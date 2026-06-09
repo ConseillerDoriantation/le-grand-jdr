@@ -2441,18 +2441,22 @@ function _vttSpellMods(s) {
           //  - fallback final : Constitution
           const mode = s.afflictionMode || 'dot';
           let saveStat = 'constitution';
+          let conditionLib = null;
           if (mode === 'etat' && s.afflictionEtatId) {
-            const etatLib = CONDITION_BY_ID[s.afflictionEtatId];
-            if (etatLib?.defaultSaveStat) saveStat = etatLib.defaultSaveStat;
+            conditionLib = CONDITION_BY_ID[s.afflictionEtatId] || null;
+            if (conditionLib?.defaultSaveStat) saveStat = conditionLib.defaultSaveStat;
           }
           // Legacy : si un ancien sort a explicitement afflictionSaveStat, on respecte
-          if (s.afflictionSaveStat) saveStat = s.afflictionSaveStat;
+          if (s.afflictionSaveStat && !(mode === 'etat' && conditionLib?.defaultSaveStat)) saveStat = s.afflictionSaveStat;
+          const dd = mode === 'etat'
+            ? (Number.isFinite(parseInt(conditionLib?.defaultDC)) ? parseInt(conditionLib.defaultDC) : 11)
+            : 11 + 2 * (nbAff - 1);
           return {
             slot:     s.afflictionSlot || 'torse',
             mode,
             effect:   s.afflictionEffect || '',
             element:  s.noyauTypeId || null,
-            dd:       11 + 2 * (nbAff - 1),
+            dd,
             nbAff,
             nbP,
             dotFormula,
@@ -3151,7 +3155,7 @@ async function _vttApplyAfflictions(srcId, targetIds, opt) {
         appliedAt: Date.now(),
         appliedBy: srcId || null,
         source: opt.label || '',
-        saveDC: lib.defaultDC || aff.dd,
+        saveDC: lib.defaultSaveStat ? (lib.defaultDC || 11) : null,
         saveStat: lib.defaultSaveStat || aff.saveStat || null,
         expiresAtRound,
         ...(pendingDuration != null ? { pendingDuration } : {}),
@@ -9880,6 +9884,14 @@ function getVttConditionLibrary() {
     id: c.id, label: c.label, icon: c.icon, color: c.color,
   }));
 }
+
+function _conditionSpellUsage(c = {}) {
+  const su = c.spellUsage;
+  return {
+    enchantment: !!su?.enchantment,
+    affliction: !!su?.affliction,
+  };
+}
 async function _vttEnsureConditionsLoaded() {
   if (CONDITION_LIBRARY.length <= CONDITION_DEFAULT_LIBRARY.length) {
     await _loadConditionsOverrides().catch(() => {});
@@ -9936,7 +9948,7 @@ async function _vttConditionApply(tokenId, condId) {
     appliedAt: Date.now(),
     appliedBy: STATE.user?.uid || null,
     source: '',
-    saveDC: lib.defaultDC || null,
+    saveDC: lib.defaultSaveStat ? (lib.defaultDC || 11) : null,
     saveStat: lib.defaultSaveStat || null,
     expiresAtRound,
     ...(pendingDuration != null ? { pendingDuration } : {}),
@@ -9968,7 +9980,7 @@ async function _vttConditionSave(tokenId, idx) {
   const cond = (t.conditions || [])[idx]; if (!cond) return;
   const lib = CONDITION_BY_ID[cond.id];
   const statKey = cond.saveStat || 'constitution';
-  const DD = cond.saveDC || 10;
+  const DD = cond.saveDC || 11;
   const mod = c => getMod(c, statKey);
   // Récupère le perso ou NPC source des stats
   const ch = t.characterId ? _characters[t.characterId] : null;
@@ -10014,7 +10026,7 @@ function _vttConditionEdit(tokenId, idx) {
       <div class="form-group" style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
         <div>
           <label>DD du jet de sauvegarde</label>
-          <input type="number" class="input-field" id="ce-dd" value="${cond.saveDC||''}" placeholder="ex: 13">
+          <input type="number" class="input-field" id="ce-dd" value="${cond.saveDC||''}" placeholder="ex: 11">
         </div>
         <div>
           <label>Stat du jet</label>
@@ -10128,6 +10140,7 @@ async function _vttConditionConfig(opts = {}) {
   // Détails à droite (tous rendus, seul l'index 0 visible)
   const details = CONDITION_LIBRARY.map((c, idx) => {
     const eff = c.effects || {};
+    const usage = _conditionSpellUsage(c);
     const statOpts = STATS.map(([v, l]) =>
       `<option value="${v}" ${(c.defaultSaveStat||'')===v?'selected':''}>${l}</option>`).join('');
     const isCustom = _isCustomCondition(c.id);
@@ -10154,6 +10167,15 @@ async function _vttConditionConfig(opts = {}) {
         <div class="vtt-cc-grp-title">📖 Description / règles narratives</div>
         <textarea class="input-field" id="cc-${idx}-desc" rows="3"
           placeholder="Effet narratif et règles racontées au joueur…">${_esc(c.desc||'')}</textarea>
+      </div>
+
+      <div class="vtt-cc-grp">
+        <div class="vtt-cc-grp-title">✨ Utilisation dans les sorts</div>
+        <div class="vtt-cc-grp-hint">Détermine dans quels sélecteurs de la modal de sort cet état apparaît.</div>
+        <div class="vtt-cc-flags-pills">
+          ${boolToggle(`cc-${idx}-useEnchant`, '✨ Enchantement', usage.enchantment)}
+          ${boolToggle(`cc-${idx}-useAffliction`, '💀 Affliction', usage.affliction)}
+        </div>
       </div>
 
       <div class="vtt-cc-grp">
@@ -10294,6 +10316,10 @@ function _vttReadConditionConfigEntry(c, idx) {
     defaultSaveStat: stat,
     defaultDC: Number.isFinite(dc) && dc > 0 ? dc : null,
     defaultDuration: Number.isFinite(dur) && dur > 0 ? dur : null,
+    spellUsage: {
+      enchantment: !!flagOn(`cc-${idx}-useEnchant`),
+      affliction: !!flagOn(`cc-${idx}-useAffliction`),
+    },
     effects: eff,
   };
 }
@@ -10319,7 +10345,7 @@ async function _vttConditionConfigReset() {
   )) return;
   try {
     await saveDoc('world', 'conditions', { library: [] });
-    CONDITION_LIBRARY = CONDITION_DEFAULT_LIBRARY.map(c => ({ ...c, effects: { ...c.effects } }));
+    CONDITION_LIBRARY = await loadConditionLibrary({ refresh: true });
     _rebuildConditionIndex();
     closeModalDirect();
     showNotif('↺ Réglages remis aux défauts', 'success');
@@ -10348,7 +10374,8 @@ async function _vttConditionConfigAddNew() {
     color: '#9ca3af',
     desc: '',
     defaultSaveStat: null,
-    defaultDC: null,
+    defaultDC: 11,
+    spellUsage: { enchantment: false, affliction: false },
     effects: {},
   });
   _rebuildConditionIndex();

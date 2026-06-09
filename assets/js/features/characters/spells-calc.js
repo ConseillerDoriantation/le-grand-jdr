@@ -1037,21 +1037,24 @@ export function _buildSortResume(s, c) {
   // ── Affliction (mode DoT ou État) ── (la branche Lacération est rendue plus haut)
   if (nbAff > 0 && !hideAff && s.afflictionMode !== 'laceration') {
     const mode = s.afflictionMode || 'dot';
-    const dd   = 11 + 2 * (nbAff - 1);
     // Stat de JS dérivée (comme dans le VTT)
     let saveStat = 'constitution';
     const lib = _conditionsLibCache || [];
+    const etat = mode === 'etat' && s.afflictionEtatId
+      ? lib.find(c2 => c2.id === s.afflictionEtatId)
+      : null;
     if (mode === 'etat' && s.afflictionEtatId) {
-      const etat = lib.find(c2 => c2.id === s.afflictionEtatId);
       if (etat?.defaultSaveStat) saveStat = etat.defaultSaveStat;
     }
-    if (s.afflictionSaveStat) saveStat = s.afflictionSaveStat;
+    if (s.afflictionSaveStat && !(mode === 'etat' && etat?.defaultSaveStat)) saveStat = s.afflictionSaveStat;
+    const dd = mode === 'etat'
+      ? (Number.isFinite(parseInt(etat?.defaultDC)) ? parseInt(etat.defaultDC) : 11)
+      : 11 + 2 * (nbAff - 1);
     const statLbl = statShort(saveStat) || saveStat;
     const cibleStr = nbAff === 1 ? 'sur 1 ennemi' : `sur ${nbAff} ennemis`;
 
     if (mode === 'etat') {
       // Mode État : on affiche l'état appliqué, PAS la formule DoT
-      const etat = s.afflictionEtatId ? lib.find(c2 => c2.id === s.afflictionEtatId) : null;
       const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ Aucun état choisi';
       lines.push({ icon:'⛓', label:`Affliction · État : ${lbl}`,
                    detail: `${cibleStr} · JS ${statLbl} DD ${dd} pour résister` });

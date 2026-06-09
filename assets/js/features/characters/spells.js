@@ -1649,22 +1649,33 @@ async function _loadAllConditions() {
   return _conditionsLibCache;
 }
 
+function _conditionSupportsSpellUsage(condition, usage) {
+  const su = condition?.spellUsage;
+  if (!su || typeof su !== 'object') return true; // compat anciens états avant migration
+  return usage === 'enchantment' ? !!su.enchantment : !!su.affliction;
+}
+
 /** Remplit un <select> d'état (Enchantement OU Affliction) depuis la BDD. */
-async function _populateConditionSelect(selectId, savedHiddenId) {
+async function _populateConditionSelect(selectId, savedHiddenId, usage) {
   const sel = document.getElementById(selectId);
   if (!sel) return;
   const savedVal = document.getElementById(savedHiddenId)?.value || '';
   const lib = await _loadAllConditions();
+  const filtered = lib.filter(c => _conditionSupportsSpellUsage(c, usage) || c.id === savedVal);
   if (!lib.length) {
     sel.innerHTML = `<option value="">⚠️ Aucun état en BDD — ouvrir le VTT une fois pour initialiser</option>`;
     return;
   }
+  if (!filtered.length) {
+    sel.innerHTML = `<option value="">— Aucun état compatible —</option>`;
+    return;
+  }
   sel.innerHTML = `<option value="">— Aucun —</option>`
-    + lib.map(c => `<option value="${c.id}" ${c.id===savedVal?'selected':''}>${c.icon||''} ${c.label}</option>`).join('');
+    + filtered.map(c => `<option value="${c.id}" ${c.id===savedVal?'selected':''}>${c.icon||''} ${c.label}</option>`).join('');
 }
 
-function _populateEnchantEtatSelect()    { return _populateConditionSelect('s-enchant-etat', 's-enchant-etat-saved'); }
-function _populateAfflictionEtatSelect() { return _populateConditionSelect('s-affliction-etat', 's-affliction-etat-saved'); }
+function _populateEnchantEtatSelect()    { return _populateConditionSelect('s-enchant-etat', 's-enchant-etat-saved', 'enchantment'); }
+function _populateAfflictionEtatSelect() { return _populateConditionSelect('s-affliction-etat', 's-affliction-etat-saved', 'affliction'); }
 
 /** Re-style les boutons de type + ajuste la visibilité des sections conditionnelles. */
 function _applyTypeChange() {
@@ -2850,7 +2861,7 @@ export async function saveSort(idx) {
       enchantEffect:    document.getElementById('s-enchant-effect')?.value
                         ?? (idx >= 0 ? (sorts[idx]?.enchantEffect || '') : ''),
       afflictionSlot:    document.getElementById('s-affliction-slot')?.value || 'torse',
-      afflictionSaveStat: document.getElementById('s-affliction-save-stat')?.value || 'constitution',
+      afflictionSaveStat: document.getElementById('s-affliction-save-stat')?.value || '',
       afflictionMode:    document.getElementById('s-affliction-mode')?.value || 'dot',
       afflictionEffect:  document.getElementById('s-affliction-effect')?.value
                          ?? (idx >= 0 ? (sorts[idx]?.afflictionEffect || '') : ''),
@@ -2963,7 +2974,7 @@ function _buildSortFromForm(idx, prevList = []) {
     enchantSlot:      idx >= 0 ? (prevList[idx]?.enchantSlot || 'arme') : 'arme',
     enchantEffect:    document.getElementById('s-enchant-effect')?.value ?? '',
     afflictionSlot:   document.getElementById('s-affliction-slot')?.value || 'torse',
-    afflictionSaveStat: document.getElementById('s-affliction-save-stat')?.value || 'constitution',
+    afflictionSaveStat: document.getElementById('s-affliction-save-stat')?.value || '',
     afflictionMode:   document.getElementById('s-affliction-mode')?.value || 'dot',
     afflictionEffect: document.getElementById('s-affliction-effect')?.value ?? '',
     afflictionDotFormula: document.getElementById('s-affliction-dot-formula')?.value?.trim() || '',
