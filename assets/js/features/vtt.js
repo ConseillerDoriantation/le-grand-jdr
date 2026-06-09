@@ -5567,6 +5567,41 @@ async function _vttRollAttack() {
       }
     }
 
+    if (opt.mods?.allonge) {
+      await _deductPm();
+      await _consumeItem();
+      await _markActionUsed();
+      const rCa = _handleMultiCast();
+      const shared = _buffShared(opt, srcId);
+      const rangeBuff = { ...shared, type: 'range_bonus', icon: '🏹',
+        bonus: opt.mods.allonge.cells, bonusMeters: opt.mods.allonge.meters };
+      for (const tid of targetIds) {
+        const td = _tokens[tid]?.data; if (!td) continue;
+        const existing = (td.buffs || []).filter(b => !(b.type === 'range_bonus' && b.sortLabel === opt.label));
+        await updateDoc(_tokRef(tid), { buffs: [...existing, rangeBuff] }).catch(() => {});
+      }
+      const targetsLabel = targetIds
+        .map(id => {
+          const td = _tokens[id]?.data;
+          return td ? (_live(td).displayName ?? td.name) : null;
+        })
+        .filter(Boolean)
+        .join(', ') || (lT.displayName ?? tgt.name);
+      await addDoc(_logCol(), {
+        type: 'cast',
+        authorId: STATE.user?.uid || null, authorName,
+        casterName: lS.displayName ?? src.name,
+        characterImage: lS.displayImage || null,
+        targetName: targetsLabel,
+        optLabel: opt.label, pmCost: opt.pmCost,
+        castEffect: `🏹 Allonge +${opt.mods.allonge.cells} portee`,
+        createdAt: serverTimestamp(),
+      }).catch(() => {});
+      showNotif(`🏹 ${opt.label} : portee +${opt.mods.allonge.cells}${_ciblSuffix(rCa)}`, 'success');
+      _cleanup();
+      return;
+    }
+
     // ── Combo Sort suspendu : on stocke l'opt + cible et on n'exécute pas l'effet ──
     // Le sort sera déclenché plus tard via le bouton dans l'inspector du porteur.
     if (opt.mods?.sortSuspendu && !_suspendedTriggerActive) {

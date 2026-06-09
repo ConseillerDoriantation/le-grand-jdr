@@ -417,6 +417,8 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const nbCibles = _calcSortCibles(s);
   const nbProt   = runesAll.filter(r => r === 'Protection').length;
   const nbAmp    = runesAll.filter(r => r === 'Amplification').length;
+  const activeIds = new Set(_activeCombos(s).map(co => co.id));
+  const isAllongeCombo = activeIds.has('allonge_magique');
 
   const ACTION_CFG = {
     action:       { label:'⚡ Act.',   color:'#e8b84b' },
@@ -451,7 +453,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   // Affliction = jamais d'impact (comme défini côté VTT)
   // Déplacement (Amplification mode déplacement) = jamais de dégâts.
   // Invocation = le sort invoque une créature (qui a ses propres dégâts) — pas d'impact du lanceur.
-  const suppressImpactDmg = isEnchantOnly || enchantBuffOnly || hasAfflictionDebuff || s.ampMode === 'deplacement' || runesAll.includes('Invocation');
+  const suppressImpactDmg = isAllongeCombo || isEnchantOnly || enchantBuffOnly || hasAfflictionDebuff || s.ampMode === 'deplacement' || runesAll.includes('Invocation');
 
   // Chips clés pour la ligne compacte
   const chips = [];
@@ -472,7 +474,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   } else if (isLaceration) {
     const lac = _calcLaceration(s);
     if (lac) chips.push({ icon:'🩸', val:`CA −${Math.min(lac.reduction, lac.maxElite)}`, color:'#dc2626' });
-  } else if (hasAfflictionDebuff && !new Set(_activeCombos(s).map(co => co.id)).has('regeneration')) {
+  } else if (hasAfflictionDebuff && !activeIds.has('regeneration')) {
     if (afflictionMode === 'etat') {
       // Mode État : on affiche TOUJOURS un chip état, jamais DoT
       const etat = s.afflictionEtatId
@@ -488,7 +490,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   }
 
   // ── 3. Enchantement : mode décide, JAMAIS de fallback dégâts en mode État ──
-  if (hasEnchant) {
+  if (hasEnchant && !isAllongeCombo && !activeIds.has('arme_invoquee')) {
     if (enchantMode === 'etat') {
       const etat = s.enchantEtatId
         ? _conditionsLibCache?.find(c2 => c2.id === s.enchantEtatId)
@@ -506,11 +508,13 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
       if (degAuto) chips.push({ icon:'✨', val: `+${degAuto}`, color:'#e8b84b' });
     }
   }
+  if (isAllongeCombo) {
+    chips.push({ icon:'🏹', val:`Allonge +${_ampLength(nbAmp)}`, color:'#4f8cff' });
+  }
 
   // ── 4. Protection (CA ou Soin) ──
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
-    const activeIds = new Set(_activeCombos(s).map(co => co.id));
     if (activeIds.has('regeneration')) {
       const dice = nbProt + runesAll.filter(r => r === 'Affliction').length;
       chips.push({ icon:'💚', val: `${(s.regenerationFormula || '').trim() || `${dice}d4`}/t`, color:'#22c38e' });
@@ -537,7 +541,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   // ── 5. Cibles / zone / déplacement / durée ──
   if (nbCibles > 1) chips.push({ icon:'🎯', val:`×${nbCibles}`, color:'#4f8cff' });
   const zone  = _calcSortZone(s);
-  if (zone)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}c`, color:'#b47fff' });
+  if (zone && !isAllongeCombo)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}c`, color:'#b47fff' });
   const depl  = _calcSortDeplacement(s);
   if (depl) {
     const dIcon = depl.mode === 'self' ? '🏃' : depl.mode === 'pull' ? '↙' : '↗';
@@ -552,7 +556,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
 
   // ── 6. Pill JS sauvegarde pour Affliction (info utile au combat) ──
   // (Pas de JS en branche Lacération : c'est une frappe + réduction de CA.)
-  if (hasAfflictionDebuff) {
+  if (hasAfflictionDebuff && !activeIds.has('regeneration') && !activeIds.has('sentinelle')) {
     const nbAff = runesAll.filter(r => r === 'Affliction').length;
     const dd = 11 + 2 * (nbAff - 1);
     chips.push({ icon:'🛡', val:`DD ${dd}`, color:'#ef4444' });
