@@ -547,7 +547,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   // (Pas de JS en branche Lacération : c'est une frappe + réduction de CA.)
   if (hasAfflictionDebuff) {
     const nbAff = runesAll.filter(r => r === 'Affliction').length;
-    const dd = 11 + 3 * (nbAff - 1);
+    const dd = 11 + 2 * (nbAff - 1);
     chips.push({ icon:'🛡', val:`DD ${dd}`, color:'#ef4444' });
   }
 
@@ -831,28 +831,18 @@ const RUNE_GROUPS = [
   { id:'meta',      title:'⏱️ Méta',              desc:'Timing et durée' },
 ];
 
-/**
- * Décrit la contribution actuelle d'une rune en clair, avec info de chaînage.
- * IMPORTANT : le chaînage est PAR RUNE (même nom), jamais croisé.
- *   - Puissance ×N seul → chaîné si N≥2 : +(N-1)*2 dégâts fixes
- *   - Protection ×N seul → chaîné si N≥2 : +(N-1)*2 soin ou +(N-1) CA fixes
- *   - Puissance + Protection séparés → COMBO Drain (signalé ailleurs), pas un chaînage
- */
+/** Décrit la contribution actuelle d'une rune en clair. */
 function _runeLiveContribution(nom, counts) {
   const cnt = counts[nom] || 0;
   if (cnt === 0) return null;
 
   switch (nom) {
     case 'Puissance': {
-      const chain = cnt > 1 ? (cnt - 1) * 2 : 0;
       return {
         main:  `+${cnt} dé${cnt>1?'s':''} de dégâts · sur 1 cible`,
-        chain: chain ? `🔗 Chaîné +${chain} dégâts fixes (Puissance ×${cnt})` : null,
       };
     }
     case 'Protection': {
-      const chainSoin = cnt > 1 ? (cnt - 1) * 2 : 0;
-      const chainCA   = cnt > 1 ? (cnt - 1)     : 0;
       // Contexte : lit le mode et la présence de Réaction pour adapter le label
       const protMode = (typeof document !== 'undefined'
         ? document.getElementById('s-prot-mode')?.value : null) || 'ca';
@@ -862,20 +852,17 @@ function _runeLiveContribution(nom, counts) {
         const tier = cnt >= 3 ? 'Boss ou inférieur' : cnt === 2 ? 'Élite ou inférieur' : 'Mob classique';
         return {
           main:  `Combo Bouclier réactif · Bloque 1 attaque entrante · plafond ${tier}`,
-          chain: cnt > 1 ? `🔗 Augmente le tier d'ennemi qu'on peut bloquer (Protection ×${cnt})` : null,
         };
       }
       // Mode CA pur (sans Réaction)
       if (protMode === 'ca') {
         return {
           main:  `+${cnt*2} CA · sur 1 cible (2 tours)`,
-          chain: cnt > 1 ? `🔗 Chaîné +${chainCA} CA (Protection ×${cnt})` : null,
         };
       }
       // Mode soin
       return {
         main:  `+${cnt}d4 soin · sur 1 cible`,
-        chain: cnt > 1 ? `🔗 Chaîné +${chainSoin} soin (Protection ×${cnt})` : null,
       };
     }
     case 'Amplification': {
@@ -885,71 +872,63 @@ function _runeLiveContribution(nom, counts) {
       const combo  = nbDisp > 0 ? ` · combo Dispersion → ${len}×${width}m` : '';
       return {
         main:  `Zone ${len}×1m${combo}`,
-        chain: cnt > 1 ? `🔗 Chaîné +1m / rune au-delà de la 1ère (${3*cnt} base + ${cnt-1} chaînage)` : null,
       };
     }
     case 'Dispersion': {
       const nbAmp = counts['Amplification'] || 0;
       if (nbAmp > 0) {
         const len = _ampLength(nbAmp);
+        const width = _ampLength(cnt);
         return {
-          main:  `Combo Amp+Disp → zone ${len}×${1+cnt}m (au lieu de cibles)`,
-          chain: cnt > 1 ? `🔗 +1m largeur par rune Dispersion (×${cnt})` : null,
+          main:  `Combo Amp+Disp → zone ${len}×${width}m (au lieu de cibles)`,
         };
       }
       return {
-        main:  `${2*cnt} cibles différentes`,
-        chain: cnt > 1 ? `🔗 Chaîné +1 cible/rune (Dispersion ×${cnt})` : null,
+        main:  `${1 + cnt} cibles différentes`,
       };
     }
     case 'Lacération': {
-      const red = 2*cnt - 1;
+      const red = cnt;
       return {
         main:  `CA cible −${red} · sur 1 cible`,
-        chain: cnt > 1 ? `🔗 Chaîné +1 CA/rune · plafond −2 joueur / −4 Élite-Boss` : null,
       };
     }
     case 'Chance': {
-      const rcLow = 21 - 2*cnt;
+      const rcLow = 20 - cnt;
       return {
         main:  `Critique RC ${rcLow}–20 · dé de crit max`,
-        chain: cnt > 1 ? `🔗 Chaîné +1 sur la plage RC (Chance ×${cnt})` : null,
       };
     }
     case 'Durée': {
-      const bonus = cnt + 1; // ×1=2, ×2=3, ×3=4
+      const bonus = 2 * cnt;
       return {
         main:  `+${bonus} tour${bonus>1?'s':''} de durée`,
-        chain: cnt > 1 ? `🔗 Chaîné +1 tour/rune (Durée ×${cnt})` : null,
       };
     }
     case 'Enchantement':
       return {
         main:  cnt === 1 ? 'Buff sur allié · 2 tours' : `${cnt} cibles alliées · 2 tours`,
-        chain: cnt > 1 ? `🔗 Chaîné +1 cible/rune (Enchantement ×${cnt})` : null,
       };
     case 'Affliction':
       return {
         main:  cnt === 1 ? 'Debuff sur ennemi · 2 tours · Action · JS pour résister' : `${cnt} cibles ennemies · 2 tours`,
-        chain: cnt > 1 ? `🔗 Chaîné +1 cible/rune (Affliction ×${cnt})` : null,
       };
     case 'Invocation':
       return {
         main:  `Invoque ${cnt} créature${cnt>1?'s':''} (1 par rune) — choix au lancement`,
-        chain: null,   // 1 rune = 1 invocation : pas de chaînage
       };
     case 'Concentration':
-      return { main: 'Maintenu hors tour · JS Sa DD 11 si dégâts reçus', chain: null };
+      return { main: 'Maintenu hors tour · JS Sa DD 11 si dégâts reçus' };
     case ACTION_RUNE:
-      return { main: `Lancé en ${ACTION_MODE_LABELS[_actionModeEdit] || 'Réaction'}`, chain: null };
+      return { main: `Lancé en ${ACTION_MODE_LABELS[_actionModeEdit] || 'Réaction'}` };
     default:
-      return { main: `×${cnt}`, chain: null };
+      return { main: `×${cnt}` };
   }
 }
 
 /**
  * Rend la section runes complète :
- *   ① "Mes runes" — grosses cartes pour les runes actives, avec contrib live + chaînage
+ *   ① "Mes runes" — grosses cartes pour les runes actives, avec contrib live
  *   ② "Ajouter une rune" — picker compact par famille
  * Re-appelée après chaque incrément/décrément pour rester synchro.
  */
@@ -990,7 +969,6 @@ function _renderRunesSection() {
           <span class="cs-rune-active-x">×${cnt}</span>
         </div>
         <div class="cs-rune-active-contrib">${contrib?.main || r.effet}</div>
-        ${contrib?.chain ? `<div class="cs-rune-active-chain">${contrib.chain}</div>` : ''}
       </div>
       <div class="cs-rune-active-ctrl">
         <button type="button" class="cs-rune-btn minus" data-action="runeDecrement" data-nom="${r.nom}">−</button>
@@ -1238,7 +1216,7 @@ export async function openSortModal(idx, s) {
 
     <!-- ④ Runes — Forge -->
     <div class="cs-spell-section cs-spell-section--runes">
-      <div class="cs-spell-section-title"><span class="cs-step-pill">3</span> Runes d’effet <span class="cs-spell-section-hint">+2 PM par rune · cumulables · chaînage possible</span></div>
+      <div class="cs-spell-section-title"><span class="cs-step-pill">3</span> Runes d’effet <span class="cs-spell-section-hint">+2 PM par rune · cumulables</span></div>
       <div id="cs-runes-section">${runesSectionHtml}</div>
     </div>
 
@@ -1447,7 +1425,7 @@ export async function openSortModal(idx, s) {
 
       <!-- Lacération mode : frappe l'attaque de base + réduit la CA de la cible -->
       <div id="s-affliction-laceration-block" style="${s?.afflictionMode==='laceration'?'':'display:none'};font-size:.78rem;line-height:1.5;color:var(--text-muted);background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.22);border-radius:8px;padding:.55rem .7rem;margin-top:.4rem">
-        🩸 <strong style="color:#f87171">Lacération</strong> — le sort inflige <strong>l'attaque de base</strong> et réduit la <strong>CA de la cible de −1 par rune Affliction</strong> (sans chaînage), plafonné à <strong>−2</strong> (joueur) / <strong>−4</strong> (Élite-Boss), pendant 2 tours. Pas de DoT ni d'état.
+        🩸 <strong style="color:#f87171">Lacération</strong> — le sort inflige <strong>l'attaque de base</strong> et réduit la <strong>CA de la cible de −1 par rune Affliction</strong>, plafonné à <strong>−2</strong> (joueur) / <strong>−4</strong> (Élite-Boss), pendant 2 tours. Pas de DoT ni d'état.
       </div>
       </div><!-- /s-affliction-modes -->
     </div><!-- /s-affliction-section -->
@@ -1470,7 +1448,7 @@ export async function openSortModal(idx, s) {
         <label>🌐 Rune Amplification — effet</label>
         <div style="display:flex;gap:.4rem">
           ${[
-            { v:'zone',        label:'📐 Zone',        color:'#b47fff', detail:'Zone alignée · 4N−1 m' },
+            { v:'zone',        label:'📐 Zone',        color:'#b47fff', detail:'Zone alignée · 3N m' },
             { v:'deplacement', label:'↔ Déplacement', color:'#e8b84b', detail:'Soi/cible · sans dégâts' },
           ].map(opt => {
             const sel = ampMode === opt.v;
@@ -1488,7 +1466,7 @@ export async function openSortModal(idx, s) {
 
       <div id="s-amp-zone-section" style="${ampMode==='zone'?'':'display:none'}">
         <div style="font-size:.74rem;color:var(--text-dim);padding:.1rem .1rem .3rem">
-          📐 Zone calculée depuis les runes (longueur 4N−1 m, largeur via Dispersion).
+          📐 Zone calculée depuis les runes (longueur 3N m, largeur via Dispersion).
         </div>
       </div>
 

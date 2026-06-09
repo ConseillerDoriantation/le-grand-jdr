@@ -77,8 +77,6 @@ export function _getSortAction(s) {
  * Dégâts effectifs d'un sort offensif.
  * - Base = dégâts de l'arme principale si degats vide
  * - Chaque rune Puissance : +1 dé
- * - Chaînage Puissance : nbPuiss > 1 → +(nbPuiss-1)*2 bonus fixe
- *   (Protection n'entre PAS dans le chaînage des dégâts — chaînage par rune.)
  */
 export function _calcSortDegats(s, c) {
   // Un sort en mode déplacement (rune Amplification → Déplacement) n'inflige jamais de dégâts.
@@ -94,7 +92,6 @@ export function _calcSortDegats(s, c) {
 
   const runes   = s.runes || [];
   const nbPuiss = runes.filter(r => r === 'Puissance').length;
-  const bonusVal = nbPuiss > 1 ? (nbPuiss - 1) * 2 : 0;
 
   // Bonus de maîtrise de l'arme principale (toujours appliqué)
   const maitrise = getSharedMaitriseBonus(c, mainP);
@@ -102,23 +99,21 @@ export function _calcSortDegats(s, c) {
   const match = base.match(/^(\d+)(d\d+)(.*)$/i);
   if (match) {
     let result = `${parseInt(match[1]) + nbPuiss}${match[2]}${match[3]}`;
-    const totalBonus = bonusVal + maitrise;
-    if (totalBonus > 0) result += ` +${totalBonus}`;
-    else if (totalBonus < 0) result += ` ${totalBonus}`;
+    if (maitrise > 0) result += ` +${maitrise}`;
+    else if (maitrise < 0) result += ` ${maitrise}`;
     return result;
   }
   let result = base;
   if (nbPuiss > 0) result += ` +${nbPuiss}d6`;
-  const totalBonus = bonusVal + maitrise;
-  if (totalBonus > 0) result += ` +${totalBonus}`;
-  else if (totalBonus < 0) result += ` ${totalBonus}`;
+  if (maitrise > 0) result += ` +${maitrise}`;
+  else if (maitrise < 0) result += ` ${maitrise}`;
   return result;
 }
 
 /**
  * Soin effectif.
  * - Base 1d4 (visible dès que le sort est de type "défensif")
- * - Chaque rune Protection : +1d4, chaînage +2 soin fixe par paire
+ * - Chaque rune Protection : +1d4
  * - Modificateur de stat selon nature du noyau :
  *    - Noyau MAGIQUE → modificateur de la stat de l'arme principale (Int/Sag/Cha…)
  *    - Noyau PHYSIQUE / sans noyau → modificateur de Constitution
@@ -128,7 +123,6 @@ export function _calcSortDegats(s, c) {
 export function _calcSortSoin(s, c) {
   const runes  = s.runes || [];
   const nbProt = runes.filter(r => r === 'Protection').length;
-  const chainSoin = nbProt > 1 ? nbProt - 1 : 0;
   const base   = (s.soin || '').trim();
 
   // Stat de soin : 'none' = aucun modificateur (potion flat, etc.)
@@ -145,9 +139,7 @@ export function _calcSortSoin(s, c) {
   const maitriseStr = maitrise > 0 ? ` +${maitrise}` : maitrise < 0 ? ` ${maitrise}` : '';
 
   const buildDefault = (diceCount) => {
-    let r = `${diceCount}d4${statStr}`;
-    if (chainSoin > 0) r += ` +${chainSoin * 2}`;
-    return r + maitriseStr;
+    return `${diceCount}d4${statStr}${maitriseStr}`;
   };
 
   if (!base || base.toLowerCase() === '= base') {
@@ -156,10 +148,8 @@ export function _calcSortSoin(s, c) {
   if (nbProt > 0) {
     const match = base.match(/^(\d+)(d\d+)(.*)$/i);
     if (match) {
-      // Format XdY reconnu → on ajoute les dés Protection + stat + chaînage + maîtrise
-      let r = `${parseInt(match[1]) + nbProt}${match[2]}${match[3]}${statStr}`;
-      if (chainSoin > 0) r += ` +${chainSoin * 2}`;
-      return r + maitriseStr;
+      // Format XdY reconnu → on ajoute les dés Protection + stat + maîtrise.
+      return `${parseInt(match[1]) + nbProt}${match[2]}${match[3]}${statStr}${maitriseStr}`;
     }
     // Texte libre → on n'ajoute rien, on respecte ce qui est écrit
     return base;
@@ -202,7 +192,7 @@ export const SORT_COMBOS = [
     describe: (counts) => {
       const w = _ampLength(counts.Amplification);
       const h = _ampLength(counts.Dispersion);
-      return `Amp ×${counts.Amplification} + Disp ×${counts.Dispersion} · zone ${w}×${h}m (la Dispersion bénéficie du chainage comme l'Amplification)`;
+      return `Amp ×${counts.Amplification} + Disp ×${counts.Dispersion} · zone ${w}×${h}m`;
     },
   },
   {
@@ -243,7 +233,7 @@ export const SORT_COMBOS = [
     describe: (counts, s) => {
       const st = _calcSentinelStats(s || {});
       const nbDisp = counts.Dispersion || 0;
-      const nbSent = nbDisp > 0 ? 2 * nbDisp : 1;
+      const nbSent = nbDisp > 0 ? 1 + nbDisp : 1;
       const sentStr = nbSent > 1 ? `${nbSent} sentinelles stationnaires (placement libre dans la portée)` : 'sentinelle stationnaire';
       return `Affliction + Invocation · ${sentStr} · ${st.hp} PV · CA ${st.ca} · attaque ${st.dmg} · portée ${st.portee}m · 2 tours par défaut`;
     },
@@ -447,8 +437,8 @@ export const SLOT_LABEL = { arme:'⚔️ Arme', tete:'👁️ Tête', torse:'�
 
 /**
  * Dégâts du DoT d'affliction (mode 'dot') effectifs (auto si vide).
- * Formule : (1 + nbPuissance)d4 + (2 + 2 × max(0, nbPuissance - 1))
- * → 0 Puiss : 1d4 +2 · 1 Puiss : 2d4 +2 · 2 Puiss : 3d4 +4 · 3 Puiss : 4d4 +6
+ * Formule : (1 + nbPuissance)d4 +2
+ * → 0 Puiss : 1d4 +2 · 1 Puiss : 2d4 +2 · 2 Puiss : 3d4 +2
  */
 /** Mapping legacy slot → stat de sauvegarde (rétro-compat sorts existants). */
 function _legacySlotToStat(slot) {
@@ -464,14 +454,13 @@ export function _calcAfflictionDot(s) {
   if (manual) return manual;
   const nbPuiss = (s?.runes || []).filter(r => r === 'Puissance').length;
   const dice = 1 + nbPuiss;
-  const mod  = 2 + 2 * Math.max(0, nbPuiss - 1);
-  return `${dice}d4 +${mod}`;
+  return `${dice}d4 +2`;
 }
 export function _autoSourceAfflictionDot(s) {
   const nbP = (s?.runes || []).filter(r => r === 'Puissance').length;
   if (nbP === 0) return '1 Affliction · base';
   if (nbP === 1) return '+1 Puiss · 1 dé bonus';
-  return `+${nbP} Puiss · ${nbP} dés + chaînage`;
+  return `+${nbP} Puiss · ${nbP} dés bonus`;
 }
 
 /**
@@ -490,7 +479,7 @@ export function _calcEnchantDegats(s) {
 
 /** Valeur CA (rune Protection mode CA) :
  *  - Saisie manuelle si fournie
- *  - Sinon auto : (mod par rune selon élément ou 2 par défaut) + chaînage +1 / rune au-delà de la 1ère
+ *  - Sinon auto : mod par rune selon élément ou 2 par défaut
  *  - Le mod par élément vient de la matrice MJ : _spellMatricesCache (Protection×CA)
  */
 export function _getSortCA(s) {
@@ -509,15 +498,13 @@ export function _getSortCA(s) {
   }
   const ov  = getProtectionCAOverride(_spellMatricesCache, s?.noyauTypeId);
   const mod = ov?.mod ?? 2;
-  const base  = nbProt * mod;
-  const chain = nbProt > 1 ? (nbProt - 1) : 0;
-  return `CA +${base + chain} (2 tours)`;
+  return `CA +${nbProt * mod} (2 tours)`;
 }
 
 /**
  * Nombre de cibles — règle Dispersion solo :
  * 0 rune  → 1 cible
- * N runes → 2N cibles différentes (1 base + N runes + (N-1) chaînage)
+ * N runes → 1 + N cibles différentes
  *
  * En combo avec Amplification, Dispersion bascule en "élargissement de zone"
  * et ne génère PAS de cibles supplémentaires — la zone gère ça.
@@ -577,8 +564,8 @@ export function _needsDureeBase(s) {
 
 /** Durée totale en tours d'un sort.
  *  Base 2 tours (sort persistant) + bonus rune Durée.
- *  Bonus Durée : chaque rune ajoute +2, chaînage ajoute +1 supplémentaire par rune au-delà de la 1ère.
- *  → 0 Durée : 2 · 1 Durée : 4 (=2+2) · 2 Durée : 7 (=2+4+1) · 3 Durée : 10 (=2+6+2) · 4 Durée : 13
+ *  Bonus Durée : chaque rune ajoute +2.
+ *  → 0 Durée : 2 · 1 Durée : 4 · 2 Durée : 6 · 3 Durée : 8
  *  Override : s.dureeBase remplace la base 2 si supérieur (saisie manuelle).
  */
 export function _calcSortDuree(s) {
@@ -588,21 +575,21 @@ export function _autoSourceDuree(s) {
   const nbDur = (s?.runes || []).filter(r => r === 'Durée').length;
   if (nbDur === 0) return 'base persistante';
   if (nbDur === 1) return '+1 Durée · +2 tours';
-  return `+${nbDur} Durée · +${2*nbDur + (nbDur-1)} tours (chaînage)`;
+  return `+${nbDur} Durée · +${2 * nbDur} tours`;
 }
 
 
 /** Longueur de zone produite par N runes (Amplification OU Dispersion en combo).
- *  Chaque rune ajoute +3m de base, chainage +1m par rune au-delà de la 1ère.
- *  ×1=3, ×2=7, ×3=11, ×4=15… → 3N + (N-1) = 4N-1 pour N≥1
+ *  Chaque rune ajoute +3m.
+ *  ×1=3, ×2=6, ×3=9, ×4=12…
  */
-export function _ampLength(nbAmp) { return nbAmp >= 1 ? (4 * nbAmp - 1) : 0; }
+export function _ampLength(nbAmp) { return nbAmp >= 1 ? 3 * nbAmp : 0; }
 
 /** Zone calculée :
  *  - Si zoneW/H manuels saisis → ils priment (override MJ)
  *  - Sinon, calculé depuis les runes Amplification (+ Dispersion en combo) :
- *      Amplification ×N → longueur = 4N-1 m  (chainage)
- *      Combo avec Dispersion ×M → largeur = 4M-1 m (même formule, symétrique)
+ *      Amplification ×N → longueur = 3N m
+ *      Combo avec Dispersion ×M → largeur = 3M m
  *      Defaut combo Amp + Disp = 3 × 3
  *  - Source: 'manual' | 'runes' | null
  */
@@ -619,7 +606,7 @@ export function _calcSortZone(s) {
   if (nbAmp === 0) return null;
 
   const length = _ampLength(nbAmp);
-  // Dispersion en combo applique le MÊME chainage qu'Amplification (4M-1).
+  // Dispersion en combo applique la même progression qu'Amplification.
   // Sans Dispersion → largeur 1 (ligne).
   const width = nbDisp >= 1 ? _ampLength(nbDisp) : 1;
   return { w: length, h: width, source: 'runes', amp: nbAmp, disp: nbDisp };
@@ -655,7 +642,7 @@ export function _hasLaceration(s) {
 }
 
 /** Lacération : réduction CA cible — pilotée par le nombre de runes Affliction
- *  (sans chaînage) : -1 par rune (plafonné -2 joueur / -4 Élite-Boss en jeu).
+ *  -1 par rune (plafonné -2 joueur / -4 Élite-Boss en jeu).
  *  Legacy : ancienne rune « Lacération » → même barème linéaire.
  */
 export function _calcLaceration(s) {
@@ -668,13 +655,13 @@ export function _calcLaceration(s) {
 }
 
 /** Chance : réduction RC critique
- *  ×1 → RC 19-20 (-1) · ×N → RC (21-2N)-20 (-(2N-1))
+ *  ×1 → RC 19-20 (-1) · ×N → RC (20-N)-20
  *  Bonus : le dé de critique ajouté est aussi max
  */
 function _calcChance(s) {
   const nb = (s.runes||[]).filter(r => r === 'Chance').length;
   if (!nb) return null;
-  const reduction = 2*nb - 1;
+  const reduction = nb;
   return { runes: nb, rc: 20 - reduction, reduction };
 }
 
@@ -699,24 +686,20 @@ function _calcConcentrationDD(s) {
 }
 
 /** Stats propres de la Sentinelle (combo Affliction + Invocation).
- *  - Dégâts : 1d4 base + Puissance avec chaînage standard (+2/rune au-delà de la 1ère)
- *  - PV     : 10 + 5×nbProt + chaînage (+1/rune au-delà de la 1ère)
- *  - CA     : 10 + 2×nbProt + chaînage (+1/rune au-delà de la 1ère)
- *  - Portée : 1m (Manhattan) sans Amp · sinon 4N-1 mètres (3, 7, 11, 15…)
+ *  - Dégâts : 1d4 base + Puissance
+ *  - PV     : 10 + 5×nbProt
+ *  - CA     : 10 + 2×nbProt
+ *  - Portée : 1m (Manhattan) sans Amp · sinon 3N mètres
  */
 function _calcSentinelStats(s) {
   const runes = s?.runes || [];
   const nbP    = runes.filter(r => r === 'Puissance').length;
   const nbProt = runes.filter(r => r === 'Protection').length;
   const nbAmp  = runes.filter(r => r === 'Amplification').length;
-  // Dégâts d4 : base 1d4 + 1d4 par Puissance, chaînage +2 par paire au-delà de la 1ère
   const nbDice = 1 + nbP;
-  const chainDmg = nbP > 1 ? (nbP - 1) * 2 : 0;
-  const dmg = chainDmg > 0 ? `${nbDice}d4 +${chainDmg}` : `${nbDice}d4`;
-  // PV : chainage +1 par rune au-delà de la 1ère
-  const chainProt = nbProt > 1 ? (nbProt - 1) : 0;
-  const hp = 10 + 5 * nbProt + chainProt;
-  const ca = 10 + 2 * nbProt + chainProt;
+  const dmg = `${nbDice}d4`;
+  const hp = 10 + 5 * nbProt;
+  const ca = 10 + 2 * nbProt;
   // Portée : 1m sans Amp, sinon longueur Amp (réutilise _ampLength)
   const portee = nbAmp === 0 ? 1 : _ampLength(nbAmp);
   return { dmg, hp, ca, portee, nbP, nbProt, nbAmp };
@@ -907,8 +890,7 @@ export function _buildSortResume(s, c) {
         const mainPsoin  = getMainWeapon(c);
         const maitrSoin  = getSharedMaitriseBonus(c, mainPsoin);
         const maitrSoinStr = maitrSoin !== 0 ? ` + Maî(${maitrSoin > 0 ? '+'+maitrSoin : maitrSoin})` : '';
-        const chainStr   = nbProt > 1 ? ` +${(nbProt-1)*2}` : '';
-        lines.push({ icon:'💚', label:_calcSortSoin(s, c), detail:`Soin · +${nbProt}d4 Prot${chainStr}${maitrSoinStr}${monoStr}` });
+        lines.push({ icon:'💚', label:_calcSortSoin(s, c), detail:`Soin · +${nbProt}d4 Prot${maitrSoinStr}${monoStr}` });
       }
     } else {
       // Mode CA — sauf si combo Bouclier réactif : la réaction instantanée ne donne pas de CA
@@ -934,7 +916,7 @@ export function _buildSortResume(s, c) {
   if (nbCibles > 1 && !(nbAmp > 0 && nbDisp > 0)) {
     const dispDetail = nbDisp === 1
       ? '1 rune Dispersion · cibles différentes uniquement'
-      : `${nbDisp} runes Dispersion · chaînage +${nbDisp - 1} cible/rune · cibles différentes`;
+      : `${nbDisp} runes Dispersion · cibles différentes`;
     lines.push({ icon:'🎯', label:`${nbCibles} cibles différentes`, detail: dispDetail });
   }
 
@@ -942,14 +924,10 @@ export function _buildSortResume(s, c) {
   if (zoneCalc && !comboIds.has('allonge_magique')) {
     let zoneDetail = '';
     if (zoneCalc.source === 'runes') {
-      const baseMeters = 3 * zoneCalc.amp;
-      const chainMeters = zoneCalc.amp > 1 ? (zoneCalc.amp - 1) : 0;
       if (zoneCalc.amp > 0 && zoneCalc.disp > 0) {
         zoneDetail = `Combo Amp ×${zoneCalc.amp} + Disp ×${zoneCalc.disp} · zone élargie`;
-      } else if (zoneCalc.amp > 1) {
-        zoneDetail = `Amplification ×${zoneCalc.amp} · ${baseMeters}m base + ${chainMeters}m chaînage`;
       } else {
-        zoneDetail = `Amplification ×1 · 3m base`;
+        zoneDetail = `Amplification ×${zoneCalc.amp} · ${zoneCalc.w}m`;
       }
     } else {
       zoneDetail = 'Zone manuelle (override MJ)';
@@ -993,7 +971,7 @@ export function _buildSortResume(s, c) {
       const baseLbl = hasOverride ? `${baseVal} base (override)` : '2 base';
       const detail = [
         baseLbl,
-        nbDur > 0 ? `+${runeBonus} (Durée ×${nbDur}${nbDur>1?' avec chaînage':''})` : '',
+        nbDur > 0 ? `+${runeBonus} (Durée ×${nbDur})` : '',
       ].filter(Boolean).join(' · ');
       lines.push({ icon:'⏱️', label:`${duree} tour${duree > 1 ? 's' : ''}`, detail });
     }
@@ -1009,8 +987,7 @@ export function _buildSortResume(s, c) {
   // Chance
   const chc = _calcChance(s);
   if (chc) {
-    const chainNote = chc.runes > 1 ? ` · chaîné +${chc.runes - 1} sur la plage` : '';
-    lines.push({ icon:'🍀', label:`RC ${chc.rc}–20`, detail:`Critique aussi max${chainNote}` });
+    lines.push({ icon:'🍀', label:`RC ${chc.rc}–20`, detail:'Critique aussi max' });
   }
 
   // ── Enchantement (mode Dégâts ou État) ──────────────────────────────
@@ -1022,7 +999,7 @@ export function _buildSortResume(s, c) {
   const hideAff  = comboIds.has('sentinelle');
   if (nbEnch > 0 && !hideEnch) {
     const mode    = s.enchantMode || 'dmg';
-    const cibleStr = nbEnch === 1 ? 'sur 1 allié' : `sur ${nbEnch} alliés (chaîné +${nbEnch-1})`;
+    const cibleStr = nbEnch === 1 ? 'sur 1 allié' : `sur ${nbEnch} alliés`;
     const detailParts = ['2 tours', cibleStr];
     // Mode décisif : si État → état affiché (jamais dégâts) ; si Dégâts → dégâts (jamais état)
     if (mode === 'etat') {
@@ -1050,7 +1027,7 @@ export function _buildSortResume(s, c) {
   // ── Affliction (mode DoT ou État) ── (la branche Lacération est rendue plus haut)
   if (nbAff > 0 && !hideAff && s.afflictionMode !== 'laceration') {
     const mode = s.afflictionMode || 'dot';
-    const dd   = 11 + 3 * (nbAff - 1);
+    const dd   = 11 + 2 * (nbAff - 1);
     // Stat de JS dérivée (comme dans le VTT)
     let saveStat = 'constitution';
     const lib = _conditionsLibCache || [];
@@ -1060,7 +1037,7 @@ export function _buildSortResume(s, c) {
     }
     if (s.afflictionSaveStat) saveStat = s.afflictionSaveStat;
     const statLbl = statShort(saveStat) || saveStat;
-    const cibleStr = nbAff === 1 ? 'sur 1 ennemi' : `sur ${nbAff} ennemis (chaîné +${nbAff-1})`;
+    const cibleStr = nbAff === 1 ? 'sur 1 ennemi' : `sur ${nbAff} ennemis`;
 
     if (mode === 'etat') {
       // Mode État : on affiche l'état appliqué, PAS la formule DoT
@@ -1093,7 +1070,7 @@ export function _buildSortResume(s, c) {
   if (comboIds.has('sentinelle')) {
     const st = _calcSentinelStats(s);
     const nbDisp = runes.filter(r => r === 'Dispersion').length;
-    const nbSent = nbDisp > 0 ? 2 * nbDisp : 1;
+    const nbSent = nbDisp > 0 ? 1 + nbDisp : 1;
     const countStr = nbSent > 1 ? ` · ×${nbSent} sentinelles` : '';
     lines.push({ icon:'🪤', label:`Sentinelle · ${st.hp} PV · CA ${st.ca}${countStr}`, detail:`Attaque ${st.dmg} · portée ${st.portee}m · stationnaire · 2 tours par défaut` });
   }
