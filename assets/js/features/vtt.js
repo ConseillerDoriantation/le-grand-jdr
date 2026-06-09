@@ -2089,7 +2089,9 @@ function _toggleMultiSelect(id) {
 function _showAttackRange(t) {
   if (!_activePage) return;
   const K = window.Konva;
-  const options = _buildAttackOptions(t);
+  const options = _buildAttackOptions(t)
+    .map(o => ({ ...o, portee: Math.max(0, parseInt(o.portee) || 0) }))
+    .filter(o => !o.targetSelf && o.portee > 0);
   if (!options.length) return;
   // Portée "naturelle" = celle de l'ARME du perso (option sans sortIdx et sans
   // _itemAction). C'est ce que le joueur considère comme sa portée de base, même
