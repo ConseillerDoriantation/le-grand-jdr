@@ -3489,6 +3489,15 @@ function _buildSpellOption(s, ctx) {
 
   // Toucher / Déplacement : buff pur sur allié → toujours buff-only, même si un
   // degats résiduel traîne (sinon le sort attaquerait ET poserait le buff).
+  if (mods?.allonge) {
+    return { ...common, label,
+      icon: '🏹',
+      dice: `+${mods.allonge.cells} portee`,
+      isUtil: true,
+      isAllonge: true,
+      halfOnMiss: false };
+  }
+
   const _enchBuffNoImpact = !!mods?.enchantToucher || !!mods?.enchantMove;
   const isEnchantOnly = _enchBuffNoImpact || (enchantOnlyAlsoEtat
     ? (!!mods?.enchantArmeDmg || !!mods?.enchantEtatId) && !((s.degats || '').trim())
@@ -5710,7 +5719,9 @@ async function _vttRollAttack() {
       // ── Construit un castEffect détaillé selon le type de sort ──
       let castEffect = opt.dice || '';
       const _STAT_LBL = { force:'For', dexterite:'Dex', constitution:'Con', intelligence:'Int', sagesse:'Sag', charisme:'Cha' };
-      if (opt.isAffliction) {
+      if (opt.isAllonge) {
+        castEffect = `🏹 Allonge +${opt.mods?.allonge?.cells ?? '?'} portee`;
+      } else if (opt.isAffliction) {
         const statLbl = (_STAT_LBL[opt.afflictionSaveStat] || opt.afflictionSaveStat || 'Con').toUpperCase();
         if (opt.afflictionMode === 'etat' && opt.afflictionEtatId) {
           const lib = CONDITION_BY_ID[opt.afflictionEtatId];
