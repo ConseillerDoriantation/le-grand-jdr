@@ -1020,7 +1020,7 @@ export function _buildSortResume(s, c) {
       const nbAmp = runes.filter(r => r === 'Amplification').length;
       const eff = etat?.effects || {};
       if (eff.dmgDealtBonus) {
-        const auto = `${1 + nbP}d4+2`;
+        const auto = `${1 + nbP}d4 +2`;
         const formula = (s.enchantStateDmgFormula || '').trim() || auto;
         detailParts.push(`bonus dégâts ${formula}${formula !== auto ? ' · naturel' : ''}`);
       }
