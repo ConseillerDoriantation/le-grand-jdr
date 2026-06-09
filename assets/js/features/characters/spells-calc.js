@@ -158,6 +158,75 @@ export function _calcSortSoin(s, c) {
   return base;
 }
 
+function _fmtSigned(n) {
+  const v = parseInt(n) || 0;
+  return v >= 0 ? `+${v}` : `${v}`;
+}
+
+function _splitDiceBase(formula = '') {
+  const raw = String(formula || '').trim();
+  const m = raw.match(/^(\d+d\d+)(.*)$/i);
+  if (!m) return { dice: raw, tail: '' };
+  return { dice: m[1], tail: (m[2] || '').trim() };
+}
+
+function _isFlatTail(tail = '') {
+  return /^[+-]\s*\d+(?:\s*[+-]\s*\d+)*$/.test(String(tail || '').trim());
+}
+
+function _scaleDiceFormulaDice(formula, extraDice = 0) {
+  const raw = String(formula || '').trim();
+  const m = raw.match(/^(\d+)(d\d+)(.*)$/i);
+  if (!m) return raw;
+  return `${parseInt(m[1]) + (parseInt(extraDice) || 0)}${m[2]}`;
+}
+
+function _calcImpactDisplayParts(s, c) {
+  const mainP = getMainWeapon(c);
+  const baseRaw = (s?.degats || '').trim();
+  const base = (!baseRaw || baseRaw.toLowerCase() === '= arme')
+    ? (mainP?.degats || '2d4')
+    : baseRaw;
+  const nbPuiss = (s?.runes || []).filter(r => r === 'Puissance').length;
+  const statKey = s?.degatsStat || mainP.statAttaque || mainP.toucherStat || 'force';
+  const statVal = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
+  const statMod = Math.floor((Math.min(22, statVal) - 10) / 2);
+  const statLbl = statShort(statKey) || statKey.slice(0, 3);
+  const maitrise = getSharedMaitriseBonus(c, mainP);
+  const { dice, tail } = _splitDiceBase(_scaleDiceFormulaDice(base, nbPuiss));
+  const hasDerivedFlat = statMod !== 0 || maitrise !== 0;
+  const pieces = [dice];
+  if (tail && !(hasDerivedFlat && _isFlatTail(tail))) pieces.push(tail);
+  if (statMod) pieces.push(`${statLbl}(${_fmtSigned(statMod)})`);
+  if (maitrise) pieces.push(`Maîtrise(${_fmtSigned(maitrise)})`);
+  return { label: pieces.join(' + '), statLbl, statMod, maitrise };
+}
+
+function _calcHealDisplayParts(s, c) {
+  const runes = s?.runes || [];
+  const nbProt = runes.filter(r => r === 'Protection').length;
+  const baseRaw = (s?.soin || '').trim();
+  const isDefault = !baseRaw || baseRaw.toLowerCase() === '= base';
+  const base = isDefault ? '1d4' : baseRaw;
+  const statKey = _getSortSoinStatKey(s, c);
+  const noMod = statKey === 'none';
+  const statVal = noMod ? 10 : ((c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0));
+  const statMod = noMod ? 0 : Math.floor((Math.min(22, statVal) - 10) / 2);
+  const statLbl = noMod ? '' : (statShort(statKey) || statKey.slice(0, 3));
+  const mainP = getMainWeapon(c);
+  const maitrise = (!noMod && _isNoyauMagic(s)) ? getSharedMaitriseBonus(c, mainP) : 0;
+  const diceCountBonus = isDefault || nbProt > 0 ? nbProt : 0;
+  const scaled = _scaleDiceFormulaDice(base, diceCountBonus);
+  const { dice, tail } = _splitDiceBase(scaled);
+  if (!dice || !/^\d+d\d+$/i.test(dice)) return { label: _calcSortSoin(s, c), statLbl, statMod, maitrise };
+  const hasDerivedFlat = statMod !== 0 || maitrise !== 0;
+  const pieces = [dice];
+  if (tail && !(hasDerivedFlat && _isFlatTail(tail))) pieces.push(tail);
+  if (statMod) pieces.push(`${statLbl}(${_fmtSigned(statMod)})`);
+  if (maitrise) pieces.push(`Maîtrise(${_fmtSigned(maitrise)})`);
+  return { label: pieces.join(' + '), statLbl, statMod, maitrise };
+}
+
 /** Mode de la rune Protection : 'soin' | 'ca' — stocké dans s.protectionMode */
 export function _getSortProtectionMode(s) {
   return s?.protectionMode || 'ca'; // défaut CA si non précisé
@@ -870,19 +939,11 @@ export function _buildSortResume(s, c) {
   // le type n'a pas été coché « offensif » → on affiche les dégâts dans ce cas aussi.
   const _dealsImpact = types.includes('offensif') || _hasLaceration(s);
   if (_dealsImpact && !_suppressImpactDmg) {
-    const mainP   = getMainWeapon(c);
-    // Override du sort sur la stat de dégâts > stat de l'arme principale
-    const statKey = s?.degatsStat || mainP.statAttaque || mainP.toucherStat || 'force';
-    const statVal = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
-    const modAtk  = Math.floor((Math.min(22, statVal) - 10) / 2);
-    const statLbl = statShort(statKey) || statKey.slice(0,3);
-    const maitrise = getSharedMaitriseBonus(c, mainP);
-    const deg      = _calcSortDegats(s, c);
-    // Label détaillé : dés + stat + maîtrise si présente
-    const modAtkStr = modAtk >= 0 ? `+${modAtk}` : `${modAtk}`;
-    const maitriseStr = maitrise !== 0 ? ` + Maî(${maitrise > 0 ? '+'+maitrise : maitrise})` : '';
-    const detail = `Dégâts · ${statLbl}(${modAtkStr})${maitriseStr}${monoStr}`;
-    lines.push({ icon:'⚔️', label:deg, detail });
+    const dmg = _calcImpactDisplayParts(s, c);
+    const detailParts = ['Dégâts'];
+    if (dmg.statMod) detailParts.push(`${dmg.statLbl} ${_fmtSigned(dmg.statMod)}`);
+    if (dmg.maitrise) detailParts.push(`Maîtrise ${_fmtSigned(dmg.maitrise)}`);
+    lines.push({ icon:'⚔️', label:dmg.label, detail: `${detailParts.join(' · ')}${monoStr}` });
   }
 
   // (Affliction / Enchantement : rendu dans le bloc unifié plus bas,
@@ -903,10 +964,11 @@ export function _buildSortResume(s, c) {
       lines.push({ icon:'🩸', label:`Drain ${pct}% des dégâts`, detail:`Soigne le lanceur · cap frappe de base hors Puissance · ${nbProt} Protection` });
     } else if (mode === 'soin') {
       {
-        const mainPsoin  = getMainWeapon(c);
-        const maitrSoin  = getSharedMaitriseBonus(c, mainPsoin);
-        const maitrSoinStr = maitrSoin !== 0 ? ` + Maî(${maitrSoin > 0 ? '+'+maitrSoin : maitrSoin})` : '';
-        lines.push({ icon:'💚', label:_calcSortSoin(s, c), detail:`Soin · +${nbProt}d4 Prot${maitrSoinStr}${monoStr}` });
+        const soin = _calcHealDisplayParts(s, c);
+        const detailParts = [`Soin`, `+${nbProt}d4 Prot`];
+        if (soin.statMod) detailParts.push(`${soin.statLbl} ${_fmtSigned(soin.statMod)}`);
+        if (soin.maitrise) detailParts.push(`Maîtrise ${_fmtSigned(soin.maitrise)}`);
+        lines.push({ icon:'💚', label:soin.label, detail:`${detailParts.join(' · ')}${monoStr}` });
       }
     } else {
       // Mode CA — sauf si combo Bouclier réactif : la réaction instantanée ne donne pas de CA
@@ -923,10 +985,11 @@ export function _buildSortResume(s, c) {
       }
     }
   } else if (hasDefensif && nbAmp > 0 && s.ampMode !== 'deplacement') {
-    const mainPsoin  = getMainWeapon(c);
-    const maitrSoin  = getSharedMaitriseBonus(c, mainPsoin);
-    const maitrSoinStr = maitrSoin !== 0 ? ` + Maî(${maitrSoin > 0 ? '+'+maitrSoin : maitrSoin})` : '';
-    lines.push({ icon:'💚', label:_calcSortSoin(s, c), detail:`Soin de soutien · base 1d4${maitrSoinStr}${monoStr}` });
+    const soin = _calcHealDisplayParts(s, c);
+    const detailParts = ['Soin de soutien', 'base 1d4'];
+    if (soin.statMod) detailParts.push(`${soin.statLbl} ${_fmtSigned(soin.statMod)}`);
+    if (soin.maitrise) detailParts.push(`Maîtrise ${_fmtSigned(soin.maitrise)}`);
+    lines.push({ icon:'💚', label:soin.label, detail:`${detailParts.join(' · ')}${monoStr}` });
   } else if (hasDefensif) {
     lines.push({ icon:'🛡️', label:'Effet défensif', detail:'Décris l\'effet ci-dessous' });
   }
