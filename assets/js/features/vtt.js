@@ -2478,7 +2478,7 @@ function _vttSpellMods(s) {
     // d'un % des dégâts, plafonné à l'exécution par la frappe de base hors Puissance.
     // Puissance non requise ; mode CA/Soin hors-sujet.
     // Formule : 25% + 25% × nbProt → Prot×1=50% · ×2=75% · ×3=100%
-    drain: (nbProt > 0 && _vttSortDealsDamageFlag(s))
+    drain: (nbProt > 0 && (s.types || []).includes('offensif'))
       ? { pct: 0.25 + 0.25 * nbProt, nbProt } : null,
     // Lacération (branche d'Affliction) : -CA brut sur la cible, -1 par rune
     // Affliction (plafonné en jeu : 2 joueur · 4 élite/boss).
@@ -2734,49 +2734,6 @@ async function _vttSpendSpellPm(src, opt) {
   if (opt.pmCost > 0 && c?.id) {
     await updateDoc(_chrRef(c.id), { pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost) });
   }
-}
-
-function _vttIsAllongeSpell(s) {
-  const runes = s?.runes || [];
-  return runes.includes('Enchantement')
-    && runes.includes('Amplification')
-    && !runes.includes('Dispersion')
-    && !runes.includes('Invocation')
-    && (s?.enchantSlot || 'arme') === 'arme';
-}
-
-function _vttSortDealsDamageFlag(s) {
-  const runes = s?.runes || [];
-  if (_vttIsAllongeSpell(s)) return false;
-  if (s?.ampMode === 'deplacement') return false;
-  if (runes.includes('Invocation')) return false;
-  if (runes.includes('Affliction') && s?.afflictionMode !== 'laceration') return false;
-  if (runes.includes('Enchantement') && !((s?.degats || '').trim())) return false;
-  if (runes.includes('Lacération') || (s?.afflictionMode === 'laceration' && runes.includes('Affliction'))) return true;
-  if (typeof s?.doesDamage === 'boolean') return s.doesDamage;
-  const types = Array.isArray(s?.types) && s.types.length ? s.types : (s?.noyau ? ['offensif'] : []);
-  return types.includes('offensif');
-}
-
-function _vttSortDoesHealFlag(s) {
-  const runes = s?.runes || [];
-  const hasProt = runes.includes('Protection');
-  const hasAff = runes.includes('Affliction');
-  if (hasProt && hasAff && s?.afflictionMode !== 'laceration') return true;
-  if (hasProt && (s?.protectionMode || 'ca') === 'soin') return true;
-  if (typeof s?.doesHeal === 'boolean') return s.doesHeal;
-  const types = Array.isArray(s?.types) && s.types.length ? s.types : (s?.typeSoin ? ['defensif'] : []);
-  return types.includes('defensif')
-    && runes.includes('Amplification')
-    && s?.ampMode !== 'deplacement'
-    && !hasProt;
-}
-
-function _vttSortGrantsCaFlag(s) {
-  const runes = s?.runes || [];
-  if (runes.includes('Protection') && (s?.protectionMode || 'ca') === 'ca') return true;
-  if (typeof s?.grantsCa === 'boolean') return s.grantsCa;
-  return false;
 }
 
 // Vrai si la case (col,row) pour un token de dimensions dim recouvre un autre token.
@@ -3593,7 +3550,7 @@ function _buildSpellOption(s, ctx) {
   }
   // Lacération frappe toujours l'attaque de base, même si « offensif » n'est pas coché.
   // (branche Lacération d'Affliction → mods.laceration ; ou ancienne rune legacy)
-  if (_vttSortDealsDamageFlag(s) || runes.includes('Lacération') || !!mods?.laceration) {
+  if (types.includes('offensif') || runes.includes('Lacération') || !!mods?.laceration) {
     const fullFormula    = _vttSortDmgFormula(s, c);
     const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(fullFormula);
     const spellTypeId    = s.noyauTypeId || null;
@@ -3630,11 +3587,11 @@ function _buildSpellOption(s, ctx) {
       mjAlwaysMax: !!s.mjAlwaysMax,
     };
   }
-  const isAmpSupportHeal = _vttSortDoesHealFlag(s)
+  const isAmpSupportHeal = types.includes('defensif')
     && (s.runes || []).includes('Amplification')
     && s.ampMode !== 'deplacement'
     && !(s.runes || []).includes('Protection');
-  if (_vttSortDoesHealFlag(s) && (protMode === 'soin' || isAmpSupportHeal)) {
+  if (types.includes('defensif') && (protMode === 'soin' || isAmpSupportHeal)) {
     const soinFormula = _vttSortSoinFormula(s, c);
     const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(soinFormula);
     // Stat de soin : override > auto (magique → stat arme magique ou Int ; physique → Con)
@@ -3669,7 +3626,7 @@ function _buildSpellOption(s, ctx) {
       toucherStatLabel: soinTouchNoMod ? '' : (statShort(soinTouchStat) || soinTouchStat),
     };
   }
-  if (_vttSortGrantsCaFlag(s) && protMode === 'ca') {
+  if (types.includes('defensif') && protMode === 'ca') {
     return { ...common,
       icon: '🛡️', label,
       dice: s.ca || 'CA +2 (2 tours)',
@@ -3745,7 +3702,9 @@ function _buildAttackOptions(t) {
       }
       t.summonActions.forEach((a, ai) => {
         // Seules les actions offensives sont jouables ici (effets complexes : à venir)
-        const isOff = _vttSortDealsDamageFlag(a);
+        const isOff = (Array.isArray(a.types) && a.types.includes('offensif'))
+                   || (Array.isArray(a.runes) && (a.runes.includes('Lacération')
+                       || (a.afflictionMode === 'laceration' && a.runes.includes('Affliction'))));
         if (!isOff) return;
         const dmg  = _vttSortDmgFormula(a, _cChar);
         const elId = a.noyauTypeId || t.summonElementId || 'physique';
@@ -14063,7 +14022,7 @@ function _vttSpellChips(s, c) {
               : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : []));
   const runes = s.runes || [];
   const _isLac = runes.includes('Lacération') || (s.afflictionMode === 'laceration' && runes.includes('Affliction'));
-  if (_vttSortDealsDamageFlag(s) || _isLac) {
+  if (types.includes('offensif') || _isLac) {
     const dmg = _vttSortDmgFormula(s, c);
     if (dmg) chips.push({ icon:'⚔️', val: dmg, color:'#ff6b6b' });
   }
@@ -14072,12 +14031,12 @@ function _vttSpellChips(s, c) {
     const nbAff = runes.filter(r => r === 'Affliction').length;
     chips.push({ icon:'💚', val:`${(s.regenerationFormula || '').trim() || `${nbProt + nbAff}d4`}/t`, color:'#22c38e' });
   }
-  const isAmpSupportHeal = _vttSortDoesHealFlag(s)
+  const isAmpSupportHeal = types.includes('defensif')
     && runes.includes('Amplification')
     && s.ampMode !== 'deplacement'
     && !runes.includes('Protection');
   if (!(runes.includes('Protection') && runes.includes('Affliction') && !_isLac)
-      && _vttSortDoesHealFlag(s) && (s.protectionMode === 'soin' || s.typeSoin || isAmpSupportHeal)) {
+      && types.includes('defensif') && (s.protectionMode === 'soin' || s.typeSoin || isAmpSupportHeal)) {
     const soin = _vttSortSoinFormula(s, c);
     if (soin) chips.push({ icon:'💚', val: soin, color:'#22c38e' });
   }

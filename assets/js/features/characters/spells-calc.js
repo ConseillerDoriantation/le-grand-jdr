@@ -59,47 +59,6 @@ export function _getSortTypes(s) {
   return ['utilitaire'];
 }
 
-export function _isAllongeSpell(s) {
-  const runes = s?.runes || [];
-  return runes.includes('Enchantement')
-    && runes.includes('Amplification')
-    && !runes.includes('Dispersion')
-    && !runes.includes('Invocation')
-    && (s?.enchantSlot || 'arme') === 'arme';
-}
-
-export function _sortDealsDamage(s) {
-  const runes = s?.runes || [];
-  if (_isAllongeSpell(s)) return false;
-  if (s?.ampMode === 'deplacement') return false;
-  if (runes.includes('Invocation')) return false;
-  if (runes.includes('Affliction') && s?.afflictionMode !== 'laceration') return false;
-  if (runes.includes('Enchantement') && !((s?.degats || '').trim())) return false;
-  if (_hasLaceration(s)) return true;
-  if (typeof s?.doesDamage === 'boolean') return s.doesDamage;
-  return _getSortTypes(s).includes('offensif');
-}
-
-export function _sortDoesHeal(s) {
-  const runes = s?.runes || [];
-  const hasProt = runes.includes('Protection');
-  const hasAff = runes.includes('Affliction');
-  if (hasProt && hasAff && s?.afflictionMode !== 'laceration') return true;
-  if (hasProt && (s?.protectionMode || 'ca') === 'soin') return true;
-  if (typeof s?.doesHeal === 'boolean') return s.doesHeal;
-  return _getSortTypes(s).includes('defensif')
-    && runes.includes('Amplification')
-    && s?.ampMode !== 'deplacement'
-    && !hasProt;
-}
-
-export function _sortGrantsCa(s) {
-  const runes = s?.runes || [];
-  if (runes.includes('Protection') && (s?.protectionMode || 'ca') === 'ca') return true;
-  if (typeof s?.grantsCa === 'boolean') return s.grantsCa;
-  return false;
-}
-
 /** Type d'action : 'action' | 'action_bonus' | 'reaction'
  *  + concentration : boolean
  *  Type d'action 100% déterminé par les runes : Réaction > Action Bonus > Action.
@@ -287,7 +246,7 @@ export const SORT_COMBOS = [
     // Drain = sort OFFENSIF (qui inflige l'attaque de base) + Protection.
     // Le soin est plafonné par la frappe de base hors Puissance : Protection
     // améliore la régénération, Puissance améliore surtout les dégâts.
-    detect: (counts, s) => counts.Protection > 0 && _sortDealsDamage(s),
+    detect: (counts, s) => counts.Protection > 0 && _getSortTypes(s).includes('offensif'),
     describe: (counts) => {
       const pct = Math.round((0.25 + 0.25 * counts.Protection) * 100);
       const pPart = counts.Puissance > 0 ? `Puissance ×${counts.Puissance} + ` : '';
@@ -978,7 +937,7 @@ export function _buildSortResume(s, c) {
   const _suppressImpactDmg = isEnchantOnly || isEnchantBuffOnly || isAfflictionSpell || isInvocationSpell;
   // Lacération inflige TOUJOURS l'attaque de base (+ sa réduction de CA), même si
   // le type n'a pas été coché « offensif » → on affiche les dégâts dans ce cas aussi.
-  const _dealsImpact = _sortDealsDamage(s) || _hasLaceration(s);
+  const _dealsImpact = types.includes('offensif') || _hasLaceration(s);
   if (_dealsImpact && !_suppressImpactDmg) {
     const dmg = _calcImpactDisplayParts(s, c);
     const detailParts = ['Dégâts'];
@@ -991,7 +950,7 @@ export function _buildSortResume(s, c) {
   //  qui respecte les modes et ne fait pas de fallback DoT incorrect.)
 
   // Protection : Drain (si sort offensif) → sinon Soin ou CA selon protectionMode
-  const hasDefensif = _sortGrantsCa(s) || _sortDoesHeal(s);
+  const hasDefensif = types.includes('defensif');
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     // Combo Drain (sort offensif + Protection) : pas de CA ni de soin direct — le
@@ -1025,7 +984,7 @@ export function _buildSortResume(s, c) {
         lines.push({ icon:'🛡️', label: caLbl, detail: `Bonus de CA (2 tours)${monoStr}` });
       }
     }
-  } else if (_sortDoesHeal(s) && nbAmp > 0 && s.ampMode !== 'deplacement') {
+  } else if (hasDefensif && nbAmp > 0 && s.ampMode !== 'deplacement') {
     const soin = _calcHealDisplayParts(s, c);
     const detailParts = ['Soin de soutien', 'base 1d4'];
     if (soin.statMod) detailParts.push(`${soin.statLbl} ${_fmtSigned(soin.statMod)}`);
