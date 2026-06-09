@@ -1341,12 +1341,24 @@ export async function openSortModal(idx, s) {
         <input type="hidden" id="s-enchant-etat-saved" value="${enchantEtatForEdit}">
         <div id="s-enchant-state-tuning" style="display:none;margin-top:.55rem">
           <div id="s-enchant-move-tune" style="display:none">
-            <label>Déplacement naturel <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">— vide = auto selon l'état et Amplification</span></label>
-            <input class="input-field" type="number" id="s-enchant-state-move-bonus" value="${s?.enchantStateMoveBonus??''}" placeholder="auto">
+            ${_autoValHtml({
+              fieldId: 's-enchant-state-move-bonus',
+              label: '💨 Déplacement naturel',
+              autoValue: '',
+              autoSource: 'État + Amplification',
+              currentValue: s?.enchantStateMoveBonus,
+              placeholder: 'ex : 1, 2, 3...',
+            })}
           </div>
           <div id="s-enchant-dmg-tune" style="display:none;margin-top:.45rem">
-            <label>Dégâts naturels <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">— vide = auto selon l'état et Puissance</span></label>
-            <input class="input-field" id="s-enchant-state-dmg-formula" value="${s?.enchantStateDmgFormula||''}" placeholder="auto">
+            ${_autoValHtml({
+              fieldId: 's-enchant-state-dmg-formula',
+              label: '✨ Dégâts naturels',
+              autoValue: '',
+              autoSource: 'État + Puissance',
+              currentValue: s?.enchantStateDmgFormula,
+              placeholder: 'ex : 1d4 +2, 2d4 +2...',
+            })}
           </div>
         </div>
       </div>
@@ -1606,12 +1618,6 @@ export async function openSortModal(idx, s) {
       modal.dataset.previewBound = '1';
       modal.addEventListener('input',  _updateSortPreview);
       modal.addEventListener('change', _updateSortPreview);
-      modal.addEventListener('input', (event) => {
-        if (event.target?.id === 's-enchant-state-move-bonus'
-            || event.target?.id === 's-enchant-state-dmg-formula') {
-          event.target.dataset.autoValue = '0';
-        }
-      });
       modal.addEventListener('change', (event) => {
         if (event.target?.id === 's-enchant-etat') _refreshEnchantStateTuning();
       });
@@ -1679,33 +1685,45 @@ function _refreshEnchantStateTuning() {
   const hasDmg = !!effects.dmgDealtBonus;
   const move = document.getElementById('s-enchant-move-tune');
   const dmg = document.getElementById('s-enchant-dmg-tune');
-  const runes = _buildRunesFromCounts();
-  const nbP = runes.filter(r => r === 'Puissance').length;
-  const nbAmp = runes.filter(r => r === 'Amplification').length;
-  const moveInput = document.getElementById('s-enchant-state-move-bonus');
-  const dmgInput = document.getElementById('s-enchant-state-dmg-formula');
   if (move) move.style.display = hasMove ? '' : 'none';
   if (dmg) dmg.style.display = hasDmg ? '' : 'none';
-  if (hasMove && moveInput) {
-    const base = Number.isFinite(parseInt(effects.movementBonus)) ? parseInt(effects.movementBonus) : 0;
-    const autoValue = String(base + nbAmp);
-    if (moveInput.value === '' || moveInput.dataset.autoValue === '1') {
-      moveInput.value = autoValue;
-      moveInput.dataset.autoValue = '1';
-    } else if (moveInput.value === autoValue) {
-      moveInput.dataset.autoValue = '1';
-    }
-  }
-  if (hasDmg && dmgInput) {
-    const autoValue = `${1 + nbP}d4 +2`;
-    if (dmgInput.value === '' || dmgInput.dataset.autoValue === '1') {
-      dmgInput.value = autoValue;
-      dmgInput.dataset.autoValue = '1';
-    } else if (dmgInput.value.trim() === autoValue) {
-      dmgInput.dataset.autoValue = '1';
-    }
-  }
   wrap.style.display = (hasMove || hasDmg) ? '' : 'none';
+  _refreshAutoValChips();
+  _collapseEnchantStateAutoIfMatching('s-enchant-state-move-bonus');
+  _collapseEnchantStateAutoIfMatching('s-enchant-state-dmg-formula');
+}
+
+function _collapseEnchantStateAutoIfMatching(fieldId) {
+  const input = document.getElementById(fieldId);
+  const auto = document.getElementById(`${fieldId}-autoval`);
+  const edit = document.getElementById(`${fieldId}-edit`);
+  const display = document.getElementById(`${fieldId}-display`);
+  const wrap = display?.parentElement;
+  if (!input || !auto || !edit || !display || !wrap) return;
+  if (!input.value.trim()) return;
+  if (input.value.trim() !== auto.textContent.trim()) return;
+  input.value = '';
+  edit.style.display = 'none';
+  display.style.display = '';
+  wrap.classList.remove('is-custom');
+}
+
+function _calcEnchantStateMoveAuto(s) {
+  const id = s?.enchantEtatId || '';
+  const condition = id ? _conditionsLibCache?.find(c => c.id === id) : null;
+  const baseRaw = condition?.effects?.movementBonus;
+  if (baseRaw == null) return '';
+  const base = Number.isFinite(parseInt(baseRaw)) ? parseInt(baseRaw) : 0;
+  const nbAmp = (s?.runes || []).filter(r => r === 'Amplification').length;
+  return String(base + nbAmp);
+}
+
+function _calcEnchantStateDmgAuto(s) {
+  const id = s?.enchantEtatId || '';
+  const condition = id ? _conditionsLibCache?.find(c => c.id === id) : null;
+  if (!condition?.effects?.dmgDealtBonus) return '';
+  const nbP = (s?.runes || []).filter(r => r === 'Puissance').length;
+  return `${1 + nbP}d4 +2`;
 }
 
 /** Re-style les boutons de type + ajuste la visibilité des sections conditionnelles. */
@@ -2449,6 +2467,8 @@ function _refreshAutoValChips() {
   apply('s-soin',           _calcSortSoin(s, c),    _autoSourceSoin(s, c));
   apply('s-ca',             _getSortCA(s),          _autoSourceCA(s));
   apply('s-enchant-degats', _calcEnchantDegats(s),  _autoSourceEnchantDeg(s));
+  apply('s-enchant-state-move-bonus', _calcEnchantStateMoveAuto(s), 'État + Amplification');
+  apply('s-enchant-state-dmg-formula', _calcEnchantStateDmgAuto(s), 'État + Puissance');
   apply('s-affliction-dot-formula', _calcAfflictionDot(s), _autoSourceAfflictionDot(s));
   apply('s-duree-base', String(_calcSortDuree(s)), _autoSourceDuree(s));
 }
