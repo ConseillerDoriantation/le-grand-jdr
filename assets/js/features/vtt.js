@@ -492,17 +492,19 @@ function _conditionDmgBonusOf(tok) {
   return active[0] || null;
 }
 
-function _scaledEnchantConditionFields(lib, power = 0, amplification = 0) {
+function _scaledEnchantConditionFields(lib, power = 0, amplification = 0, overrides = {}) {
   const eff = lib?.effects || {};
   const fields = { enchantPower: Math.max(0, parseInt(power) || 0) };
   const amp = Math.max(0, parseInt(amplification) || 0);
 
   if (eff.movementBonus != null) {
     const base = Number.isFinite(parseInt(eff.movementBonus)) ? parseInt(eff.movementBonus) : 0;
-    fields.movementBonus = base + amp;
+    fields.movementBonus = Number.isFinite(parseInt(overrides.movementBonus))
+      ? parseInt(overrides.movementBonus)
+      : base + amp;
   }
   if (eff.dmgDealtBonus) {
-    fields.dmgDealtBonusFormula = `${1 + fields.enchantPower}d4 +2`;
+    fields.dmgDealtBonusFormula = (overrides.dmgFormula || '').trim() || `${1 + fields.enchantPower}d4 +2`;
   }
   return fields;
 }
@@ -2474,6 +2476,10 @@ function _vttSpellMods(s) {
       ? nbP : 0,
     enchantStateAmplification: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
       ? nbAmp : 0,
+    enchantStateMoveBonus: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat' && Number.isFinite(parseInt(s.enchantStateMoveBonus)))
+      ? parseInt(s.enchantStateMoveBonus) : null,
+    enchantStateDmgFormula: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
+      ? ((s.enchantStateDmgFormula || '').trim()) : '',
     // Enchantement mode Toucher : bonus au toucher de l'allié (auto = 2 + Puissance)
     enchantToucher: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'toucher')
       ? { bonus: _enchBonus, nbCibles: nbEnch } : null,
@@ -3070,7 +3076,11 @@ async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
     const scaledFields = _scaledEnchantConditionFields(
       lib,
       opt.mods?.enchantStatePower || 0,
-      opt.mods?.enchantStateAmplification || 0
+      opt.mods?.enchantStateAmplification || 0,
+      {
+        movementBonus: opt.mods?.enchantStateMoveBonus,
+        dmgFormula: opt.mods?.enchantStateDmgFormula,
+      }
     );
     for (const tid of targetIds) {
       const td = _tokens[tid]?.data; if (!td) continue;

@@ -1019,11 +1019,15 @@ export function _buildSortResume(s, c) {
       const nbP = runes.filter(r => r === 'Puissance').length;
       const nbAmp = runes.filter(r => r === 'Amplification').length;
       const eff = etat?.effects || {};
-      if (eff.dmgDealtBonus) detailParts.push(`bonus dégâts ${(1 + nbP)}d4+2`);
+      if (eff.dmgDealtBonus) {
+        const formula = (s.enchantStateDmgFormula || '').trim() || `${1 + nbP}d4+2`;
+        detailParts.push(`bonus dégâts ${formula}${s.enchantStateDmgFormula?.trim() ? ' · naturel' : ''}`);
+      }
       if (eff.movementBonus != null) {
         const base = Number.isFinite(parseInt(eff.movementBonus)) ? parseInt(eff.movementBonus) : 0;
-        const bonus = base + nbAmp;
-        detailParts.push(`+${bonus} case${bonus > 1 ? 's' : ''} de déplacement`);
+        const manual = Number.isFinite(parseInt(s.enchantStateMoveBonus)) ? parseInt(s.enchantStateMoveBonus) : null;
+        const bonus = manual != null ? manual : base + nbAmp;
+        detailParts.push(`+${bonus} case${bonus > 1 ? 's' : ''} de déplacement${manual != null ? ' · naturel' : ''}`);
       }
       if (eff.attackBy === 'adv') detailParts.push('avantage aux attaques');
       if (eff.attackAgainstRanged === 'dis') detailParts.push('désavantage aux attaques à distance contre la cible');
