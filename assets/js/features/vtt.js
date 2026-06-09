@@ -716,7 +716,12 @@ async function _syncDownedCondition(t, hp) {
 async function _vttTriggerConcentrationSave(td, damageAmount) {
   if (!td || damageAmount <= 0) return [];
   const buffs = (td.buffs || []).filter(b => b?.canalisePersistant && b?.concentrationDD != null);
-  if (!buffs.length) return [];
+  const round = _session?.combat?.round ?? 0;
+  const activeConditions = (td.conditions || []).filter(c => {
+    if (c.expiresAtRound != null && round > 0 && round > c.expiresAtRound) return false;
+    return !!CONDITION_BY_ID[c.id]?.effects?.concentrationCheck;
+  });
+  if (!buffs.length && !activeConditions.length) return [];
   const sagMod = _tokenStatMod(td, 'sagesse');
   const tgtName = _live(td).displayName ?? td.name;
   const notes = [];
@@ -739,9 +744,30 @@ async function _vttTriggerConcentrationSave(td, damageAmount) {
       for (const s of summonsToKill) { await _persistInvocationState(s.data); await deleteDoc(_tokRef(s.data.id)).catch(() => {}); }
     }
   }
+
+  const removedConditionIds = new Set();
+  for (const cond of activeConditions) {
+    const lib = CONDITION_BY_ID[cond.id];
+    const dd = cond.saveDC || lib?.defaultDC || 11;
+    const roll = Math.floor(Math.random() * 20) + 1;
+    const tot = roll + sagMod;
+    const success = roll === 20 || (roll !== 1 && tot >= dd);
+    const rollStr = `JS Sa ${roll}${sagMod>=0?'+':''}${sagMod}=${tot} vs DD${dd}`;
+    if (success) {
+      notes.push(`🧠 ${rollStr} · ${lib?.label || cond.id} tenu (${tgtName})`);
+    } else {
+      notes.push(`💢 ${rollStr} ÉCHEC · ${lib?.label || cond.id} rompu sur ${tgtName}`);
+      removedConditionIds.add(cond.id);
+    }
+  }
+
   if (removed.length) {
     const remaining = (td.buffs || []).filter(b => !removed.includes(b));
     await updateDoc(_tokRef(td.id), { buffs: remaining }).catch(() => {});
+  }
+  if (removedConditionIds.size) {
+    const remainingConditions = (td.conditions || []).filter(c => !removedConditionIds.has(c.id));
+    await updateDoc(_tokRef(td.id), { conditions: remainingConditions }).catch(() => {});
   }
   return notes;
 }
@@ -6059,45 +6085,12 @@ async function _vttRollAttack() {
       }
     }
 
-    // ── JS Concentration auto : pour chaque cible qui a subi des dégâts et qui
-    //    porte un sort canalisé actif, lance un JS Sagesse vs concentrationDD.
-    //    En cas d'échec, retire le buff canalisé (et ses summons liés).
+    // ── JS Concentration auto : buffs canalisés + états de type Concentré.
     for (const r of targetResults) {
       if (!(r.hit || r.halfDmg) || r.dmgTotal <= 0) continue;
-      const td = r._data; if (!td?.buffs?.length) continue;
-      const canalisedBuffs = td.buffs.filter(b => b?.canalisePersistant && b?.concentrationDD != null);
-      if (!canalisedBuffs.length) continue;
-      // Modificateur de Sagesse du PJ porteur (PNJ/Bestiaire : fallback +0)
-      let sagMod = 0;
-      if (td.characterId) {
-        const cTgt = _characters[td.characterId];
-        if (cTgt) sagMod = getMod(cTgt, 'sagesse');
-      } else if (td.npcId) {
-        sagMod = _npcStatMod(_npcs[td.npcId] || {}, 'sagesse');
-      }
-      for (const cb of canalisedBuffs) {
-        const dd = cb.concentrationDD;
-        const roll = Math.floor(Math.random() * 20) + 1;
-        const tot = roll + sagMod;
-        const success = roll === 20 || (roll !== 1 && tot >= dd);
-        const tgtName = _live(td).displayName ?? td.name;
-        if (success) {
-          modNotes.push(`🧠 JS Sa ${roll}${sagMod>=0?'+':''}${sagMod}=${tot} vs DD${dd} · concentration tenue (${tgtName})`);
-        } else {
-          modNotes.push(`💢 JS Sa ${roll}${sagMod>=0?'+':''}${sagMod}=${tot} vs DD${dd} ÉCHEC · ${cb.sortLabel} rompu sur ${tgtName}`);
-          // Retire le buff canalisé
-          const remaining = (td.buffs || []).filter(b => b !== cb);
-          await updateDoc(_tokRef(td.id), { buffs: remaining }).catch(() => {});
-          // Supprime les summons liés (sentinelle/arme invoquée) du même lanceur si canalisés
-          const summonsToKill = Object.values(_tokens).filter(e =>
-            e?.data?.summonOwnerId === (cb.casterId || td.id)
-            && e?.data?.summonCanalise
-          );
-          for (const s of summonsToKill) {
-            await deleteDoc(_tokRef(s.data.id)).catch(() => {});
-          }
-        }
-      }
+      const td = r._data; if (!td) continue;
+      const concNotes = await _vttTriggerConcentrationSave(td, r.dmgTotal);
+      modNotes.push(...concNotes);
     }
 
     if (_mods) {

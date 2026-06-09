@@ -69,14 +69,18 @@ export const CONDITION_DEFAULT_LIBRARY = [
     desc:'L\'allié est guidé : avantage à ses jets d\'attaque pendant la durée de l\'enchantement.',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
     effects:{ attackBy:'adv' } },
-  { id:'warded',        label:'Protégé',     icon:'🛡️', color:'#22c55e',
-    desc:'L\'allié est protégé : désavantage aux attaques contre lui pendant la durée de l\'enchantement.',
+  { id:'distant_ward',  label:'Abri distant', icon:'🏹', color:'#38bdf8',
+    desc:'L\'allié est protégé contre les tirs et attaques à distance : désavantage aux attaques à distance contre lui.',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
-    effects:{ attackAgainst:'dis' } },
+    effects:{ attackAgainstRanged:'dis' } },
+  { id:'melee_ward',    label:'Garde rapprochée', icon:'🛡️', color:'#22c55e',
+    desc:'L\'allié est protégé au contact : désavantage aux attaques de mêlée contre lui.',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
+    effects:{ attackAgainstMelee:'dis' } },
   { id:'focused',       label:'Concentré',   icon:'🧠', color:'#818cf8',
-    desc:'L\'allié stabilise son énergie magique. À utiliser comme support RP ou futur bonus de concentration.',
-    defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
-    effects:{ concentrationBonus:2 } },
+    desc:'À chaque dégât reçu, le porteur lance un JS Sagesse contre le DD de l\'état. Sur échec, l\'état prend fin.',
+    defaultSaveStat:'sagesse',      defaultDC:11, defaultDuration:2,
+    effects:{ concentrationCheck:true } },
   { id:'empowered',     label:'Renforcé',    icon:'✨', color:'#e8b84b',
     desc:'L\'allié canalise un surplus d\'énergie. À utiliser comme support RP ou futur bonus de dégâts.',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
@@ -97,8 +101,8 @@ export const CONDITION_DEFAULT_LIBRARY = [
 ];
 
 export const CONDITION_DEFAULT_IDS = new Set(CONDITION_DEFAULT_LIBRARY.map(c => c.id));
-const CONDITION_REMOVED_IDS = new Set(['poisoned']);
-const CONDITION_ENCHANTMENT_DEFAULT_IDS = new Set(['swift', 'guided', 'warded', 'focused', 'empowered']);
+const CONDITION_REMOVED_IDS = new Set(['poisoned', 'warded']);
+const CONDITION_ENCHANTMENT_DEFAULT_IDS = new Set(['swift', 'guided', 'distant_ward', 'melee_ward', 'focused', 'empowered']);
 const CONDITION_NON_SPELL_DEFAULT_IDS = new Set(['dodge', 'hidden', 'disengaged']);
 
 function normalizeSpellUsage(entry = {}, fallback = null) {
