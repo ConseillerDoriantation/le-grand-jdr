@@ -1122,7 +1122,8 @@ export async function openSortModal(idx, s) {
   const hasAmp   = runesSrc.includes('Amplification');
   const nbAmp    = runesSrc.filter(r => r === 'Amplification').length;
   const ampMode  = s?.ampMode || 'zone';
-  const isAllongeCombo = hasEnchant && hasAmp;
+  const hasDisp  = runesSrc.includes('Dispersion');
+  const isAllongeCombo = hasEnchant && hasAmp && !hasDisp;
   const hasActionRune = (_runeCountsEdit[ACTION_RUNE] || 0) > 0;
   const actionMode = _actionModeEdit || 'reaction';
   const actionModeBtnsHtml = [
@@ -1761,7 +1762,9 @@ function _isRegenerationComboActive(counts = _runeCountsEdit) {
 }
 
 function _isAllongeComboActive(counts = _runeCountsEdit) {
-  return (counts?.Enchantement || 0) > 0 && (counts?.Amplification || 0) > 0;
+  return (counts?.Enchantement || 0) > 0
+    && (counts?.Amplification || 0) > 0
+    && (counts?.Dispersion || 0) === 0;
 }
 
 function _calcRegenerationAuto(s) {
