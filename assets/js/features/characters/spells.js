@@ -13,7 +13,7 @@ import { getArmorSetData, getMainWeapon } from './data.js';
 import { makeSortable } from '../../shared/sortable-helper.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
-import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts, noyauTypesFor } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampDispCircleSize, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts, noyauTypesFor } from './spells-calc.js';
 
 // ── Drag and Drop sorts ──────────────────────
 let _dragSortIdx = null;
@@ -530,11 +530,11 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   // ── 5. Cibles / zone / déplacement / durée ──
   if (nbCibles > 1) chips.push({ icon:'🎯', val:`×${nbCibles}`, color:'#4f8cff' });
   const zone  = _calcSortZone(s);
-  if (zone)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}m`, color:'#b47fff' });
+  if (zone)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}c`, color:'#b47fff' });
   const depl  = _calcSortDeplacement(s);
   if (depl) {
     const dIcon = depl.mode === 'self' ? '🏃' : depl.mode === 'pull' ? '↙' : '↗';
-    const dVal  = depl.max != null ? `1–${depl.max}m` : `${depl.distance}m`;
+    const dVal  = depl.max != null ? `1–${depl.max}c` : `${depl.distance}c`;
     chips.push({ icon: dIcon, val: dVal, color:'#e8b84b' });
   }
   // Durée : affichée uniquement pour les sorts persistants
@@ -868,8 +868,8 @@ function _runeLiveContribution(nom, counts) {
     case 'Amplification': {
       const len = _ampLength(cnt);
       const nbDisp = counts['Dispersion'] || 0;
-      const width  = nbDisp > 0 ? _ampLength(nbDisp) : 1;
-      const combo  = nbDisp > 0 ? ` · combo Dispersion → ${len}×${width} cases` : '';
+      const size = _ampDispCircleSize(cnt, nbDisp);
+      const combo  = nbDisp > 0 ? ` · combo Dispersion → ${size}×${size} cases` : '';
       return {
         main:  `Zone ${len}×1 cases${combo}`,
       };
@@ -877,10 +877,9 @@ function _runeLiveContribution(nom, counts) {
     case 'Dispersion': {
       const nbAmp = counts['Amplification'] || 0;
       if (nbAmp > 0) {
-        const len = _ampLength(nbAmp);
-        const width = _ampLength(cnt);
+        const size = _ampDispCircleSize(nbAmp, cnt);
         return {
-          main:  `Combo Amp+Disp → zone ${len}×${width}m (au lieu de cibles)`,
+          main:  `Combo Amp+Disp → zone ${size}×${size} cases plaçable`,
         };
       }
       return {

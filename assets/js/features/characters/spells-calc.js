@@ -190,9 +190,8 @@ export const SORT_COMBOS = [
     defaultName: 'Zone élargie',
     detect: (counts) => counts.Amplification > 0 && counts.Dispersion > 0,
     describe: (counts) => {
-      const w = _ampLength(counts.Amplification);
-      const h = _ampLength(counts.Dispersion);
-      return `Amp ×${counts.Amplification} + Disp ×${counts.Dispersion} · zone ${w}×${h} cases`;
+      const size = _ampDispCircleSize(counts.Amplification, counts.Dispersion);
+      return `Amp ×${counts.Amplification} + Disp ×${counts.Dispersion} · zone ${size}×${size} cases`;
     },
   },
   {
@@ -585,11 +584,20 @@ export function _autoSourceDuree(s) {
  */
 export function _ampLength(nbAmp) { return nbAmp >= 1 ? 3 * nbAmp : 0; }
 
+/** Taille de zone créée par le combo Amplification + Dispersion.
+ *  Chaque palier consomme une paire Amp+Disp : 1 paire = 3×3, 2 paires = 7×7,
+ *  3 paires = 11×11, etc.
+ */
+export function _ampDispCircleSize(nbAmp, nbDisp) {
+  const rank = Math.min(parseInt(nbAmp) || 0, parseInt(nbDisp) || 0);
+  return rank >= 1 ? (4 * rank - 1) : 0;
+}
+
 /** Zone calculée :
  *  - Si zoneW/H manuels saisis → ils priment (override MJ)
  *  - Sinon, calculé depuis les runes Amplification (+ Dispersion en combo) :
- *      Amplification ×N → longueur = 3N cases
- *      Combo avec Dispersion ×M → largeur = 3M cases
+ *      Amplification ×N → ligne de 3N cases
+ *      Combo avec Dispersion : zone 3×3, puis 7×7, 11×11...
  *      Defaut combo Amp + Disp = 3 × 3
  *  - Source: 'manual' | 'runes' | null
  */
@@ -605,11 +613,13 @@ export function _calcSortZone(s) {
   const nbDisp = runes.filter(r => r === 'Dispersion').length;
   if (nbAmp === 0) return null;
 
+  if (nbDisp >= 1) {
+    const size = _ampDispCircleSize(nbAmp, nbDisp);
+    return { w: size, h: size, source: 'runes', amp: nbAmp, disp: nbDisp };
+  }
+
   const length = _ampLength(nbAmp);
-  // Dispersion en combo applique la même progression qu'Amplification.
-  // Sans Dispersion → largeur 1 (ligne).
-  const width = nbDisp >= 1 ? _ampLength(nbDisp) : 1;
-  return { w: length, h: width, source: 'runes', amp: nbAmp, disp: nbDisp };
+  return { w: length, h: 1, source: 'runes', amp: nbAmp, disp: nbDisp };
 }
 
 /** Déplacement (rune Amplification en mode 'deplacement').
@@ -925,7 +935,7 @@ export function _buildSortResume(s, c) {
     let zoneDetail = '';
     if (zoneCalc.source === 'runes') {
       if (zoneCalc.amp > 0 && zoneCalc.disp > 0) {
-        zoneDetail = `Combo Amp ×${zoneCalc.amp} + Disp ×${zoneCalc.disp} · zone élargie`;
+        zoneDetail = `Combo Amp ×${zoneCalc.amp} + Disp ×${zoneCalc.disp} · zone plaçable`;
       } else {
         zoneDetail = `Amplification ×${zoneCalc.amp} · ${zoneCalc.w} cases`;
       }
