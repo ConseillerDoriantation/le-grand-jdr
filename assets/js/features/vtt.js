@@ -3416,6 +3416,7 @@ function _buildSpellOption(s, ctx) {
 
   // ── Pré-calculs communs aux 3 branches ─────────────────────────────────
   const mods = _vttSpellMods(s);
+  const runes = Array.isArray(s.runes) ? s.runes : [];
   const types = Array.isArray(s.types) && s.types.length ? s.types
               : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : ['utilitaire']));
   const protMode = s.protectionMode || 'ca';
@@ -3535,7 +3536,7 @@ function _buildSpellOption(s, ctx) {
   }
   // Lacération frappe toujours l'attaque de base, même si « offensif » n'est pas coché.
   // (branche Lacération d'Affliction → mods.laceration ; ou ancienne rune legacy)
-  if (types.includes('offensif') || _sRunes.includes('Lacération') || !!mods?.laceration) {
+  if (types.includes('offensif') || runes.includes('Lacération') || !!mods?.laceration) {
     const fullFormula    = _vttSortDmgFormula(s, c);
     const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(fullFormula);
     const spellTypeId    = s.noyauTypeId || null;
