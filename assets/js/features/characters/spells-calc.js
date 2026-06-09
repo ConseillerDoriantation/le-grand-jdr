@@ -386,6 +386,121 @@ export function _activeCombos(s) {
   });
 }
 
+function _conditionLabel(id) {
+  const c = id ? _conditionsLibCache.find(x => x.id === id) : null;
+  return c ? `${c.icon || ''} ${c.label}`.trim() : '';
+}
+
+function _spellDirectDamageState(s, comboIds) {
+  const runes = s?.runes || [];
+  if (comboIds.has('allonge_magique')
+      || comboIds.has('regeneration')
+      || comboIds.has('bouclier_reactif')
+      || (runes.includes('Affliction') && s.afflictionMode !== 'laceration')
+      || (runes.includes('Enchantement') && !((s.degats || '').trim()))
+      || runes.includes('Invocation')
+      || s.ampMode === 'deplacement') return 'aucun';
+  return (_getSortTypes(s).includes('offensif') || _hasLaceration(s)) ? 'oui' : 'aucun';
+}
+
+function _finalEffectLines(s, c, activeCombos, comboIds, counts) {
+  const lines = [];
+  const add = (icon, label, detail = '') => lines.push({ icon, label, detail, isFinal: true });
+  const comboNames = activeCombos.map(co => co.name).join(', ');
+  const hasCombo = activeCombos.length > 0;
+
+  if (hasCombo) add('✦', `Combo actif : ${comboNames}`);
+
+  if (comboIds.has('allonge_magique')) {
+    const len = _ampLength(counts.Amplification || 0);
+    add('🏹', `Effet produit : Allonge magique`, `augmente la portée de l'arme enchantée de +${len} case${len > 1 ? 's' : ''}`);
+    add('⊘', 'Effets absorbés : Enchantement classique, Amplification classique');
+    add('⚔️', 'Dégâts : aucun');
+    return lines;
+  }
+  if (comboIds.has('regeneration')) {
+    const dice = (counts.Protection || 0) + (counts.Affliction || 0);
+    const formula = (s.regenerationFormula || '').trim() || `${dice}d4`;
+    add('💚', 'Effet produit : Régénération', `${formula}/tour · premier tick immédiat`);
+    add('⊘', 'Effets absorbés : Protection classique, Affliction classique');
+    add('⚔️', 'Dégâts : aucun');
+    return lines;
+  }
+  if (comboIds.has('arme_invoquee')) {
+    add('⚔️', 'Effet produit : Arme invoquée', activeCombos.find(c2 => c2.id === 'arme_invoquee')?.detail || '');
+    add('⊘', 'Effets absorbés : Enchantement classique, Invocation générique');
+    add('⚔️', 'Dégâts : aucun au lancement');
+    return lines;
+  }
+  if (comboIds.has('sentinelle')) {
+    add('🪤', 'Effet produit : Sentinelle', activeCombos.find(c2 => c2.id === 'sentinelle')?.detail || '');
+    add('⊘', 'Effets absorbés : Affliction classique, Invocation générique');
+    add('⚔️', 'Dégâts : aucun au lancement');
+    return lines;
+  }
+  if (comboIds.has('bouclier_reactif')) {
+    add('🛡️', 'Effet produit : Bouclier réactif', activeCombos.find(c2 => c2.id === 'bouclier_reactif')?.detail || '');
+    add('⊘', 'Effets absorbés : Protection CA classique');
+    add('⚔️', 'Dégâts : aucun');
+    return lines;
+  }
+  if (comboIds.has('zone_elargie')) {
+    const size = _ampDispCircleSize(counts.Amplification || 0, counts.Dispersion || 0);
+    add('📐', 'Effet produit : Zone élargie', `zone ${size}×${size} cases plaçable`);
+    add('⊘', 'Effets absorbés : cibles multiples de Dispersion, ligne simple d’Amplification');
+  }
+
+  const runes = s?.runes || [];
+  if (!hasCombo) {
+    if (runes.includes('Enchantement')) {
+      const mode = s.enchantMode || 'dmg';
+      if (mode === 'etat') {
+        const lbl = _conditionLabel(s.enchantEtatId) || 'état non défini';
+        add('✨', `Effet produit : Enchantement - ${lbl}`);
+        const cond = s.enchantEtatId ? _conditionsLibCache.find(x => x.id === s.enchantEtatId) : null;
+        const eff = cond?.effects || {};
+        const scaling = eff.movementBonus != null
+          ? 'Amplification augmente le bonus de déplacement'
+          : eff.dmgDealtBonus
+            ? 'Puissance augmente le bonus de dégâts'
+            : 'Puissance et Amplification selon l’état choisi';
+        add('↗', `Scaling : ${scaling}`);
+      } else if (mode === 'deplacement') {
+        add('👢', 'Effet produit : Enchantement - déplacement', 'bonus de déplacement sur allié');
+        add('↗', 'Scaling : Puissance augmente le bonus');
+      } else if (mode === 'toucher') {
+        add('🎯', 'Effet produit : Enchantement - toucher', 'bonus au toucher sur allié');
+        add('↗', 'Scaling : Puissance augmente le bonus');
+      } else {
+        add('✨', 'Effet produit : Enchantement - arme', `bonus de dégâts ${_calcEnchantDegats(s)} sur l’arme alliée`);
+        add('↗', 'Scaling : Puissance ajoute des dés au bonus');
+      }
+    } else if (runes.includes('Affliction')) {
+      const mode = s.afflictionMode || 'dot';
+      if (mode === 'etat') add('💀', `Effet produit : Affliction - ${_conditionLabel(s.afflictionEtatId) || 'état non défini'}`);
+      else if (mode === 'laceration') add('🩸', 'Effet produit : Affliction - Lacération', 'attaque + réduction de CA');
+      else add('🩸', `Effet produit : Affliction - DoT`, `${_calcAfflictionDot(s)}/tour`);
+      add('↗', 'Scaling : Puissance augmente les dégâts, Affliction augmente le DD');
+    } else if (runes.includes('Protection')) {
+      if ((s.protectionMode || 'ca') === 'soin') add('💚', 'Effet produit : Protection - soin', _calcSortSoin(s, c));
+      else add('🛡️', 'Effet produit : Protection - CA', _getSortCA(s));
+      add('↗', 'Scaling : Protection augmente l’effet');
+    } else if (runes.includes('Amplification')) {
+      if (s.ampMode === 'deplacement') add('🏃', 'Effet produit : Déplacement', 'mouvement, poussée ou attraction');
+      else add('📐', 'Effet produit : Zone', `${_calcSortZone(s)?.w || 0}×${_calcSortZone(s)?.h || 0} cases`);
+      add('↗', 'Scaling : Amplification augmente la distance ou la zone');
+    } else if (_getSortTypes(s).includes('offensif')) {
+      add('⚔️', 'Effet produit : dégâts directs', _calcSortDegats(s, c));
+      add('↗', 'Scaling : Puissance ajoute des dés');
+    }
+  }
+
+  if (!lines.some(l => l.label.startsWith('Dégâts :'))) {
+    add('⚔️', `Dégâts : ${_spellDirectDamageState(s, comboIds)}`);
+  }
+  return lines;
+}
+
 // ── Auto-value : chip lecture seule + bouton "✏️ Custom" / "↺ Auto" ──────────
 // Évite l'effet "input vide qui invite à taper". Le joueur voit la valeur
 // calculée par défaut, et ne saisit que s'il veut explicitement override.
@@ -907,9 +1022,7 @@ export function _buildSortResume(s, c) {
   const nbAmp     = runes.filter(r => r === 'Amplification').length;
   const activeCombos = _activeCombos(s);
   const comboIds = new Set(activeCombos.map(c => c.id));
-  activeCombos.forEach(combo => {
-    lines.push({ icon: combo.icon, label: `Combo ${combo.name}`, detail: combo.detail, isCombo: true });
-  });
+  lines.push(..._finalEffectLines(s, c, activeCombos, comboIds, _runeCounts(s)));
 
   // Cibles & zone — calcul commun pour décorer les lignes mono-cible
   const nbCibles   = _calcSortCibles(s);

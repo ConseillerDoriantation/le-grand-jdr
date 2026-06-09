@@ -3592,9 +3592,21 @@ input[type=number].input-field::-webkit-outer-spin-button {
 }
 .cs-spell-preview-row--combo .cs-spell-preview-label { color: #e8b84b; font-weight: 700; }
 .cs-spell-preview-row--combo .cs-spell-preview-detail { color: var(--text); font-style: normal; font-weight: 500; }
+.cs-spell-preview-row--final {
+  padding: .24rem .42rem;
+  background: rgba(79, 140, 255, .08);
+  border-left: 3px solid rgba(79, 140, 255, .72);
+  border-radius: 0 6px 6px 0;
+}
+.cs-spell-preview-row--final .cs-spell-preview-label { color: var(--text); font-weight: 750; }
+.cs-spell-preview-row--final .cs-spell-preview-detail { color: var(--text); font-style: normal; }
 [data-theme="light"] .cs-spell-preview-row--combo {
   background: linear-gradient(90deg, rgba(217,119,6,0.08), rgba(217,119,6,0.02));
   border-left-color: #d97706;
+}
+[data-theme="light"] .cs-spell-preview-row--final {
+  background: rgba(37, 99, 235, .08);
+  border-left-color: rgba(37, 99, 235, .64);
 }
 [data-theme="light"] .cs-spell-preview-row--combo .cs-spell-preview-label { color: #b45309; }
 [data-theme="light"] .cs-spell-preview { background: rgba(37,99,235,0.05); border-color: rgba(37,99,235,0.25); }
@@ -5850,6 +5862,15 @@ body .modal:has(.sh-admin-modal.is-spell) {
 .cs-sort-detail-icon  { min-width: 1.1rem; text-align: center; }
 .cs-sort-detail-label { font-weight: 600; color: var(--text); }
 .cs-sort-detail-meta  { color: var(--text-dim); font-size: .7rem; }
+.cs-sort-detail-effect-row--final {
+  padding: .22rem .42rem;
+  margin: .12rem 0;
+  background: rgba(79, 140, 255, .07);
+  border-left: 3px solid rgba(79, 140, 255, .62);
+  border-radius: 0 6px 6px 0;
+}
+.cs-sort-detail-effect-row--final .cs-sort-detail-label { font-weight: 750; }
+.cs-sort-detail-effect-row--final .cs-sort-detail-meta { color: var(--text); }
 
 /* ══════════════════════════════════════════════
    SORTS — NOUVEAU DESIGN CARTE
