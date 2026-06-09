@@ -632,7 +632,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
       <div class="cs-sort-detail-effects">
         <div class="cs-sort-detail-effects-title">📋 Effets calculés</div>
         ${_buildSortResume(s, c).map(line => `
-          <div class="cs-sort-detail-effect-row ${line.isFinal ? 'cs-sort-detail-effect-row--final' : ''}">
+          <div class="cs-sort-detail-effect-row">
             <span class="cs-sort-detail-icon">${line.icon}</span>
             <span class="cs-sort-detail-label">${line.label}</span>
             ${line.detail ? `<span class="cs-sort-detail-meta">${line.detail}</span>` : ''}
@@ -2842,7 +2842,7 @@ function _updateSortPreview() {
     lines = [{ icon:'⚠️', label:'Aperçu indisponible', detail: String(e?.message || e) }];
   }
   body.innerHTML = lines.map(l => `
-    <div class="cs-spell-preview-row ${l.isCombo ? 'cs-spell-preview-row--combo' : ''} ${l.isFinal ? 'cs-spell-preview-row--final' : ''}">
+    <div class="cs-spell-preview-row ${l.isCombo ? 'cs-spell-preview-row--combo' : ''}">
       ${l.icon ? `<span class="cs-spell-preview-icon">${l.icon}</span>` : '<span class="cs-spell-preview-icon"></span>'}
       <span class="cs-spell-preview-label">${_esc(l.label)}</span>
       ${l.detail ? `<span class="cs-spell-preview-detail">${_esc(l.detail)}</span>` : ''}
