@@ -1123,7 +1123,8 @@ export async function openSortModal(idx, s) {
   const nbAmp    = runesSrc.filter(r => r === 'Amplification').length;
   const ampMode  = s?.ampMode || 'zone';
   const hasDisp  = runesSrc.includes('Dispersion');
-  const isAllongeCombo = hasEnchant && hasAmp && !hasDisp;
+  const hasInv   = runesSrc.includes('Invocation');
+  const isAllongeCombo = hasEnchant && hasAmp && !hasDisp && !hasInv;
   const hasActionRune = (_runeCountsEdit[ACTION_RUNE] || 0) > 0;
   const actionMode = _actionModeEdit || 'reaction';
   const actionModeBtnsHtml = [
@@ -1764,7 +1765,8 @@ function _isRegenerationComboActive(counts = _runeCountsEdit) {
 function _isAllongeComboActive(counts = _runeCountsEdit) {
   return (counts?.Enchantement || 0) > 0
     && (counts?.Amplification || 0) > 0
-    && (counts?.Dispersion || 0) === 0;
+    && (counts?.Dispersion || 0) === 0
+    && (counts?.Invocation || 0) === 0;
 }
 
 function _calcRegenerationAuto(s) {
@@ -2918,6 +2920,41 @@ function _sortContentSig(s) {
   return JSON.stringify(o);
 }
 
+function _sanitizeAbsorbedComboFields(s) {
+  if (!s) return s;
+  const comboIds = new Set(_activeCombos(s).map(c => c.id));
+  const clearEnchant = comboIds.has('allonge_magique') || comboIds.has('arme_invoquee');
+  const clearAffliction = comboIds.has('regeneration') || comboIds.has('sentinelle');
+  const clearAmpMode = comboIds.has('allonge_magique') || comboIds.has('zone_elargie');
+
+  if (clearEnchant) {
+    s.enchantMode = 'dmg';
+    s.enchantDegats = '';
+    s.enchantBonus = null;
+    s.enchantEtatId = null;
+    s.enchantStateMoveBonus = null;
+    s.enchantStateDmgFormula = '';
+    s.enchantEffect = '';
+    s.enchantSlot = 'arme';
+  }
+  if (clearAffliction) {
+    s.afflictionMode = 'dot';
+    s.afflictionSlot = 'torse';
+    s.afflictionSaveStat = '';
+    s.afflictionEffect = '';
+    s.afflictionDotFormula = '';
+    s.afflictionEtatId = null;
+  }
+  if (clearAmpMode) {
+    s.ampMode = 'zone';
+    s.deplacement = null;
+  }
+  if (comboIds.has('regeneration') || comboIds.has('drain') || comboIds.has('bouclier_reactif')) {
+    s.typeSoin = false;
+  }
+  return s;
+}
+
 export async function saveSort(idx) {
   // Si on édite une action d'item (depuis le shop), on aiguille vers le bon save
   if (_itemEditCtx) return _saveItemSpell();
@@ -2954,7 +2991,7 @@ export async function saveSort(idx) {
     const pmOverride = (pmOvrInt != null && Number.isFinite(pmOvrInt) && pmOvrInt >= 0)
       ? pmOvrInt
       : (STATE.isAdmin ? null : (idx >= 0 ? sorts[idx]?.pmOverride ?? null : null));
-    const newSort = {
+    const newSort = _sanitizeAbsorbedComboFields({
       icon:     (document.getElementById('s-icon')?.value || '').trim() || '',
       mjValidation, mjValidated,
       mjAlwaysMax: STATE.isAdmin
@@ -3018,7 +3055,7 @@ export async function saveSort(idx) {
       degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
       invocation:   _buildInvocationFromDOM(),
       mjNotes:      document.getElementById('s-mj-notes')?.value?.trim() || '',
-    };
+    });
     // Validation : un sort VALIDÉ modifié par un JOUEUR repasse « À valider » et
     // sort du Deck (un sort non validé ne peut pas rester actif). Le MJ pilote la
     // validation explicitement (sélecteur) → on ne touche pas à son choix.
@@ -3079,7 +3116,7 @@ function _buildSortFromForm(idx, prevList = []) {
   const pmOverride = (pmOvrInt != null && Number.isFinite(pmOvrInt) && pmOvrInt >= 0)
     ? pmOvrInt
     : (STATE.isAdmin ? null : (idx >= 0 ? prevList[idx]?.pmOverride ?? null : null));
-  return {
+  return _sanitizeAbsorbedComboFields({
     icon:     (document.getElementById('s-icon')?.value || '').trim() || '',
     mjValidation, mjValidated,
     nom:      document.getElementById('s-nom')?.value||'Sort',
@@ -3127,7 +3164,7 @@ function _buildSortFromForm(idx, prevList = []) {
     toucherStat: _readVisibleStatOverride('s-toucher-stat'),
     degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
     mjNotes:      document.getElementById('s-mj-notes')?.value?.trim() || '',
-  };
+  });
 }
 
 /** Hook de sauvegarde aiguillée : utilisé quand on édite une action d'item.
