@@ -5354,8 +5354,6 @@ async function _zoneValidate() {
     .filter(e => {
       if (!e.data || e.data.pageId !== _activePage?.id) return false;
       if (!e.data.visible && !STATE.isAdmin) return false;
-      // Exclure le lanceur seulement pour les sorts offensifs (soin/buff zone peut se cibler)
-      if (e.data.id === srcId && !opt.isHeal && !opt.isCaSort && !opt.isUtil) return false;
       const tc = _tokenCenter(e.data);
       return tc.x >= x1 && tc.x <= x2 && tc.y >= y1 && tc.y <= y2;
     })
@@ -5696,9 +5694,13 @@ async function _vttRollAttack() {
         }
       }
 
-      const targetsLabel = buffResults.length > 1
-        ? buffResults.join(', ')
-        : (lT.displayName ?? tgt.name);
+      const targetsLabel = targetIds
+        .map(id => {
+          const td = _tokens[id]?.data;
+          return td ? (_live(td).displayName ?? td.name) : null;
+        })
+        .filter(Boolean)
+        .join(', ') || (buffResults.length ? buffResults.join(', ') : (lT.displayName ?? tgt.name));
 
       // ── Construit un castEffect détaillé selon le type de sort ──
       let castEffect = opt.dice || '';
