@@ -1892,13 +1892,13 @@ function _showActBar(srcId) {
   const t = _tokens[srcId]?.data; if (!t || !_canControlToken(t)) return;
   const wrap = _stage?.container(); if (!wrap) return;
   const opts = _buildAttackOptions(t);
-  const weaponN = opts.filter(o => !o._itemAction && o.sortIdx === undefined && !o.targetSelf).length;
-  const itemN   = opts.filter(o => o._itemAction).length;
-  const spellN  = opts.filter(o => !o._itemAction && o.sortIdx !== undefined).length;
+  const weaponN  = opts.filter(o => !o._itemAction && o.sortIdx === undefined && !o.targetSelf).length;
+  const itemN    = opts.filter(o => o._itemAction).length;
+  const spellN   = opts.filter(o => !o._itemAction && o.sortIdx !== undefined).length;
+  const arsenalN = weaponN + itemN;   // armes + objets regroupés
   const chips = [];
-  if (weaponN) chips.push(['weapons', '⚔️', 'Armes',  weaponN, '#cbd5e1']);
-  if (spellN)  chips.push(['spells',  '✨', 'Sorts',  spellN,  '#a78bfa']);
-  if (itemN)   chips.push(['items',   '🎒', 'Objets', itemN,   '#fbbf24']);
+  if (arsenalN) chips.push(['arsenal', '🛡', 'Arsenal', arsenalN, '#cbd5e1']);
+  if (spellN)   chips.push(['spells',  '✨', 'Sorts',   spellN,   '#a78bfa']);
   chips.push(['basic', '🎭', 'Actions', 0, '#fcd34d']);   // toujours dispo (Esquiver…)
 
   const bar = document.createElement('div');
@@ -4616,8 +4616,8 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   //   par opposition aux sorts (catégories dédiées) et au déplacement.
   //   En mode action d'abord, `only` scinde Armes / Objets (chips séparés de la barre).
   const arsenalOpts = [
-    ...(!only || only === 'weapons' ? weaponOpts : []),
-    ...(!only || only === 'items'   ? itemActOpts : []),
+    ...(!only || only === 'arsenal' || only === 'weapons' ? weaponOpts : []),
+    ...(!only || only === 'arsenal' || only === 'items'   ? itemActOpts : []),
   ];
   if (arsenalOpts.length) {
     const title = only === 'weapons' ? 'Armes' : only === 'items' ? 'Objets' : 'Arsenal';
