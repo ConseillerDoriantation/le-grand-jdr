@@ -13,7 +13,7 @@ import { getArmorSetData, getMainWeapon } from './data.js';
 import { makeSortable } from '../../shared/sortable-helper.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
-import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampDispCircleSize, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts, noyauTypesFor } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampDispCircleSize, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts, _sortDealsDamage, _sortDoesHeal, _sortGrantsCa, noyauTypesFor } from './spells-calc.js';
 
 // ── Drag and Drop sorts ──────────────────────
 let _dragSortIdx = null;
@@ -419,6 +419,8 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const nbAmp    = runesAll.filter(r => r === 'Amplification').length;
   const activeIds = new Set(_activeCombos(s).map(co => co.id));
   const isAllongeCombo = activeIds.has('allonge_magique');
+  const dealsDamage = _sortDealsDamage(s);
+  const doesHeal = _sortDoesHeal(s);
 
   const ACTION_CFG = {
     action:       { label:'⚡ Act.',   color:'#e8b84b' },
@@ -459,7 +461,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const chips = [];
 
   // ── 1. Dégâts d'impact (offensif, OU Lacération qui frappe toujours) ──
-  if ((types.includes('offensif') || isLaceration) && !suppressImpactDmg) {
+  if ((dealsDamage || isLaceration) && !suppressImpactDmg) {
     const degBase = _calcSortDegats(s, c);
     let val = degBase;
     if (statMod !== 0) val += ` · ${statLbl}${statModS}`;
@@ -533,7 +535,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
         chips.push({ icon:'🛡️', val:_getSortCA(s), color:'#22c38e' });
       }
     }
-  } else if (types.includes('defensif') && nbAmp > 0 && s.ampMode !== 'deplacement') {
+  } else if (doesHeal && nbAmp > 0 && s.ampMode !== 'deplacement' && nbProt === 0) {
     const soinBase = _calcSortSoin(s, c);
     chips.push({ icon:'💚', val: soinBase, color:'#22c38e' });
   }
@@ -1121,6 +1123,22 @@ export async function openSortModal(idx, s) {
       color:${isSel?t.color:'var(--text-dim)'};
       font-weight:${isSel?'700':'400'};transition:all .15s">${t.label}</button>`;
   }).join('');
+  const effectFlags = {
+    damage: _sortDealsDamage(s || {}),
+    heal: _sortDoesHeal(s || {}),
+    ca: _sortGrantsCa(s || {}),
+  };
+  const effectToggleHtml = [
+    { id:'damage', label:'Dégâts directs', icon:'⚔️', color:'#ff6b6b' },
+    { id:'heal', label:'Soin direct', icon:'💚', color:'#22c38e' },
+    { id:'ca', label:'Bonus CA', icon:'🛡️', color:'#4f8cff' },
+  ].map(opt => {
+    const checked = !!effectFlags[opt.id];
+    return `<label class="cs-effect-toggle" style="--c:${opt.color}">
+      <input type="checkbox" id="s-effect-${opt.id}" data-change="_refreshConditionalSections" ${checked?'checked':''}>
+      <span>${opt.icon} ${opt.label}</span>
+    </label>`;
+  }).join('');
 
   // Amplification : mode Zone | Déplacement (calqué sur Protection soin/CA)
   const hasAmp   = runesSrc.includes('Amplification');
@@ -1204,6 +1222,10 @@ export async function openSortModal(idx, s) {
         <span class="cs-spell-inline-label" title="Optionnel · plusieurs possibles · cliquer pour activer/désactiver">Type</span>
         <div class="cs-spell-type-buttons">${typeBtnsHtml}</div>
       </div>
+      <div class="cs-spell-inline-row cs-spell-type-row">
+        <span class="cs-spell-inline-label" title="Ces choix pilotent les effets mecaniques. Les types ne servent qu'au classement.">Effets</span>
+        <div class="cs-spell-effect-buttons">${effectToggleHtml}</div>
+      </div>
       <div class="form-group cs-spell-desc">
         <label>Description / effet libre <span>narration, conditions spéciales, fluff</span></label>
         <textarea class="input-field" id="s-effet" rows="2" placeholder="Décris brièvement le sort, son apparence, ses conditions particulières…">${s?.effet||''}</textarea>
@@ -1246,7 +1268,7 @@ export async function openSortModal(idx, s) {
 
     <!-- Dégâts — visible si type offensif (auto-val avec toggle Custom) ;
          masqué quand Affliction est présente (la Puissance scale le DoT à la place) -->
-    <div id="s-degats-section" style="${(typesInit.includes('offensif') && !runesSrc.includes('Affliction') && ampMode !== 'deplacement')?'':'display:none'}">
+    <div id="s-degats-section" style="${(effectFlags.damage && !isAllongeCombo && !runesSrc.includes('Affliction') && ampMode !== 'deplacement')?'':'display:none'}">
       ${_autoValHtml({
         fieldId: 's-degats',
         label: '⚔️ Dégâts',
@@ -1317,7 +1339,7 @@ export async function openSortModal(idx, s) {
 
     <!-- Soin — visible si Protection en mode soin, ou Soutien + Amplification.
          Si le sort est aussi Offensif, on n'expose PAS le sélecteur de stat ici (déjà dans Dégâts). -->
-    <div id="s-soin-section" style="${((hasProt && (s?.protectionMode||'ca')==='soin') || (typesInit.includes('defensif') && hasAmp && ampMode !== 'deplacement'))?'':'display:none'}">
+    <div id="s-soin-section" style="${((hasProt && (s?.protectionMode||'ca')==='soin') || (effectFlags.heal && hasAmp && ampMode !== 'deplacement'))?'':'display:none'}">
       ${_autoValHtml({
         fieldId: 's-soin',
         label: '💚 Soin',
@@ -1325,7 +1347,7 @@ export async function openSortModal(idx, s) {
         autoSource: _autoSourceSoin(s || {}, _modalChar()),
         currentValue: s?.soin,
         placeholder: 'ex : 3d6 +2, moitié des dégâts… (vide = formule auto)',
-        extraEdit: typesInit.includes('offensif') ? null : {
+        extraEdit: effectFlags.damage ? null : {
           hasOverride: !!s?.degatsStat,
           html: `
             <div class="cs-spell-stats-grid one">
@@ -1805,8 +1827,9 @@ function _applyTypeChange() {
  *  en mode CA pour éviter la confusion avec le Bouclier réactif).
  */
 function _refreshConditionalSections() {
-  const isOffensive = _sortTypesEdit.has('offensif');
-  const isSupport   = _sortTypesEdit.has('defensif');
+  const doesDamage  = _effectChecked('damage');
+  const doesHeal    = _effectChecked('heal');
+  const grantsCa    = _effectChecked('ca');
   const counts      = _runeCountsEdit || {};
   const hasProt     = (counts.Protection || 0) > 0;
   const hasAmp      = (counts.Amplification || 0) > 0;
@@ -1830,11 +1853,11 @@ function _refreshConditionalSections() {
   const isLaceration = (counts.Lacération || 0) > 0 || (hasAffliction && _afflMode === 'laceration');
   const isRegen = _isRegenerationComboActive(counts);
   const hasAfflictionDebuff = hasAffliction && _afflMode !== 'laceration';
-  if (dSec) dSec.style.display = ((isOffensive || isLaceration) && !hasAfflictionDebuff && !isDepl && !anyInvoc) ? '' : 'none';
+  if (dSec) dSec.style.display = ((doesDamage || isLaceration) && !isAllonge && !hasAfflictionDebuff && !isDepl && !anyInvoc) ? '' : 'none';
   // Combo Drain : sort offensif + Protection → la Protection devient un vol de vie %.
   // On masque alors le choix CA/Soin et leurs montants, et on affiche l'indicateur.
-  const isDrain   = isOffensive && hasProt;
-  const isAmpSupportHeal = isSupport && hasAmp && !isDepl && !hasProt;
+  const isDrain   = doesDamage && hasProt;
+  const isAmpSupportHeal = doesHeal && hasAmp && !isDepl && !hasProt;
   const protSec = document.getElementById('s-prot-section');
   const affSec = document.getElementById('s-affliction-section');
   const regenSec = document.getElementById('s-regeneration-section');
@@ -1858,7 +1881,7 @@ function _refreshConditionalSections() {
   if (allongePluralEl) allongePluralEl.textContent = allongeRange > 1 ? 's' : '';
   if (affModes)  affModes.style.display  = isRegen ? 'none' : '';
   if (protGroup) protGroup.style.display = (isDrain || isRegen) ? 'none' : '';
-  if (caSec)     caSec.style.display     = (!isDrain && !isRegen && protMode === 'ca') ? '' : 'none';
+  if (caSec)     caSec.style.display     = (!isDrain && !isRegen && grantsCa && protMode === 'ca') ? '' : 'none';
   if (sSec)      sSec.style.display      = (!isDrain && !isRegen && ((hasProt && protMode === 'soin') || isAmpSupportHeal)) ? '' : 'none';
   if (drainEl) {
     drainEl.style.display = isDrain ? '' : 'none';
@@ -1882,6 +1905,10 @@ function _toggleSortType(type) {
 
 // ── Invocation : section éditeur (les ACTIONS se gèrent depuis la carte du sort,
 //    via la vraie modale de sort — cf. _openInvocationConfig) ──────────────────
+function _effectChecked(id) {
+  return !!document.getElementById(`s-effect-${id}`)?.checked;
+}
+
 function _renderInvActionsList() {
   const n = (_invActionsEdit || []).length;
   return `<div class="cs-inv-actions-note">
@@ -2366,6 +2393,10 @@ function _selectProtMode(mode) {
   const hidden  = document.getElementById('s-prot-mode');
   const caSec   = document.getElementById('s-ca-section');
   if (hidden)  hidden.value = mode;
+  const healFlag = document.getElementById('s-effect-heal');
+  const caFlag = document.getElementById('s-effect-ca');
+  if (healFlag) healFlag.checked = mode === 'soin';
+  if (caFlag) caFlag.checked = mode === 'ca';
   if (caSec)   caSec.style.display   = mode === 'ca'   ? '' : 'none';
   // La section Soin a maintenant sa propre logique (type Soutien OU Protection mode soin)
   _refreshConditionalSections();
@@ -2415,6 +2446,8 @@ export function runeIncrement(nom) {
   if (prevCnt === 0 && _sortTypesEdit) {
     if (nom === 'Protection' && !_sortTypesEdit.has('defensif')) {
       _sortTypesEdit.add('defensif');
+      const caFlag = document.getElementById('s-effect-ca');
+      if (caFlag) caFlag.checked = true;
       _applyTypeChange();
     }
   }
@@ -2763,6 +2796,9 @@ function _buildSortFromDOM() {
     icon:        iconRaw.trim() || '',
     mjValidation: mjVal, mjValidated: mjVal === 'ok',
     noyau, noyauTypeId, noyauTypeIds: [..._noyauIdsEdit], runes, types,
+    doesDamage: !!document.getElementById('s-effect-damage')?.checked,
+    doesHeal: !!document.getElementById('s-effect-heal')?.checked,
+    grantsCa: !!document.getElementById('s-effect-ca')?.checked,
     actionMode: (_runeCountsEdit?.[ACTION_RUNE] || 0) > 0
       ? (document.getElementById('s-action-mode')?.value || _actionModeEdit || 'reaction')
       : null,
@@ -2932,6 +2968,7 @@ function _sanitizeAbsorbedComboFields(s) {
   const clearAmpMode = comboIds.has('allonge_magique') || comboIds.has('zone_elargie');
 
   if (clearEnchant) {
+    s.doesDamage = false;
     s.enchantMode = 'dmg';
     s.enchantDegats = '';
     s.enchantBonus = null;
@@ -2955,6 +2992,20 @@ function _sanitizeAbsorbedComboFields(s) {
   }
   if (comboIds.has('regeneration') || comboIds.has('drain') || comboIds.has('bouclier_reactif')) {
     s.typeSoin = false;
+  }
+  if (comboIds.has('regeneration')) {
+    s.doesDamage = false;
+    s.doesHeal = true;
+    s.grantsCa = false;
+  }
+  if (comboIds.has('drain')) {
+    s.doesHeal = false;
+    s.grantsCa = false;
+  }
+  if (comboIds.has('bouclier_reactif')) {
+    s.doesDamage = false;
+    s.doesHeal = false;
+    s.grantsCa = false;
   }
   return s;
 }
@@ -3012,13 +3063,16 @@ export async function saveSort(idx) {
         ? (document.getElementById('s-action-mode')?.value || _actionModeEdit || 'reaction')
         : null,
       types,
+      doesDamage: !!document.getElementById('s-effect-damage')?.checked,
+      doesHeal: !!document.getElementById('s-effect-heal')?.checked,
+      grantsCa: !!document.getElementById('s-effect-ca')?.checked,
       degats:   document.getElementById('s-degats')?.value||'',
       soin:     document.getElementById('s-soin')?.value||'',
       ca:       document.getElementById('s-ca')?.value||'',
       effet:    document.getElementById('s-effet')?.value||'',
       protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
       // Legacy compat : typeSoin si defensif sans offensif + mode soin
-      typeSoin: types.includes('defensif') && !types.includes('offensif') && (document.getElementById('s-prot-mode')?.value === 'soin'),
+      typeSoin: !!document.getElementById('s-effect-heal')?.checked && !document.getElementById('s-effect-damage')?.checked && (document.getElementById('s-prot-mode')?.value === 'soin'),
       catId:         document.getElementById('s-catid')?.value || '',
       actif:         idx>=0 ? sorts[idx].actif : false,
       enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
@@ -3134,12 +3188,15 @@ function _buildSortFromForm(idx, prevList = []) {
       ? (document.getElementById('s-action-mode')?.value || _actionModeEdit || 'reaction')
       : null,
     types,
+    doesDamage: !!document.getElementById('s-effect-damage')?.checked,
+    doesHeal: !!document.getElementById('s-effect-heal')?.checked,
+    grantsCa: !!document.getElementById('s-effect-ca')?.checked,
     degats:   document.getElementById('s-degats')?.value||'',
     soin:     document.getElementById('s-soin')?.value||'',
     ca:       document.getElementById('s-ca')?.value||'',
     effet:    document.getElementById('s-effet')?.value||'',
     protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
-    typeSoin: types.includes('defensif') && !types.includes('offensif') && (document.getElementById('s-prot-mode')?.value === 'soin'),
+    typeSoin: !!document.getElementById('s-effect-heal')?.checked && !document.getElementById('s-effect-damage')?.checked && (document.getElementById('s-prot-mode')?.value === 'soin'),
     enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
     enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
     enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
@@ -3236,6 +3293,7 @@ registerActions({
   _delSortCat:            (btn) => _delSortCat(Number(btn.dataset.idx)),
   _addSortCat:            (btn) => _addSortCat(btn.dataset.col),
   _toggleSortType:        (btn) => _toggleSortType(btn.dataset.type),
+  _refreshConditionalSections: () => { _refreshConditionalSections(); _updateSortPreview(); },
   _selectDeplMode:        (btn) => _selectDeplMode(btn.dataset.val),
   _selectActionMode:      (btn) => _selectActionMode(btn.dataset.val),
   _selectProtMode:        (btn) => _selectProtMode(btn.dataset.val),
