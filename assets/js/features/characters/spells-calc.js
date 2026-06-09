@@ -1015,7 +1015,7 @@ export function _buildSortResume(s, c) {
   // Combos absorbants (Arme invoquée) → ligne classique cachée.
   const nbEnch = runes.filter(r => r === 'Enchantement').length;
   const nbAff  = runes.filter(r => r === 'Affliction').length;
-  const hideEnch = comboIds.has('arme_invoquee');
+  const hideEnch = comboIds.has('arme_invoquee') || comboIds.has('allonge_magique');
   const hideAff  = comboIds.has('sentinelle') || comboIds.has('regeneration');
   if (nbEnch > 0 && !hideEnch) {
     const mode    = s.enchantMode || 'dmg';
