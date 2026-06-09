@@ -2498,8 +2498,8 @@ function _vttSpellMods(s) {
     // Base 11, +2 par rune supplémentaire.
     // Slot détermine la nature : torse=DoT · pieds=mouvement · tete=sensoriel · arme=combat
     // ⚠️ Absorbé par le combo Sentinelle (Aff + Inv) → l'affliction est portée par la sentinelle
-    // ⚠️ Absorbé par le combo Aura punitive (Prot + Aff sans Puiss) → l'affliction est gérée par l'aura
-    affliction: (nbAff > 0 && nbInv === 0 && !(nbProt > 0 && nbP === 0) && !isLacMode)
+    // ⚠️ Absorbé par le combo Régénération (Prot + Aff) → l'affliction devient un HoT allié
+    affliction: (nbAff > 0 && nbInv === 0 && !(nbProt > 0) && !isLacMode)
       ? (() => {
           // Mode DoT : formule scalable par défaut, override possible via afflictionDotFormula
           // Base 1d4+2, +1 dé par Puissance
@@ -2536,14 +2536,13 @@ function _vttSpellMods(s) {
             saveStat,
           };
         })() : null,
-    // Aura punitive : Protection + Affliction sans Puissance (sinon Drain prime)
-    // Au cast, applique l'affliction Torse de l'élément à tous les ennemis dans la zone Manhattan
-    auraPunitive: (nbProt > 0 && nbAff > 0 && nbP === 0 && !isLacMode)
+    // Régénération : Protection + Affliction → soin sur la durée, pas de soin flat
+    // ni d'affliction ennemie. Chaque rune Protection/Affliction ajoute un d4 au tick.
+    regeneration: (nbProt > 0 && nbAff > 0 && !isLacMode)
       ? {
-          radius: nbProt,                    // portée Manhattan = nb runes Protection
-          element: s.noyauTypeId || null,
-          dd: 11,
-          saveStat: 'constitution',           // torse → Constitution
+          formula: `${nbProt + nbAff}d4`,
+          nbProt,
+          nbAff,
         } : null,
     // Sort suspendu : Réaction + Durée. Stocke le sort pour déclenchement hors-tour
     sortSuspendu: (nbReac > 0 && nbDur > 0)
@@ -3304,6 +3303,26 @@ async function _vttApplyAfflictions(srcId, targetIds, opt) {
   }
 }
 
+async function _vttApplyRegeneration(srcId, targetIds, opt) {
+  const regen = opt.mods?.regeneration;
+  if (!regen) return;
+  const shared = _buffShared(opt, srcId);
+  const newBuff = {
+    ...shared,
+    type: 'regen',
+    icon: '💚',
+    formula: regen.formula || '2d4',
+    effect: 'Régénération',
+  };
+  for (const tid of targetIds) {
+    const td = _tokens[tid]?.data; if (!td) continue;
+    const existing = (td.buffs || []).filter(b => !(b.type === 'regen' && b.sortLabel === opt.label));
+    await updateDoc(_tokRef(tid), { buffs: [...existing, newBuff] }).catch(() => {});
+    const name = _live(td).displayName ?? td.name;
+    showNotif(`💚 ${name} : Régénération ${newBuff.formula}/tour`, 'success');
+  }
+}
+
 /** Construit une option d'attaque à partir d'un sort `s` (schéma deck_sorts).
  *
  *  Pipeline unifié utilisé par TROIS branches :
@@ -3420,6 +3439,15 @@ function _buildSpellOption(s, ctx) {
       enchantElementIcon: enchTypeObj?.icon || '',
       enchantElementColor: enchTypeObj?.color || '',
       isUtil: true, halfOnMiss: false,
+    };
+  }
+  if (mods?.regeneration) {
+    return { ...common,
+      icon: '💚', label,
+      dice: `${mods.regeneration.formula}/tour`,
+      isRegen: true,
+      isUtil: true,
+      halfOnMiss: false,
     };
   }
   if (isAfflictionOnly) {
@@ -4149,7 +4177,7 @@ async function _execAttack(srcId, tgtId) {
     // Portée — si "soi-même", on n'affiche pas la portée (sans objet)
     if (!targetSelf) pills.push(_pill('range', `🎯 ${o.portee}c`));
     // Cible / zone / soi / allié / ennemi (selon le type de sort)
-    const isFriendly = isEnchant || isHeal;          // alliés
+    const isFriendly = isEnchant || isHeal || o.isRegen; // alliés
     const isHostile  = !!o.isAffliction;             // ennemis explicites
     if (targetSelf) {
       pills.push(_pill('targets self', `🧍 Sur soi`));
@@ -4183,6 +4211,8 @@ async function _execAttack(srcId, tgtId) {
       } else {
         pills.push(`<span class="vtt-aopt-pill enchant" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${elemIcon} +${_esc(o.enchantFormula || '1d4+2')} / arme alliée</span>`);
       }
+    } else if (o.isRegen) {
+      pills.push(`<span class="vtt-aopt-pill heal" style="color:#22c38e;border-color:#22c38e66;background:#22c38e1a">💚 ${_esc(o.dice || '2d4/tour')}</span>`);
     } else if (o.isAffliction) {
       // Sort d'affliction : pas de dégâts d'impact, JS de la cible → DoT ou État
       const elemIcon = o.afflictionElementIcon || '💀';
@@ -5491,33 +5521,9 @@ async function _vttRollAttack() {
       await updateDoc(_tokRef(srcId), { buffs: [...existing, luckBuff] }).catch(() => {});
     }
 
-    // ── Combo Aura punitive : applique l'affliction Torse aux ennemis dans la zone ──
-    if (opt.mods?.auraPunitive) {
-      const aura = opt.mods.auraPunitive;
-      const radius = Math.max(1, aura.radius || 1);
-      // Cibles dans la zone Manhattan radius autour du porteur (hors lanceur lui-même)
-      const inZone = Object.values(_tokens).filter(e => {
-        const d = e?.data; if (!d || d.id === srcId) return false;
-        if (d.pageId !== _activePage?.id) return false;
-        const dist = _tokenAttackDistance(src, d);
-        return dist <= radius;
-      });
-      // Forge un opt "affliction torse" virtuel pour réutiliser _vttApplyAfflictions
-      const auraOpt = {
-        ...opt,
-        mods: {
-          ...opt.mods,
-          affliction: {
-            slot: 'torse',
-            effect: opt.mods.affliction?.effect || '',
-            element: aura.element,
-            dd: aura.dd,
-            saveStat: aura.saveStat,
-          },
-        },
-      };
-      await _vttApplyAfflictions(srcId, inZone.map(e => e.data.id), auraOpt);
-      showNotif(`🌀 Aura punitive · ${inZone.length} ennemi${inZone.length > 1 ? 's' : ''} dans la zone`, 'success');
+    // ── Combo Régénération : Protection + Affliction → soin sur la durée allié ──
+    if (opt.mods?.regeneration) {
+      await _vttApplyRegeneration(srcId, allTargets && allTargets.length ? allTargets : [tgtId], opt);
     }
 
     // ── Combo Arme invoquée : remplace temporairement l'arme principale ───
@@ -5644,6 +5650,8 @@ async function _vttRollAttack() {
         } else {
           castEffect = `🩸 DoT ${opt.afflictionDotFormula}/tour · JS ${statLbl} DD ${opt.afflictionDD}`;
         }
+      } else if (opt.isRegen) {
+        castEffect = `💚 Régénération ${opt.mods?.regeneration?.formula || opt.dice || '2d4/tour'}`;
       } else if (opt.isEnchant) {
         if (opt.enchantMode === 'etat' && opt.enchantEtatId) {
           const lib = CONDITION_BY_ID[opt.enchantEtatId];
@@ -6673,7 +6681,8 @@ function _renderInspector(t) {
     bf?.expiresAtRound == null || _r === 0 || _r <= bf.expiresAtRound);
   const _buffsHtml = _activeBuffs.length ? (() => {
     const _BUFF_LABEL = {
-      ca: 'Bonus CA', dot: 'Dégâts/tour', dmg_bonus: 'Dégâts bonus',
+      ca: 'Bonus CA', dot: 'Dégâts/tour', regen: 'Régénération',
+      dmg_bonus: 'Dégâts bonus',
       move_bonus: 'Mouvement +', move_debuff: 'Mouvement −',
       range_bonus: 'Portée +', shield_reactive: 'Bouclier réactif',
       enchantment: 'Enchantement', affliction: 'Affliction',
@@ -6692,7 +6701,7 @@ function _renderInspector(t) {
                    : bf.type === 'move_bonus' || bf.type === 'move_debuff' ? `${bf.bonus > 0 ? '+' : ''}${bf.bonus} c`
                    : bf.type === 'range_bonus' ? `+${bf.bonus} c`
                    : bf.type === 'ca' ? `${bf.bonus >= 0 ? '+' : ''}${bf.bonus} CA`
-                   : bf.type === 'dot' ? `${bf.formula} / tour`
+                   : bf.type === 'dot' || bf.type === 'regen' ? `${bf.formula} / tour`
                    : bf.type === 'shield_reactive' ? `${bf.charges || 1} charge · ${bf.tier}`
                    : bf.effect ? bf.effect.slice(0, 24) : '';
       const rmBtn = STATE.isAdmin
@@ -9181,7 +9190,8 @@ function _renderChatLog(msgs) {
 
   /** Tick DoT */
   const renderDotTick = (m, i, ts) => {
-    const lbl = m.immediate ? 'Proc immédiat' : 'Tick de round';
+    const isHealTick = !!m.isHeal;
+    const lbl = m.immediate ? 'Proc immédiat' : (isHealTick ? 'Régénération' : 'Tick de round');
     const rollsDetail = (m.rolls || []).map(r => {
       const dicePart = r.rolledDice?.length
         ? `${r.rolledDice.length}d${r.sides}(${r.rolledDice.map(x=>`<strong>${x}</strong>`).join(',')})`
@@ -9194,9 +9204,9 @@ function _renderChatLog(msgs) {
       label: lbl, badges: '', ts,
     });
     const body = `<div class="vtt-log-body">
-      <span class="vtt-log-icon">🩸</span>
-      <strong class="vtt-log-result" style="font-size:1.15rem">−${m.total}</strong>
-      <span class="vtt-log-result-sub">PV (DoT)</span>
+      <span class="vtt-log-icon">${isHealTick ? '💚' : '🩸'}</span>
+      <strong class="vtt-log-result" style="font-size:1.15rem">${isHealTick ? '+' : '−'}${m.total}</strong>
+      <span class="vtt-log-result-sub">PV (${isHealTick ? 'Régénération' : 'DoT'})</span>
       ${m.newHp != null && m.hpMax ? `<span class="vtt-log-vs">→ ${m.newHp}/${m.hpMax}</span>` : ''}
     </div>`;
     const detailHtml = rollsDetail
@@ -11037,44 +11047,69 @@ async function _vttNextRound() {
   const round=(_session.combat.round??1)+1;
   await setDoc(_sesRef(),{combat:{active:true,round}},{merge:true});
 
-  // ── Application des DoT en début de round (avant le cleanup des buffs) ──
-  // Chaque buff de type 'dot' inflige sa formule à son porteur ; log dans le chat
+  // ── Application des effets périodiques en début de round (avant cleanup) ──
+  // DoT : dégâts/tour · Regen : soin/tour
   const dotNotifs = [];
   for (const id of Object.keys(_tokens)) {
     const td = _tokens[id]?.data;
-    const dots = (td?.buffs || []).filter(b => b.type === 'dot'
+    const dots = (td?.buffs || []).filter(b => (b.type === 'dot' || b.type === 'regen')
       && (b.expiresAtRound == null || round <= b.expiresAtRound));
     if (!dots.length) continue;
-    let total = 0;
-    const rolls = [];
+    let totalDmg = 0;
+    let totalHeal = 0;
+    const dmgRolls = [];
+    const healRolls = [];
     for (const dot of dots) {
       const det = _rollDiceDetailed(dot.formula || '1d4 +2');
-      total += det.total;
-      rolls.push({
+      const entry = {
         formula: dot.formula || '1d4 +2',
         rolled: det.total, rolledDice: det.rolls, mod: det.mod, sides: det.sides,
-        sortLabel: dot.sortLabel || 'DoT',
-      });
+        sortLabel: dot.sortLabel || (dot.type === 'regen' ? 'Régénération' : 'DoT'),
+      };
+      if (dot.type === 'regen') {
+        totalHeal += det.total;
+        healRolls.push(entry);
+      } else {
+        totalDmg += det.total;
+        dmgRolls.push(entry);
+      }
     }
-    if (total <= 0) continue;
     const lT = _live(td);
     const tgtName = lT.displayName ?? td.name;
     const curHp = lT.displayHp ?? td.hp ?? 20;
-    const newHp = Math.max(0, curHp - total);
-    await _setHp(td, newHp).catch(() => {});
-    dotNotifs.push(`🩸 ${total} dégâts DoT → ${tgtName}`);
-    // Log dans le chat avec le détail
-    await addDoc(_logCol(), {
-      type: 'dot-tick',
-      authorId: STATE.user?.uid || null,
-      authorName: STATE.profile?.pseudo || STATE.profile?.prenom || 'MJ',
-      tokenName: tgtName,
-      rolls, total, newHp, hpMax: lT.displayHpMax ?? 20,
-      createdAt: serverTimestamp(),
-    }).catch(() => {});
-    // JS de concentration auto si la cible porte un sort canalisé
-    const concNotes = await _vttTriggerConcentrationSave(td, total);
-    dotNotifs.push(...concNotes);
+    const hpMax = lT.displayHpMax ?? 20;
+    if (totalDmg > 0) {
+      const newHp = Math.max(0, curHp - totalDmg);
+      await _setHp(td, newHp).catch(() => {});
+      dotNotifs.push(`🩸 ${totalDmg} dégâts DoT → ${tgtName}`);
+      await addDoc(_logCol(), {
+        type: 'dot-tick',
+        authorId: STATE.user?.uid || null,
+        authorName: STATE.profile?.pseudo || STATE.profile?.prenom || 'MJ',
+        tokenName: tgtName,
+        rolls: dmgRolls, total: totalDmg, newHp, hpMax,
+        createdAt: serverTimestamp(),
+      }).catch(() => {});
+      const concNotes = await _vttTriggerConcentrationSave(td, totalDmg);
+      dotNotifs.push(...concNotes);
+    }
+    if (totalHeal > 0) {
+      const afterDmg = Math.max(0, curHp - totalDmg);
+      const newHp = Math.min(hpMax, afterDmg + totalHeal);
+      const effectiveHeal = Math.max(0, newHp - afterDmg);
+      if (effectiveHeal <= 0) continue;
+      await _setHp(td, newHp).catch(() => {});
+      dotNotifs.push(`💚 ${effectiveHeal} PV Régénération → ${tgtName}`);
+      await addDoc(_logCol(), {
+        type: 'dot-tick',
+        isHeal: true,
+        authorId: STATE.user?.uid || null,
+        authorName: STATE.profile?.pseudo || STATE.profile?.prenom || 'MJ',
+        tokenName: tgtName,
+        rolls: healRolls, total: effectiveHeal, rolledTotal: totalHeal, newHp, hpMax,
+        createdAt: serverTimestamp(),
+      }).catch(() => {});
+    }
   }
 
   const b=writeBatch(db);
@@ -13870,11 +13905,17 @@ function _vttSpellChips(s, c) {
     const dmg = _vttSortDmgFormula(s, c);
     if (dmg) chips.push({ icon:'⚔️', val: dmg, color:'#ff6b6b' });
   }
+  if (runes.includes('Protection') && runes.includes('Affliction') && !_isLac) {
+    const nbProt = runes.filter(r => r === 'Protection').length;
+    const nbAff = runes.filter(r => r === 'Affliction').length;
+    chips.push({ icon:'💚', val:`${nbProt + nbAff}d4/t`, color:'#22c38e' });
+  }
   const isAmpSupportHeal = types.includes('defensif')
     && runes.includes('Amplification')
     && s.ampMode !== 'deplacement'
     && !runes.includes('Protection');
-  if (types.includes('defensif') && (s.protectionMode === 'soin' || s.typeSoin || isAmpSupportHeal)) {
+  if (!(runes.includes('Protection') && runes.includes('Affliction') && !_isLac)
+      && types.includes('defensif') && (s.protectionMode === 'soin' || s.typeSoin || isAmpSupportHeal)) {
     const soin = _vttSortSoinFormula(s, c);
     if (soin) chips.push({ icon:'💚', val: soin, color:'#22c38e' });
   }

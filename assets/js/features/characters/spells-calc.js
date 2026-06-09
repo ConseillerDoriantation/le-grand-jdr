@@ -257,14 +257,15 @@ export const SORT_COMBOS = [
     },
   },
   {
-    id: 'aura_punitive',
-    icon: '🌀',
-    defaultName: 'Aura punitive',
-    // Protection + Affliction (sans Puissance, sinon c'est Drain qui prime)
-    detect: (counts, s) => counts.Protection > 0 && counts.Affliction > 0 && (counts.Puissance || 0) === 0 && s?.afflictionMode !== 'laceration',
+    id: 'regeneration',
+    icon: '💚',
+    defaultName: 'Régénération',
+    // Protection + Affliction : les deux runes perdent leur effet initial
+    // et deviennent un soin sur la durée appliqué à un allié.
+    detect: (counts, s) => counts.Protection > 0 && counts.Affliction > 0 && s?.afflictionMode !== 'laceration',
     describe: (counts) => {
-      const radius = counts.Protection;
-      return `Protection ×${counts.Protection} + Affliction ×${counts.Affliction} · zone ${radius}c (Manhattan) autour du lanceur · tout ennemi présent au cast subit l'affliction (JS Con DD 11) · pas de bonus CA`;
+      const dice = (counts.Protection || 0) + (counts.Affliction || 0);
+      return `Protection ×${counts.Protection} + Affliction ×${counts.Affliction} · ${dice}d4 PV/tour pendant la durée du sort`;
     },
   },
   {
@@ -893,7 +894,10 @@ export function _buildSortResume(s, c) {
     const mode = _getSortProtectionMode(s);
     // Combo Drain (sort offensif + Protection) : pas de CA ni de soin direct — le
     // lanceur récupère un % des dégâts infligés, fixé par le nombre de Protection.
-    if (comboIds.has('drain')) {
+    if (comboIds.has('regeneration')) {
+      const nbAff = runes.filter(r => r === 'Affliction').length;
+      lines.push({ icon:'💚', label:`Régénération ${(nbProt + nbAff)}d4/tour`, detail:`Soin sur la durée · Protection + Affliction · pas de CA/affliction directe` });
+    } else if (comboIds.has('drain')) {
       const pct = Math.round(_calcDrainPct(s) * 100);
       lines.push({ icon:'🩸', label:`Drain ${pct}% des dégâts`, detail:`Soigne le lanceur · cap frappe de base hors Puissance · ${nbProt} Protection` });
     } else if (mode === 'soin') {
@@ -1011,7 +1015,7 @@ export function _buildSortResume(s, c) {
   const nbEnch = runes.filter(r => r === 'Enchantement').length;
   const nbAff  = runes.filter(r => r === 'Affliction').length;
   const hideEnch = comboIds.has('arme_invoquee');
-  const hideAff  = comboIds.has('sentinelle');
+  const hideAff  = comboIds.has('sentinelle') || comboIds.has('regeneration');
   if (nbEnch > 0 && !hideEnch) {
     const mode    = s.enchantMode || 'dmg';
     const cibleStr = nbEnch === 1 ? 'sur 1 allié' : `sur ${nbEnch} alliés`;

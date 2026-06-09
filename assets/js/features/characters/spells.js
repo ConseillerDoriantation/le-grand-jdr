@@ -472,7 +472,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   } else if (isLaceration) {
     const lac = _calcLaceration(s);
     if (lac) chips.push({ icon:'🩸', val:`CA −${Math.min(lac.reduction, lac.maxElite)}`, color:'#dc2626' });
-  } else if (hasAfflictionDebuff) {
+  } else if (hasAfflictionDebuff && !new Set(_activeCombos(s).map(co => co.id)).has('regeneration')) {
     if (afflictionMode === 'etat') {
       // Mode État : on affiche TOUJOURS un chip état, jamais DoT
       const etat = s.afflictionEtatId
@@ -511,7 +511,10 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   if (nbProt > 0) {
     const mode = _getSortProtectionMode(s);
     const activeIds = new Set(_activeCombos(s).map(co => co.id));
-    if (mode === 'soin') {
+    if (activeIds.has('regeneration')) {
+      const dice = nbProt + runesAll.filter(r => r === 'Affliction').length;
+      chips.push({ icon:'💚', val: `${dice}d4/t`, color:'#22c38e' });
+    } else if (mode === 'soin') {
       if (activeIds.has('drain')) {
         const pct = Math.round(_calcDrainPct(s) * 100);
         chips.push({ icon:'🩸', val: `Drain ${pct}%`, color:'#ff6b6b' });
