@@ -62,7 +62,7 @@ export const CONDITION_DEFAULT_LIBRARY = [
     defaultSaveStat:null,           defaultDC:null, defaultDuration:null,
     effects:{ attackAgainst:'adv', dmgTakenBonus:'1d6', consumedByAttackAgainst:true } },
   { id:'swift',         label:'Accéléré',    icon:'💨', color:'#38bdf8',
-    desc:'L\'allié gagne +2 cases de déplacement, +1 par rune Puissance du sort d\'enchantement.',
+    desc:'L\'allié gagne +2 cases de déplacement, +1 par rune Amplification du sort d\'enchantement.',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
     effects:{ movementBonus:2 } },
   { id:'guided',        label:'Guidé',       icon:'🎯', color:'#facc15',
