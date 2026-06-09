@@ -509,6 +509,29 @@ function _scaledEnchantConditionFields(lib, power = 0, amplification = 0, overri
   return fields;
 }
 
+function _rangeVal(value, fallback = 1) {
+  const n = parseInt(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function _vttEquippedWeapons(c) {
+  const equip = c?.equipement || {};
+  const entries = ['Main principale', 'Main secondaire']
+    .map(slot => ({ slot, item: equip[slot] || null }))
+    .filter(entry => entry.item?.nom);
+  return entries.length ? entries : [{ slot: 'Main principale', item: getMainWeapon(c) }];
+}
+
+function _vttBestWeaponRange(c) {
+  return Math.max(1, ..._vttEquippedWeapons(c).map(entry => _rangeVal(entry.item?.portee, 1)));
+}
+
+function _vttPrimaryWeapon(c) {
+  return _vttEquippedWeapons(c)
+    .sort((a, b) => _rangeVal(b.item?.portee, 1) - _rangeVal(a.item?.portee, 1))[0]?.item
+    || getMainWeapon(c);
+}
+
 function _live(t) {
   if (!t) return null;
   const c = t.characterId ? _characters[t.characterId] : null;
@@ -610,7 +633,7 @@ function _live(t) {
     // Bonus de portée temporaire (buff range_bonus = Allonge magique etc.)
     displayRange: (() => {
       const baseRange = c
-        ? (t.range > 1 ? t.range : (weapon?.portee ? parseInt(weapon.portee)||1 : 1))
+        ? (t.range > 1 ? t.range : _vttBestWeaponRange(c))
         : b
           ? (t.range > 1 ? t.range : (_numOr(b.attaques?.[0]?.portee, 1)))
           : n
@@ -3864,7 +3887,7 @@ function _buildAttackOptions(t) {
     && (b.expiresAtRound == null || _r0 === 0 || _r0 <= b.expiresAtRound));
 
   // ── Arme principale du personnage (ou attaque générique) ──
-  const weapon       = c?.equipement?.['Main principale'];
+  const weapon       = c ? _vttPrimaryWeapon(c) : null;
   const isUnarmed    = !wReplace && !weapon?.nom;
   // Stats actives : buff weapon_replace > équipement > poings
   const wDmgStats    = wReplace ? [wReplace.statDegats || 'force']
