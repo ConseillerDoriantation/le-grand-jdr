@@ -1606,6 +1606,12 @@ export async function openSortModal(idx, s) {
       modal.dataset.previewBound = '1';
       modal.addEventListener('input',  _updateSortPreview);
       modal.addEventListener('change', _updateSortPreview);
+      modal.addEventListener('input', (event) => {
+        if (event.target?.id === 's-enchant-state-move-bonus'
+            || event.target?.id === 's-enchant-state-dmg-formula') {
+          event.target.dataset.autoValue = '0';
+        }
+      });
       modal.addEventListener('change', (event) => {
         if (event.target?.id === 's-enchant-etat') _refreshEnchantStateTuning();
       });
@@ -1673,8 +1679,32 @@ function _refreshEnchantStateTuning() {
   const hasDmg = !!effects.dmgDealtBonus;
   const move = document.getElementById('s-enchant-move-tune');
   const dmg = document.getElementById('s-enchant-dmg-tune');
+  const runes = _buildRunesFromCounts();
+  const nbP = runes.filter(r => r === 'Puissance').length;
+  const nbAmp = runes.filter(r => r === 'Amplification').length;
+  const moveInput = document.getElementById('s-enchant-state-move-bonus');
+  const dmgInput = document.getElementById('s-enchant-state-dmg-formula');
   if (move) move.style.display = hasMove ? '' : 'none';
   if (dmg) dmg.style.display = hasDmg ? '' : 'none';
+  if (hasMove && moveInput) {
+    const base = Number.isFinite(parseInt(effects.movementBonus)) ? parseInt(effects.movementBonus) : 0;
+    const autoValue = String(base + nbAmp);
+    if (moveInput.value === '' || moveInput.dataset.autoValue === '1') {
+      moveInput.value = autoValue;
+      moveInput.dataset.autoValue = '1';
+    } else if (moveInput.value === autoValue) {
+      moveInput.dataset.autoValue = '1';
+    }
+  }
+  if (hasDmg && dmgInput) {
+    const autoValue = `${1 + nbP}d4 +2`;
+    if (dmgInput.value === '' || dmgInput.dataset.autoValue === '1') {
+      dmgInput.value = autoValue;
+      dmgInput.dataset.autoValue = '1';
+    } else if (dmgInput.value.trim() === autoValue) {
+      dmgInput.dataset.autoValue = '1';
+    }
+  }
   wrap.style.display = (hasMove || hasDmg) ? '' : 'none';
 }
 
@@ -2366,6 +2396,9 @@ function _refreshRunesSection(changedNom) {
   }
   // La visibilité Dégâts/Soin dépend des types ET de la rune Protection
   _refreshConditionalSections();
+  if (changedNom === 'Puissance' || changedNom === 'Amplification' || changedNom === 'Enchantement') {
+    _refreshEnchantStateTuning();
+  }
   updateSortPM();
 }
 
