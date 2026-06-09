@@ -238,6 +238,13 @@ let _bstTracker = {};   // creatureId → tracker joueur (pvActuel, pmActuel, ca
 let _activePage = null;
 let _tool       = 'select';
 let _selected   = null, _attackSrc = null, _moveHL = [];
+// Mode "action d'abord" (action-first) : l'action est choisie AVANT la cible.
+// Quand _aimOpt est posée, un clic sur un token résout l'action sur cette cible.
+let _aimOpt     = null;   // option pré-choisie en attente de cible
+let _aimSrcId   = null;   // token source de la visée
+let _actBar     = null;   // barre d'action DOM ancrée au token sélectionné
+let _actBarSrc  = null;   // srcId courant de la barre d'action
+let _actBarRAF  = 0;      // rAF de re-positionnement de la barre
 let _mtCtx      = null; // contexte multi-cibles actif { srcId, opt, optIdx, targets[], maxTargets, lines Map }
 let _mtBroadcasting = false; // évite un write active:false si rien n'a été diffusé
 let _mtPending  = null; // cibles validées en attente du roll : string[]
@@ -1009,6 +1016,7 @@ function _cleanup() {
   _tokens = {}; _pages = {}; _characters = {}; _npcs = {}; _bestiary = {}; _bstTracker = {};
   _bestiaryLoads.clear();
   _session = {}; _activePage = null; _selected = null; _attackSrc = null;
+  _clearAim(); _hideActBar();
   _moveHL = []; _autoSyncDone = false; _renderedPings.clear(); _renderedReactions.clear();
   _selectedMulti.clear(); _multiDragOrigin = null;
   _annotations = {}; _drawing = false; _drawLive = null; _drawHistory = [];
@@ -1343,6 +1351,7 @@ function _renderMapImages() {
           if (!_mapMode) return;
           e.cancelBubble = true;
           _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
+          _hideActBar();
           _selected=null; _clearHL(); _renderInspector(null); _layers.token.batchDraw();
           _selImg = img.id;
           // Vider l'autre transformer
@@ -1721,6 +1730,13 @@ function _buildShape(t) {
       return;
     }
 
+    // Mode visée "action d'abord" : l'action est déjà choisie, ce clic désigne la cible.
+    if (_aimOpt && _aimSrcId) {
+      if (t.id !== _aimSrcId && !_isAimTargetInRange(_aimSrcId, t.id, _aimOpt)) return;
+      _resolveAim(_aimSrcId, t.id, _aimOpt);
+      return;
+    }
+
     if (_attackSrc) {
       // Attaquant désigné → clic sur n'importe quel token (y compris soi-même) = attaque/soin
       // Vérification portée uniquement pour les cibles différentes
@@ -1829,6 +1845,7 @@ function _patchShape(id) {
 
 // ── Sélection ───────────────────────────────────────────────────────
 function _select(id) {
+  _clearAim(); // changer de sélection annule une visée action-first en cours
   if (_imgTr&&_selImg) { _imgTr.nodes([]); _selImg=null; _layers.map?.batchDraw(); }
   _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
   _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
@@ -1845,17 +1862,197 @@ function _select(id) {
     _layers.token.batchDraw();
     _showMoveRange(data);    // cases bleues cliquables (déplacement)
     _showAttackRange(data);  // cases rouges par-dessus (visuel portée)
+    _showActBar(id);         // barre d'action ancrée (Armes/Sorts/Objets/Actions)
+  } else {
+    _hideActBar();
   }
 }
 
 function _deselect() {
   _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
   _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
+  _clearAim(); _hideActBar();
   _selected=null; _attackSrc=null; _clearHL(); _clearMultiSelect(); _renderInspector(null);
   if (_imgTr)   { _imgTr.nodes([]); _layers.map?.batchDraw(); }
   if (_imgTrFg) { _imgTrFg.nodes([]); _layers.mapFg?.batchDraw(); }
   _selImg=null;
   _layers.token?.batchDraw();
+}
+
+// ════════════════════════════════════════════════════════════════════
+// COMBAT « ACTION D'ABORD » : barre d'action ancrée + mode visée
+//  Flux : clic sur son token → barre de catégories ancrée (Armes/Sorts/
+//  Objets/Actions) → on choisit l'action → portée affichée → clic cible → jet.
+//  Le flux historique « clic sur l'ennemi = attaque » reste actif en parallèle.
+// ════════════════════════════════════════════════════════════════════
+
+// ── Barre d'action ancrée au token sélectionné ──────────────────────
+function _showActBar(srcId) {
+  _hideActBar();
+  const t = _tokens[srcId]?.data; if (!t || !_canControlToken(t)) return;
+  const wrap = _stage?.container(); if (!wrap) return;
+  const opts = _buildAttackOptions(t);
+  const weaponN = opts.filter(o => !o._itemAction && o.sortIdx === undefined && !o.targetSelf).length;
+  const itemN   = opts.filter(o => o._itemAction).length;
+  const spellN  = opts.filter(o => !o._itemAction && o.sortIdx !== undefined).length;
+  const chips = [];
+  if (weaponN) chips.push(['weapons', '⚔️', 'Armes',  weaponN, '#cbd5e1']);
+  if (spellN)  chips.push(['spells',  '✨', 'Sorts',  spellN,  '#a78bfa']);
+  if (itemN)   chips.push(['items',   '🎒', 'Objets', itemN,   '#fbbf24']);
+  chips.push(['basic', '🎭', 'Actions', 0, '#fcd34d']);   // toujours dispo (Esquiver…)
+
+  const bar = document.createElement('div');
+  bar.id = 'vtt-actbar';
+  bar.className = 'vtt-actbar';
+  bar.innerHTML = chips.map(([cat, icon, label, n, col]) => `
+    <button class="vtt-actbar-chip" style="--c:${col}" data-vtt-fn="_vttActBarCat" data-vtt-args="${srcId}|${cat}" title="${label}">
+      <span class="vtt-actbar-ic">${icon}</span>
+      <span class="vtt-actbar-lbl">${label}</span>
+      ${n ? `<span class="vtt-actbar-n">${n}</span>` : ''}
+    </button>`).join('');
+  wrap.appendChild(bar);
+  _actBar = bar; _actBarSrc = srcId;
+  _positionActBar();
+  _actBarLoop();
+}
+
+function _hideActBar() {
+  if (_actBarRAF) { cancelAnimationFrame(_actBarRAF); _actBarRAF = 0; }
+  _actBar?.remove();
+  _actBar = null; _actBarSrc = null;
+}
+
+// Re-positionne la barre sous le token courant (suit pan/zoom via rAF).
+function _positionActBar() {
+  if (!_actBar || !_stage) return;
+  const sh = _tokens[_actBarSrc]?.shape;
+  const t  = _tokens[_actBarSrc]?.data;
+  if (!sh || !t || t.pageId !== _activePage?.id) { _hideActBar(); return; }
+  const wrap  = _stage.container();
+  const abs   = sh.getAbsolutePosition();        // px relatifs au wrap (scale + position inclus)
+  const scale = _stage.scaleY() || 1;
+  const half  = (CELL * (_tokenDims(t).h || 1) / 2) * scale;
+  const bw = _actBar.offsetWidth, bh = _actBar.offsetHeight;
+  const wW = wrap.clientWidth, wH = wrap.clientHeight;
+  let left = abs.x;
+  let top  = abs.y + half + 8;
+  if (top + bh + 4 > wH) top = abs.y - half - 8 - bh;   // déborde en bas → passe au-dessus
+  left = Math.max(bw / 2 + 4, Math.min(wW - bw / 2 - 4, left));
+  top  = Math.max(4, Math.min(wH - bh - 4, top));
+  _actBar.style.left = `${left}px`;
+  _actBar.style.top  = `${top}px`;
+}
+
+function _actBarLoop() {
+  _actBarRAF = requestAnimationFrame(() => {
+    _actBarRAF = 0;
+    if (!_actBar) return;
+    _positionActBar();
+    _actBarLoop();
+  });
+}
+
+// Clic sur une catégorie de la barre → ouvre le picker filtré, SANS cible (action d'abord).
+function _vttActBarCat(srcId, cat) {
+  _execAttack(srcId, null, { only: cat });
+}
+
+// ── Mode visée : action choisie, en attente d'un clic sur la cible ───
+function _vttAimOpt(srcId, idx) {
+  const opt = _atkOptsCache[`${srcId}__`]?.[+idx];
+  if (!opt) return;
+  closeModalDirect();
+  if (opt.targetSelf) { _resolveAim(srcId, srcId, opt); return; }  // potions/buffs perso : direct
+  _startAim(srcId, opt);
+}
+
+function _startAim(srcId, opt) {
+  _mtClear(false); _zoneClear(); _selfClear();
+  _aimSrcId = srcId; _aimOpt = opt;
+  _attackSrc = srcId;   // garde l'anneau d'attaque + court-circuite la redirection vers son propre token
+  _tokens[srcId]?.shape?.findOne('.atk')?.visible(true);
+  _layers.token?.batchDraw();
+  _showAimRange(srcId, opt);
+  _showAimHud(opt);
+}
+
+// Surligne uniquement les cases atteignables par CETTE action (sa portée propre).
+function _showAimRange(srcId, opt) {
+  _clearHL();
+  const t = _tokens[srcId]?.data; if (!t || !_activePage || !_layers.grid) return;
+  const K = window.Konva;
+  const portee = Math.max(1, parseInt(opt.portee) || 1);
+  const sd = _tokenDims(t);
+  const { cols, rows } = _activePage;
+  const reach = (dx, dy) => (portee === 1 ? Math.max(dx, dy) : dx + dy) <= portee;
+  const friendly = opt.isHeal || opt.isEnchant || opt.isRegen;
+  const c3 = friendly ? '34,197,94' : '239,68,68';
+  for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
+    if (c >= t.col && c < t.col + sd.w && r >= t.row && r < t.row + sd.h) continue;
+    const dx = Math.max(0, Math.max(c, t.col) - Math.min(c, t.col + sd.w - 1));
+    const dy = Math.max(0, Math.max(r, t.row) - Math.min(r, t.row + sd.h - 1));
+    if (!reach(dx, dy)) continue;
+    const rect = new K.Rect({ x:c*CELL, y:r*CELL, width:CELL, height:CELL,
+      fill:`rgba(${c3},0.16)`, stroke:`rgba(${c3},0.62)`, strokeWidth:1.4, listening:false });
+    _layers.grid.add(rect); _moveHL.push(rect);
+  }
+  _layers.grid.batchDraw();
+}
+
+function _showAimHud(opt) {
+  document.getElementById('vtt-aim-hud')?.remove();
+  const portee = Math.max(1, parseInt(opt.portee) || 1);
+  const hud = document.createElement('div');
+  hud.id = 'vtt-aim-hud';
+  hud.className = 'vtt-mt-hud';
+  hud.innerHTML = `
+    <div class="vtt-mt-hud-header">
+      <span>${opt.icon || '🎯'} <strong>${_esc(opt.label)}</strong></span>
+      <span class="vtt-mt-hud-count">🎯 ${portee}c</span>
+    </div>
+    <div class="vtt-mt-hud-hint">Clique une cible à portée · <kbd>Échap</kbd> = annuler</div>
+    <div class="vtt-mt-hud-actions">
+      <button class="vtt-mt-btn-cancel" data-vtt-fn="_aimCancel">✕ Annuler</button>
+    </div>`;
+  const onKey = e => { if (e.key === 'Escape') _aimCancel(); };
+  document.addEventListener('keydown', onKey);
+  hud._removeKey = () => document.removeEventListener('keydown', onKey);
+  document.body.appendChild(hud);
+}
+
+function _isAimTargetInRange(srcId, tgtId, opt) {
+  const s = _tokens[srcId]?.data, t = _tokens[tgtId]?.data;
+  if (!s || !t) return false;
+  const portee = opt.portee || 1;
+  const dist = _tokenAttackDistance(s, t, portee);
+  if (dist <= portee) return true;
+  showNotif(`Hors de portée (${dist}c — portée ${portee}c)`, 'error');
+  return false;
+}
+
+// Cible choisie → on injecte l'option dans le cache et on rejoint le flux de lancer existant
+// (jet simple, ou ciblage zone/multi qui gèrent ensuite leur propre HUD).
+function _resolveAim(srcId, tgtId, opt) {
+  _atkOptsCache[`${srcId}__${tgtId}`] = [opt];
+  _clearAim();
+  _vttPickOpt(srcId, tgtId, 0);
+}
+
+function _clearAim() {
+  if (!_aimOpt && !_aimSrcId) return;
+  _aimOpt = null; _aimSrcId = null;
+  const hud = document.getElementById('vtt-aim-hud');
+  if (hud?._removeKey) hud._removeKey();
+  hud?.remove();
+  _clearHL();
+}
+
+function _aimCancel() {
+  const sid = _aimSrcId;
+  _clearAim();
+  const d = _tokens[sid]?.data;   // restaure les portées de sélection normales
+  if (d && _canControlToken(d)) { _showMoveRange(d); _showAttackRange(d); }
+  showNotif('Visée annulée', 'info');
 }
 
 // ── Portée de mouvement ─────────────────────────────────────────────
@@ -4159,28 +4356,44 @@ const _freeNextCast = new Set();
 let _suspendedTriggerActive = false;
 
 /** Affiche le modal de sélection d'attaque. */
-async function _execAttack(srcId, tgtId) {
-  const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
-  if (!src||!tgt) return;
-  const lS=_live(src), lT=_live(tgt);
-  const dist=_tokenAttackDistance(src, tgt);
+// _execAttack ouvre le sélecteur d'action.
+//  - Mode "cible d'abord" (tgtId fourni)   : flux historique, options filtrées par portée.
+//  - Mode "action d'abord" (tgtId == null) : ouvert depuis la barre d'action, AUCUNE cible
+//    encore ; toutes les options de la catégorie `only` sont listées, et chaque carte entre
+//    en mode visée (_vttAimOpt) au lieu de lancer directement.
+// `only` ∈ 'weapons' | 'items' | 'spells' | 'basic' | null restreint les sections affichées.
+async function _execAttack(srcId, tgtId, exOpts = {}) {
+  const only  = exOpts.only || null;
+  const noTgt = tgtId == null;
+  const src=_tokens[srcId]?.data;
+  if (!src) return;
+  const tgt = noTgt ? null : _tokens[tgtId]?.data;
+  if (!noTgt && !tgt) return;
+  const lS=_live(src), lT = tgt ? _live(tgt) : null;
+  const dist = noTgt ? null : _tokenAttackDistance(src, tgt);
 
   const options = _buildAttackOptions(src);
-  // Les actions "sur soi" sont toujours disponibles (la portée et la distance n'ont pas de sens).
-  const inRange = options.filter(o => o.targetSelf || _tokenAttackDistance(src, tgt, o.portee) <= o.portee);
-  // Aucune attaque à portée : on bloque SAUF si on contrôle le token source —
-  // dans ce cas la modale s'ouvre quand même pour les Actions de base
-  // (Esquiver, Se cacher, Se désengager, Aider).
-  if (!inRange.length && !_canControlToken(src)) {
-    showNotif(`Hors de portée (${dist} case${dist>1?'s':''}, portée max ${Math.max(...options.map(o=>o.portee))})`, 'error');
-    return;
-  }
-  if (!inRange.length) {
-    showNotif(`Aucune attaque à portée (${dist} case${dist>1?'s':''}) — actions de base disponibles.`, 'info');
+  // Cible d'abord : on filtre par portée (les actions "sur soi" restent toujours dispo).
+  // Action d'abord : pas de cible → on garde tout, la portée sera vérifiée à la visée.
+  const inRange = noTgt
+    ? options
+    : options.filter(o => o.targetSelf || _tokenAttackDistance(src, tgt, o.portee) <= o.portee);
+  if (!noTgt) {
+    // Aucune attaque à portée : on bloque SAUF si on contrôle le token source —
+    // dans ce cas la modale s'ouvre quand même pour les Actions de base
+    // (Esquiver, Se cacher, Se désengager, Aider).
+    if (!inRange.length && !_canControlToken(src)) {
+      showNotif(`Hors de portée (${dist} case${dist>1?'s':''}, portée max ${Math.max(...options.map(o=>o.portee))})`, 'error');
+      return;
+    }
+    if (!inRange.length) {
+      showNotif(`Aucune attaque à portée (${dist} case${dist>1?'s':''}) — actions de base disponibles.`, 'info');
+    }
   }
 
-  // Stocke les options dans un cache indexé — pas de JSON dans les onclick
-  const cacheKey = `${srcId}__${tgtId}`;
+  // Stocke les options dans un cache indexé — pas de JSON dans les onclick.
+  // En mode action d'abord, la clé sans cible (`${srcId}__`) est lue par _vttAimOpt.
+  const cacheKey = noTgt ? `${srcId}__` : `${srcId}__${tgtId}`;
   _atkOptsCache[cacheKey] = inRange;
 
   const pm = lS.displayPm, pmMax = lS.displayPmMax;
@@ -4217,8 +4430,8 @@ async function _execAttack(srcId, tgtId) {
   // Rendu d'un bouton option — card avec stats pills bien lisibles
   const _pill = (cls, html) => `<span class="vtt-aopt-pill ${cls}">${html}</span>`;
   const _optBtn = (o, i) => {
-    const dist     = _tokenAttackDistance(src, tgt, o.portee);
-    const canHit   = dist <= o.portee;
+    const dist     = noTgt ? null : _tokenAttackDistance(src, tgt, o.portee);
+    const canHit   = noTgt ? true : dist <= o.portee;
     const isHeal   = !!o.isHeal;
     const isUtil   = !!(o.isCaSort || o.isUtil);
     const stack    = o._itemAction?.stackCount > 1 && o._itemAction?.consommable
@@ -4364,7 +4577,7 @@ async function _execAttack(srcId, tgtId) {
     // Carte d'action — présentation identique aux cartes de sort de la fiche perso
     // (.cs-spellcard, scope .cs-v3), cliquable pour lancer.
     return `
-      <button class="cs-spellcard vtt-castcard ${canHit?'':'is-oor'}" style="--type-col:${accentCol}" data-vtt-fn="_vttPickOpt" data-vtt-args="${srcId}|${tgtId}|${i}">
+      <button class="cs-spellcard vtt-castcard ${canHit?'':'is-oor'}" style="--type-col:${accentCol}" data-vtt-fn="${noTgt?'_vttAimOpt':'_vttPickOpt'}" data-vtt-args="${noTgt?`${srcId}|${i}`:`${srcId}|${tgtId}|${i}`}">
         <header class="cs-spellcard-head">
           <span class="cs-spellcard-icon">${o.icon}</span>
           <div class="cs-spellcard-id">
@@ -4401,15 +4614,21 @@ async function _execAttack(srcId, tgtId) {
   // ── 🛡 Arsenal : armes + actions d'objets (équipement physique) ──
   //   Regroupe ce qui est "immédiatement utilisable" depuis l'équipement,
   //   par opposition aux sorts (catégories dédiées) et au déplacement.
-  const arsenalOpts = [...weaponOpts, ...itemActOpts];
+  //   En mode action d'abord, `only` scinde Armes / Objets (chips séparés de la barre).
+  const arsenalOpts = [
+    ...(!only || only === 'weapons' ? weaponOpts : []),
+    ...(!only || only === 'items'   ? itemActOpts : []),
+  ];
   if (arsenalOpts.length) {
+    const title = only === 'weapons' ? 'Armes' : only === 'items' ? 'Objets' : 'Arsenal';
+    const icon  = only === 'items' ? '🎒' : only === 'weapons' ? '⚔️' : '🛡';
     const body = arsenalOpts.map(o => _optBtnWithName(o, inRange.indexOf(o))).join('');
-    optsHtml += _section('arsenal', '🛡', 'Arsenal', '#94a3b8', arsenalOpts.length, body);
-    tabs.push({ id:'arsenal', icon:'🛡', title:'Arsenal', color:'#94a3b8', count:arsenalOpts.length });
+    optsHtml += _section('arsenal', icon, title, '#94a3b8', arsenalOpts.length, body);
+    tabs.push({ id:'arsenal', icon, title, color:'#94a3b8', count:arsenalOpts.length });
   }
 
   // ── Sorts (groupés par catégorie ou non) ──
-  if (spellOpts.length) {
+  if (spellOpts.length && (!only || only === 'spells')) {
     if (hasCats) {
       catOrder.forEach(cat => {
         const catOpts = catMap.get(cat.id) || [];
@@ -4435,7 +4654,7 @@ async function _execAttack(srcId, tgtId) {
   const couru    = (src.bonusMvt || 0) > 0;
   const canEditSrc = _canControlToken(src);
   let basicHtml = '';
-  if (canEditSrc) {
+  if (canEditSrc && (!only || only === 'basic')) {
     // Carte d'action de base — même présentation (.cs-spellcard) que les sorts.
     const _basicCard = (icon, name, desc, col, fn, args) => `
         <button class="cs-spellcard vtt-castcard" style="--type-col:${col}" data-name="${_norm(name).replace(/"/g,'')}" data-vtt-fn="${fn}" data-vtt-args="${args}">
@@ -4500,10 +4719,12 @@ async function _execAttack(srcId, tgtId) {
       <div class="vtt-aopt-modal-hd">
         <div class="vtt-aopt-modal-targets">
           <span class="vtt-aopt-modal-src"><strong>${_esc(lS.displayName??src.name)}</strong></span>
-          <span class="vtt-aopt-modal-arrow">→</span>
-          <span class="vtt-aopt-modal-tgt"><strong>${_esc(lT.displayName??tgt.name)}</strong></span>
+          ${noTgt ? '' : `<span class="vtt-aopt-modal-arrow">→</span>
+          <span class="vtt-aopt-modal-tgt"><strong>${_esc(lT.displayName??tgt.name)}</strong></span>`}
         </div>
-        <span class="vtt-aopt-modal-dist" title="Distance source → cible">📏 ${dist}c</span>
+        ${noTgt
+          ? `<span class="vtt-aopt-modal-dist" title="Choisis l'action puis clique une cible">🎯 Choisir une cible ensuite</span>`
+          : `<span class="vtt-aopt-modal-dist" title="Distance source → cible">📏 ${dist}c</span>`}
       </div>
       ${pmBar}
       ${tabsHtml}
@@ -5530,6 +5751,7 @@ async function _vttRollAttack() {
   const _cleanup = () => {
     _tokens[srcId]?.shape?.findOne('.atk')?.visible(false);
     _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
+    _hideActBar(); _clearAim();
     _selected=null; _attackSrc=null; _clearHL(); _renderInspector(null);
     _layers.token?.batchDraw();
   };
@@ -14448,6 +14670,9 @@ PAGES.vtt=renderVttPage;
 
 // Registre des actions pour le dispatcher data-vtt-fn
 const VTT_ACTIONS = {
+  _vttActBarCat,
+  _vttAimOpt,
+  _aimCancel,
   _vttEnterTable,
   _vttGateBack,
   _vttToggleSessionLive,

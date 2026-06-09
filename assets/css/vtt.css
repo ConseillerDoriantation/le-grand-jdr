@@ -3985,6 +3985,64 @@
 .vtt-mt-btn-validate:hover { background: rgba(139,92,246,.32); border-color: #c084fc; color: #fff; }
 .vtt-mt-btn-validate:disabled { opacity: .4; cursor: not-allowed; }
 .vtt-mt-btn-validate:disabled:hover { background: rgba(139,92,246,.18); border-color: rgba(139,92,246,.4); color: #c084fc; }
+.vtt-mt-hud-hint kbd {
+  font-family: inherit; font-size: .9em;
+  padding: 0 .3em; border-radius: 4px;
+  background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18);
+}
+
+/* ── Barre d'action ancrée au token (combat « action d'abord ») ──── */
+.vtt-actbar {
+  position: absolute;
+  z-index: 6;                 /* au-dessus de la vignette (::after z-index:5) */
+  transform: translateX(-50%);
+  display: flex;
+  gap: .25rem;
+  padding: .25rem;
+  background: rgba(16,16,28,.92);
+  border: 1.5px solid rgba(139,92,246,.4);
+  border-radius: 11px;
+  box-shadow: 0 6px 22px rgba(0,0,0,.5), 0 0 0 1px rgba(0,0,0,.4);
+  backdrop-filter: blur(6px);
+  animation: vtt-actbar-in .14s ease;
+  white-space: nowrap;
+}
+@keyframes vtt-actbar-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.vtt-actbar-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .34rem .55rem;
+  border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--c) 12%, transparent);
+  color: var(--c);
+  font-family: inherit;
+  font-size: .76rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .12s, border-color .12s, transform .08s;
+}
+.vtt-actbar-chip:hover {
+  background: color-mix(in srgb, var(--c) 26%, transparent);
+  border-color: var(--c);
+}
+.vtt-actbar-chip:active { transform: scale(.95); }
+.vtt-actbar-ic  { font-size: .95rem; line-height: 1; }
+.vtt-actbar-lbl { line-height: 1; }
+.vtt-actbar-n {
+  min-width: 1.1rem; text-align: center;
+  padding: 0 .25rem; border-radius: 999px;
+  background: color-mix(in srgb, var(--c) 22%, transparent);
+  font-size: .66rem;
+}
+@media (max-width: 720px) {
+  .vtt-actbar-lbl { display: none; }     /* mobile : icônes + compteurs seuls */
+  .vtt-actbar-chip { padding: .4rem .5rem; }
+}
 
 /* ── Lanceur de dés libre ───────────────────────────────────────── */
 .vtt-dice-float {
