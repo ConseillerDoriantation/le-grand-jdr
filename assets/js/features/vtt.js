@@ -2299,6 +2299,11 @@ const _tokenAttackDistance = (src, tgt, portee = null) => {
 
 const VTT_ACTION_RUNE = 'Déclenchement';
 
+function _vttAmpDispCircleSize(nbAmp, nbDisp) {
+  const rank = Math.min(parseInt(nbAmp) || 0, parseInt(nbDisp) || 0);
+  return rank >= 1 ? (4 * rank - 1) : 0;
+}
+
 function _vttSpellActionMode(s) {
   const runes = s?.runes || [];
   if (runes.includes(VTT_ACTION_RUNE) && (s?.actionMode === 'reaction' || s?.actionMode === 'action_bonus')) return s.actionMode;
@@ -3248,7 +3253,8 @@ function _buildSpellOption(s, ctx) {
   let zoneW = (mods?.allonge || _isDepl) ? 0 : (s.zoneW || 0);
   let zoneH = (mods?.allonge || _isDepl) ? 0 : (s.zoneH || 0);
   // Si pas de zone manuelle ni allonge : calcule depuis les runes (Amplification × Dispersion).
-  // Miroir EXACT de _calcSortZone (spells.js) : Amp ×N → 3N · Disp ×M en combo → 3M.
+  // Miroir EXACT de _calcSortZone (spells.js) : Amp seul → ligne 3N ;
+  // Amp+Disp → zone carrée plaçable 3×3, puis 7×7, 11×11...
   // L'éditeur affiche ces nombres comme la taille de zone (ex. 1 Amp + 1 Disp = 3×3) ;
   // le VTT doit poser la MÊME grille → 1 case par unité (pas de reconversion mètres→cases,
   // qui rétrécissait le sort, ex. 3×3 affiché → 2×2 posé).
@@ -3257,8 +3263,14 @@ function _buildSpellOption(s, ctx) {
     const _nbAmp  = _runes.filter(r => r === 'Amplification').length;
     const _nbDisp = _runes.filter(r => r === 'Dispersion').length;
     if (_nbAmp >= 1) {
-      zoneW = 3 * _nbAmp;
-      zoneH = _nbDisp >= 1 ? (3 * _nbDisp) : 1;
+      if (_nbDisp >= 1) {
+        const size = _vttAmpDispCircleSize(_nbAmp, _nbDisp);
+        zoneW = size;
+        zoneH = size;
+      } else {
+        zoneW = 3 * _nbAmp;
+        zoneH = 1;
+      }
     }
   }
   // Sentinelle / Invocation : force une zone min 1×1 (utile pour le placement)
@@ -13774,7 +13786,9 @@ function _vttSpellChips(s, c) {
   const nbAmp = runes.filter(r => r === 'Amplification').length;
   if (nbAmp > 0 && s.ampMode !== 'deplacement') {
     const nbDisp = runes.filter(r => r === 'Dispersion').length;
-    chips.push({ icon:'📐', val:`${3 * nbAmp}×${nbDisp>=1?(3 * nbDisp):1} cases`, color:'#b47fff' });
+    const zoneW = nbDisp >= 1 ? _vttAmpDispCircleSize(nbAmp, nbDisp) : 3 * nbAmp;
+    const zoneH = nbDisp >= 1 ? zoneW : 1;
+    chips.push({ icon:'📐', val:`${zoneW}×${zoneH} cases`, color:'#b47fff' });
   }
   if (runes.includes('Durée') || (s.dureeBase && s.dureeBase >= 2)) {
     chips.push({ icon:'⏱️', val:`${calcSpellDuration(s)}t`, color:'#9ca3af' });
