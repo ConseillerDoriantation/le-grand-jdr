@@ -509,9 +509,43 @@ function _scaledEnchantConditionFields(lib, power = 0, amplification = 0, overri
   return fields;
 }
 
+function _rangeVal(value, fallback = 1) {
+  const n = parseInt(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function _vttEquippedWeapons(c) {
+  const equip = c?.equipement || {};
+  const entries = ['Main principale', 'Main secondaire']
+    .map(slot => ({ slot, item: equip[slot] || null }))
+    .filter(entry => entry.item?.nom);
+  return entries.length ? entries : [{ slot: 'Main principale', item: getMainWeapon(c) }];
+}
+
+function _vttBestWeaponRange(c) {
+  return Math.max(1, ..._vttEquippedWeapons(c).map(entry => _rangeVal(entry.item?.portee, 1)));
+}
+
+function _vttPrimaryWeapon(c) {
+  return _vttEquippedWeapons(c)
+    .sort((a, b) => _rangeVal(b.item?.portee, 1) - _rangeVal(a.item?.portee, 1))[0]?.item
+    || getMainWeapon(c);
+}
+
+function _characterForToken(t) {
+  if (!t) return null;
+  if (t.characterId && _characters[t.characterId]) return _characters[t.characterId];
+  if (!t.ownerId) return null;
+  const owned = Object.values(_characters || {}).filter(c => c?.uid === t.ownerId);
+  const tokenName = _norm(t.name || '');
+  const byName = tokenName ? owned.find(c => _norm(c?.nom || '') === tokenName) : null;
+  if (byName) return byName;
+  return owned.length === 1 ? owned[0] : null;
+}
+
 function _live(t) {
   if (!t) return null;
-  const c = t.characterId ? _characters[t.characterId] : null;
+  const c = _characterForToken(t);
   const n = t.npcId       ? _npcs[t.npcId]             : null;
   const b = t.beastId     ? _bestiary[t.beastId]       : null;
   const e = c || n || b;
@@ -610,7 +644,7 @@ function _live(t) {
     // Bonus de portée temporaire (buff range_bonus = Allonge magique etc.)
     displayRange: (() => {
       const baseRange = c
-        ? (t.range > 1 ? t.range : (weapon?.portee ? parseInt(weapon.portee)||1 : 1))
+        ? (t.range > 1 ? t.range : _vttBestWeaponRange(c))
         : b
           ? (t.range > 1 ? t.range : (_numOr(b.attaques?.[0]?.portee, 1)))
           : n
@@ -2089,7 +2123,9 @@ function _toggleMultiSelect(id) {
 function _showAttackRange(t) {
   if (!_activePage) return;
   const K = window.Konva;
-  const options = _buildAttackOptions(t);
+  const options = _buildAttackOptions(t)
+    .map(o => ({ ...o, portee: Math.max(0, parseInt(o.portee) || 0) }))
+    .filter(o => !o.targetSelf && o.portee > 0);
   if (!options.length) return;
   // Portée "naturelle" = celle de l'ARME du perso (option sans sortIdx et sans
   // _itemAction). C'est ce que le joueur considère comme sa portée de base, même
@@ -2689,9 +2725,9 @@ async function _vttApplyDeplacement(src, tgtData, mode, distance) {
 
 // Déduit le coût PM du lanceur (réplique la logique de _deductPm de l'attaque).
 async function _vttSpendSpellPm(src, opt) {
-  if (opt.pmCost > 0 && src.characterId) {
-    const c = _characters[src.characterId];
-    if (c) await updateDoc(_chrRef(src.characterId), { pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost) });
+  const c = _characterForToken(src);
+  if (opt.pmCost > 0 && c?.id) {
+    await updateDoc(_chrRef(c.id), { pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost) });
   }
 }
 
@@ -3380,6 +3416,7 @@ function _buildSpellOption(s, ctx) {
 
   // ── Pré-calculs communs aux 3 branches ─────────────────────────────────
   const mods = _vttSpellMods(s);
+  const runes = Array.isArray(s.runes) ? s.runes : [];
   const types = Array.isArray(s.types) && s.types.length ? s.types
               : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : ['utilitaire']));
   const protMode = s.protectionMode || 'ca';
@@ -3499,7 +3536,7 @@ function _buildSpellOption(s, ctx) {
   }
   // Lacération frappe toujours l'attaque de base, même si « offensif » n'est pas coché.
   // (branche Lacération d'Affliction → mods.laceration ; ou ancienne rune legacy)
-  if (types.includes('offensif') || _sRunes.includes('Lacération') || !!mods?.laceration) {
+  if (types.includes('offensif') || runes.includes('Lacération') || !!mods?.laceration) {
     const fullFormula    = _vttSortDmgFormula(s, c);
     const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(fullFormula);
     const spellTypeId    = s.noyauTypeId || null;
@@ -3594,7 +3631,7 @@ function _buildSpellOption(s, ctx) {
 /** Construit la liste des options d'attaque pour un token (arme / attaques bestiaire / sorts). */
 function _buildAttackOptions(t) {
   const ld = _live(t);
-  const c  = t.characterId ? _characters[t.characterId] : null;
+  const c  = _characterForToken(t);
   const b  = ld._beast || null;
   const options = [];
 
@@ -3862,7 +3899,7 @@ function _buildAttackOptions(t) {
     && (b.expiresAtRound == null || _r0 === 0 || _r0 <= b.expiresAtRound));
 
   // ── Arme principale du personnage (ou attaque générique) ──
-  const weapon       = c?.equipement?.['Main principale'];
+  const weapon       = c ? _vttPrimaryWeapon(c) : null;
   const isUnarmed    = !wReplace && !weapon?.nom;
   // Stats actives : buff weapon_replace > équipement > poings
   const wDmgStats    = wReplace ? [wReplace.statDegats || 'force']
@@ -4146,7 +4183,7 @@ async function _execAttack(srcId, tgtId) {
   const spellOpts   = inRange.filter(o => !o._itemAction && o.sortIdx !== undefined);
 
   // Grouper les sorts par catégorie (ordre des sort_cats du personnage)
-  const srcChar   = _characters[src.characterId] || null;
+  const srcChar   = _characterForToken(src);
   const sortCats  = srcChar?.sort_cats || [];
   const hasCats   = sortCats.length > 0 && spellOpts.some(o => o.catId);
 
@@ -5444,8 +5481,9 @@ async function _vttRollAttack() {
   const authorName = STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'MJ';
   // Payeur du mana : un token convoqué (invocation) n'a pas de PM propre — ses
   // sorts/actions sont payés sur le personnage du LANCEUR (summonOwnerId).
-  const _pmPayerCharId = src.characterId
-    || (src.summonOwnerId ? (_tokens[src.summonOwnerId]?.data?.characterId || null) : null);
+  const _srcChar = _characterForToken(src);
+  const _ownerTok = src.summonOwnerId ? _tokens[src.summonOwnerId]?.data : null;
+  const _pmPayerCharId = _srcChar?.id || (_ownerTok ? _characterForToken(_ownerTok)?.id : null);
   const _deductPm  = async () => {
     if (opt.pmCost > 0 && _pmPayerCharId) {
       const c = _characters[_pmPayerCharId];
@@ -5457,15 +5495,15 @@ async function _vttRollAttack() {
   // Ré-évaluation par itemId (l'index peut s'être déplacé entre build et usage).
   const _consumeItem = async () => {
     const meta = opt._itemAction;
-    if (!meta?.consommable || !src.characterId) return;
-    const c = _characters[src.characterId]; if (!c) return;
+    if (!meta?.consommable || !_srcChar?.id) return;
+    const c = _characters[_srcChar.id] || _srcChar;
     const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
     let idx = -1;
     if (meta.itemId)  idx = inv.findIndex(it => it?.itemId === meta.itemId);
     if (idx < 0 && meta.itemNom) idx = inv.findIndex(it => it?.nom === meta.itemNom);
     if (idx < 0) return; // déjà consommé
     inv.splice(idx, 1);
-    await updateDoc(_chrRef(src.characterId), { inventaire: inv }).catch(() => {});
+    await updateDoc(_chrRef(_srcChar.id), { inventaire: inv }).catch(() => {});
     showNotif(`🧪 ${meta.itemNom || 'Objet'} consommé`, 'info');
   };
   const _markActionUsed = async () => {
