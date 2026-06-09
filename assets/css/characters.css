@@ -2442,15 +2442,6 @@ input[type=number].input-field::-webkit-outer-spin-button {
   color: var(--text);
   margin-top: 0.1rem;
 }
-.cs-rune-active-chain {
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: #e8b84b;
-  margin-top: 0.18rem;
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
 .cs-rune-active-ctrl {
   display: flex;
   gap: 0.3rem;

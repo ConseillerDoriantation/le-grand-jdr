@@ -104,7 +104,7 @@ function _vttToggleLogDetail(detailId) {
   btn?.classList.toggle('open', !open);
 }
 
-// Helpers ciblés pour les cas inline restants (chaînage / manipulation DOM directe)
+// Helpers ciblés pour les cas inline restants (raccourcis / manipulation DOM directe)
 function _vttCourirAndClose(srcId) {
   _vttCourir(srcId);
   _closeActionModal();
@@ -2154,7 +2154,7 @@ function _maxDice(formula) {
 /**
  * Formule de dégâts calculée d'un sort offensif.
  * Miroir local de _calcSortDegats (spells.js) — évite le cross-import.
- * Inclut : dés de base + runes Puissance/Protection + chaînage + maîtrise arme principale.
+ * Inclut : dés de base + runes Puissance + maîtrise arme principale.
  */
 function _vttSortDmgFormula(s, c) {
   // ⚠️ Utiliser getMainWeapon(c) pour récupérer le Poings (2d4) par défaut
@@ -2168,26 +2168,23 @@ function _vttSortDmgFormula(s, c) {
   // Seule la Puissance ajoute des dés. La Protection ne sert qu'au drain % — elle
   // NE double PAS les dégâts (bug : le combo Drain affichait 2d10 au lieu de 1d10).
   // Aligne strictement avec _calcSortDegats du sheet.
-  const bonusVal = nbPuiss > 1 ? (nbPuiss - 1) * 2 : 0;
   const maitrise = getMaitriseBonus(c, mainP || {});
   const m = base.match(/^(\d+)(d\d+)(.*)$/i);
   if (m) {
     let r = `${parseInt(m[1]) + nbPuiss}${m[2]}${m[3]}`;
-    const tot = bonusVal + maitrise;
-    if (tot > 0) r += ` +${tot}`; else if (tot < 0) r += ` ${tot}`;
+    if (maitrise > 0) r += ` +${maitrise}`; else if (maitrise < 0) r += ` ${maitrise}`;
     return r;
   }
   let r = base;
   if (nbPuiss > 0) r += ` +${nbPuiss}d6`;
-  const tot = bonusVal + maitrise;
-  if (tot > 0) r += ` +${tot}`; else if (tot < 0) r += ` ${tot}`;
+  if (maitrise > 0) r += ` +${maitrise}`; else if (maitrise < 0) r += ` ${maitrise}`;
   return r;
 }
 
 /**
  * Formule de soin calculée d'un sort défensif (mode soin).
  * Miroir local de _calcSortSoin (spells.js).
- * Inclut : 1d4 base + runes Protection + chaînage + maîtrise + mod de stat.
+ * Inclut : 1d4 base + runes Protection + maîtrise + mod de stat.
  * Stat utilisée :
  *  - Noyau magique avec arme magique équipée → stat d'attaque de l'arme
  *  - Noyau magique sans arme magique (Poings) → Intelligence
@@ -2199,7 +2196,6 @@ function _vttSortSoinFormula(s, c) {
   const maitrise = getMaitriseBonus(c, mainP || {});
   const runes    = s.runes || [];
   const nbProt   = runes.filter(r => r === 'Protection').length;
-  const chainSoin = nbProt > 1 ? nbProt - 1 : 0;
   const base     = (s.soin || '').trim();
 
   // Détermine la stat de soin :
@@ -2229,16 +2225,12 @@ function _vttSortSoinFormula(s, c) {
   const totalFlat = effectiveMaitrise + statMod;
   const flatStr = totalFlat > 0 ? ` +${totalFlat}` : totalFlat < 0 ? ` ${totalFlat}` : '';
   if (!base || base.toLowerCase() === '= base') {
-    let r = `${1 + nbProt}d4`;
-    if (chainSoin > 0) r += ` +${chainSoin * 2}`;
-    return r + flatStr;
+    return `${1 + nbProt}d4${flatStr}`;
   }
   if (nbProt > 0) {
     const m = base.match(/^(\d+)(d\d+)(.*)$/i);
     if (m) {
-      let r = `${parseInt(m[1]) + nbProt}${m[2]}${m[3]}`;
-      if (chainSoin > 0) r += ` +${chainSoin * 2}`;
-      return r + flatStr;
+      return `${parseInt(m[1]) + nbProt}${m[2]}${m[3]}${flatStr}`;
     }
     return base;
   }
@@ -2367,13 +2359,11 @@ function _vttSpellMods(s) {
   const _enchBonus = Number.isFinite(parseInt(s.enchantBonus)) ? parseInt(s.enchantBonus) : (2 + nbP);
 
   // Stats propres de la Sentinelle (combo Affliction + Invocation)
-  const _chainProt = nbProt > 1 ? (nbProt - 1) : 0;
-  const _chainP    = nbP > 1 ? (nbP - 1) * 2 : 0;
   const sentinelDice  = 1 + nbP;
-  const sentinelDmg   = _chainP > 0 ? `${sentinelDice}d4 +${_chainP}` : `${sentinelDice}d4`;
-  const sentinelHp    = 10 + 5 * nbProt + _chainProt;
-  const sentinelCa    = 10 + 2 * nbProt + _chainProt;
-  const sentinelRangeM = nbAmp === 0 ? 1 : (4 * nbAmp - 1);
+  const sentinelDmg   = `${sentinelDice}d4`;
+  const sentinelHp    = 10 + 5 * nbProt;
+  const sentinelCa    = 10 + 2 * nbProt;
+  const sentinelRangeM = nbAmp === 0 ? 1 : (3 * nbAmp);
 
   const mods = {
     // Drain : sort OFFENSIF (attaque de base) + Protection → soigne le lanceur
@@ -2382,24 +2372,24 @@ function _vttSpellMods(s) {
     drain: (nbProt > 0 && (s.types || []).includes('offensif'))
       ? { pct: 0.25 + 0.25 * nbProt, nbProt } : null,
     // Lacération (branche d'Affliction) : -CA brut sur la cible, -1 par rune
-    // Affliction sans chaînage (plafonné en jeu : 2 joueur · 4 élite/boss).
+    // Affliction (plafonné en jeu : 2 joueur · 4 élite/boss).
     // Neutralisée si combo Sentinelle (Affliction + Invocation) : portée par la sentinelle.
     laceration: (lacCount > 0 && !isSentinelle)
       ? { runes: lacCount, reduction: lacCount, max: 2, maxElite: 4 } : null,
-    // Chance : étend la plage critique (RC 20 → 21-2N..20)
+    // Chance : étend la plage critique (RC 20 → 20-N..20)
     chance: nbCh > 0
-      ? { rc: 20 - (2*nbCh - 1) } : null,
+      ? { rc: 20 - nbCh } : null,
     // Concentration : DD du JS Sagesse en cas de dégâts reçus
     concentration: nbConc > 0
       ? { dd: 11 + 2 * (nbConc - 1), runes: nbConc } : null,
     // Déplacement (rune Amplification en mode déplacement) : soi / pousse / attire.
-    // Portée = 4N-1 cases (1 rune → 3, 2 → 7…). Sous-mode dans s.deplacement.mode.
+    // Portée = 3N cases. Sous-mode dans s.deplacement.mode.
     deplacement: (s.ampMode === 'deplacement' && nbAmp > 0)
-      ? { mode: s.deplacement?.mode || 'self', cells: Math.max(1, 4 * nbAmp - 1) }
+      ? { mode: s.deplacement?.mode || 'self', cells: Math.max(1, 3 * nbAmp) }
       : null,
     // Allonge magique : Ench + Amp + slot arme → portée étendue (au lieu d'une zone)
     allonge: (nbEnch > 0 && nbAmp > 0 && (s.enchantSlot || 'arme') === 'arme')
-      ? { meters: 4*nbAmp - 1, cells: Math.ceil((4*nbAmp - 1) / CELL_M) } : null,
+      ? { meters: 3 * nbAmp, cells: Math.ceil((3 * nbAmp) / CELL_M) } : null,
     // Enchantement mode Dégâts : bonus dégâts sur les attaques d'arme de l'allié
     // Formule auto : (1+Puiss)d4 +2 — appliquée pendant la durée du sort
     // ⚠️ Absorbé par le combo Arme invoquée (Ench + Inv) → on ne le déclenche pas alors
@@ -2409,38 +2399,36 @@ function _vttSpellMods(s) {
       ? {
           formula: (s.enchantDegats || '').trim() || `${1 + nbP}d4 +2`,
           element: s.noyauTypeId || null,
-          nbCibles: nbEnch === 1 ? 1 : nbEnch + 1,
+          nbCibles: nbEnch,
         } : null,
     // Enchantement mode État : applique l'état choisi directement à l'allié
     enchantEtatId: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
       ? (s.enchantEtatId || null) : null,
     // Enchantement mode Toucher : bonus au toucher de l'allié (auto = 2 + Puissance)
     enchantToucher: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'toucher')
-      ? { bonus: _enchBonus, nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
+      ? { bonus: _enchBonus, nbCibles: nbEnch } : null,
     // Enchantement mode Déplacement : cases de mouvement en plus (auto = 2 + Puissance)
     enchantMove: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'deplacement')
-      ? { bonusCells: _enchBonus, nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
+      ? { bonusCells: _enchBonus, nbCibles: nbEnch } : null,
     // Enchantement slot=pieds : bonus mouvement (cases supplémentaires)
     // Auto : +2 cases / rune Puissance, ou +1 par défaut
     enchantPieds: (nbEnch > 0 && nbInv === 0 && s.enchantSlot === 'pieds')
-      ? { bonusCells: Math.max(1, nbP * 2 || 1), nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
+      ? { bonusCells: Math.max(1, nbP * 2 || 1), nbCibles: nbEnch } : null,
     // Enchantement slot=tete / torse : effet libre (matrice), buff générique
     enchantGeneric: (nbEnch > 0 && nbInv === 0 && (s.enchantSlot === 'tete' || s.enchantSlot === 'torse'))
-      ? { slot: s.enchantSlot, effect: s.enchantEffect || '', nbCibles: nbEnch === 1 ? 1 : nbEnch + 1 } : null,
-    // Affliction : JS Sa DD scalable selon nb runes Affliction
-    // Base 11, +2 par rune supplémentaire, +1 par chainage (= nbAff-1)
-    // → nbAff=1 : DD 11 · nbAff=2 : 11+2+1=14 · nbAff=3 : 11+4+2=17
+      ? { slot: s.enchantSlot, effect: s.enchantEffect || '', nbCibles: nbEnch } : null,
+    // Affliction : JS Sa DD scalable selon nb runes Affliction.
+    // Base 11, +2 par rune supplémentaire.
     // Slot détermine la nature : torse=DoT · pieds=mouvement · tete=sensoriel · arme=combat
     // ⚠️ Absorbé par le combo Sentinelle (Aff + Inv) → l'affliction est portée par la sentinelle
     // ⚠️ Absorbé par le combo Aura punitive (Prot + Aff sans Puiss) → l'affliction est gérée par l'aura
     affliction: (nbAff > 0 && nbInv === 0 && !(nbProt > 0 && nbP === 0) && !isLacMode)
       ? (() => {
           // Mode DoT : formule scalable par défaut, override possible via afflictionDotFormula
-          // Base 1d4+2, +1 dé par Puissance, +2 fixe par chaînage Puissance (≥2)
-          // → nbP=0:1d4+2 · nbP=1:2d4+2 · nbP=2:3d4+4 · nbP=3:4d4+6
+          // Base 1d4+2, +1 dé par Puissance
+          // → nbP=0:1d4+2 · nbP=1:2d4+2 · nbP=2:3d4+2
           const dotDice = 1 + nbP;
-          const dotMod  = 2 + 2 * Math.max(0, nbP - 1);
-          const dotAutoFormula = `${dotDice}d4 +${dotMod}`;
+          const dotAutoFormula = `${dotDice}d4 +2`;
           const dotFormula = (s.afflictionDotFormula || '').trim() || dotAutoFormula;
           // Stat de sauvegarde dérivée :
           //  - mode "État" : prend la defaultSaveStat de l'état choisi (si lib chargée)
@@ -2459,7 +2447,7 @@ function _vttSpellMods(s) {
             mode,
             effect:   s.afflictionEffect || '',
             element:  s.noyauTypeId || null,
-            dd:       11 + 3 * (nbAff - 1),
+            dd:       11 + 2 * (nbAff - 1),
             nbAff,
             nbP,
             dotFormula,
@@ -2489,7 +2477,7 @@ function _vttSpellMods(s) {
     armeInvoquee: (nbEnch > 0 && nbInv > 0)
       ? { elementId: s.noyauTypeId || null, nbPuissance: nbP } : null,
     // Sentinelle : Affliction + Invocation → token stationnaire (stats propres, 2 tours)
-    // Dispersion permet d'invoquer plusieurs sentinelles : 1 base + 2N pour N runes (chaînage standard)
+    // Dispersion permet d'invoquer plusieurs sentinelles : 1 + N pour N runes.
     sentinelle: (nbAff > 0 && nbInv > 0)
       ? {
           slot: s.afflictionSlot || 'arme',
@@ -2499,7 +2487,7 @@ function _vttSpellMods(s) {
           hp: sentinelHp, ca: sentinelCa,
           rangeCells: Math.max(1, Math.ceil(sentinelRangeM / CELL_M)),
           rangeMeters: sentinelRangeM,
-          nbInvocations: nbDisp > 0 ? 2 * nbDisp : 1,
+          nbInvocations: nbDisp > 0 ? 1 + nbDisp : 1,
           nbP, nbProt, nbAmp,
         } : null,
     // Canalisé persistant : Durée + Concentration → durée liée à la concentration
@@ -3260,7 +3248,7 @@ function _buildSpellOption(s, ctx) {
   let zoneW = (mods?.allonge || _isDepl) ? 0 : (s.zoneW || 0);
   let zoneH = (mods?.allonge || _isDepl) ? 0 : (s.zoneH || 0);
   // Si pas de zone manuelle ni allonge : calcule depuis les runes (Amplification × Dispersion).
-  // Miroir EXACT de _calcSortZone (spells.js) : Amp ×N → 4N-1 · Disp ×M en combo → 4M-1.
+  // Miroir EXACT de _calcSortZone (spells.js) : Amp ×N → 3N · Disp ×M en combo → 3M.
   // L'éditeur affiche ces nombres comme la taille de zone (ex. 1 Amp + 1 Disp = 3×3) ;
   // le VTT doit poser la MÊME grille → 1 case par unité (pas de reconversion mètres→cases,
   // qui rétrécissait le sort, ex. 3×3 affiché → 2×2 posé).
@@ -3269,8 +3257,8 @@ function _buildSpellOption(s, ctx) {
     const _nbAmp  = _runes.filter(r => r === 'Amplification').length;
     const _nbDisp = _runes.filter(r => r === 'Dispersion').length;
     if (_nbAmp >= 1) {
-      zoneW = 4 * _nbAmp  - 1;
-      zoneH = _nbDisp >= 1 ? (4 * _nbDisp - 1) : 1;
+      zoneW = 3 * _nbAmp;
+      zoneH = _nbDisp >= 1 ? (3 * _nbDisp) : 1;
     }
   }
   // Sentinelle / Invocation : force une zone min 1×1 (utile pour le placement)
@@ -3510,7 +3498,7 @@ function _buildAttackOptions(t) {
         const elId = a.noyauTypeId || t.summonElementId || 'physique';
         const elObj = getDamageTypeById(_damageTypes, elId);
         const nbCh = Array.isArray(a.runes) ? a.runes.filter(r => r === 'Chance').length : 0;
-        const rc   = nbCh > 0 ? 20 - (2 * nbCh - 1) : (t.summonChanceRc ?? 20);
+        const rc   = nbCh > 0 ? 20 - nbCh : (t.summonChanceRc ?? 20);
         options.push({
           id: `summon_action_${ai}`,
           icon: a.icon || '✨',
@@ -13786,7 +13774,7 @@ function _vttSpellChips(s, c) {
   const nbAmp = runes.filter(r => r === 'Amplification').length;
   if (nbAmp > 0 && s.ampMode !== 'deplacement') {
     const nbDisp = runes.filter(r => r === 'Dispersion').length;
-    chips.push({ icon:'📐', val:`${4*nbAmp-1}×${nbDisp>=1?(4*nbDisp-1):1}m`, color:'#b47fff' });
+    chips.push({ icon:'📐', val:`${3 * nbAmp}×${nbDisp>=1?(3 * nbDisp):1}m`, color:'#b47fff' });
   }
   if (runes.includes('Durée') || (s.dureeBase && s.dureeBase >= 2)) {
     chips.push({ icon:'⏱️', val:`${calcSpellDuration(s)}t`, color:'#9ca3af' });
