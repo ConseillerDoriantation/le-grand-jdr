@@ -14584,7 +14584,7 @@ function _renderMiniSheet(uid) {
   const chars = sortCharactersForDisplay(Object.values(_characters).filter(c => c.uid === uid));
   if (!chars.length) {
     panel.classList.add('open');
-    panel.innerHTML = `<div class="vtt-ms-empty">Aucun personnage lié pour ${pres.pseudo}.</div>`;
+    panel.innerHTML = `<div class="vtt-ms-empty">Aucun personnage lié pour ${_esc(pres.pseudo)}.</div>`;
     return;
   }
 

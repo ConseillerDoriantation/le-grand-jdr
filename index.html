@@ -21,6 +21,19 @@
   <!-- Thème appliqué avant le rendu pour éviter le flash -->
   <script src="./assets/js/core/theme-boot.js"></script>
 
+  <!-- Version du SDK Firebase centralisée ici (source unique). Pour bumper :
+       changer le numéro à un seul endroit. Doit précéder tout <script type="module">.
+       Les modules importent via les specifiers bare 'firebase/app|auth|firestore'. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "firebase/app":       "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js",
+      "firebase/auth":      "https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js",
+      "firebase/firestore": "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js"
+    }
+  }
+  </script>
+
   <!-- Feuilles de style chargées en parallèle (ordre = cascade).
        Conventions de nommage documentées dans assets/css/main.css -->
   <link rel="stylesheet" href="./assets/css/tokens.css">
