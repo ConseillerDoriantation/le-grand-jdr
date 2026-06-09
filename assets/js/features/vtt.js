@@ -2376,12 +2376,12 @@ function _vttSpellMods(s) {
     // Neutralisée si combo Sentinelle (Affliction + Invocation) : portée par la sentinelle.
     laceration: (lacCount > 0 && !isSentinelle)
       ? { runes: lacCount, reduction: lacCount, max: 2, maxElite: 4 } : null,
-    // Chance : étend la plage critique (RC 20 → 20-N..20)
+    // Chance : étend la plage critique, plafonné à RC 17-20.
     chance: nbCh > 0
-      ? { rc: 20 - nbCh } : null,
-    // Concentration : DD du JS Sagesse en cas de dégâts reçus
+      ? { rc: Math.max(17, 20 - nbCh) } : null,
+    // Concentration : chaque rune supplémentaire facilite le JS de maintien.
     concentration: nbConc > 0
-      ? { dd: 11 + 2 * (nbConc - 1), runes: nbConc } : null,
+      ? { dd: Math.max(5, 11 - 2 * (nbConc - 1)), runes: nbConc } : null,
     // Déplacement (rune Amplification en mode déplacement) : soi / pousse / attire.
     // Portée = 3N cases. Sous-mode dans s.deplacement.mode.
     deplacement: (s.ampMode === 'deplacement' && nbAmp > 0)
@@ -2492,7 +2492,7 @@ function _vttSpellMods(s) {
         } : null,
     // Canalisé persistant : Durée + Concentration → durée liée à la concentration
     canalisePersistant: (nbDur > 0 && nbConc > 0)
-      ? { graceTurns: nbDur + 1, dd: 11 + 2 * (nbConc - 1) } : null,
+      ? { graceTurns: nbDur + 1, dd: Math.max(5, 11 - 2 * (nbConc - 1)) } : null,
     // Invocation (hors combos Sentinelle/Arme invoquée). NOUVEAU modèle : la rune
     // Invocation SÉLECTIONNE des invocations de la bibliothèque du lanceur
     // (s.invocation.ids), 1 par rune. Stats finales = base (lib) + bonus de runes,
@@ -3498,7 +3498,7 @@ function _buildAttackOptions(t) {
         const elId = a.noyauTypeId || t.summonElementId || 'physique';
         const elObj = getDamageTypeById(_damageTypes, elId);
         const nbCh = Array.isArray(a.runes) ? a.runes.filter(r => r === 'Chance').length : 0;
-        const rc   = nbCh > 0 ? 20 - nbCh : (t.summonChanceRc ?? 20);
+        const rc   = nbCh > 0 ? Math.max(17, 20 - nbCh) : (t.summonChanceRc ?? 20);
         options.push({
           id: `summon_action_${ai}`,
           icon: a.icon || '✨',
@@ -13774,7 +13774,7 @@ function _vttSpellChips(s, c) {
   const nbAmp = runes.filter(r => r === 'Amplification').length;
   if (nbAmp > 0 && s.ampMode !== 'deplacement') {
     const nbDisp = runes.filter(r => r === 'Dispersion').length;
-    chips.push({ icon:'📐', val:`${3 * nbAmp}×${nbDisp>=1?(3 * nbDisp):1}m`, color:'#b47fff' });
+    chips.push({ icon:'📐', val:`${3 * nbAmp}×${nbDisp>=1?(3 * nbDisp):1} cases`, color:'#b47fff' });
   }
   if (runes.includes('Durée') || (s.dureeBase && s.dureeBase >= 2)) {
     chips.push({ icon:'⏱️', val:`${calcSpellDuration(s)}t`, color:'#9ca3af' });
