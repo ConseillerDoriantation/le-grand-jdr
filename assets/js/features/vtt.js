@@ -2458,6 +2458,10 @@ function _vttSpellMods(s) {
   // Sentinelle = Affliction (toute branche) + Invocation → la branche est absorbée,
   // pas de Lacération directe du lanceur (l'affliction est portée par la sentinelle).
   const isSentinelle = nbAff > 0 && nbInv > 0;
+  const isAllonge = nbEnch > 0 && nbAmp > 0 && nbDisp === 0 && nbInv === 0 && (s.enchantSlot || 'arme') === 'arme';
+  const isZoneElargie = nbAmp > 0 && nbDisp > 0;
+  const isArmeInvoquee = nbEnch > 0 && nbInv > 0;
+  const isRegeneration = nbProt > 0 && nbAff > 0 && nbInv === 0 && !isLacMode;
   // Bonus chiffré d'un enchantement non-dégâts (toucher/déplacement/CA) :
   // valeur saisie sinon auto = 2 + Puissance.
   const _enchBonus = Number.isFinite(parseInt(s.enchantBonus)) ? parseInt(s.enchantBonus) : (2 + nbP);
@@ -2489,17 +2493,17 @@ function _vttSpellMods(s) {
       ? { dd: Math.max(5, 11 - 2 * (nbConc - 1)), runes: nbConc } : null,
     // Déplacement (rune Amplification en mode déplacement) : soi / pousse / attire.
     // Portée = 3N cases. Sous-mode dans s.deplacement.mode.
-    deplacement: (s.ampMode === 'deplacement' && nbAmp > 0)
+    deplacement: (!isAllonge && !isZoneElargie && s.ampMode === 'deplacement' && nbAmp > 0)
       ? { mode: s.deplacement?.mode || 'self', cells: Math.max(1, 3 * nbAmp) }
       : null,
     // Allonge magique : Ench + Amp + slot arme → portée étendue.
     // Si Dispersion est présente, Amp+Disp doit rester une zone plaçable.
-    allonge: (nbEnch > 0 && nbAmp > 0 && nbDisp === 0 && (s.enchantSlot || 'arme') === 'arme')
+    allonge: isAllonge
       ? { meters: 3 * nbAmp, cells: Math.ceil((3 * nbAmp) / CELL_M) } : null,
     // Enchantement mode Dégâts : bonus dégâts sur les attaques d'arme de l'allié
     // Formule auto : (1+Puiss)d4 +2 — appliquée pendant la durée du sort
     // ⚠️ Absorbé par le combo Arme invoquée (Ench + Inv) → on ne le déclenche pas alors
-    enchantArmeDmg: (nbEnch > 0 && nbInv === 0
+    enchantArmeDmg: (nbEnch > 0 && nbInv === 0 && !isAllonge
                      && (s.enchantMode || 'dmg') === 'dmg'
                      && (s.enchantSlot || 'arme') === 'arme')
       ? {
@@ -2508,35 +2512,35 @@ function _vttSpellMods(s) {
           nbCibles: nbEnch,
         } : null,
     // Enchantement mode État : applique l'état choisi directement à l'allié
-    enchantEtatId: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
+    enchantEtatId: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantMode === 'etat')
       ? (s.enchantEtatId || null) : null,
-    enchantStatePower: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
+    enchantStatePower: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantMode === 'etat')
       ? nbP : 0,
-    enchantStateAmplification: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
+    enchantStateAmplification: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantMode === 'etat')
       ? nbAmp : 0,
-    enchantStateMoveBonus: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat' && Number.isFinite(parseInt(s.enchantStateMoveBonus)))
+    enchantStateMoveBonus: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantMode === 'etat' && Number.isFinite(parseInt(s.enchantStateMoveBonus)))
       ? parseInt(s.enchantStateMoveBonus) : null,
-    enchantStateDmgFormula: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
+    enchantStateDmgFormula: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantMode === 'etat')
       ? ((s.enchantStateDmgFormula || '').trim()) : '',
     // Enchantement mode Toucher : bonus au toucher de l'allié (auto = 2 + Puissance)
-    enchantToucher: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'toucher')
+    enchantToucher: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantMode === 'toucher')
       ? { bonus: _enchBonus, nbCibles: nbEnch } : null,
     // Enchantement mode Déplacement : cases de mouvement en plus (auto = 2 + Puissance)
-    enchantMove: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'deplacement')
+    enchantMove: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantMode === 'deplacement')
       ? { bonusCells: _enchBonus, nbCibles: nbEnch } : null,
     // Enchantement slot=pieds : bonus mouvement (cases supplémentaires)
     // Auto : +2 cases / rune Puissance, ou +1 par défaut
-    enchantPieds: (nbEnch > 0 && nbInv === 0 && s.enchantSlot === 'pieds')
+    enchantPieds: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantSlot === 'pieds')
       ? { bonusCells: Math.max(1, nbP * 2 || 1), nbCibles: nbEnch } : null,
     // Enchantement slot=tete / torse : effet libre (matrice), buff générique
-    enchantGeneric: (nbEnch > 0 && nbInv === 0 && (s.enchantSlot === 'tete' || s.enchantSlot === 'torse'))
+    enchantGeneric: (nbEnch > 0 && nbInv === 0 && !isAllonge && (s.enchantSlot === 'tete' || s.enchantSlot === 'torse'))
       ? { slot: s.enchantSlot, effect: s.enchantEffect || '', nbCibles: nbEnch } : null,
     // Affliction : JS Sa DD scalable selon nb runes Affliction.
     // Base 11, +2 par rune supplémentaire.
     // Slot détermine la nature : torse=DoT · pieds=mouvement · tete=sensoriel · arme=combat
     // ⚠️ Absorbé par le combo Sentinelle (Aff + Inv) → l'affliction est portée par la sentinelle
     // ⚠️ Absorbé par le combo Régénération (Prot + Aff) → l'affliction devient un HoT allié
-    affliction: (nbAff > 0 && nbInv === 0 && !(nbProt > 0) && !isLacMode)
+    affliction: (nbAff > 0 && nbInv === 0 && !isRegeneration && !isLacMode)
       ? (() => {
           // Mode DoT : formule scalable par défaut, override possible via afflictionDotFormula
           // Base 1d4+2, +1 dé par Puissance
@@ -2575,7 +2579,7 @@ function _vttSpellMods(s) {
         })() : null,
     // Régénération : Protection + Affliction → soin sur la durée, pas de soin flat
     // ni d'affliction ennemie. Chaque rune Protection/Affliction ajoute un d4 au tick.
-    regeneration: (nbProt > 0 && nbAff > 0 && !isLacMode)
+    regeneration: isRegeneration
       ? {
           formula: (s.regenerationFormula || '').trim() || `${nbProt + nbAff}d4`,
           nbProt,
@@ -2591,7 +2595,7 @@ function _vttSpellMods(s) {
     bouclierReactif: (nbReac > 0 && nbProt > 0 && protMode === 'ca')
       ? { nbProt, tier: nbProt >= 3 ? 'boss' : nbProt === 2 ? 'elite' : 'mob' } : null,
     // Arme invoquée : Ench + Invocation → token allié temporaire (2 tours)
-    armeInvoquee: (nbEnch > 0 && nbInv > 0)
+    armeInvoquee: isArmeInvoquee
       ? { elementId: s.noyauTypeId || null, nbPuissance: nbP } : null,
     // Sentinelle : Affliction + Invocation → token stationnaire (stats propres, 2 tours)
     // Dispersion permet d'invoquer plusieurs sentinelles : 1 + N pour N runes.
@@ -3485,6 +3489,15 @@ function _buildSpellOption(s, ctx) {
 
   // Toucher / Déplacement : buff pur sur allié → toujours buff-only, même si un
   // degats résiduel traîne (sinon le sort attaquerait ET poserait le buff).
+  if (mods?.allonge) {
+    return { ...common, label,
+      icon: '🏹',
+      dice: `+${mods.allonge.cells} portee`,
+      isUtil: true,
+      isAllonge: true,
+      halfOnMiss: false };
+  }
+
   const _enchBuffNoImpact = !!mods?.enchantToucher || !!mods?.enchantMove;
   const isEnchantOnly = _enchBuffNoImpact || (enchantOnlyAlsoEtat
     ? (!!mods?.enchantArmeDmg || !!mods?.enchantEtatId) && !((s.degats || '').trim())
@@ -5554,6 +5567,41 @@ async function _vttRollAttack() {
       }
     }
 
+    if (opt.mods?.allonge) {
+      await _deductPm();
+      await _consumeItem();
+      await _markActionUsed();
+      const rCa = _handleMultiCast();
+      const shared = _buffShared(opt, srcId);
+      const rangeBuff = { ...shared, type: 'range_bonus', icon: '🏹',
+        bonus: opt.mods.allonge.cells, bonusMeters: opt.mods.allonge.meters };
+      for (const tid of targetIds) {
+        const td = _tokens[tid]?.data; if (!td) continue;
+        const existing = (td.buffs || []).filter(b => !(b.type === 'range_bonus' && b.sortLabel === opt.label));
+        await updateDoc(_tokRef(tid), { buffs: [...existing, rangeBuff] }).catch(() => {});
+      }
+      const targetsLabel = targetIds
+        .map(id => {
+          const td = _tokens[id]?.data;
+          return td ? (_live(td).displayName ?? td.name) : null;
+        })
+        .filter(Boolean)
+        .join(', ') || (lT.displayName ?? tgt.name);
+      await addDoc(_logCol(), {
+        type: 'cast',
+        authorId: STATE.user?.uid || null, authorName,
+        casterName: lS.displayName ?? src.name,
+        characterImage: lS.displayImage || null,
+        targetName: targetsLabel,
+        optLabel: opt.label, pmCost: opt.pmCost,
+        castEffect: `🏹 Allonge +${opt.mods.allonge.cells} portee`,
+        createdAt: serverTimestamp(),
+      }).catch(() => {});
+      showNotif(`🏹 ${opt.label} : portee +${opt.mods.allonge.cells}${_ciblSuffix(rCa)}`, 'success');
+      _cleanup();
+      return;
+    }
+
     // ── Combo Sort suspendu : on stocke l'opt + cible et on n'exécute pas l'effet ──
     // Le sort sera déclenché plus tard via le bouton dans l'inspector du porteur.
     if (opt.mods?.sortSuspendu && !_suspendedTriggerActive) {
@@ -5706,7 +5754,9 @@ async function _vttRollAttack() {
       // ── Construit un castEffect détaillé selon le type de sort ──
       let castEffect = opt.dice || '';
       const _STAT_LBL = { force:'For', dexterite:'Dex', constitution:'Con', intelligence:'Int', sagesse:'Sag', charisme:'Cha' };
-      if (opt.isAffliction) {
+      if (opt.isAllonge) {
+        castEffect = `🏹 Allonge +${opt.mods?.allonge?.cells ?? '?'} portee`;
+      } else if (opt.isAffliction) {
         const statLbl = (_STAT_LBL[opt.afflictionSaveStat] || opt.afflictionSaveStat || 'Con').toUpperCase();
         if (opt.afflictionMode === 'etat' && opt.afflictionEtatId) {
           const lib = CONDITION_BY_ID[opt.afflictionEtatId];

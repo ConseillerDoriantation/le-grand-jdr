@@ -285,7 +285,7 @@ export const SORT_COMBOS = [
     id: 'allonge_magique',
     icon: '🏹',
     defaultName: 'Allonge magique',
-    detect: (counts, s) => counts.Enchantement > 0 && counts.Amplification > 0 && (counts.Dispersion || 0) === 0 && (s?.enchantSlot || 'arme') === 'arme',
+    detect: (counts, s) => counts.Enchantement > 0 && counts.Amplification > 0 && (counts.Dispersion || 0) === 0 && (counts.Invocation || 0) === 0 && (s?.enchantSlot || 'arme') === 'arme',
     describe: (counts) => {
       const len = _ampLength(counts.Amplification);
       return `Enchantement (Arme) + Amplification ×${counts.Amplification} · portée d'attaque de l'arme enchantée +${len} cases (au lieu d'une zone)`;
@@ -331,7 +331,7 @@ export const SORT_COMBOS = [
     defaultName: 'Régénération',
     // Protection + Affliction : les deux runes perdent leur effet initial
     // et deviennent un soin sur la durée appliqué à un allié.
-    detect: (counts, s) => counts.Protection > 0 && counts.Affliction > 0 && s?.afflictionMode !== 'laceration',
+    detect: (counts, s) => counts.Protection > 0 && counts.Affliction > 0 && (counts.Invocation || 0) === 0 && s?.afflictionMode !== 'laceration',
     describe: (counts) => {
       const dice = (counts.Protection || 0) + (counts.Affliction || 0);
       return `Protection ×${counts.Protection} + Affliction ×${counts.Affliction} · ${dice}d4 PV/tour pendant la durée du sort`;
