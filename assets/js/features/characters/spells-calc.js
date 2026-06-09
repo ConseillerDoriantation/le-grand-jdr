@@ -896,7 +896,8 @@ export function _buildSortResume(s, c) {
     // lanceur récupère un % des dégâts infligés, fixé par le nombre de Protection.
     if (comboIds.has('regeneration')) {
       const nbAff = runes.filter(r => r === 'Affliction').length;
-      lines.push({ icon:'💚', label:`Régénération ${(nbProt + nbAff)}d4/tour`, detail:`Soin sur la durée · Protection + Affliction · pas de CA/affliction directe` });
+      const formula = (s.regenerationFormula || '').trim() || `${nbProt + nbAff}d4`;
+      lines.push({ icon:'💚', label:`Régénération ${formula}/tour`, detail:`Soin sur la durée · Protection + Affliction · pas de CA/affliction directe` });
     } else if (comboIds.has('drain')) {
       const pct = Math.round(_calcDrainPct(s) * 100);
       lines.push({ icon:'🩸', label:`Drain ${pct}% des dégâts`, detail:`Soigne le lanceur · cap frappe de base hors Puissance · ${nbProt} Protection` });

@@ -513,7 +513,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
     const activeIds = new Set(_activeCombos(s).map(co => co.id));
     if (activeIds.has('regeneration')) {
       const dice = nbProt + runesAll.filter(r => r === 'Affliction').length;
-      chips.push({ icon:'💚', val: `${dice}d4/t`, color:'#22c38e' });
+      chips.push({ icon:'💚', val: `${(s.regenerationFormula || '').trim() || `${dice}d4`}/t`, color:'#22c38e' });
     } else if (mode === 'soin') {
       if (activeIds.has('drain')) {
         const pct = Math.round(_calcDrainPct(s) * 100);
@@ -1333,6 +1333,18 @@ export async function openSortModal(idx, s) {
       })}
     </div>
 
+    <div id="s-regeneration-section" class="cs-spell-slot-box cs-spell-slot-box--def" style="display:none">
+      <div class="cs-spell-slot-title">💚 Régénération <span>Protection + Affliction · soin sur la durée</span></div>
+      ${_autoValHtml({
+        fieldId: 's-regeneration-formula',
+        label: '💚 HoT',
+        autoValue: '',
+        autoSource: 'Protection + Affliction',
+        currentValue: s?.regenerationFormula,
+        placeholder: 'ex : 2d4, 3d4...',
+      })}
+    </div>
+
     <!-- Enchantement — visible si rune Enchantement > 0 -->
     <div id="s-enchant-section" class="cs-spell-slot-box cs-spell-slot-box--ench" style="${hasEnchant?'':'display:none'}">
       <div class="cs-spell-slot-title">✨ Enchantement <span>Cible alliée · 2 tours</span></div>
@@ -1733,6 +1745,19 @@ function _calcEnchantStateDmgAuto(s) {
   return `${1 + nbP}d4 +2`;
 }
 
+function _isRegenerationComboActive(counts = _runeCountsEdit) {
+  return (counts?.Protection || 0) > 0
+    && (counts?.Affliction || 0) > 0
+    && (document.getElementById('s-affliction-mode')?.value || 'dot') !== 'laceration';
+}
+
+function _calcRegenerationAuto(s) {
+  const runes = s?.runes || [];
+  const nbProt = runes.filter(r => r === 'Protection').length;
+  const nbAff = runes.filter(r => r === 'Affliction').length;
+  return nbProt > 0 && nbAff > 0 ? `${nbProt + nbAff}d4` : '';
+}
+
 /** Re-style les boutons de type + ajuste la visibilité des sections conditionnelles. */
 function _applyTypeChange() {
   const TYPE_CFG = {
@@ -1779,18 +1804,27 @@ function _refreshConditionalSections() {
   // l'affliction n'est PAS en suppression d'impact dans ce mode.
   const _afflMode = document.getElementById('s-affliction-mode')?.value || 'dot';
   const isLaceration = (counts.Lacération || 0) > 0 || (hasAffliction && _afflMode === 'laceration');
+  const isRegen = _isRegenerationComboActive(counts);
   const hasAfflictionDebuff = hasAffliction && _afflMode !== 'laceration';
   if (dSec) dSec.style.display = ((isOffensive || isLaceration) && !hasAfflictionDebuff && !isDepl && !anyInvoc) ? '' : 'none';
   // Combo Drain : sort offensif + Protection → la Protection devient un vol de vie %.
   // On masque alors le choix CA/Soin et leurs montants, et on affiche l'indicateur.
   const isDrain   = isOffensive && hasProt;
   const isAmpSupportHeal = isSupport && hasAmp && !isDepl && !hasProt;
+  const protSec = document.getElementById('s-prot-section');
+  const affSec = document.getElementById('s-affliction-section');
+  const regenSec = document.getElementById('s-regeneration-section');
+  const affModes = document.getElementById('s-affliction-modes');
   const protGroup = document.getElementById('s-prot-mode-group');
   const caSec     = document.getElementById('s-ca-section');
   const drainEl   = document.getElementById('s-prot-drain');
-  if (protGroup) protGroup.style.display = isDrain ? 'none' : '';
-  if (caSec)     caSec.style.display     = (!isDrain && protMode === 'ca') ? '' : 'none';
-  if (sSec)      sSec.style.display      = (!isDrain && ((hasProt && protMode === 'soin') || isAmpSupportHeal)) ? '' : 'none';
+  if (protSec) protSec.style.display = (hasProt && !isRegen) ? '' : 'none';
+  if (affSec)  affSec.style.display  = (hasAffliction && !isRegen) ? '' : 'none';
+  if (regenSec)  regenSec.style.display  = isRegen ? '' : 'none';
+  if (affModes)  affModes.style.display  = isRegen ? 'none' : '';
+  if (protGroup) protGroup.style.display = (isDrain || isRegen) ? 'none' : '';
+  if (caSec)     caSec.style.display     = (!isDrain && !isRegen && protMode === 'ca') ? '' : 'none';
+  if (sSec)      sSec.style.display      = (!isDrain && !isRegen && ((hasProt && protMode === 'soin') || isAmpSupportHeal)) ? '' : 'none';
   if (drainEl) {
     drainEl.style.display = isDrain ? '' : 'none';
     if (isDrain) {
@@ -2399,9 +2433,10 @@ function _refreshRunesSection(changedNom) {
   // (DoT/État/Lacération) et affiche une note — c'est une invocation de sentinelle.
   {
     const isSentinelle = (_runeCountsEdit['Affliction'] || 0) > 0 && (_runeCountsEdit['Invocation'] || 0) > 0;
+    const isRegen = _isRegenerationComboActive(_runeCountsEdit);
     const modesEl = document.getElementById('s-affliction-modes');
     const noteEl  = document.getElementById('s-affliction-sentinelle-note');
-    if (modesEl) modesEl.style.display = isSentinelle ? 'none' : '';
+    if (modesEl) modesEl.style.display = (isSentinelle || isRegen) ? 'none' : '';
     if (noteEl)  noteEl.style.display  = isSentinelle ? '' : 'none';
   }
   // Plus aucune rune Amplification → on repasse en mode Zone (évite un état
@@ -2476,6 +2511,7 @@ function _refreshAutoValChips() {
   apply('s-enchant-degats', _calcEnchantDegats(s),  _autoSourceEnchantDeg(s));
   apply('s-enchant-state-move-bonus', _calcEnchantStateMoveAuto(s), 'État + Amplification');
   apply('s-enchant-state-dmg-formula', _calcEnchantStateDmgAuto(s), 'État + Puissance');
+  apply('s-regeneration-formula', _calcRegenerationAuto(s), 'Protection + Affliction');
   apply('s-affliction-dot-formula', _calcAfflictionDot(s), _autoSourceAfflictionDot(s));
   apply('s-duree-base', String(_calcSortDuree(s)), _autoSourceDuree(s));
 }
@@ -2713,6 +2749,7 @@ function _buildSortFromDOM() {
     afflictionEffect: document.getElementById('s-affliction-effect')?.value || '',
     afflictionEtatId: document.getElementById('s-affliction-etat')?.value || null,
     afflictionDotFormula: document.getElementById('s-affliction-dot-formula')?.value?.trim() || '',
+    regenerationFormula: document.getElementById('s-regeneration-formula')?.value?.trim() || '',
     afflictionSaveStat: document.getElementById('s-affliction-save-stat')?.value || '',
     zoneW: null,
     zoneH: null,
@@ -2931,6 +2968,7 @@ export async function saveSort(idx) {
       afflictionEffect:  document.getElementById('s-affliction-effect')?.value
                          ?? (idx >= 0 ? (sorts[idx]?.afflictionEffect || '') : ''),
       afflictionDotFormula: document.getElementById('s-affliction-dot-formula')?.value?.trim() || '',
+      regenerationFormula: document.getElementById('s-regeneration-formula')?.value?.trim() || '',
       afflictionEtatId:  document.getElementById('s-affliction-etat')?.value || null,
       zoneW: null,
       zoneH: null,
@@ -3045,6 +3083,7 @@ function _buildSortFromForm(idx, prevList = []) {
     afflictionMode:   document.getElementById('s-affliction-mode')?.value || 'dot',
     afflictionEffect: document.getElementById('s-affliction-effect')?.value ?? '',
     afflictionDotFormula: document.getElementById('s-affliction-dot-formula')?.value?.trim() || '',
+    regenerationFormula: document.getElementById('s-regeneration-formula')?.value?.trim() || '',
     afflictionEtatId: document.getElementById('s-affliction-etat')?.value || null,
     zoneW: null, zoneH: null,
     dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,

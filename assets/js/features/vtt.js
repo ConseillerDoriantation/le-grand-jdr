@@ -2540,7 +2540,7 @@ function _vttSpellMods(s) {
     // ni d'affliction ennemie. Chaque rune Protection/Affliction ajoute un d4 au tick.
     regeneration: (nbProt > 0 && nbAff > 0 && !isLacMode)
       ? {
-          formula: `${nbProt + nbAff}d4`,
+          formula: (s.regenerationFormula || '').trim() || `${nbProt + nbAff}d4`,
           nbProt,
           nbAff,
         } : null,
@@ -13908,7 +13908,7 @@ function _vttSpellChips(s, c) {
   if (runes.includes('Protection') && runes.includes('Affliction') && !_isLac) {
     const nbProt = runes.filter(r => r === 'Protection').length;
     const nbAff = runes.filter(r => r === 'Affliction').length;
-    chips.push({ icon:'💚', val:`${nbProt + nbAff}d4/t`, color:'#22c38e' });
+    chips.push({ icon:'💚', val:`${(s.regenerationFormula || '').trim() || `${nbProt + nbAff}d4`}/t`, color:'#22c38e' });
   }
   const isAmpSupportHeal = types.includes('defensif')
     && runes.includes('Amplification')
