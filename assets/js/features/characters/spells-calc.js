@@ -285,7 +285,7 @@ export const SORT_COMBOS = [
     id: 'allonge_magique',
     icon: '🏹',
     defaultName: 'Allonge magique',
-    detect: (counts, s) => counts.Enchantement > 0 && counts.Amplification > 0 && (s?.enchantSlot || 'arme') === 'arme',
+    detect: (counts, s) => counts.Enchantement > 0 && counts.Amplification > 0 && (counts.Dispersion || 0) === 0 && (s?.enchantSlot || 'arme') === 'arme',
     describe: (counts) => {
       const len = _ampLength(counts.Amplification);
       return `Enchantement (Arme) + Amplification ×${counts.Amplification} · portée d'attaque de l'arme enchantée +${len} cases (au lieu d'une zone)`;

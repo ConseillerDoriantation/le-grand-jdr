@@ -2492,8 +2492,9 @@ function _vttSpellMods(s) {
     deplacement: (s.ampMode === 'deplacement' && nbAmp > 0)
       ? { mode: s.deplacement?.mode || 'self', cells: Math.max(1, 3 * nbAmp) }
       : null,
-    // Allonge magique : Ench + Amp + slot arme → portée étendue (au lieu d'une zone)
-    allonge: (nbEnch > 0 && nbAmp > 0 && (s.enchantSlot || 'arme') === 'arme')
+    // Allonge magique : Ench + Amp + slot arme → portée étendue.
+    // Si Dispersion est présente, Amp+Disp doit rester une zone plaçable.
+    allonge: (nbEnch > 0 && nbAmp > 0 && nbDisp === 0 && (s.enchantSlot || 'arme') === 'arme')
       ? { meters: 3 * nbAmp, cells: Math.ceil((3 * nbAmp) / CELL_M) } : null,
     // Enchantement mode Dégâts : bonus dégâts sur les attaques d'arme de l'allié
     // Formule auto : (1+Puiss)d4 +2 — appliquée pendant la durée du sort
@@ -4673,13 +4674,13 @@ function _vttPickOpt(srcId, tgtId, idx) {
   }
 
   // Sort à zone AoE : entrer en mode placement (sauf si on revient d'une validation)
-  if ((opt.zoneW > 0 || opt.zoneH > 0) && opt.sortIdx !== undefined && !_mtPending) {
+  if ((opt.zoneW > 0 || opt.zoneH > 0) && !_mtPending) {
     _startZonePlacement(srcId, tgtId, opt, +idx);
     return;
   }
 
   // Sort multi-cibles : entrer en mode de sélection (sauf si on revient d'une validation)
-  if ((opt.nbCibles || 1) > 1 && opt.sortIdx !== undefined && !_mtPending) {
+  if ((opt.nbCibles || 1) > 1 && !_mtPending) {
     _startMultiTarget(srcId, tgtId, opt, +idx);
     return;
   }
