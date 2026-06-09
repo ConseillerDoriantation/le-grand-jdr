@@ -532,9 +532,20 @@ function _vttPrimaryWeapon(c) {
     || getMainWeapon(c);
 }
 
+function _characterForToken(t) {
+  if (!t) return null;
+  if (t.characterId && _characters[t.characterId]) return _characters[t.characterId];
+  if (!t.ownerId) return null;
+  const owned = Object.values(_characters || {}).filter(c => c?.uid === t.ownerId);
+  const tokenName = _norm(t.name || '');
+  const byName = tokenName ? owned.find(c => _norm(c?.nom || '') === tokenName) : null;
+  if (byName) return byName;
+  return owned.length === 1 ? owned[0] : null;
+}
+
 function _live(t) {
   if (!t) return null;
-  const c = t.characterId ? _characters[t.characterId] : null;
+  const c = _characterForToken(t);
   const n = t.npcId       ? _npcs[t.npcId]             : null;
   const b = t.beastId     ? _bestiary[t.beastId]       : null;
   const e = c || n || b;
@@ -2714,9 +2725,9 @@ async function _vttApplyDeplacement(src, tgtData, mode, distance) {
 
 // Déduit le coût PM du lanceur (réplique la logique de _deductPm de l'attaque).
 async function _vttSpendSpellPm(src, opt) {
-  if (opt.pmCost > 0 && src.characterId) {
-    const c = _characters[src.characterId];
-    if (c) await updateDoc(_chrRef(src.characterId), { pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost) });
+  const c = _characterForToken(src);
+  if (opt.pmCost > 0 && c?.id) {
+    await updateDoc(_chrRef(c.id), { pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost) });
   }
 }
 
@@ -3619,7 +3630,7 @@ function _buildSpellOption(s, ctx) {
 /** Construit la liste des options d'attaque pour un token (arme / attaques bestiaire / sorts). */
 function _buildAttackOptions(t) {
   const ld = _live(t);
-  const c  = t.characterId ? _characters[t.characterId] : null;
+  const c  = _characterForToken(t);
   const b  = ld._beast || null;
   const options = [];
 
@@ -4171,7 +4182,7 @@ async function _execAttack(srcId, tgtId) {
   const spellOpts   = inRange.filter(o => !o._itemAction && o.sortIdx !== undefined);
 
   // Grouper les sorts par catégorie (ordre des sort_cats du personnage)
-  const srcChar   = _characters[src.characterId] || null;
+  const srcChar   = _characterForToken(src);
   const sortCats  = srcChar?.sort_cats || [];
   const hasCats   = sortCats.length > 0 && spellOpts.some(o => o.catId);
 
@@ -5469,8 +5480,9 @@ async function _vttRollAttack() {
   const authorName = STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'MJ';
   // Payeur du mana : un token convoqué (invocation) n'a pas de PM propre — ses
   // sorts/actions sont payés sur le personnage du LANCEUR (summonOwnerId).
-  const _pmPayerCharId = src.characterId
-    || (src.summonOwnerId ? (_tokens[src.summonOwnerId]?.data?.characterId || null) : null);
+  const _srcChar = _characterForToken(src);
+  const _ownerTok = src.summonOwnerId ? _tokens[src.summonOwnerId]?.data : null;
+  const _pmPayerCharId = _srcChar?.id || (_ownerTok ? _characterForToken(_ownerTok)?.id : null);
   const _deductPm  = async () => {
     if (opt.pmCost > 0 && _pmPayerCharId) {
       const c = _characters[_pmPayerCharId];
@@ -5482,15 +5494,15 @@ async function _vttRollAttack() {
   // Ré-évaluation par itemId (l'index peut s'être déplacé entre build et usage).
   const _consumeItem = async () => {
     const meta = opt._itemAction;
-    if (!meta?.consommable || !src.characterId) return;
-    const c = _characters[src.characterId]; if (!c) return;
+    if (!meta?.consommable || !_srcChar?.id) return;
+    const c = _characters[_srcChar.id] || _srcChar;
     const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
     let idx = -1;
     if (meta.itemId)  idx = inv.findIndex(it => it?.itemId === meta.itemId);
     if (idx < 0 && meta.itemNom) idx = inv.findIndex(it => it?.nom === meta.itemNom);
     if (idx < 0) return; // déjà consommé
     inv.splice(idx, 1);
-    await updateDoc(_chrRef(src.characterId), { inventaire: inv }).catch(() => {});
+    await updateDoc(_chrRef(_srcChar.id), { inventaire: inv }).catch(() => {});
     showNotif(`🧪 ${meta.itemNom || 'Objet'} consommé`, 'info');
   };
   const _markActionUsed = async () => {
