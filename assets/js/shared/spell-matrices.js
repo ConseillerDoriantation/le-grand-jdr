@@ -27,7 +27,7 @@ export const COMBO_IDS = [
   'sentinelle',
   'canalise_persistant',
   'bouclier_reactif',
-  'aura_punitive',
+  'regeneration',
   'sort_suspendu',
   'coup_chance',
 ];
@@ -41,7 +41,7 @@ export const COMBO_DEFAULTS = Object.freeze({
   sentinelle:           { enabled: true, name: 'Sentinelle / Piège' },
   canalise_persistant:  { enabled: true, name: 'Sort canalisé persistant' },
   bouclier_reactif:     { enabled: true, name: 'Bouclier réactif' },
-  aura_punitive:        { enabled: true, name: 'Aura punitive' },
+  regeneration:         { enabled: true, name: 'Régénération' },
   sort_suspendu:        { enabled: true, name: 'Sort suspendu' },
   coup_chance:          { enabled: true, name: 'Coup de chance' },
 });
