@@ -1016,6 +1016,18 @@ export function _buildSortResume(s, c) {
       const lib = _conditionsLibCache || [];
       const etat = s.enchantEtatId ? lib.find(c2 => c2.id === s.enchantEtatId) : null;
       const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ Aucun état choisi';
+      const nbP = runes.filter(r => r === 'Puissance').length;
+      const eff = etat?.effects || {};
+      if (eff.dmgDealtBonus) detailParts.push(`bonus dégâts ${(1 + nbP)}d4+2`);
+      if (eff.movementBonus != null) {
+        const base = Number.isFinite(parseInt(eff.movementBonus)) ? parseInt(eff.movementBonus) : 0;
+        const bonus = base + nbP;
+        detailParts.push(`+${bonus} case${bonus > 1 ? 's' : ''} de déplacement`);
+      }
+      if (eff.attackBy === 'adv') detailParts.push('avantage aux attaques');
+      if (eff.attackAgainstRanged === 'dis') detailParts.push('désavantage aux attaques à distance contre la cible');
+      if (eff.attackAgainstMelee === 'dis') detailParts.push('désavantage aux attaques de mêlée contre la cible');
+      if (eff.concentrationCheck) detailParts.push(`JS ${etat?.defaultSaveStat || 'sagesse'} DD ${etat?.defaultDC || 11} si dégâts`);
       lines.push({ icon:'✨', label:`Enchantement · État sur allié : ${lbl}`,
                    detail: detailParts.join(' · ') });
     } else if (mode === 'toucher' || mode === 'deplacement') {

@@ -472,6 +472,40 @@ function _touchBuffOf(tok) {
     .reduce((s, b) => s + (parseInt(b.bonus) || 0), 0);
 }
 
+function _conditionMoveBonusOf(tok) {
+  return _activeConditionsOf(tok)
+    .reduce((sum, { cond, lib }) => {
+      const raw = cond.movementBonus ?? lib.effects?.movementBonus;
+      const bonus = Number.isFinite(parseInt(raw)) ? parseInt(raw) : 0;
+      return sum + bonus;
+    }, 0);
+}
+
+function _conditionDmgBonusOf(tok) {
+  const active = _activeConditionsOf(tok)
+    .map(({ cond, lib }) => ({
+      cond,
+      lib,
+      formula: (cond.dmgDealtBonusFormula || lib.effects?.dmgDealtBonus || '').trim(),
+    }))
+    .filter(x => !!x.formula);
+  return active[0] || null;
+}
+
+function _scaledEnchantConditionFields(lib, power = 0) {
+  const eff = lib?.effects || {};
+  const fields = { enchantPower: Math.max(0, parseInt(power) || 0) };
+
+  if (eff.movementBonus != null) {
+    const base = Number.isFinite(parseInt(eff.movementBonus)) ? parseInt(eff.movementBonus) : 0;
+    fields.movementBonus = base + fields.enchantPower;
+  }
+  if (eff.dmgDealtBonus) {
+    fields.dmgDealtBonusFormula = `${1 + fields.enchantPower}d4 +2`;
+  }
+  return fields;
+}
+
 function _live(t) {
   if (!t) return null;
   const c = t.characterId ? _characters[t.characterId] : null;
@@ -485,7 +519,7 @@ function _live(t) {
     displayImage:    t.imageUrl ?? null,
     displayHp:       t.hp    ?? 20,
     displayHpMax:    t.hpMax ?? 20,
-    displayMovement: t.movement ?? 6,
+    displayMovement: Math.max(0, (t.movement ?? 6) + _conditionMoveBonusOf(t)),
     displayAttack:   t.attack   ?? 5,
     displayAttackDice: t.attackDice || '1d6',
     displayDefense:  t.defense  ?? 0,
@@ -558,7 +592,7 @@ function _live(t) {
         .filter(bf => (bf.type === 'move_bonus' || bf.type === 'move_debuff')
           && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound))
         .reduce((sum, bf) => sum + (bf.bonus || 0), 0);
-      return Math.max(0, baseMv + moveDelta);
+      return Math.max(0, baseMv + moveDelta + _conditionMoveBonusOf(t));
     })(),
     displayAttack: _baseAtk,
     displayAttackDice: atkDice,
@@ -2435,6 +2469,8 @@ function _vttSpellMods(s) {
     // Enchantement mode État : applique l'état choisi directement à l'allié
     enchantEtatId: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
       ? (s.enchantEtatId || null) : null,
+    enchantStatePower: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
+      ? nbP : 0,
     // Enchantement mode Toucher : bonus au toucher de l'allié (auto = 2 + Puissance)
     enchantToucher: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'toucher')
       ? { bonus: _enchBonus, nbCibles: nbEnch } : null,
@@ -3028,14 +3064,18 @@ async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
     const dur = Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
       ? lib.defaultDuration : 2;
     const expiresAtRound = (round > 0 && !isConsumed && dur > 0) ? round + dur - 1 : null;
+    const scaledFields = _scaledEnchantConditionFields(lib, opt.mods?.enchantStatePower || 0);
     for (const tid of targetIds) {
       const td = _tokens[tid]?.data; if (!td) continue;
-      const existingConds = td.conditions || [];
+      const existingConds = (td.conditions || []).filter(c => c.source !== opt.label);
       if (existingConds.some(c => c.id === etatId)) continue;
       const newCond = {
         id: etatId, appliedAt: Date.now(), appliedBy: srcId || null,
-        source: opt.label || '', saveDC: lib.defaultDC || null,
-        saveStat: lib.defaultSaveStat || null, expiresAtRound,
+        source: opt.label || '',
+        saveDC: lib.defaultSaveStat ? (lib.defaultDC || 11) : null,
+        saveStat: lib.defaultSaveStat || null,
+        expiresAtRound,
+        ...scaledFields,
       };
       await updateDoc(_tokRef(tid), { conditions: [...existingConds, newCond] }).catch(() => {});
       const name = _live(td).displayName ?? td.name;
@@ -3787,6 +3827,7 @@ function _buildAttackOptions(t) {
     b.type === 'dmg_bonus' && b.slot === 'arme'
     && (b.expiresAtRound == null || _round_eff === 0 || _round_eff <= b.expiresAtRound)
   );
+  const _enchantDmgCondition = _conditionDmgBonusOf(t);
   // NB : le bonus toucher d'enchantement (toucher_bonus) n'est PAS baked ici —
   // il est ajouté frais au jet (_vttRollAttack) et au HUD pour rester à jour si
   // le buff est posé après la construction du panneau.
@@ -3795,8 +3836,8 @@ function _buildAttackOptions(t) {
 
   options.push({
     id:               'weapon',
-    icon:             wReplace ? '🔮' : (_enchantBuff ? '🪄' : (isUnarmed ? '👊' : '⚔️')),
-    label:            wLabel + (_enchantBuff ? ' · enchantée' : ''),
+    icon:             wReplace ? '🔮' : ((_enchantBuff || _enchantDmgCondition) ? '🪄' : (isUnarmed ? '👊' : '⚔️')),
+    label:            wLabel + ((_enchantBuff || _enchantDmgCondition) ? ' · enchantée' : ''),
     rawDice:          wDmgDiceRaw,
     dice:             wDmgDiceFinal,
     portee:           wPortee,
@@ -5922,25 +5963,28 @@ async function _vttRollAttack() {
     let buffDmgDetail = null; // { formula, rolls, mod, total, sortLabel, element }
     if (_eligibleForEnchant && !isFumble) {
       const round_eff = _session?.combat?.round ?? 0;
+      const srcDmgCondition = _conditionDmgBonusOf(src);
       const srcDmgBuff = (src.buffs || []).find(b =>
         b.type === 'dmg_bonus' && b.slot === 'arme'
         && (b.expiresAtRound == null || round_eff === 0 || round_eff <= b.expiresAtRound)
       );
-      if (srcDmgBuff?.formula) {
-        const det = _rollDiceDetailed(srcDmgBuff.formula);
+      const srcDmgFormula = srcDmgCondition?.formula || srcDmgBuff?.formula;
+      if (srcDmgFormula) {
+        const det = _rollDiceDetailed(srcDmgFormula);
         if (det.total > 0) {
           buffDmgBonus = det.total;
           buffDmgDetail = {
-            formula: srcDmgBuff.formula,
+            formula: srcDmgFormula,
             rolls: det.rolls, mod: det.mod, sides: det.sides,
             total: det.total,
-            sortLabel: srcDmgBuff.sortLabel || 'Enchantement',
-            element: srcDmgBuff.element || null,
+            sortLabel: srcDmgCondition?.cond?.source || srcDmgBuff?.sortLabel || 'Enchantement',
+            element: srcDmgBuff?.element || null,
           };
           // Affichage détaillé dans la notif : "+1d4(3) +2 = 5 (Boule de Feu)"
           const rollsStr = det.rolls.length ? `(${det.rolls.join(',')})` : '';
           const modStr = det.mod > 0 ? ` +${det.mod}` : det.mod < 0 ? ` ${det.mod}` : '';
-          buffDmgNotes.push(`${srcDmgBuff.icon ?? '⚔️'} +${det.n}d${det.sides}${rollsStr}${modStr} = ${det.total} (${buffDmgDetail.sortLabel})`);
+          const icon = srcDmgCondition?.lib?.icon || srcDmgBuff?.icon || '⚔️';
+          buffDmgNotes.push(`${icon} +${det.n}d${det.sides}${rollsStr}${modStr} = ${det.total} (${buffDmgDetail.sortLabel})`);
           sharedDmgTotalHit += det.total;
         }
       }
@@ -10461,6 +10505,8 @@ function _conditionsAttackMods(srcToken, tgtToken, opt) {
     if (eff.attackAgainst === 'dis') { hasDis = true; reasons.push(`+dis (${CONDITION_BY_ID[c.id].label} sur cible)`); }
     // À terre : adv si CaC, dis si distance
     if (isMelee && eff.attackAgainstMelee === 'adv')  { hasAdv = true; reasons.push(`+adv (CaC vs ${CONDITION_BY_ID[c.id].label})`); }
+    if (isMelee && eff.attackAgainstMelee === 'dis')  { hasDis = true; reasons.push(`+dis (CaC vs ${CONDITION_BY_ID[c.id].label})`); }
+    if (!isMelee && eff.attackAgainstRanged === 'adv'){ hasAdv = true; reasons.push(`+adv (dist. vs ${CONDITION_BY_ID[c.id].label})`); }
     if (!isMelee && eff.attackAgainstRanged === 'dis'){ hasDis = true; reasons.push(`+dis (dist. vs ${CONDITION_BY_ID[c.id].label})`); }
   }
   return { hasAdv, hasDis, reasons };
