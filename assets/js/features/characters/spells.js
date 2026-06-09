@@ -1339,6 +1339,16 @@ export async function openSortModal(idx, s) {
           <option value="">— Aucun (effet libre uniquement) —</option>
         </select>
         <input type="hidden" id="s-enchant-etat-saved" value="${enchantEtatForEdit}">
+        <div id="s-enchant-state-tuning" style="display:none;margin-top:.55rem">
+          <div id="s-enchant-move-tune" style="display:none">
+            <label>Déplacement naturel <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">— vide = auto selon l'état et Amplification</span></label>
+            <input class="input-field" type="number" id="s-enchant-state-move-bonus" value="${s?.enchantStateMoveBonus??''}" placeholder="auto">
+          </div>
+          <div id="s-enchant-dmg-tune" style="display:none;margin-top:.45rem">
+            <label>Dégâts naturels <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">— vide = auto selon l'état et Puissance</span></label>
+            <input class="input-field" id="s-enchant-state-dmg-formula" value="${s?.enchantStateDmgFormula||''}" placeholder="auto">
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1596,6 +1606,9 @@ export async function openSortModal(idx, s) {
       modal.dataset.previewBound = '1';
       modal.addEventListener('input',  _updateSortPreview);
       modal.addEventListener('change', _updateSortPreview);
+      modal.addEventListener('change', (event) => {
+        if (event.target?.id === 's-enchant-etat') _refreshEnchantStateTuning();
+      });
     }
     // Populate les listes déroulantes d'état (affliction + enchantement).
     // Au chargement initial, le dropdown n'a que l'option "— Aucun —" : la valeur
@@ -1605,6 +1618,7 @@ export async function openSortModal(idx, s) {
       _populateAfflictionEtatSelect(),
       _populateEnchantEtatSelect(),
     ]).then(() => {
+      _refreshEnchantStateTuning();
       _updateSortPreview();
     });
   }, 50);
@@ -1648,6 +1662,21 @@ async function _populateConditionSelect(selectId, savedHiddenId, usage) {
 
 function _populateEnchantEtatSelect()    { return _populateConditionSelect('s-enchant-etat', 's-enchant-etat-saved', 'enchantment'); }
 function _populateAfflictionEtatSelect() { return _populateConditionSelect('s-affliction-etat', 's-affliction-etat-saved', 'affliction'); }
+
+function _refreshEnchantStateTuning() {
+  const wrap = document.getElementById('s-enchant-state-tuning');
+  if (!wrap) return;
+  const id = document.getElementById('s-enchant-etat')?.value || '';
+  const condition = id ? _conditionsLibCache?.find(c => c.id === id) : null;
+  const effects = condition?.effects || {};
+  const hasMove = effects.movementBonus != null;
+  const hasDmg = !!effects.dmgDealtBonus;
+  const move = document.getElementById('s-enchant-move-tune');
+  const dmg = document.getElementById('s-enchant-dmg-tune');
+  if (move) move.style.display = hasMove ? '' : 'none';
+  if (dmg) dmg.style.display = hasDmg ? '' : 'none';
+  wrap.style.display = (hasMove || hasDmg) ? '' : 'none';
+}
 
 /** Re-style les boutons de type + ajuste la visibilité des sections conditionnelles. */
 function _applyTypeChange() {
@@ -2615,6 +2644,8 @@ function _buildSortFromDOM() {
     enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
     enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
     enchantEtatId:    document.getElementById('s-enchant-etat')?.value || null,
+    enchantStateMoveBonus: (() => { const v = document.getElementById('s-enchant-state-move-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
+    enchantStateDmgFormula: document.getElementById('s-enchant-state-dmg-formula')?.value?.trim() || '',
     enchantSlot:      'arme', // legacy compat (preview live, sera écrasé à la save par la valeur en BDD)
     enchantEffect:    document.getElementById('s-enchant-effect')?.value ?? '',
     afflictionSlot:   document.getElementById('s-affliction-slot')?.value || 'arme',
@@ -2827,6 +2858,8 @@ export async function saveSort(idx) {
       enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
     enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
       enchantEtatId:    document.getElementById('s-enchant-etat')?.value || null,
+      enchantStateMoveBonus: (() => { const v = document.getElementById('s-enchant-state-move-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
+      enchantStateDmgFormula: document.getElementById('s-enchant-state-dmg-formula')?.value?.trim() || '',
       // enchantSlot legacy : conservé en BDD pour rétro-compat des combos, mais
       // l'UI n'expose plus de slot. Défaut 'arme' aligné sur le bonus dégâts.
       enchantSlot:      idx >= 0 ? (sorts[idx]?.enchantSlot || 'arme') : 'arme',
@@ -2943,6 +2976,8 @@ function _buildSortFromForm(idx, prevList = []) {
     enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
     enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
     enchantEtatId:    document.getElementById('s-enchant-etat')?.value || null,
+    enchantStateMoveBonus: (() => { const v = document.getElementById('s-enchant-state-move-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
+    enchantStateDmgFormula: document.getElementById('s-enchant-state-dmg-formula')?.value?.trim() || '',
     enchantSlot:      idx >= 0 ? (prevList[idx]?.enchantSlot || 'arme') : 'arme',
     enchantEffect:    document.getElementById('s-enchant-effect')?.value ?? '',
     afflictionSlot:   document.getElementById('s-affliction-slot')?.value || 'torse',
