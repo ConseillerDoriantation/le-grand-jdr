@@ -3318,8 +3318,36 @@ async function _vttApplyRegeneration(srcId, targetIds, opt) {
     const td = _tokens[tid]?.data; if (!td) continue;
     const existing = (td.buffs || []).filter(b => !(b.type === 'regen' && b.sortLabel === opt.label));
     await updateDoc(_tokRef(tid), { buffs: [...existing, newBuff] }).catch(() => {});
-    const name = _live(td).displayName ?? td.name;
+    const lT = _live(td);
+    const name = lT.displayName ?? td.name;
     showNotif(`💚 ${name} : Régénération ${newBuff.formula}/tour`, 'success');
+
+    const det = _rollDiceDetailed(newBuff.formula);
+    if (det.total <= 0) continue;
+    const curHp = lT.displayHp ?? td.hp ?? 20;
+    const hpMax = lT.displayHpMax ?? 20;
+    const newHp = Math.min(hpMax, curHp + det.total);
+    const effectiveHeal = Math.max(0, newHp - curHp);
+    if (effectiveHeal <= 0) continue;
+    let hpApplied = true;
+    await _setHp(td, newHp).catch(err => {
+      hpApplied = false;
+      console.error('[VTT] Régénération tick immédiat : HP non appliqués', err);
+      showNotif(`⚠️ ${name} : tick de Régénération non appliqué (${err?.code || err?.message || 'permissions ?'})`, 'error');
+    });
+    if (!hpApplied) continue;
+    await addDoc(_logCol(), {
+      type: 'dot-tick',
+      isHeal: true,
+      authorId: STATE.user?.uid || null,
+      authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
+      tokenName: name,
+      rolls: [{ formula: newBuff.formula, rolled: det.total, rolledDice: det.rolls, mod: det.mod, sides: det.sides, sortLabel: opt.label || 'Régénération' }],
+      total: effectiveHeal, rolledTotal: det.total, newHp, hpMax,
+      immediate: true,
+      createdAt: serverTimestamp(),
+    }).catch(() => {});
+    showNotif(`💚 ${name} : Régénération ${newBuff.formula} → +${effectiveHeal} PV (proc cast)`, 'success');
   }
 }
 
