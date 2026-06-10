@@ -1136,7 +1136,9 @@ export function _buildSortResume(s, c) {
   const hideAff  = comboIds.has('sentinelle') || comboIds.has('regeneration');
   if (nbEnch > 0 && !hideEnch) {
     const mode    = s.enchantMode || 'dmg';
-    const cibleStr = nbEnch === 1 ? 'sur 1 allié' : `sur ${nbEnch} alliés`;
+    // Cibles pilotées par Dispersion (pas par le nombre de runes Enchantement).
+    const nbCib   = _calcSortCibles(s);
+    const cibleStr = nbCib === 1 ? 'sur 1 allié' : `sur ${nbCib} alliés`;
     const detailParts = ['2 tours', cibleStr];
     // Mode décisif : si État → état affiché (jamais dégâts) ; si Dégâts → dégâts (jamais état)
     if (mode === 'etat') {
@@ -1197,7 +1199,9 @@ export function _buildSortResume(s, c) {
       ? (Number.isFinite(parseInt(etat?.defaultDC)) ? parseInt(etat.defaultDC) : 11)
       : 11 + 2 * (nbAff - 1);
     const statLbl = statShort(saveStat) || saveStat;
-    const cibleStr = nbAff === 1 ? 'sur 1 ennemi' : `sur ${nbAff} ennemis`;
+    // Cibles pilotées par Dispersion (le nb de runes Affliction scale le DD, pas les cibles).
+    const nbCib   = _calcSortCibles(s);
+    const cibleStr = nbCib === 1 ? 'sur 1 ennemi' : `sur ${nbCib} ennemis`;
 
     if (mode === 'etat') {
       // Mode État : on affiche l'état appliqué, PAS la formule DoT
