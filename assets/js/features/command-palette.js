@@ -30,7 +30,6 @@ const PAGE_SHORTCUTS = [
   { id: 'dashboard',    label: 'Tableau de bord', icon: '🏠', aliases: 'accueil home dashboard résumé resume campagne' },
   { id: 'vtt',          label: 'Jouer',           icon: '🎲', subtitle: 'Table virtuelle', aliases: 'table virtuelle vtt combat partie plateau direct session jouer maintenant' },
   { id: 'characters',   label: 'Personnage',      icon: '⚔️', aliases: 'perso fiche stats inventaire sorts équipement equipement' },
-  { id: 'quests',       label: 'Quêtes',          icon: '📜', aliases: 'objectifs missions quête quete quest objectifs actifs' },
   { id: 'map',          label: 'Carte',           icon: '🗺️', aliases: 'lieux exploration map voyager voyage' },
   { id: 'shop',         label: 'Boutique',        icon: '🛒', aliases: 'acheter objets équipement equipement magasin commerce or' },
   { id: 'story',        label: 'Trame',           icon: '📖', aliases: 'histoire scénario scenario récit recit campagne intrigue' },
@@ -121,15 +120,19 @@ async function _loadEntries() {
     });
   }
 
-  // Quêtes
+  // Groupes (quêtes liées à une mission de la Trame). Les anciennes quêtes
+  // autonomes (sans missionId) ne sont plus indexées.
   for (const q of quests) {
+    if (!q.missionId) continue;
     const title = _firstStr(q, ['titre', 'nom', 'name']);
     if (!title) continue;
+    const mission = story.find(s => s.id === q.missionId);
     entries.push({
-      type: 'quest', typeLabel: 'Quête', id: q.id, title,
-      subtitle: [q.statut, _trunc(q.description || q.resume || '', 80)].filter(Boolean).join(' · '),
-      icon: '📜',
-      search: _norm([title, q.description, q.resume, q.statut].filter(Boolean).join(' ')),
+      type: 'group', typeLabel: 'Groupe', id: q.id, title,
+      payload: { missionId: q.missionId },
+      subtitle: [mission?.titre, q.statut].filter(Boolean).join(' · '),
+      icon: '👥',
+      search: _norm([title, mission?.titre, q.statut].filter(Boolean).join(' ')),
     });
   }
 
@@ -329,16 +332,16 @@ async function _executeEntry(entry) {
         return;
       }
 
-      case 'quest':
-        await go('quests');
+      case 'group': {
+        await go('story');
         await _nextTick();
-        if (STATE.isAdmin) {
-          const { editQuest } = await import("./quests.js");
-          editQuest(entry.id);
-        } else {
-          _highlight(`[data-quest-id="${entry.id}"]`);
+        const missionId = entry.payload?.missionId;
+        if (missionId) {
+          const { openStoryDetail } = await import('./story.js');
+          openStoryDetail(missionId);
         }
         return;
+      }
 
       case 'achievement':
         await go('achievements');

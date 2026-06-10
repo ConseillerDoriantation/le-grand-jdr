@@ -3,16 +3,16 @@
 // ══════════════════════════════════════════════
 import { STATE, FS } from '../core/state.js';
 import { registerActions, dispatchAction } from '../core/actions.js';
-import { loadChars, loadCollection, getCachedCollection, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
+import { loadChars, loadCollection, getCachedCollection, getDocData, getDocDataSilent } from '../data/firestore.js';
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser } from '../shared/char-stats.js';
 import { showNotif } from '../shared/notifications.js';
 import { watch, watchDoc } from '../shared/realtime.js';
-import { setDashboardPartyChars, setDashboardQuests, findDashboardQuest } from '../shared/dashboard-session.js';
+import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
-import { dedupeQuestParticipants, toggleQuestParticipant } from '../shared/participants.js';
+import { dedupeQuestParticipants } from '../shared/participants.js';
 
 // TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
 import { renderCollectionPage } from '../features/collection.js';
@@ -349,9 +349,12 @@ const PAGES = {
     const collectionTotal  = collectionItems.length;
     const collectionUnlocked = collectionItems.filter(c => c.unlocked).length;
     const collectionPct    = collectionTotal > 0 ? Math.round((collectionUnlocked / collectionTotal) * 100) : 0;
-    const activeQuests     = quests
-      .filter(q => q.statut === 'active')
+    // Groupes « En cours » de la Trame (quêtes liées à une mission). L'ancien
+    // modèle de quêtes autonomes est abandonné — le hub reflète la Trame.
+    const activeGroups     = quests
+      .filter(q => q.missionId && (q.statut || 'active') === 'active')
       .sort((a, b) => (b.createdAt||'') > (a.createdAt||'') ? 1 : -1);
+    const _missionTitleById = new Map(storyItems.map(i => [i.id, i.titre || 'Mission']));
 
     setDashboardQuests(quests);
 
@@ -360,54 +363,21 @@ const PAGES = {
     // Mini-portrait
     const _portMini = (p, size = 26) => characterAvatarHtml(p, { size, border: '2px solid var(--bg-card)', background: 'rgba(79,140,255,.18)', color: 'var(--gold)' });
 
-    // Carte quête (joinable en place, pas de navigation sur le conteneur)
-    const _questRequiredCount = q => {
-      const n = parseInt(q.participantsRequis ?? q.participantsRequired ?? q.nbParticipants ?? 0, 10);
-      return Number.isFinite(n) && n > 0 ? n : 0;
-    };
-    const QDIFF = { facile:'#22c38e', moyen:'#4f8cff', difficile:'#e8b84b', extreme:'#ff6b6b' };
-    const QDLBL = { facile:'Facile',  moyen:'Moyen',   difficile:'Difficile', extreme:'Extrême' };
-    const _dashQuestCard = q => {
-      const col    = QDIFF[q.difficulte] || '#4f8cff';
-      const dlbl   = QDLBL[q.difficulte] || 'Moyen';
-      const parts  = dedupeQuestParticipants(q.participants, { uidAliases: _myUidAliases });
-      const required = _questRequiredCount(q);
-      const joined = parts.some(p => _myUidAliases.includes(p.uid));
-      const portHtml = parts.slice(0,4).map(p => _portMini(p, 24)).join('');
-      const partsLabel = `${parts.length} intéressé${parts.length > 1 ? 's' : ''}${required ? ` · ${required} requis` : ''}`;
-      const joinBtn = !STATE.isAdmin
-        ? `<button class="quest-join-btn${joined?' quest-join-btn--joined':''}"
-             data-action="_dashQuestJoin" data-id="${q.id}">
-             ${joined ? '✓ Rejoint' : '+ Rejoindre'}
-           </button>`
-        : '';
+    // Carte d'un groupe de la Trame (lecture seule → on rejoint/gère dans la Trame).
+    const _dashGroupCard = q => {
+      const parts        = dedupeQuestParticipants(q.participants, { uidAliases: _myUidAliases });
+      const missionTitle = _missionTitleById.get(q.missionId) || 'Mission';
+      const joined       = parts.some(p => _myUidAliases.includes(p.uid));
+      const portHtml     = parts.slice(0, 5).map(p => _portMini(p, 24)).join('');
       return `
-      <div class="quest-card quest-card--active">
+      <div class="quest-card quest-card--active" data-navigate="story" style="cursor:pointer">
         <div class="quest-card-hd">
-          <span class="quest-badge" style="background:${col}22;color:${col};border-color:${col}44">${dlbl}</span>
-          <div style="margin-left:auto;display:flex;gap:.3rem;align-items:center">${joinBtn}</div>
+          <span class="quest-badge" style="background:rgba(79,140,255,.13);color:#7aa7ff;border-color:rgba(79,140,255,.3)">🎯 ${_esc(missionTitle)}</span>
+          ${joined ? `<span style="margin-left:auto;font-size:.7rem;color:#22c38e;font-weight:700">✓ Rejoint</span>` : ''}
         </div>
-        <div class="quest-card-title">${_esc(q.titre||'Quête')}</div>
-        ${q.description ? `<div class="quest-card-desc">${_esc(q.description)}</div>` : ''}
-        ${q.recompense  ? `<div class="quest-reward">🎁 ${_esc(q.recompense)}</div>` : ''}
-        <div class="quest-parts">${portHtml}${parts.length>4?`<span class="quest-parts-count">+${parts.length-4}</span>`:''}<span class="quest-parts-count">${partsLabel}</span></div>
-      </div>`;
-    };
-
-    // Bloc mission compact
-    const _missionCard = () => {
-      if (!mission) return null;
-      return `<div class="dash-info-card" data-navigate="story" style="cursor:pointer">
-        <div class="dash-mission-compact">
-          ${mission.imageUrl
-            ? `<img src="${mission.imageUrl}" class="dash-mission-thumb">`
-            : `<div class="dash-mission-thumb dash-mission-thumb--empty">⚔️</div>`}
-          <div style="flex:1;min-width:0">
-            <div class="dash-info-sublabel">Mission active${mission.acte ? ` · ${_esc(mission.acte)}` : ''}</div>
-            <div class="dash-info-title">${_esc(mission.titre||'Mission')}</div>
-            ${mission.lieu ? `<div class="dash-info-meta">📍 ${_esc(mission.lieu)}</div>` : ''}
-          </div>
-        </div>
+        <div class="quest-card-title">${_esc(q.titre || 'Groupe')}</div>
+        ${q.recompense ? `<div class="quest-reward">🎁 ${_esc(q.recompense)}</div>` : ''}
+        <div class="quest-parts">${portHtml}${parts.length > 5 ? `<span class="quest-parts-count">+${parts.length - 5}</span>` : ''}<span class="quest-parts-count">${parts.length} membre${parts.length > 1 ? 's' : ''}</span></div>
       </div>`;
     };
 
@@ -621,32 +591,30 @@ const PAGES = {
         </button>`).join('')}</div>`;
     }
 
-    function _questsPanelV2() {
-      const QDIFF = { facile:'Facile', moyen:'Moyen', difficile:'Difficile', extreme:'Extrême' };
-      const QDCLS = { facile:'dv2-rarity-common', moyen:'dv2-rarity-rare', difficile:'dv2-rarity-epic', extreme:'dv2-rarity-legendary' };
-      const QICLS = { principale:'dv2-qi-main', secondaire:'dv2-qi-side', quotidienne:'dv2-qi-daily' };
-      const QICON = { principale:'🔥', secondaire:'🗡️', quotidienne:'🌅', extreme:'☠️', difficile:'⚠️' };
+    function _groupsPanelV2() {
+      // Mes groupes « En cours » (ceux que j'ai rejoints), sinon tous les groupes actifs.
+      const mine = activeGroups.filter(q => (q.participants || []).some(p => _myUidAliases.includes(p.uid)));
+      const list = (mine.length ? mine : activeGroups).slice(0, 5);
       return `
       <div class="dv2-panel-card">
         <div class="dv2-panel-header">
-          <div class="dv2-panel-title">🗡️ Quêtes <span class="dv2-panel-count">${activeQuests.length}</span></div>
-          <button class="dv2-section-action" data-navigate="quests">Voir tout →</button>
+          <div class="dv2-panel-title">👥 Mes groupes <span class="dv2-panel-count">${mine.length || activeGroups.length}</span></div>
+          <button class="dv2-section-action" data-navigate="story">Trame →</button>
         </div>
-        ${activeQuests.slice(0, 5).length > 0 ? activeQuests.slice(0, 5).map(q => {
-          const icn    = QICON[q.type] || QICON[q.difficulte] || '🗡️';
-          const cls    = QICLS[q.type] || 'dv2-qi-default';
-          const rarity = QDCLS[q.difficulte] || 'dv2-rarity-common';
-          const joined = Array.isArray(q.participants) && q.participants.some(p => _myUidAliases.includes(p.uid));
+        ${list.length ? list.map(q => {
+          const joined = (q.participants || []).some(p => _myUidAliases.includes(p.uid));
+          const missionTitle = _missionTitleById.get(q.missionId) || 'Mission';
+          const count = dedupeQuestParticipants(q.participants, { uidAliases: _myUidAliases }).length;
           return `
-          <div class="dv2-quest-item" data-navigate="quests">
-            <div class="dv2-quest-icon ${cls}">${icn}</div>
+          <div class="dv2-quest-item" data-navigate="story">
+            <div class="dv2-quest-icon dv2-qi-main">🎯</div>
             <div style="flex:1;min-width:0">
-              <div class="dv2-quest-name">${_esc(q.titre||'Quête')}</div>
-              <div class="dv2-quest-sub">${QDIFF[q.difficulte]||'—'}${joined?' · ✓ Rejointe':''}</div>
+              <div class="dv2-quest-name">${_esc(q.titre || 'Groupe')}</div>
+              <div class="dv2-quest-sub">${_esc(missionTitle)}${joined ? ' · ✓ Rejoint' : ''}</div>
             </div>
-            <div class="dv2-quest-rarity ${rarity}">${(q.difficulte||'').toUpperCase()||'—'}</div>
+            <div class="dv2-quest-rarity dv2-rarity-rare">${count} 👤</div>
           </div>`;
-        }).join('') : `<div style="padding:18px;color:var(--text-dim);font-size:.8rem">Aucune quête active.</div>`}
+        }).join('') : `<div style="padding:18px;color:var(--text-dim);font-size:.8rem">Aucun groupe en cours. Rejoins-en un dans la <strong>Trame</strong>.</div>`}
       </div>`;
     }
 
@@ -742,10 +710,10 @@ const PAGES = {
           <div class="dv2-stat-card-val" style="color:var(--gold-2)">${chars.length}</div>
           <div class="dv2-stat-card-lbl">Personnage${chars.length!==1?'s':''}</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-mp" data-navigate="quests" style="cursor:pointer">
-          <span class="dv2-stat-card-icon">🗡️</span>
-          <div class="dv2-stat-card-val" style="color:#b99fff">${activeQuests.length}</div>
-          <div class="dv2-stat-card-lbl">Quête${activeQuests.length!==1?'s':''} active${activeQuests.length!==1?'s':''}</div>
+        <div class="dv2-stat-card dv2-sc-mp" data-navigate="story" style="cursor:pointer">
+          <span class="dv2-stat-card-icon">👥</span>
+          <div class="dv2-stat-card-val" style="color:#b99fff">${activeGroups.length}</div>
+          <div class="dv2-stat-card-lbl">Groupe${activeGroups.length!==1?'s':''} en cours</div>
         </div>
         <div class="dv2-stat-card dv2-sc-hp" data-navigate="achievements" style="cursor:pointer">
           <span class="dv2-stat-card-icon">🏆</span>
@@ -786,10 +754,9 @@ const PAGES = {
           <span class="dv2-section-label-text">Console MJ</span>
           <div class="dv2-section-label-line"></div>
         </div>
-        <div class="dv2-shortcuts-grid" style="grid-template-columns:repeat(7,1fr)">
+        <div class="dv2-shortcuts-grid" style="grid-template-columns:repeat(6,1fr)">
           ${[
             { page:'story',     icon:'📚', label:'Trame',     bg:'rgba(34,211,238,.15)',  bc:'rgba(34,211,238,.3)',  col:'#22d3ee' },
-            { page:'quests',    icon:'🗡️', label:'Quêtes',    bg:'rgba(157,111,255,.15)', bc:'rgba(157,111,255,.3)', col:'#9d6fff' },
             { page:'shop',      icon:'🛍️', label:'Boutique',  bg:'rgba(244,196,48,.15)',  bc:'rgba(244,196,48,.3)',  col:'#f4c430' },
             { page:'npcs',      icon:'👥', label:'PNJ',       bg:'rgba(34,195,142,.15)',  bc:'rgba(34,195,142,.3)',  col:'#22c38e' },
             { page:'bestiaire', icon:'🐉', label:'Bestiaire', bg:'rgba(255,90,126,.15)',  bc:'rgba(255,90,126,.3)',  col:'#ff5a7e' },
@@ -803,16 +770,16 @@ const PAGES = {
         </div>
       </div>
 
-      <!-- Quêtes actives -->
+      <!-- Groupes en cours (issus de la Trame) -->
       <div>
         <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Quêtes actives</span>
+          <span class="dv2-section-label-text">Groupes en cours</span>
           <div class="dv2-section-label-line"></div>
-          <button class="dv2-section-action" data-navigate="quests">Gérer →</button>
+          <button class="dv2-section-action" data-navigate="story">Gérer dans la Trame →</button>
         </div>
-        ${activeQuests.length
-          ? `<div class="quest-grid">${activeQuests.slice(0,4).map(_dashQuestCard).join('')}</div>${activeQuests.length > 4 ? `<button class="dv2-section-action" data-navigate="quests" style="align-self:flex-end;margin-top:6px">+${activeQuests.length-4} de plus →</button>` : ''}`
-          : `<div class="dv2-panel-card"><div style="padding:20px;color:var(--text-dim);font-size:.85rem;text-align:center"><span style="opacity:.3">🗡️</span> Aucune quête active.</div></div>`}
+        ${activeGroups.length
+          ? `<div class="quest-grid">${activeGroups.slice(0,4).map(_dashGroupCard).join('')}</div>${activeGroups.length > 4 ? `<button class="dv2-section-action" data-navigate="story" style="align-self:flex-end;margin-top:6px">+${activeGroups.length-4} de plus →</button>` : ''}`
+          : `<div class="dv2-panel-card"><div style="padding:20px;color:var(--text-dim);font-size:.85rem;text-align:center"><span style="opacity:.3">👥</span> Aucun groupe en cours. Crée-en sur une mission de la Trame.</div></div>`}
       </div>
 
       <!-- Trame progression -->
@@ -887,14 +854,14 @@ const PAGES = {
 
       // ── VUE JOUEUR v2 ─────────────────────────────────────────────────
 
-      // Groupe : participants des quêtes actives que j'ai rejointes
-      const _joinedQuests = activeQuests.filter(q =>
+      // Groupe : co-membres des groupes (Trame) que j'ai rejoints
+      const _joinedGroups = activeGroups.filter(q =>
         Array.isArray(q.participants) && q.participants.some(p => _myUidAliases.includes(p.uid))
       );
       const _missionUids = new Set(
-        _joinedQuests.flatMap(q => (q.participants || []).map(p => p.uid)).filter(u => !_myUidAliases.includes(u))
+        _joinedGroups.flatMap(q => (q.participants || []).map(p => p.uid)).filter(u => !_myUidAliases.includes(u))
       );
-      const partyMembers = _joinedQuests.length > 0
+      const partyMembers = _joinedGroups.length > 0
         ? [...chars, ...allPartyChars.filter(c => _missionUids.has(c.uid))]
         : [];
 
@@ -957,7 +924,7 @@ const PAGES = {
           <div class="dv2-section-label-line"></div>
         </div>
         <div class="dv2-two-col">
-          ${_questsPanelV2()}
+          ${_groupsPanelV2()}
           ${_achievementsPanelV2()}
         </div>
       </div>
@@ -1375,33 +1342,9 @@ async function goToChar(id) {
   navigate('characters');
 }
 
-async function dashQuestJoin(id, el) {
-  const quest = findDashboardQuest(id);
-  if (!quest) return;
-  const myUid = STATE.user?.uid;
-  const myAliases = [
-    myUid,
-    ...(Array.isArray(STATE.profile?.previousUids) ? STATE.profile.previousUids : []),
-    ...(Array.isArray(STATE.profile?.uidAliases) ? STATE.profile.uidAliases : []),
-  ].filter(Boolean);
-  const myChar = (STATE.characters || []).find(c => c.uid === myUid);
-  if (!myChar) { showNotif('Aucun personnage trouvé.', 'error'); return; }
-  if (el) { el.disabled = true; el.textContent = '…'; }
-  const result = toggleQuestParticipant(quest.participants, { uid: myUid, char: myChar, uidAliases: myAliases });
-  try {
-    await saveDoc('quests', id, { participants: result.participants });
-    showNotif(result.leaving ? 'Tu as quitté cette quête.' : 'Tu as rejoint cette quête !', result.leaving ? 'info' : 'success');
-    await PAGES.dashboard();
-  } catch {
-    showNotif('Erreur.', 'error');
-    if (el) el.disabled = false;
-  }
-}
-
 registerActions({
   // Dashboard
   _goToChar:             (btn) => goToChar(btn.dataset.id),
-  _dashQuestJoin:        (btn) => dashQuestJoin(btn.dataset.id, btn),
   openAdventureSwitcher: ()    => openAdventureSwitcher(),
 
   // Characters (admin filter) — appel via window pour supporter le cas où characters.js n'est pas encore chargé
