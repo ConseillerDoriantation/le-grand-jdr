@@ -1,0 +1,9 @@
+{
+  "name": "le-grand-jdr",
+  "private": true,
+  "type": "module",
+  "description": "App web de gestion de campagne JDR (HTML/CSS/JS ES modules, Firebase). Aucun build : ce package.json sert uniquement aux tests Node (node --test). Le navigateur et GitHub Pages l'ignorent.",
+  "scripts": {
+    "test": "node --test"
+  }
+}
