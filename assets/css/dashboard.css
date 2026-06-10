@@ -598,6 +598,9 @@
 .dv2-svg-ico { width: 1.25em; height: 1.25em; display: inline-block; vertical-align: -0.18em; }
 /* Utilitaire : colonne flexible qui peut rétrécir (texte ellipsé). */
 .dv2-flex1 { flex: 1; min-width: 0; }
+/* États vides « Aucun… » (remplacent les styles inline répétés, mêmes valeurs). */
+.dv2-empty-sm { padding: 18px; color: var(--text-dim); font-size: .8rem; }
+.dv2-empty-md { padding: 20px; color: var(--text-dim); font-size: .85rem; text-align: center; }
 /* Cartes cliquables du hub : curseur pointer (remplace les style="cursor:pointer"
    inline). Scopé .dv2-root pour ne pas fuir vers les autres pages partageant
    .quest-card / .dash-hero. */

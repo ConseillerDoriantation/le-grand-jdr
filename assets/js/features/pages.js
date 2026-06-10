@@ -506,7 +506,7 @@ const PAGES = {
               title="Ouvrir la fiche complète">→</button>` : ''}
             <div class="dv2-party-dot"></div>
           </div>`;
-        }).join('') : `<div style="padding:18px;color:var(--text-dim);font-size:.8rem">Les membres du groupe apparaîtront ici.</div>`}
+        }).join('') : `<div class="dv2-empty-sm">Les membres du groupe apparaîtront ici.</div>`}
         ${nextSessionFmt ? `
         <div class="dv2-party-footer dv2-party-footer--session">
           <div class="dv2-party-session-label">Prochaine séance prévue pour :</div>
@@ -632,7 +632,7 @@ const PAGES = {
             </div>
             <div class="dv2-quest-rarity dv2-rarity-rare">${count} 👤</div>
           </div>`;
-        }).join('') : `<div style="padding:18px;color:var(--text-dim);font-size:.8rem">Aucun groupe en cours. Rejoins-en un dans la <strong>Trame</strong>.</div>`}
+        }).join('') : `<div class="dv2-empty-sm">Aucun groupe en cours. Rejoins-en un dans la <strong>Trame</strong>.</div>`}
       </div>`;
     }
 
@@ -651,7 +651,7 @@ const PAGES = {
             <div class="dv2-ach-desc">${_esc(a.description||'')}</div>
           </div>
           ${a.xp ? `<div class="dv2-ach-xp">+${a.xp}&nbsp;XP</div>` : ''}
-        </div>`).join('') : `<div style="padding:18px;color:var(--text-dim);font-size:.8rem">Aucun haut-fait.</div>`}
+        </div>`).join('') : `<div class="dv2-empty-sm">Aucun haut-fait.</div>`}
       </div>`;
     }
 
@@ -762,7 +762,7 @@ const PAGES = {
         </div>
         <div class="dv2-panel-card">${charsHtml
           ? `<div style="padding:12px">${charsHtml}</div>`
-          : `<div style="padding:20px;color:var(--text-dim);font-size:.85rem;text-align:center">Aucun personnage dans cette aventure.</div>`}
+          : `<div class="dv2-empty-md">Aucun personnage dans cette aventure.</div>`}
         </div>
       </div>
 
@@ -800,7 +800,7 @@ const PAGES = {
         </div>
         ${activeGroups.length
           ? `<div class="quest-grid">${activeGroups.slice(0,4).map(_dashGroupCard).join('')}</div>${activeGroups.length > 4 ? `<button class="dv2-section-action" data-navigate="story" style="align-self:flex-end;margin-top:6px">+${activeGroups.length-4} de plus →</button>` : ''}`
-          : `<div class="dv2-panel-card"><div style="padding:20px;color:var(--text-dim);font-size:.85rem;text-align:center"><span style="opacity:.3">👥</span> Aucun groupe en cours. Crée-en sur une mission de la Trame.</div></div>`}
+          : `<div class="dv2-panel-card"><div class="dv2-empty-md"><span style="opacity:.3">👥</span> Aucun groupe en cours. Crée-en sur une mission de la Trame.</div></div>`}
       </div>
 
       <!-- Trame progression -->
