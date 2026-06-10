@@ -352,12 +352,10 @@ export const SORT_COMBOS = [
     id: 'coup_chance',
     icon: '🍀',
     defaultName: 'Coup de chance',
-    // Chance + Réaction : relance d'attaque sur rate
+    // Chance + Réaction : les runes sont absorbées en une relance automatique.
     detect: (counts) => (counts.Chance || 0) > 0 && counts.Réaction > 0,
-    describe: (counts) => {
-      const charges = counts.Chance || 0;
-      return `Chance ×${charges} + Réaction · ${charges} relance${charges > 1 ? 's' : ''} automatique${charges > 1 ? 's' : ''} d'attaque ratée pendant 2 tours`;
-    },
+    describe: () =>
+      `Chance + Réaction · 1 relance automatique sur le prochain jet échoué · remplace le bonus critique de Chance`,
   },
 ];
 
@@ -430,6 +428,14 @@ function _comboResumeLines(activeCombos, comboIds, counts, s) {
       icon: '🪤',
       label: combo('sentinelle')?.name || 'Sentinelle',
       detail: combo('sentinelle')?.detail || 'Remplace Affliction classique et Invocation générique',
+      isCombo: true,
+    });
+  }
+  if (comboIds.has('coup_chance')) {
+    lines.push({
+      icon: '🍀',
+      label: combo('coup_chance')?.name || 'Coup de chance',
+      detail: 'Prochain jet échoué relancé automatiquement · remplace Chance classique et Réaction classique · aucun dégât direct',
       isCombo: true,
     });
   }
@@ -957,7 +963,7 @@ export function _buildSortResume(s, c) {
   const nbAmp     = runes.filter(r => r === 'Amplification').length;
   const activeCombos = _activeCombos(s);
   const comboIds = new Set(activeCombos.map(c => c.id));
-  const specializedComboIds = new Set(['allonge_magique', 'zone_elargie', 'regeneration', 'arme_invoquee', 'sentinelle']);
+  const specializedComboIds = new Set(['allonge_magique', 'zone_elargie', 'regeneration', 'arme_invoquee', 'sentinelle', 'coup_chance']);
   lines.push(..._comboResumeLines(activeCombos, comboIds, _runeCounts(s), s));
   activeCombos.forEach(combo => {
     if (specializedComboIds.has(combo.id)) return;
@@ -987,7 +993,7 @@ export function _buildSortResume(s, c) {
   // donc l'attaque de base du lanceur, même si Puissance a coché « offensif »
   // (Puissance scale l'attaque de l'invocation, pas un impact direct).
   const isInvocationSpell = runes.includes('Invocation');
-  const _suppressImpactDmg = isEnchantOnly || isEnchantBuffOnly || isAfflictionSpell || isInvocationSpell;
+  const _suppressImpactDmg = comboIds.has('coup_chance') || isEnchantOnly || isEnchantBuffOnly || isAfflictionSpell || isInvocationSpell;
   // Lacération inflige TOUJOURS l'attaque de base (+ sa réduction de CA), même si
   // le type n'a pas été coché « offensif » → on affiche les dégâts dans ce cas aussi.
   const _dealsImpact = types.includes('offensif') || _hasLaceration(s);
@@ -1116,7 +1122,7 @@ export function _buildSortResume(s, c) {
   }
 
   // Chance
-  const chc = _calcChance(s);
+  const chc = comboIds.has('coup_chance') ? null : _calcChance(s);
   if (chc) {
     lines.push({ icon:'🍀', label:`RC ${chc.rc}–20`, detail:`Critique aussi max${chc.capped ? ' · plafond atteint' : ''}` });
   }

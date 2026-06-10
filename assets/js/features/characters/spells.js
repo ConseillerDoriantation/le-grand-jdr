@@ -453,7 +453,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   // Affliction = jamais d'impact (comme défini côté VTT)
   // Déplacement (Amplification mode déplacement) = jamais de dégâts.
   // Invocation = le sort invoque une créature (qui a ses propres dégâts) — pas d'impact du lanceur.
-  const suppressImpactDmg = isAllongeCombo || isEnchantOnly || enchantBuffOnly || hasAfflictionDebuff || s.ampMode === 'deplacement' || runesAll.includes('Invocation');
+  const suppressImpactDmg = isAllongeCombo || activeIds.has('coup_chance') || isEnchantOnly || enchantBuffOnly || hasAfflictionDebuff || s.ampMode === 'deplacement' || runesAll.includes('Invocation');
 
   // Chips clés pour la ligne compacte
   const chips = [];
@@ -510,6 +510,9 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   }
   if (isAllongeCombo) {
     chips.push({ icon:'🏹', val:`Allonge +${_ampLength(nbAmp)}`, color:'#4f8cff' });
+  }
+  if (activeIds.has('coup_chance')) {
+    chips.push({ icon:'🍀', val:'Prochain jet échoué', color:'#facc15' });
   }
 
   // ── 4. Protection (CA ou Soin) ──
@@ -1773,6 +1776,13 @@ function _isAllongeComboActive(counts = _runeCountsEdit) {
     && (counts?.Invocation || 0) === 0;
 }
 
+function _isCoupChanceComboActive(counts = _runeCountsEdit) {
+  const actionMode = document.getElementById('s-action-mode')?.value || _actionModeEdit || 'reaction';
+  const hasReaction = (counts?.Réaction || 0) > 0
+    || ((counts?.[ACTION_RUNE] || 0) > 0 && actionMode === 'reaction');
+  return (counts?.Chance || 0) > 0 && hasReaction;
+}
+
 function _calcRegenerationAuto(s) {
   const runes = s?.runes || [];
   const nbProt = runes.filter(r => r === 'Protection').length;
@@ -1816,6 +1826,7 @@ function _refreshConditionalSections() {
   const ampMode     = document.getElementById('s-amp-mode')?.value || 'zone';
   const isDepl      = ampMode === 'deplacement';
   const isAllonge   = _isAllongeComboActive(counts);
+  const isCoupChance = _isCoupChanceComboActive(counts);
   const dSec = document.getElementById('s-degats-section');
   const sSec = document.getElementById('s-soin-section');
   // Affliction supprime les dégâts d'impact : la rune Puissance scale le DoT
@@ -1830,7 +1841,7 @@ function _refreshConditionalSections() {
   const isLaceration = (counts.Lacération || 0) > 0 || (hasAffliction && _afflMode === 'laceration');
   const isRegen = _isRegenerationComboActive(counts);
   const hasAfflictionDebuff = hasAffliction && _afflMode !== 'laceration';
-  if (dSec) dSec.style.display = ((isOffensive || isLaceration) && !hasAfflictionDebuff && !isDepl && !anyInvoc) ? '' : 'none';
+  if (dSec) dSec.style.display = ((isOffensive || isLaceration) && !isCoupChance && !hasAfflictionDebuff && !isDepl && !anyInvoc) ? '' : 'none';
   // Combo Drain : sort offensif + Protection → la Protection devient un vol de vie %.
   // On masque alors le choix CA/Soin et leurs montants, et on affiche l'indicateur.
   const isDrain   = isOffensive && hasProt;
@@ -2952,6 +2963,14 @@ function _sanitizeAbsorbedComboFields(s) {
   if (clearAmpMode) {
     s.ampMode = 'zone';
     s.deplacement = null;
+  }
+  if (comboIds.has('coup_chance')) {
+    s.degats = '';
+    if (Array.isArray(s.types)) {
+      s.types = s.types.filter(t => t !== 'offensif');
+      if (!s.types.length) s.types = ['utilitaire'];
+    }
+    s.typeSoin = false;
   }
   if (comboIds.has('regeneration') || comboIds.has('drain') || comboIds.has('bouclier_reactif')) {
     s.typeSoin = false;
