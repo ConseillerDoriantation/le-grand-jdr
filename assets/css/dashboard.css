@@ -596,6 +596,8 @@
 .dv2-stat-card-icon { font-size: 1.2rem; margin-bottom: 8px; display: block; }
 /* Icône SVG inline (jeu d'icônes maison) — taille relative au contexte. */
 .dv2-svg-ico { width: 1.25em; height: 1.25em; display: inline-block; vertical-align: -0.18em; }
+/* Utilitaire : colonne flexible qui peut rétrécir (texte ellipsé). */
+.dv2-flex1 { flex: 1; min-width: 0; }
 .dv2-stat-card-icon .dv2-svg-ico { width: 1.45rem; height: 1.45rem; }
 .dv2-stat-card-val  {
   font-family: var(--font-display);

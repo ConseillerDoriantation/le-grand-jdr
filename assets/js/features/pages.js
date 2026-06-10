@@ -268,7 +268,7 @@ const PAGES = {
         </div>
 
         <!-- Nom + classe -->
-        <div style="flex:1;min-width:0">
+        <div class="dv2-flex1">
           <div style="display:flex;align-items:baseline;gap:.35rem;flex-wrap:wrap">
             <span style="font-family:'Cinzel',serif;font-size:.84rem;font-weight:700;
               color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px">${_esc(c.nom||'?')}</span>
@@ -498,7 +498,7 @@ const PAGES = {
           <div class="dv2-party-member" data-action="_openQuickView" data-id="${c.id}" style="cursor:pointer"
             title="Cliquer pour aperçu rapide">
             <div class="dv2-party-avatar">${av}</div>
-            <div style="flex:1;min-width:0">
+            <div class="dv2-flex1">
               <div class="dv2-party-name">${_esc(c.nom||'?')}</div>
               <div class="dv2-party-sub">Niv.${c.niveau||1}${c.classe?` · ${_esc(c.classe)}`:''}</div>
             </div>
@@ -626,7 +626,7 @@ const PAGES = {
           return `
           <div class="dv2-quest-item" data-navigate="story">
             <div class="dv2-quest-icon dv2-qi-main">🎯</div>
-            <div style="flex:1;min-width:0">
+            <div class="dv2-flex1">
               <div class="dv2-quest-name">${_esc(q.titre || 'Groupe')}</div>
               <div class="dv2-quest-sub">${_esc(missionTitle)}${joined ? ' · ✓ Rejoint' : ''}</div>
             </div>
@@ -646,7 +646,7 @@ const PAGES = {
         ${achievements.slice(0, 5).length > 0 ? [...achievements].sort((a,b) => { const p = d => { const [j,m,y] = (d||'').split('/'); return y&&m&&j?`${y}${m.padStart(2,'0')}${j.padStart(2,'0')}`:''; }; return p(b.date) > p(a.date) ? 1 : -1; }).slice(0, 5).map(a => `
         <div class="dv2-ach-item">
           <div class="dv2-ach-icon">${a.icone||'🏆'}</div>
-          <div style="flex:1;min-width:0">
+          <div class="dv2-flex1">
             <div class="dv2-ach-name">${_esc(a.titre||a.nom||'Haut-fait')}</div>
             <div class="dv2-ach-desc">${_esc(a.description||'')}</div>
           </div>
@@ -675,7 +675,7 @@ const PAGES = {
       <div class="dv2-bastion-card" data-navigate="bastion" style="cursor:pointer">
         <div class="dv2-bastion-header">
           <div class="dv2-bastion-icon">${_esc(emoji)}</div>
-          <div style="flex:1;min-width:0">
+          <div class="dv2-flex1">
             <div class="dv2-bastion-name">${_esc(bastionNom)}</div>
             <div class="dv2-bastion-level">${semaine ? `Période ${semaine}` : `Niveau ${bastionLevel}`}${bastionDoc?.lieu ? ` · ${_esc(bastionDoc.lieu)}` : ''}</div>
           </div>
