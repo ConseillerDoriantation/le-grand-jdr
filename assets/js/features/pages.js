@@ -89,12 +89,15 @@ const PAGES = {
     const nextSessionFmt = _formatNextSession(_visibleSessions[0]);
     const _otherSessions = Math.max(0, _visibleSessions.length - 1);
 
+    // Icône SVG inline (jeu d'icônes maison) — rendu homogène cross-OS vs émoji.
+    const _svg = (id, color) => `<svg class="dv2-svg-ico"${color ? ` style="color:${color}"` : ''} aria-hidden="true"><use href="./assets/img/icons.svg#icon-${id}"/></svg>`;
+
     // ── Action du moment : bloc primaire promu en haut du hub (MJ & joueur) ──
     // Le « jouer » est l'action n°1 : on l'élève au-dessus du reste et on y
     // greffe la prochaine séance validée (contexte immédiatement utile).
     const primaryBlock = `
       <div class="dash-vtt-cta dash-vtt-cta--primary" data-navigate="vtt">
-        <span class="dash-vtt-icon">🎲</span>
+        <span class="dash-vtt-icon">${_svg('dice', '#6aa7ff')}</span>
         <div class="dash-vtt-text">
           <span class="dash-vtt-label">Entrer dans la table</span>
           <span class="dash-vtt-sub">${nextSessionFmt
@@ -462,11 +465,11 @@ const PAGES = {
             </div>
             <div class="dv2-stats-row">
               <div class="dv2-stat-pill">
-                <div class="dv2-stat-pill-val" style="color:#f4c430">💰 ${or}</div>
+                <div class="dv2-stat-pill-val" style="color:#f4c430">${_svg('coin')} ${or}</div>
                 <div class="dv2-stat-pill-lbl">Or</div>
               </div>
               <div class="dv2-stat-pill">
-                <div class="dv2-stat-pill-val" style="color:var(--gold-2)">🛡️ ${ca}</div>
+                <div class="dv2-stat-pill-val" style="color:var(--gold-2)">${_svg('shield')} ${ca}</div>
                 <div class="dv2-stat-pill-lbl">CA</div>
               </div>
             </div>
@@ -564,23 +567,23 @@ const PAGES = {
       return `
       <div class="dv2-stats-grid">
         <div class="dv2-stat-card dv2-sc-gold" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
-          <span class="dv2-stat-card-icon">💰</span>
+          <span class="dv2-stat-card-icon">${_svg('coin', '#f4c430')}</span>
           <div class="dv2-stat-card-val" style="color:#f4c430">${or}</div>
           <div class="dv2-stat-card-lbl">Or</div>
         </div>
         <div class="dv2-stat-card dv2-sc-shield" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
-          <span class="dv2-stat-card-icon">🛡️</span>
+          <span class="dv2-stat-card-icon">${_svg('shield', 'var(--gold-2)')}</span>
           <div class="dv2-stat-card-val" style="color:var(--gold-2)">${ca}</div>
           <div class="dv2-stat-card-lbl">Classe d'armure</div>
         </div>
         <div class="dv2-stat-card dv2-sc-hp" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
-          <span class="dv2-stat-card-icon">❤️</span>
+          <span class="dv2-stat-card-icon">${_svg('heart', '#22c38e')}</span>
           <div class="dv2-stat-card-val" style="color:#22c38e">${pvCur}<span style="font-size:.65em;opacity:.55">/${pvMax}</span></div>
           <div class="dv2-stat-card-lbl">Points de vie</div>
           <div class="dv2-stat-card-sub">${pvPct}% restants</div>
         </div>
         <div class="dv2-stat-card dv2-sc-mp" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
-          <span class="dv2-stat-card-icon">🔮</span>
+          <span class="dv2-stat-card-icon">${_svg('sparkles', '#b99fff')}</span>
           <div class="dv2-stat-card-val" style="color:#b99fff">${pmCur}<span style="font-size:.65em;opacity:.55">/${pmMax}</span></div>
           <div class="dv2-stat-card-lbl">Points de magie</div>
           <div class="dv2-stat-card-sub">${pmPct}% restants</div>
@@ -724,22 +727,22 @@ const PAGES = {
       <!-- Stats 4-col -->
       <div class="dv2-stats-grid">
         <div class="dv2-stat-card dv2-sc-shield" data-navigate="characters" style="cursor:pointer">
-          <span class="dv2-stat-card-icon">📜</span>
+          <span class="dv2-stat-card-icon">${_svg('scroll', 'var(--gold-2)')}</span>
           <div class="dv2-stat-card-val" style="color:var(--gold-2)">${chars.length}</div>
           <div class="dv2-stat-card-lbl">Personnage${chars.length!==1?'s':''}</div>
         </div>
         <div class="dv2-stat-card dv2-sc-mp" data-navigate="story" style="cursor:pointer">
-          <span class="dv2-stat-card-icon">👥</span>
+          <span class="dv2-stat-card-icon">${_svg('users', '#b99fff')}</span>
           <div class="dv2-stat-card-val" style="color:#b99fff">${activeGroups.length}</div>
           <div class="dv2-stat-card-lbl">Groupe${activeGroups.length!==1?'s':''} en cours</div>
         </div>
         <div class="dv2-stat-card dv2-sc-hp" data-navigate="achievements" style="cursor:pointer">
-          <span class="dv2-stat-card-icon">🏆</span>
+          <span class="dv2-stat-card-icon">${_svg('trophy', '#22c38e')}</span>
           <div class="dv2-stat-card-val" style="color:#22c38e">${achievements.length}</div>
           <div class="dv2-stat-card-lbl">Haut${achievements.length!==1?'s':''}-fait${achievements.length!==1?'s':''}</div>
         </div>
         <div class="dv2-stat-card dv2-sc-gold dv2-stat-card--collection${collectionUnlocked === 0 ? ' is-empty' : ''}" data-navigate="collection" style="cursor:pointer;--collection-progress:${collectionPct}%" aria-label="Collection, ${collectionUnlocked} cartes débloquées sur ${collectionTotal}">
-          <span class="dv2-stat-card-icon">🃏</span>
+          <span class="dv2-stat-card-icon">${_svg('layers', '#f4c430')}</span>
           <div class="dv2-stat-card-val dv2-collection-val" style="color:#f4c430">${collectionUnlocked}<span>/${collectionTotal}</span></div>
           <div class="dv2-stat-card-lbl">Collection</div>
           <div class="dv2-collection-meter" aria-hidden="true"><span></span></div>
