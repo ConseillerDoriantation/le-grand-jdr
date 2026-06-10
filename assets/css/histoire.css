@@ -2767,6 +2767,39 @@
 .mv-group-join { width: 100%; margin-top: 8px; }
 .mv-group-member-name { font-size: .72rem; color: var(--text-muted); }
 
+/* Édition inline d'un groupe (MJ) */
+.mv-group--edit { gap: 7px; }
+.mv-group-name-inp {
+  flex: 1; min-width: 0; font-family: var(--font-display); font-weight: 700;
+  font-size: .92rem; color: var(--amber);
+  background: transparent; border: 1px solid transparent; border-radius: 6px;
+  padding: 3px 6px; transition: border-color .15s, background .15s;
+}
+.mv-group-name-inp:hover { border-color: var(--border); }
+.mv-group-name-inp:focus { outline: none; border-color: var(--amber); background: var(--bg-elevated); }
+.mv-group-editrow { display: grid; grid-template-columns: 1fr 90px 1.4fr; gap: 7px; }
+.mv-group-editrow label {
+  display: flex; flex-direction: column; gap: 3px;
+  font-size: .64rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); font-weight: 700;
+}
+.mv-group-sel, .mv-group-num, .mv-group-inp, .mv-group-addsel, .mv-group-notesinp {
+  width: 100%; font: inherit; font-size: .8rem; font-weight: 400; text-transform: none; letter-spacing: 0;
+  color: var(--text); background: var(--bg-elevated);
+  border: 1px solid var(--border); border-radius: 7px; padding: 5px 8px;
+}
+.mv-group-sel:focus, .mv-group-num:focus, .mv-group-inp:focus, .mv-group-addsel:focus, .mv-group-notesinp:focus {
+  outline: none; border-color: var(--gold);
+}
+.mv-group-addsel { margin-top: 2px; color: var(--gold); cursor: pointer; }
+.mv-group-notesinp { resize: vertical; min-height: 38px; }
+.mv-group-memx {
+  border: none; background: rgba(255,107,107,.12); color: #ff6b6b;
+  border-radius: 50%; width: 16px; height: 16px; line-height: 1; cursor: pointer;
+  font-size: .8rem; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.mv-group-memx:hover { background: rgba(255,107,107,.28); }
+.mv-group--edit .mv-group-member { padding-right: 4px; }
+
 /* ── Suites (liens) ─────────────────────────────────────────────────── */
 .mv-liens {
   display: grid;

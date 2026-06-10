@@ -17,7 +17,7 @@ import PAGES from './pages.js';
 import { sortCharactersForDisplay, getMyCharacters } from '../shared/char-stats.js';
 import { setHistoireCtx } from '../shared/histoire-ctx.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
-import { storyParticipantsFromGroups, toggleQuestParticipant, dedupeQuestParticipants } from '../shared/participants.js';
+import { storyParticipantsFromGroups, toggleQuestParticipant, dedupeQuestParticipants, questParticipantFromChar } from '../shared/participants.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 
 // ── Palettes ──────────────────────────────────────────────────────────────────
@@ -320,8 +320,100 @@ function _stApplyGroup() {}
 
 // ── Groupes de mission = quêtes liées (missionId) ─────────────────────────────
 // Les joueurs rejoignent (champ participants, autorisé par les règles Firestore) ;
-// le MJ crée / édite (nom, issue, récompense) / supprime.
+// le MJ crée / assigne des joueurs / édite en inline / supprime.
 const _grpQuest = (id) => (getCachedCollection('quests') || []).find(q => q.id === id) || null;
+
+// Carte d'un groupe (MJ = édition inline · joueur = lecture + rejoindre).
+function _storyGroupCardHtml(g, missionId) {
+  const isAdmin = STATE.isAdmin;
+  const uid     = STATE.user?.uid;
+  const parts   = dedupeQuestParticipants(g.participants || []);
+  const o       = groupOutcome(g);
+  const gr      = parseInt(g.reussite) || 0;
+  const statut  = g.statut || 'active';
+  const allChars = getCachedCollection('characters') || [];
+  const av = (p) => characterAvatarHtml(p, { size: 28, className: 'mv-avatar', border: 'none', background: 'rgba(79,140,255,.18)', color: 'var(--gold)' });
+
+  const membersHtml = parts.length
+    ? parts.map(p => `<div class="mv-group-member">
+        ${av(p)}
+        <span class="mv-group-member-name">${_esc(p.nom || '')}</span>
+        ${isAdmin ? `<button class="mv-group-memx" data-action="_stGroupRemoveMember" data-id="${g.id}" data-mission="${missionId}" data-char="${_esc(p.charId || '')}" data-uid="${_esc(p.uid || '')}" title="Retirer">×</button>` : ''}
+      </div>`).join('')
+    : `<div class="mv-empty-small">Aucun membre.</div>`;
+
+  if (isAdmin) {
+    const presentIds = new Set(parts.map(p => p.charId).filter(Boolean));
+    const opts = sortCharactersForDisplay(allChars)
+      .filter(c => !presentIds.has(c.id))
+      .map(c => `<option value="${_esc(c.id)}">${_esc(c.nom || '?')}${c.ownerPseudo ? ` · ${_esc(c.ownerPseudo)}` : ''}</option>`).join('');
+    const dc = (field, extra = '') => `data-change="_stGroupFieldSave" data-id="${g.id}" data-mission="${missionId}" data-field="${field}" ${extra}`;
+    return `<article class="mv-group mv-group--edit" data-gid="${g.id}" style="--gr-color:${o.color}">
+      <header class="mv-group-head">
+        <input class="mv-group-name-inp" value="${_esc(g.titre || '')}" placeholder="Nom du groupe" ${dc('titre')}>
+        <span class="mv-group-outcome" style="--oc:${o.color}">${o.icon} ${o.label}</span>
+        <button class="mv-group-iconbtn mv-group-iconbtn--del" data-action="_stGroupDelete" data-id="${g.id}" data-mission="${missionId}" title="Supprimer le groupe">🗑️</button>
+      </header>
+      <div class="mv-group-editrow">
+        <label>Statut<select class="mv-group-sel" ${dc('statut')}>
+          ${[['active', 'En cours'], ['terminee', 'Terminée'], ['echouee', 'Échouée']].map(([v, l]) => `<option value="${v}"${statut === v ? ' selected' : ''}>${l}</option>`).join('')}
+        </select></label>
+        <label>Réussite %<input class="mv-group-num" type="number" min="0" max="100" step="1" value="${g.reussite != null && g.reussite !== '' ? gr : ''}" placeholder="—" ${dc('reussite')}></label>
+        <label>Récompense<input class="mv-group-inp" value="${_esc(g.recompense || '')}" placeholder="ex: 300 XP + 50 or" ${dc('recompense')}></label>
+      </div>
+      <div class="mv-group-bar"><div class="mv-group-bar-fill" style="width:${gr}%"></div></div>
+      <div class="mv-group-members">${membersHtml}</div>
+      <select class="mv-group-addsel" data-change="_stGroupAddMember" data-id="${g.id}" data-mission="${missionId}">
+        <option value="">＋ Assigner un personnage…</option>
+        ${opts}
+      </select>
+      <textarea class="mv-group-notesinp" rows="2" placeholder="Notes de réussite (une par ligne)…" ${dc('notesReussite')}>${_esc(g.notesReussite || '')}</textarea>
+    </article>`;
+  }
+
+  // Carte joueur — lecture seule + rejoindre
+  const notes   = (g.notesReussite || '').split('\n').map(l => l.trim()).filter(Boolean);
+  const joined  = !!uid && parts.some(p => p?.uid === uid);
+  const myChars = getMyCharacters(allChars, uid);
+  const canJoin = myChars.length > 0 && statut === 'active';
+  const requis  = parseInt(g.participantsRequis) || 0;
+  return `<article class="mv-group" data-gid="${g.id}" style="--gr-color:${o.color}">
+    <header class="mv-group-head">
+      <h4 class="mv-group-name">${_esc(g.titre || 'Groupe')}</h4>
+      <span class="mv-group-outcome" style="--oc:${o.color}">${o.icon} ${o.label}</span>
+      ${gr > 0 ? `<div class="mv-group-pct">${gr}<small>%</small></div>` : ''}
+    </header>
+    ${parts.length ? `<div class="mv-group-members">${membersHtml}</div>` : `<div class="mv-empty-small">Aucun membre${requis ? ` · ${requis} requis` : ''}.</div>`}
+    ${gr > 0 ? `<div class="mv-group-bar"><div class="mv-group-bar-fill" style="width:${gr}%"></div></div>` : ''}
+    ${notes.length ? `<ul class="mv-group-notes">${notes.map(n => `<li>${_esc(n)}</li>`).join('')}</ul>` : ''}
+    ${g.recompense ? `<div class="mv-group-reward"><span class="mv-group-reward-icon">🏆</span><span>${_esc(g.recompense)}</span></div>` : ''}
+    ${canJoin ? `<button class="btn btn-sm ${joined ? 'btn-outline' : 'btn-gold'} mv-group-join" data-action="_stGroupJoin" data-id="${g.id}" data-mission="${missionId}">${joined ? '✓ Quitter' : '＋ Rejoindre'}</button>` : ''}
+  </article>`;
+}
+
+// Remplace une carte groupe in-place (sans re-render complet) — membres.
+function _stReplaceGroupCard(questId, missionId) {
+  const q = _grpQuest(questId);
+  const el = document.querySelector(`.mv-group[data-gid="${questId}"]`);
+  if (!q || !el) return;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = _storyGroupCardHtml(q, missionId).trim();
+  if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild);
+}
+
+// Patch léger de l'issue (badge + barre) sans toucher aux champs en édition.
+function _stPatchGroupOutcome(questId) {
+  const q = _grpQuest(questId);
+  const card = document.querySelector(`.mv-group[data-gid="${questId}"]`);
+  if (!q || !card) return;
+  const o = groupOutcome(q);
+  const gr = parseInt(q.reussite) || 0;
+  card.style.setProperty('--gr-color', o.color);
+  const badge = card.querySelector('.mv-group-outcome');
+  if (badge) { badge.style.setProperty('--oc', o.color); badge.textContent = `${o.icon} ${o.label}`; }
+  const fill = card.querySelector('.mv-group-bar-fill');
+  if (fill) fill.style.width = `${gr}%`;
+}
 
 async function _stGroupNew(missionId) {
   if (!STATE.isAdmin || !missionId) return;
@@ -400,63 +492,48 @@ async function _stGroupSaveParts(questId, parts, missionId, leaving) {
   }
 }
 
-function _stGroupEdit(questId, missionId) {
+// Édition inline d'un champ de groupe (MJ) — sauvegarde silencieuse, sans modal.
+async function _stGroupFieldSave(el) {
   if (!STATE.isAdmin) return;
-  const q = _grpQuest(questId); if (!q) return;
-  openModal(`✏️ Groupe — ${_esc(q.titre || 'Groupe')}`, `
-    <div class="form-group">
-      <label>Nom du groupe</label>
-      <input class="input-field" id="stg-nom" value="${_esc(q.titre || '')}" placeholder="ex: La Compagnie de l'Aube">
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 140px;gap:.75rem">
-      <div class="form-group">
-        <label>Statut</label>
-        <select class="input-field" id="stg-statut">
-          ${[['active','En cours'],['terminee','Terminée'],['echouee','Échouée']].map(([v,l]) => `<option value="${v}"${(q.statut||'active')===v?' selected':''}>${l}</option>`).join('')}
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Places <span style="color:var(--text-dim);font-weight:400">(objectif)</span></label>
-        <input class="input-field" id="stg-requis" type="number" min="0" step="1" value="${parseInt(q.participantsRequis)||0}">
-      </div>
-    </div>
-    <div style="display:grid;grid-template-columns:140px 1fr;gap:.75rem;align-items:end">
-      <div class="form-group">
-        <label>Réussite %</label>
-        <input class="input-field" id="stg-reussite" type="number" min="0" max="100" step="1" value="${q.reussite != null && q.reussite !== '' ? parseInt(q.reussite) : ''}" placeholder="—">
-      </div>
-      <div class="form-group">
-        <label>Récompense</label>
-        <input class="input-field" id="stg-recompense" value="${_esc(q.recompense || '')}" placeholder="ex: 300 XP + 50 or">
-      </div>
-    </div>
-    <div class="form-group">
-      <label>Notes de réussite <span style="color:var(--text-dim);font-weight:400">(une par ligne)</span></label>
-      <textarea class="input-field" id="stg-notes" rows="3">${_esc(q.notesReussite || '')}</textarea>
-    </div>
-    <div style="display:flex;gap:.6rem;margin-top:.5rem">
-      <button class="btn btn-gold" data-action="_stGroupSaveEdit" data-id="${_esc(questId)}" data-mission="${_esc(missionId)}">Enregistrer</button>
-      <button class="btn btn-outline" data-action="_stOpenAfterClose" data-id="${_esc(missionId)}">Annuler</button>
-    </div>`);
+  const id = el.dataset.id, field = el.dataset.field;
+  if (!id || !field) return;
+  let value = el.value;
+  if (field === 'reussite') {
+    value = String(value).trim() === '' ? null : Math.max(0, Math.min(100, parseInt(value) || 0));
+  } else if (field === 'titre' || field === 'recompense') {
+    value = String(value).trim();
+  }
+  try {
+    await saveDoc('quests', id, { [field]: value });
+    if (field === 'reussite' || field === 'statut') _stPatchGroupOutcome(id);
+  } catch (e) { notifySaveError(e); }
 }
 
-async function _stGroupSaveEdit(questId, missionId) {
-  const titre = document.getElementById('stg-nom')?.value.trim();
-  if (!titre) { showNotif('Le nom est requis.', 'error'); return; }
-  const reussiteRaw = document.getElementById('stg-reussite')?.value.trim();
-  const requisRaw = parseInt(document.getElementById('stg-requis')?.value, 10);
-  const data = {
-    titre,
-    statut: document.getElementById('stg-statut')?.value || 'active',
-    reussite: reussiteRaw === '' ? null : Math.max(0, Math.min(100, parseInt(reussiteRaw) || 0)),
-    recompense: document.getElementById('stg-recompense')?.value.trim() || '',
-    notesReussite: document.getElementById('stg-notes')?.value || '',
-    participantsRequis: Number.isFinite(requisRaw) && requisRaw > 0 ? requisRaw : 0,
-  };
+// MJ : assigner un personnage d'office au groupe.
+async function _stGroupAddMember(el) {
+  if (!STATE.isAdmin) return;
+  const id = el.dataset.id, missionId = el.dataset.mission, charId = el.value;
+  if (!charId) return;
+  const q = _grpQuest(id); if (!q) return;
+  const char = (getCachedCollection('characters') || []).find(c => c.id === charId);
+  if (!char) return;
+  const parts = dedupeQuestParticipants([...(q.participants || []), questParticipantFromChar(char, char.uid || '')]);
   try {
-    await saveDoc('quests', questId, data);
-    showNotif('Groupe mis à jour.', 'success');
-    openStoryDetail(missionId);
+    await saveDoc('quests', id, { participants: parts });
+    _stReplaceGroupCard(id, missionId);
+  } catch (e) { notifySaveError(e); }
+}
+
+// MJ : retirer un membre du groupe.
+async function _stGroupRemoveMember(btn) {
+  if (!STATE.isAdmin) return;
+  const id = btn.dataset.id, missionId = btn.dataset.mission;
+  const charId = btn.dataset.char, uid = btn.dataset.uid;
+  const q = _grpQuest(id); if (!q) return;
+  const parts = (q.participants || []).filter(p => charId ? p.charId !== charId : p.uid !== uid);
+  try {
+    await saveDoc('quests', id, { participants: parts });
+    _stReplaceGroupCard(id, missionId);
   } catch (e) { notifySaveError(e); }
 }
 
@@ -1803,36 +1880,7 @@ async function openStoryDetail(id) {
           ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm mv-group-add" data-action="_stGroupNew" data-mission="${item.id}">＋ Nouveau groupe</button>` : ''}
         </h3>
         ${groups.length ? `<div class="mv-groups">
-          ${groups.map(g => {
-            const parts = g._parts || [];
-            const gr = parseInt(g.reussite) || 0;
-            const o = groupOutcome(g);
-            const notes = (g.notesReussite || '').split('\n').map(l => l.trim()).filter(Boolean);
-            const joined = !!_myUid && parts.some(p => p?.uid === _myUid);
-            const canJoin = !STATE.isAdmin && _myChars.length > 0 && (g.statut || 'active') === 'active';
-            const requis = parseInt(g.participantsRequis) || 0;
-            return `<article class="mv-group" style="--gr-color:${o.color}">
-              <header class="mv-group-head">
-                <h4 class="mv-group-name">${_esc(g.titre || 'Groupe')}</h4>
-                <span class="mv-group-outcome" style="--oc:${o.color}">${o.icon} ${o.label}</span>
-                ${gr > 0 ? `<div class="mv-group-pct">${gr}<small>%</small></div>` : ''}
-                ${STATE.isAdmin ? `<span class="mv-group-admin">
-                  <button class="mv-group-iconbtn" data-action="_stGroupEdit" data-id="${g.id}" data-mission="${item.id}" title="Modifier le groupe">✏️</button>
-                  <button class="mv-group-iconbtn mv-group-iconbtn--del" data-action="_stGroupDelete" data-id="${g.id}" data-mission="${item.id}" title="Supprimer">🗑️</button>
-                </span>` : ''}
-              </header>
-              ${parts.length ? `<div class="mv-group-members">
-                ${parts.map(p => `<div class="mv-group-member">
-                  ${characterAvatarHtml(p, { size: 28, className: 'mv-avatar', border: 'none', background: 'rgba(79,140,255,.18)', color: 'var(--gold)' })}
-                  <span class="mv-group-member-name">${_esc(p.nom || '')}</span>
-                </div>`).join('')}
-              </div>` : `<div class="mv-empty-small">Aucun membre${requis ? ` · ${requis} requis` : ''}.</div>`}
-              ${gr > 0 ? `<div class="mv-group-bar"><div class="mv-group-bar-fill" style="width:${gr}%"></div></div>` : ''}
-              ${notes.length ? `<ul class="mv-group-notes">${notes.map(n => `<li>${_esc(n)}</li>`).join('')}</ul>` : ''}
-              ${g.recompense ? `<div class="mv-group-reward"><span class="mv-group-reward-icon">🏆</span><span>${_esc(g.recompense)}</span></div>` : ''}
-              ${canJoin ? `<button class="btn btn-sm ${joined ? 'btn-outline' : 'btn-gold'} mv-group-join" data-action="_stGroupJoin" data-id="${g.id}" data-mission="${item.id}">${joined ? '✓ Quitter' : '＋ Rejoindre'}</button>` : ''}
-            </article>`;
-          }).join('')}
+          ${groups.map(g => _storyGroupCardHtml(g, item.id)).join('')}
         </div>` : `<div class="mv-empty"><span>👥</span><span>${STATE.isAdmin ? 'Aucun groupe. Crée-en un pour que les joueurs le rejoignent.' : 'Aucun groupe ouvert pour cette mission pour le moment.'}</span></div>`}
       </section>`}
 
@@ -2403,8 +2451,9 @@ registerActions({
   _stGroupNew:             (btn) => _stGroupNew(btn.dataset.mission),
   _stGroupJoin:            (btn) => _stGroupJoin(btn.dataset.id, btn.dataset.mission),
   _stGroupPickChar:        (btn) => _stGroupPickChar(btn.dataset.id, btn.dataset.mission, btn.dataset.char),
-  _stGroupEdit:            (btn) => _stGroupEdit(btn.dataset.id, btn.dataset.mission),
-  _stGroupSaveEdit:        (btn) => _stGroupSaveEdit(btn.dataset.id, btn.dataset.mission),
+  _stGroupFieldSave:       (el)  => _stGroupFieldSave(el),
+  _stGroupAddMember:       (el)  => _stGroupAddMember(el),
+  _stGroupRemoveMember:    (btn) => _stGroupRemoveMember(btn),
   _stGroupDelete:          (btn) => _stGroupDelete(btn.dataset.id, btn.dataset.mission),
   _stOpenAfterClose:       (btn) => openStoryDetail(btn.dataset.id),
   _stDeleteAfterClose:     (btn) => { closeModalDirect(); deleteStory(btn.dataset.id); },
