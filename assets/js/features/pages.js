@@ -89,6 +89,21 @@ const PAGES = {
     const nextSessionFmt = _formatNextSession(_visibleSessions[0]);
     const _otherSessions = Math.max(0, _visibleSessions.length - 1);
 
+    // ── Action du moment : bloc primaire promu en haut du hub (MJ & joueur) ──
+    // Le « jouer » est l'action n°1 : on l'élève au-dessus du reste et on y
+    // greffe la prochaine séance validée (contexte immédiatement utile).
+    const primaryBlock = `
+      <div class="dash-vtt-cta dash-vtt-cta--primary" data-navigate="vtt">
+        <span class="dash-vtt-icon">🎲</span>
+        <div class="dash-vtt-text">
+          <span class="dash-vtt-label">Entrer dans la table</span>
+          <span class="dash-vtt-sub">${nextSessionFmt
+            ? `Prochaine séance : ${_esc(nextSessionFmt.dateFr)} · ${nextSessionFmt.slotLabel}${_otherSessions ? ` · +${_otherSessions} autre${_otherSessions > 1 ? 's' : ''}` : ''}`
+            : 'Lancer ou rejoindre la session de jeu'}</span>
+        </div>
+        <span class="dash-vtt-arrow">→</span>
+      </div>`;
+
     const pseudo = STATE.profile?.pseudo || 'Aventurier';
 
     // Mission active
@@ -703,6 +718,9 @@ const PAGES = {
         <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Session active</div>
       </div>
 
+      <!-- Action du moment -->
+      ${primaryBlock}
+
       <!-- Stats 4-col -->
       <div class="dv2-stats-grid">
         <div class="dv2-stat-card dv2-sc-shield" data-navigate="characters" style="cursor:pointer">
@@ -791,14 +809,7 @@ const PAGES = {
           <button class="dv2-section-action" data-navigate="story">Ouvrir →</button>
         </div>
         ${_progBar()}
-      </div>` : ''}
-
-      <!-- Table Virtuelle -->
-      <div class="dash-vtt-cta" data-navigate="vtt">
-        <span class="dash-vtt-icon">🎲</span>
-        <div class="dash-vtt-text"><span class="dash-vtt-label">Table Virtuelle</span><span class="dash-vtt-sub">Entrer dans la session de jeu</span></div>
-        <span class="dash-vtt-arrow">→</span>
-      </div>`;
+      </div>` : ''}`;
 
       // ── Présence temps réel (MJ uniquement) ─────────────────────────
       // Filtre : actif si lastSeen < 2 min (cohérent avec la présence VTT)
@@ -906,6 +917,8 @@ const PAGES = {
         <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Session active</div>
       </div>
 
+      ${primaryBlock}
+
       ${heroBlock}
 
       ${_missionCardV2()}
@@ -936,13 +949,7 @@ const PAGES = {
           <div class="dv2-section-label-line"></div>
         </div>
         ${_bastionCardV2()}
-      </div>` : ''}
-
-      <div class="dash-vtt-cta" data-navigate="vtt">
-        <span class="dash-vtt-icon">🎲</span>
-        <div class="dash-vtt-text"><span class="dash-vtt-label">Table Virtuelle</span><span class="dash-vtt-sub">Entrer dans la session de jeu</span></div>
-        <span class="dash-vtt-arrow">→</span>
-      </div>`;
+      </div>` : ''}`;
     }
 
     // ── Navigation personnage ──────────────────────────────────────────
