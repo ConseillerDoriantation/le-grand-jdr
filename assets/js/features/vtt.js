@@ -2727,7 +2727,7 @@ function _vttSpellMods(s) {
       ? {
           formula: (s.enchantDegats || '').trim() || `${1 + nbP}d4 +2`,
           element: s.noyauTypeId || null,
-          nbCibles: nbEnch,
+          nbCibles: _vttSortCibles(s),
         } : null,
     // Enchantement mode État : applique l'état choisi directement à l'allié
     enchantEtatId: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantMode === 'etat')
@@ -2742,17 +2742,17 @@ function _vttSpellMods(s) {
       ? ((s.enchantStateDmgFormula || '').trim()) : '',
     // Enchantement mode Toucher : bonus au toucher de l'allié (auto = 2 + Puissance)
     enchantToucher: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantMode === 'toucher')
-      ? { bonus: _enchBonus, nbCibles: nbEnch } : null,
+      ? { bonus: _enchBonus, nbCibles: _vttSortCibles(s) } : null,
     // Enchantement mode Déplacement : cases de mouvement en plus (auto = 2 + Puissance)
     enchantMove: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantMode === 'deplacement')
-      ? { bonusCells: _enchBonus, nbCibles: nbEnch } : null,
+      ? { bonusCells: _enchBonus, nbCibles: _vttSortCibles(s) } : null,
     // Enchantement slot=pieds : bonus mouvement (cases supplémentaires)
     // Auto : +2 cases / rune Puissance, ou +1 par défaut
     enchantPieds: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantSlot === 'pieds')
-      ? { bonusCells: Math.max(1, nbP * 2 || 1), nbCibles: nbEnch } : null,
+      ? { bonusCells: Math.max(1, nbP * 2 || 1), nbCibles: _vttSortCibles(s) } : null,
     // Enchantement slot=tete / torse : effet libre (matrice), buff générique
     enchantGeneric: (nbEnch > 0 && nbInv === 0 && !isAllonge && (s.enchantSlot === 'tete' || s.enchantSlot === 'torse'))
-      ? { slot: s.enchantSlot, effect: s.enchantEffect || '', nbCibles: nbEnch } : null,
+      ? { slot: s.enchantSlot, effect: s.enchantEffect || '', nbCibles: _vttSortCibles(s) } : null,
     // Affliction : JS Sa DD scalable selon nb runes Affliction.
     // Base 11, +2 par rune supplémentaire.
     // Slot détermine la nature : torse=DoT · pieds=mouvement · tete=sensoriel · arme=combat

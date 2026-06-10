@@ -922,11 +922,13 @@ function _runeLiveContribution(nom, counts) {
     }
     case 'Enchantement':
       return {
-        main:  cnt === 1 ? 'Buff sur allié · 2 tours' : `${cnt} cibles alliées · 2 tours`,
+        main:  cnt === 1
+          ? 'Buff sur allié · 2 tours · cibles via Dispersion'
+          : `Buff allié · 2 tours · cibles via Dispersion (les runes Enchantement n'ajoutent pas de cible)`,
       };
     case 'Affliction':
       return {
-        main:  cnt === 1 ? 'Debuff sur ennemi · 2 tours · Action · JS pour résister' : `${cnt} cibles ennemies · 2 tours`,
+        main:  `Debuff sur ennemi · 2 tours · Action · JS DD ${11 + 2 * (cnt - 1)} · cibles via Dispersion`,
       };
     case 'Invocation':
       return {
