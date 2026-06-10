@@ -332,7 +332,7 @@ const PAGES = {
     } else {
       if (chars.length === 0) {
         charsHtml = `
-        <div class="dash-hero" data-navigate="characters" style="cursor:pointer">
+        <div class="dash-hero" data-navigate="characters">
           <div class="dash-hero-body" style="flex-direction:row;align-items:center;gap:1rem;padding:1.3rem 1.5rem">
             <div style="width:48px;height:48px;border-radius:50%;background:rgba(232,184,75,.08);
               border:1px dashed rgba(232,184,75,.3);display:flex;align-items:center;justify-content:center;
@@ -388,7 +388,7 @@ const PAGES = {
       const joined       = parts.some(p => _myUidAliases.includes(p.uid));
       const portHtml     = parts.slice(0, 5).map(p => _portMini(p, 24)).join('');
       return `
-      <div class="quest-card quest-card--active" data-navigate="story" style="cursor:pointer">
+      <div class="quest-card quest-card--active" data-navigate="story">
         <div class="quest-card-hd">
           <span class="quest-badge" style="background:rgba(79,140,255,.13);color:#7aa7ff;border-color:rgba(79,140,255,.3)">🎯 ${_esc(missionTitle)}</span>
           ${joined ? `<span style="margin-left:auto;font-size:.7rem;color:#22c38e;font-weight:700">✓ Rejoint</span>` : ''}
@@ -495,7 +495,7 @@ const PAGES = {
           const av = characterPortraitContent(c, { fallbackTag: 'span' });
           const isOwn = STATE.isAdmin || c.uid === STATE.user?.uid;
           return `
-          <div class="dv2-party-member" data-action="_openQuickView" data-id="${c.id}" style="cursor:pointer"
+          <div class="dv2-party-member" data-action="_openQuickView" data-id="${c.id}"
             title="Cliquer pour aperçu rapide">
             <div class="dv2-party-avatar">${av}</div>
             <div class="dv2-flex1">
@@ -529,7 +529,7 @@ const PAGES = {
       if (!mission) return '';
       const pct = totalMissions > 0 ? Math.round(doneMissions / totalMissions * 100) : 0;
       return `
-      <div class="dv2-mission-card" data-navigate="story" style="cursor:pointer">
+      <div class="dv2-mission-card" data-navigate="story">
         <div class="dv2-mission-header">
           <div class="dv2-mission-icon">${mission.imageUrl
             ? `<img src="${mission.imageUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`
@@ -566,23 +566,23 @@ const PAGES = {
       const or = calcOr(c) || 0;
       return `
       <div class="dv2-stats-grid">
-        <div class="dv2-stat-card dv2-sc-gold" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-gold" data-action="_goToChar" data-id="${c.id}">
           <span class="dv2-stat-card-icon">${_svg('coin', '#f4c430')}</span>
           <div class="dv2-stat-card-val" style="color:#f4c430">${or}</div>
           <div class="dv2-stat-card-lbl">Or</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-shield" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-shield" data-action="_goToChar" data-id="${c.id}">
           <span class="dv2-stat-card-icon">${_svg('shield', 'var(--gold-2)')}</span>
           <div class="dv2-stat-card-val" style="color:var(--gold-2)">${ca}</div>
           <div class="dv2-stat-card-lbl">Classe d'armure</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-hp" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-hp" data-action="_goToChar" data-id="${c.id}">
           <span class="dv2-stat-card-icon">${_svg('heart', '#22c38e')}</span>
           <div class="dv2-stat-card-val" style="color:#22c38e">${pvCur}<span style="font-size:.65em;opacity:.55">/${pvMax}</span></div>
           <div class="dv2-stat-card-lbl">Points de vie</div>
           <div class="dv2-stat-card-sub">${pvPct}% restants</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-mp" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-mp" data-action="_goToChar" data-id="${c.id}">
           <span class="dv2-stat-card-icon">${_svg('sparkles', '#b99fff')}</span>
           <div class="dv2-stat-card-val" style="color:#b99fff">${pmCur}<span style="font-size:.65em;opacity:.55">/${pmMax}</span></div>
           <div class="dv2-stat-card-lbl">Points de magie</div>
@@ -672,7 +672,7 @@ const PAGES = {
 
       const ev = bastionDoc?.evenementCourant;
       return `
-      <div class="dv2-bastion-card" data-navigate="bastion" style="cursor:pointer">
+      <div class="dv2-bastion-card" data-navigate="bastion">
         <div class="dv2-bastion-header">
           <div class="dv2-bastion-icon">${_esc(emoji)}</div>
           <div class="dv2-flex1">
@@ -726,22 +726,22 @@ const PAGES = {
 
       <!-- Stats 4-col -->
       <div class="dv2-stats-grid">
-        <div class="dv2-stat-card dv2-sc-shield" data-navigate="characters" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-shield" data-navigate="characters">
           <span class="dv2-stat-card-icon">${_svg('scroll', 'var(--gold-2)')}</span>
           <div class="dv2-stat-card-val" style="color:var(--gold-2)">${chars.length}</div>
           <div class="dv2-stat-card-lbl">Personnage${chars.length!==1?'s':''}</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-mp" data-navigate="story" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-mp" data-navigate="story">
           <span class="dv2-stat-card-icon">${_svg('users', '#b99fff')}</span>
           <div class="dv2-stat-card-val" style="color:#b99fff">${activeGroups.length}</div>
           <div class="dv2-stat-card-lbl">Groupe${activeGroups.length!==1?'s':''} en cours</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-hp" data-navigate="achievements" style="cursor:pointer">
+        <div class="dv2-stat-card dv2-sc-hp" data-navigate="achievements">
           <span class="dv2-stat-card-icon">${_svg('trophy', '#22c38e')}</span>
           <div class="dv2-stat-card-val" style="color:#22c38e">${achievements.length}</div>
           <div class="dv2-stat-card-lbl">Haut${achievements.length!==1?'s':''}-fait${achievements.length!==1?'s':''}</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-gold dv2-stat-card--collection${collectionUnlocked === 0 ? ' is-empty' : ''}" data-navigate="collection" style="cursor:pointer;--collection-progress:${collectionPct}%" aria-label="Collection, ${collectionUnlocked} cartes débloquées sur ${collectionTotal}">
+        <div class="dv2-stat-card dv2-sc-gold dv2-stat-card--collection${collectionUnlocked === 0 ? ' is-empty' : ''}" data-navigate="collection" style="--collection-progress:${collectionPct}%" aria-label="Collection, ${collectionUnlocked} cartes débloquées sur ${collectionTotal}">
           <span class="dv2-stat-card-icon">${_svg('layers', '#f4c430')}</span>
           <div class="dv2-stat-card-val dv2-collection-val" style="color:#f4c430">${collectionUnlocked}<span>/${collectionTotal}</span></div>
           <div class="dv2-stat-card-lbl">Collection</div>
@@ -883,7 +883,7 @@ const PAGES = {
       let heroBlock = '';
       if (chars.length === 0) {
         heroBlock = `
-        <div class="dv2-hero-card" data-navigate="characters" style="cursor:pointer">
+        <div class="dv2-hero-card" data-navigate="characters">
           <div class="dv2-hero-inner" style="padding:2rem;justify-content:center;text-align:center">
             <div>
               <div style="font-size:2rem;margin-bottom:.75rem">⚔️</div>

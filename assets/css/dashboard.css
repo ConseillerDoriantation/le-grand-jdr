@@ -598,6 +598,16 @@
 .dv2-svg-ico { width: 1.25em; height: 1.25em; display: inline-block; vertical-align: -0.18em; }
 /* Utilitaire : colonne flexible qui peut rétrécir (texte ellipsé). */
 .dv2-flex1 { flex: 1; min-width: 0; }
+/* Cartes cliquables du hub : curseur pointer (remplace les style="cursor:pointer"
+   inline). Scopé .dv2-root pour ne pas fuir vers les autres pages partageant
+   .quest-card / .dash-hero. */
+.dv2-root .dv2-stat-card,
+.dv2-root .dv2-hero-card,
+.dv2-root .dv2-mission-card,
+.dv2-root .dv2-party-member,
+.dv2-root .dv2-bastion-card,
+.dv2-root .dash-hero,
+.dv2-root .quest-card { cursor: pointer; }
 .dv2-stat-card-icon .dv2-svg-ico { width: 1.45rem; height: 1.45rem; }
 .dv2-stat-card-val  {
   font-family: var(--font-display);
