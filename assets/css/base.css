@@ -78,3 +78,28 @@ img {
   max-width: 100%;
   display: block;
 }
+
+/* ── Accessibilité : respect du « mouvement réduit » (système) ────────────────
+   Neutralise globalement animations/transitions pour les utilisateurs qui le
+   demandent (réglage OS). On garde 0.01ms (au lieu de none) pour que les
+   évènements transitionend continuent de se déclencher. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Accessibilité : anneau de focus clavier (baseline) ───────────────────────
+   Visible uniquement au clavier (:focus-visible), pas au clic souris. Chargé
+   avant les CSS de composants → reste un fallback que chaque composant peut
+   surcharger. Garantit notamment un focus visible sur les cartes cliquables
+   rendues dynamiquement (dashboard, fiches) désormais focusables. */
+:focus-visible {
+  outline: 2px solid var(--gold, #e8b84b);
+  outline-offset: 2px;
+}

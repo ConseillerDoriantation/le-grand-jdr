@@ -249,13 +249,30 @@ export function initEventDelegation() {
 }
 
 // Rend focusables/activables au clavier les cibles de nav qui ne sont pas des
-// <button> natifs (sidebar : <a> sans href, ligne de marque <div>).
+// <button> natifs (sidebar statique ET cartes rendues dynamiquement — dashboard,
+// fiches…). Un MutationObserver upgrade automatiquement tout nouveau
+// [data-navigate] non-bouton, sinon ces cartes seraient inaccessibles au clavier.
+function _upgradeNavEl(el) {
+  if (!el || el.tagName === 'BUTTON' || el.nodeType !== 1) return;
+  if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
+  if (!el.hasAttribute('role'))     el.setAttribute('role', 'link');
+}
 function _initNavA11y() {
-  document.querySelectorAll('[data-navigate]').forEach((el) => {
-    if (el.tagName === 'BUTTON') return;
-    if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
-    if (!el.hasAttribute('role'))     el.setAttribute('role', 'link');
+  document.querySelectorAll('[data-navigate]').forEach(_upgradeNavEl);
+
+  // Contenu dynamique : upgrade des [data-navigate] ajoutés après le 1er rendu.
+  if (typeof MutationObserver === 'undefined') return;
+  const obs = new MutationObserver((records) => {
+    for (const rec of records) {
+      for (const node of rec.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        if (node.matches?.('[data-navigate]')) _upgradeNavEl(node);
+        node.querySelectorAll?.('[data-navigate]').forEach(_upgradeNavEl);
+      }
+    }
   });
+  const root = document.getElementById('app') || document.body;
+  obs.observe(root, { childList: true, subtree: true });
 }
 
 // ── Synchronisation de l'état actif de la nav ─
