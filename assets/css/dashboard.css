@@ -594,6 +594,84 @@
 .dv2-sc-mp:hover  { border-color: rgba(157,111,255,0.55); box-shadow: 0 6px 28px rgba(0,0,0,0.50), 0 0 20px rgba(157,111,255,0.18); }
 
 .dv2-stat-card-icon { font-size: 1.2rem; margin-bottom: 8px; display: block; }
+/* Icône SVG inline (jeu d'icônes maison) — taille relative au contexte. */
+.dv2-svg-ico { width: 1.25em; height: 1.25em; display: inline-block; vertical-align: -0.18em; }
+/* Utilitaire : colonne flexible qui peut rétrécir (texte ellipsé). */
+.dv2-flex1 { flex: 1; min-width: 0; }
+/* Grilles de cartes (remplacent les grid inline ; mêmes valeurs). */
+.dash-grid-charlist  { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px,1fr)); gap: .45rem; }
+.dash-grid-charmini  { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px,1fr)); gap: .55rem; }
+.dash-grid-herocards { display: grid; grid-template-columns: repeat(auto-fit,  minmax(280px,1fr)); gap: .65rem; }
+.dv2-shortcuts-grid.dv2-shortcuts-grid--mj { grid-template-columns: repeat(6,1fr); }
+/* États vides « Aucun… » (remplacent les styles inline répétés, mêmes valeurs). */
+.dv2-empty-sm { padding: 18px; color: var(--text-dim); font-size: .8rem; }
+.dv2-empty-md { padding: 20px; color: var(--text-dim); font-size: .85rem; text-align: center; }
+
+/* Présence temps réel (MJ) — extraction des styles inline (valeurs identiques). */
+.dv2-presence-empty { padding: 14px 16px; color: var(--text-dim); font-size: .78rem; display: flex; align-items: center; gap: .5rem; }
+.dv2-presence-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; }
+.dv2-presence-list { padding: 12px 14px; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.dv2-presence-pill { display: flex; align-items: center; gap: .55rem; background: rgba(34,195,142,.07); border: 1px solid rgba(34,195,142,.22); border-radius: 999px; padding: 3px 12px 3px 3px; }
+.dv2-presence-meta { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.dv2-presence-name { font-size: .78rem; color: var(--text); font-weight: 600; white-space: nowrap; }
+.dv2-presence-char { font-size: .65rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+
+/* Carte « Progression aventure » MJ : panel cliquable au padding réduit. */
+.dv2-panel-card.dv2-progress-card { cursor: pointer; padding: 16px 20px; }
+
+/* Ligne personnage (vue admin) : remplace le style inline + les handlers
+   onmouseover/onmouseout legacy. La couleur du joueur passe par --pcol. */
+.dv2-char-row {
+  display: flex; align-items: center; gap: .65rem;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-left: 3px solid var(--pcol, var(--border));
+  border-radius: var(--radius-lg); padding: .5rem .7rem;
+  cursor: pointer; overflow: hidden;
+  transition: border-color .15s, transform .15s;
+}
+.dv2-char-row:hover { border-color: var(--pcol, var(--gold)); transform: translateY(-1px); }
+/* Intérieur de la ligne perso admin (valeurs identiques aux ex-styles inline). */
+.dv2-cr-avatar { width: 36px; height: 36px; border-radius: 9px; overflow: hidden; flex-shrink: 0; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center; }
+.dv2-cr-namerow { display: flex; align-items: baseline; gap: .35rem; flex-wrap: wrap; }
+.dv2-cr-name { font-family: 'Cinzel', serif; font-size: .84rem; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+.dv2-cr-badge { font-size: .63rem; color: var(--text-dim); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; flex-shrink: 0; }
+.dv2-cr-sub { font-size: .68rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.dv2-cr-bars { display: flex; flex-direction: column; gap: .2rem; width: 72px; flex-shrink: 0; }
+.dv2-cr-barrow { display: flex; align-items: center; gap: .3rem; }
+.dv2-cr-track { flex: 1; height: 5px; background: rgba(255,255,255,.06); border-radius: 999px; overflow: hidden; }
+.dv2-cr-fill { height: 100%; border-radius: 999px; }
+.dv2-cr-fill--pm { background: linear-gradient(90deg,#22c7ea,#4adbf7); }
+.dv2-cr-val { font-size: .6rem; font-weight: 700; min-width: 26px; text-align: right; }
+.dv2-cr-side { display: flex; flex-direction: column; align-items: flex-end; gap: .18rem; flex-shrink: 0; }
+.dv2-cr-side-row { font-size: .63rem; white-space: nowrap; }
+.dv2-cr-ca { color: var(--text-dim); }
+.dv2-cr-ca strong { color: var(--text); }
+.dv2-cr-or { color: #c8a73a; }
+.dv2-cr-tag { font-size: .62rem; font-weight: 700; border-radius: 6px; padding: 2px 7px; white-space: nowrap; flex-shrink: 0; max-width: 70px; overflow: hidden; text-overflow: ellipsis; }
+
+/* Carte mini perso (joueur multi-persos) — extraction inline + tweaks de barres. */
+.dash-cm-namerow { display: flex; align-items: baseline; gap: .4rem; flex-wrap: wrap; margin-bottom: .15rem; }
+.dash-cm-name { font-family: 'Cinzel', serif; font-size: .92rem; font-weight: 700; color: var(--text); }
+.dash-cm-sub { font-size: .7rem; color: var(--text-dim); margin-bottom: .35rem; }
+.dash-cm-bars { display: flex; flex-direction: column; gap: .28rem; }
+.dash-cm-chips { display: flex; gap: .35rem; margin-top: .35rem; }
+.dash-bar-fill.dash-bar-fill--pm { background: linear-gradient(90deg,#22c7ea,#4adbf7); }
+.dash-char-mini .dash-bar-icon { font-size: .62rem; }
+.dash-char-mini .dash-bar-track { height: 7px; }
+.dash-char-mini .dash-bar-val { font-size: .68rem; min-width: 36px; }
+.dash-char-mini .dash-chip { font-size: .66rem; padding: 1px 7px; }
+.dash-char-mini .dash-hero-arrow { font-size: .85rem; align-self: center; padding: .5rem; }
+/* Cartes cliquables du hub : curseur pointer (remplace les style="cursor:pointer"
+   inline). Scopé .dv2-root pour ne pas fuir vers les autres pages partageant
+   .quest-card / .dash-hero. */
+.dv2-root .dv2-stat-card,
+.dv2-root .dv2-hero-card,
+.dv2-root .dv2-mission-card,
+.dv2-root .dv2-party-member,
+.dv2-root .dv2-bastion-card,
+.dv2-root .dash-hero,
+.dv2-root .quest-card { cursor: pointer; }
+.dv2-stat-card-icon .dv2-svg-ico { width: 1.45rem; height: 1.45rem; }
 .dv2-stat-card-val  {
   font-family: var(--font-display);
   font-size: 1.5rem; font-weight: 700; line-height: 1; margin-bottom: 3px;

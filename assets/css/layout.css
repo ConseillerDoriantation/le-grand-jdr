@@ -1214,6 +1214,16 @@ html, body { min-height:100%; }
   color: rgba(79,140,255,.7);
   flex-shrink: 0;
 }
+/* Variante « action du moment » : CTA primaire promu en haut du hub. */
+.dash-vtt-cta--primary {
+  padding: 1.1rem 1.4rem;
+  border-color: rgba(79,140,255,.32);
+  box-shadow: 0 4px 22px rgba(79,140,255,.10);
+}
+.dash-vtt-cta--primary .dash-vtt-icon  { font-size: 1.85rem; }
+.dash-vtt-cta--primary .dash-vtt-label { font-size: 1.1rem; }
+.dash-vtt-cta--primary .dash-vtt-sub   { font-size: .78rem; }
+.dash-vtt-cta--primary .dash-vtt-arrow { font-size: 1.3rem; }
 
 /* ── Sections avec en-tête ─────────────────────── */
 .dash-sec {

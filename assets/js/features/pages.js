@@ -3,16 +3,16 @@
 // ══════════════════════════════════════════════
 import { STATE, FS } from '../core/state.js';
 import { registerActions, dispatchAction } from '../core/actions.js';
-import { loadChars, loadCollection, getCachedCollection, getDocData, getDocDataSilent, saveDoc } from '../data/firestore.js';
+import { loadChars, loadCollection, getCachedCollection, getDocData, getDocDataSilent } from '../data/firestore.js';
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser } from '../shared/char-stats.js';
 import { showNotif } from '../shared/notifications.js';
 import { watch, watchDoc } from '../shared/realtime.js';
-import { setDashboardPartyChars, setDashboardQuests, findDashboardQuest } from '../shared/dashboard-session.js';
+import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
-import { dedupeQuestParticipants, toggleQuestParticipant } from '../shared/participants.js';
+import { dedupeQuestParticipants } from '../shared/participants.js';
 
 // TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
 import { renderCollectionPage } from '../features/collection.js';
@@ -89,6 +89,24 @@ const PAGES = {
     const nextSessionFmt = _formatNextSession(_visibleSessions[0]);
     const _otherSessions = Math.max(0, _visibleSessions.length - 1);
 
+    // Icône SVG inline (jeu d'icônes maison) — rendu homogène cross-OS vs émoji.
+    const _svg = (id, color) => `<svg class="dv2-svg-ico"${color ? ` style="color:${color}"` : ''} aria-hidden="true"><use href="./assets/img/icons.svg#icon-${id}"/></svg>`;
+
+    // ── Action du moment : bloc primaire promu en haut du hub (MJ & joueur) ──
+    // Le « jouer » est l'action n°1 : on l'élève au-dessus du reste et on y
+    // greffe la prochaine séance validée (contexte immédiatement utile).
+    const primaryBlock = `
+      <div class="dash-vtt-cta dash-vtt-cta--primary" data-navigate="vtt">
+        <span class="dash-vtt-icon">${_svg('dice', '#6aa7ff')}</span>
+        <div class="dash-vtt-text">
+          <span class="dash-vtt-label">Entrer dans la table</span>
+          <span class="dash-vtt-sub">${nextSessionFmt
+            ? `Prochaine séance : ${_esc(nextSessionFmt.dateFr)} · ${nextSessionFmt.slotLabel}${_otherSessions ? ` · +${_otherSessions} autre${_otherSessions > 1 ? 's' : ''}` : ''}`
+            : 'Lancer ou rejoindre la session de jeu'}</span>
+        </div>
+        <span class="dash-vtt-arrow">→</span>
+      </div>`;
+
     const pseudo = STATE.profile?.pseudo || 'Aventurier';
 
     // Mission active
@@ -140,29 +158,29 @@ const PAGES = {
           <div class="dash-char-mini-portrait-fade"></div>
         </div>
         <div class="dash-char-mini-body">
-          <div style="display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap;margin-bottom:.15rem">
-            <span style="font-family:'Cinzel',serif;font-size:.92rem;font-weight:700;color:var(--text)">${_esc(c.nom||'?')}</span>
+          <div class="dash-cm-namerow">
+            <span class="dash-cm-name">${_esc(c.nom||'?')}</span>
             <span class="dash-hero-badge">Niv.&nbsp;${c.niveau||1}</span>
           </div>
-          ${c.classe ? `<div style="font-size:.7rem;color:var(--text-dim);margin-bottom:.35rem">${_esc(c.classe)}${c.race?` · ${_esc(c.race)}`:''}</div>` : ''}
-          <div style="display:flex;flex-direction:column;gap:.28rem">
+          ${c.classe ? `<div class="dash-cm-sub">${_esc(c.classe)}${c.race?` · ${_esc(c.race)}`:''}</div>` : ''}
+          <div class="dash-cm-bars">
             <div class="dash-bar-row">
-              <span class="dash-bar-icon" style="font-size:.62rem">❤️</span>
-              <div class="dash-bar-track" style="height:7px"><div class="dash-bar-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
-              <span class="dash-bar-val" style="font-size:.68rem;min-width:36px;color:${pvColor}">${pvCur}/${pvMax}</span>
+              <span class="dash-bar-icon">${_svg('heart', '#ff6b6b')}</span>
+              <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
+              <span class="dash-bar-val" style="color:${pvColor}">${pvCur}/${pvMax}</span>
             </div>
             <div class="dash-bar-row">
-              <span class="dash-bar-icon" style="font-size:.62rem">🔵</span>
-              <div class="dash-bar-track" style="height:7px"><div class="dash-bar-fill" style="width:${pmPct}%;background:linear-gradient(90deg,#22c7ea,#4adbf7)"></div></div>
-              <span class="dash-bar-val" style="font-size:.68rem;min-width:36px;color:#4adbf7">${pmCur}/${pmMax}</span>
+              <span class="dash-bar-icon">${_svg('sparkles', '#4adbf7')}</span>
+              <div class="dash-bar-track"><div class="dash-bar-fill dash-bar-fill--pm" style="width:${pmPct}%"></div></div>
+              <span class="dash-bar-val" style="color:#4adbf7">${pmCur}/${pmMax}</span>
             </div>
           </div>
-          <div style="display:flex;gap:.35rem;margin-top:.35rem">
-            <span class="dash-chip" style="font-size:.66rem;padding:1px 7px">🛡️ ${ca}</span>
-            <span class="dash-chip dash-chip--gold" style="font-size:.66rem;padding:1px 7px">💰 ${or}</span>
+          <div class="dash-cm-chips">
+            <span class="dash-chip">${_svg('shield')} ${ca}</span>
+            <span class="dash-chip dash-chip--gold">${_svg('coin')} ${or}</span>
           </div>
         </div>
-        <div class="dash-hero-arrow" style="font-size:.85rem;align-self:center;padding:.5rem">→</div>
+        <div class="dash-hero-arrow">→</div>
       </div>`;
     }
 
@@ -197,19 +215,19 @@ const PAGES = {
           <div>
             <div class="dash-hero-bars">
               <div class="dash-bar-row">
-                <span class="dash-bar-icon">❤️</span>
+                <span class="dash-bar-icon">${_svg('heart', '#ff6b6b')}</span>
                 <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
                 <span class="dash-bar-val" style="color:${pvColor}">${pvCur}/${pvMax}</span>
               </div>
               <div class="dash-bar-row">
-                <span class="dash-bar-icon">🔵</span>
-                <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pmPct}%;background:linear-gradient(90deg,#22c7ea,#4adbf7)"></div></div>
+                <span class="dash-bar-icon">${_svg('sparkles', '#4adbf7')}</span>
+                <div class="dash-bar-track"><div class="dash-bar-fill dash-bar-fill--pm" style="width:${pmPct}%"></div></div>
                 <span class="dash-bar-val" style="color:#4adbf7">${pmCur}/${pmMax}</span>
               </div>
             </div>
             <div class="dash-hero-chips">
-              <span class="dash-chip">🛡️ CA <strong>${ca}</strong></span>
-              <span class="dash-chip dash-chip--gold">💰 <strong>${or}</strong> or</span>
+              <span class="dash-chip">${_svg('shield')} CA <strong>${ca}</strong></span>
+              <span class="dash-chip dash-chip--gold">${_svg('coin')} <strong>${or}</strong> or</span>
             </div>
           </div>
         </div>
@@ -233,63 +251,35 @@ const PAGES = {
       const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#22d3ee'];
       const pcol  = PCOLS[(c.ownerPseudo||'?').split('').reduce((a,x)=>a+x.charCodeAt(0),0) % PCOLS.length];
       return `
-      <div data-action="_goToChar" data-id="${c.id}" style="
-        display:flex;align-items:center;gap:.65rem;
-        background:var(--bg-card);border:1px solid var(--border);
-        border-left:3px solid ${pcol};
-        border-radius:var(--radius-lg);padding:.5rem .7rem;
-        cursor:pointer;transition:border-color .15s,transform .15s;overflow:hidden"
-        onmouseover="this.style.borderColor='${pcol}';this.style.transform='translateY(-1px)'"
-        onmouseout="this.style.borderColor='var(--border)';this.style.borderLeftColor='${pcol}';this.style.transform=''">
+      <div class="dv2-char-row" data-action="_goToChar" data-id="${c.id}" style="--pcol:${pcol}">
 
-        <!-- Avatar -->
-        <div style="width:36px;height:36px;border-radius:9px;overflow:hidden;flex-shrink:0;
-          background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
-          display:flex;align-items:center;justify-content:center">
-          ${avatar}
+        <div class="dv2-cr-avatar">${avatar}</div>
+
+        <div class="dv2-flex1">
+          <div class="dv2-cr-namerow">
+            <span class="dv2-cr-name">${_esc(c.nom||'?')}</span>
+            <span class="dv2-cr-badge">Niv.${c.niveau||1}</span>
+          </div>
+          <div class="dv2-cr-sub">${c.classe||''}${c.race?` · ${c.race}`:''}</div>
         </div>
 
-        <!-- Nom + classe -->
-        <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:baseline;gap:.35rem;flex-wrap:wrap">
-            <span style="font-family:'Cinzel',serif;font-size:.84rem;font-weight:700;
-              color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px">${_esc(c.nom||'?')}</span>
-            <span style="font-size:.63rem;color:var(--text-dim);background:var(--bg-elevated);
-              border:1px solid var(--border);border-radius:5px;padding:0 5px;flex-shrink:0">Niv.${c.niveau||1}</span>
+        <div class="dv2-cr-bars">
+          <div class="dv2-cr-barrow">
+            <div class="dv2-cr-track"><div class="dv2-cr-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
+            <span class="dv2-cr-val" style="color:${pvColor}">${pvCur}</span>
           </div>
-          <div style="font-size:.68rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px">
-            ${c.classe||''}${c.race?` · ${c.race}`:''}
+          <div class="dv2-cr-barrow">
+            <div class="dv2-cr-track"><div class="dv2-cr-fill dv2-cr-fill--pm" style="width:${pmPct}%"></div></div>
+            <span class="dv2-cr-val" style="color:#4adbf7">${pmCur}</span>
           </div>
         </div>
 
-        <!-- Barres PV/PM -->
-        <div style="display:flex;flex-direction:column;gap:.2rem;width:72px;flex-shrink:0">
-          <div style="display:flex;align-items:center;gap:.3rem">
-            <div style="flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:999px;overflow:hidden">
-              <div style="width:${pvPct}%;height:100%;background:${pvColor};border-radius:999px"></div>
-            </div>
-            <span style="font-size:.6rem;color:${pvColor};font-weight:700;min-width:26px;text-align:right">${pvCur}</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:.3rem">
-            <div style="flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:999px;overflow:hidden">
-              <div style="width:${pmPct}%;height:100%;background:linear-gradient(90deg,#22c7ea,#4adbf7);border-radius:999px"></div>
-            </div>
-            <span style="font-size:.6rem;color:#4adbf7;font-weight:700;min-width:26px;text-align:right">${pmCur}</span>
-          </div>
+        <div class="dv2-cr-side">
+          <span class="dv2-cr-side-row dv2-cr-ca">${_svg('shield')} <strong>${ca}</strong></span>
+          <span class="dv2-cr-side-row dv2-cr-or">${_svg('coin')} ${or}</span>
         </div>
 
-        <!-- CA + Or -->
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:.18rem;flex-shrink:0">
-          <span style="font-size:.63rem;color:var(--text-dim);white-space:nowrap">🛡️ <strong style="color:var(--text)">${ca}</strong></span>
-          <span style="font-size:.63rem;color:#c8a73a;white-space:nowrap">💰 ${or}</span>
-        </div>
-
-        <!-- Joueur tag -->
-        <div style="font-size:.62rem;font-weight:700;color:${pcol};background:${pcol}18;
-          border:1px solid ${pcol}44;border-radius:6px;padding:2px 7px;
-          white-space:nowrap;flex-shrink:0;max-width:70px;overflow:hidden;text-overflow:ellipsis">
-          ${_esc(c.ownerPseudo||'?')}
-        </div>
+        <div class="dv2-cr-tag" style="color:${pcol};background:${pcol}18;border:1px solid ${pcol}44">${_esc(c.ownerPseudo||'?')}</div>
 
       </div>`;
     }
@@ -307,14 +297,14 @@ const PAGES = {
           return pa.localeCompare(pb) || (b.niveau||1) - (a.niveau||1);
         });
         charsHtml = `
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:.45rem">
+        <div class="dash-grid-charlist">
           ${sorted.map(c => _charRow(c)).join('')}
         </div>`;
       }
     } else {
       if (chars.length === 0) {
         charsHtml = `
-        <div class="dash-hero" data-navigate="characters" style="cursor:pointer">
+        <div class="dash-hero" data-navigate="characters">
           <div class="dash-hero-body" style="flex-direction:row;align-items:center;gap:1rem;padding:1.3rem 1.5rem">
             <div style="width:48px;height:48px;border-radius:50%;background:rgba(232,184,75,.08);
               border:1px dashed rgba(232,184,75,.3);display:flex;align-items:center;justify-content:center;
@@ -330,7 +320,7 @@ const PAGES = {
         charsHtml = _charFeatured(chars[0]);
       } else {
         charsHtml = `
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.55rem">
+        <div class="dash-grid-charmini">
           ${chars.map(c => _charMini(c)).join('')}
         </div>`;
       }
@@ -349,9 +339,12 @@ const PAGES = {
     const collectionTotal  = collectionItems.length;
     const collectionUnlocked = collectionItems.filter(c => c.unlocked).length;
     const collectionPct    = collectionTotal > 0 ? Math.round((collectionUnlocked / collectionTotal) * 100) : 0;
-    const activeQuests     = quests
-      .filter(q => q.statut === 'active')
+    // Groupes « En cours » de la Trame (quêtes liées à une mission). L'ancien
+    // modèle de quêtes autonomes est abandonné — le hub reflète la Trame.
+    const activeGroups     = quests
+      .filter(q => q.missionId && (q.statut || 'active') === 'active')
       .sort((a, b) => (b.createdAt||'') > (a.createdAt||'') ? 1 : -1);
+    const _missionTitleById = new Map(storyItems.map(i => [i.id, i.titre || 'Mission']));
 
     setDashboardQuests(quests);
 
@@ -360,54 +353,21 @@ const PAGES = {
     // Mini-portrait
     const _portMini = (p, size = 26) => characterAvatarHtml(p, { size, border: '2px solid var(--bg-card)', background: 'rgba(79,140,255,.18)', color: 'var(--gold)' });
 
-    // Carte quête (joinable en place, pas de navigation sur le conteneur)
-    const _questRequiredCount = q => {
-      const n = parseInt(q.participantsRequis ?? q.participantsRequired ?? q.nbParticipants ?? 0, 10);
-      return Number.isFinite(n) && n > 0 ? n : 0;
-    };
-    const QDIFF = { facile:'#22c38e', moyen:'#4f8cff', difficile:'#e8b84b', extreme:'#ff6b6b' };
-    const QDLBL = { facile:'Facile',  moyen:'Moyen',   difficile:'Difficile', extreme:'Extrême' };
-    const _dashQuestCard = q => {
-      const col    = QDIFF[q.difficulte] || '#4f8cff';
-      const dlbl   = QDLBL[q.difficulte] || 'Moyen';
-      const parts  = dedupeQuestParticipants(q.participants, { uidAliases: _myUidAliases });
-      const required = _questRequiredCount(q);
-      const joined = parts.some(p => _myUidAliases.includes(p.uid));
-      const portHtml = parts.slice(0,4).map(p => _portMini(p, 24)).join('');
-      const partsLabel = `${parts.length} intéressé${parts.length > 1 ? 's' : ''}${required ? ` · ${required} requis` : ''}`;
-      const joinBtn = !STATE.isAdmin
-        ? `<button class="quest-join-btn${joined?' quest-join-btn--joined':''}"
-             data-action="_dashQuestJoin" data-id="${q.id}">
-             ${joined ? '✓ Rejoint' : '+ Rejoindre'}
-           </button>`
-        : '';
+    // Carte d'un groupe de la Trame (lecture seule → on rejoint/gère dans la Trame).
+    const _dashGroupCard = q => {
+      const parts        = dedupeQuestParticipants(q.participants, { uidAliases: _myUidAliases });
+      const missionTitle = _missionTitleById.get(q.missionId) || 'Mission';
+      const joined       = parts.some(p => _myUidAliases.includes(p.uid));
+      const portHtml     = parts.slice(0, 5).map(p => _portMini(p, 24)).join('');
       return `
-      <div class="quest-card quest-card--active">
+      <div class="quest-card quest-card--active" data-navigate="story">
         <div class="quest-card-hd">
-          <span class="quest-badge" style="background:${col}22;color:${col};border-color:${col}44">${dlbl}</span>
-          <div style="margin-left:auto;display:flex;gap:.3rem;align-items:center">${joinBtn}</div>
+          <span class="quest-badge" style="background:rgba(79,140,255,.13);color:#7aa7ff;border-color:rgba(79,140,255,.3)">🎯 ${_esc(missionTitle)}</span>
+          ${joined ? `<span style="margin-left:auto;font-size:.7rem;color:#22c38e;font-weight:700">✓ Rejoint</span>` : ''}
         </div>
-        <div class="quest-card-title">${_esc(q.titre||'Quête')}</div>
-        ${q.description ? `<div class="quest-card-desc">${_esc(q.description)}</div>` : ''}
-        ${q.recompense  ? `<div class="quest-reward">🎁 ${_esc(q.recompense)}</div>` : ''}
-        <div class="quest-parts">${portHtml}${parts.length>4?`<span class="quest-parts-count">+${parts.length-4}</span>`:''}<span class="quest-parts-count">${partsLabel}</span></div>
-      </div>`;
-    };
-
-    // Bloc mission compact
-    const _missionCard = () => {
-      if (!mission) return null;
-      return `<div class="dash-info-card" data-navigate="story" style="cursor:pointer">
-        <div class="dash-mission-compact">
-          ${mission.imageUrl
-            ? `<img src="${mission.imageUrl}" class="dash-mission-thumb">`
-            : `<div class="dash-mission-thumb dash-mission-thumb--empty">⚔️</div>`}
-          <div style="flex:1;min-width:0">
-            <div class="dash-info-sublabel">Mission active${mission.acte ? ` · ${_esc(mission.acte)}` : ''}</div>
-            <div class="dash-info-title">${_esc(mission.titre||'Mission')}</div>
-            ${mission.lieu ? `<div class="dash-info-meta">📍 ${_esc(mission.lieu)}</div>` : ''}
-          </div>
-        </div>
+        <div class="quest-card-title">${_esc(q.titre || 'Groupe')}</div>
+        ${q.recompense ? `<div class="quest-reward">🎁 ${_esc(q.recompense)}</div>` : ''}
+        <div class="quest-parts">${portHtml}${parts.length > 5 ? `<span class="quest-parts-count">+${parts.length - 5}</span>` : ''}<span class="quest-parts-count">${parts.length} membre${parts.length > 1 ? 's' : ''}</span></div>
       </div>`;
     };
 
@@ -416,7 +376,7 @@ const PAGES = {
       if (totalMissions === 0) return '';
       const pct = Math.round(doneMissions / totalMissions * 100);
       return `
-      <div class="dv2-panel-card" data-navigate="story" style="cursor:pointer;padding:16px 20px">
+      <div class="dv2-panel-card dv2-progress-card" data-navigate="story">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <span style="font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim)">📖 Progression aventure</span>
           <span style="font-size:.72rem;color:var(--arcane);font-weight:700;font-family:var(--font-display)">${doneMissions}/${totalMissions} missions</span>
@@ -477,11 +437,11 @@ const PAGES = {
             </div>
             <div class="dv2-stats-row">
               <div class="dv2-stat-pill">
-                <div class="dv2-stat-pill-val" style="color:#f4c430">💰 ${or}</div>
+                <div class="dv2-stat-pill-val" style="color:#f4c430">${_svg('coin')} ${or}</div>
                 <div class="dv2-stat-pill-lbl">Or</div>
               </div>
               <div class="dv2-stat-pill">
-                <div class="dv2-stat-pill-val" style="color:var(--gold-2)">🛡️ ${ca}</div>
+                <div class="dv2-stat-pill-val" style="color:var(--gold-2)">${_svg('shield')} ${ca}</div>
                 <div class="dv2-stat-pill-lbl">CA</div>
               </div>
             </div>
@@ -507,10 +467,10 @@ const PAGES = {
           const av = characterPortraitContent(c, { fallbackTag: 'span' });
           const isOwn = STATE.isAdmin || c.uid === STATE.user?.uid;
           return `
-          <div class="dv2-party-member" data-action="_openQuickView" data-id="${c.id}" style="cursor:pointer"
+          <div class="dv2-party-member" data-action="_openQuickView" data-id="${c.id}"
             title="Cliquer pour aperçu rapide">
             <div class="dv2-party-avatar">${av}</div>
-            <div style="flex:1;min-width:0">
+            <div class="dv2-flex1">
               <div class="dv2-party-name">${_esc(c.nom||'?')}</div>
               <div class="dv2-party-sub">Niv.${c.niveau||1}${c.classe?` · ${_esc(c.classe)}`:''}</div>
             </div>
@@ -518,7 +478,7 @@ const PAGES = {
               title="Ouvrir la fiche complète">→</button>` : ''}
             <div class="dv2-party-dot"></div>
           </div>`;
-        }).join('') : `<div style="padding:18px;color:var(--text-dim);font-size:.8rem">Les membres du groupe apparaîtront ici.</div>`}
+        }).join('') : `<div class="dv2-empty-sm">Les membres du groupe apparaîtront ici.</div>`}
         ${nextSessionFmt ? `
         <div class="dv2-party-footer dv2-party-footer--session">
           <div class="dv2-party-session-label">Prochaine séance prévue pour :</div>
@@ -541,7 +501,7 @@ const PAGES = {
       if (!mission) return '';
       const pct = totalMissions > 0 ? Math.round(doneMissions / totalMissions * 100) : 0;
       return `
-      <div class="dv2-mission-card" data-navigate="story" style="cursor:pointer">
+      <div class="dv2-mission-card" data-navigate="story">
         <div class="dv2-mission-header">
           <div class="dv2-mission-icon">${mission.imageUrl
             ? `<img src="${mission.imageUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`
@@ -578,24 +538,24 @@ const PAGES = {
       const or = calcOr(c) || 0;
       return `
       <div class="dv2-stats-grid">
-        <div class="dv2-stat-card dv2-sc-gold" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
-          <span class="dv2-stat-card-icon">💰</span>
+        <div class="dv2-stat-card dv2-sc-gold" data-action="_goToChar" data-id="${c.id}">
+          <span class="dv2-stat-card-icon">${_svg('coin', '#f4c430')}</span>
           <div class="dv2-stat-card-val" style="color:#f4c430">${or}</div>
           <div class="dv2-stat-card-lbl">Or</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-shield" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
-          <span class="dv2-stat-card-icon">🛡️</span>
+        <div class="dv2-stat-card dv2-sc-shield" data-action="_goToChar" data-id="${c.id}">
+          <span class="dv2-stat-card-icon">${_svg('shield', 'var(--gold-2)')}</span>
           <div class="dv2-stat-card-val" style="color:var(--gold-2)">${ca}</div>
           <div class="dv2-stat-card-lbl">Classe d'armure</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-hp" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
-          <span class="dv2-stat-card-icon">❤️</span>
+        <div class="dv2-stat-card dv2-sc-hp" data-action="_goToChar" data-id="${c.id}">
+          <span class="dv2-stat-card-icon">${_svg('heart', '#22c38e')}</span>
           <div class="dv2-stat-card-val" style="color:#22c38e">${pvCur}<span style="font-size:.65em;opacity:.55">/${pvMax}</span></div>
           <div class="dv2-stat-card-lbl">Points de vie</div>
           <div class="dv2-stat-card-sub">${pvPct}% restants</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-mp" data-action="_goToChar" data-id="${c.id}" style="cursor:pointer">
-          <span class="dv2-stat-card-icon">🔮</span>
+        <div class="dv2-stat-card dv2-sc-mp" data-action="_goToChar" data-id="${c.id}">
+          <span class="dv2-stat-card-icon">${_svg('sparkles', '#b99fff')}</span>
           <div class="dv2-stat-card-val" style="color:#b99fff">${pmCur}<span style="font-size:.65em;opacity:.55">/${pmMax}</span></div>
           <div class="dv2-stat-card-lbl">Points de magie</div>
           <div class="dv2-stat-card-sub">${pmPct}% restants</div>
@@ -621,32 +581,30 @@ const PAGES = {
         </button>`).join('')}</div>`;
     }
 
-    function _questsPanelV2() {
-      const QDIFF = { facile:'Facile', moyen:'Moyen', difficile:'Difficile', extreme:'Extrême' };
-      const QDCLS = { facile:'dv2-rarity-common', moyen:'dv2-rarity-rare', difficile:'dv2-rarity-epic', extreme:'dv2-rarity-legendary' };
-      const QICLS = { principale:'dv2-qi-main', secondaire:'dv2-qi-side', quotidienne:'dv2-qi-daily' };
-      const QICON = { principale:'🔥', secondaire:'🗡️', quotidienne:'🌅', extreme:'☠️', difficile:'⚠️' };
+    function _groupsPanelV2() {
+      // Mes groupes « En cours » (ceux que j'ai rejoints), sinon tous les groupes actifs.
+      const mine = activeGroups.filter(q => (q.participants || []).some(p => _myUidAliases.includes(p.uid)));
+      const list = (mine.length ? mine : activeGroups).slice(0, 5);
       return `
       <div class="dv2-panel-card">
         <div class="dv2-panel-header">
-          <div class="dv2-panel-title">🗡️ Quêtes <span class="dv2-panel-count">${activeQuests.length}</span></div>
-          <button class="dv2-section-action" data-navigate="quests">Voir tout →</button>
+          <div class="dv2-panel-title">👥 Mes groupes <span class="dv2-panel-count">${mine.length || activeGroups.length}</span></div>
+          <button class="dv2-section-action" data-navigate="story">Trame →</button>
         </div>
-        ${activeQuests.slice(0, 5).length > 0 ? activeQuests.slice(0, 5).map(q => {
-          const icn    = QICON[q.type] || QICON[q.difficulte] || '🗡️';
-          const cls    = QICLS[q.type] || 'dv2-qi-default';
-          const rarity = QDCLS[q.difficulte] || 'dv2-rarity-common';
-          const joined = Array.isArray(q.participants) && q.participants.some(p => _myUidAliases.includes(p.uid));
+        ${list.length ? list.map(q => {
+          const joined = (q.participants || []).some(p => _myUidAliases.includes(p.uid));
+          const missionTitle = _missionTitleById.get(q.missionId) || 'Mission';
+          const count = dedupeQuestParticipants(q.participants, { uidAliases: _myUidAliases }).length;
           return `
-          <div class="dv2-quest-item" data-navigate="quests">
-            <div class="dv2-quest-icon ${cls}">${icn}</div>
-            <div style="flex:1;min-width:0">
-              <div class="dv2-quest-name">${_esc(q.titre||'Quête')}</div>
-              <div class="dv2-quest-sub">${QDIFF[q.difficulte]||'—'}${joined?' · ✓ Rejointe':''}</div>
+          <div class="dv2-quest-item" data-navigate="story">
+            <div class="dv2-quest-icon dv2-qi-main">🎯</div>
+            <div class="dv2-flex1">
+              <div class="dv2-quest-name">${_esc(q.titre || 'Groupe')}</div>
+              <div class="dv2-quest-sub">${_esc(missionTitle)}${joined ? ' · ✓ Rejoint' : ''}</div>
             </div>
-            <div class="dv2-quest-rarity ${rarity}">${(q.difficulte||'').toUpperCase()||'—'}</div>
+            <div class="dv2-quest-rarity dv2-rarity-rare">${count} 👤</div>
           </div>`;
-        }).join('') : `<div style="padding:18px;color:var(--text-dim);font-size:.8rem">Aucune quête active.</div>`}
+        }).join('') : `<div class="dv2-empty-sm">Aucun groupe en cours. Rejoins-en un dans la <strong>Trame</strong>.</div>`}
       </div>`;
     }
 
@@ -660,12 +618,12 @@ const PAGES = {
         ${achievements.slice(0, 5).length > 0 ? [...achievements].sort((a,b) => { const p = d => { const [j,m,y] = (d||'').split('/'); return y&&m&&j?`${y}${m.padStart(2,'0')}${j.padStart(2,'0')}`:''; }; return p(b.date) > p(a.date) ? 1 : -1; }).slice(0, 5).map(a => `
         <div class="dv2-ach-item">
           <div class="dv2-ach-icon">${a.icone||'🏆'}</div>
-          <div style="flex:1;min-width:0">
+          <div class="dv2-flex1">
             <div class="dv2-ach-name">${_esc(a.titre||a.nom||'Haut-fait')}</div>
             <div class="dv2-ach-desc">${_esc(a.description||'')}</div>
           </div>
           ${a.xp ? `<div class="dv2-ach-xp">+${a.xp}&nbsp;XP</div>` : ''}
-        </div>`).join('') : `<div style="padding:18px;color:var(--text-dim);font-size:.8rem">Aucun haut-fait.</div>`}
+        </div>`).join('') : `<div class="dv2-empty-sm">Aucun haut-fait.</div>`}
       </div>`;
     }
 
@@ -686,10 +644,10 @@ const PAGES = {
 
       const ev = bastionDoc?.evenementCourant;
       return `
-      <div class="dv2-bastion-card" data-navigate="bastion" style="cursor:pointer">
+      <div class="dv2-bastion-card" data-navigate="bastion">
         <div class="dv2-bastion-header">
           <div class="dv2-bastion-icon">${_esc(emoji)}</div>
-          <div style="flex:1;min-width:0">
+          <div class="dv2-flex1">
             <div class="dv2-bastion-name">${_esc(bastionNom)}</div>
             <div class="dv2-bastion-level">${semaine ? `Période ${semaine}` : `Niveau ${bastionLevel}`}${bastionDoc?.lieu ? ` · ${_esc(bastionDoc.lieu)}` : ''}</div>
           </div>
@@ -735,25 +693,28 @@ const PAGES = {
         <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Session active</div>
       </div>
 
+      <!-- Action du moment -->
+      ${primaryBlock}
+
       <!-- Stats 4-col -->
       <div class="dv2-stats-grid">
-        <div class="dv2-stat-card dv2-sc-shield" data-navigate="characters" style="cursor:pointer">
-          <span class="dv2-stat-card-icon">📜</span>
+        <div class="dv2-stat-card dv2-sc-shield" data-navigate="characters">
+          <span class="dv2-stat-card-icon">${_svg('scroll', 'var(--gold-2)')}</span>
           <div class="dv2-stat-card-val" style="color:var(--gold-2)">${chars.length}</div>
           <div class="dv2-stat-card-lbl">Personnage${chars.length!==1?'s':''}</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-mp" data-navigate="quests" style="cursor:pointer">
-          <span class="dv2-stat-card-icon">🗡️</span>
-          <div class="dv2-stat-card-val" style="color:#b99fff">${activeQuests.length}</div>
-          <div class="dv2-stat-card-lbl">Quête${activeQuests.length!==1?'s':''} active${activeQuests.length!==1?'s':''}</div>
+        <div class="dv2-stat-card dv2-sc-mp" data-navigate="story">
+          <span class="dv2-stat-card-icon">${_svg('users', '#b99fff')}</span>
+          <div class="dv2-stat-card-val" style="color:#b99fff">${activeGroups.length}</div>
+          <div class="dv2-stat-card-lbl">Groupe${activeGroups.length!==1?'s':''} en cours</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-hp" data-navigate="achievements" style="cursor:pointer">
-          <span class="dv2-stat-card-icon">🏆</span>
+        <div class="dv2-stat-card dv2-sc-hp" data-navigate="achievements">
+          <span class="dv2-stat-card-icon">${_svg('trophy', '#22c38e')}</span>
           <div class="dv2-stat-card-val" style="color:#22c38e">${achievements.length}</div>
           <div class="dv2-stat-card-lbl">Haut${achievements.length!==1?'s':''}-fait${achievements.length!==1?'s':''}</div>
         </div>
-        <div class="dv2-stat-card dv2-sc-gold dv2-stat-card--collection${collectionUnlocked === 0 ? ' is-empty' : ''}" data-navigate="collection" style="cursor:pointer;--collection-progress:${collectionPct}%" aria-label="Collection, ${collectionUnlocked} cartes débloquées sur ${collectionTotal}">
-          <span class="dv2-stat-card-icon">🃏</span>
+        <div class="dv2-stat-card dv2-sc-gold dv2-stat-card--collection${collectionUnlocked === 0 ? ' is-empty' : ''}" data-navigate="collection" style="--collection-progress:${collectionPct}%" aria-label="Collection, ${collectionUnlocked} cartes débloquées sur ${collectionTotal}">
+          <span class="dv2-stat-card-icon">${_svg('layers', '#f4c430')}</span>
           <div class="dv2-stat-card-val dv2-collection-val" style="color:#f4c430">${collectionUnlocked}<span>/${collectionTotal}</span></div>
           <div class="dv2-stat-card-lbl">Collection</div>
           <div class="dv2-collection-meter" aria-hidden="true"><span></span></div>
@@ -773,7 +734,7 @@ const PAGES = {
         </div>
         <div class="dv2-panel-card">${charsHtml
           ? `<div style="padding:12px">${charsHtml}</div>`
-          : `<div style="padding:20px;color:var(--text-dim);font-size:.85rem;text-align:center">Aucun personnage dans cette aventure.</div>`}
+          : `<div class="dv2-empty-md">Aucun personnage dans cette aventure.</div>`}
         </div>
       </div>
 
@@ -786,10 +747,9 @@ const PAGES = {
           <span class="dv2-section-label-text">Console MJ</span>
           <div class="dv2-section-label-line"></div>
         </div>
-        <div class="dv2-shortcuts-grid" style="grid-template-columns:repeat(7,1fr)">
+        <div class="dv2-shortcuts-grid dv2-shortcuts-grid--mj">
           ${[
             { page:'story',     icon:'📚', label:'Trame',     bg:'rgba(34,211,238,.15)',  bc:'rgba(34,211,238,.3)',  col:'#22d3ee' },
-            { page:'quests',    icon:'🗡️', label:'Quêtes',    bg:'rgba(157,111,255,.15)', bc:'rgba(157,111,255,.3)', col:'#9d6fff' },
             { page:'shop',      icon:'🛍️', label:'Boutique',  bg:'rgba(244,196,48,.15)',  bc:'rgba(244,196,48,.3)',  col:'#f4c430' },
             { page:'npcs',      icon:'👥', label:'PNJ',       bg:'rgba(34,195,142,.15)',  bc:'rgba(34,195,142,.3)',  col:'#22c38e' },
             { page:'bestiaire', icon:'🐉', label:'Bestiaire', bg:'rgba(255,90,126,.15)',  bc:'rgba(255,90,126,.3)',  col:'#ff5a7e' },
@@ -803,16 +763,16 @@ const PAGES = {
         </div>
       </div>
 
-      <!-- Quêtes actives -->
+      <!-- Groupes en cours (issus de la Trame) -->
       <div>
         <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Quêtes actives</span>
+          <span class="dv2-section-label-text">Groupes en cours</span>
           <div class="dv2-section-label-line"></div>
-          <button class="dv2-section-action" data-navigate="quests">Gérer →</button>
+          <button class="dv2-section-action" data-navigate="story">Gérer dans la Trame →</button>
         </div>
-        ${activeQuests.length
-          ? `<div class="quest-grid">${activeQuests.slice(0,4).map(_dashQuestCard).join('')}</div>${activeQuests.length > 4 ? `<button class="dv2-section-action" data-navigate="quests" style="align-self:flex-end;margin-top:6px">+${activeQuests.length-4} de plus →</button>` : ''}`
-          : `<div class="dv2-panel-card"><div style="padding:20px;color:var(--text-dim);font-size:.85rem;text-align:center"><span style="opacity:.3">🗡️</span> Aucune quête active.</div></div>`}
+        ${activeGroups.length
+          ? `<div class="quest-grid">${activeGroups.slice(0,4).map(_dashGroupCard).join('')}</div>${activeGroups.length > 4 ? `<button class="dv2-section-action" data-navigate="story" style="align-self:flex-end;margin-top:6px">+${activeGroups.length-4} de plus →</button>` : ''}`
+          : `<div class="dv2-panel-card"><div class="dv2-empty-md"><span style="opacity:.3">👥</span> Aucun groupe en cours. Crée-en sur une mission de la Trame.</div></div>`}
       </div>
 
       <!-- Trame progression -->
@@ -824,14 +784,7 @@ const PAGES = {
           <button class="dv2-section-action" data-navigate="story">Ouvrir →</button>
         </div>
         ${_progBar()}
-      </div>` : ''}
-
-      <!-- Table Virtuelle -->
-      <div class="dash-vtt-cta" data-navigate="vtt">
-        <span class="dash-vtt-icon">🎲</span>
-        <div class="dash-vtt-text"><span class="dash-vtt-label">Table Virtuelle</span><span class="dash-vtt-sub">Entrer dans la session de jeu</span></div>
-        <span class="dash-vtt-arrow">→</span>
-      </div>`;
+      </div>` : ''}`;
 
       // ── Présence temps réel (MJ uniquement) ─────────────────────────
       // Filtre : actif si lastSeen < 2 min (cohérent avec la présence VTT)
@@ -851,8 +804,8 @@ const PAGES = {
               <div class="dv2-section-label-line"></div>
             </div>
             <div class="dv2-panel-card">
-              <div style="padding:14px 16px;color:var(--text-dim);font-size:.78rem;display:flex;align-items:center;gap:.5rem">
-                <span style="width:8px;height:8px;border-radius:50%;background:#555"></span>
+              <div class="dv2-presence-empty">
+                <span class="dv2-presence-dot"></span>
                 Aucun joueur connecté pour le moment.
               </div>
             </div>`;
@@ -862,11 +815,11 @@ const PAGES = {
           const ch = (STATE.characters || []).find(c => c.uid === p.uid) || null;
           const portrait = characterAvatarHtml(ch || p, { size: 30, border: '2px solid rgba(34,195,142,.55)', background: 'rgba(34,195,142,.15)', color: 'var(--gold)' });
           return `
-          <div style="display:flex;align-items:center;gap:.55rem;background:rgba(34,195,142,.07);border:1px solid rgba(34,195,142,.22);border-radius:999px;padding:3px 12px 3px 3px">
+          <div class="dv2-presence-pill">
             ${portrait}
-            <div style="display:flex;flex-direction:column;line-height:1.15;min-width:0">
-              <span style="font-size:.78rem;color:var(--text);font-weight:600;white-space:nowrap">${_esc(p.pseudo||'?')}</span>
-              ${ch ? `<span style="font-size:.65rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px">${_esc(ch.nom||'?')}</span>` : ''}
+            <div class="dv2-presence-meta">
+              <span class="dv2-presence-name">${_esc(p.pseudo||'?')}</span>
+              ${ch ? `<span class="dv2-presence-char">${_esc(ch.nom||'?')}</span>` : ''}
             </div>
           </div>`;
         }).join('');
@@ -876,7 +829,7 @@ const PAGES = {
             <div class="dv2-section-label-line"></div>
           </div>
           <div class="dv2-panel-card">
-            <div style="padding:12px 14px;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center">${pills}</div>
+            <div class="dv2-presence-list">${pills}</div>
           </div>`;
       };
       // Abonnement présence une seule fois (sinon chaque paint recrée un listener
@@ -887,14 +840,14 @@ const PAGES = {
 
       // ── VUE JOUEUR v2 ─────────────────────────────────────────────────
 
-      // Groupe : participants des quêtes actives que j'ai rejointes
-      const _joinedQuests = activeQuests.filter(q =>
+      // Groupe : co-membres des groupes (Trame) que j'ai rejoints
+      const _joinedGroups = activeGroups.filter(q =>
         Array.isArray(q.participants) && q.participants.some(p => _myUidAliases.includes(p.uid))
       );
       const _missionUids = new Set(
-        _joinedQuests.flatMap(q => (q.participants || []).map(p => p.uid)).filter(u => !_myUidAliases.includes(u))
+        _joinedGroups.flatMap(q => (q.participants || []).map(p => p.uid)).filter(u => !_myUidAliases.includes(u))
       );
-      const partyMembers = _joinedQuests.length > 0
+      const partyMembers = _joinedGroups.length > 0
         ? [...chars, ...allPartyChars.filter(c => _missionUids.has(c.uid))]
         : [];
 
@@ -902,7 +855,7 @@ const PAGES = {
       let heroBlock = '';
       if (chars.length === 0) {
         heroBlock = `
-        <div class="dv2-hero-card" data-navigate="characters" style="cursor:pointer">
+        <div class="dv2-hero-card" data-navigate="characters">
           <div class="dv2-hero-inner" style="padding:2rem;justify-content:center;text-align:center">
             <div>
               <div style="font-size:2rem;margin-bottom:.75rem">⚔️</div>
@@ -921,7 +874,7 @@ const PAGES = {
         // Plusieurs personnages : grille adaptative + carte groupe en dessous
         // auto-fit (vs auto-fill) étire les colonnes pour utiliser toute la largeur
         heroBlock = `
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.65rem">
+        <div class="dash-grid-herocards">
           ${chars.map(c => _heroCardV2(c)).join('')}
         </div>
         ${_partyCardV2(partyMembers)}`;
@@ -938,6 +891,8 @@ const PAGES = {
         </div>
         <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Session active</div>
       </div>
+
+      ${primaryBlock}
 
       ${heroBlock}
 
@@ -957,7 +912,7 @@ const PAGES = {
           <div class="dv2-section-label-line"></div>
         </div>
         <div class="dv2-two-col">
-          ${_questsPanelV2()}
+          ${_groupsPanelV2()}
           ${_achievementsPanelV2()}
         </div>
       </div>
@@ -969,13 +924,7 @@ const PAGES = {
           <div class="dv2-section-label-line"></div>
         </div>
         ${_bastionCardV2()}
-      </div>` : ''}
-
-      <div class="dash-vtt-cta" data-navigate="vtt">
-        <span class="dash-vtt-icon">🎲</span>
-        <div class="dash-vtt-text"><span class="dash-vtt-label">Table Virtuelle</span><span class="dash-vtt-sub">Entrer dans la session de jeu</span></div>
-        <span class="dash-vtt-arrow">→</span>
-      </div>`;
+      </div>` : ''}`;
     }
 
     // ── Navigation personnage ──────────────────────────────────────────
@@ -1375,33 +1324,9 @@ async function goToChar(id) {
   navigate('characters');
 }
 
-async function dashQuestJoin(id, el) {
-  const quest = findDashboardQuest(id);
-  if (!quest) return;
-  const myUid = STATE.user?.uid;
-  const myAliases = [
-    myUid,
-    ...(Array.isArray(STATE.profile?.previousUids) ? STATE.profile.previousUids : []),
-    ...(Array.isArray(STATE.profile?.uidAliases) ? STATE.profile.uidAliases : []),
-  ].filter(Boolean);
-  const myChar = (STATE.characters || []).find(c => c.uid === myUid);
-  if (!myChar) { showNotif('Aucun personnage trouvé.', 'error'); return; }
-  if (el) { el.disabled = true; el.textContent = '…'; }
-  const result = toggleQuestParticipant(quest.participants, { uid: myUid, char: myChar, uidAliases: myAliases });
-  try {
-    await saveDoc('quests', id, { participants: result.participants });
-    showNotif(result.leaving ? 'Tu as quitté cette quête.' : 'Tu as rejoint cette quête !', result.leaving ? 'info' : 'success');
-    await PAGES.dashboard();
-  } catch {
-    showNotif('Erreur.', 'error');
-    if (el) el.disabled = false;
-  }
-}
-
 registerActions({
   // Dashboard
   _goToChar:             (btn) => goToChar(btn.dataset.id),
-  _dashQuestJoin:        (btn) => dashQuestJoin(btn.dataset.id, btn),
   openAdventureSwitcher: ()    => openAdventureSwitcher(),
 
   // Characters (admin filter) — appel via window pour supporter le cas où characters.js n'est pas encore chargé
