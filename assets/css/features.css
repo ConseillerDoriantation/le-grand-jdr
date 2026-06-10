@@ -4430,3 +4430,29 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
 .axe-order-grip:active { cursor: grabbing; }
 .axe-order-dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
 .axe-order-name { font-size: .86rem; font-weight: 600; color: var(--text); flex: 1; min-width: 0; }
+
+/* ── Boutons partagés (extraits de vtt.css/shop.css pour rester EAGER) ──────
+   Ces variantes sont rendues par plusieurs pages (quests, characters…) alors que
+   leurs feuilles d'origine sont chargées en lazy. Voir FEATURE_CSS dans navigation.js. */
+.btn-secondary {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: .42rem .9rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: .78rem; font-weight: 600;
+  cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.btn-secondary:hover {
+  background: var(--bg-card2);
+  color: var(--text);
+  border-color: rgba(255,255,255,.18);
+}
+.btn.btn-arcane {
+  background: rgba(157,111,255,0.14);
+  border: 1px solid rgba(157,111,255,0.40);
+  color: #bca0ff;
+}
+.btn.btn-arcane:hover { background: rgba(157,111,255,0.28); }

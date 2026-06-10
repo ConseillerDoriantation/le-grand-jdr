@@ -36,6 +36,42 @@ const FEATURE_MAP = {
 // Garde les modules déjà chargés pour ne pas re-importer
 const _loaded = new Set();
 
+// ── CSS chargé en lazy par feature ────────────────────────────────────────
+// Les feuilles spécifiques à une page sont retirées de index.html (boot allégé
+// d'environ 11 000 lignes) et chargées à la 1re navigation vers la page, en
+// parallèle de son module JS. Restent eager : le global + les feuilles partagées
+// par le dashboard ou plusieurs pages (characters, histoire, npcs, quests,
+// bestiary, bastion, features…). Les primitives partagées rendues hors de leur
+// feuille (.btn-secondary, .btn-arcane) ont été extraites vers features.css.
+// Mapping multi-pages pour les composants partagés :
+//   vtt.css ↔ bestiaire (le shop-picker rend des classes vtt-)
+//   recipes.css ↔ agenda (rend des classes rec-).
+const FEATURE_CSS = {
+  shop:      ['shop.css'],
+  vtt:       ['vtt.css'],
+  bestiaire: ['vtt.css'],            // shop-picker stylé en vtt-
+  agenda:    ['agenda.css', 'recipes.css'],
+  recettes:  ['recipes.css'],
+  account:   ['account.css'],
+};
+const _cssLoaded = new Set();
+function _loadCss(file) {
+  if (_cssLoaded.has(file)) return Promise.resolve();
+  _cssLoaded.add(file);
+  return new Promise((resolve) => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = `./assets/css/${file}`;
+    link.onload = () => resolve();
+    link.onerror = () => { console.warn('[nav] CSS feature non chargée :', file); resolve(); };
+    document.head.appendChild(link);
+  });
+}
+function _ensureFeatureCss(page) {
+  const files = FEATURE_CSS[page];
+  return files ? Promise.all(files.map(_loadCss)) : Promise.resolve();
+}
+
 // ── Naviguer vers une page ─────────────────────
 export async function navigate(page) {
   closeMoreMenu(); // referme le menu mobile quelle que soit la source (clic, clavier, palette)
@@ -52,6 +88,10 @@ export async function navigate(page) {
   _syncNav(page);
   _renderLoading();
 
+  // CSS lazy de la page : lancé en parallèle de l'import JS, attendu avant le
+  // rendu (évite le flash sans style). Instantané si déjà chargé (cache).
+  const cssReady = _ensureFeatureCss(page);
+
   // Charger la feature en lazy si nécessaire (une seule fois)
   // On le fait AVANT de vérifier PAGES[page] car certaines features
   // s'y enregistrent elles-mêmes au chargement (ex: account.js, world.js)
@@ -65,6 +105,7 @@ export async function navigate(page) {
       return;
     }
   }
+  await cssReady;
 
   // Vérifier après chargement
   if (!PAGES[page]) {

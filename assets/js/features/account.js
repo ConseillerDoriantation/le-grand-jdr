@@ -9,7 +9,7 @@ import { auth } from '../config/firebase.js';
 import {
   updateEmail, updatePassword, deleteUser,
   EmailAuthProvider, reauthenticateWithCredential,
-} from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+} from 'firebase/auth';   // résolu par l'import map de index.html
 
 import {
   loadChars, loadCollection, deleteFromCol, updateInCol,

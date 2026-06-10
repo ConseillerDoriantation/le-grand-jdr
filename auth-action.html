@@ -17,6 +17,16 @@
     })();
   </script>
 
+  <!-- Version du SDK Firebase centralisée (cf. index.html). Doit précéder le module ci-dessous. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "firebase/app":  "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js",
+      "firebase/auth": "https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js"
+    }
+  }
+  </script>
+
   <link rel="stylesheet" href="./assets/css/tokens.css">
   <link rel="stylesheet" href="./assets/css/base.css">
   <link rel="stylesheet" href="./assets/css/auth.css">
@@ -162,21 +172,14 @@
 </div>
 
 <script type="module">
-  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+  // Specifiers bare résolus par l'import map du <head> ; config partagée avec l'app.
+  import { initializeApp } from 'firebase/app';
   import {
     getAuth,
     verifyPasswordResetCode,
     confirmPasswordReset,
-  } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-
-  const firebaseConfig = {
-    apiKey:            'AIzaSyAetYIzoPMnXwL9TjKLjzKCGyrjwFgBNxU',
-    authDomain:        'le-grand-jdr.firebaseapp.com',
-    projectId:         'le-grand-jdr',
-    storageBucket:     'le-grand-jdr.firebasestorage.app',
-    messagingSenderId: '641426541133',
-    appId:             '1:641426541133:web:c4c55d900ae6304bcf6a04',
-  };
+  } from 'firebase/auth';
+  import { firebaseConfig } from './assets/js/config/firebase-config.js';
 
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);

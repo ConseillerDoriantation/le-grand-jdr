@@ -3,7 +3,8 @@
 // Aucun effet de bord sur window.*
 // ══════════════════════════════════════════════
 
-import { initializeApp }          from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+// Specifiers bare résolus par l'import map de index.html (version du SDK centralisée là-bas).
+import { initializeApp }          from 'firebase/app';
 import { getAuth,
          createUserWithEmailAndPassword,
          signInWithEmailAndPassword,
@@ -11,7 +12,7 @@ import { getAuth,
          onAuthStateChanged,
          GoogleAuthProvider,
          signInWithPopup,
-         sendPasswordResetEmail } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+         sendPasswordResetEmail } from 'firebase/auth';
 import { initializeFirestore,
          persistentLocalCache,
          persistentMultipleTabManager,
@@ -21,16 +22,8 @@ import { initializeFirestore,
          writeBatch,
          query, where, orderBy, limit,
          onSnapshot,
-         serverTimestamp }         from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-
-const firebaseConfig = {
-  apiKey:            'AIzaSyAetYIzoPMnXwL9TjKLjzKCGyrjwFgBNxU',
-  authDomain:        'le-grand-jdr.firebaseapp.com',
-  projectId:         'le-grand-jdr',
-  storageBucket:     'le-grand-jdr.firebasestorage.app',
-  messagingSenderId: '641426541133',
-  appId:             '1:641426541133:web:c4c55d900ae6304bcf6a04',
-};
+         serverTimestamp }         from 'firebase/firestore';
+import { firebaseConfig }          from './firebase-config.js';
 
 const app  = initializeApp(firebaseConfig);
 const auth = getAuth(app);

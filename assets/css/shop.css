@@ -2575,12 +2575,8 @@ body.sh-dragging * { cursor: grabbing !important; }
 
 /* Topbar v2 : align tools en colonne, nouveau bouton Atelier arcane */
 .sh-topbar--v2 .sh-topbar-tools { flex-wrap: wrap; align-items: center; gap: 6px; }
-.btn.btn-arcane {
-  background: rgba(157,111,255,0.14);
-  border: 1px solid rgba(157,111,255,0.40);
-  color: #bca0ff;
-}
-.btn.btn-arcane:hover { background: rgba(157,111,255,0.28); }
+/* .btn.btn-arcane déplacé vers features.css (eager) : rendu hors shop alors que
+   cette feuille est chargée en lazy. */
 
 /* ── Hero (recherche full-width + smart filters) ── */
 .sh-hero {
