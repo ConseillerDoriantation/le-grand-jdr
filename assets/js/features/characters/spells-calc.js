@@ -11,6 +11,15 @@ import { getMaitriseBonus as getSharedMaitriseBonus, statShort } from '../../sha
 import { getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getMainWeapon } from './data.js';
 import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js';
+// Cœurs purs extraits (testables à froid). Ré-exportés plus bas pour l'API publique.
+import {
+  _calcAfflictionDot, _autoSourceAfflictionDot, _calcEnchantDegats,
+  _hasLaceration, _calcLaceration, _calcChance, _calcDrainPct, _calcConcentrationDD,
+} from '../../shared/spell-math.js';
+export {
+  _calcAfflictionDot, _autoSourceAfflictionDot, _calcEnchantDegats,
+  _hasLaceration, _calcLaceration, _calcDrainPct,
+};
 
 // ── Caches chargés depuis openSortModal ───────────────────────────────────────
 let _spellMatricesCache = null;
@@ -574,34 +583,6 @@ function _legacySlotToStat(slot) {
   return 'constitution';
 }
 
-export function _calcAfflictionDot(s) {
-  const manual = (s?.afflictionDotFormula || '').trim();
-  if (manual) return manual;
-  const nbPuiss = (s?.runes || []).filter(r => r === 'Puissance').length;
-  const dice = 1 + nbPuiss;
-  return `${dice}d4 +2`;
-}
-export function _autoSourceAfflictionDot(s) {
-  const nbP = (s?.runes || []).filter(r => r === 'Puissance').length;
-  if (nbP === 0) return '1 Affliction · base';
-  if (nbP === 1) return '+1 Puiss · 1 dé bonus';
-  return `+${nbP} Puiss · ${nbP} dés bonus`;
-}
-
-/**
- * Dégâts d'enchantement effectifs (mode Dégâts uniquement, auto si vide).
- * Formule : (1 + nbPuissance)d4 + 2 dans l'élément.
- * Le slot legacy est ignoré — seul le mode importe.
- */
-export function _calcEnchantDegats(s) {
-  // Mode État → pas de dégâts bonus
-  if ((s.enchantMode || 'dmg') === 'etat') return '';
-  const manual = (s.enchantDegats || '').trim();
-  if (manual) return manual;
-  const nbPuiss = (s.runes || []).filter(r => r === 'Puissance').length;
-  return `${1 + nbPuiss}d4 +2`;
-}
-
 /** Valeur CA (rune Protection mode CA) :
  *  - Saisie manuelle si fournie
  *  - Sinon auto : mod par rune selon élément ou 2 par défaut
@@ -771,56 +752,6 @@ export function _calcSortDeplacement(s) {
  *  Le sort présente cette branche s'il a la rune Affliction en mode Lacération,
  *  ou (legacy) l'ancienne rune autonome « Lacération ».
  */
-export function _hasLaceration(s) {
-  const r = s?.runes || [];
-  return r.includes('Lacération')
-      || (s?.afflictionMode === 'laceration' && r.includes('Affliction'));
-}
-
-/** Lacération : réduction CA cible — pilotée par le nombre de runes Affliction
- *  -1 par rune (plafonné -2 joueur / -4 Élite-Boss en jeu).
- *  Legacy : ancienne rune « Lacération » → même barème linéaire.
- */
-export function _calcLaceration(s) {
-  const r = s?.runes || [];
-  const nb = (s?.afflictionMode === 'laceration' && r.includes('Affliction'))
-    ? r.filter(x => x === 'Affliction').length
-    : r.filter(x => x === 'Lacération').length;
-  if (!nb) return null;
-  return { runes: nb, reduction: nb, max: 2, maxElite: 4 };
-}
-
-/** Chance : réduction RC critique, plafonnée à 17-20.
- *  ×1 → RC 19-20 · ×2 → RC 18-20 · ×3+ → RC 17-20
- *  Bonus : le dé de critique ajouté est aussi max
- */
-function _calcChance(s) {
-  const nb = (s.runes||[]).filter(r => r === 'Chance').length;
-  if (!nb) return null;
-  const reduction = Math.min(nb, 3);
-  return { runes: nb, rc: 20 - reduction, reduction, capped: nb > 3 };
-}
-
-/** Drain : pourcentage des dégâts soigné au lanceur.
- *  Formule : 25% + 25% × nbProtection → Prot×1=50, ×2=75, ×3=100, ×4=125…
- *  Le soin VTT est ensuite plafonné par la frappe de base hors Puissance.
- */
-export function _calcDrainPct(s) {
-  const runes = s?.runes || [];
-  const nbProt = runes.filter(r => r === 'Protection').length;
-  if (!nbProt) return 0;        // la Puissance n'est plus requise (Prot ×1 → 50%)
-  return 0.25 + 0.25 * nbProt;
-}
-
-/** DD du jet de Sagesse de concentration : 11 - 2×(n-1), minimum 5.
- *  1 rune Concentration = DD 11 · 2 = 9 · 3 = 7 · 4+ = 5.
- */
-function _calcConcentrationDD(s) {
-  const nb = (s?.runes || []).filter(r => r === 'Concentration').length;
-  if (!nb) return null;
-  return Math.max(5, 11 - 2 * (nb - 1));
-}
-
 /** Stats propres de la Sentinelle (combo Affliction + Invocation).
  *  - Dégâts : 1d4 base + Puissance
  *  - PV     : 10 + 5×nbProt
