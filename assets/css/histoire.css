@@ -2800,6 +2800,18 @@
 .mv-group-memx:hover { background: rgba(255,107,107,.28); }
 .mv-group--edit .mv-group-member { padding-right: 4px; }
 
+/* Sélection des participants par portrait (MJ) */
+.mv-group-addlabel { font-size: .64rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); font-weight: 700; margin-top: 2px; }
+.mv-group-addgrid { display: flex; flex-wrap: wrap; gap: 5px; }
+.mv-grp-addchip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 9px 2px 2px; border-radius: 999px; cursor: pointer;
+  background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-muted);
+  transition: border-color .15s, background .15s, color .15s;
+}
+.mv-grp-addchip:hover { border-color: #22c38e; color: var(--text); background: rgba(34,195,142,.08); }
+.mv-grp-addchip-name { font-size: .74rem; white-space: nowrap; }
+
 /* ── Suites (liens) ─────────────────────────────────────────────────── */
 .mv-liens {
   display: grid;

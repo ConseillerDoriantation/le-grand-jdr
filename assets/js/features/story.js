@@ -344,9 +344,13 @@ function _storyGroupCardHtml(g, missionId) {
 
   if (isAdmin) {
     const presentIds = new Set(parts.map(p => p.charId).filter(Boolean));
-    const opts = sortCharactersForDisplay(allChars)
+    // Sélection des participants par portrait (plus lisible qu'un menu déroulant)
+    const addChips = sortCharactersForDisplay(allChars)
       .filter(c => !presentIds.has(c.id))
-      .map(c => `<option value="${_esc(c.id)}">${_esc(c.nom || '?')}${c.ownerPseudo ? ` · ${_esc(c.ownerPseudo)}` : ''}</option>`).join('');
+      .map(c => `<button type="button" class="mv-grp-addchip" data-action="_stGroupAddMember" data-id="${g.id}" data-mission="${missionId}" data-char="${_esc(c.id)}" title="Ajouter ${_esc(c.nom || '?')}${c.ownerPseudo ? ` · ${_esc(c.ownerPseudo)}` : ''}">
+          ${characterAvatarHtml(c, { size: 26, className: 'mv-avatar', border: 'none', background: 'rgba(34,195,142,.16)', color: '#22c38e' })}
+          <span class="mv-grp-addchip-name">${_esc(c.nom || '?')}</span>
+        </button>`).join('');
     const dc = (field, extra = '') => `data-change="_stGroupFieldSave" data-id="${g.id}" data-mission="${missionId}" data-field="${field}" ${extra}`;
     return `<article class="mv-group mv-group--edit" data-gid="${g.id}" style="--gr-color:${o.color}">
       <header class="mv-group-head">
@@ -363,10 +367,8 @@ function _storyGroupCardHtml(g, missionId) {
       </div>
       <div class="mv-group-bar"><div class="mv-group-bar-fill" style="width:${gr}%"></div></div>
       <div class="mv-group-members">${membersHtml}</div>
-      <select class="mv-group-addsel" data-change="_stGroupAddMember" data-id="${g.id}" data-mission="${missionId}">
-        <option value="">＋ Assigner un personnage…</option>
-        ${opts}
-      </select>
+      ${addChips ? `<div class="mv-group-addlabel">＋ Assigner un personnage</div>
+      <div class="mv-group-addgrid">${addChips}</div>` : ''}
       <textarea class="mv-group-notesinp" rows="2" placeholder="Notes de réussite (une par ligne)…" ${dc('notesReussite')}>${_esc(g.notesReussite || '')}</textarea>
     </article>`;
   }
@@ -509,10 +511,10 @@ async function _stGroupFieldSave(el) {
   } catch (e) { notifySaveError(e); }
 }
 
-// MJ : assigner un personnage d'office au groupe.
+// MJ : assigner un personnage d'office au groupe (clic sur un portrait).
 async function _stGroupAddMember(el) {
   if (!STATE.isAdmin) return;
-  const id = el.dataset.id, missionId = el.dataset.mission, charId = el.value;
+  const id = el.dataset.id, missionId = el.dataset.mission, charId = el.dataset.char || el.value;
   if (!charId) return;
   const q = _grpQuest(id); if (!q) return;
   const char = (getCachedCollection('characters') || []).find(c => c.id === charId);

@@ -84,7 +84,26 @@ const STORE = {
   characters:    [],
   achievements:  [],
   story:         [],     // missions / événements de trame (pour top compagnons)
+  quests:        [],     // quêtes-groupes (missionId + participants) → partenaires d'aventure
 };
+
+// ── Groupes (quêtes liées aux missions) — source des partenaires d'aventure ───
+// Chaque quête-groupe = un tableau de charIds (ses participants). Deux PJ sont
+// partenaires s'ils figurent dans le MÊME groupe (même quête).
+function _allGroupMemberLists() {
+  return (STORE.quests || [])
+    .map(q => [...new Set((q.participants || []).map(p => p.charId).filter(Boolean))])
+    .filter(list => list.length > 1);
+}
+// charIds présents dans au moins un groupe rattaché à une mission donnée.
+function _missionGroupCharIds(missionId) {
+  const s = new Set();
+  (STORE.quests || []).forEach(q => {
+    if (q.missionId !== missionId) return;
+    (q.participants || []).forEach(p => p.charId && s.add(p.charId));
+  });
+  return s;
+}
 
 // localStorage : ordre fallback hors-ligne (admin réordonne)
 const _LS_KEY = 'pp-ordre';
@@ -271,31 +290,26 @@ function _computeRecentMissions(currentCharId, limit = 5) {
   if (!currentCharId || !STORE.story.length) return [];
   return STORE.story
     .filter(ev => {
-      // Inclut si participant direct OU membre d'un groupe
+      // Inclut si participant direct OU membre d'un groupe (quête liée à la mission)
       if ((ev.participants || []).some(p => p.id === currentCharId)) return true;
-      return (ev.groupes || []).some(g => (g.membres || []).includes(currentCharId));
+      return _missionGroupCharIds(ev.id).has(currentCharId);
     })
     .sort(_compareMissionsChronoDesc)
     .slice(0, limit);
 }
 
-// ── Calcul des partenaires d aventure (base sur story.groupes) ───────────────
-// Les partenaires sont strictement les personnages qui partagent le MEME groupe
-// de trame que le PJ courant. Les participants globaux de mission ne sont pas
-// utilises ici : deux groupes differents sur une meme mission ne comptent pas.
+// ── Calcul des partenaires d'aventure (basé sur les quêtes-groupes) ──────────
+// Les partenaires sont les personnages qui partagent le MÊME groupe (même quête)
+// que le PJ courant. Chaque groupe partagé compte +1.
 function _computeTopAdventurers(currentCharId, items, limit = 4) {
-  if (!currentCharId || !STORE.story.length) return [];
+  if (!currentCharId) return [];
   const counter = new Map();
-  STORE.story.forEach(ev => {
-    const groupes = Array.isArray(ev.groupes) ? ev.groupes : [];
-    groupes
-      .filter(g => (g.membres || []).includes(currentCharId))
-      .forEach(g => {
-        (g.membres || []).forEach(id => {
-          if (id === currentCharId) return;
-          counter.set(id, (counter.get(id) || 0) + 1);
-        });
-      });
+  _allGroupMemberLists().forEach(members => {
+    if (!members.includes(currentCharId)) return;
+    members.forEach(id => {
+      if (id === currentCharId) return;
+      counter.set(id, (counter.get(id) || 0) + 1);
+    });
   });
   return [...counter.entries()]
     .map(([charId, count]) => ({ count, item: items.find(it => it.charId === charId) }))
@@ -478,18 +492,15 @@ function _computeRelationEdges(items) {
   // même mission. Deux groupes différents sur la même mission ne se sont
   // pas croisés → aucune relation entre eux.
   const pairCount = new Map();
-  const story = STORE.story || [];
-  for (const ev of story) {
-    const groupes = ev.groupes || [];
-    if (!groupes.length) continue;  // pas de groupe défini → pas de relation déductible
-    for (const g of groupes) {
-      const present = (g.membres || []).filter(id => byCharId.has(id));
-      for (let i = 0; i < present.length; i++) {
-        for (let j = i + 1; j < present.length; j++) {
-          const [a, b] = [present[i], present[j]].sort();
-          const k = `${a}|${b}`;
-          pairCount.set(k, (pairCount.get(k) || 0) + 1);
-        }
+  // Lien entre deux PJ = présents dans le MÊME groupe (même quête). Deux groupes
+  // différents (même mission) ne se croisent pas.
+  for (const members of _allGroupMemberLists()) {
+    const present = members.filter(id => byCharId.has(id));
+    for (let i = 0; i < present.length; i++) {
+      for (let j = i + 1; j < present.length; j++) {
+        const [a, b] = [present[i], present[j]].sort();
+        const k = `${a}|${b}`;
+        pairCount.set(k, (pairCount.get(k) || 0) + 1);
       }
     }
   }
@@ -1148,7 +1159,7 @@ function _renderChroniqueBlock(item) {
   // Compte le total des missions auxquelles le PJ a participé
   const totalCount = STORE.story.filter(ev => {
     if ((ev.participants || []).some(p => p.id === charId)) return true;
-    return (ev.groupes || []).some(g => (g.membres || []).includes(charId));
+    return _missionGroupCharIds(ev.id).has(charId);
   }).length;
 
   return `
@@ -1176,8 +1187,8 @@ function _renderChroniqueBlock(item) {
 }
 
 // ── Bloc Top partenaires d'aventure ──────────────────────────────────────────
-// Calcul depuis story.groupes : compte les co-occurrences dans un meme groupe
-// de trame et affiche les top N PJs.
+// Calcul depuis les quêtes-groupes : compte les co-occurrences dans un même
+// groupe et affiche les top N PJs.
 function _renderTopAdventurersBlock(item, items) {
   const charId = item.char?.id || item.charId;
   const top = _computeTopAdventurers(charId, items, 4);
@@ -1213,17 +1224,19 @@ export async function renderPlayersPage() {
   const content = document.getElementById('main-content');
   if (!content) return;
 
-  // Story est utilisé pour calculer les top partenaires d'aventure.
-  const [presentations, characters, achievements, story] = await Promise.all([
+  // Story (chronique) + quests (groupes) servent aux partenaires d'aventure.
+  const [presentations, characters, achievements, story, quests] = await Promise.all([
     loadCollection('players'),
     loadCollection('characters'),
     loadCollection('achievements'),
     loadCollection('story').catch(() => []),
+    loadCollection('quests').catch(() => []),
   ]);
   STORE.presentations = presentations;
   STORE.characters    = characters;
   STORE.achievements  = achievements;
   STORE.story         = story;
+  STORE.quests        = quests;
   STORE.items         = _buildDataset(presentations, characters);
 
   if (!STORE.items.length) {
