@@ -253,54 +253,33 @@ const PAGES = {
       return `
       <div class="dv2-char-row" data-action="_goToChar" data-id="${c.id}" style="--pcol:${pcol}">
 
-        <!-- Avatar -->
-        <div style="width:36px;height:36px;border-radius:9px;overflow:hidden;flex-shrink:0;
-          background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
-          display:flex;align-items:center;justify-content:center">
-          ${avatar}
-        </div>
+        <div class="dv2-cr-avatar">${avatar}</div>
 
-        <!-- Nom + classe -->
         <div class="dv2-flex1">
-          <div style="display:flex;align-items:baseline;gap:.35rem;flex-wrap:wrap">
-            <span style="font-family:'Cinzel',serif;font-size:.84rem;font-weight:700;
-              color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px">${_esc(c.nom||'?')}</span>
-            <span style="font-size:.63rem;color:var(--text-dim);background:var(--bg-elevated);
-              border:1px solid var(--border);border-radius:5px;padding:0 5px;flex-shrink:0">Niv.${c.niveau||1}</span>
+          <div class="dv2-cr-namerow">
+            <span class="dv2-cr-name">${_esc(c.nom||'?')}</span>
+            <span class="dv2-cr-badge">Niv.${c.niveau||1}</span>
           </div>
-          <div style="font-size:.68rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px">
-            ${c.classe||''}${c.race?` · ${c.race}`:''}
+          <div class="dv2-cr-sub">${c.classe||''}${c.race?` · ${c.race}`:''}</div>
+        </div>
+
+        <div class="dv2-cr-bars">
+          <div class="dv2-cr-barrow">
+            <div class="dv2-cr-track"><div class="dv2-cr-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
+            <span class="dv2-cr-val" style="color:${pvColor}">${pvCur}</span>
+          </div>
+          <div class="dv2-cr-barrow">
+            <div class="dv2-cr-track"><div class="dv2-cr-fill dv2-cr-fill--pm" style="width:${pmPct}%"></div></div>
+            <span class="dv2-cr-val" style="color:#4adbf7">${pmCur}</span>
           </div>
         </div>
 
-        <!-- Barres PV/PM -->
-        <div style="display:flex;flex-direction:column;gap:.2rem;width:72px;flex-shrink:0">
-          <div style="display:flex;align-items:center;gap:.3rem">
-            <div style="flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:999px;overflow:hidden">
-              <div style="width:${pvPct}%;height:100%;background:${pvColor};border-radius:999px"></div>
-            </div>
-            <span style="font-size:.6rem;color:${pvColor};font-weight:700;min-width:26px;text-align:right">${pvCur}</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:.3rem">
-            <div style="flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:999px;overflow:hidden">
-              <div style="width:${pmPct}%;height:100%;background:linear-gradient(90deg,#22c7ea,#4adbf7);border-radius:999px"></div>
-            </div>
-            <span style="font-size:.6rem;color:#4adbf7;font-weight:700;min-width:26px;text-align:right">${pmCur}</span>
-          </div>
+        <div class="dv2-cr-side">
+          <span class="dv2-cr-side-row dv2-cr-ca">${_svg('shield')} <strong>${ca}</strong></span>
+          <span class="dv2-cr-side-row dv2-cr-or">${_svg('coin')} ${or}</span>
         </div>
 
-        <!-- CA + Or -->
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:.18rem;flex-shrink:0">
-          <span style="font-size:.63rem;color:var(--text-dim);white-space:nowrap">🛡️ <strong style="color:var(--text)">${ca}</strong></span>
-          <span style="font-size:.63rem;color:#c8a73a;white-space:nowrap">💰 ${or}</span>
-        </div>
-
-        <!-- Joueur tag -->
-        <div style="font-size:.62rem;font-weight:700;color:${pcol};background:${pcol}18;
-          border:1px solid ${pcol}44;border-radius:6px;padding:2px 7px;
-          white-space:nowrap;flex-shrink:0;max-width:70px;overflow:hidden;text-overflow:ellipsis">
-          ${_esc(c.ownerPseudo||'?')}
-        </div>
+        <div class="dv2-cr-tag" style="color:${pcol};background:${pcol}18;border:1px solid ${pcol}44">${_esc(c.ownerPseudo||'?')}</div>
 
       </div>`;
     }
