@@ -610,6 +610,21 @@
 .dv2-presence-meta { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
 .dv2-presence-name { font-size: .78rem; color: var(--text); font-weight: 600; white-space: nowrap; }
 .dv2-presence-char { font-size: .65rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+
+/* Carte « Progression aventure » MJ : panel cliquable au padding réduit. */
+.dv2-panel-card.dv2-progress-card { cursor: pointer; padding: 16px 20px; }
+
+/* Ligne personnage (vue admin) : remplace le style inline + les handlers
+   onmouseover/onmouseout legacy. La couleur du joueur passe par --pcol. */
+.dv2-char-row {
+  display: flex; align-items: center; gap: .65rem;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-left: 3px solid var(--pcol, var(--border));
+  border-radius: var(--radius-lg); padding: .5rem .7rem;
+  cursor: pointer; overflow: hidden;
+  transition: border-color .15s, transform .15s;
+}
+.dv2-char-row:hover { border-color: var(--pcol, var(--gold)); transform: translateY(-1px); }
 /* Cartes cliquables du hub : curseur pointer (remplace les style="cursor:pointer"
    inline). Scopé .dv2-root pour ne pas fuir vers les autres pages partageant
    .quest-card / .dash-hero. */

@@ -251,14 +251,7 @@ const PAGES = {
       const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#22d3ee'];
       const pcol  = PCOLS[(c.ownerPseudo||'?').split('').reduce((a,x)=>a+x.charCodeAt(0),0) % PCOLS.length];
       return `
-      <div data-action="_goToChar" data-id="${c.id}" style="
-        display:flex;align-items:center;gap:.65rem;
-        background:var(--bg-card);border:1px solid var(--border);
-        border-left:3px solid ${pcol};
-        border-radius:var(--radius-lg);padding:.5rem .7rem;
-        cursor:pointer;transition:border-color .15s,transform .15s;overflow:hidden"
-        onmouseover="this.style.borderColor='${pcol}';this.style.transform='translateY(-1px)'"
-        onmouseout="this.style.borderColor='var(--border)';this.style.borderLeftColor='${pcol}';this.style.transform=''">
+      <div class="dv2-char-row" data-action="_goToChar" data-id="${c.id}" style="--pcol:${pcol}">
 
         <!-- Avatar -->
         <div style="width:36px;height:36px;border-radius:9px;overflow:hidden;flex-shrink:0;
@@ -404,7 +397,7 @@ const PAGES = {
       if (totalMissions === 0) return '';
       const pct = Math.round(doneMissions / totalMissions * 100);
       return `
-      <div class="dv2-panel-card" data-navigate="story" style="cursor:pointer;padding:16px 20px">
+      <div class="dv2-panel-card dv2-progress-card" data-navigate="story">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <span style="font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim)">📖 Progression aventure</span>
           <span style="font-size:.72rem;color:var(--arcane);font-weight:700;font-family:var(--font-display)">${doneMissions}/${totalMissions} missions</span>
