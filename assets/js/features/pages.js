@@ -158,29 +158,29 @@ const PAGES = {
           <div class="dash-char-mini-portrait-fade"></div>
         </div>
         <div class="dash-char-mini-body">
-          <div style="display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap;margin-bottom:.15rem">
-            <span style="font-family:'Cinzel',serif;font-size:.92rem;font-weight:700;color:var(--text)">${_esc(c.nom||'?')}</span>
+          <div class="dash-cm-namerow">
+            <span class="dash-cm-name">${_esc(c.nom||'?')}</span>
             <span class="dash-hero-badge">Niv.&nbsp;${c.niveau||1}</span>
           </div>
-          ${c.classe ? `<div style="font-size:.7rem;color:var(--text-dim);margin-bottom:.35rem">${_esc(c.classe)}${c.race?` · ${_esc(c.race)}`:''}</div>` : ''}
-          <div style="display:flex;flex-direction:column;gap:.28rem">
+          ${c.classe ? `<div class="dash-cm-sub">${_esc(c.classe)}${c.race?` · ${_esc(c.race)}`:''}</div>` : ''}
+          <div class="dash-cm-bars">
             <div class="dash-bar-row">
-              <span class="dash-bar-icon" style="font-size:.62rem">❤️</span>
-              <div class="dash-bar-track" style="height:7px"><div class="dash-bar-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
-              <span class="dash-bar-val" style="font-size:.68rem;min-width:36px;color:${pvColor}">${pvCur}/${pvMax}</span>
+              <span class="dash-bar-icon">${_svg('heart', '#ff6b6b')}</span>
+              <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
+              <span class="dash-bar-val" style="color:${pvColor}">${pvCur}/${pvMax}</span>
             </div>
             <div class="dash-bar-row">
-              <span class="dash-bar-icon" style="font-size:.62rem">🔵</span>
-              <div class="dash-bar-track" style="height:7px"><div class="dash-bar-fill" style="width:${pmPct}%;background:linear-gradient(90deg,#22c7ea,#4adbf7)"></div></div>
-              <span class="dash-bar-val" style="font-size:.68rem;min-width:36px;color:#4adbf7">${pmCur}/${pmMax}</span>
+              <span class="dash-bar-icon">${_svg('sparkles', '#4adbf7')}</span>
+              <div class="dash-bar-track"><div class="dash-bar-fill dash-bar-fill--pm" style="width:${pmPct}%"></div></div>
+              <span class="dash-bar-val" style="color:#4adbf7">${pmCur}/${pmMax}</span>
             </div>
           </div>
-          <div style="display:flex;gap:.35rem;margin-top:.35rem">
-            <span class="dash-chip" style="font-size:.66rem;padding:1px 7px">🛡️ ${ca}</span>
-            <span class="dash-chip dash-chip--gold" style="font-size:.66rem;padding:1px 7px">💰 ${or}</span>
+          <div class="dash-cm-chips">
+            <span class="dash-chip">${_svg('shield')} ${ca}</span>
+            <span class="dash-chip dash-chip--gold">${_svg('coin')} ${or}</span>
           </div>
         </div>
-        <div class="dash-hero-arrow" style="font-size:.85rem;align-self:center;padding:.5rem">→</div>
+        <div class="dash-hero-arrow">→</div>
       </div>`;
     }
 

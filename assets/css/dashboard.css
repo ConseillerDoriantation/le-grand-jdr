@@ -643,6 +643,19 @@
 .dv2-cr-ca strong { color: var(--text); }
 .dv2-cr-or { color: #c8a73a; }
 .dv2-cr-tag { font-size: .62rem; font-weight: 700; border-radius: 6px; padding: 2px 7px; white-space: nowrap; flex-shrink: 0; max-width: 70px; overflow: hidden; text-overflow: ellipsis; }
+
+/* Carte mini perso (joueur multi-persos) — extraction inline + tweaks de barres. */
+.dash-cm-namerow { display: flex; align-items: baseline; gap: .4rem; flex-wrap: wrap; margin-bottom: .15rem; }
+.dash-cm-name { font-family: 'Cinzel', serif; font-size: .92rem; font-weight: 700; color: var(--text); }
+.dash-cm-sub { font-size: .7rem; color: var(--text-dim); margin-bottom: .35rem; }
+.dash-cm-bars { display: flex; flex-direction: column; gap: .28rem; }
+.dash-cm-chips { display: flex; gap: .35rem; margin-top: .35rem; }
+.dash-bar-fill.dash-bar-fill--pm { background: linear-gradient(90deg,#22c7ea,#4adbf7); }
+.dash-char-mini .dash-bar-icon { font-size: .62rem; }
+.dash-char-mini .dash-bar-track { height: 7px; }
+.dash-char-mini .dash-bar-val { font-size: .68rem; min-width: 36px; }
+.dash-char-mini .dash-chip { font-size: .66rem; padding: 1px 7px; }
+.dash-char-mini .dash-hero-arrow { font-size: .85rem; align-self: center; padding: .5rem; }
 /* Cartes cliquables du hub : curseur pointer (remplace les style="cursor:pointer"
    inline). Scopé .dv2-root pour ne pas fuir vers les autres pages partageant
    .quest-card / .dash-hero. */
