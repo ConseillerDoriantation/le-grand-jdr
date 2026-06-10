@@ -2679,6 +2679,7 @@ function _vttSpellMods(s) {
   const isZoneElargie = nbAmp > 0 && nbDisp > 0;
   const isArmeInvoquee = nbEnch > 0 && nbInv > 0;
   const isRegeneration = nbProt > 0 && nbAff > 0 && nbInv === 0 && !isLacMode;
+  const isCoupChance = nbCh > 0 && nbReac > 0;
   // Bonus chiffré d'un enchantement non-dégâts (toucher/déplacement/CA) :
   // valeur saisie sinon auto = 2 + Puissance.
   const _enchBonus = Number.isFinite(parseInt(s.enchantBonus)) ? parseInt(s.enchantBonus) : (2 + nbP);
@@ -2703,7 +2704,7 @@ function _vttSpellMods(s) {
     laceration: (lacCount > 0 && !isSentinelle)
       ? { runes: lacCount, reduction: lacCount, max: 2, maxElite: 4 } : null,
     // Chance : étend la plage critique, plafonné à RC 17-20.
-    chance: nbCh > 0
+    chance: nbCh > 0 && !isCoupChance
       ? { rc: Math.max(17, 20 - nbCh) } : null,
     // Concentration : chaque rune supplémentaire facilite le JS de maintien.
     concentration: nbConc > 0
@@ -2805,9 +2806,9 @@ function _vttSpellMods(s) {
     // Sort suspendu : Réaction + Durée. Stocke le sort pour déclenchement hors-tour
     sortSuspendu: (nbReac > 0 && nbDur > 0)
       ? { graceTurns: nbDur + 1 } : null,
-    // Coup de chance : Chance + Réaction. Permet de relancer un d20 d'attaque raté
-    coupChance: (nbCh > 0 && nbReac > 0)
-      ? { charges: nbCh } : null,
+    // Coup de chance : Chance + Réaction. Les runes sont absorbées en 1 relance auto.
+    coupChance: isCoupChance
+      ? { charges: 1 } : null,
     // Bouclier réactif : Réaction + Protection (CA) → annule 1 attaque (sans bonus CA)
     bouclierReactif: (nbReac > 0 && nbProt > 0 && protMode === 'ca')
       ? { nbProt, tier: nbProt >= 3 ? 'boss' : nbProt === 2 ? 'elite' : 'mob' } : null,
@@ -3317,6 +3318,25 @@ function _buffShared(opt, srcId) {
   };
 }
 
+async function _consumeLuckyReroll(tokenId, tokenData, currentD20, shouldUse = true) {
+  if (!tokenId || !tokenData || !shouldUse) return null;
+  const round = _session?.combat?.round ?? 0;
+  const lucky = (tokenData.buffs || []).find(b =>
+    b?.type === 'lucky_reroll' && (b.charges || 0) > 0
+    && (b.expiresAtRound == null || round === 0 || round <= b.expiresAtRound)
+  );
+  if (!lucky) return null;
+
+  const reroll = Math.floor(Math.random() * 20) + 1;
+  const finalD20 = Math.max(currentD20, reroll);
+  const remaining = (lucky.charges || 0) - 1;
+  const newBuffs = remaining > 0
+    ? (tokenData.buffs || []).map(b => b === lucky ? { ...b, charges: remaining } : b)
+    : (tokenData.buffs || []).filter(b => b !== lucky);
+  await updateDoc(_tokRef(tokenId), { buffs: newBuffs }).catch(() => {});
+  return { d20: finalD20, reroll, label: lucky.sortLabel || 'Coup de chance' };
+}
+
 /** Applique les buffs d'enchantement (mode Dégâts arme OU mode État sur allié). */
 async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
   const shared = _buffShared(opt, srcId);
@@ -3432,8 +3452,14 @@ async function _vttApplyAfflictions(srcId, targetIds, opt) {
   for (const tid of targetIds) {
     const td = _tokens[tid]?.data; if (!td) continue;
     const saveMod = _tokenStatMod(td, aff.saveStat);
-    const roll = Math.floor(Math.random() * 20) + 1;
-    const tot = roll + saveMod;
+    const initialRoll = Math.floor(Math.random() * 20) + 1;
+    let roll = initialRoll;
+    let tot = roll + saveMod;
+    const luck = await _consumeLuckyReroll(tid, td, roll, roll === 1 || tot < aff.dd);
+    if (luck) {
+      roll = luck.d20;
+      tot = roll + saveMod;
+    }
     const success = roll === 20 || (roll !== 1 && tot >= aff.dd);
     const tgtName = _live(td).displayName ?? td.name;
     const rollStr = `JS ${statShortStr} ${roll}${saveMod>=0?'+':''}${saveMod}=${tot} vs DD${aff.dd}`;
@@ -3455,13 +3481,13 @@ async function _vttApplyAfflictions(srcId, targetIds, opt) {
       tokenName: tgtName,
       conditionLabel: _effectLbl,
       sortLabel: opt.label || '',
-      statLabel: statShortStr, mod: saveMod, d20: roll, total: tot, dd: aff.dd,
+      statLabel: statShortStr, mod: saveMod, d20: roll, d20rolls: luck ? [initialRoll, luck.reroll] : null, total: tot, dd: aff.dd,
       passed: success,
       createdAt: serverTimestamp(),
     }).catch(() => {});
 
     if (success) {
-      showNotif(`🛡️ ${tgtName} résiste · ${rollStr}`, 'info');
+      showNotif(`🛡️ ${tgtName} résiste${luck ? ` · 🍀 relance ${luck.reroll}` : ''} · ${rollStr}`, 'info');
       continue;
     }
 
@@ -3690,6 +3716,18 @@ function _buildSpellOption(s, ctx) {
     mjAlwaysMax: !!s.mjAlwaysMax,
     ...extras,
   };
+
+  // Combo Coup de chance : effet unique, les effets normaux de Chance/Réaction
+  // sont absorbés en une relance automatique.
+  if (mods?.coupChance) {
+    return { ...common, label,
+      icon: '🍀',
+      dice: 'prochain jet échoué',
+      isUtil: true,
+      isLuckyReroll: true,
+      friendlyOnly: true,
+      halfOnMiss: false };
+  }
 
   // Sort de déplacement (rune Amplification mode Déplacement) : aucun dégât, pas d'attaque.
   if (mods?.deplacement) {
@@ -4394,21 +4432,23 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   const dist = noTgt ? null : _tokenAttackDistance(src, tgt);
 
   const options = _buildAttackOptions(src);
-  // Cible d'abord : on filtre par portée (les actions "sur soi" restent toujours dispo).
-  // Action d'abord : pas de cible → on garde tout, la portée sera vérifiée à la visée.
+  // Cible d'abord : filtre par portee, en gardant les actions "sur soi".
+  // Action d'abord : pas de cible, on garde tout et la portee sera verifiee a la visee.
   const inRange = noTgt
     ? options
-    : options.filter(o => o.targetSelf || _tokenAttackDistance(src, tgt, o.portee) <= o.portee);
+    : options.filter(o => {
+        if (o.friendlyOnly && tgt.type === 'enemy') return false;
+        return o.targetSelf || _tokenAttackDistance(src, tgt, o.portee) <= o.portee;
+      });
   if (!noTgt) {
-    // Aucune attaque à portée : on bloque SAUF si on contrôle le token source —
-    // dans ce cas la modale s'ouvre quand même pour les Actions de base
-    // (Esquiver, Se cacher, Se désengager, Aider).
+    // Aucune attaque a portee : on bloque sauf si on controle le token source.
+    // Dans ce cas la modale reste disponible pour les actions de base.
     if (!inRange.length && !_canControlToken(src)) {
-      showNotif(`Hors de portée (${dist} case${dist>1?'s':''}, portée max ${Math.max(...options.map(o=>o.portee))})`, 'error');
+      showNotif(`Hors de portee (${dist} case${dist>1?'s':''}, portee max ${Math.max(...options.map(o=>o.portee))})`, 'error');
       return;
     }
     if (!inRange.length) {
-      showNotif(`Aucune attaque à portée (${dist} case${dist>1?'s':''}) — actions de base disponibles.`, 'info');
+      showNotif(`Aucune attaque a portee (${dist} case${dist>1?'s':''}) - actions de base disponibles.`, 'info');
     }
   }
 
@@ -4490,7 +4530,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
     // Portée — si "soi-même", on n'affiche pas la portée (sans objet)
     if (!targetSelf) pills.push(_pill('range', `🎯 ${o.portee}c`));
     // Cible / zone / soi / allié / ennemi (selon le type de sort)
-    const isFriendly = isEnchant || isHeal || o.isRegen; // alliés
+    const isFriendly = isEnchant || isHeal || o.isRegen || o.friendlyOnly; // alliés
     const isHostile  = !!o.isAffliction;             // ennemis explicites
     if (targetSelf) {
       pills.push(_pill('targets self', `🧍 Sur soi`));
@@ -5873,17 +5913,47 @@ async function _vttRollAttack() {
       return;
     }
 
-    // ── Combo Coup de chance : applique le buff lucky_reroll au lanceur ──
+    // ── Combo Coup de chance : applique le buff lucky_reroll à l'allié ciblé ──
     if (opt.mods?.coupChance) {
+      await _deductPm();
+      await _consumeItem();
+      await _markActionUsed();
       const sharedLuck = _buffShared(opt, srcId);
       const luckBuff = {
         ...sharedLuck,
         type: 'lucky_reroll',
         charges: opt.mods.coupChance.charges,
         icon: '🍀',
+        totalDuration: null,
+        expiresAtRound: null,
       };
-      const existing = (src.buffs || []).filter(b => !(b.type === 'lucky_reroll' && b.sortLabel === opt.label));
-      await updateDoc(_tokRef(srcId), { buffs: [...existing, luckBuff] }).catch(() => {});
+      const appliedTargets = [];
+      for (const tid of targetIds) {
+        const td = _tokens[tid]?.data;
+        if (!td || td.type === 'enemy') continue;
+        const existing = (td.buffs || []).filter(b => !(b.type === 'lucky_reroll' && b.sortLabel === opt.label));
+        await updateDoc(_tokRef(tid), { buffs: [...existing, luckBuff] }).catch(() => {});
+        appliedTargets.push(_live(td).displayName ?? td.name);
+      }
+      if (!appliedTargets.length) {
+        showNotif('Choisis un allié pour Coup de chance.', 'error');
+        _cleanup();
+        return;
+      }
+      const targetsLabel = appliedTargets.join(', ');
+      await addDoc(_logCol(), {
+        type: 'cast',
+        authorId: STATE.user?.uid||null, authorName,
+        casterName: lS.displayName??src.name,
+        characterImage: lS.displayImage||null,
+        targetName: targetsLabel,
+        optLabel: opt.label, pmCost: opt.pmCost,
+        castEffect: '🍀 1 relance automatique sur le prochain jet échoué',
+        createdAt: serverTimestamp(),
+      }).catch(()=>{});
+      showNotif(`🍀 ${opt.label} → ${targetsLabel} — prochaine relance automatique prête`, 'success');
+      _cleanup();
+      return;
     }
 
     // ── Combo Arme invoquée : remplace temporairement l'arme principale ───
@@ -6093,17 +6163,22 @@ async function _vttRollAttack() {
       // Roll d20 avec mode adv/dis
       const hRoll1 = Math.floor(Math.random()*20)+1;
       const hRoll2 = hMode !== 'normal' ? Math.floor(Math.random()*20)+1 : null;
-      const hD20   = hMode === 'adv' ? Math.max(hRoll1, hRoll2)
-                    : hMode === 'dis' ? Math.min(hRoll1, hRoll2)
-                    : hRoll1;
+      // Total : d20 + mod toucher + bonus set + bonus contextuel
+      const hTouchMod = opt.toucherMod || 0;
+      const hSetBon   = opt.toucherSetBonus || 0;
+      let hD20   = hMode === 'adv' ? Math.max(hRoll1, hRoll2)
+                 : hMode === 'dis' ? Math.min(hRoll1, hRoll2)
+                 : hRoll1;
+      let hHitTotal = hD20 + hTouchMod + hSetBon + bonusHit;
+      const hLuck = await _consumeLuckyReroll(srcId, src, hD20, hD20 === 1 || hHitTotal < HEAL_DD);
+      if (hLuck) {
+        hD20 = hLuck.d20;
+        hHitTotal = hD20 + hTouchMod + hSetBon + bonusHit;
+      }
       // Combo Chance : élargit la plage critique (RC abaissé sur le sort)
       const hCritThreshold = Math.max(2, Math.min(20, opt.mods?.chance?.rc ?? 20));
       const hIsCrit   = hD20 >= hCritThreshold;
       const hIsFumble = hD20 === 1;
-      // Total : d20 + mod toucher + bonus set + bonus contextuel
-      const hTouchMod = opt.toucherMod || 0;
-      const hSetBon   = opt.toucherSetBonus || 0;
-      const hHitTotal = hD20 + hTouchMod + hSetBon + bonusHit;
 
       const diceToRoll   = opt.rawDice || opt.dice;
       const effectiveDice = _effectiveDmgDice(diceToRoll);
@@ -6126,7 +6201,7 @@ async function _vttRollAttack() {
           defenderName: tgtNames || (lT.displayName??tgt.name),
           optLabel: opt.label,
           hitD20: hD20, hitRoll1: hRoll1, hitRoll2: hRoll2,
-          hitD20rolls: hRoll2 != null ? [hRoll1, hRoll2] : null,
+          hitD20rolls: hLuck ? [hRoll1, ...(hRoll2 != null ? [hRoll2] : []), hLuck.reroll] : (hRoll2 != null ? [hRoll1, hRoll2] : null),
           hitToucherMod: hTouchMod, hitToucherSetBonus: hSetBon,
           hitToucherStatLabel: opt.toucherStatLabel || '',
           hitBonus: bonusHit, hitTotal: hHitTotal, healDD: HEAL_DD,
@@ -6170,12 +6245,13 @@ async function _vttRollAttack() {
 
       const isMultiHeal = healResults.length > 1;
       const critTag = hIsCrit ? ' 💥 CRITIQUE' : '';
+      const luckTag = hLuck ? ` 🍀 Relance ${hLuck.reroll}→${hD20}` : '';
       // Payload commun pour le log (jet de toucher détaillé)
       const hitPayload = {
         isCrit: hIsCrit, isFumble: false, advMode: hMode, advAuto: hMode !== mode,
         advReasons: hMode !== mode ? hCondMods.reasons : null,
         hitD20: hD20, hitRoll1: hRoll1, hitRoll2: hRoll2,
-        hitD20rolls: hRoll2 != null ? [hRoll1, hRoll2] : null,
+        hitD20rolls: hLuck ? [hRoll1, ...(hRoll2 != null ? [hRoll2] : []), hLuck.reroll] : (hRoll2 != null ? [hRoll1, hRoll2] : null),
         hitToucherMod: hTouchMod, hitToucherSetBonus: hSetBon,
         hitToucherStatLabel: opt.toucherStatLabel || '',
         hitBonus: bonusHit, hitTotal: hHitTotal, healDD: HEAL_DD,
@@ -6196,7 +6272,7 @@ async function _vttRollAttack() {
           targets: healResults.map(r => ({ ...r, hit: true, halfDmg: false, dmgTotal: healTotal, targetCA: HEAL_DD })),
           createdAt: serverTimestamp(),
         }).catch(()=>{});
-        showNotif(`💚${critTag} ${healTotal} PV soignés → ${healResults.map(r=>r.name).join(', ')}`, 'success');
+        showNotif(`💚${critTag}${luckTag} ${healTotal} PV soignés → ${healResults.map(r=>r.name).join(', ')}`, 'success');
       } else {
         const r = healResults[0];
         if (r) {
@@ -6216,7 +6292,7 @@ async function _vttRollAttack() {
             dmgTotal: healTotal, newHp: r.newHp, hpMax: r.hpMax,
             createdAt: serverTimestamp(),
           }).catch(()=>{});
-          showNotif(`💚${critTag} ${healTotal} PV soignés → ${r.name}`, 'success');
+          showNotif(`💚${critTag}${luckTag} ${healTotal} PV soignés → ${r.name}`, 'success');
         }
       }
       return;
@@ -6267,29 +6343,8 @@ async function _vttRollAttack() {
     let isCrit   = d20 >= critThreshold;
     let isFumble = d20 === 1;
 
-    // ── Combo Coup de chance : relance si le d20 est sous le seuil de touche estimé ──
-    // On vérifie le buff lucky_reroll sur le lanceur. Si charge dispo ET (fumble ou attaque
-    // probablement ratée), on relance. Critère pragmatique : on relance si d20 < 10 (non-crit).
-    const luckyReroll = (src.buffs || []).find(b =>
-      b?.type === 'lucky_reroll' && (b.charges || 0) > 0
-      && (b.expiresAtRound == null || (_session?.combat?.round ?? 0) === 0 || (_session?.combat?.round ?? 0) <= b.expiresAtRound)
-    );
     let luckUsed = false;
-    if (luckyReroll && !isCrit && d20 < 10) {
-      const newRoll = Math.floor(Math.random() * 20) + 1;
-      if (newRoll > d20) {
-        d20 = newRoll;
-        isCrit   = d20 >= critThreshold;
-        isFumble = d20 === 1;
-      }
-      luckUsed = true;
-      // Décrémente / retire le buff
-      const remaining = luckyReroll.charges - 1;
-      const newBuffs = remaining > 0
-        ? (src.buffs || []).map(b => b === luckyReroll ? { ...b, charges: remaining } : b)
-        : (src.buffs || []).filter(b => b !== luckyReroll);
-      await updateDoc(_tokRef(srcId), { buffs: newBuffs }).catch(() => {});
-    }
+    let luckRerollValue = null;
     const atkBase  = opt.toucher !== null && opt.toucher !== undefined ? opt.toucher : (lS.displayAttack ?? 5);
     // Bonus de toucher d'enchantement (mode Toucher) — lu FRAIS sur le lanceur,
     // pas figé dans l'option (le buff peut avoir été posé après l'ouverture du panneau).
@@ -6305,7 +6360,7 @@ async function _vttRollAttack() {
         extraHitSum += bonusHitDice > 0 ? r : -r;
       }
     }
-    const hitTotal = d20 + atkBase + bonusHit + extraHitSum + _touchBuff;
+    let hitTotal = d20 + atkBase + bonusHit + extraHitSum + _touchBuff;
     const rules      = opt.typeRules || {};
     const armorPen   = rules.armorPen || 0;
     const typeDmgBon = rules.dmgBonus || 0;
@@ -6314,6 +6369,25 @@ async function _vttRollAttack() {
     // ½ dégâts (arrondi inf.) en cas d'échec. Si le type de dégâts définit déjà
     // 'half' ou 'full', on respecte (pas de cumul, on ne dégrade pas non plus).
     if (missEffect === 'none' && opt.pmCost > 0) missEffect = 'half';
+
+    const targetCas = targetIds.map(curTgtId => {
+      const curTgtData = _tokens[curTgtId]?.data;
+      const lCurTgt = _live(curTgtData || {});
+      const rawCA = lCurTgt.realDefense ?? lCurTgt.displayDefense ?? 10;
+      return armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
+    });
+    const missesEveryTarget = targetCas.length
+      ? targetCas.every(targetCA => hitTotal < targetCA)
+      : false;
+    const luckyReroll = await _consumeLuckyReroll(srcId, src, d20, !isCrit && (isFumble || missesEveryTarget));
+    if (luckyReroll) {
+      d20 = luckyReroll.d20;
+      luckRerollValue = luckyReroll.reroll;
+      isCrit   = d20 >= critThreshold;
+      isFumble = d20 === 1;
+      hitTotal = d20 + atkBase + bonusHit + extraHitSum + _touchBuff;
+      luckUsed = true;
+    }
 
     const diceToRoll    = opt.rawDice || opt.dice;
     const effectiveDice = _effectiveDmgDice(diceToRoll);
@@ -6613,7 +6687,7 @@ async function _vttRollAttack() {
         optLabel: opt.label,
         isCrit, isFumble, advMode: effectiveMode, advAuto: effectiveMode !== mode,
         advReasons: effectiveMode !== mode ? condMods.reasons : null,
-        hitD20: d20, hitD20rolls: roll2 !== null ? [roll1, roll2] : [roll1],
+        hitD20: d20, hitD20rolls: luckUsed ? [roll1, ...(roll2 !== null ? [roll2] : []), luckRerollValue] : (roll2 !== null ? [roll1, roll2] : [roll1]),
         hitBase: atkBase, hitBonus: bonusHit, hitTotal,
         hitToucherMod: opt.toucherMod??null, hitToucherSetBonus: opt.toucherSetBonus??0,
         hitToucherStatLabel: opt.toucherStatLabel??null, hitTouchBuff: _touchBuff || 0,
@@ -6653,7 +6727,7 @@ async function _vttRollAttack() {
         optLabel: opt.label,
         isCrit, isFumble, advMode: effectiveMode, advAuto: effectiveMode !== mode,
         advReasons: effectiveMode !== mode ? condMods.reasons : null,
-        hitD20: d20, hitD20rolls: roll2 !== null ? [roll1, roll2] : [roll1],
+        hitD20: d20, hitD20rolls: luckUsed ? [roll1, ...(roll2 !== null ? [roll2] : []), luckRerollValue] : (roll2 !== null ? [roll1, roll2] : [roll1]),
         hitBase: atkBase, hitBonus: bonusHit, hitTotal,
         hitToucherMod: opt.toucherMod??null, hitToucherSetBonus: opt.toucherSetBonus??0,
         hitToucherStatLabel: opt.toucherStatLabel??null, hitTouchBuff: _touchBuff || 0,
@@ -10434,18 +10508,25 @@ async function _vttConditionSave(tokenId, idx) {
   const np = t.npcId ? _npcs[t.npcId] : null;
   const statSrc = ch || np || { stats: {} };
   const modVal = ch || np ? mod(statSrc) : 0;
-  const d20 = Math.floor(Math.random()*20)+1;
-  const total = d20 + modVal;
+  const initialD20 = Math.floor(Math.random()*20)+1;
+  let d20 = initialD20;
+  let total = d20 + modVal;
+  const luck = await _consumeLuckyReroll(tokenId, t, d20, d20 === 1 || total < DD);
+  if (luck) {
+    d20 = luck.d20;
+    total = d20 + modVal;
+  }
   const passed = d20 !== 1 && (d20 === 20 || total >= DD);
   const statLbl = statShort(statKey) || statKey;
-  showNotif(`🎲 JS ${statLbl} : d20[${d20}]${modVal>=0?'+':''}${modVal} = ${total} vs DD ${DD} → ${passed?'✅ Réussi — état retiré':'❌ Échec'}`, passed?'success':'error');
+  const luckTxt = luck ? ` 🍀 relance ${luck.reroll}→${d20}` : '';
+  showNotif(`🎲 JS ${statLbl} : d20[${d20}]${modVal>=0?'+':''}${modVal} = ${total} vs DD ${DD}${luckTxt} → ${passed?'✅ Réussi — état retiré':'❌ Échec'}`, passed?'success':'error');
   // Log
   await addDoc(_logCol(), {
     type: 'save', authorId: STATE.user?.uid||null,
     authorName: STATE.profile?.pseudo||STATE.profile?.prenom||'?',
     tokenName: _live(t).displayName || t.name,
     conditionId: cond.id, conditionLabel: lib?.label || cond.id,
-    statLabel: statLbl, mod: modVal, d20, total, dd: DD, passed,
+    statLabel: statLbl, mod: modVal, d20, d20rolls: luck ? [initialD20, luck.reroll] : null, total, dd: DD, passed,
     createdAt: serverTimestamp(),
   }).catch(()=>{});
   if (passed) {
