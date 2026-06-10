@@ -297,7 +297,7 @@ const PAGES = {
           return pa.localeCompare(pb) || (b.niveau||1) - (a.niveau||1);
         });
         charsHtml = `
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:.45rem">
+        <div class="dash-grid-charlist">
           ${sorted.map(c => _charRow(c)).join('')}
         </div>`;
       }
@@ -320,7 +320,7 @@ const PAGES = {
         charsHtml = _charFeatured(chars[0]);
       } else {
         charsHtml = `
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.55rem">
+        <div class="dash-grid-charmini">
           ${chars.map(c => _charMini(c)).join('')}
         </div>`;
       }
@@ -747,7 +747,7 @@ const PAGES = {
           <span class="dv2-section-label-text">Console MJ</span>
           <div class="dv2-section-label-line"></div>
         </div>
-        <div class="dv2-shortcuts-grid" style="grid-template-columns:repeat(6,1fr)">
+        <div class="dv2-shortcuts-grid dv2-shortcuts-grid--mj">
           ${[
             { page:'story',     icon:'📚', label:'Trame',     bg:'rgba(34,211,238,.15)',  bc:'rgba(34,211,238,.3)',  col:'#22d3ee' },
             { page:'shop',      icon:'🛍️', label:'Boutique',  bg:'rgba(244,196,48,.15)',  bc:'rgba(244,196,48,.3)',  col:'#f4c430' },
@@ -874,7 +874,7 @@ const PAGES = {
         // Plusieurs personnages : grille adaptative + carte groupe en dessous
         // auto-fit (vs auto-fill) étire les colonnes pour utiliser toute la largeur
         heroBlock = `
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.65rem">
+        <div class="dash-grid-herocards">
           ${chars.map(c => _heroCardV2(c)).join('')}
         </div>
         ${_partyCardV2(partyMembers)}`;
