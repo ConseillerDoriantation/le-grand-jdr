@@ -277,7 +277,7 @@ function _syncNav(page) {
       if (section?.tagName === 'DETAILS' && !section.open) section.open = true;
     }
   });
-  const bottomPrimaryPages = new Set(['dashboard', 'characters', 'vtt', 'quests']);
+  const bottomPrimaryPages = new Set(['dashboard', 'characters', 'vtt', 'story']);
   document.querySelectorAll('.bottom-nav-item[data-page]').forEach((el) =>
     _setActive(el, el.dataset.page === page)
   );

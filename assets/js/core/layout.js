@@ -286,7 +286,7 @@ function _updateMobileBottomNav() {
     { page: 'dashboard',  icon: 'home',   label: 'Accueil', aria: 'Ouvrir le tableau de bord' },
     { page: 'characters', icon: 'scroll', label: 'Personnage', aria: 'Ouvrir ma fiche personnage' },
     { page: 'vtt',        icon: 'dice',   label: 'Jouer', primary: true, aria: 'Jouer maintenant, ouvrir la table virtuelle' },
-    { page: 'quests',     icon: 'sword',  label: 'Quêtes', aria: 'Ouvrir les quêtes' },
+    { page: 'story',      icon: 'book',   label: 'Trame', aria: 'Ouvrir la Trame' },
   ];
   const currentPage = STATE.currentPage || document.querySelector('.nav-item.active')?.dataset?.navigate || 'dashboard';
 

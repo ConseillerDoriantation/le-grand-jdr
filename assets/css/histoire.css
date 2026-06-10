@@ -2752,6 +2752,21 @@
 }
 .mv-group-reward-icon { font-style: normal; }
 
+/* Groupes = quêtes liées : bouton créer, actions MJ, rejoindre */
+.mv-group-add {
+  margin-left: auto; font-size: .72rem; padding: 3px 10px;
+}
+.mv-group-admin { display: inline-flex; gap: 4px; margin-left: 6px; }
+.mv-group-iconbtn {
+  border: 1px solid var(--border); background: var(--bg-elevated);
+  border-radius: 7px; padding: 2px 7px; cursor: pointer; font-size: .78rem;
+  line-height: 1; transition: border-color .15s, background .15s;
+}
+.mv-group-iconbtn:hover { border-color: var(--gold); background: var(--bg-card); }
+.mv-group-iconbtn--del:hover { border-color: #ff6b6b; }
+.mv-group-join { width: 100%; margin-top: 8px; }
+.mv-group-member-name { font-size: .72rem; color: var(--text-muted); }
+
 /* ── Suites (liens) ─────────────────────────────────────────────────── */
 .mv-liens {
   display: grid;
