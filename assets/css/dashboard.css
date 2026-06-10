@@ -601,6 +601,15 @@
 /* États vides « Aucun… » (remplacent les styles inline répétés, mêmes valeurs). */
 .dv2-empty-sm { padding: 18px; color: var(--text-dim); font-size: .8rem; }
 .dv2-empty-md { padding: 20px; color: var(--text-dim); font-size: .85rem; text-align: center; }
+
+/* Présence temps réel (MJ) — extraction des styles inline (valeurs identiques). */
+.dv2-presence-empty { padding: 14px 16px; color: var(--text-dim); font-size: .78rem; display: flex; align-items: center; gap: .5rem; }
+.dv2-presence-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; }
+.dv2-presence-list { padding: 12px 14px; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.dv2-presence-pill { display: flex; align-items: center; gap: .55rem; background: rgba(34,195,142,.07); border: 1px solid rgba(34,195,142,.22); border-radius: 999px; padding: 3px 12px 3px 3px; }
+.dv2-presence-meta { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.dv2-presence-name { font-size: .78rem; color: var(--text); font-weight: 600; white-space: nowrap; }
+.dv2-presence-char { font-size: .65rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
 /* Cartes cliquables du hub : curseur pointer (remplace les style="cursor:pointer"
    inline). Scopé .dv2-root pour ne pas fuir vers les autres pages partageant
    .quest-card / .dash-hero. */

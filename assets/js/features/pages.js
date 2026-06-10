@@ -832,8 +832,8 @@ const PAGES = {
               <div class="dv2-section-label-line"></div>
             </div>
             <div class="dv2-panel-card">
-              <div style="padding:14px 16px;color:var(--text-dim);font-size:.78rem;display:flex;align-items:center;gap:.5rem">
-                <span style="width:8px;height:8px;border-radius:50%;background:#555"></span>
+              <div class="dv2-presence-empty">
+                <span class="dv2-presence-dot"></span>
                 Aucun joueur connecté pour le moment.
               </div>
             </div>`;
@@ -843,11 +843,11 @@ const PAGES = {
           const ch = (STATE.characters || []).find(c => c.uid === p.uid) || null;
           const portrait = characterAvatarHtml(ch || p, { size: 30, border: '2px solid rgba(34,195,142,.55)', background: 'rgba(34,195,142,.15)', color: 'var(--gold)' });
           return `
-          <div style="display:flex;align-items:center;gap:.55rem;background:rgba(34,195,142,.07);border:1px solid rgba(34,195,142,.22);border-radius:999px;padding:3px 12px 3px 3px">
+          <div class="dv2-presence-pill">
             ${portrait}
-            <div style="display:flex;flex-direction:column;line-height:1.15;min-width:0">
-              <span style="font-size:.78rem;color:var(--text);font-weight:600;white-space:nowrap">${_esc(p.pseudo||'?')}</span>
-              ${ch ? `<span style="font-size:.65rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px">${_esc(ch.nom||'?')}</span>` : ''}
+            <div class="dv2-presence-meta">
+              <span class="dv2-presence-name">${_esc(p.pseudo||'?')}</span>
+              ${ch ? `<span class="dv2-presence-char">${_esc(ch.nom||'?')}</span>` : ''}
             </div>
           </div>`;
         }).join('');
@@ -857,7 +857,7 @@ const PAGES = {
             <div class="dv2-section-label-line"></div>
           </div>
           <div class="dv2-panel-card">
-            <div style="padding:12px 14px;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center">${pills}</div>
+            <div class="dv2-presence-list">${pills}</div>
           </div>`;
       };
       // Abonnement présence une seule fois (sinon chaque paint recrée un listener
