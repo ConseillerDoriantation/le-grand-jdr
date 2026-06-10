@@ -78,10 +78,11 @@ function _uniq(arr = []) {
 function _emailKey(email = '') {
   return String(email || '').trim().toLowerCase();
 }
-function _userUid(u = {}) {
-  return u.uid || u.id || '';
+function _userUid(u) {
+  return (u && (u.uid || u.id)) || '';
 }
-function _userAliases(u = {}) {
+function _userAliases(u) {
+  if (!u) return [];
   return _uniq([
     u.id,
     u.uid,
@@ -158,6 +159,15 @@ function _dedupeParticipants(parts = []) {
 }
 function _questParticipants(quest = {}) {
   return _dedupeParticipants(quest.participants || []);
+}
+// Groupes de planification = groupes issus de la Trame (quêtes liées à une mission,
+// statut « En cours »). Les anciennes quêtes autonomes (sans missionId) sont ignorées.
+function _planningGroups() {
+  return (_ag.quests || []).filter(q => q && q.missionId);
+}
+// Anciennes quêtes autonomes (sans missionId) — à supprimer (on se base sur la Trame).
+function _legacyQuests() {
+  return (_ag.quests || []).filter(q => q && !q.missionId);
 }
 function _myUidAliases() {
   return _uniq([
@@ -319,8 +329,8 @@ function _computeQuestSuggestions(quest, daysAhead = 28) {
 function _renderSuggestions() {
   const el = document.getElementById('ag-suggestions');
   if (!el) return;
-  const myQuests = (_ag.quests || []).filter(q => {
-    if (q.statut && q.statut !== 'active') return false;
+  const myQuests = _planningGroups().filter(q => {
+    if ((q.statut || 'active') !== 'active') return false; // seulement les groupes « En cours »
     if (STATE.isAdmin) return true; // MJ voit tout
     return _questHasMe(q);
   });
@@ -328,8 +338,8 @@ function _renderSuggestions() {
   if (!myQuests.length) {
     el.innerHTML = `<div class="ag-empty">
       <div class="ag-empty-ico">🎯</div>
-      <div class="ag-empty-title">Aucune quête active à planifier</div>
-      <div class="ag-empty-sub">Rejoins une quête pour voir les créneaux compatibles ici.</div>
+      <div class="ag-empty-title">Aucun groupe « En cours » à planifier</div>
+      <div class="ag-empty-sub">Crée/rejoins un groupe sur une mission de la Trame pour voir les créneaux compatibles ici.</div>
     </div>`;
     return;
   }
@@ -633,8 +643,8 @@ function _renderGroupView() {
   let players = [...playersByIdentity.values()]
     .filter(p => !_myUidAliases().includes(p.uid)); // hors moi (j'ai déjà mon calendrier)
 
-  // ── Compartimentation : groupes = quêtes (chacune a ses participants). ──
-  const quests = (_ag.quests || []).filter(q => _questParticipants(q).length);
+  // ── Compartimentation : groupes « En cours » de la Trame (quêtes liées). ──
+  const quests = _planningGroups().filter(q => (q.statut || 'active') === 'active' && _questParticipants(q).length);
   // Si le groupe filtré n'existe plus, revenir à « Tous »
   if (_ag.groupFilter && !quests.some(q => q.id === _ag.groupFilter)) _ag.groupFilter = null;
   if (_ag.groupFilter) {
@@ -700,6 +710,30 @@ function setGroupFilter(groupId) {
   _renderGroupView();
 }
 
+// Bouton MJ de nettoyage des anciennes quêtes autonomes (sans missionId).
+function _renderLegacyCleanup() {
+  const el = document.getElementById('ag-legacy-cleanup');
+  if (!el) return;
+  const n = STATE.isAdmin ? _legacyQuests().length : 0;
+  el.innerHTML = n
+    ? `<button class="btn btn-outline" data-action="_agDeleteLegacyQuests" title="Supprimer les anciennes quêtes (on planifie désormais via les groupes de la Trame)">🧹 Supprimer ${n} ancienne${n > 1 ? 's' : ''} quête${n > 1 ? 's' : ''}</button>`
+    : '';
+}
+
+async function deleteLegacyQuests() {
+  if (!STATE.isAdmin) return;
+  const legacy = _legacyQuests();
+  if (!legacy.length) return;
+  if (!confirm(`Supprimer définitivement ${legacy.length} ancienne(s) quête(s) autonome(s) ? La planification se base désormais sur les groupes de la Trame.`)) return;
+  let done = 0;
+  for (const q of legacy) {
+    try { await deleteFromCol('quests', q.id); done++; }
+    catch (e) { console.warn('[agenda] suppression quête', q.id, e?.code || e); }
+  }
+  showNotif(done ? `${done} ancienne(s) quête(s) supprimée(s).` : 'Aucune suppression.', done ? 'success' : 'error');
+  // La subscription temps réel met à jour _ag.quests et les rendus.
+}
+
 // ── Page principale ───────────────────────────────────────────────────────
 async function renderAgendaPage() {
   const content = document.getElementById('main-content');
@@ -728,6 +762,7 @@ async function renderAgendaPage() {
         <div class="ag-hero-actions">
           <button class="btn btn-gold" data-action="_agOpenRecurringEditor">📆 Mon planning récurrent</button>
           <button class="btn btn-outline" id="ag-group-toggle" data-action="_agToggleGroupView">👥 Voir les dispos du groupe</button>
+          <span id="ag-legacy-cleanup"></span>
         </div>
       </div>
 
@@ -735,7 +770,7 @@ async function renderAgendaPage() {
 
       <section class="ag-section">
         <h2 class="ag-section-title">🎯 Sessions compatibles</h2>
-        <p class="ag-section-sub">Top 5 créneaux par quête, basés sur les dispos de tous les participants.</p>
+        <p class="ag-section-sub">Top 5 créneaux par groupe « En cours » de la Trame, selon les dispos de leurs membres.</p>
         <div id="ag-suggestions" class="ag-suggestions"></div>
       </section>
 
@@ -785,6 +820,7 @@ async function renderAgendaPage() {
     _scheduleQuestParticipantCleanup();
     _renderSuggestions();
     _renderGroupView();
+    _renderLegacyCleanup();
   });
 
   watchPageCollection('agenda-users', 'users', 'agenda', data => {
@@ -813,6 +849,7 @@ registerActions({
   _agOpenRecurringEditor:   ()    => openRecurringEditor(),
   _agToggleGroupView:       ()    => toggleGroupView(),
   _agSetGroupFilter:        (btn) => setGroupFilter(btn.dataset.group),
+  _agDeleteLegacyQuests:    ()    => deleteLegacyQuests(),
   _agClearOverrides:        ()    => clearOverrides(),
 });
 export default renderAgendaPage;

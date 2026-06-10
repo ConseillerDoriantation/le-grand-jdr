@@ -4,7 +4,7 @@
 // ✓ Upload + recadrage d'image canvas 4:3 (identique aux hauts-faits)
 // ✓ Liens inter-missions (flèches SVG entre axes différents)
 // ══════════════════════════════════════════════════════════════════════════════
-import { loadCollection, addToCol, updateInCol, getDocData, getCachedCollection } from '../data/firestore.js';
+import { loadCollection, addToCol, updateInCol, saveDoc, deleteFromCol, getDocData, getCachedCollection } from '../data/firestore.js';
 import { confirmDelete, tryDoc } from '../shared/crud.js';
 import { navigate } from '../core/navigation.js';
 import { openModal, closeModal, closeModalDirect, confirmModal } from '../shared/modal.js';
@@ -14,10 +14,10 @@ import { registerActions } from '../core/actions.js';
 import { _esc, _nl2br } from '../shared/html.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import PAGES from './pages.js';
-import { sortCharactersForDisplay } from '../shared/char-stats.js';
+import { sortCharactersForDisplay, getMyCharacters } from '../shared/char-stats.js';
 import { setHistoireCtx } from '../shared/histoire-ctx.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
-import { storyParticipantsFromGroups } from '../shared/participants.js';
+import { storyParticipantsFromGroups, toggleQuestParticipant, dedupeQuestParticipants, questParticipantFromChar } from '../shared/participants.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 
 // ── Palettes ──────────────────────────────────────────────────────────────────
@@ -318,6 +318,267 @@ async function _stDeleteGroup(groupId) {
 
 function _stApplyGroup() {}
 
+// ── Groupes de mission = quêtes liées (missionId) ─────────────────────────────
+// Les joueurs rejoignent (champ participants, autorisé par les règles Firestore) ;
+// le MJ crée / assigne des joueurs / édite en inline / supprime.
+const _grpQuest = (id) => (getCachedCollection('quests') || []).find(q => q.id === id) || null;
+
+// Carte d'un groupe (MJ = édition inline · joueur = lecture + rejoindre).
+function _storyGroupCardHtml(g, missionId) {
+  const isAdmin = STATE.isAdmin;
+  const uid     = STATE.user?.uid;
+  const parts   = dedupeQuestParticipants(g.participants || []);
+  const o       = groupOutcome(g);
+  const gr      = parseInt(g.reussite) || 0;
+  const statut  = g.statut || 'active';
+  const allChars = getCachedCollection('characters') || [];
+  const av = (p) => characterAvatarHtml(p, { size: 28, className: 'mv-avatar', border: 'none', background: 'rgba(79,140,255,.18)', color: 'var(--gold)' });
+
+  const membersHtml = parts.length
+    ? parts.map(p => `<div class="mv-group-member">
+        ${av(p)}
+        <span class="mv-group-member-name">${_esc(p.nom || '')}</span>
+        ${isAdmin ? `<button class="mv-group-memx" data-action="_stGroupRemoveMember" data-id="${g.id}" data-mission="${missionId}" data-char="${_esc(p.charId || '')}" data-uid="${_esc(p.uid || '')}" title="Retirer">×</button>` : ''}
+      </div>`).join('')
+    : `<div class="mv-empty-small">Aucun membre.</div>`;
+
+  if (isAdmin) {
+    const presentIds = new Set(parts.map(p => p.charId).filter(Boolean));
+    // Sélection des participants par portrait (plus lisible qu'un menu déroulant)
+    const addChips = sortCharactersForDisplay(allChars)
+      .filter(c => !presentIds.has(c.id))
+      .map(c => `<button type="button" class="mv-grp-addchip" data-action="_stGroupAddMember" data-id="${g.id}" data-mission="${missionId}" data-char="${_esc(c.id)}" title="Ajouter ${_esc(c.nom || '?')}${c.ownerPseudo ? ` · ${_esc(c.ownerPseudo)}` : ''}">
+          ${characterAvatarHtml(c, { size: 26, className: 'mv-avatar', border: 'none', background: 'rgba(34,195,142,.16)', color: '#22c38e' })}
+          <span class="mv-grp-addchip-name">${_esc(c.nom || '?')}</span>
+        </button>`).join('');
+    const dc = (field, extra = '') => `data-change="_stGroupFieldSave" data-id="${g.id}" data-mission="${missionId}" data-field="${field}" ${extra}`;
+    return `<article class="mv-group mv-group--edit" data-gid="${g.id}" style="--gr-color:${o.color}">
+      <header class="mv-group-head">
+        <input class="mv-group-name-inp" value="${_esc(g.titre || '')}" placeholder="Nom du groupe" ${dc('titre')}>
+        <span class="mv-group-outcome" style="--oc:${o.color}">${o.icon} ${o.label}</span>
+        <button class="mv-group-iconbtn mv-group-iconbtn--del" data-action="_stGroupDelete" data-id="${g.id}" data-mission="${missionId}" title="Supprimer le groupe">🗑️</button>
+      </header>
+      <div class="mv-group-editrow">
+        <label>Statut<select class="mv-group-sel" ${dc('statut')}>
+          ${[['active', 'En cours'], ['terminee', 'Terminée'], ['echouee', 'Échouée']].map(([v, l]) => `<option value="${v}"${statut === v ? ' selected' : ''}>${l}</option>`).join('')}
+        </select></label>
+        <label>Réussite %<input class="mv-group-num" type="number" min="0" max="100" step="1" value="${g.reussite != null && g.reussite !== '' ? gr : ''}" placeholder="—" ${dc('reussite')}></label>
+        <label>Récompense<input class="mv-group-inp" value="${_esc(g.recompense || '')}" placeholder="ex: 300 XP + 50 or" ${dc('recompense')}></label>
+      </div>
+      <div class="mv-group-bar"><div class="mv-group-bar-fill" style="width:${gr}%"></div></div>
+      <div class="mv-group-members">${membersHtml}</div>
+      ${addChips ? `<div class="mv-group-addlabel">＋ Assigner un personnage</div>
+      <div class="mv-group-addgrid">${addChips}</div>` : ''}
+      <textarea class="mv-group-notesinp" rows="2" placeholder="Notes de réussite (une par ligne)…" ${dc('notesReussite')}>${_esc(g.notesReussite || '')}</textarea>
+    </article>`;
+  }
+
+  // Carte joueur — lecture seule + rejoindre
+  const notes   = (g.notesReussite || '').split('\n').map(l => l.trim()).filter(Boolean);
+  const joined  = !!uid && parts.some(p => p?.uid === uid);
+  const myChars = getMyCharacters(allChars, uid);
+  const canJoin = myChars.length > 0 && statut === 'active';
+  const requis  = parseInt(g.participantsRequis) || 0;
+  return `<article class="mv-group" data-gid="${g.id}" style="--gr-color:${o.color}">
+    <header class="mv-group-head">
+      <h4 class="mv-group-name">${_esc(g.titre || 'Groupe')}</h4>
+      <span class="mv-group-outcome" style="--oc:${o.color}">${o.icon} ${o.label}</span>
+      ${gr > 0 ? `<div class="mv-group-pct">${gr}<small>%</small></div>` : ''}
+    </header>
+    ${parts.length ? `<div class="mv-group-members">${membersHtml}</div>` : `<div class="mv-empty-small">Aucun membre${requis ? ` · ${requis} requis` : ''}.</div>`}
+    ${gr > 0 ? `<div class="mv-group-bar"><div class="mv-group-bar-fill" style="width:${gr}%"></div></div>` : ''}
+    ${notes.length ? `<ul class="mv-group-notes">${notes.map(n => `<li>${_esc(n)}</li>`).join('')}</ul>` : ''}
+    ${g.recompense ? `<div class="mv-group-reward"><span class="mv-group-reward-icon">🏆</span><span>${_esc(g.recompense)}</span></div>` : ''}
+    ${canJoin ? `<button class="btn btn-sm ${joined ? 'btn-outline' : 'btn-gold'} mv-group-join" data-action="_stGroupJoin" data-id="${g.id}" data-mission="${missionId}">${joined ? '✓ Quitter' : '＋ Rejoindre'}</button>` : ''}
+  </article>`;
+}
+
+// Remplace une carte groupe in-place (sans re-render complet) — membres.
+function _stReplaceGroupCard(questId, missionId) {
+  const q = _grpQuest(questId);
+  const el = document.querySelector(`.mv-group[data-gid="${questId}"]`);
+  if (!q || !el) return;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = _storyGroupCardHtml(q, missionId).trim();
+  if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild);
+}
+
+// Patch léger de l'issue (badge + barre) sans toucher aux champs en édition.
+function _stPatchGroupOutcome(questId) {
+  const q = _grpQuest(questId);
+  const card = document.querySelector(`.mv-group[data-gid="${questId}"]`);
+  if (!q || !card) return;
+  const o = groupOutcome(q);
+  const gr = parseInt(q.reussite) || 0;
+  card.style.setProperty('--gr-color', o.color);
+  const badge = card.querySelector('.mv-group-outcome');
+  if (badge) { badge.style.setProperty('--oc', o.color); badge.textContent = `${o.icon} ${o.label}`; }
+  const fill = card.querySelector('.mv-group-bar-fill');
+  if (fill) fill.style.width = `${gr}%`;
+}
+
+async function _stGroupNew(missionId) {
+  if (!STATE.isAdmin || !missionId) return;
+  try {
+    await addToCol('quests', {
+      missionId, titre: 'Nouveau groupe', statut: 'active',
+      participants: [], participantsRequis: 0, difficulte: 'moyen',
+    });
+    showNotif('Groupe créé. Les joueurs peuvent le rejoindre.', 'success');
+    openStoryDetail(missionId);
+  } catch (e) { notifySaveError(e); }
+}
+
+async function _stGroupDelete(questId, missionId) {
+  if (!STATE.isAdmin) return;
+  const q = _grpQuest(questId);
+  if (!await confirmModal(`Supprimer le groupe « ${q?.titre || 'Groupe'} » ?`)) return;
+  try {
+    await deleteFromCol('quests', questId);
+    showNotif('Groupe supprimé.', 'info');
+    openStoryDetail(missionId);
+  } catch (e) { notifySaveError(e); }
+}
+
+async function _stGroupJoin(questId, missionId) {
+  const q = _grpQuest(questId); if (!q) return;
+  const uid = STATE.user?.uid;
+  const cur = toggleQuestParticipant(q.participants, { uid });
+  if (cur.leaving) {
+    await _stGroupSaveParts(questId, cur.participants, missionId, true);
+    return;
+  }
+  const myChars = getMyCharacters(getCachedCollection('characters') || [], uid);
+  if (!myChars.length) { showNotif('Aucun personnage à inscrire.', 'error'); return; }
+  if (myChars.length > 1) { _stGroupPickCharModal(questId, missionId, myChars); return; }
+  const { participants } = toggleQuestParticipant(q.participants, { uid, char: myChars[0] });
+  await _stGroupSaveParts(questId, participants, missionId, false);
+}
+
+function _stGroupPickCharModal(questId, missionId, charList) {
+  const rows = charList.map(c => {
+    const av = characterAvatarHtml(c, { size: 38, border: 'none', background: 'rgba(79,140,255,.18)', color: 'var(--gold)' });
+    const sub = [c.classe, c.race].filter(Boolean).join(' · ');
+    return `<button class="btn btn-outline" style="display:flex;align-items:center;gap:.75rem;padding:.6rem .9rem;text-align:left;width:100%"
+        data-action="_stGroupPickChar" data-id="${_esc(questId)}" data-mission="${_esc(missionId)}" data-char="${_esc(c.id)}">
+        ${av}
+        <div style="min-width:0">
+          <div style="font-weight:700;font-size:.88rem;color:var(--text)">${_esc(c.nom || '?')}</div>
+          ${sub ? `<div style="font-size:.72rem;color:var(--text-dim)">${_esc(sub)}</div>` : ''}
+        </div>
+      </button>`;
+  }).join('');
+  openModal('Quel personnage rejoint ce groupe ?', `
+    <div style="display:flex;flex-direction:column;gap:.45rem">${rows}</div>
+    <div style="margin-top:.75rem;text-align:right">
+      <button class="btn btn-outline btn-sm" data-action="_stOpenAfterClose" data-id="${_esc(missionId)}">Annuler</button>
+    </div>`);
+}
+
+async function _stGroupPickChar(questId, missionId, charId) {
+  const q = _grpQuest(questId); if (!q) return;
+  const char = (getCachedCollection('characters') || []).find(c => c.id === charId);
+  if (!char) return;
+  const { participants } = toggleQuestParticipant(q.participants, { uid: STATE.user?.uid, char });
+  await _stGroupSaveParts(questId, participants, missionId, false);
+}
+
+async function _stGroupSaveParts(questId, parts, missionId, leaving) {
+  try {
+    await saveDoc('quests', questId, { participants: parts });
+    showNotif(leaving ? 'Tu as quitté ce groupe.' : 'Tu as rejoint ce groupe !', leaving ? 'info' : 'success');
+    openStoryDetail(missionId);
+  } catch (e) {
+    if (e?.code === 'permission-denied') showNotif('Action non autorisée.', 'error');
+    else notifySaveError(e);
+  }
+}
+
+// Édition inline d'un champ de groupe (MJ) — sauvegarde silencieuse, sans modal.
+async function _stGroupFieldSave(el) {
+  if (!STATE.isAdmin) return;
+  const id = el.dataset.id, field = el.dataset.field;
+  if (!id || !field) return;
+  let value = el.value;
+  if (field === 'reussite') {
+    value = String(value).trim() === '' ? null : Math.max(0, Math.min(100, parseInt(value) || 0));
+  } else if (field === 'titre' || field === 'recompense') {
+    value = String(value).trim();
+  }
+  try {
+    await saveDoc('quests', id, { [field]: value });
+    if (field === 'reussite' || field === 'statut') _stPatchGroupOutcome(id);
+  } catch (e) { notifySaveError(e); }
+}
+
+// MJ : assigner un personnage d'office au groupe (clic sur un portrait).
+async function _stGroupAddMember(el) {
+  if (!STATE.isAdmin) return;
+  const id = el.dataset.id, missionId = el.dataset.mission, charId = el.dataset.char || el.value;
+  if (!charId) return;
+  const q = _grpQuest(id); if (!q) return;
+  const char = (getCachedCollection('characters') || []).find(c => c.id === charId);
+  if (!char) return;
+  const parts = dedupeQuestParticipants([...(q.participants || []), questParticipantFromChar(char, char.uid || '')]);
+  try {
+    await saveDoc('quests', id, { participants: parts });
+    _stReplaceGroupCard(id, missionId);
+  } catch (e) { notifySaveError(e); }
+}
+
+// MJ : retirer un membre du groupe.
+async function _stGroupRemoveMember(btn) {
+  if (!STATE.isAdmin) return;
+  const id = btn.dataset.id, missionId = btn.dataset.mission;
+  const charId = btn.dataset.char, uid = btn.dataset.uid;
+  const q = _grpQuest(id); if (!q) return;
+  const parts = (q.participants || []).filter(p => charId ? p.charId !== charId : p.uid !== uid);
+  try {
+    await saveDoc('quests', id, { participants: parts });
+    _stReplaceGroupCard(id, missionId);
+  } catch (e) { notifySaveError(e); }
+}
+
+// MJ : migration one-click des anciens groupes (story.groupes) → quêtes-groupes.
+// Idempotente : marque chaque mission migrée (groupesMigrated) + saute les doublons.
+async function _stMigrateGroups() {
+  if (!STATE.isAdmin) return;
+  if (!await confirmModal('Convertir tous tes anciens groupes (et leurs joueurs) en groupes rejoignables ? Les joueurs déjà associés resteront membres.', { title: '⟳ Migrer les anciens groupes', okLabel: 'Migrer', cancelLabel: 'Annuler' })) return;
+  try {
+    const stories = getCachedCollection('story') || await loadCollection('story');
+    const chars   = getCachedCollection('characters') || await loadCollection('characters') || [];
+    const byId    = new Map(chars.map(c => [c.id, c]));
+    const existing = getCachedCollection('quests') || await loadCollection('quests') || [];
+    let created = 0, missions = 0;
+    for (const m of stories) {
+      const groupes = Array.isArray(m.groupes) ? m.groupes : [];
+      if (!groupes.length || m.groupesMigrated) continue;
+      for (const g of groupes) {
+        const titre = g.nom || 'Groupe';
+        if (existing.some(q => q.missionId === m.id && (q.titre || '') === titre)) continue; // doublon
+        const participants = (g.membres || [])
+          .map(cid => { const c = byId.get(cid); return c ? questParticipantFromChar(c, c.uid || '') : null; })
+          .filter(Boolean);
+        const reussite = (g.reussite != null && g.reussite !== '')
+          ? Math.max(0, Math.min(100, parseInt(g.reussite) || 0)) : null;
+        const statut = reussite == null ? 'active' : (reussite >= 50 ? 'terminee' : 'echouee');
+        await addToCol('quests', {
+          missionId: m.id, titre, statut, participants, reussite,
+          recompense: g.recompense || '', notesReussite: g.notesReussite || '',
+          participantsRequis: 0, difficulte: 'moyen',
+        });
+        created++;
+      }
+      await updateInCol('story', m.id, { groupesMigrated: true });
+      missions++;
+    }
+    showNotif(created
+      ? `✓ ${created} groupe(s) migré(s) sur ${missions} mission(s).`
+      : 'Rien à migrer (déjà fait).', 'success');
+    renderStory();
+  } catch (e) { notifySaveError(e); }
+}
+
 // ── Bindings de la nouvelle modale mission : tabs, segments, live preview ────
 function _initMissionModalUI(item) {
   const shell = document.querySelector('.mn-shell');
@@ -535,6 +796,9 @@ async function renderStory() {
   acteItems.forEach(i => { if (i.axe) axeColor(i.axe); });
   const axes = Object.keys(STORE.axeMap);
 
+  // Reste-t-il d'anciens groupes (story.groupes) non migrés vers les quêtes ?
+  const _legacyGroups = STATE.isAdmin && items.some(i => Array.isArray(i.groupes) && i.groupes.length && !i.groupesMigrated);
+
   // Statistiques de cockpit
   const counts = { total: acteItems.length, term: 0, cours: 0, attente: 0, echec: 0 };
   acteItems.forEach(i => {
@@ -648,6 +912,7 @@ async function renderStory() {
         <button class="view-tab ${prefs.view==='list'?'active':''}" data-action="_stSetView" data-view="list">📋 Liste</button>
       </div>
       ${STATE.isAdmin && axes.length >= 2 ? `<button class="btn btn-outline btn-sm" data-action="openAxeOrder" title="Réordonner les axes narratifs (Carte & Saga)">⇅ Axes</button>` : ''}
+      ${_legacyGroups ? `<button class="btn btn-gold btn-sm" data-action="_stMigrateGroups" title="Convertir les anciens groupes (membres) en groupes rejoignables">⟳ Migrer anciens groupes</button>` : ''}
     </div>
 
     <!-- ── CONTENU ──────────────────────────────────────────── -->
@@ -1531,16 +1796,31 @@ async function openStoryDetail(id) {
   const items = getCachedCollection('story') || await loadCollection('story');
   const item = items.find(i => i.id === id); if (!item) return;
   const st = stCfg(item);
-  const groupes = item.groupes || [];
+  // Groupes = quêtes liées à cette mission (collection session-live → 0 lecture en plus).
+  // Les joueurs les rejoignent via `participants` (règle Firestore : update participants only).
+  const groups = ((getCachedCollection('quests') || await loadCollection('quests').catch(() => []) || [])
+    .filter(q => q.missionId === item.id))
+    .map(q => ({ ...q, _parts: dedupeQuestParticipants(q.participants || []) }))
+    .sort((a, b) => (a.titre || '').localeCompare(b.titre || '', 'fr'));
   const liensItems = (item.liens || []).map(lid => items.find(i => i.id === lid)).filter(Boolean);
   // Hauts-Faits rattachés à cette mission (collection session-live → 0 lecture en plus).
   const achItems = (getCachedCollection('achievements') || await loadCollection('achievements').catch(() => []) || [])
     .filter(a => a.missionId === item.id);
   const totalMembers = (() => {
     const s = new Set();
-    groupes.forEach(g => (g.membres || []).forEach(m => s.add(m)));
+    groups.forEach(g => (g._parts || []).forEach(p => p?.uid && s.add(p.uid)));
     return s.size;
   })();
+  // Issue divergente entre groupes (pastilles) — dérivée de la réussite saisie par le MJ
+  const _grpDots = (() => {
+    if (groups.length < 2) return '';
+    const outs = groups.map(groupOutcome);
+    const mixed = new Set(outs.map(o => o.key)).size > 1;
+    const dots = groups.map((g, i) => `<span class="grp-dot" style="--oc:${outs[i].color}" title="${_esc(g.titre || 'Groupe')} · ${outs[i].label}"></span>`).join('');
+    return `<span class="grp-dots${mixed ? ' is-mixed' : ''}">${dots}</span>`;
+  })();
+  const _grpMixed = groups.length >= 2 && new Set(groups.map(g => groupOutcome(g).key)).size > 1;
+  const _myUid = STATE.user?.uid;
   const prog = itemProgress(item);
   const axeCol = item.axe ? (STORE.axeMap[item.axe] || 'var(--text-muted)') : 'var(--text-muted)';
   const bgUrl = (item.imageUrl || '').replace(/'/g, "%27");
@@ -1552,6 +1832,8 @@ async function openStoryDetail(id) {
   // (session-live → 0 lecture supplémentaire).
   const allChars = getCachedCollection('characters') || await loadCollection('characters');
   const chars = sortCharactersForDisplay(allChars || []);
+  // Personnages du joueur courant (pour rejoindre un groupe)
+  const _myChars = STATE.isAdmin ? [] : getMyCharacters(allChars || [], _myUid);
   const avatar = (c, size = 36) => {
     if (!c) return '';
     const col = PCOLS[c.nom?.charCodeAt(0) % 6 || 0];
@@ -1583,8 +1865,8 @@ async function openStoryDetail(id) {
           <span class="mv-hero-statut" style="color:${st.color};border-color:${st.border}">
             ${st.icon} <span>${_esc(item.statut || 'En attente')}</span>
           </span>
-          ${(groupes.length >= 2 && new Set(groupes.map(g => groupOutcome(g).key)).size > 1)
-            ? `<span class="mv-hero-diverge">⚠ Résultats divergents ${_groupsDotsHtml(item)}</span>` : ''}
+          ${_grpMixed
+            ? `<span class="mv-hero-diverge">⚠ Résultats divergents ${_grpDots}</span>` : ''}
           ${item.axe ? `<span class="mv-hero-axe" style="color:${axeCol}">● ${_esc(item.axe)}</span>` : ''}
           ${item.date ? `<span class="mv-hero-meta-item">📅 ${_esc(item.date)}</span>` : ''}
           ${item.lieu ? `<span class="mv-hero-meta-item">📍 ${_esc(item.lieu)}</span>` : ''}
@@ -1602,8 +1884,8 @@ async function openStoryDetail(id) {
         <div class="mv-stat-lbl">Avancement</div>
       </div>
       <div class="mv-stat">
-        <div class="mv-stat-num">${groupes.length}</div>
-        <div class="mv-stat-lbl">Groupe${groupes.length > 1 ? 's' : ''}</div>
+        <div class="mv-stat-num">${groups.length}</div>
+        <div class="mv-stat-lbl">Groupe${groups.length > 1 ? 's' : ''}</div>
       </div>
       <div class="mv-stat">
         <div class="mv-stat-num">${totalMembers}</div>
@@ -1635,46 +1917,18 @@ async function openStoryDetail(id) {
         </div>
       </section>`}
 
-      <!-- Groupes & Réussites -->
-      ${groupes.length ? `
+      <!-- Groupes (quêtes liées) — les joueurs rejoignent, le MJ gère -->
+      ${`
       <section class="mv-section">
         <h3 class="mv-section-title">
-          👥 Groupes & Réussites
-          <span class="mv-section-count">${groupes.length}</span>
+          👥 Groupes
+          <span class="mv-section-count">${groups.length}</span>
+          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm mv-group-add" data-action="_stGroupNew" data-mission="${item.id}">＋ Nouveau groupe</button>` : ''}
         </h3>
-        <div class="mv-groups">
-          ${groupes.map(g => {
-            const membres = (g.membres || []).map(mid => chars.find(c => c.id === mid)).filter(Boolean);
-            const gr = parseInt(g.reussite) || 0;
-            const o = groupOutcome(g);
-            const grColor = o.color;
-            const notes = (g.notesReussite || '').split('\n').map(l => l.trim()).filter(Boolean);
-            return `<article class="mv-group" style="--gr-color:${grColor}">
-              <header class="mv-group-head">
-                <h4 class="mv-group-name">${_esc(g.nom)}</h4>
-                <span class="mv-group-outcome" style="--oc:${o.color}">${o.icon} ${o.label}</span>
-                ${gr > 0 ? `<div class="mv-group-pct">${gr}<small>%</small></div>` : ''}
-              </header>
-              ${membres.length ? `<div class="mv-group-members">
-                ${membres.map(c => `<div class="mv-group-member">
-                  ${avatar(c, 28)}
-                  <span class="mv-group-member-name">${_esc(c.nom || '')}</span>
-                </div>`).join('')}
-              </div>` : `<div class="mv-empty-small">Aucun membre rattaché.</div>`}
-              ${gr > 0 ? `<div class="mv-group-bar">
-                <div class="mv-group-bar-fill" style="width:${gr}%"></div>
-              </div>` : ''}
-              ${notes.length ? `<ul class="mv-group-notes">
-                ${notes.map(n => `<li>${_esc(n)}</li>`).join('')}
-              </ul>` : ''}
-              ${g.recompense ? `<div class="mv-group-reward">
-                <span class="mv-group-reward-icon">🏆</span>
-                <span>${_esc(g.recompense)}</span>
-              </div>` : ''}
-            </article>`;
-          }).join('')}
-        </div>
-      </section>` : ''}
+        ${groups.length ? `<div class="mv-groups">
+          ${groups.map(g => _storyGroupCardHtml(g, item.id)).join('')}
+        </div>` : `<div class="mv-empty"><span>👥</span><span>${STATE.isAdmin ? 'Aucun groupe. Crée-en un pour que les joueurs le rejoignent.' : 'Aucun groupe ouvert pour cette mission pour le moment.'}</span></div>`}
+      </section>`}
 
       <!-- Hauts-Faits issus de cette mission -->
       ${achItems.length ? `
@@ -1815,7 +2069,6 @@ async function openStoryModal(item = null) {
     <!-- ════ TABS ════════════════════════════════════════════════ -->
     <div class="mn-tabs" role="tablist">
       <button type="button" class="mn-tab is-active" data-tab="histoire">📜 Histoire</button>
-      <button type="button" class="mn-tab" data-tab="groupes">👥 Groupes <span class="mn-tab-count" id="mn-tab-count-groupes">${STORE.modalGroupes.length || ''}</span></button>
       ${autresItems.length ? `<button type="button" class="mn-tab" data-tab="liens">↝ Liens <span class="mn-tab-count" id="mn-tab-count-liens">${(item?.liens||[]).length || ''}</span></button>` : ''}
       <button type="button" class="mn-tab" data-tab="reglages">⚙️ Réglages</button>
     </div>
@@ -2240,6 +2493,16 @@ registerActions({
   closeModalDirect:        ()    => closeModalDirect(),
   _stOpenLien:             (btn) => { closeModalDirect(); openStoryDetail(btn.dataset.id); },
   _stOpenAch:              async (btn) => { const { openAchievementLightbox } = await import('./achievements.js'); openAchievementLightbox(btn.dataset.id); },
+  // Groupes de mission (quêtes liées)
+  _stGroupNew:             (btn) => _stGroupNew(btn.dataset.mission),
+  _stGroupJoin:            (btn) => _stGroupJoin(btn.dataset.id, btn.dataset.mission),
+  _stGroupPickChar:        (btn) => _stGroupPickChar(btn.dataset.id, btn.dataset.mission, btn.dataset.char),
+  _stGroupFieldSave:       (el)  => _stGroupFieldSave(el),
+  _stGroupAddMember:       (el)  => _stGroupAddMember(el),
+  _stGroupRemoveMember:    (btn) => _stGroupRemoveMember(btn),
+  _stGroupDelete:          (btn) => _stGroupDelete(btn.dataset.id, btn.dataset.mission),
+  _stMigrateGroups:        ()    => _stMigrateGroups(),
+  _stOpenAfterClose:       (btn) => openStoryDetail(btn.dataset.id),
   _stDeleteAfterClose:     (btn) => { closeModalDirect(); deleteStory(btn.dataset.id); },
   _stEditAfterClose:       (btn) => { closeModalDirect(); editStory(btn.dataset.id); },
   _stDeleteAfterCloseModal:(btn) => { closeModal(); deleteStory(btn.dataset.id); },
