@@ -537,6 +537,46 @@ async function _stGroupRemoveMember(btn) {
   } catch (e) { notifySaveError(e); }
 }
 
+// MJ : migration one-click des anciens groupes (story.groupes) → quêtes-groupes.
+// Idempotente : marque chaque mission migrée (groupesMigrated) + saute les doublons.
+async function _stMigrateGroups() {
+  if (!STATE.isAdmin) return;
+  if (!await confirmModal('Convertir tous tes anciens groupes (et leurs joueurs) en groupes rejoignables ? Les joueurs déjà associés resteront membres.', { title: '⟳ Migrer les anciens groupes', okLabel: 'Migrer', cancelLabel: 'Annuler' })) return;
+  try {
+    const stories = getCachedCollection('story') || await loadCollection('story');
+    const chars   = getCachedCollection('characters') || await loadCollection('characters') || [];
+    const byId    = new Map(chars.map(c => [c.id, c]));
+    const existing = getCachedCollection('quests') || await loadCollection('quests') || [];
+    let created = 0, missions = 0;
+    for (const m of stories) {
+      const groupes = Array.isArray(m.groupes) ? m.groupes : [];
+      if (!groupes.length || m.groupesMigrated) continue;
+      for (const g of groupes) {
+        const titre = g.nom || 'Groupe';
+        if (existing.some(q => q.missionId === m.id && (q.titre || '') === titre)) continue; // doublon
+        const participants = (g.membres || [])
+          .map(cid => { const c = byId.get(cid); return c ? questParticipantFromChar(c, c.uid || '') : null; })
+          .filter(Boolean);
+        const reussite = (g.reussite != null && g.reussite !== '')
+          ? Math.max(0, Math.min(100, parseInt(g.reussite) || 0)) : null;
+        const statut = reussite == null ? 'active' : (reussite >= 50 ? 'terminee' : 'echouee');
+        await addToCol('quests', {
+          missionId: m.id, titre, statut, participants, reussite,
+          recompense: g.recompense || '', notesReussite: g.notesReussite || '',
+          participantsRequis: 0, difficulte: 'moyen',
+        });
+        created++;
+      }
+      await updateInCol('story', m.id, { groupesMigrated: true });
+      missions++;
+    }
+    showNotif(created
+      ? `✓ ${created} groupe(s) migré(s) sur ${missions} mission(s).`
+      : 'Rien à migrer (déjà fait).', 'success');
+    renderStory();
+  } catch (e) { notifySaveError(e); }
+}
+
 // ── Bindings de la nouvelle modale mission : tabs, segments, live preview ────
 function _initMissionModalUI(item) {
   const shell = document.querySelector('.mn-shell');
@@ -754,6 +794,9 @@ async function renderStory() {
   acteItems.forEach(i => { if (i.axe) axeColor(i.axe); });
   const axes = Object.keys(STORE.axeMap);
 
+  // Reste-t-il d'anciens groupes (story.groupes) non migrés vers les quêtes ?
+  const _legacyGroups = STATE.isAdmin && items.some(i => Array.isArray(i.groupes) && i.groupes.length && !i.groupesMigrated);
+
   // Statistiques de cockpit
   const counts = { total: acteItems.length, term: 0, cours: 0, attente: 0, echec: 0 };
   acteItems.forEach(i => {
@@ -867,6 +910,7 @@ async function renderStory() {
         <button class="view-tab ${prefs.view==='list'?'active':''}" data-action="_stSetView" data-view="list">📋 Liste</button>
       </div>
       ${STATE.isAdmin && axes.length >= 2 ? `<button class="btn btn-outline btn-sm" data-action="openAxeOrder" title="Réordonner les axes narratifs (Carte & Saga)">⇅ Axes</button>` : ''}
+      ${_legacyGroups ? `<button class="btn btn-gold btn-sm" data-action="_stMigrateGroups" title="Convertir les anciens groupes (membres) en groupes rejoignables">⟳ Migrer anciens groupes</button>` : ''}
     </div>
 
     <!-- ── CONTENU ──────────────────────────────────────────── -->
@@ -2455,6 +2499,7 @@ registerActions({
   _stGroupAddMember:       (el)  => _stGroupAddMember(el),
   _stGroupRemoveMember:    (btn) => _stGroupRemoveMember(btn),
   _stGroupDelete:          (btn) => _stGroupDelete(btn.dataset.id, btn.dataset.mission),
+  _stMigrateGroups:        ()    => _stMigrateGroups(),
   _stOpenAfterClose:       (btn) => openStoryDetail(btn.dataset.id),
   _stDeleteAfterClose:     (btn) => { closeModalDirect(); deleteStory(btn.dataset.id); },
   _stEditAfterClose:       (btn) => { closeModalDirect(); editStory(btn.dataset.id); },
