@@ -435,6 +435,8 @@
   margin-top: 2px;
 }
 
+.dv2-party-session-more { font-size: 0.66rem; color: var(--text-dim); margin-top: 4px; }
+
 [data-theme="light"] .dv2-party-footer--session .dv2-party-session-label { color: #a16207; }
 [data-theme="light"] .dv2-party-session-chip--validated {
   background: linear-gradient(135deg, rgba(234,179,8,0.12), rgba(234,179,8,0.04)) !important;

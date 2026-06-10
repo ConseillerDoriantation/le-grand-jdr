@@ -364,7 +364,7 @@ function _renderSuggestions() {
       <div class="ag-sug-list">
         ${sugs.map((s, idx) => {
           const isFull = s.okCount === s.total;
-          const isValidated = _isSessionMatch(_ag.nextSession, q.id, s.iso, s.slot.id);
+          const isValidated = _isSlotValidated(q.id, s.iso, s.slot.id);
           const cls = (isValidated ? 'ag-sug--validated ' : '') + (isFull ? 'ag-sug--full' : 'ag-sug--partial');
           const dateStr = _formatDateFr(s.date);
           return `<div class="ag-sug ${cls}" data-sug-idx="${idx}" data-quest-id="${q.id}"
@@ -395,12 +395,12 @@ function showSuggestionDetail(questId, idx) {
   const quest = _ag.quests.find(q => q.id === questId);
   if (!sug || !quest) return;
   const date = _formatDateFr(sug.date);
-  const isValidated = _isSessionMatch(_ag.nextSession, questId, sug.iso, sug.slot.id);
+  const isValidated = _isSlotValidated(questId, sug.iso, sug.slot.id);
 
   const mjActions = STATE.isAdmin ? `
     <div class="ag-detail-actions">
       ${isValidated
-        ? `<button class="btn btn-outline" data-action="_agUnvalidateSession">✕ Annuler la validation</button>`
+        ? `<button class="btn btn-outline" data-action="_agUnvalidateSlot" data-quest-id="${questId}" data-iso="${sug.iso}" data-slot-id="${sug.slot.id}">✕ Retirer ce créneau</button>`
         : `<button class="btn btn-gold" data-action="_agValidateSlot" data-quest-id="${questId}" data-iso="${sug.iso}" data-slot-id="${sug.slot.id}">✓ Valider ce créneau</button>`}
     </div>` : '';
 
@@ -424,10 +424,29 @@ function showSuggestionDetail(questId, idx) {
   `);
 }
 
-// ── Helpers session validée ──────────────────────────────────────────────
-function _isSessionMatch(session, questId, iso, slotId) {
-  if (!session) return false;
-  return session.questId === questId && session.date === iso && session.slot === slotId;
+// ── Helpers séances validées (plusieurs créneaux possibles) ───────────────
+// agenda_session/next contient désormais { sessions: [ {questId,date,slot,…} ] }.
+// Rétro-compat : ancien doc à plat {date,slot} → traité comme une liste de 1.
+function _validatedSessions() {
+  const ns = _ag.nextSession;
+  if (!ns) return [];
+  if (Array.isArray(ns.sessions)) return ns.sessions.filter(Boolean);
+  if (ns.date && ns.slot) return [ns];
+  return [];
+}
+function _sessionKey(s) { return `${s?.questId || ''}|${s?.date || ''}|${s?.slot || ''}`; }
+function _isSlotValidated(questId, iso, slotId) {
+  const k = `${questId}|${iso}|${slotId}`;
+  return _validatedSessions().some(s => _sessionKey(s) === k);
+}
+async function _saveSessions(sessions) {
+  if (sessions.length) {
+    await saveDoc('agenda_session', 'next', { sessions });
+    _ag.nextSession = { sessions };
+  } else {
+    await deleteFromCol('agenda_session', 'next');
+    _ag.nextSession = null;
+  }
 }
 function _formatSession(s) {
   if (!s || !s.date) return null;
@@ -444,19 +463,19 @@ function _formatSession(s) {
 async function validateSlot(questId, iso, slotId) {
   if (!STATE.isAdmin) return;
   const quest = _ag.quests.find(q => q.id === questId);
+  if (_isSlotValidated(questId, iso, slotId)) { closeModal(); return; }
+  const entry = {
+    questId,
+    questTitle:  quest?.titre || quest?.nom || 'Groupe',
+    date:        iso,
+    slot:        slotId,
+    // Membres du groupe concerné : seuls eux (+ le MJ) verront la séance.
+    participantUids: _questParticipants(quest).map(p => p.uid).filter(Boolean),
+    validatedAt: Date.now(),
+    validatedBy: STATE.user?.uid || null,
+  };
   try {
-    const payload = {
-      questId,
-      questTitle:  quest?.titre || quest?.nom || 'Quête',
-      date:        iso,
-      slot:        slotId,
-      // Membres du groupe concerné : seuls eux (+ le MJ) verront la séance.
-      participantUids: _questParticipants(quest).map(p => p.uid).filter(Boolean),
-      validatedAt: Date.now(),
-      validatedBy: STATE.user?.uid || null,
-    };
-    await saveDoc('agenda_session', 'next', payload);
-    _ag.nextSession = payload;
+    await _saveSessions([..._validatedSessions(), entry]);
     closeModal();
     showNotif('✓ Créneau validé. Visible par le groupe concerné (et le MJ).', 'success');
     _renderSessionBanner();
@@ -469,13 +488,14 @@ async function validateSlot(questId, iso, slotId) {
     }
   }
 }
-async function unvalidateSession() {
+async function unvalidateSlot(questId, iso, slotId) {
   if (!STATE.isAdmin) return;
+  const k = `${questId}|${iso}|${slotId}`;
+  const next = _validatedSessions().filter(s => _sessionKey(s) !== k);
   try {
-    await deleteFromCol('agenda_session', 'next');
-    _ag.nextSession = null;
+    await _saveSessions(next);
     closeModal();
-    showNotif('Validation annulée.', 'success');
+    showNotif('Créneau retiré.', 'info');
     _renderSessionBanner();
     _renderSuggestions();
   } catch (e) {
@@ -498,20 +518,28 @@ function _sessionVisibleToMe(s) {
 function _renderSessionBanner() {
   const el = document.getElementById('ag-session-banner');
   if (!el) return;
-  const s = _ag.nextSession;
-  if (!s || !_sessionVisibleToMe(s)) { el.innerHTML = ''; el.style.display = 'none'; return; }
-  const fmt = _formatSession(s);
-  if (!fmt) { el.innerHTML = ''; el.style.display = 'none'; return; }
+  const sessions = _validatedSessions()
+    .filter(_sessionVisibleToMe)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.slot || '').localeCompare(b.slot || ''));
+  if (!sessions.length) { el.innerHTML = ''; el.style.display = 'none'; return; }
   el.style.display = '';
+  const multi = sessions.length > 1;
   el.innerHTML = `
-    <div class="ag-banner">
-      <div class="ag-banner-ico">🎲</div>
-      <div class="ag-banner-body">
-        <div class="ag-banner-eyebrow">Prochaine séance validée</div>
-        <div class="ag-banner-title">${_esc(fmt.dateFr)} — ${fmt.slotLabel} <span class="ag-banner-hours">${fmt.slotHours}</span></div>
-        ${fmt.questTitle ? `<div class="ag-banner-quest">Quête : ${_esc(fmt.questTitle)}</div>` : ''}
-      </div>
-      ${STATE.isAdmin ? `<button class="ag-banner-btn" data-action="_agUnvalidateSession" title="Annuler la validation">✕</button>` : ''}
+    <div class="ag-banner-list">
+      ${multi ? `<div class="ag-banner-listhd">📌 ${sessions.length} créneaux validés</div>` : ''}
+      ${sessions.map(s => {
+        const fmt = _formatSession(s);
+        if (!fmt) return '';
+        return `<div class="ag-banner">
+          <div class="ag-banner-ico">🎲</div>
+          <div class="ag-banner-body">
+            <div class="ag-banner-eyebrow">${multi ? 'Séance validée' : 'Prochaine séance validée'}</div>
+            <div class="ag-banner-title">${_esc(fmt.dateFr)} — ${fmt.slotLabel} <span class="ag-banner-hours">${fmt.slotHours}</span></div>
+            ${fmt.questTitle ? `<div class="ag-banner-quest">Groupe : ${_esc(fmt.questTitle)}</div>` : ''}
+          </div>
+          ${STATE.isAdmin ? `<button class="ag-banner-btn" data-action="_agUnvalidateSlot" data-quest-id="${_esc(s.questId || '')}" data-iso="${_esc(s.date || '')}" data-slot-id="${_esc(s.slot || '')}" title="Retirer ce créneau">✕</button>` : ''}
+        </div>`;
+      }).join('')}
     </div>`;
 }
 
@@ -702,7 +730,7 @@ function _renderGroupView() {
 function toggleGroupView() {
   _ag.groupView = !_ag.groupView;
   const btn = document.getElementById('ag-group-toggle');
-  if (btn) btn.textContent = _ag.groupView ? '👁 Masquer la vue groupe' : '👥 Voir les dispos du groupe';
+  if (btn) btn.textContent = _ag.groupView ? '🙈 Masquer' : '👁 Afficher';
   _renderGroupView();
 }
 function setGroupFilter(groupId) {
@@ -761,7 +789,6 @@ async function renderAgendaPage() {
         </div>
         <div class="ag-hero-actions">
           <button class="btn btn-gold" data-action="_agOpenRecurringEditor">📆 Mon planning récurrent</button>
-          <button class="btn btn-outline" id="ag-group-toggle" data-action="_agToggleGroupView">👥 Voir les dispos du groupe</button>
           <span id="ag-legacy-cleanup"></span>
         </div>
       </div>
@@ -786,6 +813,12 @@ async function renderAgendaPage() {
       </section>
 
       <section class="ag-section">
+        <div class="ag-section-hd">
+          <h2 class="ag-section-title">👥 Dispos du groupe</h2>
+          <div class="ag-section-actions">
+            <button class="btn btn-outline btn-sm" id="ag-group-toggle" data-action="_agToggleGroupView">👁 Afficher</button>
+          </div>
+        </div>
         <div id="ag-group-view" class="ag-group-view"></div>
       </section>
 
@@ -841,7 +874,7 @@ PAGES.agenda = renderAgendaPage;
 
 registerActions({
   _agShowSugDetail:         (btn) => showSuggestionDetail(btn.dataset.id, Number(btn.dataset.idx)),
-  _agUnvalidateSession:     ()    => unvalidateSession(),
+  _agUnvalidateSlot:        (btn) => unvalidateSlot(btn.dataset.questId, btn.dataset.iso, btn.dataset.slotId),
   _agValidateSlot:          (btn) => validateSlot(btn.dataset.questId, btn.dataset.iso, btn.dataset.slotId),
   _agCycle:                 (btn) => cycleAgendaSlot(btn.dataset.iso, btn.dataset.slot),
   _agRecCycle:              (btn) => cycleRecurringSlot(btn.dataset.day, btn.dataset.slot, btn),

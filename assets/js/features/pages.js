@@ -73,13 +73,21 @@ const PAGES = {
       const dateFr = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
       return { dateFr, slotLabel: _SLOT_LABELS[sess.slot] || '', questTitle: sess.questTitle || '' };
     }
-    // La séance validée n'est affichée qu'aux membres du groupe concerné (+ MJ).
-    // Fallback : pas de groupe enregistré (séances legacy) → visible par tous.
-    const _sessUids = nextSession?.participantUids;
-    const _sessVisible = STATE.isAdmin
-      || !Array.isArray(_sessUids) || !_sessUids.length
-      || _sessUids.includes(uid);
-    const nextSessionFmt = _sessVisible ? _formatNextSession(nextSession) : null;
+    // agenda_session/next contient une LISTE de séances validées (rétro-compat :
+    // ancien doc à plat = liste de 1). On affiche la plus proche visible par le
+    // joueur (membres du groupe concerné + MJ).
+    const _isSessVisible = (s) => {
+      const u = s?.participantUids;
+      return STATE.isAdmin || !Array.isArray(u) || !u.length || u.includes(uid);
+    };
+    const _allSessions = Array.isArray(nextSession?.sessions)
+      ? nextSession.sessions
+      : (nextSession?.date ? [nextSession] : []);
+    const _visibleSessions = _allSessions
+      .filter(_isSessVisible)
+      .sort((a, b) => (a?.date || '').localeCompare(b?.date || ''));
+    const nextSessionFmt = _formatNextSession(_visibleSessions[0]);
+    const _otherSessions = Math.max(0, _visibleSessions.length - 1);
 
     const pseudo = STATE.profile?.pseudo || 'Aventurier';
 
@@ -519,6 +527,7 @@ const PAGES = {
             <span class="dv2-pss-slot">${nextSessionFmt.slotLabel}</span>
             ${nextSessionFmt.questTitle ? `<span class="dv2-pss-quest">${_esc(nextSessionFmt.questTitle)}</span>` : ''}
           </div>
+          ${_otherSessions ? `<div class="dv2-party-session-more">+${_otherSessions} autre${_otherSessions > 1 ? 's' : ''} créneau${_otherSessions > 1 ? 'x' : ''} validé${_otherSessions > 1 ? 's' : ''}</div>` : ''}
         </div>`
         : STATE.adventure ? `
         <div class="dv2-party-footer">
