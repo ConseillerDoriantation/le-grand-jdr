@@ -215,19 +215,19 @@ const PAGES = {
           <div>
             <div class="dash-hero-bars">
               <div class="dash-bar-row">
-                <span class="dash-bar-icon">❤️</span>
+                <span class="dash-bar-icon">${_svg('heart', '#ff6b6b')}</span>
                 <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
                 <span class="dash-bar-val" style="color:${pvColor}">${pvCur}/${pvMax}</span>
               </div>
               <div class="dash-bar-row">
-                <span class="dash-bar-icon">🔵</span>
-                <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pmPct}%;background:linear-gradient(90deg,#22c7ea,#4adbf7)"></div></div>
+                <span class="dash-bar-icon">${_svg('sparkles', '#4adbf7')}</span>
+                <div class="dash-bar-track"><div class="dash-bar-fill dash-bar-fill--pm" style="width:${pmPct}%"></div></div>
                 <span class="dash-bar-val" style="color:#4adbf7">${pmCur}/${pmMax}</span>
               </div>
             </div>
             <div class="dash-hero-chips">
-              <span class="dash-chip">🛡️ CA <strong>${ca}</strong></span>
-              <span class="dash-chip dash-chip--gold">💰 <strong>${or}</strong> or</span>
+              <span class="dash-chip">${_svg('shield')} CA <strong>${ca}</strong></span>
+              <span class="dash-chip dash-chip--gold">${_svg('coin')} <strong>${or}</strong> or</span>
             </div>
           </div>
         </div>
