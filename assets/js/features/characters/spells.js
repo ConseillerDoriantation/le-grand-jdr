@@ -3231,7 +3231,7 @@ registerActions({
     const inp = document.getElementById('s-mj-validation');
     if (inp) inp.value = val;
     document.querySelectorAll('.cs-mjval-btn').forEach(b => b.classList.toggle('is-active', b.dataset.mjval === val));
-    window._updateSortPreview?.();
+    _updateSortPreview();
   },
   addSort:                ()    => addSort(),
   openSortCatEditor:      ()    => openSortCatEditor(),
