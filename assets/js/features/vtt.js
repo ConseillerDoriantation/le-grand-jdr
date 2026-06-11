@@ -39,7 +39,7 @@ import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-ski
 import PAGES from './pages.js';
 import { VS, aid } from './vtt-state.js';
 import {
-  _musicStateRef, _syncMusicPlayback, _killAudio, _resetMusicState, _closeMusicPanel,
+  _musicStateRef, _syncMusicPlayback, _resetMusicState, _closeMusicPanel,
   _vttToggleMusicCat, _vttToggleAllMusicCats, _vttToggleMusic, _vttPlaySound,
   _vttPlayPlaylist, _vttMusicNext, _vttToggleMusicPause, _vttStopMusic,
   _vttSoundCtxMenu, _vttDeleteSound, _vttCreatePlaylist, _vttCreatePlaylistConfirm,
@@ -62,7 +62,7 @@ import {
   _vttDiceBonusSet, _vttDiceMode, _vttDiceRoll, _closeDicePanel,
 } from './vtt-dice.js';
 import {
-  _renderTimer, _timerStopTick, _vttTimerToggle, _vttTimerReset, _vttTimerLabel,
+  _renderTimer, _timerStartTick, _timerStopTick, _vttTimerToggle, _vttTimerReset, _vttTimerLabel,
 } from './vtt-timer.js';
 
 let _vttDelegSearch = '';
