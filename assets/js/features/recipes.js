@@ -3,18 +3,18 @@
 // ✓ Admin : CRUD, ingrédients dynamiques, accès par joueur
 // ✓ Joueur : voir uniquement ses recettes, envoyer à un autre (perd son accès)
 // Firestore : collection 'recipes'
-//   { type, nom, duree, effet, description, ingredients:[{nom,quantite}], acces:[uid,...] }
+//   { type, nom, duree, effet, description, ingredients:[{nom,quantite}], acces:[uid,...], shopItemId? }
 //   type : 'cuisine' | 'potion' | 'arme' | 'armure' | 'bijou'
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
-import { openModal, closeModal } from '../shared/modal.js';
+import { openModal, closeModal, confirmModal } from "../shared/modal.js";
 import { registerActions } from '../core/actions.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _rareteTag } from '../shared/rarity.js';
-import { _esc, _norm, _searchIncludes } from '../shared/html.js';
+import { _esc, _norm, _searchIncludes, _trunc } from "../shared/html.js";
 import { formatWeaponDamageText, isWeaponLikeItem } from '../shared/equipment-utils.js';
 
 // ── État local ─────────────────────────────────────────────────────────────────
@@ -48,6 +48,7 @@ const MATERIALS = {
 const STORE = {
   all: [],
   shopItems: [], // items boutique (arme/armure/bijou)
+  shopCats: [],
   tab: 'cuisine', // 'cuisine'|'potion'|'arme'|'armure'|'bijou'
   filterTxt: '',
 };
@@ -77,8 +78,42 @@ function _findRaw(id) {
   return STORE.all.find(x => x.id === id) || STORE.shopItems.find(i => i.id === id) || null;
 }
 function _isShopItem(id) { return STORE.shopItems.some(i => i.id === id); }
+function _findShopItem(id) { return STORE.shopItems.find(i => i.id === id) || null; }
+function _findShopCat(id) { return STORE.shopCats.find(c => c.id === id) || null; }
+
+const SHOP_TEMPLATE_LABELS = {
+  arme: "Arme",
+  armure: "Armure",
+  bijou: "Bijou",
+  classique: "Classique",
+  libre: "Libre",
+};
+
+function _shopItemKind(item = {}) {
+  const cat = _findShopCat(item.categorieId);
+  return cat?.nom || SHOP_TEMPLATE_LABELS[item.template] || item.type || item.sousType || "Boutique";
+}
+
+function _linkedShopItem(recipe = {}) {
+  return recipe.shopItemId ? _findShopItem(recipe.shopItemId) : null;
+}
+
+function _linkedShopSummary(item = {}) {
+  return [
+    item.nom,
+    _shopItemKind(item),
+    item.template,
+    item.type,
+    item.sousType,
+    item.format,
+    item.description,
+    item.effet,
+  ].filter(Boolean).join(" ");
+}
+
 
 function _recipeSearchText(r = {}) {
+  const linked = _linkedShopItem(r);
   const ingredientText = Array.isArray(r.ingredients)
     ? r.ingredients.map(ig => [ig.nom, ig.quantite].filter(Boolean).join(' ')).join(' ')
     : '';
@@ -97,6 +132,7 @@ function _recipeSearchText(r = {}) {
     r.atelierReq,
     r.ingredients_texte,
     ingredientText,
+    linked ? _linkedShopSummary(linked) : "",
   ].filter(Boolean).join(' '));
 }
 
@@ -177,11 +213,13 @@ function _shopToRecipe(item) {
 async function renderRecipes() {
   const content = document.getElementById('main-content');
   content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)"><div style="font-size:2rem">⏳</div></div>`;
-  [STORE.all, STORE.shopItems] = await Promise.all([
+  [STORE.all, STORE.shopItems, STORE.shopCats] = await Promise.all([
     loadCollection('recipes'),
     loadCollection('shop'),
+    loadCollection("shopCategories").catch(() => []),
   ]);
   STORE.all.sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
+  STORE.shopItems.sort((a, b) => (a.nom || "").localeCompare(b.nom || "", "fr", { sensitivity: "base" }));
   STORE.tab = STORE.tab || 'cuisine';
   _render();
 }
@@ -276,6 +314,9 @@ function _renderCard(r, accent) {
   const accesUids   = r.acces || [];
   const nbAcces     = accesUids.length;
   const isCraftType = r.type === 'arme' || r.type === 'armure' || r.type === 'bijou';
+  const linkedItem  = !r._fromShop ? _linkedShopItem(r) : null;
+  const hasMissingLinkedItem = !r._fromShop && r.shopItemId && !linkedItem;
+  const hasDetail   = isCraftType || !!linkedItem;
 
   const ingrs = Array.isArray(r.ingredients) ? r.ingredients : [];
   const ingrHtml = ingrs.length
@@ -299,15 +340,17 @@ function _renderCard(r, accent) {
   const autresJoueurs = joueurs.filter(j => j.uid !== uid && !accesUids.includes(j.uid));
   const canSend = !isAdmin && accesUids.includes(uid) && autresJoueurs.length > 0;
 
-  return `<div class="rec-card${isCraftType ? ' rec-card-clickable' : ''}"
+  return `<div class="rec-card${hasDetail ? " rec-card-clickable" : ""}"
     style="border-left:3px solid ${accent}"
-    ${isCraftType ? `data-action="openItemDetailModal" data-id="${r.id}"` : ''}>
+    ${hasDetail ? `data-action="openItemDetailModal" data-id="${r.id}"` : ""}>
     <div class="rec-card-header">
       <div>
         <div class="rec-card-name">${r.nom||'?'}</div>
         <div style="display:flex;align-items:center;gap:.4rem;margin-top:.3rem;flex-wrap:wrap">
           ${r.duree && !isCraftType ? `<span class="rec-tag">⏱️ ${r.duree}</span>` : ''}
           ${r.famille ? `<span class="rec-tag">${r.famille}</span>` : ''}
+          ${linkedItem ? `<span class="rec-tag rec-tag-shop" title="Objet boutique associé">🛒 ${_esc(linkedItem.nom || "Objet boutique")}</span>` : ""}
+          ${hasMissingLinkedItem ? `<span class="rec-tag rec-tag-missing" title="Objet boutique lié introuvable">Objet boutique manquant</span>` : ""}
           ${isAdmin ? `<span class="rec-tag" style="color:${nbAcces>0?'#22c38e':'var(--text-dim)'}">
             ${nbAcces>0 ? `✓ ${nbAcces} joueur${nbAcces>1?'s':''}` : '⚠ Non partagé'}
           </span>` : ''}
@@ -339,15 +382,63 @@ function _renderCard(r, accent) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+function _shopItemOptionLabel(item = {}) {
+  const bits = [_shopItemKind(item)];
+  if (item.prix !== undefined && item.prix !== "") bits.push(`${item.prix} or`);
+  return `${item.nom || "Objet sans nom"} — ${bits.filter(Boolean).join(" · ")}`;
+}
+
+function _shopItemOptionsHtml(selectedId = "") {
+  return STORE.shopItems.map(item => `
+    <option value="${_esc(item.id)}" ${item.id === selectedId ? "selected" : ""}>
+      ${_esc(_shopItemOptionLabel(item))}
+    </option>`).join("");
+}
+
+function _linkedShopPreviewHtml(itemId = "") {
+  if (!itemId) {
+    return `<div class="rec-linked-empty">Aucun objet boutique associé.</div>`;
+  }
+  const item = _findShopItem(itemId);
+  if (!item) {
+    return `<div class="rec-linked-missing">Objet boutique introuvable. Le lien sera conservé tant que celui-ci ne sera pas remplacé.</div>`;
+  }
+  const meta = [_shopItemKind(item), item.prix !== undefined && item.prix !== "" ? `${item.prix} or` : ""]
+    .filter(Boolean).join(" · " );
+  const desc = item.effet || item.description || "";
+  return `<div class="rec-linked-preview">
+    ${item.image ? `<img class="rec-linked-img" src="${item.image}" alt="">` : `<div class="rec-linked-img rec-linked-img-empty">🛒</div>`}
+    <div class="rec-linked-main">
+      <div class="rec-linked-name">${_esc(item.nom || "Objet boutique")}</div>
+      ${meta ? `<div class="rec-linked-meta">${_esc(meta)}</div>` : ""}
+      ${desc ? `<div class="rec-linked-desc">${_esc(_trunc(desc, 120))}</div>` : ""}
+    </div>
+  </div>`;
+}
+
+function refreshLinkedShopPreview(itemId = "") {
+  const preview = document.getElementById("rec-linked-preview");
+  if (preview) preview.innerHTML = _linkedShopPreviewHtml(itemId);
+  const clearBtn = document.querySelector("[data-action=\"_recClearLinkedShop\"]");
+  if (clearBtn) clearBtn.disabled = !itemId;
+}
+
+function clearLinkedShopItem() {
+  const select = document.getElementById("rec-shopItemId");
+  if (select) select.value = "";
+  refreshLinkedShopPreview("");
+}
+
 // MODAL DÉTAIL ITEM (arme / armure / bijou)
 // ══════════════════════════════════════════════════════════════════════════════
 export function openItemDetailModal(id) {
   const r = _visible().find(x => x.id === id);
   if (!r) return;
   const tab = TABS.find(t => t.id === r.type) || TABS[0];
+  const linkedItem = !r._fromShop ? _linkedShopItem(r) : null;
 
   // Pour les items boutique, utiliser l'item brut pour avoir tous les champs
-  const item = r._fromShop ? (_findRaw(id) || r) : r;
+  const item = r._fromShop ? (_findRaw(id) || r) : (linkedItem || r);
 
   const traitsArr = Array.isArray(item.traits) ? item.traits
     : (item.trait ? item.trait.split(',').map(t => t.trim()).filter(Boolean) : []);
@@ -371,7 +462,7 @@ export function openItemDetailModal(id) {
   const desc    = item.description || r.description || '';
   const effet   = item.effet || r.effet || '';
 
-  openModal(item.nom || r.nom, `
+  openModal(linkedItem ? r.nom : (item.nom || r.nom), `
     ${image ? `<div style="margin:-1.5rem -1.5rem .75rem"><img src="${image}" style="width:100%;height:180px;object-fit:cover;border-radius:22px 22px 0 0;display:block"></div>` : ''}
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:.75rem">
       <div>
@@ -414,6 +505,7 @@ function openRecipeModal(type, id = '') {
     : [{ nom:'', quantite:'' }, { nom:'', quantite:'' }];
 
   const isCraft = ['arme','armure','bijou'].includes(rType);
+  const linkedItemId = r?.shopItemId || "";
   if (isCraft && !id) return;
 
   // Champs spécifiques au type de craft
@@ -440,6 +532,18 @@ function openRecipeModal(type, id = '') {
         <input class="input-field" id="rec-duree" value="${r?.duree||''}" placeholder="1 heure, 10 min...">
       </div>` : ''}
       ${craftFields}
+    </div>
+
+    <div class="form-group rec-linked-control">
+      <label>Objet boutique associé</label>
+      <div class="rec-linked-select-row">
+        <select class="input-field" id="rec-shopItemId" data-change="_recLinkedShopChange">
+          <option value="">Aucun objet associé</option>
+          ${_shopItemOptionsHtml(linkedItemId)}
+        </select>
+        <button type="button" class="btn btn-outline btn-sm" data-action="_recClearLinkedShop" ${linkedItemId ? "" : "disabled"}>Retirer</button>
+      </div>
+      <div id="rec-linked-preview">${_linkedShopPreviewHtml(linkedItemId)}</div>
     </div>
 
     <!-- Ingrédients / Matériaux -->
@@ -528,6 +632,7 @@ async function saveRecipe(id, fallbackType) {
       acces:       existing?.acces || [],
       atelierReq:  document.getElementById('rec-atelierReq')?.value?.trim()|| '',
       tempsCraft:  document.getElementById('rec-tempsCraft')?.value?.trim()|| '',
+      shopItemId:  document.getElementById("rec-shopItemId")?.value || "",
     };
 
     if (id) {
@@ -791,6 +896,8 @@ registerActions({
   _recSave: (btn) => saveRecipe(btn.dataset.id, btn.dataset.type),
   _recAddIngr: () => addIngredientRow(),
   _recRemIngr: (btn) => removeIngredientRow(Number(btn.dataset.idx)),
+  _recLinkedShopChange: (el) => refreshLinkedShopPreview(el.value),
+  _recClearLinkedShop: () => clearLinkedShopItem(),
   saveShopRecipe: (btn) => saveShopRecipe(btn.dataset.id),
   openItemDetailModal: (btn) => openItemDetailModal(btn.dataset.id),
   openAccesModal: (btn) => openAccesModal(btn.dataset.id),

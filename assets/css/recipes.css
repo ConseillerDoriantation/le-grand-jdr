@@ -208,3 +208,125 @@
   border-color: rgba(5,150,105,.18);
   color: #059669;
 }
+
+
+.rec-tag-shop {
+  background: rgba(79,140,255,.1);
+  border-color: rgba(79,140,255,.24);
+  color: #7fb0ff;
+}
+
+.rec-tag-missing {
+  background: rgba(255,107,107,.08);
+  border-color: rgba(255,107,107,.26);
+  color: #ff8a8a;
+}
+
+.rec-linked-control {
+  margin-top: .85rem;
+}
+
+.rec-linked-select-row {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.rec-linked-select-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+.rec-linked-select-row button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.rec-linked-preview,
+.rec-linked-empty,
+.rec-linked-missing {
+  margin-top: .5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}
+
+.rec-linked-preview {
+  min-height: 58px;
+  padding: .5rem;
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+}
+
+.rec-linked-empty,
+.rec-linked-missing {
+  padding: .6rem .75rem;
+  font-size: .78rem;
+  color: var(--text-dim);
+}
+
+.rec-linked-missing {
+  color: #ff8a8a;
+  border-color: rgba(255,107,107,.26);
+  background: rgba(255,107,107,.06);
+}
+
+.rec-linked-img {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.04);
+}
+
+.rec-linked-img-empty {
+  display: grid;
+  place-items: center;
+  color: var(--text-dim);
+}
+
+.rec-linked-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.rec-linked-name {
+  color: var(--text);
+  font-weight: 700;
+  font-size: .86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rec-linked-meta,
+.rec-linked-desc {
+  color: var(--text-dim);
+  font-size: .74rem;
+  line-height: 1.35;
+}
+
+.rec-linked-desc {
+  margin-top: .12rem;
+  color: var(--text-muted);
+}
+
+[data-theme="light"] .rec-tag-shop {
+  background: rgba(37,99,235,.08);
+  border-color: rgba(37,99,235,.18);
+  color: #2563eb;
+}
+
+@media (max-width: 560px) {
+  .rec-linked-select-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .rec-linked-select-row button {
+    width: 100%;
+  }
+}
