@@ -10531,8 +10531,6 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   .cs-v3 .tabs-v3::-webkit-scrollbar { display: none; }
   .cs-v3 .tab-v3 { flex-shrink: 0; padding: 8px 12px; font-size: .76rem; }
   .cs-v3 .tab-v3 .tab-ico { font-size: .82rem; }
-  /* DIAGNOSTIC (étape 2) : isole l'effet de overflow:visible sur .main-col */
-  .cs-v3 .main-col { overflow: visible; }
   .cs-v3 .char-switch-row { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
   .cs-v3 .char-switch-row::-webkit-scrollbar { display: none; }
   .cs-v3 .tab-body-v3 { padding: 8px 0; }
