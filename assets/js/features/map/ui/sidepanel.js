@@ -3,7 +3,7 @@
 // actuellement sélectionnée. Émet 'panel:action' pour les boutons.
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { state, on, emit, getPlaceById, getOrgById, getOrgsOfPlace, getNpcById, getNpcsOfPlace, getQuestsOfPlace, getMissionsOfPlace, getTypeMeta } from '../map.state.js';
+import { state, on, emit, getPlaceById, getOrgById, getOrgsOfPlace, getNpcById, getNpcsOfPlace, getMissionsOfPlace, getTypeMeta } from '../map.state.js';
 import { _esc, _norm } from '../../../shared/html.js';
 import { STATE } from '../../../core/state.js';
 
@@ -121,11 +121,6 @@ function onClick(e) {
     emit('selection:changed');
     return;
   }
-  const questItem = e.target.closest('[data-goto-quests]');
-  if (questItem) {
-    import('../../../core/navigation.js').then(m => m.navigate('quests'));
-    return;
-  }
   const missionItem = e.target.closest('[data-open-mission]');
   if (missionItem) {
     window._histoireCtx = {
@@ -186,7 +181,6 @@ function placeView(place) {
   const type = getTypeMeta(place.type);
   const orgs = getOrgsOfPlace(place.id);
   const npcs = getNpcsOfPlace(place);
-  const quests = getQuestsOfPlace(place);
   const admin = STATE.isAdmin;
   const missions = admin ? getMissionsOfPlace(place) : [];
   const visLabel = {
@@ -195,7 +189,7 @@ function placeView(place) {
     public:   `<span class="map-chip map-chip--gold">Public</span>`,
   }[place.visibility] || '';
 
-  const searchableCount = orgs.length + npcs.length + quests.length + missions.length;
+  const searchableCount = orgs.length + npcs.length + missions.length;
   const showSearch = searchableCount > PLACE_SEARCH_THRESHOLD;
   const query = placeQuery.get(place.id) || '';
 
@@ -225,12 +219,11 @@ function placeView(place) {
         <div class="map-panel__searchbar">
           <span class="map-panel__searchbar-icon" aria-hidden="true">🔎</span>
           <input type="search" data-place-search="${place.id}" value="${_esc(query)}"
-                 placeholder="Rechercher (PNJ, quête, organisation…)" autocomplete="off">
+                 placeholder="Rechercher (PNJ, organisation…)" autocomplete="off">
         </div>` : ''}
 
       ${orgsSection(place, orgs, admin)}
       ${npcsSection(place, npcs)}
-      ${questsSection(place, quests)}
       ${missionsSection(place, missions, admin)}
 
       ${admin && place.meta?.notes ? `
@@ -335,26 +328,6 @@ function npcsSection(place, npcs) {
   return renderSection({ key, title: 'PNJ présents', count: total, body });
 }
 
-// Section "Quêtes ici". Clic → page Quêtes.
-function questsSection(place, quests) {
-  if (!quests.length) return '';
-  const key = `${place.id}:quests`;
-  const body = `
-    <ul class="map-orgs">
-      ${quests.map(q => `
-        <li class="map-orgs__item" data-goto-quests="1"
-            data-search-text="${_esc(_norm(`${q.titre || ''} ${(QUEST_DIFF[q.difficulte]?.label || '')} ${(QUEST_STATUT[q.statut]?.label || '')}`))}">
-          <strong>📋 ${_esc(q.titre || 'Quête')}</strong>
-          <div class="map-panel__tags" style="margin-top:5px">
-            ${questChip(QUEST_DIFF[q.difficulte])}
-            ${questChip(QUEST_STATUT[q.statut])}
-          </div>
-        </li>`).join('')}
-      <li class="map-panel__empty-match">Aucun résultat.</li>
-    </ul>`;
-  return renderSection({ key, title: 'Quêtes ici', count: quests.length, body });
-}
-
 // Section "Missions ici" (MJ uniquement — le contenu des missions est privé).
 function missionsSection(place, missions, admin) {
   if (!admin || !missions.length) return '';
@@ -412,25 +385,6 @@ function npcView(npc, placeId) {
         </section>` : ''}
     </div>
   `;
-}
-
-// ── Constantes quêtes ────────────────────────────────────────────────────────
-
-const QUEST_DIFF = {
-  facile:    { label: 'Facile',    color: '#22c38e' },
-  moyen:     { label: 'Moyen',     color: '#4f8cff' },
-  difficile: { label: 'Difficile', color: '#e8b84b' },
-  extreme:   { label: 'Extrême',   color: '#ff6b6b' },
-};
-const QUEST_STATUT = {
-  active:   { label: 'Active',   color: '#4f8cff' },
-  terminee: { label: 'Terminée', color: '#22c38e' },
-  echouee:  { label: 'Échouée',  color: '#ff6b6b' },
-};
-
-function questChip(meta) {
-  if (!meta) return '';
-  return `<span class="map-chip" style="background:${meta.color}22;color:${meta.color};border-color:${meta.color}55">${meta.label}</span>`;
 }
 
 const META_LABELS = {
