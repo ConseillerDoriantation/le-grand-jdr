@@ -41,4 +41,15 @@ export const VS = {
   mapMode:     false,  // true = édition carte activée (images déplaçables)
   mapLib:      { folders: [], images: [] }, // bibliothèque de cartes (world/mapLibrary)
   mapLibUnsub: null,   // unsubscribe du listener de la bibliothèque
+
+  // ── État partagé entre modules couplés (inspector, tray, mini-fiche, combat) ──
+  presence:     {},       // uid → { uid, pseudo } (joueurs actifs sur le VTT)
+  miniUid:      null,     // uid du joueur dont la mini-fiche est ouverte
+  miniCharId:   null,     // characterId sélectionné dans la mini-fiche
+  bstTracker:   {},       // creatureId → tracker joueur (pvActuel, pmActuel, caEstimee…)
+  selectedMulti: new Set(), // ids des tokens en multi-sélection
+  rollMode:     'normal', // 'advantage' | 'normal' | 'disadvantage'
+  rollBonus:    0,        // bonus contextuel temporaire (anneau, sort, etc.)
+  rollHidden:   false,    // MJ only — jet caché des joueurs (init via lsJson dans vtt.js)
+  diceSkills:   [],       // [{name, stat}] chargées depuis world/dice_skills
 };

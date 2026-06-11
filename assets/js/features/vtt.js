@@ -257,7 +257,7 @@ _vttBindDispatch();
 let _resizeObs = null;   // _stage, _layers, VS.unsubs → VS (cœur Konva/teardown partagé)
 let _vttEntered = false;   // le client a-t-il cliqué « Entrer » (listeners actifs) ?
 let _bestiaryLoads = new Map(); // beastId → Promise lecture doc ciblée
-let _bstTracker = {};   // creatureId → tracker joueur (pvActuel, pmActuel, caEstimee…)
+// [VS.bstTracker → VS.bstTracker] (défaut dans vtt-state.js)
 let _attackSrc = null, _moveHL = [];   // VS.selected, VS.tool → VS ; VS.characters/VS.npcs/VS.bestiary → VS
 // (état de scène : session, pages, tokens, activePage, stage, layers, characters,
 //  npcs, bestiary, selected, tool → VS / vtt-state.js)
@@ -277,7 +277,7 @@ let _selfCtx    = null; // contexte déplacement "soi" { srcId, cells, opt }
 let _selfCells  = [];   // cases Konva cliquables (losange Manhattan)
 let _chatMsgs   = [];   // derniers messages du chat rendus (pour lookup "répondre")
 let _chatReplyTo= null; // message auquel on répond { id, authorName, text }
-let _selectedMulti  = new Set();   // ids des tokens en multi-sélection
+// [VS.selectedMulti → VS.selectedMulti] (défaut dans vtt-state.js)
 let _multiDragOrigin= null;        // { [id]: {x,y} } positions au début du drag groupé
 let _middlePanActive= false;       // true pendant le pan caméra au clic molette
 let _suppressTokenClickUntil = 0;   // bloque le click synthétique après clic droit/molette
@@ -296,12 +296,12 @@ const _mapLibRef = () => doc(db, `adventures/${aid()}/vtt/mapLibrary`);
 // [état butin → vtt-loot.js]
 // ── Lanceur de dés libre ───────────────────────────────────────────
 // [état dés libre → vtt-dice.js]
-let _diceSkills = [];        // [{name, stat}] chargées depuis world/dice_skills
+// [VS.diceSkills → VS.diceSkills] (défaut dans vtt-state.js)
 // [state musique → vtt-music.js]
-let _rollMode   = 'normal';  // 'advantage' | 'normal' | 'disadvantage'
-let _rollBonus  = 0;         // bonus contextuel temporaire (anneau, sort, etc.)
+// [VS.rollMode → VS.rollMode] (défaut dans vtt-state.js)
+// [VS.rollBonus → VS.rollBonus] (défaut dans vtt-state.js)
 let _insTab     = 'stats';   // onglet actif de l'inspecteur token
-let _rollHidden = lsJson.get('vtt-roll-hidden', false); // MJ only — jet caché des joueurs
+VS.rollHidden = lsJson.get('vtt-roll-hidden', false); // MJ only — jet caché des joueurs
 const _renderedPings     = new Set();
 const _renderedReactions = new Set();
 
@@ -394,7 +394,7 @@ const _tokenStatMod = (t, statKey) => {
 }
 
 // ── État présence & mini-fiche ──────────────────────────────────────
-let _presence     = {};   // uid → { uid, pseudo }
+// [VS.presence → VS.presence] (défaut dans vtt-state.js)
 const VTT_PRESENCE_HEARTBEAT_MS = 75_000;
 let _presHeartbeat= null; // intervalId du heartbeat
 let _presLastWriteAt = 0;
@@ -420,8 +420,8 @@ const _saveTrayPref = (k, v) => { try { localStorage.setItem('vtt-tray-' + k, v 
 let _trayOnOpen  = _loadTrayPref('on');
 let _trayOffOpen = _loadTrayPref('off');
 let _trayNpcOpen = _loadTrayPref('npc');
-let _miniUid      = null; // uid du joueur dont la mini-fiche est ouverte
-let _miniCharId   = null; // characterId sélectionné dans la mini-fiche
+// [VS.miniUid → VS.miniUid] (défaut dans vtt-state.js)
+// [VS.miniCharId → VS.miniCharId] (défaut dans vtt-state.js)
 let _miniTab      = 'combat'; // onglet actif de la mini-fiche
 let _msOpenNote   = null; // index de la note dépliée (onglet Notes)
 // Filtres locaux des onglets Sac / Sorts (recherche texte + catégorie active).
@@ -665,7 +665,7 @@ export function _live(t) {
   // Sans estimation = null → affichage "?/?" sur le token (ne révèle pas les vraies valeurs MJ).
   if (!STATE.isAdmin && t.type === 'enemy') {
     if (b) {
-      const track  = _bstTracker[t.beastId] || {};
+      const track  = VS.bstTracker[t.beastId] || {};
       const estMax = track.pvActuel !== undefined ? parseInt(track.pvActuel) : null;
       if (estMax !== null) {
         // pvCombatHp est stocké sur le token lui-même (écrit lors des attaques joueur).
@@ -699,7 +699,7 @@ export function _live(t) {
   //   Jamais la vraie CA du MJ — y compris pour un ennemi custom (sans beastId).
   // • Reste (son perso, allié, PNJ) : vraie CA (displayDefense).
   if (!STATE.isAdmin && t.type === 'enemy') {
-    const track = t.beastId ? (_bstTracker[t.beastId] || {}) : null;
+    const track = t.beastId ? (VS.bstTracker[t.beastId] || {}) : null;
     result.caBadge = (track && track.caEstimee !== undefined && track.caEstimee !== '')
       ? String(parseInt(track.caEstimee) || 0)
       : '?';
@@ -999,13 +999,13 @@ function _cleanup() {
   _resetMusicState();
   _mtClear(true);
   _mtBroadcasting = false;
-  _presence = {}; _miniUid = null; _miniCharId = null;
-  VS.tokens = {}; VS.pages = {}; VS.characters = {}; VS.npcs = {}; VS.bestiary = {}; _bstTracker = {};
+  VS.presence = {}; VS.miniUid = null; VS.miniCharId = null;
+  VS.tokens = {}; VS.pages = {}; VS.characters = {}; VS.npcs = {}; VS.bestiary = {}; VS.bstTracker = {};
   _bestiaryLoads.clear();
   VS.session = {}; VS.activePage = null; VS.selected = null; _attackSrc = null;
   _clearAim(); _hideActBar();
   _moveHL = []; _autoSyncDone = false; _renderedPings.clear(); _renderedReactions.clear();
-  _selectedMulti.clear(); _multiDragOrigin = null;
+  VS.selectedMulti.clear(); _multiDragOrigin = null;
   _annotations = {}; _drawing = false; _drawLive = null; _drawHistory = [];
   _selectedAnnotId = null; _selectedAnnotIds.clear(); _annotTransformer = null;
   _annotGroupDragOrigins = null;
@@ -1583,9 +1583,9 @@ function _buildShape(t) {
         VS.layers.token?.batchDraw();
         return;
       }
-      if (_selectedMulti.has(t.id) && _selectedMulti.size>1) {
+      if (VS.selectedMulti.has(t.id) && VS.selectedMulti.size>1) {
         _multiDragOrigin={};
-        for (const id of _selectedMulti) {
+        for (const id of VS.selectedMulti) {
           const s=VS.tokens[id]?.shape;
           if (s) _multiDragOrigin[id]={x:s.x(),y:s.y()};
         }
@@ -1597,7 +1597,7 @@ function _buildShape(t) {
       const sx=Math.round((g.x()-sw*CELL/2)/CELL)*CELL+sw*CELL/2;
       const sy=Math.round((g.y()-sh*CELL/2)/CELL)*CELL+sh*CELL/2;
       g.position({x:sx,y:sy});
-      if (_multiDragOrigin && _selectedMulti.has(t.id)) {
+      if (_multiDragOrigin && VS.selectedMulti.has(t.id)) {
         const dx=sx-_multiDragOrigin[t.id].x, dy=sy-_multiDragOrigin[t.id].y;
         for (const [id,orig] of Object.entries(_multiDragOrigin)) {
           if (id===t.id) continue;
@@ -1614,10 +1614,10 @@ function _buildShape(t) {
     // ─ Fin du drag : commit Firestore ─
     g.on('dragend', async () => {
       const pg=VS.activePage; if (!pg) return;
-      if (_multiDragOrigin && _selectedMulti.has(t.id) && _selectedMulti.size>1) {
+      if (_multiDragOrigin && VS.selectedMulti.has(t.id) && VS.selectedMulti.size>1) {
         // Batch : sauver tous les tokens du groupe
         const batch=writeBatch(db);
-        for (const id of _selectedMulti) {
+        for (const id of VS.selectedMulti) {
           const s=VS.tokens[id]?.shape; if (!s) continue;
           const d2=_tokenDims(VS.tokens[id].data);
           const nc=Math.max(0,Math.min(pg.cols-d2.w,Math.round((s.x()-d2.w*CELL/2)/CELL)));
@@ -2278,24 +2278,24 @@ function _spawnCornerEmote(emoteUrl, emoteName) {
 
 // ── Multi-sélection ─────────────────────────────────────────────
 function _clearMultiSelect() {
-  for (const id of _selectedMulti) {
+  for (const id of VS.selectedMulti) {
     if (id!==VS.selected) VS.tokens[id]?.shape?.findOne('.sel')?.visible(false);
   }
-  _selectedMulti.clear();
+  VS.selectedMulti.clear();
   VS.layers.token?.batchDraw();
 }
 
 function _toggleMultiSelect(id) {
   // Inclure le token principal courant dans la multi-sélection
-  if (VS.selected && !_selectedMulti.has(VS.selected)) {
-    _selectedMulti.add(VS.selected);
+  if (VS.selected && !VS.selectedMulti.has(VS.selected)) {
+    VS.selectedMulti.add(VS.selected);
     VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(true);
   }
-  if (_selectedMulti.has(id)) {
-    _selectedMulti.delete(id);
+  if (VS.selectedMulti.has(id)) {
+    VS.selectedMulti.delete(id);
     VS.tokens[id]?.shape?.findOne('.sel')?.visible(false);
   } else {
-    _selectedMulti.add(id);
+    VS.selectedMulti.add(id);
     VS.tokens[id]?.shape?.findOne('.sel')?.visible(true);
     VS.selected = id;
     _renderInspector(VS.tokens[id]?.data??null);
@@ -6798,13 +6798,13 @@ function _renderInspectorSoon() {
 function _renderInspector(t) {
   const el=document.getElementById('vtt-inspector'); if (!el) return;
   // Multi-sélection active
-  if (_selectedMulti.size>1) {
-    const types=[..._selectedMulti].map(id=>VS.tokens[id]?.data?.type).filter(Boolean);
+  if (VS.selectedMulti.size>1) {
+    const types=[...VS.selectedMulti].map(id=>VS.tokens[id]?.data?.type).filter(Boolean);
     const uniq=t=>({player:'🧑 Joueurs',enemy:'👹 Ennemis',npc:'👤 PNJ'})[t]||t;
     const typeStr=[...new Set(types)].map(uniq).join(' · ');
     el.innerHTML=`<div class="vtt-ins-multi">
       <div style="font-size:2rem;text-align:center">↖↖</div>
-      <div class="vtt-ins-name" style="text-align:center">${_selectedMulti.size} tokens</div>
+      <div class="vtt-ins-name" style="text-align:center">${VS.selectedMulti.size} tokens</div>
       <div class="vtt-ins-type" style="text-align:center">${typeStr}</div>
       <div style="font-size:.72rem;color:var(--text-dim);text-align:center;margin-top:.5rem;line-height:1.4">
         Glisse un token pour<br>déplacer tout le groupe
@@ -6847,7 +6847,7 @@ function _renderInspector(t) {
   // vitalsHtml = barres PV/PM (épinglées sous le header) · coreStatsHtml = onglet Stats
   let vitalsHtml = '', coreStatsHtml = '';
   if (!STATE.isAdmin && t.type === 'enemy' && t.beastId) {
-    const track    = _bstTracker[t.beastId] || {};
+    const track    = VS.bstTracker[t.beastId] || {};
     const pvMax    = track.pvActuel !== undefined ? parseInt(track.pvActuel) : null;
     const pvCur    = ld.displayHp !== null ? ld.displayHp : pvMax;
     const pvPct    = pvMax > 0 ? Math.round((pvCur??pvMax) / pvMax * 100) : 0;
@@ -7055,7 +7055,7 @@ function _renderInspector(t) {
           </div>`;
       } else {
         // ── Vue joueur : seulement ses propres déductions ──────────────
-        const track = _bstTracker[t.beastId] || {};
+        const track = VS.bstTracker[t.beastId] || {};
         const ded   = track.deductions || {};
         const _bid  = t.beastId;
         const _hasNotes = (track.notes || '').trim().length > 0;
@@ -7231,9 +7231,9 @@ function _renderInspector(t) {
       </div>`;
   })();
 
-  const _skillsHtml = ((t.type==='player'||t.type==='npc') && _diceSkills.length && _canControlToken(t)) ? (() => {
+  const _skillsHtml = ((t.type==='player'||t.type==='npc') && VS.diceSkills.length && _canControlToken(t)) ? (() => {
     const cForBonus = t?.characterId ? VS.characters[t.characterId] : null;
-    const btns = _diceSkills.map(s => {
+    const btns = VS.diceSkills.map(s => {
       const statKey = _STAT_KEY[s.stat] || '';
       const statMod = _tokenStatMod(t, statKey);
       const eqBonus = cForBonus ? computeEquipSkillBonus(cForBonus.equipement || {}, s.name) : 0;
@@ -7249,24 +7249,24 @@ function _renderInspector(t) {
     return `<div class="vtt-ins-section">
         <div class="vtt-ins-section-title">🎲 Jets de compétences</div>
         <div class="vtt-roll-mode-row">
-          <button class="vtt-roll-mode-btn${_rollMode==='disadvantage'?' active':''}" data-mode="disadvantage" data-vtt-fn="_vttSetRollMode" data-vtt-args="disadvantage" title="Désavantage — prend le plus bas des 2 dés">⬇ Désav.</button>
-          <button class="vtt-roll-mode-btn${_rollMode==='normal'?' active':''}" data-mode="normal" data-vtt-fn="_vttSetRollMode" data-vtt-args="normal" title="Jet classique — 1d20">⚪ Normal</button>
-          <button class="vtt-roll-mode-btn${_rollMode==='advantage'?' active':''}" data-mode="advantage" data-vtt-fn="_vttSetRollMode" data-vtt-args="advantage" title="Avantage — prend le plus haut des 2 dés">⬆ Avantage</button>
+          <button class="vtt-roll-mode-btn${VS.rollMode==='disadvantage'?' active':''}" data-mode="disadvantage" data-vtt-fn="_vttSetRollMode" data-vtt-args="disadvantage" title="Désavantage — prend le plus bas des 2 dés">⬇ Désav.</button>
+          <button class="vtt-roll-mode-btn${VS.rollMode==='normal'?' active':''}" data-mode="normal" data-vtt-fn="_vttSetRollMode" data-vtt-args="normal" title="Jet classique — 1d20">⚪ Normal</button>
+          <button class="vtt-roll-mode-btn${VS.rollMode==='advantage'?' active':''}" data-mode="advantage" data-vtt-fn="_vttSetRollMode" data-vtt-args="advantage" title="Avantage — prend le plus haut des 2 dés">⬆ Avantage</button>
         </div>
         <div class="vtt-roll-bonus-row">
           <span class="vtt-roll-bonus-lbl">Bonus contextuel</span>
           <button class="vtt-roll-bonus-adj" data-vtt-fn="_vttAdjBonus" data-vtt-args="-1">−</button>
-          <span class="vtt-roll-bonus-val${_rollBonus!==0?' nonzero':''}" id="vtt-bonus-val">${_rollBonus>0?'+'+_rollBonus:_rollBonus}</span>
+          <span class="vtt-roll-bonus-val${VS.rollBonus!==0?' nonzero':''}" id="vtt-bonus-val">${VS.rollBonus>0?'+'+VS.rollBonus:VS.rollBonus}</span>
           <button class="vtt-roll-bonus-adj" data-vtt-fn="_vttAdjBonus" data-vtt-args="1">+</button>
           <button class="vtt-roll-bonus-reset" data-vtt-fn="_vttAdjBonus" data-vtt-args="0|true" title="Réinitialiser">↺</button>
         </div>
         ${STATE.isAdmin ? `
         <div class="vtt-roll-bonus-row">
           <span class="vtt-roll-bonus-lbl">Visibilité</span>
-          <button class="vtt-roll-mode-btn vtt-roll-hide-btn${_rollHidden?' active':''}" id="vtt-roll-hide-btn"
+          <button class="vtt-roll-mode-btn vtt-roll-hide-btn${VS.rollHidden?' active':''}" id="vtt-roll-hide-btn"
             data-vtt-fn="_vttToggleRollHidden"
             title="Jet caché : seul le MJ voit le résultat dans le log">
-            ${_rollHidden ? '🕶 Jet caché MJ' : '👁 Visible joueurs'}
+            ${VS.rollHidden ? '🕶 Jet caché MJ' : '👁 Visible joueurs'}
           </button>
         </div>` : ''}
         <div class="vtt-ins-skills">${btns}</div>
@@ -7472,7 +7472,7 @@ function _renderTray() {
 
   // ── Ligne compacte (réserve) — 1 par ligne, nom complet, statut online ─
   const _onlineTs = Date.now();
-  const isOnline = uid => !!(uid && _presence[uid] && _onlineTs - (_presence[uid].lastSeen || 0) < 120_000);
+  const isOnline = uid => !!(uid && VS.presence[uid] && _onlineTs - (VS.presence[uid].lastSeen || 0) < 120_000);
   const mkResLine = t => {
     const ld = _live(t);
     const typeIcon = t.type === 'player' ? '🧑' : '👤';
@@ -8222,7 +8222,7 @@ function _selectByRect(r) {
     if (!t || t.pageId !== VS.activePage?.id) continue;
     const { x: cx, y: cy } = _tokenCenter(t);
     if (_inRect(cx, cy, r)) {
-      _selectedMulti.add(id);
+      VS.selectedMulti.add(id);
       VS.tokens[id]?.shape?.findOne('.sel')?.visible(true);
     }
   }
@@ -8237,7 +8237,7 @@ function _selectByRect(r) {
   }
 
   _applyAnnotTransformer();
-  if (_selectedMulti.size > 0) _renderInspector(null);
+  if (VS.selectedMulti.size > 0) _renderInspector(null);
   else if (_selectedAnnotIds.size > 0) _renderInspector(null);
   VS.layers.token?.batchDraw();
 }
@@ -8517,9 +8517,9 @@ function _initListeners() {
     }
     // Ne re-rend la mini-fiche que si le perso AFFICHÉ a changé : évite d'écraser
     // une saisie en cours (note, XP) quand un autre personnage est mis à jour.
-    if (_miniUid && _miniCharId &&
-        JSON.stringify(prev[_miniCharId]) !== JSON.stringify(next[_miniCharId])) {
-      _renderMiniSheet(_miniUid);
+    if (VS.miniUid && VS.miniCharId &&
+        JSON.stringify(prev[VS.miniCharId]) !== JSON.stringify(next[VS.miniCharId])) {
+      _renderMiniSheet(VS.miniUid);
     }
   }));
 
@@ -8550,7 +8550,7 @@ function _initListeners() {
     const uid = STATE.user?.uid;
     if (uid) {
       VS.unsubs.push(onSnapshot(_bstTrackerRef(uid), snap => {
-        _bstTracker = snap.exists() ? (snap.data().data || {}) : {};
+        VS.bstTracker = snap.exists() ? (snap.data().data || {}) : {};
         // Mettre à jour la barre HP de tous les tokens ennemis sur le canvas
         for (const [id, e] of Object.entries(VS.tokens)) {
           if (e.data?.type === 'enemy' && e.data?.beastId) _patchShape(id);
@@ -8670,12 +8670,12 @@ function _initListeners() {
     const now = Date.now();
 
     // Présence : actif si lastSeen < 2 min (double filtrage : ici + render)
-    _presence = {};
+    VS.presence = {};
     snap.docs.forEach(d => {
       const pres = d.data().pres;
       if (!pres?.lastSeen) return;
       const ts = pres.lastSeen?.toMillis?.() ?? (typeof pres.lastSeen === 'number' ? pres.lastSeen : 0);
-      if (ts > 0 && now - ts < 120_000) _presence[d.id] = { uid: d.id, pseudo: pres.pseudo || '?', lastSeen: ts };
+      if (ts > 0 && now - ts < 120_000) VS.presence[d.id] = { uid: d.id, pseudo: pres.pseudo || '?', lastSeen: ts };
     });
     _renderPresenceCol();
     // Le tray range les joueurs par statut online → faut re-render quand la
@@ -8826,41 +8826,41 @@ async function _loadEmotes() {
 }
 
 // Initialiser immédiatement : localStorage (ordre perso) > défauts
-_diceSkills = lsJson.get(DICE_SKILLS_STORAGE_KEY, [...DICE_SKILLS_DEFAULT]);
+VS.diceSkills = lsJson.get(DICE_SKILLS_STORAGE_KEY, [...DICE_SKILLS_DEFAULT]);
 
 async function _loadDiceSkills() {
   try {
     const data = await getDocData('world', 'dice_skills');
-    if (data?.skills?.length) _diceSkills = data.skills;
+    if (data?.skills?.length) VS.diceSkills = data.skills;
   } catch { /* garde le cache local */ }
   // Re-render l'inspector si un token est déjà sélectionné
   if (VS.selected) _renderInspector(VS.tokens[VS.selected]?.data ?? null);
 }
 
 function _vttSetRollMode(mode) {
-  _rollMode = mode;
+  VS.rollMode = mode;
   // Mettre à jour les boutons visuellement sans re-render complet
   document.querySelectorAll('.vtt-roll-mode-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.mode === mode));
 }
 
 function _vttAdjBonus(delta, reset = false) {
-  _rollBonus = reset ? 0 : Math.max(-20, Math.min(20, _rollBonus + delta));
+  VS.rollBonus = reset ? 0 : Math.max(-20, Math.min(20, VS.rollBonus + delta));
   const el = document.getElementById('vtt-bonus-val');
   if (el) {
-    el.textContent = _rollBonus > 0 ? `+${_rollBonus}` : `${_rollBonus}`;
-    el.classList.toggle('nonzero', _rollBonus !== 0);
+    el.textContent = VS.rollBonus > 0 ? `+${VS.rollBonus}` : `${VS.rollBonus}`;
+    el.classList.toggle('nonzero', VS.rollBonus !== 0);
   }
 }
 
 function _vttToggleRollHidden() {
   if (!STATE.isAdmin) return;
-  _rollHidden = !_rollHidden;
-  lsJson.set('vtt-roll-hidden', _rollHidden);
+  VS.rollHidden = !VS.rollHidden;
+  lsJson.set('vtt-roll-hidden', VS.rollHidden);
   const btn = document.getElementById('vtt-roll-hide-btn');
   if (btn) {
-    btn.classList.toggle('active', _rollHidden);
-    btn.textContent = _rollHidden ? '🕶 Jet caché MJ' : '👁 Visible joueurs';
+    btn.classList.toggle('active', VS.rollHidden);
+    btn.textContent = VS.rollHidden ? '🕶 Jet caché MJ' : '👁 Visible joueurs';
   }
 }
 
@@ -8877,24 +8877,24 @@ async function _vttRollSkill(skillName, stat) {
   const d20 = () => Math.floor(Math.random() * 20) + 1;
 
   let d1 = d20(), d2, roll;
-  if (_rollMode === 'advantage')    { d2 = d20(); roll = Math.max(d1, d2); }
-  else if (_rollMode === 'disadvantage') { d2 = d20(); roll = Math.min(d1, d2); }
+  if (VS.rollMode === 'advantage')    { d2 = d20(); roll = Math.max(d1, d2); }
+  else if (VS.rollMode === 'disadvantage') { d2 = d20(); roll = Math.min(d1, d2); }
   else                              { roll = d1; }
 
-  const total   = roll + mod + _rollBonus + equipSkillBonus;
+  const total   = roll + mod + VS.rollBonus + equipSkillBonus;
   const isCrit  = roll === 20, isFumble = roll === 1;
   const authorName    = STATE.profile?.pseudo || STATE.profile?.prenom || 'Joueur';
   const characterName = c?.nom || n?.nom || t?.name || null;
   const characterImage = c?.photoURL || c?.photo || c?.avatar || n?.photoURL || n?.photo || n?.avatar || n?.imageUrl || null;
-  const gmOnly = STATE.isAdmin && _rollHidden;
+  const gmOnly = STATE.isAdmin && VS.rollHidden;
   try {
     await addDoc(_logCol(), {
       type: 'roll',
       authorId: STATE.user?.uid || null,
       authorName, characterName, characterImage,
-      rollMode: _rollMode,
+      rollMode: VS.rollMode,
       rollDice: d2 !== undefined ? [d1, d2] : [d1],
-      rollRaw: roll, rollMod: mod, rollBonus: _rollBonus || 0,
+      rollRaw: roll, rollMod: mod, rollBonus: VS.rollBonus || 0,
       rollResult: total,
       rollSkill: skillName, rollStat: stat,
       rollEquipBonus: equipSkillBonus || 0,
@@ -9332,7 +9332,7 @@ function _renderChatLog(msgs) {
     if (STATE.isAdmin) return realCA ?? '?';
     if (target.characterId) return realCA ?? '?';
     if (target.beastId) {
-      const track = _bstTracker[target.beastId];
+      const track = VS.bstTracker[target.beastId];
       if (track?.caEstimee !== undefined && track.caEstimee !== '') {
         return parseInt(track.caEstimee) || '?';
       }
@@ -9866,20 +9866,20 @@ function _vttSwitchPage(id) { return _switchPage(id); }
 // Écrit dans le même document Firestore que la fiche bestiaire → cohérent partout.
 const _saveBstTracker = async () => {
   const uid = STATE.user?.uid; if (!uid) return;
-  try { await saveDoc('bestiary_tracker', uid, { data: _bstTracker }); }
+  try { await saveDoc('bestiary_tracker', uid, { data: VS.bstTracker }); }
   catch (e) { console.error('[vtt] tracker save', e); }
 }
 function _vttBstDed(beastId, key, val) {
-  if (!_bstTracker[beastId]) _bstTracker[beastId] = {};
-  if (!_bstTracker[beastId].deductions) _bstTracker[beastId].deductions = {};
+  if (!VS.bstTracker[beastId]) VS.bstTracker[beastId] = {};
+  if (!VS.bstTracker[beastId].deductions) VS.bstTracker[beastId].deductions = {};
   const v = (val ?? '').toString();
-  if (!v.trim()) delete _bstTracker[beastId].deductions[key];
-  else           _bstTracker[beastId].deductions[key] = v;
+  if (!v.trim()) delete VS.bstTracker[beastId].deductions[key];
+  else           VS.bstTracker[beastId].deductions[key] = v;
   _saveBstTracker();
 }
 function _vttBstNotes(beastId, val) {
-  if (!_bstTracker[beastId]) _bstTracker[beastId] = {};
-  _bstTracker[beastId].notes = (val ?? '').toString();
+  if (!VS.bstTracker[beastId]) VS.bstTracker[beastId] = {};
+  VS.bstTracker[beastId].notes = (val ?? '').toString();
   _saveBstTracker();
 }
 
@@ -11694,7 +11694,7 @@ function _keyHandler(e) {
     }
     // 3) Tokens sélectionnés → retrait du canvas (pageId=null)
     else {
-      const ids = _selectedMulti.size > 0 ? [..._selectedMulti] : (VS.selected ? [VS.selected] : []);
+      const ids = VS.selectedMulti.size > 0 ? [...VS.selectedMulti] : (VS.selected ? [VS.selected] : []);
       if (ids.length) {
         e.preventDefault();
         const uid = STATE.user?.uid;
@@ -12142,7 +12142,7 @@ async function _vttMountTable(content) {
   loadSpellMatrices().then(m => { _spellMatrices = m; }).catch(() => {});
   // Précharge les overrides MJ de la librairie d'états (CONDITION_LIBRARY)
   _loadConditionsOverrides().catch(() => {});
-  // _skillsP : _loadDiceSkills met à jour _diceSkills et rerend l'inspector si besoin
+  // _skillsP : _loadDiceSkills met à jour VS.diceSkills et rerend l'inspector si besoin
   void _skillsP;
   _initListeners();
   // Présence : heartbeat espacé, suspendu en arrière-plan
@@ -12202,13 +12202,13 @@ async function _vttToggleSessionLive() {
 
 async function _vttKickPresence(uid) {
   if (!STATE.isAdmin || !uid) return;
-  const pseudo = _presence[uid]?.pseudo || 'ce joueur';
+  const pseudo = VS.presence[uid]?.pseudo || 'ce joueur';
   if (!confirm(`Retirer ${pseudo} de la présence du VTT ?\n(Réapparaîtra automatiquement s'il est toujours actif sur la table.)`)) return;
   try {
     await deleteDoc(_pingRef(uid));
     // Optimiste : retire localement sans attendre le snapshot.
-    delete _presence[uid];
-    if (_miniUid === uid) { _miniUid = null; _renderMiniSheet(null); }
+    delete VS.presence[uid];
+    if (VS.miniUid === uid) { VS.miniUid = null; _renderMiniSheet(null); }
     _renderPresenceCol();
     if (STATE.isAdmin) _renderTraySoon();
     showNotif(`${pseudo} retiré de la présence`, 'info');
@@ -12219,7 +12219,7 @@ function _renderPresenceCol() {
   const list = document.getElementById('vtt-pres-list');
   if (!list) return;
   const now = Date.now();
-  const players = Object.values(_presence).filter(p => now - (p.lastSeen ?? 0) < 120_000);
+  const players = Object.values(VS.presence).filter(p => now - (p.lastSeen ?? 0) < 120_000);
   if (!players.length) {
     list.innerHTML = '<div class="vtt-pres-empty">—</div>';
     return;
@@ -12228,12 +12228,12 @@ function _renderPresenceCol() {
   list.innerHTML = players.map(p => {
     const chars = sortCharactersForDisplay(Object.values(VS.characters).filter(c => c.uid === p.uid));
     // Préfère le perso ★ par défaut comme "visage" du joueur
-    const char  = chars.find(c => c.id === _miniCharId)
+    const char  = chars.find(c => c.id === VS.miniCharId)
                || chars.find(c => c.isDefault)
                || chars[0];
     const img   = char?.photoURL || char?.photo || char?.avatar || null;
     const init  = (char?.nom || p.pseudo || '?')[0].toUpperCase();
-    const isOpen = _miniUid === p.uid;
+    const isOpen = VS.miniUid === p.uid;
     const isSelf = p.uid === myUid;
     return `<div class="vtt-pres-entry${isOpen?' is-open':''}${isSelf?' is-self':''}"
       data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${p.uid}"
@@ -12345,7 +12345,7 @@ function _msItemFitsSlot(item, slot, equip, idx) {
 
 // ─── Handlers exposés ────────────────────────────────────────────
 
-function _vttMsTab(tab) { _miniTab = tab; if (_miniUid) _renderMiniSheet(_miniUid); }
+function _vttMsTab(tab) { _miniTab = tab; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
 
 // ── Filtres des onglets Sac / Sorts ──────────────────────────────
 // Barre commune : puces de catégorie + champ de recherche. `kind` = 'inv'|'sorts'.
@@ -12417,10 +12417,10 @@ function _msSetActiveChip(kind, btn) {
 
 function _vttMsInvSearch(val)  { _msInvQuery = val || ''; _msApplyInvFilter(); _msSyncClearBtn('inv'); }
 function _vttMsInvCat(cat, btn){ _msInvCat = cat; _msSetActiveChip('inv', btn); _msApplyInvFilter(); }
-function _vttMsInvClear()      { _msInvQuery = ''; if (_miniUid) _renderMiniSheet(_miniUid); }
+function _vttMsInvClear()      { _msInvQuery = ''; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
 function _vttMsSortSearch(val) { _msSortQuery = val || ''; _msApplySortFilter(); _msSyncClearBtn('sorts'); }
 function _vttMsSortCat(cat,btn){ _msSortCat = cat; _msSetActiveChip('sorts', btn); _msApplySortFilter(); }
-function _vttMsSortClear()     { _msSortQuery = ''; if (_miniUid) _renderMiniSheet(_miniUid); }
+function _vttMsSortClear()     { _msSortQuery = ''; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
 
 // Affiche/masque le bouton ✕ de la recherche sans re-render complet (préserve le focus).
 function _msSyncClearBtn(kind) {
@@ -12532,7 +12532,7 @@ function _vttMsSendPicker(charId, uid, invIndex) {
   invIndex = parseInt(invIndex);
   const c = VS.characters[charId]; if (!c) return;
   const item = (c.inventaire||[])[invIndex]; if (!item) return;
-  const targets = Object.entries(_presence)
+  const targets = Object.entries(VS.presence)
     .filter(([pUid]) => pUid !== uid)
     .flatMap(([pUid, p]) =>
       Object.values(VS.characters)
@@ -13033,7 +13033,7 @@ async function _vttMsAddNote(charId, uid) {
 function _vttMsToggleNote(idx) {
   idx = parseInt(idx);
   _msOpenNote = _msOpenNote === idx ? null : idx;
-  if (_miniUid) _renderMiniSheet(_miniUid);
+  if (VS.miniUid) _renderMiniSheet(VS.miniUid);
 }
 
 async function _vttMsRenameNote(charId, uid, idx) {
@@ -13081,7 +13081,7 @@ function _renderMiniSheet(uid) {
   const panel = document.getElementById('vtt-mini-panel');
   if (!panel) return;
 
-  const pres = _presence[uid];
+  const pres = VS.presence[uid];
   if (!uid || !pres) { panel.classList.remove('open'); panel.innerHTML = ''; return; }
 
   const chars = sortCharactersForDisplay(Object.values(VS.characters).filter(c => c.uid === uid));
@@ -13091,8 +13091,8 @@ function _renderMiniSheet(uid) {
     return;
   }
 
-  const validId = chars.find(c => c.id === _miniCharId) ? _miniCharId : chars[0].id;
-  _miniCharId = validId;
+  const validId = chars.find(c => c.id === VS.miniCharId) ? VS.miniCharId : chars[0].id;
+  VS.miniCharId = validId;
   const c = chars.find(c => c.id === validId);
   const canEdit = _msCanEdit(uid);
 
@@ -13150,19 +13150,19 @@ function _renderMiniSheet(uid) {
 }
 
 function _vttToggleMiniSheet(uid) {
-  if (_miniUid === uid) {
-    _miniUid = null; _miniCharId = null;
+  if (VS.miniUid === uid) {
+    VS.miniUid = null; VS.miniCharId = null;
     const panel = document.getElementById('vtt-mini-panel');
     if (panel) { panel.classList.remove('open'); panel.innerHTML = ''; }
   } else {
-    _miniUid = uid; _miniCharId = null;
+    VS.miniUid = uid; VS.miniCharId = null;
     _renderMiniSheet(uid);
   }
   _renderPresenceCol();
 }
 
 function _vttSelectMiniChar(uid, charId) {
-  _miniCharId = charId;
+  VS.miniCharId = charId;
   // Reset des filtres : l'inventaire/les sorts diffèrent d'un perso à l'autre.
   _msInvQuery = ''; _msInvCat = 'all'; _msSortQuery = ''; _msSortCat = 'all';
   _renderMiniSheet(uid);
