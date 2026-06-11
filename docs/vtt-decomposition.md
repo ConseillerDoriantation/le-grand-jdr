@@ -78,6 +78,29 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
 - Pan/zoom, sélection de token, une attaque, un jet de dé, le chat.
 - Vérifier la sync : une action visible chez un 2ᵉ client.
 
+## Recette d'extraction d'un module (Phase 1) — exemple audité : musique
+
+> ⚠️ **Limite de l'environnement** : `node --check` valide la *syntaxe*, **pas la
+> résolution des imports**. Un identifiant oublié = `ReferenceError` au runtime,
+> invisible ici. Toute extraction **doit être smoke-testée dans l'app avant merge**
+> (le merge manuel des PR est la barrière de vérification).
+
+**Audit du domaine musique/audio** (premier module recommandé, le plus isolé) :
+
+- **Surface à déplacer vers `vtt-music.js`** :
+  - 27 fonctions `~12530–13260` (`_vttPlaySound`, `_renderMusicPanel`, `_syncMusicPlayback`…)
+  - ref-helpers Firestore `~453–457` (`_sonsCol, _sonRef, _playlistsCol, _playlistRef, _musicStateRef`)
+  - `_vttPlColorSelect` (`~190`) + état local `~287–298` (`_sounds, _playlists, _musicState, _audioEl, _musicSearch, _musicSortables…`)
+- **Couplages ENTRANTS** (restent dans vtt.js, appellent le module) :
+  - sync Firestore `~8751` : `VS.unsubs.push(onSnapshot(_musicStateRef(), … _syncMusicPlayback(…)))`
+  - teardown `~1001` : `_killAudio()`
+  - registre `VTT_ACTIONS` : tous les `_vtt*` musique
+- **Dépendances SORTANTES** :
+  - réimporter d'autres modules : `Sortable, _esc, _norm, openModal, confirmModal, closeModalDirect, showNotif`, helpers Firestore (`onSnapshot, setDoc, updateDoc, deleteDoc, addDoc, getDoc, serverTimestamp`), `VS`, `aid`.
+  - helpers transverses restants → **exporter de vtt.js** (petit import circulaire, OK car appelés au runtime) **ou** déplacer vers un futur `vtt-shared.js` : `_showCtxMenu` (3 appels), `_previewEl` (5), `_vttNoop` (3). *(`aid` et `_unsubs` déjà relocalisés dans vtt-state.js → plus de couplage.)*
+- **Forme cible** : `vtt-music.js` exporte les handlers `_vtt*` + `_syncMusicPlayback` + `_killAudio` + `_closeMusicPanel` ; `vtt.js` les importe, les place dans le littéral `VTT_ACTIONS`, et les appelle aux points entrants `~8751`/`~1001`.
+- **Vérif post-extraction** : `node --check` (les 2 fichiers) ; grep que plus aucun symbole musique n'est défini dans vtt.js ; **smoke-test musique** (lire un son, une playlist, pause/next/stop, sync chez un 2ᵉ client, supprimer/créer playlist).
+
 ## Avancement
 
 - ✅ **Phase 0 — lot 1 (pilote, images/carte)** : `imgTr, imgTrFg, selImg, mapMode,
@@ -87,8 +110,9 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   multi-clients, changement de page/scène.
 - ✅ **Phase 0 — lot 3 (reste du cœur partagé)** : `stage, layers, characters, npcs,
   bestiary, selected, tool` → `VS.*`. (≈348 occurrences.) **Cœur partagé complet.**
-- ⏳ **Phase 1+ — extractions** : le cœur partagé étant dans `VS`, on peut sortir les
-  modules un à un. Prochain : `vtt/chat.js` (état local `emotes/chatMsgs/chatReplyTo`
-  déménage DANS le module ; lectures partagées via `VS`). Puis rest, tools-ruler, etc.
-  selon le tableau. Borderline (`unsubs, resizeObs, attackSrc, moveHL, bstTracker`) :
-  migrer vers `VS` seulement si une extraction le réclame.
+- ✅ **Phase 0 — lot 4 (helpers transverses pré-extraction)** : `_aid` → `aid` (export
+  vtt-state.js, évite l'import circulaire) ; `_unsubs` → `VS.unsubs`. (≈45 occurrences.)
+- ⏳ **Phase 1 — 1ʳᵉ extraction : `vtt-music.js`** (recette auditée ci-dessus).
+  Couplage minimal grâce aux lots 0 ; reste 3 petits helpers transverses
+  (`_showCtxMenu, _previewEl, _vttNoop`). **À exécuter puis smoke-tester avant merge.**
+  Le **chat n'est PAS un bon 1ᵉʳ module** (tout logge dedans → couplage entrant massif).

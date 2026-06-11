@@ -12,7 +12,15 @@
 // docs/vtt-decomposition.md pour l'ordre des lots et le protocole de vérif.
 // ══════════════════════════════════════════════════════════════════════════════
 
+import { getCurrentAdventureId } from '../data/firestore.js';
+
+// Id de l'aventure courante — contexte de scène partagé (utilisé par tous les
+// helpers de refs Firestore de la VTT). Exporté pour que les sous-modules le
+// résolvent sans dépendre de vtt.js (évite un import circulaire).
+export const aid = () => getCurrentAdventureId();
+
 export const VS = {
+  unsubs: [],        // listeners Firestore actifs (détachés au teardown)
   // ── Cœur de scène (état partagé par la plupart des modules) ──
   session:    {},    // doc Firestore de la session VTT courante
   pages:      {},    // pageId → doc page (scènes de la table)

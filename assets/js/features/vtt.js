@@ -9,7 +9,7 @@
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import Sortable from '../vendor/sortable.esm.js';
-import { getCurrentAdventureId, getDocData, getDocDataSilent, saveDoc, loadCollection, subscribeCollection } from '../data/firestore.js';
+import { getDocData, getDocDataSilent, saveDoc, loadCollection, subscribeCollection } from '../data/firestore.js';
 import {
   db, doc, getDoc, collection, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch,
@@ -37,7 +37,7 @@ import { _esc, _norm, _searchIncludes, appSplashHtml } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-skills.js';
 import PAGES from './pages.js';
-import { VS } from './vtt-state.js';
+import { VS, aid } from './vtt-state.js';
 
 let _vttDelegSearch = '';
 
@@ -228,7 +228,7 @@ function _vttBindDispatch() {
 _vttBindDispatch();
 
 // ── État module ─────────────────────────────────────────────────────
-let _unsubs = [], _resizeObs = null;   // VS.stage, VS.layers → VS (cœur Konva partagé)
+let _resizeObs = null;   // _stage, _layers, VS.unsubs → VS (cœur Konva/teardown partagé)
 let _vttEntered = false;   // le client a-t-il cliqué « Entrer » (listeners actifs) ?
 let _bestiaryLoads = new Map(); // beastId → Promise lecture doc ciblée
 let _bstTracker = {};   // creatureId → tracker joueur (pvActuel, pmActuel, caEstimee…)
@@ -264,7 +264,7 @@ let _emotes     = [];        // [{id, name, url}] chargées depuis world/vtt_emo
 // (images BG/FG, mapMode, mapLib, mapLibUnsub → migrés dans VS / vtt-state.js)
 let _libFolder   = null;   // null = racine, string = folderId ouvert
 let _libOpen     = true;   // section collapsible dans le tray
-const _mapLibRef = () => doc(db, `adventures/${_aid()}/vtt/mapLibrary`);
+const _mapLibRef = () => doc(db, `adventures/${aid()}/vtt/mapLibrary`);
 
 // ── Butin ─────────────────────────────────────────────────────────
 let _loot            = { stash: [], loot: [] };
@@ -272,7 +272,7 @@ let _lootUnsub       = null;
 let _lootLoading     = false;
 let _lootReady       = null;
 let _lootCloseOutside = null;
-const _lootRef  = () => doc(db, `adventures/${_aid()}/vtt/loot`);
+const _lootRef  = () => doc(db, `adventures/${aid()}/vtt/loot`);
 // ── Lanceur de dés libre ───────────────────────────────────────────
 let _diceFormula   = {};        // { faces→count } ex: { 20:2, 6:1 }
 let _diceFreeBonus = 0;
@@ -432,29 +432,29 @@ let _timerTick = null; // intervalId pour rafraîchir l'affichage
 let _combatTab = 'allies'; // 'allies' (joueurs + PNJ) | 'enemies' (MJ only)
 
 // ── Refs Firestore ──────────────────────────────────────────────────
-const _aid     = ()   => getCurrentAdventureId();
-const _sesRef  = ()   => doc(db,  `adventures/${_aid()}/vtt/session`);
-const _pgsCol  = ()   => collection(db, `adventures/${_aid()}/vttPages`);
-const _toksCol = ()   => collection(db, `adventures/${_aid()}/vttTokens`);
-const _pgRef   = (id) => doc(db, `adventures/${_aid()}/vttPages/${id}`);
-const _tokRef  = (id) => doc(db, `adventures/${_aid()}/vttTokens/${id}`);
-const _chrRef  = (id) => doc(db, `adventures/${_aid()}/characters/${id}`);
-const _npcRef  = (id) => doc(db, `adventures/${_aid()}/npcs/${id}`);
-const _bstTrackerRef = (uid) => doc(db, `adventures/${_aid()}/bestiary_tracker/${uid}`);
-const _logCol      = ()  => collection(db, `adventures/${_aid()}/vttLog`);
-const _castingCol  = ()  => collection(db, `adventures/${_aid()}/vttCasting`);
-const _castingRef  = uid => doc(db, `adventures/${_aid()}/vttCasting/${uid}`);
-const _pingsCol     = ()  => collection(db, `adventures/${_aid()}/vttPings`);
-const _pingRef      = uid => doc(db, `adventures/${_aid()}/vttPings/${uid}`);
-const _reactionsCol = ()  => collection(db, `adventures/${_aid()}/vttEmoteReactions`);
-const _reactionRef  = uid => doc(db, `adventures/${_aid()}/vttEmoteReactions/${uid}`);
-const _annotCol      = ()  => collection(db, `adventures/${_aid()}/vttAnnotations`);
-const _annotRef      = id  => doc(db, `adventures/${_aid()}/vttAnnotations/${id}`);
-const _sonsCol       = ()  => collection(db, `adventures/${_aid()}/vttSons`);
-const _sonRef        = id  => doc(db, `adventures/${_aid()}/vttSons/${id}`);
-const _playlistsCol  = ()  => collection(db, `adventures/${_aid()}/vttPlaylists`);
-const _playlistRef   = id  => doc(db, `adventures/${_aid()}/vttPlaylists/${id}`);
-const _musicStateRef = ()  => doc(db, `adventures/${_aid()}/vtt/music`);
+// `aid` (id d'aventure) est désormais importé de vtt-state.js.
+const _sesRef  = ()   => doc(db,  `adventures/${aid()}/vtt/session`);
+const _pgsCol  = ()   => collection(db, `adventures/${aid()}/vttPages`);
+const _toksCol = ()   => collection(db, `adventures/${aid()}/vttTokens`);
+const _pgRef   = (id) => doc(db, `adventures/${aid()}/vttPages/${id}`);
+const _tokRef  = (id) => doc(db, `adventures/${aid()}/vttTokens/${id}`);
+const _chrRef  = (id) => doc(db, `adventures/${aid()}/characters/${id}`);
+const _npcRef  = (id) => doc(db, `adventures/${aid()}/npcs/${id}`);
+const _bstTrackerRef = (uid) => doc(db, `adventures/${aid()}/bestiary_tracker/${uid}`);
+const _logCol      = ()  => collection(db, `adventures/${aid()}/vttLog`);
+const _castingCol  = ()  => collection(db, `adventures/${aid()}/vttCasting`);
+const _castingRef  = uid => doc(db, `adventures/${aid()}/vttCasting/${uid}`);
+const _pingsCol     = ()  => collection(db, `adventures/${aid()}/vttPings`);
+const _pingRef      = uid => doc(db, `adventures/${aid()}/vttPings/${uid}`);
+const _reactionsCol = ()  => collection(db, `adventures/${aid()}/vttEmoteReactions`);
+const _reactionRef  = uid => doc(db, `adventures/${aid()}/vttEmoteReactions/${uid}`);
+const _annotCol      = ()  => collection(db, `adventures/${aid()}/vttAnnotations`);
+const _annotRef      = id  => doc(db, `adventures/${aid()}/vttAnnotations/${id}`);
+const _sonsCol       = ()  => collection(db, `adventures/${aid()}/vttSons`);
+const _sonRef        = id  => doc(db, `adventures/${aid()}/vttSons/${id}`);
+const _playlistsCol  = ()  => collection(db, `adventures/${aid()}/vttPlaylists`);
+const _playlistRef   = id  => doc(db, `adventures/${aid()}/vttPlaylists/${id}`);
+const _musicStateRef = ()  => doc(db, `adventures/${aid()}/vtt/music`);
 
 // ═══════════════════════════════════════════════════════════════════
 // DONNÉES EFFECTIVES — fusion token + entité liée
@@ -977,8 +977,8 @@ async function _loadKonva() {
 // NETTOYAGE
 // ═══════════════════════════════════════════════════════════════════
 function _cleanup() {
-  _unsubs.forEach(u => u?.());
-  _unsubs = []; VS.stage?.destroy(); VS.stage = null; VS.layers = {};
+  VS.unsubs.forEach(u => u?.());
+  VS.unsubs = []; VS.stage?.destroy(); VS.stage = null; VS.layers = {};
   _resizeObs?.disconnect(); _resizeObs = null;
   if (_presHeartbeat) {
     clearInterval(_presHeartbeat); _presHeartbeat = null;
@@ -1132,7 +1132,7 @@ function _initCanvas(container) {
     }
   };
   window.addEventListener('mousemove', _nativeMoveHandler);
-  _unsubs.push(() => window.removeEventListener('mousemove', _nativeMoveHandler));
+  VS.unsubs.push(() => window.removeEventListener('mousemove', _nativeMoveHandler));
 
   VS.stage.on('wheel', e => {
     e.evt.preventDefault();
@@ -1181,7 +1181,7 @@ function _initCanvas(container) {
   };
   container.addEventListener('mousedown', _startMiddlePan, true);
   container.addEventListener('auxclick',  _preventMiddleAuxClick, true);
-  _unsubs.push(() => {
+  VS.unsubs.push(() => {
     container.removeEventListener('mousedown', _startMiddlePan, true);
     container.removeEventListener('auxclick',  _preventMiddleAuxClick, true);
   });
@@ -8443,10 +8443,10 @@ function _ensureBestiaryForTokens() {
 // SYNC FIRESTORE — listeners temps réel
 // ═══════════════════════════════════════════════════════════════════
 function _initListeners() {
-  if (!_aid()) return;
+  if (!aid()) return;
 
   // 1. Session
-  _unsubs.push(onSnapshot(_sesRef(), snap => {
+  VS.unsubs.push(onSnapshot(_sesRef(), snap => {
     VS.session=snap.exists()?snap.data():{};
     _renderSessionBtn();
     _renderPageTabs();
@@ -8463,7 +8463,7 @@ function _initListeners() {
   },()=>{}));
 
   // 2. Pages
-  _unsubs.push(onSnapshot(_pgsCol(), snap => {
+  VS.unsubs.push(onSnapshot(_pgsCol(), snap => {
     snap.docChanges().forEach(ch => {
       if (ch.type==='removed') delete VS.pages[ch.doc.id];
       else {
@@ -8486,7 +8486,7 @@ function _initListeners() {
   },()=>{}));
 
   // 3. Personnages — source de vérité des HP joueurs
-  _unsubs.push(subscribeCollection("characters", data => {
+  VS.unsubs.push(subscribeCollection("characters", data => {
     const prev = VS.characters;
     const next = {};
     for (const c of data || []) next[c.id] = c;
@@ -8529,7 +8529,7 @@ function _initListeners() {
   }));
 
   // 4. PNJ — source de vérité des HP PNJ
-  _unsubs.push(subscribeCollection("npcs", data => {
+  VS.unsubs.push(subscribeCollection("npcs", data => {
     const prev = VS.npcs;
     const next = {};
     for (const n of data || []) next[n.id] = n;
@@ -8554,7 +8554,7 @@ function _initListeners() {
   if (!STATE.isAdmin) {
     const uid = STATE.user?.uid;
     if (uid) {
-      _unsubs.push(onSnapshot(_bstTrackerRef(uid), snap => {
+      VS.unsubs.push(onSnapshot(_bstTrackerRef(uid), snap => {
         _bstTracker = snap.exists() ? (snap.data().data || {}) : {};
         // Mettre à jour la barre HP de tous les tokens ennemis sur le canvas
         for (const [id, e] of Object.entries(VS.tokens)) {
@@ -8570,7 +8570,7 @@ function _initListeners() {
   }
 
   // 6. Tokens
-  _unsubs.push(onSnapshot(_toksCol(), snap => {
+  VS.unsubs.push(onSnapshot(_toksCol(), snap => {
     snap.docChanges().forEach(ch => {
       const id=ch.doc.id, data={id,...ch.doc.data()};
       if (ch.type==='removed') {
@@ -8625,7 +8625,7 @@ function _initListeners() {
   },()=>{}));
 
   // 7. Annotations (dessins + formes)
-  _unsubs.push(onSnapshot(_annotCol(), snap => {
+  VS.unsubs.push(onSnapshot(_annotCol(), snap => {
     snap.docChanges().forEach(ch => {
       const id = ch.doc.id;
       if (ch.type === 'removed') {
@@ -8666,12 +8666,12 @@ function _initListeners() {
   }, () => {}));
 
   // 8. Ciblage multi-sorts temps réel (lignes pointillées broadcast)
-  _unsubs.push(onSnapshot(_castingCol(), snap => {
+  VS.unsubs.push(onSnapshot(_castingCol(), snap => {
     _renderRemoteCastings(snap.docs);
   }, () => {}));
 
   // 9. Pings + présence temps réel
-  _unsubs.push(onSnapshot(_pingsCol(), snap => {
+  VS.unsubs.push(onSnapshot(_pingsCol(), snap => {
     const now = Date.now();
 
     // Présence : actif si lastSeen < 2 min (double filtrage : ici + render)
@@ -8696,7 +8696,7 @@ function _initListeners() {
   }, () => {})); // silencieux si pas de règle Firestore
 
   // 10. Réactions émotes temps réel
-  _unsubs.push(onSnapshot(_reactionsCol(), snap => {
+  VS.unsubs.push(onSnapshot(_reactionsCol(), snap => {
     const now = Date.now();
     snap.docs.forEach(d => {
       const r = { id: d.id, ...d.data() };
@@ -8716,7 +8716,7 @@ function _initListeners() {
   // Évite de relire l'historique complet du chat à chaque ouverture de page
   // (économie majeure sur des sessions longues : passe d'une lecture par
   // message historique à une lecture par message récent).
-  _unsubs.push(onSnapshot(
+  VS.unsubs.push(onSnapshot(
     query(_logCol(), orderBy('createdAt', 'desc'), limit(80)),
     snap => {
       const msgs = snap.docs
@@ -8748,7 +8748,7 @@ function _initListeners() {
   // ou par une lecture musicale qui a besoin de résoudre l'URL du son courant.
 
   // 13. État musique — sync pour tous les clients
-  _unsubs.push(onSnapshot(_musicStateRef(), snap => {
+  VS.unsubs.push(onSnapshot(_musicStateRef(), snap => {
     _syncMusicPlayback(snap.exists() ? snap.data() : {});
   }, ()=>{}));
 }
@@ -12547,14 +12547,14 @@ function _startMusicCatalogListeners() {
       resolve();
     };
 
-    _unsubs.push(onSnapshot(_sonsCol(), snap => {
+    VS.unsubs.push(onSnapshot(_sonsCol(), snap => {
       _sounds = _sortSoundsByCreatedAt(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       soundsReady = true;
       if (document.getElementById('vtt-music-panel')?.dataset.open === '1') _renderMusicPanel();
       done();
     }, () => { soundsReady = true; done(); }));
 
-    _unsubs.push(onSnapshot(_playlistsCol(), snap => {
+    VS.unsubs.push(onSnapshot(_playlistsCol(), snap => {
       _playlists = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
         .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0));
@@ -13020,7 +13020,7 @@ function _killAudio() {
 }
 
 async function _setMusicState(patch) {
-  if (!_aid()) return;
+  if (!aid()) return;
   await setDoc(_musicStateRef(), patch, {merge:true}).catch(()=>{});
 }
 
