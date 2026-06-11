@@ -1128,7 +1128,7 @@ async function _onQuetesReordered(c) {
   if (next.length !== old.length) { _csV3JournalSub('quetes'); return; }
   c.quetes = next;
   try { await updateInCol('characters', c.id, { quetes: next }); }
-  catch (e) { console.error('[quetes reorder]', e); window.showNotif?.('Erreur d\'enregistrement.', 'error'); }
+  catch (e) { console.error('[quetes reorder]', e); showNotif('Erreur d\'enregistrement.', 'error'); }
   _csV3JournalSub('quetes');
 }
 
@@ -1201,7 +1201,7 @@ async function _onNotesReordered(c) {
   c.notesList = next;
   _openNote = null; // les index ont changé → on replie tout
   try { await updateInCol('characters', c.id, { notesList: next }); }
-  catch (e) { console.error('[notes reorder]', e); window.showNotif?.('Erreur d\'enregistrement.', 'error'); }
+  catch (e) { console.error('[notes reorder]', e); showNotif('Erreur d\'enregistrement.', 'error'); }
   _currentJournalSub = 'notes';
   _renderTabV3('journal', c, charSession.getCanEditChar());
 }
