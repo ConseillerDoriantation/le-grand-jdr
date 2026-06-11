@@ -321,7 +321,7 @@ export const SORT_COMBOS = [
     defaultName: 'Sort canalisé persistant',
     detect: (counts) => (counts.Durée || 0) > 0 && counts.Concentration > 0,
     describe: (counts) =>
-      `Durée + Concentration · le sort tient tant que la concentration est maintenue · les ${(counts.Durée||0) + 1} tours de Durée s'appliquent en grâce après rupture`,
+      `Durée + Concentration · le sort tient tant que la concentration est maintenue · après rupture, l'effet persiste encore 2 tours`,
   },
   {
     id: 'bouclier_reactif',
@@ -1032,8 +1032,8 @@ export function _buildSortResume(s, c) {
     if (comboIds.has('canalise_persistant')) {
       lines.push({
         icon:'⏱️',
-        label: `Tant que concentration · +${runeBonus} tours de grâce`,
-        detail: `Sort canalisé persistant · pas de plafond 10t · les ${runeBonus} tours s'appliquent après rupture de concentration`,
+        label: 'Tant que concentration · 2 tours après rupture',
+        detail: "Sort canalisé persistant · si la concentration est perdue, l'effet reste actif 2 tours puis expire",
       });
     } else {
       const baseLbl = hasOverride ? `${baseVal} base (override)` : '2 base';
