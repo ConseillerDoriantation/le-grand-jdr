@@ -319,18 +319,20 @@ function _buildStatTilesHtml(c, canEdit, lvlPointsRemaining) {
 
 // Navigation par onglets v3
 function _buildTabsHtml(c, v3Tab) {
+  // Icône SVG du jeu maison (rendu homogène cross-OS vs émoji ; hérite currentColor).
+  const _ico = (id) => `<svg class="cs-tab-svg" aria-hidden="true"><use href="./assets/img/icons.svg#icon-${id}"/></svg>`;
   return [
-    { k: 'combat',  ico: '⚔️', lbl: 'Combat' },
-    { k: 'sorts',   ico: '✨', lbl: 'Sorts',      badge: `${(c.deck_sorts||[]).filter(x=>x.actif).length}/${calcDeckMax(c)}` },
-    { k: 'inv',     ico: '🎒', lbl: 'Inventaire', badge: `${(c.inventaire||[]).length||''}` },
-    { k: 'compte',  ico: '💰', lbl: 'Compte' },
-    { k: 'journal', ico: '📖', lbl: 'Journal' },
-    { k: 'profil',  ico: '👤', lbl: 'Profil' },
+    { k: 'combat',  ico: 'sword',       lbl: 'Combat' },
+    { k: 'sorts',   ico: 'sparkles',    lbl: 'Sorts',      badge: `${(c.deck_sorts||[]).filter(x=>x.actif).length}/${calcDeckMax(c)}` },
+    { k: 'inv',     ico: 'bag',         lbl: 'Inventaire', badge: `${(c.inventaire||[]).length||''}` },
+    { k: 'compte',  ico: 'coin',        lbl: 'Compte' },
+    { k: 'journal', ico: 'book',        lbl: 'Journal' },
+    { k: 'profil',  ico: 'user-circle', lbl: 'Profil' },
   ].map(t => `<button class="tab-v3 ${t.k===v3Tab?'active':''}" id="cs-tab-${t.k}"
     role="tab" aria-selected="${t.k===v3Tab?'true':'false'}" aria-controls="char-tab-content"
     tabindex="${t.k===v3Tab?'0':'-1'}"
     data-tab-v3="${t.k}" data-action="showCharTab" data-tab="${t.k}">
-    <span class="tab-ico" aria-hidden="true">${t.ico}</span> ${t.lbl}
+    <span class="tab-ico" aria-hidden="true">${_ico(t.ico)}</span> ${t.lbl}
     ${t.badge?`<span class="tab-badge">${t.badge}</span>`:''}
   </button>`).join('');
 }

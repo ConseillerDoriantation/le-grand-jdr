@@ -8283,7 +8283,8 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 }
 .cs-v3 .tab-v3:hover { color: var(--text-soft, #c8d4e8); background: rgba(255,255,255,.03); }
 .cs-v3 .tab-v3.active { color: var(--gold-2, #7eb0ff); background: var(--bg-card); border-color: var(--border); border-bottom-color: var(--bg-card); box-shadow: 0 -4px 16px -8px rgba(79,140,255,.30); }
-.cs-v3 .tab-v3 .tab-ico { font-size: .95rem; opacity: .9; }
+.cs-v3 .tab-v3 .tab-ico { font-size: .95rem; opacity: .9; display: inline-flex; align-items: center; }
+.cs-v3 .tab-ico .cs-tab-svg { width: 1.05em; height: 1.05em; }
 .cs-v3 .tab-v3 .tab-badge { background: rgba(244,196,48,.2); color: var(--amber, var(--amber)); font-size: .6rem; font-weight: 800; padding: 1px 7px; border-radius: 999px; margin-left: 2px; font-family: 'Outfit', sans-serif; }
 
 .cs-v3 .tab-body-v3 { padding: 18px; flex: 1; }
