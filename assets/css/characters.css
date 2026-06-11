@@ -10527,19 +10527,9 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   .cs-v3 .stat-tile-mod { font-size: .78rem; padding: 2px 6px; min-width: 32px; }
   .cs-v3 .stat-seg-val { font-size: .82rem; }
   .cs-v3 .stat-seg-lbl { font-size: .5rem; }
-  /* overflow:hidden sur .main-col casserait le sticky des onglets → visible en mobile */
-  .cs-v3 .main-col { overflow: visible; }
-  /* Barre d'onglets sticky sous le header (toujours à portée de pouce en séance) */
-  .cs-v3 .tabs-v3 {
-    overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; padding-bottom: 4px;
-    -webkit-overflow-scrolling: touch;
-    position: sticky; top: calc(var(--header-height) + 14px); z-index: 5;
-    background: var(--bg-elevated);
-    box-shadow: 0 8px 14px -10px rgba(0,0,0,.55);
-  }
+  .cs-v3 .tabs-v3 { overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
   .cs-v3 .tabs-v3::-webkit-scrollbar { display: none; }
-  /* Cibles tactiles plus généreuses (≈40px) */
-  .cs-v3 .tab-v3 { flex-shrink: 0; padding: 9px 12px; font-size: .76rem; }
+  .cs-v3 .tab-v3 { flex-shrink: 0; padding: 6px 10px; font-size: .76rem; }
   .cs-v3 .tab-v3 .tab-ico { font-size: .82rem; }
   .cs-v3 .char-switch-row { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
   .cs-v3 .char-switch-row::-webkit-scrollbar { display: none; }
