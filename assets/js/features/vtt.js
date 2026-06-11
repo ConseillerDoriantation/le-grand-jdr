@@ -37,6 +37,7 @@ import { _esc, _norm, _searchIncludes, appSplashHtml } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-skills.js';
 import PAGES from './pages.js';
+import { VS } from './vtt-state.js';
 
 let _vttDelegSearch = '';
 
@@ -262,14 +263,9 @@ let _autoSyncDone = false;   // empêche la double-création de tokens
 let _weaponFormats = null;   // cache formats d'armes (damageType, etc.)
 let _damageTypes   = null;   // cache types de dégâts (règles de combat)
 let _spellMatrices = null;   // cache matrices MJ (armes invoquées, combos config)
-let _imgTr      = null;      // Transformer pour images BG (sous tokens)
-let _imgTrFg    = null;      // Transformer pour images FG (au-dessus des tokens)
-let _selImg     = null;      // id de l'image sélectionnée
-let _mapMode    = false;     // true = édition carte activée (images déplaçables)
 let _emotes     = [];        // [{id, name, url}] chargées depuis world/vtt_emotes
 // ── Bibliothèque de cartes ─────────────────────────────────────────
-let _mapLib      = { folders: [], images: [] };
-let _mapLibUnsub = null;
+// (images BG/FG, mapMode, mapLib, mapLibUnsub → migrés dans VS / vtt-state.js)
 let _libFolder   = null;   // null = racine, string = folderId ouvert
 let _libOpen     = true;   // section collapsible dans le tray
 const _mapLibRef = () => doc(db, `adventures/${_aid()}/vtt/mapLibrary`);
@@ -1000,8 +996,8 @@ function _cleanup() {
   _presLastWriteAt = 0;
   _timerStopTick();
   if (_emoteCloseOutside){ document.removeEventListener('mousedown', _emoteCloseOutside, true); _emoteCloseOutside = null; }
-  if (_mapLibUnsub) { _mapLibUnsub(); _mapLibUnsub = null; }
-  _mapLib = { folders: [], images: [] }; _libFolder = null;
+  if (VS.mapLibUnsub) { VS.mapLibUnsub(); VS.mapLibUnsub = null; }
+  VS.mapLib = { folders: [], images: [] }; _libFolder = null;
   if (_lootUnsub) { _lootUnsub(); _lootUnsub = null; }
   _lootLoading = false; _lootReady = null;
   if (_lootCloseOutside) { document.removeEventListener('mousedown', _lootCloseOutside, true); _lootCloseOutside = null; }
@@ -1031,7 +1027,7 @@ function _cleanup() {
   _mjRulerLastWrite = 0; _mjRulerBroadcasting = false; _mjRulerRemote = null;
   _charsReady = false; _npcsReady = false; _toksReady = false;
   _traySearch = '';
-  _imgTr = null; _imgTrFg = null; _selImg = null; _mapMode = false;
+  VS.imgTr = null; VS.imgTrFg = null; VS.selImg = null; VS.mapMode = false;
   _hideCtxMenu();
   document.removeEventListener('keydown', _keyHandler);
   const mc = document.getElementById('main-content');
@@ -1081,8 +1077,8 @@ function _initCanvas(container) {
       anchorStroke: '#4f8cff', anchorFill: '#fff',
       anchorSize: 10, anchorCornerRadius: 3,
     };
-    _imgTr   = new K.Transformer(trCfg); _layers.map.add(_imgTr);
-    _imgTrFg = new K.Transformer(trCfg); _layers.mapFg.add(_imgTrFg);
+    VS.imgTr   = new K.Transformer(trCfg); _layers.map.add(VS.imgTr);
+    VS.imgTrFg = new K.Transformer(trCfg); _layers.mapFg.add(VS.imgTrFg);
   }
 
   // Transformer annotations — disponible pour tous (chaque joueur interagit avec ses propres dessins)
@@ -1316,14 +1312,14 @@ function _renderMapImages() {
   // Nettoyer les images des deux couches (sans détruire les transformers)
   _layers.map.find('Image').forEach(n=>n.destroy());
   _layers.mapFg?.find('Image').forEach(n=>n.destroy());
-  if (_imgTr)   { _imgTr.nodes([]);   }
-  if (_imgTrFg) { _imgTrFg.nodes([]); }
-  _selImg = null;
+  if (VS.imgTr)   { VS.imgTr.nodes([]);   }
+  if (VS.imgTrFg) { VS.imgTrFg.nodes([]); }
+  VS.selImg = null;
 
   for (const img of (_activePage.backgroundImages??[])) {
     const isFg   = img.layer === 'fg';
     const tgtLyr = isFg ? _layers.mapFg : _layers.map;
-    const tr     = isFg ? _imgTrFg      : _imgTr;
+    const tr     = isFg ? VS.imgTrFg      : VS.imgTr;
 
     const el = new Image(); el.crossOrigin='anonymous';
     el.onload = () => {
@@ -1336,7 +1332,7 @@ function _renderMapImages() {
 
       if (STATE.isAdmin) {
         // Drag activé uniquement en mode édition carte
-        ki.draggable(_mapMode);
+        ki.draggable(VS.mapMode);
         ki.on('dragmove', () => {
           ki.x(Math.round(ki.x()/CELL)*CELL);
           ki.y(Math.round(ki.y()/CELL)*CELL);
@@ -1348,14 +1344,14 @@ function _renderMapImages() {
         // Clic → sélectionner l'image (seulement en mode édition carte)
         ki.on('click', e => {
           if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
-          if (!_mapMode) return;
+          if (!VS.mapMode) return;
           e.cancelBubble = true;
           _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
           _hideActBar();
           _selected=null; _clearHL(); _renderInspector(null); _layers.token.batchDraw();
-          _selImg = img.id;
+          VS.selImg = img.id;
           // Vider l'autre transformer
-          const otherTr = isFg ? _imgTr : _imgTrFg;
+          const otherTr = isFg ? VS.imgTr : VS.imgTrFg;
           otherTr?.nodes([]);
           if (tr?.getParent()) { tr.nodes([ki]); tr.moveToTop(); }
           tgtLyr.batchDraw();
@@ -1376,7 +1372,7 @@ function _renderMapImages() {
         // Clic-droit → menu contextuel
         ki.on('contextmenu', e => {
           e.evt.preventDefault();
-          if (!_mapMode) return;
+          if (!VS.mapMode) return;
           _showCtxMenu(e.evt.clientX, e.evt.clientY, [
             {
               label: isFg ? '⬇ Arrière-plan (sous les tokens)' : '⬆ Premier plan (au-dessus des tokens)',
@@ -1846,7 +1842,7 @@ function _patchShape(id) {
 // ── Sélection ───────────────────────────────────────────────────────
 function _select(id) {
   _clearAim(); // changer de sélection annule une visée action-first en cours
-  if (_imgTr&&_selImg) { _imgTr.nodes([]); _selImg=null; _layers.map?.batchDraw(); }
+  if (VS.imgTr&&VS.selImg) { VS.imgTr.nodes([]); VS.selImg=null; _layers.map?.batchDraw(); }
   _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
   _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
   _attackSrc=null; _clearHL();
@@ -1873,9 +1869,9 @@ function _deselect() {
   _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
   _clearAim(); _hideActBar();
   _selected=null; _attackSrc=null; _clearHL(); _clearMultiSelect(); _renderInspector(null);
-  if (_imgTr)   { _imgTr.nodes([]); _layers.map?.batchDraw(); }
-  if (_imgTrFg) { _imgTrFg.nodes([]); _layers.mapFg?.batchDraw(); }
-  _selImg=null;
+  if (VS.imgTr)   { VS.imgTr.nodes([]); _layers.map?.batchDraw(); }
+  if (VS.imgTrFg) { VS.imgTrFg.nodes([]); _layers.mapFg?.batchDraw(); }
+  VS.selImg=null;
   _layers.token?.batchDraw();
 }
 
@@ -7878,7 +7874,7 @@ function _renderPageTabs() {
 async function _switchPage(pageId) {
   const page=_pages[pageId]; if (!page) return;
   _activePage=page;
-  // Ne pas détruire _layers.map entièrement : _imgTr (Transformer) y vit.
+  // Ne pas détruire _layers.map entièrement : VS.imgTr (Transformer) y vit.
   // _renderMapImages() et _renderAllTokens() gèrent leur propre nettoyage.
   _layers.token?.destroyChildren(); _clearHL();
   _drawGrid(); _renderMapImages(); _renderAllTokens(); _renderAnnotLayer();
@@ -8741,10 +8737,10 @@ function _initListeners() {
 
   // Bibliothèque de cartes (MJ only)
   if (STATE.isAdmin) {
-    _mapLibUnsub = onSnapshot(_mapLibRef(), snap => {
-      _mapLib = snap.exists() ? snap.data() : {};
-      if (!Array.isArray(_mapLib.folders)) _mapLib.folders = [];
-      if (!Array.isArray(_mapLib.images))  _mapLib.images  = [];
+    VS.mapLibUnsub = onSnapshot(_mapLibRef(), snap => {
+      VS.mapLib = snap.exists() ? snap.data() : {};
+      if (!Array.isArray(VS.mapLib.folders)) VS.mapLib.folders = [];
+      if (!Array.isArray(VS.mapLib.images))  VS.mapLib.images  = [];
       _renderLibSection();
     }, () => {});
   }
@@ -8800,21 +8796,21 @@ function _showCtxMenu(x, y, items) {
 
 // ── Mode édition carte ───────────────────────────────────────────
 function _setMapMode(on) {
-  _mapMode=on;
+  VS.mapMode=on;
   _layers.map?.listening(on);
   _layers.mapFg?.listening(on);
   // Mettre à jour le draggable de toutes les images existantes
   const toggle = lyr => lyr?.find('Image').forEach(ki=>ki.draggable(on));
   toggle(_layers.map); toggle(_layers.mapFg);
   if (!on) {
-    _imgTr?.nodes([]); _imgTrFg?.nodes([]); _selImg=null;
+    VS.imgTr?.nodes([]); VS.imgTrFg?.nodes([]); VS.selImg=null;
     _layers.map?.batchDraw(); _layers.mapFg?.batchDraw();
     _hideCtxMenu();
   }
   const btn=document.getElementById('vtt-map-mode-btn');
   if (btn) { btn.classList.toggle('active',on); btn.textContent=on?'🗺 Carte ✏':'🗺 Carte 🔒'; }
 }
-function _vttToggleMapMode() { return _setMapMode(!_mapMode); }
+function _vttToggleMapMode() { return _setMapMode(!VS.mapMode); }
 
 // ═══════════════════════════════════════════════════════════════════
 // CHAT & LOG DE DÉS
@@ -11848,7 +11844,7 @@ async function _handleUpload(file) {
     await updateDoc(_pgRef(_activePage.id),{backgroundImages:imgs});
     // Sauver dans la bibliothèque
     const entry = { id: crypto.randomUUID(), url, name: file.name, folderId: _libFolder || null };
-    const updLib = { folders: _mapLib.folders||[], images: [...(_mapLib.images||[]), entry] };
+    const updLib = { folders: VS.mapLib.folders||[], images: [...(VS.mapLib.images||[]), entry] };
     setDoc(_mapLibRef(), updLib).catch(()=>{});
     showNotif('Image ajoutée !','success');
   } catch(e) { console.error(e); showNotif('Erreur upload : '+e.message,'error'); }
@@ -11907,12 +11903,12 @@ function _keyHandler(e) {
       _deselectAnnot();
     }
     // 2) Image de carte sélectionnée (MJ, mode édition)
-    else if (STATE.isAdmin && _selImg && _mapMode && _activePage) {
+    else if (STATE.isAdmin && VS.selImg && VS.mapMode && _activePage) {
       e.preventDefault();
-      const imgs = (_activePage.backgroundImages ?? []).filter(i => i.id !== _selImg);
+      const imgs = (_activePage.backgroundImages ?? []).filter(i => i.id !== VS.selImg);
       updateDoc(_pgRef(_activePage.id), { backgroundImages: imgs }).catch(()=>{});
-      _selImg = null;
-      _imgTr?.nodes([]); _imgTrFg?.nodes([]);
+      VS.selImg = null;
+      VS.imgTr?.nodes([]); VS.imgTrFg?.nodes([]);
       _layers.map?.batchDraw(); _layers.mapFg?.batchDraw();
     }
     // 3) Tokens sélectionnés → retrait du canvas (pageId=null)
@@ -11951,7 +11947,7 @@ function _keyHandler(e) {
 // ═══════════════════════════════════════════════════════════════════
 
 async function _saveMapLib() {
-  await setDoc(_mapLibRef(), { folders: _mapLib.folders, images: _mapLib.images });
+  await setDoc(_mapLibRef(), { folders: VS.mapLib.folders, images: VS.mapLib.images });
 }
 
 function _renderLibSection() {
@@ -11960,8 +11956,8 @@ function _renderLibSection() {
 
   if (!_libOpen) { el.innerHTML = ''; return; }
 
-  const folders = _mapLib.folders || [];
-  const images  = _mapLib.images  || [];
+  const folders = VS.mapLib.folders || [];
+  const images  = VS.mapLib.images  || [];
   const curFolder = _libFolder ? folders.find(f => f.id === _libFolder) : null;
   const visible = _libFolder
     ? images.filter(i => i.folderId === _libFolder)
@@ -12004,25 +12000,25 @@ function _vttLibToggle() { _libOpen = !_libOpen; _renderLibSection();
 function _vttLibNewFolder() {
   const name = prompt('Nom du dossier :')?.trim();
   if (!name) return;
-  _mapLib.folders.push({ id: crypto.randomUUID(), name });
+  VS.mapLib.folders.push({ id: crypto.randomUUID(), name });
   _saveMapLib();
 }
 
 function _vttLibDelFolder(id) {
   // Retirer les images du dossier (les remettre en racine)
-  _mapLib.images  = _mapLib.images.map(i => i.folderId === id ? { ...i, folderId: null } : i);
-  _mapLib.folders = _mapLib.folders.filter(f => f.id !== id);
+  VS.mapLib.images  = VS.mapLib.images.map(i => i.folderId === id ? { ...i, folderId: null } : i);
+  VS.mapLib.folders = VS.mapLib.folders.filter(f => f.id !== id);
   if (_libFolder === id) _libFolder = null;
   _saveMapLib();
 }
 
 function _vttLibDelImg(id) {
-  _mapLib.images = _mapLib.images.filter(i => i.id !== id);
+  VS.mapLib.images = VS.mapLib.images.filter(i => i.id !== id);
   _saveMapLib();
 }
 
 function _vttLibMoveRoot(id) {
-  _mapLib.images = _mapLib.images.map(i => i.id === id ? { ...i, folderId: null } : i);
+  VS.mapLib.images = VS.mapLib.images.map(i => i.id === id ? { ...i, folderId: null } : i);
   _saveMapLib();
 }
 
@@ -12034,7 +12030,7 @@ function _vttLibMoveMenu(imgId, evt) {
   const popup = document.createElement('div');
   popup.id = 'vtt-lib-move-popup';
   popup.className = 'vtt-lib-move-popup';
-  popup.innerHTML = _mapLib.folders.map(f =>
+  popup.innerHTML = VS.mapLib.folders.map(f =>
     `<div class="vtt-lib-move-opt" data-vtt-fn="_vttLibMoveToAndClose" data-vtt-args="${imgId}|${f.id}">📁 ${_esc(f.name)}</div>`
   ).join('') || '<div style="padding:.4rem;font-size:.75rem;color:var(--text-dim)">Aucun dossier</div>';
   const rect = evt.currentTarget.getBoundingClientRect();
@@ -12046,13 +12042,13 @@ function _vttLibMoveMenu(imgId, evt) {
 }
 
 function _vttLibMoveTo(imgId, folderId) {
-  _mapLib.images = _mapLib.images.map(i => i.id === imgId ? { ...i, folderId } : i);
+  VS.mapLib.images = VS.mapLib.images.map(i => i.id === imgId ? { ...i, folderId } : i);
   _saveMapLib();
 }
 
 function _vttLibPlace(imgId) {
   if (!_activePage) { showNotif('Aucune page active', 'error'); return; }
-  const img = _mapLib.images.find(i => i.id === imgId);
+  const img = VS.mapLib.images.find(i => i.id === imgId);
   if (!img) return;
   const imgs = [...(_activePage.backgroundImages??[]), {
     id: Date.now().toString(), url: img.url, x: 0, y: 0,
