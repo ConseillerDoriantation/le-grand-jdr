@@ -112,7 +112,11 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   bestiary, selected, tool` → `VS.*`. (≈348 occurrences.) **Cœur partagé complet.**
 - ✅ **Phase 0 — lot 4 (helpers transverses pré-extraction)** : `_aid` → `aid` (export
   vtt-state.js, évite l'import circulaire) ; `_unsubs` → `VS.unsubs`. (≈45 occurrences.)
-- ⏳ **Phase 1 — 1ʳᵉ extraction : `vtt-music.js`** (recette auditée ci-dessus).
-  Couplage minimal grâce aux lots 0 ; reste 3 petits helpers transverses
-  (`_showCtxMenu, _previewEl, _vttNoop`). **À exécuter puis smoke-tester avant merge.**
-  Le **chat n'est PAS un bon 1ᵉʳ module** (tout logge dedans → couplage entrant massif).
+- ✅ **Phase 1 — extraction `vtt-music.js`** (817 l.) : 43 fonctions + état local +
+  ref-helpers sortis de vtt.js (**15034 → 14303 l., ~730 retirées**). vtt.js importe
+  25 symboles ; import circulaire `_showCtxMenu` (fonction hoisted, sûr) ; teardown
+  via `_resetMusicState()`. Vérif statique : free-vars, orphelins, exports↔imports,
+  doubles déclarations, `node --check` — tout vert. **⚠️ Reste à SMOKE-TESTER avant
+  merge** (lecture son/playlist, pause/next/stop, sync 2ᵉ client, créer/suppr playlist).
+- ⏳ **Phase 1 — modules suivants** : `vtt-rest.js`, `vtt-tools-ruler.js`, puis chat
+  (en dernier des « simples » car couplage entrant massif). Même recette + vérif statique.
