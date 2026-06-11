@@ -134,6 +134,12 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   13634 l. (−114).** Circulaire : `_logCol` (le jet est diffusé dans vttLog). Pas de
   reset teardown. **⚠️ smoke-test** : 🎲 → composer une formule (dés + bonus), modes
   avantage/désavantage sur 1d20, lancer → résultat dans le log, visible par les autres.
-- ⏳ **Phase 1 — suivants** : `vtt-tools-ruler.js` (règle+annotations), puis Tray/Pages,
-  Inspector, Combat/attaque (gros), chat en dernier (couplage entrant massif).
-  Refs Firestore transverses (`_sesRef, _chrRef, _logCol`) exportées au besoin.
+- ✅ **Phase 1 — extraction `vtt-timer.js`** (109 l.) : minuteur de session (8 fns,
+  état partagé VS.session.timer, seul l'intervalId `_timerTick` local). **13634 →
+  13557 l. (−77).** Circulaire `_sesRef`. **⚠️ smoke-test** : démarrer/pause/reset le
+  minuteur (MJ), éditer le libellé, vérifier qu'il tourne et est visible par tous.
+- ⏳ **Phase 1 — reste = modules COUPLÉS** (les « panneaux » isolés sont sortis) :
+  `vtt-tools-ruler.js` (dessin/annot/règle : ~23 vars d'état + handlers liés au
+  système d'événements canvas), Tray/Pages, Inspector, Combat/attaque (gros), Combat
+  tracker, chat (couplage entrant massif). Ces extractions sont **plus risquées** —
+  smoke-test du lot courant recommandé avant d'y aller.
