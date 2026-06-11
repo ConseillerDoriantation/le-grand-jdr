@@ -64,6 +64,9 @@ import {
 import {
   _renderTimer, _timerStartTick, _timerStopTick, _vttTimerToggle, _vttTimerReset, _vttTimerLabel,
 } from './vtt-timer.js';
+import {
+  _renderCombatTracker, _renderCombatTrackerSoon, _vttCombatTab, _vttTrackerFocus,
+} from './vtt-combat-tracker.js';
 
 let _vttDelegSearch = '';
 
@@ -431,7 +434,7 @@ let _msSortQuery  = '', _msSortCat = 'all';
 // [_timerTick → vtt-timer.js]
 
 // ── Combat tracker (overlay haut-gauche sur le canvas) ──────────────
-let _combatTab = 'allies'; // 'allies' (joueurs + PNJ) | 'enemies' (MJ only)
+// [_combatTab → vtt-combat-tracker.js]
 
 // ── Refs Firestore ──────────────────────────────────────────────────
 // `aid` (id d'aventure) est désormais importé de vtt-state.js.
@@ -540,7 +543,7 @@ function _characterForToken(t) {
   return owned.length === 1 ? owned[0] : null;
 }
 
-function _live(t) {
+export function _live(t) {
   if (!t) return null;
   const c = _characterForToken(t);
   const n = t.npcId       ? VS.npcs[t.npcId]             : null;
@@ -1828,7 +1831,7 @@ function _patchShape(id) {
 }
 
 // ── Sélection ───────────────────────────────────────────────────────
-function _select(id) {
+export function _select(id) {
   _clearAim(); // changer de sélection annule une visée action-first en cours
   if (VS.imgTr&&VS.selImg) { VS.imgTr.nodes([]); VS.selImg=null; VS.layers.map?.batchDraw(); }
   VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
@@ -11847,134 +11850,7 @@ function _vttLibPlace(imgId) {
 // [TIMER DE SESSION → vtt-timer.js]
 
 // ═══════════════════════════════════════════════════════════════════
-// COMBAT TRACKER — overlay haut-gauche, visible quand combat actif
-// ═══════════════════════════════════════════════════════════════════
-function _trackerPortrait(ld, t) {
-  // Photo prioritaire : fiche perso/PNJ via _live (champ displayImage)
-  const url = ld.displayImage || null;
-  if (url) return `<img class="vct-photo" src="${url}" alt="">`;
-  const init = ((ld.displayName || t.name || '?').trim()[0] || '?').toUpperCase();
-  return `<div class="vct-photo vct-photo-init">${init}</div>`;
-}
-function _trackerRow(t) {
-  const ld = _live(t);
-  const moved = !!t.movedThisTurn || (t.movedCells || 0) > 0;
-  const acted = !!t.attackedThisTurn;
-  const bonusActed = !!t.bonusActionThisTurn;
-  const reacted = !!t.reactionThisTurn;
-  const done  = moved && acted;
-  const partial = moved !== acted;
-  const cls = done ? "vct-row--done" : (partial ? "vct-row--partial" : "vct-row--todo");
-  const name = _esc(ld.displayName || t.name || "—");
-  const turnPill = (field, active, icon, title) => STATE.isAdmin
-    ? `<button type="button" class="vct-pill vct-pill--toggle ${active ? "vct-pill--on" : ""}" data-vtt-fn="_vttToggleTurnFlag" data-vtt-args="${t.id}|${field}" title="${title} — cliquer pour modifier">${icon} ${active ? "✓" : "·"}</button>`
-    : `<span class="vct-pill ${active ? "vct-pill--on" : ""}" title="${title}">${icon} ${active ? "✓" : "·"}</span>`;
-  return `
-    <div class="vct-row ${cls}" data-tok="${t.id}" data-vtt-fn="_vttTrackerFocus" data-vtt-args="${t.id}" title="Cliquer pour centrer sur ce token">
-      ${_trackerPortrait(ld, t)}
-      <div class="vct-info">
-        <div class="vct-name">${name}</div>
-        <div class="vct-status">
-          <span class="vct-pill ${moved ? "vct-pill--on" : ""}" title="Déplacement effectué">🏃 ${moved ? "✓" : "·"}</span>
-          <span class="vct-pill ${acted ? "vct-pill--on" : ""}" title="Action effectuée">⚔ ${acted ? "✓" : "·"}</span>
-          ${turnPill("bonusActionThisTurn", bonusActed, "✦", "Action bonus effectuée")}
-          ${turnPill("reactionThisTurn", reacted, "⚡", "Réaction effectuée")}
-        </div>
-      </div>
-    </div>`;
-}
-function _renderCombatTracker() {
-  const el = document.getElementById('vtt-combat-tracker');
-  if (!el) return;
-  const active = !!VS.session?.combat?.active;
-  const mj = STATE.isAdmin;
-
-  // Combat inactif :
-  //   - MJ → carte compacte avec bouton "Démarrer le combat"
-  //   - Joueur → masqué
-  if (!active) {
-    if (!mj) { el.style.display = 'none'; el.innerHTML = ''; return; }
-    el.style.display = 'block';
-    el.innerHTML = `
-      <div class="vct-header vct-header--idle">
-        <div class="vct-title">
-          <span class="vct-title-ico">⚔️</span>
-          <span class="vct-title-txt vct-title-txt--idle">Combat</span>
-        </div>
-        <button class="vct-mj-btn vct-mj-btn--start" data-vtt-fn="_vttToggleCombat" title="Démarrer le combat — reset déplacement et actions de tous les tokens">▶ Démarrer</button>
-      </div>`;
-    return;
-  }
-  el.style.display = 'block';
-
-  const round = VS.session?.combat?.round ?? 1;
-  const pageId = VS.activePage?.id;
-  const onPage = Object.values(VS.tokens).map(x => x?.data || x).filter(t => t && t.pageId === pageId);
-  const allies = onPage.filter(t => t.type === 'player' || t.type === 'npc');
-  const enemies = onPage.filter(t => t.type === 'enemy');
-
-  // tab par défaut "allies" — joueurs non-MJ ne voient pas l'onglet ennemis
-  const tab = (!mj && _combatTab === 'enemies') ? 'allies' : _combatTab;
-  const list = tab === 'enemies' ? enemies : allies;
-
-  // tri : joueurs d'abord, puis PNJ ; ennemis par HP% croissant
-  if (tab === 'allies') {
-    list.sort((a, b) => {
-      const r = (a.type === 'player' ? 0 : 1) - (b.type === 'player' ? 0 : 1);
-      if (r !== 0) return r;
-      const na = _live(a).displayName || a.name || '';
-      const nb = _live(b).displayName || b.name || '';
-      return na.localeCompare(nb);
-    });
-  }
-
-  const rows = list.length
-    ? list.map(_trackerRow).join('')
-    : `<div class="vct-empty">${tab === 'enemies' ? 'Aucun ennemi sur la page' : 'Aucun token allié sur la page'}</div>`;
-
-  el.innerHTML = `
-    <div class="vct-header">
-      <div class="vct-title">
-        <span class="vct-title-ico">⚔️</span>
-        <span class="vct-title-txt">Combat</span>
-        <span class="vct-round">Tour ${round}</span>
-      </div>
-      ${mj ? `
-        <div class="vct-mj-ctrls">
-          <button class="vct-mj-btn" data-vtt-fn="_vttNextRound" title="Tour suivant — reset déplacement et actions">▶ Tour</button>
-          <button class="vct-mj-btn vct-mj-btn--danger" data-vtt-fn="_vttToggleCombat" title="Terminer le combat">⏹</button>
-        </div>` : ''}
-    </div>
-    ${mj ? `
-      <div class="vct-tabs">
-        <button class="vct-tab ${tab==='allies' ? 'active' : ''}" data-vtt-fn="_vttCombatTab" data-vtt-args="allies">👥 Joueurs &amp; PNJ <span class="vct-tab-count">${allies.length}</span></button>
-        <button class="vct-tab ${tab==='enemies' ? 'active' : ''}" data-vtt-fn="_vttCombatTab" data-vtt-args="enemies">👹 Ennemis <span class="vct-tab-count">${enemies.length}</span></button>
-      </div>` : ''}
-    <div class="vct-list">${rows}</div>
-  `;
-}
-// Re-render groupé via microtask (évite les multi-rerender lors d'un batch reset)
-let _trackerDirty = false;
-function _renderCombatTrackerSoon() {
-  if (_trackerDirty) return;
-  _trackerDirty = true;
-  queueMicrotask(() => { _trackerDirty = false; _renderCombatTracker(); });
-}
-
-function _vttCombatTab(tab) {
-  if (tab !== 'allies' && tab !== 'enemies') return;
-  if (tab === 'enemies' && !STATE.isAdmin) return;
-  _combatTab = tab;
-  _renderCombatTracker();
-}
-function _vttTrackerFocus(tokId) {
-  // Centrer/sélectionner le token cliqué
-  const t = VS.tokens[tokId]?.data;
-  if (!t) return;
-  if (STATE.isAdmin || t.type !== 'enemy') {
-    try { _select(tokId); } catch {}
-  }
-}
+// [COMBAT TRACKER → vtt-combat-tracker.js]
 
 // ═══════════════════════════════════════════════════════════════════
 // HTML

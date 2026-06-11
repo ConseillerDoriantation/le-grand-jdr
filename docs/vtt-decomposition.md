@@ -138,8 +138,15 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   état partagé VS.session.timer, seul l'intervalId `_timerTick` local). **13634 →
   13557 l. (−77).** Circulaire `_sesRef`. **⚠️ smoke-test** : démarrer/pause/reset le
   minuteur (MJ), éditer le libellé, vérifier qu'il tourne et est visible par tous.
-- ⏳ **Phase 1 — reste = modules COUPLÉS** (les « panneaux » isolés sont sortis) :
-  `vtt-tools-ruler.js` (dessin/annot/règle : ~23 vars d'état + handlers liés au
-  système d'événements canvas), Tray/Pages, Inspector, Combat/attaque (gros), Combat
-  tracker, chat (couplage entrant massif). Ces extractions sont **plus risquées** —
-  smoke-test du lot courant recommandé avant d'y aller.
+- ✅ **Phase 1 — extraction `vtt-combat-tracker.js`** (153 l.) : overlay d'ordre de
+  combat (6 fns, rendu d'après VS.tokens + données effectives ; état `_combatTab`).
+  **13557 → 13433 l. (−124).** Circulaires : `_live` (données effectives) + `_select`
+  (sélection token). **⚠️ smoke-test** : démarrer un combat → overlay haut-gauche,
+  onglets alliés/ennemis, clic sur une ligne → focus token, tour suivant.
+- ⚠️ **Régression attrapée (timer)** : `_timerStartTick` appelé par `_vttMountTable`
+  n'était pas importé (classé « interne » à tort). Cause : l'ancien verify strippait
+  les template-literals et avalait la zone. **Nouvelle vérif FIABLE** (`_reverify`,
+  grep brut sans strip) intégrée → re-checke les 6 modules à chaque extraction.
+- ⏳ **Phase 1 — reste = modules COUPLÉS** : `vtt-tools-ruler.js` (dessin/annot/règle :
+  ~23 vars + handlers canvas), Tray/Pages, Inspector, Combat/attaque (gros), chat
+  (couplage entrant massif). Plus risqués.
