@@ -85,6 +85,10 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
 - ✅ **Phase 0 — lot 2 (cœur de scène)** : `session, pages, tokens, activePage` →
   `VS.*`. (≈436 occurrences.) Smoke-test : pan/zoom, sélection token, attaque, sync
   multi-clients, changement de page/scène.
-- ⏳ Prochains lots Phase 0 (cœur partagé restant) : `stage, layers, unsubs` (Konva) ;
-  `characters, npcs, bestiary` (entités liées) ; `selected, tool` (interaction).
-  Puis Phases 1+ : extraire les modules (état local ↦ dans le module).
+- ✅ **Phase 0 — lot 3 (reste du cœur partagé)** : `stage, layers, characters, npcs,
+  bestiary, selected, tool` → `VS.*`. (≈348 occurrences.) **Cœur partagé complet.**
+- ⏳ **Phase 1+ — extractions** : le cœur partagé étant dans `VS`, on peut sortir les
+  modules un à un. Prochain : `vtt/chat.js` (état local `emotes/chatMsgs/chatReplyTo`
+  déménage DANS le module ; lectures partagées via `VS`). Puis rest, tools-ruler, etc.
+  selon le tableau. Borderline (`unsubs, resizeObs, attackSrc, moveHL, bstTracker`) :
+  migrer vers `VS` seulement si une extraction le réclame.

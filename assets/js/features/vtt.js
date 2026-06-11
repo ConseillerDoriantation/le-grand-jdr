@@ -228,17 +228,13 @@ function _vttBindDispatch() {
 _vttBindDispatch();
 
 // ── État module ─────────────────────────────────────────────────────
-let _stage   = null, _layers = {}, _unsubs = [], _resizeObs = null;
-// VS.session, VS.pages, VS.tokens → VS (état de scène partagé, voir vtt-state.js)
+let _unsubs = [], _resizeObs = null;   // VS.stage, VS.layers → VS (cœur Konva partagé)
 let _vttEntered = false;   // le client a-t-il cliqué « Entrer » (listeners actifs) ?
-let _characters = {};   // characterId → character doc
-let _npcs       = {};   // npcId → npc doc
-let _bestiary   = {};   // beastId → creature doc (bestiaire)
 let _bestiaryLoads = new Map(); // beastId → Promise lecture doc ciblée
 let _bstTracker = {};   // creatureId → tracker joueur (pvActuel, pmActuel, caEstimee…)
-// VS.activePage → VS (id de la page de scène active, voir vtt-state.js)
-let _tool       = 'select';
-let _selected   = null, _attackSrc = null, _moveHL = [];
+let _attackSrc = null, _moveHL = [];   // VS.selected, VS.tool → VS ; VS.characters/VS.npcs/VS.bestiary → VS
+// (état de scène : session, pages, tokens, activePage, stage, layers, characters,
+//  npcs, bestiary, selected, tool → VS / vtt-state.js)
 // Mode "action d'abord" (action-first) : l'action est choisie AVANT la cible.
 // Quand _aimOpt est posée, un clic sur un token résout l'action sur cette cible.
 let _aimOpt     = null;   // option pré-choisie en attente de cible
@@ -375,12 +371,12 @@ const _npcCombat = (npc = {}) => npc?.combat || {};
 const _tokenStatMod = (t, statKey) => {
   if (!t || !statKey) return 0;
   if (t.characterId) {
-    const c = _characters[t.characterId];
+    const c = VS.characters[t.characterId];
     return c ? getMod(c, statKey) : 0;
   }
-  if (t.npcId) return _npcStatMod(_npcs[t.npcId] || {}, statKey);
+  if (t.npcId) return _npcStatMod(VS.npcs[t.npcId] || {}, statKey);
   if (t.beastId) {
-    const b = _bestiary[t.beastId];
+    const b = VS.bestiary[t.beastId];
     // Le bestiaire stocke les stats DIRECTEMENT sur l'objet (b.force, b.constitution…)
     // et non dans b.stats. Fallback sur b.stats si jamais des données legacy utilisent
     // cette structure. Score par défaut 10 si non saisi (mod 0).
@@ -537,9 +533,9 @@ function _vttPrimaryWeapon(c) {
 
 function _characterForToken(t) {
   if (!t) return null;
-  if (t.characterId && _characters[t.characterId]) return _characters[t.characterId];
+  if (t.characterId && VS.characters[t.characterId]) return VS.characters[t.characterId];
   if (!t.ownerId) return null;
-  const owned = Object.values(_characters || {}).filter(c => c?.uid === t.ownerId);
+  const owned = Object.values(VS.characters || {}).filter(c => c?.uid === t.ownerId);
   const tokenName = _norm(t.name || '');
   const byName = tokenName ? owned.find(c => _norm(c?.nom || '') === tokenName) : null;
   if (byName) return byName;
@@ -549,8 +545,8 @@ function _characterForToken(t) {
 function _live(t) {
   if (!t) return null;
   const c = _characterForToken(t);
-  const n = t.npcId       ? _npcs[t.npcId]             : null;
-  const b = t.beastId     ? _bestiary[t.beastId]       : null;
+  const n = t.npcId       ? VS.npcs[t.npcId]             : null;
+  const b = t.beastId     ? VS.bestiary[t.beastId]       : null;
   const e = c || n || b;
 
   if (!e) return {
@@ -737,7 +733,7 @@ function _canControlToken(t, uid = STATE.user?.uid) {
 function _resolveUidName(uid) {
   if (!uid) return '?';
   // Cherche le perso lié à cet UID
-  const ch = Object.values(_characters || {}).find(c => c?.uid === uid);
+  const ch = Object.values(VS.characters || {}).find(c => c?.uid === uid);
   if (ch?.ownerPseudo) return ch.ownerPseudo;
   if (ch?.nom)         return ch.nom;
   // Fallback : UID court
@@ -912,8 +908,8 @@ async function _syncAutoTokens() {
     if (!key) continue;
 
     // Orphelin : l'entité a été supprimée → drop quoi qu'il arrive
-    if (data.characterId && !_characters[data.characterId]) { toDelete.push(data.id); continue; }
-    if (data.npcId       && !_npcs[data.npcId])             { toDelete.push(data.id); continue; }
+    if (data.characterId && !VS.characters[data.characterId]) { toDelete.push(data.id); continue; }
+    if (data.npcId       && !VS.npcs[data.npcId])             { toDelete.push(data.id); continue; }
 
     hasAnyToken.add(key);
 
@@ -926,14 +922,14 @@ async function _syncAutoTokens() {
 
   // ─ 2. Identifier les entités sans aucun token → à créer ──────────────
   const toCreate = [];
-  for (const c of Object.values(_characters)) {
+  for (const c of Object.values(VS.characters)) {
     if (!hasAnyToken.has('c:' + c.id)) toCreate.push({
       detId: `auto_c_${c.id}`,
       name: c.nom || 'Personnage', type: 'player',
       characterId: c.id, npcId: null, beastId: null, ownerId: c.uid || null,
     });
   }
-  for (const n of Object.values(_npcs)) {
+  for (const n of Object.values(VS.npcs)) {
     if (!hasAnyToken.has('n:' + n.id)) toCreate.push({
       detId: `auto_n_${n.id}`,
       name: n.nom || 'PNJ', type: 'npc',
@@ -982,7 +978,7 @@ async function _loadKonva() {
 // ═══════════════════════════════════════════════════════════════════
 function _cleanup() {
   _unsubs.forEach(u => u?.());
-  _unsubs = []; _stage?.destroy(); _stage = null; _layers = {};
+  _unsubs = []; VS.stage?.destroy(); VS.stage = null; VS.layers = {};
   _resizeObs?.disconnect(); _resizeObs = null;
   if (_presHeartbeat) {
     clearInterval(_presHeartbeat); _presHeartbeat = null;
@@ -1009,9 +1005,9 @@ function _cleanup() {
   _mtClear(true);
   _mtBroadcasting = false;
   _presence = {}; _miniUid = null; _miniCharId = null;
-  VS.tokens = {}; VS.pages = {}; _characters = {}; _npcs = {}; _bestiary = {}; _bstTracker = {};
+  VS.tokens = {}; VS.pages = {}; VS.characters = {}; VS.npcs = {}; VS.bestiary = {}; _bstTracker = {};
   _bestiaryLoads.clear();
-  VS.session = {}; VS.activePage = null; _selected = null; _attackSrc = null;
+  VS.session = {}; VS.activePage = null; VS.selected = null; _attackSrc = null;
   _clearAim(); _hideActBar();
   _moveHL = []; _autoSyncDone = false; _renderedPings.clear(); _renderedReactions.clear();
   _selectedMulti.clear(); _multiDragOrigin = null;
@@ -1040,10 +1036,10 @@ function _cleanup() {
 function _initCanvas(container) {
   const K = window.Konva;
   K.dragButtons = [0, 2]; // Drag autorisé au clic gauche et droit (tokens/images/annotations).
-  _stage = new K.Stage({ container, width: container.clientWidth, height: container.clientHeight });
+  VS.stage = new K.Stage({ container, width: container.clientWidth, height: container.clientHeight });
   // Konva recommande max 3-5 layers. On consolide bg+map dans `backLayer` et
   // fog+walls+mapFg+ping dans `frontLayer` via des Konva.Group. L'ordre interne
-  // préserve le z-order, et chaque "_layers.X" garde son API usuelle.
+  // préserve le z-order, et chaque "VS.layers.X" garde son API usuelle.
   // batchDraw() est forwardé vers le layer parent.
   // Ordre visuel : bg → map → grid → draw → token → fog → walls → mapFg → ping.
   // Le Stage ne contient ainsi que 5 vrais layers Konva.
@@ -1053,20 +1049,20 @@ function _initCanvas(container) {
     group.batchDraw = () => parentLayer.batchDraw();
     return group;
   };
-  _layers.bg    = _asLayer(new K.Group({ listening: false }), backLayer);
-  _layers.map   = _asLayer(new K.Group({ listening: false }), backLayer);
-  _layers.grid  = new K.Layer({ listening: true });
-  _layers.draw  = new K.Layer();                     // annotations (entre grille et tokens)
-  _layers.walls = _asLayer(new K.Group({ listening: true }), frontLayer);  // murs/portes/fenêtres/lumières
-  _layers.token = new K.Layer();
-  _layers.fog   = _asLayer(new K.Group({ listening: false }), frontLayer); // masque de brouillard
-  _layers.mapFg = _asLayer(new K.Group({ listening: false }), frontLayer);
-  _layers.ping  = _asLayer(new K.Group({ listening: false }), frontLayer);
-  backLayer.add(_layers.bg, _layers.map);
+  VS.layers.bg    = _asLayer(new K.Group({ listening: false }), backLayer);
+  VS.layers.map   = _asLayer(new K.Group({ listening: false }), backLayer);
+  VS.layers.grid  = new K.Layer({ listening: true });
+  VS.layers.draw  = new K.Layer();                     // annotations (entre grille et tokens)
+  VS.layers.walls = _asLayer(new K.Group({ listening: true }), frontLayer);  // murs/portes/fenêtres/lumières
+  VS.layers.token = new K.Layer();
+  VS.layers.fog   = _asLayer(new K.Group({ listening: false }), frontLayer); // masque de brouillard
+  VS.layers.mapFg = _asLayer(new K.Group({ listening: false }), frontLayer);
+  VS.layers.ping  = _asLayer(new K.Group({ listening: false }), frontLayer);
+  backLayer.add(VS.layers.bg, VS.layers.map);
   // fog AVANT walls : les murs/portes/lumières restent toujours lisibles au-dessus du brouillard.
-  frontLayer.add(_layers.fog, _layers.walls, _layers.mapFg, _layers.ping);
-  _stage.add(backLayer, _layers.grid, _layers.draw, _layers.token, frontLayer);
-  fogInit(_stage, _layers, CELL);
+  frontLayer.add(VS.layers.fog, VS.layers.walls, VS.layers.mapFg, VS.layers.ping);
+  VS.stage.add(backLayer, VS.layers.grid, VS.layers.draw, VS.layers.token, frontLayer);
+  fogInit(VS.stage, VS.layers, CELL);
   fogSetPgRef(id => _pgRef(id));
 
   // Transformers pour redimensionner les images (MJ uniquement)
@@ -1077,8 +1073,8 @@ function _initCanvas(container) {
       anchorStroke: '#4f8cff', anchorFill: '#fff',
       anchorSize: 10, anchorCornerRadius: 3,
     };
-    VS.imgTr   = new K.Transformer(trCfg); _layers.map.add(VS.imgTr);
-    VS.imgTrFg = new K.Transformer(trCfg); _layers.mapFg.add(VS.imgTrFg);
+    VS.imgTr   = new K.Transformer(trCfg); VS.layers.map.add(VS.imgTr);
+    VS.imgTrFg = new K.Transformer(trCfg); VS.layers.mapFg.add(VS.imgTrFg);
   }
 
   // Transformer annotations — disponible pour tous (chaque joueur interagit avec ses propres dessins)
@@ -1089,11 +1085,11 @@ function _initCanvas(container) {
     rotateAnchorOffset: 26, padding: 5,
     rotationSnaps: [0, 45, 90, 135, 180, 225, 270, 315], rotationSnapTolerance: 8,
   });
-  _layers.draw.add(_annotTransformer);
+  VS.layers.draw.add(_annotTransformer);
 
   // Listener natif window : règle + marquee (bypass Konva, garanti même hors drag)
   const _nativeMoveHandler = e => {
-    if (!_stage) return;
+    if (!VS.stage) return;
     const rect = container.getBoundingClientRect();
     const inCanvas = e.clientX >= rect.left && e.clientX <= rect.right &&
                      e.clientY >= rect.top  && e.clientY <= rect.bottom;
@@ -1102,11 +1098,11 @@ function _initCanvas(container) {
       : null;
 
     // Règle (free-hover, reste dans le canvas)
-    if (wp && _tool === 'ruler' && _rulerActive) _updateRuler(wp);
+    if (wp && VS.tool === 'ruler' && _rulerActive) _updateRuler(wp);
     else if (!wp && _rulerHoverDot) _hideRulerHover();
 
     // Marquee : suivi pendant le drag (peut sortir légèrement du canvas)
-    if (_tool === 'select' && _marqueeOrigin) {
+    if (VS.tool === 'select' && _marqueeOrigin) {
       const trackWp = wp ?? _marqueeLastWp; // utiliser la dernière pos connue si hors canvas
       if (!trackWp) return;
       if (!_marqueeActive) {
@@ -1122,7 +1118,7 @@ function _initCanvas(container) {
             stroke: '#4f8cff', strokeWidth: 1.5, fill: 'rgba(79,140,255,0.1)',
             dash: [6, 3], listening: false, name: 'marquee',
           });
-          _layers.ping.add(_marqueeShape);
+          VS.layers.ping.add(_marqueeShape);
         }
       }
       if (_marqueeActive && wp) {
@@ -1131,21 +1127,21 @@ function _initCanvas(container) {
         _marqueeShape?.setAttrs({ x, y,
           width:  Math.abs(wp.x - _marqueeOrigin.x),
           height: Math.abs(wp.y - _marqueeOrigin.y) });
-        _layers.ping?.batchDraw();
+        VS.layers.ping?.batchDraw();
       }
     }
   };
   window.addEventListener('mousemove', _nativeMoveHandler);
   _unsubs.push(() => window.removeEventListener('mousemove', _nativeMoveHandler));
 
-  _stage.on('wheel', e => {
+  VS.stage.on('wheel', e => {
     e.evt.preventDefault();
-    const old = _stage.scaleX();
+    const old = VS.stage.scaleX();
     const dir = e.evt.deltaY < 0 ? 1 : -1;
     const sc  = Math.min(MAX_SCALE, Math.max(MIN_SCALE, old * (1 + dir * 0.1)));
-    const ptr = _stage.getPointerPosition();
-    _stage.scale({ x:sc, y:sc });
-    _stage.position({ x: ptr.x - (ptr.x-_stage.x())*(sc/old), y: ptr.y - (ptr.y-_stage.y())*(sc/old) });
+    const ptr = VS.stage.getPointerPosition();
+    VS.stage.scale({ x:sc, y:sc });
+    VS.stage.position({ x: ptr.x - (ptr.x-VS.stage.x())*(sc/old), y: ptr.y - (ptr.y-VS.stage.y())*(sc/old) });
   });
 
   let _pan = false, _po = null, _rightStageDown = null;
@@ -1155,18 +1151,18 @@ function _initCanvas(container) {
   // toucher .draggable() ici.
   const _startMiddlePan = e => {
     if (e.button !== 1) return;
-    if (!_stage) return;
+    if (!VS.stage) return;
     e.preventDefault();
     if (_middlePanActive) return;
 
     _middlePanActive = true;
     _pan = true;
-    _po = { x: e.clientX - _stage.x(), y: e.clientY - _stage.y() };
+    _po = { x: e.clientX - VS.stage.x(), y: e.clientY - VS.stage.y() };
 
     const onMove = ev => {
       if ((ev.buttons & 4) === 0) { onUp(); return; }
       ev.preventDefault();
-      _stage.position({ x: ev.clientX - _po.x, y: ev.clientY - _po.y });
+      VS.stage.position({ x: ev.clientX - _po.x, y: ev.clientY - _po.y });
     };
     const onUp = () => {
       _middlePanActive = false;
@@ -1190,28 +1186,28 @@ function _initCanvas(container) {
     container.removeEventListener('auxclick',  _preventMiddleAuxClick, true);
   });
 
-  _stage.on('mousedown', e => {
+  VS.stage.on('mousedown', e => {
     if (fogIsEditMode()) return; // éditeur de murs gère ses propres events
     if (e.evt.button===2) {
       e.evt.preventDefault();
       // Règle : clic droit = annulation immédiate (en cours ou figée), sans changer d'outil.
-      if (_tool === 'ruler' && (_rulerActive || _rulerNodes)) {
+      if (VS.tool === 'ruler' && (_rulerActive || _rulerNodes)) {
         _clearRuler();
         _rightStageDown = null;
         return;
       }
       // Pan caméra au clic droit UNIQUEMENT sur stage vide.
       // Sur un token/image/annotation, on laisse Konva gérer le drag (K.dragButtons=[0,2]).
-      if (e.target === _stage) {
-        _pan = true; _po = { x:e.evt.clientX-_stage.x(), y:e.evt.clientY-_stage.y() };
+      if (e.target === VS.stage) {
+        _pan = true; _po = { x:e.evt.clientX-VS.stage.x(), y:e.evt.clientY-VS.stage.y() };
         _rightStageDown = { x:e.evt.clientX, y:e.evt.clientY };
       }
     }
     if (e.evt.button===0) {
-      const rect0 = _stage.container().getBoundingClientRect();
+      const rect0 = VS.stage.container().getBoundingClientRect();
       const np = { x: e.evt.clientX - rect0.left, y: e.evt.clientY - rect0.top };
       // Règle : 1er clic = départ, 2e clic = fin (pas besoin de maintenir)
-      if (_tool === 'ruler') {
+      if (VS.tool === 'ruler') {
         if (_pingTimer) { clearTimeout(_pingTimer); _pingTimer = null; }
         const wp = _stageToWorld(np);
         if (!_rulerActive) _startRuler(wp);
@@ -1219,62 +1215,62 @@ function _initCanvas(container) {
         return;
       }
       // Dessin : cliquer-glisser. Gomme : supprime au survol pressé.
-      if (_tool === 'draw') {
+      if (VS.tool === 'draw') {
         if (_pingTimer) { clearTimeout(_pingTimer); _pingTimer = null; }
         if (_drawShape === 'eraser') { _erasing = true; _eraseAtPointer(); return; }
         _startDraw(_stageToWorld(np));
         return;
       }
       // Clic normal → ping (+ départ marquee en mode select)
-      if (e.target===_stage) {
-        if (_tool === 'select') _marqueeOrigin = _stageToWorld(np);
+      if (e.target===VS.stage) {
+        if (VS.tool === 'select') _marqueeOrigin = _stageToWorld(np);
         _pingOrigin = { ...np };
         _pingTimer = setTimeout(() => {
           _pingTimer = null;
           if (_marqueeActive) return; // pas de ping si le lasso est en cours
-          const sc = _stage.scaleX(), sp = _stage.position();
+          const sc = VS.stage.scaleX(), sp = VS.stage.position();
           _emitPing((_pingOrigin.x - sp.x) / sc, (_pingOrigin.y - sp.y) / sc);
         }, 300);
       }
     }
   });
-  _stage.on('mousemove', e => {
-    if (_pan && _po) _stage.position({ x:e.evt.clientX-_po.x, y:e.evt.clientY-_po.y });
+  VS.stage.on('mousemove', e => {
+    if (_pan && _po) VS.stage.position({ x:e.evt.clientX-_po.x, y:e.evt.clientY-_po.y });
     // Coordonnées canvas-relatives à partir de l'événement natif (plus fiable que getPointerPosition)
-    const rect = _stage.container().getBoundingClientRect();
+    const rect = VS.stage.container().getBoundingClientRect();
     const stagePtr = { x: e.evt.clientX - rect.left, y: e.evt.clientY - rect.top };
     if (_pingTimer && _pingOrigin) {
       const dx = stagePtr.x - _pingOrigin.x, dy = stagePtr.y - _pingOrigin.y;
       if (dx*dx + dy*dy > 64) { clearTimeout(_pingTimer); _pingTimer = null; }
     }
     const wp = _stageToWorld(stagePtr);
-    if (_tool === 'ruler' && _rulerActive)      _updateRuler(wp);
-    else if (_tool === 'ruler')                 _showRulerHover(wp);
-    if (_tool === 'draw'  && _drawShape === 'eraser' && _erasing && !_pan) _eraseAtPointer();
-    else if (_tool === 'draw' && _drawing && !_pan) _updateDraw(wp);
+    if (VS.tool === 'ruler' && _rulerActive)      _updateRuler(wp);
+    else if (VS.tool === 'ruler')                 _showRulerHover(wp);
+    if (VS.tool === 'draw'  && _drawShape === 'eraser' && _erasing && !_pan) _eraseAtPointer();
+    else if (VS.tool === 'draw' && _drawing && !_pan) _updateDraw(wp);
     if (_zoneCtx) _zoneUpdatePreview(wp);
   });
-  _stage.on('mouseup', () => {
+  VS.stage.on('mouseup', () => {
     _pan = false;
     _erasing = false;
     if (_pingTimer) { clearTimeout(_pingTimer); _pingTimer = null; }
     if (_marqueeActive) { _endMarquee(); _suppressNextClick = true; }
     _marqueeOrigin = null;
-    if (_tool === 'draw' && _drawing) _endDraw();
+    if (VS.tool === 'draw' && _drawing) _endDraw();
   });
-  _stage.on('contextmenu', e => {
+  VS.stage.on('contextmenu', e => {
     e.evt.preventDefault();
-    if (e.target !== _stage) return;
-    if (_tool === 'ruler') return; // clic droit en mode règle = annulation, pas de désélection
+    if (e.target !== VS.stage) return;
+    if (VS.tool === 'ruler') return; // clic droit en mode règle = annulation, pas de désélection
     const moved = _rightStageDown
       ? Math.hypot(e.evt.clientX - _rightStageDown.x, e.evt.clientY - _rightStageDown.y) > 6
       : false;
     _rightStageDown = null;
     if (!moved) { _deselect(); _deselectAnnot(); }
   });
-  _stage.on('click', e => {
+  VS.stage.on('click', e => {
     if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
-    if (e.target===_stage) {
+    if (e.target===VS.stage) {
       if (_suppressNextClick) { _suppressNextClick = false; return; }
       if (_selfCtx) return; // placement déplacement actif : clic hors case = ne rien faire
       if (_zoneCtx) { _zoneCtx.placed = !_zoneCtx.placed; return; }
@@ -1283,42 +1279,42 @@ function _initCanvas(container) {
   });
 
   _resizeObs = new ResizeObserver(() => {
-    if (!_stage) return;
-    _stage.width(container.clientWidth); _stage.height(container.clientHeight);
+    if (!VS.stage) return;
+    VS.stage.width(container.clientWidth); VS.stage.height(container.clientHeight);
   });
   _resizeObs.observe(container);
 }
 
 function _drawGrid() {
-  if (!_stage||!VS.activePage) return;
+  if (!VS.stage||!VS.activePage) return;
   const K = window.Konva;
-  _layers.bg.destroyChildren();
-  _layers.grid.find('Line').forEach(n=>n.destroy());
+  VS.layers.bg.destroyChildren();
+  VS.layers.grid.find('Line').forEach(n=>n.destroy());
   const { cols, rows } = VS.activePage;
   const W=cols*CELL, H=rows*CELL;
   // Fond sur la couche bg (sous les images)
-  _layers.bg.add(new K.Rect({ x:0,y:0,width:W,height:H,fill:'#12121f',listening:false }));
-  _layers.bg.batchDraw();
+  VS.layers.bg.add(new K.Rect({ x:0,y:0,width:W,height:H,fill:'#12121f',listening:false }));
+  VS.layers.bg.batchDraw();
   // Lignes de grille sur la couche grid (au-dessus des images)
   const s = { stroke:'rgba(255,255,255,0.22)',strokeWidth:1,listening:false };
-  for (let c=0;c<=cols;c++) _layers.grid.add(new K.Line({ points:[c*CELL,0,c*CELL,H], ...s }));
-  for (let r=0;r<=rows;r++) _layers.grid.add(new K.Line({ points:[0,r*CELL,W,r*CELL], ...s }));
-  _layers.grid.batchDraw();
+  for (let c=0;c<=cols;c++) VS.layers.grid.add(new K.Line({ points:[c*CELL,0,c*CELL,H], ...s }));
+  for (let r=0;r<=rows;r++) VS.layers.grid.add(new K.Line({ points:[0,r*CELL,W,r*CELL], ...s }));
+  VS.layers.grid.batchDraw();
 }
 
 function _renderMapImages() {
   if (!VS.activePage) return;
   const K = window.Konva;
   // Nettoyer les images des deux couches (sans détruire les transformers)
-  _layers.map.find('Image').forEach(n=>n.destroy());
-  _layers.mapFg?.find('Image').forEach(n=>n.destroy());
+  VS.layers.map.find('Image').forEach(n=>n.destroy());
+  VS.layers.mapFg?.find('Image').forEach(n=>n.destroy());
   if (VS.imgTr)   { VS.imgTr.nodes([]);   }
   if (VS.imgTrFg) { VS.imgTrFg.nodes([]); }
   VS.selImg = null;
 
   for (const img of (VS.activePage.backgroundImages??[])) {
     const isFg   = img.layer === 'fg';
-    const tgtLyr = isFg ? _layers.mapFg : _layers.map;
+    const tgtLyr = isFg ? VS.layers.mapFg : VS.layers.map;
     const tr     = isFg ? VS.imgTrFg      : VS.imgTr;
 
     const el = new Image(); el.crossOrigin='anonymous';
@@ -1346,9 +1342,9 @@ function _renderMapImages() {
           if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
           if (!VS.mapMode) return;
           e.cancelBubble = true;
-          VS.tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
+          VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
           _hideActBar();
-          _selected=null; _clearHL(); _renderInspector(null); _layers.token.batchDraw();
+          VS.selected=null; _clearHL(); _renderInspector(null); VS.layers.token.batchDraw();
           VS.selImg = img.id;
           // Vider l'autre transformer
           const otherTr = isFg ? VS.imgTr : VS.imgTrFg;
@@ -1562,7 +1558,7 @@ function _buildShape(t) {
     const el=new Image(); el.crossOrigin='anonymous';
     el.onload = () => {
       clipGrp.add(new K.Image({ image:el, x:-rx, y:-ry, width:rx*2, height:ry*2, listening:false }));
-      clipGrp.zIndex(2); _layers.token.batchDraw();
+      clipGrp.zIndex(2); VS.layers.token.batchDraw();
     };
     el.src = imgSrc;
     g.add(clipGrp); clipGrp.zIndex(2);
@@ -1583,13 +1579,13 @@ function _buildShape(t) {
       if (_zoneCtx || _mtCtx) {
         g.stopDrag();
         g.position({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2 });
-        _layers.token?.batchDraw();
+        VS.layers.token?.batchDraw();
         return;
       }
       if (_middlePanActive) {
         g.stopDrag();
         g.position({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2 });
-        _layers.token?.batchDraw();
+        VS.layers.token?.batchDraw();
         return;
       }
       if (_selectedMulti.has(t.id) && _selectedMulti.size>1) {
@@ -1617,7 +1613,7 @@ function _buildShape(t) {
             y:Math.round((orig.y+dy-d2.h*CELL/2)/CELL)*CELL+d2.h*CELL/2,
           });
         }
-        _layers.token.batchDraw();
+        VS.layers.token.batchDraw();
       }
     });
     // ─ Fin du drag : commit Firestore ─
@@ -1634,7 +1630,7 @@ function _buildShape(t) {
           s.position({x:nc*CELL+d2.w*CELL/2,y:nr*CELL+d2.h*CELL/2});
           batch.update(_tokRef(id),{col:nc,row:nr});
         }
-        _layers.token.batchDraw();
+        VS.layers.token.batchDraw();
         await batch.commit().catch(()=>showNotif('Erreur déplacement groupe','error'));
         _multiDragOrigin=null; return;
       }
@@ -1649,7 +1645,7 @@ function _buildShape(t) {
           const rem=maxMvt-(cur.movedCells||0);
           if (d > rem) {
             showNotif(rem<=0 ? 'Plus de mouvement ce tour !' : `Trop loin ! (${rem} case${rem!==1?'s':''} restante${rem!==1?'s':''})`, 'error');
-            g.position({x:cur.col*CELL+sw*CELL/2,y:cur.row*CELL+sh*CELL/2}); _layers.token.batchDraw(); return;
+            g.position({x:cur.col*CELL+sw*CELL/2,y:cur.row*CELL+sh*CELL/2}); VS.layers.token.batchDraw(); return;
           }
         }
       }
@@ -1658,10 +1654,10 @@ function _buildShape(t) {
         const cur=VS.tokens[t.id]?.data;
         if (cur && fogWallBlocksPath(cur.col, cur.row, c, r, VS.activePage.walls)) {
           showNotif('🧱 Chemin bloqué !', 'error');
-          g.position({x:cur.col*CELL+sw*CELL/2,y:cur.row*CELL+sh*CELL/2}); _layers.token.batchDraw(); return;
+          g.position({x:cur.col*CELL+sw*CELL/2,y:cur.row*CELL+sh*CELL/2}); VS.layers.token.batchDraw(); return;
         }
       }
-      g.position({x:c*CELL+sw*CELL/2,y:r*CELL+sh*CELL/2}); _layers.token.batchDraw();
+      g.position({x:c*CELL+sw*CELL/2,y:r*CELL+sh*CELL/2}); VS.layers.token.batchDraw();
       const patch={col:c,row:r};
       if (!STATE.isAdmin&&VS.session?.combat?.active) {
         const cur=VS.tokens[t.id]?.data;
@@ -1696,7 +1692,7 @@ function _buildShape(t) {
 
   const handleTokenAction = (e, opts = {}) => {
     e.cancelBubble = true;
-    if (_tool === 'ruler' || _tool === 'draw') return; // outils de dessin ignorent les tokens
+    if (VS.tool === 'ruler' || VS.tool === 'draw') return; // outils de dessin ignorent les tokens
     // Si le token du joueur est masqué sous un autre token, prioriser son propre token
     // lors d'une sélection simple (sauf attaque/zone/cible multi/shift).
     if (!STATE.isAdmin && !_attackSrc && !_zoneCtx && !_mtCtx && !e.evt.shiftKey
@@ -1801,10 +1797,10 @@ function _patchShape(id) {
     const shape = _buildShape(e.data);
     g.destroy();
     VS.tokens[id] = { ...e, shape };
-    _layers.token?.add(shape);
-    if (_selected === id) shape.findOne('.sel')?.visible(true);
+    VS.layers.token?.add(shape);
+    if (VS.selected === id) shape.findOne('.sel')?.visible(true);
     if (_attackSrc === id) shape.findOne('.atk')?.visible(true);
-    _layers.token?.batchDraw();
+    VS.layers.token?.batchDraw();
     return;
   }
   g.to({ x:e.data.col*CELL+sw*CELL/2, y:e.data.row*CELL+sh*CELL/2, duration:0.12 });
@@ -1836,26 +1832,26 @@ function _patchShape(id) {
   }
   g.findOne('.lbl')?.text(ld.displayName??e.data.name);
   g.visible(!!(e.data.visible||STATE.isAdmin));
-  _layers.token?.batchDraw();
+  VS.layers.token?.batchDraw();
 }
 
 // ── Sélection ───────────────────────────────────────────────────────
 function _select(id) {
   _clearAim(); // changer de sélection annule une visée action-first en cours
-  if (VS.imgTr&&VS.selImg) { VS.imgTr.nodes([]); VS.selImg=null; _layers.map?.batchDraw(); }
-  VS.tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
+  if (VS.imgTr&&VS.selImg) { VS.imgTr.nodes([]); VS.selImg=null; VS.layers.map?.batchDraw(); }
+  VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
   VS.tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
   _attackSrc=null; _clearHL();
-  _selected=id;
+  VS.selected=id;
   VS.tokens[id]?.shape?.findOne('.sel')?.visible(true);
-  _layers.token.batchDraw();
+  VS.layers.token.batchDraw();
   const data=VS.tokens[id]?.data;
   _renderInspector(data??null);
   // Clic sur un token allié/propre : portée de déplacement (bleu) + portée d'attaque (rouge)
   if (data && _canControlToken(data)) {
     _attackSrc=id;
     VS.tokens[id]?.shape?.findOne('.atk')?.visible(true);
-    _layers.token.batchDraw();
+    VS.layers.token.batchDraw();
     _showMoveRange(data);    // cases bleues cliquables (déplacement)
     _showAttackRange(data);  // cases rouges par-dessus (visuel portée)
     _showActBar(id);         // barre d'action ancrée (Armes/Sorts/Objets/Actions)
@@ -1865,14 +1861,14 @@ function _select(id) {
 }
 
 function _deselect() {
-  VS.tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
+  VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
   VS.tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
   _clearAim(); _hideActBar();
-  _selected=null; _attackSrc=null; _clearHL(); _clearMultiSelect(); _renderInspector(null);
-  if (VS.imgTr)   { VS.imgTr.nodes([]); _layers.map?.batchDraw(); }
-  if (VS.imgTrFg) { VS.imgTrFg.nodes([]); _layers.mapFg?.batchDraw(); }
+  VS.selected=null; _attackSrc=null; _clearHL(); _clearMultiSelect(); _renderInspector(null);
+  if (VS.imgTr)   { VS.imgTr.nodes([]); VS.layers.map?.batchDraw(); }
+  if (VS.imgTrFg) { VS.imgTrFg.nodes([]); VS.layers.mapFg?.batchDraw(); }
   VS.selImg=null;
-  _layers.token?.batchDraw();
+  VS.layers.token?.batchDraw();
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1886,7 +1882,7 @@ function _deselect() {
 function _showActBar(srcId) {
   _hideActBar();
   const t = VS.tokens[srcId]?.data; if (!t || !_canControlToken(t)) return;
-  const wrap = _stage?.container(); if (!wrap) return;
+  const wrap = VS.stage?.container(); if (!wrap) return;
   const opts = _buildAttackOptions(t);
   const weaponN  = opts.filter(o => !o._itemAction && o.sortIdx === undefined && !o.targetSelf).length;
   const itemN    = opts.filter(o => o._itemAction).length;
@@ -1920,13 +1916,13 @@ function _hideActBar() {
 
 // Re-positionne la barre sous le token courant (suit pan/zoom via rAF).
 function _positionActBar() {
-  if (!_actBar || !_stage) return;
+  if (!_actBar || !VS.stage) return;
   const sh = VS.tokens[_actBarSrc]?.shape;
   const t  = VS.tokens[_actBarSrc]?.data;
   if (!sh || !t || t.pageId !== VS.activePage?.id) { _hideActBar(); return; }
-  const wrap  = _stage.container();
+  const wrap  = VS.stage.container();
   const abs   = sh.getAbsolutePosition();        // px relatifs au wrap (scale + position inclus)
-  const scale = _stage.scaleY() || 1;
+  const scale = VS.stage.scaleY() || 1;
   const half  = (CELL * (_tokenDims(t).h || 1) / 2) * scale;
   const bw = _actBar.offsetWidth, bh = _actBar.offsetHeight;
   const wW = wrap.clientWidth, wH = wrap.clientHeight;
@@ -1967,7 +1963,7 @@ function _startAim(srcId, opt) {
   _aimSrcId = srcId; _aimOpt = opt;
   _attackSrc = srcId;   // garde l'anneau d'attaque + court-circuite la redirection vers son propre token
   VS.tokens[srcId]?.shape?.findOne('.atk')?.visible(true);
-  _layers.token?.batchDraw();
+  VS.layers.token?.batchDraw();
   _showAimRange(srcId, opt);
   _showAimHud(opt);
 }
@@ -1975,7 +1971,7 @@ function _startAim(srcId, opt) {
 // Surligne uniquement les cases atteignables par CETTE action (sa portée propre).
 function _showAimRange(srcId, opt) {
   _clearHL();
-  const t = VS.tokens[srcId]?.data; if (!t || !VS.activePage || !_layers.grid) return;
+  const t = VS.tokens[srcId]?.data; if (!t || !VS.activePage || !VS.layers.grid) return;
   const K = window.Konva;
   const portee = Math.max(1, parseInt(opt.portee) || 1);
   const sd = _tokenDims(t);
@@ -1990,9 +1986,9 @@ function _showAimRange(srcId, opt) {
     if (!reach(dx, dy)) continue;
     const rect = new K.Rect({ x:c*CELL, y:r*CELL, width:CELL, height:CELL,
       fill:`rgba(${c3},0.16)`, stroke:`rgba(${c3},0.62)`, strokeWidth:1.4, listening:false });
-    _layers.grid.add(rect); _moveHL.push(rect);
+    VS.layers.grid.add(rect); _moveHL.push(rect);
   }
-  _layers.grid.batchDraw();
+  VS.layers.grid.batchDraw();
 }
 
 function _showAimHud(opt) {
@@ -2078,15 +2074,15 @@ function _showMoveRange(t) {
       }
       if (_mtCtx) { e.cancelBubble = true; return; }
       e.cancelBubble = true;
-      if (_selected) await _moveTo(_selected, tc, tr);
+      if (VS.selected) await _moveTo(VS.selected, tc, tr);
     };
     rect.on('click', e => { if (e.evt.button!==0) return; moveSelectedHere(e); });
     rect.on('contextmenu', e => { e.evt.preventDefault(); moveSelectedHere(e); });
-    _layers.grid.add(rect); _moveHL.push(rect);
+    VS.layers.grid.add(rect); _moveHL.push(rect);
   }
-  _layers.grid.batchDraw();
+  VS.layers.grid.batchDraw();
 }
-function _clearHL() { _moveHL.forEach(r=>r.destroy()); _moveHL=[]; _layers.grid?.batchDraw(); }
+function _clearHL() { _moveHL.forEach(r=>r.destroy()); _moveHL=[]; VS.layers.grid?.batchDraw(); }
 
 /**
  * Refresh immédiat des zones de déplacement + attaque du token sélectionné.
@@ -2095,7 +2091,7 @@ function _clearHL() { _moveHL.forEach(r=>r.destroy()); _moveHL=[]; _layers.grid?
  * @param {object} [overrideData] - données à jour si l'objet Firestore n'est pas encore mis à jour
  */
 function _refreshRanges(id, overrideData) {
-  if (!id || id !== _selected) { _clearHL(); return; }
+  if (!id || id !== VS.selected) { _clearHL(); return; }
   const data = overrideData ?? VS.tokens[id]?.data;
   if (!data) { _clearHL(); return; }
   if (!_canControlToken(data)) { _clearHL(); return; }
@@ -2118,7 +2114,7 @@ async function _emitPing(wx, wy) {
 }
 
 function _animatePing({ id, x, y, color }, pingKey) {
-  if (!_layers.ping) return;
+  if (!VS.layers.ping) return;
   const K = window.Konva;
   const g = new K.Group({ x, y, listening: false });
 
@@ -2136,10 +2132,10 @@ function _animatePing({ id, x, y, color }, pingKey) {
   const ring3 = mkRing(3, 0.65);
   const ring4 = mkRing(2, 0.45);
   g.add(flash, ring1, ring2, ring3, ring4, dot);
-  _layers.ping.add(g);
-  _layers.ping.batchDraw();
+  VS.layers.ping.add(g);
+  VS.layers.ping.batchDraw();
 
-  const upd = () => _layers.ping?.batchDraw();
+  const upd = () => VS.layers.ping?.batchDraw();
   // Flash s'efface rapidement
   new K.Tween({ node: flash, duration: 0.35, radius: 50, opacity: 0, easing: K.Easings.EaseOut, onUpdate: upd }).play();
   // Anneaux s'expandent en cascade
@@ -2149,7 +2145,7 @@ function _animatePing({ id, x, y, color }, pingKey) {
   new K.Tween({ node: ring4, duration: 1.8, delay: 0.36, radius: 280, opacity: 0, easing: K.Easings.EaseOut, onUpdate: upd }).play();
   // Point disparaît en dernier
   new K.Tween({ node: dot, duration: 0.5, delay: 1.5, opacity: 0, easing: K.Easings.EaseIn,
-    onFinish: () => { g.destroy(); _layers.ping?.batchDraw(); } }).play();
+    onFinish: () => { g.destroy(); VS.layers.ping?.batchDraw(); } }).play();
 
   setTimeout(() => _renderedPings.delete(pingKey), 4000);
 }
@@ -2174,7 +2170,7 @@ function _showEmoteBubble(tokenId, emoteUrl, emoteName, key) {
   if (_renderedReactions.size > 400) _renderedReactions.clear();
 
   const e = tokenId ? VS.tokens[tokenId] : null;
-  if (e?.data && e.shape && e.data.pageId === VS.activePage?.id && _layers.ping && window.Konva) {
+  if (e?.data && e.shape && e.data.pageId === VS.activePage?.id && VS.layers.ping && window.Konva) {
     _spawnTokenEmote(e.data, emoteUrl, emoteName);
   } else {
     _spawnCornerEmote(emoteUrl, emoteName);
@@ -2206,15 +2202,15 @@ function _spawnTokenEmote(t, emoteUrl, emoteName) {
   // Image rognée en cercle
   const clip = new K.Group({ clipFunc: ctx => { ctx.arc(0, 0, R * 0.86, 0, Math.PI * 2, false); } });
   group.add(clip);
-  _layers.ping.add(group);
-  _layers.ping.batchDraw();
+  VS.layers.ping.add(group);
+  VS.layers.ping.batchDraw();
 
   const imgEl = new Image();
   imgEl.onload = () => {
     if (group.getStage() === null) return; // déjà détruit
     const side = R * 1.78;
     clip.add(new K.Image({ image: imgEl, width: side, height: side, x: -side / 2, y: -side / 2 }));
-    _layers.ping.batchDraw();
+    VS.layers.ping.batchDraw();
   };
   imgEl.onerror = () => {};
   imgEl.src = emoteUrl;
@@ -2229,7 +2225,7 @@ function _spawnTokenEmote(t, emoteUrl, emoteName) {
           if (group.getStage() === null) return; // stage détruit (changement de page / sortie)
           group.to({
             y: cy - CELL * 0.9, opacity: 0, duration: 0.85, easing: K.Easings.EaseIn,
-            onFinish: () => { group.destroy(); _layers.ping?.batchDraw(); },
+            onFinish: () => { group.destroy(); VS.layers.ping?.batchDraw(); },
           });
         }, 1700);
       },
@@ -2288,17 +2284,17 @@ function _spawnCornerEmote(emoteUrl, emoteName) {
 // ── Multi-sélection ─────────────────────────────────────────────
 function _clearMultiSelect() {
   for (const id of _selectedMulti) {
-    if (id!==_selected) VS.tokens[id]?.shape?.findOne('.sel')?.visible(false);
+    if (id!==VS.selected) VS.tokens[id]?.shape?.findOne('.sel')?.visible(false);
   }
   _selectedMulti.clear();
-  _layers.token?.batchDraw();
+  VS.layers.token?.batchDraw();
 }
 
 function _toggleMultiSelect(id) {
   // Inclure le token principal courant dans la multi-sélection
-  if (_selected && !_selectedMulti.has(_selected)) {
-    _selectedMulti.add(_selected);
-    VS.tokens[_selected]?.shape?.findOne('.sel')?.visible(true);
+  if (VS.selected && !_selectedMulti.has(VS.selected)) {
+    _selectedMulti.add(VS.selected);
+    VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(true);
   }
   if (_selectedMulti.has(id)) {
     _selectedMulti.delete(id);
@@ -2306,10 +2302,10 @@ function _toggleMultiSelect(id) {
   } else {
     _selectedMulti.add(id);
     VS.tokens[id]?.shape?.findOne('.sel')?.visible(true);
-    _selected = id;
+    VS.selected = id;
     _renderInspector(VS.tokens[id]?.data??null);
   }
-  _layers.token?.batchDraw();
+  VS.layers.token?.batchDraw();
 }
 
 /** Surbrillance rouge des cases à portée d'attaque de t (sans clear — le caller nettoie). */
@@ -2360,9 +2356,9 @@ function _showAttackRange(t) {
       : new K.Rect({ x:c*CELL, y:r*CELL, width:CELL, height:CELL,
           fill:'rgba(167,139,250,0.10)', stroke:'rgba(167,139,250,0.55)',
           strokeWidth:1.2, dash:[6,4], listening:false });
-    _layers.grid.add(rect); _moveHL.push(rect);
+    VS.layers.grid.add(rect); _moveHL.push(rect);
   }
-  _layers.grid.batchDraw();
+  VS.layers.grid.batchDraw();
 }
 async function _moveTo(id, col, row) {
   const cur = VS.tokens[id]?.data;
@@ -2579,7 +2575,7 @@ function _splitDiceFormula(str) {
 // de lecture).
 // Dimensions du token en cases (W × H). Compat : si seul tokenSize est défini, on l'applique aux deux.
 const _tokenDims = t => {
-  const b = t?.beastId ? _bestiary[t.beastId] : null;
+  const b = t?.beastId ? VS.bestiary[t.beastId] : null;
   const w = t?.tokenW ?? t?.tokenSize ?? b?.tokenW ?? b?.tokenSize ?? 1;
   const h = t?.tokenH ?? t?.tokenSize ?? b?.tokenH ?? b?.tokenSize ?? 1;
   return { w: Math.max(1, Math.min(5, w)), h: Math.max(1, Math.min(5, h)) };
@@ -2588,8 +2584,8 @@ const _tokenDims = t => {
 // Cherche un token possédé par le joueur courant couvrant la position du pointeur.
 // Sert à débloquer la sélection quand le token du joueur est masqué sous un autre.
 function _findOwnTokenAtPointer() {
-  const uid = STATE.user?.uid; if (!uid || !_stage) return null;
-  const pos = _stage.getPointerPosition(); if (!pos) return null;
+  const uid = STATE.user?.uid; if (!uid || !VS.stage) return null;
+  const pos = VS.stage.getPointerPosition(); if (!pos) return null;
   const w = _stageToWorld(pos);
   const cx = Math.floor(w.x / CELL), cy = Math.floor(w.y / CELL);
   for (const [id, entry] of Object.entries(VS.tokens)) {
@@ -2873,8 +2869,8 @@ function _vttSpellMods(s) {
 /** Rang d'un attaquant pour comparaisons de tier (PJ = 'classique' par défaut). */
 function _attackerRank(src) {
   if (!src) return 'classique';
-  if (src.beastId) return String(_bestiary[src.beastId]?.rang || 'classique').toLowerCase();
-  if (src.npcId)   return String(_npcs[src.npcId]?.rang || 'classique').toLowerCase();
+  if (src.beastId) return String(VS.bestiary[src.beastId]?.rang || 'classique').toLowerCase();
+  if (src.npcId)   return String(VS.npcs[src.npcId]?.rang || 'classique').toLowerCase();
   if (src.characterId) return 'classique'; // PJ : tier classique par défaut
   return 'classique';
 }
@@ -2987,13 +2983,13 @@ function _selfClear() {
   _selfCells.forEach(r => r.destroy());
   _selfCells = [];
   _selfCtx = null;
-  _layers.grid?.batchDraw();
+  VS.layers.grid?.batchDraw();
 }
 
 function _startSelfMove(srcId, opt, cells) {
   _zoneClear(); _selfClear();
   _clearHL(); // retire les cases de déplacement classique pour éviter la confusion
-  const src = VS.tokens[srcId]?.data; if (!src || !_layers.grid || !VS.activePage) return;
+  const src = VS.tokens[srcId]?.data; if (!src || !VS.layers.grid || !VS.activePage) return;
   const mv  = Math.max(1, cells || 1);
   _selfCtx = { srcId, cells: mv, opt };
   const K = window.Konva;
@@ -3011,10 +3007,10 @@ function _startSelfMove(srcId, opt, cells) {
     const tc = c, tr = r;
     rect.on('click', async e => { if (e.evt.button !== 0) return; e.cancelBubble = true; await _selfMoveTo(tc, tr); });
     rect.on('contextmenu', e => { e.evt.preventDefault(); });
-    _layers.grid.add(rect);
+    VS.layers.grid.add(rect);
     _selfCells.push(rect);
   }
-  _layers.grid.batchDraw();
+  VS.layers.grid.batchDraw();
   _showSelfHud();
   showNotif(`Clic sur une case (≤ ${mv} case${mv > 1 ? 's' : ''})`, 'info');
 }
@@ -3064,7 +3060,7 @@ function _showSelfHud() {
 let _invPickState = null;  // { srcId, tgtId, opt, optIdx, lib, max, ids:Set }
 function _vttPickInvocations(srcId, tgtId, opt, optIdx) {
   const src = VS.tokens[srcId]?.data;
-  const c = src?.characterId ? _characters[src.characterId] : null;
+  const c = src?.characterId ? VS.characters[src.characterId] : null;
   const lib = Array.isArray(c?.invocations) ? c.invocations : [];
   const max = opt?.mods?.invocation?.maxInvocations || 1;
   if (!lib.length) {
@@ -3125,7 +3121,7 @@ async function _persistInvocationState(tokData) {
     const t = (tokData?.id && VS.tokens[tokData.id]?.data) ? VS.tokens[tokData.id].data : tokData;
     if (!t || t.summonKind !== 'invocation' || !t.summonInvId) return;
     const charId = t.summonOwnerCharId; if (!charId) return;
-    const c = _characters[charId]; if (!c || !Array.isArray(c.invocations)) return;
+    const c = VS.characters[charId]; if (!c || !Array.isArray(c.invocations)) return;
     const inv = c.invocations.find(iv => iv.id === t.summonInvId); if (!inv) return;
     inv.currentHp = Math.max(0, parseInt(t.hp ?? inv.currentHp ?? inv.stats?.pv) || 0);
     inv.currentPm = Math.max(0, parseInt(t.pm ?? inv.currentPm ?? inv.stats?.pmMax) || 0);
@@ -3163,7 +3159,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
     let restoreHp = null, restorePm = null;
 
     if (selIds && selIds.length) {
-      const c = src.characterId ? _characters[src.characterId] : null;
+      const c = src.characterId ? VS.characters[src.characterId] : null;
       const invDef = (c?.invocations || []).find(iv => iv.id === selIds[idx])
                   || (c?.invocations || []).find(iv => selIds.includes(iv.id));
       if (!invDef) return null;   // invocation supprimée de la bibliothèque
@@ -3244,14 +3240,14 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
   // Permet à la sentinelle de toucher à peu près comme une attaque de sort du lanceur
   let attackBonus = 5;
   if (src.characterId) {
-    const c = _characters[src.characterId];
+    const c = VS.characters[src.characterId];
     if (c) {
       const mainP   = getMainWeapon(c);
       const statKey = mainP?.toucherStat || mainP?.statAttaque || 'force';
       attackBonus = (getMod(c, statKey) || 0) + 5;
     }
   } else if (src.npcId) {
-    attackBonus = (_npcStatMod(_npcs[src.npcId] || {}, 'force') || 0) + 5;
+    attackBonus = (_npcStatMod(VS.npcs[src.npcId] || {}, 'force') || 0) + 5;
   }
 
   // Seuil critique hérité du sort (combo Chance)
@@ -3949,7 +3945,7 @@ function _buildAttackOptions(t) {
       let _ownerSetPmDelta = 0;
       if (t.summonOwnerId) {
         const _ownerData = VS.tokens[t.summonOwnerId]?.data;
-        const _ownerChar = _ownerData?.characterId ? _characters[_ownerData.characterId] : null;
+        const _ownerChar = _ownerData?.characterId ? VS.characters[_ownerData.characterId] : null;
         if (_ownerChar) _ownerSetPmDelta = getArmorSetData(_ownerChar).modifiers?.spellPmDelta || 0;
       }
       t.summonActions.forEach((a, ai) => {
@@ -4131,7 +4127,7 @@ function _buildAttackOptions(t) {
 
   // ── PNJ : stats saisies dans la fiche PNJ ──
   if (!c && t.npcId) {
-    const n = _npcs[t.npcId] || {};
+    const n = VS.npcs[t.npcId] || {};
     const combat = _npcCombat(n);
     const weapon = combat.weapon || {};
     const dmgStat = (Array.isArray(weapon.degatsStats) && weapon.degatsStats.length
@@ -4894,7 +4890,7 @@ function _atkInteractionHtml(opt) {
   for (const tid of tids) {
     const td = VS.tokens[tid]?.data;
     if (!td || td.type !== 'enemy' || !td.beastId) continue;
-    const inter = previewDamageInteraction(opt.damageTypeId, _bestiary[td.beastId]);
+    const inter = previewDamageInteraction(opt.damageTypeId, VS.bestiary[td.beastId]);
     if (inter) buckets[inter] = (buckets[inter] || 0) + 1;
   }
   const entries = Object.entries(buckets);
@@ -5324,7 +5320,7 @@ function _tokenCenter(t) {
 
 /** Dessine une ligne pointillée src→tgt sur le layer token. */
 function _mtDrawLine(srcData, tgtData, color) {
-  const K = window.Konva; if (!K || !_layers.token) return null;
+  const K = window.Konva; if (!K || !VS.layers.token) return null;
   const s = _tokenCenter(srcData), t = _tokenCenter(tgtData);
   const line = new K.Line({
     points: [s.x, s.y, t.x, t.y],
@@ -5336,8 +5332,8 @@ function _mtDrawLine(srcData, tgtData, color) {
     listening: false,
     name: 'mt-line',
   });
-  _layers.token.add(line);
-  _layers.token.batchDraw();
+  VS.layers.token.add(line);
+  VS.layers.token.batchDraw();
   return line;
 }
 
@@ -5346,13 +5342,13 @@ function _mtClearLines() {
   if (!_mtCtx?.lines) return;
   _mtCtx.lines.forEach(l => l.destroy());
   _mtCtx.lines.clear();
-  _layers.token?.batchDraw();
+  VS.layers.token?.batchDraw();
 }
 
 /** Supprime les lignes distantes (broadcast). */
 function _clearRemoteLines() {
-  _layers.token?.find('.remote-mt-line').forEach(l => l.destroy());
-  _layers.token?.batchDraw();
+  VS.layers.token?.find('.remote-mt-line').forEach(l => l.destroy());
+  VS.layers.token?.batchDraw();
 }
 
 /** Affiche ou met à jour le HUD flottant. */
@@ -5455,7 +5451,7 @@ function _mtToggleTarget(tgtId) {
     targets.splice(idx, 1);
     lines.get(tgtId)?.destroy();
     lines.delete(tgtId);
-    _layers.token?.batchDraw();
+    VS.layers.token?.batchDraw();
   } else {
     if (targets.length >= maxTargets) {
       showNotif(`Maximum ${maxTargets} cibles pour ce sort`, 'error');
@@ -5521,12 +5517,12 @@ function _zoneClear() {
   _zonePreview?.destroy();
   _zonePreview = null;
   _zoneCtx = null;
-  _layers.token?.batchDraw();
+  VS.layers.token?.batchDraw();
 }
 
 /** (Re)Construit le rectangle Konva de prévisualisation. */
 function _buildZonePreview() {
-  if (!_zoneCtx || !_layers.token) return;
+  if (!_zoneCtx || !VS.layers.token) return;
   _zonePreview?.destroy();
   const K = window.Konva;
   const { wPx, hPx, x, y } = _zoneCtx;
@@ -5552,9 +5548,9 @@ function _buildZonePreview() {
     text: `${_zoneCtx.opt.zoneW}×${_zoneCtx.opt.zoneH}c`,
     fill: '#fde047', fontSize: 11, fontStyle: 'bold', listening: false,
   }));
-  _layers.token.add(group);
+  VS.layers.token.add(group);
   _zonePreview = group;
-  _layers.token.batchDraw();
+  VS.layers.token.batchDraw();
 }
 
 /** Déplace la prévisualisation si la zone n'est pas posée. */
@@ -5566,7 +5562,7 @@ function _zoneUpdatePreview(wp) {
   const snapY = Math.round((wp.y - hPx / 2) / CELL) * CELL + hPx / 2;
   _zoneCtx.x = snapX; _zoneCtx.y = snapY;
   _zonePreview.position({ x: snapX, y: snapY });
-  _layers.token.batchDraw();
+  VS.layers.token.batchDraw();
 }
 
 /** Affiche le HUD de placement de zone. */
@@ -5630,7 +5626,7 @@ function _zoneRotate() {
   [_zoneCtx.wPx, _zoneCtx.hPx] = [_zoneCtx.hPx, _zoneCtx.wPx];
   _buildZonePreview();
   _zonePreview?.position({ x: _zoneCtx.x, y: _zoneCtx.y });
-  _layers.token?.batchDraw();
+  VS.layers.token?.batchDraw();
 }
 
 async function _zoneValidate() {
@@ -5675,7 +5671,7 @@ async function _zoneValidate() {
       _zoneCtx.opt = { ..._zoneCtx.opt, label: `${opt.label} (${done + 1}/${total})` };
       _showZoneHud();
       _zonePreview?.position({ x: _zoneCtx.x, y: _zoneCtx.y });
-      _layers.token?.batchDraw();
+      VS.layers.token?.batchDraw();
       return; // reste en mode placement
     }
     const srcD = VS.tokens[srcId]?.data;
@@ -5707,7 +5703,7 @@ async function _zoneValidate() {
       _showZoneHud();
       // Reposionne la prévisualisation au centre du stage actuel
       _zonePreview?.position({ x: _zoneCtx.x, y: _zoneCtx.y });
-      _layers.token?.batchDraw();
+      VS.layers.token?.batchDraw();
       return; // reste en mode placement
     }
     showNotif(`🪤 ${total} sentinelle${total > 1 ? 's' : ''} posée${total > 1 ? 's' : ''}`, 'success');
@@ -5736,7 +5732,7 @@ async function _zoneValidate() {
 
 /** Rendu des lignes de ciblage distantes (broadcast Firestore). */
 function _renderRemoteCastings(docs) {
-  if (!_layers.token) return;
+  if (!VS.layers.token) return;
   _clearRemoteLines();
   const myUid = STATE.user?.uid;
   docs.forEach(d => {
@@ -5755,10 +5751,10 @@ function _renderRemoteCastings(docs) {
         dash: [10, 6], lineCap: 'round',
         opacity: 0.55, listening: false, name: 'remote-mt-line',
       });
-      _layers.token.add(line);
+      VS.layers.token.add(line);
     });
   });
-  _layers.token.batchDraw();
+  VS.layers.token.batchDraw();
 }
 
 async function _vttRollAttack() {
@@ -5785,7 +5781,7 @@ async function _vttRollAttack() {
   const _pmPayerCharId = _srcChar?.id || (_ownerTok ? _characterForToken(_ownerTok)?.id : null);
   const _deductPm  = async () => {
     if (opt.pmCost > 0 && _pmPayerCharId) {
-      const c = _characters[_pmPayerCharId];
+      const c = VS.characters[_pmPayerCharId];
       if (c) await updateDoc(_chrRef(_pmPayerCharId), {pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost)});
     }
   };
@@ -5795,7 +5791,7 @@ async function _vttRollAttack() {
   const _consumeItem = async () => {
     const meta = opt._itemAction;
     if (!meta?.consommable || !_srcChar?.id) return;
-    const c = _characters[_srcChar.id] || _srcChar;
+    const c = VS.characters[_srcChar.id] || _srcChar;
     const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
     let idx = -1;
     if (meta.itemId)  idx = inv.findIndex(it => it?.itemId === meta.itemId);
@@ -5816,10 +5812,10 @@ async function _vttRollAttack() {
   };
   const _cleanup = () => {
     VS.tokens[srcId]?.shape?.findOne('.atk')?.visible(false);
-    VS.tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
+    VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
     _hideActBar(); _clearAim();
-    _selected=null; _attackSrc=null; _clearHL(); _renderInspector(null);
-    _layers.token?.batchDraw();
+    VS.selected=null; _attackSrc=null; _clearHL(); _renderInspector(null);
+    VS.layers.token?.batchDraw();
   };
 
   /** Met à jour _multiCastFree et retourne le nombre de cibles restantes. */
@@ -5844,7 +5840,7 @@ async function _vttRollAttack() {
 
     // ── Vérification PM (payés par le lanceur si c'est une invocation) ──
     if (opt.pmCost > 0 && _pmPayerCharId) {
-      const cPm = _characters[_pmPayerCharId];
+      const cPm = VS.characters[_pmPayerCharId];
       if (cPm) {
         const actualPm = cPm.pm ?? calcPMMax(cPm);
         if (actualPm < opt.pmCost) {
@@ -6527,7 +6523,7 @@ async function _vttRollAttack() {
       let dmgReduction = 0;
       if (hit || halfDmg) {
         if (curTgtData.type === 'enemy' && curTgtData.beastId) {
-          const bEnt    = _bestiary[curTgtData.beastId];
+          const bEnt    = VS.bestiary[curTgtData.beastId];
           const result  = applyDamageTypeInteraction(dmgTotal, opt.damageTypeId, bEnt);
           dmgTotal      = result.dmgTotal;
           interaction   = result.interaction;
@@ -6623,7 +6619,7 @@ async function _vttRollAttack() {
         // ── Lacération : -CA brut sur la cible (plafonné selon rang) ────
         if (_mods.laceration) {
           const lac = _mods.laceration;
-          const beast = curTgtData.beastId ? _bestiary[curTgtData.beastId] : null;
+          const beast = curTgtData.beastId ? VS.bestiary[curTgtData.beastId] : null;
           const rang = (beast?.rang || 'classique').toLowerCase();
           const cap = (rang === 'elite' || rang === 'élite' || rang === 'boss') ? lac.maxElite : lac.max;
           const reduction = Math.min(lac.reduction, cap);
@@ -6799,7 +6795,7 @@ function _renderInspectorSoon() {
   _inspectorDirty = true;
   queueMicrotask(() => {
     _inspectorDirty = false;
-    const t = _selected ? (VS.tokens[_selected]?.data ?? null) : null;
+    const t = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : null;
     _renderInspector(t);
   });
 }
@@ -6881,7 +6877,7 @@ function _renderInspector(t) {
     const pos    = t.pageId ? 'Col '+t.col+' · Lig '+t.row : 'Non placé';
     const pm     = ld.displayPm    ?? null;
     const pmMax  = ld.displayPmMax ?? null;
-    const npcCombat = t.npcId ? _npcCombat(_npcs[t.npcId]) : {};
+    const npcCombat = t.npcId ? _npcCombat(VS.npcs[t.npcId]) : {};
     const npcWeapon = npcCombat.weapon || {};
     const atkLabel = t.npcId
       ? (npcWeapon.nom || npcCombat.weaponName ? (npcWeapon.nom || npcCombat.weaponName) + ' · ' : '') + (ld.displayAttackDice || '1d6') + _signed(ld.displayAttack ?? 0)
@@ -6945,7 +6941,7 @@ function _renderInspector(t) {
   // Joueur : ses propres déductions sur les attaques et traits
   let _creatureHtml = '';
   if (t.type === 'enemy' && t.beastId) {
-    const beast = _bestiary[t.beastId];
+    const beast = VS.bestiary[t.beastId];
     if (beast) {
       // Nouveau schéma : armesNaturelles + actions (spells unifiés) + butins (objets boutique)
       // Legacy : `attaques` (texte libre) — affiché en fallback si encore présent.
@@ -7241,7 +7237,7 @@ function _renderInspector(t) {
   })();
 
   const _skillsHtml = ((t.type==='player'||t.type==='npc') && _diceSkills.length && _canControlToken(t)) ? (() => {
-    const cForBonus = t?.characterId ? _characters[t.characterId] : null;
+    const cForBonus = t?.characterId ? VS.characters[t.characterId] : null;
     const btns = _diceSkills.map(s => {
       const statKey = _STAT_KEY[s.stat] || '';
       const statMod = _tokenStatMod(t, statKey);
@@ -7375,7 +7371,7 @@ function _renderInspector(t) {
 
 function _vttInsTab(tab) {
   _insTab = tab;
-  const t = _selected ? (VS.tokens[_selected]?.data ?? null) : null;
+  const t = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : null;
   if (t) _renderInspector(t);
 }
 
@@ -7462,7 +7458,7 @@ function _renderTray() {
     // HP fraction visible pour les ennemis en combat
     const hpFrac = inCombat && t.type === 'enemy' && hpKnownL
       ? `<span class="vtt-tray-hp-frac" style="color:${hpColor(rat)}">${hp}/${hpm}</span>` : '';
-    return `<div class="vtt-tray-item ${_selected === t.id ? 'active' : ''}" data-vtt-fn="_vttSelectFromTray" data-vtt-args="${t.id}">
+    return `<div class="vtt-tray-item ${VS.selected === t.id ? 'active' : ''}" data-vtt-fn="_vttSelectFromTray" data-vtt-args="${t.id}">
       <div class="vtt-tray-dot" style="background:${TYPE_COLOR[t.type] ?? '#888'}">
         ${ld.displayImage
           ? `<img src="${ld.displayImage}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`
@@ -7643,7 +7639,7 @@ function _renderTray() {
 
   // ── Bestiaire ─────────────────────────────────────────────────────
   const showBst = _trayFilter === 'all' || _trayFilter === 'enemy';
-  const bsts = Object.values(_bestiary);
+  const bsts = Object.values(VS.bestiary);
   const bstGrid = showBst
     ? (bsts.length
         ? bsts.map(b => {
@@ -7874,9 +7870,9 @@ function _renderPageTabs() {
 async function _switchPage(pageId) {
   const page=VS.pages[pageId]; if (!page) return;
   VS.activePage=page;
-  // Ne pas détruire _layers.map entièrement : VS.imgTr (Transformer) y vit.
+  // Ne pas détruire VS.layers.map entièrement : VS.imgTr (Transformer) y vit.
   // _renderMapImages() et _renderAllTokens() gèrent leur propre nettoyage.
-  _layers.token?.destroyChildren(); _clearHL();
+  VS.layers.token?.destroyChildren(); _clearHL();
   _drawGrid(); _renderMapImages(); _renderAllTokens(); _renderAnnotLayer();
   fogRenderWalls(page, STATE.isAdmin);
   fogUpdateSoon(page, VS.tokens, STATE.isAdmin);
@@ -7888,7 +7884,7 @@ async function _switchPage(pageId) {
 
 function _renderAllTokens() {
   if (!VS.activePage) return;
-  _layers.token?.destroyChildren();
+  VS.layers.token?.destroyChildren();
   for (const e of Object.values(VS.tokens)) {
     const t=e.data;
     // destroyChildren() a détruit tous les shapes : on remet la référence à null
@@ -7898,9 +7894,9 @@ function _renderAllTokens() {
       continue;
     }
     const shape=_buildShape(t);
-    VS.tokens[t.id]={...e,shape}; _layers.token.add(shape);
+    VS.tokens[t.id]={...e,shape}; VS.layers.token.add(shape);
   }
-  _layers.token?.batchDraw();
+  VS.layers.token?.batchDraw();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -7910,7 +7906,7 @@ function _renderAllTokens() {
 
 // Conversion coords écran → monde
 function _stageToWorld(ptr) {
-  const sc = _stage.scaleX(), sp = _stage.position();
+  const sc = VS.stage.scaleX(), sp = VS.stage.position();
   return { x: (ptr.x - sp.x) / sc, y: (ptr.y - sp.y) / sc };
 }
 
@@ -7960,7 +7956,7 @@ let _rulerLastCell = null;  // dernière case survolée — court-circuite si in
 let _rulerHoverDot = null;  // aperçu de la case de départ avant le 1er clic
 
 function _showRulerHover(wp) {
-  if (!_layers.ping || _rulerNodes) { _hideRulerHover(); return; } // pas d'aperçu si une règle est déjà visible
+  if (!VS.layers.ping || _rulerNodes) { _hideRulerHover(); return; } // pas d'aperçu si une règle est déjà visible
   const o = _snapToCellCenter(wp);
   if (!_rulerHoverDot) {
     const K = window.Konva;
@@ -7968,16 +7964,16 @@ function _showRulerHover(wp) {
       radius: 5, fill: RULER_COLOR, opacity: 0.45,
       stroke: '#000', strokeWidth: 1, listening: false, name: 'ruler-hover',
     });
-    _layers.ping.add(_rulerHoverDot);
+    VS.layers.ping.add(_rulerHoverDot);
   }
   _rulerHoverDot.position({ x: o.x, y: o.y });
-  _layers.ping.batchDraw();
+  VS.layers.ping.batchDraw();
 }
 function _hideRulerHover() {
   if (!_rulerHoverDot) return;
   _rulerHoverDot.destroy();
   _rulerHoverDot = null;
-  _layers.ping?.batchDraw();
+  VS.layers.ping?.batchDraw();
 }
 
 function _startRuler(wp) {
@@ -7990,8 +7986,8 @@ function _startRuler(wp) {
   _rulerLastCell = { c: o.c, r: o.r };
   _rulerNodes = _buildRulerNodes(K, 'ruler');
   _setRulerNodes(_rulerNodes, o.x, o.y, o.x, o.y, _fmtRulerCells(0));
-  _layers.ping.add(_rulerNodes.group);
-  _layers.ping.batchDraw();
+  VS.layers.ping.add(_rulerNodes.group);
+  VS.layers.ping.batchDraw();
   _broadcastMjRuler(o.x, o.y, 0);
 }
 function _updateRuler(wp) {
@@ -8002,7 +7998,7 @@ function _updateRuler(wp) {
   _rulerLastCell = { c: e.c, r: e.r };
   const cells = Math.abs(e.c - _rulerOrigin.c) + Math.abs(e.r - _rulerOrigin.r);
   _setRulerNodes(_rulerNodes, _rulerOrigin.x, _rulerOrigin.y, e.x, e.y, _fmtRulerCells(cells));
-  _layers.ping.batchDraw();
+  VS.layers.ping.batchDraw();
   _broadcastMjRuler(e.x, e.y, cells);
 }
 function _endRuler() {
@@ -8015,7 +8011,7 @@ function _clearRuler() {
   _rulerNodes?.group.destroy();
   _rulerNodes = null;
   _rulerActive = false; _rulerOrigin = null; _rulerLastCell = null;
-  _layers.ping?.batchDraw();
+  VS.layers.ping?.batchDraw();
   _clearMjRulerBroadcast();
 }
 
@@ -8057,24 +8053,24 @@ function _clearMjRulerBroadcast() {
 let _mjRulerRemote = null;
 function _renderMjRulerRemote(data) {
   if (STATE.isAdmin) return; // le MJ voit déjà sa règle locale
-  if (!_layers.ping) return;
+  if (!VS.layers.ping) return;
   const visible = data && VS.activePage && data.pageId === VS.activePage.id;
   if (!visible) {
     if (_mjRulerRemote) {
       _mjRulerRemote.group.destroy();
       _mjRulerRemote = null;
-      _layers.ping.batchDraw();
+      VS.layers.ping.batchDraw();
     }
     return;
   }
   if (!_mjRulerRemote) {
     _mjRulerRemote = _buildRulerNodes(window.Konva, 'mj-ruler', 0.85);
-    _layers.ping.add(_mjRulerRemote.group);
+    VS.layers.ping.add(_mjRulerRemote.group);
   }
   const cells = data.cells ?? 0;
   _setRulerNodes(_mjRulerRemote, data.x1, data.y1, data.x2, data.y2,
     `MJ : ${_fmtRulerCells(cells)}`);
-  _layers.ping.batchDraw();
+  VS.layers.ping.batchDraw();
 }
 
 // ── Annotations ────────────────────────────────────────────────────
@@ -8115,7 +8111,7 @@ function _buildAnnotShape(K, data) {
     // Clic gauche → sélectionner (mode select uniquement)
     shape.on('click', e => {
       if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
-      if (_tool !== 'select') return;
+      if (VS.tool !== 'select') return;
       e.cancelBubble = true;
       if (e.evt.shiftKey) {
         // Shift+clic : toggle dans la multi-sélection
@@ -8130,7 +8126,7 @@ function _buildAnnotShape(K, data) {
     });
     // Clic-droit → supprimer la sélection (mode select uniquement)
     shape.on('contextmenu', e => {
-      if (_tool !== 'select') return;
+      if (VS.tool !== 'select') return;
       e.evt.preventDefault(); e.cancelBubble = true;
       // Supprimer toutes les annotations sélectionnées (ou juste celle-ci si pas sélectionnée)
       const toDelete = _selectedAnnotIds.has(data.id) ? [..._selectedAnnotIds] : [data.id];
@@ -8157,7 +8153,7 @@ function _buildAnnotShape(K, data) {
         if (id === data.id) continue;
         _annotations[id]?.shape?.position({ x: o.x + dx, y: o.y + dy });
       }
-      _layers.draw.batchDraw();
+      VS.layers.draw.batchDraw();
     });
     // Fin de drag → sauvegarder position(s)
     shape.on('dragend', () => {
@@ -8214,7 +8210,7 @@ function _applyAnnotTransformer() {
   if (!_annotTransformer) return;
   const shapes = [..._selectedAnnotIds].map(id => _annotations[id]?.shape).filter(Boolean);
   _annotTransformer.nodes(shapes);
-  _layers.draw?.batchDraw();
+  VS.layers.draw?.batchDraw();
 }
 
 function _inRect(cx, cy, r) {
@@ -8240,7 +8236,7 @@ function _selectByRect(r) {
   for (const [id, e] of Object.entries(_annotations)) {
     if (!e.data || e.data.pageId !== VS.activePage?.id || !e.shape) continue;
     if (!STATE.isAdmin && e.data.createdBy !== uid) continue;
-    const bb = e.shape.getClientRect({ relativeTo: _stage });
+    const bb = e.shape.getClientRect({ relativeTo: VS.stage });
     const cx = bb.x + bb.width / 2, cy = bb.y + bb.height / 2;
     if (_inRect(cx, cy, r)) _selectedAnnotIds.add(id);
   }
@@ -8248,13 +8244,13 @@ function _selectByRect(r) {
   _applyAnnotTransformer();
   if (_selectedMulti.size > 0) _renderInspector(null);
   else if (_selectedAnnotIds.size > 0) _renderInspector(null);
-  _layers.token?.batchDraw();
+  VS.layers.token?.batchDraw();
 }
 
 function _endMarquee() {
   _marqueeActive = false;
   _marqueeShape?.destroy(); _marqueeShape = null;
-  _layers.ping?.batchDraw();
+  VS.layers.ping?.batchDraw();
   if (!_marqueeLastWp || !_marqueeOrigin) { _marqueeLastWp = null; return; }
   const r = {
     x: Math.min(_marqueeOrigin.x, _marqueeLastWp.x),
@@ -8270,26 +8266,26 @@ function _endMarquee() {
 function _deselectAnnot() {
   _selectedAnnotId = null;
   _selectedAnnotIds.clear();
-  if (_annotTransformer) { _annotTransformer.nodes([]); _layers.draw?.batchDraw(); }
+  if (_annotTransformer) { _annotTransformer.nodes([]); VS.layers.draw?.batchDraw(); }
 }
 
 function _renderAnnotLayer() {
-  if (!_layers.draw || !VS.activePage) return;
+  if (!VS.layers.draw || !VS.activePage) return;
   const K = window.Konva;
   Object.values(_annotations).forEach(e => { e.shape?.destroy(); e.shape = null; });
   for (const [id, e] of Object.entries(_annotations)) {
     if (e.data.pageId !== VS.activePage.id) continue;
     const shape = _buildAnnotShape(K, e.data);
-    if (shape) { _annotations[id].shape = shape; _layers.draw.add(shape); }
+    if (shape) { _annotations[id].shape = shape; VS.layers.draw.add(shape); }
   }
   _updateAnnotDraggable();
-  _layers.draw.batchDraw();
+  VS.layers.draw.batchDraw();
 }
 
 function _updateAnnotDraggable() {
-  if (!_layers.draw) return;
-  const inSelect = _tool === 'select';
-  const inErase  = _tool === 'draw' && _drawShape === 'eraser';
+  if (!VS.layers.draw) return;
+  const inSelect = VS.tool === 'select';
+  const inErase  = VS.tool === 'draw' && _drawShape === 'eraser';
   const uid = STATE.user?.uid;
   Object.values(_annotations).forEach(e => {
     if (!e.shape) return;
@@ -8300,7 +8296,7 @@ function _updateAnnotDraggable() {
     e.shape.listening((inSelect || inErase) && canEdit);
   });
   if (inSelect) _applyAnnotTransformer(); // maintenir le transformer sur la sélection courante
-  _layers.draw.batchDraw();
+  VS.layers.draw.batchDraw();
 }
 
 // ── Draw live (crayon + formes) ────────────────────────────────────
@@ -8319,7 +8315,7 @@ function _startDraw(wp) {
   } else if (_drawShape === 'circle') {
     _drawLive = new K.Circle({ ...base, x:wp.x, y:wp.y, radius:0, fill });
   }
-  if (_drawLive) { _layers.draw.add(_drawLive); }
+  if (_drawLive) { VS.layers.draw.add(_drawLive); }
   _drawing = true;
 }
 function _updateDraw(wp) {
@@ -8341,7 +8337,7 @@ function _updateDraw(wp) {
   } else if (_drawShape === 'circle') {
     _drawLive.radius(Math.hypot(wp.x-_drawOrigin.x, wp.y-_drawOrigin.y));
   }
-  _layers.draw.batchDraw();
+  VS.layers.draw.batchDraw();
 }
 async function _endDraw() {
   _drawing = false;
@@ -8364,7 +8360,7 @@ async function _endDraw() {
   }
   const liveCopy = _drawLive;
   _drawLive = null;
-  if (!data) { liveCopy.destroy(); _layers.draw.batchDraw(); return; }
+  if (!data) { liveCopy.destroy(); VS.layers.draw.batchDraw(); return; }
   data = { ...data, pageId:VS.activePage.id, color:_drawColor, strokeWidth:_drawWidth,
     createdBy: STATE.user?.uid||null, createdAt: serverTimestamp() };
   const id = 'a' + Date.now() + Math.random().toString(36).slice(2,5);
@@ -8377,7 +8373,7 @@ async function _endDraw() {
     showNotif('Erreur sauvegarde annotation — vérifiez les règles Firestore', 'error');
     // Garder liveCopy visible temporairement (non persistée)
   }
-  _layers.draw.batchDraw();
+  VS.layers.draw.batchDraw();
 }
 
 // ── Bestiaire VTT : catalogue MJ, lecture ciblée joueurs ─────────────────────
@@ -8386,20 +8382,20 @@ function _patchBestiaryTokenShapes(changedIds) {
   for (const [id, e] of Object.entries(VS.tokens)) {
     if (e.data?.beastId && changedIds.has(e.data.beastId)) {
       _patchShape(id);
-      if (_selected === id) _renderInspectorSoon();
+      if (VS.selected === id) _renderInspectorSoon();
     }
   }
   _renderCombatTrackerSoon();
 }
 
 function _applyBestiaryCatalog(list) {
-  const before = new Set(Object.keys(_bestiary));
+  const before = new Set(Object.keys(VS.bestiary));
   const next = {};
   for (const b of list || []) {
     if (!b?.id) continue;
     next[b.id] = b;
   }
-  _bestiary = next;
+  VS.bestiary = next;
   const changed = new Set([...before, ...Object.keys(next)]);
   _patchBestiaryTokenShapes(changed);
   _renderTraySoon();
@@ -8416,13 +8412,13 @@ async function _loadBestiaryCatalog() {
 
 function _ensureBestiaryDoc(beastId) {
   if (!beastId) return Promise.resolve(null);
-  if (_bestiary[beastId]) return Promise.resolve(_bestiary[beastId]);
+  if (VS.bestiary[beastId]) return Promise.resolve(VS.bestiary[beastId]);
   if (_bestiaryLoads.has(beastId)) return _bestiaryLoads.get(beastId);
   const promise = getDocDataSilent('bestiary', beastId)
     .then(data => {
       if (!data) return null;
       const docData = { ...data, id: data.id || beastId };
-      _bestiary[beastId] = docData;
+      VS.bestiary[beastId] = docData;
       _patchBestiaryTokenShapes(new Set([beastId]));
       return docData;
     })
@@ -8491,7 +8487,7 @@ function _initListeners() {
 
   // 3. Personnages — source de vérité des HP joueurs
   _unsubs.push(subscribeCollection("characters", data => {
-    const prev = _characters;
+    const prev = VS.characters;
     const next = {};
     for (const c of data || []) next[c.id] = c;
     const wasReady = _charsReady;
@@ -8503,10 +8499,10 @@ function _initListeners() {
       if (tok) deleteDoc(_tokRef(tok.data.id)).catch(() => {});
     }
 
-    _characters = next;
+    VS.characters = next;
     for (const [id, e] of Object.entries(VS.tokens)) {
       if (e.data.characterId && changed.has(e.data.characterId)) {
-        _patchShape(id); if (_selected === id) _renderInspectorSoon();
+        _patchShape(id); if (VS.selected === id) _renderInspectorSoon();
       }
     }
     _renderTraySoon();
@@ -8534,15 +8530,15 @@ function _initListeners() {
 
   // 4. PNJ — source de vérité des HP PNJ
   _unsubs.push(subscribeCollection("npcs", data => {
-    const prev = _npcs;
+    const prev = VS.npcs;
     const next = {};
     for (const n of data || []) next[n.id] = n;
 
     const changed = new Set([...Object.keys(prev), ...Object.keys(next)]);
-    _npcs = next;
+    VS.npcs = next;
     for (const [id, e] of Object.entries(VS.tokens)) {
       if (e.data.npcId && changed.has(e.data.npcId)) {
-        _patchShape(id); if (_selected === id) _renderInspectorSoon();
+        _patchShape(id); if (VS.selected === id) _renderInspectorSoon();
       }
     }
     _renderTraySoon();
@@ -8565,8 +8561,8 @@ function _initListeners() {
           if (e.data?.type === 'enemy' && e.data?.beastId) _patchShape(id);
         }
         // Rafraîchit l'inspector si un token ennemi est sélectionné
-        if (_selected) {
-          const td = VS.tokens[_selected]?.data;
+        if (VS.selected) {
+          const td = VS.tokens[VS.selected]?.data;
           if (td?.type === 'enemy') _renderInspectorSoon();
         }
       }, () => {}));
@@ -8579,8 +8575,8 @@ function _initListeners() {
       const id=ch.doc.id, data={id,...ch.doc.data()};
       if (ch.type==='removed') {
         VS.tokens[id]?.shape?.destroy(); delete VS.tokens[id];
-        if (_selected===id) _deselect();
-        _layers.token?.batchDraw(); return;
+        if (VS.selected===id) _deselect();
+        VS.layers.token?.batchDraw(); return;
       }
       const prev=VS.tokens[id];
       if (prev) {
@@ -8590,20 +8586,20 @@ function _initListeners() {
           prev.shape?.destroy(); prev.shape=null;
           if (VS.activePage&&data.pageId===VS.activePage.id&&(data.visible||STATE.isAdmin)) {
             const shape=_buildShape(data);
-            VS.tokens[id]={data,shape}; _layers.token?.add(shape); _layers.token?.batchDraw();
+            VS.tokens[id]={data,shape}; VS.layers.token?.add(shape); VS.layers.token?.batchDraw();
           } else {
             VS.tokens[id]={data,shape:null};
           }
         } else {
           _patchShape(id);
         }
-        if (_selected===id) { _renderInspectorSoon(); _refreshRanges(id); }
+        if (VS.selected===id) { _renderInspectorSoon(); _refreshRanges(id); }
       } else {
         VS.tokens[id]={data,shape:null};
         if (VS.activePage&&data.pageId===VS.activePage.id&&(data.visible||STATE.isAdmin)) {
           const shape=_buildShape(data);
           VS.tokens[id].shape=shape;
-          _layers.token?.add(shape); _layers.token?.batchDraw();
+          VS.layers.token?.add(shape); VS.layers.token?.batchDraw();
         }
       }
     });
@@ -8658,7 +8654,7 @@ function _initListeners() {
           if (VS.activePage && newData.pageId === VS.activePage.id) {
             const K = window.Konva;
             const shape = _buildAnnotShape(K, newData);
-            if (shape) { _annotations[id].shape = shape; _layers.draw?.add(shape); }
+            if (shape) { _annotations[id].shape = shape; VS.layers.draw?.add(shape); }
           }
         }
       }
@@ -8666,7 +8662,7 @@ function _initListeners() {
     _updateAnnotDraggable();
     // Réappliquer le transformer sur les shapes reconstruits
     if (_selectedAnnotIds.size > 0) _applyAnnotTransformer();
-    _layers.draw?.batchDraw();
+    VS.layers.draw?.batchDraw();
   }, () => {}));
 
   // 8. Ciblage multi-sorts temps réel (lignes pointillées broadcast)
@@ -8797,14 +8793,14 @@ function _showCtxMenu(x, y, items) {
 // ── Mode édition carte ───────────────────────────────────────────
 function _setMapMode(on) {
   VS.mapMode=on;
-  _layers.map?.listening(on);
-  _layers.mapFg?.listening(on);
+  VS.layers.map?.listening(on);
+  VS.layers.mapFg?.listening(on);
   // Mettre à jour le draggable de toutes les images existantes
   const toggle = lyr => lyr?.find('Image').forEach(ki=>ki.draggable(on));
-  toggle(_layers.map); toggle(_layers.mapFg);
+  toggle(VS.layers.map); toggle(VS.layers.mapFg);
   if (!on) {
     VS.imgTr?.nodes([]); VS.imgTrFg?.nodes([]); VS.selImg=null;
-    _layers.map?.batchDraw(); _layers.mapFg?.batchDraw();
+    VS.layers.map?.batchDraw(); VS.layers.mapFg?.batchDraw();
     _hideCtxMenu();
   }
   const btn=document.getElementById('vtt-map-mode-btn');
@@ -8843,7 +8839,7 @@ async function _loadDiceSkills() {
     if (data?.skills?.length) _diceSkills = data.skills;
   } catch { /* garde le cache local */ }
   // Re-render l'inspector si un token est déjà sélectionné
-  if (_selected) _renderInspector(VS.tokens[_selected]?.data ?? null);
+  if (VS.selected) _renderInspector(VS.tokens[VS.selected]?.data ?? null);
 }
 
 function _vttSetRollMode(mode) {
@@ -8874,11 +8870,11 @@ function _vttToggleRollHidden() {
 }
 
 async function _vttRollSkill(skillName, stat) {
-  const t = VS.tokens[_selected]?.data;
+  const t = VS.tokens[VS.selected]?.data;
   if (!t) return;
   if (!_canControlToken(t)) return; // joueur ne peut lancer que son propre token (ou ceux délégués)
-  const c = t?.characterId ? _characters[t.characterId] : null;
-  const n = t?.npcId ? _npcs[t.npcId] : null;
+  const c = t?.characterId ? VS.characters[t.characterId] : null;
+  const n = t?.npcId ? VS.npcs[t.npcId] : null;
   const statKey = _STAT_KEY[stat] || '';
   const mod = _tokenStatMod(t, statKey);
   // Bonus de compétence depuis les items équipés (pour les PJ)
@@ -9061,7 +9057,7 @@ async function _vttPickEmote(name) {
   _pushRecent(name);
 
   // Token émetteur : sélection courante, sinon le token possédé par le joueur
-  let tokenId = _selected;
+  let tokenId = VS.selected;
   if (!tokenId) {
     const own = Object.values(VS.tokens).find(e => e.data.ownerId === uid);
     tokenId = own?.data?.id ?? null;
@@ -9829,7 +9825,7 @@ function _renderChatReplyBar() {
 // ═══════════════════════════════════════════════════════════════════
 // ACTIONS GLOBALES
 // ═══════════════════════════════════════════════════════════════════
-function _vttTool(t) { return _setTool(_tool === t ? 'select' : t); }
+function _vttTool(t) { return _setTool(VS.tool === t ? 'select' : t); }
 // ── Courir : double le mouvement de base pour ce tour ───────────────
 async function _vttCourir(id) {
   const tok = VS.tokens[id]?.data;
@@ -9842,15 +9838,15 @@ async function _vttCourir(id) {
 
 // ── Déplacement clavier (flèches + pavé numérique) ──────────────────
 async function _moveSelectedBy(dc, dr) {
-  if (!_selected || !VS.activePage || _tool !== 'select') return;
-  const tok = VS.tokens[_selected]?.data;
+  if (!VS.selected || !VS.activePage || VS.tool !== 'select') return;
+  const tok = VS.tokens[VS.selected]?.data;
   if (!tok || tok.pageId !== VS.activePage.id) return;
   const ld  = _live(tok);
   const sw  = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
   const nc  = Math.max(0, Math.min(VS.activePage.cols - sw, tok.col + dc));
   const nr  = Math.max(0, Math.min(VS.activePage.rows - sh, tok.row + dr));
   if (nc === tok.col && nr === tok.row) return;
-  await _moveTo(_selected, nc, nr);
+  await _moveTo(VS.selected, nc, nr);
   fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
 }
 
@@ -9890,7 +9886,7 @@ function _shortRestPresentChars() {
     const t = e?.data;
     if (t?.type === 'player' && t.pageId && t.characterId && !seen.has(t.characterId)) {
       seen.add(t.characterId);
-      const c = _characters[t.characterId];
+      const c = VS.characters[t.characterId];
       if (c) chars.push(c);
     }
   }
@@ -9902,7 +9898,7 @@ function _shortRestPresentNames() {
   for (const e of Object.values(VS.tokens)) {
     const t = e?.data;
     if (t?.type === 'player' && t.ownerId && !out[t.ownerId]) {
-      const c = t.characterId ? _characters[t.characterId] : null;
+      const c = t.characterId ? VS.characters[t.characterId] : null;
       out[t.ownerId] = c?.nom || t.name || t.ownerId.slice(0, 6);
     }
   }
@@ -10125,9 +10121,9 @@ function _vttUndoDraw() {
 // Gomme : supprime l'annotation (éditable) sous le curseur. Utilise la détection de
 // hit Konva → gère correctement rotation/échelle/zoom. Optimiste + suppression doc.
 function _eraseAtPointer() {
-  if (!_layers?.draw || !_stage) return;
-  const pos = _stage.getPointerPosition(); if (!pos) return;
-  let node = _layers.draw.getIntersection(pos);
+  if (!VS.layers?.draw || !VS.stage) return;
+  const pos = VS.stage.getPointerPosition(); if (!pos) return;
+  let node = VS.layers.draw.getIntersection(pos);
   let id = null;
   while (node && !id) { id = node._annotId || null; node = node.getParent?.(); }
   if (!id || !_annotations[id]) return;
@@ -10137,7 +10133,7 @@ function _eraseAtPointer() {
   delete _annotations[id];
   const hi = _drawHistory.indexOf(id);
   if (hi >= 0) _drawHistory.splice(hi, 1);
-  _layers.draw.batchDraw();
+  VS.layers.draw.batchDraw();
   deleteDoc(_annotRef(id)).catch(() => {});
 }
 function _vttDrawColor(color) {
@@ -10345,8 +10341,8 @@ async function _vttRetireToken(tokenId) {
     showNotif('Erreur lors du retrait du token', 'error');
     return;
   }
-  if (_selected===tokenId) _deselect();
-  _layers.token?.batchDraw();
+  if (VS.selected===tokenId) _deselect();
+  VS.layers.token?.batchDraw();
   _renderTraySoon();
   void _cleanupReserveDuplicates();
 }
@@ -10368,7 +10364,7 @@ async function _vttRetireMyToken() {
   if (!tok.pageId) return; // déjà rangé
   await updateDoc(_tokRef(tok.id),{pageId:null,visible:false})
     .catch(err => { console.error('[vtt] rangement:', err); showNotif('Erreur rangement','error'); });
-  if (_selected===tok.id) _deselect();
+  if (VS.selected===tok.id) _deselect();
 }
 // Déplacer le token vers une autre page
 async function _vttMoveTokenToPage(tokenId,pageId) {
@@ -10500,8 +10496,8 @@ async function _vttConditionSave(tokenId, idx) {
   const DD = cond.saveDC || 11;
   const mod = c => getMod(c, statKey);
   // Récupère le perso ou NPC source des stats
-  const ch = t.characterId ? _characters[t.characterId] : null;
-  const np = t.npcId ? _npcs[t.npcId] : null;
+  const ch = t.characterId ? VS.characters[t.characterId] : null;
+  const np = t.npcId ? VS.npcs[t.npcId] : null;
   const statSrc = ch || np || { stats: {} };
   const modVal = ch || np ? mod(statSrc) : 0;
   const initialD20 = Math.floor(Math.random()*20)+1;
@@ -11200,7 +11196,7 @@ async function _vttTokenResetBonus(tokenId) {
 
 async function _vttMsSetXp(charId, uid, xp) {
   if (!_msCanEdit(uid)) return;
-  const c = _characters[charId]; if (!c) return;
+  const c = VS.characters[charId]; if (!c) return;
   const val = Math.max(0, Math.round(xp));
   await updateDoc(_chrRef(charId), { exp: val }).catch(() => {});
   c.exp = val;
@@ -11209,7 +11205,7 @@ async function _vttMsSetXp(charId, uid, xp) {
 
 async function _vttMsAddXp(charId, uid, delta) {
   if (!_msCanEdit(uid)) return;
-  const c = _characters[charId]; if (!c) return;
+  const c = VS.characters[charId]; if (!c) return;
   const d = Math.round(delta);
   if (!d || d <= 0) return;
   const newXp = Math.max(0, (parseInt(c.exp) || 0) + d);
@@ -11220,7 +11216,7 @@ async function _vttMsAddXp(charId, uid, delta) {
 
 async function _vttMsSetNiveau(charId, uid, niveau) {
   if (!_msCanEdit(uid)) return;
-  const c = _characters[charId]; if (!c) return;
+  const c = VS.characters[charId]; if (!c) return;
   const val = Math.max(1, Math.min(20, Math.round(niveau)));
   await updateDoc(_chrRef(charId), { niveau: val }).catch(() => {});
   c.niveau = val;
@@ -11236,7 +11232,7 @@ function _vttEditToken(id) { return _openStatsModal(VS.tokens[id]?.data??null); 
 //           ET qui n'est pas admin → résidu de base de données, à ne pas proposer.
 function _vttMemberInfo(uid) {
   const adv = STATE.adventure || {};
-  const ch = Object.values(_characters || {}).find(c => c?.uid === uid);
+  const ch = Object.values(VS.characters || {}).find(c => c?.uid === uid);
   const isAdmin = (adv.admins || []).includes(uid);
   return {
     uid,
@@ -11745,7 +11741,7 @@ async function _vttDuplicateToken(tokenId) {
 // Placer une instance depuis le bestiaire (crée + place sur la page active)
 async function _vttPlaceFromBestiary(beastId) {
   if (!VS.activePage) return showNotif('Aucune page active — ouvre une page d\'abord','error');
-  const b=_bestiary[beastId]; if (!b) return;
+  const b=VS.bestiary[beastId]; if (!b) return;
   // Purger les tokens fantômes (anciens auto-créés, non placés, non modifiés)
   const ghosts=Object.values(VS.tokens).filter(e=>e.data.beastId===beastId&&!e.data.pageId&&e.data.hp==null);
   if (ghosts.length) {
@@ -11808,7 +11804,7 @@ async function _vttSaveStats(id) {
   // Clamper la position dans la nouvelle bounding box (héritage bête si override null)
   const cur = VS.tokens[id]?.data;
   if (cur && VS.activePage) {
-    const b = cur.beastId ? _bestiary[cur.beastId] : null;
+    const b = cur.beastId ? VS.bestiary[cur.beastId] : null;
     const sw = patch.tokenW ?? b?.tokenW ?? b?.tokenSize ?? 1;
     const sh = patch.tokenH ?? b?.tokenH ?? b?.tokenSize ?? 1;
     patch.col = Math.max(0, Math.min(VS.activePage.cols - sw, cur.col ?? 0));
@@ -11852,7 +11848,7 @@ async function _handleUpload(file) {
 
 // ── Outil + clavier ─────────────────────────────────────────────────
 function _setTool(tool) {
-  _tool = tool;
+  VS.tool = tool;
   document.querySelectorAll('.vtt-tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
   // Draw bar
   const drawBar = document.getElementById('vtt-draw-bar');
@@ -11889,13 +11885,13 @@ const _NUMPAD_KEYS = {
 function _keyHandler(e) {
   if (!document.getElementById('vtt-canvas-wrap')) return;
   if (e.target.matches('input,textarea,select')) return;
-  if (e.key==='Escape') { if (_tool !== 'select') _setTool('select'); else _deselect(); }
+  if (e.key==='Escape') { if (VS.tool !== 'select') _setTool('select'); else _deselect(); }
   // Raccourci R : bascule l'outil règle (sans modificateur, hors saisie)
   if ((e.key==='r' || e.key==='R') && !e.ctrlKey && !e.metaKey && !e.altKey) {
     e.preventDefault();
     _vttTool('ruler');
   }
-  if ((e.key==='Delete'||e.key==='Backspace') && _tool==='select') {
+  if ((e.key==='Delete'||e.key==='Backspace') && VS.tool==='select') {
     // 1) Annotations sélectionnées
     if (_selectedAnnotIds.size > 0) {
       e.preventDefault();
@@ -11909,11 +11905,11 @@ function _keyHandler(e) {
       updateDoc(_pgRef(VS.activePage.id), { backgroundImages: imgs }).catch(()=>{});
       VS.selImg = null;
       VS.imgTr?.nodes([]); VS.imgTrFg?.nodes([]);
-      _layers.map?.batchDraw(); _layers.mapFg?.batchDraw();
+      VS.layers.map?.batchDraw(); VS.layers.mapFg?.batchDraw();
     }
     // 3) Tokens sélectionnés → retrait du canvas (pageId=null)
     else {
-      const ids = _selectedMulti.size > 0 ? [..._selectedMulti] : (_selected ? [_selected] : []);
+      const ids = _selectedMulti.size > 0 ? [..._selectedMulti] : (VS.selected ? [VS.selected] : []);
       if (ids.length) {
         e.preventDefault();
         const uid = STATE.user?.uid;
@@ -11933,7 +11929,7 @@ function _keyHandler(e) {
     _vttUndoDraw();
   }
   // Flèches / pavé numérique : déplacer le token sélectionné
-  if (!e.ctrlKey && !e.metaKey && !e.altKey && _selected) {
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && VS.selected) {
     const dir = _MOVE_KEYS[e.key] ?? _NUMPAD_KEYS[e.code];
     if (dir) {
       e.preventDefault(); // empêche le scroll de la page
@@ -12106,7 +12102,7 @@ function _renderLootPanel() {
   }
 
   const uid = STATE.user?.uid;
-  const myChars = sortCharactersForDisplay(Object.values(_characters).filter(c => c.uid === uid));
+  const myChars = sortCharactersForDisplay(Object.values(VS.characters).filter(c => c.uid === uid));
   const _itemRow = (item, zone) => {
     const rarColor = { commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff', tres_rare:'#b47fff', legendaire:'#f59e0b' }[item.rarete] || '#9ca3af';
     return `<div class="vtt-loot-row-wrap" data-id="${item.id}">
@@ -12279,7 +12275,7 @@ function _vttLootOpenShop() { openShopPicker({
 /** MJ : envoie un butin de créature (depuis le panneau token) vers la réserve. */
 async function _vttCreatSendLootToStash(beastId, idx, btn) {
   if (!STATE.isAdmin) return;
-  const beast = _bestiary[beastId];
+  const beast = VS.bestiary[beastId];
   const b = beast?.butins?.[idx];
   if (!b?.itemId) { showNotif('Butin invalide', 'error'); return; }
 
@@ -12319,7 +12315,7 @@ function _vttLootToggleTake(id) {
   const item = _loot.loot.find(i => i.id === id);
   if (!item) return;
   const uid = STATE.user?.uid;
-  const myChars = sortCharactersForDisplay(Object.values(_characters).filter(c => c.uid === uid));
+  const myChars = sortCharactersForDisplay(Object.values(VS.characters).filter(c => c.uid === uid));
   if (!myChars.length) { showNotif('Aucun personnage trouvé', 'error'); return; }
 
   _lootTakeState[id] = { qty: item.qty, charId: myChars[0].id };
@@ -12333,7 +12329,7 @@ function _renderLootTake(id) {
   const st = _lootTakeState[id];
   if (!el || !item || !st) return;
   const uid = STATE.user?.uid;
-  const myChars = sortCharactersForDisplay(Object.values(_characters).filter(c => c.uid === uid));
+  const myChars = sortCharactersForDisplay(Object.values(VS.characters).filter(c => c.uid === uid));
   const max = item.qty;
   st.qty = Math.max(1, Math.min(max, st.qty || 1));
 
@@ -12382,7 +12378,7 @@ async function _vttLootConfirmTake(id) {
   const st      = _lootTakeState[id] || {};
   const charId  = st.charId;
   const qty     = Math.min(item.qty, Math.max(1, st.qty || 1));
-  const char    = _characters[charId];
+  const char    = VS.characters[charId];
   if (!char || !charId) { showNotif('Personnage introuvable', 'error'); return; }
 
   const inv = Array.isArray(char.inventaire) ? [...char.inventaire] : [];
@@ -13831,7 +13827,7 @@ function _renderPresenceCol() {
   }
   const myUid = STATE.user?.uid;
   list.innerHTML = players.map(p => {
-    const chars = sortCharactersForDisplay(Object.values(_characters).filter(c => c.uid === p.uid));
+    const chars = sortCharactersForDisplay(Object.values(VS.characters).filter(c => c.uid === p.uid));
     // Préfère le perso ★ par défaut comme "visage" du joueur
     const char  = chars.find(c => c.id === _miniCharId)
                || chars.find(c => c.isDefault)
@@ -14045,7 +14041,7 @@ function _msSyncClearBtn(kind) {
 
 async function _vttMsEquip(charId, uid, slot, invIndex) {
   if (!_msCanEdit(uid)) return;
-  const c = _characters[charId]; if (!c) return;
+  const c = VS.characters[charId]; if (!c) return;
   invIndex = parseInt(invIndex);
   const item = (c.inventaire||[])[invIndex]; if (!item) return;
   const equip = { ...(c.equipement||{}) };
@@ -14062,7 +14058,7 @@ async function _vttMsEquip(charId, uid, slot, invIndex) {
 
 async function _vttMsUnequip(charId, uid, slot) {
   if (!_msCanEdit(uid)) return;
-  const c = _characters[charId]; if (!c) return;
+  const c = VS.characters[charId]; if (!c) return;
   const equip = { ...(c.equipement||{}) };
   const nom = equip[slot]?.nom || slot;
   delete equip[slot];
@@ -14084,7 +14080,7 @@ function _vttMsSlotChange(sel, charId, uid, slotIdx) {
 // Ouvre une modale pour choisir le slot cible depuis l'inventaire
 function _vttMsEquipPicker(charId, uid, invIndex) {
   if (!_msCanEdit(uid)) return;
-  const c = _characters[charId]; if (!c) return;
+  const c = VS.characters[charId]; if (!c) return;
   invIndex = parseInt(invIndex);
   const item = (c.inventaire||[])[invIndex]; if (!item) return;
   const equip = c.equipement||{};
@@ -14104,7 +14100,7 @@ function _vttMsEquipPicker(charId, uid, invIndex) {
 async function _vttMsUnequipAll(charId, uid, invIndex) {
   if (!_msCanEdit(uid)) return;
   invIndex = parseInt(invIndex);
-  const c = _characters[charId]; if (!c) return;
+  const c = VS.characters[charId]; if (!c) return;
   const equip = { ...(c.equipement||{}) };
   Object.keys(equip).forEach(s => { if (equip[s]?.sourceInvIndex === invIndex) delete equip[s]; });
   const bonus = computeEquipStatsBonus(equip);
@@ -14117,7 +14113,7 @@ async function _vttMsUnequipAll(charId, uid, invIndex) {
 // Active / désactive un sort
 async function _vttToggleMsSort(charId, uid, idx) {
   if (!_msCanEdit(uid)) return;
-  const c = _characters[charId]; if (!c) return;
+  const c = VS.characters[charId]; if (!c) return;
   const sorts = [...(c.deck_sorts||[])];
   const s = sorts[idx]; if (!s) return;
   // Un joueur ne peut mettre dans son Deck qu'un sort VALIDÉ par le MJ (le MJ n'est pas limité).
@@ -14135,12 +14131,12 @@ async function _vttToggleMsSort(charId, uid, idx) {
 function _vttMsSendPicker(charId, uid, invIndex) {
   if (!_msCanEdit(uid)) return;
   invIndex = parseInt(invIndex);
-  const c = _characters[charId]; if (!c) return;
+  const c = VS.characters[charId]; if (!c) return;
   const item = (c.inventaire||[])[invIndex]; if (!item) return;
   const targets = Object.entries(_presence)
     .filter(([pUid]) => pUid !== uid)
     .flatMap(([pUid, p]) =>
-      Object.values(_characters)
+      Object.values(VS.characters)
         .filter(ch => ch.uid === pUid)
         .map(ch => ({ pUid, charId: ch.id, charNom: ch.nom||p.pseudo, pseudo: p.pseudo }))
     );
@@ -14158,8 +14154,8 @@ function _vttMsSendPicker(charId, uid, invIndex) {
 // Effectue le transfert d'objet entre deux personnages
 async function _vttMsConfirmSend(senderCharId, senderUid, invIndex, recipCharId) {
   invIndex = parseInt(invIndex);
-  const sender = _characters[senderCharId]; if (!sender) return;
-  const recip  = _characters[recipCharId];  if (!recip)  return;
+  const sender = VS.characters[senderCharId]; if (!sender) return;
+  const recip  = VS.characters[recipCharId];  if (!recip)  return;
   const senderInv = [...(sender.inventaire||[])];
   const item = senderInv[invIndex]; if (!item) return;
   senderInv.splice(invIndex, 1);
@@ -14186,7 +14182,7 @@ async function _vttMsConfirmSend(senderCharId, senderUid, invIndex, recipCharId)
 async function _vttMsDeleteItem(charId, uid, invIndex) {
   if (!_msCanEdit(uid)) return;
   invIndex = parseInt(invIndex);
-  const c = _characters[charId]; if (!c) return;
+  const c = VS.characters[charId]; if (!c) return;
   const inv = [...(c.inventaire||[])];
   const item = inv[invIndex]; if (!item) return;
   if (!confirm(`Supprimer "${item.nom||'cet objet'}" de l'inventaire ?`)) return;
@@ -14628,7 +14624,7 @@ function _msNoteText(contenu) {
 
 async function _vttMsAddNote(charId, uid) {
   if (!_msCanEdit(uid)) return;
-  const c = _characters[charId]; if (!c) return;
+  const c = VS.characters[charId]; if (!c) return;
   const notes = [...(c.notesList || [])];
   notes.push({ titre: 'Nouvelle note', contenu: '', date: new Date().toLocaleDateString('fr-FR') });
   _msOpenNote = notes.length - 1;
@@ -14644,7 +14640,7 @@ function _vttMsToggleNote(idx) {
 async function _vttMsRenameNote(charId, uid, idx) {
   if (!_msCanEdit(uid)) return;
   idx = parseInt(idx);
-  const c = _characters[charId]; if (!c) return;
+  const c = VS.characters[charId]; if (!c) return;
   const notes = [...(c.notesList || [])];
   if (!notes[idx]) return;
   const val = prompt('Titre de la note :', notes[idx].titre || 'Note sans titre');
@@ -14656,7 +14652,7 @@ async function _vttMsRenameNote(charId, uid, idx) {
 async function _vttMsSaveNote(charId, uid, idx) {
   if (!_msCanEdit(uid)) return;
   idx = parseInt(idx);
-  const c = _characters[charId]; if (!c) return;
+  const c = VS.characters[charId]; if (!c) return;
   const ta = document.getElementById(`vtt-ms-note-${charId}-${idx}`);
   const notes = [...(c.notesList || [])];
   if (!notes[idx] || !ta) return;
@@ -14669,7 +14665,7 @@ async function _vttMsSaveNote(charId, uid, idx) {
 async function _vttMsDeleteNote(charId, uid, idx) {
   if (!_msCanEdit(uid)) return;
   idx = parseInt(idx);
-  const c = _characters[charId]; if (!c) return;
+  const c = VS.characters[charId]; if (!c) return;
   const notes = [...(c.notesList || [])];
   if (!notes[idx]) return;
   if (!confirm('Supprimer cette note ?')) return;
@@ -14689,7 +14685,7 @@ function _renderMiniSheet(uid) {
   const pres = _presence[uid];
   if (!uid || !pres) { panel.classList.remove('open'); panel.innerHTML = ''; return; }
 
-  const chars = sortCharactersForDisplay(Object.values(_characters).filter(c => c.uid === uid));
+  const chars = sortCharactersForDisplay(Object.values(VS.characters).filter(c => c.uid === uid));
   if (!chars.length) {
     panel.classList.add('open');
     panel.innerHTML = `<div class="vtt-ms-empty">Aucun personnage lié pour ${_esc(pres.pseudo)}.</div>`;

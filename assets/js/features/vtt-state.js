@@ -18,6 +18,13 @@ export const VS = {
   pages:      {},    // pageId → doc page (scènes de la table)
   tokens:     {},    // tokenId → doc token de la page active
   activePage: null,  // id de la page (scène) actuellement affichée
+  stage:      null,  // Konva.Stage
+  layers:     {},    // { bg, tokens, fx, ui… } → Konva.Layer
+  characters: {},    // characterId → doc personnage (entités liées)
+  npcs:       {},    // npcId → doc PNJ
+  bestiary:   {},    // beastId → doc créature (bestiaire)
+  selected:   null,  // id du token sélectionné
+  tool:       'select', // outil d'interaction courant
 
   // ── Images de fond/avant-plan + édition de carte (futur vtt/map-images) ──
   imgTr:       null,   // Konva.Transformer pour les images BG (sous les tokens)
