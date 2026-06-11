@@ -73,7 +73,7 @@ function _startMusicCatalogListeners() {
       soundsReady = true;
       if (document.getElementById('vtt-music-panel')?.dataset.open === '1') _renderMusicPanel();
       done();
-    }, () => { soundsReady = true; done(); }));
+    }, err => { console.warn('[vtt music] lecture vttSons refusée/échouée:', err?.code || err); soundsReady = true; done(); }));
 
     VS.unsubs.push(onSnapshot(_playlistsCol(), snap => {
       _playlists = snap.docs
@@ -82,7 +82,7 @@ function _startMusicCatalogListeners() {
       playlistsReady = true;
       if (document.getElementById('vtt-music-panel')?.dataset.open === '1') _renderMusicPanel();
       done();
-    }, () => { playlistsReady = true; done(); }));
+    }, err => { console.warn('[vtt music] lecture vttPlaylists refusée/échouée:', err?.code || err); playlistsReady = true; done(); }));
   });
 
   return _musicCatalogReady;

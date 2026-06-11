@@ -247,6 +247,18 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['walls']);
       }
 
+      // Sons & playlists (musique d'ambiance) : lecture tous (pour écouter),
+      // écriture MJ (gestion du catalogue). SANS ces règles, ces collections
+      // sont refusées par défaut → le panneau musique reste vide ("Aucun son").
+      match /vttSons/{id} {
+        allow read:  if inAdventure(adventureId);
+        allow write: if isAdvAdmin(adventureId);
+      }
+      match /vttPlaylists/{id} {
+        allow read:  if inAdventure(adventureId);
+        allow write: if isAdvAdmin(adventureId);
+      }
+
       // Annotations (dessins) : tous créent, chacun modifie/supprime les siennes, MJ gère tout
       match /vttAnnotations/{id} {
         allow read:   if inAdventure(adventureId);
