@@ -118,5 +118,12 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   via `_resetMusicState()`. Vérif statique : free-vars, orphelins, exports↔imports,
   doubles déclarations, `node --check` — tout vert. **⚠️ Reste à SMOKE-TESTER avant
   merge** (lecture son/playlist, pause/next/stop, sync 2ᵉ client, créer/suppr playlist).
-- ⏳ **Phase 1 — modules suivants** : `vtt-rest.js`, `vtt-tools-ruler.js`, puis chat
-  (en dernier des « simples » car couplage entrant massif). Même recette + vérif statique.
+- ✅ **Phase 1 — extraction `vtt-rest.js`** (245 l.) : court repos (15 fns, **aucun état
+  local** — tout dans VS.session.shortRest). **14303 → 14098 l. (−205).** vtt.js importe
+  10 symboles ; circulaire `_sesRef`/`_chrRef` (refs Firestore exportées de vtt.js).
+  Vérif statique complète, `node --check` OK. **⚠️ smoke-test** : ouvrir 💤, voter le
+  repos (multi-clients), MJ force/règle max/reset, vérifier régen ½ PV/PM.
+- ⏳ **Phase 1 — suivants** : `vtt-tools-ruler.js` (règle+annotations), `vtt-loot.js`
+  (butin), `vtt-dice.js` (lanceur libre) ; chat en dernier (couplage entrant massif).
+  Les refs Firestore transverses (`_sesRef, _chrRef, …`) sont exportées au besoin ;
+  si trop d'imports circulaires s'accumulent, envisager un `vtt-refs.js` dédié.
