@@ -23,9 +23,17 @@ Le registre `VTT_ACTIONS` (objet littéral, fin de `vtt.js`) résout les handler
 
 ## Le plan
 
-### Phase 0 — `vtt-state.js` : migrer l'état mutable, **en place** (vtt.js reste un fichier)
-Rename mécanique `_x` → `VS.x`, par **lots cohérents** (un domaine à la fois).
-Zéro changement de comportement (même objet, juste relocalisé). C'est le déverrouillage.
+### Phase 0 — `vtt-state.js` : migrer l'état **partagé**, **en place** (vtt.js reste un fichier)
+Rename mécanique `_x` → `VS.x`, par **lots cohérents**. Zéro changement de comportement
+(même objet, juste relocalisé). C'est le déverrouillage.
+
+**Principe : seul l'état réellement partagé entre futurs modules va dans `VS`** — le
+cœur de scène (`session, pages, tokens, activePage, stage, layers, characters, npcs,
+bestiary, selected, tool`…) lu par beaucoup de domaines. L'état **local** à un domaine
+(musique, dés, règle/annotations, loot, présence…) **reste en place** et déménagera
+**dans son module** lors de son extraction (Phases 1+), pas dans `VS`. (Le lot pilote
+« images/carte » a migré du local vers `VS` pour éprouver le protocole ; il pourra
+rejoindre `vtt/map-images.js` plus tard — sans gravité.)
 
 ### Phases 1…n — carver un cluster par PR
 Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son cluster
@@ -72,8 +80,11 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
 
 ## Avancement
 
-- ✅ **Phase 0 — lot images/carte** : `imgTr, imgTrFg, selImg, mapMode, mapLib,
-  mapLibUnsub` → `VS.*`. `vtt-state.js` créé. (≈71 occurrences migrées.)
-- ⏳ Prochains lots Phase 0 : état chat (`emotes, chatMsgs, chatReplyTo`) avant
-  d'extraire `vtt/chat.js` ; puis le cœur session/rendu (`stage, layers, session,
-  tokens, pages, activePage`) — lot le plus chaud, PR dédiée + smoke-test appuyé.
+- ✅ **Phase 0 — lot 1 (pilote, images/carte)** : `imgTr, imgTrFg, selImg, mapMode,
+  mapLib, mapLibUnsub` → `VS.*`. `vtt-state.js` créé. (≈71 occurrences.)
+- ✅ **Phase 0 — lot 2 (cœur de scène)** : `session, pages, tokens, activePage` →
+  `VS.*`. (≈436 occurrences.) Smoke-test : pan/zoom, sélection token, attaque, sync
+  multi-clients, changement de page/scène.
+- ⏳ Prochains lots Phase 0 (cœur partagé restant) : `stage, layers, unsubs` (Konva) ;
+  `characters, npcs, bestiary` (entités liées) ; `selected, tool` (interaction).
+  Puis Phases 1+ : extraire les modules (état local ↦ dans le module).

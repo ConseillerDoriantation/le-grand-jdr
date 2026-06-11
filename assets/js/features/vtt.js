@@ -113,10 +113,10 @@ function _vttCourirAndClose(srcId) {
 
 // ── Actions de base : Esquiver / Se cacher / Se désengager (état sur soi) ──
 async function _vttSelfAction(srcId, condId) {
-  const t = _tokens[srcId]?.data; if (!t) return;
+  const t = VS.tokens[srcId]?.data; if (!t) return;
   if (!_canControlToken(t)) return;
   const lib = CONDITION_BY_ID[condId]; if (!lib) return;
-  const round = _session?.combat?.round ?? 0;
+  const round = VS.session?.combat?.round ?? 0;
   const dur = (Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0) ? lib.defaultDuration : 1;
   // En combat : actif pendant `dur` round(s) (expire à la fin du round courant).
   // Hors combat (round 0) : on cale sur le 1er round de combat → l'état est gardé
@@ -138,9 +138,9 @@ function _vttSelfActionClose(srcId, condId) {
 
 // ── Aider : relève un allié à 0 PV à 1 PV et retire tous ses états ──
 async function _vttAider(srcId, tgtId) {
-  const s = _tokens[srcId]?.data; if (!s) return;
+  const s = VS.tokens[srcId]?.data; if (!s) return;
   if (!_canControlToken(s)) return;
-  const t = _tokens[tgtId]?.data; if (!t) return;
+  const t = VS.tokens[tgtId]?.data; if (!t) return;
   await _setHp(t, 1).catch(() => {});
   await updateDoc(_tokRef(tgtId), { conditions: [] }).catch(() => {});
   const name = _live(t).displayName ?? t.name;
@@ -229,14 +229,14 @@ _vttBindDispatch();
 
 // ── État module ─────────────────────────────────────────────────────
 let _stage   = null, _layers = {}, _unsubs = [], _resizeObs = null;
-let _session = {}, _pages = {}, _tokens = {};
+// VS.session, VS.pages, VS.tokens → VS (état de scène partagé, voir vtt-state.js)
 let _vttEntered = false;   // le client a-t-il cliqué « Entrer » (listeners actifs) ?
 let _characters = {};   // characterId → character doc
 let _npcs       = {};   // npcId → npc doc
 let _bestiary   = {};   // beastId → creature doc (bestiaire)
 let _bestiaryLoads = new Map(); // beastId → Promise lecture doc ciblée
 let _bstTracker = {};   // creatureId → tracker joueur (pvActuel, pmActuel, caEstimee…)
-let _activePage = null;
+// VS.activePage → VS (id de la page de scène active, voir vtt-state.js)
 let _tool       = 'select';
 let _selected   = null, _attackSrc = null, _moveHL = [];
 // Mode "action d'abord" (action-first) : l'action est choisie AVANT la cible.
@@ -429,7 +429,7 @@ let _msInvQuery   = '', _msInvCat  = 'all';
 let _msSortQuery  = '', _msSortCat = 'all';
 
 // ── Timer de session ────────────────────────────────────────────────
-// Stocké dans _session.timer = { startedAt:ms, accumulated:ms, running:bool, label:string }
+// Stocké dans VS.session.timer = { startedAt:ms, accumulated:ms, running:bool, label:string }
 let _timerTick = null; // intervalId pour rafraîchir l'affichage
 
 // ── Combat tracker (overlay haut-gauche sur le canvas) ──────────────
@@ -469,7 +469,7 @@ const _musicStateRef = ()  => doc(db, `adventures/${_aid()}/vtt/music`);
 /** Somme des bonus de toucher actifs (enchantement mode Toucher) sur un token.
  *  Lu FRAIS au moment du jet / de l'affichage HUD (jamais figé dans l'option). */
 function _touchBuffOf(tok) {
-  const round = _session?.combat?.round ?? 0;
+  const round = VS.session?.combat?.round ?? 0;
   return (tok?.buffs || [])
     .filter(b => b.type === 'toucher_bonus' && (b.expiresAtRound == null || round === 0 || round <= b.expiresAtRound))
     .reduce((s, b) => s + (parseInt(b.bonus) || 0), 0);
@@ -606,7 +606,7 @@ function _live(t) {
     || '1d6';
 
   // Valeurs dérivées calculées une seule fois pour éviter les recalculs dans result
-  const _round   = _session?.combat?.round ?? 0;
+  const _round   = VS.session?.combat?.round ?? 0;
   const _pmMax   = c ? calcPMMax(c) : n ? npcPmMax : null;
   const _caBase  = t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0)))));
   const _caBuffs = (t.buffs || []).filter(bf => bf.type === 'ca' && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound));
@@ -653,7 +653,7 @@ function _live(t) {
           : n
             ? (t.range > 1 ? t.range : (_numOr(npcCombat.range, _numOr(npcWeapon.portee, 1))))
             : (t.range ?? 1);
-      const r = _session?.combat?.round ?? 0;
+      const r = VS.session?.combat?.round ?? 0;
       const rangeBonus = (t.buffs || [])
         .filter(bf => bf.type === 'range_bonus' && (bf.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound))
         .reduce((sum, bf) => sum + (bf.bonus || 0), 0);
@@ -790,7 +790,7 @@ async function _syncDownedCondition(t, hp) {
 async function _vttTriggerConcentrationSave(td, damageAmount) {
   if (!td || damageAmount <= 0) return [];
   const buffs = (td.buffs || []).filter(b => b?.canalisePersistant && b?.concentrationDD != null);
-  const round = _session?.combat?.round ?? 0;
+  const round = VS.session?.combat?.round ?? 0;
   const activeConditions = (td.conditions || []).filter(c => {
     if (c.expiresAtRound != null && round > 0 && round > c.expiresAtRound) return false;
     return !!CONDITION_BY_ID[c.id]?.effects?.concentrationCheck;
@@ -812,7 +812,7 @@ async function _vttTriggerConcentrationSave(td, damageAmount) {
       notes.push(`💢 ${rollStr} ÉCHEC · ${cb.sortLabel} rompu sur ${tgtName}`);
       removed.push(cb);
       // Supprime les summons canalisés liés
-      const summonsToKill = Object.values(_tokens).filter(e =>
+      const summonsToKill = Object.values(VS.tokens).filter(e =>
         e?.data?.summonOwnerId === (cb.casterId || td.id) && e?.data?.summonCanalise
       );
       for (const s of summonsToKill) { await _persistInvocationState(s.data); await deleteDoc(_tokRef(s.data.id)).catch(() => {}); }
@@ -865,7 +865,7 @@ async function _cleanupReserveDuplicates() {
   if (!STATE.isAdmin || _reserveCleanupRunning) return;
   const seen = new Map();
   const duplicateIds = [];
-  const reserve = Object.values(_tokens)
+  const reserve = Object.values(VS.tokens)
     .map(e => e.data)
     .filter(t => !t.pageId && _tokenEntityKey(t))
     .sort((a, b) => {
@@ -885,7 +885,7 @@ async function _cleanupReserveDuplicates() {
     const batch = writeBatch(db);
     duplicateIds.forEach(id => batch.delete(_tokRef(id)));
     await batch.commit();
-    duplicateIds.forEach(id => { _tokens[id]?.shape?.destroy(); delete _tokens[id]; });
+    duplicateIds.forEach(id => { VS.tokens[id]?.shape?.destroy(); delete VS.tokens[id]; });
     _renderTraySoon();
   } catch (e) {
     console.error('[vtt] cleanup reserve duplicates:', e);
@@ -905,7 +905,7 @@ async function _syncAutoTokens() {
   const reserveSeen     = new Map();  // 'c:<id>' | 'n:<id>' → 1er token réserve gardé
   const toDelete        = [];
 
-  for (const { data } of Object.values(_tokens)) {
+  for (const { data } of Object.values(VS.tokens)) {
     let key = null;
     if (data.characterId) key = 'c:' + data.characterId;
     else if (data.npcId)  key = 'n:' + data.npcId;
@@ -1009,9 +1009,9 @@ function _cleanup() {
   _mtClear(true);
   _mtBroadcasting = false;
   _presence = {}; _miniUid = null; _miniCharId = null;
-  _tokens = {}; _pages = {}; _characters = {}; _npcs = {}; _bestiary = {}; _bstTracker = {};
+  VS.tokens = {}; VS.pages = {}; _characters = {}; _npcs = {}; _bestiary = {}; _bstTracker = {};
   _bestiaryLoads.clear();
-  _session = {}; _activePage = null; _selected = null; _attackSrc = null;
+  VS.session = {}; VS.activePage = null; _selected = null; _attackSrc = null;
   _clearAim(); _hideActBar();
   _moveHL = []; _autoSyncDone = false; _renderedPings.clear(); _renderedReactions.clear();
   _selectedMulti.clear(); _multiDragOrigin = null;
@@ -1290,11 +1290,11 @@ function _initCanvas(container) {
 }
 
 function _drawGrid() {
-  if (!_stage||!_activePage) return;
+  if (!_stage||!VS.activePage) return;
   const K = window.Konva;
   _layers.bg.destroyChildren();
   _layers.grid.find('Line').forEach(n=>n.destroy());
-  const { cols, rows } = _activePage;
+  const { cols, rows } = VS.activePage;
   const W=cols*CELL, H=rows*CELL;
   // Fond sur la couche bg (sous les images)
   _layers.bg.add(new K.Rect({ x:0,y:0,width:W,height:H,fill:'#12121f',listening:false }));
@@ -1307,7 +1307,7 @@ function _drawGrid() {
 }
 
 function _renderMapImages() {
-  if (!_activePage) return;
+  if (!VS.activePage) return;
   const K = window.Konva;
   // Nettoyer les images des deux couches (sans détruire les transformers)
   _layers.map.find('Image').forEach(n=>n.destroy());
@@ -1316,14 +1316,14 @@ function _renderMapImages() {
   if (VS.imgTrFg) { VS.imgTrFg.nodes([]); }
   VS.selImg = null;
 
-  for (const img of (_activePage.backgroundImages??[])) {
+  for (const img of (VS.activePage.backgroundImages??[])) {
     const isFg   = img.layer === 'fg';
     const tgtLyr = isFg ? _layers.mapFg : _layers.map;
     const tr     = isFg ? VS.imgTrFg      : VS.imgTr;
 
     const el = new Image(); el.crossOrigin='anonymous';
     el.onload = () => {
-      if (!_activePage) return; // page changée entre temps
+      if (!VS.activePage) return; // page changée entre temps
       const ki = new K.Image({
         image:el, x:img.x*CELL, y:img.y*CELL,
         width:img.w*CELL, height:img.h*CELL,
@@ -1346,7 +1346,7 @@ function _renderMapImages() {
           if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
           if (!VS.mapMode) return;
           e.cancelBubble = true;
-          _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
+          VS.tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
           _hideActBar();
           _selected=null; _clearHL(); _renderInspector(null); _layers.token.batchDraw();
           VS.selImg = img.id;
@@ -1382,8 +1382,8 @@ function _renderMapImages() {
             {
               label: '🗑 Supprimer cette image',
               fn: () => {
-                const imgs=(_activePage.backgroundImages??[]).filter(i=>i.id!==img.id);
-                updateDoc(_pgRef(_activePage.id),{backgroundImages:imgs}).catch(()=>{});
+                const imgs=(VS.activePage.backgroundImages??[]).filter(i=>i.id!==img.id);
+                updateDoc(_pgRef(VS.activePage.id),{backgroundImages:imgs}).catch(()=>{});
               },
             },
           ]);
@@ -1398,9 +1398,9 @@ function _renderMapImages() {
   }
 }
 async function _patchImg(imgId, patch) {
-  if (!_activePage) return;
-  await updateDoc(_pgRef(_activePage.id), {
-    backgroundImages: (_activePage.backgroundImages??[]).map(i=>i.id===imgId?{...i,...patch}:i)
+  if (!VS.activePage) return;
+  await updateDoc(_pgRef(VS.activePage.id), {
+    backgroundImages: (VS.activePage.backgroundImages??[]).map(i=>i.id===imgId?{...i,...patch}:i)
   }).catch(()=>{});
 }
 
@@ -1451,7 +1451,7 @@ function _buildShape(t) {
   // ── Badge CA (coin haut-droit) + indicateur buff ─────────────────
   const _buff = ld._activeCaBuff;
   const _buffed = !!_buff;
-  const _round  = _session?.combat?.round ?? 0;
+  const _round  = VS.session?.combat?.round ?? 0;
   const _toursLeft = _buff
     ? (_buff.expiresAtRound != null && _round > 0 ? _buff.expiresAtRound - _round + 1 : _buff.totalDuration ?? '∞')
     : null;
@@ -1471,7 +1471,7 @@ function _buildShape(t) {
       fill:'#818cf8', fontFamily:'Inter,sans-serif', align:'center', listening:false, name:'ca-buff-turns' }));
   }
   // ── Badges d'états (conditions / debuffs) — top-left du token ──────────────
-  const _condRound = _session?.combat?.round ?? 0;
+  const _condRound = VS.session?.combat?.round ?? 0;
   const _activeConditions = (t.conditions || []).filter(c =>
     c.expiresAtRound == null || _condRound === 0 || _condRound <= c.expiresAtRound
   );
@@ -1504,7 +1504,7 @@ function _buildShape(t) {
   // ── Badges de buffs/debuffs (DoT, enchant, CA bonus…) — top-right du token ──
   // Affiché en miroir des états : permet de voir d'un coup d'œil les effets actifs
   // qui ne sont pas des conditions D&D (enchant arme, DoT, bouclier, etc.)
-  const _buffsRound = _session?.combat?.round ?? 0;
+  const _buffsRound = VS.session?.combat?.round ?? 0;
   const _BUFF_VIZ = {
     dot:             { icon:'🩸', color:'#dc2626' }, // DoT (debuff)
     dmg_bonus:       { icon:'⚔️', color:'#f59e0b' }, // enchant arme alliée
@@ -1595,7 +1595,7 @@ function _buildShape(t) {
       if (_selectedMulti.has(t.id) && _selectedMulti.size>1) {
         _multiDragOrigin={};
         for (const id of _selectedMulti) {
-          const s=_tokens[id]?.shape;
+          const s=VS.tokens[id]?.shape;
           if (s) _multiDragOrigin[id]={x:s.x(),y:s.y()};
         }
       } else { _multiDragOrigin=null; }
@@ -1610,8 +1610,8 @@ function _buildShape(t) {
         const dx=sx-_multiDragOrigin[t.id].x, dy=sy-_multiDragOrigin[t.id].y;
         for (const [id,orig] of Object.entries(_multiDragOrigin)) {
           if (id===t.id) continue;
-          const s=_tokens[id]?.shape; if (!s) continue;
-          const d2=_tokenDims(_tokens[id].data);
+          const s=VS.tokens[id]?.shape; if (!s) continue;
+          const d2=_tokenDims(VS.tokens[id].data);
           s.position({
             x:Math.round((orig.x+dx-d2.w*CELL/2)/CELL)*CELL+d2.w*CELL/2,
             y:Math.round((orig.y+dy-d2.h*CELL/2)/CELL)*CELL+d2.h*CELL/2,
@@ -1622,13 +1622,13 @@ function _buildShape(t) {
     });
     // ─ Fin du drag : commit Firestore ─
     g.on('dragend', async () => {
-      const pg=_activePage; if (!pg) return;
+      const pg=VS.activePage; if (!pg) return;
       if (_multiDragOrigin && _selectedMulti.has(t.id) && _selectedMulti.size>1) {
         // Batch : sauver tous les tokens du groupe
         const batch=writeBatch(db);
         for (const id of _selectedMulti) {
-          const s=_tokens[id]?.shape; if (!s) continue;
-          const d2=_tokenDims(_tokens[id].data);
+          const s=VS.tokens[id]?.shape; if (!s) continue;
+          const d2=_tokenDims(VS.tokens[id].data);
           const nc=Math.max(0,Math.min(pg.cols-d2.w,Math.round((s.x()-d2.w*CELL/2)/CELL)));
           const nr=Math.max(0,Math.min(pg.rows-d2.h,Math.round((s.y()-d2.h*CELL/2)/CELL)));
           s.position({x:nc*CELL+d2.w*CELL/2,y:nr*CELL+d2.h*CELL/2});
@@ -1641,8 +1641,8 @@ function _buildShape(t) {
       // Token seul
       const c=Math.max(0,Math.min(pg.cols-sw,Math.round((g.x()-sw*CELL/2)/CELL)));
       const r=Math.max(0,Math.min(pg.rows-sh,Math.round((g.y()-sh*CELL/2)/CELL)));
-      if (!STATE.isAdmin && _session?.combat?.active) {
-        const cur=_tokens[t.id]?.data;
+      if (!STATE.isAdmin && VS.session?.combat?.active) {
+        const cur=VS.tokens[t.id]?.data;
         if (cur) {
           const d=Math.abs(c-cur.col)+Math.abs(r-cur.row);
           const maxMvt=(_live(cur).displayMovement??6)+(cur.bonusMvt||0);
@@ -1654,37 +1654,37 @@ function _buildShape(t) {
         }
       }
       // Blocage par les murs (joueurs seulement)
-      if (!STATE.isAdmin && (_activePage?.walls||[]).length) {
-        const cur=_tokens[t.id]?.data;
-        if (cur && fogWallBlocksPath(cur.col, cur.row, c, r, _activePage.walls)) {
+      if (!STATE.isAdmin && (VS.activePage?.walls||[]).length) {
+        const cur=VS.tokens[t.id]?.data;
+        if (cur && fogWallBlocksPath(cur.col, cur.row, c, r, VS.activePage.walls)) {
           showNotif('🧱 Chemin bloqué !', 'error');
           g.position({x:cur.col*CELL+sw*CELL/2,y:cur.row*CELL+sh*CELL/2}); _layers.token.batchDraw(); return;
         }
       }
       g.position({x:c*CELL+sw*CELL/2,y:r*CELL+sh*CELL/2}); _layers.token.batchDraw();
       const patch={col:c,row:r};
-      if (!STATE.isAdmin&&_session?.combat?.active) {
-        const cur=_tokens[t.id]?.data;
+      if (!STATE.isAdmin&&VS.session?.combat?.active) {
+        const cur=VS.tokens[t.id]?.data;
         const d=Math.abs(c-(cur?.col??c))+Math.abs(r-(cur?.row??r));
         patch.movedCells=(cur?.movedCells||0)+d;
         patch.movedThisTurn=true;
       }
       await updateDoc(_tokRef(t.id),patch).catch(()=>showNotif('Erreur déplacement','error'));
       // Mise à jour optimiste + refresh des zones (déplacement et attaque)
-      const _entry=_tokens[t.id];
+      const _entry=VS.tokens[t.id];
       if (_entry?.data) {
         _entry.data.col=c; _entry.data.row=r;
         if (patch.movedCells!==undefined)   _entry.data.movedCells=patch.movedCells;
         if (patch.movedThisTurn!==undefined) _entry.data.movedThisTurn=patch.movedThisTurn;
       }
       _refreshRanges(t.id, _entry?.data);
-      fogUpdateSoon(_activePage, _tokens, STATE.isAdmin);
+      fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
     });
   }
 
   const _isAttackTargetInRange = (srcId, tgtId) => {
-    const src = _tokens[srcId]?.data;
-    const tgt = _tokens[tgtId]?.data;
+    const src = VS.tokens[srcId]?.data;
+    const tgt = VS.tokens[tgtId]?.data;
     if (!src || !tgt) return false;
     const options = _buildAttackOptions(src);
     if (options.some(o => _tokenAttackDistance(src, tgt, o.portee) <= o.portee)) return true;
@@ -1767,12 +1767,12 @@ function _buildShape(t) {
 }
 
 function _patchShape(id) {
-  const e=_tokens[id]; if (!e?.shape) return;
+  const e=VS.tokens[id]; if (!e?.shape) return;
   // Garde-fou : un token d'une autre page (ou en réserve) n'a rien à dessiner
   // sur le calque courant. Sans ça, un patch (ex. édition PV/PM d'un perso ayant
   // un token sur une autre page) ré-ajoute son shape — détruit mais encore
   // référencé — au calque actif → des tokens d'une autre page « apparaissent ».
-  if (e.data.pageId !== _activePage?.id) return;
+  if (e.data.pageId !== VS.activePage?.id) return;
   const ld=_live(e.data); const g=e.shape;
   const hasPmBar   = !!g.findOne('.pm-val');
   const hasCaBuff  = !!g.findOne('.ca-buff-turns');
@@ -1785,7 +1785,7 @@ function _patchShape(id) {
   // la forme Konva ; un simple patch des textes/barres laisse le cercle coloré.
   const imageMismatch = (g.getAttr('displayImage') || null) !== (ld.displayImage || null);
   // Conditions : si le nombre d'états actifs change, reconstruire (badges canvas)
-  const _condRoundP = _session?.combat?.round ?? 0;
+  const _condRoundP = VS.session?.combat?.round ?? 0;
   const _activeCondCount = (e.data.conditions || []).filter(c =>
     c.expiresAtRound == null || _condRoundP === 0 || _condRoundP <= c.expiresAtRound
   ).length;
@@ -1800,7 +1800,7 @@ function _patchShape(id) {
   if ((ld.displayPm != null) !== hasPmBar || hasCaBuff !== needsCaBuff || sizeMismatch || imageMismatch || condMismatch || buffMismatch) {
     const shape = _buildShape(e.data);
     g.destroy();
-    _tokens[id] = { ...e, shape };
+    VS.tokens[id] = { ...e, shape };
     _layers.token?.add(shape);
     if (_selected === id) shape.findOne('.sel')?.visible(true);
     if (_attackSrc === id) shape.findOne('.atk')?.visible(true);
@@ -1824,7 +1824,7 @@ function _patchShape(id) {
   // CA + buff
   const _buff   = ld._activeCaBuff;
   const _buffed = !!_buff;
-  const _round  = _session?.combat?.round ?? 0;
+  const _round  = VS.session?.combat?.round ?? 0;
   g.findOne('.ca-lbl')?.text(`🛡${ld.caBadge ?? (ld.displayDefense??0)}`);
   g.findOne('.ca-lbl')?.fill(_buffed ? '#c4b5fd' : '#e2e8f0');
   g.findOne('.ca-bg')?.stroke(_buffed ? '#818cf8' : '#64748b');
@@ -1843,18 +1843,18 @@ function _patchShape(id) {
 function _select(id) {
   _clearAim(); // changer de sélection annule une visée action-first en cours
   if (VS.imgTr&&VS.selImg) { VS.imgTr.nodes([]); VS.selImg=null; _layers.map?.batchDraw(); }
-  _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
-  _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
+  VS.tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
+  VS.tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
   _attackSrc=null; _clearHL();
   _selected=id;
-  _tokens[id]?.shape?.findOne('.sel')?.visible(true);
+  VS.tokens[id]?.shape?.findOne('.sel')?.visible(true);
   _layers.token.batchDraw();
-  const data=_tokens[id]?.data;
+  const data=VS.tokens[id]?.data;
   _renderInspector(data??null);
   // Clic sur un token allié/propre : portée de déplacement (bleu) + portée d'attaque (rouge)
   if (data && _canControlToken(data)) {
     _attackSrc=id;
-    _tokens[id]?.shape?.findOne('.atk')?.visible(true);
+    VS.tokens[id]?.shape?.findOne('.atk')?.visible(true);
     _layers.token.batchDraw();
     _showMoveRange(data);    // cases bleues cliquables (déplacement)
     _showAttackRange(data);  // cases rouges par-dessus (visuel portée)
@@ -1865,8 +1865,8 @@ function _select(id) {
 }
 
 function _deselect() {
-  _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
-  _tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
+  VS.tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
+  VS.tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
   _clearAim(); _hideActBar();
   _selected=null; _attackSrc=null; _clearHL(); _clearMultiSelect(); _renderInspector(null);
   if (VS.imgTr)   { VS.imgTr.nodes([]); _layers.map?.batchDraw(); }
@@ -1885,7 +1885,7 @@ function _deselect() {
 // ── Barre d'action ancrée au token sélectionné ──────────────────────
 function _showActBar(srcId) {
   _hideActBar();
-  const t = _tokens[srcId]?.data; if (!t || !_canControlToken(t)) return;
+  const t = VS.tokens[srcId]?.data; if (!t || !_canControlToken(t)) return;
   const wrap = _stage?.container(); if (!wrap) return;
   const opts = _buildAttackOptions(t);
   const weaponN  = opts.filter(o => !o._itemAction && o.sortIdx === undefined && !o.targetSelf).length;
@@ -1921,9 +1921,9 @@ function _hideActBar() {
 // Re-positionne la barre sous le token courant (suit pan/zoom via rAF).
 function _positionActBar() {
   if (!_actBar || !_stage) return;
-  const sh = _tokens[_actBarSrc]?.shape;
-  const t  = _tokens[_actBarSrc]?.data;
-  if (!sh || !t || t.pageId !== _activePage?.id) { _hideActBar(); return; }
+  const sh = VS.tokens[_actBarSrc]?.shape;
+  const t  = VS.tokens[_actBarSrc]?.data;
+  if (!sh || !t || t.pageId !== VS.activePage?.id) { _hideActBar(); return; }
   const wrap  = _stage.container();
   const abs   = sh.getAbsolutePosition();        // px relatifs au wrap (scale + position inclus)
   const scale = _stage.scaleY() || 1;
@@ -1966,7 +1966,7 @@ function _startAim(srcId, opt) {
   _mtClear(false); _zoneClear(); _selfClear();
   _aimSrcId = srcId; _aimOpt = opt;
   _attackSrc = srcId;   // garde l'anneau d'attaque + court-circuite la redirection vers son propre token
-  _tokens[srcId]?.shape?.findOne('.atk')?.visible(true);
+  VS.tokens[srcId]?.shape?.findOne('.atk')?.visible(true);
   _layers.token?.batchDraw();
   _showAimRange(srcId, opt);
   _showAimHud(opt);
@@ -1975,11 +1975,11 @@ function _startAim(srcId, opt) {
 // Surligne uniquement les cases atteignables par CETTE action (sa portée propre).
 function _showAimRange(srcId, opt) {
   _clearHL();
-  const t = _tokens[srcId]?.data; if (!t || !_activePage || !_layers.grid) return;
+  const t = VS.tokens[srcId]?.data; if (!t || !VS.activePage || !_layers.grid) return;
   const K = window.Konva;
   const portee = Math.max(1, parseInt(opt.portee) || 1);
   const sd = _tokenDims(t);
-  const { cols, rows } = _activePage;
+  const { cols, rows } = VS.activePage;
   const reach = (dx, dy) => (portee === 1 ? Math.max(dx, dy) : dx + dy) <= portee;
   const friendly = opt.isHeal || opt.isEnchant || opt.isRegen;
   const c3 = friendly ? '34,197,94' : '239,68,68';
@@ -2017,7 +2017,7 @@ function _showAimHud(opt) {
 }
 
 function _isAimTargetInRange(srcId, tgtId, opt) {
-  const s = _tokens[srcId]?.data, t = _tokens[tgtId]?.data;
+  const s = VS.tokens[srcId]?.data, t = VS.tokens[tgtId]?.data;
   if (!s || !t) return false;
   const portee = opt.portee || 1;
   const dist = _tokenAttackDistance(s, t, portee);
@@ -2046,20 +2046,20 @@ function _clearAim() {
 function _aimCancel() {
   const sid = _aimSrcId;
   _clearAim();
-  const d = _tokens[sid]?.data;   // restaure les portées de sélection normales
+  const d = VS.tokens[sid]?.data;   // restaure les portées de sélection normales
   if (d && _canControlToken(d)) { _showMoveRange(d); _showAttackRange(d); }
   showNotif('Visée annulée', 'info');
 }
 
 // ── Portée de mouvement ─────────────────────────────────────────────
 function _showMoveRange(t) {
-  _clearHL(); if (!_activePage) return;
+  _clearHL(); if (!VS.activePage) return;
   const K=window.Konva, ld=_live(t);
-  const inCombat = !!_session?.combat?.active;
+  const inCombat = !!VS.session?.combat?.active;
   const maxMvt = (ld.displayMovement??6) + (t.bonusMvt||0);
   const mv = (inCombat && !STATE.isAdmin) ? Math.max(0, maxMvt - (t.movedCells||0)) : (ld.displayMovement??6);
   const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
-  const {cols,rows}=_activePage;
+  const {cols,rows}=VS.activePage;
   // Pas de check collision : le drag & drop laisse passer, l'affichage doit faire pareil.
   for (let dc=-mv;dc<=mv;dc++) for (let dr=-mv;dr<=mv;dr++) {
     if (Math.abs(dc)+Math.abs(dr)>mv) continue;
@@ -2096,7 +2096,7 @@ function _clearHL() { _moveHL.forEach(r=>r.destroy()); _moveHL=[]; _layers.grid?
  */
 function _refreshRanges(id, overrideData) {
   if (!id || id !== _selected) { _clearHL(); return; }
-  const data = overrideData ?? _tokens[id]?.data;
+  const data = overrideData ?? VS.tokens[id]?.data;
   if (!data) { _clearHL(); return; }
   if (!_canControlToken(data)) { _clearHL(); return; }
   _showMoveRange(data);   // _clearHL() est appelé en tête de _showMoveRange
@@ -2106,12 +2106,12 @@ function _refreshRanges(id, overrideData) {
 
 // ── Pings ────────────────────────────────────────────────────────────
 async function _emitPing(wx, wy) {
-  const uid = STATE.user?.uid; if (!uid || !_activePage) return;
+  const uid = STATE.user?.uid; if (!uid || !VS.activePage) return;
   const authorName = STATE.profile?.pseudo || STATE.profile?.prenom || 'Joueur';
   const color = '#ffe600'; // jaune néon — visible sur toutes les cartes
   try {
     await setDoc(_pingRef(uid), {
-      x: wx, y: wy, pageId: _activePage.id,
+      x: wx, y: wy, pageId: VS.activePage.id,
       authorName, color, createdAt: serverTimestamp(),
     }, { merge: true });
   } catch(e) { console.warn('[vtt] ping:', e); }
@@ -2173,8 +2173,8 @@ function _showEmoteBubble(tokenId, emoteUrl, emoteName, key) {
   // purge mémoire douce (évite la croissance infinie du Set sur longue session)
   if (_renderedReactions.size > 400) _renderedReactions.clear();
 
-  const e = tokenId ? _tokens[tokenId] : null;
-  if (e?.data && e.shape && e.data.pageId === _activePage?.id && _layers.ping && window.Konva) {
+  const e = tokenId ? VS.tokens[tokenId] : null;
+  if (e?.data && e.shape && e.data.pageId === VS.activePage?.id && _layers.ping && window.Konva) {
     _spawnTokenEmote(e.data, emoteUrl, emoteName);
   } else {
     _spawnCornerEmote(emoteUrl, emoteName);
@@ -2288,7 +2288,7 @@ function _spawnCornerEmote(emoteUrl, emoteName) {
 // ── Multi-sélection ─────────────────────────────────────────────
 function _clearMultiSelect() {
   for (const id of _selectedMulti) {
-    if (id!==_selected) _tokens[id]?.shape?.findOne('.sel')?.visible(false);
+    if (id!==_selected) VS.tokens[id]?.shape?.findOne('.sel')?.visible(false);
   }
   _selectedMulti.clear();
   _layers.token?.batchDraw();
@@ -2298,23 +2298,23 @@ function _toggleMultiSelect(id) {
   // Inclure le token principal courant dans la multi-sélection
   if (_selected && !_selectedMulti.has(_selected)) {
     _selectedMulti.add(_selected);
-    _tokens[_selected]?.shape?.findOne('.sel')?.visible(true);
+    VS.tokens[_selected]?.shape?.findOne('.sel')?.visible(true);
   }
   if (_selectedMulti.has(id)) {
     _selectedMulti.delete(id);
-    _tokens[id]?.shape?.findOne('.sel')?.visible(false);
+    VS.tokens[id]?.shape?.findOne('.sel')?.visible(false);
   } else {
     _selectedMulti.add(id);
-    _tokens[id]?.shape?.findOne('.sel')?.visible(true);
+    VS.tokens[id]?.shape?.findOne('.sel')?.visible(true);
     _selected = id;
-    _renderInspector(_tokens[id]?.data??null);
+    _renderInspector(VS.tokens[id]?.data??null);
   }
   _layers.token?.batchDraw();
 }
 
 /** Surbrillance rouge des cases à portée d'attaque de t (sans clear — le caller nettoie). */
 function _showAttackRange(t) {
-  if (!_activePage) return;
+  if (!VS.activePage) return;
   const K = window.Konva;
   const options = _buildAttackOptions(t)
     .map(o => ({ ...o, portee: Math.max(0, parseInt(o.portee) || 0) }))
@@ -2326,7 +2326,7 @@ function _showAttackRange(t) {
   // identifiable (tokens enemy/sentinelle).
   const weaponOpt = options.find(o => !o._itemAction && o.sortIdx === undefined && !o.targetSelf);
   const weaponPortee = weaponOpt ? weaponOpt.portee : Math.min(...options.map(o => o.portee));
-  const { cols, rows } = _activePage;
+  const { cols, rows } = VS.activePage;
   const sd = _tokenDims(t);
 
   // Métrique de distance par option : mêlée (portée=1) = Chebyshev, sinon Manhattan
@@ -2365,16 +2365,16 @@ function _showAttackRange(t) {
   _layers.grid.batchDraw();
 }
 async function _moveTo(id, col, row) {
-  const cur = _tokens[id]?.data;
+  const cur = VS.tokens[id]?.data;
   // Blocage par les murs (joueurs seulement)
-  if (!STATE.isAdmin && (_activePage?.walls||[]).length) {
-    if (cur && fogWallBlocksPath(cur.col, cur.row, col, row, _activePage.walls)) {
+  if (!STATE.isAdmin && (VS.activePage?.walls||[]).length) {
+    if (cur && fogWallBlocksPath(cur.col, cur.row, col, row, VS.activePage.walls)) {
       showNotif('🧱 Chemin bloqué !', 'error');
       return;
     }
   }
   // Limite de mouvement en combat (joueurs seulement)
-  if (!STATE.isAdmin && _session?.combat?.active && cur) {
+  if (!STATE.isAdmin && VS.session?.combat?.active && cur) {
     const d = Math.abs(col - cur.col) + Math.abs(row - cur.row);
     const maxMvt = (_live(cur).displayMovement ?? 6) + (cur.bonusMvt || 0);
     const rem = maxMvt - (cur.movedCells || 0);
@@ -2384,7 +2384,7 @@ async function _moveTo(id, col, row) {
     }
   }
   const patch = {col, row};
-  if (!STATE.isAdmin && _session?.combat?.active && cur) {
+  if (!STATE.isAdmin && VS.session?.combat?.active && cur) {
     const d = Math.abs(col - cur.col) + Math.abs(row - cur.row);
     patch.movedCells = (cur.movedCells || 0) + d;
     patch.movedThisTurn = true;
@@ -2392,7 +2392,7 @@ async function _moveTo(id, col, row) {
   await updateDoc(_tokRef(id), patch).catch(() => showNotif('Déplacement refusé', 'error'));
 
   // Mise à jour optimiste : ne pas attendre le snapshot Firestore pour rafraîchir les zones
-  const entry = _tokens[id];
+  const entry = VS.tokens[id];
   if (entry?.data) {
     entry.data.col = col;
     entry.data.row = row;
@@ -2592,7 +2592,7 @@ function _findOwnTokenAtPointer() {
   const pos = _stage.getPointerPosition(); if (!pos) return null;
   const w = _stageToWorld(pos);
   const cx = Math.floor(w.x / CELL), cy = Math.floor(w.y / CELL);
-  for (const [id, entry] of Object.entries(_tokens)) {
+  for (const [id, entry] of Object.entries(VS.tokens)) {
     const d = entry?.data; if (!d || d.ownerId !== uid) continue;
     const dim = _tokenDims(d);
     if (cx >= d.col && cx < d.col + dim.w && cy >= d.row && cy < d.row + dim.h) return id;
@@ -2919,7 +2919,7 @@ async function _vttApplyDeplacement(src, tgtData, mode, distance) {
   for (let i = 0; i < maxCells; i++) {
     const tryC = nc + stepC, tryR = nr + stepR;
     // Collision avec un autre token sur la même page
-    const collide = Object.values(_tokens).some(e => {
+    const collide = Object.values(VS.tokens).some(e => {
       const d = e?.data;
       if (!d || d.id === tgtData.id || d.pageId !== tgtData.pageId) return false;
       const dim = _tokenDims(d);
@@ -2952,7 +2952,7 @@ async function _vttSpendSpellPm(src, opt) {
 
 // Vrai si la case (col,row) pour un token de dimensions dim recouvre un autre token.
 function _selfCellOccupied(col, row, dim, src) {
-  return Object.values(_tokens).some(e => {
+  return Object.values(VS.tokens).some(e => {
     const dd = e?.data;
     if (!dd || dd.id === src.id || dd.pageId !== src.pageId) return false;
     const od = _tokenDims(dd);
@@ -2962,7 +2962,7 @@ function _selfCellOccupied(col, row, dim, src) {
 
 // Push/Pull : déplace la cible cliquée le long de l'axe lanceur↔cible (sans dégât).
 async function _vttCastPushPull(srcId, tgtId, opt, d) {
-  const src = _tokens[srcId]?.data, tgt = _tokens[tgtId]?.data;
+  const src = VS.tokens[srcId]?.data, tgt = VS.tokens[tgtId]?.data;
   if (!src || !tgt) return;
   if (src.id === tgt.id) { showNotif('Choisis une cible (pas toi-même)', 'error'); return; }
   if (_tokenAttackDistance(src, tgt, opt.portee) > (opt.portee || 1) + 0.001) {
@@ -2993,12 +2993,12 @@ function _selfClear() {
 function _startSelfMove(srcId, opt, cells) {
   _zoneClear(); _selfClear();
   _clearHL(); // retire les cases de déplacement classique pour éviter la confusion
-  const src = _tokens[srcId]?.data; if (!src || !_layers.grid || !_activePage) return;
+  const src = VS.tokens[srcId]?.data; if (!src || !_layers.grid || !VS.activePage) return;
   const mv  = Math.max(1, cells || 1);
   _selfCtx = { srcId, cells: mv, opt };
   const K = window.Konva;
   const dim = _tokenDims(src);
-  const { cols, rows } = _activePage;
+  const { cols, rows } = VS.activePage;
   for (let dc = -mv; dc <= mv; dc++) for (let dr = -mv; dr <= mv; dr++) {
     if (Math.abs(dc) + Math.abs(dr) > mv || (!dc && !dr)) continue; // losange Manhattan
     const c = src.col + dc, r = src.row + dr;
@@ -3022,7 +3022,7 @@ function _startSelfMove(srcId, opt, cells) {
 async function _selfMoveTo(col, row) {
   if (!_selfCtx) return;
   const { srcId, opt } = _selfCtx;
-  const src = _tokens[srcId]?.data; if (!src) { _selfClear(); return; }
+  const src = VS.tokens[srcId]?.data; if (!src) { _selfClear(); return; }
   const dist = Math.abs(col - src.col) + Math.abs(row - src.row);
   const name = _live(src).displayName ?? src.name;
   _selfClear();
@@ -3063,7 +3063,7 @@ function _showSelfHud() {
 // ── Sélecteur d'invocations AU LANCEMENT (versatilité : on choisit dans le VTT) ──
 let _invPickState = null;  // { srcId, tgtId, opt, optIdx, lib, max, ids:Set }
 function _vttPickInvocations(srcId, tgtId, opt, optIdx) {
-  const src = _tokens[srcId]?.data;
+  const src = VS.tokens[srcId]?.data;
   const c = src?.characterId ? _characters[src.characterId] : null;
   const lib = Array.isArray(c?.invocations) ? c.invocations : [];
   const max = opt?.mods?.invocation?.maxInvocations || 1;
@@ -3122,7 +3122,7 @@ function _invPickCancel() { _invPickState = null; closeModalDirect(); }
 // Best-effort (écriture autorisée surtout pour le propriétaire / le MJ).
 async function _persistInvocationState(tokData) {
   try {
-    const t = (tokData?.id && _tokens[tokData.id]?.data) ? _tokens[tokData.id].data : tokData;
+    const t = (tokData?.id && VS.tokens[tokData.id]?.data) ? VS.tokens[tokData.id].data : tokData;
     if (!t || t.summonKind !== 'invocation' || !t.summonInvId) return;
     const charId = t.summonOwnerCharId; if (!charId) return;
     const c = _characters[charId]; if (!c || !Array.isArray(c.invocations)) return;
@@ -3141,15 +3141,15 @@ async function _persistInvocationState(tokData) {
  * - Persisté en Firestore via _toksCol, visible par tous, contrôlable par l'owner
  */
 async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }) {
-  if (!_activePage) return null;
-  const src = _tokens[srcId]?.data; if (!src) return null;
-  const round = _session?.combat?.round ?? 0;
+  if (!VS.activePage) return null;
+  const src = VS.tokens[srcId]?.data; if (!src) return null;
+  const round = VS.session?.combat?.round ?? 0;
   const baseRound = Math.max(1, round);
   const ownerName = _live(src).displayName ?? src.name;
 
   // Snap dans les bornes de la page (commun à tous les kinds)
-  const targetCol = Math.max(0, Math.min(_activePage.cols - 1, col));
-  const targetRow = Math.max(0, Math.min(_activePage.rows - 1, row));
+  const targetCol = Math.max(0, Math.min(VS.activePage.cols - 1, col));
+  const targetRow = Math.max(0, Math.min(VS.activePage.rows - 1, row));
 
   // ── Invocation : résout la N-ième invocation choisie sur la bibliothèque du
   //    lanceur, applique base + bonus de runes, et RESTAURE les PV/PM persistants. ──
@@ -3210,7 +3210,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
       summonChanceRc: opt?.mods?.chance?.rc ?? 20,
       summonActions: actions,
       summonElementId: mod.elementId || null,   // attaque de base = élément du sort d'invocation
-      pageId: _activePage.id,
+      pageId: VS.activePage.id,
       col: targetCol, row: targetRow,
       visible: true,
       hp, hpMax: pvMax, pm, pmMax,
@@ -3274,7 +3274,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
     summonNbPuissance: st.nbP || 0,
     summonNbProtection: st.nbProt || 0,
     summonNbAmplification: st.nbAmp || 0,
-    pageId: _activePage.id,
+    pageId: VS.activePage.id,
     col: targetCol, row: targetRow,
     visible: true,
     hp, hpMax: hp,
@@ -3298,7 +3298,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
  * Évite la duplication entre les différents types d'enchantements/afflictions.
  */
 function _buffShared(opt, srcId) {
-  const round = _session?.combat?.round ?? 0;
+  const round = VS.session?.combat?.round ?? 0;
   const baseRound = Math.max(1, round);
   const dur = opt.sortDuree ?? 2;
   const isCanalise = !!opt.mods?.canalisePersistant;
@@ -3316,7 +3316,7 @@ function _buffShared(opt, srcId) {
 
 async function _consumeLuckyReroll(tokenId, tokenData, currentD20, shouldUse = true) {
   if (!tokenId || !tokenData || !shouldUse) return null;
-  const round = _session?.combat?.round ?? 0;
+  const round = VS.session?.combat?.round ?? 0;
   const lucky = (tokenData.buffs || []).find(b =>
     b?.type === 'lucky_reroll' && (b.charges || 0) > 0
     && (b.expiresAtRound == null || round === 0 || round <= b.expiresAtRound)
@@ -3342,7 +3342,7 @@ async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
   const etatId = opt.mods?.enchantEtatId;
   if (etatId && CONDITION_BY_ID[etatId]) {
     const lib = CONDITION_BY_ID[etatId];
-    const round = _session?.combat?.round ?? 0;
+    const round = VS.session?.combat?.round ?? 0;
     const isConsumed = !!lib.effects?.consumedByAttackAgainst;
     const dur = Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
       ? lib.defaultDuration : 2;
@@ -3357,7 +3357,7 @@ async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
       }
     );
     for (const tid of targetIds) {
-      const td = _tokens[tid]?.data; if (!td) continue;
+      const td = VS.tokens[tid]?.data; if (!td) continue;
       const existingConds = (td.conditions || []).filter(c => c.source !== opt.label);
       if (existingConds.some(c => c.id === etatId)) continue;
       const newCond = {
@@ -3402,7 +3402,7 @@ async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
   // Les autres types (move_bonus, range_bonus, enchantment) se filtrent par sort label
   // pour permettre des effets différents de sources différentes.
   for (const tid of targetIds) {
-    const td = _tokens[tid]?.data; if (!td) continue;
+    const td = VS.tokens[tid]?.data; if (!td) continue;
     const existing = (td.buffs || []).filter(b => {
       // Retire tout buff dmg_bonus arme : non cumulable, le dernier en vigueur l'emporte
       if (b.type === 'dmg_bonus' && b.slot === 'arme') return false;
@@ -3422,13 +3422,13 @@ async function _vttApplyAfflictions(srcId, targetIds, opt) {
   const statShortStr = _STAT_SHORT[aff.saveStat] || aff.saveStat;
   const dotFormula = aff.dotFormula || '1d4';
   const mode = aff.mode || 'dot';
-  const srcTok = _tokens[srcId]?.data;
+  const srcTok = VS.tokens[srcId]?.data;
   const srcName = srcTok ? (_live(srcTok).displayName ?? srcTok.name) : '?';
 
   // ── Log d'annonce du cast (1 message global) ────────────────────────
   // « A lance Silence sur B » avant les JS individuels
   const tgtNames = targetIds.map(tid => {
-    const td = _tokens[tid]?.data;
+    const td = VS.tokens[tid]?.data;
     return td ? (_live(td).displayName ?? td.name) : '?';
   }).join(', ');
   await addDoc(_logCol(), {
@@ -3446,7 +3446,7 @@ async function _vttApplyAfflictions(srcId, targetIds, opt) {
   }).catch(() => {});
 
   for (const tid of targetIds) {
-    const td = _tokens[tid]?.data; if (!td) continue;
+    const td = VS.tokens[tid]?.data; if (!td) continue;
     const saveMod = _tokenStatMod(td, aff.saveStat);
     const initialRoll = Math.floor(Math.random() * 20) + 1;
     let roll = initialRoll;
@@ -3499,7 +3499,7 @@ async function _vttApplyAfflictions(srcId, targetIds, opt) {
         showNotif(`⚠️ État "${aff.etatId}" introuvable en BDD — vérifier les réglages`, 'error');
         continue;
       }
-      const round = _session?.combat?.round ?? 0;
+      const round = VS.session?.combat?.round ?? 0;
       const isConsumed = !!lib.effects?.consumedByAttackAgainst;
       const dur = Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
         ? lib.defaultDuration : 2;
@@ -3595,7 +3595,7 @@ async function _vttApplyRegeneration(srcId, targetIds, opt) {
     effect: 'Régénération',
   };
   for (const tid of targetIds) {
-    const td = _tokens[tid]?.data; if (!td) continue;
+    const td = VS.tokens[tid]?.data; if (!td) continue;
     const existing = (td.buffs || []).filter(b => !(b.type === 'regen' && b.sortLabel === opt.label));
     await updateDoc(_tokRef(tid), { buffs: [...existing, newBuff] }).catch(() => {});
     const lT = _live(td);
@@ -3948,7 +3948,7 @@ function _buildAttackOptions(t) {
       // réduit le coût en mana de ses sorts (payés par le lanceur).
       let _ownerSetPmDelta = 0;
       if (t.summonOwnerId) {
-        const _ownerData = _tokens[t.summonOwnerId]?.data;
+        const _ownerData = VS.tokens[t.summonOwnerId]?.data;
         const _ownerChar = _ownerData?.characterId ? _characters[_ownerData.characterId] : null;
         if (_ownerChar) _ownerSetPmDelta = getArmorSetData(_ownerChar).modifiers?.spellPmDelta || 0;
       }
@@ -4160,7 +4160,7 @@ function _buildAttackOptions(t) {
   }
 
   // ── Arme invoquée active (buff weapon_replace) : remplace l'arme principale ──
-  const _r0 = _session?.combat?.round ?? 0;
+  const _r0 = VS.session?.combat?.round ?? 0;
   const wReplace = (t.buffs || []).find(b => b?.type === 'weapon_replace'
     && (b.expiresAtRound == null || _r0 === 0 || _r0 <= b.expiresAtRound));
 
@@ -4204,7 +4204,7 @@ function _buildAttackOptions(t) {
   // (donc miss = 0 dégâts, pas de demi-dégâts). Le bonus s'ajoute uniquement
   // sur un coup réussi (géré dans _vttRollAttack). On garde juste le label
   // « · enchantée » et l'élément du bonus en métadonnée pour affichage.
-  const _round_eff = _session?.combat?.round ?? 0;
+  const _round_eff = VS.session?.combat?.round ?? 0;
   const _enchantBuff = (t.buffs || []).find(b =>
     b.type === 'dmg_bonus' && b.slot === 'arme'
     && (b.expiresAtRound == null || _round_eff === 0 || _round_eff <= b.expiresAtRound)
@@ -4420,9 +4420,9 @@ let _suspendedTriggerActive = false;
 async function _execAttack(srcId, tgtId, exOpts = {}) {
   const only  = exOpts.only || null;
   const noTgt = tgtId == null;
-  const src=_tokens[srcId]?.data;
+  const src=VS.tokens[srcId]?.data;
   if (!src) return;
-  const tgt = noTgt ? null : _tokens[tgtId]?.data;
+  const tgt = noTgt ? null : VS.tokens[tgtId]?.data;
   if (!noTgt && !tgt) return;
   const lS=_live(src), lT = tgt ? _live(tgt) : null;
   const dist = noTgt ? null : _tokenAttackDistance(src, tgt);
@@ -4709,7 +4709,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   // ── Section Actions de base (Courir / Esquiver / Se cacher / Se désengager / Aider) ──
   // Disponibles dès que tu contrôles le token source (pas seulement en combat
   // formel : un allié peut tomber à 0 PV hors tracker d'initiative).
-  const inCombat = !!_session?.combat?.active;
+  const inCombat = !!VS.session?.combat?.active;
   const couru    = (src.bonusMvt || 0) > 0;
   const canEditSrc = _canControlToken(src);
   let basicHtml = '';
@@ -4892,7 +4892,7 @@ function _atkInteractionHtml(opt) {
   const tids = (_atkCtx?.allTargets?.length ? _atkCtx.allTargets : (_atkCtx?.tgtId ? [_atkCtx.tgtId] : []));
   const buckets = {};
   for (const tid of tids) {
-    const td = _tokens[tid]?.data;
+    const td = VS.tokens[tid]?.data;
     if (!td || td.type !== 'enemy' || !td.beastId) continue;
     const inter = previewDamageInteraction(opt.damageTypeId, _bestiary[td.beastId]);
     if (inter) buckets[inter] = (buckets[inter] || 0) + 1;
@@ -4978,7 +4978,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
     return;
   }
 
-  const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
+  const src=VS.tokens[srcId]?.data, tgt=VS.tokens[tgtId]?.data;
   if (!src||!tgt) return;
   const lS=_live(src), lT=_live(tgt);
   // Si on arrive d'une validation multi-cibles, stocker les cibles dans le contexte
@@ -5207,7 +5207,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
       ${allTargets && allTargets.length > 1 ? `
       <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.7rem">
         ${allTargets.map(id => {
-          const td = _tokens[id]?.data;
+          const td = VS.tokens[id]?.data;
           const nm = td ? (_live(td).displayName ?? td.name ?? id) : id;
           return `<span style="font-size:.65rem;padding:.15rem .45rem;border-radius:999px;
             background:rgba(79,140,255,.12);border:1px solid rgba(79,140,255,.3);color:#4f8cff">${_esc(nm)}</span>`;
@@ -5363,7 +5363,7 @@ function _mtRefreshHud() {
 
   const { opt, targets, maxTargets } = _mtCtx;
   const names = targets.map(id => {
-    const td = _tokens[id]?.data;
+    const td = VS.tokens[id]?.data;
     return td ? (_live(td).displayName ?? td.name ?? id) : id;
   });
   const remaining = maxTargets - targets.length;
@@ -5410,7 +5410,7 @@ async function _mtBroadcast() {
   await setDoc(_castingRef(uid), {
     active: true, srcId, targets,
     spellName: opt.label, spellIcon: opt.icon,
-    pageId: _activePage?.id || null,
+    pageId: VS.activePage?.id || null,
     updatedAt: Date.now(),
   }).catch(() => {});
 }
@@ -5435,7 +5435,7 @@ function _startMultiTarget(srcId, firstTgtId, opt, optIdx) {
   _mtClear(false);
   _mtCtx = { srcId, opt, optIdx, targets: [firstTgtId], maxTargets: opt.nbCibles, lines: new Map() };
 
-  const srcData = _tokens[srcId]?.data, tgtData = _tokens[firstTgtId]?.data;
+  const srcData = VS.tokens[srcId]?.data, tgtData = VS.tokens[firstTgtId]?.data;
   if (srcData && tgtData) {
     const line = _mtDrawLine(srcData, tgtData);
     if (line) _mtCtx.lines.set(firstTgtId, line);
@@ -5461,7 +5461,7 @@ function _mtToggleTarget(tgtId) {
       showNotif(`Maximum ${maxTargets} cibles pour ce sort`, 'error');
       return;
     }
-    const srcData = _tokens[srcId]?.data, tgtData = _tokens[tgtId]?.data;
+    const srcData = VS.tokens[srcId]?.data, tgtData = VS.tokens[tgtId]?.data;
     if (srcData && tgtData) {
       const portee = _mtCtx.opt.portee || 1;
       const dist = _tokenAttackDistance(srcData, tgtData, portee);
@@ -5497,8 +5497,8 @@ function _mtValidate() {
   const cacheKey = `${srcId}__${firstTgt}`;
   // Le cache peut ne pas exister pour firstTgt si ce n'est pas la cible initiale
   // → on reconstruire le cache pour cette cible
-  const src = _tokens[srcId]?.data; if (!src) { _mtPending = null; return; }
-  const tgtData = _tokens[firstTgt]?.data; if (!tgtData) { _mtPending = null; return; }
+  const src = VS.tokens[srcId]?.data; if (!src) { _mtPending = null; return; }
+  const tgtData = VS.tokens[firstTgt]?.data; if (!tgtData) { _mtPending = null; return; }
   const options = _buildAttackOptions(src);
   const inRange = options.filter(o => _tokenAttackDistance(src, tgtData, o.portee) <= o.portee);
   _atkOptsCache[cacheKey] = inRange;
@@ -5638,7 +5638,7 @@ async function _zoneValidate() {
   const { srcId, opt, wPx, hPx, x, y } = _zoneCtx;
 
   // Vérification portée : centre de la zone vs lanceur
-  const srcData = _tokens[srcId]?.data;
+  const srcData = VS.tokens[srcId]?.data;
   if (srcData) {
     const sc = _tokenCenter(srcData);
     const distCells = Math.hypot(x - sc.x, y - sc.y) / CELL;
@@ -5651,9 +5651,9 @@ async function _zoneValidate() {
   // Détection des tokens dans le rectangle (centré sur x, y)
   const x1 = x - wPx / 2, x2 = x + wPx / 2;
   const y1 = y - hPx / 2, y2 = y + hPx / 2;
-  const targets = Object.values(_tokens)
+  const targets = Object.values(VS.tokens)
     .filter(e => {
-      if (!e.data || e.data.pageId !== _activePage?.id) return false;
+      if (!e.data || e.data.pageId !== VS.activePage?.id) return false;
       if (!e.data.visible && !STATE.isAdmin) return false;
       const tc = _tokenCenter(e.data);
       return tc.x >= x1 && tc.x <= x2 && tc.y >= y1 && tc.y <= y2;
@@ -5678,7 +5678,7 @@ async function _zoneValidate() {
       _layers.token?.batchDraw();
       return; // reste en mode placement
     }
-    const srcD = _tokens[srcId]?.data;
+    const srcD = VS.tokens[srcId]?.data;
     if (srcD) await _vttSpendSpellPm(srcD, opt);
     showNotif(`🐾 ${total} invocation${total > 1 ? 's' : ''} placée${total > 1 ? 's' : ''}`, 'success');
     _zoneClear();
@@ -5727,8 +5727,8 @@ async function _zoneValidate() {
   // Flux identique à multi-cibles : stocker les cibles, ouvrir la modale d'attaque
   _mtPending = targets;
   const firstTgt = targets[0];
-  const src = _tokens[srcId]?.data; if (!src) { _mtPending = null; return; }
-  if (!_tokens[firstTgt]?.data) { _mtPending = null; return; }
+  const src = VS.tokens[srcId]?.data; if (!src) { _mtPending = null; return; }
+  if (!VS.tokens[firstTgt]?.data) { _mtPending = null; return; }
   // Le sort zone est mis seul dans le cache à l'index 0 (portée déjà vérifiée sur la zone)
   _atkOptsCache[`${srcId}__${firstTgt}`] = [opt];
   _vttPickOpt(srcId, firstTgt, 0);
@@ -5741,11 +5741,11 @@ function _renderRemoteCastings(docs) {
   const myUid = STATE.user?.uid;
   docs.forEach(d => {
     const c = d.data();
-    if (!c.active || c.pageId !== _activePage?.id || d.id === myUid) return;
-    const srcEntry = Object.values(_tokens).find(e => e.data?.id === c.srcId);
+    if (!c.active || c.pageId !== VS.activePage?.id || d.id === myUid) return;
+    const srcEntry = Object.values(VS.tokens).find(e => e.data?.id === c.srcId);
     if (!srcEntry) return;
     (c.targets || []).forEach(tgtId => {
-      const tgtEntry = Object.values(_tokens).find(e => e.data?.id === tgtId);
+      const tgtEntry = Object.values(VS.tokens).find(e => e.data?.id === tgtId);
       if (!tgtEntry) return;
       const K = window.Konva;
       const s = _tokenCenter(srcEntry.data), t = _tokenCenter(tgtEntry.data);
@@ -5772,7 +5772,7 @@ async function _vttRollAttack() {
   _atkCtx = null;
 
   const { srcId, tgtId, opt, lS, lT, allTargets } = ctx;
-  const src=_tokens[srcId]?.data, tgt=_tokens[tgtId]?.data;
+  const src=VS.tokens[srcId]?.data, tgt=VS.tokens[tgtId]?.data;
   if (!src||!tgt) return;
   // Liste des cibles : multi si allTargets, sinon cible unique
   const targetIds = allTargets && allTargets.length > 0 ? allTargets : [tgtId];
@@ -5781,7 +5781,7 @@ async function _vttRollAttack() {
   // Payeur du mana : un token convoqué (invocation) n'a pas de PM propre — ses
   // sorts/actions sont payés sur le personnage du LANCEUR (summonOwnerId).
   const _srcChar = _characterForToken(src);
-  const _ownerTok = src.summonOwnerId ? _tokens[src.summonOwnerId]?.data : null;
+  const _ownerTok = src.summonOwnerId ? VS.tokens[src.summonOwnerId]?.data : null;
   const _pmPayerCharId = _srcChar?.id || (_ownerTok ? _characterForToken(_ownerTok)?.id : null);
   const _deductPm  = async () => {
     if (opt.pmCost > 0 && _pmPayerCharId) {
@@ -5806,7 +5806,7 @@ async function _vttRollAttack() {
     showNotif(`🧪 ${meta.itemNom || 'Objet'} consommé`, 'info');
   };
   const _markActionUsed = async () => {
-    if (!_session?.combat?.active) return;
+    if (!VS.session?.combat?.active) return;
     const field = opt.actionType === 'bonus'
       ? 'bonusActionThisTurn'
       : opt.actionType === 'reaction'
@@ -5815,8 +5815,8 @@ async function _vttRollAttack() {
     await updateDoc(_tokRef(src.id), { [field]: true }).catch(()=>{});
   };
   const _cleanup = () => {
-    _tokens[srcId]?.shape?.findOne('.atk')?.visible(false);
-    _tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
+    VS.tokens[srcId]?.shape?.findOne('.atk')?.visible(false);
+    VS.tokens[_selected]?.shape?.findOne('.sel')?.visible(false);
     _hideActBar(); _clearAim();
     _selected=null; _attackSrc=null; _clearHL(); _renderInspector(null);
     _layers.token?.batchDraw();
@@ -5864,13 +5864,13 @@ async function _vttRollAttack() {
       const rangeBuff = { ...shared, type: 'range_bonus', icon: '🏹',
         bonus: opt.mods.allonge.cells, bonusMeters: opt.mods.allonge.meters };
       for (const tid of targetIds) {
-        const td = _tokens[tid]?.data; if (!td) continue;
+        const td = VS.tokens[tid]?.data; if (!td) continue;
         const existing = (td.buffs || []).filter(b => !(b.type === 'range_bonus' && b.sortLabel === opt.label));
         await updateDoc(_tokRef(tid), { buffs: [...existing, rangeBuff] }).catch(() => {});
       }
       const targetsLabel = targetIds
         .map(id => {
-          const td = _tokens[id]?.data;
+          const td = VS.tokens[id]?.data;
           return td ? (_live(td).displayName ?? td.name) : null;
         })
         .filter(Boolean)
@@ -5925,7 +5925,7 @@ async function _vttRollAttack() {
       };
       const appliedTargets = [];
       for (const tid of targetIds) {
-        const td = _tokens[tid]?.data;
+        const td = VS.tokens[tid]?.data;
         if (!td || td.type === 'enemy') continue;
         const existing = (td.buffs || []).filter(b => !(b.type === 'lucky_reroll' && b.sortLabel === opt.label));
         await updateDoc(_tokRef(tid), { buffs: [...existing, luckBuff] }).catch(() => {});
@@ -5990,7 +5990,7 @@ async function _vttRollAttack() {
       const rangeBuff = { ...shared, type: 'range_bonus', icon: '🏹',
         bonus: opt.mods.allonge.cells, bonusMeters: opt.mods.allonge.meters };
       for (const tid of (allTargets && allTargets.length ? allTargets : [tgtId])) {
-        const td = _tokens[tid]?.data; if (!td) continue;
+        const td = VS.tokens[tid]?.data; if (!td) continue;
         const existing = (td.buffs || []).filter(b => !(b.type === 'range_bonus' && b.sortLabel === opt.label));
         await updateDoc(_tokRef(tid), { buffs: [...existing, rangeBuff] }).catch(() => {});
       }
@@ -6019,7 +6019,7 @@ async function _vttRollAttack() {
       const buffResults = [];
       const isShieldReactive = !!opt.mods?.bouclierReactif;
       if (opt.isCaSort) {
-        const round = _session?.combat?.round ?? 0;
+        const round = VS.session?.combat?.round ?? 0;
         const dur   = opt.sortDuree ?? null;
         const baseRound = Math.max(1, round); // traiter round 0 comme round 1
         // Canalisé persistant : pas d'expiration automatique (jusqu'à rupture concentration)
@@ -6053,7 +6053,7 @@ async function _vttRollAttack() {
         };
         const buffType = newBuff.type;
         for (const curTgtId of targetIds) {
-          const curTgtData = _tokens[curTgtId]?.data; if (!curTgtData) continue;
+          const curTgtData = VS.tokens[curTgtId]?.data; if (!curTgtData) continue;
           // Filtre les buffs existants du même sort (anti-stack)
           const existingBuffs = (curTgtData.buffs || []).filter(b => !(b.type === buffType && b.sortLabel === opt.label));
           await updateDoc(_tokRef(curTgtId), { buffs: [...existingBuffs, newBuff] }).catch(()=>{});
@@ -6063,7 +6063,7 @@ async function _vttRollAttack() {
 
       const targetsLabel = targetIds
         .map(id => {
-          const td = _tokens[id]?.data;
+          const td = VS.tokens[id]?.data;
           return td ? (_live(td).displayName ?? td.name) : null;
         })
         .filter(Boolean)
@@ -6187,7 +6187,7 @@ async function _vttRollAttack() {
 
       // ── Échec critique : sort raté, aucun soin appliqué ─────────────
       if (hIsFumble) {
-        const tgtNames = targetIds.map(tid => _live(_tokens[tid]?.data || {}).displayName).filter(Boolean).join(', ');
+        const tgtNames = targetIds.map(tid => _live(VS.tokens[tid]?.data || {}).displayName).filter(Boolean).join(', ');
         await addDoc(_logCol(), {
           type: 'attack', isHeal: true, isFumble: true, advMode: hMode, advAuto: hMode !== mode,
           advReasons: hMode !== mode ? hCondMods.reasons : null,
@@ -6231,7 +6231,7 @@ async function _vttRollAttack() {
       // Appliquer à chaque cible
       const healResults = [];
       for (const curTgtId of targetIds) {
-        const curTgtData = _tokens[curTgtId]?.data; if (!curTgtData) continue;
+        const curTgtData = VS.tokens[curTgtId]?.data; if (!curTgtData) continue;
         const lCur = _live(curTgtData);
         const curHp = lCur.displayHp ?? 20, hpMax = lCur.displayHpMax ?? 20;
         const newHp = Math.min(hpMax, curHp + healTotal);
@@ -6298,9 +6298,9 @@ async function _vttRollAttack() {
     const attackerRank = _attackerRank(src);
     const blockedTargets = new Set();
     {
-      const curRound = _session?.combat?.round ?? 0;
+      const curRound = VS.session?.combat?.round ?? 0;
       for (const tid of targetIds) {
-        const td = _tokens[tid]?.data;
+        const td = VS.tokens[tid]?.data;
         const buffs = td?.buffs || [];
         const shield = buffs.find(b =>
           b?.type === 'shield_reactive'
@@ -6367,7 +6367,7 @@ async function _vttRollAttack() {
     if (missEffect === 'none' && opt.pmCost > 0) missEffect = 'half';
 
     const targetCas = targetIds.map(curTgtId => {
-      const curTgtData = _tokens[curTgtId]?.data;
+      const curTgtData = VS.tokens[curTgtId]?.data;
       const lCurTgt = _live(curTgtData || {});
       const rawCA = lCurTgt.realDefense ?? lCurTgt.displayDefense ?? 10;
       return armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
@@ -6436,7 +6436,7 @@ async function _vttRollAttack() {
     const buffDmgNotes = [];
     let buffDmgDetail = null; // { formula, rolls, mod, total, sortLabel, element }
     if (_eligibleForEnchant && !isFumble) {
-      const round_eff = _session?.combat?.round ?? 0;
+      const round_eff = VS.session?.combat?.round ?? 0;
       const srcDmgCondition = _conditionDmgBonusOf(src);
       const srcDmgBuff = (src.buffs || []).find(b =>
         b.type === 'dmg_bonus' && b.slot === 'arme'
@@ -6471,7 +6471,7 @@ async function _vttRollAttack() {
     // ── Appliquer les HP + collecter résultats par cible ──────────────
     const targetResults = [];
     for (const curTgtId of targetIds) {
-      const curTgtData = _tokens[curTgtId]?.data;
+      const curTgtData = VS.tokens[curTgtId]?.data;
       if (!curTgtData) continue;
       const lCurTgt = _live(curTgtData);
 
@@ -6612,7 +6612,7 @@ async function _vttRollAttack() {
     }
 
     if (_mods) {
-      const round = _session?.combat?.round ?? 0;
+      const round = VS.session?.combat?.round ?? 0;
       const baseRound = Math.max(1, round);
 
       for (const r of targetResults) {
@@ -6799,7 +6799,7 @@ function _renderInspectorSoon() {
   _inspectorDirty = true;
   queueMicrotask(() => {
     _inspectorDirty = false;
-    const t = _selected ? (_tokens[_selected]?.data ?? null) : null;
+    const t = _selected ? (VS.tokens[_selected]?.data ?? null) : null;
     _renderInspector(t);
   });
 }
@@ -6808,7 +6808,7 @@ function _renderInspector(t) {
   const el=document.getElementById('vtt-inspector'); if (!el) return;
   // Multi-sélection active
   if (_selectedMulti.size>1) {
-    const types=[..._selectedMulti].map(id=>_tokens[id]?.data?.type).filter(Boolean);
+    const types=[..._selectedMulti].map(id=>VS.tokens[id]?.data?.type).filter(Boolean);
     const uniq=t=>({player:'🧑 Joueurs',enemy:'👹 Ennemis',npc:'👤 PNJ'})[t]||t;
     const typeStr=[...new Set(types)].map(uniq).join(' · ');
     el.innerHTML=`<div class="vtt-ins-multi">
@@ -6831,7 +6831,7 @@ function _renderInspector(t) {
   const linked=t.characterId||t.npcId;
 
   const pageOpts=STATE.isAdmin
-    ? Object.values(_pages).filter(p=>p.id!==t.pageId)
+    ? Object.values(VS.pages).filter(p=>p.id!==t.pageId)
         .map(p=>`<option value="${p.id}">${p.name}</option>`).join('') : '';
 
   // ── Helpers rendu stats ──────────────────────────────────────────
@@ -6887,7 +6887,7 @@ function _renderInspector(t) {
       ? (npcWeapon.nom || npcCombat.weaponName ? (npcWeapon.nom || npcCombat.weaponName) + ' · ' : '') + (ld.displayAttackDice || '1d6') + _signed(ld.displayAttack ?? 0)
       : (ld.displayAttackDice || (ld.displayAttack??5));
     const _canEditToken = _canControlToken(t);
-    const _inCombat = !!_session?.combat?.active;
+    const _inCombat = !!VS.session?.combat?.active;
     const pvEditHtml = _canEditToken
       ? '<input class="vtt-ins-input" type="number" value="'+hp+'" min="0" max="'+hpm+'" data-vtt-fn="_vttSetHp" data-vtt-on="change" data-vtt-args="'+t.id+'|$value">'
       : null;
@@ -7119,7 +7119,7 @@ function _renderInspector(t) {
   }
 
   // ── Effets actifs (buffs, debuffs, DoT, enchantements, afflictions…) ──
-  const _r = _session?.combat?.round ?? 0;
+  const _r = VS.session?.combat?.round ?? 0;
   const _activeBuffs = (t.buffs || []).filter(bf =>
     bf?.expiresAtRound == null || _r === 0 || _r <= bf.expiresAtRound);
   const _buffsHtml = _activeBuffs.length ? (() => {
@@ -7218,7 +7218,7 @@ function _renderInspector(t) {
 
   // ── Fragments par onglet (calculés puis répartis) ──────────────────────
   const _combatActionsHtml = (() => {
-    const inCombat = !!_session?.combat?.active;
+    const inCombat = !!VS.session?.combat?.active;
     const canEdit  = _canControlToken(t);
     if (!inCombat || !canEdit || (t.type !== 'player' && t.type !== 'npc')) return '';
     const ld2  = _live(t);
@@ -7319,7 +7319,7 @@ function _renderInspector(t) {
         <div class="vtt-ins-actions">
           <button class="vtt-btn-sm" data-vtt-fn="_vttEditToken" data-vtt-args="${t.id}" title="Modifier les stats combat">⚙️ Stats</button>
           <button class="vtt-btn-sm" data-vtt-fn="_vttToggleVisible" data-vtt-args="${t.id}" title="Visibilité joueurs">${t.visible?'👁 Visible':'🙈 Caché'}</button>
-          ${_session?.combat?.active?`<button class="vtt-btn-sm" data-vtt-fn="_vttResetTurn" data-vtt-args="${t.id}" title="Réinitialiser le tour de ce token">↺ Tour</button>`:''}
+          ${VS.session?.combat?.active?`<button class="vtt-btn-sm" data-vtt-fn="_vttResetTurn" data-vtt-args="${t.id}" title="Réinitialiser le tour de ce token">↺ Tour</button>`:''}
           ${t.pageId?`<button class="vtt-btn-sm" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="Retirer de la carte">↩ Retirer</button>`:''}
           ${(t.buffs||[]).length?`<button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttClearBuffs" data-vtt-args="${t.id}" title="Supprimer tous les buffs actifs">🗑 Buffs</button>`:''}
         </div>
@@ -7375,7 +7375,7 @@ function _renderInspector(t) {
 
 function _vttInsTab(tab) {
   _insTab = tab;
-  const t = _selected ? (_tokens[_selected]?.data ?? null) : null;
+  const t = _selected ? (VS.tokens[_selected]?.data ?? null) : null;
   if (t) _renderInspector(t);
 }
 
@@ -7408,8 +7408,8 @@ function _renderTray() {
   const searchFocused = ae?.classList?.contains('vtt-tray-search-input') && el.contains(ae);
   const caretPos = searchFocused ? ae.selectionStart : null;
 
-  const all      = Object.values(_tokens).map(e => e.data);
-  const onPage   = all.filter(t => t.pageId === _activePage?.id);
+  const all      = Object.values(VS.tokens).map(e => e.data);
+  const onPage   = all.filter(t => t.pageId === VS.activePage?.id);
   const reserveSeen = new Set();
   const reserve  = all.filter(t => {
     if (t.pageId || t.type === 'enemy') return false;
@@ -7419,7 +7419,7 @@ function _renderTray() {
     reserveSeen.add(key);
     return true;
   });
-  const inCombat = !!_session?.combat?.active;
+  const inCombat = !!VS.session?.combat?.active;
 
   // Tokens placés sur d'autres pages (perso/PNJ seulement, déduplication par entité,
   // et on cache les persos déjà présents sur la page active).
@@ -7429,7 +7429,7 @@ function _renderTray() {
     if (t.npcId)       entityOnCurrent.add('n:' + t.npcId);
   }
   const elsewhereRaw = all.filter(t =>
-    t.pageId && t.pageId !== _activePage?.id
+    t.pageId && t.pageId !== VS.activePage?.id
     && t.type !== 'enemy'
     && (t.characterId || t.npcId)
     && !entityOnCurrent.has((t.characterId ? 'c:' + t.characterId : 'n:' + t.npcId))
@@ -7565,7 +7565,7 @@ function _renderTray() {
       const ld = _live(t);
       const typeIcon = t.type === 'player' ? '🧑' : '👤';
       const col = TYPE_COLOR[t.type] ?? '#888';
-      const pageName = _pages[t.pageId]?.name || '?';
+      const pageName = VS.pages[t.pageId]?.name || '?';
       return `<button class="vtt-res-chip vtt-res-chip--elsewhere" data-vtt-fn="_vttDuplicateOnPage" data-vtt-args="${t.id}"
           title="${_esc(ld.displayName ?? t.name)} — sur « ${_esc(pageName)} ». Clic = placer aussi ici (HP partagés).">
         <div class="vtt-res-chip-dot" style="border-color:${col};color:${col}">
@@ -7696,8 +7696,8 @@ function _renderTray() {
 // ─ Liste verticale des pages dans le tray (MJ) ─────────────────────
 function _renderPageList() {
   const el=document.getElementById('vtt-tray-pages'); if (!el) return;
-  const broadcastId=_session.activePageId;
-  const all=Object.values(_pages).sort((a,b)=>(a.order??0)-(b.order??0));
+  const broadcastId=VS.session.activePageId;
+  const all=Object.values(VS.pages).sort((a,b)=>(a.order??0)-(b.order??0));
 
   // Préserve le focus/caret de la barre de recherche au rerender
   const ae = document.activeElement;
@@ -7722,7 +7722,7 @@ function _renderPageList() {
   }
   // Ordre des dossiers : ordre MJ persisté (session.pageFolderOrder) puis alpha
   // pour les nouveaux ; '' (sans dossier) toujours en dernier.
-  const fOrder = Array.isArray(_session.pageFolderOrder) ? _session.pageFolderOrder : [];
+  const fOrder = Array.isArray(VS.session.pageFolderOrder) ? VS.session.pageFolderOrder : [];
   const fIdx = f => { const i = fOrder.indexOf(f); return i < 0 ? 1e9 : i; };
   const folders = [...groups.keys()].sort((a,b)=>{
     if (a==='') return 1; if (b==='') return -1;          // sans dossier en dernier
@@ -7731,7 +7731,7 @@ function _renderPageList() {
   });
 
   const _pageRow = p => {
-    const isPlayers=p.id===broadcastId, isMj=p.id===_activePage?.id;
+    const isPlayers=p.id===broadcastId, isMj=p.id===VS.activePage?.id;
     const cls=isMj&&isPlayers?'mj-and-players':isMj?'mj':isPlayers?'players':'';
     return `<div class="vtt-page-item ${cls}" data-page-id="${p.id}" data-vtt-fn="_vttSwitchPage" data-vtt-args="${p.id}" title="${_esc(p.name)} · ${p.cols||24}×${p.rows||18} cases">
       <span class="vtt-page-item-grip" title="Glisser pour déplacer">⠿</span>
@@ -7824,7 +7824,7 @@ async function _onPageDrop(el) {
   el.querySelectorAll('.vtt-page-folder-body').forEach(body => {
     const folder = decodeURIComponent(body.dataset.folder || '');
     body.querySelectorAll('.vtt-page-item').forEach(item => {
-      const id = item.dataset.pageId; const p = _pages[id]; if (!p) { order++; return; }
+      const id = item.dataset.pageId; const p = VS.pages[id]; if (!p) { order++; return; }
       if ((p.folder||'') !== folder || (p.order??0) !== order) {
         batch.update(_pgRef(id), { folder, order });
         changed++;
@@ -7858,11 +7858,11 @@ function _renderPageTabs() {
   if (STATE.isAdmin) { _renderPageList(); return; } // MJ : liste dans le tray
   const el=document.getElementById('vtt-page-tabs'); if (!el) return;
   // Les joueurs ne naviguent pas — ils voient juste le nom de leur page courante
-  const name = _activePage?.name ?? '…';
+  const name = VS.activePage?.name ?? '…';
   const uid  = STATE.user?.uid;
-  const myTok = uid ? Object.values(_tokens).find(e => e.data?.ownerId === uid)?.data : null;
-  const canInvoke = !!(myTok && _activePage && myTok.pageId !== _activePage.id);
-  const onActivePage = !!(myTok && _activePage && myTok.pageId === _activePage.id);
+  const myTok = uid ? Object.values(VS.tokens).find(e => e.data?.ownerId === uid)?.data : null;
+  const canInvoke = !!(myTok && VS.activePage && myTok.pageId !== VS.activePage.id);
+  const onActivePage = !!(myTok && VS.activePage && myTok.pageId === VS.activePage.id);
   const actionBtn = canInvoke
     ? `<button class="vtt-btn-sm" data-vtt-fn="_vttInvokeMyToken" title="Placer ton token sur cette carte">🧑 Invoquer mon token</button>`
     : onActivePage
@@ -7872,33 +7872,33 @@ function _renderPageTabs() {
 }
 
 async function _switchPage(pageId) {
-  const page=_pages[pageId]; if (!page) return;
-  _activePage=page;
+  const page=VS.pages[pageId]; if (!page) return;
+  VS.activePage=page;
   // Ne pas détruire _layers.map entièrement : VS.imgTr (Transformer) y vit.
   // _renderMapImages() et _renderAllTokens() gèrent leur propre nettoyage.
   _layers.token?.destroyChildren(); _clearHL();
   _drawGrid(); _renderMapImages(); _renderAllTokens(); _renderAnnotLayer();
   fogRenderWalls(page, STATE.isAdmin);
-  fogUpdateSoon(page, _tokens, STATE.isAdmin);
+  fogUpdateSoon(page, VS.tokens, STATE.isAdmin);
   _renderPageTabs(); _renderTray(); _deselect();
   _renderCombatTracker();
-  _renderMjRulerRemote(_session?.mjRuler);
+  _renderMjRulerRemote(VS.session?.mjRuler);
   // Le MJ navigue librement — les joueurs ne suivent que via 📡 Envoyer
 }
 
 function _renderAllTokens() {
-  if (!_activePage) return;
+  if (!VS.activePage) return;
   _layers.token?.destroyChildren();
-  for (const e of Object.values(_tokens)) {
+  for (const e of Object.values(VS.tokens)) {
     const t=e.data;
     // destroyChildren() a détruit tous les shapes : on remet la référence à null
     // pour les tokens non rendus ici (autre page / réserve / invisibles).
-    if (t.pageId!==_activePage.id || (!t.visible&&!STATE.isAdmin)) {
-      if (e.shape) _tokens[t.id]={...e,shape:null};
+    if (t.pageId!==VS.activePage.id || (!t.visible&&!STATE.isAdmin)) {
+      if (e.shape) VS.tokens[t.id]={...e,shape:null};
       continue;
     }
     const shape=_buildShape(t);
-    _tokens[t.id]={...e,shape}; _layers.token.add(shape);
+    VS.tokens[t.id]={...e,shape}; _layers.token.add(shape);
   }
   _layers.token?.batchDraw();
 }
@@ -8019,16 +8019,16 @@ function _clearRuler() {
   _clearMjRulerBroadcast();
 }
 
-// Diffusion de la règle du MJ (visible par tous les joueurs via _session.mjRuler).
+// Diffusion de la règle du MJ (visible par tous les joueurs via VS.session.mjRuler).
 // Throttle pour lisser les écritures Firestore.
 const MJ_RULER_THROTTLE = 120;
 let _mjRulerLastWrite = 0;
 let _mjRulerPendingTimer = null;
 let _mjRulerBroadcasting = false; // évite un setDoc(null) inutile si jamais diffusé
 function _broadcastMjRuler(x2, y2, cells) {
-  if (!STATE.isAdmin || !_activePage || !_rulerOrigin) return;
+  if (!STATE.isAdmin || !VS.activePage || !_rulerOrigin) return;
   const payload = {
-    pageId: _activePage.id,
+    pageId: VS.activePage.id,
     x1: _rulerOrigin.x, y1: _rulerOrigin.y,
     x2, y2, cells,
   };
@@ -8058,7 +8058,7 @@ let _mjRulerRemote = null;
 function _renderMjRulerRemote(data) {
   if (STATE.isAdmin) return; // le MJ voit déjà sa règle locale
   if (!_layers.ping) return;
-  const visible = data && _activePage && data.pageId === _activePage.id;
+  const visible = data && VS.activePage && data.pageId === VS.activePage.id;
   if (!visible) {
     if (_mjRulerRemote) {
       _mjRulerRemote.group.destroy();
@@ -8227,18 +8227,18 @@ function _selectByRect(r) {
   const uid = STATE.user?.uid;
 
   // Tokens sur la page active
-  for (const [id, {data: t}] of Object.entries(_tokens)) {
-    if (!t || t.pageId !== _activePage?.id) continue;
+  for (const [id, {data: t}] of Object.entries(VS.tokens)) {
+    if (!t || t.pageId !== VS.activePage?.id) continue;
     const { x: cx, y: cy } = _tokenCenter(t);
     if (_inRect(cx, cy, r)) {
       _selectedMulti.add(id);
-      _tokens[id]?.shape?.findOne('.sel')?.visible(true);
+      VS.tokens[id]?.shape?.findOne('.sel')?.visible(true);
     }
   }
 
   // Annotations interactives sur la page active
   for (const [id, e] of Object.entries(_annotations)) {
-    if (!e.data || e.data.pageId !== _activePage?.id || !e.shape) continue;
+    if (!e.data || e.data.pageId !== VS.activePage?.id || !e.shape) continue;
     if (!STATE.isAdmin && e.data.createdBy !== uid) continue;
     const bb = e.shape.getClientRect({ relativeTo: _stage });
     const cx = bb.x + bb.width / 2, cy = bb.y + bb.height / 2;
@@ -8274,11 +8274,11 @@ function _deselectAnnot() {
 }
 
 function _renderAnnotLayer() {
-  if (!_layers.draw || !_activePage) return;
+  if (!_layers.draw || !VS.activePage) return;
   const K = window.Konva;
   Object.values(_annotations).forEach(e => { e.shape?.destroy(); e.shape = null; });
   for (const [id, e] of Object.entries(_annotations)) {
-    if (e.data.pageId !== _activePage.id) continue;
+    if (e.data.pageId !== VS.activePage.id) continue;
     const shape = _buildAnnotShape(K, e.data);
     if (shape) { _annotations[id].shape = shape; _layers.draw.add(shape); }
   }
@@ -8345,7 +8345,7 @@ function _updateDraw(wp) {
 }
 async function _endDraw() {
   _drawing = false;
-  if (!_drawLive || !_activePage) { _drawLive?.destroy(); _drawLive=null; return; }
+  if (!_drawLive || !VS.activePage) { _drawLive?.destroy(); _drawLive=null; return; }
   let data;
   if (_drawShape === 'pencil' && _drawPts.length >= 6) {
     data = { type:'freehand', points:_drawPts, offsetX:0, offsetY:0 };
@@ -8365,7 +8365,7 @@ async function _endDraw() {
   const liveCopy = _drawLive;
   _drawLive = null;
   if (!data) { liveCopy.destroy(); _layers.draw.batchDraw(); return; }
-  data = { ...data, pageId:_activePage.id, color:_drawColor, strokeWidth:_drawWidth,
+  data = { ...data, pageId:VS.activePage.id, color:_drawColor, strokeWidth:_drawWidth,
     createdBy: STATE.user?.uid||null, createdAt: serverTimestamp() };
   const id = 'a' + Date.now() + Math.random().toString(36).slice(2,5);
   try {
@@ -8383,7 +8383,7 @@ async function _endDraw() {
 // ── Bestiaire VTT : catalogue MJ, lecture ciblée joueurs ─────────────────────
 function _patchBestiaryTokenShapes(changedIds) {
   if (!changedIds?.size) return;
-  for (const [id, e] of Object.entries(_tokens)) {
+  for (const [id, e] of Object.entries(VS.tokens)) {
     if (e.data?.beastId && changedIds.has(e.data.beastId)) {
       _patchShape(id);
       if (_selected === id) _renderInspectorSoon();
@@ -8438,7 +8438,7 @@ function _ensureBestiaryDoc(beastId) {
 function _ensureBestiaryForTokens() {
   if (STATE.isAdmin) return;
   const ids = new Set();
-  for (const { data } of Object.values(_tokens)) {
+  for (const { data } of Object.values(VS.tokens)) {
     if (data?.beastId) ids.add(data.beastId);
   }
   ids.forEach(id => { void _ensureBestiaryDoc(id); });
@@ -8451,17 +8451,17 @@ function _initListeners() {
 
   // 1. Session
   _unsubs.push(onSnapshot(_sesRef(), snap => {
-    _session=snap.exists()?snap.data():{};
+    VS.session=snap.exists()?snap.data():{};
     _renderSessionBtn();
     _renderPageTabs();
     if (!STATE.isAdmin) {
       const uid=STATE.user?.uid;
-      const target=_session.playerPages?.[uid]??_session.activePageId;
-      if (target&&_pages[target]&&_activePage?.id!==target) _switchPage(target);
+      const target=VS.session.playerPages?.[uid]??VS.session.activePageId;
+      if (target&&VS.pages[target]&&VS.activePage?.id!==target) _switchPage(target);
     }
     _renderTimer();
     _renderCombatTracker();
-    _renderMjRulerRemote(_session.mjRuler);
+    _renderMjRulerRemote(VS.session.mjRuler);
     _renderShortRest();
     _checkShortRestAutoApply();
   },()=>{}));
@@ -8469,23 +8469,23 @@ function _initListeners() {
   // 2. Pages
   _unsubs.push(onSnapshot(_pgsCol(), snap => {
     snap.docChanges().forEach(ch => {
-      if (ch.type==='removed') delete _pages[ch.doc.id];
+      if (ch.type==='removed') delete VS.pages[ch.doc.id];
       else {
-        _pages[ch.doc.id]={id:ch.doc.id,...ch.doc.data()};
-        if (_activePage?.id===ch.doc.id) {
-          _activePage=_pages[ch.doc.id];
+        VS.pages[ch.doc.id]={id:ch.doc.id,...ch.doc.data()};
+        if (VS.activePage?.id===ch.doc.id) {
+          VS.activePage=VS.pages[ch.doc.id];
           _renderMapImages();
-          fogRenderWalls(_activePage, STATE.isAdmin);
-          fogUpdateSoon(_activePage, _tokens, STATE.isAdmin);
+          fogRenderWalls(VS.activePage, STATE.isAdmin);
+          fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
         }
       }
     });
     _renderPageTabs();
-    if (!_activePage&&Object.keys(_pages).length>0) {
+    if (!VS.activePage&&Object.keys(VS.pages).length>0) {
       const uid=STATE.user?.uid;
-      const target=(_session.playerPages?.[uid]??_session.activePageId)
-        ||Object.values(_pages).sort((a,b)=>(a.order??0)-(b.order??0))[0]?.id;
-      if (target&&_pages[target]) _switchPage(target);
+      const target=(VS.session.playerPages?.[uid]??VS.session.activePageId)
+        ||Object.values(VS.pages).sort((a,b)=>(a.order??0)-(b.order??0))[0]?.id;
+      if (target&&VS.pages[target]) _switchPage(target);
     }
   },()=>{}));
 
@@ -8499,12 +8499,12 @@ function _initListeners() {
     const changed = new Set([...Object.keys(prev), ...Object.keys(next)]);
     for (const id of Object.keys(prev)) {
       if (next[id]) continue;
-      const tok = Object.values(_tokens).find(e => e.data.characterId === id);
+      const tok = Object.values(VS.tokens).find(e => e.data.characterId === id);
       if (tok) deleteDoc(_tokRef(tok.data.id)).catch(() => {});
     }
 
     _characters = next;
-    for (const [id, e] of Object.entries(_tokens)) {
+    for (const [id, e] of Object.entries(VS.tokens)) {
       if (e.data.characterId && changed.has(e.data.characterId)) {
         _patchShape(id); if (_selected === id) _renderInspectorSoon();
       }
@@ -8540,7 +8540,7 @@ function _initListeners() {
 
     const changed = new Set([...Object.keys(prev), ...Object.keys(next)]);
     _npcs = next;
-    for (const [id, e] of Object.entries(_tokens)) {
+    for (const [id, e] of Object.entries(VS.tokens)) {
       if (e.data.npcId && changed.has(e.data.npcId)) {
         _patchShape(id); if (_selected === id) _renderInspectorSoon();
       }
@@ -8561,12 +8561,12 @@ function _initListeners() {
       _unsubs.push(onSnapshot(_bstTrackerRef(uid), snap => {
         _bstTracker = snap.exists() ? (snap.data().data || {}) : {};
         // Mettre à jour la barre HP de tous les tokens ennemis sur le canvas
-        for (const [id, e] of Object.entries(_tokens)) {
+        for (const [id, e] of Object.entries(VS.tokens)) {
           if (e.data?.type === 'enemy' && e.data?.beastId) _patchShape(id);
         }
         // Rafraîchit l'inspector si un token ennemi est sélectionné
         if (_selected) {
-          const td = _tokens[_selected]?.data;
+          const td = VS.tokens[_selected]?.data;
           if (td?.type === 'enemy') _renderInspectorSoon();
         }
       }, () => {}));
@@ -8578,31 +8578,31 @@ function _initListeners() {
     snap.docChanges().forEach(ch => {
       const id=ch.doc.id, data={id,...ch.doc.data()};
       if (ch.type==='removed') {
-        _tokens[id]?.shape?.destroy(); delete _tokens[id];
+        VS.tokens[id]?.shape?.destroy(); delete VS.tokens[id];
         if (_selected===id) _deselect();
         _layers.token?.batchDraw(); return;
       }
-      const prev=_tokens[id];
+      const prev=VS.tokens[id];
       if (prev) {
         const changedPage=prev.data.pageId!==data.pageId;
         prev.data=data;
         if (changedPage) {
           prev.shape?.destroy(); prev.shape=null;
-          if (_activePage&&data.pageId===_activePage.id&&(data.visible||STATE.isAdmin)) {
+          if (VS.activePage&&data.pageId===VS.activePage.id&&(data.visible||STATE.isAdmin)) {
             const shape=_buildShape(data);
-            _tokens[id]={data,shape}; _layers.token?.add(shape); _layers.token?.batchDraw();
+            VS.tokens[id]={data,shape}; _layers.token?.add(shape); _layers.token?.batchDraw();
           } else {
-            _tokens[id]={data,shape:null};
+            VS.tokens[id]={data,shape:null};
           }
         } else {
           _patchShape(id);
         }
         if (_selected===id) { _renderInspectorSoon(); _refreshRanges(id); }
       } else {
-        _tokens[id]={data,shape:null};
-        if (_activePage&&data.pageId===_activePage.id&&(data.visible||STATE.isAdmin)) {
+        VS.tokens[id]={data,shape:null};
+        if (VS.activePage&&data.pageId===VS.activePage.id&&(data.visible||STATE.isAdmin)) {
           const shape=_buildShape(data);
-          _tokens[id].shape=shape;
+          VS.tokens[id].shape=shape;
           _layers.token?.add(shape); _layers.token?.batchDraw();
         }
       }
@@ -8621,7 +8621,7 @@ function _initListeners() {
     }
     // Recalcul fog si un token joueur a bougé
     if (snap.docChanges().some(ch => ch.doc.data()?.type === 'player'))
-      fogUpdateSoon(_activePage, _tokens, STATE.isAdmin);
+      fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
     // Si la composition des joueurs présents change, le panneau "Court repos" doit suivre
     if (snap.docChanges().some(ch => ch.doc.data()?.type === 'player')) {
       _renderShortRest(); _checkShortRestAutoApply();
@@ -8655,7 +8655,7 @@ function _initListeners() {
           }
           _annotations[id] = { data: newData, shape: null };
           // Rendre sur la page active seulement
-          if (_activePage && newData.pageId === _activePage.id) {
+          if (VS.activePage && newData.pageId === VS.activePage.id) {
             const K = window.Konva;
             const shape = _buildAnnotShape(K, newData);
             if (shape) { _annotations[id].shape = shape; _layers.draw?.add(shape); }
@@ -8695,7 +8695,7 @@ function _initListeners() {
     // Pings visuels (< 5 s)
     const pings = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
-      .filter(p => p.pageId === _activePage?.id && p.createdAt && (now - p.createdAt.toMillis()) < 5000);
+      .filter(p => p.pageId === VS.activePage?.id && p.createdAt && (now - p.createdAt.toMillis()) < 5000);
     _renderPings(pings);
   }, () => {})); // silencieux si pas de règle Firestore
 
@@ -8843,7 +8843,7 @@ async function _loadDiceSkills() {
     if (data?.skills?.length) _diceSkills = data.skills;
   } catch { /* garde le cache local */ }
   // Re-render l'inspector si un token est déjà sélectionné
-  if (_selected) _renderInspector(_tokens[_selected]?.data ?? null);
+  if (_selected) _renderInspector(VS.tokens[_selected]?.data ?? null);
 }
 
 function _vttSetRollMode(mode) {
@@ -8874,7 +8874,7 @@ function _vttToggleRollHidden() {
 }
 
 async function _vttRollSkill(skillName, stat) {
-  const t = _tokens[_selected]?.data;
+  const t = VS.tokens[_selected]?.data;
   if (!t) return;
   if (!_canControlToken(t)) return; // joueur ne peut lancer que son propre token (ou ceux délégués)
   const c = t?.characterId ? _characters[t.characterId] : null;
@@ -9063,7 +9063,7 @@ async function _vttPickEmote(name) {
   // Token émetteur : sélection courante, sinon le token possédé par le joueur
   let tokenId = _selected;
   if (!tokenId) {
-    const own = Object.values(_tokens).find(e => e.data.ownerId === uid);
+    const own = Object.values(VS.tokens).find(e => e.data.ownerId === uid);
     tokenId = own?.data?.id ?? null;
   }
 
@@ -9077,7 +9077,7 @@ async function _vttPickEmote(name) {
   // Propagation aux autres joueurs via Firestore
   setDoc(_reactionRef(uid), {
     tokenId, emoteName: name, emoteUrl: em.url,
-    pageId: _activePage?.id ?? null,
+    pageId: VS.activePage?.id ?? null,
     createdAt: ts,           // nombre (ms) — même valeur que la clé locale
   }).catch(err => {
     console.error('[vtt] émote temps réel — écriture refusée. Vérifier vttEmoteReactions dans Firestore.', err);
@@ -9832,8 +9832,8 @@ function _renderChatReplyBar() {
 function _vttTool(t) { return _setTool(_tool === t ? 'select' : t); }
 // ── Courir : double le mouvement de base pour ce tour ───────────────
 async function _vttCourir(id) {
-  const tok = _tokens[id]?.data;
-  if (!tok || !_session?.combat?.active) return;
+  const tok = VS.tokens[id]?.data;
+  if (!tok || !VS.session?.combat?.active) return;
   if (tok.bonusMvt > 0) { showNotif('Course déjà utilisée ce tour', 'error'); return; }
   const bonus = _live(tok).displayMovement ?? 6;
   await updateDoc(_tokRef(id), { bonusMvt: bonus }).catch(() => showNotif('Erreur', 'error'));
@@ -9842,30 +9842,30 @@ async function _vttCourir(id) {
 
 // ── Déplacement clavier (flèches + pavé numérique) ──────────────────
 async function _moveSelectedBy(dc, dr) {
-  if (!_selected || !_activePage || _tool !== 'select') return;
-  const tok = _tokens[_selected]?.data;
-  if (!tok || tok.pageId !== _activePage.id) return;
+  if (!_selected || !VS.activePage || _tool !== 'select') return;
+  const tok = VS.tokens[_selected]?.data;
+  if (!tok || tok.pageId !== VS.activePage.id) return;
   const ld  = _live(tok);
   const sw  = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
-  const nc  = Math.max(0, Math.min(_activePage.cols - sw, tok.col + dc));
-  const nr  = Math.max(0, Math.min(_activePage.rows - sh, tok.row + dr));
+  const nc  = Math.max(0, Math.min(VS.activePage.cols - sw, tok.col + dc));
+  const nr  = Math.max(0, Math.min(VS.activePage.rows - sh, tok.row + dr));
   if (nc === tok.col && nr === tok.row) return;
   await _moveTo(_selected, nc, nr);
-  fogUpdateSoon(_activePage, _tokens, STATE.isAdmin);
+  fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
 }
 
-function _vttFogTool(t) { return fogSetEditTool(t, _activePage); }
+function _vttFogTool(t) { return fogSetEditTool(t, VS.activePage); }
 async function _vttToggleFog() {
-  if (!_activePage) return;
-  const next = !_activePage.fogEnabled;
-  await updateDoc(_pgRef(_activePage.id), { fogEnabled: next }).catch(() => showNotif('Erreur fog','error'));
+  if (!VS.activePage) return;
+  const next = !VS.activePage.fogEnabled;
+  await updateDoc(_pgRef(VS.activePage.id), { fogEnabled: next }).catch(() => showNotif('Erreur fog','error'));
 }
 async function _vttFogClearOps() {
-  if (!_activePage) return;
-  const n = (_activePage.fogOps || []).length;
+  if (!VS.activePage) return;
+  const n = (VS.activePage.fogOps || []).length;
   if (!n) { showNotif('Aucune zone de brouillard sur cette page', 'info'); return; }
   if (!confirm(`Supprimer ${n} zone(s) de brouillard manuel de cette page ?`)) return;
-  await updateDoc(_pgRef(_activePage.id), { fogOps: [] }).catch(() => showNotif('Erreur', 'error'));
+  await updateDoc(_pgRef(VS.activePage.id), { fogOps: [] }).catch(() => showNotif('Erreur', 'error'));
 }
 function _vttSwitchPage(id) { return _switchPage(id); }
 
@@ -9878,7 +9878,7 @@ function _vttSwitchPage(id) { return _switchPage(id); }
 // ══════════════════════════════════════════════════════════════════════════
 function _shortRestPresentUids() {
   const uids = new Set();
-  for (const e of Object.values(_tokens)) {
+  for (const e of Object.values(VS.tokens)) {
     const t = e?.data;
     if (t?.type === 'player' && t.pageId && t.ownerId) uids.add(t.ownerId);
   }
@@ -9886,7 +9886,7 @@ function _shortRestPresentUids() {
 }
 function _shortRestPresentChars() {
   const seen = new Set(), chars = [];
-  for (const e of Object.values(_tokens)) {
+  for (const e of Object.values(VS.tokens)) {
     const t = e?.data;
     if (t?.type === 'player' && t.pageId && t.characterId && !seen.has(t.characterId)) {
       seen.add(t.characterId);
@@ -9899,7 +9899,7 @@ function _shortRestPresentChars() {
 function _shortRestPresentNames() {
   // ownerId → nom à afficher (perso le plus récemment vu)
   const out = {};
-  for (const e of Object.values(_tokens)) {
+  for (const e of Object.values(VS.tokens)) {
     const t = e?.data;
     if (t?.type === 'player' && t.ownerId && !out[t.ownerId]) {
       const c = t.characterId ? _characters[t.characterId] : null;
@@ -9911,7 +9911,7 @@ function _shortRestPresentNames() {
 
 async function _vttShortRestVote() {
   const uid = STATE.user?.uid; if (!uid) return;
-  const sr  = _session?.shortRest || { max: 0, count: 0, vote: null };
+  const sr  = VS.session?.shortRest || { max: 0, count: 0, vote: null };
   if ((sr.count || 0) >= (sr.max ?? 0)) {
     showNotif('Plus de court repos disponible', 'error'); return;
   }
@@ -9922,7 +9922,7 @@ async function _vttShortRestVote() {
 
 async function _vttShortRestUnvote() {
   const uid = STATE.user?.uid; if (!uid) return;
-  const sr  = _session?.shortRest; if (!sr?.vote) return;
+  const sr  = VS.session?.shortRest; if (!sr?.vote) return;
   const votes = { ...sr.vote.votes };
   delete votes[uid];
   // ⚠️ setDoc(..., {merge:true}) FUSIONNE les maps → il ne supprimerait jamais la
@@ -9936,7 +9936,7 @@ async function _vttShortRestUnvote() {
 
 async function _vttShortRestCancel() {
   if (!STATE.isAdmin) return;
-  const sr = _session?.shortRest; if (!sr) return;
+  const sr = VS.session?.shortRest; if (!sr) return;
   await setDoc(_sesRef(), { shortRest: { ...sr, vote: null } }, { merge: true });
 }
 
@@ -9948,18 +9948,18 @@ async function _vttShortRestForce() {
 async function _vttShortRestSetMax(val) {
   if (!STATE.isAdmin) return;
   const max = Math.max(0, Math.min(20, parseInt(val) || 0));
-  const sr  = _session?.shortRest || { count: 0, vote: null };
+  const sr  = VS.session?.shortRest || { count: 0, vote: null };
   await setDoc(_sesRef(), { shortRest: { ...sr, max } }, { merge: true });
 }
 
 async function _vttShortRestResetCount() {
   if (!STATE.isAdmin) return;
-  const sr = _session?.shortRest || { max: 0 };
+  const sr = VS.session?.shortRest || { max: 0 };
   await setDoc(_sesRef(), { shortRest: { ...sr, count: 0, vote: null } }, { merge: true });
 }
 
 async function _applyShortRest({ forced = false } = {}) {
-  const sr = _session?.shortRest || { max: 0, count: 0, vote: null };
+  const sr = VS.session?.shortRest || { max: 0, count: 0, vote: null };
   if ((sr.count || 0) >= (sr.max ?? 0)) {
     showNotif('Plus de court repos disponible', 'error'); return;
   }
@@ -9982,7 +9982,7 @@ async function _applyShortRest({ forced = false } = {}) {
 // Auto-apply : seul le MJ déclenche pour éviter les races.
 function _checkShortRestAutoApply() {
   if (!STATE.isAdmin) return;
-  const sr = _session?.shortRest;
+  const sr = VS.session?.shortRest;
   if (!sr?.vote) return;
   if ((sr.count || 0) >= (sr.max ?? 0)) return;
   const present = _shortRestPresentUids();
@@ -9998,7 +9998,7 @@ function _renderShortRest() {
   const body    = document.getElementById('vtt-rest-body');
   if (!trigger) return;
 
-  const sr   = _session?.shortRest || { max: 0, count: 0, vote: null };
+  const sr   = VS.session?.shortRest || { max: 0, count: 0, vote: null };
   const max  = sr.max ?? 0;
   const used = sr.count || 0;
   const rem  = Math.max(0, max - used);
@@ -10154,9 +10154,9 @@ function _vttToggleDrawFill() {
   if (btn) { btn.textContent = _drawFill ? '◼' : '◻'; btn.classList.toggle('active', _drawFill); }
 }
 async function _vttClearAnnots() {
-  if (!_activePage) return;
+  if (!VS.activePage) return;
   if (!await confirmModal('Effacer toutes les annotations de cette page ?')) return;
-  const toDelete = Object.values(_annotations).filter(e => e.data.pageId === _activePage.id);
+  const toDelete = Object.values(_annotations).filter(e => e.data.pageId === VS.activePage.id);
   await Promise.all(toDelete.map(e => deleteDoc(_annotRef(e.data.id)).catch(()=>{})));
 }
 
@@ -10219,7 +10219,7 @@ function _vttAddPage() {
 }
 // Datalist des dossiers de pages existants (suggestions de saisie)
 function _pageFolderDatalist(id) {
-  const folders = [...new Set(Object.values(_pages).map(p => (p.folder||'').trim()).filter(Boolean))]
+  const folders = [...new Set(Object.values(VS.pages).map(p => (p.folder||'').trim()).filter(Boolean))]
     .sort((a,b)=>a.localeCompare(b,'fr',{sensitivity:'base'}));
   return `<datalist id="${id}">${folders.map(f=>`<option value="${_esc(f)}">`).join('')}</datalist>`;
 }
@@ -10231,12 +10231,12 @@ async function _vttConfirmAddPage() {
   const rows=Math.max(8,Math.min(200,parseInt(document.getElementById('vpf-rows')?.value)||18));
   if (!name) { showNotif('Nom requis','error'); return; }
   closeModalDirect();
-  await addDoc(_pgsCol(),{name,folder,cols,rows,backgroundImages:[],order:Object.keys(_pages).length,createdAt:serverTimestamp()})
+  await addDoc(_pgsCol(),{name,folder,cols,rows,backgroundImages:[],order:Object.keys(VS.pages).length,createdAt:serverTimestamp()})
     .catch(()=>showNotif('Erreur création page','error'));
 }
 
 function _vttEditPage(id) {
-  const p=_pages[id]; if (!p) return;
+  const p=VS.pages[id]; if (!p) return;
   openModal('✏️ Modifier la page', `
     ${_pgModalBody('vpe-', { name:p.name, folder:p.folder||'', cols:p.cols||24, rows:p.rows||18, fog:!!p.fogEnabled })}
     <div class="vtt-pgm-actions">
@@ -10253,7 +10253,7 @@ async function _vttConfirmEditPage(id) {
   const fogEnabled = document.getElementById('vpe-fog')?.checked ?? false;
   closeModalDirect();
   await updateDoc(_pgRef(id),{name,folder,cols,rows,fogEnabled}).catch(()=>showNotif('Erreur','error'));
-  if (_activePage?.id===id) { _activePage={..._activePage,name,folder,cols,rows,fogEnabled}; _drawGrid(); }
+  if (VS.activePage?.id===id) { VS.activePage={...VS.activePage,name,folder,cols,rows,fogEnabled}; _drawGrid(); }
 }
 
 async function _vttDeletePage(id) {
@@ -10263,27 +10263,27 @@ async function _vttDeletePage(id) {
 
 // Envoyer tous les joueurs vers une page spécifique (depuis la liste)
 async function _vttSendToPage(pageId) {
-  const p=_pages[pageId]; if (!p) return;
+  const p=VS.pages[pageId]; if (!p) return;
   await setDoc(_sesRef(),{activePageId:pageId},{merge:true}).catch(()=>{});
   showNotif(`📡 Tous les joueurs → « ${p.name} »`,'success');
 }
 
 // Placer un token sur la page active (depuis le tray)
 async function _vttPlace(tokenId) {
-  if (!_activePage) { showNotif('Crée d\'abord une page','error'); return; }
-  const cC=Math.floor(_activePage.cols/2), cR=Math.floor(_activePage.rows/2);
-  await updateDoc(_tokRef(tokenId),{pageId:_activePage.id,col:cC,row:cR,visible:true})
+  if (!VS.activePage) { showNotif('Crée d\'abord une page','error'); return; }
+  const cC=Math.floor(VS.activePage.cols/2), cR=Math.floor(VS.activePage.rows/2);
+  await updateDoc(_tokRef(tokenId),{pageId:VS.activePage.id,col:cC,row:cR,visible:true})
     .catch(()=>showNotif('Erreur placement','error'));
 }
 // Dupliquer un perso/PNJ déjà placé sur une autre page → nouveau token sur la page active.
 // Le HP/PM/stats sont partagés via la fiche perso ; les buffs et état de tour restent par-instance.
 async function _vttDuplicateOnPage(srcTokenId) {
   if (!STATE.isAdmin) return;
-  if (!_activePage) { showNotif('Crée d\'abord une page','error'); return; }
-  const src = _tokens[srcTokenId]?.data;
+  if (!VS.activePage) { showNotif('Crée d\'abord une page','error'); return; }
+  const src = VS.tokens[srcTokenId]?.data;
   if (!src) { showNotif('Token introuvable','error'); return; }
   if (src.type === 'enemy') { _vttDuplicateToken(srcTokenId); return; }
-  const cC = Math.floor(_activePage.cols/2), cR = Math.floor(_activePage.rows/2);
+  const cC = Math.floor(VS.activePage.cols/2), cR = Math.floor(VS.activePage.rows/2);
   try {
     await addDoc(_toksCol(), {
       name: src.name || 'Token',
@@ -10292,7 +10292,7 @@ async function _vttDuplicateOnPage(srcTokenId) {
       npcId:       src.npcId       || null,
       beastId:     src.beastId     || null,
       ownerId:     src.ownerId     || null,
-      pageId: _activePage.id, col: cC, row: cR,
+      pageId: VS.activePage.id, col: cC, row: cR,
       visible: true,
       imageUrl: src.imageUrl || null,
       movement: src.movement ?? null, range: src.range ?? 1,
@@ -10314,12 +10314,12 @@ async function _vttDuplicateOnPage(srcTokenId) {
 // Si plusieurs tokens partagent la même entité (perso/PNJ dupliqué), on supprime celui-ci ;
 // sinon on le renvoie en réserve.
 async function _vttRetireToken(tokenId) {
-  const t = _tokens[tokenId]?.data; if (!t) return;
+  const t = VS.tokens[tokenId]?.data; if (!t) return;
   const key = t.characterId || t.npcId; // les ennemis (beastId) sont gérés par _vttDeleteToken
   let isDuplicate = false;
   if (key) {
     let count = 0;
-    for (const e of Object.values(_tokens)) {
+    for (const e of Object.values(VS.tokens)) {
       const d = e.data;
       if ((d.characterId && d.characterId === t.characterId) ||
           (d.npcId && d.npcId === t.npcId)) count++;
@@ -10330,14 +10330,14 @@ async function _vttRetireToken(tokenId) {
   try {
     if (isDuplicate) {
       await deleteDoc(_tokRef(tokenId));
-      _tokens[tokenId]?.shape?.destroy();
-      delete _tokens[tokenId];
+      VS.tokens[tokenId]?.shape?.destroy();
+      delete VS.tokens[tokenId];
     } else {
       await updateDoc(_tokRef(tokenId),{pageId:null,visible:false});
-      const entry = _tokens[tokenId];
+      const entry = VS.tokens[tokenId];
       if (entry) {
         entry.shape?.destroy();
-        _tokens[tokenId] = { data: { ...entry.data, pageId:null, visible:false }, shape:null };
+        VS.tokens[tokenId] = { data: { ...entry.data, pageId:null, visible:false }, shape:null };
       }
     }
   } catch (e) {
@@ -10352,18 +10352,18 @@ async function _vttRetireToken(tokenId) {
 }
 // Le joueur invoque son propre token sur la carte active
 async function _vttInvokeMyToken() {
-  if (!_activePage) { showNotif('Aucune carte active','error'); return; }
+  if (!VS.activePage) { showNotif('Aucune carte active','error'); return; }
   const uid = STATE.user?.uid; if (!uid) return;
-  const tok = Object.values(_tokens).find(e => e.data?.ownerId === uid)?.data;
+  const tok = Object.values(VS.tokens).find(e => e.data?.ownerId === uid)?.data;
   if (!tok) { showNotif('Aucun token associé à ton personnage','error'); return; }
-  const cC = Math.floor(_activePage.cols/2), cR = Math.floor(_activePage.rows/2);
-  await updateDoc(_tokRef(tok.id),{pageId:_activePage.id,col:cC,row:cR,visible:true})
+  const cC = Math.floor(VS.activePage.cols/2), cR = Math.floor(VS.activePage.rows/2);
+  await updateDoc(_tokRef(tok.id),{pageId:VS.activePage.id,col:cC,row:cR,visible:true})
     .catch(err => { console.error('[vtt] invocation:', err); showNotif('Erreur invocation','error'); });
 }
 // Le joueur range son propre token (le renvoie en réserve, sans le supprimer)
 async function _vttRetireMyToken() {
   const uid = STATE.user?.uid; if (!uid) return;
-  const tok = Object.values(_tokens).find(e => e.data?.ownerId === uid)?.data;
+  const tok = Object.values(VS.tokens).find(e => e.data?.ownerId === uid)?.data;
   if (!tok) { showNotif('Aucun token associé à ton personnage','error'); return; }
   if (!tok.pageId) return; // déjà rangé
   await updateDoc(_tokRef(tok.id),{pageId:null,visible:false})
@@ -10377,17 +10377,17 @@ async function _vttMoveTokenToPage(tokenId,pageId) {
 }
 // Sélectionner depuis le tray (place si non placé)
 function _vttSelectFromTray(id) {
-  const t=_tokens[id]?.data; if (!t) return;
+  const t=VS.tokens[id]?.data; if (!t) return;
   if (!t.pageId&&STATE.isAdmin) { _vttPlace(id); return; }
-  if (t.pageId===_activePage?.id) _select(id);
+  if (t.pageId===VS.activePage?.id) _select(id);
 }
 async function _vttToggleVisible(id) {
-  const t=_tokens[id]?.data; if (!t) return;
+  const t=VS.tokens[id]?.data; if (!t) return;
   await updateDoc(_tokRef(id),{visible:!t.visible}).catch(()=>{});
 }
 async function _vttClearBuffs(id) {
   if (!STATE.isAdmin) return;
-  const t=_tokens[id]?.data; if (!t) return;
+  const t=VS.tokens[id]?.data; if (!t) return;
   await updateDoc(_tokRef(id),{buffs:[]}).catch(()=>{});
   showNotif('Buffs supprimés.','success');
 }
@@ -10441,7 +10441,7 @@ function _vttConditionAdd(tokenId) {
  *  puis ouvre la modal d'édition pour ajuster source/durée si besoin. */
 async function _vttConditionApply(tokenId, condId) {
   const lib = CONDITION_BY_ID[condId]; if (!lib) return;
-  const t = _tokens[tokenId]?.data; if (!t) return;
+  const t = VS.tokens[tokenId]?.data; if (!t) return;
   // Évite les doublons (même état déjà appliqué)
   const existing = (t.conditions || []).some(c => c.id === condId);
   if (existing) {
@@ -10451,7 +10451,7 @@ async function _vttConditionApply(tokenId, condId) {
   }
   // Durée par défaut : valeur définie sur l'état (defaultDuration), sinon
   // 2 tours par convention. Ignorée pour les états qui se consomment au 1er coup.
-  const round = _session?.combat?.round ?? 0;
+  const round = VS.session?.combat?.round ?? 0;
   const isConsumed = !!lib.effects?.consumedByAttackAgainst;
   const dur = Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
     ? lib.defaultDuration
@@ -10482,7 +10482,7 @@ async function _vttConditionApply(tokenId, condId) {
 /** Retire un état du token (par index dans le tableau). */
 async function _vttConditionRemove(tokenId, idx) {
   if (!STATE.isAdmin) return;
-  const t = _tokens[tokenId]?.data; if (!t) return;
+  const t = VS.tokens[tokenId]?.data; if (!t) return;
   const conds = [...(t.conditions || [])];
   const removed = conds[idx]; if (!removed) return;
   conds.splice(idx, 1);
@@ -10493,7 +10493,7 @@ async function _vttConditionRemove(tokenId, idx) {
 
 /** Lance un jet de sauvegarde pour tenter de finir l'état. */
 async function _vttConditionSave(tokenId, idx) {
-  const t = _tokens[tokenId]?.data; if (!t) return;
+  const t = VS.tokens[tokenId]?.data; if (!t) return;
   const cond = (t.conditions || [])[idx]; if (!cond) return;
   const lib = CONDITION_BY_ID[cond.id];
   const statKey = cond.saveStat || 'constitution';
@@ -10534,10 +10534,10 @@ async function _vttConditionSave(tokenId, idx) {
 /** Modal d'édition d'un état (source / DD / stat / durée). */
 function _vttConditionEdit(tokenId, idx) {
   if (!STATE.isAdmin) return;
-  const t = _tokens[tokenId]?.data; if (!t) return;
+  const t = VS.tokens[tokenId]?.data; if (!t) return;
   const cond = (t.conditions || [])[idx]; if (!cond) return;
   const lib = CONDITION_BY_ID[cond.id] || { label: cond.id, icon: '❓' };
-  const round = _session?.combat?.round ?? 0;
+  const round = VS.session?.combat?.round ?? 0;
   const turnsLeft = cond.expiresAtRound != null && round > 0
     ? (cond.expiresAtRound - round + 1)
     : (cond.expiresAtRound != null ? 0 : '');
@@ -10576,13 +10576,13 @@ function _vttConditionEdit(tokenId, idx) {
 }
 
 async function _vttConditionEditSave(tokenId, idx) {
-  const t = _tokens[tokenId]?.data; if (!t) return;
+  const t = VS.tokens[tokenId]?.data; if (!t) return;
   const cond = (t.conditions || [])[idx]; if (!cond) return;
   const source = document.getElementById('ce-source')?.value?.trim() || '';
   const saveDC = parseInt(document.getElementById('ce-dd')?.value) || null;
   const saveStat = document.getElementById('ce-stat')?.value || null;
   const turns = parseInt(document.getElementById('ce-turns')?.value) || 0;
-  const round = _session?.combat?.round ?? 0;
+  const round = VS.session?.combat?.round ?? 0;
   const expiresAtRound = turns > 0 && round > 0 ? round + turns - 1 : null;
   const conds = [...(t.conditions || [])];
   conds[idx] = { ...cond, source, saveDC, saveStat: saveDC ? saveStat : null, expiresAtRound };
@@ -10946,7 +10946,7 @@ async function _vttConditionConfigDelete(idx) {
 
 /** Helper : true si le token porte un état actif dont l'effet `effectKey` est truthy. */
 function _hasConditionEffect(token, effectKey) {
-  const round = _session?.combat?.round ?? 0;
+  const round = VS.session?.combat?.round ?? 0;
   for (const c of (token?.conditions || [])) {
     if (c.expiresAtRound != null && round > 0 && round > c.expiresAtRound) continue;
     const eff = CONDITION_BY_ID[c.id]?.effects;
@@ -10957,7 +10957,7 @@ function _hasConditionEffect(token, effectKey) {
 
 /** Helper : retourne la liste des états actifs sur un token (objets {cond, lib}). */
 function _activeConditionsOf(token) {
-  const round = _session?.combat?.round ?? 0;
+  const round = VS.session?.combat?.round ?? 0;
   const out = [];
   for (const c of (token?.conditions || [])) {
     if (c.expiresAtRound != null && round > 0 && round > c.expiresAtRound) continue;
@@ -10971,7 +10971,7 @@ function _activeConditionsOf(token) {
  *  selon leurs états actifs. À appeler par _vttRollAttack. */
 function _conditionsAttackMods(srcToken, tgtToken, opt) {
   const isMelee = (opt?.portee || 1) <= 1;
-  const round = _session?.combat?.round ?? 0;
+  const round = VS.session?.combat?.round ?? 0;
   const isActive = c => c.expiresAtRound == null || round === 0 || round <= c.expiresAtRound;
 
   let hasAdv = false, hasDis = false;
@@ -11000,10 +11000,10 @@ function _conditionsAttackMods(srcToken, tgtToken, opt) {
 }
 /** Déclenche un sort suspendu : marque le sort gratuit puis ouvre le modal d'attaque. */
 async function _vttTriggerSuspendedSpell(tokenId, buffIdx) {
-  const t = _tokens[tokenId]?.data; if (!t?.buffs?.length) return;
+  const t = VS.tokens[tokenId]?.data; if (!t?.buffs?.length) return;
   if (!_canControlToken(t)) return;
   // Index visible (parmi les buffs actifs) → index réel dans t.buffs
-  const r = _session?.combat?.round ?? 0;
+  const r = VS.session?.combat?.round ?? 0;
   const activeIdxs = t.buffs.map((bf, i) => ({ bf, i }))
     .filter(({ bf }) => bf?.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound)
     .map(({ i }) => i);
@@ -11028,9 +11028,9 @@ async function _vttTriggerSuspendedSpell(tokenId, buffIdx) {
 /** Retire un buff à l'index donné (MJ uniquement). */
 async function _vttRemoveBuff(tokenId, idx) {
   if (!STATE.isAdmin) return;
-  const t = _tokens[tokenId]?.data; if (!t || !Array.isArray(t.buffs)) return;
+  const t = VS.tokens[tokenId]?.data; if (!t || !Array.isArray(t.buffs)) return;
   // Recalcule l'index parmi les buffs actifs (pour matcher l'affichage)
-  const r = _session?.combat?.round ?? 0;
+  const r = VS.session?.combat?.round ?? 0;
   const activeIndexes = t.buffs
     .map((bf, i) => ({ bf, i }))
     .filter(({ bf }) => bf?.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound)
@@ -11045,7 +11045,7 @@ async function _vttRemoveBuff(tokenId, idx) {
 /** Ouvre une modale simple pour ajouter manuellement un effet sur le token (MJ). */
 async function _vttAddBuffPrompt(tokenId) {
   if (!STATE.isAdmin) return;
-  const t = _tokens[tokenId]?.data; if (!t) return;
+  const t = VS.tokens[tokenId]?.data; if (!t) return;
   const TYPES = [
     { v:'ca',          ic:'🛡', lbl:'Bonus CA',         needsBonus:true },
     { v:'dot',         ic:'🩸', lbl:'DoT (dégâts/tour)', needsFormula:true },
@@ -11106,7 +11106,7 @@ function _vttSyncAddBuffRows(type) {
 
 async function _vttConfirmAddBuff(tokenId) {
   if (!STATE.isAdmin) return;
-  const t = _tokens[tokenId]?.data; if (!t) return;
+  const t = VS.tokens[tokenId]?.data; if (!t) return;
   const type    = document.getElementById('vab-type')?.value || 'ca';
   const label   = document.getElementById('vab-label')?.value?.trim() || 'Effet manuel';
   const bonus   = parseInt(document.getElementById('vab-bonus')?.value) || 0;
@@ -11114,7 +11114,7 @@ async function _vttConfirmAddBuff(tokenId) {
   const effect  = document.getElementById('vab-effect')?.value?.trim() || '';
   const durRaw  = document.getElementById('vab-dur')?.value;
   const dur     = durRaw === '' ? null : Math.max(0, parseInt(durRaw) || 0);
-  const round = _session?.combat?.round ?? 0;
+  const round = VS.session?.combat?.round ?? 0;
   const baseRound = Math.max(1, round);
   const ICONS = { ca:'🛡', dot:'🩸', dmg_bonus:'⚔️', move_bonus:'👢', move_debuff:'👢', range_bonus:'🏹', enchantment:'✨', affliction:'💀' };
   const newBuff = {
@@ -11134,7 +11134,7 @@ async function _vttConfirmAddBuff(tokenId) {
 }
 
 async function _vttSetHp(tokenId,hp) {
-  const t=_tokens[tokenId]?.data; if (!t) return;
+  const t=VS.tokens[tokenId]?.data; if (!t) return;
   // Détecte une perte de PV pour déclencher un JS de concentration auto
   const lT = _live(t);
   const prevHp = lT.displayHp ?? t.hp ?? null;
@@ -11147,7 +11147,7 @@ async function _vttSetHp(tokenId,hp) {
   }
 }
 async function _vttSetPm(tokenId,pm) {
-  const t=_tokens[tokenId]?.data; if (!t) return;
+  const t=VS.tokens[tokenId]?.data; if (!t) return;
   const v=Math.max(0,pm);
   if (t.characterId) await updateDoc(_chrRef(t.characterId),{pm:v}).catch(()=>{});
   else if (t.npcId)  await updateDoc(_npcRef(t.npcId),{pmCurrent:v}).catch(()=>{});
@@ -11169,7 +11169,7 @@ function _manualBuffVal(t, key) {
   return b ? (parseInt(b.bonus) || 0) : 0;
 }
 async function _vttTokenBonus(tokenId, key, delta) {
-  const t = _tokens[tokenId]?.data; if (!t) return;
+  const t = VS.tokens[tokenId]?.data; if (!t) return;
   if (!_canControlToken(t)) return;
   const cfg = _MS_BONUS_BUFF[key]; if (!cfg) return;
   const d = parseInt(delta) || 0;
@@ -11183,18 +11183,18 @@ async function _vttTokenBonus(tokenId, key, delta) {
   } else if (next !== 0) {
     buffs.push({ type: cfg.type, bonus: next, manual: true, icon: cfg.icon, label: 'Bonus du tour', expiresAtRound: null });
   }
-  if (_tokens[tokenId]) _tokens[tokenId].data = { ...t, buffs }; // optimiste
+  if (VS.tokens[tokenId]) VS.tokens[tokenId].data = { ...t, buffs }; // optimiste
   await updateDoc(_tokRef(tokenId), { buffs }).catch(() => {});
-  _renderInspector(_tokens[tokenId]?.data || t);
+  _renderInspector(VS.tokens[tokenId]?.data || t);
   _patchShape(tokenId);
 }
 async function _vttTokenResetBonus(tokenId) {
-  const t = _tokens[tokenId]?.data; if (!t) return;
+  const t = VS.tokens[tokenId]?.data; if (!t) return;
   if (!_canControlToken(t)) return;
   const buffs = (t.buffs || []).filter(b => !(b && b.manual));
-  if (_tokens[tokenId]) _tokens[tokenId].data = { ...t, buffs };
+  if (VS.tokens[tokenId]) VS.tokens[tokenId].data = { ...t, buffs };
   await updateDoc(_tokRef(tokenId), { buffs }).catch(() => {});
-  _renderInspector(_tokens[tokenId]?.data || t);
+  _renderInspector(VS.tokens[tokenId]?.data || t);
   _patchShape(tokenId);
 }
 
@@ -11226,7 +11226,7 @@ async function _vttMsSetNiveau(charId, uid, niveau) {
   c.niveau = val;
   _renderMiniSheet(uid);
 }
-function _vttEditToken(id) { return _openStatsModal(_tokens[id]?.data??null); }
+function _vttEditToken(id) { return _openStatsModal(VS.tokens[id]?.data??null); }
 
 // ═══════════════════════════════════════════════════════════════════
 // DÉLÉGATION DE CONTRÔLE — autoriser d'autres joueurs sur son token
@@ -11251,7 +11251,7 @@ function _vttMemberInfo(uid) {
 }
 
 function _vttRenderDelegateModalBody(tokenId, search = '') {
-  const t = _tokens[tokenId]?.data; if (!t) return '';
+  const t = VS.tokens[tokenId]?.data; if (!t) return '';
   const uid = STATE.user?.uid;
   const adv = STATE.adventure || {};
   const dels = new Set(Array.isArray(t.controlDelegates) ? t.controlDelegates : []);
@@ -11344,7 +11344,7 @@ function _vttRenderDelegateModalBody(tokenId, search = '') {
 }
 
 function _vttOpenTokenDelegatesModal(tokenId) {
-  const t = _tokens[tokenId]?.data; if (!t) return;
+  const t = VS.tokens[tokenId]?.data; if (!t) return;
   const uid = STATE.user?.uid;
   const isOwner = uid && t.ownerId === uid;
   if (!isOwner && !STATE.isAdmin) {
@@ -11373,7 +11373,7 @@ function _vttFilterDelegates(tokenId, value) {
 }
 
 async function _vttToggleTokenDelegate(tokenId, targetUid) {
-  const t = _tokens[tokenId]?.data; if (!t || !targetUid) return;
+  const t = VS.tokens[tokenId]?.data; if (!t || !targetUid) return;
   const uid = STATE.user?.uid;
   const isOwner = uid && t.ownerId === uid;
   if (!isOwner && !STATE.isAdmin) return;
@@ -11383,7 +11383,7 @@ async function _vttToggleTokenDelegate(tokenId, targetUid) {
   try {
     await updateDoc(_tokRef(tokenId), { controlDelegates: next });
     // Mise à jour optimiste du cache local pour rafraîchir immédiatement la modal
-    if (_tokens[tokenId]?.data) _tokens[tokenId].data.controlDelegates = next;
+    if (VS.tokens[tokenId]?.data) VS.tokens[tokenId].data.controlDelegates = next;
     const host = document.getElementById('vtt-deleg-modal');
     if (host) host.innerHTML = _vttRenderDelegateModalBody(tokenId, _vttDelegSearch || '');
     const name = _resolveUidName(targetUid);
@@ -11446,22 +11446,22 @@ async function _vttResetTurn(id) {
 
 async function _vttToggleTurnFlag(id, field) {
   if (!STATE.isAdmin || !["bonusActionThisTurn", "reactionThisTurn"].includes(field)) return;
-  const token = _tokens[id]?.data;
+  const token = VS.tokens[id]?.data;
   if (!token) return;
   await updateDoc(_tokRef(id), { [field]: !token[field] })
     .catch(() => showNotif("Erreur de suivi du tour", "error"));
 }
 
 async function _vttAddImageUrl() {
-  const url=prompt('URL de l\'image :')?.trim(); if (!url||!_activePage) return;
-  const imgs=[...(_activePage.backgroundImages??[]),{id:Date.now().toString(),url,x:0,y:0,w:_activePage.cols,h:_activePage.rows}];
-  await updateDoc(_pgRef(_activePage.id),{backgroundImages:imgs}).catch(()=>{});
+  const url=prompt('URL de l\'image :')?.trim(); if (!url||!VS.activePage) return;
+  const imgs=[...(VS.activePage.backgroundImages??[]),{id:Date.now().toString(),url,x:0,y:0,w:VS.activePage.cols,h:VS.activePage.rows}];
+  await updateDoc(_pgRef(VS.activePage.id),{backgroundImages:imgs}).catch(()=>{});
 }
 function _vttUploadClick() { return document.getElementById('vtt-img-input')?.click(); }
 
 async function _vttToggleCombat() {
   if (!STATE.isAdmin) return;
-  const active=!_session?.combat?.active;
+  const active=!VS.session?.combat?.active;
   await setDoc(_sesRef(),{combat:{active,round:active?1:0}},{merge:true});
   if (active) {
     const b=writeBatch(db);
@@ -11469,8 +11469,8 @@ async function _vttToggleCombat() {
     // différée (pendingDuration, posées hors combat) en expiresAtRound réel.
     // Sinon ces états resteraient indéfiniment.
     const startRound = 1;
-    Object.keys(_tokens).forEach(id => {
-      const tokData = _tokens[id]?.data;
+    Object.keys(VS.tokens).forEach(id => {
+      const tokData = VS.tokens[id]?.data;
       if (!tokData) return;
       const updates = { movedThisTurn:false, movedCells:0, bonusMvt:0, attackedThisTurn:false, bonusActionThisTurn:false, reactionThisTurn:false };
       if (Array.isArray(tokData.conditions) && tokData.conditions.length) {
@@ -11493,15 +11493,15 @@ async function _vttToggleCombat() {
   } else showNotif('Combat terminé.','success');
 }
 async function _vttNextRound() {
-  if (!STATE.isAdmin||!_session?.combat?.active) return;
-  const round=(_session.combat.round??1)+1;
+  if (!STATE.isAdmin||!VS.session?.combat?.active) return;
+  const round=(VS.session.combat.round??1)+1;
   await setDoc(_sesRef(),{combat:{active:true,round}},{merge:true});
 
   // ── Application des effets périodiques en début de round (avant cleanup) ──
   // DoT : dégâts/tour · Regen : soin/tour
   const dotNotifs = [];
-  for (const id of Object.keys(_tokens)) {
-    const td = _tokens[id]?.data;
+  for (const id of Object.keys(VS.tokens)) {
+    const td = VS.tokens[id]?.data;
     const dots = (td?.buffs || []).filter(b => (b.type === 'dot' || b.type === 'regen')
       && (b.expiresAtRound == null || round <= b.expiresAtRound));
     if (!dots.length) continue;
@@ -11564,8 +11564,8 @@ async function _vttNextRound() {
 
   const b=writeBatch(db);
   const expiredNotifs = [];
-  Object.keys(_tokens).forEach(id => {
-    const tokData = _tokens[id]?.data;
+  Object.keys(VS.tokens).forEach(id => {
+    const tokData = VS.tokens[id]?.data;
     if (!tokData) return;
     // ── Cleanup auto des tokens summons expirés (sentinelle, arme invoquée) ──
     // Les summons non-canalisés expirent à round > summonExpiresAtRound.
@@ -11703,9 +11703,9 @@ async function _vttConfirmCreateEnemy() {
     batch.set(ref, {
       name: count>1 ? `${name} ${i+1}` : name,
       type: 'enemy', characterId: null, npcId: null, ownerId: null,
-      pageId: _activePage?.id||null,
-      col: _activePage ? Math.min(_activePage.cols-1, Math.floor(_activePage.cols/2)+i) : i,
-      row: _activePage ? Math.floor(_activePage.rows/2) : 0,
+      pageId: VS.activePage?.id||null,
+      col: VS.activePage ? Math.min(VS.activePage.cols-1, Math.floor(VS.activePage.cols/2)+i) : i,
+      row: VS.activePage ? Math.floor(VS.activePage.rows/2) : 0,
       visible: true,
       hp, hpMax: hp, attackDice: atk, defense: ca, movement: mv, range,
       imageUrl: null, movedThisTurn: false, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false,
@@ -11718,9 +11718,9 @@ async function _vttConfirmCreateEnemy() {
 
 // Créer une nouvelle instance indépendante d'un ennemi (PV séparés)
 async function _vttDuplicateToken(tokenId) {
-  const t=_tokens[tokenId]?.data; if (!t) return;
+  const t=VS.tokens[tokenId]?.data; if (!t) return;
   const baseName=t.name.replace(/ \d+$/, '');
-  const sameGroup=Object.values(_tokens).filter(e=>
+  const sameGroup=Object.values(VS.tokens).filter(e=>
     t.beastId ? e.data.beastId===t.beastId
               : (e.data.name||'').replace(/ \d+$/,'')===baseName
   );
@@ -11732,8 +11732,8 @@ async function _vttDuplicateToken(tokenId) {
     ...base,
     name: num===1 ? baseName : `${baseName} ${num}`,
     hp: null,   // PV frais depuis le template bestiaire
-    pageId: _activePage?.id||null,
-    col: _activePage ? Math.min(_activePage.cols-1,(t.col||0)+sameGroup.length) : 0,
+    pageId: VS.activePage?.id||null,
+    col: VS.activePage ? Math.min(VS.activePage.cols-1,(t.col||0)+sameGroup.length) : 0,
     row: t.row||0,
     visible: true,
     movedThisTurn: false, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false,
@@ -11744,31 +11744,31 @@ async function _vttDuplicateToken(tokenId) {
 
 // Placer une instance depuis le bestiaire (crée + place sur la page active)
 async function _vttPlaceFromBestiary(beastId) {
-  if (!_activePage) return showNotif('Aucune page active — ouvre une page d\'abord','error');
+  if (!VS.activePage) return showNotif('Aucune page active — ouvre une page d\'abord','error');
   const b=_bestiary[beastId]; if (!b) return;
   // Purger les tokens fantômes (anciens auto-créés, non placés, non modifiés)
-  const ghosts=Object.values(_tokens).filter(e=>e.data.beastId===beastId&&!e.data.pageId&&e.data.hp==null);
+  const ghosts=Object.values(VS.tokens).filter(e=>e.data.beastId===beastId&&!e.data.pageId&&e.data.hp==null);
   if (ghosts.length) {
     const batch=writeBatch(db);
     ghosts.forEach(g=>batch.delete(_tokRef(g.data.id)));
     await batch.commit().catch(()=>{});
   }
   // Trouver le premier numéro libre parmi les tokens actifs
-  const active=Object.values(_tokens).filter(e=>e.data.beastId===beastId&&(e.data.pageId||e.data.hp!=null));
+  const active=Object.values(VS.tokens).filter(e=>e.data.beastId===beastId&&(e.data.pageId||e.data.hp!=null));
   const usedNums=new Set(active.map(e=>{const m=(e.data.name||'').match(/\s(\d+)$/);return m?parseInt(m[1]):1;}));
   let num=1; while(usedNums.has(num))num++;
   const name=num===1?(b.nom||'Créature'):`${b.nom} ${num}`;
   const sw = Math.max(1, Math.min(5, b.tokenW || b.tokenSize || 1));
   const sh = Math.max(1, Math.min(5, b.tokenH || b.tokenSize || 1));
-  const cx=Math.floor(_activePage.cols/2), cy=Math.floor(_activePage.rows/2);
+  const cx=Math.floor(VS.activePage.cols/2), cy=Math.floor(VS.activePage.rows/2);
   const ref=doc(_toksCol());
   await setDoc(ref,{
     name, type:'enemy',
     characterId:null, npcId:null, beastId,
     ownerId:null,
-    pageId:_activePage.id,
-    col:Math.max(0,Math.min(_activePage.cols-sw,cx+active.length)),
-    row:Math.max(0,Math.min(_activePage.rows-sh,cy)),
+    pageId:VS.activePage.id,
+    col:Math.max(0,Math.min(VS.activePage.cols-sw,cx+active.length)),
+    row:Math.max(0,Math.min(VS.activePage.rows-sh,cy)),
     visible:true,
     imageUrl:null, movement:null, range:1, attack:null, defense:null,
     hp:null, hpMax:null,
@@ -11780,7 +11780,7 @@ async function _vttPlaceFromBestiary(beastId) {
 
 // Supprimer définitivement un token ennemi
 async function _vttDeleteToken(tokenId) {
-  const t=_tokens[tokenId]?.data; if (!t||t.type!=='enemy') return;
+  const t=VS.tokens[tokenId]?.data; if (!t||t.type!=='enemy') return;
   if (!confirm(`Supprimer définitivement "${t.name}" ?`)) return;
   await deleteDoc(_tokRef(tokenId)).catch(()=>showNotif('Erreur suppression','error'));
   showNotif(`🗑 ${t.name} supprimé`,'success');
@@ -11806,13 +11806,13 @@ async function _vttSaveStats(id) {
     tokenH:   th ? Math.max(1, Math.min(5, parseInt(th)||1)) : null,
   };
   // Clamper la position dans la nouvelle bounding box (héritage bête si override null)
-  const cur = _tokens[id]?.data;
-  if (cur && _activePage) {
+  const cur = VS.tokens[id]?.data;
+  if (cur && VS.activePage) {
     const b = cur.beastId ? _bestiary[cur.beastId] : null;
     const sw = patch.tokenW ?? b?.tokenW ?? b?.tokenSize ?? 1;
     const sh = patch.tokenH ?? b?.tokenH ?? b?.tokenSize ?? 1;
-    patch.col = Math.max(0, Math.min(_activePage.cols - sw, cur.col ?? 0));
-    patch.row = Math.max(0, Math.min(_activePage.rows - sh, cur.row ?? 0));
+    patch.col = Math.max(0, Math.min(VS.activePage.cols - sw, cur.col ?? 0));
+    patch.row = Math.max(0, Math.min(VS.activePage.rows - sh, cur.row ?? 0));
   }
   await updateDoc(_tokRef(id),patch).catch(()=>showNotif('Erreur','error'));
   closeModalDirect();
@@ -11830,7 +11830,7 @@ function _vttSetImgbbKey() {
 }
 
 async function _handleUpload(file) {
-  if (!file||!_activePage) return;
+  if (!file||!VS.activePage) return;
   if (!hasCloudinaryConfig()) {
     showNotif('Configure ta config Cloudinary d\'abord (bouton 🔑)','error');
     openCloudinaryConfigModal();
@@ -11840,8 +11840,8 @@ async function _handleUpload(file) {
   try {
     const up = await uploadCloudinary(file, { folder: 'maps', tags: ['map'] });
     const url = up.url;
-    const imgs=[...(_activePage.backgroundImages??[]),{id:Date.now().toString(),url,x:0,y:0,w:_activePage.cols,h:_activePage.rows}];
-    await updateDoc(_pgRef(_activePage.id),{backgroundImages:imgs});
+    const imgs=[...(VS.activePage.backgroundImages??[]),{id:Date.now().toString(),url,x:0,y:0,w:VS.activePage.cols,h:VS.activePage.rows}];
+    await updateDoc(_pgRef(VS.activePage.id),{backgroundImages:imgs});
     // Sauver dans la bibliothèque
     const entry = { id: crypto.randomUUID(), url, name: file.name, folderId: _libFolder || null };
     const updLib = { folders: VS.mapLib.folders||[], images: [...(VS.mapLib.images||[]), entry] };
@@ -11864,9 +11864,9 @@ function _setTool(tool) {
   const wrap = document.getElementById('vtt-canvas-wrap');
   if (wrap) wrap.style.cursor = (tool === 'ruler' || tool === 'draw' || tool === 'walls') ? 'crosshair' : '';
   // Éditeur de murs
-  fogToggleEditMode(tool === 'walls', _activePage);
-  if (tool === 'walls') fogRenderWalls(_activePage, true);
-  else if (_activePage) fogRenderWalls(_activePage, STATE.isAdmin); // quitter édition → redraw normal
+  fogToggleEditMode(tool === 'walls', VS.activePage);
+  if (tool === 'walls') fogRenderWalls(VS.activePage, true);
+  else if (VS.activePage) fogRenderWalls(VS.activePage, STATE.isAdmin); // quitter édition → redraw normal
   // Règle : effacer si on quitte
   if (tool !== 'ruler') { _clearRuler(); _hideRulerHover(); }
   // Désélection annotation si on quitte le mode select
@@ -11903,10 +11903,10 @@ function _keyHandler(e) {
       _deselectAnnot();
     }
     // 2) Image de carte sélectionnée (MJ, mode édition)
-    else if (STATE.isAdmin && VS.selImg && VS.mapMode && _activePage) {
+    else if (STATE.isAdmin && VS.selImg && VS.mapMode && VS.activePage) {
       e.preventDefault();
-      const imgs = (_activePage.backgroundImages ?? []).filter(i => i.id !== VS.selImg);
-      updateDoc(_pgRef(_activePage.id), { backgroundImages: imgs }).catch(()=>{});
+      const imgs = (VS.activePage.backgroundImages ?? []).filter(i => i.id !== VS.selImg);
+      updateDoc(_pgRef(VS.activePage.id), { backgroundImages: imgs }).catch(()=>{});
       VS.selImg = null;
       VS.imgTr?.nodes([]); VS.imgTrFg?.nodes([]);
       _layers.map?.batchDraw(); _layers.mapFg?.batchDraw();
@@ -11918,7 +11918,7 @@ function _keyHandler(e) {
         e.preventDefault();
         const uid = STATE.user?.uid;
         for (const id of ids) {
-          const t = _tokens[id]?.data; if (!t) continue;
+          const t = VS.tokens[id]?.data; if (!t) continue;
           if (STATE.isAdmin || t.ownerId === uid) {
             updateDoc(_tokRef(id), { pageId: null, visible: false }).catch(()=>{});
           }
@@ -12047,14 +12047,14 @@ function _vttLibMoveTo(imgId, folderId) {
 }
 
 function _vttLibPlace(imgId) {
-  if (!_activePage) { showNotif('Aucune page active', 'error'); return; }
+  if (!VS.activePage) { showNotif('Aucune page active', 'error'); return; }
   const img = VS.mapLib.images.find(i => i.id === imgId);
   if (!img) return;
-  const imgs = [...(_activePage.backgroundImages??[]), {
+  const imgs = [...(VS.activePage.backgroundImages??[]), {
     id: Date.now().toString(), url: img.url, x: 0, y: 0,
-    w: _activePage.cols, h: _activePage.rows,
+    w: VS.activePage.cols, h: VS.activePage.rows,
   }];
-  updateDoc(_pgRef(_activePage.id), { backgroundImages: imgs })
+  updateDoc(_pgRef(VS.activePage.id), { backgroundImages: imgs })
     .then(() => showNotif('Image placée sur la carte', 'success'))
     .catch(() => showNotif('Erreur lors du placement', 'error'));
 }
@@ -13246,10 +13246,10 @@ async function _vttRemoveSoundFromPlaylist(plId, soundId) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// TIMER DE SESSION — partagé via _session.timer, visible par tous
+// TIMER DE SESSION — partagé via VS.session.timer, visible par tous
 // ═══════════════════════════════════════════════════════════════════
 function _timerElapsedMs() {
-  const t = _session?.timer;
+  const t = VS.session?.timer;
   if (!t) return 0;
   const acc = +t.accumulated || 0;
   if (t.running && t.startedAt) return acc + Math.max(0, Date.now() - (+t.startedAt));
@@ -13266,7 +13266,7 @@ function _timerFmt(ms) {
 function _renderTimer() {
   const el = document.getElementById('vtt-timer');
   if (!el) return;
-  const t = _session?.timer || {};
+  const t = VS.session?.timer || {};
   const mj = STATE.isAdmin;
   const running = !!t.running;
   const label = (t.label || '').toString().slice(0, 40);
@@ -13293,7 +13293,7 @@ function _renderTimer() {
 function _timerStartTick() {
   if (_timerTick) return;
   _timerTick = setInterval(() => {
-    if (_session?.timer?.running) _renderTimer();
+    if (VS.session?.timer?.running) _renderTimer();
   }, 1000);
 }
 function _timerStopTick() {
@@ -13302,7 +13302,7 @@ function _timerStopTick() {
 
 async function _vttTimerToggle() {
   if (!STATE.isAdmin) return;
-  const t = _session?.timer || {};
+  const t = VS.session?.timer || {};
   const now = Date.now();
   if (t.running && t.startedAt) {
     const acc = (+t.accumulated || 0) + Math.max(0, now - (+t.startedAt));
@@ -13315,15 +13315,15 @@ async function _vttTimerReset() {
   if (!STATE.isAdmin) return;
   const ok = await confirmModal('Réinitialiser le minuteur à 00:00 ?', { title: '↺ Reset minuteur', okLabel: 'Réinitialiser', cancelLabel: 'Annuler' }).catch(()=>false);
   if (!ok) return;
-  const t = _session?.timer || {};
+  const t = VS.session?.timer || {};
   await setDoc(_sesRef(), { timer: { running: false, accumulated: 0, startedAt: null, label: t.label || '' } }, { merge: true }).catch(()=>{});
 }
 async function _vttTimerLabel() {
   if (!STATE.isAdmin) return;
-  const cur = _session?.timer?.label || '';
+  const cur = VS.session?.timer?.label || '';
   const next = prompt('Libellé du minuteur (laisser vide pour effacer) :', cur);
   if (next === null) return;
-  const t = _session?.timer || {};
+  const t = VS.session?.timer || {};
   await setDoc(_sesRef(), { timer: { ...t, label: next.trim().slice(0, 40) } }, { merge: true }).catch(()=>{});
 }
 
@@ -13367,7 +13367,7 @@ function _trackerRow(t) {
 function _renderCombatTracker() {
   const el = document.getElementById('vtt-combat-tracker');
   if (!el) return;
-  const active = !!_session?.combat?.active;
+  const active = !!VS.session?.combat?.active;
   const mj = STATE.isAdmin;
 
   // Combat inactif :
@@ -13388,9 +13388,9 @@ function _renderCombatTracker() {
   }
   el.style.display = 'block';
 
-  const round = _session?.combat?.round ?? 1;
-  const pageId = _activePage?.id;
-  const onPage = Object.values(_tokens).map(x => x?.data || x).filter(t => t && t.pageId === pageId);
+  const round = VS.session?.combat?.round ?? 1;
+  const pageId = VS.activePage?.id;
+  const onPage = Object.values(VS.tokens).map(x => x?.data || x).filter(t => t && t.pageId === pageId);
   const allies = onPage.filter(t => t.type === 'player' || t.type === 'npc');
   const enemies = onPage.filter(t => t.type === 'enemy');
 
@@ -13450,7 +13450,7 @@ function _vttCombatTab(tab) {
 }
 function _vttTrackerFocus(tokId) {
   // Centrer/sélectionner le token cliqué
-  const t = _tokens[tokId]?.data;
+  const t = VS.tokens[tokId]?.data;
   if (!t) return;
   if (STATE.isAdmin || t.type !== 'enemy') {
     try { _select(tokId); } catch {}
@@ -13789,7 +13789,7 @@ async function _vttMountTable(content) {
 function _renderSessionBtn() {
   const btn = document.getElementById('vtt-session-btn');
   if (!btn) return;
-  const live = !!_session?.live;
+  const live = !!VS.session?.live;
   btn.classList.toggle('is-live', live);
   btn.innerHTML = live ? '🔴 Session en cours' : '⚪ Démarrer la session';
   btn.title = live
@@ -13798,7 +13798,7 @@ function _renderSessionBtn() {
 }
 async function _vttToggleSessionLive() {
   if (!STATE.isAdmin) return;
-  const live = !_session?.live;
+  const live = !VS.session?.live;
   try {
     await setDoc(_sesRef(), live ? { live: true, liveSince: serverTimestamp() } : { live: false }, { merge: true });
     showNotif(live ? '🔴 Session déclarée en cours.' : '⏹ Session terminée.', 'success');

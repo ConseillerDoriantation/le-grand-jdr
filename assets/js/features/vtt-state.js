@@ -13,6 +13,12 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 export const VS = {
+  // ── Cœur de scène (état partagé par la plupart des modules) ──
+  session:    {},    // doc Firestore de la session VTT courante
+  pages:      {},    // pageId → doc page (scènes de la table)
+  tokens:     {},    // tokenId → doc token de la page active
+  activePage: null,  // id de la page (scène) actuellement affichée
+
   // ── Images de fond/avant-plan + édition de carte (futur vtt/map-images) ──
   imgTr:       null,   // Konva.Transformer pour les images BG (sous les tokens)
   imgTrFg:     null,   // Konva.Transformer pour les images FG (au-dessus des tokens)
