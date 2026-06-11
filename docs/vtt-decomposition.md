@@ -129,7 +129,11 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   exporté). Le verify a attrapé un import oublié (`_closeLootPanel`) → corrigé.
   **⚠️ smoke-test** : ouvrir 💰, MJ ajoute objets (boutique/URL), déplacer réserve↔butin,
   un joueur prend un objet → inventaire perso ; vérifier sync 2ᵉ client.
-- ⏳ **Phase 1 — suivants** : `vtt-dice.js` (lanceur libre), `vtt-tools-ruler.js`
-  (règle+annotations) ; chat en dernier (couplage entrant massif).
-  Refs Firestore transverses (`_sesRef, _chrRef`) exportées au besoin ; si trop
-  d'imports circulaires s'accumulent, envisager un `vtt-refs.js` dédié.
+- ✅ **Phase 1 — extraction `vtt-dice.js`** (149 l.) : lanceur de dés libre (10 fns,
+  état local `_diceFormula/_diceFreeBonus/_diceFreeMode/_diceCloseOut`). **13748 →
+  13634 l. (−114).** Circulaire : `_logCol` (le jet est diffusé dans vttLog). Pas de
+  reset teardown. **⚠️ smoke-test** : 🎲 → composer une formule (dés + bonus), modes
+  avantage/désavantage sur 1d20, lancer → résultat dans le log, visible par les autres.
+- ⏳ **Phase 1 — suivants** : `vtt-tools-ruler.js` (règle+annotations), puis Tray/Pages,
+  Inspector, Combat/attaque (gros), chat en dernier (couplage entrant massif).
+  Refs Firestore transverses (`_sesRef, _chrRef, _logCol`) exportées au besoin.
