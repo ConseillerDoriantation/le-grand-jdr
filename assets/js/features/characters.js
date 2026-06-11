@@ -326,9 +326,11 @@ function _buildTabsHtml(c, v3Tab) {
     { k: 'compte',  ico: '💰', lbl: 'Compte' },
     { k: 'journal', ico: '📖', lbl: 'Journal' },
     { k: 'profil',  ico: '👤', lbl: 'Profil' },
-  ].map(t => `<button class="tab-v3 ${t.k===v3Tab?'active':''}"
+  ].map(t => `<button class="tab-v3 ${t.k===v3Tab?'active':''}" id="cs-tab-${t.k}"
+    role="tab" aria-selected="${t.k===v3Tab?'true':'false'}" aria-controls="char-tab-content"
+    tabindex="${t.k===v3Tab?'0':'-1'}"
     data-tab-v3="${t.k}" data-action="showCharTab" data-tab="${t.k}">
-    <span class="tab-ico">${t.ico}</span> ${t.lbl}
+    <span class="tab-ico" aria-hidden="true">${t.ico}</span> ${t.lbl}
     ${t.badge?`<span class="tab-badge">${t.badge}</span>`:''}
   </button>`).join('');
 }
@@ -459,7 +461,7 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
   </aside>`;
 }
 
-function _buildMainColHtml(c, canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, titres, playerLbl, advLbl }) {
+function _buildMainColHtml(c, canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, titres, playerLbl, advLbl, v3Tab }) {
   return `<section class="main-col">
 
     <!-- Hero strip -->
@@ -486,11 +488,11 @@ function _buildMainColHtml(c, canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining
     </div>` : ''}
 
     <!-- Tabs v3 -->
-    <nav class="tabs-v3" id="char-tabs-v3">
+    <nav class="tabs-v3" id="char-tabs-v3" role="tablist" aria-label="Sections de la fiche personnage">
       ${tabsHtml}
     </nav>
 
-    <div id="char-tab-content" class="tab-body-v3"></div>
+    <div id="char-tab-content" class="tab-body-v3" role="tabpanel" tabindex="0" aria-labelledby="cs-tab-${v3Tab}"></div>
 
   </section>`;
 }
@@ -539,7 +541,7 @@ function renderCharSheet(c, keepTab) {
   const advLbl    = STATE.adventure?.nom ? `<span style="color:var(--text-dim)">Aventure :</span> ${_esc(STATE.adventure.nom)}` : '';
 
   const sidebarHtml = _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckMax, titresChips });
-  const mainColHtml = _buildMainColHtml(c, canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, titres, playerLbl, advLbl });
+  const mainColHtml = _buildMainColHtml(c, canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, titres, playerLbl, advLbl, v3Tab });
 
   area.innerHTML = `<div class="cs-v3">
   <div class="app-shell">
@@ -2456,10 +2458,15 @@ function showCharTab(tab, el) {
   _currentTopTab  = v3;
   charSession.set(charSession.getCurrentChar(), charSession.getCanEditChar(), v3);
 
-  // Onglets v3 (nouveau template)
-  document.querySelectorAll('#char-tabs-v3 .tab-v3').forEach(t =>
-    t.classList.toggle('active', t.dataset.tabV3 === v3)
-  );
+  // Onglets v3 (nouveau template) — classe active + ARIA (sélection + roving tabindex)
+  document.querySelectorAll('#char-tabs-v3 .tab-v3').forEach(t => {
+    const on = t.dataset.tabV3 === v3;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', on ? 'true' : 'false');
+    t.tabIndex = on ? 0 : -1;
+  });
+  // Le panneau pointe vers l'onglet actif (role=tabpanel)
+  document.getElementById('char-tab-content')?.setAttribute('aria-labelledby', `cs-tab-${v3}`);
   // Rétro-compat : les anciennes barres .cs-tab / .cs-subtab si une vieille page tarde à se rafraîchir
   document.querySelectorAll('#char-tabs .cs-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === v3)
@@ -2614,4 +2621,20 @@ registerActions({
 });
 
 charSession.bindRender(_renderTab, renderCharSheet, refreshOrDisplay);
+
+// Navigation clavier des onglets de fiche (pattern WAI-ARIA tablist) :
+// ← → bouclent, Home/End vont au premier/dernier, activation automatique au focus.
+// Listener délégué unique (module importé une seule fois en lazy).
+document.addEventListener('keydown', (e) => {
+  const tab = e.target.closest?.('#char-tabs-v3 .tab-v3[role="tab"]');
+  if (!tab || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+  e.preventDefault();
+  const tabs = [...document.querySelectorAll('#char-tabs-v3 .tab-v3[role="tab"]')];
+  const i = tabs.indexOf(tab);
+  const next = e.key === 'Home' ? tabs[0]
+    : e.key === 'End' ? tabs[tabs.length - 1]
+    : e.key === 'ArrowLeft' ? tabs[(i - 1 + tabs.length) % tabs.length]
+    : tabs[(i + 1) % tabs.length];
+  if (next) { next.focus(); showCharTab(next.dataset.tab, next); }
+});
 
