@@ -463,6 +463,18 @@ function _applyOrder(items, order) {
   return [...ordered, ...rest];
 }
 
+function _sortAchievementsByDate(items, desc = false) {
+  return [...items]
+    .map((item, idx) => ({ item, idx, ts: parseDate(item.date) }))
+    .sort((a, b) => {
+      if (!a.ts && !b.ts) return a.idx - b.idx;
+      if (!a.ts) return 1;
+      if (!b.ts) return -1;
+      return desc ? b.ts - a.ts || a.idx - b.idx : a.ts - b.ts || a.idx - b.idx;
+    })
+    .map(entry => entry.item);
+}
+
 function _refreshAchievementCounters() {
   const all = STORE.items || [];
   const visible = STATE.isAdmin ? all : all.filter(a => !a.secret);
@@ -989,6 +1001,8 @@ async function _achRenderContent() {
     contentEl.innerHTML = _renderTimeline(filtered);
     return;
   }
+
+  if (filter === 'all') filtered = _sortAchievementsByDate(filtered);
 
   // Galerie justified
   const galleryEl = document.createElement('div');
