@@ -123,7 +123,13 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   10 symboles ; circulaire `_sesRef`/`_chrRef` (refs Firestore exportées de vtt.js).
   Vérif statique complète, `node --check` OK. **⚠️ smoke-test** : ouvrir 💤, voter le
   repos (multi-clients), MJ force/règle max/reset, vérifier régen ½ PV/PM.
-- ⏳ **Phase 1 — suivants** : `vtt-tools-ruler.js` (règle+annotations), `vtt-loot.js`
-  (butin), `vtt-dice.js` (lanceur libre) ; chat en dernier (couplage entrant massif).
-  Les refs Firestore transverses (`_sesRef, _chrRef, …`) sont exportées au besoin ;
-  si trop d'imports circulaires s'accumulent, envisager un `vtt-refs.js` dédié.
+- ✅ **Phase 1 — extraction `vtt-loot.js`** (404 l.) : butin d'aventure (19 fns, état
+  local `_loot/_lootTakeState/…` + ref `_lootRef` déménagés ; teardown via
+  `_resetLootState()`). **14098 → 13748 l. (−350).** Circulaire : `_chrRef` (déjà
+  exporté). Le verify a attrapé un import oublié (`_closeLootPanel`) → corrigé.
+  **⚠️ smoke-test** : ouvrir 💰, MJ ajoute objets (boutique/URL), déplacer réserve↔butin,
+  un joueur prend un objet → inventaire perso ; vérifier sync 2ᵉ client.
+- ⏳ **Phase 1 — suivants** : `vtt-dice.js` (lanceur libre), `vtt-tools-ruler.js`
+  (règle+annotations) ; chat en dernier (couplage entrant massif).
+  Refs Firestore transverses (`_sesRef, _chrRef`) exportées au besoin ; si trop
+  d'imports circulaires s'accumulent, envisager un `vtt-refs.js` dédié.
