@@ -12,7 +12,8 @@ import { VS } from './vtt-state.js';
 import { _esc } from '../shared/html.js';
 import { showNotif } from '../shared/notifications.js';
 import { sortCharactersForDisplay } from '../shared/char-stats.js';
-import { _sesRef, _pingRef, _renderMiniSheet, _renderTraySoon, _vttToggleMiniSheet } from './vtt.js';
+import { _sesRef, _pingRef, _renderTraySoon } from './vtt.js';
+import { _renderMiniSheet, _vttToggleMiniSheet } from './vtt-mini-fiche.js';
 
 const VTT_PRESENCE_HEARTBEAT_MS = 75_000;
 

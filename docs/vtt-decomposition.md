@@ -156,5 +156,13 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   _renderTraySoon, _vttToggleMiniSheet`. Heartbeat quota-sensible préservé verbatim.
   **⚠️ smoke-test** : présence des joueurs (colonne, apparition/disparition), session
   live MJ, kick d'un joueur ; vérifier que le heartbeat tourne (pas de spam d'écritures).
-- ⏳ **Phase 1 — reste** : mini-fiche, Tray/Pages, Inspector (42 deps), `tools-ruler`
-  (dessin/annot), Combat/attaque (gros), chat (couplage entrant massif). Plus risqués.
+- ✅ **Phase 1 — extraction `vtt-mini-fiche.js`** (999 l., la plus grosse) : popup
+  perso 4 onglets (43 fns). **13327 → 12414 l. (−913).** Circulaires : `_chrRef,
+  _MS_BONUS_BUFF, _STAT_COLOR` + 6 helpers d'affichage de sorts + `_renderPresenceCol`
+  (mini↔présence). Import présence redirigé (`_renderMiniSheet/_vttToggleMiniSheet`
+  viennent de mini-fiche). La vérif a attrapé 3 vrais bugs (duplicate export,
+  `_STAT_COLOR`/`_renderPresenceCol` non importés) → corrigés. **⚠️ smoke-test** :
+  clic sur un joueur → mini-fiche, onglets Combat/Équipement/Sorts/Inventaire/Notes,
+  équiper/déséquiper, éditer une note, envoyer un objet.
+- ⏳ **Phase 1 — reste** : Tray/Pages, Inspector (42 deps), `tools-ruler` (dessin/annot),
+  Combat/attaque (gros), chat (couplage entrant massif). Les plus durs.
