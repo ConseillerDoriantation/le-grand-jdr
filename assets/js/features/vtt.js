@@ -295,7 +295,7 @@ let _middlePanActive= false;       // true pendant le pan caméra au clic molett
 let _suppressTokenClickUntil = 0;   // bloque le click synthétique après clic droit/molette
 let _autoSyncDone = false;   // empêche la double-création de tokens
 let _weaponFormats = null;   // cache formats d'armes (damageType, etc.)
-let _damageTypes   = null;   // cache types de dégâts (règles de combat)
+export let _damageTypes   = null;   // cache types de dégâts (règles de combat)
 let _spellMatrices = null;   // cache matrices MJ (armes invoquées, combos config)
 let _emotes     = [];        // [{id, name, url}] chargées depuis world/vtt_emotes
 // ── Bibliothèque de cartes ─────────────────────────────────────────
@@ -426,7 +426,7 @@ let _trayOffOpen = _loadTrayPref('off');
 let _trayNpcOpen = _loadTrayPref('npc');
 // [VS.miniUid → VS.miniUid] (défaut dans vtt-state.js)
 // [VS.miniCharId → VS.miniCharId] (défaut dans vtt-state.js)
-let _miniTab      = 'combat'; // onglet actif de la mini-fiche
+// [_miniTab → vtt-mini-fiche.js]
 // [état mini-fiche → vtt-mini-fiche.js]
 // Filtres locaux des onglets Sac / Sorts (recherche texte + catégorie active).
 // Filtrage DOM in-place (pas de re-render) → le focus de la recherche est conservé.
