@@ -12,7 +12,7 @@ import { STATE } from '../core/state.js';
 import { VS } from './vtt-state.js';
 import { _esc, _norm } from '../shared/html.js';
 import { showNotif } from '../shared/notifications.js';
-import { openModal } from '../shared/modal.js';
+import { openModal, confirmModal, promptModal } from '../shared/modal.js';
 import { getArmorSetData } from '../shared/equipment-utils.js';
 import { calcSpellDuration, calcSpellTargets } from '../shared/spell-runes.js';
 import { getDamageTypeById } from '../shared/damage-types.js';
@@ -370,7 +370,7 @@ async function _vttMsDeleteItem(charId, uid, invIndex) {
   const c = VS.characters[charId]; if (!c) return;
   const inv = [...(c.inventaire||[])];
   const item = inv[invIndex]; if (!item) return;
-  if (!confirm(`Supprimer "${item.nom||'cet objet'}" de l'inventaire ?`)) return;
+  if (!await confirmModal(`Supprimer <b>${_esc(item.nom||'cet objet')}</b> de l'inventaire ?`, { title: 'Inventaire', confirmLabel: 'Supprimer' })) return;
   inv.splice(invIndex, 1);
   const equip = { ...(c.equipement||{}) };
   Object.keys(equip).forEach(s => {
@@ -828,7 +828,7 @@ async function _vttMsRenameNote(charId, uid, idx) {
   const c = VS.characters[charId]; if (!c) return;
   const notes = [...(c.notesList || [])];
   if (!notes[idx]) return;
-  const val = prompt('Titre de la note :', notes[idx].titre || 'Note sans titre');
+  const val = await promptModal('Titre de la note :', { title: 'Renommer la note', default: notes[idx].titre || 'Note sans titre' });
   if (val === null) return;
   notes[idx] = { ...notes[idx], titre: val.trim() || notes[idx].titre || 'Note sans titre' };
   await updateDoc(_chrRef(charId), { notesList: notes }).catch(() => showNotif('Erreur sauvegarde', 'error'));
@@ -853,7 +853,7 @@ async function _vttMsDeleteNote(charId, uid, idx) {
   const c = VS.characters[charId]; if (!c) return;
   const notes = [...(c.notesList || [])];
   if (!notes[idx]) return;
-  if (!confirm('Supprimer cette note ?')) return;
+  if (!await confirmModal('Supprimer cette note ?', { title: 'Note', confirmLabel: 'Supprimer' })) return;
   notes.splice(idx, 1);
   if (_msOpenNote === idx) _msOpenNote = null;
   else if (_msOpenNote > idx) _msOpenNote--;

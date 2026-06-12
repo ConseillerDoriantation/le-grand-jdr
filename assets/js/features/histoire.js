@@ -6,6 +6,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { getDocData, saveDoc, loadCollection } from '../data/firestore.js';
+import { confirmModal } from '../shared/modal.js';
 import { STATE } from '../core/state.js';
 import { _esc, _norm } from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
@@ -853,8 +854,8 @@ function _gestionDesAdd() {
   nameInput?.focus();
 };
 
-function _resetDiceSkills() {
-  if (!confirm('Rétablir la liste par défaut ? Les modifications seront perdues.')) return;
+async function _resetDiceSkills() {
+  if (!await confirmModal('Rétablir la liste par défaut ?<br><span style="opacity:.75;font-size:.85em">Les modifications seront perdues.</span>', { title: 'Compétences de dés', confirmLabel: 'Rétablir' })) return;
   _saveDiceSkills(DICE_SKILLS_DEFAULT);
   _refreshGestionDesList();
 }

@@ -12,7 +12,7 @@ import Sortable from '../vendor/sortable.esm.js';
 import { STATE } from '../core/state.js';
 import { VS, aid } from './vtt-state.js';
 import { _esc, _norm } from '../shared/html.js';
-import { openModal, confirmModal, closeModalDirect } from '../shared/modal.js';
+import { openModal, confirmModal, closeModalDirect, promptModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _showCtxMenu } from './vtt.js';   // transverse (menu contextuel générique)
 
@@ -672,8 +672,8 @@ async function _vttImportGithubRelease() {
   const LS_REPO = 'vtt-music-gh-repo', LS_TAG = 'vtt-music-gh-tag';
   const defRepo = localStorage.getItem(LS_REPO) || 'ConseillerDoriantation/le-grand-jdr';
   const defTag  = localStorage.getItem(LS_TAG)  || 'sounds-v1';
-  const repo = prompt('Repo GitHub (owner/repo) :', defRepo)?.trim(); if (!repo) return;
-  const tag  = prompt('Tag de la release :', defTag)?.trim();          if (!tag)  return;
+  const repo = (await promptModal('Repo GitHub (owner/repo) :', { title: 'Importer depuis GitHub', default: defRepo, placeholder: 'owner/repo' }))?.trim(); if (!repo) return;
+  const tag  = (await promptModal('Tag de la release :', { title: 'Importer depuis GitHub', default: defTag }))?.trim();          if (!tag)  return;
   localStorage.setItem(LS_REPO, repo); localStorage.setItem(LS_TAG, tag);
 
   try {
@@ -701,9 +701,9 @@ async function _vttImportGithubRelease() {
 
 // ── Ajout d'un son par URL ───────────────────────────────────────────
 async function _vttAddSonUrl() {
-  const url  = prompt('URL directe du fichier audio (mp3, ogg, wav…) :')?.trim();
+  const url  = (await promptModal('URL directe du fichier audio (mp3, ogg, wav…) :', { title: 'Ajouter un son', placeholder: 'https://…/son.mp3', required: true }))?.trim();
   if (!url) return;
-  const name = prompt('Nom du son :', url.split('/').pop()?.replace(/\.[^.]+$/,'') || 'Son')?.trim();
+  const name = (await promptModal('Nom du son :', { title: 'Ajouter un son', default: url.split('/').pop()?.replace(/\.[^.]+$/,'') || 'Son' }))?.trim();
   if (!name) return;
   await addDoc(_sonsCol(), { name, url, createdAt:serverTimestamp(), addedBy:STATE.user?.uid||null });
   showNotif(`✅ "${name}" ajouté`, 'success');

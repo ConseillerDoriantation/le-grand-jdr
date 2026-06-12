@@ -32,7 +32,7 @@ import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
   fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath,
 } from './vtt-fog.js';
-import { openModal, closeModalDirect, confirmModal, updateModalContent } from '../shared/modal.js';
+import { openModal, closeModalDirect, confirmModal, updateModalContent, promptModal } from '../shared/modal.js';
 import { _esc, _norm, _searchIncludes, appSplashHtml } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-skills.js';
@@ -10062,7 +10062,7 @@ async function _vttFogClearOps() {
   if (!VS.activePage) return;
   const n = (VS.activePage.fogOps || []).length;
   if (!n) { showNotif('Aucune zone de brouillard sur cette page', 'info'); return; }
-  if (!confirm(`Supprimer ${n} zone(s) de brouillard manuel de cette page ?`)) return;
+  if (!await confirmModal(`Supprimer ${n} zone(s) de brouillard manuel de cette page ?`, { title: 'Brouillard', confirmLabel: 'Supprimer' })) return;
   await updateDoc(_pgRef(VS.activePage.id), { fogOps: [] }).catch(() => showNotif('Erreur', 'error'));
 }
 function _vttSwitchPage(id) { return _switchPage(id); }
@@ -11441,7 +11441,7 @@ async function _vttToggleTurnFlag(id, field) {
 }
 
 async function _vttAddImageUrl() {
-  const url=prompt('URL de l\'image :')?.trim(); if (!url||!VS.activePage) return;
+  const url=(await promptModal('URL de l\'image :', { title: 'Image de fond', placeholder: 'https://…', required: true }))?.trim(); if (!url||!VS.activePage) return;
   const imgs=[...(VS.activePage.backgroundImages??[]),{id:Date.now().toString(),url,x:0,y:0,w:VS.activePage.cols,h:VS.activePage.rows}];
   await updateDoc(_pgRef(VS.activePage.id),{backgroundImages:imgs}).catch(()=>{});
 }
@@ -11774,7 +11774,7 @@ async function _vttPlaceFromBestiary(beastId) {
 // Supprimer définitivement un token ennemi
 async function _vttDeleteToken(tokenId) {
   const t=VS.tokens[tokenId]?.data; if (!t||t.type!=='enemy') return;
-  if (!confirm(`Supprimer définitivement "${t.name}" ?`)) return;
+  if (!await confirmModal(`Supprimer définitivement <b>${_esc(t.name)}</b> ?`, { title: 'Token', confirmLabel: 'Supprimer' })) return;
   await deleteDoc(_tokRef(tokenId)).catch(()=>showNotif('Erreur suppression','error'));
   showNotif(`🗑 ${t.name} supprimé`,'success');
 }
@@ -11990,8 +11990,8 @@ function _vttLibOpenFolder(id) { _libFolder = id; _renderLibSection(); }
 function _vttLibToggle() { _libOpen = !_libOpen; _renderLibSection();
   document.getElementById('vtt-lib-toggle')?.classList.toggle('open', _libOpen); }
 
-function _vttLibNewFolder() {
-  const name = prompt('Nom du dossier :')?.trim();
+async function _vttLibNewFolder() {
+  const name = (await promptModal('Nom du dossier :', { title: 'Bibliothèque de cartes', required: true }))?.trim();
   if (!name) return;
   VS.mapLib.folders.push({ id: crypto.randomUUID(), name });
   _saveMapLib();

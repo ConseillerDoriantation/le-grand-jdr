@@ -6,7 +6,7 @@
 import { loadCollection, getCachedCollection, loadChars, addToCol, updateInCol, getDocData, saveDoc } from '../data/firestore.js';
 import { trySave, confirmDelete, tryDoc } from '../shared/crud.js';
 import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
-import { openModal, closeModal, pushModal, popModal } from '../shared/modal.js';
+import { openModal, closeModal, pushModal, popModal, confirmModal, promptModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
@@ -262,9 +262,9 @@ async function _bstEditAction(idx) {
   }, charForCalc);
 }
 
-function _bstRemoveAction(idx) {
+async function _bstRemoveAction(idx) {
   if (!Number.isFinite(idx) || !_bstActionsCache[idx]) return;
-  if (!confirm('Supprimer cette action ?')) return;
+  if (!await confirmModal('Supprimer cette action ?', { title: 'Action', confirmLabel: 'Supprimer' })) return;
   _bstActionsCache.splice(idx, 1);
   _bstActionsPersist();
   _bstRefreshActionsHost();
@@ -1895,7 +1895,7 @@ async function _bstViewAs(uid) {
 }
 
 async function _bstCreateBestiaire() {
-  const label = prompt('Nom du nouveau bestiaire :');
+  const label = await promptModal('Nom du nouveau bestiaire :', { title: 'Nouveau bestiaire', required: true });
   if (!label?.trim()) return;
   const id    = 'bst_' + Date.now();
   const list  = STORE.bestiaireList || [{ id:'main', label:'Bestiaire principal' }];

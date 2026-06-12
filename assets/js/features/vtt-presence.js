@@ -11,6 +11,7 @@ import { STATE } from '../core/state.js';
 import { VS } from './vtt-state.js';
 import { _esc } from '../shared/html.js';
 import { showNotif } from '../shared/notifications.js';
+import { confirmModal } from '../shared/modal.js';
 import { sortCharactersForDisplay } from '../shared/char-stats.js';
 import { _sesRef, _pingRef, _renderTraySoon } from './vtt.js';
 import { _renderMiniSheet, _vttToggleMiniSheet } from './vtt-mini-fiche.js';
@@ -93,7 +94,7 @@ async function _vttToggleSessionLive() {
 async function _vttKickPresence(uid) {
   if (!STATE.isAdmin || !uid) return;
   const pseudo = VS.presence[uid]?.pseudo || 'ce joueur';
-  if (!confirm(`Retirer ${pseudo} de la présence du VTT ?\n(Réapparaîtra automatiquement s'il est toujours actif sur la table.)`)) return;
+  if (!await confirmModal(`Retirer <b>${_esc(pseudo)}</b> de la présence du VTT ?<br><span style="opacity:.75;font-size:.85em">Réapparaîtra automatiquement s'il est toujours actif sur la table.</span>`, { title: 'Présence', confirmLabel: 'Retirer', icon: '👋' })) return;
   try {
     await deleteDoc(_pingRef(uid));
     // Optimiste : retire localement sans attendre le snapshot.

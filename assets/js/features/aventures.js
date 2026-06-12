@@ -3,6 +3,7 @@
 // ══════════════════════════════════════════════
 
 import { STATE, setAdventures } from '../core/state.js';
+import { confirmModal } from '../shared/modal.js';
 import { registerActions } from '../core/actions.js';
 import { openModal, closeModal }              from '../shared/modal.js';
 import { showNotif }                          from '../shared/notifications.js';
@@ -324,7 +325,7 @@ async function promoteAdventurePlayer(advId, targetUid) {
 }
 
 async function relinkAdventurePlayer(advId, oldUid, newUid) {
-  if (!confirm('Réassocier ce joueur à son nouveau compte ?\n\nSon accès à l\'aventure et ses personnages seront transférés de l\'ancien identifiant vers le nouveau. À faire après qu\'il se soit reconnecté avec son nouveau compte.')) return;
+  if (!await confirmModal('Réassocier ce joueur à son nouveau compte ?<br><br><span style="opacity:.8;font-size:.88em">Son accès à l\'aventure et ses personnages seront transférés de l\'ancien identifiant vers le nouveau. À faire après qu\'il se soit reconnecté avec son nouveau compte.</span>', { title: 'Réassocier le joueur', confirmLabel: 'Réassocier', danger: false, icon: '🔗' })) return;
   try {
     const { migrated } = await relinkPlayerAccount(advId, oldUid, newUid);
     const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });

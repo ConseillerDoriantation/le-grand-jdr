@@ -89,7 +89,7 @@ import { loadDamageTypes, getMagicTypes } from '../shared/damage-types.js';
 import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
-import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
+import { openModal, closeModalDirect, confirmModal, promptModal } from '../shared/modal.js';
 
 // Caches partagés Phase 2 — chargés à la demande au 1er affichage Combat
 let _combatTabCache = { styles: null, dmgTypes: null };
@@ -1675,7 +1675,7 @@ async function _csV3SaveIdentityValue(charId, key, value) {
 async function _csV3RenameIdentity(charId, key) {
   if (IDENTITY_DEFAULTS.includes(key)) return;
   const c = getCharacterById(charId); if (!c) return;
-  const newK = prompt(`Renommer "${key}" (laisser vide pour supprimer) :`, key);
+  const newK = await promptModal(`Renommer "${_esc(key)}" <span style="opacity:.7;font-size:.85em">(vide = supprimer)</span> :`, { title: 'Renommer', default: key });
   if (newK === null) return;
   const trimmed = newK.trim();
   let next = _normalizeIdentity(c.identity);
@@ -1692,8 +1692,8 @@ async function _csV3RenameIdentity(charId, key) {
 // Ajoute un champ identité custom
 async function _csV3AddFact(charId) {
   const c = getCharacterById(charId); if (!c) return;
-  const k = prompt('Nom du champ (ex: Bras-droit, Phobie…) :'); if (!k?.trim()) return;
-  const v = prompt('Valeur :') || '';
+  const k = (await promptModal('Nom du champ (ex: Bras-droit, Phobie…) :', { title: 'Nouveau champ', required: true })); if (!k?.trim()) return;
+  const v = (await promptModal('Valeur :', { title: 'Nouveau champ' })) || '';
   const next = _normalizeIdentity(c.identity);
   next.push({ k: k.trim(), v: v.trim() });
   c.identity = next;

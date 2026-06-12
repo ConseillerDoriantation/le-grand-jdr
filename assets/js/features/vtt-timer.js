@@ -10,7 +10,7 @@ import { setDoc } from '../config/firebase.js';
 import { STATE } from '../core/state.js';
 import { VS } from './vtt-state.js';
 import { _esc } from '../shared/html.js';
-import { confirmModal } from '../shared/modal.js';
+import { confirmModal, promptModal } from '../shared/modal.js';
 import { _sesRef } from './vtt.js';   // ref Firestore session (transverse)
 
 let _timerTick = null; // intervalId pour rafraîchir l'affichage
@@ -91,7 +91,7 @@ async function _vttTimerReset() {
 async function _vttTimerLabel() {
   if (!STATE.isAdmin) return;
   const cur = VS.session?.timer?.label || '';
-  const next = prompt('Libellé du minuteur (laisser vide pour effacer) :', cur);
+  const next = await promptModal('Libellé du minuteur (laisser vide pour effacer) :', { title: 'Minuteur', default: cur });
   if (next === null) return;
   const t = VS.session?.timer || {};
   await setDoc(_sesRef(), { timer: { ...t, label: next.trim().slice(0, 40) } }, { merge: true }).catch(()=>{});

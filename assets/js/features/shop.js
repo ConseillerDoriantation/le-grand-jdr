@@ -1,7 +1,7 @@
 import { STATE } from '../core/state.js';
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { trySave } from '../shared/crud.js';
-import { openModal, closeModalDirect, confirmModal } from '../shared/modal.js';
+import { openModal, closeModalDirect, confirmModal, promptModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
@@ -4294,7 +4294,7 @@ async function _atelierSaveBuild() {
   if (!c) return;
   const entries = Object.entries(_atelier.simulated).filter(([, it]) => !!it);
   if (!entries.length) { showNotif('Aucun essai à sauver.', 'error'); return; }
-  const name = prompt('Nom du build :', `Build ${(c.shopBuilds||[]).length + 1}`);
+  const name = await promptModal('Nom du build :', { title: 'Sauvegarder le build', default: `Build ${(c.shopBuilds||[]).length + 1}`, required: true });
   if (!name?.trim()) return;
   const slots = {};
   entries.forEach(([slot, it]) => { slots[slot] = it.id; });

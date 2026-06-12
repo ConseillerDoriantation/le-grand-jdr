@@ -18,7 +18,7 @@ import { tryDoc } from '../shared/crud.js';
 import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc, appSplashHtml } from '../shared/html.js';
-import { openModal, closeModal } from '../shared/modal.js';
+import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import PAGES from './pages.js';
 import { registerActions } from '../core/actions.js';
 
@@ -283,7 +283,7 @@ function setRecurringPattern(preset) {
 }
 async function clearOverrides() {
   if (!_ag.myAvail) return;
-  if (!confirm('Effacer toutes tes dispos ponctuelles (les patterns récurrents sont conservés) ?')) return;
+  if (!await confirmModal('Effacer toutes tes dispos ponctuelles (les patterns récurrents sont conservés) ?', { title: 'Disponibilités', confirmLabel: 'Effacer' })) return;
   _ag.myAvail.slots = {};
   _scheduleSave();
   _renderCalendar();
@@ -752,7 +752,7 @@ async function deleteLegacyQuests() {
   if (!STATE.isAdmin) return;
   const legacy = _legacyQuests();
   if (!legacy.length) return;
-  if (!confirm(`Supprimer définitivement ${legacy.length} ancienne(s) quête(s) autonome(s) ? La planification se base désormais sur les groupes de la Trame.`)) return;
+  if (!await confirmModal(`Supprimer définitivement ${legacy.length} ancienne(s) quête(s) autonome(s) ?<br><span style="opacity:.75;font-size:.85em">La planification se base désormais sur les groupes de la Trame.</span>`, { title: 'Anciennes quêtes', confirmLabel: 'Supprimer' })) return;
   let done = 0;
   for (const q of legacy) {
     try { await deleteFromCol('quests', q.id); done++; }

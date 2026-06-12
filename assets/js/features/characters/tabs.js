@@ -2,7 +2,7 @@ import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { updateInCol, loadCollection, loadCollectionWhere, addToCol, saveDoc } from '../../data/firestore.js';
 import { trySave } from '../../shared/crud.js';
-import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
+import { openModal, closeModal, confirmModal, promptModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { modStr, _esc } from '../../shared/html.js';
 import { getMod, calcPVMax, calcPMMax, calcOr, calcPalier } from '../../shared/char-stats.js';
@@ -330,12 +330,12 @@ export function addNote() {
   });
 }
 
-export function editNoteTitle(idx) {
+export async function editNoteTitle(idx) {
   const c = STATE.activeChar; if(!c) return;
   const note = (c.notesList||[])[idx];
   if (!note) return;
   const cur = note.titre||'Sans titre';
-  const val = prompt('Titre de la note :', cur);
+  const val = await promptModal('Titre de la note :', { title: 'Renommer la note', default: cur });
   if (val === null) return;
   note.titre = val.trim()||cur;
   c.notesList[idx] = note;
