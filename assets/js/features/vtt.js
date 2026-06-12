@@ -67,6 +67,10 @@ import {
 import {
   _renderCombatTracker, _renderCombatTrackerSoon, _vttCombatTab, _vttTrackerFocus,
 } from './vtt-combat-tracker.js';
+import {
+  _startPresence, _resetPresence, _renderSessionBtn, _vttToggleSessionLive,
+  _vttKickPresence, _renderPresenceCol,
+} from './vtt-presence.js';
 
 let _vttDelegSearch = '';
 
@@ -395,12 +399,8 @@ const _tokenStatMod = (t, statKey) => {
 
 // ── État présence & mini-fiche ──────────────────────────────────────
 // [VS.presence → VS.presence] (défaut dans vtt-state.js)
-const VTT_PRESENCE_HEARTBEAT_MS = 75_000;
-let _presHeartbeat= null; // intervalId du heartbeat
-let _presLastWriteAt = 0;
-let _presVisibility = null; // listener visibilitychange (pause heartbeat onglet masqué)
-let _presUnload = null; // listener beforeunload VTT
-let _presRefresh  = null; // intervalId du rafraîchissement présence
+// [VTT_PRESENCE_HEARTBEAT_MS → vtt-presence.js]
+// [état présence → vtt-presence.js]
 let _emoteCloseOutside = null; // listener mousedown fermeture picker émotes
 let _trayFilter       = 'all'; // filtre actif : 'all'|'player'|'npc'|'enemy'
 let _traySearch       = '';    // filtre texte appliqué à la réserve
@@ -450,7 +450,7 @@ export const _logCol      = ()  => collection(db, `adventures/${aid()}/vttLog`);
 const _castingCol  = ()  => collection(db, `adventures/${aid()}/vttCasting`);
 const _castingRef  = uid => doc(db, `adventures/${aid()}/vttCasting/${uid}`);
 const _pingsCol     = ()  => collection(db, `adventures/${aid()}/vttPings`);
-const _pingRef      = uid => doc(db, `adventures/${aid()}/vttPings/${uid}`);
+export const _pingRef      = uid => doc(db, `adventures/${aid()}/vttPings/${uid}`);
 const _reactionsCol = ()  => collection(db, `adventures/${aid()}/vttEmoteReactions`);
 const _reactionRef  = uid => doc(db, `adventures/${aid()}/vttEmoteReactions/${uid}`);
 const _annotCol      = ()  => collection(db, `adventures/${aid()}/vttAnnotations`);
@@ -981,16 +981,7 @@ function _cleanup() {
   VS.unsubs.forEach(u => u?.());
   VS.unsubs = []; VS.stage?.destroy(); VS.stage = null; VS.layers = {};
   _resizeObs?.disconnect(); _resizeObs = null;
-  if (_presHeartbeat) {
-    clearInterval(_presHeartbeat); _presHeartbeat = null;
-    // Supprimer le doc de présence immédiatement pour que les autres voient le départ
-    const _uid = STATE.user?.uid;
-    if (_uid) { try { deleteDoc(_pingRef(_uid)).catch(()=>{}); } catch(e){} }
-  }
-  if (_presVisibility)   { document.removeEventListener('visibilitychange', _presVisibility); _presVisibility = null; }
-  if (_presUnload)       { window.removeEventListener('beforeunload', _presUnload); _presUnload = null; }
-  if (_presRefresh)      { clearInterval(_presRefresh);    _presRefresh   = null; }
-  _presLastWriteAt = 0;
+  _resetPresence();
   _timerStopTick();
   if (_emoteCloseOutside){ document.removeEventListener('mousedown', _emoteCloseOutside, true); _emoteCloseOutside = null; }
   if (VS.mapLibUnsub) { VS.mapLibUnsub(); VS.mapLibUnsub = null; }
@@ -7382,7 +7373,7 @@ function _vttToggleNpc() { _trayNpcOpen = !_trayNpcOpen; _saveTrayPref('npc', _t
 
 // Coalesce les rafales de snapshots (chrs/npcs/bsts/toks au mount) → 1 render par tick
 let _trayDirty = false;
-function _renderTraySoon() {
+export function _renderTraySoon() {
   if (_trayDirty) return;
   _trayDirty = true;
   queueMicrotask(() => { _trayDirty = false; _renderTray(); });
@@ -12146,107 +12137,10 @@ async function _vttMountTable(content) {
   void _skillsP;
   _initListeners();
   // Présence : heartbeat espacé, suspendu en arrière-plan
-  const _presUid = STATE.user?.uid;
-  if (_presUid) {
-    const _presWrite = () => {
-      // Onglet en arrière-plan : on ne dépense pas de write (la présence expire
-      // à 120 s côté lecture, le joueur réapparaît dès qu'il revient sur l'onglet).
-      if (document.hidden) return;
-      const pseudo = STATE.profile?.pseudo || STATE.user?.email?.split('@')[0] || '?';
-      const now = Date.now();
-      if (now - _presLastWriteAt < 10_000) return;
-      _presLastWriteAt = now;
-      setDoc(_pingRef(_presUid), { pres: { pseudo, lastSeen: serverTimestamp() } }, { merge: true }).catch(() => {});
-    };
-    _presWrite();
-    _presHeartbeat = setInterval(_presWrite, VTT_PRESENCE_HEARTBEAT_MS);
-    // Retour au premier plan : ré-annoncer immédiatement sans attendre le prochain tick.
-    _presVisibility = () => { if (!document.hidden) _presWrite(); };
-    document.addEventListener('visibilitychange', _presVisibility);
-    // Fermeture navigateur : tentative de suppression (best-effort)
-    _presUnload = () => { deleteDoc(_pingRef(_presUid)).catch(()=>{}); };
-    window.addEventListener('beforeunload', _presUnload);
-  }
-  // Filet de sécurité : re-rendre la présence toutes les 30s pour expirer les entrants inactifs
-  _presRefresh = setInterval(_renderPresenceCol, 30_000);
+  _startPresence();
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// PRÉSENCE — joueurs actifs sur le VTT
-// ═══════════════════════════════════════════════════════════════════
-
-// MJ : retire un joueur de la présence du VTT en supprimant son doc ping/présence.
-// Effet : il disparaît de la colonne pour tout le monde, et son doc cesse d'être
-// relu à chaque ouverture du VTT (utile pour les entrées fantômes). Un joueur
-// encore actif se ré-annonce à son prochain heartbeat (≤75 s) — c'est voulu.
-// MJ : déclare / termine une session de jeu en cours (vtt/session.live).
-// Les joueurs qui ouvrent le VTT voient alors un message dans le sas d'entrée.
-function _renderSessionBtn() {
-  const btn = document.getElementById('vtt-session-btn');
-  if (!btn) return;
-  const live = !!VS.session?.live;
-  btn.classList.toggle('is-live', live);
-  btn.innerHTML = live ? '🔴 Session en cours' : '⚪ Démarrer la session';
-  btn.title = live
-    ? 'Session déclarée en cours — clique pour la terminer'
-    : 'Démarrer la session (prévient les joueurs qui rejoignent)';
-}
-async function _vttToggleSessionLive() {
-  if (!STATE.isAdmin) return;
-  const live = !VS.session?.live;
-  try {
-    await setDoc(_sesRef(), live ? { live: true, liveSince: serverTimestamp() } : { live: false }, { merge: true });
-    showNotif(live ? '🔴 Session déclarée en cours.' : '⏹ Session terminée.', 'success');
-  } catch { showNotif('Erreur d\'enregistrement de la session.', 'error'); }
-}
-
-async function _vttKickPresence(uid) {
-  if (!STATE.isAdmin || !uid) return;
-  const pseudo = VS.presence[uid]?.pseudo || 'ce joueur';
-  if (!confirm(`Retirer ${pseudo} de la présence du VTT ?\n(Réapparaîtra automatiquement s'il est toujours actif sur la table.)`)) return;
-  try {
-    await deleteDoc(_pingRef(uid));
-    // Optimiste : retire localement sans attendre le snapshot.
-    delete VS.presence[uid];
-    if (VS.miniUid === uid) { VS.miniUid = null; _renderMiniSheet(null); }
-    _renderPresenceCol();
-    if (STATE.isAdmin) _renderTraySoon();
-    showNotif(`${pseudo} retiré de la présence`, 'info');
-  } catch (e) { console.error('[vtt] kick presence', e); showNotif('Erreur', 'error'); }
-}
-
-function _renderPresenceCol() {
-  const list = document.getElementById('vtt-pres-list');
-  if (!list) return;
-  const now = Date.now();
-  const players = Object.values(VS.presence).filter(p => now - (p.lastSeen ?? 0) < 120_000);
-  if (!players.length) {
-    list.innerHTML = '<div class="vtt-pres-empty">—</div>';
-    return;
-  }
-  const myUid = STATE.user?.uid;
-  list.innerHTML = players.map(p => {
-    const chars = sortCharactersForDisplay(Object.values(VS.characters).filter(c => c.uid === p.uid));
-    // Préfère le perso ★ par défaut comme "visage" du joueur
-    const char  = chars.find(c => c.id === VS.miniCharId)
-               || chars.find(c => c.isDefault)
-               || chars[0];
-    const img   = char?.photoURL || char?.photo || char?.avatar || null;
-    const init  = (char?.nom || p.pseudo || '?')[0].toUpperCase();
-    const isOpen = VS.miniUid === p.uid;
-    const isSelf = p.uid === myUid;
-    return `<div class="vtt-pres-entry${isOpen?' is-open':''}${isSelf?' is-self':''}"
-      data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${p.uid}"
-      title="${p.pseudo}${char?.nom ? ' · '+char.nom : ''}">
-      <div class="vtt-pres-avatar"${img?` style="background-image:url('${img}')"`:''}>
-        ${img ? '' : `<span>${init}</span>`}
-        ${isSelf ? '<div class="vtt-pres-self-dot"></div>' : ''}
-        ${(STATE.isAdmin && !isSelf) ? `<button class="vtt-pres-kick" data-vtt-fn="_vttKickPresence" data-vtt-args="${p.uid}" title="Retirer ${_esc(p.pseudo)} de la présence" aria-label="Retirer de la présence">✕</button>` : ''}
-      </div>
-      <div class="vtt-pres-name">${p.pseudo}</div>
-    </div>`;
-  }).join('');
-}
+// [PRÉSENCE → vtt-presence.js]
 
 // ═══════════════════════════════════════════════════════════════════
 // MINI-FICHE PERSONNAGE — 4 onglets
@@ -13077,7 +12971,7 @@ async function _vttMsDeleteNote(charId, uid, idx) {
 
 // ─── Rendu principal ─────────────────────────────────────────────
 
-function _renderMiniSheet(uid) {
+export function _renderMiniSheet(uid) {
   const panel = document.getElementById('vtt-mini-panel');
   if (!panel) return;
 
@@ -13149,7 +13043,7 @@ function _renderMiniSheet(uid) {
   else if (_miniTab === 'sorts') _msApplySortFilter();
 }
 
-function _vttToggleMiniSheet(uid) {
+export function _vttToggleMiniSheet(uid) {
   if (VS.miniUid === uid) {
     VS.miniUid = null; VS.miniCharId = null;
     const panel = document.getElementById('vtt-mini-panel');

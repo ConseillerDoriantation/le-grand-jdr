@@ -147,6 +147,14 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   n'était pas importé (classé « interne » à tort). Cause : l'ancien verify strippait
   les template-literals et avalait la zone. **Nouvelle vérif FIABLE** (`_reverify`,
   grep brut sans strip) intégrée → re-checke les 6 modules à chaque extraction.
-- ⏳ **Phase 1 — reste = modules COUPLÉS** : `vtt-tools-ruler.js` (dessin/annot/règle :
-  ~23 vars + handlers canvas), Tray/Pages, Inspector, Combat/attaque (gros), chat
-  (couplage entrant massif). Plus risqués.
+- ✅ **Phase 0.x — état partagé des couplés → VS** : `presence, miniUid, miniCharId,
+  bstTracker, selectedMulti, rollMode, rollBonus, rollHidden, diceSkills` (≈117 occ.).
+  Débloque inspector/tray/mini-fiche/présence.
+- ✅ **Phase 1 — extraction `vtt-presence.js`** (147 l.) : heartbeat + colonne joueurs
+  (6 fns dont `_startPresence`/`_resetPresence` extraits **inline** de mount/teardown).
+  **13433 → 13327 l. (−106).** Circulaires : `_sesRef, _pingRef, _renderMiniSheet,
+  _renderTraySoon, _vttToggleMiniSheet`. Heartbeat quota-sensible préservé verbatim.
+  **⚠️ smoke-test** : présence des joueurs (colonne, apparition/disparition), session
+  live MJ, kick d'un joueur ; vérifier que le heartbeat tourne (pas de spam d'écritures).
+- ⏳ **Phase 1 — reste** : mini-fiche, Tray/Pages, Inspector (42 deps), `tools-ruler`
+  (dessin/annot), Combat/attaque (gros), chat (couplage entrant massif). Plus risqués.
