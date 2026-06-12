@@ -5,6 +5,40 @@ feature la plus critique en séance live. Objectif : le découper en modules
 cohérents **sans changer le comportement observable**. Campagne multi-PR, chaque
 étape livrable et vérifiable isolément.
 
+## Bilan (état final) — découpage à seams propres terminé
+
+**vtt.js : 15034 → 12414 lignes (−2620, −17 %).** Extraits, chacun avec un couplage
+faible (0–9 deps) et vérifié (audit → script → `node --check` → reverify → smoke-test) :
+
+| Module | Lignes | Rôle |
+|---|---|---|
+| `vtt-state.js` | 55 | objet d'état partagé `VS` (le déverrouillage) |
+| `vtt-mini-fiche.js` | 1001 | popup perso 4 onglets |
+| `vtt-music.js` | 817 | sons & musique d'ambiance |
+| `vtt-loot.js` | 404 | butin d'aventure |
+| `vtt-rest.js` | 245 | court repos du groupe |
+| `vtt-combat-tracker.js` | 153 | overlay d'ordre de combat |
+| `vtt-dice.js` | 149 | lanceur de dés libre |
+| `vtt-presence.js` | 148 | présence joueurs + heartbeat |
+| `vtt-timer.js` | 109 | minuteur de session |
+| (`vtt-fog.js` 938 — déjà séparé avant) | | fog / murs / lumière |
+
+### Décision : on s'arrête là (volontairement)
+
+Ce qui reste dans `vtt.js` — **canvas, rendu, tokens, combat/attaque, inspector, tray,
+chat** — n'est PAS un assemblage de panneaux isolés : c'est **un moteur d'interaction
+cohésif**. Mesuré : extraire le Tray exigerait **15 deps circulaires** (dont 7 fonctions
+de rendu canvas) ; l'Inspector **42**. Les sortir transformerait `vtt.js` en **hub
+d'imports circulaires bidirectionnels** — plus dur à raisonner qu'un cœur cohérent, et
+risqué sur la feature live (cf. la régression `_miniTab`/`_damageTypes` sur la mini-fiche,
+pourtant plus simple).
+
+**Architecture cible (commerciale) : périphérie modulaire + cœur cohésif documenté.**
+Pour aller plus loin proprement, il ne faut PAS des imports circulaires en plus, mais un
+**vrai refactor du cœur de rendu** (extraire un `vtt-render.js` avec une interface nette :
+grille, calques Konva, images, annotations) — gros chantier à part entière, à ne tenter
+que sur une base de tests solide. Tant que ce n'est pas fait, le cœur reste ensemble.
+
 ## L'obstacle (pourquoi ce n'est pas un simple couper-coller)
 
 1. **136 variables mutables au niveau module** (`_stage`, `_session`, `_tokens`,
