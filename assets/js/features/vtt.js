@@ -266,7 +266,7 @@ function _vttBindDispatch() {
 _vttBindDispatch();
 
 // ── État module ─────────────────────────────────────────────────────
-let _resizeObs = null;   // _stage, _layers, VS.unsubs → VS (cœur Konva/teardown partagé)
+let _resizeObs = null;   // VS.stage, VS.layers, VS.unsubs → VS (cœur Konva/teardown partagé)
 let _vttEntered = false;   // le client a-t-il cliqué « Entrer » (listeners actifs) ?
 let _bestiaryLoads = new Map(); // beastId → Promise lecture doc ciblée
 // [VS.bstTracker → VS.bstTracker] (défaut dans vtt-state.js)
@@ -788,19 +788,51 @@ async function _syncDownedCondition(t, hp) {
  * hors `_vttRollAttack` (édition manuelle, DoT, environnement…).
  * Retourne un tableau de notes pour log/notif.
  */
-async function _vttTriggerConcentrationSave(td, damageAmount) {
+async function _vttTriggerConcentrationSave(td, damageAmount, nextHp = null, opts = {}) {
   if (!td || damageAmount <= 0) return [];
-  const buffs = (td.buffs || []).filter(b => b?.canalisePersistant && b?.concentrationDD != null);
+  let liveTd = VS.tokens?.[td.id]?.data || td;
+  const freshSnap = td.id ? await getDoc(_tokRef(td.id)).catch(() => null) : null;
+  if (freshSnap?.exists?.()) {
+    liveTd = { ...liveTd, ...freshSnap.data(), id: td.id };
+  }
+  const buffs = (liveTd.buffs || []).filter(b => b?.canalisePersistant && b?.concentrationDD != null);
   const round = VS.session?.combat?.round ?? 0;
-  const activeConditions = (td.conditions || []).filter(c => {
+  const activeConditions = (liveTd.conditions || []).filter(c => {
     if (c.expiresAtRound != null && round > 0 && round > c.expiresAtRound) return false;
-    return !!CONDITION_BY_ID[c.id]?.effects?.concentrationCheck;
+    return !!c.concentrationSpell || !!CONDITION_BY_ID[c.id]?.effects?.concentrationCheck;
   });
   if (!buffs.length && !activeConditions.length) return [];
-  const sagMod = _tokenStatMod(td, 'sagesse');
-  const tgtName = _live(td).displayName ?? td.name;
+  const sagMod = _tokenStatMod(liveTd, 'sagesse');
+  const tgtName = _live(liveTd).displayName ?? liveTd.name;
   const notes = [];
-  let removed = [];
+  const deferredLogs = [];
+  const graceBuffs = [];
+  const baseRound = Math.max(1, round);
+  const graceExpiresAtRound = baseRound + 2 - 1;
+  const forcedBreak = nextHp != null && nextHp <= 0;
+  const logConcentration = async ({ cond, lib, roll = null, total = null, dd = null, passed = false, forced = false }) => {
+    const label = cond?.sortLabel || cond?.source || lib?.label || 'Concentration';
+    const payload = {
+      type: 'concentration-save',
+      authorId: STATE.user?.uid || null,
+      authorName: STATE.profile?.pseudo || STATE.profile?.prenom || 'MJ',
+      tokenName: tgtName,
+      characterImage: _live(liveTd).displayImage || null,
+      sortLabel: label,
+      conditionLabel: lib?.label || 'Concentré',
+      statLabel: 'Sa',
+      mod: sagMod,
+      d20: roll,
+      total,
+      dd,
+      passed,
+      forcedBreak: forced,
+      newHp: nextHp,
+      createdAt: serverTimestamp(),
+    };
+    if (opts.deferLog) deferredLogs.push(payload);
+    else await addDoc(_logCol(), payload).catch(() => {});
+  };
   for (const cb of buffs) {
     const dd = cb.concentrationDD;
     const roll = Math.floor(Math.random() * 20) + 1;
@@ -810,40 +842,66 @@ async function _vttTriggerConcentrationSave(td, damageAmount) {
     if (success) {
       notes.push(`🧠 ${rollStr} · ${cb.sortLabel} tenu (${tgtName})`);
     } else {
-      notes.push(`💢 ${rollStr} ÉCHEC · ${cb.sortLabel} rompu sur ${tgtName}`);
-      removed.push(cb);
-      // Supprime les summons canalisés liés
-      const summonsToKill = Object.values(VS.tokens).filter(e =>
+      notes.push(`💢 ${rollStr} ÉCHEC · ${cb.sortLabel} rompu sur ${tgtName} · persiste encore 2 tours`);
+      graceBuffs.push(cb);
+      // Les summons canalisés liés perdent la concentration, mais restent 2 tours.
+      const summonsToExpire = Object.values(VS.tokens).filter(e =>
         e?.data?.summonOwnerId === (cb.casterId || td.id) && e?.data?.summonCanalise
       );
-      for (const s of summonsToKill) { await _persistInvocationState(s.data); await deleteDoc(_tokRef(s.data.id)).catch(() => {}); }
+      for (const s of summonsToExpire) {
+        await updateDoc(_tokRef(s.data.id), {
+          summonCanalise: false,
+          summonExpiresAtRound: graceExpiresAtRound,
+        }).catch(() => {});
+      }
     }
   }
 
-  const removedConditionIds = new Set();
+  const removedConditions = [];
   for (const cond of activeConditions) {
     const lib = CONDITION_BY_ID[cond.id];
+    if (forcedBreak && cond?.concentrationSpell) {
+      await logConcentration({ cond, lib, passed: false, forced: true });
+      removedConditions.push(cond);
+      continue;
+    }
     const dd = cond.saveDC || lib?.defaultDC || 11;
     const roll = Math.floor(Math.random() * 20) + 1;
     const tot = roll + sagMod;
     const success = roll === 20 || (roll !== 1 && tot >= dd);
     const rollStr = `JS Sa ${roll}${sagMod>=0?'+':''}${sagMod}=${tot} vs DD${dd}`;
     if (success) {
-      notes.push(`🧠 ${rollStr} · ${lib?.label || cond.id} tenu (${tgtName})`);
+      await logConcentration({ cond, lib, roll, total: tot, dd, passed: true });
     } else {
-      notes.push(`💢 ${rollStr} ÉCHEC · ${lib?.label || cond.id} rompu sur ${tgtName}`);
-      removedConditionIds.add(cond.id);
+      await logConcentration({ cond, lib, roll, total: tot, dd, passed: false });
+      removedConditions.push(cond);
     }
   }
 
-  if (removed.length) {
-    const remaining = (td.buffs || []).filter(b => !removed.includes(b));
-    await updateDoc(_tokRef(td.id), { buffs: remaining }).catch(() => {});
+  if (graceBuffs.length) {
+    const remaining = (liveTd.buffs || []).map(b => {
+      if (!graceBuffs.includes(b)) return b;
+      const { canalisePersistant, concentrationDD, ...rest } = b;
+      return {
+        ...rest,
+        totalDuration: 2,
+        startRound: baseRound,
+        expiresAtRound: graceExpiresAtRound,
+        concentrationGrace: true,
+      };
+    });
+    await updateDoc(_tokRef(liveTd.id), { buffs: remaining }).catch(() => {});
   }
-  if (removedConditionIds.size) {
-    const remainingConditions = (td.conditions || []).filter(c => !removedConditionIds.has(c.id));
-    await updateDoc(_tokRef(td.id), { conditions: remainingConditions }).catch(() => {});
+  if (removedConditions.length) {
+    const remainingConditions = (liveTd.conditions || []).filter(c => !removedConditions.includes(c));
+    await updateDoc(_tokRef(liveTd.id), { conditions: remainingConditions }).catch(() => {});
+    for (const cond of removedConditions) {
+      if (cond?.concentrationSpell) {
+        await _vttBreakConcentrationEffects(liveTd.id, cond);
+      }
+    }
   }
+  notes.concentrationLogs = deferredLogs;
   return notes;
 }
 
@@ -3190,8 +3248,10 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
       summonOwnerCharId: src.characterId || null,
       summonKind: 'invocation',
       summonInvId,
-      summonExpiresAtRound: mod.concentration ? null : baseRound + durationTurns - 1,
+      summonSortLabel: opt?.label || '',
+      summonExpiresAtRound: mod.concentration ? baseRound + 10 - 1 : baseRound + durationTurns - 1,
       summonCanalise: !!mod.concentration,
+      summonCanalisePersistant: !!opt?.mods?.canalisePersistant,
       summonConcentrationDD: opt?.mods?.concentration?.dd || null,
       summonChanceRc: opt?.mods?.chance?.rc ?? 20,
       summonActions: actions,
@@ -3250,8 +3310,10 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
     ownerId: src.characterId ? STATE.user?.uid || null : null,
     summonOwnerId: srcId,              // lien vers le lanceur (contrôle + cleanup)
     summonKind: kind,
-    summonExpiresAtRound: baseRound + durationTurns - 1,
-    summonCanalise: !!opt?.mods?.canalisePersistant,
+    summonSortLabel: opt?.label || '',
+    summonExpiresAtRound: opt?.mods?.concentration ? baseRound + 10 - 1 : baseRound + durationTurns - 1,
+    summonCanalise: !!opt?.mods?.concentration,
+    summonCanalisePersistant: !!opt?.mods?.canalisePersistant,
     summonConcentrationDD: opt?.mods?.canalisePersistant?.dd || opt?.mods?.concentration?.dd || null,
     // Stats héritées du sort qui l'a invoquée — utilisées par _buildAttackOptions
     summonChanceRc: chanceRc,
@@ -3286,18 +3348,110 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
 function _buffShared(opt, srcId) {
   const round = VS.session?.combat?.round ?? 0;
   const baseRound = Math.max(1, round);
-  const dur = opt.sortDuree ?? 2;
   const isCanalise = !!opt.mods?.canalisePersistant;
-  const concDD = opt.mods?.concentration?.dd ?? (isCanalise ? 11 : null);
+  const dur = isCanalise ? null : (opt.mods?.concentration ? 10 : (opt.sortDuree ?? 2));
   // Firestore rejette `undefined` — on omet les champs au lieu de les mettre à undefined
   return {
     startRound: round,
     totalDuration: isCanalise ? null : dur,
-    expiresAtRound: isCanalise ? null : baseRound + dur - 1,
+    expiresAtRound: isCanalise ? null : (dur != null ? baseRound + dur - 1 : null),
     casterId: srcId || null,
     sortLabel: opt.label || '',
-    ...(isCanalise ? { canalisePersistant: true, concentrationDD: concDD } : {}),
+    ...(isCanalise ? { canalisePersistant: true } : {}),
   };
+}
+
+function _vttConcentrationDurationFields(opt) {
+  const round = VS.session?.combat?.round ?? 0;
+  const baseRound = Math.max(1, round);
+  const dur = 10;
+  return {
+    expiresAtRound: dur != null && dur > 0 ? baseRound + dur - 1 : null,
+    ...(round === 0 && dur != null && dur > 0 ? { pendingDuration: dur } : {}),
+  };
+}
+
+async function _vttApplyCasterConcentration(srcId, opt) {
+  if (!srcId || !opt?.mods?.concentration) return;
+  const src = VS.tokens[srcId]?.data;
+  if (!src) return;
+  const label = opt.label || 'Sort concentré';
+  const dd = opt.mods.concentration.dd ?? 11;
+  const existing = (src.conditions || []).filter(c =>
+    !(c.id === 'focused' && c.concentrationSpell && (c.source || '') === label)
+  );
+  const cond = {
+    id: 'focused',
+    appliedAt: Date.now(),
+    appliedBy: srcId,
+    source: label,
+    sortLabel: label,
+    saveDC: dd,
+    saveStat: 'sagesse',
+    concentrationSpell: true,
+    ..._vttConcentrationDurationFields(opt),
+  };
+  await updateDoc(_tokRef(srcId), { conditions: [...existing, cond] }).catch(() => {});
+}
+
+async function _vttBreakConcentrationEffects(casterId, cond) {
+  const label = cond?.sortLabel || cond?.source || '';
+  if (!casterId || !label) return;
+  const round = VS.session?.combat?.round ?? 0;
+  const baseRound = Math.max(1, round);
+  const graceExpiresAtRound = baseRound + 2 - 1;
+
+  for (const entry of Object.values(VS.tokens || {})) {
+    const tok = entry?.data;
+    if (!tok?.id) continue;
+    const updates = {};
+
+    if (tok.summonOwnerId === casterId && tok.summonCanalise && (tok.summonSortLabel || '') === label) {
+      if (tok.summonCanalisePersistant) {
+        updates.summonCanalise = false;
+        updates.summonExpiresAtRound = graceExpiresAtRound;
+      } else {
+        await _persistInvocationState(tok);
+        await deleteDoc(_tokRef(tok.id)).catch(() => {});
+        continue;
+      }
+    }
+
+    if (Array.isArray(tok.buffs) && tok.buffs.length) {
+      let changed = false;
+      const nextBuffs = [];
+      for (const buff of tok.buffs) {
+        const linked = buff?.casterId === casterId && (buff.sortLabel || '') === label;
+        if (!linked) {
+          nextBuffs.push(buff);
+          continue;
+        }
+        changed = true;
+        if (buff.canalisePersistant) {
+          const { canalisePersistant, concentrationDD, ...rest } = buff;
+          nextBuffs.push({
+            ...rest,
+            totalDuration: 2,
+            startRound: baseRound,
+            expiresAtRound: graceExpiresAtRound,
+            concentrationGrace: true,
+          });
+        }
+      }
+      if (changed) updates.buffs = nextBuffs;
+    }
+
+    if (Array.isArray(tok.conditions) && tok.conditions.length) {
+      const nextConditions = tok.conditions.filter(c =>
+        !(c?.appliedBy === casterId && (c.source || '') === label && c.id !== 'focused')
+      );
+      if (nextConditions.length !== tok.conditions.length) updates.conditions = nextConditions;
+    }
+
+    if (Object.keys(updates).length) {
+      await updateDoc(_tokRef(tok.id), updates).catch(() => {});
+    }
+  }
 }
 
 async function _consumeLuckyReroll(tokenId, tokenData, currentD20, shouldUse = true) {
@@ -3330,9 +3484,12 @@ async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
     const lib = CONDITION_BY_ID[etatId];
     const round = VS.session?.combat?.round ?? 0;
     const isConsumed = !!lib.effects?.consumedByAttackAgainst;
-    const dur = Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
-      ? lib.defaultDuration : 2;
+    const dur = opt.mods?.concentration ? 10 : (
+      Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
+        ? lib.defaultDuration : 2
+    );
     const expiresAtRound = (round > 0 && !isConsumed && dur > 0) ? round + dur - 1 : null;
+    const pendingDuration = (round === 0 && !isConsumed && dur > 0) ? dur : null;
     const scaledFields = _scaledEnchantConditionFields(
       lib,
       opt.mods?.enchantStatePower || 0,
@@ -3352,6 +3509,7 @@ async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
         saveDC: lib.defaultSaveStat ? (lib.defaultDC || 11) : null,
         saveStat: lib.defaultSaveStat || null,
         expiresAtRound,
+        ...(pendingDuration != null ? { pendingDuration } : {}),
         ...scaledFields,
       };
       await updateDoc(_tokRef(tid), { conditions: [...existingConds, newCond] }).catch(() => {});
@@ -3487,8 +3645,10 @@ async function _vttApplyAfflictions(srcId, targetIds, opt) {
       }
       const round = VS.session?.combat?.round ?? 0;
       const isConsumed = !!lib.effects?.consumedByAttackAgainst;
-      const dur = Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
-        ? lib.defaultDuration : 2;
+      const dur = opt.mods?.concentration ? 10 : (
+        Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
+          ? lib.defaultDuration : 2
+      );
       // Si combat actif (round > 0) : expiresAtRound calculé direct
       // Si combat inactif (round = 0) : on stocke pendingDuration pour reporter
       //   le calcul au démarrage du combat (sinon l'état durerait à l'infini)
@@ -5666,6 +5826,7 @@ async function _zoneValidate() {
     }
     const srcD = VS.tokens[srcId]?.data;
     if (srcD) await _vttSpendSpellPm(srcD, opt);
+    await _vttApplyCasterConcentration(srcId, opt);
     showNotif(`🐾 ${total} invocation${total > 1 ? 's' : ''} placée${total > 1 ? 's' : ''}`, 'success');
     _zoneClear();
     return;
@@ -5696,6 +5857,7 @@ async function _zoneValidate() {
       VS.layers.token?.batchDraw();
       return; // reste en mode placement
     }
+    await _vttApplyCasterConcentration(srcId, opt);
     showNotif(`🪤 ${total} sentinelle${total > 1 ? 's' : ''} posée${total > 1 ? 's' : ''}`, 'success');
     // Si aucune cible présente, on s'arrête là (sentinelles posées, pas d'attaque)
     if (!targets.length) {
@@ -5854,6 +6016,7 @@ async function _vttRollAttack() {
         const existing = (td.buffs || []).filter(b => !(b.type === 'range_bonus' && b.sortLabel === opt.label));
         await updateDoc(_tokRef(tid), { buffs: [...existing, rangeBuff] }).catch(() => {});
       }
+      await _vttApplyCasterConcentration(srcId, opt);
       const targetsLabel = targetIds
         .map(id => {
           const td = VS.tokens[id]?.data;
@@ -5890,6 +6053,7 @@ async function _vttRollAttack() {
       };
       const existing = (src.buffs || []).filter(b => !(b.type === 'suspended_spell' && b.sortLabel === opt.label));
       await updateDoc(_tokRef(srcId), { buffs: [...existing, suspBuff] }).catch(() => {});
+      await _vttApplyCasterConcentration(srcId, opt);
       showNotif(`🔮 ${opt.label} suspendu — à déclencher hors de votre tour`, 'success');
       _cleanup();
       return;
@@ -5922,6 +6086,7 @@ async function _vttRollAttack() {
         _cleanup();
         return;
       }
+      await _vttApplyCasterConcentration(srcId, opt);
       const targetsLabel = appliedTargets.join(', ');
       await addDoc(_logCol(), {
         type: 'cast',
@@ -5966,6 +6131,7 @@ async function _vttRollAttack() {
       };
       const existing = (src.buffs || []).filter(b => !(b.type === 'weapon_replace' && b.sortLabel === opt.label));
       await updateDoc(_tokRef(srcId), { buffs: [...existing, wrBuff] }).catch(() => {});
+      await _vttApplyCasterConcentration(srcId, opt);
       showNotif(`⚔️ ${wrBuff.weaponName} équipée (${armDice})`, 'success');
     }
 
@@ -5980,17 +6146,20 @@ async function _vttRollAttack() {
         const existing = (td.buffs || []).filter(b => !(b.type === 'range_bonus' && b.sortLabel === opt.label));
         await updateDoc(_tokRef(tid), { buffs: [...existing, rangeBuff] }).catch(() => {});
       }
+      await _vttApplyCasterConcentration(srcId, opt);
     }
 
     // ── Enchantements (Dégâts, État, Toucher, Déplacement, slots) : buffs / états sur alliés ──
     if (opt.mods?.enchantArmeDmg || opt.mods?.enchantPieds || opt.mods?.enchantGeneric
         || opt.mods?.enchantEtatId || opt.mods?.enchantToucher || opt.mods?.enchantMove) {
       await _vttApplyEnchantBuffs(srcId, allTargets && allTargets.length ? allTargets : [tgtId], opt);
+      await _vttApplyCasterConcentration(srcId, opt);
     }
 
     // ── Afflictions : JS Sa de la cible, buff (DoT, débuff mouvement, etc.) sur échec ──
     if (opt.mods?.affliction) {
       await _vttApplyAfflictions(srcId, allTargets && allTargets.length ? allTargets : [tgtId], opt);
+      await _vttApplyCasterConcentration(srcId, opt);
     }
 
     // ── CA / Utilitaire : consommer PM, appliquer buff, loguer ─────────
@@ -6006,14 +6175,13 @@ async function _vttRollAttack() {
       const isShieldReactive = !!opt.mods?.bouclierReactif;
       if (opt.isCaSort) {
         const round = VS.session?.combat?.round ?? 0;
-        const dur   = opt.sortDuree ?? null;
+        const dur   = opt.mods?.concentration ? 10 : (opt.sortDuree ?? null);
         const baseRound = Math.max(1, round); // traiter round 0 comme round 1
         // Canalisé persistant : pas d'expiration automatique (jusqu'à rupture concentration)
-      const isCanalise = !!opt.mods?.canalisePersistant;
-      const concDD = opt.mods?.concentration?.dd ?? (isCanalise ? 11 : null);
-      // Firestore : pas de `undefined` → spread conditionnel pour les champs facultatifs
-      const _canFields = isCanalise ? { canalisePersistant: true, concentrationDD: concDD } : {};
-      const newBuff = isShieldReactive ? {
+        const isCanalise = !!opt.mods?.canalisePersistant;
+        // Firestore : pas de `undefined` → spread conditionnel pour les champs facultatifs
+        const _canFields = isCanalise ? { canalisePersistant: true } : {};
+        const newBuff = isShieldReactive ? {
           // Bouclier réactif : annule 1 attaque (pas de bonus CA)
           type: 'shield_reactive',
           tier: opt.mods.bouclierReactif.tier,         // 'mob' | 'elite' | 'boss'
@@ -6045,6 +6213,7 @@ async function _vttRollAttack() {
           await updateDoc(_tokRef(curTgtId), { buffs: [...existingBuffs, newBuff] }).catch(()=>{});
           buffResults.push(_live(curTgtData).displayName ?? curTgtData.name);
         }
+        if (buffResults.length) await _vttApplyCasterConcentration(srcId, opt);
       }
 
       const targetsLabel = targetIds
@@ -6104,6 +6273,7 @@ async function _vttRollAttack() {
       // dans le chat, comme le DoT d'affliction.
       if (opt.mods?.regeneration) {
         await _vttApplyRegeneration(srcId, allTargets && allTargets.length ? allTargets : [tgtId], opt);
+        await _vttApplyCasterConcentration(srcId, opt);
       }
 
       // Notif post-cast : neutre pour les afflictions (les notifs JS et effet
@@ -6578,6 +6748,7 @@ async function _vttRollAttack() {
     // ── Combos post-attaque (Lacération, Déplacement, Drain, Concentration) ──
     const _mods = opt.mods || null;
     const modNotes = []; // notes textuelles pour la notif/log
+    const concentrationLogs = [];
 
     // Remonte dans modNotes les effets liés aux états (dégâts bonus + consommations)
     for (const r of targetResults) {
@@ -6593,8 +6764,9 @@ async function _vttRollAttack() {
     for (const r of targetResults) {
       if (!(r.hit || r.halfDmg) || r.dmgTotal <= 0) continue;
       const td = r._data; if (!td) continue;
-      const concNotes = await _vttTriggerConcentrationSave(td, r.dmgTotal);
+      const concNotes = await _vttTriggerConcentrationSave(td, r.dmgTotal, r.newHp, { deferLog: true });
       modNotes.push(...concNotes);
+      if (concNotes.concentrationLogs?.length) concentrationLogs.push(...concNotes.concentrationLogs);
     }
 
     if (_mods) {
@@ -6733,6 +6905,10 @@ async function _vttRollAttack() {
         interaction: r.interaction || null,
         createdAt: serverTimestamp(),
       }).catch(()=>{});
+    }
+
+    for (const payload of concentrationLogs) {
+      await addDoc(_logCol(), payload).catch(() => {});
     }
 
     // Notif consolidée
@@ -9617,6 +9793,41 @@ function _renderChatLog(msgs) {
     return `<div class="vtt-log vtt-log--${theme}">${head}${body}</div>`;
   };
 
+  /** Jet de concentration */
+  const renderConcentrationSave = (m, i, ts) => {
+    const forced = !!m.forcedBreak;
+    const passed = !!m.passed && !forced;
+    const theme = passed ? 'saveok' : 'savefail';
+    const badge = forced
+      ? `<span class="vtt-log-badge vtt-log-badge--fail">PV À 0</span>`
+      : passed
+        ? `<span class="vtt-log-badge vtt-log-badge--ok">✅ MAINTENU</span>`
+        : `<span class="vtt-log-badge vtt-log-badge--fail">❌ ROMPU</span>`;
+    const head = _header({
+      srcImg: m.characterImage || null,
+      srcName: m.tokenName || '?',
+      label: `Concentration · ${m.sortLabel || 'Sort'}`,
+      badges: badge,
+      ts,
+    });
+    const modStr = (m.mod >= 0 ? '+' : '') + (m.mod ?? 0);
+    const result = forced
+      ? `<strong class="vtt-log-result" style="font-size:1.05rem;color:#ef4444">Concentration rompue</strong>
+         <span class="vtt-log-result-sub">le lanceur tombe à 0 PV</span>`
+      : `<strong class="vtt-log-result" style="font-size:1.15rem;color:${passed ? '#22c38e' : '#ef4444'}">${m.total}</strong>
+         <span class="vtt-log-vs">vs DD ${m.dd}</span>
+         <span class="vtt-log-result-sub">d20[<strong>${m.d20}</strong>] ${modStr}${sub(m.statLabel || 'Sa')}</span>`;
+    const tail = passed
+      ? `<span class="vtt-log-result-sub" style="color:#86efac;font-weight:700">→ sort maintenu</span>`
+      : `<span class="vtt-log-result-sub" style="color:#fca5a5;font-weight:700">→ effets dissipés</span>`;
+    const body = `<div class="vtt-log-body">
+      <span class="vtt-log-icon">🧠</span>
+      ${result}
+      ${tail}
+    </div>`;
+    return `<div class="vtt-log vtt-log--${theme}">${head}${body}</div>`;
+  };
+
   /** Tick DoT */
   const renderDotTick = (m, i, ts) => {
     const isHealTick = !!m.isHeal;
@@ -9728,6 +9939,7 @@ function _renderChatLog(msgs) {
     if (m.type === 'cast')            return renderCast(m, i, ts);
     if (m.type === 'affliction-cast') return renderAfflictionCast(m, i, ts);
     if (m.type === 'save')            return renderSave(m, i, ts);
+    if (m.type === 'concentration-save') return renderConcentrationSave(m, i, ts);
     if (m.type === 'dot-tick')        return renderDotTick(m, i, ts);
     if (m.type === 'roll')            return renderRoll(m, i, ts);
     if (m.type === 'dice-free')       return renderDiceFree(m, i, ts);
@@ -10918,7 +11130,7 @@ async function _vttSetHp(tokenId,hp) {
   const delta  = prevHp != null ? Math.max(0, prevHp - newHp) : 0;
   await _setHp(t,hp).catch(()=>{});
   if (delta > 0) {
-    const notes = await _vttTriggerConcentrationSave(t, delta);
+    const notes = await _vttTriggerConcentrationSave(t, delta, newHp);
     notes.forEach(msg => showNotif(msg, msg.startsWith('💢') ? 'error' : 'info'));
   }
 }
@@ -11316,7 +11528,7 @@ async function _vttNextRound() {
         rolls: dmgRolls, total: totalDmg, newHp, hpMax,
         createdAt: serverTimestamp(),
       }).catch(() => {});
-      const concNotes = await _vttTriggerConcentrationSave(td, totalDmg);
+      const concNotes = await _vttTriggerConcentrationSave(td, totalDmg, newHp);
       dotNotifs.push(...concNotes);
     }
     if (totalHeal > 0) {
@@ -11340,13 +11552,14 @@ async function _vttNextRound() {
 
   const b=writeBatch(db);
   const expiredNotifs = [];
+  const expiredConcentrations = [];
   Object.keys(VS.tokens).forEach(id => {
     const tokData = VS.tokens[id]?.data;
     if (!tokData) return;
     // ── Cleanup auto des tokens summons expirés (sentinelle, arme invoquée) ──
     // Les summons non-canalisés expirent à round > summonExpiresAtRound.
     // Les summons canalisés (summonCanalise: true) persistent tant que la
-    // concentration tient — supprimés via le JS Sa raté.
+    // concentration tient, puis deviennent temporaires après rupture.
     if (tokData.summonExpiresAtRound != null && !tokData.summonCanalise && round > tokData.summonExpiresAtRound) {
       expiredNotifs.push(`${tokData.summonKind === 'invocation' ? '🐾' : tokData.summonKind === 'sentinelle' ? '🪤' : '⚔️'} ${tokData.name} dissipé`);
       _persistInvocationState(tokData);   // PV/PM persistants avant dissipation (invocations)
@@ -11380,6 +11593,7 @@ async function _vttNextRound() {
           const icon = lib?.icon || '⛓';
           const label = lib?.label || c.id;
           expiredNotifs.push(`${icon} ${label} expiré sur ${_live(tokData).displayName ?? tokData.name}`);
+          if (c.concentrationSpell) expiredConcentrations.push({ casterId: tokData.id, cond: c });
           return false;
         }
         return true;
@@ -11389,6 +11603,9 @@ async function _vttNextRound() {
     b.update(_tokRef(id), updates);
   });
   await b.commit().catch(()=>{});
+  for (const item of expiredConcentrations) {
+    await _vttBreakConcentrationEffects(item.casterId, item.cond);
+  }
   dotNotifs.forEach(msg => showNotif(msg, 'error'));
   expiredNotifs.forEach(msg => showNotif(msg, 'info'));
   showNotif(`Round ${round} !`, 'success');

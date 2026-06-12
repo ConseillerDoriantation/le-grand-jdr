@@ -13,7 +13,6 @@ export const state = {
   places: [],              // liste normalisée (new + legacy fusionnés)
   organizations: [],
   npcs: [],                // PNJ (collection npcs) — liés aux lieux par nom
-  quests: [],              // quêtes (collection quests) — liées aux lieux par nom
   missions: [],            // missions (story) — liées aux lieux par id (MJ only)
   types: [],               // types de lieux (collection ou fallback)
   fogZones: [],            // zones de brouillard, format [{ pts:[{x,y}] }] en %
@@ -60,10 +59,6 @@ export const getNpcById = id => state.npcs.find(n => n.id === id) || null;
 // des lieux dans npcs.js) comparé au nom du lieu, normalisé (casse/accents).
 export const getNpcsOfPlace = place =>
   !place ? [] : state.npcs.filter(n => n.lieu && _norm(n.lieu) === _norm(place.name));
-
-// Lien quête ↔ lieu par nom : quest.lieu comparé au nom du lieu (normalisé).
-export const getQuestsOfPlace = place =>
-  !place ? [] : state.quests.filter(q => q.lieu && _norm(q.lieu) === _norm(place.name));
 
 // Lien mission ↔ lieu par id : les @lieu d'histoire.js stockent l'id du lieu.
 export const getMissionsOfPlace = place =>

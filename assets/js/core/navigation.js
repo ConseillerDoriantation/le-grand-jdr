@@ -29,7 +29,6 @@ const FEATURE_MAP = {
   aventures:    () => import('../features/aventures.js'),
   histoire:     () => import('../features/histoire.js'),
   vtt:          () => import('../features/vtt.js'),
-  quests:       () => import('../features/quests.js'),
   agenda:       () => import('../features/agenda.js'),
 };
 
