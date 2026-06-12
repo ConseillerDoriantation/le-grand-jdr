@@ -1255,19 +1255,38 @@
 
 /* ── Tray — panneau gauche (MJ) ─────────────────────────────────── */
 .vtt-tray {
-  width: 190px;
+  width: 232px;
   flex-shrink: 0;
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
-  overflow-y: auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   font-size: .8rem;
   transition: width .2s ease, opacity .2s ease;
 }
 .vtt-tray.hidden { width: 0; opacity: 0; pointer-events: none; overflow: hidden; }
-.vtt-tray::-webkit-scrollbar { width: 4px; }
-.vtt-tray::-webkit-scrollbar-thumb { background: var(--bg-elevated); border-radius: 2px; }
+
+/* ── Panneau MJ à onglets (Scènes / Réserve / Bestiaire / Images) ── */
+.vtt-tray-tabs { display: flex; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.vtt-tray-tab {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: .42rem .15rem .35rem;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--text-muted); font-size: .6rem; font-weight: 600; letter-spacing: .02em;
+  cursor: pointer; transition: color .12s, background .12s, border-color .12s;
+}
+.vtt-tray-tab .vtt-tt-ic { font-size: 1.02rem; line-height: 1; }
+.vtt-tray-tab:hover { color: var(--text-soft); background: var(--bg-elevated); }
+.vtt-tray-tab.active { color: var(--gold); border-bottom-color: var(--gold); background: var(--gold-glow); }
+.vtt-tray-views { flex: 1; min-height: 0; display: flex; }
+.vtt-tray-view { display: none; flex: 1; min-height: 0; overflow-y: auto; flex-direction: column; }
+.vtt-tray-view.active { display: flex; }
+.vtt-tray-view::-webkit-scrollbar { width: 4px; }
+.vtt-tray-view::-webkit-scrollbar-thumb { background: var(--bg-elevated); border-radius: 2px; }
+.vtt-scene-tok-hd { margin-top: .15rem; border-top: 1px solid var(--border); }
+.vtt-bst-scroll { padding: 0 .5rem .5rem; }
 
 .vtt-tray-section { display: flex; flex-direction: column; }
 .vtt-tray-section + .vtt-tray-section { border-top: 1px solid var(--border); }

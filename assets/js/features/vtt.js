@@ -408,6 +408,8 @@ const _tokenStatMod = (t, statKey) => {
 let _emoteCloseOutside = null; // listener mousedown fermeture picker émotes
 let _trayFilter       = 'all'; // filtre actif : 'all'|'player'|'npc'|'enemy'
 let _traySearch       = '';    // filtre texte appliqué à la réserve
+let _bstSearch        = '';    // filtre texte appliqué au bestiaire
+let _trayTab          = (() => { try { return localStorage.getItem('vtt-tray-tab') || 'scenes'; } catch { return 'scenes'; } })(); // onglet actif du panneau MJ
 let _pageSearch       = '';    // filtre texte appliqué à la liste des pages
 const _pageFoldClosed = (() => { // dossiers de pages repliés (persistés)
   try { return new Set(JSON.parse(localStorage.getItem('vtt-page-folds') || '[]')); } catch { return new Set(); }
@@ -7547,6 +7549,15 @@ function _vttInsTab(tab) {
 function _vttTrayFilter(f) { _trayFilter = f; _renderTraySoon(); }
 function _vttTraySearch(v) { _traySearch = String(v || ''); _renderTraySoon(); }
 function _vttTrayClearSearch() { _traySearch = ''; _renderTraySoon(); }
+function _vttBstSearch(v) { _bstSearch = String(v || ''); _renderTraySoon(); }
+function _vttBstClearSearch() { _bstSearch = ''; _renderTraySoon(); }
+// Onglets du panneau MJ (Scènes / Réserve / Bestiaire / Images) — affiche une vue à la fois.
+function _vttTrayTab(tab) {
+  _trayTab = tab;
+  try { localStorage.setItem('vtt-tray-tab', tab); } catch (_) {}
+  document.querySelectorAll('#vtt-tray .vtt-tray-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('#vtt-tray .vtt-tray-view').forEach(v => v.classList.toggle('active', v.dataset.view === tab));
+}
 function _vttToggleOn() { _trayOnOpen  = !_trayOnOpen;  _saveTrayPref('on',  _trayOnOpen);  _renderTraySoon(); }
 function _vttToggleOff() { _trayOffOpen = !_trayOffOpen; _saveTrayPref('off', _trayOffOpen); _renderTraySoon(); }
 function _vttToggleNpc() { _trayNpcOpen = !_trayNpcOpen; _saveTrayPref('npc', _trayNpcOpen); _renderTraySoon(); }
@@ -7562,53 +7573,28 @@ export function _renderTraySoon() {
 function _renderTray() {
   if (!STATE.isAdmin) { _renderPageTabs(); return; }
   _renderPageList();
-  const el = document.getElementById('vtt-tray-tokens'); if (!el) return;
+  _renderLibSection();
 
-  // Sauve focus + caret du champ recherche : sans ça, chaque keystroke
-  // déclenche un rerender qui détruit l'input → focus perdu.
-  const ae = document.activeElement;
-  const searchFocused = ae?.classList?.contains('vtt-tray-search-input') && el.contains(ae);
-  const caretPos = searchFocused ? ae.selectionStart : null;
+  const onlineTs = Date.now();
+  const isOnline = uid => !!(uid && VS.presence[uid] && onlineTs - (VS.presence[uid].lastSeen || 0) < 120_000);
+  const inCombat = !!VS.session?.combat?.active;
 
-  const all      = Object.values(VS.tokens).map(e => e.data);
-  const onPage   = all.filter(t => t.pageId === VS.activePage?.id);
+  const all     = Object.values(VS.tokens).map(e => e.data);
+  const onPage  = all.filter(t => t.pageId === VS.activePage?.id);
   const reserveSeen = new Set();
-  const reserve  = all.filter(t => {
+  const reserve = all.filter(t => {
     if (t.pageId || t.type === 'enemy') return false;
     const key = _tokenEntityKey(t);
     if (!key) return true;
     if (reserveSeen.has(key)) return false;
-    reserveSeen.add(key);
-    return true;
-  });
-  const inCombat = !!VS.session?.combat?.active;
-
-  // Tokens placés sur d'autres pages (perso/PNJ seulement, déduplication par entité,
-  // et on cache les persos déjà présents sur la page active).
-  const entityOnCurrent = new Set();
-  for (const t of onPage) {
-    if (t.characterId) entityOnCurrent.add('c:' + t.characterId);
-    if (t.npcId)       entityOnCurrent.add('n:' + t.npcId);
-  }
-  const elsewhereRaw = all.filter(t =>
-    t.pageId && t.pageId !== VS.activePage?.id
-    && t.type !== 'enemy'
-    && (t.characterId || t.npcId)
-    && !entityOnCurrent.has((t.characterId ? 'c:' + t.characterId : 'n:' + t.npcId))
-  );
-  const elsewhereSeen = new Set();
-  const elsewhere = elsewhereRaw.filter(t => {
-    const k = t.characterId ? 'c:' + t.characterId : 'n:' + t.npcId;
-    if (elsewhereSeen.has(k)) return false;
-    elsewhereSeen.add(k);
-    return true;
+    reserveSeen.add(key); return true;
   });
 
-  // Filtre par type
-  const applyFilter = arr => _trayFilter === 'all' ? arr : arr.filter(t => t.type === _trayFilter);
+  const ae = document.activeElement;
+  const focusedSearch = ae?.classList?.contains('vtt-tray-search-input') ? ae.dataset.search : null;
+  const caretPos = focusedSearch != null ? ae.selectionStart : null;
 
-  // ── Item liste (sur la page) ──────────────────────────────────────
-  const mkItem = (t, placed) => {
+  const mkItem = (t) => {
     const ld = _live(t);
     const hpKnownL = ld.displayHp !== null && ld.displayHpMax !== null;
     const hp = hpKnownL ? ld.displayHp : 0, hpm = hpKnownL ? ld.displayHpMax : 1;
@@ -7618,10 +7604,7 @@ function _renderTray() {
       ? `<button class="vtt-tray-btn" data-vtt-fn="_vttDuplicateToken" data-vtt-args="${t.id}" title="Dupliquer">＋</button>` : '';
     const delBtn = t.type === 'enemy'
       ? `<button class="vtt-tray-btn vtt-tray-btn-del" data-vtt-fn="_vttDeleteToken" data-vtt-args="${t.id}" title="Supprimer">×</button>` : '';
-    const actionBtn = !placed
-      ? `<button class="vtt-tray-btn" data-vtt-fn="_vttPlace" data-vtt-args="${t.id}" title="Placer">▶</button>`
-      : `<button class="vtt-tray-btn" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="Retirer">↩</button>`;
-    // HP fraction visible pour les ennemis en combat
+    const actionBtn = `<button class="vtt-tray-btn" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="Retirer de la scène">↩</button>`;
     const hpFrac = inCombat && t.type === 'enemy' && hpKnownL
       ? `<span class="vtt-tray-hp-frac" style="color:${hpColor(rat)}">${hp}/${hpm}</span>` : '';
     return `<div class="vtt-tray-item ${VS.selected === t.id ? 'active' : ''}" data-vtt-fn="_vttSelectFromTray" data-vtt-args="${t.id}">
@@ -7641,214 +7624,107 @@ function _renderTray() {
     </div>`;
   };
 
-  // ── Ligne compacte (réserve) — 1 par ligne, nom complet, statut online ─
-  const _onlineTs = Date.now();
-  const isOnline = uid => !!(uid && VS.presence[uid] && _onlineTs - (VS.presence[uid].lastSeen || 0) < 120_000);
   const mkResLine = t => {
     const ld = _live(t);
     const typeIcon = t.type === 'player' ? '🧑' : '👤';
     const col = TYPE_COLOR[t.type] ?? '#888';
-    const showStatus = t.type === 'player';
-    const online = showStatus && isOnline(t.ownerId);
-    const statusDot = showStatus
-      ? `<span class="vtt-res-line-status ${online ? 'is-online' : ''}" title="${online ? 'En ligne' : 'Hors ligne'}"></span>`
-      : '';
+    const online = t.type === 'player' && isOnline(t.ownerId);
+    const statusDot = t.type === 'player'
+      ? `<span class="vtt-res-line-status ${online ? 'is-online' : ''}" title="${online ? 'En ligne' : 'Hors ligne'}"></span>` : '';
     const name = _esc(ld.displayName ?? t.name);
     return `<button class="vtt-res-line" data-vtt-fn="_vttPlace" data-vtt-args="${t.id}" title="Placer ${name}">
       <span class="vtt-res-line-dot" style="border-color:${col};color:${col}">
-        ${ld.displayImage
-          ? `<img src="${ld.displayImage}" alt="">`
-          : `<span>${typeIcon}</span>`}
+        ${ld.displayImage ? `<img src="${ld.displayImage}" alt="">` : `<span>${typeIcon}</span>`}
         ${statusDot}
       </span>
       <span class="vtt-res-line-name">${name}</span>
     </button>`;
   };
 
-  // Conservé pour la section "Sur d'autres pages" qui utilise toujours la grid.
-  const mkChip = t => {
-    const ld = _live(t);
-    const typeIcon = t.type === 'player' ? '🧑' : '👤';
-    const col = TYPE_COLOR[t.type] ?? '#888';
-    return `<button class="vtt-res-chip" data-vtt-fn="_vttPlace" data-vtt-args="${t.id}"
-        title="Placer ${_esc(ld.displayName ?? t.name)}">
-      <div class="vtt-res-chip-dot" style="border-color:${col};color:${col}">
-        ${ld.displayImage
-          ? `<img src="${ld.displayImage}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`
-          : `<span>${typeIcon}</span>`}
-      </div>
-      <span class="vtt-res-chip-name">${_esc(ld.displayName ?? t.name)}</span>
-    </button>`;
-  };
-
-  // ── Pills de filtre ───────────────────────────────────────────────
-  const filterPills = `<div class="vtt-tray-filters">
-    ${[['all','Tout'],['player','🧑'],['npc','👤'],['enemy','👹']].map(([v,l]) =>
-      `<button class="vtt-tray-fp${_trayFilter === v ? ' active' : ''}" data-vtt-fn="_vttTrayFilter" data-vtt-args="${v}">${l}</button>`
-    ).join('')}
-  </div>`;
-
-  // ── Sur la page — groupé par type ────────────────────────────────
-  const filteredPage = applyFilter(onPage);
-  let pageSec = '';
-  if (!filteredPage.length) {
-    pageSec = `<div class="vtt-tray-empty">${_trayFilter === 'all' ? 'Aucun token sur cette page' : 'Aucun ici'}</div>`;
-  } else {
-    const pagePlayers = filteredPage.filter(t => t.type === 'player');
-    const pageNpcs    = filteredPage.filter(t => t.type === 'npc');
-    let   pageEnemies = filteredPage.filter(t => t.type === 'enemy');
-
-    // En combat : ennemis triés par HP% croissant (blessés en premier)
-    if (inCombat && pageEnemies.length > 1) {
-      pageEnemies = [...pageEnemies].sort((a, b) => {
-        const la = _live(a), lb = _live(b);
-        const ra = (la.displayHp ?? 1) / Math.max(1, la.displayHpMax ?? 1);
-        const rb = (lb.displayHp ?? 1) / Math.max(1, lb.displayHpMax ?? 1);
-        return ra - rb; // plus blessé = plus haut
-      });
+  const scEl = document.getElementById('vtt-scene-tokens');
+  if (scEl) {
+    if (!onPage.length) {
+      scEl.innerHTML = `<div class="vtt-tray-empty">Aucun token sur cette scène</div>`;
+    } else {
+      const players = onPage.filter(t => t.type === 'player');
+      const npcs    = onPage.filter(t => t.type === 'npc');
+      let   enemies = onPage.filter(t => t.type === 'enemy');
+      if (inCombat && enemies.length > 1) {
+        enemies = [...enemies].sort((a, b) => {
+          const la = _live(a), lb = _live(b);
+          return ((la.displayHp ?? 1) / Math.max(1, la.displayHpMax ?? 1)) - ((lb.displayHp ?? 1) / Math.max(1, lb.displayHpMax ?? 1));
+        });
+      }
+      const multi = [players, npcs, enemies].filter(g => g.length).length > 1;
+      const grp = (icon, label, items) => !items.length ? ''
+        : (multi ? `<div class="vtt-tray-sublabel">${icon} ${label}</div>` : '') + items.map(mkItem).join('');
+      scEl.innerHTML = grp('🧑', 'Joueurs', players) + grp('👤', 'PNJ', npcs) + grp('👹', 'Ennemis', enemies);
     }
-
-    const multiType = [pagePlayers, pageNpcs, pageEnemies].filter(g => g.length).length > 1;
-    const mkGrp = (icon, label, items) => {
-      if (!items.length) return '';
-      const hdr = multiType ? `<div class="vtt-tray-sublabel">${icon} ${label}</div>` : '';
-      return hdr + items.map(t => mkItem(t, true)).join('');
-    };
-    pageSec = mkGrp('🧑', 'Joueurs', pagePlayers)
-            + mkGrp('👤', 'PNJ', pageNpcs)
-            + mkGrp('👹', 'Ennemis', pageEnemies);
   }
 
-  // ── Sur d'autres pages — chips avec "+" pour dupliquer ici ───────
-  const filteredElsewhere = applyFilter(elsewhere);
-  let elsewhereSec = '';
-  if (filteredElsewhere.length) {
-    const mkElsewhereChip = t => {
-      const ld = _live(t);
-      const typeIcon = t.type === 'player' ? '🧑' : '👤';
-      const col = TYPE_COLOR[t.type] ?? '#888';
-      const pageName = VS.pages[t.pageId]?.name || '?';
-      return `<button class="vtt-res-chip vtt-res-chip--elsewhere" data-vtt-fn="_vttDuplicateOnPage" data-vtt-args="${t.id}"
-          title="${_esc(ld.displayName ?? t.name)} — sur « ${_esc(pageName)} ». Clic = placer aussi ici (HP partagés).">
-        <div class="vtt-res-chip-dot" style="border-color:${col};color:${col}">
-          ${ld.displayImage
-            ? `<img src="${ld.displayImage}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`
-            : `<span>${typeIcon}</span>`}
-          <span class="vtt-res-chip-plus">+</span>
-        </div>
-        <span class="vtt-res-chip-name">${_esc(ld.displayName ?? t.name)}</span>
-        <span class="vtt-res-chip-sub">${_esc(pageName)}</span>
-      </button>`;
-    };
-    elsewhereSec = `<div class="vtt-tray-sect">
-      <div class="vtt-tray-sect-hd">
-        <span>🗂 Sur d'autres pages</span>
-        <span class="vtt-tray-count">${filteredElsewhere.length}</span>
-      </div>
-      <div class="vtt-reserve-grid">${filteredElsewhere.map(mkElsewhereChip).join('')}</div>
-    </div>`;
-  }
-
-  // ── Réserve — toujours dépliée, triée par utilité (online > offline > PNJ) ─
-  // Objectif : 1 coup d'œil = je sais qui placer ; 1 clic = c'est placé.
-  const filteredRes = applyFilter(reserve);
-  let reserveSec = '';
-  if (filteredRes.length) {
+  const reEl = document.getElementById('vtt-reserve-body');
+  if (reEl) {
     const sortByName = arr => [...arr].sort((a, b) =>
-      (_live(a).displayName ?? a.name ?? '').localeCompare(_live(b).displayName ?? b.name ?? '', 'fr', { sensitivity:'base' }));
-    const searched = filteredRes.filter(t =>
-      !_traySearch || _searchIncludes(_live(t).displayName ?? t.name ?? '', _traySearch));
-
-    // Tri par utilité MJ : ceux qui jouent maintenant en haut.
+      (_live(a).displayName ?? a.name ?? '').localeCompare(_live(b).displayName ?? b.name ?? '', 'fr', { sensitivity: 'base' }));
+    const searched = reserve.filter(t => !_traySearch || _searchIncludes(_live(t).displayName ?? t.name ?? '', _traySearch));
     const presentPlayers = sortByName(searched.filter(t => t.type === 'player' && isOnline(t.ownerId)));
     const absentPlayers  = sortByName(searched.filter(t => t.type === 'player' && !isOnline(t.ownerId)));
     const npcs           = sortByName(searched.filter(t => t.type === 'npc'));
-
-    // La recherche force l'ouverture des sous-sections — sinon le MJ tape
-    // et ne voit aucun résultat parce que la section est repliée.
     const forceOpen = !!_traySearch;
-    const mkBlock = (label, items, toggleFn = null, open = true) => {
+    const mkBlock = (label, items, toggleFn, open) => {
       if (!items.length) return '';
-      const collapsible = !!toggleFn;
-      const isOpen = collapsible ? (open || forceOpen) : true;
-      const caret = collapsible ? `<span class="vtt-tray-sub-caret">${isOpen ? '▾' : '▸'}</span>` : '';
-      const attrs = collapsible ? `data-vtt-fn="${toggleFn}"` : '';
-      const cls = `vtt-tray-sublabel${collapsible ? ' vtt-tray-sub-toggle' : ''}`;
-      const body = isOpen ? items.map(mkResLine).join('') : '';
-      return `<div class="${cls}" ${attrs}>${caret}${label} <span class="vtt-tray-sublabel-n">${items.length}</span></div>${body}`;
+      const isOpen = open || forceOpen;
+      return `<div class="vtt-tray-sublabel vtt-tray-sub-toggle" data-vtt-fn="${toggleFn}">`
+        + `<span class="vtt-tray-sub-caret">${isOpen ? '▾' : '▸'}</span>${label} `
+        + `<span class="vtt-tray-sublabel-n">${items.length}</span></div>`
+        + (isOpen ? items.map(mkResLine).join('') : '');
     };
-
-    const clrBtn = _traySearch
-      ? `<button class="vtt-tray-search-clr" data-vtt-fn="_vttTrayClearSearch" title="Effacer">✕</button>` : '';
-
-    const scrollContent = searched.length
-      ? mkBlock('🟢 En ligne',   presentPlayers, '_vttToggleOn',  _trayOnOpen)
-        + mkBlock('🕓 Hors ligne', absentPlayers,  '_vttToggleOff', _trayOffOpen)
-        + mkBlock('👤 PNJ',        npcs,           '_vttToggleNpc', _trayNpcOpen)
-      : `<div class="vtt-tray-empty">Aucun résultat</div>`;
-
-    reserveSec = `<div class="vtt-tray-sect">
-      <div class="vtt-tray-sect-hd">
-        <span>📦 Réserve</span>
-        <span class="vtt-tray-count">${filteredRes.length}</span>
-      </div>
+    const clrBtn = _traySearch ? `<button class="vtt-tray-search-clr" data-vtt-fn="_vttTrayClearSearch" title="Effacer">✕</button>` : '';
+    const list = searched.length
+      ? mkBlock('🟢 En ligne', presentPlayers, '_vttToggleOn', _trayOnOpen)
+        + mkBlock('🕓 Hors ligne', absentPlayers, '_vttToggleOff', _trayOffOpen)
+        + mkBlock('👤 PNJ', npcs, '_vttToggleNpc', _trayNpcOpen)
+      : `<div class="vtt-tray-empty">${reserve.length ? 'Aucun résultat' : 'Réserve vide'}</div>`;
+    reEl.innerHTML = `
       <div class="vtt-tray-search">
         <span class="vtt-tray-search-ic">🔍</span>
-        <input type="text" class="vtt-tray-search-input" placeholder="Rechercher…"
-          value="${_esc(_traySearch)}"
-          data-vtt-fn="_vttTraySearch" data-vtt-on="input" data-vtt-args="$value">
+        <input type="text" class="vtt-tray-search-input" data-search="reserve" placeholder="Rechercher un perso…"
+          value="${_esc(_traySearch)}" data-vtt-fn="_vttTraySearch" data-vtt-on="input" data-vtt-args="$value">
         ${clrBtn}
       </div>
-      <div class="vtt-res-scroll">${scrollContent}</div>
-    </div>`;
+      <div class="vtt-res-scroll">${list}</div>`;
   }
 
-  // ── Bestiaire ─────────────────────────────────────────────────────
-  const showBst = _trayFilter === 'all' || _trayFilter === 'enemy';
-  const bsts = Object.values(VS.bestiary);
-  const bstGrid = showBst
-    ? (bsts.length
-        ? bsts.map(b => {
-            const img = b.photoURL || b.photo || b.avatar || b.imageUrl || '';
-            const init = (b.nom || '?')[0].toUpperCase();
-            return `<button class="vtt-bst-tile" data-vtt-fn="_vttPlaceFromBestiary" data-vtt-args="${b.id}"
-                title="${_esc(b.nom || 'Créature')} · PV ${parseInt(b.pvMax) || '?'}">
-              ${img ? `<img src="${img}" alt="${_esc(b.nom || '')}">` : `<span class="vtt-bst-icon">${init}</span>`}
-              <div class="vtt-bst-name">${_esc((b.nom || 'Créature').slice(0, 8))}</div>
-            </button>`;
-          }).join('')
-        : `<div class="vtt-tray-empty">Bestiaire vide</div>`)
-    : '';
-
-  el.innerHTML = `
-    ${filterPills}
-    <div class="vtt-tray-sect">
-      <div class="vtt-tray-sect-hd">
-        <span>🗺 Sur la page</span>
-        <span class="vtt-tray-count">${filteredPage.length}${filteredPage.length !== onPage.length ? `/${onPage.length}` : ''}</span>
+  const beEl = document.getElementById('vtt-bestiary-body');
+  if (beEl) {
+    const bsts = Object.values(VS.bestiary)
+      .filter(b => !_bstSearch || _searchIncludes(b.nom || '', _bstSearch))
+      .sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
+    const clrBtn = _bstSearch ? `<button class="vtt-tray-search-clr" data-vtt-fn="_vttBstClearSearch" title="Effacer">✕</button>` : '';
+    const grid = bsts.length
+      ? `<div class="vtt-bst-grid">${bsts.map(b => {
+          const img = b.photoURL || b.photo || b.avatar || b.imageUrl || '';
+          const init = (b.nom || '?')[0].toUpperCase();
+          return `<button class="vtt-bst-tile" data-vtt-fn="_vttPlaceFromBestiary" data-vtt-args="${b.id}"
+              title="${_esc(b.nom || 'Créature')} · PV ${parseInt(b.pvMax) || '?'}">
+            ${img ? `<img src="${img}" alt="${_esc(b.nom || '')}">` : `<span class="vtt-bst-icon">${init}</span>`}
+            <div class="vtt-bst-name">${_esc((b.nom || 'Créature').slice(0, 10))}</div>
+          </button>`;
+        }).join('')}</div>`
+      : `<div class="vtt-tray-empty">${Object.keys(VS.bestiary).length ? 'Aucun résultat' : 'Bestiaire vide'}</div>`;
+    beEl.innerHTML = `
+      <div class="vtt-tray-search">
+        <span class="vtt-tray-search-ic">🔍</span>
+        <input type="text" class="vtt-tray-search-input" data-search="bestiary" placeholder="Rechercher une créature…"
+          value="${_esc(_bstSearch)}" data-vtt-fn="_vttBstSearch" data-vtt-on="input" data-vtt-args="$value">
+        ${clrBtn}
       </div>
-      ${pageSec}
-    </div>
-    ${elsewhereSec}
-    ${reserveSec}
-    ${showBst ? `<div class="vtt-tray-sect">
-      <div class="vtt-tray-sect-hd" style="justify-content:space-between">
-        <span>👹 Bestiaire</span>
-        <button class="vtt-tray-add-btn" data-vtt-fn="_vttCreateEnemy" title="Créer un ennemi">＋</button>
-      </div>
-      <div class="vtt-bst-grid">${bstGrid}</div>
-    </div>` : ''}
-  `;
+      <div class="vtt-bst-scroll">${grid}</div>`;
+  }
 
-  // Restaure le focus + caret de la recherche après le rerender.
-  if (searchFocused) {
-    const inp = el.querySelector('.vtt-tray-search-input');
-    if (inp) {
-      inp.focus();
-      if (caretPos != null) {
-        try { inp.setSelectionRange(caretPos, caretPos); } catch (_) {}
-      }
-    }
+  if (focusedSearch != null) {
+    const inp = document.querySelector(`.vtt-tray-search-input[data-search="${focusedSearch}"]`);
+    if (inp) { inp.focus(); if (caretPos != null) { try { inp.setSelectionRange(caretPos, caretPos); } catch (_) {} } }
   }
 }
 
@@ -12090,25 +11966,28 @@ function _buildHtml() {
     <div class="vtt-mini-panel" id="vtt-mini-panel"></div>
     ${mj?`
     <div class="vtt-tray" id="vtt-tray">
-      <div class="vtt-tray-section">
-        <div class="vtt-tray-section-hd">
-          <span>Pages</span>
-          <button class="vtt-tray-add-btn" data-vtt-fn="_vttAddPage" title="Nouvelle page">＋</button>
-        </div>
-        <div id="vtt-tray-pages"><div class="vtt-tray-empty">Chargement…</div></div>
+      <div class="vtt-tray-tabs" role="tablist">
+        <button class="vtt-tray-tab${_trayTab==='scenes'?' active':''}" data-tab="scenes" data-vtt-fn="_vttTrayTab" data-vtt-args="scenes" title="Scènes &amp; pages"><span class="vtt-tt-ic">🗺</span>Scènes</button>
+        <button class="vtt-tray-tab${_trayTab==='reserve'?' active':''}" data-tab="reserve" data-vtt-fn="_vttTrayTab" data-vtt-args="reserve" title="Réserve (joueurs / PNJ)"><span class="vtt-tt-ic">👥</span>Réserve</button>
+        <button class="vtt-tray-tab${_trayTab==='bestiary'?' active':''}" data-tab="bestiary" data-vtt-fn="_vttTrayTab" data-vtt-args="bestiary" title="Bestiaire"><span class="vtt-tt-ic">🐾</span>Bestiaire</button>
+        <button class="vtt-tray-tab${_trayTab==='images'?' active':''}" data-tab="images" data-vtt-fn="_vttTrayTab" data-vtt-args="images" title="Bibliothèque d'images"><span class="vtt-tt-ic">🖼</span>Images</button>
       </div>
-      <div class="vtt-tray-section">
-        <div id="vtt-tray-tokens"></div>
-      </div>
-      <div class="vtt-tray-section vtt-tray-section--lib">
-        <div class="vtt-tray-section-hd vtt-tray-collapsible" data-vtt-fn="_vttLibToggle">
-          <span>📁 Bibliothèque</span>
-          <div style="display:flex;gap:3px;align-items:center">
-            <button class="vtt-tray-add-btn" data-vtt-fn="_vttLibNewFolder" title="Nouveau dossier">📁</button>
-            <span id="vtt-lib-toggle" class="vtt-tray-count open">▲</span>
-          </div>
+      <div class="vtt-tray-views">
+        <div class="vtt-tray-view${_trayTab==='scenes'?' active':''}" data-view="scenes">
+          <div class="vtt-tray-section-hd"><span>Pages</span><button class="vtt-tray-add-btn" data-vtt-fn="_vttAddPage" title="Nouvelle page">＋</button></div>
+          <div id="vtt-tray-pages"><div class="vtt-tray-empty">Chargement…</div></div>
+          <div class="vtt-tray-section-hd vtt-scene-tok-hd"><span>🗺 Sur la scène</span></div>
+          <div id="vtt-scene-tokens"></div>
         </div>
-        <div id="vtt-tray-library"></div>
+        <div class="vtt-tray-view${_trayTab==='reserve'?' active':''}" data-view="reserve"><div id="vtt-reserve-body"></div></div>
+        <div class="vtt-tray-view${_trayTab==='bestiary'?' active':''}" data-view="bestiary">
+          <div class="vtt-tray-section-hd"><span>👹 Bestiaire</span><button class="vtt-tray-add-btn" data-vtt-fn="_vttCreateEnemy" title="Créer un ennemi">＋</button></div>
+          <div id="vtt-bestiary-body"></div>
+        </div>
+        <div class="vtt-tray-view${_trayTab==='images'?' active':''}" data-view="images">
+          <div class="vtt-tray-section-hd"><span>📁 Bibliothèque</span><button class="vtt-tray-add-btn" data-vtt-fn="_vttLibNewFolder" title="Nouveau dossier">📁</button></div>
+          <div id="vtt-tray-library"></div>
+        </div>
       </div>
     </div>`:''}
     <div class="vtt-canvas-wrap" id="vtt-canvas-wrap"></div>
@@ -12602,6 +12481,9 @@ const VTT_ACTIONS = {
   _vttTrayClearSearch,
   _vttTrayFilter,
   _vttTraySearch,
+  _vttBstSearch,
+  _vttBstClearSearch,
+  _vttTrayTab,
   _vttTriggerConcentrationSave,
   _vttTriggerSuspendedSpell,
   _vttUploadClick,
