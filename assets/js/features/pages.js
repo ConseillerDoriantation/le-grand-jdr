@@ -14,9 +14,6 @@ import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
 import { dedupeQuestParticipants } from '../shared/participants.js';
 
-// TODO: mettre le code js des autres pages dans leurs fichiers respectives pour réduire la taille de ce fichier et importer comme ça:
-import { renderCollectionPage } from '../features/collection.js';
-import renderBastionPage from '../features/bastion.js';
 import { charSession } from '../shared/char-session.js';
 import { openAdventureSwitcher } from '../core/layout.js';
 import { navigate } from '../core/navigation.js';
@@ -1161,7 +1158,10 @@ const PAGES = {
   },
 
 // ─── BASTION ────────────────────────────────────────────────────────────────
-  bastion: renderBastionPage,
+  async bastion() {
+    const { default: renderBastionPage } = await import('./bastion.js');
+    await renderBastionPage();
+  },
 
   // ─── STORY ──────────────────────────────────────────────────────────────────
   async story() {
@@ -1241,6 +1241,7 @@ const PAGES = {
 
   // ─── COLLECTION ─────────────────────────────────────────────────────────────
   async collection() {
+    const { renderCollectionPage } = await import('./collection.js');
     await renderCollectionPage();
   },
 

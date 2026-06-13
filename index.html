@@ -36,10 +36,9 @@
 
   <!-- Feuilles de style GLOBALES / partagées, chargées au boot (ordre = cascade).
        Conventions de nommage documentées dans assets/css/main.css.
-       Les feuilles spécifiques à une page (shop, vtt, agenda, recipes, account)
-       sont chargées en lazy à la navigation — voir FEATURE_CSS dans
-       assets/js/core/navigation.js. Garder ici uniquement le global et les
-       feuilles partagées par le dashboard / plusieurs pages. -->
+       Les feuilles spécifiques aux pages sont chargées en lazy à la navigation
+       via FEATURE_CSS dans assets/js/core/navigation.js. Garder ici uniquement
+       le global et les petits composants transverses déclenchables hors route. -->
   <link rel="stylesheet" href="./assets/css/tokens.css">
   <link rel="stylesheet" href="./assets/css/base.css">
   <link rel="stylesheet" href="./assets/css/auth.css">
@@ -47,14 +46,7 @@
   <link rel="stylesheet" href="./assets/css/layout.css">
   <link rel="stylesheet" href="./assets/css/responsive.css">
   <link rel="stylesheet" href="./assets/css/features.css">
-  <link rel="stylesheet" href="./assets/css/characters.css">
-  <link rel="stylesheet" href="./assets/css/histoire.css">
-  <link rel="stylesheet" href="./assets/css/npcs.css">
-  <link rel="stylesheet" href="./assets/css/quests.css">
-  <link rel="stylesheet" href="./assets/css/bestiary.css">
-  <link rel="stylesheet" href="./assets/css/bastion.css">
   <link rel="stylesheet" href="./assets/css/rich-text.css">
-  <link rel="stylesheet" href="./assets/css/dashboard.css">
   <link rel="stylesheet" href="./assets/css/quick-view.css">
   <link rel="stylesheet" href="./assets/css/command-palette.css">
   <link rel="stylesheet" href="./assets/css/print.css">

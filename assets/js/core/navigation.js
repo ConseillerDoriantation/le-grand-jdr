@@ -36,22 +36,24 @@ const FEATURE_MAP = {
 const _loaded = new Set();
 
 // ── CSS chargé en lazy par feature ────────────────────────────────────────
-// Les feuilles spécifiques à une page sont retirées de index.html (boot allégé
-// d'environ 11 000 lignes) et chargées à la 1re navigation vers la page, en
-// parallèle de son module JS. Restent eager : le global + les feuilles partagées
-// par le dashboard ou plusieurs pages (characters, histoire, npcs, quests,
-// bestiary, bastion, features…). Les primitives partagées rendues hors de leur
-// feuille (.btn-secondary, .btn-arcane) ont été extraites vers features.css.
-// Mapping multi-pages pour les composants partagés :
-//   vtt.css ↔ bestiaire (le shop-picker rend des classes vtt-)
-//   recipes.css ↔ agenda (rend des classes rec-).
+// Les feuilles spécifiques à une page sont retirées de index.html et chargées
+// à la 1re navigation vers la page, en parallèle de son module JS. Restent
+// eager : le global, les primitives partagées, quick-view, palette et print.
+// Certaines features réutilisent les cartes de sort/personnage : characters.css
+// est donc aussi chargé avec shop, bestiaire et vtt.
 const FEATURE_CSS = {
-  shop:      ['shop.css'],
-  vtt:       ['vtt.css'],
-  bestiaire: ['vtt.css'],            // shop-picker stylé en vtt-
-  agenda:    ['agenda.css', 'recipes.css'],
-  recettes:  ['recipes.css'],
-  account:   ['account.css'],
+  dashboard:  ['quests.css', 'bastion.css', 'dashboard.css'],
+  characters: ['characters.css'],
+  shop:       ['characters.css', 'shop.css'],
+  npcs:       ['npcs.css'],
+  story:      ['histoire.css'],
+  histoire:   ['histoire.css'],
+  bastion:    ['bastion.css'],
+  vtt:        ['characters.css', 'vtt.css'],
+  bestiaire:  ['characters.css', 'bestiary.css', 'vtt.css'],
+  agenda:     ['agenda.css', 'recipes.css'],
+  recettes:   ['recipes.css'],
+  account:    ['account.css'],
 };
 const _cssLoaded = new Set();
 function _loadCss(file) {
