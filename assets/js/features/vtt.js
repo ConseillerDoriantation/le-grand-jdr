@@ -4536,6 +4536,19 @@ let _suspendedTriggerActive = false;
 //    encore ; toutes les options de la catégorie `only` sont listées, et chaque carte entre
 //    en mode visée (_vttAimOpt) au lieu de lancer directement.
 // `only` ∈ 'weapons' | 'items' | 'spells' | 'basic' | null restreint les sections affichées.
+// Méta des runes (icône/couleur) — utilisée par _optBtn pour les pastilles de
+// rune sur les cartes d'action. (Miroir de la copie de vtt-mini-fiche.js.)
+const _VTT_RUNE_META = {
+  'Puissance':{icon:'⚔️',color:'#ef4444'}, 'Protection':{icon:'💚',color:'#22c38e'},
+  'Amplification':{icon:'🌐',color:'#4f8cff'}, 'Dispersion':{icon:'🎯',color:'#a855f7'},
+  'Enchantement':{icon:'✨',color:'#e8b84b'}, 'Affliction':{icon:'💀',color:'#8b5cf6'},
+  'Invocation':{icon:'🐾',color:'#a16207'}, 'Lacération':{icon:'🩸',color:'#dc2626'},
+  'Chance':{icon:'🍀',color:'#facc15'}, 'Durée':{icon:'⏱️',color:'#06b6d4'},
+  'Concentration':{icon:'🧠',color:'#6366f1'}, 'Réaction':{icon:'🔄',color:'#ec4899'},
+  'Action Bonus':{icon:'✴️',color:'#f97316'},
+  'Déclenchement':{icon:'⚡',color:'#f97316'},
+};
+
 async function _execAttack(srcId, tgtId, exOpts = {}) {
   const only  = exOpts.only || null;
   const noTgt = tgtId == null;
