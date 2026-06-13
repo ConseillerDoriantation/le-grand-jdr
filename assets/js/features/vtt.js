@@ -11878,6 +11878,23 @@ async function _vttPasteClipboard() {
   if (parts.length) showNotif(`📌 Collé : ${parts.join(' + ')}`, 'success');
 }
 
+// Échap : ferme le premier panneau flottant ouvert (dés, musique, butin,
+// repos, émotes) ou le HUD d'action. Renvoie true si quelque chose a été fermé.
+function _vttEscapeCloseFloaters() {
+  const panels = [
+    ['vtt-dice-panel',  _closeDicePanel],
+    ['vtt-music-panel', _closeMusicPanel],
+    ['vtt-loot-panel',  _closeLootPanel],
+    ['vtt-rest-panel',  _closeShortRest],
+  ];
+  for (const [id, close] of panels) {
+    if (document.getElementById(id)?.dataset.open === '1') { close(); return true; }
+  }
+  if (document.getElementById('vtt-emote-picker')?.classList.contains('open')) { _closeEmotePicker(); return true; }
+  if (document.getElementById('vtt-action-hud')?.classList.contains('show'))    { _hideActBar();      return true; }
+  return false;
+}
+
 function _keyHandler(e) {
   if (!document.getElementById('vtt-canvas-wrap')) return;
   if (e.target.matches('input,textarea,select')) return;
@@ -11890,7 +11907,21 @@ function _keyHandler(e) {
     if (_vttClipboard.tokens.length || _vttClipboard.annots.length) { e.preventDefault(); _vttPasteClipboard(); }
     return;
   }
-  if (e.key==='Escape') { if (VS.tool !== 'select') _setTool('select'); else _deselect(); }
+  if (e.key === 'Escape') {
+    // a) Modale ouverte → la modale gère sa propre fermeture (ne pas désélectionner derrière).
+    if (document.getElementById('modal-overlay')?.classList.contains('show')) return;
+    // b) Visée en cours → écouteur dédié (_aimCancel) s'en charge.
+    if (_aimOpt || _aimSrcId) return;
+    // c) Fermer un panneau flottant / le HUD d'action.
+    if (_vttEscapeCloseFloaters()) { e.preventDefault(); return; }
+    // d) Outil ≠ sélection → revenir à l'outil sélection.
+    if (VS.tool !== 'select') { _setTool('select'); e.preventDefault(); return; }
+    // e) Désélectionner tokens ET dessins.
+    if (VS.selected || VS.selectedMulti.size || _selectedAnnotId || _selectedAnnotIds.size) {
+      _deselect(); _deselectAnnot(); e.preventDefault();
+    }
+    return;
+  }
   // Raccourci R : bascule l'outil règle (sans modificateur, hors saisie)
   if ((e.key==='r' || e.key==='R') && !e.ctrlKey && !e.metaKey && !e.altKey) {
     e.preventDefault();
