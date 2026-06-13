@@ -275,7 +275,7 @@ Occurrences browser natif (ne pas toucher) : `scrollTo`, `scrollY`, `getSelectio
 
 ## Ordre recommande
 
-1. `vtt.js` (32) : migrer le dispatcher `data-vtt-fn` de `window[fn]` vers un registre local (`VTT_ACTIONS`). Elimine le besoin de l `Object.assign` et des 4 closures. Supprime aussi le `closeModalDirect` bridge dans `story.js`.
+1. `vtt.js` — ~~migrer le dispatcher `data-vtt-fn` vers un registre local `VTT_ACTIONS`~~ **FAIT** : le dispatcher résout via `VTT_ACTIONS[el.dataset.vttFn]` (vtt.js ~L251) ; il reste un fallback `|| window[fnName]` dans `_vttCloseAnd` (vtt.js ~L125) à supprimer une fois toutes les fns enregistrées. `closeModalDirect` est désormais une `data-action` dans `story.js` (plus un bridge `window`).
 2. `pages.js` (15) : se resorbe au fur et a mesure que les modules cibles (bastion dashboard, recettes) exportent leurs fonctions.
 3. `histoire.js` (21) : necessite Sprint 2 — migration `onmousedown`/`ondragstart` → `data-action`.
 

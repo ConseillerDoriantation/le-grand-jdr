@@ -115,7 +115,7 @@ export function bindImageUploadDropZone(dropEl, {
   return { destroy };
 }
 
-// ── Utilitaire : simple upload JPEG/PNG sans crop (uploadImage.js) ────────────
+// ── Utilitaire : simple upload JPEG/PNG sans crop ────────────────────────────
 
 function _resizeDimensions(w, h, max = 400) {
   if (w <= max && h <= max) return { w, h };

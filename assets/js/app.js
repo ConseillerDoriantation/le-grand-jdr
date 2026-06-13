@@ -27,11 +27,10 @@ import { openAdventureSwitcher }  from './core/layout.js';
 import { initTheme, toggleTheme } from './shared/theme.js';
 
 // ── Modules chargés au boot (nécessaires immédiatement) ──────────────────────
-// uploadImage  : expose window.previewUploadPng/Jpeg (utilisé dans tout le HTML)
-// character-photo: expose window.openCharacterPhotoPicker (utilisé dès la fiche perso)
-import './features/uploadImage.js';
+// character-photo : enregistre à l'import un handler de clic délégué pour les
+//   actions data-action="open-character-photo" / "delete-character-photo".
 import './features/character-photo.js';
-// upload-cloudinary expose window._cloudinaryConfigure (bouton 🖼️ du sidebar)
+// upload-cloudinary : openCloudinaryConfigModal, câblé via l'action `cloudinaryConfig`.
 import { openCloudinaryConfigModal } from './shared/upload-cloudinary.js';
 
 // Recherche globale (Ctrl+K / Cmd+K) — auto-init à l'import

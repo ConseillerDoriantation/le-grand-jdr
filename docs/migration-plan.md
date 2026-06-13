@@ -43,12 +43,17 @@ Fichiers prioritaires : characters.js (~30 onclick), shop.js, npcs.js
 document.getElementById('btn-login')?.addEventListener('click', doLogin);
 ```
 
-## Sprint 4 — Router lazy avec import() dynamique
+## Sprint 4 — Router lazy avec import() dynamique — **FAIT**
+
+Implémenté dans `core/navigation.js` via `FEATURE_MAP` (page → `import()` dynamique,
+module importé une fois puis caché). CSS également lazy par feature via `FEATURE_CSS`.
 
 ```js
-const ROUTES = {
-  dashboard:  () => import('./features/pages.js').then(m => m.renderDashboard()),
-  characters: () => import('./features/characters.js').then(m => m.renderCharacters()),
+// core/navigation.js (extrait)
+const FEATURE_MAP = {
+  characters: () => import('../features/characters.js'),
+  shop:       () => import('../features/shop.js'),
+  // …
 };
 ```
 

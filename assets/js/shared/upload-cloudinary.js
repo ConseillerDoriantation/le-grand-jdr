@@ -222,5 +222,3 @@ function _esc(s) {
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;',
   })[c]);
 }
-
-// Exposition window pour appels depuis attributs inline / délégation
