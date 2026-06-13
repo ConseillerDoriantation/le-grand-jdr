@@ -3865,6 +3865,60 @@
 
 /* ── Notes ──────────────────────────────────────────────────────── */
 .vtt-ms-notes { display: flex; flex-direction: column; gap: .4rem; }
+/* ── Mini-fiche : onglet Compte (or) ───────────────────────────── */
+.vtt-ms-cpt { display: flex; flex-direction: column; gap: .5rem; }
+.vtt-ms-cpt-solde {
+  display: flex; align-items: baseline; justify-content: space-between; gap: .5rem;
+  padding: .4rem .55rem; border-radius: 8px;
+  background: var(--gold-glow, color-mix(in srgb, var(--gold) 10%, transparent));
+  border: 1px solid color-mix(in srgb, var(--gold) 28%, var(--border));
+}
+.vtt-ms-cpt-solde-main { font-size: 1.05rem; color: var(--gold); }
+.vtt-ms-cpt-solde-main strong { font-weight: 800; }
+.vtt-ms-cpt-or { font-size: .64rem; color: var(--text-muted); margin-left: .15rem; }
+.vtt-ms-cpt-solde-sub { font-size: .72rem; font-weight: 700; }
+.vtt-ms-cpt-solde-sub .pos { color: var(--emerald, #22c38e); }
+.vtt-ms-cpt-solde-sub .neg { color: #ef6a6a; }
+
+.vtt-ms-cpt-add { display: flex; flex-direction: column; gap: .3rem; }
+.vtt-ms-cpt-lib, .vtt-ms-cpt-amt {
+  width: 100%; box-sizing: border-box;
+  padding: .3rem .45rem; font-size: .72rem;
+  background: var(--bg-elevated); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+}
+.vtt-ms-cpt-lib:focus, .vtt-ms-cpt-amt:focus { outline: none; border-color: var(--gold); }
+.vtt-ms-cpt-btns { display: flex; gap: .3rem; }
+.vtt-ms-cpt-btn {
+  flex: 1; padding: .34rem; font-size: .7rem; font-weight: 700;
+  border-radius: 6px; cursor: pointer; transition: filter .12s;
+}
+.vtt-ms-cpt-btn.pos { color: var(--emerald, #22c38e); background: rgba(34,195,142,.12); border: 1px solid rgba(34,195,142,.4); }
+.vtt-ms-cpt-btn.neg { color: #ef6a6a; background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.35); }
+.vtt-ms-cpt-btn:hover { filter: brightness(1.2); }
+
+.vtt-ms-cpt-cols { display: flex; flex-direction: column; gap: .45rem; }
+.vtt-ms-cpt-col-hd { font-size: .66rem; font-weight: 800; letter-spacing: .02em; margin-bottom: .15rem; }
+.vtt-ms-cpt-col-hd.pos { color: var(--emerald, #22c38e); }
+.vtt-ms-cpt-col-hd.neg { color: #ef6a6a; }
+.vtt-ms-cpt-empty { font-size: .66rem; color: var(--text-muted); padding: .15rem .1rem; }
+.vtt-ms-cpt-row {
+  display: flex; align-items: center; gap: .4rem;
+  padding: .22rem .35rem; border-radius: 5px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.vtt-ms-cpt-row:hover { background: color-mix(in srgb, var(--gold) 5%, transparent); }
+.vtt-ms-cpt-row-lib { flex: 1; min-width: 0; font-size: .72rem; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vtt-ms-cpt-row-amt { font-size: .74rem; font-weight: 800; white-space: nowrap; }
+.vtt-ms-cpt-row-amt.pos { color: var(--emerald, #22c38e); }
+.vtt-ms-cpt-row-amt.neg { color: #ef6a6a; }
+.vtt-ms-cpt-del {
+  background: none; border: none; cursor: pointer; padding: 0 .1rem;
+  font-size: .72rem; opacity: .5; transition: opacity .12s;
+}
+.vtt-ms-cpt-del:hover { opacity: 1; }
+
 .vtt-ms-note-add {
   width: 100%;
   padding: .35rem;

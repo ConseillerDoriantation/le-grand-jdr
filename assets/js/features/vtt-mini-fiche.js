@@ -16,9 +16,10 @@ import { openModal, confirmModal, promptModal } from '../shared/modal.js';
 import { getArmorSetData } from '../shared/equipment-utils.js';
 import { calcSpellDuration, calcSpellTargets } from '../shared/spell-runes.js';
 import { getDamageTypeById } from '../shared/damage-types.js';
-import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse,
+import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, calcOr,
          computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, getMod,
          sortCharactersForDisplay } from '../shared/char-stats.js';
+import { useGold } from '../shared/economy.js';
 import { _chrRef, _MS_BONUS_BUFF, _STAT_COLOR, _damageTypes, _effectDisplay, _vttSortDmgFormula,
          _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode, _vttDisplayRunes } from './vtt.js'; // circ.
 import { _renderPresenceCol } from './vtt-presence.js'; // circ. (toggle mini → refresh colonne)
@@ -359,7 +360,12 @@ async function _vttMsConfirmSend(senderCharId, senderUid, invIndex, recipCharId)
     batch.update(_chrRef(recipCharId), { inventaire: recipInv });
     await batch.commit();
     showNotif(`${item.nom||'Objet'} envoyé à ${recip.nom||'joueur'}`, 'success');
-  } catch(e) { console.error('[vtt] send item', e); showNotif('Erreur envoi', 'error'); }
+  } catch(e) {
+    console.error('[vtt] send item', e);
+    showNotif(e?.code === 'permission-denied'
+      ? "Envoi refusé : règle Firestore d'inventaire manquante (don d'objet)"
+      : 'Erreur envoi', 'error');
+  }
 }
 
 // Supprime définitivement un exemplaire de l'inventaire (sans destinataire).
@@ -662,6 +668,94 @@ function _msTabSorts(c, uid, canEdit) {
     <div class="vtt-ms-filter-empty" data-kind="sorts" style="display:none">Aucun sort ne correspond.</div>`;
 }
 
+// ─── Onglet Compte (or : recettes / dépenses) ─────────────────────
+// Réutilise la couche economy.js (useGold) + le modèle c.compte de la fiche.
+function _msTabCompte(c, uid, canEdit) {
+  const compte   = c?.compte || { recettes: [], depenses: [] };
+  const recettes = compte.recettes || [];
+  const depenses = compte.depenses || [];
+  const totalR = recettes.reduce((s, r) => s + (parseFloat(r?.montant) || 0), 0);
+  const totalD = depenses.reduce((s, d) => s + (parseFloat(d?.montant) || 0), 0);
+  const solde  = calcOr(c);
+
+  const addForm = canEdit ? `
+    <div class="vtt-ms-cpt-add">
+      <input id="vtt-ms-cpt-lib" class="vtt-ms-cpt-lib" type="text" placeholder="Libellé (ex. Vente potion)" maxlength="60">
+      <input id="vtt-ms-cpt-amt" class="vtt-ms-cpt-amt" type="number" min="0" step="1" placeholder="0" inputmode="numeric"
+        onkeydown="if(event.key==='Enter')this.blur()">
+      <div class="vtt-ms-cpt-btns">
+        <button class="vtt-ms-cpt-btn pos" data-vtt-fn="_vttMsCompteAdd" data-vtt-args="${c.id}|${uid}|1"  title="Ajouter une recette">+ Recette</button>
+        <button class="vtt-ms-cpt-btn neg" data-vtt-fn="_vttMsCompteAdd" data-vtt-args="${c.id}|${uid}|-1" title="Ajouter une dépense">− Dépense</button>
+      </div>
+    </div>` : '';
+
+  // Liste compacte par type : 5 plus récentes (fin de tableau), récent en haut.
+  const histList = (list, type) => {
+    if (!list.length) return `<div class="vtt-ms-cpt-empty">Aucune entrée.</div>`;
+    return list.map((r, i) => ({ r, i })).slice(-5).reverse().map(({ r, i }) => `
+      <div class="vtt-ms-cpt-row">
+        <span class="vtt-ms-cpt-row-lib" title="${_esc(r.libelle || '')}">${_esc(r.libelle || '—')}</span>
+        <span class="vtt-ms-cpt-row-amt ${type === 'recettes' ? 'pos' : 'neg'}">${type === 'recettes' ? '+' : '−'}${r.montant || 0}</span>
+        ${canEdit ? `<button class="vtt-ms-cpt-del" data-vtt-fn="_vttMsCompteDel" data-vtt-args="${c.id}|${uid}|${type}|${i}" title="Supprimer">🗑️</button>` : ''}
+      </div>`).join('');
+  };
+
+  return `<div class="vtt-ms-cpt">
+    <div class="vtt-ms-cpt-solde">
+      <div class="vtt-ms-cpt-solde-main">💰 <strong>${solde}</strong><span class="vtt-ms-cpt-or">or</span></div>
+      <div class="vtt-ms-cpt-solde-sub">
+        <span class="pos">+${totalR}</span> · <span class="neg">−${totalD}</span>
+      </div>
+    </div>
+    ${addForm}
+    <div class="vtt-ms-cpt-cols">
+      <div class="vtt-ms-cpt-col">
+        <div class="vtt-ms-cpt-col-hd pos">📈 Recettes</div>
+        ${histList(recettes, 'recettes')}
+      </div>
+      <div class="vtt-ms-cpt-col">
+        <div class="vtt-ms-cpt-col-hd neg">📉 Dépenses</div>
+        ${histList(depenses, 'depenses')}
+      </div>
+    </div>
+  </div>`;
+}
+
+// Ajoute une recette (sign>0) ou dépense (sign<0). Réutilise useGold (vérifie le
+// solde pour une dépense, 1 seule écriture, libellé cohérent avec la fiche).
+async function _vttMsCompteAdd(charId, uid, sign) {
+  if (!_msCanEdit(uid)) return;
+  const c = VS.characters[charId]; if (!c) return;
+  const amtEl = document.getElementById('vtt-ms-cpt-amt');
+  const libEl = document.getElementById('vtt-ms-cpt-lib');
+  const montant = Math.abs(parseFloat(amtEl?.value) || 0);
+  if (!montant) { showNotif('Montant invalide', 'info'); amtEl?.focus(); return; }
+  const s = parseInt(sign) < 0 ? -1 : 1;
+  const reason = (libEl?.value || '').trim() || (s > 0 ? 'Recette' : 'Dépense');
+  const res = await useGold(charId, s * montant, reason, { charObj: c, refreshUI: false });
+  if (!res.ok) { showNotif(res.error || 'Erreur', 'error'); return; }
+  showNotif(`${s > 0 ? '+' : '−'}${montant} or — ${reason}`, 'success');
+  if (VS.miniUid) _renderMiniSheet(VS.miniUid);
+}
+
+// Supprime une ligne de compte (recettes|depenses).
+async function _vttMsCompteDel(charId, uid, type, idx) {
+  if (!_msCanEdit(uid)) return;
+  if (type !== 'recettes' && type !== 'depenses') return;
+  idx = parseInt(idx);
+  const c = VS.characters[charId]; if (!c) return;
+  const compte = { recettes: [], depenses: [], ...(c.compte || {}) };
+  const list = [...(compte[type] || [])];
+  if (!list[idx]) return;
+  list.splice(idx, 1);
+  const newCompte = { ...compte, [type]: list };
+  try {
+    await updateDoc(_chrRef(charId), { compte: newCompte });
+    c.compte = newCompte;
+    if (VS.miniUid) _renderMiniSheet(VS.miniUid);
+  } catch (e) { console.error('[vtt] compte del', e); showNotif('Erreur suppression', 'error'); }
+}
+
 function _msTabInventaire(c, uid, canEdit) {
   const inv = c?.inventaire||[];
   if (!inv.length) return '<div class="vtt-ms-empty">Inventaire vide</div>';
@@ -898,6 +992,7 @@ function _renderMiniSheet(uid) {
     { key:'equip',  icon:'🛡',  label:'Équip.' },
     { key:'sorts',  icon:'✨',  label:'Sorts'  },
     { key:'inv',    icon:'🎒',  label:'Sac'    },
+    { key:'compte', icon:'💰', label:'Or'     },
     { key:'notes',  icon:'📝', label:'Notes'  },
   ];
   const tabBarHtml = `<div class="vtt-ms-tabbar">${TABS.map(t =>
@@ -910,6 +1005,7 @@ function _renderMiniSheet(uid) {
       _miniTab === 'combat' ? _msTabCombat(c, uid, canEdit)
     : _miniTab === 'equip'  ? _msTabEquipement(c, uid, canEdit)
     : _miniTab === 'sorts'  ? _msTabSorts(c, uid, canEdit)
+    : _miniTab === 'compte' ? _msTabCompte(c, uid, canEdit)
     : _miniTab === 'notes'  ? _msTabNotes(c, uid, canEdit)
     :                         _msTabInventaire(c, uid, canEdit);
 
@@ -966,6 +1062,7 @@ export {
   _msSetActiveChip,
   _msSyncClearBtn,
   _msTabCombat,
+  _msTabCompte,
   _msTabEquipement,
   _msTabInventaire,
   _msTabNotes,
@@ -974,6 +1071,8 @@ export {
   _msXpSection,
   _renderMiniSheet,
   _vttMsAddNote,
+  _vttMsCompteAdd,
+  _vttMsCompteDel,
   _vttMsConfirmSend,
   _vttMsDeleteItem,
   _vttMsDeleteNote,
