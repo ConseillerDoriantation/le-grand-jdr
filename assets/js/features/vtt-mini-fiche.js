@@ -680,9 +680,14 @@ function _msTabCompte(c, uid, canEdit) {
 
   const addForm = canEdit ? `
     <div class="vtt-ms-cpt-add">
-      <input id="vtt-ms-cpt-lib" class="vtt-ms-cpt-lib" type="text" placeholder="Libellé (ex. Vente potion)" maxlength="60">
-      <input id="vtt-ms-cpt-amt" class="vtt-ms-cpt-amt" type="number" min="0" step="1" placeholder="0" inputmode="numeric"
-        onkeydown="if(event.key==='Enter')this.blur()">
+      <div class="vtt-ms-cpt-fields">
+        <input id="vtt-ms-cpt-lib" class="vtt-ms-cpt-lib" type="text" placeholder="Libellé (ex. Vente potion)" maxlength="60">
+        <div class="vtt-ms-cpt-amt-wrap">
+          <input id="vtt-ms-cpt-amt" class="vtt-ms-cpt-amt" type="number" min="0" step="1" placeholder="0" inputmode="numeric"
+            onkeydown="if(event.key==='Enter')this.blur()">
+          <span class="vtt-ms-cpt-amt-suffix">or</span>
+        </div>
+      </div>
       <div class="vtt-ms-cpt-btns">
         <button class="vtt-ms-cpt-btn pos" data-vtt-fn="_vttMsCompteAdd" data-vtt-args="${c.id}|${uid}|1"  title="Ajouter une recette">+ Recette</button>
         <button class="vtt-ms-cpt-btn neg" data-vtt-fn="_vttMsCompteAdd" data-vtt-args="${c.id}|${uid}|-1" title="Ajouter une dépense">− Dépense</button>

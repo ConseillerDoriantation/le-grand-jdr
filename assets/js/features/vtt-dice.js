@@ -16,6 +16,10 @@ let _diceFormula   = {};        // { faces→count } ex: { 20:2, 6:1 }
 let _diceFreeBonus = 0;
 let _diceFreeMode  = 'normal';  // 'advantage'|'normal'|'disadvantage'
 let _diceCloseOut  = null;
+// Historique des derniers jets libres (mémoire de session, le plus récent en fin).
+// Chaque entrée : { formula:{faces→count}, bonus, mode, formulaStr, total }
+let _diceHistory   = [];
+const _DICE_HIST_MAX = 6;
 
 // LANCEUR DE DÉS LIBRE
 // ═══════════════════════════════════════════════════════════════════
@@ -93,10 +97,47 @@ function _renderDicePanel() {
     <button class="vtt-dice-roll-btn" data-vtt-fn="_vttDiceRoll"
       ${!hasDice&&!_diceFreeBonus?'disabled':''}>
       🎲 Lancer !
-    </button>`;
+    </button>
+    ${_diceHistory.length ? `
+      <div class="vtt-dice-hist">
+        <div class="vtt-dice-hist-hd">
+          <span>Derniers jets</span>
+          <button class="vtt-dice-reroll-btn" data-vtt-fn="_vttDiceRerollLast" title="Relancer le dernier jet (mêmes dés)">🔁 Relancer</button>
+        </div>
+        <div class="vtt-dice-hist-list">
+          ${_diceHistory.map((h, i) => ({ h, i })).reverse().map(({ h, i }) => `
+            <button class="vtt-dice-hist-item" data-vtt-fn="_vttDiceUseHistory" data-vtt-args="${i}" title="Réutiliser ${h.formulaStr}">
+              <span class="vtt-dice-hist-formula">${h.formulaStr}</span>
+              <span class="vtt-dice-hist-eq">=</span>
+              <span class="vtt-dice-hist-total">${h.total}</span>
+            </button>`).join('')}
+        </div>
+      </div>` : ''}`;
 }
 
-function _vttDiceRoll() {
+// Relance le dernier jet (même formule/bonus/mode, nouveaux dés). Garde le
+// panneau ouvert pour enchaîner les relances en séance.
+function _vttDiceRerollLast() {
+  const last = _diceHistory[_diceHistory.length - 1];
+  if (!last) return;
+  _diceFormula   = { ...last.formula };
+  _diceFreeBonus = last.bonus || 0;
+  _diceFreeMode  = last.mode || 'normal';
+  _vttDiceRoll(true);
+}
+
+// Réutilise une formule de l'historique : la recharge dans le constructeur
+// (sans lancer) pour pouvoir l'ajuster puis relancer.
+function _vttDiceUseHistory(idx) {
+  const h = _diceHistory[+idx];
+  if (!h) return;
+  _diceFormula   = { ...h.formula };
+  _diceFreeBonus = h.bonus || 0;
+  _diceFreeMode  = h.mode || 'normal';
+  _renderDicePanel();
+}
+
+function _vttDiceRoll(keepPanel) {
   const faces = Object.keys(_diceFormula).map(Number).sort((a,b)=>b-a);
   if (!faces.length && !_diceFreeBonus) return;
   const authorName = STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'Joueur';
@@ -132,7 +173,13 @@ function _vttDiceRoll() {
     createdAt:serverTimestamp(),
   }).catch(()=>{});
   showNotif(`🎲 ${formula} = ${total}`, 'success');
-  _closeDicePanel();
+
+  // Mémorise le jet (pour « relancer » / rappel des derniers).
+  _diceHistory.push({ formula:{ ..._diceFormula }, bonus:_diceFreeBonus||0, mode:_diceFreeMode, formulaStr:formula, total });
+  if (_diceHistory.length > _DICE_HIST_MAX) _diceHistory.shift();
+
+  if (keepPanel) _renderDicePanel();
+  else _closeDicePanel();
 }
 
 export {
@@ -145,5 +192,7 @@ export {
   _vttDiceMode,
   _vttDiceRemoveDie,
   _vttDiceRoll,
+  _vttDiceRerollLast,
+  _vttDiceUseHistory,
   _vttToggleDice,
 };

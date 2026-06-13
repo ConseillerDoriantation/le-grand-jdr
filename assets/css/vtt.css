@@ -3880,15 +3880,40 @@
 .vtt-ms-cpt-solde-sub .pos { color: var(--emerald, #22c38e); }
 .vtt-ms-cpt-solde-sub .neg { color: #ef6a6a; }
 
-.vtt-ms-cpt-add { display: flex; flex-direction: column; gap: .3rem; }
-.vtt-ms-cpt-lib, .vtt-ms-cpt-amt {
-  width: 100%; box-sizing: border-box;
-  padding: .3rem .45rem; font-size: .72rem;
+.vtt-ms-cpt-add { display: flex; flex-direction: column; gap: .4rem; }
+.vtt-ms-cpt-fields { display: flex; gap: .35rem; align-items: stretch; }
+.vtt-ms-cpt-lib {
+  flex: 1; min-width: 0; box-sizing: border-box;
+  padding: .4rem .55rem; font-size: .74rem;
   background: var(--bg-elevated); color: var(--text);
-  border: 1px solid var(--border); border-radius: 6px;
+  border: 1px solid var(--border); border-radius: 7px;
+  transition: border-color .12s, box-shadow .12s;
 }
-.vtt-ms-cpt-lib:focus, .vtt-ms-cpt-amt:focus { outline: none; border-color: var(--gold); }
-.vtt-ms-cpt-btns { display: flex; gap: .3rem; }
+.vtt-ms-cpt-amt-wrap {
+  position: relative; flex: 0 0 84px;
+  display: flex; align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border); border-radius: 7px;
+  transition: border-color .12s, box-shadow .12s;
+}
+.vtt-ms-cpt-amt {
+  width: 100%; box-sizing: border-box;
+  padding: .4rem 1.55rem .4rem .55rem; font-size: .74rem; font-weight: 700;
+  background: none; color: var(--text); border: none; border-radius: 7px;
+  text-align: right; -moz-appearance: textfield;
+}
+.vtt-ms-cpt-amt::-webkit-outer-spin-button,
+.vtt-ms-cpt-amt::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.vtt-ms-cpt-amt-suffix {
+  position: absolute; right: .5rem; pointer-events: none;
+  font-size: .62rem; font-weight: 700; color: var(--gold); opacity: .8;
+}
+.vtt-ms-cpt-lib::placeholder, .vtt-ms-cpt-amt::placeholder { color: var(--text-muted); opacity: .6; }
+.vtt-ms-cpt-lib:focus, .vtt-ms-cpt-amt-wrap:focus-within {
+  outline: none; border-color: var(--gold);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 18%, transparent);
+}
+.vtt-ms-cpt-btns { display: flex; gap: .4rem; }
 .vtt-ms-cpt-btn {
   flex: 1; padding: .34rem; font-size: .7rem; font-weight: 700;
   border-radius: 6px; cursor: pointer; transition: filter .12s;
@@ -4281,6 +4306,35 @@
   background: rgba(255,210,0,.22); box-shadow: 0 0 12px rgba(255,210,0,.2);
 }
 .vtt-dice-roll-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ── Lanceur libre : historique des derniers jets ────────────────── */
+.vtt-dice-hist { margin-top: .5rem; border-top: 1px solid var(--border); padding-top: .45rem; }
+.vtt-dice-hist-hd {
+  display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+  margin-bottom: .35rem;
+  font-size: .62rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text-dim);
+}
+.vtt-dice-reroll-btn {
+  padding: .22rem .5rem; font-size: .68rem; font-weight: 700;
+  background: rgba(255,210,0,.12); border: 1px solid rgba(255,210,0,.35);
+  border-radius: 6px; color: var(--gold); cursor: pointer;
+  transition: background .12s;
+}
+.vtt-dice-reroll-btn:hover { background: rgba(255,210,0,.24); }
+.vtt-dice-hist-list { display: flex; flex-direction: column; gap: .25rem; }
+.vtt-dice-hist-item {
+  display: flex; align-items: center; gap: .4rem;
+  padding: .28rem .5rem; width: 100%;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.vtt-dice-hist-item:hover { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 8%, var(--bg-elevated)); }
+.vtt-dice-hist-formula { flex: 1; min-width: 0; text-align: left; font-size: .72rem; font-family: ui-monospace, monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vtt-dice-hist-eq { font-size: .66rem; color: var(--text-muted); }
+.vtt-dice-hist-total { font-size: .82rem; font-weight: 800; color: var(--gold); min-width: 1.4rem; text-align: right; }
 
 /* ── Court repos (vote groupe) ───────────────────────────────────── */
 .vtt-rest-float {

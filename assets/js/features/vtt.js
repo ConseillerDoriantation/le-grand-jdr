@@ -60,6 +60,7 @@ import {
 import {
   _vttToggleDice, _vttDiceAddDie, _vttDiceRemoveDie, _vttDiceClear, _vttDiceBonusStep,
   _vttDiceBonusSet, _vttDiceMode, _vttDiceRoll, _closeDicePanel,
+  _vttDiceRerollLast, _vttDiceUseHistory,
 } from './vtt-dice.js';
 import {
   _renderTimer, _timerStartTick, _timerStopTick, _vttTimerToggle, _vttTimerReset, _vttTimerLabel,
@@ -12351,6 +12352,8 @@ const VTT_ACTIONS = {
   _vttDiceClear,
   _vttDiceMode,
   _vttDiceRoll,
+  _vttDiceRerollLast,
+  _vttDiceUseHistory,
   _vttDrawColor,
   _vttDrawShape,
   _vttDrawWidth,
