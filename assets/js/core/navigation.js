@@ -80,10 +80,9 @@ export async function navigate(page) {
   unwatchAll(); // stopper tous les listeners temps réel de la page précédente
 
   // Reset des inline styles que certaines pages posent sur #main-content
-  // (ex. VTT pose overflow/height/paddingBottom et ne nettoie qu'à la
-  //  ré-entrée dans la page → casse le scroll des pages suivantes).
+  // (ex. VTT: overflow/height/paddingBottom ; map: padding/height).
   const mc = document.getElementById('main-content');
-  if (mc) { mc.style.overflow = ''; mc.style.height = ''; mc.style.paddingBottom = ''; }
+  if (mc) { mc.style.overflow = ''; mc.style.height = ''; mc.style.padding = ''; mc.style.paddingBottom = ''; }
 
   setPage(page);
   _syncNav(page);

@@ -3,7 +3,7 @@
 // ══════════════════════════════════════════════
 import { STATE, FS } from '../core/state.js';
 import { registerActions, dispatchAction } from '../core/actions.js';
-import { loadChars, loadCollection, getCachedCollection, getDocData, getDocDataSilent } from '../data/firestore.js';
+import { loadChars, loadCollection, getCachedCollection, getDocData } from '../data/firestore.js';
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser } from '../shared/char-stats.js';
@@ -16,8 +16,6 @@ import { dedupeQuestParticipants } from '../shared/participants.js';
 
 import { charSession } from '../shared/char-session.js';
 import { openAdventureSwitcher } from '../core/layout.js';
-import { navigate } from '../core/navigation.js';
-
 const renderCharSheet   = (...args) => charSession.renderSheet(...args);
 
 
@@ -1070,25 +1068,12 @@ const PAGES = {
     await renderShop();
   },
 
-  // ─── WORLD ──────────────────────────────────────────────────────────────────
-  async world() {
-    const doc = await getDocData('world', 'main');
-    const content = document.getElementById('main-content');
-    let html = `pageHeaderHtml('📖 Le Monde', 'Lore, histoire et informations générales')`;
-    if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Édition Admin</div><button class="btn btn-gold btn-sm" data-action="editWorldContent">✏️ Modifier le contenu</button></div>`;
-    const sections = doc?.sections || [{ title: 'Introduction', content: 'Les informations sur le monde seront ajoutées ici par le Maître de Jeu.' }];
-    sections.forEach(s => { html += `<div class="world-section"><div class="card-header" style="margin-bottom:0.8rem;padding:0.8rem;background:var(--bg-card2);border-radius:6px;border:1px solid var(--border)">${s.title}</div><div class="world-content">${s.content}</div></div>`; });
-    content.innerHTML = html;
-  },
-
   // ─── MAP ────────────────────────────────────────────────────────────────────
   async map() {
     const doc     = await getDocData('world', 'map');
     const content = document.getElementById('main-content');
 
-    // La page map prend toute la hauteur dispo — supprimer le padding habituel
-    const origPadding = content.style.padding;
-    const origHeight  = content.style.height;
+    // La page map prend toute la hauteur dispo ; navigation.js nettoie ces styles inline en quittant la page.
     content.style.padding = '0';
     content.style.height  = 'calc(100vh - var(--header-height))';
 
@@ -1126,59 +1111,12 @@ const PAGES = {
           ${t.label}
         </span>`).join('');
     }
-
-    // Restaurer les styles au changement de page
-    const origNavigate = window.navigate;
-    window.navigate = function(...args) {
-      content.style.padding = origPadding;
-      content.style.height  = origHeight;
-      window.navigate = origNavigate;
-      return origNavigate?.(...args);
-    };
-  },
-
-  // ─── NPCs ───────────────────────────────────────────────────────────────────
-  async npcs() {
-    const items = await loadCollection('npcs');
-    const content = document.getElementById('main-content');
-    let html = `pageHeaderHtml('👥 PNJ Rencontrés', 'Personnages non-joueurs et factions')`;
-    if (STATE.isAdmin) html += `<div class="admin-section"><div class="admin-label">Gestion Admin</div><button class="btn btn-gold btn-sm" data-action="openNpcModal">+ Ajouter un PNJ</button></div>`;
-    if (items.length === 0) {
-      html += emptyStateHtml('👥', 'Aucun PNJ pour l\'instant.');
-    } else {
-      const filters = [...new Set(items.map(n => n.disposition || 'Inconnu'))];
-      html += `<div class="tabs" id="npc-filter" style="margin-bottom:1.5rem"><button class="tab active" data-action="filterNpcs" data-filter="">Tous</button>${filters.map(f => `<button class="tab" data-action="filterNpcs" data-filter="${_esc(f)}">${f}</button>`).join('')}</div><div class="npc-grid" id="npc-grid">`;
-      items.forEach(npc => {
-        const dispColor = npc.disposition === 'Amical' || npc.disposition === 'Allié' ? 'green' : npc.disposition === 'Hostile' || npc.disposition === 'Ennemi' ? 'red' : 'blue';
-        html += `<div class="npc-card" data-disp="${npc.disposition || 'Inconnu'}"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:0.5rem"><div><div class="npc-name">${npc.nom || '?'}</div><div class="npc-role">${npc.role || ''}</div></div><div style="display:flex;gap:0.3rem;align-items:center"><span class="badge badge-${dispColor}">${npc.disposition || 'Inconnu'}</span>${STATE.isAdmin ? `<button class="btn-icon" data-action="editNpc" data-id="${npc.id}">✏️</button><button class="btn-icon" data-action="deleteNpc" data-id="${npc.id}">🗑️</button>` : ''}</div></div><div class="npc-desc">${npc.description || ''}</div>${npc.lieu ? `<div style="margin-top:0.5rem;font-size:0.78rem;color:var(--text-dim)">📍 ${npc.lieu}</div>` : ''}</div>`;
-      });
-      html += '</div>';
-    }
-    content.innerHTML = html;
   },
 
 // ─── BASTION ────────────────────────────────────────────────────────────────
   async bastion() {
     const { default: renderBastionPage } = await import('./bastion.js');
     await renderBastionPage();
-  },
-
-  // ─── STORY ──────────────────────────────────────────────────────────────────
-  async story() {
-    // Délégué à story.js qui override cette méthode au chargement
-    // Fallback minimal si story.js n'est pas encore chargé
-    const content = document.getElementById('main-content');
-    content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)">
-      <div style="font-size:2rem;margin-bottom:0.5rem">⏳</div>
-      <p>Chargement de la trame…</p>
-    </div>`;
-  },
-
-  // ─── PLAYERS ────────────────────────────────────────────────────────────────
-  async players() {
-    // Implémentation effective dans features/players.js (override PAGES.players)
-    const { renderPlayersPage } = await import('./players.js');
-    await renderPlayersPage();
   },
 
   // ─── ACHIEVEMENTS ───────────────────────────────────────────────────────────
@@ -1285,38 +1223,6 @@ const PAGES = {
       </div>`;
   },
 
-  // ─── RECETTES ───────────────────────────────────────────────────────────────
-  async recettes() {
-    const doc      = await getDocData('recettes', 'main');
-    const content  = document.getElementById('main-content');
-    const recettes = doc?.recettes || [];
-    const potions  = doc?.potions  || [];
-    let html = `pageHeaderHtml('🍳 Recettes & Potions', 'Cuisine de groupe et alchimie')
-      ${STATE.isAdmin ? `<div class="admin-section"><div class="admin-label">Gestion Admin</div><div style="display:flex;gap:0.5rem"><button class="btn btn-gold btn-sm" data-action="openRecetteModal" data-type="cuisine">+ Recette cuisine</button><button class="btn btn-gold btn-sm" data-action="openRecetteModal" data-type="potion">+ Potion</button></div></div>` : ''}
-      <div style="background:rgba(226,185,111,0.05);border:1px solid rgba(226,185,111,0.15);border-radius:8px;padding:1rem;margin-bottom:1.5rem;font-size:0.85rem;color:var(--text-muted)">
-        <strong style="color:var(--gold)">🍳 Cuisine</strong> — Avant mission ou pendant un repos. Bénéficie à tout le groupe. Max 2 plats actifs simultanément.<br>
-        <strong style="color:var(--gold)">🧪 Potions</strong> — Préparées avant une mission. Effets individuels.
-      </div>
-      <div class="grid-2" style="gap:1.5rem">
-        <div>
-          <div class="card-header" style="margin-bottom:1rem">🍳 Cuisine (${recettes.length})</div>
-          ${recettes.length === 0 ? `<div class="empty-state"><span class="icon">🍳</span><p>Aucune recette de cuisine.</p></div>` :
-            recettes.map(r => `<div class="card" style="margin-bottom:0.8rem;padding:1rem"><div style="display:flex;justify-content:space-between"><div style="font-weight:700;font-size:0.92rem;color:var(--text)">${r.nom}</div>${STATE.isAdmin ? `<div style="display:flex;gap:0.3rem"><button class="btn-icon" data-action="editRecette" data-id="${r.id}" data-type="cuisine">✏️</button><button class="btn-icon" data-action="deleteRecette" data-id="${r.id}">🗑️</button></div>` : ''}</div>${r.duree ? `<div style="font-size:0.75rem;color:var(--text-dim);margin-top:0.2rem">⏱️ ${r.duree}</div>` : ''}${r.ingredients ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.3rem">🌿 ${r.ingredients}</div>` : ''}<div style="font-size:0.82rem;color:var(--text);margin-top:0.4rem;font-style:italic">${r.effet || ''}</div></div>`).join('')}
-        </div>
-        <div>
-          <div class="card-header" style="margin-bottom:1rem">🧪 Potions (${potions.length})</div>
-          ${potions.length === 0 ? `<div class="empty-state"><span class="icon">🧪</span><p>Aucune potion.</p></div>` :
-            potions.map(p => `<div class="card" style="margin-bottom:0.8rem;padding:1rem"><div style="display:flex;justify-content:space-between"><div><span style="font-weight:700;font-size:0.92rem;color:var(--text)">${p.nom}</span>${p.famille ? `<span class="badge badge-blue" style="margin-left:0.4rem;font-size:0.65rem">${p.famille}</span>` : ''}</div>${STATE.isAdmin ? `<div style="display:flex;gap:0.3rem"><button class="btn-icon" data-action="editRecette" data-id="${p.id}" data-type="potion">✏️</button><button class="btn-icon" data-action="deleteRecette" data-id="${p.id}">🗑️</button></div>` : ''}</div>${p.ingredients ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.3rem">🌿 ${p.ingredients}</div>` : ''}<div style="font-size:0.82rem;color:var(--text);margin-top:0.4rem;font-style:italic">${p.effet || ''}</div></div>`).join('')}
-        </div>
-      </div>`;
-    content.innerHTML = html;
-  },
-
-  // ─── BESTIAIRE ──────────────────────────────────────────────────────────────
-  async bestiaire() {
-    const { renderBestiary } = await import('./bestiary.js');
-    await renderBestiary();
-  },
 };
 
 async function goToChar(id) {
@@ -1330,36 +1236,6 @@ registerActions({
   _goToChar:             (btn) => goToChar(btn.dataset.id),
   openAdventureSwitcher: ()    => openAdventureSwitcher(),
 
-  // Characters (admin filter) — appel via window pour supporter le cas où characters.js n'est pas encore chargé
-
-  // World
-
-  // NPCs
-  deleteNpc:             async (btn) => {
-    const { deleteNpc } = await import('./npcs.js');
-    deleteNpc(btn.dataset.id);
-  },
-  filterNpcs:            (btn) => {
-    const filter = btn.dataset.filter || null;
-    document.querySelectorAll('#npc-filter .tab').forEach(b => b.classList.toggle('active', b === btn));
-    document.querySelectorAll('#npc-grid .npc-card').forEach(card => {
-      card.style.display = (!filter || card.dataset.disp === filter) ? '' : 'none';
-    });
-  },
-
-  // Bastion
-  editBastion:              ()    => window.editBastion?.(),
-  investirOrBastion:        ()    => window.investirOrBastion?.(),
-  ouvrirInventaireBastion:  ()    => window.ouvrirInventaireBastion?.(),
-  ouvrirMissionsBastion:    ()    => window.ouvrirMissionsBastion?.(),
-  tirerEvenement:           ()    => window.tirerEvenement?.(),
-  gererAmeliorations:       ()    => window.gererAmeliorations?.(),
-  investirAmelioration:     (btn) => window.investirAmelioration?.(btn.dataset.id, btn.dataset.mode),
-  supprimerHistorique:      (btn) => window.supprimerHistorique?.(btn.dataset.id),
-  addBastionLog:            ()    => window.addBastionLog?.(),
-
-  // Achievements
-
   // Admin lazy-load tools
   _adminLazyOpen:        (btn) => {
     const fn  = btn.dataset.fn;
@@ -1372,11 +1248,6 @@ registerActions({
       dispatchAction(proxy, new Event('click'));
     });
   },
-
-  // Recettes
-  openRecetteModal:  (btn) => window.openRecetteModal?.(btn.dataset.type),
-  editRecette:       (btn) => window.editRecette?.(btn.dataset.id, btn.dataset.type),
-  deleteRecette:     (btn) => window.deleteRecette?.(btn.dataset.id),
 });
 
 export default PAGES;

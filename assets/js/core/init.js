@@ -31,7 +31,7 @@ import {
 
 import { showAppLoading, showAuth, showAdventurePicker, showAdventureLoadError } from "./layout.js";
 import { navigate } from "./navigation.js";
-import { loadUserAdventures, repairCurrentUserAdventureLinks, selectAdventure, runMigration } from "./adventure.js";
+import { loadUserAdventures, repairCurrentUserAdventureLinks, selectAdventure } from "./adventure.js";
 import { unwatchAll } from "../shared/realtime.js";
 import { stopPresence } from "../shared/presence.js";
 import { releaseSessionData } from "../data/firestore.js";
@@ -239,43 +239,3 @@ async function loadProfile(user) {
 
   setProfile(profile);
 }
-
-// ── Migration depuis le picker ─────────────────
-// Appelé par le bouton "Récupérer mes données" sur l'écran sélecteur vide.
-// Aussi déclenché automatiquement si super-admin et zéro aventures.
-async function _runMigrationFromPicker(uid) {
-  const logEl  = document.getElementById('picker-migrate-log');
-  const btnEl  = document.querySelector('[data-action="runMigrationFromPicker"]');
-
-  if (logEl) { logEl.style.display = 'block'; logEl.innerHTML = ''; }
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳ Migration en cours…'; }
-
-  const log = (msg) => {
-    console.info('[migration]', msg);
-    if (logEl) { logEl.innerHTML += `<div>${msg}</div>`; logEl.scrollTop = logEl.scrollHeight; }
-  };
-
-  try {
-    log('Démarrage de la migration…');
-    await runMigration(log);
-
-    log('Chargement de l\'aventure…');
-    const adventures = await loadUserAdventures(uid, { email: STATE.profile?.email || STATE.user?.email });
-    setAdventures(adventures);
-
-    if (adventures.length > 0) {
-      selectAdventure(adventures[0]);
-      showAppLoading();
-      await navigate('dashboard');
-    } else {
-      log('⚠️ Migration terminée mais aventure introuvable — recharge la page.');
-      if (btnEl) { btnEl.disabled = false; btnEl.textContent = '🔄 Réessayer'; }
-    }
-  } catch (e) {
-    console.error('[init] Migration échouée :', e);
-    log(`❌ Erreur : ${e.message}`);
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '🔄 Réessayer'; }
-  }
-}
-
-// Exposer pour le bouton HTML du picker

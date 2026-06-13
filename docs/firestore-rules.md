@@ -1,8 +1,3 @@
-# Regles Firestore - Le Grand JDR
-
-Firebase Console > Firestore > Regles > coller ci-dessous > Publier.
-
-```
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -247,18 +242,6 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['walls']);
       }
 
-      // Sons & playlists (musique d'ambiance) : lecture tous (pour écouter),
-      // écriture MJ (gestion du catalogue). SANS ces règles, ces collections
-      // sont refusées par défaut → le panneau musique reste vide ("Aucun son").
-      match /vttSons/{id} {
-        allow read:  if inAdventure(adventureId);
-        allow write: if isAdvAdmin(adventureId);
-      }
-      match /vttPlaylists/{id} {
-        allow read:  if inAdventure(adventureId);
-        allow write: if isAdvAdmin(adventureId);
-      }
-
       // Annotations (dessins) : tous créent, chacun modifie/supprime les siennes, MJ gère tout
       match /vttAnnotations/{id} {
         allow read:   if inAdventure(adventureId);
@@ -338,12 +321,16 @@ service cloud.firestore {
       match /vttEmoteReactions/{id} {
         allow read, write: if inAdventure(adventureId) || isAdvAdmin(adventureId);
       }
+      
+            // Sons & playlists (musique) : lecture membres, écriture MJ
+      match /vttSons/{id} {
+        allow read:  if inAdventure(adventureId);
+        allow write: if isAdvAdmin(adventureId);
+      }
+      match /vttPlaylists/{id} {
+        allow read:  if inAdventure(adventureId);
+        allow write: if isAdvAdmin(adventureId);
+      }
     }
   }
 }
-```
-
-## Pourquoi c'est suffisant
-
-Meme si STATE.isAdmin est force en console, les regles verifient
-request.auth.token.email cote serveur (token Google signe, non falsifiable).
