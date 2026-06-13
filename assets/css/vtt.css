@@ -2218,9 +2218,9 @@
 /* Nom : jusqu'à 2 lignes, coupé proprement (overflow:hidden requis par line-clamp). */
 .vtt-aopt-hud .cs-spellcard-id { min-width: 0; }
 .vtt-aopt-hud .cs-spellcard-name {
-  font-size: .9rem; font-weight: 700; line-height: 1.22;
-  white-space: normal; word-break: break-word;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  font-size: .88rem; font-weight: 700; line-height: 1.22;
+  white-space: normal; overflow-wrap: break-word; word-break: normal;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
   overflow: hidden;
 }
 /* Type d'action : chip net sous le nom. */
