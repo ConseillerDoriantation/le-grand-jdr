@@ -11897,6 +11897,28 @@ function _vttEscapeCloseFloaters() {
 
 function _keyHandler(e) {
   if (!document.getElementById('vtt-canvas-wrap')) return;
+
+  // Échap : traité AVANT le filtre de saisie, pour fermer un panneau dont le
+  // champ de recherche a le focus (émotes, dés, musique…).
+  if (e.key === 'Escape') {
+    // a) Modale ouverte → la modale gère sa propre fermeture (ne pas désélectionner derrière).
+    if (document.getElementById('modal-overlay')?.classList.contains('show')) return;
+    // b) Visée en cours → écouteur dédié (_aimCancel) s'en charge.
+    if (_aimOpt || _aimSrcId) return;
+    // c) Fermer un panneau flottant / le HUD d'action (même si un de leurs champs a le focus).
+    if (_vttEscapeCloseFloaters()) { e.preventDefault(); if (typeof e.target.blur === 'function') e.target.blur(); return; }
+    // d) Focus dans un champ de saisie hors panneau (chat, notes…) → on se contente de blur.
+    if (e.target.matches('input,textarea,select')) { e.target.blur(); return; }
+    // e) Outil ≠ sélection → revenir à l'outil sélection.
+    if (VS.tool !== 'select') { _setTool('select'); e.preventDefault(); return; }
+    // f) Désélectionner tokens ET dessins.
+    if (VS.selected || VS.selectedMulti.size || _selectedAnnotId || _selectedAnnotIds.size) {
+      _deselect(); _deselectAnnot(); e.preventDefault();
+    }
+    return;
+  }
+
+  // Autres raccourcis : ignorés quand la frappe vise un champ de saisie.
   if (e.target.matches('input,textarea,select')) return;
   // Ctrl+C / Ctrl+V : copier / coller la sélection (tokens + dessins)
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
@@ -11905,21 +11927,6 @@ function _keyHandler(e) {
   }
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'v' || e.key === 'V')) {
     if (_vttClipboard.tokens.length || _vttClipboard.annots.length) { e.preventDefault(); _vttPasteClipboard(); }
-    return;
-  }
-  if (e.key === 'Escape') {
-    // a) Modale ouverte → la modale gère sa propre fermeture (ne pas désélectionner derrière).
-    if (document.getElementById('modal-overlay')?.classList.contains('show')) return;
-    // b) Visée en cours → écouteur dédié (_aimCancel) s'en charge.
-    if (_aimOpt || _aimSrcId) return;
-    // c) Fermer un panneau flottant / le HUD d'action.
-    if (_vttEscapeCloseFloaters()) { e.preventDefault(); return; }
-    // d) Outil ≠ sélection → revenir à l'outil sélection.
-    if (VS.tool !== 'select') { _setTool('select'); e.preventDefault(); return; }
-    // e) Désélectionner tokens ET dessins.
-    if (VS.selected || VS.selectedMulti.size || _selectedAnnotId || _selectedAnnotIds.size) {
-      _deselect(); _deselectAnnot(); e.preventDefault();
-    }
     return;
   }
   // Raccourci R : bascule l'outil règle (sans modificateur, hors saisie)
