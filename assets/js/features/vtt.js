@@ -4926,7 +4926,9 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   // Flux « action d'abord » (sans cible) → HUD docké en bas du canvas.
   // Flux « clic sur une cible » → modale centrée (inchangé).
   if (noTgt) {
-    _showActionHud(`<div class="vtt-form vtt-aopt-modal vtt-aopt-hud">${innerHtml}</div>`);
+    _showActionHud(`<div class="vtt-form vtt-aopt-modal vtt-aopt-hud">
+      <button type="button" class="vtt-aopt-hud-close" title="Fermer" data-vtt-fn="_hideActBar">✕</button>
+      ${innerHtml}</div>`);
     return;
   }
 
@@ -12253,6 +12255,7 @@ PAGES.vtt=renderVttPage;
 const VTT_ACTIONS = {
   _vttActBarCat,
   _vttAimOpt,
+  _hideActBar,
   _aimCancel,
   _vttEnterTable,
   _vttGateBack,
