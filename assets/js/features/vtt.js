@@ -1936,7 +1936,7 @@ function _deselect() {
 function _showActBar(srcId) {
   const t = VS.tokens[srcId]?.data;
   if (!t || !_canControlToken(t)) { _hideActBar(); return; }
-  _execAttack(srcId, null).catch(() => {});   // rend le picker dans le HUD (cf. fin de _execAttack)
+  _execAttack(srcId, null).catch(e => console.error('[vtt] HUD action:', e));   // rend le picker dans le HUD (cf. fin de _execAttack)
 }
 
 function _hideActBar() { _hideActionHud(); }
