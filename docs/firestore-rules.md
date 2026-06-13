@@ -114,6 +114,13 @@ service cloud.firestore {
       allow create: if isLoggedIn() && request.resource.data.uid == request.auth.uid;
       allow update, delete: if isLoggedIn() &&
         (resource.data.uid == request.auth.uid || isAdmin());
+      // Don d'objet entre joueurs (VTT « Envoyer ») : tout membre connecté peut
+      // AJOUTER exactement un objet à l'inventaire d'un autre perso, sans toucher
+      // à aucun autre champ. Le retrait côté donneur passe par la règle owner.
+      allow update: if isLoggedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['inventaire'])
+        && request.resource.data.inventaire.size() ==
+             ((resource.data.inventaire is list ? resource.data.inventaire.size() : 0) + 1);
     }
 
     match /users/{uid} {
