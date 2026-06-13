@@ -784,8 +784,7 @@ function openAccesModal(id) {
       ${joueurs.map(j => `
         <label style="display:flex;align-items:center;gap:.75rem;padding:.6rem .85rem;
           border-radius:10px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer"
-          onmouseover="this.style.borderColor='#22c38e';this.style.background='rgba(34,195,142,.06)'"
-          onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg-elevated)'">
+          data-hov-border="#22c38e" data-hov-bg="rgba(34,195,142,.06)">
           <input type="checkbox" value="${j.uid}" ${accesUids.includes(j.uid)?'checked':''}
             style="accent-color:#22c38e;width:16px;height:16px">
           <span style="font-size:.84rem;color:var(--text)">${j.pseudo}</span>
@@ -837,8 +836,7 @@ function openSendRecipeModal(id) {
       ${cibles.map(j => `
         <label style="display:flex;align-items:center;gap:.75rem;padding:.65rem .9rem;
           border-radius:10px;border:1px solid var(--border);background:var(--bg-elevated);cursor:pointer"
-          onmouseover="this.style.borderColor='#4f8cff';this.style.background='rgba(79,140,255,.06)'"
-          onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg-elevated)'">
+          data-hov-border="#4f8cff" data-hov-bg="rgba(79,140,255,.06)">
           <input type="radio" name="send-rec-target" value="${j.uid}" style="accent-color:#4f8cff">
           <span style="font-size:.84rem;color:var(--text)">${j.pseudo}</span>
         </label>`).join('')}

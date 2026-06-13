@@ -222,8 +222,7 @@ function _renderNavItem(s) {
       background:${isActive ? 'rgba(232,184,75,.07)' : 'transparent'};
       border-left:3px solid ${isActive ? 'var(--gold)' : 'transparent'};
       opacity:${isHidden ? '.45' : '1'}"
-    onmouseover="if(!this.style.background.includes('184')){this.style.background='rgba(255,255,255,.03)'}"
-    onmouseout="if(!this.style.background.includes('184')){this.style.background='transparent'}">
+    data-hov-bg="rgba(255,255,255,.03)" data-hov-skip-if-bg="184">
     <span style="font-size:1rem;flex-shrink:0">${s.icone||'📖'}</span>
     <span style="font-size:.83rem;color:${isActive?'var(--gold)':'var(--text)'};
       font-weight:${isActive?'600':'400'};flex:1;white-space:normal;

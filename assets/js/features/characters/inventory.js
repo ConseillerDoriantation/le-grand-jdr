@@ -134,16 +134,14 @@ export function _renderInventaireBoutique(char) {
             style="background:rgba(232,184,75,.08);border:1px solid rgba(232,184,75,.3);
             border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
             color:var(--gold);transition:all .15s"
-            onmouseover="this.style.background='rgba(232,184,75,.15)'"
-            onmouseout="this.style.background='rgba(232,184,75,.08)'">
+            data-hov-bg="rgba(232,184,75,.15)">
             🔄 Vendre
           </button>
           <button data-action="openSendInvModal" data-id="${char.id}" data-indices="${indicesB64}" data-name="${_esc(item.nom||'')}"
             style="background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.3);
             border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
             color:#4f8cff;transition:all .15s"
-            onmouseover="this.style.background='rgba(79,140,255,.15)'"
-            onmouseout="this.style.background='rgba(79,140,255,.08)'"
+            data-hov-bg="rgba(79,140,255,.15)"
             title="Envoyer">
             📤 Envoyer
           </button>
@@ -839,8 +837,7 @@ export async function openSendGoldModal(charId) {
     const couleur   = '#e8b84b';
     return `<label style="display:flex;align-items:center;gap:.7rem;padding:.55rem .7rem;
       border-radius:8px;cursor:pointer;border:2px solid var(--border);background:var(--bg-elevated);
-      transition:border-color .15s" onmouseover="this.style.borderColor='var(--gold)'"
-      onmouseout="this.style.borderColor='var(--border)'">
+      transition:border-color .15s" data-hov-border="var(--gold)">
       <input type="radio" name="gold-target" value="${t.id}" style="accent-color:var(--gold)">
       ${characterAvatarHtml(t, {
         size: 30,

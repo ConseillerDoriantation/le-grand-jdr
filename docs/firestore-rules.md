@@ -301,13 +301,18 @@ service cloud.firestore {
                .affectedKeys().hasOnly(['controlDelegates']);
       }
 
-      // Chat & log de dés : tous les membres de l'aventure peuvent lire et écrire.
-      // À durcir : les messages `gmOnly == true` (jets cachés du MJ) ne sont
-      // filtrés que côté client — un joueur peut techniquement les lire en
-      // s'abonnant directement à la collection. Pour une vraie protection,
-      // restreindre la lecture des docs `gmOnly` à `isAdmin(adventureId)`.
+      // Chat & log de dés PUBLIC : tous les membres de l'aventure lisent et écrivent.
+      // Les jets cachés du MJ ne sont PAS ici (voir vttLogGm ci-dessous) → cette
+      // collection ne contient aucun secret.
       match /vttLog/{id} {
         allow read, write: if inAdventure(adventureId);
+      }
+
+      // Jets cachés du MJ : sous-collection réservée au MJ de l'aventure.
+      // Les joueurs n'ont AUCUN accès (lecture ni écriture) → vrais jets secrets,
+      // protégés côté serveur et plus seulement filtrés dans l'UI.
+      match /vttLogGm/{id} {
+        allow read, write: if isAdvAdmin(adventureId);
       }
 
       // Pings temps réel : tous les membres lisent et écrivent (1 doc par joueur)

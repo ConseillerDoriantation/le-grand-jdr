@@ -3171,8 +3171,7 @@ function _buildFieldsHtml(tpl,item) {
           style="font-size:.75rem;padding:4px 12px;border-radius:8px;cursor:pointer;
           border:1px dashed var(--border);background:transparent;color:var(--text-dim);
           transition:all .12s;width:100%"
-          onmouseover="this.style.borderColor='var(--gold)';this.style.color='var(--gold)'"
-          onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-dim)'">
+          data-hov-border="var(--gold)" data-hov-color="var(--gold)">
           + Ajouter un trait
         </button>
       </div>`;
@@ -3187,7 +3186,7 @@ function _buildFieldsHtml(tpl,item) {
           <input type="number" class="input-field" id="si-dispo" min="0" value="${num}" placeholder="Quantité en stock" style="flex:1" ${isInf?'disabled':''}>
           <label style="display:flex;align-items:center;gap:.35rem;white-space:nowrap;cursor:pointer;font-size:.85rem">
             <input type="checkbox" id="si-dispo-infini" ${isInf?'checked':''}
-              onchange="var d=document.getElementById('si-dispo');d.disabled=this.checked;if(!this.checked)d.focus()">
+              data-toggle-disable="si-dispo">
             ♾️ Illimité
           </label>
         </div>

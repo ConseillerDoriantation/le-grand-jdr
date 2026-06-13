@@ -844,8 +844,7 @@ function _avatarTile({ active, ringColor, uid, imageUrl, fallback, pseudo, charN
     style="display:flex;flex-direction:column;align-items:center;gap:.25rem;padding:.25rem;
     border:none;background:none;cursor:pointer;border-radius:8px;min-width:54px;
     transition:background .12s"
-    onmouseover="this.style.background='rgba(255,255,255,.04)'"
-    onmouseout="this.style.background='none'">
+    data-hov-bg="rgba(255,255,255,.04)">
     <div style="width:44px;height:44px;border-radius:50%;overflow:hidden;
       border:2px solid ${ring};box-shadow:${shadow};
       background:var(--bg-elevated);display:flex;align-items:center;justify-content:center;

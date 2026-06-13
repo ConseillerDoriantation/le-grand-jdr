@@ -335,7 +335,7 @@ export function _renderWeaponFormatsModal(formats) {
 
         <div class="sh-admin-add-row">
           <input type="text" id="wf-new-label" placeholder="Nouveau format (ex: Arme 2M CaC Mag.)..."
-            onkeydown="if(event.key==='Enter'){event.preventDefault();document.querySelector('[data-action=\"_addWeaponFormat\"]')?.click();}">
+            data-enter-click="[data-action=_addWeaponFormat]">
           <button class="btn btn-gold btn-sm" data-action="_addWeaponFormat">+ Ajouter</button>
         </div>
       </div>
@@ -474,7 +474,7 @@ function _renderDamageTypesModal(types) {
           <input type="text" id="dt-new-icon" placeholder="🌊"
             style="width:50px;text-align:center;flex:0 0 auto">
           <input type="text" id="dt-new-label" placeholder="Nouveau type (ex: Eau, Foudre…)"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();document.querySelector('[data-action=\"_addDmgType\"]')?.click();}">
+            data-enter-click="[data-action=_addDmgType]">
           <button class="btn btn-gold btn-sm" data-action="_addDmgType">+ Ajouter</button>
         </div>
       </div>

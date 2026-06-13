@@ -782,17 +782,17 @@ function renderCharLedger(c, canEdit) {
           <span>Date</span>
           <input type="date" id="ledger-date"
             value="${_csV3TodayISO()}" class="ledger-add-date"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('.ledger-add')?.querySelector('[data-action=csV3AddLedger]')?.click();}">
+            data-enter-click="[data-action=csV3AddLedger]">
         </label>
         <label class="ledger-add-field ledger-add-field-lib">
           <span>Libellé</span>
           <input type="text" id="ledger-lib" placeholder="${addKind==='recettes'?'Pillage du gobelin…':'Auberge du nain…'}" class="lib"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('.ledger-add')?.querySelector('[data-action=csV3AddLedger]')?.click();}">
+            data-enter-click="[data-action=csV3AddLedger]">
         </label>
         <label class="ledger-add-field ledger-add-field-amt">
           <span>Montant (or)</span>
           <input type="number" id="ledger-amount" placeholder="0" step="any" min="0" class="ledger-add-amount"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('.ledger-add')?.querySelector('[data-action=csV3AddLedger]')?.click();}">
+            data-enter-click="[data-action=csV3AddLedger]">
         </label>
       </div>
       <button class="ledger-add-btn ${addKind}" data-action="csV3AddLedger" data-id="${c.id}">
@@ -809,8 +809,7 @@ function renderCharLedger(c, canEdit) {
             const editAttr = canEdit
               ? `contenteditable="true" spellcheck="false"
                   data-blur="csV3LedgerSaveField" data-kind="${e.kind}" data-idx="${e.idx}" data-field="$FIELD$"
-                  onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.textContent=this.dataset.original||'';this.blur();}"
-                  onfocus="this.dataset.original=this.textContent"`
+                  data-enter="blur" data-esc="revert-blur"`
               : '';
             return `<li class="ledger-row ${e.sign>0?'rcpt':'dep'}">
               <span class="ledger-sign" title="${e.sign>0?'Recette':'Dépense'}">${e.sign>0?'↗':'↘'}</span>
@@ -820,8 +819,7 @@ function renderCharLedger(c, canEdit) {
                 <span class="ledger-sgn">${e.sign>0?'+':'−'}</span><span class="ledger-amount" ${canEdit
                   ? `contenteditable="true" spellcheck="false"
                       data-blur="csV3LedgerSaveAmount" data-kind="${e.kind}" data-idx="${e.idx}" data-sign="${e.sign}"
-                      onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.textContent=this.dataset.original||'';this.blur();}"
-                      onfocus="this.dataset.original=this.textContent"`
+                      data-enter="blur" data-esc="revert-blur"`
                   : ''}>${fmt(Math.abs(parseFloat(e.montant)||0))}</span><small class="ledger-or-suffix">or</small>
               </span>
               ${canEdit?`<button class="ledger-del" title="Supprimer" data-action="csV3DeleteLedger" data-id="${c.id}" data-kind="${e.kind}" data-idx="${e.idx}">🗑</button>`:'<span></span>'}
@@ -1152,7 +1150,7 @@ function renderCharNotesV3(c, canEdit) {
         ${canEdit
           ? `<input class="note-v3-titre" type="text" value="${_esc(titre)}"
               data-blur="csV3SaveNoteTitle" data-idx="${i}"
-              onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}"
+              data-enter="blur" data-esc="revert-blur"
               placeholder="Titre de la note">`
           : `<span class="note-v3-titre note-v3-titre-ro">${_esc(titre)}</span>`}
         ${date ? `<span class="note-v3-date">${_esc(date)}</span>` : ''}
@@ -1492,7 +1490,7 @@ function renderCharProfilV3(c, canEdit) {
           <input type="text" id="csv3-tag-input-${c.id}" class="profil-tag-input"
             placeholder="${tagsFull ? `Maximum ${TAG_MAX_V3} traits atteint` : 'Ajouter un trait personnalisé…'}"
             maxlength="24" ${tagsFull?'disabled':''}
-            onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('.profil-tags-input-row')?.querySelector('[data-action=csV3AddProfilTagFromInput]')?.click();}else if(event.key==='Escape'){this.value='';this.blur();}">
+            data-enter-click="[data-action=csV3AddProfilTagFromInput]" data-esc="clear-blur">
           <button class="profil-tag-add-btn" ${tagsFull?'disabled':''}
             data-action="csV3AddProfilTagFromInput" data-id="${c.id}">Ajouter</button>
         </div>
@@ -1516,7 +1514,7 @@ function renderCharProfilV3(c, canEdit) {
       ? `<input type="text" class="profil-fact-input" value="${_esc(v)}" placeholder="—"
           data-id-key="${_esc(k)}"
           data-blur="csV3SaveIdentityValue" data-id="${c.id}" data-key="${safeKey}"
-          onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">`
+          data-enter="blur" data-esc="revert-blur">`
       : `<span class="profil-fact-v">${v ? _esc(v) : '<span style="color:var(--text-dim)">—</span>'}</span>`;
     const keyClickable = isCustom && canEdit
       ? `data-action="csV3RenameIdentity" data-id="${c.id}" data-key="${safeKey}" style="cursor:pointer" title="Renommer / supprimer"`
@@ -1550,7 +1548,7 @@ function renderCharProfilV3(c, canEdit) {
         placeholder="Ajoute une citation pour ton personnage…"
         data-input="_csQuoteToggleEmpty"
         data-blur="csV3SaveQuote" data-id="${c.id}"
-        onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.classList.toggle('is-empty',!this.value);this.blur();}">`
+        data-enter="blur" data-esc="revert-blur">`
     : (quote
         ? `<div class="profil-quote">${_esc(quote)}</div>`
         : '')}

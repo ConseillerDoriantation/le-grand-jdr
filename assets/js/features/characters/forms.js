@@ -380,7 +380,7 @@ function _titresListHtml() {
     <div class="cs-titre-row" data-idx="${i}">
       <span class="cs-titre-drag" title="Glisser pour réordonner">⠿</span>
       <input class="cs-titre-input" type="text" value="${_esc(t)}" placeholder="Titre…" autocomplete="off"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
+        data-enter="blur">
       <button class="cs-titre-del" data-action="removeTitre" title="Retirer ce titre">✕</button>
     </div>`).join('');
 }

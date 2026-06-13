@@ -30,6 +30,9 @@ import { initTheme, toggleTheme } from './shared/theme.js';
 // character-photo : enregistre à l'import un handler de clic délégué pour les
 //   actions data-action="open-character-photo" / "delete-character-photo".
 import './features/character-photo.js';
+// inline-compat : écouteurs délégués remplaçant les handlers inline (hover, Entrée/
+//   Échap sur champs, onerror d'image…) → prérequis CSP stricte. Voir docs/security.md §3.
+import './shared/inline-compat.js';
 // upload-cloudinary : openCloudinaryConfigModal, câblé via l'action `cloudinaryConfig`.
 import { openCloudinaryConfigModal } from './shared/upload-cloudinary.js';
 

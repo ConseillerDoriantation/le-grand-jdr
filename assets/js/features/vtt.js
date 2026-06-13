@@ -290,6 +290,8 @@ let _selfCtx    = null; // contexte déplacement "soi" { srcId, cells, opt }
 let _selfCells  = [];   // cases Konva cliquables (losange Manhattan)
 let _chatMsgs   = [];   // derniers messages du chat rendus (pour lookup "répondre")
 let _chatReplyTo= null; // message auquel on répond { id, authorName, text }
+let _logMain    = [];   // log public (vttLog) — dernier snapshot
+let _logGm      = [];   // jets cachés (vttLogGm) — uniquement abonné côté MJ
 // [VS.selectedMulti → VS.selectedMulti] (défaut dans vtt-state.js)
 let _multiDragOrigin= null;        // { [id]: {x,y} } positions au début du drag groupé
 let _middlePanActive= false;       // true pendant le pan caméra au clic molette
@@ -455,6 +457,9 @@ export const _chrRef  = (id) => doc(db, `adventures/${aid()}/characters/${id}`);
 const _npcRef  = (id) => doc(db, `adventures/${aid()}/npcs/${id}`);
 const _bstTrackerRef = (uid) => doc(db, `adventures/${aid()}/bestiary_tracker/${uid}`);
 export const _logCol      = ()  => collection(db, `adventures/${aid()}/vttLog`);
+// Jets cachés du MJ : sous-collection séparée, lisible/écrivable par le seul MJ
+// (règles Firestore isAdvAdmin) → secret réel, pas un filtre client.
+const _logGmCol    = ()  => collection(db, `adventures/${aid()}/vttLogGm`);
 const _castingCol  = ()  => collection(db, `adventures/${aid()}/vttCasting`);
 const _castingRef  = uid => doc(db, `adventures/${aid()}/vttCasting/${uid}`);
 const _pingsCol     = ()  => collection(db, `adventures/${aid()}/vttPings`);
@@ -8775,10 +8780,8 @@ function _initListeners() {
   VS.unsubs.push(onSnapshot(
     query(_logCol(), orderBy('createdAt', 'desc'), limit(80)),
     snap => {
-      const msgs = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0));
-      _renderChatLog(msgs);
+      _logMain = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      _rebuildChatLog();
     },
     e => {
       console.error('[vtt] chat listener:', e);
@@ -8786,6 +8789,19 @@ function _initListeners() {
       if (el) el.innerHTML = `<div class="vtt-log-entry vtt-log-roll" style="color:#ef4444">⚠ Accès refusé — ajouter <code>vttLog</code> aux règles Firestore</div>`;
     }
   ));
+
+  // Jets cachés du MJ : sous-collection séparée, lisible par le seul MJ (règles).
+  // Les joueurs ne s'y abonnent jamais → 0 lecture facturée et aucun secret côté client.
+  if (STATE.isAdmin) {
+    VS.unsubs.push(onSnapshot(
+      query(_logGmCol(), orderBy('createdAt', 'desc'), limit(80)),
+      snap => {
+        _logGm = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        _rebuildChatLog();
+      },
+      e => { console.error('[vtt] gm chat listener:', e); }
+    ));
+  }
 
   // Bibliothèque de cartes (MJ only)
   if (STATE.isAdmin) {
@@ -8949,7 +8965,8 @@ async function _vttRollSkill(skillName, stat) {
   const characterImage = c?.photoURL || c?.photo || c?.avatar || n?.photoURL || n?.photo || n?.avatar || n?.imageUrl || null;
   const gmOnly = STATE.isAdmin && VS.rollHidden;
   try {
-    await addDoc(_logCol(), {
+    // Jet caché → sous-collection MJ (secret serveur) ; sinon log public.
+    await addDoc(gmOnly ? _logGmCol() : _logCol(), {
       type: 'roll',
       authorId: STATE.user?.uid || null,
       authorName, characterName, characterImage,
@@ -9317,9 +9334,22 @@ async function _ouvrirGestionEmotes() {
   };
 }
 
+// Fusionne le log public et (pour le MJ) les jets cachés, trie chronologiquement
+// et garde les 80 plus récents — quelle que soit la collection qui vient de changer.
+function _rebuildChatLog() {
+  const merged = _logGm.length ? _logMain.concat(_logGm) : _logMain;
+  const msgs = merged
+    .slice()
+    .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0))
+    .slice(-80);
+  _renderChatLog(msgs);
+}
+
 function _renderChatLog(msgs) {
   const el = document.getElementById('vtt-chat-log'); if (!el) return;
   const myUid = STATE.user?.uid;
+  // Défense en profondeur : les jets cachés ne parviennent déjà plus aux joueurs
+  // (collection vttLogGm non abonnée + règles), ce filtre reste un garde-fou UI.
   if (!STATE.isAdmin) msgs = msgs.filter(m => !m.gmOnly);
   _chatMsgs = msgs;   // pour le lookup "Répondre"
 
@@ -9331,7 +9361,7 @@ function _renderChatLog(msgs) {
 
   // Portrait 30px : image si dispo, sinon initiale colorée
   const _portrait = (url, name) => url
-    ? `<img class="vtt-log-portrait-lg" src="${_esc(url)}" alt="${_esc(name||'')}" onerror="this.style.visibility='hidden'">`
+    ? `<img class="vtt-log-portrait-lg" src="${_esc(url)}" alt="${_esc(name||'')}" data-img-err="hide">`
     : `<div class="vtt-log-portrait-lg">${_esc((name||'?')[0].toUpperCase())}</div>`;
 
   // Acteur = portrait + nom
@@ -9607,7 +9637,7 @@ function _renderChatLog(msgs) {
       // Portrait de la cible : son image si disponible (ex. invocation), sinon
       // l'icône de résolution. La pastille de couleur reste le statut hit/miss.
       const portraitInner = r.targetImage
-        ? `<img src="${_esc(r.targetImage)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" onerror="this.replaceWith(document.createTextNode('${icon}'))">`
+        ? `<img src="${_esc(r.targetImage)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" data-img-err="text" data-img-err-text="${_esc(icon)}">`
         : icon;
       return `<div class="vtt-log-target" style="--row-c:${baseCol}">
         <div class="vtt-log-target-portrait" style="background:${baseCol}">${portraitInner}</div>
@@ -11935,7 +11965,7 @@ function _renderLibSection() {
   const imgGrid = visible.length
     ? `<div class="vtt-lib-grid">${visible.map(img => `
         <div class="vtt-lib-card" title="${_esc(img.name||'')}">
-          <img src="${img.url}" loading="lazy" onerror="this.parentNode.classList.add('vtt-lib-card--err')">
+          <img src="${img.url}" loading="lazy" data-img-err="mark-parent" data-img-err-class="vtt-lib-card--err">
           <div class="vtt-lib-card-ov">
             <button data-vtt-fn="_vttLibPlace" data-vtt-args="${img.id}" title="Placer sur la carte">▶</button>
             ${folders.length && !_libFolder ? `<button data-vtt-fn="_vttLibMoveMenu" data-vtt-args="${img.id}|event" title="Déplacer dans un dossier">📁</button>` : ''}

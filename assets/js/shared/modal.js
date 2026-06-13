@@ -106,8 +106,7 @@ export function confirmModal(message, {
               border:1px solid ${btnBorder};
               background:${btnBg};color:${btnColor};
               transition:background .12s"
-            onmouseover="this.style.background='${danger ? 'rgba(255,107,107,.22)' : 'rgba(79,140,255,.22)'}'"
-            onmouseout="this.style.background='${btnBg}'">
+            data-hov-bg="${danger ? 'rgba(255,107,107,.22)' : 'rgba(79,140,255,.22)'}">
             ${confirmLabel}
           </button>
           <button id="cm-cancel"
@@ -116,8 +115,7 @@ export function confirmModal(message, {
               border:1px solid var(--border-strong);
               background:var(--bg-elevated);color:var(--text-muted);
               transition:background .12s"
-            onmouseover="this.style.background='var(--bg-card2)'"
-            onmouseout="this.style.background='var(--bg-elevated)'">
+            data-hov-bg="var(--bg-card2)">
             ${cancelLabel}
           </button>
         </div>
@@ -189,14 +187,12 @@ export function promptModal(label, {
             style="flex:1;padding:.55rem 1rem;border-radius:10px;cursor:pointer;font-size:.87rem;
               font-weight:700;border:1px solid rgba(79,140,255,.35);
               background:rgba(79,140,255,.12);color:var(--gold);transition:background .12s,opacity .12s"
-            onmouseover="this.style.background='rgba(79,140,255,.22)'"
-            onmouseout="this.style.background='rgba(79,140,255,.12)'">${confirmLabel}</button>
+            data-hov-bg="rgba(79,140,255,.22)">${confirmLabel}</button>
           <button id="pm-cancel"
             style="flex:1;padding:.55rem 1rem;border-radius:10px;cursor:pointer;font-size:.87rem;
               font-weight:600;border:1px solid var(--border-strong);
               background:var(--bg-elevated);color:var(--text-muted);transition:background .12s"
-            onmouseover="this.style.background='var(--bg-card2)'"
-            onmouseout="this.style.background='var(--bg-elevated)'">${cancelLabel}</button>
+            data-hov-bg="var(--bg-card2)">${cancelLabel}</button>
         </div>
       </div>`;
 

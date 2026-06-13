@@ -389,14 +389,14 @@ export function renderCharCompte(c, canEdit) {
     return `${trOpen}
       <td><input class="cs-compte-input cs-compte-input-date" type="text" value="${_esc(row.date||'')}" placeholder="—"
         data-change="saveCompteField" data-compte-type="${type}" data-idx="${i}" data-field="date"
-        onkeydown="if(event.key==='Enter')this.blur()"></td>
+        data-enter="blur"></td>
       <td><input class="cs-compte-input cs-compte-input-libelle" type="text" value="${_esc(row.libelle||'')}" placeholder="Libellé…"
         data-change="saveCompteField" data-compte-type="${type}" data-idx="${i}" data-field="libelle"
-        onkeydown="if(event.key==='Enter')this.blur()"></td>
+        data-enter="blur"></td>
       <td class="${montantClass}">
         <input class="cs-compte-input cs-compte-input-montant" type="number" value="${row.montant||''}" placeholder="0"
           data-change="saveCompteField" data-compte-type="${type}" data-idx="${i}" data-field="montant"
-          onkeydown="if(event.key==='Enter')this.blur()"><span class="cs-compte-or-lbl">or</span>
+          data-enter="blur"><span class="cs-compte-or-lbl">or</span>
       </td>
       <td><button class="btn-icon" data-action="deleteCompteRow" data-compte-type="${type}" data-idx="${i}">🗑️</button></td>
     </tr>`;

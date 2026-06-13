@@ -4,11 +4,25 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- CSP minimale (défense en profondeur, ne restreint ni script-src ni connect-src
-       → ne peut pas casser Firebase/auth). Bloque <object>/<embed> et l'injection de <base>.
-       Pour la CSP complète (script-src/connect-src/frame-src), voir docs/security.md :
-       à déployer en test avant commit car une directive incomplète casse l'auth Google. -->
+  <!-- CSP minimale ACTIVE (défense en profondeur, ne restreint ni script-src ni connect-src
+       → ne peut pas casser Firebase/auth). Bloque <object>/<embed> et l'injection de <base>. -->
   <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'">
+
+  <!-- CSP STRICTE — PRÊTE (handlers inline migrés vers shared/inline-compat.js, hash importmap
+       calculé). NE PAS activer sur main sans test : pas de mode Report-Only via <meta>, et une
+       directive incomplète casse l'auth Google. Procédure + checklist : docs/security.md §3.
+       Si l'importmap (versions SDK Firebase) change → recalculer le hash sha256 ci-dessous.
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' https://www.gstatic.com 'sha256-pux95tWeUAUbC4qBEFQ0c9EyyXfMrPyeU6SN0nA8yVE=';
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+    font-src https://fonts.gstatic.com;
+    img-src 'self' data: https:;
+    connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudinary.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com wss://*.firebaseio.com;
+    frame-src https://*.firebaseapp.com https://accounts.google.com https://apis.google.com;
+    object-src 'none';
+    base-uri 'self'">
+  -->
 
   <title>Grimorium</title>
   <link rel="icon" href="./favicon.ico" sizes="any">

@@ -469,7 +469,7 @@ function _msXpSection(c, uid, canEdit) {
         <span class="vtt-ms-xp-label">⭐ XP</span>
         <input class="vtt-ms-xp-input" type="number" value="${xp}" min="0"
           data-vtt-fn="_vttMsSetXp" data-vtt-on="change" data-vtt-args="${c.id}|${uid}|$value"
-          onkeydown="if(event.key==='Enter'){this.dispatchEvent(new Event('change'));this.blur();}"
+          data-enter="change-blur"
           title="XP total — Entrée pour valider">
         <span class="vtt-ms-xp-sep">/ ${palier}</span>
         <span class="vtt-ms-xp-niv">Niv.</span>

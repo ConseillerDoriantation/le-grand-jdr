@@ -11,7 +11,7 @@ dont certains tenteront de tricher / glitcher. Ce document distingue ce qui est
 | Lecture/écriture des collections | Règles Firestore (serveur) | Vraie protection. Voir `firestore-rules.md`. |
 | `STATE.isAdmin` côté client | Aucune | Confort UI. Un joueur peut le forcer en console — sans effet, les règles vérifient `request.auth.token.email`. |
 | Triche sur **ses propres** données (PV, or, inventaire de SA fiche) | Règles : `resource.data.uid == request.auth.uid` | **Possible par design.** Sans backend, on ne peut pas empêcher un joueur d'éditer sa propre fiche via la console. Acceptable entre potes ; seule parade réelle = Cloud Functions. |
-| `gmOnly` (jets cachés du MJ dans `vttLog`) | Filtré **côté client** | Un joueur abonné directement à la collection peut les lire. Pour durcir : restreindre la lecture des docs `gmOnly` au MJ dans les règles. |
+| `gmOnly` (jets cachés du MJ) | Règles Firestore (serveur) | **Vraie protection.** Les jets cachés sont écrits dans la sous-collection `vttLogGm` (`allow read, write: if isAdvAdmin`) ; les joueurs ne s'y abonnent pas et ne peuvent pas la lire. Le filtre client subsiste en défense en profondeur. |
 | XSS stocké (HTML injecté dans un champ) | Échappement systématique + sanitizer rich-text + CSP | Voir §2. |
 
 ## 2. XSS — règles internes
@@ -46,7 +46,7 @@ Bloque l'exécution de tout `<script>`/handler inline injecté (le vrai rempart 
 ```html
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' https://www.gstatic.com 'sha256-REMPLACER_PAR_LE_HASH_DU_SCRIPT_THEME';
+  script-src 'self' https://www.gstatic.com 'sha256-pux95tWeUAUbC4qBEFQ0c9EyyXfMrPyeU6SN0nA8yVE=';
   style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
   font-src https://fonts.gstatic.com;
   img-src 'self' data: https:;
@@ -58,16 +58,25 @@ Bloque l'exécution de tout `<script>`/handler inline injecté (le vrai rempart 
 
 #### Prérequis avant activation (sinon l'app casse)
 
-1. **Script inline du thème** (`index.html`, head) : soit le déplacer dans un fichier
-   `.js` chargé en `<script src>`, soit calculer son hash sha256 et le mettre dans
-   `script-src` (toute modif d'espace casse le hash) :
+1. **Importmap Firebase** (`index.html`, head — le `<script type="importmap">`) :
+   c'est le seul script *inline* restant (le script de thème est déjà externalisé
+   dans `core/theme-boot.js`, chargé en `<script src>` → couvert par `script-src 'self'`).
+   L'importmap doit rester inline et précéder les modules ; son hash sha256 est donc
+   listé dans `script-src` ci-dessus.
+   - Hash courant : `sha256-pux95tWeUAUbC4qBEFQ0c9EyyXfMrPyeU6SN0nA8yVE=`
+   - **⚠ À RECALCULER** à chaque modif de l'importmap — y compris un bump de version
+     du SDK Firebase (l'URL versionnée fait partie du contenu haché) ou tout changement
+     d'espaces/indentation. Commande :
    ```sh
-   # contenu = exactement ce qu'il y a ENTRE <script> et </script>
-   printf '%s' '<contenu>' | openssl dgst -sha256 -binary | openssl base64
+   node -e 'const fs=require("fs"),c=require("crypto");const m=fs.readFileSync("index.html","utf8").match(/<script type="importmap">([\s\S]*?)<\/script>/);console.log("sha256-"+c.createHash("sha256").update(m[1]).digest("base64"))'
    ```
-2. **Handlers inline restants** (`onmouseover`/`onclick` générés dans
-   `core/navigation.js` `_renderPageError`, `shared/upload-cloudinary.js`, `core/init.js`) :
-   les remplacer par des classes CSS / `data-action`, sinon ils sont bloqués.
+2. **Handlers inline générés** — ✅ **FAIT** : migrés vers des écouteurs délégués dans
+   `shared/inline-compat.js` (importé au boot par `app.js`). Le HTML porte désormais des
+   attributs `data-*` (`data-hov-bg`/`-border`/`-color`/`-opacity` pour le survol,
+   `data-enter`/`data-enter-click`/`data-esc` pour Entrée/Échap, `data-img-err` pour le
+   fallback d'image, `data-toggle-disable`) au lieu de `on*=`. Plus aucun `on*="…"` inline
+   dans le HTML généré → `script-src` sans `'unsafe-inline'` ne casse plus rien.
+   (Les `reader.onload`/`img.onload` restants sont des affectations JS, non concernées par la CSP.)
 
 #### Checklist de test (avec Firebase réel, avant commit)
 

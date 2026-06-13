@@ -1000,8 +1000,7 @@ function _renderMjStatsRow(n) {
 
   return `
     <tr style="border-bottom:1px solid rgba(255,255,255,.04)"
-      onmouseover="this.style.background='rgba(255,255,255,.02)'"
-      onmouseout="this.style.background='transparent'">
+      data-hov-bg="rgba(255,255,255,.02)">
       <td style="padding:.35rem;text-align:left;cursor:pointer;color:var(--text);
         max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
         data-action="_mjOpenNpc" data-id="${n.id}" title="Ouvrir la fiche">

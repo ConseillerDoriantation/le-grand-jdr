@@ -199,8 +199,7 @@ function _refreshStGroupsRow(groups) {
         style="padding:.3rem .65rem;border-radius:999px;border:1px dashed rgba(232,184,75,.35);
           background:transparent;color:var(--gold);font-size:.73rem;cursor:pointer;opacity:.8;
           align-self:flex-start;margin-top:.1rem;transition:all .15s"
-        onmouseover="this.style.opacity='1';this.style.background='rgba(232,184,75,.06)'"
-        onmouseout="this.style.opacity='.8';this.style.background='transparent'">
+        data-hov-opacity="1" data-hov-bg="rgba(232,184,75,.06)">
         + Nouveau groupe</button>`;
   }
   // Nouvelle vue par cards (modal v2)
