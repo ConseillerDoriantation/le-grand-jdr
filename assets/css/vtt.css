@@ -2208,17 +2208,20 @@
   grid-template-columns: none; gap: .35rem; padding: 0;
 }
 
-/* Carte compacte : icône + nom + dégâts/portée + PM, sur ~2 lignes max. */
+/* Carte compacte : nom bien lisible + chip Action/Bonus + effet (dégâts/soin). */
 .vtt-aopt-hud .vtt-castcard {
-  width: auto; min-width: 124px; max-width: 188px; flex-shrink: 0;
-  padding: 6px 9px; gap: 3px; border-radius: 9px;
+  width: auto; min-width: 152px; max-width: 220px; flex-shrink: 0;
+  padding: 7px 10px; gap: 4px; border-radius: 9px;
 }
-.vtt-aopt-hud .cs-spellcard-icon { width: 24px; height: 24px; font-size: .92rem; border-radius: 6px; }
-.vtt-aopt-hud .cs-spellcard-name { font-size: .82rem; }
-.vtt-aopt-hud .cs-spellcard-head { gap: 6px; }
-.vtt-aopt-hud .cs-spellcard-sub { margin-top: 1px; }
-.vtt-aopt-hud .cs-spellcard-pm { font-size: .88rem; }
-.vtt-aopt-hud .cs-spellcard-tags { gap: 3px; max-height: 1.4rem; overflow: hidden; }
+.vtt-aopt-hud .cs-spellcard-icon { width: 26px; height: 26px; font-size: .98rem; border-radius: 7px; }
+.vtt-aopt-hud .cs-spellcard-name { font-size: .9rem; font-weight: 700; }
+.vtt-aopt-hud .cs-spellcard-head { gap: 7px; }
+/* Action / Action bonus / Réaction : chip net, toujours sur sa ligne. */
+.vtt-aopt-hud .cs-spellcard-sub { margin-top: 2px; flex-wrap: nowrap; }
+.vtt-aopt-hud .cs-spellcard-act { font-size: .66rem; padding: 1px 6px; }
+.vtt-aopt-hud .cs-spellcard-pm { font-size: .92rem; }
+/* Effet (dégâts/soin) : 1 ligne, la pastille principale reste visible. */
+.vtt-aopt-hud .cs-spellcard-tags { gap: 4px; flex-wrap: nowrap; overflow: hidden; }
 /* Trop verbeux pour une hotbar : masqués (le détail s'affiche après la visée). */
 .vtt-aopt-hud .cs-spellcard-desc,
 .vtt-aopt-hud .cs-spellcard-runes { display: none; }
