@@ -323,6 +323,7 @@ const CELL_M = 1.5;          // 1 case = 1.5 mètre
 let _annotations      = {};   // id → { data, shape }
 let _selectedAnnotId  = null; // id de l'annotation sélectionnée (sélection simple)
 let _selectedAnnotIds = new Set(); // multi-sélection annotations
+let _vttClipboard = { tokens: [], annots: [] }; // presse-papier Ctrl+C/V (mémoire de session)
 let _annotTransformer = null; // Konva Transformer pour resize/rotation
 let _annotGroupDragOrigins = null; // { [id]: {x,y} } pour déplacement groupé annotations
 let _skipAnnotRebuild = new Set(); // ids dont le onSnapshot doit sauter le rebuild (transform local)
@@ -11768,9 +11769,86 @@ const _NUMPAD_KEYS = {
   'Numpad1':{dc:-1,dr: 1}, 'Numpad3':{dc: 1,dr: 1},
 }
 
+// ── Copier / coller (Ctrl+C / Ctrl+V) : tokens + dessins ─────────────
+// Presse-papier interne (mémoire de session). Capture les data sélectionnées ;
+// le collage recrée des docs neufs, décalés d'une demi-case pour ne pas se
+// superposer. Tokens = MJ uniquement (règle vttTokens). Dessins = chacun les
+// siens (createdBy = soi).
+function _vttCopySelection() {
+  const tokIds   = VS.selectedMulti.size > 0 ? [...VS.selectedMulti] : (VS.selected ? [VS.selected] : []);
+  const annotIds = _selectedAnnotIds.size > 0 ? [..._selectedAnnotIds] : (_selectedAnnotId ? [_selectedAnnotId] : []);
+  const tokens = tokIds.map(id => VS.tokens[id]?.data).filter(Boolean).map(d => ({ ...d }));
+  const annots = annotIds.map(id => _annotations[id]?.data).filter(Boolean).map(d => ({ ...d }));
+  if (!tokens.length && !annots.length) return false;
+  _vttClipboard = { tokens, annots };
+  const parts = [];
+  if (tokens.length) parts.push(`${tokens.length} token${tokens.length > 1 ? 's' : ''}`);
+  if (annots.length) parts.push(`${annots.length} dessin${annots.length > 1 ? 's' : ''}`);
+  showNotif(`📋 Copié : ${parts.join(' + ')}`, 'info');
+  return true;
+}
+
+async function _vttPasteClipboard() {
+  const { tokens, annots } = _vttClipboard;
+  if (!tokens.length && !annots.length) return;
+  if (!VS.activePage) { showNotif('Aucune page active', 'error'); return; }
+  const pg = VS.activePage;
+  const D  = Math.round(CELL * 0.5);
+  let nTok = 0, nAnnot = 0;
+
+  // Dessins : autorisés à tous (createdBy = soi).
+  for (const a of annots) {
+    const { id: _oid, createdAt: _ca, ...base } = a;
+    const data = { ...base, pageId: pg.id, createdBy: STATE.user?.uid || null, createdAt: serverTimestamp() };
+    if (data.type === 'line' || data.type === 'freehand') {
+      data.offsetX = (data.offsetX || 0) + D; data.offsetY = (data.offsetY || 0) + D;
+    } else {
+      data.x = (data.x || 0) + D; data.y = (data.y || 0) + D;
+    }
+    const nid = 'a' + Date.now() + Math.random().toString(36).slice(2, 5);
+    try { await setDoc(_annotRef(nid), data); _drawHistory.push(nid); nAnnot++; }
+    catch (e) { console.error('[vtt] paste annot', e); }
+  }
+
+  // Tokens : création réservée au MJ (règle Firestore vttTokens = isAdvAdmin).
+  if (tokens.length && STATE.isAdmin) {
+    const batch = writeBatch(db);
+    for (const t of tokens) {
+      const { id: _tid, createdAt: _ca, ...base } = t;
+      const ref = doc(_toksCol());
+      batch.set(ref, { ...base,
+        pageId: pg.id,
+        col: Math.max(0, Math.min(pg.cols - 1, (t.col || 0) + 1)),
+        row: Math.max(0, Math.min(pg.rows - 1, (t.row || 0) + 1)),
+        visible: true,
+        movedThisTurn: false, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false,
+        createdAt: serverTimestamp() });
+      nTok++;
+    }
+    try { await batch.commit(); }
+    catch (e) { console.error('[vtt] paste tokens', e); showNotif('Erreur collage tokens', 'error'); nTok = 0; }
+  } else if (tokens.length) {
+    showNotif('Coller des tokens est réservé au MJ', 'info');
+  }
+
+  const parts = [];
+  if (nTok)   parts.push(`${nTok} token${nTok > 1 ? 's' : ''}`);
+  if (nAnnot) parts.push(`${nAnnot} dessin${nAnnot > 1 ? 's' : ''}`);
+  if (parts.length) showNotif(`📌 Collé : ${parts.join(' + ')}`, 'success');
+}
+
 function _keyHandler(e) {
   if (!document.getElementById('vtt-canvas-wrap')) return;
   if (e.target.matches('input,textarea,select')) return;
+  // Ctrl+C / Ctrl+V : copier / coller la sélection (tokens + dessins)
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
+    if (_vttCopySelection()) e.preventDefault();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'v' || e.key === 'V')) {
+    if (_vttClipboard.tokens.length || _vttClipboard.annots.length) { e.preventDefault(); _vttPasteClipboard(); }
+    return;
+  }
   if (e.key==='Escape') { if (VS.tool !== 'select') _setTool('select'); else _deselect(); }
   // Raccourci R : bascule l'outil règle (sans modificateur, hors saisie)
   if ((e.key==='r' || e.key==='R') && !e.ctrlKey && !e.metaKey && !e.altKey) {
