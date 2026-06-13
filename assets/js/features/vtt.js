@@ -1950,6 +1950,13 @@ function _actionHudEl() {
     hud = document.createElement('div');
     hud.id = 'vtt-action-hud';
     hud.className = 'vtt-action-hud';
+    // Molette verticale → défilement horizontal de la rangée d'actions (hotbar).
+    hud.addEventListener('wheel', (e) => {
+      const list = hud.querySelector('.vtt-aopt-list');
+      if (!list || !e.deltaY || list.scrollWidth <= list.clientWidth) return;
+      list.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }, { passive: false });
     wrap.appendChild(hud);
   }
   return hud;
