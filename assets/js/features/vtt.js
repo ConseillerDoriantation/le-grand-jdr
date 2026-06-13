@@ -2642,7 +2642,9 @@ export function _vttAmpDispCircleSize(nbAmp, nbDisp) {
 
 export function _vttSpellActionMode(s) {
   const runes = s?.runes || [];
-  if (runes.includes(VTT_ACTION_RUNE) && (s?.actionMode === 'reaction' || s?.actionMode === 'action_bonus')) return s.actionMode;
+  // actionMode explicite (sort/objet) honoré tel quel — il n'est jamais
+  // positionné sans intention, donc pas de faux positif sur un sort normal.
+  if (s?.actionMode === 'reaction' || s?.actionMode === 'action_bonus') return s.actionMode;
   if (runes.includes('Réaction')) return 'reaction';
   if (runes.includes('Action Bonus')) return 'action_bonus';
   return 'action';
