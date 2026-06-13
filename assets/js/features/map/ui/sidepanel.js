@@ -6,6 +6,7 @@
 import { state, on, emit, getPlaceById, getOrgById, getOrgsOfPlace, getNpcById, getNpcsOfPlace, getMissionsOfPlace, getTypeMeta } from '../map.state.js';
 import { _esc, _norm } from '../../../shared/html.js';
 import { STATE } from '../../../core/state.js';
+import { setHistoireCtx } from '../../../shared/histoire-ctx.js';
 
 let panelEl = null;
 
@@ -123,11 +124,11 @@ function onClick(e) {
   }
   const missionItem = e.target.closest('[data-open-mission]');
   if (missionItem) {
-    window._histoireCtx = {
-      id:    missionItem.dataset.openMission,
-      titre: missionItem.dataset.missionTitre || 'Mission',
-      acte:  missionItem.dataset.missionActe || '',
-    };
+    setHistoireCtx(
+      missionItem.dataset.openMission,
+      missionItem.dataset.missionTitre || 'Mission',
+      missionItem.dataset.missionActe || '',
+    );
     import('../../../core/navigation.js').then(m => m.navigate('histoire'));
     return;
   }
