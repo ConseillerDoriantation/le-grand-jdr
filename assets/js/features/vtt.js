@@ -972,6 +972,7 @@ async function _syncAutoTokens() {
   const hasAnyToken     = new Set();  // 'c:<id>' | 'n:<id>' : a au moins 1 token
   const reserveSeen     = new Map();  // 'c:<id>' | 'n:<id>' → 1er token réserve gardé
   const toDelete        = [];
+  const toFixOwner      = [];         // { id, ownerId } : ownerId désynchro de character.uid
 
   for (const { data } of Object.values(VS.tokens)) {
     let key = null;
@@ -984,6 +985,15 @@ async function _syncAutoTokens() {
     if (data.npcId       && !VS.npcs[data.npcId])             { toDelete.push(data.id); continue; }
 
     hasAnyToken.add(key);
+
+    // Réconciliation propriétaire : le token d'un perso doit refléter
+    // character.uid (réassignation de compte / correction d'association),
+    // sinon le joueur n'est pas reconnu « en ligne » et ne peut pas bouger son
+    // token (la règle vttTokens compare ownerId à l'uid).
+    if (data.characterId) {
+      const want = VS.characters[data.characterId]?.uid || null;
+      if ((data.ownerId || null) !== want) toFixOwner.push({ id: data.id, ownerId: want });
+    }
 
     // Doublons réserve : on garde le 1er rencontré, on drop les autres
     if (!data.pageId) {
@@ -1011,7 +1021,7 @@ async function _syncAutoTokens() {
   // Les ennemis ne sont PAS auto-créés depuis le bestiaire : ils sont placés
   // manuellement depuis la section Bestiaire du tray.
 
-  if (!toCreate.length && !toDelete.length) return;
+  if (!toCreate.length && !toDelete.length && !toFixOwner.length) return;
 
   const batch = writeBatch(db);
   for (const { detId, ...base } of toCreate) {
@@ -1029,6 +1039,7 @@ async function _syncAutoTokens() {
     });
   }
   for (const id of new Set(toDelete)) batch.delete(_tokRef(id));
+  for (const { id, ownerId } of toFixOwner) batch.update(_tokRef(id), { ownerId });
   await batch.commit().catch(e => console.error('[vtt] auto-sync tokens:', e));
 }
 

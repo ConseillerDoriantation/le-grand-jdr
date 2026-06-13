@@ -278,8 +278,8 @@ async function _createCharForOwner(uid, ownerPseudo) {
   } catch (e) { notifySaveError(e); }
 }
 
-/** MJ : sélecteur du compte propriétaire (membres de l'aventure courante). */
-async function _openCharOwnerPicker() {
+/** Membres de l'aventure courante (comptes), triés : soi d'abord puis alpha. */
+async function _advMembersSorted() {
   const adv = STATE.adventure;
   const allUsers = await loadAllUsers();
   const memberUids = new Set([
@@ -290,11 +290,18 @@ async function _openCharOwnerPicker() {
   ]);
   let members = allUsers.filter(u => memberUids.has(u.id));
   if (!members.length) members = [{ id: STATE.user.uid, pseudo: STATE.profile?.pseudo || 'Moi' }];
-  // Tri : soi d'abord, puis alpha
   const selfId = STATE.user.uid;
   members.sort((a, b) =>
     (a.id === selfId ? -1 : b.id === selfId ? 1 : 0) ||
     (a.pseudo || a.email || '').localeCompare(b.pseudo || b.email || ''));
+  return members;
+}
+
+/** MJ : sélecteur du compte propriétaire (membres de l'aventure courante). */
+async function _openCharOwnerPicker() {
+  const adv = STATE.adventure;
+  const members = await _advMembersSorted();
+  const selfId = STATE.user.uid;
   _newCharOwners = members;
 
   const admins = adv?.admins || [];
@@ -328,6 +335,50 @@ async function confirmNewChar() {
     || (uid === STATE.user.uid ? (STATE.profile?.pseudo || '?') : '?');
   closeModal();
   await _createCharForOwner(uid, pseudo);
+}
+
+/** MJ : réassigner un personnage existant à un autre compte joueur.
+ *  Corrige l'association `uid` (+ `ownerPseudo`) ; le token VTT suit via la
+ *  réconciliation de `ownerId` dans _syncAutoTokens. */
+async function reassignCharOwner(charId) {
+  if (!STATE.isAdmin) return;
+  const c = (STATE.characters || []).find(x => x.id === charId);
+  if (!c) return showNotif('Personnage introuvable', 'error');
+  const members = await _advMembersSorted();
+  _newCharOwners = members;
+  const admins = STATE.adventure?.admins || [];
+  const options = members.map(u => {
+    const isMj = admins.includes(u.id);
+    const sel  = u.id === c.uid ? 'selected' : '';
+    return `<option value="${u.id}" ${sel}>${_esc(u.pseudo || u.email || u.id)}${isMj ? ' — MJ' : ''}</option>`;
+  }).join('');
+  openModal(`👤 Réassigner « ${_esc(c.nom || 'Personnage')} »`, `
+    <div class="form-group">
+      <label>Compte propriétaire</label>
+      <select class="input-field" id="reassign-char-owner">${options}</select>
+      <div style="font-size:.72rem;color:var(--text-dim);margin-top:.4rem;line-height:1.5">
+        Le personnage sera rattaché à ce compte (fiche, présence « en ligne »).
+        Son token VTT suivra automatiquement à la prochaine ouverture de la table par le MJ.
+      </div>
+    </div>
+    <div style="display:flex;gap:.5rem;align-items:center;margin-top:1.1rem">
+      <button class="btn btn-outline btn-sm" data-action="cancelNewChar">Annuler</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-gold" data-action="confirmReassignChar" data-id="${charId}">Réassigner</button>
+    </div>`);
+}
+
+async function confirmReassignChar(charId) {
+  const uid = document.getElementById('reassign-char-owner')?.value;
+  if (!uid) return;
+  const owner = (_newCharOwners || []).find(u => u.id === uid);
+  const pseudo = owner?.pseudo || owner?.email || '?';
+  closeModal();
+  try {
+    await updateInCol('characters', charId, { uid, ownerPseudo: pseudo });
+    showNotif(`Personnage réassigné à ${pseudo}`, 'success');
+    PAGES.characters();
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════
@@ -454,4 +505,6 @@ registerActions({
   confirmNewChar: ()    => confirmNewChar(),
   cancelNewChar:  ()    => closeModal(),
   closeTitres:    ()    => closeModal(),
+  reassignCharOwner:   (btn) => reassignCharOwner(btn.dataset.id),
+  confirmReassignChar: (btn) => confirmReassignChar(btn.dataset.id),
 });
