@@ -1928,70 +1928,41 @@ function _deselect() {
 //  Le flux historique « clic sur l'ennemi = attaque » reste actif en parallèle.
 // ════════════════════════════════════════════════════════════════════
 
-// ── Barre d'action ancrée au token sélectionné ──────────────────────
+// ── HUD d'action fixe en bas du canvas (remplace la barre ancrée) ────
+// Le picker d'actions (construit par _execAttack en mode noTgt) est désormais
+// DOCKÉ en bas du canvas plutôt qu'ancré au token : il ne flotte plus sur le
+// jeu et ne bloque plus les clics là où on veut viser. Il persiste pendant la
+// visée (le canvas au-dessus reste cliquable).
 function _showActBar(srcId) {
-  _hideActBar();
-  const t = VS.tokens[srcId]?.data; if (!t || !_canControlToken(t)) return;
-  const wrap = VS.stage?.container(); if (!wrap) return;
-  const opts = _buildAttackOptions(t);
-  const weaponN  = opts.filter(o => !o._itemAction && o.sortIdx === undefined && !o.targetSelf).length;
-  const itemN    = opts.filter(o => o._itemAction).length;
-  const spellN   = opts.filter(o => !o._itemAction && o.sortIdx !== undefined).length;
-  const arsenalN = weaponN + itemN;   // armes + objets regroupés
-  const chips = [];
-  if (arsenalN) chips.push(['arsenal', '🛡', 'Arsenal', arsenalN, '#cbd5e1']);
-  if (spellN)   chips.push(['spells',  '✨', 'Sorts',   spellN,   '#a78bfa']);
-  chips.push(['basic', '🎭', 'Actions', 0, '#fcd34d']);   // toujours dispo (Esquiver…)
-
-  const bar = document.createElement('div');
-  bar.id = 'vtt-actbar';
-  bar.className = 'vtt-actbar';
-  bar.innerHTML = chips.map(([cat, icon, label, n, col]) => `
-    <button class="vtt-actbar-chip" style="--c:${col}" data-vtt-fn="_vttActBarCat" data-vtt-args="${srcId}|${cat}" title="${label}">
-      <span class="vtt-actbar-ic">${icon}</span>
-      <span class="vtt-actbar-lbl">${label}</span>
-      ${n ? `<span class="vtt-actbar-n">${n}</span>` : ''}
-    </button>`).join('');
-  wrap.appendChild(bar);
-  _actBar = bar; _actBarSrc = srcId;
-  _positionActBar();
-  _actBarLoop();
+  const t = VS.tokens[srcId]?.data;
+  if (!t || !_canControlToken(t)) { _hideActBar(); return; }
+  _execAttack(srcId, null).catch(() => {});   // rend le picker dans le HUD (cf. fin de _execAttack)
 }
 
-function _hideActBar() {
-  if (_actBarRAF) { cancelAnimationFrame(_actBarRAF); _actBarRAF = 0; }
-  _actBar?.remove();
-  _actBar = null; _actBarSrc = null;
-}
+function _hideActBar() { _hideActionHud(); }
 
-// Re-positionne la barre sous le token courant (suit pan/zoom via rAF).
-function _positionActBar() {
-  if (!_actBar || !VS.stage) return;
-  const sh = VS.tokens[_actBarSrc]?.shape;
-  const t  = VS.tokens[_actBarSrc]?.data;
-  if (!sh || !t || t.pageId !== VS.activePage?.id) { _hideActBar(); return; }
-  const wrap  = VS.stage.container();
-  const abs   = sh.getAbsolutePosition();        // px relatifs au wrap (scale + position inclus)
-  const scale = VS.stage.scaleY() || 1;
-  const half  = (CELL * (_tokenDims(t).h || 1) / 2) * scale;
-  const bw = _actBar.offsetWidth, bh = _actBar.offsetHeight;
-  const wW = wrap.clientWidth, wH = wrap.clientHeight;
-  let left = abs.x;
-  let top  = abs.y + half + 8;
-  if (top + bh + 4 > wH) top = abs.y - half - 8 - bh;   // déborde en bas → passe au-dessus
-  left = Math.max(bw / 2 + 4, Math.min(wW - bw / 2 - 4, left));
-  top  = Math.max(4, Math.min(wH - bh - 4, top));
-  _actBar.style.left = `${left}px`;
-  _actBar.style.top  = `${top}px`;
+// Conteneur du HUD : overlay absolu en bas du container Konva (créé à la volée).
+function _actionHudEl() {
+  let hud = document.getElementById('vtt-action-hud');
+  if (!hud) {
+    const wrap = VS.stage?.container();
+    if (!wrap) return null;
+    hud = document.createElement('div');
+    hud.id = 'vtt-action-hud';
+    hud.className = 'vtt-action-hud';
+    wrap.appendChild(hud);
+  }
+  return hud;
 }
-
-function _actBarLoop() {
-  _actBarRAF = requestAnimationFrame(() => {
-    _actBarRAF = 0;
-    if (!_actBar) return;
-    _positionActBar();
-    _actBarLoop();
-  });
+function _showActionHud(html) {
+  const hud = _actionHudEl();
+  if (!hud) return;
+  hud.innerHTML = html;
+  hud.classList.add('show');
+}
+function _hideActionHud() {
+  const hud = document.getElementById('vtt-action-hud');
+  if (hud) { hud.classList.remove('show'); hud.innerHTML = ''; }
 }
 
 // Clic sur une catégorie de la barre → ouvre le picker filtré, SANS cible (action d'abord).
@@ -4921,8 +4892,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
         data-vtt-fn="_vttClearAoptSearch" data-vtt-args="$this">✕</button>
     </div>` : '';
 
-  openModal('⚔️ Choisir une action', `
-    <div class="vtt-form vtt-aopt-modal">
+  const innerHtml = `
       <div class="vtt-aopt-modal-hd">
         <div class="vtt-aopt-modal-targets">
           <span class="vtt-aopt-modal-src"><strong>${_esc(lS.displayName??src.name)}</strong></span>
@@ -4930,15 +4900,25 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
           <span class="vtt-aopt-modal-tgt"><strong>${_esc(lT.displayName??tgt.name)}</strong></span>`}
         </div>
         ${noTgt
-          ? `<span class="vtt-aopt-modal-dist" title="Choisis l'action puis clique une cible">🎯 Choisir une cible ensuite</span>`
+          ? `<span class="vtt-aopt-modal-dist" title="Choisis l'action puis clique une cible">🎯 puis clique une cible</span>`
           : `<span class="vtt-aopt-modal-dist" title="Distance source → cible">📏 ${dist}c</span>`}
       </div>
       ${pmBar}
       ${tabsHtml}
-      ${searchHtml}
+      ${noTgt ? searchHtml.replace(' autofocus', '') : searchHtml}
       <div class="vtt-aopt-list cs-v3">${optsHtml}${basicHtml}
         <div class="vtt-aopt-empty" style="display:none"><span style="opacity:.5">Aucune action ne correspond.</span></div>
-      </div>
+      </div>`;
+
+  // Flux « action d'abord » (sans cible) → HUD docké en bas du canvas.
+  // Flux « clic sur une cible » → modale centrée (inchangé).
+  if (noTgt) {
+    _showActionHud(`<div class="vtt-form vtt-aopt-modal vtt-aopt-hud">${innerHtml}</div>`);
+    return;
+  }
+
+  openModal('⚔️ Choisir une action', `
+    <div class="vtt-form vtt-aopt-modal">${innerHtml}
       <div class="vtt-aopt-footer">
         <button class="btn-secondary" data-action="close-modal">Annuler</button>
       </div>
@@ -6965,6 +6945,14 @@ function _renderInspectorSoon() {
     _inspectorDirty = false;
     const t = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : null;
     _renderInspector(t);
+    // HUD d'action : (ré)affiché pour le token sélectionné contrôlable, avec PM
+    // et options à jour. On ne reconstruit PAS pendant une visée (_aimOpt), tant
+    // qu'une modale est ouverte, ni si l'utilisateur tape dans la recherche.
+    const modalOpen = document.getElementById('modal-overlay')?.classList.contains('show');
+    if (t && _canControlToken(t) && !_aimOpt && !modalOpen
+        && !document.activeElement?.classList?.contains('vtt-aopt-search-input')) {
+      _showActBar(VS.selected);
+    }
   });
 }
 

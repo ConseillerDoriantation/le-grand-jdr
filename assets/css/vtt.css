@@ -2154,6 +2154,47 @@
   align-items: stretch;   /* cartes d'une même rangée à hauteur égale */
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   HUD d'action de combat — picker docké en bas du canvas (remplace la
+   barre ancrée + la modale pour le flux « action d'abord »). Fixe en bas,
+   ne flotte plus sur le jeu : le canvas au-dessus reste cliquable.
+   ════════════════════════════════════════════════════════════════════ */
+.vtt-action-hud {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 30;
+  display: none;
+  background: color-mix(in srgb, var(--bg-panel) 97%, transparent);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -8px 26px -14px rgba(0,0,0,.7);
+  padding: .45rem .6rem .5rem;
+  max-height: 44%;
+  overflow: hidden;
+}
+.vtt-action-hud.show { display: block; }
+.vtt-aopt-hud { display: flex; flex-direction: column; gap: .4rem; max-height: 100%; }
+.vtt-aopt-hud .vtt-aopt-modal-hd { padding: 0 .1rem .05rem; }
+.vtt-aopt-hud .vtt-aopt-tabs,
+.vtt-aopt-hud .vtt-aopt-search,
+.vtt-aopt-hud .vtt-atk-pm-bar { flex-shrink: 0; }
+/* La liste devient une rangée horizontale scrollable (hotbar). */
+.vtt-aopt-hud .vtt-aopt-list {
+  flex-direction: row; flex-wrap: nowrap; align-items: flex-start;
+  max-height: none; overflow-x: auto; overflow-y: hidden;
+  gap: .5rem; padding: 0 0 5px;
+}
+.vtt-aopt-hud .vtt-aopt-section { min-width: max-content; }
+.vtt-aopt-hud .vtt-aopt-section-body {
+  display: flex; flex-direction: row; flex-wrap: nowrap;
+  grid-template-columns: none; gap: 6px; padding: 6px;
+}
+.vtt-aopt-hud .vtt-castcard { width: 212px; flex-shrink: 0; }
+.vtt-action-hud .vtt-aopt-list::-webkit-scrollbar { height: 6px; }
+.vtt-action-hud .vtt-aopt-list::-webkit-scrollbar-thumb { background: var(--bg-elevated); border-radius: 3px; }
+/* Mobile : un peu plus haut + cartes plus étroites. */
+@media (max-width: 720px) {
+  .vtt-action-hud { max-height: 50%; }
+  .vtt-aopt-hud .vtt-castcard { width: 180px; }
+}
+
 /* ── Action en carte de sort (réutilise .cs-spellcard de la fiche perso) ── */
 .cs-v3 .vtt-castcard {
   cursor: pointer; text-align: left; font-family: inherit; width: 100%;
