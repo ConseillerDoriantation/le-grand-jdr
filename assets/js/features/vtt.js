@@ -4416,7 +4416,13 @@ function _buildAttackOptions(t) {
       const basePm    = Math.max(0, pmRaw + spellPmDelta);
       const freeKey   = `${t.id}_${idx}`;
       const freeCasts = _multiCastFree.get(freeKey) || 0;
-      const isOneShot = _freeNextCast.has(freeKey);
+      // Sort suspendu actif pour CE sort (buff non expiré) → une version GRATUITE
+      // du sort est dispo dans la liste (cast une fois → consomme le buff).
+      const _rNow = VS.session?.combat?.round ?? 0;
+      const hasSuspendedBuff = (t.buffs || []).some(b =>
+        b.type === 'suspended_spell' && b.sortIdx === idx &&
+        (b.expiresAtRound == null || _rNow === 0 || _rNow <= b.expiresAtRound));
+      const isOneShot = _freeNextCast.has(freeKey) || hasSuspendedBuff;
       const cout      = (freeCasts > 0 || isOneShot) ? 0 : basePm;
       // Catégorie pour le tri dans le modal VTT
       const sortCats = c.sort_cats || [];
@@ -6068,30 +6074,40 @@ async function _vttRollAttack() {
       return;
     }
 
-    // ── Combo Sort suspendu : on stocke l'opt + cible et on n'exécute pas l'effet ──
-    // Le sort sera déclenché plus tard via le bouton dans l'inspector du porteur.
-    if (opt.mods?.sortSuspendu && !_suspendedTriggerActive) {
-      await _deductPm();
-      // Durée de stockage pilotée par le combo (2 tours + 2 par rune Durée),
-      // indépendante de la durée d'effet du sort (qui est instantané : onHit).
-      const graceTurns = opt.mods.sortSuspendu.graceTurns || 2;
-      const round = VS.session?.combat?.round ?? 0;
-      const baseRound = Math.max(1, round);
-      const sharedSusp = _buffShared(opt, srcId);
-      const suspBuff = {
-        ...sharedSusp,
-        type: 'suspended_spell',
-        sortIdx: opt.sortIdx ?? null,
-        tgtId: tgtId,
-        icon: '🔮',
-        totalDuration: graceTurns,
-        expiresAtRound: baseRound + graceTurns - 1,
-      };
-      const existing = (src.buffs || []).filter(b => !(b.type === 'suspended_spell' && b.sortLabel === opt.label));
-      await updateDoc(_tokRef(srcId), { buffs: [...existing, suspBuff] }).catch(() => {});
-      showNotif(`🔮 ${opt.label} suspendu — déclenchable hors de votre tour pendant ${graceTurns} tours`, 'success');
-      _cleanup();
-      return;
+    // ── Combo Sort suspendu ──────────────────────────────────────────────
+    // 1er cast : on STOCKE le sort (PM payé) sans exécuter l'effet. Une version
+    // GRATUITE du sort apparaît alors directement dans la liste d'actions
+    // (cf. hasSuspendedBuff dans _buildAttackOptions).
+    // Cast de la version gratuite (le buff existe) : on consomme le buff puis on
+    // laisse l'exécution onHit normale suivre — pas de re-suspension.
+    if (opt.mods?.sortSuspendu) {
+      const alreadySuspended = (src.buffs || []).some(b => b.type === 'suspended_spell' && b.sortIdx === opt.sortIdx);
+      if (!alreadySuspended) {
+        await _deductPm();
+        // Durée de stockage pilotée par le combo (2 tours + 2 par rune Durée),
+        // indépendante de la durée d'effet du sort (qui est instantané : onHit).
+        const graceTurns = opt.mods.sortSuspendu.graceTurns || 2;
+        const round = VS.session?.combat?.round ?? 0;
+        const baseRound = Math.max(1, round);
+        const sharedSusp = _buffShared(opt, srcId);
+        const suspBuff = {
+          ...sharedSusp,
+          type: 'suspended_spell',
+          sortIdx: opt.sortIdx ?? null,
+          icon: '🔮',
+          totalDuration: graceTurns,
+          expiresAtRound: baseRound + graceTurns - 1,
+        };
+        const existing = (src.buffs || []).filter(b => !(b.type === 'suspended_spell' && b.sortLabel === opt.label));
+        await updateDoc(_tokRef(srcId), { buffs: [...existing, suspBuff] }).catch(() => {});
+        showNotif(`🔮 ${opt.label} suspendu — version gratuite dispo dans tes sorts (${graceTurns} tours)`, 'success');
+        _cleanup();
+        return;
+      }
+      // Version gratuite : retire le buff (consommé), puis l'effet onHit s'exécute
+      // normalement (coût déjà 0). Pas de return → on continue le flux d'attaque.
+      const remaining = (src.buffs || []).filter(b => !(b.type === 'suspended_spell' && b.sortIdx === opt.sortIdx));
+      await updateDoc(_tokRef(srcId), { buffs: remaining }).catch(() => {});
     }
 
     // ── Combo Coup de chance : applique le buff lucky_reroll à l'allié ciblé ──
@@ -7354,16 +7370,16 @@ function _renderInspector(t) {
                    : bf.effect ? bf.effect.slice(0, 24) : '';
       const rmBtn = STATE.isAdmin
         ? `<button class="vtt-buff-rm" data-vtt-fn="_vttRemoveBuff" data-vtt-args="${t.id}|${i}" title="Retirer">✕</button>` : '';
-      // Sort suspendu : bouton ▶ pour le déclencher (porteur ou MJ)
-      const canTrigger = bf.type === 'suspended_spell' && _canControlToken(t);
-      const trigBtn = canTrigger
-        ? `<button class="vtt-buff-trigger" data-vtt-fn="_vttTriggerSuspendedSpell" data-vtt-args="${t.id}|${i}" title="Déclencher le sort suspendu">▶</button>` : '';
-      return `<div class="vtt-buff-item" title="${_esc(lbl)}${detail?' · '+_esc(detail):''}">
+      // Sort suspendu : pas de bouton — la version GRATUITE du sort est dispo
+      // directement dans la liste d'actions (le buff 🔮 sert d'indicateur + minuteur).
+      const suspHint = bf.type === 'suspended_spell'
+        ? ' · 🎁 version gratuite dispo dans tes sorts' : '';
+      return `<div class="vtt-buff-item" title="${_esc(lbl)}${detail?' · '+_esc(detail):''}${suspHint}">
         <span class="vtt-buff-ic">${ic}</span>
         <span class="vtt-buff-lbl">${_esc(lbl)}</span>
         ${detail ? `<span class="vtt-buff-detail">${_esc(detail)}</span>` : ''}
         <span class="vtt-buff-dur">${durStr}</span>
-        ${trigBtn}${rmBtn}
+        ${rmBtn}
       </div>`;
     }).join('');
     const addBtn = STATE.isAdmin
@@ -10928,38 +10944,6 @@ function _conditionsAttackMods(srcToken, tgtToken, opt) {
   }
   return { hasAdv, hasDis, reasons };
 }
-/** Déclenche un sort suspendu : marque le sort gratuit puis ouvre le modal d'attaque. */
-async function _vttTriggerSuspendedSpell(tokenId, buffIdx) {
-  const t = VS.tokens[tokenId]?.data; if (!t?.buffs?.length) return;
-  if (!_canControlToken(t)) return;
-  // Index visible (parmi les buffs actifs) → index réel dans t.buffs
-  const r = VS.session?.combat?.round ?? 0;
-  const activeIdxs = t.buffs.map((bf, i) => ({ bf, i }))
-    .filter(({ bf }) => bf?.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound)
-    .map(({ i }) => i);
-  const realIdx = activeIdxs[buffIdx];
-  const buff = t.buffs[realIdx];
-  if (!buff || buff.type !== 'suspended_spell') return;
-  // Marque le sort comme gratuit pour le prochain cast
-  if (buff.sortIdx != null) _freeNextCast.add(`${tokenId}_${buff.sortIdx}`);
-  // Retire le buff suspendu
-  const remaining = t.buffs.filter((_, i) => i !== realIdx);
-  await updateDoc(_tokRef(tokenId), { buffs: remaining }).catch(() => {});
-  // Active le flag pour éviter la re-suspension immédiate
-  _suspendedTriggerActive = true;
-  try {
-    // Cible choisie AU DÉCLENCHEMENT (réaction) : on ouvre la barre d'action
-    // sans cible (HUD) plutôt que de réutiliser l'ancienne cible — qui a pu
-    // mourir / sortir de portée (→ _execAttack bail silencieux = « introuvable »).
-    // Le sort apparaît marqué « 🎁 Gratuit ».
-    _showActBar(tokenId);
-    showNotif('🔮 Sort suspendu prêt — choisis-le (🎁 Gratuit) puis une cible', 'info');
-  } finally {
-    // Le flag reste actif jusqu'à la fin du cast — désactivé par sécurité après 30s
-    setTimeout(() => { _suspendedTriggerActive = false; }, 30_000);
-  }
-}
-
 /** Retire un buff à l'index donné (MJ uniquement). */
 async function _vttRemoveBuff(tokenId, idx) {
   if (!STATE.isAdmin) return;
@@ -12676,7 +12660,6 @@ const VTT_ACTIONS = {
   _vttBstClearSearch,
   _vttTrayTab,
   _vttTriggerConcentrationSave,
-  _vttTriggerSuspendedSpell,
   _vttUploadClick,
   _zoneCancel,
   _zoneClear,
