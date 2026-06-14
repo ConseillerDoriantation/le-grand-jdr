@@ -319,7 +319,7 @@ export const SORT_COMBOS = [
     id: 'canalise_persistant',
     icon: '🧠',
     defaultName: 'Sort canalisé persistant',
-    detect: (counts) => (counts.Durée || 0) > 0 && counts.Concentration > 0,
+    detect: (counts) => (counts.Durée || 0) > 0 && counts.Concentration > 0 && (counts.Réaction || 0) === 0,
     describe: (counts) =>
       `Durée + Concentration · le sort tient tant que la concentration est maintenue · après rupture, l'effet persiste encore 2 tours`,
   },
@@ -350,11 +350,16 @@ export const SORT_COMBOS = [
     id: 'sort_suspendu',
     icon: '🔮',
     defaultName: 'Sort suspendu',
-    // Réaction + Durée : stocke le sort, déclenchement manuel hors-tour
-    detect: (counts) => counts.Réaction > 0 && (counts.Durée || 0) > 0,
+    // Concentration + Réaction : stocke un sort onHit INSTANTANÉ, déclenchement
+    // manuel hors-tour. Durée prolonge le stockage (+2 tours chacune). Exclut les
+    // effets sur la durée (Affliction/DoT, Régénération, Enchantement, Invocation).
+    detect: (counts) => (counts.Concentration || 0) > 0 && counts.Réaction > 0
+      && (counts.Affliction || 0) === 0 && (counts.Enchantement || 0) === 0
+      && (counts.Invocation || 0) === 0 && (counts.Lacération || 0) === 0,
     describe: (counts) => {
-      const turns = (counts.Durée || 0) + 1;
-      return `Réaction + Durée ×${counts.Durée || 0} · le sort est stocké au cast (PM payé) · déclenchable hors de votre tour pendant ${turns} tour${turns > 1 ? 's' : ''}`;
+      const nbDur = counts.Durée || 0;
+      const turns = 2 + 2 * nbDur;
+      return `Concentration + Réaction · sort onHit instantané stocké au cast (PM payé) · déclenchable hors de votre tour pendant ${turns} tours${nbDur ? ` (Durée ×${nbDur})` : ''}`;
     },
   },
   {

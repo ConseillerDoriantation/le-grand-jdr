@@ -2843,9 +2843,13 @@ function _vttSpellMods(s) {
           nbProt,
           nbAff,
         } : null,
-    // Sort suspendu : Réaction + Durée. Stocke le sort pour déclenchement hors-tour
-    sortSuspendu: (nbReac > 0 && nbDur > 0)
-      ? { graceTurns: nbDur + 1 } : null,
+    // Sort suspendu : Concentration + Réaction. Stocke un sort onHit INSTANTANÉ
+    // pour déclenchement hors-tour ; la rune Durée prolonge le stockage (+2 tours
+    // chacune). Restreint aux sorts sans effet sur la durée (pas d'Affliction/DoT,
+    // Régénération, Enchantement, Invocation/Sentinelle ni Lacération).
+    sortSuspendu: (nbConc > 0 && nbReac > 0
+        && nbAff === 0 && nbEnch === 0 && nbInv === 0 && lacCount === 0)
+      ? { graceTurns: 2 + 2 * nbDur } : null,
     // Coup de chance : Chance + Réaction. Les runes sont absorbées en 1 relance auto.
     coupChance: isCoupChance
       ? { charges: 1 } : null,
@@ -2869,8 +2873,9 @@ function _vttSpellMods(s) {
           nbInvocations: nbDisp > 0 ? 1 + nbDisp : 1,
           nbP, nbProt, nbAmp,
         } : null,
-    // Canalisé persistant : Durée + Concentration → durée liée à la concentration
-    canalisePersistant: (nbDur > 0 && nbConc > 0)
+    // Canalisé persistant : Durée + Concentration (SANS Réaction → sinon c'est un
+    // Sort suspendu) → durée liée à la concentration.
+    canalisePersistant: (nbDur > 0 && nbConc > 0 && nbReac === 0)
       ? { graceTurns: nbDur + 1, dd: Math.max(5, 11 - 2 * (nbConc - 1)) } : null,
     // Invocation (hors combos Sentinelle/Arme invoquée). NOUVEAU modèle : la rune
     // Invocation SÉLECTIONNE des invocations de la bibliothèque du lanceur
@@ -6067,6 +6072,11 @@ async function _vttRollAttack() {
     // Le sort sera déclenché plus tard via le bouton dans l'inspector du porteur.
     if (opt.mods?.sortSuspendu && !_suspendedTriggerActive) {
       await _deductPm();
+      // Durée de stockage pilotée par le combo (2 tours + 2 par rune Durée),
+      // indépendante de la durée d'effet du sort (qui est instantané : onHit).
+      const graceTurns = opt.mods.sortSuspendu.graceTurns || 2;
+      const round = VS.session?.combat?.round ?? 0;
+      const baseRound = Math.max(1, round);
       const sharedSusp = _buffShared(opt, srcId);
       const suspBuff = {
         ...sharedSusp,
@@ -6074,11 +6084,12 @@ async function _vttRollAttack() {
         sortIdx: opt.sortIdx ?? null,
         tgtId: tgtId,
         icon: '🔮',
+        totalDuration: graceTurns,
+        expiresAtRound: baseRound + graceTurns - 1,
       };
       const existing = (src.buffs || []).filter(b => !(b.type === 'suspended_spell' && b.sortLabel === opt.label));
       await updateDoc(_tokRef(srcId), { buffs: [...existing, suspBuff] }).catch(() => {});
-      await _vttApplyCasterConcentration(srcId, opt);
-      showNotif(`🔮 ${opt.label} suspendu — à déclencher hors de votre tour`, 'success');
+      showNotif(`🔮 ${opt.label} suspendu — déclenchable hors de votre tour pendant ${graceTurns} tours`, 'success');
       _cleanup();
       return;
     }
