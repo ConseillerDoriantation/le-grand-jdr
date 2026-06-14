@@ -1,6 +1,6 @@
 # Découpage de `vtt.js` (≈15 000 lignes)
 
-`features/vtt.js` est le plus gros fichier de l'app (~23 % du JS), monolithe de la
+`features/vtt/vtt.js` est le plus gros fichier de l'app (~23 % du JS), monolithe de la
 feature la plus critique en séance live. Objectif : le découper en modules
 cohérents **sans changer le comportement observable**. Campagne multi-PR, chaque
 étape livrable et vérifiable isolément.
@@ -12,7 +12,7 @@ faible (0–9 deps) et vérifié (audit → script → `node --check` → reveri
 
 | Module | Lignes | Rôle |
 |---|---|---|
-| `vtt-state.js` | 55 | objet d'état partagé `VS` (le déverrouillage) |
+| `features/vtt/vtt-state.js` | 55 | objet d'état partagé `VS` (le déverrouillage) |
 | `vtt-mini-fiche.js` | 1001 | popup perso 4 onglets |
 | `vtt-music.js` | 817 | sons & musique d'ambiance |
 | `vtt-loot.js` | 404 | butin d'aventure |
@@ -48,7 +48,7 @@ que sur une base de tests solide. Tant que ce n'est pas fait, le cœur reste ens
    réassigner une variable importée (`_stage = …` impossible depuis un autre fichier).
 
 → On ne peut déplacer une fonction tant qu'elle écrit dans ces variables. Il faut
-d'abord les regrouper dans **un objet d'état partagé** `VS` (`features/vtt-state.js`),
+d'abord les regrouper dans **un objet d'état partagé** `VS` (`features/vtt/vtt-state.js`),
 muté par propriété (`VS.stage = …`) et importé par tous les modules. **Même patron
 que `features/map/map.state.js`** — modèle de référence déjà éprouvé dans le repo.
 
@@ -57,7 +57,7 @@ Le registre `VTT_ACTIONS` (objet littéral, fin de `vtt.js`) résout les handler
 
 ## Le plan
 
-### Phase 0 — `vtt-state.js` : migrer l'état **partagé**, **en place** (vtt.js reste un fichier)
+### Phase 0 — `features/vtt/vtt-state.js` : migrer l'état **partagé**, **en place** (vtt.js reste un fichier)
 Rename mécanique `_x` → `VS.x`, par **lots cohérents**. Zéro changement de comportement
 (même objet, juste relocalisé). C'est le déverrouillage.
 
@@ -99,7 +99,7 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
    Variantes longues avant courtes. Outil : script Node jetable (le `\b` d'un
    `RegExp("\\b"+...)` passé via shell peut être mangé → préférer un **fichier** `.cjs`).
 2. **Symétrie grep** : `\b_x\b` = 0 restant ; voisins non ciblés inchangés ; `VS.x` présent.
-3. **Retirer** la déclaration `let _x` de `vtt.js` (vit désormais dans `vtt-state.js`).
+3. **Retirer** la déclaration `let _x` de `vtt.js` (vit désormais dans `features/vtt/vtt-state.js`).
 4. **`node --check`** sur une copie `.mjs`.
 5. **Smoke-test manuel** (impossible à automatiser ici : Konva + Firestore temps réel) —
    voir checklist ci-dessous.
@@ -138,7 +138,7 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
 ## Avancement
 
 - ✅ **Phase 0 — lot 1 (pilote, images/carte)** : `imgTr, imgTrFg, selImg, mapMode,
-  mapLib, mapLibUnsub` → `VS.*`. `vtt-state.js` créé. (≈71 occurrences.)
+  mapLib, mapLibUnsub` → `VS.*`. `features/vtt/vtt-state.js` créé. (≈71 occurrences.)
 - ✅ **Phase 0 — lot 2 (cœur de scène)** : `session, pages, tokens, activePage` →
   `VS.*`. (≈436 occurrences.) Smoke-test : pan/zoom, sélection token, attaque, sync
   multi-clients, changement de page/scène.

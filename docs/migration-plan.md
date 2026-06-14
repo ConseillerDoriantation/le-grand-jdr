@@ -1,66 +1,57 @@
-# Plan de migration — Le Grand JDR
+# Plan de migration - Le Grand JDR
 
-## Ce qui a ete fait (Sprint 1)
+Ce document resume l'etat courant du refactor. L'historique detaille de la dette `window.*` reste dans `docs/window-globals-inventory.md`.
 
-- firebase.js : window._jdr supprime, exports ES6 nommes
-- state.js : STATE centralise, mutateurs types, plus de window.*
-- init.js : import direct Firebase, plus de firebase-ready event
-- auth.js : imports propres
-- navigation.js : delegation d'evenements, pattern data-navigate
-- layout.js : imports propres
-- firestore.js : couche data isolee
-- modal.js / notifications.js : ES module exports
-- app.js : point d'entree unique (remplace 15 script defer)
-- index.html : 1 script type=module + data-navigate partout
+## Etat actuel
 
-## Sprint 2 — onclick dans les features (prochain)
+### Fait
 
-Migrer les onclick inline generes par les features vers data-action.
+- Entree unique : `index.html` + `assets/js/app.js`.
+- Modules ES natifs, sans build obligatoire.
+- Router lazy dans `core/navigation.js` via `FEATURE_MAP`.
+- CSS par page en lazy via `FEATURE_CSS`.
+- Couche Firestore centralisee dans `data/firestore.js` avec cache session-live, TTL et coalescing.
+- Delegation globale `data-action` et delegation scopee `bindScopedActions`.
+- CSP stricte preparee dans `docs/security.md`, non activee par defaut.
+- VTT deplace dans `features/vtt/` : coeur `vtt.js` + modules peripheriques.
+- Tests Node sur helpers purs dans `tests/`.
 
-```js
-// Avant
-`<button onclick="editCharInfo()">Modifier</button>`
+### Legacy conserve volontairement
 
-// Apres
-`<button data-action="editCharInfo">Modifier</button>`
+- Compatibilites de donnees anciennes dans personnages, sorts, carte, agenda, boutique et VTT.
+- Quelques ponts applicatifs `window.*` encore suivis dans `docs/window-globals-inventory.md`.
+- Usages navigateur natifs de `window` (`getSelection`, `scrollTo`, `addEventListener`, `Konva`) a ne pas compter comme dette applicative.
 
-// Dans un actions.js centralise :
-document.addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-action]');
-  if (!btn) return;
-  ACTIONS[btn.dataset.action]?.(btn.dataset.id, btn);
-});
-```
+Ne pas supprimer ces branches sans migration ou verification des donnees de production.
 
-Fichiers prioritaires : characters.js (~30 onclick), shop.js, npcs.js
+## Prochaines priorites
 
-## Sprint 3 — Formulaires auth sans onclick
+### 1. Securite Firestore
 
-```html
-<button id="btn-login" type="button">Connexion</button>
-```
-```js
-document.getElementById('btn-login')?.addEventListener('click', doLogin);
-```
+- Transformer `docs/firestore-rules.md` en source deployable ou le synchroniser explicitement avec les regles deployees.
+- Resserrer les collections larges champ par champ quand le gameplay le permet.
+- Remplacer progressivement le super-admin par email hardcode par une strategie serveur plus propre.
 
-## Sprint 4 — Router lazy avec import() dynamique — **FAIT**
+### 2. Performance / taille
 
-Implémenté dans `core/navigation.js` via `FEATURE_MAP` (page → `import()` dynamique,
-module importé une fois puis caché). CSS également lazy par feature via `FEATURE_CSS`.
+- Continuer a verifier `FEATURE_CSS` lors de chaque nouvelle page.
+- Eviter de charger une grosse feuille voisine pour un petit widget reutilise.
+- Surveiller `characters.css`, `shop.css` et `vtt.css`, qui restent les feuilles les plus lourdes.
 
-```js
-// core/navigation.js (extrait)
-const FEATURE_MAP = {
-  characters: () => import('../features/characters.js'),
-  shop:       () => import('../features/shop.js'),
-  // …
-};
-```
+### 3. VTT
 
-## Issues GitHub recommandees
+- Garder le coeur canvas/combat/tokens dans `features/vtt/vtt.js` tant que l'interface de rendu n'est pas extraite proprement.
+- Deplacer seulement les modules a faible couplage et toujours avec smoke-test navigateur.
+- A moyen terme, extraire un vrai module de rendu VTT avant de toucher au Tray ou a l'Inspector.
 
-- Issue 1 : Sprint 2 - data-action dans characters.js
-- Issue 2 : Sprint 2 - data-action dans les autres features
-- Issue 3 : Sprint 3 - formulaires auth sans onclick
-- Issue 4 : Sprint 4 - router lazy
-- Issue 5 : Deployer les regles Firestore (docs/firestore-rules.md)
+### 4. Tests / qualite
+
+- Ajouter un script de check qui combine `node --test`, `node --check` sur les fichiers touches et `git diff --check`.
+- Extraire davantage de logique pure testable (sorts, ciblage, degats, permissions token).
+- Ajouter des tests de regles Firestore avec l'emulator quand les regles deviennent source de verite versionnee.
+
+### 5. Docs / dette
+
+- Garder `README.md`, `docs/architecture.md`, `.claude/CLAUDE.md` et ce plan alignes sur les chemins reels.
+- Ignorer les worktrees locaux `.claude/worktrees/` plutot que les versionner.
+- Continuer la reduction `window.*`, mais sans en faire une priorite devant securite, performance et tests.

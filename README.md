@@ -1,83 +1,64 @@
-# Le Grand JDR — refactor modulaire
+# Le Grand JDR - Grimorium
 
-Refactor structurel de la page monolithique `index.html` en projet statique multi-fichiers, prêt à être versionné sur GitHub.
+App web statique de gestion de campagne JDR multi-joueurs.
 
-## Objectif
+Le projet est volontairement simple a deployer : HTML, CSS et JavaScript ES modules, sans build obligatoire. Les donnees vivent dans Firebase Firestore et l'app peut etre servie telle quelle par GitHub Pages ou par un serveur statique local.
 
-- sortir le HTML, le CSS et le JavaScript du fichier unique
-- découper le code par domaines fonctionnels
-- garder une base simple à déployer sans build
-- préparer une migration ultérieure vers Vite ou un framework si nécessaire
+## Stack
 
-## Structure
+- `index.html` + `assets/js/app.js` comme points d'entree.
+- ES modules natifs, import map Firebase dans `index.html`.
+- Firestore via `assets/js/data/firestore.js`.
+- CSS globales au boot, CSS de pages en lazy via `FEATURE_CSS`.
+- Tests Node uniquement pour les helpers purs (`node --test`).
+
+## Structure active
 
 ```text
 .
 ├─ index.html
 ├─ assets/
-│  ├─ css/
-│  │  ├─ main.css
-│  │  ├─ tokens.css
-│  │  ├─ base.css
-│  │  ├─ auth.css
-│  │  ├─ layout.css
-│  │  ├─ responsive.css
-│  │  └─ features.css
+│  ├─ css/                  # global + feuilles lazy par domaine
 │  └─ js/
-│     ├─ config/
-│     │  └─ firebase.js
-│     ├─ core/
-│     │  ├─ state.js
-│     │  ├─ init.js
-│     │  ├─ auth.js
-│     │  ├─ layout.js
-│     │  └─ navigation.js
-│     ├─ data/
-│     │  └─ firestore.js
-│     ├─ shared/
-│     │  ├─ modal.js
-│     │  └─ notifications.js
-│     └─ features/
-│        ├─ pages.js
-│        ├─ characters.js
-│        ├─ shop.js
-│        ├─ npcs.js
-│        ├─ story.js
-│        ├─ bastion.js
-│        ├─ world.js
-│        ├─ achievements.js
-│        ├─ collection.js
-│        ├─ players.js
-│        ├─ tutorial.js
-│        ├─ informations.js
-│        ├─ recettes.js
-│        ├─ bestiary.js
-│        └─ photo-cropper.js
+│     ├─ app.js             # bootstrap app
+│     ├─ config/            # Firebase
+│     ├─ core/              # auth, navigation, etat, layout
+│     ├─ data/              # couche Firestore centralisee
+│     ├─ shared/            # helpers UI + logique metier partagee
+│     └─ features/          # pages metier lazy
+│        ├─ characters/     # sous-modules fiche personnage
+│        ├─ map/            # carte: state, repos, render, UI
+│        └─ vtt/            # table virtuelle: coeur + modules peripheriques
 ├─ docs/
-│  └─ architecture.md
-└─ .github/
-   └─ workflows/
-      └─ pages.yml
+│  ├─ architecture.md
+│  ├─ migration-plan.md
+│  ├─ security.md
+│  ├─ firestore-rules.md
+│  ├─ vtt-decomposition.md
+│  └─ window-globals-inventory.md
+└─ tests/                   # tests node:test sur helpers purs
 ```
 
 ## Lancer localement
 
-Option simple : ouvrir `index.html` via un serveur statique.
-
-Exemples :
-
 ```bash
-python -m http.server 8080
+python3 -m http.server 8080
 ```
 
-Puis ouvrir `http://localhost:8000`.
+Puis ouvrir `http://localhost:8080`.
 
-## Déploiement GitHub Pages
+## Tests et verifications
 
-Le workflow fourni publie le dépôt comme site statique. Il faut seulement activer **GitHub Pages** dans le dépôt et choisir **GitHub Actions** comme source de déploiement.
+```bash
+npm test
+node --check assets/js/core/navigation.js
+```
 
-## Remarques
+Pour les gros changements JS, lancer aussi `node --check` sur les fichiers touches. Le VTT depend de Konva + Firestore temps reel : les changements qui le touchent necessitent un smoke-test manuel dans le navigateur.
 
-- Le refactor est volontairement conservateur : la logique métier a été découpée sans réécriture complète.
-- Les appels inline (`onclick`) sont encore présents. La prochaine étape saine est de migrer progressivement vers de la délégation d’événements.
-- La logique `ADMIN_EMAIL` côté client a été conservée pour ne pas casser le fonctionnement. Elle doit être déplacée vers des règles Firestore et des custom claims.
+## Dette assumee
+
+- Le refactor monolithe vers modules est avance, mais conserve du legacy de donnees et quelques ponts applicatifs pour préserver le comportement.
+- `STATE.isAdmin` cote client n'est qu'un confort UI. La vraie securite doit rester dans les regles Firestore.
+- Ne pas supprimer les branches de compat legacy tant que les donnees de production correspondantes n'ont pas ete migrees ou verifiees.
+- Le suivi de la reduction `window.*` est dans `docs/window-globals-inventory.md`.

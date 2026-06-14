@@ -248,7 +248,7 @@ flux encore bases sur `data-action`, les modules lazy et les anciens handlers.
 
 - Apres passe : 136 occurrences.
 - Reduction cumulee : 1 495 occurrences.
-- `features/vtt.js` : 262 -> 32 occurrences.
+- `features/vtt/vtt.js` : 262 -> 32 occurrences.
 - 181 fonctions `window._vttXxx = ...` converties en `function _vttXxx(...)` locales.
 - Un seul `Object.assign(window, { _vttXxx, ... })` centralise les 206 exports necessaires au dispatcher `data-vtt-fn` (qui lit via `window[fn]`).
 - Variable etat `window._vttDelegSearch` convertie en variable module-locale.
@@ -257,33 +257,28 @@ flux encore bases sur `data-action`, les modules lazy et les anciens handlers.
 - `closeModalDirect` importe depuis `shared/modal.js` au lieu de `window.closeModalDirect`.
 - Raison : le VTT a son propre dispatcher `data-vtt-fn` qui lit depuis `window`. Convertir les definitions en fonctions locales et centraliser les exports dans un bloc Object.assign rend le contrat public explicite, au lieu de 181 assignments disperses. Le dispatcher lui-meme peut etre migre vers un registre local lors d une prochaine passe.
 
-## Restes principaux
+## Etat courant apres v22
 
-Top fichiers restants apres v22 (total : 136) :
+Les occurrences restantes de `window.` sont maintenant majoritairement des APIs navigateur natives ou Konva : `scrollTo`, `scrollY`, `getSelection`, `addEventListener/removeEventListener`, `open`, `print`, `close`, `innerWidth/innerHeight`, `window.Konva`.
 
-- `features/vtt.js` : 32 — Object.assign centralisé (dispatcher) + 4 closures + browser natif
-- `features/histoire.js` : 21 — bloque par inline `onmousedown`/drag handlers (Sprint 2)
-- `features/pages.js` : 15 — delegations lazy vers bastion dashboard, recettes, world editing
-- `shared/rich-text.js` : 11 — tout `window.getSelection()` browser natif
-- `features/vtt-fog.js` : 6 — Konva (`window.Konva`) + browser natif
-- `features/map/render/viewport.js` : 4 — `window.addEventListener` browser natif
-- `features/characters/export.js` : 4 — `window.open/print/close` browser natif
-- `features/story.js` : 2 — `closeModalDirect` bridge pour `vtt.js`
-- `shared/presence.js` : 2 — `window.addEventListener('beforeunload')` browser natif
+Ponts applicatifs restants a traiter en priorite basse :
 
-Occurrences browser natif (ne pas toucher) : `scrollTo`, `scrollY`, `getSelection`, `addEventListener/removeEventListener`, `open`, `print`, `close`, `innerWidth/innerHeight`, `Konva`.
+- `assets/js/data/firestore.js` : fallback `window.showNotif` dans le gestionnaire d'erreur.
+- `assets/js/features/players.js` : `window.openCharacterSheetFromShowcase`, pont public pour ouverture de fiche depuis la vitrine.
+- `assets/js/features/vtt/vtt.js` : `window._vttSaveEmote`, closure de compat liee a la modale d'emotes.
 
 ## Ordre recommande
 
-1. `vtt.js` — ~~migrer le dispatcher `data-vtt-fn` vers un registre local `VTT_ACTIONS`~~ **FAIT** : le dispatcher résout via `VTT_ACTIONS[el.dataset.vttFn]` (vtt.js ~L251) ; il reste un fallback `|| window[fnName]` dans `_vttCloseAnd` (vtt.js ~L125) à supprimer une fois toutes les fns enregistrées. `closeModalDirect` est désormais une `data-action` dans `story.js` (plus un bridge `window`).
-2. `pages.js` (15) : se resorbe au fur et a mesure que les modules cibles (bastion dashboard, recettes) exportent leurs fonctions.
-3. `histoire.js` (21) : necessite Sprint 2 — migration `onmousedown`/`ondragstart` → `data-action`.
+1. Remplacer `window.openCharacterSheetFromShowcase` par un export ES + import dynamique chez ses consommateurs reels.
+2. Retirer le fallback `window.showNotif` de `data/firestore.js` au profit d'un import direct ou d'un callback injecte.
+3. Sortir `_vttSaveEmote` de sa closure ou l'enregistrer uniquement dans `VTT_ACTIONS`.
 
+Ces points sont nettement moins prioritaires que les regles Firestore, la performance CSS et les tests. Ne pas toucher aux usages navigateur natifs.
 
 ## Garde-fous
 
-- Ne pas remplacer un global si un handler inline le consomme encore.
+- Ne pas remplacer un global si un handler inline ou un module lazy le consomme encore.
 - Preferer `registerActions` ou `bindScopedActions` quand le HTML porte deja des attributs `data-action` ou `data-*-action`.
-- Preferer un export ES + import dynamique quand un autre module a besoin de appeler une feature lazy.
-- Eviter de importer un module lourd pour lire un petit etat partage ; creer un module `shared/*` dedie quand la dependance est transversale.
+- Preferer un export ES + import dynamique quand un autre module a besoin d'appeler une feature lazy.
+- Eviter d'importer un module lourd pour lire un petit etat partage ; creer un module `shared/*` dedie quand la dependance est transversale.
 - Apres chaque passe : verifier la syntaxe ES module, `git diff --check` et recompter `window.`.

@@ -5,14 +5,14 @@ App web de gestion de campagne JDR multi-joueurs. Réponses **directement exploi
 ## Stack & déploiement
 - Web statique **sans build**, HTML/CSS/JS en ES modules, données **Firebase Firestore**, hébergé sur **GitHub Pages**.
 - Doit rester déployable tel quel : pas de build, framework ou dépendance lourde sans demande explicite.
-- Issu d'un refactor monolithe → modulaire. Reste du legacy (`onclick` inline ; cible = `data-action` + délégation). Le fonctionnement prime sur la pureté archi.
+- Issu d'un refactor monolithe → modulaire. Reste du legacy de données et quelques ponts de compat ; cible = `data-action`/`bindScopedActions`/registre VTT. Le fonctionnement prime sur la pureté archi.
 - Droits admin côté client (`STATE.isAdmin`) = **confort UI, jamais une sécurité**. La vraie protection = règles Firestore.
 
 ## Carte du repo
 - `index.html` — entrée · `assets/js/app.js` — entrée JS · `assets/css/` — styles globaux + par domaine
 - `assets/js/config/` — Firebase · `assets/js/data/firestore.js` — **toute** la couche d'accès Firestore
 - `assets/js/core/` — état global + câblage · `assets/js/shared/` — helpers · `assets/js/features/` — métier (découplés)
-- `docs/` — `architecture.md`, `migration-plan.md`, `firestore-rules.md`, `security.md`, `window-globals-inventory.md`
+- `docs/` — `architecture.md`, `migration-plan.md`, `firestore-rules.md`, `security.md`, `vtt-decomposition.md`, `window-globals-inventory.md`
 
 ## Index — où chercher directement (ne pas re-explorer)
 
@@ -20,10 +20,10 @@ App web de gestion de campagne JDR multi-joueurs. Réponses **directement exploi
 `state.js` source unique de vérité (`STATE`, `setPage`) · `navigation.js` router + `FEATURE_MAP` (page→import lazy) + délégation d'événements · `actions.js` registry `data-action` · `auth.js` connexion · `adventure.js` sélection d'aventure (démarre présence/session) · `init.js` bootstrap · `layout.js` rendu app/auth/aventure.
 
 ### Page → module feature (lazy via `FEATURE_MAP` dans navigation.js)
-La plupart : id = fichier. Exceptions : `recettes`→`recipes.js`, `bestiaire`→`bestiary.js`, `map`→`map.js` (shim vers `features/map/`). Importé une fois puis caché par le navigateur.
+La plupart : id = fichier. Exceptions : `recettes`→`recipes.js`, `bestiaire`→`bestiary.js`, `map`→`map.js` (shim vers `features/map/`), `vtt`→`features/vtt/vtt.js`. Importé une fois puis caché par le navigateur.
 
 ### Feature → fichier (`assets/js/features/`)
-Personnages `characters.js` (+ sous-dossier `characters/`) · Boutique `shop.js` · PNJ & affinités `npcs.js` · Trame/narration `story.js` (écriture) + `histoire.js` (éditeur mission, lecture via `shared/histoire-ctx.js`) · Bastion `bastion.js` · Monde/règles `world.js` · Hauts-faits `achievements.js` · Collection `collection.js` · Roster `players.js` · Recettes/craft `recipes.js` · Bestiaire `bestiary.js` · Compte `account.js` · Carte `map/` · Aventures (admin) `aventures.js` · VTT — moteur `vtt.js` (canvas/tokens/combat/inspector/tray/chat, cohésif) + modules périphériques : fog/murs/lumière `vtt-fog.js`, état partagé `vtt-state.js` (objet `VS`), musique `vtt-music.js`, butin `vtt-loot.js`, court repos `vtt-rest.js`, overlay combat `vtt-combat-tracker.js`, dés libres `vtt-dice.js`, présence `vtt-presence.js`, minuteur `vtt-timer.js`, mini-fiche perso `vtt-mini-fiche.js` (déc. `docs/vtt-decomposition.md`) · Quêtes `quests.js` · Agenda/dispos `agenda.js` · Artisanat `artisan.js` · Dashboard/accueil `pages.js` · Recherche Ctrl+K `command-palette.js`.
+Personnages `characters.js` (+ sous-dossier `characters/`) · Boutique `shop.js` · PNJ & affinités `npcs.js` · Trame/narration `story.js` (écriture) + `histoire.js` (éditeur mission, lecture via `shared/histoire-ctx.js`) · Bastion `bastion.js` · Monde/règles `world.js` · Hauts-faits `achievements.js` · Collection `collection.js` · Roster `players.js` · Recettes/craft `recipes.js` · Bestiaire `bestiary.js` · Compte `account.js` · Carte `map/` · Aventures (admin) `aventures.js` · VTT — `features/vtt/vtt.js` (coeur canvas/tokens/combat/inspector/tray/chat, cohésif) + modules périphériques dans `features/vtt/` : fog/murs/lumière `vtt-fog.js`, état partagé `vtt-state.js` (objet `VS`), musique `vtt-music.js`, butin `vtt-loot.js`, court repos `vtt-rest.js`, overlay combat `vtt-combat-tracker.js`, dés libres `vtt-dice.js`, présence `vtt-presence.js`, minuteur `vtt-timer.js`, mini-fiche perso `vtt-mini-fiche.js` (déc. `docs/vtt-decomposition.md`) · Groupes/quêtes via `story.js` + dashboard · Agenda/dispos `agenda.js` · Artisanat `artisan.js` · Dashboard/accueil `pages.js` · Recherche Ctrl+K `command-palette.js`.
 
 ### Sous-modules
 `features/characters/` : `combat.js`, `equipment.js`, `inventory.js`, `spells.js` + `spells-calc.js` (calcul pur), `forms.js`, `tabs.js`, `inline-edit.js`, `quick-view.js`, `data.js`, `export.js`.
@@ -35,8 +35,8 @@ HTML/chaînes `html.js` · Toast `notifications.js` (`showNotif`) · Modale `mod
 ## Câblage UI → code (4 systèmes coexistants — savoir lequel s'applique)
 1. **Global (cible propre)** : HTML `data-action="x"` / `data-change` / `data-input` → la feature fait `registerActions({ x: (btn, event) => … })` ; dispatch dans `navigation.js`.
 2. **Scopé par préfixe** (shop, bestiary, players) : `bindScopedActions('sh', handlers)` + HTML `data-sh-action="open"` (option `data-sh-on="input"`). Voir `shared/scoped-actions.js`.
-3. **VTT** : dispatcher propre `data-vtt-fn` + résolution `window[...]` + parsing d'args, **non mutualisé** (volontaire, dans `vtt.js`).
-4. **Legacy** : `onclick` inline + `window.*` (~1460 occurrences, en réduction — suivi `docs/window-globals-inventory.md`). À migrer vers (1) ou (2) au fil de l'eau, jamais en masse.
+3. **VTT** : dispatcher propre `data-vtt-fn` + registre local `VTT_ACTIONS` dans `features/vtt/vtt.js` ; quelques fallbacks `window.*` subsistent uniquement pour compat ciblée.
+4. **Legacy** : compat de données + quelques ponts applicatifs `window.*` suivis dans `docs/window-globals-inventory.md`. Les usages navigateur natifs (`scrollTo`, `getSelection`, `addEventListener`, `Konva`) ne sont pas une dette à supprimer.
 
 ## Méthode de travail
 1. Lire l'existant et les fichiers liés avant de conclure.
@@ -55,7 +55,7 @@ But : réduire taille/duplication/verbosité **sans changer le comportement obse
 
 ## QUOTA Firestore — priorité absolue (lectures/écritures facturées)
 
-**Toujours passer par `assets/js/data/firestore.js`.** Ne jamais importer `config/firebase.js` dans une feature pour lire/écrire. API : `loadCollection`, `getDocData`, `subscribeCollection`, `saveDoc`, `addToCol`, `updateInCol`, `deleteFromCol`, ou `shared/realtime.js` (`watch`/`watchDoc`/`watchPageCollection`/`watchPageDoc`). Seules exceptions assumées : `vtt.js` / `vtt-fog.js` (temps réel tactique).
+**Toujours passer par `assets/js/data/firestore.js`.** Ne jamais importer `config/firebase.js` dans une feature pour lire/écrire. API : `loadCollection`, `getDocData`, `subscribeCollection`, `saveDoc`, `addToCol`, `updateInCol`, `deleteFromCol`, ou `shared/realtime.js` (`watch`/`watchDoc`/`watchPageCollection`/`watchPageDoc`). Seules exceptions assumées : `features/vtt/vtt.js` / `features/vtt/vtt-fog.js` et petits modules VTT temps réel tactique.
 
 Cache déjà en place (ne pas réinventer) :
 1. **Session-live** : un `onSnapshot` unique par collection/doc vivant toute la session → page qui le consomme = **0 lecture en plus**. Couvre `story`, `achievements`, `quests`, `characters`, `collection` + lazy (`shop`, `shopCategories`, `npcs`, `organizations`, `players`) + docs (`bastion/main`, `world/main`, `agenda_session/next`…).

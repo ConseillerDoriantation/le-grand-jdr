@@ -1,49 +1,63 @@
 # Architecture
 
-## Découpage retenu
+## Principes
+
+Le Grand JDR reste une app statique sans build. L'architecture cherche donc a garder des modules ES natifs simples, deployables tels quels, avec des frontieres claires plutot qu'une surcouche framework.
+
+Regles de base :
+
+- `core/` cable l'app : auth, navigation, etat global, layout.
+- `data/firestore.js` est la couche d'acces Firestore par defaut.
+- `shared/` contient les helpers et regles metier reutilisables.
+- `features/` contient les pages lazy et leur orchestration UI.
+- Les CSS de pages sont chargees en lazy par `FEATURE_CSS` dans `core/navigation.js`.
+
+## Decoupage actuel
 
 ### `assets/js/config`
-Contient l’initialisation Firebase et l’exposition contrôlée des objets nécessaires au runtime.
+
+Initialisation Firebase et exports SDK necessaires au runtime. Les imports directs depuis une feature doivent rester exceptionnels et justifies par du temps reel tactique ou de l'auth.
 
 ### `assets/js/core`
-Contient l’état global, l’initialisation de session, l’authentification, la navigation et la logique d’interface transversale.
+
+Source de verite applicative : `STATE`, routeur lazy, delegation globale `data-action`, auth, selection d'aventure, layout.
 
 ### `assets/js/data`
-Contient l’accès aux collections et documents Firestore.
+
+Acces Firestore centralise : scope aventure, cache session-live, cache TTL, coalescing in-flight, patch du cache apres ecriture.
 
 ### `assets/js/shared`
-Contient les briques transversales et les domaines métier réutilisables.
 
-Exemples :
+Briques reutilisables : HTML/echappement, modal, notifications, rich-text, presence, economie, stats perso, inventaire, equipement, sorts, conditions, types de degats, helpers de tri/drag.
 
-- `char-stats.js` : calculs de statistiques, PV/PM/CA/or, bonus et maîtrise.
-- `equipment-utils.js` : projection inventaire/boutique vers équipement, traits, armes, sets d'armure.
-- `inventory-utils.js` : convention inventaire et conversion boutique → inventaire.
-- `economy.js` : mutations du livre de compte et transferts d'or.
-- `modal.js`, `notifications.js`, `rich-text.js` : composants transversaux UI.
+Une regle utilisee par plusieurs features doit vivre ici ou dans un sous-module metier dedie, pas dans une feature voisine.
 
 ### `assets/js/features`
-Chaque domaine métier possède son fichier : personnages, boutique, PNJ, trame, bastion, tutoriel, etc.
 
-## Règle de séparation
+Chaque page orchestre son rendu, ses listeners et ses appels aux helpers. Les domaines complexes ont leurs sous-dossiers :
 
-Les fichiers `features/*.js` orchestrent la page : rendu, listeners, actions utilisateur et appels Firestore. Les règles métier partagées doivent vivre dans `assets/js/shared` ou dans un sous-module de domaine dédié.
+- `features/characters/` : sous-modules de fiche personnage.
+- `features/map/` : modele propre avec `map.state.js`, repos data, rendu et UI.
+- `features/vtt/` : coeur VTT `vtt.js` + modules peripheriques (fog, musique, butin, des, presence, mini-fiche, timer, tracker combat).
 
-Quand une règle est utilisée par plusieurs features, elle ne doit pas importer une feature voisine. Exemple : l'artisan ne dépend pas de `features/characters/equipment.js`; il dépend de `shared/equipment-utils.js`.
+## Patterns UI
 
-## Choix de refactor
+- Global : `data-action`, `data-change`, `data-input` + `registerActions`.
+- Scope local : `bindScopedActions(prefix, handlers)` pour les domaines type boutique/bestiaire/players.
+- VTT : `data-vtt-fn` resolu par le registre `VTT_ACTIONS` du coeur VTT.
+- Legacy : conserver uniquement quand les donnees ou le HTML genere l'exigent encore. Migrer par petites passes verifiables.
 
-Le refactor privilégie la stabilité :
+## Performance
 
-- conservation du fonctionnement actuel
-- séparation stricte par responsabilité
-- absence de build obligatoire
-- base compatible avec GitHub Pages
+Le routeur charge les modules et CSS a la premiere navigation. Ne pas remettre les grosses feuilles de page dans `index.html`. Si une feature reutilise un widget visuel d'une autre page, extraire ou dupliquer le petit widget necessaire plutot que charger toute la CSS voisine.
 
-## Prochaine étape recommandée
+## Securite
 
-1. Remplacer progressivement les `onclick` inline par `data-action` + délégation d’événements.
-2. Introduire un namespace d’application unique (`window.JDRApp`) au lieu de variables globales libres.
-3. Isoler chaque page dans un renderer dédié et sortir les templates HTML vers des fonctions plus petites.
-4. Déplacer les permissions admin côté sécurité Firebase.
-5. Introduire un pipeline de lint + tests une fois la logique stabilisée.
+Le client ne porte pas la securite. `STATE.isAdmin` masque/affiche des actions, mais seules les regles Firestore protegent les donnees. Toute nouvelle collection ou permission doit etre refletee dans `docs/firestore-rules.md` puis dans les regles deployees.
+
+## Refactor recommande
+
+1. Garder le coeur VTT coherent tant que les dependances canvas/combat restent fortement couplees.
+2. Continuer a retirer les ponts applicatifs `window.*` restants, sans toucher aux usages navigateur natifs.
+3. Ajouter des tests purs avant d'extraire de la logique metier risquee.
+4. Nettoyer le legacy seulement apres verification ou migration des donnees reelles.
