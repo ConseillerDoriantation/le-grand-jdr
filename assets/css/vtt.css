@@ -3274,6 +3274,24 @@
   border-left: 2px solid #a78bfa; border-radius: 4px;
 }
 
+/* MJ : annuler une action loggée (restaure PV/PM/états). */
+.vtt-log-undo-btn {
+  display: inline-flex; align-items: center; gap: .3rem;
+  margin: .15rem 0 .1rem; padding: .22rem .55rem;
+  background: color-mix(in srgb, #ef4444 12%, transparent);
+  border: 1px solid color-mix(in srgb, #ef4444 40%, transparent);
+  border-radius: 7px; color: #fca5a5; cursor: pointer;
+  font-size: .66rem; font-weight: 700;
+  transition: background .12s, border-color .12s;
+}
+.vtt-log-undo-btn:hover { background: color-mix(in srgb, #ef4444 24%, transparent); border-color: #ef4444; }
+.vtt-log-undone {
+  margin: .15rem 0 .1rem; padding: .2rem .5rem;
+  font-size: .64rem; font-weight: 700; color: var(--text-dim);
+  background: rgba(255,255,255,.04);
+  border-left: 2px solid var(--text-dim); border-radius: 4px;
+}
+
 .vtt-log-toggle {
   margin-left: auto;
   background: transparent;

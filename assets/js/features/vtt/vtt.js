@@ -4587,6 +4587,39 @@ const _VTT_RUNE_META = {
   'Déclenchement':{icon:'⚡',color:'#f97316'},
 };
 
+// Snapshot pré-action des entités impliquées (lanceur + cibles) : PV/PM/buffs/
+// états. Stocké sur le log de l'action → l'annulation MJ restaure cet état exact
+// (dégâts/soins rendus, PM rendus, buffs et états posés retirés). Voir
+// _vttUndoAction.
+// PV courants RÉELS d'un token (indépendant du filtre d'estimation joueur) —
+// au bon endroit selon le type (perso → fiche, PNJ → doc PNJ, ennemi → token).
+function _effectiveTokenHp(t) {
+  if (t.characterId) { const c = VS.characters[t.characterId]; return c ? (c.hp ?? calcPVMax(c)) : (t.hp ?? null); }
+  if (t.npcId)       { const n = VS.npcs[t.npcId];            return n ? _numOr(n.hp, _numOr(n.pvMax, t.hp ?? null)) : (t.hp ?? null); }
+  if (t.beastId)     { const b = VS.bestiary[t.beastId];      return t.hp != null ? t.hp : (b ? _numOr(b.pvMax, null) : null); }
+  return t.hp ?? null;
+}
+
+function _captureUndoSnapshot(srcId, targetIds) {
+  const ids = [...new Set([srcId, ...(targetIds || [])].filter(Boolean))];
+  const tokens = {}, chars = {};
+  const addChar = (cid) => { if (cid && chars[cid] === undefined) { const c = VS.characters[cid]; chars[cid] = { pm: c ? (c.pm ?? calcPMMax(c)) : null }; } };
+  for (const id of ids) {
+    const t = VS.tokens[id]?.data; if (!t) continue;
+    tokens[id] = {
+      hp: _effectiveTokenHp(t),
+      pvCombatHp: t.pvCombatHp ?? null,
+      buffs: Array.isArray(t.buffs) ? JSON.parse(JSON.stringify(t.buffs)) : [],
+      conditions: Array.isArray(t.conditions) ? JSON.parse(JSON.stringify(t.conditions)) : [],
+    };
+    if (t.characterId) addChar(t.characterId);
+  }
+  const srcT = VS.tokens[srcId]?.data;
+  addChar(_characterForToken(srcT)?.id);
+  if (srcT?.summonOwnerId) addChar(_characterForToken(VS.tokens[srcT.summonOwnerId]?.data)?.id);
+  return { tokens, chars };
+}
+
 async function _execAttack(srcId, tgtId, exOpts = {}) {
   const only  = exOpts.only || null;
   const noTgt = tgtId == null;
@@ -5959,6 +5992,8 @@ async function _vttRollAttack() {
   if (!src||!tgt) return;
   // Liste des cibles : multi si allTargets, sinon cible unique
   const targetIds = allTargets && allTargets.length > 0 ? allTargets : [tgtId];
+  // Snapshot pré-action pour l'annulation MJ (attaché aux logs de l'action).
+  const _undoSnap = _captureUndoSnapshot(srcId, targetIds);
 
   const authorName = STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'MJ';
   // Payeur du mana : un token convoqué (invocation) n'a pas de PM propre — ses
@@ -6061,6 +6096,7 @@ async function _vttRollAttack() {
         .join(', ') || (lT.displayName ?? tgt.name);
       await addDoc(_logCol(), {
         type: 'cast',
+        undo: _undoSnap,
         authorId: STATE.user?.uid || null, authorName,
         casterName: lS.displayName ?? src.name,
         characterImage: lS.displayImage || null,
@@ -6141,6 +6177,7 @@ async function _vttRollAttack() {
       const targetsLabel = appliedTargets.join(', ');
       await addDoc(_logCol(), {
         type: 'cast',
+        undo: _undoSnap,
         authorId: STATE.user?.uid||null, authorName,
         casterName: lS.displayName??src.name,
         characterImage: lS.displayImage||null,
@@ -6304,6 +6341,7 @@ async function _vttRollAttack() {
       if (!opt.isAffliction) {
         await addDoc(_logCol(), {
           type: 'cast',
+          undo: _undoSnap,
           authorId: STATE.user?.uid||null, authorName,
           casterName: lS.displayName??src.name,
           characterImage: lS.displayImage||null,
@@ -6392,6 +6430,7 @@ async function _vttRollAttack() {
         await addDoc(_logCol(), {
           type: 'attack', isHeal: true, isFumble: true, advMode: hMode, advAuto: hMode !== mode,
           advReasons: hMode !== mode ? hCondMods.reasons : null,
+          undo: _undoSnap,
           authorId: STATE.user?.uid||null, authorName,
           attackerName: lS.displayName??src.name,
           characterImage: lS.displayImage||null,
@@ -6457,6 +6496,7 @@ async function _vttRollAttack() {
       if (isMultiHeal) {
         await addDoc(_logCol(), {
           type: 'attack-multi', isHeal: true,
+          undo: _undoSnap,
           authorId: STATE.user?.uid||null, authorName,
           attackerName: lS.displayName??src.name,
           characterImage: lS.displayImage||null,
@@ -6863,6 +6903,7 @@ async function _vttRollAttack() {
     if (isMulti) {
       await addDoc(_logCol(), {
         type: 'attack-multi',
+        undo: _undoSnap,
         authorId: STATE.user?.uid||null, authorName,
         attackerName: lS.displayName??src.name,
         characterImage: lS.displayImage||null,
@@ -6898,6 +6939,7 @@ async function _vttRollAttack() {
       const _defImg = _live(tgt)?.displayImage || r?.targetImage || null;
       if (r) await addDoc(_logCol(), {
         type: 'attack',
+        undo: _undoSnap,
         authorId: STATE.user?.uid||null, authorName,
         attackerName: lS.displayName??src.name,
         characterImage: lS.displayImage||null,
@@ -9382,6 +9424,15 @@ function _renderChatLog(msgs) {
     if (t >= (_lastHitMs[m.defenderTokenId] ?? -1)) { _lastHitMs[m.defenderTokenId] = t; _lastHitLogId[m.defenderTokenId] = m.id; }
   }
 
+  // MJ : bouton « ↩ Annuler l'action » sur les logs portant un snapshot d'undo.
+  const _undoBtn = (m) => {
+    if (!STATE.isAdmin) return '';
+    if (m.actionUndone) return `<div class="vtt-log-undone">↩ Action annulée par le MJ</div>`;
+    if (!m.undo) return '';
+    return `<button class="vtt-log-undo-btn" data-vtt-fn="_vttUndoAction" data-vtt-args="${m.id}"
+      title="Annuler cette action — rend PV/PM, retire les buffs et états posés">↩ Annuler l'action</button>`;
+  };
+
   // ═══════════════════════════════════════════════════════════════════
   // HELPERS — composants réutilisables pour tous les types de log
   // ═══════════════════════════════════════════════════════════════════
@@ -9586,6 +9637,7 @@ function _renderChatLog(msgs) {
       ${head}
       ${bodyHtml}
       ${shieldHtml}
+      ${_undoBtn(m)}
       <div class="vtt-log-detail" id="d${i}">${detail}</div>
     </div>`;
   };
@@ -9700,6 +9752,7 @@ function _renderChatLog(msgs) {
       ${head}
       ${body}
       <div class="vtt-log-targets">${targets}</div>
+      ${_undoBtn(m)}
       <div class="vtt-log-detail" id="d${i}">${buildAttackDetail(m, false)}</div>
     </div>`;
   };
@@ -9717,7 +9770,7 @@ function _renderChatLog(msgs) {
       <span class="vtt-log-icon">✨</span>
       <span class="vtt-log-text">${_esc(m.castEffect || 'Sort activé')}</span>
     </div>`;
-    return `<div class="vtt-log vtt-log--cast">${head}${body}</div>`;
+    return `<div class="vtt-log vtt-log--cast">${head}${body}${_undoBtn(m)}</div>`;
   };
 
   /** Annonce d'affliction : "A lance Silence sur B" */
@@ -11024,6 +11077,33 @@ async function _vttShieldCancelAttack(logId) {
   } catch (e) {
     console.error('[vtt] shield cancel', e);
     showNotif('Annulation refusée (permissions ?)', 'error');
+  }
+}
+
+/** MJ : annule une action loggée dans le chat. Restaure l'état pré-action
+ *  (snapshot `m.undo`) des entités impliquées : PV/PM rendus, buffs et états
+ *  posés retirés. Réservé au MJ. Marque le log comme annulé. */
+async function _vttUndoAction(logId) {
+  if (!STATE.isAdmin) return;
+  const m = (_chatMsgs || []).find(x => x.id === logId);
+  if (!m || m.actionUndone || !m.undo) { showNotif('Action non annulable', 'info'); return; }
+  const snap = m.undo;
+  try {
+    for (const [tid, st] of Object.entries(snap.tokens || {})) {
+      const t = VS.tokens[tid]?.data;
+      const patch = { buffs: st.buffs || [], conditions: st.conditions || [] };
+      if (st.pvCombatHp != null) patch.pvCombatHp = st.pvCombatHp;
+      await updateDoc(_tokRef(tid), patch).catch(() => {});
+      if (t && st.hp != null) await _setHp(t, st.hp).catch(() => {});
+    }
+    for (const [cid, st] of Object.entries(snap.chars || {})) {
+      if (st.pm != null) await updateDoc(_chrRef(cid), { pm: st.pm }).catch(() => {});
+    }
+    await updateDoc(doc(_logCol(), logId), { actionUndone: true, actionUndoneBy: STATE.user?.uid || null }).catch(() => {});
+    showNotif('↩ Action annulée — PV/PM/états restaurés', 'success');
+  } catch (e) {
+    console.error('[vtt] undo action', e);
+    showNotif('Annulation échouée', 'error');
   }
 }
 
@@ -12502,6 +12582,7 @@ const VTT_ACTIONS = {
   _vttSelfActionClose,
   _vttSelfAction,
   _vttShieldCancelAttack,
+  _vttUndoAction,
   _vttLootOpenShop,
   _vttLibToggle,
   _closeActionModal,
