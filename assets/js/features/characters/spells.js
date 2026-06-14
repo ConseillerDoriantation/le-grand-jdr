@@ -565,6 +565,12 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
     chips.push({ icon:'🛡', val:`DD ${dd}`, color:'#ef4444' });
   }
 
+  // ── Combo Sort suspendu : pill explicite (stocké au cast, déclenché hors-tour) ──
+  if (activeIds.has('sort_suspendu')) {
+    const nbDur = runesAll.filter(r => r === 'Durée').length;
+    chips.push({ icon:'🔮', val:`Suspendu · ${2 + 2 * nbDur}t`, color:'#a855f7' });
+  }
+
   const pmVal = pmDelta !== 0
     ? `<span class="cs-sort-pm-old">${s.pm||0}</span><span class="cs-sort-pm-new">${Math.max(0,(s.pm||0)+pmDelta)}</span>`
     : `${s.pm||0}`;
@@ -1637,7 +1643,6 @@ export async function openSortModal(idx, s) {
    </div><!-- /cs-spell-forge -->
     </div><!-- /sh-admin-body -->
     <div class="sh-admin-footer">
-      <button class="btn btn-outline btn-sm" data-action="closeModalDirect">Annuler</button>
       <div class="sh-admin-footer-spacer"></div>
       <button class="btn btn-gold btn-sm" data-action="saveSort" data-idx="${idx}">💾 Enregistrer le sort</button>
     </div>

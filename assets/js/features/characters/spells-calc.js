@@ -874,17 +874,24 @@ export function _buildSortResume(s, c) {
   const runes  = s.runes || [];
   const types  = _getSortTypes(s);
   const { action, concentration } = _getSortAction(s);
+  // Combos détectés (centralisés dans SORT_COMBOS) — résolus tôt car le sort
+  // suspendu change l'affichage de la ligne d'action (concentration masquée).
+  const activeCombos = _activeCombos(s);
+  const comboIds = new Set(activeCombos.map(c => c.id));
+  const isSuspended = comboIds.has('sort_suspendu');
 
   // Action + Nature (instantané/persistant) + Portée (de l'arme principale, fallback Poings)
   const actionLabels = { action:'⚡ Action', action_bonus:'✴️ Action Bonus', reaction:'🔄 Réaction' };
   let actionStr = actionLabels[action] || '⚡ Action';
-  if (concentration) actionStr += ' + 🧠 Concentration';
+  // Sort suspendu : la Concentration n'est qu'un déclencheur de combo, pas une
+  // vraie concentration → on n'affiche ni le tag 🧠 ni le JS de concentration.
+  if (concentration && !isSuspended) actionStr += ' + 🧠 Concentration';
   // Nature : instantané sauf si une durée explicite est définie ou si Enchant/Affliction/Protection CA actifs
-  const isPersistent = runes.includes('Durée') || runes.includes('Enchantement') || runes.includes('Affliction')
+  const isPersistent = !isSuspended && (runes.includes('Durée') || runes.includes('Enchantement') || runes.includes('Affliction')
                     || (runes.includes('Protection') && (s.protectionMode || 'ca') === 'ca' && !_isReactionSpell(s))
-                    || !!(s.dureeBase && s.dureeBase >= 2);
+                    || !!(s.dureeBase && s.dureeBase >= 2));
   const natureStr = isPersistent ? '⏳ Persistant' : '⏱️ Instantané';
-  const concDD = _calcConcentrationDD(s);
+  const concDD = isSuspended ? 0 : _calcConcentrationDD(s);
   lines.push({ icon: '', label: `${actionStr} · ${natureStr}`, detail: concDD ? `JS Sagesse DD ${concDD} si dégâts reçus · jusqu'à 10 tours` : '' });
 
   // Portée du sort = portée de l'arme principale équipée (ou Poings = 1 case)
@@ -897,8 +904,6 @@ export function _buildSortResume(s, c) {
   const nbPuiss   = runes.filter(r => r === 'Puissance').length;
   const nbProt    = runes.filter(r => r === 'Protection').length;
   const nbAmp     = runes.filter(r => r === 'Amplification').length;
-  const activeCombos = _activeCombos(s);
-  const comboIds = new Set(activeCombos.map(c => c.id));
   const specializedComboIds = new Set(['allonge_magique', 'zone_elargie', 'regeneration', 'arme_invoquee', 'sentinelle', 'coup_chance']);
   lines.push(..._comboResumeLines(activeCombos, comboIds, _runeCounts(s), s));
   activeCombos.forEach(combo => {

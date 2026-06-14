@@ -10948,9 +10948,14 @@ async function _vttTriggerSuspendedSpell(tokenId, buffIdx) {
   // Active le flag pour éviter la re-suspension immédiate
   _suspendedTriggerActive = true;
   try {
-    await _execAttack(tokenId, buff.tgtId || tokenId);
+    // Cible choisie AU DÉCLENCHEMENT (réaction) : on ouvre la barre d'action
+    // sans cible (HUD) plutôt que de réutiliser l'ancienne cible — qui a pu
+    // mourir / sortir de portée (→ _execAttack bail silencieux = « introuvable »).
+    // Le sort apparaît marqué « 🎁 Gratuit ».
+    _showActBar(tokenId);
+    showNotif('🔮 Sort suspendu prêt — choisis-le (🎁 Gratuit) puis une cible', 'info');
   } finally {
-    // Le flag reste actif jusqu'à la fin du modal — désactivé par sécurité après 30s
+    // Le flag reste actif jusqu'à la fin du cast — désactivé par sécurité après 30s
     setTimeout(() => { _suspendedTriggerActive = false; }, 30_000);
   }
 }
