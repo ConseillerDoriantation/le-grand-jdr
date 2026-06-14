@@ -6550,6 +6550,7 @@ async function _vttRollAttack() {
         if (r) {
           await addDoc(_logCol(), {
             type:'attack', isHeal:true,
+            undo: _undoSnap,
             authorId: STATE.user?.uid||null, authorName,
             attackerName: lS.displayName??src.name,
             characterImage: lS.displayImage||null,
