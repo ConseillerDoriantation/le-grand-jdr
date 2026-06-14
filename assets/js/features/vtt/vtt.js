@@ -4620,6 +4620,10 @@ function _captureUndoSnapshot(srcId, targetIds) {
   return { tokens, chars };
 }
 
+// Ids des tokens invoqués lors de la séquence de placement en cours (pour que
+// l'annulation MJ d'une invocation supprime les tokens créés).
+let _summonSpawnIds = [];
+
 async function _execAttack(srcId, tgtId, exOpts = {}) {
   const only  = exOpts.only || null;
   const noTgt = tgtId == null;
@@ -5877,9 +5881,11 @@ async function _zoneValidate() {
   // ── Invocation générique : place la créature à l'emplacement choisi ──
   // (pas d'attaque du lanceur — la créature a ses propres stats/actions)
   if (opt?.mods?.invocation) {
+    if (!_zoneCtx.invocationsDone) _summonSpawnIds = []; // 1ère pose → reset collecteur
     const col = Math.round((x - wPx / 2) / CELL);
     const row = Math.round((y - hPx / 2) / CELL);
-    await _vttSpawnSummon({ kind: 'invocation', srcId, col, row, opt, durationTurns: opt.mods.invocation.duree || 2 });
+    const _spawned = await _vttSpawnSummon({ kind: 'invocation', srcId, col, row, opt, durationTurns: opt.mods.invocation.duree || 2 });
+    if (_spawned?.id) _summonSpawnIds.push(_spawned.id);
     _zoneCtx.invocationsDone = (_zoneCtx.invocationsDone || 0) + 1;
     const total = _zoneCtx.invocationsTotal || 1;
     const done  = _zoneCtx.invocationsDone;
@@ -5893,8 +5899,21 @@ async function _zoneValidate() {
       return; // reste en mode placement
     }
     const srcD = VS.tokens[srcId]?.data;
+    // Snapshot AVANT déduction PM/concentration + tokens créés → annulable par le MJ.
+    const _snap = _captureUndoSnapshot(srcId, []);
+    _snap.createdTokens = [..._summonSpawnIds];
     if (srcD) await _vttSpendSpellPm(srcD, opt);
     await _vttApplyCasterConcentration(srcId, opt);
+    await addDoc(_logCol(), {
+      type: 'cast', undo: _snap,
+      authorId: STATE.user?.uid || null,
+      authorName: STATE.profile?.pseudo || STATE.profile?.prenom || STATE.user?.displayName || 'MJ',
+      casterName: srcD ? (_live(srcD).displayName ?? srcD.name) : '?',
+      characterImage: srcD ? (_live(srcD).displayImage || null) : null,
+      targetName: `${total} invocation${total > 1 ? 's' : ''}`,
+      optLabel: opt.label, castEffect: `🐾 ${total} invocation${total > 1 ? 's' : ''} placée${total > 1 ? 's' : ''}`,
+      createdAt: serverTimestamp(),
+    }).catch(() => {});
     showNotif(`🐾 ${total} invocation${total > 1 ? 's' : ''} placée${total > 1 ? 's' : ''}`, 'success');
     _zoneClear();
     return;
@@ -5904,9 +5923,11 @@ async function _zoneValidate() {
   // Le token apparaît même sans cible présente (le piège attend les ennemis)
   // Avec Dispersion, plusieurs sentinelles peuvent être posées en boucle.
   if (opt?.mods?.sentinelle) {
+    if (!_zoneCtx.invocationsDone) _summonSpawnIds = []; // 1ère pose → reset collecteur
     const col = Math.round((x - wPx / 2) / CELL);
     const row = Math.round((y - hPx / 2) / CELL);
-    await _vttSpawnSummon({ kind: 'sentinelle', srcId, col, row, opt, durationTurns: 2 });
+    const _spawned = await _vttSpawnSummon({ kind: 'sentinelle', srcId, col, row, opt, durationTurns: 2 });
+    if (_spawned?.id) _summonSpawnIds.push(_spawned.id);
     _zoneCtx.invocationsDone = (_zoneCtx.invocationsDone || 0) + 1;
     const total = _zoneCtx.invocationsTotal || 1;
     const done  = _zoneCtx.invocationsDone;
@@ -5926,6 +5947,20 @@ async function _zoneValidate() {
       return; // reste en mode placement
     }
     await _vttApplyCasterConcentration(srcId, opt);
+    // Snapshot + tokens créés → annulable par le MJ.
+    const _srcD = VS.tokens[srcId]?.data;
+    const _snap = _captureUndoSnapshot(srcId, []);
+    _snap.createdTokens = [..._summonSpawnIds];
+    await addDoc(_logCol(), {
+      type: 'cast', undo: _snap,
+      authorId: STATE.user?.uid || null,
+      authorName: STATE.profile?.pseudo || STATE.profile?.prenom || STATE.user?.displayName || 'MJ',
+      casterName: _srcD ? (_live(_srcD).displayName ?? _srcD.name) : '?',
+      characterImage: _srcD ? (_live(_srcD).displayImage || null) : null,
+      targetName: `${total} sentinelle${total > 1 ? 's' : ''}`,
+      optLabel: opt.label, castEffect: `🪤 ${total} sentinelle${total > 1 ? 's' : ''} posée${total > 1 ? 's' : ''}`,
+      createdAt: serverTimestamp(),
+    }).catch(() => {});
     showNotif(`🪤 ${total} sentinelle${total > 1 ? 's' : ''} posée${total > 1 ? 's' : ''}`, 'success');
     // Si aucune cible présente, on s'arrête là (sentinelles posées, pas d'attaque)
     if (!targets.length) {
@@ -11089,6 +11124,12 @@ async function _vttUndoAction(logId) {
   if (!m || m.actionUndone || !m.undo) { showNotif('Action non annulable', 'info'); return; }
   const snap = m.undo;
   try {
+    // Invocations : supprimer les tokens créés par l'action.
+    for (const tid of (snap.createdTokens || [])) {
+      await deleteDoc(_tokRef(tid)).catch(() => {});
+      VS.tokens[tid]?.shape?.destroy?.();
+      delete VS.tokens[tid];
+    }
     for (const [tid, st] of Object.entries(snap.tokens || {})) {
       const t = VS.tokens[tid]?.data;
       const patch = { buffs: st.buffs || [], conditions: st.conditions || [] };
