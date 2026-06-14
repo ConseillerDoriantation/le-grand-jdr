@@ -6,9 +6,9 @@
 // (collection vttLog via _logCol importé de vtt.js).
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { addDoc, serverTimestamp } from '../config/firebase.js';
-import { STATE } from '../core/state.js';
-import { showNotif } from '../shared/notifications.js';
+import { addDoc, serverTimestamp } from '../../config/firebase.js';
+import { STATE } from '../../core/state.js';
+import { showNotif } from '../../shared/notifications.js';
 import { _logCol } from './vtt.js';   // ref Firestore du log VTT (transverse)
 
 // ── État local (lanceur libre) ──────────────────────────────────────

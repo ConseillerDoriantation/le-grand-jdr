@@ -6,12 +6,12 @@
 // Vote du groupe → régénère ½ PV / ½ PM aux persos placés. MJ force/règle/reset.
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { setDoc, updateDoc } from '../config/firebase.js';
-import { STATE } from '../core/state.js';
+import { setDoc, updateDoc } from '../../config/firebase.js';
+import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
-import { _esc } from '../shared/html.js';
-import { calcPVMax, calcPMMax } from '../shared/char-stats.js';
-import { showNotif } from '../shared/notifications.js';
+import { _esc } from '../../shared/html.js';
+import { calcPVMax, calcPMMax } from '../../shared/char-stats.js';
+import { showNotif } from '../../shared/notifications.js';
 import { _sesRef, _chrRef } from './vtt.js';   // refs Firestore (transverses)
 
 // ══════════════════════════════════════════════════════════════════════════

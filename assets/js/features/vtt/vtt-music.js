@@ -7,13 +7,13 @@
 // _killAudio (teardown), handlers _vtt* (registre VTT_ACTIONS).
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { db, doc, collection, addDoc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp } from '../config/firebase.js';
-import Sortable from '../vendor/sortable.esm.js';
-import { STATE } from '../core/state.js';
+import { db, doc, collection, addDoc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp } from '../../config/firebase.js';
+import Sortable from '../../vendor/sortable.esm.js';
+import { STATE } from '../../core/state.js';
 import { VS, aid } from './vtt-state.js';
-import { _esc, _norm } from '../shared/html.js';
-import { openModal, confirmModal, closeModalDirect, promptModal } from '../shared/modal.js';
-import { showNotif } from '../shared/notifications.js';
+import { _esc, _norm } from '../../shared/html.js';
+import { openModal, confirmModal, closeModalDirect, promptModal } from '../../shared/modal.js';
+import { showNotif } from '../../shared/notifications.js';
 import { _showCtxMenu } from './vtt.js';   // transverse (menu contextuel générique)
 
 // ── État local musique ──────────────────────────────────────────────

@@ -6,37 +6,37 @@
 // en sync bidirectionnel avec les fiches (HP, nom, photo).
 // ═══════════════════════════════════════════════════════════════════
 
-import { STATE } from '../core/state.js';
-import { registerActions } from '../core/actions.js';
-import Sortable from '../vendor/sortable.esm.js';
-import { getDocData, getDocDataSilent, saveDoc, loadCollection, subscribeCollection } from '../data/firestore.js';
+import { STATE } from '../../core/state.js';
+import { registerActions } from '../../core/actions.js';
+import Sortable from '../../vendor/sortable.esm.js';
+import { getDocData, getDocDataSilent, saveDoc, loadCollection, subscribeCollection } from '../../data/firestore.js';
 import {
   db, doc, getDoc, collection, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch,
   query, orderBy, limit,
-} from '../config/firebase.js';
-import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcPalier, calcDeckMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../shared/char-stats.js';
-import { shopItemToInvEntry } from '../shared/inventory-utils.js';
-import { openShopPicker, getShopItemById } from '../shared/shop-picker.js';
-import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED } from '../shared/equipment-utils.js';
-import { loadWeaponFormats } from '../shared/weapon-formats.js';
-import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../shared/damage-types.js';
-import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../shared/damage-profile.js';
-import { runeBadges, spellTypeBadges } from '../shared/spell-action-card.js';
-import { calcSpellDuration, calcSpellTargets } from '../shared/spell-runes.js';
-import { loadSpellMatrices, getInvokedArm } from '../shared/spell-matrices.js';
-import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../shared/conditions.js';
-import { showNotif } from '../shared/notifications.js';
-import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from '../shared/upload-cloudinary.js';
+} from '../../config/firebase.js';
+import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcPalier, calcDeckMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../../shared/char-stats.js';
+import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
+import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
+import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED } from '../../shared/equipment-utils.js';
+import { loadWeaponFormats } from '../../shared/weapon-formats.js';
+import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../../shared/damage-types.js';
+import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
+import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
+import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js';
+import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js';
+import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
+import { showNotif } from '../../shared/notifications.js';
+import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
   fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath,
 } from './vtt-fog.js';
-import { openModal, closeModalDirect, confirmModal, updateModalContent, promptModal } from '../shared/modal.js';
-import { _esc, _norm, _searchIncludes, appSplashHtml } from '../shared/html.js';
-import { lsJson } from '../shared/local-storage.js';
-import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-skills.js';
-import PAGES from './pages.js';
+import { openModal, closeModalDirect, confirmModal, updateModalContent, promptModal } from '../../shared/modal.js';
+import { _esc, _norm, _searchIncludes, appSplashHtml } from '../../shared/html.js';
+import { lsJson } from '../../shared/local-storage.js';
+import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
+import PAGES from '../pages.js';
 import { VS, aid } from './vtt-state.js';
 import {
   _musicStateRef, _syncMusicPlayback, _resetMusicState, _closeMusicPanel,
@@ -9193,7 +9193,7 @@ async function _vttPickEmote(name) {
 
 async function _ouvrirGestionEmotes() {
   await _loadEmotes();
-  const { default: Sortable } = await import('../vendor/sortable.esm.js');
+  const { default: Sortable } = await import('../../vendor/sortable.esm.js');
 
   // ── Helper upload Cloudinary (avec sous-dossier optionnel pour grouper) ──
   const _getEmoteAlbum = () => localStorage.getItem('vtt-emote-folder') || localStorage.getItem('vtt-imgbb-emote-album') || '';
@@ -12233,7 +12233,7 @@ function _vttSessionSince(ts) {
   return `il y a ${h} h`;
 }
 async function _vttGateBack() {
-  const { navigate } = await import('../core/navigation.js');
+  const { navigate } = await import('../../core/navigation.js');
   navigate('dashboard');
 }
 async function _vttEnterTable() {

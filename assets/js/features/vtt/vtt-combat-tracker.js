@@ -7,9 +7,9 @@
 // Les contrôles MJ (démarrer/tour/flags) sont des handlers data-vtt-fn de vtt.js.
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { STATE } from '../core/state.js';
+import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
-import { _esc } from '../shared/html.js';
+import { _esc } from '../../shared/html.js';
 import { _live, _select } from './vtt.js';   // données effectives + sélection token (transverses)
 
 let _combatTab = 'allies'; // 'allies' (joueurs + PNJ) | 'enemies' (MJ only)

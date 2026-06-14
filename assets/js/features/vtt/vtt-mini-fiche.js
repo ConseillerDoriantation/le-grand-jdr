@@ -7,19 +7,19 @@
 // depuis vtt.js (helpers _vttSort*/_vttDisplayRunes, circulaires).
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { updateDoc, writeBatch } from '../config/firebase.js';
-import { STATE } from '../core/state.js';
+import { updateDoc, writeBatch } from '../../config/firebase.js';
+import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
-import { _esc, _norm } from '../shared/html.js';
-import { showNotif } from '../shared/notifications.js';
-import { openModal, confirmModal, promptModal } from '../shared/modal.js';
-import { getArmorSetData } from '../shared/equipment-utils.js';
-import { calcSpellDuration, calcSpellTargets } from '../shared/spell-runes.js';
-import { getDamageTypeById } from '../shared/damage-types.js';
+import { _esc, _norm } from '../../shared/html.js';
+import { showNotif } from '../../shared/notifications.js';
+import { openModal, confirmModal, promptModal } from '../../shared/modal.js';
+import { getArmorSetData } from '../../shared/equipment-utils.js';
+import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js';
+import { getDamageTypeById } from '../../shared/damage-types.js';
 import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, calcOr,
          computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, getMod,
-         sortCharactersForDisplay } from '../shared/char-stats.js';
-import { useGold } from '../shared/economy.js';
+         sortCharactersForDisplay } from '../../shared/char-stats.js';
+import { useGold } from '../../shared/economy.js';
 import { _chrRef, _MS_BONUS_BUFF, _STAT_COLOR, _damageTypes, _effectDisplay, _vttSortDmgFormula,
          _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode, _vttDisplayRunes } from './vtt.js'; // circ.
 import { _renderPresenceCol } from './vtt-presence.js'; // circ. (toggle mini → refresh colonne)

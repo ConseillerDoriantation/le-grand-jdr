@@ -6,13 +6,13 @@
 // lecture) + colonne des joueurs actifs. État partagé presence/miniUid via VS.
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { setDoc, deleteDoc, serverTimestamp } from '../config/firebase.js';
-import { STATE } from '../core/state.js';
+import { setDoc, deleteDoc, serverTimestamp } from '../../config/firebase.js';
+import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
-import { _esc } from '../shared/html.js';
-import { showNotif } from '../shared/notifications.js';
-import { confirmModal } from '../shared/modal.js';
-import { sortCharactersForDisplay } from '../shared/char-stats.js';
+import { _esc } from '../../shared/html.js';
+import { showNotif } from '../../shared/notifications.js';
+import { confirmModal } from '../../shared/modal.js';
+import { sortCharactersForDisplay } from '../../shared/char-stats.js';
 import { _sesRef, _pingRef, _renderTraySoon } from './vtt.js';
 import { _renderMiniSheet, _vttToggleMiniSheet } from './vtt-mini-fiche.js';
 

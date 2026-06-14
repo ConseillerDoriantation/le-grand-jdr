@@ -12,8 +12,8 @@
 //  • En obscurité (token hors rayon de toute source) : vision 1 case.
 //  • Fenêtres : transparentes à la LOS, bloquent le déplacement.
 // ══════════════════════════════════════════════════════════════════════════════
-import { updateDoc } from '../config/firebase.js';
-import { showNotif }  from '../shared/notifications.js';
+import { updateDoc } from '../../config/firebase.js';
+import { showNotif }  from '../../shared/notifications.js';
 
 // ── État module ───────────────────────────────────────────────────────────────
 let _CELL       = 70;

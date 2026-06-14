@@ -6,11 +6,11 @@
 // MJ démarre/met en pause/réinitialise ; libellé éditable. Visible par tous.
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { setDoc } from '../config/firebase.js';
-import { STATE } from '../core/state.js';
+import { setDoc } from '../../config/firebase.js';
+import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
-import { _esc } from '../shared/html.js';
-import { confirmModal, promptModal } from '../shared/modal.js';
+import { _esc } from '../../shared/html.js';
+import { confirmModal, promptModal } from '../../shared/modal.js';
 import { _sesRef } from './vtt.js';   // ref Firestore session (transverse)
 
 let _timerTick = null; // intervalId pour rafraîchir l'affichage

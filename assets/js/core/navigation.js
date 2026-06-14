@@ -28,7 +28,7 @@ const FEATURE_MAP = {
   map:          () => import('../features/map.js'),
   aventures:    () => import('../features/aventures.js'),
   histoire:     () => import('../features/histoire.js'),
-  vtt:          () => import('../features/vtt.js'),
+  vtt:          () => import('../features/vtt/vtt.js'),
   agenda:       () => import('../features/agenda.js'),
 };
 
@@ -39,18 +39,18 @@ const _loaded = new Set();
 // Les feuilles spécifiques à une page sont retirées de index.html et chargées
 // à la 1re navigation vers la page, en parallèle de son module JS. Restent
 // eager : le global, les primitives partagées, quick-view, palette et print.
-// Certaines features réutilisent les cartes de sort/personnage : characters.css
-// est donc aussi chargé avec shop, bestiaire et vtt.
+// Les widgets personnage nécessaires au VTT sont embarqués dans vtt.css.
+// Les autres features chargent uniquement leurs feuilles dédiées.
 const FEATURE_CSS = {
   dashboard:  ['quests.css', 'bastion.css', 'dashboard.css'],
   characters: ['characters.css'],
-  shop:       ['characters.css', 'shop.css'],
+  shop:       ['shop.css'],
   npcs:       ['npcs.css'],
   story:      ['histoire.css'],
   histoire:   ['histoire.css'],
   bastion:    ['bastion.css'],
-  vtt:        ['characters.css', 'vtt.css'],
-  bestiaire:  ['characters.css', 'bestiary.css', 'vtt.css'],
+  vtt:        ['vtt.css'],
+  bestiaire:  ['bestiary.css'],
   agenda:     ['agenda.css', 'recipes.css'],
   recettes:   ['recipes.css'],
   account:    ['account.css'],

@@ -6,14 +6,14 @@
 // MJ gère le butin ; les joueurs prennent des objets (→ inventaire perso).
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { db, doc, onSnapshot, setDoc, updateDoc } from '../config/firebase.js';
-import { STATE } from '../core/state.js';
+import { db, doc, onSnapshot, setDoc, updateDoc } from '../../config/firebase.js';
+import { STATE } from '../../core/state.js';
 import { VS, aid } from './vtt-state.js';
-import { _esc } from '../shared/html.js';
-import { showNotif } from '../shared/notifications.js';
-import { openShopPicker, getShopItemById } from '../shared/shop-picker.js';
-import { shopItemToInvEntry } from '../shared/inventory-utils.js';
-import { sortCharactersForDisplay } from '../shared/char-stats.js';
+import { _esc } from '../../shared/html.js';
+import { showNotif } from '../../shared/notifications.js';
+import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
+import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
+import { sortCharactersForDisplay } from '../../shared/char-stats.js';
 import { _chrRef } from './vtt.js';   // ref Firestore perso (transverse)
 
 // ── État local butin ────────────────────────────────────────────────
@@ -118,7 +118,7 @@ function _initLootSortable() {
   const stashEl = document.getElementById('vtt-stash-list');
   const lootEl  = document.getElementById('vtt-loot-list');
   if (!stashEl || !lootEl) return;
-  import('../vendor/sortable.esm.js').then(({ default: Sortable }) => {
+  import('../../vendor/sortable.esm.js').then(({ default: Sortable }) => {
     Sortable.create(stashEl, {
       group: { name: 'vtt-loot', pull: 'clone', put: true },
       animation: 150,

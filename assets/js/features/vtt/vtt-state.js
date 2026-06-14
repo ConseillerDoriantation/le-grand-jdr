@@ -12,7 +12,7 @@
 // docs/vtt-decomposition.md pour l'ordre des lots et le protocole de vérif.
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { getCurrentAdventureId } from '../data/firestore.js';
+import { getCurrentAdventureId } from '../../data/firestore.js';
 
 // Id de l'aventure courante — contexte de scène partagé (utilisé par tous les
 // helpers de refs Firestore de la VTT). Exporté pour que les sous-modules le
