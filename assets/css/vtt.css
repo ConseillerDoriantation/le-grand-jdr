@@ -3256,6 +3256,24 @@
 .vtt-log-text { flex: 1; min-width: 0; font-size: .8rem; }
 
 /* Toggle détail */
+/* Bouclier réactif : bouton d'annulation manuelle + badge "annulé" dans le chat. */
+.vtt-log-shield-btn {
+  display: inline-flex; align-items: center; gap: .3rem;
+  margin: .15rem 0 .1rem; padding: .26rem .6rem;
+  background: color-mix(in srgb, #a78bfa 16%, transparent);
+  border: 1px solid color-mix(in srgb, #a78bfa 45%, transparent);
+  border-radius: 7px; color: #c4b5fd; cursor: pointer;
+  font-size: .68rem; font-weight: 700;
+  transition: background .12s, border-color .12s;
+}
+.vtt-log-shield-btn:hover { background: color-mix(in srgb, #a78bfa 28%, transparent); border-color: #a78bfa; }
+.vtt-log-shield-done {
+  margin: .15rem 0 .1rem; padding: .2rem .5rem;
+  font-size: .66rem; font-weight: 700; color: #a78bfa;
+  background: color-mix(in srgb, #a78bfa 10%, transparent);
+  border-left: 2px solid #a78bfa; border-radius: 4px;
+}
+
 .vtt-log-toggle {
   margin-left: auto;
   background: transparent;

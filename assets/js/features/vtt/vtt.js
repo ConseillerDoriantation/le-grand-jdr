@@ -6501,30 +6501,12 @@ async function _vttRollAttack() {
       return;
     }
 
-    // ── Bouclier réactif : check des cibles, consomme charges, marque les "blocked" ──
+    // ── Bouclier réactif : plus d'auto-blocage. L'attaque TOUCHE normalement ;
+    // le porteur d'un bouclier adapté pourra ANNULER l'attaque depuis le chat
+    // (rend les PV, consomme 1 charge, PM non remboursés) — cf.
+    // _vttShieldCancelAttack. On ne garde que le rang de l'attaquant pour le log.
     const attackerRank = _attackerRank(src);
-    const blockedTargets = new Set();
-    {
-      const curRound = VS.session?.combat?.round ?? 0;
-      for (const tid of targetIds) {
-        const td = VS.tokens[tid]?.data;
-        const buffs = td?.buffs || [];
-        const shield = buffs.find(b =>
-          b?.type === 'shield_reactive'
-          && (b.charges == null || b.charges > 0)
-          && (b.expiresAtRound == null || b.expiresAtRound >= curRound)
-          && _shieldBlocks(b.tier, attackerRank)
-        );
-        if (!shield) continue;
-        blockedTargets.add(tid);
-        // Consommer la charge (1 charge → retire le buff ; >1 → décrémente)
-        const remaining = (shield.charges == null) ? 0 : Math.max(0, shield.charges - 1);
-        const newBuffs = remaining > 0
-          ? buffs.map(b => b === shield ? { ...b, charges: remaining } : b)
-          : buffs.filter(b => b !== shield);
-        await updateDoc(_tokRef(tid), { buffs: newBuffs }).catch(() => {});
-      }
-    }
+    const blockedTargets = new Set(); // conservé vide (isBlocked toujours false)
 
     // ── Mode effectif : combine choix utilisateur + états sur attaquant/cible ──
     // Règle D&D : avantage + désavantage = annulés (mode 'normal').
@@ -6784,6 +6766,7 @@ async function _vttRollAttack() {
       targetResults.push({
         name: lCurTgt.displayName ?? curTgtData.name, targetCA, hit, halfDmg,
         dmgTotal, dmgPre, dmgReduction, newHp, hpMax, interaction,
+        tokenId: curTgtData.id,   // pour l'annulation manuelle (bouclier réactif)
         shieldBlocked: isBlocked,
         condDmgNotes: _condDmgNotes, consumedNotes: _consumedNotes,
         // Métadonnées pour le rendu côté joueur (estimation CA, portrait)
@@ -6889,6 +6872,7 @@ async function _vttRollAttack() {
         authorId: STATE.user?.uid||null, authorName,
         attackerName: lS.displayName??src.name,
         characterImage: lS.displayImage||null,
+        attackerRank,
         optLabel: opt.label,
         isCrit, isFumble, advMode: effectiveMode, advAuto: effectiveMode !== mode,
         advReasons: effectiveMode !== mode ? condMods.reasons : null,
@@ -6925,6 +6909,9 @@ async function _vttRollAttack() {
         characterImage: lS.displayImage||null,
         defenderName: r.name,
         defenderImage: _defImg,
+        // Bouclier réactif manuel : token cible + rang attaquant (vérif du palier).
+        defenderTokenId: r.tokenId || null,
+        attackerRank,
         // Identifiants cible pour rendu côté joueur (estimation CA)
         beastId: r.beastId || null,
         npcId: r.npcId || null,
@@ -9572,9 +9559,32 @@ function _renderChatLog(msgs) {
     // Panneau détail
     const detail = buildAttackDetail(m, isHeal);
 
+    // ── Bouclier réactif : annulation manuelle depuis le chat ───────────────
+    // Visible pour le contrôleur de la cible (ou MJ) si elle porte un bouclier
+    // dont le palier couvre le rang de l'attaquant, et si l'attaque a fait des
+    // dégâts non déjà annulés.
+    let shieldHtml = '';
+    if (m.shieldCancelled) {
+      shieldHtml = `<div class="vtt-log-shield-done">🛡 Attaque annulée (bouclier réactif) · +${m.dmgTotal} PV rendus</div>`;
+    } else if (!isHeal && (m.dmgTotal || 0) > 0 && m.defenderTokenId) {
+      const dtok = VS.tokens[m.defenderTokenId]?.data;
+      if (dtok && (STATE.isAdmin || _canControlToken(dtok))) {
+        const curRound = VS.session?.combat?.round ?? 0;
+        const shield = (dtok.buffs || []).find(b => b?.type === 'shield_reactive'
+          && (b.charges == null || b.charges > 0)
+          && (b.expiresAtRound == null || b.expiresAtRound >= curRound)
+          && _shieldBlocks(b.tier, m.attackerRank || 'classique'));
+        if (shield) {
+          shieldHtml = `<button class="vtt-log-shield-btn" data-vtt-fn="_vttShieldCancelAttack" data-vtt-args="${m.id}"
+            title="Annuler cette attaque avec le bouclier réactif — rend ${m.dmgTotal} PV, consomme 1 charge (PM non remboursés)">🛡 Annuler (bouclier réactif)</button>`;
+        }
+      }
+    }
+
     return `<div class="vtt-log vtt-log--${theme}">
       ${head}
       ${bodyHtml}
+      ${shieldHtml}
       <div class="vtt-log-detail" id="d${i}">${detail}</div>
     </div>`;
   };
@@ -10959,6 +10969,49 @@ async function _vttRemoveBuff(tokenId, idx) {
   const newBuffs = t.buffs.filter((_, i) => i !== realIdx);
   await updateDoc(_tokRef(tokenId), { buffs: newBuffs }).catch(() => {});
   showNotif('Effet retiré', 'info');
+}
+
+/** Bouclier réactif (Réaction + Protection) : annule une attaque depuis le chat.
+ *  Rend les PV infligés au porteur, consomme 1 charge de bouclier, marque le log.
+ *  Les PM consommés (cast du bouclier) ne sont PAS remboursés. */
+async function _vttShieldCancelAttack(logId) {
+  const m = (_chatMsgs || []).find(x => x.id === logId);
+  if (!m || m.shieldCancelled) return;
+  const dtok = VS.tokens[m.defenderTokenId]?.data;
+  if (!dtok) { showNotif('Cible introuvable sur la carte', 'error'); return; }
+  if (!STATE.isAdmin && !_canControlToken(dtok)) { showNotif('Ce n\'est pas ta cible', 'info'); return; }
+
+  const curRound = VS.session?.combat?.round ?? 0;
+  const buffs = dtok.buffs || [];
+  const shield = buffs.find(b => b?.type === 'shield_reactive'
+    && (b.charges == null || b.charges > 0)
+    && (b.expiresAtRound == null || b.expiresAtRound >= curRound)
+    && _shieldBlocks(b.tier, m.attackerRank || 'classique'));
+  if (!shield) { showNotif('Aucun bouclier réactif adapté à ce palier d\'attaquant', 'info'); return; }
+
+  // Restaure les PV infligés (cap au max), via _setHp (sync fiche perso incluse).
+  const restore = Math.max(0, m.dmgTotal || 0);
+  const lt = _live(dtok);
+  const hpMax = m.hpMax ?? lt.displayHpMax ?? 20;
+  const curHp = lt.displayHp ?? dtok.hp ?? 0;
+  const newHp = Math.min(hpMax, curHp + restore);
+
+  // Consomme 1 charge (retire le buff si plus de charge).
+  const remaining = (shield.charges == null) ? 0 : Math.max(0, shield.charges - 1);
+  const newBuffs = remaining > 0
+    ? buffs.map(b => b === shield ? { ...b, charges: remaining } : b)
+    : buffs.filter(b => b !== shield);
+
+  try {
+    await _setHp(dtok, newHp);
+    await _syncDownedCondition(dtok, newHp);
+    await updateDoc(_tokRef(dtok.id), { buffs: newBuffs });
+    await updateDoc(doc(_logCol(), logId), { shieldCancelled: true, shieldCancelledBy: STATE.user?.uid || null });
+    showNotif(`🛡 Attaque annulée — +${restore} PV rendus`, 'success');
+  } catch (e) {
+    console.error('[vtt] shield cancel', e);
+    showNotif('Annulation refusée (permissions ?)', 'error');
+  }
 }
 
 /** Ouvre une modale simple pour ajouter manuellement un effet sur le token (MJ). */
@@ -12435,6 +12488,7 @@ const VTT_ACTIONS = {
   _vttAider,
   _vttSelfActionClose,
   _vttSelfAction,
+  _vttShieldCancelAttack,
   _vttLootOpenShop,
   _vttLibToggle,
   _closeActionModal,
