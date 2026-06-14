@@ -617,7 +617,7 @@ export function _live(t) {
 
   // Valeurs dérivées calculées une seule fois pour éviter les recalculs dans result
   const _round   = VS.session?.combat?.round ?? 0;
-  const _pmMax   = c ? calcPMMax(c) : n ? npcPmMax : null;
+  const _pmMax   = c ? calcPMMax(c) : n ? npcPmMax : (b ? _numOr(b.pmMax, 0) : null);
   const _caBase  = t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0)))));
   const _caBuffs = (t.buffs || []).filter(bf => bf.type === 'ca' && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound));
   const _ca      = _caBase + _caBuffs.reduce((sum, bf) => sum + (bf.bonus || 0), 0);
@@ -634,8 +634,10 @@ export function _live(t) {
     displayImage:      e.photoURL || e.photo || e.avatar || e.imageUrl || t.imageUrl || null,
     displayHp:         hpCurrent,
     displayHpMax:      hpMax,
-    displayPm:         c ? (c.pm ?? _pmMax) : n ? npcPmCur : null,
+    displayPm:         c ? (c.pm ?? _pmMax) : n ? npcPmCur : (b && _pmMax > 0 ? (t.pm ?? _pmMax) : null),
     displayPmMax:      _pmMax,
+    // Créature avec mana (perso, PNJ ou bestiaire pmMax>0) → jauge PM affichée.
+    hasMana:           !!(c || (n && npcPmMax > 0) || (b && _pmMax > 0)),
     displayMovement: (() => {
       const baseMv = t.movement ?? (c ? calcVitesse(c) : (b ? (_numOr(b.vitesse, 4)) : (_numOr(e.vitesse, _numOr(e.deplacement, 6)))));
       const moveDelta = (t.buffs || [])
@@ -699,6 +701,18 @@ export function _live(t) {
         result.displayHpMax = null;
       }
       if (track.caEstimee !== undefined) result.displayDefense = parseInt(track.caEstimee) || 0;
+      // PM estimé : pmActuel (estimation joueur) borné par pmCombat (PM réellement
+      // consommés, suivis sur le token quand la créature utilise une compétence).
+      // Sans estimation → null → jauge "✨?".
+      const estPmMax = track.pmActuel !== undefined ? parseInt(track.pmActuel) : null;
+      if (estPmMax !== null && _pmMax > 0) {
+        const pmCombat = t.pmCombat != null ? Math.max(0, parseInt(t.pmCombat) || 0) : null;
+        result.displayPm    = pmCombat !== null ? Math.min(pmCombat, estPmMax) : estPmMax;
+        result.displayPmMax = estPmMax;
+      } else {
+        result.displayPm    = null;
+        result.displayPmMax = null;
+      }
     } else {
       // Ennemi sans fiche bestiaire → HP toujours inconnus pour les joueurs
       result.displayHp    = null;
@@ -1501,13 +1515,14 @@ function _buildShape(t) {
   // ── Barre PM (joueurs + PNJ avec PM renseignés, texte superposé) ──
   const _pm0=ld.displayPm;
   let _lblY=r+BH+8;
-  if (_pm0!=null) {
-    const pmMax0=ld.displayPmMax??1, pmRat0=pmMax0>0?Math.min(1,Math.max(0,_pm0/pmMax0)):1;
+  if (_pm0!=null || ld.hasMana) {
+    const _pmKnown = _pm0!=null;
+    const pmMax0=ld.displayPmMax??1, pmRat0=_pmKnown&&pmMax0>0?Math.min(1,Math.max(0,_pm0/pmMax0)):(_pmKnown?1:0);
     const PMH=8;
     g.add(new K.Rect({ x:-bW/2, y:r+BH+6, width:bW, height:PMH, fill:'#0d1117', cornerRadius:4, listening:false }));
-    g.add(new K.Rect({ x:-bW/2, y:r+BH+6, width:Math.max(2,bW*pmRat0), height:PMH, fill:'#9b6dff', cornerRadius:4, listening:false, name:'pm-fill' }));
+    g.add(new K.Rect({ x:-bW/2, y:r+BH+6, width:Math.max(2,bW*pmRat0), height:PMH, fill:_pmKnown?'#9b6dff':'#555', cornerRadius:4, listening:false, name:'pm-fill' }));
     g.add(new K.Text({ x:-bW/2, y:r+BH+6, width:bW, height:PMH, align:'center', verticalAlign:'middle',
-      text:`✨${_pm0}/${pmMax0}`, fontSize:7, fontStyle:'bold', fill:'#fff',
+      text:_pmKnown?`✨${_pm0}/${pmMax0}`:'✨?', fontSize:7, fontStyle:'bold', fill:'#fff',
       shadowColor:'#000', shadowBlur:2, shadowOpacity:.9,
       fontFamily:'Inter,sans-serif', listening:false, name:'pm-val' }));
     _lblY=r+BH+PMH+10;
@@ -1861,7 +1876,7 @@ function _patchShape(id) {
   ).length;
   const _renderedBuffCount = g.find('.buff-ic').length;
   const buffMismatch = _activeBuffCount !== _renderedBuffCount;
-  if ((ld.displayPm != null) !== hasPmBar || hasCaBuff !== needsCaBuff || sizeMismatch || imageMismatch || condMismatch || buffMismatch) {
+  if ((ld.displayPm != null || ld.hasMana) !== hasPmBar || hasCaBuff !== needsCaBuff || sizeMismatch || imageMismatch || condMismatch || buffMismatch) {
     const shape = _buildShape(e.data);
     g.destroy();
     VS.tokens[id] = { ...e, shape };
@@ -1878,12 +1893,14 @@ function _patchShape(id) {
   const fill=g.findOne('.hp-fill');
   if (fill){fill.width(bW*rat);fill.fill(hpKnownU?hpColor(rat):'#555');}
   g.findOne('.hp-val')?.text(hpKnownU?`${hp}/${hpm}`:'?/?');
-  // PM
+  // PM (créatures avec mana ; "✨?" si pas d'estimation côté joueur)
   const _pm=ld.displayPm;
-  if (_pm!=null) {
-    const pmMax=ld.displayPmMax??1, pmRat=pmMax>0?Math.min(1,Math.max(0,_pm/pmMax)):1;
+  if (_pm!=null || ld.hasMana) {
+    const _pmK=_pm!=null;
+    const pmMax=ld.displayPmMax??1, pmRat=_pmK&&pmMax>0?Math.min(1,Math.max(0,_pm/pmMax)):(_pmK?1:0);
     g.findOne('.pm-fill')?.width(bW*pmRat);
-    g.findOne('.pm-val')?.text(`✨${_pm}/${pmMax}`);
+    g.findOne('.pm-fill')?.fill(_pmK?'#9b6dff':'#555');
+    g.findOne('.pm-val')?.text(_pmK?`✨${_pm}/${pmMax}`:'✨?');
   }
   // CA + buff
   const _buff   = ld._activeCaBuff;
@@ -6037,9 +6054,22 @@ async function _vttRollAttack() {
   const _ownerTok = src.summonOwnerId ? VS.tokens[src.summonOwnerId]?.data : null;
   const _pmPayerCharId = _srcChar?.id || (_ownerTok ? _characterForToken(_ownerTok)?.id : null);
   const _deductPm  = async () => {
-    if (opt.pmCost > 0 && _pmPayerCharId) {
+    if (opt.pmCost <= 0) return;
+    if (_pmPayerCharId) {
       const c = VS.characters[_pmPayerCharId];
       if (c) await updateDoc(_chrRef(_pmPayerCharId), {pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost)});
+      return;
+    }
+    // Créature du bestiaire avec mana : déduit du token. `pm` = PM réels (vus du
+    // MJ), `pmCombat` = suivi public pour l'estimation joueur (la jauge baisse).
+    const _beastPmMax = _numOr(VS.bestiary[src.beastId]?.pmMax, 0);
+    if (src.beastId && _beastPmMax > 0) {
+      const curPm  = src.pm != null ? src.pm : _beastPmMax;
+      const curCmb = src.pmCombat != null ? src.pmCombat : _beastPmMax;
+      await updateDoc(_tokRef(srcId), {
+        pm: Math.max(0, curPm - opt.pmCost),
+        pmCombat: Math.max(0, curCmb - opt.pmCost),
+      }).catch(() => {});
     }
   };
   // Consomme 1 exemplaire de l'objet si l'option vient d'un item-action marqué `consommable`.
