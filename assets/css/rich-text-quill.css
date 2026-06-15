@@ -3,6 +3,11 @@
    Adapte l'éditeur à l'identité visuelle de l'app (vars CSS globales).
    ════════════════════════════════════════════════════════════════════════════ */
 
+/* Wrapper : unité d'éditeur autonome (toolbar + zone), pour ne pas perturber
+   la mise en page de la modale/page autour. */
+.rtq-wrap { display: block; width: 100%; }
+.rtq-wrap .ql-toolbar.ql-snow { border-bottom: 0; }
+
 /* Conteneur global */
 .ql-toolbar.ql-snow,
 .ql-container.ql-snow { border-color: var(--border); }

@@ -50,11 +50,12 @@ const _TOOLBAR = [
   ['clean'],
 ];
 
-/** Conteneur d'éditeur. Le HTML initial est placé dans le conteneur : Quill le
- *  reprend comme contenu de départ au montage. */
+/** Conteneur d'éditeur. Quill insère sa toolbar AVANT le `.rtq` ; on enveloppe
+ *  le tout dans `.rtq-wrap` pour que la modale ne voie qu'UN seul élément
+ *  (sinon la toolbar ajoutée comme frère casse la mise en forme alentour).
+ *  Le HTML initial est dans le `.rtq` → Quill le reprend comme contenu. */
 export function quillEditorHtml({ id, html = '', placeholder = '', minHeight = 200 }) {
-  return `<div class="rtq" data-rtq-id="${_esc(id)}" data-rtq-placeholder="${_esc(placeholder)}"
-    style="--rtq-min-h:${parseInt(minHeight) || 200}px">${html || ''}</div>`;
+  return `<div class="rtq-wrap" style="--rtq-min-h:${parseInt(minHeight) || 200}px"><div class="rtq" data-rtq-id="${_esc(id)}" data-rtq-placeholder="${_esc(placeholder)}">${html || ''}</div></div>`;
 }
 
 /** Monte Quill sur tous les conteneurs `.rtq` non encore initialisés sous `root`.
