@@ -10,7 +10,8 @@ import { tryDoc } from '../shared/crud.js';
 import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc, _nl2br, _norm } from '../shared/html.js';
-import { richTextEditorHtml, bindRichTextEditors, getRichTextHtml, richTextContentHtml } from '../shared/rich-text.js';
+import { richTextContentHtml } from '../shared/rich-text.js';
+import { quillEditorHtml, bindQuillEditors, getQuillHtml } from '../shared/rich-text-quill.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import { STATE } from '../core/state.js';
 import Sortable from '../vendor/sortable.esm.js';
@@ -441,7 +442,7 @@ function openWorldSectionModal(id = null, presetCatId = null) {
 
       <div class="mn-field">
         <label class="mn-label">Contenu <span class="mn-label-hint">texte enrichi</span></label>
-        ${richTextEditorHtml({ id: 'wi-contenu', html: _contentToHtml(s?.contenu || ''), placeholder: 'Décris ce chapitre du lore…', minHeight: 240 })}
+        ${quillEditorHtml({ id: 'wi-contenu', html: _contentToHtml(s?.contenu || ''), placeholder: 'Décris ce chapitre du lore…', minHeight: 240 })}
       </div>
 
       <label style="display:flex;align-items:center;gap:.6rem;
@@ -464,8 +465,8 @@ function openWorldSectionModal(id = null, presetCatId = null) {
   </div>
   `);
 
-  // Éditeur rich-text du contenu (toolbar gras/listes/couleur…)
-  bindRichTextEditors();
+  // Éditeur rich-text (Quill) du contenu (toolbar gras/listes/couleur…)
+  bindQuillEditors();
 
   // Upload + crop bannière → met à jour le fond du hero en live (onResult).
   _wiCropper?.destroy();
@@ -517,7 +518,7 @@ async function saveWorldSection() {
   const id        = document.getElementById('wi-id')?.value || `ws_${Date.now()}`;
   const isNew     = !document.getElementById('wi-id')?.value;
   const icone     = document.getElementById('wi-icon')?.value || '📖';
-  const contenu   = getRichTextHtml('wi-contenu');
+  const contenu   = getQuillHtml('wi-contenu');
   const hidden    = document.getElementById('wi-hidden')?.checked || false;
   const categoryId = document.getElementById('wi-categorie')?.value
     || STORE.categories[0]?.id || DEFAULT_CAT.id;

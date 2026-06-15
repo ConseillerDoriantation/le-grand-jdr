@@ -1,0 +1,77 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   RICH-TEXT-QUILL — thème sombre par-dessus le thème "snow" de Quill.
+   Adapte l'éditeur à l'identité visuelle de l'app (vars CSS globales).
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* Conteneur global */
+.ql-toolbar.ql-snow,
+.ql-container.ql-snow { border-color: var(--border); }
+
+.ql-toolbar.ql-snow {
+  background: var(--bg-elevated);
+  border-top-left-radius: 9px; border-top-right-radius: 9px;
+  padding: 6px 8px;
+}
+.ql-container.ql-snow {
+  background: var(--bg-panel);
+  color: var(--text);
+  border-bottom-left-radius: 9px; border-bottom-right-radius: 9px;
+  font-family: inherit; font-size: .92rem;
+}
+
+/* Zone d'édition */
+.ql-editor {
+  min-height: var(--rtq-min-h, 200px);
+  color: var(--text);
+  line-height: 1.6;
+}
+.ql-editor.ql-blank::before {
+  color: var(--text-muted);
+  font-style: normal;
+  opacity: .7;
+}
+.ql-editor h2 { color: var(--text); font-size: 1.25rem; }
+.ql-editor h3 { color: var(--text); font-size: 1.08rem; }
+.ql-editor blockquote {
+  border-left: 3px solid var(--gold);
+  color: var(--text-soft, var(--text-dim));
+  background: color-mix(in srgb, var(--gold) 6%, transparent);
+  padding: .25rem .8rem; border-radius: 0 6px 6px 0;
+}
+.ql-editor a { color: var(--gold); }
+.ql-editor pre, .ql-editor code { background: var(--bg-elevated); color: var(--text); border-radius: 5px; }
+
+/* Icônes de la barre d'outils (SVG) */
+.ql-snow .ql-stroke { stroke: var(--text-dim); }
+.ql-snow .ql-fill, .ql-snow .ql-stroke.ql-fill { fill: var(--text-dim); }
+.ql-snow .ql-picker { color: var(--text-dim); }
+
+.ql-snow .ql-toolbar button:hover,
+.ql-snow.ql-toolbar button:hover,
+.ql-snow .ql-toolbar button:focus,
+.ql-snow.ql-toolbar button:focus,
+.ql-snow .ql-toolbar button.ql-active,
+.ql-snow.ql-toolbar button.ql-active,
+.ql-snow .ql-toolbar .ql-picker-label:hover,
+.ql-snow.ql-toolbar .ql-picker-label:hover { color: var(--gold); }
+
+.ql-snow .ql-toolbar button:hover .ql-stroke,
+.ql-snow.ql-toolbar button:hover .ql-stroke,
+.ql-snow .ql-toolbar button.ql-active .ql-stroke,
+.ql-snow.ql-toolbar button.ql-active .ql-stroke,
+.ql-snow .ql-toolbar .ql-picker-label:hover .ql-stroke { stroke: var(--gold); }
+.ql-snow .ql-toolbar button:hover .ql-fill,
+.ql-snow.ql-toolbar button:hover .ql-fill,
+.ql-snow .ql-toolbar button.ql-active .ql-fill,
+.ql-snow.ql-toolbar button.ql-active .ql-fill { fill: var(--gold); }
+
+/* Menus déroulants (titre, couleurs) */
+.ql-snow .ql-picker-options {
+  background: var(--bg-panel);
+  border-color: var(--border) !important;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px -10px rgba(0,0,0,.7);
+}
+.ql-snow .ql-picker.ql-expanded .ql-picker-label { border-color: var(--border); color: var(--gold); }
+.ql-snow .ql-picker-item { color: var(--text-dim); }
+.ql-snow .ql-picker-item:hover { color: var(--gold); }
