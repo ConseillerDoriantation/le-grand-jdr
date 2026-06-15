@@ -1846,6 +1846,12 @@ function _buildShape(t) {
 }
 
 function _patchShape(id) {
+  // Frontière d'erreur par token : un token corrompu ne casse pas le rendu des
+  // autres (la boucle onSnapshot continue). Le token garde son état précédent.
+  try { return _patchShapeImpl(id); }
+  catch (e) { _vttPanelError('Token', e, null); }
+}
+function _patchShapeImpl(id) {
   const e=VS.tokens[id]; if (!e?.shape) return;
   // Garde-fou : un token d'une autre page (ou en réserve) n'a rien à dessiner
   // sur le calque courant. Sans ça, un patch (ex. édition PV/PM d'un perso ayant
@@ -7134,7 +7140,7 @@ function _renderInspectorSoon() {
 // Un rendu qui plante (ReferenceError, état corrompu…) n'interrompt plus les
 // autres panneaux ni la table : log + 1 notif (anti-spam) + fallback DOM.
 const _vttPanelErrSeen = new Set();
-function _vttPanelError(label, e, elId) {
+export function _vttPanelError(label, e, elId) {
   console.error(`[vtt] panneau « ${label} » : rendu échoué`, e);
   if (!_vttPanelErrSeen.has(label)) {
     _vttPanelErrSeen.add(label);
@@ -8804,6 +8810,7 @@ function _initListeners() {
   // 6. Tokens
   VS.unsubs.push(onSnapshot(_toksCol(), snap => {
     snap.docChanges().forEach(ch => {
+     try {
       const id=ch.doc.id, data={id,...ch.doc.data()};
       if (ch.type==='removed') {
         VS.tokens[id]?.shape?.destroy(); delete VS.tokens[id];
@@ -8834,6 +8841,7 @@ function _initListeners() {
           VS.layers.token?.add(shape); VS.layers.token?.batchDraw();
         }
       }
+     } catch (e) { _vttPanelError('Token', e, null); }
     });
     _renderTraySoon();
     _renderCombatTrackerSoon();

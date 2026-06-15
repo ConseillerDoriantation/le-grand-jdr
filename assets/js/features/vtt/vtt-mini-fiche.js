@@ -21,7 +21,8 @@ import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, cal
          sortCharactersForDisplay } from '../../shared/char-stats.js';
 import { useGold } from '../../shared/economy.js';
 import { _chrRef, _MS_BONUS_BUFF, _STAT_COLOR, _damageTypes, _effectDisplay, _vttSortDmgFormula,
-         _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode, _vttDisplayRunes } from './vtt.js'; // circ.
+         _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode, _vttDisplayRunes,
+         _vttPanelError } from './vtt.js'; // circ.
 import { _renderPresenceCol } from './vtt-presence.js'; // circ. (toggle mini → refresh colonne)
 
 let _miniTab = 'combat'; // onglet actif de la mini-fiche (état local)
@@ -963,6 +964,10 @@ async function _vttMsDeleteNote(charId, uid, idx) {
 // ─── Rendu principal ─────────────────────────────────────────────
 
 function _renderMiniSheet(uid) {
+  try { return _renderMiniSheetImpl(uid); }
+  catch (e) { _vttPanelError('Mini-fiche', e, 'vtt-mini-panel'); }
+}
+function _renderMiniSheetImpl(uid) {
   const panel = document.getElementById('vtt-mini-panel');
   if (!panel) return;
 
