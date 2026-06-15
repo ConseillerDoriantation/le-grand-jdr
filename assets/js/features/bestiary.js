@@ -301,10 +301,13 @@ function _bstRenderArmeRow(a = {}, cid, idx) {
       <div class="bst-arme-grp">
         <div class="bst-arme-grp-hd">🎯 Toucher</div>
         <div class="bst-arme-grp-fields">
-          <select class="bst-p-input" data-f="toucherStat" title="Statistique de toucher" ${selectAttrs}>${optsHTML(a.toucherStat || a.degatsStat || 'force')}</select>
+          <select class="bst-p-input" data-f="toucherStat" title="Statistique de toucher" ${selectAttrs} ${a.toucherAuto ? 'disabled' : ''}>${optsHTML(a.toucherStat || a.degatsStat || 'force')}</select>
           <input class="bst-p-input" data-f="toucherFlat" type="number" placeholder="+0"
-            title="Bonus fixe au toucher" value="${a.toucherFlat ?? ''}" ${inputAttrs}>
+            title="Bonus fixe au toucher" value="${a.toucherFlat ?? ''}" ${inputAttrs} ${a.toucherAuto ? 'disabled' : ''}>
         </div>
+        <label class="bst-arme-auto" title="L'attaque touche automatiquement (aucun jet de toucher). Les dégâts restent normaux.">
+          <input type="checkbox" data-f="toucherAuto" ${a.toucherAuto ? 'checked' : ''} ${selectAttrs}> 🎯 Touche auto
+        </label>
       </div>
     </div>
 
@@ -340,7 +343,7 @@ function _bstAddArme(cid) {
   if (!host) return;
   const c = STORE.creatures.find(x => x.id === cid);
   const armes = Array.isArray(c?.armesNaturelles) ? [...c.armesNaturelles] : [];
-  armes.push({ id: _bstUuid(), nom:'', degats:'', degatsStat:'force', toucherStat:'force', portee:'', format:'physique', damageTypeId:'physique', info:'' });
+  armes.push({ id: _bstUuid(), nom:'', degats:'', degatsStat:'force', toucherStat:'force', toucherAuto:false, portee:'', format:'physique', damageTypeId:'physique', info:'' });
   if (c) c.armesNaturelles = armes;
   host.innerHTML = armes.map((a,i) => _bstRenderArmeRow(a, cid, i)).join('');
   _bstQueueSave(cid, { armesNaturelles: armes });
@@ -367,6 +370,7 @@ function _bstSaveArmes(cid) {
       degatsFlat:  Number.isFinite(flatD) ? flatD : 0,
       toucherStat: r.querySelector('[data-f=toucherStat]')?.value || 'force',
       toucherFlat: Number.isFinite(flatT) ? flatT : 0,
+      toucherAuto: r.querySelector('[data-f=toucherAuto]')?.checked || false,
       portee:      r.querySelector('[data-f=portee]')?.value?.trim() || '',
       format:      r.querySelector('[data-f=format]')?.value || 'physique',
       damageTypeId: r.querySelector('[data-f=damageTypeId]')?.value || 'physique',

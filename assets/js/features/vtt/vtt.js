@@ -4188,6 +4188,7 @@ function _buildAttackOptions(t) {
         portee:  parseInt(w.portee) || 1,
         actionDescription: w.info || '',   // effet complémentaire (ex : « Si touche, applique Poison »)
         pmCost:  0,
+        autoHit: !!w.toucherAuto,          // touche auto : pas de jet de toucher
         toucher: toucherTotal,            // total numérique utilisé par les jets
         toucherMod: toucherTotal,         // pour l'affichage détaillé (formule 1d20 +X (stat))
         toucherSetBonus: 0,
@@ -6683,6 +6684,9 @@ async function _vttRollAttack() {
       hitTotal = d20 + atkBase + bonusHit + extraHitSum + _touchBuff;
       luckUsed = true;
     }
+    // Touche automatique : aucun jet de toucher → toujours touché, ni critique ni
+    // échec (les dégâts restent normaux, roulés ensuite comme d'habitude).
+    if (opt.autoHit) { isCrit = false; isFumble = false; }
 
     const diceToRoll    = opt.rawDice || opt.dice;
     const effectiveDice = _effectiveDmgDice(diceToRoll);
@@ -6782,7 +6786,7 @@ async function _vttRollAttack() {
       const targetCA = armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
       // Bouclier réactif : annule complètement l'attaque (pas de touche, pas de demi-dégâts, pas de fumble visuel)
       const isBlocked = blockedTargets.has(curTgtId);
-      const hit      = isBlocked ? false : (isCrit ? true : isFumble ? false : hitTotal >= targetCA);
+      const hit      = isBlocked ? false : (opt.autoHit ? true : (isCrit ? true : isFumble ? false : hitTotal >= targetCA));
       const halfDmg  = !isBlocked && !hit && missEffect !== 'none' && !isFumble;
       let dmgTotal   = hit ? sharedDmgTotalHit : halfDmg ? sharedDmgTotalHalf : 0;
       let interaction = null;
@@ -6985,6 +6989,7 @@ async function _vttRollAttack() {
         characterImage: lS.displayImage||null,
         attackerRank,
         optLabel: opt.label,
+        autoHit: !!opt.autoHit,
         isCrit, isFumble, advMode: effectiveMode, advAuto: effectiveMode !== mode,
         advReasons: effectiveMode !== mode ? condMods.reasons : null,
         hitD20: d20, hitD20rolls: luckUsed ? [roll1, ...(roll2 !== null ? [roll2] : []), luckRerollValue] : (roll2 !== null ? [roll1, roll2] : [roll1]),
@@ -7029,6 +7034,7 @@ async function _vttRollAttack() {
         npcId: r.npcId || null,
         characterId: r.characterId || null,
         optLabel: opt.label,
+        autoHit: !!opt.autoHit,
         isCrit, isFumble, advMode: effectiveMode, advAuto: effectiveMode !== mode,
         advReasons: effectiveMode !== mode ? condMods.reasons : null,
         hitD20: d20, hitD20rolls: luckUsed ? [roll1, ...(roll2 !== null ? [roll2] : []), luckRerollValue] : (roll2 !== null ? [roll1, roll2] : [roll1]),
@@ -9668,7 +9674,14 @@ function _renderChatLog(msgs) {
       const natDie = (m.hitD20 != null)
         ? `<span class="vtt-log-nat" title="Jet naturel du dé (avant modificateurs)">${_d20(m.hitD20, m.hitD20rolls)}</span>`
         : '';
-      const hitRow = `<div class="vtt-log-body">
+      const hitRow = m.autoHit
+        ? `<div class="vtt-log-body">
+        <span class="vtt-log-icon">🎯</span>
+        <strong class="vtt-log-result" style="color:#22c38e">Touche auto</strong>
+        <span class="vtt-log-result-sub" style="color:#22c38e;font-weight:700">✓ TOUCHE</span>
+        ${_toggle(`d${i}`)}
+      </div>`
+        : `<div class="vtt-log-body">
         <span class="vtt-log-icon">🎯</span>
         <strong class="vtt-log-result" style="font-size:1.15rem;color:${isHit?'#22c38e':'#ef4444'}">${m.hitTotal ?? '?'}</strong>
         ${natDie}

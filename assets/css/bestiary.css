@@ -693,6 +693,11 @@ select.bst-p-input option {
 }
 .bst-arme-grp-fields { display: grid; grid-template-columns: 1fr 52px; gap: 5px; }
 .bst-arme-grp-fields .bst-p-input { font-size: .8rem; }
+.bst-arme-auto {
+  display: inline-flex; align-items: center; gap: .3rem; margin-top: 4px;
+  font-size: .68rem; font-weight: 600; color: var(--text-dim); cursor: pointer;
+}
+.bst-arme-auto input { accent-color: var(--gold); cursor: pointer; }
 
 /* Portée · Format · Type */
 .bst-arme-trio { display: grid; grid-template-columns: 96px 1fr 1fr; gap: 6px; align-items: end; }
