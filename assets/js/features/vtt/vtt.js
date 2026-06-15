@@ -7130,7 +7130,27 @@ function _renderInspectorSoon() {
   });
 }
 
+// ── Frontière d'erreur par panneau VTT ───────────────────────────────────────
+// Un rendu qui plante (ReferenceError, état corrompu…) n'interrompt plus les
+// autres panneaux ni la table : log + 1 notif (anti-spam) + fallback DOM.
+const _vttPanelErrSeen = new Set();
+function _vttPanelError(label, e, elId) {
+  console.error(`[vtt] panneau « ${label} » : rendu échoué`, e);
+  if (!_vttPanelErrSeen.has(label)) {
+    _vttPanelErrSeen.add(label);
+    try { showNotif(`⚠ Panneau « ${label} » en erreur — le reste de la table continue (détail en console).`, 'error'); } catch {}
+  }
+  if (elId) {
+    const el = document.getElementById(elId);
+    if (el) el.innerHTML = `<div class="vtt-panel-err">⚠ Erreur d'affichage de ce panneau.<br><small>${_esc(String(e?.message ?? e))}</small></div>`;
+  }
+}
+
 function _renderInspector(t) {
+  try { return _renderInspectorImpl(t); }
+  catch (e) { _vttPanelError('Inspecteur', e, 'vtt-inspector'); }
+}
+function _renderInspectorImpl(t) {
   const el=document.getElementById('vtt-inspector'); if (!el) return;
   // Multi-sélection active
   if (VS.selectedMulti.size>1) {
@@ -7733,6 +7753,10 @@ export function _renderTraySoon() {
 }
 
 function _renderTray() {
+  try { return _renderTrayImpl(); }
+  catch (e) { _vttPanelError('Panneau MJ', e, 'vtt-tray'); }
+}
+function _renderTrayImpl() {
   if (!STATE.isAdmin) { _renderPageTabs(); return; }
   _renderPageList();
   _renderLibSection();
@@ -8474,6 +8498,10 @@ function _deselectAnnot() {
 }
 
 function _renderAnnotLayer() {
+  try { return _renderAnnotLayerImpl(); }
+  catch (e) { _vttPanelError('Dessins', e, null); }
+}
+function _renderAnnotLayerImpl() {
   if (!VS.layers.draw || !VS.activePage) return;
   const K = window.Konva;
   Object.values(_annotations).forEach(e => { e.shape?.destroy(); e.shape = null; });
@@ -9489,6 +9517,10 @@ function _rebuildChatLog() {
 }
 
 function _renderChatLog(msgs) {
+  try { return _renderChatLogImpl(msgs); }
+  catch (e) { _vttPanelError('Chat', e, 'vtt-chat-log'); }
+}
+function _renderChatLogImpl(msgs) {
   const el = document.getElementById('vtt-chat-log'); if (!el) return;
   const myUid = STATE.user?.uid;
   // Défense en profondeur : les jets cachés ne parviennent déjà plus aux joueurs
