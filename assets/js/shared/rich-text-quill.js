@@ -16,6 +16,7 @@ import { _esc } from './html.js';
 import { sanitizeRichTextHtml } from './rich-text.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from './upload-cloudinary.js';
 import { showNotif } from './notifications.js';
+import { STATE } from '../core/state.js';
 
 const _instances = new Map(); // id → instance Quill
 
@@ -42,8 +43,17 @@ export function loadQuill() {
   return _loading;
 }
 
-// Barre d'outils : couvre (et dépasse) l'éditeur maison.
-const _TOOLBAR = [
+// Barre d'outils. L'insertion d'image (upload Cloudinary) est RÉSERVÉE AU MJ :
+// les joueurs n'ont ni le bouton 🖼 ni le drop/coller d'image.
+const _TOOLBAR_BASE = [
+  [{ header: [2, 3, false] }],
+  ['bold', 'italic', 'underline', 'strike'],
+  [{ color: [] }, { background: [] }],
+  [{ list: 'ordered' }, { list: 'bullet' }],
+  ['blockquote', 'link'],
+  ['clean'],
+];
+const _TOOLBAR_ADMIN = [
   [{ header: [2, 3, false] }],
   ['bold', 'italic', 'underline', 'strike'],
   [{ color: [] }, { background: [] }],
@@ -100,20 +110,23 @@ export async function bindQuillEditors(root = document) {
     el.classList.add('rtq-bound');
     const id = el.getAttribute('data-rtq-id');
     const placeholder = el.getAttribute('data-rtq-placeholder') || '';
+    const canImage = !!STATE.isAdmin; // images réservées au MJ
     const q = new Quill(el, {
       theme: 'snow',
       placeholder,
       modules: {
         toolbar: {
-          container: _TOOLBAR,
-          handlers: { image() { _pickAndUploadImage(this.quill); } },
+          container: canImage ? _TOOLBAR_ADMIN : _TOOLBAR_BASE,
+          handlers: canImage ? { image() { _pickAndUploadImage(this.quill); } } : {},
         },
         uploader: { mimetypes: ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'] },
       },
     });
-    // Glisser-déposer / coller une image → upload Cloudinary (au lieu du base64).
+    // Glisser-déposer / coller une image : MJ → upload Cloudinary ; joueur → ignoré.
     const _up = q.getModule('uploader');
-    if (_up) _up.upload = (range, files) => { [...files].forEach(f => _uploadAndInsertImage(q, f, range)); };
+    if (_up) _up.upload = canImage
+      ? (range, files) => { [...files].forEach(f => _uploadAndInsertImage(q, f, range)); }
+      : () => {};
     if (id) _instances.set(id, q);
   }
 }
