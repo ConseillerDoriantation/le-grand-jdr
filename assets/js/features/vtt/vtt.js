@@ -4617,6 +4617,14 @@ function _effectiveTokenHp(t) {
   return t.hp ?? null;
 }
 
+// PM courant RÉEL stocké SUR LE TOKEN (créatures bestiaire / invocations qui
+// paient leurs compétences sur leur propre mana). null si le token ne porte pas
+// de PM (perso/PNJ → le PM est sur la fiche, capturé via `chars`).
+function _effectiveTokenPm(t) {
+  if (t.beastId) { const b = VS.bestiary[t.beastId]; return t.pm != null ? t.pm : (b ? _numOr(b.pmMax, null) : null); }
+  return t.pm ?? null;
+}
+
 function _captureUndoSnapshot(srcId, targetIds) {
   const ids = [...new Set([srcId, ...(targetIds || [])].filter(Boolean))];
   const tokens = {}, chars = {};
@@ -4626,6 +4634,8 @@ function _captureUndoSnapshot(srcId, targetIds) {
     tokens[id] = {
       hp: _effectiveTokenHp(t),
       pvCombatHp: t.pvCombatHp ?? null,
+      pm: _effectiveTokenPm(t),
+      pmCombat: t.pmCombat ?? _effectiveTokenPm(t),
       buffs: Array.isArray(t.buffs) ? JSON.parse(JSON.stringify(t.buffs)) : [],
       conditions: Array.isArray(t.conditions) ? JSON.parse(JSON.stringify(t.conditions)) : [],
     };
@@ -11165,6 +11175,9 @@ async function _vttUndoAction(logId) {
       const t = VS.tokens[tid]?.data;
       const patch = { buffs: st.buffs || [], conditions: st.conditions || [] };
       if (st.pvCombatHp != null) patch.pvCombatHp = st.pvCombatHp;
+      // PM porté par le token (créatures bestiaire / invocations) → rendu.
+      if (st.pm != null)       patch.pm = st.pm;
+      if (st.pmCombat != null) patch.pmCombat = st.pmCombat;
       await updateDoc(_tokRef(tid), patch).catch(() => {});
       if (t && st.hp != null) await _setHp(t, st.hp).catch(() => {});
     }
