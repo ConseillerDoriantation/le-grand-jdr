@@ -305,11 +305,15 @@ function _bstRenderArmeRow(a = {}, cid, idx) {
           <input class="bst-p-input" data-f="toucherFlat" type="number" placeholder="+0"
             title="Bonus fixe au toucher" value="${a.toucherFlat ?? ''}" ${inputAttrs} ${a.toucherAuto ? 'disabled' : ''}>
         </div>
-        <label class="bst-arme-auto" title="L'attaque touche automatiquement (aucun jet de toucher). Les dégâts restent normaux.">
-          <input type="checkbox" data-f="toucherAuto" ${a.toucherAuto ? 'checked' : ''} ${selectAttrs}> 🎯 Touche auto
-        </label>
       </div>
     </div>
+
+    <!-- Toucher automatique : pleine largeur sous le duo Dégâts/Toucher -->
+    <label class="bst-arme-auto${a.toucherAuto ? ' is-on' : ''}" title="L'attaque touche automatiquement (aucun jet de toucher). Les dégâts restent normaux.">
+      <input type="checkbox" data-f="toucherAuto" ${a.toucherAuto ? 'checked' : ''} ${selectAttrs}>
+      <span>🎯 Toucher automatique</span>
+      <span class="bst-arme-auto-hint">— touche toujours, dégâts normaux</span>
+    </label>
 
     <!-- Ligne 3 : portée · format · type de dégâts -->
     <div class="bst-arme-trio">

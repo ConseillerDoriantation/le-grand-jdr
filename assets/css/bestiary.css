@@ -694,10 +694,21 @@ select.bst-p-input option {
 .bst-arme-grp-fields { display: grid; grid-template-columns: 1fr 52px; gap: 5px; }
 .bst-arme-grp-fields .bst-p-input { font-size: .8rem; }
 .bst-arme-auto {
-  display: inline-flex; align-items: center; gap: .3rem; margin-top: 4px;
-  font-size: .68rem; font-weight: 600; color: var(--text-dim); cursor: pointer;
+  display: flex; align-items: center; gap: .45rem; width: 100%;
+  margin: 6px 0 0; padding: .4rem .6rem; box-sizing: border-box;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 8px; cursor: pointer;
+  font-size: .74rem; font-weight: 600; color: var(--text-dim);
+  transition: border-color .12s, background .12s, color .12s;
 }
-.bst-arme-auto input { accent-color: var(--gold); cursor: pointer; }
+.bst-arme-auto:hover { border-color: var(--gold); color: var(--text); }
+.bst-arme-auto.is-on {
+  color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 10%, var(--bg-elevated));
+  border-color: color-mix(in srgb, var(--gold) 40%, var(--border));
+}
+.bst-arme-auto input { accent-color: var(--gold); cursor: pointer; flex-shrink: 0; }
+.bst-arme-auto-hint { font-weight: 500; color: var(--text-muted); font-size: .68rem; }
 
 /* Portée · Format · Type */
 .bst-arme-trio { display: grid; grid-template-columns: 96px 1fr 1fr; gap: 6px; align-items: end; }
