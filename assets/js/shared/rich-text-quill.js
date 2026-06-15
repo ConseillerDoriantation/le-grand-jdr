@@ -14,6 +14,8 @@
 // ════════════════════════════════════════════════════════════════════════════
 import { _esc } from './html.js';
 import { sanitizeRichTextHtml } from './rich-text.js';
+import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from './upload-cloudinary.js';
+import { showNotif } from './notifications.js';
 
 const _instances = new Map(); // id → instance Quill
 
@@ -46,9 +48,36 @@ const _TOOLBAR = [
   ['bold', 'italic', 'underline', 'strike'],
   [{ color: [] }, { background: [] }],
   [{ list: 'ordered' }, { list: 'bullet' }],
-  ['blockquote', 'link'],
+  ['blockquote', 'link', 'image'],
   ['clean'],
 ];
+
+// ── Images : upload Cloudinary (URL insérée, PAS de base64 → Firestore léger) ──
+function _pickAndUploadImage(quill) {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = 'image/*';
+  input.onchange = () => { const f = input.files?.[0]; if (f) _uploadAndInsertImage(quill, f, quill.getSelection(true)); };
+  input.click();
+}
+
+async function _uploadAndInsertImage(quill, file, range) {
+  if (!file || !file.type?.startsWith('image/')) return;
+  if (!hasCloudinaryConfig()) {
+    showNotif('Configure Cloudinary (🔑) pour insérer des images', 'info');
+    try { openCloudinaryConfigModal(); } catch {}
+    return;
+  }
+  const idx = range ? range.index : (quill.getSelection()?.index ?? quill.getLength());
+  try {
+    showNotif("⏳ Upload de l'image…", 'info');
+    const { url } = await uploadCloudinary(file, { folder: 'rich-text', tags: ['rich-text'] });
+    quill.insertEmbed(idx, 'image', url, 'user');
+    quill.setSelection(idx + 1, 0, 'silent');
+    showNotif('🖼 Image insérée', 'success');
+  } catch (e) {
+    showNotif('Upload image échoué : ' + (e?.message || ''), 'error');
+  }
+}
 
 /** Conteneur d'éditeur. Quill insère sa toolbar AVANT le `.rtq` ; on enveloppe
  *  le tout dans `.rtq-wrap` pour que la modale ne voie qu'UN seul élément
@@ -71,7 +100,20 @@ export async function bindQuillEditors(root = document) {
     el.classList.add('rtq-bound');
     const id = el.getAttribute('data-rtq-id');
     const placeholder = el.getAttribute('data-rtq-placeholder') || '';
-    const q = new Quill(el, { theme: 'snow', placeholder, modules: { toolbar: _TOOLBAR } });
+    const q = new Quill(el, {
+      theme: 'snow',
+      placeholder,
+      modules: {
+        toolbar: {
+          container: _TOOLBAR,
+          handlers: { image() { _pickAndUploadImage(this.quill); } },
+        },
+        uploader: { mimetypes: ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'] },
+      },
+    });
+    // Glisser-déposer / coller une image → upload Cloudinary (au lieu du base64).
+    const _up = q.getModule('uploader');
+    if (_up) _up.upload = (range, files) => { [...files].forEach(f => _uploadAndInsertImage(q, f, range)); };
     if (id) _instances.set(id, q);
   }
 }
