@@ -33,7 +33,8 @@ import { attachDropAndCrop, attachPanZoomCrop, panZoomCropHTML, resizeImageDataU
 import { bindImageUploadDropZone, uploadJpeg } from '../shared/image-upload.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from '../shared/upload-cloudinary.js';
 import { lsJson } from '../shared/local-storage.js';
-import { richTextEditorHtml, getRichTextHtml, richTextContentHtml, bindRichTextEditors } from '../shared/rich-text.js';
+import { richTextContentHtml } from '../shared/rich-text.js';
+import { quillEditorHtml, getQuillHtml, bindQuillEditors } from '../shared/rich-text-quill.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import { characterPortraitContent } from '../shared/portraits.js';
 
@@ -1510,7 +1511,7 @@ async function openPlayerPresentModal(player = null) {
 
         <div class="pp-mn-field">
           <label class="pp-mn-label">Présentation</label>
-          ${richTextEditorHtml({ id: 'pp-content', html: existingContent, minHeight: 240, placeholder: 'Décris librement ce personnage…' })}
+          ${quillEditorHtml({ id: 'pp-content', html: existingContent, minHeight: 240, placeholder: 'Décris librement ce personnage…' })}
         </div>
 
         <label class="pp-mn-toggle-row">
@@ -1624,7 +1625,7 @@ async function openPlayerPresentModal(player = null) {
     if (t && c?.nom) t.textContent = c.nom;
   });
 
-  bindRichTextEditors();
+  bindQuillEditors();
   _ppCropper?.destroy();
   _ppCropper = attachDropAndCrop({
     dropEl:        document.getElementById('pp-img-drop'),
@@ -1807,7 +1808,7 @@ async function _savePlayerPresent(id = '') {
 
     const data = {
       charId:         document.getElementById('pp-char-id')?.value         || '',
-      content:        getRichTextHtml('pp-content'),
+      content:        getQuillHtml('pp-content'),
       imageUrl,
       cardCrop,
       ordre:          parseInt(document.getElementById('pp-ordre')?.value, 10) || 999,

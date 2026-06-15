@@ -64,7 +64,8 @@ import {
   getProfilCacheRef as _profilCache,
   STATS_KEYS,
 } from './characters/tabs.js';
-import { bindRichTextEditors, richTextEditorHtml, getRichTextHtml, richTextContentHtml } from '../shared/rich-text.js';
+import { richTextContentHtml } from '../shared/rich-text.js';
+import { quillEditorHtml, bindQuillEditors, getQuillHtml } from '../shared/rich-text-quill.js';
 import { registerActions } from '../core/actions.js';
 
 import {
@@ -589,9 +590,9 @@ function _renderTabV3(tab, c, canEdit) {
   void area.offsetWidth;
   area.classList.add('cs-tab-fadein');
   if (tab === 'profil') {
-    bindRichTextEditors(area);
+    bindQuillEditors(area);
   }
-  if (tab === 'journal' && sub === 'notes') { bindRichTextEditors(area); _bindNotesDnd(c, canEdit); }
+  if (tab === 'journal' && sub === 'notes') { bindQuillEditors(area); _bindNotesDnd(c, canEdit); }
   if (tab === 'journal' && sub === 'quetes') _bindQuetesDnd(c, canEdit);
   if (tab === 'sorts') { _bindSortsCatDrag(c, canEdit); bindSortCardsDnd(c, canEdit); }
 }
@@ -1035,7 +1036,7 @@ function _csV3JournalSub(sub) {
   const area = document.getElementById('char-tab-content');
   if (area) {
     area.innerHTML = renderCharJournal(c, canEdit, sub);
-    if (sub === 'notes') { bindRichTextEditors(area); _bindNotesDnd(c, canEdit); }
+    if (sub === 'notes') { bindQuillEditors(area); _bindNotesDnd(c, canEdit); }
     if (sub === 'quetes') _bindQuetesDnd(c, canEdit);
   }
 }
@@ -1159,7 +1160,7 @@ function renderCharNotesV3(c, canEdit) {
       </header>
       ${isOpen ? `<div class="note-v3-body">
         ${canEdit
-          ? `${richTextEditorHtml({ id: `note-area-${i}`, html: n.contenu || '', placeholder: 'Contenu de la note…', minHeight: 180 })}
+          ? `${quillEditorHtml({ id: `note-area-${i}`, html: n.contenu || '', placeholder: 'Contenu de la note…', minHeight: 180 })}
              <div style="display:flex;gap:8px;margin-top:8px">
                <button class="btn btn-gold btn-sm" data-action="saveNote" data-idx="${i}">💾 Enregistrer</button>
              </div>`
@@ -1530,7 +1531,7 @@ function renderCharProfilV3(c, canEdit) {
   const editingBio = _csV3EditingBio === c.id;
   const bioBlockHtml = editingBio && canEdit
     ? `<div class="profil-bio-edit">
-        ${richTextEditorHtml({ id: 'profil-bio-rt', html: bioHtml, minHeight: 220, placeholder: 'Décris ton personnage…' })}
+        ${quillEditorHtml({ id: 'profil-bio-rt', html: bioHtml, minHeight: 220, placeholder: 'Décris ton personnage…' })}
         <div style="display:flex;gap:8px;margin-top:10px">
           <button class="btn btn-gold btn-sm" data-action="csV3SaveBioRt" data-id="${c.id}">💾 Enregistrer</button>
           <button class="btn btn-outline btn-sm" data-action="csV3CancelBio" data-id="${c.id}">Annuler</button>
@@ -1713,7 +1714,7 @@ function _csV3CancelBio(charId) {
 }
 async function _csV3SaveBioRt(charId) {
   const c = getCharacterById(charId); if (!c) return;
-  const html = getRichTextHtml('profil-bio-rt') || '';
+  const html = getQuillHtml('profil-bio-rt') || '';
   // Sauvegarde : on écrit sur c.bio (string HTML) ET sur pres.content si présence
   c.bio = html;
   await updateInCol('characters', charId, { bio: html });

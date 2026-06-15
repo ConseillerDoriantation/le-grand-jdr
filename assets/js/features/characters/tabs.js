@@ -6,7 +6,8 @@ import { openModal, closeModal, confirmModal, promptModal } from '../../shared/m
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { modStr, _esc } from '../../shared/html.js';
 import { getMod, calcPVMax, calcPMMax, calcOr, calcPalier } from '../../shared/char-stats.js';
-import { richTextEditorHtml, getRichTextHtml, richTextContentHtml } from '../../shared/rich-text.js';
+import { richTextContentHtml } from '../../shared/rich-text.js';
+import { quillEditorHtml, getQuillHtml } from '../../shared/rich-text-quill.js';
 import { uploadJpeg } from '../../shared/image-upload.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from '../../shared/upload-cloudinary.js';
 
@@ -299,7 +300,7 @@ export function renderCharNotes(c, canEdit) {
         </div>
         ${isOpen?`<div class="cs-note-body">
           ${canEdit
-            ? `${richTextEditorHtml({ id: `note-area-${i}`, html: note.contenu || '', placeholder: 'Contenu de la note...', minHeight: 180 })}
+            ? `${quillEditorHtml({ id: `note-area-${i}`, html: note.contenu || '', placeholder: 'Contenu de la note...', minHeight: 180 })}
                <button class="btn btn-gold btn-sm" style="margin-top:0.6rem" data-action="saveNote" data-idx="${i}">💾 Enregistrer</button>`
             : richTextContentHtml({ html: note.contenu, className: 'cs-note-content', fallback: '<em style="opacity:.5">Aucun contenu.</em>' })
           }
@@ -347,7 +348,7 @@ export async function editNoteTitle(idx) {
 
 export async function saveNote(idx) {
   const c = STATE.activeChar; if(!c) return;
-  const html = getRichTextHtml(`note-area-${idx}`);
+  const html = getQuillHtml(`note-area-${idx}`);
   if (!c.notesList?.[idx]) return;
   c.notesList[idx].contenu = html;
   if (await trySave('characters', c.id, {notesList: c.notesList})) showNotif('Note enregistrée !','success');
