@@ -1,7 +1,6 @@
 import {
   auth,
   db,
-  ADMIN_EMAIL,
   onAuthStateChanged,
   doc,
   setDoc,
@@ -63,7 +62,7 @@ setFirebase(auth, db, {
   collection, getDocs, addDoc, updateDoc, deleteDoc,
   query, where, orderBy,
   createUserWithEmailAndPassword, signInWithEmailAndPassword,
-  signOut, onAuthStateChanged, ADMIN_EMAIL,
+  signOut, onAuthStateChanged,
 });
 
 
@@ -97,8 +96,8 @@ onAuthStateChanged(auth, async (user) => {
     });
   }
 
-  // Super-admin = profile.isAdmin OU email legacy hardcodé (bootstrap)
-  const isSuperAdmin = STATE.profile?.isAdmin === true || user.email === ADMIN_EMAIL;
+  // Super-admin = rôle serveur users/{uid}.isAdmin. Pas de bootstrap par email côté client.
+  const isSuperAdmin = STATE.profile?.isAdmin === true;
   setSuperAdmin(isSuperAdmin);
 
   showAppLoading();
@@ -192,34 +191,6 @@ async function loadProfile(user) {
   if (snap.exists()) {
     setProfile(snap.data());
     return;
-  }
-
-  // Chercher si un profil existe déjà pour cet email (doublon)
-  try {
-    const q        = query(collection(db, "users"), where("email", "==", user.email));
-    const existing = await getDocs(q);
-    if (!existing.empty) {
-      const existingDoc  = existing.docs[0];
-      const existingData = existingDoc.data();
-      const aliases = [
-        ...(Array.isArray(existingData.uidAliases) ? existingData.uidAliases : []),
-        ...(Array.isArray(existingData.previousUids) ? existingData.previousUids : []),
-        existingData.uid,
-        existingDoc.id,
-      ].filter(uid => uid && uid !== user.uid);
-      const profile = {
-        ...existingData,
-        uid: user.uid,
-        previousUids: [...new Set(aliases)],
-        uidAliases: [...new Set([user.uid, ...aliases])],
-        duplicateOf: existingDoc.id !== user.uid ? existingDoc.id : (existingData.duplicateOf || null),
-      };
-      await setDoc(ref, profile, { merge: true });
-      setProfile(profile);
-      return;
-    }
-  } catch (error) {
-    console.error("[init] email duplicate check failed:", error);
   }
 
   // Nouveau joueur

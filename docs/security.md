@@ -9,10 +9,17 @@ dont certains tenteront de tricher / glitcher. Ce document distingue ce qui est
 | Surface | Protection | Réalité |
 |---|---|---|
 | Lecture/écriture des collections | Règles Firestore (serveur) | Vraie protection. Voir `firestore-rules.md`. |
-| `STATE.isAdmin` côté client | Aucune | Confort UI. Un joueur peut le forcer en console — sans effet, les règles vérifient `request.auth.token.email`. |
+| `STATE.isAdmin` côté client | Aucune | Confort UI. Un joueur peut le forcer en console — sans effet, les règles vérifient `users/{uid}.isAdmin` et les admins d'aventure. |
 | Triche sur **ses propres** données (PV, or, inventaire de SA fiche) | Règles : `resource.data.uid == request.auth.uid` | **Possible par design.** Sans backend, on ne peut pas empêcher un joueur d'éditer sa propre fiche via la console. Acceptable entre potes ; seule parade réelle = Cloud Functions. |
 | `gmOnly` (jets cachés du MJ) | Règles Firestore (serveur) | **Vraie protection.** Les jets cachés sont écrits dans la sous-collection `vttLogGm` (`allow read, write: if isAdvAdmin`) ; les joueurs ne s'y abonnent pas et ne peuvent pas la lire. Le filtre client subsiste en défense en profondeur. |
-| XSS stocké (HTML injecté dans un champ) | Échappement systématique + sanitizer rich-text + CSP | Voir §2. |
+| XSS stocké (HTML injecté dans un champ) | Échappement systématique + sanitizer rich-text | Voir §2. |
+
+### Admins et rôles
+
+- Le super-admin est `users/{uid}.isAdmin === true`, vérifié côté règles Firestore.
+- Ne pas réintroduire de constante `ADMIN_EMAIL` ni de comparaison `request.auth.token.email == ...`.
+- Bootstrap initial : définir `isAdmin: true` manuellement dans Firebase Console sur le document `users/{uid}` du premier admin.
+- L'auto-rattachement par email ajoute uniquement le `uid` courant dans `accessList` et `players`; il ne peut pas modifier `admins` ni `accessEmails`.
 
 ## 2. XSS — règles internes
 

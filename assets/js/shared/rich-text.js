@@ -1349,26 +1349,56 @@ export function getRichTextHtml(id) {
   return sanitizeRichTextHtml(el.innerHTML).trim();
 }
 
-// Sanitisation : strip des tags d'exécution / rendu arbitraire, des handlers
-// inline (on*), de l'attribut srcdoc, et des URLs dangereuses (javascript:,
-// data:text/html, vbscript:). Les data: images restent autorisées.
+const RICH_TEXT_DROP_CONTENT_TAGS = new Set([
+  'script', 'style', 'iframe', 'object', 'embed', 'form', 'link', 'meta',
+  'base', 'template', 'svg', 'math',
+]);
+const RICH_TEXT_ALLOWED_TAGS = new Set([
+  'a', 'b', 'blockquote', 'br', 'code', 'div', 'em', 'font', 'h1', 'h2',
+  'h3', 'h4', 'hr', 'i', 'img', 'li', 'ol', 'p', 'pre', 's', 'span',
+  'strike', 'strong', 'sub', 'sup', 'u', 'ul',
+]);
+const RICH_TEXT_ALLOWED_ATTRS = new Set([
+  'alt', 'class', 'color', 'contenteditable', 'face', 'height', 'href',
+  'rel', 'size', 'src', 'style', 'target', 'title', 'width', 'xlink:href',
+]);
+const RICH_TEXT_ALLOWED_STYLE_PROPS = new Set([
+  'background', 'background-color', 'border', 'border-color',
+  'border-bottom', 'border-bottom-color', 'border-bottom-style',
+  'border-bottom-width', 'border-left', 'border-left-color',
+  'border-left-style', 'border-left-width', 'border-radius', 'border-right',
+  'border-right-color', 'border-right-style', 'border-right-width',
+  'border-style', 'border-top', 'border-top-color', 'border-top-style',
+  'border-top-width', 'border-width', 'color', 'cursor', 'display',
+  'font-family', 'font-size', 'font-style', 'font-weight', 'margin',
+  'margin-bottom', 'margin-left', 'margin-right', 'margin-top', 'opacity',
+  'padding', 'padding-bottom', 'padding-left', 'padding-right', 'padding-top',
+  'text-align', 'text-decoration', 'user-select', 'vertical-align',
+  'white-space',
+]);
+
+// Sanitisation : whitelist des tags/attributs utiles au rich-text, retrait des
+// handlers inline, des contenus actifs et des URLs/CSS dangereux.
 export function sanitizeRichTextHtml(html) {
   if (!html) return '';
   const tpl = document.createElement('template');
   tpl.innerHTML = String(html);
-  tpl.content
-    .querySelectorAll('script, style, iframe, object, embed, form, link, meta, base')
-    .forEach((n) => n.remove());
+
   tpl.content.querySelectorAll('*').forEach((n) => {
-    [...n.attributes].forEach((a) => {
-      const name = a.name.toLowerCase();
-      if (/^on/i.test(name) || name === 'srcdoc') { n.removeAttribute(a.name); return; }
-      if ((name === 'href' || name === 'src' || name === 'xlink:href') &&
-          /^\s*(javascript:|data:text\/html|vbscript:)/i.test(a.value)) {
-        n.removeAttribute(a.name);
-      }
-    });
+    const tag = n.tagName.toLowerCase();
+    if (RICH_TEXT_DROP_CONTENT_TAGS.has(tag)) {
+      n.remove();
+      return;
+    }
+    if (!RICH_TEXT_ALLOWED_TAGS.has(tag)) {
+      unwrapElement(n);
+      return;
+    }
+    sanitizeRichTextAttributes(n, tag);
   });
+
+  removeRichTextComments(tpl.content);
+
   // Retire les citations vides (héritées d'anciennes suppressions) : un
   // <blockquote> sans texte ni image laissait sa bordure bleue orpheline.
   // S'applique au chargement de l'éditeur, à l'affichage lecture seule et à
@@ -1377,4 +1407,100 @@ export function sanitizeRichTextHtml(html) {
     if (_isEmptyBlockquote(bq)) bq.remove();
   });
   return tpl.innerHTML;
+}
+
+function sanitizeRichTextAttributes(n, tag) {
+  [...n.attributes].forEach((a) => {
+    const name = a.name.toLowerCase();
+    const isDataAttr = /^data-[a-z0-9_-]+$/i.test(name);
+    if (/^on/i.test(name) || name === 'srcdoc' ||
+        (!isDataAttr && !RICH_TEXT_ALLOWED_ATTRS.has(name))) {
+      n.removeAttribute(a.name);
+      return;
+    }
+
+    if ((name === 'href' || name === 'xlink:href') && tag !== 'a') {
+      n.removeAttribute(a.name);
+      return;
+    }
+    if (name === 'src' && tag !== 'img') {
+      n.removeAttribute(a.name);
+      return;
+    }
+    if ((name === 'href' || name === 'src' || name === 'xlink:href') &&
+        !isSafeRichTextUrl(name, a.value)) {
+      n.removeAttribute(a.name);
+      return;
+    }
+    if (name === 'style') {
+      const safeStyle = sanitizeRichTextStyle(a.value);
+      if (safeStyle) n.setAttribute('style', safeStyle);
+      else n.removeAttribute(a.name);
+      return;
+    }
+    if (name === 'contenteditable' && a.value.toLowerCase() !== 'false') {
+      n.removeAttribute(a.name);
+      return;
+    }
+    if (name === 'target' && !['_blank', '_self'].includes(a.value)) {
+      n.removeAttribute(a.name);
+      return;
+    }
+  });
+
+  if (tag === 'a' && n.getAttribute('target') === '_blank') {
+    n.setAttribute('rel', 'noopener noreferrer');
+  }
+}
+
+function isSafeRichTextUrl(name, value) {
+  const raw = String(value || '').trim();
+  if (!raw) return false;
+  if (raw.startsWith('#')) return true;
+  try {
+    const base = document.baseURI || globalThis.location?.href || 'https://example.invalid/';
+    const url = new URL(raw, base);
+    const protocol = url.protocol.toLowerCase();
+    if (name === 'src') {
+      return protocol === 'http:' ||
+             protocol === 'https:' ||
+             /^data:image\/(?:png|jpe?g|gif|webp|avif);base64,/i.test(raw);
+    }
+    return protocol === 'http:' ||
+           protocol === 'https:' ||
+           protocol === 'mailto:' ||
+           protocol === 'tel:';
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeRichTextStyle(value) {
+  const probe = document.createElement('span');
+  probe.setAttribute('style', value);
+  const out = [];
+  for (let i = 0; i < probe.style.length; i++) {
+    const prop = probe.style[i];
+    const name = prop.toLowerCase();
+    const val = probe.style.getPropertyValue(prop).trim();
+    if (!isAllowedRichTextStyleProp(name) || !isSafeRichTextCssValue(val)) continue;
+    out.push(`${name}: ${val}`);
+  }
+  return out.join('; ');
+}
+
+function isAllowedRichTextStyleProp(name) {
+  return RICH_TEXT_ALLOWED_STYLE_PROPS.has(name) || /^--rte-[a-z0-9_-]+$/i.test(name);
+}
+
+function isSafeRichTextCssValue(value) {
+  return !/(?:url\s*\(|expression\s*\(|javascript:|vbscript:|data:|@import|-moz-binding)/i.test(value);
+}
+
+function removeRichTextComments(root) {
+  const showComment = globalThis.NodeFilter?.SHOW_COMMENT || 128;
+  const walker = document.createTreeWalker(root, showComment);
+  const comments = [];
+  while (walker.nextNode()) comments.push(walker.currentNode);
+  comments.forEach((node) => node.remove());
 }

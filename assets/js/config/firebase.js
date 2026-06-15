@@ -44,12 +44,9 @@ try {
   db = initializeFirestore(app, {});
 }
 
-// ⚠️  Côté client uniquement — la vraie protection est dans les règles Firestore.
-//    Voir docs/firestore-rules.md
-const ADMIN_EMAIL = 'dorianferrer02@gmail.com';
 
 export {
-  auth, db, ADMIN_EMAIL,
+  auth, db,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,

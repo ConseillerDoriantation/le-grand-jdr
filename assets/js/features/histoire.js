@@ -22,6 +22,7 @@ import {
   richTextToolbarHtml,
   replaceRichTextRangeWithNode,
   selectRichTextNodeContents,
+  sanitizeRichTextHtml,
 } from '../shared/rich-text.js';
 import PAGES from './pages.js';
 import { getHistoireCtx, setHistoireCtx } from '../shared/histoire-ctx.js';
@@ -136,7 +137,7 @@ async function renderHistoire() {
     joueur:       users.map(u => ({ id: u.uid || u.id, label: u.pseudo || u.email || '?' })),
   };
 
-  const savedContent = histDoc?.content || '';
+  const savedContent = sanitizeRichTextHtml(histDoc?.content || '');
   const wordCount    = countRichTextWords(savedContent);
 
   document.getElementById('main-content').innerHTML = `
@@ -148,8 +149,8 @@ async function renderHistoire() {
           <span>←</span> Trame
         </button>
         <div class="hist-topbar-center">
-          ${_missionActe ? `<span class="hist-acte-pill">${_missionActe}</span>` : ''}
-          <span class="hist-titre">${_missionTitre}</span>
+          ${_missionActe ? `<span class="hist-acte-pill">${_esc(_missionActe)}</span>` : ''}
+          <span class="hist-titre">${_esc(_missionTitre)}</span>
         </div>
         <div class="hist-topbar-actions">
           <button class="hist-handout-btn-top" data-action="_ouvrirHandout" title="Aperçu handout joueur">📜 Handout</button>
@@ -395,14 +396,14 @@ function _renderPickerContent() {
       _pickerFlat.push({ type, ...item });
       html += `<div class="hist-picker-item ${idx === _pickerIdx ? 'active' : ''}"
         data-idx="${idx}" data-pick-idx="${idx}" style="--tag-color:${cfg.color};--tag-bg:${cfg.bg}">
-        <span class="hist-picker-dot" style="background:${cfg.color}"></span>${item.label}
+        <span class="hist-picker-dot" style="background:${cfg.color}"></span>${_esc(item.label)}
       </div>`;
     });
     html += `</div>`;
   }
 
   if (!html) {
-    html = `<div class="hist-picker-empty">Aucun résultat pour « ${_pickerQuery || '@'} »</div>`;
+    html = `<div class="hist-picker-empty">Aucun résultat pour « ${_esc(_pickerQuery || '@')} »</div>`;
     _pickerFlat = [];
   }
 
@@ -421,8 +422,8 @@ function _renderDicePickerContent() {
     inner.innerHTML = `
       <div style="padding:8px 12px">
         <div style="font-size:.78rem;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px">
-          <span style="color:#f59e0b">🎲 ${_diceSel.name}</span>
-          ${_diceSel.stat ? `<span style="color:${col};font-size:.72rem;font-weight:700;padding:1px 5px;border:1px solid ${col}40;border-radius:4px;background:${col}18">${_diceSel.stat}</span>` : ''}
+          <span style="color:#f59e0b">🎲 ${_esc(_diceSel.name)}</span>
+          ${_diceSel.stat ? `<span style="color:${col};font-size:.72rem;font-weight:700;padding:1px 5px;border:1px solid ${col}40;border-radius:4px;background:${col}18">${_esc(_diceSel.stat)}</span>` : ''}
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <span style="font-size:.82rem;color:var(--text-muted)">DD</span>
@@ -464,8 +465,8 @@ function _renderDicePickerContent() {
         style="--tag-color:#f59e0b;--tag-bg:rgba(245,158,11,.15)"
         data-pick-dice-idx="${i}">
         <span class="hist-picker-dot" style="background:#f59e0b"></span>
-        <span style="flex:1">${s.name}</span>
-        ${s.stat ? `<span style="font-size:.68rem;font-weight:700;color:${col};padding:0 4px;border-radius:3px;background:${col}18">${s.stat}</span>` : ''}
+        <span style="flex:1">${_esc(s.name)}</span>
+        ${s.stat ? `<span style="font-size:.68rem;font-weight:700;color:${col};padding:0 4px;border-radius:3px;background:${col}18">${_esc(s.stat)}</span>` : ''}
       </div>`;
     }).join('');
   }
@@ -638,7 +639,7 @@ function _updateToc() {
   const links = Array.from(markers).map((m, i) => {
     const label = m.textContent.trim() || `Scène ${i + 1}`;
     return `<a href="#" class="hist-toc-link" data-action="_histScrollToScene" data-scene-id="${i}"
-    >${label}</a>`;
+    >${_esc(label)}</a>`;
   }).join('');
 
   toc.innerHTML = `<span class="hist-toc-label">Scènes :</span>${links}`;
@@ -664,12 +665,12 @@ function _renderSidebarMissions() {
       const isCurrent = m.id === _missionId;
       return `<button class="hist-sb-item${isCurrent ? ' hist-sb-item--active' : ''}"
         data-action="_switchHistMission" data-id="${m.id}" data-titre="${_esc(m.titre||'')}" data-acte="${_esc(acte)}">
-        <span class="hist-sb-item-title">${m.titre || '(sans titre)'}</span>
+        <span class="hist-sb-item-title">${_esc(m.titre || '(sans titre)')}</span>
       </button>`;
     }).join('');
 
     return `<div class="hist-sb-group">
-      <div class="hist-sb-acte${isCurrentActe ? ' hist-sb-acte--active' : ''}">${acte}</div>
+      <div class="hist-sb-acte${isCurrentActe ? ' hist-sb-acte--active' : ''}">${_esc(acte)}</div>
       ${rows}
     </div>`;
   }).join('');
@@ -708,7 +709,7 @@ async function _switchHistMission(id, titre, acte) {
 
   const histDoc = await getDocData('story_histories', id).catch(() => null);
   if (editor) {
-    editor.innerHTML = histDoc?.content || '';
+    editor.innerHTML = sanitizeRichTextHtml(histDoc?.content || '');
     editor.focus();
   }
 
@@ -877,7 +878,7 @@ function _ouvrirHandout() {
     m.replaceWith(div);
   });
 
-  const content   = clone.innerHTML;
+  const content   = sanitizeRichTextHtml(clone.innerHTML);
   const wordCount = countRichTextWords(content);
 
   document.getElementById('hist-handout-modal')?.remove();
@@ -889,8 +890,8 @@ function _ouvrirHandout() {
     <div class="hist-handout-panel">
       <div class="hist-handout-header">
         <div>
-          ${_missionActe ? `<div class="hist-handout-acte">${_missionActe}</div>` : ''}
-          <div class="hist-handout-title">${_missionTitre}</div>
+          ${_missionActe ? `<div class="hist-handout-acte">${_esc(_missionActe)}</div>` : ''}
+          <div class="hist-handout-title">${_esc(_missionTitre)}</div>
           <div class="hist-handout-meta">${wordCount} mot${wordCount !== 1 ? 's' : ''}</div>
         </div>
         <div style="display:flex;gap:8px;align-items:flex-start;flex-shrink:0">
@@ -928,7 +929,7 @@ async function _saveNow() {
   _setSaveStatus('saving');
   try {
     await saveDoc('story_histories', _missionId, {
-      content:      editor.innerHTML,
+      content:      sanitizeRichTextHtml(editor.innerHTML),
       missionId:    _missionId,
       missionTitre: _missionTitre,
       updatedAt:    new Date().toISOString(),

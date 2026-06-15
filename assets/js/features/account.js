@@ -111,14 +111,17 @@ async function renderAccount() {
   // Compter les personnages
   const chars = await loadChars(user.uid);
   const nbChars = chars.length;
+  const pseudo = profile.pseudo || 'Aventurier';
+  const email = user.email || '';
+  const avatarInitial = (pseudo || '?')[0]?.toUpperCase?.() || '?';
 
   content.innerHTML = `
   <!-- ═══ HEADER ═══════════════════════════════════════════════════════════ -->
   <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem">
-    <div class="acc-avatar">${(profile.pseudo||'?')[0].toUpperCase()}</div>
+    <div class="acc-avatar">${_esc(avatarInitial)}</div>
     <div>
-      <h1 style="font-family:'Cinzel',serif;font-size:1.5rem;color:var(--gold);letter-spacing:1px;margin:0">${profile.pseudo||'Aventurier'}</h1>
-      <div style="font-size:.78rem;color:var(--text-dim);margin-top:.2rem">${user.email}</div>
+      <h1 style="font-family:'Cinzel',serif;font-size:1.5rem;color:var(--gold);letter-spacing:1px;margin:0">${_esc(pseudo)}</h1>
+      <div style="font-size:.78rem;color:var(--text-dim);margin-top:.2rem">${_esc(email)}</div>
       <div style="font-size:.72rem;color:var(--text-dim);margin-top:.1rem">${STATE.isAdmin?'🛡️ Maître de Jeu':'⚔️ Joueur'} · ${nbChars} personnage${nbChars!==1?'s':''}</div>
     </div>
   </div>
@@ -135,7 +138,7 @@ async function renderAccount() {
         <div class="acc-inline">
           <div>
             <div class="acc-label">Pseudo</div>
-            <div class="acc-value">${profile.pseudo||'—'}</div>
+            <div class="acc-value">${_esc(pseudo || '—')}</div>
           </div>
           <button class="acc-edit-btn" data-action="openEditPseudo">✏️ Modifier</button>
         </div>
@@ -147,7 +150,7 @@ async function renderAccount() {
         <div class="acc-inline">
           <div>
             <div class="acc-label">Adresse email</div>
-            <div class="acc-value">${user.email}</div>
+            <div class="acc-value">${_esc(email)}</div>
           </div>
           <button class="acc-edit-btn" data-action="openEditEmail">✏️ Modifier</button>
         </div>
@@ -201,7 +204,7 @@ function openEditPseudo() {
   openModal('✏️ Modifier le pseudo', `
     <div class="form-group">
       <label>Nouveau pseudo</label>
-      <input class="input-field" id="acc-pseudo" value="${profile.pseudo||''}"
+      <input class="input-field" id="acc-pseudo" value="${_esc(profile.pseudo || '')}"
         placeholder="Ton pseudo d'aventurier...">
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.75rem">

@@ -2,66 +2,62 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isAdmin() {
-      return request.auth != null &&
-             request.auth.token.email == "dorianferrer02@gmail.com";
-    }
     function isLoggedIn() { return request.auth != null; }
-
-    function hasEmailAccess(data) {
-      return request.auth.token.email != null &&
-             data.keys().hasAny(["accessEmails"]) &&
-             request.auth.token.email in data.accessEmails;
-    }
 
     function currentProfile() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    function hasPreviousUid(uid) {
-      let profile = currentProfile();
-      return profile.keys().hasAny(["previousUids"]) &&
-             profile.previousUids.hasAny([uid]) &&
-             request.auth.token.email != null &&
-             get(/databases/$(database)/documents/users/$(uid)).data.email == request.auth.token.email;
+    function isAdmin() {
+      return isLoggedIn() && currentProfile().isAdmin == true;
     }
 
-    function hasPreviousUidAccess(data) {
-      let profile = currentProfile();
-      return profile.keys().hasAny(["previousUids"]) &&
+    function hasEmailAccess(data) {
+      return isLoggedIn() &&
+             request.auth.token.email != null &&
+             data.keys().hasAny(["accessEmails"]) &&
+             request.auth.token.email in data.accessEmails;
+    }
+
+    function isUserSelfCreate(uid) {
+      return isLoggedIn() &&
+             uid == request.auth.uid &&
+             request.resource.data.keys().hasOnly(["uid", "email", "pseudo", "isAdmin", "createdAt"]) &&
+             request.resource.data.uid == request.auth.uid &&
+             request.resource.data.email == request.auth.token.email &&
              (
-               data.accessList.hasAny(profile.previousUids) ||
-               data.players.hasAny(profile.previousUids) ||
-               data.admins.hasAny(profile.previousUids)
+               !request.resource.data.keys().hasAny(["isAdmin"]) ||
+               request.resource.data.isAdmin == false
              );
+    }
+
+    function isUserSelfUpdate(uid) {
+      return isLoggedIn() &&
+             uid == request.auth.uid &&
+             request.resource.data.diff(resource.data).affectedKeys().hasOnly(["email", "pseudo"]);
     }
 
     function isAccountSelfRepair(before, after) {
       return isLoggedIn() &&
-             (hasEmailAccess(before) || hasPreviousUidAccess(before)) &&
-             after.diff(before).affectedKeys().hasOnly(["accessList", "players", "admins", "accessEmails"]) &&
+             hasEmailAccess(before) &&
+             before.keys().hasAll(["accessList", "players"]) &&
+             !before.accessList.hasAny([request.auth.uid]) &&
+             !before.players.hasAny([request.auth.uid]) &&
+             after.diff(before).affectedKeys().hasOnly(["accessList", "players"]) &&
              after.accessList.hasAll(before.accessList) &&
              after.accessList.hasAny([request.auth.uid]) &&
+             after.accessList.size() == before.accessList.size() + 1 &&
              after.players.hasAll(before.players) &&
-             after.admins.hasAll(before.admins) &&
-             (
-               !after.keys().hasAny(["accessEmails"]) ||
-               !before.keys().hasAny(["accessEmails"]) ||
-               after.accessEmails.hasAll(before.accessEmails)
-             );
-    }
-
-    function isCharacterUidSelfRepair(before, after) {
-      return isLoggedIn() &&
-             hasPreviousUid(before.uid) &&
-             after.diff(before).affectedKeys().hasOnly(["uid"]) &&
-             after.uid == request.auth.uid;
+             after.players.hasAny([request.auth.uid]) &&
+             after.players.size() == before.players.size() + 1;
     }
 
     function inAdventure(adventureId) {
       let adv = get(/databases/$(database)/documents/adventures/$(adventureId)).data;
       return isLoggedIn() &&
         (
+          isAdmin() ||
+          adv.admins.hasAny([request.auth.uid]) ||
           adv.accessList.hasAny([request.auth.uid]) ||
           hasEmailAccess(adv)
         );
@@ -72,6 +68,40 @@ service cloud.firestore {
         (isLoggedIn() &&
           get(/databases/$(database)/documents/adventures/$(adventureId))
             .data.admins.hasAny([request.auth.uid]));
+    }
+
+    function ownsGlobalCharacter(charId) {
+      return isLoggedIn() &&
+             charId is string &&
+             exists(/databases/$(database)/documents/characters/$(charId)) &&
+             get(/databases/$(database)/documents/characters/$(charId)).data.uid == request.auth.uid;
+    }
+
+    function ownsAdventureCharacter(adventureId, charId) {
+      return isLoggedIn() &&
+             charId is string &&
+             exists(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(charId)) &&
+             get(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(charId)).data.uid == request.auth.uid;
+    }
+
+    function canWriteGlobalPlayer(data) {
+      return isAdmin() ||
+             (data.keys().hasAny(["charId"]) && ownsGlobalCharacter(data.charId));
+    }
+
+    function canCreateAdventurePlayer(adventureId) {
+      return isAdvAdmin(adventureId) ||
+             (inAdventure(adventureId) &&
+              request.resource.data.keys().hasAny(["charId"]) &&
+              ownsAdventureCharacter(adventureId, request.resource.data.charId));
+    }
+
+    function canUpdateAdventurePlayer(adventureId) {
+      return isAdvAdmin(adventureId) ||
+             (inAdventure(adventureId) &&
+              resource.data.keys().hasAny(["charId"]) &&
+              ownsAdventureCharacter(adventureId, resource.data.charId) &&
+              request.resource.data.charId == resource.data.charId);
     }
 
     match /shop/{id}              { allow read: if isLoggedIn(); allow write: if isAdmin(); }
@@ -95,9 +125,10 @@ service cloud.firestore {
     match /collectionSettings/{id}{ allow read: if isLoggedIn(); allow write: if isAdmin(); }
     match /players/{id} {
       allow read:   if isLoggedIn();
-      allow create: if isLoggedIn();
-      allow update: if isLoggedIn();
-      allow delete: if isAdmin();
+      allow create: if canWriteGlobalPlayer(request.resource.data);
+      allow update: if canWriteGlobalPlayer(resource.data) &&
+                       request.resource.data.charId == resource.data.charId;
+      allow delete: if canWriteGlobalPlayer(resource.data);
     }
     match /world/{id}             { allow read: if isLoggedIn(); allow write: if isAdmin(); }
     match /informations/{id}      { allow read: if isLoggedIn(); allow write: if isAdmin(); }
@@ -124,18 +155,26 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read:   if isLoggedIn();
-      allow create: if isLoggedIn() && uid == request.auth.uid;
-      allow update: if isLoggedIn() && (uid == request.auth.uid || isAdmin());
+      allow get:    if isLoggedIn();
+      allow list:   if isAdmin();
+      allow create: if isUserSelfCreate(uid) || isAdmin();
+      allow update: if isUserSelfUpdate(uid) || isAdmin();
       allow delete: if isAdmin();
     }
 
     match /adventures/{adventureId} {
-      allow list:   if isLoggedIn();
+      allow list:   if isAdmin() ||
+                       (isLoggedIn() &&
+                         (
+                           resource.data.accessList.hasAny([request.auth.uid]) ||
+                           resource.data.admins.hasAny([request.auth.uid]) ||
+                           hasEmailAccess(resource.data)
+                         ));
       allow get:    if isAdmin() ||
                        (isLoggedIn() &&
                          (
                            resource.data.accessList.hasAny([request.auth.uid]) ||
+                           resource.data.admins.hasAny([request.auth.uid]) ||
                            hasEmailAccess(resource.data)
                          ));
       allow create: if isAdmin();
@@ -177,9 +216,12 @@ service cloud.firestore {
       match /collection/{id}        { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /collectionSettings/{id}{ allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
 
-      // Présentations joueurs : tout membre de l'aventure peut lire et écrire sa propre fiche
+      // Présentations joueurs : lecture membres, écriture MJ ou propriétaire du personnage lié.
       match /players/{id} {
-        allow read, write: if inAdventure(adventureId);
+        allow read:   if inAdventure(adventureId);
+        allow create: if canCreateAdventurePlayer(adventureId);
+        allow update: if canUpdateAdventurePlayer(adventureId);
+        allow delete: if canUpdateAdventurePlayer(adventureId);
       }
 
       match /world/{id}             { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
@@ -204,7 +246,6 @@ service cloud.firestore {
         allow update: if inAdventure(adventureId) && (
           resource.data.uid == request.auth.uid ||
           isAdvAdmin(adventureId) ||
-          isCharacterUidSelfRepair(resource.data, request.resource.data) ||
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['inventaire', 'compte']) ||
           // ── VTT : tout membre de l'aventure peut écrire les champs de combat ──
           //   nécessaire pour que les sorts (DoT, soins, buffs, états) lancés par

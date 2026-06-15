@@ -30,7 +30,7 @@ Ne pas supprimer ces branches sans migration ou verification des donnees de prod
 
 - Transformer `docs/firestore-rules.md` en source deployable ou le synchroniser explicitement avec les regles deployees.
 - Resserrer les collections larges champ par champ quand le gameplay le permet.
-- Remplacer progressivement le super-admin par email hardcode par une strategie serveur plus propre.
+- Super-admin par email hardcode supprime : role `users/{uid}.isAdmin` verrouille par les regles.
 
 ### 2. Performance / taille
 

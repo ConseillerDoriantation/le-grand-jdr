@@ -132,7 +132,7 @@ export async function openManageAdventureModal(adventureId) {
   const adv = STATE.adventures.find(a => a.id === adventureId);
   if (!adv) return;
 
-  const allUsers = await loadAllUsers();
+  const allUsers = await loadAllUsers(adv);
   const admins   = adv.admins   || [];
   const players  = adv.players  || [];
   const access   = adv.accessList || [];

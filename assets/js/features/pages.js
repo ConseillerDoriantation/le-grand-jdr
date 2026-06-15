@@ -1,7 +1,7 @@
 // ══════════════════════════════════════════════
 // PAGES
 // ══════════════════════════════════════════════
-import { STATE, FS } from '../core/state.js';
+import { STATE } from '../core/state.js';
 import { registerActions, dispatchAction } from '../core/actions.js';
 import { loadChars, loadCollection, getCachedCollection, getDocData } from '../data/firestore.js';
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
@@ -16,6 +16,7 @@ import { dedupeQuestParticipants } from '../shared/participants.js';
 
 import { charSession } from '../shared/char-session.js';
 import { openAdventureSwitcher } from '../core/layout.js';
+import { loadAllUsers } from '../core/adventure.js';
 const renderCharSheet   = (...args) => charSession.renderSheet(...args);
 
 
@@ -1186,7 +1187,7 @@ const PAGES = {
   // ─── ADMIN ──────────────────────────────────────────────────────────────────
   async admin() {
     if (!STATE.isAdmin) { const { navigate } = await import('../core/navigation.js'); navigate('dashboard'); return; }
-    const users   = await loadCollection('users');
+    const users   = await loadAllUsers(STATE.adventure);
     const content = document.getElementById('main-content');
     content.innerHTML = `pageHeaderHtml('⚙️ Panneau Admin', 'Gestion complète du jeu')
       <div class="grid-2">
@@ -1194,7 +1195,7 @@ const PAGES = {
           <div class="card-header">Joueurs inscrits (${users.length})</div>
           <table class="data-table">
             <thead><tr><th>Pseudo</th><th>Email</th><th>Inscrit le</th></tr></thead>
-            <tbody>${users.filter(u => u.email !== FS.ADMIN_EMAIL).map(u => `<tr><td>${_esc(u.pseudo || '-')}</td><td style="font-size:0.8rem;color:var(--text-muted)">${_esc(u.email || '-')}</td><td style="font-size:0.78rem;color:var(--text-dim)">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr') : '?'}</td></tr>`).join('')}</tbody>
+            <tbody>${users.map(u => `<tr><td>${_esc(u.pseudo || '-')}</td><td style="font-size:0.8rem;color:var(--text-muted)">${_esc(u.email || '-')}</td><td style="font-size:0.78rem;color:var(--text-dim)">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr') : '?'}</td></tr>`).join('')}</tbody>
           </table>
         </div>
         <div class="card">
