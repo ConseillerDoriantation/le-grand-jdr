@@ -2412,7 +2412,7 @@ function openCatModal(catId) {
         <p class="sh-admin-section-hint">Affichée en background de la pastille catégorie sur la page d'accueil.</p>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <div id="cat-img-preview" style="width:90px;height:60px;border-radius:8px;background:rgba(0,0,0,.30);border:1px dashed var(--border-md);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">
-            ${cat?.image ? `<img src="${cat.image}" style="width:100%;height:100%;object-fit:cover">` : '<span style="color:var(--text-dim);font-size:1.4rem">🖼️</span>'}
+            ${cat?.image ? `<img src="${cat.image}" alt="${_esc(cat.nom || '')}" style="width:100%;height:100%;object-fit:cover">` : '<span style="color:var(--text-dim);font-size:1.4rem">🖼️</span>'}
           </div>
           <label style="flex:1;min-width:0">
             <input type="file" id="cat-img-file" accept="image/*"
@@ -2515,7 +2515,7 @@ function openSubCatModal(catId,scId) {
         <div class="sh-admin-section-title">🖼️ Illustration <small class="sh-label">(optionnelle)</small></div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <div id="sc-img-preview" style="width:90px;height:60px;border-radius:8px;background:rgba(0,0,0,.30);border:1px dashed var(--border-md);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">
-            ${sc?.image ? `<img src="${sc.image}" style="width:100%;height:100%;object-fit:cover">` : '<span style="color:var(--text-dim);font-size:1.4rem">🖼️</span>'}
+            ${sc?.image ? `<img src="${sc.image}" alt="${_esc(sc.nom || '')}" style="width:100%;height:100%;object-fit:cover">` : '<span style="color:var(--text-dim);font-size:1.4rem">🖼️</span>'}
           </div>
           <label style="flex:1;min-width:0">
             <input type="file" id="sc-img-file" accept="image/*"
@@ -3343,7 +3343,7 @@ function previewUpload(fileInputId,previewId,hiddenId) {
         if (preview.classList.contains('si-img-thumb')) {
           preview.innerHTML = `<img src="${b64}" alt="">`;
         } else {
-          preview.innerHTML = `<img src="${b64}" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`;
+          preview.innerHTML = `<img src="${b64}" alt="" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`;
         }
       }
       const kb=Math.round(b64.length*3/4/1024);

@@ -154,7 +154,7 @@ export function uploadJpeg(file, { previewId = null, hiddenId = null, max = 400,
       const { w, h } = _resizeDimensions(img.width, img.height, max);
       const b64 = _imageToBase64(img, w, h, 'image/jpeg', quality);
       if (hiddenId)  { const el = document.getElementById(hiddenId);  if (el) el.value = b64; }
-      if (previewId) { const el = document.getElementById(previewId); if (el) el.innerHTML = `<img src="${b64}" style="max-height:80px;margin-top:.4rem;display:block;border-radius:6px">`; }
+      if (previewId) { const el = document.getElementById(previewId); if (el) el.innerHTML = `<img src="${b64}" alt="" style="max-height:80px;margin-top:.4rem;display:block;border-radius:6px">`; }
       resolve(b64);
     });
   });
@@ -169,7 +169,7 @@ export function uploadPng(file, { previewId = null, hiddenId = null, max = 400 }
       const { w, h } = _resizeDimensions(img.width, img.height, max);
       const b64 = _imageToBase64(img, w, h, 'image/png', 1);
       if (hiddenId)  { const el = document.getElementById(hiddenId);  if (el) el.value = b64; }
-      if (previewId) { const el = document.getElementById(previewId); if (el) el.innerHTML = `<img src="${b64}" style="max-height:80px;margin-top:.4rem;display:block;border-radius:6px">`; }
+      if (previewId) { const el = document.getElementById(previewId); if (el) el.innerHTML = `<img src="${b64}" alt="" style="max-height:80px;margin-top:.4rem;display:block;border-radius:6px">`; }
       resolve(b64);
     });
   });

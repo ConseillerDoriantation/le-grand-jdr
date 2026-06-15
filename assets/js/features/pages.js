@@ -499,7 +499,7 @@ const PAGES = {
       <div class="dv2-mission-card" data-navigate="story">
         <div class="dv2-mission-header">
           <div class="dv2-mission-icon">${mission.imageUrl
-            ? `<img src="${mission.imageUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`
+            ? `<img src="${mission.imageUrl}" alt="${_esc(mission.nom || mission.titre || '')}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`
             : '⚔️'}</div>
           <div class="dv2-mission-info">
             <div class="dv2-mission-type">Mission active${mission.acte ? ` · ${_esc(mission.acte)}` : ''}</div>

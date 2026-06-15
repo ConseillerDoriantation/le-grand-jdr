@@ -7772,7 +7772,7 @@ function _renderTray() {
     return `<div class="vtt-tray-item ${VS.selected === t.id ? 'active' : ''}" data-vtt-fn="_vttSelectFromTray" data-vtt-args="${t.id}">
       <div class="vtt-tray-dot" style="background:${TYPE_COLOR[t.type] ?? '#888'}">
         ${ld.displayImage
-          ? `<img src="${ld.displayImage}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`
+          ? `<img src="${ld.displayImage}" alt="${_esc(ld.displayName || '')}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`
           : `<span style="font-size:.65rem">${typeIcon}</span>`}
       </div>
       <div class="vtt-tray-info">
@@ -12258,7 +12258,7 @@ function _renderLibSection() {
   const imgGrid = visible.length
     ? `<div class="vtt-lib-grid">${visible.map(img => `
         <div class="vtt-lib-card" title="${_esc(img.name||'')}">
-          <img src="${img.url}" loading="lazy" data-img-err="mark-parent" data-img-err-class="vtt-lib-card--err">
+          <img src="${img.url}" alt="${_esc(img.name||'')}" loading="lazy" data-img-err="mark-parent" data-img-err-class="vtt-lib-card--err">
           <div class="vtt-lib-card-ov">
             <button data-vtt-fn="_vttLibPlace" data-vtt-args="${img.id}" title="Placer sur la carte">▶</button>
             ${folders.length && !_libFolder ? `<button data-vtt-fn="_vttLibMoveMenu" data-vtt-args="${img.id}|event" title="Déplacer dans un dossier">📁</button>` : ''}

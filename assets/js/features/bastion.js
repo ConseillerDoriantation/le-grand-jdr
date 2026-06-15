@@ -1140,7 +1140,7 @@ function _bastionOpenPersonnel() {
       ? list.map(e => {
           const npc = e.npcId ? npcs.find(n => n.id === e.npcId) : null;
           const portrait = npc?.imageUrl
-            ? `<img src="${_esc(npc.imageUrl)}" style="width:100%;height:100%;object-fit:cover">`
+            ? `<img src="${_esc(npc.imageUrl)}" alt="${_esc(npc.nom || e.nom || '')}" style="width:100%;height:100%;object-fit:cover">`
             : (e.nom || '?')[0].toUpperCase();
           const since = (b.semaine || 1) - (e.hiredAtWeek || b.semaine || 1);
           return `<div class="bs-emp">
@@ -1255,7 +1255,7 @@ async function _bastionOpenHire(roomSlug) {
   // Génère les cards d'aperçu sous le select
   const cardsHtml = eligible.map(n => {
     const portrait = n.imageUrl
-      ? `<img src="${_esc(n.imageUrl)}" class="bs-hire-card-img">`
+      ? `<img src="${_esc(n.imageUrl)}" alt="${_esc(n.nom || '')}" class="bs-hire-card-img">`
       : `<span class="bs-hire-card-init">${(n.nom||'?')[0].toUpperCase()}</span>`;
     return `<div class="bs-hire-card" data-npc-id="${n.id}" data-action="_bastionSelectHireCard" data-id="${n.id}">
       <div class="bs-hire-card-av">${portrait}</div>
@@ -1756,7 +1756,7 @@ function _renderRoomCard(def, b) {
     const cards = assigned.map(e => {
       const npc = e.npcId ? npcs.find(n => n.id === e.npcId) : null;
       const portrait = npc?.imageUrl
-        ? `<img src="${npc.imageUrl}" class="bs-emp-mini-img">`
+        ? `<img src="${npc.imageUrl}" alt="${_esc(npc.nom || e.nom || '')}" class="bs-emp-mini-img">`
         : `<span class="bs-emp-mini-init">${(e.nom || '?')[0].toUpperCase()}</span>`;
       return `<div class="bs-emp-mini" title="${_esc(e.bonus || 'Aucun passif renseigné')}">
         <div class="bs-emp-mini-av">${portrait}</div>

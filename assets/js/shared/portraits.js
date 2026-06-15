@@ -26,7 +26,7 @@ export function characterPortraitContent(c = {}, opts = {}) {
     const src = escapePhoto ? _esc(c.photo) : c.photo;
     // loading lazy + decoding async : les portraits (souvent lourds en base64) ne
     // bloquent pas le rendu/scroll → moins de « gel » à l'arrivée des données.
-    return `<img src="${src}"${cls} loading="lazy" decoding="async" style="${imgStyle};object-position:${characterPhotoPosition(c)}">`;
+    return `<img src="${src}"${cls} alt="${_esc(c.nom || c.name || c.pseudo || 'Portrait')}" loading="lazy" decoding="async" style="${imgStyle};object-position:${characterPhotoPosition(c)}">`;
   }
   const cls = fallbackClass ? ` class="${_esc(fallbackClass)}"` : '';
   const st = fallbackStyle ? ` style="${fallbackStyle}"` : '';

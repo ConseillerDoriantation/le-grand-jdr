@@ -251,7 +251,7 @@ function _renderSection(s) {
     <!-- Image bannière -->
     ${s.imageUrl ? `
     <div style="width:100%;aspect-ratio:16/6;overflow:hidden;position:relative">
-      <img src="${s.imageUrl}" style="width:100%;height:100%;object-fit:cover;display:block">
+      <img src="${s.imageUrl}" alt="${_esc(s.titre || '')}" style="width:100%;height:100%;object-fit:cover;display:block">
       <div style="position:absolute;inset:0;background:linear-gradient(to bottom,transparent 50%,rgba(11,17,24,.85))"></div>
     </div>` : ''}
 

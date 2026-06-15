@@ -45,7 +45,7 @@ function _idlePreviewHtml() {
 }
 
 function _imagePreviewHtml(url, maxHeight) {
-  return `<img src="${url}" style="max-height:${maxHeight}px;border-radius:8px;max-width:100%">`;
+  return `<img src="${url}" alt="" style="max-height:${maxHeight}px;border-radius:8px;max-width:100%">`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -546,7 +546,7 @@ export function attachDropAndCrop({
   const renderCropping = (dataUrl) => {
     if (!previewEl) return;
     previewEl.innerHTML =
-      `<img src="${dataUrl}" style="max-height:${Math.round(previewMaxH * 0.65)}px;border-radius:6px;opacity:.6">
+      `<img src="${dataUrl}" alt="" style="max-height:${Math.round(previewMaxH * 0.65)}px;border-radius:6px;opacity:.6">
        <div style="font-size:.7rem;color:var(--text-dim);margin-top:4px">${cropHintText}</div>`;
   };
 

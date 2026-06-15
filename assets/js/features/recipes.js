@@ -463,7 +463,7 @@ export function openItemDetailModal(id) {
   const effet   = item.effet || r.effet || '';
 
   openModal(linkedItem ? r.nom : (item.nom || r.nom), `
-    ${image ? `<div style="margin:-1.5rem -1.5rem .75rem"><img src="${image}" style="width:100%;height:180px;object-fit:cover;border-radius:22px 22px 0 0;display:block"></div>` : ''}
+    ${image ? `<div style="margin:-1.5rem -1.5rem .75rem"><img src="${image}" alt="${_esc(r.nom || item.nom || '')}" style="width:100%;height:180px;object-fit:cover;border-radius:22px 22px 0 0;display:block"></div>` : ''}
     <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:.75rem">
       <div>
         <div style="font-family:'Cinzel',serif;font-size:1.15rem;font-weight:700;color:var(--text)">${item.nom || r.nom || '?'}</div>

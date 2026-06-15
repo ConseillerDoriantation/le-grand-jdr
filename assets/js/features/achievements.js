@@ -578,7 +578,7 @@ function _achOpenImage(url) {
   overlay.className = 'ach-lightbox-basic';
 
   overlay.innerHTML = `
-    <img class="ach-lb-image-basic" src="${url}">
+    <img class="ach-lb-image-basic" src="${url}" alt="Image agrandie">
     <button class="ach-lb-close" type="button">✕</button>
   `;
 
@@ -667,7 +667,7 @@ function _achCardHTML(item, isAdmin) {
     </div>` : '';
 
   const imageHtml = item.imageUrl
-    ? `<img class="ach-img" src="${item.imageUrl}" loading="lazy" draggable="false">`
+    ? `<img class="ach-img" src="${item.imageUrl}" alt="${_esc(item.nom || item.titre || '')}" loading="lazy" draggable="false">`
     : `<div class="ach-img-empty"><div class="ach-img-empty-emoji">${item.emoji || cat.emoji}</div></div>`;
 
   const secretBadge = (isAdmin && item.secret)
@@ -816,7 +816,7 @@ function _renderTimeline(items) {
     const cat     = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
     const contribs = (item.contributeurs || []).map(id => chars.find(c => c.id === id)).filter(Boolean);
     const imgEl   = item.imageUrl
-      ? `<img class="tl-card-img" src="${item.imageUrl}" loading="lazy">`
+      ? `<img class="tl-card-img" src="${item.imageUrl}" alt="${_esc(item.nom || item.titre || '')}" loading="lazy">`
       : `<div class="tl-card-empty" style="--c-glow:${cat.glow}">${item.emoji || cat.emoji}</div>`;
     const contribsEl = contribs.length ? `
       <div class="tl-card-contribs">
@@ -1076,7 +1076,7 @@ function _achOpenLightbox(itemId) {
   overlay.id = 'ach-lightbox';
   overlay.className = 'ach-lightbox-rich';
   overlay.innerHTML = `
-    ${item.imageUrl ? `<img class="ach-lb-image-rich" src="${item.imageUrl}">` : ""}
+    ${item.imageUrl ? `<img class="ach-lb-image-rich" src="${item.imageUrl}" alt="${_esc(item.nom || item.titre || '')}">` : ""}
     <div class="ach-lb-info${item.imageUrl ? "" : " is-empty"}">
       <div class="ach-lb-cat" style="background:${cat.glow};border-color:${cat.line};color:${cat.color}">${cat.emoji} ${cat.label}</div>
       <div class="ach-lb-title">${_esc(item.titre || 'Haut-Fait')}</div>

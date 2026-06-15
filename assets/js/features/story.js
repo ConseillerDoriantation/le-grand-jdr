@@ -1749,7 +1749,7 @@ function _renderTimeline(items) {
         <div class="sn-inner" style="background:var(--bg-card);border:1px solid ${st.border};border-radius:12px;overflow:hidden">
           <div style="width:100%;height:88px;background:var(--bg-panel);position:relative;overflow:hidden;flex-shrink:0">
             ${item.imageUrl
-              ? `<img src="${item.imageUrl}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy" draggable="false">`
+              ? `<img src="${item.imageUrl}" alt="${_esc(item.nom || item.titre || '')}" style="width:100%;height:100%;object-fit:cover;display:block" loading="lazy" draggable="false">`
               : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:1.8rem;background:linear-gradient(135deg,var(--bg-elevated),var(--bg-panel))">
                    ${item.type === 'mission' ? '🎯' : '📖'}</div>`
             }
@@ -2219,7 +2219,7 @@ async function openStoryModal(item = null) {
               transition:all .15s;user-select:none;">
             <div style="height:52px;background:var(--bg-panel);overflow:hidden;position:relative">
               ${other.imageUrl
-                ?`<img src="${other.imageUrl}" style="width:100%;height:100%;object-fit:cover;display:block">`
+                ?`<img src="${other.imageUrl}" alt="${_esc(other.nom || other.titre || '')}" style="width:100%;height:100%;object-fit:cover;display:block">`
                 :`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:1.2rem">${other.type==='mission'?'🎯':'📖'}</div>`
               }
               <div id="lien-tick-${other.id}" style="
