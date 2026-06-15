@@ -48,6 +48,11 @@ const FEATURE_CSS = {
   npcs:       ['npcs.css'],
   story:      ['histoire.css'],
   histoire:   ['histoire.css'],
+  // Composant modal partagé `.mn-*` (hero/champs/footer) défini dans histoire.css
+  // et réutilisé par ces pages → sinon leur modale s'affiche sans style.
+  world:      ['histoire.css'],
+  collection: ['histoire.css'],
+  players:    ['histoire.css'],
   bastion:    ['bastion.css'],
   vtt:        ['vtt.css'],
   bestiaire:  ['bestiary.css'],
