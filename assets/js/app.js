@@ -33,6 +33,9 @@ import './features/character-photo.js';
 // inline-compat : écouteurs délégués remplaçant les handlers inline (hover, Entrée/
 //   Échap sur champs, onerror d'image…) → prérequis CSP stricte. Voir docs/security.md §3.
 import './shared/inline-compat.js';
+// a11y : aria-label auto (title → aria-label) sur les boutons icône-seule, pour
+//   les lecteurs d'écran. Auto-init + observer le rendu dynamique.
+import './shared/a11y.js';
 // upload-cloudinary : openCloudinaryConfigModal, câblé via l'action `cloudinaryConfig`.
 import { openCloudinaryConfigModal } from './shared/upload-cloudinary.js';
 
