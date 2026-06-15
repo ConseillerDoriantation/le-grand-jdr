@@ -37,19 +37,44 @@ service cloud.firestore {
              request.resource.data.diff(resource.data).affectedKeys().hasOnly(["email", "pseudo"]);
     }
 
+    function hasPreviousUid(uid) {
+      let profile = currentProfile();
+      return profile.keys().hasAny(["previousUids"]) &&
+             profile.previousUids.hasAny([uid]) &&
+             request.auth.token.email != null &&
+             get(/databases/$(database)/documents/users/$(uid)).data.email == request.auth.token.email;
+    }
+
+    function hasPreviousUidAccess(data) {
+      let profile = currentProfile();
+      return profile.keys().hasAny(["previousUids"]) &&
+             (
+               data.accessList.hasAny(profile.previousUids) ||
+               data.players.hasAny(profile.previousUids) ||
+               data.admins.hasAny(profile.previousUids)
+             );
+    }
+
     function isAccountSelfRepair(before, after) {
       return isLoggedIn() &&
-             hasEmailAccess(before) &&
-             before.keys().hasAll(["accessList", "players"]) &&
-             !before.accessList.hasAny([request.auth.uid]) &&
-             !before.players.hasAny([request.auth.uid]) &&
-             after.diff(before).affectedKeys().hasOnly(["accessList", "players"]) &&
+             (hasEmailAccess(before) || hasPreviousUidAccess(before)) &&
+             after.diff(before).affectedKeys().hasOnly(["accessList", "players", "admins", "accessEmails"]) &&
              after.accessList.hasAll(before.accessList) &&
              after.accessList.hasAny([request.auth.uid]) &&
-             after.accessList.size() == before.accessList.size() + 1 &&
              after.players.hasAll(before.players) &&
-             after.players.hasAny([request.auth.uid]) &&
-             after.players.size() == before.players.size() + 1;
+             after.admins.hasAll(before.admins) &&
+             (
+               !after.keys().hasAny(["accessEmails"]) ||
+               !before.keys().hasAny(["accessEmails"]) ||
+               after.accessEmails.hasAll(before.accessEmails)
+             );
+    }
+
+    function isCharacterUidSelfRepair(before, after) {
+      return isLoggedIn() &&
+             hasPreviousUid(before.uid) &&
+             after.diff(before).affectedKeys().hasOnly(["uid"]) &&
+             after.uid == request.auth.uid;
     }
 
     function inAdventure(adventureId) {
@@ -246,6 +271,7 @@ service cloud.firestore {
         allow update: if inAdventure(adventureId) && (
           resource.data.uid == request.auth.uid ||
           isAdvAdmin(adventureId) ||
+          isCharacterUidSelfRepair(resource.data, request.resource.data) ||
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['inventaire', 'compte']) ||
           // ── VTT : tout membre de l'aventure peut écrire les champs de combat ──
           //   nécessaire pour que les sorts (DoT, soins, buffs, états) lancés par
