@@ -1217,8 +1217,8 @@ const PAGES = {
           <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="openCombatStylesAdmin" data-module="characters">🗡️ Styles de combat</button>
           <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="openSpellMatricesAdmin" data-module="characters">🔮 Matrices de sorts</button>
           <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="_ouvrirGestionDes" data-module="histoire">🎲 Compétences de dés</button>
-          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="_ouvrirGestionEmotes" data-module="vtt">😄 Émotes VTT</button>
-          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="_vttConditionConfig" data-module="vtt">🎭 États & conditions</button>
+          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="_ouvrirGestionEmotes" data-module="vtt/vtt">😄 Émotes VTT</button>
+          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="_vttConditionConfig" data-module="vtt/vtt">🎭 États & conditions</button>
         </div>
       </div>`;
   },
