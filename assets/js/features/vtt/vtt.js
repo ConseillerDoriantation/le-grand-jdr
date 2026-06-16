@@ -1360,6 +1360,27 @@ function _initCanvas(container) {
     }
   });
 
+  // ── Pan tactile : un doigt glissé sur le stage VIDE déplace la caméra ──
+  //    Sur desktop le pan se fait au clic droit / molette ; le tactile n'a
+  //    aucun de ces boutons → sans ça, impossible de se déplacer sur mobile.
+  //    Toucher un token/image laisse Konva gérer le drag (e.target ≠ stage).
+  let _touchPanOff = null;
+  VS.stage.on('touchstart', e => {
+    if (fogIsEditMode() || VS.tool === 'draw' || VS.tool === 'ruler') { _touchPanOff = null; return; }
+    const ts = e.evt.touches;
+    _touchPanOff = (ts && ts.length === 1 && e.target === VS.stage)
+      ? { x: ts[0].clientX - VS.stage.x(), y: ts[0].clientY - VS.stage.y() }
+      : null;
+  });
+  VS.stage.on('touchmove', e => {
+    if (!_touchPanOff) return;
+    const ts = e.evt.touches;
+    if (!ts || ts.length !== 1) { _touchPanOff = null; return; }
+    e.evt.preventDefault();   // empêche le scroll/zoom de page natif
+    VS.stage.position({ x: ts[0].clientX - _touchPanOff.x, y: ts[0].clientY - _touchPanOff.y });
+  });
+  VS.stage.on('touchend touchcancel', () => { _touchPanOff = null; });
+
   _resizeObs = new ResizeObserver(() => {
     if (!VS.stage) return;
     VS.stage.width(container.clientWidth); VS.stage.height(container.clientHeight);

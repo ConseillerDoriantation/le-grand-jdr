@@ -655,6 +655,11 @@
   cursor: default;
   background: var(--bg-dark);
 }
+/* Tactile : on désactive le scroll/zoom natif du navigateur SUR LE CANVAS
+   pour que les gestes (pan un doigt) aillent à Konva, sans toucher aux
+   overlays (HUD, dés, mini-fiche) qui gardent leur propre défilement. */
+.vtt-canvas-wrap .konvajs-content,
+.vtt-canvas-wrap .konvajs-content canvas { touch-action: none; }
 
 /* Vignette atmosphérique */
 .vtt-canvas-wrap::after {
