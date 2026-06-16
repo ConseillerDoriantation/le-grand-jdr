@@ -64,7 +64,9 @@ export async function initMap(containerEl) {
   state.mode = 'navigate';
   state.modeContext = null;
   state.viewport = { scale: 0.14, offsetX: 25, offsetY: -250 };
-  state.filters = { types: new Set(), onlyRevealed: false, query: '' };
+  // La recherche persiste entre deux visites de la page (comme boutique/bestiaire) ;
+  // les filtres de type repartent à zéro à chaque ouverture.
+  state.filters = { types: new Set(), onlyRevealed: false, query: state.filters?.query || '' };
 
   // 2. Monter le shell DOM
   containerEl.innerHTML = shellHTML();
@@ -117,7 +119,7 @@ function shellHTML() {
           <span class="map-topbar__region">${_esc(regionName)}</span>
         </div>
         <div class="map-topbar__search">
-          <input type="search" id="map-search" placeholder="Rechercher un lieu, une organisation…" autocomplete="off">
+          <input type="search" id="map-search" placeholder="Rechercher un lieu, une organisation…" autocomplete="off" value="${_esc(state.filters.query)}">
         </div>
         <div class="map-topbar__filters" id="map-filters"></div>
       </header>
