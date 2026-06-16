@@ -45,6 +45,32 @@
   55%, 80% { transform: rotate(-90deg); }
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   MOBILE PAYSAGE — viewport court (téléphone). Cible joueur : garder la
+   CARTE lisible et les contrôles cliquables au doigt. Le portrait est déjà
+   intercepté par .vtt-rotate-prompt ci-dessus ; ici on traite le paysage.
+   max-height (pas max-width) = on vise les écrans BAS, pas les tablettes.
+   ════════════════════════════════════════════════════════════════════ */
+@media (orientation: landscape) and (max-height: 500px) {
+  /* L'inspecteur ne doit plus écraser la carte (il défile en interne). */
+  .vtt-inspector { max-height: 40%; padding: .5rem; gap: .35rem; }
+  /* Tray plus étroit : laisse la carte respirer en largeur. */
+  .vtt-tray { width: 190px; }
+  /* Panneau de dés : ne déborde plus en hauteur sur écran court.
+     Repli 100vh pour les navigateurs sans unité dvh. */
+  .vtt-dice-panel { max-height: calc(100vh - 56px); max-height: calc(100dvh - 56px); overflow-y: auto; }
+  /* HUD de combat : borne sa hauteur (filet de sécurité), la hotbar
+     reste scrollable horizontalement à l'intérieur. */
+  .vtt-action-hud { max-height: 58%; overflow-y: auto; }
+}
+
+/* Cibles tactiles agrandies sur écrans tactiles uniquement (la souris,
+   pointer:fine, n'est pas affectée → desktop inchangé). */
+@media (pointer: coarse) {
+  .vtt-dice-trigger { width: 40px; height: 40px; }
+  .vtt-aopt-hud-close { width: 32px; height: 32px; }
+}
+
 /* ── Layout racine ──────────────────────────────────────────────── */
 .vtt-root {
   display: flex;
