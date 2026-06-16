@@ -14,7 +14,7 @@ import { VS, aid } from './vtt-state.js';
 import { _esc, _norm } from '../../shared/html.js';
 import { openModal, confirmModal, closeModalDirect, promptModal } from '../../shared/modal.js';
 import { showNotif } from '../../shared/notifications.js';
-import { _showCtxMenu } from './vtt.js';   // transverse (menu contextuel générique)
+import { _showCtxMenu } from './vtt-utils.js';   // menu contextuel générique (leaf)
 
 // ── État local musique ──────────────────────────────────────────────
 // — Musique / sons

@@ -232,5 +232,12 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   concerné, `node --check` OK. **⚠️ smoke-test combat** : aperçu d'attaque (interaction
   résistance), formules dégâts/soin (mini-fiche + carte d'action), jets de dés (le roller
   réimporte `_parseDice`/`_maxDice`).
+- ✅ **Phase 1.x (suite) — menu contextuel → `vtt-utils.js`** : le cluster générique
+  `_showCtxMenu`/`_hideCtxMenu` (+`_CTX_ACTIONS`/`_ctxClose`, pur DOM) rejoint le leaf
+  `vtt-utils.js`. **`vtt-music.js` n'importe plus rien de vtt.js → découplé.** (Le
+  `_showCtxMenu(id)` de vtt-fog.js est une fonction homonyme distincte, non concernée.)
+  Bilan : **6 sous-modules sur 8 totalement découplés** (dice, loot, rest, timer,
+  mini-fiche, music). Restent couplés au cœur render/état : `vtt-combat-tracker`
+  (`_live`/`_select`) et `vtt-presence` (`_renderTraySoon`).
 - ⏳ **Phase 1 — reste** : Tray/Pages, Inspector (42 deps), `tools-ruler` (dessin/annot),
   Combat/attaque (gros), chat (couplage entrant massif). Les plus durs.
