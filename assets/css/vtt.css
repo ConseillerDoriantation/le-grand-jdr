@@ -8,6 +8,16 @@
    écran. Aucune rotation CSS du canvas → le tactile reste correct une fois
    l'appareil tourné. */
 .vtt-rotate-prompt { display: none; }
+/* Rejeté par le joueur (2 classes = priorité sur la media-query 1 classe) :
+   échappatoire si l'orientation ne bascule jamais (verrouillage, in-app…). */
+.vtt-rotate-prompt.dismissed { display: none; }
+.vtt-rotate-dismiss {
+  margin-top: .35rem; padding: .55rem 1.1rem; font-size: .82rem;
+  border-radius: 9px; border: 1px solid var(--border);
+  background: var(--bg-elevated); color: var(--text-soft); cursor: pointer;
+  transition: border-color .12s, color .12s;
+}
+.vtt-rotate-dismiss:hover { border-color: var(--gold); color: var(--text); }
 @media (orientation: portrait) and (max-width: 920px) {
   .vtt-rotate-prompt {
     display: flex;

@@ -12542,6 +12542,10 @@ async function _vttEnterTable() {
   if (content) await _vttMountTable(content);
 }
 
+// Échappatoire du bandeau « tourne ton téléphone » : une fois rejeté, on ne le
+// ré-affiche plus de la session (persiste aux re-rendus et à la navigation SPA).
+let _vttRotateDismissed = (() => { try { return sessionStorage.getItem('vtt-rotate-dismissed') === '1'; } catch { return false; } })();
+
 async function _vttMountTable(content) {
   content.innerHTML = appSplashHtml('Chargement de la table…');
   // Lancer en parallèle : téléchargement Konva + reads Firestore non critiques
@@ -12558,11 +12562,14 @@ async function _vttMountTable(content) {
   // Overlay "tourne ton téléphone" — visible uniquement en portrait sur petit
   // écran (piloté par media-query CSS). En paysage il disparaît et la table
   // s'utilise nativement (tactile correct, pas de rotation CSS du canvas).
+  // Bouton d'échappatoire : si l'orientation ne bascule jamais (verrouillage
+  // d'écran, navigateur in-app, émulateur…), le joueur n'est jamais bloqué.
   content.insertAdjacentHTML('beforeend', `
-    <div class="vtt-rotate-prompt" aria-hidden="true">
+    <div class="vtt-rotate-prompt${_vttRotateDismissed ? ' dismissed' : ''}" aria-hidden="true">
       <div class="vtt-rotate-phone">📱</div>
       <div class="vtt-rotate-title">Tourne ton téléphone</div>
-      <div class="vtt-rotate-text">La Table Virtuelle s'utilise en mode paysage.</div>
+      <div class="vtt-rotate-text">La Table Virtuelle est plus confortable en mode paysage.</div>
+      <button class="vtt-rotate-dismiss" data-vtt-fn="_vttDismissRotate">Utiliser quand même</button>
     </div>`);
   const wrap=document.getElementById('vtt-canvas-wrap');
   if (!wrap) return;
@@ -12720,6 +12727,11 @@ PAGES.vtt=renderVttPage;
 
 // Registre des actions pour le dispatcher data-vtt-fn
 const VTT_ACTIONS = {
+  _vttDismissRotate: () => {
+    _vttRotateDismissed = true;
+    try { sessionStorage.setItem('vtt-rotate-dismissed', '1'); } catch {}
+    document.querySelectorAll('.vtt-rotate-prompt').forEach(el => el.classList.add('dismissed'));
+  },
   _vttActBarCat,
   _vttAimOpt,
   _hideActBar,
