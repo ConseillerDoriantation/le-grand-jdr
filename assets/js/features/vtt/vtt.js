@@ -1461,7 +1461,7 @@ function _renderMapImages() {
               label: '🗑 Supprimer cette image',
               fn: () => {
                 const imgs=(VS.activePage.backgroundImages??[]).filter(i=>i.id!==img.id);
-                updateDoc(_pgRef(VS.activePage.id),{backgroundImages:imgs}).catch(()=>{});
+                updateDoc(_pgRef(VS.activePage.id),{backgroundImages:imgs}).catch(e=>{ console.error('[vtt] suppr image carte', e); showNotif("Échec de la suppression de l'image de carte", 'error'); });
               },
             },
           ]);
@@ -3365,7 +3365,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
   };
 
   const ref = doc(_toksCol());
-  await setDoc(ref, tokenData).catch(() => {});
+  await setDoc(ref, tokenData).catch(e => { console.error('[vtt] invocation', e); showNotif("Échec de l'invocation (réseau / permissions)", 'error'); });
   return { id: ref.id, ...tokenData };
 }
 
@@ -8070,7 +8070,7 @@ async function _onFolderDrop(el) {
   const order = [...el.querySelectorAll('.vtt-page-folder')]
     .map(f => decodeURIComponent(f.dataset.folder || ''))
     .filter(f => f !== '');
-  await setDoc(_sesRef(), { pageFolderOrder: order }, { merge: true }).catch(() => {});
+  await setDoc(_sesRef(), { pageFolderOrder: order }, { merge: true }).catch(e => { console.error('[vtt] ordre dossiers', e); showNotif("Échec de l'enregistrement de l'ordre des dossiers", 'error'); });
 }
 
 function _vttPageSearch(v) { _pageSearch = String(v || ''); _renderPageList(); }
@@ -10403,7 +10403,7 @@ async function _vttDeletePage(id) {
 // Envoyer tous les joueurs vers une page spécifique (depuis la liste)
 async function _vttSendToPage(pageId) {
   const p=VS.pages[pageId]; if (!p) return;
-  await setDoc(_sesRef(),{activePageId:pageId},{merge:true}).catch(()=>{});
+  await setDoc(_sesRef(),{activePageId:pageId},{merge:true}).catch(e=>{ console.error('[vtt] changement page', e); showNotif('Échec du changement de page', 'error'); });
   showNotif(`📡 Tous les joueurs → « ${p.name} »`,'success');
 }
 
@@ -11658,7 +11658,7 @@ async function _vttToggleTurnFlag(id, field) {
 async function _vttAddImageUrl() {
   const url=(await promptModal('URL de l\'image :', { title: 'Image de fond', placeholder: 'https://…', required: true }))?.trim(); if (!url||!VS.activePage) return;
   const imgs=[...(VS.activePage.backgroundImages??[]),{id:Date.now().toString(),url,x:0,y:0,w:VS.activePage.cols,h:VS.activePage.rows}];
-  await updateDoc(_pgRef(VS.activePage.id),{backgroundImages:imgs}).catch(()=>{});
+  await updateDoc(_pgRef(VS.activePage.id),{backgroundImages:imgs}).catch(e=>{ console.error('[vtt] ajout image fond', e); showNotif("Échec de l'ajout de l'image de fond", 'error'); });
 }
 function _vttUploadClick() { return document.getElementById('vtt-img-input')?.click(); }
 
@@ -12229,7 +12229,7 @@ function _keyHandler(e) {
     else if (STATE.isAdmin && VS.selImg && VS.mapMode && VS.activePage) {
       e.preventDefault();
       const imgs = (VS.activePage.backgroundImages ?? []).filter(i => i.id !== VS.selImg);
-      updateDoc(_pgRef(VS.activePage.id), { backgroundImages: imgs }).catch(()=>{});
+      updateDoc(_pgRef(VS.activePage.id), { backgroundImages: imgs }).catch(e=>{ console.error('[vtt] suppr image carte', e); showNotif("Échec de la suppression de l'image de carte", 'error'); });
       VS.selImg = null;
       VS.imgTr?.nodes([]); VS.imgTrFg?.nodes([]);
       VS.layers.map?.batchDraw(); VS.layers.mapFg?.batchDraw();
