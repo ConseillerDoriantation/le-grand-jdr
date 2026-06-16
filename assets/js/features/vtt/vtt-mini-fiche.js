@@ -21,10 +21,11 @@ import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, cal
          sortCharactersForDisplay } from '../../shared/char-stats.js';
 import { useGold } from '../../shared/economy.js';
 import { _chrRef } from './vtt-refs.js'; // ref Firestore perso (leaf)
-import { _STAT_COLOR, _VTT_RUNE_META } from './vtt-constants.js'; // constantes pures (leaf)
-import { _MS_BONUS_BUFF, _damageTypes, _effectDisplay, _vttSortDmgFormula,
+import { _STAT_COLOR, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js'; // constantes pures (leaf)
+import { _vttPanelError } from './vtt-utils.js'; // frontière d'erreur (leaf)
+import { _damageTypes, _effectDisplay, _vttSortDmgFormula,
          _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode, _vttDisplayRunes,
-         _vttPanelError } from './vtt.js'; // circ.
+         } from './vtt.js'; // circ.
 import { _renderPresenceCol } from './vtt-presence.js'; // circ. (toggle mini → refresh colonne)
 
 let _miniTab = 'combat'; // onglet actif de la mini-fiche (état local)

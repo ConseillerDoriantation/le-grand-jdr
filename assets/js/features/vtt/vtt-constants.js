@@ -11,6 +11,13 @@ export const _STAT_KEY   = { FOR:'force', DEX:'dexterite', CON:'constitution', I
 export const _STAT_COLOR = { FOR:'#ef4444', DEX:'#22c38e', CON:'#f59e0b', INT:'#4f8cff', SAG:'#b47fff', CHA:'#fd6c9e' };
 export const _STAT_RGB   = { FOR:'239,68,68', DEX:'34,195,142', CON:'245,158,11', INT:'79,140,255', SAG:'180,127,255', CHA:'253,108,158' };
 
+// Types de buff manuels posables sur un token (mini-fiche / inspecteur).
+export const _MS_BONUS_BUFF = {
+  vitesse: { type: 'move_bonus',  icon: '👢' },
+  ca:      { type: 'ca',          icon: '🛡' },
+  portee:  { type: 'range_bonus', icon: '🏹' },
+};
+
 // Métadonnées d'affichage des runes de sort (icône + couleur).
 export const _VTT_RUNE_META = {
   'Puissance':{icon:'⚔️',color:'#ef4444'}, 'Protection':{icon:'💚',color:'#22c38e'},

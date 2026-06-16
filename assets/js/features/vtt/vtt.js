@@ -43,7 +43,8 @@ import {
   _logCol, _logGmCol, _castingCol, _castingRef, _pingsCol, _pingRef,
   _reactionsCol, _reactionRef, _annotCol, _annotRef,
 } from './vtt-refs.js';
-import { _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META } from './vtt-constants.js';
+import { _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
+import { _vttPanelError } from './vtt-utils.js';
 import {
   _musicStateRef, _syncMusicPlayback, _resetMusicState, _closeMusicPanel,
   _vttToggleMusicCat, _vttToggleAllMusicCats, _vttToggleMusic, _vttPlaySound,
@@ -7148,21 +7149,7 @@ function _renderInspectorSoon() {
   });
 }
 
-// ── Frontière d'erreur par panneau VTT ───────────────────────────────────────
-// Un rendu qui plante (ReferenceError, état corrompu…) n'interrompt plus les
-// autres panneaux ni la table : log + 1 notif (anti-spam) + fallback DOM.
-const _vttPanelErrSeen = new Set();
-export function _vttPanelError(label, e, elId) {
-  console.error(`[vtt] panneau « ${label} » : rendu échoué`, e);
-  if (!_vttPanelErrSeen.has(label)) {
-    _vttPanelErrSeen.add(label);
-    try { showNotif(`⚠ Panneau « ${label} » en erreur — le reste de la table continue (détail en console).`, 'error'); } catch {}
-  }
-  if (elId) {
-    const el = document.getElementById(elId);
-    if (el) el.innerHTML = `<div class="vtt-panel-err">⚠ Erreur d'affichage de ce panneau.<br><small>${_esc(String(e?.message ?? e))}</small></div>`;
-  }
-}
+// ── Frontière d'erreur par panneau VTT → vtt-utils.js (importé en haut) ───────
 
 function _renderInspector(t) {
   try { return _renderInspectorImpl(t); }
@@ -11372,11 +11359,7 @@ async function _vttSetPm(tokenId,pm) {
 // token. Avantages : déjà intégré dans displayMovement/Defense/Range ET la
 // logique de jeu (portée d'attaque, déplacement sur le plateau), et les `buffs`
 // sont écrivables par le joueur ET le MJ (règle Firestore vttTokens).
-export const _MS_BONUS_BUFF = {
-  vitesse: { type: 'move_bonus',  icon: '👢' },
-  ca:      { type: 'ca',          icon: '🛡' },
-  portee:  { type: 'range_bonus', icon: '🏹' },
-}
+// [_MS_BONUS_BUFF → vtt-constants.js (importé en haut)]
 // Lit la valeur du buff manuel d'un type donné sur un token.
 function _manualBuffVal(t, key) {
   const cfg = _MS_BONUS_BUFF[key]; if (!cfg) return 0;

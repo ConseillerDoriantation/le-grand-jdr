@@ -213,5 +213,13 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   donnée/ref. `node --check` + symétrie grep OK. **⚠️ smoke-test** : entrer dans la table,
   un jet de dé (log), ouvrir butin/court-repos/minuteur, présence joueurs, mini-fiche
   (runes affichées, couleurs de stats) — vérifier qu'aucun module ne casse au runtime.
+- ✅ **Phase 1.x (suite) — `vtt-utils.js` + `_MS_BONUS_BUFF`** : `_vttPanelError`
+  (frontière d'erreur de panneau, autonome : notifications + html) → leaf `vtt-utils.js` ;
+  `_MS_BONUS_BUFF` (constante) → `vtt-constants.js`. Mini-fiche n'importe plus ces 2
+  symboles depuis vtt.js. Reste circulaire mini-fiche↔vtt.js : `_damageTypes` (cache
+  d'état) + 5 formules d'affichage de sorts (dont `_vttSortSoinFormula`, qui lit les
+  caches `_damageTypes`/`_weaponFormats`). **Prochain vrai déblocage** = migrer ces 2
+  caches vers `VS` (≈37 occ.) puis sortir un `vtt-spell-display.js` — mais ça touche tout
+  le chemin combat/sorts → à faire avec smoke-test complet. `node --check` + grep OK.
 - ⏳ **Phase 1 — reste** : Tray/Pages, Inspector (42 deps), `tools-ruler` (dessin/annot),
   Combat/attaque (gros), chat (couplage entrant massif). Les plus durs.
