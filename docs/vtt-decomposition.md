@@ -259,5 +259,15 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
     patchImg })`), vtt.js câblant les callbacks. C'est un vrai changement de design, à
     blast-radius sur la feature live (édition de carte MJ, puis combat) → à faire **un
     renderer à la fois, avec smoke-test approfondi à chaque étape** (pas de big-bang).
+  - ✅ **Tranche 3 — images BG/FG (1er renderer d'entité, via callbacks)** : `_renderMapImages`
+    + `_patchImg` (privé) → `vtt-render.js`. Le leaf importe directement les leafs
+    (`_showCtxMenu`, `_pgRef`, `updateDoc`, `showNotif`, `STATE`, `CELL`, `VS`) ; les 3 effets
+    cross-domaine du clic de sélection sont **injectés** : `_renderMapImages({ hideActBar,
+    clearHL, renderInspector })`. vtt.js passe `_MAP_IMG_DEPS` aux 2 sites d'appel. **Aucun
+    import circulaire ajouté** (le leaf n'importe rien de vtt.js). Vérif : free-vars du leaf
+    toutes résolues, aucun appel orphelin, `node --check` OK. **⚠️ smoke-test (édition carte
+    MJ)** : mode carte → ajouter/glisser/redimensionner/supprimer une image, basculer
+    avant/arrière-plan, et **sélectionner une image désélectionne bien le token** (callback
+    `renderInspector(null)` + barre d'action masquée). vtt.js 12790 → 12696.
 - ⏳ **Phase 1 — reste** : Tray/Pages, Inspector (42 deps), `tools-ruler` (dessin/annot),
   Combat/attaque (gros), chat (couplage entrant massif). Les plus durs.

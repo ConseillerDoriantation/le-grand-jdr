@@ -44,7 +44,7 @@ import {
   _reactionsCol, _reactionRef, _annotCol, _annotRef,
 } from './vtt-refs.js';
 import { CELL, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
-import { _drawGrid, _loadKonva, _stageToWorld } from './vtt-render.js';
+import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages } from './vtt-render.js';
 import { _vttPanelError, _showCtxMenu, _hideCtxMenu } from './vtt-utils.js';
 import {
   VTT_ACTION_RUNE, _parseDice, _maxDice, _maxEffectDisplay, _effectDisplay,
@@ -1372,103 +1372,9 @@ function _initCanvas(container) {
 
 // [_drawGrid → vtt-render.js (importé en haut) — 1re tranche du moteur de rendu]
 
-function _renderMapImages() {
-  if (!VS.activePage) return;
-  const K = window.Konva;
-  // Nettoyer les images des deux couches (sans détruire les transformers)
-  VS.layers.map.find('Image').forEach(n=>n.destroy());
-  VS.layers.mapFg?.find('Image').forEach(n=>n.destroy());
-  if (VS.imgTr)   { VS.imgTr.nodes([]);   }
-  if (VS.imgTrFg) { VS.imgTrFg.nodes([]); }
-  VS.selImg = null;
-
-  for (const img of (VS.activePage.backgroundImages??[])) {
-    const isFg   = img.layer === 'fg';
-    const tgtLyr = isFg ? VS.layers.mapFg : VS.layers.map;
-    const tr     = isFg ? VS.imgTrFg      : VS.imgTr;
-
-    const el = new Image(); el.crossOrigin='anonymous';
-    el.onload = () => {
-      if (!VS.activePage) return; // page changée entre temps
-      const ki = new K.Image({
-        image:el, x:img.x*CELL, y:img.y*CELL,
-        width:img.w*CELL, height:img.h*CELL,
-        name:`img-${img.id}`,
-      });
-
-      if (STATE.isAdmin) {
-        // Drag activé uniquement en mode édition carte
-        ki.draggable(VS.mapMode);
-        ki.on('dragmove', () => {
-          ki.x(Math.round(ki.x()/CELL)*CELL);
-          ki.y(Math.round(ki.y()/CELL)*CELL);
-        });
-        ki.on('dragend', () => {
-          _patchImg(img.id, { x:Math.round(ki.x()/CELL), y:Math.round(ki.y()/CELL) });
-        });
-
-        // Clic → sélectionner l'image (seulement en mode édition carte)
-        ki.on('click', e => {
-          if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
-          if (!VS.mapMode) return;
-          e.cancelBubble = true;
-          VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
-          _hideActBar();
-          VS.selected=null; _clearHL(); _renderInspector(null); VS.layers.token.batchDraw();
-          VS.selImg = img.id;
-          // Vider l'autre transformer
-          const otherTr = isFg ? VS.imgTr : VS.imgTrFg;
-          otherTr?.nodes([]);
-          if (tr?.getParent()) { tr.nodes([ki]); tr.moveToTop(); }
-          tgtLyr.batchDraw();
-        });
-
-        // Fin de redimensionnement → snap + sauvegarde
-        ki.on('transformend', () => {
-          const w=Math.max(1,Math.round(ki.width()*ki.scaleX()/CELL));
-          const h=Math.max(1,Math.round(ki.height()*ki.scaleY()/CELL));
-          const x=Math.round(ki.x()/CELL), y=Math.round(ki.y()/CELL);
-          ki.width(w*CELL); ki.height(h*CELL);
-          ki.scaleX(1); ki.scaleY(1);
-          ki.x(x*CELL); ki.y(y*CELL);
-          tgtLyr.batchDraw();
-          _patchImg(img.id, { x, y, w, h });
-        });
-
-        // Clic-droit → menu contextuel
-        ki.on('contextmenu', e => {
-          e.evt.preventDefault();
-          if (!VS.mapMode) return;
-          _showCtxMenu(e.evt.clientX, e.evt.clientY, [
-            {
-              label: isFg ? '⬇ Arrière-plan (sous les tokens)' : '⬆ Premier plan (au-dessus des tokens)',
-              fn: () => _patchImg(img.id, { layer: isFg ? 'bg' : 'fg' }),
-            },
-            '---',
-            {
-              label: '🗑 Supprimer cette image',
-              fn: () => {
-                const imgs=(VS.activePage.backgroundImages??[]).filter(i=>i.id!==img.id);
-                updateDoc(_pgRef(VS.activePage.id),{backgroundImages:imgs}).catch(e=>{ console.error('[vtt] suppr image carte', e); showNotif("Échec de la suppression de l'image de carte", 'error'); });
-              },
-            },
-          ]);
-        });
-      }
-
-      tgtLyr.add(ki);
-      if (tr?.getParent()) tr.moveToTop();
-      tgtLyr.batchDraw();
-    };
-    el.src = img.url;
-  }
-}
-async function _patchImg(imgId, patch) {
-  if (!VS.activePage) return;
-  await updateDoc(_pgRef(VS.activePage.id), {
-    backgroundImages: (VS.activePage.backgroundImages??[]).map(i=>i.id===imgId?{...i,...patch}:i)
-  }).catch(()=>{});
-}
+// [_renderMapImages + _patchImg → vtt-render.js (importés en haut). Les effets
+//  cross-domaine du clic de sélection sont injectés via _MAP_IMG_DEPS.]
+const _MAP_IMG_DEPS = { hideActBar: _hideActBar, clearHL: _clearHL, renderInspector: _renderInspector };
 
 // ═══════════════════════════════════════════════════════════════════
 // TOKENS — shapes Konva
@@ -7951,7 +7857,7 @@ async function _switchPage(pageId) {
   // Ne pas détruire VS.layers.map entièrement : VS.imgTr (Transformer) y vit.
   // _renderMapImages() et _renderAllTokens() gèrent leur propre nettoyage.
   VS.layers.token?.destroyChildren(); _clearHL();
-  _drawGrid(); _renderMapImages(); _renderAllTokens(); _renderAnnotLayer();
+  _drawGrid(); _renderMapImages(_MAP_IMG_DEPS); _renderAllTokens(); _renderAnnotLayer();
   fogRenderWalls(page, STATE.isAdmin);
   fogUpdateSoon(page, VS.tokens, STATE.isAdmin);
   _renderPageTabs(); _renderTray(); _deselect();
@@ -8549,7 +8455,7 @@ function _initListeners() {
         VS.pages[ch.doc.id]={id:ch.doc.id,...ch.doc.data()};
         if (VS.activePage?.id===ch.doc.id) {
           VS.activePage=VS.pages[ch.doc.id];
-          _renderMapImages();
+          _renderMapImages(_MAP_IMG_DEPS);
           fogRenderWalls(VS.activePage, STATE.isAdmin);
           fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
         }
