@@ -43,7 +43,8 @@ import {
   _logCol, _logGmCol, _castingCol, _castingRef, _pingsCol, _pingRef,
   _reactionsCol, _reactionRef, _annotCol, _annotRef,
 } from './vtt-refs.js';
-import { _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
+import { CELL, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
+import { _drawGrid } from './vtt-render.js';
 import { _vttPanelError, _showCtxMenu, _hideCtxMenu } from './vtt-utils.js';
 import {
   VTT_ACTION_RUNE, _parseDice, _maxDice, _maxEffectDisplay, _effectDisplay,
@@ -96,7 +97,7 @@ import {
 let _vttDelegSearch = '';
 
 // ── Constantes ──────────────────────────────────────────────────────
-const CELL        = 70;
+// [CELL → vtt-constants.js (importé en haut, partagé avec vtt-render.js)]
 const MIN_SCALE   = 0.15;
 const MAX_SCALE   = 4;
 
@@ -1377,22 +1378,7 @@ function _initCanvas(container) {
   _resizeObs.observe(container);
 }
 
-function _drawGrid() {
-  if (!VS.stage||!VS.activePage) return;
-  const K = window.Konva;
-  VS.layers.bg.destroyChildren();
-  VS.layers.grid.find('Line').forEach(n=>n.destroy());
-  const { cols, rows } = VS.activePage;
-  const W=cols*CELL, H=rows*CELL;
-  // Fond sur la couche bg (sous les images)
-  VS.layers.bg.add(new K.Rect({ x:0,y:0,width:W,height:H,fill:'#12121f',listening:false }));
-  VS.layers.bg.batchDraw();
-  // Lignes de grille sur la couche grid (au-dessus des images)
-  const s = { stroke:'rgba(255,255,255,0.22)',strokeWidth:1,listening:false };
-  for (let c=0;c<=cols;c++) VS.layers.grid.add(new K.Line({ points:[c*CELL,0,c*CELL,H], ...s }));
-  for (let r=0;r<=rows;r++) VS.layers.grid.add(new K.Line({ points:[0,r*CELL,W,r*CELL], ...s }));
-  VS.layers.grid.batchDraw();
-}
+// [_drawGrid → vtt-render.js (importé en haut) — 1re tranche du moteur de rendu]
 
 function _renderMapImages() {
   if (!VS.activePage) return;

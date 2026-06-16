@@ -6,6 +6,10 @@
 // imports circulaires (mini-fiche importait _STAT_COLOR depuis vtt.js).
 // ══════════════════════════════════════════════════════════════════════════════
 
+// Taille d'une case de la grille en pixels monde (référence pour tous les
+// calculs de position token/image/zone, et le rendu de la grille).
+export const CELL = 70;
+
 // Mapping abréviation compétence → clé getMod / couleurs associées.
 export const _STAT_KEY   = { FOR:'force', DEX:'dexterite', CON:'constitution', INT:'intelligence', SAG:'sagesse', CHA:'charisme' };
 export const _STAT_COLOR = { FOR:'#ef4444', DEX:'#22c38e', CON:'#f59e0b', INT:'#4f8cff', SAG:'#b47fff', CHA:'#fd6c9e' };

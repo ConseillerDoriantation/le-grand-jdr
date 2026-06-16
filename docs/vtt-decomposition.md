@@ -239,5 +239,14 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   Bilan : **6 sous-modules sur 8 totalement découplés** (dice, loot, rest, timer,
   mini-fiche, music). Restent couplés au cœur render/état : `vtt-combat-tracker`
   (`_live`/`_select`) et `vtt-presence` (`_renderTraySoon`).
+- 🚧 **Phase 2 — moteur de rendu `vtt-render.js` (démarré)**. Le gros refactor du cœur,
+  par tranches, du renderer le moins couplé au plus couplé. Interface : dessine sur les
+  calques Konva partagés (`VS.layers`) à partir de `VS` + `CELL` ; Konva via `window.Konva`.
+  - ✅ **Tranche 1 — grille** : `CELL` (constante) → `vtt-constants.js` ; `_drawGrid` (renderer
+    leaf, rien ne le rappelle) → `vtt-render.js`. **⚠️ smoke-test** : changer de page/scène,
+    redimensionner la fenêtre, éditer cols/rows d'une page → la grille + le fond se redessinent.
+  - ⏳ **Tranches suivantes (par couplage croissant)** : images BG/FG (`_renderMapImages`, drag/
+    resize), tokens (`_renderAllTokens` + shapes — le plus dur : handlers de drag rappellent
+    sélection/combat), annotations (`_renderAnnotLayer`). Chacune = 1 commit + smoke-test.
 - ⏳ **Phase 1 — reste** : Tray/Pages, Inspector (42 deps), `tools-ruler` (dessin/annot),
   Combat/attaque (gros), chat (couplage entrant massif). Les plus durs.
