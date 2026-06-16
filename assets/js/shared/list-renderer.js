@@ -13,12 +13,17 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 /**
- * HTML d'un état vide standard (icône + message).
+ * HTML d'un état vide standard (icône + message + action optionnelle).
  * @param {string} icon    - Emoji ou texte affiché dans .icon
  * @param {string} message - Texte du paragraphe (non échappé — doit être déjà sûr)
+ * @param {?{label:string, attrs?:string}} action - Bouton optionnel ; `attrs` = attributs
+ *        bruts de dispatch (ex: `data-action="npcCreate"`). Passer `null` pour aucun bouton.
  */
-export function emptyStateHtml(icon = '', message = '') {
-  return `<div class="empty-state"><div class="icon">${icon}</div><p>${message}</p></div>`;
+export function emptyStateHtml(icon = '', message = '', action = null) {
+  const btn = action?.label
+    ? `<button class="btn btn-gold btn-sm" style="margin-top:.85rem" ${action.attrs || ''}>${action.label}</button>`
+    : '';
+  return `<div class="empty-state"><div class="icon">${icon}</div><p>${message}</p>${btn}</div>`;
 }
 
 /**

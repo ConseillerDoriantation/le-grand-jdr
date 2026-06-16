@@ -290,6 +290,8 @@ function _gridHtml(filtered, tabInfo, visible, borderColor) {
           ? (_isAdmin() ? `Aucune recette de type "${tabInfo.label}" — créez-en une !` : `Aucune recette partagée avec vous dans cette catégorie.`)
           : 'Aucun résultat pour cette recherche.'}
       </p>
+      ${_isAdmin() && visible.filter(r=>r.type===STORE.tab).length === 0
+        ? `<button class="btn btn-gold btn-sm" style="margin-top:.5rem" data-action="_recOpenModal" data-type="${STORE.tab}">＋ Nouvelle recette</button>` : ''}
     </div>`;
   return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1rem">
     ${filtered.map(r => _renderCard(r, borderColor[r.type]||'#e8b84b')).join('')}

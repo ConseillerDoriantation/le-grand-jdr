@@ -993,6 +993,7 @@ async function _achRenderContent() {
         <div class="hall-empty-icon">${catDef?.emoji || '🏆'}</div>
         <div class="hall-empty-title">${title}</div>
         <div class="hall-empty-sub">${sub}</div>
+        ${STATE.isAdmin && !search ? `<button class="btn btn-gold btn-sm" style="margin-top:1rem" data-action="openAchievementModal">＋ Créer un haut-fait</button>` : ''}
       </div>`;
     return;
   }
