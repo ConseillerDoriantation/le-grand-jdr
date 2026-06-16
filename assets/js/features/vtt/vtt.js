@@ -18,7 +18,7 @@ import {
 import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcPalier, calcDeckMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../../shared/char-stats.js';
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
-import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED } from '../../shared/equipment-utils.js';
+import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED, getCharDamageProfile } from '../../shared/equipment-utils.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../../shared/damage-types.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
@@ -5145,8 +5145,13 @@ function _atkInteractionHtml(opt) {
   const buckets = {};
   for (const tid of tids) {
     const td = VS.tokens[tid]?.data;
-    if (!td || td.type !== 'enemy' || !td.beastId) continue;
-    const inter = previewDamageInteraction(opt.damageTypeId, VS.bestiary[td.beastId]);
+    if (!td) continue;
+    // Profil de la cible : créature (bestiaire) OU personnage (via son équipement).
+    let prof = null;
+    if (td.type === 'enemy' && td.beastId) prof = VS.bestiary[td.beastId];
+    else if (td.characterId) prof = getCharDamageProfile(STATE.characters.find(x => x.id === td.characterId));
+    if (!prof) continue;
+    const inter = previewDamageInteraction(opt.damageTypeId, prof);
     if (inter) buckets[inter] = (buckets[inter] || 0) + 1;
   }
   const entries = Object.entries(buckets);
@@ -6851,15 +6856,26 @@ async function _vttRollAttack() {
           await updateDoc(_tokRef(curTgtData.id), { hp: newHp, pvCombatHp: newEst });
           await _syncDownedCondition(curTgtData, newHp);
         } else {
-          // Set Lourd : réduction de 2 dégâts par coup, minimum 1 dégât
-          if (dmgTotal > 0 && curTgtData.characterId) {
-            const tgtChar = STATE.characters.find(x => x.id === curTgtData.characterId);
-            if (tgtChar) {
-              dmgReduction = getArmorSetData(tgtChar).modifiers.damageReduction || 0;
-              if (dmgReduction > 0) dmgTotal = Math.max(1, dmgTotal - dmgReduction);
+          const tgtChar = curTgtData.characterId
+            ? STATE.characters.find(x => x.id === curTgtData.characterId) : null;
+          // Résistances / immunités / absorptions / faiblesses accordées par
+          // l'équipement du personnage (non cumulable — cf. getCharDamageProfile).
+          if (tgtChar) {
+            const prof = getCharDamageProfile(tgtChar);
+            if (prof) {
+              const result = applyDamageTypeInteraction(dmgTotal, opt.damageTypeId, prof);
+              dmgTotal    = result.dmgTotal;
+              interaction = result.interaction;
             }
           }
-          newHp = Math.max(0, curHp - dmgTotal);
+          // Set Lourd : réduction plate par coup (sur des dégâts positifs uniquement —
+          // une absorption rend des PV et ne doit pas être rognée).
+          if (dmgTotal > 0 && tgtChar) {
+            dmgReduction = getArmorSetData(tgtChar).modifiers.damageReduction || 0;
+            if (dmgReduction > 0) dmgTotal = Math.max(1, dmgTotal - dmgReduction);
+          }
+          // Borne haute = hpMax pour qu'une absorption ne soigne pas au-delà du max.
+          newHp = Math.max(0, Math.min(hpMax, curHp - dmgTotal));
           await _setHp(curTgtData, newHp);
         }
       }

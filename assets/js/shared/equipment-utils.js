@@ -144,7 +144,45 @@ function copyDerivedEquipmentFields(item = {}) {
     caBonus:         parseInt(item.caBonus)         || 0,
     skillBonuses:    item.skillBonuses && typeof item.skillBonuses === 'object'
                      ? { ...item.skillBonuses } : {},
+    ...(item.damageProfile && typeof item.damageProfile === 'object'
+        ? { damageProfile: _cloneDamageProfile(item.damageProfile) } : {}),
   };
+}
+
+const _DMG_PROFILE_KEYS = ['resistances', 'immunites', 'absorptions', 'faiblesses'];
+
+function _cloneDamageProfile(dp = {}) {
+  const out = {};
+  _DMG_PROFILE_KEYS.forEach(k => {
+    if (Array.isArray(dp[k]) && dp[k].length) out[k] = [...dp[k]];
+  });
+  return out;
+}
+
+/**
+ * Profil de dégâts agrégé d'un personnage à partir de TOUT son équipement
+ * (résistances / immunités / absorptions / faiblesses accordées par les objets équipés).
+ * Union dédupliquée → non cumulable : porter deux objets « Résistance feu » ne
+ * compte qu'une fois. Forme identique à un `beast` → utilisable directement avec
+ * `applyDamageTypeInteraction` (shared/damage-profile.js).
+ * @returns {?{resistances:string[],immunites:string[],absorptions:string[],faiblesses:string[]}}
+ *          null si aucun objet équipé n'accorde d'interaction.
+ */
+export function getCharDamageProfile(c) {
+  const equip = c?.equipement || {};
+  const out = { resistances: [], immunites: [], absorptions: [], faiblesses: [] };
+  let any = false;
+  for (const eq of Object.values(equip)) {
+    const dp = eq?.damageProfile;
+    if (!dp || typeof dp !== 'object') continue;
+    for (const key of _DMG_PROFILE_KEYS) {
+      const arr = Array.isArray(dp[key]) ? dp[key] : [];
+      for (const id of arr) {
+        if (id && !out[key].includes(id)) { out[key].push(id); any = true; }
+      }
+    }
+  }
+  return any ? out : null;
 }
 
 function copyStatBonuses(item = {}) {

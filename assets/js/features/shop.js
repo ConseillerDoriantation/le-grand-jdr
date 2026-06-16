@@ -11,6 +11,7 @@ import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, ca
 import { useGold } from '../shared/economy.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
+import { DAMAGE_RELATIONS } from '../shared/damage-profile.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
 import { openArtisanModal } from './artisan.js';
@@ -2575,6 +2576,65 @@ async function _shopEnsureDamageTypes() {
   return _shopDamageTypes;
 }
 
+// ── Profil de dégâts porté (résistances / immunités / absorptions / faiblesses) ──
+// Affiché dans l'onglet « Bonus » des objets équipables (arme/armure/bijou).
+// Appliqué côté VTT quand le perso est touché (cf. getCharDamageProfile + applyDamageTypeInteraction).
+const _DMG_PROFILE_KEYS = ['resistances', 'immunites', 'absorptions', 'faiblesses'];
+
+function _shopRenderDamageProfileSection(item) {
+  const prof  = item?.damageProfile || {};
+  const types = _shopDamageTypes;
+  const rows = !types
+    ? `<div style="color:var(--text-dim);font-size:.78rem;padding:.4rem 0">Chargement des types de dégâts…</div>`
+    : DAMAGE_RELATIONS.map(rel => {
+        const active = Array.isArray(prof[rel.key]) ? prof[rel.key] : [];
+        return `<div class="sh-dmgprof-row" style="border-left:3px solid ${rel.color};background:${rel.color}0d">
+          <div class="sh-dmgprof-head">
+            <span>${rel.icon}</span>
+            <span style="color:${rel.color}">${rel.label}</span>
+            <span class="sh-dmgprof-rule">${rel.shortLabel}</span>
+          </div>
+          <div class="sh-dmgprof-chips">
+            ${types.map(t => {
+              const on = active.includes(t.id);
+              return `<button type="button" class="sh-dmgprof-chip${on ? ' is-on' : ''}"
+                style="${on ? `color:${rel.color};border-color:${rel.color};background:${rel.color}1a` : ''}"
+                data-sh-action="toggleDmgProfile" data-rel="${rel.key}" data-tid="${t.id}" aria-pressed="${on}">
+                ${t.icon || ''} ${_esc(t.label)}
+              </button>`;
+            }).join('')}
+          </div>
+        </div>`;
+      }).join('');
+  return `<div class="sh-dmgprof sh-field-full">
+    <div class="sh-dmgprof-title">🛡️ Résistances accordées <span class="sh-dmgprof-sub">— quand l'objet est équipé</span></div>
+    <div class="sh-dmgprof-hint">Non cumulable. En cas de conflit sur un même type : Immunité &gt; Absorption &gt; Faiblesse &gt; Résistance.</div>
+    <div id="si-dmgprof-rows">${rows}</div>
+  </div>`;
+}
+
+/** Lit le profil de dégâts coché dans le modal. Retourne null si la section est absente. */
+function _shopCollectDamageProfile() {
+  const host = document.getElementById('si-dmgprof-rows');
+  if (!host) return null;
+  const out = { resistances: [], immunites: [], absorptions: [], faiblesses: [] };
+  host.querySelectorAll('.sh-dmgprof-chip.is-on').forEach(ch => {
+    const rel = ch.dataset.rel, tid = ch.dataset.tid;
+    if (out[rel] && tid && !out[rel].includes(tid)) out[rel].push(tid);
+  });
+  return out;
+}
+
+/** Toggle d'un type sur une relation (résistance/immunité/…). État porté par le DOM jusqu'au save. */
+function _shopToggleDmgProfile(btn) {
+  if (!btn) return;
+  const on = !btn.classList.contains('is-on');
+  const rel = DAMAGE_RELATIONS.find(r => r.key === btn.dataset.rel);
+  btn.classList.toggle('is-on', on);
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  btn.style.cssText = on && rel ? `color:${rel.color};border-color:${rel.color};background:${rel.color}1a` : '';
+}
+
 // Cache des compétences de dés (chargées depuis world/dice_skills)
 let _shopDiceSkillsCache = null;
 async function _shopLoadDiceSkills() {
@@ -2852,7 +2912,11 @@ function _siBuildFieldsSubset(tpl, item, fieldIds) {
 /** Contenu d'un onglet (HTML). */
 function _siBuildTabContent(tab, tpl, item, tplKey) {
   if (tab === 'essentiel' || tab === 'bonus' || tab === 'traits') {
-    return _siBuildFieldsSubset(tpl, item, _SI_TAB_FIELDS[tplKey]?.[tab] || []);
+    let h = _siBuildFieldsSubset(tpl, item, _SI_TAB_FIELDS[tplKey]?.[tab] || []);
+    if (tab === 'bonus' && ['arme', 'armure', 'bijou'].includes(tplKey)) {
+      h += _shopRenderDamageProfileSection(item);
+    }
+    return h;
   }
   if (tab === 'actions') {
     return `<div class="si-actions-toggle">
@@ -3000,6 +3064,9 @@ function openItemModal(itemId) {
   _shopEnsureDamageTypes().then(() => {
     const host = document.getElementById('si-actions-host');
     if (host) host.innerHTML = _shopRenderActionsSection(_shopCollectActions().length ? _shopCollectActions() : (item?.actions || []));
+    // Re-rend la section « Résistances accordées » maintenant que les types sont chargés.
+    const dp = document.querySelector('.sh-dmgprof');
+    if (dp) dp.outerHTML = _shopRenderDamageProfileSection(item);
   });
 }
 
@@ -3430,6 +3497,9 @@ async function saveShopItem(itemId) {
 
     // Actions/Bonus/Réactions définies sur l'item — propagées à l'inventaire
     data.actions = _shopCollectActions();
+    // Profil de dégâts porté (résistances/immunités/…) — uniquement si la section existe (équipables)
+    const dmgProfile = _shopCollectDamageProfile();
+    if (dmgProfile) data.damageProfile = dmgProfile;
     // Flag consommable (item-level) : retire 1 exemplaire à chaque usage d'action
     data.consommable = !!document.getElementById('si-consommable')?.checked;
 
@@ -4503,6 +4573,7 @@ Object.assign(shHandlers, {
   refreshFields:  (el) => refreshItemFields(el.value),
   setItemTemplate:(el) => refreshTemplateFields(el.value),
   setItemCat:     () => { /* la catégorie n'affecte plus les champs ; juste un changement de référence */ },
+  toggleDmgProfile: (el) => _shopToggleDmgProfile(el),
   prixInput:      (el) => updatePrixVente(el.value),
   dispoInfini:    (el) => toggleDispoInfini(el),
   dispoInfiniBtn: ()   => toggleDispoInfiniBtn(),

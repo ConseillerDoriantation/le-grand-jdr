@@ -5619,3 +5619,20 @@ body.shop-card-list .sh-page--v2 .sh-item-grid { grid-template-columns: none !im
 [data-theme="light"] .sh-page--v2 .sh-list-row:nth-child(even) { background: rgba(15,23,42,.02); }
 [data-theme="light"] .sh-page--v2 .sh-list-row:hover { background: rgba(37,99,235,.07); }
 [data-theme="light"] .sh-page--v2 .sh-list-row { border-bottom-color: rgba(15,23,42,.06); }
+
+/* ── Profil de dégâts porté (modal article, onglet Bonus) ───────────────── */
+.sh-dmgprof { margin-top: 1rem; }
+.sh-dmgprof-title { font-size: .84rem; font-weight: 600; color: var(--text); }
+.sh-dmgprof-sub { font-weight: 400; color: var(--text-dim); }
+.sh-dmgprof-hint { font-size: .7rem; color: var(--text-dim); margin: .15rem 0 .55rem; }
+.sh-dmgprof-row { padding: .45rem .6rem; border-radius: 8px; margin-bottom: .4rem; }
+.sh-dmgprof-head { display: flex; align-items: center; gap: .4rem; font-size: .78rem; font-weight: 600; margin-bottom: .35rem; }
+.sh-dmgprof-rule { margin-left: auto; font-weight: 400; font-size: .68rem; color: var(--text-dim); }
+.sh-dmgprof-chips { display: flex; flex-wrap: wrap; gap: .3rem; }
+.sh-dmgprof-chip {
+  font-size: .72rem; padding: .22rem .5rem; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg-elevated);
+  color: var(--text-dim); cursor: pointer; transition: color .12s, border-color .12s, background .12s;
+}
+.sh-dmgprof-chip:hover { border-color: var(--text-dim); color: var(--text); }
+.sh-dmgprof-chip.is-on { font-weight: 600; }
