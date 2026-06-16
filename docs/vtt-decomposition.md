@@ -245,8 +245,19 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   - ✅ **Tranche 1 — grille** : `CELL` (constante) → `vtt-constants.js` ; `_drawGrid` (renderer
     leaf, rien ne le rappelle) → `vtt-render.js`. **⚠️ smoke-test** : changer de page/scène,
     redimensionner la fenêtre, éditer cols/rows d'une page → la grille + le fond se redessinent.
-  - ⏳ **Tranches suivantes (par couplage croissant)** : images BG/FG (`_renderMapImages`, drag/
-    resize), tokens (`_renderAllTokens` + shapes — le plus dur : handlers de drag rappellent
-    sélection/combat), annotations (`_renderAnnotLayer`). Chacune = 1 commit + smoke-test.
+  - ✅ **Tranche 2 — helpers de rendu sans callback** : `_loadKonva` (bootstrap) et
+    `_stageToWorld` (transform écran→monde, pur `VS.stage`) → `vtt-render.js`. Sûrs (aucun
+    callback cross-domaine). **⚠️ smoke-test** : entrer dans la table (Konva charge),
+    pan/clic/règle (conversion de coordonnées OK).
+  - 🧱 **MUR (constaté tranche 2)** : les renderers d'ENTITÉS ne sont PAS des leafs. Leurs
+    handlers Konva (drag/click/transformend/contextmenu) **rappellent le combat et
+    l'inspecteur** : `_renderMapImages` → `_patchImg`, `_hideActBar`, `_clearHL`,
+    `_renderInspector` ; `_renderAllTokens` pire encore (sélection, mouvement, attaque).
+    Les sortir « tels quels » ajouterait des imports circulaires render→vtt.js — proscrit.
+    Les sortir PROPREMENT exige un **redesign en interface** : le renderer reçoit ses
+    effets cross-domaine en **callbacks injectés** (ex. `_renderMapImages({ onSelectImage,
+    patchImg })`), vtt.js câblant les callbacks. C'est un vrai changement de design, à
+    blast-radius sur la feature live (édition de carte MJ, puis combat) → à faire **un
+    renderer à la fois, avec smoke-test approfondi à chaque étape** (pas de big-bang).
 - ⏳ **Phase 1 — reste** : Tray/Pages, Inspector (42 deps), `tools-ruler` (dessin/annot),
   Combat/attaque (gros), chat (couplage entrant massif). Les plus durs.

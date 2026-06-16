@@ -11,6 +11,23 @@
 import { VS } from './vtt-state.js';
 import { CELL } from './vtt-constants.js';
 
+/** Charge Konva (vendored) sur window.Konva si pas déjà présent. */
+export async function _loadKonva() {
+  if (window.Konva) return;
+  await new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = './assets/js/vendor/konva-10.3.0.min.js';
+    s.onload = res; s.onerror = () => rej(new Error('Konva.js introuvable'));
+    document.head.appendChild(s);
+  });
+}
+
+/** Convertit une position écran (pointeur) en coordonnées monde (avant grille). */
+export function _stageToWorld(ptr) {
+  const sc = VS.stage.scaleX(), sp = VS.stage.position();
+  return { x: (ptr.x - sp.x) / sc, y: (ptr.y - sp.y) / sc };
+}
+
 /** Redessine le fond + la grille de la page active sur les calques bg/grid. */
 export function _drawGrid() {
   if (!VS.stage || !VS.activePage) return;

@@ -44,7 +44,7 @@ import {
   _reactionsCol, _reactionRef, _annotCol, _annotRef,
 } from './vtt-refs.js';
 import { CELL, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
-import { _drawGrid } from './vtt-render.js';
+import { _drawGrid, _loadKonva, _stageToWorld } from './vtt-render.js';
 import { _vttPanelError, _showCtxMenu, _hideCtxMenu } from './vtt-utils.js';
 import {
   VTT_ACTION_RUNE, _parseDice, _maxDice, _maxEffectDisplay, _effectDisplay,
@@ -1050,15 +1050,7 @@ async function _syncAutoTokens() {
 // ═══════════════════════════════════════════════════════════════════
 // KONVA — chargement dynamique CDN
 // ═══════════════════════════════════════════════════════════════════
-async function _loadKonva() {
-  if (window.Konva) return;
-  await new Promise((res, rej) => {
-    const s = document.createElement('script');
-    s.src = './assets/js/vendor/konva-10.3.0.min.js';
-    s.onload = res; s.onerror = () => rej(new Error('Konva.js introuvable'));
-    document.head.appendChild(s);
-  });
-}
+// [_loadKonva → vtt-render.js (importé en haut)]
 
 // ═══════════════════════════════════════════════════════════════════
 // NETTOYAGE
@@ -7991,10 +7983,7 @@ function _renderAllTokens() {
 // ═══════════════════════════════════════════════════════════════════
 
 // Conversion coords écran → monde
-function _stageToWorld(ptr) {
-  const sc = VS.stage.scaleX(), sp = VS.stage.position();
-  return { x: (ptr.x - sp.x) / sc, y: (ptr.y - sp.y) / sc };
-}
+// [_stageToWorld → vtt-render.js (importé en haut)]
 
 // ── Règle ──────────────────────────────────────────────────────────
 // Comptage Manhattan (|dc|+|dr|) : cohérent avec _moveTo / _showMoveRange.
