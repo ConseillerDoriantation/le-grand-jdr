@@ -304,8 +304,7 @@ let _multiDragOrigin= null;        // { [id]: {x,y} } positions au début du dra
 let _middlePanActive= false;       // true pendant le pan caméra au clic molette
 let _suppressTokenClickUntil = 0;   // bloque le click synthétique après clic droit/molette
 let _autoSyncDone = false;   // empêche la double-création de tokens
-let _weaponFormats = null;   // cache formats d'armes (damageType, etc.)
-export let _damageTypes   = null;   // cache types de dégâts (règles de combat)
+// [VS.weaponFormats / VS.damageTypes → VS.weaponFormats / VS.damageTypes (vtt-state.js)]
 let _spellMatrices = null;   // cache matrices MJ (armes invoquées, combos config)
 let _emotes     = [];        // [{id, name, url}] chargées depuis world/vtt_emotes
 // ── Bibliothèque de cartes ─────────────────────────────────────────
@@ -2588,12 +2587,12 @@ export function _vttSortSoinFormula(s, c) {
   if (s?.degatsStat) {
     statKey = s.degatsStat;
   } else {
-    const dmgTypes = _damageTypes;
+    const dmgTypes = VS.damageTypes;
     const noyauTypeId = s?.noyauTypeId;
     const isMagic = !!(dmgTypes && noyauTypeId && dmgTypes.find(x => x.id === noyauTypeId)?.isMagic);
     statKey = 'constitution';
     if (isMagic) {
-      const fmt = _weaponFormats?.find(f => f.label === mainP?.format);
+      const fmt = VS.weaponFormats?.find(f => f.label === mainP?.format);
       // Les Poings par défaut (isDefault) ne sont pas une arme magique
       const isMagicWeapon = fmt?.isMagic === true && mainP?.nom && !mainP?.isDefault;
       statKey = isMagicWeapon ? (mainP.statAttaque || mainP.toucherStat || 'intelligence') : 'intelligence';
@@ -3940,7 +3939,7 @@ function _buildSpellOption(s, ctx) {
     const enchMode  = s.enchantMode || 'dmg';
     const isEtat    = enchMode === 'etat' && !!mods?.enchantEtatId;
     const elementId = mods?.enchantArmeDmg?.element || s.noyauTypeId || null;
-    const enchTypeObj = elementId ? getDamageTypeById(_damageTypes, elementId) : null;
+    const enchTypeObj = elementId ? getDamageTypeById(VS.damageTypes, elementId) : null;
     return { ...common,
       icon: isEtat ? '✨' : '🪄', label, dice: '',
       isEnchant: true, enchantMode: enchMode,
@@ -3963,7 +3962,7 @@ function _buildSpellOption(s, ctx) {
   }
   if (isAfflictionOnly) {
     const aff = mods.affliction;
-    const aTypeObj = aff.element ? getDamageTypeById(_damageTypes, aff.element) : null;
+    const aTypeObj = aff.element ? getDamageTypeById(VS.damageTypes, aff.element) : null;
     return { ...common,
       icon: aff.mode === 'etat' ? '⛓' : '🩸', label,
       dice: aff.mode === 'dot'
@@ -3987,9 +3986,9 @@ function _buildSpellOption(s, ctx) {
     const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(fullFormula);
     const spellTypeId    = s.noyauTypeId || null;
     const spellTypeRules = spellTypeId
-      ? getDamageTypeRules(_damageTypes, spellTypeId)
+      ? getDamageTypeRules(VS.damageTypes, spellTypeId)
       : { missEffect: 'half', armorPen: 0, dmgBonus: 0 };
-    const spellTypeObj   = spellTypeId ? getDamageTypeById(_damageTypes, spellTypeId) : null;
+    const spellTypeObj   = spellTypeId ? getDamageTypeById(VS.damageTypes, spellTypeId) : null;
     const ovrTouchStat   = s.toucherStat || fallbackTouchStat;
     const ovrDmgStat     = s.degatsStat  || fallbackDmgStat;
     const ovrTouchNoMod  = ovrTouchStat === 'none';
@@ -4032,10 +4031,10 @@ function _buildSpellOption(s, ctx) {
       soinStatKey = s.degatsStat;
     } else {
       const mainP = c ? getMainWeapon(c) : null;
-      const isMagic = !!(_damageTypes && s?.noyauTypeId
-        && _damageTypes.find(x => x.id === s.noyauTypeId)?.isMagic);
+      const isMagic = !!(VS.damageTypes && s?.noyauTypeId
+        && VS.damageTypes.find(x => x.id === s.noyauTypeId)?.isMagic);
       if (isMagic) {
-        const fmt = _weaponFormats?.find(f => f.label === mainP?.format);
+        const fmt = VS.weaponFormats?.find(f => f.label === mainP?.format);
         // Les Poings (isDefault) ne sont jamais une "arme magique" → Int par défaut
         const isMagicWeapon = fmt?.isMagic === true && mainP?.nom && !mainP?.isDefault;
         soinStatKey = isMagicWeapon ? (mainP.statAttaque || mainP.toucherStat || 'intelligence') : 'intelligence';
@@ -4107,11 +4106,11 @@ function _buildAttackOptions(t) {
       // échec (on neutralise le missEffect 'half'/'full' du type). La sentinelle
       // garde le comportement du type.
       typeRules: _isInvoc
-        ? { ...getDamageTypeRules(_damageTypes, t.summonElementId || 'physique'), missEffect: 'none' }
-        : getDamageTypeRules(_damageTypes, t.summonElementId || 'physique'),
+        ? { ...getDamageTypeRules(VS.damageTypes, t.summonElementId || 'physique'), missEffect: 'none' }
+        : getDamageTypeRules(VS.damageTypes, t.summonElementId || 'physique'),
       damageTypeId:    t.summonElementId || 'physique',
-      damageTypeIcon:  getDamageTypeById(_damageTypes, t.summonElementId || 'physique')?.icon || '',
-      damageTypeColor: getDamageTypeById(_damageTypes, t.summonElementId || 'physique')?.color || '',
+      damageTypeIcon:  getDamageTypeById(VS.damageTypes, t.summonElementId || 'physique')?.icon || '',
+      damageTypeColor: getDamageTypeById(VS.damageTypes, t.summonElementId || 'physique')?.color || '',
       mods: sentinelMods,
     });
 
@@ -4140,7 +4139,7 @@ function _buildAttackOptions(t) {
         if (!isOff) return;
         const dmg  = _vttSortDmgFormula(a, _cChar);
         const elId = a.noyauTypeId || t.summonElementId || 'physique';
-        const elObj = getDamageTypeById(_damageTypes, elId);
+        const elObj = getDamageTypeById(VS.damageTypes, elId);
         const nbCh = Array.isArray(a.runes) ? a.runes.filter(r => r === 'Chance').length : 0;
         const rc   = nbCh > 0 ? Math.max(17, 20 - nbCh) : (t.summonChanceRc ?? 20);
         options.push({
@@ -4156,7 +4155,7 @@ function _buildAttackOptions(t) {
           toucher: t.attack ?? 0,
           dmgStatMod: 0, dmgStatLabel: '—', maitriseBonus: 0,
           halfOnMiss: false,
-          typeRules: getDamageTypeRules(_damageTypes, elId),
+          typeRules: getDamageTypeRules(VS.damageTypes, elId),
           damageTypeId: elId,
           damageTypeIcon: elObj?.icon || '',
           damageTypeColor: elObj?.color || '',
@@ -4190,7 +4189,7 @@ function _buildAttackOptions(t) {
       // Type de dégâts défini par le MJ (feu/eau/…) → règles associées (dont
       // missEffect:'half' des types magiques = ½ dégâts), icône et couleur.
       const dtypeId = w.damageTypeId || 'physique';
-      const dtype   = (_damageTypes || []).find(t => t.id === dtypeId) || null;
+      const dtype   = (VS.damageTypes || []).find(t => t.id === dtypeId) || null;
       options.push({
         id:      `beast_arme_${idx}`,
         icon:    '🦷',
@@ -4214,7 +4213,7 @@ function _buildAttackOptions(t) {
         maitriseBonus: 0,
         halfOnMiss: false,
         weaponFormat: w.format || 'physique',   // Physique / Magique (descriptif)
-        typeRules: getDamageTypeRules(_damageTypes, dtypeId),
+        typeRules: getDamageTypeRules(VS.damageTypes, dtypeId),
         damageTypeId: dtypeId,
         damageTypeIcon: dtype?.icon || '',
         damageTypeColor: dtype?.color || '',
@@ -4229,8 +4228,8 @@ function _buildAttackOptions(t) {
     b.attaques.forEach((atk, idx) => {
       if (!atk.degats) return;
       const atkTypeId = atk.damageTypeId || null;
-      const atkTypeObj = atkTypeId ? getDamageTypeById(_damageTypes, atkTypeId) : null;
-      const atkTypeRules = atkTypeId ? getDamageTypeRules(_damageTypes, atkTypeId) : getDamageTypeRules(_damageTypes, 'physique');
+      const atkTypeObj = atkTypeId ? getDamageTypeById(VS.damageTypes, atkTypeId) : null;
+      const atkTypeRules = atkTypeId ? getDamageTypeRules(VS.damageTypes, atkTypeId) : getDamageTypeRules(VS.damageTypes, 'physique');
       options.push({
         id:      `beast_${idx}`,
         icon:    '👹',
@@ -4362,13 +4361,13 @@ function _buildAttackOptions(t) {
   const wMaitrise    = c && !wReplace && weapon ? getMaitriseBonus(c, weapon) : 0;
   // Règles de type de dégâts (missEffect, armorPen, dmgBonus)
   const wReplaceTypeId = wReplace?.element || 'physique';
-  const fmt        = wReplace ? null : _weaponFormats?.find(f => f.label === weapon?.format);
+  const fmt        = wReplace ? null : VS.weaponFormats?.find(f => f.label === weapon?.format);
   const isMagicW   = wReplace ? true : fmt?.isMagic === true;
   const typeRules  = wReplace
-    ? getDamageTypeRules(_damageTypes, wReplaceTypeId)
+    ? getDamageTypeRules(VS.damageTypes, wReplaceTypeId)
     : (isMagicW
-        ? getDamageTypeRules(_damageTypes, 'physique')
-        : getDamageTypeRules(_damageTypes, fmt?.damageType || 'physique'));
+        ? getDamageTypeRules(VS.damageTypes, 'physique')
+        : getDamageTypeRules(VS.damageTypes, fmt?.damageType || 'physique'));
 
   // Formule dés finale : arme invoquée → buff.weaponDice + mod stat ; sinon comportement actuel
   const wDmgDiceRaw = wReplace ? wReplace.weaponDice
@@ -4395,7 +4394,7 @@ function _buildAttackOptions(t) {
   // il est ajouté frais au jet (_vttRollAttack) et au HUD pour rester à jour si
   // le buff est posé après la construction du panneau.
   const _wDefaultTypeId = wReplace ? wReplaceTypeId : (isMagicW ? null : (fmt?.damageType || 'physique'));
-  const _wFinalTypeObj  = _wDefaultTypeId ? getDamageTypeById(_damageTypes, _wDefaultTypeId) : null;
+  const _wFinalTypeObj  = _wDefaultTypeId ? getDamageTypeById(VS.damageTypes, _wDefaultTypeId) : null;
 
   options.push({
     id:               'weapon',
@@ -5185,9 +5184,9 @@ function _atkMissNoteHtml(opt) {
 // (plus de modale séparée). Met à jour le contexte du jet + l'affichage en place.
 function _vttAtkSetElement(elemId) {
   const ctx = _atkCtx; if (!ctx?.opt) return;
-  const t = getDamageTypeById(_damageTypes, elemId);
+  const t = getDamageTypeById(VS.damageTypes, elemId);
   ctx.opt.damageTypeId    = elemId;
-  ctx.opt.typeRules       = getDamageTypeRules(_damageTypes, elemId);
+  ctx.opt.typeRules       = getDamageTypeRules(VS.damageTypes, elemId);
   ctx.opt.damageTypeIcon  = t?.icon || '';
   ctx.opt.damageTypeColor = t?.color || '';
   document.querySelectorAll('.vtt-atk-elem').forEach(b => b.classList.toggle('is-active', b.dataset.elem === elemId));
@@ -5243,11 +5242,11 @@ function _vttPickOpt(srcId, tgtId, idx) {
   // haut), plus de modale séparée. On fixe un défaut tout de suite (1er élément
   // accessible, sinon physique) pour que les dégâts/aperçus s'affichent.
   if (opt.isMagicWeapon && !opt._mwElemReady) {
-    const avail = (opt.charElements || []).map(id => getDamageTypeById(_damageTypes, id)).filter(Boolean);
-    const def = avail[0] || getDamageTypeById(_damageTypes, 'physique');
+    const avail = (opt.charElements || []).map(id => getDamageTypeById(VS.damageTypes, id)).filter(Boolean);
+    const def = avail[0] || getDamageTypeById(VS.damageTypes, 'physique');
     if (def) {
       opt.damageTypeId    = def.id;
-      opt.typeRules       = getDamageTypeRules(_damageTypes, def.id);
+      opt.typeRules       = getDamageTypeRules(VS.damageTypes, def.id);
       opt.damageTypeIcon  = def.icon || '';
       opt.damageTypeColor = def.color || '';
     }
@@ -5324,9 +5323,9 @@ function _vttPickOpt(srcId, tgtId, idx) {
   // Choix d'élément intégré : sort multi-noyau OU arme magique (≥ 2 éléments dispo).
   let _elemChoices = [];
   if (Array.isArray(opt.spellElementChoices) && opt.spellElementChoices.length > 1) {
-    _elemChoices = opt.spellElementChoices.map(id => getDamageTypeById(_damageTypes, id)).filter(Boolean);
+    _elemChoices = opt.spellElementChoices.map(id => getDamageTypeById(VS.damageTypes, id)).filter(Boolean);
   } else if (opt.isMagicWeapon) {
-    _elemChoices = (opt.charElements || []).map(id => getDamageTypeById(_damageTypes, id)).filter(Boolean);
+    _elemChoices = (opt.charElements || []).map(id => getDamageTypeById(VS.damageTypes, id)).filter(Boolean);
   }
   const elemSelectorHtml = _elemChoices.length > 1 ? `
     <div class="vtt-atk-elemrow">
@@ -5522,8 +5521,8 @@ function _vttPickElement(srcId, tgtId, optIdx, elementId) {
   const cacheKey = `${srcId}__${tgtId}`;
   const opt = _atkOptsCache[cacheKey]?.[+optIdx];
   if (!opt) return;
-  const typeRules  = getDamageTypeRules(_damageTypes, elementId);
-  const elemType   = getDamageTypeById(_damageTypes, elementId);
+  const typeRules  = getDamageTypeRules(VS.damageTypes, elementId);
+  const elemType   = getDamageTypeById(VS.damageTypes, elementId);
   _atkOptsCache[cacheKey][+optIdx] = {
     ...opt,
     isMagicWeapon:    false,
@@ -12684,7 +12683,7 @@ async function _vttMountTable(content) {
       img.decode().catch(() => {}); // ignore erreurs réseau / format
     });
   });
-  _formatsP.then(([f, d]) => { _weaponFormats = f; _damageTypes = d; });
+  _formatsP.then(([f, d]) => { VS.weaponFormats = f; VS.damageTypes = d; });
   // Précharge les matrices MJ (combos, armes invoquées) pour les sorts en combat
   loadSpellMatrices().then(m => { _spellMatrices = m; }).catch(() => {});
   // Précharge les overrides MJ de la librairie d'états (CONDITION_LIBRARY)

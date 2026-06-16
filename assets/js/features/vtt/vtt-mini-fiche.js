@@ -23,7 +23,7 @@ import { useGold } from '../../shared/economy.js';
 import { _chrRef } from './vtt-refs.js'; // ref Firestore perso (leaf)
 import { _STAT_COLOR, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js'; // constantes pures (leaf)
 import { _vttPanelError } from './vtt-utils.js'; // frontière d'erreur (leaf)
-import { _damageTypes, _effectDisplay, _vttSortDmgFormula,
+import { _effectDisplay, _vttSortDmgFormula,
          _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode, _vttDisplayRunes,
          } from './vtt.js'; // circ.
 import { _renderPresenceCol } from './vtt-presence.js'; // circ. (toggle mini → refresh colonne)
@@ -583,7 +583,7 @@ function _vttSpellCardHtml(s, i, c, uid, canEdit) {
   const concentration = runes.includes('Concentration');
   const ids = (Array.isArray(s.noyauTypeIds) && s.noyauTypeIds.length) ? s.noyauTypeIds
             : (s.noyauTypeId ? [s.noyauTypeId] : []);
-  const nts = ids.map(id => getDamageTypeById(_damageTypes, id)).filter(Boolean);
+  const nts = ids.map(id => getDamageTypeById(VS.damageTypes, id)).filter(Boolean);
   const noyauPills = nts.map(t =>
     `<span class="cs-spellcard-noyau" style="--c:${t.color||'#888'}" title="Noyau ${_esc(t.label)}">${t.icon||''}</span>`).join('');
   const typeCol = types.includes('offensif') ? '#ff6b6b' : types.includes('defensif') ? '#22c38e' : '#b47fff';

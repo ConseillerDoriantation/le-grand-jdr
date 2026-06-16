@@ -52,4 +52,8 @@ export const VS = {
   rollBonus:    0,        // bonus contextuel temporaire (anneau, sort, etc.)
   rollHidden:   false,    // MJ only — jet caché des joueurs (init via lsJson dans vtt.js)
   diceSkills:   [],       // [{name, stat}] chargées depuis world/dice_skills
+
+  // ── Caches de règles (chargés une fois, lus par le combat ET l'affichage de sorts) ──
+  damageTypes:   null,    // cache types de dégâts (world/damage_types)
+  weaponFormats: null,    // cache formats d'armes (world/weapon_formats)
 };
