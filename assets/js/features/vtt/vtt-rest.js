@@ -12,7 +12,7 @@ import { VS } from './vtt-state.js';
 import { _esc } from '../../shared/html.js';
 import { calcPVMax, calcPMMax } from '../../shared/char-stats.js';
 import { showNotif } from '../../shared/notifications.js';
-import { _sesRef, _chrRef } from './vtt.js';   // refs Firestore (transverses)
+import { _sesRef, _chrRef } from './vtt-refs.js';   // refs Firestore (leaf)
 
 // ══════════════════════════════════════════════════════════════════════════
 // COURT REPOS — Vote du groupe, régénère ½ PV / ½ PM (arrondi sup.)

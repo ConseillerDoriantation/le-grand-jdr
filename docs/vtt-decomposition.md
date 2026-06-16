@@ -198,5 +198,20 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   `_STAT_COLOR`/`_renderPresenceCol` non importés) → corrigés. **⚠️ smoke-test** :
   clic sur un joueur → mini-fiche, onglets Combat/Équipement/Sorts/Inventaire/Notes,
   équiper/déséquiper, éditer une note, envoyer un objet.
+- ✅ **Phase 1.x — leafs partagés `vtt-refs.js` + `vtt-constants.js`** (réduction du
+  couplage circulaire, pas d'un cluster). Constat : aucun cluster *leaf* de taille ne
+  reste (conditions/émotes sont tissés au combat/canvas → cf. décision « cœur cohésif »).
+  À la place, on a sorti ce qui était **partagé sans état** :
+  - `vtt-refs.js` (18 constructeurs de chemins Firestore, purs `aid()`+`db`) → **dice,
+    loot, rest, timer n'importent plus RIEN de vtt.js** (leafs découplés) ; présence et
+    mini-fiche réduits.
+  - `vtt-constants.js` (`_STAT_KEY/_STAT_COLOR/_STAT_RGB`, `_VTT_RUNE_META`) → supprime la
+    **duplication** de `_VTT_RUNE_META` (copié dans vtt.js ET mini-fiche) et l'import
+    circulaire de `_STAT_COLOR`.
+  Imports circulaires restants = uniquement de **vraies fonctions transverses** (`_live`/
+  `_select`, `_showCtxMenu`, `_renderTraySoon`, helpers d'affichage de sorts), plus aucune
+  donnée/ref. `node --check` + symétrie grep OK. **⚠️ smoke-test** : entrer dans la table,
+  un jet de dé (log), ouvrir butin/court-repos/minuteur, présence joueurs, mini-fiche
+  (runes affichées, couleurs de stats) — vérifier qu'aucun module ne casse au runtime.
 - ⏳ **Phase 1 — reste** : Tray/Pages, Inspector (42 deps), `tools-ruler` (dessin/annot),
   Combat/attaque (gros), chat (couplage entrant massif). Les plus durs.

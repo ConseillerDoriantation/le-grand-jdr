@@ -13,7 +13,8 @@ import { _esc } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { confirmModal } from '../../shared/modal.js';
 import { sortCharactersForDisplay } from '../../shared/char-stats.js';
-import { _sesRef, _pingRef, _renderTraySoon } from './vtt.js';
+import { _sesRef, _pingRef } from './vtt-refs.js';   // refs Firestore (leaf)
+import { _renderTraySoon } from './vtt.js';
 import { _renderMiniSheet, _vttToggleMiniSheet } from './vtt-mini-fiche.js';
 
 const VTT_PRESENCE_HEARTBEAT_MS = 75_000;

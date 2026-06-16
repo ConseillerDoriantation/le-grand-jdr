@@ -20,7 +20,9 @@ import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, cal
          computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, getMod,
          sortCharactersForDisplay } from '../../shared/char-stats.js';
 import { useGold } from '../../shared/economy.js';
-import { _chrRef, _MS_BONUS_BUFF, _STAT_COLOR, _damageTypes, _effectDisplay, _vttSortDmgFormula,
+import { _chrRef } from './vtt-refs.js'; // ref Firestore perso (leaf)
+import { _STAT_COLOR, _VTT_RUNE_META } from './vtt-constants.js'; // constantes pures (leaf)
+import { _MS_BONUS_BUFF, _damageTypes, _effectDisplay, _vttSortDmgFormula,
          _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode, _vttDisplayRunes,
          _vttPanelError } from './vtt.js'; // circ.
 import { _renderPresenceCol } from './vtt-presence.js'; // circ. (toggle mini → refresh colonne)
@@ -520,16 +522,7 @@ function _msTabEquipement(c, uid, canEdit) {
 
 // Méta runes (icône/couleur) — miroir de RUNE_META (spells.js) pour un rendu de
 // carte identique côté VTT, sans importer le gros module de la fiche.
-const _VTT_RUNE_META = {
-  'Puissance':{icon:'⚔️',color:'#ef4444'}, 'Protection':{icon:'💚',color:'#22c38e'},
-  'Amplification':{icon:'🌐',color:'#4f8cff'}, 'Dispersion':{icon:'🎯',color:'#a855f7'},
-  'Enchantement':{icon:'✨',color:'#e8b84b'}, 'Affliction':{icon:'💀',color:'#8b5cf6'},
-  'Invocation':{icon:'🐾',color:'#a16207'}, 'Lacération':{icon:'🩸',color:'#dc2626'},
-  'Chance':{icon:'🍀',color:'#facc15'}, 'Durée':{icon:'⏱️',color:'#06b6d4'},
-  'Concentration':{icon:'🧠',color:'#6366f1'}, 'Réaction':{icon:'🔄',color:'#ec4899'},
-  'Action Bonus':{icon:'✴️',color:'#f97316'},
-  'Déclenchement':{icon:'⚡',color:'#f97316'},
-};
+// [_VTT_RUNE_META → vtt-constants.js (importé en haut)]
 
 // Chips d'effets clés (dégâts/soin/cibles/zone/durée), calculés avec les helpers
 // natifs du VTT (cache-free → cohérents avec les options d'attaque du VTT).

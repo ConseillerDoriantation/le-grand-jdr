@@ -14,7 +14,7 @@ import { showNotif } from '../../shared/notifications.js';
 import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { sortCharactersForDisplay } from '../../shared/char-stats.js';
-import { _chrRef } from './vtt.js';   // ref Firestore perso (transverse)
+import { _chrRef } from './vtt-refs.js';   // ref Firestore perso (leaf)
 
 // ── État local butin ────────────────────────────────────────────────
 let _loot            = { stash: [], loot: [] };

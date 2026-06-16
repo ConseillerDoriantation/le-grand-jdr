@@ -9,7 +9,7 @@
 import { addDoc, serverTimestamp } from '../../config/firebase.js';
 import { STATE } from '../../core/state.js';
 import { showNotif } from '../../shared/notifications.js';
-import { _logCol } from './vtt.js';   // ref Firestore du log VTT (transverse)
+import { _logCol } from './vtt-refs.js';   // ref Firestore du log VTT (leaf)
 
 // ── État local (lanceur libre) ──────────────────────────────────────
 let _diceFormula   = {};        // { faces→count } ex: { 20:2, 6:1 }

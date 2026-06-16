@@ -11,7 +11,7 @@ import { registerActions } from '../../core/actions.js';
 import Sortable from '../../vendor/sortable.esm.js';
 import { getDocData, getDocDataSilent, saveDoc, loadCollection, subscribeCollection } from '../../data/firestore.js';
 import {
-  db, doc, getDoc, collection, addDoc, updateDoc, deleteDoc,
+  db, doc, getDoc, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch,
   query, orderBy, limit,
 } from '../../config/firebase.js';
@@ -38,6 +38,12 @@ import { lsJson } from '../../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
 import PAGES from '../pages.js';
 import { VS, aid } from './vtt-state.js';
+import {
+  _sesRef, _pgsCol, _toksCol, _pgRef, _tokRef, _chrRef, _npcRef, _bstTrackerRef,
+  _logCol, _logGmCol, _castingCol, _castingRef, _pingsCol, _pingRef,
+  _reactionsCol, _reactionRef, _annotCol, _annotRef,
+} from './vtt-refs.js';
+import { _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META } from './vtt-constants.js';
 import {
   _musicStateRef, _syncMusicPlayback, _resetMusicState, _closeMusicPanel,
   _vttToggleMusicCat, _vttToggleAllMusicCats, _vttToggleMusic, _vttPlaySound,
@@ -371,10 +377,7 @@ function _rebuildConditionIndex() {
 }
 function _isCustomCondition(id) { return !CONDITION_DEFAULT_IDS.has(id); }
 
-// Mapping abréviation compétence → clé getMod
-const _STAT_KEY = { FOR:'force', DEX:'dexterite', CON:'constitution', INT:'intelligence', SAG:'sagesse', CHA:'charisme' };
-export const _STAT_COLOR = { FOR:'#ef4444', DEX:'#22c38e', CON:'#f59e0b', INT:'#4f8cff', SAG:'#b47fff', CHA:'#fd6c9e' };
-const _STAT_RGB   = { FOR:'239,68,68', DEX:'34,195,142', CON:'245,158,11', INT:'79,140,255', SAG:'180,127,255', CHA:'253,108,158' };
+// [_STAT_KEY / _STAT_COLOR / _STAT_RGB → vtt-constants.js (importés en haut)]
 // [_MS_STATS → vtt-mini-fiche.js]
 
 const _numOr = (value, fallback = null) => {
@@ -447,27 +450,8 @@ let _trayNpcOpen = _loadTrayPref('npc');
 // [_combatTab → vtt-combat-tracker.js]
 
 // ── Refs Firestore ──────────────────────────────────────────────────
-// `aid` (id d'aventure) est désormais importé de vtt-state.js.
-export const _sesRef  = ()   => doc(db,  `adventures/${aid()}/vtt/session`);
-const _pgsCol  = ()   => collection(db, `adventures/${aid()}/vttPages`);
-const _toksCol = ()   => collection(db, `adventures/${aid()}/vttTokens`);
-const _pgRef   = (id) => doc(db, `adventures/${aid()}/vttPages/${id}`);
-const _tokRef  = (id) => doc(db, `adventures/${aid()}/vttTokens/${id}`);
-export const _chrRef  = (id) => doc(db, `adventures/${aid()}/characters/${id}`);
-const _npcRef  = (id) => doc(db, `adventures/${aid()}/npcs/${id}`);
-const _bstTrackerRef = (uid) => doc(db, `adventures/${aid()}/bestiary_tracker/${uid}`);
-export const _logCol      = ()  => collection(db, `adventures/${aid()}/vttLog`);
-// Jets cachés du MJ : sous-collection séparée, lisible/écrivable par le seul MJ
-// (règles Firestore isAdvAdmin) → secret réel, pas un filtre client.
-const _logGmCol    = ()  => collection(db, `adventures/${aid()}/vttLogGm`);
-const _castingCol  = ()  => collection(db, `adventures/${aid()}/vttCasting`);
-const _castingRef  = uid => doc(db, `adventures/${aid()}/vttCasting/${uid}`);
-const _pingsCol     = ()  => collection(db, `adventures/${aid()}/vttPings`);
-export const _pingRef      = uid => doc(db, `adventures/${aid()}/vttPings/${uid}`);
-const _reactionsCol = ()  => collection(db, `adventures/${aid()}/vttEmoteReactions`);
-const _reactionRef  = uid => doc(db, `adventures/${aid()}/vttEmoteReactions/${uid}`);
-const _annotCol      = ()  => collection(db, `adventures/${aid()}/vttAnnotations`);
-const _annotRef      = id  => doc(db, `adventures/${aid()}/vttAnnotations/${id}`);
+// Déplacées dans le module leaf ./vtt-refs.js (importées en haut de fichier) ;
+// les sous-modules les importent de là plutôt que circulairement d'ici.
 // [refs musique → vtt-music.js]
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4621,16 +4605,7 @@ let _suspendedTriggerActive = false;
 // `only` ∈ 'weapons' | 'items' | 'spells' | 'basic' | null restreint les sections affichées.
 // Méta des runes (icône/couleur) — utilisée par _optBtn pour les pastilles de
 // rune sur les cartes d'action. (Miroir de la copie de vtt-mini-fiche.js.)
-const _VTT_RUNE_META = {
-  'Puissance':{icon:'⚔️',color:'#ef4444'}, 'Protection':{icon:'💚',color:'#22c38e'},
-  'Amplification':{icon:'🌐',color:'#4f8cff'}, 'Dispersion':{icon:'🎯',color:'#a855f7'},
-  'Enchantement':{icon:'✨',color:'#e8b84b'}, 'Affliction':{icon:'💀',color:'#8b5cf6'},
-  'Invocation':{icon:'🐾',color:'#a16207'}, 'Lacération':{icon:'🩸',color:'#dc2626'},
-  'Chance':{icon:'🍀',color:'#facc15'}, 'Durée':{icon:'⏱️',color:'#06b6d4'},
-  'Concentration':{icon:'🧠',color:'#6366f1'}, 'Réaction':{icon:'🔄',color:'#ec4899'},
-  'Action Bonus':{icon:'✴️',color:'#f97316'},
-  'Déclenchement':{icon:'⚡',color:'#f97316'},
-};
+// [_VTT_RUNE_META → vtt-constants.js (importé en haut, partagé avec mini-fiche)]
 
 // Snapshot pré-action des entités impliquées (lanceur + cibles) : PV/PM/buffs/
 // états. Stocké sur le log de l'action → l'annulation MJ restaure cet état exact
