@@ -25,7 +25,7 @@ import { _STAT_COLOR, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js'
 import { _vttPanelError } from './vtt-utils.js'; // frontière d'erreur (leaf)
 import { _effectDisplay, _vttSortDmgFormula,
          _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode, _vttDisplayRunes,
-         } from './vtt.js'; // circ.
+         } from './vtt-spell-display.js'; // formules de sorts (leaf — mini-fiche découplée de vtt.js)
 import { _renderPresenceCol } from './vtt-presence.js'; // circ. (toggle mini → refresh colonne)
 
 let _miniTab = 'combat'; // onglet actif de la mini-fiche (état local)

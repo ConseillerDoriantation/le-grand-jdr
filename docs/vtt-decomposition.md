@@ -221,5 +221,16 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   caches `_damageTypes`/`_weaponFormats`). **Prochain vrai déblocage** = migrer ces 2
   caches vers `VS` (≈37 occ.) puis sortir un `vtt-spell-display.js` — mais ça touche tout
   le chemin combat/sorts → à faire avec smoke-test complet. `node --check` + grep OK.
+- ✅ **Phase 1.x (suite) — leaf `vtt-spell-display.js`** (formules de sorts). Débloqué
+  par la migration `damageTypes`/`weaponFormats`→VS : on sort les 10 symboles d'affichage
+  de sorts (`_parseDice`, `_maxDice`, `_maxEffectDisplay`, `_effectDisplay`,
+  `_vttSortDmgFormula`, `_vttSortSoinFormula`, `_vttAmpDispCircleSize`,
+  `_vttSpellActionMode`, `_vttDisplayRunes`, `VTT_ACTION_RUNE`) vers un leaf pur
+  (deps : equipment-utils, char-stats, VS). **Résultat : `vtt-mini-fiche.js` n'importe
+  PLUS RIEN de vtt.js — totalement découplée.** vtt.js réimporte les 10 (tous utilisés).
+  Vérif : aucune def restante dans vtt.js, def unique dans le leaf, aucun autre module
+  concerné, `node --check` OK. **⚠️ smoke-test combat** : aperçu d'attaque (interaction
+  résistance), formules dégâts/soin (mini-fiche + carte d'action), jets de dés (le roller
+  réimporte `_parseDice`/`_maxDice`).
 - ⏳ **Phase 1 — reste** : Tray/Pages, Inspector (42 deps), `tools-ruler` (dessin/annot),
   Combat/attaque (gros), chat (couplage entrant massif). Les plus durs.
