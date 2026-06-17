@@ -23,6 +23,7 @@ let _wallsLayer = null;   // Konva.Layer pour les visuels mur/porte/fenêtre
 
 let _editMode   = false;  // éditeur de murs actif ?
 let _editTool   = 'wall'; // 'wall' | 'door' | 'window' | 'light' | 'eraser' | 'hide' | 'reveal'
+let _placeHistory = [];   // pile des poses (Ctrl+Z) : { field:'walls'|'lightSources'|'fogOps', id }
 let _drawStart  = null;   // {col,row} — début du segment en cours de tracé
 let _preview    = null;   // Konva.Line de prévisualisation
 let _selectedId = null;   // id du segment/lumière sélectionné
@@ -281,7 +282,10 @@ export function fogInit(stage, layers, CELL) {
 export function fogSetPgRef(fn) { _pgRefFn = fn; }
 
 /** Mise à jour de la référence page courante (appelée depuis vtt.js à chaque changement). */
-export function fogSetPage(page) { _page = page; }
+export function fogSetPage(page) {
+  if (page?.id !== _page?.id) _placeHistory = []; // nouvelle scène → pile d'annulation vierge
+  _page = page;
+}
 
 function _pgRef(id) { return _pgRefFn ? _pgRefFn(id) : null; }
 
@@ -698,6 +702,7 @@ function _addWall(x1, y1, x2, y2, type) {
   // Lire les murs courants depuis _page (toujours à jour via fogSetPage)
   updateDoc(ref, { walls: [...(_page.walls || []), w] })
     .catch(() => showNotif('Erreur sauvegarde', 'error'));
+  _placeHistory.push({ field: 'walls', id: w.id });
 }
 
 function _addLightSource(x, y) {
@@ -706,6 +711,7 @@ function _addLightSource(x, y) {
   const ref = _pgRef(_page.id); if (!ref) return;
   updateDoc(ref, { lightSources: [...(_page.lightSources || []), ls] })
     .catch(() => showNotif('Erreur sauvegarde', 'error'));
+  _placeHistory.push({ field: 'lightSources', id: ls.id });
 }
 
 function _addFogRect(type, x, y, w, h) {
@@ -715,6 +721,27 @@ function _addFogRect(type, x, y, w, h) {
   const ops = [...(_page.fogOps || []), op];
   updateDoc(ref, { fogOps: ops })
     .catch(() => showNotif('Erreur sauvegarde', 'error'));
+  _placeHistory.push({ field: 'fogOps', id: op.id });
+}
+
+/**
+ * Annule la dernière pose (mur/porte/fenêtre, lumière ou zone de brouillard) de
+ * la session d'édition courante. Ctrl+Z en mode édition. Ignore les entrées déjà
+ * supprimées manuellement entre-temps. Retourne false si rien à annuler.
+ */
+export function fogUndo() {
+  if (!_page) return false;
+  const ref = _pgRef(_page.id); if (!ref) return false;
+  while (_placeHistory.length) {
+    const last = _placeHistory.pop();
+    const arr = _page[last.field] || [];
+    if (arr.some(x => x.id === last.id)) {
+      updateDoc(ref, { [last.field]: arr.filter(x => x.id !== last.id) })
+        .catch(() => showNotif('Erreur annulation', 'error'));
+      return true;
+    }
+  }
+  return false;
 }
 
 function _deleteAtPos(pos) {

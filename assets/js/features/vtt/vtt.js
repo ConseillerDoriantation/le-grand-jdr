@@ -30,7 +30,7 @@ import { showNotif } from '../../shared/notifications.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
-  fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath,
+  fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath, fogUndo,
 } from './vtt-fog.js';
 import { openModal, closeModalDirect, confirmModal, updateModalContent, promptModal } from '../../shared/modal.js';
 import { _esc, _norm, _searchIncludes, appSplashHtml } from '../../shared/html.js';
@@ -8435,6 +8435,7 @@ async function _moveSelectedBy(dc, dr) {
 }
 
 function _vttFogTool(t) { return fogSetEditTool(t, VS.activePage); }
+function _vttFogUndo() { if (!fogUndo()) showNotif('Rien à annuler', 'info'); }
 async function _vttToggleFog() {
   if (!VS.activePage) return;
   const next = !VS.activePage.fogEnabled;
@@ -10477,10 +10478,12 @@ function _keyHandler(e) {
       }
     }
   }
-  // Ctrl+Z : annuler le dernier tracé de la session
+  // Ctrl+Z : en mode édition murs → annuler la dernière pose (mur/lumière/zone) ;
+  // sinon → annuler le dernier tracé d'annotation.
   if ((e.ctrlKey||e.metaKey) && e.key==='z' && !e.shiftKey) {
     e.preventDefault();
-    _vttUndoDraw();
+    if (fogIsEditMode()) { if (!fogUndo()) showNotif('Rien à annuler', 'info'); }
+    else _vttUndoDraw();
   }
   // Flèches / pavé numérique : déplacer le token sélectionné
   if (!e.ctrlKey && !e.metaKey && !e.altKey && VS.selected) {
@@ -10834,21 +10837,32 @@ async function _vttMountTable(content) {
     </div>
     ${STATE.isAdmin?`
     <div id="vtt-walls-bar" class="vtt-walls-bar" style="display:none">
-      <span class="vtt-walls-bar-label">Outil :</span>
-      <button class="vtt-btn-sm active" data-fog-tool="wall"   data-vtt-fn="_vttFogTool" data-vtt-args="wall"   title="Tracer un mur">🧱 Mur</button>
-      <button class="vtt-btn-sm"        data-fog-tool="door"   data-vtt-fn="_vttFogTool" data-vtt-args="door"   title="Tracer une porte">🚪 Porte</button>
-      <button class="vtt-btn-sm"        data-fog-tool="window" data-vtt-fn="_vttFogTool" data-vtt-args="window" title="Tracer une fenêtre">🪟 Fenêtre</button>
-      <button class="vtt-btn-sm"        data-fog-tool="light"  data-vtt-fn="_vttFogTool" data-vtt-args="light"  title="Placer une source lumineuse">💡 Lumière</button>
-      <div class="vtt-tb-sep"></div>
-      <button class="vtt-btn-sm"        data-fog-tool="hide"   data-vtt-fn="_vttFogTool" data-vtt-args="hide"   title="Cacher une zone (drag rectangle)">🌑 Cacher</button>
-      <button class="vtt-btn-sm"        data-fog-tool="reveal" data-vtt-fn="_vttFogTool" data-vtt-args="reveal" title="Révéler une zone (drag rectangle, prioritaire sur le LOS)">🔦 Révéler</button>
-      <div class="vtt-tb-sep"></div>
-      <button class="vtt-btn-sm"        data-fog-tool="eraser" data-vtt-fn="_vttFogTool" data-vtt-args="eraser" title="Effacer (clic sur mur, lumière ou zone de brouillard)">🗑 Effacer</button>
-      <button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttFogClearOps" title="Supprimer toutes les zones de brouillard manuel de cette page">🧹 Vider brouillard</button>
-      <div class="vtt-tb-sep"></div>
-      <button class="vtt-btn-sm" id="vtt-fog-toggle" data-vtt-fn="_vttToggleFog" title="Activer / désactiver l'éclairage dynamique sur cette page" style="color:#9ca3af">👁 Éclairage OFF</button>
+      <div class="vtt-walls-row">
+        <div class="vtt-walls-grp">
+          <span class="vtt-walls-grp-lbl">Structures</span>
+          <button class="vtt-btn-sm active" data-fog-tool="wall"   data-vtt-fn="_vttFogTool" data-vtt-args="wall"   title="Tracer un mur (bloque vision + déplacement)">🧱 Mur</button>
+          <button class="vtt-btn-sm"        data-fog-tool="door"   data-vtt-fn="_vttFogTool" data-vtt-args="door"   title="Tracer une porte (ouvrable)">🚪 Porte</button>
+          <button class="vtt-btn-sm"        data-fog-tool="window" data-vtt-fn="_vttFogTool" data-vtt-args="window" title="Tracer une fenêtre (laisse passer la vision, bloque le passage)">🪟 Fenêtre</button>
+        </div>
+        <div class="vtt-walls-grp">
+          <span class="vtt-walls-grp-lbl">Lumière</span>
+          <button class="vtt-btn-sm"        data-fog-tool="light"  data-vtt-fn="_vttFogTool" data-vtt-args="light"  title="Placer une source lumineuse">💡 Source</button>
+          <button class="vtt-btn-sm" id="vtt-fog-toggle" data-vtt-fn="_vttToggleFog" title="Activer / désactiver l'éclairage dynamique sur cette page" style="color:#9ca3af">👁 Éclairage OFF</button>
+        </div>
+        <div class="vtt-walls-grp">
+          <span class="vtt-walls-grp-lbl">Brouillard</span>
+          <button class="vtt-btn-sm"        data-fog-tool="hide"   data-vtt-fn="_vttFogTool" data-vtt-args="hide"   title="Cacher une zone (drag rectangle)">🌑 Cacher</button>
+          <button class="vtt-btn-sm"        data-fog-tool="reveal" data-vtt-fn="_vttFogTool" data-vtt-args="reveal" title="Révéler une zone (drag rectangle, prioritaire sur le LOS)">🔦 Révéler</button>
+          <button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttFogClearOps" title="Supprimer toutes les zones de brouillard manuel de cette page">🧹 Vider</button>
+        </div>
+        <div class="vtt-walls-grp">
+          <span class="vtt-walls-grp-lbl">Édition</span>
+          <button class="vtt-btn-sm"        data-fog-tool="eraser" data-vtt-fn="_vttFogTool" data-vtt-args="eraser" title="Effacer (clic sur mur, lumière ou zone de brouillard)">🗑 Effacer</button>
+          <button class="vtt-btn-sm"        data-vtt-fn="_vttFogUndo" title="Annuler la dernière pose (Ctrl+Z)">↩ Annuler</button>
+        </div>
+      </div>
       <div class="vtt-walls-bar-hint">
-        Murs : grille · Brouillard : demi-case · <kbd>Alt</kbd> = précision ×2 · <kbd>Shift</kbd> = libre · Clic segment/zone = menu<br>
+        Murs : grille · Brouillard : demi-case · <kbd>Alt</kbd> = précision ×2 · <kbd>Shift</kbd> = libre · <kbd>Ctrl</kbd>+<kbd>Z</kbd> = annuler la pose · Clic segment/zone = menu<br>
         <span class="vtt-fog-legend"><span class="vtt-fog-dot vtt-fog-dot--ok"></span>sommet raccordé ·
         <span class="vtt-fog-dot vtt-fog-dot--bad"></span>sommet isolé (fuite possible) ·
         <span class="vtt-fog-dot vtt-fog-dot--snap"></span>aimantation pendant tracé</span>
@@ -11048,6 +11062,7 @@ export const VTT_ACTIONS = {
   _vttFilterEmotes,
   _vttFogClearOps,
   _vttFogTool,
+  _vttFogUndo,
   _vttImportGithubRelease,
   _vttInsTab,
   _vttInvokeMyToken,
