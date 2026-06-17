@@ -315,4 +315,29 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   smoke-test** : journal de combat (attaques/soins/jets/sorts s'affichent, portraits,
   détails dépliables, badges), envoyer un message, répondre, bouton « Annuler l'action »
   (MJ) et bouclier réactif visibles, jets cachés MJ.
-- ⏳ **Phase 1 — reste** : Tray/Pages, Inspector (42 deps), Combat/attaque (gros). Les plus durs.
+- ✅ **Phase 1 — extractions intermédiaires** (consignées en bloc) : `vtt-effective.js`
+  (`_live` + données effectives, ~258 l.), `vtt-inspector.js` (inspecteur de token 4
+  onglets, ~596 l.), `vtt-maplib.js` (bibliothèque de cartes, leaf, ~115 l.),
+  `vtt-autosync.js` (auto-sync tokens↔fiches, ~125 l.). Vérif free-var + orphelins à
+  chaque coup ; plusieurs imports oubliés attrapés (cf. commits).
+- ⚠️ **Régression de prod (autosync)** : `_tokenEntityKey` (helper) vivait dans la zone
+  auto-sync et fut emporté dans `vtt-autosync.js` comme const locale — mais il était
+  **aussi** lu par le rendu du tray (`vtt.js`) → `ReferenceError`, panneau MJ cassé.
+  Leçon : scanner l'usage **externe de chaque symbole défini dans le module extrait**, pas
+  seulement les symboles qu'on croit déplacer. Corrigé : `_tokenEntityKey` → leaf
+  `vtt-utils.js`, importé par les deux (commit `a7c1201`).
+- ✅ **Phase 1 — extraction `vtt-tray.js`** (panneau MJ + pages, **~436 l.**) : tray
+  (réserve joueurs/PNJ, tokens en scène, bestiaire), liste des pages (dossiers, drag&drop,
+  recherche) et `_switchPage`. État de filtre/onglet (localStorage) déménagé ; `_trayTab`
+  exporté en **live-binding** (lu par le constructeur du panneau dans vtt.js), reset du
+  filtre via `_resetTraySearch()` (teardown). Imports circulaires runtime → vtt.js :
+  `_MAP_IMG_DEPS, _renderAllTokens, _renderAnnotLayer, _clearHL, _deselect` (export ajouté).
+  `_renderTraySoon` (importé par autosync & présence) redirigé vers `vtt-tray.js`. Vérif :
+  node --check, free-var (0 manquante), orphelins (0 réel), symétrie exports↔imports.
+  **vtt.js 10143 → 9746 (−397) — sous la barre des 10k.** **⚠️ smoke-test** : panneau MJ —
+  onglets Scènes/Réserve/Bestiaire/Images, recherche réserve & bestiaire, replier
+  En ligne/Hors ligne/PNJ, placer un perso/une créature, liste des pages (créer, renommer,
+  dossiers, drag&drop, recherche), **changer de page** (carte/tokens/fog se redessinent),
+  envoyer les joueurs (📡).
+- ⏳ **Phase 1 — reste** : Combat/attaque (gros, ~3000 l.), multi-ciblage (~1500 l.),
+  dessin/annotations (tools). Les plus durs (combat-critiques, fortement tissés).
