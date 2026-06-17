@@ -44,7 +44,7 @@ import {
   _reactionsCol, _reactionRef, _annotCol, _annotRef,
 } from './vtt-refs.js';
 import { CELL, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
-import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual } from './vtt-render.js';
+import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual } from './vtt-render.js';
 import { _vttPanelError, _showCtxMenu, _hideCtxMenu } from './vtt-utils.js';
 import {
   VTT_ACTION_RUNE, _parseDice, _maxDice, _maxEffectDisplay, _effectDisplay,
@@ -7901,34 +7901,8 @@ function _renderMjRulerRemote(data) {
 
 // ── Annotations ────────────────────────────────────────────────────
 function _buildAnnotShape(K, data) {
-  const col  = data.color || '#ef4444';
-  const fill = data.fill ? col + '30' : 'transparent';
-  // listening sera ajusté par _updateAnnotDraggable selon l'outil et la propriété
-  const base = { stroke: col, strokeWidth: data.strokeWidth || 2,
-    lineCap:'round', lineJoin:'round', name:'annot', listening: false,
-    // Zone de clic/gomme élargie : un trait fin (2px) reste facile à sélectionner/effacer.
-    hitStrokeWidth: Math.max(16, (data.strokeWidth || 2) + 12) };
-  let shape;
-  if (data.type === 'freehand' || data.type === 'line') {
-    shape = new K.Line({ ...base, points: data.points || [],
-      x: data.offsetX||0, y: data.offsetY||0,
-      tension: data.type === 'freehand' ? 0.3 : 0, fill:'transparent' });
-  } else if (data.type === 'rect') {
-    const rw = data.w||10, rh = data.h||10;
-    shape = new K.Rect({ ...base, x:data.x||0, y:data.y||0,
-      width:rw, height:rh, fill, cornerRadius:3,
-      // centered:true = x,y est le centre → offsetX/Y pour pivoter sur place
-      ...(data.centered ? { offsetX: rw/2, offsetY: rh/2 } : {}) });
-  } else if (data.type === 'circle') {
-    shape = new K.Circle({ ...base, x:data.x||0, y:data.y||0, radius:data.r||10, fill });
-  }
+  const shape = _buildAnnotVisual(K, data);  // construction pure → vtt-render.js
   if (!shape) return null;
-  shape._annotId = data.id;
-
-  // Restaurer rotation / scale sauvegardés
-  if (data.rotation) shape.rotation(data.rotation);
-  if (data.scaleX)   shape.scaleX(data.scaleX);
-  if (data.scaleY)   shape.scaleY(data.scaleY);
 
   // MJ peut tout modifier, joueur seulement ses propres dessins
   const canEdit = STATE.isAdmin || data.createdBy === STATE.user?.uid;

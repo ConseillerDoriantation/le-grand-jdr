@@ -278,7 +278,18 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
     circulaire). `TYPE_COLOR`/`hpColor` → `vtt-constants.js`. **⚠️ smoke-test** : tokens
     affichés correctement (PV/PM, badges d'états/buffs, CA, nom, portrait), et drag/clic/
     sélection/attaque **inchangés**. vtt.js 12696 → 12541.
-  - ⏳ **Restant render** : handlers d'interaction token (le plus couplé — à décomposer en
-    callbacks injectés comme les images, mais c'est le combat → prudence max), annotations.
+  - ✅ **Tranche 5 — visuel des annotations** : la construction de shape pure de
+    `_buildAnnotShape` (freehand/ligne/rect/cercle, rotation/scale — ~28 l.) →
+    `_buildAnnotVisual(K, data)` dans `vtt-render.js` (pur : `K`+`data` seulement). Les
+    handlers d'édition (sélection/drag/transform) restent dans vtt.js. **⚠️ smoke-test** :
+    dessiner (crayon/ligne/rect/cercle), couleur/épaisseur, sélectionner/déplacer/pivoter
+    un dessin. vtt.js 12541 → 12515.
+  - 🧱 **Restant render = la partie DURE** : les **handlers d'interaction token**
+    (drag/clic/sélection/attaque/mouvement — combat LIVE) ; à décomposer en callbacks
+    injectés comme les images, mais le nombre de callbacks est grand et c'est le combat →
+    **ne PAS faire sans base de tests / smoke-test combat exhaustif**. Idem cluster
+    annotations/dessin (mieux comme module domaine `vtt/tools-ruler.js` que dans render).
+    Les **constructeurs de shape purs** (grille, images, token, annotation) sont, eux, tous
+    sortis. `vtt-render.js` ≈ 363 l., ~365 l. retirées du monolithe, **0 import circulaire**.
 - ⏳ **Phase 1 — reste** : Tray/Pages, Inspector (42 deps), `tools-ruler` (dessin/annot),
   Combat/attaque (gros), chat (couplage entrant massif). Les plus durs.

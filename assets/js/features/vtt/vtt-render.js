@@ -327,3 +327,37 @@ export function _drawGrid() {
   for (let r=0; r<=rows; r++) VS.layers.grid.add(new K.Line({ points:[0,r*CELL,W,r*CELL], ...s }));
   VS.layers.grid.batchDraw();
 }
+
+// ── Construction visuelle d'une annotation (dessin libre / ligne / rect / cercle) ──
+// Partie PURE-RENDU : shape Konva à partir des données (K + data). Les handlers
+// d'édition (sélection/drag/transform) restent dans vtt.js (cluster annotations).
+export function _buildAnnotVisual(K, data) {
+  const col  = data.color || '#ef4444';
+  const fill = data.fill ? col + '30' : 'transparent';
+  // listening sera ajusté par _updateAnnotDraggable selon l'outil et la propriété
+  const base = { stroke: col, strokeWidth: data.strokeWidth || 2,
+    lineCap:'round', lineJoin:'round', name:'annot', listening: false,
+    // Zone de clic/gomme élargie : un trait fin (2px) reste facile à sélectionner/effacer.
+    hitStrokeWidth: Math.max(16, (data.strokeWidth || 2) + 12) };
+  let shape;
+  if (data.type === 'freehand' || data.type === 'line') {
+    shape = new K.Line({ ...base, points: data.points || [],
+      x: data.offsetX||0, y: data.offsetY||0,
+      tension: data.type === 'freehand' ? 0.3 : 0, fill:'transparent' });
+  } else if (data.type === 'rect') {
+    const rw = data.w||10, rh = data.h||10;
+    shape = new K.Rect({ ...base, x:data.x||0, y:data.y||0,
+      width:rw, height:rh, fill, cornerRadius:3,
+      // centered:true = x,y est le centre → offsetX/Y pour pivoter sur place
+      ...(data.centered ? { offsetX: rw/2, offsetY: rh/2 } : {}) });
+  } else if (data.type === 'circle') {
+    shape = new K.Circle({ ...base, x:data.x||0, y:data.y||0, radius:data.r||10, fill });
+  }
+  if (!shape) return null;
+  shape._annotId = data.id;
+  // Restaurer rotation / scale sauvegardés
+  if (data.rotation) shape.rotation(data.rotation);
+  if (data.scaleX)   shape.scaleX(data.scaleX);
+  if (data.scaleY)   shape.scaleY(data.scaleY);
+  return shape;
+}
