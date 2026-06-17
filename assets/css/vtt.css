@@ -1205,9 +1205,11 @@
   transition: all .1s; text-align: center; white-space: nowrap;
 }
 .vtt-roll-mode-btn:hover { border-color: var(--gold-glow); color: var(--text); }
-.vtt-roll-mode-btn.active[data-mode="advantage"]    { background: rgba(34,195,142,.15); border-color: var(--emerald); color: var(--emerald); }
-.vtt-roll-mode-btn.active[data-mode="normal"]       { background: rgba(255,255,255,.08); border-color: var(--text-muted); color: var(--text); }
-.vtt-roll-mode-btn.active[data-mode="disadvantage"] { background: rgba(239,68,68,.15); border-color: #ef4444; color: #ef4444; }
+/* État sélectionné : fond marqué + anneau interne + texte coloré → la sélection
+   (Désav./Normal/Avantage) doit être immédiatement lisible. */
+.vtt-roll-mode-btn.active[data-mode="advantage"]    { background: rgba(34,195,142,.28);  border-color: var(--emerald);    color: var(--emerald);    box-shadow: inset 0 0 0 1.5px var(--emerald); }
+.vtt-roll-mode-btn.active[data-mode="normal"]       { background: rgba(255,255,255,.18); border-color: var(--text);       color: var(--text);       box-shadow: inset 0 0 0 1.5px var(--text-muted); }
+.vtt-roll-mode-btn.active[data-mode="disadvantage"] { background: rgba(239,68,68,.28);   border-color: #ef4444;           color: #ef4444;           box-shadow: inset 0 0 0 1.5px #ef4444; }
 .vtt-roll-hide-btn {
   flex: 1; min-width: 0;
   background: rgba(34,195,142,.10); border-color: rgba(34,195,142,.55); color: var(--emerald);

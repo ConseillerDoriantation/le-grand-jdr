@@ -90,9 +90,9 @@ function _renderDicePanel() {
       <button class="vtt-icon-btn" data-vtt-fn="_vttDiceBonusStep" data-vtt-args="+1">＋</button>
     </div>
     ${hasD20single ? `<div class="vtt-dice-mode-row">
-      <button class="vtt-roll-mode-btn${_diceFreeMode==='disadvantage'?' active':''}" data-vtt-fn="_vttDiceMode" data-vtt-args="disadvantage">⬇ Désav.</button>
-      <button class="vtt-roll-mode-btn${_diceFreeMode==='normal'?' active':''}" data-vtt-fn="_vttDiceMode" data-vtt-args="normal">⚪ Normal</button>
-      <button class="vtt-roll-mode-btn${_diceFreeMode==='advantage'?' active':''}" data-vtt-fn="_vttDiceMode" data-vtt-args="advantage">⬆ Avantage</button>
+      <button class="vtt-roll-mode-btn${_diceFreeMode==='disadvantage'?' active':''}" data-mode="disadvantage" data-vtt-fn="_vttDiceMode" data-vtt-args="disadvantage">⬇ Désav.</button>
+      <button class="vtt-roll-mode-btn${_diceFreeMode==='normal'?' active':''}" data-mode="normal" data-vtt-fn="_vttDiceMode" data-vtt-args="normal">⚪ Normal</button>
+      <button class="vtt-roll-mode-btn${_diceFreeMode==='advantage'?' active':''}" data-mode="advantage" data-vtt-fn="_vttDiceMode" data-vtt-args="advantage">⬆ Avantage</button>
     </div>` : ''}
     <button class="vtt-dice-roll-btn" data-vtt-fn="_vttDiceRoll"
       ${!hasDice&&!_diceFreeBonus?'disabled':''}>
