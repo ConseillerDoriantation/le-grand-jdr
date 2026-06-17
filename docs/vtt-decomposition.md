@@ -375,6 +375,17 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   **⚠️ smoke-test** : démarrer un combat (flags reset), ▶ Tour suivant (round++, DoT/regen
   appliqués + log, buffs/états expirés retirés, summon non-canalisé dissipé), ↺ reset tour
   d'un token, toggles action bonus/réaction dans le tracker, terminer le combat.
-- ⏳ **Phase 1 — reste** : Combat/attaque (gros, ~3000 l.), multi-ciblage (~1500 l.),
-  effets de sorts (afflictions/enchant/regen/invocation, appelés depuis l'attaque),
-  dessin/annotations (tools). Les plus durs (combat-critiques, fortement tissés).
+- ✅ **Phase 1 — extraction `vtt-spell-effects.js`** (applicateurs d'effets, ~322 l.) :
+  les 3 fonctions appliquées en fin de résolution d'attaque/sort — `_vttApplyEnchantBuffs`
+  (buffs d'enchantement), `_vttApplyAfflictions` (jet de sauvegarde + buff si échec),
+  `_vttApplyRegeneration` (soin sur durée). Le déclenchement reste dans `_vttRollAttack`
+  (vtt.js), qui les importe. Couplage runtime → vtt.js (helpers combat hoisted, exportés) :
+  `_buffShared` (aussi utilisé par l'attaque → reste), `_consumeLuckyReroll`,
+  `_rollDiceDetailed`, `_setHp`, `_tokenStatMod`, `_STAT_SHORT` (const, gardée+exportée car
+  aussi lue en 4018), `CONDITION_BY_ID`. `_STAT_SHORT` (sandwich entre les 2 ranges) laissé
+  en place → 2 ranges. 3 filets propres + 0 import inutilisé. **vtt.js 9051 → 8756 (−295).**
+  **⚠️ smoke-test** : lancer un sort d'enchantement (buff appliqué à l'allié/arme), une
+  affliction (la cible fait son JS, état posé si échec + log), une régénération (soin/tour).
+- ⏳ **Phase 1 — reste** : moteur d'attaque (`_vttRollAttack` ~1087 l. + `_buildAttackOptions`
+  / `_execAttack` / `_vttPickOpt`, le plus dur), concentration/invocation/push-pull (effets
+  restants), dessin/annotations (tools). Combat-critiques, fortement tissés.
