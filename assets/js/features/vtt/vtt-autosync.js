@@ -10,6 +10,7 @@ import { VS } from './vtt-state.js';
 import { STATE } from '../../core/state.js';
 import { db, doc, writeBatch, serverTimestamp } from '../../config/firebase.js';
 import { _tokRef, _toksCol } from './vtt-refs.js';
+import { _tokenEntityKey } from './vtt-utils.js';
 import { _renderTraySoon } from './vtt.js'; // circ. (rendu du tray, runtime)
 
 let _autoSyncDone = false;   // empêche la double-création de tokens
@@ -30,7 +31,6 @@ export function _maybeSyncAutoTokens() {
   _syncAutoTokens();
 }
 
-const _tokenEntityKey = t => t?.characterId ? 'c:' + t.characterId : t?.npcId ? 'n:' + t.npcId : null;
 let _reserveCleanupRunning = false;
 
 export async function _cleanupReserveDuplicates() {

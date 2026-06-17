@@ -7,6 +7,10 @@
 import { showNotif } from '../../shared/notifications.js';
 import { _esc } from '../../shared/html.js';
 
+// Clé d'identité de l'entité liée à un token (perso/PNJ) — null si token libre.
+// Partagé par l'auto-sync (dédup réserve) et le rendu du tray.
+export const _tokenEntityKey = t => t?.characterId ? 'c:' + t.characterId : t?.npcId ? 'n:' + t.npcId : null;
+
 // Frontière d'erreur par panneau : un rendu qui plante n'abat pas toute la table.
 // Loggue, notifie une seule fois par panneau, et remplit le conteneur d'un message.
 const _vttPanelErrSeen = new Set();

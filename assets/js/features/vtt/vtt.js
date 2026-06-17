@@ -68,7 +68,7 @@ import {
   _vttLibMoveToAndClose,
 } from './vtt-maplib.js';
 import { _markCharsReady, _markNpcsReady, _markToksReady, _resetAutoSync, _charsReady, _cleanupReserveDuplicates } from './vtt-autosync.js';
-import { _vttPanelError, _showCtxMenu, _hideCtxMenu } from './vtt-utils.js';
+import { _vttPanelError, _showCtxMenu, _hideCtxMenu, _tokenEntityKey } from './vtt-utils.js';
 import {
   VTT_ACTION_RUNE, _parseDice, _maxDice, _maxEffectDisplay, _effectDisplay,
   _vttSortDmgFormula, _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode,
@@ -1305,7 +1305,7 @@ export function _select(id) {
   }
 }
 
-function _deselect() {
+export function _deselect() {
   VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
   VS.tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
   _clearAim(); _hideActBar();
@@ -1505,7 +1505,7 @@ function _showMoveRange(t) {
   }
   VS.layers.grid.batchDraw();
 }
-function _clearHL() { _moveHL.forEach(r=>r.destroy()); _moveHL=[]; VS.layers.grid?.batchDraw(); }
+export function _clearHL() { _moveHL.forEach(r=>r.destroy()); _moveHL=[]; VS.layers.grid?.batchDraw(); }
 
 /**
  * Refresh immédiat des zones de déplacement + attaque du token sélectionné.
@@ -6729,7 +6729,7 @@ async function _switchPage(pageId) {
   // Le MJ navigue librement — les joueurs ne suivent que via 📡 Envoyer
 }
 
-function _renderAllTokens() {
+export function _renderAllTokens() {
   if (!VS.activePage) return;
   VS.layers.token?.destroyChildren();
   for (const e of Object.values(VS.tokens)) {
@@ -6926,7 +6926,7 @@ function _deselectAnnot() {
   if (_annotTransformer) { _annotTransformer.nodes([]); VS.layers.draw?.batchDraw(); }
 }
 
-function _renderAnnotLayer() {
+export function _renderAnnotLayer() {
   try { return _renderAnnotLayerImpl(); }
   catch (e) { _vttPanelError('Dessins', e, null); }
 }
