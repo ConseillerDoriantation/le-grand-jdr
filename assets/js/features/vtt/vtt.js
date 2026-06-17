@@ -1069,9 +1069,7 @@ function _cleanup() {
   _marqueeActive = false; _marqueeOrigin = null; _marqueeLastWp = null;
   _marqueeShape = null; _suppressNextClick = false;
   _pingTimer = null; _pingOrigin = null;
-  _resetRuler();
-  if (_mjRulerPendingTimer) { clearTimeout(_mjRulerPendingTimer); _mjRulerPendingTimer = null; }
-  _mjRulerLastWrite = 0; _mjRulerBroadcasting = false; _mjRulerRemote = null;
+  _resetRuler();  // réinitialise aussi l'état de diffusion MJ (cf. vtt-ruler.js)
   _charsReady = false; _npcsReady = false; _toksReady = false;
   _traySearch = '';
   VS.imgTr = null; VS.imgTrFg = null; VS.selImg = null; VS.mapMode = false;
