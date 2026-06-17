@@ -14,7 +14,7 @@ import { _pgRef } from './vtt-refs.js';
 
 export let _libFolder = null;   // null = racine, string = folderId ouvert
 let _libOpen   = true;   // section collapsible dans le tray
-const _mapLibRef = () => doc(db, `adventures/${aid()}/vtt/mapLibrary`);
+export const _mapLibRef = () => doc(db, `adventures/${aid()}/vtt/mapLibrary`);
 
 // Reset au teardown / changement d'aventure (appelé par vtt.js).
 export function _resetMapLib() { _libFolder = null; }
