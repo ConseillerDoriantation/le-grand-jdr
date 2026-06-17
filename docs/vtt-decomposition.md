@@ -302,5 +302,17 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
     visible chez un 2ᵉ client (joueur). vtt.js 12515 → 12355.
   - ⏳ **Restant tools** : dessin (`_startDraw`/`_updateDraw`/`_endDraw` + état), annotations
     (build/select/transform/persist — sélection couplée). Mêmes sous-tranches.
-- ⏳ **Phase 1 — reste** : Tray/Pages, Inspector (42 deps), Combat/attaque (gros), chat
-  (couplage entrant massif). Les plus durs.
+- ✅ **Phase 1 — extraction `vtt-chat.js`** (chat & log de dés, **~700 l.**) : `_rebuildChatLog`,
+  `_renderChatLog`/Impl (le gros formateur de journal), `_vttSendChat`, réponses,
+  `_vttToggleLogDetail` + état (`_chatMsgs`/`_logMain`/`_logGm`/`_chatReplyTo`) + les 2
+  souscriptions Firestore (via `_initChatLogSubs()`). Couplage entrant : vtt.js appelle
+  `_initChatLogSubs()` au montage et importe les handlers (VTT_ACTIONS). Sortant : 3
+  imports circulaires ciblés vers vtt.js (`_findUsableReactiveShield`, `_canControlToken`,
+  `_applyEmotes` — appelés au runtime). `_chatMsgs` exporté en live-binding (lu par le
+  bouclier/undo côté vtt.js). Les `data-vtt-fn` du log restent des chaînes (résolues au
+  clic). **vtt.js 12355 → 11657 (−698) — sous la barre des 12k.** Vérif : node --check,
+  analyse de variables libres (0 manquante), zéro orphelin, imports non morts. **⚠️
+  smoke-test** : journal de combat (attaques/soins/jets/sorts s'affichent, portraits,
+  détails dépliables, badges), envoyer un message, répondre, bouton « Annuler l'action »
+  (MJ) et bouclier réactif visibles, jets cachés MJ.
+- ⏳ **Phase 1 — reste** : Tray/Pages, Inspector (42 deps), Combat/attaque (gros). Les plus durs.
