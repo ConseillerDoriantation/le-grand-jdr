@@ -352,6 +352,16 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   un état (effets adv/dis, flags, sauvegarde/DC), Enregistrer, ＋ Nouvel état (rename),
   supprimer un état perso, ↺ Réinitialiser ; vérifier que les états s'appliquent toujours
   en combat (le moteur lit la lib mise à jour).
+- ✅ **Phase 1 — extraction `vtt-conditions.js`** (gameplay des états sur tokens, ~209 l.) :
+  appliquer/retirer/jet de sauvegarde/éditer un état posé sur un token (`_vttConditionAdd/
+  Apply/Remove/Save/Edit/EditSave` + `_vttEnsureConditionsLoaded` + `getVttConditionLibrary`).
+  Complète `vtt-conditions-config.js` (éditeur de librairie) : l'état `CONDITION_LIBRARY/
+  CONDITION_BY_ID` reste dans vtt.js (live-binding). Circulaire runtime → vtt.js :
+  `_consumeLuckyReroll` (relance chance, partagé combat — export ajouté). Les fns sont
+  référencées en chaînes `data-vtt-fn` dans l'inspecteur (résolues au clic, pas d'import).
+  3 filets propres (free-var, helpers partagés, orphelins). **vtt.js 9403 → 9223 (−180).**
+  **⚠️ smoke-test** : inspecteur d'un token → ＋ appliquer un état, ✏️ éditer (source/DD/
+  stat/durée), 🎲 jet de sauvegarde (log + retrait si réussi), ✕ retirer.
 - ⏳ **Phase 1 — reste** : Combat/attaque (gros, ~3000 l.), multi-ciblage (~1500 l.),
-  dessin/annotations (tools), conditions par-token (`_vttConditionApply/Remove/…`). Les
-  plus durs (combat-critiques, fortement tissés).
+  effets de sorts (afflictions/enchant/regen/invocation, appelés depuis l'attaque),
+  dessin/annotations (tools). Les plus durs (combat-critiques, fortement tissés).
