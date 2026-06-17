@@ -14,7 +14,8 @@ import { DAMAGE_INTERACTIONS } from '../../shared/damage-profile.js';
 import { onSnapshot, query, orderBy, limit, addDoc, serverTimestamp } from '../../config/firebase.js';
 import { _logCol, _logGmCol } from './vtt-refs.js';
 import { _vttPanelError } from './vtt-utils.js';
-import { _findUsableReactiveShield, _canControlToken, _applyEmotes } from './vtt.js'; // circ. (combat/émotes)
+import { _findUsableReactiveShield, _canControlToken } from './vtt.js'; // circ. (combat)
+import { _applyEmotes } from './vtt-emotes.js'; // leaf émotes
 
 // État chat (déplacé de vtt.js)
 export let _chatMsgs = [];   // derniers messages rendus (lookup "répondre" + bouclier/undo côté vtt.js)
