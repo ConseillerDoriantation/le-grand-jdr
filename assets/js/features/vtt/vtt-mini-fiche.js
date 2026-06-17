@@ -7,7 +7,7 @@
 // depuis vtt.js (helpers _vttSort*/_vttDisplayRunes, circulaires).
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { updateDoc, writeBatch } from '../../config/firebase.js';
+import { db, updateDoc, writeBatch } from '../../config/firebase.js';
 import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
 import { _esc, _norm } from '../../shared/html.js';

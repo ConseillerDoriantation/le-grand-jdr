@@ -12,7 +12,7 @@ import { _esc, _norm, _searchIncludes } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { showNotif } from '../../shared/notifications.js';
 import { getDocData, saveDoc } from '../../data/firestore.js';
-import { db, doc, getDoc, addDoc, serverTimestamp } from '../../config/firebase.js';
+import { db, doc, getDoc, addDoc, setDoc, serverTimestamp } from '../../config/firebase.js';
 import { computeEquipSkillBonus } from '../../shared/char-stats.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from '../../shared/upload-cloudinary.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
