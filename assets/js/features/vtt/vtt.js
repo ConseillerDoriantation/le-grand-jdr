@@ -43,8 +43,12 @@ import {
   _logCol, _logGmCol, _castingCol, _castingRef, _pingsCol, _pingRef,
   _reactionsCol, _reactionRef, _annotCol, _annotRef,
 } from './vtt-refs.js';
-import { CELL, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
+import { CELL, CELL_M, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
 import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual } from './vtt-render.js';
+import {
+  _startRuler, _updateRuler, _endRuler, _clearRuler, _showRulerHover, _hideRulerHover,
+  _renderMjRulerRemote, _resetRuler, rulerActive, rulerBusy,
+} from './vtt-ruler.js';
 import { _vttPanelError, _showCtxMenu, _hideCtxMenu } from './vtt-utils.js';
 import {
   VTT_ACTION_RUNE, _parseDice, _maxDice, _maxEffectDisplay, _effectDisplay,
@@ -332,7 +336,7 @@ const _renderedPings     = new Set();
 const _renderedReactions = new Set();
 
 // ── Outils de dessin & règle ────────────────────────────────────────
-const CELL_M = 1.5;          // 1 case = 1.5 mètre
+// [CELL_M → vtt-constants.js ; état/fonctions règle → vtt-ruler.js]
 let _annotations      = {};   // id → { data, shape }
 let _selectedAnnotId  = null; // id de l'annotation sélectionnée (sélection simple)
 let _selectedAnnotIds = new Set(); // multi-sélection annotations
@@ -361,9 +365,7 @@ let _drawColor    = '#ef4444';
 let _drawWidth    = 2;
 let _drawShape    = 'pencil'; // 'pencil'|'line'|'rect'|'circle'
 let _drawFill     = false;
-let _rulerActive  = false;
-let _rulerOrigin  = null;
-let _rulerHideTimer = null;
+// [état règle (_rulerActive/_rulerOrigin/_rulerHideTimer/…) → vtt-ruler.js]
 
 // ══════════════════════════════════════════════════════════════════════════════
 // LIBRAIRIE DES ÉTATS (CONDITIONS) — inspirée des conditions D&D 5e
@@ -1080,8 +1082,7 @@ function _cleanup() {
   _marqueeActive = false; _marqueeOrigin = null; _marqueeLastWp = null;
   _marqueeShape = null; _suppressNextClick = false;
   _pingTimer = null; _pingOrigin = null;
-  _rulerActive = false; _rulerOrigin = null; _rulerNodes = null; _rulerLastCell = null; _rulerHoverDot = null;
-  if (_rulerHideTimer) { clearTimeout(_rulerHideTimer); _rulerHideTimer = null; }
+  _resetRuler();
   if (_mjRulerPendingTimer) { clearTimeout(_mjRulerPendingTimer); _mjRulerPendingTimer = null; }
   _mjRulerLastWrite = 0; _mjRulerBroadcasting = false; _mjRulerRemote = null;
   _charsReady = false; _npcsReady = false; _toksReady = false;
@@ -1161,8 +1162,8 @@ function _initCanvas(container) {
       : null;
 
     // Règle (free-hover, reste dans le canvas)
-    if (wp && VS.tool === 'ruler' && _rulerActive) _updateRuler(wp);
-    else if (!wp && _rulerHoverDot) _hideRulerHover();
+    if (wp && VS.tool === 'ruler' && rulerActive()) _updateRuler(wp);
+    else if (!wp) _hideRulerHover();
 
     // Marquee : suivi pendant le drag (peut sortir légèrement du canvas)
     if (VS.tool === 'select' && _marqueeOrigin) {
@@ -1254,7 +1255,7 @@ function _initCanvas(container) {
     if (e.evt.button===2) {
       e.evt.preventDefault();
       // Règle : clic droit = annulation immédiate (en cours ou figée), sans changer d'outil.
-      if (VS.tool === 'ruler' && (_rulerActive || _rulerNodes)) {
+      if (VS.tool === 'ruler' && rulerBusy()) {
         _clearRuler();
         _rightStageDown = null;
         return;
@@ -1273,8 +1274,8 @@ function _initCanvas(container) {
       if (VS.tool === 'ruler') {
         if (_pingTimer) { clearTimeout(_pingTimer); _pingTimer = null; }
         const wp = _stageToWorld(np);
-        if (!_rulerActive) _startRuler(wp);
-        else               _endRuler();
+        if (!rulerActive()) _startRuler(wp);
+        else                _endRuler();
         return;
       }
       // Dessin : cliquer-glisser. Gomme : supprime au survol pressé.
@@ -1307,7 +1308,7 @@ function _initCanvas(container) {
       if (dx*dx + dy*dy > 64) { clearTimeout(_pingTimer); _pingTimer = null; }
     }
     const wp = _stageToWorld(stagePtr);
-    if (VS.tool === 'ruler' && _rulerActive)      _updateRuler(wp);
+    if (VS.tool === 'ruler' && rulerActive())     _updateRuler(wp);
     else if (VS.tool === 'ruler')                 _showRulerHover(wp);
     if (VS.tool === 'draw'  && _drawShape === 'eraser' && _erasing && !_pan) _eraseAtPointer();
     else if (VS.tool === 'draw' && _drawing && !_pan) _updateDraw(wp);
@@ -7736,168 +7737,7 @@ function _renderAllTokens() {
 // Conversion coords écran → monde
 // [_stageToWorld → vtt-render.js (importé en haut)]
 
-// ── Règle ──────────────────────────────────────────────────────────
-// Comptage Manhattan (|dc|+|dr|) : cohérent avec _moveTo / _showMoveRange.
-// Les extrémités sont snappées au centre de la case sous le curseur.
-const RULER_COLOR = '#ffe600';
-const RULER_LABEL_OFFSET = { x: 6, y: -18 };
-const _fmtRulerCells = n => `${n} case${n !== 1 ? 's' : ''} · ${(n * CELL_M).toFixed(1)}m`;
-const _snapToCellCenter = wp => {
-  const c = Math.floor(wp.x / CELL), r = Math.floor(wp.y / CELL);
-  return { c, r, x: c * CELL + CELL / 2, y: r * CELL + CELL / 2 };
-}
-const _rulerLabelPos = (x1, y1, x2, y2) => ({
-  x: (x1 + x2) / 2 + RULER_LABEL_OFFSET.x,
-  y: (y1 + y2) / 2 + RULER_LABEL_OFFSET.y,
-});
-// Crée line + label + dot d'origine, regroupés pour destruction unique.
-function _buildRulerNodes(K, name, opacity = 1) {
-  const group = new K.Group({ listening: false, name });
-  const line = new K.Line({
-    points: [0, 0, 0, 0], stroke: RULER_COLOR, strokeWidth: 2, dash: [8, 4],
-    lineCap: 'round', opacity, listening: false,
-  });
-  const dot = new K.Circle({
-    x: 0, y: 0, radius: 4, fill: RULER_COLOR, opacity,
-    shadowColor: '#000', shadowBlur: 4, shadowOpacity: 0.7, listening: false,
-  });
-  const label = new K.Text({
-    x: 0, y: 0, text: '', fill: RULER_COLOR, fontSize: 13, fontStyle: 'bold',
-    shadowColor: '#000', shadowBlur: 6, shadowOpacity: 0.9,
-    shadowOffset: { x: 1, y: 1 }, opacity, listening: false,
-  });
-  group.add(line, dot, label);
-  return { group, line, dot, label };
-}
-function _setRulerNodes(nodes, x1, y1, x2, y2, text) {
-  nodes.line.points([x1, y1, x2, y2]);
-  nodes.dot.position({ x: x1, y: y1 });
-  const p = _rulerLabelPos(x1, y1, x2, y2);
-  nodes.label.text(text);
-  nodes.label.position(p);
-}
-
-let _rulerNodes = null;     // nodes locaux (MJ ou joueur, pour l'utilisateur courant)
-let _rulerLastCell = null;  // dernière case survolée — court-circuite si inchangée
-let _rulerHoverDot = null;  // aperçu de la case de départ avant le 1er clic
-
-function _showRulerHover(wp) {
-  if (!VS.layers.ping || _rulerNodes) { _hideRulerHover(); return; } // pas d'aperçu si une règle est déjà visible
-  const o = _snapToCellCenter(wp);
-  if (!_rulerHoverDot) {
-    const K = window.Konva;
-    _rulerHoverDot = new K.Circle({
-      radius: 5, fill: RULER_COLOR, opacity: 0.45,
-      stroke: '#000', strokeWidth: 1, listening: false, name: 'ruler-hover',
-    });
-    VS.layers.ping.add(_rulerHoverDot);
-  }
-  _rulerHoverDot.position({ x: o.x, y: o.y });
-  VS.layers.ping.batchDraw();
-}
-function _hideRulerHover() {
-  if (!_rulerHoverDot) return;
-  _rulerHoverDot.destroy();
-  _rulerHoverDot = null;
-  VS.layers.ping?.batchDraw();
-}
-
-function _startRuler(wp) {
-  const K = window.Konva;
-  _clearRuler();
-  _hideRulerHover();
-  const o = _snapToCellCenter(wp);
-  _rulerActive = true;
-  _rulerOrigin = o;
-  _rulerLastCell = { c: o.c, r: o.r };
-  _rulerNodes = _buildRulerNodes(K, 'ruler');
-  _setRulerNodes(_rulerNodes, o.x, o.y, o.x, o.y, _fmtRulerCells(0));
-  VS.layers.ping.add(_rulerNodes.group);
-  VS.layers.ping.batchDraw();
-  _broadcastMjRuler(o.x, o.y, 0);
-}
-function _updateRuler(wp) {
-  if (!_rulerNodes || !_rulerOrigin) return;
-  const e = _snapToCellCenter(wp);
-  // Court-circuit : pas de redraw ni de broadcast si la case n'a pas changé.
-  if (_rulerLastCell && e.c === _rulerLastCell.c && e.r === _rulerLastCell.r) return;
-  _rulerLastCell = { c: e.c, r: e.r };
-  const cells = Math.abs(e.c - _rulerOrigin.c) + Math.abs(e.r - _rulerOrigin.r);
-  _setRulerNodes(_rulerNodes, _rulerOrigin.x, _rulerOrigin.y, e.x, e.y, _fmtRulerCells(cells));
-  VS.layers.ping.batchDraw();
-  _broadcastMjRuler(e.x, e.y, cells);
-}
-function _endRuler() {
-  _rulerActive = false;
-  if (_rulerHideTimer) clearTimeout(_rulerHideTimer);
-  _rulerHideTimer = setTimeout(_clearRuler, 5000);
-}
-function _clearRuler() {
-  if (_rulerHideTimer) { clearTimeout(_rulerHideTimer); _rulerHideTimer = null; }
-  _rulerNodes?.group.destroy();
-  _rulerNodes = null;
-  _rulerActive = false; _rulerOrigin = null; _rulerLastCell = null;
-  VS.layers.ping?.batchDraw();
-  _clearMjRulerBroadcast();
-}
-
-// Diffusion de la règle du MJ (visible par tous les joueurs via VS.session.mjRuler).
-// Throttle pour lisser les écritures Firestore.
-const MJ_RULER_THROTTLE = 120;
-let _mjRulerLastWrite = 0;
-let _mjRulerPendingTimer = null;
-let _mjRulerBroadcasting = false; // évite un setDoc(null) inutile si jamais diffusé
-function _broadcastMjRuler(x2, y2, cells) {
-  if (!STATE.isAdmin || !VS.activePage || !_rulerOrigin) return;
-  const payload = {
-    pageId: VS.activePage.id,
-    x1: _rulerOrigin.x, y1: _rulerOrigin.y,
-    x2, y2, cells,
-  };
-  const now = Date.now();
-  const wait = Math.max(0, MJ_RULER_THROTTLE - (now - _mjRulerLastWrite));
-  if (_mjRulerPendingTimer) { clearTimeout(_mjRulerPendingTimer); _mjRulerPendingTimer = null; }
-  const flush = () => {
-    _mjRulerPendingTimer = null;
-    _mjRulerLastWrite = Date.now();
-    _mjRulerBroadcasting = true;
-    setDoc(_sesRef(), { mjRuler: payload }, { merge: true }).catch(() => {});
-  };
-  if (wait === 0) flush();
-  else _mjRulerPendingTimer = setTimeout(flush, wait);
-}
-function _clearMjRulerBroadcast() {
-  if (!STATE.isAdmin) return;
-  if (_mjRulerPendingTimer) { clearTimeout(_mjRulerPendingTimer); _mjRulerPendingTimer = null; }
-  if (!_mjRulerBroadcasting) return; // rien n'a été diffusé → pas de write à effacer
-  _mjRulerLastWrite = 0;
-  _mjRulerBroadcasting = false;
-  setDoc(_sesRef(), { mjRuler: null }, { merge: true }).catch(() => {});
-}
-
-// Rendu de la règle MJ chez les joueurs — mise à jour en place, sans destroy/rebuild.
-let _mjRulerRemote = null;
-function _renderMjRulerRemote(data) {
-  if (STATE.isAdmin) return; // le MJ voit déjà sa règle locale
-  if (!VS.layers.ping) return;
-  const visible = data && VS.activePage && data.pageId === VS.activePage.id;
-  if (!visible) {
-    if (_mjRulerRemote) {
-      _mjRulerRemote.group.destroy();
-      _mjRulerRemote = null;
-      VS.layers.ping.batchDraw();
-    }
-    return;
-  }
-  if (!_mjRulerRemote) {
-    _mjRulerRemote = _buildRulerNodes(window.Konva, 'mj-ruler', 0.85);
-    VS.layers.ping.add(_mjRulerRemote.group);
-  }
-  const cells = data.cells ?? 0;
-  _setRulerNodes(_mjRulerRemote, data.x1, data.y1, data.x2, data.y2,
-    `MJ : ${_fmtRulerCells(cells)}`);
-  VS.layers.ping.batchDraw();
-}
+// [Règle de mesure (état + fonctions + diffusion MJ) → vtt-ruler.js (importé en haut)]
 
 // ── Annotations ────────────────────────────────────────────────────
 function _buildAnnotShape(K, data) {

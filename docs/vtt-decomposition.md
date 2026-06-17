@@ -291,5 +291,16 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
     annotations/dessin (mieux comme module domaine `vtt/tools-ruler.js` que dans render).
     Les **constructeurs de shape purs** (grille, images, token, annotation) sont, eux, tous
     sortis. `vtt-render.js` ≈ 363 l., ~365 l. retirées du monolithe, **0 import circulaire**.
-- ⏳ **Phase 1 — reste** : Tray/Pages, Inspector (42 deps), `tools-ruler` (dessin/annot),
-  Combat/attaque (gros), chat (couplage entrant massif). Les plus durs.
+- 🚧 **Sous-système outils MJ (`tools-ruler`) — démarré, par sous-tranches** (non combat-
+  critique → blast-radius contenu).
+  - ✅ **`vtt-ruler.js`** (règle de mesure + diffusion MJ, ~210 l.) : état + 14 fns extraits.
+    Couplage entrant = les handlers canvas de vtt.js appellent les actions et lisent l'état
+    via getters `rulerActive()`/`rulerBusy()` (au lieu de lire `_rulerActive`/`_rulerNodes`
+    directement) ; teardown via `_resetRuler()`. `CELL_M` → `vtt-constants.js`. Sortant :
+    VS, CELL/CELL_M, STATE, `_sesRef` (leaf), setDoc. **⚠️ smoke-test** : outil règle —
+    cliquer-déplacer-recliquer (mesure en cases/m), clic-droit annule, la règle du MJ est
+    visible chez un 2ᵉ client (joueur). vtt.js 12515 → 12355.
+  - ⏳ **Restant tools** : dessin (`_startDraw`/`_updateDraw`/`_endDraw` + état), annotations
+    (build/select/transform/persist — sélection couplée). Mêmes sous-tranches.
+- ⏳ **Phase 1 — reste** : Tray/Pages, Inspector (42 deps), Combat/attaque (gros), chat
+  (couplage entrant massif). Les plus durs.

@@ -10,6 +10,9 @@
 // calculs de position token/image/zone, et le rendu de la grille).
 export const CELL = 70;
 
+// Échelle de distance : 1 case = 1,5 mètre (règle, portées de sorts).
+export const CELL_M = 1.5;
+
 // Couleur de base d'un token selon son type, et couleur de la barre de PV
 // selon le ratio (vert > 50% > orange > 25% > rouge).
 export const TYPE_COLOR = { player:'#4f8cff', enemy:'#ef4444', npc:'#a78bfa' };
