@@ -19,7 +19,8 @@ import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-
 import { _logCol, _logGmCol, _reactionRef } from './vtt-refs.js';
 import { _STAT_KEY } from './vtt-constants.js';
 import { openModal, closeModalDirect, confirmModal } from '../../shared/modal.js';
-import { VTT_ACTIONS, _renderInspector, _showEmoteBubble, _canControlToken, _tokenStatMod } from './vtt.js'; // circ. (runtime)
+import { VTT_ACTIONS, _showEmoteBubble, _canControlToken, _tokenStatMod } from './vtt.js'; // circ. (runtime)
+import { _renderInspector } from './vtt-inspector.js'; // re-render après changement de mode de jet
 
 // État émotes (déplacé de vtt.js). _emotes exporté : préchargé au montage côté vtt.js.
 export let _emotes = [];        // [{id, name, url}] chargées depuis world/vtt_emotes
