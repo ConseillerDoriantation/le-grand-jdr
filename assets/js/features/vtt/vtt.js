@@ -67,6 +67,7 @@ import {
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,
   _vttLibMoveToAndClose,
 } from './vtt-maplib.js';
+import { _markCharsReady, _markNpcsReady, _markToksReady, _resetAutoSync, _charsReady, _cleanupReserveDuplicates } from './vtt-autosync.js';
 import { _vttPanelError, _showCtxMenu, _hideCtxMenu } from './vtt-utils.js';
 import {
   VTT_ACTION_RUNE, _parseDice, _maxDice, _maxEffectDisplay, _effectDisplay,
@@ -311,7 +312,7 @@ let _selfCells  = [];   // cases Konva cliquables (losange Manhattan)
 let _multiDragOrigin= null;        // { [id]: {x,y} } positions au début du drag groupé
 let _middlePanActive= false;       // true pendant le pan caméra au clic molette
 let _suppressTokenClickUntil = 0;   // bloque le click synthétique après clic droit/molette
-let _autoSyncDone = false;   // empêche la double-création de tokens
+// [_autoSyncDone → vtt-autosync.js]
 // [VS.weaponFormats / VS.damageTypes → VS.weaponFormats / VS.damageTypes (vtt-state.js)]
 let _spellMatrices = null;   // cache matrices MJ (armes invoquées, combos config)
 // [_emotes → vtt-emotes.js (importé en haut)]
@@ -660,132 +661,9 @@ async function _vttTriggerConcentrationSave(td, damageAmount, nextHp = null, opt
 // ═══════════════════════════════════════════════════════════════════
 // AUTO-SYNC TOKENS — crée les tokens manquants pour persos et PNJ
 // ═══════════════════════════════════════════════════════════════════
-let _charsReady = false, _npcsReady = false, _toksReady = false;
+// [_charsReady/_npcsReady/_toksReady → vtt-autosync.js]
 
-function _maybeSyncAutoTokens() {
-  if (!STATE.isAdmin || _autoSyncDone) return;
-  if (!_charsReady || !_npcsReady || !_toksReady) return;
-  _autoSyncDone = true;
-  _syncAutoTokens();
-}
-
-const _tokenEntityKey = t => t?.characterId ? 'c:' + t.characterId : t?.npcId ? 'n:' + t.npcId : null;
-let _reserveCleanupRunning = false;
-
-async function _cleanupReserveDuplicates() {
-  if (!STATE.isAdmin || _reserveCleanupRunning) return;
-  const seen = new Map();
-  const duplicateIds = [];
-  const reserve = Object.values(VS.tokens)
-    .map(e => e.data)
-    .filter(t => !t.pageId && _tokenEntityKey(t))
-    .sort((a, b) => {
-      const aAuto = a.id?.startsWith('auto_') ? 0 : 1;
-      const bAuto = b.id?.startsWith('auto_') ? 0 : 1;
-      return aAuto - bAuto || String(a.id).localeCompare(String(b.id));
-    });
-  for (const t of reserve) {
-    const key = _tokenEntityKey(t);
-    if (seen.has(key)) duplicateIds.push(t.id);
-    else seen.set(key, t.id);
-  }
-  if (!duplicateIds.length) return;
-
-  _reserveCleanupRunning = true;
-  try {
-    const batch = writeBatch(db);
-    duplicateIds.forEach(id => batch.delete(_tokRef(id)));
-    await batch.commit();
-    duplicateIds.forEach(id => { VS.tokens[id]?.shape?.destroy(); delete VS.tokens[id]; });
-    _renderTraySoon();
-  } catch (e) {
-    console.error('[vtt] cleanup reserve duplicates:', e);
-  } finally {
-    _reserveCleanupRunning = false;
-  }
-}
-
-async function _syncAutoTokens() {
-  // ─ 1. Scanner les tokens existants : tokens orphelins + doublons réserve ─
-  // Règle : un perso/PNJ peut avoir plusieurs tokens *placés* sur des pages
-  // différentes (cf. _vttDuplicateOnPage), mais UN SEUL token en réserve
-  // (pageId === null). Les doublons en réserve viennent de syncs concurrents
-  // historiques (multi-tab / multi-admin) avant l'introduction des IDs
-  // déterministes ci-dessous.
-  const hasAnyToken     = new Set();  // 'c:<id>' | 'n:<id>' : a au moins 1 token
-  const reserveSeen     = new Map();  // 'c:<id>' | 'n:<id>' → 1er token réserve gardé
-  const toDelete        = [];
-  const toFixOwner      = [];         // { id, ownerId } : ownerId désynchro de character.uid
-
-  for (const { data } of Object.values(VS.tokens)) {
-    let key = null;
-    if (data.characterId) key = 'c:' + data.characterId;
-    else if (data.npcId)  key = 'n:' + data.npcId;
-    if (!key) continue;
-
-    // Orphelin : l'entité a été supprimée → drop quoi qu'il arrive
-    if (data.characterId && !VS.characters[data.characterId]) { toDelete.push(data.id); continue; }
-    if (data.npcId       && !VS.npcs[data.npcId])             { toDelete.push(data.id); continue; }
-
-    hasAnyToken.add(key);
-
-    // Réconciliation propriétaire : le token d'un perso doit refléter
-    // character.uid (réassignation de compte / correction d'association),
-    // sinon le joueur n'est pas reconnu « en ligne » et ne peut pas bouger son
-    // token (la règle vttTokens compare ownerId à l'uid).
-    if (data.characterId) {
-      const want = VS.characters[data.characterId]?.uid || null;
-      if ((data.ownerId || null) !== want) toFixOwner.push({ id: data.id, ownerId: want });
-    }
-
-    // Doublons réserve : on garde le 1er rencontré, on drop les autres
-    if (!data.pageId) {
-      if (reserveSeen.has(key)) toDelete.push(data.id);
-      else                      reserveSeen.set(key, data);
-    }
-  }
-
-  // ─ 2. Identifier les entités sans aucun token → à créer ──────────────
-  const toCreate = [];
-  for (const c of Object.values(VS.characters)) {
-    if (!hasAnyToken.has('c:' + c.id)) toCreate.push({
-      detId: `auto_c_${c.id}`,
-      name: c.nom || 'Personnage', type: 'player',
-      characterId: c.id, npcId: null, beastId: null, ownerId: c.uid || null,
-    });
-  }
-  for (const n of Object.values(VS.npcs)) {
-    if (!hasAnyToken.has('n:' + n.id)) toCreate.push({
-      detId: `auto_n_${n.id}`,
-      name: n.nom || 'PNJ', type: 'npc',
-      characterId: null, npcId: n.id, beastId: null, ownerId: null,
-    });
-  }
-  // Les ennemis ne sont PAS auto-créés depuis le bestiaire : ils sont placés
-  // manuellement depuis la section Bestiaire du tray.
-
-  if (!toCreate.length && !toDelete.length && !toFixOwner.length) return;
-
-  const batch = writeBatch(db);
-  for (const { detId, ...base } of toCreate) {
-    // ID déterministe (auto_c_<id> / auto_n_<id>) : si deux syncs concurrents
-    // (multi-tab, multi-admin) créent en même temps, `batch.set` écrase au
-    // lieu de dupliquer → garantie d'unicité au niveau Firestore.
-    batch.set(doc(_toksCol(), detId), {
-      ...base,
-      pageId: null, col: 0, row: 0,
-      visible: false, imageUrl: null,
-      movement: null, range: 1, attack: null, defense: null,
-      hp: null, hpMax: null,
-      movedThisTurn: false, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false,
-      createdAt: serverTimestamp(),
-    });
-  }
-  for (const id of new Set(toDelete)) batch.delete(_tokRef(id));
-  for (const { id, ownerId } of toFixOwner) batch.update(_tokRef(id), { ownerId });
-  await batch.commit().catch(e => console.error('[vtt] auto-sync tokens:', e));
-}
-
+// [Auto-sync des tokens (création/réserve) → vtt-autosync.js (importé en haut)]
 // ═══════════════════════════════════════════════════════════════════
 // KONVA — chargement dynamique CDN
 // ═══════════════════════════════════════════════════════════════════
@@ -812,7 +690,7 @@ function _cleanup() {
   _bestiaryLoads.clear();
   VS.session = {}; VS.activePage = null; VS.selected = null; _attackSrc = null;
   _clearAim(); _hideActBar();
-  _moveHL = []; _autoSyncDone = false; _renderedPings.clear(); _renderedReactions.clear();
+  _moveHL = []; _renderedPings.clear(); _renderedReactions.clear();
   VS.selectedMulti.clear(); _multiDragOrigin = null;
   _annotations = {}; _drawing = false; _drawLive = null; _drawHistory = [];
   _selectedAnnotId = null; _selectedAnnotIds.clear(); _annotTransformer = null;
@@ -821,7 +699,7 @@ function _cleanup() {
   _marqueeShape = null; _suppressNextClick = false;
   _pingTimer = null; _pingOrigin = null;
   _resetRuler();  // réinitialise aussi l'état de diffusion MJ (cf. vtt-ruler.js)
-  _charsReady = false; _npcsReady = false; _toksReady = false;
+  _resetAutoSync();
   _traySearch = '';
   VS.imgTr = null; VS.imgTrFg = null; VS.selImg = null; VS.mapMode = false;
   _hideCtxMenu();
@@ -7289,7 +7167,7 @@ function _initListeners() {
       }
     }
     _renderTraySoon();
-    _charsReady = true; _maybeSyncAutoTokens();
+    _markCharsReady();
     // Signale immédiatement au destinataire les objets reçus pendant qu’il est
     // sur le VTT. Le premier snapshot est ignoré pour ne pas annoncer tout
     // l’inventaire existant à l’ouverture de la table.
@@ -7325,7 +7203,7 @@ function _initListeners() {
       }
     }
     _renderTraySoon();
-    _npcsReady = true; _maybeSyncAutoTokens();
+    _markNpcsReady();
   }));
 
   // 5. Bestiaire
@@ -7391,7 +7269,7 @@ function _initListeners() {
     _renderTraySoon();
     _renderCombatTrackerSoon();
     void _cleanupReserveDuplicates();
-    _toksReady=true; _maybeSyncAutoTokens();
+    _markToksReady();
     _ensureBestiaryForTokens();
     // Joueur : le bouton « Invoquer mon token » dépend de l'état de SON token
     // (créé / assigné / déplacé par le MJ). Sans ce refresh, le bouton n'apparaît
