@@ -339,5 +339,19 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   En ligne/Hors ligne/PNJ, placer un perso/une créature, liste des pages (créer, renommer,
   dossiers, drag&drop, recherche), **changer de page** (carte/tokens/fog se redessinent),
   envoyer les joueurs (📡).
+- ✅ **Phase 1 — extraction `vtt-conditions-config.js`** (modal « Réglages des états »,
+  ~374 l.) : éditeur MJ de la bibliothèque de conditions (liste/détails/effets,
+  création/suppression d'états perso, reset). **Approche basse-risque** : l'**état**
+  (`CONDITION_LIBRARY`/`CONDITION_BY_ID`, lu en 39 points du combat) **reste dans vtt.js
+  intact** — seul le modal sort. Le module lit `CONDITION_LIBRARY` en live-binding et le
+  mute via un setter exporté `_setConditionLibrary()` + `_rebuildConditionIndex()` (les 4
+  réassignations directes converties). Les toggles `_vttCcTriSet`/`_vttCcFlagToggle`
+  suivent. vtt.js réimporte les 8 handlers (registre VTT_ACTIONS). Free-var a attrapé
+  `openModal` non importé → corrigé. Balayage d'orphelins **tous modules** propre.
+  **vtt.js 9746 → 9403 (−343).** **⚠️ smoke-test** : section États → ⚙ Réglages → éditer
+  un état (effets adv/dis, flags, sauvegarde/DC), Enregistrer, ＋ Nouvel état (rename),
+  supprimer un état perso, ↺ Réinitialiser ; vérifier que les états s'appliquent toujours
+  en combat (le moteur lit la lib mise à jour).
 - ⏳ **Phase 1 — reste** : Combat/attaque (gros, ~3000 l.), multi-ciblage (~1500 l.),
-  dessin/annotations (tools). Les plus durs (combat-critiques, fortement tissés).
+  dessin/annotations (tools), conditions par-token (`_vttConditionApply/Remove/…`). Les
+  plus durs (combat-critiques, fortement tissés).
