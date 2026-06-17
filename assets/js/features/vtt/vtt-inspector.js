@@ -9,7 +9,7 @@
 import { VS } from './vtt-state.js';
 import { STATE } from '../../core/state.js';
 import { _esc, _searchIncludes } from '../../shared/html.js';
-import { computeEquipSkillBonus } from '../../shared/char-stats.js';
+import { computeEquipSkillBonus, statShort } from '../../shared/char-stats.js';
 import { hpColor, _STAT_COLOR, _STAT_KEY, _MS_BONUS_BUFF, _VTT_RUNE_META } from './vtt-constants.js';
 import { DAMAGE_INTERACTIONS } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
