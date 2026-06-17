@@ -10,7 +10,8 @@
 import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
 import { _esc } from '../../shared/html.js';
-import { _live, _select } from './vtt.js';   // données effectives + sélection token (transverses)
+import { _live } from './vtt-effective.js';   // données effectives (leaf)
+import { _select } from './vtt.js';           // sélection token (transverse)
 
 let _combatTab = 'allies'; // 'allies' (joueurs + PNJ) | 'enemies' (MJ only)
 
