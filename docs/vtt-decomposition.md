@@ -269,5 +269,16 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
     MJ)** : mode carte → ajouter/glisser/redimensionner/supprimer une image, basculer
     avant/arrière-plan, et **sélectionner une image désélectionne bien le token** (callback
     `renderInspector(null)` + barre d'action masquée). vtt.js 12790 → 12696.
+  - ✅ **Tranche 4 — visuel des tokens (split visuel ↔ handlers)** : la partie PURE-RENDU
+    de `_buildShape` (forme, anneaux sél/atk, barres HP/PM, badges CA/états/buffs, nom,
+    portrait clippé — ~155 l.) → `_buildTokenVisual(t, ld, condById)` dans `vtt-render.js`.
+    Les **handlers d'interaction** (drag/clic/attaque/sélection — combat live) **restent
+    dans vtt.js**, attachés au groupe retourné. Cut net vérifié : les handlers n'utilisent
+    aucune variable locale du visuel ; `ld`/`condById` passés en paramètres (pas d'import
+    circulaire). `TYPE_COLOR`/`hpColor` → `vtt-constants.js`. **⚠️ smoke-test** : tokens
+    affichés correctement (PV/PM, badges d'états/buffs, CA, nom, portrait), et drag/clic/
+    sélection/attaque **inchangés**. vtt.js 12696 → 12541.
+  - ⏳ **Restant render** : handlers d'interaction token (le plus couplé — à décomposer en
+    callbacks injectés comme les images, mais c'est le combat → prudence max), annotations.
 - ⏳ **Phase 1 — reste** : Tray/Pages, Inspector (42 deps), `tools-ruler` (dessin/annot),
   Combat/attaque (gros), chat (couplage entrant massif). Les plus durs.

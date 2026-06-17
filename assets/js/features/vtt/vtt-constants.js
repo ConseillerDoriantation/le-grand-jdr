@@ -10,6 +10,11 @@
 // calculs de position token/image/zone, et le rendu de la grille).
 export const CELL = 70;
 
+// Couleur de base d'un token selon son type, et couleur de la barre de PV
+// selon le ratio (vert > 50% > orange > 25% > rouge).
+export const TYPE_COLOR = { player:'#4f8cff', enemy:'#ef4444', npc:'#a78bfa' };
+export const hpColor = r => r > 0.5 ? '#22c38e' : r > 0.25 ? '#f59e0b' : '#ef4444';
+
 // Mapping abréviation compétence → clé getMod / couleurs associées.
 export const _STAT_KEY   = { FOR:'force', DEX:'dexterite', CON:'constitution', INT:'intelligence', SAG:'sagesse', CHA:'charisme' };
 export const _STAT_COLOR = { FOR:'#ef4444', DEX:'#22c38e', CON:'#f59e0b', INT:'#4f8cff', SAG:'#b47fff', CHA:'#fd6c9e' };

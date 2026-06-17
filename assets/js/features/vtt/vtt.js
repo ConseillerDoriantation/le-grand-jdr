@@ -43,8 +43,8 @@ import {
   _logCol, _logGmCol, _castingCol, _castingRef, _pingsCol, _pingRef,
   _reactionsCol, _reactionRef, _annotCol, _annotRef,
 } from './vtt-refs.js';
-import { CELL, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
-import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages } from './vtt-render.js';
+import { CELL, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
+import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual } from './vtt-render.js';
 import { _vttPanelError, _showCtxMenu, _hideCtxMenu } from './vtt-utils.js';
 import {
   VTT_ACTION_RUNE, _parseDice, _maxDice, _maxEffectDisplay, _effectDisplay,
@@ -101,8 +101,7 @@ let _vttDelegSearch = '';
 const MIN_SCALE   = 0.15;
 const MAX_SCALE   = 4;
 
-const TYPE_COLOR  = { player:'#4f8cff', enemy:'#ef4444', npc:'#a78bfa' };
-const hpColor     = r => r > 0.5 ? '#22c38e' : r > 0.25 ? '#f59e0b' : '#ef4444';
+// [TYPE_COLOR / hpColor → vtt-constants.js (importés en haut)]
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS — dispatcher générique pour vtt.js
@@ -1380,166 +1379,12 @@ const _MAP_IMG_DEPS = { hideActBar: _hideActBar, clearHL: _clearHL, renderInspec
 // TOKENS — shapes Konva
 // ═══════════════════════════════════════════════════════════════════
 function _buildShape(t) {
-  const K  = window.Konva;
+  // Visuel pur (forme, barres, badges, nom, portrait) → vtt-render.js.
+  // `ld` = données effectives (via _live) ; les handlers d'interaction ci-dessous
+  // restent ici, attachés au groupe retourné.
   const ld = _live(t);
   const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
-  // Rayons ellipse (proportionnels à la bounding box) ; r = rayon vertical, sert d'ancre Y aux barres.
-  const rx = CELL*sw*0.42, ry = CELL*sh*0.42, r = ry, bW = CELL*sw*0.9;
-  const hpKnown = ld.displayHp !== null && ld.displayHpMax !== null;
-  const hp  = hpKnown ? ld.displayHp  : 0;
-  const hpm = hpKnown ? ld.displayHpMax : 1;
-  const rat = hpKnown ? (hpm>0 ? Math.min(1, Math.max(0,hp/hpm)) : 1) : 0.5;
-  const g = new K.Group({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2, id:`tok-${t.id}` });
-  g.setAttr('tokenW', sw);
-  g.setAttr('tokenH', sh);
-  g.setAttr('displayImage', ld.displayImage || null);
-  // ── Forme de base (ellipse, équivalente à un cercle quand W===H) ──
-  g.add(new K.Ellipse({ radiusX:rx, radiusY:ry, fill:TYPE_COLOR[t.type]??'#888', opacity:.9 }));
-  // ── Anneaux sélection / attaque ───────────────────────────────────
-  g.add(new K.Ellipse({ radiusX:rx+4, radiusY:ry+4, stroke:'#fff',    strokeWidth:3, fill:'transparent',visible:false,name:'sel' }));
-  g.add(new K.Ellipse({ radiusX:rx+4, radiusY:ry+4, stroke:'#ef4444', strokeWidth:3, dash:[5,3],fill:'transparent',visible:false,name:'atk' }));
-  // ── Barre HP (texte superposé sur la barre) ───────────────────────
-  const BH=9; // hauteur barre HP
-  g.add(new K.Rect({ x:-bW/2, y:r+4, width:bW, height:BH, fill:'#0d1117', cornerRadius:4, listening:false }));
-  g.add(new K.Rect({ x:-bW/2, y:r+4, width:Math.max(2,bW*rat), height:BH, fill:hpKnown?hpColor(rat):'#555', cornerRadius:4, listening:false, name:'hp-fill' }));
-  g.add(new K.Text({ x:-bW/2, y:r+4, width:bW, height:BH, align:'center', verticalAlign:'middle',
-    text:hpKnown?`${hp}/${hpm}`:'?/?', fontSize:8, fontStyle:'bold', fill:'#fff',
-    shadowColor:'#000', shadowBlur:2, shadowOpacity:.9,
-    fontFamily:'Inter,sans-serif', listening:false, name:'hp-val' }));
-  // ── Barre PM (joueurs + PNJ avec PM renseignés, texte superposé) ──
-  const _pm0=ld.displayPm;
-  let _lblY=r+BH+8;
-  if (_pm0!=null || ld.hasMana) {
-    const _pmKnown = _pm0!=null;
-    const pmMax0=ld.displayPmMax??1, pmRat0=_pmKnown&&pmMax0>0?Math.min(1,Math.max(0,_pm0/pmMax0)):(_pmKnown?1:0);
-    const PMH=8;
-    g.add(new K.Rect({ x:-bW/2, y:r+BH+6, width:bW, height:PMH, fill:'#0d1117', cornerRadius:4, listening:false }));
-    g.add(new K.Rect({ x:-bW/2, y:r+BH+6, width:Math.max(2,bW*pmRat0), height:PMH, fill:_pmKnown?'#9b6dff':'#555', cornerRadius:4, listening:false, name:'pm-fill' }));
-    g.add(new K.Text({ x:-bW/2, y:r+BH+6, width:bW, height:PMH, align:'center', verticalAlign:'middle',
-      text:_pmKnown?`✨${_pm0}/${pmMax0}`:'✨?', fontSize:7, fontStyle:'bold', fill:'#fff',
-      shadowColor:'#000', shadowBlur:2, shadowOpacity:.9,
-      fontFamily:'Inter,sans-serif', listening:false, name:'pm-val' }));
-    _lblY=r+BH+PMH+10;
-  }
-  // ── Badge CA (coin haut-droit) + indicateur buff ─────────────────
-  const _buff = ld._activeCaBuff;
-  const _buffed = !!_buff;
-  const _round  = VS.session?.combat?.round ?? 0;
-  const _toursLeft = _buff
-    ? (_buff.expiresAtRound != null && _round > 0 ? _buff.expiresAtRound - _round + 1 : _buff.totalDuration ?? '∞')
-    : null;
-  const _caX = rx*.7, _caY = -ry*.7;
-  g.add(new K.Circle({ x:_caX, y:_caY, radius:10,
-    fill: _buffed ? 'rgba(30,27,80,0.95)' : 'rgba(15,15,25,0.9)',
-    stroke: _buffed ? '#818cf8' : '#64748b',
-    strokeWidth: _buffed ? 2.5 : 1.5,
-    listening:false, name:'ca-bg' }));
-  g.add(new K.Text({ x:_caX-10, y:_caY-6, width:20, height:12,
-    text:`🛡${ld.caBadge ?? (ld.displayDefense??0)}`, fontSize:9, fontStyle:'bold',
-    fill: _buffed ? '#c4b5fd' : '#e2e8f0',
-    fontFamily:'Inter,sans-serif', align:'center', listening:false, name:'ca-lbl' }));
-  if (_buffed) {
-    g.add(new K.Text({ x:_caX-10, y:_caY+5, width:20, height:9,
-      text:`${_toursLeft}↺`, fontSize:7, fontStyle:'bold',
-      fill:'#818cf8', fontFamily:'Inter,sans-serif', align:'center', listening:false, name:'ca-buff-turns' }));
-  }
-  // ── Badges d'états (conditions / debuffs) — top-left du token ──────────────
-  const _condRound = VS.session?.combat?.round ?? 0;
-  const _activeConditions = (t.conditions || []).filter(c =>
-    c.expiresAtRound == null || _condRound === 0 || _condRound <= c.expiresAtRound
-  );
-  if (_activeConditions.length) {
-    const maxShow = 4;
-    const display = _activeConditions.slice(0, maxShow);
-    const overflow = _activeConditions.length - display.length;
-    display.forEach((cond, i) => {
-      const lib = CONDITION_BY_ID[cond.id] || { icon: '❓', color: '#888' };
-      const cx = -rx*.7;
-      const cy = -ry*.7 + i * 20;
-      g.add(new K.Circle({ x:cx, y:cy, radius:10,
-        fill: lib.color, stroke: '#000', strokeWidth: 1.2,
-        listening:false, name:'cond-bg' }));
-      g.add(new K.Text({ x:cx-10, y:cy-7, width:20, height:14,
-        text: lib.icon, fontSize:11, fontStyle:'bold',
-        fontFamily:'Inter,sans-serif', align:'center', verticalAlign:'middle',
-        listening:false, name:'cond-ic' }));
-    });
-    if (overflow > 0) {
-      const cx = -rx*.7, cy = -ry*.7 + maxShow * 20;
-      g.add(new K.Circle({ x:cx, y:cy, radius:10,
-        fill: '#374151', stroke: '#000', strokeWidth: 1.2, listening:false }));
-      g.add(new K.Text({ x:cx-10, y:cy-6, width:20, height:12,
-        text: `+${overflow}`, fontSize:9, fontStyle:'bold',
-        fill:'#fff', fontFamily:'Inter,sans-serif', align:'center', listening:false }));
-    }
-  }
-
-  // ── Badges de buffs/debuffs (DoT, enchant, CA bonus…) — top-right du token ──
-  // Affiché en miroir des états : permet de voir d'un coup d'œil les effets actifs
-  // qui ne sont pas des conditions D&D (enchant arme, DoT, bouclier, etc.)
-  const _buffsRound = VS.session?.combat?.round ?? 0;
-  const _BUFF_VIZ = {
-    dot:             { icon:'🩸', color:'#dc2626' }, // DoT (debuff)
-    dmg_bonus:       { icon:'⚔️', color:'#f59e0b' }, // enchant arme alliée
-    move_bonus:      { icon:'👢', color:'#22c55e' }, // mouvement +
-    move_debuff:     { icon:'👢', color:'#7c2d12' }, // mouvement −
-    range_bonus:     { icon:'🏹', color:'#0ea5e9' }, // portée +
-    toucher_bonus:   { icon:'🎯', color:'#e8b84b' }, // toucher + (enchant)
-    ca:              { icon:'🛡', color:'#06b6d4' }, // bonus CA
-    shield_reactive: { icon:'🛡', color:'#a78bfa' }, // bouclier réactif
-    enchantment:     { icon:'✨', color:'#e8b84b' }, // enchant générique
-    affliction:      { icon:'💀', color:'#8b5cf6' }, // affliction générique
-    weapon_replace:  { icon:'🔮', color:'#a78bfa' }, // arme invoquée
-  };
-  const _activeBuffs = (t.buffs || []).filter(b =>
-    b.expiresAtRound == null || _buffsRound === 0 || _buffsRound <= b.expiresAtRound
-  );
-  if (_activeBuffs.length) {
-    const maxShow = 4;
-    const display = _activeBuffs.slice(0, maxShow);
-    const overflow = _activeBuffs.length - display.length;
-    display.forEach((bf, i) => {
-      const viz = _BUFF_VIZ[bf.type] || { icon: bf.icon || '✨', color: '#9ca3af' };
-      const cx = rx*.7;
-      const cy = -ry*.7 + i * 20;
-      g.add(new K.Circle({ x:cx, y:cy, radius:10,
-        fill: viz.color, stroke: '#000', strokeWidth: 1.2,
-        listening:false, name:'buff-bg' }));
-      g.add(new K.Text({ x:cx-10, y:cy-7, width:20, height:14,
-        text: viz.icon, fontSize:11, fontStyle:'bold',
-        fontFamily:'Inter,sans-serif', align:'center', verticalAlign:'middle',
-        listening:false, name:'buff-ic' }));
-    });
-    if (overflow > 0) {
-      const cx = rx*.7, cy = -ry*.7 + maxShow * 20;
-      g.add(new K.Circle({ x:cx, y:cy, radius:10,
-        fill: '#374151', stroke: '#000', strokeWidth: 1.2, listening:false }));
-      g.add(new K.Text({ x:cx-10, y:cy-6, width:20, height:12,
-        text: `+${overflow}`, fontSize:9, fontStyle:'bold',
-        fill:'#fff', fontFamily:'Inter,sans-serif', align:'center', listening:false }));
-    }
-  }
-  // ── Nom ───────────────────────────────────────────────────────────
-  // listening:false → le label ne capte pas les clics : ils traversent vers le
-  // token situé en dessous (évite de se cibler soi-même quand le nom déborde
-  // au-dessus du token d'une cible).
-  g.add(new K.Text({ text:ld.displayName??t.name, x:-bW/2, y:_lblY,
-    width:bW, align:'center', fontSize:11, fontStyle:'bold', fill:'#fff',
-    fontFamily:'Inter,sans-serif', name:'lbl', listening:false,
-    shadowColor:'#000', shadowBlur:4, shadowOpacity:1 }));
-
-  // ── Image clippée à l'ellipse (équivalent cercle quand W===H) ─────
-  const imgSrc = ld.displayImage;
-  if (imgSrc) {
-    const clipGrp = new K.Group({ clipFunc: ctx => { ctx.ellipse(0,0,rx,ry,0,0,Math.PI*2,false); }, listening:false });
-    const el=new Image(); el.crossOrigin='anonymous';
-    el.onload = () => {
-      clipGrp.add(new K.Image({ image:el, x:-rx, y:-ry, width:rx*2, height:ry*2, listening:false }));
-      clipGrp.zIndex(2); VS.layers.token.batchDraw();
-    };
-    el.src = imgSrc;
-    g.add(clipGrp); clipGrp.zIndex(2);
-  }
+  const g = _buildTokenVisual(t, ld, CONDITION_BY_ID);
 
   const canDrag = _canControlToken(t);
   let rightDown = null;
