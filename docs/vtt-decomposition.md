@@ -362,6 +362,19 @@ Du **moins** couplé au **plus** couplé. Chaque PR : importe `VS`, déplace son
   3 filets propres (free-var, helpers partagés, orphelins). **vtt.js 9403 → 9223 (−180).**
   **⚠️ smoke-test** : inspecteur d'un token → ＋ appliquer un état, ✏️ éditer (source/DD/
   stat/durée), 🎲 jet de sauvegarde (log + retrait si réussi), ✕ retirer.
+- ✅ **Phase 1 — extraction `vtt-combat-turns.js`** (cycle de combat, ~199 l.) :
+  démarrer/terminer le combat (`_vttToggleCombat` : reset des flags + conversion des
+  durées différées), réinitialiser le tour d'un token (`_vttResetTurn`), bascule action
+  bonus/réaction (`_vttToggleTurnFlag`), et `_vttNextRound` (effets périodiques DoT/regen,
+  expiration buffs/états/summons, sauvegardes de concentration). Couplage runtime → vtt.js
+  (5 helpers combat hoisted, exportés) : `_rollDiceDetailed`, `_setHp`,
+  `_persistInvocationState`, `_vttTriggerConcentrationSave`, `_vttBreakConcentrationEffects`.
+  Les 4 handlers réimportés (registre) ; référencés en chaînes `data-vtt-fn` (tracker +
+  inspecteur, aucun import à rediriger). `_vttAddImageUrl`/`_vttUploadClick` (image,
+  intercalés) laissés en place → 2 ranges. 3 filets propres. **vtt.js 9223 → 9051 (−172).**
+  **⚠️ smoke-test** : démarrer un combat (flags reset), ▶ Tour suivant (round++, DoT/regen
+  appliqués + log, buffs/états expirés retirés, summon non-canalisé dissipé), ↺ reset tour
+  d'un token, toggles action bonus/réaction dans le tracker, terminer le combat.
 - ⏳ **Phase 1 — reste** : Combat/attaque (gros, ~3000 l.), multi-ciblage (~1500 l.),
   effets de sorts (afflictions/enchant/regen/invocation, appelés depuis l'attaque),
   dessin/annotations (tools). Les plus durs (combat-critiques, fortement tissés).

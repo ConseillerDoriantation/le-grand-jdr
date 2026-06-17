@@ -78,6 +78,9 @@ import {
   _vttConditionEdit, _vttConditionEditSave, _vttEnsureConditionsLoaded,
 } from './vtt-conditions.js';
 import {
+  _vttResetTurn, _vttToggleTurnFlag, _vttToggleCombat, _vttNextRound,
+} from './vtt-combat-turns.js';
+import {
   _renderTraySoon, _renderPageTabs, _switchPage, _trayTab, _resetTraySearch,
   _vttTrayFilter, _vttTraySearch, _vttTrayClearSearch, _vttBstSearch, _vttBstClearSearch, _vttTrayTab,
   _vttToggleOn, _vttToggleOff, _vttToggleNpc, _vttPageSearch, _vttPageSearchClear, _vttPageFolderToggle,
@@ -487,7 +490,7 @@ export function _resolveUidName(uid) {
 }
 
 // HP écrit sur la fiche source (bidirectionnel)
-async function _setHp(t, newHp) {
+export async function _setHp(t, newHp) {
   const v = Math.max(0, newHp);
   if (t.characterId) await updateDoc(_chrRef(t.characterId), { hp: v });
   else if (t.npcId)  await updateDoc(_npcRef(t.npcId),       { hp: v });
@@ -529,7 +532,7 @@ async function _syncDownedCondition(t, hp) {
  * hors `_vttRollAttack` (édition manuelle, DoT, environnement…).
  * Retourne un tableau de notes pour log/notif.
  */
-async function _vttTriggerConcentrationSave(td, damageAmount, nextHp = null, opts = {}) {
+export async function _vttTriggerConcentrationSave(td, damageAmount, nextHp = null, opts = {}) {
   if (!td || damageAmount <= 0) return [];
   let liveTd = VS.tokens?.[td.id]?.data || td;
   const freshSnap = td.id ? await getDoc(_tokRef(td.id)).catch(() => null) : null;
@@ -1825,7 +1828,7 @@ function _rollDice(formula) {
 }
 /** Variante détaillée : retourne aussi les rolls individuels et le mod.
  *  Utile pour afficher "1d4(3) +2 = 5" dans les logs. */
-function _rollDiceDetailed(formula) {
+export function _rollDiceDetailed(formula) {
   const p = _parseDice(formula);
   if (!p) {
     const flat = Math.max(0, parseInt(formula)||0);
@@ -2397,7 +2400,7 @@ function _invPickCancel() { _invPickState = null; closeModalDirect(); }
 // Avant de désinvoquer un token d'invocation : sauvegarde ses PV/PM courants sur
 // l'entrée de bibliothèque du lanceur (instance unique → réapparaît avec son état).
 // Best-effort (écriture autorisée surtout pour le propriétaire / le MJ).
-async function _persistInvocationState(tokData) {
+export async function _persistInvocationState(tokData) {
   try {
     const t = (tokData?.id && VS.tokens[tokData.id]?.data) ? VS.tokens[tokData.id].data : tokData;
     if (!t || t.summonKind !== 'invocation' || !t.summonInvId) return;
@@ -2627,7 +2630,7 @@ async function _vttApplyCasterConcentration(srcId, opt) {
   await updateDoc(_tokRef(srcId), { conditions: [...existing, cond] }).catch(() => {});
 }
 
-async function _vttBreakConcentrationEffects(casterId, cond) {
+export async function _vttBreakConcentrationEffects(casterId, cond) {
   const label = cond?.sortLabel || cond?.source || '';
   if (!casterId || !label) return;
   const round = VS.session?.combat?.round ?? 0;
@@ -7975,20 +7978,7 @@ async function _vttCleanGhostMembers() {
 }
 
 /** Réinitialise le déplacement et les actions d'un token (MJ, tour individuel). */
-async function _vttResetTurn(id) {
-  if (!STATE.isAdmin) return;
-  await updateDoc(_tokRef(id), { movedThisTurn: false, movedCells: 0, bonusMvt: 0, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false })
-    .catch(() => showNotif('Erreur reset tour', 'error'));
-  showNotif('Tour réinitialisé', 'success');
-}
-
-async function _vttToggleTurnFlag(id, field) {
-  if (!STATE.isAdmin || !["bonusActionThisTurn", "reactionThisTurn"].includes(field)) return;
-  const token = VS.tokens[id]?.data;
-  if (!token) return;
-  await updateDoc(_tokRef(id), { [field]: !token[field] })
-    .catch(() => showNotif("Erreur de suivi du tour", "error"));
-}
+// [Combat: reset tour + flags (_vttResetTurn/_vttToggleTurnFlag) → vtt-combat-turns.js]
 
 async function _vttAddImageUrl() {
   const url=(await promptModal('URL de l\'image :', { title: 'Image de fond', placeholder: 'https://…', required: true }))?.trim(); if (!url||!VS.activePage) return;
@@ -7997,169 +7987,7 @@ async function _vttAddImageUrl() {
 }
 function _vttUploadClick() { return document.getElementById('vtt-img-input')?.click(); }
 
-async function _vttToggleCombat() {
-  if (!STATE.isAdmin) return;
-  const active=!VS.session?.combat?.active;
-  await setDoc(_sesRef(),{combat:{active,round:active?1:0}},{merge:true});
-  if (active) {
-    const b=writeBatch(db);
-    // Au démarrage du combat (round 1), on convertit les conditions à durée
-    // différée (pendingDuration, posées hors combat) en expiresAtRound réel.
-    // Sinon ces états resteraient indéfiniment.
-    const startRound = 1;
-    Object.keys(VS.tokens).forEach(id => {
-      const tokData = VS.tokens[id]?.data;
-      if (!tokData) return;
-      const updates = { movedThisTurn:false, movedCells:0, bonusMvt:0, attackedThisTurn:false, bonusActionThisTurn:false, reactionThisTurn:false };
-      if (Array.isArray(tokData.conditions) && tokData.conditions.length) {
-        let changed = false;
-        const newConds = tokData.conditions.map(c => {
-          if (c.pendingDuration != null && c.expiresAtRound == null) {
-            changed = true;
-            const dur = parseInt(c.pendingDuration) || 0;
-            const { pendingDuration, ...rest } = c;
-            return { ...rest, expiresAtRound: dur > 0 ? startRound + dur - 1 : null };
-          }
-          return c;
-        });
-        if (changed) updates.conditions = newConds;
-      }
-      b.update(_tokRef(id), updates);
-    });
-    await b.commit().catch(()=>{});
-    showNotif('⚔️ Combat démarré !','success');
-  } else showNotif('Combat terminé.','success');
-}
-async function _vttNextRound() {
-  if (!STATE.isAdmin||!VS.session?.combat?.active) return;
-  const round=(VS.session.combat.round??1)+1;
-  await setDoc(_sesRef(),{combat:{active:true,round}},{merge:true});
-
-  // ── Application des effets périodiques en début de round (avant cleanup) ──
-  // DoT : dégâts/tour · Regen : soin/tour
-  const dotNotifs = [];
-  for (const id of Object.keys(VS.tokens)) {
-    const td = VS.tokens[id]?.data;
-    const dots = (td?.buffs || []).filter(b => (b.type === 'dot' || b.type === 'regen')
-      && (b.expiresAtRound == null || round <= b.expiresAtRound));
-    if (!dots.length) continue;
-    let totalDmg = 0;
-    let totalHeal = 0;
-    const dmgRolls = [];
-    const healRolls = [];
-    for (const dot of dots) {
-      const det = _rollDiceDetailed(dot.formula || '1d4 +2');
-      const entry = {
-        formula: dot.formula || '1d4 +2',
-        rolled: det.total, rolledDice: det.rolls, mod: det.mod, sides: det.sides,
-        sortLabel: dot.sortLabel || (dot.type === 'regen' ? 'Régénération' : 'DoT'),
-      };
-      if (dot.type === 'regen') {
-        totalHeal += det.total;
-        healRolls.push(entry);
-      } else {
-        totalDmg += det.total;
-        dmgRolls.push(entry);
-      }
-    }
-    const lT = _live(td);
-    const tgtName = lT.displayName ?? td.name;
-    const curHp = lT.displayHp ?? td.hp ?? 20;
-    const hpMax = lT.displayHpMax ?? 20;
-    if (totalDmg > 0) {
-      const newHp = Math.max(0, curHp - totalDmg);
-      await _setHp(td, newHp).catch(() => {});
-      dotNotifs.push(`🩸 ${totalDmg} dégâts DoT → ${tgtName}`);
-      await addDoc(_logCol(), {
-        type: 'dot-tick',
-        authorId: STATE.user?.uid || null,
-        authorName: STATE.profile?.pseudo || STATE.profile?.prenom || 'MJ',
-        tokenName: tgtName,
-        rolls: dmgRolls, total: totalDmg, newHp, hpMax,
-        createdAt: serverTimestamp(),
-      }).catch(() => {});
-      const concNotes = await _vttTriggerConcentrationSave(td, totalDmg, newHp);
-      dotNotifs.push(...concNotes);
-    }
-    if (totalHeal > 0) {
-      const afterDmg = Math.max(0, curHp - totalDmg);
-      const newHp = Math.min(hpMax, afterDmg + totalHeal);
-      const effectiveHeal = Math.max(0, newHp - afterDmg);
-      if (effectiveHeal <= 0) continue;
-      await _setHp(td, newHp).catch(() => {});
-      dotNotifs.push(`💚 ${effectiveHeal} PV Régénération → ${tgtName}`);
-      await addDoc(_logCol(), {
-        type: 'dot-tick',
-        isHeal: true,
-        authorId: STATE.user?.uid || null,
-        authorName: STATE.profile?.pseudo || STATE.profile?.prenom || 'MJ',
-        tokenName: tgtName,
-        rolls: healRolls, total: effectiveHeal, rolledTotal: totalHeal, newHp, hpMax,
-        createdAt: serverTimestamp(),
-      }).catch(() => {});
-    }
-  }
-
-  const b=writeBatch(db);
-  const expiredNotifs = [];
-  const expiredConcentrations = [];
-  Object.keys(VS.tokens).forEach(id => {
-    const tokData = VS.tokens[id]?.data;
-    if (!tokData) return;
-    // ── Cleanup auto des tokens summons expirés (sentinelle, arme invoquée) ──
-    // Les summons non-canalisés expirent à round > summonExpiresAtRound.
-    // Les summons canalisés (summonCanalise: true) persistent tant que la
-    // concentration tient, puis deviennent temporaires après rupture.
-    if (tokData.summonExpiresAtRound != null && !tokData.summonCanalise && round > tokData.summonExpiresAtRound) {
-      expiredNotifs.push(`${tokData.summonKind === 'invocation' ? '🐾' : tokData.summonKind === 'sentinelle' ? '🪤' : '⚔️'} ${tokData.name} dissipé`);
-      _persistInvocationState(tokData);   // PV/PM persistants avant dissipation (invocations)
-      b.delete(_tokRef(id));
-      return; // skip buff cleanup pour token supprimé
-    }
-    const updates = { movedThisTurn: false, movedCells: 0, bonusMvt: 0, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false };
-    if (tokData.buffs?.length) {
-      const remaining = tokData.buffs.filter(bf => {
-        const isExpired =
-          // cas normal : expiresAtRound calculé
-          (bf.expiresAtRound != null && round > bf.expiresAtRound) ||
-          // fallback : anciens buffs (expiresAtRound null) avec totalDuration+startRound
-          (bf.expiresAtRound == null && bf.totalDuration != null && bf.startRound != null &&
-           round - Math.max(1, bf.startRound) >= bf.totalDuration);
-        if (isExpired) {
-          expiredNotifs.push(`${bf.icon ?? '✨'} ${bf.sortLabel ?? 'Buff'} expiré sur ${_live(tokData).displayName ?? tokData.name}`);
-          return false;
-        }
-        return true;
-      });
-      if (remaining.length !== tokData.buffs.length) updates.buffs = remaining;
-    }
-    // ── Cleanup des états (conditions) expirés ────────────────────────
-    // Les conditions ont aussi un expiresAtRound (posé au cast d'affliction
-    // ou via l'édition manuelle). Mêmes règles d'expiration que les buffs.
-    if (tokData.conditions?.length) {
-      const remainingConds = tokData.conditions.filter(c => {
-        if (c.expiresAtRound != null && round > c.expiresAtRound) {
-          const lib = CONDITION_BY_ID[c.id];
-          const icon = lib?.icon || '⛓';
-          const label = lib?.label || c.id;
-          expiredNotifs.push(`${icon} ${label} expiré sur ${_live(tokData).displayName ?? tokData.name}`);
-          if (c.concentrationSpell) expiredConcentrations.push({ casterId: tokData.id, cond: c });
-          return false;
-        }
-        return true;
-      });
-      if (remainingConds.length !== tokData.conditions.length) updates.conditions = remainingConds;
-    }
-    b.update(_tokRef(id), updates);
-  });
-  await b.commit().catch(()=>{});
-  for (const item of expiredConcentrations) {
-    await _vttBreakConcentrationEffects(item.casterId, item.cond);
-  }
-  dotNotifs.forEach(msg => showNotif(msg, 'error'));
-  expiredNotifs.forEach(msg => showNotif(msg, 'info'));
-  showNotif(`Round ${round} !`, 'success');
-}
+// [Combat: démarrer/terminer + round suivant (_vttToggleCombat/_vttNextRound) → vtt-combat-turns.js]
 
 // ── Modal stats combat (override des stats auto) ────────────────────
 function _openStatsModal(t) {
