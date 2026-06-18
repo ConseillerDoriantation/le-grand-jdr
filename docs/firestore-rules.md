@@ -228,6 +228,11 @@ service cloud.firestore {
       match /bestiary_tracker/{id}  { allow read, write: if inAdventure(adventureId); }
       match /collection/{id}        { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /collectionSettings/{id}{ allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      // Contenu SECRET des cartes (recto / nom / défi des cartes non révélées) :
+      // sous-collection MJ-only. Le doc public `collection/{id}` ne contient que la
+      // projection révélée (cf. _publicProjection dans collection.js) → les joueurs
+      // ne téléchargent plus le contenu des cartes verrouillées ou masquées.
+      match /collection_secret/{id} { allow read, write: if isAdvAdmin(adventureId); }
 
       // Présentations joueurs : lecture membres, écriture MJ ou propriétaire du personnage lié.
       match /players/{id} {

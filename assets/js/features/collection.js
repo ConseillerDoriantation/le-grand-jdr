@@ -1,5 +1,5 @@
 import { STATE } from '../core/state.js';
-import { loadCollection } from '../data/firestore.js';
+import { loadCollection, saveDoc, replaceDoc, deleteFromCol } from '../data/firestore.js';
 import { confirmDelete, trySave, tryUpsert } from '../shared/crud.js';
 import { registerActions } from '../core/actions.js';
 import { openModal, closeModal } from '../shared/modal.js';
@@ -67,12 +67,68 @@ function getCardBackImage(card) {
 const _canSeeFace      = (c) => STATE.isAdmin || !!c.unlocked;
 const _challengeMasked = (c) => !!c.descMasquee && !STATE.isAdmin;
 
+// ── Protection serveur des cartes (révélation progressive) ───────────────────
+// Le doc public `collection/{id}` ne contient QUE ce qu'un joueur a le droit de
+// voir ; le contenu secret (recto/nom/défi des cartes verrouillées ou masquées)
+// vit dans `collection_secret/{id}` (MJ-only). Firestore ne masque pas un champ à
+// la lecture → seule façon d'éviter que les joueurs téléchargent les cartes non
+// révélées. La projection est ré-écrite à chaque changement d'état.
+function _publicProjection(full) {
+  const pub = {
+    ordre:       full.ordre ?? 999,
+    unlocked:    !!full.unlocked,
+    descMasquee: !!full.descMasquee,
+    backImageId: full.backImageId || '',
+  };
+  if (full.backImageUrl) pub.backImageUrl = full.backImageUrl;
+  if (full.unlocked) {                      // carte débloquée → recto révélé
+    pub.nom      = full.nom || '';
+    pub.imageUrl = full.imageUrl || '';
+    pub.emoji    = full.emoji || '';
+    if (!full.descMasquee) pub.description = full.description || '';  // défi visible
+  }
+  return pub;
+}
+
+// Persiste une carte : vérité complète MJ (collection_secret) PUIS projection
+// publique (replaceDoc → retire les champs non révélés). Séquentiel : le secret
+// est écrit en premier (aucune perte de données si le 2ᵉ write échoue).
+async function _persistCard(id, full) {
+  try {
+    await saveDoc('collection_secret', id, full);
+    await replaceDoc('collection', id, _publicProjection(full));
+    return true;
+  } catch (e) {
+    console.error('[collection] _persistCard', e);
+    showNotif('Erreur lors de la sauvegarde de la carte.', 'error');
+    return false;
+  }
+}
+
+// MJ : source = collection_secret (complète). Migration douce idempotente — toute
+// carte présente côté public mais absente du secret y est recopiée, puis le doc
+// public est réduit à sa projection.
+async function _loadAdminCardsWithMigration() {
+  let secret = await loadCollection('collection_secret').catch(() => []);
+  const publicCards = await loadCollection('collection').catch(() => []);
+  const secretIds = new Set(secret.map(c => c.id));
+  const toMigrate = publicCards.filter(c => !secretIds.has(c.id));
+  if (toMigrate.length) {
+    for (const c of toMigrate) {
+      const { id, ...full } = c;
+      await _persistCard(id, full);
+    }
+    secret = await loadCollection('collection_secret').catch(() => secret);
+  }
+  return secret;
+}
+
 // ── Rendu principal ──────────────────────────────────────────────────────────
 export async function renderCollectionPage() {
-  const [cards] = await Promise.all([
-    loadCollection('collection'),
-    loadSettings(),
-  ]);
+  await loadSettings();
+  const cards = STATE.isAdmin
+    ? await _loadAdminCardsWithMigration()
+    : await loadCollection('collection').catch(() => []);
 
   STORE.cards = [...cards].sort((a, b) => (a.ordre ?? 999) - (b.ordre ?? 999));
 
@@ -326,6 +382,7 @@ async function _persistOrder(selector = '.collection-grid .coll-card-wrapper') {
     if (card && card.ordre !== idx) {
       card.ordre = idx;
       writes.push(trySave('collection', id, { ordre: idx }));
+      writes.push(trySave('collection_secret', id, { ordre: idx }));
     }
   });
   if (writes.length) await Promise.all(writes);
@@ -336,7 +393,11 @@ async function _persistOrder(selector = '.collection-grid .coll-card-wrapper') {
 async function toggleUnlock(id) {
   const card = STORE.cards.find(c => c.id === id);
   if (!card) return;
-  if (await trySave('collection', id, { unlocked: !card.unlocked })) {
+  const { id: _omit, ...full } = card;
+  full.unlocked = !card.unlocked;
+  // Re-projette : débloquer copie recto/nom/défi dans le doc public ; verrouiller
+  // les retire (replaceDoc).
+  if (await _persistCard(id, full)) {
     showNotif(card.unlocked ? 'Carte verrouillée.' : '🎉 Carte débloquée !', 'success');
   }
   closeModal();
@@ -543,18 +604,24 @@ function openCollectionModal(card = null) {
 async function saveCard(id = '') {
   const existing = id ? STORE.cards.find(c => c.id === id) : null;
   const imageResult = _cardImageCropper?.getResult();
-  const data = {
+  // `full` = carte complète (on repart de l'existant pour préserver unlocked/ordre/
+  // createdAt/backImageUrl que le formulaire ne touche pas).
+  const full = {
+    ...(existing || {}),
     nom:         document.getElementById('cc-nom')?.value?.trim() || 'Carte',
     imageUrl:    imageResult === undefined ? (existing?.imageUrl || '') : (imageResult || ''),
     backImageId: document.querySelector('input[name="cc-back-image"]:checked')?.value || STORE.backImages[0]?.id || '',
     description: document.getElementById('cc-desc')?.value || '',
     descMasquee: !!document.getElementById('cc-masque')?.checked,
   };
+  delete full.id;
+  const cardId = id || `card_${Date.now()}`;
   if (!id) {
-    data.unlocked = false;
-    data.ordre = STORE.cards.length;
+    full.unlocked  = false;
+    full.ordre     = STORE.cards.length;
+    full.createdAt = new Date().toISOString();
   }
-  if (await tryUpsert('collection', id || null, data)) {
+  if (await _persistCard(cardId, full)) {
     _cardImageCropper?.destroy();
     _cardImageCropper = null;
     closeModal();
@@ -570,6 +637,7 @@ function editCard(id) {
 
 async function deleteCard(id) {
   if (!await confirmDelete('collection', id, 'Supprimer cette carte ?')) return;
+  try { await deleteFromCol('collection_secret', id); } catch (e) { console.warn('[collection] suppr. secret', e); }
   closeModal();
   showNotif('Carte supprimée.', 'success');
   await renderCollectionPage();
