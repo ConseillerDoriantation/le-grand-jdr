@@ -157,6 +157,9 @@ let _shopWeapons   = [];   // armes issues de la boutique pour l'espace combat P
 let _activeId      = null;
 let _filterSearch  = '';
 let _activeOrgFilter = null;
+let _listView      = 'cat';  // 'cat' (par catégorie) | 'az' (liste à plat A→Z)
+let _filterStatus  = '';     // ''=tous | 'mort' | 'disparu' | 'alive' (ni mort ni disparu)
+let _filterHidden  = false;  // MJ : n'afficher que les PNJ cachés
 let _histEditDelta = 0;
 let _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
 
@@ -343,7 +346,7 @@ function _renderNavItem(n) {
   const niv      = _affiniteNiveau(n);
   const af       = afx(niv);
   return `
-  <div class="npc-nav-item ${isActive ? 'is-active' : ''}" style="${_afVars(af)}"
+  <div class="npc-nav-item ${isActive ? 'is-active' : ''} ${n.statut === 'mort' ? 'npc-nav-item--dead' : ''}" style="${_afVars(af)}"
     data-action="selectNpc" data-id="${n.id}" data-npc-id="${n.id}">
 
     <div class="npc-nav-avatar">
@@ -353,7 +356,7 @@ function _renderNavItem(n) {
     </div>
 
     <div class="npc-nav-body">
-      <div class="npc-nav-name">${_esc(n.nom || '?')}${STATE.isAdmin && n.embauchable === false ? ` <span class="npc-hidden-tag" title="Caché aux joueurs">🚫</span>` : ''}</div>
+      <div class="npc-nav-name">${_esc(n.nom || '?')}${NPC_STATUTS[n.statut] ? ` <span class="npc-status-tag" title="${NPC_STATUTS[n.statut].lbl}">${NPC_STATUTS[n.statut].ico}</span>` : ''}${STATE.isAdmin && n.embauchable === false ? ` <span class="npc-hidden-tag" title="Caché aux joueurs">🚫</span>` : ''}</div>
       <div class="npc-nav-affi">
         <div class="npc-nav-dots">
           ${AFFINITE.map((a, i) => `<div class="npc-nav-dot" ${i <= niv ? `style="background:${a.couleur}"` : ''}></div>`).join('')}
@@ -705,6 +708,22 @@ function _renderFiche(n) {
           rows="3" placeholder="Apparence, personnalité, secrets…">${_esc(n.description || '')}</textarea>
       </div>`
     : (n.description ? `<div class="npc-desc">${_esc(n.description)}</div>` : '');
+  // Statut narratif (MJ) — segmenté Vivant / Mort / Disparu.
+  const statutSel = STATE.isAdmin ? `
+    <div class="npc-statut-bar">
+      <span class="npc-edit-lbl">Statut</span>
+      <div class="npc-statut-seg">
+        ${[['', '💚 Vivant'], ['mort', '☠️ Mort'], ['disparu', '❓ Disparu']].map(([v, lbl]) =>
+          `<button type="button" class="npc-statut-btn ${(n.statut || '') === v ? 'is-on' : ''}" data-action="npcSetStatut" data-id="${n.id}" data-statut="${v}">${lbl}</button>`).join('')}
+      </div>
+    </div>` : '';
+  // Notes MJ — jamais rendues côté joueur (réservées à l'admin).
+  const noteMJ = STATE.isAdmin ? `
+    <div class="npc-edit-block npc-note-mj">
+      <span class="npc-edit-lbl">🔒 Notes MJ <span class="npc-note-mj-hint">(jamais visible des joueurs)</span></span>
+      <textarea class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="noteMJ"
+        rows="3" placeholder="Intrigue, vraie identité, twist, objectif secret…">${_esc(n.noteMJ || '')}</textarea>
+    </div>` : '';
   // Colonne principale (affinité + événements, puis stats) et colonne latérale
   // (affinités spécifiques, bastion). L'historique est intégré à la carte affinité.
   const main = [_renderAffiniteGroupe(n), _renderStatsPanel(n)].filter(Boolean).join('');
@@ -721,7 +740,9 @@ function _renderFiche(n) {
   <div class="npc-fiche">
     ${_renderFicheHeader(n)}
     <div class="npc-body">
+      ${statutSel}
       ${desc}
+      ${noteMJ}
       ${body}
     </div>
   </div>`;
@@ -744,8 +765,33 @@ function _getFiltered() {
   // Visibilité joueurs : un PNJ avec embauchable === false est caché (toggle
   // « 🚫 Caché joueurs » de la fiche). Le MJ voit tout. (Filtrage UI ; la vraie
   // confidentialité passerait par les règles Firestore — cf. note.)
-  const base = STATE.isAdmin ? _npcs : _npcs.filter(n => n.embauchable !== false);
+  let base = STATE.isAdmin ? _npcs : _npcs.filter(n => n.embauchable !== false);
+  if (STATE.isAdmin && _filterHidden) base = base.filter(n => n.embauchable === false);
+  if (_filterStatus === 'mort')         base = base.filter(n => n.statut === 'mort');
+  else if (_filterStatus === 'disparu') base = base.filter(n => n.statut === 'disparu');
+  else if (_filterStatus === 'alive')   base = base.filter(n => n.statut !== 'mort' && n.statut !== 'disparu');
   return base.filter(n => _npcMatchesSearch(n, _filterSearch));
+}
+
+// Barre de contrôles : bascule de vue (Catégories / A→Z) + filtres rapides.
+function _renderListControls() {
+  const viewBtn = (v, lbl) => `<button type="button" class="npc-lc-btn ${_listView === v ? 'is-on' : ''}" data-action="npcSetListView" data-view="${v}">${lbl}</button>`;
+  const statBtn = (v, lbl, title) => `<button type="button" class="npc-lc-chip ${_filterStatus === v ? 'is-on' : ''}" data-action="npcSetStatusFilter" data-status="${v}" title="${title}">${lbl}</button>`;
+  return `<div class="npc-list-controls">
+    <div class="npc-lc-seg">${viewBtn('cat', '📁 Catégories')}${viewBtn('az', '🔤 A→Z')}</div>
+    <div class="npc-lc-filters">
+      ${statBtn('', 'Tous', 'Tous les statuts')}
+      ${statBtn('mort', '☠️', 'Morts seulement')}
+      ${statBtn('disparu', '❓', 'Disparus seulement')}
+      ${STATE.isAdmin ? `<button type="button" class="npc-lc-chip ${_filterHidden ? 'is-on' : ''}" data-action="npcToggleHiddenFilter" title="N'afficher que les PNJ cachés">🚫</button>` : ''}
+    </div>
+  </div>`;
+}
+
+function _renderFlatList(filtered) {
+  const sorted = [...filtered].sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
+  return `<div class="npc-list-modebar"><span>A→Z</span><span>${sorted.length} PNJ</span></div>
+    <div class="npc-flat-list">${sorted.map(_renderNavItem).join('')}</div>`;
 }
 
 // ── Sélection & filtres ───────────────────────────────────────────────────────
@@ -799,6 +845,12 @@ function _updateNpcListScrollHint(list = document.getElementById('npc-list-items
 
 
 // ── Groupement par organisation (navigation par catégories) ──────────────────
+// Statut narratif d'un PNJ (défaut = vivant : aucune valeur stockée).
+const NPC_STATUTS = {
+  mort:    { lbl: 'Mort',    ico: '☠️' },
+  disparu: { lbl: 'Disparu', ico: '❓' },
+};
+
 const NO_ORG_KEY = '__no_org__';
 
 function _groupNpcsByOrg(npcs) {
@@ -908,21 +960,25 @@ function _renderSearchResults(entries, total) {
 }
 
 function _buildListHtml(filtered = _getFiltered()) {
-  if (filtered.length === 0) {
-    return `<div style="padding:1.5rem;text-align:center;color:var(--text-dim);
-        font-size:.8rem;font-style:italic">Aucun PNJ trouvé</div>`;
-  }
-  const groups = _groupNpcsByOrg(filtered);
-  const entries = _visibleOrgEntries(groups);
-  if (_filterSearch.trim()) return _renderSearchResults(entries, filtered.length);
-
-  if (_activeOrgFilter) {
-    const selected = groups.get(_activeOrgFilter) || [];
+  // Drilldown d'une catégorie (vue Catégories, hors recherche) : sous-vue propre.
+  if (_activeOrgFilter && _listView === 'cat' && !_filterSearch.trim()) {
+    const selected = _groupNpcsByOrg(filtered).get(_activeOrgFilter) || [];
     if (selected.length) return _renderOrgDrilldown(_activeOrgFilter, selected);
     _activeOrgFilter = null;
   }
-
-  return _renderOrgIndex(entries);
+  const controls = _renderListControls();
+  if (filtered.length === 0) {
+    const why = _filterSearch.trim() ? ' trouvé' : (_filterStatus || _filterHidden) ? ' (filtre actif)' : '';
+    return controls + `<div style="padding:1.5rem;text-align:center;color:var(--text-dim);
+        font-size:.8rem;font-style:italic">Aucun PNJ${why}</div>`;
+  }
+  if (_filterSearch.trim()) {
+    const entries = _visibleOrgEntries(_groupNpcsByOrg(filtered));
+    return controls + _renderSearchResults(entries, filtered.length);
+  }
+  if (_listView === 'az') return controls + _renderFlatList(filtered);
+  const entries = _visibleOrgEntries(_groupNpcsByOrg(filtered));
+  return controls + _renderOrgIndex(entries);
 }
 
 function _npcSelectOrg(btn) {
@@ -935,6 +991,30 @@ function _npcSelectOrg(btn) {
 function _npcBackToOrgs() {
   _activeOrgFilter = null;
   _refreshList({ keepScroll: false });
+}
+
+function _npcSetListView(btn) {
+  _listView = btn.dataset.view === 'az' ? 'az' : 'cat';
+  _activeOrgFilter = null;
+  _refreshList({ keepScroll: false });
+}
+function _npcSetStatusFilter(btn) {
+  _filterStatus = btn.dataset.status || '';
+  _refreshList({ keepScroll: false });
+}
+function _npcToggleHiddenFilter() {
+  _filterHidden = !_filterHidden;
+  _refreshList({ keepScroll: false });
+}
+
+async function _npcSetStatut(btn) {
+  if (!STATE.isAdmin) return;
+  const id = btn.dataset.id; const statut = btn.dataset.statut || '';
+  const n = _npcs.find(x => x.id === id); if (!n) return;
+  n.statut = statut;
+  await trySave('npcs', id, { statut });
+  _refreshActivePanel();
+  _refreshList({ keepScroll: true });
 }
 
 // ── Émoji personnalisé par catégorie (organisation) ───────────────────────────
@@ -1881,6 +1961,10 @@ registerActions({
   npcSetWeapon:              (el) => _npcSetWeapon(el),
   npcSetPhoto:               (btn) => _npcSetPhoto(btn),
   npcViewPhoto:              (btn) => _npcViewPhoto(btn),
+  npcSetStatut:              (btn) => _npcSetStatut(btn),
+  npcSetListView:            (btn) => _npcSetListView(btn),
+  npcSetStatusFilter:        (btn) => _npcSetStatusFilter(btn),
+  npcToggleHiddenFilter:     ()    => _npcToggleHiddenFilter(),
   npcEditOrgIcon:            (btn) => _npcEditOrgIcon(btn),
   npcPickOrgIcon:            (btn) => _npcPickOrgIcon(btn),
   npcResetOrgIcon:           (btn) => _npcResetOrgIcon(btn),

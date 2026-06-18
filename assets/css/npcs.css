@@ -332,6 +332,34 @@
   background: var(--af-bg);
 }
 .npc-hidden-tag { font-size: .72rem; opacity: .85; vertical-align: middle; }
+.npc-status-tag { font-size: .72rem; vertical-align: middle; }
+.npc-nav-item--dead { opacity: .55; filter: grayscale(.5); }
+.npc-nav-item--dead .npc-nav-name { text-decoration: line-through; text-decoration-thickness: 1px; }
+
+/* Statut narratif (fiche, MJ) */
+.npc-statut-bar { display: flex; align-items: center; gap: .6rem; margin-bottom: .3rem; flex-wrap: wrap; }
+.npc-statut-seg { display: inline-flex; gap: 4px; background: rgba(255,255,255,.04); padding: 3px; border-radius: 10px; border: 1px solid var(--border); }
+.npc-statut-btn { border: 0; background: transparent; color: var(--text-dim); cursor: pointer; font-size: .74rem; padding: 3px 10px; border-radius: 7px; transition: background .12s, color .12s; }
+.npc-statut-btn:hover { color: var(--text); }
+.npc-statut-btn.is-on { background: rgba(255,255,255,.12); color: var(--text); }
+
+/* Notes MJ (secret) — teinte distincte pour signaler le contenu réservé. */
+.npc-note-mj textarea { border-color: rgba(212,175,55,.35); background: rgba(212,175,55,.05); }
+.npc-note-mj-hint { font-weight: 400; font-size: .68rem; color: var(--text-dim); }
+
+/* Barre de contrôles de la liste (vue + filtres rapides). */
+.npc-list-controls {
+  display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap;
+  padding: .4rem .55rem; position: sticky; top: 0; z-index: 2;
+  background: rgba(14,22,36,.96); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border);
+}
+.npc-lc-seg { display: inline-flex; gap: 3px; background: rgba(255,255,255,.04); padding: 2px; border-radius: 9px; border: 1px solid var(--border); }
+.npc-lc-btn { border: 0; background: transparent; color: var(--text-dim); cursor: pointer; font-size: .7rem; padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+.npc-lc-btn.is-on { background: rgba(255,255,255,.12); color: var(--text); }
+.npc-lc-filters { display: inline-flex; gap: 4px; }
+.npc-lc-chip { border: 1px solid var(--border); background: rgba(255,255,255,.04); color: var(--text-dim); cursor: pointer; font-size: .72rem; padding: 2px 8px; border-radius: 999px; }
+.npc-lc-chip.is-on { background: rgba(212,175,55,.18); border-color: var(--gold, #d4af37); color: var(--text); }
+.npc-flat-list { display: flex; flex-direction: column; }
 .npc-hero-id { min-width: 0; display: flex; flex-direction: column; gap: .4rem; }
 .npc-hero-name {
   font-family: 'Cinzel', serif; font-size: 1.3rem; color: var(--text);
