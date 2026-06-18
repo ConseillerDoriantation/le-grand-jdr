@@ -350,7 +350,7 @@ function _renderNavItem(n) {
     </div>
 
     <div class="npc-nav-body">
-      <div class="npc-nav-name">${_esc(n.nom || '?')}</div>
+      <div class="npc-nav-name">${_esc(n.nom || '?')}${STATE.isAdmin && n.embauchable === false ? ` <span class="npc-hidden-tag" title="Caché aux joueurs">🚫</span>` : ''}</div>
       <div class="npc-nav-affi">
         <div class="npc-nav-dots">
           ${AFFINITE.map((a, i) => `<div class="npc-nav-dot" ${i <= niv ? `style="background:${a.couleur}"` : ''}></div>`).join('')}
@@ -740,7 +740,11 @@ function _renderEmpty() {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function _getFiltered() {
-  return _npcs.filter(n => _npcMatchesSearch(n, _filterSearch));
+  // Visibilité joueurs : un PNJ avec embauchable === false est caché (toggle
+  // « 🚫 Caché joueurs » de la fiche). Le MJ voit tout. (Filtrage UI ; la vraie
+  // confidentialité passerait par les règles Firestore — cf. note.)
+  const base = STATE.isAdmin ? _npcs : _npcs.filter(n => n.embauchable !== false);
+  return base.filter(n => _npcMatchesSearch(n, _filterSearch));
 }
 
 // ── Sélection & filtres ───────────────────────────────────────────────────────

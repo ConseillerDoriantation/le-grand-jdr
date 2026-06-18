@@ -3,7 +3,7 @@
 // Toute la logique est dans assets/js/features/characters/
 // ══════════════════════════════════════════════
 import { STATE } from '../core/state.js';
-import { updateInCol } from '../data/firestore.js';
+import { updateInCol, loadCollection } from '../data/firestore.js';
 import { _esc, _norm, modStr } from '../shared/html.js';
 import { charSession } from '../shared/char-session.js';
 import { characterPortraitContent } from '../shared/portraits.js';
@@ -1243,7 +1243,9 @@ function renderCharRelations(c, canEdit) {
       const sent = _RELATION_PALETTE[r.sent] || _RELATION_PALETTE.neutre;
       const ini = (r.ini || r.nom || '?')[0]?.toUpperCase() || '?';
       return `<div class="rel-card" style="--rel-c:${sent[2]};--rel-bg:${sent[0]};--rel-bd:${sent[1]}">
-        <div class="rel-avatar">${_esc(ini)}</div>
+        ${r.img
+          ? `<div class="rel-avatar rel-avatar--img"><img src="${r.img}" alt=""></div>`
+          : `<div class="rel-avatar">${_esc(ini)}</div>`}
         <div class="rel-body">
           <div class="rel-name-row">
             <span class="rel-name">${_esc(r.nom || 'Sans nom')}</span>
@@ -1270,12 +1272,24 @@ const _REL_SENTS = [
 ];
 const _REL_DEFAULT_LBL = { lien:'Lien', allie:'Allié', neutre:'Neutre', mefiance:'Méfiance', ennemi:'Ennemi' };
 
-function _openRelationModal(charId, idx) {
+let _relNpcsCache = []; // PNJ chargés pour le sélecteur de relation (modale)
+async function _openRelationModal(charId, idx) {
   const c = getCharacterById(charId); if (!c) return;
   const isEdit = Number.isInteger(idx) && idx >= 0;
   const r = isEdit ? (c.relations || [])[idx] : null;
   if (isEdit && !r) return;
   const curSent = r?.sent || 'neutre';
+  // PNJ liables : tous pour le MJ, seulement les non cachés (embauchable !== false)
+  // pour un joueur qui édite la fiche.
+  _relNpcsCache = (await loadCollection('npcs').catch(() => []))
+    .filter(n => STATE.isAdmin || n.embauchable !== false)
+    .sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
+  const npcOpts = `<option value="">— Aucun (relation libre) —</option>` + _relNpcsCache.map(n =>
+    `<option value="${n.id}" ${r?.npcId === n.id ? 'selected' : ''}>${_esc(n.nom || 'PNJ')}${n.role ? ' — ' + _esc(n.role) : ''}${STATE.isAdmin && n.embauchable === false ? ' 🚫' : ''}</option>`).join('');
+  const linkedImg = r?.img || '';
+  const previewHtml = linkedImg
+    ? `<img src="${linkedImg}" alt="">`
+    : `<span>${_esc((r?.ini || r?.nom || '?')[0]?.toUpperCase() || '?')}</span>`;
   openModal('', `
     <div class="rel-modal">
       <div class="rel-modal-head">
@@ -1286,6 +1300,15 @@ function _openRelationModal(charId, idx) {
         </div>
       </div>
       <div class="rel-modal-body">
+        <div class="form-group">
+          <label>🔗 Lier un PNJ existant <span class="rel-opt">(optionnel)</span></label>
+          <div class="rel-npc-pick">
+            <div class="rel-npc-preview" id="rel-npc-preview">${previewHtml}</div>
+            <select class="input-field" id="rel-npc" data-change="csV3RelPickNpc">${npcOpts}</select>
+          </div>
+          <input type="hidden" id="rel-npcid" value="${_esc(r?.npcId||'')}">
+          <input type="hidden" id="rel-img" value="${linkedImg}">
+        </div>
         <div class="form-group"><label>Nom</label>
           <input class="input-field" id="rel-nom" value="${_esc(r?.nom||'')}" placeholder="Maître Aldric, Capitaine Vex…" autocomplete="off"></div>
         <div class="form-group"><label>Rôle / lien <span class="rel-opt">(optionnel)</span></label>
@@ -1319,6 +1342,24 @@ function _csV3RelSent(sent) {
   if (lbl && !lbl.value.trim()) lbl.value = _REL_DEFAULT_LBL[sent] || sent;
 }
 
+// Sélection d'un PNJ existant : préremplit nom/rôle, l'aperçu et l'image (snapshot
+// du portrait cadré → reste cohérent côté joueur sans charger la collection npcs).
+function _csV3RelPickNpc(el) {
+  const n = el.value ? _relNpcsCache.find(x => x.id === el.value) : null;
+  document.getElementById('rel-npcid').value = n ? n.id : '';
+  document.getElementById('rel-img').value = n ? (n.imageUrl || '') : '';
+  const prev = document.getElementById('rel-npc-preview');
+  const nomEl = document.getElementById('rel-nom');
+  const roleEl = document.getElementById('rel-role');
+  if (n) {
+    if (nomEl) nomEl.value = n.nom || nomEl.value;
+    if (roleEl && n.role && !roleEl.value.trim()) roleEl.value = n.role;
+    if (prev) prev.innerHTML = n.imageUrl ? `<img src="${n.imageUrl}" alt="">` : `<span>${_esc((n.nom||'?')[0]?.toUpperCase()||'?')}</span>`;
+  } else if (prev) {
+    prev.innerHTML = `<span>${_esc((nomEl?.value || '?')[0]?.toUpperCase() || '?')}</span>`;
+  }
+}
+
 async function _csV3SaveRelation(charId, idx) {
   const c = getCharacterById(charId); if (!c) return;
   const nom = document.getElementById('rel-nom')?.value.trim();
@@ -1330,6 +1371,8 @@ async function _csV3SaveRelation(charId, idx) {
     sent,
     sentiment: document.getElementById('rel-sentiment')?.value.trim() || (_REL_DEFAULT_LBL[sent] || sent),
     note:      document.getElementById('rel-note')?.value.trim() || '',
+    npcId:     document.getElementById('rel-npcid')?.value || '',
+    img:       document.getElementById('rel-img')?.value || '',
   };
   const rels = Array.isArray(c.relations) ? c.relations.slice() : [];
   if (Number.isInteger(idx) && idx >= 0 && rels[idx]) rels[idx] = { ...rels[idx], ...rel };
@@ -2562,6 +2605,7 @@ registerActions({
   csV3EditRelation:        (btn)    => _csV3EditRelation(btn.dataset.id, Number(btn.dataset.idx)),
   csV3DeleteRelation:      (btn)    => _csV3DeleteRelation(btn.dataset.id, Number(btn.dataset.idx)),
   csV3RelSent:             (btn)    => _csV3RelSent(btn.dataset.sent),
+  csV3RelPickNpc:          (el)     => _csV3RelPickNpc(el),
   csV3SaveRelation:        (btn)    => _csV3SaveRelation(btn.dataset.id, Number(btn.dataset.idx)),
   closeRelModal:           ()       => closeModalDirect(),
 

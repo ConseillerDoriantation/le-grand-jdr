@@ -8616,6 +8616,19 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .rel-sentiment { font-size: .58rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; padding: 1px 8px; border-radius: 999px; background: var(--rel-bg); border: 1px solid var(--rel-bd); color: var(--rel-c); }
 .cs-v3 .rel-role { font-size: .7rem; color: var(--text-muted); }
 .cs-v3 .rel-note { font-size: .72rem; color: var(--text-soft, #c8d4e8); line-height: 1.4; font-style: italic; border-top: 1px dashed var(--border); padding-top: 6px; margin-top: 4px; font-family: 'Cormorant Garamond', 'Palatino Linotype', serif; }
+/* Avatar de relation = portrait du PNJ lié (cohérent avec sa fiche). */
+.cs-v3 .rel-avatar--img { padding: 0; overflow: hidden; }
+.cs-v3 .rel-avatar--img img { width: 100%; height: 100%; object-fit: cover; object-position: top center; }
+/* Sélecteur de PNJ dans la modale de relation. */
+.rel-npc-pick { display: flex; align-items: center; gap: .55rem; }
+.rel-npc-pick .input-field { flex: 1; min-width: 0; }
+.rel-npc-preview {
+  width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-elevated, #20203a); border: 1px solid var(--border);
+  font-family: var(--font-display, 'Cinzel', serif); font-weight: 700; color: var(--text);
+}
+.rel-npc-preview img { width: 100%; height: 100%; object-fit: cover; object-position: top center; }
 
 /* Profil v3 */
 .cs-v3 .profil-layout { display: grid; grid-template-columns: 1fr 280px; gap: 14px; }

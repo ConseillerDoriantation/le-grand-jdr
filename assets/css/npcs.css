@@ -310,6 +310,7 @@
   font-family: 'Cinzel', serif; font-weight: 700; font-size: 2rem; color: var(--af);
   background: var(--af-bg);
 }
+.npc-hidden-tag { font-size: .72rem; opacity: .85; vertical-align: middle; }
 .npc-hero-id { min-width: 0; display: flex; flex-direction: column; gap: .4rem; }
 .npc-hero-name {
   font-family: 'Cinzel', serif; font-size: 1.3rem; color: var(--text);
