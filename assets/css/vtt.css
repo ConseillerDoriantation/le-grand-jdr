@@ -1709,8 +1709,13 @@
 
 /* Wrapper scrollable qui contient tous les sous-blocs (En ligne, Hors ligne, PNJ).
    Limite la hauteur de la réserve pour que le Bestiaire reste accessible. */
+/* La réserve remplit toute la hauteur dispo de la vue (barre de recherche épinglée
+   en haut, liste scrollable en dessous) au lieu d'un cap fixe à 45vh qui gaspillait
+   l'espace et forçait un double scroll. */
+#vtt-reserve-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .vtt-res-scroll {
-  max-height: 45vh;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: .1rem .3rem .25rem;
 }
