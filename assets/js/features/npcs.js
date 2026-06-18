@@ -412,6 +412,7 @@ function _renderFicheHeader(n) {
     ${adm ? `
     <div class="npc-hero-actions">
       <button class="npc-mini-btn npc-mini-btn--danger" data-action="deleteNpc" data-id="${n.id}" title="Supprimer ce PNJ">🗑️ Supprimer</button>
+      <button class="npc-mini-btn ${n.embauchable === false ? 'npc-mini-btn--off' : ''}" data-action="npcToggleEmbauchable" data-id="${n.id}" title="Visibilité côté joueurs (les PNJ cachés n'apparaissent pas dans leur liste)">${n.embauchable !== false ? '👁️ Visible joueurs' : '🚫 Caché joueurs'}</button>
     </div>` : ''}
   </div>`;
 }
@@ -430,7 +431,6 @@ function _renderBastionProfil(n) {
 
   const actSet = new Set(n.activites || []);
   const mjBadge = !canSee ? `<span class="npc-badge-mj">MJ</span>` : '';
-  const embauchable = n.embauchable !== false;
 
   // ── Vue MJ : tout éditable inline ──
   if (adm) {
@@ -438,8 +438,6 @@ function _renderBastionProfil(n) {
     <div class="npc-card">
       <div class="npc-card-hd">
         <div class="npc-card-title">🏰 Recrutable au Bastion${mjBadge}</div>
-        <button class="npc-card-act ${embauchable ? '' : 'npc-card-act--off'}" data-action="npcToggleEmbauchable" data-id="${n.id}"
-          title="Visibilité côté joueurs">${embauchable ? '👁️ Visible joueurs' : '🚫 Caché joueurs'}</button>
       </div>
       <div class="npc-edit-block" style="margin-bottom:.45rem">
         <span class="npc-edit-lbl">Activités / spécialités</span>

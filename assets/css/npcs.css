@@ -323,12 +323,15 @@
   background: rgba(255,255,255,.05); border: 1px solid var(--border); color: var(--text-dim);
 }
 .npc-chip--af { background: var(--af-bg); border-color: var(--af-bd); color: var(--af); font-weight: 600; }
-.npc-hero-actions { display: flex; gap: .35rem; flex-shrink: 0; }
+.npc-hero-actions { display: flex; flex-direction: column; align-items: stretch; gap: .35rem; flex-shrink: 0; }
 .npc-mini-btn {
   background: rgba(255,255,255,.06); border: 1px solid var(--border); border-radius: 8px;
   padding: 4px 11px; cursor: pointer; font-size: .72rem; color: var(--text-dim); transition: background .12s;
+  white-space: nowrap;
 }
 .npc-mini-btn:hover { background: rgba(255,255,255,.1); }
+.npc-mini-btn--off { color: var(--text-dim); background: rgba(255,255,255,.04); }
+.npc-mini-btn--off:hover { background: rgba(255,255,255,.08); }
 .npc-mini-btn--danger { border-color: rgba(255,107,107,.25); color: #ff6b6b; background: transparent; }
 .npc-mini-btn--danger:hover { background: rgba(255,107,107,.1); }
 
