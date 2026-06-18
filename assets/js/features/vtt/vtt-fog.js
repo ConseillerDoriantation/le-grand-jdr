@@ -579,7 +579,7 @@ export function fogToggleEditMode(enabled, page) {
   const _isRectTool = t => t === 'hide' || t === 'reveal';
 
   const onDown = e => {
-    if (e.evt?.button === 2) return; // clic-droit = pan
+    if (e.evt?.button === 2 || e.evt?.button === 1) return; // clic-droit / molette = pan, jamais de pose
     const pos = _worldPos(); if (!pos) return;
     const K = window.Konva;
 
