@@ -55,19 +55,19 @@ service cloud.firestore {
              );
     }
 
+    // Auto-rattachement de compte : un membre invité (par email ou via un ancien
+    // uid) peut UNIQUEMENT s'ajouter lui-même à accessList + players. Le diff est
+    // borné à ces deux clés via hasOnly → `admins` et `accessEmails` sont garantis
+    // INCHANGÉS. Sans cette borne, un invité email pouvait se promouvoir MJ en
+    // s'ajoutant à `admins` (les anciennes clauses hasAll n'empêchaient que le
+    // retrait, pas l'ajout). Re-grader un MJ reste réservé à un admin existant.
     function isAccountSelfRepair(before, after) {
       return isLoggedIn() &&
              (hasEmailAccess(before) || hasPreviousUidAccess(before)) &&
-             after.diff(before).affectedKeys().hasOnly(["accessList", "players", "admins", "accessEmails"]) &&
+             after.diff(before).affectedKeys().hasOnly(["accessList", "players"]) &&
              after.accessList.hasAll(before.accessList) &&
              after.accessList.hasAny([request.auth.uid]) &&
-             after.players.hasAll(before.players) &&
-             after.admins.hasAll(before.admins) &&
-             (
-               !after.keys().hasAny(["accessEmails"]) ||
-               !before.keys().hasAny(["accessEmails"]) ||
-               after.accessEmails.hasAll(before.accessEmails)
-             );
+             after.players.hasAll(before.players);
     }
 
     function isCharacterUidSelfRepair(before, after) {
@@ -95,23 +95,11 @@ service cloud.firestore {
             .data.admins.hasAny([request.auth.uid]));
     }
 
-    function ownsGlobalCharacter(charId) {
-      return isLoggedIn() &&
-             charId is string &&
-             exists(/databases/$(database)/documents/characters/$(charId)) &&
-             get(/databases/$(database)/documents/characters/$(charId)).data.uid == request.auth.uid;
-    }
-
     function ownsAdventureCharacter(adventureId, charId) {
       return isLoggedIn() &&
              charId is string &&
              exists(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(charId)) &&
              get(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(charId)).data.uid == request.auth.uid;
-    }
-
-    function canWriteGlobalPlayer(data) {
-      return isAdmin() ||
-             (data.keys().hasAny(["charId"]) && ownsGlobalCharacter(data.charId));
     }
 
     function canCreateAdventurePlayer(adventureId) {
@@ -129,58 +117,53 @@ service cloud.firestore {
               request.resource.data.charId == resource.data.charId);
     }
 
-    match /shop/{id}              { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /shopCategories/{id}    { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /story/{id}             { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /story_meta/{id}        { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /places/{id}            { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /organizations/{id}     { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /place_types/{id}       { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /map_lieux/{id}         { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /npcs/{id}              { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /npc_affinites/{id}     { allow read, write: if isLoggedIn(); }
-    match /settings/{id}          { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /achievements/{id}      { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /achievements_meta/{id} { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /bestiary/{id}          { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /bestiaire/{id}         { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /bestiary_meta/{id}     { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /bestiary_tracker/{id}  { allow read, write: if isLoggedIn(); }
-    match /collection/{id}        { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /collectionSettings/{id}{ allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /players/{id} {
-      allow read:   if isLoggedIn();
-      allow create: if canWriteGlobalPlayer(request.resource.data);
-      allow update: if canWriteGlobalPlayer(resource.data) &&
-                       request.resource.data.charId == resource.data.charId;
-      allow delete: if canWriteGlobalPlayer(resource.data);
-    }
-    match /world/{id}             { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /informations/{id}      { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /tutorial/{id}          { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /recettes/{id}          { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /recipes/{id}           { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /combat_styles/{id}     { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /order/{id}             { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-    match /bastion/{id}           { allow read, write: if isLoggedIn(); }
-    match /story_histories/{id}   { allow read: if isLoggedIn(); allow write: if isAdmin(); }
-
-    match /characters/{id} {
-      allow read: if isLoggedIn();
-      allow create: if isLoggedIn() && request.resource.data.uid == request.auth.uid;
-      allow update, delete: if isLoggedIn() &&
-        (resource.data.uid == request.auth.uid || isAdmin());
-      // Don d'objet entre joueurs (VTT « Envoyer ») : tout membre connecté peut
-      // AJOUTER exactement un objet à l'inventaire d'un autre perso, sans toucher
-      // à aucun autre champ. Le retrait côté donneur passe par la règle owner.
-      allow update: if isLoggedIn()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['inventaire'])
-        && request.resource.data.inventaire.size() ==
-             ((resource.data.inventaire is list ? resource.data.inventaire.size() : 0) + 1);
-    }
+    // ── Collections LEGACY top-level — ADMIN ONLY ───────────────────────────
+    // Toutes les données « métier » sont désormais scopées par aventure
+    // (adventures/{advId}/…, cf. _colPath dans data/firestore.js : seules `users`
+    // et `adventures` restent globales). Ces collections racine ne sont plus ni
+    // lues ni écrites par l'app en fonctionnement normal ; elles ne subsistent que
+    // comme SOURCE de la migration (super-admin, runMigration).
+    //
+    // L'app étant publique et l'inscription email ouverte, la frontière de confiance
+    // ne peut PAS être `isLoggedIn` ici : un inconnu qui s'inscrit deviendrait
+    // « membre ». On verrouille donc tout le legacy racine en admin-only — un compte
+    // étranger n'y a plus aucun accès (ni lecture/PII, ni vandalisme).
+    match /shop/{id}              { allow read, write: if isAdmin(); }
+    match /shopCategories/{id}    { allow read, write: if isAdmin(); }
+    match /story/{id}             { allow read, write: if isAdmin(); }
+    match /story_meta/{id}        { allow read, write: if isAdmin(); }
+    match /places/{id}            { allow read, write: if isAdmin(); }
+    match /organizations/{id}     { allow read, write: if isAdmin(); }
+    match /place_types/{id}       { allow read, write: if isAdmin(); }
+    match /map_lieux/{id}         { allow read, write: if isAdmin(); }
+    match /npcs/{id}              { allow read, write: if isAdmin(); }
+    match /npc_affinites/{id}     { allow read, write: if isAdmin(); }
+    match /settings/{id}          { allow read, write: if isAdmin(); }
+    match /achievements/{id}      { allow read, write: if isAdmin(); }
+    match /achievements_meta/{id} { allow read, write: if isAdmin(); }
+    match /bestiary/{id}          { allow read, write: if isAdmin(); }
+    match /bestiaire/{id}         { allow read, write: if isAdmin(); }
+    match /bestiary_meta/{id}     { allow read, write: if isAdmin(); }
+    match /bestiary_tracker/{id}  { allow read, write: if isAdmin(); }
+    match /collection/{id}        { allow read, write: if isAdmin(); }
+    match /collectionSettings/{id}{ allow read, write: if isAdmin(); }
+    match /players/{id}           { allow read, write: if isAdmin(); }
+    match /world/{id}             { allow read, write: if isAdmin(); }
+    match /informations/{id}      { allow read, write: if isAdmin(); }
+    match /tutorial/{id}          { allow read, write: if isAdmin(); }
+    match /recettes/{id}          { allow read, write: if isAdmin(); }
+    match /recipes/{id}           { allow read, write: if isAdmin(); }
+    match /combat_styles/{id}     { allow read, write: if isAdmin(); }
+    match /order/{id}             { allow read, write: if isAdmin(); }
+    match /bastion/{id}           { allow read, write: if isAdmin(); }
+    match /story_histories/{id}   { allow read, write: if isAdmin(); }
+    match /characters/{id}        { allow read, write: if isAdmin(); }
 
     match /users/{uid} {
-      allow get:    if isLoggedIn();
+      // PII (email, pseudo, isAdmin) : lisible seulement par soi-même et le
+      // super-admin. Empêche la moisson d'emails (inconnu inscrit → lire les uids
+      // ailleurs → get users/{uid}). `list` déjà réservé à l'admin.
+      allow get:    if request.auth.uid == uid || isAdmin();
       allow list:   if isAdmin();
       allow create: if isUserSelfCreate(uid) || isAdmin();
       allow update: if isUserSelfUpdate(uid) || isAdmin();

@@ -9,6 +9,9 @@ dont certains tenteront de tricher / glitcher. Ce document distingue ce qui est
 | Surface | Protection | Réalité |
 |---|---|---|
 | Lecture/écriture des collections | Règles Firestore (serveur) | Vraie protection. Voir `firestore-rules.md`. |
+| Inconnu qui s'inscrit (inscription email ouverte) | Données métier scopées par aventure (`inAdventure`) + legacy racine en admin-only | Un compte étranger n'est dans aucune aventure → 0 accès métier ; il ne peut plus lire/vandaliser les collections racine. La confiance n'est **jamais** `isLoggedIn` seul. |
+| Promotion MJ par un invité (escalade) | Règles : `isAccountSelfRepair` borné à `accessList`/`players` | **Bloqué.** L'auto-rattachement ne peut plus toucher `admins`/`accessEmails`. Re-grader un MJ = action d'un admin existant. |
+| Moisson d'emails / PII | Règles : `users` `get` = soi-même + admin, `list` = admin | Un membre ne lit plus l'email/pseudo des autres comptes. *Effet de bord : un MJ d'aventure non-super ne résout plus les autres membres via `users` (accès par uid intact, dégradation douce).* |
 | `STATE.isAdmin` côté client | Aucune | Confort UI. Un joueur peut le forcer en console — sans effet, les règles vérifient `users/{uid}.isAdmin` et les admins d'aventure. |
 | Triche sur **ses propres** données (PV, or, inventaire de SA fiche) | Règles : `resource.data.uid == request.auth.uid` | **Possible par design.** Sans backend, on ne peut pas empêcher un joueur d'éditer sa propre fiche via la console. Acceptable entre potes ; seule parade réelle = Cloud Functions. |
 | `gmOnly` (jets cachés du MJ) | Règles Firestore (serveur) | **Vraie protection.** Les jets cachés sont écrits dans la sous-collection `vttLogGm` (`allow read, write: if isAdvAdmin`) ; les joueurs ne s'y abonnent pas et ne peuvent pas la lire. Le filtre client subsiste en défense en profondeur. |
@@ -19,7 +22,7 @@ dont certains tenteront de tricher / glitcher. Ce document distingue ce qui est
 - Le super-admin est `users/{uid}.isAdmin === true`, vérifié côté règles Firestore.
 - Ne pas réintroduire de constante `ADMIN_EMAIL` ni de comparaison `request.auth.token.email == ...`.
 - Bootstrap initial : définir `isAdmin: true` manuellement dans Firebase Console sur le document `users/{uid}` du premier admin.
-- L'auto-rattachement par email ajoute uniquement le `uid` courant dans `accessList` et `players`; il ne peut pas modifier `admins` ni `accessEmails`.
+- L'auto-rattachement par email ajoute uniquement le `uid` courant dans `accessList` et `players`; il ne peut pas modifier `admins` ni `accessEmails` (garanti côté règles par `affectedKeys().hasOnly(["accessList", "players"])` dans `isAccountSelfRepair`).
 
 ## 2. XSS — règles internes
 
