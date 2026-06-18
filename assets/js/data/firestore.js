@@ -340,7 +340,11 @@ function _primeDoc(col, id) {
 
 // Liste des collections promues "session-live" : choisies parce qu'elles
 // sont lues par 3+ pages et que la donnée ne grossit pas démesurément.
-// `bestiary` est volontairement exclu (volume potentiellement énorme).
+// `bestiary` (collection PRINCIPALE) est désormais lazy-session : sinon elle
+// était re-lue intégralement à chaque visite de la page (listener page-scoped
+// ré-attaché). Promue malgré le volume base64 → compromis mémoire assumé
+// (les créatures restent en RAM toute la session). Les bestiaires SECONDAIRES
+// `bestiary_<id>` ne matchent pas ce Set et restent page-scoped.
 // Amorçage EAGER minimal à l'entrée d'aventure : seules les collections dont
 // le dashboard a besoin tout de suite ET légères. Le reste est lazy (amorcé au
 // 1er accès — page, Ctrl+K, ou abonnement réactif du dashboard), ce qui réduit
@@ -360,6 +364,9 @@ const _LAZY_SESSION_COLLECTIONS = new Set([
   'story',
   'achievements',
   'collection',
+  // Bestiaire principal : lu par la page Bestiaire, la palette Ctrl+K et le VTT.
+  // Lazy-session → 0 lecture en repeat-visit (au prix de la RAM, cf. note ci-dessus).
+  'bestiary',
 ]);
 const _SESSION_DOCS = [
   ['bastion',          'main'], // dashboard
