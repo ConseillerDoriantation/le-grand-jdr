@@ -261,6 +261,11 @@ export function _renderPageList() {
   const ae = document.activeElement;
   const searchFocused = ae?.id === 'vtt-page-search' && el.contains(ae);
   const caretPos = searchFocused ? ae.selectionStart : null;
+  // Préserve le défilement de la vue Scènes : reconstruire la liste via innerHTML
+  // (au switch de page, _renderPageTabs appelle _renderPageList) clampe sinon le
+  // scrollTop du parent et fait remonter le panneau tout en haut.
+  const _scroller = el.closest('.vtt-tray-view');
+  const _sTop = _scroller ? _scroller.scrollTop : 0;
 
   if (!all.length) {
     el.innerHTML=`<div class="vtt-tray-empty">Aucune page<br><small>Clique ＋ pour créer</small></div>`;
@@ -344,6 +349,9 @@ export function _renderPageList() {
     const inp = document.getElementById('vtt-page-search');
     if (inp) { inp.focus(); if (caretPos != null) { try { inp.setSelectionRange(caretPos, caretPos); } catch {} } }
   }
+  // Restaure le défilement après le rebuild (et après un éventuel focus qui pourrait
+  // déplacer la vue). Clampé naturellement si le contenu est devenu plus court.
+  if (_scroller) _scroller.scrollTop = _sTop;
   // Drag & drop désactivé pendant une recherche (la liste filtrée n'est pas l'ordre réel)
   _initPageSortables(el, { pages: !q, folders: !q && !onlyUngrouped });
 }
