@@ -17,7 +17,8 @@ import { _sesRef, _pingRef } from './vtt-refs.js';   // refs Firestore (leaf)
 import { _renderTraySoon } from './vtt-tray.js';
 import { _renderMiniSheet, _vttToggleMiniSheet } from './vtt-mini-fiche.js';
 
-const VTT_PRESENCE_HEARTBEAT_MS = 75_000;
+// 90 s : aligné sur la présence app-wide, sous l'expiration lecture de 120 s.
+const VTT_PRESENCE_HEARTBEAT_MS = 90_000;
 
 // ── État local (intervalIds + listeners) ────────────────────────────
 let _presHeartbeat= null; // intervalId du heartbeat
@@ -70,7 +71,7 @@ function _resetPresence() {
 // MJ : retire un joueur de la présence du VTT en supprimant son doc ping/présence.
 // Effet : il disparaît de la colonne pour tout le monde, et son doc cesse d'être
 // relu à chaque ouverture du VTT (utile pour les entrées fantômes). Un joueur
-// encore actif se ré-annonce à son prochain heartbeat (≤75 s) — c'est voulu.
+// encore actif se ré-annonce à son prochain heartbeat (≤90 s) — c'est voulu.
 // MJ : déclare / termine une session de jeu en cours (vtt/session.live).
 // Les joueurs qui ouvrent le VTT voient alors un message dans le sas d'entrée.
 function _renderSessionBtn() {

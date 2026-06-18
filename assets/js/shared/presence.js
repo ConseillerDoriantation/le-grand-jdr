@@ -2,7 +2,7 @@
 // PRESENCE.JS — Présence app-wide (qui est connecté sur cette aventure)
 //
 // Écrit un doc adventures/{advId}/presence/{uid} avec { uid, pseudo, lastSeen }
-// toutes les 75 s tant qu'une aventure est sélectionnée ET que l'onglet est visible.
+// toutes les 90 s tant qu'une aventure est sélectionnée ET que l'onglet est visible.
 // L'admin lit cette collection sur son dashboard pour voir les joueurs connectés.
 //
 // Économie de quota : on suspend le heartbeat quand l'onglet passe en arrière-plan
@@ -13,7 +13,9 @@
 import { db, doc, setDoc, deleteDoc, serverTimestamp } from '../config/firebase.js';
 import { STATE } from '../core/state.js';
 
-const HEARTBEAT_MS = 75_000;
+// 90 s : sous l'expiration lecture de 120 s (marge 30 s sur un battement propre).
+// Allongé depuis 75 s pour réduire les écritures présence continues (~17 %).
+const HEARTBEAT_MS = 90_000;
 let _timer        = null;
 let _ref          = null;
 let _onUnload     = null;
