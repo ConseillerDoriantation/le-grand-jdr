@@ -139,6 +139,7 @@ const afx = (n) => AFFINITE[Math.max(0, Math.min(4, n ?? 2))];
 const _afVars = (af) => `--af:${af.couleur};--af-bg:${af.bg};--af-bd:${af.border}`;
 const AFFINITE_TYPES_DOC_ID  = 'npc_affinite_types';
 const AFFINITE_SEUILS_DOC_ID = 'npc_affinite_seuils';
+const ORG_ICONS_DOC_ID       = 'npc_org_icons'; // { icons: { [orgName]: emoji } }
 
 // Seuils par défaut (mode valeur) — chaque seuil = borne basse incluse du palier
 const SEUILS_DEFAULT = { hostile: -50, mefiant: -10, neutre: 0, amical: 30, allie: 100 };
@@ -151,6 +152,7 @@ let _affiniteTypes  = [];   // [{id, label, emoji, couleur}]
 let _affiniteSeuils = { ...SEUILS_DEFAULT };
 let _places        = [];   // [{ id, name }] — alimente l'autocomplete Lieu
 let _organisations = [];   // [{ id, name }] — alimente la sélection Organisations
+let _orgIcons      = {};   // { [orgName]: emoji } — émoji personnalisé par catégorie (MJ)
 let _shopWeapons   = [];   // armes issues de la boutique pour l'espace combat PNJ
 let _activeId      = null;
 let _filterSearch  = '';
@@ -279,9 +281,10 @@ export async function renderNpcs() {
   // Une seule subscription pour la collection npc_affinites : on y range
   // les relations PNJ↔joueur + les 2 docs spéciaux (types, seuils).
   watchPageCollection('npcs-affi', 'npc_affinites', 'npcs', data => {
-    _affiPerso = data.filter(a => a.id !== AFFINITE_TYPES_DOC_ID && a.id !== AFFINITE_SEUILS_DOC_ID);
+    _affiPerso = data.filter(a => a.id !== AFFINITE_TYPES_DOC_ID && a.id !== AFFINITE_SEUILS_DOC_ID && a.id !== ORG_ICONS_DOC_ID);
     const typesDoc  = data.find(a => a.id === AFFINITE_TYPES_DOC_ID);
     const seuilsDoc = data.find(a => a.id === AFFINITE_SEUILS_DOC_ID);
+    _orgIcons = data.find(a => a.id === ORG_ICONS_DOC_ID)?.icons || {};
     _affiniteTypes = Array.isArray(typesDoc?.types) ? [...typesDoc.types] : [];
     _affiniteTypes.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
     _affiniteSeuils = { ...SEUILS_DEFAULT, ...(seuilsDoc || {}) };
@@ -828,7 +831,8 @@ function _orgLabel(orgName) {
 }
 
 function _orgIcon(orgName) {
-  return orgName === NO_ORG_KEY ? '👤' : '🏛️';
+  if (orgName === NO_ORG_KEY) return '👤';
+  return _orgIcons[orgName] || '🏛️';
 }
 
 function _visibleOrgEntries(groups) {
@@ -858,7 +862,7 @@ function _renderOrgIndexItem(orgName, npcs) {
     class="npc-org-card ${hasActiveNpc ? 'is-active' : ''}"
     data-action="_npcSelectOrg">
     <span class="npc-org-card-main">
-      <span class="npc-org-icon">${isNoOrg ? '👤' : '🏛️'}</span>
+      <span class="npc-org-icon">${_orgIcon(orgName)}</span>
       <span class="npc-org-card-text">
         <strong>${_esc(label)}</strong>
       </span>
@@ -877,6 +881,9 @@ function _renderOrgDrilldown(orgName, npcs) {
         <strong>${_orgIcon(orgName)} ${_esc(label)}</strong>
         <small>${count} PNJ</small>
       </span>
+      ${STATE.isAdmin && orgName !== NO_ORG_KEY
+        ? `<button type="button" class="npc-org-emoji-btn" data-action="npcEditOrgIcon" data-org="${_esc(orgName)}" title="Changer l'emoji de la catégorie">${_orgIcon(orgName)} ✎</button>`
+        : ''}
     </div>
     <div class="npc-drill-list">
       ${npcs.map(n => _renderNavItem(n)).join('')}
@@ -929,6 +936,44 @@ function _npcBackToOrgs() {
   _activeOrgFilter = null;
   _refreshList({ keepScroll: false });
 }
+
+// ── Émoji personnalisé par catégorie (organisation) ───────────────────────────
+const ORG_ICON_PALETTE = ['🏛️','⚔️','🛡️','👑','💰','🏰','⛪','🗡️','🏴‍☠️','🐉','🌲','⚜️','🔮','🧙','🐺','🦅','🌟','🔥','❄️','💀','🎭','📜','⚖️','🍺','⚒️','🏹','🌹','🕯️','👁️','🦁','🌊','🪙'];
+
+function _npcEditOrgIcon(btn) {
+  if (!STATE.isAdmin) return;
+  const org = btn.dataset.org; if (!org) return;
+  const cur = _orgIcons[org] || '';
+  openModal(`🎨 Emoji de « ${_esc(org)} »`, `
+    <div class="npc-emoji-pick">
+      <div class="npc-emoji-grid">
+        ${ORG_ICON_PALETTE.map(e => `<button type="button" class="npc-emoji-opt ${e === cur ? 'is-on' : ''}" data-action="npcPickOrgIcon" data-org="${_esc(org)}" data-emoji="${e}">${e}</button>`).join('')}
+      </div>
+      <div class="npc-emoji-free">
+        <input type="text" class="input-field" id="npc-emoji-input" maxlength="8" value="${_esc(cur)}" placeholder="…ou colle ton propre emoji" autocomplete="off">
+        <button class="btn btn-gold btn-sm" data-action="npcApplyOrgIconInput" data-org="${_esc(org)}">OK</button>
+      </div>
+      <div class="npc-emoji-foot">
+        <button class="btn btn-outline btn-sm" data-action="npcResetOrgIcon" data-org="${_esc(org)}">↺ Émoji par défaut (🏛️)</button>
+      </div>
+    </div>`);
+}
+
+async function _saveOrgIcon(org, emoji) {
+  if (!STATE.isAdmin || !org) return;
+  // On stocke '' (= défaut) plutôt que de supprimer la clé : compatible avec un
+  // saveDoc en merge, et _orgIcon retombe sur 🏛️ pour une valeur vide.
+  _orgIcons = { ..._orgIcons, [org]: (emoji || '').trim() };
+  try {
+    await saveDoc('npc_affinites', ORG_ICONS_DOC_ID, { icons: _orgIcons });
+    closeModal();
+    _refreshList({ keepScroll: true });
+  } catch (e) { console.error('[org icon]', e); showNotif("Échec de l'enregistrement de l'emoji.", 'error'); }
+}
+
+function _npcPickOrgIcon(btn)       { _saveOrgIcon(btn.dataset.org, btn.dataset.emoji); }
+function _npcResetOrgIcon(btn)      { _saveOrgIcon(btn.dataset.org, ''); }
+function _npcApplyOrgIconInput(btn) { _saveOrgIcon(btn.dataset.org, document.getElementById('npc-emoji-input')?.value || ''); }
 
 function _renderStatsPanel(n) {
   if (!STATE.isAdmin) return ''; // bloc réservé MJ
@@ -1836,6 +1881,10 @@ registerActions({
   npcSetWeapon:              (el) => _npcSetWeapon(el),
   npcSetPhoto:               (btn) => _npcSetPhoto(btn),
   npcViewPhoto:              (btn) => _npcViewPhoto(btn),
+  npcEditOrgIcon:            (btn) => _npcEditOrgIcon(btn),
+  npcPickOrgIcon:            (btn) => _npcPickOrgIcon(btn),
+  npcResetOrgIcon:           (btn) => _npcResetOrgIcon(btn),
+  npcApplyOrgIconInput:      (btn) => _npcApplyOrgIconInput(btn),
   npcToggleActivite:         (btn) => _npcToggleActivite(btn),
   npcToggleEmbauchable:      (btn) => _npcToggleEmbauchable(btn),
   npcAddEvent:               (btn) => _npcAddEvent(btn),
