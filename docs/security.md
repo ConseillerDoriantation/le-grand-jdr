@@ -15,6 +15,8 @@ dont certains tenteront de tricher / glitcher. Ce document distingue ce qui est
 | `STATE.isAdmin` côté client | Aucune | Confort UI. Un joueur peut le forcer en console — sans effet, les règles vérifient `users/{uid}.isAdmin` et les admins d'aventure. |
 | Triche sur **ses propres** données (PV, or, inventaire de SA fiche) | Règles : `resource.data.uid == request.auth.uid` | **Possible par design.** Sans backend, on ne peut pas empêcher un joueur d'éditer sa propre fiche via la console. Acceptable entre potes ; seule parade réelle = Cloud Functions. |
 | `gmOnly` (jets cachés du MJ) | Règles Firestore (serveur) | **Vraie protection.** Les jets cachés sont écrits dans la sous-collection `vttLogGm` (`allow read, write: if isAdvAdmin`) ; les joueurs ne s'y abonnent pas et ne peuvent pas la lire. Le filtre client subsiste en défense en profondeur. |
+| Hauts-faits **secrets** (prophéties / twists) | Règles : sous-collection `achievements_secret` (`isAdvAdmin`) | **Vraie protection** (même schéma que `gmOnly`). Sortis de `achievements` → plus téléchargés par les joueurs. Migration douce auto au 1er chargement MJ de la page. Le filtre client `!a.secret` subsiste en défense en profondeur. |
+| Collection : cartes verrouillées / défis masqués | UI seulement (`unlocked`/`descMasquee` filtrés côté client) | ⚠️ **Pas encore protégé serveur.** `imageUrl`/`defi` des cartes non débloquées restent dans des docs lisibles par les membres → spoiler possible via la console. Fix = pipeline de révélation au déblocage (Étape 2, à faire testé). |
 | XSS stocké (HTML injecté dans un champ) | Échappement systématique + sanitizer rich-text | Voir §2. |
 
 ### Admins et rôles

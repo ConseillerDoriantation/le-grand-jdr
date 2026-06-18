@@ -29,7 +29,9 @@ const CATS = [
 
 
 const STORE = {
-  items:         [],        // hauts-faits chargés
+  items:         [],        // hauts-faits affichés (public + secret fusionnés, MJ)
+  publicItems:   [],        // miroir de la collection `achievements` (lue par tous)
+  secretItems:   [],        // sous-collection `achievements_secret` (MJ-only), [] côté joueur
   missions:      [],        // missions de la Trame disponibles pour les liaisons
   lightboxItems: {},        // { [catId]: item[] } cache lightbox
   filter:        'all',     // 'all' | 'epique' | 'comique' | 'histoire'
@@ -409,20 +411,28 @@ async function saveAchievement(id = '') {
       secret:       !!document.getElementById('ach-secret')?.checked,
     };
 
+    // Un HF secret vit dans `achievements_secret` (MJ-only) ; sinon dans la
+    // collection publique lue par les joueurs.
+    const newCol = payload.secret ? 'achievements_secret' : 'achievements';
+
     let docId = id;
     if (!id) {
       docId = `ach_${Date.now()}`;
-      await saveDoc('achievements', docId, payload);
+      await saveDoc(newCol, docId, payload);
       const order = await _loadOrder();
       order.push(docId);
       await _saveOrder(order);
-      if (STORE.items) STORE.items.push({ id: docId, ...payload });
     } else {
-      await saveDoc('achievements', docId, payload);
-      if (STORE.items) {
-        STORE.items = STORE.items.map(a => a.id === id ? { id, ...payload } : a);
+      const oldCol = (ex && ex.secret) ? 'achievements_secret' : 'achievements';
+      await saveDoc(newCol, docId, payload);
+      // Toggle secret↔public = déplacement : on a écrit la nouvelle collection,
+      // on nettoie l'ancienne.
+      if (oldCol !== newCol) {
+        try { await deleteFromCol(oldCol, docId); }
+        catch (e) { console.warn('[ach] nettoyage déplacement', docId, e); }
       }
     }
+    _storeUpsert(docId, payload);
 
     _achUploader?.destroy(); _achUploader = null;
     closeModal();
@@ -433,14 +443,21 @@ async function saveAchievement(id = '') {
 
 // ── ÉDITER ────────────────────────────────────────────────────────────────────
 async function editAchievement(id) {
-  if (!STORE.items) STORE.items = await loadCollection('achievements');
+  if (!STORE.items?.length) {
+    STORE.publicItems = await loadCollection('achievements').catch(() => []);
+    if (STATE.isAdmin) STORE.secretItems = await loadCollection('achievements_secret').catch(() => []);
+    STORE.items = _composeItems();
+  }
   openAchievementModal(id);
 }
 
 // ── SUPPRIMER ─────────────────────────────────────────────────────────────────
 async function deleteAchievement(id) {
   try {
-    if (!await confirmDelete('achievements', id, 'Supprimer ce haut-fait définitivement ?')) return;
+    const col = (STORE.secretItems || []).some(a => a.id === id) ? 'achievements_secret' : 'achievements';
+    if (!await confirmDelete(col, id, 'Supprimer ce haut-fait définitivement ?')) return;
+    STORE.publicItems = (STORE.publicItems || []).filter(a => a.id !== id);
+    STORE.secretItems = (STORE.secretItems || []).filter(a => a.id !== id);
     if (STORE.items) STORE.items = STORE.items.filter(a => a.id !== id);
     const order = (await _loadOrder()).filter(oid => oid !== id);
     await _saveOrder(order);
@@ -461,6 +478,24 @@ function _applyOrder(items, order) {
   const ordered = order.filter(id => map[id]).map(id => map[id]);
   const rest    = items.filter(a => !order.includes(a.id));
   return [...ordered, ...rest];
+}
+
+// Fusionne la source publique (`achievements`) et secrète (`achievements_secret`,
+// MJ-only) en un seul tableau ordonné. Côté joueur, secretItems = [] → no-op.
+function _composeItems() {
+  return _applyOrder(
+    [...(STORE.publicItems || []), ...(STORE.secretItems || [])],
+    STORE.order || [],
+  );
+}
+
+// Upsert local après écriture : retire l'id des deux sources, le replace dans la
+// bonne selon `payload.secret`, puis recompose STORE.items.
+function _storeUpsert(id, payload) {
+  STORE.publicItems = (STORE.publicItems || []).filter(a => a.id !== id);
+  STORE.secretItems = (STORE.secretItems || []).filter(a => a.id !== id);
+  (payload.secret ? STORE.secretItems : STORE.publicItems).push({ id, ...payload });
+  STORE.items = _composeItems();
 }
 
 function _sortAchievementsByDate(items, desc = false) {
@@ -1099,7 +1134,11 @@ function _achOpenLightbox(itemId) {
 // Charge les hauts-faits si nécessaire (collection session-live → 0 lecture en plus).
 export async function openAchievementLightbox(id) {
   if (!STORE.items || !STORE.items.length) {
-    try { STORE.items = await loadCollection('achievements'); } catch {}
+    try {
+      STORE.publicItems = await loadCollection('achievements');
+      if (STATE.isAdmin) STORE.secretItems = await loadCollection('achievements_secret').catch(() => []);
+      STORE.items = _composeItems();
+    } catch {}
   }
   _achOpenLightbox(id);
 }
@@ -1107,14 +1146,36 @@ export async function openAchievementLightbox(id) {
 // ── OVERRIDE PAGES.ACHIEVEMENTS ───────────────────────────────────────────────
 const _origPage = PAGES.achievements.bind(PAGES);
 PAGES.achievements = async function() {
-  const [items, order, story] = await Promise.all([
+  let [items, order, story] = await Promise.all([
     loadCollection('achievements'),
     _loadOrder(),
     loadCollection('story').catch(() => []),
   ]);
-  STORE.order    = order;
-  STORE.items    = _applyOrder(items || [], order);
-  STORE.missions = (story || []).filter(item => item.type === 'mission' || item.type === 'event');
+
+  // Hauts-faits secrets : chargés (MJ uniquement) depuis la sous-collection MJ-only.
+  // Migration douce idempotente : tout HF encore marqué secret dans la collection
+  // publique est déplacé vers `achievements_secret` (copy-then-delete, ré-exécutable).
+  STORE.secretItems = [];
+  if (STATE.isAdmin) {
+    STORE.secretItems = await loadCollection('achievements_secret').catch(() => []);
+    const strays = (items || []).filter(a => a.secret === true);
+    if (strays.length) {
+      for (const a of strays) {
+        const { id: _omit, ...data } = a;
+        try {
+          await saveDoc('achievements_secret', a.id, data);
+          await deleteFromCol('achievements', a.id);
+        } catch (e) { console.warn('[ach] migration secret', a.id, e); }
+      }
+      items = await loadCollection('achievements').catch(() => (items || []).filter(a => a.secret !== true));
+      STORE.secretItems = await loadCollection('achievements_secret').catch(() => STORE.secretItems);
+    }
+  }
+
+  STORE.order       = order;
+  STORE.publicItems = items || [];
+  STORE.items       = _composeItems();
+  STORE.missions    = (story || []).filter(item => item.type === 'mission' || item.type === 'event');
   STORE.filter ??= 'all';
   STORE.view   ??= 'galerie';
   STORE.search ??= '';
@@ -1129,7 +1190,8 @@ PAGES.achievements = async function() {
   // unwatchAll() côté navigation s'occupe du cleanup.
   watchPageCollection('ach-items', 'achievements', 'achievements', items => {
     if (document.body.classList.contains('ach-dragging')) return;
-    STORE.items = _applyOrder(items, STORE.order);
+    STORE.publicItems = items || [];
+    STORE.items = _composeItems();
     _achRenderContent();
   });
 
@@ -1141,7 +1203,7 @@ PAGES.achievements = async function() {
   watchPageDoc('ach-order', 'achievements_meta', 'order', 'achievements', doc => {
     if (document.body.classList.contains('ach-dragging')) return;
     STORE.order = Array.isArray(doc?.order) ? doc.order : [];
-    STORE.items = _applyOrder(STORE.items || [], STORE.order);
+    STORE.items = _composeItems();
     _achRenderContent();
   });
 };

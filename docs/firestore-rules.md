@@ -218,6 +218,11 @@ service cloud.firestore {
       match /settings/{id}          { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /achievements/{id}      { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /achievements_meta/{id} { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+      // Hauts-faits SECRETS (prophéties / twists) : sous-collection MJ-only.
+      // Sortis de `achievements` pour ne PAS être téléchargés par les joueurs
+      // (Firestore ne masque pas un doc à la lecture → vrai secret serveur, plus
+      // seulement filtré dans l'UI). Révéler = déplacer le doc vers `achievements`.
+      match /achievements_secret/{id} { allow read, write: if isAdvAdmin(adventureId); }
       match /bestiary/{id}          { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /bestiary_meta/{id}     { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
       match /bestiary_tracker/{id}  { allow read, write: if inAdventure(adventureId); }
