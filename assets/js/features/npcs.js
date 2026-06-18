@@ -23,7 +23,7 @@ import { getItemStatBonus, sortCharactersForDisplay, getMyCharacters, getModFrom
 import { _getTraits } from './characters/data.js';
 import { listPlaces } from './map/data/places.repo.js';
 import { listOrganizations } from './map/data/organizations.repo.js';
-import { pickImageFile } from '../shared/image-upload.js';
+import { pickImageFile, compressDataUrl } from '../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
 
@@ -371,13 +371,18 @@ function _renderFicheHeader(n) {
   const initial = (n.nom || '?')[0].toUpperCase();
   const portInner = n.imageUrl ? `<img src="${n.imageUrl}" alt="">` : `<span>${initial}</span>`;
 
-  const portrait = adm
+  const portraitEl = adm
     ? `<button class="npc-hero-portrait npc-portrait-btn ${n.imageUrl ? '' : 'is-empty'}"
          data-action="npcSetPhoto" data-id="${n.id}" title="Cliquer pour changer le portrait">
          ${portInner}<span class="npc-portrait-cam">📷</span></button>`
     : (n.imageUrl
         ? `<img class="npc-hero-portrait" src="${n.imageUrl}" alt="">`
         : `<div class="npc-hero-portrait npc-hero-portrait--ph">${initial}</div>`);
+  // Badge « agrandir » visible par tous (joueurs compris) → image pleine non cadrée.
+  const viewBadge = n.imageUrl
+    ? `<button class="npc-portrait-view" data-action="npcViewPhoto" data-id="${n.id}" title="Voir l'image en grand">⛶</button>`
+    : '';
+  const portrait = `<div class="npc-portrait-box">${portraitEl}${viewBadge}</div>`;
 
   const nameEl = adm
     ? `<input class="npc-inline npc-inline-name" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="nom" value="${_esc(n.nom || '')}" placeholder="Nom du PNJ">`
@@ -1566,6 +1571,7 @@ async function _npcInlineSave(el) {
 // Portrait PNJ : on passe par le cropper pan/zoom (comme les persos) pour
 // pouvoir cadrer l'image au lieu de la stocker brute.
 let _npcPhotoCrop = null;
+let _npcPhotoSrc = null; // image originale (avant cadrage) → stockée en imageFull
 function _npcSetPhoto(btn) {
   if (!STATE.isAdmin) return;
   const id = btn.dataset.id;
@@ -1573,6 +1579,7 @@ function _npcSetPhoto(btn) {
 }
 
 function _npcShowCropModal(dataUrl, id) {
+  _npcPhotoSrc = dataUrl;
   openModal('📷 Cadrer le portrait', `
     ${panZoomCropHTML({ idPrefix: 'npc-crop', viewSize: 300 })}
     <div style="display:flex;gap:.6rem;justify-content:flex-end;width:300px;margin:.8rem auto 0">
@@ -1592,13 +1599,33 @@ function _npcShowCropModal(dataUrl, id) {
 async function _npcSaveCroppedPhoto(id) {
   const dataUrl = _npcPhotoCrop?.getBase64();
   if (!dataUrl) { showNotif('Erreur : cadrage non initialisé.', 'error'); return; }
-  const n = _npcs.find(x => x.id === id); if (n) n.imageUrl = dataUrl;
-  if (await trySave('npcs', id, { imageUrl: dataUrl })) {
-    _npcPhotoCrop?.destroy?.(); _npcPhotoCrop = null;
+  // Image pleine (non cadrée) bornée → visible par les joueurs via le portrait.
+  const imageFull = _npcPhotoSrc ? await compressDataUrl(_npcPhotoSrc, { max: 1280, quality: 0.8 }) : '';
+  const n = _npcs.find(x => x.id === id); if (n) { n.imageUrl = dataUrl; n.imageFull = imageFull; }
+  if (await trySave('npcs', id, { imageUrl: dataUrl, imageFull })) {
+    _npcPhotoCrop?.destroy?.(); _npcPhotoCrop = null; _npcPhotoSrc = null;
     closeModal();
     showNotif('Portrait enregistré !', 'success');
     _refreshActivePanel(); _refreshList();
   }
+}
+
+// Lightbox : affiche l'image pleine (non cadrée) du PNJ — accessible à TOUS
+// (joueurs compris). Fallback sur le portrait cadré pour les anciens PNJ sans
+// imageFull. Clic n'importe où ou Échap pour fermer.
+function _npcViewPhoto(btn) {
+  const n = _npcs.find(x => x.id === btn.dataset.id); if (!n) return;
+  const src = n.imageFull || n.imageUrl; if (!src) return;
+  document.getElementById('npc-img-lightbox')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'npc-img-lightbox';
+  ov.className = 'npc-img-lightbox';
+  ov.innerHTML = `<img src="${src}" alt="${_esc(n.nom || '')}"><button class="npc-img-lightbox-close" title="Fermer (Échap)">✕</button>`;
+  const close = () => { ov.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  ov.addEventListener('click', close);
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(ov);
 }
 
 // Organisations en texte libre séparé par des virgules → tableau.
@@ -1806,6 +1833,7 @@ registerActions({
   npcSaveOrgs:               (el) => _npcSaveOrgs(el),
   npcSetWeapon:              (el) => _npcSetWeapon(el),
   npcSetPhoto:               (btn) => _npcSetPhoto(btn),
+  npcViewPhoto:              (btn) => _npcViewPhoto(btn),
   npcToggleActivite:         (btn) => _npcToggleActivite(btn),
   npcToggleEmbauchable:      (btn) => _npcToggleEmbauchable(btn),
   npcAddEvent:               (btn) => _npcAddEvent(btn),

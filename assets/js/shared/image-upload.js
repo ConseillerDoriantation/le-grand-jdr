@@ -132,6 +132,26 @@ function _imageToBase64(img, w, h, format = 'image/jpeg', quality = 0.72) {
 }
 
 /**
+ * Recompresse une dataURL en JPEG borné (côté max `max` px). Sert à stocker une
+ * version « pleine » mais raisonnable d'une image (ex. portrait non cadré visible
+ * par les joueurs) sans exploser la taille du document Firestore.
+ * @returns {Promise<string>} dataURL JPEG (ou l'original si le décodage échoue).
+ */
+export function compressDataUrl(dataUrl, { max = 1280, quality = 0.82 } = {}) {
+  return new Promise((resolve) => {
+    if (!dataUrl) { resolve(dataUrl); return; }
+    const img = new Image();
+    img.onload = () => {
+      const { w, h } = _resizeDimensions(img.width, img.height, max);
+      try { resolve(_imageToBase64(img, w, h, 'image/jpeg', quality)); }
+      catch { resolve(dataUrl); }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+/**
  * Lit un fichier image et appelle onLoad(img).
  */
 export async function readImageFile(file, onLoad) {

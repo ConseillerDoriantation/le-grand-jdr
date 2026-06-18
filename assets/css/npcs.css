@@ -546,6 +546,43 @@ textarea.npc-inline { resize: vertical; min-height: 2.4em; line-height: 1.6; fon
 }
 .npc-portrait-btn:hover .npc-portrait-cam { opacity: 1; }
 
+/* Boîte du portrait : permet de superposer le badge « agrandir » en sibling du
+   bouton (donc non rogné par son overflow:hidden). */
+.npc-portrait-box { position: relative; width: 84px; height: 84px; flex-shrink: 0; }
+.npc-portrait-box > .npc-hero-portrait,
+.npc-portrait-box > .npc-portrait-btn { width: 100%; height: 100%; }
+.npc-portrait-view {
+  position: absolute; top: -6px; right: -6px; z-index: 3;
+  width: 24px; height: 24px; border-radius: 50%; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .72rem; line-height: 1; cursor: pointer;
+  color: var(--text); background: var(--bg-elevated, #20203a);
+  border: 1px solid var(--border); box-shadow: 0 1px 4px rgba(0,0,0,.45);
+  opacity: .82; transition: opacity .15s, transform .15s;
+}
+.npc-portrait-view:hover { opacity: 1; transform: scale(1.12); }
+
+/* Lightbox image pleine (non cadrée) — accessible à tous, joueurs compris. */
+.npc-img-lightbox {
+  position: fixed; inset: 0; z-index: 10001;
+  display: flex; align-items: center; justify-content: center;
+  padding: 2.5vh; background: rgba(0,0,0,.86); cursor: zoom-out;
+  animation: npcLbFade .12s ease-out;
+}
+@keyframes npcLbFade { from { opacity: 0; } to { opacity: 1; } }
+.npc-img-lightbox img {
+  max-width: 94vw; max-height: 94vh; object-fit: contain;
+  border-radius: 10px; box-shadow: 0 12px 48px rgba(0,0,0,.6);
+}
+.npc-img-lightbox-close {
+  position: absolute; top: 16px; right: 20px;
+  width: 40px; height: 40px; border-radius: 50%; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.1rem; color: #fff;
+  background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.35);
+}
+.npc-img-lightbox-close:hover { background: rgba(0,0,0,.75); }
+
 /* Toggles d'activité bastion + visibilité */
 .npc-act-toggle {
   font-size: .66rem; padding: 2px 9px; border-radius: 999px; cursor: pointer; font-weight: 600;
