@@ -83,6 +83,11 @@ export function _renderTray() {
 }
 export function _renderTrayImpl() {
   if (!STATE.isAdmin) { _renderPageTabs(); return; }
+  // Préserve la position de défilement de la vue Scènes : sans ça, reconstruire
+  // la liste des pages + les tokens de scène (au changement de scène) fait
+  // remonter le panneau tout en haut.
+  const _scenesView = document.querySelector('#vtt-tray .vtt-tray-view[data-view="scenes"]');
+  const _scenesScroll = _scenesView ? _scenesView.scrollTop : 0;
   _renderPageList();
   _renderLibSection();
 
@@ -237,6 +242,10 @@ export function _renderTrayImpl() {
     const inp = document.querySelector(`.vtt-tray-search-input[data-search="${focusedSearch}"]`);
     if (inp) { inp.focus(); if (caretPos != null) { try { inp.setSelectionRange(caretPos, caretPos); } catch (_) {} } }
   }
+
+  // Restaure le défilement après tous les rebuilds de la vue Scènes (clampé si la
+  // nouvelle scène est plus courte — comportement attendu).
+  if (_scenesView) _scenesView.scrollTop = _scenesScroll;
 }
 
 // ═══════════════════════════════════════════════════════════════════
