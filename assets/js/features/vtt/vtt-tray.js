@@ -261,11 +261,11 @@ export function _renderPageList() {
   const ae = document.activeElement;
   const searchFocused = ae?.id === 'vtt-page-search' && el.contains(ae);
   const caretPos = searchFocused ? ae.selectionStart : null;
-  // Préserve le défilement de la vue Scènes : reconstruire la liste via innerHTML
-  // (au switch de page, _renderPageTabs appelle _renderPageList) clampe sinon le
-  // scrollTop du parent et fait remonter le panneau tout en haut.
-  const _scroller = el.closest('.vtt-tray-view');
-  const _sTop = _scroller ? _scroller.scrollTop : 0;
+  // Préserve le défilement de la liste des pages : .vtt-page-list (le conteneur
+  // scrollable, max-height:32vh) est RECRÉÉ dans le innerHTML ci-dessous → un
+  // nouveau nœud repart à scrollTop 0 et la liste remonte tout en haut au switch
+  // de page. On capture l'ancien scrollTop pour le réappliquer au nouveau.
+  const _listTop = el.querySelector('.vtt-page-list')?.scrollTop ?? 0;
 
   if (!all.length) {
     el.innerHTML=`<div class="vtt-tray-empty">Aucune page<br><small>Clique ＋ pour créer</small></div>`;
@@ -349,9 +349,10 @@ export function _renderPageList() {
     const inp = document.getElementById('vtt-page-search');
     if (inp) { inp.focus(); if (caretPos != null) { try { inp.setSelectionRange(caretPos, caretPos); } catch {} } }
   }
-  // Restaure le défilement après le rebuild (et après un éventuel focus qui pourrait
-  // déplacer la vue). Clampé naturellement si le contenu est devenu plus court.
-  if (_scroller) _scroller.scrollTop = _sTop;
+  // Restaure le défilement sur le NOUVEAU .vtt-page-list (clampé si la liste est
+  // devenue plus courte, ex. après filtrage).
+  const _newList = el.querySelector('.vtt-page-list');
+  if (_newList) _newList.scrollTop = _listTop;
   // Drag & drop désactivé pendant une recherche (la liste filtrée n'est pas l'ordre réel)
   _initPageSortables(el, { pages: !q, folders: !q && !onlyUngrouped });
 }
