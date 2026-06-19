@@ -167,25 +167,35 @@ export function _renderInventaireBoutique(char) {
 // ══════════════════════════════════════════════
 
 // ── Catégorisation ────────────────────────────
+// Catégorie d'un objet pour le filtre d'inventaire.
+// • L'ÉQUIPEMENT est regroupé en 3 rubriques fixes : toutes les armes → Armes,
+//   toutes les armures → Armures, bagues/amulettes → Bijoux (quel que soit leur
+//   sous-type).
+// • TOUT LE RESTE forme une rubrique par `type` d'objet (champ libre : « Potion »,
+//   « Parchemin », « Pierre précieuse »…) → les rubriques affichées dépendent des
+//   objets réellement possédés, pas d'une liste figée.
 function _invCategory(item) {
   const tpl = (item.template || '').toLowerCase();
-  // _norm : minuscules + sans accents → mots-clés écrits sans accent.
-  const hay = _norm([item.type, item.categorie, item.nom, item.sousType, item.sousCategorie]
-    .filter(Boolean).join(' '));
+  const hay = _norm([item.type, item.categorie, item.nom, item.sousType, item.sousCategorie].filter(Boolean).join(' '));
   const has = (...keys) => keys.some(k => hay.includes(k));
-  if (tpl === 'arme' || item.degats || item.toucherStat || item.toucher) return 'armes';
-  if (tpl === 'armure' || item.slotArmure || item.typeArmure || (item.ca != null && item.ca !== '')) return 'armures';
-  if (tpl === 'bijou' || item.slotBijou || has('anneau','amulette','bijou','talisman','pendentif','bague'))
-    return 'bijoux';
-  // Parchemins / grimoires (avant consommables : un parchemin n'est pas une potion).
-  if (has('parchemin','grimoire','rouleau','scroll')) return 'parchemins';
-  // Objets précieux / trésor (avant divers : ne pas les noyer dans le fourre-tout).
-  if (has('precieux','gemme','joyau','pierre precieuse','tresor','lingot','diamant',
-          'rubis','saphir','emeraude','perle','cristal','pepite','relique', 'objet de valeur'))
-    return 'precieux';
-  if (has('potion','consommable','nourriture','herbe','ingredient','ressource','elixir','antidote'))
-    return 'consommables';
-  return 'divers';
+  if (tpl === 'arme'   || item.degats || item.toucherStat || item.toucher) return { id: 'armes',   label: 'Armes',                icon: '⚔️' };
+  if (tpl === 'armure' || item.slotArmure || item.typeArmure || (item.ca != null && item.ca !== '')) return { id: 'armures', label: 'Armures', icon: '🛡️' };
+  if (tpl === 'bijou'  || item.slotBijou || has('anneau','amulette','bijou','talisman','pendentif','bague'))
+    return { id: 'bijoux', label: 'Bijoux & Accessoires', icon: '💍' };
+  // Sinon : rubrique dynamique d'après le type de l'objet.
+  const type = (item.type || '').trim();
+  if (type) return { id: 'type:' + _norm(type), label: type, icon: _typeIcon(type) };
+  return { id: 'divers', label: 'Divers', icon: '📦' };
+}
+
+// Icône d'agrément d'une rubrique de type (cosmétique ; le libellé reste le type réel).
+function _typeIcon(type) {
+  const t = _norm(type);
+  if (/potion|consommable|elixir|antidote|nourriture|herbe|ingredient|ressource|materiau/.test(t)) return '🧪';
+  if (/parchemin|grimoire|rouleau|scroll|livre/.test(t)) return '📜';
+  if (/precieux|gemme|joyau|pierre|tresor|lingot|diamant|rubis|saphir|emeraude|perle|cristal|pepite|relique|valeur/.test(t)) return '💎';
+  if (/cle|clef|outil|kit|piege/.test(t)) return '🔧';
+  return '📦';
 }
 
 // ── Chips compactes pour une ligne (max 3) ────
@@ -235,20 +245,23 @@ export function renderCharInventaire(c, canEdit) {
 
   const equippedMap = getEquippedInventoryIndexMap(c);
 
-  // ── Catégories (détection intelligente via _invCategory) ──
-  const CATS = [
-    { id: 'armes',        icon: '⚔️',  label: 'Armes',               items: [] },
-    { id: 'armures',      icon: '🛡️',  label: 'Armures',             items: [] },
-    { id: 'bijoux',       icon: '💍',  label: 'Bijoux & Accessoires', items: [] },
-    { id: 'consommables', icon: '🧪',  label: 'Consommables',         items: [] },
-    { id: 'parchemins',   icon: '📜',  label: 'Parchemins',           items: [] },
-    { id: 'precieux',     icon: '💎',  label: 'Précieux',             items: [] },
-    { id: 'divers',       icon: '📦',  label: 'Divers',               items: [] },
-  ];
+  // ── Rubriques : 3 fixes (équipement) + une par type d'objet possédé ──
+  // L'ordre : Armes, Armures, Bijoux, puis les types présents (alpha), Divers en dernier.
+  const FIXED_ORDER = ['armes', 'armures', 'bijoux'];
+  const catMap = new Map();
   grouped.forEach(g => {
-    const catId = _invCategory(g.item);
-    CATS.find(cat => cat.id === catId)?.items.push(g);
+    const cat = _invCategory(g.item);
+    let c = catMap.get(cat.id);
+    if (!c) { c = { id: cat.id, label: cat.label, icon: cat.icon, items: [] }; catMap.set(cat.id, c); }
+    c.items.push(g);
   });
+  const CATS = [
+    ...FIXED_ORDER.map(id => catMap.get(id)).filter(Boolean),
+    ...[...catMap.values()]
+      .filter(c => !FIXED_ORDER.includes(c.id) && c.id !== 'divers')
+      .sort((a, b) => a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' })),
+    ...(catMap.get('divers') ? [catMap.get('divers')] : []),
+  ];
 
   // ── Rendu d'une ligne compacte ──
   const _renderRow = (g) => {
@@ -318,12 +331,12 @@ export function renderCharInventaire(c, canEdit) {
       if (!cat.items.length) continue;
       const allHidden = q && cat.items.every(g => !_norm(g.item.nom || '').includes(q));
       const openState = _invCatOpen[cat.id] !== false;
-      html += `<details class="inv-cat${allHidden ? ' inv-cat--hidden' : ''}" id="inv-cat-${cat.id}"
+      html += `<details class="inv-cat${allHidden ? ' inv-cat--hidden' : ''}" id="inv-cat-${_esc(cat.id)}"
         ${openState ? 'open' : ''}>
-        <summary class="inv-cat-head" data-action="_invCatToggle" data-cat="${cat.id}">
+        <summary class="inv-cat-head" data-action="_invCatToggle" data-cat="${_esc(cat.id)}">
           <div class="inv-cat-title-row">
             <span class="inv-cat-icon">${cat.icon}</span>
-            <span class="inv-cat-title">${cat.label}</span>
+            <span class="inv-cat-title">${_esc(cat.label)}</span>
           </div>
           <div class="inv-cat-right">
             <span class="inv-cat-count">${cat.items.reduce((s, g) => s + (parseInt(g.qte) || 0), 0)}</span>
