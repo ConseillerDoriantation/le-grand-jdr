@@ -169,15 +169,21 @@ export function _renderInventaireBoutique(char) {
 // ── Catégorisation ────────────────────────────
 function _invCategory(item) {
   const tpl = (item.template || '').toLowerCase();
-  const hay = [item.type, item.categorie, item.nom, item.sousType, item.sousCategorie]
-    .filter(Boolean).join(' ').toLowerCase();
+  // _norm : minuscules + sans accents → mots-clés écrits sans accent.
+  const hay = _norm([item.type, item.categorie, item.nom, item.sousType, item.sousCategorie]
+    .filter(Boolean).join(' '));
+  const has = (...keys) => keys.some(k => hay.includes(k));
   if (tpl === 'arme' || item.degats || item.toucherStat || item.toucher) return 'armes';
   if (tpl === 'armure' || item.slotArmure || item.typeArmure || (item.ca != null && item.ca !== '')) return 'armures';
-  if (tpl === 'bijou' || item.slotBijou ||
-    ['anneau','amulette','bijou','talisman','pendentif','bague'].some(k => hay.includes(k)))
+  if (tpl === 'bijou' || item.slotBijou || has('anneau','amulette','bijou','talisman','pendentif','bague'))
     return 'bijoux';
-  if (['potion','consommable','parchemin','scroll','nourriture','herbe','ingrédient','ressource']
-    .some(k => hay.includes(k)))
+  // Parchemins / grimoires (avant consommables : un parchemin n'est pas une potion).
+  if (has('parchemin','grimoire','rouleau','scroll')) return 'parchemins';
+  // Objets précieux / trésor (avant divers : ne pas les noyer dans le fourre-tout).
+  if (has('precieux','gemme','joyau','pierre precieuse','tresor','lingot','diamant',
+          'rubis','saphir','emeraude','perle','cristal','pepite','relique', 'objet de valeur'))
+    return 'precieux';
+  if (has('potion','consommable','nourriture','herbe','ingredient','ressource','elixir','antidote'))
     return 'consommables';
   return 'divers';
 }
@@ -229,12 +235,14 @@ export function renderCharInventaire(c, canEdit) {
 
   const equippedMap = getEquippedInventoryIndexMap(c);
 
-  // ── 5 catégories ──
+  // ── Catégories (détection intelligente via _invCategory) ──
   const CATS = [
     { id: 'armes',        icon: '⚔️',  label: 'Armes',               items: [] },
     { id: 'armures',      icon: '🛡️',  label: 'Armures',             items: [] },
     { id: 'bijoux',       icon: '💍',  label: 'Bijoux & Accessoires', items: [] },
     { id: 'consommables', icon: '🧪',  label: 'Consommables',         items: [] },
+    { id: 'parchemins',   icon: '📜',  label: 'Parchemins',           items: [] },
+    { id: 'precieux',     icon: '💎',  label: 'Précieux',             items: [] },
     { id: 'divers',       icon: '📦',  label: 'Divers',               items: [] },
   ];
   grouped.forEach(g => {
