@@ -4,6 +4,7 @@
 
 import { STATE } from './state.js';
 import { navigate } from './navigation.js';
+import { maybeShowWelcome } from '../shared/onboarding.js';
 import { appSplashHtml } from '../shared/html.js';
 
 // Masque le splash de boot dès qu'un écran principal est prêt à s'afficher.
@@ -76,6 +77,9 @@ export function showApp() {
   document.querySelectorAll('.admin-only').forEach((el) => {
     el.style.display = STATE.isAdmin ? 'flex' : 'none';
   });
+
+  // ── Accueil « première visite » (s'auto-garde via localStorage) ──
+  maybeShowWelcome();
 }
 
 function _initSidebarExpansion() {

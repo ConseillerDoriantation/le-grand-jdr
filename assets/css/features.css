@@ -4456,3 +4456,36 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   color: #bca0ff;
 }
 .btn.btn-arcane:hover { background: rgba(157,111,255,0.28); }
+
+/* ── Onboarding : aide in-app + accueil première visite ───────────────────── */
+.ob-modal { display: flex; flex-direction: column; gap: 1rem; max-width: 540px; }
+.ob-intro { margin: 0; color: var(--text-soft, #c8d4e8); font-size: .92rem; }
+.ob-steps { display: flex; flex-direction: column; gap: .7rem; }
+.ob-step { display: flex; gap: .8rem; align-items: flex-start; }
+.ob-step-num {
+  flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: .8rem; color: var(--bg-deep, #0e1624);
+  background: var(--gold, #e8b84b);
+}
+.ob-step-body { min-width: 0; }
+.ob-step-body h3 { margin: 0 0 .2rem; font-size: .98rem; color: var(--text); }
+.ob-step-body p { margin: 0 0 .5rem; font-size: .85rem; line-height: 1.45; color: var(--text-soft, #c8d4e8); }
+.ob-mj {
+  font-size: .82rem; line-height: 1.45; color: var(--text-soft, #c8d4e8);
+  background: rgba(232,184,75,.08); border: 1px solid rgba(232,184,75,.25);
+  border-radius: 10px; padding: .6rem .75rem;
+}
+.ob-foot { display: flex; align-items: center; gap: .5rem; margin-top: .2rem; }
+/* Accueil : 3 grandes actions */
+.ob-welcome-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .6rem; }
+.ob-wa {
+  display: flex; flex-direction: column; align-items: center; gap: .35rem;
+  padding: .9rem .5rem; border-radius: 12px; cursor: pointer;
+  background: rgba(255,255,255,.04); border: 1px solid var(--border);
+  color: var(--text); font-size: .8rem; font-weight: 600; text-align: center;
+  transition: background .14s, transform .12s, border-color .14s;
+}
+.ob-wa span { font-size: 1.6rem; }
+.ob-wa:hover { background: rgba(232,184,75,.12); border-color: var(--gold, #e8b84b); transform: translateY(-2px); }
+@media (max-width: 520px) { .ob-welcome-actions { grid-template-columns: 1fr; } }
