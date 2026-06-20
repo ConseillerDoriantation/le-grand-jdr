@@ -4276,13 +4276,16 @@
   outline: none; border-color: var(--gold);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 18%, transparent);
 }
-.vtt-ms-cpt-btns { display: flex; gap: .4rem; }
+.vtt-ms-cpt-btns { display: flex; gap: .4rem; flex-wrap: wrap; }
 .vtt-ms-cpt-btn {
-  flex: 1; padding: .34rem; font-size: .7rem; font-weight: 700;
-  border-radius: 6px; cursor: pointer; transition: filter .12s;
+  flex: 1; min-width: max-content; padding: .34rem .5rem; font-size: .7rem; font-weight: 700;
+  border-radius: 6px; cursor: pointer; transition: filter .12s; white-space: nowrap;
+  /* Défaut neutre lisible (les boutons sans variante n'étaient pas stylés → blancs). */
+  color: var(--text); background: rgba(255,255,255,.06); border: 1px solid var(--border);
 }
 .vtt-ms-cpt-btn.pos { color: var(--emerald, #22c38e); background: rgba(34,195,142,.12); border: 1px solid rgba(34,195,142,.4); }
 .vtt-ms-cpt-btn.neg { color: #ef6a6a; background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.35); }
+.vtt-ms-cpt-btn.gold { color: var(--gold, #e8b84b); background: rgba(232,184,75,.12); border: 1px solid rgba(232,184,75,.4); }
 .vtt-ms-cpt-btn:hover { filter: brightness(1.2); }
 
 .vtt-ms-cpt-cols { display: flex; flex-direction: column; gap: .45rem; }

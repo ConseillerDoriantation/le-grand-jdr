@@ -688,7 +688,7 @@ function _msTabCompte(c, uid, canEdit) {
       <div class="vtt-ms-cpt-btns">
         <button class="vtt-ms-cpt-btn pos" data-vtt-fn="_vttMsCompteAdd" data-vtt-args="${c.id}|${uid}|1"  title="Ajouter une recette">+ Recette</button>
         <button class="vtt-ms-cpt-btn neg" data-vtt-fn="_vttMsCompteAdd" data-vtt-args="${c.id}|${uid}|-1" title="Ajouter une dépense">− Dépense</button>
-        ${solde > 0 ? `<button class="vtt-ms-cpt-btn" data-vtt-fn="_vttMsSendGoldPicker" data-vtt-args="${c.id}|${uid}" title="Envoyer de l'or à un joueur présent">💰 Envoyer</button>` : ''}
+        ${solde > 0 ? `<button class="vtt-ms-cpt-btn gold" data-vtt-fn="_vttMsSendGoldPicker" data-vtt-args="${c.id}|${uid}" title="Envoyer de l'or à un joueur présent">💰 Envoyer</button>` : ''}
       </div>
     </div>` : '';
 
