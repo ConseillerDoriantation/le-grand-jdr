@@ -124,6 +124,17 @@ try {
   console.error('[app] wheel guard:', err);
 }
 
+// ── PWA : enregistre le service worker (installable + lecture hors-ligne) ─────
+// Après 'load' pour ne pas concurrencer le démarrage. Échec silencieux (contexte
+// non sécurisé, navigateur sans SW…). Stratégie réseau-first → aucune régression
+// de fraîcheur en ligne (cf. sw.js à la racine).
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch((err) =>
+      console.warn('[pwa] service worker non enregistré :', err?.message || err));
+  });
+}
+
 // ── Les features sont chargées en lazy via navigation.js ─────────────────────
 // Chaque page charge son module uniquement à la première navigation.
 // Voir : core/navigation.js → loadFeature()
