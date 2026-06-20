@@ -43,7 +43,7 @@ const _loadTrayPref = (k, dflt = false) => {
   catch { return dflt; }
 }
 const _saveTrayPref = (k, v) => { try { localStorage.setItem('vtt-tray-' + k, v ? '1' : '0'); } catch {} };
-let _trayOnOpen  = _loadTrayPref('on');
+let _trayOnOpen  = _loadTrayPref('on', true); // « En ligne » ouvert par défaut (joueurs présents à invoquer)
 let _trayOffOpen = _loadTrayPref('off');
 let _trayNpcOpen = _loadTrayPref('npc');
 
@@ -99,7 +99,10 @@ export function _renderTrayImpl() {
   const onPage  = all.filter(t => t.pageId === VS.activePage?.id);
   const reserveSeen = new Set();
   const reserve = all.filter(t => {
-    if (t.pageId || t.type === 'enemy') return false;
+    // Réserve = persos/PNJ qui ne sont PAS sur la scène courante (sur une autre
+    // page ou non placés) → le MJ peut les (ré)invoquer ici. Les ennemis sont
+    // propres à chaque scène (jamais en réserve).
+    if (t.type === 'enemy' || t.pageId === VS.activePage?.id) return false;
     const key = _tokenEntityKey(t);
     if (!key) return true;
     if (reserveSeen.has(key)) return false;
