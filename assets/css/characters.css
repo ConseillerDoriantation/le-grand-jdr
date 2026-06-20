@@ -8806,6 +8806,9 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   padding-right: 4px;
   scrollbar-width: thin; scrollbar-color: rgba(79,140,255,.3) transparent;
 }
+/* Masquage par le filtre de recherche des destinataires (envoi objet/or) —
+   classe plutôt qu'inline pour ne pas écraser le display:flex des cartes. */
+.send-target-hidden { display: none !important; }
 .invm-targets::-webkit-scrollbar { width: 6px; }
 .invm-targets::-webkit-scrollbar-thumb { background: rgba(79,140,255,.3); border-radius: 3px; }
 .invm-target {

@@ -704,7 +704,9 @@ function _sendTargetFilter(el) {
   let shown = 0;
   list.querySelectorAll('[data-search]').forEach(card => {
     const ok = !q || card.dataset.search.includes(q);
-    card.style.display = ok ? '' : 'none';
+    // Classe plutôt que style.display='' : sinon on efface le display:flex inline
+    // des cartes (la modale d'or) → mise en forme cassée.
+    card.classList.toggle('send-target-hidden', !ok);
     if (ok) shown++;
   });
   const empty = document.getElementById('send-target-empty');
