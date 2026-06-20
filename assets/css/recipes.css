@@ -7,12 +7,16 @@
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
-  transition: box-shadow .15s;
+  transition: box-shadow .15s, border-color .15s, transform .15s;
   display: flex;
   flex-direction: column;
 }
 
-.rec-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+.rec-card:hover {
+  box-shadow: 0 6px 20px rgba(0,0,0,.35);
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
+}
 
 .rec-card-header {
   padding: .8rem 1rem .5rem;
@@ -123,41 +127,142 @@
 }
 .rec-btn-acces:hover { background: rgba(34,195,142,.18); }
 
-.rec-tabs {
-  display: flex;
-  gap: 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-  flex-wrap: wrap;
+/* ── Page : gouttière + respiration (cf. .main-content sans padding) ─── */
+.rec-page {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: clamp(1.1rem, 2.2vw, 2rem) clamp(1rem, 2.4vw, 2.25rem) 2.5rem;
 }
 
-.rec-tab {
-  flex: 1;
-  min-width: 80px;
-  padding: .5rem .6rem;
-  font-size: .78rem;
-  cursor: pointer;
-  border: none;
-  background: var(--bg-elevated);
+/* ── En-tête ─────────────────────────────────────────────────────── */
+.rec-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.15rem;
+}
+.rec-eyebrow {
+  display: block;
+  font-size: .68rem;
+  letter-spacing: .22em;
+  text-transform: uppercase;
   color: var(--text-dim);
-  transition: all .15s;
+  margin-bottom: .25rem;
+}
+.rec-title {
+  margin: 0;
+  font-family: 'Cinzel', serif;
+  font-size: clamp(1.55rem, 2.4vw, 2rem);
+  font-weight: 700;
+  letter-spacing: .04em;
+  line-height: 1.1;
+  color: var(--gold);
+}
+.rec-head-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+
+/* ── Légende ─────────────────────────────────────────────────────── */
+.rec-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem 1.4rem;
+  margin-bottom: 1.1rem;
+  padding: .7rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--gold) 16%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--gold) 5%, transparent);
+  font-size: .76rem;
+  color: var(--text-muted);
+}
+.rec-legend-item { display: inline-flex; align-items: center; gap: .35rem; }
+
+/* ── Barre d'outils : onglets + recherche ─────────────────────────── */
+.rec-toolbar {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  gap: .75rem 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.4rem;
+}
+
+.rec-tabs {
+  display: flex;
+  flex-wrap: wrap;
   gap: .3rem;
+}
+.rec-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .45rem .8rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font-size: .8rem;
   white-space: nowrap;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
 }
-
-.rec-tab.active {
-  background: var(--gold);
-  color: #0b1118;
-  font-weight: 700;
-}
-
 .rec-tab:not(.active):hover {
   background: var(--bg-card);
   color: var(--text);
+  border-color: var(--border-strong);
+}
+.rec-tab.active {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #0b1118;
+  font-weight: 700;
+}
+.rec-tab-emoji { font-size: .92rem; line-height: 1; }
+.rec-tab-count {
+  font-size: .68rem;
+  font-weight: 700;
+  padding: .03rem .42rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.rec-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 200px;
+  max-width: 320px;
+  margin-left: auto;
+}
+.rec-search-ic {
+  position: absolute;
+  left: .75rem;
+  font-size: .8rem;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+.rec-search-input {
+  width: 100%;
+  padding: .5rem .85rem .5rem 2.05rem;
+  font-size: .82rem;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.rec-search-input::placeholder { color: var(--text-dim); }
+.rec-search-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--gold) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 12%, transparent);
+}
+
+/* ── Grille ──────────────────────────────────────────────────────── */
+.rec-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 1.1rem;
 }
 
 .rec-empty {

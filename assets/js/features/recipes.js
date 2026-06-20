@@ -21,16 +21,16 @@ import { formatWeaponDamageText, isWeaponLikeItem } from '../shared/equipment-ut
 
 // ── Config des onglets ────────────────────────────────────────────────────────
 const TABS = [
+  { id:'all',     emoji:'📚', label:'Tout' },
   { id:'cuisine', emoji:'🍳', label:'Cuisine' },
   { id:'potion',  emoji:'🧪', label:'Potions' },
   { id:'arme',    emoji:'⚔️', label:'Armes' },
   { id:'armure',  emoji:'🛡️', label:'Armures' },
   { id:'bijou',   emoji:'💍', label:'Bijoux' },
 ];
-const CREATE_RECIPES = [
-  TABS[0],
-  TABS[1],
-];
+// Onglets qui proposent une création directe (les crafts arme/armure/bijou se
+// créent depuis la boutique, et "Tout" n'est pas un type).
+const CREATE_RECIPES = TABS.filter(t => t.id === 'cuisine' || t.id === 'potion');
 
 const MATERIALS = {
   'matMyst': 'Matériaux mystiques',
@@ -137,11 +137,11 @@ function _recipeSearchText(r = {}) {
 }
 
 function _filterRecipesBySearch(recipes) {
+  // La recherche est bornée à l'onglet actif ; "Tout" couvre tous les types.
+  const inTab = STORE.tab === 'all' ? recipes : recipes.filter(r => r.type === STORE.tab);
   const q = _norm(STORE.filterTxt);
-  return recipes.filter(r => {
-    if (!q) return r.type === STORE.tab;
-    return _searchIncludes(_recipeSearchText(r), STORE.filterTxt);
-  });
+  if (!q) return inTab;
+  return inTab.filter(r => _searchIncludes(_recipeSearchText(r), STORE.filterTxt));
 }
 
 // ── Conversion item boutique → recette ───────────────────────────────────────
@@ -231,9 +231,9 @@ function _render() {
 
   const filtered = _filterRecipesBySearch(visible);
 
-  // Compteurs par onglet
+  // Compteurs par onglet ("Tout" = total visible)
   const counts = {};
-  TABS.forEach(t => { counts[t.id] = visible.filter(r => r.type === t.id).length; });
+  TABS.forEach(t => { counts[t.id] = t.id === 'all' ? visible.length : visible.filter(r => r.type === t.id).length; });
 
   // Couleur de bordure selon le type
   const borderColor = {
@@ -241,59 +241,65 @@ function _render() {
   };
 
   content.innerHTML = `
-  <!-- HEADER -->
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1.25rem">
-    <div>
-      <div style="font-size:.7rem;color:var(--text-dim);letter-spacing:3px;text-transform:uppercase;margin-bottom:.2rem">Encyclopédie</div>
-      <h1 style="font-family:'Cinzel',serif;font-size:1.8rem;color:var(--gold);letter-spacing:2px;margin:0">Recettes</h1>
+  <div class="rec-page">
+    <header class="rec-head">
+      <div class="rec-head-titles">
+        <span class="rec-eyebrow">Encyclopédie</span>
+        <h1 class="rec-title">Recettes</h1>
+      </div>
+      ${_isAdmin() ? `
+      <div class="rec-head-actions">
+        ${CREATE_RECIPES.map(t => `<button class="btn btn-outline btn-sm" data-action="_recOpenModal" data-type="${t.id}">${t.emoji} + ${t.label}</button>`).join('')}
+      </div>` : ''}
+    </header>
+
+    <div class="rec-legend">
+      <span class="rec-legend-item"><strong style="color:var(--gold)">🍳</strong> Cuisine — avant mission, bénéficie au groupe (max 2 actifs)</span>
+      <span class="rec-legend-item"><strong style="color:#22c38e">🧪</strong> Potions — effets individuels</span>
+      <span class="rec-legend-item"><strong style="color:#ff6b6b">⚔️🛡️💍</strong> Craft — matériaux + atelier requis</span>
     </div>
-    ${_isAdmin() ? `
-    <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
-      ${CREATE_RECIPES.map(t => `<button class="btn btn-outline btn-sm" data-action="_recOpenModal" data-type="${t.id}">${t.emoji} + ${t.label}</button>`).join('')}
-    </div>` : ''}
-  </div>
 
-  <!-- Info règles -->
-  <div style="background:rgba(226,185,111,.05);border:1px solid rgba(226,185,111,.15);border-radius:10px;
-    padding:.75rem 1rem;margin-bottom:1.25rem;font-size:.78rem;color:var(--text-muted);display:flex;flex-wrap:wrap;gap:.4rem .75rem">
-    <span><strong style="color:var(--gold)">🍳</strong> Cuisine — Avant mission, bénéficie au groupe. Max 2 actifs.</span>
-    <span>·</span>
-    <span><strong style="color:#22c38e">🧪</strong> Potions — Effets individuels.</span>
-    <span>·</span>
-    <span><strong style="color:#ff6b6b">⚔️🛡️💍</strong> Craft — Nécessite les matériaux et un atelier.</span>
-  </div>
-
-  <!-- TABS + SEARCH -->
-  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem;flex-wrap:wrap">
-    <div class="rec-tabs" style="flex-shrink:0">
-      ${TABS.map(t => `
-        <button class="rec-tab ${STORE.tab===t.id?'active':''}" data-action="recSetTab" data-id="${t.id}">
-          <span>${t.emoji}</span><span>${t.label}</span>
-          <span style="font-size:.65rem;opacity:.7">(${counts[t.id]})</span>
-        </button>`).join('')}
+    <div class="rec-toolbar">
+      <div class="rec-tabs">
+        ${TABS.map(t => `
+          <button class="rec-tab ${STORE.tab===t.id?'active':''}" data-action="recSetTab" data-id="${t.id}">
+            <span class="rec-tab-emoji">${t.emoji}</span>
+            <span class="rec-tab-label">${t.label}</span>
+            <span class="rec-tab-count">${counts[t.id]}</span>
+          </button>`).join('')}
+      </div>
+      <div class="rec-search">
+        <span class="rec-search-ic">🔍</span>
+        <input type="text" class="rec-search-input" data-input="recSearch"
+          placeholder="Rechercher ${STORE.tab==='all'?'une recette':'dans '+tabInfo.label}…"
+          value="${_esc(STORE.filterTxt)}">
+      </div>
     </div>
-    <input type="text" class="input-field" placeholder="🔍 Rechercher..."
-      value="${STORE.filterTxt}" data-input="recSearch"
-      style="max-width:240px;font-size:.82rem">
-  </div>
 
-  <div id="rec-grid-wrap">${_gridHtml(filtered, tabInfo, visible, borderColor)}</div>
+    <div id="rec-grid-wrap">${_gridHtml(filtered, tabInfo, visible, borderColor)}</div>
+  </div>
   `;
 }
 
 function _gridHtml(filtered, tabInfo, visible, borderColor) {
-  if (filtered.length === 0) return `
+  if (filtered.length === 0) {
+    const isAll    = STORE.tab === 'all';
+    const tabCount = isAll ? visible.length : visible.filter(r => r.type === STORE.tab).length;
+    const emptyTxt = tabCount > 0
+      ? 'Aucun résultat pour cette recherche.'
+      : isAll
+        ? (_isAdmin() ? 'Aucune recette pour le moment.' : 'Aucune recette partagée avec vous.')
+        : (_isAdmin() ? `Aucune recette de type "${tabInfo.label}" — créez-en une !` : `Aucune recette partagée avec vous dans cette catégorie.`);
+    const canCreate = _isAdmin() && tabCount === 0 && CREATE_RECIPES.some(t => t.id === STORE.tab);
+    return `
     <div class="rec-empty">
       <div style="font-size:2.5rem;margin-bottom:.75rem;opacity:.25">${tabInfo.emoji}</div>
-      <p style="font-style:italic">
-        ${visible.filter(r=>r.type===STORE.tab).length === 0
-          ? (_isAdmin() ? `Aucune recette de type "${tabInfo.label}" — créez-en une !` : `Aucune recette partagée avec vous dans cette catégorie.`)
-          : 'Aucun résultat pour cette recherche.'}
-      </p>
-      ${_isAdmin() && visible.filter(r=>r.type===STORE.tab).length === 0
+      <p style="font-style:italic">${emptyTxt}</p>
+      ${canCreate
         ? `<button class="btn btn-gold btn-sm" style="margin-top:.5rem" data-action="_recOpenModal" data-type="${STORE.tab}">＋ Nouvelle recette</button>` : ''}
     </div>`;
-  return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1rem">
+  }
+  return `<div class="rec-grid">
     ${filtered.map(r => _renderCard(r, borderColor[r.type]||'#e8b84b')).join('')}
   </div>`;
 }
