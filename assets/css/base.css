@@ -78,3 +78,39 @@ img {
   max-width: 100%;
   display: block;
 }
+
+/* ── Accessibilité ─────────────────────────────────────────────────────────── */
+
+/* Anneau de focus clavier visible sur TOUT élément focusable (boutons, liens,
+   inputs, [tabindex]). Bleu accent : perceptible en thème jour comme nuit.
+   :focus-visible n'apparaît qu'à la navigation clavier (pas au clic souris). */
+:focus-visible {
+  outline: 2px solid #4f8cff;
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+/* Supprime l'outline natif quand le focus vient de la souris (évite le double anneau). */
+:focus:not(:focus-visible) { outline: none; }
+/* Conteneurs simplement focusables par programme (cibles du lien d'évitement,
+   panneaux) : pas d'anneau, ce ne sont pas des contrôles. */
+[tabindex="-1"]:focus { outline: none; }
+
+/* Lien d'évitement « Aller au contenu » (visible seulement au focus clavier). */
+.skip-link {
+  position: fixed; top: 8px; left: 8px; z-index: 100001;
+  padding: .5rem .9rem; border-radius: 8px;
+  background: #4f8cff; color: #fff; font-weight: 700; font-size: .85rem;
+  transform: translateY(-150%); transition: transform .15s;
+}
+.skip-link:focus { transform: translateY(0); }
+
+/* Respect de « réduire les animations » (système) : neutralise animations,
+   transitions et défilement fluide pour les personnes sensibles au mouvement. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
