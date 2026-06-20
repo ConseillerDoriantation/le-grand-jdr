@@ -22,7 +22,7 @@ import { initializeFirestore,
          writeBatch,
          query, where, orderBy, limit,
          onSnapshot,
-         serverTimestamp }         from 'firebase/firestore';
+         serverTimestamp, Timestamp } from 'firebase/firestore';
 import { firebaseConfig }          from './firebase-config.js';
 
 const app  = initializeApp(firebaseConfig);
@@ -60,5 +60,5 @@ export {
   writeBatch,
   query, where, orderBy, limit,
   onSnapshot,
-  serverTimestamp,
+  serverTimestamp, Timestamp,
 };

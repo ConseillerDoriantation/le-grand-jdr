@@ -7,7 +7,7 @@
 // _killAudio (teardown), handlers _vtt* (registre VTT_ACTIONS).
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { db, doc, collection, addDoc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp } from '../../config/firebase.js';
+import { db, doc, collection, addDoc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, Timestamp } from '../../config/firebase.js';
 import Sortable from '../../vendor/sortable.esm.js';
 import { STATE } from '../../core/state.js';
 import { VS, aid } from './vtt-state.js';
@@ -31,6 +31,7 @@ let _musicCloseOut = null;
 let _musicProgTimer = null;
 let _musicSortables = [];   // instances Sortable actives
 let _previewEl     = null;  // aperçu local MJ (non diffusé)
+let _lastAppliedSeek = 0;   // dernier seekVersion appliqué (évite de re-seeker à chaque resync)
 
 // ── Refs Firestore (sons / playlists / état musique) ────────────────
 const _sonsCol       = ()  => collection(db, `adventures/${aid()}/vttSons`);
@@ -452,7 +453,7 @@ function _renderNowPlaying(curSound, ms) {
       : '<span style="color:var(--text-dim)">— Rien en lecture —</span>'
     }</div>
     ${curSound ? `<div class="vtt-music-prog-row">
-      <div class="vtt-music-prog-bar"${mj?' data-vtt-fn="_vttSeek" data-vtt-args="event|$this"':''} style="${mj?'':'cursor:default'}">
+      <div class="vtt-music-prog-bar"${mj?' data-vtt-fn="_vttSeek" data-vtt-args="$event|$this"':''} style="${mj?'':'cursor:default'}">
         <div class="vtt-music-prog-fill" id="vtt-music-prog-fill" style="width:0%"></div>
       </div>
       <span class="vtt-music-prog-time" id="vtt-music-prog-time">0:00 / 0:00</span>
@@ -468,13 +469,24 @@ function _renderNowPlaying(curSound, ms) {
   </div>`;
 }
 
-// ── Seek sur clic barre de progression ─────────────────────────────
-function _vttSeek(e, bar) {
-  if (!_audioEl || !_audioEl.duration) return;
+// ── Seek sur clic barre de progression (MJ) ────────────────────────
+// Clic = sauter à la position cliquée. Pour une piste partagée non bouclée,
+// on rediffuse la position à toute la table en réécrivant `startedAt` (le
+// mécanisme de sync existant) + un `seekVersion` qui fait re-seeker les clients
+// déjà en lecture. Boucle / pause → seek local au MJ uniquement.
+async function _vttSeek(e, bar) {
+  if (!STATE.isAdmin || !_audioEl || !_audioEl.duration) return;
   const rect = bar.getBoundingClientRect();
   const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-  _audioEl.currentTime = ratio * _audioEl.duration;
+  const target = ratio * _audioEl.duration;
+  _audioEl.currentTime = target;   // feedback immédiat côté MJ
   _updateMusicProg();
+  if (_musicState.loop || _musicState.paused) return;   // pas de sync pertinente → local
+  _lastAppliedSeek = (_musicState.seekVersion || 0) + 1; // déjà appliqué localement
+  await _setMusicState({
+    startedAt: Timestamp.fromMillis(Date.now() - Math.round(target * 1000)),
+    seekVersion: _lastAppliedSeek,
+  });
 }
 
 // ── Lecture / contrôles ─────────────────────────────────────────────
@@ -546,6 +558,7 @@ function _resetMusicState() {
   _sounds = []; _playlists = []; _musicState = {};
   _musicCatalogStarted = false; _musicCatalogLoading = false; _musicCatalogReady = null;
   _musicSoundLoads.clear();
+  _lastAppliedSeek = 0;
 }
 
 async function _setMusicState(patch) {
@@ -586,6 +599,16 @@ function _syncMusicPlayback(ms) {
   // Même son déjà en lecture → pas de restart
   if (_audioEl && _audioEl.dataset.soundId===ms.currentSoundId && !_audioEl.paused && !_audioEl.ended) {
     _audioEl.loop = ms.loop ?? false;
+    // Seek diffusé par le MJ : on rejoue à la position partagée. Gate par
+    // seekVersion → un seul saut par seek (pas de re-seek à chaque resync).
+    const sv = ms.seekVersion || 0;
+    if (sv !== _lastAppliedSeek) {
+      _lastAppliedSeek = sv;
+      if (!ms.loop && ms.startedAt && _audioEl.duration) {
+        const pos = (Date.now() - (ms.startedAt?.toMillis?.() ?? Date.now())) / 1000;
+        if (pos >= 0 && pos < _audioEl.duration - 0.3) _audioEl.currentTime = pos;
+      }
+    }
     if (panel?.dataset.open==='1') _renderMusicPanel();
     return;
   }
@@ -596,6 +619,7 @@ function _syncMusicPlayback(ms) {
   el.dataset.soundId = ms.currentSoundId;
   el.volume = _getUserVolume();
   el.loop = ms.loop ?? false;
+  _lastAppliedSeek = ms.seekVersion || 0; // la position initiale est déjà gérée via startedAt
 
   // Sync temps (non-loop uniquement)
   if (ms.startedAt && !ms.loop) {
