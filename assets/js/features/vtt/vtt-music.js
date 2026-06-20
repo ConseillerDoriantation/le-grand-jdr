@@ -200,6 +200,9 @@ function _vttToggleMusic() {
 // ── Rendu du panel ──────────────────────────────────────────────────
 function _renderMusicPanel() {
   const panel = document.getElementById('vtt-music-panel'); if (!panel) return;
+  // Mémorise le défilement de la liste : le re-render via innerHTML (ex. au
+  // changement de musique) la remettrait sinon en haut.
+  const prevScroll = panel.querySelector('.vtt-music-body')?.scrollTop || 0;
   const mj = STATE.isAdmin;
   const ms = _musicState;
   const playing = !!(ms.playing && ms.currentSoundId);
@@ -248,8 +251,23 @@ function _renderMusicPanel() {
   if (_audioEl && !_audioEl.paused) {
     _musicProgTimer = setInterval(_updateMusicProg, 500);
   }
-  // Sortables (MJ uniquement — vue unifiée)
-  if (mj) _initMusicSortable();
+  // Sortables + clic droit sur les catégories (MJ uniquement — vue unifiée).
+  // Le contextmenu est lié en direct car l'en-tête porte déjà un data-vtt-fn
+  // (toggle au clic) et le dispatcher ne gère qu'un handler par élément.
+  if (mj) {
+    _initMusicSortable();
+    panel.querySelectorAll('.vtt-music-pl-hd').forEach(hd => {
+      hd.oncontextmenu = e => {
+        e.preventDefault();
+        const plId = hd.closest('.vtt-music-cat')?.dataset.catId;
+        if (plId) _vttPlaylistCtxMenu(e, plId);
+      };
+    });
+  }
+
+  // Restaure le défilement capturé avant le re-render.
+  const body = panel.querySelector('.vtt-music-body');
+  if (body) body.scrollTop = prevScroll;
 }
 
 function _updateMusicProg() {
@@ -348,7 +366,7 @@ function _renderMusicList(mj) {
       const sounds = (pl.soundIds||[]).map(sid=>_sounds.find(s=>s.id===sid)).filter(Boolean);
       const collapsed = _isCatCollapsed(pl.id);
       return `<div class="vtt-music-cat vtt-music-pl-item${active?' is-playing':''}" data-cat-id="${pl.id}" data-collapsed="${collapsed?1:0}">
-        <div class="vtt-music-cat-hd vtt-music-pl-hd" data-vtt-fn="_vttToggleMusicCat" data-vtt-args="${pl.id}">
+        <div class="vtt-music-cat-hd vtt-music-pl-hd" data-vtt-fn="_vttToggleMusicCat" data-vtt-args="${pl.id}" title="Clic droit : renommer / supprimer">
           <span class="vtt-music-cat-chevron"></span>
           <span class="vtt-music-pl-dot" style="background:${pl.color||'#6366f1'}"></span>
           <span class="vtt-music-pl-name vtt-music-cat-name">${_esc(pl.name)}</span>
@@ -691,6 +709,15 @@ function _vttSoundCtxMenu(e, soundId, currentPlId) {
   if (items.length) _showCtxMenu(e.clientX, e.clientY, items);
 }
 
+// ── Menu contextuel catégorie/playlist (MJ) — clic droit sur l'en-tête ──
+function _vttPlaylistCtxMenu(e, plId) {
+  const pl = _playlists.find(p => p.id === plId); if (!pl) return;
+  _showCtxMenu(e.clientX, e.clientY, [
+    { label: '✏️ Renommer', fn: () => _vttRenamePlaylist(plId) },
+    { label: '🗑 Supprimer', fn: () => _vttDeletePlaylist(plId) },
+  ]);
+}
+
 // ── Import GitHub Release ────────────────────────────────────────────
 async function _vttImportGithubRelease() {
   const LS_REPO = 'vtt-music-gh-repo', LS_TAG = 'vtt-music-gh-tag';
@@ -780,6 +807,13 @@ async function _vttDeletePlaylist(plId) {
   if (!await confirmModal(`Supprimer la playlist "${pl.name}" ?`)) return;
   if (_musicState.currentPlaylistId===plId) await _vttStopMusic();
   await deleteDoc(_playlistRef(plId)).catch(()=>{});
+}
+
+async function _vttRenamePlaylist(plId) {
+  const pl = _playlists.find(p => p.id === plId); if (!pl) return;
+  const name = (await promptModal('Nouveau nom de la catégorie :', { title: 'Renommer la catégorie', default: pl.name || '' }))?.trim();
+  if (!name || name === pl.name) return;
+  await updateDoc(_playlistRef(plId), { name }).catch(() => showNotif('Erreur lors du renommage', 'error'));
 }
 
 async function _vttAddSoundToPlaylist(plId, soundId) {
