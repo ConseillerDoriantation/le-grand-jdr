@@ -133,7 +133,7 @@ import {
   _vttMsDeleteNote, _vttMsEquip, _vttMsUnequip, _vttMsUnequipAll, _vttMsEquipPicker,
   _vttMsSlotChange, _vttMsDeleteItem, _vttMsSendPicker, _vttMsConfirmSend,
   _vttMsInvSearch, _vttMsInvCat, _vttMsInvClear, _vttMsSortSearch, _vttMsSortCat,
-  _vttMsSortClear, _vttToggleMsSort, _vttMsCompteAdd, _vttMsCompteDel,
+  _vttMsSortClear, _vttToggleMsSort, _vttMsCompteAdd, _vttMsCompteDel, _vttMsCraft,
 } from './vtt-mini-fiche.js';
 
 let _vttDelegSearch = '';
@@ -8620,6 +8620,7 @@ export const VTT_ACTIONS = {
   _vttMsCompteAdd,
   _vttMsCompteDel,
   _vttMsConfirmSend,
+  _vttMsCraft,
   _vttMsDeleteItem,
   _vttMsDeleteNote,
   _vttMsEquip,

@@ -7,20 +7,22 @@
 // depuis vtt.js (helpers _vttSort*/_vttDisplayRunes, circulaires).
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { db, updateDoc, writeBatch } from '../../config/firebase.js';
+import { db, updateDoc, writeBatch, addDoc, serverTimestamp } from '../../config/firebase.js';
 import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
 import { _esc, _norm } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { openModal, confirmModal, promptModal } from '../../shared/modal.js';
-import { getArmorSetData } from '../../shared/equipment-utils.js';
+import { getArmorSetData, syncEquipmentAfterInventoryMutation } from '../../shared/equipment-utils.js';
 import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js';
 import { getDamageTypeById } from '../../shared/damage-types.js';
 import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, calcOr,
          computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, getMod,
          sortCharactersForDisplay } from '../../shared/char-stats.js';
 import { useGold } from '../../shared/economy.js';
-import { _chrRef } from './vtt-refs.js'; // ref Firestore perso (leaf)
+import { loadCollection } from '../../data/firestore.js'; // lecture recettes/boutique (couche quota)
+import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
+import { _chrRef, _logCol } from './vtt-refs.js'; // refs Firestore perso + log VTT (leaf)
 import { _STAT_COLOR, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js'; // constantes pures (leaf)
 import { _vttPanelError } from './vtt-utils.js'; // frontière d'erreur (leaf)
 import { _effectDisplay, _vttSortDmgFormula,
@@ -853,6 +855,178 @@ function _msTabInventaire(c, uid, canEdit) {
   return html;
 }
 
+// ── Onglet Craft (recette rapide) ───────────────────────────────────────
+// Liste les recettes connues du joueur (collection `recipes`, partagées via
+// `acces`). Crafter consomme les ingrédients présents en sac et lance un jet
+// d'Artisanat (d20 + mod INT) vs DD 11. Réussite → ajoute le résultat (objet
+// boutique réel si la recette y est liée via shopItemId, sinon un consommable).
+// Échec → ingrédients perdus quand même. Le jet est posté dans le log VTT.
+const _MS_CRAFT_DD = 11;
+const _MS_CRAFT_TYPE_ICON = { cuisine:'🍳', potion:'🧪', arme:'⚔️', armure:'🛡', bijou:'💍' };
+
+let _msCraftRecipes = null;   // recettes chargées (array) | null = pas encore chargé
+let _msCraftLoading = false;
+let _msCraftShop    = null;   // items boutique (chargés à la demande pour les recettes liées)
+
+// Charge les recettes une fois (cache session). Re-render à l'arrivée des données.
+async function _msEnsureCraftRecipes() {
+  if (_msCraftRecipes !== null || _msCraftLoading) return;
+  _msCraftLoading = true;
+  try { _msCraftRecipes = await loadCollection('recipes'); }
+  catch { _msCraftRecipes = []; }
+  finally {
+    _msCraftLoading = false;
+    if (VS.miniUid && _miniTab === 'craft') _renderMiniSheet(VS.miniUid);
+  }
+}
+
+// Recettes connues du perso : MJ = toutes, joueur = celles partagées avec lui.
+function _msKnownRecipes(uid) {
+  const list = _msCraftRecipes || [];
+  return STATE.isAdmin ? list : list.filter(r => (r.acces || []).includes(uid));
+}
+
+// Compte les unités d'inventaire par nom normalisé (convention 1 entrée = 1 unité).
+function _msInvNameCounts(c) {
+  const counts = new Map();
+  (c?.inventaire || []).forEach(it => {
+    if (!it?.nom) return;
+    const k = _norm(it.nom);
+    counts.set(k, (counts.get(k) || 0) + 1);
+  });
+  return counts;
+}
+
+// État des ingrédients d'une recette vis-à-vis du sac.
+function _msRecipeIngrStatus(recipe, counts) {
+  const ingrs = (Array.isArray(recipe.ingredients) ? recipe.ingredients : []).filter(ig => ig?.nom);
+  const rows = ingrs.map(ig => {
+    const need = Math.max(1, parseInt(ig.quantite) || 1);
+    const have = counts.get(_norm(ig.nom)) || 0;
+    return { nom: ig.nom, need, have, ok: have >= need };
+  });
+  return { rows, hasIngr: ingrs.length > 0, allOk: ingrs.length > 0 && rows.every(r => r.ok) };
+}
+
+function _msTabCraft(c, uid, canEdit) {
+  if (_msCraftRecipes === null) { _msEnsureCraftRecipes(); return '<div class="vtt-ms-empty">⏳ Chargement des recettes…</div>'; }
+
+  const known = _msKnownRecipes(uid);
+  if (!known.length) return '<div class="vtt-ms-empty">Aucune recette connue.</div>';
+
+  const counts = _msInvNameCounts(c);
+  const cards  = known
+    .map(r => ({ r, st: _msRecipeIngrStatus(r, counts) }))
+    .sort((a, b) => (b.st.allOk - a.st.allOk) || (a.r.nom || '').localeCompare(b.r.nom || ''));
+
+  return `<div class="vtt-ms-craft">${cards.map(({ r, st }) => {
+    const icon = _MS_CRAFT_TYPE_ICON[r.type] || '🔨';
+    const ingrHtml = st.hasIngr
+      ? `<div class="vtt-ms-craft-ingrs">${st.rows.map(row =>
+          `<span class="vtt-ms-craft-ingr ${row.ok ? 'ok' : 'ko'}">${_esc(row.nom)} <b>${row.have}/${row.need}</b></span>`).join('')}</div>`
+      : `<div class="vtt-ms-craft-noingr">Pas d'ingrédients listés — non craftable ici.</div>`;
+    const canCraft = canEdit && st.allOk;
+    const btnTitle = !canEdit ? 'Lecture seule'
+      : !st.hasIngr ? 'Recette sans ingrédients structurés'
+      : !st.allOk ? 'Ingrédients manquants'
+      : `Jet d'Artisanat (INT) DD ${_MS_CRAFT_DD}`;
+    return `<div class="vtt-ms-craft-card${st.allOk ? ' craftable' : ''}">
+      <div class="vtt-ms-craft-hd">
+        <span class="vtt-ms-craft-type" title="${_esc(r.type || '')}">${icon}</span>
+        <span class="vtt-ms-craft-name" title="${_esc(r.nom || '')}">${_esc(r.nom || '?')}</span>
+        ${r.shopItemId ? `<span class="vtt-ms-craft-out" title="Donne un objet à la réussite">🎁</span>` : ''}
+      </div>
+      ${ingrHtml}
+      ${r.effet ? `<div class="vtt-ms-craft-effet">✨ ${_esc(r.effet)}</div>` : ''}
+      <button class="vtt-ms-craft-btn" title="${_esc(btnTitle)}"${canCraft ? '' : ' disabled'}
+        data-vtt-fn="_vttMsCraft" data-vtt-args="${c.id}|${uid}|${r.id}">
+        🔨 Crafter <span class="vtt-ms-craft-dd">DD ${_MS_CRAFT_DD} · INT</span>
+      </button>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+// Objet produit par un craft réussi : l'objet boutique lié à la recette, ou
+// null si la recette n'a pas d'objet associé (ex. cuisine) — dans ce cas le
+// craft se limite à consommer les ingrédients (résultat ajouté à la main).
+async function _msBuildCraftResult(recipe) {
+  if (!recipe.shopItemId) return null;
+  if (_msCraftShop === null) { try { _msCraftShop = await loadCollection('shop'); } catch { _msCraftShop = []; } }
+  const shopItem = _msCraftShop.find(i => i.id === recipe.shopItemId);
+  return shopItem ? shopItemToInvEntry(shopItem, { source: 'craft' }) : null;
+}
+
+// Tente le craft : jet d'Artisanat (INT) DD 11. Consomme les ingrédients
+// (succès OU échec) ; ajoute le résultat uniquement si réussi.
+async function _vttMsCraft(charId, uid, recipeId) {
+  if (!_msCanEdit(uid)) return;
+  const c = VS.characters[charId]; if (!c) return;
+  const recipe = (_msCraftRecipes || []).find(r => r.id === recipeId); if (!recipe) return;
+
+  const status = _msRecipeIngrStatus(recipe, _msInvNameCounts(c));
+  if (!status.hasIngr) { showNotif('Recette sans ingrédients structurés.', 'info'); return; }
+  if (!status.allOk)   { showNotif('Ingrédients insuffisants.', 'error'); return; }
+
+  const ingrTxt = status.rows.map(r => `${r.need}× ${r.nom}`).join(', ');
+  const outTxt = recipe.shopItemId
+    ? `Réussite → l'objet de la recette est ajouté au sac. `
+    : `Réussite → aucun objet produit (recette sans objet lié), à ajouter à la main. `;
+  if (!await confirmModal(
+    `Tenter de crafter <b>${_esc(recipe.nom || '')}</b> ?<br>
+     <span style="color:var(--text-dim);font-size:.85rem">Jet d'Artisanat (INT) DD ${_MS_CRAFT_DD}. ${outTxt}Les ingrédients (${_esc(ingrTxt)}) sont consommés même en cas d'échec.</span>`,
+    { title: '🔨 Recette rapide', confirmLabel: 'Lancer le jet' })) return;
+
+  // 1) Indices des entrées à consommer (les `need` premières par nom normalisé).
+  const oldInv = [...(c.inventaire || [])];
+  const removedSet = new Set();
+  for (const row of status.rows) {
+    const key = _norm(row.nom);
+    let left = row.need;
+    for (let i = 0; i < oldInv.length && left > 0; i++) {
+      if (!removedSet.has(i) && oldInv[i]?.nom && _norm(oldInv[i].nom) === key) { removedSet.add(i); left--; }
+    }
+    if (left > 0) { showNotif('Ingrédients insuffisants.', 'error'); return; } // garde-fou (course)
+  }
+
+  // 2) Jet d'Artisanat INT DD 11 (nat 1 = échec auto, nat 20 = succès auto).
+  const mod    = getMod(c, 'intelligence');
+  const d20    = Math.floor(Math.random() * 20) + 1;
+  const total  = d20 + mod;
+  const passed = d20 !== 1 && (d20 === 20 || total >= _MS_CRAFT_DD);
+
+  // 3) Nouvel inventaire (ingrédients retirés) + objet appendé si réussite & objet lié.
+  const removedIdx = [...removedSet];
+  const newInv = oldInv.filter((_, i) => !removedSet.has(i));
+  let produced = null;
+  if (passed) { produced = await _msBuildCraftResult(recipe); if (produced) newInv.push(produced); }
+
+  // 4) Réindexe l'équipement (mêmes règles que l'artisan : indices d'origine).
+  c.inventaire = newInv;
+  const sync = syncEquipmentAfterInventoryMutation(c, removedIdx);
+
+  try {
+    await updateDoc(_chrRef(charId), { inventaire: newInv, equipement: sync.equipement, statsBonus: sync.statsBonus });
+    c.equipement = sync.equipement; c.statsBonus = sync.statsBonus;
+  } catch (e) { console.error('[vtt] craft', e); showNotif('Erreur sauvegarde', 'error'); return; }
+
+  // 5) Log VTT (visible par toute la table).
+  const authorName = STATE.profile?.pseudo || STATE.profile?.prenom || c.nom || 'Joueur';
+  addDoc(_logCol(), {
+    type: 'craft', authorId: STATE.user?.uid || null, authorName,
+    charName: c.nom || '', recipeName: recipe.nom || '',
+    statLabel: 'Artisanat (INT)', mod, d20, total, dd: _MS_CRAFT_DD, passed,
+    createdAt: serverTimestamp(),
+  }).catch(() => {});
+
+  const okMsg = produced ? `✅ ${produced.nom || recipe.nom} crafté !` : '✅ Réussi — ingrédients consommés';
+  showNotif(
+    `🔨 Artisanat : d20[${d20}]${mod >= 0 ? '+' : ''}${mod} = ${total} vs DD ${_MS_CRAFT_DD} → ` +
+    (passed ? okMsg : '❌ Échec — ingrédients perdus'),
+    passed ? 'success' : 'error');
+
+  if (VS.miniUid) _renderMiniSheet(VS.miniUid);
+}
+
 // ── Onglet Notes (modèle notesList partagé avec la vraie fiche) ──────────
 function _msTabNotes(c, uid, canEdit) {
   const notes = c?.notesList || [];
@@ -996,6 +1170,7 @@ function _renderMiniSheetImpl(uid) {
     { key:'equip',  icon:'🛡',  label:'Équip.' },
     { key:'sorts',  icon:'✨',  label:'Sorts'  },
     { key:'inv',    icon:'🎒',  label:'Sac'    },
+    { key:'craft',  icon:'🔨', label:'Craft'  },
     { key:'compte', icon:'💰', label:'Or'     },
     { key:'notes',  icon:'📝', label:'Notes'  },
   ];
@@ -1009,6 +1184,7 @@ function _renderMiniSheetImpl(uid) {
       _miniTab === 'combat' ? _msTabCombat(c, uid, canEdit)
     : _miniTab === 'equip'  ? _msTabEquipement(c, uid, canEdit)
     : _miniTab === 'sorts'  ? _msTabSorts(c, uid, canEdit)
+    : _miniTab === 'craft'  ? _msTabCraft(c, uid, canEdit)
     : _miniTab === 'compte' ? _msTabCompte(c, uid, canEdit)
     : _miniTab === 'notes'  ? _msTabNotes(c, uid, canEdit)
     :                         _msTabInventaire(c, uid, canEdit);
@@ -1067,6 +1243,7 @@ export {
   _msSyncClearBtn,
   _msTabCombat,
   _msTabCompte,
+  _msTabCraft,
   _msTabEquipement,
   _msTabInventaire,
   _msTabNotes,
@@ -1078,6 +1255,7 @@ export {
   _vttMsCompteAdd,
   _vttMsCompteDel,
   _vttMsConfirmSend,
+  _vttMsCraft,
   _vttMsDeleteItem,
   _vttMsDeleteNote,
   _vttMsEquip,

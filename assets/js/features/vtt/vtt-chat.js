@@ -622,6 +622,28 @@ export function _renderChatLogImpl(msgs) {
     </div>`;
   };
 
+  /** Recette rapide craftée depuis la mini-fiche (jet d'Artisanat) */
+  const renderCraft = (m, i, ts) => {
+    const passed = !!m.passed;
+    const theme = passed ? 'saveok' : 'savefail';
+    const modStr = (m.mod >= 0 ? '+' : '') + m.mod;
+    const badge = passed
+      ? `<span class="vtt-log-badge vtt-log-badge--ok">✅ CRAFTÉ</span>`
+      : `<span class="vtt-log-badge vtt-log-badge--fail">❌ RATÉ</span>`;
+    const head = _header({
+      srcImg: null, srcName: m.charName || m.authorName || '?',
+      label: `🔨 ${m.recipeName || 'Artisanat'}`,
+      badges: badge, ts,
+    });
+    const body = `<div class="vtt-log-body">
+      <span class="vtt-log-icon">🔨</span>
+      <strong class="vtt-log-result" style="font-size:1.15rem">${m.total}</strong>
+      <span class="vtt-log-vs">vs DD ${m.dd}</span>
+      <span class="vtt-log-result-sub">d20[<strong>${m.d20}</strong>] ${modStr}${sub(m.statLabel||'')}</span>
+    </div>`;
+    return `<div class="vtt-log vtt-log--${theme}">${head}${body}</div>`;
+  };
+
   // ═══════════════════════════════════════════════════════════════════
   // RENDU
   // ═══════════════════════════════════════════════════════════════════
@@ -636,6 +658,7 @@ export function _renderChatLogImpl(msgs) {
     if (m.type === 'dot-tick')        return renderDotTick(m, i, ts);
     if (m.type === 'roll')            return renderRoll(m, i, ts);
     if (m.type === 'dice-free')       return renderDiceFree(m, i, ts);
+    if (m.type === 'craft')           return renderCraft(m, i, ts);
     return renderChat(m);
   }).join('');
 
@@ -691,6 +714,7 @@ export function _chatMsgExcerpt(m) {
   if (m.type === 'cast' || m.type === 'affliction-cast') return `✨ ${m.optLabel || 'Sort'}`;
   if (m.type === 'roll' || m.type === 'dice-free') return `🎲 Jet${m.total != null ? ' : '+m.total : ''}`;
   if (m.type === 'save') return `🛡 Jet de sauvegarde`;
+  if (m.type === 'craft') return `🔨 ${m.recipeName || 'Craft'}`;
   return 'message';
 }
 export function _vttChatReply(msgId) {
