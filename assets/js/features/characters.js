@@ -2180,24 +2180,53 @@ function renderCharCombatV3(c, canEdit) {
 const _RARE_NAMES = ['', 'Commun', 'Singulier', 'Rare', 'Mythique', 'Légendaire'];
 const _RARE_COLS  = ['#7a8fa8', '#9ca3af', '#4ade80', '#60a5fa', '#c084fc', '#f97316'];
 
-const _INV_FILTERS = [
-  { id: 'all',  lbl: 'Tout',          icon: '' },
-  { id: 'arme', lbl: 'Armes',         icon: '⚔️' },
-  { id: 'armure', lbl: 'Armures',     icon: '🛡️' },
-  { id: 'conso', lbl: 'Consommables', icon: '🧪' },
-  { id: 'parchemin', lbl: 'Parchemins', icon: '📜' },
-  { id: 'bijou', lbl: 'Précieux',     icon: '💎' },
-];
-
+// Catégorie d'un objet pour le filtre d'inventaire.
+// • Équipement → 3 catégories fixes qui absorbent tous leurs sous-types :
+//   toute arme → 'arme', toute armure → 'armure', bagues/amulettes → 'bijou'.
+// • Tout le reste → 'type:<type>' (champ libre de l'objet) → les filtres affichés
+//   dépendent des objets réellement possédés. Sans type → 'autre' (Divers).
 function _detectInvCategory(it) {
-  const tpl = (it.template || it.categorie || it.type || '').toLowerCase();
-  const nom = (it.nom || '').toLowerCase();
-  if (tpl.includes('arme') || it.degats || it.toucher) return 'arme';
-  if (tpl.includes('armure') || it.typeArmure || it.slotArmure) return 'armure';
-  if (tpl.includes('bijou') || it.slotBijou) return 'bijou';
-  if (tpl.includes('parchemin') || nom.includes('parchemin')) return 'parchemin';
-  if (tpl.includes('conso') || tpl.includes('potion') || nom.includes('potion')) return 'conso';
-  return 'autre';
+  const tpl = (it.template || '').toLowerCase();
+  const hay = _norm([it.type, it.categorie, it.nom, it.sousType, it.sousCategorie].filter(Boolean).join(' '));
+  const has = (...k) => k.some(x => hay.includes(x));
+  if (tpl === 'arme'   || tpl.includes('arme')   || it.degats || it.toucher) return 'arme';
+  if (tpl === 'armure' || tpl.includes('armure') || it.typeArmure || it.slotArmure) return 'armure';
+  if (tpl === 'bijou'  || it.slotBijou || has('anneau','amulette','bijou','talisman','pendentif','bague')) return 'bijou';
+  const type = (it.type || '').trim();
+  return type ? 'type:' + _norm(type) : 'autre';
+}
+
+// Icône d'agrément d'un filtre de type (cosmétique ; le libellé reste le type réel).
+function _invTypeIcon(type) {
+  const t = _norm(type || '');
+  if (/potion|consommable|elixir|antidote|nourriture|herbe|ingredient|ressource|materiau/.test(t)) return '🧪';
+  if (/parchemin|grimoire|rouleau|scroll|livre/.test(t)) return '📜';
+  if (/precieux|gemme|joyau|pierre|tresor|lingot|diamant|rubis|saphir|emeraude|perle|cristal|pepite|relique|valeur/.test(t)) return '💎';
+  if (/cle|clef|outil|kit|piege/.test(t)) return '🔧';
+  return '📦';
+}
+
+// Puces de filtre dynamiques : « Tout » + uniquement les catégories réellement
+// présentes dans l'inventaire (Armes/Armures/Bijoux, puis une puce par type
+// d'objet, puis « Divers »).
+function _invFilters(inv) {
+  const present = new Map();
+  (inv || []).forEach(it => {
+    const cat = _detectInvCategory(it);
+    if (present.has(cat)) return;
+    if (cat === 'arme')        present.set(cat, { id: 'arme',   lbl: 'Armes',   icon: '⚔️' });
+    else if (cat === 'armure') present.set(cat, { id: 'armure', lbl: 'Armures', icon: '🛡️' });
+    else if (cat === 'bijou')  present.set(cat, { id: 'bijou',  lbl: 'Bijoux',  icon: '💍' });
+    else if (cat === 'autre')  present.set(cat, { id: 'autre',  lbl: 'Divers',  icon: '📦' });
+    else present.set(cat, { id: cat, lbl: (it.type || '').trim() || '—', icon: _invTypeIcon(it.type) });
+  });
+  const FIX = ['arme', 'armure', 'bijou'];
+  const fixed = FIX.map(id => present.get(id)).filter(Boolean);
+  const dyn = [...present.values()]
+    .filter(c => !FIX.includes(c.id) && c.id !== 'autre')
+    .sort((a, b) => a.lbl.localeCompare(b.lbl, 'fr', { sensitivity: 'base' }));
+  const autre = present.get('autre');
+  return [{ id: 'all', lbl: 'Tout', icon: '' }, ...fixed, ...dyn, ...(autre ? [autre] : [])];
 }
 
 function renderCharInventaireV3(c, canEdit) {
@@ -2217,6 +2246,10 @@ function renderCharInventaireV3(c, canEdit) {
   // État du filtre / search module-local
   const filter = _csV3InvFilter;
   const q = _norm(filter.search || '');   // minuscules + sans accents
+  // Puces dynamiques d'après les objets présents ; un filtre devenu absent
+  // (ex. ancienne catégorie supprimée) retombe sur « Tout ».
+  const filters = _invFilters(inv);
+  const activeCat = filters.some(f => f.id === filter.cat) ? filter.cat : 'all';
 
   // Stack : regroupe les items identiques (même itemId ou même nom+rareté+template+prix)
   // Garde la liste d'indices originaux pour les actions (vente/envoi/suppression bulk).
@@ -2234,7 +2267,7 @@ function renderCharInventaireV3(c, canEdit) {
 
   // Filtrage sur les stacks
   const filteredInv = [...stackMap.values()].filter(({ it }) => {
-    if (filter.cat !== 'all' && _detectInvCategory(it) !== filter.cat) return false;
+    if (activeCat !== 'all' && _detectInvCategory(it) !== activeCat) return false;
     if (!q) return true;
     const hay = _norm(`${it.nom||''} ${it.type||''} ${it.template||''} ${it.description||''}`);
     return hay.includes(q);
@@ -2251,8 +2284,8 @@ function renderCharInventaireV3(c, canEdit) {
     <input placeholder="🔍 Rechercher dans l'inventaire…" value="${_esc(filter.search)}"
       data-input="_csV3InvSetSearch">
     <div class="filter-chips">
-      ${_INV_FILTERS.map(f => `<button class="filter-chip ${filter.cat===f.id?'on':''}" data-action="csV3InvSetCat" data-cat="${f.id}">
-        ${f.icon} ${f.lbl}
+      ${filters.map(f => `<button class="filter-chip ${activeCat===f.id?'on':''}" data-action="csV3InvSetCat" data-cat="${_esc(f.id)}">
+        ${f.icon} ${_esc(f.lbl)}
       </button>`).join('')}
     </div>
   </div>`;
