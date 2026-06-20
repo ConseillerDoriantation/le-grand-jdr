@@ -12,7 +12,7 @@ import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
 import { _esc, _norm } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
-import { openModal, confirmModal, promptModal } from '../../shared/modal.js';
+import { openModal, closeModalDirect, confirmModal, promptModal } from '../../shared/modal.js';
 import { getArmorSetData, syncEquipmentAfterInventoryMutation } from '../../shared/equipment-utils.js';
 import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js';
 import { getDamageTypeById } from '../../shared/damage-types.js';
@@ -688,6 +688,7 @@ function _msTabCompte(c, uid, canEdit) {
       <div class="vtt-ms-cpt-btns">
         <button class="vtt-ms-cpt-btn pos" data-vtt-fn="_vttMsCompteAdd" data-vtt-args="${c.id}|${uid}|1"  title="Ajouter une recette">+ Recette</button>
         <button class="vtt-ms-cpt-btn neg" data-vtt-fn="_vttMsCompteAdd" data-vtt-args="${c.id}|${uid}|-1" title="Ajouter une dépense">− Dépense</button>
+        ${solde > 0 ? `<button class="vtt-ms-cpt-btn" data-vtt-fn="_vttMsSendGoldPicker" data-vtt-args="${c.id}|${uid}" title="Envoyer de l'or à un joueur présent">💰 Envoyer</button>` : ''}
       </div>
     </div>` : '';
 
@@ -756,6 +757,59 @@ async function _vttMsCompteDel(charId, uid, type, idx) {
     c.compte = newCompte;
     if (VS.miniUid) _renderMiniSheet(VS.miniUid);
   } catch (e) { console.error('[vtt] compte del', e); showNotif('Erreur suppression', 'error'); }
+}
+
+// Envoyer de l'or à un joueur présent — choix du montant + destinataire (mini-fiche).
+function _vttMsSendGoldPicker(charId, uid) {
+  if (!_msCanEdit(uid)) return;
+  const c = VS.characters[charId]; if (!c) return;
+  const solde = calcOr(c);
+  if (solde <= 0) { showNotif('Solde vide', 'info'); return; }
+  const targets = Object.entries(VS.presence)
+    .filter(([pUid]) => pUid !== uid)
+    .flatMap(([pUid, p]) => Object.values(VS.characters)
+      .filter(ch => ch.uid === pUid)
+      .map(ch => ({ charId: ch.id, charNom: ch.nom || p.pseudo, pseudo: p.pseudo })));
+  if (!targets.length) { showNotif('Aucun joueur présent à qui envoyer de l\'or', 'info'); return; }
+  openModal('💰 Envoyer de l\'or', `
+    <div style="display:flex;flex-direction:column;gap:.55rem">
+      <div style="font-size:.8rem;color:var(--text-dim)">Solde : <strong style="color:var(--gold)">${solde} or</strong></div>
+      <div class="form-group" style="margin:0">
+        <label style="font-size:.75rem">Montant</label>
+        <input type="number" id="vtt-ms-gold-amt" class="input-field" min="1" max="${solde}" value="1" style="max-width:140px">
+      </div>
+      <p style="margin:.2rem 0 0;font-size:.85rem;color:var(--text-dim)">Destinataire :</p>
+      ${targets.map(t => `<button class="btn btn-outline" style="text-align:left"
+        data-vtt-fn="_vttMsConfirmSendGold" data-vtt-args="${charId}|${uid}|${t.charId}">
+        ${_esc(t.pseudo)} → ${_esc(t.charNom)}</button>`).join('')}
+      <button class="btn btn-outline btn-sm" style="margin-top:.3rem" data-vtt-fn="closeModal">Annuler</button>
+    </div>`);
+}
+
+// Effectue le transfert d'or entre deux persos (débit + crédit, rollback si échec).
+// La règle Firestore autorise un non-propriétaire à modifier le `compte` d'un
+// autre perso (cf. don d'objet) ; on passe charObj car STATE.characters est vide
+// côté VTT (les persos vivent dans VS.characters).
+async function _vttMsConfirmSendGold(senderCharId, senderUid, recipCharId) {
+  if (!_msCanEdit(senderUid)) return;
+  const sender = VS.characters[senderCharId]; if (!sender) return;
+  const recip  = VS.characters[recipCharId];  if (!recip)  return;
+  const amtEl = document.getElementById('vtt-ms-gold-amt');
+  const montant = Math.floor(Math.abs(parseFloat(amtEl?.value) || 0));
+  if (!montant) { showNotif('Montant invalide', 'info'); amtEl?.focus(); return; }
+  if (montant > calcOr(sender)) { showNotif('Solde insuffisant', 'error'); return; }
+  const debit = await useGold(senderCharId, -montant, `Don → ${recip.nom || 'joueur'}`, { charObj: sender, refreshUI: false });
+  if (!debit.ok) { showNotif(debit.error || 'Erreur', 'error'); return; }
+  const credit = await useGold(recipCharId, +montant, `Don ← ${sender.nom || 'joueur'}`, { charObj: recip, refreshUI: false });
+  if (!credit.ok) {
+    await useGold(senderCharId, +montant, 'Annulation du don', { charObj: sender, refreshUI: false }).catch(() => {});
+    showNotif(/refus|permission/i.test(credit.error || '')
+      ? "Envoi refusé : règle Firestore compte manquante (don d'or)" : (credit.error || 'Erreur — don annulé'), 'error');
+    return;
+  }
+  closeModalDirect();
+  showNotif(`💰 ${montant} or envoyé à ${recip.nom || 'joueur'}`, 'success');
+  if (VS.miniUid) _renderMiniSheet(VS.miniUid);
 }
 
 function _msTabInventaire(c, uid, canEdit) {
@@ -1253,6 +1307,8 @@ export {
   _renderMiniSheet,
   _vttMsAddNote,
   _vttMsCompteAdd,
+  _vttMsSendGoldPicker,
+  _vttMsConfirmSendGold,
   _vttMsCompteDel,
   _vttMsConfirmSend,
   _vttMsCraft,
