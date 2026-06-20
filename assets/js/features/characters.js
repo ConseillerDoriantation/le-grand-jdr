@@ -2180,25 +2180,43 @@ function renderCharCombatV3(c, canEdit) {
 const _RARE_NAMES = ['', 'Commun', 'Singulier', 'Rare', 'Mythique', 'Légendaire'];
 const _RARE_COLS  = ['#7a8fa8', '#9ca3af', '#4ade80', '#60a5fa', '#c084fc', '#f97316'];
 
-// Catégorie d'un objet pour le filtre d'inventaire.
+// Regroupements spécifiques par type (le MJ saisit le type libre des objets).
+// Clé = type normalisé (minuscules, sans accents) → catégorie cible.
+const _INV_MATERIAUX = { id: 'materiaux', lbl: 'Matériaux', icon: '🧱' };
+const _INV_TYPE_MAP = {
+  'skin':       { id: 'armure', lbl: 'Armures', icon: '🛡️' }, // routé vers la catégorie Armures
+  'instrument': { id: 'objet',  lbl: 'Objet',   icon: '🎒' },
+};
+
+// Catégorie complète d'un objet ({ id, lbl, icon }) pour le filtre d'inventaire.
 // • Équipement → 3 catégories fixes qui absorbent tous leurs sous-types :
-//   toute arme → 'arme', toute armure → 'armure', bagues/amulettes → 'bijou'.
-// • Tout le reste → 'type:<type>' (champ libre de l'objet) → les filtres affichés
-//   dépendent des objets réellement possédés. Sans type → 'autre' (Divers).
-function _detectInvCategory(it) {
+//   toute arme → Armes, toute armure → Armures, bagues/amulettes → Bijoux.
+// • Mat.* (Mat.Arme, Mat.Armure, Mat.Bijoux…) → Matériaux.
+// • Règles ponctuelles (_INV_TYPE_MAP) : skin → Armures, Instrument → Objet…
+// • Tout le reste → une catégorie par `type` d'objet (libellé = le type réel).
+// • Sans type → Divers.
+function _invCat(it) {
   const tpl = (it.template || '').toLowerCase();
   const hay = _norm([it.type, it.categorie, it.nom, it.sousType, it.sousCategorie].filter(Boolean).join(' '));
   const has = (...k) => k.some(x => hay.includes(x));
-  if (tpl === 'arme'   || tpl.includes('arme')   || it.degats || it.toucher) return 'arme';
-  if (tpl === 'armure' || tpl.includes('armure') || it.typeArmure || it.slotArmure) return 'armure';
-  if (tpl === 'bijou'  || it.slotBijou || has('anneau','amulette','bijou','talisman','pendentif','bague')) return 'bijou';
+  if (tpl === 'arme'   || tpl.includes('arme')   || it.degats || it.toucher) return { id: 'arme',   lbl: 'Armes',   icon: '⚔️' };
+  if (tpl === 'armure' || tpl.includes('armure') || it.typeArmure || it.slotArmure) return { id: 'armure', lbl: 'Armures', icon: '🛡️' };
+  if (tpl === 'bijou'  || it.slotBijou || has('anneau','amulette','bijou','talisman','pendentif','bague')) return { id: 'bijou', lbl: 'Bijoux', icon: '💍' };
   const type = (it.type || '').trim();
-  return type ? 'type:' + _norm(type) : 'autre';
+  if (!type) return { id: 'autre', lbl: 'Divers', icon: '📦' };
+  const nt = _norm(type);
+  if (nt.startsWith('mat.') || nt.startsWith('mat ') || nt === 'materiau' || nt === 'materiaux') return _INV_MATERIAUX;
+  if (_INV_TYPE_MAP[nt]) return _INV_TYPE_MAP[nt];
+  return { id: 'type:' + nt, lbl: type, icon: _invTypeIcon(type) };
 }
+
+// Renvoie l'id de catégorie (pour le filtrage).
+function _detectInvCategory(it) { return _invCat(it).id; }
 
 // Icône d'agrément d'un filtre de type (cosmétique ; le libellé reste le type réel).
 function _invTypeIcon(type) {
   const t = _norm(type || '');
+  if (/plante|fleur|champignon|graine|botaniqu/.test(t)) return '🌿';
   if (/potion|consommable|elixir|antidote|nourriture|herbe|ingredient|ressource|materiau/.test(t)) return '🧪';
   if (/parchemin|grimoire|rouleau|scroll|livre/.test(t)) return '📜';
   if (/precieux|gemme|joyau|pierre|tresor|lingot|diamant|rubis|saphir|emeraude|perle|cristal|pepite|relique|valeur/.test(t)) return '💎';
@@ -2207,18 +2225,13 @@ function _invTypeIcon(type) {
 }
 
 // Puces de filtre dynamiques : « Tout » + uniquement les catégories réellement
-// présentes dans l'inventaire (Armes/Armures/Bijoux, puis une puce par type
-// d'objet, puis « Divers »).
+// présentes dans l'inventaire (Armes/Armures/Bijoux, puis les autres par libellé,
+// puis « Divers »).
 function _invFilters(inv) {
   const present = new Map();
   (inv || []).forEach(it => {
-    const cat = _detectInvCategory(it);
-    if (present.has(cat)) return;
-    if (cat === 'arme')        present.set(cat, { id: 'arme',   lbl: 'Armes',   icon: '⚔️' });
-    else if (cat === 'armure') present.set(cat, { id: 'armure', lbl: 'Armures', icon: '🛡️' });
-    else if (cat === 'bijou')  present.set(cat, { id: 'bijou',  lbl: 'Bijoux',  icon: '💍' });
-    else if (cat === 'autre')  present.set(cat, { id: 'autre',  lbl: 'Divers',  icon: '📦' });
-    else present.set(cat, { id: cat, lbl: (it.type || '').trim() || '—', icon: _invTypeIcon(it.type) });
+    const cat = _invCat(it);
+    if (!present.has(cat.id)) present.set(cat.id, cat);
   });
   const FIX = ['arme', 'armure', 'bijou'];
   const fixed = FIX.map(id => present.get(id)).filter(Boolean);
