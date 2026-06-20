@@ -695,6 +695,22 @@ export async function deleteInvItemBulk(charId, indicesB64) {
 // ══════════════════════════════════════════════
 // ENVOI
 // ══════════════════════════════════════════════
+// Filtre live des cartes destinataires (envoi objet/or) : beaucoup de joueurs →
+// on tape pour filtrer par nom / pseudo. Commun aux deux modales.
+function _sendTargetFilter(el) {
+  const q = _norm(el.value || '');
+  const list = document.getElementById('send-target-list');
+  if (!list) return;
+  let shown = 0;
+  list.querySelectorAll('[data-search]').forEach(card => {
+    const ok = !q || card.dataset.search.includes(q);
+    card.style.display = ok ? '' : 'none';
+    if (ok) shown++;
+  });
+  const empty = document.getElementById('send-target-empty');
+  if (empty) empty.style.display = shown ? 'none' : '';
+}
+
 export async function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
   const c = getCharacterById(charId);
   if (!c) return;
@@ -729,7 +745,7 @@ export async function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
   const targetCards = otherChars.map(target => {
     const colors    = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
     const couleur   = colors[(target.nom||'').charCodeAt(0) % colors.length];
-    return `<label class="invm-target" style="--tc:${couleur}">
+    return `<label class="invm-target" data-search="${_esc(_norm((target.nom||'')+' '+(target.ownerPseudo||'')))}" style="--tc:${couleur}">
       <input type="radio" name="send-target" value="${target.id}">
       <div class="invm-target-av">
         ${characterPortraitContent(target)}
@@ -763,7 +779,10 @@ export async function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
       </div>` : ''}
 
       <div class="invm-section-lbl">Destinataire</div>
-      <div class="invm-targets">${targetCards}</div>
+      ${otherChars.length > 4 ? `<input type="text" class="input-field" data-input="_sendTargetFilter" placeholder="🔍 Filtrer un personnage…" autocomplete="off" style="width:100%;margin-bottom:.45rem">` : ''}
+      <div class="invm-targets" id="send-target-list">${targetCards}
+        <div id="send-target-empty" style="display:none;padding:.6rem;text-align:center;color:var(--text-dim);font-size:.78rem">Aucun personnage trouvé</div>
+      </div>
 
       <footer class="invm-actions">
         <button class="invm-btn invm-btn-primary invm-btn-arcane" data-action="sendInvItem" data-id="${charId}" data-indices="${b64}">📤 Envoyer</button>
@@ -856,7 +875,7 @@ export async function openSendGoldModal(charId) {
   const targetCards = targets.map(t => {
     const initiale  = (t.nom || '?')[0].toUpperCase();
     const couleur   = '#e8b84b';
-    return `<label style="display:flex;align-items:center;gap:.7rem;padding:.55rem .7rem;
+    return `<label data-search="${_esc(_norm((t.nom||'')+' '+(t.ownerPseudo||'')))}" style="display:flex;align-items:center;gap:.7rem;padding:.55rem .7rem;
       border-radius:8px;cursor:pointer;border:2px solid var(--border);background:var(--bg-elevated);
       transition:border-color .15s" data-hov-border="var(--gold)">
       <input type="radio" name="gold-target" value="${t.id}" style="accent-color:var(--gold)">
@@ -883,8 +902,10 @@ export async function openSendGoldModal(charId) {
     </div>
     <div style="font-size:.72rem;color:var(--text-dim);font-weight:600;
       text-transform:uppercase;letter-spacing:.8px;margin-bottom:.4rem">Destinataire</div>
-    <div style="display:flex;flex-direction:column;gap:.35rem;max-height:220px;overflow-y:auto;margin-bottom:.75rem">
+    ${targets.length > 4 ? `<input type="text" class="input-field" data-input="_sendTargetFilter" placeholder="🔍 Filtrer un personnage…" autocomplete="off" style="width:100%;margin-bottom:.45rem">` : ''}
+    <div id="send-target-list" style="display:flex;flex-direction:column;gap:.35rem;max-height:220px;overflow-y:auto;margin-bottom:.75rem">
       ${targetCards}
+      <div id="send-target-empty" style="display:none;padding:.5rem;text-align:center;color:var(--text-dim);font-size:.76rem">Aucun personnage trouvé</div>
     </div>
     <div class="form-group" style="margin-bottom:.75rem">
       <label style="font-size:.75rem">Montant <span style="color:var(--text-dim);font-weight:400">(max ${orDispo} or)</span></label>
@@ -1202,6 +1223,7 @@ export async function saveInvItem(idx) {
 
 registerActions({
   _charInvSearch:      (el)  => { _charInvSearch = el.value; filterInvRows(el.value); },
+  _sendTargetFilter:   (el)  => _sendTargetFilter(el),
   _invCatToggle:       (btn) => { const d = btn.closest('details'); requestAnimationFrame(() => { if (d) _invCatOpen[btn.dataset.cat] = d.open; }); },
   _sellRefreshTotal:   (el)  => _sellRefreshTotal(el, Number(el.dataset.prix), Number(el.dataset.max)),
   _invmStep:          (btn) => _invmStep(btn.dataset.input, Number(btn.dataset.delta), Number(btn.dataset.max), btn.dataset.context),
