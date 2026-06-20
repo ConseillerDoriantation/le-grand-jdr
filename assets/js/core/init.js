@@ -34,6 +34,11 @@ import { loadUserAdventures, repairCurrentUserAdventureLinks, selectAdventure } 
 import { unwatchAll } from "../shared/realtime.js";
 import { stopPresence } from "../shared/presence.js";
 import { releaseSessionData } from "../data/firestore.js";
+import { initErrorSensor } from "../shared/error-sensor.js";
+
+// Capteur d'erreurs (window.onerror / unhandledrejection → Firestore borné).
+// Installé au plus tôt pour attraper les erreurs dès le chargement.
+initErrorSensor();
 
 // Fonction disponible tot pour le picker, avant le lazy-load de aventures.js
 const LAST_ADV_KEY = 'jdr-last-adventure';

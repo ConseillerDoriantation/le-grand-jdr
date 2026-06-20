@@ -6,6 +6,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { showNotif } from '../../shared/notifications.js';
 import { _esc } from '../../shared/html.js';
+import { reportError } from '../../shared/error-sensor.js';
 
 // Clé d'identité de l'entité liée à un token (perso/PNJ) — null si token libre.
 // Partagé par l'auto-sync (dédup réserve) et le rendu du tray.
@@ -16,6 +17,7 @@ export const _tokenEntityKey = t => t?.characterId ? 'c:' + t.characterId : t?.n
 const _vttPanelErrSeen = new Set();
 export function _vttPanelError(label, e, elId) {
   console.error(`[vtt] panneau « ${label} » : rendu échoué`, e);
+  reportError(e, { boundary: 'vtt:' + label });
   if (!_vttPanelErrSeen.has(label)) {
     _vttPanelErrSeen.add(label);
     try { showNotif(`⚠ Panneau « ${label} » en erreur — le reste de la table continue (détail en console).`, 'error'); } catch {}

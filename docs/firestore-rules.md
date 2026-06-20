@@ -138,6 +138,9 @@ service cloud.firestore {
     match /map_lieux/{id}         { allow read, write: if isAdmin(); }
     match /npcs/{id}              { allow read, write: if isAdmin(); }
     match /npc_affinites/{id}     { allow read, write: if isAdmin(); }
+    // Capteur d'erreurs client : tout joueur connecté peut créer/incrémenter un
+    // doc d'erreur (id = hash de la signature → collection bornée) ; seul le MJ lit.
+    match /errors/{id}            { allow create, update: if isLoggedIn(); allow read, delete: if isAdmin(); }
     match /settings/{id}          { allow read, write: if isAdmin(); }
     match /achievements/{id}      { allow read, write: if isAdmin(); }
     match /achievements_meta/{id} { allow read, write: if isAdmin(); }
