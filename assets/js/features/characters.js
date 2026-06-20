@@ -1108,6 +1108,9 @@ function _bindQuetesDnd(c, canEdit) {
       animation: 160,
       draggable: '.quest',
       filter: '.btn-icon, .q-empty',
+      // Garde le clone dans .cs-v3 : les cartes sont stylées via cet ancêtre, sinon
+      // le clone (déplacé dans <body>) perd toute son apparence pendant le drag.
+      fallbackOnBody: false,
       onEnd: () => _onQuetesReordered(c),
     }));
   });
@@ -1185,6 +1188,9 @@ function _bindNotesDnd(c, canEdit) {
     handle: '.note-v3-drag',
     draggable: '.note-v3',
     animation: 160,
+    // Garde le clone dans .cs-v3 (cartes stylées via cet ancêtre) → conserve son
+    // apparence pendant le drag au lieu de devenir un bloc nu.
+    fallbackOnBody: false,
     onEnd: () => _onNotesReordered(c),
   });
 }
