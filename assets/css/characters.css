@@ -8027,7 +8027,7 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 /* Vitaux PV/PM sidebar */
 .cs-v3 .vital {
   display: grid; grid-template-columns: 24px 1fr; gap: 10px; align-items: center;
-  padding: 10px 12px; border-radius: 18px;
+  padding: 10px var(--space-3); border-radius: 18px;
   background: rgba(255,255,255,.02); border: 1px solid var(--border);
   transition: border-color .2s; position: relative;
 }
@@ -8064,7 +8064,7 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .cs-mini-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
 .cs-v3 .cs-mini-grid-3 { grid-template-columns: repeat(3, 1fr); }
 @media (max-width: 360px) { .cs-v3 .cs-mini-grid-3 { grid-template-columns: repeat(2, 1fr); } }
-.cs-v3 .cs-mini { background: rgba(255,255,255,.02); border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px; display: flex; align-items: center; gap: 8px; }
+.cs-v3 .cs-mini { background: rgba(255,255,255,.02); border: 1px solid var(--border); border-radius: 12px; padding: 8px var(--space-3); display: flex; align-items: center; gap: 8px; }
 .cs-v3 .cs-mini-icon { font-size: .92rem; opacity: .9; }
 .cs-v3 .cs-mini-body { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
 .cs-v3 .cs-mini-lbl { font-size: .56rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); }
@@ -8073,7 +8073,7 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 /* Or carte */
 .cs-v3 .or-card {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 10px 12px; border-radius: 18px;
+  padding: 10px var(--space-3); border-radius: 18px;
   background: linear-gradient(135deg, rgba(244,196,48,.08), rgba(244,196,48,.02));
   border: 1px solid rgba(244,196,48,.22);
 }
