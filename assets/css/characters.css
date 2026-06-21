@@ -8011,6 +8011,19 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .xp-add button { background: rgba(192,132,252,.18); border: 1px solid rgba(192,132,252,.42); border-radius: 8px; padding: 4px 10px; color: #dcc6ff; cursor: pointer; font-size: .7rem; font-weight: 700; }
 .cs-v3 .xp-add button:hover { background: rgba(192,132,252,.30); }
 
+/* Chiffres tabulaires (largeur de chiffre constante) : les valeurs ne
+   "sautillent" plus quand elles changent (PV 9→10, mod ±) et les colonnes
+   de la grille de stats restent alignées. Polish systématique, zéro impact
+   de mise en page. Couvre tous les afficheurs numériques de la fiche. */
+.cs-v3 .vital-num, .cs-v3 .vital-num small,
+.cs-v3 .cs-mini-val, .cs-v3 .or-card-val, .cs-v3 .or-card-amount,
+.cs-v3 .stat-tile-total, .cs-v3 .stat-tile-mod, .cs-v3 .stat-seg,
+.cs-v3 .xp-meta, .cs-v3 .xp-pct, .cs-v3 .xp-add input,
+.cs-v3 .id-lvl-badge {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
 /* Vitaux PV/PM sidebar */
 .cs-v3 .vital {
   display: grid; grid-template-columns: 24px 1fr; gap: 10px; align-items: center;
