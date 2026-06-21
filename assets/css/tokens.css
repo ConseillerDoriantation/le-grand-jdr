@@ -72,6 +72,50 @@
   --r-lg:   24px;
   --r-xl:   32px;
   --r-full: 999px;
+
+  /* ── SOCLE DE DESIGN (additif, voir docs) ─────────────────────────────
+     Échelles partagées par les deux thèmes. À utiliser dans les nouveaux
+     composants / refontes pour un rythme et une typo cohérents. Les anciens
+     composants conservent leurs valeurs ad hoc tant qu'ils ne sont pas migrés. */
+
+  /* Espacement — grille 4/8pt. Marges/gaps/paddings = multiples de ces pas. */
+  --space-0:   0;
+  --space-1:   4px;
+  --space-2:   8px;
+  --space-3:   12px;
+  --space-4:   16px;
+  --space-5:   20px;
+  --space-6:   24px;
+  --space-8:   32px;
+  --space-10:  40px;
+  --space-12:  48px;
+  --space-16:  64px;
+
+  /* Typographie — échelle modulaire fermée (6 tailles). Pas de taille hors-échelle. */
+  --fs-xs:    12px;   /* labels, kickers, méta */
+  --fs-sm:    14px;   /* secondaire, corps dense */
+  --fs-base:  16px;   /* corps */
+  --fs-lg:    20px;   /* sous-titres */
+  --fs-xl:    26px;   /* titres de section */
+  --fs-2xl:   34px;   /* titres de page / nom de perso */
+  --lh-tight:  1.15;  /* titres */
+  --lh-snug:   1.35;  /* sous-titres */
+  --lh-normal: 1.6;   /* corps */
+  --fw-regular:  400;
+  --fw-medium:   500;
+  --fw-semibold: 600;
+
+  /* Surfaces sémantiques — échelle d'élévation. Un composant lit --surface-N
+     (et non un bg en dur) → cohérence garantie + bascule jour/nuit gratuite.
+     Valeurs nuit : */
+  --surface-page:   #080d15;   /* fond de page */
+  --surface-sunken: #0a121e;   /* creux (rail, champ, fond de jauge) */
+  --surface-1:      #0d1520;   /* carte / panneau */
+  --surface-2:      #111b2a;   /* bloc surélevé DANS une carte */
+  --surface-3:      #1a2535;   /* élément le plus haut (popover, actif) */
+  --on-surface:        var(--text);        /* texte principal sur surface */
+  --on-surface-muted:  var(--text-muted);  /* texte secondaire */
+
   --sidebar-width:  288px;   /* sidebar déployée (survol / focus) */
   --rail-w:         84px;    /* sidebar repliée : rail d'icônes */
   --content-max:    1680px;
@@ -174,6 +218,14 @@
   --green-dim: rgba(5,150,105,0.12);
   --blue:      #2563eb;
   --blue-dim:  rgba(37,99,235,0.10);
+
+  /* Surfaces sémantiques — valeurs jour (mêmes tons gris bleutés que les
+     overrides existants, mais centralisés ici). Espacement/typo = partagés. */
+  --surface-page:   #e0e3ea;
+  --surface-sunken: #e6e9ef;
+  --surface-1:      #eef1f5;
+  --surface-2:      #f3f4f7;
+  --surface-3:      #f5f7fa;
 }
 
 /* ══════════════════════════════════════════════════
