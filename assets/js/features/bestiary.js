@@ -1251,6 +1251,7 @@ function _render() {
           ${_esc(t)}
         </button>`).join('')}
     </div>
+    ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="white-space:nowrap;flex-shrink:0" data-bst-action="exportBeasts" title="Exporter toutes les créatures en document (.html imprimable)">📄 Exporter</button>` : ''}
     ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="white-space:nowrap;flex-shrink:0" data-bst-action="createDraft">+ Créature</button>` : ''}
   </div>
 
@@ -2113,9 +2114,82 @@ async function _bstRemoveImage(id) {
 // et appelle la fonction existante. Les fonctions restent sur `window` tant que
 // d'autres features (legacy) peuvent encore les invoquer.
 // ──────────────────────────────────────────────────────────────────────────────
+// ── Export : document HTML imprimable de toutes les créatures (MJ) ────────────
+// Génère un fichier .html autonome (lisible + imprimable en PDF depuis le
+// navigateur) listant chaque créature et ses infos. Téléchargement direct.
+function _bstExportDocument() {
+  if (!STATE.isAdmin) return;
+  const list = (STORE.creatures || []).slice()
+    .sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
+  if (!list.length) { showNotif('Aucune créature à exporter', 'info'); return; }
+  try {
+    const blob = new Blob([_bstBuildExportHtml(list)], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bestiaire-${new Date().toISOString().slice(0, 10)}.html`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    showNotif(`📄 Bestiaire exporté (${list.length} créature${list.length > 1 ? 's' : ''}).`, 'success');
+  } catch (e) {
+    console.error('[bestiaire] export', e);
+    showNotif("Échec de l'export", 'error');
+  }
+}
+
+function _bstBuildExportHtml(list) {
+  const e = _esc;
+  const txt = v => e(v && typeof v === 'object' ? (v.nom || v.label || v.description || '') : String(v ?? ''));
+  const statsHtml = (c) => [['FOR', 'force'], ['DEX', 'dexterite'], ['CON', 'constitution'], ['INT', 'intelligence'], ['SAG', 'sagesse'], ['CHA', 'charisme']]
+    .map(([l, k]) => (c[k] != null && c[k] !== '') ? `<span><b>${l}</b> ${e(String(c[k]))}</span>` : '')
+    .filter(Boolean).join('');
+  const actLine = (a) => {
+    const dmg = a.degats ? ` — ${e(a.degats)}${a.degatsFlat ? '+' + e(String(a.degatsFlat)) : ''}` : '';
+    const info = a.info ? ` <i>${e(a.info)}</i>` : '';
+    return `<li><b>${e(a.nom || 'Action')}</b>${dmg}${info}</li>`;
+  };
+  const ul = (arr, fn) => (Array.isArray(arr) && arr.length) ? `<ul>${arr.map(fn).join('')}</ul>` : '';
+  const section = (label, html) => html ? `<h3>${label}</h3>${html}` : '';
+  const card = (c) => {
+    const rs = RANG_STYLE[c.rang || 'classique'] || RANG_STYLE.classique;
+    const meta = [rs.label, c.type, c.environnement].filter(Boolean).map(e).join(' · ');
+    const vit = [c.pvMax && `❤️ ${e(String(c.pvMax))} PV`, c.pmMax && `✦ ${e(String(c.pmMax))} PM`,
+      c.ca && `🛡️ CA ${e(String(c.ca))}`, c.vitesse && `💨 ${e(String(c.vitesse))} m`,
+      c.initiative && `⚡ Init ${e(String(c.initiative))}`].filter(Boolean).join(' · ');
+    const st = statsHtml(c);
+    return `<article class="card">
+      <h2>${e(c.emoji || '🐲')} ${e(c.nom || '?')}${c.niveau ? ` <span class="lvl">Niv. ${e(String(c.niveau))}</span>` : ''}${c.hidden ? ` <span class="hid">🔒 caché aux joueurs</span>` : ''}</h2>
+      ${meta ? `<div class="meta">${meta}</div>` : ''}
+      ${vit ? `<div class="vit">${vit}</div>` : ''}
+      ${st ? `<div class="stats">${st}</div>` : ''}
+      ${section('Traits', ul(c.traits, t => `<li>${txt(t)}</li>`))}
+      ${section('Armes naturelles', ul(c.armesNaturelles, a => `<li><b>${e(a.nom || 'Arme')}</b>${a.degats ? ` — ${e(a.degats)}` : ''}</li>`))}
+      ${section('Actions', ul(c.actions, actLine))}
+      ${section('Butins', ul(c.butins, b => `<li>${txt(b)}</li>`))}
+      ${c.description ? `<div class="desc">${e(c.description)}</div>` : ''}
+    </article>`;
+  };
+  const css = `*{box-sizing:border-box}body{font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f2937;background:#fff;margin:0;padding:24px;line-height:1.45}`
+    + `h1{font-size:1.6rem;margin:0 0 .2rem}header p{color:#64748b;margin:0 0 1.2rem;font-size:.9rem}`
+    + `.card{border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin:0 0 14px;page-break-inside:avoid;break-inside:avoid}`
+    + `.card h2{font-size:1.1rem;margin:0 0 4px}.lvl{font-size:.8rem;color:#64748b;font-weight:400}.hid{font-size:.72rem;color:#ef4444;font-weight:400}`
+    + `.meta{color:#64748b;font-size:.85rem;margin-bottom:6px}.vit{font-size:.9rem;margin-bottom:6px}`
+    + `.stats{display:flex;flex-wrap:wrap;gap:10px;font-size:.85rem;color:#334155;margin-bottom:6px}`
+    + `.card h3{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:#475569;margin:10px 0 3px}`
+    + `.card ul{margin:0;padding-left:18px;font-size:.88rem}.card li{margin:2px 0}`
+    + `.desc{font-size:.88rem;color:#334155;margin-top:8px;white-space:pre-wrap}`
+    + `@media print{body{padding:0}.card{border-color:#cbd5e1}}`;
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8">`
+    + `<meta name="viewport" content="width=device-width,initial-scale=1">`
+    + `<title>Bestiaire (${list.length})</title><style>${css}</style></head>`
+    + `<body><header><h1>📖 Bestiaire</h1><p>${list.length} créature${list.length > 1 ? 's' : ''} · exporté le ${e(new Date().toLocaleDateString('fr-FR'))}</p></header>`
+    + `${list.map(card).join('')}</body></html>`;
+}
+
 Object.assign(bstHandlers, {
   // Galerie / navigation
   open:           (el) => _bstOpen(el.dataset.id),
+  exportBeasts:   ()   => _bstExportDocument(),
   close:          ()   => _bstClose(),
   createDraft:    ()   => _bstCreateDraft(),
   switchBest:     (el) => _bstSwitchBestiaire(el.dataset.id),
