@@ -888,13 +888,17 @@ const PAGES = {
         <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Session active</div>
       </div>
 
-      ${primaryBlock}
+      <div class="dv2-player-action">
+        ${primaryBlock}
+      </div>
 
-      ${heroBlock}
+      <div class="dv2-player-hero">
+        ${heroBlock}
+      </div>
 
       ${_missionCardV2()}
 
-      <div>
+      <div class="dv2-player-shortcuts">
         <div class="dv2-section-label">
           <span class="dv2-section-label-text">Navigation rapide</span>
           <div class="dv2-section-label-line"></div>
@@ -902,7 +906,7 @@ const PAGES = {
         ${_shortcutsV2()}
       </div>
 
-      <div>
+      <div class="dv2-player-adventure">
         <div class="dv2-section-label">
           <span class="dv2-section-label-text">Aventure</span>
           <div class="dv2-section-label-line"></div>

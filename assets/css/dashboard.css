@@ -124,6 +124,153 @@
 }
 .dv2-section-action:hover { color: var(--gold-2); }
 
+/* ── Vue joueur : même contenu, meilleure hiérarchie ─────────── */
+.dv2-player-action .dash-vtt-cta--primary {
+  position: relative;
+  overflow: hidden;
+  min-height: 86px;
+  padding: 18px 22px;
+  border-color: rgba(232,184,75,.34);
+  background:
+    linear-gradient(135deg, rgba(232,184,75,.13), rgba(79,140,255,.07) 58%, rgba(34,195,142,.05)),
+    linear-gradient(160deg, rgba(13,21,36,.96), rgba(8,14,24,.98));
+  box-shadow: 0 12px 34px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.05);
+}
+.dv2-player-action .dash-vtt-cta--primary::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--gold), var(--blue));
+  opacity: .9;
+}
+.dv2-player-action .dash-vtt-cta--primary:hover {
+  border-color: rgba(232,184,75,.52);
+  box-shadow: 0 16px 40px rgba(0,0,0,.38), 0 0 24px rgba(232,184,75,.08);
+}
+.dv2-player-action .dash-vtt-icon,
+.dv2-player-action .dash-vtt-text,
+.dv2-player-action .dash-vtt-arrow {
+  position: relative;
+  z-index: 1;
+}
+.dv2-player-action .dash-vtt-icon {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: rgba(79,140,255,.10);
+  border: 1px solid rgba(79,140,255,.20);
+}
+.dv2-player-action .dash-vtt-label {
+  font-size: 1.18rem;
+}
+.dv2-player-action .dash-vtt-sub {
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+.dv2-player-action .dash-vtt-arrow {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: rgba(232,184,75,.10);
+  border: 1px solid rgba(232,184,75,.22);
+  color: var(--gold);
+}
+.dv2-player-hero .dv2-hero-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  gap: 18px;
+}
+.dv2-player-hero .dv2-hero-card {
+  min-height: 292px;
+  border-color: rgba(79,140,255,.36);
+  background:
+    linear-gradient(160deg, rgba(13,21,36,.98) 0%, rgba(8,14,24,.99) 100%),
+    radial-gradient(circle at 0% 0%, rgba(79,140,255,.20), transparent 46%);
+  box-shadow: 0 18px 54px rgba(0,0,0,.46), inset 0 1px 0 rgba(255,255,255,.06);
+}
+.dv2-player-hero .dv2-hero-card::before {
+  background:
+    linear-gradient(135deg, rgba(79,140,255,.16) 0%, rgba(157,111,255,.07) 50%, transparent 100%),
+    linear-gradient(0deg, rgba(0,0,0,.20), transparent 42%);
+}
+.dv2-player-hero .dv2-hero-card::after {
+  width: 220px;
+  height: 220px;
+  background: radial-gradient(circle at 100% 0%, rgba(232,184,75,.10) 0%, transparent 70%);
+}
+.dv2-player-hero .dv2-hero-inner {
+  min-height: 292px;
+  align-items: center;
+  padding: 30px;
+}
+.dv2-player-hero .dv2-portrait {
+  width: 138px;
+  height: 166px;
+  border-radius: 18px;
+}
+.dv2-player-hero .dv2-portrait-level {
+  bottom: -10px;
+  padding: 3px 12px;
+}
+.dv2-player-hero .dv2-hero-info {
+  gap: 14px;
+}
+.dv2-player-hero .dv2-hero-name {
+  font-size: 2.15rem;
+  line-height: 1.05;
+}
+.dv2-player-hero .dv2-stat-bars {
+  gap: 10px;
+}
+.dv2-player-hero .dv2-bar-track {
+  height: 9px;
+  background: rgba(255,255,255,.075);
+}
+.dv2-player-hero .dv2-stats-row {
+  max-width: 300px;
+}
+.dv2-player-hero .dv2-party-card {
+  border-color: rgba(79,140,255,.14);
+  background: linear-gradient(160deg, rgba(13,21,36,.88), rgba(8,14,24,.95));
+}
+.dv2-player-shortcuts .dv2-shortcuts-grid {
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+  gap: 8px;
+}
+.dv2-player-shortcuts .dv2-shortcut {
+  min-height: 62px;
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  box-shadow: none;
+}
+.dv2-player-shortcuts .dv2-shortcut-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  font-size: 15px;
+}
+.dv2-player-shortcuts .dv2-shortcut-label {
+  color: var(--text-soft);
+  font-size: .72rem;
+  text-align: left;
+}
+.dv2-player-adventure .dv2-two-col {
+  align-items: stretch;
+}
+.dv2-player-adventure .dv2-panel-card {
+  min-height: 100%;
+}
+.dv2-player-adventure .dv2-panel-header {
+  background: rgba(255,255,255,.018);
+}
+
 /* ── Grille hero + groupe ────────────────────────────────────── */
 .dv2-hero-grid {
   display: grid;
@@ -913,12 +1060,44 @@
 
 /* ── Responsive ─────────────────────────────────── */
 @media (max-width: 900px) {
+  .dv2-player-hero .dv2-hero-grid { grid-template-columns: 1fr; }
+  .dv2-player-hero .dv2-hero-card,
+  .dv2-player-hero .dv2-hero-inner { min-height: 0; }
   .dv2-hero-grid  { grid-template-columns: 1fr; }
   .dv2-stats-grid { grid-template-columns: repeat(2, 1fr); }
   .dv2-shortcuts-grid { grid-template-columns: repeat(4, 1fr); }
 }
 @media (max-width: 660px) {
   .dv2-root { padding: 16px 12px 40px; gap: 14px; }
+  .dv2-player-action .dash-vtt-cta--primary {
+    align-items: flex-start;
+    min-height: 0;
+    padding: 16px;
+  }
+  .dv2-player-action .dash-vtt-icon {
+    width: 38px;
+    height: 38px;
+  }
+  .dv2-player-action .dash-vtt-label {
+    font-size: 1.02rem;
+  }
+  .dv2-player-hero .dv2-hero-inner {
+    padding: 22px;
+  }
+  .dv2-player-hero .dv2-portrait {
+    width: 118px;
+    height: 140px;
+  }
+  .dv2-player-hero .dv2-hero-name {
+    font-size: 1.55rem;
+    text-align: center;
+  }
+  .dv2-player-shortcuts .dv2-shortcuts-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dv2-player-shortcuts .dv2-shortcut {
+    min-height: 58px;
+  }
   .dv2-two-col { grid-template-columns: 1fr; }
   .dv2-shortcuts-grid { grid-template-columns: repeat(4, 1fr); }
   .dv2-stats-grid { grid-template-columns: repeat(2, 1fr); }
@@ -962,6 +1141,31 @@
 }
 [data-theme="light"] .dv2-mission-card::after {
   background: radial-gradient(circle at 100% 100%, rgba(157,111,255,0.05) 0%, transparent 70%) !important;
+}
+
+/* Vue joueur */
+[data-theme="light"] .dv2-player-action .dash-vtt-cta--primary {
+  background:
+    linear-gradient(135deg, rgba(234,179,8,.14), rgba(37,99,235,.06) 58%, rgba(5,150,105,.04)),
+    var(--bg-elevated) !important;
+  border-color: rgba(234,179,8,.34) !important;
+  box-shadow: var(--shadow-card) !important;
+}
+[data-theme="light"] .dv2-player-action .dash-vtt-icon {
+  background: rgba(37,99,235,.08) !important;
+  border-color: rgba(37,99,235,.18) !important;
+}
+[data-theme="light"] .dv2-player-action .dash-vtt-arrow {
+  background: rgba(234,179,8,.10) !important;
+  border-color: rgba(234,179,8,.28) !important;
+  color: #a16207 !important;
+}
+[data-theme="light"] .dv2-player-hero .dv2-hero-card {
+  border-color: rgba(37,99,235,.24) !important;
+  box-shadow: var(--shadow-soft) !important;
+}
+[data-theme="light"] .dv2-player-hero .dv2-party-card {
+  background: var(--bg-elevated) !important;
 }
 
 /* Portrait — texte foncé sur fond clair */
