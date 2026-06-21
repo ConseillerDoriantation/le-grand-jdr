@@ -745,6 +745,11 @@
 .dv2-svg-ico { width: 1.25em; height: 1.25em; display: inline-block; vertical-align: -0.18em; }
 /* Utilitaire : colonne flexible qui peut rétrécir (texte ellipsé). */
 .dv2-flex1 { flex: 1; min-width: 0; }
+/* Chiffres tabulaires sur tout le dashboard (hérité, n'affecte que les
+   chiffres) : PV/PM, niveaux, compteurs s'alignent et ne "sautillent" pas.
+   Cohérent avec la fiche perso. Zéro impact de mise en page. */
+#dash-root { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
 /* Grilles de cartes (remplacent les grid inline ; mêmes valeurs). */
 .dash-grid-charlist  { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px,1fr)); gap: .45rem; }
 .dash-grid-charmini  { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px,1fr)); gap: .55rem; }
