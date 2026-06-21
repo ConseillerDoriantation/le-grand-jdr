@@ -2117,11 +2117,13 @@ async function _bstRemoveImage(id) {
 // ── Export : document HTML imprimable de toutes les créatures (MJ) ────────────
 // Génère un fichier .html autonome (lisible + imprimable en PDF depuis le
 // navigateur) listant chaque créature et ses infos. Téléchargement direct.
-function _bstExportDocument() {
+async function _bstExportDocument() {
   if (!STATE.isAdmin) return;
   const list = (STORE.creatures || []).slice()
     .sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
   if (!list.length) { showNotif('Aucune créature à exporter', 'info'); return; }
+  // Types de dégâts (pour résoudre id → libellé des résistances/immunités…).
+  if (!STORE.damageTypes) { try { STORE.damageTypes = await loadDamageTypes(); } catch { STORE.damageTypes = []; } }
   try {
     const blob = new Blob([_bstBuildExportHtml(list)], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -2137,6 +2139,16 @@ function _bstExportDocument() {
   }
 }
 
+// id (ou objet) de type de dégât → libellé lisible (via STORE.damageTypes).
+function _bstDmgLabel(v) {
+  const id = (v && typeof v === 'object') ? (v.id || v.type || v.damageTypeId || '') : v;
+  const dt = (STORE.damageTypes || []).find(t => t.id === id);
+  return dt ? `${dt.icon || ''} ${dt.label}`.trim() : String(id || '');
+}
+function _bstDmgList(arr) {
+  return (Array.isArray(arr) ? arr : []).map(_bstDmgLabel).filter(Boolean);
+}
+
 function _bstBuildExportHtml(list) {
   const e = _esc;
   const txt = v => e(v && typeof v === 'object' ? (v.nom || v.label || v.description || '') : String(v ?? ''));
@@ -2150,18 +2162,29 @@ function _bstBuildExportHtml(list) {
   };
   const ul = (arr, fn) => (Array.isArray(arr) && arr.length) ? `<ul>${arr.map(fn).join('')}</ul>` : '';
   const section = (label, html) => html ? `<h3>${label}</h3>${html}` : '';
+  const relHtml = (c) => {
+    const rows = [
+      ['Résistances (½ dégâts)', _bstDmgList(c.resistances)],
+      ['Immunités (0 dégât)',    _bstDmgList(c.immunites)],
+      ['Absorptions (soigne)',   _bstDmgList(c.absorptions)],
+      ['Faiblesses (×2 dégâts)', _bstDmgList(c.faiblesses)],
+    ].filter(([, v]) => v.length);
+    return rows.length ? `<ul>${rows.map(([l, v]) => `<li><b>${l} :</b> ${v.map(e).join(', ')}</li>`).join('')}</ul>` : '';
+  };
   const card = (c) => {
     const rs = RANG_STYLE[c.rang || 'classique'] || RANG_STYLE.classique;
     const meta = [rs.label, c.type, c.environnement].filter(Boolean).map(e).join(' · ');
     const vit = [c.pvMax && `❤️ ${e(String(c.pvMax))} PV`, c.pmMax && `✦ ${e(String(c.pmMax))} PM`,
       c.ca && `🛡️ CA ${e(String(c.ca))}`, c.vitesse && `💨 ${e(String(c.vitesse))} m`,
-      c.initiative && `⚡ Init ${e(String(c.initiative))}`].filter(Boolean).join(' · ');
+      c.initiative && `⚡ Init ${e(String(c.initiative))}`,
+      c.dangerositeXp && `🏆 ${e(String(c.dangerositeXp))} XP`].filter(Boolean).join(' · ');
     const st = statsHtml(c);
     return `<article class="card">
       <h2>${e(c.emoji || '🐲')} ${e(c.nom || '?')}${c.niveau ? ` <span class="lvl">Niv. ${e(String(c.niveau))}</span>` : ''}${c.hidden ? ` <span class="hid">🔒 caché aux joueurs</span>` : ''}</h2>
       ${meta ? `<div class="meta">${meta}</div>` : ''}
       ${vit ? `<div class="vit">${vit}</div>` : ''}
       ${st ? `<div class="stats">${st}</div>` : ''}
+      ${section('Relations aux dégâts', relHtml(c))}
       ${section('Traits', ul(c.traits, t => `<li>${txt(t)}</li>`))}
       ${section('Armes naturelles', ul(c.armesNaturelles, a => `<li><b>${e(a.nom || 'Arme')}</b>${a.degats ? ` — ${e(a.degats)}` : ''}</li>`))}
       ${section('Actions', ul(c.actions, actLine))}
@@ -2169,6 +2192,22 @@ function _bstBuildExportHtml(list) {
       ${c.description ? `<div class="desc">${e(c.description)}</div>` : ''}
     </article>`;
   };
+  // Données structurées (pour analyse automatique : id de dégât → libellé résolu).
+  const data = list.map(c => ({
+    nom: c.nom || '', rang: c.rang || 'classique', type: c.type || '', environnement: c.environnement || '',
+    niveau: c.niveau ?? null, xp: c.dangerositeXp ?? null,
+    pvMax: c.pvMax ?? null, pmMax: c.pmMax ?? null, ca: c.ca ?? null, vitesse: c.vitesse ?? null, initiative: c.initiative ?? null,
+    stats: { force: c.force ?? null, dexterite: c.dexterite ?? null, constitution: c.constitution ?? null,
+             intelligence: c.intelligence ?? null, sagesse: c.sagesse ?? null, charisme: c.charisme ?? null },
+    resistances: _bstDmgList(c.resistances), immunites: _bstDmgList(c.immunites),
+    absorptions: _bstDmgList(c.absorptions), faiblesses: _bstDmgList(c.faiblesses),
+    traits: (c.traits || []).map(t => (t && typeof t === 'object') ? (t.nom || t.description || '') : t),
+    armesNaturelles: (c.armesNaturelles || []).map(a => ({ nom: a.nom || '', degats: a.degats || '' })),
+    actions: (c.actions || []).map(a => ({ nom: a.nom || '', degats: a.degats || '', degatsFlat: a.degatsFlat ?? null, degatsStat: a.degatsStat || '', effet: a.info || '' })),
+    butins: (c.butins || []).map(b => (b && typeof b === 'object') ? (b.nom || '') : b),
+    description: c.description || '', cacheJoueurs: !!c.hidden,
+  }));
+  const jsonEmbed = JSON.stringify(data, null, 1).replace(/</g, '\\u003c');
   const css = `*{box-sizing:border-box}body{font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f2937;background:#fff;margin:0;padding:24px;line-height:1.45}`
     + `h1{font-size:1.6rem;margin:0 0 .2rem}header p{color:#64748b;margin:0 0 1.2rem;font-size:.9rem}`
     + `.card{border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin:0 0 14px;page-break-inside:avoid;break-inside:avoid}`
@@ -2178,12 +2217,17 @@ function _bstBuildExportHtml(list) {
     + `.card h3{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:#475569;margin:10px 0 3px}`
     + `.card ul{margin:0;padding-left:18px;font-size:.88rem}.card li{margin:2px 0}`
     + `.desc{font-size:.88rem;color:#334155;margin-top:8px;white-space:pre-wrap}`
-    + `@media print{body{padding:0}.card{border-color:#cbd5e1}}`;
+    + `.data{margin-top:28px;font-size:.78rem;color:#64748b;border-top:1px solid #e2e8f0;padding-top:12px}`
+    + `.data pre{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:.72rem;color:#334155}`
+    + `@media print{body{padding:0}.card{border-color:#cbd5e1}.data{display:none}}`;
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8">`
     + `<meta name="viewport" content="width=device-width,initial-scale=1">`
     + `<title>Bestiaire (${list.length})</title><style>${css}</style></head>`
     + `<body><header><h1>📖 Bestiaire</h1><p>${list.length} créature${list.length > 1 ? 's' : ''} · exporté le ${e(new Date().toLocaleDateString('fr-FR'))}</p></header>`
-    + `${list.map(card).join('')}</body></html>`;
+    + `${list.map(card).join('')}`
+    + `<details class="data"><summary>Données structurées (JSON) — pour analyse automatique</summary><pre>${jsonEmbed}</pre></details>`
+    + `<script type="application/json" id="bestiaire-data">${jsonEmbed}</script>`
+    + `</body></html>`;
 }
 
 Object.assign(bstHandlers, {
