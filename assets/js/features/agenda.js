@@ -856,12 +856,18 @@ async function renderAgendaPage() {
     _renderLegacyCleanup();
   });
 
-  watchPageCollection('agenda-users', 'users', 'agenda', data => {
-    _ag.users = data;
-    _scheduleQuestParticipantCleanup();
-    _renderSuggestions();
-    _renderGroupView();
-  });
+  // Liste de la collection `users` : réservée au MJ par les règles Firestore
+  // (anti-moisson de PII — `list` admin-only). Un joueur ne peut pas la lister :
+  // on n'abonne donc que le MJ. Côté joueur l'agenda fonctionne sans (pseudos
+  // via availabilities/quêtes), et on évite l'erreur "Accès refusé".
+  if (STATE.isAdmin) {
+    watchPageCollection('agenda-users', 'users', 'agenda', data => {
+      _ag.users = data;
+      _scheduleQuestParticipantCleanup();
+      _renderSuggestions();
+      _renderGroupView();
+    });
+  }
 
   watchPageDoc('agenda-session', 'agenda_session', 'next', 'agenda', data => {
     _ag.nextSession = data;
