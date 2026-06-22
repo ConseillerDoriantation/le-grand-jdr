@@ -383,6 +383,16 @@ service cloud.firestore {
         allow read, write: if inAdventure(adventureId);
       }
 
+      // Visée & sceaux runiques temps réel : 1 doc par joueur (id = uid).
+      // Porte les lignes de visée (active/srcId/targets/pageId) ET le champ
+      // sigilFire {tokenId, sigil, targets, impColor, pageId, n} qui déclenche le
+      // sceau + les impacts chez les autres joueurs au lancement d'un sort.
+      // Lecture : tous les membres · Écriture : chacun son propre doc.
+      match /vttCasting/{uid} {
+        allow read:  if inAdventure(adventureId);
+        allow write: if inAdventure(adventureId) && uid == request.auth.uid;
+      }
+
       // Présence app-wide : heartbeat depuis le client (1 doc par joueur, id = uid).
       // Lecture : tous les membres (pour permettre au MJ d'afficher qui est connecté).
       // Écriture : chacun écrit/supprime uniquement sa propre entrée.
