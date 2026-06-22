@@ -386,7 +386,11 @@
 }
 
 /* Barres stat */
-.dv2-stat-bars { display: flex; flex-direction: column; gap: 8px; }
+/* Barres capées : sur grand écran la carte héros est très large ; sans cap,
+   les barres PV/PM/XP s'étirent sur ~1200px et la valeur se retrouve isolée
+   loin du label. On borne la zone pour garder label ↔ barre ↔ valeur lisibles
+   d'un seul regard. Reste fluide sous cette largeur. */
+.dv2-stat-bars { display: flex; flex-direction: column; gap: 8px; max-width: 560px; }
 .dv2-bar-row   { display: flex; align-items: center; gap: 10px; }
 .dv2-bar-label {
   font-size: 0.62rem; font-weight: 700;
