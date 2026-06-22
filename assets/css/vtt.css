@@ -5749,6 +5749,16 @@
   50%     { box-shadow: 0 0 10px -2px rgba(239,68,68,.6); }
 }
 
+/* Entrée d'un nouveau jet de dé dans le chat (classe posée en JS sur la seule
+   nouvelle entrée) : il "tombe" en place avec un léger ressort. */
+.vtt-log-enter { animation: vtt-log-pop .34s var(--ease-spring, cubic-bezier(.22,1,.36,1)); }
+@keyframes vtt-log-pop {
+  from { opacity: 0; transform: translateY(12px) scale(.96); }
+  55%  { opacity: 1; }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .vtt-log-enter { animation: none; } }
+
 /* Entrée de l'inspecteur au changement de token (classe posée en JS, une fois).
    translateX négatif → glisse vers sa place sans déborder du bord droit. */
 #vtt-inspector.vtt-ins-enter {

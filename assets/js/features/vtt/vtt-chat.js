@@ -70,6 +70,9 @@ export function _renderChatLog(msgs) {
   try { return _renderChatLogImpl(msgs); }
   catch (e) { _vttPanelError('Chat', e, 'vtt-chat-log'); }
 }
+// Dernier jet animé : pour n'animer QUE la nouvelle entrée à son arrivée
+// (le log se re-rend en entier → on évite de tout faire rejouer).
+let _chatLastNewestId = null;
 export function _renderChatLogImpl(msgs) {
   const el = document.getElementById('vtt-chat-log'); if (!el) return;
   const myUid = STATE.user?.uid;
@@ -661,6 +664,18 @@ export function _renderChatLogImpl(msgs) {
     if (m.type === 'craft')           return renderCraft(m, i, ts);
     return renderChat(m);
   }).join('');
+
+  // Anime UNIQUEMENT le dernier jet quand un NOUVEAU arrive (pas au 1er rendu,
+  // pas sur une simple mise à jour). Donne de la vie à chaque résultat de dé.
+  const _newestId = msgs.length ? msgs[msgs.length - 1].id : null;
+  if (_newestId && _chatLastNewestId !== null && _newestId !== _chatLastNewestId) {
+    const last = el.lastElementChild;
+    if (last) {
+      last.classList.add('vtt-log-enter');
+      last.addEventListener('animationend', () => last.classList.remove('vtt-log-enter'), { once: true });
+    }
+  }
+  _chatLastNewestId = _newestId;
 
   // Wire up detail toggles (clic = ouvre/ferme le panneau associé)
   el.querySelectorAll('.vtt-log-toggle').forEach(btn => {
