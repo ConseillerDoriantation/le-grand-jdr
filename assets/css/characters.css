@@ -9706,6 +9706,37 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .cstyle-desc {
   font-size: .74rem; color: var(--text-soft, #c8d4e8); line-height: 1.45;
 }
+/* Bande de style compacte (sous les armes) : 1 ligne, desc tronquée + tooltip. */
+.cs-v3 .cstyle-strip {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 10px; padding: 7px 12px;
+  border: 1px solid var(--border); border-left: 3px solid var(--style-c, #4f8cff);
+  border-radius: 10px; background: rgba(0,0,0,.15);
+}
+.cs-v3 .cstyle-strip-ico { font-size: 1rem; line-height: 1; flex-shrink: 0; }
+.cs-v3 .cstyle-strip-name {
+  font-family: var(--font-display, 'Cinzel', serif); font-weight: 700;
+  font-size: .82rem; flex-shrink: 0;
+}
+.cs-v3 .cstyle-strip-desc {
+  flex: 1; min-width: 0; font-size: .72rem; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border-left: 1px solid var(--border-md, rgba(255,255,255,.1)); padding-left: 8px;
+}
+.cs-v3 .cstyle-strip-cog {
+  margin-left: auto; flex-shrink: 0; background: none; border: none;
+  color: var(--text-dim); cursor: pointer; font-size: .72rem; padding: 2px 4px; line-height: 1;
+}
+.cs-v3 .cstyle-strip-cog:hover { color: var(--gold-2, #7eb0ff); }
+/* Colonne "Maîtrises d'armes" (jumelée à la carte Éléments dans combat-footer). */
+.cs-v3 .cmeta-col {
+  padding: 12px 14px; border-radius: 18px;
+  background: rgba(0,0,0,.15); border: 1px solid var(--border);
+}
+.cs-v3 .cmeta-col-head {
+  font-size: .58rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--text-dim); margin-bottom: 8px;
+}
 .cs-v3 .elem-card {
   padding: 12px 14px; border-radius: 18px;
   background: rgba(0,0,0,.15);

@@ -2042,39 +2042,33 @@ function renderCharCombatV3(c, canEdit) {
   }
 
   // ── STYLE de combat : auto-détecté depuis les armes équipées (comme avant)
+  // Style de combat — détecté depuis les armes. Rendu en bande compacte (1 ligne)
+  // placée sous la grille d'armes, à sa source logique : nom + aperçu de l'effet,
+  // description complète au survol. Économise tout un bloc.
   let styleHtml = '';
   let detected = null;
   try { detected = detectCombatStyle?.(c, _combatTabCache.styles || []); } catch (e) { console.warn('[style detect]', e); }
+  const _styleCog = STATE.isAdmin ? `<button class="cstyle-strip-cog" data-action="openCombatStylesAdmin" title="Gérer les styles (admin)">⚙️</button>` : '';
   if (!_combatTabCache.styles) {
-    styleHtml = `<div class="cstyle" style="--style-c:var(--text-dim)">
-      <span class="cstyle-ico">🧙</span>
-      <div class="cstyle-body">
-        <div class="cstyle-tag">Style de combat</div>
-        <div class="cstyle-name" style="color:var(--text-dim);font-style:italic">Chargement…</div>
-      </div>
+    styleHtml = `<div class="cstyle-strip" style="--style-c:var(--text-dim)">
+      <span class="cstyle-strip-ico">🧙</span>
+      <span class="cstyle-strip-name" style="color:var(--text-dim);font-style:italic">Style — chargement…</span>
     </div>`;
   } else if (detected) {
-    const col = detected.couleur || detected.color || '#9d6fff';
-    styleHtml = `<div class="cstyle" style="--style-c:${col}">
-      <span class="cstyle-ico">${_esc(detected.icon || detected.icone || '🧙')}</span>
-      <div class="cstyle-body">
-        <div class="cstyle-tag">
-          Style de combat
-          ${STATE.isAdmin ? `<button class="section-action" style="float:right;font-size:.62rem;padding:2px 8px" data-action="openCombatStylesAdmin" title="Gérer les styles (admin)">⚙️</button>` : ''}
-        </div>
-        <div class="cstyle-name" style="color:${col}">${_esc(detected.label || detected.name || 'Sans nom')}</div>
-        <div class="cstyle-desc">${_esc(detected.description || '')}</div>
-        <div class="cstyle-detect">Détecté depuis les armes équipées</div>
-      </div>
+    const col  = detected.couleur || detected.color || '#9d6fff';
+    const name = detected.label || detected.name || 'Sans nom';
+    const desc = detected.description || '';
+    styleHtml = `<div class="cstyle-strip" style="--style-c:${col}"${desc?` title="${_esc(desc)}"`:''}>
+      <span class="cstyle-strip-ico">${_esc(detected.icon || detected.icone || '🧙')}</span>
+      <span class="cstyle-strip-name" style="color:${col}">${_esc(name)}</span>
+      ${desc?`<span class="cstyle-strip-desc">${_esc(desc)}</span>`:''}
+      ${_styleCog}
     </div>`;
   } else {
-    styleHtml = `<div class="cstyle" style="--style-c:var(--text-dim)">
-      <span class="cstyle-ico">🧙</span>
-      <div class="cstyle-body">
-        <div class="cstyle-tag">Style de combat</div>
-        <div class="cstyle-name" style="color:var(--text-dim);font-style:italic">Aucun style détecté</div>
-        <div class="cstyle-desc">Équipe une arme pour révéler ton style.</div>
-      </div>
+    styleHtml = `<div class="cstyle-strip" style="--style-c:var(--text-dim)">
+      <span class="cstyle-strip-ico">🧙</span>
+      <span class="cstyle-strip-name" style="color:var(--text-dim);font-style:italic">Aucun style — équipe une arme</span>
+      ${_styleCog}
     </div>`;
   }
 
@@ -2132,6 +2126,7 @@ function renderCharCombatV3(c, canEdit) {
       ${canEdit?`<button class="section-action" data-action="editEquipSlot" data-slot="Main principale">＋ Équiper</button>`:''}
     </div>
     <div class="weap-grid">${weapsHtml}</div>
+    ${styleHtml}
   </div>
 
   <div class="section">
@@ -2145,20 +2140,16 @@ function renderCharCombatV3(c, canEdit) {
 
   <div class="section">
     <div class="section-head">
-      <div class="section-title"><span class="ico">🧙</span> Style & Éléments</div>
+      <div class="section-title"><span class="ico">🎯</span> Maîtrises &amp; affinités</div>
+      ${canEdit?`<button class="section-action" data-action="addMaitrise">＋ Maîtrise</button>`:''}
     </div>
     <div class="combat-footer">
-      ${styleHtml || '<div class="q-empty">Aucun style détecté.</div>'}
+      <div class="cmeta-col">
+        <div class="cmeta-col-head">Maîtrises d'armes</div>
+        ${maitsHtml}
+      </div>
       ${elemsHtml}
     </div>
-  </div>
-
-  <div class="section">
-    <div class="section-head">
-      <div class="section-title"><span class="ico">🎯</span> Maîtrises d'armes</div>
-      ${canEdit?`<button class="section-action" data-action="addMaitrise">＋ Ajouter</button>`:''}
-    </div>
-    ${maitsHtml}
   </div>`;
 }
 
