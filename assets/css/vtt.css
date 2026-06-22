@@ -397,6 +397,19 @@
   box-shadow: 0 6px 18px rgba(0,0,0,0.35);
   overflow: hidden;
 }
+/* Déploiement à l'ouverture du combat (classe posée en JS, une seule fois). */
+.vtt-combat-tracker.vct-enter {
+  animation: vtt-tracker-deploy .36s var(--ease-spring, cubic-bezier(.22,1,.36,1));
+  transform-origin: 0 0;
+}
+@keyframes vtt-tracker-deploy {
+  from { opacity: 0; transform: translateX(-16px) translateY(-6px) scale(.95); }
+  60%  { opacity: 1; }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vtt-combat-tracker.vct-enter { animation: none; }
+}
 .vct-header {
   display: flex; align-items: center; gap: .5rem;
   padding: .5rem .65rem;

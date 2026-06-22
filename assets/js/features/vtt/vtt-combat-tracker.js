@@ -14,6 +14,9 @@ import { _live } from './vtt-effective.js';   // données effectives (leaf)
 import { _select } from './vtt.js';           // sélection token (transverse)
 
 let _combatTab = 'allies'; // 'allies' (joueurs + PNJ) | 'enemies' (MJ only)
+// Suit l'état "combat actif affiché" pour ne déclencher l'animation de
+// déploiement du tracker QU'à l'ouverture (pas à chaque re-render de tour).
+let _trackerWasActive = false;
 
 // COMBAT TRACKER — overlay haut-gauche, visible quand combat actif
 // ═══════════════════════════════════════════════════════════════════
@@ -61,6 +64,7 @@ function _renderCombatTracker() {
   //   - MJ → carte compacte avec bouton "Démarrer le combat"
   //   - Joueur → masqué
   if (!active) {
+    _trackerWasActive = false;
     if (!mj) { el.style.display = 'none'; el.innerHTML = ''; return; }
     el.style.display = 'block';
     el.innerHTML = `
@@ -73,7 +77,16 @@ function _renderCombatTracker() {
       </div>`;
     return;
   }
+  // Déploiement : joue UNIQUEMENT à la transition inactif → combat actif.
+  const justOpened = !_trackerWasActive;
+  _trackerWasActive = true;
   el.style.display = 'block';
+  if (justOpened) {
+    el.classList.remove('vct-enter');
+    void el.offsetWidth;                 // reflow → permet de (re)jouer l'anim
+    el.classList.add('vct-enter');
+    el.addEventListener('animationend', () => el.classList.remove('vct-enter'), { once: true });
+  }
 
   const round = VS.session?.combat?.round ?? 1;
   const pageId = VS.activePage?.id;
