@@ -7256,14 +7256,38 @@ async function _vttRetireToken(tokenId) {
   void _cleanupReserveDuplicates();
 }
 // Le joueur invoque son propre token sur la carte active
-async function _vttInvokeMyToken() {
+async function _vttInvokeMyToken(tokenId) {
   if (!VS.activePage) { showNotif('Aucune carte active','error'); return; }
   const uid = STATE.user?.uid; if (!uid) return;
-  const tok = Object.values(VS.tokens).find(e => e.data?.ownerId === uid)?.data;
-  if (!tok) { showNotif('Aucun token associé à ton personnage','error'); return; }
+  // Tous les persos du joueur (un token par personnage).
+  const mine = Object.values(VS.tokens).filter(e => e.data?.ownerId === uid).map(e => e.data);
+  if (!mine.length) { showNotif('Aucun token associé à ton personnage','error'); return; }
+  // Choix explicite (depuis le sélecteur) OU un seul perso → placer direct ;
+  // plusieurs persos sans choix → ouvrir le sélecteur.
+  const tok = tokenId ? mine.find(t => t.id === tokenId) : (mine.length === 1 ? mine[0] : null);
+  if (!tok) { _vttInvokeMyTokenPicker(mine); return; }
+  if (tokenId) closeModalDirect();
   const cC = Math.floor(VS.activePage.cols/2), cR = Math.floor(VS.activePage.rows/2);
   await updateDoc(_tokRef(tok.id),{pageId:VS.activePage.id,col:cC,row:cR,visible:true})
     .catch(err => { console.error('[vtt] invocation:', err); showNotif('Erreur invocation','error'); });
+}
+// Sélecteur de personnage à invoquer (joueur avec plusieurs persos).
+function _vttInvokeMyTokenPicker(toks) {
+  const cards = toks.map(t => {
+    const ld = _live(t);
+    const name = _esc(ld.displayName || t.name || 'Personnage');
+    const img = ld.displayImage;
+    const av = img
+      ? `<img src="${_esc(img)}" alt="" style="width:38px;height:38px;border-radius:9px;object-fit:cover;flex-shrink:0">`
+      : `<div style="width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:rgba(79,140,255,.15);border:1px solid rgba(79,140,255,.3);font-weight:700;flex-shrink:0">${(name[0]||'?').toUpperCase()}</div>`;
+    const onScene = t.pageId === VS.activePage?.id;
+    return `<button class="vtt-btn-sm" style="display:flex;align-items:center;gap:10px;width:100%;justify-content:flex-start;padding:8px 11px;height:auto${onScene?';opacity:.55':''}"
+      data-vtt-fn="_vttInvokeMyToken" data-vtt-args="${_esc(t.id)}"${onScene?' disabled':''}>
+      ${av}<span style="flex:1;text-align:left;font-size:.85rem">${name}</span>
+      ${onScene?'<small style="color:var(--text-dim)">déjà sur la carte</small>':'<span style="color:var(--gold-2,#7eb0ff)">🧑 Invoquer</span>'}
+    </button>`;
+  }).join('');
+  openModal('🧑 Quel personnage invoquer ?', `<div style="display:flex;flex-direction:column;gap:8px;min-width:250px">${cards}</div>`);
 }
 // Le joueur range son propre token (le renvoie en réserve, sans le supprimer)
 async function _vttRetireMyToken() {
