@@ -764,7 +764,13 @@
 .dv2-empty-md { padding: 20px; color: var(--text-dim); font-size: .85rem; text-align: center; }
 
 /* Présence temps réel (MJ) — extraction des styles inline (valeurs identiques). */
-.dv2-presence-empty { padding: 14px 16px; color: var(--text-dim); font-size: .78rem; display: flex; align-items: center; gap: .5rem; }
+/* Empty state "dessiné" (icône muette + titre + sous-ligne) plutôt qu'une
+   boîte vide avec une phrase — réflexe produit, l'écran ne paraît pas inachevé. */
+.dv2-presence-empty { padding: 22px 16px; color: var(--text-dim); display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.dv2-presence-empty-ico { font-size: 1.6rem; opacity: .28; display: inline-flex; line-height: 0; color: var(--text-muted); }
+.dv2-presence-empty-txt { display: flex; flex-direction: column; gap: 2px; }
+.dv2-presence-empty-title { font-size: .82rem; font-weight: 600; color: var(--text-muted); }
+.dv2-presence-empty-sub { font-size: .72rem; color: var(--text-dim); }
 .dv2-presence-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; }
 .dv2-presence-list { padding: 12px 14px; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 .dv2-presence-pill { display: flex; align-items: center; gap: .55rem; background: rgba(34,195,142,.07); border: 1px solid rgba(34,195,142,.22); border-radius: 999px; padding: 3px 12px 3px 3px; }

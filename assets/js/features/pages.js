@@ -804,8 +804,11 @@ const PAGES = {
             </div>
             <div class="dv2-panel-card">
               <div class="dv2-presence-empty">
-                <span class="dv2-presence-dot"></span>
-                Aucun joueur connecté pour le moment.
+                <span class="dv2-presence-empty-ico">${_svg('users')}</span>
+                <div class="dv2-presence-empty-txt">
+                  <span class="dv2-presence-empty-title">Personne autour de la table</span>
+                  <span class="dv2-presence-empty-sub">Les joueurs connectés apparaîtront ici en temps réel.</span>
+                </div>
               </div>
             </div>`;
           return;
