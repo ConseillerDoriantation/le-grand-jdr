@@ -5091,6 +5091,7 @@ function _renderRemoteCastings(docs) {
         _playZoneFx(sf.tokenId, { x: sf.zone.x, y: sf.zone.y }, { w: sf.zone.w, h: sf.zone.h }, sf.targets || [], sf.impColor, !!sf.physical, !!sf.isSummon);
       } else {
         (sf.targets || []).forEach(tid => _playCastTargetFx(sf.tokenId, tid, sf.impColor, !!sf.melee, !!sf.physical));
+        if (sf.selfAura) _playImpactForToken(sf.tokenId, sf.impColor);
       }
     }
     if (!c.active || c.pageId !== VS.activePage?.id || d.id === myUid) return;
@@ -5138,7 +5139,11 @@ async function _vttRollAttack() {
     const _impColor = ctx.sigil.category === 'heal' ? '#22c38e' : ctx.sigil.color;
     const _melee = ctx.sigil.category === 'heal' ? false : !!ctx.sigil.melee;  // pas de "frappe" pour un soin
     const _physical = !!ctx.sigil.physical;
-    for (const tid of targetIds) { if (tid !== srcId) _playCastTargetFx(srcId, tid, _impColor, _melee, _physical); }
+    const _self = targetIds.includes(srcId);   // sort sur soi (buff/soin perso) → aura, pas de projectile
+    for (const tid of targetIds) {
+      if (tid === srcId) _playImpactForToken(srcId, _impColor);          // aura sur le lanceur
+      else _playCastTargetFx(srcId, tid, _impColor, _melee, _physical);
+    }
     try {
       const _uid = STATE.user?.uid;
       if (_uid) {
@@ -5148,7 +5153,7 @@ async function _vttRollAttack() {
           sigilFire: {
             tokenId: srcId, sigil: ctx.sigil, pageId: VS.activePage?.id || null, n: _n,
             targets: targetIds.filter(t => t !== srcId), impColor: _impColor,
-            melee: _melee, physical: _physical,
+            melee: _melee, physical: _physical, selfAura: _self,
           },
         }, { merge: true }).catch(() => {});
       }
