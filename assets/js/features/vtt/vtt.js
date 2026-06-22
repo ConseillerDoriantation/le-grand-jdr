@@ -5049,8 +5049,12 @@ async function _vttRollAttack() {
   const src=VS.tokens[srcId]?.data, tgt=VS.tokens[tgtId]?.data;
   if (!src||!tgt) return;
 
+  // Liste des cibles : multi si allTargets, sinon cible unique
+  const targetIds = allTargets && allTargets.length > 0 ? allTargets : [tgtId];
+
   // Sceau runique signature sur le lanceur — joué localement ET diffusé à tous
   // les joueurs via le canal casting (champ sigilFire, keyé par n unique).
+  // ⚠ Doit rester APRÈS la déclaration de targetIds (sinon zone morte temporelle).
   if (ctx.sigil) {
     _playSigilForToken(srcId, ctx.sigil);
     const _impColor = ctx.sigil.category === 'heal' ? '#22c38e' : ctx.sigil.color;
@@ -5065,8 +5069,6 @@ async function _vttRollAttack() {
       }, { merge: true }).catch(() => {});
     } catch {}
   }
-  // Liste des cibles : multi si allTargets, sinon cible unique
-  const targetIds = allTargets && allTargets.length > 0 ? allTargets : [tgtId];
   // Snapshot pré-action pour l'annulation MJ (attaché aux logs de l'action).
   const _undoSnap = _captureUndoSnapshot(srcId, targetIds);
 
