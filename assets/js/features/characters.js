@@ -1612,15 +1612,9 @@ function renderCharProfilV3(c, canEdit) {
   <div class="profil-layout">
     <div class="profil-main">
       ${bioBlockHtml}
-    </div>
-    <div class="profil-side">
-      <div class="profil-side-card">
-        <h4>🎯 Profil de stats</h4>
-        ${_renderRadarV3(c)}
-      </div>
       <div class="profil-side-card">
         <h4>📜 Identité</h4>
-        ${identityHtml}
+        <div class="profil-facts-grid">${identityHtml}</div>
         ${canEdit ? `<button class="section-action" style="margin-top:.6rem;width:100%" data-action="csV3AddFact" data-id="${c.id}">＋ Champ personnalisé</button>` : ''}
       </div>
       ${canEdit ? `
@@ -1639,6 +1633,12 @@ function renderCharProfilV3(c, canEdit) {
         </div>
         <div class="profil-img-hint">L'image apparaît sur la page Joueurs comme illustration grand format du personnage.</div>
       </div>` : ''}
+    </div>
+    <div class="profil-side">
+      <div class="profil-side-card">
+        <h4>🎯 Profil de stats</h4>
+        ${_renderRadarV3(c)}
+      </div>
       ${canEdit ? `
       <div class="profil-side-card">
         <h4>👁️ Visible par les joueurs</h4>

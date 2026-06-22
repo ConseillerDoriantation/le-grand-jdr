@@ -8642,9 +8642,15 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .rel-npc-preview img { width: 100%; height: 100%; object-fit: cover; object-position: top center; }
 
 /* Profil v3 */
-.cs-v3 .profil-layout { display: grid; grid-template-columns: 1fr 280px; gap: 14px; }
+.cs-v3 .profil-layout { display: grid; grid-template-columns: 1fr 300px; gap: 14px; align-items: start; }
 @media (max-width: 880px) { .cs-v3 .profil-layout { grid-template-columns: 1fr; } }
 .cs-v3 .profil-main { display: flex; flex-direction: column; gap: 14px; }
+/* Identité : champs sur 2 colonnes (la carte vit désormais dans la colonne
+   large) → moins de hauteur, meilleur usage de l'espace. */
+.cs-v3 .profil-facts-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 18px; }
+@media (max-width: 560px) { .cs-v3 .profil-facts-grid { grid-template-columns: 1fr; } }
+/* Illustration (portrait 3:4) bornée pour ne pas exploser dans la colonne large. */
+.cs-v3 .profil-main .profil-img-wrap { max-width: 280px; margin-left: auto; margin-right: auto; }
 .cs-v3 .profil-quote {
   font-family: 'Cormorant Garamond', 'Palatino Linotype', serif; font-style: italic; font-size: 1.05rem; color: var(--gold-2, #7eb0ff);
   padding: 14px 18px; border-left: 3px solid var(--gold);
