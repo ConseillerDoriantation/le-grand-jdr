@@ -477,7 +477,10 @@ const PAGES = {
               title="Ouvrir la fiche complète">→</button>` : ''}
             <div class="dv2-party-dot"></div>
           </div>`;
-        }).join('') : `<div class="dv2-empty-sm">Les membres du groupe apparaîtront ici.</div>`}
+        }).join('') : `<div class="dv2-empty-sm dv2-party-empty">
+          <span class="dv2-presence-empty-ico">${_svg('users')}</span>
+          <span>Les membres de ton groupe apparaîtront ici dès que vous partagez une aventure.</span>
+        </div>`}
         ${nextSessionFmt ? `
         <div class="dv2-party-footer dv2-party-footer--session">
           <div class="dv2-party-session-label">Prochaine séance prévue pour :</div>

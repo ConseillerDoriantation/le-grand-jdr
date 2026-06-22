@@ -475,6 +475,15 @@
   display: flex;
   flex-direction: column;
 }
+/* Groupe vide : message centré dans l'espace dispo + footer (séance/aventure)
+   épinglé en bas → plus de grand vide au milieu quand le panneau est étiré à
+   la hauteur de la carte héros. Harmonisé avec l'empty state de présence. */
+.dv2-party-card .dv2-party-empty {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center; gap: 10px; max-width: 240px; margin: 0 auto;
+}
+.dv2-party-card .dv2-party-footer { margin-top: auto; }
 .dv2-panel-header {
   display: flex; align-items: center;
   justify-content: space-between;
