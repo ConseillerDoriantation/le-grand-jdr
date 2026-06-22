@@ -9323,9 +9323,29 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   border-left: 1px solid var(--border-md, rgba(255,255,255,.10)); padding-left: 6px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.cs-v3 .set-badge.active { background: rgba(34,195,142,.10); border-color: rgba(34,195,142,.34); }
-.cs-v3 .set-badge.active b { color: var(--emerald, #22c38e); }
-.cs-v3 .set-badge.active .set-badge-fx { color: var(--text-soft); border-left-color: rgba(34,195,142,.30); }
+.cs-v3 .set-badge.active .set-badge-fx { color: var(--text-soft); }
+/* Code couleur set : Léger = bleu, Inter = vert, Lourd = rouge. */
+.cs-v3 .set-badge.active.light  { background: rgba(79,140,255,.10);  border-color: rgba(79,140,255,.34); }
+.cs-v3 .set-badge.active.light  b, .cs-v3 .set-badge.active.light  .set-badge-ico { color: var(--gold-2, #7eb0ff); }
+.cs-v3 .set-badge.active.light  .set-badge-fx { border-left-color: rgba(79,140,255,.30); }
+.cs-v3 .set-badge.active.medium { background: rgba(34,195,142,.10); border-color: rgba(34,195,142,.34); }
+.cs-v3 .set-badge.active.medium b, .cs-v3 .set-badge.active.medium .set-badge-ico { color: var(--emerald); }
+.cs-v3 .set-badge.active.medium .set-badge-fx { border-left-color: rgba(34,195,142,.30); }
+.cs-v3 .set-badge.active.heavy  { background: rgba(255,90,126,.10); border-color: rgba(255,90,126,.34); }
+.cs-v3 .set-badge.active.heavy  b, .cs-v3 .set-badge.active.heavy  .set-badge-ico { color: var(--crimson-light, #ff8ca7); }
+.cs-v3 .set-badge.active.heavy  .set-badge-fx { border-left-color: rgba(255,90,126,.30); }
+
+/* Pill de type d'armure sur la carte (en-tête de slot, à droite près du ✎). */
+.cs-v3 .armor-slot-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cs-v3 .armor-slot-right { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.cs-v3 .armor-type-pill {
+  font-size: .56rem; font-weight: 700; letter-spacing: .02em; text-transform: none;
+  padding: 1px 7px; border-radius: 999px; white-space: nowrap;
+  background: rgba(255,255,255,.05); border: 1px solid var(--border); color: var(--text-muted);
+}
+.cs-v3 .armor-type-pill.light  { background: rgba(79,140,255,.12);  border-color: rgba(79,140,255,.38);  color: var(--gold-2, #7eb0ff); }
+.cs-v3 .armor-type-pill.medium { background: rgba(34,195,142,.12); border-color: rgba(34,195,142,.38); color: var(--emerald); }
+.cs-v3 .armor-type-pill.heavy  { background: rgba(255,90,126,.12); border-color: rgba(255,90,126,.38); color: var(--crimson-light, #ff8ca7); }
 .cs-v3 .set-hint {
   font-size: .7rem; color: var(--text-dim); font-style: italic;
   margin-top: 8px; padding: 6px 10px;

@@ -1919,6 +1919,13 @@ function renderCharCombatV3(c, canEdit) {
     force: 'FOR', dexterite: 'DEX', intelligence: 'INT',
     constitution: 'CON', sagesse: 'SAG', charisme: 'CHA',
   };
+  // Code couleur des types d'armure (partagé pill de carte + badge de set) :
+  // Léger = bleu, Intermédiaire = vert, Lourd = rouge.
+  const ARMOR_TYPE_META = {
+    'Légère':        { key: 'light',  short: 'Légère' },
+    'Intermédiaire': { key: 'medium', short: 'Inter.' },
+    'Lourde':        { key: 'heavy',  short: 'Lourde' },
+  };
   const renderArmor = slot => {
     const it = equip[slot] || {};
     const has = !!it.nom;
@@ -1931,9 +1938,14 @@ function renderCharCombatV3(c, canEdit) {
         <div class="armor-name muted">— Vide —</div>
       </div>`;
     }
+    // Type d'armure → pill colorée placée dans l'en-tête du slot (pas mélangée
+    // aux bonus de stats). Léger/Inter/Lourd = bleu/vert/rouge.
+    const tmeta = ARMOR_TYPE_META[it.typeArmure];
+    const typePill = it.typeArmure
+      ? `<span class="armor-type-pill ${tmeta?.key || ''}">${_esc(tmeta?.short || it.typeArmure)}</span>`
+      : '';
     // Bonus : stats + CA + caBonus + dérivés
     const badges = [];
-    if (it.typeArmure) badges.push({ lbl: _esc(it.typeArmure), cls: 'green' });
     const caTotal = (parseInt(it.ca) || 0) + (parseInt(it.caBonus) || 0);
     if (caTotal) badges.push({ lbl: `CA +${caTotal}`, cls: 'gold' });
     // Stats : items stockent sous codes courts (fo/dex/in/sa/co/ch + alias 'for').
@@ -1954,8 +1966,11 @@ function renderCharCombatV3(c, canEdit) {
     const traits = (_getTraits?.(it) || []);
     return `<div class="armor-card equipped">
       <div class="armor-slot">
-        <span>${_esc(slot)}</span>
-        ${canEdit?`<button class="weap-edit" data-action="editEquipSlot" data-slot="${slot}" title="Changer">✎</button>`:''}
+        <span class="armor-slot-name">${_esc(slot)}</span>
+        <span class="armor-slot-right">
+          ${typePill}
+          ${canEdit?`<button class="weap-edit" data-action="editEquipSlot" data-slot="${slot}" title="Changer">✎</button>`:''}
+        </span>
       </div>
       <div class="armor-name">${_esc(it.nom)}</div>
       ${badges.length?`<div class="armor-badges">${badges.map(b=>`<span class="badge-chip ${b.cls}">${b.lbl}</span>`).join('')}</div>`:''}
@@ -1988,9 +2003,10 @@ function renderCharCombatV3(c, canEdit) {
     };
 
     if (isActive) {
-      const fx  = EFFECT_BY_TYPE[fullType] || { tag: fullType, fx: setData.activeEffect?.chipText || '' };
-      const ico = TYPE_ICONS[fullType] || '✨';
-      setBadgeHtml = `<span class="set-badge active" title="Tête, Torse et Bottes de type ${_esc(fullType)} équipés (set complet)">
+      const fx   = EFFECT_BY_TYPE[fullType] || { tag: fullType, fx: setData.activeEffect?.chipText || '' };
+      const ico  = TYPE_ICONS[fullType] || '✨';
+      const tkey = ARMOR_TYPE_META[fullType]?.key || '';
+      setBadgeHtml = `<span class="set-badge active ${tkey}" title="Tête, Torse et Bottes de type ${_esc(fullType)} équipés (set complet)">
         <span class="set-badge-ico">${ico}</span><b>Set ${_esc(fx.tag)} 3/3</b><span class="set-badge-fx">${_esc(fx.fx)}</span>
       </span>`;
     } else {
