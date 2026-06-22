@@ -1968,7 +1968,9 @@ function renderCharCombatV3(c, canEdit) {
     <div class="armor-grid" style="margin-top:8px">${armorSlotsRow2.map(renderArmor).join('')}</div>`;
 
   // Set bonus — actif UNIQUEMENT si Tête + Torse + Bottes du même type (Légère / Intermédiaire / Lourde)
-  let setHtml = '';
+  // Rendu compacté : un badge dans l'en-tête de la section (le type de chaque
+  // pièce est déjà affiché sur sa carte → pas de liste slot-par-slot redondante).
+  let setBadgeHtml = '', setHintHtml = '';
   try {
     const setData = getArmorSetData?.(c) || {};
     const trackedSlots = setData.trackedSlots || ['Tête', 'Torse', 'Bottes'];
@@ -1985,58 +1987,26 @@ function renderCharCombatV3(c, canEdit) {
       'Lourde':        { tag: 'Lourd',         fx: 'Réduction de 2 dégâts (toute source)' },
     };
 
-    // Tableau slot-par-slot : Tête / Torse / Bottes avec leur type
-    const slotsRow = slots.map(s => {
-      const ico = TYPE_ICONS[s.type] || '·';
-      const cls = !s.equipped ? 'empty' : (fullType && s.type === fullType ? 'match' : 'mismatch');
-      const typeLbl = s.equipped ? (s.type || 'Sans type') : 'Vide';
-      return `<div class="set-slot ${cls}">
-        <span class="set-slot-name">${_esc(s.slot)}</span>
-        <span class="set-slot-type"><span class="set-slot-ico">${ico}</span>${_esc(typeLbl)}</span>
-      </div>`;
-    }).join('');
-
-    let headHtml, effectHtml, hintHtml = '';
     if (isActive) {
-      const fx = EFFECT_BY_TYPE[fullType] || { tag: fullType, fx: setData.activeEffect?.chipText || '' };
-      headHtml = `<span class="set-card-badge active">✨ Set ${_esc(fx.tag)} actif</span>
-        <span class="set-card-title-name">${_esc(fullType)} · 3/3</span>`;
-      effectHtml = `<div class="set-card-effect">
-        <span class="set-card-fx-dot"></span>
-        <div><b>Bonus actif :</b> ${_esc(fx.fx)}</div>
-      </div>`;
+      const fx  = EFFECT_BY_TYPE[fullType] || { tag: fullType, fx: setData.activeEffect?.chipText || '' };
+      const ico = TYPE_ICONS[fullType] || '✨';
+      setBadgeHtml = `<span class="set-badge active" title="Tête, Torse et Bottes de type ${_esc(fullType)} équipés (set complet)">
+        <span class="set-badge-ico">${ico}</span><b>Set ${_esc(fx.tag)} 3/3</b><span class="set-badge-fx">${_esc(fx.fx)}</span>
+      </span>`;
     } else {
-      // Diagnose pourquoi ce n'est pas actif
       const types = Object.keys(counts);
-      headHtml = `<span class="set-card-badge">🌱 Set en cours</span>
-        <span class="set-card-title-name">${equippedCount}/3 pièces équipées</span>`;
-      let reason = '';
+      let reason;
       if (equippedCount < 3) {
-        reason = `Équipe les 3 emplacements (Tête, Torse, Bottes) du même type pour activer un bonus.`;
+        reason = `Équipe Tête, Torse et Bottes du même type pour activer un bonus d'ensemble.`;
       } else if (types.length > 1) {
         const list = types.map(t => `${counts[t]}× ${t}`).join(', ');
-        reason = `Types mélangés : ${list}. Il faut 3× le même type.`;
+        reason = `Types mélangés (${list}) — il faut 3× le même type.`;
       } else {
-        reason = `Continue à équiper les 3 pièces d'un même type.`;
+        reason = `Continue d'équiper les 3 pièces d'un même type.`;
       }
-      hintHtml = `<div class="set-card-hint-block">${_esc(reason)}</div>`;
-      // On liste tout de même les bonus disponibles selon le choix
-      effectHtml = `<div class="set-card-rules">
-        <div class="set-card-rules-title">Bonus possibles selon le type :</div>
-        <ul>
-          <li><span class="set-card-fx-dot light"></span><b>Léger</b> : Coût des sorts −2 PM</li>
-          <li><span class="set-card-fx-dot medium"></span><b>Intermédiaire</b> : Toucher +2</li>
-          <li><span class="set-card-fx-dot heavy"></span><b>Lourd</b> : Réduction de 2 dégâts</li>
-        </ul>
-      </div>`;
+      setBadgeHtml = `<span class="set-badge" title="${_esc(reason)}"><span class="set-badge-ico">🌱</span><b>Set ${equippedCount}/3</b></span>`;
+      setHintHtml  = `<div class="set-hint">${_esc(reason)}</div>`;
     }
-
-    setHtml = `<div class="set-card ${isActive?'is-active':'is-progress'}" data-set-type="${_esc(fullType)}">
-      <div class="set-card-head">${headHtml}</div>
-      <div class="set-slots-row">${slotsRow}</div>
-      ${effectHtml}
-      ${hintHtml}
-    </div>`;
   } catch (e) { console.warn('[set bonus]', e); }
 
   // ── Bootstrap async des caches DB (styles de combat + types de dégâts magiques)
@@ -2151,9 +2121,10 @@ function renderCharCombatV3(c, canEdit) {
   <div class="section">
     <div class="section-head">
       <div class="section-title"><span class="ico">🪖</span> Armures & Accessoires</div>
+      ${setBadgeHtml}
     </div>
     ${armorRows}
-    ${setHtml}
+    ${setHintHtml}
   </div>
 
   <div class="section">

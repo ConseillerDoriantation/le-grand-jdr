@@ -9306,6 +9306,32 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 }
 .cs-v3 .section-action:hover { background: rgba(79,140,255,.20); }
 
+/* Badge de set d'armure compacté dans l'en-tête de section (remplace l'ancien
+   gros bloc set-card qui re-listait Tête/Torse/Bottes déjà visibles sur chaque
+   carte). Actif = vert + bonus ; en cours = neutre + indice slim sous la grille. */
+.cs-v3 .set-badge {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+  font-size: .68rem; font-weight: 600; letter-spacing: 0; text-transform: none;
+  padding: 4px 10px; border-radius: 999px;
+  background: rgba(255,255,255,.04); border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.cs-v3 .set-badge b { color: var(--text-soft); font-weight: 700; }
+.cs-v3 .set-badge-ico { font-size: .82rem; line-height: 1; flex-shrink: 0; }
+.cs-v3 .set-badge-fx {
+  min-width: 0; color: var(--text-muted);
+  border-left: 1px solid var(--border-md, rgba(255,255,255,.10)); padding-left: 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cs-v3 .set-badge.active { background: rgba(34,195,142,.10); border-color: rgba(34,195,142,.34); }
+.cs-v3 .set-badge.active b { color: var(--emerald, #22c38e); }
+.cs-v3 .set-badge.active .set-badge-fx { color: var(--text-soft); border-left-color: rgba(34,195,142,.30); }
+.cs-v3 .set-hint {
+  font-size: .7rem; color: var(--text-dim); font-style: italic;
+  margin-top: 8px; padding: 6px 10px;
+  background: rgba(255,255,255,.02); border: 1px dashed var(--border); border-radius: 10px;
+}
+
 /* Combat — armes : 2 cards égales (Main principale + Main secondaire) */
 .cs-v3 .weap-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
