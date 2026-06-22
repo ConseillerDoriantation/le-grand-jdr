@@ -8049,8 +8049,11 @@ async function _vttPlaceFromBestiary(beastId) {
     ghosts.forEach(g=>batch.delete(_tokRef(g.data.id)));
     await batch.commit().catch(()=>{});
   }
-  // Trouver le premier numéro libre parmi les tokens actifs
-  const active=Object.values(VS.tokens).filter(e=>e.data.beastId===beastId&&(e.data.pageId||e.data.hp!=null));
+  // Numérotation d'après les créatures de ce bestiaire PRÉSENTES SUR LA PAGE
+  // COURANTE : supprimer/retirer une créature libère son numéro → le compteur se
+  // "réinitialise" naturellement (Loup 1, 2… repartent de 1 quand la page est vidée),
+  // et les créatures d'autres pages n'inflent plus le compteur.
+  const active=Object.values(VS.tokens).filter(e=>e.data.beastId===beastId&&e.data.pageId===VS.activePage.id);
   const usedNums=new Set(active.map(e=>{const m=(e.data.name||'').match(/\s(\d+)$/);return m?parseInt(m[1]):1;}));
   let num=1; while(usedNums.has(num))num++;
   const name=num===1?(b.nom||'Créature'):`${b.nom} ${num}`;
