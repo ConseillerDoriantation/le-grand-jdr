@@ -43,7 +43,11 @@ const _loaded = new Set();
 // Les autres features chargent uniquement leurs feuilles dédiées.
 const FEATURE_CSS = {
   dashboard:  ['quests.css', 'bastion.css', 'dashboard.css'],
-  characters: ['characters.css'],
+  // shop.css : les modales admin rendues depuis la fiche perso (types de dégâts,
+  // formats d'arme, styles de combat, matrices de sorts) réutilisent les styles
+  // partagés `.sh-admin-*` / `.sh-dmg-*` définis dans shop.css → sinon, ouvertes
+  // hors boutique, elles s'affichent sans mise en forme. Chargeur dédoublonné.
+  characters: ['characters.css', 'shop.css'],
   shop:       ['shop.css'],
   npcs:       ['npcs.css'],
   story:      ['histoire.css'],
