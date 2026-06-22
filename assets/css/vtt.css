@@ -2268,6 +2268,26 @@
 }
 .vtt-aopt-hud-close:hover { color: var(--text); border-color: var(--text-dim); }
 
+/* Bouton replier/déplier le tiroir (à gauche du ✕). Replié → ne reste que
+   l'en-tête : la carte est rendue. État persistant (localStorage). */
+.vtt-aopt-hud-toggle {
+  position: absolute; top: -.05rem; right: 1.7rem; z-index: 2;
+  width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0;
+  display: grid; place-items: center; cursor: pointer;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  color: var(--text-dim); font-size: .72rem; line-height: 1;
+  transition: transform .28s var(--ease-spring, cubic-bezier(.22,1,.36,1)),
+              color .15s, border-color .15s;
+}
+.vtt-aopt-hud-toggle:hover { color: var(--text); border-color: var(--text-dim); }
+.vtt-action-hud.is-collapsed .vtt-aopt-hud-toggle { transform: rotate(180deg); }
+.vtt-action-hud.is-collapsed .vtt-aopt-list,
+.vtt-action-hud.is-collapsed .vtt-aopt-tabs,
+.vtt-action-hud.is-collapsed .vtt-aopt-search,
+.vtt-action-hud.is-collapsed .vtt-atk-pm-bar { display: none; }
+/* Replié : l'en-tête laisse la place aux 2 boutons (toggle + close). */
+.vtt-action-hud.is-collapsed .vtt-aopt-modal-hd { padding-right: 3.6rem; }
+
 .vtt-aopt-hud .vtt-aopt-tabs { flex-shrink: 0; flex-wrap: wrap; gap: .25rem; }
 .vtt-aopt-hud .vtt-aopt-tab { padding: 2px 7px; }
 .vtt-aopt-hud .vtt-aopt-search { flex-shrink: 0; }

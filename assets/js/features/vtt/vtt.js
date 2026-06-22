@@ -1331,6 +1331,20 @@ export function _showActBar(srcId) {
 
 function _hideActBar() { _hideActionHud(); }
 
+// Repli du tiroir d'actions (overlay bas du canvas) — état persistant.
+// Replié = barre fine (en-tête token seul) → la carte est rendue ; déplié =
+// cartes d'action visibles. Distinct du ✕ (qui ferme tout le tiroir).
+let _hudCollapsed = false;
+try { _hudCollapsed = localStorage.getItem('vtt-hud-collapsed') === '1'; } catch {}
+function _applyHudCollapsed() {
+  document.getElementById('vtt-action-hud')?.classList.toggle('is-collapsed', _hudCollapsed);
+}
+function _vttToggleHudCollapse() {
+  _hudCollapsed = !_hudCollapsed;
+  try { localStorage.setItem('vtt-hud-collapsed', _hudCollapsed ? '1' : '0'); } catch {}
+  _applyHudCollapsed();
+}
+
 // Conteneur du HUD : overlay absolu en bas du container Konva (créé à la volée).
 function _actionHudEl() {
   let hud = document.getElementById('vtt-action-hud');
@@ -1356,6 +1370,7 @@ function _showActionHud(html) {
   if (!hud) return;
   hud.innerHTML = html;
   hud.classList.add('show');
+  _applyHudCollapsed();   // réapplique l'état replié persistant à chaque rendu
 }
 function _hideActionHud() {
   const hud = document.getElementById('vtt-action-hud');
@@ -3941,6 +3956,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   // Flux « clic sur une cible » → modale centrée (inchangé).
   if (noTgt) {
     _showActionHud(`<div class="vtt-form vtt-aopt-modal vtt-aopt-hud">
+      <button type="button" class="vtt-aopt-hud-toggle" title="Replier / déplier les actions" data-vtt-fn="_vttToggleHudCollapse">▾</button>
       <button type="button" class="vtt-aopt-hud-close" title="Fermer" data-vtt-fn="_hideActBar">✕</button>
       ${innerHtml}</div>`);
     return;
@@ -8490,6 +8506,7 @@ export const VTT_ACTIONS = {
   _vttActBarCat,
   _vttAimOpt,
   _hideActBar,
+  _vttToggleHudCollapse,
   _aimCancel,
   _vttEnterTable,
   _vttGateBack,
