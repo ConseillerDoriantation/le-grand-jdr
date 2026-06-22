@@ -48,12 +48,16 @@ export function buildSigilSvg({ color = '#4f8cff', runes = [], category = 'attac
     g += `<g class="sig-spin"><circle cx="${C}" cy="${C}" r="${R + 11}" fill="none" stroke="${color}" stroke-width="1.3" stroke-dasharray="3 9" opacity=".6"/></g>`;
   }
   const dash = r.Affliction ? `stroke-dasharray="${6 + r.Affliction * 3} ${4 + r.Affliction * 2}"` : '';
-  g += `<g class="sig-spinr"><circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="${color}" stroke-width="2.2" opacity="1" ${dash}/>`;
+  // Anneau principal : se "trace" (stroke-dashoffset) sauf en mode brisé (Affliction).
+  const circ = (2 * Math.PI * R).toFixed(1);
+  const ringExtra = r.Affliction ? dash : `class="sig-draw" style="--circ:${circ}"`;
+  g += `<g class="sig-spinr"><circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="${color}" stroke-width="2.2" opacity="1" ${ringExtra}/>`;
   for (let i = 0; i < total; i++) {
     const a = 2 * Math.PI * i / Math.max(total, 1) - Math.PI / 2;
     const [x, y] = _pol(C, C, R, a);
     const deg = a * 180 / Math.PI + 90;
-    g += `<g transform="translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${deg.toFixed(1)})"><line x1="0" y1="-7" x2="0" y2="7" stroke="${color}" stroke-width="2"/><rect x="-3.5" y="-3.5" width="7" height="7" transform="rotate(45)" fill="none" stroke="${color}" stroke-width="1.7"/></g>`;
+    const dly = (0.32 + i * 0.05).toFixed(2);   // les runes s'inscrivent une à une
+    g += `<g class="sig-glyph" style="animation-delay:${dly}s" transform="translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${deg.toFixed(1)})"><line x1="0" y1="-7" x2="0" y2="7" stroke="${color}" stroke-width="2"/><rect x="-3.5" y="-3.5" width="7" height="7" transform="rotate(45)" fill="none" stroke="${color}" stroke-width="1.7"/></g>`;
   }
   g += '</g>';
 
@@ -157,7 +161,7 @@ export function playImpact(container, x, y, size, color = '#4f8cff') {
     const [x2, y2] = _pol(50, 50, 47, a);
     sp += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${color}" stroke-width="2.6" stroke-linecap="round"/>`;
   }
-  el.innerHTML = `<svg viewBox="0 0 100 100" width="100%" height="100%" aria-hidden="true" style="filter:drop-shadow(0 0 7px ${color})"><circle cx="50" cy="50" r="38" fill="none" stroke="${color}" stroke-width="3.2"/>${sp}</svg>`;
+  el.innerHTML = `<svg viewBox="0 0 100 100" width="100%" height="100%" aria-hidden="true" style="filter:drop-shadow(0 0 8px ${color})"><circle class="imp-flash" cx="50" cy="50" r="20" fill="${color}"/><circle cx="50" cy="50" r="38" fill="none" stroke="${color}" stroke-width="3.4"/><circle cx="50" cy="50" r="27" fill="none" stroke="${color}" stroke-width="1.6" opacity=".5"/>${sp}</svg>`;
   layer.appendChild(el);
   el.addEventListener('animationend', (e) => { if (e.target === el) el.remove(); });
   setTimeout(() => el.remove(), 1800);
@@ -184,9 +188,10 @@ export function playProjectile(container, fromX, fromY, toX, toY, { color = '#4f
   const el = document.createElement('div');
   el.className = 'vtt-proj-fx';
   el.style.cssText = `left:${fromX}px;top:${fromY}px`;
+  const gid = 'pjt' + (++_sigilSeq);
   el.innerHTML = physical
-    ? `<svg width="44" height="16" viewBox="0 0 44 16" style="filter:drop-shadow(0 0 4px ${color})"><g transform="rotate(${ang.toFixed(1)} 22 8)"><line x1="4" y1="8" x2="34" y2="8" stroke="${color}" stroke-width="3" stroke-linecap="round"/><path d="M34 8 L27 4 M34 8 L27 12" stroke="${color}" stroke-width="3" stroke-linecap="round" fill="none"/></g></svg>`
-    : `<svg width="44" height="44" viewBox="0 0 44 44" style="filter:drop-shadow(0 0 9px ${color})"><g transform="rotate(${ang.toFixed(1)} 22 22)"><path d="M2 22 Q14 17 24 22 Q14 27 2 22 Z" fill="${color}" opacity=".4"/><circle cx="24" cy="22" r="6.5" fill="${color}"/></g></svg>`;
+    ? `<svg width="46" height="16" viewBox="0 0 46 16" style="filter:drop-shadow(0 0 4px ${color})"><defs><linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${color}" stop-opacity="0"/><stop offset="1" stop-color="${color}" stop-opacity=".5"/></linearGradient></defs><g transform="rotate(${ang.toFixed(1)} 23 8)"><line x1="2" y1="8" x2="30" y2="8" stroke="url(#${gid})" stroke-width="3"/><line x1="14" y1="8" x2="36" y2="8" stroke="${color}" stroke-width="3" stroke-linecap="round"/><path d="M36 8 L29 4 M36 8 L29 12" stroke="${color}" stroke-width="3" stroke-linecap="round" fill="none"/></g></svg>`
+    : `<svg width="58" height="44" viewBox="0 0 58 44" style="filter:drop-shadow(0 0 11px ${color})"><defs><linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${color}" stop-opacity="0"/><stop offset="1" stop-color="${color}" stop-opacity=".55"/></linearGradient></defs><g transform="rotate(${ang.toFixed(1)} 29 22)"><path d="M2 22 Q22 14 38 22 Q22 30 2 22 Z" fill="url(#${gid})"/><circle cx="40" cy="22" r="6.8" fill="${color}"/><circle cx="38" cy="20" r="2.4" fill="#fff" opacity=".75"/></g></svg>`;
   _ensureLayer(container).appendChild(el);
   el.animate([
     { transform: 'translate(-50%,-50%) translate(0px,0px)', opacity: 0, offset: 0 },
