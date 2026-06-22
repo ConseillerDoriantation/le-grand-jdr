@@ -91,6 +91,11 @@
   /* Annule le max-width:1680px et le margin:0 auto de .main-content > * */
   max-width: 100% !important;
   margin: 0 !important;
+  /* Chiffres tabulaires (hérité, n'affecte que les chiffres) : initiative,
+     PV des tokens, compteurs du HUD de combat s'alignent et ne "sautillent"
+     pas quand ils changent en plein combat. Cohérent avec fiche/dashboard. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
 
 /* ── Toolbar ────────────────────────────────────────────────────── */
