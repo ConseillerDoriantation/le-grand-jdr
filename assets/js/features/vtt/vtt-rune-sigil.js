@@ -162,3 +162,51 @@ export function playImpact(container, x, y, size, color = '#4f8cff') {
   el.addEventListener('animationend', (e) => { if (e.target === el) el.remove(); });
   setTimeout(() => el.remove(), 1800);
 }
+
+function _ensureLayer(container) {
+  let layer = container.querySelector('.vtt-sigil-layer');
+  if (!layer) { layer = document.createElement('div'); layer.className = 'vtt-sigil-layer'; container.appendChild(layer); }
+  return layer;
+}
+const _reduced = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * Projectile d'un sort À DISTANCE : voyage du lanceur (from) vers la cible (to).
+ * Magique = orbe lumineux avec traîne · Physique = flèche/dard. Couleur = élément.
+ */
+export function playProjectile(container, fromX, fromY, toX, toY, { color = '#4f8cff', physical = false } = {}) {
+  if (!container || _reduced()) return;
+  const dx = toX - fromX, dy = toY - fromY;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 6) return;
+  const dur = Math.max(260, Math.min(720, dist * 0.95));
+  const ang = Math.atan2(dy, dx) * 180 / Math.PI;
+  const el = document.createElement('div');
+  el.className = 'vtt-proj-fx';
+  el.style.cssText = `left:${fromX}px;top:${fromY}px`;
+  el.innerHTML = physical
+    ? `<svg width="44" height="16" viewBox="0 0 44 16" style="filter:drop-shadow(0 0 4px ${color})"><g transform="rotate(${ang.toFixed(1)} 22 8)"><line x1="4" y1="8" x2="34" y2="8" stroke="${color}" stroke-width="3" stroke-linecap="round"/><path d="M34 8 L27 4 M34 8 L27 12" stroke="${color}" stroke-width="3" stroke-linecap="round" fill="none"/></g></svg>`
+    : `<svg width="44" height="44" viewBox="0 0 44 44" style="filter:drop-shadow(0 0 9px ${color})"><g transform="rotate(${ang.toFixed(1)} 22 22)"><path d="M2 22 Q14 17 24 22 Q14 27 2 22 Z" fill="${color}" opacity=".4"/><circle cx="24" cy="22" r="6.5" fill="${color}"/></g></svg>`;
+  _ensureLayer(container).appendChild(el);
+  el.animate([
+    { transform: 'translate(-50%,-50%) translate(0px,0px)', opacity: 0, offset: 0 },
+    { opacity: 1, offset: 0.15 },
+    { transform: `translate(-50%,-50%) translate(${dx.toFixed(1)}px,${dy.toFixed(1)}px)`, opacity: 1, offset: 0.85 },
+    { transform: `translate(-50%,-50%) translate(${dx.toFixed(1)}px,${dy.toFixed(1)}px)`, opacity: 0, offset: 1 },
+  ], { duration: dur, easing: 'cubic-bezier(.35,0,.5,1)', fill: 'forwards' });
+  setTimeout(() => el.remove(), dur + 250);
+}
+
+/** Frappe de corps-à-corps : une lacération qui balaie la cible (couleur = élément). */
+export function playSlash(container, x, y, size, color = '#4f8cff') {
+  if (!container || _reduced()) return;
+  const el = document.createElement('div');
+  el.className = 'vtt-slash-fx';
+  const s = Math.max(60, Math.min(280, size || 100));
+  const rot = (-35 + Math.random() * 70).toFixed(0);
+  el.style.cssText = `left:${x}px;top:${y}px;width:${s}px;height:${s}px;--rot:${rot}deg`;
+  el.innerHTML = `<svg viewBox="0 0 100 100" width="100%" height="100%" aria-hidden="true" style="filter:drop-shadow(0 0 6px ${color})"><path d="M12 40 Q50 8 88 40" fill="none" stroke="${color}" stroke-width="5" stroke-linecap="round"/><path d="M20 60 Q50 34 80 60" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" opacity=".7"/></svg>`;
+  _ensureLayer(container).appendChild(el);
+  el.addEventListener('animationend', (e) => { if (e.target === el) el.remove(); });
+  setTimeout(() => el.remove(), 800);
+}

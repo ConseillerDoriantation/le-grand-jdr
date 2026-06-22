@@ -21,7 +21,7 @@ import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
 import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED, getCharDamageProfile } from '../../shared/equipment-utils.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../../shared/damage-types.js';
-import { playSigil, playImpact } from './vtt-rune-sigil.js';
+import { playSigil, playImpact, playProjectile, playSlash } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
 import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js';
@@ -4194,7 +4194,9 @@ function _vttPickOpt(srcId, tgtId, idx) {
       else if (opt.mods?.invocation) _sgCat = 'summon';
       else if (opt.mods?.affliction) _sgCat = 'affliction';
       else if (opt.mods && (opt.mods.enchantArmeDmg || opt.mods.enchantToucher || opt.mods.enchantMove || opt.mods.enchantPieds || opt.mods.enchantGeneric)) _sgCat = 'buff';
-      if (_sgColor) _sigil = { color: _sgColor, runes: _sgSpell.runes || [], category: _sgCat };
+      const _melee = (parseInt(opt.portee) || 1) <= 1;   // portée 1 case = corps-à-corps
+      const _physical = (_sgElem === 'physique');
+      if (_sgColor) _sigil = { color: _sgColor, runes: _sgSpell.runes || [], category: _sgCat, melee: _melee, physical: _physical };
     }
   } catch {}
 
@@ -4983,6 +4985,36 @@ function _playSigilForToken(tokenId, sigil) {
     playSigil(cont, pt.x, pt.y, sizePx, sigil);
   } catch (e) { console.warn('[sigil]', e); }
 }
+/** Données token depuis un id (clé directe ou recherche par data.id). */
+function _tokenDataById(tokenId) {
+  return (VS.tokens[tokenId]?.data) ? VS.tokens[tokenId].data
+       : Object.values(VS.tokens).find(e => e?.data?.id === tokenId)?.data || null;
+}
+/** Centre écran d'un token (px dans le conteneur) + taille de cellule à l'écran. */
+function _tokenScreenCenter(data) {
+  const center = _tokenCenter(data);
+  const pt = VS.layers?.token?.getAbsoluteTransform().point(center) || center;
+  const scale = VS.stage?.scaleX() || 1;
+  const dims = _tokenDims(data);
+  return { x: pt.x, y: pt.y, cellPx: Math.max(dims.w, dims.h) * CELL * scale };
+}
+/** Effet de cast sur une cible : projectile (distance) ou frappe (CaC) + impact. */
+function _playCastTargetFx(srcId, tid, color, melee, physical) {
+  const tgt = _tokenDataById(tid); if (!tgt) return;
+  try {
+    const cont = VS.stage?.container();
+    const tp = _tokenScreenCenter(tgt);
+    const src = _tokenDataById(srcId);
+    if (melee || !src) {
+      playSlash(cont, tp.x, tp.y, Math.max(80, tp.cellPx * 1.5), color);
+    } else {
+      const sp = _tokenScreenCenter(src);
+      playProjectile(cont, sp.x, sp.y, tp.x, tp.y, { color, physical });
+    }
+  } catch (e) { console.warn('[castfx]', e); }
+  _playImpactForToken(tid, color);
+}
+
 /** Éclat d'impact coloré sur un token (cible d'un sort). */
 function _playImpactForToken(tokenId, color) {
   if (!color) return;
@@ -5013,7 +5045,7 @@ function _renderRemoteCastings(docs) {
     if (sf && sf.n && sf.pageId === VS.activePage?.id && _seenSigilFire[d.id] !== sf.n) {
       _seenSigilFire[d.id] = sf.n;   // dédup par n : l'onglet du lanceur l'a déjà → ignoré
       _playSigilForToken(sf.tokenId, sf.sigil);
-      (sf.targets || []).forEach(tid => _playImpactForToken(tid, sf.impColor));
+      (sf.targets || []).forEach(tid => _playCastTargetFx(sf.tokenId, tid, sf.impColor, !!sf.melee, !!sf.physical));
     }
     if (!c.active || c.pageId !== VS.activePage?.id || d.id === myUid) return;
     const srcEntry = Object.values(VS.tokens).find(e => e.data?.id === c.srcId);
@@ -5058,7 +5090,9 @@ async function _vttRollAttack() {
   if (ctx.sigil) {
     _playSigilForToken(srcId, ctx.sigil);
     const _impColor = ctx.sigil.category === 'heal' ? '#22c38e' : ctx.sigil.color;
-    for (const tid of targetIds) { if (tid !== srcId) _playImpactForToken(tid, _impColor); }
+    const _melee = ctx.sigil.category === 'heal' ? false : !!ctx.sigil.melee;  // pas de "frappe" pour un soin
+    const _physical = !!ctx.sigil.physical;
+    for (const tid of targetIds) { if (tid !== srcId) _playCastTargetFx(srcId, tid, _impColor, _melee, _physical); }
     try {
       const _uid = STATE.user?.uid;
       if (_uid) {
@@ -5068,6 +5102,7 @@ async function _vttRollAttack() {
           sigilFire: {
             tokenId: srcId, sigil: ctx.sigil, pageId: VS.activePage?.id || null, n: _n,
             targets: targetIds.filter(t => t !== srcId), impColor: _impColor,
+            melee: _melee, physical: _physical,
           },
         }, { merge: true }).catch(() => {});
       }
