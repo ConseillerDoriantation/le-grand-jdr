@@ -4996,81 +4996,83 @@ function _buildCastSigil(src, opt) {
 
 /** Effet de cast À ZONE : projectile lanceur→centre, onde au centre, impacts sur
  *  les cibles touchées (sauf invocation). center/zonePx en coords Konva. */
+// ── Effets de sort (sceau/impact/projectile) ────────────────────────────────
+// Overlays DOM placés en coords LOGIQUES (comme les tokens) dans .vtt-sigil-layer ;
+// ce calque suit en continu le transform du layer Konva (rAF tant qu'un effet est
+// actif) → les effets restent ancrés sous les tokens au pan ET au zoom.
+let _sigilSyncRAF = 0;
+function _syncSigilLayer() {
+  _sigilSyncRAF = 0;
+  const layer = VS.stage?.container()?.querySelector('.vtt-sigil-layer');
+  if (!layer || !VS.layers?.token) return;
+  const m = VS.layers.token.getAbsoluteTransform().getMatrix();
+  layer.style.transform = `matrix(${m[0]},${m[1]},${m[2]},${m[3]},${m[4]},${m[5]})`;
+  if (layer.childElementCount > 0) _sigilSyncRAF = requestAnimationFrame(_syncSigilLayer);
+}
+function _ensureSigilSync() { if (!_sigilSyncRAF) _sigilSyncRAF = requestAnimationFrame(_syncSigilLayer); }
+
+/** Données token depuis un id (clé directe ou recherche par data.id). */
+function _tokenDataById(tokenId) {
+  return (VS.tokens[tokenId]?.data) ? VS.tokens[tokenId].data
+       : Object.values(VS.tokens).find(e => e?.data?.id === tokenId)?.data || null;
+}
+/** Centre LOGIQUE d'un token (coords Konva) + taille de cellule logique. */
+function _tokenLogicalCenter(data) {
+  const c = _tokenCenter(data);
+  const dims = _tokenDims(data);
+  return { x: c.x, y: c.y, cellPx: Math.max(dims.w, dims.h) * CELL };
+}
+
+/** Effet de cast à ZONE : projectile lanceur→centre, onde, impacts (coords logiques). */
 function _playZoneFx(srcId, center, zonePx, targetIds, color, physical, isSummon) {
   try {
     const cont = VS.stage?.container();
-    const cpt = VS.layers?.token?.getAbsoluteTransform().point(center) || center;
-    const scale = VS.stage?.scaleX() || 1;
     const src = _tokenDataById(srcId);
-    if (src) { const sp = _tokenScreenCenter(src); playProjectile(cont, sp.x, sp.y, cpt.x, cpt.y, { color, physical }); }
-    const waveSize = Math.max(zonePx?.w || 0, zonePx?.h || 0, CELL) * scale * 1.15;
-    playImpact(cont, cpt.x, cpt.y, waveSize, color);
+    if (src) { const sp = _tokenLogicalCenter(src); playProjectile(cont, sp.x, sp.y, center.x, center.y, { color, physical }); }
+    playImpact(cont, center.x, center.y, Math.max(zonePx?.w || 0, zonePx?.h || 0, CELL) * 1.15, color);
+    _ensureSigilSync();
     if (!isSummon) (targetIds || []).forEach(tid => _playImpactForToken(tid, color));
   } catch (e) { console.warn('[zonefx]', e); }
 }
 
 // Sceaux déjà rejoués (par uid → dernier n) pour ne pas rejouer un même cast.
 let _seenSigilFire = {};
-/** Joue le sceau runique sur un token (centre écran via le transform du layer). */
+
+/** Joue le sceau runique sur un token (coords logiques → suit pan/zoom). */
 function _playSigilForToken(tokenId, sigil) {
   if (!sigil) return;
-  const ent = (VS.tokens[tokenId]?.data) ? VS.tokens[tokenId]
-            : Object.values(VS.tokens).find(e => e?.data?.id === tokenId);
-  const data = ent?.data; if (!data) return;
+  const data = _tokenDataById(tokenId); if (!data) return;
   try {
-    const cont = VS.stage?.container();
-    const center = _tokenCenter(data);
-    const pt = VS.layers?.token?.getAbsoluteTransform().point(center) || center;
-    const scale = VS.stage?.scaleX() || 1;
-    const dims = _tokenDims(data);
-    const sizePx = Math.max(dims.w, dims.h) * CELL * scale * 3;
-    playSigil(cont, pt.x, pt.y, sizePx, sigil);
+    const lc = _tokenLogicalCenter(data);
+    playSigil(VS.stage?.container(), lc.x, lc.y, lc.cellPx * 3, sigil);
+    _ensureSigilSync();
   } catch (e) { console.warn('[sigil]', e); }
-}
-/** Données token depuis un id (clé directe ou recherche par data.id). */
-function _tokenDataById(tokenId) {
-  return (VS.tokens[tokenId]?.data) ? VS.tokens[tokenId].data
-       : Object.values(VS.tokens).find(e => e?.data?.id === tokenId)?.data || null;
-}
-/** Centre écran d'un token (px dans le conteneur) + taille de cellule à l'écran. */
-function _tokenScreenCenter(data) {
-  const center = _tokenCenter(data);
-  const pt = VS.layers?.token?.getAbsoluteTransform().point(center) || center;
-  const scale = VS.stage?.scaleX() || 1;
-  const dims = _tokenDims(data);
-  return { x: pt.x, y: pt.y, cellPx: Math.max(dims.w, dims.h) * CELL * scale };
 }
 /** Effet de cast sur une cible : projectile (distance) ou frappe (CaC) + impact. */
 function _playCastTargetFx(srcId, tid, color, melee, physical) {
   const tgt = _tokenDataById(tid); if (!tgt) return;
   try {
     const cont = VS.stage?.container();
-    const tp = _tokenScreenCenter(tgt);
+    const tp = _tokenLogicalCenter(tgt);
     const src = _tokenDataById(srcId);
     if (melee || !src) {
-      playSlash(cont, tp.x, tp.y, Math.max(80, tp.cellPx * 1.5), color);
+      playSlash(cont, tp.x, tp.y, Math.max(60, tp.cellPx * 1.5), color);
     } else {
-      const sp = _tokenScreenCenter(src);
+      const sp = _tokenLogicalCenter(src);
       playProjectile(cont, sp.x, sp.y, tp.x, tp.y, { color, physical });
     }
+    _ensureSigilSync();
   } catch (e) { console.warn('[castfx]', e); }
   _playImpactForToken(tid, color);
 }
-
-/** Éclat d'impact coloré sur un token (cible d'un sort). */
+/** Éclat d'impact coloré sur un token (coords logiques → suit pan/zoom). */
 function _playImpactForToken(tokenId, color) {
   if (!color) return;
-  const ent = (VS.tokens[tokenId]?.data) ? VS.tokens[tokenId]
-            : Object.values(VS.tokens).find(e => e?.data?.id === tokenId);
-  const data = ent?.data; if (!data) return;
+  const data = _tokenDataById(tokenId); if (!data) return;
   try {
-    const cont = VS.stage?.container();
-    const center = _tokenCenter(data);
-    const pt = VS.layers?.token?.getAbsoluteTransform().point(center) || center;
-    const scale = VS.stage?.scaleX() || 1;
-    const dims = _tokenDims(data);
-    const sizePx = Math.max(dims.w, dims.h) * CELL * scale * 1.6;
-    playImpact(cont, pt.x, pt.y, sizePx, color);
+    const lc = _tokenLogicalCenter(data);
+    playImpact(VS.stage?.container(), lc.x, lc.y, lc.cellPx * 1.6, color);
+    _ensureSigilSync();
   } catch (e) { console.warn('[impact]', e); }
 }
 

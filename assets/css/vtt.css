@@ -5815,7 +5815,7 @@
    ici, l'overlay (au-dessus du canvas) + le timing d'apparition/disparition
    et les sous-animations (rotation, pulse, montée de soin).
    ════════════════════════════════════════════════════════════════════════ */
-.vtt-sigil-layer { position: absolute; inset: 0; pointer-events: none; z-index: 25; overflow: hidden; }
+.vtt-sigil-layer { position: absolute; inset: 0; pointer-events: none; z-index: 25; transform-origin: 0 0; will-change: transform; }
 .vtt-sigil-fx {
   position: absolute; transform: translate(-50%, -50%); pointer-events: none;
   animation: vtt-sigil-in 4s cubic-bezier(.22,1,.36,1) forwards;
