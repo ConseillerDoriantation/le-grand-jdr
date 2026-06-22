@@ -126,7 +126,9 @@ export function playSigil(container, x, y, size, spell) {
   el.style.cssText = `left:${x}px;top:${y}px;width:${s}px;height:${s}px`;
   el.innerHTML = buildSigilSvg(spell || {});
   layer.appendChild(el);
-  el.addEventListener('animationend', () => el.remove(), { once: true });
+  // ⚠ Ne retirer QUE sur la fin de l'anim du wrapper : les enfants (flash, etc.)
+  // émettent aussi animationend qui bouillonne — sinon le sceau saute à 0,7 s.
+  el.addEventListener('animationend', (e) => { if (e.target === el) el.remove(); });
   setTimeout(() => el.remove(), 9500);   // filet de sécurité (> durée d'anim)
 }
 
@@ -157,6 +159,6 @@ export function playImpact(container, x, y, size, color = '#4f8cff') {
   }
   el.innerHTML = `<svg viewBox="0 0 100 100" width="100%" height="100%" aria-hidden="true" style="filter:drop-shadow(0 0 7px ${color})"><circle cx="50" cy="50" r="38" fill="none" stroke="${color}" stroke-width="3.2"/>${sp}</svg>`;
   layer.appendChild(el);
-  el.addEventListener('animationend', () => el.remove(), { once: true });
+  el.addEventListener('animationend', (e) => { if (e.target === el) el.remove(); });
   setTimeout(() => el.remove(), 1800);
 }

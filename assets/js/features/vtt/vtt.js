@@ -5010,8 +5010,8 @@ function _renderRemoteCastings(docs) {
     // Sceau runique diffusé : rejoué chez les autres au déclenchement (indépendant
     // des lignes de visée ; clé = n unique pour ne jouer qu'une fois par cast).
     const sf = c.sigilFire;
-    if (sf && sf.n && d.id !== myUid && sf.pageId === VS.activePage?.id && _seenSigilFire[d.id] !== sf.n) {
-      _seenSigilFire[d.id] = sf.n;
+    if (sf && sf.n && sf.pageId === VS.activePage?.id && _seenSigilFire[d.id] !== sf.n) {
+      _seenSigilFire[d.id] = sf.n;   // dédup par n : l'onglet du lanceur l'a déjà → ignoré
       _playSigilForToken(sf.tokenId, sf.sigil);
       (sf.targets || []).forEach(tid => _playImpactForToken(tid, sf.impColor));
     }
@@ -5061,12 +5061,16 @@ async function _vttRollAttack() {
     for (const tid of targetIds) { if (tid !== srcId) _playImpactForToken(tid, _impColor); }
     try {
       const _uid = STATE.user?.uid;
-      if (_uid) setDoc(_castingRef(_uid), {
-        sigilFire: {
-          tokenId: srcId, sigil: ctx.sigil, pageId: VS.activePage?.id || null, n: Date.now(),
-          targets: targetIds.filter(t => t !== srcId), impColor: _impColor,
-        },
-      }, { merge: true }).catch(() => {});
+      if (_uid) {
+        const _n = Date.now();
+        _seenSigilFire[_uid] = _n;   // marque comme déjà joué localement → pas de double sur cet onglet
+        setDoc(_castingRef(_uid), {
+          sigilFire: {
+            tokenId: srcId, sigil: ctx.sigil, pageId: VS.activePage?.id || null, n: _n,
+            targets: targetIds.filter(t => t !== srcId), impColor: _impColor,
+          },
+        }, { merge: true }).catch(() => {});
+      }
     } catch {}
   }
   // Snapshot pré-action pour l'annulation MJ (attaché aux logs de l'action).
