@@ -41,69 +41,69 @@ export function buildSigilSvg({ color = '#4f8cff', runes = [], category = 'attac
   const uid = ++_sigilSeq;
   let g = '';
 
-  // Flash de halo à l'apparition (présence/impact), joué une fois.
-  g += `<circle class="sig-flash" cx="${C}" cy="${C}" r="${R}" fill="none" stroke="${color}" stroke-width="5"/>`;
+  // Flash de halo à l'apparition (présence), joué une fois — trait fin.
+  g += `<circle class="sig-flash" cx="${C}" cy="${C}" r="${R}" fill="none" stroke="${color}" stroke-width="2.4"/>`;
 
   if (r['Durée']) {
-    g += `<g class="sig-spin"><circle cx="${C}" cy="${C}" r="${R + 13}" fill="none" stroke="${color}" stroke-width="3.5" stroke-dasharray="5 11" opacity=".8"/></g>`;
+    g += `<g class="sig-spin"><circle cx="${C}" cy="${C}" r="${R + 11}" fill="none" stroke="${color}" stroke-width="1.3" stroke-dasharray="3 9" opacity=".6"/></g>`;
   }
-  const dash = r.Affliction ? `stroke-dasharray="${8 + r.Affliction * 4} ${5 + r.Affliction * 2}"` : '';
-  g += `<g class="sig-spinr"><circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="${color}" stroke-width="5" opacity="1" ${dash}/>`;
+  const dash = r.Affliction ? `stroke-dasharray="${6 + r.Affliction * 3} ${4 + r.Affliction * 2}"` : '';
+  g += `<g class="sig-spinr"><circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="${color}" stroke-width="2.2" opacity="1" ${dash}/>`;
   for (let i = 0; i < total; i++) {
     const a = 2 * Math.PI * i / Math.max(total, 1) - Math.PI / 2;
     const [x, y] = _pol(C, C, R, a);
     const deg = a * 180 / Math.PI + 90;
-    g += `<g transform="translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${deg.toFixed(1)})"><line x1="0" y1="-10" x2="0" y2="10" stroke="${color}" stroke-width="4.4"/><rect x="-5" y="-5" width="10" height="10" transform="rotate(45)" fill="none" stroke="${color}" stroke-width="3.8"/></g>`;
+    g += `<g transform="translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${deg.toFixed(1)})"><line x1="0" y1="-7" x2="0" y2="7" stroke="${color}" stroke-width="2"/><rect x="-3.5" y="-3.5" width="7" height="7" transform="rotate(45)" fill="none" stroke="${color}" stroke-width="1.7"/></g>`;
   }
   g += '</g>';
 
   for (let k = 0; k < (r.Protection || 0); k++) {
-    g += `<circle cx="${C}" cy="${C}" r="${(R * (0.78 - k * 0.16)).toFixed(1)}" fill="none" stroke="${color}" stroke-width="4" opacity=".8"/>`;
+    g += `<circle cx="${C}" cy="${C}" r="${(R * (0.78 - k * 0.16)).toFixed(1)}" fill="none" stroke="${color}" stroke-width="1.6" opacity=".6"/>`;
   }
   if (r.Puissance) {
     const pts = 3 + r.Puissance * 2;
-    g += `<g class="sig-spin"><path d="${_starPath(C, C, R * 0.52, R * 0.2, pts)}" fill="none" stroke="${color}" stroke-width="4.4" stroke-linejoin="round" opacity="1"/></g>`;
+    g += `<g class="sig-spin"><path d="${_starPath(C, C, R * 0.5, R * 0.2, pts)}" fill="none" stroke="${color}" stroke-width="1.9" stroke-linejoin="round" opacity=".95"/></g>`;
   }
   for (let k = 1; k <= (r.Dispersion || 0); k++) {
     const a = 2 * Math.PI * k / (r.Dispersion + 1) - Math.PI / 2;
-    const [x, y] = _pol(C, C, R + 26, a);
-    g += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="15" fill="none" stroke="${color}" stroke-width="4" opacity=".95"/>`;
+    const [x, y] = _pol(C, C, R + 22, a);
+    g += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="13" fill="none" stroke="${color}" stroke-width="1.7" opacity=".8"/>`;
   }
   if (r.Chance) {
     g += '<g class="sig-orbit">';
     for (let k = 0; k < r.Chance + 2; k++) {
       const a = 2 * Math.PI * k / (r.Chance + 2);
       const [x, y] = _pol(C, C, R * 0.62, a);
-      g += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5.5" fill="${color}"/>`;
+      g += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${color}"/>`;
     }
     g += '</g>';
   }
   if (r.Invocation) {
-    g += `<defs><radialGradient id="sig-iris-${uid}"><stop offset="0%" stop-color="${color}" stop-opacity="1"/><stop offset="70%" stop-color="${color}" stop-opacity=".3"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></radialGradient></defs>`
-       + `<circle cx="${C}" cy="${C}" r="${R * 0.6}" fill="url(#sig-iris-${uid})"/>`
-       + `<circle class="sig-core" cx="${C}" cy="${C}" r="${R * 0.28}" fill="none" stroke="${color}" stroke-width="4.4"/>`;
+    g += `<defs><radialGradient id="sig-iris-${uid}"><stop offset="0%" stop-color="${color}" stop-opacity=".95"/><stop offset="70%" stop-color="${color}" stop-opacity=".18"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></radialGradient></defs>`
+       + `<circle cx="${C}" cy="${C}" r="${R * 0.56}" fill="url(#sig-iris-${uid})"/>`
+       + `<circle class="sig-core" cx="${C}" cy="${C}" r="${R * 0.28}" fill="none" stroke="${color}" stroke-width="2"/>`;
   } else if (r.Concentration) {
-    g += `<circle class="sig-core" cx="${C}" cy="${C}" r="${(R * 0.24).toFixed(1)}" fill="${color}" opacity="1"/>`;
+    g += `<circle class="sig-core" cx="${C}" cy="${C}" r="${(R * 0.22).toFixed(1)}" fill="${color}" opacity=".9"/>`;
   } else {
-    g += `<circle cx="${C}" cy="${C}" r="7" fill="${color}"/>`;
+    g += `<circle cx="${C}" cy="${C}" r="4" fill="${color}"/>`;
   }
 
   if (category === 'attack') {
     for (let k = 0; k < 8; k++) {
       const a = 2 * Math.PI * k / 8;
-      const [x1, y1] = _pol(C, C, R + 5, a);
-      const [x2, y2] = _pol(C, C, R + 19, a);
-      g += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${color}" stroke-width="5.2" stroke-linecap="round" opacity="1"/>`;
+      const [x1, y1] = _pol(C, C, R + 3, a);
+      const [x2, y2] = _pol(C, C, R + 14, a);
+      g += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${color}" stroke-width="2.4" stroke-linecap="round" opacity=".85"/>`;
     }
   } else if (category === 'heal') {
     for (let k = 0; k < 3; k++) {
-      g += `<g class="sig-rise" style="animation-delay:${k * 0.35}s" transform="translate(${C - 22 + k * 22} ${C})"><path d="M0 -7 V7 M-7 0 H7" stroke="${color}" stroke-width="5" stroke-linecap="round"/></g>`;
+      g += `<g class="sig-rise" style="animation-delay:${k * 0.35}s" transform="translate(${C - 20 + k * 20} ${C})"><path d="M0 -5 V5 M-5 0 H5" stroke="${color}" stroke-width="2.4" stroke-linecap="round"/></g>`;
     }
   } else if (category === 'buff') {
-    g += `<circle cx="${C}" cy="${C}" r="${R + 8}" fill="none" stroke="${color}" stroke-width="3.5" opacity=".6"/>`;
+    g += `<circle cx="${C}" cy="${C}" r="${R + 6}" fill="none" stroke="${color}" stroke-width="1.4" opacity=".45"/>`;
   }
 
-  return `<svg viewBox="0 0 220 220" width="100%" height="100%" aria-hidden="true" style="filter:drop-shadow(0 0 14px ${color}) drop-shadow(0 0 5px ${color})">${g}</svg>`;
+  return `<svg viewBox="0 0 220 220" width="100%" height="100%" aria-hidden="true" style="filter:drop-shadow(0 0 8px ${color}) drop-shadow(0 0 2px ${color})">${g}</svg>`;
 }
 
 /**
