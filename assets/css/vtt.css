@@ -5818,17 +5818,18 @@
 .vtt-sigil-layer { position: absolute; inset: 0; pointer-events: none; z-index: 25; overflow: hidden; }
 .vtt-sigil-fx {
   position: absolute; transform: translate(-50%, -50%); pointer-events: none;
-  animation: vtt-sigil-in 1.5s cubic-bezier(.22,1,.36,1) forwards;
+  animation: vtt-sigil-in 3.2s cubic-bezier(.22,1,.36,1) forwards;
 }
 .vtt-sigil-fx svg { display: block; width: 100%; height: 100%; }
-.vtt-sigil-fx--attack { animation-duration: 1.2s; }
-.vtt-sigil-fx--heal   { animation-duration: 1.7s; }
-.vtt-sigil-fx--summon { animation-duration: 1.8s; }
+.vtt-sigil-fx--attack { animation-duration: 2.8s; }
+.vtt-sigil-fx--heal   { animation-duration: 3.6s; }
+.vtt-sigil-fx--summon { animation-duration: 3.8s; }
 @keyframes vtt-sigil-in {
-  0%   { opacity: 0; transform: translate(-50%,-50%) scale(.25) rotate(-30deg); }
-  22%  { opacity: 1; }
-  68%  { opacity: 1; transform: translate(-50%,-50%) scale(1) rotate(0deg); }
-  100% { opacity: 0; transform: translate(-50%,-50%) scale(1.18) rotate(8deg); }
+  0%   { opacity: 0; transform: translate(-50%,-50%) scale(.3) rotate(-24deg); }
+  12%  { opacity: 1; transform: translate(-50%,-50%) scale(1.04) rotate(-4deg); }
+  20%  { transform: translate(-50%,-50%) scale(1) rotate(0deg); }
+  82%  { opacity: 1; transform: translate(-50%,-50%) scale(1) rotate(0deg); }
+  100% { opacity: 0; transform: translate(-50%,-50%) scale(1.14) rotate(6deg); }
 }
 .vtt-sigil-fx .sig-spin,
 .vtt-sigil-fx .sig-spinr,

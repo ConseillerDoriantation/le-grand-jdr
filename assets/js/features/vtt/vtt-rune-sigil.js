@@ -42,65 +42,65 @@ export function buildSigilSvg({ color = '#4f8cff', runes = [], category = 'attac
   let g = '';
 
   if (r['Durée']) {
-    g += `<g class="sig-spin"><circle cx="${C}" cy="${C}" r="${R + 10}" fill="none" stroke="${color}" stroke-width="1" stroke-dasharray="3 9" opacity=".55"/></g>`;
+    g += `<g class="sig-spin"><circle cx="${C}" cy="${C}" r="${R + 11}" fill="none" stroke="${color}" stroke-width="2.2" stroke-dasharray="4 10" opacity=".75"/></g>`;
   }
-  const dash = r.Affliction ? `stroke-dasharray="${6 + r.Affliction * 3} ${4 + r.Affliction * 2}"` : '';
-  g += `<g class="sig-spinr"><circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="${color}" stroke-width="1.8" opacity=".9" ${dash}/>`;
+  const dash = r.Affliction ? `stroke-dasharray="${7 + r.Affliction * 3} ${4 + r.Affliction * 2}"` : '';
+  g += `<g class="sig-spinr"><circle cx="${C}" cy="${C}" r="${R}" fill="none" stroke="${color}" stroke-width="3.4" opacity="1" ${dash}/>`;
   for (let i = 0; i < total; i++) {
     const a = 2 * Math.PI * i / Math.max(total, 1) - Math.PI / 2;
     const [x, y] = _pol(C, C, R, a);
     const deg = a * 180 / Math.PI + 90;
-    g += `<g transform="translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${deg.toFixed(1)})"><line x1="0" y1="-6" x2="0" y2="6" stroke="${color}" stroke-width="1.6"/><rect x="-3.2" y="-3.2" width="6.4" height="6.4" transform="rotate(45)" fill="none" stroke="${color}" stroke-width="1.3"/></g>`;
+    g += `<g transform="translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${deg.toFixed(1)})"><line x1="0" y1="-8" x2="0" y2="8" stroke="${color}" stroke-width="3"/><rect x="-4" y="-4" width="8" height="8" transform="rotate(45)" fill="none" stroke="${color}" stroke-width="2.6"/></g>`;
   }
   g += '</g>';
 
   for (let k = 0; k < (r.Protection || 0); k++) {
-    g += `<circle cx="${C}" cy="${C}" r="${(R * (0.78 - k * 0.16)).toFixed(1)}" fill="none" stroke="${color}" stroke-width="1.2" opacity=".5"/>`;
+    g += `<circle cx="${C}" cy="${C}" r="${(R * (0.78 - k * 0.16)).toFixed(1)}" fill="none" stroke="${color}" stroke-width="2.6" opacity=".75"/>`;
   }
   if (r.Puissance) {
     const pts = 3 + r.Puissance * 2;
-    g += `<g class="sig-spin"><path d="${_starPath(C, C, R * 0.5, R * 0.2, pts)}" fill="none" stroke="${color}" stroke-width="1.5" opacity=".85"/></g>`;
+    g += `<g class="sig-spin"><path d="${_starPath(C, C, R * 0.5, R * 0.2, pts)}" fill="none" stroke="${color}" stroke-width="3" stroke-linejoin="round" opacity="1"/></g>`;
   }
   for (let k = 1; k <= (r.Dispersion || 0); k++) {
     const a = 2 * Math.PI * k / (r.Dispersion + 1) - Math.PI / 2;
-    const [x, y] = _pol(C, C, R + 22, a);
-    g += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="13" fill="none" stroke="${color}" stroke-width="1.3" opacity=".7"/>`;
+    const [x, y] = _pol(C, C, R + 24, a);
+    g += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="14" fill="none" stroke="${color}" stroke-width="2.6" opacity=".9"/>`;
   }
   if (r.Chance) {
     g += '<g class="sig-orbit">';
     for (let k = 0; k < r.Chance + 2; k++) {
       const a = 2 * Math.PI * k / (r.Chance + 2);
       const [x, y] = _pol(C, C, R * 0.62, a);
-      g += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6" fill="${color}"/>`;
+      g += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" fill="${color}"/>`;
     }
     g += '</g>';
   }
   if (r.Invocation) {
-    g += `<defs><radialGradient id="sig-iris-${uid}"><stop offset="0%" stop-color="${color}" stop-opacity=".95"/><stop offset="70%" stop-color="${color}" stop-opacity=".15"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></radialGradient></defs>`
-       + `<circle cx="${C}" cy="${C}" r="${R * 0.55}" fill="url(#sig-iris-${uid})"/>`
-       + `<circle class="sig-core" cx="${C}" cy="${C}" r="${R * 0.28}" fill="none" stroke="${color}" stroke-width="1.6"/>`;
+    g += `<defs><radialGradient id="sig-iris-${uid}"><stop offset="0%" stop-color="${color}" stop-opacity="1"/><stop offset="70%" stop-color="${color}" stop-opacity=".22"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></radialGradient></defs>`
+       + `<circle cx="${C}" cy="${C}" r="${R * 0.58}" fill="url(#sig-iris-${uid})"/>`
+       + `<circle class="sig-core" cx="${C}" cy="${C}" r="${R * 0.28}" fill="none" stroke="${color}" stroke-width="2.8"/>`;
   } else if (r.Concentration) {
-    g += `<circle class="sig-core" cx="${C}" cy="${C}" r="${(R * 0.22).toFixed(1)}" fill="${color}" opacity=".85"/>`;
+    g += `<circle class="sig-core" cx="${C}" cy="${C}" r="${(R * 0.22).toFixed(1)}" fill="${color}" opacity="1"/>`;
   } else {
-    g += `<circle cx="${C}" cy="${C}" r="3.4" fill="${color}"/>`;
+    g += `<circle cx="${C}" cy="${C}" r="5" fill="${color}"/>`;
   }
 
   if (category === 'attack') {
     for (let k = 0; k < 8; k++) {
       const a = 2 * Math.PI * k / 8;
-      const [x1, y1] = _pol(C, C, R + 3, a);
-      const [x2, y2] = _pol(C, C, R + 13, a);
-      g += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${color}" stroke-width="2" opacity=".7"/>`;
+      const [x1, y1] = _pol(C, C, R + 4, a);
+      const [x2, y2] = _pol(C, C, R + 16, a);
+      g += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${color}" stroke-width="3.6" stroke-linecap="round" opacity=".95"/>`;
     }
   } else if (category === 'heal') {
     for (let k = 0; k < 3; k++) {
-      g += `<g class="sig-rise" style="animation-delay:${k * 0.35}s" transform="translate(${C - 20 + k * 20} ${C})"><path d="M0 -5 V5 M-5 0 H5" stroke="${color}" stroke-width="2"/></g>`;
+      g += `<g class="sig-rise" style="animation-delay:${k * 0.35}s" transform="translate(${C - 20 + k * 20} ${C})"><path d="M0 -6 V6 M-6 0 H6" stroke="${color}" stroke-width="3.4" stroke-linecap="round"/></g>`;
     }
   } else if (category === 'buff') {
-    g += `<circle cx="${C}" cy="${C}" r="${R + 6}" fill="none" stroke="${color}" stroke-width="1" opacity=".35"/>`;
+    g += `<circle cx="${C}" cy="${C}" r="${R + 7}" fill="none" stroke="${color}" stroke-width="2.2" opacity=".55"/>`;
   }
 
-  return `<svg viewBox="0 0 220 220" width="100%" height="100%" aria-hidden="true" style="filter:drop-shadow(0 0 6px ${color}aa)">${g}</svg>`;
+  return `<svg viewBox="0 0 220 220" width="100%" height="100%" aria-hidden="true" style="filter:drop-shadow(0 0 10px ${color}) drop-shadow(0 0 3px ${color})">${g}</svg>`;
 }
 
 /**
@@ -124,5 +124,5 @@ export function playSigil(container, x, y, size, spell) {
   el.innerHTML = buildSigilSvg(spell || {});
   layer.appendChild(el);
   el.addEventListener('animationend', () => el.remove(), { once: true });
-  setTimeout(() => el.remove(), 2000);   // filet de sécurité
+  setTimeout(() => el.remove(), 4500);   // filet de sécurité (> durée d'anim)
 }
