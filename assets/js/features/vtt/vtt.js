@@ -5015,7 +5015,7 @@ async function _vttRollAttack() {
       const pt = VS.layers?.token?.getAbsoluteTransform().point(center) || center;
       const scale = VS.stage?.scaleX() || 1;
       const dims = _tokenDims(src);
-      const sizePx = Math.max(dims.w, dims.h) * CELL * scale * 2.4;
+      const sizePx = Math.max(dims.w, dims.h) * CELL * scale * 3;
       playSigil(cont, pt.x, pt.y, sizePx, ctx.sigil);
     } catch (e) { console.warn('[sigil]', e); }
   }
