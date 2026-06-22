@@ -340,8 +340,13 @@ const PAGES = {
     const collectionPct    = collectionTotal > 0 ? Math.round((collectionUnlocked / collectionTotal) * 100) : 0;
     // Groupes « En cours » de la Trame (quêtes liées à une mission). L'ancien
     // modèle de quêtes autonomes est abandonné — le hub reflète la Trame.
+    // Missions clôturées (Terminée/Échouée) → leurs groupes ne doivent plus
+    // compter comme « en cours », même si le statut du groupe n'a pas été basculé.
+    const _doneMissionIds = new Set(
+      storyItems.filter(i => i.statut === 'Terminée' || i.statut === 'Échouée').map(i => i.id)
+    );
     const activeGroups     = quests
-      .filter(q => q.missionId && (q.statut || 'active') === 'active')
+      .filter(q => q.missionId && (q.statut || 'active') === 'active' && !_doneMissionIds.has(q.missionId))
       .sort((a, b) => (b.createdAt||'') > (a.createdAt||'') ? 1 : -1);
     const _missionTitleById = new Map(storyItems.map(i => [i.id, i.titre || 'Mission']));
 
