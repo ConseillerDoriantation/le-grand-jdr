@@ -4181,24 +4181,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
 
   // Sceau runique signature : capturé ici (le sort est en main) pour être joué à
   // la résolution. Couleur = élément, géométrie = runes, forme = catégorie.
-  // Uniquement pour les sorts du deck (sortIdx numérique) — pas les attaques d'arme.
-  let _sigil = null;
-  try {
-    const _sgChar  = _characterForToken(src);
-    const _sgSpell = (typeof opt.sortIdx === 'number') ? _sgChar?.deck_sorts?.[opt.sortIdx] : null;
-    if (_sgSpell) {
-      const _sgElem  = opt.element || _sgSpell.noyauTypeId || opt.damageTypeId || null;
-      const _sgColor = (_sgElem && getDamageTypeById(VS.damageTypes, _sgElem)?.color) || opt.damageTypeColor || null;
-      let _sgCat = 'attack';
-      if (opt.isHeal) _sgCat = 'heal';
-      else if (opt.mods?.invocation) _sgCat = 'summon';
-      else if (opt.mods?.affliction) _sgCat = 'affliction';
-      else if (opt.mods && (opt.mods.enchantArmeDmg || opt.mods.enchantToucher || opt.mods.enchantMove || opt.mods.enchantPieds || opt.mods.enchantGeneric)) _sgCat = 'buff';
-      const _melee = (parseInt(opt.portee) || 1) <= 1;   // portée 1 case = corps-à-corps
-      const _physical = (_sgElem === 'physique');
-      if (_sgColor) _sigil = { color: _sgColor, runes: _sgSpell.runes || [], category: _sgCat, melee: _melee, physical: _physical };
-    }
-  } catch {}
+  const _sigil = _buildCastSigil(src, opt);
 
   _atkCtx = { srcId, tgtId, opt, lS, lT, allTargets, sigil: _sigil };
 
@@ -4860,6 +4843,29 @@ async function _zoneValidate() {
     })
     .map(e => e.data.id);
 
+  // ── Sceau runique + effet de zone (projectile → centre, onde, impacts) ──
+  const _zoneSigil = _buildCastSigil(srcData, opt);
+  if (_zoneSigil) {
+    const _isSummon = _zoneSigil.category === 'summon';
+    const _zImpColor = _zoneSigil.category === 'heal' ? '#22c38e' : _zoneSigil.color;
+    _playSigilForToken(srcId, _zoneSigil);
+    _playZoneFx(srcId, { x, y }, { w: wPx, h: hPx }, targets, _zImpColor, _zoneSigil.physical, _isSummon);
+    try {
+      const _uid = STATE.user?.uid;
+      if (_uid) {
+        const _n = Date.now();
+        _seenSigilFire[_uid] = _n;
+        setDoc(_castingRef(_uid), {
+          sigilFire: {
+            tokenId: srcId, sigil: _zoneSigil, pageId: VS.activePage?.id || null, n: _n,
+            targets, impColor: _zImpColor, physical: _zoneSigil.physical,
+            zone: { x, y, w: wPx, h: hPx }, isSummon: _isSummon,
+          },
+        }, { merge: true }).catch(() => {});
+      }
+    } catch {}
+  }
+
   // ── Invocation générique : place la créature à l'emplacement choisi ──
   // (pas d'attaque du lanceur — la créature a ses propres stats/actions)
   if (opt?.mods?.invocation) {
@@ -4967,6 +4973,42 @@ async function _zoneValidate() {
   _vttPickOpt(srcId, firstTgt, 0);
 }
 
+/** Construit la donnée du sceau {color,runes,category,melee,physical} depuis un
+ *  sort du deck (sortIdx numérique), ou null si ce n'est pas un sort. Partagé
+ *  entre le cast ciblé (_vttPickOpt) et le cast à zone (_zoneValidate). */
+function _buildCastSigil(src, opt) {
+  try {
+    const char  = _characterForToken(src);
+    const spell = (typeof opt.sortIdx === 'number') ? char?.deck_sorts?.[opt.sortIdx] : null;
+    if (!spell) return null;
+    const elem  = opt.element || spell.noyauTypeId || opt.damageTypeId || null;
+    const color = (elem && getDamageTypeById(VS.damageTypes, elem)?.color) || opt.damageTypeColor || null;
+    if (!color) return null;
+    let cat = 'attack';
+    if (opt.isHeal) cat = 'heal';
+    else if (opt.mods?.invocation) cat = 'summon';
+    else if (opt.mods?.affliction) cat = 'affliction';
+    else if (opt.mods && (opt.mods.enchantArmeDmg || opt.mods.enchantToucher || opt.mods.enchantMove || opt.mods.enchantPieds || opt.mods.enchantGeneric)) cat = 'buff';
+    return { color, runes: spell.runes || [], category: cat,
+             melee: (parseInt(opt.portee) || 1) <= 1, physical: (elem === 'physique') };
+  } catch { return null; }
+}
+
+/** Effet de cast À ZONE : projectile lanceur→centre, onde au centre, impacts sur
+ *  les cibles touchées (sauf invocation). center/zonePx en coords Konva. */
+function _playZoneFx(srcId, center, zonePx, targetIds, color, physical, isSummon) {
+  try {
+    const cont = VS.stage?.container();
+    const cpt = VS.layers?.token?.getAbsoluteTransform().point(center) || center;
+    const scale = VS.stage?.scaleX() || 1;
+    const src = _tokenDataById(srcId);
+    if (src) { const sp = _tokenScreenCenter(src); playProjectile(cont, sp.x, sp.y, cpt.x, cpt.y, { color, physical }); }
+    const waveSize = Math.max(zonePx?.w || 0, zonePx?.h || 0, CELL) * scale * 1.15;
+    playImpact(cont, cpt.x, cpt.y, waveSize, color);
+    if (!isSummon) (targetIds || []).forEach(tid => _playImpactForToken(tid, color));
+  } catch (e) { console.warn('[zonefx]', e); }
+}
+
 // Sceaux déjà rejoués (par uid → dernier n) pour ne pas rejouer un même cast.
 let _seenSigilFire = {};
 /** Joue le sceau runique sur un token (centre écran via le transform du layer). */
@@ -5045,7 +5087,11 @@ function _renderRemoteCastings(docs) {
     if (sf && sf.n && sf.pageId === VS.activePage?.id && _seenSigilFire[d.id] !== sf.n) {
       _seenSigilFire[d.id] = sf.n;   // dédup par n : l'onglet du lanceur l'a déjà → ignoré
       _playSigilForToken(sf.tokenId, sf.sigil);
-      (sf.targets || []).forEach(tid => _playCastTargetFx(sf.tokenId, tid, sf.impColor, !!sf.melee, !!sf.physical));
+      if (sf.zone) {
+        _playZoneFx(sf.tokenId, { x: sf.zone.x, y: sf.zone.y }, { w: sf.zone.w, h: sf.zone.h }, sf.targets || [], sf.impColor, !!sf.physical, !!sf.isSummon);
+      } else {
+        (sf.targets || []).forEach(tid => _playCastTargetFx(sf.tokenId, tid, sf.impColor, !!sf.melee, !!sf.physical));
+      }
     }
     if (!c.active || c.pageId !== VS.activePage?.id || d.id === myUid) return;
     const srcEntry = Object.values(VS.tokens).find(e => e.data?.id === c.srcId);
