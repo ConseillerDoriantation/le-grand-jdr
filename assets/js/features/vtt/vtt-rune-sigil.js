@@ -129,3 +129,34 @@ export function playSigil(container, x, y, size, spell) {
   el.addEventListener('animationend', () => el.remove(), { once: true });
   setTimeout(() => el.remove(), 9500);   // filet de sécurité (> durée d'anim)
 }
+
+/**
+ * Éclat d'impact coloré sur une cible (anneau + éclats radiaux qui s'évasent),
+ * dans la couleur du type de dégât (ou vert pour un soin). Transitoire ~1 s,
+ * légèrement décalé pour donner l'impression que le sort « atteint » la cible.
+ */
+export function playImpact(container, x, y, size, color = '#4f8cff') {
+  if (!container) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  let layer = container.querySelector('.vtt-sigil-layer');
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.className = 'vtt-sigil-layer';
+    container.appendChild(layer);
+  }
+  const el = document.createElement('div');
+  el.className = 'vtt-impact-fx';
+  const s = Math.max(60, Math.min(380, size || 120));
+  el.style.cssText = `left:${x}px;top:${y}px;width:${s}px;height:${s}px`;
+  let sp = '';
+  for (let k = 0; k < 8; k++) {
+    const a = 2 * Math.PI * k / 8;
+    const [x1, y1] = _pol(50, 50, 34, a);
+    const [x2, y2] = _pol(50, 50, 47, a);
+    sp += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${color}" stroke-width="2.6" stroke-linecap="round"/>`;
+  }
+  el.innerHTML = `<svg viewBox="0 0 100 100" width="100%" height="100%" aria-hidden="true" style="filter:drop-shadow(0 0 7px ${color})"><circle cx="50" cy="50" r="38" fill="none" stroke="${color}" stroke-width="3.2"/>${sp}</svg>`;
+  layer.appendChild(el);
+  el.addEventListener('animationend', () => el.remove(), { once: true });
+  setTimeout(() => el.remove(), 1800);
+}

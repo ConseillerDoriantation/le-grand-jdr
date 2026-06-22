@@ -21,7 +21,7 @@ import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
 import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED, getCharDamageProfile } from '../../shared/equipment-utils.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../../shared/damage-types.js';
-import { playSigil } from './vtt-rune-sigil.js';
+import { playSigil, playImpact } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
 import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js';
@@ -4983,6 +4983,22 @@ function _playSigilForToken(tokenId, sigil) {
     playSigil(cont, pt.x, pt.y, sizePx, sigil);
   } catch (e) { console.warn('[sigil]', e); }
 }
+/** Éclat d'impact coloré sur un token (cible d'un sort). */
+function _playImpactForToken(tokenId, color) {
+  if (!color) return;
+  const ent = (VS.tokens[tokenId]?.data) ? VS.tokens[tokenId]
+            : Object.values(VS.tokens).find(e => e?.data?.id === tokenId);
+  const data = ent?.data; if (!data) return;
+  try {
+    const cont = VS.stage?.container();
+    const center = _tokenCenter(data);
+    const pt = VS.layers?.token?.getAbsoluteTransform().point(center) || center;
+    const scale = VS.stage?.scaleX() || 1;
+    const dims = _tokenDims(data);
+    const sizePx = Math.max(dims.w, dims.h) * CELL * scale * 1.6;
+    playImpact(cont, pt.x, pt.y, sizePx, color);
+  } catch (e) { console.warn('[impact]', e); }
+}
 
 /** Rendu des lignes de ciblage distantes (broadcast Firestore). */
 function _renderRemoteCastings(docs) {
@@ -4997,6 +5013,7 @@ function _renderRemoteCastings(docs) {
     if (sf && sf.n && d.id !== myUid && sf.pageId === VS.activePage?.id && _seenSigilFire[d.id] !== sf.n) {
       _seenSigilFire[d.id] = sf.n;
       _playSigilForToken(sf.tokenId, sf.sigil);
+      (sf.targets || []).forEach(tid => _playImpactForToken(tid, sf.impColor));
     }
     if (!c.active || c.pageId !== VS.activePage?.id || d.id === myUid) return;
     const srcEntry = Object.values(VS.tokens).find(e => e.data?.id === c.srcId);
@@ -5036,10 +5053,15 @@ async function _vttRollAttack() {
   // les joueurs via le canal casting (champ sigilFire, keyé par n unique).
   if (ctx.sigil) {
     _playSigilForToken(srcId, ctx.sigil);
+    const _impColor = ctx.sigil.category === 'heal' ? '#22c38e' : ctx.sigil.color;
+    for (const tid of targetIds) { if (tid !== srcId) _playImpactForToken(tid, _impColor); }
     try {
       const _uid = STATE.user?.uid;
       if (_uid) setDoc(_castingRef(_uid), {
-        sigilFire: { tokenId: srcId, sigil: ctx.sigil, pageId: VS.activePage?.id || null, n: Date.now() },
+        sigilFire: {
+          tokenId: srcId, sigil: ctx.sigil, pageId: VS.activePage?.id || null, n: Date.now(),
+          targets: targetIds.filter(t => t !== srcId), impColor: _impColor,
+        },
       }, { merge: true }).catch(() => {});
     } catch {}
   }

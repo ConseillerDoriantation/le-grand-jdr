@@ -5836,6 +5836,18 @@
   0%   { opacity: .9; transform: scale(.35); }
   100% { opacity: 0;  transform: scale(1.55); }
 }
+
+/* Éclat d'impact sur la cible — s'évase et s'estompe, légèrement décalé. */
+.vtt-impact-fx {
+  position: absolute; transform: translate(-50%, -50%); pointer-events: none; opacity: 0;
+  animation: vtt-impact-in 0.95s ease-out 0.35s forwards;
+}
+.vtt-impact-fx svg { display: block; width: 100%; height: 100%; }
+@keyframes vtt-impact-in {
+  0%   { opacity: 0; transform: translate(-50%,-50%) scale(.2); }
+  25%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%,-50%) scale(1.35); }
+}
 .vtt-sigil-fx .sig-spin,
 .vtt-sigil-fx .sig-spinr,
 .vtt-sigil-fx .sig-orbit,
