@@ -430,14 +430,18 @@ export function _renderPageTabs() {
   // Les joueurs ne naviguent pas — ils voient juste le nom de leur page courante
   const name = VS.activePage?.name ?? '…';
   const uid  = STATE.user?.uid;
-  const myTok = uid ? Object.values(VS.tokens).find(e => e.data?.ownerId === uid)?.data : null;
-  const canInvoke = !!(myTok && VS.activePage && myTok.pageId !== VS.activePage.id);
-  const onActivePage = !!(myTok && VS.activePage && myTok.pageId === VS.activePage.id);
-  const actionBtn = canInvoke
-    ? `<button class="vtt-btn-sm" data-vtt-fn="_vttInvokeMyToken" title="Placer ton token sur cette carte">🧑 Invoquer mon token</button>`
-    : onActivePage
-    ? `<button class="vtt-btn-sm" data-vtt-fn="_vttRetireMyToken" title="Retirer ton token de la carte">📦 Ranger mon token</button>`
-    : '';
+  // Tous les persos du joueur (un token par personnage) → on raisonne sur
+  // l'ensemble, pas le premier : un joueur multi-persos peut avoir un perso sur
+  // la carte ET un autre en réserve → les deux boutons coexistent.
+  const myToks = uid ? Object.values(VS.tokens).filter(e => e.data?.ownerId === uid).map(e => e.data) : [];
+  const multi = myToks.length > 1;
+  const canInvoke = !!(VS.activePage && myToks.some(t => t.pageId !== VS.activePage.id));
+  const canRetire = !!(VS.activePage && myToks.some(t => t.pageId === VS.activePage.id));
+  const invokeLbl = multi ? '🧑 Invoquer un perso' : '🧑 Invoquer mon token';
+  const retireLbl = multi ? '📦 Ranger un perso'   : '📦 Ranger mon token';
+  const actionBtn =
+    (canInvoke ? `<button class="vtt-btn-sm" data-vtt-fn="_vttInvokeMyToken" title="Placer un personnage sur cette carte">${invokeLbl}</button>` : '') +
+    (canRetire ? `<button class="vtt-btn-sm" data-vtt-fn="_vttRetireMyToken" title="Retirer un personnage de la carte">${retireLbl}</button>` : '');
   el.innerHTML = `<span class="vtt-page-current-label">📍 ${_esc(name)}</span>${actionBtn}`;
 }
 
