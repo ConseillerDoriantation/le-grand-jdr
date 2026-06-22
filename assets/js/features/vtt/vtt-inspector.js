@@ -43,12 +43,25 @@ export function _renderInspectorSoon() {
 
 // ── Frontière d'erreur par panneau VTT → vtt-utils.js (importé en haut) ───────
 
+// Suit la dernière sélection rendue pour n'animer l'entrée de l'inspecteur QU'au
+// changement de token (pas à chaque re-render dû à un +/- de PV, un tour, etc.).
+let _insLastSelKey = null;
+
 export function _renderInspector(t) {
   try { return _renderInspectorImpl(t); }
   catch (e) { _vttPanelError('Inspecteur', e, 'vtt-inspector'); }
 }
 export function _renderInspectorImpl(t) {
   const el=document.getElementById('vtt-inspector'); if (!el) return;
+  // Entrée animée : uniquement quand la sélection CHANGE (≠ re-render PV/tour).
+  const _selKey = VS.selectedMulti.size>1 ? `multi:${VS.selectedMulti.size}` : (t?.id || null);
+  if (_selKey && _selKey !== _insLastSelKey) {
+    el.classList.remove('vtt-ins-enter');
+    void el.offsetWidth;                 // reflow → (re)joue l'anim
+    el.classList.add('vtt-ins-enter');
+    el.addEventListener('animationend', () => el.classList.remove('vtt-ins-enter'), { once: true });
+  }
+  _insLastSelKey = _selKey;
   // Multi-sélection active
   if (VS.selectedMulti.size>1) {
     const types=[...VS.selectedMulti].map(id=>VS.tokens[id]?.data?.type).filter(Boolean);

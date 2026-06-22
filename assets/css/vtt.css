@@ -5729,6 +5729,19 @@
   50%     { box-shadow: 0 0 10px -2px rgba(239,68,68,.6); }
 }
 
+/* Entrée de l'inspecteur au changement de token (classe posée en JS, une fois).
+   translateX négatif → glisse vers sa place sans déborder du bord droit. */
+#vtt-inspector.vtt-ins-enter {
+  animation: vtt-ins-slide .3s var(--ease-spring, cubic-bezier(.22,1,.36,1));
+}
+@keyframes vtt-ins-slide {
+  from { opacity: 0; transform: translateX(-10px) scale(.99); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #vtt-inspector.vtt-ins-enter { animation: none; }
+}
+
 /* ════════════════════════════════════════════════════════════════════════
    PHASE 0 — INTERFACE VIVANTE · couche de micro-interactions (toujours active)
    ────────────────────────────────────────────────────────────────────────
