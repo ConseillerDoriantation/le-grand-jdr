@@ -249,33 +249,36 @@ const PAGES = {
       return `
       <div class="dv2-char-row" data-action="_goToChar" data-id="${c.id}" style="--pcol:${pcol}">
 
-        <div class="dv2-cr-avatar">${avatar}</div>
-
-        <div class="dv2-flex1">
-          <div class="dv2-cr-namerow">
-            <span class="dv2-cr-name">${_esc(c.nom||'?')}</span>
-            <span class="dv2-cr-badge">Niv.${c.niveau||1}</span>
+        <div class="dv2-cr-top">
+          <div class="dv2-cr-avatar">${avatar}</div>
+          <div class="dv2-flex1">
+            <div class="dv2-cr-namerow">
+              <span class="dv2-cr-name">${_esc(c.nom||'?')}</span>
+              <span class="dv2-cr-badge">Niv.${c.niveau||1}</span>
+            </div>
+            <div class="dv2-cr-sub">${c.classe||''}${c.race?` · ${c.race}`:''}</div>
           </div>
-          <div class="dv2-cr-sub">${c.classe||''}${c.race?` · ${c.race}`:''}</div>
+          <div class="dv2-cr-tag" style="color:${pcol};background:${pcol}18;border:1px solid ${pcol}44">${_esc(c.ownerPseudo||'?')}</div>
         </div>
 
-        <div class="dv2-cr-bars">
-          <div class="dv2-cr-barrow">
-            <div class="dv2-cr-track"><div class="dv2-cr-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
-            <span class="dv2-cr-val" style="color:${pvColor}">${pvCur}</span>
+        <div class="dv2-cr-bottom">
+          <div class="dv2-cr-bars">
+            <div class="dv2-cr-barrow">
+              <span class="dv2-cr-icon">${_svg('heart', '#ff6b6b')}</span>
+              <div class="dv2-cr-track"><div class="dv2-cr-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
+              <span class="dv2-cr-val" style="color:${pvColor}">${pvCur}/${pvMax}</span>
+            </div>
+            <div class="dv2-cr-barrow">
+              <span class="dv2-cr-icon">${_svg('sparkles', '#4adbf7')}</span>
+              <div class="dv2-cr-track"><div class="dv2-cr-fill dv2-cr-fill--pm" style="width:${pmPct}%"></div></div>
+              <span class="dv2-cr-val" style="color:#4adbf7">${pmCur}/${pmMax}</span>
+            </div>
           </div>
-          <div class="dv2-cr-barrow">
-            <div class="dv2-cr-track"><div class="dv2-cr-fill dv2-cr-fill--pm" style="width:${pmPct}%"></div></div>
-            <span class="dv2-cr-val" style="color:#4adbf7">${pmCur}</span>
+          <div class="dv2-cr-side">
+            <span class="dv2-cr-side-row dv2-cr-ca">${_svg('shield')} <strong>${ca}</strong></span>
+            <span class="dv2-cr-side-row dv2-cr-or">${_svg('coin')} ${or}</span>
           </div>
         </div>
-
-        <div class="dv2-cr-side">
-          <span class="dv2-cr-side-row dv2-cr-ca">${_svg('shield')} <strong>${ca}</strong></span>
-          <span class="dv2-cr-side-row dv2-cr-or">${_svg('coin')} ${or}</span>
-        </div>
-
-        <div class="dv2-cr-tag" style="color:${pcol};background:${pcol}18;border:1px solid ${pcol}44">${_esc(c.ownerPseudo||'?')}</div>
 
       </div>`;
     }

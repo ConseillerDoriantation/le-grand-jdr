@@ -774,26 +774,31 @@
 /* Ligne personnage (vue admin) : remplace le style inline + les handlers
    onmouseover/onmouseout legacy. La couleur du joueur passe par --pcol. */
 .dv2-char-row {
-  display: flex; align-items: center; gap: .65rem;
+  display: flex; flex-direction: column; gap: .5rem;
   background: var(--bg-card); border: 1px solid var(--border);
   border-left: 3px solid var(--pcol, var(--border));
-  border-radius: var(--radius-lg); padding: .5rem .7rem;
+  border-radius: var(--radius-lg); padding: .6rem .7rem;
   cursor: pointer; overflow: hidden;
   transition: border-color .15s, transform .15s;
 }
 .dv2-char-row:hover { border-color: var(--pcol, var(--gold)); transform: translateY(-1px); }
-/* Intérieur de la ligne perso admin (valeurs identiques aux ex-styles inline). */
-.dv2-cr-avatar { width: 36px; height: 36px; border-radius: 9px; overflow: hidden; flex-shrink: 0; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center; }
-.dv2-cr-namerow { display: flex; align-items: baseline; gap: .35rem; flex-wrap: wrap; }
-.dv2-cr-name { font-family: 'Cinzel', serif; font-size: .84rem; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+/* Carte perso admin restructurée en 2 lignes : (haut) avatar + nom pleine
+   largeur + pastille joueur ; (bas) barres PV/PM longues + CA/or. Le nom n'est
+   plus écrasé par les éléments concurrents → lisible même long. */
+.dv2-cr-top { display: flex; align-items: center; gap: .6rem; }
+.dv2-cr-bottom { display: flex; align-items: center; gap: .7rem; }
+.dv2-cr-avatar { width: 38px; height: 38px; border-radius: 9px; overflow: hidden; flex-shrink: 0; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center; }
+.dv2-cr-namerow { display: flex; align-items: baseline; gap: .35rem; }
+.dv2-cr-name { font-family: 'Cinzel', serif; font-size: .9rem; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .dv2-cr-badge { font-size: .63rem; color: var(--text-dim); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; flex-shrink: 0; }
 .dv2-cr-sub { font-size: .68rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
-.dv2-cr-bars { display: flex; flex-direction: column; gap: .2rem; width: 72px; flex-shrink: 0; }
-.dv2-cr-barrow { display: flex; align-items: center; gap: .3rem; }
+.dv2-cr-bars { display: flex; flex-direction: column; gap: .25rem; flex: 1; min-width: 0; }
+.dv2-cr-barrow { display: flex; align-items: center; gap: .35rem; }
+.dv2-cr-icon { display: inline-flex; flex-shrink: 0; font-size: .62rem; line-height: 0; }
 .dv2-cr-track { flex: 1; height: 5px; background: rgba(255,255,255,.06); border-radius: 999px; overflow: hidden; }
 .dv2-cr-fill { height: 100%; border-radius: 999px; }
 .dv2-cr-fill--pm { background: linear-gradient(90deg,#22c7ea,#4adbf7); }
-.dv2-cr-val { font-size: .6rem; font-weight: 700; min-width: 26px; text-align: right; }
+.dv2-cr-val { font-size: .64rem; font-weight: 700; min-width: 38px; text-align: right; flex-shrink: 0; }
 .dv2-cr-side { display: flex; flex-direction: column; align-items: flex-end; gap: .18rem; flex-shrink: 0; }
 .dv2-cr-side-row { font-size: .63rem; white-space: nowrap; }
 .dv2-cr-ca { color: var(--text-dim); }
