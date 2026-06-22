@@ -1632,6 +1632,18 @@ export async function openSortModal(idx, s) {
           </span>
           <span class="cs-mj-validation-state"></span>
         </label>
+      </div>
+      <div class="cs-mj-validation cs-mj-validation--autohit ${s?.mjAutoHit?'is-on':''}">
+        <input type="checkbox" id="s-mj-auto-hit" ${s?.mjAutoHit?'checked':''}
+          data-change="_csMjValToggle">
+        <label for="s-mj-auto-hit" class="cs-mj-validation-label">
+          <span class="cs-mj-validation-switch"><span class="cs-mj-validation-thumb"></span></span>
+          <span class="cs-mj-validation-info">
+            <span class="cs-mj-validation-title">✅ Réussite automatique (sans jet)</span>
+            <span class="cs-mj-validation-sub">Pas de jet de toucher : le sort réussit toujours (évite les échecs critiques — potions, soins, buffs à effet garanti)</span>
+          </span>
+          <span class="cs-mj-validation-state"></span>
+        </label>
       </div>` : ''}
     </div>
         </div>
@@ -3027,6 +3039,9 @@ export async function saveSort(idx) {
       mjAlwaysMax: STATE.isAdmin
         ? !!document.getElementById('s-mj-always-max')?.checked
         : (idx >= 0 ? !!sorts[idx]?.mjAlwaysMax : false),
+      mjAutoHit: STATE.isAdmin
+        ? !!document.getElementById('s-mj-auto-hit')?.checked
+        : (idx >= 0 ? !!sorts[idx]?.mjAutoHit : false),
       nom:      document.getElementById('s-nom')?.value||'Sort',
       pm:       autoPm,
       pmOverride,
@@ -3155,6 +3170,9 @@ function _buildSortFromForm(idx, prevList = []) {
     mjAlwaysMax: STATE.isAdmin
       ? !!document.getElementById('s-mj-always-max')?.checked
       : (idx >= 0 ? !!prevList[idx]?.mjAlwaysMax : false),
+    mjAutoHit: STATE.isAdmin
+      ? !!document.getElementById('s-mj-auto-hit')?.checked
+      : (idx >= 0 ? !!prevList[idx]?.mjAutoHit : false),
     noyau, noyauTypeId, runes,
     actionMode: (_runeCountsEdit?.[ACTION_RUNE] || 0) > 0
       ? (document.getElementById('s-action-mode')?.value || _actionModeEdit || 'reaction')

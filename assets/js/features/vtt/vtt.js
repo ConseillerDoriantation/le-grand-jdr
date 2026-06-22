@@ -2815,7 +2815,7 @@ function _buildSpellOption(s, ctx) {
     id, sortIdx, portee,
     pmCost, basePm, pmRaw, pmSetDelta,
     nbCibles, zoneW, zoneH, mods, actionType,
-    mjAlwaysMax: !!s.mjAlwaysMax,
+    mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
     ...extras,
   };
 
@@ -2942,7 +2942,7 @@ function _buildSpellOption(s, ctx) {
       dmgStatLabel: ovrDmgNoMod ? '' : (statShort(ovrDmgStat) || ovrDmgStat),
       maitriseBonus: sFixed,
       drainBaseFormula: mods?.drain ? _vttSortDmgFormula(s, c, { includePower: false }) : null,
-      mjAlwaysMax: !!s.mjAlwaysMax,
+      mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
     };
   }
   const isAmpSupportHeal = types.includes('defensif')
@@ -2977,7 +2977,7 @@ function _buildSpellOption(s, ctx) {
     return { ...common,
       icon: '💚', label, rawDice: sRawDice, dice: soinFormula,
       isHeal: true, halfOnMiss: false, maitriseBonus: sFixed,
-      mjAlwaysMax: !!s.mjAlwaysMax,
+      mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
       dmgStatMod: soinStatMod,
       dmgStatLabel: soinNoMod ? '' : (statShort(soinStatKey) || soinStatKey),
       toucherMod: soinTouchMod, toucherSetBonus: touchSetBonus,
