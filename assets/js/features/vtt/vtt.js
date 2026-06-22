@@ -711,6 +711,8 @@ function _initCanvas(container) {
   const K = window.Konva;
   K.dragButtons = [0, 2]; // Drag autorisé au clic gauche et droit (tokens/images/annotations).
   VS.stage = new K.Stage({ container, width: container.clientWidth, height: container.clientHeight });
+  // Le calque d'effets DOM (sceaux/impacts) suit pan + zoom du stage.
+  VS.stage.on('xChange yChange scaleXChange scaleYChange', _syncSigilLayer);
   // Konva recommande max 3-5 layers. On consolide bg+map dans `backLayer` et
   // fog+walls+mapFg+ping dans `frontLayer` via des Konva.Group. L'ordre interne
   // préserve le z-order, et chaque "VS.layers.X" garde son API usuelle.
@@ -5000,16 +5002,17 @@ function _buildCastSigil(src, opt) {
 // Overlays DOM placés en coords LOGIQUES (comme les tokens) dans .vtt-sigil-layer ;
 // ce calque suit en continu le transform du layer Konva (rAF tant qu'un effet est
 // actif) → les effets restent ancrés sous les tokens au pan ET au zoom.
-let _sigilSyncRAF = 0;
+// Synchronise le transform du calque d'effets DOM sur celui du layer Konva, pour
+// que les effets (sceau/impact/projectile) suivent pan ET zoom. Appelé à chaque
+// effet (pose initiale) + abonné aux évènements de transform du stage (au montage,
+// cf. l'abonnement après VS.stage = new K.Stage…).
 function _syncSigilLayer() {
-  _sigilSyncRAF = 0;
   const layer = VS.stage?.container()?.querySelector('.vtt-sigil-layer');
   if (!layer || !VS.layers?.token) return;
   const m = VS.layers.token.getAbsoluteTransform().getMatrix();
   layer.style.transform = `matrix(${m[0]},${m[1]},${m[2]},${m[3]},${m[4]},${m[5]})`;
-  if (layer.childElementCount > 0) _sigilSyncRAF = requestAnimationFrame(_syncSigilLayer);
 }
-function _ensureSigilSync() { if (!_sigilSyncRAF) _sigilSyncRAF = requestAnimationFrame(_syncSigilLayer); }
+function _ensureSigilSync() { _syncSigilLayer(); }
 
 /** Données token depuis un id (clé directe ou recherche par data.id). */
 function _tokenDataById(tokenId) {
