@@ -9446,6 +9446,8 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   font-style: italic;
 }
 .cs-v3 .weap-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: .7rem; color: var(--text-muted); align-items: center; }
+/* Particularité (trait/effet libre de l'arme) : ligne pleine largeur sous les rolls. */
+.cs-v3 .weap-particularite { flex-basis: 100%; font-size: .68rem; color: var(--text-soft); line-height: 1.35; font-style: italic; }
 .cs-v3 .weap-vide, .cs-v3 .weap-card[style*="dashed"] .weap-name { color: var(--text-dim); font-style: italic; }
 
 /* Combat — armures */

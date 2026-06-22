@@ -1910,8 +1910,9 @@ function renderCharCombatV3(c, canEdit) {
         const badges = _itemBonusBadges(item);
         return badges.length ? `<div class="weap-badges">${badges.map(b=>`<span class="badge-chip ${b.cls}">${b.lbl}</span>`).join('')}</div>` : '';
       })()}
-      ${(item.portee || traits.length) ? `<div class="weap-meta">
+      ${(item.portee || traits.length || item.particularite) ? `<div class="weap-meta">
         ${item.portee?`<span>↗ ${_esc(item.portee)}</span>`:''}
+        ${item.particularite?`<div class="weap-particularite">${_esc(item.particularite)}</div>`:''}
         ${traits.length?`<div class="weap-traits">${traits.map(t=>`<span class="trait">${_esc(t)}</span>`).join('')}</div>`:''}
       </div>`:''}
     </div>`;
