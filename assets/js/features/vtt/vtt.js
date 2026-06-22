@@ -21,6 +21,7 @@ import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
 import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED, getCharDamageProfile } from '../../shared/equipment-utils.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../../shared/damage-types.js';
+import { playSigil } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
 import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js';
@@ -4178,7 +4179,26 @@ function _vttPickOpt(srcId, tgtId, idx) {
     opt._mwElemReady = true;   // évite de réinitialiser à chaque réouverture (Retour)
   }
 
-  _atkCtx = { srcId, tgtId, opt, lS, lT, allTargets };
+  // Sceau runique signature : capturé ici (le sort est en main) pour être joué à
+  // la résolution. Couleur = élément, géométrie = runes, forme = catégorie.
+  // Uniquement pour les sorts du deck (sortIdx numérique) — pas les attaques d'arme.
+  let _sigil = null;
+  try {
+    const _sgChar  = _characterForToken(src);
+    const _sgSpell = (typeof opt.sortIdx === 'number') ? _sgChar?.deck_sorts?.[opt.sortIdx] : null;
+    if (_sgSpell) {
+      const _sgElem  = opt.element || _sgSpell.noyauTypeId || opt.damageTypeId || null;
+      const _sgColor = (_sgElem && getDamageTypeById(VS.damageTypes, _sgElem)?.color) || opt.damageTypeColor || null;
+      let _sgCat = 'attack';
+      if (opt.isHeal) _sgCat = 'heal';
+      else if (opt.mods?.invocation) _sgCat = 'summon';
+      else if (opt.mods?.affliction) _sgCat = 'affliction';
+      else if (opt.mods && (opt.mods.enchantArmeDmg || opt.mods.enchantToucher || opt.mods.enchantMove || opt.mods.enchantPieds || opt.mods.enchantGeneric)) _sgCat = 'buff';
+      if (_sgColor) _sigil = { color: _sgColor, runes: _sgSpell.runes || [], category: _sgCat };
+    }
+  } catch {}
+
+  _atkCtx = { srcId, tgtId, opt, lS, lT, allTargets, sigil: _sigil };
 
   const dist    = _tokenAttackDistance(src, tgt);
   // Bonus toucher d'enchantement — lu frais sur le lanceur (jamais figé dans l'option)
@@ -4985,6 +5005,20 @@ async function _vttRollAttack() {
   const { srcId, tgtId, opt, lS, lT, allTargets } = ctx;
   const src=VS.tokens[srcId]?.data, tgt=VS.tokens[tgtId]?.data;
   if (!src||!tgt) return;
+
+  // Sceau runique signature sur le lanceur (effet local — diffusion multi-joueurs
+  // dans un second temps). Position écran via le transform du layer token.
+  if (ctx.sigil) {
+    try {
+      const cont = VS.stage?.container();
+      const center = _tokenCenter(src);
+      const pt = VS.layers?.token?.getAbsoluteTransform().point(center) || center;
+      const scale = VS.stage?.scaleX() || 1;
+      const dims = _tokenDims(src);
+      const sizePx = Math.max(dims.w, dims.h) * CELL * scale * 2.4;
+      playSigil(cont, pt.x, pt.y, sizePx, ctx.sigil);
+    } catch (e) { console.warn('[sigil]', e); }
+  }
   // Liste des cibles : multi si allTargets, sinon cible unique
   const targetIds = allTargets && allTargets.length > 0 ? allTargets : [tgtId];
   // Snapshot pré-action pour l'annulation MJ (attaché aux logs de l'action).
