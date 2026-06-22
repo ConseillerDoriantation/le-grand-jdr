@@ -127,5 +127,5 @@ export function playSigil(container, x, y, size, spell) {
   el.innerHTML = buildSigilSvg(spell || {});
   layer.appendChild(el);
   el.addEventListener('animationend', () => el.remove(), { once: true });
-  setTimeout(() => el.remove(), 7000);   // filet de sécurité (> durée d'anim)
+  setTimeout(() => el.remove(), 9500);   // filet de sécurité (> durée d'anim)
 }

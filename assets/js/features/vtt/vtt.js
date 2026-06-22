@@ -4965,6 +4965,25 @@ async function _zoneValidate() {
   _vttPickOpt(srcId, firstTgt, 0);
 }
 
+// Sceaux déjà rejoués (par uid → dernier n) pour ne pas rejouer un même cast.
+let _seenSigilFire = {};
+/** Joue le sceau runique sur un token (centre écran via le transform du layer). */
+function _playSigilForToken(tokenId, sigil) {
+  if (!sigil) return;
+  const ent = (VS.tokens[tokenId]?.data) ? VS.tokens[tokenId]
+            : Object.values(VS.tokens).find(e => e?.data?.id === tokenId);
+  const data = ent?.data; if (!data) return;
+  try {
+    const cont = VS.stage?.container();
+    const center = _tokenCenter(data);
+    const pt = VS.layers?.token?.getAbsoluteTransform().point(center) || center;
+    const scale = VS.stage?.scaleX() || 1;
+    const dims = _tokenDims(data);
+    const sizePx = Math.max(dims.w, dims.h) * CELL * scale * 3;
+    playSigil(cont, pt.x, pt.y, sizePx, sigil);
+  } catch (e) { console.warn('[sigil]', e); }
+}
+
 /** Rendu des lignes de ciblage distantes (broadcast Firestore). */
 function _renderRemoteCastings(docs) {
   if (!VS.layers.token) return;
@@ -4972,6 +4991,13 @@ function _renderRemoteCastings(docs) {
   const myUid = STATE.user?.uid;
   docs.forEach(d => {
     const c = d.data();
+    // Sceau runique diffusé : rejoué chez les autres au déclenchement (indépendant
+    // des lignes de visée ; clé = n unique pour ne jouer qu'une fois par cast).
+    const sf = c.sigilFire;
+    if (sf && sf.n && d.id !== myUid && sf.pageId === VS.activePage?.id && _seenSigilFire[d.id] !== sf.n) {
+      _seenSigilFire[d.id] = sf.n;
+      _playSigilForToken(sf.tokenId, sf.sigil);
+    }
     if (!c.active || c.pageId !== VS.activePage?.id || d.id === myUid) return;
     const srcEntry = Object.values(VS.tokens).find(e => e.data?.id === c.srcId);
     if (!srcEntry) return;
@@ -5006,18 +5032,16 @@ async function _vttRollAttack() {
   const src=VS.tokens[srcId]?.data, tgt=VS.tokens[tgtId]?.data;
   if (!src||!tgt) return;
 
-  // Sceau runique signature sur le lanceur (effet local — diffusion multi-joueurs
-  // dans un second temps). Position écran via le transform du layer token.
+  // Sceau runique signature sur le lanceur — joué localement ET diffusé à tous
+  // les joueurs via le canal casting (champ sigilFire, keyé par n unique).
   if (ctx.sigil) {
+    _playSigilForToken(srcId, ctx.sigil);
     try {
-      const cont = VS.stage?.container();
-      const center = _tokenCenter(src);
-      const pt = VS.layers?.token?.getAbsoluteTransform().point(center) || center;
-      const scale = VS.stage?.scaleX() || 1;
-      const dims = _tokenDims(src);
-      const sizePx = Math.max(dims.w, dims.h) * CELL * scale * 3;
-      playSigil(cont, pt.x, pt.y, sizePx, ctx.sigil);
-    } catch (e) { console.warn('[sigil]', e); }
+      const _uid = STATE.user?.uid;
+      if (_uid) setDoc(_castingRef(_uid), {
+        sigilFire: { tokenId: srcId, sigil: ctx.sigil, pageId: VS.activePage?.id || null, n: Date.now() },
+      }, { merge: true }).catch(() => {});
+    } catch {}
   }
   // Liste des cibles : multi si allTargets, sinon cible unique
   const targetIds = allTargets && allTargets.length > 0 ? allTargets : [tgtId];
