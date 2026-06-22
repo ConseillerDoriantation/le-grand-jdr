@@ -1618,20 +1618,24 @@ function renderCharProfilV3(c, canEdit) {
         ${canEdit ? `<button class="section-action" style="margin-top:.6rem;width:100%" data-action="csV3AddFact" data-id="${c.id}">＋ Champ personnalisé</button>` : ''}
       </div>
       ${canEdit ? `
-      <div class="profil-side-card">
+      <div class="profil-side-card profil-illu-card">
         <h4>🖼️ Illustration page Joueurs</h4>
-        <div class="profil-img-wrap">
-          ${presCache?.imageUrl
-            ? `<img class="profil-img" src="${_esc(presCache.imageUrl)}" alt="">`
-            : `<div class="profil-img profil-img-empty">Aucune image</div>`}
+        <div class="profil-illu-row">
+          <div class="profil-img-wrap">
+            ${presCache?.imageUrl
+              ? `<img class="profil-img" src="${_esc(presCache.imageUrl)}" alt="">`
+              : `<div class="profil-img profil-img-empty">Aucune image</div>`}
+          </div>
+          <div class="profil-illu-meta">
+            <div class="profil-img-hint">L'image apparaît sur la page Joueurs comme illustration grand format du personnage.</div>
+            <div class="profil-img-actions">
+              <button class="section-action" style="flex:1" data-action="openProfilImageUpload" data-id="${c.id}">
+                ${presCache?.imageUrl ? '🔄 Changer' : '📷 Upload image'}
+              </button>
+              ${presCache?.imageUrl ? `<button class="section-action" style="color:var(--crimson-light,#ff8ca7);border-color:rgba(255,90,126,.3)" data-action="removeProfilImage" data-id="${c.id}" title="Retirer">✕</button>` : ''}
+            </div>
+          </div>
         </div>
-        <div class="profil-img-actions">
-          <button class="section-action" style="flex:1" data-action="openProfilImageUpload" data-id="${c.id}">
-            ${presCache?.imageUrl ? '🔄 Changer' : '📷 Upload image'}
-          </button>
-          ${presCache?.imageUrl ? `<button class="section-action" style="color:var(--crimson-light,#ff8ca7);border-color:rgba(255,90,126,.3)" data-action="removeProfilImage" data-id="${c.id}" title="Retirer">✕</button>` : ''}
-        </div>
-        <div class="profil-img-hint">L'image apparaît sur la page Joueurs comme illustration grand format du personnage.</div>
       </div>` : ''}
     </div>
     <div class="profil-side">

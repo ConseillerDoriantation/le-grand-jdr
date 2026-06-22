@@ -8645,12 +8645,19 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .profil-layout { display: grid; grid-template-columns: 1fr 300px; gap: 14px; align-items: start; }
 @media (max-width: 880px) { .cs-v3 .profil-layout { grid-template-columns: 1fr; } }
 .cs-v3 .profil-main { display: flex; flex-direction: column; gap: 14px; }
-/* Identité : champs sur 2 colonnes (la carte vit désormais dans la colonne
-   large) → moins de hauteur, meilleur usage de l'espace. */
-.cs-v3 .profil-facts-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 18px; }
-@media (max-width: 560px) { .cs-v3 .profil-facts-grid { grid-template-columns: 1fr; } }
-/* Illustration (portrait 3:4) bornée pour ne pas exploser dans la colonne large. */
-.cs-v3 .profil-main .profil-img-wrap { max-width: 280px; margin-left: auto; margin-right: auto; }
+/* Identité : champs en auto-fit (plusieurs colonnes étroites dans la colonne
+   large) → label et valeur restent rapprochés, pas d'écart béant, hauteur basse. */
+.cs-v3 .profil-facts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 2px 18px; }
+/* Carte illustration en ligne : image à gauche (largeur bornée), infos + actions
+   à droite → la carte large est remplie au lieu d'une petite image centrée. */
+.cs-v3 .profil-illu-row { display: flex; gap: 16px; align-items: flex-start; }
+.cs-v3 .profil-illu-row .profil-img-wrap { width: 220px; flex-shrink: 0; margin: 0; }
+.cs-v3 .profil-illu-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.cs-v3 .profil-illu-meta .profil-img-hint { margin: 0; }
+@media (max-width: 560px) {
+  .cs-v3 .profil-illu-row { flex-direction: column; }
+  .cs-v3 .profil-illu-row .profil-img-wrap { width: 100%; max-width: 280px; }
+}
 .cs-v3 .profil-quote {
   font-family: 'Cormorant Garamond', 'Palatino Linotype', serif; font-style: italic; font-size: 1.05rem; color: var(--gold-2, #7eb0ff);
   padding: 14px 18px; border-left: 3px solid var(--gold);
