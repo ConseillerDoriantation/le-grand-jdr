@@ -396,11 +396,23 @@ function _shopItemOptionLabel(item = {}) {
   return `${item.nom || "Objet sans nom"} — ${bits.filter(Boolean).join(" · ")}`;
 }
 
-function _shopItemOptionsHtml(selectedId = "") {
-  return STORE.shopItems.map(item => `
+function _shopItemOptionsHtml(selectedId = "", query = "") {
+  const q = (query || "").trim();
+  return STORE.shopItems
+    // L'objet sélectionné reste toujours présent (pour ne pas perdre le lien en filtrant).
+    .filter(item => !q || item.id === selectedId || _searchIncludes(`${item.nom || ""} ${_shopItemKind(item)}`, q))
+    .map(item => `
     <option value="${_esc(item.id)}" ${item.id === selectedId ? "selected" : ""}>
       ${_esc(_shopItemOptionLabel(item))}
     </option>`).join("");
+}
+// Filtre live de la liste déroulante "Objet boutique associé" (toute la boutique).
+function _recFilterShopOptions(query) {
+  const select = document.getElementById("rec-shopItemId");
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = `<option value="">Aucun objet associé</option>` + _shopItemOptionsHtml(current, query);
+  if (current) select.value = current;   // préserve la sélection même hors filtre
 }
 
 function _linkedShopPreviewHtml(itemId = "") {
@@ -543,7 +555,9 @@ function openRecipeModal(type, id = '') {
     </div>
 
     <div class="form-group rec-linked-control">
-      <label>Objet boutique associé</label>
+      <label>Objet boutique associé <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">(toute la boutique)</span></label>
+      <input type="text" class="input-field" id="rec-shop-filter" placeholder="🔍 Filtrer la boutique (nom, type…)"
+        data-input="_recShopFilter" style="margin-bottom:.4rem" autocomplete="off">
       <div class="rec-linked-select-row">
         <select class="input-field" id="rec-shopItemId" data-change="_recLinkedShopChange">
           <option value="">Aucun objet associé</option>
@@ -903,6 +917,7 @@ registerActions({
   _recAddIngr: () => addIngredientRow(),
   _recRemIngr: (btn) => removeIngredientRow(Number(btn.dataset.idx)),
   _recLinkedShopChange: (el) => refreshLinkedShopPreview(el.value),
+  _recShopFilter: (el) => _recFilterShopOptions(el.value),
   _recClearLinkedShop: () => clearLinkedShopItem(),
   saveShopRecipe: (btn) => saveShopRecipe(btn.dataset.id),
   openItemDetailModal: (btn) => openItemDetailModal(btn.dataset.id),
