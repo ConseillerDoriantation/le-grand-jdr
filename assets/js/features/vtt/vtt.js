@@ -135,6 +135,7 @@ import {
   _vttMsSlotChange, _vttMsDeleteItem, _vttMsSendPicker, _vttMsConfirmSend,
   _vttMsInvSearch, _vttMsInvCat, _vttMsInvClear, _vttMsSortSearch, _vttMsSortCat,
   _vttMsSortClear, _vttToggleMsSort, _vttMsCompteAdd, _vttMsCompteDel, _vttMsCraft,
+  _vttMsCraftSearch, _vttMsCraftClear,
   _vttMsSendGoldPicker, _vttMsConfirmSendGold,
 } from './vtt-mini-fiche.js';
 
@@ -8855,6 +8856,8 @@ export const VTT_ACTIONS = {
   _vttMsConfirmSendGold,
   _vttMsConfirmSend,
   _vttMsCraft,
+  _vttMsCraftSearch,
+  _vttMsCraftClear,
   _vttMsDeleteItem,
   _vttMsDeleteNote,
   _vttMsEquip,

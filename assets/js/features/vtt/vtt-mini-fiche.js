@@ -41,6 +41,7 @@ const _MS_STATS   = [
 let _msOpenNote   = null; // index de la note dépliée (onglet Notes)
 let _msInvQuery   = '', _msInvCat  = 'all';
 let _msSortQuery  = '', _msSortCat = 'all';
+let _msCraftQuery = '';   // filtre de recherche de l'onglet Craft
 
 // MINI-FICHE PERSONNAGE — 4 onglets
 // ═══════════════════════════════════════════════════════════════════
@@ -144,10 +145,10 @@ function _vttMsTab(tab) { _miniTab = tab; if (VS.miniUid) _renderMiniSheet(VS.mi
 // Barre commune : puces de catégorie + champ de recherche. `kind` = 'inv'|'sorts'.
 // `chips` = [{ key, label, color? }] ; la puce active vient de l'état module.
 function _msFilterBar(kind, chips, query) {
-  const activeCat = kind === 'inv' ? _msInvCat : _msSortCat;
+  const activeCat = kind === 'inv' ? _msInvCat : kind === 'sorts' ? _msSortCat : 'all';
   const catFn     = kind === 'inv' ? '_vttMsInvCat' : '_vttMsSortCat';
-  const searchFn  = kind === 'inv' ? '_vttMsInvSearch' : '_vttMsSortSearch';
-  const clrFn     = kind === 'inv' ? '_vttMsInvClear' : '_vttMsSortClear';
+  const searchFn  = kind === 'inv' ? '_vttMsInvSearch' : kind === 'sorts' ? '_vttMsSortSearch' : '_vttMsCraftSearch';
+  const clrFn     = kind === 'inv' ? '_vttMsInvClear' : kind === 'sorts' ? '_vttMsSortClear' : '_vttMsCraftClear';
   // ch.label / ch.color viennent de noms de catégorie saisis par le joueur → échappés.
   const chipsHtml = chips.map(ch =>
     `<button class="vtt-ms-fchip${activeCat===ch.key?' active':''}"${ch.color?` style="--chip-col:${_esc(ch.color)}"`:''}
@@ -198,6 +199,19 @@ function _msApplySortFilter() {
   _msToggleEmpty('sorts', anyVisible || !cards.length);
 }
 
+// Applique le filtre Craft (recherche : nom / type / effet / ingrédients) sans re-render.
+function _msApplyCraftFilter() {
+  const q = _norm(_msCraftQuery);
+  const cards = document.querySelectorAll('#vtt-mini-panel .vtt-ms-craft .vtt-ms-craft-card');
+  let anyVisible = false;
+  cards.forEach(card => {
+    const m = !q || (card.dataset.name || '').includes(q);
+    card.style.display = m ? '' : 'none';
+    if (m) anyVisible = true;
+  });
+  _msToggleEmpty('craft', anyVisible || !cards.length);
+}
+
 function _msToggleEmpty(kind, anyVisible) {
   const el = document.querySelector(`#vtt-mini-panel .vtt-ms-filter-empty[data-kind="${kind}"]`);
   if (el) el.style.display = anyVisible ? 'none' : '';
@@ -214,17 +228,19 @@ function _vttMsInvClear()      { _msInvQuery = ''; if (VS.miniUid) _renderMiniSh
 function _vttMsSortSearch(val) { _msSortQuery = val || ''; _msApplySortFilter(); _msSyncClearBtn('sorts'); }
 function _vttMsSortCat(cat,btn){ _msSortCat = cat; _msSetActiveChip('sorts', btn); _msApplySortFilter(); }
 function _vttMsSortClear()     { _msSortQuery = ''; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
+function _vttMsCraftSearch(val){ _msCraftQuery = val || ''; _msApplyCraftFilter(); _msSyncClearBtn('craft'); }
+function _vttMsCraftClear()    { _msCraftQuery = ''; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
 
 // Affiche/masque le bouton ✕ de la recherche sans re-render complet (préserve le focus).
 function _msSyncClearBtn(kind) {
-  const query = kind === 'inv' ? _msInvQuery : _msSortQuery;
+  const query = kind === 'inv' ? _msInvQuery : kind === 'sorts' ? _msSortQuery : _msCraftQuery;
   const wrap  = document.querySelector(`#vtt-mini-panel .vtt-ms-filter[data-kind="${kind}"] .vtt-ms-fsearch`);
   if (!wrap) return;
   let btn = wrap.querySelector('.vtt-ms-fsearch-clr');
   if (query && !btn) {
     btn = document.createElement('button');
     btn.className = 'vtt-ms-fsearch-clr'; btn.title = 'Effacer'; btn.textContent = '✕';
-    btn.dataset.vttFn = kind === 'inv' ? '_vttMsInvClear' : '_vttMsSortClear';
+    btn.dataset.vttFn = kind === 'inv' ? '_vttMsInvClear' : kind === 'sorts' ? '_vttMsSortClear' : '_vttMsCraftClear';
     wrap.appendChild(btn);
   } else if (!query && btn) {
     btn.remove();
@@ -973,8 +989,11 @@ function _msTabCraft(c, uid, canEdit) {
     .map(r => ({ r, st: _msRecipeIngrStatus(r, counts) }))
     .sort((a, b) => (b.st.allOk - a.st.allOk) || (a.r.nom || '').localeCompare(b.r.nom || ''));
 
-  return `<div class="vtt-ms-craft">${cards.map(({ r, st }) => {
+  return _msFilterBar('craft', [], _msCraftQuery)
+    + `<div class="vtt-ms-filter-empty" data-kind="craft" style="display:none">Aucune recette ne correspond.</div>`
+    + `<div class="vtt-ms-craft">${cards.map(({ r, st }) => {
     const icon = _MS_CRAFT_TYPE_ICON[r.type] || '🔨';
+    const searchTxt = _norm([r.nom, r.type, r.effet, ...((r.ingredients || []).map(ig => ig?.nom))].filter(Boolean).join(' '));
     const ingrHtml = st.hasIngr
       ? `<div class="vtt-ms-craft-ingrs">${st.rows.map(row =>
           `<span class="vtt-ms-craft-ingr ${row.ok ? 'ok' : 'ko'}">${_esc(row.nom)} <b>${row.have}/${row.need}</b></span>`).join('')}</div>`
@@ -984,7 +1003,7 @@ function _msTabCraft(c, uid, canEdit) {
       : !st.hasIngr ? 'Recette sans ingrédients structurés'
       : !st.allOk ? 'Ingrédients manquants'
       : `Jet d'Artisanat (INT) DD ${_MS_CRAFT_DD}`;
-    return `<div class="vtt-ms-craft-card${st.allOk ? ' craftable' : ''}">
+    return `<div class="vtt-ms-craft-card${st.allOk ? ' craftable' : ''}" data-name="${_esc(searchTxt)}">
       <div class="vtt-ms-craft-hd">
         <span class="vtt-ms-craft-type" title="${_esc(r.type || '')}">${icon}</span>
         <span class="vtt-ms-craft-name" title="${_esc(r.nom || '')}">${_esc(r.nom || '?')}</span>
@@ -1280,7 +1299,7 @@ function _vttToggleMiniSheet(uid) {
 function _vttSelectMiniChar(uid, charId) {
   VS.miniCharId = charId;
   // Reset des filtres : l'inventaire/les sorts diffèrent d'un perso à l'autre.
-  _msInvQuery = ''; _msInvCat = 'all'; _msSortQuery = ''; _msSortCat = 'all';
+  _msInvQuery = ''; _msInvCat = 'all'; _msSortQuery = ''; _msSortCat = 'all'; _msCraftQuery = '';
   _renderMiniSheet(uid);
 }
 
@@ -1312,6 +1331,8 @@ export {
   _vttMsCompteDel,
   _vttMsConfirmSend,
   _vttMsCraft,
+  _vttMsCraftSearch,
+  _vttMsCraftClear,
   _vttMsDeleteItem,
   _vttMsDeleteNote,
   _vttMsEquip,
