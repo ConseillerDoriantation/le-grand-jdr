@@ -1009,6 +1009,14 @@ function _buildShape(t) {
     // ─ Début du drag : mémoriser les positions du groupe ─
     g.on('dragstart', () => {
       if (rightDown) rightDown.dragged = true;
+      // En mode Règle (mesure) ou Dessin : le token ne doit pas se déplacer — la
+      // mesure/le tracé (pilotés par le stage) restent prioritaires.
+      if (VS.tool === 'ruler' || VS.tool === 'draw') {
+        g.stopDrag();
+        g.position({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2 });
+        VS.layers.token?.batchDraw();
+        return;
+      }
       // En mode placement de zone ou de ciblage multi-cibles : pas de déplacement de token
       // (le sort doit rester prioritaire — un drag accidentel ne déplace pas le PJ)
       if (_zoneCtx || _mtCtx) {
