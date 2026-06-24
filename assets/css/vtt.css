@@ -5889,3 +5889,68 @@
 @keyframes sig-spin  { to { transform: rotate(360deg); } }
 @keyframes sig-pulse { 0%,100% { opacity:.4; transform:scale(.8); } 50% { opacity:1; transform:scale(1.1); } }
 @keyframes sig-rise  { 0% { opacity:0; transform:translateY(6px) scale(.7);} 30%{opacity:.9;} 100%{ opacity:0; transform:translateY(-24px) scale(1.05);} }
+
+/* ════════════════════════════════════════════════════════════════════════
+   MÉTÉO DE SCÈNE — bouton (près du timer) + sélecteur + effets visuels.
+   Effet ÉCRAN (overlay fixe au-dessus du canvas, sous l'UI) — non ancré carte.
+   ════════════════════════════════════════════════════════════════════════ */
+.vtt-weather:empty { display: none; }
+.vtt-weather-btn {
+  display: inline-flex; align-items: center; gap: .45rem;
+  padding: .4rem .7rem; border-radius: 12px;
+  background: rgba(13,17,28,.82); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,.10); color: var(--text);
+  font-size: .8rem; font-weight: 600; cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0,0,0,.35);
+  transition: transform .18s var(--ease-spring, cubic-bezier(.22,1,.36,1)), border-color .15s;
+  align-self: flex-start;
+}
+.vtt-weather-btn:hover:not([disabled]) { transform: translateY(-1.5px); border-color: var(--border-md, rgba(255,255,255,.16)); }
+.vtt-weather-btn[disabled] { cursor: default; }
+.vtt-weather-ico { font-size: 1.05rem; line-height: 1; }
+
+.vtt-weather-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); gap: 8px; min-width: 280px; }
+.vtt-weather-opt {
+  display: flex; flex-direction: column; align-items: center; gap: 7px;
+  padding: 13px 8px; border-radius: 12px;
+  background: rgba(255,255,255,.04); border: 1px solid var(--border);
+  color: var(--text); font-size: .8rem; cursor: pointer;
+  transition: border-color .15s, background .15s, transform .12s;
+}
+.vtt-weather-opt:hover { border-color: var(--border-bright, rgba(79,140,255,.28)); transform: translateY(-1px); }
+.vtt-weather-opt.is-active { border-color: rgba(79,140,255,.5); background: rgba(79,140,255,.10); }
+.vtt-weather-opt-ico { font-size: 1.7rem; line-height: 1; }
+
+/* ── Couche d'effet (au-dessus du canvas, SOUS les overlays UI z>=20) ── */
+.vtt-weather-fx { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 4; }
+.vtt-weather-fx[data-w="storm"] { background: rgba(20,26,40,.18); }
+.vtt-weather-fx[data-w="fog"]   { background: rgba(184,196,210,.10); }
+
+/* Pluie / Orage */
+.vtt-weather-fx .wd {
+  position: absolute; top: -14%; width: 1.5px; height: 17px;
+  background: linear-gradient(transparent, rgba(186,206,235,.85));
+  animation-name: vtt-wd-fall; animation-iteration-count: infinite; animation-timing-function: linear;
+}
+@keyframes vtt-wd-fall { to { transform: translateY(118vh); } }
+.vtt-weather-fx[data-w="storm"] .wd { height: 22px; }
+.vtt-weather-fx .wflash { position: absolute; inset: 0; background: rgba(220,230,255,.5); opacity: 0; animation: vtt-wflash 8s linear infinite; }
+@keyframes vtt-wflash { 0%,4%,100% { opacity:0; } 1.2% { opacity:.55; } 2% { opacity:.08; } 2.6% { opacity:.42; } 3.4% { opacity:0; } }
+
+/* Neige */
+.vtt-weather-fx .ws {
+  position: absolute; top: -6%; border-radius: 50%; background: rgba(255,255,255,.9);
+  animation-name: vtt-ws-fall; animation-iteration-count: infinite; animation-timing-function: linear;
+}
+@keyframes vtt-ws-fall { 0% { transform: translateY(0) translateX(0); } 100% { transform: translateY(112vh) translateX(26px); } }
+
+/* Brouillard */
+.vtt-weather-fx .wfog {
+  position: absolute; inset: -25% -50%;
+  background: radial-gradient(ellipse at center, rgba(205,214,224,.20), transparent 62%);
+  animation: vtt-wfog-drift 42s linear infinite;
+}
+.vtt-weather-fx .wfog2 { animation-duration: 64s; animation-direction: reverse; opacity: .65; }
+@keyframes vtt-wfog-drift { from { transform: translateX(-14%); } to { transform: translateX(14%); } }
+
+@media (prefers-reduced-motion: reduce) { .vtt-weather-fx * { animation: none !important; } }

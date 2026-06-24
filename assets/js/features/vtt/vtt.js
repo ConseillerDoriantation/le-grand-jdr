@@ -121,6 +121,7 @@ import {
 import {
   _renderTimer, _timerStartTick, _timerStopTick, _vttTimerToggle, _vttTimerReset, _vttTimerLabel,
 } from './vtt-timer.js';
+import { _renderWeatherBtn, _applyWeather, _vttWeatherOpen, _vttSetWeather } from './vtt-weather.js';
 import {
   _renderCombatTracker, _renderCombatTrackerSoon, _vttCombatTab, _vttTrackerFocus,
 } from './vtt-combat-tracker.js';
@@ -6633,6 +6634,8 @@ function _initListeners() {
       if (target&&VS.pages[target]&&VS.activePage?.id!==target) _switchPage(target);
     }
     _renderTimer();
+    _renderWeatherBtn();
+    _applyWeather();
     _renderCombatTracker();
     _renderMjRulerRemote(VS.session.mjRuler);
     _renderShortRest();
@@ -8636,10 +8639,13 @@ async function _vttMountTable(content) {
   _ovTL.className = 'vtt-overlay-tl';
   _ovTL.innerHTML = `
     <div id="vtt-timer" class="vtt-timer" aria-live="polite"></div>
+    <div id="vtt-weather" class="vtt-weather"></div>
     <div id="vtt-combat-tracker" class="vtt-combat-tracker" style="display:none"></div>
   `;
   wrap.appendChild(_ovTL);
   _renderTimer();
+  _renderWeatherBtn();
+  _applyWeather();
   _renderCombatTracker();
   const _ef = document.createElement('div');
   _ef.className = 'vtt-emote-float';
@@ -8933,6 +8939,8 @@ export const VTT_ACTIONS = {
   _vttTimerLabel,
   _vttTimerReset,
   _vttTimerToggle,
+  _vttWeatherOpen,
+  _vttSetWeather,
   _vttToggleAllMusicCats,
   _vttToggleCombat,
   _vttToggleDice,
