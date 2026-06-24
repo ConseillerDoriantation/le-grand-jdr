@@ -121,7 +121,7 @@ import {
 import {
   _renderTimer, _timerStartTick, _timerStopTick, _vttTimerToggle, _vttTimerReset, _vttTimerLabel,
 } from './vtt-timer.js';
-import { _renderWeatherBtn, _applyWeather, _vttWeatherOpen, _vttSetWeather } from './vtt-weather.js';
+import { _renderWeatherBtn, _applyWeather, _vttWeatherToggle, _vttSetWeather } from './vtt-weather.js';
 import {
   _renderCombatTracker, _renderCombatTrackerSoon, _vttCombatTab, _vttTrackerFocus,
 } from './vtt-combat-tracker.js';
@@ -8638,8 +8638,10 @@ async function _vttMountTable(content) {
   const _ovTL = document.createElement('div');
   _ovTL.className = 'vtt-overlay-tl';
   _ovTL.innerHTML = `
-    <div id="vtt-timer" class="vtt-timer" aria-live="polite"></div>
-    <div id="vtt-weather" class="vtt-weather"></div>
+    <div class="vtt-tl-toprow">
+      <div id="vtt-timer" class="vtt-timer" aria-live="polite"></div>
+      <div id="vtt-weather" class="vtt-weather"></div>
+    </div>
     <div id="vtt-combat-tracker" class="vtt-combat-tracker" style="display:none"></div>
   `;
   wrap.appendChild(_ovTL);
@@ -8939,7 +8941,7 @@ export const VTT_ACTIONS = {
   _vttTimerLabel,
   _vttTimerReset,
   _vttTimerToggle,
-  _vttWeatherOpen,
+  _vttWeatherToggle,
   _vttSetWeather,
   _vttToggleAllMusicCats,
   _vttToggleCombat,

@@ -5894,32 +5894,36 @@
    MÉTÉO DE SCÈNE — bouton (près du timer) + sélecteur + effets visuels.
    Effet ÉCRAN (overlay fixe au-dessus du canvas, sous l'UI) — non ancré carte.
    ════════════════════════════════════════════════════════════════════════ */
+/* Timer + météo sur une même rangée (gap non cliquable). */
+.vtt-tl-toprow { display: flex; align-items: flex-start; gap: 8px; pointer-events: none; }
+.vtt-tl-toprow > * { pointer-events: auto; }
 .vtt-weather:empty { display: none; }
-.vtt-weather-btn {
-  display: inline-flex; align-items: center; gap: .45rem;
-  padding: .4rem .7rem; border-radius: 12px;
+
+/* Icône météo seule (sans texte). */
+.vtt-weather-ic {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
   background: rgba(13,17,28,.82); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(255,255,255,.10); color: var(--text);
-  font-size: .8rem; font-weight: 600; cursor: pointer;
+  font-size: 1.05rem; line-height: 1; cursor: pointer;
   box-shadow: 0 6px 18px rgba(0,0,0,.35);
-  transition: transform .18s var(--ease-spring, cubic-bezier(.22,1,.36,1)), border-color .15s;
-  align-self: flex-start;
+  transition: transform .15s var(--ease-spring, cubic-bezier(.22,1,.36,1)), border-color .15s, background .15s;
 }
-.vtt-weather-btn:hover:not([disabled]) { transform: translateY(-1.5px); border-color: var(--border-md, rgba(255,255,255,.16)); }
-.vtt-weather-btn[disabled] { cursor: default; }
-.vtt-weather-ico { font-size: 1.05rem; line-height: 1; }
+.vtt-weather-ic:hover { transform: translateY(-1.5px); border-color: var(--border-md, rgba(255,255,255,.16)); }
+.vtt-weather-ic--ro { cursor: default; box-shadow: none; }
 
-.vtt-weather-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); gap: 8px; min-width: 280px; }
-.vtt-weather-opt {
-  display: flex; flex-direction: column; align-items: center; gap: 7px;
-  padding: 13px 8px; border-radius: 12px;
-  background: rgba(255,255,255,.04); border: 1px solid var(--border);
-  color: var(--text); font-size: .8rem; cursor: pointer;
-  transition: border-color .15s, background .15s, transform .12s;
+/* Popover inline : rangée d'icônes. */
+.vtt-weather-pop {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4px;
+  border-radius: 12px; background: rgba(13,17,28,.6);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,.08); box-shadow: 0 6px 18px rgba(0,0,0,.35);
+  animation: vtt-weather-pop-in .2s var(--ease-spring, cubic-bezier(.22,1,.36,1));
 }
-.vtt-weather-opt:hover { border-color: var(--border-bright, rgba(79,140,255,.28)); transform: translateY(-1px); }
-.vtt-weather-opt.is-active { border-color: rgba(79,140,255,.5); background: rgba(79,140,255,.10); }
-.vtt-weather-opt-ico { font-size: 1.7rem; line-height: 1; }
+@keyframes vtt-weather-pop-in { from { opacity: 0; transform: scale(.92) translateX(-4px); } to { opacity: 1; transform: none; } }
+.vtt-weather-pop .vtt-weather-ic { width: 32px; height: 32px; box-shadow: none; background: rgba(255,255,255,.04); }
+.vtt-weather-pop .vtt-weather-ic:hover { background: rgba(255,255,255,.10); }
+.vtt-weather-pop .vtt-weather-ic.is-active { border-color: rgba(79,140,255,.55); background: rgba(79,140,255,.16); }
 
 /* ── Couche d'effet (au-dessus du canvas, SOUS les overlays UI z>=20) ── */
 .vtt-weather-fx { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 4; }

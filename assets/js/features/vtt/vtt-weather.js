@@ -11,8 +11,9 @@
 import { setDoc } from '../../config/firebase.js';
 import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
-import { openModal, closeModalDirect } from '../../shared/modal.js';
 import { _sesRef } from './vtt-refs.js';
+
+let _weatherOpen = false;   // popover inline d'icônes ouvert (MJ)
 
 const WEATHER = [
   { id: 'clear', label: 'Dégagé',     icon: '☀️' },
@@ -24,33 +25,41 @@ const WEATHER = [
 const _wMeta = id => WEATHER.find(w => w.id === id) || WEATHER[0];
 const _curWeather = () => VS.session?.weather || 'clear';
 
-// Bouton météo (sous le timer). MJ : ouvre le sélecteur. Joueur : icône seule
-// (lecture), masqué si dégagé pour ne pas encombrer.
+// Contrôle météo (à côté du timer) : icône seule, sans texte. MJ : clic → rangée
+// d'icônes inline (pas de modale) pour choisir. Joueur : icône courante (lecture,
+// masquée si dégagé).
 function _renderWeatherBtn() {
   const el = document.getElementById('vtt-weather');
   if (!el) return;
-  const w = _wMeta(_curWeather());
+  const cur = _curWeather();
+  const w = _wMeta(cur);
   const mj = STATE.isAdmin;
-  if (!mj && w.id === 'clear') { el.innerHTML = ''; el.style.display = 'none'; return; }
+  if (!mj) {
+    el.style.display = w.id === 'clear' ? 'none' : '';
+    el.innerHTML = w.id === 'clear' ? '' : `<span class="vtt-weather-ic vtt-weather-ic--ro" title="Météo : ${w.label}">${w.icon}</span>`;
+    return;
+  }
   el.style.display = '';
-  el.innerHTML = `<button class="vtt-weather-btn" ${mj ? 'data-vtt-fn="_vttWeatherOpen"' : 'disabled'} title="Météo : ${w.label}">
-    <span class="vtt-weather-ico">${w.icon}</span>${mj ? `<span class="vtt-weather-lbl">${w.label}</span>` : ''}
-  </button>`;
+  if (!_weatherOpen) {
+    el.innerHTML = `<button class="vtt-weather-ic" data-vtt-fn="_vttWeatherToggle" title="Météo : ${w.label}">${w.icon}</button>`;
+    return;
+  }
+  // Ouvert : rangée de toutes les icônes (l'active surlignée), clic = choix.
+  el.innerHTML = `<div class="vtt-weather-pop">${WEATHER.map(o =>
+    `<button class="vtt-weather-ic${o.id === cur ? ' is-active' : ''}" data-vtt-fn="_vttSetWeather" data-vtt-args="${o.id}" title="${o.label}">${o.icon}</button>`
+  ).join('')}</div>`;
 }
 
-function _vttWeatherOpen() {
+function _vttWeatherToggle() {
   if (!STATE.isAdmin) return;
-  const cur = _curWeather();
-  const opts = WEATHER.map(w =>
-    `<button class="vtt-weather-opt${w.id === cur ? ' is-active' : ''}" data-vtt-fn="_vttSetWeather" data-vtt-args="${w.id}">
-      <span class="vtt-weather-opt-ico">${w.icon}</span><span>${w.label}</span>
-    </button>`).join('');
-  openModal('🌦️ Météo de la scène', `<div class="vtt-weather-grid">${opts}</div>`);
+  _weatherOpen = !_weatherOpen;
+  _renderWeatherBtn();
 }
 
 async function _vttSetWeather(id) {
   if (!STATE.isAdmin) return;
-  closeModalDirect();
+  _weatherOpen = false;
+  _renderWeatherBtn();   // ferme le popover tout de suite (l'effet s'applique au snapshot)
   await setDoc(_sesRef(), { weather: id }, { merge: true }).catch(() => {});
 }
 
@@ -97,4 +106,4 @@ function _weatherInner(id) {
   return '';
 }
 
-export { _renderWeatherBtn, _applyWeather, _vttWeatherOpen, _vttSetWeather };
+export { _renderWeatherBtn, _applyWeather, _vttWeatherToggle, _vttSetWeather };
