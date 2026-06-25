@@ -293,9 +293,16 @@ service cloud.firestore {
 
       // ── VTT ──────────────────────────────────────────────────────
       // Session (page active, état combat) : lecture tous, écriture MJ
+      // Exception : les joueurs peuvent voter pour un court repos → ils ne
+      // modifient QUE le champ `shortRest` (leur vote), sans toucher `max`/`count`
+      // qui restent réservés au MJ.
       match /vtt/{docId} {
         allow read:  if inAdventure(adventureId);
         allow write: if isAdvAdmin(adventureId);
+        allow update: if inAdventure(adventureId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['shortRest'])
+          && request.resource.data.shortRest.max   == resource.data.shortRest.max
+          && request.resource.data.shortRest.count == resource.data.shortRest.count;
       }
 
       // Butin partagé : tous les membres lisent et écrivent
