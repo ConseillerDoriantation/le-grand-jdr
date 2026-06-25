@@ -111,3 +111,30 @@ export function appSplashHtml(label = 'Chargement…') {
       </div>
     </div>`;
 }
+
+/**
+ * Normalise une URL d'image collée par l'utilisateur :
+ *  - convertit une URL « page web » GitHub (github.com/<owner>/<repo>/tree|blob/
+ *    <branche>/<chemin>) en URL d'image directe servie par GitHub Pages
+ *    (https://<owner>.github.io/<repo>/<chemin>, même domaine que l'app) ;
+ *  - encode les espaces / accents du chemin (sans casser protocole + host).
+ * Renvoie l'URL inchangée (juste ré-encodée) si ce n'est pas une URL GitHub.
+ */
+export function normalizeImageUrl(url) {
+  if (!url) return url;
+  let u = String(url).trim();
+  const m = u.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:tree|blob)\/[^/]+\/(.+)$/i);
+  if (m) {
+    const [, owner, repo, path] = m;
+    u = `https://${owner.toLowerCase()}.github.io/${repo}/${path}`;
+  }
+  try {
+    const parsed = new URL(u);
+    parsed.pathname = parsed.pathname.split('/')
+      .map(seg => { try { return encodeURIComponent(decodeURIComponent(seg)); } catch { return encodeURIComponent(seg); } })
+      .join('/');
+    return parsed.toString();
+  } catch {
+    return u.replace(/ /g, '%20');
+  }
+}

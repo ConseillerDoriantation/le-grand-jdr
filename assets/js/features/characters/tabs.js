@@ -4,7 +4,7 @@ import { updateInCol, loadCollection, loadCollectionWhere, addToCol, saveDoc } f
 import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal, confirmModal, promptModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
-import { modStr, _esc } from '../../shared/html.js';
+import { modStr, _esc, normalizeImageUrl } from '../../shared/html.js';
 import { getMod, calcPVMax, calcPMMax, calcOr, calcPalier } from '../../shared/char-stats.js';
 import { richTextContentHtml } from '../../shared/rich-text.js';
 import { quillEditorHtml, getQuillHtml } from '../../shared/rich-text-quill.js';
@@ -858,11 +858,12 @@ export async function openProfilImageUpload(charId) {
   // (ex. image hébergée dans un dossier GitHub) → qualité conservée, zéro poids
   // Firestore, aucun hébergeur payant.
   if (!CLOUDINARY_ENABLED) {
-    const url = (await promptModal(
+    let url = (await promptModal(
       'Colle l\'URL de l\'illustration (ex. image hébergée dans un dossier GitHub) :',
-      { title: '🔗 Illustration par URL', placeholder: 'https://…raw.githubusercontent.com/…' },
+      { title: '🔗 Illustration par URL', placeholder: 'https://…github.io/le-grand-jdr/images/illustrations/…' },
     ))?.trim();
     if (!url) return;
+    url = normalizeImageUrl(url);   // tolère github.com/.../tree/... + encode les espaces
     try { await _applyProfilImageUrl(charId, url); }
     catch (e) { console.error('[profilImage]', e); showNotif(`Erreur : ${e?.message || '?'}`, 'error'); }
     return;

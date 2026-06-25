@@ -25,7 +25,7 @@ import { loadCollection, updateInCol } from '../data/firestore.js';
 import { openModal, closeModal, promptModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
-import { _esc, _nl2br, _norm, _initials } from '../shared/html.js';
+import { _esc, _nl2br, _norm, _initials, normalizeImageUrl } from '../shared/html.js';
 import {
   getMod, calcCA, calcPVMax, calcPMMax, calcOr, calcVitesse, STAT_META, getModFromScore, modStr,
 } from '../shared/char-stats.js';
@@ -1670,11 +1670,12 @@ async function openPlayerPresentModal(player = null) {
         if (status) { status.textContent = `Maximum ${PP_GALLERY_MAX} photos atteint.`; status.style.color = '#ff6b6b'; }
         return;
       }
-      const url = (await promptModal(
+      let url = (await promptModal(
         'Colle l\'URL de la photo (ex. image hébergée dans un dossier GitHub) :',
-        { title: '🔗 Photo par URL', placeholder: 'https://…raw.githubusercontent.com/…' },
+        { title: '🔗 Photo par URL', placeholder: 'https://…github.io/le-grand-jdr/images/illustrations/…' },
       ))?.trim();
       if (!url) return;
+      url = normalizeImageUrl(url);   // tolère github.com/.../tree/... + encode les espaces
       _ppGallery.push({ url, thumb: url, deleteUrl: '' });
       _renderGalleryEditor();
       if (status) { status.textContent = '✓ Photo ajoutée (URL).'; status.style.color = 'var(--green)'; }

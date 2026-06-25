@@ -34,7 +34,7 @@ import {
   fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath, fogUndo,
 } from './vtt-fog.js';
 import { openModal, closeModalDirect, confirmModal, updateModalContent, promptModal } from '../../shared/modal.js';
-import { _esc, _norm, _searchIncludes, appSplashHtml } from '../../shared/html.js';
+import { _esc, _norm, _searchIncludes, appSplashHtml, normalizeImageUrl } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
 import PAGES from '../pages.js';
@@ -7918,7 +7918,8 @@ async function _vttCleanGhostMembers() {
 // [Combat: reset tour + flags (_vttResetTurn/_vttToggleTurnFlag) → vtt-combat-turns.js]
 
 async function _vttAddImageUrl() {
-  const url=(await promptModal('Colle l\'URL d\'une image (ex. carte hébergée dans un dossier GitHub) :', { title: '🔗 Carte par URL', placeholder: 'https://…raw.githubusercontent.com/…', required: true }))?.trim(); if (!url||!VS.activePage) return;
+  let url=(await promptModal('Colle l\'URL d\'une image (ex. carte hébergée dans un dossier GitHub) :', { title: '🔗 Carte par URL', placeholder: 'https://…github.io/le-grand-jdr/images/maps/…', required: true }))?.trim(); if (!url||!VS.activePage) return;
+  url = normalizeImageUrl(url);   // tolère github.com/.../tree/... (page web) + encode les espaces du nom
   const imgs=[...(VS.activePage.backgroundImages??[]),{id:Date.now().toString(),url,x:0,y:0,w:VS.activePage.cols,h:VS.activePage.rows}];
   try {
     await updateDoc(_pgRef(VS.activePage.id),{backgroundImages:imgs});
