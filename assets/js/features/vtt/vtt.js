@@ -28,7 +28,7 @@ import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js
 import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
-import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from '../../shared/upload-cloudinary.js';
+import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
   fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath, fogUndo,
@@ -7918,9 +7918,15 @@ async function _vttCleanGhostMembers() {
 // [Combat: reset tour + flags (_vttResetTurn/_vttToggleTurnFlag) → vtt-combat-turns.js]
 
 async function _vttAddImageUrl() {
-  const url=(await promptModal('URL de l\'image :', { title: 'Image de fond', placeholder: 'https://…', required: true }))?.trim(); if (!url||!VS.activePage) return;
+  const url=(await promptModal('Colle l\'URL d\'une image (ex. carte hébergée dans un dossier GitHub) :', { title: '🔗 Carte par URL', placeholder: 'https://…raw.githubusercontent.com/…', required: true }))?.trim(); if (!url||!VS.activePage) return;
   const imgs=[...(VS.activePage.backgroundImages??[]),{id:Date.now().toString(),url,x:0,y:0,w:VS.activePage.cols,h:VS.activePage.rows}];
-  await updateDoc(_pgRef(VS.activePage.id),{backgroundImages:imgs}).catch(e=>{ console.error('[vtt] ajout image fond', e); showNotif("Échec de l'ajout de l'image de fond", 'error'); });
+  try {
+    await updateDoc(_pgRef(VS.activePage.id),{backgroundImages:imgs});
+    // Sauver dans la bibliothèque pour réutilisation (même flux que l'upload).
+    const entry = { id: crypto.randomUUID(), url, name: (url.split('/').pop()||'Carte').split('?')[0], folderId: _libFolder || null };
+    setDoc(_mapLibRef(), { folders: VS.mapLib.folders||[], images: [...(VS.mapLib.images||[]), entry] }).catch(()=>{});
+    showNotif('Carte ajoutée par URL !', 'success');
+  } catch (e) { console.error('[vtt] ajout image fond', e); showNotif("Échec de l'ajout de l'image de fond", 'error'); }
 }
 function _vttUploadClick() { return document.getElementById('vtt-img-input')?.click(); }
 
@@ -8401,8 +8407,9 @@ function _buildHtml() {
       ${mj?`
         <button class="vtt-btn-sm vtt-session-btn" id="vtt-session-btn" data-vtt-fn="_vttToggleSessionLive" title="Démarrer / terminer la session — prévient les joueurs qui rejoignent">⚪ Session</button>
         <button class="vtt-btn-sm" id="vtt-map-mode-btn" data-vtt-fn="_vttToggleMapMode" title="Verrouille / déverrouille le calque des cartes en arrière-plan">🗺 Carte</button>
-        <label  class="vtt-btn-sm vtt-upload-lbl" title="Upload une image via Cloudinary — sauvegardée dans la bibliothèque">⬆ Upload<input type="file" id="vtt-img-input" accept="image/*" hidden></label>
-        <button class="vtt-btn-sm" data-vtt-fn="_vttSetImgbbKey" title="Configurer Cloudinary (cloud name + upload preset)">🔑</button>`:''}
+        <button class="vtt-btn-sm" data-vtt-fn="_vttAddImageUrl" title="Ajouter une carte par URL (ex. image hébergée dans un dossier GitHub) — gratuit, sauvegardée dans la bibliothèque">🔗 URL</button>
+        ${CLOUDINARY_ENABLED?`<label  class="vtt-btn-sm vtt-upload-lbl" title="Upload une image via Cloudinary — sauvegardée dans la bibliothèque">⬆ Upload<input type="file" id="vtt-img-input" accept="image/*" hidden></label>
+        <button class="vtt-btn-sm" data-vtt-fn="_vttSetImgbbKey" title="Configurer Cloudinary (cloud name + upload preset)">🔑</button>`:''}`:''}
     </div>
   </div>
 

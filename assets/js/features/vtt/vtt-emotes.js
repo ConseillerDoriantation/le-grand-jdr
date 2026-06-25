@@ -14,7 +14,8 @@ import { showNotif } from '../../shared/notifications.js';
 import { getDocData, saveDoc } from '../../data/firestore.js';
 import { db, doc, getDoc, addDoc, setDoc, serverTimestamp } from '../../config/firebase.js';
 import { computeEquipSkillBonus } from '../../shared/char-stats.js';
-import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from '../../shared/upload-cloudinary.js';
+import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
+import { uploadPng } from '../../shared/image-upload.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
 import { _logCol, _logGmCol, _reactionRef } from './vtt-refs.js';
 import { _STAT_KEY } from './vtt-constants.js';
@@ -304,14 +305,19 @@ export async function _ouvrirGestionEmotes() {
   const _setEmoteAlbum = v => v ? localStorage.setItem('vtt-emote-folder', v) : localStorage.removeItem('vtt-emote-folder');
 
   const _uploadEmote = async (file) => {
-    if (!hasCloudinaryConfig()) {
-      openCloudinaryConfigModal();
-      if (!hasCloudinaryConfig()) throw new Error('Configuration Cloudinary requise (bouton 🔑)');
+    if (CLOUDINARY_ENABLED) {
+      if (!hasCloudinaryConfig()) {
+        openCloudinaryConfigModal();
+        if (!hasCloudinaryConfig()) throw new Error('Configuration Cloudinary requise (bouton 🔑)');
+      }
+      const sub = _getEmoteAlbum().trim();
+      const folder = sub ? `emotes/${sub}` : 'emotes';
+      const up = await uploadCloudinary(file, { folder, tags: ['emote'] });
+      return up.url;
     }
-    const sub = _getEmoteAlbum().trim();
-    const folder = sub ? `emotes/${sub}` : 'emotes';
-    const up = await uploadCloudinary(file, { folder, tags: ['emote'] });
-    return up.url;
+    // Mode gratuit : émote = petite image → base64 PNG (transparence conservée),
+    // stockée directement dans le doc des émotes (pas d'hébergeur externe).
+    return await uploadPng(file, { max: 200 });
   };
 
   // ── Rendu de la grille de cartes ─────────────────────────────────

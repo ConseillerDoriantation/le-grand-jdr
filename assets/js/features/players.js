@@ -22,7 +22,7 @@ import { STATE } from '../core/state.js';
 import { navigate } from '../core/navigation.js';
 import { charSession } from '../shared/char-session.js';
 import { loadCollection, updateInCol } from '../data/firestore.js';
-import { openModal, closeModal } from '../shared/modal.js';
+import { openModal, closeModal, promptModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
 import { _esc, _nl2br, _norm, _initials } from '../shared/html.js';
@@ -31,7 +31,7 @@ import {
 } from '../shared/char-stats.js';
 import { attachDropAndCrop, attachPanZoomCrop, panZoomCropHTML, resizeImageDataUrl } from '../shared/image-crop.js';
 import { bindImageUploadDropZone, uploadJpeg } from '../shared/image-upload.js';
-import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from '../shared/upload-cloudinary.js';
+import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../shared/upload-cloudinary.js';
 import { lsJson } from '../shared/local-storage.js';
 import { richTextContentHtml } from '../shared/rich-text.js';
 import { quillEditorHtml, getQuillHtml, bindQuillEditors } from '../shared/rich-text-quill.js';
@@ -1568,7 +1568,7 @@ async function openPlayerPresentModal(player = null) {
           </div>` : ''}
 
         <div class="pp-mn-field">
-          <label class="pp-mn-label">Photos additionnelles <span class="pp-form-hint">(glisse pour réordonner · Cloudinary pleine qualité)</span></label>
+          <label class="pp-mn-label">Photos additionnelles <span class="pp-form-hint">(glisse pour réordonner · pleine qualité)</span></label>
           <div id="pp-gallery-list" class="pp-gallery-edit"></div>
           <div id="pp-gallery-drop" class="pp-form-drop pp-gallery-drop">
             <div class="pp-gallery-drop-hint">+ Glisser une photo (ou cliquer)</div>
@@ -1659,7 +1659,27 @@ async function openPlayerPresentModal(player = null) {
 
   _renderGalleryEditor();
   const galleryDrop = document.getElementById('pp-gallery-drop');
-  if (galleryDrop) {
+  if (galleryDrop && !CLOUDINARY_ENABLED) {
+    // Mode gratuit : photo HD pointée par URL (ex. dossier GitHub) → qualité
+    // conservée, zéro poids Firestore. Le « drop » devient un bouton d'ajout URL.
+    const hint = galleryDrop.querySelector('.pp-gallery-drop-hint');
+    if (hint) hint.textContent = '🔗 Ajouter une photo par URL';
+    galleryDrop.addEventListener('click', async () => {
+      const status = document.getElementById('pp-gallery-status');
+      if (_ppGallery.length >= PP_GALLERY_MAX) {
+        if (status) { status.textContent = `Maximum ${PP_GALLERY_MAX} photos atteint.`; status.style.color = '#ff6b6b'; }
+        return;
+      }
+      const url = (await promptModal(
+        'Colle l\'URL de la photo (ex. image hébergée dans un dossier GitHub) :',
+        { title: '🔗 Photo par URL', placeholder: 'https://…raw.githubusercontent.com/…' },
+      ))?.trim();
+      if (!url) return;
+      _ppGallery.push({ url, thumb: url, deleteUrl: '' });
+      _renderGalleryEditor();
+      if (status) { status.textContent = '✓ Photo ajoutée (URL).'; status.style.color = 'var(--green)'; }
+    });
+  } else if (galleryDrop) {
     bindImageUploadDropZone(galleryDrop, {
       onImage: async ({ file }) => {
         const status = document.getElementById('pp-gallery-status');

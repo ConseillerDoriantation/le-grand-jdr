@@ -9,7 +9,7 @@ import { getMod, calcPVMax, calcPMMax, calcOr, calcPalier } from '../../shared/c
 import { richTextContentHtml } from '../../shared/rich-text.js';
 import { quillEditorHtml, getQuillHtml } from '../../shared/rich-text-quill.js';
 import { uploadJpeg } from '../../shared/image-upload.js';
-import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from '../../shared/upload-cloudinary.js';
+import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 
 import { getCharacterById } from '../../shared/character-state.js';
 // ══════════════════════════════════════════════
@@ -835,7 +835,38 @@ export function invalidateProfilCache(charId) {
   delete _profilCache[charId];
 }
 
-export function openProfilImageUpload(charId) {
+// Enregistre l'URL d'illustration dans le doc `players` du perso + re-render.
+async function _applyProfilImageUrl(charId, imageUrl) {
+  const pres = _profilCache[charId];
+  const data = pres
+    ? { imageUrl }
+    : { charId, uid: STATE.user?.uid || '', imageUrl, visible: true, ordre: 999, content: '' };
+  if (pres?.id) {
+    await updateInCol('players', pres.id, { imageUrl });
+    _profilCache[charId] = { ...pres, imageUrl };
+  } else {
+    const newId = await addToCol('players', data);
+    _profilCache[charId] = { id: newId, ...data };
+  }
+  const c = getCharacterById(charId);
+  if (c && charSession.getCurrentCharTab() === 'profil') charSession.renderTab('profil', c, true);
+  showNotif('Illustration mise à jour !', 'success');
+}
+
+export async function openProfilImageUpload(charId) {
+  // Mode gratuit (Cloudinary off) : l'illustration HD est pointée par URL
+  // (ex. image hébergée dans un dossier GitHub) → qualité conservée, zéro poids
+  // Firestore, aucun hébergeur payant.
+  if (!CLOUDINARY_ENABLED) {
+    const url = (await promptModal(
+      'Colle l\'URL de l\'illustration (ex. image hébergée dans un dossier GitHub) :',
+      { title: '🔗 Illustration par URL', placeholder: 'https://…raw.githubusercontent.com/…' },
+    ))?.trim();
+    if (!url) return;
+    try { await _applyProfilImageUrl(charId, url); }
+    catch (e) { console.error('[profilImage]', e); showNotif(`Erreur : ${e?.message || '?'}`, 'error'); }
+    return;
+  }
   if (!hasCloudinaryConfig()) {
     showNotif('Configuration Cloudinary requise — saisis-la puis relance l\'upload.', 'error');
     openCloudinaryConfigModal();
@@ -856,20 +887,7 @@ export function openProfilImageUpload(charId) {
         folder: 'characters',
         tags: ['profil', charId],
       });
-      const pres = _profilCache[charId];
-      const data = pres
-        ? { imageUrl }
-        : { charId, uid: STATE.user?.uid || '', imageUrl, visible: true, ordre: 999, content: '' };
-      if (pres?.id) {
-        await updateInCol('players', pres.id, { imageUrl });
-        _profilCache[charId] = { ...pres, imageUrl };
-      } else {
-        const newId = await addToCol('players', data);
-        _profilCache[charId] = { id: newId, ...data };
-      }
-      const c = getCharacterById(charId);
-      if (c && charSession.getCurrentCharTab() === 'profil') charSession.renderTab('profil', c, true);
-      showNotif('Illustration mise à jour !', 'success');
+      await _applyProfilImageUrl(charId, imageUrl);
     } catch (e) {
       console.error('[profilImage]', e);
       showNotif(`Erreur upload : ${e?.message || '?'}`, 'error');

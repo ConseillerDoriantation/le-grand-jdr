@@ -5,6 +5,7 @@
 import { STATE } from './state.js';
 import { navigate } from './navigation.js';
 import { appSplashHtml } from '../shared/html.js';
+import { CLOUDINARY_ENABLED } from '../shared/upload-cloudinary.js';
 
 // Masque le splash de boot dès qu'un écran principal est prêt à s'afficher.
 function _hideBootSplash() {
@@ -76,6 +77,13 @@ export function showApp() {
   document.querySelectorAll('.admin-only').forEach((el) => {
     el.style.display = STATE.isAdmin ? 'flex' : 'none';
   });
+
+  // Cloudinary désactivé (mode gratuit) → masquer le bouton de config même pour
+  // le MJ. Réapparaît si CLOUDINARY_ENABLED repasse à true (cf. upload-cloudinary.js).
+  if (!CLOUDINARY_ENABLED) {
+    const clBtn = document.querySelector('[data-action="cloudinaryConfig"]');
+    if (clBtn) clBtn.style.display = 'none';
+  }
 }
 
 function _initSidebarExpansion() {

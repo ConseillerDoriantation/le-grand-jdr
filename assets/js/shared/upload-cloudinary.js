@@ -15,6 +15,16 @@
 // touche que le point d'upload, pas les données existantes.
 // ══════════════════════════════════════════════════════════════════════
 
+// ══════════════════════════════════════════════════════════════════════
+// BASCULE GLOBALE — false = Cloudinary désactivé (mode gratuit base64/URL).
+// Quota Cloudinary épuisé → on stocke les petites images en base64 (Firestore)
+// et les grandes (cartes, illustrations) via une URL (dossier GitHub Pages).
+// TOUT le code Cloudinary ci-dessous est conservé : repasse simplement ce flag
+// à `true` le jour où tu (re)prends un plan Cloudinary (ex. commercialisation)
+// et les call sites recommenceront à uploader via Cloudinary.
+// ══════════════════════════════════════════════════════════════════════
+export const CLOUDINARY_ENABLED = false;
+
 const LS_CLOUD  = 'cloudinary-cloud-name';
 const LS_PRESET = 'cloudinary-upload-preset';
 
