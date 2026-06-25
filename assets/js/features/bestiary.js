@@ -734,6 +734,15 @@ async function _bstButinPickerOpen(creatureId) {
   });
 }
 
+// Or lâché par la créature : nombre brut ("20") ou formule de dés ("5d4").
+// Le jet n'est pas fait ici — il l'est dans le VTT à l'envoi vers la réserve MJ.
+function _bstSaveOr(id, val) {
+  const c = STORE.creatures.find(x => x.id === id);
+  if (!c) return;
+  c.or = String(val || '').trim();
+  _bstQueueSave(id, { or: c.or });
+}
+
 // Matrice de relations aux dégâts (panneau, version chips compacte)
 function _renderDamageMatrixPanel(c, types) {
   return `<div class="bst-section">
@@ -1758,6 +1767,13 @@ function _renderPanelAdmin(c, rs) {
         <span class="bst-section-count" data-bst-count="${c.id}-butins">${butins.length}</span>
         <button class="bst-add-row-btn" data-bst-action="pickerOpen" data-id="${c.id}">+ Ajouter</button>
       </div>
+      <div class="bst-butin-or-row">
+        <span class="bst-butin-or-ic">🪙</span>
+        <input class="bst-p-input bst-butin-or-input" type="text" placeholder="Or lâché — ex : 5d4 ou 20"
+          value="${_esc(c.or || '')}" title="Or lâché à la mort : nombre brut (20) ou formule de dés (5d4, 2d6+3). Le jet est fait dans le VTT."
+          data-bst-action="saveOr" data-bst-on="input" data-id="${c.id}">
+        <span class="bst-butin-or-hint">brut ou XdY</span>
+      </div>
       <div id="bst-p-butins-${c.id}" class="bst-p-rows">
         ${butins.map((b, i) => _panelButinRow(b, c.id, i)).join('')}
       </div>
@@ -2269,6 +2285,7 @@ Object.assign(bstHandlers, {
   removeAction:   (el) => _bstRemoveAction(parseInt(el.dataset.idx)),
   addRow:         (el) => _bstAddPanelRow(el.dataset.id, el.dataset.type),
   saveArr:        (el) => _bstSaveArr(el.dataset.id, el.dataset.type),
+  saveOr:         (el) => _bstSaveOr(el.dataset.id, el.value),
   removeRow:      (el) => _bstRemovePanelRow(el.dataset.id, el.dataset.type, el),
 
   // Picker de butin (délégation au composant partagé shop-picker.js — pas de handlers locaux)

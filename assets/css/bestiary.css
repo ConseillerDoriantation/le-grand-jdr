@@ -944,3 +944,14 @@ textarea.bst-deduct-input {
 }
 /* La liste de butins : pas de gap-pile énorme entre rows */
 .bst-p-rows .bst-butin-card + .bst-butin-card { margin-top: .2rem; }
+
+/* ── Or lâché (formule brute ou XdY) dans la section Butins du panneau ── */
+.bst-butin-or-row {
+  display: flex; align-items: center; gap: .4rem;
+  margin-bottom: .5rem;
+}
+.bst-butin-or-ic { font-size: 1rem; flex-shrink: 0; }
+.bst-butin-or-input { flex: 1; min-width: 0; }
+.bst-butin-or-hint {
+  font-size: .65rem; color: var(--text-dim); font-style: italic; flex-shrink: 0;
+}

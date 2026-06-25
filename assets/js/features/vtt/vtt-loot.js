@@ -12,9 +12,32 @@ import { VS, aid } from './vtt-state.js';
 import { _esc } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
+import { promptModal } from '../../shared/modal.js';
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { sortCharactersForDisplay } from '../../shared/char-stats.js';
+import { useGold } from '../../shared/economy.js';
 import { _chrRef } from './vtt-refs.js';   // ref Firestore perso (leaf)
+
+// Quantité « prenable » d'une entrée de butin : objets → qty, or → amount.
+const _lootCount = (item) => item?.kind === 'gold' ? (item.amount || 0) : (item.qty || 0);
+
+// Or lâché : nombre brut ("20") ou formule de dés ("5d4", "2d6+3"). Jet inclus.
+function _rollGoldFormula(str) {
+  const s = String(str ?? '').trim().toLowerCase().replace(/\s+/g, '');
+  if (!s) return 0;
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  const m = s.match(/^(\d+)d(\d+)([+-]\d+)?$/);
+  if (m) {
+    const n = Math.min(100, parseInt(m[1], 10) || 0);
+    const f = Math.max(1, parseInt(m[2], 10) || 1);
+    const bonus = m[3] ? parseInt(m[3], 10) : 0;
+    let total = 0;
+    for (let i = 0; i < n; i++) total += 1 + Math.floor(Math.random() * f);
+    return Math.max(0, total + bonus);
+  }
+  const f2 = s.match(/\d+/);
+  return f2 ? parseInt(f2[0], 10) : 0;
+}
 
 // ── État local butin ────────────────────────────────────────────────
 let _loot            = { stash: [], loot: [] };
@@ -73,18 +96,32 @@ function _renderLootPanel() {
   const uid = STATE.user?.uid;
   const myChars = sortCharactersForDisplay(Object.values(VS.characters).filter(c => c.uid === uid));
   const _itemRow = (item, zone) => {
+    const isGold = item.kind === 'gold';
     const rarColor = { commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff', tres_rare:'#b47fff', legendaire:'#f59e0b' }[item.rarete] || '#9ca3af';
+    const removeBtn = (zone === 'stash' && mj) ? `<button class="vtt-icon-btn" data-vtt-fn="_vttLootRemoveStash" data-vtt-args="${item.id}" title="Retirer">✕</button>`
+      : (zone === 'loot' && mj) ? `<button class="vtt-icon-btn" data-vtt-fn="_vttLootRemoveLoot" data-vtt-args="${item.id}" title="Retirer">✕</button>` : '';
+    const takeBtn = (zone === 'loot' && myChars.length) ? `<button class="vtt-loot-take-btn" data-vtt-fn="_vttLootToggleTake" data-vtt-args="${item.id}">Prendre</button>` : '';
+    const dragHandle = mj ? `<span class="vtt-loot-drag" title="${zone === 'stash' ? 'Glisser vers le butin' : 'Glisser vers la réserve'}">⠿</span>` : '';
+    const inline = zone === 'loot' ? `<div class="vtt-loot-take-inline" id="vtt-take-inline-${item.id}" style="display:none"></div>` : '';
+    if (isGold) {
+      return `<div class="vtt-loot-row-wrap" data-id="${item.id}">
+        <div class="vtt-loot-row vtt-loot-row--gold" data-id="${item.id}">
+          ${dragHandle}
+          <span class="vtt-loot-gold-ic">🪙</span>
+          <span class="vtt-loot-name">Or</span>
+          <span class="vtt-loot-qty">${item.amount || 0}</span>
+          ${removeBtn}${takeBtn}
+        </div>${inline}
+      </div>`;
+    }
     return `<div class="vtt-loot-row-wrap" data-id="${item.id}">
       <div class="vtt-loot-row" data-id="${item.id}">
-        ${mj ? `<span class="vtt-loot-drag" title="${zone === 'stash' ? 'Glisser vers le butin' : 'Glisser vers la réserve'}">⠿</span>` : ''}
+        ${dragHandle}
         <span class="vtt-loot-dot" style="background:${rarColor}"></span>
         <span class="vtt-loot-name">${_esc(item.nom)}</span>
         <span class="vtt-loot-qty">×${item.qty}</span>
-        ${zone === 'stash' && mj ? `<button class="vtt-icon-btn" data-vtt-fn="_vttLootRemoveStash" data-vtt-args="${item.id}" title="Retirer">✕</button>` : ''}
-        ${zone === 'loot'  && mj ? `<button class="vtt-icon-btn" data-vtt-fn="_vttLootRemoveLoot" data-vtt-args="${item.id}" title="Retirer">✕</button>` : ''}
-        ${zone === 'loot' && myChars.length ? `<button class="vtt-loot-take-btn" data-vtt-fn="_vttLootToggleTake" data-vtt-args="${item.id}">Prendre</button>` : ''}
-      </div>
-      ${zone === 'loot' ? `<div class="vtt-loot-take-inline" id="vtt-take-inline-${item.id}" style="display:none"></div>` : ''}
+        ${removeBtn}${takeBtn}
+      </div>${inline}
     </div>`;
   };
 
@@ -93,7 +130,10 @@ function _renderLootPanel() {
     <div class="vtt-loot-section">
       <div class="vtt-loot-sec-hd">
         <span>🔒 Réserve MJ</span>
-        <button class="vtt-btn-sm" data-vtt-fn="_vttLootOpenShop">＋ Ajouter</button>
+        <span class="vtt-loot-sec-actions">
+          <button class="vtt-btn-sm" data-vtt-fn="_vttLootAddGoldPrompt" title="Ajouter de l'or (nombre brut ou formule XdY)">🪙 Or</button>
+          <button class="vtt-btn-sm" data-vtt-fn="_vttLootOpenShop">＋ Ajouter</button>
+        </span>
       </div>
       <div class="vtt-loot-list" id="vtt-stash-list">
         ${_loot.stash.length ? _loot.stash.map(i => _itemRow(i, 'stash')).join('') : '<div class="vtt-loot-empty">Vide — ajoutez des objets</div>'}
@@ -131,9 +171,13 @@ function _initLootSortable() {
         evt.item.remove();
         const src = _loot.loot.find(i => i.id === id);
         if (!src) return;
-        const existing = _loot.stash.find(i => i.itemId === src.itemId);
-        if (existing) { existing.qty += src.qty; }
-        else { _loot.stash.push({ ...src, id: crypto.randomUUID() }); }
+        const existing = src.kind === 'gold'
+          ? _loot.stash.find(i => i.kind === 'gold')
+          : _loot.stash.find(i => i.itemId === src.itemId);
+        if (existing) {
+          if (src.kind === 'gold') existing.amount = (existing.amount || 0) + (src.amount || 0);
+          else existing.qty += src.qty;
+        } else { _loot.stash.push({ ...src, id: crypto.randomUUID() }); }
         _loot.loot = _loot.loot.filter(i => i.id !== id);
         _saveLoot();
       },
@@ -150,9 +194,13 @@ function _initLootSortable() {
         evt.item.remove();
         const src = _loot.stash.find(i => i.id === id);
         if (!src) return;
-        const existing = _loot.loot.find(i => i.itemId === src.itemId);
-        if (existing) { existing.qty += src.qty; }
-        else { _loot.loot.push({ ...src, id: crypto.randomUUID() }); }
+        const existing = src.kind === 'gold'
+          ? _loot.loot.find(i => i.kind === 'gold')
+          : _loot.loot.find(i => i.itemId === src.itemId);
+        if (existing) {
+          if (src.kind === 'gold') existing.amount = (existing.amount || 0) + (src.amount || 0);
+          else existing.qty += src.qty;
+        } else { _loot.loot.push({ ...src, id: crypto.randomUUID() }); }
         _loot.stash = _loot.stash.filter(i => i.id !== id);
         _saveLoot();
       },
@@ -269,6 +317,44 @@ async function _vttCreatSendLootToStash(beastId, idx, btn) {
   showNotif(`+${qty} "${item.nom}" → réserve MJ`, 'success');
 }
 
+/** Helper : ajoute de l'or à la réserve MJ (fusionne avec l'entrée or existante). */
+async function _vttLootAddGoldToStash(amount) {
+  await _ensureLootListener();
+  const amt = Math.max(0, Math.floor(Number(amount) || 0));
+  if (!amt) return;
+  const g = _loot.stash.find(s => s.kind === 'gold');
+  if (g) g.amount = (g.amount || 0) + amt;
+  else _loot.stash.push({ id: crypto.randomUUID(), kind: 'gold', nom: 'Or', amount: amt });
+  await _saveLoot();
+}
+
+/** MJ : ajoute de l'or à la réserve à la main (nombre brut ou formule XdY). */
+async function _vttLootAddGoldPrompt() {
+  if (!STATE.isAdmin) return;
+  const val = (await promptModal('Or à ajouter — nombre brut (200) ou formule de dés (5d4, 2d6+10) :', { title: '🪙 Ajouter de l\'or', placeholder: 'ex : 200 ou 5d4' }))?.trim();
+  if (!val) return;
+  const amt = _rollGoldFormula(val);
+  if (!amt) { showNotif('Montant invalide', 'error'); return; }
+  await _vttLootAddGoldToStash(amt);
+  showNotif(`🪙 +${amt} or → réserve MJ`, 'success');
+}
+
+/** MJ : lance l'or d'une créature (formule "5d4"/"20") → réserve MJ. */
+async function _vttCreatSendGoldToStash(beastId, btn) {
+  if (!STATE.isAdmin) return;
+  const formula = VS.bestiary[beastId]?.or;
+  if (!formula) { showNotif('Aucun or défini pour cette créature', 'error'); return; }
+  const amt = _rollGoldFormula(formula);
+  if (!amt) { showNotif('Or lancé = 0', 'warning'); return; }
+  await _vttLootAddGoldToStash(amt);
+  if (btn) {
+    btn.textContent = '✓';
+    btn.classList.add('vtt-creat-loot-add--ok');
+    setTimeout(() => { btn.textContent = '＋'; btn.classList.remove('vtt-creat-loot-add--ok'); }, 800);
+  }
+  showNotif(`🪙 ${formula} → ${amt} or → réserve MJ`, 'success');
+}
+
 // Joueur : expand inline sur la ligne pour choisir perso + quantité (pas de 2e modal)
 // État courant par item : qty choisie + perso sélectionné (chip)
 const _lootTakeState = {}; // { [itemId]: { qty, charId } }
@@ -287,7 +373,7 @@ function _vttLootToggleTake(id) {
   const myChars = sortCharactersForDisplay(Object.values(VS.characters).filter(c => c.uid === uid));
   if (!myChars.length) { showNotif('Aucun personnage trouvé', 'error'); return; }
 
-  _lootTakeState[id] = { qty: item.qty, charId: myChars[0].id };
+  _lootTakeState[id] = { qty: _lootCount(item), charId: myChars[0].id };
   _renderLootTake(id);
   el.style.display = 'block';
 }
@@ -299,7 +385,8 @@ function _renderLootTake(id) {
   if (!el || !item || !st) return;
   const uid = STATE.user?.uid;
   const myChars = sortCharactersForDisplay(Object.values(VS.characters).filter(c => c.uid === uid));
-  const max = item.qty;
+  const isGold = item.kind === 'gold';
+  const max = _lootCount(item);
   st.qty = Math.max(1, Math.min(max, st.qty || 1));
 
   const charBar = myChars.length > 1 ? `
@@ -323,7 +410,7 @@ function _renderLootTake(id) {
       ${max > 1 ? `<button class="vtt-loot-step-all" data-vtt-fn="_vttLootTakeStep" data-vtt-args="${id}|max" ${st.qty>=max?'disabled':''}>Tout</button>` : ''}
       <button class="vtt-loot-take-cancel" data-vtt-fn="_vttLootToggleTake" data-vtt-args="${id}" title="Annuler">✕</button>
     </div>
-    <button class="vtt-loot-take-go" data-vtt-fn="_vttLootConfirmTake" data-vtt-args="${id}">Prendre ×${st.qty}</button>
+    <button class="vtt-loot-take-go" data-vtt-fn="_vttLootConfirmTake" data-vtt-args="${id}">${isGold ? `Prendre ${st.qty} or` : `Prendre ×${st.qty}`}</button>
   `;
 }
 
@@ -336,8 +423,9 @@ function _vttLootTakeStep(id, delta) {
   const item = _loot.loot.find(i => i.id === id);
   const st = _lootTakeState[id];
   if (!item || !st) return;
-  if (delta === 'max') st.qty = item.qty;
-  else st.qty = Math.max(1, Math.min(item.qty, (st.qty || 1) + delta));
+  const max = _lootCount(item);
+  if (delta === 'max') st.qty = max;
+  else st.qty = Math.max(1, Math.min(max, (st.qty || 1) + delta));
   _renderLootTake(id);
 }
 
@@ -346,9 +434,23 @@ async function _vttLootConfirmTake(id) {
   if (!item) return;
   const st      = _lootTakeState[id] || {};
   const charId  = st.charId;
-  const qty     = Math.min(item.qty, Math.max(1, st.qty || 1));
+  const qty     = Math.min(_lootCount(item), Math.max(1, st.qty || 1));
   const char    = VS.characters[charId];
   if (!char || !charId) { showNotif('Personnage introuvable', 'error'); return; }
+
+  // ── Or : crédite le compte du perso (livre de compte) via la couche economy ──
+  if (item.kind === 'gold') {
+    const res = await useGold(charId, +qty, 'Butin (VTT)', { charObj: char });
+    if (!res?.ok) { showNotif(res?.error || 'Erreur lors de la prise de l\'or', 'error'); return; }
+    if ((item.amount || 0) - qty <= 0) _loot.loot = _loot.loot.filter(i => i.id !== id);
+    else item.amount -= qty;
+    try {
+      await _saveLoot();
+      delete _lootTakeState[id];
+      showNotif(`🪙 +${qty} or → ${_esc(char.nom || char.pseudo || '?')}`, 'success');
+    } catch { showNotif('Erreur lors de la prise du butin', 'error'); }
+    return;
+  }
 
   const inv = Array.isArray(char.inventaire) ? [...char.inventaire] : [];
   // Snapshot canonique loot → inventaire (préserve tous les champs présents et futurs)
@@ -391,6 +493,8 @@ export {
   _resetLootState,
   _saveLoot,
   _vttCreatSendLootToStash,
+  _vttCreatSendGoldToStash,
+  _vttLootAddGoldPrompt,
   _vttLootAddItemToStash,
   _vttLootClear,
   _vttLootConfirmTake,

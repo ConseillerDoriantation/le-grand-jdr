@@ -5958,3 +5958,16 @@
 @keyframes vtt-wfog-drift { from { transform: translateX(-14%); } to { transform: translateX(14%); } }
 
 @media (prefers-reduced-motion: reduce) { .vtt-weather-fx * { animation: none !important; } }
+
+/* ── Or dans les butins (inspecteur créature + panneau butin) ── */
+.vtt-creat-loot--gold .vtt-creat-loot-img--gold {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem; background: var(--gold-glow);
+  border: 1px solid oklch(72% 0.14 52 / 0.35);
+}
+.vtt-creat-loot--gold .vtt-creat-loot-name { color: var(--gold); font-weight: 600; }
+.vtt-loot-row--gold { background: var(--gold-glow); }
+.vtt-loot-row--gold .vtt-loot-name { color: var(--gold); font-weight: 600; }
+.vtt-loot-gold-ic { font-size: .95rem; flex-shrink: 0; }
+.vtt-loot-row--gold .vtt-loot-qty { color: var(--gold); }
+.vtt-loot-sec-actions { display: inline-flex; gap: 4px; align-items: center; }

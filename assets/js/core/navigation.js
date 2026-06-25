@@ -59,7 +59,10 @@ const FEATURE_CSS = {
   players:    ['histoire.css'],
   bastion:    ['bastion.css'],
   vtt:        ['vtt.css'],
-  bestiaire:  ['bestiary.css'],
+  // shop-picker.css : le picker de butins (shared/shop-picker.js) utilise des
+  // classes `vtt-loot-*` qui ne vivent sinon que dans vtt.css → sans lui, la
+  // modale d'ajout de butin s'affiche sans style hors VTT.
+  bestiaire:  ['bestiary.css', 'shop-picker.css'],
   agenda:     ['agenda.css', 'recipes.css'],
   recettes:   ['recipes.css'],
   account:    ['account.css'],

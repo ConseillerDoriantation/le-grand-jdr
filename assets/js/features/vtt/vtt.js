@@ -110,7 +110,8 @@ import {
 import {
   _vttToggleLoot, _vttLootRemoveStash, _vttLootRemoveLoot, _vttLootClear,
   _vttLootAddItemToStash, _vttLootOpenShop, _vttLootToggleTake, _vttLootTakeSetChar,
-  _vttLootTakeStep, _vttLootConfirmTake, _vttCreatSendLootToStash, _resetLootState,
+  _vttLootTakeStep, _vttLootConfirmTake, _vttCreatSendLootToStash, _vttCreatSendGoldToStash,
+  _vttLootAddGoldPrompt, _resetLootState,
   _closeLootPanel,
 } from './vtt-loot.js';
 import {
@@ -8814,6 +8815,8 @@ export const VTT_ACTIONS = {
   _vttCourir,
   _vttCourirAndClose,
   _vttCreatSendLootToStash,
+  _vttCreatSendGoldToStash,
+  _vttLootAddGoldPrompt,
   _vttCreateEnemy,
   _vttCreatePlaylist,
   _vttDeletePage,

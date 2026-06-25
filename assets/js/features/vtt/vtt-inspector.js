@@ -299,8 +299,8 @@ export function _renderInspectorImpl(t) {
                   <div class="vtt-creat-trait-name">${_esc(tr.nom || '')}</div>
                   ${tr.description ? `<div class="vtt-creat-trait-desc">${_esc(tr.description)}</div>` : ''}
                 </div>`).join('')}` : ''}
-            ${_btn.length ? `
-              <div class="vtt-creat-sub-title">💰 Butins (${_btn.length})</div>
+            ${(_btn.length || beast.or) ? `
+              <div class="vtt-creat-sub-title">💰 Butins${_btn.length ? ` (${_btn.length})` : ''}</div>
               <div class="vtt-creat-loots">
                 ${_btn.map((b,i) => {
                   const orphan = !b.itemId;
@@ -316,6 +316,12 @@ export function _renderInspectorImpl(t) {
                       : `<button class="vtt-creat-loot-add" data-vtt-fn="_vttCreatSendLootToStash" data-vtt-args="${t.beastId}|${i}|$this" title="Envoyer à la réserve MJ">＋</button>`}
                   </div>`;
                 }).join('')}
+                ${beast.or ? `<div class="vtt-creat-loot vtt-creat-loot--gold">
+                  <span class="vtt-creat-loot-img vtt-creat-loot-img--gold">🪙</span>
+                  <span class="vtt-creat-loot-name">Or</span>
+                  <span class="vtt-creat-loot-meta">${_esc(beast.or)}</span>
+                  <button class="vtt-creat-loot-add" data-vtt-fn="_vttCreatSendGoldToStash" data-vtt-args="${t.beastId}|$this" title="Lancer l'or (${_esc(beast.or)}) et l'envoyer à la réserve MJ">＋</button>
+                </div>` : ''}
               </div>` : ''}
           </div>`;
       } else {
