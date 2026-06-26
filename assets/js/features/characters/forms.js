@@ -325,7 +325,7 @@ async function _openCharOwnerPicker() {
       <div style="flex:1"></div>
       <button class="btn btn-gold" data-action="confirmNewChar">Créer le personnage</button>
     </div>
-  `);
+  `, { subtitle: 'Rattacher la fiche à un compte joueur', accent: '#22c38e' });
 }
 
 async function confirmNewChar() {
@@ -365,7 +365,7 @@ async function reassignCharOwner(charId) {
       <button class="btn btn-outline btn-sm" data-action="cancelNewChar">Annuler</button>
       <div style="flex:1"></div>
       <button class="btn btn-gold" data-action="confirmReassignChar" data-id="${charId}">Réassigner</button>
-    </div>`);
+    </div>`, { subtitle: 'Changer le compte propriétaire', accent: '#4f8cff' });
 }
 
 async function confirmReassignChar(charId) {

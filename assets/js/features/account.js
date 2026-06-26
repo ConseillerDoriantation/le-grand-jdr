@@ -211,7 +211,7 @@ function openEditPseudo() {
       <button class="btn btn-gold" style="flex:1" data-action="savePseudo">Enregistrer</button>
       <button class="btn btn-outline btn-sm" data-action="_accClose">Annuler</button>
     </div>
-  `);
+  `, { subtitle: 'Ton nom d\'aventurier, visible par la table' });
   setTimeout(() => {
     const el = document.getElementById('acc-pseudo');
     el?.focus(); el?.select();
@@ -265,7 +265,7 @@ function openEditEmail() {
       <button class="btn btn-gold" style="flex:1" data-action="saveEmail">Enregistrer</button>
       <button class="btn btn-outline btn-sm" data-action="_accClose">Annuler</button>
     </div>
-  `);
+  `, { subtitle: 'Mot de passe actuel requis pour confirmer', accent: '#4f8cff' });
 }
 
 async function saveEmail() {
@@ -311,7 +311,7 @@ function openEditPassword() {
       <button class="btn btn-gold" style="flex:1" data-action="savePassword">Enregistrer</button>
       <button class="btn btn-outline btn-sm" data-action="_accClose">Annuler</button>
     </div>
-  `);
+  `, { subtitle: 'Mot de passe actuel requis pour confirmer', accent: '#4f8cff' });
 }
 
 async function savePassword() {
@@ -365,7 +365,7 @@ function openDeleteAccount() {
       </button>
       <button class="btn btn-outline btn-sm" data-action="_accClose">Annuler</button>
     </div>
-  `);
+  `, { subtitle: 'Action irréversible', accent: '#ff6b6b' });
 }
 
 async function confirmDeleteAccount() {

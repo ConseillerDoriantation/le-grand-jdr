@@ -19,7 +19,7 @@ import { getDocData, updateInCol, loadCollection, replaceDoc } from '../data/fir
 import { tryDoc } from '../shared/crud.js';
 import { watchDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
-import { openModal, closeModal, confirmModal } from '../shared/modal.js';
+import { openModal, closeModal, confirmModal, modalSection } from '../shared/modal.js';
 import { _esc, _norm, appSplashHtml } from '../shared/html.js';
 import { calcOr, getDefaultCharForUser } from '../shared/char-stats.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
@@ -512,14 +512,15 @@ async function _bastionEditIdentite() {
   if (!STATE.isAdmin) return;
   const b = STORE.bastion || _defaultBastion();
   openModal('🏰 Identité du Bastion', `
-    <div class="form-group"><label>Nom</label>
-      <input class="input-field" id="bas-nom" value="${_esc(b.nom||'')}"></div>
-    <div class="form-group"><label>Emoji / icône</label>
-      <input class="input-field" id="bas-emoji" value="${_esc(b.emoji||'🏰')}" maxlength="4" style="max-width:90px;font-size:1.4rem;text-align:center"></div>
-    <div class="form-group"><label>Lieu</label>
-      <input class="input-field" id="bas-lieu" value="${_esc(b.lieu||'')}" placeholder="ex: Faubourg sud de Belport"></div>
-    <div class="form-group"><label>Description</label>
-      <textarea class="input-field" id="bas-desc" rows="4" placeholder="Histoire, ambiance, particularités…">${_esc(b.description||'')}</textarea></div>
+    ${modalSection('📋 Informations générales', `
+      <div class="form-group" style="margin:0 0 .6rem"><label>Nom</label>
+        <input class="input-field" id="bas-nom" value="${_esc(b.nom||'')}"></div>
+      <div class="form-group" style="margin:0 0 .6rem"><label>Emoji / icône</label>
+        <input class="input-field" id="bas-emoji" value="${_esc(b.emoji||'🏰')}" maxlength="4" style="max-width:90px;font-size:1.4rem;text-align:center"></div>
+      <div class="form-group" style="margin:0 0 .6rem"><label>Lieu</label>
+        <input class="input-field" id="bas-lieu" value="${_esc(b.lieu||'')}" placeholder="ex: Faubourg sud de Belport"></div>
+      <div class="form-group" style="margin:0"><label>Description</label>
+        <textarea class="input-field" id="bas-desc" rows="4" placeholder="Histoire, ambiance, particularités…">${_esc(b.description||'')}</textarea></div>`)}
     <button class="btn btn-gold" style="width:100%" data-action="_bastionSaveIdentite">Enregistrer</button>
 
     <div class="bs-danger-zone">
@@ -530,7 +531,7 @@ async function _bastionEditIdentite() {
       </p>
       <button class="btn btn-outline btn-sm bs-danger-btn" data-action="_bastionResetAll">🗑 Réinitialiser tout le Bastion</button>
     </div>
-  `);
+  `, { subtitle: 'Nom, lieu et description du Bastion', accent: '#f4c430' });
 }
 
 async function _bastionResetAll() {

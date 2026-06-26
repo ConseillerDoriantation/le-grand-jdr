@@ -627,7 +627,7 @@ function openRecurringEditor() {
       <button class="btn btn-outline btn-sm" data-action="_agSetRecurringPattern" data-pattern="fri-eve">🎲 Vendredi soir</button>
       <button class="btn btn-outline btn-sm" data-action="_agSetRecurringPattern" data-pattern="reset">🚫 Reset</button>
     </div>
-  `);
+  `, { subtitle: 'Tes disponibilités par défaut, semaine type', accent: '#22c38e' });
 }
 function cycleRecurringSlot(dayId, slotId, btn) {
   _cycleRecurring(dayId, slotId);
