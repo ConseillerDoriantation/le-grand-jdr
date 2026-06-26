@@ -15,5 +15,12 @@ export function calcSpellTargets(spell = {}) {
 export function calcSpellDuration(spell = {}) {
   const nbDur = runeCount(spell, 'Durée');
   const base = (spell?.dureeBase && spell.dureeBase >= 2) ? +spell.dureeBase : 2;
-  return base + (nbDur > 0 ? 2 * nbDur : 0);
+  const dur = base + (nbDur > 0 ? 2 * nbDur : 0);
+  // Concentration (hors combo Réaction, qui stocke un sort instantané) : le sort
+  // est maintenu tant que la concentration tient → durée longue par défaut (10
+  // tours) au lieu des 2 tours persistants. Un override manuel supérieur l'emporte.
+  if (runeCount(spell, 'Concentration') > 0 && runeCount(spell, 'Réaction') === 0) {
+    return Math.max(10, dur);
+  }
+  return dur;
 }

@@ -670,6 +670,8 @@ export function _needsDureeBase(s) {
   if (runes.includes('Durée')) return true;
   if (runes.includes('Enchantement') || runes.includes('Affliction')) return true;
   if (runes.includes('Protection') && (s?.protectionMode || 'ca') === 'ca') return true;
+  // Concentration maintenue (hors combo Réaction) : sort à durée (10 tours).
+  if (runes.includes('Concentration') && !runes.includes('Réaction')) return true;
   return false;
 }
 
@@ -683,7 +685,14 @@ export function _calcSortDuree(s) {
   return calcSpellDuration(s);
 }
 export function _autoSourceDuree(s) {
-  const nbDur = (s?.runes || []).filter(r => r === 'Durée').length;
+  const runes = s?.runes || [];
+  const nbDur = runes.filter(r => r === 'Durée').length;
+  // Concentration maintenue (hors combo Réaction) : durée longue par défaut.
+  if (runes.includes('Concentration') && !runes.includes('Réaction')) {
+    return nbDur
+      ? `Concentration · maintenu (10 tours) · +${2 * nbDur} via Durée`
+      : 'Concentration · maintenu tant que concentré (10 tours)';
+  }
   if (nbDur === 0) return 'base persistante';
   if (nbDur === 1) return '+1 Durée · +2 tours';
   return `+${nbDur} Durée · +${2 * nbDur} tours`;
