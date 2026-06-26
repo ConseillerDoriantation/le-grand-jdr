@@ -78,8 +78,21 @@
     max-height: 58%; padding: .3rem .5rem .35rem;
   }
   .vtt-action-hud.is-collapsed { bottom: 0; }
-  /* Tiroir bas large → on retrouve une grille de cartes (hotbar). */
-  .vtt-aopt-section-body { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
+  /* Tiroir bas large → rangée horizontale (hotbar) : liste en ligne, sections
+     côte à côte, cartes à largeur fixe qui défilent horizontalement. */
+  .vtt-aopt-hud .vtt-aopt-list {
+    flex-direction: row; flex-wrap: nowrap; align-items: stretch;
+    overflow-x: auto; overflow-y: hidden; gap: .35rem; padding: 1px 0 6px;
+  }
+  .vtt-aopt-hud .vtt-aopt-section {
+    min-width: max-content; display: flex; flex-direction: row; align-items: stretch;
+    gap: .35rem; padding: 0;
+  }
+  .vtt-aopt-hud .vtt-aopt-section-hd { display: none; }
+  .vtt-aopt-hud .vtt-aopt-section-body {
+    display: flex; flex-direction: row; flex-wrap: nowrap; gap: .35rem; padding: 0;
+  }
+  .vtt-aopt-hud .vtt-castcard { flex: 0 0 168px; width: 168px; }
 }
 
 /* Cibles tactiles agrandies sur écrans tactiles uniquement (la souris,
@@ -2310,20 +2323,19 @@
 .vtt-aopt-hud .vtt-aopt-search { flex-shrink: 0; }
 .vtt-aopt-hud .vtt-atk-pm-bar { flex-shrink: 0; }
 
-/* La liste = une seule rangée horizontale scrollable (hotbar). */
+/* Panneau latéral : liste VERTICALE scrollable, sections empilées, 1 carte
+   pleine largeur par ligne. (En tiroir bas mobile → rangée horizontale, média.) */
 .vtt-aopt-hud .vtt-aopt-list {
-  flex-direction: row; flex-wrap: nowrap; align-items: stretch;
-  max-height: none; overflow-x: auto; overflow-y: hidden;
-  gap: .35rem; padding: 1px 0 6px;
+  flex-direction: column; flex-wrap: nowrap; align-items: stretch;
+  overflow-y: auto; overflow-x: hidden;
+  gap: .45rem; padding: 1px 2px 6px 0;
 }
 .vtt-aopt-hud .vtt-aopt-section {
-  min-width: max-content; display: flex; flex-direction: row; align-items: stretch;
-  gap: .35rem; padding: 0;
+  display: block; min-width: 0;
 }
-.vtt-aopt-hud .vtt-aopt-section-hd { display: none; }   /* les onglets servent déjà d'étiquette */
 .vtt-aopt-hud .vtt-aopt-section-body {
-  display: flex; flex-direction: row; flex-wrap: nowrap;
-  grid-template-columns: none; gap: .35rem; padding: 0;
+  display: grid; grid-template-columns: 1fr;
+  gap: 6px; padding: 6px;
 }
 
 /* ── Widgets personnage utilisés par le VTT (cartes de sort + invocations) ──
