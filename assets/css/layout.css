@@ -1778,11 +1778,11 @@ select.input-field, select.input-sm { cursor:pointer; }
 }
 .modal-overlay.show { opacity:1; pointer-events:all; }
 .modal {
-  background:
-    linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015)),
-    #10192d;
-  border:1px solid rgba(255,255,255,0.08);
-  border-radius:28px;
+  /* Même fond sombre/neutre que les modales admin (.sh-admin-modal) pour un
+     rendu unifié, plus sobre — au lieu du navy clair + voile blanc précédent. */
+  background: var(--bg-card, rgba(13,21,32,0.96));
+  border:1px solid var(--border-md, rgba(255,255,255,0.10));
+  border-radius:24px;
   padding:2rem;
   max-width:640px;
   width:92%;
@@ -1806,7 +1806,7 @@ select.input-field, select.input-sm { cursor:pointer; }
   padding:1rem 1.4rem;
   background:linear-gradient(90deg, var(--gold-glow, rgba(244,196,48,0.10)), transparent);
   border-bottom:1px solid var(--border, rgba(255,255,255,0.08));
-  border-radius:28px 28px 0 0;
+  border-radius:24px 24px 0 0;
   display:flex;
   justify-content:space-between;
   align-items:center;

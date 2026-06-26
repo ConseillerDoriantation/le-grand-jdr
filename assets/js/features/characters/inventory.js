@@ -3,7 +3,7 @@ import { charSession } from '../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
 import { updateInCol, loadCollection } from '../../data/firestore.js';
 import { trySave } from '../../shared/crud.js';
-import { openModal, closeModal } from '../../shared/modal.js';
+import { openModal, closeModal, modalSection } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _norm } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
@@ -902,18 +902,15 @@ export async function openSendGoldModal(charId) {
       <span style="font-size:1.1rem">💰</span>
       <span style="font-size:.84rem;color:var(--text)">Ton solde : <strong style="color:var(--gold)">${orDispo} or</strong></span>
     </div>
-    <div style="font-size:.72rem;color:var(--text-dim);font-weight:600;
-      text-transform:uppercase;letter-spacing:.8px;margin-bottom:.4rem">Destinataire</div>
-    ${targets.length > 4 ? `<input type="text" class="input-field" data-input="_sendTargetFilter" placeholder="🔍 Filtrer un personnage…" autocomplete="off" style="width:100%;margin-bottom:.45rem">` : ''}
-    <div id="send-target-list" style="display:flex;flex-direction:column;gap:.35rem;max-height:220px;overflow-y:auto;margin-bottom:.75rem">
-      ${targetCards}
-      <div id="send-target-empty" style="display:none;padding:.5rem;text-align:center;color:var(--text-dim);font-size:.76rem">Aucun personnage trouvé</div>
-    </div>
-    <div class="form-group" style="margin-bottom:.75rem">
-      <label style="font-size:.75rem">Montant <span style="color:var(--text-dim);font-weight:400">(max ${orDispo} or)</span></label>
+    ${modalSection('👤 Destinataire', `
+      ${targets.length > 4 ? `<input type="text" class="input-field" data-input="_sendTargetFilter" placeholder="🔍 Filtrer un personnage…" autocomplete="off" style="width:100%;margin-bottom:.45rem">` : ''}
+      <div id="send-target-list" style="display:flex;flex-direction:column;gap:.35rem;max-height:220px;overflow-y:auto">
+        ${targetCards}
+        <div id="send-target-empty" style="display:none;padding:.5rem;text-align:center;color:var(--text-dim);font-size:.76rem">Aucun personnage trouvé</div>
+      </div>`)}
+    ${modalSection(`💰 Montant <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">(max ${orDispo} or)</span>`, `
       <input type="number" class="input-field" id="gold-amount" min="1" max="${orDispo}" value="1"
-        placeholder="Montant en or" style="max-width:140px">
-    </div>
+        placeholder="Montant en or" style="max-width:140px">`)}
     <div style="display:flex;gap:.5rem">
       <button class="btn btn-gold" style="flex:1" data-action="sendGold" data-id="${charId}">💰 Envoyer</button>
       <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
