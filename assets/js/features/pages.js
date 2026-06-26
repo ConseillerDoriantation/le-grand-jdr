@@ -6,7 +6,7 @@ import { registerActions, dispatchAction } from '../core/actions.js';
 import { loadChars, loadCollection, getCachedCollection, getDocData } from '../data/firestore.js';
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
-import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser } from '../shared/char-stats.js';
+import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { showNotif } from '../shared/notifications.js';
 import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
@@ -38,7 +38,7 @@ const PAGES = {
     // l'arrivée de chaque source via les abonnements en bas de fonction. Ces
     // watch() se branchent sur les listeners session-live (0 lecture en plus)
     // et sont nettoyés par unwatchAll() à la navigation.
-    let allChars        = getCachedCollection('characters')   || [];
+    let allChars        = sortCharactersForDisplay(getCachedCollection('characters') || []);
     let storyItems      = getCachedCollection('story')        || [];
     let achievementsRaw = getCachedCollection('achievements') || [];
     let quests          = getCachedCollection('quests')       || [];
@@ -1006,7 +1006,7 @@ const PAGES = {
     // par unwatchAll() à la navigation. Le 1er snapshot cache vide est ignoré
     // côté firestore (gate trustworthy) → pas de flash "0" figé.
     paint();
-    watch('dash-characters',   'characters',   d => { allChars        = d || []; schedulePaint(); });
+    watch('dash-characters',   'characters',   d => { allChars        = sortCharactersForDisplay(d || []); schedulePaint(); });
     watch('dash-quests',       'quests',       d => { quests          = d || []; schedulePaint(); });
     watch('dash-story',        'story',        d => { storyItems      = d || []; schedulePaint(); });
     watch('dash-achievements', 'achievements', d => { achievementsRaw = d || []; schedulePaint(); });
@@ -1018,7 +1018,7 @@ const PAGES = {
   // ─── CHARACTERS ─────────────────────────────────────────────────────────────
   async characters() {
     const uid   = STATE.isAdmin ? null : STATE.user.uid;
-    const chars = await loadChars(uid);
+    const chars = sortCharactersForDisplay(await loadChars(uid));
     STATE.characters = chars;
     const content = document.getElementById('main-content');
     // V3 : page-header standard (titre comme les autres pages) + shell de la fiche.
@@ -1058,7 +1058,7 @@ const PAGES = {
     let previousChars = chars;
     watch("characters-live", "characters", data => {
       if (STATE.currentPage !== "characters") return;
-      const nextChars = STATE.isAdmin ? (data || []) : (data || []).filter(c => c.uid === STATE.user.uid);
+      const nextChars = sortCharactersForDisplay(STATE.isAdmin ? (data || []) : (data || []).filter(c => c.uid === STATE.user.uid));
       const activeId = charSession.getCurrentChar()?.id || STATE.activeChar?.id;
       const previousActive = previousChars.find(c => c.id === activeId);
       const nextActive = nextChars.find(c => c.id === activeId);
