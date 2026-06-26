@@ -2195,8 +2195,10 @@
 }
 
 .vtt-aopt-list {
-  display: flex; flex-direction: column; gap: .55rem;
-  max-height: 60vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: .4rem;
+  /* Plafond bas : le tiroir d'actions ne doit pas manger la moitié de l'écran.
+     Au-delà, on scrolle. (était 60vh → le HUD occupait ~60% en vertical). */
+  max-height: 34vh; overflow-y: auto;
   scrollbar-width: thin; scrollbar-color: var(--border) transparent;
   padding-right: 2px;
 }
