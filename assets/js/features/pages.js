@@ -1256,16 +1256,21 @@ registerActions({
   openAdventureSwitcher: ()    => openAdventureSwitcher(),
 
   // Admin lazy-load tools
-  _adminLazyOpen:        (btn) => {
+  _adminLazyOpen:        async (btn) => {
     const fn  = btn.dataset.fn;
     const mod = btn.dataset.module;
+    // Les modales admin empruntent les styles de leur feature d'origine → on
+    // charge la feuille correspondante AVANT d'ouvrir (sinon modale sans style).
+    const cssPage = { 'characters': 'characters', 'histoire': 'histoire', 'vtt/vtt': 'vtt' }[mod];
+    if (cssPage) {
+      try { const { _ensureFeatureCss } = await import('../core/navigation.js'); await _ensureFeatureCss(cssPage); } catch {}
+    }
     if (window[fn]) { window[fn](); return; }
-    import(`./${mod}.js`).then(() => {
-      if (window[fn]) { window[fn](); return; }
-      const proxy = document.createElement('button');
-      proxy.dataset.action = fn;
-      dispatchAction(proxy, new Event('click'));
-    });
+    await import(`./${mod}.js`);
+    if (window[fn]) { window[fn](); return; }
+    const proxy = document.createElement('button');
+    proxy.dataset.action = fn;
+    dispatchAction(proxy, new Event('click'));
   },
 });
 
