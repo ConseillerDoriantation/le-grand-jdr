@@ -23,6 +23,7 @@ import {
   addDoc, updateDoc, deleteDoc,
   onSnapshot,
   query, where,
+  writeBatch, Timestamp,
 } from '../config/firebase.js';
 
 // ── Scope aventure ─────────────────────────────
@@ -528,6 +529,120 @@ export function getCachedCollection(col) {
   const live = _liveCollections.get(path);
   if (live && !live.failed && live.firstReceived) return live.data;
   return _cacheGet(`${path}:all`);
+}
+
+// ── Backup complet d'une campagne ─────────────────────────────────────────────
+// Liste EXPLICITE des sous-collections DURABLES à sauvegarder. Le SDK client ne
+// peut pas énumérer les sous-collections d'un document → en ajouter une nouvelle
+// au métier IMPLIQUE de l'ajouter ici, sinon elle sort du backup.
+// Exclus volontairement : éphémères / temps réel (vttPings, presence, vttCasting,
+// vttEmoteReactions, bestiary_tracker, vttLogGm) et le journal volumineux vttLog
+// (passer includeLog:true pour l'inclure).
+export const CAMPAIGN_EXPORT_COLLECTIONS = [
+  'characters', 'npcs', 'npc_affinites',
+  'story', 'story_meta', 'story_histories', 'quests',
+  'places', 'place_types', 'organizations', 'map_lieux',
+  'world', 'informations', 'tutorial', 'settings',
+  'shop', 'shopCategories',
+  'bestiary', 'bestiary_meta',
+  'collection', 'collectionSettings', 'collection_secret',
+  'achievements', 'achievements_meta', 'achievements_secret',
+  'recettes', 'recipes', 'combat_styles', 'order',
+  'bastion', 'players', 'agenda_session', 'availabilities',
+  'vtt', 'vttPages', 'vttAnnotations', 'vttTokens', 'vttSons', 'vttPlaylists',
+];
+
+// Lit en DIRECT (sans cache) le doc racine + toutes les sous-collections durables
+// d'une aventure. Lecture par chemin explicite → indépendante du scope courant
+// (_adventureId) : fonctionne pour toute aventure que le MJ peut lire, même non
+// sélectionnée. Coût : 1 getDocs/collection + N docs facturés → action manuelle,
+// rare, déclenchée par le MJ. Renvoie un objet sérialisable en JSON.
+export async function exportAdventure(advId, { includeLog = false } = {}) {
+  if (!advId) throw new Error('exportAdventure: advId manquant');
+  const cols = includeLog ? [...CAMPAIGN_EXPORT_COLLECTIONS, 'vttLog'] : CAMPAIGN_EXPORT_COLLECTIONS;
+
+  const rootSnap = await getDoc(doc(db, 'adventures', advId));
+  const collections = {};
+  await Promise.all(cols.map(async (col) => {
+    try {
+      const snap = await getDocs(collection(db, `adventures/${advId}/${col}`));
+      collections[col] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (e) {
+      _handleFirestoreError(e, `exportAdventure(${col})`);
+      collections[col] = [];
+    }
+  }));
+
+  return {
+    type: 'le-grand-jdr.campaign',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    adventureId: advId,
+    adventure: rootSnap.exists() ? { id: rootSnap.id, ...rootSnap.data() } : null,
+    collections,
+  };
+}
+
+// Collections exportées mais NON restaurables par le MJ : `availabilities` a une
+// règle d'écriture réservée à chaque joueur (uid == auth.uid, sans override MJ)
+// → un batch.set du MJ y serait refusé. On la saute au restore (perte mineure :
+// dispos d'agenda, que chaque joueur ré-renseigne).
+const _RESTORE_SKIP = new Set(['availabilities']);
+
+// Reconstruit les Timestamp Firestore sérialisés en JSON à l'export
+// ({seconds,nanoseconds}) en vrais objets Timestamp. Récursif (maps + arrays).
+function _reviveTimestamps(val) {
+  if (Array.isArray(val)) return val.map(_reviveTimestamps);
+  if (val && typeof val === 'object') {
+    const keys = Object.keys(val);
+    if (typeof val.seconds === 'number' && typeof val.nanoseconds === 'number'
+        && keys.every(k => k === 'seconds' || k === 'nanoseconds' || k === 'type')) {
+      return new Timestamp(val.seconds, val.nanoseconds);
+    }
+    const out = {};
+    for (const k of keys) out[k] = _reviveTimestamps(val[k]);
+    return out;
+  }
+  return val;
+}
+
+// Restaure une campagne depuis un payload produit par exportAdventure().
+// Stratégie SÛRE : upsert (setDoc overwrite) — réécrit les docs du backup, n'EFFACE
+// jamais ceux ajoutés depuis. Ne touche PAS au doc racine de l'aventure (membres /
+// MJ / permissions préservés → on ne se reverrouille pas dehors). Écriture par
+// chemin explicite, en lots writeBatch ; chaque collection est isolée (une erreur
+// de règle sur l'une n'interrompt pas les autres → reportée dans `failed`).
+export async function importAdventure(advId, payload, { onProgress } = {}) {
+  if (!advId) throw new Error('importAdventure: advId manquant');
+  if (!payload || payload.type !== 'le-grand-jdr.campaign' || !payload.collections) {
+    throw new Error('Fichier de backup invalide.');
+  }
+  const allowed = new Set([...CAMPAIGN_EXPORT_COLLECTIONS, 'vttLog']);
+  const cols = Object.keys(payload.collections)
+    .filter(c => allowed.has(c) && !_RESTORE_SKIP.has(c));
+
+  let written = 0, skipped = 0;
+  const failed = [];
+  for (const col of cols) {
+    const docs = Array.isArray(payload.collections[col]) ? payload.collections[col] : [];
+    try {
+      for (let i = 0; i < docs.length; i += 400) {   // marge sous la limite de 500 ops/batch
+        const batch = writeBatch(db);
+        let n = 0;
+        for (const d of docs.slice(i, i + 400)) {
+          if (!d || !d.id) { skipped++; continue; }
+          const { id, ...data } = d;
+          batch.set(doc(db, `adventures/${advId}/${col}/${id}`), _reviveTimestamps(data));
+          n++;
+        }
+        if (n) { await batch.commit(); written += n; }
+      }
+      onProgress?.(col, docs.length);
+    } catch (e) {
+      failed.push({ col, error: e?.code || e?.message || String(e) });
+    }
+  }
+  return { written, skipped, collections: cols.length, failed };
 }
 
 export async function loadCollectionWhere(col, field, op, value) {
