@@ -2171,10 +2171,48 @@ function _bstBuildExportHtml(list) {
   const statsHtml = (c) => [['FOR', 'force'], ['DEX', 'dexterite'], ['CON', 'constitution'], ['INT', 'intelligence'], ['SAG', 'sagesse'], ['CHA', 'charisme']]
     .map(([l, k]) => (c[k] != null && c[k] !== '') ? `<span><b>${l}</b> ${e(String(c[k]))}</span>` : '')
     .filter(Boolean).join('');
-  const actLine = (a) => {
-    const dmg = a.degats ? ` — ${e(a.degats)}${a.degatsFlat ? '+' + e(String(a.degatsFlat)) : ''}` : '';
+  // Trait : nom + effet (description).
+  const traitLine = (t) => {
+    if (!t || typeof t !== 'object') return `<li>${txt(t)}</li>`;
+    return `<li><b>${e(t.nom || 'Trait')}</b>${t.description ? ` — ${e(t.description)}` : ''}</li>`;
+  };
+  // Arme naturelle : dégâts (+ bonus, type), portée, toucher, info.
+  const armeLine = (a) => {
+    const parts = [];
+    if (a.degats) parts.push(`${e(a.degats)}${a.degatsFlat ? '+' + e(String(a.degatsFlat)) : ''}`);
+    const dt = a.damageTypeId ? _bstDmgLabel(a.damageTypeId) : '';
+    if (dt) parts.push(dt);
+    if (a.portee) parts.push(`portée ${e(a.portee)}`);
+    const toucher = a.toucherAuto ? 'toucher auto'
+      : (a.toucherFlat ? `toucher +${e(String(a.toucherFlat))}` : '');
+    if (toucher) parts.push(toucher);
+    const meta = parts.length ? ` — ${parts.join(' · ')}` : '';
     const info = a.info ? ` <i>${e(a.info)}</i>` : '';
-    return `<li><b>${e(a.nom || 'Action')}</b>${dmg}${info}</li>`;
+    return `<li><b>${e(a.nom || 'Arme')}</b>${meta}${info}</li>`;
+  };
+  // Action (sort de créature) : PM, dégâts, portée, types, runes, effet.
+  const actLine = (a) => {
+    const parts = [];
+    const pm = a.pmOverride ?? a.pm;
+    if (pm != null && pm !== '') parts.push(`${e(String(pm))} PM`);
+    if (a.degats) parts.push(`${e(a.degats)}${a.degatsFlat ? '+' + e(String(a.degatsFlat)) : ''}`);
+    if (a.portee) parts.push(`portée ${e(a.portee)}`);
+    if (Array.isArray(a.types) && a.types.length) parts.push(a.types.map(e).join('/'));
+    if (Array.isArray(a.runes) && a.runes.length) parts.push(`runes : ${a.runes.map(e).join(', ')}`);
+    const meta = parts.length ? ` — ${parts.join(' · ')}` : '';
+    const info = a.info ? ` <i>${e(a.info)}</i>` : '';
+    return `<li><b>${a.icon ? e(a.icon) + ' ' : ''}${e(a.nom || 'Action')}</b>${meta}${info}</li>`;
+  };
+  // Butin : objet (quantité · chance). L'or éventuel est ajouté à part.
+  const butinLine = (b) => {
+    if (!b || typeof b !== 'object') return `<li>${txt(b)}</li>`;
+    const meta = [b.quantite && `×${e(String(b.quantite))}`, b.chance && e(String(b.chance))].filter(Boolean).join(' · ');
+    return `<li><b>${e(b.nom || 'Objet')}</b>${meta ? ` — ${meta}` : ''}</li>`;
+  };
+  const butinsSection = (c) => {
+    const items = (Array.isArray(c.butins) ? c.butins : []).map(butinLine).join('');
+    const or = c.or ? `<li><b>🪙 Or :</b> ${e(String(c.or))}</li>` : '';
+    return (items || or) ? `<h3>Butins</h3><ul>${items}${or}</ul>` : '';
   };
   const ul = (arr, fn) => (Array.isArray(arr) && arr.length) ? `<ul>${arr.map(fn).join('')}</ul>` : '';
   const section = (label, html) => html ? `<h3>${label}</h3>${html}` : '';
@@ -2193,7 +2231,8 @@ function _bstBuildExportHtml(list) {
     const vit = [c.pvMax && `❤️ ${e(String(c.pvMax))} PV`, c.pmMax && `✦ ${e(String(c.pmMax))} PM`,
       c.ca && `🛡️ CA ${e(String(c.ca))}`, c.vitesse && `💨 ${e(String(c.vitesse))} m`,
       c.initiative && `⚡ Init ${e(String(c.initiative))}`,
-      c.dangerositeXp && `🏆 ${e(String(c.dangerositeXp))} XP`].filter(Boolean).join(' · ');
+      c.dangerositeXp && `🏆 ${e(String(c.dangerositeXp))} XP`,
+      ((+c.tokenW > 1) || (+c.tokenH > 1)) && `⬛ ${e(String(c.tokenW || 1))}×${e(String(c.tokenH || 1))} cases`].filter(Boolean).join(' · ');
     const st = statsHtml(c);
     return `<article class="card">
       <h2>${e(c.emoji || '🐲')} ${e(c.nom || '?')}${c.niveau ? ` <span class="lvl">Niv. ${e(String(c.niveau))}</span>` : ''}${c.hidden ? ` <span class="hid">🔒 caché aux joueurs</span>` : ''}</h2>
@@ -2201,10 +2240,10 @@ function _bstBuildExportHtml(list) {
       ${vit ? `<div class="vit">${vit}</div>` : ''}
       ${st ? `<div class="stats">${st}</div>` : ''}
       ${section('Relations aux dégâts', relHtml(c))}
-      ${section('Traits', ul(c.traits, t => `<li>${txt(t)}</li>`))}
-      ${section('Armes naturelles', ul(c.armesNaturelles, a => `<li><b>${e(a.nom || 'Arme')}</b>${a.degats ? ` — ${e(a.degats)}` : ''}</li>`))}
+      ${section('Traits', ul(c.traits, traitLine))}
+      ${section('Armes naturelles', ul(c.armesNaturelles, armeLine))}
       ${section('Actions', ul(c.actions, actLine))}
-      ${section('Butins', ul(c.butins, b => `<li>${txt(b)}</li>`))}
+      ${butinsSection(c)}
       ${c.description ? `<div class="desc">${e(c.description)}</div>` : ''}
     </article>`;
   };
@@ -2213,14 +2252,25 @@ function _bstBuildExportHtml(list) {
     nom: c.nom || '', rang: c.rang || 'classique', type: c.type || '', environnement: c.environnement || '',
     niveau: c.niveau ?? null, xp: c.dangerositeXp ?? null,
     pvMax: c.pvMax ?? null, pmMax: c.pmMax ?? null, ca: c.ca ?? null, vitesse: c.vitesse ?? null, initiative: c.initiative ?? null,
+    tokenW: c.tokenW ?? 1, tokenH: c.tokenH ?? 1,
     stats: { force: c.force ?? null, dexterite: c.dexterite ?? null, constitution: c.constitution ?? null,
              intelligence: c.intelligence ?? null, sagesse: c.sagesse ?? null, charisme: c.charisme ?? null },
     resistances: _bstDmgList(c.resistances), immunites: _bstDmgList(c.immunites),
     absorptions: _bstDmgList(c.absorptions), faiblesses: _bstDmgList(c.faiblesses),
-    traits: (c.traits || []).map(t => (t && typeof t === 'object') ? (t.nom || t.description || '') : t),
-    armesNaturelles: (c.armesNaturelles || []).map(a => ({ nom: a.nom || '', degats: a.degats || '' })),
-    actions: (c.actions || []).map(a => ({ nom: a.nom || '', degats: a.degats || '', degatsFlat: a.degatsFlat ?? null, degatsStat: a.degatsStat || '', effet: a.info || '' })),
-    butins: (c.butins || []).map(b => (b && typeof b === 'object') ? (b.nom || '') : b),
+    traits: (c.traits || []).map(t => (t && typeof t === 'object') ? { nom: t.nom || '', effet: t.description || '' } : { nom: t, effet: '' }),
+    armesNaturelles: (c.armesNaturelles || []).map(a => ({
+      nom: a.nom || '', degats: a.degats || '', degatsFlat: a.degatsFlat ?? null, degatsStat: a.degatsStat || '',
+      toucherStat: a.toucherStat || '', toucherFlat: a.toucherFlat ?? null, toucherAuto: !!a.toucherAuto,
+      portee: a.portee || '', typeDegats: _bstDmgLabel(a.damageTypeId || ''), info: a.info || '',
+    })),
+    actions: (c.actions || []).map(a => ({
+      nom: a.nom || '', pm: a.pmOverride ?? a.pm ?? null,
+      degats: a.degats || '', degatsFlat: a.degatsFlat ?? null, degatsStat: a.degatsStat || '',
+      portee: a.portee || '', types: Array.isArray(a.types) ? a.types : [], runes: Array.isArray(a.runes) ? a.runes : [],
+      noyau: a.noyau || '', effet: a.info || '',
+    })),
+    butins: (c.butins || []).map(b => (b && typeof b === 'object') ? { nom: b.nom || '', quantite: b.quantite || '', chance: b.chance || '' } : { nom: b, quantite: '', chance: '' }),
+    or: c.or || '',
     description: c.description || '', cacheJoueurs: !!c.hidden,
   }));
   const jsonEmbed = JSON.stringify(data, null, 1).replace(/</g, '\\u003c');
