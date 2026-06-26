@@ -49,10 +49,12 @@ const FEATURE_CSS = {
   // hors boutique, elles s'affichent sans mise en forme. Chargeur dédoublonné.
   characters: ['characters.css', 'shop.css'],
   shop:       ['shop.css'],
-  // Console MJ : les modales admin (types de dégâts, formats d'arme, styles de
-  // combat, matrices) réutilisent les styles `.sh-admin-*` / `.sh-dmg-*` de
-  // shop.css → sans lui, elles s'ouvrent sans mise en forme.
-  admin:      ['shop.css'],
+  // Console MJ : ses modales sont empruntées à plusieurs features et ont chacune
+  // leur feuille → toutes nécessaires sinon elles s'ouvrent sans mise en forme.
+  //   shop.css/characters.css : formats d'arme, types de dégâts, styles de
+  //     combat, matrices de sorts · histoire.css : compétences de dés ·
+  //     vtt.css : émotes VTT, états & conditions.
+  admin:      ['shop.css', 'characters.css', 'histoire.css', 'vtt.css'],
   npcs:       ['npcs.css'],
   story:      ['histoire.css'],
   histoire:   ['histoire.css'],
