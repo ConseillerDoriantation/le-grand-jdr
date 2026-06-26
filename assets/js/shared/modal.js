@@ -6,30 +6,73 @@ import { _esc } from './html.js';
 
 const _modalStack = [];
 
-export function openModal(title, bodyHtml) {
-  _modalStack.length = 0;
+// Construit l'en-tête de la modale de base. Sans `opts` → titre texte simple
+// (comportement historique). Avec `opts.icon`/`opts.subtitle`/`opts.accent` →
+// en-tête « riche » (tuile d'icône lumineuse + titre Cinzel + sous-titre),
+// le même langage visuel que les modales admin, mais sur le chrome de base.
+// Détecte un emoji en tête de titre (gère séquences ZWJ + sélecteurs de variation)
+// pour le transformer en tuile d'icône. Retourne [icon, reste] ou ['', titre].
+function _splitLeadingEmoji(title) {
+  const m = String(title || '').match(/^(\p{Extended_Pictographic}(?:[‍️⃣]\p{Extended_Pictographic}?)*)\s+(.+)$/u);
+  return m ? [m[1], m[2]] : ['', String(title || '')];
+}
+
+function _applyModalHeader(title, opts = {}) {
   const titleEl = document.querySelector('#modal-title span');
+  const bar = document.getElementById('modal-title');
+  if (!titleEl) return;
+  if (bar) bar.dataset.title = title || '';   // titre brut (pour push/pop)
+  // Icône explicite (opts) sinon emoji de tête auto-extrait du titre.
+  let icon = opts.icon || '';
+  let text = title || '';
+  if (!icon) { const [e, rest] = _splitLeadingEmoji(text); if (e) { icon = e; text = rest; } }
+  if (bar) {
+    if (opts.accent) bar.style.setProperty('--modal-accent', opts.accent);
+    else bar.style.removeProperty('--modal-accent');
+  }
+  if (icon || opts.subtitle) {
+    bar?.classList.add('is-rich');
+    titleEl.innerHTML = `
+      ${icon ? `<span class="modal-head-ico">${_esc(icon)}</span>` : ''}
+      <span class="modal-head-tt">
+        <span class="modal-head-title">${_esc(text)}</span>
+        ${opts.subtitle ? `<small>${_esc(opts.subtitle)}</small>` : ''}
+      </span>`;
+  } else {
+    bar?.classList.remove('is-rich');
+    titleEl.textContent = text;
+  }
+}
+
+// Section en carte teintée pour structurer le corps d'une modale (langage admin).
+// `title` peut contenir une icône/HTML maîtrisé par l'appelant (non échappé).
+export function modalSection(title, html) {
+  return `<div class="modal-section"><div class="modal-section-title">${title}</div>${html}</div>`;
+}
+
+export function openModal(title, bodyHtml, opts = {}) {
+  _modalStack.length = 0;
+  _applyModalHeader(title, opts);
   const bodyEl  = document.getElementById('modal-body');
   const overlay = document.getElementById('modal-overlay');
-  if (titleEl) titleEl.textContent = title;
   if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
   overlay?.classList.add('show');
 }
 
-export function pushModal(title, bodyHtml, restore = null) {
-  const titleEl = document.querySelector('#modal-title span');
+export function pushModal(title, bodyHtml, restore = null, opts = {}) {
   const bodyEl  = document.getElementById('modal-body');
+  const bar     = document.getElementById('modal-title');
   const overlay = document.getElementById('modal-overlay');
 
-  if (titleEl && bodyEl && overlay?.classList.contains('show')) {
+  if (bodyEl && overlay?.classList.contains('show')) {
     _modalStack.push({
-      title: titleEl.textContent || '',
+      title: bar?.dataset.title || '',   // titre brut (cf. _applyModalHeader)
       body: bodyEl.innerHTML || '',
       restore,
     });
   }
 
-  if (titleEl) titleEl.textContent = title;
+  _applyModalHeader(title, opts);
   if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
   overlay?.classList.add('show');
 }
@@ -41,19 +84,17 @@ export function popModal() {
   }
 
   const previous = _modalStack.pop();
-  const titleEl = document.querySelector('#modal-title span');
   const bodyEl  = document.getElementById('modal-body');
-  if (titleEl) titleEl.textContent = previous.title;
+  _applyModalHeader(previous.title);
   if (bodyEl)  bodyEl.innerHTML    = previous.body;
   if (typeof previous.restore === 'function') {
     previous.restore();
   }
 }
 
-export function updateModalContent(title, bodyHtml) {
-  const titleEl = document.querySelector('#modal-title span');
+export function updateModalContent(title, bodyHtml, opts = {}) {
   const bodyEl  = document.getElementById('modal-body');
-  if (titleEl) titleEl.textContent = title;
+  _applyModalHeader(title, opts);
   if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
 }
 

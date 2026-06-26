@@ -1836,6 +1836,40 @@ select.input-field, select.input-sm { cursor:pointer; }
   background:none; border:none; margin:0; padding:0; border-radius:0;
 }
 
+/* En-tête « riche » optionnel (openModal(..,{icon,subtitle,accent})) : tuile
+   d'icône lumineuse + titre Cinzel + sous-titre, comme les modales admin. */
+.modal-title.is-rich #modal-title-text {
+  display:flex; align-items:center; gap:12px; min-width:0;
+}
+.modal-head-ico {
+  width:38px; height:38px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  border-radius:12px; font-size:1.2rem;
+  background:radial-gradient(circle at 35% 30%, var(--modal-accent, var(--gold-glow, rgba(244,196,48,0.40))), rgba(244,196,48,0.06));
+  border:1px solid var(--border-md, rgba(255,255,255,0.16));
+}
+.modal-head-tt { display:flex; flex-direction:column; min-width:0; line-height:1.2; }
+.modal-head-title {
+  font-family:'Cinzel',serif; font-weight:700; font-size:1.05rem; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.modal-head-tt small { color:var(--text-muted); font-size:.72rem; margin-top:2px; }
+
+/* Sections de corps (modalSection) : carte teintée, même look que .sh-admin-section. */
+.modal-section {
+  background:rgba(255,255,255,0.025);
+  border:1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius:12px;
+  padding:12px 14px;
+  margin-bottom:12px;
+}
+.modal-section:last-child { margin-bottom:0; }
+.modal-section-title {
+  font-family:'Cinzel',serif; font-size:.82rem; font-weight:700;
+  color:var(--modal-accent, var(--gold, #f4c430));
+  margin:0 0 8px; display:flex; align-items:center; gap:6px;
+}
+
 /* TABS */
 .tabs {
   display:flex;
