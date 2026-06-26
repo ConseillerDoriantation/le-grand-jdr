@@ -918,7 +918,7 @@ export async function openSendGoldModal(charId) {
       <button class="btn btn-gold" style="flex:1" data-action="sendGold" data-id="${charId}">💰 Envoyer</button>
       <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
     </div>
-  `);
+  `, { subtitle: 'Transférer de l\'or à un autre personnage', accent: '#f4c430' });
 }
 
 export async function sendGold(fromCharId) {
