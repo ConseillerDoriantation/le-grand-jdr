@@ -79,7 +79,9 @@ function _startMusicCatalogListeners() {
     VS.unsubs.push(onSnapshot(_playlistsCol(), snap => {
       _playlists = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0));
+        // Ordre manuel (drag) prioritaire ; à défaut, ancienneté de création.
+        .sort((a, b) => ((a.order ?? 1e9) - (b.order ?? 1e9))
+          || ((a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0)));
       playlistsReady = true;
       if (document.getElementById('vtt-music-panel')?.dataset.open === '1') _renderMusicPanel();
       done();
@@ -361,12 +363,13 @@ function _renderMusicList(mj) {
   }
 
   if (_playlists.length) {
-    h += _playlists.map(pl => {
+    h += `<div class="vtt-music-cats" id="vtt-music-cats">` + _playlists.map(pl => {
       const active = _musicState.playing && _musicState.currentPlaylistId===pl.id;
       const sounds = (pl.soundIds||[]).map(sid=>_sounds.find(s=>s.id===sid)).filter(Boolean);
       const collapsed = _isCatCollapsed(pl.id);
       return `<div class="vtt-music-cat vtt-music-pl-item${active?' is-playing':''}" data-cat-id="${pl.id}" data-collapsed="${collapsed?1:0}">
-        <div class="vtt-music-cat-hd vtt-music-pl-hd" data-vtt-fn="_vttToggleMusicCat" data-vtt-args="${pl.id}" title="Clic droit : renommer / supprimer">
+        <div class="vtt-music-cat-hd vtt-music-pl-hd" data-vtt-fn="_vttToggleMusicCat" data-vtt-args="${pl.id}" title="Clic droit : renommer / couleur / supprimer · glisser ⠿ pour réordonner">
+          ${mj?'<span class="vtt-music-cat-grip" data-vtt-fn="_vttNoop" title="Glisser pour réordonner">⠿</span>':''}
           <span class="vtt-music-cat-chevron"></span>
           <span class="vtt-music-pl-dot" style="background:${pl.color||'#6366f1'}"></span>
           <span class="vtt-music-pl-name vtt-music-cat-name">${_esc(pl.name)}</span>
@@ -384,7 +387,7 @@ function _renderMusicList(mj) {
           </div>
         </div>
       </div>`;
-    }).join('');
+    }).join('') + `</div>`;
   }
 
   return h;
@@ -424,6 +427,22 @@ function _renderSonRow(s, plId, mj) {
 // ── Initialisation Sortable ────────────────────────────────────────
 function _initMusicSortable() {
   _musicSortables.forEach(s => s.destroy()); _musicSortables = [];
+
+  // Réordonnancement des catégories (playlists) par glisser-déposer (poignée ⠿).
+  const catsEl = document.getElementById('vtt-music-cats');
+  if (catsEl) {
+    _musicSortables.push(new Sortable(catsEl, {
+      group: 'vtt-cats',
+      animation: 120,
+      ghostClass: 'vtt-sort-ghost',
+      draggable: '.vtt-music-pl-item',
+      handle: '.vtt-music-cat-grip',
+      onUpdate: async () => {
+        const ids = [...catsEl.querySelectorAll('.vtt-music-pl-item')].map(e => e.dataset.catId).filter(Boolean);
+        await Promise.all(ids.map((id, i) => updateDoc(_playlistRef(id), { order: i }).catch(() => {})));
+      },
+    }));
+  }
 
   const pool = document.getElementById('vtt-music-pool');
   if (pool) {
@@ -465,11 +484,16 @@ function _initMusicSortable() {
 function _renderNowPlaying(curSound, ms) {
   const mj = STATE.isAdmin;
   const pl = ms.currentPlaylistId ? _playlists.find(p=>p.id===ms.currentPlaylistId) : null;
+  const hidden = !!ms.hideTitle;
+  // Titre masqué : les joueurs voient un libellé générique ; le MJ voit toujours
+  // le vrai titre, avec un marqueur 🙈 indiquant qu'il est caché côté joueurs.
+  const nameHtml = curSound
+    ? ((!mj && hidden)
+        ? '🎵 <em>Ambiance en cours…</em>'
+        : `🎵 ${_esc(curSound.name)}${pl?` · <em>${_esc(pl.name)}</em>`:''}${ms.loop?' 🔁':''}${ms.shuffle?' 🔀':''}${mj && hidden ? ' <span class="vtt-music-np-hidetag" title="Titre masqué aux joueurs">🙈</span>' : ''}`)
+    : '<span style="color:var(--text-dim)">— Rien en lecture —</span>';
   return `<div class="vtt-music-np">
-    <div class="vtt-music-np-name">${curSound
-      ? `🎵 ${_esc(curSound.name)}${pl?` · <em>${_esc(pl.name)}</em>`:''}${ms.loop?' 🔁':''}${ms.shuffle?' 🔀':''}`
-      : '<span style="color:var(--text-dim)">— Rien en lecture —</span>'
-    }</div>
+    <div class="vtt-music-np-name">${nameHtml}</div>
     ${curSound ? `<div class="vtt-music-prog-row">
       <div class="vtt-music-prog-bar"${mj?' data-vtt-fn="_vttSeek" data-vtt-args="$event|$this"':''} style="${mj?'':'cursor:default'}">
         <div class="vtt-music-prog-fill" id="vtt-music-prog-fill" style="width:0%"></div>
@@ -481,6 +505,7 @@ function _renderNowPlaying(curSound, ms) {
         <button class="vtt-music-ctrl" data-vtt-fn="_vttToggleMusicPause" title="${ms.paused?'Reprendre':'Pause'}">${ms.paused?'▶':'⏸'}</button>
         ${pl?`<button class="vtt-music-ctrl" data-vtt-fn="_vttMusicNext" title="Suivant">⏭</button>`:''}
         <button class="vtt-music-ctrl" data-vtt-fn="_vttStopMusic" title="Arrêter">⏹</button>
+        <button class="vtt-music-ctrl${hidden?' on':''}" data-vtt-fn="_vttMusicToggleHideTitle" title="${hidden?'Afficher le titre aux joueurs':'Masquer le titre aux joueurs'}">${hidden?'🙈':'👁'}</button>
       ` : ''}
       <label class="vtt-music-vol-lbl">🔊<input type="range" id="vtt-music-vol" class="vtt-music-vol-inp" min="0" max="100" step="1"></label>
     </div>
@@ -558,6 +583,12 @@ async function _vttToggleMusicPause() {
 async function _vttStopMusic() {
   _killAudio();
   await _setMusicState({ playing:false, paused:false, currentSoundId:null, currentPlaylistId:null });
+}
+
+// MJ : masque / affiche le titre de la piste en cours côté joueurs.
+async function _vttMusicToggleHideTitle() {
+  if (!STATE.isAdmin) return;
+  await _setMusicState({ hideTitle: !_musicState.hideTitle });
 }
 
 function _killAudio() {
@@ -713,7 +744,7 @@ function _vttSoundCtxMenu(e, soundId, currentPlId) {
 function _vttPlaylistCtxMenu(e, plId) {
   const pl = _playlists.find(p => p.id === plId); if (!pl) return;
   _showCtxMenu(e.clientX, e.clientY, [
-    { label: '✏️ Renommer', fn: () => _vttRenamePlaylist(plId) },
+    { label: '✏️ Renommer / couleur', fn: () => _vttRenamePlaylist(plId) },
     { label: '🗑 Supprimer', fn: () => _vttDeletePlaylist(plId) },
   ]);
 }
@@ -770,28 +801,35 @@ async function _vttDeleteSound(soundId) {
 }
 
 // ── Playlists ───────────────────────────────────────────────────────
-function _vttCreatePlaylist() {
-  const colors = ['#6366f1','#22c38e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#ec4899'];
-  const defColor = colors[_playlists.length % colors.length];
-  openModal('Nouvelle playlist', `
+const PL_COLORS = ['#6366f1','#22c38e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#ec4899'];
+let _musicEditPlId = null;   // catégorie en cours d'édition (modal renommage)
+
+// Corps de modal commun à la création et au renommage (nom + sélecteur couleur).
+function _plModalBody(name, color, submitFn, submitLabel) {
+  return `
     <div style="display:flex;flex-direction:column;gap:.9rem">
       <div>
         <label class="vtt-pl-modal-lbl">Nom</label>
         <input id="vtt-pl-name-inp" type="text" class="vtt-pl-modal-inp"
-          placeholder="Ex : Donjon, Combat, Ambiance…"
-          data-vtt-fn="_vttCreatePlaylistConfirm" data-vtt-on="keydown-enter">
+          placeholder="Ex : Donjon, Combat, Ambiance…" value="${_esc(name || '')}"
+          data-vtt-fn="${submitFn}" data-vtt-on="keydown-enter">
       </div>
       <div>
         <label class="vtt-pl-modal-lbl">Couleur</label>
         <div class="vtt-pl-color-row">
-          ${colors.map(c=>`<button type="button" class="vtt-pl-color-btn${c===defColor?' sel':''}"
+          ${PL_COLORS.map(c=>`<button type="button" class="vtt-pl-color-btn${c===color?' sel':''}"
             data-color="${c}" style="background:${c}"
             data-vtt-fn="_vttPlColorSelect" data-vtt-args="$this">
           </button>`).join('')}
         </div>
       </div>
-      <button class="vtt-pl-modal-submit" data-vtt-fn="_vttCreatePlaylistConfirm">Créer la playlist</button>
-    </div>`);
+      <button class="vtt-pl-modal-submit" data-vtt-fn="${submitFn}">${submitLabel}</button>
+    </div>`;
+}
+
+function _vttCreatePlaylist() {
+  const defColor = PL_COLORS[_playlists.length % PL_COLORS.length];
+  openModal('Nouvelle playlist', _plModalBody('', defColor, '_vttCreatePlaylistConfirm', 'Créer la playlist'));
   setTimeout(() => { document.getElementById('vtt-pl-name-inp')?.focus(); }, 60);
 }
 
@@ -799,7 +837,7 @@ async function _vttCreatePlaylistConfirm() {
   const name  = document.getElementById('vtt-pl-name-inp')?.value?.trim(); if (!name) return;
   const color = document.querySelector('.vtt-pl-color-btn.sel')?.dataset.color || '#6366f1';
   closeModalDirect();
-  await addDoc(_playlistsCol(), { name, color, soundIds:[], createdAt:serverTimestamp() });
+  await addDoc(_playlistsCol(), { name, color, soundIds:[], order:_playlists.length, createdAt:serverTimestamp() });
 }
 
 async function _vttDeletePlaylist(plId) {
@@ -809,11 +847,22 @@ async function _vttDeletePlaylist(plId) {
   await deleteDoc(_playlistRef(plId)).catch(()=>{});
 }
 
-async function _vttRenamePlaylist(plId) {
+function _vttRenamePlaylist(plId) {
   const pl = _playlists.find(p => p.id === plId); if (!pl) return;
-  const name = (await promptModal('Nouveau nom de la catégorie :', { title: 'Renommer la catégorie', default: pl.name || '' }))?.trim();
-  if (!name || name === pl.name) return;
-  await updateDoc(_playlistRef(plId), { name }).catch(() => showNotif('Erreur lors du renommage', 'error'));
+  _musicEditPlId = plId;
+  openModal('Modifier la catégorie', _plModalBody(pl.name || '', pl.color || '#6366f1', '_vttRenamePlaylistConfirm', 'Enregistrer'));
+  setTimeout(() => { const i = document.getElementById('vtt-pl-name-inp'); i?.focus(); i?.select(); }, 60);
+}
+
+async function _vttRenamePlaylistConfirm() {
+  const plId = _musicEditPlId; if (!plId) return;
+  const pl = _playlists.find(p => p.id === plId); if (!pl) return;
+  const name  = document.getElementById('vtt-pl-name-inp')?.value?.trim(); if (!name) return;
+  const color = document.querySelector('.vtt-pl-color-btn.sel')?.dataset.color || pl.color || '#6366f1';
+  closeModalDirect();
+  _musicEditPlId = null;
+  if (name === pl.name && color === pl.color) return;
+  await updateDoc(_playlistRef(plId), { name, color }).catch(() => showNotif('Erreur lors de l\'enregistrement', 'error'));
 }
 
 async function _vttAddSoundToPlaylist(plId, soundId) {
@@ -860,7 +909,9 @@ export {
   _vttDeleteSound,
   _vttImportGithubRelease,
   _vttMusicNext,
+  _vttMusicToggleHideTitle,
   _vttPlColorSelect,
+  _vttRenamePlaylistConfirm,
   _vttPlayPlaylist,
   _vttPlaySound,
   _vttPreview,

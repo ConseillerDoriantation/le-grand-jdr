@@ -5971,3 +5971,12 @@
 .vtt-loot-gold-ic { font-size: .95rem; flex-shrink: 0; }
 .vtt-loot-row--gold .vtt-loot-qty { color: var(--gold); }
 .vtt-loot-sec-actions { display: inline-flex; gap: 4px; align-items: center; }
+
+/* ── Musique : poignée de drag des catégories + marqueur titre masqué ── */
+.vtt-music-cat-grip {
+  flex-shrink: 0; cursor: grab; color: var(--text-dim);
+  font-size: .8rem; line-height: 1; padding: 0 .15rem;
+  user-select: none; touch-action: none;
+}
+.vtt-music-cat-grip:active { cursor: grabbing; }
+.vtt-music-np-hidetag { opacity: .85; font-size: .85em; }
