@@ -21,19 +21,37 @@ import { _sesRef, _chrRef } from './vtt-refs.js';   // refs Firestore (leaf)
 // Vote complet (tous les owners de player tokens placés ont voté) → MJ applique.
 // MJ peut forcer / annuler / régler max / reset compteur.
 // ══════════════════════════════════════════════════════════════════════════
+// Présent = joueur RÉELLEMENT connecté au VTT (VS.presence / pings, fenêtre 120 s,
+// même critère que la liste de présence et vtt-tray) ET dont un token est posé sur
+// la map active. Sans ça, des joueurs déconnectés — ou des tokens oubliés sur
+// d'autres pages — restaient comptés dans le quorum et bloquaient le vote à
+// l'unanimité indéfiniment.
+// Page active GLOBALE (VS.session.activePageId) plutôt que VS.activePage (locale,
+// car un joueur peut être épinglé ailleurs via playerPages) → quorum identique sur
+// tous les clients. Tout est déjà en mémoire : zéro lecture/écriture Firestore.
+const _SR_TTL = 120_000;
+function _srOnline(uid) {
+  const p = uid && VS.presence?.[uid];
+  return !!(p && Date.now() - (p.lastSeen || 0) < _SR_TTL);
+}
+function _srActivePage() {
+  return VS.session?.activePageId || VS.activePage?.id || null;
+}
 function _shortRestPresentUids() {
+  const ap = _srActivePage(); if (!ap) return [];
   const uids = new Set();
   for (const e of Object.values(VS.tokens)) {
     const t = e?.data;
-    if (t?.type === 'player' && t.pageId && t.ownerId) uids.add(t.ownerId);
+    if (t?.type === 'player' && t.pageId === ap && t.ownerId && _srOnline(t.ownerId)) uids.add(t.ownerId);
   }
   return [...uids];
 }
 function _shortRestPresentChars() {
+  const ap = _srActivePage(); if (!ap) return [];
   const seen = new Set(), chars = [];
   for (const e of Object.values(VS.tokens)) {
     const t = e?.data;
-    if (t?.type === 'player' && t.pageId && t.characterId && !seen.has(t.characterId)) {
+    if (t?.type === 'player' && t.pageId === ap && t.characterId && _srOnline(t.ownerId) && !seen.has(t.characterId)) {
       seen.add(t.characterId);
       const c = VS.characters[t.characterId];
       if (c) chars.push(c);
@@ -42,11 +60,12 @@ function _shortRestPresentChars() {
   return chars;
 }
 function _shortRestPresentNames() {
-  // ownerId → nom à afficher (perso le plus récemment vu)
+  // ownerId → nom à afficher (perso le plus récemment vu sur la map active)
+  const ap = _srActivePage(); if (!ap) return {};
   const out = {};
   for (const e of Object.values(VS.tokens)) {
     const t = e?.data;
-    if (t?.type === 'player' && t.ownerId && !out[t.ownerId]) {
+    if (t?.type === 'player' && t.pageId === ap && t.ownerId && _srOnline(t.ownerId) && !out[t.ownerId]) {
       const c = t.characterId ? VS.characters[t.characterId] : null;
       out[t.ownerId] = c?.nom || t.name || t.ownerId.slice(0, 6);
     }

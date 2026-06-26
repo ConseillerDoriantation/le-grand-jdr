@@ -6879,6 +6879,10 @@ function _initListeners() {
     // présence change, sinon la section "En ligne" reste vide à l'arrivée
     // jusqu'au prochain clic.
     if (STATE.isAdmin) _renderTraySoon();
+    // Le quorum du court repos se base sur la présence : un joueur bloquant qui se
+    // déconnecte doit pouvoir débloquer le vote sans attendre une autre action.
+    _renderShortRest();
+    _checkShortRestAutoApply();
 
     // Pings visuels (< 5 s)
     const pings = snap.docs
