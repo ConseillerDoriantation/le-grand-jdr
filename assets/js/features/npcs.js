@@ -1195,7 +1195,7 @@ function _openMjStatsView() {
     <div style="margin-top:.65rem;font-size:.7rem;color:var(--text-dim);font-style:italic;text-align:center">
       Clic sur n'importe quelle valeur pour la modifier (Entrée = valider, Échap = annuler) <br> • Clic sur le nom d'un PNJ pour ouvrir sa fiche
     </div>
-  `);
+  `, { subtitle: 'Édition rapide des caractéristiques', accent: '#4f8cff' });
 }
 
 function _restoreMjStatsModal() {

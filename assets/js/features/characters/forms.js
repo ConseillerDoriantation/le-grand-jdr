@@ -3,7 +3,7 @@ import { charSession } from '../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
 import { addToCol, updateInCol, deleteFromCol, loadCollectionWhere, loadCollection } from '../../data/firestore.js';
 import { trySave } from '../../shared/crud.js';
-import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
+import { openModal, closeModal, confirmModal, modalSection } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { calcPVMax, calcPMMax, pct } from '../../shared/char-stats.js';
 import { loadAllUsers } from '../../core/adventure.js';
@@ -95,11 +95,12 @@ export async function deleteQuete(idx) {
 
 export function addQuete() {
   openModal('📜 Ajouter une quête', `
-    <div class="form-group"><label>Nom</label><input class="input-field" id="q-nom" placeholder="La Crypte Maudite..."></div>
-    <div class="form-group"><label>Type</label><input class="input-field" id="q-type" placeholder="Principale, Secondaire..."></div>
-    <div class="form-group"><label>Description</label><textarea class="input-field" id="q-desc" rows="3" placeholder="Objectif..."></textarea></div>
+    ${modalSection('📜 Détails de la quête', `
+      <div class="form-group" style="margin:0 0 .6rem"><label>Nom</label><input class="input-field" id="q-nom" placeholder="La Crypte Maudite..."></div>
+      <div class="form-group" style="margin:0 0 .6rem"><label>Type</label><input class="input-field" id="q-type" placeholder="Principale, Secondaire..."></div>
+      <div class="form-group" style="margin:0"><label>Description</label><textarea class="input-field" id="q-desc" rows="3" placeholder="Objectif..."></textarea></div>`)}
     <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="saveQuete">Ajouter</button>
-  `);
+  `, { subtitle: 'Nouvel objectif pour le personnage' });
 }
 
 export async function saveQuete() {

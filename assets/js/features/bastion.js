@@ -579,25 +579,26 @@ function _bastionOpenDeposit() {
   const defaultChar = getDefaultCharForUser(chars, STATE.user?.uid) || chars[0];
 
   openModal('📥 Déposer un objet au coffre', `
-    <div class="form-group">
-      <label>Depuis le personnage</label>
-      <select class="input-field" id="bas-dep-char" data-change="_bastionRefreshDepositItems">
-        ${chars.map(c => `<option value="${c.id}"${c.id === defaultChar.id ? ' selected' : ''}>${_esc(c.nom || '?')}</option>`).join('')}
-      </select>
-    </div>
-    <div class="form-group">
-      <label>Objet à déposer <span style="font-size:.74rem;color:var(--text-dim);font-weight:400">(coffre : ${used}/${capacity})</span></label>
-      <select class="input-field" id="bas-dep-item" data-change="_bastionRefreshDepositMax"></select>
-    </div>
-    <div class="form-group">
-      <label>Quantité <span id="bas-dep-info" style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:.4rem"></span></label>
-      <div style="display:flex;gap:6px;align-items:center">
-        <input type="number" class="input-field" id="bas-dep-qte" min="1" value="1" style="flex:1">
-        <button type="button" class="btn btn-outline btn-sm" data-action="_bastionFillDepositMax">Tout</button>
+    ${modalSection('📦 Objet à déposer', `
+      <div class="form-group" style="margin:0 0 .6rem">
+        <label>Depuis le personnage</label>
+        <select class="input-field" id="bas-dep-char" data-change="_bastionRefreshDepositItems">
+          ${chars.map(c => `<option value="${c.id}"${c.id === defaultChar.id ? ' selected' : ''}>${_esc(c.nom || '?')}</option>`).join('')}
+        </select>
       </div>
-    </div>
+      <div class="form-group" style="margin:0 0 .6rem">
+        <label>Objet à déposer <span style="font-size:.74rem;color:var(--text-dim);font-weight:400">(coffre : ${used}/${capacity})</span></label>
+        <select class="input-field" id="bas-dep-item" data-change="_bastionRefreshDepositMax"></select>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Quantité <span id="bas-dep-info" style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:.4rem"></span></label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="number" class="input-field" id="bas-dep-qte" min="1" value="1" style="flex:1">
+          <button type="button" class="btn btn-outline btn-sm" data-action="_bastionFillDepositMax">Tout</button>
+        </div>
+      </div>`)}
     <button class="btn btn-gold" style="width:100%" data-action="_bastionDoDeposit">📥 Déposer</button>
-  `);
+  `, { subtitle: 'Transférer un objet vers le coffre commun', accent: '#f4c430' });
   _bastionRefreshDepositItems();
 }
 function _bastionFillDepositMax() {
