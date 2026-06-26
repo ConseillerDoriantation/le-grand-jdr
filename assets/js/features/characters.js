@@ -155,7 +155,9 @@ function filterAdminChars(pseudo, el) {
   const filtered = pseudo ? STATE.characters.filter(c=>c.ownerPseudo===pseudo) : STATE.characters;
   // Sélectionne le ★ par défaut du joueur filtré si possible, sinon le premier (alpha)
   const chars = sortCharactersForDisplay(filtered);
-  if (chars.length > 0) { STATE.activeChar = chars[0]; renderCharSheet(chars[0]); }
+  // Affichage alphabétique, mais on sélectionne le ★ par défaut du joueur si présent.
+  const pick = chars.find(c => c.isDefault) || chars[0];
+  if (pick) { STATE.activeChar = pick; renderCharSheet(pick); }
 }
 
 // ══════════════════════════════════════════════

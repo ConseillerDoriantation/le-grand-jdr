@@ -361,36 +361,24 @@ export function computeEquipAllSkillBonuses(equip = {}) {
 // ══════════════════════════════════════════════════════════════════
 // TRI & PERSONNAGE PAR DÉFAUT
 // Source unique de vérité pour ordonner les personnages partout
-// dans l'app (char-switch, groupes, players, VTT, etc.).
+// dans l'app (char-switch, groupes, affinités PNJ, players, VTT, etc.).
 //
-// Règles :
-//   1. Joueurs regroupés par pseudo (ordre alpha FR).
-//   2. À l'intérieur d'un joueur : personnage `isDefault=true` en tête,
-//      puis ordre alpha sur le nom.
-//   3. Tiebreak final : id (stable).
+// Règle : ordre alphabétique du NOM du personnage (alpha FR), sans
+// regroupement par joueur. Noms vides en dernier, tiebreak stable sur l'id.
 //
-// Le champ `isDefault` est stocké directement sur le doc personnage
-// (boolean). Un seul personnage par joueur peut l'avoir à true ;
-// setDefaultCharacter() s'occupe de désactiver les autres.
+// Le champ `isDefault` reste géré par setDefaultCharacter() (un seul par
+// joueur) mais n'influe plus sur l'ordre d'affichage.
 // ══════════════════════════════════════════════════════════════════
 export function sortCharactersForDisplay(chars = []) {
   return [...(chars || [])].sort((a, b) => {
-    const pa = (a?.ownerPseudo || '').toLowerCase();
-    const pb = (b?.ownerPseudo || '').toLowerCase();
-    if (pa !== pb) {
-      if (!pa) return 1;
-      if (!pb) return -1;
-      return pa.localeCompare(pb, 'fr');
-    }
-    // Même joueur : default en premier
-    const da = a?.isDefault ? 0 : 1;
-    const db = b?.isDefault ? 0 : 1;
-    if (da !== db) return da - db;
-    // Puis nom alpha
     const na = (a?.nom || '').toLowerCase();
     const nb = (b?.nom || '').toLowerCase();
-    if (na !== nb) return na.localeCompare(nb, 'fr');
-    return (a?.id || '').localeCompare(b?.id || '');
+    if (na !== nb) {
+      if (!na) return 1;   // sans nom → en dernier
+      if (!nb) return -1;
+      return na.localeCompare(nb, 'fr');
+    }
+    return (a?.id || '').localeCompare(b?.id || '');   // tiebreak stable
   });
 }
 
