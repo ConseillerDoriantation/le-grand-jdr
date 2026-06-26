@@ -2,7 +2,7 @@ import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { updateInCol, loadCollection, loadCollectionWhere, addToCol, saveDoc } from '../../data/firestore.js';
 import { trySave } from '../../shared/crud.js';
-import { openModal, closeModal, confirmModal, promptModal } from '../../shared/modal.js';
+import { openModal, closeModal, confirmModal, promptModal, modalSection } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { modStr, _esc, normalizeImageUrl } from '../../shared/html.js';
 import { getMod, calcPVMax, calcPMMax, calcOr, calcPalier } from '../../shared/char-stats.js';
@@ -645,18 +645,19 @@ export async function addMaitrise() {
   const c = STATE.activeChar; if (!c) return;
   const sousTypes = await _loadWeaponSousTypes();
   openModal('⚔️ Nouvelle maîtrise', `
-    <div class="form-group"><label>Type d'arme</label>
-      ${_maitriseSousTypeSelect('', sousTypes)}
-    </div>
-    <div class="form-group">
-      <label>Niveau <span style="color:var(--text-dim);font-weight:400">(+1 aux dégâts par niveau)</span></label>
-      <input type="number" class="input-field" id="mait-niveau" value="1" min="0" max="5">
-    </div>
-    <div class="form-group"><label>Note (optionnel)</label>
-      <input class="input-field" id="mait-note" placeholder="Obtenu lors de la mission X...">
-    </div>
+    ${modalSection('⚔️ Maîtrise d\'arme', `
+      <div class="form-group" style="margin:0 0 .6rem"><label>Type d'arme</label>
+        ${_maitriseSousTypeSelect('', sousTypes)}
+      </div>
+      <div class="form-group" style="margin:0 0 .6rem">
+        <label>Niveau <span style="color:var(--text-dim);font-weight:400">(+1 aux dégâts par niveau)</span></label>
+        <input type="number" class="input-field" id="mait-niveau" value="1" min="0" max="5">
+      </div>
+      <div class="form-group" style="margin:0"><label>Note (optionnel)</label>
+        <input class="input-field" id="mait-note" placeholder="Obtenu lors de la mission X...">
+      </div>`)}
     <button class="btn btn-gold" style="width:100%;margin-top:.5rem" data-action="saveMaitrise" data-idx="-1">Ajouter</button>
-  `);
+  `, { subtitle: 'Bonus aux dégâts selon le niveau' });
 }
 
 export async function editMaitrise(idx) {
@@ -664,18 +665,19 @@ export async function editMaitrise(idx) {
   const m = (c.maitrises || [])[idx]; if (!m) return;
   const sousTypes = await _loadWeaponSousTypes();
   openModal('✏️ Modifier la maîtrise', `
-    <div class="form-group"><label>Type d'arme</label>
-      ${_maitriseSousTypeSelect(m.typeArme||'', sousTypes)}
-    </div>
-    <div class="form-group">
-      <label>Niveau</label>
-      <input type="number" class="input-field" id="mait-niveau" value="${m.niveau||1}" min="0" max="5">
-    </div>
-    <div class="form-group"><label>Note (optionnel)</label>
-      <input class="input-field" id="mait-note" value="${m.note||''}">
-    </div>
+    ${modalSection('⚔️ Maîtrise d\'arme', `
+      <div class="form-group" style="margin:0 0 .6rem"><label>Type d'arme</label>
+        ${_maitriseSousTypeSelect(m.typeArme||'', sousTypes)}
+      </div>
+      <div class="form-group" style="margin:0 0 .6rem">
+        <label>Niveau</label>
+        <input type="number" class="input-field" id="mait-niveau" value="${m.niveau||1}" min="0" max="5">
+      </div>
+      <div class="form-group" style="margin:0"><label>Note (optionnel)</label>
+        <input class="input-field" id="mait-note" value="${m.note||''}">
+      </div>`)}
     <button class="btn btn-gold" style="width:100%;margin-top:.5rem" data-action="saveMaitrise" data-idx="${idx}">Enregistrer</button>
-  `);
+  `, { subtitle: 'Bonus aux dégâts selon le niveau' });
 }
 
 export async function saveMaitrise(idx) {

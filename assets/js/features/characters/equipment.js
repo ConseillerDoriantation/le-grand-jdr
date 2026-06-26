@@ -173,7 +173,7 @@ export function editEquipSlot(slot) {
       ${equippedHasItem ? `<button class="btn btn-danger" ${isWeapon?'':'style="flex:1"'} data-action="clearEquipSlot" data-slot="${slot}">Retirer</button>` : ''}
       ${!isWeapon && !equippedHasItem ? `<button class="btn btn-outline" style="flex:1" data-action="_eqClose">Fermer</button>` : ''}
     </div>
-  `);
+  `, { subtitle: `Emplacement : ${slot}` });
 
   _equipCompatibles = compatibles;
   _equipSelectedMeta = {

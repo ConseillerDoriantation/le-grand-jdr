@@ -1093,7 +1093,7 @@ export async function addInvItem() {
       <button class="btn btn-gold" style="flex:1" data-action="saveInvItemFromShop">✓ Ajouter</button>
       <button class="btn btn-outline btn-sm" data-action="close-modal">Fermer</button>
     </div>
-  `);
+  `, { subtitle: 'Choisis un objet de la boutique à ajouter', accent: '#f4c430' });
   setTimeout(() => document.getElementById('loot-search')?.focus(), 60);
 
   _lootSetCat = function(catId) {
