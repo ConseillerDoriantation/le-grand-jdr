@@ -5092,7 +5092,7 @@ function _playImpactForToken(tokenId, color) {
 }
 
 /** Rendu des lignes de ciblage distantes (broadcast Firestore). */
-function _renderRemoteCastings(docs) {
+function _renderRemoteCastings(docs, prime = false) {
   if (!VS.layers.token) return;
   _clearRemoteLines();
   const myUid = STATE.user?.uid;
@@ -5103,12 +5103,15 @@ function _renderRemoteCastings(docs) {
     const sf = c.sigilFire;
     if (sf && sf.n && sf.pageId === VS.activePage?.id && _seenSigilFire[d.id] !== sf.n) {
       _seenSigilFire[d.id] = sf.n;   // dédup par n : l'onglet du lanceur l'a déjà → ignoré
-      _playSigilForToken(sf.tokenId, sf.sigil);
-      if (sf.zone) {
-        _playZoneFx(sf.tokenId, { x: sf.zone.x, y: sf.zone.y }, { w: sf.zone.w, h: sf.zone.h }, sf.targets || [], sf.impColor, !!sf.physical, !!sf.isSummon);
-      } else {
-        (sf.targets || []).forEach(tid => _playCastTargetFx(sf.tokenId, tid, sf.impColor, !!sf.melee, !!sf.physical));
-        if (sf.selfAura) _playImpactForToken(sf.tokenId, sf.impColor);
+      // Amorce (1er snapshot) : on marque vu mais on NE rejoue PAS les anciens casts.
+      if (!prime) {
+        _playSigilForToken(sf.tokenId, sf.sigil);
+        if (sf.zone) {
+          _playZoneFx(sf.tokenId, { x: sf.zone.x, y: sf.zone.y }, { w: sf.zone.w, h: sf.zone.h }, sf.targets || [], sf.impColor, !!sf.physical, !!sf.isSummon);
+        } else {
+          (sf.targets || []).forEach(tid => _playCastTargetFx(sf.tokenId, tid, sf.impColor, !!sf.melee, !!sf.physical));
+          if (sf.selfAura) _playImpactForToken(sf.tokenId, sf.impColor);
+        }
       }
     }
     if (!c.active || c.pageId !== VS.activePage?.id || d.id === myUid) return;
@@ -6850,8 +6853,13 @@ function _initListeners() {
   }, () => {}));
 
   // 8. Ciblage multi-sorts temps réel (lignes pointillées broadcast)
+  // Le 1er snapshot livre les docs vttCasting persistés (anciens casts) → on
+  // « amorce » : on marque leurs sigils comme déjà vus SANS les rejouer, sinon
+  // toutes les runes des casts précédents se redessinent à l'arrivée sur le VTT.
+  let _castingPrimed = false;
   VS.unsubs.push(onSnapshot(_castingCol(), snap => {
-    _renderRemoteCastings(snap.docs);
+    _renderRemoteCastings(snap.docs, !_castingPrimed);
+    _castingPrimed = true;
   }, () => {}));
 
   // 9. Pings + présence temps réel
