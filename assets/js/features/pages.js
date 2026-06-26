@@ -290,11 +290,8 @@ const PAGES = {
         charsHtml = `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.2rem;text-align:center;color:var(--text-dim);font-size:.85rem">
           <div style="font-size:1.5rem;margin-bottom:.4rem;opacity:.35">📜</div>Aucun personnage dans cette aventure</div>`;
       } else {
-        // Tri : par joueur (alpha FR) d'abord, puis par niveau desc
-        const sorted = [...chars].sort((a,b) => {
-          const pa = a.ownerPseudo||'', pb = b.ownerPseudo||'';
-          return pa.localeCompare(pb, 'fr') || (b.niveau||1) - (a.niveau||1);
-        });
+        // Tri : ordre alphabétique du nom du personnage (cohérent avec le reste de l'app).
+        const sorted = sortCharactersForDisplay(chars);
         charsHtml = `
         <div class="dash-grid-charlist">
           ${sorted.map(c => _charRow(c)).join('')}
