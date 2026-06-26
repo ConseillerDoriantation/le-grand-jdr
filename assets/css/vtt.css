@@ -69,9 +69,15 @@
   /* Panneau de dés : ne déborde plus en hauteur sur écran court.
      Repli 100vh pour les navigateurs sans unité dvh. */
   .vtt-dice-panel { max-height: calc(100vh - 56px); max-height: calc(100dvh - 56px); overflow-y: auto; }
-  /* HUD de combat : borne sa hauteur (filet de sécurité), la hotbar
-     reste scrollable horizontalement à l'intérieur. */
-  .vtt-action-hud { max-height: 58%; overflow-y: auto; }
+  /* HUD de combat : sur petit écran, le panneau latéral droit volerait trop de
+     largeur → on le repasse en tiroir bas (borné à 58% de hauteur). */
+  .vtt-action-hud {
+    top: auto; left: 0; right: 0; bottom: 0; width: auto;
+    border: none; border-top: 1px solid var(--border); border-radius: 0;
+    box-shadow: 0 -8px 26px -14px rgba(0,0,0,.7);
+    max-height: 58%; padding: .3rem .5rem .35rem;
+  }
+  .vtt-action-hud.is-collapsed { bottom: 0; }
 }
 
 /* Cibles tactiles agrandies sur écrans tactiles uniquement (la souris,
@@ -2196,9 +2202,8 @@
 
 .vtt-aopt-list {
   display: flex; flex-direction: column; gap: .4rem;
-  /* Plafond bas : le tiroir d'actions ne doit pas manger la moitié de l'écran.
-     Au-delà, on scrolle. (était 60vh → le HUD occupait ~60% en vertical). */
-  max-height: 34vh; overflow-y: auto;
+  /* En panneau latéral, la liste remplit la hauteur dispo et scrolle. */
+  flex: 1; min-height: 0; overflow-y: auto;
   scrollbar-width: thin; scrollbar-color: var(--border) transparent;
   padding-right: 2px;
 }
@@ -2231,7 +2236,7 @@
 }
 .vtt-aopt-section-body {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(238px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 7px;
   padding: 6px;
   align-items: stretch;   /* cartes d'une même rangée à hauteur égale */
@@ -2242,17 +2247,23 @@
    barre ancrée + la modale pour le flux « action d'abord »). Fixe en bas,
    ne flotte plus sur le jeu : le canvas au-dessus reste cliquable.
    ════════════════════════════════════════════════════════════════════ */
+/* Panneau latéral DROIT (au lieu d'un tiroir qui surgit du bas — plus « table
+   de JDR » : liste verticale d'actions, façon fiche posée à côté du plateau,
+   le centre reste dégagé). Sur petit mobile paysage → repasse en bas (média). */
 .vtt-action-hud {
-  position: absolute; left: 0; right: 0; bottom: 0; z-index: 30;
-  display: none;
+  position: absolute; top: 10px; right: 10px; bottom: 10px; left: auto;
+  width: min(360px, 40vw); z-index: 30;
+  display: none; flex-direction: column;
   background: color-mix(in srgb, var(--bg-panel) 97%, transparent);
-  border-top: 1px solid var(--border);
-  box-shadow: 0 -8px 26px -14px rgba(0,0,0,.7);
-  padding: .3rem .5rem .35rem;
+  border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 18px 50px -22px rgba(0,0,0,.8);
+  padding: .5rem .55rem .55rem;
   overflow: hidden;
 }
-.vtt-action-hud.show { display: block; }
-.vtt-aopt-hud { display: flex; flex-direction: column; gap: .25rem; position: relative; }
+.vtt-action-hud.show { display: flex; }
+/* Replié : ne garde que l'en-tête → le panneau se réduit à une carte en haut. */
+.vtt-action-hud.is-collapsed { bottom: auto; }
+.vtt-aopt-hud { display: flex; flex-direction: column; gap: .25rem; position: relative; flex: 1; min-height: 0; }
 
 /* ── En-tête compact (1 ligne) : source → cible + close ───────────── */
 .vtt-aopt-hud .vtt-aopt-modal-hd {
