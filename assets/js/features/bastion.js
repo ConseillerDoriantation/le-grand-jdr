@@ -782,25 +782,22 @@ function _bastionOpenCatalogEditor() {
   if (!STATE.isAdmin) return;
   const cat = _getRoomCatalog(STORE.bastion);
   openModal('✏️ Éditer les salles & activités', `
-    <p style="font-size:.85rem;color:var(--text-soft);margin-bottom:.8rem">
-      Personnalise chaque salle : nom, prix, durée, renommée, productions, bonus.
-      Les modifications s'appliquent immédiatement à tous.
-    </p>
-    <div class="bs-edit-list">
-      ${cat.map(def => `
-        <div class="bs-edit-row" data-action="_bastionEditRoom" data-slug="${def.slug}">
-          <span class="bs-edit-emoji">${def.emoji}</span>
-          <div class="bs-edit-info">
-            <div class="bs-edit-name">${_esc(def.nom)}${def.isCustom ? ' <span class="bs-edit-tag">custom</span>' : ''}</div>
-            <div class="bs-edit-desc">${_esc(def.desc)}</div>
-          </div>
-          <span class="bs-edit-arrow">✏️</span>
-        </div>`).join('')}
-    </div>
+    ${modalSection('🏛️ Salles', `
+      <div class="bs-edit-list">
+        ${cat.map(def => `
+          <div class="bs-edit-row" data-action="_bastionEditRoom" data-slug="${def.slug}">
+            <span class="bs-edit-emoji">${def.emoji}</span>
+            <div class="bs-edit-info">
+              <div class="bs-edit-name">${_esc(def.nom)}${def.isCustom ? ' <span class="bs-edit-tag">custom</span>' : ''}</div>
+              <div class="bs-edit-desc">${_esc(def.desc)}</div>
+            </div>
+            <span class="bs-edit-arrow">✏️</span>
+          </div>`).join('')}
+      </div>`)}
     <div class="bs-edit-actions" style="margin-top:14px;justify-content:center">
       <button class="btn btn-gold" data-action="_bastionAddCustomRoom">＋ Nouvelle salle custom</button>
     </div>
-  `);
+  `, { subtitle: 'Nom, prix, durée, renommée, productions, bonus — appliqué à tous', accent: '#f4c430' });
 }
 
 async function _bastionAddCustomRoom() {

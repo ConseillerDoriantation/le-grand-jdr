@@ -13,7 +13,7 @@ import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { getShopCharId } from '../shared/shop-session.js';
 import { trySave } from '../shared/crud.js';
-import { openModal, pushModal, closeModalDirect, confirmModal } from '../shared/modal.js';
+import { openModal, pushModal, closeModalDirect, confirmModal, modalSection } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
 import {
@@ -185,12 +185,8 @@ function _renderArtisanModal() {
 
     ${_renderFragmentBag(c)}
 
-    <div style="margin-top:1rem;font-size:.78rem;font-weight:700;letter-spacing:.06em;
-      text-transform:uppercase;color:var(--text-dim);margin-bottom:.5rem">
-      Inventaire améliorable
-    </div>
-    ${_renderUpgradeableItemsList(c)}
-  `);
+    ${modalSection('🛠️ Inventaire améliorable', _renderUpgradeableItemsList(c))}
+  `, { subtitle: 'Pose des fragments pour améliorer ton équipement', accent: '#f4c430' });
 }
 
 // ── Sac de fragments ────────────────────────────────────────────────

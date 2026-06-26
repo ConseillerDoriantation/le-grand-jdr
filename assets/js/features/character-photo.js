@@ -49,7 +49,7 @@ function _showCropModal(dataUrl, charId) {
       <button class="btn btn-outline" id="char-photo-cancel">Annuler</button>
       <button class="btn btn-gold" id="char-photo-save">✅ Enregistrer</button>
     </div>
-  `);
+  `, { subtitle: 'Zoome et déplace pour cadrer', accent: '#4f8cff' });
 
   // L'image et le slider doivent être présents dans le DOM avant le binding.
   requestAnimationFrame(() => {
