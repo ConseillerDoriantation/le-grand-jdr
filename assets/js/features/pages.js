@@ -290,10 +290,10 @@ const PAGES = {
         charsHtml = `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.2rem;text-align:center;color:var(--text-dim);font-size:.85rem">
           <div style="font-size:1.5rem;margin-bottom:.4rem;opacity:.35">📜</div>Aucun personnage dans cette aventure</div>`;
       } else {
-        // Tri : par joueur d'abord, puis par niveau desc
+        // Tri : par joueur (alpha FR) d'abord, puis par niveau desc
         const sorted = [...chars].sort((a,b) => {
           const pa = a.ownerPseudo||'', pb = b.ownerPseudo||'';
-          return pa.localeCompare(pb) || (b.niveau||1) - (a.niveau||1);
+          return pa.localeCompare(pb, 'fr') || (b.niveau||1) - (a.niveau||1);
         });
         charsHtml = `
         <div class="dash-grid-charlist">
@@ -803,7 +803,8 @@ const PAGES = {
         const active = (list || [])
           .filter(p => p.uid && p.uid !== _myUid)
           .map(p => ({ ...p, ts: p.lastSeen?.toMillis?.() ?? 0 }))
-          .filter(p => p.ts > 0 && (now - p.ts) < 120_000);
+          .filter(p => p.ts > 0 && (now - p.ts) < 120_000)
+          .sort((a, b) => (a.pseudo || '').localeCompare(b.pseudo || '', 'fr'));
         if (!active.length) {
           slot.innerHTML = `
             <div class="dv2-section-label">
