@@ -5980,3 +5980,10 @@
 }
 .vtt-music-cat-grip:active { cursor: grabbing; }
 .vtt-music-np-hidetag { opacity: .85; font-size: .85em; }
+
+/* Clone de glissé (forceFallback) d'une catégorie musique : lisible, au-dessus. */
+.vtt-music-cat.sortable-fallback {
+  opacity: .92; pointer-events: none;
+  box-shadow: 0 8px 24px rgba(0,0,0,.45); border-radius: 8px;
+  background: var(--bg-panel, #1a1a22);
+}

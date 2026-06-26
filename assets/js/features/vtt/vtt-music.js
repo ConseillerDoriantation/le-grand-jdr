@@ -331,10 +331,16 @@ function _renderMusicList(mj) {
   </div>`;
 
   if (mj) {
+    const hideOn = !!_musicState.hideTitle;
     h += `<div class="vtt-music-son-actions-row">
       <button class="vtt-music-upload-btn" data-vtt-fn="_vttAddSonUrl" style="flex:1" title="Ajouter un son via URL">＋ URL</button>
       <button class="vtt-music-upload-btn" data-vtt-fn="_vttImportGithubRelease" style="flex:1.4" title="Importer depuis une release GitHub">📥 GitHub</button>
       <button class="vtt-music-upload-btn" data-vtt-fn="_vttCreatePlaylist" style="flex:1.2" title="Créer une nouvelle catégorie/playlist">＋ Catégorie</button>
+    </div>
+    <div class="vtt-music-son-actions-row">
+      <button class="vtt-music-upload-btn${hideOn?' on':''}" data-vtt-fn="_vttMusicToggleHideTitle" style="flex:1"
+        title="${hideOn?'Les joueurs ne voient pas le nom des musiques — clic pour réafficher':'Masquer le nom des musiques aux joueurs'}">
+        ${hideOn?'🙈 Titres masqués aux joueurs':'👁 Titres visibles par les joueurs'}</button>
     </div>`;
   }
 
@@ -431,12 +437,21 @@ function _initMusicSortable() {
   // Réordonnancement des catégories (playlists) par glisser-déposer (poignée ⠿).
   const catsEl = document.getElementById('vtt-music-cats');
   if (catsEl) {
+    const scrollEl = document.querySelector('.vtt-music-body') || true;
     _musicSortables.push(new Sortable(catsEl, {
       group: 'vtt-cats',
       animation: 120,
       ghostClass: 'vtt-sort-ghost',
       draggable: '.vtt-music-pl-item',
       handle: '.vtt-music-cat-grip',
+      // Drag fiable dans un panneau scrollable : fallback maison + auto-scroll
+      // explicite + ghost détaché du body (sinon clippé par l'overflow du panneau).
+      forceFallback: true,
+      fallbackOnBody: true,
+      scroll: scrollEl,
+      scrollSensitivity: 90,
+      scrollSpeed: 18,
+      bubbleScroll: true,
       onUpdate: async () => {
         const ids = [...catsEl.querySelectorAll('.vtt-music-pl-item')].map(e => e.dataset.catId).filter(Boolean);
         await Promise.all(ids.map((id, i) => updateDoc(_playlistRef(id), { order: i }).catch(() => {})));
@@ -505,7 +520,6 @@ function _renderNowPlaying(curSound, ms) {
         <button class="vtt-music-ctrl" data-vtt-fn="_vttToggleMusicPause" title="${ms.paused?'Reprendre':'Pause'}">${ms.paused?'▶':'⏸'}</button>
         ${pl?`<button class="vtt-music-ctrl" data-vtt-fn="_vttMusicNext" title="Suivant">⏭</button>`:''}
         <button class="vtt-music-ctrl" data-vtt-fn="_vttStopMusic" title="Arrêter">⏹</button>
-        <button class="vtt-music-ctrl${hidden?' on':''}" data-vtt-fn="_vttMusicToggleHideTitle" title="${hidden?'Afficher le titre aux joueurs':'Masquer le titre aux joueurs'}">${hidden?'🙈':'👁'}</button>
       ` : ''}
       <label class="vtt-music-vol-lbl">🔊<input type="range" id="vtt-music-vol" class="vtt-music-vol-inp" min="0" max="100" step="1"></label>
     </div>
