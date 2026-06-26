@@ -78,6 +78,8 @@
     max-height: 58%; padding: .3rem .5rem .35rem;
   }
   .vtt-action-hud.is-collapsed { bottom: 0; }
+  /* Tiroir bas large → on retrouve une grille de cartes (hotbar). */
+  .vtt-aopt-section-body { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
 }
 
 /* Cibles tactiles agrandies sur écrans tactiles uniquement (la souris,
@@ -2236,10 +2238,12 @@
 }
 .vtt-aopt-section-body {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  /* Panneau latéral : 1 carte pleine largeur par ligne (lisible). La grille
+     multi-colonnes ne sert qu'au tiroir bas mobile (cf. média). */
+  grid-template-columns: 1fr;
   gap: 7px;
   padding: 6px;
-  align-items: stretch;   /* cartes d'une même rangée à hauteur égale */
+  align-items: stretch;
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -2517,9 +2521,10 @@
 [data-theme="light"] .cs-v3 .cs-spellcard-desc { color: #475569; }
 [data-theme="light"] .cs-v3 .cs-spellcard-desc:hover { color: #1e293b; }
 
-/* Carte : largeur FIXE (rangée régulière) + hauteur uniforme (align stretch). */
+/* Carte : remplit sa cellule de grille (panneau = 1 colonne pleine largeur ;
+   tiroir bas mobile = grille multi-colonnes). */
 .vtt-aopt-hud .vtt-castcard {
-  flex: 0 0 190px; width: 190px; box-sizing: border-box;
+  flex: none; width: 100%; box-sizing: border-box;
   padding: 9px 11px; gap: 5px; border-radius: 10px;
 }
 .vtt-aopt-hud .cs-spellcard-head { gap: 8px; align-items: flex-start; }
@@ -2546,10 +2551,6 @@
 /* Description et runes masquées (le détail s'affiche après la visée). */
 .vtt-aopt-hud .cs-spellcard-desc,
 .vtt-aopt-hud .cs-spellcard-runes { display: none; }
-
-@media (max-width: 720px) {
-  .vtt-aopt-hud .vtt-castcard { flex-basis: 168px; width: 168px; }
-}
 
 .vtt-action-hud .vtt-aopt-list::-webkit-scrollbar { height: 7px; }
 .vtt-action-hud .vtt-aopt-list::-webkit-scrollbar-thumb { background: var(--bg-elevated); border-radius: 4px; }
