@@ -1470,7 +1470,7 @@ function _renderChroniqueView(missions) {
           </div>
           <h2 class="chap-title">${_esc(m.titre || 'Sans titre')}</h2>
           ${m.description
-            ? `<p class="chap-desc">${_nl2br(_esc(m.description))}</p>`
+            ? `<p class="chap-desc">${_nl2br(m.description)}</p>`
             : `<p class="chap-desc-empty">— La chronique ne dit rien de cette mission —</p>`}
           <div class="chap-foot">
             ${parts.length ? `<div class="chap-parts">
@@ -1907,7 +1907,7 @@ async function openStoryDetail(id) {
       ${item.description ? `
       <section class="mv-section">
         <h3 class="mv-section-title">📜 Récit</h3>
-        <div class="mv-recit">${_nl2br(_esc(item.description))}</div>
+        <div class="mv-recit">${_nl2br(item.description)}</div>
       </section>` : `
       <section class="mv-section">
         <div class="mv-empty">

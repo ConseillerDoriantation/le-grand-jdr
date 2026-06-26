@@ -45,7 +45,7 @@ function _contentToHtml(raw) {
   // "Tom &amp; Jerry" / "l&#39;épée" produite par l'éditeur) était re-échappé à
   // chaque rendu → le & devenait &amp; à chaque fois (accumulation "amp;amp;…").
   const looksHtml = /<[a-z][\s\S]*?>/i.test(s) || /&(#\d+|#x[0-9a-f]+|[a-z][a-z0-9]*);/i.test(s);
-  return looksHtml ? s : _nl2br(_esc(s));
+  return looksHtml ? s : _nl2br(s);
 }
 
 // ── État local ────────────────────────────────────────────────────────────────

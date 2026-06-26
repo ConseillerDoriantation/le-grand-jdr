@@ -277,7 +277,7 @@ function _cardHtml(c) {
     const defi = masked
       ? `<div class="coll-defi coll-defi--masked">🔒 Défi gardé secret</div>`
       : (c.description
-          ? `<div class="coll-defi">${_nl2br(_esc(c.description))}</div>`
+          ? `<div class="coll-defi">${_nl2br(c.description)}</div>`
           : `<div class="coll-defi coll-defi--empty">Aucun défi renseigné.</div>`);
     back2 = STATE.isAdmin
       ? `<div class="coll-back-info">
@@ -345,7 +345,7 @@ function presentCard(id) {
   if (!seeFace)      defi = `<p class="coll-present-defi coll-present-defi--mystery">Relève le défi associé pour révéler cette carte et son contenu.</p>`;
   else if (masked)   defi = `<p class="coll-present-defi coll-present-defi--masked">🔒 Le MJ garde ce défi secret pour l'instant.</p>`;
   else               defi = c.description
-                       ? `<p class="coll-present-defi">${_nl2br(_esc(c.description))}</p>`
+                       ? `<p class="coll-present-defi">${_nl2br(c.description)}</p>`
                        : `<p class="coll-present-defi coll-present-defi--empty">Aucun défi renseigné.</p>`;
 
   const status = c.unlocked

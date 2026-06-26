@@ -628,11 +628,11 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
       ${chips.map(ch => `<span class="cs-sort-sstat" style="--c:${ch.color}">${ch.icon} ${_esc(ch.val)}</span>`).join('')}
     </div>
 
-    ${s.effet ? `<p class="cs-spellcard-desc ${isOpen?'is-full':''}" data-action="toggleSortDetail" data-idx="${i}" title="Cliquer pour ${isOpen?'replier':'voir le détail'}">${isOpen ? _nl2br(_esc(s.effet)) : _esc(s.effet)}</p>` : ''}
+    ${s.effet ? `<p class="cs-spellcard-desc ${isOpen?'is-full':''}" data-action="toggleSortDetail" data-idx="${i}" title="Cliquer pour ${isOpen?'replier':'voir le détail'}">${isOpen ? _nl2br(s.effet) : _esc(s.effet)}</p>` : ''}
 
     ${s.mjNotes ? `<div class="cs-spellcard-mjnote" title="Note / restriction du Maître du Jeu">
       <span class="cs-spellcard-mjnote-ic">📌</span>
-      <span class="cs-spellcard-mjnote-tx">${isOpen ? _nl2br(_esc(s.mjNotes)) : _esc(s.mjNotes)}</span>
+      <span class="cs-spellcard-mjnote-tx">${isOpen ? _nl2br(s.mjNotes) : _esc(s.mjNotes)}</span>
     </div>` : ''}
 
     ${runeChips}

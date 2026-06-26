@@ -255,7 +255,7 @@ function _buildNotes(c) {
     <section class="ps-section">
       <h2 class="ps-section-title">Présentation</h2>
       ${traits.length ? `<div class="ps-traits">${traits.slice(0, 12).map(t => `<span class="ps-trait">${_esc(t)}</span>`).join('')}</div>` : ''}
-      ${bio ? `<div class="ps-bio">${_nl2br(_esc(bio))}</div>` : ''}
+      ${bio ? `<div class="ps-bio">${_nl2br(bio)}</div>` : ''}
     </section>`;
 }
 
