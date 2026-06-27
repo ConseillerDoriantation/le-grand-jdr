@@ -28,7 +28,7 @@ import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js
 import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
-import { accAttackDelta, applyStatsDelta } from '../../shared/stats.js';
+import { accAttackDelta, accCastDelta, applyStatsDelta } from '../../shared/stats.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
@@ -6129,7 +6129,14 @@ async function _vttRollAttack() {
       }
     }
 
-    // ── Statistiques : écrit le delta accumulé (1 écriture) ───────────
+    // ── Statistiques : cast (sort lancé + PM) puis écriture du delta ──
+    if (src.characterId && (opt.sortIdx !== undefined || (opt.pmCost || 0) > 0)) {
+      accCastDelta(_statsDelta, {
+        casterId: src.characterId, casterName: src.name,
+        spellName: opt.sortIdx !== undefined ? (opt.label || 'Sort') : null,
+        pm: opt.pmCost || 0,
+      });
+    }
     applyStatsDelta(_statsDelta, +1);
 
     // ── Un seul message dans le log ────────────────────────────────────

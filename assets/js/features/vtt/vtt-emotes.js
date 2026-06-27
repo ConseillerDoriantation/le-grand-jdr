@@ -17,7 +17,7 @@ import { computeEquipSkillBonus } from '../../shared/char-stats.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import { uploadPng } from '../../shared/image-upload.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
-import { bumpSkill } from '../../shared/stats.js';
+import { bumpSkill, bumpEmote } from '../../shared/stats.js';
 import { _logCol, _logGmCol, _reactionRef } from './vtt-refs.js';
 import { _STAT_KEY } from './vtt-constants.js';
 import { openModal, closeModalDirect, confirmModal } from '../../shared/modal.js';
@@ -298,6 +298,10 @@ export async function _vttPickEmote(name) {
   }).catch(err => {
     console.error('[vtt] émote temps réel — écriture refusée. Vérifier vttEmoteReactions dans Firestore.', err);
   });
+
+  // Statistiques : compte l'émote (attribuée au personnage du token émetteur).
+  const _et = tokenId ? VS.tokens[tokenId]?.data : null;
+  if (_et?.characterId) bumpEmote(_et.characterId, VS.characters[_et.characterId]?.nom || _et.name, name);
 }
 
 export async function _ouvrirGestionEmotes() {

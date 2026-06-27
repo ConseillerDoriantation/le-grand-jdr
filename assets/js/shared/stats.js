@@ -69,16 +69,43 @@ export function accAttackDelta(acc, { attackerId, attackerName, targetId, target
   return acc;
 }
 
+// Cast d'un sort : +1 sort lancé, +PM dépensés, +1 sur la répartition par sort,
+// +soin éventuel. Accumulé dans le même delta réversible que l'attaque.
+export function accCastDelta(acc, { casterId, casterName, spellName, pm = 0, heal = 0 } = {}) {
+  if (!casterId) return acc;
+  acc.chars ??= {};
+  const c = (acc.chars[casterId] ??= { name: casterName || '', combat: {} });
+  if (casterName) c.name = casterName;
+  c.combat.spellsCast = (c.combat.spellsCast || 0) + 1;
+  if (pm > 0)   c.combat.pmSpent = (c.combat.pmSpent || 0) + pm;
+  if (heal > 0) c.combat.heal    = (c.combat.heal || 0) + heal;
+  if (spellName) { c.spells ??= {}; c.spells[spellName] = (c.spells[spellName] || 0) + 1; }
+  return acc;
+}
+
 // Applique un delta brut via increment(). sign = +1 (pose) ou −1 (annulation).
+// Générique : chaque groupe de compteurs (combat, spells, emotes…) est traité.
 export function applyStatsDelta(delta, sign = 1) {
   if (!delta?.chars || !Object.keys(delta.chars).length) return;
   const chars = {};
   for (const [id, c] of Object.entries(delta.chars)) {
-    const combat = {};
-    for (const [k, v] of Object.entries(c.combat || {})) combat[k] = increment(sign * (Number(v) || 0));
-    chars[id] = { name: c.name || '', combat };
+    const out = { name: c.name || '' };
+    for (const [grp, counters] of Object.entries(c)) {
+      if (grp === 'name' || !counters || typeof counters !== 'object') continue;
+      const g = {};
+      for (const [k, v] of Object.entries(counters)) g[k] = increment(sign * (Number(v) || 0));
+      out[grp] = g;
+    }
+    chars[id] = out;
   }
   return bumpStats({ chars });
+}
+
+// ── Émote utilisée (par perso) ───────────────────────────────────────────────
+// Pas d'annulation possible → écriture directe.
+export function bumpEmote(charId, charName, emoteName) {
+  if (!charId || !emoteName) return;
+  return bumpStats({ chars: { [charId]: { name: charName || '', emotes: { [emoteName]: increment(1) } } } });
 }
 
 export function bumpSkill(charId, charName, skill, { crit = false, fumble = false } = {}) {
