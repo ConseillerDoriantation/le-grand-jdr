@@ -22,7 +22,7 @@ import { initializeFirestore,
          writeBatch,
          query, where, orderBy, limit,
          onSnapshot,
-         increment,
+         increment, deleteField,
          serverTimestamp, Timestamp } from 'firebase/firestore';
 import { firebaseConfig }          from './firebase-config.js';
 
@@ -61,6 +61,6 @@ export {
   writeBatch,
   query, where, orderBy, limit,
   onSnapshot,
-  increment,
+  increment, deleteField,
   serverTimestamp, Timestamp,
 };

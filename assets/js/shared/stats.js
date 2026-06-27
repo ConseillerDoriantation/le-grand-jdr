@@ -19,7 +19,7 @@
 // Les stats GLOBALES (table) = somme des chars, calculée à l'affichage.
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { db, doc, getDoc, setDoc, increment } from '../config/firebase.js';
+import { db, doc, getDoc, setDoc, updateDoc, increment, deleteField } from '../config/firebase.js';
 import { getCurrentAdventureId } from '../data/firestore.js';
 
 function _statsRef() {
@@ -47,6 +47,14 @@ export async function resetStats() {
   const ref = _statsRef();
   if (!ref) return false;
   try { await setDoc(ref, {}, { merge: false }); return true; }
+  catch { return false; }
+}
+
+// Supprime les stats d'UN personnage (ex. jets de test) sans toucher aux autres.
+export async function deleteCharStats(charId) {
+  const ref = _statsRef();
+  if (!ref || !charId) return false;
+  try { await updateDoc(ref, { [`chars.${charId}`]: deleteField() }); return true; }
   catch { return false; }
 }
 

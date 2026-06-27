@@ -71,3 +71,16 @@
   border-radius: 999px; padding: .15rem .55rem;
   font-variant-numeric: tabular-nums; white-space: nowrap;
 }
+
+/* Bouton suppression des stats d'un personnage (MJ) */
+.stats-char-del {
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-dim); font-size: .8rem; cursor: pointer; line-height: 1;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.stats-char-del:hover {
+  color: var(--crimson-light, #ff8ca7);
+  border-color: rgba(255,90,126,.4); background: rgba(255,90,126,.08);
+}

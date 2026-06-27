@@ -7,7 +7,7 @@ import { loadChars, loadCollection, getCachedCollection, getDocData } from '../d
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
-import { loadStats, resetStats } from '../shared/stats.js';
+import { loadStats, resetStats, deleteCharStats } from '../shared/stats.js';
 import { showNotif } from '../shared/notifications.js';
 import { confirmModal } from '../shared/modal.js';
 import { watch, watchDoc } from '../shared/realtime.js';
@@ -1344,8 +1344,11 @@ const PAGES = {
               <span class="stats-skill-n">${s.rolls}${s.crits ? ` · 💥${s.crits}` : ''}${s.fumbles ? ` · 💔${s.fumbles}` : ''}</span>
             </div>`).join('')}
         </div>` : '';
+      const delBtn = STATE.isAdmin
+        ? `<button class="stats-char-del" data-action="_statsDelChar" data-id="${r.id}" title="Supprimer les stats de ce personnage (jets de test…)">✕</button>`
+        : '';
       return `<div class="stats-char">
-        <div class="stats-char-hd"><span class="stats-char-name">${_esc(r.name)}</span></div>
+        <div class="stats-char-hd"><span class="stats-char-name">${_esc(r.name)}</span>${delBtn}</div>
         ${combatHtml}${skillHtml}
       </div>`;
     };
@@ -1416,6 +1419,18 @@ registerActions({
     if (!ok) return;
     const done = await resetStats();
     showNotif(done ? 'Statistiques réinitialisées.' : 'Échec de la réinitialisation.', done ? 'success' : 'error');
+    if (done) PAGES.statistiques();
+  },
+  _statsDelChar: async (btn) => {
+    if (!STATE.isAdmin) return;
+    const id = btn.dataset.id; if (!id) return;
+    const name = btn.closest('.stats-char')?.querySelector('.stats-char-name')?.textContent || 'ce personnage';
+    const ok = await confirmModal(`Supprimer les statistiques de <b>${_esc(name)}</b> ? (utile pour des jets de test)`, {
+      title: '✕ Supprimer les stats du personnage', confirmLabel: 'Supprimer', cancelLabel: 'Annuler', danger: true,
+    }).catch(() => false);
+    if (!ok) return;
+    const done = await deleteCharStats(id);
+    showNotif(done ? 'Statistiques du personnage supprimées.' : 'Échec de la suppression.', done ? 'success' : 'error');
     if (done) PAGES.statistiques();
   },
 
