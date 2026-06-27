@@ -5631,10 +5631,17 @@ async function _vttRollAttack() {
       // ── Échec critique : sort raté, aucun soin appliqué ─────────────
       if (hIsFumble) {
         const tgtNames = targetIds.map(tid => _live(VS.tokens[tid]?.data || {}).displayName).filter(Boolean).join(', ');
+        // Stats : soin raté → compte quand même 1 sort lancé + PM (soin 0), réversible.
+        const _healDelta = { chars: {} };
+        if (src.characterId) {
+          accCastDelta(_healDelta, { casterId: src.characterId, casterName: src.name, spellName: opt.label || 'Soin', pm: opt.pmCost || 0, heal: 0 });
+          applyStatsDelta(_healDelta, +1);
+        }
         await addDoc(_logCol(), {
           type: 'attack', isHeal: true, isFumble: true, advMode: hMode, advAuto: hMode !== mode,
           advReasons: hMode !== mode ? hCondMods.reasons : null,
           undo: _undoSnap,
+          statsDelta: _healDelta,
           authorId: STATE.user?.uid||null, authorName,
           attackerName: lS.displayName??src.name,
           characterImage: lS.displayImage||null,
@@ -5674,13 +5681,21 @@ async function _vttRollAttack() {
 
       // Appliquer à chaque cible
       const healResults = [];
+      let _healActual = 0;   // soin RÉEL cumulé (hors surplus au-delà du max) pour les stats
       for (const curTgtId of targetIds) {
         const curTgtData = VS.tokens[curTgtId]?.data; if (!curTgtData) continue;
         const lCur = _live(curTgtData);
         const curHp = lCur.displayHp ?? 20, hpMax = lCur.displayHpMax ?? 20;
         const newHp = Math.min(hpMax, curHp + healTotal);
+        _healActual += Math.max(0, newHp - curHp);
         await _setHp(curTgtData, newHp);
         healResults.push({ name: lCur.displayName ?? curTgtData.name, newHp, hpMax });
+      }
+      // Statistiques (soin) : 1 sort lancé + PM + soin réel, réversible à l'annulation.
+      const _healDelta = { chars: {} };
+      if (src.characterId) {
+        accCastDelta(_healDelta, { casterId: src.characterId, casterName: src.name, spellName: opt.label || 'Soin', pm: opt.pmCost || 0, heal: _healActual });
+        applyStatsDelta(_healDelta, +1);
       }
 
       const isMultiHeal = healResults.length > 1;
@@ -5701,6 +5716,7 @@ async function _vttRollAttack() {
         await addDoc(_logCol(), {
           type: 'attack-multi', isHeal: true,
           undo: _undoSnap,
+          statsDelta: _healDelta,
           authorId: STATE.user?.uid||null, authorName,
           attackerName: lS.displayName??src.name,
           characterImage: lS.displayImage||null,
@@ -5720,6 +5736,7 @@ async function _vttRollAttack() {
           await addDoc(_logCol(), {
             type:'attack', isHeal:true,
             undo: _undoSnap,
+            statsDelta: _healDelta,
             authorId: STATE.user?.uid||null, authorName,
             attackerName: lS.displayName??src.name,
             characterImage: lS.displayImage||null,
