@@ -16,6 +16,7 @@ import { updateDoc, addDoc, serverTimestamp } from '../../config/firebase.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _tokRef, _logCol } from './vtt-refs.js';
 import { _live, _scaledEnchantConditionFields } from './vtt-effective.js';
+import { bumpHeal } from '../../shared/stats.js';
 import {
   CONDITION_BY_ID, _STAT_SHORT, _buffShared, _consumeLuckyReroll,
   _rollDiceDetailed, _setHp, _tokenStatMod,
@@ -278,6 +279,7 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt) {
 export async function _vttApplyRegeneration(srcId, targetIds, opt) {
   const regen = opt.mods?.regeneration;
   if (!regen) return;
+  const _caster = VS.tokens[srcId]?.data;   // soigneur (pour les stats de soin)
   const shared = _buffShared(opt, srcId);
   const newBuff = {
     ...shared,
@@ -308,6 +310,8 @@ export async function _vttApplyRegeneration(srcId, targetIds, opt) {
       showNotif(`⚠️ ${name} : tick de Régénération non appliqué (${err?.code || err?.message || 'permissions ?'})`, 'error');
     });
     if (!hpApplied) continue;
+    // Statistiques : soin réel attribué au soigneur (proc immédiat de Régénération).
+    if (_caster?.characterId) bumpHeal(_caster.characterId, _caster.name, effectiveHeal);
     await addDoc(_logCol(), {
       type: 'dot-tick',
       isHeal: true,

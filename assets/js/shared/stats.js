@@ -42,6 +42,14 @@ export async function loadStats() {
   return snap?.exists() ? snap.data() : null;
 }
 
+// Remise à zéro de toutes les statistiques de l'aventure (MJ).
+export async function resetStats() {
+  const ref = _statsRef();
+  if (!ref) return false;
+  try { await setDoc(ref, {}, { merge: false }); return true; }
+  catch { return false; }
+}
+
 // ── Jet de compétence (Athlétisme, Acrobaties…) ──────────────────────────────
 // Comptabilise 1 jet, + crit (20 nat) et + échec critique (1 nat). La réussite
 // n'est pas auto-déterminée (pas de DD systématique) → on ne compte pas succès/échec.
@@ -99,6 +107,13 @@ export function applyStatsDelta(delta, sign = 1) {
     chars[id] = out;
   }
   return bumpStats({ chars });
+}
+
+// ── Soin direct (ex. tick de Régénération) ───────────────────────────────────
+// Écriture directe (un HoT par tour ne se « défait » pas proprement à l'annulation).
+export function bumpHeal(charId, charName, amount) {
+  if (!charId || !(amount > 0)) return;
+  return bumpStats({ chars: { [charId]: { name: charName || '', combat: { heal: increment(amount) } } } });
 }
 
 // ── Émote utilisée (par perso) ───────────────────────────────────────────────

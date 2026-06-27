@@ -16,6 +16,7 @@ import { db, updateDoc, setDoc, addDoc, serverTimestamp, writeBatch } from '../.
 import { showNotif } from '../../shared/notifications.js';
 import { _sesRef, _tokRef, _logCol } from './vtt-refs.js';
 import { _live } from './vtt-effective.js';
+import { bumpHeal } from '../../shared/stats.js';
 import {
   CONDITION_BY_ID, _rollDiceDetailed, _setHp, _persistInvocationState,
   _vttTriggerConcentrationSave, _vttBreakConcentrationEffects,
@@ -126,6 +127,13 @@ export async function _vttNextRound() {
       const effectiveHeal = Math.max(0, newHp - afterDmg);
       if (effectiveHeal <= 0) continue;
       await _setHp(td, newHp).catch(() => {});
+      // Statistiques : soin effectif attribué aux soigneurs (au prorata du tick).
+      const _regenBuffs = dots.filter(d => d.type === 'regen');
+      _regenBuffs.forEach((d, i) => {
+        const share = totalHeal > 0 ? Math.round(effectiveHeal * ((healRolls[i]?.rolled || 0) / totalHeal)) : 0;
+        const hc = VS.tokens[d.casterId]?.data;
+        if (hc?.characterId && share > 0) bumpHeal(hc.characterId, hc.name, share);
+      });
       dotNotifs.push(`💚 ${effectiveHeal} PV Régénération → ${tgtName}`);
       await addDoc(_logCol(), {
         type: 'dot-tick',

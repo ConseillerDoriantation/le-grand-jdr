@@ -7,8 +7,9 @@ import { loadChars, loadCollection, getCachedCollection, getDocData } from '../d
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
-import { loadStats } from '../shared/stats.js';
+import { loadStats, resetStats } from '../shared/stats.js';
 import { showNotif } from '../shared/notifications.js';
+import { confirmModal } from '../shared/modal.js';
 import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
@@ -1262,7 +1263,10 @@ const PAGES = {
   // ─── STATISTIQUES ─────────────────────────────────────────────────────────────
   async statistiques() {
     const content = document.getElementById('main-content');
-    content.innerHTML = `${pageHeaderHtml('📊 Statistiques', 'Jets, réussites et exploits de la table')}
+    const resetBtn = STATE.isAdmin
+      ? `<button class="btn btn-outline btn-sm" data-action="_statsReset" style="float:right;color:var(--crimson-light,#ff8ca7);border-color:rgba(255,90,126,.3)" title="Remettre toutes les statistiques à zéro">↺ Réinitialiser</button>`
+      : '';
+    content.innerHTML = `${pageHeaderHtml('📊 Statistiques', 'Jets, réussites et exploits de la table')}${resetBtn}
       <div id="stats-root" class="stats-root"><div class="stats-empty">Chargement…</div></div>`;
     const data = await loadStats();
     const root = document.getElementById('stats-root');
@@ -1402,6 +1406,18 @@ registerActions({
   // Dashboard
   _goToChar:             (btn) => goToChar(btn.dataset.id),
   openAdventureSwitcher: ()    => openAdventureSwitcher(),
+
+  // Statistiques : réinitialisation (MJ)
+  _statsReset: async () => {
+    if (!STATE.isAdmin) return;
+    const ok = await confirmModal('Remettre TOUTES les statistiques de l\'aventure à zéro ? (irréversible)', {
+      title: '↺ Réinitialiser les statistiques', confirmLabel: 'Tout effacer', cancelLabel: 'Annuler', danger: true,
+    }).catch(() => false);
+    if (!ok) return;
+    const done = await resetStats();
+    showNotif(done ? 'Statistiques réinitialisées.' : 'Échec de la réinitialisation.', done ? 'success' : 'error');
+    if (done) PAGES.statistiques();
+  },
 
   // Admin lazy-load tools
   _adminLazyOpen:        async (btn) => {
