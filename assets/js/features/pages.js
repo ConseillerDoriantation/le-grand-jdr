@@ -1269,66 +1269,101 @@ const PAGES = {
     if (!root) return;
 
     const charsMap = data?.chars || {};
+    const num = (v) => Number(v) || 0;
     const rows = Object.entries(charsMap).map(([id, c]) => {
       const skills = c.skills || {};
-      let rolls = 0, crits = 0, fumbles = 0;
+      let sRolls = 0, sCrits = 0, sFumbles = 0;
       const perSkill = Object.entries(skills).map(([sk, v]) => {
-        rolls += v.rolls || 0; crits += v.crits || 0; fumbles += v.fumbles || 0;
-        return { sk, rolls: v.rolls || 0, crits: v.crits || 0, fumbles: v.fumbles || 0 };
+        sRolls += num(v.rolls); sCrits += num(v.crits); sFumbles += num(v.fumbles);
+        return { sk, rolls: num(v.rolls), crits: num(v.crits), fumbles: num(v.fumbles) };
       }).sort((a, b) => b.rolls - a.rolls);
-      return { id, name: c.name || '?', rolls, crits, fumbles, perSkill };
-    }).filter(r => r.rolls > 0).sort((a, b) => b.rolls - a.rolls);
+      const cm = c.combat || {};
+      const combat = {
+        attacks: num(cm.attacks), hits: num(cm.hits), crits: num(cm.crits), fumbles: num(cm.fumbles),
+        dmgDealt: num(cm.dmgDealt), dmgTaken: num(cm.dmgTaken), kosDealt: num(cm.kosDealt), kosTaken: num(cm.kosTaken),
+      };
+      return { id, name: c.name || '?', sRolls, sCrits, sFumbles, perSkill, combat };
+    }).filter(r => r.sRolls > 0 || r.combat.attacks > 0 || r.combat.dmgTaken > 0);
 
     if (!rows.length) {
       root.innerHTML = `<div class="stats-empty">Aucune statistique pour le moment.<br>
-        <span>Les jets de compétences (et bientôt le combat) alimenteront cette page au fil des séances.</span></div>`;
+        <span>Les jets de compétence et le combat alimenteront cette page au fil des séances.</span></div>`;
       return;
     }
 
-    // Global (table) + agrégat par compétence
-    const G = rows.reduce((g, r) => { g.rolls += r.rolls; g.crits += r.crits; g.fumbles += r.fumbles; return g; }, { rolls: 0, crits: 0, fumbles: 0 });
+    // Agrégats table
+    const GC = rows.reduce((g, r) => { for (const k in r.combat) g[k] += r.combat[k]; return g; },
+      { attacks: 0, hits: 0, crits: 0, fumbles: 0, dmgDealt: 0, dmgTaken: 0, kosDealt: 0, kosTaken: 0 });
+    const GS = rows.reduce((g, r) => { g.rolls += r.sRolls; g.crits += r.sCrits; g.fumbles += r.sFumbles; return g; }, { rolls: 0, crits: 0, fumbles: 0 });
+    const hitRate = GC.attacks ? Math.round(GC.hits / GC.attacks * 100) : 0;
     const skillAgg = {};
-    rows.forEach(r => r.perSkill.forEach(s => { (skillAgg[s.sk] ??= { rolls: 0, crits: 0, fumbles: 0 }); skillAgg[s.sk].rolls += s.rolls; skillAgg[s.sk].crits += s.crits; skillAgg[s.sk].fumbles += s.fumbles; }));
+    rows.forEach(r => r.perSkill.forEach(s => { (skillAgg[s.sk] ??= { rolls: 0 }); skillAgg[s.sk].rolls += s.rolls; }));
     const topSkill = Object.entries(skillAgg).sort((a, b) => b[1].rolls - a[1].rolls)[0];
-    const topCrit   = [...rows].filter(r => r.crits   > 0).sort((a, b) => b.crits   - a.crits)[0];
-    const topFumble = [...rows].filter(r => r.fumbles > 0).sort((a, b) => b.fumbles - a.fumbles)[0];
+
+    const best = (key) => [...rows].filter(r => r.combat[key] > 0).sort((a, b) => b.combat[key] - a.combat[key])[0];
+    const topDmg = best('dmgDealt'), topKo = best('kosDealt');
+    const topHit = [...rows].filter(r => r.combat.attacks >= 3).map(r => ({ ...r, hr: Math.round(r.combat.hits / r.combat.attacks * 100) })).sort((a, b) => b.hr - a.hr)[0];
+    const topFumble = [...rows].map(r => ({ ...r, tf: r.combat.fumbles + r.sFumbles })).filter(r => r.tf > 0).sort((a, b) => b.tf - a.tf)[0];
 
     const statCard = (ic, val, lbl, a) => `<div class="stats-kpi" style="--a:${a}"><span class="stats-kpi-ic">${ic}</span><span class="stats-kpi-val">${val}</span><span class="stats-kpi-lbl">${lbl}</span></div>`;
     const award = (ic, lbl, who, val) => who ? `<div class="stats-award"><span class="stats-award-ic">${ic}</span><div class="stats-award-tx"><span class="stats-award-lbl">${lbl}</span><span class="stats-award-who">${_esc(who)} <b>· ${val}</b></span></div></div>` : '';
 
-    const charBlock = (r) => `
-      <div class="stats-char">
-        <div class="stats-char-hd">
-          <span class="stats-char-name">${_esc(r.name)}</span>
-          <span class="stats-char-meta">${r.rolls} jet${r.rolls > 1 ? 's' : ''} · 💥 ${r.crits} · 💔 ${r.fumbles}</span>
-        </div>
+    const charBlock = (r) => {
+      const hr = r.combat.attacks ? Math.round(r.combat.hits / r.combat.attacks * 100) : 0;
+      const combatHtml = (r.combat.attacks > 0 || r.combat.dmgTaken > 0) ? `
+        <div class="stats-cstats">
+          <span class="stats-cstat" title="Attaques · taux de réussite">⚔️ ${r.combat.attacks}${r.combat.attacks ? ` · ${hr}%` : ''}</span>
+          <span class="stats-cstat" title="Réussites critiques">💥 ${r.combat.crits}</span>
+          <span class="stats-cstat" title="Échecs critiques">💔 ${r.combat.fumbles}</span>
+          <span class="stats-cstat" title="Dégâts infligés">🗡️ ${r.combat.dmgDealt}</span>
+          <span class="stats-cstat" title="Dégâts subis">🛡️ ${r.combat.dmgTaken}</span>
+          <span class="stats-cstat" title="KO infligés / subis">☠️ ${r.combat.kosDealt}/${r.combat.kosTaken}</span>
+        </div>` : '';
+      const skillHtml = r.perSkill.length ? `
         <div class="stats-skills">
           ${r.perSkill.map(s => `
             <div class="stats-skill-row">
               <span class="stats-skill-name">${_esc(s.sk)}</span>
-              <span class="stats-skill-bar"><span style="width:${Math.round((s.rolls / r.rolls) * 100)}%"></span></span>
+              <span class="stats-skill-bar"><span style="width:${r.sRolls ? Math.round((s.rolls / r.sRolls) * 100) : 0}%"></span></span>
               <span class="stats-skill-n">${s.rolls}${s.crits ? ` · 💥${s.crits}` : ''}${s.fumbles ? ` · 💔${s.fumbles}` : ''}</span>
             </div>`).join('')}
-        </div>
+        </div>` : '';
+      return `<div class="stats-char">
+        <div class="stats-char-hd"><span class="stats-char-name">${_esc(r.name)}</span></div>
+        ${combatHtml}${skillHtml}
       </div>`;
+    };
 
     root.innerHTML = `
       <section class="adm-block">
-        <div class="adm-label">🎲 Vue d'ensemble (table)</div>
+        <div class="adm-label">⚔️ Combat (table)</div>
         <div class="stats-kpis">
-          ${statCard('🎲', G.rolls, 'Jets de compétence', '#4f8cff')}
-          ${statCard('💥', G.crits, 'Réussites critiques', '#22c38e')}
-          ${statCard('💔', G.fumbles, 'Échecs critiques', '#ff6b6b')}
-          ${statCard('🏅', topSkill ? _esc(topSkill[0]) : '—', 'Compétence la + jouée', '#f4c430')}
+          ${statCard('⚔️', GC.attacks, 'Attaques', '#ff8b6b')}
+          ${statCard('🎯', GC.attacks ? `${hitRate}%` : '—', 'Taux de réussite', '#22c38e')}
+          ${statCard('💥', GC.crits, 'Réussites critiques', '#f4c430')}
+          ${statCard('💔', GC.fumbles, 'Échecs critiques', '#ff6b6b')}
+          ${statCard('🗡️', GC.dmgDealt, 'Dégâts infligés', '#a78bfa')}
+          ${statCard('☠️', GC.kosDealt, 'KO infligés', '#ef4444')}
         </div>
         <div class="stats-awards">
-          ${award('🍀', 'Le plus chanceux', topCrit?.name, `${topCrit?.crits} crit${topCrit?.crits > 1 ? 's' : ''}`)}
-          ${award('☠️', 'Le plus malchanceux', topFumble?.name, `${topFumble?.fumbles} échec${topFumble?.fumbles > 1 ? 's' : ''}`)}
+          ${award('🏆', 'Plus gros frappeur', topDmg?.name, `${topDmg?.combat.dmgDealt} dmg`)}
+          ${award('🎯', 'Meilleur taux', topHit?.name, topHit ? `${topHit.hr}%` : '')}
+          ${award('☠️', 'Bourreau', topKo?.name, `${topKo?.combat.kosDealt} KO`)}
+          ${award('🤡', 'Le plus malchanceux', topFumble?.name, `${topFumble?.tf} échec${topFumble?.tf > 1 ? 's' : ''}`)}
+        </div>
+      </section>
+      <section class="adm-block">
+        <div class="adm-label">🎲 Compétences (table)</div>
+        <div class="stats-kpis">
+          ${statCard('🎲', GS.rolls, 'Jets de compétence', '#4f8cff')}
+          ${statCard('💥', GS.crits, 'Réussites critiques', '#22c38e')}
+          ${statCard('💔', GS.fumbles, 'Échecs critiques', '#ff6b6b')}
+          ${statCard('🏅', topSkill ? _esc(topSkill[0]) : '—', 'Compétence la + jouée', '#f4c430')}
         </div>
       </section>
       <section class="adm-block">
         <div class="adm-label">👤 Par personnage</div>
-        <div class="stats-chars">${rows.map(charBlock).join('')}</div>
+        <div class="stats-chars">${rows.sort((a, b) => (b.combat.attacks + b.sRolls) - (a.combat.attacks + a.sRolls)).map(charBlock).join('')}</div>
       </section>`;
   },
 

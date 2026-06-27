@@ -58,3 +58,16 @@
 .stats-skill-bar { flex: 1; height: 7px; border-radius: 999px; background: var(--bg-elevated); overflow: hidden; }
 .stats-skill-bar > span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #6366f1, #a78bfa); }
 .stats-skill-n { font-size: .72rem; color: var(--text-muted); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
+/* ── Stats de combat par personnage ── */
+.stats-cstats {
+  display: flex; flex-wrap: wrap; gap: .35rem .5rem;
+  margin: 0 0 .6rem; padding-bottom: .55rem;
+  border-bottom: 1px solid var(--border);
+}
+.stats-cstat {
+  font-size: .76rem; color: var(--text-soft, #c8d4e8);
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 999px; padding: .15rem .55rem;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}

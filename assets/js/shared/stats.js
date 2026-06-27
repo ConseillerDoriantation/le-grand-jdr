@@ -56,6 +56,32 @@ export async function loadStats() {
 // ── Jet de compétence (Athlétisme, Acrobaties…) ──────────────────────────────
 // Comptabilise 1 jet, + crit (20 nat) et + échec critique (1 nat). La réussite
 // n'est pas auto-déterminée (pas de DD systématique) → on ne compte pas succès/échec.
+// ── Attaque (arme / sort offensif) ───────────────────────────────────────────
+// Comptabilise, par jet sur une cible : +1 attaque, +touché, +crit, +échec
+// critique, +dégâts infligés (attaquant) et +dégâts subis / +KO (cible).
+// On ne compte que les PJ (attaquant et/ou cible) — les créatures sont ignorées.
+export function bumpAttack({ attackerId, attackerName, targetId, targetName, hit, crit, fumble, dmg = 0, ko = false } = {}) {
+  const chars = {};
+  if (attackerId) {
+    chars[attackerId] = { name: attackerName || '', combat: {
+      attacks:  increment(1),
+      hits:     increment(hit   ? 1 : 0),
+      crits:    increment(crit  ? 1 : 0),
+      fumbles:  increment(fumble ? 1 : 0),
+      dmgDealt: increment(dmg > 0 ? dmg : 0),
+      kosDealt: increment(ko ? 1 : 0),
+    } };
+  }
+  if (targetId && targetId !== attackerId) {
+    chars[targetId] = { name: targetName || '', combat: {
+      dmgTaken: increment(dmg > 0 ? dmg : 0),
+      kosTaken: increment(ko ? 1 : 0),
+    } };
+  }
+  if (!Object.keys(chars).length) return;
+  return bumpStats({ chars });
+}
+
 export function bumpSkill(charId, charName, skill, { crit = false, fumble = false } = {}) {
   console.debug('[stats] bumpSkill', { charId, charName, skill, crit, fumble });
   if (!charId || !skill) { console.warn('[stats] bumpSkill ignoré — charId/skill manquant'); return; }

@@ -28,6 +28,7 @@ import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js
 import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
+import { bumpAttack } from '../../shared/stats.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
@@ -5995,6 +5996,18 @@ async function _vttRollAttack() {
           await _setHp(curTgtData, newHp);
         }
       }
+
+      // ── Statistiques de combat : 1 entrée par cible (PJ attaquant/cible) ──
+      bumpAttack({
+        attackerId:   src.characterId || null,
+        attackerName: src.name || '',
+        targetId:     curTgtData.characterId || null,
+        targetName:   curTgtData.name || '',
+        hit, crit: isCrit, fumble: isFumble,
+        dmg: (hit || halfDmg) ? Math.max(0, dmgTotal) : 0,
+        ko: (curHp > 0 && newHp <= 0),
+      });
+
       // ── États consommés au 1er coup (Marqué, etc.) : retire ceux dont
       //    l'effet `consumedByAttackAgainst` est activé après que les bonus
       //    de dégâts aient été appliqués. Persistance immédiate.
