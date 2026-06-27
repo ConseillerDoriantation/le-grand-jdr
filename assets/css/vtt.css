@@ -2841,6 +2841,10 @@
 }
 .vtt-loot-trigger:hover { background: var(--bg-elevated); box-shadow: 0 3px 14px rgba(0,0,0,.55); }
 .vtt-loot-trigger.active { border-color: var(--gold); box-shadow: 0 0 0 2px oklch(72% 0.14 52 / 0.3); }
+.vtt-loot-trigger--voting {
+  border-color: rgba(167,139,250,.6);
+  animation: vtt-vote-pulse 1.6s ease-in-out infinite;
+}
 
 .vtt-loot-panel {
   flex-direction: column;
@@ -2975,6 +2979,40 @@
   padding: 0; transition: background .1s, color .1s;
 }
 .vtt-loot-take-cancel:hover { background: rgba(239,68,68,.15); color: #ef4444; }
+
+/* Répartition des drops — vote des joueurs (montant demandé) */
+.vtt-loot-dist-btn {
+  padding: .2rem .4rem; font-size: .72rem; flex-shrink: 0;
+  background: rgba(167,139,250,.15); border: 1px solid rgba(167,139,250,.4);
+  border-radius: 5px; color: #c4b5fd; cursor: pointer;
+  transition: background .1s;
+}
+.vtt-loot-dist-btn:hover { background: rgba(167,139,250,.28); }
+.vtt-loot-voting-badge {
+  font-size: .72rem; color: #c4b5fd; flex-shrink: 0;
+  animation: vtt-vote-pulse 1.6s ease-in-out infinite;
+}
+@keyframes vtt-vote-pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+.vtt-loot-vote {
+  display: flex; flex-direction: column; gap: .35rem;
+  padding: .45rem .5rem; margin: 2px 0 4px 14px;
+  background: var(--bg-card2); border: 1px solid rgba(167,139,250,.35);
+  border-radius: 7px;
+  animation: vtt-take-slide .15s ease-out;
+}
+.vtt-loot-claim-total {
+  font-size: .72rem; color: var(--text-muted);
+}
+.vtt-loot-claim-total.over { color: #f87171; font-weight: 600; }
+.vtt-loot-claim-done {
+  display: flex; align-items: center; gap: 6px;
+  font-size: .74rem; color: var(--text);
+}
+.vtt-loot-claim-done > span { flex: 1; }
+.vtt-loot-vote-mj {
+  display: flex; flex-direction: column; gap: .25rem;
+  border-top: 1px dashed var(--border); padding-top: .4rem;
+}
 
 /* MJ : sélecteur boutique avec catégories + ajout inline */
 .vtt-loot-cats {

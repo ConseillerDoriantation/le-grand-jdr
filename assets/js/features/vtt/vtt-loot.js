@@ -17,6 +17,7 @@ import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { sortCharactersForDisplay } from '../../shared/char-stats.js';
 import { useGold } from '../../shared/economy.js';
 import { _chrRef } from './vtt-refs.js';   // ref Firestore perso (leaf)
+import { _shortRestPresentUids, _shortRestPresentNames } from './vtt-rest.js'; // quorum présence (réutilisé)
 
 // Quantité « prenable » d'une entrée de butin : objets → qty, or → amount.
 const _lootCount = (item) => item?.kind === 'gold' ? (item.amount || 0) : (item.qty || 0);
@@ -40,7 +41,7 @@ function _rollGoldFormula(str) {
 }
 
 // ── État local butin ────────────────────────────────────────────────
-let _loot            = { stash: [], loot: [] };
+let _loot            = { stash: [], loot: [], voteClaims: {} };
 let _lootUnsub       = null;
 let _lootLoading     = false;
 let _lootReady       = null;
@@ -53,13 +54,14 @@ const _lootRef  = () => doc(db, `adventures/${aid()}/vtt/loot`);
 
 async function _saveLoot() {
   await _ensureLootListener();
-  await setDoc(_lootRef(), { stash: _loot.stash, loot: _loot.loot });
+  await setDoc(_lootRef(), { stash: _loot.stash, loot: _loot.loot, voteClaims: _loot.voteClaims || {} });
 }
 
 function _normalizeLoot(data) {
   _loot = data || {};
   if (!Array.isArray(_loot.stash)) _loot.stash = [];
   if (!Array.isArray(_loot.loot))  _loot.loot  = [];
+  if (!_loot.voteClaims || typeof _loot.voteClaims !== 'object') _loot.voteClaims = {};
 }
 
 function _ensureLootListener() {
@@ -74,6 +76,7 @@ function _ensureLootListener() {
     };
     _lootUnsub = onSnapshot(_lootRef(), snap => {
       _normalizeLoot(snap.exists() ? snap.data() : {});
+      _checkLootVoteAutoApply();
       finish();
     }, () => {
       _normalizeLoot(_loot);
@@ -85,6 +88,9 @@ function _ensureLootListener() {
 
 function _renderLootPanel() {
   const panel = document.getElementById('vtt-loot-panel');
+  // Cue sur le déclencheur même panneau fermé : répartition en cours.
+  document.getElementById('vtt-loot-trigger')
+    ?.classList.toggle('vtt-loot-trigger--voting', _loot.loot.some(i => i.vote?.open));
   if (!panel || panel.dataset.open !== '1') return;
   const mj = STATE.isAdmin;
 
@@ -98,11 +104,16 @@ function _renderLootPanel() {
   const _itemRow = (item, zone) => {
     const isGold = item.kind === 'gold';
     const rarColor = { commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff', tres_rare:'#b47fff', legendaire:'#f59e0b' }[item.rarete] || '#9ca3af';
+    const voteOpen = zone === 'loot' && !!item.vote?.open;
     const removeBtn = (zone === 'stash' && mj) ? `<button class="vtt-icon-btn" data-vtt-fn="_vttLootRemoveStash" data-vtt-args="${item.id}" title="Retirer">✕</button>`
       : (zone === 'loot' && mj) ? `<button class="vtt-icon-btn" data-vtt-fn="_vttLootRemoveLoot" data-vtt-args="${item.id}" title="Retirer">✕</button>` : '';
-    const takeBtn = (zone === 'loot' && myChars.length) ? `<button class="vtt-loot-take-btn" data-vtt-fn="_vttLootToggleTake" data-vtt-args="${item.id}">Prendre</button>` : '';
-    const dragHandle = mj ? `<span class="vtt-loot-drag" title="${zone === 'stash' ? 'Glisser vers le butin' : 'Glisser vers la réserve'}">⠿</span>` : '';
-    const inline = zone === 'loot' ? `<div class="vtt-loot-take-inline" id="vtt-take-inline-${item.id}" style="display:none"></div>` : '';
+    const takeBtn = (zone === 'loot' && !voteOpen && myChars.length) ? `<button class="vtt-loot-take-btn" data-vtt-fn="_vttLootToggleTake" data-vtt-args="${item.id}">Prendre</button>` : '';
+    const distBtn = (zone === 'loot' && !voteOpen && mj && _lootCount(item) > 0) ? `<button class="vtt-loot-dist-btn" data-vtt-fn="_vttLootOpenVote" data-vtt-args="${item.id}" title="Répartir entre les joueurs (vote)">⚖</button>` : '';
+    const voteBadge = voteOpen ? `<span class="vtt-loot-voting-badge" title="Répartition en cours">⚖</span>` : '';
+    const dragHandle = (mj && !voteOpen) ? `<span class="vtt-loot-drag" title="${zone === 'stash' ? 'Glisser vers le butin' : 'Glisser vers la réserve'}">⠿</span>` : '';
+    const inline = zone !== 'loot' ? ''
+      : voteOpen ? `<div class="vtt-loot-vote" id="vtt-vote-inline-${item.id}"></div>`
+      : `<div class="vtt-loot-take-inline" id="vtt-take-inline-${item.id}" style="display:none"></div>`;
     if (isGold) {
       return `<div class="vtt-loot-row-wrap" data-id="${item.id}">
         <div class="vtt-loot-row vtt-loot-row--gold" data-id="${item.id}">
@@ -110,7 +121,7 @@ function _renderLootPanel() {
           <span class="vtt-loot-gold-ic">🪙</span>
           <span class="vtt-loot-name">Or</span>
           <span class="vtt-loot-qty">${item.amount || 0}</span>
-          ${removeBtn}${takeBtn}
+          ${voteBadge}${removeBtn}${distBtn}${takeBtn}
         </div>${inline}
       </div>`;
     }
@@ -120,7 +131,7 @@ function _renderLootPanel() {
         <span class="vtt-loot-dot" style="background:${rarColor}"></span>
         <span class="vtt-loot-name">${_esc(item.nom)}</span>
         <span class="vtt-loot-qty">×${item.qty}</span>
-        ${removeBtn}${takeBtn}
+        ${voteBadge}${removeBtn}${distBtn}${takeBtn}
       </div>${inline}
     </div>`;
   };
@@ -152,6 +163,7 @@ function _renderLootPanel() {
     </div>`;
 
   if (mj) _initLootSortable();
+  _loot.loot.forEach(i => { if (i.vote?.open) _renderLootVote(i.id); });
 }
 
 function _initLootSortable() {
@@ -475,15 +487,316 @@ async function _vttLootConfirmTake(id) {
   } catch { showNotif('Erreur lors de la prise du butin', 'error'); }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// RÉPARTITION DES DROPS — Vote des joueurs (montant demandé par perso)
+// ───────────────────────────────────────────────────────────────────
+// Le MJ met un drop « en répartition » (item.vote.open). Chaque joueur
+// présent (en ligne + token sur la page active, même quorum que le court
+// repos) dépose sa DEMANDE : { qty, charId }. Stockée dans loot.voteClaims
+// sous la clé `${itemId}__${uid}` → setDoc(merge) par clé = pas de course
+// entre joueurs (l'array `loot` ne porte que le flag open).
+// Résolution (client MJ, comme le court repos) :
+//   • total demandé ≤ dispo ET tous les présents ont demandé → distribution auto
+//   • sur-souscrit (total > dispo) → reste ouvert, les joueurs réduisent ;
+//     le MJ peut « Forcer » → partage round-robin équitable plafonné.
+// ═══════════════════════════════════════════════════════════════════
+
+const _lootClaimState = {}; // { [itemId]: { qty, charId } } — demande en cours d'édition (local)
+
+const _claimKey = (itemId, uid) => `${itemId}__${uid}`;
+
+// Demandes valides pour un item → { uid: { qty, charId, name } }.
+function _lootClaimsFor(itemId) {
+  const pre = `${itemId}__`;
+  const out = {};
+  for (const [k, v] of Object.entries(_loot.voteClaims || {})) {
+    if (v && k.startsWith(pre)) out[k.slice(pre.length)] = v;
+  }
+  return out;
+}
+
+// Efface (localement) toutes les demandes d'un item — avant un _saveLoot MJ.
+function _clearItemClaims(itemId) {
+  const pre = `${itemId}__`;
+  for (const k of Object.keys(_loot.voteClaims || {})) if (k.startsWith(pre)) delete _loot.voteClaims[k];
+}
+
+function _myLootChars() {
+  const uid = STATE.user?.uid;
+  return sortCharactersForDisplay(Object.values(VS.characters).filter(c => c.uid === uid));
+}
+
+// ── MJ : ouvrir / fermer une répartition ────────────────────────────
+async function _vttLootOpenVote(id) {
+  if (!STATE.isAdmin) return;
+  const item = _loot.loot.find(i => i.id === id);
+  if (!item) return;
+  if (_lootCount(item) <= 0) { showNotif('Rien à répartir', 'error'); return; }
+  _clearItemClaims(id);
+  item.vote = { open: true };
+  await _saveLoot();
+}
+
+async function _vttLootCloseVote(id) {
+  if (!STATE.isAdmin) return;
+  const item = _loot.loot.find(i => i.id === id);
+  if (!item?.vote) return;
+  delete item.vote;
+  _clearItemClaims(id);
+  delete _lootClaimState[id];
+  await _saveLoot();
+}
+
+// ── Joueur : déposer / modifier / retirer sa demande ────────────────
+function _vttLootClaimSetChar(id, charId) {
+  const st = _lootClaimState[id] || (_lootClaimState[id] = { qty: 1, charId });
+  st.charId = charId;
+  _renderLootVote(id);
+}
+
+function _vttLootClaimStep(id, delta) {
+  const item = _loot.loot.find(i => i.id === id);
+  if (!item) return;
+  const dispo = _lootCount(item);
+  const st = _lootClaimState[id] || (_lootClaimState[id] = { qty: 1, charId: _myLootChars()[0]?.id });
+  if (delta === 'max') st.qty = dispo;
+  else st.qty = Math.max(0, Math.min(dispo, (st.qty || 0) + delta));
+  _renderLootVote(id);
+}
+
+function _vttLootClaimEdit(id) {
+  const claim = _lootClaimsFor(id)[STATE.user?.uid];
+  const chars = _myLootChars();
+  _lootClaimState[id] = { qty: claim?.qty ?? 1, charId: claim?.charId || chars[0]?.id };
+  _renderLootVote(id);
+}
+
+async function _vttLootClaimSubmit(id) {
+  const uid = STATE.user?.uid; if (!uid) return;
+  const item = _loot.loot.find(i => i.id === id);
+  if (!item?.vote?.open) return;
+  const st = _lootClaimState[id];
+  const dispo = _lootCount(item);
+  const qty = Math.max(0, Math.min(dispo, Math.floor(st?.qty ?? 0)));
+  const char = VS.characters[st?.charId];
+  if (!char) { showNotif('Choisis un personnage', 'error'); return; }
+  const key = _claimKey(id, uid);
+  const claim = { qty, charId: st.charId, name: char.nom || char.pseudo || '?' };
+  if (!_loot.voteClaims) _loot.voteClaims = {};
+  _loot.voteClaims[key] = claim;       // optimiste
+  delete _lootClaimState[id];
+  _renderLootVote(id);
+  await _ensureLootListener();
+  await setDoc(_lootRef(), { voteClaims: { [key]: claim } }, { merge: true })
+    .catch(() => showNotif('Erreur lors de la demande', 'error'));
+}
+
+async function _vttLootClaimWithdraw(id) {
+  const uid = STATE.user?.uid; if (!uid) return;
+  const key = _claimKey(id, uid);
+  if (_loot.voteClaims) delete _loot.voteClaims[key];
+  delete _lootClaimState[id];
+  _renderLootVote(id);
+  await _ensureLootListener();
+  // merge ne supprime pas une clé → on la met à null (filtrée à la lecture).
+  await setDoc(_lootRef(), { voteClaims: { [key]: null } }, { merge: true })
+    .catch(() => showNotif('Erreur', 'error'));
+}
+
+// ── Rendu du bloc vote (inline sous la ligne de butin) ──────────────
+function _renderLootVote(id) {
+  const host = document.getElementById(`vtt-vote-inline-${id}`);
+  const item = _loot.loot.find(i => i.id === id);
+  if (!host || !item?.vote?.open) return;
+
+  const mj      = STATE.isAdmin;
+  const uid     = STATE.user?.uid;
+  const isGold  = item.kind === 'gold';
+  const dispo   = _lootCount(item);
+  const present = _shortRestPresentUids();
+  const names   = _shortRestPresentNames();
+  const claims  = _lootClaimsFor(id);
+  const total   = Object.values(claims).reduce((s, c) => s + Math.max(0, c.qty || 0), 0);
+  const over    = total > dispo;
+  const onPage  = present.includes(uid);
+  const myChars = _myLootChars();
+  const myClaim = claims[uid];
+
+  const rowUids = [...new Set([...present, ...Object.keys(claims)])];
+  const voterList = rowUids.map(u => {
+    const c = claims[u];
+    return `<div class="vtt-rest-voter">
+      <span class="vtt-rest-voter-ic ${c ? 'on' : ''}">${c ? (isGold ? c.qty : `×${c.qty}`) : '⋯'}</span>
+      <span class="vtt-rest-voter-name">${_esc(names[u] || c?.name || u.slice(0, 6))}</span>
+    </div>`;
+  }).join('');
+
+  let mine = '';
+  if (onPage && myChars.length) {
+    const editing = !!_lootClaimState[id];
+    if (myClaim && !editing) {
+      mine = `<div class="vtt-loot-claim-done">
+        <span>Tu demandes <b>${isGold ? `${myClaim.qty} or` : `×${myClaim.qty}`}</b></span>
+        <button class="vtt-loot-step-all" data-vtt-fn="_vttLootClaimEdit" data-vtt-args="${id}">Modifier</button>
+        <button class="vtt-loot-take-cancel" data-vtt-fn="_vttLootClaimWithdraw" data-vtt-args="${id}" title="Retirer ma demande">✕</button>
+      </div>`;
+    } else {
+      const st = _lootClaimState[id] || (_lootClaimState[id] = {
+        qty: myClaim ? myClaim.qty : Math.min(dispo, 1),
+        charId: myClaim?.charId || myChars[0].id,
+      });
+      st.qty = Math.max(0, Math.min(dispo, st.qty || 0));
+      const charBar = myChars.length > 1 ? `
+        <div class="vtt-loot-take-chars">
+          ${myChars.map(c => `<button class="vtt-loot-char-chip${st.charId === c.id ? ' active' : ''}"
+            data-vtt-fn="_vttLootClaimSetChar" data-vtt-args="${id}|${c.id}">${_esc(c.nom || c.pseudo || '?')}</button>`).join('')}
+        </div>` : '';
+      mine = `${charBar}
+        <div class="vtt-loot-take-row">
+          <div class="vtt-loot-stepper">
+            <button class="vtt-loot-step" data-vtt-fn="_vttLootClaimStep" data-vtt-args="${id}|-1" ${st.qty <= 0 ? 'disabled' : ''}>−</button>
+            <span class="vtt-loot-step-val">${st.qty}<span class="vtt-loot-step-max">/${dispo}</span></span>
+            <button class="vtt-loot-step" data-vtt-fn="_vttLootClaimStep" data-vtt-args="${id}|1" ${st.qty >= dispo ? 'disabled' : ''}>+</button>
+          </div>
+          ${dispo > 1 ? `<button class="vtt-loot-step-all" data-vtt-fn="_vttLootClaimStep" data-vtt-args="${id}|max">Tout</button>` : ''}
+        </div>
+        <button class="vtt-loot-take-go" data-vtt-fn="_vttLootClaimSubmit" data-vtt-args="${id}">${st.qty > 0 ? (isGold ? `Demander ${st.qty} or` : `Demander ×${st.qty}`) : 'Passer (0)'}</button>`;
+    }
+  } else if (!onPage && !mj) {
+    mine = `<div class="vtt-rest-help">Place un token sur la map pour participer à la répartition.</div>`;
+  }
+
+  const claimedCount = present.filter(u => claims[u]).length;
+  host.innerHTML = `
+    <div class="vtt-rest-vote-hd">⚖ Répartition · ${claimedCount}/${present.length || '?'} ont demandé</div>
+    <div class="vtt-loot-claim-total${over ? ' over' : ''}">Total demandé <b>${total}</b> / ${dispo} dispo${over ? ' — trop, réduisez' : ''}</div>
+    <div class="vtt-rest-voters">${voterList || '<div class="vtt-rest-help">Aucun joueur sur la map.</div>'}</div>
+    ${mine}
+    ${mj ? `<div class="vtt-loot-vote-mj">
+      <button class="vtt-rest-btn vtt-rest-btn--force" data-vtt-fn="_vttLootForceDistribute" data-vtt-args="${id}">⚖ Forcer la répartition</button>
+      <button class="vtt-rest-btn vtt-rest-btn--cancel" data-vtt-fn="_vttLootCloseVote" data-vtt-args="${id}">✕ Annuler</button>
+    </div>` : ''}
+  `;
+}
+
+// ── Résolution ──────────────────────────────────────────────────────
+async function _vttLootForceDistribute(id) {
+  if (!STATE.isAdmin) return;
+  await _applyLootDistribution(id, { forced: true });
+}
+
+// Round-robin équitable : 1 par 1, plafonné par la demande de chacun.
+function _allotFair(entries, dispo) {
+  const alloc = {};
+  entries.forEach(([u]) => { alloc[u] = 0; });
+  let remaining = dispo, progress = true;
+  while (remaining > 0 && progress) {
+    progress = false;
+    for (const [u, c] of entries) {
+      if (remaining <= 0) break;
+      if (alloc[u] < (c.qty || 0)) { alloc[u]++; remaining--; progress = true; }
+    }
+  }
+  return alloc;
+}
+
+// Clôt la répartition : retire l'item si épuisé, sinon nettoie juste le vote.
+function _finishDistribution(id, item) {
+  _clearItemClaims(id);
+  delete _lootClaimState[id];
+  if (_lootCount(item) <= 0) _loot.loot = _loot.loot.filter(i => i.id !== id);
+  else delete item.vote;
+}
+
+let _lootDistributing = false; // verrou ré-entrant (client MJ) → pas de double distribution
+
+async function _applyLootDistribution(id, { forced = false } = {}) {
+  if (_lootDistributing) return;
+  const item = _loot.loot.find(i => i.id === id);
+  if (!item?.vote?.open) return;
+  _lootDistributing = true;
+  try {
+    const dispo = _lootCount(item);
+    const claims = _lootClaimsFor(id);
+    const entries = Object.entries(claims).filter(([, c]) => (c.qty || 0) > 0 && VS.characters[c.charId]);
+    if (!entries.length) { if (forced) await _vttLootCloseVote(id); return; }
+
+    const total = entries.reduce((s, [, c]) => s + Math.max(0, c.qty || 0), 0);
+    const alloc = total <= dispo
+      ? Object.fromEntries(entries.map(([u, c]) => [u, Math.max(0, c.qty || 0)]))
+      : _allotFair(entries, dispo);
+    const allocated = Object.values(alloc).reduce((s, n) => s + n, 0);
+    if (allocated <= 0) { if (forced) await _vttLootCloseVote(id); return; }
+
+    const summary = [];
+
+    if (item.kind === 'gold') {
+      for (const [u, n] of Object.entries(alloc)) {
+        if (n <= 0) continue;
+        const c = claims[u];
+        const res = await useGold(c.charId, +n, 'Butin réparti (VTT)', { charObj: VS.characters[c.charId] });
+        if (res?.ok) summary.push(`${_esc(VS.characters[c.charId]?.nom || c.name)}: ${n}`);
+      }
+      item.amount = Math.max(0, (item.amount || 0) - allocated);
+      _finishDistribution(id, item);
+      try {
+        await _saveLoot();
+        showNotif(`🪙 Or réparti — ${summary.join(' · ')}`, 'success');
+      } catch { showNotif('Erreur lors de la répartition', 'error'); }
+      return;
+    }
+
+    const writes = [];
+    for (const [u, n] of Object.entries(alloc)) {
+      if (n <= 0) continue;
+      const c = claims[u];
+      const char = VS.characters[c.charId];
+      if (!char) continue;
+      const inv = Array.isArray(char.inventaire) ? [...char.inventaire] : [];
+      const baseEntry = shopItemToInvEntry(item, { source: 'butin' });
+      for (let k = 0; k < n; k++) inv.push({ ...baseEntry });
+      writes.push(updateDoc(_chrRef(c.charId), { inventaire: inv }).then(() => { char.inventaire = inv; }));
+      summary.push(`${_esc(char.nom || c.name)}: ×${n}`);
+    }
+    item.qty = Math.max(0, (item.qty || 0) - allocated);
+    _finishDistribution(id, item);
+    try {
+      await Promise.all([...writes, _saveLoot()]);
+      showNotif(`⚖ "${_esc(item.nom)}" réparti — ${summary.join(' · ')}`, 'success');
+    } catch { showNotif('Erreur lors de la répartition', 'error'); }
+  } finally {
+    _lootDistributing = false;
+  }
+}
+
+// MJ uniquement : applique dès que tous les présents ont demandé et que ça rentre.
+function _checkLootVoteAutoApply() {
+  if (!STATE.isAdmin) return;
+  const present = _shortRestPresentUids();
+  if (!present.length) return;
+  for (const item of _loot.loot) {
+    if (!item.vote?.open) continue;
+    const claims = _lootClaimsFor(item.id);
+    if (!present.every(u => claims[u])) continue;          // quorum : tous les présents
+    const total = Object.values(claims).reduce((s, c) => s + Math.max(0, c.qty || 0), 0);
+    if (total <= 0) { _vttLootCloseVote(item.id); return; } // tout le monde a passé
+    if (total > _lootCount(item)) continue;                // sur-souscrit → reste ouvert (option A)
+    _applyLootDistribution(item.id, { forced: false });
+    return;                                                // une distribution par tick
+  }
+}
+
 // Reset complet de l'état butin au teardown de la VTT (appelé depuis vtt.js).
 function _resetLootState() {
   if (_lootUnsub) { _lootUnsub(); _lootUnsub = null; }
   _lootLoading = false; _lootReady = null;
   if (_lootCloseOutside) { document.removeEventListener('mousedown', _lootCloseOutside, true); _lootCloseOutside = null; }
-  _loot = { stash: [], loot: [] };
+  for (const k of Object.keys(_lootClaimState)) delete _lootClaimState[k];
+  _loot = { stash: [], loot: [], voteClaims: {} };
 }
 
 export {
+  _checkLootVoteAutoApply,
   _closeLootPanel,
   _ensureLootListener,
   _initLootSortable,
@@ -492,6 +805,14 @@ export {
   _renderLootTake,
   _resetLootState,
   _saveLoot,
+  _vttLootClaimEdit,
+  _vttLootClaimSetChar,
+  _vttLootClaimStep,
+  _vttLootClaimSubmit,
+  _vttLootClaimWithdraw,
+  _vttLootCloseVote,
+  _vttLootForceDistribute,
+  _vttLootOpenVote,
   _vttCreatSendLootToStash,
   _vttCreatSendGoldToStash,
   _vttLootAddGoldPrompt,
