@@ -123,7 +123,7 @@ export function appSplashHtml(label = 'Chargement…') {
 export function normalizeImageUrl(url) {
   if (!url) return url;
   let u = String(url).trim();
-  const m = u.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:tree|blob)\/[^/]+\/(.+)$/i);
+  const m = u.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:tree|blob|upload)\/[^/]+\/(.+)$/i);
   if (m) {
     const [, owner, repo, path] = m;
     u = `https://${owner.toLowerCase()}.github.io/${repo}/${path}`;

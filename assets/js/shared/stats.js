@@ -31,26 +31,15 @@ function _statsRef() {
 // setDoc(merge:true) fusionne en profondeur ET crée le doc s'il n'existe pas.
 async function bumpStats(patch) {
   const ref = _statsRef();
-  if (!ref || !patch) { console.warn('[stats] bumpStats annulé — pas de ref (aventure?) ou patch vide', { aid: getCurrentAdventureId() }); return; }
-  try {
-    await setDoc(ref, patch, { merge: true });
-    console.debug('[stats] bumpStats OK →', ref.path);
-  } catch (e) {
-    console.error('[stats] bumpStats ÉCHEC →', ref.path, e?.code || e?.message || e);
-  }
+  if (!ref || !patch) return;
+  await setDoc(ref, patch, { merge: true }).catch(() => {});
 }
 
 export async function loadStats() {
   const ref = _statsRef();
-  if (!ref) { console.warn('[stats] loadStats — pas de ref (aventure?)'); return null; }
-  try {
-    const snap = await getDoc(ref);
-    console.debug('[stats] loadStats →', ref.path, 'exists:', snap.exists(), snap.exists() ? snap.data() : null);
-    return snap.exists() ? snap.data() : null;
-  } catch (e) {
-    console.error('[stats] loadStats ÉCHEC →', ref.path, e?.code || e?.message || e);
-    return null;
-  }
+  if (!ref) return null;
+  const snap = await getDoc(ref).catch(() => null);
+  return snap?.exists() ? snap.data() : null;
 }
 
 // ── Jet de compétence (Athlétisme, Acrobaties…) ──────────────────────────────
@@ -83,8 +72,7 @@ export function bumpAttack({ attackerId, attackerName, targetId, targetName, hit
 }
 
 export function bumpSkill(charId, charName, skill, { crit = false, fumble = false } = {}) {
-  console.debug('[stats] bumpSkill', { charId, charName, skill, crit, fumble });
-  if (!charId || !skill) { console.warn('[stats] bumpSkill ignoré — charId/skill manquant'); return; }
+  if (!charId || !skill) return;
   // Les clés de map (charId, skill) peuvent contenir accents/espaces → on passe
   // par des OBJETS imbriqués (pas des field-paths pointés) pour rester valide.
   return bumpStats({

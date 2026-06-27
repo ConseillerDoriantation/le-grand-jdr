@@ -12,6 +12,7 @@ import { VS } from './vtt-state.js';
 import { CELL, TYPE_COLOR, hpColor } from './vtt-constants.js';
 import { STATE } from '../../core/state.js';
 import { updateDoc } from '../../config/firebase.js';
+import { normalizeImageUrl } from '../../shared/html.js';
 import { _pgRef } from './vtt-refs.js';
 import { _showCtxMenu } from './vtt-utils.js';
 import { showNotif } from '../../shared/notifications.js';
@@ -306,7 +307,8 @@ export function _renderMapImages(deps = {}) {
       if (tr?.getParent()) tr.moveToTop();
       tgtLyr.batchDraw();
     };
-    el.src = img.url;
+    // Auto-répare les URLs « page web » GitHub stockées (blob/tree/upload → Pages).
+    el.src = normalizeImageUrl(img.url);
   }
 }
 
