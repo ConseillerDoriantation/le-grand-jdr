@@ -19,11 +19,11 @@
 // Les stats GLOBALES (table) = somme des chars, calculée à l'affichage.
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { STATE } from '../core/state.js';
 import { db, doc, getDoc, setDoc, increment } from '../config/firebase.js';
+import { getCurrentAdventureId } from '../data/firestore.js';
 
 function _statsRef() {
-  const aid = STATE.adventure?.id;
+  const aid = getCurrentAdventureId();   // id canonique (même source que le VTT)
   return aid ? doc(db, `adventures/${aid}/stats/main`) : null;
 }
 

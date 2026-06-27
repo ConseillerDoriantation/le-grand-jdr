@@ -127,7 +127,8 @@ export async function _vttRollSkill(skillName, stat) {
     if (gmOnly) showNotif('Jet caché — visible uniquement par le MJ', 'success');
   } catch(e) { showNotif('Erreur jet : ' + e.message, 'error'); }
   // Statistiques : compte le jet de compétence (PJ uniquement) + crit/échec.
-  if (c?.id) bumpSkill(c.id, characterName, skillName, { crit: isCrit, fumble: isFumble });
+  // t.characterId = id fiable (VS.characters[...] ne porte pas forcément .id).
+  if (c && t.characterId) bumpSkill(t.characterId, characterName, skillName, { crit: isCrit, fumble: isFumble });
 }
 
 export async function _saveEmotes(list) {
