@@ -53,6 +53,7 @@ const FEATURE_CSS = {
   // à d'autres features) sont chargées à l'ouverture de chaque modale via
   // _adminLazyOpen (pages.js) — inutile de tirer vtt.css/histoire.css avant besoin.
   admin:      ['admin.css'],
+  statistiques: ['admin.css', 'stats.css'],
   npcs:       ['npcs.css'],
   story:      ['histoire.css'],
   histoire:   ['histoire.css'],

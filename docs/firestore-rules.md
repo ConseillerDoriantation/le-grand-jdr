@@ -309,6 +309,12 @@ service cloud.firestore {
         allow read, write: if inAdventure(adventureId);
       }
 
+      // Statistiques d'aventure (compteurs incrémentaux) : tous les membres
+      // lisent et incrémentent (un joueur compte ses propres jets/attaques).
+      match /stats/{id} {
+        allow read, write: if inAdventure(adventureId);
+      }
+
       // Pages (cartes) : lecture tous, écriture MJ
       // Exception : les joueurs peuvent mettre à jour le champ `walls` (ouvrir/fermer portes et fenêtres)
       match /vttPages/{id} {

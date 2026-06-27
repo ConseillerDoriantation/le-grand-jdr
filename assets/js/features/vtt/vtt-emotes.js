@@ -17,6 +17,7 @@ import { computeEquipSkillBonus } from '../../shared/char-stats.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import { uploadPng } from '../../shared/image-upload.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
+import { bumpSkill } from '../../shared/stats.js';
 import { _logCol, _logGmCol, _reactionRef } from './vtt-refs.js';
 import { _STAT_KEY } from './vtt-constants.js';
 import { openModal, closeModalDirect, confirmModal } from '../../shared/modal.js';
@@ -125,6 +126,8 @@ export async function _vttRollSkill(skillName, stat) {
     });
     if (gmOnly) showNotif('Jet caché — visible uniquement par le MJ', 'success');
   } catch(e) { showNotif('Erreur jet : ' + e.message, 'error'); }
+  // Statistiques : compte le jet de compétence (PJ uniquement) + crit/échec.
+  if (c?.id) bumpSkill(c.id, characterName, skillName, { crit: isCrit, fumble: isFumble });
 }
 
 export async function _saveEmotes(list) {

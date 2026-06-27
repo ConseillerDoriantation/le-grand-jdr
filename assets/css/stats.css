@@ -1,0 +1,60 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   STATS.CSS — page Statistiques. S'appuie sur admin.css (.adm-block/.adm-label).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.stats-root { display: block; }
+.stats-empty {
+  text-align: center; color: var(--text-dim); font-size: .9rem;
+  padding: 3rem 1rem; line-height: 1.7;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px;
+}
+.stats-empty span { font-size: .8rem; }
+
+/* ── KPI (vue d'ensemble) ── */
+.stats-kpis {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: .7rem;
+}
+.stats-kpi {
+  display: flex; flex-direction: column; align-items: center; gap: .2rem;
+  padding: 1rem; border-radius: 14px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-top: 2px solid var(--a, var(--gold));
+}
+.stats-kpi-ic { font-size: 1.4rem; }
+.stats-kpi-val { font-family: 'Cinzel', serif; font-weight: 700; font-size: 1.4rem; color: var(--text); font-variant-numeric: tabular-nums; }
+.stats-kpi-lbl { font-size: .72rem; color: var(--text-muted); text-align: center; }
+
+/* ── Récompenses / classements ── */
+.stats-awards { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: .7rem; }
+.stats-award {
+  display: flex; align-items: center; gap: .6rem; flex: 1; min-width: 220px;
+  padding: .7rem .9rem; border-radius: 12px;
+  background: var(--bg-card); border: 1px solid var(--border);
+}
+.stats-award-ic { font-size: 1.5rem; flex-shrink: 0; }
+.stats-award-tx { display: flex; flex-direction: column; min-width: 0; }
+.stats-award-lbl { font-size: .72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+.stats-award-who { color: var(--text); font-size: .9rem; }
+
+/* ── Par personnage ── */
+.stats-chars {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: .8rem;
+}
+.stats-char {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 14px; padding: .85rem 1rem;
+}
+.stats-char-hd {
+  display: flex; align-items: baseline; justify-content: space-between; gap: .6rem;
+  margin-bottom: .6rem; padding-bottom: .5rem; border-bottom: 1px solid var(--border);
+}
+.stats-char-name { font-family: 'Cinzel', serif; font-weight: 700; font-size: 1rem; color: var(--text); }
+.stats-char-meta { font-size: .72rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.stats-skills { display: flex; flex-direction: column; gap: .35rem; }
+.stats-skill-row { display: flex; align-items: center; gap: .5rem; }
+.stats-skill-name { font-size: .78rem; color: var(--text-soft, #c8d4e8); width: 38%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-skill-bar { flex: 1; height: 7px; border-radius: 999px; background: var(--bg-elevated); overflow: hidden; }
+.stats-skill-bar > span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #6366f1, #a78bfa); }
+.stats-skill-n { font-size: .72rem; color: var(--text-muted); flex-shrink: 0; font-variant-numeric: tabular-nums; }
