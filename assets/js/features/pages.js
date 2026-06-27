@@ -1205,38 +1205,52 @@ const PAGES = {
     if (!STATE.isAdmin) { const { navigate } = await import('../core/navigation.js'); navigate('dashboard'); return; }
     const users   = await loadAllUsers(STATE.adventure);
     const content = document.getElementById('main-content');
-    content.innerHTML = `pageHeaderHtml('⚙️ Panneau Admin', 'Gestion complète du jeu')
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-header">Joueurs inscrits (${users.length})</div>
-          <table class="data-table">
-            <thead><tr><th>Pseudo</th><th>Email</th><th>Inscrit le</th></tr></thead>
-            <tbody>${users.map(u => `<tr><td>${_esc(u.pseudo || '-')}</td><td style="font-size:0.8rem;color:var(--text-muted)">${_esc(u.email || '-')}</td><td style="font-size:0.78rem;color:var(--text-dim)">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr') : '?'}</td></tr>`).join('')}</tbody>
-          </table>
-        </div>
-        <div class="card">
-          <div class="card-header">Actions Rapides</div>
-          <div style="display:flex;flex-direction:column;gap:0.7rem">
-            <button class="btn btn-outline" data-navigate="shop">🛒 Gérer la Boutique</button>
-            <button class="btn btn-outline" data-navigate="achievements">🏆 Gérer les Hauts-Faits</button>
-            <button class="btn btn-outline" data-navigate="collection">🃏 Gérer la Collection</button>
-            <button class="btn btn-outline" data-navigate="story">📚 Gérer la Trame</button>
-            <button class="btn btn-outline" data-navigate="npcs">👥 Gérer les PNJ</button>
-            <button class="btn btn-outline" data-navigate="world">📖 Modifier le Monde</button>
-          </div>
-        </div>
-      </div>
-      <div class="card" style="margin-top:1.2rem">
-        <div class="card-header">⚙️ Réglages du jeu</div>
-        <div style="display:flex;flex-direction:column;gap:0.7rem">
-          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="openWeaponFormatsAdmin" data-module="characters">⚔️ Formats d'arme</button>
-          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="openDamageTypesAdmin" data-module="characters">⚡ Types de dégâts</button>
-          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="openCombatStylesAdmin" data-module="characters">🗡️ Styles de combat</button>
-          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="openSpellMatricesAdmin" data-module="characters">🔮 Matrices de sorts</button>
-          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="_ouvrirGestionDes" data-module="histoire">🎲 Compétences de dés</button>
-          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="_ouvrirGestionEmotes" data-module="vtt/vtt">😄 Émotes VTT</button>
-          <button class="btn btn-outline" data-action="_adminLazyOpen" data-fn="_vttConditionConfig" data-module="vtt/vtt">🎭 États & conditions</button>
-        </div>
+
+    // Réglages du jeu : seules fonctions propres à cette page (le reste — boutique,
+    // trame, PNJ… — est déjà accessible via la navigation, d'où la suppression des
+    // « actions rapides » redondantes). Chaque tuile ouvre sa modale (lazy CSS+JS).
+    const SETTINGS = [
+      { ic:'⚔️', t:"Formats d'arme",     s:'Physique / magique par format',   a:'#ff8b6b', fn:'openWeaponFormatsAdmin', mod:'characters' },
+      { ic:'⚡', t:'Types de dégâts',     s:'Éléments, résistances, couleurs', a:'#f4c430', fn:'openDamageTypesAdmin',   mod:'characters' },
+      { ic:'🗡️', t:'Styles de combat',    s:"Bonus selon l'arme équipée",      a:'#9d8cff', fn:'openCombatStylesAdmin',  mod:'characters' },
+      { ic:'🔮', t:'Matrices de sorts',   s:'Runes, noyaux, combinaisons',     a:'#bca0ff', fn:'openSpellMatricesAdmin', mod:'characters' },
+      { ic:'🎲', t:'Compétences de dés',  s:'Jets personnalisés',              a:'#4f8cff', fn:'_ouvrirGestionDes',      mod:'histoire' },
+      { ic:'😄', t:'Émotes VTT',          s:'Réactions sur la table',          a:'#22c38e', fn:'_ouvrirGestionEmotes',   mod:'vtt/vtt' },
+      { ic:'🎭', t:'États & conditions',  s:'Effets appliqués aux tokens',     a:'#f97316', fn:'_vttConditionConfig',    mod:'vtt/vtt' },
+    ];
+    const tile = (x) => `
+      <button class="adm-tile" style="--a:${x.a}" data-action="_adminLazyOpen" data-fn="${x.fn}" data-module="${x.mod}" title="${_esc(x.t)}">
+        <span class="adm-tile-ic">${x.ic}</span>
+        <span class="adm-tile-txt"><span class="adm-tile-t">${_esc(x.t)}</span><span class="adm-tile-s">${_esc(x.s)}</span></span>
+        <span class="adm-tile-arrow">→</span>
+      </button>`;
+
+    const sortedUsers = [...users].sort((a, b) => (a.pseudo || '').localeCompare(b.pseudo || '', 'fr'));
+    const pRow = (u) => {
+      const initial = ((u.pseudo || '?').trim().charAt(0) || '?').toUpperCase();
+      const date = u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr') : '—';
+      return `
+        <div class="adm-prow">
+          <span class="adm-pav">${_esc(initial)}</span>
+          <span class="adm-pmeta">
+            <span class="adm-pname">${_esc(u.pseudo || '-')}</span>
+            <span class="adm-pmail">${_esc(u.email || '-')}</span>
+          </span>
+          <span class="adm-pdate">${date}</span>
+        </div>`;
+    };
+
+    content.innerHTML = `
+      ${pageHeaderHtml('⚙️ Console MJ', "Réglages du jeu & joueurs de l'aventure")}
+      <div class="adm-layout">
+        <section class="adm-main">
+          <div class="adm-label">🎮 Réglages du jeu</div>
+          <div class="adm-tiles">${SETTINGS.map(tile).join('')}</div>
+        </section>
+        <aside class="adm-side">
+          <div class="adm-label">👥 Joueurs inscrits <span class="adm-count">${users.length}</span></div>
+          <div class="adm-players">${sortedUsers.map(pRow).join('')}</div>
+        </aside>
       </div>`;
   },
 

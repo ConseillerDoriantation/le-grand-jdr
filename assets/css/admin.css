@@ -1,0 +1,80 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   ADMIN.CSS — Console MJ (page admin). Langage visuel aligné sur les modales
+   (tuiles à icône lumineuse, libellés Cinzel, cartes sombres) et le dashboard.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.adm-layout {
+  display: grid;
+  grid-template-columns: 1fr minmax(280px, 360px);
+  gap: 1.1rem; align-items: start;
+}
+@media (max-width: 880px) { .adm-layout { grid-template-columns: 1fr; } }
+
+.adm-label {
+  font-family: 'Cinzel', serif; font-size: .8rem; font-weight: 700;
+  letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted);
+  margin: 0 0 .65rem; display: flex; align-items: center; gap: .45rem;
+}
+.adm-count {
+  font-size: .7rem; font-weight: 700; color: var(--gold);
+  background: var(--gold-glow); padding: 1px .55rem; border-radius: 999px;
+}
+
+/* ── Tuiles de réglages ── */
+.adm-tiles {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(244px, 1fr));
+  gap: .7rem;
+}
+.adm-tile {
+  display: flex; align-items: center; gap: .75rem; width: 100%; text-align: left;
+  padding: .85rem 1rem; border-radius: 14px; cursor: pointer;
+  background: var(--bg-card); border: 1px solid var(--border);
+  transition: border-color .15s, transform .15s, background .15s, box-shadow .15s;
+}
+.adm-tile:hover {
+  border-color: color-mix(in srgb, var(--a, var(--gold)) 55%, var(--border));
+  background: var(--bg-card2, var(--bg-elevated));
+  transform: translateY(-2px);
+  box-shadow: 0 10px 26px -18px rgba(0,0,0,.8);
+}
+.adm-tile-ic {
+  width: 42px; height: 42px; flex-shrink: 0; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center; font-size: 1.3rem;
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--a, var(--gold)) 42%, transparent), transparent);
+  border: 1px solid color-mix(in srgb, var(--a, var(--gold)) 35%, var(--border));
+}
+.adm-tile-txt { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.adm-tile-t { font-weight: 700; color: var(--text); font-size: .92rem; }
+.adm-tile-s { font-size: .72rem; color: var(--text-muted); margin-top: 1px; }
+.adm-tile-arrow {
+  color: var(--a, var(--gold)); font-weight: 700; opacity: .55; flex-shrink: 0;
+  transition: transform .15s, opacity .15s;
+}
+.adm-tile:hover .adm-tile-arrow { opacity: 1; transform: translateX(3px); }
+
+/* ── Joueurs inscrits ── */
+.adm-players {
+  display: flex; flex-direction: column; gap: 1px;
+  max-height: 64vh; overflow-y: auto;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 14px; padding: .5rem;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+.adm-prow {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .4rem .5rem; border-radius: 9px;
+}
+.adm-prow:hover { background: var(--bg-elevated); }
+.adm-pav {
+  width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: .82rem; color: var(--gold);
+  background: var(--gold-glow); border: 1px solid var(--border);
+}
+.adm-pmeta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.adm-pname { font-weight: 600; color: var(--text); font-size: .84rem; }
+.adm-pmail {
+  font-size: .7rem; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.adm-pdate { font-size: .7rem; color: var(--text-dim); flex-shrink: 0; }

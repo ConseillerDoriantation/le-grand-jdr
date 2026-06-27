@@ -49,9 +49,10 @@ const FEATURE_CSS = {
   // hors boutique, elles s'affichent sans mise en forme. Chargeur dédoublonné.
   characters: ['characters.css', 'shop.css'],
   shop:       ['shop.css'],
-  // Console MJ : ses modales sont empruntées à d'autres features. La CSS est
-  // chargée à l'ouverture de chaque modale (cf. _adminLazyOpen dans pages.js),
-  // pas ici — inutile de charger vtt.css/histoire.css tant qu'on n'en a pas besoin.
+  // Console MJ : admin.css pour la page elle-même. Les CSS des modales (empruntées
+  // à d'autres features) sont chargées à l'ouverture de chaque modale via
+  // _adminLazyOpen (pages.js) — inutile de tirer vtt.css/histoire.css avant besoin.
+  admin:      ['admin.css'],
   npcs:       ['npcs.css'],
   story:      ['histoire.css'],
   histoire:   ['histoire.css'],
