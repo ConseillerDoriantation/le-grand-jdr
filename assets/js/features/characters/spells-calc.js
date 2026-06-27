@@ -309,8 +309,7 @@ export const SORT_COMBOS = [
     detect: (counts) => counts.Affliction > 0 && counts.Invocation > 0,
     describe: (counts, s) => {
       const st = _calcSentinelStats(s || {});
-      const nbDisp = counts.Dispersion || 0;
-      const nbSent = nbDisp > 0 ? 1 + nbDisp : 1;
+      const nbSent = counts.Invocation || 1;   // nombre piloté par la rune Invocation (1 par rune)
       const sentStr = nbSent > 1 ? `${nbSent} sentinelles stationnaires (placement libre dans la portée)` : 'sentinelle stationnaire';
       return `Affliction + Invocation · ${sentStr} · ${st.hp} PV · CA ${st.ca} · attaque ${st.dmg} · portée ${st.portee} cases · 2 tours par défaut`;
     },
@@ -1182,8 +1181,7 @@ export function _buildSortResume(s, c) {
   // Détails Sentinelle — affichés à la place de la ligne classique Invocation/Affliction
   if (comboIds.has('sentinelle')) {
     const st = _calcSentinelStats(s);
-    const nbDisp = runes.filter(r => r === 'Dispersion').length;
-    const nbSent = nbDisp > 0 ? 1 + nbDisp : 1;
+    const nbSent = runes.filter(r => r === 'Invocation').length || 1;   // nombre piloté par la rune Invocation
     const countStr = nbSent > 1 ? ` · ×${nbSent} sentinelles` : '';
     lines.push({ icon:'🪤', label:`Sentinelle · ${st.hp} PV · CA ${st.ca}${countStr}`, detail:`Attaque ${st.dmg} · portée ${st.portee} cases · stationnaire · 2 tours par défaut` });
   }

@@ -2125,7 +2125,7 @@ function _vttSpellMods(s) {
     armeInvoquee: isArmeInvoquee
       ? { elementId: s.noyauTypeId || null, nbPuissance: nbP } : null,
     // Sentinelle : Affliction + Invocation → token stationnaire (stats propres, 2 tours)
-    // Dispersion permet d'invoquer plusieurs sentinelles : 1 + N pour N runes.
+    // Le nombre de sentinelles est piloté par la rune Invocation (1 par rune).
     sentinelle: (nbAff > 0 && nbInv > 0)
       ? {
           slot: s.afflictionSlot || 'arme',
@@ -2135,7 +2135,7 @@ function _vttSpellMods(s) {
           hp: sentinelHp, ca: sentinelCa,
           rangeCells: Math.max(1, Math.ceil(sentinelRangeM / CELL_M)),
           rangeMeters: sentinelRangeM,
-          nbInvocations: nbDisp > 0 ? 1 + nbDisp : 1,
+          nbInvocations: nbInv,
           nbP, nbProt, nbAmp,
         } : null,
     // Canalisé persistant : Durée + Concentration (SANS Réaction → sinon c'est un
