@@ -1210,13 +1210,13 @@ const PAGES = {
     // trame, PNJ… — est déjà accessible via la navigation, d'où la suppression des
     // « actions rapides » redondantes). Chaque tuile ouvre sa modale (lazy CSS+JS).
     const SETTINGS = [
-      { ic:'⚔️', t:"Formats d'arme",     s:'Physique / magique par format',   a:'#ff8b6b', fn:'openWeaponFormatsAdmin', mod:'characters' },
-      { ic:'⚡', t:'Types de dégâts',     s:'Éléments, résistances, couleurs', a:'#f4c430', fn:'openDamageTypesAdmin',   mod:'characters' },
-      { ic:'🗡️', t:'Styles de combat',    s:"Bonus selon l'arme équipée",      a:'#9d8cff', fn:'openCombatStylesAdmin',  mod:'characters' },
-      { ic:'🔮', t:'Matrices de sorts',   s:'Runes, noyaux, combinaisons',     a:'#bca0ff', fn:'openSpellMatricesAdmin', mod:'characters' },
-      { ic:'🎲', t:'Compétences de dés',  s:'Jets personnalisés',              a:'#4f8cff', fn:'_ouvrirGestionDes',      mod:'histoire' },
-      { ic:'😄', t:'Émotes VTT',          s:'Réactions sur la table',          a:'#22c38e', fn:'_ouvrirGestionEmotes',   mod:'vtt/vtt' },
-      { ic:'🎭', t:'États & conditions',  s:'Effets appliqués aux tokens',     a:'#f97316', fn:'_vttConditionConfig',    mod:'vtt/vtt' },
+      { g:'combat', ic:'⚔️', t:"Formats d'arme",     s:'Physique / magique par format',   a:'#ff8b6b', fn:'openWeaponFormatsAdmin', mod:'characters' },
+      { g:'combat', ic:'⚡', t:'Types de dégâts',     s:'Éléments, résistances, couleurs', a:'#f4c430', fn:'openDamageTypesAdmin',   mod:'characters' },
+      { g:'combat', ic:'🗡️', t:'Styles de combat',    s:"Bonus selon l'arme équipée",      a:'#9d8cff', fn:'openCombatStylesAdmin',  mod:'characters' },
+      { g:'combat', ic:'🔮', t:'Matrices de sorts',   s:'Runes, noyaux, combinaisons',     a:'#bca0ff', fn:'openSpellMatricesAdmin', mod:'characters' },
+      { g:'table',  ic:'🎲', t:'Compétences de dés',  s:'Jets personnalisés',              a:'#4f8cff', fn:'_ouvrirGestionDes',      mod:'histoire' },
+      { g:'table',  ic:'😄', t:'Émotes VTT',          s:'Réactions sur la table',          a:'#22c38e', fn:'_ouvrirGestionEmotes',   mod:'vtt/vtt' },
+      { g:'table',  ic:'🎭', t:'États & conditions',  s:'Effets appliqués aux tokens',     a:'#f97316', fn:'_vttConditionConfig',    mod:'vtt/vtt' },
     ];
     const tile = (x) => `
       <button class="adm-tile" style="--a:${x.a}" data-action="_adminLazyOpen" data-fn="${x.fn}" data-module="${x.mod}" title="${_esc(x.t)}">
@@ -1224,6 +1224,7 @@ const PAGES = {
         <span class="adm-tile-txt"><span class="adm-tile-t">${_esc(x.t)}</span><span class="adm-tile-s">${_esc(x.s)}</span></span>
         <span class="adm-tile-arrow">→</span>
       </button>`;
+    const grid = (g) => `<div class="adm-tiles">${SETTINGS.filter(x => x.g === g).map(tile).join('')}</div>`;
 
     const sortedUsers = [...users].sort((a, b) => (a.pseudo || '').localeCompare(b.pseudo || '', 'fr'));
     const pRow = (u) => {
@@ -1242,16 +1243,18 @@ const PAGES = {
 
     content.innerHTML = `
       ${pageHeaderHtml('⚙️ Console MJ', "Réglages du jeu & joueurs de l'aventure")}
-      <div class="adm-layout">
-        <section class="adm-main">
-          <div class="adm-label">🎮 Réglages du jeu</div>
-          <div class="adm-tiles">${SETTINGS.map(tile).join('')}</div>
-        </section>
-        <aside class="adm-side">
-          <div class="adm-label">👥 Joueurs inscrits <span class="adm-count">${users.length}</span></div>
-          <div class="adm-players">${sortedUsers.map(pRow).join('')}</div>
-        </aside>
-      </div>`;
+      <section class="adm-block">
+        <div class="adm-label">⚔️ Personnages &amp; combat</div>
+        ${grid('combat')}
+      </section>
+      <section class="adm-block">
+        <div class="adm-label">🎲 Table &amp; VTT</div>
+        ${grid('table')}
+      </section>
+      <section class="adm-block">
+        <div class="adm-label">👥 Joueurs inscrits <span class="adm-count">${users.length}</span></div>
+        <div class="adm-players adm-players--grid">${sortedUsers.map(pRow).join('')}</div>
+      </section>`;
   },
 
 };

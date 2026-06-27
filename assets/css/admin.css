@@ -3,12 +3,9 @@
    (tuiles à icône lumineuse, libellés Cinzel, cartes sombres) et le dashboard.
    ══════════════════════════════════════════════════════════════════════════ */
 
-.adm-layout {
-  display: grid;
-  grid-template-columns: 1fr minmax(280px, 360px);
-  gap: 1.1rem; align-items: start;
-}
-@media (max-width: 880px) { .adm-layout { grid-template-columns: 1fr; } }
+/* Sections empilées qui remplissent la largeur (au lieu d'un rail étroit). */
+.adm-block { margin-bottom: 1.6rem; }
+.adm-block:last-child { margin-bottom: 0; }
 
 .adm-label {
   font-family: 'Cinzel', serif; font-size: .8rem; font-weight: 700;
@@ -55,10 +52,15 @@
 /* ── Joueurs inscrits ── */
 .adm-players {
   display: flex; flex-direction: column; gap: 1px;
-  max-height: 64vh; overflow-y: auto;
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: 14px; padding: .5rem;
   scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+/* Grille pleine largeur : les joueurs s'étalent en colonnes au lieu d'un rail. */
+.adm-players--grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1px .4rem;
 }
 .adm-prow {
   display: flex; align-items: center; gap: .6rem;
