@@ -46,28 +46,38 @@ export async function loadStats() {
 // Comptabilise 1 jet, + crit (20 nat) et + échec critique (1 nat). La réussite
 // n'est pas auto-déterminée (pas de DD systématique) → on ne compte pas succès/échec.
 // ── Attaque (arme / sort offensif) ───────────────────────────────────────────
-// Comptabilise, par jet sur une cible : +1 attaque, +touché, +crit, +échec
-// critique, +dégâts infligés (attaquant) et +dégâts subis / +KO (cible).
-// On ne compte que les PJ (attaquant et/ou cible) — les créatures sont ignorées.
-export function bumpAttack({ attackerId, attackerName, targetId, targetName, hit, crit, fumble, dmg = 0, ko = false } = {}) {
+// Pour pouvoir ANNULER une action (et réverser ses stats), on accumule un delta
+// en NOMBRES BRUTS (sérialisable → stockable dans le log), puis on l'applique
+// avec un signe (+1 pose l'action, −1 l'annule). On ne compte que les PJ.
+//
+// `acc` = { chars: { [id]: { name, combat: {…compteurs nombres…} } } }
+export function accAttackDelta(acc, { attackerId, attackerName, targetId, targetName, hit, crit, fumble, dmg = 0, ko = false } = {}) {
+  acc.chars ??= {};
+  const add = (id, name, fields) => {
+    if (!id) return;
+    const c = (acc.chars[id] ??= { name: name || '', combat: {} });
+    if (name) c.name = name;
+    for (const [k, v] of Object.entries(fields)) c.combat[k] = (c.combat[k] || 0) + v;
+  };
+  add(attackerId, attackerName, {
+    attacks: 1, hits: hit ? 1 : 0, crits: crit ? 1 : 0, fumbles: fumble ? 1 : 0,
+    dmgDealt: dmg > 0 ? dmg : 0, kosDealt: ko ? 1 : 0,
+  });
+  if (targetId && targetId !== attackerId) add(targetId, targetName, {
+    dmgTaken: dmg > 0 ? dmg : 0, kosTaken: ko ? 1 : 0,
+  });
+  return acc;
+}
+
+// Applique un delta brut via increment(). sign = +1 (pose) ou −1 (annulation).
+export function applyStatsDelta(delta, sign = 1) {
+  if (!delta?.chars || !Object.keys(delta.chars).length) return;
   const chars = {};
-  if (attackerId) {
-    chars[attackerId] = { name: attackerName || '', combat: {
-      attacks:  increment(1),
-      hits:     increment(hit   ? 1 : 0),
-      crits:    increment(crit  ? 1 : 0),
-      fumbles:  increment(fumble ? 1 : 0),
-      dmgDealt: increment(dmg > 0 ? dmg : 0),
-      kosDealt: increment(ko ? 1 : 0),
-    } };
+  for (const [id, c] of Object.entries(delta.chars)) {
+    const combat = {};
+    for (const [k, v] of Object.entries(c.combat || {})) combat[k] = increment(sign * (Number(v) || 0));
+    chars[id] = { name: c.name || '', combat };
   }
-  if (targetId && targetId !== attackerId) {
-    chars[targetId] = { name: targetName || '', combat: {
-      dmgTaken: increment(dmg > 0 ? dmg : 0),
-      kosTaken: increment(ko ? 1 : 0),
-    } };
-  }
-  if (!Object.keys(chars).length) return;
   return bumpStats({ chars });
 }
 

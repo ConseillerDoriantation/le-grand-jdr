@@ -28,7 +28,7 @@ import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js
 import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
-import { bumpAttack } from '../../shared/stats.js';
+import { accAttackDelta, applyStatsDelta } from '../../shared/stats.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
@@ -5901,6 +5901,7 @@ async function _vttRollAttack() {
 
     // ── Appliquer les HP + collecter résultats par cible ──────────────
     const targetResults = [];
+    const _statsDelta = { chars: {} };   // delta de stats accumulé (réversible à l'annulation)
     for (const curTgtId of targetIds) {
       const curTgtData = VS.tokens[curTgtId]?.data;
       if (!curTgtData) continue;
@@ -5997,8 +5998,9 @@ async function _vttRollAttack() {
         }
       }
 
-      // ── Statistiques de combat : 1 entrée par cible (PJ attaquant/cible) ──
-      bumpAttack({
+      // ── Statistiques de combat : accumule (écrit une fois après la boucle,
+      //    stocké dans le log pour pouvoir l'annuler avec l'action) ──
+      accAttackDelta(_statsDelta, {
         attackerId:   src.characterId || null,
         attackerName: src.name || '',
         targetId:     curTgtData.characterId || null,
@@ -6127,6 +6129,9 @@ async function _vttRollAttack() {
       }
     }
 
+    // ── Statistiques : écrit le delta accumulé (1 écriture) ───────────
+    applyStatsDelta(_statsDelta, +1);
+
     // ── Un seul message dans le log ────────────────────────────────────
     // Strip _data (référence token interne, non sérialisable Firestore)
     const cleanResults = targetResults.map(({ _data, ...rest }) => rest);
@@ -6135,6 +6140,7 @@ async function _vttRollAttack() {
       await addDoc(_logCol(), {
         type: 'attack-multi',
         undo: _undoSnap,
+        statsDelta: _statsDelta,
         authorId: STATE.user?.uid||null, authorName,
         attackerName: lS.displayName??src.name,
         characterImage: lS.displayImage||null,
@@ -6172,6 +6178,7 @@ async function _vttRollAttack() {
       if (r) await addDoc(_logCol(), {
         type: 'attack',
         undo: _undoSnap,
+        statsDelta: _statsDelta,
         authorId: STATE.user?.uid||null, authorName,
         attackerName: lS.displayName??src.name,
         characterImage: lS.displayImage||null,
@@ -7546,6 +7553,8 @@ async function _vttUndoAction(logId) {
     for (const [cid, st] of Object.entries(snap.chars || {})) {
       if (st.pm != null) await updateDoc(_chrRef(cid), { pm: st.pm }).catch(() => {});
     }
+    // Statistiques : réverse le delta enregistré avec l'action (décrémente).
+    if (m.statsDelta) applyStatsDelta(m.statsDelta, -1);
     await updateDoc(doc(_logCol(), logId), { actionUndone: true, actionUndoneBy: STATE.user?.uid || null }).catch(() => {});
     showNotif('↩ Action annulée — PV/PM/états restaurés', 'success');
   } catch (e) {
