@@ -27,6 +27,17 @@ function _statsRef() {
   return aid ? doc(db, `adventures/${aid}/stats/main`) : null;
 }
 
+// Clé de séance = jour local YYYY-MM-DD. Permet une vue « stats par date »
+// sans lecture supplémentaire (les compteurs datés vivent dans le même doc).
+export function statsDateKey(d = new Date()) {
+  const z = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
+}
+
+// Miroir mémoire best-effort du doc (pour le « plus gros coup » : un max ne se
+// fait pas avec increment()). Rafraîchi à chaque loadStats / écriture locale.
+let _mem = null;
+
 // Écriture générique : `patch` peut contenir des increment(n) imbriqués.
 // setDoc(merge:true) fusionne en profondeur ET crée le doc s'il n'existe pas.
 async function bumpStats(patch) {
@@ -39,14 +50,16 @@ export async function loadStats() {
   const ref = _statsRef();
   if (!ref) return null;
   const snap = await getDoc(ref).catch(() => null);
-  return snap?.exists() ? snap.data() : null;
+  const d = snap?.exists() ? snap.data() : null;
+  _mem = d || {};
+  return d;
 }
 
 // Remise à zéro de toutes les statistiques de l'aventure (MJ).
 export async function resetStats() {
   const ref = _statsRef();
   if (!ref) return false;
-  try { await setDoc(ref, {}, { merge: false }); return true; }
+  try { await setDoc(ref, {}, { merge: false }); _mem = {}; return true; }
   catch { return false; }
 }
 
@@ -54,8 +67,11 @@ export async function resetStats() {
 export async function deleteCharStats(charId) {
   const ref = _statsRef();
   if (!ref || !charId) return false;
-  try { await updateDoc(ref, { [`chars.${charId}`]: deleteField() }); return true; }
-  catch { return false; }
+  try {
+    await updateDoc(ref, { [`chars.${charId}`]: deleteField() });
+    if (_mem?.chars) delete _mem.chars[charId];
+    return true;
+  } catch { return false; }
 }
 
 // ── Jet de compétence (Athlétisme, Acrobaties…) ──────────────────────────────
@@ -69,11 +85,16 @@ export async function deleteCharStats(charId) {
 // `acc` = { chars: { [id]: { name, combat: {…compteurs nombres…} } } }
 export function accAttackDelta(acc, { attackerId, attackerName, targetId, targetName, hit, crit, fumble, dmg = 0, ko = false } = {}) {
   acc.chars ??= {};
+  const dk = statsDateKey();
   const add = (id, name, fields) => {
     if (!id) return;
     const c = (acc.chars[id] ??= { name: name || '', combat: {} });
     if (name) c.name = name;
-    for (const [k, v] of Object.entries(fields)) c.combat[k] = (c.combat[k] || 0) + v;
+    const dc = (((c.byDate ??= {})[dk] ??= { combat: {} }).combat);   // miroir par séance
+    for (const [k, v] of Object.entries(fields)) {
+      c.combat[k] = (c.combat[k] || 0) + v;
+      dc[k] = (dc[k] || 0) + v;
+    }
   };
   add(attackerId, attackerName, {
     attacks: 1, hits: hit ? 1 : 0, crits: crit ? 1 : 0, fumbles: fumble ? 1 : 0,
@@ -90,59 +111,84 @@ export function accAttackDelta(acc, { attackerId, attackerName, targetId, target
 export function accCastDelta(acc, { casterId, casterName, spellName, pm = 0, heal = 0 } = {}) {
   if (!casterId) return acc;
   acc.chars ??= {};
+  const dk = statsDateKey();
   const c = (acc.chars[casterId] ??= { name: casterName || '', combat: {} });
   if (casterName) c.name = casterName;
-  c.combat.spellsCast = (c.combat.spellsCast || 0) + 1;
-  if (pm > 0)   c.combat.pmSpent = (c.combat.pmSpent || 0) + pm;
-  if (heal > 0) c.combat.heal    = (c.combat.heal || 0) + heal;
-  if (spellName) { c.spells ??= {}; c.spells[spellName] = (c.spells[spellName] || 0) + 1; }
+  const dEntry = ((c.byDate ??= {})[dk] ??= { combat: {} });
+  const bump = (grp, key, val) => {
+    (c[grp] ??= {})[key] = (c[grp][key] || 0) + val;
+    (dEntry[grp] ??= {})[key] = (dEntry[grp][key] || 0) + val;
+  };
+  bump('combat', 'spellsCast', 1);
+  if (pm > 0)    bump('combat', 'pmSpent', pm);
+  if (heal > 0)  bump('combat', 'heal', heal);
+  if (spellName) bump('spells', spellName, 1);
   return acc;
 }
 
 // Applique un delta brut via increment(). sign = +1 (pose) ou −1 (annulation).
-// Générique : chaque groupe de compteurs (combat, spells, emotes…) est traité.
+// Récursif : tout NOMBRE (à n'importe quelle profondeur : combat, spells, emotes,
+// byDate.{date}.combat…) devient un increment ; les chaînes (name) sont conservées.
+function _incTree(node, sign) {
+  if (typeof node === 'number') return increment(sign * node);
+  if (node && typeof node === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(node)) out[k] = (typeof v === 'string') ? v : _incTree(v, sign);
+    return out;
+  }
+  return node;
+}
 export function applyStatsDelta(delta, sign = 1) {
   if (!delta?.chars || !Object.keys(delta.chars).length) return;
-  const chars = {};
-  for (const [id, c] of Object.entries(delta.chars)) {
-    const out = { name: c.name || '' };
-    for (const [grp, counters] of Object.entries(c)) {
-      if (grp === 'name' || !counters || typeof counters !== 'object') continue;
-      const g = {};
-      for (const [k, v] of Object.entries(counters)) g[k] = increment(sign * (Number(v) || 0));
-      out[grp] = g;
-    }
-    chars[id] = out;
-  }
-  return bumpStats({ chars });
+  return bumpStats({ chars: _incTree(delta.chars, sign) });
+}
+
+// ── Plus gros coup (max d'un seul coup) ──────────────────────────────────────
+// increment() ne sait pas faire un max → on compare au miroir mémoire (_mem,
+// amorcé d'un seul getDoc par session si besoin) et on n'écrit que si record.
+// Non réversible à l'annulation (un record reste un record) — acceptable.
+export async function bumpBiggestHit(charId, charName, dmg) {
+  if (!charId || !(dmg > 0)) return;
+  if (!_mem) _mem = (await loadStats()) || {};
+  const cur = Number(_mem?.chars?.[charId]?.combat?.biggestHit) || 0;
+  if (dmg <= cur) return;
+  ((((_mem.chars ??= {})[charId] ??= {}).combat ??= {}).biggestHit) = dmg;
+  return bumpStats({ chars: { [charId]: { name: charName || '', combat: { biggestHit: dmg } } } });
 }
 
 // ── Soin direct (ex. tick de Régénération) ───────────────────────────────────
 // Écriture directe (un HoT par tour ne se « défait » pas proprement à l'annulation).
 export function bumpHeal(charId, charName, amount) {
   if (!charId || !(amount > 0)) return;
-  return bumpStats({ chars: { [charId]: { name: charName || '', combat: { heal: increment(amount) } } } });
+  const dk = statsDateKey();
+  return bumpStats({ chars: { [charId]: {
+    name: charName || '',
+    combat: { heal: increment(amount) },
+    byDate: { [dk]: { combat: { heal: increment(amount) } } },
+  } } });
 }
 
 // ── Émote utilisée (par perso) ───────────────────────────────────────────────
 // Pas d'annulation possible → écriture directe.
 export function bumpEmote(charId, charName, emoteName) {
   if (!charId || !emoteName) return;
-  return bumpStats({ chars: { [charId]: { name: charName || '', emotes: { [emoteName]: increment(1) } } } });
+  const dk = statsDateKey();
+  return bumpStats({ chars: { [charId]: {
+    name: charName || '',
+    emotes: { [emoteName]: increment(1) },
+    byDate: { [dk]: { emotes: { [emoteName]: increment(1) } } },
+  } } });
 }
 
 export function bumpSkill(charId, charName, skill, { crit = false, fumble = false } = {}) {
   if (!charId || !skill) return;
   // Les clés de map (charId, skill) peuvent contenir accents/espaces → on passe
   // par des OBJETS imbriqués (pas des field-paths pointés) pour rester valide.
-  return bumpStats({
-    chars: { [charId]: {
-      name: charName || '',
-      skills: { [skill]: {
-        rolls:   increment(1),
-        crits:   increment(crit   ? 1 : 0),
-        fumbles: increment(fumble ? 1 : 0),
-      } },
-    } },
-  });
+  const dk = statsDateKey();
+  const sk = () => ({ rolls: increment(1), crits: increment(crit ? 1 : 0), fumbles: increment(fumble ? 1 : 0) });
+  return bumpStats({ chars: { [charId]: {
+    name: charName || '',
+    skills: { [skill]: sk() },
+    byDate: { [dk]: { skills: { [skill]: sk() } } },
+  } } });
 }

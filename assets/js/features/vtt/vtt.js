@@ -28,7 +28,7 @@ import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js
 import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
-import { accAttackDelta, accCastDelta, applyStatsDelta } from '../../shared/stats.js';
+import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit } from '../../shared/stats.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
@@ -5919,6 +5919,7 @@ async function _vttRollAttack() {
     // ── Appliquer les HP + collecter résultats par cible ──────────────
     const targetResults = [];
     const _statsDelta = { chars: {} };   // delta de stats accumulé (réversible à l'annulation)
+    let _maxHit = 0;                      // plus gros coup de cette attaque (record, non réversible)
     for (const curTgtId of targetIds) {
       const curTgtData = VS.tokens[curTgtId]?.data;
       if (!curTgtData) continue;
@@ -6026,6 +6027,7 @@ async function _vttRollAttack() {
         dmg: (hit || halfDmg) ? Math.max(0, dmgTotal) : 0,
         ko: (curHp > 0 && newHp <= 0),
       });
+      if ((hit || halfDmg) && dmgTotal > _maxHit) _maxHit = dmgTotal;
 
       // ── États consommés au 1er coup (Marqué, etc.) : retire ceux dont
       //    l'effet `consumedByAttackAgainst` est activé après que les bonus
@@ -6155,6 +6157,7 @@ async function _vttRollAttack() {
       });
     }
     applyStatsDelta(_statsDelta, +1);
+    if (src.characterId && _maxHit > 0) bumpBiggestHit(src.characterId, src.name, _maxHit);
 
     // ── Un seul message dans le log ────────────────────────────────────
     // Strip _data (référence token interne, non sérialisable Firestore)

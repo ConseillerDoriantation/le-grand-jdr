@@ -9,7 +9,7 @@ import { emptyStateHtml } from '../shared/list-renderer.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { loadStats, resetStats, deleteCharStats } from '../shared/stats.js';
 import { showNotif } from '../shared/notifications.js';
-import { confirmModal } from '../shared/modal.js';
+import { confirmModal, openModal } from '../shared/modal.js';
 import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
@@ -20,6 +20,48 @@ import { charSession } from '../shared/char-session.js';
 import { openAdventureSwitcher } from '../core/layout.js';
 import { loadAllUsers } from '../core/adventure.js';
 const renderCharSheet   = (...args) => charSession.renderSheet(...args);
+
+// ── Statistiques : état léger pour la vue « par séance » (évite une relecture) ──
+let _statsData = null;                 // dernier doc stats chargé (pour la modale par date)
+let _statsEmoteUrl = new Map();        // name → url (affichage de l'émote réelle)
+
+const _statsNum = (v) => Number(v) || 0;
+function _statsEmoteHtml(name, cls = 'stats-emote') {
+  if (!name) return '—';
+  const url = _statsEmoteUrl.get(name);
+  return url ? `<img class="${cls}" src="${url}" alt="${_esc(name)}" title="${_esc(name)}">` : _esc(name);
+}
+function _statsNormCombat(cm = {}) {
+  const n = _statsNum;
+  return {
+    attacks: n(cm.attacks), hits: n(cm.hits), crits: n(cm.crits), fumbles: n(cm.fumbles),
+    dmgDealt: n(cm.dmgDealt), dmgTaken: n(cm.dmgTaken), kosDealt: n(cm.kosDealt), kosTaken: n(cm.kosTaken),
+    spellsCast: n(cm.spellsCast), pmSpent: n(cm.pmSpent), heal: n(cm.heal), biggestHit: n(cm.biggestHit),
+  };
+}
+function _statsTop(map = {}) {
+  const e = Object.entries(map).map(([n, v]) => ({ n, c: _statsNum(v) })).sort((a, b) => b.c - a.c)[0];
+  return e && e.c > 0 ? e : null;
+}
+// Bandeau de chips combat (réutilisé par carte perso ET vue par séance).
+function _statsCombatChips(cm, { topSpell, topEmote } = {}) {
+  const hr = cm.attacks ? Math.round((cm.hits / cm.attacks) * 100) : 0;
+  return [
+    cm.attacks > 0    && `<span class="stats-cstat" title="Attaques · taux de réussite">⚔️ ${cm.attacks} · ${hr}%</span>`,
+    cm.crits > 0      && `<span class="stats-cstat" title="Réussites critiques">💥 ${cm.crits}</span>`,
+    cm.fumbles > 0    && `<span class="stats-cstat" title="Échecs critiques">💔 ${cm.fumbles}</span>`,
+    cm.dmgDealt > 0   && `<span class="stats-cstat" title="Dégâts totaux infligés">🗡️ ${cm.dmgDealt}</span>`,
+    cm.biggestHit > 0 && `<span class="stats-cstat" title="Plus gros coup">💢 ${cm.biggestHit}</span>`,
+    cm.dmgTaken > 0   && `<span class="stats-cstat" title="Dégâts subis">🛡️ ${cm.dmgTaken}</span>`,
+    cm.kosDealt > 0   && `<span class="stats-cstat" title="KO infligés">☠️ ${cm.kosDealt} KO</span>`,
+    cm.kosTaken > 0   && `<span class="stats-cstat" title="Fois mis KO">💀 ${cm.kosTaken}</span>`,
+    cm.spellsCast > 0 && `<span class="stats-cstat" title="Sorts lancés">🔮 ${cm.spellsCast}</span>`,
+    cm.pmSpent > 0    && `<span class="stats-cstat" title="PM dépensés">🔋 ${cm.pmSpent}</span>`,
+    cm.heal > 0       && `<span class="stats-cstat" title="Soin prodigué">💚 ${cm.heal}</span>`,
+    topSpell          && `<span class="stats-cstat" title="Sort le plus lancé">⭐ ${_esc(topSpell.n)} ×${topSpell.c}</span>`,
+    topEmote          && `<span class="stats-cstat" title="Émote favorite">${_statsEmoteHtml(topEmote.n, 'stats-emote-sm')} ×${topEmote.c}</span>`,
+  ].filter(Boolean).join('');
+}
 
 
 const PAGES = {
@@ -1263,33 +1305,30 @@ const PAGES = {
   // ─── STATISTIQUES ─────────────────────────────────────────────────────────────
   async statistiques() {
     const content = document.getElementById('main-content');
-    const resetBtn = STATE.isAdmin
-      ? `<button class="btn btn-outline btn-sm" data-action="_statsReset" style="float:right;color:var(--crimson-light,#ff8ca7);border-color:rgba(255,90,126,.3)" title="Remettre toutes les statistiques à zéro">↺ Réinitialiser</button>`
-      : '';
-    content.innerHTML = `${pageHeaderHtml('📊 Statistiques', 'Jets, réussites et exploits de la table')}${resetBtn}
+    content.innerHTML = `${pageHeaderHtml('📊 Statistiques', 'Jets, réussites et exploits de la table')}
       <div id="stats-root" class="stats-root"><div class="stats-empty">Chargement…</div></div>`;
-    const data = await loadStats();
+    const [data, emoteDoc] = await Promise.all([
+      loadStats(),
+      getDocData('world', 'vtt_emotes').catch(() => null),
+    ]);
+    _statsData = data;
+    _statsEmoteUrl = new Map((emoteDoc?.emotes || []).filter(e => e?.name && e?.url).map(e => [e.name, e.url]));
     const root = document.getElementById('stats-root');
     if (!root) return;
 
-    const charsMap = data?.chars || {};
-    const num = (v) => Number(v) || 0;
-    const rows = Object.entries(charsMap).map(([id, c]) => {
+    const num = _statsNum;
+    const rows = Object.entries(data?.chars || {}).map(([id, c]) => {
       const skills = c.skills || {};
       let sRolls = 0, sCrits = 0, sFumbles = 0;
       const perSkill = Object.entries(skills).map(([sk, v]) => {
         sRolls += num(v.rolls); sCrits += num(v.crits); sFumbles += num(v.fumbles);
         return { sk, rolls: num(v.rolls), crits: num(v.crits), fumbles: num(v.fumbles) };
       }).sort((a, b) => b.rolls - a.rolls);
-      const cm = c.combat || {};
-      const combat = {
-        attacks: num(cm.attacks), hits: num(cm.hits), crits: num(cm.crits), fumbles: num(cm.fumbles),
-        dmgDealt: num(cm.dmgDealt), dmgTaken: num(cm.dmgTaken), kosDealt: num(cm.kosDealt), kosTaken: num(cm.kosTaken),
-        spellsCast: num(cm.spellsCast), pmSpent: num(cm.pmSpent), heal: num(cm.heal),
-      };
+      const combat = _statsNormCombat(c.combat);
       const spells = Object.entries(c.spells || {}).map(([n, v]) => ({ n, c: num(v) })).sort((a, b) => b.c - a.c);
       const emotes = Object.entries(c.emotes || {}).map(([n, v]) => ({ n, c: num(v) })).sort((a, b) => b.c - a.c);
-      return { id, name: c.name || '?', sRolls, sCrits, sFumbles, perSkill, combat, spells, emotes };
+      const hasDates = !!c.byDate && Object.keys(c.byDate).length > 0;
+      return { id, name: c.name || '?', sRolls, sCrits, sFumbles, perSkill, combat, spells, emotes, hasDates };
     }).filter(r => r.sRolls > 0 || r.combat.attacks > 0 || r.combat.dmgTaken > 0 || r.combat.spellsCast > 0 || r.emotes.length);
 
     if (!rows.length) {
@@ -1311,7 +1350,7 @@ const PAGES = {
     const topSpell = spellTally[0], topEmote = emoteTally[0];
 
     const best = (key) => [...rows].filter(r => r.combat[key] > 0).sort((a, b) => b.combat[key] - a.combat[key])[0];
-    const topDmg = best('dmgDealt'), topKo = best('kosDealt'), topHeal = best('heal');
+    const topDmg = best('dmgDealt'), topKo = best('kosDealt'), topHeal = best('heal'), topBig = best('biggestHit');
     const topHit = [...rows].filter(r => r.combat.attacks >= 3).map(r => ({ ...r, hr: Math.round(r.combat.hits / r.combat.attacks * 100) })).sort((a, b) => b.hr - a.hr)[0];
     const topFumble = [...rows].map(r => ({ ...r, tf: r.combat.fumbles + r.sFumbles })).filter(r => r.tf > 0).sort((a, b) => b.tf - a.tf)[0];
 
@@ -1319,22 +1358,8 @@ const PAGES = {
     const award = (ic, lbl, who, val) => who ? `<div class="stats-award"><span class="stats-award-ic">${ic}</span><div class="stats-award-tx"><span class="stats-award-lbl">${lbl}</span><span class="stats-award-who">${_esc(who)} <b>· ${val}</b></span></div></div>` : '';
 
     const charBlock = (r) => {
-      const hr = r.combat.attacks ? Math.round(r.combat.hits / r.combat.attacks * 100) : 0;
-      const cm = r.combat;
-      const chips = [
-        cm.attacks > 0 && `<span class="stats-cstat" title="Attaques · taux de réussite">⚔️ ${cm.attacks} · ${hr}%</span>`,
-        cm.crits > 0 && `<span class="stats-cstat" title="Réussites critiques">💥 ${cm.crits}</span>`,
-        cm.fumbles > 0 && `<span class="stats-cstat" title="Échecs critiques">💔 ${cm.fumbles}</span>`,
-        cm.dmgDealt > 0 && `<span class="stats-cstat" title="Dégâts infligés">🗡️ ${cm.dmgDealt}</span>`,
-        cm.dmgTaken > 0 && `<span class="stats-cstat" title="Dégâts subis">🛡️ ${cm.dmgTaken}</span>`,
-        (cm.kosDealt > 0 || cm.kosTaken > 0) && `<span class="stats-cstat" title="KO infligés / subis">☠️ ${cm.kosDealt}/${cm.kosTaken}</span>`,
-        cm.spellsCast > 0 && `<span class="stats-cstat" title="Sorts lancés">🔮 ${cm.spellsCast}</span>`,
-        cm.pmSpent > 0 && `<span class="stats-cstat" title="PM dépensés">🔋 ${cm.pmSpent}</span>`,
-        cm.heal > 0 && `<span class="stats-cstat" title="Soin prodigué">💚 ${cm.heal}</span>`,
-        r.spells[0] && `<span class="stats-cstat" title="Sort favori">⭐ ${_esc(r.spells[0].n)} ×${r.spells[0].c}</span>`,
-        r.emotes[0] && `<span class="stats-cstat" title="Émote favorite">😄 ${_esc(r.emotes[0].n)} ×${r.emotes[0].c}</span>`,
-      ].filter(Boolean);
-      const combatHtml = chips.length ? `<div class="stats-cstats">${chips.join('')}</div>` : '';
+      const combatHtml = ((c) => c ? `<div class="stats-cstats">${c}</div>` : '')(
+        _statsCombatChips(r.combat, { topSpell: r.spells[0], topEmote: r.emotes[0] }));
       const skillHtml = r.perSkill.length ? `
         <div class="stats-skills">
           ${r.perSkill.map(s => `
@@ -1344,44 +1369,46 @@ const PAGES = {
               <span class="stats-skill-n">${s.rolls}${s.crits ? ` · 💥${s.crits}` : ''}${s.fumbles ? ` · 💔${s.fumbles}` : ''}</span>
             </div>`).join('')}
         </div>` : '';
+      const dateBtn = r.hasDates
+        ? `<button class="stats-char-btn" data-action="_statsCharDates" data-id="${r.id}" title="Voir les stats séance par séance">📅</button>`
+        : '';
       const delBtn = STATE.isAdmin
-        ? `<button class="stats-char-del" data-action="_statsDelChar" data-id="${r.id}" title="Supprimer les stats de ce personnage (jets de test…)">✕</button>`
+        ? `<button class="stats-char-btn stats-char-del" data-action="_statsDelChar" data-id="${r.id}" title="Supprimer les stats de ce personnage (jets de test…)">✕</button>`
         : '';
       return `<div class="stats-char">
-        <div class="stats-char-hd"><span class="stats-char-name">${_esc(r.name)}</span>${delBtn}</div>
+        <div class="stats-char-hd"><span class="stats-char-name">${_esc(r.name)}</span><span class="stats-char-actions">${dateBtn}${delBtn}</span></div>
         ${combatHtml}${skillHtml}
       </div>`;
     };
 
+    const resetBtn = STATE.isAdmin
+      ? `<button class="stats-reset-btn" data-action="_statsReset" title="Remettre toutes les statistiques à zéro">↺ Réinitialiser</button>`
+      : '';
+
     root.innerHTML = `
       <section class="adm-block">
-        <div class="adm-label">⚔️ Combat (table)</div>
+        <div class="adm-label stats-section-hd"><span>⚔️ Combat (table)</span>${resetBtn}</div>
         <div class="stats-kpis">
           ${statCard('⚔️', GC.attacks, 'Attaques', '#ff8b6b')}
           ${statCard('🎯', GC.attacks ? `${hitRate}%` : '—', 'Taux de réussite', '#22c38e')}
           ${statCard('💥', GC.crits, 'Réussites critiques', '#f4c430')}
           ${statCard('💔', GC.fumbles, 'Échecs critiques', '#ff6b6b')}
           ${statCard('🗡️', GC.dmgDealt, 'Dégâts infligés', '#a78bfa')}
+          ${statCard('🛡️', GC.dmgTaken, 'Dégâts subis', '#9aa0aa')}
           ${statCard('☠️', GC.kosDealt, 'KO infligés', '#ef4444')}
+          ${statCard('💚', GC.heal, 'Soin prodigué', '#22c38e')}
           ${statCard('🔮', GC.spellsCast, 'Sorts lancés', '#bca0ff')}
           ${statCard('🔋', GC.pmSpent, 'PM dépensés', '#4f8cff')}
         </div>
         <div class="stats-awards">
           ${award('🏆', 'Plus gros frappeur', topDmg?.name, `${topDmg?.combat.dmgDealt} dmg`)}
+          ${award('💢', 'Plus gros coup', topBig?.name, `${topBig?.combat.biggestHit}`)}
           ${award('🎯', 'Meilleur taux', topHit?.name, topHit ? `${topHit.hr}%` : '')}
           ${award('☠️', 'Bourreau', topKo?.name, `${topKo?.combat.kosDealt} KO`)}
           ${award('💚', 'Plus grand soigneur', topHeal?.name, `${topHeal?.combat.heal} PV`)}
           ${award('🤡', 'Le plus malchanceux', topFumble?.name, `${topFumble?.tf} échec${topFumble?.tf > 1 ? 's' : ''}`)}
         </div>
       </section>
-      ${(spellTally.length || emoteTally.length) ? `
-      <section class="adm-block">
-        <div class="adm-label">🔮 Sorts &amp; 😄 émotes (table)</div>
-        <div class="stats-kpis">
-          ${statCard('🔮', topSpell ? `${_esc(topSpell[0])}` : '—', 'Sort le + lancé', '#bca0ff')}
-          ${statCard('😄', topEmote ? `${_esc(topEmote[0])}` : '—', 'Émote la + utilisée', '#22c38e')}
-        </div>
-      </section>` : ''}
       <section class="adm-block">
         <div class="adm-label">🎲 Compétences (table)</div>
         <div class="stats-kpis">
@@ -1391,6 +1418,14 @@ const PAGES = {
           ${statCard('🏅', topSkill ? _esc(topSkill[0]) : '—', 'Compétence la + jouée', '#f4c430')}
         </div>
       </section>
+      ${(spellTally.length || emoteTally.length) ? `
+      <section class="adm-block">
+        <div class="adm-label">🔮 Sorts &amp; 😄 émotes (table)</div>
+        <div class="stats-kpis">
+          ${statCard('🔮', topSpell ? `${_esc(topSpell[0])}` : '—', 'Sort le + lancé', '#bca0ff')}
+          ${statCard('😄', topEmote ? _statsEmoteHtml(topEmote[0]) : '—', 'Émote la + utilisée', '#22c38e')}
+        </div>
+      </section>` : ''}
       <section class="adm-block">
         <div class="adm-label">👤 Par personnage</div>
         <div class="stats-chars">${rows.sort((a, b) => (b.combat.attacks + b.sRolls) - (a.combat.attacks + a.sRolls)).map(charBlock).join('')}</div>
@@ -1432,6 +1467,29 @@ registerActions({
     const done = await deleteCharStats(id);
     showNotif(done ? 'Statistiques du personnage supprimées.' : 'Échec de la suppression.', done ? 'success' : 'error');
     if (done) PAGES.statistiques();
+  },
+  // Stats d'un personnage séance par séance (date) — lit le doc déjà chargé.
+  _statsCharDates: (btn) => {
+    const id = btn.dataset.id; if (!id) return;
+    const c = _statsData?.chars?.[id]; if (!c) return;
+    const byDate = c.byDate || {};
+    const dates = Object.keys(byDate).sort().reverse();
+    const fmt = (d) => { const [y, m, da] = d.split('-'); return `${da}/${m}/${y}`; };
+    const body = dates.length ? dates.map((d) => {
+      const e = byDate[d] || {};
+      const chips = _statsCombatChips(_statsNormCombat(e.combat), { topSpell: _statsTop(e.spells), topEmote: _statsTop(e.emotes) });
+      const skills = Object.entries(e.skills || {}).map(([sk, v]) => ({ sk, rolls: _statsNum(v?.rolls), crits: _statsNum(v?.crits), fumbles: _statsNum(v?.fumbles) }))
+        .filter(s => s.rolls > 0).sort((a, b) => b.rolls - a.rolls);
+      const skillLine = skills.length
+        ? `<div class="stats-date-skills">🎲 ${skills.map(s => `${_esc(s.sk)} ×${s.rolls}${s.crits ? ` 💥${s.crits}` : ''}${s.fumbles ? ` 💔${s.fumbles}` : ''}`).join(' · ')}</div>`
+        : '';
+      return `<div class="stats-date">
+        <div class="stats-date-hd">📅 ${fmt(d)}</div>
+        ${chips ? `<div class="stats-cstats">${chips}</div>` : ''}
+        ${skillLine || (chips ? '' : '<div class="stats-date-skills" style="opacity:.5">Aucune action ce jour.</div>')}
+      </div>`;
+    }).join('') : '<div class="stats-empty">Aucune séance enregistrée.</div>';
+    openModal(`📅 ${_esc(c.name || 'Personnage')} — par séance`, `<div class="stats-dates">${body}</div>`);
   },
 
   // Admin lazy-load tools
