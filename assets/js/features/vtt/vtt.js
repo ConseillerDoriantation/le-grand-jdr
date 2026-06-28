@@ -5949,7 +5949,10 @@ async function _vttRollAttack() {
       const targetCA = armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
       // Bouclier réactif : annule complètement l'attaque (pas de touche, pas de demi-dégâts, pas de fumble visuel)
       const isBlocked = blockedTargets.has(curTgtId);
-      const hit      = isBlocked ? false : (opt.autoHit ? true : (isCrit ? true : isFumble ? false : hitTotal >= targetCA));
+      // Le lanceur pris dans sa PROPRE zone ne peut pas l'esquiver → touche auto sur soi
+      // (sinon, avec une CA élevée, il « esquivait » son explosion alors qu'il est dedans).
+      const _selfInZone = curTgtId === srcId && (opt.zoneW > 0 || opt.zoneH > 0);
+      const hit      = isBlocked ? false : ((_selfInZone || opt.autoHit) ? true : (isCrit ? true : isFumble ? false : hitTotal >= targetCA));
       const halfDmg  = !isBlocked && !hit && missEffect !== 'none' && !isFumble;
       let dmgTotal   = hit ? sharedDmgTotalHit : halfDmg ? sharedDmgTotalHalf : 0;
       let interaction = null;
