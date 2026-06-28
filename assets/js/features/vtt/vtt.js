@@ -4947,12 +4947,17 @@ async function _zoneValidate() {
     } catch {}
   }
 
-  // ── Sort « pose de zone » : utilitaire SANS effet sur cible (Mur de pierre…).
-  //    Pose UNIQUEMENT un marqueur visuel persistant qui disparaît après la durée
-  //    (défaut 2 tours). Les sorts qui APPLIQUENT un effet au cast (dégâts, soin,
-  //    affliction/enchant/régén de zone) sont instantanés et ne passent PAS ici.
-  if (opt.isUtil && (opt.zoneW > 0 || opt.zoneH > 0)
-      && !opt.isHeal && !opt.isRegen && !opt.isEnchant && !opt.isAffliction
+  // ── Sort « pose de zone » : utilitaire SANS effet appliqué sur cible (Mur de
+  //    pierre, ou Affliction « sans état défini »…). Pose UNIQUEMENT un marqueur
+  //    visuel persistant qui disparaît après la durée (défaut 2 tours).
+  //    Les sorts qui APPLIQUENT un effet au cast (dégâts, soin, enchant/régén, ou
+  //    affliction AVEC un état/DoT réel) sont instantanés et ne passent PAS ici.
+  const _afflHasEffect = opt.isAffliction && (
+    (opt.afflictionMode === 'dot' && String(opt.afflictionDotFormula || '').trim())
+    || (opt.afflictionMode === 'etat' && opt.afflictionEtatId)
+  );
+  const _zoneAppliesEffect = opt.isHeal || opt.isRegen || opt.isEnchant || _afflHasEffect;
+  if (opt.isUtil && (opt.zoneW > 0 || opt.zoneH > 0) && !_zoneAppliesEffect
       && !opt?.mods?.invocation && !opt?.mods?.sentinelle) {
     const _zid = await _vttPlaceSpellZone(srcId, opt, { x, y, wPx, hPx });
     const srcD = VS.tokens[srcId]?.data;
