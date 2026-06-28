@@ -1425,6 +1425,9 @@ function _vttAimOpt(srcId, idx) {
   if (!opt) return;
   closeModalDirect();
   if (opt.targetSelf) { _resolveAim(srcId, srcId, opt); return; }  // potions/buffs perso : direct
+  // Sort de zone (ou invocation, zone min 1×1) : pas besoin de viser une cible →
+  // on entre directement en placement de zone (clic token → clic sort → place).
+  if (opt.zoneW > 0 || opt.zoneH > 0) { _hideActBar(); _startZonePlacement(srcId, srcId, opt, +idx); return; }
   _startAim(srcId, opt);
 }
 
@@ -4944,6 +4947,34 @@ async function _zoneValidate() {
     } catch {}
   }
 
+  // ── Sort « pose de zone » : utilitaire SANS effet sur cible (Mur de pierre…).
+  //    Pose UNIQUEMENT un marqueur visuel persistant qui disparaît après la durée
+  //    (défaut 2 tours). Les sorts qui APPLIQUENT un effet au cast (dégâts, soin,
+  //    affliction/enchant/régén de zone) sont instantanés et ne passent PAS ici.
+  if (opt.isUtil && (opt.zoneW > 0 || opt.zoneH > 0)
+      && !opt.isHeal && !opt.isRegen && !opt.isEnchant && !opt.isAffliction
+      && !opt?.mods?.invocation && !opt?.mods?.sentinelle) {
+    const _zid = await _vttPlaceSpellZone(srcId, opt, { x, y, wPx, hPx });
+    const srcD = VS.tokens[srcId]?.data;
+    const _snap = _captureUndoSnapshot(srcId, []);
+    if (_zid) _snap.createdAnnots = [_zid];
+    if (srcD) await _vttSpendSpellPm(srcD, opt);
+    await _vttApplyCasterConcentration(srcId, opt);
+    await addDoc(_logCol(), {
+      type: 'cast', undo: _snap,
+      authorId: STATE.user?.uid || null,
+      authorName: STATE.profile?.pseudo || STATE.profile?.prenom || STATE.user?.displayName || 'MJ',
+      casterName: srcD ? (_live(srcD).displayName ?? srcD.name) : '?',
+      characterImage: srcD ? (_live(srcD).displayImage || null) : null,
+      targetName: 'zone', optLabel: opt.label,
+      castEffect: `${opt.icon || '✨'} ${opt.label} — zone (${opt.sortDuree ?? 2} t)`,
+      createdAt: serverTimestamp(),
+    }).catch(() => {});
+    showNotif(`${opt.icon || '✨'} Zone « ${opt.label} » placée`, 'success');
+    _zoneClear();
+    return;
+  }
+
   // ── Invocation générique : place la créature à l'emplacement choisi ──
   // (pas d'attaque du lanceur — la créature a ses propres stats/actions)
   if (opt?.mods?.invocation) {
@@ -5033,37 +5064,9 @@ async function _zoneValidate() {
       _zoneClear();
       return;
     }
-  } else if (!targets.length && !(opt.isUtil && (opt.zoneW > 0 || opt.zoneH > 0))) {
+  } else if (!targets.length) {
     showNotif('Aucune cible dans la zone', 'error');
     return;
-  }
-
-  // ── Zone utilitaire : marqueur visuel persistant (visible de tous), qui
-  //    disparaît après la durée du sort (défaut 2 tours). En plus de l'effet
-  //    éventuel (enchant/régén/affliction de zone appliqué aux cibles présentes).
-  if (opt.isUtil && (opt.zoneW > 0 || opt.zoneH > 0)) {
-    const _zid = await _vttPlaceSpellZone(srcId, opt, { x, y, wPx, hPx });
-    if (!targets.length) {
-      // Marqueur seul (aucune cible) → consommer PM + concentration + log, puis fin.
-      const srcD = VS.tokens[srcId]?.data;
-      const _snap = _captureUndoSnapshot(srcId, []);
-      if (_zid) _snap.createdAnnots = [_zid];
-      if (srcD) await _vttSpendSpellPm(srcD, opt);
-      await _vttApplyCasterConcentration(srcId, opt);
-      await addDoc(_logCol(), {
-        type: 'cast', undo: _snap,
-        authorId: STATE.user?.uid || null,
-        authorName: STATE.profile?.pseudo || STATE.profile?.prenom || STATE.user?.displayName || 'MJ',
-        casterName: srcD ? (_live(srcD).displayName ?? srcD.name) : '?',
-        characterImage: srcD ? (_live(srcD).displayImage || null) : null,
-        targetName: 'zone', optLabel: opt.label,
-        castEffect: `${opt.icon || '✨'} ${opt.label} — zone (${opt.sortDuree ?? 2} t)`,
-        createdAt: serverTimestamp(),
-      }).catch(() => {});
-      showNotif(`${opt.icon || '✨'} Zone « ${opt.label} » placée`, 'success');
-      _zoneClear();
-      return;
-    }
   }
 
   const { optIdx } = _zoneCtx;
