@@ -4873,6 +4873,7 @@ async function _zoneValidate() {
   const targets = Object.values(VS.tokens)
     .filter(e => {
       if (!e.data || e.data.pageId !== VS.activePage?.id) return false;
+      if (e.data.id === srcId) return false;   // le lanceur ne subit JAMAIS sa propre zone
       if (!e.data.visible && !STATE.isAdmin) return false;
       const tc = _tokenCenter(e.data);
       return tc.x >= x1 && tc.x <= x2 && tc.y >= y1 && tc.y <= y2;
@@ -5951,10 +5952,7 @@ async function _vttRollAttack() {
       const targetCA = armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
       // Bouclier réactif : annule complètement l'attaque (pas de touche, pas de demi-dégâts, pas de fumble visuel)
       const isBlocked = blockedTargets.has(curTgtId);
-      // Le lanceur pris dans sa PROPRE zone ne peut pas l'esquiver → touche auto sur soi
-      // (sinon, avec une CA élevée, il « esquivait » son explosion alors qu'il est dedans).
-      const _selfInZone = curTgtId === srcId && (opt.zoneW > 0 || opt.zoneH > 0);
-      const hit      = isBlocked ? false : ((_selfInZone || opt.autoHit) ? true : (isCrit ? true : isFumble ? false : hitTotal >= targetCA));
+      const hit      = isBlocked ? false : (opt.autoHit ? true : (isCrit ? true : isFumble ? false : hitTotal >= targetCA));
       const halfDmg  = !isBlocked && !hit && missEffect !== 'none' && !isFumble;
       let dmgTotal   = hit ? sharedDmgTotalHit : halfDmg ? sharedDmgTotalHalf : 0;
       let interaction = null;
