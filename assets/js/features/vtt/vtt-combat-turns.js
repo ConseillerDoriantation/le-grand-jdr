@@ -19,7 +19,7 @@ import { _live } from './vtt-effective.js';
 import { bumpHeal } from '../../shared/stats.js';
 import {
   CONDITION_BY_ID, _rollDiceDetailed, _setHp, _persistInvocationState,
-  _vttTriggerConcentrationSave, _vttBreakConcentrationEffects,
+  _vttTriggerConcentrationSave, _vttBreakConcentrationEffects, _vttExpireSpellZones,
 } from './vtt.js';
 
 export async function _vttResetTurn(id) {
@@ -203,6 +203,7 @@ export async function _vttNextRound() {
   for (const item of expiredConcentrations) {
     await _vttBreakConcentrationEffects(item.casterId, item.cond);
   }
+  _vttExpireSpellZones(round);   // zones de sort persistantes arrivées à expiration
   dotNotifs.forEach(msg => showNotif(msg, 'error'));
   expiredNotifs.forEach(msg => showNotif(msg, 'info'));
   showNotif(`Round ${round} !`, 'success');

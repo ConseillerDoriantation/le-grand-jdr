@@ -4842,6 +4842,47 @@ function _startZonePlacement(srcId, tgtId, opt, optIdx) {
   _showZoneHud();
 }
 
+// Pose une zone de sort PERSISTANTE (sort utilitaire) : un dessin partagé par
+// tous, qui disparaît après la durée du sort (défaut 2 tours). Réutilise la
+// collection d'annotations (rendu + sync gratuits). Renvoie l'id (pour l'undo).
+async function _vttPlaceSpellZone(srcId, opt, { x, y, wPx, hPx }) {
+  if (!VS.activePage) return null;
+  const round = VS.session?.combat?.round ?? 0;
+  const dur = opt.mods?.concentration ? 10 : (opt.sortDuree ?? 2);
+  // Même convention d'expiration que buffs/états : en combat → round+dur−1 ;
+  // hors combat → dur (converti au démarrage du round 1).
+  const expiresAtRound = round > 0 ? (round + dur - 1) : dur;
+  const sigil = _buildCastSigil(VS.tokens[srcId]?.data, opt);
+  const color = sigil?.color || opt.enchantElementColor || opt.afflictionElementColor || '#b47fff';
+  const data = {
+    type: 'spellzone',
+    x, y, w: wPx, h: hPx,
+    color, fill: true, strokeWidth: 2,
+    label: opt.label || 'Zone', icon: opt.icon || '✨',
+    totalDuration: dur, startRound: round, expiresAtRound,
+    pageId: VS.activePage.id,
+    createdBy: STATE.user?.uid || null, createdAt: serverTimestamp(),
+  };
+  const id = 'z' + Date.now() + Math.random().toString(36).slice(2, 5);
+  try { await setDoc(_annotRef(id), data); _drawHistory.push(id); return id; }
+  catch (err) { console.error('[VTT] spellzone save', err?.code, err?.message); return null; }
+}
+
+// Supprime les zones de sort dont la durée est écoulée (appelé au passage de round
+// par le MJ). Les zones sans expiration (posées hors combat) restent.
+export function _vttExpireSpellZones(round) {
+  if (!STATE.isAdmin) return;
+  for (const [id, e] of Object.entries(_annotations)) {
+    const d = e?.data;
+    if (d?.type === 'spellzone' && d.expiresAtRound != null && round > d.expiresAtRound) {
+      _annotations[id]?.shape?.destroy?.();
+      delete _annotations[id];
+      deleteDoc(_annotRef(id)).catch(() => {});
+    }
+  }
+  VS.layers.draw?.batchDraw();
+}
+
 function _zoneCancel() { _zoneClear(); showNotif('Zone annulée', 'info'); }
 
 function _zoneRotate() {
@@ -4992,9 +5033,37 @@ async function _zoneValidate() {
       _zoneClear();
       return;
     }
-  } else if (!targets.length) {
+  } else if (!targets.length && !(opt.isUtil && (opt.zoneW > 0 || opt.zoneH > 0))) {
     showNotif('Aucune cible dans la zone', 'error');
     return;
+  }
+
+  // ── Zone utilitaire : marqueur visuel persistant (visible de tous), qui
+  //    disparaît après la durée du sort (défaut 2 tours). En plus de l'effet
+  //    éventuel (enchant/régén/affliction de zone appliqué aux cibles présentes).
+  if (opt.isUtil && (opt.zoneW > 0 || opt.zoneH > 0)) {
+    const _zid = await _vttPlaceSpellZone(srcId, opt, { x, y, wPx, hPx });
+    if (!targets.length) {
+      // Marqueur seul (aucune cible) → consommer PM + concentration + log, puis fin.
+      const srcD = VS.tokens[srcId]?.data;
+      const _snap = _captureUndoSnapshot(srcId, []);
+      if (_zid) _snap.createdAnnots = [_zid];
+      if (srcD) await _vttSpendSpellPm(srcD, opt);
+      await _vttApplyCasterConcentration(srcId, opt);
+      await addDoc(_logCol(), {
+        type: 'cast', undo: _snap,
+        authorId: STATE.user?.uid || null,
+        authorName: STATE.profile?.pseudo || STATE.profile?.prenom || STATE.user?.displayName || 'MJ',
+        casterName: srcD ? (_live(srcD).displayName ?? srcD.name) : '?',
+        characterImage: srcD ? (_live(srcD).displayImage || null) : null,
+        targetName: 'zone', optLabel: opt.label,
+        castEffect: `${opt.icon || '✨'} ${opt.label} — zone (${opt.sortDuree ?? 2} t)`,
+        createdAt: serverTimestamp(),
+      }).catch(() => {});
+      showNotif(`${opt.icon || '✨'} Zone « ${opt.label} » placée`, 'success');
+      _zoneClear();
+      return;
+    }
   }
 
   const { optIdx } = _zoneCtx;
@@ -7653,6 +7722,12 @@ async function _vttUndoAction(logId) {
       await deleteDoc(_tokRef(tid)).catch(() => {});
       VS.tokens[tid]?.shape?.destroy?.();
       delete VS.tokens[tid];
+    }
+    // Zones de sort persistantes créées par l'action.
+    for (const aid of (snap.createdAnnots || [])) {
+      _annotations[aid]?.shape?.destroy?.();
+      delete _annotations[aid];
+      await deleteDoc(_annotRef(aid)).catch(() => {});
     }
     for (const [tid, st] of Object.entries(snap.tokens || {})) {
       const t = VS.tokens[tid]?.data;

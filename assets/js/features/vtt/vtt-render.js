@@ -350,6 +350,22 @@ export function _buildAnnotVisual(K, data) {
     // Forme tracée sommet par sommet (triangle, etc.) → ligne fermée + remplissage opt.
     shape = new K.Line({ ...base, points: data.points || [],
       x: data.offsetX||0, y: data.offsetY||0, closed: true, fill });
+  } else if (data.type === 'spellzone') {
+    // Zone de sort persistante (utilitaire) : rectangle pointillé teinté + label,
+    // visible de tous, posé au centre (x,y). Auto-supprimé à expiration (par round).
+    const zw = data.w || CELL, zh = data.h || CELL;
+    const g = new K.Group({ name: 'annot', listening: false });
+    g.add(new K.Rect({ x: 0, y: 0, width: zw, height: zh, offsetX: zw / 2, offsetY: zh / 2,
+      fill: col + '24', stroke: col, strokeWidth: data.strokeWidth || 2, dash: [10, 6], cornerRadius: 4,
+      hitStrokeWidth: 0, listening: true }));
+    if (data.label) {
+      g.add(new K.Text({ text: `${data.icon ? data.icon + ' ' : ''}${data.label}`,
+        fontSize: 13, fontStyle: 'bold', fill: '#fff', align: 'center',
+        width: zw, offsetX: zw / 2, offsetY: zh / 2 + 18,
+        shadowColor: '#000', shadowBlur: 4, shadowOpacity: 0.9, listening: false }));
+    }
+    g.position({ x: data.x || 0, y: data.y || 0 });
+    shape = g;
   } else if (data.type === 'rect') {
     const rw = data.w||10, rh = data.h||10;
     shape = new K.Rect({ ...base, x:data.x||0, y:data.y||0,
