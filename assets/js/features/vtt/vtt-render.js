@@ -346,6 +346,10 @@ export function _buildAnnotVisual(K, data) {
     shape = new K.Line({ ...base, points: data.points || [],
       x: data.offsetX||0, y: data.offsetY||0,
       tension: data.type === 'freehand' ? 0.3 : 0, fill:'transparent' });
+  } else if (data.type === 'polygon') {
+    // Forme tracée sommet par sommet (triangle, etc.) → ligne fermée + remplissage opt.
+    shape = new K.Line({ ...base, points: data.points || [],
+      x: data.offsetX||0, y: data.offsetY||0, closed: true, fill });
   } else if (data.type === 'rect') {
     const rw = data.w||10, rh = data.h||10;
     shape = new K.Rect({ ...base, x:data.x||0, y:data.y||0,

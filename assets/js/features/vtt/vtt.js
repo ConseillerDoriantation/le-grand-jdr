@@ -381,8 +381,15 @@ let _drawOrigin   = null;    // point de départ pour formes
 let _drawLive     = null;    // forme Konva live (avant sauvegarde)
 let _drawColor    = '#ef4444';
 let _drawWidth    = 2;
-let _drawShape    = 'pencil'; // 'pencil'|'line'|'rect'|'circle'
+let _drawShape    = 'pencil'; // 'pencil'|'line'|'rect'|'circle'|'poly'|'eraser'
 let _drawFill     = false;
+// Polygone (tracé sommet par sommet) : clic = pose un sommet, double-clic / clic sur
+// le 1er point = ferme. État séparé du drag (pas de _drawing : multi-clics).
+let _polyPts      = [];      // sommets posés [x,y,…] (world coords)
+let _polyLive     = null;    // ligne Konva fermée (aperçu)
+let _polyActive   = false;   // tracé polygone en cours
+// Types d'annotation « à points » (position via offsetX/Y, pas x/y centre).
+const _ANNOT_PTS_TYPES = new Set(['freehand', 'line', 'polygon']);
 // [état règle (_rulerActive/_rulerOrigin/_rulerHideTimer/…) → vtt-ruler.js]
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -697,6 +704,7 @@ function _cleanup() {
   _moveHL = []; _renderedPings.clear(); _renderedReactions.clear();
   VS.selectedMulti.clear(); _multiDragOrigin = null;
   _annotations = {}; _drawing = false; _drawLive = null; _drawHistory = [];
+  _polyPts = []; _polyLive = null; _polyActive = false;
   _selectedAnnotId = null; _selectedAnnotIds.clear(); _annotTransformer = null;
   _annotGroupDragOrigins = null;
   _marqueeActive = false; _marqueeOrigin = null; _marqueeLastWp = null;
@@ -902,6 +910,7 @@ function _initCanvas(container) {
       if (VS.tool === 'draw') {
         if (_pingTimer) { clearTimeout(_pingTimer); _pingTimer = null; }
         if (_drawShape === 'eraser') { _erasing = true; _eraseAtPointer(); return; }
+        if (_drawShape === 'poly') { _polyClick(_stageToWorld(np)); return; }
         _startDraw(_stageToWorld(np));
         return;
       }
@@ -931,6 +940,7 @@ function _initCanvas(container) {
     if (VS.tool === 'ruler' && rulerActive())     _updateRuler(wp);
     else if (VS.tool === 'ruler')                 _showRulerHover(wp);
     if (VS.tool === 'draw'  && _drawShape === 'eraser' && _erasing && !_pan) _eraseAtPointer();
+    else if (VS.tool === 'draw' && _drawShape === 'poly' && _polyActive && !_pan) _polyHover(wp);
     else if (VS.tool === 'draw' && _drawing && !_pan) _updateDraw(wp);
     if (_zoneCtx) _zoneUpdatePreview(wp);
   });
@@ -950,7 +960,13 @@ function _initCanvas(container) {
       ? Math.hypot(e.evt.clientX - _rightStageDown.x, e.evt.clientY - _rightStageDown.y) > 6
       : false;
     _rightStageDown = null;
-    if (!moved) { _deselect(); _deselectAnnot(); }
+    if (moved) return;                 // clic droit glissé = pan caméra
+    if (_polyActive) { _polyUndoPoint(); return; } // polygone en cours → retirer le dernier sommet
+    _deselect(); _deselectAnnot();
+  });
+  // Double-clic : ferme le polygone en cours.
+  VS.stage.on('dblclick dbltap', () => {
+    if (VS.tool === 'draw' && _drawShape === 'poly' && _polyActive) _polyFinish();
   });
   VS.stage.on('click', e => {
     if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
@@ -6393,10 +6409,11 @@ function _buildAnnotShape(K, data) {
         if (!s || !ann) continue;
         // Marquer skip rebuild pour éviter le saut visuel au retour onSnapshot
         _skipAnnotRebuild.add(id);
-        const update = (ann.type === 'freehand' || ann.type === 'line')
+        const isPts = _ANNOT_PTS_TYPES.has(ann.type);
+        const update = isPts
           ? { offsetX: s.x(), offsetY: s.y() }
           : { x: s.x(), y: s.y() };
-        if (ann.type !== 'freehand' && ann.type !== 'line') {
+        if (!isPts) {
           ann.x = s.x(); ann.y = s.y();
         }
         updateDoc(_annotRef(id), update).catch(() => {});
@@ -6605,6 +6622,72 @@ async function _endDraw() {
     console.error('[VTT] Annotation save error:', err?.code, err?.message);
     showNotif('Erreur sauvegarde annotation — vérifiez les règles Firestore', 'error');
     // Garder liveCopy visible temporairement (non persistée)
+  }
+  VS.layers.draw.batchDraw();
+}
+
+// ── Polygone (sommet par sommet : triangles & formes libres) ───────────────
+function _polyEnsureLive() {
+  if (_polyLive) return;
+  const K = window.Konva;
+  _polyLive = new K.Line({ stroke:_drawColor, strokeWidth:_drawWidth, lineCap:'round', lineJoin:'round',
+    listening:false, name:'draw-live', points:[], closed:true,
+    fill: _drawFill ? _drawColor+'30' : 'transparent' });
+  VS.layers.draw.add(_polyLive);
+}
+// Clic : pose un sommet (ou ferme si on clique près du premier).
+function _polyClick(wp) {
+  _polyEnsureLive();
+  const scale = VS.stage.scaleX() || 1;
+  // Fermeture : clic à proximité du 1er sommet (et au moins un triangle posé).
+  if (_polyPts.length >= 6) {
+    if (Math.hypot(wp.x - _polyPts[0], wp.y - _polyPts[1]) < 12 / scale) { _polyFinish(); return; }
+  }
+  // Dé-doublonne les sommets quasi-confondus (ex. les 2 clics d'un double-clic).
+  if (_polyPts.length >= 2) {
+    const lx = _polyPts[_polyPts.length - 2], ly = _polyPts[_polyPts.length - 1];
+    if (Math.hypot(wp.x - lx, wp.y - ly) < 3 / scale) return;
+  }
+  _polyPts.push(wp.x, wp.y);
+  _polyActive = true;
+  _polyLive.points([..._polyPts]);
+  VS.layers.draw.batchDraw();
+}
+// Survol : aperçu du segment courant vers le curseur.
+function _polyHover(wp) {
+  if (!_polyActive || !_polyLive) return;
+  _polyLive.points([..._polyPts, wp.x, wp.y]);
+  VS.layers.draw.batchDraw();
+}
+// Annule le tracé en cours (Échap, changement d'outil…).
+function _polyCancel() {
+  _polyLive?.destroy();
+  _polyLive = null; _polyPts = []; _polyActive = false;
+  VS.layers.draw?.batchDraw();
+}
+// Retire le dernier sommet posé (clic droit).
+function _polyUndoPoint() {
+  if (!_polyActive) return;
+  _polyPts.splice(-2, 2);
+  if (!_polyPts.length) { _polyCancel(); return; }
+  _polyLive.points([..._polyPts]);
+  VS.layers.draw.batchDraw();
+}
+// Termine et persiste le polygone (double-clic, Entrée, clic sur 1er sommet).
+async function _polyFinish() {
+  const pts = [..._polyPts];
+  _polyCancel();
+  if (pts.length < 6 || !VS.activePage) return;   // < 3 sommets = pas un polygone
+  const data = { type:'polygon', points:pts, offsetX:0, offsetY:0, fill:_drawFill,
+    pageId:VS.activePage.id, color:_drawColor, strokeWidth:_drawWidth,
+    createdBy: STATE.user?.uid||null, createdAt: serverTimestamp() };
+  const id = 'a' + Date.now() + Math.random().toString(36).slice(2,5);
+  try {
+    await setDoc(_annotRef(id), data);
+    _drawHistory.push(id);   // permet Ctrl+Z
+  } catch(err) {
+    console.error('[VTT] Annotation save error:', err?.code, err?.message);
+    showNotif('Erreur sauvegarde annotation — vérifiez les règles Firestore', 'error');
   }
   VS.layers.draw.batchDraw();
 }
@@ -7085,8 +7168,9 @@ function _vttBstNotes(beastId, val) {
 
 // ── Outils de dessin ────────────────────────────────────────────────
 function _vttDrawShape(shape) {
+  _polyCancel();   // abandonne un polygone en cours si on change d'outil de dessin
   _drawShape = shape;
-  ['pencil','line','rect','circle','eraser'].forEach(s => {
+  ['pencil','line','rect','circle','poly','eraser'].forEach(s => {
     document.getElementById(`vtt-ds-${s}`)?.classList.toggle('active', s === shape);
   });
   // La gomme a besoin que les annotations soient « écoutables » pour le hit-test ;
@@ -8253,6 +8337,8 @@ function _setTool(tool) {
   else if (VS.activePage) fogRenderWalls(VS.activePage, STATE.isAdmin); // quitter édition → redraw normal
   // Règle : effacer si on quitte
   if (tool !== 'ruler') { _clearRuler(); _hideRulerHover(); }
+  // Polygone : abandonner un tracé en cours si on quitte le dessin
+  if (tool !== 'draw') _polyCancel();
   // Désélection annotation si on quitte le mode select
   if (tool !== 'select') _deselectAnnot();
   // Draggability des annotations
@@ -8301,7 +8387,7 @@ async function _vttPasteClipboard() {
   for (const a of annots) {
     const { id: _oid, createdAt: _ca, ...base } = a;
     const data = { ...base, pageId: pg.id, createdBy: STATE.user?.uid || null, createdAt: serverTimestamp() };
-    if (data.type === 'line' || data.type === 'freehand') {
+    if (_ANNOT_PTS_TYPES.has(data.type)) {
       data.offsetX = (data.offsetX || 0) + D; data.offsetY = (data.offsetY || 0) + D;
     } else {
       data.x = (data.x || 0) + D; data.y = (data.y || 0) + D;
@@ -8369,6 +8455,8 @@ function _keyHandler(e) {
     if (_vttEscapeCloseFloaters()) { e.preventDefault(); if (typeof e.target.blur === 'function') e.target.blur(); return; }
     // d) Focus dans un champ de saisie hors panneau (chat, notes…) → on se contente de blur.
     if (e.target.matches('input,textarea,select')) { e.target.blur(); return; }
+    // d-bis) Polygone en cours → annuler le tracé (sans quitter l'outil dessin).
+    if (_polyActive) { _polyCancel(); e.preventDefault(); return; }
     // e) Outil ≠ sélection → revenir à l'outil sélection.
     if (VS.tool !== 'select') { _setTool('select'); e.preventDefault(); return; }
     // f) Désélectionner tokens ET dessins.
@@ -8380,6 +8468,8 @@ function _keyHandler(e) {
 
   // Autres raccourcis : ignorés quand la frappe vise un champ de saisie.
   if (e.target.matches('input,textarea,select')) return;
+  // Entrée : ferme le polygone en cours.
+  if (e.key === 'Enter' && _polyActive) { e.preventDefault(); _polyFinish(); return; }
   // Ctrl+C / Ctrl+V : copier / coller la sélection (tokens + dessins)
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
     if (_vttCopySelection()) e.preventDefault();
@@ -8645,6 +8735,7 @@ async function _vttMountTable(content) {
           <button class="vtt-draw-btn"        id="vtt-ds-line"    data-vtt-fn="_vttDrawShape" data-vtt-args="line"    title="Ligne">╱</button>
           <button class="vtt-draw-btn"        id="vtt-ds-rect"    data-vtt-fn="_vttDrawShape" data-vtt-args="rect"    title="Rectangle">⬜</button>
           <button class="vtt-draw-btn"        id="vtt-ds-circle"  data-vtt-fn="_vttDrawShape" data-vtt-args="circle"  title="Cercle">⬭</button>
+          <button class="vtt-draw-btn"        id="vtt-ds-poly"    data-vtt-fn="_vttDrawShape" data-vtt-args="poly"    title="Polygone (triangle, etc.) — un clic par sommet · double-clic ou clic sur le 1er point pour fermer · clic droit annule le dernier sommet · Échap annule">△</button>
           <button class="vtt-draw-btn"        id="vtt-ds-eraser"  data-vtt-fn="_vttDrawShape" data-vtt-args="eraser"  title="Gomme — passe sur un tracé pour l'effacer">🧽</button>
         </div>
       </div>
