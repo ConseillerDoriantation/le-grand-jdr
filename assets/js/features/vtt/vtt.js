@@ -1177,8 +1177,10 @@ function _buildShape(t) {
     }
     _clearMultiSelect();
 
-    // Mode zone AoE actif → le clic verrouille / déverrouille le placement
-    if (_zoneCtx && t.id !== _zoneCtx.srcId) {
+    // Mode zone AoE actif → le clic verrouille / déverrouille le placement.
+    // Aucun token n'est sélectionnable ici, lanceur compris : sinon cliquer sur
+    // le lanceur tombait dans le `else` final et rouvrait le HUD d'action.
+    if (_zoneCtx) {
       _zoneCtx.placed = !_zoneCtx.placed;
       return;
     }
