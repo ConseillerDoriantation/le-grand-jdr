@@ -3618,6 +3618,99 @@ function _captureUndoSnapshot(srcId, targetIds) {
 // l'annulation MJ d'une invocation supprime les tokens créés).
 let _summonSpawnIds = [];
 
+// ── Pills d'une action/sort (SOURCE UNIQUE) ──────────────────────────────────
+// Partagé par les cartes du picker (_optBtn) ET la modale de confirmation, pour
+// que les deux affichent EXACTEMENT la même info (portée, zone/cibles, effet, JS…).
+const _vttAoptPill = (cls, html) => `<span class="vtt-aopt-pill ${cls}">${html}</span>`;
+function _vttSpellPills(o) {
+  const pills = [];
+  const targetSelf = !!o.targetSelf;
+  const isHeal = !!o.isHeal;
+  const isUtil = !!(o.isCaSort || o.isUtil);
+  const isEnchant = !!o.isEnchant;
+  if (o.actionType === 'bonus')         pills.push(_vttAoptPill('action-bonus', `💫 Action Bonus`));
+  else if (o.actionType === 'reaction') pills.push(_vttAoptPill('action-reaction', `⚡ Réaction`));
+  if (!targetSelf) pills.push(_vttAoptPill('range', `🎯 ${o.portee}c`));
+  const isFriendly = isEnchant || isHeal || o.isRegen || o.friendlyOnly;
+  const isHostile  = !!o.isAffliction;
+  if (targetSelf) {
+    pills.push(_vttAoptPill('targets self', `🧍 Sur soi`));
+  } else if (o.zoneW > 0 || o.zoneH > 0) {
+    pills.push(_vttAoptPill('zone', `📐 ${o.zoneW||o.zoneH}×${o.zoneH||o.zoneW}c`));
+  } else if ((o.nbCibles || 1) > 1) {
+    const lbl = isFriendly ? 'alliés' : isHostile ? 'ennemis' : 'cibles';
+    pills.push(_vttAoptPill('targets', `👥 ${o.nbCibles} ${lbl}`));
+  } else if (isFriendly) {
+    pills.push(_vttAoptPill('targets single', `🤝 1 allié`));
+  } else if (isHostile) {
+    pills.push(_vttAoptPill('targets single', `💢 1 ennemi`));
+  } else {
+    pills.push(_vttAoptPill('targets single', `🎯 1 cible`));
+  }
+  // Effet principal (dégâts / soin / enchant / affliction / utilitaire)
+  if (isEnchant) {
+    const elemIcon = o.enchantElementIcon || '🪄';
+    const elemCol  = o.enchantElementColor || '#a78bfa';
+    if (o.enchantMode === 'etat' && o.enchantEtatId) {
+      const lib = CONDITION_BY_ID[o.enchantEtatId];
+      const lbl = lib ? `${lib.icon} ${lib.label} sur allié` : '✨ État sur allié';
+      pills.push(`<span class="vtt-aopt-pill enchant" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${lbl}</span>`);
+    } else if (o.enchantMode === 'toucher') {
+      const b = o.mods?.enchantToucher?.bonus;
+      pills.push(`<span class="vtt-aopt-pill enchant" style="color:#e8b84b;border-color:#e8b84b66;background:#e8b84b1a">🎯 +${b ?? '?'} au toucher / allié</span>`);
+    } else if (o.enchantMode === 'deplacement') {
+      const b = o.mods?.enchantMove?.bonusCells;
+      pills.push(`<span class="vtt-aopt-pill enchant" style="color:#22c55e;border-color:#22c55e66;background:#22c55e1a">👢 +${b ?? '?'} case${b > 1 ? 's' : ''} de déplacement / allié</span>`);
+    } else {
+      const enchFormula = _effectDisplay(o, o.enchantFormula || '1d4+2');
+      pills.push(`<span class="vtt-aopt-pill enchant" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${elemIcon} +${_esc(enchFormula)} / arme alliée</span>`);
+    }
+  } else if (o.isRegen) {
+    pills.push(`<span class="vtt-aopt-pill heal" style="color:#22c38e;border-color:#22c38e66;background:#22c38e1a">💚 ${_esc(_effectDisplay(o, o.dice || '2d4/tour'))}</span>`);
+  } else if (o.isAffliction) {
+    const elemIcon = o.afflictionElementIcon || '💀';
+    const elemCol  = o.afflictionElementColor || '#ef4444';
+    if (o.afflictionMode === 'etat' && o.afflictionEtatId) {
+      const lib = CONDITION_BY_ID[o.afflictionEtatId];
+      const lbl = lib ? `${lib.icon} ${lib.label}` : '⛓ État';
+      pills.push(`<span class="vtt-aopt-pill" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${lbl}</span>`);
+    } else {
+      pills.push(`<span class="vtt-aopt-pill" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${elemIcon} ${_esc(_effectDisplay(o, o.afflictionDotFormula || '1d4'))} / tour</span>`);
+    }
+    const statLbl = (_STAT_SHORT[o.afflictionSaveStat] || o.afflictionSaveStat || '').toUpperCase();
+    pills.push(_vttAoptPill('save', `🛡 JS ${statLbl} DD ${o.afflictionDD}`));
+  } else if (isUtil) {
+    const effetTxt = _effectDisplay(o, o.dice || '').trim();
+    pills.push(_vttAoptPill('util', `🔧 ${effetTxt ? _esc(effetTxt) : 'Utilitaire'}`));
+  } else if (o.rawDice || o.dice) {
+    const formula = o.rawDice || o.dice;
+    const displayFormula = _effectDisplay(o, formula, _optionFixedBonus(o));
+    pills.push(_vttAoptPill(isHeal ? 'heal' : 'dmg', `${isHeal ? '🩹' : '🎲'} ${isHeal ? '+' : ''}${_esc(displayFormula)}${isHeal ? ' PV' : ''}`));
+  }
+  // Stat utilisée (provenance du +X)
+  if (o.dmgStatLabel && (o.dmgStatMod !== undefined && o.dmgStatMod !== null)) {
+    const m = o.dmgStatMod;
+    const modStr = m > 0 ? `+${m}` : m < 0 ? `${m}` : '±0';
+    pills.push(_vttAoptPill('stat', `📊 ${_esc(o.dmgStatLabel)} ${modStr}`));
+  }
+  if (o.traits?.length) {
+    pills.push(`<span class="vtt-aopt-pill traits">${o.traits.slice(0,2).map(_esc).join(' · ')}</span>`);
+  }
+  return pills;
+}
+// Chips de runes du sort (lecture seule), comme sur la carte de la fiche perso.
+function _vttSpellRuneChips(o, srcChar) {
+  if (o.sortIdx === undefined || !srcChar?.deck_sorts) return '';
+  const _s = srcChar.deck_sorts[o.sortIdx];
+  const _runes = _vttDisplayRunes(_s?.runes || []);
+  if (!_runes.length) return '';
+  const _counts = {}; _runes.forEach(r => { _counts[r] = (_counts[r]||0)+1; });
+  return `<div class="cs-spellcard-runes">${Object.entries(_counts).map(([nom, n]) => {
+    const m = _VTT_RUNE_META[nom] || { icon:'•', color:'#888' };
+    return `<span class="cs-runechip" style="--c:${m.color}" title="${_esc(nom)}">${m.icon} ${_esc(nom)}${n>1?` ×${n}`:''}</span>`;
+  }).join('')}</div>`;
+}
+
 async function _execAttack(srcId, tgtId, exOpts = {}) {
   const only  = exOpts.only || null;
   const noTgt = tgtId == null;
@@ -3696,22 +3789,8 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
                        ? `<span class="vtt-aopt-stack">×${o._itemAction.stackCount}</span>` : '';
     const desc     = (o.actionDescription || '').trim();
 
-    // Pills principales
-    const pills = [];
-    const targetSelf = !!o.targetSelf;
-    const isEnchant  = !!o.isEnchant;
-
-    // ── Type d'action en PREMIER (visible d'un coup d'œil) ─────────────
-    if (o.actionType === 'bonus') {
-      pills.push(_pill('action-bonus', `💫 Action Bonus`));
-    } else if (o.actionType === 'reaction') {
-      pills.push(_pill('action-reaction', `⚡ Réaction`));
-    }
     // ── Coût en PM : badge dédié à DROITE du titre (pas en pill) ──────
-    // Construit ici, injecté dans .vtt-aopt-head pour qu'il soit la 1re info
-    // visible avec le nom du sort, sans noyer les pills techniques.
     let pmBadge = '';
-    // Indicateur set léger : delta négatif → coût réduit visible sur le badge
     const _setReduc = o.pmSetDelta && o.pmSetDelta < 0;
     const _setExtra = _setReduc
       ? `<span class="vtt-aopt-pm-set" title="Set léger : −${-o.pmSetDelta} PM (coût brut ${o.pmRaw})">🍃 −${-o.pmSetDelta}</span>`
@@ -3724,80 +3803,8 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       pmBadge = `<span class="vtt-aopt-pm ${_setReduc?'vtt-aopt-pm--reduced':''}">🔮 ${o.basePm} PM${_setExtra}</span>`;
     }
 
-    // Portée — si "soi-même", on n'affiche pas la portée (sans objet)
-    if (!targetSelf) pills.push(_pill('range', `🎯 ${o.portee}c`));
-    // Cible / zone / soi / allié / ennemi (selon le type de sort)
-    const isFriendly = isEnchant || isHeal || o.isRegen || o.friendlyOnly; // alliés
-    const isHostile  = !!o.isAffliction;             // ennemis explicites
-    if (targetSelf) {
-      pills.push(_pill('targets self', `🧍 Sur soi`));
-    } else if (o.zoneW > 0 || o.zoneH > 0) {
-      pills.push(_pill('zone', `📐 ${o.zoneW||o.zoneH}×${o.zoneH||o.zoneW}c`));
-    } else if ((o.nbCibles || 1) > 1) {
-      const lbl = isFriendly ? 'alliés' : isHostile ? 'ennemis' : 'cibles';
-      pills.push(_pill('targets', `👥 ${o.nbCibles} ${lbl}`));
-    } else if (isFriendly) {
-      pills.push(_pill('targets single', `🤝 1 allié`));
-    } else if (isHostile) {
-      pills.push(_pill('targets single', `💢 1 ennemi`));
-    } else {
-      pills.push(_pill('targets single', `🎯 1 cible`));
-    }
-    // Effet principal de l'option (dégâts / soin / enchant / affliction / utilitaire)
-    if (isEnchant) {
-      // Sort d'enchantement : pas de dégâts d'impact, juste un buff/état sur l'allié
-      const elemIcon = o.enchantElementIcon || '🪄';
-      const elemCol  = o.enchantElementColor || '#a78bfa';
-      if (o.enchantMode === 'etat' && o.enchantEtatId) {
-        const lib = CONDITION_BY_ID[o.enchantEtatId];
-        const lbl = lib ? `${lib.icon} ${lib.label} sur allié` : '✨ État sur allié';
-        pills.push(`<span class="vtt-aopt-pill enchant" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${lbl}</span>`);
-      } else if (o.enchantMode === 'toucher') {
-        const b = o.mods?.enchantToucher?.bonus;
-        pills.push(`<span class="vtt-aopt-pill enchant" style="color:#e8b84b;border-color:#e8b84b66;background:#e8b84b1a">🎯 +${b ?? '?'} au toucher / allié</span>`);
-      } else if (o.enchantMode === 'deplacement') {
-        const b = o.mods?.enchantMove?.bonusCells;
-        pills.push(`<span class="vtt-aopt-pill enchant" style="color:#22c55e;border-color:#22c55e66;background:#22c55e1a">👢 +${b ?? '?'} case${b > 1 ? 's' : ''} de déplacement / allié</span>`);
-      } else {
-        const enchFormula = _effectDisplay(o, o.enchantFormula || '1d4+2');
-        pills.push(`<span class="vtt-aopt-pill enchant" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${elemIcon} +${_esc(enchFormula)} / arme alliée</span>`);
-      }
-    } else if (o.isRegen) {
-      pills.push(`<span class="vtt-aopt-pill heal" style="color:#22c38e;border-color:#22c38e66;background:#22c38e1a">💚 ${_esc(_effectDisplay(o, o.dice || '2d4/tour'))}</span>`);
-    } else if (o.isAffliction) {
-      // Sort d'affliction : pas de dégâts d'impact, JS de la cible → DoT ou État
-      const elemIcon = o.afflictionElementIcon || '💀';
-      const elemCol  = o.afflictionElementColor || '#ef4444';
-      if (o.afflictionMode === 'etat' && o.afflictionEtatId) {
-        const lib = CONDITION_BY_ID[o.afflictionEtatId];
-        const lbl = lib ? `${lib.icon} ${lib.label}` : '⛓ État';
-        pills.push(`<span class="vtt-aopt-pill" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${lbl}</span>`);
-      } else {
-        pills.push(`<span class="vtt-aopt-pill" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${elemIcon} ${_esc(_effectDisplay(o, o.afflictionDotFormula || '1d4'))} / tour</span>`);
-      }
-      // Pill séparé pour le JS de sauvegarde
-      const statLbl = (_STAT_SHORT[o.afflictionSaveStat] || o.afflictionSaveStat || '').toUpperCase();
-      pills.push(_pill('save', `🛡 JS ${statLbl} DD ${o.afflictionDD}`));
-    } else if (isUtil) {
-      // Sort utilitaire : pas de damage pill, juste un résumé de l'effet
-      const effetTxt = _effectDisplay(o, o.dice || '').trim();
-      pills.push(_pill('util', `🔧 ${effetTxt ? _esc(effetTxt) : 'Utilitaire'}`));
-    } else if (o.rawDice || o.dice) {
-      const formula = o.rawDice || o.dice;
-      const displayFormula = _effectDisplay(o, formula, _optionFixedBonus(o));
-      pills.push(_pill(isHeal ? 'heal' : 'dmg', `${isHeal ? '🩹' : '🎲'} ${isHeal ? '+' : ''}${_esc(displayFormula)}${isHeal ? ' PV' : ''}`));
-    }
-
-    // Pill explicite de la stat utilisée (pour comprendre d'où vient le +X)
-    if (o.dmgStatLabel && (o.dmgStatMod !== undefined && o.dmgStatMod !== null)) {
-      const m = o.dmgStatMod;
-      const modStr = m > 0 ? `+${m}` : m < 0 ? `${m}` : '±0';
-      pills.push(_pill('stat', `📊 ${_esc(o.dmgStatLabel)} ${modStr}`));
-    }
-    // Traits courts
-    if (o.traits?.length) {
-      pills.push(`<span class="vtt-aopt-pill traits">${o.traits.slice(0,2).map(_esc).join(' · ')}</span>`);
-    }
+    // Pills (portée, zone/cibles, effet, JS, stat, traits) — source unique partagée.
+    const pills = _vttSpellPills(o);
 
     // ── Couleur d'accent + pastille d'élément (langage visuel des cartes de sort) ──
     const accentCol = o.isHeal ? '#22c55e'
@@ -3821,18 +3828,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
         : `<span class="cs-spellcard-act" style="--c:#e8b84b">⚡ Act.</span>`;
 
     // Runes du sort (chips lecture seule) — comme sur la carte de la fiche perso.
-    let runeChipsHtml = '';
-    if (o.sortIdx !== undefined && srcChar?.deck_sorts) {
-      const _s = srcChar.deck_sorts[o.sortIdx];
-      const _runes = _vttDisplayRunes(_s?.runes || []);
-      if (_runes.length) {
-        const _counts = {}; _runes.forEach(r => { _counts[r] = (_counts[r]||0)+1; });
-        runeChipsHtml = `<div class="cs-spellcard-runes">${Object.entries(_counts).map(([nom, n]) => {
-          const m = _VTT_RUNE_META[nom] || { icon:'•', color:'#888' };
-          return `<span class="cs-runechip" style="--c:${m.color}" title="${_esc(nom)}">${m.icon} ${_esc(nom)}${n>1?` ×${n}`:''}</span>`;
-        }).join('')}</div>`;
-      }
-    }
+    const runeChipsHtml = _vttSpellRuneChips(o, srcChar);
 
     // Carte d'action — présentation identique aux cartes de sort de la fiche perso
     // (.cs-spellcard, scope .cs-v3), cliquable pour lancer.
@@ -4199,6 +4195,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
   const src=VS.tokens[srcId]?.data, tgt=VS.tokens[tgtId]?.data;
   if (!src||!tgt) return;
   const lS=_live(src), lT=_live(tgt);
+  const srcChar = _characterForToken(src);   // pour les chips de runes (cohérence carte ↔ modale)
   // Si on arrive d'une validation multi-cibles, stocker les cibles dans le contexte
   const allTargets = _mtPending && _mtPending.length > 0 ? [..._mtPending] : null;
   _mtPending = null;
@@ -4435,6 +4432,12 @@ function _vttPickOpt(srcId, tgtId, idx) {
             background:rgba(79,140,255,.12);border:1px solid rgba(79,140,255,.3);color:#4f8cff">${_esc(nm)}</span>`;
         }).join('')}
       </div>` : ''}
+
+      <!-- Pills + runes IDENTIQUES à la carte d'action (source unique _vttSpellPills) -->
+      <div class="cs-v3 vtt-atk-pills" style="display:flex;flex-direction:column;gap:.4rem;margin-bottom:.85rem">
+        ${(() => { const p = _vttSpellPills(opt); return p.length ? `<div class="cs-spellcard-tags">${p.join('')}</div>` : ''; })()}
+        ${_vttSpellRuneChips(opt, srcChar)}
+      </div>
 
       ${elemSelectorHtml}
 
