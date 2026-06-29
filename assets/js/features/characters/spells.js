@@ -1689,6 +1689,12 @@ export async function openSortModal(idx, s) {
       modal.addEventListener('change', (event) => {
         if (event.target?.id === 's-enchant-etat') _refreshEnchantStateTuning();
       });
+      // Emoji perso : Entrée dans le champ applique l'emoji saisi.
+      modal.addEventListener('keydown', (event) => {
+        if (event.target?.id === 's-icon-custom' && event.key === 'Enter') {
+          event.preventDefault(); _applyCustomSortIcon();
+        }
+      });
     }
     // Populate les listes déroulantes d'état (affliction + enchantement).
     // Au chargement initial, le dropdown n'a que l'option "— Aucun —" : la valeur
@@ -2708,15 +2714,30 @@ function _toggleSortIconPicker() {
   const picker = document.getElementById('s-icon-picker');
   if (!picker) return;
   if (picker.style.display !== 'none') { picker.style.display = 'none'; return; }
-  // Génère la grille à l'ouverture (au cas où la sélection courante a changé)
+  // Génère le contenu à l'ouverture (au cas où la sélection courante a changé)
   const current = document.getElementById('s-icon')?.value || '';
-  picker.innerHTML = SPELL_ICONS.map(ic => {
+  const grid = [...new Set(SPELL_ICONS)].map(ic => {
     const sel = ic === current ? ' is-selected' : '';
     return `<button type="button" class="cs-spell-icon-opt${sel}"
       data-action="_pickSortIcon" data-icon="${_esc(ic)}">${ic}</button>`;
   }).join('') + `<button type="button" class="cs-spell-icon-opt cs-spell-icon-opt--clear"
       data-action="_pickSortIcon" data-icon="" title="Aucune icône — utilise celle du noyau">✕</button>`;
-  picker.style.display = 'grid';
+  // Zone "emoji perso" collante : champ libre pour n'importe quel emoji.
+  picker.innerHTML = `
+    <div class="cs-spell-icon-custom">
+      <input type="text" id="s-icon-custom" class="cs-spell-icon-custom-input"
+        placeholder="Emoji perso… (ex : 🦄)" maxlength="8" value="${_esc(current)}">
+      <button type="button" class="cs-spell-icon-custom-ok" data-action="_applyCustomSortIcon" title="Utiliser cet emoji">OK</button>
+    </div>
+    <div class="cs-spell-icon-grid">${grid}</div>`;
+  picker.style.display = 'block';
+}
+
+// Applique l'emoji libre saisi (champ "emoji perso"). Accepte tout caractère/emoji.
+function _applyCustomSortIcon() {
+  const v = (document.getElementById('s-icon-custom')?.value || '').trim();
+  if (!v) return;
+  _pickSortIcon(v);
 }
 
 function _pickSortIcon(icon) {
@@ -3341,6 +3362,7 @@ registerActions({
   _selectEnchantMode:     (btn) => _selectEnchantMode(btn.dataset.val),
   _selectAfflictionMode:  (btn) => _selectAfflictionMode(btn.dataset.val),
   _toggleSortIconPicker:  ()    => _toggleSortIconPicker(),
+  _applyCustomSortIcon:   ()    => _applyCustomSortIcon(),
   _pickSortIcon:          (btn) => _pickSortIcon(btn.dataset.icon),
   _pickSpellSuggestion:   (btn) => _pickSpellSuggestion(btn.dataset.cat, btn.dataset.encoded),
   _invPickImage:          ()    => _invPickImage(),
