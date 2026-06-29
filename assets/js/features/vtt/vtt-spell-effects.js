@@ -26,33 +26,34 @@ import {
 export async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
   const shared = _buffShared(opt, srcId);
 
-  // Mode "État" : applique directement un état choisi à chaque allié ciblé.
-  // Pas de JS (effet bénéfique consenti). Durée selon defaultDuration de l'état.
-  const etatId = opt.mods?.enchantEtatId;
-  if (etatId && CONDITION_BY_ID[etatId]) {
-    const lib = CONDITION_BY_ID[etatId];
+  // Mode "État" : applique 1..N états choisis (1 par rune Enchantement) à chaque
+  // allié ciblé. Pas de JS (effet bénéfique consenti). Le 1er état garde ses
+  // réglages fins ; tous sont modulés par Puissance/Amplification (global).
+  const etatIds = (opt.mods?.enchantEtatIds?.length
+    ? opt.mods.enchantEtatIds
+    : (opt.mods?.enchantEtatId ? [opt.mods.enchantEtatId] : []))
+    .filter(id => id && CONDITION_BY_ID[id]);
+  if (etatIds.length) {
     const round = VS.session?.combat?.round ?? 0;
-    const isConsumed = !!lib.effects?.consumedByAttackAgainst;
-    const dur = opt.mods?.concentration ? 10 : (
-      Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
-        ? lib.defaultDuration : 2
-    );
-    const expiresAtRound = (round > 0 && !isConsumed && dur > 0) ? round + dur - 1 : null;
-    const pendingDuration = (round === 0 && !isConsumed && dur > 0) ? dur : null;
-    const scaledFields = _scaledEnchantConditionFields(
-      lib,
-      opt.mods?.enchantStatePower || 0,
-      opt.mods?.enchantStateAmplification || 0,
-      {
-        movementBonus: opt.mods?.enchantStateMoveBonus,
-        dmgFormula: opt.mods?.enchantStateDmgFormula,
-      }
-    );
-    for (const tid of targetIds) {
-      const td = VS.tokens[tid]?.data; if (!td) continue;
-      const existingConds = (td.conditions || []).filter(c => c.source !== opt.label);
-      if (existingConds.some(c => c.id === etatId)) continue;
-      const newCond = {
+    // Construit la condition pour un état donné (idx 0 = réglages fins manuels).
+    const buildCond = (etatId, idx) => {
+      const lib = CONDITION_BY_ID[etatId];
+      const isConsumed = !!lib.effects?.consumedByAttackAgainst;
+      const dur = opt.mods?.concentration ? 10 : (
+        Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0 ? lib.defaultDuration : 2
+      );
+      const expiresAtRound = (round > 0 && !isConsumed && dur > 0) ? round + dur - 1 : null;
+      const pendingDuration = (round === 0 && !isConsumed && dur > 0) ? dur : null;
+      const scaledFields = _scaledEnchantConditionFields(
+        lib,
+        opt.mods?.enchantStatePower || 0,
+        opt.mods?.enchantStateAmplification || 0,
+        idx === 0 ? {
+          movementBonus: opt.mods?.enchantStateMoveBonus,
+          dmgFormula: opt.mods?.enchantStateDmgFormula,
+        } : {}
+      );
+      return {
         id: etatId, appliedAt: Date.now(), appliedBy: srcId || null,
         source: opt.label || '',
         saveDC: lib.defaultSaveStat ? (lib.defaultDC || 11) : null,
@@ -61,9 +62,20 @@ export async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
         ...(pendingDuration != null ? { pendingDuration } : {}),
         ...scaledFields,
       };
-      await updateDoc(_tokRef(tid), { conditions: [...existingConds, newCond] }).catch(() => {});
+    };
+    for (const tid of targetIds) {
+      const td = VS.tokens[tid]?.data; if (!td) continue;
+      let conds = (td.conditions || []).filter(c => c.source !== opt.label);
+      const applied = [];
+      etatIds.forEach((etatId, idx) => {
+        if (conds.some(c => c.id === etatId)) return;   // pas de doublon d'état
+        conds = [...conds, buildCond(etatId, idx)];
+        applied.push(CONDITION_BY_ID[etatId]);
+      });
+      if (!applied.length) continue;
+      await updateDoc(_tokRef(tid), { conditions: conds }).catch(() => {});
       const name = _live(td).displayName ?? td.name;
-      showNotif(`${lib.icon} ${name} : ${lib.label}`, 'success');
+      showNotif(`${applied.map(l => l.icon).join('')} ${name} : ${applied.map(l => l.label).join(', ')}`, 'success');
     }
     return;
   }

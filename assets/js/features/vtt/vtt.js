@@ -2062,6 +2062,12 @@ function _vttSpellMods(s) {
     // Enchantement mode État : applique l'état choisi directement à l'allié
     enchantEtatId: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantMode === 'etat')
       ? (s.enchantEtatId || null) : null,
+    // Multi-états : 1 par rune Enchantement (le 1er garde ses réglages fins, les
+    // suivants sont auto-modulés par Puissance/Amplification). Limité à nbEnch.
+    enchantEtatIds: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantMode === 'etat')
+      ? ((Array.isArray(s.enchantEtatIds) && s.enchantEtatIds.length
+          ? s.enchantEtatIds : [s.enchantEtatId]).filter(Boolean).slice(0, nbEnch))
+      : [],
     enchantStatePower: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantMode === 'etat')
       ? nbP : 0,
     enchantStateAmplification: (nbEnch > 0 && nbInv === 0 && !isAllonge && s.enchantMode === 'etat')

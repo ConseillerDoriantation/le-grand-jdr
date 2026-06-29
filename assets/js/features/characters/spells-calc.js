@@ -1092,8 +1092,13 @@ export function _buildSortResume(s, c) {
     // Mode décisif : si État → état affiché (jamais dégâts) ; si Dégâts → dégâts (jamais état)
     if (mode === 'etat') {
       const lib = _conditionsLibCache || [];
-      const etat = s.enchantEtatId ? lib.find(c2 => c2.id === s.enchantEtatId) : null;
-      const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ Aucun état choisi';
+      const ids = (Array.isArray(s.enchantEtatIds) && s.enchantEtatIds.length)
+        ? s.enchantEtatIds : (s.enchantEtatId ? [s.enchantEtatId] : []);
+      const etats = ids.map(id => lib.find(c2 => c2.id === id)).filter(Boolean);
+      const etat = etats[0] || null;   // le 1er porte les réglages fins (dégâts/déplacement)
+      const lbl = etats.length
+        ? etats.map(e => `${e.icon || ''} ${e.label}`).join(' + ')
+        : '⚠ Aucun état choisi';
       const nbP = runes.filter(r => r === 'Puissance').length;
       const nbAmp = runes.filter(r => r === 'Amplification').length;
       const eff = etat?.effects || {};

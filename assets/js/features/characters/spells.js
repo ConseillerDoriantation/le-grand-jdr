@@ -29,6 +29,7 @@ let _sortTypesEdit = new Set(['utilitaire']);
 let _deplModeEdit = null;
 let _actionModeEdit = 'reaction';
 let _protModeEdit = 'ca';   // mode rune Protection en cours d'édition ('ca'|'soin') — source fiable (≠ DOM périmé)
+let _enchantExtraSavedEdit = [];   // états d'enchantement supplémentaires sauvegardés (slots 2..n)
 let _invImageEdit = '';      // image (dataUrl) de l'invocation en cours d'édition
 let _invActionsEdit = [];    // actions (mini-sorts) de l'invocation — éditées à l'étape C
 let _invCrop = null;         // instance du cropper pan/zoom inline de l'image d'invocation
@@ -493,11 +494,16 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   // ── 3. Enchantement : mode décide, JAMAIS de fallback dégâts en mode État ──
   if (hasEnchant && !isAllongeCombo && !activeIds.has('arme_invoquee')) {
     if (enchantMode === 'etat') {
-      const etat = s.enchantEtatId
-        ? _conditionsLibCache?.find(c2 => c2.id === s.enchantEtatId)
-        : null;
-      const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ État non défini';
-      chips.push({ icon:'✨', val: lbl, color:'#e8b84b' });
+      const ids = (Array.isArray(s.enchantEtatIds) && s.enchantEtatIds.length)
+        ? s.enchantEtatIds : (s.enchantEtatId ? [s.enchantEtatId] : []);
+      if (ids.length) {
+        ids.forEach(id => {
+          const etat = _conditionsLibCache?.find(c2 => c2.id === id);
+          chips.push({ icon:'✨', val: etat ? `${etat.icon || ''} ${etat.label}` : '⚠ État', color:'#e8b84b' });
+        });
+      } else {
+        chips.push({ icon:'✨', val: '⚠ État non défini', color:'#e8b84b' });
+      }
     } else if (enchantMode === 'toucher' || enchantMode === 'deplacement') {
       const nbP   = runesAll.filter(r => r === 'Puissance').length;
       const bonus = Number.isFinite(parseInt(s.enchantBonus)) ? parseInt(s.enchantBonus) : (2 + nbP);
@@ -1056,6 +1062,7 @@ export async function openSortModal(idx, s) {
   const runeCounts = {};
   _actionModeEdit = _spellActionMode(s);
   _protModeEdit = s?.protectionMode || 'ca';   // fixé depuis la donnée (pas le DOM périmé)
+  _enchantExtraSavedEdit = Array.isArray(s?.enchantEtatIds) ? s.enchantEtatIds.slice(1) : [];
   runesSrc.forEach(r => {
     const nom = (r === 'Réaction' || r === 'Action Bonus') ? ACTION_RUNE : r;
     runeCounts[nom] = (runeCounts[nom] || 0) + 1;
@@ -1409,6 +1416,9 @@ export async function openSortModal(idx, s) {
           </div>
         </div>
       </div>
+      <!-- États supplémentaires : 1 sélecteur par rune Enchantement en plus.
+           Chaque état est appliqué à l'allié, modulé par Puissance/Amplification/Durée. -->
+      <div id="s-enchant-extra-slots"></div>
     </div>
 
     <!-- Affliction — visible si rune Affliction > 0 -->
@@ -1687,6 +1697,7 @@ export async function openSortModal(idx, s) {
     Promise.all([
       _populateAfflictionEtatSelect(),
       _populateEnchantEtatSelect(),
+      _renderEnchantExtraSlots(),
     ]).then(() => {
       _refreshEnchantStateTuning();
       _updateSortPreview();
@@ -1731,6 +1742,41 @@ async function _populateConditionSelect(selectId, savedHiddenId, usage) {
 }
 
 function _populateEnchantEtatSelect()    { return _populateConditionSelect('s-enchant-etat', 's-enchant-etat-saved', 'enchantment'); }
+
+// États d'enchantement SUPPLÉMENTAIRES : 1 sélecteur par rune Enchantement en plus
+// du premier. Idempotent (ne reconstruit que si le nombre change → préserve les choix).
+async function _renderEnchantExtraSlots() {
+  const container = document.getElementById('s-enchant-extra-slots');
+  if (!container) return;
+  const needed = Math.max(0, (_runeCountsEdit?.Enchantement || 0) - 1);   // le 1er état = s-enchant-etat
+  const existing = container.querySelectorAll('select.s-enchant-extra').length;
+  if (existing === needed && container.dataset.rendered === '1') return;   // rien à refaire
+  const cur = [...container.querySelectorAll('select.s-enchant-extra')].map(s => s.value);
+  const saved = (i) => cur[i] ?? _enchantExtraSavedEdit[i] ?? '';
+  container.dataset.rendered = '1';
+  if (needed === 0) { container.innerHTML = ''; return; }
+  container.innerHTML = Array.from({ length: needed }, (_, i) => `
+    <div class="form-group" style="margin-top:.55rem">
+      <label>État supplémentaire ${i + 2} <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">— rune Enchantement n°${i + 2} · modulé par les runes</span></label>
+      <select class="input-field s-enchant-extra" id="s-enchant-etat-${i + 1}">
+        <option value="">— Aucun —</option>
+      </select>
+      <input type="hidden" id="s-enchant-etat-${i + 1}-saved" value="${_esc(saved(i))}">
+    </div>`).join('');
+  for (let i = 0; i < needed; i++) {
+    await _populateConditionSelect(`s-enchant-etat-${i + 1}`, `s-enchant-etat-${i + 1}-saved`, 'enchantment');
+  }
+}
+// Liste ordonnée des états d'enchantement choisis (1er + supplémentaires non vides).
+function _collectEnchantEtatIds() {
+  const ids = [];
+  const first = document.getElementById('s-enchant-etat')?.value || '';
+  if (first) ids.push(first);
+  document.querySelectorAll('#s-enchant-extra-slots select.s-enchant-extra').forEach(sel => {
+    if (sel.value) ids.push(sel.value);
+  });
+  return ids;
+}
 function _populateAfflictionEtatSelect() { return _populateConditionSelect('s-affliction-etat', 's-affliction-etat-saved', 'affliction'); }
 
 function _refreshEnchantStateTuning() {
@@ -1882,6 +1928,7 @@ function _refreshConditionalSections() {
   if (regenSec)  regenSec.style.display  = isRegen ? '' : 'none';
   if (allongeSec) allongeSec.style.display = isAllonge ? '' : 'none';
   if (enchantSec) enchantSec.style.display = (hasEnchant && !isAllonge) ? '' : 'none';
+  if (hasEnchant && !isAllonge) _renderEnchantExtraSlots();   // (re)génère 1 select par rune Enchantement en plus
   if (ampSec)     ampSec.style.display     = (hasAmp && !isAllonge) ? '' : 'none';
   const allongeRange = _ampLength(counts.Amplification || 0);
   const allongeRangeEl = document.getElementById('s-allonge-range');
@@ -2808,6 +2855,7 @@ function _buildSortFromDOM() {
     enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
     enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
     enchantEtatId:    document.getElementById('s-enchant-etat')?.value || null,
+    enchantEtatIds:   _collectEnchantEtatIds(),
     enchantStateMoveBonus: (() => { const v = document.getElementById('s-enchant-state-move-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
     enchantStateDmgFormula: document.getElementById('s-enchant-state-dmg-formula')?.value?.trim() || '',
     enchantSlot:      'arme', // legacy compat (preview live, sera écrasé à la save par la valeur en BDD)
@@ -2969,6 +3017,7 @@ function _sanitizeAbsorbedComboFields(s) {
     s.enchantDegats = '';
     s.enchantBonus = null;
     s.enchantEtatId = null;
+    s.enchantEtatIds = [];
     s.enchantStateMoveBonus = null;
     s.enchantStateDmgFormula = '';
     s.enchantEffect = '';
@@ -3069,6 +3118,7 @@ export async function saveSort(idx) {
       enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
     enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
       enchantEtatId:    document.getElementById('s-enchant-etat')?.value || null,
+    enchantEtatIds:   _collectEnchantEtatIds(),
       enchantStateMoveBonus: (() => { const v = document.getElementById('s-enchant-state-move-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
       enchantStateDmgFormula: document.getElementById('s-enchant-state-dmg-formula')?.value?.trim() || '',
       // enchantSlot legacy : conservé en BDD pour rétro-compat des combos, mais
@@ -3191,6 +3241,7 @@ function _buildSortFromForm(idx, prevList = []) {
     enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
     enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
     enchantEtatId:    document.getElementById('s-enchant-etat')?.value || null,
+    enchantEtatIds:   _collectEnchantEtatIds(),
     enchantStateMoveBonus: (() => { const v = document.getElementById('s-enchant-state-move-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
     enchantStateDmgFormula: document.getElementById('s-enchant-state-dmg-formula')?.value?.trim() || '',
     enchantSlot:      idx >= 0 ? (prevList[idx]?.enchantSlot || 'arme') : 'arme',
