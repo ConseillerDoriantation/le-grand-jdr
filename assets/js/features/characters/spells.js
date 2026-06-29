@@ -28,6 +28,7 @@ let _noyauIdsEdit = [];   // noyaux élémentaires sélectionnés (multi). [0] =
 let _sortTypesEdit = new Set(['utilitaire']);
 let _deplModeEdit = null;
 let _actionModeEdit = 'reaction';
+let _protModeEdit = 'ca';   // mode rune Protection en cours d'édition ('ca'|'soin') — source fiable (≠ DOM périmé)
 let _invImageEdit = '';      // image (dataUrl) de l'invocation en cours d'édition
 let _invActionsEdit = [];    // actions (mini-sorts) de l'invocation — éditées à l'étape C
 let _invCrop = null;         // instance du cropper pan/zoom inline de l'image d'invocation
@@ -863,9 +864,9 @@ function _runeLiveContribution(nom, counts) {
       };
     }
     case 'Protection': {
-      // Contexte : lit le mode et la présence de Réaction pour adapter le label
-      const protMode = (typeof document !== 'undefined'
-        ? document.getElementById('s-prot-mode')?.value : null) || 'ca';
+      // Contexte : lit le mode (état module fiable, pas le DOM qui peut être périmé
+      // pendant la construction de l'éditeur) et la présence de Réaction.
+      const protMode = _protModeEdit || 'ca';
       const hasReac = (counts.Réaction || 0) > 0 || ((counts[ACTION_RUNE] || 0) > 0 && _actionModeEdit === 'reaction');
       // Combo Bouclier réactif (Réa + Prot mode CA) : pas de soin, blocage 1 attaque
       if (hasReac && protMode === 'ca') {
@@ -1054,6 +1055,7 @@ export async function openSortModal(idx, s) {
   const runesSrc = s?.runes||[];
   const runeCounts = {};
   _actionModeEdit = _spellActionMode(s);
+  _protModeEdit = s?.protectionMode || 'ca';   // fixé depuis la donnée (pas le DOM périmé)
   runesSrc.forEach(r => {
     const nom = (r === 'Réaction' || r === 'Action Bonus') ? ACTION_RUNE : r;
     runeCounts[nom] = (runeCounts[nom] || 0) + 1;
@@ -2393,6 +2395,7 @@ function _selectActionMode(mode) {
 }
 
 function _selectProtMode(mode) {
+  _protModeEdit = mode;   // garde l'état module synchro (source du label de la carte rune)
   const hidden  = document.getElementById('s-prot-mode');
   const caSec   = document.getElementById('s-ca-section');
   if (hidden)  hidden.value = mode;
