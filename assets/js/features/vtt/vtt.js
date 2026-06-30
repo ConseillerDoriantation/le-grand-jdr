@@ -63,7 +63,7 @@ import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
   _scaledEnchantConditionFields, _vttPrimaryWeapon,
 } from './vtt-effective.js';
-import { _renderInspector, _renderInspectorSoon, _vttInsTab } from './vtt-inspector.js';
+import { _renderInspector, _renderInspectorSoon, _vttInsTab } from './vtt-inspector.js?v=20260630-max-v2';
 import {
   _renderLibSection, _resetMapLib, _libFolder, _vttLibToggle, _vttLibOpenFolder, _vttLibNewFolder,
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,
@@ -733,7 +733,8 @@ function _initCanvas(container) {
   // fog+walls+mapFg+ping dans `frontLayer` via des Konva.Group. L'ordre interne
   // préserve le z-order, et chaque "VS.layers.X" garde son API usuelle.
   // batchDraw() est forwardé vers le layer parent.
-  // Ordre visuel : bg → map → grid → draw → token → fog → walls → mapFg → ping.
+  // MJ : ordre historique inchangé. Joueur : le fog recouvre aussi les
+  // structures et le premier plan pour ne révéler aucun élément hors LOS.
   // Le Stage ne contient ainsi que 5 vrais layers Konva.
   const backLayer  = new K.Layer();
   const frontLayer = new K.Layer();
@@ -751,8 +752,11 @@ function _initCanvas(container) {
   VS.layers.mapFg = _asLayer(new K.Group({ listening: false }), frontLayer);
   VS.layers.ping  = _asLayer(new K.Group({ listening: false }), frontLayer);
   backLayer.add(VS.layers.bg, VS.layers.map);
-  // fog AVANT walls : les murs/portes/lumières restent toujours lisibles au-dessus du brouillard.
-  frontLayer.add(VS.layers.fog, VS.layers.walls, VS.layers.mapFg, VS.layers.ping);
+  if (STATE.isAdmin) {
+    frontLayer.add(VS.layers.fog, VS.layers.walls, VS.layers.mapFg, VS.layers.ping);
+  } else {
+    frontLayer.add(VS.layers.walls, VS.layers.mapFg, VS.layers.fog, VS.layers.ping);
+  }
   VS.stage.add(backLayer, VS.layers.grid, VS.layers.draw, VS.layers.token, frontLayer);
   fogInit(VS.stage, VS.layers, CELL);
   fogSetPgRef(id => _pgRef(id));
@@ -1959,6 +1963,53 @@ function _findOwnTokenAtPointer() {
   }
   return null;
 }
+
+function _vttCenterOnMyToken() {
+  const uid = STATE.user?.uid;
+  if (!uid || !VS.stage || !VS.activePage) return;
+
+  const owned = Object.entries(VS.tokens)
+    .filter(([, entry]) => {
+      const t = entry?.data;
+      return t?.ownerId === uid
+        && t.pageId === VS.activePage.id
+        && t.visible !== false;
+    });
+
+  const selectedEntry = VS.tokens[VS.selected];
+  const selectedData = selectedEntry?.data;
+  const selected = selectedData
+    && selectedData.pageId === VS.activePage.id
+    && selectedData.visible !== false
+    && (selectedData.ownerId === uid || STATE.isAdmin)
+      ? [VS.selected, selectedEntry]
+      : null;
+
+  if (!owned.length && !selected) {
+    showNotif(
+      STATE.isAdmin
+        ? 'Sélectionne un token ou place ton personnage sur cette carte.'
+        : 'Ton personnage n’est pas présent sur cette carte.',
+      'info',
+    );
+    return;
+  }
+
+  const defaultChar = owned.find(([, entry]) =>
+    entry.data?.characterId && VS.characters[entry.data.characterId]?.isDefault);
+  const [, entry] = selected || defaultChar || owned[0];
+  const t = entry.data;
+  const dims = _tokenDims(t);
+  const scale = VS.stage.scaleX();
+  const worldX = (t.col + dims.w / 2) * CELL;
+  const worldY = (t.row + dims.h / 2) * CELL;
+
+  VS.stage.to({
+    x: VS.stage.width() / 2 - worldX * scale,
+    y: VS.stage.height() / 2 - worldY * scale,
+    duration: 0.2,
+  });
+}
 // Distance d'attaque entre bounding boxes WxH (0 = adjacent / chevauchement de côté).
 // portee === 1 (mêlée) → Chebyshev (8 directions, inclut diagonales).
 // portee > 1 ou non précisé → Manhattan (losange, 4 directions).
@@ -2291,7 +2342,10 @@ async function _vttApplyDeplacement(src, tgtData, mode, distance) {
 async function _vttSpendSpellPm(src, opt) {
   const c = _characterForToken(src);
   if (opt.pmCost > 0 && c?.id) {
-    await updateDoc(_chrRef(c.id), { pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost) });
+    await updateDoc(_chrRef(c.id), {
+      pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost),
+      vttControlTokenId: src.id,
+    });
   }
 }
 
@@ -5140,6 +5194,12 @@ function _tokenDataById(tokenId) {
   return (VS.tokens[tokenId]?.data) ? VS.tokens[tokenId].data
        : Object.values(VS.tokens).find(e => e?.data?.id === tokenId)?.data || null;
 }
+function _tokenFxIsVisible(tokenId) {
+  if (STATE.isAdmin) return true;
+  const entry = VS.tokens[tokenId]
+    || Object.values(VS.tokens).find(e => e?.data?.id === tokenId);
+  return !!entry?.shape?.isVisible();
+}
 /** Centre LOGIQUE d'un token (coords Konva) + taille de cellule logique. */
 function _tokenLogicalCenter(data) {
   const c = _tokenCenter(data);
@@ -5152,10 +5212,16 @@ function _playZoneFx(srcId, center, zonePx, targetIds, color, physical, isSummon
   try {
     const cont = VS.stage?.container();
     const src = _tokenDataById(srcId);
-    if (src) { const sp = _tokenLogicalCenter(src); playProjectile(cont, sp.x, sp.y, center.x, center.y, { color, physical }); }
+    const srcVisible = src && _tokenFxIsVisible(srcId);
+    const visibleTargets = (targetIds || []).filter(_tokenFxIsVisible);
+    if (!srcVisible && !visibleTargets.length) return;
+    if (srcVisible) {
+      const sp = _tokenLogicalCenter(src);
+      playProjectile(cont, sp.x, sp.y, center.x, center.y, { color, physical });
+    }
     playImpact(cont, center.x, center.y, Math.max(zonePx?.w || 0, zonePx?.h || 0, CELL) * 1.15, color);
     _ensureSigilSync();
-    if (!isSummon) (targetIds || []).forEach(tid => _playImpactForToken(tid, color));
+    if (!isSummon) visibleTargets.forEach(tid => _playImpactForToken(tid, color));
   } catch (e) { console.warn('[zonefx]', e); }
 }
 
@@ -5164,7 +5230,7 @@ let _seenSigilFire = {};
 
 /** Joue le sceau runique sur un token (coords logiques → suit pan/zoom). */
 function _playSigilForToken(tokenId, sigil) {
-  if (!sigil) return;
+  if (!sigil || !_tokenFxIsVisible(tokenId)) return;
   const data = _tokenDataById(tokenId); if (!data) return;
   try {
     const lc = _tokenLogicalCenter(data);
@@ -5174,12 +5240,17 @@ function _playSigilForToken(tokenId, sigil) {
 }
 /** Effet de cast sur une cible : projectile (distance) ou frappe (CaC) + impact. */
 function _playCastTargetFx(srcId, tid, color, melee, physical) {
-  const tgt = _tokenDataById(tid); if (!tgt) return;
+  const tgt = _tokenDataById(tid); if (!tgt || !_tokenFxIsVisible(tid)) return;
   try {
     const cont = VS.stage?.container();
     const tp = _tokenLogicalCenter(tgt);
     const src = _tokenDataById(srcId);
-    if (melee || !src) {
+    const srcVisible = src && _tokenFxIsVisible(srcId);
+    if (!srcVisible) {
+      _playImpactForToken(tid, color);
+      return;
+    }
+    if (melee) {
       playSlash(cont, tp.x, tp.y, Math.max(60, tp.cellPx * 1.5), color);
     } else {
       const sp = _tokenLogicalCenter(src);
@@ -5191,7 +5262,7 @@ function _playCastTargetFx(srcId, tid, color, melee, physical) {
 }
 /** Éclat d'impact coloré sur un token (coords logiques → suit pan/zoom). */
 function _playImpactForToken(tokenId, color) {
-  if (!color) return;
+  if (!color || !_tokenFxIsVisible(tokenId)) return;
   const data = _tokenDataById(tokenId); if (!data) return;
   try {
     const lc = _tokenLogicalCenter(data);
@@ -5301,7 +5372,10 @@ async function _vttRollAttack() {
     if (opt.pmCost <= 0) return;
     if (_pmPayerCharId) {
       const c = VS.characters[_pmPayerCharId];
-      if (c) await updateDoc(_chrRef(_pmPayerCharId), {pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost)});
+      if (c) await updateDoc(_chrRef(_pmPayerCharId), {
+        pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost),
+        vttControlTokenId: src.id,
+      });
       return;
     }
     // Créature du bestiaire avec mana : déduit du token. `pm` = PM réels (vus du
@@ -7024,8 +7098,8 @@ function _initListeners() {
       const _myUid = STATE.user?.uid;
       if (snap.docChanges().some(ch => ch.doc.data()?.ownerId === _myUid)) _renderPageTabs();
     }
-    // Recalcul fog si un token joueur a bougé
-    if (snap.docChanges().some(ch => ch.doc.data()?.type === 'player'))
+    // Le fog pilote aussi la visibilité/interactivité de tous les tokens.
+    if (snap.docChanges().length)
       fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
     // Si la composition des joueurs présents change, le panneau "Court repos" doit suivre
     if (snap.docChanges().some(ch => ch.doc.data()?.type === 'player')) {
@@ -7713,7 +7787,10 @@ async function _vttShieldCancelAttack(logId) {
   try {
     await _setHp(dtok, newHp);
     await _syncDownedCondition(dtok, newHp);
-    await updateDoc(_chrRef(pick.char.id), { pm: Math.max(0, curPm - pick.cost) });
+    await updateDoc(_chrRef(pick.char.id), {
+      pm: Math.max(0, curPm - pick.cost),
+      vttControlTokenId: dtok.id,
+    });
     await updateDoc(doc(_logCol(), logId), {
       shieldCancelled: true, shieldCancelledBy: STATE.user?.uid || null,
       shieldSpell: pick.spell.nom || 'Bouclier réactif',
@@ -7876,7 +7953,7 @@ async function _vttSetHp(tokenId,hp) {
 async function _vttSetPm(tokenId,pm) {
   const t=VS.tokens[tokenId]?.data; if (!t) return;
   const v=Math.max(0,pm);
-  if (t.characterId) await updateDoc(_chrRef(t.characterId),{pm:v}).catch(()=>{});
+  if (t.characterId) await updateDoc(_chrRef(t.characterId), { pm:v, vttControlTokenId:tokenId }).catch(()=>{});
   else if (t.npcId)  await updateDoc(_npcRef(t.npcId),{pmCurrent:v}).catch(()=>{});
 }
 
@@ -8817,6 +8894,7 @@ async function _vttMountTable(content) {
   _tf.className = 'vtt-tool-float';
   _tf.innerHTML = `
     <div class="vtt-tool-float-tools">
+      <button class="vtt-tool" data-vtt-fn="_vttCenterOnMyToken" title="Recentrer sur mon personnage" aria-label="Recentrer sur mon personnage">⌖</button>
       <button class="vtt-tool active" data-tool="select" data-vtt-fn="_vttTool" data-vtt-args="select" title="↖ Sélection">↖</button>
       <button class="vtt-tool" data-tool="ruler"  data-vtt-fn="_vttTool" data-vtt-args="ruler"  title="📏 Règle (R) — clic gauche pour mesurer · clic droit pour annuler">📏</button>
       <button class="vtt-tool" data-tool="draw"   data-vtt-fn="_vttTool" data-vtt-args="draw"   title="✏️ Dessin">✏️</button>
@@ -9238,6 +9316,7 @@ export const VTT_ACTIONS = {
   _vttToggleVisible,
   _vttTokenBonus,
   _vttTokenResetBonus,
+  _vttCenterOnMyToken,
   _vttTool,
   _vttTrackerFocus,
   _vttTrayClearSearch,
