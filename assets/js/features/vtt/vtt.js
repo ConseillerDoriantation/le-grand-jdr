@@ -1959,6 +1959,53 @@ function _findOwnTokenAtPointer() {
   }
   return null;
 }
+
+function _vttCenterOnMyToken() {
+  const uid = STATE.user?.uid;
+  if (!uid || !VS.stage || !VS.activePage) return;
+
+  const owned = Object.entries(VS.tokens)
+    .filter(([, entry]) => {
+      const t = entry?.data;
+      return t?.ownerId === uid
+        && t.pageId === VS.activePage.id
+        && t.visible !== false;
+    });
+
+  const selectedEntry = VS.tokens[VS.selected];
+  const selectedData = selectedEntry?.data;
+  const selected = selectedData
+    && selectedData.pageId === VS.activePage.id
+    && selectedData.visible !== false
+    && (selectedData.ownerId === uid || STATE.isAdmin)
+      ? [VS.selected, selectedEntry]
+      : null;
+
+  if (!owned.length && !selected) {
+    showNotif(
+      STATE.isAdmin
+        ? 'Sélectionne un token ou place ton personnage sur cette carte.'
+        : 'Ton personnage n’est pas présent sur cette carte.',
+      'info',
+    );
+    return;
+  }
+
+  const defaultChar = owned.find(([, entry]) =>
+    entry.data?.characterId && VS.characters[entry.data.characterId]?.isDefault);
+  const [, entry] = selected || defaultChar || owned[0];
+  const t = entry.data;
+  const dims = _tokenDims(t);
+  const scale = VS.stage.scaleX();
+  const worldX = (t.col + dims.w / 2) * CELL;
+  const worldY = (t.row + dims.h / 2) * CELL;
+
+  VS.stage.to({
+    x: VS.stage.width() / 2 - worldX * scale,
+    y: VS.stage.height() / 2 - worldY * scale,
+    duration: 0.2,
+  });
+}
 // Distance d'attaque entre bounding boxes WxH (0 = adjacent / chevauchement de côté).
 // portee === 1 (mêlée) → Chebyshev (8 directions, inclut diagonales).
 // portee > 1 ou non précisé → Manhattan (losange, 4 directions).
@@ -8817,6 +8864,7 @@ async function _vttMountTable(content) {
   _tf.className = 'vtt-tool-float';
   _tf.innerHTML = `
     <div class="vtt-tool-float-tools">
+      <button class="vtt-tool" data-vtt-fn="_vttCenterOnMyToken" title="Recentrer sur mon personnage" aria-label="Recentrer sur mon personnage">⌖</button>
       <button class="vtt-tool active" data-tool="select" data-vtt-fn="_vttTool" data-vtt-args="select" title="↖ Sélection">↖</button>
       <button class="vtt-tool" data-tool="ruler"  data-vtt-fn="_vttTool" data-vtt-args="ruler"  title="📏 Règle (R) — clic gauche pour mesurer · clic droit pour annuler">📏</button>
       <button class="vtt-tool" data-tool="draw"   data-vtt-fn="_vttTool" data-vtt-args="draw"   title="✏️ Dessin">✏️</button>
@@ -9238,6 +9286,7 @@ export const VTT_ACTIONS = {
   _vttToggleVisible,
   _vttTokenBonus,
   _vttTokenResetBonus,
+  _vttCenterOnMyToken,
   _vttTool,
   _vttTrackerFocus,
   _vttTrayClearSearch,
