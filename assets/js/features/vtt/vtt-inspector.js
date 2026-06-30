@@ -91,15 +91,16 @@ export function _renderInspectorImpl(t) {
         .map(p=>`<option value="${p.id}">${p.name}</option>`).join('') : '';
 
   // ── Helpers rendu stats ──────────────────────────────────────────
-  const _bar = (lbl, cur, max, col, editHtml='') => {
+  const _bar = (lbl, cur, max, col, editHtml='', actionHtml='') => {
     const pct = max > 0 ? Math.round(Math.max(0, cur) / max * 100) : 0;
     const val = editHtml
       ? editHtml + '<span style="color:var(--text-muted)"> / '+max+'</span>'
       : '<span>'+cur+' / '+max+'</span>';
-    return '<div class="vtt-ins-bar-row">' +
+    return '<div class="vtt-ins-bar-row'+(actionHtml?' has-action':'')+'">' +
       '<span class="vtt-ins-bar-lbl">'+lbl+'</span>' +
       '<div class="vtt-ins-bar-track"><div class="vtt-ins-bar-fill" style="width:'+pct+'%;background:'+col+'"></div></div>' +
       '<span class="vtt-ins-bar-val">'+val+'</span>' +
+      actionHtml +
     '</div>';
   };
   const _stat = (icon, lbl, val, full=false) =>
@@ -147,9 +148,15 @@ export function _renderInspectorImpl(t) {
     const pvEditHtml = _canEditToken
       ? '<input class="vtt-ins-input" type="number" value="'+hp+'" min="0" max="'+hpm+'" data-vtt-fn="_vttSetHp" data-vtt-on="change" data-vtt-args="'+t.id+'|$value">'
       : null;
+    const pvMaxHtml = _canEditToken
+      ? '<button type="button" class="vtt-ins-max-btn" data-vtt-fn="_vttSetHp" data-vtt-args="'+t.id+'|'+hpm+'" title="Rétablir tous les PV">Max</button>'
+      : '';
     const pmEditHtml = (_canEditToken && pm !== null && pmMax !== null)
       ? '<input class="vtt-ins-input" type="number" value="'+pm+'" min="0" max="'+pmMax+'" data-vtt-fn="_vttSetPm" data-vtt-on="change" data-vtt-args="'+t.id+'|$value">'
       : null;
+    const pmMaxHtml = (_canEditToken && pm !== null && pmMax !== null)
+      ? '<button type="button" class="vtt-ins-max-btn" data-vtt-fn="_vttSetPm" data-vtt-args="'+t.id+'|'+pmMax+'" title="Rétablir tous les PM">Max</button>'
+      : '';
     // Bonus manuels « du tour » via les BUFFS du token. ld.display* les inclut
     // DÉJÀ (move_bonus / ca / range_bonus) → ne pas re-additionner. Le badge
     // affiche juste la part manuelle. Éditable par qui contrôle le token.
@@ -163,8 +170,8 @@ export function _renderInspectorImpl(t) {
 
     vitalsHtml =
       '<div class="vtt-ins-bars">' +
-        _bar('PV', hp, hpm, hpColor(rat), pvEditHtml) +
-        (pm !== null && pmMax !== null ? _bar('PM', pm, pmMax, '#b47fff', pmEditHtml) : '') +
+        _bar('PV', hp, hpm, hpColor(rat), pvEditHtml, pvMaxHtml) +
+        (pm !== null && pmMax !== null ? _bar('PM', pm, pmMax, '#b47fff', pmEditHtml, pmMaxHtml) : '') +
       '</div>';
     coreStatsHtml =
       '<div class="vtt-ins-stats">' +
