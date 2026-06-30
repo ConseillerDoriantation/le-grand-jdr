@@ -17,7 +17,7 @@ import { openModal, closeModalDirect } from '../../shared/modal.js';
 import { CONDITION_DEFAULT_LIBRARY } from '../../shared/conditions.js';
 import { _tokRef, _logCol } from './vtt-refs.js';
 import { _live } from './vtt-effective.js';
-import { _renderInspectorSoon } from './vtt-inspector.js';
+import { _renderInspectorSoon } from './vtt-inspector.js?v=20260630-max-v2';
 import { CONDITION_LIBRARY, CONDITION_BY_ID, _loadConditionsOverrides, _consumeLuckyReroll } from './vtt.js';
 
 function getVttConditionLibrary() {

@@ -20,6 +20,7 @@ let _CELL       = 70;
 let _stage      = null;
 let _fogLayer   = null;   // Konva.Layer pour le masque de brouillard
 let _wallsLayer = null;   // Konva.Layer pour les visuels mur/porte/fenêtre
+let _tokenLayer = null;   // Konva.Layer des tokens, masqués hors LOS côté joueur
 
 let _editMode   = false;  // éditeur de murs actif ?
 let _editTool   = 'wall'; // 'wall' | 'door' | 'window' | 'light' | 'eraser' | 'hide' | 'reveal'
@@ -33,11 +34,12 @@ let _page       = null;   // référence TOUJOURS à jour vers la page active (�
 
 let _fogPending = false;  // debounce requestAnimationFrame
 let _snapDot    = null;   // indicateur d'aimantation pendant l'édition
+let _playerFogCanvas = null; // masque courant pour les interactions et tokens hors LOS
 
 let _pgRefFn = null;      // (pageId) → Firestore DocumentReference
 
 // ── Constantes ────────────────────────────────────────────────────────────────
-const FOG_ALPHA       = 0.92; // opacité pour les joueurs
+const FOG_ALPHA       = 1;    // noir total pour les joueurs
 const FOG_ALPHA_ADMIN = 0.40; // semi-transparent pour le MJ (voit la carte en dessous)
 const DARK_CELLS  = 1;              // rayon de vision en obscurité (en cases)
 const LIGHT_DEF_R = 5;              // rayon par défaut des sources (cases)
@@ -198,10 +200,15 @@ function _buildFogCanvas(page, tokens, isAdmin = false) {
 
     const lights = page.lightSources || [];
 
-    for (const ls of lights) {
-      const lx = ls.x * C, ly = ls.y * C;
-      const r  = (ls.radius ?? LIGHT_DEF_R) * C;
-      fillPolyClipped(_visPoly(lx, ly, blockers, W, H), lx, ly, r);
+    // Le MJ conserve l'ancien aperçu des halos lumineux. Côté joueur, une source
+    // ne révèle jamais une pièce à elle seule : elle doit être dans la LOS d'un
+    // personnage, sinon elle créerait une fenêtre indiscrète dans le brouillard.
+    if (isAdmin) {
+      for (const ls of lights) {
+        const lx = ls.x * C, ly = ls.y * C;
+        const r  = (ls.radius ?? LIGHT_DEF_R) * C;
+        fillPolyClipped(_visPoly(lx, ly, blockers, W, H), lx, ly, r);
+      }
     }
 
     const playerToks = Object.values(tokens || {})
@@ -213,13 +220,34 @@ function _buildFogCanvas(page, tokens, isAdmin = false) {
       const th = tok.tokenH ?? tok.tokenSize ?? 1;
       const ox = (tok.col + tw * 0.5) * C;
       const oy = (tok.row + th * 0.5) * C;
-      const inLight = lights.length === 0 || lights.some(ls => {
+      const poly = _visPoly(ox, oy, blockers, W, H);
+      if (lights.length === 0) {
+        fillPoly(poly);
+        continue;
+      }
+
+      const containingLights = lights.filter(ls => {
         const r = (ls.radius ?? LIGHT_DEF_R) * C;
         return Math.hypot(ox - ls.x*C, oy - ls.y*C) <= r;
       });
-      const poly = _visPoly(ox, oy, blockers, W, H);
-      if (inLight) fillPoly(poly);
-      else         fillPolyClipped(poly, ox, oy, DARK_CELLS * C);
+
+      if (isAdmin) {
+        if (containingLights.length) fillPoly(poly);
+        else fillPolyClipped(poly, ox, oy, DARK_CELLS * C);
+      } else if (containingLights.length) {
+        // Intersection LOS × halo : aucune visibilité au-delà de la lumière,
+        // même si le polygone géométrique continue derrière.
+        for (const ls of containingLights) {
+          fillPolyClipped(
+            poly,
+            ls.x * C,
+            ls.y * C,
+            (ls.radius ?? LIGHT_DEF_R) * C,
+          );
+        }
+      } else {
+        fillPolyClipped(poly, ox, oy, DARK_CELLS * C);
+      }
     }
   }
 
@@ -277,6 +305,7 @@ export function fogInit(stage, layers, CELL) {
   _CELL       = CELL;
   _fogLayer   = layers.fog;
   _wallsLayer = layers.walls;
+  _tokenLayer = layers.token;
 }
 
 export function fogSetPgRef(fn) { _pgRefFn = fn; }
@@ -284,10 +313,36 @@ export function fogSetPgRef(fn) { _pgRefFn = fn; }
 /** Mise à jour de la référence page courante (appelée depuis vtt.js à chaque changement). */
 export function fogSetPage(page) {
   if (page?.id !== _page?.id) _placeHistory = []; // nouvelle scène → pile d'annulation vierge
+  if (page?.id !== _page?.id) _playerFogCanvas = null;
   _page = page;
 }
 
 function _pgRef(id) { return _pgRefFn ? _pgRefFn(id) : null; }
+
+function _playerPointIsVisible(x, y, page = _page) {
+  if (!page?.fogEnabled && !(page?.fogOps || []).length) return true;
+  if (!_playerFogCanvas) return false;
+  const px = Math.max(0, Math.min(_playerFogCanvas.width - 1, Math.round(x)));
+  const py = Math.max(0, Math.min(_playerFogCanvas.height - 1, Math.round(y)));
+  return _playerFogCanvas.getContext('2d').getImageData(px, py, 1, 1).data[3] < 250;
+}
+
+function _applyTokenVisibility(page, tokens, isAdmin) {
+  for (const entry of Object.values(tokens || {})) {
+    const t = entry?.data;
+    const shape = entry?.shape;
+    if (!t || !shape || t.pageId !== page.id) continue;
+    const tw = shape.getAttr('tokenW') ?? t.tokenW ?? t.tokenSize ?? 1;
+    const th = shape.getAttr('tokenH') ?? t.tokenH ?? t.tokenSize ?? 1;
+    const inSight = isAdmin || _playerPointIsVisible(
+      (t.col + tw * 0.5) * _CELL,
+      (t.row + th * 0.5) * _CELL,
+      page,
+    );
+    shape.visible(!!(t.visible || isAdmin) && inSight);
+  }
+  _tokenLayer?.batchDraw();
+}
 
 /** Recalcule et affiche le fog immédiatement. */
 export function fogUpdate(page, tokens, isAdmin) {
@@ -297,6 +352,8 @@ export function fogUpdate(page, tokens, isAdmin) {
   // Rien à dessiner si ni LOS ni ops manuelles
   const hasFogOps = (page.fogOps || []).length > 0;
   if (!page.fogEnabled && !hasFogOps) {
+    _playerFogCanvas = null;
+    _applyTokenVisibility(page, tokens, !!isAdmin);
     _fogLayer.batchDraw();
     return;
   }
@@ -304,8 +361,11 @@ export function fogUpdate(page, tokens, isAdmin) {
   const K = window.Konva;
   if (!K) return;
   const canvas = _buildFogCanvas(page, tokens, !!isAdmin);
+  _playerFogCanvas = isAdmin ? null : canvas;
   const img = new K.Image({ image: canvas, x: 0, y: 0, listening: false });
   _fogLayer.add(img);
+  _applyTokenVisibility(page, tokens, !!isAdmin);
+  if (!isAdmin) fogRenderWalls(page, false);
   _fogLayer.batchDraw();
 }
 
@@ -353,6 +413,7 @@ export function fogRenderWalls(page, isAdmin) {
     if (w.type === 'door' || w.type === 'window') {
       const mx = (w.x1 + w.x2) * 0.5 * C;
       const my = (w.y1 + w.y2) * 0.5 * C;
+      const canInteract = isAdmin || _playerPointIsVisible(mx, my, page);
       // Porte : rouge/vert. Fenêtre : bleu clair/vert, verrouillée = rouge.
       const dotCol = w.locked ? '#e53e3e'
         : w.open ? '#48bb78'
@@ -361,7 +422,7 @@ export function fogRenderWalls(page, isAdmin) {
         x: mx, y: my, radius: _editMode ? 8 : 6,
         fill: _selectedId === w.id ? '#fff' : dotCol,
         stroke: '#000', strokeWidth: 1,
-        listening: true, id: `door-dot-${w.id}`,
+        listening: canInteract, id: `door-dot-${w.id}`,
       });
       dot.on('click tap', e => {
         e.cancelBubble = true;
@@ -373,7 +434,7 @@ export function fogRenderWalls(page, isAdmin) {
       // Zone de clic sur toute la ligne (en mode normal)
       if (!_editMode) {
         const hitLine = new K.Line({
-          points: pts, stroke: 'transparent', strokeWidth: 12, listening: true,
+          points: pts, stroke: 'transparent', strokeWidth: 12, listening: canInteract,
         });
         hitLine.on('click tap', e => { e.cancelBubble = true; _toggleDoor(w, isAdmin); });
         _wallsLayer.add(hitLine);
