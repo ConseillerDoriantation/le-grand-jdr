@@ -2338,7 +2338,10 @@ async function _vttApplyDeplacement(src, tgtData, mode, distance) {
 async function _vttSpendSpellPm(src, opt) {
   const c = _characterForToken(src);
   if (opt.pmCost > 0 && c?.id) {
-    await updateDoc(_chrRef(c.id), { pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost) });
+    await updateDoc(_chrRef(c.id), {
+      pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost),
+      vttControlTokenId: src.id,
+    });
   }
 }
 
@@ -5348,7 +5351,10 @@ async function _vttRollAttack() {
     if (opt.pmCost <= 0) return;
     if (_pmPayerCharId) {
       const c = VS.characters[_pmPayerCharId];
-      if (c) await updateDoc(_chrRef(_pmPayerCharId), {pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost)});
+      if (c) await updateDoc(_chrRef(_pmPayerCharId), {
+        pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost),
+        vttControlTokenId: src.id,
+      });
       return;
     }
     // Créature du bestiaire avec mana : déduit du token. `pm` = PM réels (vus du
@@ -7760,7 +7766,10 @@ async function _vttShieldCancelAttack(logId) {
   try {
     await _setHp(dtok, newHp);
     await _syncDownedCondition(dtok, newHp);
-    await updateDoc(_chrRef(pick.char.id), { pm: Math.max(0, curPm - pick.cost) });
+    await updateDoc(_chrRef(pick.char.id), {
+      pm: Math.max(0, curPm - pick.cost),
+      vttControlTokenId: dtok.id,
+    });
     await updateDoc(doc(_logCol(), logId), {
       shieldCancelled: true, shieldCancelledBy: STATE.user?.uid || null,
       shieldSpell: pick.spell.nom || 'Bouclier réactif',
@@ -7923,7 +7932,7 @@ async function _vttSetHp(tokenId,hp) {
 async function _vttSetPm(tokenId,pm) {
   const t=VS.tokens[tokenId]?.data; if (!t) return;
   const v=Math.max(0,pm);
-  if (t.characterId) await updateDoc(_chrRef(t.characterId),{pm:v}).catch(()=>{});
+  if (t.characterId) await updateDoc(_chrRef(t.characterId), { pm:v, vttControlTokenId:tokenId }).catch(()=>{});
   else if (t.npcId)  await updateDoc(_npcRef(t.npcId),{pmCurrent:v}).catch(()=>{});
 }
 
