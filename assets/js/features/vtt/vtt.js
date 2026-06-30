@@ -6682,9 +6682,22 @@ export function _renderAnnotLayer() {
   try { return _renderAnnotLayerImpl(); }
   catch (e) { _vttPanelError('Dessins', e, null); }
 }
+function _syncPlayerAnnotClip() {
+  if (STATE.isAdmin || !VS.layers.draw || !VS.activePage) return;
+  VS.layers.draw.clip({
+    x: 0,
+    y: 0,
+    width: VS.activePage.cols * CELL,
+    height: VS.activePage.rows * CELL,
+  });
+}
 function _renderAnnotLayerImpl() {
   if (!VS.layers.draw || !VS.activePage) return;
   const K = window.Konva;
+  // Le canvas de brouillard s'arrête aux limites de la grille. Sans découpe,
+  // les annotations placées dans l'espace de travail autour de la carte restent
+  // donc visibles des joueurs. Le MJ conserve tout son espace de préparation.
+  _syncPlayerAnnotClip();
   Object.values(_annotations).forEach(e => { e.shape?.destroy(); e.shape = null; });
   for (const [id, e] of Object.entries(_annotations)) {
     if (e.data.pageId !== VS.activePage.id) continue;
@@ -6951,6 +6964,7 @@ function _initListeners() {
         VS.pages[ch.doc.id]={id:ch.doc.id,...ch.doc.data()};
         if (VS.activePage?.id===ch.doc.id) {
           VS.activePage=VS.pages[ch.doc.id];
+          _syncPlayerAnnotClip();
           _renderMapImages(_MAP_IMG_DEPS);
           fogRenderWalls(VS.activePage, STATE.isAdmin);
           fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
