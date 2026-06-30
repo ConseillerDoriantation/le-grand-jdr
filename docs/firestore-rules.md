@@ -117,6 +117,26 @@ service cloud.firestore {
               request.resource.data.charId == resource.data.charId);
     }
 
+    function canSpendCharacterPmViaToken(adventureId, charId, tokenId) {
+      let tokenPath = /databases/$(database)/documents/adventures/$(adventureId)/vttTokens/$(tokenId);
+      let token = get(tokenPath).data;
+      return isLoggedIn() &&
+             tokenId is string &&
+             exists(tokenPath) &&
+             (
+               token.ownerId == request.auth.uid ||
+               (token.controlDelegates is list &&
+                request.auth.uid in token.controlDelegates)
+             ) &&
+             (
+               token.characterId == charId ||
+               (
+                 token.summonOwnerId is string &&
+                 get(/databases/$(database)/documents/adventures/$(adventureId)/vttTokens/$(token.summonOwnerId)).data.characterId == charId
+               )
+             );
+    }
+
     // ── Collections LEGACY top-level — ADMIN ONLY ───────────────────────────
     // Toutes les données « métier » sont désormais scopées par aventure
     // (adventures/{advId}/…, cf. _colPath dans data/firestore.js : seules `users`
@@ -269,11 +289,21 @@ service cloud.firestore {
           isAdvAdmin(adventureId) ||
           isCharacterUidSelfRepair(resource.data, request.resource.data) ||
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['inventaire', 'compte']) ||
+          // Dépense de PM par le propriétaire ou le délégué du token lanceur.
+          // `vttControlTokenId` fournit à la règle le token précis à vérifier.
+          (
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['pm', 'vttControlTokenId']) &&
+            canSpendCharacterPmViaToken(
+              adventureId,
+              id,
+              request.resource.data.vttControlTokenId
+            )
+          ) ||
           // ── VTT : tout membre de l'aventure peut écrire les champs de combat ──
           //   nécessaire pour que les sorts (DoT, soins, buffs, états) lancés par
           //   un joueur appliquent leur effet sur une fiche cible (PJ allié comme
-          //   PJ ennemi). hp et pvCombatHp étaient déjà permis via les tokens ;
-          //   on étend aux conditions/buffs pour les sorts à effet persistant.
+          //   PJ ennemi).
           request.resource.data.diff(resource.data)
             .affectedKeys().hasOnly(['hp', 'pvCombatHp', 'buffs', 'conditions'])
         );
@@ -351,15 +381,21 @@ service cloud.firestore {
       match /vttTokens/{id} {
         allow read: if inAdventure(adventureId);
         allow write: if isAdvAdmin(adventureId);
-        // Déplacement + invocation/retrait : propriétaire OU délégué de contrôle.
+        // Contrôle du token : propriétaire OU délégué de contrôle.
         // `pageId`/`visible` permettent au joueur d'« Invoquer mon token » (le poser
-        // sur la carte active) et de le retirer — cf. _vttInvokeMyToken dans vtt.js.
+        // sur la carte active). Les compteurs d'action et PM sont écrits lors d'une
+        // attaque ou compétence ; sans eux, seul le déplacement délégué fonctionne.
         allow update: if inAdventure(adventureId)
           && (request.auth.uid == resource.data.ownerId
               || (resource.data.controlDelegates is list
                   && request.auth.uid in resource.data.controlDelegates))
           && request.resource.data.diff(resource.data)
-               .affectedKeys().hasOnly(['col', 'row', 'movedThisTurn', 'movedCells', 'bonusMvt', 'pageId', 'visible']);
+               .affectedKeys().hasOnly([
+                 'col', 'row', 'movedThisTurn', 'movedCells', 'bonusMvt',
+                 'pageId', 'visible',
+                 'attackedThisTurn', 'bonusActionThisTurn', 'reactionThisTurn',
+                 'pm', 'pmCombat'
+               ]);
         // Sorts de déplacement : un joueur peut pousser/attirer une cible
         // sans pouvoir modifier sa page, sa visibilité ou ses compteurs de tour.
         allow update: if inAdventure(adventureId)
