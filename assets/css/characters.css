@@ -10049,6 +10049,25 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .inv-card-props .v { color: var(--text-soft, #c8d4e8); font-weight: 500; }
 .cs-v3 .inv-card-props .v.dmg { color: var(--crimson-light, #ff8ca7); font-weight: 600; }
 .cs-v3 .inv-card-props .v.gold { color: var(--amber, var(--amber)); font-weight: 600; }
+.cs-v3 .inv-card-traits {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.cs-v3 .inv-card-traits-label {
+  padding-top: 3px;
+  flex-shrink: 0;
+  font-size: .6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-dim);
+}
+.cs-v3 .inv-card-traits-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
 .cs-v3 .inv-card-desc {
   font-size: .76rem; color: var(--text-muted, #7a8fa8);
   font-style: italic;

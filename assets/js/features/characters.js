@@ -1851,6 +1851,15 @@ function _itemBonusBadges(it = {}) {
 
 function renderCharCombatV3(c, canEdit) {
   const equip = c.equipement || {};
+  const equippedInvMap = (() => {
+    try { return getEquippedInventoryIndexMap?.(c) || new Map(); }
+    catch { return new Map(); }
+  })();
+  const getEquippedInventoryItem = (slot, fallback) => {
+    const invIndex = [...equippedInvMap.entries()]
+      .find(([, slots]) => slots.includes(slot))?.[0];
+    return Number.isInteger(invIndex) ? (c.inventaire?.[invIndex] || fallback) : fallback;
+  };
   const weaponSlots = ['Main principale', 'Main secondaire'];
   const armorSlotsRow1 = ['Tête', 'Torse', 'Bottes'];
   const armorSlotsRow2 = ['Anneau', 'Amulette', 'Objet magique'];
@@ -1871,7 +1880,7 @@ function renderCharCombatV3(c, canEdit) {
     let tp = null, dp = null;
     try { tp = getWeaponToucherParts?.(c, item, statKey); } catch {}
     try { dp = getWeaponDegatsParts?.(c, item, statKey); } catch {}
-    const traits = item.nom ? (_getTraits?.(item) || []) : [];
+    const traits = item.nom ? (_getTraits?.(getEquippedInventoryItem(slot, item)) || []) : [];
 
     if (!item.nom) {
       return `<div class="weap-card" style="opacity:.65;border-style:dashed">
@@ -1970,7 +1979,7 @@ function renderCharCombatV3(c, canEdit) {
       badges.push({ lbl: `${shortLbl} ${v>0?'+':''}${v}`, cls: 'gold' });
     });
     // Traits via _getTraits (importé de data.js)
-    const traits = (_getTraits?.(it) || []);
+    const traits = (_getTraits?.(getEquippedInventoryItem(slot, it)) || []);
     return `<div class="armor-card equipped">
       <div class="armor-slot">
         <span class="armor-slot-name">${_esc(slot)}</span>
@@ -2255,11 +2264,13 @@ function renderCharInventaireV3(c, canEdit) {
   const filters = _invFilters(inv);
   const activeCat = filters.some(f => f.id === filter.cat) ? filter.cat : 'all';
 
-  // Stack : regroupe les items identiques (même itemId ou même nom+rareté+template+prix)
+  // Stack : regroupe les items identiques qui portent aussi les mêmes traits.
   // Garde la liste d'indices originaux pour les actions (vente/envoi/suppression bulk).
   const stackMap = new Map();
   inv.forEach((it, idx) => {
-    const key = it.itemId || `${it.nom||''}|${it.template||it.type||''}|${parseInt(it.rarete||it.rare||0)}|${parseInt(it.prix||0)}`;
+    const baseKey = it.itemId || `${it.nom||''}|${it.template||it.type||''}|${parseInt(it.rarete||it.rare||0)}|${parseInt(it.prix||0)}`;
+    const traitsKey = (_getTraits?.(it) || []).join('\u001f');
+    const key = `${baseKey}|traits:${traitsKey}`;
     if (!stackMap.has(key)) {
       stackMap.set(key, { it: { ...it }, indices: [idx], qte: parseInt(it.quantite || it.qte || 1) || 1 });
     } else {
@@ -2329,6 +2340,7 @@ function renderCharInventaireV3(c, canEdit) {
     const effetTxt = getItemEffectText(it);
     if (effetTxt) props.push({ k: 'Effet', v: effetTxt });
     if (prixAchat) props.push({ k: 'Prix', v: prixAchat + ' or', c: 'gold' });
+    const traits = _getTraits?.(it) || [];
 
     const equipMap = (() => { try { return getEquippedInventoryIndexMap?.(c) || new Map(); } catch { return new Map(); } })();
     const isEquipped = allIdx.some(i => equipMap.has(i));
@@ -2351,6 +2363,12 @@ function renderCharInventaireV3(c, canEdit) {
           <span class="v ${p.c||''}">${_esc(p.v)}</span>
         </span>`).join('')}
       </div>`:''}
+      ${traits.length ? `<div class="inv-card-traits">
+        <span class="inv-card-traits-label">Traits</span>
+        <div class="inv-card-traits-list">
+          ${traits.map(trait => `<span class="trait">${_esc(trait)}</span>`).join('')}
+        </div>
+      </div>` : ''}
       ${(() => {
         const badges = _itemBonusBadges(it);
         return badges.length ? `<div class="inv-card-badges">${badges.map(b=>`<span class="badge-chip ${b.cls}">${b.lbl}</span>`).join('')}</div>` : '';
