@@ -8094,7 +8094,34 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .vital.hp .vital-bar-fill.mid { background: linear-gradient(90deg, var(--ember), var(--amber)); }
 .cs-v3 .vital.hp .vital-bar-fill.low { background: linear-gradient(90deg, #dc2626, #ff5a7e); }
 .cs-v3 .vital.mp .vital-bar-fill { background: linear-gradient(90deg, #3a6ffa, #6aa7ff); }
-.cs-v3 .vital-ctrls { display: flex; gap: 5px; align-items: center; justify-content: space-between; margin-top: 2px; }
+.cs-v3 .vital-ctrls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+  margin-top: 4px;
+}
+.cs-v3 .vital-current-control {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cs-v3 .vital-control-label {
+  min-width: 0;
+  margin-right: auto;
+  color: var(--text-dim);
+  font-size: .56rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  line-height: 1.15;
+}
+.cs-v3 .vital-stepper {
+  display: inline-flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
 .cs-v3 .vital-btn {
   width: 24px; height: 24px; border-radius: 999px;
   border: 1px solid var(--border); background: rgba(255,255,255,.04);
@@ -8103,7 +8130,67 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 }
 .cs-v3 .vital-btn:hover { background: rgba(255,90,126,.16); border-color: rgba(255,90,126,.4); color: var(--crimson-light, #ff8ca7); }
 .cs-v3 .vital-btn.plus:hover { background: rgba(34,195,142,.16); border-color: rgba(34,195,142,.4); color: var(--emerald); }
-.cs-v3 .vital-temp { font-size: .62rem; color: var(--text-dim); font-style: italic; text-align: center; flex: 1; }
+.cs-v3 .cs-vital-base-btn,
+.cs-v3 .cs-vital-base-readonly {
+  min-width: 98px;
+  min-height: 32px;
+  padding: 4px 7px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.035);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  font: inherit;
+}
+.cs-v3 .cs-vital-base-btn {
+  cursor: pointer;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.cs-v3 .cs-vital-base-btn:hover {
+  border-color: rgba(126,176,255,.45);
+  background: rgba(79,140,255,.10);
+  color: var(--text);
+}
+.cs-v3 .vital.hp .cs-vital-base-btn:hover {
+  border-color: rgba(255,140,167,.45);
+  background: rgba(255,90,126,.09);
+}
+.cs-v3 .cs-vital-base-copy,
+.cs-v3 .cs-vital-base-readonly {
+  text-align: left;
+}
+.cs-v3 .cs-vital-base-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cs-v3 .cs-vital-base-copy span,
+.cs-v3 .cs-vital-base-readonly span {
+  font-size: .52rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.cs-v3 .cs-vital-base-copy strong,
+.cs-v3 .cs-vital-base-readonly strong {
+  color: var(--text);
+  font-family: 'Outfit', sans-serif;
+  font-size: .82rem;
+  line-height: 1;
+}
+.cs-v3 .cs-vital-base-edit {
+  color: var(--text-dim);
+  font-size: .8rem;
+}
+.cs-v3 .cs-vital-base-btn:hover .cs-vital-base-edit { color: currentColor; }
+@media (max-width: 360px) {
+  .cs-v3 .vital-control-label { display: none; }
+}
 
 /* Mini stats 2x2 */
 .cs-v3 .cs-mini-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }

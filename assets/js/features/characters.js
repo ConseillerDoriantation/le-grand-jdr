@@ -410,9 +410,18 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
         </div>
         <div class="vital-bar"><div class="${hpBarCls}" id="pv-bar" style="width:${pvPct}%"></div></div>
         <div class="vital-ctrls">
-          ${canEdit?`<button class="vital-btn" data-action="adjustStat" data-field="pvActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
-          <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" data-action="inlineEditNum" data-id="${c.id}" data-field="pvBase" data-min="1" data-max="999" title="PV base">base ${c.pvBase||10}</button>` : `base ${c.pvBase||10}`}</span>
-          ${canEdit?`<button class="vital-btn plus" data-action="adjustStat" data-field="pvActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
+          ${canEdit ? `<div class="vital-current-control">
+            <span class="vital-control-label">Valeur actuelle</span>
+            <span class="vital-stepper">
+              <button class="vital-btn" data-action="adjustStat" data-field="pvActuel" data-delta="-1" data-id="${c.id}" title="Retirer 1 PV">−</button>
+              <button class="vital-btn plus" data-action="adjustStat" data-field="pvActuel" data-delta="1" data-id="${c.id}" title="Ajouter 1 PV">+</button>
+            </span>
+          </div>
+          <button class="cs-vital-base-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="pvBase"
+            data-min="1" data-max="999" title="Modifier les PV de base">
+            <span class="cs-vital-base-copy"><span>PV de base</span><strong>${c.pvBase||10}</strong></span>
+            <span class="cs-vital-base-edit" aria-hidden="true">✎</span>
+          </button>` : `<div class="cs-vital-base-readonly"><span>PV de base</span><strong>${c.pvBase||10}</strong></div>`}
         </div>
       </div>
     </div>
@@ -427,9 +436,18 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
         </div>
         <div class="vital-bar"><div class="vital-bar-fill" id="pm-bar" style="width:${pmPct}%"></div></div>
         <div class="vital-ctrls">
-          ${canEdit?`<button class="vital-btn" data-action="adjustStat" data-field="pmActuel" data-delta="-1" data-id="${c.id}">−</button>`:''}
-          <span class="vital-temp">${canEdit ? `<button class="cs-vital-base-btn" style="background:none;border:none;color:inherit;cursor:pointer" data-action="inlineEditNum" data-id="${c.id}" data-field="pmBase" data-min="1" data-max="999" title="PM base">base ${c.pmBase||10}</button>` : `base ${c.pmBase||10}`}</span>
-          ${canEdit?`<button class="vital-btn plus" data-action="adjustStat" data-field="pmActuel" data-delta="1" data-id="${c.id}">+</button>`:''}
+          ${canEdit ? `<div class="vital-current-control">
+            <span class="vital-control-label">Valeur actuelle</span>
+            <span class="vital-stepper">
+              <button class="vital-btn" data-action="adjustStat" data-field="pmActuel" data-delta="-1" data-id="${c.id}" title="Retirer 1 PM">−</button>
+              <button class="vital-btn plus" data-action="adjustStat" data-field="pmActuel" data-delta="1" data-id="${c.id}" title="Ajouter 1 PM">+</button>
+            </span>
+          </div>
+          <button class="cs-vital-base-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="pmBase"
+            data-min="1" data-max="999" title="Modifier les PM de base">
+            <span class="cs-vital-base-copy"><span>PM de base</span><strong>${c.pmBase||10}</strong></span>
+            <span class="cs-vital-base-edit" aria-hidden="true">✎</span>
+          </button>` : `<div class="cs-vital-base-readonly"><span>PM de base</span><strong>${c.pmBase||10}</strong></div>`}
         </div>
       </div>
     </div>
