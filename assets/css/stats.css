@@ -59,14 +59,18 @@
 .stats-skill-bar > span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #6366f1, #a78bfa); }
 .stats-skill-n { font-size: .72rem; color: var(--text-muted); flex-shrink: 0; font-variant-numeric: tabular-nums; }
 
-/* ── Stats de combat par personnage : grille label → valeur (lisible, sans débordement) ── */
+/* ── Stats de combat par personnage : liste label → valeur (une ligne par stat) ── */
 .stats-cgrid {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto;
-  gap: .16rem .8rem; align-items: baseline;
-  margin: 0 0 .55rem; padding-bottom: .5rem; border-bottom: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  margin: 0 0 .55rem; padding-bottom: .45rem; border-bottom: 1px solid var(--border);
 }
-.stats-clbl { font-size: .78rem; color: var(--text-soft, #c8d4e8); min-width: 0; }
-.stats-cval { font-size: .82rem; font-weight: 700; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stats-crow {
+  display: flex; align-items: baseline; justify-content: space-between; gap: .9rem;
+  padding: .18rem 0;
+}
+.stats-crow + .stats-crow { border-top: 1px solid rgba(255,255,255,.035); }
+.stats-clbl { font-size: .8rem; color: var(--text-soft, #c8d4e8); min-width: 0; }
+.stats-cval { font-size: .86rem; font-weight: 700; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* Favoris (sort / émote) : ligne pleine largeur, la valeur peut passer à la ligne */
 .stats-cfavs { display: flex; flex-direction: column; gap: .35rem; margin: 0 0 .55rem; padding-bottom: .5rem; border-bottom: 1px solid var(--border); }
 .stats-cfav { display: flex; align-items: center; justify-content: space-between; gap: .7rem; }
