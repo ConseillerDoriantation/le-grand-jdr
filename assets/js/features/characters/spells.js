@@ -1094,7 +1094,7 @@ export async function openSortModal(idx, s) {
   const ampMode  = s?.ampMode || 'zone';
   const hasDisp  = runesSrc.includes('Dispersion');
   const hasInv   = runesSrc.includes('Invocation');
-  const isAllongeCombo = hasEnchant && hasAmp && !hasDisp && !hasInv;
+  const isAllongeCombo = false;   // combo « Allonge magique » retiré (→ état d'enchantement « Allonge »)
   const hasActionRune = (_runeCountsEdit[ACTION_RUNE] || 0) > 0;
   const actionMode = _actionModeEdit || 'reaction';
   const actionModeBtnsHtml = [
@@ -1788,11 +1788,10 @@ function _isRegenerationComboActive(counts = _runeCountsEdit) {
     && (document.getElementById('s-affliction-mode')?.value || 'dot') !== 'laceration';
 }
 
-function _isAllongeComboActive(counts = _runeCountsEdit) {
-  return (counts?.Enchantement || 0) > 0
-    && (counts?.Amplification || 0) > 0
-    && (counts?.Dispersion || 0) === 0
-    && (counts?.Invocation || 0) === 0;
+// Combo « Allonge magique » retiré : l'Amplification n'écrase plus l'enchantement,
+// elle en augmente l'effet (état « Allonge » = portée, « Accéléré » = déplacement…).
+function _isAllongeComboActive() {
+  return false;
 }
 
 function _isCoupChanceComboActive(counts = _runeCountsEdit) {

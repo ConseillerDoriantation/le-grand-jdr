@@ -32,6 +32,16 @@ export function _conditionMoveBonusOf(tok) {
     }, 0);
 }
 
+// Bonus de portée d'attaque apporté par les états actifs (état « Allonge »).
+export function _conditionRangeBonusOf(tok) {
+  return _activeConditionsOf(tok)
+    .reduce((sum, { cond, lib }) => {
+      const raw = cond.rangeBonus ?? lib.effects?.rangeBonus;
+      const bonus = Number.isFinite(parseInt(raw)) ? parseInt(raw) : 0;
+      return sum + bonus;
+    }, 0);
+}
+
 export function _conditionDmgBonusOf(tok) {
   const active = _activeConditionsOf(tok)
     .map(({ cond, lib }) => ({
@@ -53,6 +63,11 @@ export function _scaledEnchantConditionFields(lib, power = 0, amplification = 0,
     fields.movementBonus = Number.isFinite(parseInt(overrides.movementBonus))
       ? parseInt(overrides.movementBonus)
       : base + amp;
+  }
+  // Allonge (portée) : +base, +1 par rune Amplification (symétrique du déplacement).
+  if (eff.rangeBonus != null) {
+    const base = Number.isFinite(parseInt(eff.rangeBonus)) ? parseInt(eff.rangeBonus) : 0;
+    fields.rangeBonus = base + amp;
   }
   if (eff.dmgDealtBonus) {
     fields.dmgDealtBonusFormula = (overrides.dmgFormula || '').trim() || `${1 + fields.enchantPower}d4 +2`;
@@ -207,7 +222,7 @@ export function _live(t) {
       const rangeBonus = (t.buffs || [])
         .filter(bf => bf.type === 'range_bonus' && (bf.expiresAtRound == null || r === 0 || r <= bf.expiresAtRound))
         .reduce((sum, bf) => sum + (bf.bonus || 0), 0);
-      return baseRange + rangeBonus;
+      return baseRange + rangeBonus + _conditionRangeBonusOf(t);   // + état « Allonge »
     })(),
     _beast:            b,   // référence directe pour _buildAttackOptions
     displayTokenW:     Math.max(1, Math.min(5, t.tokenW ?? t.tokenSize ?? b?.tokenW ?? b?.tokenSize ?? 1)),

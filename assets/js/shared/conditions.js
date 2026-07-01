@@ -65,6 +65,10 @@ export const CONDITION_DEFAULT_LIBRARY = [
     desc:'L\'allié gagne +2 cases de déplacement, +1 par rune Amplification du sort d\'enchantement.',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
     effects:{ movementBonus:2 } },
+  { id:'allonge',       label:'Allonge',     icon:'🏹', color:'#0ea5e9',
+    desc:'L\'allié gagne +2 cases de portée d\'attaque, +1 par rune Amplification du sort d\'enchantement.',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
+    effects:{ rangeBonus:2 } },
   { id:'guided',        label:'Guidé',       icon:'🎯', color:'#facc15',
     desc:'L\'allié est guidé : avantage à ses jets d\'attaque pendant la durée de l\'enchantement.',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
@@ -102,7 +106,7 @@ export const CONDITION_DEFAULT_LIBRARY = [
 
 export const CONDITION_DEFAULT_IDS = new Set(CONDITION_DEFAULT_LIBRARY.map(c => c.id));
 const CONDITION_REMOVED_IDS = new Set(['poisoned', 'warded']);
-const CONDITION_ENCHANTMENT_DEFAULT_IDS = new Set(['swift', 'guided', 'distant_ward', 'melee_ward', 'focused', 'empowered']);
+const CONDITION_ENCHANTMENT_DEFAULT_IDS = new Set(['swift', 'allonge', 'guided', 'distant_ward', 'melee_ward', 'focused', 'empowered']);
 const CONDITION_NON_SPELL_DEFAULT_IDS = new Set(['dodge', 'hidden', 'disengaged']);
 
 function normalizeSpellUsage(entry = {}, fallback = null) {

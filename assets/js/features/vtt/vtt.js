@@ -2125,7 +2125,7 @@ function _vttSpellMods(s) {
   // Sentinelle = Affliction (toute branche) + Invocation → la branche est absorbée,
   // pas de Lacération directe du lanceur (l'affliction est portée par la sentinelle).
   const isSentinelle = nbAff > 0 && nbInv > 0;
-  const isAllonge = nbEnch > 0 && nbAmp > 0 && nbDisp === 0 && nbInv === 0 && (s.enchantSlot || 'arme') === 'arme';
+  const isAllonge = false;   // combo « Allonge magique » retiré → l'Amplification augmente désormais l'état d'enchantement (état « Allonge » = portée)
   const isZoneElargie = nbAmp > 0 && nbDisp > 0;
   const isArmeInvoquee = nbEnch > 0 && nbInv > 0;
   const isRegeneration = nbProt > 0 && nbAff > 0 && nbInv === 0 && !isLacMode;

@@ -290,16 +290,8 @@ export const SORT_COMBOS = [
       return `Arme générique 1d8${nbP > 0 ? ` +${nbP} dé${nbP>1?'s':''} (Puissance)` : ''} · 2 tours par défaut · ⚠️ matrice Armes invoquées vide pour cet élément`;
     },
   },
-  {
-    id: 'allonge_magique',
-    icon: '🏹',
-    defaultName: 'Allonge magique',
-    detect: (counts, s) => counts.Enchantement > 0 && counts.Amplification > 0 && (counts.Dispersion || 0) === 0 && (counts.Invocation || 0) === 0 && (s?.enchantSlot || 'arme') === 'arme',
-    describe: (counts) => {
-      const len = _ampLength(counts.Amplification);
-      return `Enchantement (Arme) + Amplification ×${counts.Amplification} · portée d'attaque de l'arme enchantée +${len} cases (au lieu d'une zone)`;
-    },
-  },
+  // [Combo « Allonge magique » (Ench+Amp) retiré : remplacé par l'état d'enchantement
+  //  « Allonge » — l'Amplification augmente sa portée. Voir conditions.js.]
   {
     id: 'sentinelle',
     icon: '🪤',
@@ -1113,6 +1105,11 @@ export function _buildSortResume(s, c) {
         const manual = Number.isFinite(parseInt(s.enchantStateMoveBonus)) ? parseInt(s.enchantStateMoveBonus) : null;
         const bonus = manual != null ? manual : auto;
         detailParts.push(`+${bonus} case${bonus > 1 ? 's' : ''} de déplacement${manual != null && manual !== auto ? ' · naturel' : ''}`);
+      }
+      if (eff.rangeBonus != null) {
+        const base = Number.isFinite(parseInt(eff.rangeBonus)) ? parseInt(eff.rangeBonus) : 0;
+        const bonus = base + nbAmp;
+        detailParts.push(`+${bonus} case${bonus > 1 ? 's' : ''} de portée d'attaque`);
       }
       if (eff.attackBy === 'adv') detailParts.push('avantage aux attaques');
       if (eff.attackAgainstRanged === 'dis') detailParts.push('désavantage aux attaques à distance contre la cible');
