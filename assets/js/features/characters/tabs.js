@@ -147,10 +147,14 @@ export function renderCharCarac(c, canEdit) {
         <span class="cs-vital-card-total">${max}</span>
       </div>
       <div class="cs-vital-formula">
-        <span class="cs-vital-part ${canEdit?'cs-vital-part--edit':''}"
-              ${canEdit?`data-action="inlineEditNum" data-id="${c.id}" data-field="${baseField}" data-min="1" data-max="999" title="Modifier la base (niv. 1)"`:''}>
+        <span class="cs-vital-part cs-vital-part--base">
           <span class="cs-vital-part-lbl">Base</span>
-          <span class="cs-vital-part-val">${base}</span>
+          <span class="cs-vital-base-row">
+            ${canEdit?`<button class="cs-lvl-btn cs-lvl-btn--minus" data-action="_adjVitalBase" data-id="${c.id}" data-field="${baseField}" data-delta="-1" title="Diminuer la base">−</button>`:''}
+            <span class="cs-vital-part-val ${canEdit?'cs-vital-base-val--edit':''}"
+                  ${canEdit?`data-action="inlineEditNum" data-id="${c.id}" data-field="${baseField}" data-min="1" data-max="999" title="Cliquer pour saisir la base"`:''}>${base}</span>
+            ${canEdit?`<button class="cs-lvl-btn cs-lvl-btn--plus" data-action="_adjVitalBase" data-id="${c.id}" data-field="${baseField}" data-delta="1" title="Augmenter la base">+</button>`:''}
+          </span>
         </span>
         <span class="cs-vital-op">+</span>
         ${isPositive
@@ -183,7 +187,7 @@ export function renderCharCarac(c, canEdit) {
 
   html += `<div class="cs-section cs-caracs-tab-side">
     <div class="cs-section-title">❤️ Vitalité
-      <span class="cs-hint">${canEdit?'clic sur Base pour modifier':''}</span>
+      <span class="cs-hint">${canEdit?'− / + ou clic pour saisir la Base':''}</span>
     </div>
     <div class="cs-vitals-cards">
       ${_vitalCard({
@@ -769,6 +773,18 @@ export async function addXpFromInput(charId) {
   input.value = '';
   const lbl = document.getElementById(`cs-xp-val-${charId}`);
   if (lbl) lbl.textContent = newXp;
+}
+
+// Ajuste la base PV/PM (± delta) via les steppers de la carte Vitalité.
+export async function adjVitalBase(charId, field, delta) {
+  const c = getCharacterById(charId);
+  if (!c) return;
+  const cur  = Math.max(1, parseInt(c[field]) || 10);
+  const next = Math.max(1, Math.min(999, cur + (parseInt(delta) || 0)));
+  if (next === cur) return;
+  c[field] = next;
+  await updateInCol('characters', charId, { [field]: next });
+  charSession.renderSheet(c, charSession.getCurrentCharTab());
 }
 
 export function toggleCompteHist(type, count) {

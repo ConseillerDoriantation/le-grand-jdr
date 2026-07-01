@@ -5196,6 +5196,15 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   border-color: rgba(232,184,75,0.45);
   background: rgba(232,184,75,0.08);
 }
+/* Base PV/PM éditable : stepper − [valeur] + (valeur aussi cliquable pour saisir) */
+.cs-vital-part--base { padding: 0.28rem 0.45rem; }
+.cs-vital-base-row { display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.15rem; }
+.cs-vital-base-row .cs-lvl-btn { width: 24px; height: 24px; font-size: 1rem; }
+.cs-vital-base-val--edit {
+  cursor: pointer; padding: 0.05rem 0.35rem; border-radius: 6px; min-width: 1.6rem; text-align: center;
+  border: 1px dashed rgba(232,184,75,0.35); transition: background 0.12s, border-color 0.12s;
+}
+.cs-vital-base-val--edit:hover { background: rgba(232,184,75,0.12); border-color: rgba(232,184,75,0.6); }
 .cs-vital-part--prog {
   background: rgba(34,195,142,0.08);
   border-color: rgba(34,195,142,0.25);

@@ -59,7 +59,7 @@ import {
   renderCharMaitrises,
   addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,
   previewXpBar, saveXpDirect, addXpDelta,
-  allocStatPoint, addXpFromInput, toggleCompteHist,
+  allocStatPoint, addXpFromInput, adjVitalBase, toggleCompteHist,
   renderCharProfil, openProfilImageUpload, removeProfilImage,
   getProfilCacheRef as _profilCache,
   STATS_KEYS,
@@ -2735,6 +2735,7 @@ registerActions({
   _toggleCompteHist:        (btn)   => toggleCompteHist(btn.dataset.compteType, Number(btn.dataset.count)),
   _csAddXp:                 (btn)   => addXpFromInput(btn.dataset.id),
   _allocStatPoint:          (btn)   => allocStatPoint(btn.dataset.id, btn.dataset.key, Number(btn.dataset.delta)),
+  _adjVitalBase:            (btn)   => adjVitalBase(btn.dataset.id, btn.dataset.field, Number(btn.dataset.delta)),
   saveMaitrise:             (btn)   => saveMaitrise(Number(btn.dataset.idx)),
   deleteMaitrise:           (btn)   => deleteMaitrise(Number(btn.dataset.idx)),
 });
