@@ -48,20 +48,24 @@ function _statsTop(map = {}) {
 // Bandeau de chips combat (réutilisé par carte perso ET vue par séance).
 function _statsCombatChips(cm, { topSpell, topEmote } = {}) {
   const hr = cm.attacks ? Math.round((cm.hits / cm.attacks) * 100) : 0;
+  // Chaque chip : emoji + valeur + libellé lisible (plus seulement un symbole).
+  const chip = (ic, val, lbl) =>
+    `<span class="stats-cstat"><span class="stats-cstat-ic">${ic}</span> <b>${val}</b> <span class="stats-cstat-lbl">${lbl}</span></span>`;
   return [
-    cm.attacks > 0    && `<span class="stats-cstat" title="Attaques · taux de réussite">⚔️ ${cm.attacks} · ${hr}%</span>`,
-    cm.crits > 0      && `<span class="stats-cstat" title="Réussites critiques">💥 ${cm.crits}</span>`,
-    cm.fumbles > 0    && `<span class="stats-cstat" title="Échecs critiques">💔 ${cm.fumbles}</span>`,
-    cm.dmgDealt > 0   && `<span class="stats-cstat" title="Dégâts totaux infligés">🗡️ ${cm.dmgDealt}</span>`,
-    cm.biggestHit > 0 && `<span class="stats-cstat" title="Plus gros coup">💢 ${cm.biggestHit}</span>`,
-    cm.dmgTaken > 0   && `<span class="stats-cstat" title="Dégâts subis">🛡️ ${cm.dmgTaken}</span>`,
-    cm.kosDealt > 0   && `<span class="stats-cstat" title="KO infligés">☠️ ${cm.kosDealt} KO</span>`,
-    cm.kosTaken > 0   && `<span class="stats-cstat" title="Fois mis KO">💀 ${cm.kosTaken}</span>`,
-    cm.spellsCast > 0 && `<span class="stats-cstat" title="Sorts lancés">🔮 ${cm.spellsCast}</span>`,
-    cm.pmSpent > 0    && `<span class="stats-cstat" title="PM dépensés">🔋 ${cm.pmSpent}</span>`,
-    cm.heal > 0       && `<span class="stats-cstat" title="Soin prodigué">💚 ${cm.heal}</span>`,
-    topSpell          && `<span class="stats-cstat" title="Sort le plus lancé">⭐ ${_esc(topSpell.n)} ×${topSpell.c}</span>`,
-    topEmote          && `<span class="stats-cstat" title="Émote favorite">${_statsEmoteHtml(topEmote.n, 'stats-emote-sm')} ×${topEmote.c}</span>`,
+    cm.attacks > 0    && chip('⚔️', cm.attacks, 'attaques'),
+    cm.attacks > 0    && chip('🎯', `${hr}%`, 'réussite'),
+    cm.crits > 0      && chip('💥', cm.crits, 'critiques'),
+    cm.fumbles > 0    && chip('💔', cm.fumbles, 'échecs crit.'),
+    cm.dmgDealt > 0   && chip('🗡️', cm.dmgDealt, 'dégâts infligés'),
+    cm.biggestHit > 0 && chip('💢', cm.biggestHit, 'plus gros coup'),
+    cm.dmgTaken > 0   && chip('🛡️', cm.dmgTaken, 'dégâts subis'),
+    cm.kosDealt > 0   && chip('☠️', cm.kosDealt, 'KO infligés'),
+    cm.kosTaken > 0   && chip('💀', cm.kosTaken, 'KO subis'),
+    cm.spellsCast > 0 && chip('🔮', cm.spellsCast, 'sorts lancés'),
+    cm.pmSpent > 0    && chip('🔋', cm.pmSpent, 'PM dépensés'),
+    cm.heal > 0       && chip('💚', cm.heal, 'PV soignés'),
+    topSpell          && `<span class="stats-cstat"><span class="stats-cstat-lbl">⭐ Sort fétiche</span> <b>${_esc(topSpell.n)}</b> <span class="stats-cstat-lbl">×${topSpell.c}</span></span>`,
+    topEmote          && `<span class="stats-cstat"><span class="stats-cstat-lbl">Émote fétiche</span> ${_statsEmoteHtml(topEmote.n, 'stats-emote-sm')} <span class="stats-cstat-lbl">×${topEmote.c}</span></span>`,
   ].filter(Boolean).join('');
 }
 
