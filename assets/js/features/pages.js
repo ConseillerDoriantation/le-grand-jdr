@@ -1507,10 +1507,13 @@ const PAGES = {
     const content = document.getElementById('main-content');
     content.innerHTML = `${pageHeaderHtml('📊 Statistiques', 'Jets, réussites et exploits de la table')}
       <div id="stats-root" class="stats-root"><div class="stats-empty">Chargement…</div></div>`;
-    const [data, emoteDoc] = await Promise.all([
+    const [data, emoteDoc, chars] = await Promise.all([
       loadStats(),
       getDocData('world', 'vtt_emotes').catch(() => null),
+      // Charge les persos (avec leur portrait) pour les afficher à côté du nom.
+      loadChars().catch(() => null),
     ]);
+    if (Array.isArray(chars) && chars.length) STATE.characters = chars;
     _statsData = data;
     _statsEmoteUrl = new Map((emoteDoc?.emotes || []).filter(e => e?.name && e?.url).map(e => [e.name, e.url]));
     _statsScope = null;
