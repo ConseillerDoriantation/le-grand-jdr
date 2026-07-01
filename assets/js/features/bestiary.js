@@ -193,16 +193,7 @@ function _bstActionsCacheLoad(creatureId, actions) {
 }
 
 async function _bstEnsureSpellsModule() {
-  const mod = await import('./characters/spells.js');
-  const keys = [
-    'addSort','editSort','openSortModal','saveSort',
-    'addItemSpell','editItemSpell',
-    'runeIncrement','runeDecrement','selectNoyau',
-    'updateSortPM','toggleSortDetail',
-    'openSortCatEditor',
-    'sortDragStart','sortDragOver','sortDrop','sortDragEnd',
-  ];
-  return mod;
+  return import('./characters/spells.js');
 }
 
 function _bstActionsPersist() {

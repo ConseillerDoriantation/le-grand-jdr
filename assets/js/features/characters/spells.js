@@ -15,8 +15,6 @@ import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
 import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _ampDispCircleSize, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts, noyauTypesFor } from './spells-calc.js';
 
-// ── Drag and Drop sorts ──────────────────────
-let _dragSortIdx = null;
 let _sortsSearch = '';
 let _sortsView = 'all';
 let _sortsTypeFilter = '';
@@ -35,56 +33,6 @@ let _invCrop = null;         // instance du cropper pan/zoom inline de l'image d
 let _invCfgIdx = -1;         // index (deck) du sort dont on configure l'invocation
 let _invOriginal = null;     // s.invocation du sort en cours d'édition (préserve sélection/legacy)
 let _sortIconPickerOutsideBound = false;
-
-export function sortDragStart(e, idx) {
-  _dragSortIdx = idx;
-  e.currentTarget.style.opacity = '0.4';
-  e.dataTransfer.effectAllowed = 'move';
-}
-export function sortDragOver(e) {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-  document.querySelectorAll('.cs-spellcard').forEach(el => {
-    el.classList.remove('cs-drop-before', 'cs-drop-after');
-  });
-  const rect = e.currentTarget.getBoundingClientRect();
-  const mid  = rect.top + rect.height / 2;
-  if (e.clientY < mid) {
-    e.currentTarget.classList.add('cs-drop-before');
-  } else {
-    e.currentTarget.classList.add('cs-drop-after');
-  }
-}
-export function sortDragEnd(e) {
-  e.currentTarget.style.opacity = '';
-  document.querySelectorAll('.cs-spellcard').forEach(el => {
-    el.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
-  });
-}
-export async function sortDrop(e, toIdx) {
-  e.preventDefault();
-  const card = e.currentTarget;
-  const rect = card.getBoundingClientRect();
-  const insertAfter = e.clientY >= rect.top + rect.height / 2;
-  const actualIdx   = insertAfter ? toIdx + 1 : toIdx;
-  card.classList.remove('cs-sort-drag-over', 'cs-drop-before', 'cs-drop-after');
-  document.querySelectorAll('.cs-spellcard').forEach(el =>
-    el.classList.remove('cs-drop-before', 'cs-drop-after'));
-  const fromIdx = _dragSortIdx;
-  _dragSortIdx = null;
-  if (fromIdx === null) return;
-  const c = STATE.activeChar; if (!c) return;
-  const sorts = [...(c.deck_sorts||[])];
-  if (fromIdx === actualIdx || fromIdx === actualIdx - 1) return;
-  const [moved] = sorts.splice(fromIdx, 1);
-  const insertAt = actualIdx > fromIdx ? actualIdx - 1 : actualIdx;
-  sorts.splice(insertAt, 0, moved);
-  c.deck_sorts = sorts;
-  await trySave('characters', c.id, {deck_sorts: sorts});
-  _renderSpellsTab(c);
-}
-
-
 
 function _renderSpellsTab(c = _getCurrentSpellChar()) {
   if (!c) return;
