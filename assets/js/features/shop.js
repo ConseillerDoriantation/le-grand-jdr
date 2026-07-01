@@ -2277,9 +2277,6 @@ function _updateHomeOnly() {
   _mountSortables();
 }
 
-// Compat
-function shopGoSubCat() {}
-function shopFilterBy()  {}
 // ══════════════════════════════════════════════════════════════════════════════
 // DRAG & DROP (SortableJS) — Catégories & Articles
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2475,90 +2472,6 @@ async function deleteCat(catId) {
     if(_activeCat===catId){_view='home';_activeCat=null;}
     showNotif(`Catégorie et ${toDelete.length} article(s) supprimés.`,'success'); renderShop();
   } catch (e) { notifySaveError(e); }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// MODAL SOUS-CATÉGORIE
-// ══════════════════════════════════════════════════════════════════════════════
-function openSubCatModal(catId,scId) {
-  const cat = _cats.find(c=>c.id===catId);
-  const sc  = scId ? (cat?.sousCats||[]).find(s=>s.id===scId) : null;
-  openModal('', `
-  <div class="sh-admin-modal is-cat">
-    <div class="sh-admin-head">
-      <div class="sh-admin-head-ico">${sc ? '✏️' : '📂'}</div>
-      <div class="sh-admin-head-title">
-        <h2>${sc ? `Modifier « ${_esc(sc.nom||'?')} »` : 'Nouvelle sous-catégorie'}</h2>
-        <small>${cat ? `Dans ${_esc(cat.nom)}` : 'Sous-catégorie de l\'article'}</small>
-      </div>
-      <button class="sh-admin-close" data-sh-action="closeModal" title="Fermer">✕</button>
-    </div>
-
-    <div class="sh-admin-body">
-      <div class="sh-admin-section">
-        <div class="sh-admin-section-title">📝 Identité</div>
-        <div class="sh-admin-row">
-          <div class="sh-admin-row-line">
-            <span class="sh-admin-row-lbl">Nom</span>
-          </div>
-          <input class="sh-admin-row-input" id="sc-nom" value="${_esc(sc?.nom||'')}"
-            placeholder="Épée, Bouclier, Lance…" style="width:100%;text-align:left">
-        </div>
-        <div class="sh-admin-row" style="margin-top:8px">
-          <div class="sh-admin-row-line">
-            <span class="sh-admin-row-lbl">Emoji <small style="color:var(--text-dim)">(opt.)</small></span>
-            <input class="sh-admin-row-input small" id="sc-emoji" value="${_esc(sc?.emoji||'')}" placeholder="⚔️">
-          </div>
-        </div>
-      </div>
-
-      <div class="sh-admin-section">
-        <div class="sh-admin-section-title">🖼️ Illustration <small class="sh-label">(optionnelle)</small></div>
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <div id="sc-img-preview" style="width:90px;height:60px;border-radius:8px;background:rgba(0,0,0,.30);border:1px dashed var(--border-md);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">
-            ${sc?.image ? `<img src="${sc.image}" alt="${_esc(sc.nom || '')}" style="width:100%;height:100%;object-fit:cover">` : '<span style="color:var(--text-dim);font-size:1.4rem">🖼️</span>'}
-          </div>
-          <label style="flex:1;min-width:0">
-            <input type="file" id="sc-img-file" accept="image/*"
-              data-sh-action="uploadImg" data-sh-on="change" data-preview="sc-img-preview" data-hidden="sc-img-b64"
-              style="font-size:.78rem;color:var(--text-muted);width:100%">
-            <input type="hidden" id="sc-img-b64" value="${sc?.image||''}">
-          </label>
-        </div>
-      </div>
-    </div>
-
-    <div class="sh-admin-footer">
-      <button class="btn btn-outline btn-sm" data-sh-action="closeModal">Annuler</button>
-      <div class="sh-admin-footer-spacer"></div>
-      <button class="btn btn-gold btn-sm" data-sh-action="saveSubCat" data-cat="${catId}" data-sc="${scId||''}">
-        ${sc ? '💾 Enregistrer' : '➕ Créer'}
-      </button>
-    </div>
-  </div>
-  `);
-  setTimeout(()=>document.getElementById('sc-nom')?.focus(), 50);
-}
-
-async function saveSubCat(catId,scId) {
-  const nom=document.getElementById('sc-nom')?.value.trim();
-  const emoji=document.getElementById('sc-emoji')?.value.trim();
-  const image=document.getElementById('sc-img-b64')?.value||'';
-  if(!nom){showNotif('Nom requis.','error');return;}
-  const cat=_cats.find(c=>c.id===catId); if(!cat) return;
-  const sousCats=[...(cat.sousCats||[])];
-  if(scId){ const idx=sousCats.findIndex(s=>s.id===scId); if(idx>=0) sousCats[idx]={...sousCats[idx],nom,emoji,image}; }
-  else sousCats.push({id:'sc_'+Date.now(),nom,emoji,image});
-  if (await trySave('shopCategories',catId,{sousCats})) { closeModalDirect(); showNotif(scId?'Sous-catégorie mise à jour.':'Sous-catégorie créée !','success'); }
-  renderShop();
-}
-
-async function deleteSubCat(catId,scId) {
-  if (!await confirmModal('Supprimer cette sous-catégorie ?', { title: 'Confirmation de suppression' })) return;
-  const cat=_cats.find(c=>c.id===catId); if(!cat) return;
-  const sousCats=(cat.sousCats||[]).filter(s=>s.id!==scId);
-  if (await trySave('shopCategories',catId,{sousCats})) showNotif('Sous-catégorie supprimée.','success');
-  renderShop();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3389,7 +3302,6 @@ function refreshTemplateFields(tplKey) {
   host.innerHTML = _siBuildTabs(tpl, null, tplKey, cur);
   _bindPrixListener(); _initAutocompletes(); _siRefreshChip();
 }
-function refreshSubCatSelect(catId){ refreshItemFields(catId); }
 
 // ── Upload image ──────────────────────────────────────────────────────────────
 function previewUpload(fileInputId,previewId,hiddenId) {
@@ -3616,10 +3528,6 @@ async function deleteShopItem(itemId) {
     showNotif('Article supprimé.','success'); renderShop();
   } catch (e) { notifySaveError(e); }
 }
-
-function openShopItemModal(item){ openItemModal(item?.id); }
-async function editShopItem(id){ openItemModal(id); }
-function filterShop(){}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // EXPORT / IMPORT
@@ -4592,9 +4500,8 @@ Object.assign(shHandlers, {
   degatsRemove:   (el) => removeShopDegatsStat(parseInt(el.dataset.idx)),
   skillAdd:       () => addSkillBonus(),
   skillRemove:    (el) => removeSkillBonus(el.dataset.skill),
-  // Modal catégorie/sous-cat
+  // Modal catégorie
   saveCat:        (el) => saveCat(el.dataset.id || ''),
-  saveSubCat:     (el) => saveSubCat(el.dataset.cat, el.dataset.sc || ''),
   // Export / import
   tabSwitch:      (el) => switchShopExportTab(el.dataset.tab),
   exportSelectAll:(el) => selectAllShopExport(el.dataset.all === 'true'),

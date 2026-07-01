@@ -13,7 +13,7 @@ import { getArmorSetData, getMainWeapon } from './data.js';
 import { makeSortable } from '../../shared/sortable-helper.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
-import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, SPELL_SLOTS, _SPELL_STAT_OPTIONS, _activeCombos, _ampDispCircleSize, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts, noyauTypesFor } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _ampDispCircleSize, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _isNoyauMagic, _needsDureeBase, _readVisibleStatOverride, _runeCounts, noyauTypesFor } from './spells-calc.js';
 
 // ── Drag and Drop sorts ──────────────────────
 let _dragSortIdx = null;
@@ -31,7 +31,6 @@ let _actionModeEdit = 'reaction';
 let _protModeEdit = 'ca';   // mode rune Protection en cours d'édition ('ca'|'soin') — source fiable (≠ DOM périmé)
 let _enchantExtraSavedEdit = [];   // états d'enchantement supplémentaires sauvegardés (slots 2..n)
 let _invImageEdit = '';      // image (dataUrl) de l'invocation en cours d'édition
-let _invActionsEdit = [];    // actions (mini-sorts) de l'invocation — éditées à l'étape C
 let _invCrop = null;         // instance du cropper pan/zoom inline de l'image d'invocation
 let _invCfgIdx = -1;         // index (deck) du sort dont on configure l'invocation
 let _invOriginal = null;     // s.invocation du sort en cours d'édition (préserve sélection/legacy)
@@ -1108,7 +1107,6 @@ export async function openSortModal(idx, s) {
   _sortTypesEdit  = new Set(typesInit);
   _deplModeEdit   = s?.deplacement?.mode || (s?.ampMode === 'deplacement' ? 'self' : null);
   _invImageEdit   = s?.invocation?.image || '';
-  _invActionsEdit = Array.isArray(s?.invocation?.actions) ? s.invocation.actions.map(a => ({ ...a })) : [];
   _invOriginal    = (s?.invocation && typeof s.invocation === 'object') ? s.invocation : null;
 
   const hasEnchant  = runesSrc.includes('Enchantement');
@@ -1965,16 +1963,6 @@ function _toggleSortType(type) {
   _applyTypeChange();
 }
 
-// ── Invocation : section éditeur (les ACTIONS se gèrent depuis la carte du sort,
-//    via la vraie modale de sort — cf. _openInvocationConfig) ──────────────────
-function _renderInvActionsList() {
-  const n = (_invActionsEdit || []).length;
-  return `<div class="cs-inv-actions-note">
-    ${n ? `<b>${n}</b> action${n>1?'s':''} définie${n>1?'s':''}.` : 'Aucune action pour l\'instant.'}
-    Conçois-les depuis la carte du sort (bouton <b>🐾</b>, après enregistrement) — chaque action est un vrai sort à runes.
-  </div>`;
-}
-
 // ── Configuration de l'invocation (modale depuis la carte du sort) ─────────────
 //    Les actions = vrais sorts, édités via la modale de sort complète
 //    (editItemSpell). La modale de config N'EST PAS un éditeur de sort → ouvrir
@@ -2751,13 +2739,6 @@ function _pickSortIcon(icon) {
   _updateSortPreview();
 }
 
-// Marque la textarea comme "touchée par l'utilisateur" dès qu'il y tape :
-// empêche le pré-remplissage agressif d'écraser ses changements ultérieurs.
-function _markSpellEffectTouched(cat) {
-  const txtEl = document.getElementById(`s-${cat}-effect`);
-  if (txtEl) txtEl.dataset.userTouched = '1';
-}
-
 /**
  * Applique une suggestion spécifique (base64 encodé) dans la textarea d'effet.
  * Appelé depuis les boutons générés par _refreshSpellSuggestions.
@@ -2818,23 +2799,6 @@ function _selectAfflictionMode(mode) {
   if (dotBlock) dotBlock.style.display = mode === 'dot' ? '' : 'none';
   if (etatBlock) etatBlock.style.display = mode === 'etat' ? '' : 'none';
   if (lacBlock) lacBlock.style.display = mode === 'laceration' ? '' : 'none';
-  _updateSortPreview();
-}
-
-function _selectSpellSlot(groupId, slotV) {
-  const hidden = document.getElementById(`s-${groupId}-slot`);
-  if (hidden) hidden.value = slotV;
-  // Style des boutons
-  SPELL_SLOTS.forEach(opt => {
-    const btn = document.getElementById(`s-${groupId}-slot-${opt.v}`);
-    if (!btn) return;
-    btn.classList.toggle('selected', opt.v === slotV);
-  });
-  // Section dégâts visible UNIQUEMENT si slot=arme (Enchantement)
-  if (groupId === 'enchant') {
-    const row = document.getElementById('s-enchant-degats-row');
-    if (row) row.style.display = slotV === 'arme' ? '' : 'none';
-  }
   _updateSortPreview();
 }
 
