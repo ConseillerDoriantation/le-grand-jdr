@@ -8244,19 +8244,6 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .aura-int-btn:hover { color: var(--text); border-color: var(--aura-border, rgba(79,140,255,.5)); }
 .cs-v3 .aura-int-btn.active { background: var(--aura-soft, rgba(79,140,255,.12)); border-color: var(--aura-border, rgba(79,140,255,.55)); color: var(--aura, #4f8cff); }
 
-/* ── Thème d'aura appliqué à toute la feuille ── */
-.cs-v3 .sheet {
-  background-image: radial-gradient(ellipse 120% 42% at 50% -2%, var(--aura-glow, transparent) 0%, transparent 72%);
-  background-repeat: no-repeat; background-position: top center;
-}
-.cs-v3 .tab-v3.active { color: var(--aura, #7eb0ff); box-shadow: 0 -4px 16px -8px var(--aura-strong, rgba(79,140,255,.30)); }
-.cs-v3 .cs-section-title { position: relative; padding-left: 11px; }
-.cs-v3 .cs-section-title::before {
-  content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-  width: 3px; height: 0.82em; border-radius: 2px;
-  background: var(--aura, #4f8cff); opacity: .8;
-}
-
 /* MAIN COL */
 .cs-v3 .main-col {
   background: var(--bg-card); border: 1px solid var(--border);
