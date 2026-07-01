@@ -143,18 +143,20 @@ export function applyStatsDelta(delta, sign = 1) {
   return bumpStats({ chars: _incTree(delta.chars, sign) });
 }
 
-// ── Plus gros coup (max d'un seul coup) ──────────────────────────────────────
+// ── Records "max" (plus gros coup infligé / reçu) ────────────────────────────
 // increment() ne sait pas faire un max → on compare au miroir mémoire (_mem,
 // amorcé d'un seul getDoc par session si besoin) et on n'écrit que si record.
 // Non réversible à l'annulation (un record reste un record) — acceptable.
-export async function bumpBiggestHit(charId, charName, dmg) {
-  if (!charId || !(dmg > 0)) return;
+async function _bumpMaxField(charId, charName, field, val) {
+  if (!charId || !(val > 0)) return;
   if (!_mem) _mem = (await loadStats()) || {};
-  const cur = Number(_mem?.chars?.[charId]?.combat?.biggestHit) || 0;
-  if (dmg <= cur) return;
-  ((((_mem.chars ??= {})[charId] ??= {}).combat ??= {}).biggestHit) = dmg;
-  return bumpStats({ chars: { [charId]: { name: charName || '', combat: { biggestHit: dmg } } } });
+  const cur = Number(_mem?.chars?.[charId]?.combat?.[field]) || 0;
+  if (val <= cur) return;
+  ((((_mem.chars ??= {})[charId] ??= {}).combat ??= {})[field]) = val;
+  return bumpStats({ chars: { [charId]: { name: charName || '', combat: { [field]: val } } } });
 }
+export const bumpBiggestHit   = (charId, name, dmg) => _bumpMaxField(charId, name, 'biggestHit', dmg);
+export const bumpBiggestTaken = (charId, name, dmg) => _bumpMaxField(charId, name, 'biggestTaken', dmg);
 
 // ── Soin direct (ex. tick de Régénération) ───────────────────────────────────
 // Écriture directe (un HoT par tour ne se « défait » pas proprement à l'annulation).

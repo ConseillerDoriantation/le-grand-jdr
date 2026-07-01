@@ -59,20 +59,19 @@
 .stats-skill-bar > span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #6366f1, #a78bfa); }
 .stats-skill-n { font-size: .72rem; color: var(--text-muted); flex-shrink: 0; font-variant-numeric: tabular-nums; }
 
-/* ── Stats de combat par personnage ── */
-.stats-cstats {
-  display: flex; flex-wrap: wrap; gap: .35rem .5rem;
-  margin: 0 0 .6rem; padding-bottom: .55rem;
-  border-bottom: 1px solid var(--border);
+/* ── Stats de combat par personnage : grille label → valeur (lisible, sans débordement) ── */
+.stats-cgrid {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: .16rem .8rem; align-items: baseline;
+  margin: 0 0 .55rem; padding-bottom: .5rem; border-bottom: 1px solid var(--border);
 }
-.stats-cstat {
-  font-size: .76rem; color: var(--text-soft, #c8d4e8);
-  background: var(--bg-elevated); border: 1px solid var(--border);
-  border-radius: 999px; padding: .15rem .6rem;
-  font-variant-numeric: tabular-nums; white-space: nowrap;
-}
-.stats-cstat b { font-variant-numeric: tabular-nums; }
-.stats-cstat-lbl { color: var(--text-muted); font-weight: 400; }
+.stats-clbl { font-size: .78rem; color: var(--text-soft, #c8d4e8); min-width: 0; }
+.stats-cval { font-size: .82rem; font-weight: 700; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Favoris (sort / émote) : ligne pleine largeur, la valeur peut passer à la ligne */
+.stats-cfavs { display: flex; flex-direction: column; gap: .35rem; margin: 0 0 .55rem; padding-bottom: .5rem; border-bottom: 1px solid var(--border); }
+.stats-cfav { display: flex; align-items: center; justify-content: space-between; gap: .7rem; }
+.stats-cfav-v { display: inline-flex; align-items: center; gap: .35rem; font-size: .82rem; font-weight: 700; color: var(--text); text-align: right; overflow-wrap: anywhere; }
+.stats-cfav-v small { color: var(--text-muted); font-weight: 400; }
 
 /* Émote affichée pour de vrai (image) au lieu de son nom */
 .stats-emote { width: 1.5rem; height: 1.5rem; vertical-align: middle; object-fit: contain; }

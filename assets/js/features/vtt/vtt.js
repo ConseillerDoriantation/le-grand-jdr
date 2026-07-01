@@ -28,7 +28,7 @@ import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js
 import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
-import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit } from '../../shared/stats.js';
+import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit, bumpBiggestTaken } from '../../shared/stats.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
@@ -6224,6 +6224,9 @@ async function _vttRollAttack() {
         ko: (curHp > 0 && newHp <= 0),
       });
       if ((hit || halfDmg) && dmgTotal > _maxHit) _maxHit = dmgTotal;
+      // Record du plus gros coup REÇU par la cible (PJ).
+      if ((hit || halfDmg) && dmgTotal > 0 && curTgtData.characterId)
+        bumpBiggestTaken(curTgtData.characterId, curTgtData.name || '', dmgTotal);
 
       // ── États consommés au 1er coup (Marqué, etc.) : retire ceux dont
       //    l'effet `consumedByAttackAgainst` est activé après que les bonus

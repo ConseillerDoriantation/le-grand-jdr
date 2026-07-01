@@ -38,7 +38,8 @@ function _statsNormCombat(cm = {}) {
   return {
     attacks: n(cm.attacks), hits: n(cm.hits), crits: n(cm.crits), fumbles: n(cm.fumbles),
     dmgDealt: n(cm.dmgDealt), dmgTaken: n(cm.dmgTaken), kosDealt: n(cm.kosDealt), kosTaken: n(cm.kosTaken),
-    spellsCast: n(cm.spellsCast), pmSpent: n(cm.pmSpent), heal: n(cm.heal), biggestHit: n(cm.biggestHit),
+    spellsCast: n(cm.spellsCast), pmSpent: n(cm.pmSpent), heal: n(cm.heal),
+    biggestHit: n(cm.biggestHit), biggestTaken: n(cm.biggestTaken),
   };
 }
 function _statsTop(map = {}) {
@@ -46,27 +47,29 @@ function _statsTop(map = {}) {
   return e && e.c > 0 ? e : null;
 }
 // Bandeau de chips combat (réutilisé par carte perso ET vue par séance).
-function _statsCombatChips(cm, { topSpell, topEmote } = {}) {
+function _statsCombatGrid(cm, { topSpell, topEmote } = {}) {
   const hr = cm.attacks ? Math.round((cm.hits / cm.attacks) * 100) : 0;
-  // Chaque chip : emoji + valeur + libellé lisible (plus seulement un symbole).
-  const chip = (ic, val, lbl) =>
-    `<span class="stats-cstat"><span class="stats-cstat-ic">${ic}</span> <b>${val}</b> <span class="stats-cstat-lbl">${lbl}</span></span>`;
-  return [
-    cm.attacks > 0    && chip('⚔️', cm.attacks, 'attaques'),
-    cm.attacks > 0    && chip('🎯', `${hr}%`, 'réussite'),
-    cm.crits > 0      && chip('💥', cm.crits, 'critiques'),
-    cm.fumbles > 0    && chip('💔', cm.fumbles, 'échecs crit.'),
-    cm.dmgDealt > 0   && chip('🗡️', cm.dmgDealt, 'dégâts infligés'),
-    cm.biggestHit > 0 && chip('💢', cm.biggestHit, 'plus gros coup'),
-    cm.dmgTaken > 0   && chip('🛡️', cm.dmgTaken, 'dégâts subis'),
-    cm.kosDealt > 0   && chip('☠️', cm.kosDealt, 'KO infligés'),
-    cm.kosTaken > 0   && chip('💀', cm.kosTaken, 'KO subis'),
-    cm.spellsCast > 0 && chip('🔮', cm.spellsCast, 'sorts lancés'),
-    cm.pmSpent > 0    && chip('🔋', cm.pmSpent, 'PM dépensés'),
-    cm.heal > 0       && chip('💚', cm.heal, 'PV soignés'),
-    topSpell          && `<span class="stats-cstat"><span class="stats-cstat-lbl">⭐ Sort fétiche</span> <b>${_esc(topSpell.n)}</b> <span class="stats-cstat-lbl">×${topSpell.c}</span></span>`,
-    topEmote          && `<span class="stats-cstat"><span class="stats-cstat-lbl">Émote fétiche</span> ${_statsEmoteHtml(topEmote.n, 'stats-emote-sm')} <span class="stats-cstat-lbl">×${topEmote.c}</span></span>`,
-  ].filter(Boolean).join('');
+  // Grille label → valeur : lisible, jamais de débordement (valeur alignée à droite).
+  const rows = [];
+  const row = (ic, lbl, val) => rows.push(
+    `<div class="stats-crow"><span class="stats-clbl">${ic} ${lbl}</span><span class="stats-cval">${val}</span></div>`);
+  if (cm.attacks > 0)      { row('⚔️', 'Attaques', cm.attacks); row('🎯', 'Taux de réussite', `${hr}%`); }
+  if (cm.crits > 0)        row('💥', 'Réussites critiques', cm.crits);
+  if (cm.fumbles > 0)      row('💔', 'Échecs critiques', cm.fumbles);
+  if (cm.dmgDealt > 0)     row('🗡️', 'Dégâts infligés', cm.dmgDealt);
+  if (cm.biggestHit > 0)   row('💢', 'Plus gros coup infligé', cm.biggestHit);
+  if (cm.dmgTaken > 0)     row('🛡️', 'Dégâts subis', cm.dmgTaken);
+  if (cm.biggestTaken > 0) row('🩸', 'Plus gros coup reçu', cm.biggestTaken);
+  if (cm.kosDealt > 0)     row('☠️', 'KO infligés', cm.kosDealt);
+  if (cm.kosTaken > 0)     row('💀', 'Fois mis KO', cm.kosTaken);
+  if (cm.spellsCast > 0)   row('🔮', 'Sorts lancés', cm.spellsCast);
+  if (cm.pmSpent > 0)      row('🔋', 'PM dépensés', cm.pmSpent);
+  if (cm.heal > 0)         row('💚', 'PV soignés', cm.heal);
+  const favs = [];
+  if (topSpell) favs.push(`<div class="stats-cfav"><span class="stats-clbl">⭐ Sort fétiche</span><span class="stats-cfav-v">${_esc(topSpell.n)} <small>×${topSpell.c}</small></span></div>`);
+  if (topEmote) favs.push(`<div class="stats-cfav"><span class="stats-clbl">😄 Émote fétiche</span><span class="stats-cfav-v">${_statsEmoteHtml(topEmote.n, 'stats-emote')} <small>×${topEmote.c}</small></span></div>`);
+  return (rows.length ? `<div class="stats-cgrid">${rows.join('')}</div>` : '')
+       + (favs.length ? `<div class="stats-cfavs">${favs.join('')}</div>` : '');
 }
 
 const _statsFmtDate = (d) => { const [y, m, da] = d.split('-'); return `${da}/${m}/${y}`; };
@@ -155,8 +158,7 @@ function _statsRender(dateKey) {
     return `<div class="stats-award"><span class="stats-award-ic">${ic}</span><div class="stats-award-tx"><span class="stats-award-lbl">${lbl}</span><span class="stats-award-who">${_esc(who)} <b>· ${val}</b></span></div></div>`; };
 
   const charBlock = (r) => {
-    const combatHtml = ((c) => c ? `<div class="stats-cstats">${c}</div>` : '')(
-      _statsCombatChips(r.combat, { topSpell: r.spells[0], topEmote: r.emotes[0] }));
+    const combatHtml = _statsCombatGrid(r.combat, { topSpell: r.spells[0], topEmote: r.emotes[0] });
     const skillHtml = r.perSkill.length ? `
       <div class="stats-skills">
         ${r.perSkill.map(s => `
@@ -1555,7 +1557,7 @@ registerActions({
     const fmt = (d) => { const [y, m, da] = d.split('-'); return `${da}/${m}/${y}`; };
     const body = dates.length ? dates.map((d) => {
       const e = byDate[d] || {};
-      const chips = _statsCombatChips(_statsNormCombat(e.combat), { topSpell: _statsTop(e.spells), topEmote: _statsTop(e.emotes) });
+      const grid = _statsCombatGrid(_statsNormCombat(e.combat), { topSpell: _statsTop(e.spells), topEmote: _statsTop(e.emotes) });
       const skills = Object.entries(e.skills || {}).map(([sk, v]) => ({ sk, rolls: _statsNum(v?.rolls), crits: _statsNum(v?.crits), fumbles: _statsNum(v?.fumbles) }))
         .filter(s => s.rolls > 0).sort((a, b) => b.rolls - a.rolls);
       const skillLine = skills.length
@@ -1563,8 +1565,8 @@ registerActions({
         : '';
       return `<div class="stats-date">
         <div class="stats-date-hd">📅 ${fmt(d)}</div>
-        ${chips ? `<div class="stats-cstats">${chips}</div>` : ''}
-        ${skillLine || (chips ? '' : '<div class="stats-date-skills" style="opacity:.5">Aucune action ce jour.</div>')}
+        ${grid}
+        ${skillLine || (grid ? '' : '<div class="stats-date-skills" style="opacity:.5">Aucune action ce jour.</div>')}
       </div>`;
     }).join('') : '<div class="stats-empty">Aucune séance enregistrée.</div>';
     openModal(`📅 ${_esc(c.name || 'Personnage')} — par séance`, `<div class="stats-dates">${body}</div>`);
