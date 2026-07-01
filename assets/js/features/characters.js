@@ -206,16 +206,57 @@ function _resolveV3Tab(raw) {
 }
 
 
-// Convertit une couleur hex aura (#rrggbb) en variables CSS rgba
-function _auraVars(hexCol) {
+// Couleur d'aura effective : couleur perso (hex libre) sinon preset nommé.
+function _auraHex(c) {
+  const cust = (c?.auraColor || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(cust) ? cust : _auraColor(c?.aura);
+}
+// Intensité de l'aura (multiplicateur des alphas). Défaut 1.
+function _auraIntensity(c) {
+  const v = parseFloat(c?.auraIntensity);
+  return Number.isFinite(v) ? Math.max(0.3, Math.min(2, v)) : 1;
+}
+// Convertit une couleur hex aura (#rrggbb) + intensité en variables CSS.
+function _auraVars(hexCol, intensity = 1) {
   const r = parseInt(hexCol.slice(1,3),16);
   const g = parseInt(hexCol.slice(3,5),16);
   const b = parseInt(hexCol.slice(5,7),16);
+  const k = Math.max(0.3, Math.min(2, intensity || 1));
+  const a = (base) => Math.min(0.96, base * k).toFixed(3);
   return {
-    auraGlow: `rgba(${r},${g},${b},.14)`,
-    auraBd:   `rgba(${r},${g},${b},.55)`,
-    auraSh:   `0 0 38px rgba(${r},${g},${b},.28)`,
+    aura:       hexCol,
+    auraGlow:   `rgba(${r},${g},${b},${a(0.14)})`,
+    auraSoft:   `rgba(${r},${g},${b},${a(0.07)})`,
+    auraBd:     `rgba(${r},${g},${b},${a(0.55)})`,
+    auraStrong: `rgba(${r},${g},${b},${a(0.85)})`,
+    auraSh:     `0 0 ${Math.round(38*k)}px rgba(${r},${g},${b},${a(0.28)})`,
   };
+}
+// Chaîne de variables CSS d'aura posée sur la racine .cs-v3 (toute la feuille en hérite).
+function _auraStyleVars(c) {
+  const v = _auraVars(_auraHex(c), _auraIntensity(c));
+  return `--aura:${v.aura};--aura-glow:${v.auraGlow};--aura-soft:${v.auraSoft};--aura-border:${v.auraBd};--aura-strong:${v.auraStrong};--aura-shadow:${v.auraSh}`;
+}
+// Réapplique les variables d'aura en direct (sans re-render complet) + états actifs du picker.
+function _applyAuraVars(c) {
+  const root = document.querySelector('.cs-v3');
+  if (root) {
+    const v = _auraVars(_auraHex(c), _auraIntensity(c));
+    root.style.setProperty('--aura',        v.aura);
+    root.style.setProperty('--aura-glow',   v.auraGlow);
+    root.style.setProperty('--aura-soft',   v.auraSoft);
+    root.style.setProperty('--aura-border', v.auraBd);
+    root.style.setProperty('--aura-strong', v.auraStrong);
+    root.style.setProperty('--aura-shadow', v.auraSh);
+  }
+  const side = document.getElementById('cs-sidebar');
+  if (side) side.setAttribute('data-aura', c.auraColor ? 'custom' : (c.aura || 'blue'));
+  const isCustom = !!c.auraColor, curInt = _auraIntensity(c);
+  document.querySelectorAll('.aura-dot:not(.aura-dot--custom)').forEach(d =>
+    d.classList.toggle('active', !isCustom && d.dataset.auraKey === (c.aura || 'blue')));
+  document.querySelector('.aura-dot--custom')?.classList.toggle('active', isCustom);
+  document.querySelectorAll('.aura-int-btn').forEach(b =>
+    b.classList.toggle('active', parseFloat(b.dataset.level) === curInt));
 }
 
 // Pastilles de sélection de personnage (char-switch)
@@ -341,8 +382,7 @@ function _buildTabsHtml(c, v3Tab) {
 }
 
 function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckMax, titresChips }) {
-  return `<aside class="id-side" id="cs-sidebar" data-aura="${c.aura||'blue'}"
-    style="--aura-glow:${auraGlow};--aura-border:${auraBd};--aura-shadow:${auraSh}">
+  return `<aside class="id-side" id="cs-sidebar" data-aura="${c.auraColor?'custom':(c.aura||'blue')}">
 
     <div class="id-portrait-wrap">
       <div class="id-portrait"
@@ -471,16 +511,30 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
       ${canEdit?`<button class="or-card-btn" data-action="openSendGoldModal" data-id="${c.id}">↗ Envoyer</button>`:''}
     </div>
 
-    ${canEdit?`<div class="aura-row">
-      <span class="aura-lbl">Aura</span>
-      <div class="aura-dots">
-        ${Object.entries(AURA_PALETTE).map(([k,col]) => `
-          <button class="aura-dot${(c.aura||'blue')===k?' active':''}"
-            style="--dot-c:${col}" data-aura="${k}"
-            data-action="setCharAura" data-id="${c.id}" data-aura-key="${k}"
-            title="${k}"></button>`).join('')}
+    ${canEdit?(() => {
+      const isCustom = !!c.auraColor, curHex = _auraHex(c), curInt = _auraIntensity(c);
+      return `<div class="aura-panel">
+      <div class="aura-row">
+        <span class="aura-lbl">Aura</span>
+        <div class="aura-dots">
+          ${Object.entries(AURA_PALETTE).map(([k,col]) => `
+            <button class="aura-dot${(!isCustom && (c.aura||'blue')===k)?' active':''}"
+              style="--dot-c:${col}" data-aura-key="${k}"
+              data-action="setCharAura" data-id="${c.id}"
+              title="${k}"></button>`).join('')}
+          <label class="aura-dot aura-dot--custom${isCustom?' active':''}" style="--dot-c:${curHex}" title="Couleur personnalisée">
+            <input type="color" class="aura-color-input" value="${curHex}" data-change="setCharAuraColor" data-id="${c.id}">
+          </label>
+        </div>
       </div>
-    </div>`:''}
+      <div class="aura-row">
+        <span class="aura-lbl">Intensité</span>
+        <div class="aura-intens">
+          ${[['0.6','Léger'],['1','Normal'],['1.4','Fort']].map(([lv,lbl]) => `
+            <button class="aura-int-btn${curInt===parseFloat(lv)?' active':''}" data-action="setCharAuraIntensity" data-id="${c.id}" data-level="${lv}">${lbl}</button>`).join('')}
+        </div>
+      </div>
+    </div>`;})():''}
 
   </aside>`;
 }
@@ -548,7 +602,7 @@ function renderCharSheet(c, keepTab) {
 
   // ── Sous-composants HTML ───────────────────────
   const charSwitchHtml = _buildCharSwitchHtml(c.id, canEdit);
-  const { auraGlow, auraBd, auraSh } = _auraVars(_auraColor(c.aura));
+  const { auraGlow, auraBd, auraSh } = _auraVars(_auraHex(c), _auraIntensity(c));
   const tilesHtml      = _buildStatTilesHtml(c, canEdit, lvlPointsRemaining);
   const tabsHtml       = _buildTabsHtml(c, v3Tab);
 
@@ -567,7 +621,7 @@ function renderCharSheet(c, keepTab) {
   const sidebarHtml = _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckMax, titresChips });
   const mainColHtml = _buildMainColHtml(c, canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, titres, playerLbl, advLbl, v3Tab });
 
-  area.innerHTML = `<div class="cs-v3">
+  area.innerHTML = `<div class="cs-v3" style="${_auraStyleVars(c)}">
   <div class="app-shell">
     <div class="char-switch-row">${charSwitchHtml}</div>
     <div class="sheet">
@@ -2541,19 +2595,24 @@ async function _setDefaultCharacter(charId) {
 async function setCharAura(charId, aura) {
   const c = getCharacterById(charId);
   if (!c) return;
-  c.aura = aura;
-  await updateInCol('characters', charId, {aura});
-  const side = document.getElementById('cs-sidebar');
-  if (side) {
-    side.setAttribute('data-aura', aura);
-    const { auraGlow, auraBd, auraSh } = _auraVars(_auraColor(aura));
-    side.style.setProperty('--aura-glow',   auraGlow);
-    side.style.setProperty('--aura-border', auraBd);
-    side.style.setProperty('--aura-shadow', auraSh);
-  }
-  document.querySelectorAll('.cs-aura-dot, .aura-dot').forEach(d =>
-    d.classList.toggle('active', d.dataset.aura === aura)
-  );
+  c.aura = aura; c.auraColor = null;   // preset choisi → efface la couleur personnalisée
+  await updateInCol('characters', charId, { aura, auraColor: null });
+  _applyAuraVars(c);
+}
+async function setCharAuraColor(charId, hex) {
+  const c = getCharacterById(charId);
+  if (!c || !/^#[0-9a-fA-F]{6}$/.test(hex || '')) return;
+  c.auraColor = hex;
+  await updateInCol('characters', charId, { auraColor: hex });
+  _applyAuraVars(c);
+}
+async function setCharAuraIntensity(charId, level) {
+  const c = getCharacterById(charId);
+  if (!c) return;
+  const v = Math.max(0.3, Math.min(2, parseFloat(level) || 1));
+  c.auraIntensity = v;
+  await updateInCol('characters', charId, { auraIntensity: v });
+  _applyAuraVars(c);
 }
 
 // Mémorise la position de scroll par onglet (clé : charId + tab)
@@ -2656,6 +2715,8 @@ registerActions({
   openCharExportMenu:      (btn)    => openCharExportMenu(btn.dataset.id, btn),
   deleteChar:              (btn)    => deleteChar(btn.dataset.id),
   setCharAura:             (btn)    => setCharAura(btn.dataset.id, btn.dataset.auraKey),
+  setCharAuraColor:        (el)     => setCharAuraColor(el.dataset.id, el.value),
+  setCharAuraIntensity:    (btn)    => setCharAuraIntensity(btn.dataset.id, btn.dataset.level),
   openSendGoldModal:       (btn)    => openSendGoldModal(btn.dataset.id),
 
   // Ledger
