@@ -613,7 +613,6 @@ function _renderSpellMatricesModal(types) {
       drain:               'Puissance + Protection → dégâts ET soin sur le même lancer',
       zone_elargie:        'Amplification + Dispersion → Dispersion élargit la zone au lieu d\'ajouter des cibles',
       arme_invoquee:       'Enchantement + Invocation → manifeste une arme magique élémentaire (voir onglet Armes invoquées)',
-      allonge_magique:     'Enchantement (Arme) + Amplification → portée d\'arme étendue au lieu d\'une zone',
       sentinelle:          'Affliction + Invocation → sentinelle stationnaire qui afflige à l\'entrée',
       canalise_persistant: 'Durée + Concentration → tient tant que la concentration · grâce après rupture',
       bouclier_reactif:    'Réaction + Protection (CA) → consommé en réaction à une attaque entrante',

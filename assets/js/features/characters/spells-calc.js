@@ -392,15 +392,6 @@ export function _activeCombos(s) {
 function _comboResumeLines(activeCombos, comboIds, counts, s) {
   const lines = [];
   const combo = id => activeCombos.find(c => c.id === id);
-  if (comboIds.has('allonge_magique')) {
-    const len = _ampLength(counts.Amplification || 0);
-    lines.push({
-      icon: '🏹',
-      label: `${combo('allonge_magique')?.name || 'Allonge magique'} · portée +${len} case${len > 1 ? 's' : ''}`,
-      detail: 'Remplace Enchantement classique et Amplification · aucun dégât direct',
-      isCombo: true,
-    });
-  }
   if (comboIds.has('zone_elargie')) {
     const size = _ampDispCircleSize(counts.Amplification || 0, counts.Dispersion || 0);
     lines.push({
@@ -895,7 +886,6 @@ export function _buildSortResume(s, c) {
   lines.push({ icon: '', label: `${actionStr} · ${natureStr}`, detail: concDD ? `JS Sagesse DD ${concDD} si dégâts reçus · jusqu'à 10 tours` : '' });
 
   // Portée du sort = portée de l'arme principale équipée (ou Poings = 1 case)
-  // Sauf si combo Allonge magique : portée étendue (voir ligne dédiée plus bas)
   const mainWp = getMainWeapon(c);
   const wpPortee = parseInt(mainWp.portee) || 1;
   lines.push({ icon:'📏', label:`Portée ${wpPortee} cases`, detail: mainWp.isDefault ? 'Poings (mains nues)' : `Arme : ${mainWp.nom}` });
@@ -904,7 +894,7 @@ export function _buildSortResume(s, c) {
   const nbPuiss   = runes.filter(r => r === 'Puissance').length;
   const nbProt    = runes.filter(r => r === 'Protection').length;
   const nbAmp     = runes.filter(r => r === 'Amplification').length;
-  const specializedComboIds = new Set(['allonge_magique', 'zone_elargie', 'regeneration', 'arme_invoquee', 'sentinelle', 'coup_chance']);
+  const specializedComboIds = new Set(['zone_elargie', 'regeneration', 'arme_invoquee', 'sentinelle', 'coup_chance']);
   lines.push(..._comboResumeLines(activeCombos, comboIds, _runeCounts(s), s));
   activeCombos.forEach(combo => {
     if (specializedComboIds.has(combo.id)) return;
@@ -1001,8 +991,8 @@ export function _buildSortResume(s, c) {
     lines.push({ icon:'🎯', label:`${nbCibles} cibles différentes`, detail: dispDetail });
   }
 
-  // Zone (Amplification ou manuelle) — sauf combo Allonge magique : devient portée d'arme
-  if (zoneCalc && !comboIds.has('allonge_magique') && !comboIds.has('zone_elargie')) {
+  // Zone (Amplification ou manuelle) — sauf combo zone élargie
+  if (zoneCalc && !comboIds.has('zone_elargie')) {
     let zoneDetail = '';
     if (zoneCalc.source === 'runes') {
       if (zoneCalc.amp > 0 && zoneCalc.disp > 0) {
@@ -1073,7 +1063,7 @@ export function _buildSortResume(s, c) {
   // Combos absorbants (Arme invoquée) → ligne classique cachée.
   const nbEnch = runes.filter(r => r === 'Enchantement').length;
   const nbAff  = runes.filter(r => r === 'Affliction').length;
-  const hideEnch = comboIds.has('arme_invoquee') || comboIds.has('allonge_magique');
+  const hideEnch = comboIds.has('arme_invoquee');
   const hideAff  = comboIds.has('sentinelle') || comboIds.has('regeneration');
   if (nbEnch > 0 && !hideEnch) {
     const mode    = s.enchantMode || 'dmg';

@@ -367,7 +367,6 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const nbProt   = runesAll.filter(r => r === 'Protection').length;
   const nbAmp    = runesAll.filter(r => r === 'Amplification').length;
   const activeIds = new Set(_activeCombos(s).map(co => co.id));
-  const isAllongeCombo = activeIds.has('allonge_magique');
 
   const ACTION_CFG = {
     action:       { label:'⚡ Act.',   color:'#e8b84b' },
@@ -402,7 +401,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   // Affliction = jamais d'impact (comme défini côté VTT)
   // Déplacement (Amplification mode déplacement) = jamais de dégâts.
   // Invocation = le sort invoque une créature (qui a ses propres dégâts) — pas d'impact du lanceur.
-  const suppressImpactDmg = isAllongeCombo || activeIds.has('coup_chance') || isEnchantOnly || enchantBuffOnly || hasAfflictionDebuff || s.ampMode === 'deplacement' || runesAll.includes('Invocation');
+  const suppressImpactDmg = activeIds.has('coup_chance') || isEnchantOnly || enchantBuffOnly || hasAfflictionDebuff || s.ampMode === 'deplacement' || runesAll.includes('Invocation');
 
   // Chips clés pour la ligne compacte
   const chips = [];
@@ -439,7 +438,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   }
 
   // ── 3. Enchantement : mode décide, JAMAIS de fallback dégâts en mode État ──
-  if (hasEnchant && !isAllongeCombo && !activeIds.has('arme_invoquee')) {
+  if (hasEnchant && !activeIds.has('arme_invoquee')) {
     if (enchantMode === 'etat') {
       const ids = (Array.isArray(s.enchantEtatIds) && s.enchantEtatIds.length)
         ? s.enchantEtatIds : (s.enchantEtatId ? [s.enchantEtatId] : []);
@@ -461,9 +460,6 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
       const degAuto = _calcEnchantDegats(s);
       if (degAuto) chips.push({ icon:'✨', val: `+${degAuto}`, color:'#e8b84b', lbl:'Bonus de dégâts sur l\'arme alliée' });
     }
-  }
-  if (isAllongeCombo) {
-    chips.push({ icon:'🏹', val:`Allonge +${_ampLength(nbAmp)}`, color:'#4f8cff', lbl:'Allonge de portée' });
   }
   if (activeIds.has('coup_chance')) {
     chips.push({ icon:'🍀', val:'Prochain jet échoué', color:'#facc15', lbl:'Relance le prochain jet raté (Coup de chance)' });
@@ -498,7 +494,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   // ── 5. Cibles / zone / déplacement / durée ──
   if (nbCibles > 1) chips.push({ icon:'🎯', val:`×${nbCibles}`, color:'#4f8cff', lbl:'Nombre de cibles' });
   const zone  = _calcSortZone(s);
-  if (zone && !isAllongeCombo)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}c`, color:'#b47fff', lbl:'Zone d\'effet (cases)' });
+  if (zone)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}c`, color:'#b47fff', lbl:'Zone d\'effet (cases)' });
   const depl  = _calcSortDeplacement(s);
   if (depl) {
     const dIcon = depl.mode === 'self' ? '🏃' : depl.mode === 'pull' ? '↙' : '↗';
@@ -1094,7 +1090,6 @@ export async function openSortModal(idx, s) {
   const ampMode  = s?.ampMode || 'zone';
   const hasDisp  = runesSrc.includes('Dispersion');
   const hasInv   = runesSrc.includes('Invocation');
-  const isAllongeCombo = false;   // combo « Allonge magique » retiré (→ état d'enchantement « Allonge »)
   const hasActionRune = (_runeCountsEdit[ACTION_RUNE] || 0) > 0;
   const actionMode = _actionModeEdit || 'reaction';
   const actionModeBtnsHtml = [
@@ -1318,16 +1313,8 @@ export async function openSortModal(idx, s) {
       })}
     </div>
 
-    <div id="s-allonge-section" class="cs-spell-slot-box cs-spell-slot-box--ench" style="${isAllongeCombo?'':'display:none'}">
-      <div class="cs-spell-slot-title">🏹 Allonge magique <span>Amplification + Enchantement · buff de portée</span></div>
-      <div style="font-size:.82rem;line-height:1.5;color:var(--text-muted);background:rgba(79,140,255,.1);border:1px solid rgba(79,140,255,.28);border-radius:8px;padding:.65rem .75rem">
-        L'arme enchantée gagne <strong style="color:#4f8cff">+<span id="s-allonge-range">${_ampLength(nbAmp)}</span> case<span id="s-allonge-range-plural">${_ampLength(nbAmp) > 1 ? 's' : ''}</span> de portée</strong> pendant la durée du sort.
-        <span style="display:block;margin-top:.2rem;color:var(--text-dim)">Les modes Enchantement et Amplification sont absorbés par ce combo.</span>
-      </div>
-    </div>
-
     <!-- Enchantement — visible si rune Enchantement > 0 -->
-    <div id="s-enchant-section" class="cs-spell-slot-box cs-spell-slot-box--ench" style="${hasEnchant && !isAllongeCombo?'':'display:none'}">
+    <div id="s-enchant-section" class="cs-spell-slot-box cs-spell-slot-box--ench" style="${hasEnchant?'':'display:none'}">
       <div class="cs-spell-slot-title">✨ Enchantement <span>Cible alliée · 2 tours</span></div>
 
       <input type="hidden" id="s-enchant-mode" value="${enchantModeForEdit}">
@@ -1441,7 +1428,7 @@ export async function openSortModal(idx, s) {
     </div>
 
     <!-- ⑨ Rune Amplification — mode Zone ou Déplacement (visible si rune présente) -->
-    <div id="s-amp-section" style="${hasAmp && !isAllongeCombo?'':'display:none'}">
+    <div id="s-amp-section" style="${hasAmp && !hasEnchant?'':'display:none'}">
       <div class="form-group">
         <label>🌐 Rune Amplification — effet</label>
         <div style="display:flex;gap:.4rem">
@@ -1788,12 +1775,6 @@ function _isRegenerationComboActive(counts = _runeCountsEdit) {
     && (document.getElementById('s-affliction-mode')?.value || 'dot') !== 'laceration';
 }
 
-// Combo « Allonge magique » retiré : l'Amplification n'écrase plus l'enchantement,
-// elle en augmente l'effet (état « Allonge » = portée, « Accéléré » = déplacement…).
-function _isAllongeComboActive() {
-  return false;
-}
-
 function _isCoupChanceComboActive(counts = _runeCountsEdit) {
   const actionMode = document.getElementById('s-action-mode')?.value || _actionModeEdit || 'reaction';
   const hasReaction = (counts?.Réaction || 0) > 0
@@ -1843,7 +1824,6 @@ function _refreshConditionalSections() {
   const protMode    = document.getElementById('s-prot-mode')?.value || 'ca';
   const ampMode     = document.getElementById('s-amp-mode')?.value || 'zone';
   const isDepl      = ampMode === 'deplacement';
-  const isAllonge   = _isAllongeComboActive(counts);
   const isCoupChance = _isCoupChanceComboActive(counts);
   const dSec = document.getElementById('s-degats-section');
   const sSec = document.getElementById('s-soin-section');
@@ -1867,7 +1847,6 @@ function _refreshConditionalSections() {
   const protSec = document.getElementById('s-prot-section');
   const affSec = document.getElementById('s-affliction-section');
   const regenSec = document.getElementById('s-regeneration-section');
-  const allongeSec = document.getElementById('s-allonge-section');
   const enchantSec = document.getElementById('s-enchant-section');
   const ampSec = document.getElementById('s-amp-section');
   const affModes = document.getElementById('s-affliction-modes');
@@ -1877,15 +1856,15 @@ function _refreshConditionalSections() {
   if (protSec) protSec.style.display = (hasProt && !isRegen) ? '' : 'none';
   if (affSec)  affSec.style.display  = (hasAffliction && !isRegen) ? '' : 'none';
   if (regenSec)  regenSec.style.display  = isRegen ? '' : 'none';
-  if (allongeSec) allongeSec.style.display = isAllonge ? '' : 'none';
-  if (enchantSec) enchantSec.style.display = (hasEnchant && !isAllonge) ? '' : 'none';
-  if (hasEnchant && !isAllonge) _renderEnchantExtraSlots();   // (re)génère 1 select par rune Enchantement en plus
-  if (ampSec)     ampSec.style.display     = (hasAmp && !isAllonge) ? '' : 'none';
-  const allongeRange = _ampLength(counts.Amplification || 0);
-  const allongeRangeEl = document.getElementById('s-allonge-range');
-  const allongePluralEl = document.getElementById('s-allonge-range-plural');
-  if (allongeRangeEl) allongeRangeEl.textContent = String(allongeRange);
-  if (allongePluralEl) allongePluralEl.textContent = allongeRange > 1 ? 's' : '';
+  if (enchantSec) enchantSec.style.display = hasEnchant ? '' : 'none';
+  if (hasEnchant) _renderEnchantExtraSlots();   // (re)génère 1 select par rune Enchantement en plus
+  // Avec Enchantement, l'Amplification BOOSTE l'effet (portée/déplacement de l'état) :
+  // pas de choix de mode zone/déplacement → on masque la section et on force « zone ».
+  if (ampSec) ampSec.style.display = (hasAmp && !hasEnchant) ? '' : 'none';
+  if (hasEnchant) {
+    const ampHidden = document.getElementById('s-amp-mode');
+    if (ampHidden && ampHidden.value !== 'zone') ampHidden.value = 'zone';
+  }
   if (affModes)  affModes.style.display  = isRegen ? 'none' : '';
   if (protGroup) protGroup.style.display = (isDrain || isRegen) ? 'none' : '';
   if (caSec)     caSec.style.display     = (!isDrain && !isRegen && protMode === 'ca') ? '' : 'none';
@@ -2940,9 +2919,9 @@ function _sortContentSig(s) {
 function _sanitizeAbsorbedComboFields(s) {
   if (!s) return s;
   const comboIds = new Set(_activeCombos(s).map(c => c.id));
-  const clearEnchant = comboIds.has('allonge_magique') || comboIds.has('arme_invoquee');
+  const clearEnchant = comboIds.has('arme_invoquee');
   const clearAffliction = comboIds.has('regeneration') || comboIds.has('sentinelle');
-  const clearAmpMode = comboIds.has('allonge_magique') || comboIds.has('zone_elargie');
+  const clearAmpMode = comboIds.has('zone_elargie');
 
   if (clearEnchant) {
     s.enchantMode = 'dmg';
