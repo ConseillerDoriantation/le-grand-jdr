@@ -19,14 +19,19 @@ import {
   openShopExport, switchShopExportTab, selectAllShopExport,
   doShopExport, previewShopImport, doShopImport,
 } from './shop-export.js';
+import {
+  ITEM_STATS, ITEM_STAT_BY_KEY,
+  _parseLegacyStats, _formatStatBonuses, _legacyStatsTextFromData,
+  _formatDegatsStatsText, _legacyToucherTextFromData,
+  _getRareteNum, _getItemStatFilterKeys,
+} from './shop-item-stats.js';
 import { openWeaponFormatsAdmin } from './characters/data.js';
-import { syncEquipmentAfterInventoryMutation, normalizeStatKey as _normalizeStatKey, getWeaponDamageStatKeys as _getDegatsStats, formatWeaponDamageStatsText } from '../shared/equipment-utils.js';
+import { syncEquipmentAfterInventoryMutation, normalizeStatKey as _normalizeStatKey, getWeaponDamageStatKeys as _getDegatsStats } from '../shared/equipment-utils.js';
 import { autocompleteHTML, initAutocomplete } from '../shared/autocomplete.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import { getShopCharId, setShopCharId } from '../shared/shop-session.js';
 import { characterPortraitContent } from '../shared/portraits.js';
 import { loadConditionLibrary } from '../shared/conditions.js';
-import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { spellActionCardHtml } from '../shared/spell-action-card.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
@@ -112,93 +117,6 @@ const TEMPLATES = {
 };
 
 const PRIX_VENTE_RATIO = 0.6; // 60%
-const ITEM_STATS = [
-  { key:'force',       short:'For', store:'for',  label:'Force' },
-  { key:'dexterite',   short:'Dex', store:'dex', label:'Dextérité' },
-  { key:'intelligence',short:'Int', store:'in',  label:'Intelligence' },
-  { key:'sagesse',     short:'Sag', store:'sa',  label:'Sagesse' },
-  { key:'constitution',short:'Con', store:'co',  label:'Constitution' },
-  { key:'charisme',    short:'Cha', store:'ch',  label:'Charisme' },
-];
-// Map clé → entrée ITEM_STATS (restauré : utilisé par _buildTagGroups pour les
-// filtres « Stats ». Sa suppression cassait l'accès aux catégories arme/armure/bijou.)
-const ITEM_STAT_BY_KEY = Object.fromEntries(ITEM_STATS.map(s => [s.key, s]));
-function _parseLegacyStats(item = {}) {
-  const out = { for:0, dex:0, in:0, sa:0, co:0, ch:0 };
-  ['for','dex','in','sa','co','ch'].forEach(k => {
-    const val = parseInt(item?.[k]);
-    if (!Number.isNaN(val)) out[k] = val;
-  });
-  const txt = String(item?.stats || '');
-  const aliases = {
-    for:['for','force'], dex:['dex','dextérité','dexterite'], in:['in','int','intelligence'],
-    sa:['sa','sag','sagesse'], co:['co','con','constitution'], ch:['ch','cha','charisme'],
-  };
-  Object.entries(aliases).forEach(([store, list]) => {
-    if (out[store]) return;
-    for (const token of list) {
-      const re = new RegExp(`(?:^|[^a-z])${token}\\s*([+-]\\d+)|([+-]\\d+)\\s*${token}(?:[^a-z]|$)`, 'i');
-      const m = txt.match(re);
-      const picked = m?.[1] || m?.[2];
-      if (picked) {
-        out[store] = parseInt(picked) || 0;
-        break;
-      }
-    }
-  });
-  return out;
-}
-
-function _formatStatBonuses(item = {}) {
-  const parsed = _parseLegacyStats(item);
-  return ITEM_STATS
-    .map(stat => ({ short: stat.short, val: parseInt(parsed[stat.store]) || 0 }))
-    .filter(x => x.val)
-    .map(x => `${x.short} ${x.val > 0 ? '+' : ''}${x.val}`);
-}
-
-function _legacyStatsTextFromData(data = {}) {
-  return _formatStatBonuses(data).join(' · ');
-}
-
-function _formatDegatsStatsText(keys) {
-  return formatWeaponDamageStatsText(keys, { statLabel: _statShort });
-}
-
-
-function _legacyToucherTextFromData(data = {}) {
-  const short = _statShort(data.toucherStat);
-  return short ? `+${short}` : '';
-}
-
-function _getRareteNum(value) {
-  const direct = parseInt(value);
-  if (direct > 0) return direct;
-
-  const normalized = _norm(String(value || '').replace(/★/g, '').trim());
-  const byName = RARETE_NAMES.findIndex(name => _norm(name) === normalized);
-  if (byName > 0) return byName;
-
-  const stars = String(value || '').match(/★/g)?.length || 0;
-  return stars > 0 ? stars : 0;
-}
-
-function _getItemStatFilterKeys(item = {}) {
-  const keys = new Set();
-  const parsed = _parseLegacyStats(item);
-
-  ITEM_STATS.forEach(stat => {
-    if (parseInt(parsed[stat.store]) || 0) keys.add(stat.key);
-  });
-
-  _getDegatsStats(item).forEach(key => keys.add(key));
-
-  const toucherStat = _normalizeStatKey(item.toucherStat || item.toucher || item.statAttaque || '');
-  if (toucherStat) keys.add(toucherStat);
-
-  return [...keys];
-}
-
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ÉTAT
@@ -2490,7 +2408,6 @@ async function _shopEnsureDamageTypes() {
 // ── Profil de dégâts porté (résistances / immunités / absorptions / faiblesses) ──
 // Affiché dans l'onglet « Bonus » des objets équipables (arme/armure/bijou).
 // Appliqué côté VTT quand le perso est touché (cf. getCharDamageProfile + applyDamageTypeInteraction).
-const _DMG_PROFILE_KEYS = ['resistances', 'immunites', 'absorptions', 'faiblesses'];
 
 function _shopRenderDamageProfileSection(item) {
   const prof  = item?.damageProfile || {};
@@ -2647,17 +2564,6 @@ function removeSkillBonus(skillName) {
 async function _shopEnsureConditions() {
   return loadConditionLibrary();
 }
-
-const _ACT_TYPE_LABEL = { action: '🎯 Action', bonus: '💫 Action bonus', reaction: '⚡ Réaction' };
-const _ACT_STATS      = [
-  { v:'',           lbl:'Aucune' },
-  { v:'force',      lbl:'Force' },
-  { v:'dexterite',  lbl:'Dextérité' },
-  { v:'intelligence', lbl:'Intelligence' },
-  { v:'sagesse',    lbl:'Sagesse' },
-  { v:'constitution', lbl:'Constitution' },
-  { v:'charisme',   lbl:'Charisme' },
-];
 
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4126,7 +4032,6 @@ Object.assign(shHandlers, {
   openExport:     () => openShopExport({
     getCats: () => _cats,
     getItems: () => _items,
-    formatStatBonuses: _formatStatBonuses,
     onImported: () => renderShop(),
   }),
   closeModal:     () => closeModalDirect(),

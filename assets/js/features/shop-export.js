@@ -12,10 +12,11 @@ import { _esc } from '../shared/html.js';
 import { RARETE_NAMES } from '../shared/rarity.js';
 import { statShort as _statShort } from '../shared/char-stats.js';
 import { addToCol } from '../data/firestore.js';
+import { _formatStatBonuses } from './shop-item-stats.js';
 
-// Contexte injecté par shop.js (getters live + helper de présentation + callback
-// de re-render). Mémorisé pour les handlers déclenchés après l'ouverture.
-let _ctx = { getCats: () => [], getItems: () => [], formatStatBonuses: () => [], onImported: () => {} };
+// Contexte injecté par shop.js (getters live + callback de re-render).
+// Mémorisé pour les handlers déclenchés après l'ouverture.
+let _ctx = { getCats: () => [], getItems: () => [], onImported: () => {} };
 let _importData = null;
 
 // Texte de stock (∞ / épuisé / n dispo) — utilisé uniquement par l'export Markdown.
@@ -220,7 +221,7 @@ function _shopExportToMd(data) {
       if (item.ca)          lines.push(`- **CA bonus** : ${item.ca}`);
       if (item.slotArmure)  lines.push(`- **Emplacement** : ${item.slotArmure} (${item.typeArmure || ''})`);
       if (item.slotBijou)   lines.push(`- **Slot** : ${item.slotBijou}`);
-      const bonuses = _ctx.formatStatBonuses(item);
+      const bonuses = _formatStatBonuses(item);
       if (bonuses.length)   lines.push(`- **Bonus** : ${bonuses.join(' · ')}`);
       const traits = Array.isArray(item.traits) ? item.traits : [];
       if (traits.length)    lines.push(`- **Traits** : ${traits.join(', ')}`);
