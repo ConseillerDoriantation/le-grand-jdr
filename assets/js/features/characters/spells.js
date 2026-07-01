@@ -465,7 +465,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
     const degBase = _calcSortDegats(s, c);
     let val = degBase;
     if (statMod !== 0) val += ` · ${statLbl}${statModS}`;
-    chips.push({ icon:'⚔️', val, color:'#ff6b6b' });
+    chips.push({ icon:'⚔️', val, color:'#ff6b6b', lbl:'Dégâts infligés' });
   }
 
   // ── 2. Affliction : mode décide (DoT / État / Lacération) ──
@@ -475,7 +475,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
     // rien : l'affliction est portée par la sentinelle (chip Invocation géré ailleurs)
   } else if (isLaceration) {
     const lac = _calcLaceration(s);
-    if (lac) chips.push({ icon:'🩸', val:`CA −${Math.min(lac.reduction, lac.maxElite)}`, color:'#dc2626' });
+    if (lac) chips.push({ icon:'🩸', val:`CA −${Math.min(lac.reduction, lac.maxElite)}`, color:'#dc2626', lbl:'Réduction de CA de la cible (Lacération)' });
   } else if (hasAfflictionDebuff && !activeIds.has('regeneration')) {
     if (afflictionMode === 'etat') {
       // Mode État : on affiche TOUJOURS un chip état, jamais DoT
@@ -483,11 +483,11 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
         ? _conditionsLibCache?.find(c2 => c2.id === s.afflictionEtatId)
         : null;
       const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ État non défini';
-      chips.push({ icon:'⛓', val: lbl, color:'#8b5cf6' });
+      chips.push({ icon:'⛓', val: lbl, color:'#8b5cf6', lbl:'État infligé à l\'ennemi (Affliction)' });
     } else {
       // Mode DoT : formule scalée
       const dot = _calcAfflictionDot(s);
-      chips.push({ icon:'🩸', val: `${dot}/t`, color:'#8b5cf6' });
+      chips.push({ icon:'🩸', val: `${dot}/t`, color:'#8b5cf6', lbl:'Dégâts par tour (Affliction)' });
     }
   }
 
@@ -499,27 +499,27 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
       if (ids.length) {
         ids.forEach(id => {
           const etat = _conditionsLibCache?.find(c2 => c2.id === id);
-          chips.push({ icon:'✨', val: etat ? `${etat.icon || ''} ${etat.label}` : '⚠ État', color:'#e8b84b' });
+          chips.push({ icon:'✨', val: etat ? `${etat.icon || ''} ${etat.label}` : '⚠ État', color:'#e8b84b', lbl:'État bénéfique sur l\'allié (Enchantement)' });
         });
       } else {
-        chips.push({ icon:'✨', val: '⚠ État non défini', color:'#e8b84b' });
+        chips.push({ icon:'✨', val: '⚠ État non défini', color:'#e8b84b', lbl:'Enchantement : aucun état défini' });
       }
     } else if (enchantMode === 'toucher' || enchantMode === 'deplacement') {
       const nbP   = runesAll.filter(r => r === 'Puissance').length;
       const bonus = Number.isFinite(parseInt(s.enchantBonus)) ? parseInt(s.enchantBonus) : (2 + nbP);
       const ic    = enchantMode === 'toucher' ? '🎯' : '👢';
-      chips.push({ icon: ic, val: `+${bonus}`, color:'#e8b84b' });
+      chips.push({ icon: ic, val: `+${bonus}`, color:'#e8b84b', lbl: enchantMode === 'toucher' ? 'Bonus au toucher de l\'allié' : 'Bonus de déplacement de l\'allié' });
     } else {
       // Mode Dégâts : formule bonus sur arme alliée
       const degAuto = _calcEnchantDegats(s);
-      if (degAuto) chips.push({ icon:'✨', val: `+${degAuto}`, color:'#e8b84b' });
+      if (degAuto) chips.push({ icon:'✨', val: `+${degAuto}`, color:'#e8b84b', lbl:'Bonus de dégâts sur l\'arme alliée' });
     }
   }
   if (isAllongeCombo) {
-    chips.push({ icon:'🏹', val:`Allonge +${_ampLength(nbAmp)}`, color:'#4f8cff' });
+    chips.push({ icon:'🏹', val:`Allonge +${_ampLength(nbAmp)}`, color:'#4f8cff', lbl:'Allonge de portée' });
   }
   if (activeIds.has('coup_chance')) {
-    chips.push({ icon:'🍀', val:'Prochain jet échoué', color:'#facc15' });
+    chips.push({ icon:'🍀', val:'Prochain jet échoué', color:'#facc15', lbl:'Relance le prochain jet raté (Coup de chance)' });
   }
 
   // ── 4. Protection (CA ou Soin) ──
@@ -527,41 +527,41 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
     const mode = _getSortProtectionMode(s);
     if (activeIds.has('regeneration')) {
       const dice = nbProt + runesAll.filter(r => r === 'Affliction').length;
-      chips.push({ icon:'💚', val: `${(s.regenerationFormula || '').trim() || `${dice}d4`}/t`, color:'#22c38e' });
+      chips.push({ icon:'💚', val: `${(s.regenerationFormula || '').trim() || `${dice}d4`}/t`, color:'#22c38e', lbl:'Soin par tour (Régénération)' });
     } else if (mode === 'soin') {
       if (activeIds.has('drain')) {
         const pct = Math.round(_calcDrainPct(s) * 100);
-        chips.push({ icon:'🩸', val: `Drain ${pct}%`, color:'#ff6b6b' });
+        chips.push({ icon:'🩸', val: `Drain ${pct}%`, color:'#ff6b6b', lbl:'Vol de vie : % des dégâts rendus au lanceur (Drain)' });
       } else {
         const soinBase = _calcSortSoin(s, c);
-        chips.push({ icon:'💚', val: soinBase, color:'#22c38e' });
+        chips.push({ icon:'💚', val: soinBase, color:'#22c38e', lbl:'Soin' });
       }
     } else {
       if (activeIds.has('bouclier_reactif')) {
-        chips.push({ icon:'🛡️', val:'Bloque 1', color:'#22c38e' });
+        chips.push({ icon:'🛡️', val:'Bloque 1', color:'#22c38e', lbl:'Bloque 1 attaque entrante (Bouclier réactif)' });
       } else {
-        chips.push({ icon:'🛡️', val:_getSortCA(s), color:'#22c38e' });
+        chips.push({ icon:'🛡️', val:_getSortCA(s), color:'#22c38e', lbl:'Bonus de CA (Protection)' });
       }
     }
   } else if (types.includes('defensif') && nbAmp > 0 && s.ampMode !== 'deplacement') {
     const soinBase = _calcSortSoin(s, c);
-    chips.push({ icon:'💚', val: soinBase, color:'#22c38e' });
+    chips.push({ icon:'💚', val: soinBase, color:'#22c38e', lbl:'Soin' });
   }
 
   // ── 5. Cibles / zone / déplacement / durée ──
-  if (nbCibles > 1) chips.push({ icon:'🎯', val:`×${nbCibles}`, color:'#4f8cff' });
+  if (nbCibles > 1) chips.push({ icon:'🎯', val:`×${nbCibles}`, color:'#4f8cff', lbl:'Nombre de cibles' });
   const zone  = _calcSortZone(s);
-  if (zone && !isAllongeCombo)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}c`, color:'#b47fff' });
+  if (zone && !isAllongeCombo)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}c`, color:'#b47fff', lbl:'Zone d\'effet (cases)' });
   const depl  = _calcSortDeplacement(s);
   if (depl) {
     const dIcon = depl.mode === 'self' ? '🏃' : depl.mode === 'pull' ? '↙' : '↗';
     const dVal  = depl.max != null ? `1–${depl.max}c` : `${depl.distance}c`;
-    chips.push({ icon: dIcon, val: dVal, color:'#e8b84b' });
+    chips.push({ icon: dIcon, val: dVal, color:'#e8b84b', lbl: depl.mode === 'self' ? 'Déplacement du lanceur (cases)' : depl.mode === 'pull' ? 'Attire la cible (cases)' : 'Repousse la cible (cases)' });
   }
   // Durée : affichée uniquement pour les sorts persistants
   if (_needsDureeBase(s)) {
     const duree = _calcSortDuree(s);
-    if (duree) chips.push({ icon:'⏱️', val:`${duree}t`, color:'#9ca3af' });
+    if (duree) chips.push({ icon:'⏱️', val:`${duree}t`, color:'#9ca3af', lbl:'Durée de l\'effet (tours)' });
   }
 
   // ── 6. Pill JS sauvegarde pour Affliction (info utile au combat) ──
@@ -569,13 +569,13 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   if (hasAfflictionDebuff && !activeIds.has('regeneration') && !activeIds.has('sentinelle')) {
     const nbAff = runesAll.filter(r => r === 'Affliction').length;
     const dd = 11 + 2 * (nbAff - 1);
-    chips.push({ icon:'🛡', val:`DD ${dd}`, color:'#ef4444' });
+    chips.push({ icon:'🛡', val:`DD ${dd}`, color:'#ef4444', lbl:'Jet de sauvegarde de la cible pour résister' });
   }
 
   // ── Combo Sort suspendu : pill explicite (stocké au cast, déclenché hors-tour) ──
   if (activeIds.has('sort_suspendu')) {
     const nbDur = runesAll.filter(r => r === 'Durée').length;
-    chips.push({ icon:'🔮', val:`Suspendu · ${2 + 2 * nbDur}t`, color:'#a855f7' });
+    chips.push({ icon:'🔮', val:`Suspendu · ${2 + 2 * nbDur}t`, color:'#a855f7', lbl:'Sort suspendu : déclenché plus tard, hors de ton tour' });
   }
 
   const pmVal = pmDelta !== 0
@@ -632,7 +632,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
 
     <div class="cs-spellcard-tags">
       ${valBadge}
-      ${chips.map(ch => `<span class="cs-sort-sstat" style="--c:${ch.color}">${ch.icon} ${_esc(ch.val)}</span>`).join('')}
+      ${chips.map(ch => `<span class="cs-sort-sstat" style="--c:${ch.color}"${ch.lbl?` title="${_esc(ch.lbl)}"`:''}>${ch.icon} ${_esc(ch.val)}</span>`).join('')}
     </div>
 
     ${s.effet ? `<p class="cs-spellcard-desc ${isOpen?'is-full':''}" data-action="toggleSortDetail" data-idx="${i}" title="Cliquer pour ${isOpen?'replier':'voir le détail'}">${isOpen ? _nl2br(s.effet) : _esc(s.effet)}</p>` : ''}

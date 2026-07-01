@@ -553,13 +553,13 @@ function _vttSpellChips(s, c) {
   const _isLac = runes.includes('Lacération') || (s.afflictionMode === 'laceration' && runes.includes('Affliction'));
   if (types.includes('offensif') || _isLac) {
     const dmg = _vttSortDmgFormula(s, c);
-    if (dmg) chips.push({ icon:'⚔️', val: _effectDisplay(s, dmg), color:'#ff6b6b' });
+    if (dmg) chips.push({ icon:'⚔️', val: _effectDisplay(s, dmg), color:'#ff6b6b', lbl:'Dégâts infligés' });
   }
   if (runes.includes('Protection') && runes.includes('Affliction') && !_isLac) {
     const nbProt = runes.filter(r => r === 'Protection').length;
     const nbAff = runes.filter(r => r === 'Affliction').length;
     const regenFormula = `${(s.regenerationFormula || '').trim() || `${nbProt + nbAff}d4`}/t`;
-    chips.push({ icon:'💚', val:_effectDisplay(s, regenFormula), color:'#22c38e' });
+    chips.push({ icon:'💚', val:_effectDisplay(s, regenFormula), color:'#22c38e', lbl:'Soin par tour (Régénération)' });
   }
   const isAmpSupportHeal = types.includes('defensif')
     && runes.includes('Amplification')
@@ -568,19 +568,19 @@ function _vttSpellChips(s, c) {
   if (!(runes.includes('Protection') && runes.includes('Affliction') && !_isLac)
       && types.includes('defensif') && (s.protectionMode === 'soin' || s.typeSoin || isAmpSupportHeal)) {
     const soin = _vttSortSoinFormula(s, c);
-    if (soin) chips.push({ icon:'💚', val: _effectDisplay(s, soin), color:'#22c38e' });
+    if (soin) chips.push({ icon:'💚', val: _effectDisplay(s, soin), color:'#22c38e', lbl:'Soin' });
   }
   const nbT = calcSpellTargets(s);
-  if (nbT > 1) chips.push({ icon:'🎯', val:`×${nbT}`, color:'#4f8cff' });
+  if (nbT > 1) chips.push({ icon:'🎯', val:`×${nbT}`, color:'#4f8cff', lbl:'Nombre de cibles' });
   const nbAmp = runes.filter(r => r === 'Amplification').length;
   if (nbAmp > 0 && s.ampMode !== 'deplacement') {
     const nbDisp = runes.filter(r => r === 'Dispersion').length;
     const zoneW = nbDisp >= 1 ? _vttAmpDispCircleSize(nbAmp, nbDisp) : 3 * nbAmp;
     const zoneH = nbDisp >= 1 ? zoneW : 1;
-    chips.push({ icon:'📐', val:`${zoneW}×${zoneH} cases`, color:'#b47fff' });
+    chips.push({ icon:'📐', val:`${zoneW}×${zoneH} cases`, color:'#b47fff', lbl:'Zone d\'effet (cases)' });
   }
   if (runes.includes('Durée') || (s.dureeBase && s.dureeBase >= 2)) {
-    chips.push({ icon:'⏱️', val:`${calcSpellDuration(s)}t`, color:'#9ca3af' });
+    chips.push({ icon:'⏱️', val:`${calcSpellDuration(s)}t`, color:'#9ca3af', lbl:'Durée de l\'effet (tours)' });
   }
   return chips;
 }
@@ -637,7 +637,7 @@ function _vttSpellCardHtml(s, i, c, uid, canEdit) {
       </div>
       <span class="cs-spellcard-pm" title="Coût en PM">${s.pm||0}<small>PM</small></span>
     </header>
-    <div class="cs-spellcard-tags">${valBadge}${chips.map(ch => `<span class="cs-sort-sstat" style="--c:${ch.color}">${ch.icon} ${_esc(ch.val)}</span>`).join('')}</div>
+    <div class="cs-spellcard-tags">${valBadge}${chips.map(ch => `<span class="cs-sort-sstat" style="--c:${ch.color}"${ch.lbl?` title="${_esc(ch.lbl)}"`:''}>${ch.icon} ${_esc(ch.val)}</span>`).join('')}</div>
     ${s.effet ? `<p class="cs-spellcard-desc">${_esc(s.effet)}</p>` : ''}
     ${s.mjNotes ? `<div class="cs-spellcard-mjnote" title="Note / restriction du MJ"><span class="cs-spellcard-mjnote-ic">📌</span><span class="cs-spellcard-mjnote-tx">${_esc(s.mjNotes)}</span></div>` : ''}
     ${runeChips}

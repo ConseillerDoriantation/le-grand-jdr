@@ -47,10 +47,12 @@
   border-radius: 14px; padding: .85rem 1rem;
 }
 .stats-char-hd {
-  display: flex; align-items: baseline; justify-content: space-between; gap: .6rem;
+  display: flex; align-items: center; justify-content: space-between; gap: .6rem;
   margin-bottom: .6rem; padding-bottom: .5rem; border-bottom: 1px solid var(--border);
 }
-.stats-char-name { font-family: 'Cinzel', serif; font-weight: 700; font-size: 1rem; color: var(--text); }
+.stats-char-id { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.stats-char-av { flex-shrink: 0; }
+.stats-char-name { font-family: 'Cinzel', serif; font-weight: 700; font-size: 1rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stats-char-meta { font-size: .72rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .stats-skills { display: flex; flex-direction: column; gap: .35rem; }
 .stats-skill-row { display: flex; align-items: center; gap: .5rem; }

@@ -174,8 +174,13 @@ function _statsRender(dateKey) {
     const delBtn = STATE.isAdmin
       ? `<button class="stats-char-btn stats-char-del" data-action="_statsDelChar" data-id="${r.id}" title="Supprimer les stats de ce personnage (jets de test…)">✕</button>`
       : '';
+    const char = STATE.characters?.find(x => x.id === r.id) || { nom: r.name };
+    const avatar = characterAvatarHtml(char, { size: 30, className: 'stats-char-av', title: r.name });
     return `<div class="stats-char">
-      <div class="stats-char-hd"><span class="stats-char-name">${_esc(r.name)}</span><span class="stats-char-actions">${dateBtn}${delBtn}</span></div>
+      <div class="stats-char-hd">
+        <span class="stats-char-id">${avatar}<span class="stats-char-name">${_esc(r.name)}</span></span>
+        <span class="stats-char-actions">${dateBtn}${delBtn}</span>
+      </div>
       ${combatHtml}${skillHtml}
     </div>`;
   };
