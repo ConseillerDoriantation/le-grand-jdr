@@ -6070,3 +6070,18 @@
   box-shadow: 0 8px 24px rgba(0,0,0,.45); border-radius: 8px;
   background: var(--bg-panel, #1a1a22);
 }
+
+/* Infobulle de token au survol (nom + états/buffs en clair) */
+#vtt-token-tip {
+  position: fixed; z-index: 10000; display: none; pointer-events: none;
+  max-width: 280px; padding: 6px 10px;
+  background: rgba(14,18,28,.97); border: 1px solid var(--border, #2a3350);
+  border-radius: 8px; box-shadow: 0 10px 28px rgba(0,0,0,.55);
+  font-size: .74rem; line-height: 1.45; color: var(--text, #e6ebf5);
+}
+#vtt-token-tip .vtt-tip-name { font-weight: 800; margin-bottom: 2px; }
+#vtt-token-tip .vtt-tip-row { color: var(--text-soft, #c8d4e8); }
+#vtt-token-tip .vtt-tip-lbl {
+  color: var(--text-dim, #8a93a8); font-size: .6rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .05em; margin-right: 3px;
+}

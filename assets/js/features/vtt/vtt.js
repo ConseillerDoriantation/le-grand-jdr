@@ -1016,6 +1016,52 @@ function _initCanvas(container) {
 //  cross-domaine du clic de sélection sont injectés via _MAP_IMG_DEPS.]
 export const _MAP_IMG_DEPS = { hideActBar: _hideActBar, clearHL: _clearHL, renderInspector: _renderInspector };
 
+// ── Infobulle de token au survol (nom + états/buffs en clair) ──────────────
+// Les badges d'états/buffs sur les tokens sont des icônes canvas non survolables.
+// Ce tooltip DOM explique ce qu'ils signifient sans avoir à sélectionner le token.
+const _BUFF_LABEL = {
+  dot: 'Dégâts par tour', dmg_bonus: 'Bonus de dégâts (arme)', move_bonus: 'Déplacement +',
+  move_debuff: 'Déplacement −', range_bonus: 'Portée +', toucher_bonus: 'Bonus au toucher',
+  ca: 'Bonus de CA', shield_reactive: 'Bouclier réactif', enchantment: 'Enchantement',
+  affliction: 'Affliction', weapon_replace: 'Arme invoquée', suspended_spell: 'Sort suspendu',
+  lucky_reroll: 'Relance chanceuse', regen: 'Régénération',
+};
+let _tokenTipEl = null;
+function _tokenTipEnsure() {
+  if (_tokenTipEl) return _tokenTipEl;
+  _tokenTipEl = document.createElement('div');
+  _tokenTipEl.id = 'vtt-token-tip';
+  document.body.appendChild(_tokenTipEl);
+  return _tokenTipEl;
+}
+function _hideTokenTip() { if (_tokenTipEl) _tokenTipEl.style.display = 'none'; }
+function _moveTokenTip(e) {
+  if (!_tokenTipEl || _tokenTipEl.style.display === 'none' || !e?.evt) return;
+  const pad = 14;
+  let x = e.evt.clientX + pad, y = e.evt.clientY + pad;
+  const w = _tokenTipEl.offsetWidth, h = _tokenTipEl.offsetHeight;
+  if (x + w > window.innerWidth - 8)  x = e.evt.clientX - w - pad;
+  if (y + h > window.innerHeight - 8) y = e.evt.clientY - h - pad;
+  _tokenTipEl.style.left = `${Math.max(4, x)}px`;
+  _tokenTipEl.style.top  = `${Math.max(4, y)}px`;
+}
+function _showTokenTip(id, e) {
+  const td = VS.tokens[id]?.data; if (!td) return;
+  const round = VS.session?.combat?.round ?? 0;
+  const active = (arr) => (arr || []).filter(x => x.expiresAtRound == null || round === 0 || round <= x.expiresAtRound);
+  const conds = active(td.conditions), buffs = active(td.buffs);
+  if (!conds.length && !buffs.length) { _hideTokenTip(); return; }   // rien à expliquer
+  const ld = _live(td);
+  const tl = (x) => (x.expiresAtRound != null && round > 0) ? ` (${x.expiresAtRound - round + 1}t)` : '';
+  let html = `<div class="vtt-tip-name">${_esc(ld.displayName ?? td.name ?? '?')}</div>`;
+  if (conds.length) html += `<div class="vtt-tip-row"><span class="vtt-tip-lbl">États</span>${conds.map(c => { const l = CONDITION_BY_ID[c.id]; return ` ${l?.icon || '⛓'} ${_esc(l?.label || c.id)}${tl(c)}`; }).join(' ·')}</div>`;
+  if (buffs.length) html += `<div class="vtt-tip-row"><span class="vtt-tip-lbl">Effets</span>${buffs.map(b => { const lbl = _BUFF_LABEL[b.type] || b.sortLabel || 'Effet'; const src = (b.sortLabel && _BUFF_LABEL[b.type]) ? ` (${_esc(b.sortLabel)})` : ''; return ` ${_esc(lbl)}${src}${tl(b)}`; }).join(' ·')}</div>`;
+  const el = _tokenTipEnsure();
+  el.innerHTML = html;
+  el.style.display = 'block';
+  _moveTokenTip(e);
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // TOKENS — shapes Konva
 // ═══════════════════════════════════════════════════════════════════
@@ -1027,6 +1073,11 @@ function _buildShape(t) {
   const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
   const g = _buildTokenVisual(t, ld, CONDITION_BY_ID);
 
+  // Survol : infobulle nom + états/buffs EN CLAIR (comprendre les badges des tokens).
+  g.on('mouseenter', e => _showTokenTip(t.id, e));
+  g.on('mousemove',  e => _moveTokenTip(e));
+  g.on('mouseleave', () => _hideTokenTip());
+
   const canDrag = _canControlToken(t);
   let rightDown = null;
   if (canDrag) {
@@ -1037,6 +1088,7 @@ function _buildShape(t) {
     // ─ Début du drag : mémoriser les positions du groupe ─
     g.on('dragstart', () => {
       if (rightDown) rightDown.dragged = true;
+      _hideTokenTip();
       // En mode Règle (mesure) ou Dessin : le token ne doit pas se déplacer — la
       // mesure/le tracé (pilotés par le stage) restent prioritaires.
       if (VS.tool === 'ruler' || VS.tool === 'draw') {
