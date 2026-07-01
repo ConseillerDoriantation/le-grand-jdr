@@ -8233,16 +8233,10 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .aura-dot:hover { transform: scale(1.15); }
 .cs-v3 .aura-dot.active { border-color: #fff; box-shadow: 0 0 8px var(--dot-c, #4f8cff); }
 
-/* Aura étendue : couleur personnalisée + intensité */
-.cs-v3 .aura-panel { display: flex; flex-direction: column; gap: 6px; }
-.cs-v3 .aura-panel .aura-row:last-child { padding-top: 6px; border-top: none; }
+/* Aura : pastille de couleur personnalisée (en plus des 6 presets) */
 .cs-v3 .aura-dot--custom { position: relative; overflow: hidden; padding: 0; }
 .cs-v3 .aura-color-input { position: absolute; inset: -6px; width: calc(100% + 12px); height: calc(100% + 12px); border: none; padding: 0; background: none; cursor: pointer; opacity: 0; }
 .cs-v3 .aura-dot--custom::after { content: '✎'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: .55rem; color: #fff; text-shadow: 0 0 2px rgba(0,0,0,.6); pointer-events: none; }
-.cs-v3 .aura-intens { display: inline-flex; gap: 4px; }
-.cs-v3 .aura-int-btn { font-size: .58rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: rgba(255,255,255,.04); border: 1px solid var(--border); color: var(--text-dim); cursor: pointer; transition: all .15s; letter-spacing: .04em; }
-.cs-v3 .aura-int-btn:hover { color: var(--text); border-color: var(--aura-border, rgba(79,140,255,.5)); }
-.cs-v3 .aura-int-btn.active { background: var(--aura-soft, rgba(79,140,255,.12)); border-color: var(--aura-border, rgba(79,140,255,.55)); color: var(--aura, #4f8cff); }
 
 /* MAIN COL */
 .cs-v3 .main-col {

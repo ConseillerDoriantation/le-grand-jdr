@@ -211,11 +211,6 @@ function _auraHex(c) {
   const cust = (c?.auraColor || '').trim();
   return /^#[0-9a-fA-F]{6}$/.test(cust) ? cust : _auraColor(c?.aura);
 }
-// Intensité de l'aura (multiplicateur des alphas). Défaut 1.
-function _auraIntensity(c) {
-  const v = parseFloat(c?.auraIntensity);
-  return Number.isFinite(v) ? Math.max(0.3, Math.min(2, v)) : 1;
-}
 // Convertit une couleur hex aura (#rrggbb) + intensité en variables CSS.
 function _auraVars(hexCol, intensity = 1) {
   const r = parseInt(hexCol.slice(1,3),16);
@@ -234,14 +229,14 @@ function _auraVars(hexCol, intensity = 1) {
 }
 // Chaîne de variables CSS d'aura posée sur la racine .cs-v3 (toute la feuille en hérite).
 function _auraStyleVars(c) {
-  const v = _auraVars(_auraHex(c), _auraIntensity(c));
+  const v = _auraVars(_auraHex(c));
   return `--aura:${v.aura};--aura-glow:${v.auraGlow};--aura-soft:${v.auraSoft};--aura-border:${v.auraBd};--aura-strong:${v.auraStrong};--aura-shadow:${v.auraSh}`;
 }
 // Réapplique les variables d'aura en direct (sans re-render complet) + états actifs du picker.
 function _applyAuraVars(c) {
   const root = document.querySelector('.cs-v3');
   if (root) {
-    const v = _auraVars(_auraHex(c), _auraIntensity(c));
+    const v = _auraVars(_auraHex(c));
     root.style.setProperty('--aura',        v.aura);
     root.style.setProperty('--aura-glow',   v.auraGlow);
     root.style.setProperty('--aura-soft',   v.auraSoft);
@@ -251,12 +246,10 @@ function _applyAuraVars(c) {
   }
   const side = document.getElementById('cs-sidebar');
   if (side) side.setAttribute('data-aura', c.auraColor ? 'custom' : (c.aura || 'blue'));
-  const isCustom = !!c.auraColor, curInt = _auraIntensity(c);
+  const isCustom = !!c.auraColor;
   document.querySelectorAll('.aura-dot:not(.aura-dot--custom)').forEach(d =>
     d.classList.toggle('active', !isCustom && d.dataset.auraKey === (c.aura || 'blue')));
   document.querySelector('.aura-dot--custom')?.classList.toggle('active', isCustom);
-  document.querySelectorAll('.aura-int-btn').forEach(b =>
-    b.classList.toggle('active', parseFloat(b.dataset.level) === curInt));
 }
 
 // Pastilles de sélection de personnage (char-switch)
@@ -512,9 +505,8 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
     </div>
 
     ${canEdit?(() => {
-      const isCustom = !!c.auraColor, curHex = _auraHex(c), curInt = _auraIntensity(c);
-      return `<div class="aura-panel">
-      <div class="aura-row">
+      const isCustom = !!c.auraColor, curHex = _auraHex(c);
+      return `<div class="aura-row">
         <span class="aura-lbl">Aura</span>
         <div class="aura-dots">
           ${Object.entries(AURA_PALETTE).map(([k,col]) => `
@@ -526,15 +518,7 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
             <input type="color" class="aura-color-input" value="${curHex}" data-change="setCharAuraColor" data-id="${c.id}">
           </label>
         </div>
-      </div>
-      <div class="aura-row">
-        <span class="aura-lbl">Intensité</span>
-        <div class="aura-intens">
-          ${[['0.6','Léger'],['1','Normal'],['1.4','Fort']].map(([lv,lbl]) => `
-            <button class="aura-int-btn${curInt===parseFloat(lv)?' active':''}" data-action="setCharAuraIntensity" data-id="${c.id}" data-level="${lv}">${lbl}</button>`).join('')}
-        </div>
-      </div>
-    </div>`;})():''}
+      </div>`;})():''}
 
   </aside>`;
 }
@@ -602,7 +586,7 @@ function renderCharSheet(c, keepTab) {
 
   // ── Sous-composants HTML ───────────────────────
   const charSwitchHtml = _buildCharSwitchHtml(c.id, canEdit);
-  const { auraGlow, auraBd, auraSh } = _auraVars(_auraHex(c), _auraIntensity(c));
+  const { auraGlow, auraBd, auraSh } = _auraVars(_auraHex(c));
   const tilesHtml      = _buildStatTilesHtml(c, canEdit, lvlPointsRemaining);
   const tabsHtml       = _buildTabsHtml(c, v3Tab);
 
@@ -2606,14 +2590,6 @@ async function setCharAuraColor(charId, hex) {
   await updateInCol('characters', charId, { auraColor: hex });
   _applyAuraVars(c);
 }
-async function setCharAuraIntensity(charId, level) {
-  const c = getCharacterById(charId);
-  if (!c) return;
-  const v = Math.max(0.3, Math.min(2, parseFloat(level) || 1));
-  c.auraIntensity = v;
-  await updateInCol('characters', charId, { auraIntensity: v });
-  _applyAuraVars(c);
-}
 
 // Mémorise la position de scroll par onglet (clé : charId + tab)
 const _scrollByTab = new Map();
@@ -2716,7 +2692,6 @@ registerActions({
   deleteChar:              (btn)    => deleteChar(btn.dataset.id),
   setCharAura:             (btn)    => setCharAura(btn.dataset.id, btn.dataset.auraKey),
   setCharAuraColor:        (el)     => setCharAuraColor(el.dataset.id, el.value),
-  setCharAuraIntensity:    (btn)    => setCharAuraIntensity(btn.dataset.id, btn.dataset.level),
   openSendGoldModal:       (btn)    => openSendGoldModal(btn.dataset.id),
 
   // Ledger
