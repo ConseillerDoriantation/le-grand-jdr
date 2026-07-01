@@ -1533,19 +1533,31 @@ function _showMoveRange(t) {
   const mv = (inCombat && !STATE.isAdmin) ? Math.max(0, maxMvt - (t.movedCells||0)) : (ld.displayMovement??6);
   const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
   const {cols,rows}=VS.activePage;
-  // Grandes créatures : le déplacement est ancré sur la case CENTRALE, pas le coin
-  // haut-gauche. On dessine chaque case atteignable au centre de l'empreinte de
-  // destination (clic = le centre de la créature vient sur cette case).
-  const cx = Math.floor((sw-1)/2), cy = Math.floor((sh-1)/2);
-  // Pas de check collision : le drag & drop laisse passer, l'affichage doit faire pareil.
+  // Grandes créatures : le déplacement est basé sur TOUTE l'empreinte (hit-box),
+  // pas un point unique. On calcule la RÉUNION des empreintes atteignables → une
+  // région symétrique autour du corps (marche pour 2×2, 3×3, taille paire ou non).
+  // Chaque case de la région pointe vers la meilleure destination : celle où cette
+  // case est la plus « centrale » dans la nouvelle empreinte → cliquer y recentre
+  // la créature. Le coût reste |dc|+|dr| (translation rigide de la hit-box).
+  const cxG = (sw-1)/2, cyG = (sh-1)/2;   // centre géométrique (peut valoir .5)
+  const cellMap = new Map();              // "c,r" → { aC, aR, score }
   for (let dc=-mv;dc<=mv;dc++) for (let dr=-mv;dr<=mv;dr++) {
-    if (Math.abs(dc)+Math.abs(dr)>mv) continue;
-    const c=t.col+dc,r=t.row+dr;                 // coin haut-gauche de destination
-    if (c<0||r<0||c+sw>cols||r+sh>rows||(!dc&&!dr)) continue;
-    const hc=c+cx, hr=r+cy;                       // case centrale de destination (affichée)
-    const rect=new K.Rect({ x:hc*CELL,y:hr*CELL,width:CELL,height:CELL,
+    if (Math.abs(dc)+Math.abs(dr)>mv || (!dc&&!dr)) continue;
+    const aC=t.col+dc, aR=t.row+dr;       // coin haut-gauche de destination
+    if (aC<0||aR<0||aC+sw>cols||aR+sh>rows) continue;
+    for (let fx=0;fx<sw;fx++) for (let fy=0;fy<sh;fy++) {
+      const cc=aC+fx, cr=aR+fy;
+      const score=Math.abs(cc-(aC+cxG))+Math.abs(cr-(aR+cyG));   // centralité dans l'empreinte
+      const key=cc+','+cr, prev=cellMap.get(key);
+      if (!prev || score<prev.score) cellMap.set(key,{aC,aR,score});
+    }
+  }
+  // Pas de check collision : le drag & drop laisse passer, l'affichage doit faire pareil.
+  for (const [key,dest] of cellMap) {
+    const [cc,cr]=key.split(',').map(Number);
+    const rect=new K.Rect({ x:cc*CELL,y:cr*CELL,width:CELL,height:CELL,
       fill:'rgba(79,140,255,0.28)', stroke:'rgba(79,140,255,0.70)', strokeWidth:1.5, listening:true });
-    const tc=c, tr=r;
+    const tc=dest.aC, tr=dest.aR;
     const moveSelectedHere = async e => {
       // En mode placement de zone ou de ciblage multi-cibles : le sort est prioritaire
       // on bascule placed pour zone et on annule le déplacement
