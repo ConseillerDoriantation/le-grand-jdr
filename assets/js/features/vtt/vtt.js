@@ -1533,12 +1533,17 @@ function _showMoveRange(t) {
   const mv = (inCombat && !STATE.isAdmin) ? Math.max(0, maxMvt - (t.movedCells||0)) : (ld.displayMovement??6);
   const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
   const {cols,rows}=VS.activePage;
+  // Grandes créatures : le déplacement est ancré sur la case CENTRALE, pas le coin
+  // haut-gauche. On dessine chaque case atteignable au centre de l'empreinte de
+  // destination (clic = le centre de la créature vient sur cette case).
+  const cx = Math.floor((sw-1)/2), cy = Math.floor((sh-1)/2);
   // Pas de check collision : le drag & drop laisse passer, l'affichage doit faire pareil.
   for (let dc=-mv;dc<=mv;dc++) for (let dr=-mv;dr<=mv;dr++) {
     if (Math.abs(dc)+Math.abs(dr)>mv) continue;
-    const c=t.col+dc,r=t.row+dr;
+    const c=t.col+dc,r=t.row+dr;                 // coin haut-gauche de destination
     if (c<0||r<0||c+sw>cols||r+sh>rows||(!dc&&!dr)) continue;
-    const rect=new K.Rect({ x:c*CELL,y:r*CELL,width:CELL,height:CELL,
+    const hc=c+cx, hr=r+cy;                       // case centrale de destination (affichée)
+    const rect=new K.Rect({ x:hc*CELL,y:hr*CELL,width:CELL,height:CELL,
       fill:'rgba(79,140,255,0.28)', stroke:'rgba(79,140,255,0.70)', strokeWidth:1.5, listening:true });
     const tc=c, tr=r;
     const moveSelectedHere = async e => {
