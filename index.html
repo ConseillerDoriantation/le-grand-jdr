@@ -4,24 +4,27 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- CSP minimale ACTIVE (défense en profondeur, ne restreint ni script-src ni connect-src
-       → ne peut pas casser Firebase/auth). Bloque <object>/<embed> et l'injection de <base>. -->
-  <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'">
-
-  <!-- CSP STRICTE — PRÊTE (handlers inline migrés vers shared/inline-compat.js, hash importmap
-       calculé). NE PAS activer sur main sans test : pas de mode Report-Only via <meta>, et une
-       directive incomplète casse l'auth Google. Procédure + checklist : docs/security.md §3.
-       Si l'importmap (versions SDK Firebase) change → recalculer le hash sha256 ci-dessous.
+  <!-- CSP STRICTE — ACTIVE. Vrai rempart anti-XSS. Procédure + checklist : docs/security.md §3.
+       Si l'importmap (versions SDK Firebase) change → recalculer le hash sha256 de script-src.
+       media-src https: = audio VTT (releases GitHub / URLs libres) ; connect api.github.com =
+       import de sons depuis une release. Revert instantané : recommenter ce bloc et décommenter
+       la CSP minimale ci-dessous. -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
-    script-src 'self' https://www.gstatic.com 'sha256-pux95tWeUAUbC4qBEFQ0c9EyyXfMrPyeU6SN0nA8yVE=';
+    script-src 'self' https://www.gstatic.com 'sha256-Prwrq/u3+3rrlnpZLIupm7QH2lfjWZRVSJY0YslArdk=';
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
     font-src https://fonts.gstatic.com;
     img-src 'self' data: https:;
-    connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudinary.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com wss://*.firebaseio.com;
+    media-src 'self' https:;
+    connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudinary.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://api.github.com wss://*.firebaseio.com;
     frame-src https://*.firebaseapp.com https://accounts.google.com https://apis.google.com;
     object-src 'none';
     base-uri 'self'">
+
+  <!-- CSP minimale — FALLBACK de revert (ne restreint ni script-src ni connect-src → ne peut
+       pas casser Firebase/auth). Pour revenir en arrière : commenter la CSP stricte ci-dessus
+       et décommenter la ligne ci-dessous.
+  <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'">
   -->
 
   <title>Grimorium</title>
