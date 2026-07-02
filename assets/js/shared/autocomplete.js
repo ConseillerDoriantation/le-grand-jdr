@@ -31,8 +31,8 @@ const ITEM_STYLE = 'padding:.5rem .75rem;cursor:pointer;font-size:.85rem;color:v
 const _lower = (v) => String(v).toLowerCase();
 const _normalize = (arr) => [...new Set((arr || []).filter(Boolean).map(String))];
 
-// Styles statiques injectés une fois pour le focus-within du multi (mimique
-// .input-field:focus tel qu'overridé par darkforge-overrides.css).
+// Styles statiques injectés une fois pour le focus-within du multi
+// (mimique l'état .input-field:focus du thème).
 if (typeof document !== 'undefined' && !document.getElementById('ac-multi-styles')) {
   const style = document.createElement('style');
   style.id = 'ac-multi-styles';

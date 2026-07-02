@@ -26,15 +26,20 @@
      ════════════════════════════════════════════════════════════════════════ */
 
 /* ────────────────────────────────────────────────────────────────────────────
-   CHARGEMENT DES FEUILLES
-   Les 23 feuilles ne sont PLUS chargées via @import (waterfall séquentiel,
-   bloquant). Elles sont déclarées en <link> dans index.html, ce qui permet
-   au navigateur de les télécharger EN PARALLÈLE dès le premier scan du HTML.
-   → L'ORDRE des <link> dans index.html = l'ordre de cascade ci-dessous.
-     Si tu ajoutes une feuille, ajoute-la AUSSI dans index.html (même position).
+   CHARGEMENT DES FEUILLES — ce fichier N'EST PAS chargé (index/doc uniquement).
+   Aucun @import : waterfall séquentiel bloquant évité. Deux niveaux :
 
-   Ordre de cascade :
-     tokens, base, auth, adventure, layout, responsive, features, recipes, shop,
-     characters, histoire, bestiary, npcs, vtt, quests, rich-text, dashboard, account,
-     agenda, bastion, quick-view, command-palette, print
+   1) EAGER — <link> dans index.html (global, chargé au boot, parallèle).
+      Ordre de cascade = ordre des <link> :
+        tokens, base, auth, adventure, layout, responsive, features,
+        rich-text, quick-view, command-palette, print
+      → Réservé au socle + composants réellement partagés partout.
+        Y ajouter une feuille = payload sur CHAQUE page : à éviter.
+
+   2) LAZY par page — FEATURE_CSS dans core/navigation.js (_ensureFeatureCss).
+      Chargé la 1ʳᵉ fois que la page est visitée, puis mis en cache navigateur.
+      C'est là que vivent les grosses feuilles (characters, vtt, shop, histoire,
+      bestiary, npcs, bastion, dashboard, stats, agenda, recipes, account…).
+      → NOUVELLE PAGE = ajouter son CSS dans FEATURE_CSS, PAS dans index.html.
+        Vérifier qu'une feuille lourde n'est pas tirée eager « pour un petit widget ».
    ──────────────────────────────────────────────────────────────────────────── */
