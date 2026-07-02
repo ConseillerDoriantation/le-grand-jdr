@@ -54,7 +54,7 @@ en dessous comme **fallback de revert instantané**.
 ```html
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' https://www.gstatic.com 'sha256-Prwrq/u3+3rrlnpZLIupm7QH2lfjWZRVSJY0YslArdk=';
+  script-src 'self' https://www.gstatic.com 'sha256-pux95tWeUAUbC4qBEFQ0c9EyyXfMrPyeU6SN0nA8yVE=';
   style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
   font-src https://fonts.gstatic.com;
   img-src 'self' data: https:;
@@ -76,12 +76,13 @@ depuis une release GitHub (`vtt-music.js`). Retirer l'une casse la musique VTT.
    dans `core/theme-boot.js`, chargé en `<script src>` → couvert par `script-src 'self'`).
    L'importmap doit rester inline et précéder les modules ; son hash sha256 est donc
    listé dans `script-src` ci-dessus.
-   - Hash courant : `sha256-Prwrq/u3+3rrlnpZLIupm7QH2lfjWZRVSJY0YslArdk=`
+   - Hash courant : `sha256-pux95tWeUAUbC4qBEFQ0c9EyyXfMrPyeU6SN0nA8yVE=`
    - **⚠ À RECALCULER** à chaque modif de l'importmap — y compris un bump de version
      du SDK Firebase (l'URL versionnée fait partie du contenu haché) ou tout changement
-     d'espaces/indentation. Commande :
+     d'espaces/indentation. Commande (⚠ normaliser CRLF→LF : le navigateur hache le
+     contenu servi en LF ; sans la normalisation on obtient un faux hash sur Windows) :
    ```sh
-   node -e 'const fs=require("fs"),c=require("crypto");const m=fs.readFileSync("index.html","utf8").match(/<script type="importmap">([\s\S]*?)<\/script>/);console.log("sha256-"+c.createHash("sha256").update(m[1]).digest("base64"))'
+   node -e 'const fs=require("fs"),c=require("crypto");const m=fs.readFileSync("index.html","utf8").replace(/\r\n/g,"\n").match(/<script type="importmap">([\s\S]*?)<\/script>/);console.log("sha256-"+c.createHash("sha256").update(m[1]).digest("base64"))'
    ```
 2. **Handlers inline générés** — ✅ **FAIT** : migrés vers des écouteurs délégués dans
    `shared/inline-compat.js` (importé au boot par `app.js`). Le HTML porte désormais des
