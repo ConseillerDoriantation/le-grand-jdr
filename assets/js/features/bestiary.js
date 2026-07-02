@@ -9,6 +9,7 @@ import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
 import { openModal, closeModal, pushModal, popModal, confirmModal, promptModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
+import { _ensureFeatureCss } from '../core/navigation.js';
 import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
@@ -193,7 +194,14 @@ function _bstActionsCacheLoad(creatureId, actions) {
 }
 
 async function _bstEnsureSpellsModule() {
-  return import('./characters/spells.js');
+  // L'éditeur de sorts est stylé par characters.css (+ shop.css pour le sous-modal
+  // matrices) — chargés en lazy uniquement sur la page Perso. Ouvert depuis le
+  // bestiaire sans y être passé → CSS absente = modale non stylée. On la charge ici.
+  const [mod] = await Promise.all([
+    import('./characters/spells.js'),
+    _ensureFeatureCss('characters'),
+  ]);
+  return mod;
 }
 
 function _bstActionsPersist() {
