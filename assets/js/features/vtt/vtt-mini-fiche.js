@@ -573,7 +573,9 @@ function _vttSpellChips(s, c) {
   const nbT = calcSpellTargets(s);
   if (nbT > 1) chips.push({ icon:'🎯', val:`×${nbT}`, color:'#4f8cff', lbl:'Nombre de cibles' });
   const nbAmp = runes.filter(r => r === 'Amplification').length;
-  if (nbAmp > 0 && s.ampMode !== 'deplacement') {
+  // Avec Enchantement (hors Invocation), l'Amplification booste l'effet → pas de zone.
+  const _enchNoZone = runes.includes('Enchantement') && !runes.includes('Invocation');
+  if (nbAmp > 0 && s.ampMode !== 'deplacement' && !_enchNoZone) {
     const nbDisp = runes.filter(r => r === 'Dispersion').length;
     const zoneW = nbDisp >= 1 ? _vttAmpDispCircleSize(nbAmp, nbDisp) : 3 * nbAmp;
     const zoneH = nbDisp >= 1 ? zoneW : 1;

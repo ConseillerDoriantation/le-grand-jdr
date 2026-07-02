@@ -708,6 +708,10 @@ export function _calcSortZone(s) {
   // En mode déplacement, l'Amplification produit un déplacement, pas une zone.
   if (s.ampMode === 'deplacement') return null;
   const runes  = s.runes || [];
+  // Avec Enchantement (hors combo Arme invoquée), l'Amplification BOOSTE l'effet
+  // de l'enchantement (portée/déplacement de l'état) → ce n'est PAS un sort de zone.
+  if (runes.filter(r => r === 'Enchantement').length > 0
+      && runes.filter(r => r === 'Invocation').length === 0) return null;
   const wMan = s.zoneW ? parseInt(s.zoneW) : 0;
   const hMan = s.zoneH ? parseInt(s.zoneH) : 0;
   if (wMan > 0 || hMan > 0) return { w: wMan, h: hMan, source: 'manual' };
