@@ -59,7 +59,7 @@ en dessous comme **fallback de revert instantané**.
   font-src https://fonts.gstatic.com;
   img-src 'self' data: https:;
   media-src 'self' https:;
-  connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudinary.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://api.github.com wss://*.firebaseio.com;
+  connect-src 'self' https://www.gstatic.com https://*.googleapis.com https://*.firebaseio.com https://*.cloudinary.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://api.github.com wss://*.firebaseio.com;
   frame-src https://*.firebaseapp.com https://accounts.google.com https://apis.google.com;
   object-src 'none';
   base-uri 'self'">
@@ -68,6 +68,8 @@ en dessous comme **fallback de revert instantané**.
 Directives non triviales : `media-src 'self' https:` = audio de la musique VTT (assets de
 releases GitHub ou URLs libres) ; `https://api.github.com` dans `connect-src` = import de sons
 depuis une release GitHub (`vtt-music.js`). Retirer l'une casse la musique VTT.
+`https://www.gstatic.com` dans `connect-src` (en plus de `script-src`) = fetch des *source maps*
+`.js.map` du SDK Firebase quand la console est ouverte (sans lui : warnings CSP bénins en devtools).
 
 #### Prérequis avant activation (sinon l'app casse)
 
