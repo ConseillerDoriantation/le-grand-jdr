@@ -9,6 +9,7 @@ import { loadCollection, loadChars } from '../data/firestore.js';
 import { _esc, _norm, _searchIncludes, _trunc } from '../shared/html.js';
 import { charSession } from '../shared/char-session.js';
 import { navigate } from '../core/navigation.js';
+import { isFeatureEnabled } from '../shared/features.js';
 
 const MAX_RESULTS = 30;
 
@@ -88,6 +89,7 @@ async function _loadEntries() {
   // Pages
   for (const p of PAGE_SHORTCUTS) {
     if (p.adminOnly && !STATE.isAdmin) continue;
+    if (!isFeatureEnabled(p.id)) continue; // feature désactivée pour cette aventure
     entries.push({
       type: 'page', typeLabel: 'Page', id: p.id,
       title: p.label, subtitle: p.subtitle || 'Aller à la page', icon: p.icon,

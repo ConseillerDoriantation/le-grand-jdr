@@ -6,6 +6,7 @@ import { STATE } from './state.js';
 import { navigate } from './navigation.js';
 import { appSplashHtml, _esc } from '../shared/html.js';
 import { CLOUDINARY_ENABLED } from '../shared/upload-cloudinary.js';
+import { isToggleable, isFeatureEnabled } from '../shared/features.js';
 
 // Masque le splash de boot dès qu'un écran principal est prêt à s'afficher.
 function _hideBootSplash() {
@@ -78,12 +79,36 @@ export function showApp() {
     el.style.display = STATE.isAdmin ? 'flex' : 'none';
   });
 
+  // ── Fonctionnalités activées par aventure (masque la nav des features off) ──
+  applyFeatureVisibility();
+
   // Cloudinary désactivé (mode gratuit) → masquer le bouton de config même pour
   // le MJ. Réapparaît si CLOUDINARY_ENABLED repasse à true (cf. upload-cloudinary.js).
   if (!CLOUDINARY_ENABLED) {
     const clBtn = document.querySelector('[data-action="cloudinaryConfig"]');
     if (clBtn) clBtn.style.display = 'none';
   }
+}
+
+// Masque/affiche les items de nav selon les fonctionnalités activées de l'aventure
+// courante. Togglables seulement (les pages fixes/admin-only ne sont pas touchées,
+// sauf pour ne pas ré-afficher un item admin-only à un non-admin). Ré-appelée après
+// un changement de toggles. Couvre sidebar + more-menu (tous les [data-navigate]).
+export function applyFeatureVisibility() {
+  document.querySelectorAll('[data-navigate]').forEach((el) => {
+    const page = el.getAttribute('data-navigate');
+    if (!isToggleable(page)) return;                 // page fixe → laissée telle quelle
+    if (!isFeatureEnabled(page)) { el.style.display = 'none'; return; }
+    // Feature activée : réafficher, sauf si masquée par admin-only pour un non-admin.
+    const adminHidden = el.classList.contains('admin-only') && !STATE.isAdmin;
+    el.style.display = adminHidden ? 'none' : '';
+  });
+  // Sections de sidebar dont tous les items sont cachés → masquer le titre orphelin.
+  document.querySelectorAll('.sidebar-section').forEach((sec) => {
+    const items = sec.querySelectorAll('.nav-item');
+    if (!items.length) return;
+    sec.style.display = [...items].every(i => i.style.display === 'none') ? 'none' : '';
+  });
 }
 
 function _initSidebarExpansion() {
@@ -290,12 +315,13 @@ function _updateMobileBottomNav() {
   if (!nav) return;
 
   // Même barre pour tous : Jouer est l'action principale, le reste passe par « Plus ».
+  // Filtrée selon les fonctionnalités activées de l'aventure (ex : VTT off → retiré).
   const items = [
     { page: 'dashboard',  icon: 'home',   label: 'Accueil', aria: 'Ouvrir le tableau de bord' },
     { page: 'characters', icon: 'scroll', label: 'Personnage', aria: 'Ouvrir ma fiche personnage' },
     { page: 'vtt',        icon: 'dice',   label: 'Jouer', primary: true, aria: 'Jouer maintenant, ouvrir la table virtuelle' },
     { page: 'story',      icon: 'book',   label: 'Trame', aria: 'Ouvrir la Trame' },
-  ];
+  ].filter(i => isFeatureEnabled(i.page));
   const currentPage = STATE.currentPage || document.querySelector('.nav-item.active')?.dataset?.navigate || 'dashboard';
 
   const moreActive = !items.some(i => i.page === currentPage);

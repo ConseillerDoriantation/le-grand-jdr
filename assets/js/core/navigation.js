@@ -8,6 +8,7 @@ import PAGES from '../features/pages.js';
 import { unwatchAll } from '../shared/realtime.js';
 import { appSplashHtml } from '../shared/html.js';
 import { dispatchAction, dispatchValueAction } from './actions.js';
+import { isFeatureEnabled } from '../shared/features.js';
 
 // ── Carte page → module feature chargé en lazy ────────────────────────────
 // Chaque module est importé une seule fois : le navigateur le met en cache
@@ -94,6 +95,14 @@ export function _ensureFeatureCss(page) {
 export async function navigate(page) {
   closeMoreMenu(); // referme le menu mobile quelle que soit la source (clic, clavier, palette)
   _collapseRailAfterNav(); // referme la sidebar déployée (rail) après navigation
+
+  // Garde : une feature désactivée pour l'aventure courante (lien direct, palette,
+  // page devenue off) → on redirige vers le tableau de bord au lieu de l'ouvrir.
+  if (!isFeatureEnabled(page)) {
+    showNotif('Cette fonctionnalité n\'est pas activée pour cette aventure.', 'info');
+    page = 'dashboard';
+  }
+
   unwatchAll(); // stopper tous les listeners temps réel de la page précédente
 
   // Reset des inline styles que certaines pages posent sur #main-content

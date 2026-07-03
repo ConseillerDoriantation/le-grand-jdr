@@ -17,6 +17,7 @@ import {
   loadMyCharacters,
   promoteToAdmin,
   relinkPlayerAccount,
+  setAdventureFeatures,
   inviteByEmail,
   cancelInvite,
   loadAllUsers,
@@ -25,6 +26,7 @@ import {
 } from '../core/adventure.js';
 import { exportAdventure, importAdventure } from '../data/firestore.js';
 import { unwatchAll } from '../shared/realtime.js';
+import { TOGGLEABLE_FEATURES, enabledFeaturesOf } from '../shared/features.js';
 
 // ── Page principale ────────────────────────────
 async function renderAventuresPage() {
@@ -282,6 +284,29 @@ export async function openManageAdventureModal(adventureId) {
           </div>`).join('')}
         </div>
       </div>` : ''}
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:0">
+
+      <!-- Fonctionnalités activées -->
+      <div>
+        <div style="font-size:.78rem;font-weight:600;color:var(--text-dim);margin-bottom:.4rem">FONCTIONNALITÉS</div>
+        <p style="font-size:.78rem;color:var(--text-dim);margin:0 0 .55rem">
+          Choisis les pages actives pour cette aventure. Modifiable à tout moment.
+        </p>
+        <div class="adv-feat-grid">
+          ${(() => {
+            const enabled = new Set(enabledFeaturesOf(adv));
+            return TOGGLEABLE_FEATURES.map(f => `
+              <button type="button" class="adv-feat-toggle ${enabled.has(f.key) ? 'is-on' : ''}"
+                data-action="_advToggleFeature" data-adv-id="${adventureId}" data-feature="${f.key}"
+                aria-pressed="${enabled.has(f.key)}">
+                <span class="adv-feat-ico">${f.icon}</span>
+                <span class="adv-feat-name">${_esc(f.label)}</span>
+                <span class="adv-feat-switch" aria-hidden="true"></span>
+              </button>`).join('');
+          })()}
+        </div>
+      </div>
 
       <hr style="border:none;border-top:1px solid var(--border);margin:0">
 
@@ -567,6 +592,28 @@ async function inviteAdventurePlayer(advId) {
   } catch (e) { showNotif(e.message, 'error'); }
 }
 
+// Toggle optimiste d'une fonctionnalité : flip visuel immédiat, collecte des clés
+// actives depuis le DOM, sauvegarde, ré-application de la visibilité de la nav.
+// Revert visuel en cas d'échec. Pas de re-render de la modale (fluide).
+async function toggleAdventureFeature(btn) {
+  const advId = btn.dataset.advId;
+  const on = btn.classList.toggle('is-on');
+  btn.setAttribute('aria-pressed', String(on));
+  const keys = [...document.querySelectorAll('.adv-feat-toggle.is-on[data-feature]')]
+    .map(b => b.dataset.feature);
+  try {
+    await setAdventureFeatures(advId, keys);
+    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
+    setAdventures(adventures);
+    const { applyFeatureVisibility } = await import('../core/layout.js');
+    applyFeatureVisibility();
+  } catch (e) {
+    btn.classList.toggle('is-on');
+    btn.setAttribute('aria-pressed', String(!on));
+    showNotif(e.message || 'Échec de la modification.', 'error');
+  }
+}
+
 async function cancelAdventureInvite(advId, email) {
   try {
     await cancelInvite(advId, email);
@@ -632,6 +679,7 @@ registerActions({
   _advInvite: (btn) => inviteAdventurePlayer(btn.dataset.id),
   _advCancelInvite: (btn) => cancelAdventureInvite(btn.dataset.advId, btn.dataset.email),
   _advLeave: (btn) => leaveAdventure(btn.dataset.id),
+  _advToggleFeature: (btn) => toggleAdventureFeature(btn),
   _advDelete: (btn) => deleteAdventureAndRefresh(btn.dataset.id),
   _advHideDeleteConfirm: () => { document.getElementById('adv-delete-confirm').style.display = 'none'; },
   _advShowDeleteConfirm: (btn) => {

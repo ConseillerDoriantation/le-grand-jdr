@@ -6,6 +6,7 @@ import { registerActions, dispatchAction } from '../core/actions.js';
 import { loadChars, loadCollection, getCachedCollection, getDocData } from '../data/firestore.js';
 import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
+import { isFeatureEnabled } from '../shared/features.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { loadStats, resetStats, deleteCharStats } from '../shared/stats.js';
 import { showNotif } from '../shared/notifications.js';
@@ -821,7 +822,8 @@ const PAGES = {
         { page:'vtt',        icon:'🎲', label:'Table VTT',  bg:'rgba(157,111,255,.15)', bc:'rgba(157,111,255,.3)', col:'#9d6fff' },
         { page:'bastion',    icon:'🏰', label:'Bastion',    bg:'rgba(255,149,68,.15)',  bc:'rgba(255,149,68,.3)',  col:'#ff9544' },
         { page:'characters', icon:'⚔️', label:'Personnage', bg:'rgba(232,184,75,.15)',  bc:'rgba(232,184,75,.3)',  col:'#e8b84b' },
-      ];
+      ].filter(s => isFeatureEnabled(s.page));
+      if (!S.length) return '';
       return `<div class="dv2-shortcuts-grid">${S.map(s => `
         <button class="dv2-shortcut" data-navigate="${s.page}">
           <div class="dv2-shortcut-icon" style="background:${s.bg};border-color:${s.bc};color:${s.col}">${s.icon}</div>
@@ -1004,7 +1006,7 @@ const PAGES = {
             { page:'map',       icon:'🗺️', label:'Carte',     bg:'rgba(79,140,255,.15)',  bc:'rgba(79,140,255,.3)',  col:'#4f8cff' },
             { page:'statistiques', icon:'📊', label:'Stats',  bg:'rgba(167,139,250,.15)', bc:'rgba(167,139,250,.3)', col:'#a78bfa' },
             { page:'admin',     icon:'⚙️', label:'Admin',     bg:'rgba(255,149,68,.15)',  bc:'rgba(255,149,68,.3)',  col:'#ff9544' },
-          ].map(s => `
+          ].filter(s => isFeatureEnabled(s.page)).map(s => `
           <button class="dv2-shortcut" data-navigate="${s.page}">
             <div class="dv2-shortcut-icon" style="background:${s.bg};border-color:${s.bc};color:${s.col}">${s.icon}</div>
             <span class="dv2-shortcut-label">${s.label}</span>

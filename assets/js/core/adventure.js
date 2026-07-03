@@ -20,6 +20,7 @@ import {
 
 import { setCurrentAdventure, primeSessionData } from '../data/firestore.js';
 import { startPresence } from '../shared/presence.js';
+import { DEFAULT_ENABLED } from '../shared/features.js';
 
 const _emailRaw = (email = '') => String(email || '').trim();
 const _emailKey = (email = '') => _emailRaw(email).toLowerCase();
@@ -183,6 +184,8 @@ export async function createAdventure({ nom, emoji = '⚔️', description = '' 
     // Profils dénormalisés {uid:{pseudo,email}} : permet au MJ (même non super-admin)
     // d'afficher/gérer ses membres sans lire users/{uid} (verrouillé anti-moisson).
     memberProfiles: { [uid]: _selfProfile() },
+    // Fonctionnalités actives par défaut (le MJ ajuste ensuite via Gérer).
+    enabledFeatures: [...DEFAULT_ENABLED],
     status:     'active',
   };
 
@@ -482,6 +485,27 @@ export async function updateAdventureMeta(adventureId, { nom, emoji, description
   if (STATE.adventure?.id === adventureId) {
     setAdventure({ ...STATE.adventure, ...update });
   }
+}
+
+// ── Fonctionnalités actives de l'aventure (toggles MJ) ─────────────────
+// `keys` = tableau des clés de page activées. Réservé au MJ (règle isAdvAdmin).
+export async function setAdventureFeatures(adventureId, keys) {
+  const uid = STATE.user?.uid;
+  if (!uid) throw new Error('Non connecté');
+
+  const ref  = doc(db, 'adventures', adventureId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Aventure introuvable');
+  if (!STATE.isSuperAdmin && !snap.data().admins?.includes(uid)) {
+    throw new Error('Accès refusé — réservé au MJ de cette aventure');
+  }
+
+  const enabledFeatures = _uniq(keys);
+  await updateDoc(ref, { enabledFeatures });
+  if (STATE.adventure?.id === adventureId) {
+    setAdventure({ ...STATE.adventure, enabledFeatures });
+  }
+  return enabledFeatures;
 }
 
 // ── Supprimer une aventure (et toutes ses sous-collections) ───────────
