@@ -21,6 +21,25 @@ import {
 import { setCurrentAdventure, primeSessionData } from '../data/firestore.js';
 import { startPresence } from '../shared/presence.js';
 import { DEFAULT_ENABLED } from '../shared/features.js';
+// Caches module-level de « défauts MJ » scopés par aventure (types de dégâts,
+// formats d'arme, matrices de sorts, conditions, améliorations, picker boutique) :
+// à vider au changement d'aventure sinon les données d'une aventure « fuient » sur
+// la suivante (l'app est une SPA, ces caches survivent au logout/switch).
+import { invalidateDamageTypesCache } from '../shared/damage-types.js';
+import { invalidateWeaponFormatsCache } from '../shared/weapon-formats.js';
+import { invalidateSpellMatricesCache } from '../shared/spell-matrices.js';
+import { invalidateUpgradeSettingsCache } from '../shared/upgrade-settings.js';
+import { invalidateShopPickerCache } from '../shared/shop-picker.js';
+import { clearConditionLibraryCache } from '../shared/conditions.js';
+
+function _invalidateScopedCaches() {
+  invalidateDamageTypesCache();
+  invalidateWeaponFormatsCache();
+  invalidateSpellMatricesCache();
+  invalidateUpgradeSettingsCache();
+  invalidateShopPickerCache();
+  clearConditionLibraryCache();
+}
 
 const _emailRaw = (email = '') => String(email || '').trim();
 const _emailKey = (email = '') => _emailRaw(email).toLowerCase();
@@ -147,6 +166,10 @@ export function selectAdventure(adv) {
   // `setCurrentAdventure` tear-down les listeners session de l'aventure
   // précédente avant de changer de scope.
   setCurrentAdventure(adv.id);
+
+  // Vider les caches « défauts MJ » de l'aventure précédente (sinon ses types de
+  // dégâts / formats d'arme / etc. restent affichés dans la nouvelle aventure).
+  _invalidateScopedCaches();
 
   // isAdmin : vrai si admin global (profile.isAdmin) OU admin de cette aventure
   const uid = STATE.user?.uid;
