@@ -9,7 +9,7 @@
 import { db, doc, onSnapshot, setDoc, updateDoc } from '../../config/firebase.js';
 import { STATE } from '../../core/state.js';
 import { VS, aid } from './vtt-state.js';
-import { _esc } from '../../shared/html.js';
+import { _esc, loadingHtml } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
 import { promptModal } from '../../shared/modal.js';
@@ -95,7 +95,7 @@ function _renderLootPanel() {
   const mj = STATE.isAdmin;
 
   if (_lootLoading) {
-    panel.innerHTML = '<div class="vtt-loot-empty">Chargement du butin…</div>';
+    panel.innerHTML = loadingHtml('Chargement du butin…', { compact: true });
     return;
   }
 

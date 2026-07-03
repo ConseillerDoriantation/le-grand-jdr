@@ -4,7 +4,7 @@
 // ══════════════════════════════════════════════
 import { STATE } from '../core/state.js';
 import { updateInCol } from '../data/firestore.js';
-import { _esc, _norm } from '../shared/html.js';
+import { _esc, _norm, loadingHtml } from '../shared/html.js';
 import { charSession } from '../shared/char-session.js';
 import { characterPortraitContent } from '../shared/portraits.js';
 import {
@@ -947,7 +947,7 @@ function renderCharCombatV3(c, canEdit) {
   if (!dmgTypes.length) {
     elemsHtml = `<div class="elem-card">
       <div class="elem-card-head">Éléments maîtrisés</div>
-      <div style="font-size:.74rem;color:var(--text-dim);font-style:italic">Chargement…</div>
+      ${loadingHtml('Chargement…', { compact: true })}
     </div>`;
   } else {
     const elemChips = magicTypes.map(t => {

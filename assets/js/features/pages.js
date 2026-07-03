@@ -4,7 +4,7 @@
 import { STATE } from '../core/state.js';
 import { registerActions, dispatchAction } from '../core/actions.js';
 import { loadChars, loadCollection, getCachedCollection, getDocData } from '../data/firestore.js';
-import { _esc, appSplashHtml, pageHeaderHtml} from '../shared/html.js';
+import { _esc, appSplashHtml, pageHeaderHtml, loadingHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { isFeatureEnabled } from '../shared/features.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
@@ -1537,7 +1537,7 @@ const PAGES = {
   async statistiques() {
     const content = document.getElementById('main-content');
     content.innerHTML = `${pageHeaderHtml('📊 Statistiques', 'Jets, réussites et exploits de la table')}
-      <div id="stats-root" class="stats-root"><div class="stats-empty">Chargement…</div></div>`;
+      <div id="stats-root" class="stats-root">${loadingHtml('Chargement des statistiques…')}</div>`;
     const [data, emoteDoc, chars] = await Promise.all([
       loadStats(),
       getDocData('world', 'vtt_emotes').catch(() => null),

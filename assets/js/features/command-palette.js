@@ -6,7 +6,7 @@
 
 import { STATE } from '../core/state.js';
 import { loadCollection, loadChars } from '../data/firestore.js';
-import { _esc, _norm, _searchIncludes, _trunc } from '../shared/html.js';
+import { _esc, _norm, _searchIncludes, _trunc, loadingHtml } from '../shared/html.js';
 import { charSession } from '../shared/char-session.js';
 import { navigate } from '../core/navigation.js';
 import { isFeatureEnabled } from '../shared/features.js';
@@ -499,7 +499,7 @@ async function openPalette() {
 
   const input = _mountModal();
   const list = document.getElementById('cmd-palette-list');
-  if (list) list.innerHTML = `<div class="cmd-palette-empty">Chargement…</div>`;
+  if (list) list.innerHTML = loadingHtml('Chargement…', { compact: true });
 
   setTimeout(() => input?.focus(), 30);
 

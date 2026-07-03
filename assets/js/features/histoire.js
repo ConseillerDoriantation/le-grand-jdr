@@ -8,7 +8,7 @@
 import { getDocData, saveDoc, loadCollection } from '../data/firestore.js';
 import { confirmModal } from '../shared/modal.js';
 import { STATE } from '../core/state.js';
-import { _esc, _norm } from '../shared/html.js';
+import { _esc, _norm, loadingHtml } from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { showNotif } from '../shared/notifications.js';
 import { lsJson } from '../shared/local-storage.js';
@@ -705,7 +705,7 @@ async function _switchHistMission(id, titre, acte) {
 
   // Charger et afficher le nouveau contenu
   const editor = document.getElementById('hist-editor');
-  if (editor) editor.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:2rem;font-size:.9rem">Chargement…</div>';
+  if (editor) editor.innerHTML = loadingHtml('Chargement…');
 
   const histDoc = await getDocData('story_histories', id).catch(() => null);
   if (editor) {

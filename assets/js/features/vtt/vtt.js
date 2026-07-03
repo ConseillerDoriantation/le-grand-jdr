@@ -35,7 +35,7 @@ import {
   fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath, fogUndo,
 } from './vtt-fog.js';
 import { openModal, closeModalDirect, confirmModal, updateModalContent, promptModal } from '../../shared/modal.js';
-import { _esc, _norm, _searchIncludes, appSplashHtml, normalizeImageUrl } from '../../shared/html.js';
+import { _esc, _norm, _searchIncludes, appSplashHtml, loadingHtml, normalizeImageUrl } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
 import PAGES from '../pages.js';
@@ -8781,7 +8781,7 @@ function _buildHtml() {
       <div class="vtt-tray-views">
         <div class="vtt-tray-view${_trayTab==='scenes'?' active':''}" data-view="scenes">
           <div class="vtt-tray-section-hd"><span>Pages</span><button class="vtt-tray-add-btn" data-vtt-fn="_vttAddPage" title="Nouvelle page">＋</button></div>
-          <div id="vtt-tray-pages"><div class="vtt-tray-empty">Chargement…</div></div>
+          <div id="vtt-tray-pages">${loadingHtml('Chargement…', { compact: true })}</div>
           <div class="vtt-tray-section-hd vtt-scene-tok-hd"><span>🗺 Sur la scène</span></div>
           <div id="vtt-scene-tokens"></div>
         </div>

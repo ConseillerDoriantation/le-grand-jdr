@@ -112,6 +112,23 @@ export function appSplashHtml(label = 'Chargement…') {
     </div>`;
 }
 
+// Loader INLINE léger (spinner + libellé) pour un panneau / une liste / une section —
+// à distinguer de `appSplashHtml` (chargement PLEINE PAGE avec logo). `compact` réduit
+// l'espacement pour les petits conteneurs (dropdowns, mini-panneaux).
+export function loadingHtml(label = 'Chargement…', { compact = false } = {}) {
+  return `<div class="loading-inline${compact ? ' loading-inline--compact' : ''}" role="status" aria-live="polite">
+    <span class="loading-inline-spinner" aria-hidden="true"></span>
+    ${label ? `<span class="loading-inline-label">${_esc(label)}</span>` : ''}
+  </div>`;
+}
+
+// Skeleton de liste (barres scintillantes) — placeholder pendant le chargement d'une
+// liste, plus soigné qu'un simple texte. `count` = nombre de lignes.
+export function skeletonHtml(count = 3) {
+  const rows = Array.from({ length: Math.max(1, count) }, () => '<div class="skeleton-row"></div>').join('');
+  return `<div class="skeleton-list" aria-hidden="true">${rows}</div>`;
+}
+
 /**
  * Normalise une URL d'image collée par l'utilisateur :
  *  - convertit une URL « page web » GitHub (github.com/<owner>/<repo>/tree|blob/

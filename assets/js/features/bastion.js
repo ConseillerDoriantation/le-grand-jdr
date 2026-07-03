@@ -20,7 +20,7 @@ import { tryDoc } from '../shared/crud.js';
 import { watchDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { openModal, closeModal, confirmModal, modalSection } from '../shared/modal.js';
-import { _esc, _norm, appSplashHtml } from '../shared/html.js';
+import { _esc, _norm, appSplashHtml, loadingHtml } from '../shared/html.js';
 import { calcOr, getDefaultCharForUser } from '../shared/char-stats.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { useGold } from '../shared/economy.js';
@@ -873,7 +873,7 @@ async function _bastionEditRoom(slug) {
           <label style="font-size:.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;font-weight:600">Production items <span style="font-size:.68rem;color:var(--text-dim);font-weight:400;text-transform:none;letter-spacing:0">(depuis ta boutique)</span></label>
           <div id="ed-items-list-${i}" class="bs-items-list"></div>
           <div class="bs-items-picker" id="ed-items-picker-${i}">
-            <div class="loading-mini">Chargement de la boutique…</div>
+            ${loadingHtml('Chargement de la boutique…', { compact: true })}
           </div>
         </div>
         <label class="bs-edit-full">Bonus passif (texte libre)

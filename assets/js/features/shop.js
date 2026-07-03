@@ -4,7 +4,7 @@ import { trySave } from '../shared/crud.js';
 import { openModal, closeModalDirect, confirmModal, promptModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
-import { _esc, _norm, _searchIncludes } from '../shared/html.js';
+import { _esc, _norm, _searchIncludes, loadingHtml } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, calcVitesse, ITEM_STAT_META, statShort as _statShort, getDefaultCharForUser } from '../shared/char-stats.js';
@@ -2413,7 +2413,7 @@ function _shopRenderDamageProfileSection(item) {
   const prof  = item?.damageProfile || {};
   const types = _shopDamageTypes;
   const rows = !types
-    ? `<div style="color:var(--text-dim);font-size:.78rem;padding:.4rem 0">Chargement des types de dégâts…</div>`
+    ? loadingHtml('Chargement des types de dégâts…', { compact: true })
     : DAMAGE_RELATIONS.map(rel => {
         const active = Array.isArray(prof[rel.key]) ? prof[rel.key] : [];
         return `<div class="sh-dmgprof-row" style="border-left:3px solid ${rel.color};background:${rel.color}0d">

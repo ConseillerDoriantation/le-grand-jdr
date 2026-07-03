@@ -10,7 +10,7 @@
 import { db, updateDoc, writeBatch, addDoc, serverTimestamp } from '../../config/firebase.js';
 import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
-import { _esc, _norm } from '../../shared/html.js';
+import { _esc, _norm, loadingHtml } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal, promptModal } from '../../shared/modal.js';
 import { getArmorSetData, syncEquipmentAfterInventoryMutation } from '../../shared/equipment-utils.js';
@@ -981,7 +981,7 @@ function _msRecipeIngrStatus(recipe, counts) {
 }
 
 function _msTabCraft(c, uid, canEdit) {
-  if (_msCraftRecipes === null) { _msEnsureCraftRecipes(); return '<div class="vtt-ms-empty">⏳ Chargement des recettes…</div>'; }
+  if (_msCraftRecipes === null) { _msEnsureCraftRecipes(); return loadingHtml('Chargement des recettes…', { compact: true }); }
 
   const known = _msKnownRecipes(uid);
   if (!known.length) return '<div class="vtt-ms-empty">Aucune recette connue.</div>';
