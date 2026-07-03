@@ -741,8 +741,7 @@ function _renderFiche(n) {
     ${_renderFicheHeader(n)}
     <div class="npc-body">
       ${statutSel}
-      ${desc}
-      ${noteMJ}
+      ${noteMJ ? `<div class="npc-topgrid">${desc}${noteMJ}</div>` : desc}
       ${body}
     </div>
   </div>`;

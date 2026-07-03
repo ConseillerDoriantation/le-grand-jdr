@@ -307,9 +307,15 @@
   border-radius: var(--radius-lg);
   /* overflow visible pour laisser déborder le menu déroulant du sélecteur de
      personnage ; les coins hauts sont arrondis via le héro lui-même. */
-  max-width: 1180px;   /* évite l'étirement sur écrans larges */
+  max-width: 1600px;   /* exploite les écrans larges sans stretch absurde en 4K */
 }
 .npc-hero { border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+/* Haut de fiche : Description | Notes MJ côte à côte (MJ) pour utiliser la largeur ;
+   replié en 1 colonne sous 1000px. */
+.npc-topgrid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: .9rem; align-items: start;
+}
+@media (max-width: 1000px) { .npc-topgrid { grid-template-columns: 1fr; } }
 /* Corps en 2 colonnes : principal (affinité, stats) + latéral (relations, bastion) */
 .npc-cols {
   display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
