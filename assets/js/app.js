@@ -1,6 +1,6 @@
 // assets/js/app.js
 
-import { pickAdventure, openCreateAdventureModal } from './core/init.js';
+import { pickAdventure, openCreateAdventureModal, acceptAdventureInvitation, declineAdventureInvitation } from './core/init.js';
 
 import {
   initAuth,
@@ -72,6 +72,8 @@ registerActions({
   openAdventureSwitcher: () => openAdventureSwitcher(),
   openCreateAdventureModal: () => openCreateAdventureModal(),
   pickAdventure: (btn) => pickAdventure(btn.dataset.id),
+  acceptInvitation: (btn) => acceptAdventureInvitation(btn.dataset.id),
+  declineInvitation: (btn) => declineAdventureInvitation(btn.dataset.id),
   _advSwitchPick: (btn) => { closeModal(); pickAdventure(btn.dataset.id); },
   _layoutCloseModal: () => closeModal(),
   _openQuickView: (btn) => openQuickView(btn.dataset.id),

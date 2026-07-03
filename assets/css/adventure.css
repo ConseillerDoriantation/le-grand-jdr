@@ -129,6 +129,22 @@
   flex-shrink: 0;
 }
 
+/* ── Invitations en attente (picker) ──────────── */
+.adv-invites { margin-bottom: 1.1rem; }
+.adv-card--invite {
+  cursor: default;
+  border-color: rgba(232,184,75,.35);
+  background: rgba(232,184,75,.05);
+}
+.adv-card--invite:hover { transform: none; }
+.adv-invite-actions {
+  display: flex;
+  gap: .4rem;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 /* ── Rôles ────────────────────────────────────── */
 .adv-role {
   font-size: .68rem;

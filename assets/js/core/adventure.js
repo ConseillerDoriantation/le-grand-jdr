@@ -139,10 +139,11 @@ export function selectAdventure(adv) {
 }
 
 // ── Créer une aventure ──────────────────────────
-// Réservé aux super-admins (profile.isAdmin === true)
+// Ouvert à tout utilisateur connecté : le créateur en devient l'unique MJ.
+// (Les règles Firestore imposent createdBy/admins/accessList == [uid] à la création.)
 export async function createAdventure({ nom, emoji = '⚔️', description = '' }) {
   const uid = STATE.user?.uid;
-  if (!uid || !STATE.isSuperAdmin) throw new Error('Accès refusé');
+  if (!uid) throw new Error('Non connecté');
 
   const id  = 'adv_' + Date.now();
   const adv = {
@@ -155,6 +156,7 @@ export async function createAdventure({ nom, emoji = '⚔️', description = '' 
     players:    [],
     accessList: [uid],
     accessEmails: _emailKeys(STATE.profile?.email || STATE.user?.email),
+    invitedEmails: [],
     status:     'active',
   };
 
@@ -166,44 +168,120 @@ export async function createAdventure({ nom, emoji = '⚔️', description = '' 
   return created;
 }
 
-// ── Ajouter un joueur à une aventure ───────────
-export async function addPlayerToAdventure(adventureId, targetUid, asAdmin = false) {
-  const uid = STATE.user?.uid;
+// ── Invitations par email ──────────────────────
+// Modèle : `invitedEmails` = invitations EN ATTENTE (aucun accès ouvert tant que
+// l'invité n'a pas accepté). Accepter = déplacer son email invited→access + s'ajouter
+// à accessList/players. Séparé de `accessEmails` (membres réellement rattachés) pour
+// un vrai flux accepter/refuser. Emails stockés en raw+lower (`_emailKeys`) comme
+// accessEmails : requête `array-contains` (lower) + règle `token.email` (raw).
+
+// MJ : ajoute un email aux invitations en attente.
+export async function inviteByEmail(adventureId, email) {
+  const uid  = STATE.user?.uid;
   if (!uid) throw new Error('Non connecté');
+  const keys = _emailKeys(email);
+  if (!keys.length) throw new Error('Email invalide');
 
   const ref  = doc(db, 'adventures', adventureId);
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error('Aventure introuvable');
+  const adv = snap.data();
+  if (!STATE.isSuperAdmin && !adv.admins?.includes(uid)) {
+    throw new Error('Accès refusé — réservé au MJ de cette aventure');
+  }
 
+  const accessEmails = adv.accessEmails || [];
+  if (keys.some(k => accessEmails.includes(k))) throw new Error('Ce joueur est déjà membre de l\'aventure');
+
+  const invitedEmails = _uniq([...(adv.invitedEmails || []), ...keys]);
+  if (invitedEmails.length === (adv.invitedEmails || []).length) throw new Error('Cet email est déjà invité');
+
+  await updateDoc(ref, { invitedEmails });
+  if (STATE.adventure?.id === adventureId) {
+    setAdventure({ ...STATE.adventure, invitedEmails });
+  }
+}
+
+// MJ : annule une invitation en attente.
+export async function cancelInvite(adventureId, email) {
+  const uid  = STATE.user?.uid;
+  if (!uid) throw new Error('Non connecté');
+  const keys = _emailKeys(email);
+
+  const ref  = doc(db, 'adventures', adventureId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Aventure introuvable');
+  const adv = snap.data();
+  if (!STATE.isSuperAdmin && !adv.admins?.includes(uid)) {
+    throw new Error('Accès refusé');
+  }
+
+  const invitedEmails = (adv.invitedEmails || []).filter(e => !keys.includes(e));
+  await updateDoc(ref, { invitedEmails });
+  if (STATE.adventure?.id === adventureId) {
+    setAdventure({ ...STATE.adventure, invitedEmails });
+  }
+}
+
+// Charger les invitations EN ATTENTE de l'utilisateur (invité mais pas encore membre).
+export async function loadUserInvitations(email = '') {
+  const emailKey = _emailKey(email || STATE.profile?.email || STATE.user?.email);
+  if (!emailKey) return [];
+  try {
+    const snap = await getDocs(
+      query(collection(db, 'adventures'), where('invitedEmails', 'array-contains', emailKey))
+    );
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(adv => !(adv.accessEmails || []).includes(emailKey)); // déjà accepté → pas une invitation
+  } catch (e) {
+    console.error('[adventure] loadUserInvitations', e);
+    return [];
+  }
+}
+
+// Invité : accepte → son email passe invited→access, son uid rejoint accessList/players.
+export async function acceptInvitation(adventure) {
+  const uid = STATE.user?.uid;
+  if (!uid) throw new Error('Non connecté');
+  const myKeys  = _emailKeys(STATE.profile?.email || STATE.user?.email);
+  const rawEmail = _emailRaw(STATE.profile?.email || STATE.user?.email);
+
+  const ref  = doc(db, 'adventures', adventure.id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Aventure introuvable');
   const adv = snap.data();
 
-  // Vérifier qu'on a le droit de modifier
-  if (!STATE.isSuperAdmin && !adv.admins?.includes(uid)) {
-    throw new Error('Accès refusé — tu n\'es pas admin de cette aventure');
-  }
+  const invited = adv.invitedEmails || [];
+  if (!myKeys.some(k => invited.includes(k))) throw new Error('Invitation introuvable ou expirée');
 
-  const players    = adv.players    || [];
-  const admins     = adv.admins     || [];
-  const accessList = adv.accessList || [];
-  const accessEmails = adv.accessEmails || [];
-  const targetEmail = await _userEmailByUid(targetUid);
+  const invitedEmails = invited.filter(e => !myKeys.includes(e));
+  // On garde le raw token email en tête pour matcher la règle `token.email in accessEmails`.
+  const accessEmails  = _uniq([...(adv.accessEmails || []), rawEmail, ...myKeys]);
+  const accessList    = _uniq([...(adv.accessList || []), uid]);
+  const players       = _uniq([...(adv.players || []), uid]);
 
-  if (!accessList.includes(targetUid)) accessList.push(targetUid);
-  _emailKeys(targetEmail).forEach(email => {
-    if (!accessEmails.includes(email)) accessEmails.push(email);
-  });
-  if (asAdmin) {
-    if (!admins.includes(targetUid)) admins.push(targetUid);
-  } else {
-    if (!players.includes(targetUid)) players.push(targetUid);
-  }
+  await updateDoc(ref, { invitedEmails, accessEmails, accessList, players });
 
-  await updateDoc(ref, { players, admins, accessList, accessEmails });
+  const joined = { ...adv, id: adventure.id, invitedEmails, accessEmails, accessList, players };
+  const others = STATE.adventures.filter(a => a.id !== adventure.id);
+  setAdventures([...others, joined]);
+  return joined;
+}
 
-  // Mettre à jour l'aventure locale si c'est la courante
-  if (STATE.adventure?.id === adventureId) {
-    setAdventure({ ...STATE.adventure, players, admins, accessList, accessEmails });
-  }
+// Invité : refuse → retire simplement son email des invitations.
+export async function declineInvitation(adventure) {
+  const uid = STATE.user?.uid;
+  if (!uid) throw new Error('Non connecté');
+  const myKeys = _emailKeys(STATE.profile?.email || STATE.user?.email);
+
+  const ref  = doc(db, 'adventures', adventure.id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const adv = snap.data();
+
+  const invitedEmails = (adv.invitedEmails || []).filter(e => !myKeys.includes(e));
+  await updateDoc(ref, { invitedEmails });
 }
 
 // ── Retirer un joueur d'une aventure ───────────
@@ -322,9 +400,19 @@ export async function updateAdventureMeta(adventureId, { nom, emoji, description
 }
 
 // ── Supprimer une aventure (et toutes ses sous-collections) ───────────
+// Autorisé au MJ de l'aventure (créateur/admin) ou au super-admin — cohérent avec
+// la règle Firestore `delete: isAdvAdmin`.
 export async function deleteAdventure(adventureId) {
   const uid = STATE.user?.uid;
-  if (!uid || !STATE.isSuperAdmin) throw new Error('Accès refusé — super-admin uniquement');
+  if (!uid) throw new Error('Non connecté');
+
+  if (!STATE.isSuperAdmin) {
+    const snap = await getDoc(doc(db, 'adventures', adventureId));
+    if (!snap.exists()) throw new Error('Aventure introuvable');
+    if (!snap.data().admins?.includes(uid)) {
+      throw new Error('Accès refusé — réservé au MJ de cette aventure');
+    }
+  }
 
   const SUBCOLLECTIONS = [
     'shop', 'shopCategories', 'story', 'story_meta',

@@ -30,7 +30,10 @@ import {
 
 import { showAppLoading, showAuth, showAdventurePicker, showAdventureLoadError } from "./layout.js";
 import { navigate } from "./navigation.js";
-import { loadUserAdventures, repairCurrentUserAdventureLinks, selectAdventure } from "./adventure.js";
+import {
+  loadUserAdventures, repairCurrentUserAdventureLinks, selectAdventure,
+  loadUserInvitations, acceptInvitation, declineInvitation,
+} from "./adventure.js";
 import { unwatchAll } from "../shared/realtime.js";
 import { stopPresence } from "../shared/presence.js";
 import { releaseSessionData } from "../data/firestore.js";
@@ -60,6 +63,39 @@ export async function pickAdventure(adventureId) {
 export async function openCreateAdventureModal() {
   const { openCreateAdventureModal: openModalLazy } = await import('../features/aventures.js');
   openModalLazy();
+}
+
+// Invitations en attente affichées dans le picker (mémorisées pour accept/decline).
+let _pendingInvitations = [];
+
+export async function acceptAdventureInvitation(adventureId) {
+  const inv = _pendingInvitations.find(a => a.id === adventureId);
+  if (!inv) return;
+  try {
+    const joined = await acceptInvitation(inv);
+    _pendingInvitations = _pendingInvitations.filter(a => a.id !== adventureId);
+    localStorage.setItem(LAST_ADV_KEY, joined.id);
+    selectAdventure(joined);
+    const { hideAdventurePicker } = await import('./layout.js');
+    hideAdventurePicker();
+    showAppLoading();
+    await navigate('dashboard');
+  } catch (e) {
+    const { showNotif } = await import('../shared/notifications.js');
+    showNotif(e.message || "Échec de l'acceptation.", 'error');
+  }
+}
+
+export async function declineAdventureInvitation(adventureId) {
+  const inv = _pendingInvitations.find(a => a.id === adventureId);
+  if (!inv) return;
+  try {
+    await declineInvitation(inv);
+  } catch (e) {
+    console.warn('[init] declineInvitation', e?.code || e);
+  }
+  _pendingInvitations = _pendingInvitations.filter(a => a.id !== adventureId);
+  showAdventurePicker(STATE.adventures, _pendingInvitations);
 }
 
 setFirebase(auth, db, {
@@ -161,9 +197,22 @@ async function loadAndRouteAdventures(user) {
   adventures = await repairCurrentUserAdventureLinks(adventures);
   setAdventures(adventures);
 
+  // Invitations en attente (l'utilisateur est invité mais pas encore membre).
+  // Best-effort : une erreur ne doit pas bloquer le routage vers les aventures.
+  try {
+    _pendingInvitations = await loadUserInvitations(STATE.profile?.email || user.email);
+  } catch (_) { _pendingInvitations = []; }
+
   if (adventures.length === 0) {
-    // Sélecteur vide : super-admin → migration/création ; joueur → "En attente".
-    showAdventurePicker([]);
+    // Sélecteur vide : invitations à accepter, sinon création (tous) / "En attente".
+    showAdventurePicker([], _pendingInvitations);
+    return;
+  }
+
+  // Des aventures ET des invitations → montrer le sélecteur (avec les invitations)
+  // plutôt que d'auto-router, pour laisser l'utilisateur voir/traiter ses invitations.
+  if (_pendingInvitations.length) {
+    showAdventurePicker(adventures, _pendingInvitations);
     return;
   }
 

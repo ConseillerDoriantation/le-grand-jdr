@@ -4,7 +4,7 @@
 
 import { STATE } from './state.js';
 import { navigate } from './navigation.js';
-import { appSplashHtml } from '../shared/html.js';
+import { appSplashHtml, _esc } from '../shared/html.js';
 import { CLOUDINARY_ENABLED } from '../shared/upload-cloudinary.js';
 
 // Masque le splash de boot dès qu'un écran principal est prêt à s'afficher.
@@ -162,7 +162,7 @@ export function showAuth() {
 }
 
 // ── Afficher le sélecteur d'aventure ──────────
-export function showAdventurePicker(adventures = []) {
+export function showAdventurePicker(adventures = [], invitations = []) {
   _hideBootSplash();
   const authScreen = document.getElementById('auth-screen');
   const advScreen  = document.getElementById('adventure-screen');
@@ -173,7 +173,7 @@ export function showAdventurePicker(adventures = []) {
   if (!advScreen) return;
 
   advScreen.style.display = 'flex';
-  _renderAdventurePicker(adventures);
+  _renderAdventurePicker(adventures, invitations);
 }
 
 // ── Masquer le sélecteur après sélection ──────
@@ -317,30 +317,56 @@ function _updateMobileBottomNav() {
 }
 
 // ── Rendu de l'écran sélecteur ─────────────────
-function _renderAdventurePicker(adventures) {
+function _renderAdventurePicker(adventures, invitations = []) {
   const body = document.getElementById('adventure-picker-body');
   if (!body) return;
 
-  const pseudo    = STATE.profile?.pseudo || 'Aventurier';
-  const canCreate = STATE.isSuperAdmin;
+  const pseudo      = STATE.profile?.pseudo || 'Aventurier';
+  const invitesHtml = _renderInvitations(invitations);
 
   if (adventures.length === 0) {
-    if (canCreate) {
-      body.innerHTML = _renderCreateFirst();
-    } else {
-      body.innerHTML = _renderWaiting(pseudo);
-    }
+    // Aucune aventure : d'abord les invitations à traiter, sinon création (ouverte à tous).
+    body.innerHTML = invitesHtml
+      ? `${invitesHtml}<div class="adv-picker-footer">
+           <button class="btn btn-outline btn-sm" data-action="openCreateAdventureModal">+ Nouvelle aventure</button>
+         </div>`
+      : _renderWaiting(pseudo);
     return;
   }
 
   body.innerHTML = `
+    ${invitesHtml}
     <p class="adv-picker-subtitle">Choisis une aventure pour continuer, ${pseudo}.</p>
     <div class="adv-list">
       ${adventures.map(a => _renderAdvCard(a)).join('')}
     </div>
-    ${canCreate ? `<div class="adv-picker-footer">
+    <div class="adv-picker-footer">
       <button class="btn btn-outline btn-sm" data-action="openCreateAdventureModal">+ Nouvelle aventure</button>
-    </div>` : ''}
+    </div>
+  `;
+}
+
+// Invitations en attente : carte par aventure avec Accepter / Refuser.
+function _renderInvitations(invitations = []) {
+  if (!invitations?.length) return '';
+  return `
+    <div class="adv-invites">
+      <p class="adv-picker-subtitle">📩 Invitation${invitations.length > 1 ? 's' : ''} en attente</p>
+      <div class="adv-list">
+        ${invitations.map(inv => `
+          <div class="adv-card adv-card--invite">
+            <div class="adv-card-emoji">${inv.emoji || '⚔️'}</div>
+            <div class="adv-card-info">
+              <div class="adv-card-nom">${_esc(inv.nom || 'Aventure')}</div>
+              ${inv.description ? `<div class="adv-card-desc">${_esc(inv.description)}</div>` : ''}
+            </div>
+            <div class="adv-invite-actions">
+              <button class="btn btn-gold btn-sm" data-action="acceptInvitation" data-id="${inv.id}">Accepter</button>
+              <button class="btn btn-outline btn-sm" data-action="declineInvitation" data-id="${inv.id}">Refuser</button>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>
   `;
 }
 

@@ -12,10 +12,11 @@ import {
   createAdventure,
   updateAdventureMeta,
   deleteAdventure,
-  addPlayerToAdventure,
   removePlayerFromAdventure,
   promoteToAdmin,
   relinkPlayerAccount,
+  inviteByEmail,
+  cancelInvite,
   loadAllUsers,
   loadUserAdventures,
 } from '../core/adventure.js';
@@ -31,7 +32,7 @@ async function renderAventuresPage() {
 
   let html = `<div class="page-header">
     <h1 class="page-title">🗺️ Aventures</h1>
-    ${STATE.isSuperAdmin ? `<button class="btn btn-gold" data-action="openCreateAdventureModal">+ Nouvelle aventure</button>` : ''}
+    <button class="btn btn-gold" data-action="openCreateAdventureModal">+ Nouvelle aventure</button>
   </div>`;
 
   if (adventures.length === 0) {
@@ -179,17 +180,15 @@ export async function openManageAdventureModal(adventureId) {
     ...allUsers.filter(u => players.includes(u.id)).map(u => _userLine(u, false)),
   ];
 
-  // Ne pas proposer un membre déjà présent. On exclut par uid ET par email :
-  // certains joueurs ont un compte en double (même email, uid différent) ; sans
-  // le filtre email, le doublon orphelin réapparaîtrait dans le select.
-  const memberEmails = new Set(
-    allUsers.filter(u => memberUids.has(u.id) && u.email)
-            .map(u => u.email.toLowerCase())
-  );
-  const nonMembers = allUsers.filter(u =>
-    !memberUids.has(u.id) &&
-    !(u.email && memberEmails.has(u.email.toLowerCase()))
-  );
+  // Invitations en attente : emails ajoutés à invitedEmails, pas encore acceptés.
+  // On dédoublonne l'affichage (invitedEmails stocke raw+lower → on garde 1 forme
+  // par email, en préférant la forme avec majuscules si présente).
+  const pendingByLower = new Map();
+  (adv.invitedEmails || []).forEach(e => {
+    const lower = String(e).toLowerCase();
+    if (!pendingByLower.has(lower) || e !== lower) pendingByLower.set(lower, e);
+  });
+  const pendingInvites = [...pendingByLower.values()];
   const currentEmoji = adv.emoji || '⚔️';
 
   openModal(`⚙️ Gérer — ${currentEmoji} ${adv.nom}`, `
@@ -229,14 +228,32 @@ export async function openManageAdventureModal(adventureId) {
         </div>
       </div>
 
-      ${nonMembers.length ? `<div>
-        <div style="font-size:.78rem;font-weight:600;color:var(--text-dim);margin-bottom:.4rem">AJOUTER UN JOUEUR</div>
+      <!-- Inviter par email -->
+      <div>
+        <div style="font-size:.78rem;font-weight:600;color:var(--text-dim);margin-bottom:.4rem">INVITER UN JOUEUR</div>
         <div style="display:flex;gap:.4rem;align-items:center">
-          <select id="adv-add-user" style="flex:1;padding:.5rem .7rem;border-radius:9px;
-            border:1px solid var(--border);background:var(--bg-elevated);color:var(--text);font-size:.85rem">
-            ${nonMembers.map(u => `<option value="${u.id}">${_esc(u.pseudo || u.email)}</option>`).join('')}
-          </select>
-          <button class="btn btn-gold btn-sm" data-action="_advAdd" data-id="${adventureId}">Ajouter</button>
+          <input type="email" id="adv-invite-email" placeholder="email@exemple.com"
+            data-enter-click="#_advInvite-${adventureId}"
+            style="flex:1;padding:.5rem .7rem;border-radius:9px;border:1px solid var(--border);
+            background:var(--bg-elevated);color:var(--text);font-size:.85rem">
+          <button class="btn btn-gold btn-sm" id="_advInvite-${adventureId}" data-action="_advInvite" data-id="${adventureId}">Inviter</button>
+        </div>
+        <p style="font-size:.74rem;color:var(--text-dim);margin:.4rem 0 0">
+          Le joueur reçoit une invitation à accepter à sa prochaine connexion. Il peut ne pas encore avoir de compte.
+        </p>
+      </div>
+
+      ${pendingInvites.length ? `<div>
+        <div style="font-size:.78rem;font-weight:600;color:var(--text-dim);margin-bottom:.4rem">INVITATIONS EN ATTENTE (${pendingInvites.length})</div>
+        <div style="display:flex;flex-direction:column;gap:.3rem">
+          ${pendingInvites.map(e => `<div class="adv-member-row">
+            <span class="adv-member-pseudo">${_esc(e)}</span>
+            <span class="adv-role adv-role--joueur">Invité</span>
+            <div class="adv-member-actions">
+              <button class="btn-icon" title="Annuler l'invitation" style="color:#ff6b6b"
+                data-action="_advCancelInvite" data-adv-id="${adventureId}" data-email="${_esc(e)}">✕</button>
+            </div>
+          </div>`).join('')}
         </div>
       </div>` : ''}
 
@@ -460,14 +477,24 @@ async function deleteAdventureAndRefresh(advId) {
   } catch (e) { showNotif(e.message, 'error'); }
 }
 
-async function addAdventurePlayer(advId) {
-  const uid = document.getElementById('adv-add-user')?.value;
-  if (!uid) return;
+async function inviteAdventurePlayer(advId) {
+  const email = document.getElementById('adv-invite-email')?.value?.trim();
+  if (!email) { showNotif('Saisis un email à inviter.', 'error'); return; }
   try {
-    await addPlayerToAdventure(advId, uid);
+    await inviteByEmail(advId, email);
     const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
     setAdventures(adventures);
-    showNotif('Joueur ajouté.', 'success');
+    showNotif(`Invitation envoyée à ${email}.`, 'success');
+    openManageAdventureModal(advId);
+  } catch (e) { showNotif(e.message, 'error'); }
+}
+
+async function cancelAdventureInvite(advId, email) {
+  try {
+    await cancelInvite(advId, email);
+    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
+    setAdventures(adventures);
+    showNotif('Invitation annulée.', 'success');
     openManageAdventureModal(advId);
   } catch (e) { showNotif(e.message, 'error'); }
 }
@@ -524,7 +551,8 @@ registerActions({
   _advSaveMeta: (btn) => saveAdventureMeta(btn.dataset.id),
   _advExport: (btn) => exportAdventureBackup(btn.dataset.id, btn),
   _advImport: (btn) => importAdventureBackup(btn.dataset.id),
-  _advAdd: (btn) => addAdventurePlayer(btn.dataset.id),
+  _advInvite: (btn) => inviteAdventurePlayer(btn.dataset.id),
+  _advCancelInvite: (btn) => cancelAdventureInvite(btn.dataset.advId, btn.dataset.email),
   _advDelete: (btn) => deleteAdventureAndRefresh(btn.dataset.id),
   _advHideDeleteConfirm: () => { document.getElementById('adv-delete-confirm').style.display = 'none'; },
   _advShowDeleteConfirm: (btn) => {

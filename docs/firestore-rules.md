@@ -70,6 +70,43 @@ service cloud.firestore {
              after.players.hasAll(before.players);
     }
 
+    // Invitation en attente : l'utilisateur est invité (email dans invitedEmails)
+    // mais pas encore membre. Sert à autoriser get/list pour afficher l'invitation.
+    function hasEmailInvite(data) {
+      return isLoggedIn() &&
+             request.auth.token.email != null &&
+             data.keys().hasAny(["invitedEmails"]) &&
+             request.auth.token.email in data.invitedEmails;
+    }
+
+    // Accepter une invitation : l'invité déplace SON email invitedEmails→accessEmails
+    // et s'ajoute à accessList + players. Le diff est borné à ces 4 clés (admins et
+    // le reste INCHANGÉS), et les bornes de taille empêchent d'ajouter des tiers :
+    // il ne peut ajouter que son propre email (raw+lower ⇒ +2 max) et son uid (+1).
+    function isInviteAccept(before, after) {
+      return isLoggedIn() &&
+             request.auth.token.email != null &&
+             request.auth.token.email in before.invitedEmails &&
+             after.diff(before).affectedKeys().hasOnly(["invitedEmails", "accessEmails", "accessList", "players"]) &&
+             !(request.auth.token.email in after.invitedEmails) &&
+             after.accessEmails.hasAll(before.accessEmails) &&
+             request.auth.token.email in after.accessEmails &&
+             after.accessEmails.size() <= before.accessEmails.size() + 2 &&
+             after.accessList.hasAll(before.accessList) &&
+             request.auth.uid in after.accessList &&
+             after.accessList.size() <= before.accessList.size() + 1 &&
+             after.players.hasAll(before.players);
+    }
+
+    // Refuser une invitation : l'invité retire simplement son email de invitedEmails.
+    function isInviteDecline(before, after) {
+      return isLoggedIn() &&
+             request.auth.token.email != null &&
+             request.auth.token.email in before.invitedEmails &&
+             after.diff(before).affectedKeys().hasOnly(["invitedEmails"]) &&
+             !(request.auth.token.email in after.invitedEmails);
+    }
+
     function isCharacterUidSelfRepair(before, after) {
       return isLoggedIn() &&
              hasPreviousUid(before.uid) &&
@@ -199,19 +236,31 @@ service cloud.firestore {
                          (
                            resource.data.accessList.hasAny([request.auth.uid]) ||
                            resource.data.admins.hasAny([request.auth.uid]) ||
-                           hasEmailAccess(resource.data)
+                           hasEmailAccess(resource.data) ||
+                           hasEmailInvite(resource.data)
                          ));
       allow get:    if isAdmin() ||
                        (isLoggedIn() &&
                          (
                            resource.data.accessList.hasAny([request.auth.uid]) ||
                            resource.data.admins.hasAny([request.auth.uid]) ||
-                           hasEmailAccess(resource.data)
+                           hasEmailAccess(resource.data) ||
+                           hasEmailInvite(resource.data)
                          ));
-      allow create: if isAdmin();
+      // Création ouverte à tout utilisateur connecté : il devient l'unique MJ de sa
+      // nouvelle aventure. On force createdBy/admins/accessList = [uid] pour empêcher
+      // d'injecter des membres tiers dès la création (invitedEmails reste libre =
+      // inviter à la création, protégé par l'acceptation explicite côté invité).
+      allow create: if isAdmin() ||
+                       (isLoggedIn() &&
+                        request.resource.data.createdBy == request.auth.uid &&
+                        request.resource.data.admins == [request.auth.uid] &&
+                        request.resource.data.accessList == [request.auth.uid]);
       allow update: if isAdvAdmin(adventureId) ||
-                       isAccountSelfRepair(resource.data, request.resource.data);
-      allow delete: if isAdmin();
+                       isAccountSelfRepair(resource.data, request.resource.data) ||
+                       isInviteAccept(resource.data, request.resource.data) ||
+                       isInviteDecline(resource.data, request.resource.data);
+      allow delete: if isAdvAdmin(adventureId);
 
       // Boutique : MJ écrit tout, les joueurs peuvent uniquement mettre à jour `dispo`
       // (décrément à l'achat, incrément à la revente).
