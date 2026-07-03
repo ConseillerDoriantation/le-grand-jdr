@@ -388,7 +388,7 @@ async function confirmDeleteAccount() {
 
     // 2. Vendre les items et supprimer les personnages
     const { nbPersos, totalOr } = await _purgeUserCharacters(user.uid);
-    console.log(`[account] ${nbPersos} persos supprimés, ${totalOr} or restitué à la boutique`);
+    console.debug(`[account] ${nbPersos} persos supprimés, ${totalOr} or restitué à la boutique`);
 
     // 3. Supprimer le document profil dans Firestore
     try {
@@ -435,7 +435,7 @@ async function deleteCharWithRefund(charId) {
     // Vendre/restituer les items boutique
     if (nbItems > 0) {
       const totalOr = await _liquidateInventory(inv);
-      console.log(`[account] deleteChar "${c.nom}" : ${nbItems} items, ${totalOr} or restitués`);
+      console.debug(`[account] deleteChar "${c.nom}" : ${nbItems} items, ${totalOr} or restitués`);
     }
 
     await deleteFromCol('characters', charId);
