@@ -14,6 +14,7 @@ import {
   deleteAdventure,
   removePlayerFromAdventure,
   removeSelfFromAdventure,
+  loadMyCharacters,
   promoteToAdmin,
   relinkPlayerAccount,
   inviteByEmail,
@@ -22,7 +23,7 @@ import {
   loadUserAdventures,
   selectAdventure,
 } from '../core/adventure.js';
-import { exportAdventure, importAdventure, loadCollectionWhere } from '../data/firestore.js';
+import { exportAdventure, importAdventure } from '../data/firestore.js';
 import { unwatchAll } from '../shared/realtime.js';
 
 // ── Page principale ────────────────────────────
@@ -505,25 +506,23 @@ async function leaveAdventure(advId) {
      Cette action est <strong>irréversible</strong>.`,
     { title: '🚪 Quitter l\'aventure', confirmLabel: 'Quitter et supprimer mon perso', danger: true, icon: '🚪' }
   );
-  console.log('[leave] confirmation =', ok);
   if (!ok) return;
 
   try {
-    console.log('[leave] début — scope courant', STATE.adventure?.id, '→ quitter', advId);
     // La cascade purgeCharacter cible l'aventure active → s'y placer si nécessaire.
     if (STATE.adventure?.id !== advId) selectAdventure(adv);
 
-    const { purgeCharacter } = await import('./characters/forms.js');
-    const myChars = await loadCollectionWhere('characters', 'uid', '==', STATE.user.uid);
-    console.log('[leave] persos à purger :', myChars.length);
-    for (const c of myChars) {
-      try { await purgeCharacter(c.id); }
-      catch (e) { console.warn('[leaveAdventure] purge perso ignorée', c.id, e?.code || e); }
+    // Requête directe (pas le cache-live qui peut bloquer sur une collection vide).
+    const myChars = await loadMyCharacters(advId);
+    if (myChars.length) {
+      const { purgeCharacter } = await import('./characters/forms.js');
+      for (const c of myChars) {
+        try { await purgeCharacter(c.id); }
+        catch (e) { console.warn('[leaveAdventure] purge perso ignorée', c.id, e?.code || e); }
+      }
     }
 
-    console.log('[leave] retrait de l\'aventure…');
     await removeSelfFromAdventure(advId);
-    console.log('[leave] retrait OK');
 
     closeModal();
     unwatchAll();
@@ -534,7 +533,6 @@ async function leaveAdventure(advId) {
     setAdventures(adventures);
     const { showAdventurePicker } = await import('../core/layout.js');
     showAdventurePicker(adventures);
-    console.log('[leave] terminé → picker');
   } catch (e) {
     console.error('[leaveAdventure] échec :', e);
     showNotif(e.message || 'Échec — impossible de quitter.', 'error');

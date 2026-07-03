@@ -349,6 +349,18 @@ export async function removePlayerFromAdventure(adventureId, targetUid) {
   }
 }
 
+// Persos de l'utilisateur courant dans une aventure — requête directe one-shot
+// (comme relinkPlayerAccount) : évite le cache-live `ready` qui peut bloquer sur
+// une collection perso vide (1er snapshot cache vide en ligne, serveur en attente).
+export async function loadMyCharacters(adventureId) {
+  const uid = STATE.user?.uid;
+  if (!uid) return [];
+  const snap = await getDocs(
+    query(collection(db, 'adventures', adventureId, 'characters'), where('uid', '==', uid))
+  );
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
 // ── Quitter une aventure (le membre se retire lui-même) ─────────────────────
 // Retire l'utilisateur courant de accessList/players/admins + son email de
 // accessEmails (sinon repairCurrentUserAdventureLinks le ré-ajouterait au login)
