@@ -921,12 +921,6 @@
   border-color: rgba(37,99,235,0.30);
   color: #1d4ed8;
 }
-.loading-mini {
-  font-size: 0.72rem;
-  color: var(--text-dim);
-  font-style: italic;
-  padding: 4px;
-}
 [data-theme="light"] .bs-item-row { background: var(--bg-card); }
 [data-theme="light"] .bs-items-picker { background: rgba(37,99,235,0.03); border-color: rgba(37,99,235,0.18); }
 
