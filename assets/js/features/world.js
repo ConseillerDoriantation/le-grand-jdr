@@ -9,7 +9,7 @@ import { getDocData } from '../data/firestore.js';
 import { tryDoc } from '../shared/crud.js';
 import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
-import { _esc, _nl2br, _norm, loadingHtml } from '../shared/html.js';
+import { _esc, _nl2br, _norm } from '../shared/html.js';
 import { richTextContentHtml } from '../shared/rich-text.js';
 import { quillEditorHtml, bindQuillEditors, getQuillHtml } from '../shared/rich-text-quill.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
@@ -105,8 +105,8 @@ const _save = () => tryDoc('world', 'main', { categories: STORE.categories, sect
 // ── Rendu principal ───────────────────────────────────────────────────────────
 async function renderWorld() {
   const content = document.getElementById('main-content');
-  content.innerHTML = loadingHtml('Chargement du monde…');
-
+  // Le splash pleine page de la navigation reste visible pendant _load (pas de
+  // second loader propre — évite le flash splash→spinner, cf. npcs).
   await _load();
 
   // Catégories + section active visibles. Pour un joueur, une section dans une

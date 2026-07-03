@@ -18,7 +18,7 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import PAGES from './pages.js';
-import { _esc, _norm, _searchIncludes, loadingHtml } from '../shared/html.js';
+import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { getItemStatBonus, sortCharactersForDisplay, getMyCharacters, getModFromScore } from '../shared/char-stats.js';
 import { _getTraits } from './characters/data.js';
 import { listPlaces } from './map/data/places.repo.js';
@@ -263,8 +263,9 @@ function _withValeurDelta(n, baseAffinite, deltaChange) {
 // ── Rendu principal ───────────────────────────────────────────────────────────
 export async function renderNpcs() {
   const content = document.getElementById('main-content');
-  content.innerHTML = loadingHtml('Chargement des PNJ…');
-
+  // Pas de loader propre ici : la navigation affiche déjà le splash pleine page
+  // (cf. _renderLoading dans navigation.js). En ajouter un second = flash splash→
+  // spinner disgracieux. Le splash reste visible pendant _load, puis _renderPage.
   await _load();
   if (!_activeId && _npcs.length) _activeId = _npcs[0].id;
   _renderPage(content);
