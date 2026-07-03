@@ -22,6 +22,30 @@ import { openAdventureSwitcher } from '../core/layout.js';
 import { loadAllUsers } from '../core/adventure.js';
 const renderCharSheet   = (...args) => charSession.renderSheet(...args);
 
+// Masque les blocs du dashboard liés à une fonctionnalité désactivée pour l'aventure
+// courante, puis les sections/labels devenus orphelins (plus aucun contenu visible).
+// Appelé après le rendu (vue joueur ET MJ partagent #dash-root).
+function _hideDisabledDashboardBlocks(root) {
+  if (!root) return;
+  // 1. Cartes/CTA/boutons ciblant une feature off (la plupart ont data-navigate racine).
+  root.querySelectorAll('[data-navigate]').forEach(el => {
+    if (!isFeatureEnabled(el.getAttribute('data-navigate'))) el.style.display = 'none';
+  });
+  // 2. Wrappers connus sans titre (action/héros) devenus vides → masqués.
+  const _visibleContent = (el, skipLabel = false) => [...el.children].some(c =>
+    (!skipLabel || !c.classList.contains('dv2-section-label')) &&
+    c.style.display !== 'none' &&
+    (c.children.length > 0 || c.textContent.trim() !== ''));
+  root.querySelectorAll('.dv2-player-action, .dv2-player-hero').forEach(w => {
+    if (w.children.length && !_visibleContent(w)) w.style.display = 'none';
+  });
+  // 3. Sections à titre (dv2-section-label) sans plus aucun contenu visible → masquées.
+  root.querySelectorAll('.dv2-section-label').forEach(label => {
+    const section = label.parentElement;
+    if (section && !_visibleContent(section, true)) section.style.display = 'none';
+  });
+}
+
 // ── Statistiques : état léger pour la vue « par séance » (évite une relecture) ──
 let _statsData = null;                 // dernier doc stats chargé (pour la modale par date)
 let _statsEmoteUrl = new Map();        // name → url (affichage de l'émote réelle)
@@ -832,6 +856,7 @@ const PAGES = {
     }
 
     function _groupsPanelV2() {
+      if (!isFeatureEnabled('story')) return ''; // Trame désactivée
       // Mes groupes « En cours » (ceux que j'ai rejoints), sinon tous les groupes actifs.
       const mine = activeGroups.filter(q => (q.participants || []).some(p => _myUidAliases.includes(p.uid)));
       const list = (mine.length ? mine : activeGroups).slice(0, 5);
@@ -859,6 +884,7 @@ const PAGES = {
     }
 
     function _achievementsPanelV2() {
+      if (!isFeatureEnabled('achievements')) return ''; // Hauts-Faits désactivés
       return `
       <div class="dv2-panel-card">
         <div class="dv2-panel-header">
@@ -1185,6 +1211,9 @@ const PAGES = {
         ${_bastionCardV2()}
       </div>` : ''}`;
     }
+
+    // ── Fonctionnalités désactivées : masquer les blocs + sections orphelines ──
+    _hideDisabledDashboardBlocks(dash);
 
     // ── Navigation personnage ──────────────────────────────────────────
 
