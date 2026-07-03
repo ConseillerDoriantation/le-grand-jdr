@@ -25,6 +25,15 @@ const _emailRaw = (email = '') => String(email || '').trim();
 const _emailKey = (email = '') => _emailRaw(email).toLowerCase();
 const _emailKeys = (email = '') => _uniq([_emailRaw(email), _emailKey(email)]);
 const _uniq = (arr = []) => [...new Set((arr || []).filter(Boolean))];
+// Profil dénormalisé de l'utilisateur courant pour `memberProfiles` {uid:{pseudo,email}}.
+// L'email y est déjà présent au niveau de l'aventure (accessEmails) : on n'expose rien
+// de nouveau, on ajoute juste le mapping uid→(pseudo,email) que les règles `users`
+// (anti-moisson) empêchent sinon de reconstituer côté MJ non super-admin.
+const _selfEmail   = () => _emailRaw(STATE.profile?.email || STATE.user?.email);
+const _selfProfile = () => ({
+  pseudo: STATE.profile?.pseudo || _selfEmail() || 'Aventurier',
+  email:  _selfEmail(),
+});
 
 async function _userEmailByUid(uid) {
   if (!uid) return '';
@@ -157,6 +166,9 @@ export async function createAdventure({ nom, emoji = '⚔️', description = '' 
     accessList: [uid],
     accessEmails: _emailKeys(STATE.profile?.email || STATE.user?.email),
     invitedEmails: [],
+    // Profils dénormalisés {uid:{pseudo,email}} : permet au MJ (même non super-admin)
+    // d'afficher/gérer ses membres sans lire users/{uid} (verrouillé anti-moisson).
+    memberProfiles: { [uid]: _selfProfile() },
     status:     'active',
   };
 
@@ -260,10 +272,12 @@ export async function acceptInvitation(adventure) {
   const accessEmails  = _uniq([...(adv.accessEmails || []), rawEmail, ...myKeys]);
   const accessList    = _uniq([...(adv.accessList || []), uid]);
   const players       = _uniq([...(adv.players || []), uid]);
+  // L'invité dépose SON profil (règle isInviteAccept : uniquement sa propre entrée).
+  const memberProfiles = { ...(adv.memberProfiles || {}), [uid]: _selfProfile() };
 
-  await updateDoc(ref, { invitedEmails, accessEmails, accessList, players });
+  await updateDoc(ref, { invitedEmails, accessEmails, accessList, players, memberProfiles });
 
-  const joined = { ...adv, id: adventure.id, invitedEmails, accessEmails, accessList, players };
+  const joined = { ...adv, id: adventure.id, invitedEmails, accessEmails, accessList, players, memberProfiles };
   const others = STATE.adventures.filter(a => a.id !== adventure.id);
   setAdventures([...others, joined]);
   return joined;
@@ -304,16 +318,20 @@ export async function removePlayerFromAdventure(adventureId, targetUid) {
   const players    = (adv.players    || []).filter(u => u !== targetUid);
   const admins     = (adv.admins     || []).filter(u => u !== targetUid);
   const accessList = (adv.accessList || []).filter(u => u !== targetUid);
-  const targetEmail = await _userEmailByUid(targetUid);
+  // Email du membre pour révoquer aussi son accès par email : d'abord le profil
+  // dénormalisé (marche pour un MJ non super-admin), sinon lecture users/{uid}.
+  const targetEmail  = adv.memberProfiles?.[targetUid]?.email || await _userEmailByUid(targetUid);
   const targetEmails = _emailKeys(targetEmail);
   const accessEmails = targetEmails.length
     ? (adv.accessEmails || []).filter(e => !targetEmails.includes(e))
     : (adv.accessEmails || []);
+  const memberProfiles = { ...(adv.memberProfiles || {}) };
+  delete memberProfiles[targetUid];
 
-  await updateDoc(ref, { players, admins, accessList, accessEmails });
+  await updateDoc(ref, { players, admins, accessList, accessEmails, memberProfiles });
 
   if (STATE.adventure?.id === adventureId) {
-    setAdventure({ ...STATE.adventure, players, admins, accessList, accessEmails });
+    setAdventure({ ...STATE.adventure, players, admins, accessList, accessEmails, memberProfiles });
   }
 }
 
@@ -351,6 +369,12 @@ export async function relinkPlayerAccount(adventureId, oldUid, newUid) {
   const admins     = repl(adv.admins);
   const newEmail = await _userEmailByUid(newUid);
   const accessEmails = _uniq([...(adv.accessEmails || []), ..._emailKeys(newEmail)]);
+  // Re-key du profil dénormalisé oldUid→newUid (conserve le pseudo affiché).
+  const memberProfiles = { ...(adv.memberProfiles || {}) };
+  if (memberProfiles[oldUid]) {
+    memberProfiles[newUid] = { ...memberProfiles[oldUid], ...(newEmail ? { email: _emailRaw(newEmail) } : {}) };
+    delete memberProfiles[oldUid];
+  }
 
   // Re-key des personnages de CETTE aventure (les persos sont une sous-collection
   // scoping par aventure et keyés par `uid`).
@@ -364,9 +388,9 @@ export async function relinkPlayerAccount(adventureId, oldUid, newUid) {
     await batch.commit();
   }
 
-  await updateDoc(ref, { accessList, players, admins, accessEmails });
+  await updateDoc(ref, { accessList, players, admins, accessEmails, memberProfiles });
   if (STATE.adventure?.id === adventureId) {
-    setAdventure({ ...STATE.adventure, accessList, players, admins, accessEmails });
+    setAdventure({ ...STATE.adventure, accessList, players, admins, accessEmails, memberProfiles });
   }
 
   return { migrated };

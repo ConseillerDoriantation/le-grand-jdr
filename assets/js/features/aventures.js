@@ -142,42 +142,61 @@ export async function openManageAdventureModal(adventureId) {
   const adv = STATE.adventures.find(a => a.id === adventureId);
   if (!adv) return;
 
-  const allUsers = await loadAllUsers(adv);
+  // Noms des membres : memberProfiles (dénormalisé) suffit pour un MJ non super-admin.
+  // loadAllUsers n'est utile qu'au super-admin (données cross-user + détection de
+  // doublon) ; pour un MJ normal il ne ferait que N lectures users/{uid} refusées.
+  const allUsers = STATE.isSuperAdmin ? await loadAllUsers(adv) : [];
   const admins   = adv.admins   || [];
   const players  = adv.players  || [];
   const access   = adv.accessList || [];
+  const profiles = adv.memberProfiles || {};
 
   const memberUids = new Set([...access, ...players, ...admins]);
+  const usersById  = new Map(allUsers.map(u => [u.id, u]));
+
+  // Nom affichable d'un membre par uid, SANS dépendre de la lecture de users/{uid}
+  // (bloquée pour un MJ non super-admin) : priorité au pseudo dénormalisé sur le doc
+  // aventure (memberProfiles), puis aux users lus (super-admin / soi), puis fallback.
+  const _nameFor = (uid) => {
+    const p = profiles[uid];
+    const denorm = typeof p === 'string' ? p : (p?.pseudo || p?.email);
+    const u = usersById.get(uid);
+    return denorm || u?.pseudo || u?.email || `Joueur ${uid.slice(0, 6)}…`;
+  };
 
   // Détection des comptes en double : un MEMBRE (ancien uid) dont l'email possède
   // un AUTRE compte non-membre (nouvel uid) → proposer la réassociation. Sert au
-  // cas "mdp oublié → nouvel uid → En attente d'invitation".
+  // cas "mdp oublié → nouvel uid → En attente d'invitation". Ne fonctionne que si on
+  // a pu lire les users (super-admin) ; sinon pas de bouton relink (dégradation OK).
   const _emailToUsers = {};
   allUsers.forEach(u => { if (u.email) (_emailToUsers[u.email.toLowerCase()] ||= []).push(u); });
-  const _newUidFor = (u) => {
-    if (!u.email) return null;
+  const _newUidFor = (uid) => {
+    const u = usersById.get(uid);
+    if (!u?.email) return null;
     const dupe = (_emailToUsers[u.email.toLowerCase()] || [])
-      .find(d => d.id !== u.id && !memberUids.has(d.id));
+      .find(d => d.id !== uid && !memberUids.has(d.id));
     return dupe ? dupe.id : null;
   };
 
-  const _userLine = (u, isAdmin) => {
-    const isCreator = u.id === adv.createdBy;
-    const newUid    = _newUidFor(u);
-    return `<div class="adv-member-row" id="mbr-${u.id}">
-      <span class="adv-member-pseudo">${_esc(u.pseudo || u.email)}</span>
+  const _memberLine = (uid, isAdmin) => {
+    const isCreator = uid === adv.createdBy;
+    const newUid    = _newUidFor(uid);
+    return `<div class="adv-member-row" id="mbr-${uid}">
+      <span class="adv-member-pseudo">${_esc(_nameFor(uid))}</span>
       ${isAdmin ? '<span class="adv-role adv-role--mj">MJ</span>' : '<span class="adv-role adv-role--joueur">Joueur</span>'}
       <div class="adv-member-actions">
-        ${newUid ? `<button class="btn-icon" title="Réassocier au nouveau compte (changement d'identifiant : transfère accès + personnages)" style="color:#4f8cff" data-action="_advRelink" data-adv-id="${adventureId}" data-old-uid="${u.id}" data-new-uid="${newUid}">🔗</button>` : ''}
-        ${!isAdmin && !isCreator ? `<button class="btn-icon" title="Promouvoir MJ" data-action="_advPromote" data-adv-id="${adventureId}" data-uid="${u.id}">⬆️</button>` : ''}
-        ${!isCreator ? `<button class="btn-icon" title="Retirer" style="color:#ff6b6b" data-action="_advRemove" data-adv-id="${adventureId}" data-uid="${u.id}">✕</button>` : ''}
+        ${newUid ? `<button class="btn-icon" title="Réassocier au nouveau compte (changement d'identifiant : transfère accès + personnages)" style="color:#4f8cff" data-action="_advRelink" data-adv-id="${adventureId}" data-old-uid="${uid}" data-new-uid="${newUid}">🔗</button>` : ''}
+        ${!isAdmin && !isCreator ? `<button class="btn-icon" title="Promouvoir MJ" data-action="_advPromote" data-adv-id="${adventureId}" data-uid="${uid}">⬆️</button>` : ''}
+        ${!isCreator ? `<button class="btn-icon" title="Retirer" style="color:#ff6b6b" data-action="_advRemove" data-adv-id="${adventureId}" data-uid="${uid}">✕</button>` : ''}
       </div>
     </div>`;
   };
 
+  // Rendu piloté par les tableaux d'uid du doc (fiables) plutôt que par les users lus.
+  const playerUids = players.filter(uid => !admins.includes(uid));
   const memberLines = [
-    ...allUsers.filter(u => admins.includes(u.id)).map(u => _userLine(u, true)),
-    ...allUsers.filter(u => players.includes(u.id)).map(u => _userLine(u, false)),
+    ...admins.map(uid => _memberLine(uid, true)),
+    ...playerUids.map(uid => _memberLine(uid, false)),
   ];
 
   // Invitations en attente : emails ajoutés à invitedEmails, pas encore acceptés.

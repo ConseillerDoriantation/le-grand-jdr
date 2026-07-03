@@ -87,7 +87,7 @@ service cloud.firestore {
       return isLoggedIn() &&
              request.auth.token.email != null &&
              request.auth.token.email in before.invitedEmails &&
-             after.diff(before).affectedKeys().hasOnly(["invitedEmails", "accessEmails", "accessList", "players"]) &&
+             after.diff(before).affectedKeys().hasOnly(["invitedEmails", "accessEmails", "accessList", "players", "memberProfiles"]) &&
              !(request.auth.token.email in after.invitedEmails) &&
              after.accessEmails.hasAll(before.accessEmails) &&
              request.auth.token.email in after.accessEmails &&
@@ -95,7 +95,10 @@ service cloud.firestore {
              after.accessList.hasAll(before.accessList) &&
              request.auth.uid in after.accessList &&
              after.accessList.size() <= before.accessList.size() + 1 &&
-             after.players.hasAll(before.players);
+             after.players.hasAll(before.players) &&
+             // Profils dénormalisés : l'invité ne touche QUE sa propre entrée (uid).
+             after.get("memberProfiles", {}).diff(before.get("memberProfiles", {}))
+               .affectedKeys().hasOnly([request.auth.uid]);
     }
 
     // Refuser une invitation : l'invité retire simplement son email de invitedEmails.
