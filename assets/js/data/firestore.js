@@ -296,7 +296,7 @@ function _primeCol(col) {
       entry.firstReceived = true;
       _notify(entry.data);
       _resolveOnce(entry.data);
-    }, 8000);
+    }, 6000);
   });
   return entry.ready;
 }

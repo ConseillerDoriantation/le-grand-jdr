@@ -94,6 +94,19 @@ function _userForUid(uid) {
   if (!uid) return null;
   return (_ag.users || []).find(u => _userAliases(u).includes(uid)) || null;
 }
+// Membres de l'aventure courante sous forme d'objets {id,uid,pseudo,email}, dérivés
+// du doc aventure (memberProfiles + tableaux d'uid) — sans lire la collection `users`.
+function _membersFromAdventure() {
+  const adv = STATE.adventure;
+  if (!adv) return [];
+  const profiles = adv.memberProfiles || {};
+  const uids = _uniq([...(adv.admins || []), ...(adv.players || []), ...(adv.accessList || [])]);
+  return uids.map(uid => {
+    const p = profiles[uid];
+    const prof = (p && typeof p === 'object') ? p : {};
+    return { id: uid, uid, pseudo: prof.pseudo || '', email: prof.email || '' };
+  });
+}
 function _uidIdentityKey(uid) {
   const user = _userForUid(uid);
   const email = _emailKey(user?.email);
@@ -775,7 +788,9 @@ async function renderAgendaPage() {
   //   cache chaud (et 1 seule lecture quand il faut aller au serveur).
   _ag.allAvails   = [];
   _ag.quests      = [];
-  _ag.users       = [];
+  // Membres/pseudos dérivés du doc aventure (memberProfiles) — plus de lecture de
+  // la collection globale `users` (refusée au MJ NON super-admin par les règles).
+  _ag.users       = _membersFromAdventure();
   _ag.nextSession = null;
   _ag.myAvail     = { slots: {}, recurring: {} };
 
@@ -856,18 +871,10 @@ async function renderAgendaPage() {
     _renderLegacyCleanup();
   });
 
-  // Liste de la collection `users` : réservée au MJ par les règles Firestore
-  // (anti-moisson de PII — `list` admin-only). Un joueur ne peut pas la lister :
-  // on n'abonne donc que le MJ. Côté joueur l'agenda fonctionne sans (pseudos
-  // via availabilities/quêtes), et on évite l'erreur "Accès refusé".
-  if (STATE.isAdmin) {
-    watchPageCollection('agenda-users', 'users', 'agenda', data => {
-      _ag.users = data;
-      _scheduleQuestParticipantCleanup();
-      _renderSuggestions();
-      _renderGroupView();
-    });
-  }
+  // (Pseudos des membres : dérivés du doc aventure via _membersFromAdventure() —
+  // plus d'abonnement à la collection globale `users`, qui n'est listable que par
+  // le super-admin global et provoquait un "Accès refusé" + chargement infini chez
+  // un MJ non super-admin.)
 
   watchPageDoc('agenda-session', 'agenda_session', 'next', 'agenda', data => {
     _ag.nextSession = data;
