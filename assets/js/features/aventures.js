@@ -13,14 +13,17 @@ import {
   updateAdventureMeta,
   deleteAdventure,
   removePlayerFromAdventure,
+  removeSelfFromAdventure,
   promoteToAdmin,
   relinkPlayerAccount,
   inviteByEmail,
   cancelInvite,
   loadAllUsers,
   loadUserAdventures,
+  selectAdventure,
 } from '../core/adventure.js';
-import { exportAdventure, importAdventure } from '../data/firestore.js';
+import { exportAdventure, importAdventure, loadCollectionWhere } from '../data/firestore.js';
+import { unwatchAll } from '../shared/realtime.js';
 
 // ── Page principale ────────────────────────────
 async function renderAventuresPage() {
@@ -53,6 +56,8 @@ async function renderAventuresPage() {
 function _renderAdventureCard(adv, isAdvAdmin, isCurrent) {
   const members  = (adv.accessList || []).length;
   const adminCnt = (adv.admins    || []).length;
+  // Quitter : réservé aux membres NON créateurs (le créateur supprime l'aventure).
+  const canLeave = adv.createdBy !== STATE.user?.uid;
   return `
   <div class="adv-manage-card ${isCurrent ? 'adv-manage-card--active' : ''}">
     <div class="adv-manage-card-hdr">
@@ -66,6 +71,7 @@ function _renderAdventureCard(adv, isAdvAdmin, isCurrent) {
           ? `<span class="adv-badge-active">Actuelle</span>`
           : `<button class="btn btn-outline btn-sm" data-action="pickAdventure" data-id="${adv.id}">Rejoindre</button>`}
         ${isAdvAdmin ? `<button class="btn btn-outline btn-sm" data-action="openManageAdventureModal" data-id="${adv.id}">⚙️ Gérer</button>` : ''}
+        ${canLeave ? `<button class="btn btn-outline btn-sm adv-leave-btn" data-action="_advLeave" data-id="${adv.id}" title="Quitter cette aventure (supprime ton personnage)">🚪 Quitter</button>` : ''}
       </div>
     </div>
     ${adv.description ? `<p class="adv-manage-desc">${_esc(adv.description)}</p>` : ''}
@@ -480,6 +486,54 @@ function importAdventureBackup(advId) {
   input.click();
 }
 
+// Quitter une aventure : supprime le(s) perso(s) du joueur (cascade complète) puis
+// le retire de l'aventure. La cascade opère sur l'aventure ACTIVE → on s'y place
+// d'abord si besoin. Réservé aux membres non créateurs (garde + règle Firestore).
+async function leaveAdventure(advId) {
+  const adv = STATE.adventures.find(a => a.id === advId);
+  if (!adv) return;
+  if (adv.createdBy === STATE.user?.uid) {
+    showNotif("Tu es le créateur : supprime l'aventure au lieu de la quitter.", 'error');
+    return;
+  }
+
+  const ok = await confirmModal(
+    `Quitter <strong>${_esc(adv.nom)}</strong> ?<br><br>
+     • Ton personnage et <strong>tout son contenu</strong> (objets, quêtes, hauts-faits, relations…)
+       seront <strong>définitivement supprimés</strong> de cette aventure.<br>
+     • Tu perdras l'accès à l'aventure.<br><br>
+     Cette action est <strong>irréversible</strong>.`,
+    { title: '🚪 Quitter l\'aventure', confirmLabel: 'Quitter et supprimer mon perso', danger: true, icon: '🚪' }
+  );
+  if (!ok) return;
+
+  try {
+    // La cascade purgeCharacter cible l'aventure active → s'y placer si nécessaire.
+    if (STATE.adventure?.id !== advId) selectAdventure(adv);
+
+    const { purgeCharacter } = await import('./characters/forms.js');
+    const myChars = await loadCollectionWhere('characters', 'uid', '==', STATE.user.uid);
+    for (const c of myChars) {
+      try { await purgeCharacter(c.id); }
+      catch (e) { console.warn('[leaveAdventure] purge perso ignorée', c.id, e?.code || e); }
+    }
+
+    await removeSelfFromAdventure(advId);
+
+    closeModal();
+    unwatchAll();
+    showNotif(`Tu as quitté « ${adv.nom} ».`, 'success');
+
+    // Router hors de l'aventure : recharger la liste et afficher le picker.
+    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
+    setAdventures(adventures);
+    const { showAdventurePicker } = await import('../core/layout.js');
+    showAdventurePicker(adventures);
+  } catch (e) {
+    showNotif(e.message || 'Échec — impossible de quitter.', 'error');
+  }
+}
+
 async function deleteAdventureAndRefresh(advId) {
   try {
     await deleteAdventure(advId);
@@ -572,6 +626,7 @@ registerActions({
   _advImport: (btn) => importAdventureBackup(btn.dataset.id),
   _advInvite: (btn) => inviteAdventurePlayer(btn.dataset.id),
   _advCancelInvite: (btn) => cancelAdventureInvite(btn.dataset.advId, btn.dataset.email),
+  _advLeave: (btn) => leaveAdventure(btn.dataset.id),
   _advDelete: (btn) => deleteAdventureAndRefresh(btn.dataset.id),
   _advHideDeleteConfirm: () => { document.getElementById('adv-delete-confirm').style.display = 'none'; },
   _advShowDeleteConfirm: (btn) => {

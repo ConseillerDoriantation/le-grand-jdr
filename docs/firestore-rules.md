@@ -112,6 +112,27 @@ service cloud.firestore {
                .affectedKeys().hasOnly([request.auth.uid]);
     }
 
+    // Quitter une aventure : un membre (non créateur) se retire LUI-MÊME —
+    // uniquement son uid des listes et son email de accessEmails + son entrée
+    // memberProfiles. Ne peut pas retirer autrui ni le créateur.
+    function isSelfLeave(before, after) {
+      return isLoggedIn() &&
+             request.auth.uid != before.createdBy &&
+             after.diff(before).affectedKeys().hasOnly(["accessList", "players", "admins", "accessEmails", "memberProfiles"]) &&
+             before.accessList.hasAll(after.accessList) &&
+             !(request.auth.uid in after.accessList) &&
+             before.accessList.toSet().difference(after.accessList.toSet()).hasOnly([request.auth.uid]) &&
+             before.players.hasAll(after.players) &&
+             before.players.toSet().difference(after.players.toSet()).hasOnly([request.auth.uid]) &&
+             before.admins.hasAll(after.admins) &&
+             before.admins.toSet().difference(after.admins.toSet()).hasOnly([request.auth.uid]) &&
+             before.accessEmails.hasAll(after.accessEmails) &&
+             !(request.auth.token.email in after.accessEmails) &&
+             after.accessEmails.size() >= before.accessEmails.size() - 2 &&
+             before.get("memberProfiles", {}).diff(after.get("memberProfiles", {}))
+               .affectedKeys().hasOnly([request.auth.uid]);
+    }
+
     // Refuser une invitation : l'invité retire simplement son email de invitedEmails.
     function isInviteDecline(before, after) {
       return isLoggedIn() &&
@@ -274,7 +295,8 @@ service cloud.firestore {
                        isAccountSelfRepair(resource.data, request.resource.data) ||
                        isInviteAccept(resource.data, request.resource.data) ||
                        isInviteDecline(resource.data, request.resource.data) ||
-                       isMemberProfileSelfUpdate(resource.data, request.resource.data);
+                       isMemberProfileSelfUpdate(resource.data, request.resource.data) ||
+                       isSelfLeave(resource.data, request.resource.data);
       allow delete: if isAdvAdmin(adventureId);
 
       // Boutique : MJ écrit tout, les joueurs peuvent uniquement mettre à jour `dispo`

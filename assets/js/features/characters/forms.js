@@ -145,11 +145,10 @@ export async function deleteInvItem(idx) {
 export async function deleteChar(id) {
   if (!await confirmModal('Supprimer ce personnage ? Toutes ses références (trame, hauts-faits, PNJ, quêtes, bastion) seront également nettoyées.')) return;
 
-  // ── Suppression principale du document personnage ─────────────────────────
-  // Isolée dans son propre try : si elle échoue (règles Firestore, réseau…),
-  // on le signale CLAIREMENT et on stoppe — pas de fausse impression de succès.
+  // Suppression + cascades factorisées dans purgeCharacter (réutilisé par « Quitter
+  // l'aventure »). La suppression principale peut échouer (règles/réseau) → on stoppe.
   try {
-    await deleteFromCol('characters', id);
+    await purgeCharacter(id);
   } catch (e) {
     notifySaveError(e);
     showNotif("Suppression refusée — vérifie les règles Firestore (suppression autorisée au propriétaire et au MJ).", 'error');
@@ -163,6 +162,16 @@ export async function deleteChar(id) {
   if (Array.isArray(STATE.characters)) {
     STATE.characters = STATE.characters.filter(c => c.id !== id);
   }
+
+  showNotif('Personnage supprimé.', 'success');
+  PAGES.characters();
+}
+
+// Suppression du perso + cascades de nettoyage (best-effort), sans UI ni confirm.
+// Réutilisé par deleteChar (confirm/refresh) et par « Quitter l'aventure ». La
+// suppression principale laisse remonter son erreur ; les cascades sont non bloquantes.
+export async function purgeCharacter(id) {
+  await deleteFromCol('characters', id);
 
   // ── Cascades de nettoyage (best-effort, non bloquantes) ───────────────────
   // Chaque bloc est isolé : un refus de règle (ex: joueur sans droit sur une
@@ -237,15 +246,12 @@ export async function deleteChar(id) {
         if (!Object.keys(updates).length) return;
         return updateInCol('bastion', b.id, updates);
       }));
-    } catch (e2) { console.warn('[deleteChar] cascade bastion :', e2); }
+    } catch (e2) { console.warn('[purgeCharacter] cascade bastion :', e2); }
   } catch (cascadeErr) {
     // Le document personnage est déjà supprimé : une cascade interrompue ne
     // doit pas masquer le succès ni bloquer le rafraîchissement de la page.
-    console.warn('[deleteChar] cascade interrompue :', cascadeErr);
+    console.warn('[purgeCharacter] cascade interrompue :', cascadeErr);
   }
-
-  showNotif('Personnage supprimé.', 'success');
-  PAGES.characters();
 }
 
 export async function createNewChar() {

@@ -249,7 +249,10 @@
 .adv-manage-nom   { font-size: .95rem; font-weight: 600; color: var(--text); }
 .adv-manage-meta  { font-size: .75rem; color: var(--text-dim); margin-top: .15rem; }
 .adv-manage-desc  { font-size: .8rem; color: var(--text-dim); margin-top: .5rem; line-height: 1.5; }
-.adv-manage-actions { display: flex; gap: .35rem; flex-shrink: 0; }
+.adv-manage-actions { display: flex; gap: .35rem; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+
+.adv-leave-btn { color: #ff8080; border-color: rgba(255,107,107,.35); }
+.adv-leave-btn:hover { background: rgba(255,107,107,.10); border-color: #ff6b6b; }
 
 .adv-badge-active {
   font-size: .72rem;

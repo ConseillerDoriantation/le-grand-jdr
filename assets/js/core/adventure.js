@@ -349,6 +349,41 @@ export async function removePlayerFromAdventure(adventureId, targetUid) {
   }
 }
 
+// ── Quitter une aventure (le membre se retire lui-même) ─────────────────────
+// Retire l'utilisateur courant de accessList/players/admins + son email de
+// accessEmails (sinon repairCurrentUserAdventureLinks le ré-ajouterait au login)
+// + son entrée memberProfiles. Refusé au créateur (il doit supprimer l'aventure).
+// La suppression du personnage est gérée par l'appelant (features/aventures.js →
+// purgeCharacter). Autorisé côté règles par isSelfLeave.
+export async function removeSelfFromAdventure(adventureId) {
+  const uid = STATE.user?.uid;
+  if (!uid) throw new Error('Non connecté');
+
+  const ref  = doc(db, 'adventures', adventureId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Aventure introuvable');
+  const adv = snap.data();
+
+  if (adv.createdBy === uid) {
+    throw new Error('Le créateur ne peut pas quitter son aventure — supprime-la à la place.');
+  }
+
+  const players    = (adv.players    || []).filter(u => u !== uid);
+  const admins     = (adv.admins     || []).filter(u => u !== uid);
+  const accessList = (adv.accessList || []).filter(u => u !== uid);
+  const myKeys     = _emailKeys(STATE.profile?.email || STATE.user?.email);
+  const accessEmails = myKeys.length
+    ? (adv.accessEmails || []).filter(e => !myKeys.includes(e))
+    : (adv.accessEmails || []);
+  const memberProfiles = { ...(adv.memberProfiles || {}) };
+  delete memberProfiles[uid];
+
+  await updateDoc(ref, { players, admins, accessList, accessEmails, memberProfiles });
+
+  setAdventures(STATE.adventures.filter(a => a.id !== adventureId));
+  if (STATE.adventure?.id === adventureId) setAdventure(null);
+}
+
 // ── Réassociation d'un compte (changement d'identifiant Firebase) ──────────
 // Cas réel : un joueur revient avec un NOUVEL uid pour le même email (compte
 // Google/mot-de-passe dupliqué — cf. "compte en double"). Son ancien uid est
