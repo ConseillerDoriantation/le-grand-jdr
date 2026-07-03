@@ -99,29 +99,43 @@ export async function repairCurrentUserAdventureLinks(adventures = []) {
   if (!uid || !Array.isArray(adventures) || !adventures.length) return adventures;
 
   const emailKeys = _emailKeys(STATE.profile?.email || STATE.user?.email);
-  if (!emailKeys.length) return adventures;
+  const self = _selfProfile();
 
   const repaired = [];
   for (const adv of adventures) {
-    const accessEmails = adv.accessEmails || [];
+    let cur = adv;
+
+    // 1. Auto-rattachement : email invité mais uid pas encore dans accessList.
+    const accessEmails = cur.accessEmails || [];
     const hasEmailAccess = emailKeys.some(email => accessEmails.includes(email));
-    const isAlreadyLinked = (adv.accessList || []).includes(uid);
-
-    if (!hasEmailAccess || isAlreadyLinked) {
-      repaired.push(adv);
-      continue;
+    if (hasEmailAccess && !(cur.accessList || []).includes(uid)) {
+      const accessList = _uniq([...(cur.accessList || []), uid]);
+      const players = _uniq([...(cur.players || []), uid]);
+      try {
+        await updateDoc(doc(db, 'adventures', cur.id), { accessList, players });
+        cur = { ...cur, accessList, players };
+      } catch (e) {
+        console.warn('[adventure] auto-rattachement compte ignoré', cur.id, e?.code || e);
+      }
     }
 
-    const accessList = _uniq([...(adv.accessList || []), uid]);
-    const players = _uniq([...(adv.players || []), uid]);
-
-    try {
-      await updateDoc(doc(db, 'adventures', adv.id), { accessList, players });
-      repaired.push({ ...adv, accessList, players });
-    } catch (e) {
-      console.warn('[adventure] auto-rattachement compte ignoré', adv.id, e?.code || e);
-      repaired.push(adv);
+    // 2. Self-heal du profil dénormalisé : chaque membre écrit/rafraîchit SA propre
+    // entrée memberProfiles (pseudo à jour pour l'affichage MJ), y compris pour les
+    // aventures créées avant l'introduction de memberProfiles. Idempotent : n'écrit
+    // que si absent ou périmé (0 écriture aux logins suivants).
+    const isMember = (cur.accessList || []).includes(uid) || (cur.admins || []).includes(uid);
+    const mine = cur.memberProfiles?.[uid];
+    if (isMember && (!mine || mine.pseudo !== self.pseudo || mine.email !== self.email)) {
+      const memberProfiles = { ...(cur.memberProfiles || {}), [uid]: self };
+      try {
+        await updateDoc(doc(db, 'adventures', cur.id), { memberProfiles });
+        cur = { ...cur, memberProfiles };
+      } catch (e) {
+        console.warn('[adventure] self-heal memberProfile ignoré', cur.id, e?.code || e);
+      }
     }
+
+    repaired.push(cur);
   }
 
   return repaired;

@@ -101,6 +101,17 @@ service cloud.firestore {
                .affectedKeys().hasOnly([request.auth.uid]);
     }
 
+    // Self-heal du profil dénormalisé : un membre (dans accessList ou admins) écrit
+    // UNIQUEMENT sa propre entrée memberProfiles (pseudo à jour). Permet d'afficher
+    // les vrais pseudos côté MJ non super-admin sans lire users/{uid}.
+    function isMemberProfileSelfUpdate(before, after) {
+      return isLoggedIn() &&
+             (before.accessList.hasAny([request.auth.uid]) || before.admins.hasAny([request.auth.uid])) &&
+             after.diff(before).affectedKeys().hasOnly(["memberProfiles"]) &&
+             after.get("memberProfiles", {}).diff(before.get("memberProfiles", {}))
+               .affectedKeys().hasOnly([request.auth.uid]);
+    }
+
     // Refuser une invitation : l'invité retire simplement son email de invitedEmails.
     function isInviteDecline(before, after) {
       return isLoggedIn() &&
@@ -262,7 +273,8 @@ service cloud.firestore {
       allow update: if isAdvAdmin(adventureId) ||
                        isAccountSelfRepair(resource.data, request.resource.data) ||
                        isInviteAccept(resource.data, request.resource.data) ||
-                       isInviteDecline(resource.data, request.resource.data);
+                       isInviteDecline(resource.data, request.resource.data) ||
+                       isMemberProfileSelfUpdate(resource.data, request.resource.data);
       allow delete: if isAdvAdmin(adventureId);
 
       // Boutique : MJ écrit tout, les joueurs peuvent uniquement mettre à jour `dispo`
