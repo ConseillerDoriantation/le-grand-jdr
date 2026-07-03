@@ -254,24 +254,26 @@ function _primeCol(col) {
 
   entry.ready = new Promise(resolve => {
     let resolved = false;
+    const _resolveOnce = (data) => { if (!resolved) { resolved = true; resolve(data); } };
+    const _notify = (data) => {
+      entry.observers.forEach(o => {
+        try { o.cb(data); } catch (e) { console.error('[firestore] observer error', e); }
+      });
+    };
     entry.unsub = onSnapshot(
       collection(db, path),
       snap => {
         entry.data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         // Donnée fiable = snapshot SERVEUR (!fromCache), OU cache non vide, OU
         // hors-ligne réel (le serveur ne répondra pas → on prend ce qu'on a).
-        // Un 1er snapshot cache VIDE en ligne (fréquent après un vidage de cache)
-        // ne débloque PAS les awaits : sinon les pages one-shot rendent "0 /
-        // aucune donnée" avant l'arrivée du serveur. Pas de timeout : un
-        // chargement à froid lourd peut dépasser la minute.
+        // Un 1er snapshot cache VIDE en ligne ne débloque PAS immédiatement
+        // (sinon les pages one-shot rendent "0" avant l'arrivée du serveur) —
+        // mais le filet ci-dessous garantit qu'on ne reste jamais bloqué.
         const trustworthy = !snap.metadata.fromCache || entry.data.length > 0 || !navigator.onLine;
         if (!trustworthy) return;
         entry.firstReceived = true;
-        // Notifier tous les observers de page
-        entry.observers.forEach(o => {
-          try { o.cb(entry.data); } catch (e) { console.error('[firestore] observer error', e); }
-        });
-        if (!resolved) { resolved = true; resolve(entry.data); }
+        _notify(entry.data);          // updates live à chaque snapshot fiable
+        _resolveOnce(entry.data);
       },
       err => {
         entry.failed = true;
@@ -281,12 +283,20 @@ function _primeCol(col) {
           _handleFirestoreError(err, `primeSession(${path})`);
         }
         entry.firstReceived = true; // débloquer les awaits sur ready
-        entry.observers.forEach(o => {
-          try { o.cb([]); } catch (e) { console.error('[firestore] observer error', e); }
-        });
-        if (!resolved) { resolved = true; resolve([]); }
+        _notify([]);
+        _resolveOnce([]);
       }
     );
+    // Filet ANTI-BLOCAGE : une collection VIDE en ligne (aventure neuve) peut ne
+    // jamais recevoir de snapshot "fiable" → sans ça la page reste en chargement
+    // infini. On débloque après un délai avec ce qu'on a (souvent []) ; l'observer
+    // live continue de mettre à jour si le serveur répond plus tard.
+    setTimeout(() => {
+      if (resolved) return;
+      entry.firstReceived = true;
+      _notify(entry.data);
+      _resolveOnce(entry.data);
+    }, 8000);
   });
   return entry.ready;
 }
@@ -434,7 +444,12 @@ export function subscribeCollection(col, callback) {
       _cacheSet(`${path}:all`, data);
       callback(data);
     },
-    err => _handleFirestoreError(err, `subscribeCollection(${path})`)
+    err => {
+      _handleFirestoreError(err, `subscribeCollection(${path})`);
+      // Débloquer le consommateur (page en attente de son 1er fire) au lieu de le
+      // laisser en chargement infini quand l'accès est refusé/indisponible.
+      try { callback([]); } catch (e) { console.error('[firestore] callback error', e); }
+    }
   );
 }
 
@@ -459,7 +474,10 @@ export function subscribeDoc(col, id, callback) {
       if (data) _cacheSet(`${path}:${id}`, data);
       callback(data);
     },
-    err => _handleFirestoreError(err, `subscribeDoc(${path}/${id})`)
+    err => {
+      _handleFirestoreError(err, `subscribeDoc(${path}/${id})`);
+      try { callback(null); } catch (e) { console.error('[firestore] callback error', e); }
+    }
   );
 }
 
