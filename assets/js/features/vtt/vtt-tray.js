@@ -151,7 +151,7 @@ export function _renderTrayImpl() {
     const statusDot = t.type === 'player'
       ? `<span class="vtt-res-line-status ${online ? 'is-online' : ''}" title="${online ? 'En ligne' : 'Hors ligne'}"></span>` : '';
     const name = _esc(ld.displayName ?? t.name);
-    return `<button class="vtt-res-line" data-vtt-fn="_vttPlace" data-vtt-args="${t.id}" title="Placer ${name}">
+    return `<button class="vtt-res-line" draggable="true" data-vtt-drag="token:${t.id}" data-vtt-fn="_vttPlace" data-vtt-args="${t.id}" title="Placer ${name} (clic = centre · glisser sur la carte = à l'endroit voulu)">
       <span class="vtt-res-line-dot" style="border-color:${col};color:${col}">
         ${ld.displayImage ? `<img src="${ld.displayImage}" alt="">` : `<span>${typeIcon}</span>`}
         ${statusDot}
@@ -224,8 +224,8 @@ export function _renderTrayImpl() {
       ? `<div class="vtt-bst-grid">${bsts.map(b => {
           const img = b.photoURL || b.photo || b.avatar || b.imageUrl || '';
           const init = (b.nom || '?')[0].toUpperCase();
-          return `<button class="vtt-bst-tile" data-vtt-fn="_vttPlaceFromBestiary" data-vtt-args="${b.id}"
-              title="${_esc(b.nom || 'Créature')} · PV ${parseInt(b.pvMax) || '?'}">
+          return `<button class="vtt-bst-tile" draggable="true" data-vtt-drag="beast:${b.id}" data-vtt-fn="_vttPlaceFromBestiary" data-vtt-args="${b.id}"
+              title="${_esc(b.nom || 'Créature')} · PV ${parseInt(b.pvMax) || '?'} · clic = centre · glisser sur la carte = à l'endroit voulu">
             ${img ? `<img src="${img}" alt="${_esc(b.nom || '')}">` : `<span class="vtt-bst-icon">${init}</span>`}
             <div class="vtt-bst-name">${_esc((b.nom || 'Créature').slice(0, 10))}</div>
           </button>`;

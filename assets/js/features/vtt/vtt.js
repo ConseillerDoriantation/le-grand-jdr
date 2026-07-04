@@ -722,6 +722,54 @@ function _cleanup() {
 
 // ═══════════════════════════════════════════════════════════════════
 // CANVAS
+// ── Drag & drop tray → canvas ──────────────────────────────────────
+// Rend les items du tray déposables sur la case voulue (au lieu du clic → case
+// fixe). Le clic reste (fallback tactile). Payload = "beast:<id>" | "token:<id>"
+// posé par un dragstart délégué (les items portent draggable + data-vtt-drag).
+const _VTT_DND_MIME = 'text/vtt-place';
+function _wireTrayDrop(container) {
+  const onDragStart = (e) => {
+    const el = e.target?.closest?.('[data-vtt-drag]');
+    if (!el || !e.dataTransfer) return;
+    e.dataTransfer.setData(_VTT_DND_MIME, el.dataset.vttDrag);
+    e.dataTransfer.effectAllowed = 'copy';
+  };
+  const isPlaceDrag = (e) => Array.from(e.dataTransfer?.types || []).includes(_VTT_DND_MIME);
+  const onDragOver = (e) => {
+    if (!isPlaceDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    container.classList.add('vtt-drop-active');
+  };
+  const onDragLeave = (e) => {
+    if (e.relatedTarget && container.contains(e.relatedTarget)) return;
+    container.classList.remove('vtt-drop-active');
+  };
+  const onDrop = (e) => {
+    const payload = e.dataTransfer?.getData(_VTT_DND_MIME);
+    if (!payload) return;
+    e.preventDefault();
+    container.classList.remove('vtt-drop-active');
+    const rect = VS.stage.container().getBoundingClientRect();
+    const wp = _stageToWorld({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    const cell = { col: Math.floor(wp.x / CELL), row: Math.floor(wp.y / CELL) };
+    const sep = payload.indexOf(':');
+    const kind = payload.slice(0, sep), id = payload.slice(sep + 1);
+    if (kind === 'beast') _vttPlaceFromBestiary(id, cell);
+    else if (kind === 'token') _vttPlace(id, cell);
+  };
+  document.addEventListener('dragstart', onDragStart);
+  container.addEventListener('dragover', onDragOver);
+  container.addEventListener('dragleave', onDragLeave);
+  container.addEventListener('drop', onDrop);
+  VS.unsubs.push(() => {
+    document.removeEventListener('dragstart', onDragStart);
+    container.removeEventListener('dragover', onDragOver);
+    container.removeEventListener('dragleave', onDragLeave);
+    container.removeEventListener('drop', onDrop);
+  });
+}
+
 // ═══════════════════════════════════════════════════════════════════
 function _initCanvas(container) {
   const K = window.Konva;
@@ -729,6 +777,8 @@ function _initCanvas(container) {
   VS.stage = new K.Stage({ container, width: container.clientWidth, height: container.clientHeight });
   // Le calque d'effets DOM (sceaux/impacts) suit pan + zoom du stage.
   VS.stage.on('xChange yChange scaleXChange scaleYChange', _syncSigilLayer);
+  // Drag & drop : poser une créature du bestiaire / un token de la réserve à la case voulue.
+  _wireTrayDrop(container);
   // Konva recommande max 3-5 layers. On consolide bg+map dans `backLayer` et
   // fog+walls+mapFg+ping dans `frontLayer` via des Konva.Group. L'ordre interne
   // préserve le z-order, et chaque "VS.layers.X" garde son API usuelle.
@@ -7519,9 +7569,11 @@ async function _vttSendToPage(pageId) {
 }
 
 // Placer un token sur la page active (depuis le tray)
-async function _vttPlace(tokenId) {
+async function _vttPlace(tokenId, cell = null) {
   if (!VS.activePage) { showNotif('Crée d\'abord une page','error'); return; }
-  const cC=Math.floor(VS.activePage.cols/2), cR=Math.floor(VS.activePage.rows/2);
+  // `cell` fourni = drop à l'emplacement voulu ; sinon clic → centre de la page.
+  const cC = cell ? Math.max(0, Math.min(VS.activePage.cols-1, cell.col)) : Math.floor(VS.activePage.cols/2);
+  const cR = cell ? Math.max(0, Math.min(VS.activePage.rows-1, cell.row)) : Math.floor(VS.activePage.rows/2);
   await updateDoc(_tokRef(tokenId),{pageId:VS.activePage.id,col:cC,row:cR,visible:true})
     .catch(()=>showNotif('Erreur placement','error'));
 }
@@ -8402,7 +8454,7 @@ async function _vttDuplicateToken(tokenId) {
 }
 
 // Placer une instance depuis le bestiaire (crée + place sur la page active)
-async function _vttPlaceFromBestiary(beastId) {
+async function _vttPlaceFromBestiary(beastId, cell = null) {
   if (!VS.activePage) return showNotif('Aucune page active — ouvre une page d\'abord','error');
   const b=VS.bestiary[beastId]; if (!b) return;
   // Purger les tokens fantômes (anciens auto-créés, non placés, non modifiés)
@@ -8422,14 +8474,17 @@ async function _vttPlaceFromBestiary(beastId) {
   const name=num===1?(b.nom||'Créature'):`${b.nom} ${num}`;
   const sw = Math.max(1, Math.min(5, b.tokenW || b.tokenSize || 1));
   const sh = Math.max(1, Math.min(5, b.tokenH || b.tokenSize || 1));
-  const cx=Math.floor(VS.activePage.cols/2), cy=Math.floor(VS.activePage.rows/2);
+  // `cell` fourni = drop à l'emplacement voulu ; sinon clic → centre décalé par le
+  // nombre de créatures déjà posées (évite l'empilement).
+  const cx = cell ? cell.col : Math.floor(VS.activePage.cols/2) + active.length;
+  const cy = cell ? cell.row : Math.floor(VS.activePage.rows/2);
   const ref=doc(_toksCol());
   await setDoc(ref,{
     name, type:'enemy',
     characterId:null, npcId:null, beastId,
     ownerId:null,
     pageId:VS.activePage.id,
-    col:Math.max(0,Math.min(VS.activePage.cols-sw,cx+active.length)),
+    col:Math.max(0,Math.min(VS.activePage.cols-sw,cx)),
     row:Math.max(0,Math.min(VS.activePage.rows-sh,cy)),
     visible:true,
     imageUrl:null, movement:null, range:1, attack:null, defense:null,

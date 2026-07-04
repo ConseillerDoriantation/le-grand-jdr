@@ -6111,3 +6111,8 @@
   color: var(--text-dim, #8a93a8); font-size: .6rem; font-weight: 700;
   text-transform: uppercase; letter-spacing: .05em; margin-right: 3px;
 }
+
+/* ── Drag & drop tray → carte : surbrillance de la zone de dépôt + curseur ── */
+.vtt-drop-active { outline: 2px dashed var(--gold, #e2b96f); outline-offset: -4px; }
+.vtt-bst-tile[draggable="true"], .vtt-res-line[draggable="true"] { cursor: grab; }
+.vtt-bst-tile[draggable="true"]:active, .vtt-res-line[draggable="true"]:active { cursor: grabbing; }
