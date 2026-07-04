@@ -68,7 +68,11 @@ export async function toggleSort(idx, btn = null) {
   const sorts=c.deck_sorts||[];
   const s = sorts[idx]; if (!s) return;
   // Un joueur ne peut mettre dans son Deck qu'un sort VALIDÉ par le MJ.
-  const isValidated = (s.mjValidation || (s.mjValidated ? 'ok' : 'pending')) === 'ok';
+  // Rétro-compat : un sort créé AVANT la validation MJ (aucun champ) = validé
+  // (sinon tous les sorts existants seraient bloqués hors du deck).
+  const vState = s.mjValidation
+    || (typeof s.mjValidated === 'boolean' ? (s.mjValidated ? 'ok' : 'pending') : 'ok');
+  const isValidated = vState === 'ok';
   if (!s.actif && !isValidated && !STATE.isAdmin) {
     showNotif('Ce sort doit être validé par le MJ avant d\'entrer dans le Deck.', 'error');
     return;

@@ -48,7 +48,11 @@ function _renderSpellsTab(c = _getCurrentSpellChar()) {
 }
 
 function _sortValidationState(s) {
-  return s?.mjValidation || (s?.mjValidated ? 'ok' : 'pending');
+  if (s?.mjValidation) return s.mjValidation;
+  if (typeof s?.mjValidated === 'boolean') return s.mjValidated ? 'ok' : 'pending';
+  // Sort créé AVANT la validation MJ (aucun champ) → considéré validé (rétro-compat) :
+  // sinon tous les sorts existants seraient bloqués hors du deck côté joueur.
+  return 'ok';
 }
 
 function _sortsHasActiveOrderFilter() {
@@ -1758,7 +1762,7 @@ export async function openSortModal(idx, s) {
 
       <!-- Validation MJ : 3 états (admins) / badge lecture seule (joueurs) -->
       ${(() => {
-        const vs = s?.mjValidation || (s?.mjValidated ? 'ok' : 'pending');
+        const vs = _sortValidationState(s);
         if (STATE.isAdmin) {
           const seg = (val, label) => `<button type="button" class="cs-mjval-btn cs-mjval-btn--${val} ${vs===val?'is-active':''}" data-mjval="${val}" data-action="_csSetMjVal">${label}</button>`;
           return `<div class="cs-mjval-block">
@@ -3261,7 +3265,7 @@ export async function saveSort(idx) {
     const deplMode = _deplModeEdit || null;
 
     // Validation MJ (3 états) : seuls les admins peuvent la modifier ; sinon on garde la valeur existante
-    const prevVal = idx >= 0 ? (sorts[idx]?.mjValidation || (sorts[idx]?.mjValidated ? 'ok' : 'pending')) : 'pending';
+    const prevVal = idx >= 0 ? _sortValidationState(sorts[idx]) : 'pending';
     const mjValidation = STATE.isAdmin
       ? (document.getElementById('s-mj-validation')?.value || 'pending')
       : prevVal;
@@ -3392,7 +3396,7 @@ function _buildSortFromForm(idx, prevList = []) {
   const types = [...(_sortTypesEdit || new Set(['utilitaire']))];
   const dureeBaseRaw = parseInt(document.getElementById('s-duree-base')?.value) || 0;
   const deplMode = _deplModeEdit || null;
-  const prevVal = idx >= 0 ? (prevList[idx]?.mjValidation || (prevList[idx]?.mjValidated ? 'ok' : 'pending')) : 'pending';
+  const prevVal = idx >= 0 ? _sortValidationState(prevList[idx]) : 'pending';
   const mjValidation = STATE.isAdmin
     ? (document.getElementById('s-mj-validation')?.value || 'pending')
     : prevVal;
