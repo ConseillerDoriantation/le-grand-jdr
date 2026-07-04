@@ -1268,7 +1268,8 @@ function _buildShape(t) {
     if (VS.tool === 'ruler' || VS.tool === 'draw') return; // outils de dessin ignorent les tokens
     // Si le token du joueur est masqué sous un autre token, prioriser son propre token
     // lors d'une sélection simple (sauf attaque/zone/cible multi/shift).
-    if (!STATE.isAdmin && !_attackSrc && !_zoneCtx && !_mtCtx && !e.evt.shiftKey
+    if (!STATE.isAdmin && !_attackSrc && !_zoneCtx && !_mtCtx
+        && !e.evt.shiftKey && !e.evt.ctrlKey && !e.evt.metaKey
         && t.ownerId !== STATE.user?.uid) {
       const ownId = _findOwnTokenAtPointer();
       if (ownId && ownId !== t.id) {
@@ -1277,8 +1278,8 @@ function _buildShape(t) {
         return;
       }
     }
-    if (e.evt.shiftKey && _canControlToken(t)) {
-      // Shift+clic : ajouter / retirer du groupe multi-sélection
+    if ((e.evt.ctrlKey || e.evt.metaKey || e.evt.shiftKey) && _canControlToken(t)) {
+      // Ctrl/Cmd/Maj+clic : ajouter / retirer du groupe multi-sélection (un par un)
       _toggleMultiSelect(t.id); return;
     }
     _clearMultiSelect();
@@ -6579,8 +6580,8 @@ function _buildAnnotShape(K, data) {
       if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
       if (VS.tool !== 'select') return;
       e.cancelBubble = true;
-      if (e.evt.shiftKey) {
-        // Shift+clic : toggle dans la multi-sélection
+      if (e.evt.ctrlKey || e.evt.metaKey || e.evt.shiftKey) {
+        // Ctrl/Cmd/Maj+clic : toggle dans la multi-sélection (grouper un par un)
         if (_selectedAnnotIds.has(data.id)) _selectedAnnotIds.delete(data.id);
         else _selectedAnnotIds.add(data.id);
       } else {
@@ -8869,7 +8870,7 @@ function _buildHtml() {
       </div>
     </div>
   </div>
-  <div class="vtt-hint">Clic token allié → portée · Clic ennemi → attaque · Échap désélect. · Molette zoom · Clic-droit pan${mj?' · Clic image → redimensionner':''}</div>
+  <div class="vtt-hint">Clic token allié → portée · Clic ennemi → attaque · Ctrl+clic → sélection multiple · Échap désélect. · Molette zoom · Clic-droit pan${mj?' · Clic image → redimensionner':''}</div>
 </div>`;
 }
 
