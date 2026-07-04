@@ -6575,30 +6575,42 @@ function _buildAnnotShape(K, data) {
   const canEdit = STATE.isAdmin || data.createdBy === STATE.user?.uid;
 
   if (canEdit) {
-    // Clic gauche → sélectionner (mode select uniquement)
+    // Clic gauche → sélectionner (mode select uniquement). Cliquer un membre d'un
+    // groupe sélectionne TOUT le groupe.
     shape.on('click', e => {
       if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
       if (VS.tool !== 'select') return;
       e.cancelBubble = true;
+      const grp = _annotIdsInGroup(data);
       if (e.evt.ctrlKey || e.evt.metaKey || e.evt.shiftKey) {
-        // Ctrl/Cmd/Maj+clic : toggle dans la multi-sélection (grouper un par un)
-        if (_selectedAnnotIds.has(data.id)) _selectedAnnotIds.delete(data.id);
-        else _selectedAnnotIds.add(data.id);
+        // Ctrl/Cmd/Maj+clic : toggle dans la multi-sélection (un par un / groupe entier)
+        const anySel = grp.some(id => _selectedAnnotIds.has(id));
+        grp.forEach(id => anySel ? _selectedAnnotIds.delete(id) : _selectedAnnotIds.add(id));
       } else {
         _selectedAnnotIds.clear();
-        _selectedAnnotIds.add(data.id);
+        grp.forEach(id => _selectedAnnotIds.add(id));
         _selectedAnnotId = data.id;
       }
       _applyAnnotTransformer();
     });
-    // Clic-droit → supprimer la sélection (mode select uniquement)
+    // Clic-droit → MENU (Grouper / Dégrouper / Supprimer) — NE supprime plus d'un clic.
     shape.on('contextmenu', e => {
       if (VS.tool !== 'select') return;
       e.evt.preventDefault(); e.cancelBubble = true;
-      // Supprimer toutes les annotations sélectionnées (ou juste celle-ci si pas sélectionnée)
-      const toDelete = _selectedAnnotIds.has(data.id) ? [..._selectedAnnotIds] : [data.id];
-      toDelete.forEach(id => deleteDoc(_annotRef(id)).catch(() => {}));
-      _deselectAnnot();
+      // La forme cliquée (et son groupe) entre dans la sélection si elle n'y est pas.
+      if (!_selectedAnnotIds.has(data.id)) {
+        _selectedAnnotIds.clear();
+        _annotIdsInGroup(data).forEach(id => _selectedAnnotIds.add(id));
+        _selectedAnnotId = data.id;
+        _applyAnnotTransformer();
+      }
+      const selCount = _selectedAnnotIds.size;
+      const items = [];
+      if (selCount >= 2) items.push({ label: `🔗 Grouper (${selCount})`, fn: _groupSelectedAnnots });
+      if (data.groupId)  items.push({ label: '✂️ Dégrouper', fn: () => _ungroupAnnot(data.id) });
+      if (items.length)  items.push('---');
+      items.push({ label: `🗑️ Supprimer${selCount > 1 ? ` (${selCount})` : ''}`, fn: () => _deleteSelectedAnnots(data.id) });
+      _showCtxMenu(e.evt.clientX, e.evt.clientY, items);
     });
     // Début de drag groupé
     shape.on('dragstart', () => {
@@ -6735,6 +6747,46 @@ function _deselectAnnot() {
   _selectedAnnotId = null;
   _selectedAnnotIds.clear();
   if (_annotTransformer) { _annotTransformer.nodes([]); VS.layers.draw?.batchDraw(); }
+}
+
+// ── Groupes de dessins (groupId persistant sur l'annotation) ────────
+// Ids de toutes les annotations du groupe de `data` (sur la page active), ou juste
+// [data.id] si le dessin n'est pas groupé.
+function _annotIdsInGroup(data) {
+  if (!data?.groupId) return [data.id];
+  const gid = data.groupId, pid = VS.activePage?.id;
+  return Object.entries(_annotations)
+    .filter(([, e]) => e.data?.groupId === gid && e.data?.pageId === pid)
+    .map(([id]) => id);
+}
+// Grouper les annotations actuellement sélectionnées sous un même groupId.
+function _groupSelectedAnnots() {
+  const ids = [..._selectedAnnotIds];
+  if (ids.length < 2) return;
+  const gid = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  ids.forEach(id => {
+    const ann = _annotations[id]?.data; if (ann) ann.groupId = gid;
+    _skipAnnotRebuild.add(id);
+    updateDoc(_annotRef(id), { groupId: gid }).catch(() => {});
+  });
+  showNotif(`🔗 ${ids.length} dessins groupés`, 'success');
+}
+// Dégrouper : retire le groupId de tous les membres du groupe de `id`.
+function _ungroupAnnot(id) {
+  const gid = _annotations[id]?.data?.groupId; if (!gid) return;
+  const ids = Object.entries(_annotations).filter(([, e]) => e.data?.groupId === gid).map(([i]) => i);
+  ids.forEach(i => {
+    const a = _annotations[i]?.data; if (a) a.groupId = null;
+    _skipAnnotRebuild.add(i);
+    updateDoc(_annotRef(i), { groupId: null }).catch(() => {});
+  });
+  showNotif('✂️ Dessins dégroupés', 'success');
+}
+// Supprimer la sélection (ou juste `fallbackId` si non sélectionné).
+function _deleteSelectedAnnots(fallbackId) {
+  const toDelete = _selectedAnnotIds.has(fallbackId) ? [..._selectedAnnotIds] : [fallbackId];
+  toDelete.forEach(id => deleteDoc(_annotRef(id)).catch(() => {}));
+  _deselectAnnot();
 }
 
 export function _renderAnnotLayer() {
