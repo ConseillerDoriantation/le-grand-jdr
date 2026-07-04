@@ -678,7 +678,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   // ── 5. Cibles / zone / déplacement / durée ──
   if (nbCibles > 1) chips.push({ icon:'🎯', val:`×${nbCibles}`, color:'#4f8cff', lbl:'Nombre de cibles', dim:true });
   const zone  = _calcSortZone(s);
-  if (zone && !isAllongeCombo)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}c`, color:'#b47fff', lbl:'Zone d\'effet (cases)', dim:true });
+  if (zone)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}c`, color:'#b47fff', lbl:'Zone d\'effet (cases)', dim:true });
   const depl  = _calcSortDeplacement(s);
   if (depl) {
     const dIcon = depl.mode === 'self' ? '🏃' : depl.mode === 'pull' ? '↙' : '↗';
