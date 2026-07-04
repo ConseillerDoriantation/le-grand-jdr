@@ -18,8 +18,12 @@ import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_ST
 let _sortsSearch = '';
 let _sortsView = 'all';
 let _sortsTypeFilter = '';
+let _sortsValidationFilter = '';
+let _sortsOrder = 'manual';
+let _sortsSearchTimer = null;
 let _sortsCatCollapsed = {};
 let _sortsCatPanelOpen = false;   // panneau inline de gestion des catégories (remplace la modale)
+let _newSortCatColor = '#4f8cff';
 let _runeCountsEdit = {};
 let _sortAllowedNoyauIds = null;
 let _noyauIdsEdit = [];   // noyaux élémentaires sélectionnés (multi). [0] = primaire (compat soin/suggestions/VTT).
@@ -43,6 +47,86 @@ function _renderSpellsTab(c = _getCurrentSpellChar()) {
   }
 }
 
+function _sortValidationState(s) {
+  return s?.mjValidation || (s?.mjValidated ? 'ok' : 'pending');
+}
+
+function _sortsHasActiveOrderFilter() {
+  const hasCollapsedCat = Object.values(_sortsCatCollapsed || {}).some(Boolean);
+  return !!(_sortsSearch || _sortsTypeFilter || _sortsView === 'deck' || _sortsOrder !== 'manual' || (STATE.isAdmin && _sortsValidationFilter) || hasCollapsedCat);
+}
+
+function _noyauFilterKey(t) {
+  return t?.id || _norm(t?.label || t?.nom || '');
+}
+
+function _effectiveSortPm(s, pmDelta = 0) {
+  const base = Number.isFinite(parseInt(s?.pmOverride)) ? parseInt(s.pmOverride)
+    : Number.isFinite(parseInt(s?.pm)) ? parseInt(s.pm)
+      : 0;
+  return Math.max(0, base + (parseInt(pmDelta) || 0));
+}
+
+function _sortsOrderComparator(order, pmDelta = 0) {
+  const valRank = { pending: 0, no: 1, ok: 2 };
+  return (a, b) => {
+    const sa = a?.s || {};
+    const sb = b?.s || {};
+    if (order === 'pm') {
+      const d = _effectiveSortPm(sa, pmDelta) - _effectiveSortPm(sb, pmDelta);
+      if (d) return d;
+    } else if (order === 'nom') {
+      const d = String(sa.nom || '').localeCompare(String(sb.nom || ''), 'fr', { sensitivity: 'base' });
+      if (d) return d;
+    } else if (order === 'validation') {
+      const d = (valRank[_sortValidationState(sa)] ?? 9) - (valRank[_sortValidationState(sb)] ?? 9);
+      if (d) return d;
+    }
+    return (a?.globalIdx || 0) - (b?.globalIdx || 0);
+  };
+}
+
+function _renderDeckStats(activeSorts = [], deckMax = Infinity, pmDelta = 0) {
+  if (!activeSorts.length) return '';
+  const pmCounts = new Map();
+  const typeCounts = { offensif: 0, defensif: 0, utilitaire: 0 };
+  const noyauCounts = new Map();
+  activeSorts.forEach(s => {
+    const pm = _effectiveSortPm(s, pmDelta);
+    pmCounts.set(pm, (pmCounts.get(pm) || 0) + 1);
+    const types = _getSortTypes(s);
+    if (types.includes('offensif')) typeCounts.offensif += 1;
+    if (types.includes('defensif')) typeCounts.defensif += 1;
+    if (types.includes('utilitaire') && !types.includes('offensif') && !types.includes('defensif')) typeCounts.utilitaire += 1;
+    noyauTypesFor(s).forEach(t => {
+      const k = _noyauFilterKey(t);
+      if (!k) return;
+      const cur = noyauCounts.get(k) || { t, count: 0 };
+      cur.count += 1;
+      noyauCounts.set(k, cur);
+    });
+  });
+  const pmChips = [...pmCounts.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([pm, count]) => `<span>${pm} PM <b>×${count}</b></span>`)
+    .join('');
+  const typeChips = [
+    typeCounts.offensif ? `<span class="off">⚔️ Off <b>${typeCounts.offensif}</b></span>` : '',
+    typeCounts.defensif ? `<span class="def">🛡️ Soutien <b>${typeCounts.defensif}</b></span>` : '',
+    typeCounts.utilitaire ? `<span class="util">🔧 Util <b>${typeCounts.utilitaire}</b></span>` : '',
+  ].filter(Boolean).join('');
+  const noyauChips = [...noyauCounts.values()]
+    .sort((a, b) => String(a.t.label || '').localeCompare(String(b.t.label || ''), 'fr', { sensitivity: 'base' }))
+    .map(({ t, count }) => `<span style="--c:${t.color || '#8aa'}">${t.icon || '✦'} ${_esc(t.label || t.nom || 'Noyau')} <b>${count}</b></span>`)
+    .join('');
+  return `<div class="cs-sorts-deckstats" title="Répartition du Deck actif, calculée depuis les sorts en mémoire">
+    <div class="cs-sorts-deckstats-head"><span>Stats Deck</span><b>${activeSorts.length}/${deckMax}</b></div>
+    <div class="cs-sorts-deckstats-row">${pmChips || '<span>PM —</span>'}</div>
+    <div class="cs-sorts-deckstats-row">${typeChips || '<span>Types —</span>'}</div>
+    ${noyauChips ? `<div class="cs-sorts-deckstats-row">${noyauChips}</div>` : ''}
+  </div>`;
+}
+
 // ── Drag & drop des CARTES de sorts (Sortable.js), y compris ENTRE catégories ──
 // Chaque grille de catégorie est une zone Sortable du même groupe → on peut
 // déplacer un sort dans une autre catégorie. À la dépose, on reconstruit l'ordre
@@ -52,15 +136,18 @@ let _sortCardSortables = [];
 export function bindSortCardsDnd(c, canEdit) {
   _sortCardSortables.forEach(s => { try { s.destroy(); } catch {} });
   _sortCardSortables = [];
-  if (!canEdit) return;
+  if (!canEdit || _sortsHasActiveOrderFilter()) return;
   document.querySelectorAll('.cs-spellcard-grid').forEach(grid => {
     _sortCardSortables.push(makeSortable(grid, {
       prefix: 'cs',
       group: 'cs-spell-cards',
       draggable: '.cs-spellcard',
-      delay: 80,
-      // Le clone de drag doit rester DANS .cs-v3 (sinon le CSS scopé .cs-v3 ne
-      // s'applique pas → rendu brut empilé). Donc pas de clone sur <body>.
+      animation: 90,
+      delay: 0,
+      forceFallback: false,
+      fallbackTolerance: 3,
+      // Desktop : drag natif, beaucoup plus réactif que le fallback JS forcé.
+      // Si Sortable repasse en fallback, le clone reste dans .cs-v3 pour garder le style.
       fallbackOnBody: false,
       onEnd: async () => {
         const wrap = document.getElementById('cs-sort-cats-wrap');
@@ -109,14 +196,22 @@ export function renderCharDeck(c, canEdit) {
   const search   = _norm(_sortsSearch || '');   // minuscules + sans accents
   const view     = _sortsView || 'all';          // 'all' | 'deck'
   const typeFlt  = _sortsTypeFilter || '';        // '' | 'offensif' | 'defensif' | 'soin' | 'enchantement' | 'affliction' | 'utilitaire'
+  const validationFlt = STATE.isAdmin ? (_sortsValidationFilter || '') : '';
+  const order = ['manual', 'pm', 'nom', 'validation'].includes(_sortsOrder) ? _sortsOrder : 'manual';
+  const hasOrderFilter = _sortsHasActiveOrderFilter();
   const collapsed = _sortsCatCollapsed || {};     // { catId: true } = replié
 
   const DEFAULT_CAT = { id: '__none', nom: 'Sans catégorie', couleur: '#4f8cff' };
   const allCats = cats.length ? [...cats, DEFAULT_CAT] : [DEFAULT_CAT];
 
   // Stats globales avant filtre
-  const deckCount = allSorts.filter(s => s.actif).length;
+  const activeSorts = allSorts.filter(s => s.actif);
+  const deckCount = activeSorts.length;
   const deckMax   = calcDeckMax(c);
+  const validationCounts = allSorts.reduce((acc, s) => {
+    acc[_sortValidationState(s)] = (acc[_sortValidationState(s)] || 0) + 1;
+    return acc;
+  }, { pending: 0, ok: 0, no: 0 });
 
   // ── Application des filtres : view + search + type ───────────────
   const matchSpell = (s) => {
@@ -128,10 +223,14 @@ export function renderCharDeck(c, canEdit) {
       ].join(' '));
       if (!hay.includes(search)) return false;
     }
+    if (validationFlt && _sortValidationState(s) !== validationFlt) return false;
     if (typeFlt) {
       if (typeFlt.startsWith('rune:')) {
         // Filtre par rune utilisée
         if (!_displayRunes(s.runes || []).includes(typeFlt.slice(5))) return false;
+      } else if (typeFlt.startsWith('noyau:')) {
+        const wanted = typeFlt.slice(6);
+        if (!noyauTypesFor(s).some(t => _noyauFilterKey(t) === wanted)) return false;
       } else {
         const types = _getSortTypes(s);
         if (typeFlt === 'offensif'   && !types.includes('offensif')) return false;
@@ -145,12 +244,17 @@ export function renderCharDeck(c, canEdit) {
   // ── Filtre INTELLIGENT : ne proposer que les types et runes RÉELLEMENT utilisés ──
   const usedTypes = new Set();   // 'offensif' | 'defensif' | 'utilitaire'
   const usedRunes = new Set();   // noms de runes présents dans au moins un sort
+  const usedNoyaux = new Map();  // noyaux/éléments présents dans au moins un sort
   allSorts.forEach(s => {
     const t = _getSortTypes(s);
     if (t.includes('offensif')) usedTypes.add('offensif');
     if (t.includes('defensif')) usedTypes.add('defensif');
     if (t.includes('utilitaire') && !t.includes('offensif') && !t.includes('defensif')) usedTypes.add('utilitaire');
     _displayRunes(s.runes || []).forEach(r => usedRunes.add(r));
+    noyauTypesFor(s).forEach(nt => {
+      const k = _noyauFilterKey(nt);
+      if (k && !usedNoyaux.has(k)) usedNoyaux.set(k, nt);
+    });
   });
   const TYPE_META = {
     offensif:   { lbl: '⚔️ Off',  cls: 'off' },
@@ -159,6 +263,8 @@ export function renderCharDeck(c, canEdit) {
   };
   // Runes ordonnées comme RUNE_META, filtrées sur celles utilisées par le perso.
   const usedRuneMetas = RUNE_META.filter(rm => usedRunes.has(rm.nom));
+  const usedNoyauMetas = [...usedNoyaux.entries()]
+    .sort((a, b) => String(a[1].label || '').localeCompare(String(b[1].label || ''), 'fr', { sensitivity: 'base' }));
 
   const sortsByCat = {};
   allCats.forEach(cat => { sortsByCat[cat.id] = []; });
@@ -182,6 +288,7 @@ export function renderCharDeck(c, canEdit) {
         <input type="text" class="cs-sorts-search" id="cs-sorts-search"
           placeholder="Rechercher (nom, effet, rune)…"
           value="${_esc(_sortsSearch || '')}"
+          aria-label="Rechercher un sort"
           data-input="_sortsSearchInput">
         ${search ? `<button class="cs-sorts-search-clear" data-action="_sortsSetSearch" data-val="" title="Effacer">✕</button>` : ''}
       </div>
@@ -213,7 +320,22 @@ export function renderCharDeck(c, canEdit) {
         <button class="cs-sorts-chip ${view==='all'?'on':''}"  data-action="_sortsSetView" data-view="all">Tous (${allSorts.length})</button>
         <button class="cs-sorts-chip ${view==='deck'?'on':''}" data-action="_sortsSetView" data-view="deck">⚡ Deck (${deckCount})</button>
       </div>
-      ${(usedTypes.size || usedRuneMetas.length) ? `<div class="cs-sorts-filt-grp">
+      <div class="cs-sorts-filt-grp cs-sorts-sortgrp" title="Tri d'affichage non persistant">
+        <span class="cs-sorts-sortlbl">Tri</span>
+        ${[
+          ['manual', 'Manuel'],
+          ['pm', 'PM'],
+          ['nom', 'Nom'],
+          ['validation', 'MJ'],
+        ].map(([v, lbl]) => `<button class="cs-sorts-chip sort ${order===v?'on':''}" data-action="_sortsSetOrder" data-order="${v}">${lbl}</button>`).join('')}
+      </div>
+      ${STATE.isAdmin ? `<div class="cs-sorts-filt-grp cs-sorts-filt-grp--mj" title="Filtrer par validation MJ">
+        <button class="cs-sorts-chip mj ${validationFlt===''?'on':''}" data-action="_sortsSetValidation" data-val="">MJ Tous</button>
+        <button class="cs-sorts-chip mj wait ${validationFlt==='pending'?'on':''}" data-action="_sortsSetValidation" data-val="pending">⏳ À valider (${validationCounts.pending || 0})</button>
+        <button class="cs-sorts-chip mj ok ${validationFlt==='ok'?'on':''}" data-action="_sortsSetValidation" data-val="ok">✅ (${validationCounts.ok || 0})</button>
+        <button class="cs-sorts-chip mj no ${validationFlt==='no'?'on':''}" data-action="_sortsSetValidation" data-val="no">❌ (${validationCounts.no || 0})</button>
+      </div>` : ''}
+      ${(usedTypes.size || usedRuneMetas.length || usedNoyauMetas.length) ? `<div class="cs-sorts-filt-grp">
         <button class="cs-sorts-chip type ${typeFlt===''?'on':''}" data-action="_sortsSetType" data-type="">Toutes</button>
         ${['offensif','defensif','utilitaire'].filter(t => usedTypes.has(t)).map(t => {
           const m = TYPE_META[t];
@@ -224,8 +346,15 @@ export function renderCharDeck(c, canEdit) {
           const v = `rune:${rm.nom}`;
           return `<button class="cs-sorts-chip rune ${typeFlt===v?'on':''}" style="--c:${rm.color}" data-action="_sortsSetType" data-type="${v}" title="${_esc(rm.effet || rm.nom)}">${rm.icon} ${_esc(rm.nom)}</button>`;
         }).join('')}
+        ${usedNoyauMetas.length ? `<span class="cs-sorts-filt-sep"></span>` : ''}
+        ${usedNoyauMetas.map(([key, nt]) => {
+          const v = `noyau:${key}`;
+          return `<button class="cs-sorts-chip noyau ${typeFlt===v?'on':''}" style="--c:${nt.color || '#8aa'}" data-action="_sortsSetType" data-type="${v}" title="Noyau ${_esc(nt.label || nt.nom || '')}">${nt.icon || '✦'} ${_esc(nt.label || nt.nom || 'Noyau')}</button>`;
+        }).join('')}
       </div>` : ''}
     </div>
+
+    ${_renderDeckStats(activeSorts, deckMax, pmDelta)}
 
     <!-- Bandeau Set Léger (PM offset) -->
     ${pmDelta !== 0 ? `<div class="cs-sort-pm-bar">
@@ -241,19 +370,27 @@ export function renderCharDeck(c, canEdit) {
 
   // ── État vide / aucun résultat ───────────────────────────────────
   if (allSorts.length === 0) {
-    html += `<div class="cs-empty">🔮 Aucun sort créé</div></div>`;
+    html += `<div class="cs-sorts-empty-state cs-sorts-empty-state--first">
+      <div class="cs-sorts-empty-ico">🔮</div>
+      <div class="cs-sorts-empty-body">
+        <b>Aucun sort créé</b>
+        <span>Un sort part d'un noyau élémentaire, gagne des runes d'effet, calcule ses PM, puis passe en validation MJ avant d'entrer dans le Deck.</span>
+      </div>
+      ${canEdit ? `<button class="btn btn-gold btn-sm" data-action="addSort">＋ Premier sort</button>` : ''}
+    </div></div>`;
     return html;
   }
   if (visibleCount === 0) {
-    html += `<div class="cs-sorts-noresult">
-      <span style="font-size:1.4rem">🔎</span>
-      <div>
-        <div style="font-weight:700">Aucun sort ne correspond</div>
-        <div style="font-size:.74rem;color:var(--text-dim);margin-top:2px">
-          ${search ? `« ${_esc(search)} » ${typeFlt?' · '+typeFlt:''}${view==='deck'?' · Deck uniquement':''}` : 'Essaie un autre filtre'}
-        </div>
+    const deckEmpty = view === 'deck' && deckCount === 0;
+    html += `<div class="cs-sorts-empty-state ${deckEmpty?'cs-sorts-empty-state--deck':'cs-sorts-noresult'}">
+      <div class="cs-sorts-empty-ico">${deckEmpty ? '⚡' : '🔎'}</div>
+      <div class="cs-sorts-empty-body">
+        <b>${deckEmpty ? 'Deck vide' : 'Aucun sort ne correspond'}</b>
+        <span>${deckEmpty
+          ? 'Active un sort validé depuis la liste complète pour le préparer en combat.'
+          : (search ? `« ${_esc(search)} » ${typeFlt?' · '+typeFlt:''}${validationFlt?' · validation '+validationFlt:''}${view==='deck'?' · Deck uniquement':''}` : 'Essaie un autre filtre.')}</span>
       </div>
-      <button class="btn btn-outline btn-sm" data-action="_sortsResetFilters">Réinitialiser</button>
+      <button class="btn btn-outline btn-sm" data-action="${deckEmpty?'_sortsSetView':'_sortsResetFilters'}" ${deckEmpty?'data-view="all"':''}>${deckEmpty?'Voir tous les sorts':'Réinitialiser'}</button>
     </div></div>`;
     return html;
   }
@@ -263,7 +400,9 @@ export function renderCharDeck(c, canEdit) {
   allCats.forEach(cat => {
     const entries = sortsByCat[cat.id] || [];
     const visibleEntries = entries.filter(e => !e.hidden);
-    if (!visibleEntries.length) return;
+    if (order !== 'manual') visibleEntries.sort(_sortsOrderComparator(order, pmDelta));
+    const showEmptyDrop = canEdit && !hasOrderFilter;
+    if (!visibleEntries.length && !showEmptyDrop) return;
     const isDefault = cat.id === '__none';
     const isCollapsed = !!collapsed[cat.id];
     const activeInCat = visibleEntries.filter(e => e.s.actif).length;
@@ -279,10 +418,13 @@ export function renderCharDeck(c, canEdit) {
       </div>`;
     }
     if (!isCollapsed) {
-      html += `<div class="cs-spellcard-grid" data-cat="${cat.id}">`;
+      html += `<div class="cs-spellcard-grid ${visibleEntries.length?'':'is-empty'}" data-cat="${cat.id}">`;
       visibleEntries.forEach(({ s, globalIdx: i }) => {
-        html += _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta);
+        html += _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats, pmDelta, deckCount, deckMax);
       });
+      if (!visibleEntries.length) {
+        html += `<div class="cs-spellcard-emptydrop">Dépose un sort ici</div>`;
+      }
       html += `</div>`;
     }
     html += `</div>`;  // /cat-block
@@ -297,17 +439,18 @@ export function renderCharDeck(c, canEdit) {
 function _sortsRerender() {
   _renderSpellsTab();
 }
-function _sortsSetSearch(v) {
+function _sortsSetSearch(v, opts = {}) {
   _sortsSearch = v || '';
-  _sortsRerender();
-  // Re-focus + caret restaurés
-  requestAnimationFrame(() => {
-    const el = document.getElementById('cs-sorts-search');
-    if (el) {
-      el.focus();
-      try { el.setSelectionRange(el.value.length, el.value.length); } catch {}
-    }
-  });
+  if (_sortsSearchTimer) clearTimeout(_sortsSearchTimer);
+  if (opts.immediate) {
+    _sortsSearchTimer = null;
+    _sortsRerender();
+    return;
+  }
+  _sortsSearchTimer = setTimeout(() => {
+    _sortsSearchTimer = null;
+    _sortsRerender();
+  }, 150);
 }
 function _sortsSetView(v) {
   _sortsView = (v === 'deck') ? 'deck' : 'all';
@@ -315,6 +458,14 @@ function _sortsSetView(v) {
 }
 function _sortsSetType(t) {
   _sortsTypeFilter = t || '';
+  _sortsRerender();
+}
+function _sortsSetValidation(v) {
+  _sortsValidationFilter = ['ok', 'pending', 'no'].includes(v) ? v : '';
+  _sortsRerender();
+}
+function _sortsSetOrder(v) {
+  _sortsOrder = ['manual', 'pm', 'nom', 'validation'].includes(v) ? v : 'manual';
   _sortsRerender();
 }
 // MJ : règle le nombre de runes d'effet débloquées (characters.maxRunes) directement
@@ -335,6 +486,31 @@ async function _sortsAdjRuneLimit(delta) {
     showNotif(`🔮 Runes d'effet : ${next} pour ${_esc(c.nom || 'ce perso')}`, 'success');
   }
 }
+
+async function _sortsSetCardCat(idx, catId) {
+  const c = _getCurrentSpellChar() || STATE.activeChar; if (!c) return;
+  const cats = c.sort_cats || [];
+  const cleanCatId = cats.some(cat => cat.id === catId) ? catId : '';
+  const sorts = [...(c.deck_sorts || [])];
+  const s = sorts[idx]; if (!s) return;
+  const prevCatId = s.catId || '';
+  if (prevCatId === cleanCatId) return;
+  sorts[idx] = { ...s, catId: cleanCatId };
+  c.deck_sorts = sorts;
+  if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
+  if (charSession.getCurrentChar()?.id === c.id)
+    charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+  if (await trySave('characters', c.id, { deck_sorts: sorts })) {
+    _renderSpellsTab(c);
+  } else {
+    sorts[idx] = { ...sorts[idx], catId: prevCatId };
+    c.deck_sorts = sorts;
+    if (charSession.getCurrentChar()?.id === c.id)
+      charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+    _renderSpellsTab(c);
+  }
+}
+
 function _sortsToggleCat(catId) {
   _sortsCatCollapsed = { ...(_sortsCatCollapsed || {}) };
   _sortsCatCollapsed[catId] = !_sortsCatCollapsed[catId];
@@ -352,13 +528,17 @@ function _sortsToggleAllCats() {
   _sortsRerender();
 }
 function _sortsResetFilters() {
+  if (_sortsSearchTimer) clearTimeout(_sortsSearchTimer);
+  _sortsSearchTimer = null;
   _sortsSearch = '';
   _sortsView = 'all';
   _sortsTypeFilter = '';
+  _sortsValidationFilter = '';
+  _sortsOrder = 'manual';
   _sortsRerender();
 }
 
-function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
+function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta = 0, deckCount = 0, deckMax = Infinity) {
   const isOpen   = openIdx === i;
   const runesAll = s.runes || [];
   const types    = _getSortTypes(s);
@@ -492,19 +672,19 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   }
 
   // ── 5. Cibles / zone / déplacement / durée ──
-  if (nbCibles > 1) chips.push({ icon:'🎯', val:`×${nbCibles}`, color:'#4f8cff', lbl:'Nombre de cibles' });
+  if (nbCibles > 1) chips.push({ icon:'🎯', val:`×${nbCibles}`, color:'#4f8cff', lbl:'Nombre de cibles', dim:true });
   const zone  = _calcSortZone(s);
-  if (zone)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}c`, color:'#b47fff', lbl:'Zone d\'effet (cases)' });
+  if (zone && !isAllongeCombo)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}c`, color:'#b47fff', lbl:'Zone d\'effet (cases)', dim:true });
   const depl  = _calcSortDeplacement(s);
   if (depl) {
     const dIcon = depl.mode === 'self' ? '🏃' : depl.mode === 'pull' ? '↙' : '↗';
     const dVal  = depl.max != null ? `1–${depl.max}c` : `${depl.distance}c`;
-    chips.push({ icon: dIcon, val: dVal, color:'#e8b84b', lbl: depl.mode === 'self' ? 'Déplacement du lanceur (cases)' : depl.mode === 'pull' ? 'Attire la cible (cases)' : 'Repousse la cible (cases)' });
+    chips.push({ icon: dIcon, val: dVal, color:'#e8b84b', lbl: depl.mode === 'self' ? 'Déplacement du lanceur (cases)' : depl.mode === 'pull' ? 'Attire la cible (cases)' : 'Repousse la cible (cases)', dim:true });
   }
   // Durée : affichée uniquement pour les sorts persistants
   if (_needsDureeBase(s)) {
     const duree = _calcSortDuree(s);
-    if (duree) chips.push({ icon:'⏱️', val:`${duree}t`, color:'#9ca3af', lbl:'Durée de l\'effet (tours)' });
+    if (duree) chips.push({ icon:'⏱️', val:`${duree}t`, color:'#9ca3af', lbl:'Durée de l\'effet (tours)', dim:true });
   }
 
   // ── 6. Pill JS sauvegarde pour Affliction (info utile au combat) ──
@@ -512,7 +692,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   if (hasAfflictionDebuff && !activeIds.has('regeneration') && !activeIds.has('sentinelle')) {
     const nbAff = runesAll.filter(r => r === 'Affliction').length;
     const dd = 11 + 2 * (nbAff - 1);
-    chips.push({ icon:'🛡', val:`DD ${dd}`, color:'#ef4444', lbl:'Jet de sauvegarde de la cible pour résister' });
+    chips.push({ icon:'🛡', val:`DD ${dd}`, color:'#ef4444', lbl:'Jet de sauvegarde de la cible pour résister', dim:true });
   }
 
   // ── Combo Sort suspendu : pill explicite (stocké au cast, déclenché hors-tour) ──
@@ -530,12 +710,16 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
                 : '#b47fff';
 
   // ── Validation MJ ──
-  const vs = s.mjValidation || (s.mjValidated ? 'ok' : 'pending');
+  const vs = _sortValidationState(s);
   const valBadge = vs === 'ok'
     ? `<span class="cs-spellcard-val ok" title="Sort validé par le Maître du Jeu">✅ Validé</span>`
     : vs === 'no'
       ? `<span class="cs-spellcard-val no" title="Sort refusé par le Maître du Jeu">❌ Refusé</span>`
       : `<span class="cs-spellcard-val wait" title="Pas encore validé par le Maître du Jeu">⏳ À valider</span>`;
+  const valActions = STATE.isAdmin ? `<span class="cs-spellcard-mj-actions" data-stop-propagation>
+    <button class="cs-spellcard-mjbtn ok ${vs==='ok'?'is-active':''}" data-action="setSortValidation" data-idx="${i}" data-val="ok" title="Valider ce sort">✅</button>
+    <button class="cs-spellcard-mjbtn no ${vs==='no'?'is-active':''}" data-action="setSortValidation" data-idx="${i}" data-val="no" title="Refuser ce sort">❌</button>
+  </span>` : '';
 
   // ── Noyaux (éléments) en petites pastilles ──
   const nts = noyauTypesFor(s);
@@ -550,16 +734,29 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
   const runeChips = runeMetas.length ? `<div class="cs-spellcard-runes">
     ${runeMetas.map(rm => `<span class="cs-runechip" style="--c:${rm.color}" title="${_esc(rm.nom)} — ${_esc(rm.effet)}">${rm.icon} ${_esc(rm.nom)}${(counts[rm.nom]>1)?` ×${counts[rm.nom]}`:''}</span>`).join('')}
   </div>` : '';
+  const catSelect = canEdit && cats.length ? `<select class="cs-spellcard-catselect"
+      data-change="_sortsSetCardCat" data-idx="${i}"
+      title="Changer de catégorie" aria-label="Changer la catégorie du sort">
+      <option value="" ${!s.catId?'selected':''}>Sans catégorie</option>
+      ${cats.map(cat => `<option value="${_esc(cat.id)}" ${(s.catId||'')===cat.id?'selected':''}>${_esc(cat.nom)}</option>`).join('')}
+    </select>` : '';
 
-  // Deck : un joueur ne peut activer que les sorts VALIDÉS (le MJ n'est pas limité).
-  const canActivate = STATE.isAdmin || vs === 'ok';
+  const validationAllows = STATE.isAdmin || vs === 'ok';
+  const deckFull = deckCount >= deckMax;
+  const deckAllows = s.actif || !deckFull;
+  const canActivate = validationAllows && deckAllows;
+  const lockTitle = !validationAllows
+    ? 'Doit être validé par le MJ pour entrer dans le Deck'
+    : !deckAllows
+      ? `Deck plein (${deckCount}/${deckMax}) — retire un sort avant d'en ajouter un`
+      : (s.actif?'Retirer du deck':'Ajouter au deck');
 
-  return `<article class="cs-spellcard ${s.actif?'is-actif':''} ${isOpen?'is-open':''}" style="--type-col:${typeCol}"
+  return `<article class="cs-spellcard ${s.actif?'is-actif':''} ${isOpen?'is-open':''} ${vs==='no'?'is-refused':''}" style="--type-col:${typeCol}"
     data-sort-idx="${i}">
 
     <header class="cs-spellcard-head">
       ${canEdit
-        ? `<div class="toggle ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" data-action="toggleSort" data-idx="${i}" data-stop-propagation title="${(!canActivate && !s.actif)?'Doit être validé par le MJ pour entrer dans le Deck':(s.actif?'Retirer du deck':'Ajouter au deck')}"></div>`
+        ? `<div class="toggle ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" role="switch" aria-pressed="${s.actif?'true':'false'}" data-action="toggleSort" data-idx="${i}" data-stop-propagation title="${lockTitle}"></div>`
         : `<div class="toggle ${s.actif?'on':''}"></div>`}
       <span class="cs-spellcard-icon">${s.icon ? _esc(s.icon) : '✦'}</span>
       <div class="cs-spellcard-id">
@@ -574,8 +771,8 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
     </header>
 
     <div class="cs-spellcard-tags">
-      ${valBadge}
-      ${chips.map(ch => `<span class="cs-sort-sstat" style="--c:${ch.color}"${ch.lbl?` title="${_esc(ch.lbl)}"`:''}>${ch.icon} ${_esc(ch.val)}</span>`).join('')}
+      ${valBadge}${valActions}
+      ${chips.map(ch => `<span class="cs-sort-sstat${ch.dim?' cs-sort-sstat--dim':''}" style="--c:${ch.color}"${ch.lbl?` title="${_esc(ch.lbl)}"`:''}>${ch.icon} ${_esc(ch.val)}</span>`).join('')}
     </div>
 
     ${s.effet ? `<p class="cs-spellcard-desc ${isOpen?'is-full':''}" data-action="toggleSortDetail" data-idx="${i}" title="Cliquer pour ${isOpen?'replier':'voir le détail'}">${isOpen ? _nl2br(s.effet) : _esc(s.effet)}</p>` : ''}
@@ -601,8 +798,10 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, pmDelta = 0) {
 
     <footer class="cs-spellcard-foot">
       <button class="cs-spellcard-detailbtn" data-action="toggleSortDetail" data-idx="${i}">${isOpen?'▲ Replier':'▼ Détails'}</button>
+      ${catSelect}
       ${canEdit ? `<div class="cs-spellcard-acts" data-stop-propagation>
         ${runesAll.includes('Invocation') ? `<button class="btn-icon" data-action="_openInvocationConfig" data-idx="${i}" title="Configurer l'invocation (créatures à invoquer)">🐾</button>` : ''}
+        <button class="btn-icon" data-action="duplicateSort" data-idx="${i}" title="Dupliquer le sort">⧉</button>
         <button class="btn-icon" data-action="editSort" data-idx="${i}" title="Éditer le sort">✏️</button>
         <button class="btn-icon" data-action="deleteSort" data-idx="${i}" title="Supprimer">🗑️</button>
       </div>` : ''}
@@ -617,7 +816,7 @@ const _CAT_COLORS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'
 // recolorie / supprime — la suppression NE supprime PAS les sorts (catId remis à '').
 function _renderCatManager(cats = []) {
   const swatch = (col, action, idx, sel) =>
-    `<button class="cs-catmgr-col ${sel?'on':''}" style="background:${col}" data-action="${action}"${idx!=null?` data-idx="${idx}"`:''} data-col="${col}" title="${sel?'Couleur actuelle':'Choisir cette couleur'}"></button>`;
+    `<button type="button" class="cs-catmgr-col ${sel?'on':''}" style="background:${col}" data-action="${action}" data-stop-propagation${idx!=null?` data-idx="${idx}"`:''} data-col="${col}" title="${sel?'Couleur actuelle':'Choisir cette couleur'}"></button>`;
   return `<div class="cs-catmgr">
     <div class="cs-catmgr-head">
       <span class="cs-catmgr-title">📂 Catégories</span>
@@ -635,8 +834,8 @@ function _renderCatManager(cats = []) {
     </div>` : `<div class="cs-catmgr-empty">Aucune catégorie pour l'instant.</div>`}
     <div class="cs-catmgr-new">
       <input class="cs-catmgr-name" id="cs-newcat-name" maxlength="40" placeholder="Nouvelle catégorie…">
-      <div class="cs-catmgr-colors">${_CAT_COLORS.map(col => swatch(col, '_addSortCat', null, false)).join('')}</div>
-      <span class="cs-catmgr-hint">← clique une couleur pour créer</span>
+      <div class="cs-catmgr-colors">${_CAT_COLORS.map(col => swatch(col, '_pickNewSortCatColor', null, _newSortCatColor === col)).join('')}</div>
+      <button type="button" class="btn btn-gold btn-sm cs-catmgr-add" data-action="_addSortCat" data-col="${_newSortCatColor}">Ajouter</button>
     </div>
   </div>`;
 }
@@ -647,16 +846,38 @@ export function openSortCatEditor() {
   _renderSpellsTab();
 }
 
+function _pickNewSortCatColor(btn) {
+  const couleur = btn?.dataset?.col || _CAT_COLORS[0];
+  _newSortCatColor = couleur;
+  document.querySelectorAll('.cs-catmgr-new .cs-catmgr-col').forEach(b => b.classList.toggle('on', b.dataset.col === couleur));
+  const addBtn = document.querySelector('.cs-catmgr-add');
+  if (addBtn) addBtn.dataset.col = couleur;
+}
+
 async function _addSortCat(couleur) {
-  const c = STATE.activeChar; if (!c) return;
+  const c = _getCurrentSpellChar() || STATE.activeChar; if (!c) return;
   const inp = document.getElementById('cs-newcat-name');
-  const nom = (inp?.value || '').trim() || 'Nouvelle catégorie';
-  const cats = [...(c.sort_cats || [])];
-  cats.push({ id: `cat_${Date.now()}`, nom, couleur });
+  const nom = (inp?.value || '').trim();
+  if (!nom) {
+    showNotif('Donne un nom à la catégorie.', 'error');
+    inp?.focus();
+    return;
+  }
+  const prevCats = c.sort_cats || [];
+  const cats = [...prevCats];
+  cats.push({ id: `cat_${Date.now()}`, nom, couleur: couleur || _newSortCatColor || _CAT_COLORS[0] });
   c.sort_cats = cats;
+  if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
+  if (charSession.getCurrentChar()?.id === c.id)
+    charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
   if (await trySave('characters', c.id, { sort_cats: cats })) {
     showNotif('Catégorie créée !', 'success');
     _renderSpellsTab(c);   // _sortsCatPanelOpen reste vrai → le panneau reste ouvert
+  } else {
+    c.sort_cats = prevCats;
+    if (charSession.getCurrentChar()?.id === c.id)
+      charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+    _renderSpellsTab(c);
   }
 }
 
@@ -1150,7 +1371,8 @@ export async function openSortModal(idx, s) {
           <div id="s-icon-picker" class="cs-spell-icon-picker" style="display:none"></div>
         </div>
         <div class="cs-spell-identity-field cs-spell-identity-field--name"><label>Nom du sort</label>
-          <input class="input-field" id="s-nom" value="${s?.nom||''}" placeholder="Boule de feu, Vague de soin…">
+          <input class="input-field" id="s-nom" value="${s?.nom||''}" placeholder="Boule de feu, Vague de soin…" aria-describedby="s-nom-error">
+          <div id="s-nom-error" class="cs-spell-field-error" hidden>Donne un nom au sort avant de l'enregistrer.</div>
         </div>
         <div class="cs-spell-identity-field"><label>Catégorie</label>
           <select class="input-field" id="s-catid">
@@ -1204,6 +1426,7 @@ export async function openSortModal(idx, s) {
     <!-- ④ Effets générés par les choix précédents -->
     <section class="cs-spell-effects-panel" aria-label="Effets générés par le sort">
       <div class="cs-spell-effects-title"><span class="cs-step-pill">4</span><div><b>Effets actifs</b><small>Les options apparaissent uniquement quand les runes ou types concernés sont présents.</small></div></div>
+      <div id="s-effects-empty" class="cs-spell-effects-empty">Choisis un type ou une rune pour afficher les effets actifs.</div>
 
     <!-- Dégâts — visible si type offensif (auto-val avec toggle Custom) ;
          masqué quand Affliction est présente (la Puissance scale le DoT à la place) -->
@@ -1617,17 +1840,31 @@ export async function openSortModal(idx, s) {
     const modal = document.querySelector('.modal');
     if (modal && !modal.dataset.previewBound) {
       modal.dataset.previewBound = '1';
-      modal.addEventListener('input',  _updateSortPreview);
+      modal.addEventListener('input', (event) => {
+        if (event.target?.id === 's-nom') _setSortNameRequiredError(false);
+        _updateSortPreview();
+      });
       modal.addEventListener('change', _updateSortPreview);
       modal.addEventListener('change', (event) => {
         if (event.target?.id === 's-enchant-etat') _refreshEnchantStateTuning();
       });
       // Emoji perso : Entrée dans le champ applique l'emoji saisi.
       modal.addEventListener('keydown', (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key?.toLowerCase() === 's') {
+          event.preventDefault();
+          const saveBtn = modal.querySelector('[data-action="saveSort"]');
+          if (saveBtn && !saveBtn.disabled) saveSort(Number(saveBtn.dataset.idx));
+          return;
+        }
         if (event.target?.id === 's-icon-custom' && event.key === 'Enter') {
           event.preventDefault(); _applyCustomSortIcon();
         }
       });
+    }
+    if (idx < 0) {
+      const nameEl = document.getElementById('s-nom');
+      nameEl?.focus();
+      nameEl?.select?.();
     }
     // Populate les listes déroulantes d'état (affliction + enchantement).
     // Au chargement initial, le dropdown n'a que l'option "— Aucun —" : la valeur
@@ -1881,6 +2118,19 @@ function _refreshConditionalSections() {
   const iSec = document.getElementById('s-invocation-section');
   if (iSec) iSec.style.display = hasInvoc ? '' : 'none';
   if (hasInvoc) _refreshInvocationDerived();
+  const empty = document.getElementById('s-effects-empty');
+  if (empty) {
+    const visibleIds = [
+      's-degats-section', 's-prot-section', 's-soin-section', 's-regeneration-section',
+      's-allonge-section', 's-enchant-section', 's-affliction-section', 's-action-rune-section',
+      's-amp-section', 's-invocation-section',
+    ];
+    const hasVisible = visibleIds.some(id => {
+      const el = document.getElementById(id);
+      return el && el.style.display !== 'none';
+    });
+    empty.style.display = hasVisible ? 'none' : '';
+  }
 }
 
 function _toggleSortType(type) {
@@ -2842,6 +3092,31 @@ function _updateSortPreview() {
   `).join('');
 }
 
+function _setSortNameRequiredError(show, message = "Donne un nom au sort avant de l'enregistrer.") {
+  const field = document.getElementById('s-nom')?.closest('.cs-spell-identity-field');
+  const input = document.getElementById('s-nom');
+  const error = document.getElementById('s-nom-error');
+  field?.classList.toggle('is-invalid', !!show);
+  input?.setAttribute('aria-invalid', show ? 'true' : 'false');
+  if (error) {
+    error.textContent = message;
+    error.hidden = !show;
+  }
+}
+
+function _requireSortName() {
+  const input = document.getElementById('s-nom');
+  const valid = !!(input?.value || '').trim();
+  const message = "Donne un nom au sort avant de l'enregistrer.";
+  _setSortNameRequiredError(!valid, message);
+  if (!valid) {
+    showNotif(message, 'error');
+    input?.focus();
+    input?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  return valid;
+}
+
 function _setNoyauRequiredError(show, message = 'Sélectionne une rune noyau pour enregistrer ce sort.') {
   const section = document.querySelector('.cs-spell-section--noyau');
   const error   = document.getElementById('s-noyau-error');
@@ -2963,7 +3238,9 @@ function _sanitizeAbsorbedComboFields(s) {
 export async function saveSort(idx) {
   // Si on édite une action d'item (depuis le shop), on aiguille vers le bon save
   if (_itemEditCtx) return _saveItemSpell();
-  if (!_requireNoyauSelection()) return;
+  const hasName = _requireSortName();
+  const hasNoyau = _requireNoyauSelection();
+  if (!hasName || !hasNoyau) return;
     const c = STATE.activeChar; if(!c) return;
     const sorts = c.deck_sorts||[];
     const noyau       = document.getElementById('s-noyau')?.value||'';
@@ -3005,7 +3282,7 @@ export async function saveSort(idx) {
       mjAutoHit: STATE.isAdmin
         ? !!document.getElementById('s-mj-auto-hit')?.checked
         : (idx >= 0 ? !!sorts[idx]?.mjAutoHit : false),
-      nom:      document.getElementById('s-nom')?.value||'Sort',
+      nom:      document.getElementById('s-nom')?.value?.trim() || '',
       pm:       autoPm,
       pmOverride,
       noyau,
@@ -3128,7 +3405,7 @@ function _buildSortFromForm(idx, prevList = []) {
   return _sanitizeAbsorbedComboFields({
     icon:     (document.getElementById('s-icon')?.value || '').trim() || '',
     mjValidation, mjValidated,
-    nom:      document.getElementById('s-nom')?.value||'Sort',
+    nom:      document.getElementById('s-nom')?.value?.trim() || '',
     pm:       autoPm,
     pmOverride,
     mjAlwaysMax: STATE.isAdmin
@@ -3185,7 +3462,9 @@ function _buildSortFromForm(idx, prevList = []) {
 async function _saveItemSpell() {
   if (!_itemEditCtx) return false;
   try {
-    if (!_requireNoyauSelection()) return false;
+    const hasName = _requireSortName();
+    const hasNoyau = _requireNoyauSelection();
+    if (!hasName || !hasNoyau) return false;
     const { item, idx, onSave } = _itemEditCtx;
     const acts = Array.isArray(item.actions) ? [...item.actions] : [];
     const newSort = _buildSortFromForm(idx, acts);
@@ -3233,10 +3512,13 @@ registerActions({
   closeModalDirect:       ()    => closeModalDirect(),
   _enableSortCustom:      (btn) => _enableSortCustom(btn.dataset.field),
   _disableSortCustom:     (btn) => _disableSortCustom(btn.dataset.field),
-  _sortsSetSearch:        (btn) => _sortsSetSearch(btn.dataset.val),
+  _sortsSetSearch:        (btn) => _sortsSetSearch(btn.dataset.val, { immediate: true }),
   _sortsSetView:          (btn) => _sortsSetView(btn.dataset.view),
   _sortsSetType:          (btn) => _sortsSetType(btn.dataset.type),
+  _sortsSetValidation:    (btn) => _sortsSetValidation(btn.dataset.val),
+  _sortsSetOrder:         (btn) => _sortsSetOrder(btn.dataset.order),
   _sortsAdjRuneLimit:     (btn) => _sortsAdjRuneLimit(btn.dataset.delta),
+  _sortsSetCardCat:       (el)  => _sortsSetCardCat(Number(el.dataset.idx), el.value),
   _sortsToggleCat:        (btn) => _sortsToggleCat(btn.dataset.id),
   _sortsToggleAllCats:    ()    => _sortsToggleAllCats(),
   _sortsResetFilters:     ()    => _sortsResetFilters(),
@@ -3244,6 +3526,7 @@ registerActions({
   _recolorSortCat:        (btn) => _recolorSortCat(Number(btn.dataset.idx), btn.dataset.col),
   _delSortCat:            (btn) => _delSortCat(Number(btn.dataset.idx)),
   _addSortCat:            (btn) => _addSortCat(btn.dataset.col),
+  _pickNewSortCatColor:   (btn) => _pickNewSortCatColor(btn),
   _toggleSortType:        (btn) => _toggleSortType(btn.dataset.type),
   _selectDeplMode:        (btn) => _selectDeplMode(btn.dataset.val),
   _selectActionMode:      (btn) => _selectActionMode(btn.dataset.val),

@@ -3320,6 +3320,20 @@ input[type=number].input-field::-webkit-outer-spin-button {
   line-height: 1.35;
 }
 .cs-spell-field-error[hidden] { display: none; }
+.cs-spell-identity-field.is-invalid .input-field {
+  border-color: rgba(239,68,68,0.62);
+  box-shadow: 0 0 0 2px rgba(239,68,68,0.12);
+}
+.cs-spell-effects-empty {
+  margin-bottom: .55rem;
+  padding: .65rem .75rem;
+  border: 1px dashed rgba(148,163,184,.22);
+  border-radius: 8px;
+  background: rgba(148,163,184,.055);
+  color: var(--text-dim);
+  font-size: .76rem;
+  line-height: 1.4;
+}
 .cs-spell-section--runes {
   background: linear-gradient(180deg, rgba(79,140,255,0.04), rgba(79,140,255,0.01));
   border-color: rgba(79,140,255,0.18);
@@ -9136,6 +9150,18 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   box-shadow: 0 8px 24px rgba(79,140,255,.30);
   border-color: rgba(79,140,255,.45) !important;
   background: rgba(79,140,255,.06) !important;
+  cursor: grabbing !important;
+}
+.cs-sortable-drag {
+  opacity: .96;
+  cursor: grabbing !important;
+  will-change: transform;
+}
+.cs-sortable-chosen,
+.cs-sortable-drag,
+.cs-sortable-drag * {
+  transition: none !important;
+  animation: none !important;
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -9150,6 +9176,7 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   border: 1px solid var(--border);
   position: sticky; top: 0; z-index: 5;
   backdrop-filter: blur(6px);
+  box-shadow: 0 10px 22px -20px rgba(0,0,0,.85);
 }
 .cs-v3 .cs-sorts-search-wrap {
   position: relative; flex: 1; min-width: 220px;
@@ -9259,7 +9286,83 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   color: color-mix(in srgb, var(--c, #ccc) 62%, var(--text));
   box-shadow: 0 0 8px -2px var(--c, transparent);
 }
+.cs-v3 .cs-sorts-chip.mj.on { background: rgba(148,163,184,.14); color: var(--text); box-shadow: none; }
+.cs-v3 .cs-sorts-chip.mj.wait.on { background: rgba(232,184,75,.18); color: var(--amber, #e8b84b); }
+.cs-v3 .cs-sorts-chip.mj.ok.on { background: rgba(34,195,142,.18); color: var(--emerald, #22c38e); }
+.cs-v3 .cs-sorts-chip.mj.no.on { background: rgba(239,68,68,.18); color: #ff8b8b; }
 .cs-v3 .cs-sorts-filt-sep { width: 1px; align-self: stretch; margin: 0 3px; background: var(--border); }
+.cs-v3 .cs-sorts-sortlbl {
+  display: inline-flex; align-items: center;
+  padding: 0 6px 0 8px;
+  color: var(--text-dim);
+  font-size: .62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.cs-v3 .cs-sorts-chip.noyau.on {
+  background: color-mix(in srgb, var(--c, #888) 18%, transparent);
+  color: color-mix(in srgb, var(--c, #ccc) 66%, var(--text));
+  box-shadow: 0 0 8px -2px var(--c, transparent);
+}
+.cs-v3 .cs-sorts-deckstats {
+  display: grid;
+  grid-template-columns: minmax(110px, .7fr) repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  align-items: stretch;
+  padding: 8px;
+  border: 1px solid rgba(232,184,75,.22);
+  border-radius: 10px;
+  background: rgba(232,184,75,.055);
+}
+.cs-v3 .cs-sorts-deckstats-head,
+.cs-v3 .cs-sorts-deckstats-row {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.cs-v3 .cs-sorts-deckstats-head {
+  justify-content: space-between;
+  padding: 5px 7px;
+  border-radius: 8px;
+  background: rgba(0,0,0,.16);
+  color: var(--amber, #e8b84b);
+  font-size: .68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.cs-v3 .cs-sorts-deckstats-head b { color: var(--text); font-size: .78rem; }
+.cs-v3 .cs-sorts-deckstats-row span {
+  display: inline-flex; align-items: center; gap: 4px;
+  max-width: 100%;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.045);
+  color: var(--text-muted);
+  font-size: .68rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.cs-v3 .cs-sorts-deckstats-row span[style] {
+  color: color-mix(in srgb, var(--c, #ccc) 62%, var(--text));
+  background: color-mix(in srgb, var(--c, #888) 12%, transparent);
+}
+.cs-v3 .cs-sorts-deckstats-row .off { color: #ff8b8b; background: rgba(255,107,107,.11); }
+.cs-v3 .cs-sorts-deckstats-row .def { color: var(--emerald, #22c38e); background: rgba(34,195,142,.11); }
+.cs-v3 .cs-sorts-deckstats-row .util { color: #c8a8ff; background: rgba(180,127,255,.11); }
+.cs-v3 .cs-sorts-empty-state {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.02);
+  border: 1px dashed var(--border);
+  color: var(--text-soft, #c8d4e8);
+}
+.cs-v3 .cs-sorts-empty-ico { font-size: 1.5rem; line-height: 1; }
+.cs-v3 .cs-sorts-empty-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.cs-v3 .cs-sorts-empty-body b { color: var(--text); font-size: .9rem; }
+.cs-v3 .cs-sorts-empty-body span { color: var(--text-dim); font-size: .75rem; line-height: 1.4; }
 
 /* Stepper MJ : nombre de runes d'effet débloquées (characters.maxRunes) */
 .cs-v3 .cs-sorts-mjrunes {
@@ -9317,6 +9420,7 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   .cs-v3 .cs-sorts-toolbar { flex-direction: column; align-items: stretch; }
   .cs-v3 .cs-sorts-search-wrap { width: 100%; }
   .cs-v3 .cs-sorts-deck { justify-content: space-between; }
+  .cs-v3 .cs-sorts-deckstats { grid-template-columns: 1fr; }
   .cs-v3 .cs-sorts-actions { justify-content: flex-end; }
 }
 
@@ -11005,6 +11109,22 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   gap: 12px;
   align-items: stretch;   /* cartes d'une même rangée à hauteur égale */
 }
+.cs-v3 .cs-spellcard-grid.is-empty {
+  min-height: 58px;
+  border: 1px dashed color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: 10px;
+  background: rgba(255,255,255,.015);
+}
+.cs-v3 .cs-spellcard-emptydrop {
+  grid-column: 1 / -1;
+  display: grid;
+  place-items: center;
+  min-height: 56px;
+  color: var(--text-dim);
+  font-size: .72rem;
+  font-weight: 700;
+  pointer-events: none;
+}
 
 .cs-v3 .cs-spellcard {
   position: relative;
@@ -11028,6 +11148,32 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--type-col, #b47fff) 35%, transparent);
   background: color-mix(in srgb, var(--type-col, #b47fff) 6%, var(--bg-elevated, rgba(255,255,255,.03)));
 }
+
+.cs-v3 .cs-spellcard.is-refused { opacity: .62; }
+.cs-v3 .cs-spellcard.is-refused:hover { opacity: .86; }
+.cs-v3 .cs-spellcard-head .toggle.on {
+  background: rgba(232,184,75,.28) !important;
+  border-color: rgba(232,184,75,.48) !important;
+}
+.cs-v3 .cs-spellcard-head .toggle.on::after { background: var(--gold, #e8b84b) !important; }
+.cs-v3 .cs-spellcard-val { border: 1px solid transparent; }
+.cs-v3 .cs-spellcard-val.ok   { border-color: rgba(34,195,142,.34); }
+.cs-v3 .cs-spellcard-val.wait { border-color: rgba(232,184,75,.40); box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
+.cs-v3 .cs-spellcard-val.no   { border-color: rgba(239,68,68,.34); }
+.cs-v3 .cs-spellcard-mj-actions { display: inline-flex; align-items: center; gap: 2px; margin-left: 2px; }
+.cs-v3 .cs-spellcard-mjbtn {
+  width: 22px; height: 22px; padding: 0;
+  border-radius: 6px; border: 1px solid var(--border);
+  background: rgba(255,255,255,.035); color: var(--text-muted);
+  cursor: pointer; font-size: .72rem; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background .12s, border-color .12s, transform .08s, opacity .12s;
+}
+.cs-v3 .cs-spellcard-mjbtn:hover { transform: translateY(-1px); }
+.cs-v3 .cs-spellcard-mjbtn.ok:hover,
+.cs-v3 .cs-spellcard-mjbtn.ok.is-active { background: rgba(34,195,142,.16); border-color: rgba(34,195,142,.42); color: var(--emerald, #22c38e); }
+.cs-v3 .cs-spellcard-mjbtn.no:hover,
+.cs-v3 .cs-spellcard-mjbtn.no.is-active { background: rgba(239,68,68,.16); border-color: rgba(239,68,68,.42); color: #ff8b8b; }
 .cs-v3 .cs-spellcard.cs-drop-before { box-shadow: -3px 0 0 0 var(--gold), 0 0 0 1px var(--gold) inset; }
 .cs-v3 .cs-spellcard.cs-drop-after  { box-shadow:  3px 0 0 0 var(--gold), 0 0 0 1px var(--gold) inset; }
 
@@ -11116,17 +11262,58 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 
 /* Pied de carte — pousse en bas pour aligner les pieds (hauteurs egales) */
 .cs-v3 .cs-spellcard-foot {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  display: grid;
+  grid-template-columns: auto minmax(72px, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   margin-top: auto;
   padding-top: 2px;
 }
 .cs-v3 .cs-spellcard-detailbtn {
+  justify-self: start;
   border: none; background: transparent; cursor: pointer;
   color: var(--text-dim); font-size: .68rem; font-weight: 700; padding: 2px 0;
   transition: color .12s;
+  white-space: nowrap;
 }
 .cs-v3 .cs-spellcard-detailbtn:hover { color: var(--text); }
-.cs-v3 .cs-spellcard-acts { display: inline-flex; gap: 2px; opacity: .55; transition: opacity .14s; }
+.cs-v3 .cs-spellcard-catselect {
+  justify-self: end;
+  width: 100%;
+  max-width: 180px;
+  min-width: 0;
+  height: 28px;
+  padding: 2px 24px 2px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated, #101824);
+  color: var(--text);
+  color-scheme: dark;
+  font: inherit;
+  font-size: .68rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cs-v3 .cs-spellcard-catselect option {
+  background: var(--bg-elevated, #101824);
+  color: var(--text);
+}
+.cs-v3 .cs-spellcard-catselect:focus { outline: none; border-color: rgba(232,184,75,.55); color: var(--text); }
+.cs-v3 .cs-spellcard-acts {
+  justify-self: end;
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 2px;
+  max-width: 100%;
+  opacity: .55;
+  transition: opacity .14s;
+}
+.cs-v3 .cs-spellcard-acts .btn-icon {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+}
 .cs-v3 .cs-spellcard:hover .cs-spellcard-acts { opacity: 1; }
 
 /* Toggle verrouillé : sort non validé → pas activable dans le Deck */
@@ -11136,12 +11323,23 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 
 @media (max-width: 560px) {
   .cs-v3 .cs-spellcard-grid { grid-template-columns: 1fr; }
+  .cs-v3 .cs-spellcard-foot { grid-template-columns: auto 1fr; }
+  .cs-v3 .cs-spellcard-catselect { grid-column: 1 / -1; justify-self: stretch; max-width: none; }
+  .cs-v3 .cs-spellcard-acts { grid-column: 2; grid-row: 1; }
 }
 
 /* Thème clair */
 [data-theme="light"] .cs-v3 .cs-spellcard { background: #fff; border-color: rgba(0,0,0,.08); }
 [data-theme="light"] .cs-v3 .cs-spellcard:hover { box-shadow: 0 4px 14px -8px rgba(0,0,0,.25); }
 [data-theme="light"] .cs-v3 .cs-spellcard-detail { background: rgba(0,0,0,.025); border-color: rgba(0,0,0,.08); }
+[data-theme="light"] .cs-v3 .cs-spellcard-grid.is-empty { background: rgba(0,0,0,.015); border-color: rgba(0,0,0,.10); }
+[data-theme="light"] .cs-v3 .cs-spellcard-catselect {
+  background: #fff;
+  border-color: rgba(0,0,0,.14);
+  color: #1f2937;
+  color-scheme: light;
+}
+[data-theme="light"] .cs-v3 .cs-spellcard-catselect option { background: #fff; color: #1f2937; }
 [data-theme="light"] .cs-v3 .cs-spellcard-mjnote { color: #92651b; }
 [data-theme="light"] .cs-v3 .cs-spellcard-desc { color: #475569; }
 [data-theme="light"] .cs-v3 .cs-spellcard-desc:hover { color: #1e293b; }
@@ -11178,8 +11376,14 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .cs-catmgr-col.on { border-color: var(--text); box-shadow: 0 0 0 2px var(--bg-elevated); }
 .cs-v3 .cs-catmgr-empty { font-size: .76rem; color: var(--text-dim); font-style: italic; padding: 4px 2px; }
 .cs-v3 .cs-catmgr-hint { font-size: .66rem; color: var(--text-dim); white-space: nowrap; }
+.cs-v3 .cs-catmgr-add { flex-shrink: 0; }
 .cs-v3 .cs-sorts-actions .btn.is-active { border-color: var(--gold); color: var(--gold); background: rgba(79,140,255,.12); }
-@media (max-width: 560px) { .cs-v3 .cs-catmgr-colors { flex-wrap: wrap; } }
+@media (max-width: 560px) {
+  .cs-v3 .cs-catmgr-row,
+  .cs-v3 .cs-catmgr-new { flex-wrap: wrap; }
+  .cs-v3 .cs-catmgr-colors { flex-wrap: wrap; }
+  .cs-v3 .cs-catmgr-add { width: 100%; }
+}
 [data-theme="light"] .cs-v3 .cs-catmgr-row, [data-theme="light"] .cs-v3 .cs-catmgr-new { background: rgba(0,0,0,.02); }
 
 /* ── Éditeur d'invocation : sections titrées (style éditeur de sort) ── */

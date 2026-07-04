@@ -5,7 +5,7 @@ import { addToCol, updateInCol, deleteFromCol, loadCollectionWhere, loadCollecti
 import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal, confirmModal, modalSection } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
-import { calcPVMax, calcPMMax, pct } from '../../shared/char-stats.js';
+import { calcDeckMax, calcPVMax, calcPMMax, pct } from '../../shared/char-stats.js';
 import { loadAllUsers } from '../../core/adventure.js';
 import { _esc } from '../../shared/html.js';
 import { makeSortable } from '../../shared/sortable-helper.js';
@@ -63,7 +63,7 @@ export async function saveNotes() {
 // ══════════════════════════════════════════════
 // SORTS (toggle / delete)
 // ══════════════════════════════════════════════
-export async function toggleSort(idx) {
+export async function toggleSort(idx, btn = null) {
   const c=STATE.activeChar; if(!c) return;
   const sorts=c.deck_sorts||[];
   const s = sorts[idx]; if (!s) return;
@@ -73,9 +73,38 @@ export async function toggleSort(idx) {
     showNotif('Ce sort doit être validé par le MJ avant d\'entrer dans le Deck.', 'error');
     return;
   }
-  s.actif=!s.actif;
+  const deckMax = calcDeckMax(c);
+  const deckCount = sorts.filter(x => x?.actif).length;
+  if (!s.actif && deckCount >= deckMax) {
+    showNotif(`Deck plein (${deckCount}/${deckMax}) — retire un sort avant d'en ajouter un.`, 'error');
+    return;
+  }
+
+  const prevActif = !!s.actif;
+  const nextActif = !prevActif;
+  const paint = (active) => {
+    if (!btn) return;
+    btn.classList.toggle('on', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    btn.closest('.cs-spellcard')?.classList.toggle('is-actif', active);
+  };
+
+  s.actif=nextActif;
   c.deck_sorts=sorts;
-  if (await trySave('characters',c.id,{deck_sorts:sorts})) _renderFormsChar(c, 'sorts');
+  paint(nextActif);
+  if (charSession.getCurrentChar()?.id === c.id)
+    charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+  if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
+
+  if (await trySave('characters',c.id,{deck_sorts:sorts})) {
+    _renderFormsChar(c, 'sorts');
+  } else {
+    s.actif = prevActif;
+    c.deck_sorts = sorts;
+    paint(prevActif);
+    if (charSession.getCurrentChar()?.id === c.id)
+      charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -131,6 +160,46 @@ export async function deleteSort(idx) {
   })) return;
   c.deck_sorts.splice(idx,1);
   if (await trySave('characters',c.id,{deck_sorts:c.deck_sorts})) _renderFormsChar(c, 'sorts');
+}
+
+export async function duplicateSort(idx) {
+  const c=STATE.activeChar; if(!c) return;
+  const sorts = [...(c.deck_sorts||[])];
+  const src = sorts[idx]; if (!src) return;
+  const clone = (typeof structuredClone === 'function')
+    ? structuredClone(src)
+    : JSON.parse(JSON.stringify(src));
+  clone.id = `s${Date.now().toString(36)}`;
+  clone.nom = `${(src.nom || 'Sort').trim() || 'Sort'} (copie)`;
+  clone.actif = false;
+  clone.mjValidation = 'pending';
+  clone.mjValidated = false;
+  sorts.splice(idx + 1, 0, clone);
+  c.deck_sorts = sorts;
+  if (await trySave('characters', c.id, {deck_sorts: sorts})) {
+    showNotif('Sort dupliqué — à valider par le MJ.', 'success');
+    _renderFormsChar(c, 'sorts');
+  }
+}
+
+export async function setSortValidation(idx, status) {
+  if (!STATE.isAdmin) return;
+  const c=STATE.activeChar; if(!c) return;
+  const sorts = [...(c.deck_sorts||[])];
+  const s = sorts[idx]; if (!s) return;
+  const nextStatus = ['ok', 'pending', 'no'].includes(status) ? status : 'pending';
+  const next = { ...s, mjValidation: nextStatus, mjValidated: nextStatus === 'ok' };
+  if (nextStatus !== 'ok') next.actif = false;
+  sorts[idx] = next;
+  c.deck_sorts = sorts;
+  if (charSession.getCurrentChar()?.id === c.id)
+    charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+  if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
+  if (await trySave('characters', c.id, {deck_sorts: sorts})) {
+    const label = nextStatus === 'ok' ? 'validé' : nextStatus === 'no' ? 'refusé' : 'remis à valider';
+    showNotif(`Sort ${label}.`, nextStatus === 'no' ? 'info' : 'success');
+    _renderFormsChar(c, 'sorts');
+  }
 }
 
 export async function deleteInvItem(idx) {

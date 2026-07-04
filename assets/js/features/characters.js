@@ -86,6 +86,7 @@ import {
 import {
   adjustStat,
   toggleSort, toggleQuete, deleteQuete,
+  duplicateSort, setSortValidation,
   deleteSort, deleteChar, createNewChar,
   manageTitres, addQuete,
 } from './characters/forms.js';
@@ -598,6 +599,9 @@ function _renderTab(leafTab, c, canEdit) {
 function _renderTabV3(tab, c, canEdit) {
   const area = document.getElementById('char-tab-content');
   if (!area) return;
+  const samePanel = area.dataset.renderedTab === tab && area.dataset.renderedCharId === String(c?.id || '');
+  const savedScroll = samePanel ? _readTabScroll(area) : null;
+  if (samePanel && savedScroll > 0 && c?.id) _scrollByTab.set(_scrollKey(c.id, tab), savedScroll);
   const sub = getCurrentJournalSub() || 'notes';
   const renders = {
     combat:  () => renderCharCombatV3(c, canEdit),
@@ -608,6 +612,8 @@ function _renderTabV3(tab, c, canEdit) {
     profil:  () => renderCharProfilV3(c, canEdit),
   };
   area.innerHTML = renders[tab]?.() || '';
+  area.dataset.renderedTab = tab;
+  area.dataset.renderedCharId = c?.id || '';
   area.classList.remove('cs-tab-fadein');
   void area.offsetWidth;
   area.classList.add('cs-tab-fadein');
@@ -617,6 +623,7 @@ function _renderTabV3(tab, c, canEdit) {
   if (tab === 'journal' && sub === 'notes') { bindQuillEditors(area); _bindNotesDnd(c, canEdit); }
   if (tab === 'journal' && sub === 'quetes') _bindQuetesDnd(c, canEdit);
   if (tab === 'sorts') { _bindSortsCatDrag(c, canEdit); bindSortCardsDnd(c, canEdit); }
+  if (samePanel && savedScroll != null) _restoreTabScroll(savedScroll);
 }
 
 // ── Drag & drop des catégories de sorts (Sortable.esm.js) ──────────────────
@@ -1335,6 +1342,17 @@ async function setCharAuraColor(charId, hex) {
 // Mémorise la position de scroll par onglet (clé : charId + tab)
 const _scrollByTab = new Map();
 function _scrollKey(charId, tab) { return `${charId || '?'}::${tab}`; }
+function _readTabScroll(area = document.getElementById('char-tab-content')) {
+  return area?.scrollTop || window.scrollY || document.documentElement.scrollTop || 0;
+}
+function _restoreTabScroll(scrollTop) {
+  if (scrollTop == null) return;
+  requestAnimationFrame(() => {
+    const area = document.getElementById('char-tab-content');
+    if (area) area.scrollTop = scrollTop;
+    window.scrollTo({ top: scrollTop, behavior: 'instant' });
+  });
+}
 
 function showCharTab(tab, el) {
   // V3 : 6 onglets uniquement. Toute valeur legacy est remappée.
@@ -1345,7 +1363,7 @@ function showCharTab(tab, el) {
   const prevChar = charSession.getCurrentChar()?.id;
   if (prevLeaf && prevChar) {
     const area = document.getElementById('char-tab-content');
-    const scrollTop = area?.scrollTop ?? window.scrollY ?? 0;
+    const scrollTop = _readTabScroll(area);
     if (scrollTop > 0) _scrollByTab.set(_scrollKey(prevChar, prevLeaf), scrollTop);
   }
 
@@ -1371,13 +1389,7 @@ function showCharTab(tab, el) {
   // Restitue le scroll de l'onglet rejoint (si on y était déjà passé)
   const charId = charSession.getCurrentChar()?.id;
   const saved  = charId ? _scrollByTab.get(_scrollKey(charId, v3)) : null;
-  if (saved != null) {
-    requestAnimationFrame(() => {
-      const area = document.getElementById('char-tab-content');
-      if (area) area.scrollTop = saved;
-      else window.scrollTo({ top: saved, behavior: 'instant' });
-    });
-  }
+  if (saved != null) _restoreTabScroll(saved);
 }
 
 // ══════════════════════════════════════════════
@@ -1499,8 +1511,10 @@ registerActions({
 
   // Sorts
   addSort:                  ()      => addSort(),
-  toggleSort:               (btn)   => toggleSort(Number(btn.dataset.idx)),
+  toggleSort:               (btn)   => toggleSort(Number(btn.dataset.idx), btn),
   editSort:                 (btn)   => editSort(Number(btn.dataset.idx)),
+  duplicateSort:            (btn)   => duplicateSort(Number(btn.dataset.idx)),
+  setSortValidation:        (btn)   => setSortValidation(Number(btn.dataset.idx), btn.dataset.val),
   deleteSort:               (btn)   => deleteSort(Number(btn.dataset.idx)),
 
   // Tabs legacy (renderCharCarac, renderCharNotes, renderCharCompte, renderCharMaitrises, renderCharProfil)

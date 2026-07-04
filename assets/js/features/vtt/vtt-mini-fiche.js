@@ -330,6 +330,12 @@ async function _vttToggleMsSort(charId, uid, idx) {
     showNotif('Ce sort doit être validé par le MJ avant d\'entrer dans le Deck.', 'error');
     return;
   }
+  const deckMax = calcDeckMax(c);
+  const deckCount = sorts.filter(x => x?.actif).length;
+  if (!s.actif && deckCount >= deckMax) {
+    showNotif(`Deck plein (${deckCount}/${deckMax}) — retire un sort avant d'en ajouter un.`, 'error');
+    return;
+  }
   sorts[idx] = { ...s, actif: !s.actif };
   try { await updateDoc(_chrRef(charId), { deck_sorts: sorts }); }
   catch(e) { showNotif('Erreur sauvegarde', 'error'); }
@@ -571,7 +577,7 @@ function _vttSpellChips(s, c) {
     if (soin) chips.push({ icon:'💚', val: _effectDisplay(s, soin), color:'#22c38e', lbl:'Soin' });
   }
   const nbT = calcSpellTargets(s);
-  if (nbT > 1) chips.push({ icon:'🎯', val:`×${nbT}`, color:'#4f8cff', lbl:'Nombre de cibles' });
+  if (nbT > 1) chips.push({ icon:'🎯', val:`×${nbT}`, color:'#4f8cff', lbl:'Nombre de cibles', dim:true });
   const nbAmp = runes.filter(r => r === 'Amplification').length;
   // Avec Enchantement (hors Invocation), l'Amplification booste l'effet → pas de zone.
   const _enchNoZone = runes.includes('Enchantement') && !runes.includes('Invocation');
@@ -579,17 +585,17 @@ function _vttSpellChips(s, c) {
     const nbDisp = runes.filter(r => r === 'Dispersion').length;
     const zoneW = nbDisp >= 1 ? _vttAmpDispCircleSize(nbAmp, nbDisp) : 3 * nbAmp;
     const zoneH = nbDisp >= 1 ? zoneW : 1;
-    chips.push({ icon:'📐', val:`${zoneW}×${zoneH} cases`, color:'#b47fff', lbl:'Zone d\'effet (cases)' });
+    chips.push({ icon:'📐', val:`${zoneW}×${zoneH} cases`, color:'#b47fff', lbl:'Zone d\'effet (cases)', dim:true });
   }
   if (runes.includes('Durée') || (s.dureeBase && s.dureeBase >= 2)) {
-    chips.push({ icon:'⏱️', val:`${calcSpellDuration(s)}t`, color:'#9ca3af', lbl:'Durée de l\'effet (tours)' });
+    chips.push({ icon:'⏱️', val:`${calcSpellDuration(s)}t`, color:'#9ca3af', lbl:'Durée de l\'effet (tours)', dim:true });
   }
   return chips;
 }
 
 // Carte de sort VTT — même présentation que la fiche perso (classes .cs-spellcard,
 // scope .cs-v3) avec câblage VTT (toggle deck par data-vtt-fn).
-function _vttSpellCardHtml(s, i, c, uid, canEdit) {
+function _vttSpellCardHtml(s, i, c, uid, canEdit, deckCount = 0, deckMax = Infinity) {
   const runes = s.runes || [];
   const types = (Array.isArray(s.types) && s.types.length) ? s.types
               : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : []));
@@ -620,11 +626,19 @@ function _vttSpellCardHtml(s, i, c, uid, canEdit) {
       const m = _VTT_RUNE_META[nom] || { icon:'•', color:'#888' };
       return `<span class="cs-runechip" style="--c:${m.color}" title="${_esc(nom)}">${m.icon} ${_esc(nom)}${n>1?` ×${n}`:''}</span>`;
     }).join('')}</div>` : '';
-  const canActivate = STATE.isAdmin || vs === 'ok';
+  const validationAllows = STATE.isAdmin || vs === 'ok';
+  const deckFull = deckCount >= deckMax;
+  const deckAllows = s.actif || !deckFull;
+  const canActivate = validationAllows && deckAllows;
+  const lockTitle = !validationAllows
+    ? 'Doit être validé par le MJ pour entrer dans le Deck'
+    : !deckAllows
+      ? `Deck plein (${deckCount}/${deckMax}) — retire un sort avant d'en ajouter un`
+      : (s.actif?'Retirer du deck':'Ajouter au deck');
   const toggle = canEdit
-    ? `<div class="toggle ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" data-vtt-fn="_vttToggleMsSort" data-vtt-args="${c.id}|${uid}|${i}" title="${(!canActivate && !s.actif)?'Doit être validé par le MJ pour entrer dans le Deck':(s.actif?'Retirer du deck':'Ajouter au deck')}"></div>`
+    ? `<div class="toggle ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" data-vtt-fn="_vttToggleMsSort" data-vtt-args="${c.id}|${uid}|${i}" title="${lockTitle}"></div>`
     : `<div class="toggle ${s.actif?'on':''}"></div>`;
-  return `<article class="cs-spellcard ${s.actif?'is-actif':''}" style="--type-col:${typeCol}"
+  return `<article class="cs-spellcard ${s.actif?'is-actif':''} ${vs==='no'?'is-refused':''}" style="--type-col:${typeCol}"
       data-name="${_esc(_norm(s.nom||''))}" data-cat="${_esc(s.catId||'__none')}" data-actif="${s.actif?1:0}">
     <header class="cs-spellcard-head">
       ${toggle}
@@ -639,7 +653,7 @@ function _vttSpellCardHtml(s, i, c, uid, canEdit) {
       </div>
       <span class="cs-spellcard-pm" title="Coût en PM">${s.pm||0}<small>PM</small></span>
     </header>
-    <div class="cs-spellcard-tags">${valBadge}${chips.map(ch => `<span class="cs-sort-sstat" style="--c:${ch.color}"${ch.lbl?` title="${_esc(ch.lbl)}"`:''}>${ch.icon} ${_esc(ch.val)}</span>`).join('')}</div>
+    <div class="cs-spellcard-tags">${valBadge}${chips.map(ch => `<span class="cs-sort-sstat${ch.dim?' cs-sort-sstat--dim':''}" style="--c:${ch.color}"${ch.lbl?` title="${_esc(ch.lbl)}"`:''}>${ch.icon} ${_esc(ch.val)}</span>`).join('')}</div>
     ${s.effet ? `<p class="cs-spellcard-desc">${_esc(s.effet)}</p>` : ''}
     ${s.mjNotes ? `<div class="cs-spellcard-mjnote" title="Note / restriction du MJ"><span class="cs-spellcard-mjnote-ic">📌</span><span class="cs-spellcard-mjnote-tx">${_esc(s.mjNotes)}</span></div>` : ''}
     ${runeChips}
@@ -678,7 +692,7 @@ function _msTabSorts(c, uid, canEdit) {
     </div>
     ${filterBar}
     <div class="cs-v3"><div class="cs-spellcard-grid vtt-ms-spellgrid">
-      ${sorts.map((s, i) => _vttSpellCardHtml(s, i, c, uid, canEdit)).join('')}
+      ${sorts.map((s, i) => _vttSpellCardHtml(s, i, c, uid, canEdit, deckCount, deckMax)).join('')}
     </div></div>
     <div class="vtt-ms-filter-empty" data-kind="sorts" style="display:none">Aucun sort ne correspond.</div>`;
 }

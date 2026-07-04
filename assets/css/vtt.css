@@ -2434,6 +2434,32 @@
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--type-col, #b47fff) 35%, transparent);
   background: color-mix(in srgb, var(--type-col, #b47fff) 6%, var(--bg-elevated, rgba(255,255,255,.03)));
 }
+
+.cs-v3 .cs-spellcard.is-refused { opacity: .62; }
+.cs-v3 .cs-spellcard.is-refused:hover { opacity: .86; }
+.cs-v3 .cs-spellcard-head .toggle.on {
+  background: rgba(232,184,75,.28) !important;
+  border-color: rgba(232,184,75,.48) !important;
+}
+.cs-v3 .cs-spellcard-head .toggle.on::after { background: var(--gold, #e8b84b) !important; }
+.cs-v3 .cs-spellcard-val { border: 1px solid transparent; }
+.cs-v3 .cs-spellcard-val.ok   { border-color: rgba(34,195,142,.34); }
+.cs-v3 .cs-spellcard-val.wait { border-color: rgba(232,184,75,.40); box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
+.cs-v3 .cs-spellcard-val.no   { border-color: rgba(239,68,68,.34); }
+.cs-v3 .cs-spellcard-mj-actions { display: inline-flex; align-items: center; gap: 2px; margin-left: 2px; }
+.cs-v3 .cs-spellcard-mjbtn {
+  width: 22px; height: 22px; padding: 0;
+  border-radius: 6px; border: 1px solid var(--border);
+  background: rgba(255,255,255,.035); color: var(--text-muted);
+  cursor: pointer; font-size: .72rem; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background .12s, border-color .12s, transform .08s, opacity .12s;
+}
+.cs-v3 .cs-spellcard-mjbtn:hover { transform: translateY(-1px); }
+.cs-v3 .cs-spellcard-mjbtn.ok:hover,
+.cs-v3 .cs-spellcard-mjbtn.ok.is-active { background: rgba(34,195,142,.16); border-color: rgba(34,195,142,.42); color: var(--emerald, #22c38e); }
+.cs-v3 .cs-spellcard-mjbtn.no:hover,
+.cs-v3 .cs-spellcard-mjbtn.no.is-active { background: rgba(239,68,68,.16); border-color: rgba(239,68,68,.42); color: #ff8b8b; }
 .cs-v3 .cs-spellcard.cs-drop-before { box-shadow: -3px 0 0 0 var(--gold), 0 0 0 1px var(--gold) inset; }
 .cs-v3 .cs-spellcard.cs-drop-after  { box-shadow:  3px 0 0 0 var(--gold), 0 0 0 1px var(--gold) inset; }
 
