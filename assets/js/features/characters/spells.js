@@ -3185,9 +3185,12 @@ export function selectNoyau(el, noyauId, noyauLabel, noyauColor) {
 
 // Signature du CONTENU jouable d'un sort (hors champs volatils : actif, validation,
 // catégorie, PM dérivé, notes/flags MJ). Sert à détecter une modification réelle.
+// `types` (+ son dérivé legacy `typeSoin`) est exclu : changer le type d'un sort
+// (offensif/défensif/utilitaire) ne redéclenche PAS la validation MJ. Un changement
+// de mode Protection reste capté par `protectionMode` (non exclu).
 function _sortContentSig(s) {
   if (!s) return '';
-  const SKIP = new Set(['actif','mjValidation','mjValidated','catId','pm','pmOverride','mjNotes','mjAlwaysMax','enchantSlot']);
+  const SKIP = new Set(['actif','mjValidation','mjValidated','catId','pm','pmOverride','mjNotes','mjAlwaysMax','enchantSlot','types','typeSoin']);
   const o = {};
   Object.keys(s).filter(k => !SKIP.has(k)).sort().forEach(k => { o[k] = s[k]; });
   return JSON.stringify(o);
