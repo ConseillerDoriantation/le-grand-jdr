@@ -339,7 +339,10 @@ function _applyTokenVisibility(page, tokens, isAdmin) {
       (t.row + th * 0.5) * _CELL,
       page,
     );
-    shape.visible(!!(t.visible || isAdmin) && inSight);
+    // MJ : un token hors de la grille de jeu (backstage) est caché aux joueurs.
+    const offGrid = (t.col ?? 0) < 0 || (t.row ?? 0) < 0
+                 || (t.col ?? 0) + tw > page.cols || (t.row ?? 0) + th > page.rows;
+    shape.visible(!!(t.visible || isAdmin) && inSight && (isAdmin || !offGrid));
   }
   _tokenLayer?.batchDraw();
 }

@@ -1198,8 +1198,8 @@ function _buildShape(t) {
         for (const id of VS.selectedMulti) {
           const s=VS.tokens[id]?.shape; if (!s) continue;
           const d2=_tokenDims(VS.tokens[id].data);
-          const nc=Math.max(0,Math.min(pg.cols-d2.w,Math.round((s.x()-d2.w*CELL/2)/CELL)));
-          const nr=Math.max(0,Math.min(pg.rows-d2.h,Math.round((s.y()-d2.h*CELL/2)/CELL)));
+          const nc=_clampTokenCell(Math.round((s.x()-d2.w*CELL/2)/CELL), d2.w, pg.cols);
+          const nr=_clampTokenCell(Math.round((s.y()-d2.h*CELL/2)/CELL), d2.h, pg.rows);
           s.position({x:nc*CELL+d2.w*CELL/2,y:nr*CELL+d2.h*CELL/2});
           batch.update(_tokRef(id),{col:nc,row:nr});
         }
@@ -1208,8 +1208,8 @@ function _buildShape(t) {
         _multiDragOrigin=null; return;
       }
       // Token seul
-      const c=Math.max(0,Math.min(pg.cols-sw,Math.round((g.x()-sw*CELL/2)/CELL)));
-      const r=Math.max(0,Math.min(pg.rows-sh,Math.round((g.y()-sh*CELL/2)/CELL)));
+      const c=_clampTokenCell(Math.round((g.x()-sw*CELL/2)/CELL), sw, pg.cols);
+      const r=_clampTokenCell(Math.round((g.y()-sh*CELL/2)/CELL), sh, pg.rows);
       if (!STATE.isAdmin && VS.session?.combat?.active) {
         const cur=VS.tokens[t.id]?.data;
         if (cur) {
@@ -1415,7 +1415,7 @@ function _patchShapeImpl(id) {
     g.findOne('.ca-buff-turns')?.text(`${tl}↺`);
   }
   g.findOne('.lbl')?.text(ld.displayName??e.data.name);
-  g.visible(!!(e.data.visible||STATE.isAdmin));
+  g.visible(STATE.isAdmin || (!!e.data.visible && !_tokenOffGrid(e.data)));
   VS.layers.token?.batchDraw();
 }
 
@@ -2068,6 +2068,23 @@ const _tokenDims = t => {
   const h = t?.tokenH ?? t?.tokenSize ?? b?.tokenH ?? b?.tokenSize ?? 1;
   return { w: Math.max(1, Math.min(5, w)), h: Math.max(1, Math.min(5, h)) };
 }
+
+// MJ uniquement : marge "backstage" hors de la grille de jeu. Le MJ peut y glisser
+// des tokens pour les préparer / les cacher aux joueurs (un token hors grille n'est
+// pas rendu côté joueur — cf. _tokenOffGrid + _applyTokenVisibility dans vtt-fog.js).
+const OFF_GRID_BAND = 20;
+// Clampe une case : joueurs = strictement dans la grille ; MJ = grille + marge backstage.
+const _clampTokenCell = (raw, span, max) => {
+  const band = STATE.isAdmin ? OFF_GRID_BAND : 0;
+  return Math.max(-band, Math.min(max - span + band, raw));
+};
+// Vrai si le token (par sa taille) sort de la grille de jeu → caché aux joueurs.
+const _tokenOffGrid = (d, pg = VS.activePage) => {
+  if (!pg || !d) return false;
+  const { w:sw, h:sh } = _tokenDims(d);
+  return (d.col ?? 0) < 0 || (d.row ?? 0) < 0
+      || (d.col ?? 0) + sw > pg.cols || (d.row ?? 0) + sh > pg.rows;
+};
 
 // Cherche un token possédé par le joueur courant couvrant la position du pointeur.
 // Sert à débloquer la sélection quand le token du joueur est masqué sous un autre.
@@ -7426,8 +7443,8 @@ async function _moveSelectedBy(dc, dr) {
   if (!tok || tok.pageId !== VS.activePage.id) return;
   const ld  = _live(tok);
   const sw  = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
-  const nc  = Math.max(0, Math.min(VS.activePage.cols - sw, tok.col + dc));
-  const nr  = Math.max(0, Math.min(VS.activePage.rows - sh, tok.row + dr));
+  const nc  = _clampTokenCell(tok.col + dc, sw, VS.activePage.cols);
+  const nr  = _clampTokenCell(tok.row + dr, sh, VS.activePage.rows);
   if (nc === tok.col && nr === tok.row) return;
   await _moveTo(VS.selected, nc, nr);
   fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
