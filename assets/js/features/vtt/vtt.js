@@ -63,7 +63,7 @@ import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
   _scaledEnchantConditionFields, _vttPrimaryWeapon, _conditionCritRangeBonusOf,
 } from './vtt-effective.js';
-import { _renderInspector, _renderInspectorSoon, _vttInsTab } from './vtt-inspector.js?v=20260630-max-v2';
+import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js?v=20260630-max-v2';
 import {
   _renderLibSection, _resetMapLib, _libFolder, _vttLibToggle, _vttLibOpenFolder, _vttLibNewFolder,
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,
@@ -9371,6 +9371,8 @@ export const VTT_ACTIONS = {
   _vttFogRedo,
   _vttImportGithubRelease,
   _vttInsTab,
+  _vttSkillFilter,
+  _vttSkillFilterClear,
   _vttInvokeMyToken,
   _vttKickPresence,
   _vttLibDelFolder,

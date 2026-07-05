@@ -1328,10 +1328,38 @@
 }
 .vtt-roll-bonus-reset:hover { opacity: 1; color: var(--text); }
 
-.vtt-ins-skills {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: .22rem;
+/* ── Filtre de recherche des jets de compétences ──────────────────── */
+.vtt-skill-filter {
+  display: flex; align-items: center; gap: .35rem;
+  padding: .28rem .45rem; margin-bottom: .3rem;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 7px;
+}
+.vtt-skill-filter:focus-within { border-color: var(--gold-glow); }
+.vtt-skill-filter-ic { font-size: .8rem; opacity: .7; }
+.vtt-skill-filter-input {
+  flex: 1; min-width: 0; border: none; background: transparent;
+  color: var(--text); font-family: inherit; font-size: .74rem; outline: none;
+}
+.vtt-skill-filter-input::placeholder { color: var(--text-dim); }
+.vtt-skill-filter-clr {
+  border: none; background: transparent; color: var(--text-dim);
+  cursor: pointer; font-size: .7rem; padding: 0 .15rem; line-height: 1;
+}
+.vtt-skill-filter-clr:hover { color: var(--text); }
+.vtt-skill-filter-clr.hide { visibility: hidden; }
+
+/* ── Groupes de compétences par caractéristique ───────────────────── */
+.vtt-ins-skills { display: flex; flex-direction: column; gap: .5rem; }
+.vtt-sk-group-hd {
+  font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  padding: 0 0 .16rem 0; margin-bottom: .28rem;
+  border-bottom: 1px solid; opacity: .85;
+}
+.vtt-sk-group-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: .22rem;
+}
+.vtt-sk-empty {
+  font-size: .68rem; color: var(--text-dim); text-align: center; padding: .5rem 0;
 }
 .vtt-skill-btn {
   display: flex; flex-direction: column; align-items: flex-start; gap: 1px;

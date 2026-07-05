@@ -22,12 +22,22 @@ import {
 
 let _insTab = 'stats';          // onglet actif de l'inspecteur token
 let _inspectorDirty = false;    // coalescing des rafales de snapshots → 1 render/tick
+let _skillFilter = '';          // filtre live du panneau « Jets de compétences »
+// Regroupement des compétences par caractéristique (scan plus rapide pour le joueur).
+const _SK_STAT_ORDER = ['FOR', 'DEX', 'CON', 'INT', 'SAG', 'CHA', ''];
+const _SK_STAT_LABEL = { FOR:'Force', DEX:'Dextérité', CON:'Constitution', INT:'Intelligence', SAG:'Sagesse', CHA:'Charisme', '':'Autres' };
 
 export function _renderInspectorSoon() {
   if (_inspectorDirty) return;
   _inspectorDirty = true;
   queueMicrotask(() => {
     _inspectorDirty = false;
+    // Ne pas reconstruire le panneau pendant que le joueur tape dans le filtre de
+    // compétences (perte de focus + reset). On diffère le rendu tant qu'il a le focus.
+    if (document.activeElement?.classList?.contains('vtt-skill-filter-input')) {
+      setTimeout(_renderInspectorSoon, 400);
+      return;
+    }
     const t = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : null;
     _renderInspector(t);
     // HUD d'action : (ré)affiché pour le token sélectionné contrôlable, avec PM
@@ -511,7 +521,7 @@ export function _renderInspectorImpl(t) {
 
   const _skillsHtml = ((t.type==='player'||t.type==='npc') && VS.diceSkills.length && _canControlToken(t)) ? (() => {
     const cForBonus = t?.characterId ? VS.characters[t.characterId] : null;
-    const btns = VS.diceSkills.map(s => {
+    const _mkBtn = (s) => {
       const statKey = _STAT_KEY[s.stat] || '';
       const statMod = _tokenStatMod(t, statKey);
       const eqBonus = cForBonus ? computeEquipSkillBonus(cForBonus.equipement || {}, s.name) : 0;
@@ -519,11 +529,25 @@ export function _renderInspectorImpl(t) {
       const modStr = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '±0';
       const col  = _STAT_COLOR[s.stat] || 'var(--text-dim)';
       const eqTitle = eqBonus !== 0 ? ` title="Inclut ${eqBonus>0?'+':''}${eqBonus} équip."` : '';
-      return `<button class="vtt-skill-btn" data-vtt-fn="_vttRollSkill" data-vtt-args="${_esc(s.name)}|${s.stat}"${eqTitle}>
+      const hide = _searchIncludes(s.name, _skillFilter) ? '' : ' style="display:none"';
+      return `<button class="vtt-skill-btn" data-skill="${_esc(s.name)}" data-vtt-fn="_vttRollSkill" data-vtt-args="${_esc(s.name)}|${s.stat}"${eqTitle}${hide}>
           <span class="vtt-sk-name">${s.name}${eqBonus!==0?' <span style="color:#22c38e;font-size:.7em">●</span>':''}</span>
           <span class="vtt-sk-mod" style="color:${col}">${s.stat ? s.stat+' '+modStr : '—'}</span>
         </button>`;
+    };
+    // Groupe par caractéristique, trie par nom dans chaque groupe.
+    const byStat = {};
+    for (const s of VS.diceSkills) (byStat[s.stat || ''] ||= []).push(s);
+    const groupsHtml = _SK_STAT_ORDER.filter(k => byStat[k]?.length).map(k => {
+      const list = byStat[k].slice().sort((a,b) => a.name.localeCompare(b.name, 'fr'));
+      const col  = _STAT_COLOR[k] || 'var(--text-dim)';
+      const anyVis = list.some(s => _searchIncludes(s.name, _skillFilter));
+      return `<div class="vtt-sk-group"${anyVis?'':' style="display:none"'}>
+          <div class="vtt-sk-group-hd" style="color:${col};border-color:${col}">${_SK_STAT_LABEL[k] || 'Autres'}</div>
+          <div class="vtt-sk-group-grid">${list.map(_mkBtn).join('')}</div>
+        </div>`;
     }).join('');
+    const anyMatch = VS.diceSkills.some(s => _searchIncludes(s.name, _skillFilter));
     return `<div class="vtt-ins-section">
         <div class="vtt-ins-section-title">🎲 Jets de compétences</div>
         <div class="vtt-roll-mode-row">
@@ -547,7 +571,16 @@ export function _renderInspectorImpl(t) {
             ${VS.rollHidden ? '🕶 Jet caché MJ' : '👁 Visible joueurs'}
           </button>
         </div>` : ''}
-        <div class="vtt-ins-skills">${btns}</div>
+        <div class="vtt-skill-filter">
+          <span class="vtt-skill-filter-ic">🔍</span>
+          <input type="text" class="vtt-skill-filter-input" placeholder="Filtrer une compétence…"
+            data-vtt-fn="_vttSkillFilter" data-vtt-on="input" data-vtt-args="$value" value="${_esc(_skillFilter)}">
+          <button type="button" class="vtt-skill-filter-clr${_skillFilter?'':' hide'}" title="Effacer" data-vtt-fn="_vttSkillFilterClear">✕</button>
+        </div>
+        <div class="vtt-ins-skills">
+          ${groupsHtml}
+          <div class="vtt-sk-empty"${anyMatch?' style="display:none"':''}>Aucune compétence ne correspond.</div>
+        </div>
       </div>`;
   })() : '';
 
@@ -646,4 +679,32 @@ export function _vttInsTab(tab) {
   _insTab = tab;
   const t = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : null;
   if (t) _renderInspector(t);
+}
+
+// Filtre live du panneau « Jets de compétences » : masque/affiche les boutons et
+// les groupes de caractéristiques sans reconstruire le panneau (garde le focus).
+export function _vttSkillFilter(raw) {
+  _skillFilter = raw || '';
+  let total = 0;
+  document.querySelectorAll('.vtt-ins-skills .vtt-sk-group').forEach(grp => {
+    let vis = 0;
+    grp.querySelectorAll('.vtt-skill-btn').forEach(btn => {
+      const show = _searchIncludes(btn.dataset.skill || '', _skillFilter);
+      btn.style.display = show ? '' : 'none';
+      if (show) vis++;
+    });
+    grp.style.display = vis ? '' : 'none';
+    total += vis;
+  });
+  document.querySelector('.vtt-ins-skills .vtt-sk-empty')
+    ?.style.setProperty('display', total ? 'none' : '');
+  document.querySelector('.vtt-skill-filter-clr')?.classList.toggle('hide', !_skillFilter);
+}
+
+export function _vttSkillFilterClear() {
+  _skillFilter = '';
+  const inp = document.querySelector('.vtt-skill-filter-input');
+  if (inp) { inp.value = ''; }
+  _vttSkillFilter('');
+  inp?.focus();
 }
