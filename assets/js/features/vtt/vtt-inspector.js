@@ -550,27 +550,34 @@ export function _renderInspectorImpl(t) {
     const anyMatch = VS.diceSkills.some(s => _searchIncludes(s.name, _skillFilter));
     return `<div class="vtt-ins-section">
         <div class="vtt-ins-section-title">🎲 Jets de compétences</div>
-        <div class="vtt-roll-mode-row">
-          <button class="vtt-roll-mode-btn${VS.rollMode==='disadvantage'?' active':''}" data-mode="disadvantage" data-vtt-fn="_vttSetRollMode" data-vtt-args="disadvantage" title="Désavantage — prend le plus bas des 2 dés">⬇ Désav.</button>
-          <button class="vtt-roll-mode-btn${VS.rollMode==='normal'?' active':''}" data-mode="normal" data-vtt-fn="_vttSetRollMode" data-vtt-args="normal" title="Jet classique — 1d20">⚪ Normal</button>
-          <button class="vtt-roll-mode-btn${VS.rollMode==='advantage'?' active':''}" data-mode="advantage" data-vtt-fn="_vttSetRollMode" data-vtt-args="advantage" title="Avantage — prend le plus haut des 2 dés">⬆ Avantage</button>
+        <div class="vtt-roll-settings">
+          <div class="vtt-roll-set-block">
+            <span class="vtt-roll-set-lbl">Mode de jet</span>
+            <div class="vtt-roll-mode-row">
+              <button class="vtt-roll-mode-btn${VS.rollMode==='disadvantage'?' active':''}" data-mode="disadvantage" data-vtt-fn="_vttSetRollMode" data-vtt-args="disadvantage" title="Désavantage — prend le plus bas des 2 dés"><span class="vtt-rm-ic">⬇</span><span class="vtt-rm-lbl">Désav.</span></button>
+              <button class="vtt-roll-mode-btn${VS.rollMode==='normal'?' active':''}" data-mode="normal" data-vtt-fn="_vttSetRollMode" data-vtt-args="normal" title="Jet classique — 1d20"><span class="vtt-rm-ic">●</span><span class="vtt-rm-lbl">Normal</span></button>
+              <button class="vtt-roll-mode-btn${VS.rollMode==='advantage'?' active':''}" data-mode="advantage" data-vtt-fn="_vttSetRollMode" data-vtt-args="advantage" title="Avantage — prend le plus haut des 2 dés"><span class="vtt-rm-ic">⬆</span><span class="vtt-rm-lbl">Avantage</span></button>
+            </div>
+          </div>
+          <div class="vtt-roll-set-block">
+            <span class="vtt-roll-set-lbl">Bonus contextuel</span>
+            <div class="vtt-roll-bonus-stepper">
+              <button class="vtt-roll-bonus-adj" data-vtt-fn="_vttAdjBonus" data-vtt-args="-1" title="−1">−</button>
+              <span class="vtt-roll-bonus-val${VS.rollBonus!==0?' nonzero':''}" id="vtt-bonus-val">${VS.rollBonus>0?'+'+VS.rollBonus:VS.rollBonus}</span>
+              <button class="vtt-roll-bonus-adj" data-vtt-fn="_vttAdjBonus" data-vtt-args="1" title="+1">＋</button>
+              <button class="vtt-roll-bonus-reset${VS.rollBonus!==0?'':' hide'}" data-vtt-fn="_vttAdjBonus" data-vtt-args="0|true" title="Réinitialiser">↺</button>
+            </div>
+          </div>
+          ${STATE.isAdmin ? `
+          <div class="vtt-roll-set-block">
+            <span class="vtt-roll-set-lbl">Visibilité du jet</span>
+            <button class="vtt-roll-hide-btn${VS.rollHidden?' active':''}" id="vtt-roll-hide-btn"
+              data-vtt-fn="_vttToggleRollHidden"
+              title="Jet caché : seul le MJ voit le résultat dans le log">
+              ${VS.rollHidden ? '🕶 Jet caché MJ' : '👁 Visible joueurs'}
+            </button>
+          </div>` : ''}
         </div>
-        <div class="vtt-roll-bonus-row">
-          <span class="vtt-roll-bonus-lbl">Bonus contextuel</span>
-          <button class="vtt-roll-bonus-adj" data-vtt-fn="_vttAdjBonus" data-vtt-args="-1">−</button>
-          <span class="vtt-roll-bonus-val${VS.rollBonus!==0?' nonzero':''}" id="vtt-bonus-val">${VS.rollBonus>0?'+'+VS.rollBonus:VS.rollBonus}</span>
-          <button class="vtt-roll-bonus-adj" data-vtt-fn="_vttAdjBonus" data-vtt-args="1">+</button>
-          <button class="vtt-roll-bonus-reset" data-vtt-fn="_vttAdjBonus" data-vtt-args="0|true" title="Réinitialiser">↺</button>
-        </div>
-        ${STATE.isAdmin ? `
-        <div class="vtt-roll-bonus-row">
-          <span class="vtt-roll-bonus-lbl">Visibilité</span>
-          <button class="vtt-roll-mode-btn vtt-roll-hide-btn${VS.rollHidden?' active':''}" id="vtt-roll-hide-btn"
-            data-vtt-fn="_vttToggleRollHidden"
-            title="Jet caché : seul le MJ voit le résultat dans le log">
-            ${VS.rollHidden ? '🕶 Jet caché MJ' : '👁 Visible joueurs'}
-          </button>
-        </div>` : ''}
         <div class="vtt-skill-filter">
           <span class="vtt-skill-filter-ic">🔍</span>
           <input type="text" class="vtt-skill-filter-input" placeholder="Filtrer une compétence…"

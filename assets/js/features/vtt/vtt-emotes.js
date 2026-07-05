@@ -72,6 +72,8 @@ export function _vttAdjBonus(delta, reset = false) {
     el.textContent = VS.rollBonus > 0 ? `+${VS.rollBonus}` : `${VS.rollBonus}`;
     el.classList.toggle('nonzero', VS.rollBonus !== 0);
   }
+  // Le bouton « réinitialiser » n'apparaît que si un bonus est actif.
+  document.querySelector('.vtt-roll-bonus-reset')?.classList.toggle('hide', VS.rollBonus === 0);
 }
 
 export function _vttToggleRollHidden() {
