@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   STATS.CSS — page Statistiques. S'appuie sur admin.css (.adm-block/.adm-label).
+   STATS.CSS — page Statistiques (refonte). Thème sombre du projet.
    ══════════════════════════════════════════════════════════════════════════ */
 
 .stats-root { display: block; }
@@ -10,98 +10,10 @@
 }
 .stats-empty span { font-size: .8rem; }
 
-/* ── KPI (vue d'ensemble) ── */
-.stats-kpis {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: .7rem;
-}
-.stats-kpi {
-  display: flex; flex-direction: column; align-items: center; gap: .2rem;
-  padding: 1rem; border-radius: 14px;
-  background: var(--bg-card); border: 1px solid var(--border);
-  border-top: 2px solid var(--a, var(--gold));
-}
-.stats-kpi-ic { font-size: 1.4rem; }
-.stats-kpi-val { font-family: 'Cinzel', serif; font-weight: 700; font-size: 1.4rem; color: var(--text); font-variant-numeric: tabular-nums; }
-.stats-kpi-lbl { font-size: .72rem; color: var(--text-muted); text-align: center; }
-
-/* ── Récompenses / classements ── */
-.stats-awards { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: .7rem; }
-.stats-award {
-  display: flex; align-items: center; gap: .6rem; flex: 1; min-width: 220px;
-  padding: .7rem .9rem; border-radius: 12px;
-  background: var(--bg-card); border: 1px solid var(--border);
-}
-.stats-award-ic { font-size: 1.5rem; flex-shrink: 0; }
-.stats-award-tx { display: flex; flex-direction: column; min-width: 0; }
-.stats-award-lbl { font-size: .72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
-.stats-award-who { color: var(--text); font-size: .9rem; }
-
-/* ── Par personnage ── */
-.stats-chars {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: .8rem;
-}
-.stats-char {
-  background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: 14px; padding: .85rem 1rem;
-}
-.stats-char-hd {
-  display: flex; align-items: center; justify-content: space-between; gap: .6rem;
-  margin-bottom: .6rem; padding-bottom: .5rem; border-bottom: 1px solid var(--border);
-}
-.stats-char-id { display: flex; align-items: center; gap: .5rem; min-width: 0; }
-.stats-char-av { flex-shrink: 0; }
-.stats-char-name { font-family: 'Cinzel', serif; font-weight: 700; font-size: 1rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stats-char-meta { font-size: .72rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-.stats-skills { display: flex; flex-direction: column; gap: .35rem; }
-.stats-skill-row { display: flex; align-items: center; gap: .5rem; }
-.stats-skill-name { font-size: .78rem; color: var(--text-soft, #c8d4e8); width: 38%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stats-skill-bar { flex: 1; height: 7px; border-radius: 999px; background: var(--bg-elevated); overflow: hidden; }
-.stats-skill-bar > span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #6366f1, #a78bfa); }
-.stats-skill-n { font-size: .72rem; color: var(--text-muted); flex-shrink: 0; font-variant-numeric: tabular-nums; }
-
-/* ── Stats de combat par personnage : liste label → valeur (une ligne par stat) ── */
-.stats-cgrid {
-  display: flex; flex-direction: column;
-  margin: 0 0 .55rem; padding-bottom: .45rem; border-bottom: 1px solid var(--border);
-}
-.stats-crow {
-  display: flex; align-items: baseline; justify-content: space-between; gap: .9rem;
-  padding: .18rem 0;
-}
-.stats-crow + .stats-crow { border-top: 1px solid rgba(255,255,255,.035); }
-.stats-clbl { font-size: .8rem; color: var(--text-soft, #c8d4e8); min-width: 0; }
-.stats-cval { font-size: .86rem; font-weight: 700; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-/* Favoris (sort / émote) : ligne pleine largeur, la valeur peut passer à la ligne */
-.stats-cfavs { display: flex; flex-direction: column; gap: .35rem; margin: 0 0 .55rem; padding-bottom: .5rem; border-bottom: 1px solid var(--border); }
-.stats-cfav { display: flex; align-items: center; justify-content: space-between; gap: .7rem; }
-.stats-cfav-v { display: inline-flex; align-items: center; gap: .35rem; font-size: .82rem; font-weight: 700; color: var(--text); text-align: right; overflow-wrap: anywhere; }
-.stats-cfav-v small { color: var(--text-muted); font-weight: 400; }
-
-/* Émote affichée pour de vrai (image) au lieu de son nom */
-.stats-emote { width: 1.5rem; height: 1.5rem; vertical-align: middle; object-fit: contain; }
-.stats-emote-sm { width: 1.05rem; height: 1.05rem; vertical-align: middle; object-fit: contain; }
-
-/* Boutons d'action sur la carte d'un personnage (📅 par séance, ✕ suppression) */
-.stats-char-actions { display: inline-flex; gap: .3rem; flex-shrink: 0; }
-.stats-char-btn {
-  flex-shrink: 0; width: 22px; height: 22px; border-radius: 6px;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: transparent; border: 1px solid var(--border);
-  color: var(--text-dim); font-size: .8rem; cursor: pointer; line-height: 1;
-  transition: color .12s, border-color .12s, background .12s;
-}
-.stats-char-btn:hover { color: var(--text); border-color: var(--accent, #6366f1); background: rgba(99,102,241,.08); }
-.stats-char-del:hover {
-  color: var(--crimson-light, #ff8ca7);
-  border-color: rgba(255,90,126,.4); background: rgba(255,90,126,.08);
-}
-
-/* Barre d'outils : sélecteur de séance + actions (export, reset) */
+/* ── Barre d'outils : sélecteur de séance + actions (export, reset) ── */
 .stats-toolbar {
   display: flex; align-items: center; justify-content: space-between; gap: .8rem;
-  flex-wrap: wrap; margin-bottom: 1rem;
+  flex-wrap: wrap; margin-bottom: 1.1rem;
 }
 .stats-scope { display: inline-flex; align-items: center; gap: .5rem; font-size: .82rem; color: var(--text-muted); }
 .stats-scope select {
@@ -113,23 +25,138 @@
 .stats-toolbar-actions { display: inline-flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .stats-tool-btn {
   font-size: .76rem; line-height: 1; cursor: pointer;
-  padding: .4rem .7rem; border-radius: 8px;
+  padding: .42rem .75rem; border-radius: 8px;
   background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-soft, #c8d4e8);
   transition: background .12s, border-color .12s, color .12s;
 }
-.stats-tool-btn:hover { color: var(--text); border-color: var(--accent, #6366f1); background: rgba(99,102,241,.08); }
+.stats-tool-btn:hover { color: var(--text); border-color: var(--gold-glow, #6366f1); background: rgba(99,102,241,.08); }
 .stats-reset-btn { color: var(--crimson-light, #ff8ca7); border-color: rgba(255,90,126,.3); background: transparent; }
 .stats-reset-btn:hover { background: rgba(255,90,126,.1); border-color: rgba(255,90,126,.5); color: var(--crimson-light, #ff8ca7); }
 
-/* Podiums (palmarès top 3) */
+/* ── Héro : jauge de réussite + chiffres phares de la campagne ── */
+.stats-hero {
+  display: flex; align-items: center; gap: 1.3rem;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px;
+  padding: 1.1rem 1.4rem; margin-bottom: 1.2rem;
+}
+.stats-hero-gauge { flex-shrink: 0; display: flex; }
+.stats-hero-body { flex: 1; min-width: 0; }
+.stats-hero-title {
+  font-size: .7rem; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--text-dim); margin-bottom: .8rem;
+}
+.stats-hero-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 1rem; }
+.stats-hm { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.stats-hm-v {
+  font-family: 'Cinzel', serif; font-weight: 700; font-size: 1.55rem; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.stats-hm-l { font-size: .68rem; color: var(--text-muted); }
+
+/* Texte des jauges SVG (fill, pas color) */
+.stats-gauge-val { fill: var(--text); font-weight: 700; font-family: 'Cinzel', serif; font-variant-numeric: tabular-nums; }
+.stats-gauge-sub { fill: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
+
+/* ── Sections ── */
+.stats-sec { margin-bottom: 1.4rem; }
+.stats-sec-hd {
+  display: flex; align-items: center; gap: .45rem;
+  font-size: .92rem; font-weight: 700; color: var(--text);
+  margin-bottom: .65rem;
+}
+
+/* ── KPI ── */
+.stats-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(138px, 1fr)); gap: .6rem; }
+.stats-kpi {
+  display: flex; flex-direction: column; align-items: center; gap: .15rem;
+  padding: .85rem .6rem; border-radius: 12px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-top: 2px solid var(--a, var(--gold));
+}
+.stats-kpi-ic { font-size: 1.2rem; line-height: 1; }
+.stats-kpi-val { font-family: 'Cinzel', serif; font-weight: 700; font-size: 1.35rem; color: var(--text); font-variant-numeric: tabular-nums; }
+.stats-kpi-lbl { font-size: .7rem; color: var(--text-muted); text-align: center; line-height: 1.2; }
+
+/* ── Distinctions (cartes-trophées) ── */
+.stats-trophies { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .6rem; }
+.stats-trophy {
+  display: flex; align-items: center; gap: .7rem;
+  padding: .7rem .85rem; border-radius: 12px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-left: 3px solid var(--tc, var(--gold));
+}
+.stats-trophy-ic { font-size: 1.5rem; flex-shrink: 0; line-height: 1; }
+.stats-trophy-tx { display: flex; flex-direction: column; min-width: 0; }
+.stats-trophy-lbl { font-size: .66rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
+.stats-trophy-who { color: var(--text); font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-trophy-who b { color: var(--tc, var(--gold)); font-weight: 700; }
+
+/* ── Palmarès (podiums top 3) ── */
 .stats-podiums { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: .7rem; }
-.stats-pod { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: .7rem .85rem; }
-.stats-pod-title { font-size: .76rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: .5rem; }
-.stats-pod-row { display: flex; align-items: center; gap: .5rem; padding: .2rem 0; }
+.stats-pod { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: .8rem .9rem; }
+.stats-pod-title { font-size: .74rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: .55rem; }
+.stats-pod-row { display: flex; align-items: center; gap: .5rem; padding: .22rem 0; }
+.stats-pod-row + .stats-pod-row { border-top: 1px solid rgba(255,255,255,.04); }
 .stats-pod-rank { font-size: 1rem; flex-shrink: 0; }
 .stats-pod-name { flex: 1; min-width: 0; color: var(--text); font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stats-pod-n { font-size: .78rem; color: var(--text-muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .stats-pod-empty { color: var(--text-dim); font-size: .85rem; }
+
+/* ── Par personnage ── */
+.stats-chars { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: .8rem; }
+.stats-char {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 14px; padding: .9rem 1rem;
+}
+.stats-char-hd { display: flex; align-items: center; gap: .55rem; margin-bottom: .75rem; }
+.stats-char-id { display: flex; align-items: center; gap: .5rem; min-width: 0; flex: 1; }
+.stats-char-av { flex-shrink: 0; }
+.stats-char-name { font-family: 'Cinzel', serif; font-weight: 700; font-size: 1rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-char-ring { flex-shrink: 0; display: flex; }
+.stats-char-actions { display: inline-flex; gap: .3rem; flex-shrink: 0; }
+.stats-char-btn {
+  flex-shrink: 0; width: 24px; height: 24px; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-dim); font-size: .82rem; cursor: pointer; line-height: 1;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.stats-char-btn:hover { color: var(--text); border-color: var(--gold-glow, #6366f1); background: rgba(99,102,241,.08); }
+.stats-char-del:hover { color: var(--crimson-light, #ff8ca7); border-color: rgba(255,90,126,.4); background: rgba(255,90,126,.08); }
+
+/* Tuiles de stats clés (par perso) */
+.stats-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(62px, 1fr)); gap: .4rem; margin-bottom: .7rem; }
+.stats-tile { display: flex; flex-direction: column; gap: 1px; align-items: center; background: var(--bg-dark); border-radius: 9px; padding: .5rem .3rem; }
+.stats-tile-v { font-weight: 700; font-size: 1.05rem; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.stats-tile-l { font-size: .62rem; color: var(--text-muted); text-align: center; }
+
+/* Barres de compétences (par perso) */
+.stats-skills { display: flex; flex-direction: column; gap: .35rem; }
+.stats-skill-row { display: flex; align-items: center; gap: .5rem; }
+.stats-skill-name { font-size: .78rem; color: var(--text-soft, #c8d4e8); width: 38%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-skill-bar { flex: 1; height: 6px; border-radius: 999px; background: var(--bg-dark); overflow: hidden; }
+.stats-skill-bar > span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #6366f1, #a78bfa); }
+.stats-skill-n { font-size: .72rem; color: var(--text-muted); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
+/* Favoris (sort / émote fétiche) */
+.stats-favs { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .65rem; padding-top: .65rem; border-top: 1px solid var(--border); }
+.stats-fav { display: inline-flex; align-items: center; gap: .3rem; font-size: .76rem; color: var(--text-soft, #c8d4e8); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 999px; padding: .18rem .6rem; }
+.stats-fav small { color: var(--text-muted); }
+
+/* Émotes affichées (image) au lieu du nom */
+.stats-emote { width: 1.5rem; height: 1.5rem; vertical-align: middle; object-fit: contain; }
+.stats-emote-sm { width: 1.05rem; height: 1.05rem; vertical-align: middle; object-fit: contain; }
+
+/* ── Modale « par séance » : réutilise la grille combat compacte ── */
+.stats-cgrid { display: flex; flex-direction: column; margin: 0 0 .55rem; padding-bottom: .45rem; border-bottom: 1px solid var(--border); }
+.stats-crow { display: flex; align-items: baseline; justify-content: space-between; gap: .9rem; padding: .18rem 0; }
+.stats-crow + .stats-crow { border-top: 1px solid rgba(255,255,255,.035); }
+.stats-clbl { font-size: .8rem; color: var(--text-soft, #c8d4e8); min-width: 0; }
+.stats-cval { font-size: .86rem; font-weight: 700; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stats-cfavs { display: flex; flex-direction: column; gap: .35rem; margin: 0 0 .55rem; padding-bottom: .5rem; border-bottom: 1px solid var(--border); }
+.stats-cfav { display: flex; align-items: center; justify-content: space-between; gap: .7rem; }
+.stats-cfav-v { display: inline-flex; align-items: center; gap: .35rem; font-size: .82rem; font-weight: 700; color: var(--text); text-align: right; overflow-wrap: anywhere; }
+.stats-cfav-v small { color: var(--text-muted); font-weight: 400; }
 
 /* Export récap (fallback presse-papier) */
 .stats-export-ta {
@@ -141,10 +168,7 @@
 
 /* Modale « par séance » */
 .stats-dates { display: flex; flex-direction: column; gap: .7rem; }
-.stats-date {
-  background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: 12px; padding: .7rem .85rem;
-}
+.stats-date { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: .7rem .85rem; }
 .stats-date-hd { font-family: 'Cinzel', serif; font-weight: 700; font-size: .9rem; color: var(--text); margin-bottom: .5rem; }
 .stats-date .stats-cstats { margin-bottom: .4rem; padding-bottom: .4rem; }
 .stats-date-skills { font-size: .76rem; color: var(--text-soft, #c8d4e8); line-height: 1.5; }

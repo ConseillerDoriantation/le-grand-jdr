@@ -99,6 +99,23 @@ function _statsCombatGrid(cm, { topSpell, topEmote } = {}) {
 
 const _statsFmtDate = (d) => { const [y, m, da] = d.split('-'); return `${da}/${m}/${y}`; };
 
+// Jauge circulaire (donut) — pct 0-100 + couleur d'accent. Optionnellement un
+// sous-label. Utilisée pour le taux de réussite (héro + carte perso).
+function _statsGauge(pct, color = '#22c38e', size = 92, stroke = 9, sub = '') {
+  const r = size / 2 - stroke, cx = size / 2;
+  const circ = 2 * Math.PI * r;
+  const off = circ * (1 - Math.max(0, Math.min(100, _statsNum(pct))) / 100);
+  const big = Math.round(size * 0.24);
+  return `<svg class="stats-gauge" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+    <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="var(--border)" stroke-width="${stroke}"/>
+    <circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round"
+      stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" transform="rotate(-90 ${cx} ${cx})"/>
+    <text x="${cx}" y="${sub ? cx - big * 0.28 : cx}" text-anchor="middle" dominant-baseline="central"
+      class="stats-gauge-val" style="font-size:${big}px">${_statsNum(pct)}%</text>
+    ${sub ? `<text x="${cx}" y="${cx + big * 0.62}" text-anchor="middle" dominant-baseline="central" class="stats-gauge-sub" style="font-size:${Math.round(size * 0.1)}px">${sub}</text>` : ''}
+  </svg>`;
+}
+
 // Construit les lignes/cartes de stats pour un scope donné (dateKey null = campagne).
 function _statsRowsFor(dateKey) {
   const num = _statsNum;
@@ -179,20 +196,43 @@ function _statsRender(dateKey) {
   const statCard = (ic, val, lbl, a) => `<div class="stats-kpi" style="--a:${a}"><span class="stats-kpi-ic">${ic}</span><span class="stats-kpi-val">${val}</span><span class="stats-kpi-lbl">${lbl}</span></div>`;
   // Award : renvoie { html, txt } pour mutualiser affichage et export.
   const awards = [];
-  const award = (ic, lbl, who, val) => { if (!who) return ''; awards.push(`${ic} ${lbl} : ${who} (${val})`);
-    return `<div class="stats-award"><span class="stats-award-ic">${ic}</span><div class="stats-award-tx"><span class="stats-award-lbl">${lbl}</span><span class="stats-award-who">${_esc(who)} <b>· ${val}</b></span></div></div>`; };
+  // Carte-trophée : icône + intitulé + gagnant · valeur, liseré coloré (--tc).
+  const award = (ic, lbl, who, val, col) => { if (!who) return ''; awards.push(`${ic} ${lbl} : ${who} (${val})`);
+    return `<div class="stats-trophy" style="--tc:${col}">
+      <span class="stats-trophy-ic">${ic}</span>
+      <div class="stats-trophy-tx">
+        <span class="stats-trophy-lbl">${lbl}</span>
+        <span class="stats-trophy-who">${_esc(who)}<b> · ${val}</b></span>
+      </div></div>`; };
 
   const charBlock = (r) => {
-    const combatHtml = _statsCombatGrid(r.combat, { topSpell: r.spells[0], topEmote: r.emotes[0] });
+    const cm = r.combat;
+    const rhr = cm.attacks ? Math.round(cm.hits / cm.attacks * 100) : null;
+    // Tuiles de stats clés (nonzero seulement) — vue d'un coup d'œil.
+    const tiles = [];
+    const tile = (v, l, c) => tiles.push(`<div class="stats-tile"><span class="stats-tile-v"${c ? ` style="color:${c}"` : ''}>${v}</span><span class="stats-tile-l">${l}</span></div>`);
+    if (cm.attacks)    tile(cm.attacks, 'Attaques');
+    if (cm.dmgDealt)   tile(cm.dmgDealt, 'Dégâts', '#c9b6ff');
+    if (cm.biggestHit) tile(cm.biggestHit, 'Plus gros coup');
+    if (cm.dmgTaken)   tile(cm.dmgTaken, 'Subis');
+    if (cm.kosDealt)   tile(cm.kosDealt, 'KO');
+    if (cm.spellsCast) tile(cm.spellsCast, 'Sorts', '#c9b6ff');
+    if (cm.heal)       tile(cm.heal, 'Soin', '#4fd3a6');
+    if (r.sRolls)      tile(r.sRolls, 'Jets', '#7fb0ff');
+    const tilesHtml = tiles.length ? `<div class="stats-tiles">${tiles.join('')}</div>` : '';
     const skillHtml = r.perSkill.length ? `
       <div class="stats-skills">
-        ${r.perSkill.map(s => `
+        ${r.perSkill.slice(0, 6).map(s => `
           <div class="stats-skill-row">
             <span class="stats-skill-name">${_esc(s.sk)}</span>
             <span class="stats-skill-bar"><span style="width:${r.sRolls ? Math.round((s.rolls / r.sRolls) * 100) : 0}%"></span></span>
             <span class="stats-skill-n">${s.rolls}${s.crits ? ` · 💥${s.crits}` : ''}${s.fumbles ? ` · 💔${s.fumbles}` : ''}</span>
           </div>`).join('')}
       </div>` : '';
+    const favs = [];
+    if (r.spells[0]) favs.push(`<span class="stats-fav">⭐ ${_esc(r.spells[0].n)} <small>×${r.spells[0].c}</small></span>`);
+    if (r.emotes[0]) favs.push(`<span class="stats-fav">${_statsEmoteHtml(r.emotes[0].n, 'stats-emote-sm')} <small>×${r.emotes[0].c}</small></span>`);
+    const favsHtml = favs.length ? `<div class="stats-favs">${favs.join('')}</div>` : '';
     const dateBtn = r.hasDates
       ? `<button class="stats-char-btn" data-action="_statsCharDates" data-id="${r.id}" title="Voir les stats séance par séance">📅</button>`
       : '';
@@ -200,28 +240,31 @@ function _statsRender(dateKey) {
       ? `<button class="stats-char-btn stats-char-del" data-action="_statsDelChar" data-id="${r.id}" title="Supprimer les stats de ce personnage (jets de test…)">✕</button>`
       : '';
     const char = STATE.characters?.find(x => x.id === r.id) || { nom: r.name };
-    const avatar = characterAvatarHtml(char, { size: 30, className: 'stats-char-av', title: r.name });
+    const avatar = characterAvatarHtml(char, { size: 34, className: 'stats-char-av', title: r.name });
+    const ring = rhr != null
+      ? `<span class="stats-char-ring" title="Taux de réussite">${_statsGauge(rhr, '#22c38e', 44, 5)}</span>` : '';
     return `<div class="stats-char">
       <div class="stats-char-hd">
         <span class="stats-char-id">${avatar}<span class="stats-char-name">${_esc(r.name)}</span></span>
+        ${ring}
         <span class="stats-char-actions">${dateBtn}${delBtn}</span>
       </div>
-      ${combatHtml}${skillHtml}
+      ${tilesHtml}${skillHtml}${favsHtml}
     </div>`;
   };
 
   const combatTitle = dateKey ? `⚔️ Combat — séance du ${_statsFmtDate(dateKey)}` : '⚔️ Combat (table)';
   const awardsHtml = [
-    award('🏆', 'Plus gros frappeur', topDmg?.name, `${topDmg?.combat.dmgDealt} dmg`),
-    award('💢', 'Plus gros coup', topBig?.name, `${topBig?.combat.biggestHit}`),
-    award('🎯', 'Meilleur taux', topHit?.name, topHit ? `${topHit.hr}%` : ''),
-    award('☠️', 'Bourreau', topKo?.name, `${topKo?.combat.kosDealt} KO`),
-    award('💚', 'Plus grand soigneur', topHeal?.name, `${topHeal?.combat.heal} PV`),
-    award('🧙', 'Le Mage', topMage?.name, `${topMage?.combat.spellsCast} sorts`),
-    award('🪨', "L'Increvable", topTank?.name, `${topTank?.combat.dmgTaken} dmg subis`),
-    award('💬', 'Le Bavard', topEmoter?.name, `${topEmoter?.emoteTotal} émotes`),
-    award('🎲', 'Le Joueur', topRoller?.name, `${topRoller?.sRolls} jets`),
-    award('🤡', 'Le plus malchanceux', topFumble?.name, `${topFumble?.tf} échec${topFumble?.tf > 1 ? 's' : ''}`),
+    award('🏆', 'Plus gros frappeur', topDmg?.name, `${topDmg?.combat.dmgDealt} dmg`, '#f4c430'),
+    award('💢', 'Plus gros coup', topBig?.name, `${topBig?.combat.biggestHit}`, '#ff8b6b'),
+    award('🎯', 'Meilleur taux', topHit?.name, topHit ? `${topHit.hr}%` : '', '#22c38e'),
+    award('☠️', 'Bourreau', topKo?.name, `${topKo?.combat.kosDealt} KO`, '#ef4444'),
+    award('💚', 'Plus grand soigneur', topHeal?.name, `${topHeal?.combat.heal} PV`, '#4fd3a6'),
+    award('🧙', 'Le Mage', topMage?.name, `${topMage?.combat.spellsCast} sorts`, '#bca0ff'),
+    award('🪨', "L'Increvable", topTank?.name, `${topTank?.combat.dmgTaken} dmg subis`, '#9aa0aa'),
+    award('💬', 'Le Bavard', topEmoter?.name, `${topEmoter?.emoteTotal} émotes`, '#4f8cff'),
+    award('🎲', 'Le Joueur', topRoller?.name, `${topRoller?.sRolls} jets`, '#7fb0ff'),
+    award('🤡', 'Le plus malchanceux', topFumble?.name, `${topFumble?.tf} échec${topFumble?.tf > 1 ? 's' : ''}`, '#ff6b6b'),
   ].join('');
 
   // Récap texte (export) — construit à partir du scope courant.
@@ -246,26 +289,46 @@ function _statsRender(dateKey) {
   });
   _statsLastSummary = sumLines.join('\n');
 
+  const heroMetric = (v, l, c) => `<div class="stats-hm"><span class="stats-hm-v" style="color:${c}">${v}</span><span class="stats-hm-l">${l}</span></div>`;
+
   root.innerHTML = `
     ${toolbar}
-    <section class="adm-block">
-      <div class="adm-label">${combatTitle}</div>
+    <section class="stats-hero">
+      <div class="stats-hero-gauge">
+        ${_statsGauge(hitRate, '#22c38e', 104, 10, 'réussite')}
+      </div>
+      <div class="stats-hero-body">
+        <div class="stats-hero-title">Résumé — ${scopeLabel}</div>
+        <div class="stats-hero-metrics">
+          ${heroMetric(GC.attacks, 'Attaques', '#ff9d7a')}
+          ${heroMetric(GC.dmgDealt, 'Dégâts infligés', '#c9b6ff')}
+          ${heroMetric(GC.spellsCast, 'Sorts lancés', '#bca0ff')}
+          ${heroMetric(GC.heal, 'Soin prodigué', '#4fd3a6')}
+          ${heroMetric(GS.rolls, 'Jets de compétence', '#7fb0ff')}
+        </div>
+      </div>
+    </section>
+
+    <section class="stats-sec">
+      <div class="stats-sec-hd">${combatTitle}</div>
       <div class="stats-kpis">
-        ${statCard('⚔️', GC.attacks, 'Attaques', '#ff8b6b')}
-        ${statCard('🎯', GC.attacks ? `${hitRate}%` : '—', 'Taux de réussite', '#22c38e')}
         ${statCard('💥', GC.crits, 'Réussites critiques', '#f4c430')}
         ${statCard('💔', GC.fumbles, 'Échecs critiques', '#ff6b6b')}
-        ${statCard('🗡️', GC.dmgDealt, 'Dégâts infligés', '#a78bfa')}
         ${statCard('🛡️', GC.dmgTaken, 'Dégâts subis', '#9aa0aa')}
         ${statCard('☠️', GC.kosDealt, 'KO infligés', '#ef4444')}
-        ${statCard('💚', GC.heal, 'Soin prodigué', '#22c38e')}
-        ${statCard('🔮', GC.spellsCast, 'Sorts lancés', '#bca0ff')}
+        ${statCard('💀', GC.kosTaken, 'Fois mis KO', '#b06a6a')}
         ${statCard('🔋', GC.pmSpent, 'PM dépensés', '#4f8cff')}
       </div>
-      <div class="stats-awards">${awardsHtml}</div>
     </section>
-    <section class="adm-block">
-      <div class="adm-label">🎲 Compétences</div>
+
+    ${awardsHtml ? `
+    <section class="stats-sec">
+      <div class="stats-sec-hd">🏆 Distinctions</div>
+      <div class="stats-trophies">${awardsHtml}</div>
+    </section>` : ''}
+
+    <section class="stats-sec">
+      <div class="stats-sec-hd">🎲 Compétences</div>
       <div class="stats-kpis">
         ${statCard('🎲', GS.rolls, 'Jets de compétence', '#4f8cff')}
         ${statCard('💥', GS.crits, 'Réussites critiques', '#22c38e')}
@@ -273,17 +336,19 @@ function _statsRender(dateKey) {
         ${statCard('🏅', topSkill ? _esc(topSkill[0]) : '—', 'Compétence la + jouée', '#f4c430')}
       </div>
     </section>
+
     ${(spellTally.length || emoteTally.length || skillTally.length) ? `
-    <section class="adm-block">
-      <div class="adm-label">🏅 Palmarès</div>
+    <section class="stats-sec">
+      <div class="stats-sec-hd">🏅 Palmarès</div>
       <div class="stats-podiums">
         ${_statsPodium('🔮 Sorts les + lancés', spellTally)}
         ${_statsPodium('🎲 Compétences les + jouées', skillTally)}
         ${_statsPodium('😄 Émotes les + utilisées', emoteTally, (l) => _statsEmoteHtml(l, 'stats-emote-sm'))}
       </div>
     </section>` : ''}
-    <section class="adm-block">
-      <div class="adm-label">👤 Par personnage</div>
+
+    <section class="stats-sec">
+      <div class="stats-sec-hd">👤 Par personnage</div>
       <div class="stats-chars">${rows.sort((a, b) => (b.combat.attacks + b.sRolls) - (a.combat.attacks + a.sRolls)).map(charBlock).join('')}</div>
     </section>`;
 }
