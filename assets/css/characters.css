@@ -8063,6 +8063,9 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .id-chip { font-size: .7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 3px 11px; border-radius: 999px; border: 1px solid; white-space: nowrap; cursor: pointer; }
 .cs-v3 .id-chip.classe { background: rgba(79,140,255,.12); border-color: rgba(79,140,255,.32); color: var(--gold-2, #7eb0ff); }
 .cs-v3 .id-chip.race { background: rgba(157,111,255,.12); border-color: rgba(157,111,255,.32); color: #bca0ff; }
+/* Puce propriétaire (MJ) — montre le compte rattaché et sert de bouton de réassignation. */
+.cs-v3 .id-chip.owner { background: rgba(34,195,142,.12); border-color: rgba(34,195,142,.34); color: #4fd3a6; text-transform: none; letter-spacing: .02em; }
+.cs-v3 .id-chip.owner:hover { background: rgba(34,195,142,.22); border-color: rgba(34,195,142,.6); }
 
 /* XP sidebar */
 .cs-v3 .xp-block { display: flex; flex-direction: column; gap: 6px; }

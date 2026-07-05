@@ -365,7 +365,6 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
           data-action="_setDefaultCharacter" data-id="${c.id}">${c.isDefault?'★':'☆'}</button>`:''}
         ${canEdit?`<button title="Renommer" data-action="inlineEditText" data-id="${c.id}" data-field="nom" data-target-sel=".id-name">✎</button>`:''}
         ${canEdit?`<button title="Exporter" data-action="openCharExportMenu" data-id="${c.id}">📤</button>`:''}
-        ${STATE.isAdmin?`<button title="Réassigner le compte propriétaire" data-action="reassignCharOwner" data-id="${c.id}">👤</button>`:''}
         ${canEdit?`<button class="id-del-btn" title="Supprimer ce personnage" data-action="deleteChar" data-id="${c.id}">🗑️</button>`:''}
       </span>
     </div>
@@ -379,6 +378,9 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
       ${canEdit
         ? `<span class="id-chip race" data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${_esc(c.race||'Race')}</span>`
         : (c.race?`<span class="id-chip race">${_esc(c.race)}</span>`:'')}
+      ${STATE.isAdmin
+        ? `<span class="id-chip owner" data-action="reassignCharOwner" data-id="${c.id}" title="Réassigner à un autre compte joueur">👤 ${_esc(c.ownerPseudo || (c.uid ? 'Compte lié' : 'Sans compte'))}</span>`
+        : ''}
     </div>
 
     <!-- XP -->
