@@ -6614,18 +6614,22 @@ function _buildAnnotShape(K, data) {
     });
     // Début de drag groupé
     shape.on('dragstart', () => {
-      if (_selectedAnnotIds.has(data.id) && _selectedAnnotIds.size > 1) {
+      // Un dessin GROUPÉ entraîne tout son groupe (une seule entité), même sans
+      // sélection préalable ; sinon on retombe sur la multi-sélection courante (>1).
+      const grp = _annotIdsInGroup(data);
+      const movers = grp.length > 1 ? grp
+        : (_selectedAnnotIds.has(data.id) && _selectedAnnotIds.size > 1 ? [..._selectedAnnotIds] : null);
+      if (movers) {
         _annotGroupDragOrigins = {};
-        for (const id of _selectedAnnotIds) {
+        for (const id of movers) {
           const s = _annotations[id]?.shape;
           if (s) _annotGroupDragOrigins[id] = { x: s.x(), y: s.y() };
         }
       } else { _annotGroupDragOrigins = null; }
     });
-    // Déplacement groupé
+    // Déplacement groupé (piloté par les origines capturées, indépendant de la sélection)
     shape.on('dragmove', () => {
-      if (!_annotGroupDragOrigins || !_selectedAnnotIds.has(data.id)) return;
-      const orig = _annotGroupDragOrigins[data.id];
+      const orig = _annotGroupDragOrigins?.[data.id];
       if (!orig) return;
       const dx = shape.x() - orig.x, dy = shape.y() - orig.y;
       for (const [id, o] of Object.entries(_annotGroupDragOrigins)) {
@@ -6636,8 +6640,7 @@ function _buildAnnotShape(K, data) {
     });
     // Fin de drag → sauvegarder position(s)
     shape.on('dragend', () => {
-      const idsToSave = (_annotGroupDragOrigins && _selectedAnnotIds.has(data.id))
-        ? [..._selectedAnnotIds] : [data.id];
+      const idsToSave = _annotGroupDragOrigins ? Object.keys(_annotGroupDragOrigins) : [data.id];
       for (const id of idsToSave) {
         const s = _annotations[id]?.shape, ann = _annotations[id]?.data;
         if (!s || !ann) continue;
