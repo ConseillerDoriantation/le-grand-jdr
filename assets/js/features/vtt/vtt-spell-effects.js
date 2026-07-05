@@ -51,7 +51,8 @@ export async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
         idx === 0 ? {
           movementBonus: opt.mods?.enchantStateMoveBonus,
           dmgFormula: opt.mods?.enchantStateDmgFormula,
-        } : {}
+        } : {},
+        opt.mods?.enchantStateChance || 0
       );
       return {
         id: etatId, appliedAt: Date.now(), appliedBy: srcId || null,

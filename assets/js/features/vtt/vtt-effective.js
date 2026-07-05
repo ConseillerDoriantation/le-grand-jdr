@@ -42,6 +42,17 @@ export function _conditionRangeBonusOf(tok) {
     }, 0);
 }
 
+// Réduction du seuil critique apportée par les états actifs (état « Chanceux »).
+// Ex. 1 → l'attaquant critique sur 19-20 au lieu de 20.
+export function _conditionCritRangeBonusOf(tok) {
+  return _activeConditionsOf(tok)
+    .reduce((sum, { cond, lib }) => {
+      const raw = cond.critRangeBonus ?? lib.effects?.critRangeBonus;
+      const bonus = Number.isFinite(parseInt(raw)) ? parseInt(raw) : 0;
+      return sum + bonus;
+    }, 0);
+}
+
 export function _conditionDmgBonusOf(tok) {
   const active = _activeConditionsOf(tok)
     .map(({ cond, lib }) => ({
@@ -53,10 +64,15 @@ export function _conditionDmgBonusOf(tok) {
   return active[0] || null;
 }
 
-export function _scaledEnchantConditionFields(lib, power = 0, amplification = 0, overrides = {}) {
+export function _scaledEnchantConditionFields(lib, power = 0, amplification = 0, overrides = {}, chance = 0) {
   const eff = lib?.effects || {};
   const fields = { enchantPower: Math.max(0, parseInt(power) || 0) };
   const amp = Math.max(0, parseInt(amplification) || 0);
+  // Chanceux : RC de la cible abaissée de 1 par rune Chance du sort (plancher RC 17
+  // → réduction max 3). Sans rune Chance = aucun effet.
+  if (eff.critRangeBonus != null) {
+    fields.critRangeBonus = Math.min(3, Math.max(0, parseInt(chance) || 0));
+  }
 
   if (eff.movementBonus != null) {
     const base = Number.isFinite(parseInt(eff.movementBonus)) ? parseInt(eff.movementBonus) : 0;

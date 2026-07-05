@@ -61,7 +61,7 @@ import {
 } from './vtt-emotes.js';
 import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
-  _scaledEnchantConditionFields, _vttPrimaryWeapon,
+  _scaledEnchantConditionFields, _vttPrimaryWeapon, _conditionCritRangeBonusOf,
 } from './vtt-effective.js';
 import { _renderInspector, _renderInspectorSoon, _vttInsTab } from './vtt-inspector.js?v=20260630-max-v2';
 import {
@@ -2239,6 +2239,9 @@ function _vttSpellMods(s) {
       ? nbP : 0,
     enchantStateAmplification: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
       ? nbAmp : 0,
+    // Runes Chance : pilotent la réduction de RC de l'état « Chanceux ».
+    enchantStateChance: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
+      ? nbCh : 0,
     enchantStateMoveBonus: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat' && Number.isFinite(parseInt(s.enchantStateMoveBonus)))
       ? parseInt(s.enchantStateMoveBonus) : null,
     enchantStateDmgFormula: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
@@ -5850,7 +5853,7 @@ async function _vttRollAttack() {
         hHitTotal = hD20 + hTouchMod + hSetBon + bonusHit;
       }
       // Combo Chance : élargit la plage critique (RC abaissé sur le sort)
-      const hCritThreshold = Math.max(2, Math.min(20, opt.mods?.chance?.rc ?? 20));
+      const hCritThreshold = Math.max(17, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
       const hIsCrit   = hD20 >= hCritThreshold;
       const hIsFumble = hD20 === 1;
 
@@ -6015,7 +6018,9 @@ async function _vttRollAttack() {
                    : effectiveMode === 'dis' ? Math.min(roll1, roll2)
                    : roll1;
     // Combo Chance : RC abaissée (19-20, 17-20…) — élargit la plage critique
-    const critThreshold = Math.max(2, Math.min(20, opt.mods?.chance?.rc ?? 20));
+    // RC = rc du sort (rune Chance) abaissée par l'état « Chanceux » de l'attaquant,
+    // plancher 17. Le crit reste normal (max + relance) — le double-max n'est pas ici.
+    const critThreshold = Math.max(17, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
     let isCrit   = d20 >= critThreshold;
     let isFumble = d20 === 1;
 

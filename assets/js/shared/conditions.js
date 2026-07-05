@@ -69,6 +69,10 @@ export const CONDITION_DEFAULT_LIBRARY = [
     desc:'L\'allié gagne +2 cases de portée d\'attaque, +1 par rune Amplification du sort d\'enchantement.',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
     effects:{ rangeBonus:2 } },
+  { id:'chanceux',      label:'Chanceux',    icon:'🍀', color:'#22c55e',
+    desc:'L\'allié critique plus facilement : sa RC baisse de 1 par rune Chance du sort (plancher 17). Le critique reste NORMAL (max + relance) — pas le double-max de la rune Chance.',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
+    effects:{ critRangeBonus:1 } },
   { id:'guided',        label:'Guidé',       icon:'🎯', color:'#facc15',
     desc:'L\'allié est guidé : avantage à ses jets d\'attaque pendant la durée de l\'enchantement.',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
@@ -106,7 +110,7 @@ export const CONDITION_DEFAULT_LIBRARY = [
 
 export const CONDITION_DEFAULT_IDS = new Set(CONDITION_DEFAULT_LIBRARY.map(c => c.id));
 const CONDITION_REMOVED_IDS = new Set(['poisoned', 'warded']);
-const CONDITION_ENCHANTMENT_DEFAULT_IDS = new Set(['swift', 'allonge', 'guided', 'distant_ward', 'melee_ward', 'focused', 'empowered']);
+const CONDITION_ENCHANTMENT_DEFAULT_IDS = new Set(['swift', 'allonge', 'chanceux', 'guided', 'distant_ward', 'melee_ward', 'focused', 'empowered']);
 const CONDITION_NON_SPELL_DEFAULT_IDS = new Set(['dodge', 'hidden', 'disengaged']);
 
 function normalizeSpellUsage(entry = {}, fallback = null) {
