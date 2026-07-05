@@ -25,6 +25,7 @@ let _tokenLayer = null;   // Konva.Layer des tokens, masqués hors LOS côté jo
 let _editMode   = false;  // éditeur de murs actif ?
 let _editTool   = 'wall'; // 'wall' | 'door' | 'window' | 'light' | 'eraser' | 'hide' | 'reveal'
 let _placeHistory = [];   // pile des poses (Ctrl+Z) : { field:'walls'|'lightSources'|'fogOps', id }
+let _redoHistory  = [];   // pile de rétablissement (Ctrl+Y) : { field, item } — vidée à toute nouvelle pose
 let _drawStart  = null;   // {col,row} — début du segment en cours de tracé
 let _preview    = null;   // Konva.Line de prévisualisation
 let _selectedId = null;   // id du segment/lumière sélectionné
@@ -312,7 +313,7 @@ export function fogSetPgRef(fn) { _pgRefFn = fn; }
 
 /** Mise à jour de la référence page courante (appelée depuis vtt.js à chaque changement). */
 export function fogSetPage(page) {
-  if (page?.id !== _page?.id) _placeHistory = []; // nouvelle scène → pile d'annulation vierge
+  if (page?.id !== _page?.id) { _placeHistory = []; _redoHistory = []; } // nouvelle scène → piles vierges
   if (page?.id !== _page?.id) _playerFogCanvas = null;
   _page = page;
 }
@@ -766,7 +767,7 @@ function _addWall(x1, y1, x2, y2, type) {
   // Lire les murs courants depuis _page (toujours à jour via fogSetPage)
   updateDoc(ref, { walls: [...(_page.walls || []), w] })
     .catch(() => showNotif('Erreur sauvegarde', 'error'));
-  _placeHistory.push({ field: 'walls', id: w.id });
+  _placeHistory.push({ field: 'walls', id: w.id }); _redoHistory = [];
 }
 
 function _addLightSource(x, y) {
@@ -775,7 +776,7 @@ function _addLightSource(x, y) {
   const ref = _pgRef(_page.id); if (!ref) return;
   updateDoc(ref, { lightSources: [...(_page.lightSources || []), ls] })
     .catch(() => showNotif('Erreur sauvegarde', 'error'));
-  _placeHistory.push({ field: 'lightSources', id: ls.id });
+  _placeHistory.push({ field: 'lightSources', id: ls.id }); _redoHistory = [];
 }
 
 function _addFogRect(type, x, y, w, h) {
@@ -785,7 +786,7 @@ function _addFogRect(type, x, y, w, h) {
   const ops = [...(_page.fogOps || []), op];
   updateDoc(ref, { fogOps: ops })
     .catch(() => showNotif('Erreur sauvegarde', 'error'));
-  _placeHistory.push({ field: 'fogOps', id: op.id });
+  _placeHistory.push({ field: 'fogOps', id: op.id }); _redoHistory = [];
 }
 
 /**
@@ -799,11 +800,32 @@ export function fogUndo() {
   while (_placeHistory.length) {
     const last = _placeHistory.pop();
     const arr = _page[last.field] || [];
-    if (arr.some(x => x.id === last.id)) {
+    const item = arr.find(x => x.id === last.id);
+    if (item) {
       updateDoc(ref, { [last.field]: arr.filter(x => x.id !== last.id) })
         .catch(() => showNotif('Erreur annulation', 'error'));
+      _redoHistory.push({ field: last.field, item }); // permet le rétablissement (Ctrl+Y)
       return true;
     }
+  }
+  return false;
+}
+
+/**
+ * Rétablit la dernière pose annulée (Ctrl+Y). Ré-ajoute l'élément retiré par
+ * fogUndo à sa collection. Ignore les entrées déjà re-présentes. false si rien.
+ */
+export function fogRedo() {
+  if (!_page) return false;
+  const ref = _pgRef(_page.id); if (!ref) return false;
+  while (_redoHistory.length) {
+    const last = _redoHistory.pop();
+    const arr = _page[last.field] || [];
+    if (arr.some(x => x.id === last.item.id)) continue; // déjà présent
+    updateDoc(ref, { [last.field]: [...arr, last.item] })
+      .catch(() => showNotif('Erreur rétablissement', 'error'));
+    _placeHistory.push({ field: last.field, id: last.item.id });
+    return true;
   }
   return false;
 }

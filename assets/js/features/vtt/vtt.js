@@ -32,7 +32,7 @@ import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit, bumpBigg
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
-  fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath, fogUndo,
+  fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath, fogUndo, fogRedo,
 } from './vtt-fog.js';
 import { openModal, closeModalDirect, confirmModal, updateModalContent, promptModal } from '../../shared/modal.js';
 import { _esc, _norm, _searchIncludes, appSplashHtml, loadingHtml, normalizeImageUrl } from '../../shared/html.js';
@@ -374,6 +374,7 @@ let _suppressNextClick = false; // empêche le click de désélectionner après 
 let _pingTimer  = null;
 let _pingOrigin = null;
 let _drawHistory  = [];      // ids des annotations créées dans la session (pour Ctrl+Z)
+let _drawRedo     = [];      // data des annotations annulées (pour Ctrl+Y) — vidée à tout nouveau tracé
 let _drawing      = false;   // tracé en cours
 let _erasing      = false;   // gomme : effacement pressé en cours
 let _drawPts      = [];      // points crayon libre (world coords)
@@ -703,7 +704,7 @@ function _cleanup() {
   _clearAim(); _hideActBar();
   _moveHL = []; _renderedPings.clear(); _renderedReactions.clear();
   VS.selectedMulti.clear(); _multiDragOrigin = null;
-  _annotations = {}; _drawing = false; _drawLive = null; _drawHistory = [];
+  _annotations = {}; _drawing = false; _drawLive = null; _drawHistory = []; _drawRedo = [];
   _polyPts = []; _polyLive = null; _polyActive = false;
   _selectedAnnotId = null; _selectedAnnotIds.clear(); _annotTransformer = null;
   _annotGroupDragOrigins = null;
@@ -5060,7 +5061,7 @@ async function _vttPlaceSpellZone(srcId, opt, { x, y, wPx, hPx }) {
     createdBy: STATE.user?.uid || null, createdAt: serverTimestamp(),
   };
   const id = 'z' + Date.now() + Math.random().toString(36).slice(2, 5);
-  try { await setDoc(_annotRef(id), data); _drawHistory.push(id); return id; }
+  try { await setDoc(_annotRef(id), data); _pushDrawHistory(id); return id; }
   catch (err) { console.error('[VTT] spellzone save', err?.code, err?.message); return null; }
 }
 
@@ -6938,7 +6939,7 @@ async function _endDraw() {
   const id = 'a' + Date.now() + Math.random().toString(36).slice(2,5);
   try {
     await setDoc(_annotRef(id), data);
-    _drawHistory.push(id); // permet Ctrl+Z
+    _pushDrawHistory(id); // permet Ctrl+Z / invalide le redo
     liveCopy.destroy(); // l'onSnapshot va recréer la version persistée
   } catch(err) {
     console.error('[VTT] Annotation save error:', err?.code, err?.message);
@@ -7006,7 +7007,7 @@ async function _polyFinish() {
   const id = 'a' + Date.now() + Math.random().toString(36).slice(2,5);
   try {
     await setDoc(_annotRef(id), data);
-    _drawHistory.push(id);   // permet Ctrl+Z
+    _pushDrawHistory(id);   // permet Ctrl+Z / invalide le redo
   } catch(err) {
     console.error('[VTT] Annotation save error:', err?.code, err?.message);
     showNotif('Erreur sauvegarde annotation — vérifiez les règles Firestore', 'error');
@@ -7452,6 +7453,7 @@ async function _moveSelectedBy(dc, dr) {
 
 function _vttFogTool(t) { return fogSetEditTool(t, VS.activePage); }
 function _vttFogUndo() { if (!fogUndo()) showNotif('Rien à annuler', 'info'); }
+function _vttFogRedo() { if (!fogRedo()) showNotif('Rien à rétablir', 'info'); }
 async function _vttToggleFog() {
   if (!VS.activePage) return;
   const next = !VS.activePage.fogEnabled;
@@ -7504,10 +7506,29 @@ function _vttDrawShape(shape) {
   if (wrap) wrap.style.cursor = shape === 'eraser' ? 'cell' : 'crosshair';
 }
 
-// Annule le dernier tracé de la session (bouton ↩ et Ctrl+Z).
+// Empile un nouvel id de tracé et invalide la pile de rétablissement (nouvelle action).
+function _pushDrawHistory(id) { _drawHistory.push(id); _drawRedo = []; }
+
+// Annule le dernier tracé de la session (bouton ↩ et Ctrl+Z). Mémorise la donnée
+// annulée pour permettre le rétablissement (Ctrl+Y).
 function _vttUndoDraw() {
   const lastId = _drawHistory.pop();
-  if (lastId) deleteDoc(_annotRef(lastId)).catch(() => {});
+  if (!lastId) return;
+  const data = _annotations[lastId]?.data;
+  if (data) _drawRedo.push({ id: lastId, data: { ...data } }); // capture avant suppression
+  deleteDoc(_annotRef(lastId)).catch(() => {});
+}
+
+// Rétablit le dernier tracé annulé (bouton ↪ et Ctrl+Y). Recrée l'annotation avec
+// le même id et re-empile son id dans l'historique d'annulation.
+function _vttRedoDraw() {
+  const last = _drawRedo.pop();
+  if (!last) { showNotif('Rien à rétablir', 'info'); return; }
+  _drawHistory.push(last.id); // ne pas vider _drawRedo (ce n'est pas une nouvelle action)
+  setDoc(_annotRef(last.id), last.data).catch(err => {
+    console.error('[VTT] redo annotation', err?.code, err?.message);
+    showNotif('Erreur rétablissement', 'error');
+  });
 }
 
 // Gomme : supprime l'annotation (éditable) sous le curseur. Utilise la détection de
@@ -8730,7 +8751,7 @@ async function _vttPasteClipboard() {
       data.x = (data.x || 0) + D; data.y = (data.y || 0) + D;
     }
     const nid = 'a' + Date.now() + Math.random().toString(36).slice(2, 5);
-    try { await setDoc(_annotRef(nid), data); _drawHistory.push(nid); nAnnot++; }
+    try { await setDoc(_annotRef(nid), data); _pushDrawHistory(nid); nAnnot++; }
     catch (e) { console.error('[vtt] paste annot', e); }
   }
 
@@ -8859,6 +8880,12 @@ function _keyHandler(e) {
     e.preventDefault();
     if (fogIsEditMode()) { if (!fogUndo()) showNotif('Rien à annuler', 'info'); }
     else _vttUndoDraw();
+  }
+  // Ctrl+Y (ou Ctrl+Shift+Z) : rétablir la dernière annulation (fog ou tracé).
+  if ((e.ctrlKey||e.metaKey) && (e.key==='y' || (e.key==='z' && e.shiftKey))) {
+    e.preventDefault();
+    if (fogIsEditMode()) { if (!fogRedo()) showNotif('Rien à rétablir', 'info'); }
+    else _vttRedoDraw();
   }
   // Flèches / pavé numérique : déplacer le token sélectionné
   if (!e.ctrlKey && !e.metaKey && !e.altKey && VS.selected) {
@@ -9098,6 +9125,7 @@ async function _vttMountTable(content) {
         <div class="vtt-draw-group">
           <button class="vtt-draw-btn" id="vtt-draw-fill-btn" data-vtt-fn="_vttToggleDrawFill" title="Remplir les rectangles/cercles">◻</button>
           <button class="vtt-draw-btn" id="vtt-draw-undo-btn" data-vtt-fn="_vttUndoDraw" title="Annuler le dernier tracé (Ctrl+Z)">↩</button>
+          <button class="vtt-draw-btn" id="vtt-draw-redo-btn" data-vtt-fn="_vttRedoDraw" title="Rétablir le dernier tracé annulé (Ctrl+Y)">↪</button>
           ${STATE.isAdmin?`<button class="vtt-draw-btn vtt-draw-btn--danger" data-vtt-fn="_vttClearAnnots" title="Tout effacer les annotations de la page">🗑</button>`:''}
         </div>
       </div>
@@ -9126,6 +9154,7 @@ async function _vttMountTable(content) {
           <span class="vtt-walls-grp-lbl">Édition</span>
           <button class="vtt-btn-sm"        data-fog-tool="eraser" data-vtt-fn="_vttFogTool" data-vtt-args="eraser" title="Effacer (clic sur mur, lumière ou zone de brouillard)">🗑 Effacer</button>
           <button class="vtt-btn-sm"        data-vtt-fn="_vttFogUndo" title="Annuler la dernière pose (Ctrl+Z)">↩ Annuler</button>
+          <button class="vtt-btn-sm"        data-vtt-fn="_vttFogRedo" title="Rétablir la dernière pose annulée (Ctrl+Y)">↪ Rétablir</button>
         </div>
       </div>
       <div class="vtt-walls-bar-hint">
@@ -9238,6 +9267,7 @@ export const VTT_ACTIONS = {
   _vttGateBack,
   _vttToggleSessionLive,
   _vttUndoDraw,
+  _vttRedoDraw,
   _invPickToggle,
   _invPickConfirm,
   _invPickCancel,
@@ -9338,6 +9368,7 @@ export const VTT_ACTIONS = {
   _vttFogClearOps,
   _vttFogTool,
   _vttFogUndo,
+  _vttFogRedo,
   _vttImportGithubRelease,
   _vttInsTab,
   _vttInvokeMyToken,
