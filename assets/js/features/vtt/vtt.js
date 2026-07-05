@@ -5700,6 +5700,52 @@ async function _vttRollAttack() {
       showNotif(`⚔️ ${wrBuff.weaponName} équipée (${armDice})`, 'success');
     }
 
+    // ── Enchantement : jet de d20 pour Réussite / Échec critique ────────────
+    // Un enchantement (buff allié) ne vise pas une CA, mais on lance quand même
+    // un d20 :
+    //  • Échec critique (1 naturel) → le sort ÉCHOUE, le mana est tout de même perdu.
+    //  • Réussite critique (20 nat, ou seuil abaissé par la rune Chance) → signalée.
+    // (avantage/désavantage du lanceur pris en compte, relance chanceuse sur un 1.)
+    let _enchD20 = null, _enchRC = false;
+    if (opt.isEnchant) {
+      let eMode = mode;
+      const eCondMods = _conditionsAttackMods(src, null, opt);
+      if (eMode === 'normal') {
+        if (eCondMods.hasAdv && !eCondMods.hasDis) eMode = 'adv';
+        else if (eCondMods.hasDis && !eCondMods.hasAdv) eMode = 'dis';
+      }
+      const eR1 = Math.floor(Math.random()*20)+1;
+      const eR2 = eMode !== 'normal' ? Math.floor(Math.random()*20)+1 : null;
+      _enchD20 = eMode === 'adv' ? Math.max(eR1, eR2) : eMode === 'dis' ? Math.min(eR1, eR2) : eR1;
+      const eLuck = await _consumeLuckyReroll(srcId, src, _enchD20, _enchD20 === 1);
+      if (eLuck) _enchD20 = eLuck.d20;
+      const eCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
+      _enchRC = _enchD20 >= eCritThreshold;
+
+      if (_enchD20 === 1) {
+        // Échec critique : le sort ne se lance pas, mais le mana est perdu.
+        await _deductPm();
+        await _consumeItem();
+        await _markActionUsed();
+        const ecTgt = targetIds.map(id => { const td = VS.tokens[id]?.data; return td ? (_live(td).displayName ?? td.name) : null; })
+          .filter(Boolean).join(', ') || (lT?.displayName ?? tgt?.name ?? '');
+        await addDoc(_logCol(), {
+          type: 'cast', undo: _undoSnap,
+          authorId: STATE.user?.uid||null, authorName,
+          casterName: lS.displayName??src.name,
+          characterImage: lS.displayImage||null,
+          targetName: ecTgt,
+          optLabel: opt.label, pmCost: opt.pmCost,
+          castEC: true,
+          castEffect: `💔 Échec critique (d20 = 1) — sort raté${opt.pmCost>0?`, ${opt.pmCost} PM perdus`:''}`,
+          createdAt: serverTimestamp(),
+        }).catch(()=>{});
+        showNotif(`💔 Échec critique ! ${opt.label} raté${opt.pmCost>0?` — ${opt.pmCost} PM perdus`:''}`, 'error');
+        _cleanup();
+        return;
+      }
+    }
+
     // ── Enchantements (Dégâts, État, Toucher, Déplacement, slots) : buffs / états sur alliés ──
     if (opt.mods?.enchantArmeDmg || opt.mods?.enchantPieds || opt.mods?.enchantGeneric
         || opt.mods?.enchantEtatId || opt.mods?.enchantToucher || opt.mods?.enchantMove) {
@@ -5793,6 +5839,8 @@ async function _vttRollAttack() {
         } else if (opt.enchantFormula) {
           castEffect = `⚔️ +${opt.enchantFormula} / arme alliée`;
         }
+        // Résultat du jet de cast (RC/EC) devant l'effet.
+        if (_enchD20 != null) castEffect = `🎲 ${_enchD20}${_enchRC ? ' 💥 RC' : ''} · ${castEffect}`;
       }
 
       // Log "cast" générique : sauté pour les afflictions (déjà loggées via

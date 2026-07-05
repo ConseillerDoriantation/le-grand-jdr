@@ -3411,6 +3411,7 @@
 .vtt-log--half   { --log-c: #b47fff; }
 .vtt-log--heal   { --log-c: var(--emerald); }
 .vtt-log--cast   { --log-c: #b47fff; }
+.vtt-log--cast-ec { --log-c: #ef4444; }
 .vtt-log--aff    { --log-c: #8b5cf6; }
 .vtt-log--saveok   { --log-c: var(--emerald); }
 .vtt-log--savefail { --log-c: #ef4444; }

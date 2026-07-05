@@ -441,10 +441,10 @@ export function _renderChatLogImpl(msgs) {
       badges: pmBadge, ts,
     });
     const body = `<div class="vtt-log-body">
-      <span class="vtt-log-icon">✨</span>
+      <span class="vtt-log-icon">${m.castEC ? '💔' : '✨'}</span>
       <span class="vtt-log-text">${_esc(m.castEffect || 'Sort activé')}</span>
     </div>`;
-    return `<div class="vtt-log vtt-log--cast">${head}${body}${_undoBtn(m)}</div>`;
+    return `<div class="vtt-log vtt-log--cast${m.castEC ? ' vtt-log--cast-ec' : ''}">${head}${body}${_undoBtn(m)}</div>`;
   };
 
   /** Annonce d'affliction : "A lance Silence sur B" */
