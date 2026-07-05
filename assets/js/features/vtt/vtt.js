@@ -2203,9 +2203,10 @@ function _vttSpellMods(s) {
     // Neutralisée si combo Sentinelle (Affliction + Invocation) : portée par la sentinelle.
     laceration: (lacCount > 0 && !isSentinelle)
       ? { runes: lacCount, reduction: lacCount, max: 2, maxElite: 4 } : null,
-    // Chance : étend la plage critique, plafonné à RC 17-20.
+    // Chance : étend la plage critique (RC = 20 - nb runes Chance), sans plafond.
+    // Plancher à 2 pour garder le 1 naturel en échec critique.
     chance: nbCh > 0 && !isCoupChance
-      ? { rc: Math.max(17, 20 - nbCh) } : null,
+      ? { rc: Math.max(2, 20 - nbCh) } : null,
     // Concentration : chaque rune supplémentaire facilite le JS de maintien.
     concentration: nbConc > 0
       ? { dd: Math.max(5, 11 - 2 * (nbConc - 1)), runes: nbConc } : null,
@@ -3277,7 +3278,7 @@ function _buildAttackOptions(t) {
         const elId = a.noyauTypeId || t.summonElementId || 'physique';
         const elObj = getDamageTypeById(VS.damageTypes, elId);
         const nbCh = Array.isArray(a.runes) ? a.runes.filter(r => r === 'Chance').length : 0;
-        const rc   = nbCh > 0 ? Math.max(17, 20 - nbCh) : (t.summonChanceRc ?? 20);
+        const rc   = nbCh > 0 ? Math.max(2, 20 - nbCh) : (t.summonChanceRc ?? 20);
         options.push({
           id: `summon_action_${ai}`,
           icon: a.icon || '✨',
@@ -5853,7 +5854,7 @@ async function _vttRollAttack() {
         hHitTotal = hD20 + hTouchMod + hSetBon + bonusHit;
       }
       // Combo Chance : élargit la plage critique (RC abaissé sur le sort)
-      const hCritThreshold = Math.max(17, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
+      const hCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
       const hIsCrit   = hD20 >= hCritThreshold;
       const hIsFumble = hD20 === 1;
 
@@ -5909,7 +5910,9 @@ async function _vttRollAttack() {
         healTotal = Math.max(1, maxDice + healFixed);
       } else if (hIsCrit) {
         const maxDice = _maxDice(effectiveDice);
-        const critRoll = _rollDice(effectiveDice);
+        // Rune Chance (opt.mods.chance) → double max : la 2e partie est aussi maximisée
+        // (max + max) au lieu de max + relance. Le buff Chanceux ne passe pas par ce mod.
+        const critRoll = opt.mods?.chance ? maxDice : _rollDice(effectiveDice);
         healRaw   = critRoll;          // pour le log (le "raw" est le 2e jet)
         healTotal = Math.max(1, maxDice + critRoll + 2 * healFixed);
       } else {
@@ -6020,7 +6023,7 @@ async function _vttRollAttack() {
     // Combo Chance : RC abaissée (19-20, 17-20…) — élargit la plage critique
     // RC = rc du sort (rune Chance) abaissée par l'état « Chanceux » de l'attaquant,
     // plancher 17. Le crit reste normal (max + relance) — le double-max n'est pas ici.
-    const critThreshold = Math.max(17, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
+    const critThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
     let isCrit   = d20 >= critThreshold;
     let isFumble = d20 === 1;
 
@@ -6094,9 +6097,16 @@ async function _vttRollAttack() {
         sharedDmgTotalHit    = Math.max(1, maxDice + totalFixed);
       } else if (isCrit) {
         sharedCritNormalMax = _maxDice(effectiveDice) + totalFixed;
-        const critDet = _rollDiceDetailed(effectiveDice);
-        sharedCritRaw2      = critDet.total;
-        sharedCritRollsDetail = { rolls: critDet.rolls, sides: critDet.sides, mod: critDet.mod };
+        // Rune Chance (opt.mods.chance) → double max : la 2e partie est aussi maximisée
+        // (max+max) au lieu de max + relance. Le buff Chanceux (arme) n'a pas ce mod → crit normal.
+        if (opt.mods?.chance) {
+          sharedCritRaw2      = _maxDice(effectiveDice);
+          sharedCritRollsDetail = null; // valeur max, pas de rolls individuels
+        } else {
+          const critDet = _rollDiceDetailed(effectiveDice);
+          sharedCritRaw2      = critDet.total;
+          sharedCritRollsDetail = { rolls: critDet.rolls, sides: critDet.sides, mod: critDet.mod };
+        }
         sharedCritFixed2    = totalFixed;
         sharedDmgRaw        = sharedCritRaw2;
         sharedDmgTotalHit   = sharedCritNormalMax + sharedCritRaw2 + sharedCritFixed2;

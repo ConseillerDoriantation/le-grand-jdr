@@ -977,7 +977,7 @@ const RUNE_META = [
   { nom:'Enchantement',  icon:'✨', color:'#e8b84b', family:'soutien',   effet:'Booste un allié · 2 tours' },
   { nom:'Affliction',    icon:'💀', color:'#8b5cf6', family:'soutien',   effet:'Élément + état sur arme ennemie · 2 tours' },
   { nom:'Invocation',    icon:'🐾', color:'#a16207', family:'soutien',   effet:'Créature liée · 10 PV, CA 10' },
-  { nom:'Chance',        icon:'🍀', color:'#facc15', family:'soutien',   effet:'RC 19–20, jusqu’à 17–20 max' },
+  { nom:'Chance',        icon:'🍀', color:'#facc15', family:'soutien',   effet:'RC −1 par rune · crit = double max' },
   { nom:'Durée',         icon:'⏱️', color:'#06b6d4', family:'meta',      effet:'+2 tours' },
   { nom:'Concentration', icon:'🧠', color:'#6366f1', family:'meta',      effet:'Maintien hors tour · JS Sa DD 11 si touché' },
   { nom:'Déclenchement', icon:'⚡', color:'#f97316', family:'meta',      effet:'Transforme le sort en Réaction ou Action Bonus · non cumulable' },
@@ -1088,11 +1088,9 @@ function _runeLiveContribution(nom, counts) {
       };
     }
     case 'Chance': {
-      const rawRc = 20 - cnt;
-      const rcLow = Math.max(17, rawRc);
-      const cap = rawRc < 17 ? ' · plafond atteint' : '';
+      const rcLow = Math.max(2, 20 - cnt);
       return {
-        main:  `Critique RC ${rcLow}–20 · dé de crit max${cap}`,
+        main:  `Critique RC ${rcLow}–20 · crit = double max`,
       };
     }
     case 'Durée': {
