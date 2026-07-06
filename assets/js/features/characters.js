@@ -342,45 +342,47 @@ function _buildTabsHtml(c, v3Tab) {
 function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckMax, titresChips }) {
   return `<aside class="id-side" id="cs-sidebar" data-aura="${c.auraColor?'custom':(c.aura||'blue')}">
 
-    <div class="id-portrait-wrap">
-      <div class="id-portrait"
-           ${canEdit ? `data-action="open-character-photo" data-charid="${c.id}"` : ''}>
-        ${characterPortraitContent(c, {
-          imgStyle: `transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);transform-origin:center`,
-          fallbackTag: 'span',
-        })}
+    <div class="id-identity">
+      <div class="id-portrait-wrap">
+        <div class="id-portrait"
+             ${canEdit ? `data-action="open-character-photo" data-charid="${c.id}"` : ''}>
+          ${characterPortraitContent(c, {
+            imgStyle: `transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);transform-origin:center`,
+            fallbackTag: 'span',
+          })}
+        </div>
+        <div class="id-lvl-badge">${canEdit
+          ? `<button type="button" class="id-lvl-edit" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Modifier le niveau" style="background:none;border:none;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer;padding:0">Niv. <strong>${c.niveau||1}</strong></button>`
+          : `Niv. <strong>${c.niveau||1}</strong>`}</div>
       </div>
-      <div class="id-lvl-badge">${canEdit
-        ? `<button type="button" class="id-lvl-edit" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Modifier le niveau" style="background:none;border:none;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer;padding:0">Niv. <strong>${c.niveau||1}</strong></button>`
-        : `Niv. <strong>${c.niveau||1}</strong>`}</div>
-    </div>
 
-    <div class="id-name-row">
-      ${canEdit
-        ? `<span class="id-name" data-action="inlineEditText" data-id="${c.id}" data-field="nom" title="Renommer">${_esc(c.nom||'Sans nom')}</span>`
-        : `<span class="id-name">${_esc(c.nom||'Sans nom')}</span>`}
-      <span class="id-actions-mini">
-        ${canEdit?`<button class="id-default-btn${c.isDefault?' is-on':''}"
-          title="${c.isDefault?"Personnage par défaut — il représente le joueur":'Définir comme personnage par défaut'}"
-          data-action="_setDefaultCharacter" data-id="${c.id}">${c.isDefault?'★':'☆'}</button>`:''}
-        ${canEdit?`<button title="Renommer" data-action="inlineEditText" data-id="${c.id}" data-field="nom" data-target-sel=".id-name">✎</button>`:''}
-        ${canEdit?`<button title="Exporter" data-action="openCharExportMenu" data-id="${c.id}">📤</button>`:''}
-        ${canEdit?`<button class="id-del-btn" title="Supprimer ce personnage" data-action="deleteChar" data-id="${c.id}">🗑️</button>`:''}
-      </span>
-    </div>
+      <div class="id-name-row">
+        ${canEdit
+          ? `<span class="id-name" data-action="inlineEditText" data-id="${c.id}" data-field="nom" title="Renommer">${_esc(c.nom||'Sans nom')}</span>`
+          : `<span class="id-name">${_esc(c.nom||'Sans nom')}</span>`}
+        <span class="id-actions-mini">
+          ${canEdit?`<button class="id-default-btn${c.isDefault?' is-on':''}"
+            title="${c.isDefault?"Personnage par défaut — il représente le joueur":'Définir comme personnage par défaut'}"
+            data-action="_setDefaultCharacter" data-id="${c.id}">${c.isDefault?'★':'☆'}</button>`:''}
+          ${canEdit?`<button title="Renommer" data-action="inlineEditText" data-id="${c.id}" data-field="nom" data-target-sel=".id-name">✎</button>`:''}
+          ${canEdit?`<button title="Exporter" data-action="openCharExportMenu" data-id="${c.id}">📤</button>`:''}
+          ${canEdit?`<button class="id-del-btn" title="Supprimer ce personnage" data-action="deleteChar" data-id="${c.id}">🗑️</button>`:''}
+        </span>
+      </div>
 
-    ${titresChips}
+      ${titresChips}
 
-    <div class="id-chips">
-      ${canEdit
-        ? `<span class="id-chip classe" data-action="inlineEditChip" data-id="${c.id}" data-field="classe" data-label="Classe">${_esc(c.classe||'Classe')}</span>`
-        : (c.classe?`<span class="id-chip classe">${_esc(c.classe)}</span>`:'')}
-      ${canEdit
-        ? `<span class="id-chip race" data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${_esc(c.race||'Race')}</span>`
-        : (c.race?`<span class="id-chip race">${_esc(c.race)}</span>`:'')}
-      ${STATE.isAdmin
-        ? `<span class="id-chip owner" data-action="reassignCharOwner" data-id="${c.id}" title="Réassigner à un autre compte joueur">👤 ${_esc(c.ownerPseudo || (c.uid ? 'Compte lié' : 'Sans compte'))}</span>`
-        : ''}
+      <div class="id-chips">
+        ${canEdit
+          ? `<span class="id-chip classe" data-action="inlineEditChip" data-id="${c.id}" data-field="classe" data-label="Classe">${_esc(c.classe||'Classe')}</span>`
+          : (c.classe?`<span class="id-chip classe">${_esc(c.classe)}</span>`:'')}
+        ${canEdit
+          ? `<span class="id-chip race" data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${_esc(c.race||'Race')}</span>`
+          : (c.race?`<span class="id-chip race">${_esc(c.race)}</span>`:'')}
+        ${STATE.isAdmin
+          ? `<span class="id-chip owner" data-action="reassignCharOwner" data-id="${c.id}" title="Réassigner à un autre compte joueur">👤 ${_esc(c.ownerPseudo || (c.uid ? 'Compte lié' : 'Sans compte'))}</span>`
+          : ''}
+      </div>
     </div>
 
     <!-- XP -->
@@ -490,20 +492,8 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
   </aside>`;
 }
 
-function _buildMainColHtml(c, canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, titres, playerLbl, advLbl, v3Tab }) {
+function _buildMainColHtml(canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, v3Tab }) {
   return `<section class="main-col">
-
-    <!-- Hero strip -->
-    <div class="hero-strip">
-      <div class="hero-id">
-        <div class="hero-id-name">${_esc(c.nom || 'Sans nom')}
-          <span class="hero-id-tag">${[c.classe, c.race, titres[0]].filter(Boolean).map(_esc).join(' · ')}</span>
-        </div>
-        ${advLbl || playerLbl ? `<div class="hero-id-tag" style="font-size:.7rem">
-          ${advLbl}${playerLbl}
-        </div>` : ''}
-      </div>
-    </div>
 
     <!-- Stats banner 6 tuiles -->
     <div class="stats-banner" id="cs-stats-banner">
@@ -566,11 +556,8 @@ function renderCharSheet(c, keepTab) {
       </div>`
     : '';
 
-  const playerLbl = c.ownerPseudo ? `<span class="hero-tag-sep">·</span><span style="color:var(--text-dim)">Joueur :</span> ${_esc(c.ownerPseudo)}` : '';
-  const advLbl    = STATE.adventure?.nom ? `<span style="color:var(--text-dim)">Aventure :</span> ${_esc(STATE.adventure.nom)}` : '';
-
   const sidebarHtml = _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckMax, titresChips });
-  const mainColHtml = _buildMainColHtml(c, canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, titres, playerLbl, advLbl, v3Tab });
+  const mainColHtml = _buildMainColHtml(canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, v3Tab });
 
   area.innerHTML = `<div class="cs-v3" style="${_auraStyleVars(c)}">
   <div class="app-shell">
