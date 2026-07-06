@@ -33,6 +33,44 @@
 .stats-reset-btn { color: var(--crimson-light, #ff8ca7); border-color: rgba(255,90,126,.3); background: transparent; }
 .stats-reset-btn:hover { background: rgba(255,90,126,.1); border-color: rgba(255,90,126,.5); color: var(--crimson-light, #ff8ca7); }
 
+/* ── Contrôles : frise de séances + chips joueurs ── */
+.stats-controls { display: flex; flex-direction: column; gap: .6rem; margin-bottom: 1.1rem; }
+.stats-controls-top { display: flex; align-items: center; justify-content: space-between; gap: .8rem; flex-wrap: wrap; }
+.stats-chips { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; min-width: 0; }
+.stats-sessions { overflow-x: auto; flex: 1; padding-bottom: 2px; }
+.stats-chips-lbl { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); margin-right: .1rem; }
+.stats-chip {
+  flex-shrink: 0; cursor: pointer; font-family: inherit;
+  font-size: .78rem; line-height: 1; white-space: nowrap;
+  padding: .38rem .75rem; border-radius: 999px;
+  background: var(--bg-card); border: 1px solid var(--border); color: var(--text-muted);
+  transition: background .12s, border-color .12s, color .12s;
+}
+.stats-chip:hover { color: var(--text); border-color: var(--gold-glow, #6366f1); }
+.stats-sessions .stats-chip.active { background: rgba(34,195,142,.16); border-color: rgba(34,195,142,.55); color: var(--emerald, #22c38e); font-weight: 700; }
+.stats-players .stats-chip.active { background: rgba(79,140,255,.16); border-color: rgba(79,140,255,.55); color: #9cc3ff; font-weight: 700; }
+
+/* ── Graphiques ── */
+.stats-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: .7rem; }
+.stats-chart-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: .85rem 1rem 1rem; }
+.stats-chart-hd { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-bottom: .7rem; font-size: .82rem; font-weight: 700; color: var(--text); }
+.stats-chart-sel {
+  background: var(--bg-dark); color: var(--text-soft, #c8d4e8);
+  border: 1px solid var(--border); border-radius: 7px;
+  padding: .28rem .5rem; font-size: .74rem; cursor: pointer; font-family: inherit;
+}
+.stats-chart-svg { width: 100%; height: auto; display: block; }
+.stats-chart-lbl { fill: var(--text-dim); font-size: 8px; font-family: inherit; }
+.stats-chart-empty { color: var(--text-dim); font-size: .82rem; text-align: center; padding: 1.6rem 0; }
+
+/* Barres horizontales (comparatif perso) */
+.stats-bars { display: flex; flex-direction: column; gap: .5rem; }
+.stats-bar-row { display: flex; align-items: center; gap: .55rem; }
+.stats-bar-name { width: 86px; flex-shrink: 0; font-size: .76rem; color: var(--text-soft, #c8d4e8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stats-bar-track { flex: 1; height: 14px; border-radius: 5px; background: var(--bg-dark); overflow: hidden; }
+.stats-bar-track > span { display: block; height: 100%; border-radius: 5px; }
+.stats-bar-val { width: 34px; flex-shrink: 0; text-align: right; font-size: .8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+
 /* ── Héro : jauge de réussite + chiffres phares de la campagne ── */
 .stats-hero {
   display: flex; align-items: center; gap: 1.3rem;
