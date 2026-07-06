@@ -4,13 +4,13 @@
 import { STATE } from '../core/state.js';
 import { registerActions, dispatchAction } from '../core/actions.js';
 import { loadChars, loadCollection, getCachedCollection, getDocData } from '../data/firestore.js';
-import { _esc, appSplashHtml, pageHeaderHtml, loadingHtml} from '../shared/html.js';
+import { _esc, _norm, appSplashHtml, pageHeaderHtml, loadingHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { isFeatureEnabled } from '../shared/features.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { loadStats, resetStats, deleteCharStats, setSessionMission } from '../shared/stats.js';
 import { showNotif } from '../shared/notifications.js';
-import { confirmModal, openModal, promptModal } from '../shared/modal.js';
+import { confirmModal, openModal, closeModalDirect } from '../shared/modal.js';
 import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
@@ -161,6 +161,7 @@ function _statsBarChart(rows, key) {
 }
 
 // Camembert (donut SVG + légende) : répartition d'une métrique entre persos.
+// Anneau à segments arrondis espacés (padAngle), total au centre, ombre douce.
 function _statsPieChart(rows, key) {
   const m = _STATS_METRICS[key] || _STATS_METRICS.dmgDealt;
   let data = rows.map(r => ({ id: r.id, name: r.name, v: _statsMetricVal(r, key) }))
@@ -168,23 +169,29 @@ function _statsPieChart(rows, key) {
   if (!data.length) return `<div class="stats-chart-empty">Aucune donnée pour « ${m.lbl} ».</div>`;
   const total = data.reduce((s, d) => s + d.v, 0);
   if (data.length > 7) { const rest = data.slice(6); data = data.slice(0, 6).concat([{ name: 'Autres', v: rest.reduce((s, d) => s + d.v, 0) }]); }
-  const palette = ['#c9b6ff', '#ff9d7a', '#4fd3a6', '#7fb0ff', '#f4c430', '#ef4444', '#22c38e'];
-  const cx = 56, cy = 56, R = 50, rin = 30;
+  const palette = ['#a78bfa', '#ff9d7a', '#22c38e', '#4f8cff', '#f4c430', '#ef4444', '#5fd0c8'];
+  const cx = 60, cy = 60, R = 46, TW = 16, GAP = 0.09;   // ring radius / épaisseur / espace
   let ang = -Math.PI / 2;
   const arcs = data.map((s, i) => {
-    const frac = s.v / total, a2 = ang + frac * 2 * Math.PI, large = frac > 0.5 ? 1 : 0;
-    const x1 = cx + R * Math.cos(ang), y1 = cy + R * Math.sin(ang), x2 = cx + R * Math.cos(a2), y2 = cy + R * Math.sin(a2);
-    ang = a2;
+    const frac = s.v / total, sweep = frac * 2 * Math.PI;
+    const a1 = ang, a2 = ang + sweep; ang = a2;
+    const g = Math.min(GAP, sweep * 0.5);
+    const b1 = a1 + g / 2, b2 = a2 - g / 2;
+    const x1 = cx + R * Math.cos(b1), y1 = cy + R * Math.sin(b1), x2 = cx + R * Math.cos(b2), y2 = cy + R * Math.sin(b2);
+    const large = (b2 - b1) > Math.PI ? 1 : 0;
     const col = palette[i % palette.length];
-    // Cercle complet (un seul perso) : arc dégénéré → dessine un disque.
-    const d = frac >= 0.999
-      ? `M ${cx} ${cy} m -${R} 0 a ${R} ${R} 0 1 0 ${2 * R} 0 a ${R} ${R} 0 1 0 -${2 * R} 0`
-      : `M ${cx} ${cy} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`;
-    return { d, col, s, pct: Math.round(frac * 100) };
+    const seg = frac >= 0.999
+      ? `<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${col}" stroke-width="${TW}"/>`
+      : `<path d="M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}" fill="none" stroke="${col}" stroke-width="${TW}" stroke-linecap="round"/>`;
+    return { seg, col, s, pct: Math.round(frac * 100) };
   });
-  const svg = `<svg viewBox="0 0 112 112" class="stats-pie-svg" role="img">
-    ${arcs.map(a => `<path d="${a.d}" fill="${a.col}" stroke="var(--bg-card)" stroke-width="1"><title>${_esc(a.s.name)} · ${a.s.v} (${a.pct}%)</title></path>`).join('')}
-    <circle cx="${cx}" cy="${cy}" r="${rin}" fill="var(--bg-card)"/></svg>`;
+  const firstWord = (m.lbl || '').split(' ')[0];
+  const svg = `<svg viewBox="0 0 120 120" class="stats-pie-svg" role="img">
+    <circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="var(--bg-dark)" stroke-width="${TW}"/>
+    ${arcs.map(a => `<g class="stats-pie-seg"><title>${_esc(a.s.name)} · ${a.s.v} (${a.pct}%)</title>${a.seg}</g>`).join('')}
+    <text x="${cx}" y="${cy - 5}" text-anchor="middle" dominant-baseline="central" class="stats-pie-total">${total}</text>
+    <text x="${cx}" y="${cy + 11}" text-anchor="middle" dominant-baseline="central" class="stats-pie-sub">${_esc(firstWord)}</text>
+  </svg>`;
   const legend = `<div class="stats-pie-legend">${arcs.map(a => `<div class="stats-pie-li"><span class="stats-pie-dot" style="background:${a.col}"></span><span class="stats-pie-nm" title="${_esc(a.s.name)}">${_esc(a.s.name)}</span><span class="stats-pie-vl">${a.pct}%</span></div>`).join('')}</div>`;
   return `<div class="stats-pie">${svg}${legend}</div>`;
 }
@@ -1855,18 +1862,48 @@ registerActions({
   _statsEvoMetric: (el) => { _statsEvoMetric = el.value; _statsRender(_statsScope); },
   // Type du graphique comparatif : barres ↔ camembert.
   _statsCmpType: (btn) => { _statsCmpType = btn.dataset.type === 'pie' ? 'pie' : 'bars'; _statsRender(_statsScope); },
-  // MJ : nomme la mission jouée à une séance (stockée dans le doc stats).
+  // MJ : relie la séance à une mission de la Trame (sélecteur recherchable).
   _statsEditMission: async (btn) => {
     if (!STATE.isAdmin) return;
     const dk = btn.dataset.scope; if (!dk) return;
-    const cur = _statsData?.sessions?.[dk]?.mission || '';
-    const val = await promptModal('Mission jouée cette séance', {
-      title: `📅 Séance du ${_statsFmtDate(dk)}`, default: cur, placeholder: "Ex. L'antre du dragon", confirmLabel: 'Enregistrer',
-    }).catch(() => null);
-    if (val === null || val === undefined) return;
-    await setSessionMission(dk, val);
-    (_statsData.sessions ??= {})[dk] = { mission: (val || '').trim() };
+    let story = getCachedCollection('story');
+    if (!story || !story.length) story = await loadCollection('story').catch(() => []);
+    const missions = (story || [])
+      .filter(m => m.type === 'mission' || m.type === 'event')
+      .sort((a, b) => (a.titre || '').localeCompare(b.titre || '', 'fr'));
+    const curId = _statsData?.sessions?.[dk]?.missionId || '';
+    const opt = (id, ico, title, active) =>
+      `<button type="button" class="stats-mp-opt${active ? ' active' : ''}" data-name="${_esc(_norm(title))}"
+        data-action="_statsPickMission" data-scope="${dk}" data-mission-id="${_esc(id)}" data-mission="${_esc(title)}">
+        <span class="stats-mp-ico">${ico}</span><span class="stats-mp-tt">${_esc(title)}</span>${active ? '<span class="stats-mp-check">✓</span>' : ''}</button>`;
+    openModal(`📅 Séance du ${_statsFmtDate(dk)}`, `
+      <div class="stats-mp">
+        <input type="text" class="stats-mp-search" placeholder="🔍 Rechercher une mission / un événement…" data-input="_statsMissionSearch" autocomplete="off">
+        <div class="stats-mp-list">
+          <button type="button" class="stats-mp-opt stats-mp-none${!curId ? ' active' : ''}" data-action="_statsPickMission" data-scope="${dk}" data-mission-id="" data-mission="">
+            <span class="stats-mp-ico">✖</span><span class="stats-mp-tt">Aucune mission</span></button>
+          ${missions.map(m => opt(m.id, m.type === 'event' ? '📖' : '🎯', m.titre || 'Mission', m.id === curId)).join('')}
+          ${missions.length ? '' : '<div class="stats-mp-empty">Aucune mission dans la Trame.</div>'}
+        </div>
+      </div>`, { subtitle: 'Relier la séance à un élément de la Trame', accent: '#22c38e' });
+  },
+  // Choix d'une mission dans le sélecteur.
+  _statsPickMission: async (btn) => {
+    if (!STATE.isAdmin) return;
+    const dk = btn.dataset.scope; if (!dk) return;
+    const mid = btn.dataset.missionId || '';
+    const mission = btn.dataset.mission || '';
+    closeModalDirect();
+    await setSessionMission(dk, mission, mid);
+    (_statsData.sessions ??= {})[dk] = { mission: mission.trim(), missionId: mid };
     _statsRender(_statsScope);
+  },
+  // Filtre live du sélecteur de missions (sans re-render).
+  _statsMissionSearch: (el) => {
+    const q = _norm(el.value || '');
+    document.querySelectorAll('.stats-mp-list .stats-mp-opt:not(.stats-mp-none)').forEach(b => {
+      b.style.display = (!q || (b.dataset.name || '').includes(q)) ? '' : 'none';
+    });
   },
   // Export : copie le récap texte du scope courant (collable dans Discord…).
   _statsExport: async () => {

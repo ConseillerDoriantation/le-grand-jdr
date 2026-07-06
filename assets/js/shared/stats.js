@@ -76,11 +76,12 @@ export async function deleteCharStats(charId) {
 
 // Libellé de mission d'une séance (date → nom de mission), édité par le MJ.
 // Stocké dans le même doc stats (sessions.{date}.mission) — 0 lecture en plus.
-export async function setSessionMission(dateKey, mission) {
+export async function setSessionMission(dateKey, mission, missionId = '') {
   if (!dateKey) return false;
   const clean = (mission || '').trim();
-  await bumpStats({ sessions: { [dateKey]: { mission: clean } } });
-  if (_mem) { (_mem.sessions ??= {})[dateKey] = { mission: clean }; }
+  const mid = missionId || '';
+  await bumpStats({ sessions: { [dateKey]: { mission: clean, missionId: mid } } });
+  if (_mem) { (_mem.sessions ??= {})[dateKey] = { mission: clean, missionId: mid }; }
   return true;
 }
 

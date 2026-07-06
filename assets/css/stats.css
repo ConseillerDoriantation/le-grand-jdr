@@ -113,14 +113,40 @@
 .stats-col-bar > span { width: 100%; border-radius: 4px 4px 0 0; min-height: 2px; }
 .stats-col-lbl { font-size: .6rem; color: var(--text-dim); white-space: nowrap; }
 
-/* Camembert (donut + légende) */
-.stats-pie { display: flex; align-items: center; gap: .8rem; }
-.stats-pie-svg { width: 108px; height: 108px; flex-shrink: 0; }
-.stats-pie-legend { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .22rem; }
-.stats-pie-li { display: flex; align-items: center; gap: .4rem; font-size: .74rem; }
-.stats-pie-dot { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
+/* Camembert (donut à segments arrondis + légende) */
+.stats-pie { display: flex; align-items: center; gap: 1rem; }
+.stats-pie-svg { width: 124px; height: 124px; flex-shrink: 0; filter: drop-shadow(0 3px 9px rgba(0,0,0,.5)); }
+.stats-pie-seg { transition: opacity .12s; }
+.stats-pie-seg:hover { opacity: .78; }
+.stats-pie-total { fill: var(--text); font-family: 'Cinzel', serif; font-weight: 700; font-size: 21px; font-variant-numeric: tabular-nums; }
+.stats-pie-sub { fill: var(--text-dim); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; }
+.stats-pie-legend { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .28rem; }
+.stats-pie-li { display: flex; align-items: center; gap: .45rem; font-size: .76rem; }
+.stats-pie-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; box-shadow: 0 0 6px -1px currentColor; }
 .stats-pie-nm { flex: 1; min-width: 0; color: var(--text-soft, #c8d4e8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stats-pie-vl { color: var(--text-muted); font-weight: 700; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+
+/* ── Sélecteur de mission de la Trame (modale) ── */
+.stats-mp { display: flex; flex-direction: column; gap: .6rem; }
+.stats-mp-search {
+  width: 100%; box-sizing: border-box; padding: .55rem .7rem; border-radius: 10px;
+  border: 1px solid var(--border-strong, var(--border)); background: var(--bg-elevated);
+  color: var(--text); font-size: .88rem; font-family: inherit;
+}
+.stats-mp-list { display: flex; flex-direction: column; gap: .28rem; max-height: 46vh; overflow-y: auto; }
+.stats-mp-opt {
+  display: flex; align-items: center; gap: .55rem; text-align: left; width: 100%;
+  padding: .55rem .7rem; border-radius: 10px; cursor: pointer; font-family: inherit; font-size: .86rem;
+  background: var(--bg-card); border: 1px solid var(--border); color: var(--text-soft, #c8d4e8);
+  transition: background .12s, border-color .12s, color .12s;
+}
+.stats-mp-opt:hover { border-color: var(--emerald, #22c38e); color: var(--text); background: rgba(34,195,142,.07); }
+.stats-mp-opt.active { border-color: rgba(34,195,142,.6); background: rgba(34,195,142,.12); color: var(--text); }
+.stats-mp-ico { flex-shrink: 0; }
+.stats-mp-tt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-mp-check { flex-shrink: 0; color: var(--emerald, #22c38e); font-weight: 700; }
+.stats-mp-none { color: var(--text-dim); }
+.stats-mp-empty { color: var(--text-dim); font-size: .84rem; text-align: center; padding: 1rem 0; }
 
 /* ── Héro : jauge de réussite + chiffres phares de la campagne ── */
 .stats-hero {
