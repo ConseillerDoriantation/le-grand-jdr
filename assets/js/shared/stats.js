@@ -74,6 +74,16 @@ export async function deleteCharStats(charId) {
   } catch { return false; }
 }
 
+// Libellé de mission d'une séance (date → nom de mission), édité par le MJ.
+// Stocké dans le même doc stats (sessions.{date}.mission) — 0 lecture en plus.
+export async function setSessionMission(dateKey, mission) {
+  if (!dateKey) return false;
+  const clean = (mission || '').trim();
+  await bumpStats({ sessions: { [dateKey]: { mission: clean } } });
+  if (_mem) { (_mem.sessions ??= {})[dateKey] = { mission: clean }; }
+  return true;
+}
+
 // ── Jet de compétence (Athlétisme, Acrobaties…) ──────────────────────────────
 // Comptabilise 1 jet, + crit (20 nat) et + échec critique (1 nat). La réussite
 // n'est pas auto-déterminée (pas de DD systématique) → on ne compte pas succès/échec.

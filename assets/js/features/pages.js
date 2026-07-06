@@ -8,9 +8,9 @@ import { _esc, appSplashHtml, pageHeaderHtml, loadingHtml} from '../shared/html.
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { isFeatureEnabled } from '../shared/features.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
-import { loadStats, resetStats, deleteCharStats } from '../shared/stats.js';
+import { loadStats, resetStats, deleteCharStats, setSessionMission } from '../shared/stats.js';
 import { showNotif } from '../shared/notifications.js';
-import { confirmModal, openModal } from '../shared/modal.js';
+import { confirmModal, openModal, promptModal } from '../shared/modal.js';
 import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
@@ -53,7 +53,14 @@ let _statsScope = null;                // null = toute la campagne ; sinon clé 
 let _statsLastSummary = '';            // récap texte du scope courant (export Discord)
 let _statsPlayerSel = null;            // Set d'ids ciblés (null = tous les joueurs)
 let _statsCmpMetric = 'dmgDealt';      // métrique du graphique comparatif (par perso)
+let _statsCmpType   = 'bars';          // type du comparatif : 'bars' | 'pie'
 let _statsEvoMetric = 'dmgDealt';      // métrique du graphique d'évolution (par séance)
+
+// Avatar (rond) d'un perso par id — devant son nom dans les chips/graphiques.
+const _statsAvatar = (id, name, size = 18) =>
+  characterAvatarHtml(STATE.characters?.find(x => x.id === id) || { nom: name }, { size, className: 'stats-av-xs', title: name });
+// Mission d'une séance (libellé MJ), ou '' si non renseignée.
+const _statsMissionOf = (dateKey) => (dateKey && _statsData?.sessions?.[dateKey]?.mission) || '';
 
 // Métriques graphables : clé → { libellé, couleur }. La valeur se lit sur la
 // ligne (combat, ou sRolls pour les jets de compétence).
@@ -138,19 +145,48 @@ function _statsMetricSelect(cur, action) {
     ${Object.entries(_STATS_METRICS).map(([k, m]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${m.lbl}</option>`).join('')}</select>`;
 }
 
-// Graphique en barres horizontales : compare les personnages sur une métrique.
+// Graphique en barres horizontales : compare les personnages (portrait + nom).
 function _statsBarChart(rows, key) {
   const m = _STATS_METRICS[key] || _STATS_METRICS.dmgDealt;
-  const data = rows.map(r => ({ name: r.name, v: _statsMetricVal(r, key) }))
+  const data = rows.map(r => ({ id: r.id, name: r.name, v: _statsMetricVal(r, key) }))
     .filter(d => d.v > 0).sort((a, b) => b.v - a.v).slice(0, 12);
   if (!data.length) return `<div class="stats-chart-empty">Aucune donnée pour « ${m.lbl} ».</div>`;
   const max = Math.max(...data.map(d => d.v));
   return `<div class="stats-bars">${data.map(d => `
     <div class="stats-bar-row">
-      <span class="stats-bar-name" title="${_esc(d.name)}">${_esc(d.name)}</span>
+      <span class="stats-bar-name" title="${_esc(d.name)}">${_statsAvatar(d.id, d.name, 18)}<span>${_esc(d.name)}</span></span>
       <span class="stats-bar-track"><span style="width:${Math.max(3, Math.round(d.v / max * 100))}%;background:${m.color}"></span></span>
       <span class="stats-bar-val" style="color:${m.color}">${d.v}</span>
     </div>`).join('')}</div>`;
+}
+
+// Camembert (donut SVG + légende) : répartition d'une métrique entre persos.
+function _statsPieChart(rows, key) {
+  const m = _STATS_METRICS[key] || _STATS_METRICS.dmgDealt;
+  let data = rows.map(r => ({ id: r.id, name: r.name, v: _statsMetricVal(r, key) }))
+    .filter(d => d.v > 0).sort((a, b) => b.v - a.v);
+  if (!data.length) return `<div class="stats-chart-empty">Aucune donnée pour « ${m.lbl} ».</div>`;
+  const total = data.reduce((s, d) => s + d.v, 0);
+  if (data.length > 7) { const rest = data.slice(6); data = data.slice(0, 6).concat([{ name: 'Autres', v: rest.reduce((s, d) => s + d.v, 0) }]); }
+  const palette = ['#c9b6ff', '#ff9d7a', '#4fd3a6', '#7fb0ff', '#f4c430', '#ef4444', '#22c38e'];
+  const cx = 56, cy = 56, R = 50, rin = 30;
+  let ang = -Math.PI / 2;
+  const arcs = data.map((s, i) => {
+    const frac = s.v / total, a2 = ang + frac * 2 * Math.PI, large = frac > 0.5 ? 1 : 0;
+    const x1 = cx + R * Math.cos(ang), y1 = cy + R * Math.sin(ang), x2 = cx + R * Math.cos(a2), y2 = cy + R * Math.sin(a2);
+    ang = a2;
+    const col = palette[i % palette.length];
+    // Cercle complet (un seul perso) : arc dégénéré → dessine un disque.
+    const d = frac >= 0.999
+      ? `M ${cx} ${cy} m -${R} 0 a ${R} ${R} 0 1 0 ${2 * R} 0 a ${R} ${R} 0 1 0 -${2 * R} 0`
+      : `M ${cx} ${cy} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`;
+    return { d, col, s, pct: Math.round(frac * 100) };
+  });
+  const svg = `<svg viewBox="0 0 112 112" class="stats-pie-svg" role="img">
+    ${arcs.map(a => `<path d="${a.d}" fill="${a.col}" stroke="var(--bg-card)" stroke-width="1"><title>${_esc(a.s.name)} · ${a.s.v} (${a.pct}%)</title></path>`).join('')}
+    <circle cx="${cx}" cy="${cy}" r="${rin}" fill="var(--bg-card)"/></svg>`;
+  const legend = `<div class="stats-pie-legend">${arcs.map(a => `<div class="stats-pie-li"><span class="stats-pie-dot" style="background:${a.col}"></span><span class="stats-pie-nm" title="${_esc(a.s.name)}">${_esc(a.s.name)}</span><span class="stats-pie-vl">${a.pct}%</span></div>`).join('')}</div>`;
+  return `<div class="stats-pie">${svg}${legend}</div>`;
 }
 
 // Série d'évolution : valeur de la métrique par séance (dates ascendantes),
@@ -169,23 +205,16 @@ function _statsEvoSeries(datesAsc, key, selSet) {
   });
 }
 
-// Graphique en courbe (SVG) : évolution d'une métrique séance après séance.
-function _statsLineChart(series, key) {
+// Graphique en colonnes (barres verticales, bas → haut) : évolution par séance.
+function _statsColChart(series, key) {
   const m = _STATS_METRICS[key] || _STATS_METRICS.dmgDealt;
-  const W = 300, H = 132, padL = 8, padR = 8, padT = 12, padB = 24;
   const max = Math.max(1, ...series.map(s => s.v));
-  const n = series.length;
-  const X = i => n <= 1 ? W / 2 : padL + i * (W - padL - padR) / (n - 1);
-  const Y = v => padT + (1 - v / max) * (H - padT - padB);
-  const pts = series.map((s, i) => `${X(i).toFixed(1)},${Y(s.v).toFixed(1)}`).join(' ');
-  const base = (H - padB).toFixed(1);
-  return `<svg viewBox="0 0 ${W} ${H}" class="stats-chart-svg" role="img">
-    <line x1="${padL}" y1="${base}" x2="${W - padR}" y2="${base}" stroke="var(--border)" stroke-width="1"/>
-    <polygon points="${X(0).toFixed(1)},${base} ${pts} ${X(n - 1).toFixed(1)},${base}" fill="${m.color}22"/>
-    <polyline points="${pts}" fill="none" stroke="${m.color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-    ${series.map((s, i) => `<circle cx="${X(i).toFixed(1)}" cy="${Y(s.v).toFixed(1)}" r="3" fill="var(--bg-card)" stroke="${m.color}" stroke-width="2"><title>${_statsFmtDate(s.d)} · ${s.v}</title></circle>`).join('')}
-    ${series.map((s, i) => `<text x="${X(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" class="stats-chart-lbl">${_statsFmtDate(s.d).slice(0, 5)}</text>`).join('')}
-  </svg>`;
+  return `<div class="stats-cols">${series.map(s => `
+    <div class="stats-col" title="${_statsFmtDate(s.d)} · ${s.v}">
+      <span class="stats-col-v">${s.v || ''}</span>
+      <span class="stats-col-bar"><span style="height:${s.v ? Math.max(3, Math.round(s.v / max * 100)) : 0}%;background:${m.color}"></span></span>
+      <span class="stats-col-lbl">${_statsFmtDate(s.d).slice(0, 5)}</span>
+    </div>`).join('')}</div>`;
 }
 
 // Construit les lignes/cartes de stats pour un scope donné (dateKey null = campagne).
@@ -223,29 +252,28 @@ function _statsRender(dateKey) {
   _statsScope = dateKey || null;
   const root = document.getElementById('stats-root');
   if (!root) return;
-  const allRows = _statsRowsFor(dateKey);
+  const allRows = _statsRowsFor(dateKey);   // participants du scope courant
   // Filtre « joueurs ciblés » : recalcule toute la page sur le sous-ensemble choisi.
   const sel = _statsPlayerSel;
   const rows = (sel && sel.size) ? allRows.filter(r => sel.has(r.id)) : allRows;
-  // Roster stable (toute la campagne) pour les chips joueurs — indépendant du scope
-  // courant, pour qu'un joueur reste dé-sélectionnable même sans données ce jour-là.
-  const roster = _statsRowsFor(null);
 
   const allDates = [...new Set(Object.values(_statsData?.chars || {}).flatMap(c => Object.keys(c.byDate || {})))].sort().reverse();
 
-  // Frise de séances : un clic = une vue (campagne entière ou une date).
-  const scopeChip = (val, label, active) =>
-    `<button class="stats-chip${active ? ' active' : ''}" data-action="_statsSetScope" data-scope="${val}">${label}</button>`;
+  // Frise de séances : un clic = une vue. Chaque séance affiche sa mission (MJ).
+  const scopeChip = (val, label, active, mission) =>
+    `<button class="stats-chip stats-chip-session${active ? ' active' : ''}" data-action="_statsSetScope" data-scope="${val}"${mission ? ` title="${_esc(mission)}"` : ''}>
+      <span class="stats-chip-date">${label}</span>${mission ? `<span class="stats-chip-mission">${_esc(mission)}</span>` : ''}
+    </button>`;
   const sessionsBar = `<div class="stats-chips stats-sessions">
-    ${scopeChip('', 'Toute la campagne', !dateKey)}
-    ${allDates.map(d => scopeChip(d, `📅 ${_statsFmtDate(d).slice(0, 5)}`, d === dateKey)).join('')}
+    ${scopeChip('', 'Toute la campagne', !dateKey, '')}
+    ${allDates.map(d => scopeChip(d, `📅 ${_statsFmtDate(d).slice(0, 5)}`, d === dateKey, _statsMissionOf(d))).join('')}
   </div>`;
 
-  // Chips « joueurs ciblés » (roster complet). « Tous » réinitialise le filtre.
-  const playersBar = roster.length ? `<div class="stats-chips stats-players">
+  // Chips « joueurs ciblés » : uniquement les participants du scope (portrait + nom).
+  const playersBar = allRows.length ? `<div class="stats-chips stats-players">
     <span class="stats-chips-lbl">Joueurs</span>
     <button class="stats-chip${!sel || !sel.size ? ' active' : ''}" data-action="_statsTogglePlayer" data-id="__all">Tous</button>
-    ${roster.map(r => `<button class="stats-chip${sel && sel.has(r.id) ? ' active' : ''}" data-action="_statsTogglePlayer" data-id="${r.id}">${_esc(r.name)}</button>`).join('')}
+    ${allRows.map(r => `<button class="stats-chip stats-chip-player${sel && sel.has(r.id) ? ' active' : ''}" data-action="_statsTogglePlayer" data-id="${r.id}">${_statsAvatar(r.id, r.name, 18)}<span>${_esc(r.name)}</span></button>`).join('')}
   </div>` : '';
 
   const exportBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExport" title="Copier un récap texte (Discord…)">📋 Copier le récap</button>` : '';
@@ -254,6 +282,20 @@ function _statsRender(dateKey) {
     <div class="stats-controls-top">${sessionsBar}<div class="stats-toolbar-actions">${exportBtn}${resetBtn}</div></div>
     ${playersBar}
   </div>`;
+
+  // Bannière de séance : mission (éditable MJ) + portraits des participants.
+  const sessionBanner = dateKey ? (() => {
+    const mission = _statsMissionOf(dateKey);
+    const editBtn = STATE.isAdmin ? `<button class="stats-sb-edit" data-action="_statsEditMission" data-scope="${dateKey}" title="Nommer la mission de la séance">✎</button>` : '';
+    const parts = allRows.map(r => `<span class="stats-sb-part" title="${_esc(r.name)}">${_statsAvatar(r.id, r.name, 30)}</span>`).join('');
+    return `<div class="stats-session-banner">
+      <div class="stats-sb-info">
+        <div class="stats-sb-date">📅 Séance du ${_statsFmtDate(dateKey)}</div>
+        <div class="stats-sb-mission">${mission ? `🎯 ${_esc(mission)}` : '<span class="stats-sb-none">Mission non renseignée</span>'}${editBtn}</div>
+      </div>
+      ${parts ? `<div class="stats-sb-parts" title="Participants">${parts}</div>` : ''}
+    </div>`;
+  })() : '';
 
   if (!rows.length) {
     _statsLastSummary = '';
@@ -382,7 +424,11 @@ function _statsRender(dateKey) {
   const heroMetric = (v, l, c) => `<div class="stats-hm"><span class="stats-hm-v" style="color:${c}">${v}</span><span class="stats-hm-l">${l}</span></div>`;
 
   // ── Graphiques (SVG/HTML, sans dépendance) ──
-  const barChart = _statsBarChart(rows, _statsCmpMetric);
+  const cmpChart = _statsCmpType === 'pie' ? _statsPieChart(rows, _statsCmpMetric) : _statsBarChart(rows, _statsCmpMetric);
+  const typeToggle = `<div class="stats-type-toggle">
+    <button class="stats-tt${_statsCmpType === 'bars' ? ' active' : ''}" data-action="_statsCmpType" data-type="bars" title="Barres">📊</button>
+    <button class="stats-tt${_statsCmpType === 'pie' ? ' active' : ''}" data-action="_statsCmpType" data-type="pie" title="Camembert">🥧</button>
+  </div>`;
   const evoDatesAsc = [...allDates].reverse();  // ancienne → récente
   const evoSeries = _statsEvoSeries(evoDatesAsc, _statsEvoMetric, _statsPlayerSel);
   const evoHasData = evoDatesAsc.length >= 2 && evoSeries.some(s => s.v > 0);
@@ -391,18 +437,19 @@ function _statsRender(dateKey) {
       <div class="stats-sec-hd">📈 Graphiques</div>
       <div class="stats-charts">
         <div class="stats-chart-card">
-          <div class="stats-chart-hd"><span>Comparatif — personnages</span>${_statsMetricSelect(_statsCmpMetric, '_statsCmpMetric')}</div>
-          ${barChart}
+          <div class="stats-chart-hd"><span>Comparatif — personnages</span><div class="stats-chart-ctrls">${typeToggle}${_statsMetricSelect(_statsCmpMetric, '_statsCmpMetric')}</div></div>
+          ${cmpChart}
         </div>
         ${evoDatesAsc.length >= 2 ? `<div class="stats-chart-card">
           <div class="stats-chart-hd"><span>Évolution par séance</span>${_statsMetricSelect(_statsEvoMetric, '_statsEvoMetric')}</div>
-          ${evoHasData ? _statsLineChart(evoSeries, _statsEvoMetric) : '<div class="stats-chart-empty">Pas assez de données par séance.</div>'}
+          ${evoHasData ? _statsColChart(evoSeries, _statsEvoMetric) : '<div class="stats-chart-empty">Pas assez de données par séance.</div>'}
         </div>` : ''}
       </div>
     </section>`;
 
   root.innerHTML = `
     ${controls}
+    ${sessionBanner}
     <section class="stats-hero">
       <div class="stats-hero-gauge">
         ${_statsGauge(hitRate, '#22c38e', 104, 10, 'réussite')}
@@ -1806,6 +1853,21 @@ registerActions({
   // Métriques des graphiques (comparatif / évolution).
   _statsCmpMetric: (el) => { _statsCmpMetric = el.value; _statsRender(_statsScope); },
   _statsEvoMetric: (el) => { _statsEvoMetric = el.value; _statsRender(_statsScope); },
+  // Type du graphique comparatif : barres ↔ camembert.
+  _statsCmpType: (btn) => { _statsCmpType = btn.dataset.type === 'pie' ? 'pie' : 'bars'; _statsRender(_statsScope); },
+  // MJ : nomme la mission jouée à une séance (stockée dans le doc stats).
+  _statsEditMission: async (btn) => {
+    if (!STATE.isAdmin) return;
+    const dk = btn.dataset.scope; if (!dk) return;
+    const cur = _statsData?.sessions?.[dk]?.mission || '';
+    const val = await promptModal('Mission jouée cette séance', {
+      title: `📅 Séance du ${_statsFmtDate(dk)}`, default: cur, placeholder: "Ex. L'antre du dragon", confirmLabel: 'Enregistrer',
+    }).catch(() => null);
+    if (val === null || val === undefined) return;
+    await setSessionMission(dk, val);
+    (_statsData.sessions ??= {})[dk] = { mission: (val || '').trim() };
+    _statsRender(_statsScope);
+  },
   // Export : copie le récap texte du scope courant (collable dans Discord…).
   _statsExport: async () => {
     if (!_statsLastSummary) return;
