@@ -622,6 +622,25 @@ export function _renderInspectorImpl(t) {
         </select>
       </div>` : '';
 
+  const _sourceLinksHtml = STATE.isAdmin ? (() => {
+    const links = [];
+    if (t.characterId) {
+      const charId = _esc(t.characterId);
+      links.push(`<button class="vtt-source-link" data-vtt-fn="_vttOpenSource" data-vtt-args="char|${charId}|combat" title="Ouvrir la fiche personnage"><span>👤</span><b>Fiche</b></button>`);
+      links.push(`<button class="vtt-source-link" data-vtt-fn="_vttOpenSource" data-vtt-args="char|${charId}|sorts" title="Modifier les sorts du personnage"><span>✨</span><b>Sorts</b></button>`);
+      links.push(`<button class="vtt-source-link" data-vtt-fn="_vttOpenSource" data-vtt-args="char|${charId}|inv" title="Modifier l'inventaire du personnage"><span>🎒</span><b>Inventaire</b></button>`);
+    } else if (t.npcId) {
+      links.push(`<button class="vtt-source-link" data-vtt-fn="_vttOpenSource" data-vtt-args="npc|${_esc(t.npcId)}" title="Ouvrir la page des PNJ"><span>👥</span><b>PNJ</b></button>`);
+    } else if (t.beastId) {
+      links.push(`<button class="vtt-source-link" data-vtt-fn="_vttOpenSource" data-vtt-args="bestiary|${_esc(t.beastId)}" title="Ouvrir le bestiaire"><span>🐉</span><b>Bestiaire</b></button>`);
+    }
+    if (!links.length) return '';
+    return `<div class="vtt-ins-section">
+        <div class="vtt-ins-section-title">↗ Modifier la source</div>
+        <div class="vtt-source-links">${links.join('')}</div>
+      </div>`;
+  })() : '';
+
   const _footerHtml = STATE.isAdmin ? `
       <div class="vtt-ins-section">
         <div class="vtt-ins-section-title">🛠 Outils MJ</div>
@@ -656,7 +675,7 @@ export function _renderInspectorImpl(t) {
     { k:'invoc',    ic:'🐾', lb:'Actions',   html: _summonActionsHtml },
     { k:'effets',   ic:'✨', lb:'Effets',    html: _condsHtml + _buffsHtml },
     { k:'creature', ic:'📜', lb:'Bestiaire', html: _creatureHtml },
-    { k:'gerer',    ic:'⚙️', lb:'Gérer',     html: _delegateHtml + _sendPageHtml + _footerHtml },
+    { k:'gerer',    ic:'⚙️', lb:'Gérer',     html: _sourceLinksHtml + _delegateHtml + _sendPageHtml + _footerHtml },
   ].filter(s => s.html && s.html.trim());
 
   const _active = _tabs.some(s => s.k === _insTab) ? _insTab : (_tabs[0]?.k || 'stats');

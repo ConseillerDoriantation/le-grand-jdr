@@ -1355,6 +1355,32 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-sk-name { font-size: .68rem; color: var(--text); font-weight: 600; line-height: 1.2; }
 .vtt-sk-mod  { font-size: .6rem; font-weight: 700; line-height: 1; }
 .vtt-ins-actions .vtt-btn-sm { flex: 1; justify-content: center; }
+.vtt-source-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: .4rem;
+}
+.vtt-source-link {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .35rem;
+  padding: .45rem .5rem;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  background: rgba(255,255,255,.04);
+  cursor: pointer;
+  transition: border-color .15s, background .15s, transform .15s;
+}
+.vtt-source-link:hover {
+  border-color: rgba(232,184,75,.45);
+  background: rgba(232,184,75,.09);
+  transform: translateY(-1px);
+}
+.vtt-source-link span { line-height: 1; }
+.vtt-source-link b { font-size: .72rem; }
 
 /* ── Formulaire token ───────────────────────────────────────────── */
 .vtt-form { display: flex; flex-direction: column; gap: .6rem; }
@@ -1655,6 +1681,33 @@ html:not([data-theme="light"]) .vtt-root {
 }
 .vtt-tray-btn:hover      { background: var(--bg-card2); color: var(--text); }
 .vtt-tray-btn-del:hover  { color: var(--crimson); border-color: oklch(58% 0.20 22 / 0.30); }
+.vtt-tray-source-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: rgba(255,255,255,.035);
+  color: var(--text-dim);
+  font-size: .66rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.vtt-tray-source-btn:hover {
+  border-color: rgba(232,184,75,.5);
+  background: rgba(232,184,75,.12);
+  color: #f8d982;
+}
+.vtt-tray-source-btn.is-compact {
+  width: 17px;
+  height: 17px;
+  font-size: .58rem;
+}
 
 .vtt-tray-sublabel {
   display: flex; align-items: center; gap: .4rem;
@@ -1937,11 +1990,20 @@ html:not([data-theme="light"]) .vtt-root {
 }
 .vtt-bst-tile {
   display: flex; flex-direction: column; align-items: center; gap: 2px;
+  position: relative;
   padding: .2rem .1rem; border-radius: 6px;
   background: transparent; border: 1px solid transparent;
   cursor: pointer; transition: background .1s, border-color .1s;
 }
 .vtt-bst-tile:hover { background: var(--bg-elevated); border-color: var(--border); }
+.vtt-bst-tile .vtt-tray-source-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  opacity: .78;
+  background: rgba(9, 13, 22, .72);
+}
+.vtt-bst-tile:hover .vtt-tray-source-btn { opacity: 1; }
 .vtt-bst-tile img {
   width: 36px; height: 36px; border-radius: 50%;
   object-fit: cover; border: 1.5px solid #ef4444;
@@ -2607,6 +2669,28 @@ html:not([data-theme="light"]) .vtt-root {
 /* Type d'action : chip net sous le nom. */
 .vtt-aopt-hud .cs-spellcard-sub { margin-top: 2px; flex-wrap: wrap; }
 .vtt-aopt-hud .cs-spellcard-act { font-size: .68rem; padding: 2px 7px; }
+.vtt-aopt-hud .vtt-aopt-source {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: rgba(255,255,255,.035);
+  font-size: .66rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.vtt-aopt-hud .vtt-aopt-source[data-vtt-fn] {
+  cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.vtt-aopt-hud .vtt-aopt-source[data-vtt-fn]:hover {
+  border-color: rgba(232,184,75,.5);
+  color: #f8d982;
+  background: rgba(232,184,75,.1);
+}
 .vtt-aopt-hud .cs-spellcard-pm { font-size: 1rem; }
 /* Pills : largeur bornée par la carte → le texte long passe à la ligne au lieu
    d'élargir la carte ; toutes les pills restent visibles. */
@@ -3412,6 +3496,28 @@ html:not([data-theme="light"]) .vtt-root {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   max-width: 9rem;
 }
+.vtt-log-source-btn {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255,255,255,.035);
+  color: var(--text-dim);
+  font-size: .64rem;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.vtt-log-source-btn:hover {
+  border-color: rgba(232,184,75,.5);
+  background: rgba(232,184,75,.12);
+  color: #f8d982;
+}
 .vtt-log-arrow {
   font-size: 1rem; color: var(--log-c);
   font-weight: 700; line-height: 1;
@@ -3586,7 +3692,7 @@ html:not([data-theme="light"]) .vtt-root {
 }
 .vtt-log-target {
   display: grid;
-  grid-template-columns: 24px 1fr auto auto;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto auto;
   align-items: center; gap: .35rem;
   padding: .25rem .4rem;
   background: rgba(255,255,255,.03);
