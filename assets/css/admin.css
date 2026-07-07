@@ -173,6 +173,137 @@
 }
 .adm-action-empty b { color: var(--emerald, #22c38e); }
 
+/* ── Santé des données ── */
+.adm-health {
+  margin-bottom: 1.6rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(0,0,0,.14);
+}
+.adm-health-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: .8rem;
+}
+.adm-health-head h2 {
+  margin: .1rem 0 0;
+  color: var(--text);
+  font-family: 'Cinzel', serif;
+  font-size: 1.05rem;
+  line-height: 1.15;
+}
+.adm-health-state {
+  padding: .34rem .62rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  background: rgba(255,255,255,.04);
+  font-size: .72rem;
+  font-weight: 800;
+}
+.adm-health-state.is-warn {
+  border-color: rgba(244,196,48,.34);
+  color: var(--gold);
+  background: rgba(244,196,48,.08);
+}
+.adm-health-state.is-ok {
+  border-color: rgba(34,195,142,.28);
+  color: #7ee0bd;
+  background: rgba(34,195,142,.08);
+}
+.adm-health-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem;
+  margin-bottom: .85rem;
+}
+.adm-health-metrics span {
+  display: inline-flex;
+  align-items: center;
+  gap: .28rem;
+  padding: .22rem .5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: rgba(0,0,0,.14);
+  font-size: .7rem;
+  font-weight: 650;
+}
+.adm-health-metrics b { color: var(--text); }
+.adm-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: .55rem;
+}
+.adm-health-card {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  min-height: 58px;
+  width: 100%;
+  padding: .62rem .7rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255,255,255,.035);
+  color: var(--text);
+  text-align: left;
+}
+button.adm-health-card {
+  cursor: pointer;
+  transition: border-color .15s, background .15s, transform .15s;
+}
+button.adm-health-card:hover {
+  border-color: var(--border-md, rgba(255,255,255,.16));
+  background: var(--bg-elevated);
+  transform: translateY(-1px);
+}
+.adm-health-card.is-warn { border-color: rgba(244,196,48,.24); }
+.adm-health-card.is-danger { border-color: rgba(255,107,107,.28); }
+.adm-health-card.is-info { border-color: rgba(126,176,255,.24); }
+.adm-health-ico {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(255,255,255,.055);
+}
+.adm-health-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.adm-health-title {
+  color: var(--text);
+  font-size: .78rem;
+  font-weight: 800;
+}
+.adm-health-text {
+  color: var(--text-muted);
+  font-size: .71rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.adm-health-action {
+  flex-shrink: 0;
+  padding: .2rem .45rem;
+  border: 1px solid rgba(244,196,48,.26);
+  border-radius: 999px;
+  color: var(--gold);
+  background: rgba(244,196,48,.08);
+  font-size: .66rem;
+  font-weight: 800;
+}
+
 /* ── Tuiles de réglages ── */
 .adm-tiles {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(244px, 1fr));
