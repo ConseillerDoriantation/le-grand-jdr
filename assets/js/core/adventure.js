@@ -65,6 +65,21 @@ async function _userEmailByUid(uid) {
   }
 }
 
+async function _userProfileByUid(uid) {
+  if (!uid) return null;
+  try {
+    const snap = await getDoc(doc(db, 'users', uid));
+    if (!snap.exists()) return null;
+    const data = snap.data() || {};
+    return {
+      pseudo: data.pseudo || data.email || '',
+      email: _emailRaw(data.email),
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
 async function _getDocsSafe(q, { preferServer = false } = {}) {
   if (preferServer) {
     try {
@@ -454,14 +469,25 @@ export async function relinkPlayerAccount(adventureId, oldUid, newUid) {
   const accessList = repl(adv.accessList);
   const players    = repl(adv.players);
   const admins     = repl(adv.admins);
-  const newEmail = await _userEmailByUid(newUid);
+  const newProfile = await _userProfileByUid(newUid);
+  const newEmail = newProfile?.email || '';
   const accessEmails = _uniq([...(adv.accessEmails || []), ..._emailKeys(newEmail)]);
   // Re-key du profil dénormalisé oldUid→newUid (conserve le pseudo affiché).
   const memberProfiles = { ...(adv.memberProfiles || {}) };
   if (memberProfiles[oldUid]) {
-    memberProfiles[newUid] = { ...memberProfiles[oldUid], ...(newEmail ? { email: _emailRaw(newEmail) } : {}) };
+    memberProfiles[newUid] = {
+      ...memberProfiles[oldUid],
+      ...(newProfile?.pseudo ? { pseudo: newProfile.pseudo } : {}),
+      ...(newEmail ? { email: _emailRaw(newEmail) } : {}),
+    };
     delete memberProfiles[oldUid];
   }
+  const accountRelinks = { ...(adv.accountRelinks || {}) };
+  delete accountRelinks[newUid];
+  Object.entries(accountRelinks).forEach(([from, to]) => {
+    if (to === oldUid) delete accountRelinks[from];
+  });
+  accountRelinks[oldUid] = newUid;
 
   // Re-key des personnages de CETTE aventure (les persos sont une sous-collection
   // scoping par aventure et keyés par `uid`).
@@ -471,13 +497,26 @@ export async function relinkPlayerAccount(adventureId, oldUid, newUid) {
   let migrated = 0;
   if (!charsSnap.empty) {
     const batch = writeBatch(db);
-    charsSnap.forEach(d => { batch.update(d.ref, { uid: newUid }); migrated++; });
+    const charPatch = {
+      uid: newUid,
+      ...(newProfile?.pseudo ? { ownerPseudo: newProfile.pseudo } : {}),
+    };
+    charsSnap.forEach(d => { batch.update(d.ref, charPatch); migrated++; });
     await batch.commit();
   }
+  if (Array.isArray(STATE.characters) && migrated > 0) {
+    STATE.characters = STATE.characters.map(c => c?.uid === oldUid
+      ? {
+          ...c,
+          uid: newUid,
+          ...(newProfile?.pseudo ? { ownerPseudo: newProfile.pseudo } : {}),
+        }
+      : c);
+  }
 
-  await updateDoc(ref, { accessList, players, admins, accessEmails, memberProfiles });
+  await updateDoc(ref, { accessList, players, admins, accessEmails, memberProfiles, accountRelinks });
   if (STATE.adventure?.id === adventureId) {
-    setAdventure({ ...STATE.adventure, accessList, players, admins, accessEmails, memberProfiles });
+    setAdventure({ ...STATE.adventure, accessList, players, admins, accessEmails, memberProfiles, accountRelinks });
   }
 
   return { migrated };

@@ -80,3 +80,17 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .adm-pdate { font-size: .7rem; color: var(--text-dim); flex-shrink: 0; }
+.adm-pactions {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  flex-shrink: 0;
+}
+.adm-relink-btn {
+  color: #7eb0ff;
+  opacity: .85;
+}
+.adm-relink-btn:hover {
+  color: #9fc4ff;
+  opacity: 1;
+}

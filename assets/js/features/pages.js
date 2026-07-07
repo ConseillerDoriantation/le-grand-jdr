@@ -19,7 +19,7 @@ import { dedupeQuestParticipants } from '../shared/participants.js';
 
 import { charSession } from '../shared/char-session.js';
 import { openAdventureSwitcher } from '../core/layout.js';
-import { loadAllUsers } from '../core/adventure.js';
+import { loadAllUsers, relinkPlayerAccount } from '../core/adventure.js';
 const renderCharSheet   = (...args) => charSession.renderSheet(...args);
 
 // Masque les blocs du dashboard liés à une fonctionnalité désactivée pour l'aventure
@@ -81,6 +81,26 @@ function _statsEmoteHtml(name, cls = 'stats-emote') {
   const url = _statsEmoteUrl.get(name);
   return url ? `<img class="${cls}" src="${url}" alt="${_esc(name)}" title="${_esc(name)}">` : _esc(name);
 }
+
+async function _adminRelinkPlayer(oldUid, newUid, name = '') {
+  if (!STATE.adventure?.id || !oldUid || !newUid || oldUid === newUid) {
+    showNotif('Aventure ou joueur introuvable.', 'error');
+    return;
+  }
+  const ok = await confirmModal(
+    `Réassocier automatiquement <b>${_esc(name || newUid)}</b> ?<br><br><span style="opacity:.8;font-size:.88em">Cette action transfère l'accès à l'aventure et les personnages de l'ancien compte détecté vers ce compte.</span>`,
+    { title: 'Réassocier le joueur', confirmLabel: 'Réassocier', danger: false, icon: '🔗' }
+  );
+  if (!ok) return;
+  try {
+    const { migrated } = await relinkPlayerAccount(STATE.adventure.id, oldUid, newUid);
+    showNotif(`Compte réassocié — ${migrated} personnage(s) transféré(s).`, 'success');
+    await PAGES.admin();
+  } catch (e) {
+    showNotif(e.message || 'Échec de la réassociation.', 'error');
+  }
+}
+
 function _statsNormCombat(cm = {}) {
   const n = _statsNum;
   return {
@@ -1733,8 +1753,71 @@ const PAGES = {
       </button>`;
     const grid = (g) => `<div class="adm-tiles">${SETTINGS.filter(x => x.g === g).map(tile).join('')}</div>`;
 
-    const sortedUsers = [...users].sort((a, b) => (a.pseudo || '').localeCompare(b.pseudo || '', 'fr'));
+    const adv = STATE.adventure || {};
+    const memberUids = new Set([...(adv.accessList || []), ...(adv.players || []), ...(adv.admins || [])]);
+    const profiles = adv.memberProfiles || {};
+    const absorbedUids = new Set(Object.keys(adv.accountRelinks || {}));
+    const userEmailByUid = new Map();
+    users.forEach(u => {
+      const uid = u?.id || u?.uid || '';
+      const email = String(u?.email || '').trim().toLowerCase();
+      if (uid && email) userEmailByUid.set(uid, email);
+    });
+    const charCountByUid = new Map();
+    const labelByUid = new Map();
+    (STATE.characters || []).forEach(c => {
+      if (!c?.uid) return;
+      charCountByUid.set(c.uid, (charCountByUid.get(c.uid) || 0) + 1);
+      if (c.ownerPseudo && !labelByUid.has(c.uid)) labelByUid.set(c.uid, c.ownerPseudo);
+    });
+    Object.entries(profiles).forEach(([uid, p]) => {
+      const pseudo = typeof p === 'string' ? p : (p?.pseudo || p?.email || '');
+      if (pseudo && !labelByUid.has(uid)) labelByUid.set(uid, pseudo);
+    });
+
+    const emailOfUid = (uid) => {
+      const p = profiles[uid];
+      return userEmailByUid.get(uid) || String(typeof p === 'string' ? '' : (p?.email || '')).trim().toLowerCase();
+    };
+    const pseudoOfUid = (uid) => _norm(labelByUid.get(uid) || '');
+    const relinkSourceFor = (u) => {
+      const newUid = u.id || u.uid || '';
+      if (!newUid) return null;
+      if (absorbedUids.has(newUid)) return null;
+      const newCharCount = charCountByUid.get(newUid) || 0;
+      if (memberUids.has(newUid) && newCharCount > 0) return null;
+      if (!memberUids.has(newUid) && newCharCount === 0) {
+        const curCreated = Date.parse(u.createdAt || '') || 0;
+        const hasWorkingLinkedAccount = users.some(other => {
+          const otherUid = other?.id || other?.uid || '';
+          if (!otherUid || otherUid === newUid) return false;
+          const otherCreated = Date.parse(other.createdAt || '') || 0;
+          return memberUids.has(otherUid)
+            && (charCountByUid.get(otherUid) || 0) > 0
+            && String(other.email || '').trim().toLowerCase() === String(u.email || '').trim().toLowerCase()
+            && otherCreated > curCreated;
+        });
+        if (hasWorkingLinkedAccount) return null;
+      }
+
+      const userEmail = String(u.email || '').trim().toLowerCase();
+      const userPseudo = _norm(u.pseudo || '');
+      const candidates = [...new Set([...memberUids, ...charCountByUid.keys(), ...userEmailByUid.keys()])]
+        .filter(uid => uid && uid !== newUid && !absorbedUids.has(uid) && (charCountByUid.get(uid) || 0) > newCharCount);
+      const byEmail = userEmail ? candidates.find(uid => emailOfUid(uid) === userEmail) : null;
+      if (byEmail) return byEmail;
+      const byPseudo = userPseudo ? candidates.find(uid => pseudoOfUid(uid) === userPseudo) : null;
+      return byPseudo || null;
+    };
+
+    const visibleUsers = users.filter(u => {
+      const uid = u.id || u.uid || '';
+      return uid && !absorbedUids.has(uid) && (memberUids.has(uid) || relinkSourceFor(u));
+    });
+    const sortedUsers = [...visibleUsers].sort((a, b) => (a.pseudo || '').localeCompare(b.pseudo || '', 'fr'));
     const pRow = (u) => {
+      const uid = u.id || u.uid || '';
+      const oldUid = relinkSourceFor(u);
       const initial = ((u.pseudo || '?').trim().charAt(0) || '?').toUpperCase();
       const date = u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr') : '—';
       return `
@@ -1745,6 +1828,15 @@ const PAGES = {
             <span class="adm-pmail">${_esc(u.email || '-')}</span>
           </span>
           <span class="adm-pdate">${date}</span>
+          ${oldUid ? `<span class="adm-pactions">
+            <button type="button" class="btn-icon adm-relink-btn"
+              data-action="_adminRelinkPlayer"
+              data-old-uid="${_esc(oldUid)}"
+              data-new-uid="${_esc(uid)}"
+              data-name="${_esc(u.pseudo || u.email || uid)}"
+              title="Compte non relié détecté : réassocier automatiquement"
+              aria-label="Réassocier ${_esc(u.pseudo || u.email || uid)} automatiquement">🔗</button>
+          </span>` : ''}
         </div>`;
     };
 
@@ -1759,7 +1851,7 @@ const PAGES = {
         ${grid('table')}
       </section>
       <section class="adm-block">
-        <div class="adm-label">👥 Joueurs inscrits <span class="adm-count">${users.length}</span></div>
+        <div class="adm-label">👥 Joueurs inscrits <span class="adm-count">${visibleUsers.length}</span></div>
         <div class="adm-players adm-players--grid">${sortedUsers.map(pRow).join('')}</div>
       </section>`;
   },
@@ -1934,6 +2026,7 @@ registerActions({
     proxy.dataset.action = fn;
     dispatchAction(proxy, new Event('click'));
   },
+  _adminRelinkPlayer: (btn) => _adminRelinkPlayer(btn.dataset.oldUid, btn.dataset.newUid, btn.dataset.name),
 });
 
 export default PAGES;
