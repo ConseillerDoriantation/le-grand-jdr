@@ -3,7 +3,7 @@
 // ══════════════════════════════════════════════
 import { STATE } from '../core/state.js';
 import { registerActions, dispatchAction } from '../core/actions.js';
-import { loadChars, loadCollection, getCachedCollection, getDocData } from '../data/firestore.js';
+import { loadChars, loadCollection, getCachedCollection, getDocData, saveDoc, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { _esc, _norm, appSplashHtml, pageHeaderHtml, loadingHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { isFeatureEnabled } from '../shared/features.js';
@@ -15,7 +15,7 @@ import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
-import { dedupeQuestParticipants } from '../shared/participants.js';
+import { dedupeQuestParticipants, questParticipantFromChar } from '../shared/participants.js';
 
 import { charSession } from '../shared/char-session.js';
 import { openAdventureSwitcher } from '../core/layout.js';
@@ -99,6 +99,92 @@ async function _adminRelinkPlayer(oldUid, newUid, name = '') {
   } catch (e) {
     showNotif(e.message || 'Échec de la réassociation.', 'error');
   }
+}
+
+async function _adminRepairQuestParticipants() {
+  if (!STATE.isAdmin) return;
+  const ok = await confirmModal(
+    `Réparer les participants de quête quand c'est sûr ?<br><br><span style="opacity:.8;font-size:.88em">Remplace les anciens UID relinkés, recale les participants sur l'UID de leur personnage, retire les entrées sans compte/personnage exploitable et dédoublonne.</span>`,
+    { title: 'Réparer les quêtes', confirmLabel: 'Réparer', danger: false, icon: '📌' }
+  ).catch(() => false);
+  if (!ok) return;
+
+  const adv = STATE.adventure || {};
+  const memberUids = new Set([...(adv.accessList || []), ...(adv.players || []), ...(adv.admins || [])]);
+  const accountRelinks = adv.accountRelinks || {};
+  const absorbedUids = new Set(Object.keys(accountRelinks));
+  const charById = new Map((STATE.characters || []).map(c => [c.id, c]));
+  const quests = getCachedCollection('quests') || await loadCollection('quests').catch(() => []);
+  let fixed = 0;
+
+  for (const q of quests || []) {
+    const before = Array.isArray(q?.participants) ? q.participants : [];
+    if (!q?.id || !before.length) continue;
+    const normalized = [];
+    for (const raw of before) {
+      const p = raw || {};
+      const char = p.charId ? charById.get(p.charId) : null;
+      let uid = accountRelinks[p.uid] || p.uid || '';
+      if (char?.uid) uid = char.uid;
+      if (!uid || absorbedUids.has(uid) || !memberUids.has(uid)) continue;
+      if (p.charId && !char) continue;
+      normalized.push(char
+        ? questParticipantFromChar(char, uid)
+        : { ...p, uid, nom: p.nom || '?' });
+    }
+    const after = dedupeQuestParticipants(normalized);
+    if (JSON.stringify(before) === JSON.stringify(after)) continue;
+    await saveDoc('quests', q.id, { participants: after });
+    fixed++;
+  }
+
+  showNotif(fixed ? `${fixed} groupe(s) de quête réparé(s).` : 'Aucune quête à réparer.', fixed ? 'success' : 'info');
+  await PAGES.admin();
+}
+
+async function _adminRepairVttData() {
+  if (!STATE.isAdmin) return;
+  const ok = await confirmModal(
+    `Réparer les données VTT sûres ?<br><br><span style="opacity:.8;font-size:.88em">Resynchronise les propriétaires de tokens avec les personnages, retire les délégations vers des comptes invalides et supprime les doublons de tokens en réserve.</span>`,
+    { title: 'Réparer le VTT', confirmLabel: 'Réparer', danger: false, icon: '🎲' }
+  ).catch(() => false);
+  if (!ok) return;
+
+  const adv = STATE.adventure || {};
+  const memberUids = new Set([...(adv.accessList || []), ...(adv.players || []), ...(adv.admins || [])]);
+  const absorbedUids = new Set(Object.keys(adv.accountRelinks || {}));
+  const charById = new Map((STATE.characters || []).map(c => [c.id, c]));
+  const tokens = await loadCollection('vttTokens').catch(() => []);
+  const reserveSeen = new Map();
+  const toDelete = [];
+  const updates = [];
+
+  for (const t of tokens || []) {
+    if (!t?.id) continue;
+    const patch = {};
+    if (t.characterId) {
+      const char = charById.get(t.characterId);
+      if (char && (t.ownerId || null) !== (char.uid || null)) patch.ownerId = char.uid || null;
+    }
+    if (Array.isArray(t.controlDelegates)) {
+      const next = [...new Set(t.controlDelegates.filter(uid => uid && memberUids.has(uid) && !absorbedUids.has(uid)))];
+      if (JSON.stringify(next) !== JSON.stringify(t.controlDelegates)) patch.controlDelegates = next;
+    }
+    const reserveKey = t.characterId ? `c:${t.characterId}` : t.npcId ? `n:${t.npcId}` : '';
+    if (reserveKey && !t.pageId) {
+      if (reserveSeen.has(reserveKey)) toDelete.push(t.id);
+      else reserveSeen.set(reserveKey, t.id);
+    }
+    if (Object.keys(patch).length) updates.push({ id: t.id, patch });
+  }
+
+  await Promise.all([
+    ...updates.map(x => updateInCol('vttTokens', x.id, x.patch)),
+    ...toDelete.map(id => deleteFromCol('vttTokens', id)),
+  ]);
+  const total = updates.length + toDelete.length;
+  showNotif(total ? `${total} correction(s) VTT appliquée(s).` : 'Aucune donnée VTT à réparer.', total ? 'success' : 'info');
+  await PAGES.admin();
 }
 
 function _statsNormCombat(cm = {}) {
@@ -1732,7 +1818,11 @@ const PAGES = {
   // ─── ADMIN ──────────────────────────────────────────────────────────────────
   async admin() {
     if (!STATE.isAdmin) { const { navigate } = await import('../core/navigation.js'); navigate('dashboard'); return; }
-    const users   = await loadAllUsers(STATE.adventure);
+    const [users, quests, vttTokens] = await Promise.all([
+      loadAllUsers(STATE.adventure),
+      Promise.resolve(getCachedCollection('quests') || loadCollection('quests')).catch(() => []),
+      loadCollection('vttTokens').catch(() => []),
+    ]);
     const content = document.getElementById('main-content');
 
     // Réglages du jeu : seules fonctions propres à cette page (le reste — boutique,
@@ -1758,7 +1848,9 @@ const PAGES = {
     const adv = STATE.adventure || {};
     const memberUids = new Set([...(adv.accessList || []), ...(adv.players || []), ...(adv.admins || [])]);
     const profiles = adv.memberProfiles || {};
+    const accountRelinks = adv.accountRelinks || {};
     const absorbedUids = new Set(Object.keys(adv.accountRelinks || {}));
+    const charById = new Map((STATE.characters || []).map(c => [c.id, c]));
     const userEmailByUid = new Map();
     users.forEach(u => {
       const uid = u?.id || u?.uid || '';
@@ -1842,6 +1934,121 @@ const PAGES = {
         if (spellValidationState(s) === 'pending') pendingSpells.push({ c, s, idx });
       });
     });
+    const duplicateEmailGroups = [];
+    const emailGroups = new Map();
+    [...new Set([...memberUids, ...userEmailByUid.keys(), ...Object.keys(profiles)])]
+      .filter(uid => uid && !absorbedUids.has(uid))
+      .forEach(uid => {
+        const email = emailOfUid(uid);
+        if (!email) return;
+        if (!emailGroups.has(email)) emailGroups.set(email, []);
+        emailGroups.get(email).push(uid);
+      });
+    emailGroups.forEach((uids, email) => {
+      const uniq = [...new Set(uids)];
+      if (uniq.length > 1) duplicateEmailGroups.push({ email, uids: uniq });
+    });
+    const questParticipantIssues = [];
+    (quests || []).forEach(q => {
+      const parts = Array.isArray(q?.participants) ? q.participants : [];
+      const deduped = dedupeQuestParticipants(parts);
+      if (deduped.length < parts.length) {
+        questParticipantIssues.push({
+          q,
+          title: 'Participants dupliqués',
+          text: `${q.titre || 'Groupe'} · ${parts.length - deduped.length} doublon${parts.length - deduped.length > 1 ? 's' : ''}`,
+        });
+      }
+      parts.forEach(p => {
+        const uid = p?.uid || '';
+        const char = p?.charId ? charById.get(p.charId) : null;
+        if (!uid) {
+          questParticipantIssues.push({ q, title: 'Participant sans compte', text: `${q.titre || 'Groupe'} · ${p?.nom || 'Inconnu'}` });
+        } else if (absorbedUids.has(uid)) {
+          questParticipantIssues.push({ q, title: 'Participant sur ancien compte', text: `${q.titre || 'Groupe'} · ${p?.nom || userLabel(uid)}` });
+        } else if (!memberUids.has(uid)) {
+          questParticipantIssues.push({ q, title: 'Participant hors aventure', text: `${q.titre || 'Groupe'} · ${p?.nom || userLabel(uid)}` });
+        }
+        if (p?.charId && !char) {
+          questParticipantIssues.push({ q, title: 'Personnage de quête introuvable', text: `${q.titre || 'Groupe'} · ${p?.nom || p.charId}` });
+        } else if (char?.uid && uid && accountRelinks[uid] !== char.uid && char.uid !== uid) {
+          questParticipantIssues.push({ q, title: 'Compte/personnage incohérents', text: `${q.titre || 'Groupe'} · ${p?.nom || char.nom || userLabel(uid)}` });
+        }
+      });
+    });
+    const tokenIssues = [];
+    const reserveTokenKeys = new Map();
+    (vttTokens || []).forEach(t => {
+      if (!t) return;
+      const tokenName = t.name || t.nom || 'Token';
+      if (t.characterId) {
+        const c = charById.get(t.characterId);
+        const owner = t.ownerId || '';
+        if (!c) {
+          tokenIssues.push({ t, title: 'Token sans personnage', text: `${tokenName} · personnage introuvable`, repairable: false });
+        } else if ((owner || null) !== (c.uid || null)) {
+          tokenIssues.push({ t, title: 'Token propriétaire désynchronisé', text: `${tokenName} · attendu ${userLabel(c.uid)}`, repairable: true });
+        } else if (owner && (absorbedUids.has(owner) || !memberUids.has(owner))) {
+          tokenIssues.push({ t, title: 'Token avec propriétaire invalide', text: `${tokenName} · ${userLabel(owner)}`, repairable: false, charId: c.id });
+        }
+      }
+      (Array.isArray(t.controlDelegates) ? t.controlDelegates : []).forEach(uid => {
+        if (!uid || absorbedUids.has(uid) || !memberUids.has(uid)) {
+          tokenIssues.push({ t, title: 'Délégation VTT invalide', text: `${tokenName} · ${userLabel(uid)}`, repairable: true });
+        }
+      });
+      const reserveKey = t.characterId ? `c:${t.characterId}` : t.npcId ? `n:${t.npcId}` : '';
+      if (reserveKey && !t.pageId) {
+        reserveTokenKeys.set(reserveKey, (reserveTokenKeys.get(reserveKey) || 0) + 1);
+      }
+    });
+    reserveTokenKeys.forEach((count, key) => {
+      if (count > 1) {
+        const id = key.slice(2);
+        const c = key.startsWith('c:') ? charById.get(id) : null;
+        tokenIssues.push({
+          title: 'Tokens en réserve dupliqués',
+          text: `${c?.nom || id} · ${count} tokens hors map`,
+          repairable: true,
+        });
+      }
+    });
+    const healthIssues = [
+      ...duplicateEmailGroups.map(g => ({
+        icon: '🪪',
+        title: 'Compte doublonné probable',
+        text: `${g.email} · ${g.uids.length} comptes actifs`,
+        tone: 'is-warn',
+        attrs: '',
+      })),
+      ...invalidOwnerChars.map(c => ({
+        icon: '👤',
+        title: 'Personnage sans propriétaire fiable',
+        text: `${c.nom || 'Personnage'} · ${c.ownerPseudo || userLabel(c.uid)}`,
+        tone: 'is-danger',
+        attrs: `data-action="_goToChar" data-id="${_esc(c.id)}"`,
+      })),
+      ...questParticipantIssues.map(i => ({
+        icon: '📌',
+        title: i.title,
+        text: i.text,
+        tone: 'is-warn',
+        attrs: 'data-action="_adminRepairQuestParticipants"',
+        action: 'Réparer',
+      })),
+      ...tokenIssues.map(i => ({
+        icon: '🎲',
+        title: i.title,
+        text: i.text,
+        tone: 'is-info',
+        attrs: i.repairable
+          ? 'data-action="_adminRepairVttData"'
+          : i.charId
+            ? `data-action="_goToChar" data-id="${_esc(i.charId)}"`
+            : 'data-navigate="vtt"',
+        action: i.repairable ? 'Réparer' : 'Ouvrir',
+      })),
+    ];
     const actionTotal = relinkItems.length + invalidOwnerChars.length + playersWithoutChar.length + pendingSpells.length;
     const actionCard = (html, attrs = '', tone = '') =>
       `<button type="button" class="adm-action-card ${tone}" ${attrs}>${html}<span class="adm-action-arrow">→</span></button>`;
@@ -1902,6 +2109,39 @@ const PAGES = {
           ? `<div class="adm-action-list">${actionCenterItems.join('')}${hiddenActionCount ? `<div class="adm-action-more">+${hiddenActionCount} autre${hiddenActionCount>1?'s':''} point${hiddenActionCount>1?'s':''}</div>` : ''}</div>`
           : `<div class="adm-action-empty"><b>Tout est propre.</b><span>Aucun compte, personnage ou sort ne demande ton attention.</span></div>`}
       </section>`;
+    const healthCard = (issue) => {
+      const tag = issue.attrs ? 'button' : 'div';
+      const type = tag === 'button' ? ' type="button"' : '';
+      return `<${tag}${type} class="adm-health-card ${issue.tone || ''}" ${issue.attrs || ''}>
+        <span class="adm-health-ico">${issue.icon || '•'}</span>
+        <span class="adm-health-body">
+          <span class="adm-health-title">${_esc(issue.title || 'Diagnostic')}</span>
+          <span class="adm-health-text">${_esc(issue.text || '')}</span>
+        </span>
+        ${tag === 'button' ? `<span class="adm-health-action">${_esc(issue.action || 'Ouvrir')}</span>` : ''}
+      </${tag}>`;
+    };
+    const healthPreview = healthIssues.slice(0, 10);
+    const hiddenHealthCount = Math.max(0, healthIssues.length - healthPreview.length);
+    const dataHealth = `
+      <section class="adm-health">
+        <div class="adm-health-head">
+          <div>
+            <div class="adm-action-kicker">Diagnostic</div>
+            <h2>Santé des données</h2>
+          </div>
+          <div class="adm-health-state ${healthIssues.length ? 'is-warn' : 'is-ok'}">${healthIssues.length ? `${healthIssues.length} alerte${healthIssues.length > 1 ? 's' : ''}` : 'OK'}</div>
+        </div>
+        <div class="adm-health-metrics">
+          <span><b>${duplicateEmailGroups.length}</b> doublons</span>
+          <span><b>${invalidOwnerChars.length}</b> propriétaires</span>
+          <span><b>${questParticipantIssues.length}</b> quêtes</span>
+          <span><b>${tokenIssues.length}</b> VTT</span>
+        </div>
+        ${healthIssues.length
+          ? `<div class="adm-health-grid">${healthPreview.map(healthCard).join('')}${hiddenHealthCount ? `<div class="adm-action-more">+${hiddenHealthCount} autre${hiddenHealthCount > 1 ? 's' : ''} alerte${hiddenHealthCount > 1 ? 's' : ''}</div>` : ''}</div>`
+          : `<div class="adm-action-empty"><b>Aucune incohérence détectée.</b><span>Comptes, personnages, quêtes et tokens semblent alignés.</span></div>`}
+      </section>`;
     const pRow = (u) => {
       const uid = u.id || u.uid || '';
       const oldUid = relinkSourceFor(u);
@@ -1930,6 +2170,7 @@ const PAGES = {
     content.innerHTML = `
       ${pageHeaderHtml('⚙️ Console MJ', "Réglages du jeu & joueurs de l'aventure")}
       ${actionCenter}
+      ${dataHealth}
       <section class="adm-block">
         <div class="adm-label">⚔️ Personnages &amp; combat</div>
         ${grid('combat')}
@@ -1975,6 +2216,8 @@ registerActions({
   // Dashboard
   _goToChar:             (btn) => goToChar(btn.dataset.id, btn.dataset.tab),
   openAdventureSwitcher: ()    => openAdventureSwitcher(),
+  _adminRepairQuestParticipants: () => _adminRepairQuestParticipants(),
+  _adminRepairVttData:           () => _adminRepairVttData(),
 
   // Statistiques : réinitialisation (MJ)
   _statsReset: async () => {
