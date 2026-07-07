@@ -17,6 +17,162 @@
   background: var(--gold-glow); padding: 1px .55rem; border-radius: 999px;
 }
 
+/* ── Centre d'action MJ ── */
+.adm-action-center {
+  margin-bottom: 1.6rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(79,140,255,.08), rgba(244,196,48,.04)),
+    var(--bg-card);
+}
+.adm-action-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: .8rem;
+}
+.adm-action-kicker {
+  color: var(--gold);
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+.adm-action-head h2 {
+  margin: .1rem 0 0;
+  color: var(--text);
+  font-family: 'Cinzel', serif;
+  font-size: 1.05rem;
+  line-height: 1.15;
+}
+.adm-action-score {
+  min-width: 64px;
+  padding: .38rem .55rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  text-align: center;
+  background: rgba(255,255,255,.04);
+}
+.adm-action-score strong {
+  display: block;
+  color: var(--text);
+  font-size: 1.3rem;
+  line-height: 1;
+}
+.adm-action-score span {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-dim);
+  font-size: .62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.adm-action-score.is-hot { border-color: rgba(244,196,48,.35); background: rgba(244,196,48,.08); }
+.adm-action-score.is-ok { border-color: rgba(34,195,142,.28); background: rgba(34,195,142,.08); }
+.adm-action-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem;
+  margin-bottom: .85rem;
+}
+.adm-action-metrics span {
+  display: inline-flex;
+  align-items: center;
+  gap: .28rem;
+  padding: .22rem .5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: rgba(0,0,0,.14);
+  font-size: .7rem;
+  font-weight: 650;
+}
+.adm-action-metrics b { color: var(--text); }
+.adm-action-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: .55rem;
+}
+.adm-action-card {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  min-height: 62px;
+  width: 100%;
+  padding: .65rem .75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(0,0,0,.18);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, transform .15s;
+}
+.adm-action-card:hover {
+  border-color: var(--border-md, rgba(255,255,255,.16));
+  background: var(--bg-elevated);
+  transform: translateY(-1px);
+}
+.adm-action-card.is-warn { border-color: rgba(244,196,48,.26); }
+.adm-action-card.is-danger { border-color: rgba(255,107,107,.28); }
+.adm-action-card.is-info { border-color: rgba(126,176,255,.25); }
+.adm-action-ico {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--border);
+}
+.adm-action-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.adm-action-title {
+  color: var(--text);
+  font-size: .8rem;
+  font-weight: 800;
+}
+.adm-action-text {
+  color: var(--text-muted);
+  font-size: .72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.adm-action-arrow {
+  color: var(--gold);
+  opacity: .6;
+  font-weight: 800;
+}
+.adm-action-more,
+.adm-action-empty {
+  display: flex;
+  align-items: center;
+  min-height: 62px;
+  padding: .65rem .8rem;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--text-muted);
+  background: rgba(255,255,255,.03);
+  font-size: .78rem;
+}
+.adm-action-empty {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.adm-action-empty b { color: var(--emerald, #22c38e); }
+
 /* ── Tuiles de réglages ── */
 .adm-tiles {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(244px, 1fr));

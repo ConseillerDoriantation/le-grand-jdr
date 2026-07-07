@@ -1567,14 +1567,16 @@ const PAGES = {
     }
     content.innerHTML = html;
     if (chars.length > 0) {
-      const targetId  = consumeTargetCharacter();
+      const target = consumeTargetCharacter();
+      const targetId = typeof target === 'string' ? target : target?.id;
+      const targetTab = typeof target === 'object' ? target?.tab : null;
       // Sélection par défaut : la cible explicite (VTT…), sinon le perso favori
       // (★ par défaut) du joueur, sinon le premier.
       const charToShow = (targetId ? chars.find(c => c.id === targetId) : null)
         || getDefaultCharForUser(chars, STATE.user?.uid)
         || chars[0];
       STATE.activeChar = charToShow;
-      renderCharSheet(charToShow);
+      renderCharSheet(charToShow, targetTab);
     }
 
     // La collection personnages est déjà session-live : cet abonnement ne
@@ -1809,12 +1811,97 @@ const PAGES = {
       const byPseudo = userPseudo ? candidates.find(uid => pseudoOfUid(uid) === userPseudo) : null;
       return byPseudo || null;
     };
+    const userByUid = new Map(users.map(u => [u.id || u.uid || '', u]));
+    const userLabel = (uid) => {
+      const p = profiles[uid];
+      const u = userByUid.get(uid);
+      const denorm = typeof p === 'string' ? p : (p?.pseudo || p?.email || '');
+      return denorm || u?.pseudo || u?.email || (uid ? `UID ${uid.slice(0, 6)}...` : 'Compte inconnu');
+    };
+    const spellValidationState = (s) => s?.mjValidation
+      || (typeof s?.mjValidated === 'boolean' ? (s.mjValidated ? 'ok' : 'pending') : 'ok');
 
     const visibleUsers = users.filter(u => {
       const uid = u.id || u.uid || '';
       return uid && !absorbedUids.has(uid) && (memberUids.has(uid) || relinkSourceFor(u));
     });
     const sortedUsers = [...visibleUsers].sort((a, b) => (a.pseudo || '').localeCompare(b.pseudo || '', 'fr'));
+    const relinkItems = visibleUsers
+      .map(u => ({ user: u, uid: u.id || u.uid || '', oldUid: relinkSourceFor(u) }))
+      .filter(x => x.uid && x.oldUid);
+    const invalidOwnerChars = (STATE.characters || [])
+      .filter(c => !c.uid || absorbedUids.has(c.uid) || !memberUids.has(c.uid));
+    const playerUids = [...new Set([...(adv.players || []), ...(adv.accessList || [])])]
+      .filter(uid => uid && !(adv.admins || []).includes(uid) && !absorbedUids.has(uid));
+    const playersWithoutChar = playerUids
+      .filter(uid => (charCountByUid.get(uid) || 0) === 0)
+      .filter(uid => !relinkItems.some(x => x.uid === uid || x.oldUid === uid));
+    const pendingSpells = [];
+    (STATE.characters || []).forEach(c => {
+      (c.deck_sorts || []).forEach((s, idx) => {
+        if (spellValidationState(s) === 'pending') pendingSpells.push({ c, s, idx });
+      });
+    });
+    const actionTotal = relinkItems.length + invalidOwnerChars.length + playersWithoutChar.length + pendingSpells.length;
+    const actionCard = (html, attrs = '', tone = '') =>
+      `<button type="button" class="adm-action-card ${tone}" ${attrs}>${html}<span class="adm-action-arrow">→</span></button>`;
+    const actionCenterItems = [
+      ...relinkItems.slice(0, 4).map(({ user, uid, oldUid }) => actionCard(`
+        <span class="adm-action-ico">🔗</span>
+        <span class="adm-action-body">
+          <span class="adm-action-title">Compte à relier</span>
+          <span class="adm-action-text">${_esc(user.pseudo || user.email || uid)}</span>
+        </span>`,
+        `data-action="_adminRelinkPlayer" data-old-uid="${_esc(oldUid)}" data-new-uid="${_esc(uid)}" data-name="${_esc(user.pseudo || user.email || uid)}"`,
+        'is-warn')),
+      ...invalidOwnerChars.slice(0, 4).map(c => actionCard(`
+        <span class="adm-action-ico">👤</span>
+        <span class="adm-action-body">
+          <span class="adm-action-title">Personnage sans compte actif</span>
+          <span class="adm-action-text">${_esc(c.nom || 'Personnage')} · ${_esc(c.ownerPseudo || 'propriétaire inconnu')}</span>
+        </span>`,
+        `data-action="_goToChar" data-id="${_esc(c.id)}"`,
+        'is-danger')),
+      ...pendingSpells.slice(0, 4).map(({ c, s }) => actionCard(`
+        <span class="adm-action-ico">✨</span>
+        <span class="adm-action-body">
+          <span class="adm-action-title">Sort à valider</span>
+          <span class="adm-action-text">${_esc(s.nom || 'Sort')} · ${_esc(c.nom || 'Personnage')}</span>
+        </span>`,
+        `data-action="_goToChar" data-id="${_esc(c.id)}" data-tab="sorts"`,
+        'is-info')),
+      ...playersWithoutChar.slice(0, 3).map(uid => actionCard(`
+        <span class="adm-action-ico">📜</span>
+        <span class="adm-action-body">
+          <span class="adm-action-title">Joueur sans personnage</span>
+          <span class="adm-action-text">${_esc(userLabel(uid))}</span>
+        </span>`,
+        `data-navigate="characters"`,
+        'is-muted')),
+    ];
+    const hiddenActionCount = Math.max(0, actionTotal - actionCenterItems.length);
+    const actionCenter = `
+      <section class="adm-action-center">
+        <div class="adm-action-head">
+          <div>
+            <div class="adm-action-kicker">À traiter</div>
+            <h2>Centre d'action MJ</h2>
+          </div>
+          <div class="adm-action-score ${actionTotal ? 'is-hot' : 'is-ok'}">
+            <strong>${actionTotal}</strong>
+            <span>${actionTotal > 1 ? 'points' : 'point'}</span>
+          </div>
+        </div>
+        <div class="adm-action-metrics">
+          <span><b>${relinkItems.length}</b> relink</span>
+          <span><b>${invalidOwnerChars.length}</b> persos</span>
+          <span><b>${pendingSpells.length}</b> sorts</span>
+          <span><b>${playersWithoutChar.length}</b> joueurs</span>
+        </div>
+        ${actionTotal
+          ? `<div class="adm-action-list">${actionCenterItems.join('')}${hiddenActionCount ? `<div class="adm-action-more">+${hiddenActionCount} autre${hiddenActionCount>1?'s':''} point${hiddenActionCount>1?'s':''}</div>` : ''}</div>`
+          : `<div class="adm-action-empty"><b>Tout est propre.</b><span>Aucun compte, personnage ou sort ne demande ton attention.</span></div>`}
+      </section>`;
     const pRow = (u) => {
       const uid = u.id || u.uid || '';
       const oldUid = relinkSourceFor(u);
@@ -1842,6 +1929,7 @@ const PAGES = {
 
     content.innerHTML = `
       ${pageHeaderHtml('⚙️ Console MJ', "Réglages du jeu & joueurs de l'aventure")}
+      ${actionCenter}
       <section class="adm-block">
         <div class="adm-label">⚔️ Personnages &amp; combat</div>
         ${grid('combat')}
@@ -1877,15 +1965,15 @@ const PAGES = {
 
 };
 
-async function goToChar(id) {
-  setTargetCharacter(id);
+async function goToChar(id, tab = null) {
+  setTargetCharacter(id, tab);
   const { navigate } = await import('../core/navigation.js');
   navigate('characters');
 }
 
 registerActions({
   // Dashboard
-  _goToChar:             (btn) => goToChar(btn.dataset.id),
+  _goToChar:             (btn) => goToChar(btn.dataset.id, btn.dataset.tab),
   openAdventureSwitcher: ()    => openAdventureSwitcher(),
 
   // Statistiques : réinitialisation (MJ)
