@@ -127,28 +127,51 @@ export async function deleteQuete(idx) {
 }
 
 export function addQuete() {
-  openModal('📜 Ajouter une quête', `
-    ${modalSection('📜 Détails de la quête', `
-      <div class="form-group" style="margin:0 0 .6rem"><label>Nom</label><input class="input-field" id="q-nom" placeholder="La Crypte Maudite..."></div>
-      <div class="form-group" style="margin:0 0 .6rem"><label>Type</label><input class="input-field" id="q-type" placeholder="Principale, Secondaire..."></div>
-      <div class="form-group" style="margin:0"><label>Description</label><textarea class="input-field" id="q-desc" rows="3" placeholder="Objectif..."></textarea></div>`)}
-    <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="saveQuete">Ajouter</button>
-  `, { subtitle: 'Nouvel objectif pour le personnage' });
+  openQueteModal();
 }
 
-export async function saveQuete() {
+export function editQuete(idx) {
+  openQueteModal(idx);
+}
+
+function openQueteModal(idx = null) {
+  const c = STATE.activeChar; if (!c) return;
+  const editIdx = Number.isInteger(idx) ? idx : null;
+  const q = editIdx != null ? (c.quetes || [])[editIdx] : null;
+  if (editIdx != null && !q) {
+    showNotif('Quête introuvable.', 'error');
+    return;
+  }
+  openModal(q ? '✏️ Modifier la quête' : '📜 Ajouter une quête', `
+    ${modalSection('📜 Détails de la quête', `
+      <div class="form-group" style="margin:0 0 .6rem"><label>Nom</label><input class="input-field" id="q-nom" value="${_esc(q?.nom || '')}" placeholder="La Crypte Maudite..."></div>
+      <div class="form-group" style="margin:0 0 .6rem"><label>Type</label><input class="input-field" id="q-type" value="${_esc(q?.type || '')}" placeholder="Principale, Secondaire..."></div>
+      <div class="form-group" style="margin:0"><label>Description</label><textarea class="input-field" id="q-desc" rows="3" placeholder="Objectif...">${_esc(q?.description || '')}</textarea></div>`)}
+    <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="saveQuete" data-idx="${editIdx ?? ''}">${q ? 'Enregistrer' : 'Ajouter'}</button>
+  `, { subtitle: q ? 'Mise à jour de l’objectif' : 'Nouvel objectif pour le personnage' });
+}
+
+export async function saveQuete(idx = null) {
   const c = STATE.activeChar; if(!c) return;
-  const quetes = c.quetes||[];
-  quetes.push({
+  const editIdx = Number.isInteger(idx) ? idx : null;
+  const quetes = Array.isArray(c.quetes) ? [...c.quetes] : [];
+  const prev = editIdx != null ? quetes[editIdx] : null;
+  if (editIdx != null && !prev) {
+    showNotif('Quête introuvable.', 'error');
+    return;
+  }
+  const next = {
     nom: document.getElementById('q-nom')?.value||'?',
     type: document.getElementById('q-type')?.value||'',
     description: document.getElementById('q-desc')?.value||'',
-    valide: false,
-  });
+    valide: !!prev?.valide,
+  };
+  if (editIdx != null) quetes[editIdx] = { ...prev, ...next };
+  else quetes.push(next);
   c.quetes=quetes;
   if (await trySave('characters',c.id,{quetes})) {
     closeModal();
-    showNotif('Quête ajoutée !','success');
+    showNotif(editIdx != null ? 'Quête modifiée !' : 'Quête ajoutée !','success');
     _renderFormsChar(c, 'quetes');
   }
 }
@@ -578,7 +601,8 @@ export async function saveTitres(charId) {
 // PHOTO
 
 registerActions({
-  saveQuete:      ()    => saveQuete(),
+  saveQuete:      (btn) => saveQuete(btn.dataset.idx === '' ? null : Number(btn.dataset.idx)),
+  editQuete:      (btn) => editQuete(Number(btn.dataset.idx)),
   addTitre:       ()    => addTitre(),
   removeTitre:    (btn) => removeTitre(btn),
   saveTitres:     (btn) => saveTitres(btn.dataset.id),
