@@ -1,11 +1,11 @@
-let _targetCharId = null;
+let _targetChar = null;
 
-export function setTargetCharacter(id) {
-  _targetCharId = id || null;
+export function setTargetCharacter(id, tab = null) {
+  _targetChar = id ? { id, tab: tab || null } : null;
 }
 
 export function consumeTargetCharacter() {
-  const id = _targetCharId;
-  _targetCharId = null;
-  return id;
+  const target = _targetChar;
+  _targetChar = null;
+  return target;
 }
