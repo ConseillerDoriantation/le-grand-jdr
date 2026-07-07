@@ -159,6 +159,7 @@ export async function openManageAdventureModal(adventureId) {
   const players  = adv.players  || [];
   const access   = adv.accessList || [];
   const profiles = adv.memberProfiles || {};
+  const absorbedUids = new Set(Object.keys(adv.accountRelinks || {}));
 
   const memberUids = new Set([...access, ...players, ...admins]);
   const usersById  = new Map(allUsers.map(u => [u.id, u]));
@@ -176,15 +177,42 @@ export async function openManageAdventureModal(adventureId) {
   // Détection des comptes en double : un MEMBRE (ancien uid) dont l'email possède
   // un AUTRE compte non-membre (nouvel uid) → proposer la réassociation. Sert au
   // cas "mdp oublié → nouvel uid → En attente d'invitation". Ne fonctionne que si on
-  // a pu lire les users (super-admin) ; sinon pas de bouton relink (dégradation OK).
+  // a pu lire les users (super-admin). Pour un MJ standard, on complète avec
+  // memberProfiles ; sinon le bouton reste disponible en saisie manuelle d'UID.
   const _emailToUsers = {};
   allUsers.forEach(u => { if (u.email) (_emailToUsers[u.email.toLowerCase()] ||= []).push(u); });
+  const _userEmailByUid = new Map();
+  allUsers.forEach(u => {
+    if (u?.id && u?.email) _userEmailByUid.set(u.id, String(u.email).trim().toLowerCase());
+  });
+  const charCountByUid = new Map();
+  (STATE.characters || []).forEach(c => {
+    if (!c?.uid) return;
+    charCountByUid.set(c.uid, (charCountByUid.get(c.uid) || 0) + 1);
+  });
+
+  const _profileEmail = (uid) => {
+    const p = profiles[uid];
+    const email = typeof p === 'string' ? '' : (p?.email || '');
+    return _userEmailByUid.get(uid) || String(email).trim().toLowerCase();
+  };
+
   const _newUidFor = (uid) => {
+    if (absorbedUids.has(uid)) return null;
     const u = usersById.get(uid);
-    if (!u?.email) return null;
-    const dupe = (_emailToUsers[u.email.toLowerCase()] || [])
-      .find(d => d.id !== uid && !memberUids.has(d.id));
-    return dupe ? dupe.id : null;
+    if (u?.email) {
+      const dupe = (_emailToUsers[u.email.toLowerCase()] || [])
+        .find(d => d.id !== uid && !memberUids.has(d.id));
+      if (dupe) return dupe.id;
+    }
+
+    const email = _profileEmail(uid);
+    if (!email) return null;
+    const dupes = [...memberUids].filter(other => other !== uid && !absorbedUids.has(other) && _profileEmail(other) === email);
+    if (!dupes.length) return null;
+    const srcCount = charCountByUid.get(uid) || 0;
+    const target = dupes.sort((a, b) => (charCountByUid.get(a) || 0) - (charCountByUid.get(b) || 0))[0];
+    return srcCount > 0 && srcCount > (charCountByUid.get(target) || 0) ? target : null;
   };
 
   const _memberLine = (uid, isAdmin) => {
@@ -194,7 +222,7 @@ export async function openManageAdventureModal(adventureId) {
       <span class="adv-member-pseudo">${_esc(_nameFor(uid))}</span>
       ${isAdmin ? '<span class="adv-role adv-role--mj">MJ</span>' : '<span class="adv-role adv-role--joueur">Joueur</span>'}
       <div class="adv-member-actions">
-        ${newUid ? `<button class="btn-icon" title="Réassocier au nouveau compte (changement d'identifiant : transfère accès + personnages)" style="color:#4f8cff" data-action="_advRelink" data-adv-id="${adventureId}" data-old-uid="${uid}" data-new-uid="${newUid}">🔗</button>` : ''}
+        ${newUid && !isCreator ? `<button class="btn-icon" title="Réassocier au compte détecté" style="color:#4f8cff" data-action="_advRelink" data-adv-id="${adventureId}" data-old-uid="${uid}" data-new-uid="${newUid}">🔗</button>` : ''}
         ${!isAdmin && !isCreator ? `<button class="btn-icon" title="Promouvoir MJ" data-action="_advPromote" data-adv-id="${adventureId}" data-uid="${uid}">⬆️</button>` : ''}
         ${!isCreator ? `<button class="btn-icon" title="Retirer" style="color:#ff6b6b" data-action="_advRemove" data-adv-id="${adventureId}" data-uid="${uid}">✕</button>` : ''}
       </div>
@@ -644,10 +672,15 @@ async function promoteAdventurePlayer(advId, targetUid) {
   } catch (e) { showNotif(e.message, 'error'); }
 }
 
-async function relinkAdventurePlayer(advId, oldUid, newUid) {
+async function relinkAdventurePlayer(advId, oldUid, newUid = '') {
+  let targetUid = String(newUid || '').trim();
+  if (!targetUid || targetUid === oldUid) {
+    showNotif('Identifiant de destination invalide.', 'error');
+    return;
+  }
   if (!await confirmModal('Réassocier ce joueur à son nouveau compte ?<br><br><span style="opacity:.8;font-size:.88em">Son accès à l\'aventure et ses personnages seront transférés de l\'ancien identifiant vers le nouveau. À faire après qu\'il se soit reconnecté avec son nouveau compte.</span>', { title: 'Réassocier le joueur', confirmLabel: 'Réassocier', danger: false, icon: '🔗' })) return;
   try {
-    const { migrated } = await relinkPlayerAccount(advId, oldUid, newUid);
+    const { migrated } = await relinkPlayerAccount(advId, oldUid, targetUid);
     const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
     setAdventures(adventures);
     showNotif(`Compte réassocié — ${migrated} personnage(s) transféré(s).`, 'success');
