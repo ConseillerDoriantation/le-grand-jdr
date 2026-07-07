@@ -1102,6 +1102,8 @@ async function _vttMsCraft(charId, uid, recipeId) {
   const authorName = STATE.profile?.pseudo || STATE.profile?.prenom || c.nom || 'Joueur';
   addDoc(_logCol(), {
     type: 'craft', authorId: STATE.user?.uid || null, authorName,
+    characterId: charId || null,
+    characterImage: c.photoURL || c.photo || c.avatar || null,
     charName: c.nom || '', recipeName: recipe.nom || '',
     statLabel: 'Artisanat (INT)', mod, d20, total, dd: _MS_CRAFT_DD, passed,
     createdAt: serverTimestamp(),

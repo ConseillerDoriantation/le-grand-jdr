@@ -18,7 +18,7 @@ import { CONDITION_DEFAULT_LIBRARY } from '../../shared/conditions.js';
 import { _tokRef, _logCol } from './vtt-refs.js';
 import { _live } from './vtt-effective.js';
 import { _renderInspectorSoon } from './vtt-inspector.js?v=20260630-max-v2';
-import { CONDITION_LIBRARY, CONDITION_BY_ID, _loadConditionsOverrides, _consumeLuckyReroll } from './vtt.js';
+import { CONDITION_LIBRARY, CONDITION_BY_ID, _loadConditionsOverrides, _consumeLuckyReroll, _vttLogTargetFields } from './vtt.js';
 
 function getVttConditionLibrary() {
   return CONDITION_LIBRARY.map(c => ({
@@ -138,6 +138,8 @@ export async function _vttConditionSave(tokenId, idx) {
     type: 'save', authorId: STATE.user?.uid||null,
     authorName: STATE.profile?.pseudo||STATE.profile?.prenom||'?',
     tokenName: _live(t).displayName || t.name,
+    characterImage: _live(t).displayImage || null,
+    ..._vttLogTargetFields(t),
     conditionId: cond.id, conditionLabel: lib?.label || cond.id,
     statLabel: statLbl, mod: modVal, d20, d20rolls: luck ? [initialD20, luck.reroll] : null, total, dd: DD, passed,
     createdAt: serverTimestamp(),

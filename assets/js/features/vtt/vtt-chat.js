@@ -458,7 +458,7 @@ export function _renderChatLogImpl(msgs) {
     const head = _header({
       srcImg: m.characterImage, srcName: m.casterName || m.authorName || '?',
       tgtName: m.targetName, label: m.optLabel,
-      badges: pmBadge, ts, sourceArgs: _sourceArgs(m, 'sorts'),
+      badges: pmBadge, ts, sourceArgs: _sourceArgs(m, 'sorts'), targetArgs: _targetArgs(m, 'combat'),
     });
     const body = `<div class="vtt-log-body">
       <span class="vtt-log-icon">${m.castEC ? '💔' : '✨'}</span>
@@ -473,7 +473,7 @@ export function _renderChatLogImpl(msgs) {
       srcImg: m.characterImage, srcName: m.casterName || m.authorName || '?',
       tgtName: m.targetName, label: m.optLabel,
       badges: `<span class="vtt-log-badge" style="color:#c4b5fd;background:rgba(180,127,255,.18)">🛡 JS ${_esc(m.statLabel||'?')} DD ${m.dd}</span>`,
-      ts, sourceArgs: _sourceArgs(m, 'sorts'),
+      ts, sourceArgs: _sourceArgs(m, 'sorts'), targetArgs: _targetArgs(m, 'combat'),
     });
     const body = `<div class="vtt-log-body">
       <span class="vtt-log-icon">🪄</span>
@@ -491,9 +491,9 @@ export function _renderChatLogImpl(msgs) {
       ? `<span class="vtt-log-badge vtt-log-badge--ok">✅ RÉUSSI</span>`
       : `<span class="vtt-log-badge vtt-log-badge--fail">❌ ÉCHEC</span>`;
     const head = _header({
-      srcImg: null, srcName: m.tokenName || '?',
+      srcImg: m.characterImage || null, srcName: m.tokenName || '?',
       label: m.sortLabel ? `JS vs ${m.sortLabel}` : `JS ${m.statLabel||''}`,
-      badges: badge, ts,
+      badges: badge, ts, sourceArgs: _targetArgs(m, 'combat'),
     });
     const body = `<div class="vtt-log-body">
       <span class="vtt-log-icon">🛡</span>
@@ -525,6 +525,7 @@ export function _renderChatLogImpl(msgs) {
       label: `Concentration · ${m.sortLabel || 'Sort'}`,
       badges: badge,
       ts,
+      sourceArgs: _targetArgs(m, 'combat'),
     });
     const modStr = (m.mod >= 0 ? '+' : '') + (m.mod ?? 0);
     const result = forced
@@ -556,8 +557,8 @@ export function _renderChatLogImpl(msgs) {
       return `${_esc(r.sortLabel)}: ${dicePart}${modPart} = <strong>${r.rolled}</strong>`;
     }).join(' · ');
     const head = _header({
-      srcImg: null, srcName: m.tokenName || '?',
-      label: lbl, badges: '', ts,
+      srcImg: m.characterImage || null, srcName: m.tokenName || '?',
+      label: lbl, badges: '', ts, sourceArgs: _targetArgs(m, 'combat'),
     });
     const body = `<div class="vtt-log-body">
       <span class="vtt-log-icon">${isHealTick ? '💚' : '🩸'}</span>
@@ -588,6 +589,7 @@ export function _renderChatLogImpl(msgs) {
     const head = _header({
       srcImg: m.characterImage, srcName: m.characterName || m.authorName || '?',
       label: m.rollSkill || m.rollFormula || 'Jet', badges, ts,
+      sourceArgs: _targetArgs(m, 'combat'),
     });
     const diceStr = Array.isArray(m.rollDice) && m.rollDice.length === 2
       ? _d20(m.rollRaw, m.rollDice)
@@ -654,9 +656,10 @@ export function _renderChatLogImpl(msgs) {
       ? `<span class="vtt-log-badge vtt-log-badge--ok">✅ CRAFTÉ</span>`
       : `<span class="vtt-log-badge vtt-log-badge--fail">❌ RATÉ</span>`;
     const head = _header({
-      srcImg: null, srcName: m.charName || m.authorName || '?',
+      srcImg: m.characterImage || null, srcName: m.charName || m.authorName || '?',
       label: `🔨 ${m.recipeName || 'Artisanat'}`,
       badges: badge, ts,
+      sourceArgs: _targetArgs(m, 'inv'),
     });
     const body = `<div class="vtt-log-body">
       <span class="vtt-log-icon">🔨</span>

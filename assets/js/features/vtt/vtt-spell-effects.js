@@ -19,7 +19,7 @@ import { _live, _scaledEnchantConditionFields } from './vtt-effective.js';
 import { bumpHeal } from '../../shared/stats.js';
 import {
   CONDITION_BY_ID, _STAT_SHORT, _buffShared, _consumeLuckyReroll,
-  _rollDiceDetailed, _setHp, _tokenStatMod,
+  _rollDiceDetailed, _setHp, _tokenStatMod, _vttLogSourceFields, _vttLogTargetFields, _vttLogSingleTargetFields,
 } from './vtt.js';
 
 /** Applique les buffs d'enchantement (mode Dégâts arme OU mode État sur allié). */
@@ -140,6 +140,8 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt) {
     authorId: STATE.user?.uid || null,
     authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
     casterName: srcName, characterImage: srcTok?.image || null,
+    ..._vttLogSourceFields(srcTok),
+    ..._vttLogSingleTargetFields(targetIds),
     targetName: tgtNames,
     optLabel: opt.label || 'Affliction',
     mode, dd: aff.dd, statLabel: statShortStr,
@@ -179,6 +181,8 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt) {
       authorId: STATE.user?.uid || null,
       authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
       tokenName: tgtName,
+      characterImage: _live(td).displayImage || null,
+      ..._vttLogTargetFields(td),
       conditionLabel: _effectLbl,
       sortLabel: opt.label || '',
       statLabel: statShortStr, mod: saveMod, d20: roll, d20rolls: luck ? [initialRoll, luck.reroll] : null, total: tot, dd: aff.dd,
@@ -277,6 +281,8 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt) {
         authorId: STATE.user?.uid || null,
         authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
         tokenName: tgtName,
+        characterImage: lT.displayImage || null,
+        ..._vttLogTargetFields(td),
         rolls: [{ formula: dotFormula, rolled: det.total, rolledDice: det.rolls, mod: det.mod, sides: det.sides, sortLabel: opt.label || 'DoT' }],
         total: det.total, newHp, hpMax: lT.displayHpMax ?? 20,
         immediate: true,
@@ -331,6 +337,8 @@ export async function _vttApplyRegeneration(srcId, targetIds, opt) {
       authorId: STATE.user?.uid || null,
       authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
       tokenName: name,
+      characterImage: lT.displayImage || null,
+      ..._vttLogTargetFields(td),
       rolls: [{ formula: newBuff.formula, rolled: det.total, rolledDice: det.rolls, mod: det.mod, sides: det.sides, sortLabel: opt.label || 'Régénération' }],
       total: effectiveHeal, rolledTotal: det.total, newHp, hpMax,
       immediate: true,

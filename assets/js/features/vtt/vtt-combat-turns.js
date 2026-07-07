@@ -20,6 +20,7 @@ import { bumpHeal } from '../../shared/stats.js';
 import {
   CONDITION_BY_ID, _rollDiceDetailed, _setHp, _persistInvocationState,
   _vttTriggerConcentrationSave, _vttBreakConcentrationEffects, _vttExpireSpellZones,
+  _vttLogTargetFields,
 } from './vtt.js';
 
 export async function _vttResetTurn(id) {
@@ -115,6 +116,8 @@ export async function _vttNextRound() {
         authorId: STATE.user?.uid || null,
         authorName: STATE.profile?.pseudo || STATE.profile?.prenom || 'MJ',
         tokenName: tgtName,
+        characterImage: lT.displayImage || null,
+        ..._vttLogTargetFields(td),
         rolls: dmgRolls, total: totalDmg, newHp, hpMax,
         createdAt: serverTimestamp(),
       }).catch(() => {});
@@ -141,6 +144,8 @@ export async function _vttNextRound() {
         authorId: STATE.user?.uid || null,
         authorName: STATE.profile?.pseudo || STATE.profile?.prenom || 'MJ',
         tokenName: tgtName,
+        characterImage: lT.displayImage || null,
+        ..._vttLogTargetFields(td),
         rolls: healRolls, total: effectiveHeal, rolledTotal: totalHeal, newHp, hpMax,
         createdAt: serverTimestamp(),
       }).catch(() => {});
