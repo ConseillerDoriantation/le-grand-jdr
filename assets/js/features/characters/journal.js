@@ -39,14 +39,14 @@ function renderCharJournal(c, canEdit, sub = 'notes') {
                 : subTab === 'quetes'    ? renderJournalQuetes(c, canEdit)
                 : renderCharRelations(c, canEdit);
 
-  return `<div class="journal-tabs">
-    <span class="journal-tab ${subTab==='notes'?'on':''}" data-action="csV3JournalSub" data-sub="notes">📝 Notes (${counts.notes})</span>
-    <span class="journal-tab ${subTab==='quetes'?'on':''}" data-action="csV3JournalSub" data-sub="quetes">📜 Quêtes (${counts.quetes})</span>
-    <span class="journal-tab ${subTab==='relations'?'on':''}" data-action="csV3JournalSub" data-sub="relations">👥 Relations (${counts.relations})</span>
-    ${canEdit && subTab==='notes' ? `<button class="section-action" style="margin-left:auto" data-action="addNote">＋ Note</button>` : ''}
-    ${canEdit && subTab==='quetes' ? `<button class="section-action" style="margin-left:auto" data-action="addQuete">＋ Quête</button>` : ''}
-    ${canEdit && subTab==='relations' ? `<button class="section-action" style="margin-left:auto" data-action="csV3AddRelation" data-id="${c.id}">＋ Relation</button>` : ''}
-  </div>
+  return `<nav class="journal-tabs" aria-label="Sections du journal">
+    <button type="button" class="journal-tab ${subTab==='notes'?'on':''}" ${subTab==='notes'?'aria-current="page"':''} data-action="csV3JournalSub" data-sub="notes">📝 Notes (${counts.notes})</button>
+    <button type="button" class="journal-tab ${subTab==='quetes'?'on':''}" ${subTab==='quetes'?'aria-current="page"':''} data-action="csV3JournalSub" data-sub="quetes">📜 Quêtes (${counts.quetes})</button>
+    <button type="button" class="journal-tab ${subTab==='relations'?'on':''}" ${subTab==='relations'?'aria-current="page"':''} data-action="csV3JournalSub" data-sub="relations">👥 Relations (${counts.relations})</button>
+    ${canEdit && subTab==='notes' ? `<button type="button" class="section-action" style="margin-left:auto" data-action="addNote">＋ Note</button>` : ''}
+    ${canEdit && subTab==='quetes' ? `<button type="button" class="section-action" style="margin-left:auto" data-action="addQuete">＋ Quête</button>` : ''}
+    ${canEdit && subTab==='relations' ? `<button type="button" class="section-action" style="margin-left:auto" data-action="csV3AddRelation" data-id="${c.id}">＋ Relation</button>` : ''}
+  </nav>
   <div id="journal-body">${bodyHtml}</div>`;
 }
 
@@ -60,6 +60,7 @@ function _csV3JournalSub(sub) {
     area.innerHTML = renderCharJournal(c, canEdit, sub);
     if (sub === 'notes') { bindQuillEditors(area); _bindNotesDnd(c, canEdit); }
     if (sub === 'quetes') _bindQuetesDnd(c, canEdit);
+    area.querySelector(`.journal-tab[data-sub="${sub}"]`)?.focus({ preventScroll: true });
   }
 }
 
