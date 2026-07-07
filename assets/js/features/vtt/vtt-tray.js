@@ -112,6 +112,22 @@ export function _renderTrayImpl() {
   const ae = document.activeElement;
   const focusedSearch = ae?.classList?.contains('vtt-tray-search-input') ? ae.dataset.search : null;
   const caretPos = focusedSearch != null ? ae.selectionStart : null;
+  const sourceBtn = (t, compact = false) => {
+    let args = '', title = '';
+    if (t.characterId) {
+      args = `char|${t.characterId}|combat`;
+      title = 'Ouvrir la fiche personnage';
+    } else if (t.npcId) {
+      args = `npc|${t.npcId}`;
+      title = 'Ouvrir le PNJ source';
+    } else if (t.beastId) {
+      args = `bestiary|${t.beastId}`;
+      title = 'Ouvrir la créature source';
+    }
+    return args
+      ? `<span class="vtt-tray-source-btn${compact ? ' is-compact' : ''}" data-vtt-fn="_vttOpenSource" data-vtt-args="${_esc(args)}" title="${_esc(title)}">↗</span>`
+      : '';
+  };
 
   const mkItem = (t) => {
     const ld = _live(t);
@@ -139,7 +155,7 @@ export function _renderTrayImpl() {
           ${hpFrac}
         </div>
       </div>
-      <div class="vtt-tray-actions">${dupBtn}${actionBtn}${delBtn}</div>
+      <div class="vtt-tray-actions">${sourceBtn(t)}${dupBtn}${actionBtn}${delBtn}</div>
     </div>`;
   };
 
@@ -157,6 +173,7 @@ export function _renderTrayImpl() {
         ${statusDot}
       </span>
       <span class="vtt-res-line-name">${name}</span>
+      ${sourceBtn(t)}
     </button>`;
   };
 
@@ -226,6 +243,7 @@ export function _renderTrayImpl() {
           const init = (b.nom || '?')[0].toUpperCase();
           return `<button class="vtt-bst-tile" draggable="true" data-vtt-drag="beast:${b.id}" data-vtt-fn="_vttPlaceFromBestiary" data-vtt-args="${b.id}"
               title="${_esc(b.nom || 'Créature')} · PV ${parseInt(b.pvMax) || '?'} · clic = centre · glisser sur la carte = à l'endroit voulu">
+            <span class="vtt-tray-source-btn is-compact" data-vtt-fn="_vttOpenSource" data-vtt-args="bestiary|${_esc(b.id)}" title="Ouvrir la créature source">↗</span>
             ${img ? `<img src="${img}" alt="${_esc(b.nom || '')}">` : `<span class="vtt-bst-icon">${init}</span>`}
             <div class="vtt-bst-name">${_esc((b.nom || 'Créature').slice(0, 10))}</div>
           </button>`;

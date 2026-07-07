@@ -3979,6 +3979,30 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
     const stack    = o._itemAction?.stackCount > 1 && o._itemAction?.consommable
                        ? `<span class="vtt-aopt-stack">×${o._itemAction.stackCount}</span>` : '';
     const desc     = (o.actionDescription || '').trim();
+    const source = (() => {
+      if (o._itemAction) {
+        const itemId = o._itemAction.itemId || '';
+        if (itemId) return { label: `🎒 ${o._itemAction.itemNom || 'Objet'}`, args: `shop|${itemId}|detail`, title: 'Ouvrir cet article boutique' };
+        if (src.characterId) return { label: `🎒 ${o._itemAction.itemNom || 'Objet'}`, args: `char|${src.characterId}|inv`, title: "Ouvrir l'inventaire source" };
+        return { label: `🎒 ${o._itemAction.itemNom || 'Objet'}`, args: '', title: 'Objet' };
+      }
+      if (o.sortIdx !== undefined) {
+        const key = String(o.sortIdx);
+        if (/^b\d+/.test(key) && src.beastId) return { label: '🐉 Bestiaire', args: `bestiary|${src.beastId}`, title: 'Ouvrir la créature source' };
+        if (/^i\d+_/.test(key) && src.characterId) return { label: '🎒 Objet', args: `char|${src.characterId}|inv`, title: "Ouvrir l'inventaire source" };
+        if (src.characterId) return { label: o.catLabel ? `✨ ${o.catLabel}` : '✨ Sort', args: `char|${src.characterId}|sorts`, title: 'Ouvrir les sorts du personnage' };
+        return { label: o.catLabel ? `✨ ${o.catLabel}` : '✨ Sort', args: '', title: 'Sort' };
+      }
+      if ((src.beastId || src.type === 'enemy') && src.beastId) return { label: '🐉 Bestiaire', args: `bestiary|${src.beastId}`, title: 'Ouvrir la créature source' };
+      if (src.npcId) return { label: '👥 PNJ', args: `npc|${src.npcId}`, title: 'Ouvrir le PNJ source' };
+      if (src.characterId) return { label: '⚔ Arme équipée', args: `char|${src.characterId}|combat`, title: 'Ouvrir le combat du personnage' };
+      return { label: '⚔ Action', args: '', title: 'Action' };
+    })();
+    const sourceArgs = STATE.isAdmin ? source?.args : '';
+    const sourceAttrs = sourceArgs
+      ? ` data-vtt-fn="_vttOpenSource" data-vtt-args="${_esc(sourceArgs)}" title="${_esc(source.title)}"`
+      : ` title="${_esc(source?.title || '')}"`;
+    const sourceChip = source?.label ? `<span class="vtt-aopt-source"${sourceAttrs}>${_esc(source.label)}</span>` : '';
 
     // ── Coût en PM : badge dédié à DROITE du titre (pas en pill) ──────
     let pmBadge = '';
@@ -4029,7 +4053,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
           <span class="cs-spellcard-icon">${o.icon}</span>
           <div class="cs-spellcard-id">
             <div class="cs-spellcard-name" title="${_esc(o.label)}">${_esc(o.label)}</div>
-            <div class="cs-spellcard-sub">${actChip}${elemPastille}${stack}</div>
+            <div class="cs-spellcard-sub">${actChip}${sourceChip}${elemPastille}${stack}</div>
           </div>
           ${pmBadge}
         </header>
@@ -5161,6 +5185,7 @@ async function _zoneValidate() {
     await _vttApplyCasterConcentration(srcId, opt);
     await addDoc(_logCol(), {
       type: 'cast', undo: _snap,
+      ..._vttLogSourceFields(srcD),
       authorId: STATE.user?.uid || null,
       authorName: STATE.profile?.pseudo || STATE.profile?.prenom || STATE.user?.displayName || 'MJ',
       casterName: srcD ? (_live(srcD).displayName ?? srcD.name) : '?',
@@ -5202,6 +5227,7 @@ async function _zoneValidate() {
     await _vttApplyCasterConcentration(srcId, opt);
     await addDoc(_logCol(), {
       type: 'cast', undo: _snap,
+      ..._vttLogSourceFields(srcD),
       authorId: STATE.user?.uid || null,
       authorName: STATE.profile?.pseudo || STATE.profile?.prenom || STATE.user?.displayName || 'MJ',
       casterName: srcD ? (_live(srcD).displayName ?? srcD.name) : '?',
@@ -5249,6 +5275,7 @@ async function _zoneValidate() {
     _snap.createdTokens = [..._summonSpawnIds];
     await addDoc(_logCol(), {
       type: 'cast', undo: _snap,
+      ..._vttLogSourceFields(_srcD),
       authorId: STATE.user?.uid || null,
       authorName: STATE.profile?.pseudo || STATE.profile?.prenom || STATE.user?.displayName || 'MJ',
       casterName: _srcD ? (_live(_srcD).displayName ?? _srcD.name) : '?',
@@ -5655,6 +5682,7 @@ async function _vttRollAttack() {
       await addDoc(_logCol(), {
         type: 'cast',
         undo: _undoSnap,
+        ..._vttLogSourceFields(src),
         authorId: STATE.user?.uid||null, authorName,
         casterName: lS.displayName??src.name,
         characterImage: lS.displayImage||null,
@@ -5731,6 +5759,7 @@ async function _vttRollAttack() {
           .filter(Boolean).join(', ') || (lT?.displayName ?? tgt?.name ?? '');
         await addDoc(_logCol(), {
           type: 'cast', undo: _undoSnap,
+          ..._vttLogSourceFields(src),
           authorId: STATE.user?.uid||null, authorName,
           casterName: lS.displayName??src.name,
           characterImage: lS.displayImage||null,
@@ -5851,6 +5880,7 @@ async function _vttRollAttack() {
         await addDoc(_logCol(), {
           type: 'cast',
           undo: _undoSnap,
+          ..._vttLogSourceFields(src),
           authorId: STATE.user?.uid||null, authorName,
           casterName: lS.displayName??src.name,
           characterImage: lS.displayImage||null,
@@ -5947,6 +5977,7 @@ async function _vttRollAttack() {
           advReasons: hMode !== mode ? hCondMods.reasons : null,
           undo: _undoSnap,
           statsDelta: _healDelta,
+          ..._vttLogSourceFields(src),
           authorId: STATE.user?.uid||null, authorName,
           attackerName: lS.displayName??src.name,
           characterImage: lS.displayImage||null,
@@ -5996,7 +6027,14 @@ async function _vttRollAttack() {
         const newHp = Math.min(hpMax, curHp + healTotal);
         _healActual += Math.max(0, newHp - curHp);
         await _setHp(curTgtData, newHp);
-        healResults.push({ name: lCur.displayName ?? curTgtData.name, newHp, hpMax });
+        healResults.push({
+          name: lCur.displayName ?? curTgtData.name,
+          newHp, hpMax,
+          characterId: curTgtData.characterId || null,
+          npcId: curTgtData.npcId || null,
+          beastId: curTgtData.beastId || null,
+          targetImage: lCur.displayImage || null,
+        });
       }
       // Statistiques (soin) : 1 sort lancé + PM + soin réel, réversible à l'annulation.
       const _healDelta = { chars: {} };
@@ -6024,6 +6062,7 @@ async function _vttRollAttack() {
           type: 'attack-multi', isHeal: true,
           undo: _undoSnap,
           statsDelta: _healDelta,
+          ..._vttLogSourceFields(src),
           authorId: STATE.user?.uid||null, authorName,
           attackerName: lS.displayName??src.name,
           characterImage: lS.displayImage||null,
@@ -6044,11 +6083,15 @@ async function _vttRollAttack() {
             type:'attack', isHeal:true,
             undo: _undoSnap,
             statsDelta: _healDelta,
+            ..._vttLogSourceFields(src),
             authorId: STATE.user?.uid||null, authorName,
             attackerName: lS.displayName??src.name,
             characterImage: lS.displayImage||null,
             defenderName: r.name,
             defenderImage: _live(tgt)?.displayImage || null,
+            characterId: tgt?.characterId || null,
+            npcId: tgt?.npcId || null,
+            beastId: tgt?.beastId || null,
             optLabel: opt.label,
             ...hitPayload,
             dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
@@ -6487,6 +6530,7 @@ async function _vttRollAttack() {
         type: 'attack-multi',
         undo: _undoSnap,
         statsDelta: _statsDelta,
+        ..._vttLogSourceFields(src),
         authorId: STATE.user?.uid||null, authorName,
         attackerName: lS.displayName??src.name,
         characterImage: lS.displayImage||null,
@@ -6525,6 +6569,7 @@ async function _vttRollAttack() {
         type: 'attack',
         undo: _undoSnap,
         statsDelta: _statsDelta,
+        ..._vttLogSourceFields(src),
         authorId: STATE.user?.uid||null, authorName,
         attackerName: lS.displayName??src.name,
         characterImage: lS.displayImage||null,
@@ -9090,6 +9135,35 @@ async function _vttGateBack() {
   const { navigate } = await import('../../core/navigation.js');
   navigate('dashboard');
 }
+async function _vttOpenSource(kind, id = '', tab = '') {
+  const { navigate } = await import('../../core/navigation.js');
+  if (kind === 'char') {
+    if (!id) { showNotif('Personnage source introuvable.', 'error'); return; }
+    const { setTargetCharacter } = await import('../../shared/character-navigation.js');
+    setTargetCharacter(id, tab || null);
+    navigate('characters');
+    return;
+  }
+  if (id && (kind === 'npc' || kind === 'bestiary' || kind === 'shop')) {
+    const { setTargetEntity } = await import('../../shared/entity-navigation.js');
+    setTargetEntity(kind, id, { mode: tab || '' });
+  }
+  const page = {
+    npc: 'npcs',
+    bestiary: 'bestiaire',
+    shop: 'shop',
+  }[kind];
+  if (!page) { showNotif('Source introuvable.', 'error'); return; }
+  navigate(page);
+}
+function _vttLogSourceFields(t) {
+  return {
+    sourceTokenId: t?.id || null,
+    sourceCharacterId: t?.characterId || null,
+    sourceNpcId: t?.npcId || null,
+    sourceBeastId: t?.beastId || null,
+  };
+}
 async function _vttEnterTable() {
   _vttEntered = true;
   const content = document.getElementById('main-content');
@@ -9419,6 +9493,7 @@ export const VTT_ACTIONS = {
   _vttFogRedo,
   _vttImportGithubRelease,
   _vttInsTab,
+  _vttOpenSource,
   _vttSkillFilter,
   _vttSkillFilterClear,
   _vttInvokeMyToken,

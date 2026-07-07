@@ -35,6 +35,7 @@ import { loadConditionLibrary } from '../shared/conditions.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { spellActionCardHtml } from '../shared/spell-action-card.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
+import { consumeTargetEntity } from '../shared/entity-navigation.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS — remplace les onclick/oninput/onchange inline
@@ -131,6 +132,8 @@ let _weaponFormats = [];
 let _view  = 'home';   // 'home' | 'items'
 let _activeCat = null;
 let _page = 1;
+let _pendingTargetShopItemId = null;
+let _pendingTargetShopMode = '';
 const PAGE_SIZE = 20;
 
 // Filtres actifs (multi-sélection)
@@ -263,6 +266,29 @@ function _animateCount(el, from, to, duration = 400) {
 // ══════════════════════════════════════════════════════════════════════════════
 export async function renderShop() {
   await loadShopData();
+  const target = consumeTargetEntity('shop');
+  const targetItemId = target?.id || _pendingTargetShopItemId;
+  const targetMode = target?.meta?.mode || _pendingTargetShopMode || 'detail';
+  let targetItemToOpen = null;
+  if (targetItemId) {
+    const item = _items.find(i => i.id === targetItemId);
+    if (item) {
+      _view = 'items';
+      _activeCat = item.categorieId || '__uncategorized__';
+      _filterSearch = '';
+      _filterTags.clear();
+      _smartFilters.clear();
+      const visibleItems = _getFilteredItems(_activeCat);
+      const idx = visibleItems.findIndex(i => i.id === item.id);
+      _page = idx >= 0 ? Math.floor(idx / PAGE_SIZE) + 1 : 1;
+      targetItemToOpen = { id: item.id, mode: targetMode };
+      _pendingTargetShopItemId = null;
+      _pendingTargetShopMode = '';
+    } else {
+      _pendingTargetShopItemId = targetItemId;
+      _pendingTargetShopMode = targetMode;
+    }
+  }
   // Un joueur ne peut pas rester sur une catégorie devenue masquée.
   if (_view === 'items' && !STATE.isAdmin && _cats.find(c => c.id === _activeCat)?.masquee) {
     _view = 'home'; _activeCat = null;
@@ -347,6 +373,14 @@ export async function renderShop() {
   content.innerHTML = html;
   _shopTweaksApply();
   _mountSortables();
+  if (targetItemToOpen) {
+    requestAnimationFrame(() => {
+      const card = [...document.querySelectorAll('[data-item-id]')]
+        .find(el => el.dataset.itemId === targetItemToOpen.id);
+      card?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      if (targetItemToOpen.mode !== 'list') openShopItemDetail(targetItemToOpen.id);
+    });
+  }
 }
 
 /** Popup Tweaks d'affichage — segmented controls × 3. */

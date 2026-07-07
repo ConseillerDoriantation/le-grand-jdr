@@ -113,14 +113,31 @@ export function _renderChatLogImpl(msgs) {
 
   // Acteur = portrait + nom
   const _actor = (image, name) => `<span class="vtt-log-actor">${_portrait(image, name)}<span class="vtt-log-name">${_esc(name||'?')}</span></span>`;
+  const _sourceArgs = (m, tab = 'combat') => {
+    if (!STATE.isAdmin || !m) return '';
+    if (m.sourceCharacterId) return `char|${m.sourceCharacterId}|${tab}`;
+    if (m.sourceNpcId) return `npc|${m.sourceNpcId}`;
+    if (m.sourceBeastId) return `bestiary|${m.sourceBeastId}`;
+    return '';
+  };
+  const _targetArgs = (m, tab = 'combat') => {
+    if (!STATE.isAdmin || !m) return '';
+    if (m.characterId) return `char|${m.characterId}|${tab}`;
+    if (m.npcId) return `npc|${m.npcId}`;
+    if (m.beastId) return `bestiary|${m.beastId}`;
+    return '';
+  };
+  const _sourceLink = (args, title = 'Ouvrir la source') => args
+    ? `<button class="vtt-log-source-btn" data-vtt-fn="_vttOpenSource" data-vtt-args="${_esc(args)}" title="${_esc(title)}">↗</button>`
+    : '';
 
   // Header source ▸ cible avec label optionnel
-  const _header = ({ srcImg, srcName, tgtImg, tgtName, label, badges = '', ts = '' }) => {
+  const _header = ({ srcImg, srcName, tgtImg, tgtName, label, badges = '', ts = '', sourceArgs = '', targetArgs = '' }) => {
     const arrow = tgtName ? `<span class="vtt-log-arrow">▸</span>` : '';
     const tgt = tgtName ? _actor(tgtImg, tgtName) : '';
     const lbl = label ? `<span class="vtt-log-label">${_esc(label)}</span>` : '';
     return `<div class="vtt-log-head">
-      ${_actor(srcImg, srcName)}${arrow}${tgt}${lbl}
+      ${_actor(srcImg, srcName)}${_sourceLink(sourceArgs)}${arrow}${tgt}${_sourceLink(targetArgs, 'Ouvrir la cible')}${lbl}
       <span class="vtt-log-meta">${badges}${ts}</span>
     </div>`;
   };
@@ -213,6 +230,8 @@ export function _renderChatLogImpl(msgs) {
       srcImg: m.characterImage, srcName: m.attackerName || m.authorName || '?',
       tgtImg: m.defenderImage, tgtName: m.defenderName,
       label:  m.optLabel, badges, ts,
+      sourceArgs: _sourceArgs(m, m.isHeal ? 'sorts' : 'combat'),
+      targetArgs: _targetArgs(m, 'combat'),
     });
 
     // Headline : résultat principal
@@ -390,7 +409,7 @@ export function _renderChatLogImpl(msgs) {
     const head = _header({
       srcImg: m.characterImage, srcName: m.attackerName || m.authorName || '?',
       tgtName: `${(m.targets||[]).length} cibles`,
-      label:   m.optLabel, badges, ts,
+      label:   m.optLabel, badges, ts, sourceArgs: _sourceArgs(m, m.isHeal ? 'sorts' : 'combat'),
     });
 
     // Headline : touche total (commun à toutes les cibles)
@@ -414,9 +433,10 @@ export function _renderChatLogImpl(msgs) {
       const portraitInner = r.targetImage
         ? `<img src="${_esc(r.targetImage)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" data-img-err="text" data-img-err-text="${_esc(icon)}">`
         : icon;
+      const targetSourceLink = _sourceLink(_targetArgs(r, 'combat'), 'Ouvrir la cible');
       return `<div class="vtt-log-target" style="--row-c:${baseCol}">
         <div class="vtt-log-target-portrait" style="background:${baseCol}">${portraitInner}</div>
-        <span class="vtt-log-target-name">${_esc(r.name)}</span>
+        <span class="vtt-log-target-name">${_esc(r.name)}</span>${targetSourceLink}
         <span class="vtt-log-target-ca">CA ${shownCA}</span>
         <span class="vtt-log-target-dmg">${dmgVal}${dmgSuffix}</span>
       </div>`;
@@ -438,7 +458,7 @@ export function _renderChatLogImpl(msgs) {
     const head = _header({
       srcImg: m.characterImage, srcName: m.casterName || m.authorName || '?',
       tgtName: m.targetName, label: m.optLabel,
-      badges: pmBadge, ts,
+      badges: pmBadge, ts, sourceArgs: _sourceArgs(m, 'sorts'),
     });
     const body = `<div class="vtt-log-body">
       <span class="vtt-log-icon">${m.castEC ? '💔' : '✨'}</span>
@@ -453,7 +473,7 @@ export function _renderChatLogImpl(msgs) {
       srcImg: m.characterImage, srcName: m.casterName || m.authorName || '?',
       tgtName: m.targetName, label: m.optLabel,
       badges: `<span class="vtt-log-badge" style="color:#c4b5fd;background:rgba(180,127,255,.18)">🛡 JS ${_esc(m.statLabel||'?')} DD ${m.dd}</span>`,
-      ts,
+      ts, sourceArgs: _sourceArgs(m, 'sorts'),
     });
     const body = `<div class="vtt-log-body">
       <span class="vtt-log-icon">🪄</span>

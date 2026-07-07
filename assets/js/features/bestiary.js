@@ -12,6 +12,7 @@ import { STATE } from '../core/state.js';
 import { _ensureFeatureCss } from '../core/navigation.js';
 import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
+import { consumeTargetEntity } from '../shared/entity-navigation.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
 import { sortCharactersForDisplay, modStr } from '../shared/char-stats.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
@@ -54,6 +55,7 @@ let _bstSortable = null;
 let _bstDragBlockClick = false;
 let _bstClickGuardInstalled = false;
 let _bstReordering = false;
+let _pendingTargetBeastId = null;
 
 // Vue "MJ" effective : admin ET pas en train de consulter un joueur.
 // Quand l'admin bascule sur un joueur, on rend exactement comme côté joueur
@@ -905,6 +907,8 @@ function _renderPlayerAvatars() {
 export async function renderBestiary() {
   const content = document.getElementById('main-content');
   content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)"><div style="font-size:2rem">⏳</div></div>`;
+  const target = consumeTargetEntity('bestiary');
+  _pendingTargetBeastId = target?.id || _pendingTargetBeastId;
 
   // SÉCURITÉ : la vue "bestiaire d'un joueur" (viewAsUid) ne doit JAMAIS persister
   // hors d'une session admin ni à travers un changement de compte. L'app est une
@@ -996,6 +1000,13 @@ function _bstApplyData(all) {
   const arr = all || [];
   STORE.creatures = (STATE.isAdmin ? [...arr] : arr.filter(c => !c.hidden))
     .sort(_bstCompareCreatures);
+  if (_pendingTargetBeastId && STORE.creatures.some(c => c.id === _pendingTargetBeastId)) {
+    STORE.activeId = _pendingTargetBeastId;
+    STORE.searchVal = '';
+    STORE.filterType = '';
+    STORE.filterRang = '';
+    _pendingTargetBeastId = null;
+  }
 }
 
 // Re-charge STORE.creatures depuis loadCollection (cache TTL en mémoire patché par

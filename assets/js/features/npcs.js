@@ -19,6 +19,7 @@ import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
+import { consumeTargetEntity } from '../shared/entity-navigation.js';
 import { getItemStatBonus, sortCharactersForDisplay, getMyCharacters, getModFromScore } from '../shared/char-stats.js';
 import { _getTraits } from './characters/data.js';
 import { listPlaces } from './map/data/places.repo.js';
@@ -155,6 +156,7 @@ let _organisations = [];   // [{ id, name }] — alimente la sélection Organisa
 let _orgIcons      = {};   // { [orgName]: emoji } — émoji personnalisé par catégorie (MJ)
 let _shopWeapons   = [];   // armes issues de la boutique pour l'espace combat PNJ
 let _activeId      = null;
+let _pendingTargetNpcId = null;
 let _filterSearch  = '';
 let _activeOrgFilter = null;
 let _listView      = 'cat';  // 'cat' (par catégorie) | 'az' (liste à plat A→Z)
@@ -267,6 +269,16 @@ export async function renderNpcs() {
   // (cf. _renderLoading dans navigation.js). En ajouter un second = flash splash→
   // spinner disgracieux. Le splash reste visible pendant _load, puis _renderPage.
   await _load();
+  const target = consumeTargetEntity('npc');
+  _pendingTargetNpcId = target?.id || _pendingTargetNpcId;
+  if (_pendingTargetNpcId && _npcs.some(n => n.id === _pendingTargetNpcId)) {
+    _activeId = _pendingTargetNpcId;
+    _filterSearch = '';
+    _filterStatus = '';
+    _filterHidden = false;
+    _activeOrgFilter = null;
+    _pendingTargetNpcId = null;
+  }
   if (!_activeId && _npcs.length) _activeId = _npcs[0].id;
   _renderPage(content);
   _bindCharPickOutside();
@@ -277,6 +289,14 @@ export async function renderNpcs() {
   // → pas de double-read.
   watchPageCollection('npcs-list', 'npcs', 'npcs', data => {
     _npcs = data;
+    if (_pendingTargetNpcId && _npcs.some(n => n.id === _pendingTargetNpcId)) {
+      _activeId = _pendingTargetNpcId;
+      _filterSearch = '';
+      _filterStatus = '';
+      _filterHidden = false;
+      _activeOrgFilter = null;
+      _pendingTargetNpcId = null;
+    }
     _refreshList({ keepScroll: true });
     _refreshActivePanel();
   });
