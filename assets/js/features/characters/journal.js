@@ -87,6 +87,7 @@ function renderJournalQuetes(c, canEdit) {
         </div>
         ${canEdit ? `<div class="quest-actions">
           <button class="btn-icon" data-action="toggleQuete" data-idx="${idx}" title="${validee?'Rouvrir':'Marquer comme validée'}">${validee?'↺':'✔️'}</button>
+          <button class="btn-icon" data-action="editQuete" data-idx="${idx}" title="Modifier">✏️</button>
           <button class="btn-icon" data-action="deleteQuete" data-idx="${idx}" title="Supprimer" style="color:#ff8ca7">🗑️</button>
         </div>` : ''}
       </header>
