@@ -583,6 +583,7 @@ export async function _vttTriggerConcentrationSave(td, damageAmount, nextHp = nu
       authorName: STATE.profile?.pseudo || STATE.profile?.prenom || 'MJ',
       tokenName: tgtName,
       characterImage: _live(liveTd).displayImage || null,
+      ..._vttLogTargetFields(liveTd),
       sortLabel: label,
       conditionLabel: lib?.label || 'Concentré',
       statLabel: 'Sa',
@@ -5683,6 +5684,7 @@ async function _vttRollAttack() {
         type: 'cast',
         undo: _undoSnap,
         ..._vttLogSourceFields(src),
+        ..._vttLogSingleTargetFields(targetIds),
         authorId: STATE.user?.uid||null, authorName,
         casterName: lS.displayName??src.name,
         characterImage: lS.displayImage||null,
@@ -5760,6 +5762,7 @@ async function _vttRollAttack() {
         await addDoc(_logCol(), {
           type: 'cast', undo: _undoSnap,
           ..._vttLogSourceFields(src),
+          ..._vttLogSingleTargetFields(targetIds),
           authorId: STATE.user?.uid||null, authorName,
           casterName: lS.displayName??src.name,
           characterImage: lS.displayImage||null,
@@ -5881,6 +5884,7 @@ async function _vttRollAttack() {
           type: 'cast',
           undo: _undoSnap,
           ..._vttLogSourceFields(src),
+          ..._vttLogSingleTargetFields(targetIds),
           authorId: STATE.user?.uid||null, authorName,
           casterName: lS.displayName??src.name,
           characterImage: lS.displayImage||null,
@@ -9156,13 +9160,25 @@ async function _vttOpenSource(kind, id = '', tab = '') {
   if (!page) { showNotif('Source introuvable.', 'error'); return; }
   navigate(page);
 }
-function _vttLogSourceFields(t) {
+export function _vttLogSourceFields(t) {
   return {
     sourceTokenId: t?.id || null,
     sourceCharacterId: t?.characterId || null,
     sourceNpcId: t?.npcId || null,
     sourceBeastId: t?.beastId || null,
   };
+}
+export function _vttLogTargetFields(t) {
+  return {
+    tokenId: t?.id || null,
+    characterId: t?.characterId || null,
+    npcId: t?.npcId || null,
+    beastId: t?.beastId || null,
+  };
+}
+export function _vttLogSingleTargetFields(targetIds = []) {
+  if (!Array.isArray(targetIds) || targetIds.length !== 1) return {};
+  return _vttLogTargetFields(VS.tokens[targetIds[0]]?.data);
 }
 async function _vttEnterTable() {
   _vttEntered = true;
