@@ -443,7 +443,7 @@ function _statsRender(scope) {
   </div>` : '';
 
   const exportBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExport" title="Copier un récap texte (Discord…)">📋 Copier le récap</button>` : '';
-  const manageBtn = STATE.isAdmin ? `<button class="stats-tool-btn" data-action="_statsManage" title="Gérer / supprimer des statistiques">⚙ Gérer les données</button>` : '';
+  const manageBtn = STATE.isAdmin ? `<button class="stats-tool-btn" data-action="_statsManage" title="Relier les séances aux missions · supprimer des données">⚙ Gérer les données</button>` : '';
   const controls = `<div class="stats-controls">
     <div class="stats-controls-top">${sessionsBar}<div class="stats-toolbar-actions">${exportBtn}${manageBtn}</div></div>
     ${playersBar}
@@ -453,14 +453,19 @@ function _statsRender(scope) {
   const partsHtml = allRows.map(r => `<span class="stats-sb-part" title="${_esc(r.name)}">${_statsAvatar(r.id, r.name, 30)}</span>`).join('');
   const sessionBanner = dateKey ? (() => {
     const mission = _statsMissionOf(dateKey), group = _statsGroupOf(dateKey);
-    const editBtn = STATE.isAdmin ? `<button class="stats-sb-edit" data-action="_statsEditMission" data-scope="${dateKey}" title="Relier la séance à une mission / un groupe">✎</button>` : '';
+    // Lien mission/groupe : bouton EXPLICITE (le ✎ discret n'était pas trouvé).
+    const linkBtn = STATE.isAdmin
+      ? (mission
+          ? `<button class="stats-sb-edit" data-action="_statsEditMission" data-scope="${dateKey}" title="Modifier le lien mission / groupe">✎ Modifier</button>`
+          : `<button class="stats-sb-link" data-action="_statsEditMission" data-scope="${dateKey}">🔗 Relier à une mission / un groupe</button>`)
+      : '';
     const missLine = mission
-      ? `🎯 ${_esc(mission)}${group ? ` <span class="stats-sb-group">· 👥 ${_esc(group)}</span>` : ''}`
-      : '<span class="stats-sb-none">Mission non renseignée</span>';
+      ? `🎯 ${_esc(mission)}${group ? ` <span class="stats-sb-group">· 👥 ${_esc(group)}</span>` : ''} ${linkBtn}`
+      : (linkBtn || '<span class="stats-sb-none">Mission non renseignée</span>');
     return `<div class="stats-session-banner">
       <div class="stats-sb-info">
         <div class="stats-sb-date">📅 Séance du ${_statsFmtDate(dateKey)}</div>
-        <div class="stats-sb-mission">${missLine}${editBtn}</div>
+        <div class="stats-sb-mission">${missLine}</div>
       </div>
       ${partsHtml ? `<div class="stats-sb-parts" title="Participants">${partsHtml}</div>` : ''}
     </div>`;
@@ -2301,18 +2306,28 @@ registerActions({
     const dates = [...new Set(Object.values(_statsData?.chars || {}).flatMap(c => Object.keys(c.byDate || {})))].sort().reverse();
     const missions = _statsMissionList();
     const missRow = (m) => `<div class="stats-mng-row"><span class="stats-mng-lbl">🎯 ${_esc(m.name)}</span><button class="stats-mng-del" data-action="_statsDelMission" data-scope="${m.id}" data-name="${_esc(m.name)}">🗑 Supprimer</button></div>`;
-    const dateRow = (d) => { const mi = _statsMissionOf(d), gr = _statsGroupOf(d); return `<div class="stats-mng-row"><span class="stats-mng-lbl">📅 ${_statsFmtDate(d)}${mi ? ` · ${_esc(mi)}` : ''}${gr ? ` · 👥 ${_esc(gr)}` : ''}</span><button class="stats-mng-del" data-action="_statsDelDate" data-scope="${d}">🗑 Supprimer</button></div>`; };
+    const dateRow = (d) => {
+      const mi = _statsMissionOf(d), gr = _statsGroupOf(d);
+      const label = mi ? `🎯 ${_esc(mi)}${gr ? ` · 👥 ${_esc(gr)}` : ''}` : '<span class="stats-sb-none">Non reliée</span>';
+      return `<div class="stats-mng-row">
+        <span class="stats-mng-lbl">📅 ${_statsFmtDate(d)} — ${label}</span>
+        <span class="stats-mng-acts">
+          <button class="stats-mng-link" data-action="_statsEditMission" data-scope="${d}">🔗 ${mi ? 'Modifier' : 'Relier'}</button>
+          <button class="stats-mng-del" data-action="_statsDelDate" data-scope="${d}">🗑</button>
+        </span>
+      </div>`;
+    };
     openModal('⚙ Gérer les statistiques', `
       <div class="stats-mng">
-        ${missions.length ? `<div class="stats-mng-sec"><div class="stats-mng-hd">Supprimer par mission</div>${missions.map(missRow).join('')}</div>` : ''}
-        ${dates.length ? `<div class="stats-mng-sec"><div class="stats-mng-hd">Supprimer par séance (date)</div>${dates.map(dateRow).join('')}</div>` : ''}
-        ${(!missions.length && !dates.length) ? '<div class="stats-mng-sec" style="color:var(--text-dim);font-size:.85rem">Aucune donnée datée à supprimer.</div>' : ''}
+        ${dates.length ? `<div class="stats-mng-sec"><div class="stats-mng-hd">Relier une séance à une mission / un groupe · ou la supprimer</div>${dates.map(dateRow).join('')}</div>` : ''}
+        ${missions.length ? `<div class="stats-mng-sec"><div class="stats-mng-hd">Supprimer toutes les stats d'une mission</div>${missions.map(missRow).join('')}</div>` : ''}
+        ${(!missions.length && !dates.length) ? '<div class="stats-mng-sec" style="color:var(--text-dim);font-size:.85rem">Aucune donnée datée pour le moment.</div>' : ''}
         <div class="stats-mng-danger">
           <div class="stats-mng-hd">⚠ Zone dangereuse</div>
           <p>Efface <b>toutes</b> les statistiques de l'aventure. Irréversible.</p>
           <button class="stats-mng-reset" data-action="_statsResetAsk">↺ Tout réinitialiser…</button>
         </div>
-      </div>`, { subtitle: 'Suppression ciblée (les totaux campagne sont ajustés)', accent: '#ef4444' });
+      </div>`, { subtitle: 'Relier les séances aux missions · supprimer des données ciblées', accent: '#4f8cff' });
   },
   // Supprime les stats d'une séance (date) — ajuste les totaux campagne.
   _statsDelDate: async (btn) => {
@@ -2429,7 +2444,7 @@ registerActions({
           <button type="button" class="stats-mp-opt stats-mp-none${!curId ? ' active' : ''}" data-action="_statsPickMission" data-scope="${dk}" data-mission-id="" data-mission="">
             <span class="stats-mp-ico">✖</span><span class="stats-mp-tt">Aucune mission</span></button>
           ${missions.map(m => opt(m.id, m.type === 'event' ? '📖' : '🎯', m.titre || 'Mission', m.id === curId)).join('')}
-          ${missions.length ? '' : '<div class="stats-mp-empty">Aucune mission dans la Trame.</div>'}
+          ${missions.length ? '' : '<div class="stats-mp-empty">Aucune mission dans la Trame.<br><span style="font-size:.9em">Crée d\'abord une mission (et ses groupes) dans la page <b>Trame</b>.</span></div>'}
         </div>
       </div>`, { subtitle: 'Relier la séance à un élément de la Trame', accent: '#22c38e' });
   },

@@ -74,6 +74,18 @@
   font-size: .74rem; cursor: pointer; transition: color .12s, border-color .12s;
 }
 .stats-sb-edit:hover { color: var(--gold); border-color: var(--gold-glow, #6366f1); }
+/* Bouton explicite « Relier à une mission » (séance non reliée) */
+.stats-sb-edit {
+  width: auto; padding: .18rem .5rem; font-size: .72rem; gap: .25rem;
+}
+.stats-sb-link {
+  display: inline-flex; align-items: center; gap: .3rem; cursor: pointer;
+  font-size: .82rem; font-weight: 700; font-family: inherit;
+  padding: .38rem .7rem; border-radius: 8px;
+  background: rgba(79,140,255,.14); border: 1px solid rgba(79,140,255,.5); color: #9cc3ff;
+  transition: background .12s, border-color .12s;
+}
+.stats-sb-link:hover { background: rgba(79,140,255,.24); border-color: rgba(79,140,255,.7); }
 .stats-sb-parts { display: flex; align-items: center; }
 .stats-sb-part { display: inline-flex; margin-left: -8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--bg-card); }
 .stats-sb-part:first-child { margin-left: 0; }
@@ -168,6 +180,13 @@
   transition: background .12s, border-color .12s;
 }
 .stats-mng-del:hover { background: rgba(255,90,126,.12); border-color: rgba(255,90,126,.55); }
+.stats-mng-acts { display: inline-flex; gap: .35rem; flex-shrink: 0; }
+.stats-mng-link {
+  flex-shrink: 0; font-size: .74rem; cursor: pointer; padding: .3rem .6rem; border-radius: 7px;
+  background: rgba(79,140,255,.12); border: 1px solid rgba(79,140,255,.4); color: #9cc3ff;
+  transition: background .12s, border-color .12s;
+}
+.stats-mng-link:hover { background: rgba(79,140,255,.22); border-color: rgba(79,140,255,.6); }
 .stats-mng-danger {
   margin-top: .3rem; padding: .8rem .9rem; border-radius: 11px;
   background: rgba(239,68,68,.06); border: 1px solid rgba(239,68,68,.3);
