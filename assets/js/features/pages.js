@@ -769,31 +769,42 @@ function _statsRender(scope) {
   const topFumble = [...rows].map(r => ({ ...r, tf: r.combat.fumbles + r.sFumbles })).filter(r => r.tf > 0).sort((a, b) => b.tf - a.tf)[0];
   const topEmoter = [...rows].filter(r => r.emoteTotal > 0).sort((a, b) => b.emoteTotal - a.emoteTotal)[0];
   const topRoller = [...rows].filter(r => r.sRolls > 0).sort((a, b) => b.sRolls - a.sRolls)[0];
-  const impactScore = (r) => {
+  const impactBreakdown = (r) => {
     const cm = r.combat || {};
     const tactical = cm.tacticalSpells || 0;
     const plainCasts = Math.max(0, (cm.spellsCast || 0) - tactical);
-    const tankScore =
-      (cm.attacksTaken || 0) * 3 +
-      (cm.attacksAvoided || 0) * 4 +
-      (cm.dmgTaken || 0) * 0.35 -
-      (cm.kosTaken || 0) * 8;
-    return Math.round(
-      (cm.dmgDealt || 0) +
-      (cm.heal || 0) * 1.15 +
-      (cm.kosDealt || 0) * 12 +
-      plainCasts * 3 +
-      tactical * 5 +
-      (cm.supportSpells || 0) * 3 +
-      (cm.afflictionSpells || 0) * 3 +
-      (r.sRolls || 0) * 2 +
-      ((cm.crits || 0) + (r.sCrits || 0)) * 6 +
-      tankScore -
-      ((cm.fumbles || 0) + (r.sFumbles || 0)) * 3
-    );
+    const entries = [];
+    const add = (label, count, points, icon) => {
+      if (!count || !points) return;
+      entries.push({ label, count, points, icon });
+    };
+    add('Dégâts infligés', cm.dmgDealt, cm.dmgDealt, '🗡️');
+    add('Soin prodigué', cm.heal, cm.heal * 1.15, '💚');
+    add('KO infligés', cm.kosDealt, cm.kosDealt * 12, '☠️');
+    add('Sorts classiques', plainCasts, plainCasts * 3, '🔮');
+    add('Sorts tactiques', tactical, tactical * 5, '✨');
+    add('Soutien', cm.supportSpells, cm.supportSpells * 3, '🛡️');
+    add('Afflictions', cm.afflictionSpells, cm.afflictionSpells * 3, '💀');
+    add('Jets de compétence', r.sRolls, r.sRolls * 2, '🎲');
+    add('Critiques', (cm.crits || 0) + (r.sCrits || 0), ((cm.crits || 0) + (r.sCrits || 0)) * 6, '💥');
+    add('Ciblages encaissés', cm.attacksTaken, cm.attacksTaken * 3, '🧱');
+    add('Attaques évitées', cm.attacksAvoided, cm.attacksAvoided * 4, '🛡️');
+    add('Dégâts encaissés', cm.dmgTaken, cm.dmgTaken * 0.35, '🩸');
+    add('KO subis', cm.kosTaken, cm.kosTaken * -8, '💀');
+    add('Échecs critiques', (cm.fumbles || 0) + (r.sFumbles || 0), ((cm.fumbles || 0) + (r.sFumbles || 0)) * -3, '💔');
+    const raw = entries.reduce((sum, e) => sum + e.points, 0);
+    return {
+      entries,
+      gained: entries.filter(e => e.points > 0).reduce((sum, e) => sum + e.points, 0),
+      lost: Math.abs(entries.filter(e => e.points < 0).reduce((sum, e) => sum + e.points, 0)),
+      score: Math.round(raw),
+    };
   };
   const impactRows = [...rows]
-    .map(r => ({ ...r, impact: impactScore(r) }))
+    .map(r => {
+      const impactDetails = impactBreakdown(r);
+      return { ...r, impact: impactDetails.score, impactDetails };
+    })
     .filter(r => r.impact > 0)
     .sort((a, b) => (b.impact - a.impact) || String(a.name || '').localeCompare(String(b.name || ''), 'fr'));
   const topImpact = impactRows[0]?.impact || 0;
@@ -943,11 +954,33 @@ function _statsRender(scope) {
       ${_statsAvatar(leader.id, leader.name, 42)}
       <div><span class="stats-mvp-eyebrow">${title}</span><b>${_esc(leader.name)}</b></div>
     </div>`).join('');
+    const fmtPts = (v) => {
+      const abs = Math.abs(v);
+      const txt = Number.isInteger(abs) ? String(abs) : abs.toFixed(1).replace(/\.0$/, '');
+      return `${v >= 0 ? '+' : '-'}${txt}`;
+    };
+    const calcHtml = mvps.map(leader => {
+      const details = leader.impactDetails || { entries: [], gained: 0, lost: 0, score: leader.impact || 0 };
+      const rowsHtml = details.entries.map(e => `<div class="stats-mvp-calc-row${e.points < 0 ? ' is-loss' : ''}">
+        <span><b>${e.icon}</b>${_esc(e.label)} <small>×${e.count}</small></span>
+        <strong>${fmtPts(e.points)}</strong>
+      </div>`).join('');
+      return `<div class="stats-mvp-calc">
+        ${mvps.length > 1 ? `<div class="stats-mvp-calc-name">${_esc(leader.name)}</div>` : ''}
+        <div class="stats-mvp-calc-total">
+          <span>Gagnés <b>${fmtPts(details.gained)}</b></span>
+          <span>Perdus <b>${details.lost ? fmtPts(-details.lost) : '0'}</b></span>
+          <span>Net <b>${details.score}</b></span>
+        </div>
+        <div class="stats-mvp-calc-rows">${rowsHtml}</div>
+      </div>`;
+    }).join('');
     return `<section class="stats-sec stats-mvp-sec">
       <div class="stats-mvp-card">
         <div class="stats-mvp-id stats-mvp-id--multi">${leadersHtml}</div>
         <div class="stats-mvp-score">${topImpact}<span>score</span></div>
         <div class="stats-mvp-breakdown">${parts.slice(0, 5).map(p => `<span>${p}</span>`).join('')}</div>
+        <div class="stats-mvp-calcs">${calcHtml}</div>
       </div>
     </section>`;
   })() : '';

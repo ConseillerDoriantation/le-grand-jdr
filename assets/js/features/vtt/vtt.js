@@ -28,7 +28,7 @@ import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js
 import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
-import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit, bumpBiggestTaken } from '../../shared/stats.js';
+import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit, bumpBiggestTaken, bumpDamageTaken } from '../../shared/stats.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
@@ -8248,8 +8248,15 @@ async function _vttSetHp(tokenId,hp) {
   const prevHp = lT.displayHp ?? t.hp ?? null;
   const newHp  = Math.max(0, hp);
   const delta  = prevHp != null ? Math.max(0, prevHp - newHp) : 0;
-  await _setHp(t,hp).catch(()=>{});
+  let hpUpdated = false;
+  await _setHp(t,hp).then(() => { hpUpdated = true; }).catch(()=>{});
   if (delta > 0) {
+    if (hpUpdated && t.characterId) {
+      const ko = prevHp > 0 && newHp <= 0;
+      const name = lT.displayName ?? t.name ?? '';
+      bumpDamageTaken(t.characterId, name, delta, { ko });
+      bumpBiggestTaken(t.characterId, name, delta);
+    }
     const notes = await _vttTriggerConcentrationSave(t, delta, newHp);
     notes.forEach(msg => showNotif(msg, msg.startsWith('💢') ? 'error' : 'info'));
   }

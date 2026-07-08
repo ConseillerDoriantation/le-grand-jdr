@@ -244,6 +244,20 @@ export function bumpHeal(charId, charName, amount) {
 
 // ── Émote utilisée (par perso) ───────────────────────────────────────────────
 // Pas d'annulation possible → écriture directe.
+export function bumpDamageTaken(charId, charName, amount, { ko = false } = {}) {
+  const dmg = Math.max(0, Number(amount) || 0);
+  if (!charId || (dmg <= 0 && !ko)) return;
+  const dk = statsDateKey();
+  const combat = {};
+  if (dmg > 0) combat.dmgTaken = increment(dmg);
+  if (ko) combat.kosTaken = increment(1);
+  return bumpStats({ chars: { [charId]: {
+    name: charName || '',
+    combat,
+    byDate: { [dk]: { combat } },
+  } } });
+}
+
 export function bumpEmote(charId, charName, emoteName) {
   if (!charId || !emoteName) return;
   const dk = statsDateKey();
