@@ -8,9 +8,9 @@ import { _esc, _norm, appSplashHtml, pageHeaderHtml, loadingHtml} from '../share
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { isFeatureEnabled } from '../shared/features.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
-import { loadStats, resetStats, deleteCharStats, setSessionMission } from '../shared/stats.js';
+import { loadStats, resetStats, deleteCharStats, deleteDateStats, deleteMissionStats, setSessionMission } from '../shared/stats.js';
 import { showNotif } from '../shared/notifications.js';
-import { confirmModal, openModal, closeModalDirect } from '../shared/modal.js';
+import { confirmModal, openModal, promptModal, closeModalDirect } from '../shared/modal.js';
 import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
@@ -61,6 +61,31 @@ const _statsAvatar = (id, name, size = 18) =>
   characterAvatarHtml(STATE.characters?.find(x => x.id === id) || { nom: name }, { size, className: 'stats-av-xs', title: name });
 // Mission d'une séance (libellé MJ), ou '' si non renseignée.
 const _statsMissionOf = (dateKey) => (dateKey && _statsData?.sessions?.[dateKey]?.mission) || '';
+const _statsGroupOf   = (dateKey) => (dateKey && _statsData?.sessions?.[dateKey]?.group) || '';
+// Dates liées à une mission (via sessions.{date}.missionId).
+const _statsMissionDates = (mid) => Object.entries(_statsData?.sessions || {}).filter(([, s]) => s?.missionId === mid).map(([dk]) => dk);
+// Missions distinctes ayant ≥1 séance liée (pour la frise).
+function _statsMissionList() {
+  const m = new Map();
+  for (const s of Object.values(_statsData?.sessions || {})) if (s?.missionId && !m.has(s.missionId)) m.set(s.missionId, s.mission || 'Mission');
+  return [...m.entries()].map(([id, name]) => ({ id, name }));
+}
+// Étape 2 du sélecteur : choisir le GROUPE de la mission ayant joué la séance.
+function _statsGroupStep(dk, mid, mission, groupes) {
+  const curG = _statsData?.sessions?.[dk]?.groupId || '';
+  const opt = (gid, name, active) =>
+    `<button type="button" class="stats-mp-opt${active ? ' active' : ''}"
+      data-action="_statsPickGroup" data-scope="${dk}" data-mission-id="${_esc(mid)}" data-mission="${_esc(mission)}" data-group-id="${_esc(gid)}" data-group="${_esc(name)}">
+      <span class="stats-mp-ico">👥</span><span class="stats-mp-tt">${_esc(name)}</span>${active ? '<span class="stats-mp-check">✓</span>' : ''}</button>`;
+  openModal(`🎯 ${_esc(mission)}`, `
+    <div class="stats-mp">
+      <div class="stats-mp-hint">Quel groupe a joué cette séance ?</div>
+      <div class="stats-mp-list">
+        <button type="button" class="stats-mp-opt stats-mp-none${!curG ? ' active' : ''}" data-action="_statsPickGroup" data-scope="${dk}" data-mission-id="${_esc(mid)}" data-mission="${_esc(mission)}" data-group-id="" data-group=""><span class="stats-mp-ico">—</span><span class="stats-mp-tt">Sans groupe précis</span></button>
+        ${groupes.map(g => opt(g.id, g.titre || 'Groupe', g.id === curG)).join('')}
+      </div>
+    </div>`, { subtitle: 'Groupe de la mission', accent: '#4f8cff' });
+}
 
 // Métriques graphables : clé → { libellé, couleur }. La valeur se lit sur la
 // ligne (combat, ou sRolls pour les jets de compétence).
@@ -330,11 +355,30 @@ function _statsColChart(series, key) {
     </div>`).join('')}</div>`;
 }
 
-// Construit les lignes/cartes de stats pour un scope donné (dateKey null = campagne).
-function _statsRowsFor(dateKey) {
+// Somme les miroirs byDate d'un perso sur un ensemble de dates → même forme
+// que le total campagne (combat/skills/spells/emotes).
+function _statsSumByDates(c, dates) {
+  const acc = {};
+  for (const dk of dates) {
+    const bd = c?.byDate?.[dk]; if (!bd) continue;
+    for (const [grp, obj] of Object.entries(bd)) {
+      if (!obj || typeof obj !== 'object') continue;
+      const a = (acc[grp] ??= {});
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof v === 'number') a[k] = (a[k] || 0) + v;
+        else if (v && typeof v === 'object') { const a2 = (a[k] ??= {}); for (const [k2, v2] of Object.entries(v)) if (typeof v2 === 'number') a2[k2] = (a2[k2] || 0) + v2; }
+      }
+    }
+  }
+  return acc;
+}
+
+// Construit les lignes/cartes de stats pour un scope. `dateKeys` : null = campagne
+// (totaux) ; sinon tableau de dates → somme des séances (une ou une mission entière).
+function _statsRowsFor(dateKeys) {
   const num = _statsNum;
   return Object.entries(_statsData?.chars || {}).map(([id, c]) => {
-    const src = dateKey ? (c.byDate?.[dateKey] || {}) : c;   // même forme : combat/skills/spells/emotes
+    const src = dateKeys ? _statsSumByDates(c, dateKeys) : c;   // même forme : combat/skills/spells/emotes
     const skills = src.skills || {};
     let sRolls = 0, sCrits = 0, sFumbles = 0;
     const perSkill = Object.entries(skills).map(([sk, v]) => {
@@ -361,25 +405,34 @@ function _statsPodium(title, entries, render) {
 }
 
 // Rendu complet de la page pour un scope (réutilisé au changement de séance).
-function _statsRender(dateKey) {
-  _statsScope = dateKey || null;
+function _statsRender(scope) {
+  _statsScope = scope || null;
   const root = document.getElementById('stats-root');
   if (!root) return;
-  const allRows = _statsRowsFor(dateKey);   // participants du scope courant
+  // Scope : null (campagne) · 'YYYY-MM-DD' (une séance) · 'mission:{id}' (mission entière).
+  const isMission = typeof scope === 'string' && scope.startsWith('mission:');
+  const missionId = isMission ? scope.slice(8) : '';
+  const dateKey   = (scope && !isMission) ? scope : null;
+  const missions  = _statsMissionList();
+  const missionName = isMission ? (missions.find(m => m.id === missionId)?.name || 'Mission') : '';
+  const scopeDates = isMission ? _statsMissionDates(missionId) : (dateKey ? [dateKey] : null);
+
+  const allRows = _statsRowsFor(scopeDates);   // participants du scope courant
   // Filtre « joueurs ciblés » : recalcule toute la page sur le sous-ensemble choisi.
   const sel = _statsPlayerSel;
   const rows = (sel && sel.size) ? allRows.filter(r => sel.has(r.id)) : allRows;
 
   const allDates = [...new Set(Object.values(_statsData?.chars || {}).flatMap(c => Object.keys(c.byDate || {})))].sort().reverse();
 
-  // Frise de séances : un clic = une vue. Chaque séance affiche sa mission (MJ).
-  const scopeChip = (val, label, active, mission) =>
-    `<button class="stats-chip stats-chip-session${active ? ' active' : ''}" data-action="_statsSetScope" data-scope="${val}"${mission ? ` title="${_esc(mission)}"` : ''}>
-      <span class="stats-chip-date">${label}</span>${mission ? `<span class="stats-chip-mission">${_esc(mission)}</span>` : ''}
+  // Frise : campagne · missions (🎯) · séances (📅 + groupe).
+  const scopeChip = (val, label, active, sub) =>
+    `<button class="stats-chip stats-chip-session${active ? ' active' : ''}" data-action="_statsSetScope" data-scope="${val}"${sub ? ` title="${_esc(sub)}"` : ''}>
+      <span class="stats-chip-date">${label}</span>${sub ? `<span class="stats-chip-mission">${_esc(sub)}</span>` : ''}
     </button>`;
   const sessionsBar = `<div class="stats-chips stats-sessions">
-    ${scopeChip('', 'Toute la campagne', !dateKey, '')}
-    ${allDates.map(d => scopeChip(d, `📅 ${_statsFmtDate(d).slice(0, 5)}`, d === dateKey, _statsMissionOf(d))).join('')}
+    ${scopeChip('', 'Toute la campagne', !scope, '')}
+    ${missions.map(m => scopeChip('mission:' + m.id, `🎯 ${_esc(m.name)}`, isMission && m.id === missionId, 'Mission')).join('')}
+    ${allDates.map(d => scopeChip(d, `📅 ${_statsFmtDate(d).slice(0, 5)}`, d === dateKey, _statsGroupOf(d) || _statsMissionOf(d))).join('')}
   </div>`;
 
   // Chips « joueurs ciblés » : uniquement les participants du scope (portrait + nom).
@@ -390,31 +443,42 @@ function _statsRender(dateKey) {
   </div>` : '';
 
   const exportBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExport" title="Copier un récap texte (Discord…)">📋 Copier le récap</button>` : '';
-  const resetBtn = STATE.isAdmin ? `<button class="stats-tool-btn stats-reset-btn" data-action="_statsReset" title="Remettre toutes les statistiques à zéro">↺ Réinitialiser</button>` : '';
+  const manageBtn = STATE.isAdmin ? `<button class="stats-tool-btn" data-action="_statsManage" title="Gérer / supprimer des statistiques">⚙ Gérer les données</button>` : '';
   const controls = `<div class="stats-controls">
-    <div class="stats-controls-top">${sessionsBar}<div class="stats-toolbar-actions">${exportBtn}${resetBtn}</div></div>
+    <div class="stats-controls-top">${sessionsBar}<div class="stats-toolbar-actions">${exportBtn}${manageBtn}</div></div>
     ${playersBar}
   </div>`;
 
-  // Bannière de séance : mission (éditable MJ) + portraits des participants.
+  // Bannière : séance (mission + groupe, éditable MJ) OU mission (agrégée).
+  const partsHtml = allRows.map(r => `<span class="stats-sb-part" title="${_esc(r.name)}">${_statsAvatar(r.id, r.name, 30)}</span>`).join('');
   const sessionBanner = dateKey ? (() => {
-    const mission = _statsMissionOf(dateKey);
-    const editBtn = STATE.isAdmin ? `<button class="stats-sb-edit" data-action="_statsEditMission" data-scope="${dateKey}" title="Nommer la mission de la séance">✎</button>` : '';
-    const parts = allRows.map(r => `<span class="stats-sb-part" title="${_esc(r.name)}">${_statsAvatar(r.id, r.name, 30)}</span>`).join('');
+    const mission = _statsMissionOf(dateKey), group = _statsGroupOf(dateKey);
+    const editBtn = STATE.isAdmin ? `<button class="stats-sb-edit" data-action="_statsEditMission" data-scope="${dateKey}" title="Relier la séance à une mission / un groupe">✎</button>` : '';
+    const missLine = mission
+      ? `🎯 ${_esc(mission)}${group ? ` <span class="stats-sb-group">· 👥 ${_esc(group)}</span>` : ''}`
+      : '<span class="stats-sb-none">Mission non renseignée</span>';
     return `<div class="stats-session-banner">
       <div class="stats-sb-info">
         <div class="stats-sb-date">📅 Séance du ${_statsFmtDate(dateKey)}</div>
-        <div class="stats-sb-mission">${mission ? `🎯 ${_esc(mission)}` : '<span class="stats-sb-none">Mission non renseignée</span>'}${editBtn}</div>
+        <div class="stats-sb-mission">${missLine}${editBtn}</div>
       </div>
-      ${parts ? `<div class="stats-sb-parts" title="Participants">${parts}</div>` : ''}
+      ${partsHtml ? `<div class="stats-sb-parts" title="Participants">${partsHtml}</div>` : ''}
     </div>`;
-  })() : '';
+  })() : isMission ? `<div class="stats-session-banner">
+      <div class="stats-sb-info">
+        <div class="stats-sb-date">🎯 Mission — ${scopeDates.length} séance${scopeDates.length > 1 ? 's' : ''} agrégée${scopeDates.length > 1 ? 's' : ''}</div>
+        <div class="stats-sb-mission">${_esc(missionName)}</div>
+      </div>
+      ${partsHtml ? `<div class="stats-sb-parts" title="Participants">${partsHtml}</div>` : ''}
+    </div>` : '';
 
   if (!rows.length) {
     _statsLastSummary = '';
-    const why = (sel && sel.size) ? 'les joueurs ciblés' : (dateKey ? `la séance du ${_statsFmtDate(dateKey)}` : 'le moment');
+    const why = (sel && sel.size) ? 'les joueurs ciblés'
+      : dateKey ? `la séance du ${_statsFmtDate(dateKey)}`
+      : isMission ? `la mission « ${missionName} »` : 'le moment';
     root.innerHTML = `${controls}<div class="stats-empty">Aucune statistique pour ${why}.<br>
-      <span>Ajuste la séance ou les joueurs ciblés ci-dessus.</span></div>`;
+      <span>Ajuste la vue ou les joueurs ciblés ci-dessus.</span></div>`;
     return;
   }
 
@@ -498,7 +562,8 @@ function _statsRender(dateKey) {
     </div>`;
   };
 
-  const combatTitle = dateKey ? `⚔️ Combat — séance du ${_statsFmtDate(dateKey)}` : '⚔️ Combat (table)';
+  const combatTitle = dateKey ? `⚔️ Combat — séance du ${_statsFmtDate(dateKey)}`
+    : isMission ? `⚔️ Combat — ${_esc(missionName)}` : '⚔️ Combat (table)';
   const awardsHtml = [
     award('🏆', 'Plus gros frappeur', topDmg?.name, `${topDmg?.combat.dmgDealt} dmg`, '#f4c430'),
     award('💢', 'Plus gros coup', topBig?.name, `${topBig?.combat.biggestHit}`, '#ff8b6b'),
@@ -513,7 +578,8 @@ function _statsRender(dateKey) {
   ].join('');
 
   // Récap texte (export) — construit à partir du scope courant.
-  const scopeLabel = dateKey ? `séance du ${_statsFmtDate(dateKey)}` : 'toute la campagne';
+  const scopeLabel = dateKey ? `séance du ${_statsFmtDate(dateKey)}`
+    : isMission ? `mission « ${missionName} »` : 'toute la campagne';
   const sumLines = [
     `📊 Stats — ${scopeLabel}`,
     `⚔️ ${GC.attacks} attaques (${hitRate}%) · 🗡️ ${GC.dmgDealt} dmg · ☠️ ${GC.kosDealt} KO · 💚 ${GC.heal} PV soignés · 🔮 ${GC.spellsCast} sorts`,
@@ -2229,16 +2295,63 @@ registerActions({
   _adminRepairQuestParticipants: () => _adminRepairQuestParticipants(),
   _adminRepairVttData:           () => _adminRepairVttData(),
 
-  // Statistiques : réinitialisation (MJ)
-  _statsReset: async () => {
+  // Statistiques : modale de gestion des données (MJ) — supprimer ciblé ou tout.
+  _statsManage: () => {
     if (!STATE.isAdmin) return;
-    const ok = await confirmModal('Remettre TOUTES les statistiques de l\'aventure à zéro ? (irréversible)', {
-      title: '↺ Réinitialiser les statistiques', confirmLabel: 'Tout effacer', cancelLabel: 'Annuler', danger: true,
+    const dates = [...new Set(Object.values(_statsData?.chars || {}).flatMap(c => Object.keys(c.byDate || {})))].sort().reverse();
+    const missions = _statsMissionList();
+    const missRow = (m) => `<div class="stats-mng-row"><span class="stats-mng-lbl">🎯 ${_esc(m.name)}</span><button class="stats-mng-del" data-action="_statsDelMission" data-scope="${m.id}" data-name="${_esc(m.name)}">🗑 Supprimer</button></div>`;
+    const dateRow = (d) => { const mi = _statsMissionOf(d), gr = _statsGroupOf(d); return `<div class="stats-mng-row"><span class="stats-mng-lbl">📅 ${_statsFmtDate(d)}${mi ? ` · ${_esc(mi)}` : ''}${gr ? ` · 👥 ${_esc(gr)}` : ''}</span><button class="stats-mng-del" data-action="_statsDelDate" data-scope="${d}">🗑 Supprimer</button></div>`; };
+    openModal('⚙ Gérer les statistiques', `
+      <div class="stats-mng">
+        ${missions.length ? `<div class="stats-mng-sec"><div class="stats-mng-hd">Supprimer par mission</div>${missions.map(missRow).join('')}</div>` : ''}
+        ${dates.length ? `<div class="stats-mng-sec"><div class="stats-mng-hd">Supprimer par séance (date)</div>${dates.map(dateRow).join('')}</div>` : ''}
+        ${(!missions.length && !dates.length) ? '<div class="stats-mng-sec" style="color:var(--text-dim);font-size:.85rem">Aucune donnée datée à supprimer.</div>' : ''}
+        <div class="stats-mng-danger">
+          <div class="stats-mng-hd">⚠ Zone dangereuse</div>
+          <p>Efface <b>toutes</b> les statistiques de l'aventure. Irréversible.</p>
+          <button class="stats-mng-reset" data-action="_statsResetAsk">↺ Tout réinitialiser…</button>
+        </div>
+      </div>`, { subtitle: 'Suppression ciblée (les totaux campagne sont ajustés)', accent: '#ef4444' });
+  },
+  // Supprime les stats d'une séance (date) — ajuste les totaux campagne.
+  _statsDelDate: async (btn) => {
+    if (!STATE.isAdmin) return;
+    const d = btn.dataset.scope; if (!d) return;
+    const ok = await confirmModal(`Supprimer toutes les stats de la séance du <b>${_statsFmtDate(d)}</b> ?<br>Les totaux de campagne seront ajustés en conséquence.`, {
+      title: '🗑 Supprimer une séance', confirmLabel: 'Supprimer', cancelLabel: 'Annuler', danger: true,
     }).catch(() => false);
     if (!ok) return;
+    const done = await deleteDateStats(d);
+    showNotif(done ? 'Séance supprimée.' : 'Échec de la suppression.', done ? 'success' : 'error');
+    closeModalDirect();
+    if (done) { if (_statsScope === d) _statsScope = null; PAGES.statistiques(); }
+  },
+  // Supprime les stats liées à une mission (toutes ses séances).
+  _statsDelMission: async (btn) => {
+    if (!STATE.isAdmin) return;
+    const mid = btn.dataset.scope, name = btn.dataset.name || 'cette mission';
+    const ok = await confirmModal(`Supprimer toutes les stats liées à <b>${_esc(name)}</b> (toutes ses séances) ?<br>Les totaux de campagne seront ajustés.`, {
+      title: '🗑 Supprimer une mission', confirmLabel: 'Supprimer', cancelLabel: 'Annuler', danger: true,
+    }).catch(() => false);
+    if (!ok) return;
+    const done = await deleteMissionStats(mid);
+    showNotif(done ? 'Stats de la mission supprimées.' : 'Échec de la suppression.', done ? 'success' : 'error');
+    closeModalDirect();
+    if (done) { _statsScope = null; PAGES.statistiques(); }
+  },
+  // Réinitialisation TOTALE — confirmation par saisie (« RESET »).
+  _statsResetAsk: async () => {
+    if (!STATE.isAdmin) return;
+    const val = await promptModal('Tape RESET pour confirmer la remise à zéro TOTALE (irréversible).', {
+      title: '↺ Tout réinitialiser', placeholder: 'RESET', confirmLabel: 'Confirmer', required: true,
+    }).catch(() => null);
+    if (val === null) return;
+    if ((val || '').trim().toUpperCase() !== 'RESET') { showNotif('Confirmation incorrecte — rien n\'a été supprimé.', 'info'); return; }
     const done = await resetStats();
-    showNotif(done ? 'Statistiques réinitialisées.' : 'Échec de la réinitialisation.', done ? 'success' : 'error');
-    if (done) PAGES.statistiques();
+    showNotif(done ? 'Toutes les statistiques ont été réinitialisées.' : 'Échec de la réinitialisation.', done ? 'success' : 'error');
+    closeModalDirect();
+    if (done) { _statsScope = null; _statsPlayerSel = null; PAGES.statistiques(); }
   },
   _statsDelChar: async (btn) => {
     if (!STATE.isAdmin) return;
@@ -2320,15 +2433,36 @@ registerActions({
         </div>
       </div>`, { subtitle: 'Relier la séance à un élément de la Trame', accent: '#22c38e' });
   },
-  // Choix d'une mission dans le sélecteur.
+  // Choix d'une mission : passe à l'étape « groupe » si la mission en a, sinon enregistre.
   _statsPickMission: async (btn) => {
     if (!STATE.isAdmin) return;
     const dk = btn.dataset.scope; if (!dk) return;
     const mid = btn.dataset.missionId || '';
     const mission = btn.dataset.mission || '';
+    if (!mid) { // « Aucune mission » → efface le lien
+      closeModalDirect();
+      await setSessionMission(dk, {});
+      (_statsData.sessions ??= {})[dk] = { mission: '', missionId: '', groupId: '', group: '' };
+      _statsRender(_statsScope);
+      return;
+    }
+    const story = getCachedCollection('story') || [];
+    const groupes = (story.find(x => x.id === mid)?.groupes) || [];
+    if (Array.isArray(groupes) && groupes.length) { _statsGroupStep(dk, mid, mission, groupes); return; }
     closeModalDirect();
-    await setSessionMission(dk, mission, mid);
-    (_statsData.sessions ??= {})[dk] = { mission: mission.trim(), missionId: mid };
+    await setSessionMission(dk, { mission, missionId: mid });
+    (_statsData.sessions ??= {})[dk] = { mission: mission.trim(), missionId: mid, groupId: '', group: '' };
+    _statsRender(_statsScope);
+  },
+  // Choix du groupe (étape 2).
+  _statsPickGroup: async (btn) => {
+    if (!STATE.isAdmin) return;
+    const dk = btn.dataset.scope; if (!dk) return;
+    const mid = btn.dataset.missionId || '', mission = btn.dataset.mission || '';
+    const gid = btn.dataset.groupId || '', group = btn.dataset.group || '';
+    closeModalDirect();
+    await setSessionMission(dk, { mission, missionId: mid, groupId: gid, group });
+    (_statsData.sessions ??= {})[dk] = { mission: mission.trim(), missionId: mid, groupId: gid, group: group.trim() };
     _statsRender(_statsScope);
   },
   // Filtre live du sélecteur de missions (sans re-render).

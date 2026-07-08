@@ -74,15 +74,72 @@ export async function deleteCharStats(charId) {
   } catch { return false; }
 }
 
-// Libellé de mission d'une séance (date → nom de mission), édité par le MJ.
-// Stocké dans le même doc stats (sessions.{date}.mission) — 0 lecture en plus.
-export async function setSessionMission(dateKey, mission, missionId = '') {
+// Lien d'une séance (date) → mission de la Trame + groupe de cette mission,
+// édité par le MJ. Stocké dans le même doc stats (sessions.{date}) — 0 lecture.
+export async function setSessionMission(dateKey, { mission = '', missionId = '', groupId = '', group = '' } = {}) {
   if (!dateKey) return false;
-  const clean = (mission || '').trim();
-  const mid = missionId || '';
-  await bumpStats({ sessions: { [dateKey]: { mission: clean, missionId: mid } } });
-  if (_mem) { (_mem.sessions ??= {})[dateKey] = { mission: clean, missionId: mid }; }
+  const entry = { mission: (mission || '').trim(), missionId: missionId || '', groupId: groupId || '', group: (group || '').trim() };
+  await bumpStats({ sessions: { [dateKey]: entry } });
+  if (_mem) { (_mem.sessions ??= {})[dateKey] = entry; }
   return true;
+}
+
+// ── Suppression ciblée de stats (MJ) ────────────────────────────────────────
+// Somme brute des miroirs `byDate` d'un perso sur un ensemble de dates.
+function _sumByDatesRaw(c, dates) {
+  const acc = {};
+  for (const dk of dates) {
+    const bd = c?.byDate?.[dk]; if (!bd) continue;
+    for (const [grp, obj] of Object.entries(bd)) {
+      if (!obj || typeof obj !== 'object') continue;
+      const a = (acc[grp] ??= {});
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof v === 'number') a[k] = (a[k] || 0) + v;
+        else if (v && typeof v === 'object') { const a2 = (a[k] ??= {}); for (const [k2, v2] of Object.entries(v)) if (typeof v2 === 'number') a2[k2] = (a2[k2] || 0) + v2; }
+      }
+    }
+  }
+  return acc;
+}
+
+// Supprime les stats enregistrées pour un ENSEMBLE de dates : soustrait leur
+// miroir des totaux campagne (champs sommables) puis retire les entrées byDate
+// et la description de séance. Les records "max" (biggestHit) ne sont pas datés
+// → non ajustés (cosmétique). Réservé au MJ (règle doc stats).
+export async function deleteDatesStats(dates) {
+  const ref = _statsRef();
+  if (!ref || !Array.isArray(dates) || !dates.length) return false;
+  const snap = await getDoc(ref).catch(() => null);
+  const d = snap?.exists() ? snap.data() : null;
+  if (!d) return false;
+  const charsPatch = {};
+  for (const [id, c] of Object.entries(d.chars || {})) {
+    const relevant = dates.filter(dk => c.byDate?.[dk]);
+    if (!relevant.length) continue;
+    const sum = _sumByDatesRaw(c, relevant);
+    const byDateDel = {}; relevant.forEach(dk => { byDateDel[dk] = deleteField(); });
+    charsPatch[id] = { ..._incTree(sum, -1), byDate: byDateDel };
+  }
+  const sessionsDel = {}; dates.forEach(dk => { sessionsDel[dk] = deleteField(); });
+  try {
+    await setDoc(ref, { chars: charsPatch, sessions: sessionsDel }, { merge: true });
+    _mem = null;   // forcera un re-fetch propre au prochain loadStats
+    return true;
+  } catch { return false; }
+}
+
+export const deleteDateStats = (dateKey) => deleteDatesStats(dateKey ? [dateKey] : []);
+
+// Supprime toutes les stats liées à une mission (toutes ses séances datées).
+export async function deleteMissionStats(missionId) {
+  const ref = _statsRef();
+  if (!ref || !missionId) return false;
+  const snap = await getDoc(ref).catch(() => null);
+  const d = snap?.exists() ? snap.data() : null;
+  if (!d) return false;
+  const dates = Object.entries(d.sessions || {}).filter(([, s]) => s?.missionId === missionId).map(([dk]) => dk);
+  if (!dates.length) return false;
+  return deleteDatesStats(dates);
 }
 
 // ── Jet de compétence (Athlétisme, Acrobaties…) ──────────────────────────────

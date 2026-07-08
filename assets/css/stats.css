@@ -147,6 +147,39 @@
 .stats-mp-check { flex-shrink: 0; color: var(--emerald, #22c38e); font-weight: 700; }
 .stats-mp-none { color: var(--text-dim); }
 .stats-mp-empty { color: var(--text-dim); font-size: .84rem; text-align: center; padding: 1rem 0; }
+.stats-mp-hint { font-size: .82rem; color: var(--text-muted); }
+
+/* Groupe dans la bannière de séance */
+.stats-sb-group { font-family: var(--font-sans, sans-serif); font-weight: 400; font-size: .8rem; color: #9cc3ff; }
+
+/* ── Modale « Gérer les données » ── */
+.stats-mng { display: flex; flex-direction: column; gap: 1rem; }
+.stats-mng-sec { display: flex; flex-direction: column; gap: .3rem; }
+.stats-mng-hd { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); margin-bottom: .1rem; }
+.stats-mng-row {
+  display: flex; align-items: center; justify-content: space-between; gap: .6rem;
+  padding: .45rem .6rem; border-radius: 9px;
+  background: var(--bg-card); border: 1px solid var(--border);
+}
+.stats-mng-lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .84rem; color: var(--text-soft, #c8d4e8); }
+.stats-mng-del {
+  flex-shrink: 0; font-size: .74rem; cursor: pointer; padding: .3rem .6rem; border-radius: 7px;
+  background: transparent; border: 1px solid rgba(255,90,126,.3); color: var(--crimson-light, #ff8ca7);
+  transition: background .12s, border-color .12s;
+}
+.stats-mng-del:hover { background: rgba(255,90,126,.12); border-color: rgba(255,90,126,.55); }
+.stats-mng-danger {
+  margin-top: .3rem; padding: .8rem .9rem; border-radius: 11px;
+  background: rgba(239,68,68,.06); border: 1px solid rgba(239,68,68,.3);
+}
+.stats-mng-danger p { margin: .2rem 0 .7rem; font-size: .82rem; color: var(--text-muted); line-height: 1.5; }
+.stats-mng-danger .stats-mng-hd { color: var(--crimson-light, #ff8ca7); }
+.stats-mng-reset {
+  cursor: pointer; font-size: .82rem; font-weight: 700; padding: .5rem .9rem; border-radius: 9px;
+  background: rgba(239,68,68,.14); border: 1px solid rgba(239,68,68,.5); color: #ff9d9d;
+  transition: background .12s;
+}
+.stats-mng-reset:hover { background: rgba(239,68,68,.24); }
 
 /* ── Héro : jauge de réussite + chiffres phares de la campagne ── */
 .stats-hero {
