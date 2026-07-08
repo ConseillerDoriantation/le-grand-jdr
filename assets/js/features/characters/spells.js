@@ -216,6 +216,8 @@ function _spellTTShow(card, anchor) {
   _spellTT = tt; _spellTTFor = card;
 }
 function _spellTTTarget(e) {
+  // Dock d'actions (⧉✏️🗑️) : on vise un bouton → pas de tooltip par-dessus.
+  if (e.target.closest?.('.is-tiles .cs-spellcard-foot')) return null;
   const tile = e.target.closest?.('.is-tiles .cs-spellcard');
   if (tile) return { card: tile, anchor: tile };
   const sock = e.target.closest?.('.cs-sock[data-idx]');

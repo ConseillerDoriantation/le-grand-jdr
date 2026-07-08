@@ -11982,19 +11982,38 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .is-tiles .cs-spellcard-runes,
 .cs-v3 .is-tiles .cs-spellcard-detail,
 .cs-v3 .is-tiles .cs-spellcard-detailbtn { display: none; }   /* la tooltip fait le travail */
-/* Actions ⧉✏️🗑️ : overlay bas de tuile, révélé au survol (toujours visible en tactile) */
+/* Actions ⧉✏️🗑️ : DOCK opaque révélé au survol, légèrement débordant sous la
+   tuile (jamais un voile transparent sur le nom). La tooltip se cache quand on
+   survole ce dock (géré en JS) pour ne pas se superposer aux boutons. */
 .cs-v3 .is-tiles .cs-spellcard-foot {
-  position: absolute; left: 3px; right: 3px; bottom: 3px; margin: 0; padding: 2px;
-  display: flex; justify-content: center; border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-panel, #131a2a) 90%, transparent);
+  position: absolute; left: -3px; right: -3px; bottom: -7px; margin: 0; padding: 3px 4px;
+  display: flex; justify-content: center; border-radius: 9px;
+  background: var(--bg-panel, #131a2a);
+  border: 1px solid var(--border-strong, var(--border));
+  box-shadow: 0 6px 14px -6px rgba(0,0,0,.7);
   opacity: 0; pointer-events: none; transition: opacity .14s;
+  z-index: 3;
 }
 .cs-v3 .is-tiles .cs-spellcard:hover .cs-spellcard-foot,
 .cs-v3 .is-tiles .cs-spellcard:focus-within .cs-spellcard-foot { opacity: 1; pointer-events: auto; }
-.cs-v3 .is-tiles .cs-spellcard-acts .btn-icon { width: 24px; height: 24px; font-size: .72rem; }
-@media (hover: none) {
-  .cs-v3 .is-tiles .cs-spellcard-foot { position: static; opacity: 1; pointer-events: auto; background: transparent; padding: 0; }
+.cs-v3 .is-tiles .cs-spellcard-acts { gap: 3px; }
+.cs-v3 .is-tiles .cs-spellcard-acts .btn-icon {
+  width: 22px; height: 22px; font-size: .7rem; border-radius: 6px;
+  background: var(--bg-card2, rgba(255,255,255,.05));
+  border: 1px solid var(--border-strong, var(--border));
 }
+.cs-v3 .is-tiles .cs-spellcard-acts .btn-icon:hover {
+  background: rgba(232,184,75,.12);
+  border-color: rgba(232,184,75,.55);
+  color: var(--gold, #e8b84b);
+}
+@media (hover: none) {
+  .cs-v3 .is-tiles .cs-spellcard-foot {
+    position: static; opacity: 1; pointer-events: auto;
+    background: transparent; border: none; box-shadow: none; padding: 0;
+  }
+}
+[data-theme="light"] .cs-v3 .is-tiles .cs-spellcard-foot { background: #fff; }
 /* Préparé : anneau or qui respire + éclair de coin (le glow deck existant reste) */
 .cs-v3 .is-tiles .cs-spellcard.is-actif { border-color: rgba(232,184,75,.5); border-top-color: var(--type-col, #b47fff); }
 .cs-v3 .is-tiles .cs-spellcard.is-actif .cs-spellcard-icon {
