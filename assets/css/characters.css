@@ -3661,6 +3661,169 @@ input[type=number].input-field::-webkit-outer-spin-button {
 [data-theme="light"] .cs-spell-preview { background: rgba(37,99,235,0.05); border-color: rgba(37,99,235,0.25); }
 
 /* ═══════════════════════════════════════════════════════════
+   BREAKDOWN PM — coût lisible (Noyau + runes ×2)
+═══════════════════════════════════════════════════════════ */
+.cs-pmbd {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.2rem;
+  margin: 0 0 0.45rem;
+  font-size: 0.68rem;
+}
+.cs-pmbd:empty { display: none; }
+.cs-pmbd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  padding: 0.08rem 0.36rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--blue) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--blue) 26%, transparent);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.cs-pmbd-chip b { color: var(--blue); font-family: 'Outfit', sans-serif; font-size: 0.72rem; }
+.cs-pmbd-plus { color: var(--text-dim); font-weight: 700; opacity: 0.7; }
+.cs-pmbd-min { color: var(--text-dim); font-style: italic; }
+
+/* ═══════════════════════════════════════════════════════════
+   LA RÉSONANCE — circuit de combos vivant dans la forge
+═══════════════════════════════════════════════════════════ */
+.cs-spell-section--resonance .cs-spell-section-title { color: #c084fc; }
+[data-theme="light"] .cs-spell-section--resonance .cs-spell-section-title { color: #7c3aed; }
+
+.cs-resonance { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.cs-rez-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.5rem;
+}
+
+.cs-rez-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--rez-c) 34%, transparent);
+  background: color-mix(in srgb, var(--rez-c) 7%, var(--bg-panel));
+}
+.cs-rez-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.25rem;
+}
+.cs-rez-icon { font-size: 1.05rem; line-height: 1; flex-shrink: 0; }
+.cs-rez-name {
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cs-rez-badge, .cs-rez-hint {
+  flex-shrink: 0;
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.08rem 0.34rem;
+  border-radius: 999px;
+}
+.cs-rez-badge {
+  color: var(--rez-c);
+  background: color-mix(in srgb, var(--rez-c) 20%, transparent);
+}
+.cs-rez-hint { color: var(--text-dim); background: color-mix(in srgb, var(--text-dim) 14%, transparent); }
+.cs-rez-detail {
+  font-size: 0.7rem;
+  line-height: 1.3;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ── Cartes allumées : bordure vive, halo pulsé, sweep lumineux ── */
+.cs-rez-card--lit {
+  border-color: color-mix(in srgb, var(--rez-c) 62%, transparent);
+  background: linear-gradient(140deg, color-mix(in srgb, var(--rez-c) 22%, var(--bg-panel)), color-mix(in srgb, var(--rez-c) 8%, var(--bg-panel)));
+  animation: cs-rez-pulse 3.4s ease-in-out infinite;
+}
+.cs-rez-card--lit .cs-rez-name { color: var(--rez-c); }
+.cs-rez-card--lit .cs-rez-detail { color: var(--text); }
+.cs-rez-card--lit.is-new { animation: cs-rez-ignite 0.55s cubic-bezier(.2,.9,.25,1.2) 1, cs-rez-pulse 3.4s ease-in-out 0.55s infinite; }
+
+.cs-rez-spark { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
+.cs-rez-card--lit .cs-rez-spark::before {
+  content: '';
+  position: absolute;
+  top: 0; left: -60%;
+  width: 45%; height: 100%;
+  background: linear-gradient(100deg, transparent, color-mix(in srgb, var(--rez-c) 34%, #ffffff 12%), transparent);
+  transform: skewX(-18deg);
+  animation: cs-rez-sweep 3.8s ease-in-out infinite;
+}
+
+@keyframes cs-rez-ignite {
+  0%   { transform: scale(0.92); box-shadow: 0 0 0 0 color-mix(in srgb, var(--rez-c) 60%, transparent); }
+  45%  { transform: scale(1.03); box-shadow: 0 0 24px 5px color-mix(in srgb, var(--rez-c) 55%, transparent); }
+  100% { transform: scale(1);    box-shadow: 0 0 10px 0 color-mix(in srgb, var(--rez-c) 22%, transparent); }
+}
+@keyframes cs-rez-pulse {
+  0%, 100% { box-shadow: 0 0 8px 0 color-mix(in srgb, var(--rez-c) 16%, transparent); }
+  50%      { box-shadow: 0 0 15px 1px color-mix(in srgb, var(--rez-c) 32%, transparent); }
+}
+@keyframes cs-rez-sweep {
+  0%       { left: -60%; }
+  55%, 100% { left: 130%; }
+}
+
+/* ── Cartes en approche : discrètes, pointillés, ingrédients à cocher ── */
+.cs-rez-card--near {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--rez-c) 30%, transparent);
+  background: color-mix(in srgb, var(--rez-c) 4%, var(--bg-elevated));
+  opacity: 0.9;
+}
+.cs-rez-card--near .cs-rez-name { color: var(--text-muted); font-weight: 600; }
+.cs-rez-ings { display: flex; flex-wrap: wrap; gap: 0.2rem; }
+.cs-rez-ing {
+  font-size: 0.64rem;
+  font-weight: 600;
+  padding: 0.06rem 0.32rem;
+  border-radius: 5px;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 12%, transparent);
+  white-space: nowrap;
+}
+.cs-rez-ing.ok {
+  color: var(--rez-c);
+  background: color-mix(in srgb, var(--rez-c) 16%, transparent);
+}
+.cs-rez-blocker { margin-top: 0.28rem; font-size: 0.64rem; color: #f59e0b; }
+[data-theme="light"] .cs-rez-blocker { color: #b45309; }
+
+.cs-rez-empty {
+  font-size: 0.74rem;
+  font-style: italic;
+  color: var(--text-dim);
+  padding: 0.45rem 0.6rem;
+  border: 1px dashed var(--border);
+  border-radius: 9px;
+  line-height: 1.35;
+}
+.cs-rez-empty b { color: var(--text-muted); font-style: normal; }
+.cs-rez-empty-ico { color: #c084fc; font-style: normal; margin-right: 0.15rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cs-rez-card--lit,
+  .cs-rez-card--lit.is-new { animation: none; }
+  .cs-rez-card--lit .cs-rez-spark::before { animation: none; display: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════
    MODAL DE SORT — Parcours guidé (refonte anti-cockpit)
 ═══════════════════════════════════════════════════════════ */
 body .modal:has(.sh-admin-modal.is-spell) {
@@ -3668,6 +3831,10 @@ body .modal:has(.sh-admin-modal.is-spell) {
   width: min(1180px, 96vw) !important;
   padding: 0 !important;
   overflow: hidden;
+  /* Chaîne flex : la forge est BORNÉE par le .modal (sinon son pied dépasse le clip). */
+  display: flex;
+  flex-direction: column;
+  max-height: min(88vh, 940px);
 }
 body .modal:has(.sh-admin-modal.is-spell) > #modal-title {
   display: none !important;
@@ -3675,13 +3842,20 @@ body .modal:has(.sh-admin-modal.is-spell) > #modal-title {
 body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   padding: 0 !important;
   overflow: hidden;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .sh-admin-modal.is-spell {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-height: min(90vh, 920px);
-  min-height: min(84vh, 820px);
+  /* Bornée par le parent (#modal-body flex) — pas de max-height propre qui dépasserait
+     le clip du .modal. Head + pied fixes, seul .sh-admin-body scrolle. */
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
   background: var(--bg-card, rgba(13,21,32,.96));
   border-radius: 16px;
   overflow: hidden;
@@ -3695,6 +3869,16 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
     linear-gradient(180deg, rgba(79,140,255,.035), transparent 180px),
     var(--bg-card, rgba(13,21,32,.96));
 }
+/* Pied de la forge — autonome (le style de base vit dans shop.css, lazy-loadé ;
+   on le redéclare ici pour que la forge ne dépende pas de l'ouverture de la Boutique). */
+.sh-admin-modal.is-spell .sh-admin-footer {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 20px;
+  background: var(--bg-card2, rgba(17,27,42,.96));
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sh-admin-modal.is-spell .sh-admin-footer-spacer { flex: 1; }
 .sh-admin-modal.is-spell .sh-admin-head {
   position: relative;
   flex: 0 0 auto;
@@ -9134,6 +9318,29 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
    Drag & drop des catégories de sorts (Sortable.esm.js)
    ════════════════════════════════════════════════════════════════════════════ */
 .cs-v3 .cs-sort-cats-wrap { display: flex; flex-direction: column; gap: 8px; }
+
+/* Pied de liste : ajouter une catégorie là où vit la structure (motif « + colonne ») */
+.cs-v3 .cs-sort-cats-foot { display: flex; margin-top: 2px; }
+.cs-v3 .cs-sort-catadd {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 14px; border-radius: 10px;
+  background: transparent;
+  border: 1px dashed color-mix(in srgb, var(--border) 100%, transparent);
+  color: var(--text-dim); font: inherit; font-size: .78rem; font-weight: 700;
+  cursor: pointer; transition: color .12s, border-color .12s, background .12s;
+}
+.cs-v3 .cs-sort-catadd:hover {
+  color: var(--amber, #e8b84b);
+  border-color: rgba(232,184,75,.5);
+  background: rgba(232,184,75,.06);
+}
+.cs-v3 .cs-sort-catadd.is-open {
+  color: var(--text); border-style: solid;
+  border-color: rgba(232,184,75,.5); background: rgba(232,184,75,.08);
+}
+.cs-v3 .cs-sort-catadd-plus { font-size: 1rem; line-height: 1; }
+[data-theme="light"] .cs-v3 .cs-sort-catadd:hover { background: rgba(232,184,75,.10); }
+
 .cs-v3 .cs-sort-cat-block {
   background: rgba(255,255,255,.015);
   border: 1px solid var(--border);
@@ -9278,6 +9485,128 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 
 .cs-v3 .cs-sorts-actions { display: inline-flex; gap: 6px; }
 
+/* ═══════════════════════════════════════════════════════════
+   ONGLET SORTS — en-tête réorganisé (anti-cockpit)
+   Ligne 1 : barre d'action · Ligne 2 : vue Tous/Deck · panneaux repliables
+═══════════════════════════════════════════════════════════ */
+.cs-v3 .cs-sorts-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: nowrap;
+  padding: 8px 10px; border-radius: 12px;
+  background: rgba(0,0,0,.22);
+  border: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 6;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 10px 22px -20px rgba(0,0,0,.85);
+}
+.cs-v3 .cs-sorts-create { flex: 0 0 auto; white-space: nowrap; }
+.cs-v3 .cs-sorts-toolbtn {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 34px; padding: 0 12px;
+  background: rgba(0,0,0,.28);
+  border: 1px solid var(--border); border-radius: 9px;
+  color: var(--text-muted); font: inherit; font-size: .78rem; font-weight: 700;
+  cursor: pointer; position: relative;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.cs-v3 .cs-sorts-toolbtn:hover { color: var(--text); border-color: rgba(232,184,75,.4); }
+.cs-v3 .cs-sorts-toolbtn.is-active {
+  background: rgba(232,184,75,.14); border-color: rgba(232,184,75,.5); color: var(--amber, #e8b84b);
+}
+.cs-v3 .cs-sorts-toolbtn-ico { font-size: .95rem; line-height: 1; }
+.cs-v3 .cs-sorts-toolbtn.has-dot::after {
+  content: ''; position: absolute; top: 5px; right: 6px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--amber, #e8b84b); box-shadow: 0 0 0 2px rgba(0,0,0,.25);
+}
+
+/* Vue Tous / Deck — segment large et clair */
+/* Sélecteur segmenté compact (pas de barres pleine largeur) — aligné à gauche */
+.cs-v3 .cs-sorts-viewseg {
+  display: inline-flex; gap: 3px; margin-top: 8px;
+  padding: 3px; border-radius: 10px;
+  background: rgba(0,0,0,.22); border: 1px solid var(--border);
+}
+.cs-v3 .cs-sorts-seg {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 14px;
+  background: transparent; border: 1px solid transparent; border-radius: 8px;
+  color: var(--text-muted); font: inherit; font-size: .78rem; font-weight: 700;
+  cursor: pointer; transition: background .14s, color .14s;
+}
+.cs-v3 .cs-sorts-seg:hover { color: var(--text); }
+.cs-v3 .cs-sorts-seg b { font-family: 'Outfit', sans-serif; font-size: .82rem; margin-left: 1px; }
+.cs-v3 .cs-sorts-seg b small { font-size: .68rem; color: var(--text-dim); }
+.cs-v3 .cs-sorts-seg-ico { font-size: .92rem; line-height: 1; }
+.cs-v3 .cs-sorts-seg.on {
+  color: var(--text);
+  background: rgba(232,184,75,.16);
+  box-shadow: 0 1px 3px -1px rgba(0,0,0,.4);
+}
+.cs-v3 .cs-sorts-seg--deck.on b { color: var(--amber, #e8b84b); }
+.cs-v3 .cs-sorts-seg--deck.is-over.on { background: rgba(255,90,126,.16); }
+.cs-v3 .cs-sorts-seg--deck.is-over b { color: var(--crimson-light, #ff8ca7); }
+
+/* Rangée de vue : segment Tous/Deck à gauche, densité Cartes/Liste à droite */
+.cs-v3 .cs-sorts-viewrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cs-v3 .cs-sorts-densityseg .cs-sorts-seg { padding: 0 11px; font-size: .92rem; }
+
+/* Menu « Plus d'outils » repliable */
+.cs-v3 .cs-sorts-menu {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-top: 8px; padding: 8px 10px;
+  background: rgba(0,0,0,.18); border: 1px solid var(--border); border-radius: 10px;
+}
+.cs-v3 .cs-sorts-menu-item {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 12px; border-radius: 8px;
+  background: rgba(0,0,0,.25); border: 1px solid var(--border);
+  color: var(--text-muted); font: inherit; font-size: .78rem; font-weight: 600;
+  cursor: pointer; transition: background .12s, color .12s, border-color .12s;
+}
+.cs-v3 .cs-sorts-menu-item:hover { color: var(--text); border-color: rgba(232,184,75,.4); }
+.cs-v3 .cs-sorts-menu-item.is-active { background: rgba(232,184,75,.14); border-color: rgba(232,184,75,.5); color: var(--amber, #e8b84b); }
+.cs-v3 .cs-sorts-menu-mjrunes {
+  display: inline-flex; align-items: center; gap: 6px; margin-left: auto;
+  padding: 4px 10px; border-radius: 8px;
+  background: rgba(180,127,255,.10); border: 1px solid rgba(180,127,255,.28);
+  font-size: .74rem; font-weight: 700; color: var(--text-muted);
+}
+.cs-v3 .cs-sorts-menu-mjrunes b { font-family: 'Outfit', sans-serif; color: #c8a8ff; min-width: 14px; text-align: center; }
+
+/* Panneau Filtres & tri repliable */
+.cs-v3 .cs-sorts-filterpanel {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 8px; padding: 10px 12px;
+  background: rgba(0,0,0,.18); border: 1px solid var(--border); border-radius: 10px;
+}
+.cs-v3 .cs-sorts-filt-row {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 5px;
+}
+.cs-v3 .cs-sorts-filt-lbl {
+  flex: 0 0 auto; width: 74px;
+  font-size: .64rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--text-dim);
+}
+.cs-v3 .cs-sorts-filt-row--reset { justify-content: flex-start; }
+
+/* Analyse du deck repliable */
+/* Compact mobile : la barre passe sur 2 rangs, le libellé « Sort/Filtres » se réduit */
+@media (max-width: 560px) {
+  .cs-v3 .cs-sorts-bar { flex-wrap: wrap; }
+  .cs-v3 .cs-sorts-search-wrap { flex: 1 1 100%; order: -1; }
+  .cs-v3 .cs-sorts-toolbtn-lbl { display: none; }
+  .cs-v3 .cs-sorts-filt-lbl { width: 100%; }
+}
+[data-theme="light"] .cs-v3 .cs-sorts-bar,
+[data-theme="light"] .cs-v3 .cs-sorts-menu,
+[data-theme="light"] .cs-v3 .cs-sorts-filterpanel { background: rgba(0,0,0,.03); }
+[data-theme="light"] .cs-v3 .cs-sorts-viewseg { background: rgba(0,0,0,.04); }
+[data-theme="light"] .cs-v3 .cs-sorts-seg.on { background: rgba(217,119,6,.14); }
+[data-theme="light"] .cs-v3 .cs-sorts-toolbtn,
+[data-theme="light"] .cs-v3 .cs-sorts-menu-item { background: #fff; }
+
 /* Filtres rapides */
 .cs-v3 .cs-sorts-filters {
   display: flex; flex-wrap: wrap; gap: 12px;
@@ -9334,53 +9663,44 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   color: color-mix(in srgb, var(--c, #ccc) 66%, var(--text));
   box-shadow: 0 0 8px -2px var(--c, transparent);
 }
-.cs-v3 .cs-sorts-deckstats {
-  display: grid;
-  grid-template-columns: minmax(110px, .7fr) repeat(3, minmax(0, 1fr));
-  gap: 6px;
-  align-items: stretch;
-  padding: 8px;
-  border: 1px solid rgba(232,184,75,.22);
-  border-radius: 10px;
-  background: rgba(232,184,75,.055);
+.cs-v3 .cs-sorts-chip.pm.on { background: rgba(96,165,250,.16); color: #93c5fd; box-shadow: 0 0 8px -2px rgba(96,165,250,.4); }
+/* Répartition du deck — une ligne discrète (label + chips PM · types · éléments)
+   + Set Léger en note fine. Plus d'encadré ni de compteur redondant. */
+.cs-v3 .cs-sorts-deckinfo {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  margin-top: 8px; padding: 0 2px;
 }
-.cs-v3 .cs-sorts-deckstats-head,
-.cs-v3 .cs-sorts-deckstats-row {
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
+.cs-v3 .cs-sorts-deckstrip {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0;
 }
-.cs-v3 .cs-sorts-deckstats-head {
-  justify-content: space-between;
-  padding: 5px 7px;
-  border-radius: 8px;
-  background: rgba(0,0,0,.16);
-  color: var(--amber, #e8b84b);
-  font-size: .68rem;
-  font-weight: 800;
-  text-transform: uppercase;
+.cs-v3 .cs-sorts-deckstrip-lbl {
+  font-size: .62rem; font-weight: 800; letter-spacing: .05em;
+  color: var(--text-dim); text-transform: uppercase;
 }
-.cs-v3 .cs-sorts-deckstats-head b { color: var(--text); font-size: .78rem; }
-.cs-v3 .cs-sorts-deckstats-row span {
+.cs-v3 .cs-sorts-deckstrip-grp { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.cs-v3 .cs-sorts-deckstrip-sep { width: 1px; height: 13px; background: var(--border); margin: 0 3px; }
+.cs-v3 .cs-sorts-deckstrip-grp span {
   display: inline-flex; align-items: center; gap: 4px;
-  max-width: 100%;
-  padding: 4px 7px;
-  border-radius: 999px;
+  padding: 2px 8px; border-radius: 999px;
   background: rgba(255,255,255,.045);
-  color: var(--text-muted);
-  font-size: .68rem;
-  font-weight: 700;
-  white-space: nowrap;
+  color: var(--text-muted); font-size: .67rem; font-weight: 700; white-space: nowrap;
 }
-.cs-v3 .cs-sorts-deckstats-row span[style] {
+.cs-v3 .cs-sorts-deckstrip-grp span b { color: var(--text); }
+.cs-v3 .cs-sorts-deckstrip-grp span[style] {
   color: color-mix(in srgb, var(--c, #ccc) 62%, var(--text));
   background: color-mix(in srgb, var(--c, #888) 12%, transparent);
 }
-.cs-v3 .cs-sorts-deckstats-row .off { color: #ff8b8b; background: rgba(255,107,107,.11); }
-.cs-v3 .cs-sorts-deckstats-row .def { color: var(--emerald, #22c38e); background: rgba(34,195,142,.11); }
-.cs-v3 .cs-sorts-deckstats-row .util { color: #c8a8ff; background: rgba(180,127,255,.11); }
+.cs-v3 .cs-sorts-deckstrip-grp .off  { color: #ff8b8b; background: rgba(255,107,107,.11); }
+.cs-v3 .cs-sorts-deckstrip-grp .def  { color: var(--emerald, #22c38e); background: rgba(34,195,142,.11); }
+.cs-v3 .cs-sorts-deckstrip-grp .util { color: #c8a8ff; background: rgba(180,127,255,.11); }
+.cs-v3 .cs-sorts-deckstrip-grp.pm span b { color: var(--amber, #e8b84b); }
+.cs-v3 .cs-sorts-setlight {
+  display: inline-flex; align-items: center; gap: 5px; margin-left: auto;
+  padding: 3px 9px; border-radius: 999px;
+  background: rgba(34,195,142,.10); border: 1px solid rgba(34,195,142,.28);
+  color: var(--text-muted); font-size: .67rem; font-weight: 700; white-space: nowrap;
+}
+.cs-v3 .cs-sorts-setlight b { color: var(--emerald, #22c38e); }
 .cs-v3 .cs-sorts-empty-state {
   display: flex; align-items: center; gap: 14px;
   padding: 16px 18px;
@@ -9450,7 +9770,6 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   .cs-v3 .cs-sorts-toolbar { flex-direction: column; align-items: stretch; }
   .cs-v3 .cs-sorts-search-wrap { width: 100%; }
   .cs-v3 .cs-sorts-deck { justify-content: space-between; }
-  .cs-v3 .cs-sorts-deckstats { grid-template-columns: 1fr; }
   .cs-v3 .cs-sorts-actions { justify-content: flex-end; }
 }
 
@@ -11365,10 +11684,15 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   border: 1px solid color-mix(in srgb, var(--type-col, #b47fff) 30%, transparent);
 }
 .cs-v3 .cs-spellcard-id { flex: 1; min-width: 0; }
+.cs-v3 .cs-spellcard-name-row { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .cs-v3 .cs-spellcard-name {
+  flex: 1 1 auto; min-width: 0;
   font-weight: 700; font-size: .94rem; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* Statut de validation — pastille discrète à côté du nom (hors de la rangée d'effets) */
+.cs-v3 .cs-spellcard-status { flex: 0 0 auto; font-size: .74rem; line-height: 1; cursor: help; }
+.cs-v3 .cs-spellcard-status--no { filter: grayscale(.15); opacity: .85; }
 .cs-v3 .cs-spellcard-sub {
   display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 2px;
 }
@@ -11399,6 +11723,21 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .cs-spellcard-val.ok   { background: rgba(34,195,142,.16);  color: var(--emerald, #22c38e); }
 .cs-v3 .cs-spellcard-val.wait { background: rgba(232,184,75,.16);  color: var(--amber, #e8b84b); }
 .cs-v3 .cs-spellcard-val.no   { background: rgba(239,68,68,.16);   color: #ff8b8b; }
+
+/* Chip « héros » — l'effet principal du sort, promu EN TÊTE de la rangée de
+   chips (plus gros, plus gras, teinté) au lieu d'une boîte pleine largeur.
+   Couleur = celle du chip promu (--c), même logique color-mix que les chips. */
+.cs-v3 .cs-spellcard-hero {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 7px;
+  background: color-mix(in srgb, var(--c, #888) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c, #888) 30%, transparent);
+}
+.cs-v3 .cs-spellcard-hero-ic { flex: 0 0 auto; font-size: .8rem; line-height: 1; }
+.cs-v3 .cs-spellcard-hero-val {
+  min-width: 0; font-size: .78rem; font-weight: 800;
+  color: color-mix(in srgb, var(--c, #ccc) 72%, var(--text));
+}
 
 /* Description */
 .cs-v3 .cs-spellcard-desc {
@@ -11441,13 +11780,69 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 /* Pied de carte — pousse en bas pour aligner les pieds (hauteurs egales) */
 .cs-v3 .cs-spellcard-foot {
   display: grid;
-  grid-template-columns: auto minmax(72px, 1fr) auto;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: 6px;
   min-width: 0;
   margin-top: auto;
   padding-top: 2px;
 }
+/* Bandeau avant/après : édite un sort validé → prévient du retour en validation MJ.
+   Sticky : reste épinglé en haut de la zone scrollable de la forge tant qu'il est actif. */
+.cs-forge-revalidate {
+  position: sticky; top: 0; z-index: 8;
+  display: flex; align-items: flex-start; gap: 8px;
+  margin: 0 0 12px; padding: 10px 12px; border-radius: 10px;
+  background: color-mix(in srgb, #e8b84b 16%, var(--bg-panel, #131a2a));
+  border: 1px solid rgba(232,184,75,.45);
+  box-shadow: 0 6px 18px -8px rgba(0,0,0,.7);
+  backdrop-filter: blur(6px);
+  color: var(--text); font-size: .82rem; line-height: 1.4; font-weight: 600;
+}
+.cs-forge-revalidate[hidden] { display: none; }
+.cs-forge-revalidate-ico { font-size: 1rem; line-height: 1.3; flex-shrink: 0; }
+.cs-forge-revalidate b { color: var(--amber, #e8b84b); }
+[data-theme="light"] .cs-forge-revalidate {
+  background: color-mix(in srgb, #d97706 12%, #ffffff);
+  border-color: rgba(217,119,6,.4);
+}
+[data-theme="light"] .cs-forge-revalidate b { color: #b45309; }
+
+/* Garde anti-perte de la forge : confirmation inline superposée (ne détruit pas le form) */
+.cs-forge-guard {
+  position: fixed; inset: 0; z-index: 10000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.55); backdrop-filter: blur(2px);
+}
+.cs-forge-guard-box {
+  width: min(92vw, 420px);
+  background: var(--bg-panel, #131a2a);
+  border: 1px solid var(--border);
+  border-radius: 14px; padding: 22px 22px 18px;
+  box-shadow: 0 24px 70px -20px rgba(0,0,0,.85);
+  text-align: center;
+}
+.cs-forge-guard-ico { font-size: 2rem; line-height: 1; }
+.cs-forge-guard-title { font-weight: 800; font-size: 1.02rem; margin-top: 8px; color: var(--text); }
+.cs-forge-guard-msg { color: var(--text-muted); font-size: .9rem; line-height: 1.5; margin: 10px 0 16px; }
+.cs-forge-guard-btns { display: flex; flex-direction: column; gap: 8px; }
+.cs-forge-guard-btns-row { display: flex; gap: 10px; }
+.cs-forge-guard-btns button {
+  flex: 1; padding: 10px 12px; border-radius: 10px;
+  font-weight: 700; font-size: .87rem; cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.cs-forge-guard-save {
+  width: 100%;
+  border: 1px solid rgba(232,184,75,.5);
+  background: rgba(232,184,75,.16); color: var(--amber, #e8b84b);
+}
+.cs-forge-guard-save:hover { background: rgba(232,184,75,.26); }
+.cs-forge-guard-close { border: 1px solid rgba(255,107,107,.4); background: rgba(255,107,107,.14); color: #ff8b8b; }
+.cs-forge-guard-close:hover { background: rgba(255,107,107,.24); }
+.cs-forge-guard-cancel { border: 1px solid var(--border-strong, var(--border)); background: var(--bg-elevated); color: var(--text-muted); }
+.cs-forge-guard-cancel:hover { background: var(--bg-card2, rgba(255,255,255,.05)); color: var(--text); }
+
 .cs-v3 .cs-spellcard-detailbtn {
   justify-self: start;
   border: none; background: transparent; cursor: pointer;
@@ -11456,35 +11851,13 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   white-space: nowrap;
 }
 .cs-v3 .cs-spellcard-detailbtn:hover { color: var(--text); }
-.cs-v3 .cs-spellcard-catselect {
-  justify-self: end;
-  width: 100%;
-  max-width: 180px;
-  min-width: 0;
-  height: 28px;
-  padding: 2px 24px 2px 8px;
-  border-radius: 7px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated, #101824);
-  color: var(--text);
-  color-scheme: dark;
-  font: inherit;
-  font-size: .68rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-.cs-v3 .cs-spellcard-catselect option {
-  background: var(--bg-elevated, #101824);
-  color: var(--text);
-}
-.cs-v3 .cs-spellcard-catselect:focus { outline: none; border-color: rgba(232,184,75,.55); color: var(--text); }
 .cs-v3 .cs-spellcard-acts {
   justify-self: end;
   display: inline-flex;
   flex-wrap: nowrap;
   gap: 2px;
   max-width: 100%;
-  opacity: .55;
+  opacity: 1;
   transition: opacity .14s;
 }
 .cs-v3 .cs-spellcard-acts .btn-icon {
@@ -11492,15 +11865,228 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   width: 28px;
   height: 28px;
 }
-.cs-v3 .cs-spellcard:hover .cs-spellcard-acts { opacity: 1; }
+/* Desktop (souris) : actions ET boutons MJ discrets, révélés au survol/focus de la
+   carte (ou quand elle est dépliée). Sur tactile (pas de hover) → toujours visibles. */
+@media (hover: hover) {
+  .cs-v3 .cs-spellcard-acts,
+  .cs-v3 .cs-spellcard-mj-actions { opacity: 0; transition: opacity .14s; }
+  .cs-v3 .cs-spellcard:hover .cs-spellcard-acts,
+  .cs-v3 .cs-spellcard:focus-within .cs-spellcard-acts,
+  .cs-v3 .cs-spellcard.is-open .cs-spellcard-acts,
+  .cs-v3 .cs-spellcard:hover .cs-spellcard-mj-actions,
+  .cs-v3 .cs-spellcard:focus-within .cs-spellcard-mj-actions { opacity: 1; }
+}
 
 /* Toggle verrouillé : sort non validé → pas activable dans le Deck */
 .cs-v3 .cs-spellcard-head .toggle.is-locked {
   opacity: .4; cursor: not-allowed; filter: grayscale(.6);
 }
 
+/* ── Vue LISTE compacte : une ligne par sort ──────────────────────────
+   Même markup que la carte, re-layouté en rangée : toggle · icône · nom
+   (+ statut) · action/noyaux · effet héros · PM · détails/actions.
+   Un sort déplié (.is-open) reprend la mise en page carte, en place. */
+.cs-v3 .cs-spellcard-grid.is-list { display: flex; flex-direction: column; gap: 5px; }
+.cs-v3 .is-list .cs-spellcard:not(.is-open) {
+  flex-direction: row; align-items: center; gap: 8px;
+  padding: 5px 10px 5px 9px;
+}
+/* L'en-tête éclate en items directs de la rangée pour pouvoir intercaler
+   le héros et le PM dans le bon ordre (id étire, le reste s'aligne à droite). */
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-head { display: contents; }
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-icon {
+  width: 24px; height: 24px; font-size: .85rem; border-radius: 6px;
+}
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-id {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+}
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-name-row { flex: 0 1 auto; }
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-sub {
+  margin-top: 0; flex-wrap: nowrap; flex: 0 0 auto;
+}
+/* La rangée de tags porte le héros : en Liste elle ne montre QUE lui,
+   les chips secondaires vivent dans le dépli. */
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-tags {
+  order: 3; display: flex; align-items: center; flex: 0 1 auto; min-width: 0;
+}
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-tags .cs-sort-sstat { display: none; }
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-hero { flex: 0 1 auto; min-width: 0; }
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-hero-val {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-pm {
+  order: 4; align-self: center; margin: 0; font-size: .9rem;
+}
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-foot {
+  order: 5; margin: 0; padding: 0;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+/* En rangée : seuls l'essentiel reste visible — le reste vit dans le dépli */
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-desc,
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-mjnote,
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-runes { display: none; }
+
+@media (max-width: 640px) {
+  /* Rangée étroite : on garde nom · héros · PM, les pastilles action/noyau passent au dépli */
+  .cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-sub { display: none; }
+}
+
+/* ── Vue GRIMOIRE (tuiles) : le sort en tuile de jeu vidéo ────────────────────
+   Même markup que la carte, replié en tuile : icône (grande) + nom + badge PM +
+   pastille validation. Toute l'info vit dans la tooltip (.cs-spell-tt = clone
+   flottant de la carte). Clic sur la tuile = préparer/retirer (toggleSort). */
+.cs-v3 .cs-spellcard-grid.is-tiles {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px;
+}
+.cs-v3 .is-tiles .cs-spellcard {
+  flex-direction: column; align-items: center; gap: 4px;
+  padding: 10px 4px 7px; cursor: pointer;
+  border-left: 1px solid var(--border);
+  border-top: 2px solid var(--type-col, #b47fff);
+}
+.cs-v3 .is-tiles .cs-spellcard:hover,
+.cs-v3 .is-tiles .cs-spellcard:focus-visible {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px -14px rgba(0,0,0,.9), 0 0 14px -6px color-mix(in srgb, var(--type-col, #888) 45%, transparent);
+}
+.cs-v3 .is-tiles .cs-spellcard-head { display: contents; }
+.cs-v3 .is-tiles .cs-spellcard-head .toggle { display: none; }   /* l'état = anneau or + ⚡ */
+.cs-v3 .is-tiles .cs-spellcard-icon {
+  width: 46px; height: 46px; font-size: 1.6rem; border-radius: 10px; position: relative;
+}
+.cs-v3 .is-tiles .cs-spellcard-id { flex: 0 0 auto; width: 100%; }
+.cs-v3 .is-tiles .cs-spellcard-name-row { justify-content: center; }
+.cs-v3 .is-tiles .cs-spellcard-name {
+  flex: 0 1 auto; white-space: normal; text-align: center;
+  font-size: .64rem; font-weight: 700; line-height: 1.2; min-height: 2.4em;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* Pastille validation & badge PM : coins de la tuile */
+.cs-v3 .is-tiles .cs-spellcard-status {
+  position: absolute; top: -6px; left: -4px; font-size: .66rem;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.6));
+}
+.cs-v3 .is-tiles .cs-spellcard-pm {
+  position: absolute; top: -7px; right: -5px; margin: 0; align-self: auto;
+  font-size: .66rem; padding: 1px 6px; border-radius: 7px;
+  background: var(--bg-panel, #131a2a); border: 1px solid var(--border-strong, var(--border));
+  box-shadow: 0 2px 6px rgba(0,0,0,.5);
+}
+.cs-v3 .is-tiles .cs-spellcard-pm small { font-size: .5rem; }
+.cs-v3 .is-tiles .cs-spellcard-pm .cs-sort-pm-old { display: none; }
+.cs-v3 .is-tiles .cs-spellcard-mj-actions,
+.cs-v3 .is-tiles .cs-spellcard-sub,
+.cs-v3 .is-tiles .cs-spellcard-tags,
+.cs-v3 .is-tiles .cs-spellcard-desc,
+.cs-v3 .is-tiles .cs-spellcard-mjnote,
+.cs-v3 .is-tiles .cs-spellcard-runes,
+.cs-v3 .is-tiles .cs-spellcard-detail,
+.cs-v3 .is-tiles .cs-spellcard-detailbtn { display: none; }   /* la tooltip fait le travail */
+/* Actions ⧉✏️🗑️ : overlay bas de tuile, révélé au survol (toujours visible en tactile) */
+.cs-v3 .is-tiles .cs-spellcard-foot {
+  position: absolute; left: 3px; right: 3px; bottom: 3px; margin: 0; padding: 2px;
+  display: flex; justify-content: center; border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-panel, #131a2a) 90%, transparent);
+  opacity: 0; pointer-events: none; transition: opacity .14s;
+}
+.cs-v3 .is-tiles .cs-spellcard:hover .cs-spellcard-foot,
+.cs-v3 .is-tiles .cs-spellcard:focus-within .cs-spellcard-foot { opacity: 1; pointer-events: auto; }
+.cs-v3 .is-tiles .cs-spellcard-acts .btn-icon { width: 24px; height: 24px; font-size: .72rem; }
+@media (hover: none) {
+  .cs-v3 .is-tiles .cs-spellcard-foot { position: static; opacity: 1; pointer-events: auto; background: transparent; padding: 0; }
+}
+/* Préparé : anneau or qui respire + éclair de coin (le glow deck existant reste) */
+.cs-v3 .is-tiles .cs-spellcard.is-actif { border-color: rgba(232,184,75,.5); border-top-color: var(--type-col, #b47fff); }
+.cs-v3 .is-tiles .cs-spellcard.is-actif .cs-spellcard-icon {
+  box-shadow: 0 0 0 2px var(--gold, #e8b84b), 0 0 16px -2px rgba(232,184,75,.45);
+  animation: csTileBreathe 2.6s ease-in-out infinite;
+}
+.cs-v3 .is-tiles .cs-spellcard.is-actif .cs-spellcard-icon::after {
+  content: "⚡"; position: absolute; bottom: -6px; right: -7px;
+  width: 15px; height: 15px; display: grid; place-items: center;
+  font-size: .55rem; background: var(--gold, #e8b84b); color: #241c08;
+  border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,.5);
+}
+@keyframes csTileBreathe {
+  50% { box-shadow: 0 0 0 2px var(--gold, #e8b84b), 0 0 24px 0 rgba(232,184,75,.35); }
+}
+/* Non validé : tuile assombrie (la pastille ⏳/❌ + la tooltip expliquent) */
+.cs-v3 .is-tiles .cs-spellcard:has(.toggle.is-locked) { opacity: .72; }
+.cs-v3 .is-tiles .cs-spellcard:has(.toggle.is-locked) .cs-spellcard-icon { filter: grayscale(.45); }
+/* Socket vide cliqué : les tuiles préparables pulsent */
+.cs-v3 .is-tiles .cs-spellcard.cs-hintme { animation: csTileHint 1.1s ease 2; }
+@keyframes csTileHint {
+  50% { border-color: var(--gold, #e8b84b); box-shadow: 0 0 14px -4px rgba(232,184,75,.5); transform: translateY(-2px); }
+}
+
+/* ── Tooltip « objet de jeu » : clone flottant de la carte complète ── */
+.cs-spell-tt {
+  position: fixed; z-index: 10000; width: 300px; pointer-events: none;
+  opacity: 0; transform: translateY(4px) scale(.98);
+  transition: opacity .13s ease, transform .13s ease;
+}
+.cs-spell-tt.show { opacity: 1; transform: none; }
+/* .cs-spell-tt.cs-v3 : spécificité (0,3,0) pour battre .cs-v3 .cs-spellcard.is-actif
+   (fond/ombre) — la tooltip doit rester SOLIDE, jamais translucide. */
+.cs-spell-tt.cs-v3 .cs-spellcard {
+  cursor: default; margin: 0;
+  background: var(--bg-panel, #131a2a);
+  border-color: color-mix(in srgb, var(--type-col, #888) 45%, var(--border));
+  box-shadow: 0 22px 50px -18px rgba(0,0,0,.9), 0 0 22px -10px color-mix(in srgb, var(--type-col, #888) 40%, transparent);
+}
+.cs-spell-tt.cs-v3 .cs-spellcard.is-actif {
+  background: color-mix(in srgb, var(--type-col, #b47fff) 8%, var(--bg-panel, #131a2a));
+}
+.cs-spell-tt .cs-spellcard-head .toggle,
+.cs-spell-tt .cs-spellcard-mj-actions,
+.cs-spell-tt .cs-spellcard-foot { display: none; }
+.cs-spell-tt .cs-spellcard-desc { -webkit-line-clamp: unset; display: block; cursor: default; }
+[data-theme="light"] .cs-spell-tt .cs-spellcard { background: #fff; }
+
+/* ── Deck en sockets (barre d'action du Grimoire) ── */
+.cs-v3 .cs-sorts-sockets {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 7px 10px; border-radius: 10px;
+  background: var(--bg-elevated, rgba(255,255,255,.03)); border: 1px solid var(--border);
+}
+.cs-v3 .cs-sorts-sockets-lbl { font-size: .9rem; line-height: 1; }
+.cs-v3 .cs-sorts-sockets-row { display: flex; gap: 5px; flex-wrap: wrap; }
+.cs-v3 .cs-sock {
+  width: 34px; height: 34px; border-radius: 8px; padding: 0;
+  display: grid; place-items: center; font-size: 1rem; line-height: 1; position: relative;
+  border: 1px solid var(--border-strong, var(--border));
+  background: var(--bg-card2, rgba(255,255,255,.05));
+  color: var(--text-dim); cursor: default;
+}
+button.cs-sock { cursor: pointer; transition: transform .13s, border-color .13s, color .13s; }
+.cs-v3 .cs-sock.is-filled { border-color: rgba(232,184,75,.5); box-shadow: inset 0 0 8px -4px rgba(232,184,75,.4); }
+button.cs-sock.is-filled:hover { transform: translateY(-2px); border-color: var(--gold, #e8b84b); }
+.cs-v3 .cs-sock-x {
+  position: absolute; top: -5px; right: -5px; width: 14px; height: 14px;
+  display: grid; place-items: center; font-size: .5rem; font-weight: 800;
+  border-radius: 50%; background: var(--bg-panel, #131a2a);
+  border: 1px solid var(--border-strong, var(--border));
+  color: var(--text-dim); opacity: 0; transition: opacity .13s;
+}
+button.cs-sock.is-filled:hover .cs-sock-x { opacity: 1; }
+.cs-v3 .cs-sock.is-empty { border-style: dashed; background: rgba(0,0,0,.15); font-size: .85rem; }
+button.cs-sock.is-empty:hover { border-color: rgba(232,184,75,.55); color: var(--gold, #e8b84b); }
+.cs-v3 .cs-sorts-sockets.is-over .cs-sock.is-filled { border-color: rgba(255,90,126,.55); }
+.cs-v3 .cs-sorts-sockets-pm { margin-left: auto; font-size: .72rem; color: var(--text-dim); white-space: nowrap; }
+.cs-v3 .cs-sorts-sockets-pm b { color: var(--gold, #e8b84b); }
+[data-theme="light"] .cs-v3 .cs-sock.is-empty { background: rgba(0,0,0,.03); }
+
+@media (prefers-reduced-motion: reduce) {
+  .cs-v3 .is-tiles .cs-spellcard.is-actif .cs-spellcard-icon,
+  .cs-v3 .is-tiles .cs-spellcard.cs-hintme { animation: none; }
+  .cs-spell-tt { transition: none; }
+  button.cs-sock, .cs-v3 .is-tiles .cs-spellcard { transition: none; }
+}
+
 @media (max-width: 560px) {
   .cs-v3 .cs-spellcard-grid { grid-template-columns: 1fr; }
+  /* les tuiles restent des tuiles sur mobile (juste un peu plus petites) */
+  .cs-v3 .cs-spellcard-grid.is-tiles { grid-template-columns: repeat(auto-fill, minmax(82px, 1fr)); }
   .cs-v3 .cs-spellcard-foot { grid-template-columns: auto 1fr; }
   .cs-v3 .cs-spellcard-catselect { grid-column: 1 / -1; justify-self: stretch; max-width: none; }
   .cs-v3 .cs-spellcard-acts { grid-column: 2; grid-row: 1; }
@@ -11565,13 +12151,6 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 [data-theme="light"] .cs-v3 .cs-spellcard:hover { box-shadow: 0 4px 14px -8px rgba(0,0,0,.25); }
 [data-theme="light"] .cs-v3 .cs-spellcard-detail { background: rgba(0,0,0,.025); border-color: rgba(0,0,0,.08); }
 [data-theme="light"] .cs-v3 .cs-spellcard-grid.is-empty { background: rgba(0,0,0,.015); border-color: rgba(0,0,0,.10); }
-[data-theme="light"] .cs-v3 .cs-spellcard-catselect {
-  background: #fff;
-  border-color: rgba(0,0,0,.14);
-  color: #1f2937;
-  color-scheme: light;
-}
-[data-theme="light"] .cs-v3 .cs-spellcard-catselect option { background: #fff; color: #1f2937; }
 [data-theme="light"] .cs-v3 .cs-spellcard-mjnote { color: #92651b; }
 [data-theme="light"] .cs-v3 .cs-spellcard-desc { color: #475569; }
 [data-theme="light"] .cs-v3 .cs-spellcard-desc:hover { color: #1e293b; }

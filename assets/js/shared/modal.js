@@ -6,6 +6,16 @@ import { _esc } from './html.js';
 
 const _modalStack = [];
 
+// ── Garde de fermeture (opt-in) ─────────────────────────────────────────────
+// Une feature peut poser un « garde » consulté par closeModalDirect sur TOUTE
+// fermeture (✕, Échap, clic overlay). Le garde renvoie `true` pour BLOQUER la
+// fermeture (il gère lui-même la confirmation), `false`/rien pour laisser fermer.
+// Réinitialisé à chaque nouvelle modale de base (openModal) pour éviter un garde
+// périmé qui bloquerait une modale sans rapport.
+let _closeGuard = null;
+export function setModalCloseGuard(fn) { _closeGuard = typeof fn === 'function' ? fn : null; }
+export function clearModalCloseGuard() { _closeGuard = null; }
+
 // Construit l'en-tête de la modale de base. Sans `opts` → titre texte simple
 // (comportement historique). Avec `opts.icon`/`opts.subtitle`/`opts.accent` →
 // en-tête « riche » (tuile d'icône lumineuse + titre Cinzel + sous-titre),
@@ -52,6 +62,7 @@ export function modalSection(title, html) {
 
 export function openModal(title, bodyHtml, opts = {}) {
   _modalStack.length = 0;
+  _closeGuard = null;   // nouvelle modale de base → aucun garde hérité
   _applyModalHeader(title, opts);
   const bodyEl  = document.getElementById('modal-body');
   const overlay = document.getElementById('modal-overlay');
@@ -106,6 +117,13 @@ export function closeModal(e) {
 
 // Ferme toujours — utilisée par le bouton ✕ et Escape
 export function closeModalDirect() {
+  // Garde opt-in : si posé et qu'il renvoie true, la fermeture est bloquée
+  // (le garde gère sa propre confirmation puis rappellera closeModalDirect).
+  if (_closeGuard) {
+    let blocked = false;
+    try { blocked = _closeGuard() === true; } catch { blocked = false; }
+    if (blocked) return;
+  }
   if (_modalStack.length > 0) {
     return popModal();
   }
