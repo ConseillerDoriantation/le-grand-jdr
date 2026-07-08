@@ -155,7 +155,12 @@
 .stats-mp-opt:hover { border-color: var(--emerald, #22c38e); color: var(--text); background: rgba(34,195,142,.07); }
 .stats-mp-opt.active { border-color: rgba(34,195,142,.6); background: rgba(34,195,142,.12); color: var(--text); }
 .stats-mp-ico { flex-shrink: 0; }
+.stats-mp-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .25rem; }
 .stats-mp-tt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-mp-members { display: flex; align-items: center; min-height: 24px; }
+.stats-mp-avatar { margin-left: -5px; box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+.stats-mp-avatar:first-child { margin-left: 0; }
+.stats-mp-empty-members { font-size: .72rem; color: var(--text-dim); }
 .stats-mp-check { flex-shrink: 0; color: var(--emerald, #22c38e); font-weight: 700; }
 .stats-mp-none { color: var(--text-dim); }
 .stats-mp-empty { color: var(--text-dim); font-size: .84rem; text-align: center; padding: 1rem 0; }

@@ -55,13 +55,21 @@ let _statsPlayerSel = null;            // Set d'ids ciblés (null = tous les jou
 let _statsCmpMetric = 'dmgDealt';      // métrique du graphique comparatif (par perso)
 let _statsCmpType   = 'bars';          // type du comparatif : 'bars' | 'pie'
 let _statsEvoMetric = 'dmgDealt';      // métrique du graphique d'évolution (par séance)
+let _statsQuests    = [];              // groupes de mission (collection quests) pour libellés/portraits
 
 // Avatar (rond) d'un perso par id — devant son nom dans les chips/graphiques.
 const _statsAvatar = (id, name, size = 18) =>
   characterAvatarHtml(STATE.characters?.find(x => x.id === id) || { nom: name }, { size, className: 'stats-av-xs', title: name });
 // Mission d'une séance (libellé MJ), ou '' si non renseignée.
 const _statsMissionOf = (dateKey) => (dateKey && _statsData?.sessions?.[dateKey]?.mission) || '';
-const _statsGroupOf   = (dateKey) => (dateKey && _statsData?.sessions?.[dateKey]?.group) || '';
+const _statsGroupOf   = (dateKey) => {
+  const session = dateKey ? _statsData?.sessions?.[dateKey] : null;
+  if (!session) return '';
+  const group = session.group || '';
+  if (group && group !== 'Groupe') return group;
+  const current = session.groupId ? (_statsQuests || []).find(q => q.id === session.groupId) : null;
+  return current ? _statsGroupName(current) : group;
+};
 // Dates liées à une mission (via sessions.{date}.missionId).
 const _statsMissionDates = (mid) => Object.entries(_statsData?.sessions || {}).filter(([, s]) => s?.missionId === mid).map(([dk]) => dk);
 // Missions distinctes ayant ≥1 séance liée (pour la frise).
@@ -70,19 +78,56 @@ function _statsMissionList() {
   for (const s of Object.values(_statsData?.sessions || {})) if (s?.missionId && !m.has(s.missionId)) m.set(s.missionId, s.mission || 'Mission');
   return [...m.entries()].map(([id, name]) => ({ id, name }));
 }
+function _statsGroupName(g = {}, idx = 0) {
+  return (g.titre || g.nom || g.name || '').trim() || `Groupe ${idx + 1}`;
+}
+function _statsGroupsForMission(story = [], quests = [], missionId = '') {
+  const linked = (quests || [])
+    .filter(q => q?.missionId === missionId)
+    .sort((a, b) => (_statsGroupName(a)).localeCompare(_statsGroupName(b), 'fr'));
+  if (linked.length) return linked;
+  const legacyGroups = (story || []).find(x => x.id === missionId)?.groupes || [];
+  return Array.isArray(legacyGroups) ? legacyGroups : [];
+}
+function _statsGroupMembersHtml(g = {}) {
+  const charById = new Map((STATE.characters || []).map(c => [c.id, c]));
+  const parts = dedupeQuestParticipants(g.participants || []);
+  if (!parts.length) return `<span class="stats-mp-empty-members">Aucun membre</span>`;
+  return parts.map(p => {
+    const char = p.charId ? charById.get(p.charId) : null;
+    const avatarData = char || p;
+    return characterAvatarHtml(avatarData, {
+      size: 24,
+      className: 'stats-mp-avatar',
+      title: avatarData.nom || p.nom || '?',
+      border: '1px solid rgba(255,255,255,.12)',
+      background: 'rgba(79,140,255,.16)',
+    });
+  }).join('');
+}
 // Étape 2 du sélecteur : choisir le GROUPE de la mission ayant joué la séance.
 function _statsGroupStep(dk, mid, mission, groupes) {
   const curG = _statsData?.sessions?.[dk]?.groupId || '';
-  const opt = (gid, name, active) =>
+  const opt = (g, idx, active) => {
+    const gid = g.id || '';
+    const name = _statsGroupName(g, idx);
+    return (
     `<button type="button" class="stats-mp-opt${active ? ' active' : ''}"
       data-action="_statsPickGroup" data-scope="${dk}" data-mission-id="${_esc(mid)}" data-mission="${_esc(mission)}" data-group-id="${_esc(gid)}" data-group="${_esc(name)}">
-      <span class="stats-mp-ico">👥</span><span class="stats-mp-tt">${_esc(name)}</span>${active ? '<span class="stats-mp-check">✓</span>' : ''}</button>`;
+      <span class="stats-mp-ico">👥</span>
+      <span class="stats-mp-body">
+        <span class="stats-mp-tt">${_esc(name)}</span>
+        <span class="stats-mp-members">${_statsGroupMembersHtml(g)}</span>
+      </span>
+      ${active ? '<span class="stats-mp-check">✓</span>' : ''}</button>`
+    );
+  };
   openModal(`🎯 ${_esc(mission)}`, `
     <div class="stats-mp">
       <div class="stats-mp-hint">Quel groupe a joué cette séance ?</div>
       <div class="stats-mp-list">
         <button type="button" class="stats-mp-opt stats-mp-none${!curG ? ' active' : ''}" data-action="_statsPickGroup" data-scope="${dk}" data-mission-id="${_esc(mid)}" data-mission="${_esc(mission)}" data-group-id="" data-group=""><span class="stats-mp-ico">—</span><span class="stats-mp-tt">Sans groupe précis</span></button>
-        ${groupes.map(g => opt(g.id, g.titre || 'Groupe', g.id === curG)).join('')}
+        ${groupes.map((g, idx) => opt(g, idx, g.id === curG)).join('')}
       </div>
     </div>`, { subtitle: 'Groupe de la mission', accent: '#4f8cff' });
 }
@@ -2271,13 +2316,15 @@ const PAGES = {
     const content = document.getElementById('main-content');
     content.innerHTML = `${pageHeaderHtml('📊 Statistiques', 'Jets, réussites et exploits de la table')}
       <div id="stats-root" class="stats-root">${loadingHtml('Chargement des statistiques…')}</div>`;
-    const [data, emoteDoc, chars] = await Promise.all([
+    const [data, emoteDoc, chars, quests] = await Promise.all([
       loadStats(),
       getDocData('world', 'vtt_emotes').catch(() => null),
       // Charge les persos (avec leur portrait) pour les afficher à côté du nom.
       loadChars().catch(() => null),
+      loadCollection('quests').catch(() => []),
     ]);
     if (Array.isArray(chars) && chars.length) STATE.characters = chars;
+    _statsQuests = Array.isArray(quests) ? quests : [];
     _statsData = data;
     _statsEmoteUrl = new Map((emoteDoc?.emotes || []).filter(e => e?.name && e?.url).map(e => [e.name, e.url]));
     _statsScope = null;
@@ -2462,7 +2509,10 @@ registerActions({
       return;
     }
     const story = getCachedCollection('story') || [];
-    const groupes = (story.find(x => x.id === mid)?.groupes) || [];
+    let quests = _statsQuests?.length ? _statsQuests : getCachedCollection('quests');
+    if (!quests || !quests.length) quests = await loadCollection('quests').catch(() => []);
+    _statsQuests = Array.isArray(quests) ? quests : [];
+    const groupes = _statsGroupsForMission(story, quests, mid);
     if (Array.isArray(groupes) && groupes.length) { _statsGroupStep(dk, mid, mission, groupes); return; }
     closeModalDirect();
     await setSessionMission(dk, { mission, missionId: mid });
