@@ -560,6 +560,44 @@ function _statsRender(dateKey) {
       </div>
     </section>`;
 
+  // ── Sections (recomposées en colonnes plus bas) ──
+  const combatSec = `
+    <section class="stats-sec">
+      <div class="stats-sec-hd">${combatTitle}</div>
+      <div class="stats-kpis">
+        ${statCard('💥', GC.crits, 'Réussites critiques', '#f4c430')}
+        ${statCard('💔', GC.fumbles, 'Échecs critiques', '#ff6b6b')}
+        ${statCard('🛡️', GC.dmgTaken, 'Dégâts subis', '#9aa0aa')}
+        ${statCard('☠️', GC.kosDealt, 'KO infligés', '#ef4444')}
+        ${statCard('💀', GC.kosTaken, 'Fois mis KO', '#b06a6a')}
+        ${statCard('🔋', GC.pmSpent, 'PM dépensés', '#4f8cff')}
+      </div>
+    </section>`;
+  const competencesSec = `
+    <section class="stats-sec">
+      <div class="stats-sec-hd">🎲 Compétences</div>
+      <div class="stats-kpis">
+        ${statCard('🎲', GS.rolls, 'Jets de compétence', '#4f8cff')}
+        ${statCard('💥', GS.crits, 'Réussites critiques', '#22c38e')}
+        ${statCard('💔', GS.fumbles, 'Échecs critiques', '#ff6b6b')}
+        ${statCard('🏅', topSkill ? _esc(topSkill[0]) : '—', 'Compétence la + jouée', '#f4c430')}
+      </div>
+    </section>`;
+  const distinctionsSec = awardsHtml ? `
+    <section class="stats-sec">
+      <div class="stats-sec-hd">🏆 Distinctions</div>
+      <div class="stats-trophies">${awardsHtml}</div>
+    </section>` : '';
+  const palmaresSec = (spellTally.length || emoteTally.length || skillTally.length) ? `
+    <section class="stats-sec">
+      <div class="stats-sec-hd">🏅 Palmarès</div>
+      <div class="stats-podiums">
+        ${_statsPodium('🔮 Sorts les + lancés', spellTally)}
+        ${_statsPodium('🎲 Compétences les + jouées', skillTally)}
+        ${_statsPodium('😄 Émotes les + utilisées', emoteTally, (l) => _statsEmoteHtml(l, 'stats-emote-sm'))}
+      </div>
+    </section>` : '';
+
   root.innerHTML = `
     ${controls}
     ${sessionBanner}
@@ -579,45 +617,17 @@ function _statsRender(dateKey) {
       </div>
     </section>
 
-    <section class="stats-sec">
-      <div class="stats-sec-hd">${combatTitle}</div>
-      <div class="stats-kpis">
-        ${statCard('💥', GC.crits, 'Réussites critiques', '#f4c430')}
-        ${statCard('💔', GC.fumbles, 'Échecs critiques', '#ff6b6b')}
-        ${statCard('🛡️', GC.dmgTaken, 'Dégâts subis', '#9aa0aa')}
-        ${statCard('☠️', GC.kosDealt, 'KO infligés', '#ef4444')}
-        ${statCard('💀', GC.kosTaken, 'Fois mis KO', '#b06a6a')}
-        ${statCard('🔋', GC.pmSpent, 'PM dépensés', '#4f8cff')}
+    <div class="stats-columns">
+      <div class="stats-col-group">
+        ${combatSec}
+        ${competencesSec}
+        ${chartsHtml}
       </div>
-    </section>
-
-    ${awardsHtml ? `
-    <section class="stats-sec">
-      <div class="stats-sec-hd">🏆 Distinctions</div>
-      <div class="stats-trophies">${awardsHtml}</div>
-    </section>` : ''}
-
-    ${chartsHtml}
-
-    <section class="stats-sec">
-      <div class="stats-sec-hd">🎲 Compétences</div>
-      <div class="stats-kpis">
-        ${statCard('🎲', GS.rolls, 'Jets de compétence', '#4f8cff')}
-        ${statCard('💥', GS.crits, 'Réussites critiques', '#22c38e')}
-        ${statCard('💔', GS.fumbles, 'Échecs critiques', '#ff6b6b')}
-        ${statCard('🏅', topSkill ? _esc(topSkill[0]) : '—', 'Compétence la + jouée', '#f4c430')}
+      <div class="stats-col-group">
+        ${distinctionsSec}
+        ${palmaresSec}
       </div>
-    </section>
-
-    ${(spellTally.length || emoteTally.length || skillTally.length) ? `
-    <section class="stats-sec">
-      <div class="stats-sec-hd">🏅 Palmarès</div>
-      <div class="stats-podiums">
-        ${_statsPodium('🔮 Sorts les + lancés', spellTally)}
-        ${_statsPodium('🎲 Compétences les + jouées', skillTally)}
-        ${_statsPodium('😄 Émotes les + utilisées', emoteTally, (l) => _statsEmoteHtml(l, 'stats-emote-sm'))}
-      </div>
-    </section>` : ''}
+    </div>
 
     <section class="stats-sec">
       <div class="stats-sec-hd">👤 Par personnage</div>

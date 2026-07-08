@@ -180,8 +180,19 @@
   margin-bottom: .65rem;
 }
 
+/* ── Disposition en colonnes (remplit la largeur, sinon beaucoup de vide) ──
+   2 groupes côte à côte sur large écran, empilés sur étroit. align-items:start
+   pour que chaque colonne prenne sa hauteur propre (pas d'étirement). */
+.stats-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
+  gap: 1.4rem; align-items: start;
+}
+.stats-col-group { min-width: 0; }
+.stats-col-group > .stats-sec:last-child { margin-bottom: 0; }
+
 /* ── KPI ── */
-.stats-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(138px, 1fr)); gap: .6rem; }
+.stats-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(138px, 1fr)); gap: .6rem; }
 .stats-kpi {
   display: flex; flex-direction: column; align-items: center; gap: .15rem;
   padding: .85rem .6rem; border-radius: 12px;
@@ -193,7 +204,7 @@
 .stats-kpi-lbl { font-size: .7rem; color: var(--text-muted); text-align: center; line-height: 1.2; }
 
 /* ── Distinctions (cartes-trophées) ── */
-.stats-trophies { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .6rem; }
+.stats-trophies { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .6rem; }
 .stats-trophy {
   display: flex; align-items: center; gap: .7rem;
   padding: .7rem .85rem; border-radius: 12px;
@@ -207,7 +218,7 @@
 .stats-trophy-who b { color: var(--tc, var(--gold)); font-weight: 700; }
 
 /* ── Palmarès (podiums top 3) ── */
-.stats-podiums { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: .7rem; }
+.stats-podiums { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .7rem; }
 .stats-pod { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: .8rem .9rem; }
 .stats-pod-title { font-size: .74rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: .55rem; }
 .stats-pod-row { display: flex; align-items: center; gap: .5rem; padding: .22rem 0; }
@@ -218,7 +229,7 @@
 .stats-pod-empty { color: var(--text-dim); font-size: .85rem; }
 
 /* ── Par personnage ── */
-.stats-chars { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: .8rem; }
+.stats-chars { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: .8rem; }
 .stats-char {
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: 14px; padding: .9rem 1rem;
