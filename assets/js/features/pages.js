@@ -58,13 +58,23 @@ let _statsHiddenAwards = new Set();    // distinctions masquées localement par 
 let _statsVisualSummary = null;        // données du dernier rendu pour export image
 let _statsCmpMetric = 'dmgDealt';      // métrique du graphique comparatif (par perso)
 let _statsCmpType   = 'bars';          // type du comparatif : 'bars' | 'pie'
-let _statsEvoMetric = 'dmgDealt';      // métrique du graphique d'évolution (par séance)
+let _statsEvoMetric = 'dmgDealt';      // métrique du comparatif missions/groupes
+let _statsAnalysisMode = 'overview';   // 'overview' | 'compare'
+let _statsCompareKind = 'players';     // 'players' | 'groups'
+const _statsCompareSelection = { players: [], groups: [] };
 let _statsQuests    = [];              // groupes de mission (collection quests) pour libellés/portraits
 let _statsStory     = [];              // missions de la Trame pour ordre/titres du sélecteur stats
+let _statsDrawerState = new Map();     // key → état ouvert/fermé des onglets stats durant la session
 
 // Avatar (rond) d'un perso par id — devant son nom dans les chips/graphiques.
 const _statsAvatar = (id, name, size = 18) =>
   characterAvatarHtml(STATE.characters?.find(x => x.id === id) || { nom: name }, { size, className: 'stats-av-xs', title: name });
+function _statsCaptureDrawerState(root = document.getElementById('stats-root')) {
+  if (!root) return;
+  root.querySelectorAll('details[data-drawer-key]').forEach(d => {
+    if (d.dataset.drawerKey) _statsDrawerState.set(d.dataset.drawerKey, !!d.open);
+  });
+}
 // Mission d'une séance (libellé MJ), ou '' si non renseignée.
 const _statsMissionOf = (dateKey) => (dateKey && _statsData?.sessions?.[dateKey]?.mission) || '';
 const _statsGroupOf   = (dateKey) => {
@@ -238,6 +248,31 @@ function _statsEmoteHtml(name, cls = 'stats-emote') {
   const url = _statsEmoteUrl.get(name);
   return url ? `<img class="${cls}" src="${url}" alt="${_esc(name)}" title="${_esc(name)}">` : _esc(name);
 }
+function _statsFavoritesHtml(spells = [], emotes = []) {
+  const normalize = (items) => (Array.isArray(items)
+    ? items
+    : Object.entries(items || {}).map(([n, c]) => ({ n, c: _statsNum(c) })))
+    .filter(x => x?.n && _statsNum(x.c) > 0)
+    .sort((a, b) => _statsNum(b.c) - _statsNum(a.c))
+    .slice(0, 3);
+  const spellTop = normalize(spells);
+  const emoteTop = normalize(emotes);
+  const group = (icon, title, items, render) => items.length ? `<section class="stats-favorite-group">
+    <h4>${icon} ${title}</h4>
+    <div class="stats-favorite-list">${items.map((item, i) => `<div class="stats-favorite-row">
+      <span class="stats-favorite-rank">${i + 1}</span>
+      <span class="stats-favorite-name">${render(item.n)}</span>
+      <b>×${_statsNum(item.c)}</b>
+    </div>`).join('')}</div>
+  </section>` : '';
+  const content = [
+    group('⭐', 'Sorts favoris', spellTop, n => _esc(n)),
+    group('😄', 'Émotes favorites', emoteTop, n => _statsEmoteUrl.has(n)
+      ? `<span class="stats-favorite-emote">${_statsEmoteHtml(n, 'stats-emote-sm')}<span>${_esc(n)}</span></span>`
+      : _esc(n)),
+  ].filter(Boolean).join('');
+  return content ? `<div class="stats-favorite-groups">${content}</div>` : '';
+}
 function _statsLoadAwardPrefs() {
   try {
     const raw = JSON.parse(localStorage.getItem(_STATS_AWARD_PREF_KEY) || '[]');
@@ -364,39 +399,6 @@ function _statsNormCombat(cm = {}) {
     biggestHit: n(cm.biggestHit), biggestTaken: n(cm.biggestTaken),
   };
 }
-function _statsTop(map = {}) {
-  const e = Object.entries(map).map(([n, v]) => ({ n, c: _statsNum(v) })).sort((a, b) => b.c - a.c)[0];
-  return e && e.c > 0 ? e : null;
-}
-// Bandeau de chips combat (réutilisé par carte perso ET vue par séance).
-function _statsCombatGrid(cm, { topSpell, topEmote } = {}) {
-  const hr = cm.attacks ? Math.round((cm.hits / cm.attacks) * 100) : 0;
-  // Grille label → valeur : lisible, jamais de débordement (valeur alignée à droite).
-  const rows = [];
-  const row = (ic, lbl, val) => rows.push(
-    `<div class="stats-crow"><span class="stats-clbl">${ic} ${lbl}</span><span class="stats-cval">${val}</span></div>`);
-  if (cm.attacks > 0)      { row('⚔️', 'Attaques', cm.attacks); row('🎯', 'Taux de réussite', `${hr}%`); }
-  if (cm.crits > 0)        row('💥', 'Réussites critiques', cm.crits);
-  if (cm.fumbles > 0)      row('💔', 'Échecs critiques', cm.fumbles);
-  if (cm.dmgDealt > 0)     row('🗡️', 'Dégâts infligés', cm.dmgDealt);
-  if (cm.biggestHit > 0)   row('💢', 'Plus gros coup infligé', cm.biggestHit);
-  if (cm.dmgTaken > 0)     row('🛡️', 'Dégâts subis', cm.dmgTaken);
-  if (cm.attacksTaken > 0) row('🧱', 'Attaques subies', cm.attacksTaken);
-  if (cm.attacksAvoided > 0) row('🛡️', 'Attaques évitées', cm.attacksAvoided);
-  if (cm.biggestTaken > 0) row('🩸', 'Plus gros coup reçu', cm.biggestTaken);
-  if (cm.kosDealt > 0)     row('☠️', 'KO infligés', cm.kosDealt);
-  if (cm.kosTaken > 0)     row('💀', 'Fois mis KO', cm.kosTaken);
-  if (cm.spellsCast > 0)   row('🔮', 'Sorts lancés', cm.spellsCast);
-  if (cm.tacticalSpells > 0) row('✨', 'Sorts tactiques', cm.tacticalSpells);
-  if (cm.pmSpent > 0)      row('🔋', 'PM dépensés', cm.pmSpent);
-  if (cm.heal > 0)         row('💚', 'PV soignés', cm.heal);
-  const favs = [];
-  if (topSpell) favs.push(`<div class="stats-cfav"><span class="stats-clbl">⭐ Sort fétiche</span><span class="stats-cfav-v">${_esc(topSpell.n)} <small>×${topSpell.c}</small></span></div>`);
-  if (topEmote) favs.push(`<div class="stats-cfav"><span class="stats-clbl">😄 Émote fétiche</span><span class="stats-cfav-v">${_statsEmoteHtml(topEmote.n, 'stats-emote')} <small>×${topEmote.c}</small></span></div>`);
-  return (rows.length ? `<div class="stats-cgrid">${rows.join('')}</div>` : '')
-       + (favs.length ? `<div class="stats-cfavs">${favs.join('')}</div>` : '');
-}
-
 const _statsFmtDate = (d) => { const [y, m, da] = d.split('-'); return `${da}/${m}/${y}`; };
 
 // Jauge circulaire (donut) — pct 0-100 + couleur d'accent. Optionnellement un
@@ -439,15 +441,20 @@ function _statsBarChart(rows, key) {
 function _statsGroupMetricChart(groups, key) {
   const m = _STATS_METRICS[key] || _STATS_METRICS.dmgDealt;
   const val = (g) => key === 'rolls' ? g.skills.rolls : (g.combat[key] || 0);
-  const data = groups.map(g => ({ name: g.label, v: val(g), count: g.count, quest: g.quest }))
-    .filter(d => d.v > 0).sort((a, b) => b.v - a.v);
-  if (!data.length) return `<div class="stats-chart-empty">Aucune donnée de groupe pour « ${m.lbl} ».</div>`;
+  const data = groups.map(g => ({
+    name: g.label,
+    total: val(g),
+    v: Math.round(val(g) / Math.max(1, g.count)),
+    count: g.count,
+    totalSessions: g.totalSessions || g.count,
+  })).filter(d => d.total > 0).sort((a, b) => b.v - a.v);
+  if (!data.length) return `<div class="stats-chart-empty">Aucune donnée comparable pour « ${m.lbl} ».</div>`;
   const max = Math.max(...data.map(d => d.v));
   return `<div class="stats-bars stats-bars-groups">${data.map(d => `
     <div class="stats-bar-row stats-bar-row-group">
-      <span class="stats-bar-name stats-bar-name-group" title="${_esc(d.name)}"><span>${_esc(d.name)}</span><small>${d.count} séance${d.count > 1 ? 's' : ''}</small></span>
+      <span class="stats-bar-name stats-bar-name-group" title="${_esc(d.name)} · ${d.total} au total"><span>${_esc(d.name)}</span><small>${d.count} séance${d.count > 1 ? 's' : ''} suivie${d.count > 1 ? 's' : ''}${d.totalSessions > d.count ? ` sur ${d.totalSessions}` : ''}</small></span>
       <span class="stats-bar-track"><span style="width:${Math.max(3, Math.round(d.v / max * 100))}%;background:${m.color}"></span></span>
-      <span class="stats-bar-val" style="color:${m.color}">${d.v}</span>
+      <span class="stats-bar-val stats-bar-val-avg" style="color:${m.color}" title="${d.total} au total">${d.v}<small>/ séance</small></span>
     </div>`).join('')}</div>`;
 }
 
@@ -485,34 +492,6 @@ function _statsPieChart(rows, key) {
   </svg>`;
   const legend = `<div class="stats-pie-legend">${arcs.map(a => `<div class="stats-pie-li"><span class="stats-pie-dot" style="background:${a.col}"></span><span class="stats-pie-nm" title="${_esc(a.s.name)}">${_esc(a.s.name)}</span><span class="stats-pie-vl">${a.pct}%</span></div>`).join('')}</div>`;
   return `<div class="stats-pie">${svg}${legend}</div>`;
-}
-
-// Série d'évolution : valeur de la métrique par séance (dates ascendantes),
-// sommée sur les joueurs ciblés (selSet null/vide = tous).
-function _statsEvoSeries(datesAsc, key, selSet) {
-  const num = _statsNum;
-  return datesAsc.map(d => {
-    let v = 0;
-    for (const [id, c] of Object.entries(_statsData?.chars || {})) {
-      if (selSet && selSet.size && !selSet.has(id)) continue;
-      const src = c.byDate?.[d]; if (!src) continue;
-      if (key === 'rolls') v += Object.values(src.skills || {}).reduce((s, x) => s + num(x.rolls), 0);
-      else v += num(_statsNormCombat(src.combat)[key]);
-    }
-    return { d, v };
-  });
-}
-
-// Graphique en colonnes (barres verticales, bas → haut) : évolution par séance.
-function _statsColChart(series, key) {
-  const m = _STATS_METRICS[key] || _STATS_METRICS.dmgDealt;
-  const max = Math.max(1, ...series.map(s => s.v));
-  return `<div class="stats-cols">${series.map(s => `
-    <div class="stats-col" title="${_statsFmtDate(s.d)} · ${s.v}">
-      <span class="stats-col-v">${s.v || ''}</span>
-      <span class="stats-col-bar"><span style="height:${s.v ? Math.max(3, Math.round(s.v / max * 100)) : 0}%;background:${m.color}"></span></span>
-      <span class="stats-col-lbl">${_statsFmtDate(s.d).slice(0, 5)}</span>
-    </div>`).join('')}</div>`;
 }
 
 // Somme les miroirs byDate d'un perso sur un ensemble de dates → même forme
@@ -576,9 +555,8 @@ function _statsAggregateRows(rows = []) {
   return { combat, skills, hitRate };
 }
 
-// Mini-palmarès top 5 (sorts / compétences / émotes). render(label) → html (défaut _esc).
+// Classement top 5 homogène (sorts / compétences / émotes).
 function _statsPodium(title, entries, render, opts = {}) {
-  const ranks = ['🥇', '🥈', '🥉', '4', '5'];
   const rdr = render || ((l) => _esc(l));
   const labelOf = (e) => Array.isArray(e) ? e[0] : e?.n;
   const countOf = (e) => Array.isArray(e) ? e[1] : e?.c;
@@ -586,14 +564,20 @@ function _statsPodium(title, entries, render, opts = {}) {
     ? entries.slice(0, 5).map((e, i) => {
       const label = labelOf(e);
       const meta = opts.meta ? opts.meta(e, i) : '';
-      return `<div class="stats-pod-row">
-        <span class="stats-pod-rank${i > 2 ? ' stats-pod-rank-num' : ''}">${ranks[i]}</span>
+      return `<div class="stats-pod-row${i === 0 ? ' is-first' : ''}">
+        <span class="stats-pod-rank">${i + 1}</span>
         <span class="stats-pod-main"><span class="stats-pod-name">${rdr(label)}</span>${meta}</span>
-        <span class="stats-pod-n">×${countOf(e) || 0}</span>
+        <span class="stats-pod-n"><b>${countOf(e) || 0}</b><small>fois</small></span>
       </div>`;
     }).join('')
-    : '<div class="stats-pod-empty">—</div>';
-  return `<div class="stats-pod"><div class="stats-pod-title">${title}</div>${body}</div>`;
+    : '<div class="stats-pod-empty">Aucune donnée</div>';
+  return `<section class="stats-pod" style="--pod-accent:${opts.accent || '#7fb0ff'}">
+    <div class="stats-pod-head">
+      <span class="stats-pod-icon">${opts.icon || '🏅'}</span>
+      <span class="stats-pod-title">${title}<small>Top 5</small></span>
+    </div>
+    <div class="stats-pod-list">${body}</div>
+  </section>`;
 }
 
 // Rendu complet de la page pour un scope (réutilisé au changement de séance).
@@ -601,6 +585,7 @@ function _statsRender(scope) {
   _statsScope = scope || null;
   const root = document.getElementById('stats-root');
   if (!root) return;
+  _statsCaptureDrawerState(root);
   // Scope : null (campagne) · 'YYYY-MM-DD' (une séance) · 'mission:{id}' (mission entière).
   const isMission = typeof scope === 'string' && scope.startsWith('mission:');
   const missionId = isMission ? scope.slice(8) : '';
@@ -635,17 +620,36 @@ function _statsRender(scope) {
   // Filtre « joueurs ciblés » : recalcule toute la page sur le sous-ensemble choisi.
   const sel = _statsPlayerSel;
   const rows = (sel && sel.size) ? allRows.filter(r => sel.has(r.id)) : allRows;
+  const comparableAggregate = (entry) => {
+    const trackedDates = entry.dates.filter(d => {
+      const dateRows = _statsRowsFor([d]);
+      const filteredRows = (sel && sel.size) ? dateRows.filter(r => sel.has(r.id)) : dateRows;
+      return filteredRows.length > 0;
+    });
+    const rawRows = _statsRowsFor(trackedDates);
+    const comparedRows = (sel && sel.size) ? rawRows.filter(r => sel.has(r.id)) : rawRows;
+    return {
+      ...entry,
+      count: trackedDates.length,
+      totalSessions: entry.dates.length,
+      trackedDates,
+      rows: comparedRows,
+      ..._statsAggregateRows(comparedRows),
+      active: trackedDates.length > 0,
+    };
+  };
   const missionGroupOptions = isMission && selectedMissionId ? _statsGroupOptionsForDates(selectedMissionDates) : [];
   const groupCompareOptions = isMission && missionGroupOptions.length > 1
     ? missionGroupOptions.filter(g => !_statsGroupSel || !_statsGroupSel.size || _statsGroupSel.has(g.key))
     : [];
-  const groupCompare = groupCompareOptions.map(g => {
-    const rawRows = _statsRowsFor(g.dates);
-    const groupRows = (sel && sel.size) ? rawRows.filter(r => sel.has(r.id)) : rawRows;
-    const agg = _statsAggregateRows(groupRows);
-    const active = groupRows.length || agg.combat.attacks || agg.skills.rolls;
-    return { ...g, rows: groupRows, ...agg, active };
-  }).filter(g => g.active);
+  const groupCompare = groupCompareOptions.map(comparableAggregate).filter(g => g.active);
+  const missionCompare = !selectedMissionId && !dateKey
+    ? missions.map(m => comparableAggregate({
+        key: m.id,
+        label: m.name,
+        dates: _statsMissionDates(m.id),
+      })).filter(m => m.active)
+    : [];
 
   const unlinkedDates = allDates.filter(d => !_statsData?.sessions?.[d]?.missionId);
   const showUnlinkedDates = !selectedMissionId && unlinkedDates.length > 0;
@@ -708,14 +712,14 @@ function _statsRender(scope) {
     ${filtersActive ? '<button class="stats-active-reset" data-action="_statsResetFilters">Réinitialiser</button>' : ''}
   </div>`;
 
-  const exportBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExport" title="Copier un récap texte (Discord…)">📋 Copier le récap</button>` : '';
-  const visualBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExportImage" title="Télécharger un récap visuel PNG">🖼️ Récap visuel</button>` : '';
-  const manageBtn = STATE.isAdmin ? `<button class="stats-tool-btn" data-action="_statsManage" title="Relier les séances aux missions · supprimer des données">⚙ Gérer les données</button>` : '';
+  const exportBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExport" title="Copier un récapitulatif texte pour Discord"><span>📋</span> Copier</button>` : '';
+  const visualBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExportImage" title="Télécharger le récapitulatif visuel en PNG"><span>🖼️</span> Visuel</button>` : '';
+  const manageBtn = STATE.isAdmin ? `<button class="stats-tool-btn stats-tool-btn--manage" data-action="_statsManage" title="Relier les séances aux missions et gérer les données"><span>⚙</span> Données</button>` : '';
+  const actionBar = (exportBtn || visualBtn || manageBtn) ? `<div class="stats-toolbar-actions"><span class="stats-toolbar-label">Actions</span>${exportBtn}${visualBtn}${manageBtn}</div>` : '';
   const controls = `<div class="stats-controls">
-    <div class="stats-controls-top">${sessionsBar}<div class="stats-toolbar-actions">${exportBtn}${visualBtn}${manageBtn}</div></div>
-    ${activeView}
+    <div class="stats-controls-top">${sessionsBar}${actionBar}</div>
     ${playersBar}
-  </div>`;
+  </div>${activeView}`;
 
   // Bannière : séance (mission + groupe, éditable MJ) OU mission (agrégée).
   const partsHtml = allRows.map(r => `<span class="stats-sb-part" title="${_esc(r.name)}">${_statsAvatar(r.id, r.name, 30)}</span>`).join('');
@@ -761,29 +765,27 @@ function _statsRender(scope) {
   const GC = aggregate.combat;
   const GS = aggregate.skills;
   const hitRate = aggregate.hitRate;
-  const tally = (key) => { const m = {}; rows.forEach(r => r[key].forEach(x => { m[x.n] = (m[x.n] || 0) + x.c; })); return Object.entries(m).sort((a, b) => b[1] - a[1]); };
-  const spellTallyWithCaster = () => {
+  const tallyWithContributors = (itemsOf) => {
     const map = new Map();
-    rows.forEach(r => r.spells.forEach(sp => {
-      if (!sp?.n || !sp.c) return;
-      const cur = map.get(sp.n) || { n: sp.n, c: 0, casters: new Map() };
-      cur.c += sp.c;
-      cur.casters.set(r.id, (cur.casters.get(r.id) || 0) + sp.c);
-      map.set(sp.n, cur);
+    rows.forEach(r => itemsOf(r).forEach(item => {
+      if (!item?.n || !item.c) return;
+      const cur = map.get(item.n) || { n: item.n, c: 0, byPlayer: new Map() };
+      cur.c += item.c;
+      cur.byPlayer.set(r.id, (cur.byPlayer.get(r.id) || 0) + item.c);
+      map.set(item.n, cur);
     }));
-    return [...map.values()].sort((a, b) => b.c - a.c).map(sp => {
-      const casters = [...sp.casters.entries()].sort((a, b) => b[1] - a[1]).map(([id, count]) => {
+    return [...map.values()].sort((a, b) => b.c - a.c).map(item => {
+      const contributors = [...item.byPlayer.entries()].sort((a, b) => b[1] - a[1]).map(([id, count]) => {
         const row = rows.find(r => r.id === id);
         return row ? { id: row.id, name: row.name, count } : null;
       }).filter(Boolean);
-      return { n: sp.n, c: sp.c, casters, caster: casters[0] || null };
+      return { n: item.n, c: item.c, contributors, contributor: contributors[0] || null };
     });
   };
-  const skillAgg = {};
-  rows.forEach(r => r.perSkill.forEach(s => { (skillAgg[s.sk] ??= 0); skillAgg[s.sk] += s.rolls; }));
-  const skillTally = Object.entries(skillAgg).sort((a, b) => b[1] - a[1]);
+  const spellTally = tallyWithContributors(r => r.spells);
+  const skillTally = tallyWithContributors(r => r.perSkill.map(s => ({ n: s.sk, c: s.rolls })));
+  const emoteTally = tallyWithContributors(r => r.emotes);
   const topSkill = skillTally[0];
-  const spellTally = spellTallyWithCaster(), emoteTally = tally('emotes');
 
   const best = (key) => [...rows].filter(r => r.combat[key] > 0).sort((a, b) => b.combat[key] - a.combat[key])[0];
   const topDmg = best('dmgDealt'), topKo = best('kosDealt'), topHeal = best('heal'), topBig = best('biggestHit'), topTank = best('dmgTaken'), topMage = best('spellsCast');
@@ -831,20 +833,6 @@ function _statsRender(scope) {
     .sort((a, b) => (b.impact - a.impact) || String(a.name || '').localeCompare(String(b.name || ''), 'fr'));
   const topImpact = impactRows[0]?.impact || 0;
   const mvps = topImpact > 0 ? impactRows.filter(r => r.impact === topImpact) : [];
-  const insightItems = [];
-  if (groupCompare.length > 1) {
-    const byDmg = [...groupCompare].sort((a, b) => b.combat.dmgDealt - a.combat.dmgDealt)[0];
-    const byHeal = [...groupCompare].sort((a, b) => b.combat.heal - a.combat.heal)[0];
-    const byRolls = [...groupCompare].sort((a, b) => b.skills.rolls - a.skills.rolls)[0];
-    if (byDmg?.combat.dmgDealt) insightItems.push(`Le groupe <b>${_esc(byDmg.label)}</b> domine les dégâts (${byDmg.combat.dmgDealt}).`);
-    if (byHeal?.combat.heal) insightItems.push(`<b>${_esc(byHeal.label)}</b> porte le soin (${byHeal.combat.heal} PV).`);
-    if (byRolls?.skills.rolls) insightItems.push(`<b>${_esc(byRolls.label)}</b> joue le plus de compétences (${byRolls.skills.rolls} jets).`);
-  }
-  if (topDmg?.combat.dmgDealt) insightItems.push(`<b>${_esc(topDmg.name)}</b> a porté l'offensive (${topDmg.combat.dmgDealt} dégâts).`);
-  if (topHeal?.combat.heal) insightItems.push(`<b>${_esc(topHeal.name)}</b> a stabilisé le groupe (${topHeal.combat.heal} PV soignés).`);
-  if (GC.attacks >= 5) insightItems.push(`La table termine à <b>${hitRate}%</b> de réussite sur ${GC.attacks} attaques.`);
-
-  const statCard = (ic, val, lbl, a) => `<div class="stats-kpi" style="--a:${a}"><span class="stats-kpi-ic">${ic}</span><span class="stats-kpi-val">${val}</span><span class="stats-kpi-lbl">${lbl}</span></div>`;
   // Award : renvoie { html, txt } pour mutualiser affichage et export.
   const awards = [];
   let awardTotal = 0;
@@ -862,18 +850,13 @@ function _statsRender(scope) {
   const charBlock = (r) => {
     const cm = r.combat;
     const rhr = cm.attacks ? Math.round(cm.hits / cm.attacks * 100) : null;
-    // Tuiles de stats clés (nonzero seulement) — vue d'un coup d'œil.
-    const tiles = [];
-    const tile = (v, l, c) => tiles.push(`<div class="stats-tile"><span class="stats-tile-v"${c ? ` style="color:${c}"` : ''}>${v}</span><span class="stats-tile-l">${l}</span></div>`);
-    if (cm.attacks)    tile(cm.attacks, 'Attaques');
-    if (cm.dmgDealt)   tile(cm.dmgDealt, 'Dégâts', '#c9b6ff');
-    if (cm.biggestHit) tile(cm.biggestHit, 'Plus gros coup');
-    if (cm.dmgTaken)   tile(cm.dmgTaken, 'Subis');
-    if (cm.kosDealt)   tile(cm.kosDealt, 'KO');
-    if (cm.spellsCast) tile(cm.spellsCast, 'Sorts', '#c9b6ff');
-    if (cm.heal)       tile(cm.heal, 'Soin', '#4fd3a6');
-    if (r.sRolls)      tile(r.sRolls, 'Jets', '#7fb0ff');
-    const tilesHtml = tiles.length ? `<div class="stats-tiles">${tiles.join('')}</div>` : '';
+    const quickMetric = (icon, value, label, color) => `<span class="stats-char-kpi">
+      <span class="stats-char-kpi-icon">${icon}</span>
+      <span><b${color ? ` style="color:${color}"` : ''}>${value}</b><small>${label}</small></span>
+    </span>`;
+    const fact = (label, value, color = '') => `<span class="stats-char-fact">
+      <small>${label}</small><b${color ? ` style="color:${color}"` : ''}>${value}</b>
+    </span>`;
     const skillHtml = r.perSkill.length ? `
       <div class="stats-skills">
         ${r.perSkill.slice(0, 6).map(s => `
@@ -883,33 +866,70 @@ function _statsRender(scope) {
             <span class="stats-skill-n">${s.rolls}${s.crits ? ` · 💥${s.crits}` : ''}${s.fumbles ? ` · 💔${s.fumbles}` : ''}</span>
           </div>`).join('')}
       </div>` : '';
-    const favs = [];
-    if (r.spells[0]) favs.push(`<span class="stats-fav">⭐ ${_esc(r.spells[0].n)} <small>×${r.spells[0].c}</small></span>`);
-    if (r.emotes[0]) favs.push(`<span class="stats-fav">${_statsEmoteHtml(r.emotes[0].n, 'stats-emote-sm')} <small>×${r.emotes[0].c}</small></span>`);
-    const favsHtml = favs.length ? `<div class="stats-favs">${favs.join('')}</div>` : '';
+    const favsHtml = _statsFavoritesHtml(r.spells, r.emotes);
     const dateBtn = r.hasDates
-      ? `<button class="stats-char-btn" data-action="_statsCharDates" data-id="${r.id}" title="Voir les stats séance par séance">📅</button>`
+      ? `<button class="stats-char-btn" data-action="_statsCharDates" data-id="${r.id}" title="Voir les statistiques séance par séance">📅 Séances</button>`
       : '';
     const delBtn = STATE.isAdmin
-      ? `<button class="stats-char-btn stats-char-del" data-action="_statsDelChar" data-id="${r.id}" title="Supprimer les stats de ce personnage (jets de test…)">✕</button>`
+      ? `<button class="stats-char-btn stats-char-del" data-action="_statsDelChar" data-id="${r.id}" title="Supprimer les stats de ce personnage (jets de test…)">🗑 Supprimer</button>`
       : '';
     const char = STATE.characters?.find(x => x.id === r.id) || { nom: r.name };
-    const avatar = characterAvatarHtml(char, { size: 34, className: 'stats-char-av', title: r.name });
+    const avatar = characterAvatarHtml(char, { size: 38, className: 'stats-char-av', title: r.name });
     const ring = rhr != null
-      ? `<span class="stats-char-ring" title="Taux de réussite">${_statsGauge(rhr, '#22c38e', 44, 5)}</span>` : '';
-    return `<div class="stats-char">
-      <div class="stats-char-hd">
-        <span class="stats-char-id">${avatar}<span class="stats-char-name">${_esc(r.name)}</span></span>
+      ? `<span class="stats-char-ring" title="${cm.hits} attaque${cm.hits > 1 ? 's' : ''} réussie${cm.hits > 1 ? 's' : ''} sur ${cm.attacks}">${_statsGauge(rhr, '#22c38e', 42, 5)}</span>`
+      : `<span class="stats-char-no-rate">—<small>réussite</small></span>`;
+    const charKey = `character:${r.id}`;
+    const isOpen = _statsDrawerState.get(charKey) || false;
+    return `<details class="stats-char" data-drawer-key="${_esc(charKey)}"${isOpen ? ' open' : ''}>
+      <summary class="stats-char-summary">
+        <span class="stats-char-id">${avatar}<span><b class="stats-char-name">${_esc(r.name)}</b><small>${cm.attacks} attaque${cm.attacks > 1 ? 's' : ''} · ${r.sRolls} jet${r.sRolls > 1 ? 's' : ''}</small></span></span>
+        <span class="stats-char-kpis">
+          ${quickMetric('🗡️', cm.dmgDealt, 'Dégâts', '#c9b6ff')}
+          ${quickMetric('💚', cm.heal, 'Soin', '#4fd3a6')}
+          ${quickMetric('🔮', cm.spellsCast, 'Sorts', '#bca0ff')}
+          ${quickMetric('🎲', r.sRolls, 'Jets', '#7fb0ff')}
+          ${quickMetric('🛡️', cm.dmgTaken, 'Subis', '#a7b4c4')}
+        </span>
         ${ring}
-        <span class="stats-char-actions">${dateBtn}${delBtn}</span>
+        <span class="stats-char-chevron" aria-hidden="true">⌄</span>
+      </summary>
+      <div class="stats-char-body">
+        <div class="stats-char-detail-grid">
+          <section class="stats-char-detail">
+            <h4>⚔️ Combat</h4>
+            <div class="stats-char-facts">
+              ${fact('Attaques réussies', `${cm.hits}/${cm.attacks}`, '#22c38e')}
+              ${fact('Critiques', cm.crits)}
+              ${fact('Échecs critiques', cm.fumbles)}
+              ${fact('Plus gros coup', cm.biggestHit)}
+              ${fact('KO infligés', cm.kosDealt)}
+              ${fact('Fois mis KO', cm.kosTaken)}
+              ${fact('Attaques subies', cm.attacksTaken)}
+              ${fact('Attaques évitées', cm.attacksAvoided)}
+            </div>
+          </section>
+          <section class="stats-char-detail">
+            <h4>🔮 Magie & soutien</h4>
+            <div class="stats-char-facts">
+              ${fact('PM dépensés', cm.pmSpent)}
+              ${fact('Sorts tactiques', cm.tacticalSpells)}
+              ${fact('Soutiens appliqués', cm.supportSpells)}
+              ${fact('Afflictions', cm.afflictionSpells)}
+              ${fact('Soin produit', cm.heal, '#4fd3a6')}
+              ${fact('Sorts lancés', cm.spellsCast, '#bca0ff')}
+            </div>
+          </section>
+          ${skillHtml ? `<section class="stats-char-detail stats-char-detail--skills"><h4>🎲 Compétences les plus jouées</h4>${skillHtml}</section>` : ''}
+        </div>
+        ${favsHtml}
+        ${(dateBtn || delBtn) ? `<div class="stats-char-actions">${dateBtn}${delBtn}</div>` : ''}
       </div>
-      ${tilesHtml}${skillHtml}${favsHtml}
-    </div>`;
+    </details>`;
   };
 
   const combatTitle = dateKey ? `⚔️ Combat — séance du ${_statsFmtDate(dateKey)}`
     : isMission ? `⚔️ Combat — ${_esc(missionName)}` : '⚔️ Combat (table)';
-  const awardsHtml = [
+  const awardCards = [
     award('dmg', '🏆', 'Plus gros frappeur', topDmg, `${topDmg?.combat.dmgDealt} dmg`, '#f4c430'),
     award('bigHit', '💢', 'Plus gros coup', topBig, `${topBig?.combat.biggestHit}`, '#ff8b6b'),
     award('hitRate', '🎯', 'Meilleur taux', topHit, topHit ? `${topHit.hr}%` : '', '#22c38e'),
@@ -920,7 +940,8 @@ function _statsRender(scope) {
     award('emotes', '💬', 'Le Bavard', topEmoter, `${topEmoter?.emoteTotal} émotes`, '#4f8cff'),
     award('rolls', '🎲', 'Le Joueur', topRoller, `${topRoller?.sRolls} jets`, '#7fb0ff'),
     award('fumble', '🤡', 'Le plus malchanceux', topFumble, `${topFumble?.tf} échec${topFumble?.tf > 1 ? 's' : ''}`, '#ff6b6b'),
-  ].join('');
+  ].filter(Boolean);
+  const awardsHtml = awardCards.join('');
 
   // Récap texte (export) — construit à partir du scope courant.
   const scopeLabel = dateKey ? `séance du ${_statsFmtDate(dateKey)}`
@@ -946,10 +967,24 @@ function _statsRender(scope) {
   _statsLastSummary = sumLines.join('\n');
 
   const heroMetric = (v, l, c) => `<div class="stats-hm"><span class="stats-hm-v" style="color:${c}">${v}</span><span class="stats-hm-l">${l}</span></div>`;
-  const insightsSec = insightItems.length ? `
-    <section class="stats-sec stats-insights-sec">
-      <div class="stats-sec-hd">🧭 Lecture rapide</div>
-      <div class="stats-insights">${insightItems.slice(0, 5).map(x => `<div class="stats-insight">${x}</div>`).join('')}</div>
+  const drawer = (title, body, { open = false, count = '', key = title } = {}) => {
+    if (!body) return '';
+    const drawerKey = String(key || title);
+    const shouldOpen = _statsDrawerState.has(drawerKey) ? _statsDrawerState.get(drawerKey) : open;
+    return `
+    <details class="stats-drawer" data-drawer-key="${_esc(drawerKey)}"${shouldOpen ? ' open' : ''}>
+      <summary><span>${title}</span>${count ? `<small>${count}</small>` : ''}</summary>
+      <div class="stats-drawer-body">${body}</div>
+    </details>`;
+  };
+  const contextItems = [];
+  if (groupCompare.length > 1) contextItems.push('Comparaison des groupes normalisée par séance.');
+  if (!selectedMissionId && unlinkedDates.length) contextItems.push(`${unlinkedDates.length} séance${unlinkedDates.length > 1 ? 's' : ''} non reliée${unlinkedDates.length > 1 ? 's' : ''} à une mission.`);
+  if (selectedMissionId && selectedMissionDates.length) contextItems.push(`${selectedMissionDates.length} séance${selectedMissionDates.length > 1 ? 's' : ''} liée${selectedMissionDates.length > 1 ? 's' : ''} à cette mission.`);
+  if ((GC.attacksTaken || 0) === 0 && (GC.attacksAvoided || 0) === 0) contextItems.push('Attaques subies/évitées : nouvelles stats, non rétroactives.');
+  const contextSec = contextItems.length ? `
+    <section class="stats-context">
+      ${contextItems.slice(0, 4).map(x => `<span>${_esc(x)}</span>`).join('')}
     </section>` : '';
   const mvpSec = mvps.length ? (() => {
     const mvpParts = (leader) => {
@@ -983,18 +1018,35 @@ function _statsRender(scope) {
     };
     const calcHtml = mvps.map(leader => {
       const details = leader.impactDetails || { entries: [], gained: 0, lost: 0, score: leader.impact || 0 };
-      const rowsHtml = details.entries.map(e => `<div class="stats-mvp-calc-row${e.points < 0 ? ' is-loss' : ''}">
-        <span><b>${e.icon}</b>${_esc(e.label)} <small>×${e.count}</small></span>
-        <strong>${fmtPts(e.points)}</strong>
-      </div>`).join('');
+      const fmtNum = (v) => Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+      const calcRow = (e) => {
+        const unit = Math.abs(e.points / Math.max(1, e.count));
+        const formula = e.count === 1 ? fmtPts(e.points) : `${e.points < 0 ? '-' : '+'}${e.count} × ${fmtNum(unit)}`;
+        return `<div class="stats-mvp-calc-row${e.points < 0 ? ' is-loss' : ''}">
+          <span class="stats-mvp-calc-main"><b>${e.icon}</b><span>${_esc(e.label)}</span></span>
+          <span class="stats-mvp-calc-formula">${formula}</span>
+          <strong>${fmtPts(e.points)}</strong>
+        </div>`;
+      };
+      const calcGroup = (title, entries, cls) => `<div class="stats-mvp-calc-group ${cls}">
+        <div class="stats-mvp-calc-group-title">${title}</div>
+        <div class="stats-mvp-calc-rows">${entries.length ? entries.map(calcRow).join('') : '<div class="stats-mvp-calc-empty">Aucun</div>'}</div>
+      </div>`;
+      const gainedEntries = details.entries.filter(e => e.points > 0);
+      const lostEntries = details.entries.filter(e => e.points < 0);
       return `<div class="stats-mvp-calc">
-        ${mvps.length > 1 ? `<div class="stats-mvp-calc-name">${_esc(leader.name)}</div>` : ''}
-        <div class="stats-mvp-calc-total">
-          <span>Gagnés <b>${fmtPts(details.gained)}</b></span>
-          <span>Perdus <b>${details.lost ? fmtPts(-details.lost) : '0'}</b></span>
-          <span>Net <b>${details.score}</b></span>
+        <div class="stats-mvp-calc-head">
+          <div class="stats-mvp-calc-name">${mvps.length > 1 ? _esc(leader.name) : 'Score détaillé'}</div>
+          <div class="stats-mvp-calc-net">${details.score}<span>net</span></div>
         </div>
-        <div class="stats-mvp-calc-rows">${rowsHtml}</div>
+        <div class="stats-mvp-calc-total">
+          <span>Gains <b>${fmtPts(details.gained)}</b></span>
+          <span>Pertes <b>${details.lost ? fmtPts(-details.lost) : '0'}</b></span>
+        </div>
+        <div class="stats-mvp-calc-columns">
+          ${calcGroup('Ce qui rapporte', gainedEntries, 'is-gain')}
+          ${calcGroup('Ce qui pénalise', lostEntries, 'is-loss')}
+        </div>
       </div>`;
     }).join('');
     return `<section class="stats-sec stats-mvp-sec">
@@ -1002,7 +1054,7 @@ function _statsRender(scope) {
         <div class="stats-mvp-id stats-mvp-id--multi">${leadersHtml}</div>
         <div class="stats-mvp-score">${topImpact}<span>score</span></div>
         <div class="stats-mvp-breakdown">${parts.slice(0, 5).map(p => `<span>${p}</span>`).join('')}</div>
-        <div class="stats-mvp-calcs">${calcHtml}</div>
+        ${drawer('Détail du calcul MVP', `<div class="stats-mvp-calcs">${calcHtml}</div>`, { key: 'mvp-detail', count: `${mvps.length} fiche${mvps.length > 1 ? 's' : ''}` })}
       </div>
     </section>`;
   })() : '';
@@ -1061,7 +1113,7 @@ function _statsRender(scope) {
               ${groupMetricLine('🎲', 'Jets', g.skills.rolls, groupMax.rolls, '#7fb0ff', '', g.count)}
               ${groupMetricLine('🎯', 'Touche', g.hitRate, groupMax.hit, '#22c38e', '%', 1, false)}
             </div>
-            ${sessions.length ? `<div class="stats-group-sessions"><div class="stats-group-subtitle">Séances jouées</div>${sessions.map(groupSessionItem).join('')}</div>` : ''}
+            ${sessions.length ? drawer('Séances jouées', `<div class="stats-group-sessions">${sessions.map(groupSessionItem).join('')}</div>`, { key: `group-sessions:${g.key}`, count: `${sessions.length}` }) : ''}
           </div>`;
         }).join('')}
       </div>
@@ -1094,132 +1146,203 @@ function _statsRender(scope) {
     <button class="stats-tt${_statsCmpType === 'bars' ? ' active' : ''}" data-action="_statsCmpType" data-type="bars" title="Barres">📊</button>
     <button class="stats-tt${_statsCmpType === 'pie' ? ' active' : ''}" data-action="_statsCmpType" data-type="pie" title="Camembert">🥧</button>
   </div>`;
-  const evoDatesAsc = (isMission ? [...filteredMissionDates].sort() : [...allDates].reverse());  // ancienne → récente
-  const evoSeries = _statsEvoSeries(evoDatesAsc, _statsEvoMetric, _statsPlayerSel);
-  const evoHasData = evoDatesAsc.length >= 2 && evoSeries.some(s => s.v > 0);
-  const shouldCompareGroupsInChart = isMission && groupCompare.length > 1 && (!_statsGroupSel || !_statsGroupSel.size);
-  const secondaryChartHtml = shouldCompareGroupsInChart
+  const contextCompare = isMission ? groupCompare : missionCompare;
+  const contextCompareLabel = isMission ? 'Comparatif — groupes' : 'Comparatif — missions';
+  const secondaryChartHtml = contextCompare.length > 1
     ? `<div class="stats-chart-card">
-        <div class="stats-chart-hd"><span>Comparatif — groupes</span>${_statsMetricSelect(_statsEvoMetric, '_statsEvoMetric')}</div>
-        ${_statsGroupMetricChart(groupCompare, _statsEvoMetric)}
+        <div class="stats-chart-hd"><span>${contextCompareLabel}<small>Moyenne par séance suivie</small></span>${_statsMetricSelect(_statsEvoMetric, '_statsEvoMetric')}</div>
+        ${_statsGroupMetricChart(contextCompare, _statsEvoMetric)}
       </div>`
-    : (evoDatesAsc.length >= 2 ? `<div class="stats-chart-card">
-        <div class="stats-chart-hd"><span>${isMission ? 'Évolution du groupe' : 'Évolution par séance'}</span>${_statsMetricSelect(_statsEvoMetric, '_statsEvoMetric')}</div>
-        ${evoHasData ? _statsColChart(evoSeries, _statsEvoMetric) : '<div class="stats-chart-empty">Pas assez de données comparables.</div>'}
-      </div>` : '');
-  const chartsHtml = `
-    <section class="stats-sec">
-      <div class="stats-sec-hd">📈 Graphiques</div>
-      <div class="stats-charts">
-        <div class="stats-chart-card">
-          <div class="stats-chart-hd"><span>Comparatif — personnages</span><div class="stats-chart-ctrls">${typeToggle}${_statsMetricSelect(_statsCmpMetric, '_statsCmpMetric')}</div></div>
-          ${cmpChart}
-        </div>
-        ${secondaryChartHtml}
-      </div>
-    </section>`;
+    : '';
+  const overviewChartsHtml = `<div class="stats-charts">
+    <div class="stats-chart-card">
+      <div class="stats-chart-hd"><span>Comparatif — personnages</span><div class="stats-chart-ctrls">${typeToggle}${_statsMetricSelect(_statsCmpMetric, '_statsCmpMetric')}</div></div>
+      ${cmpChart}
+    </div>
+    ${secondaryChartHtml}
+  </div>`;
+  const playerCompareOptions = rows.map(r => ({
+    id: r.id,
+    label: r.name,
+    avatar: _statsAvatar(r.id, r.name, 24),
+    combat: r.combat,
+    rolls: r.sRolls,
+    hitRate: r.combat.attacks ? Math.round(r.combat.hits / r.combat.attacks * 100) : 0,
+    divisor: 1,
+  }));
+  const groupCompareOptionsForDuel = groupCompare.map(g => ({
+    id: g.key,
+    label: g.label,
+    avatar: g.quest ? _statsGroupMembersMiniHtml(g.quest) : g.rows.slice(0, 4).map(r => _statsAvatar(r.id, r.name, 18)).join(''),
+    combat: g.combat,
+    rolls: g.skills.rolls,
+    hitRate: g.hitRate,
+    divisor: Math.max(1, g.count),
+  }));
+  if (_statsCompareKind === 'groups' && groupCompareOptionsForDuel.length < 2) _statsCompareKind = 'players';
+  if (_statsCompareKind === 'players' && playerCompareOptions.length < 2 && groupCompareOptionsForDuel.length >= 2) _statsCompareKind = 'groups';
+  const duelOptions = _statsCompareKind === 'groups' ? groupCompareOptionsForDuel : playerCompareOptions;
+  const validDuelIds = new Set(duelOptions.map(x => x.id));
+  const duelSelection = [...new Set((_statsCompareSelection[_statsCompareKind] || []).filter(id => validDuelIds.has(id)))];
+  duelOptions.forEach(x => { if (duelSelection.length < 2 && !duelSelection.includes(x.id)) duelSelection.push(x.id); });
+  _statsCompareSelection[_statsCompareKind] = duelSelection.slice(0, 2);
+  const duelEntities = _statsCompareSelection[_statsCompareKind].map(id => duelOptions.find(x => x.id === id)).filter(Boolean);
+  const duelSelect = (slot) => {
+    const selected = duelEntities[slot]?.id || '';
+    const other = duelEntities[slot === 0 ? 1 : 0]?.id || '';
+    return `<label class="stats-duel-picker">
+      <span>${slot === 0 ? 'Référence' : 'Comparé à'}</span>
+      <select data-change="_statsComparePick" data-slot="${slot}">
+        ${duelOptions.map(x => `<option value="${_esc(x.id)}"${x.id === selected ? ' selected' : ''}${x.id === other ? ' disabled' : ''}>${_esc(x.label)}</option>`).join('')}
+      </select>
+    </label>`;
+  };
+  const duelMetrics = [
+    ['⚔️', 'Attaques', 'attacks', '#ff9d7a', true],
+    ['🎯', 'Taux de réussite', 'hitRate', '#22c38e', false],
+    ['🗡️', 'Dégâts infligés', 'dmgDealt', '#c9b6ff', true],
+    ['💚', 'Soin produit', 'heal', '#4fd3a6', true],
+    ['🔮', 'Sorts lancés', 'spellsCast', '#bca0ff', true],
+    ['✨', 'Sorts tactiques', 'tacticalSpells', '#d8c7ff', true],
+    ['🛡️', 'Soutiens appliqués', 'supportSpells', '#4fd3a6', true],
+    ['💀', 'Afflictions', 'afflictionSpells', '#c084fc', true],
+    ['🎲', 'Jets de compétence', 'rolls', '#7fb0ff', true],
+    ['🧱', 'Dégâts subis', 'dmgTaken', '#a7b4c4', true],
+    ['☠️', 'KO infligés', 'kosDealt', '#ef4444', true],
+  ];
+  const duelValue = (entity, key, normalize) => {
+    const raw = key === 'rolls' ? entity.rolls : key === 'hitRate' ? entity.hitRate : (entity.combat[key] || 0);
+    return _statsCompareKind === 'groups' && normalize ? Math.round(raw / entity.divisor) : raw;
+  };
+  const duelRows = duelEntities.length === 2 ? duelMetrics.map(([icon, label, key, color, normalize]) => {
+    const a = duelValue(duelEntities[0], key, normalize);
+    const b = duelValue(duelEntities[1], key, normalize);
+    if (!a && !b && !['attacks', 'hitRate', 'dmgDealt', 'heal', 'spellsCast', 'rolls'].includes(key)) return '';
+    const max = Math.max(1, a, b);
+    const suffix = key === 'hitRate' ? '%' : '';
+    return `<div class="stats-duel-row">
+      <span class="stats-duel-value stats-duel-value--left${a > b ? ' is-leading' : ''}" style="--duel-color:${color};--duel-pct:${Math.round(a / max * 100)}%"><b>${a}${suffix}</b></span>
+      <span class="stats-duel-metric"><i>${icon}</i><span>${label}</span></span>
+      <span class="stats-duel-value stats-duel-value--right${b > a ? ' is-leading' : ''}" style="--duel-color:${color};--duel-pct:${Math.round(b / max * 100)}%"><b>${b}${suffix}</b></span>
+    </div>`;
+  }).join('') : '';
+  const groupsAvailable = groupCompareOptionsForDuel.length >= 2;
+  const compareHtml = duelEntities.length === 2 ? `<div class="stats-duel">
+    <div class="stats-duel-kind">
+      <button class="${_statsCompareKind === 'players' ? 'active' : ''}" data-action="_statsCompareKind" data-kind="players">Personnages</button>
+      ${groupsAvailable ? `<button class="${_statsCompareKind === 'groups' ? 'active' : ''}" data-action="_statsCompareKind" data-kind="groups">Groupes</button>` : ''}
+    </div>
+    <div class="stats-duel-pickers">${duelSelect(0)}<span class="stats-duel-vs">VS</span>${duelSelect(1)}</div>
+    <div class="stats-duel-head">
+      <span>${duelEntities[0].avatar}<b>${_esc(duelEntities[0].label)}</b></span>
+      <small>${_statsCompareKind === 'groups' ? 'Moyenne par séance suivie' : 'Totaux dans la vue actuelle'}</small>
+      <span>${duelEntities[1].avatar}<b>${_esc(duelEntities[1].label)}</b></span>
+    </div>
+    <div class="stats-duel-rows">${duelRows}</div>
+  </div>` : `<div class="stats-chart-empty">Il faut au moins deux ${_statsCompareKind === 'groups' ? 'groupes' : 'personnages'} dans la vue actuelle pour les comparer.</div>`;
+  const analysisToggle = `<div class="stats-analysis-toggle">
+    <button class="${_statsAnalysisMode === 'overview' ? 'active' : ''}" data-action="_statsAnalysisMode" data-mode="overview">Vue globale</button>
+    <button class="${_statsAnalysisMode === 'compare' ? 'active' : ''}" data-action="_statsAnalysisMode" data-mode="compare">Comparer</button>
+  </div>`;
+  const chartsHtml = `<section class="stats-sec stats-analysis">
+    <div class="stats-analysis-head">
+      <span>${_statsAnalysisMode === 'compare' ? 'Face-à-face sur la vue actuelle' : 'Répartition des performances'}</span>
+      ${analysisToggle}
+    </div>
+    ${_statsAnalysisMode === 'compare' ? compareHtml : overviewChartsHtml}
+  </section>`;
 
   // ── Sections (recomposées en colonnes plus bas) ──
   const emoteTotal = rows.reduce((s, r) => s + r.emoteTotal, 0);
-  const combatSec = `
-    <section class="stats-sec">
-      <div class="stats-sec-hd">${combatTitle}</div>
-      <div class="stats-kpis">
-        ${statCard('⚔️', GC.attacks, 'Attaques', '#ff9d7a')}
-        ${statCard('🎯', `${hitRate}%`, 'Taux de réussite', '#22c38e')}
-        ${statCard('🗡️', GC.dmgDealt, 'Dégâts infligés', '#c9b6ff')}
-        ${statCard('💥', GC.crits, 'Réussites critiques', '#f4c430')}
-        ${statCard('💔', GC.fumbles, 'Échecs critiques', '#ff6b6b')}
-        ${statCard('🛡️', GC.dmgTaken, 'Dégâts subis', '#9aa0aa')}
-        ${statCard('🧱', GC.attacksTaken, 'Attaques subies', '#a7b4c4')}
-        ${statCard('🛡️', GC.attacksAvoided, 'Attaques évitées', '#7fb0ff')}
-        ${statCard('☠️', GC.kosDealt, 'KO infligés', '#ef4444')}
-        ${statCard('💀', GC.kosTaken, 'Fois mis KO', '#b06a6a')}
-      </div>
-    </section>`;
-  const magicSec = `
-    <section class="stats-sec">
-      <div class="stats-sec-hd">🔮 Magie & soutien</div>
-      <div class="stats-kpis">
-        ${statCard('🔮', GC.spellsCast, 'Sorts lancés', '#bca0ff')}
-        ${statCard('✨', GC.tacticalSpells, 'Sorts tactiques', '#d8c7ff')}
-        ${statCard('🛡️', GC.supportSpells, 'Soutien appliqué', '#4fd3a6')}
-        ${statCard('💀', GC.afflictionSpells, 'Afflictions appliquées', '#c084fc')}
-        ${statCard('🔋', GC.pmSpent, 'PM dépensés', '#4f8cff')}
-        ${statCard('💚', GC.heal, 'Soin prodigué', '#4fd3a6')}
-        ${statCard('🧙', topMage ? _esc(topMage.name) : '—', 'Lanceur le + actif', '#bca0ff')}
-      </div>
-    </section>`;
-  const competencesSec = `
-    <section class="stats-sec">
-      <div class="stats-sec-hd">🎲 Compétences & RP</div>
-      <div class="stats-kpis">
-        ${statCard('🎲', GS.rolls, 'Jets de compétence', '#4f8cff')}
-        ${statCard('💥', GS.crits, 'Réussites critiques', '#22c38e')}
-        ${statCard('💔', GS.fumbles, 'Échecs critiques', '#ff6b6b')}
-        ${statCard('💬', emoteTotal, 'Émotes utilisées', '#4f8cff')}
-        ${statCard('🏅', topSkill ? _esc(topSkill[0]) : '—', 'Compétence la + jouée', '#f4c430')}
-      </div>
-    </section>`;
+  const detailRow = (ic, lbl, val, hint = '') => `<div class="stats-detail-row">
+    <span>${ic} ${lbl}${hint ? `<small>${hint}</small>` : ''}</span><b>${val}</b>
+  </div>`;
+  const detailPanel = (title, rowsHtml) => `<section class="stats-detail-panel">
+    <div class="stats-detail-title">${title}</div>
+    <div class="stats-detail-rows">${rowsHtml}</div>
+  </section>`;
+  const combatSec = detailPanel(combatTitle, [
+    detailRow('⚔️', 'Attaques', GC.attacks),
+    detailRow('🎯', 'Taux de réussite', `${hitRate}%`),
+    detailRow('🗡️', 'Dégâts infligés', GC.dmgDealt),
+    detailRow('💥', 'Réussites critiques', GC.crits),
+    detailRow('💔', 'Échecs critiques', GC.fumbles),
+    detailRow('🛡️', 'Dégâts subis', GC.dmgTaken),
+    detailRow('🧱', 'Attaques subies', GC.attacksTaken, 'nouvelles stats'),
+    detailRow('🛡️', 'Attaques évitées', GC.attacksAvoided, 'nouvelles stats'),
+    detailRow('☠️', 'KO infligés', GC.kosDealt),
+    detailRow('💀', 'Fois mis KO', GC.kosTaken),
+  ].join(''));
+  const magicSec = detailPanel('🔮 Magie & soutien', [
+    detailRow('🔮', 'Sorts lancés', GC.spellsCast),
+    detailRow('✨', 'Sorts tactiques', GC.tacticalSpells),
+    detailRow('🛡️', 'Soutien appliqué', GC.supportSpells),
+    detailRow('💀', 'Afflictions appliquées', GC.afflictionSpells),
+    detailRow('🔋', 'PM dépensés', GC.pmSpent),
+    detailRow('💚', 'Soin prodigué', GC.heal),
+    detailRow('🧙', 'Lanceur le + actif', topMage ? _esc(topMage.name) : '—'),
+  ].join(''));
+  const competencesSec = detailPanel('🎲 Compétences & RP', [
+    detailRow('🎲', 'Jets de compétence', GS.rolls),
+    detailRow('💥', 'Réussites critiques', GS.crits),
+    detailRow('💔', 'Échecs critiques', GS.fumbles),
+    detailRow('💬', 'Émotes utilisées', emoteTotal),
+    detailRow('🏅', 'Compétence la + jouée', topSkill ? _esc(topSkill.n) : '—'),
+  ].join(''));
   const distinctionsSec = awardTotal ? `
     <section class="stats-sec">
       <div class="stats-sec-hd stats-sec-hd-tools"><span>🏆 Distinctions</span><button class="stats-sec-tool" data-action="_statsAwardsConfig" title="Choisir les distinctions affichées">⚙</button></div>
-      ${awardsHtml ? `<div class="stats-trophies">${awardsHtml}</div>` : '<div class="stats-empty-inline">Toutes les distinctions disponibles sont masquées.</div>'}
+      ${awardsHtml ? `<div class="stats-trophies stats-trophies--all">${awardsHtml}</div>` : '<div class="stats-empty-inline">Toutes les distinctions disponibles sont masquées.</div>'}
     </section>` : '';
+  const podiumMeta = (e) => e.contributor ? `<span class="stats-pod-caster" title="${_esc((e.contributors || []).map(c => `${c.name} ×${c.count}`).join(' · '))}">
+    <span class="stats-pod-caster-avatars">${(e.contributors || []).slice(0, 4).map(c => _statsAvatar(c.id, c.name, 18)).join('')}${(e.contributors || []).length > 4 ? `<span class="stats-pod-more">+${(e.contributors || []).length - 4}</span>` : ''}</span>
+    <span>${_esc(e.contributor.name)}${(e.contributors || []).length > 1 ? ` +${(e.contributors || []).length - 1}` : ''}</span>${e.contributor.count !== e.c ? `<small>×${e.contributor.count}</small>` : ''}
+  </span>` : '';
   const palmaresSec = (spellTally.length || emoteTally.length || skillTally.length) ? `
     <section class="stats-sec">
-      <div class="stats-sec-hd">🏅 Palmarès</div>
       <div class="stats-podiums">
-        ${_statsPodium('🔮 Sorts les + lancés', spellTally, null, {
-          meta: (e) => e.caster ? `<span class="stats-pod-caster" title="${_esc((e.casters || []).map(c => `${c.name} ×${c.count}`).join(' · '))}">
-            <span class="stats-pod-caster-avatars">${(e.casters || []).slice(0, 4).map(c => _statsAvatar(c.id, c.name, 18)).join('')}${(e.casters || []).length > 4 ? `<span class="stats-pod-more">+${(e.casters || []).length - 4}</span>` : ''}</span>
-            <span>${_esc(e.caster.name)}${(e.casters || []).length > 1 ? ` +${(e.casters || []).length - 1}` : ''}</span>${e.caster.count !== e.c ? `<small>×${e.caster.count}</small>` : ''}
-          </span>` : ''
-        })}
-        ${_statsPodium('🎲 Compétences les + jouées', skillTally)}
-        ${_statsPodium('😄 Émotes les + utilisées', emoteTally, (l) => _statsEmoteHtml(l, 'stats-emote-sm'))}
+        ${_statsPodium('Sorts lancés', spellTally, null, { icon: '🔮', accent: '#bca0ff', meta: podiumMeta })}
+        ${_statsPodium('Compétences jouées', skillTally, null, { icon: '🎲', accent: '#7fb0ff', meta: podiumMeta })}
+        ${_statsPodium('Émotes utilisées', emoteTally, (l) => _statsEmoteHtml(l, 'stats-emote-sm'), { icon: '😄', accent: '#4fd3a6', meta: podiumMeta })}
       </div>
     </section>` : '';
+
+  const detailedKpisHtml = `<div class="stats-detail-grid">${combatSec}${magicSec}${competencesSec}</div>`;
+  const charsHtml = `<section class="stats-sec">
+    <div class="stats-chars">${[...rows].sort((a, b) => (b.combat.attacks + b.sRolls) - (a.combat.attacks + a.sRolls)).map(charBlock).join('')}</div>
+  </section>`;
+  const heroSec = `<section class="stats-hero">
+    <div class="stats-hero-gauge">
+      ${_statsGauge(hitRate, '#22c38e', 104, 10, 'réussite')}
+    </div>
+    <div class="stats-hero-body">
+      <div class="stats-hero-title">Résumé — ${scopeLabel}</div>
+      <div class="stats-hero-metrics">
+        ${heroMetric(GC.attacks, 'Attaques', '#ff9d7a')}
+        ${heroMetric(GC.dmgDealt, 'Dégâts infligés', '#c9b6ff')}
+        ${heroMetric(GC.spellsCast, 'Sorts lancés', '#bca0ff')}
+        ${heroMetric(GC.heal, 'Soin prodigué', '#4fd3a6')}
+        ${heroMetric(GS.rolls, 'Jets de compétence', '#7fb0ff')}
+      </div>
+    </div>
+  </section>`;
 
   root.innerHTML = `
     ${controls}
     ${sessionBanner}
-    <section class="stats-hero">
-      <div class="stats-hero-gauge">
-        ${_statsGauge(hitRate, '#22c38e', 104, 10, 'réussite')}
-      </div>
-      <div class="stats-hero-body">
-        <div class="stats-hero-title">Résumé — ${scopeLabel}</div>
-        <div class="stats-hero-metrics">
-          ${heroMetric(GC.attacks, 'Attaques', '#ff9d7a')}
-          ${heroMetric(GC.dmgDealt, 'Dégâts infligés', '#c9b6ff')}
-          ${heroMetric(GC.spellsCast, 'Sorts lancés', '#bca0ff')}
-          ${heroMetric(GC.heal, 'Soin prodigué', '#4fd3a6')}
-          ${heroMetric(GS.rolls, 'Jets de compétence', '#7fb0ff')}
-        </div>
-      </div>
-    </section>
-    ${insightsSec}
-    ${mvpSec}
-    ${missionGroupsSec}
-
-    <div class="stats-columns">
-      <div class="stats-col-group">
-        ${combatSec}
-        ${magicSec}
-        ${competencesSec}
-        ${chartsHtml}
-      </div>
-      <div class="stats-col-group">
-        ${distinctionsSec}
-        ${palmaresSec}
-      </div>
+    <div class="stats-topline${mvpSec ? '' : ' stats-topline--solo'}">
+      ${heroSec}
+      ${mvpSec}
     </div>
-
-    <section class="stats-sec">
-      <div class="stats-sec-hd">👤 Par personnage</div>
-      <div class="stats-chars">${rows.sort((a, b) => (b.combat.attacks + b.sRolls) - (a.combat.attacks + a.sRolls)).map(charBlock).join('')}</div>
-    </section>`;
+    ${contextSec}
+    ${missionGroupsSec}
+    ${distinctionsSec}
+    <div class="stats-drawer-stack">
+      ${drawer('Analyse visuelle', chartsHtml, { key: 'charts', count: _statsAnalysisMode === 'compare' ? 'comparaison' : 'graphiques' })}
+      ${drawer('Chiffres détaillés', detailedKpisHtml, { key: 'details', count: 'combat · magie · RP' })}
+      ${drawer('Palmarès', palmaresSec, { key: 'palmares', count: 'top 5' })}
+      ${drawer('Par personnage', charsHtml, { key: 'characters', count: `${rows.length}` })}
+    </div>`;
 }
 
 
@@ -2909,22 +3032,75 @@ registerActions({
     const c = _statsData?.chars?.[id]; if (!c) return;
     const byDate = c.byDate || {};
     const dates = Object.keys(byDate).sort().reverse();
-    const fmt = (d) => { const [y, m, da] = d.split('-'); return `${da}/${m}/${y}`; };
+    const metric = (icon, value, label, color = '') => `<span class="stats-date-kpi">
+      <span>${icon}</span><span><b${color ? ` style="color:${color}"` : ''}>${value}</b><small>${label}</small></span>
+    </span>`;
+    const fact = (label, value, color = '') => `<span class="stats-char-fact">
+      <small>${label}</small><b${color ? ` style="color:${color}"` : ''}>${value}</b>
+    </span>`;
     const body = dates.length ? dates.map((d) => {
       const e = byDate[d] || {};
-      const grid = _statsCombatGrid(_statsNormCombat(e.combat), { topSpell: _statsTop(e.spells), topEmote: _statsTop(e.emotes) });
+      const cm = _statsNormCombat(e.combat);
+      const hitRate = cm.attacks ? Math.round(cm.hits / cm.attacks * 100) : 0;
       const skills = Object.entries(e.skills || {}).map(([sk, v]) => ({ sk, rolls: _statsNum(v?.rolls), crits: _statsNum(v?.crits), fumbles: _statsNum(v?.fumbles) }))
         .filter(s => s.rolls > 0).sort((a, b) => b.rolls - a.rolls);
-      const skillLine = skills.length
-        ? `<div class="stats-date-skills">🎲 ${skills.map(s => `${_esc(s.sk)} ×${s.rolls}${s.crits ? ` 💥${s.crits}` : ''}${s.fumbles ? ` 💔${s.fumbles}` : ''}`).join(' · ')}</div>`
-        : '';
-      return `<div class="stats-date">
-        <div class="stats-date-hd">📅 ${fmt(d)}</div>
-        ${grid}
-        ${skillLine || (grid ? '' : '<div class="stats-date-skills" style="opacity:.5">Aucune action ce jour.</div>')}
-      </div>`;
+      const skillTotal = skills.reduce((sum, s) => sum + s.rolls, 0);
+      const skillHtml = skills.length ? `<div class="stats-skills">${skills.slice(0, 6).map(s => `
+        <div class="stats-skill-row">
+          <span class="stats-skill-name">${_esc(s.sk)}</span>
+          <span class="stats-skill-bar"><span style="width:${skillTotal ? Math.round(s.rolls / skillTotal * 100) : 0}%"></span></span>
+          <span class="stats-skill-n">${s.rolls}${s.crits ? ` · 💥${s.crits}` : ''}${s.fumbles ? ` · 💔${s.fumbles}` : ''}</span>
+        </div>`).join('')}</div>` : '<div class="stats-date-empty">Aucun jet de compétence.</div>';
+      const favorites = _statsFavoritesHtml(e.spells, e.emotes);
+      const context = [_statsMissionOf(d), _statsGroupOf(d)].filter(Boolean).join(' · ') || 'Séance non reliée';
+      return `<details class="stats-date">
+        <summary class="stats-date-summary">
+          <span class="stats-date-id"><b>📅 ${_statsFmtDate(d)}</b><small>${_esc(context)}</small></span>
+          <span class="stats-date-kpis">
+            ${metric('🗡️', cm.dmgDealt, 'Dégâts', '#c9b6ff')}
+            ${metric('💚', cm.heal, 'Soin', '#4fd3a6')}
+            ${metric('🔮', cm.spellsCast, 'Sorts', '#bca0ff')}
+            ${metric('🎲', skillTotal, 'Jets', '#7fb0ff')}
+          </span>
+          <span class="stats-date-rate"><b>${cm.attacks ? `${hitRate}%` : '—'}</b><small>réussite</small></span>
+          <span class="stats-date-chevron">⌄</span>
+        </summary>
+        <div class="stats-date-body">
+          <div class="stats-date-detail-grid">
+            <section class="stats-char-detail">
+              <h4>⚔️ Combat</h4>
+              <div class="stats-char-facts">
+                ${fact('Attaques', cm.attacks)}
+                ${fact('Réussies', cm.hits, '#22c38e')}
+                ${fact('Critiques', cm.crits)}
+                ${fact('Échecs critiques', cm.fumbles)}
+                ${fact('Plus gros coup', cm.biggestHit)}
+                ${fact('Dégâts subis', cm.dmgTaken)}
+                ${fact('KO infligés', cm.kosDealt)}
+                ${fact('Fois mis KO', cm.kosTaken)}
+              </div>
+            </section>
+            <section class="stats-char-detail">
+              <h4>🔮 Magie & soutien</h4>
+              <div class="stats-char-facts">
+                ${fact('PM dépensés', cm.pmSpent)}
+                ${fact('Sorts tactiques', cm.tacticalSpells)}
+                ${fact('Soutiens', cm.supportSpells)}
+                ${fact('Afflictions', cm.afflictionSpells)}
+                ${fact('Soin produit', cm.heal, '#4fd3a6')}
+                ${fact('Sorts lancés', cm.spellsCast, '#bca0ff')}
+              </div>
+            </section>
+            <section class="stats-char-detail stats-char-detail--skills"><h4>🎲 Compétences</h4>${skillHtml}</section>
+          </div>
+          ${favorites}
+        </div>
+      </details>`;
     }).join('') : '<div class="stats-empty">Aucune séance enregistrée.</div>';
-    openModal(`📅 ${_esc(c.name || 'Personnage')} — par séance`, `<div class="stats-dates">${body}</div>`);
+    openModal(`📅 ${_esc(c.name || 'Personnage')}`, `<div class="stats-dates">${body}</div>`, {
+      subtitle: `${dates.length} séance${dates.length > 1 ? 's' : ''} enregistrée${dates.length > 1 ? 's' : ''}`,
+      accent: '#7fb0ff',
+    });
   },
   // Changement de scope (campagne entière ↔ une séance) — re-rend sans relecture.
   _statsScope: (el) => { _statsRender(el.value || null); },
@@ -2966,6 +3142,22 @@ registerActions({
   _statsEvoMetric: (el) => { _statsEvoMetric = el.value; _statsRender(_statsScope); },
   // Type du graphique comparatif : barres ↔ camembert.
   _statsCmpType: (btn) => { _statsCmpType = btn.dataset.type === 'pie' ? 'pie' : 'bars'; _statsRender(_statsScope); },
+  _statsAnalysisMode: (btn) => {
+    _statsAnalysisMode = btn.dataset.mode === 'compare' ? 'compare' : 'overview';
+    _statsRender(_statsScope);
+  },
+  _statsCompareKind: (btn) => {
+    _statsCompareKind = btn.dataset.kind === 'groups' ? 'groups' : 'players';
+    _statsRender(_statsScope);
+  },
+  _statsComparePick: (el) => {
+    const slot = Number(el.dataset.slot);
+    if (slot !== 0 && slot !== 1) return;
+    const pair = [...(_statsCompareSelection[_statsCompareKind] || [])];
+    pair[slot] = el.value;
+    _statsCompareSelection[_statsCompareKind] = pair;
+    _statsRender(_statsScope);
+  },
   // MJ : relie la séance à une mission de la Trame (sélecteur recherchable).
   _statsEditMission: async (btn) => {
     if (!STATE.isAdmin) return;
