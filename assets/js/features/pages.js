@@ -54,6 +54,8 @@ let _statsLastSummary = '';            // récap texte du scope courant (export 
 let _statsPlayerSel = null;            // Set d'ids ciblés (null = tous les joueurs)
 let _statsGroupSel = null;             // Set de groupes ciblés pour une mission (null = tous)
 let _statsGroupMissionId = '';         // mission associée au filtre groupes
+let _statsHiddenAwards = new Set();    // distinctions masquées localement par l'utilisateur
+let _statsVisualSummary = null;        // données du dernier rendu pour export image
 let _statsCmpMetric = 'dmgDealt';      // métrique du graphique comparatif (par perso)
 let _statsCmpType   = 'bars';          // type du comparatif : 'bars' | 'pie'
 let _statsEvoMetric = 'dmgDealt';      // métrique du graphique d'évolution (par séance)
@@ -67,10 +69,10 @@ const _statsMissionOf = (dateKey) => (dateKey && _statsData?.sessions?.[dateKey]
 const _statsGroupOf   = (dateKey) => {
   const session = dateKey ? _statsData?.sessions?.[dateKey] : null;
   if (!session) return '';
-  const group = session.group || '';
-  if (group && group !== 'Groupe') return group;
   const current = session.groupId ? (_statsQuests || []).find(q => q.id === session.groupId) : null;
-  return current ? _statsGroupName(current) : group;
+  if (current) return _statsGroupName(current);
+  const group = session.group || '';
+  return (group && group !== 'Groupe') ? group : '';
 };
 // Dates liées à une mission (via sessions.{date}.missionId).
 const _statsMissionDates = (mid) => Object.entries(_statsData?.sessions || {}).filter(([, s]) => s?.missionId === mid).map(([dk]) => dk);
@@ -189,12 +191,34 @@ const _STATS_METRICS = {
   rolls:      { lbl: 'Jets de compétence',  color: '#7fb0ff' },
 };
 const _statsMetricVal = (r, key) => key === 'rolls' ? r.sRolls : (r.combat[key] || 0);
+const _STATS_AWARD_PREF_KEY = 'lgj.stats.hiddenAwards';
+const _STATS_AWARD_CATALOG = [
+  ['dmg', 'Plus gros frappeur'],
+  ['bigHit', 'Plus gros coup'],
+  ['hitRate', 'Meilleur taux'],
+  ['ko', 'Bourreau'],
+  ['heal', 'Plus grand soigneur'],
+  ['mage', 'Le Mage'],
+  ['tank', "L'Increvable"],
+  ['emotes', 'Le Bavard'],
+  ['rolls', 'Le Joueur'],
+  ['fumble', 'Le plus malchanceux'],
+];
 
 const _statsNum = (v) => Number(v) || 0;
 function _statsEmoteHtml(name, cls = 'stats-emote') {
   if (!name) return '—';
   const url = _statsEmoteUrl.get(name);
   return url ? `<img class="${cls}" src="${url}" alt="${_esc(name)}" title="${_esc(name)}">` : _esc(name);
+}
+function _statsLoadAwardPrefs() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(_STATS_AWARD_PREF_KEY) || '[]');
+    _statsHiddenAwards = new Set(Array.isArray(raw) ? raw : []);
+  } catch { _statsHiddenAwards = new Set(); }
+}
+function _statsSaveAwardPrefs() {
+  try { localStorage.setItem(_STATS_AWARD_PREF_KEY, JSON.stringify([..._statsHiddenAwards])); } catch {}
 }
 
 async function _adminRelinkPlayer(oldUid, newUid, name = '') {
@@ -380,6 +404,20 @@ function _statsBarChart(rows, key) {
       <span class="stats-bar-val" style="color:${m.color}">${d.v}</span>
     </div>`).join('')}</div>`;
 }
+function _statsGroupMetricChart(groups, key) {
+  const m = _STATS_METRICS[key] || _STATS_METRICS.dmgDealt;
+  const val = (g) => key === 'rolls' ? g.skills.rolls : (g.combat[key] || 0);
+  const data = groups.map(g => ({ name: g.label, v: val(g), count: g.count, quest: g.quest }))
+    .filter(d => d.v > 0).sort((a, b) => b.v - a.v);
+  if (!data.length) return `<div class="stats-chart-empty">Aucune donnée de groupe pour « ${m.lbl} ».</div>`;
+  const max = Math.max(...data.map(d => d.v));
+  return `<div class="stats-bars stats-bars-groups">${data.map(d => `
+    <div class="stats-bar-row stats-bar-row-group">
+      <span class="stats-bar-name stats-bar-name-group" title="${_esc(d.name)}"><span>${_esc(d.name)}</span><small>${d.count} séance${d.count > 1 ? 's' : ''}</small></span>
+      <span class="stats-bar-track"><span style="width:${Math.max(3, Math.round(d.v / max * 100))}%;background:${m.color}"></span></span>
+      <span class="stats-bar-val" style="color:${m.color}">${d.v}</span>
+    </div>`).join('')}</div>`;
+}
 
 // Camembert (donut SVG + légende) : répartition d'une métrique entre persos.
 // Anneau à segments arrondis espacés (padAngle), total au centre, ombre douce.
@@ -483,6 +521,22 @@ function _statsRowsFor(dateKeys) {
     return { id, name: c.name || '?', sRolls, sCrits, sFumbles, perSkill, combat, spells, emotes, emoteTotal, hasDates };
   }).filter(r => r.sRolls > 0 || r.combat.attacks > 0 || r.combat.dmgTaken > 0 || r.combat.spellsCast > 0 || r.emotes.length);
 }
+function _statsAggregateRows(rows = []) {
+  const combat = rows.reduce((g, r) => {
+    for (const k in g) g[k] += (r.combat[k] || 0);
+    return g;
+  }, { attacks: 0, hits: 0, crits: 0, fumbles: 0, dmgDealt: 0, dmgTaken: 0, kosDealt: 0, kosTaken: 0, spellsCast: 0, pmSpent: 0, heal: 0, biggestHit: 0, biggestTaken: 0 });
+  combat.biggestHit = Math.max(0, ...rows.map(r => r.combat.biggestHit || 0));
+  combat.biggestTaken = Math.max(0, ...rows.map(r => r.combat.biggestTaken || 0));
+  const skills = rows.reduce((g, r) => {
+    g.rolls += r.sRolls;
+    g.crits += r.sCrits;
+    g.fumbles += r.sFumbles;
+    return g;
+  }, { rolls: 0, crits: 0, fumbles: 0 });
+  const hitRate = combat.attacks ? Math.round(combat.hits / combat.attacks * 100) : 0;
+  return { combat, skills, hitRate };
+}
 
 // Mini-palmarès top 5 (sorts / compétences / émotes). render(label) → html (défaut _esc).
 function _statsPodium(title, entries, render, opts = {}) {
@@ -522,7 +576,7 @@ function _statsRender(scope) {
   const selectedMission = selectedMissionId ? missions.find(m => m.id === selectedMissionId) : null;
   const missionName = isMission ? (selectedMission?.name || 'Mission') : '';
   const selectedMissionDates = selectedMissionId ? _statsMissionDates(selectedMissionId).sort().reverse() : [];
-  const groupOptions = selectedMissionId ? _statsGroupOptionsForDates(selectedMissionDates) : [];
+  const groupOptions = selectedMissionId ? _statsGroupOptionsForDates(dateKey ? [dateKey] : selectedMissionDates) : [];
   if (_statsGroupMissionId !== selectedMissionId) {
     _statsGroupMissionId = selectedMissionId;
     _statsGroupSel = null;
@@ -536,12 +590,24 @@ function _statsRender(scope) {
   const filteredMissionDates = (_statsGroupSel && _statsGroupSel.size)
     ? selectedMissionDates.filter(d => _statsGroupSel.has(_statsGroupKeyOf(d)))
     : selectedMissionDates;
+  const displayedMissionDates = (_statsGroupSel && _statsGroupSel.size) ? filteredMissionDates : selectedMissionDates;
   const scopeDates = isMission ? filteredMissionDates : (dateKey ? [dateKey] : null);
 
   const allRows = _statsRowsFor(scopeDates);   // participants du scope courant
   // Filtre « joueurs ciblés » : recalcule toute la page sur le sous-ensemble choisi.
   const sel = _statsPlayerSel;
   const rows = (sel && sel.size) ? allRows.filter(r => sel.has(r.id)) : allRows;
+  const missionGroupOptions = isMission && selectedMissionId ? _statsGroupOptionsForDates(selectedMissionDates) : [];
+  const groupCompareOptions = isMission && missionGroupOptions.length > 1
+    ? missionGroupOptions.filter(g => !_statsGroupSel || !_statsGroupSel.size || _statsGroupSel.has(g.key))
+    : [];
+  const groupCompare = groupCompareOptions.map(g => {
+    const rawRows = _statsRowsFor(g.dates);
+    const groupRows = (sel && sel.size) ? rawRows.filter(r => sel.has(r.id)) : rawRows;
+    const agg = _statsAggregateRows(groupRows);
+    const active = groupRows.length || agg.combat.attacks || agg.skills.rolls;
+    return { ...g, rows: groupRows, ...agg, active };
+  }).filter(g => g.active);
 
   const unlinkedDates = allDates.filter(d => !_statsData?.sessions?.[d]?.missionId);
   const showUnlinkedDates = !selectedMissionId && unlinkedDates.length > 0;
@@ -552,16 +618,16 @@ function _statsRender(scope) {
   const missionDatesBar = selectedMissionId ? `<div class="stats-chips stats-sessions stats-sessions--dates">
     <span class="stats-chips-lbl">Séances</span>
     ${scopeChip('mission:' + selectedMissionId, 'Toute la mission', isMission && missionId === selectedMissionId, selectedMission?.name || '', 'stats-chip-session')}
-    ${selectedMissionDates.map(d => scopeChip(d, `📅 ${_statsFmtDate(d).slice(0, 5)}`, d === dateKey, _statsGroupOf(d), 'stats-chip-session')).join('')}
+    ${displayedMissionDates.map(d => scopeChip(d, `📅 ${_statsFmtDate(d).slice(0, 5)}`, d === dateKey, _statsGroupOf(d), 'stats-chip-session')).join('')}
   </div>` : showUnlinkedDates ? `<div class="stats-chips stats-sessions stats-sessions--dates">
     <span class="stats-chips-lbl">Sans mission</span>
     ${scopeChip('', 'Toute la campagne', !scope, '', 'stats-chip-session')}
     ${unlinkedDates.map(d => scopeChip(d, `📅 ${_statsFmtDate(d).slice(0, 5)}`, d === dateKey, 'Non reliée', 'stats-chip-session')).join('')}
   </div>` : '';
-  const groupsBar = selectedMissionId && groupOptions.length > 1 ? `<div class="stats-chips stats-groups">
+  const groupsBar = selectedMissionId && groupOptions.length && (dateKey || groupOptions.length > 1) ? `<div class="stats-chips stats-groups">
     <span class="stats-chips-lbl">Groupes</span>
-    <button class="stats-chip${!_statsGroupSel || !_statsGroupSel.size ? ' active' : ''}" data-action="_statsToggleGroup" data-group-key="__all">Tous</button>
-    ${groupOptions.map(g => `<button class="stats-chip stats-chip-group${_statsGroupSel?.has(g.key) ? ' active' : ''}" data-action="_statsToggleGroup" data-group-key="${_esc(g.key)}" title="${_esc(g.label)} · ${g.count} séance${g.count > 1 ? 's' : ''}">
+    ${!dateKey && groupOptions.length > 1 ? `<button class="stats-chip${!_statsGroupSel || !_statsGroupSel.size ? ' active' : ''}" data-action="_statsToggleGroup" data-group-key="__all">Tous</button>` : ''}
+    ${groupOptions.map(g => `<button class="stats-chip stats-chip-group${dateKey || _statsGroupSel?.has(g.key) ? ' active' : ''}" data-action="_statsToggleGroup" data-group-key="${_esc(g.key)}" title="${_esc(g.label)} · ${g.count} séance${g.count > 1 ? 's' : ''}">
       <span class="stats-chip-group-main"><span>${_esc(g.label)}</span><small>${g.count}</small></span>
       ${g.quest ? `<span class="stats-chip-group-members">${_statsGroupMembersMiniHtml(g.quest)}</span>` : ''}
     </button>`).join('')}
@@ -591,9 +657,10 @@ function _statsRender(scope) {
   </div>` : '';
 
   const exportBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExport" title="Copier un récap texte (Discord…)">📋 Copier le récap</button>` : '';
+  const visualBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExportImage" title="Télécharger un récap visuel PNG">🖼️ Récap visuel</button>` : '';
   const manageBtn = STATE.isAdmin ? `<button class="stats-tool-btn" data-action="_statsManage" title="Relier les séances aux missions · supprimer des données">⚙ Gérer les données</button>` : '';
   const controls = `<div class="stats-controls">
-    <div class="stats-controls-top">${sessionsBar}<div class="stats-toolbar-actions">${exportBtn}${manageBtn}</div></div>
+    <div class="stats-controls-top">${sessionsBar}<div class="stats-toolbar-actions">${exportBtn}${visualBtn}${manageBtn}</div></div>
     ${playersBar}
   </div>`;
 
@@ -627,6 +694,7 @@ function _statsRender(scope) {
 
   if (!rows.length) {
     _statsLastSummary = '';
+    _statsVisualSummary = null;
     const why = (sel && sel.size) ? 'les joueurs ciblés'
       : dateKey ? `la séance du ${_statsFmtDate(dateKey)}`
       : isMission ? `la mission « ${missionName} »` : 'le moment';
@@ -636,10 +704,10 @@ function _statsRender(scope) {
   }
 
   // Agrégats du scope
-  const GC = rows.reduce((g, r) => { for (const k in g) g[k] += (r.combat[k] || 0); return g; },
-    { attacks: 0, hits: 0, crits: 0, fumbles: 0, dmgDealt: 0, dmgTaken: 0, kosDealt: 0, kosTaken: 0, spellsCast: 0, pmSpent: 0, heal: 0 });
-  const GS = rows.reduce((g, r) => { g.rolls += r.sRolls; g.crits += r.sCrits; g.fumbles += r.sFumbles; return g; }, { rolls: 0, crits: 0, fumbles: 0 });
-  const hitRate = GC.attacks ? Math.round(GC.hits / GC.attacks * 100) : 0;
+  const aggregate = _statsAggregateRows(rows);
+  const GC = aggregate.combat;
+  const GS = aggregate.skills;
+  const hitRate = aggregate.hitRate;
   const tally = (key) => { const m = {}; rows.forEach(r => r[key].forEach(x => { m[x.n] = (m[x.n] || 0) + x.c; })); return Object.entries(m).sort((a, b) => b[1] - a[1]); };
   const spellTallyWithCaster = () => {
     const map = new Map();
@@ -670,12 +738,25 @@ function _statsRender(scope) {
   const topFumble = [...rows].map(r => ({ ...r, tf: r.combat.fumbles + r.sFumbles })).filter(r => r.tf > 0).sort((a, b) => b.tf - a.tf)[0];
   const topEmoter = [...rows].filter(r => r.emoteTotal > 0).sort((a, b) => b.emoteTotal - a.emoteTotal)[0];
   const topRoller = [...rows].filter(r => r.sRolls > 0).sort((a, b) => b.sRolls - a.sRolls)[0];
+  const insightItems = [];
+  if (groupCompare.length > 1) {
+    const byDmg = [...groupCompare].sort((a, b) => b.combat.dmgDealt - a.combat.dmgDealt)[0];
+    const byHeal = [...groupCompare].sort((a, b) => b.combat.heal - a.combat.heal)[0];
+    const byRolls = [...groupCompare].sort((a, b) => b.skills.rolls - a.skills.rolls)[0];
+    if (byDmg?.combat.dmgDealt) insightItems.push(`Le groupe <b>${_esc(byDmg.label)}</b> domine les dégâts (${byDmg.combat.dmgDealt}).`);
+    if (byHeal?.combat.heal) insightItems.push(`<b>${_esc(byHeal.label)}</b> porte le soin (${byHeal.combat.heal} PV).`);
+    if (byRolls?.skills.rolls) insightItems.push(`<b>${_esc(byRolls.label)}</b> joue le plus de compétences (${byRolls.skills.rolls} jets).`);
+  }
+  if (topDmg?.combat.dmgDealt) insightItems.push(`<b>${_esc(topDmg.name)}</b> a porté l'offensive (${topDmg.combat.dmgDealt} dégâts).`);
+  if (topHeal?.combat.heal) insightItems.push(`<b>${_esc(topHeal.name)}</b> a stabilisé le groupe (${topHeal.combat.heal} PV soignés).`);
+  if (GC.attacks >= 5) insightItems.push(`La table termine à <b>${hitRate}%</b> de réussite sur ${GC.attacks} attaques.`);
 
   const statCard = (ic, val, lbl, a) => `<div class="stats-kpi" style="--a:${a}"><span class="stats-kpi-ic">${ic}</span><span class="stats-kpi-val">${val}</span><span class="stats-kpi-lbl">${lbl}</span></div>`;
   // Award : renvoie { html, txt } pour mutualiser affichage et export.
   const awards = [];
+  let awardTotal = 0;
   // Carte-trophée : icône + intitulé + gagnant · valeur, liseré coloré (--tc).
-  const award = (ic, lbl, row, val, col) => { if (!row?.name) return ''; awards.push(`${ic} ${lbl} : ${row.name} (${val})`);
+  const award = (id, ic, lbl, row, val, col) => { if (!row?.name) return ''; awardTotal += 1; if (_statsHiddenAwards.has(id)) return ''; awards.push(`${ic} ${lbl} : ${row.name} (${val})`);
     const char = STATE.characters?.find(x => x.id === row.id) || { nom: row.name };
     return `<div class="stats-trophy" style="--tc:${col}">
       <span class="stats-trophy-ic">${ic}</span>
@@ -736,16 +817,16 @@ function _statsRender(scope) {
   const combatTitle = dateKey ? `⚔️ Combat — séance du ${_statsFmtDate(dateKey)}`
     : isMission ? `⚔️ Combat — ${_esc(missionName)}` : '⚔️ Combat (table)';
   const awardsHtml = [
-    award('🏆', 'Plus gros frappeur', topDmg, `${topDmg?.combat.dmgDealt} dmg`, '#f4c430'),
-    award('💢', 'Plus gros coup', topBig, `${topBig?.combat.biggestHit}`, '#ff8b6b'),
-    award('🎯', 'Meilleur taux', topHit, topHit ? `${topHit.hr}%` : '', '#22c38e'),
-    award('☠️', 'Bourreau', topKo, `${topKo?.combat.kosDealt} KO`, '#ef4444'),
-    award('💚', 'Plus grand soigneur', topHeal, `${topHeal?.combat.heal} PV`, '#4fd3a6'),
-    award('🧙', 'Le Mage', topMage, `${topMage?.combat.spellsCast} sorts`, '#bca0ff'),
-    award('🪨', "L'Increvable", topTank, `${topTank?.combat.dmgTaken} dmg subis`, '#9aa0aa'),
-    award('💬', 'Le Bavard', topEmoter, `${topEmoter?.emoteTotal} émotes`, '#4f8cff'),
-    award('🎲', 'Le Joueur', topRoller, `${topRoller?.sRolls} jets`, '#7fb0ff'),
-    award('🤡', 'Le plus malchanceux', topFumble, `${topFumble?.tf} échec${topFumble?.tf > 1 ? 's' : ''}`, '#ff6b6b'),
+    award('dmg', '🏆', 'Plus gros frappeur', topDmg, `${topDmg?.combat.dmgDealt} dmg`, '#f4c430'),
+    award('bigHit', '💢', 'Plus gros coup', topBig, `${topBig?.combat.biggestHit}`, '#ff8b6b'),
+    award('hitRate', '🎯', 'Meilleur taux', topHit, topHit ? `${topHit.hr}%` : '', '#22c38e'),
+    award('ko', '☠️', 'Bourreau', topKo, `${topKo?.combat.kosDealt} KO`, '#ef4444'),
+    award('heal', '💚', 'Plus grand soigneur', topHeal, `${topHeal?.combat.heal} PV`, '#4fd3a6'),
+    award('mage', '🧙', 'Le Mage', topMage, `${topMage?.combat.spellsCast} sorts`, '#bca0ff'),
+    award('tank', '🪨', "L'Increvable", topTank, `${topTank?.combat.dmgTaken} dmg subis`, '#9aa0aa'),
+    award('emotes', '💬', 'Le Bavard', topEmoter, `${topEmoter?.emoteTotal} émotes`, '#4f8cff'),
+    award('rolls', '🎲', 'Le Joueur', topRoller, `${topRoller?.sRolls} jets`, '#7fb0ff'),
+    award('fumble', '🤡', 'Le plus malchanceux', topFumble, `${topFumble?.tf} échec${topFumble?.tf > 1 ? 's' : ''}`, '#ff6b6b'),
   ].join('');
 
   // Récap texte (export) — construit à partir du scope courant.
@@ -772,6 +853,80 @@ function _statsRender(scope) {
   _statsLastSummary = sumLines.join('\n');
 
   const heroMetric = (v, l, c) => `<div class="stats-hm"><span class="stats-hm-v" style="color:${c}">${v}</span><span class="stats-hm-l">${l}</span></div>`;
+  const insightsSec = insightItems.length ? `
+    <section class="stats-sec stats-insights-sec">
+      <div class="stats-sec-hd">🧭 Lecture rapide</div>
+      <div class="stats-insights">${insightItems.slice(0, 5).map(x => `<div class="stats-insight">${x}</div>`).join('')}</div>
+    </section>` : '';
+  const groupMax = {
+    dmg: Math.max(1, ...groupCompare.map(g => g.combat.dmgDealt || 0)),
+    heal: Math.max(1, ...groupCompare.map(g => g.combat.heal || 0)),
+    spells: Math.max(1, ...groupCompare.map(g => g.combat.spellsCast || 0)),
+    rolls: Math.max(1, ...groupCompare.map(g => g.skills.rolls || 0)),
+    hit: Math.max(1, ...groupCompare.map(g => g.hitRate || 0)),
+  };
+  const groupMetricLine = (ic, lbl, val, max, col, suffix = '') => `<div class="stats-group-metric" style="--gm:${col}">
+    <span class="stats-group-metric-lbl"><span>${ic}</span>${lbl}</span>
+    <span class="stats-group-metric-bar"><span style="width:${Math.max(3, Math.round((_statsNum(val) / max) * 100))}%"></span></span>
+    <b>${val}${suffix}</b>
+  </div>`;
+  const groupSessionItem = (x) => `<div class="stats-group-session">
+    <div class="stats-group-session-main">
+      <span class="stats-time-date">📅 ${_statsFmtDate(x.d)}</span>
+      <span class="stats-time-avatars">${x.rows.slice(0, 6).map(r => _statsAvatar(r.id, r.name, 18)).join('')}</span>
+    </div>
+    <div class="stats-time-metrics">
+      <span>🗡️ ${x.combat.dmgDealt}</span>
+      <span>💚 ${x.combat.heal}</span>
+      <span>🔮 ${x.combat.spellsCast}</span>
+      <span>🎲 ${x.skills.rolls}</span>
+    </div>
+  </div>`;
+  const missionGroupsSec = groupCompare.length ? `
+    <section class="stats-sec">
+      <div class="stats-sec-hd">👥 Groupes & séances</div>
+      <div class="stats-mission-groups">
+        ${groupCompare.map(g => {
+          const sessions = [...g.dates].sort().map(d => {
+            const dateRowsRaw = _statsRowsFor([d]);
+            const dateRows = (sel && sel.size) ? dateRowsRaw.filter(r => sel.has(r.id)) : dateRowsRaw;
+            const agg = _statsAggregateRows(dateRows);
+            return { d, rows: dateRows, ...agg };
+          }).filter(x => x.rows.length || x.combat.attacks || x.skills.rolls);
+          return `<div class="stats-group-card stats-group-card--merged">
+            <div class="stats-group-hd">
+              <div class="stats-group-title" title="${_esc(g.label)}">👥 ${_esc(g.label)}</div>
+              <span class="stats-group-count">📅 ${g.count}</span>
+            </div>
+            <div class="stats-group-roster">
+              <span class="stats-group-roster-lbl">Participants</span>
+              <span class="stats-group-members">${g.quest ? _statsGroupMembersMiniHtml(g.quest) : g.rows.slice(0, 5).map(r => _statsAvatar(r.id, r.name, 18)).join('')}</span>
+            </div>
+            <div class="stats-group-metrics">
+              ${groupMetricLine('🗡️', 'Dégâts', g.combat.dmgDealt, groupMax.dmg, '#c9b6ff')}
+              ${groupMetricLine('💚', 'Soin', g.combat.heal, groupMax.heal, '#4fd3a6')}
+              ${groupMetricLine('🔮', 'Sorts', g.combat.spellsCast, groupMax.spells, '#bca0ff')}
+              ${groupMetricLine('🎲', 'Jets', g.skills.rolls, groupMax.rolls, '#7fb0ff')}
+              ${groupMetricLine('🎯', 'Touche', g.hitRate, groupMax.hit, '#22c38e', '%')}
+            </div>
+            ${sessions.length ? `<div class="stats-group-sessions"><div class="stats-group-subtitle">Séances jouées</div>${sessions.map(groupSessionItem).join('')}</div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>
+    </section>` : '';
+  _statsVisualSummary = {
+    scopeLabel,
+    hitRate,
+    metrics: [
+      ['Attaques', GC.attacks, '#ff9d7a'],
+      ['Dégâts', GC.dmgDealt, '#c9b6ff'],
+      ['Sorts', GC.spellsCast, '#bca0ff'],
+      ['Soin', GC.heal, '#4fd3a6'],
+      ['Jets', GS.rolls, '#7fb0ff'],
+    ],
+    awards: awards.slice(0, 6),
+    groups: groupCompare.slice(0, 4).map(g => ({ label: g.label, dmg: g.combat.dmgDealt, heal: g.combat.heal, rolls: g.skills.rolls, sessions: g.count })),
+  };
 
   // ── Graphiques (SVG/HTML, sans dépendance) ──
   const cmpChart = _statsCmpType === 'pie' ? _statsPieChart(rows, _statsCmpMetric) : _statsBarChart(rows, _statsCmpMetric);
@@ -779,9 +934,19 @@ function _statsRender(scope) {
     <button class="stats-tt${_statsCmpType === 'bars' ? ' active' : ''}" data-action="_statsCmpType" data-type="bars" title="Barres">📊</button>
     <button class="stats-tt${_statsCmpType === 'pie' ? ' active' : ''}" data-action="_statsCmpType" data-type="pie" title="Camembert">🥧</button>
   </div>`;
-  const evoDatesAsc = [...allDates].reverse();  // ancienne → récente
+  const evoDatesAsc = (isMission ? [...filteredMissionDates].sort() : [...allDates].reverse());  // ancienne → récente
   const evoSeries = _statsEvoSeries(evoDatesAsc, _statsEvoMetric, _statsPlayerSel);
   const evoHasData = evoDatesAsc.length >= 2 && evoSeries.some(s => s.v > 0);
+  const shouldCompareGroupsInChart = isMission && groupCompare.length > 1 && (!_statsGroupSel || !_statsGroupSel.size);
+  const secondaryChartHtml = shouldCompareGroupsInChart
+    ? `<div class="stats-chart-card">
+        <div class="stats-chart-hd"><span>Comparatif — groupes</span>${_statsMetricSelect(_statsEvoMetric, '_statsEvoMetric')}</div>
+        ${_statsGroupMetricChart(groupCompare, _statsEvoMetric)}
+      </div>`
+    : (evoDatesAsc.length >= 2 ? `<div class="stats-chart-card">
+        <div class="stats-chart-hd"><span>${isMission ? 'Évolution du groupe' : 'Évolution par séance'}</span>${_statsMetricSelect(_statsEvoMetric, '_statsEvoMetric')}</div>
+        ${evoHasData ? _statsColChart(evoSeries, _statsEvoMetric) : '<div class="stats-chart-empty">Pas assez de données comparables.</div>'}
+      </div>` : '');
   const chartsHtml = `
     <section class="stats-sec">
       <div class="stats-sec-hd">📈 Graphiques</div>
@@ -790,10 +955,7 @@ function _statsRender(scope) {
           <div class="stats-chart-hd"><span>Comparatif — personnages</span><div class="stats-chart-ctrls">${typeToggle}${_statsMetricSelect(_statsCmpMetric, '_statsCmpMetric')}</div></div>
           ${cmpChart}
         </div>
-        ${evoDatesAsc.length >= 2 ? `<div class="stats-chart-card">
-          <div class="stats-chart-hd"><span>Évolution par séance</span>${_statsMetricSelect(_statsEvoMetric, '_statsEvoMetric')}</div>
-          ${evoHasData ? _statsColChart(evoSeries, _statsEvoMetric) : '<div class="stats-chart-empty">Pas assez de données par séance.</div>'}
-        </div>` : ''}
+        ${secondaryChartHtml}
       </div>
     </section>`;
 
@@ -820,10 +982,10 @@ function _statsRender(scope) {
         ${statCard('🏅', topSkill ? _esc(topSkill[0]) : '—', 'Compétence la + jouée', '#f4c430')}
       </div>
     </section>`;
-  const distinctionsSec = awardsHtml ? `
+  const distinctionsSec = awardTotal ? `
     <section class="stats-sec">
-      <div class="stats-sec-hd">🏆 Distinctions</div>
-      <div class="stats-trophies">${awardsHtml}</div>
+      <div class="stats-sec-hd stats-sec-hd-tools"><span>🏆 Distinctions</span><button class="stats-sec-tool" data-action="_statsAwardsConfig" title="Choisir les distinctions affichées">⚙</button></div>
+      ${awardsHtml ? `<div class="stats-trophies">${awardsHtml}</div>` : '<div class="stats-empty-inline">Toutes les distinctions disponibles sont masquées.</div>'}
     </section>` : '';
   const palmaresSec = (spellTally.length || emoteTally.length || skillTally.length) ? `
     <section class="stats-sec">
@@ -858,6 +1020,8 @@ function _statsRender(scope) {
         </div>
       </div>
     </section>
+    ${insightsSec}
+    ${missionGroupsSec}
 
     <div class="stats-columns">
       <div class="stats-col-group">
@@ -2451,6 +2615,7 @@ const PAGES = {
     ]);
     if (Array.isArray(chars) && chars.length) STATE.characters = chars;
     _statsQuests = Array.isArray(quests) ? quests : [];
+    _statsLoadAwardPrefs();
     _statsData = data;
     _statsEmoteUrl = new Map((emoteDoc?.emotes || []).filter(e => e?.name && e?.url).map(e => [e.name, e.url]));
     _statsScope = null;
@@ -2678,6 +2843,31 @@ registerActions({
       b.style.display = (!q || (b.dataset.name || '').includes(q)) ? '' : 'none';
     });
   },
+  _statsAwardsConfig: () => {
+    const row = ([id, label]) => `<label class="stats-award-opt">
+      <input type="checkbox" data-change="_statsToggleAward" data-award-id="${id}"${_statsHiddenAwards.has(id) ? '' : ' checked'}>
+      <span>${_esc(label)}</span>
+    </label>`;
+    openModal('🏆 Distinctions', `
+      <div class="stats-award-config">
+        <div class="stats-mp-hint">Choisis les distinctions affichées sur la page et dans le récap copié.</div>
+        <div class="stats-award-list">${_STATS_AWARD_CATALOG.map(row).join('')}</div>
+        <button class="stats-mng-link stats-award-reset" data-action="_statsShowAllAwards">Tout réafficher</button>
+      </div>`, { subtitle: 'Affichage local de cette page', accent: '#f4c430' });
+  },
+  _statsToggleAward: (el) => {
+    const id = el.dataset.awardId;
+    if (!id) return;
+    el.checked ? _statsHiddenAwards.delete(id) : _statsHiddenAwards.add(id);
+    _statsSaveAwardPrefs();
+    _statsRender(_statsScope);
+  },
+  _statsShowAllAwards: () => {
+    _statsHiddenAwards = new Set();
+    _statsSaveAwardPrefs();
+    closeModalDirect();
+    _statsRender(_statsScope);
+  },
   // Export : copie le récap texte du scope courant (collable dans Discord…).
   _statsExport: async () => {
     if (!_statsLastSummary) return;
@@ -2688,6 +2878,73 @@ registerActions({
       // Fallback si clipboard indisponible (contexte non sécurisé) → affiche dans une modale.
       openModal('📋 Récap des statistiques', `<textarea class="stats-export-ta" readonly>${_esc(_statsLastSummary)}</textarea>`);
     }
+  },
+  _statsExportImage: () => {
+    const s = _statsVisualSummary;
+    if (!s) { showNotif('Aucun récap visuel à exporter.', 'info'); return; }
+    const W = 1200, H = 760, dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    const canvas = document.createElement('canvas');
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    const round = (x, y, w, h, r = 18) => {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+    };
+    const text = (t, x, y, size = 24, color = '#e6edf7', weight = '700') => {
+      ctx.fillStyle = color; ctx.font = `${weight} ${size}px Inter, Arial, sans-serif`; ctx.fillText(String(t), x, y);
+    };
+    const wrap = (t, x, y, max, lh = 28) => {
+      ctx.font = '700 22px Inter, Arial, sans-serif';
+      const words = String(t).split(/\s+/); let line = '';
+      for (const word of words) {
+        const next = line ? `${line} ${word}` : word;
+        if (ctx.measureText(next).width > max && line) { text(line, x, y, 22, '#d8e3f6', '700'); y += lh; line = word; }
+        else line = next;
+      }
+      if (line) text(line, x, y, 22, '#d8e3f6', '700');
+      return y + lh;
+    };
+    ctx.fillStyle = '#07101d'; ctx.fillRect(0, 0, W, H);
+    const grad = ctx.createLinearGradient(0, 0, W, H);
+    grad.addColorStop(0, 'rgba(79,140,255,.22)'); grad.addColorStop(.55, 'rgba(188,160,255,.12)'); grad.addColorStop(1, 'rgba(34,195,142,.16)');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+    text('GRIMORIUM', 56, 64, 24, '#9cc3ff', '800');
+    wrap(`Statistiques — ${s.scopeLabel}`, 56, 112, 760, 34);
+    round(930, 46, 180, 180, 90); ctx.fillStyle = 'rgba(34,195,142,.18)'; ctx.fill();
+    text(`${s.hitRate}%`, 974, 135, 44, '#22c38e', '900'); text('réussite', 978, 166, 19, '#9fb0c7', '700');
+    let x = 56, y = 210;
+    s.metrics.forEach(([label, value, color], i) => {
+      const cx = x + (i % 5) * 214;
+      round(cx, y, 190, 105, 16); ctx.fillStyle = 'rgba(9,18,32,.78)'; ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.stroke();
+      text(value, cx + 20, y + 44, 34, color, '900');
+      text(label, cx + 20, y + 76, 18, '#9fb0c7', '700');
+    });
+    y = 370;
+    text('Distinctions', 56, y, 26, '#f4c430', '900'); y += 44;
+    (s.awards.length ? s.awards : ['Aucune distinction affichée']).slice(0, 6).forEach(a => { y = wrap(a, 72, y, 500, 30); });
+    if (s.groups.length) {
+      let gy = 370;
+      text('Groupes', 650, gy, 26, '#c9b6ff', '900'); gy += 34;
+      s.groups.forEach(g => {
+        round(650, gy, 410, 72, 14); ctx.fillStyle = 'rgba(9,18,32,.7)'; ctx.fill();
+        text(g.label, 670, gy + 28, 21, '#e6edf7', '800');
+        text(`${g.sessions} séances · ${g.dmg} dmg · ${g.heal} soin · ${g.rolls} jets`, 670, gy + 54, 17, '#9fb0c7', '700');
+        gy += 86;
+      });
+    }
+    text(new Date().toLocaleDateString('fr-FR'), 56, H - 42, 18, '#708097', '700');
+    canvas.toBlob(blob => {
+      if (!blob) { showNotif('Export image impossible.', 'error'); return; }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `grimorium-stats-${Date.now()}.png`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+      showNotif('Récap visuel téléchargé.', 'success');
+    }, 'image/png');
   },
 
   // Admin lazy-load tools
