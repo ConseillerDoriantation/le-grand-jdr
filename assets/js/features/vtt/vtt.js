@@ -28,7 +28,7 @@ import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js
 import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
-import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit, bumpBiggestTaken } from '../../shared/stats.js';
+import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit, bumpBiggestTaken, bumpDamageTaken } from '../../shared/stats.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
@@ -6514,12 +6514,36 @@ async function _vttRollAttack() {
       }
     }
 
+    const _isSupportCast = !!(
+      opt.mods?.enchant
+      || opt.enchantMode === 'etat'
+      || opt.enchantEtatId
+      || opt.mods?.rangeBuff
+      || opt.mods?.hot
+      || opt.category === 'support'
+    );
+    const _isAfflictionCast = !!(
+      opt.mods?.affliction
+      || opt.mods?.laceration
+      || opt.afflictionMode
+      || opt.afflictionEtatId
+    );
+    const _isTacticalCast = _isSupportCast || _isAfflictionCast || !!(
+      opt.mods?.move
+      || opt.mods?.push
+      || opt.mods?.pull
+      || opt.mods?.zone
+    );
+
     // ── Statistiques : cast (sort lancé + PM) puis écriture du delta ──
     if (src.characterId && (opt.sortIdx !== undefined || (opt.pmCost || 0) > 0)) {
       accCastDelta(_statsDelta, {
         casterId: src.characterId, casterName: src.name,
         spellName: opt.sortIdx !== undefined ? (opt.label || 'Sort') : null,
         pm: opt.pmCost || 0,
+        tactical: _isTacticalCast ? 1 : 0,
+        support: _isSupportCast ? 1 : 0,
+        affliction: _isAfflictionCast ? 1 : 0,
       });
     }
     applyStatsDelta(_statsDelta, +1);
@@ -8224,8 +8248,15 @@ async function _vttSetHp(tokenId,hp) {
   const prevHp = lT.displayHp ?? t.hp ?? null;
   const newHp  = Math.max(0, hp);
   const delta  = prevHp != null ? Math.max(0, prevHp - newHp) : 0;
-  await _setHp(t,hp).catch(()=>{});
+  let hpUpdated = false;
+  await _setHp(t,hp).then(() => { hpUpdated = true; }).catch(()=>{});
   if (delta > 0) {
+    if (hpUpdated && t.characterId) {
+      const ko = prevHp > 0 && newHp <= 0;
+      const name = lT.displayName ?? t.name ?? '';
+      bumpDamageTaken(t.characterId, name, delta, { ko });
+      bumpBiggestTaken(t.characterId, name, delta);
+    }
     const notes = await _vttTriggerConcentrationSave(t, delta, newHp);
     notes.forEach(msg => showNotif(msg, msg.startsWith('💢') ? 'error' : 'info'));
   }
