@@ -169,6 +169,7 @@ export function accAttackDelta(acc, { attackerId, attackerName, targetId, target
     dmgDealt: dmg > 0 ? dmg : 0, kosDealt: ko ? 1 : 0,
   });
   if (targetId && targetId !== attackerId) add(targetId, targetName, {
+    attacksTaken: 1, attacksAvoided: hit ? 0 : 1,
     dmgTaken: dmg > 0 ? dmg : 0, kosTaken: ko ? 1 : 0,
   });
   return acc;
@@ -176,7 +177,7 @@ export function accAttackDelta(acc, { attackerId, attackerName, targetId, target
 
 // Cast d'un sort : +1 sort lancé, +PM dépensés, +1 sur la répartition par sort,
 // +soin éventuel. Accumulé dans le même delta réversible que l'attaque.
-export function accCastDelta(acc, { casterId, casterName, spellName, pm = 0, heal = 0 } = {}) {
+export function accCastDelta(acc, { casterId, casterName, spellName, pm = 0, heal = 0, tactical = 0, support = 0, affliction = 0 } = {}) {
   if (!casterId) return acc;
   acc.chars ??= {};
   const dk = statsDateKey();
@@ -190,6 +191,9 @@ export function accCastDelta(acc, { casterId, casterName, spellName, pm = 0, hea
   bump('combat', 'spellsCast', 1);
   if (pm > 0)    bump('combat', 'pmSpent', pm);
   if (heal > 0)  bump('combat', 'heal', heal);
+  if (tactical > 0)   bump('combat', 'tacticalSpells', tactical);
+  if (support > 0)    bump('combat', 'supportSpells', support);
+  if (affliction > 0) bump('combat', 'afflictionSpells', affliction);
   if (spellName) bump('spells', spellName, 1);
   return acc;
 }

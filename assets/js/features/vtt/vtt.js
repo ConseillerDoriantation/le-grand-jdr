@@ -6514,12 +6514,36 @@ async function _vttRollAttack() {
       }
     }
 
+    const _isSupportCast = !!(
+      opt.mods?.enchant
+      || opt.enchantMode === 'etat'
+      || opt.enchantEtatId
+      || opt.mods?.rangeBuff
+      || opt.mods?.hot
+      || opt.category === 'support'
+    );
+    const _isAfflictionCast = !!(
+      opt.mods?.affliction
+      || opt.mods?.laceration
+      || opt.afflictionMode
+      || opt.afflictionEtatId
+    );
+    const _isTacticalCast = _isSupportCast || _isAfflictionCast || !!(
+      opt.mods?.move
+      || opt.mods?.push
+      || opt.mods?.pull
+      || opt.mods?.zone
+    );
+
     // ── Statistiques : cast (sort lancé + PM) puis écriture du delta ──
     if (src.characterId && (opt.sortIdx !== undefined || (opt.pmCost || 0) > 0)) {
       accCastDelta(_statsDelta, {
         casterId: src.characterId, casterName: src.name,
         spellName: opt.sortIdx !== undefined ? (opt.label || 'Sort') : null,
         pm: opt.pmCost || 0,
+        tactical: _isTacticalCast ? 1 : 0,
+        support: _isSupportCast ? 1 : 0,
+        affliction: _isAfflictionCast ? 1 : 0,
       });
     }
     applyStatsDelta(_statsDelta, +1);

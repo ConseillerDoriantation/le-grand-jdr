@@ -186,8 +186,13 @@ const _STATS_METRICS = {
   attacks:    { lbl: 'Attaques',            color: '#ff9d7a' },
   heal:       { lbl: 'Soin prodigué',       color: '#4fd3a6' },
   spellsCast: { lbl: 'Sorts lancés',        color: '#bca0ff' },
+  tacticalSpells: { lbl: 'Sorts tactiques', color: '#d8c7ff' },
+  supportSpells: { lbl: 'Soutien',          color: '#4fd3a6' },
+  afflictionSpells: { lbl: 'Afflictions',   color: '#c084fc' },
   kosDealt:   { lbl: 'KO infligés',         color: '#ef4444' },
   dmgTaken:   { lbl: 'Dégâts subis',        color: '#9aa0aa' },
+  attacksTaken: { lbl: 'Attaques subies',   color: '#a7b4c4' },
+  attacksAvoided: { lbl: 'Attaques évitées', color: '#7fb0ff' },
   rolls:      { lbl: 'Jets de compétence',  color: '#7fb0ff' },
 };
 const _statsMetricVal = (r, key) => key === 'rolls' ? r.sRolls : (r.combat[key] || 0);
@@ -331,7 +336,9 @@ function _statsNormCombat(cm = {}) {
   return {
     attacks: n(cm.attacks), hits: n(cm.hits), crits: n(cm.crits), fumbles: n(cm.fumbles),
     dmgDealt: n(cm.dmgDealt), dmgTaken: n(cm.dmgTaken), kosDealt: n(cm.kosDealt), kosTaken: n(cm.kosTaken),
-    spellsCast: n(cm.spellsCast), pmSpent: n(cm.pmSpent), heal: n(cm.heal),
+    attacksTaken: n(cm.attacksTaken), attacksAvoided: n(cm.attacksAvoided),
+    spellsCast: n(cm.spellsCast), tacticalSpells: n(cm.tacticalSpells), supportSpells: n(cm.supportSpells), afflictionSpells: n(cm.afflictionSpells),
+    pmSpent: n(cm.pmSpent), heal: n(cm.heal),
     biggestHit: n(cm.biggestHit), biggestTaken: n(cm.biggestTaken),
   };
 }
@@ -352,10 +359,13 @@ function _statsCombatGrid(cm, { topSpell, topEmote } = {}) {
   if (cm.dmgDealt > 0)     row('🗡️', 'Dégâts infligés', cm.dmgDealt);
   if (cm.biggestHit > 0)   row('💢', 'Plus gros coup infligé', cm.biggestHit);
   if (cm.dmgTaken > 0)     row('🛡️', 'Dégâts subis', cm.dmgTaken);
+  if (cm.attacksTaken > 0) row('🧱', 'Attaques subies', cm.attacksTaken);
+  if (cm.attacksAvoided > 0) row('🛡️', 'Attaques évitées', cm.attacksAvoided);
   if (cm.biggestTaken > 0) row('🩸', 'Plus gros coup reçu', cm.biggestTaken);
   if (cm.kosDealt > 0)     row('☠️', 'KO infligés', cm.kosDealt);
   if (cm.kosTaken > 0)     row('💀', 'Fois mis KO', cm.kosTaken);
   if (cm.spellsCast > 0)   row('🔮', 'Sorts lancés', cm.spellsCast);
+  if (cm.tacticalSpells > 0) row('✨', 'Sorts tactiques', cm.tacticalSpells);
   if (cm.pmSpent > 0)      row('🔋', 'PM dépensés', cm.pmSpent);
   if (cm.heal > 0)         row('💚', 'PV soignés', cm.heal);
   const favs = [];
@@ -525,7 +535,13 @@ function _statsAggregateRows(rows = []) {
   const combat = rows.reduce((g, r) => {
     for (const k in g) g[k] += (r.combat[k] || 0);
     return g;
-  }, { attacks: 0, hits: 0, crits: 0, fumbles: 0, dmgDealt: 0, dmgTaken: 0, kosDealt: 0, kosTaken: 0, spellsCast: 0, pmSpent: 0, heal: 0, biggestHit: 0, biggestTaken: 0 });
+  }, {
+    attacks: 0, hits: 0, crits: 0, fumbles: 0,
+    dmgDealt: 0, dmgTaken: 0, kosDealt: 0, kosTaken: 0,
+    attacksTaken: 0, attacksAvoided: 0,
+    spellsCast: 0, tacticalSpells: 0, supportSpells: 0, afflictionSpells: 0,
+    pmSpent: 0, heal: 0, biggestHit: 0, biggestTaken: 0
+  });
   combat.biggestHit = Math.max(0, ...rows.map(r => r.combat.biggestHit || 0));
   combat.biggestTaken = Math.max(0, ...rows.map(r => r.combat.biggestTaken || 0));
   const skills = rows.reduce((g, r) => {
@@ -753,15 +769,29 @@ function _statsRender(scope) {
   const topFumble = [...rows].map(r => ({ ...r, tf: r.combat.fumbles + r.sFumbles })).filter(r => r.tf > 0).sort((a, b) => b.tf - a.tf)[0];
   const topEmoter = [...rows].filter(r => r.emoteTotal > 0).sort((a, b) => b.emoteTotal - a.emoteTotal)[0];
   const topRoller = [...rows].filter(r => r.sRolls > 0).sort((a, b) => b.sRolls - a.sRolls)[0];
-  const impactScore = (r) => Math.round(
-    (r.combat.dmgDealt || 0) +
-    (r.combat.heal || 0) * 1.15 +
-    (r.combat.kosDealt || 0) * 12 +
-    (r.combat.spellsCast || 0) * 4 +
-    (r.sRolls || 0) * 2 +
-    (r.sCrits || 0) * 6 -
-    ((r.combat.fumbles || 0) + (r.sFumbles || 0)) * 3
-  );
+  const impactScore = (r) => {
+    const cm = r.combat || {};
+    const tactical = cm.tacticalSpells || 0;
+    const plainCasts = Math.max(0, (cm.spellsCast || 0) - tactical);
+    const tankScore =
+      (cm.attacksTaken || 0) * 3 +
+      (cm.attacksAvoided || 0) * 4 +
+      (cm.dmgTaken || 0) * 0.35 -
+      (cm.kosTaken || 0) * 8;
+    return Math.round(
+      (cm.dmgDealt || 0) +
+      (cm.heal || 0) * 1.15 +
+      (cm.kosDealt || 0) * 12 +
+      plainCasts * 3 +
+      tactical * 5 +
+      (cm.supportSpells || 0) * 3 +
+      (cm.afflictionSpells || 0) * 3 +
+      (r.sRolls || 0) * 2 +
+      ((cm.crits || 0) + (r.sCrits || 0)) * 6 +
+      tankScore -
+      ((cm.fumbles || 0) + (r.sFumbles || 0)) * 3
+    );
+  };
   const mvp = [...rows].map(r => ({ ...r, impact: impactScore(r) })).filter(r => r.impact > 0).sort((a, b) => b.impact - a.impact)[0];
   const insightItems = [];
   if (groupCompare.length > 1) {
@@ -888,6 +918,12 @@ function _statsRender(scope) {
     if (mvp.combat.dmgDealt) parts.push(`🗡️ ${mvp.combat.dmgDealt} dégâts`);
     if (mvp.combat.heal) parts.push(`💚 ${mvp.combat.heal} soin`);
     if (mvp.combat.spellsCast) parts.push(`🔮 ${mvp.combat.spellsCast} sorts`);
+    if (mvp.combat.tacticalSpells) parts.push(`✨ ${mvp.combat.tacticalSpells} tactique`);
+    if (mvp.combat.supportSpells) parts.push(`🛡️ ${mvp.combat.supportSpells} soutien`);
+    if (mvp.combat.afflictionSpells) parts.push(`💀 ${mvp.combat.afflictionSpells} affliction`);
+    if (mvp.combat.attacksTaken) parts.push(`🧱 ${mvp.combat.attacksTaken} ciblages`);
+    if (mvp.combat.attacksAvoided) parts.push(`🛡️ ${mvp.combat.attacksAvoided} évitées`);
+    if (mvp.combat.dmgTaken) parts.push(`🩸 ${mvp.combat.dmgTaken} subis`);
     if (mvp.sRolls) parts.push(`🎲 ${mvp.sRolls} jets`);
     if (mvp.combat.kosDealt) parts.push(`☠️ ${mvp.combat.kosDealt} KO`);
     return `<section class="stats-sec stats-mvp-sec">
@@ -1023,6 +1059,8 @@ function _statsRender(scope) {
         ${statCard('💥', GC.crits, 'Réussites critiques', '#f4c430')}
         ${statCard('💔', GC.fumbles, 'Échecs critiques', '#ff6b6b')}
         ${statCard('🛡️', GC.dmgTaken, 'Dégâts subis', '#9aa0aa')}
+        ${statCard('🧱', GC.attacksTaken, 'Attaques subies', '#a7b4c4')}
+        ${statCard('🛡️', GC.attacksAvoided, 'Attaques évitées', '#7fb0ff')}
         ${statCard('☠️', GC.kosDealt, 'KO infligés', '#ef4444')}
         ${statCard('💀', GC.kosTaken, 'Fois mis KO', '#b06a6a')}
       </div>
@@ -1032,6 +1070,9 @@ function _statsRender(scope) {
       <div class="stats-sec-hd">🔮 Magie & soutien</div>
       <div class="stats-kpis">
         ${statCard('🔮', GC.spellsCast, 'Sorts lancés', '#bca0ff')}
+        ${statCard('✨', GC.tacticalSpells, 'Sorts tactiques', '#d8c7ff')}
+        ${statCard('🛡️', GC.supportSpells, 'Soutien appliqué', '#4fd3a6')}
+        ${statCard('💀', GC.afflictionSpells, 'Afflictions appliquées', '#c084fc')}
         ${statCard('🔋', GC.pmSpent, 'PM dépensés', '#4f8cff')}
         ${statCard('💚', GC.heal, 'Soin prodigué', '#4fd3a6')}
         ${statCard('🧙', topMage ? _esc(topMage.name) : '—', 'Mage le + actif', '#bca0ff')}
