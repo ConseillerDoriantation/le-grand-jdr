@@ -60,6 +60,7 @@ let _statsCmpMetric = 'dmgDealt';      // métrique du graphique comparatif (par
 let _statsCmpType   = 'bars';          // type du comparatif : 'bars' | 'pie'
 let _statsEvoMetric = 'dmgDealt';      // métrique du graphique d'évolution (par séance)
 let _statsQuests    = [];              // groupes de mission (collection quests) pour libellés/portraits
+let _statsStory     = [];              // missions de la Trame pour ordre/titres du sélecteur stats
 
 // Avatar (rond) d'un perso par id — devant son nom dans les chips/graphiques.
 const _statsAvatar = (id, name, size = 18) =>
@@ -84,10 +85,31 @@ const _statsGroupKeyOf = (dateKey) => {
   return group ? `name:${_norm(group)}` : '__nogroup';
 };
 // Missions distinctes ayant ≥1 séance liée (pour la frise).
+function _statsStoryOrderCompare(a = {}, b = {}) {
+  const ao = Number.isFinite(Number(a.ordre)) ? Number(a.ordre) : Number.MAX_SAFE_INTEGER;
+  const bo = Number.isFinite(Number(b.ordre)) ? Number(b.ordre) : Number.MAX_SAFE_INTEGER;
+  return (a.acte || '').localeCompare(b.acte || '', 'fr')
+    || ao - bo
+    || (a.date || '').localeCompare(b.date || '', 'fr')
+    || (a.titre || a.name || '').localeCompare(b.titre || b.name || '', 'fr');
+}
 function _statsMissionList() {
-  const m = new Map();
-  for (const s of Object.values(_statsData?.sessions || {})) if (s?.missionId && !m.has(s.missionId)) m.set(s.missionId, s.mission || 'Mission');
-  return [...m.entries()].map(([id, name]) => ({ id, name }));
+  const sessionNames = new Map();
+  for (const s of Object.values(_statsData?.sessions || {})) {
+    if (s?.missionId && !sessionNames.has(s.missionId)) sessionNames.set(s.missionId, s.mission || 'Mission');
+  }
+  const storyById = new Map((_statsStory || []).map(m => [m.id, m]));
+  return [...sessionNames.entries()]
+    .map(([id, name]) => {
+      const story = storyById.get(id);
+      return { id, name: story?.titre || name, story };
+    })
+    .sort((a, b) => {
+      if (a.story && b.story) return _statsStoryOrderCompare(a.story, b.story);
+      if (a.story) return -1;
+      if (b.story) return 1;
+      return a.name.localeCompare(b.name, 'fr');
+    });
 }
 function _statsGroupName(g = {}, idx = 0) {
   return (g.titre || g.nom || g.name || '').trim() || `Groupe ${idx + 1}`;
@@ -203,7 +225,7 @@ const _STATS_AWARD_CATALOG = [
   ['hitRate', 'Meilleur taux'],
   ['ko', 'Bourreau'],
   ['heal', 'Plus grand soigneur'],
-  ['mage', 'Le Mage'],
+  ['mage', 'Lanceur le + actif'],
   ['tank', "L'Increvable"],
   ['emotes', 'Le Bavard'],
   ['rolls', 'Le Joueur'],
@@ -893,7 +915,7 @@ function _statsRender(scope) {
     award('hitRate', '🎯', 'Meilleur taux', topHit, topHit ? `${topHit.hr}%` : '', '#22c38e'),
     award('ko', '☠️', 'Bourreau', topKo, `${topKo?.combat.kosDealt} KO`, '#ef4444'),
     award('heal', '💚', 'Plus grand soigneur', topHeal, `${topHeal?.combat.heal} PV`, '#4fd3a6'),
-    award('mage', '🧙', 'Le Mage', topMage, `${topMage?.combat.spellsCast} sorts`, '#bca0ff'),
+    award('mage', '🧙', 'Lanceur le + actif', topMage, `${topMage?.combat.spellsCast} sorts`, '#bca0ff'),
     award('tank', '🪨', "L'Increvable", topTank, `${topTank?.combat.dmgTaken} dmg subis`, '#9aa0aa'),
     award('emotes', '💬', 'Le Bavard', topEmoter, `${topEmoter?.emoteTotal} émotes`, '#4f8cff'),
     award('rolls', '🎲', 'Le Joueur', topRoller, `${topRoller?.sRolls} jets`, '#7fb0ff'),
@@ -1125,7 +1147,7 @@ function _statsRender(scope) {
         ${statCard('💀', GC.afflictionSpells, 'Afflictions appliquées', '#c084fc')}
         ${statCard('🔋', GC.pmSpent, 'PM dépensés', '#4f8cff')}
         ${statCard('💚', GC.heal, 'Soin prodigué', '#4fd3a6')}
-        ${statCard('🧙', topMage ? _esc(topMage.name) : '—', 'Mage le + actif', '#bca0ff')}
+        ${statCard('🧙', topMage ? _esc(topMage.name) : '—', 'Lanceur le + actif', '#bca0ff')}
       </div>
     </section>`;
   const competencesSec = `
@@ -2765,15 +2787,17 @@ const PAGES = {
     const content = document.getElementById('main-content');
     content.innerHTML = `${pageHeaderHtml('📊 Statistiques', 'Jets, réussites et exploits de la table')}
       <div id="stats-root" class="stats-root">${loadingHtml('Chargement des statistiques…')}</div>`;
-    const [data, emoteDoc, chars, quests] = await Promise.all([
+    const [data, emoteDoc, chars, quests, story] = await Promise.all([
       loadStats(),
       getDocData('world', 'vtt_emotes').catch(() => null),
       // Charge les persos (avec leur portrait) pour les afficher à côté du nom.
       loadChars().catch(() => null),
       loadCollection('quests').catch(() => []),
+      Promise.resolve(getCachedCollection('story') || loadCollection('story')).catch(() => []),
     ]);
     if (Array.isArray(chars) && chars.length) STATE.characters = chars;
     _statsQuests = Array.isArray(quests) ? quests : [];
+    _statsStory = Array.isArray(story) ? story : [];
     _statsLoadAwardPrefs();
     _statsData = data;
     _statsEmoteUrl = new Map((emoteDoc?.emotes || []).filter(e => e?.name && e?.url).map(e => [e.name, e.url]));
@@ -2948,9 +2972,10 @@ registerActions({
     const dk = btn.dataset.scope; if (!dk) return;
     let story = getCachedCollection('story');
     if (!story || !story.length) story = await loadCollection('story').catch(() => []);
+    _statsStory = Array.isArray(story) ? story : [];
     const missions = (story || [])
       .filter(m => m.type === 'mission' || m.type === 'event')
-      .sort((a, b) => (a.titre || '').localeCompare(b.titre || '', 'fr'));
+      .sort(_statsStoryOrderCompare);
     const curId = _statsData?.sessions?.[dk]?.missionId || '';
     const opt = (id, ico, title, active) =>
       `<button type="button" class="stats-mp-opt${active ? ' active' : ''}" data-name="${_esc(_norm(title))}"
