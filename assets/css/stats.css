@@ -22,10 +22,11 @@
   padding: .35rem .6rem; font-size: .82rem; cursor: pointer;
 }
 .stats-scope-label { font-size: .82rem; color: var(--text-muted); }
-.stats-toolbar-actions { display: inline-flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.stats-toolbar-actions { flex: 0 0 170px; display: inline-flex; flex-direction: column; align-items: stretch; gap: .45rem; flex-wrap: nowrap; }
 .stats-tool-btn {
+  width: 100%; min-width: 150px;
   font-size: .76rem; line-height: 1; cursor: pointer;
-  padding: .42rem .75rem; border-radius: 8px;
+  padding: .48rem .75rem; border-radius: 8px;
   background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-soft, #c8d4e8);
   transition: background .12s, border-color .12s, color .12s;
 }
@@ -35,9 +36,38 @@
 
 /* ── Contrôles : frise de séances + chips joueurs ── */
 .stats-controls { display: flex; flex-direction: column; gap: .6rem; margin-bottom: 1.1rem; }
-.stats-controls-top { display: flex; align-items: center; justify-content: space-between; gap: .8rem; flex-wrap: wrap; }
+.stats-controls-top { display: flex; align-items: flex-start; justify-content: space-between; gap: .8rem; flex-wrap: wrap; }
+.stats-scope-panel {
+  flex: 1 1 auto; min-width: min(100%, 320px);
+  display: flex; flex-direction: column; gap: .45rem;
+  padding: .65rem; border-radius: 12px;
+  background: rgba(255,255,255,.025); border: 1px solid var(--border);
+}
+.stats-scope-select-wrap { display: grid; grid-template-columns: auto minmax(260px, 520px); align-items: center; justify-content: start; gap: .55rem; }
+.stats-scope-select {
+  color-scheme: dark;
+  appearance: none;
+  min-width: 0; width: 100%; cursor: pointer;
+  font-family: inherit; font-size: .84rem; font-weight: 700;
+  color: var(--text); background-color: #121c2c;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #9cc3ff 50%),
+    linear-gradient(135deg, #9cc3ff 50%, transparent 50%);
+  background-position: calc(100% - 18px) 52%, calc(100% - 12px) 52%;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  border: 1px solid var(--border); border-radius: 9px;
+  padding: .48rem 2rem .48rem .65rem;
+}
+.stats-scope-select:hover,
+.stats-scope-select:focus { outline: none; border-color: rgba(34,195,142,.55); background-color: #13283a; }
+.stats-scope-select option { color: var(--text); background: #121c2c; }
 .stats-chips { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; min-width: 0; }
 .stats-sessions { overflow-x: auto; flex: 1; padding-bottom: 2px; }
+.stats-sessions--missions, .stats-sessions--dates { flex: initial; overflow-x: visible; padding-bottom: 0; }
+.stats-sessions--dates {
+  padding-top: .45rem; border-top: 1px solid rgba(255,255,255,.07);
+}
 .stats-chips-lbl { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); margin-right: .1rem; }
 .stats-chip {
   flex-shrink: 0; cursor: pointer; font-family: inherit;
@@ -48,7 +78,10 @@
 }
 .stats-chip:hover { color: var(--text); border-color: var(--gold-glow, #6366f1); }
 .stats-sessions .stats-chip.active { background: rgba(34,195,142,.16); border-color: rgba(34,195,142,.55); color: var(--emerald, #22c38e); font-weight: 700; }
+.stats-chip-scope { max-width: 230px; overflow: hidden; text-overflow: ellipsis; }
 .stats-players .stats-chip.active { background: rgba(79,140,255,.16); border-color: rgba(79,140,255,.55); color: #9cc3ff; font-weight: 700; }
+.stats-groups { padding-top: .45rem; border-top: 1px solid rgba(255,255,255,.07); }
+.stats-groups .stats-chip.active { background: rgba(188,160,255,.16); border-color: rgba(188,160,255,.55); color: #c9b6ff; font-weight: 700; }
 /* Chip de séance : date + mission (2 lignes si mission renseignée) */
 .stats-chip-session { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; }
 .stats-chip-date { font-weight: 700; }
@@ -56,6 +89,22 @@
 .stats-sessions .stats-chip.active .stats-chip-mission { color: rgba(34,195,142,.85); }
 /* Chip joueur : portrait + nom */
 .stats-chip-player { display: inline-flex; align-items: center; gap: .35rem; padding: .28rem .7rem .28rem .3rem; }
+.stats-chip-group { display: inline-flex; align-items: center; gap: .45rem; padding: .28rem .65rem; }
+.stats-chip-group-main { display: inline-flex; align-items: center; gap: .35rem; min-width: 0; }
+.stats-chip-group-main > span { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-chip-group-main small {
+  flex-shrink: 0; min-width: 1.2rem; height: 1.2rem; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: inherit; background: rgba(255,255,255,.08); font-size: .66rem; font-weight: 800;
+}
+.stats-chip-group-members { display: inline-flex; align-items: center; flex-shrink: 0; }
+.stats-chip-group-avatar { margin-left: -5px; box-shadow: 0 0 0 1px var(--bg-card); }
+.stats-chip-group-avatar:first-child { margin-left: 0; }
+
+@media (max-width: 640px) {
+  .stats-scope-select-wrap { grid-template-columns: 1fr; gap: .35rem; }
+  .stats-toolbar-actions { width: 100%; }
+}
 
 /* ── Bannière de séance : mission + participants ── */
 .stats-session-banner {
@@ -155,7 +204,12 @@
 .stats-mp-opt:hover { border-color: var(--emerald, #22c38e); color: var(--text); background: rgba(34,195,142,.07); }
 .stats-mp-opt.active { border-color: rgba(34,195,142,.6); background: rgba(34,195,142,.12); color: var(--text); }
 .stats-mp-ico { flex-shrink: 0; }
+.stats-mp-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .25rem; }
 .stats-mp-tt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-mp-members { display: flex; align-items: center; min-height: 24px; }
+.stats-mp-avatar { margin-left: -5px; box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+.stats-mp-avatar:first-child { margin-left: 0; }
+.stats-mp-empty-members { font-size: .72rem; color: var(--text-dim); }
 .stats-mp-check { flex-shrink: 0; color: var(--emerald, #22c38e); font-weight: 700; }
 .stats-mp-none { color: var(--text-dim); }
 .stats-mp-empty { color: var(--text-dim); font-size: .84rem; text-align: center; padding: 1rem 0; }
@@ -256,28 +310,42 @@
 .stats-kpi-lbl { font-size: .7rem; color: var(--text-muted); text-align: center; line-height: 1.2; }
 
 /* ── Distinctions (cartes-trophées) ── */
-.stats-trophies { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .6rem; }
+.stats-trophies { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: .6rem; }
 .stats-trophy {
   display: flex; align-items: center; gap: .7rem;
   padding: .7rem .85rem; border-radius: 12px;
-  background: var(--bg-card); border: 1px solid var(--border);
+  background: linear-gradient(90deg, rgba(255,255,255,.04), rgba(255,255,255,.018)); border: 1px solid var(--border);
   border-left: 3px solid var(--tc, var(--gold));
 }
 .stats-trophy-ic { font-size: 1.5rem; flex-shrink: 0; line-height: 1; }
-.stats-trophy-tx { display: flex; flex-direction: column; min-width: 0; }
+.stats-trophy-av { flex-shrink: 0; }
+.stats-trophy-tx { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .stats-trophy-lbl { font-size: .66rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
-.stats-trophy-who { color: var(--text); font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stats-trophy-who b { color: var(--tc, var(--gold)); font-weight: 700; }
+.stats-trophy-line { display: flex; align-items: baseline; gap: .45rem; min-width: 0; }
+.stats-trophy-who { flex: 1; min-width: 0; color: var(--text); font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-trophy-line b {
+  flex-shrink: 0; color: var(--tc, var(--gold)); font-weight: 700; font-variant-numeric: tabular-nums;
+  padding: .08rem .38rem; border-radius: 999px; background: color-mix(in srgb, var(--tc, var(--gold)) 14%, transparent);
+}
 
-/* ── Palmarès (podiums top 3) ── */
+/* ── Palmarès (podiums top 5) ── */
 .stats-podiums { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .7rem; }
 .stats-pod { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: .8rem .9rem; }
 .stats-pod-title { font-size: .74rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: .55rem; }
-.stats-pod-row { display: flex; align-items: center; gap: .5rem; padding: .22rem 0; }
+.stats-pod-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: .5rem; padding: .28rem 0; }
 .stats-pod-row + .stats-pod-row { border-top: 1px solid rgba(255,255,255,.04); }
-.stats-pod-rank { font-size: 1rem; flex-shrink: 0; }
-.stats-pod-name { flex: 1; min-width: 0; color: var(--text); font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-pod-rank { font-size: 1rem; flex-shrink: 0; text-align: center; }
+.stats-pod-rank-num { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; justify-self: center; border-radius: 50%; background: rgba(255,255,255,.07); color: var(--text-muted); font-size: .72rem; font-weight: 800; }
+.stats-pod-main { min-width: 0; display: flex; flex-direction: column; gap: .12rem; }
+.stats-pod-name { min-width: 0; color: var(--text); font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stats-pod-n { font-size: .78rem; color: var(--text-muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.stats-pod-caster { display: inline-flex; align-items: center; gap: .3rem; min-width: 0; color: var(--text-dim); font-size: .7rem; }
+.stats-pod-caster > span:not(.stats-pod-caster-avatars) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-pod-caster-avatars { display: inline-flex; align-items: center; flex-shrink: 0; }
+.stats-pod-caster-avatars .stats-av-xs { margin-left: -5px; box-shadow: 0 0 0 1px var(--bg-card); }
+.stats-pod-caster-avatars .stats-av-xs:first-child { margin-left: 0; }
+.stats-pod-more { margin-left: -3px; font-size: .62rem; color: var(--text-muted); }
+.stats-pod-caster small { flex-shrink: 0; color: var(--text-muted); }
 .stats-pod-empty { color: var(--text-dim); font-size: .85rem; }
 
 /* ── Par personnage ── */

@@ -52,37 +52,127 @@ let _statsEmoteUrl = new Map();        // name → url (affichage de l'émote r�
 let _statsScope = null;                // null = toute la campagne ; sinon clé date YYYY-MM-DD
 let _statsLastSummary = '';            // récap texte du scope courant (export Discord)
 let _statsPlayerSel = null;            // Set d'ids ciblés (null = tous les joueurs)
+let _statsGroupSel = null;             // Set de groupes ciblés pour une mission (null = tous)
+let _statsGroupMissionId = '';         // mission associée au filtre groupes
 let _statsCmpMetric = 'dmgDealt';      // métrique du graphique comparatif (par perso)
 let _statsCmpType   = 'bars';          // type du comparatif : 'bars' | 'pie'
 let _statsEvoMetric = 'dmgDealt';      // métrique du graphique d'évolution (par séance)
+let _statsQuests    = [];              // groupes de mission (collection quests) pour libellés/portraits
 
 // Avatar (rond) d'un perso par id — devant son nom dans les chips/graphiques.
 const _statsAvatar = (id, name, size = 18) =>
   characterAvatarHtml(STATE.characters?.find(x => x.id === id) || { nom: name }, { size, className: 'stats-av-xs', title: name });
 // Mission d'une séance (libellé MJ), ou '' si non renseignée.
 const _statsMissionOf = (dateKey) => (dateKey && _statsData?.sessions?.[dateKey]?.mission) || '';
-const _statsGroupOf   = (dateKey) => (dateKey && _statsData?.sessions?.[dateKey]?.group) || '';
+const _statsGroupOf   = (dateKey) => {
+  const session = dateKey ? _statsData?.sessions?.[dateKey] : null;
+  if (!session) return '';
+  const group = session.group || '';
+  if (group && group !== 'Groupe') return group;
+  const current = session.groupId ? (_statsQuests || []).find(q => q.id === session.groupId) : null;
+  return current ? _statsGroupName(current) : group;
+};
 // Dates liées à une mission (via sessions.{date}.missionId).
 const _statsMissionDates = (mid) => Object.entries(_statsData?.sessions || {}).filter(([, s]) => s?.missionId === mid).map(([dk]) => dk);
+const _statsGroupKeyOf = (dateKey) => {
+  const session = dateKey ? _statsData?.sessions?.[dateKey] : null;
+  if (!session) return '__nogroup';
+  if (session.groupId) return `id:${session.groupId}`;
+  const group = _statsGroupOf(dateKey);
+  return group ? `name:${_norm(group)}` : '__nogroup';
+};
 // Missions distinctes ayant ≥1 séance liée (pour la frise).
 function _statsMissionList() {
   const m = new Map();
   for (const s of Object.values(_statsData?.sessions || {})) if (s?.missionId && !m.has(s.missionId)) m.set(s.missionId, s.mission || 'Mission');
   return [...m.entries()].map(([id, name]) => ({ id, name }));
 }
+function _statsGroupName(g = {}, idx = 0) {
+  return (g.titre || g.nom || g.name || '').trim() || `Groupe ${idx + 1}`;
+}
+function _statsGroupsForMission(story = [], quests = [], missionId = '') {
+  const linked = (quests || [])
+    .filter(q => q?.missionId === missionId)
+    .sort((a, b) => (_statsGroupName(a)).localeCompare(_statsGroupName(b), 'fr'));
+  if (linked.length) return linked;
+  const legacyGroups = (story || []).find(x => x.id === missionId)?.groupes || [];
+  return Array.isArray(legacyGroups) ? legacyGroups : [];
+}
+function _statsGroupMembersHtml(g = {}) {
+  const charById = new Map((STATE.characters || []).map(c => [c.id, c]));
+  const parts = dedupeQuestParticipants(g.participants || []);
+  if (!parts.length) return `<span class="stats-mp-empty-members">Aucun membre</span>`;
+  return parts.map(p => {
+    const char = p.charId ? charById.get(p.charId) : null;
+    const avatarData = char || p;
+    return characterAvatarHtml(avatarData, {
+      size: 24,
+      className: 'stats-mp-avatar',
+      title: avatarData.nom || p.nom || '?',
+      border: '1px solid rgba(255,255,255,.12)',
+      background: 'rgba(79,140,255,.16)',
+    });
+  }).join('');
+}
+function _statsGroupMembersMiniHtml(g = {}) {
+  const charById = new Map((STATE.characters || []).map(c => [c.id, c]));
+  const parts = dedupeQuestParticipants(g.participants || []);
+  return parts.slice(0, 5).map(p => {
+    const char = p.charId ? charById.get(p.charId) : null;
+    const avatarData = char || p;
+    return characterAvatarHtml(avatarData, {
+      size: 18,
+      className: 'stats-chip-group-avatar',
+      title: avatarData.nom || p.nom || '?',
+      border: '1px solid rgba(255,255,255,.16)',
+      background: 'rgba(79,140,255,.16)',
+    });
+  }).join('');
+}
+function _statsGroupOptionsForDates(dates = []) {
+  const map = new Map();
+  dates.forEach(d => {
+    const session = _statsData?.sessions?.[d] || {};
+    const key = _statsGroupKeyOf(d);
+    const label = _statsGroupOf(d) || 'Sans groupe';
+    const current = map.get(key) || { key, label, groupId: session.groupId || '', count: 0, dates: [] };
+    current.count += 1;
+    current.dates.push(d);
+    if (!current.groupId && session.groupId) current.groupId = session.groupId;
+    map.set(key, current);
+  });
+  return [...map.values()].map(g => ({
+    ...g,
+    quest: g.groupId ? (_statsQuests || []).find(q => q.id === g.groupId) : null,
+  })).sort((a, b) => {
+    if (a.key === '__nogroup') return 1;
+    if (b.key === '__nogroup') return -1;
+    return a.label.localeCompare(b.label, 'fr');
+  });
+}
 // Étape 2 du sélecteur : choisir le GROUPE de la mission ayant joué la séance.
 function _statsGroupStep(dk, mid, mission, groupes) {
   const curG = _statsData?.sessions?.[dk]?.groupId || '';
-  const opt = (gid, name, active) =>
+  const opt = (g, idx, active) => {
+    const gid = g.id || '';
+    const name = _statsGroupName(g, idx);
+    return (
     `<button type="button" class="stats-mp-opt${active ? ' active' : ''}"
       data-action="_statsPickGroup" data-scope="${dk}" data-mission-id="${_esc(mid)}" data-mission="${_esc(mission)}" data-group-id="${_esc(gid)}" data-group="${_esc(name)}">
-      <span class="stats-mp-ico">👥</span><span class="stats-mp-tt">${_esc(name)}</span>${active ? '<span class="stats-mp-check">✓</span>' : ''}</button>`;
+      <span class="stats-mp-ico">👥</span>
+      <span class="stats-mp-body">
+        <span class="stats-mp-tt">${_esc(name)}</span>
+        <span class="stats-mp-members">${_statsGroupMembersHtml(g)}</span>
+      </span>
+      ${active ? '<span class="stats-mp-check">✓</span>' : ''}</button>`
+    );
+  };
   openModal(`🎯 ${_esc(mission)}`, `
     <div class="stats-mp">
       <div class="stats-mp-hint">Quel groupe a joué cette séance ?</div>
       <div class="stats-mp-list">
         <button type="button" class="stats-mp-opt stats-mp-none${!curG ? ' active' : ''}" data-action="_statsPickGroup" data-scope="${dk}" data-mission-id="${_esc(mid)}" data-mission="${_esc(mission)}" data-group-id="" data-group=""><span class="stats-mp-ico">—</span><span class="stats-mp-tt">Sans groupe précis</span></button>
-        ${groupes.map(g => opt(g.id, g.titre || 'Groupe', g.id === curG)).join('')}
+        ${groupes.map((g, idx) => opt(g, idx, g.id === curG)).join('')}
       </div>
     </div>`, { subtitle: 'Groupe de la mission', accent: '#4f8cff' });
 }
@@ -394,12 +484,22 @@ function _statsRowsFor(dateKeys) {
   }).filter(r => r.sRolls > 0 || r.combat.attacks > 0 || r.combat.dmgTaken > 0 || r.combat.spellsCast > 0 || r.emotes.length);
 }
 
-// Mini-podium top 3 (sorts / compétences / émotes). render(label) → html (défaut _esc).
-function _statsPodium(title, entries, render) {
-  const medals = ['🥇', '🥈', '🥉'];
+// Mini-palmarès top 5 (sorts / compétences / émotes). render(label) → html (défaut _esc).
+function _statsPodium(title, entries, render, opts = {}) {
+  const ranks = ['🥇', '🥈', '🥉', '4', '5'];
   const rdr = render || ((l) => _esc(l));
+  const labelOf = (e) => Array.isArray(e) ? e[0] : e?.n;
+  const countOf = (e) => Array.isArray(e) ? e[1] : e?.c;
   const body = entries.length
-    ? entries.slice(0, 3).map((e, i) => `<div class="stats-pod-row"><span class="stats-pod-rank">${medals[i]}</span><span class="stats-pod-name">${rdr(e[0])}</span><span class="stats-pod-n">×${e[1]}</span></div>`).join('')
+    ? entries.slice(0, 5).map((e, i) => {
+      const label = labelOf(e);
+      const meta = opts.meta ? opts.meta(e, i) : '';
+      return `<div class="stats-pod-row">
+        <span class="stats-pod-rank${i > 2 ? ' stats-pod-rank-num' : ''}">${ranks[i]}</span>
+        <span class="stats-pod-main"><span class="stats-pod-name">${rdr(label)}</span>${meta}</span>
+        <span class="stats-pod-n">×${countOf(e) || 0}</span>
+      </div>`;
+    }).join('')
     : '<div class="stats-pod-empty">—</div>';
   return `<div class="stats-pod"><div class="stats-pod-title">${title}</div>${body}</div>`;
 }
@@ -414,26 +514,74 @@ function _statsRender(scope) {
   const missionId = isMission ? scope.slice(8) : '';
   const dateKey   = (scope && !isMission) ? scope : null;
   const missions  = _statsMissionList();
-  const missionName = isMission ? (missions.find(m => m.id === missionId)?.name || 'Mission') : '';
-  const scopeDates = isMission ? _statsMissionDates(missionId) : (dateKey ? [dateKey] : null);
+  const allDates = [...new Set(Object.values(_statsData?.chars || {}).flatMap(c => Object.keys(c.byDate || {})))].sort().reverse();
+
+  // Sélecteur hiérarchique : campagne/mission d'abord, séances ensuite.
+  const currentSession = dateKey ? (_statsData?.sessions?.[dateKey] || {}) : null;
+  const selectedMissionId = isMission ? missionId : (currentSession?.missionId || '');
+  const selectedMission = selectedMissionId ? missions.find(m => m.id === selectedMissionId) : null;
+  const missionName = isMission ? (selectedMission?.name || 'Mission') : '';
+  const selectedMissionDates = selectedMissionId ? _statsMissionDates(selectedMissionId).sort().reverse() : [];
+  const groupOptions = selectedMissionId ? _statsGroupOptionsForDates(selectedMissionDates) : [];
+  if (_statsGroupMissionId !== selectedMissionId) {
+    _statsGroupMissionId = selectedMissionId;
+    _statsGroupSel = null;
+  }
+  if (_statsGroupSel && groupOptions.length) {
+    const validGroups = new Set(groupOptions.map(g => g.key));
+    _statsGroupSel = new Set([..._statsGroupSel].filter(k => validGroups.has(k)));
+    if (!_statsGroupSel.size) _statsGroupSel = null;
+  }
+  if (!selectedMissionId || !groupOptions.length) _statsGroupSel = null;
+  const filteredMissionDates = (_statsGroupSel && _statsGroupSel.size)
+    ? selectedMissionDates.filter(d => _statsGroupSel.has(_statsGroupKeyOf(d)))
+    : selectedMissionDates;
+  const scopeDates = isMission ? filteredMissionDates : (dateKey ? [dateKey] : null);
 
   const allRows = _statsRowsFor(scopeDates);   // participants du scope courant
   // Filtre « joueurs ciblés » : recalcule toute la page sur le sous-ensemble choisi.
   const sel = _statsPlayerSel;
   const rows = (sel && sel.size) ? allRows.filter(r => sel.has(r.id)) : allRows;
 
-  const allDates = [...new Set(Object.values(_statsData?.chars || {}).flatMap(c => Object.keys(c.byDate || {})))].sort().reverse();
-
-  // Frise : campagne · missions (🎯) · séances (📅 + groupe).
-  const scopeChip = (val, label, active, sub) =>
-    `<button class="stats-chip stats-chip-session${active ? ' active' : ''}" data-action="_statsSetScope" data-scope="${val}"${sub ? ` title="${_esc(sub)}"` : ''}>
+  const unlinkedDates = allDates.filter(d => !_statsData?.sessions?.[d]?.missionId);
+  const showUnlinkedDates = !selectedMissionId && unlinkedDates.length > 0;
+  const scopeChip = (val, label, active, sub = '', cls = '') =>
+    `<button class="stats-chip ${cls}${active ? ' active' : ''}" data-action="_statsSetScope" data-scope="${val}"${sub ? ` title="${_esc(sub)}"` : ''}>
       <span class="stats-chip-date">${label}</span>${sub ? `<span class="stats-chip-mission">${_esc(sub)}</span>` : ''}
     </button>`;
-  const sessionsBar = `<div class="stats-chips stats-sessions">
-    ${scopeChip('', 'Toute la campagne', !scope, '')}
-    ${missions.map(m => scopeChip('mission:' + m.id, `🎯 ${_esc(m.name)}`, isMission && m.id === missionId, 'Mission')).join('')}
-    ${allDates.map(d => scopeChip(d, `📅 ${_statsFmtDate(d).slice(0, 5)}`, d === dateKey, _statsGroupOf(d) || _statsMissionOf(d))).join('')}
+  const missionDatesBar = selectedMissionId ? `<div class="stats-chips stats-sessions stats-sessions--dates">
+    <span class="stats-chips-lbl">Séances</span>
+    ${scopeChip('mission:' + selectedMissionId, 'Toute la mission', isMission && missionId === selectedMissionId, selectedMission?.name || '', 'stats-chip-session')}
+    ${selectedMissionDates.map(d => scopeChip(d, `📅 ${_statsFmtDate(d).slice(0, 5)}`, d === dateKey, _statsGroupOf(d), 'stats-chip-session')).join('')}
+  </div>` : showUnlinkedDates ? `<div class="stats-chips stats-sessions stats-sessions--dates">
+    <span class="stats-chips-lbl">Sans mission</span>
+    ${scopeChip('', 'Toute la campagne', !scope, '', 'stats-chip-session')}
+    ${unlinkedDates.map(d => scopeChip(d, `📅 ${_statsFmtDate(d).slice(0, 5)}`, d === dateKey, 'Non reliée', 'stats-chip-session')).join('')}
+  </div>` : '';
+  const groupsBar = selectedMissionId && groupOptions.length > 1 ? `<div class="stats-chips stats-groups">
+    <span class="stats-chips-lbl">Groupes</span>
+    <button class="stats-chip${!_statsGroupSel || !_statsGroupSel.size ? ' active' : ''}" data-action="_statsToggleGroup" data-group-key="__all">Tous</button>
+    ${groupOptions.map(g => `<button class="stats-chip stats-chip-group${_statsGroupSel?.has(g.key) ? ' active' : ''}" data-action="_statsToggleGroup" data-group-key="${_esc(g.key)}" title="${_esc(g.label)} · ${g.count} séance${g.count > 1 ? 's' : ''}">
+      <span class="stats-chip-group-main"><span>${_esc(g.label)}</span><small>${g.count}</small></span>
+      ${g.quest ? `<span class="stats-chip-group-members">${_statsGroupMembersMiniHtml(g.quest)}</span>` : ''}
+    </button>`).join('')}
+  </div>` : '';
+  const missionSelect = `<label class="stats-scope-select-wrap">
+    <span class="stats-chips-lbl">Mission</span>
+    <select class="stats-scope-select" data-change="_statsScope">
+      <option value=""${!selectedMissionId && !dateKey ? ' selected' : ''}>Toute la campagne</option>
+      ${missions.map(m => `<option value="mission:${_esc(m.id)}"${selectedMissionId === m.id ? ' selected' : ''}>🎯 ${_esc(m.name)} (${_statsMissionDates(m.id).length})</option>`).join('')}
+    </select>
+  </label>`;
+  const sessionsBar = `<div class="stats-scope-panel">
+    ${missionSelect}
+    ${groupsBar}
+    ${missionDatesBar}
   </div>`;
+  const activeGroupNames = (_statsGroupSel && _statsGroupSel.size)
+    ? groupOptions.filter(g => _statsGroupSel.has(g.key)).map(g => g.label)
+    : [];
+  const groupScopeText = activeGroupNames.length ? activeGroupNames.join(', ') : '';
 
   // Chips « joueurs ciblés » : uniquement les participants du scope (portrait + nom).
   const playersBar = allRows.length ? `<div class="stats-chips stats-players">
@@ -472,7 +620,7 @@ function _statsRender(scope) {
   })() : isMission ? `<div class="stats-session-banner">
       <div class="stats-sb-info">
         <div class="stats-sb-date">🎯 Mission — ${scopeDates.length} séance${scopeDates.length > 1 ? 's' : ''} agrégée${scopeDates.length > 1 ? 's' : ''}</div>
-        <div class="stats-sb-mission">${_esc(missionName)}</div>
+        <div class="stats-sb-mission">${_esc(missionName)}${groupScopeText ? ` <span class="stats-sb-group">· 👥 ${_esc(groupScopeText)}</span>` : ''}</div>
       </div>
       ${partsHtml ? `<div class="stats-sb-parts" title="Participants">${partsHtml}</div>` : ''}
     </div>` : '';
@@ -493,12 +641,28 @@ function _statsRender(scope) {
   const GS = rows.reduce((g, r) => { g.rolls += r.sRolls; g.crits += r.sCrits; g.fumbles += r.sFumbles; return g; }, { rolls: 0, crits: 0, fumbles: 0 });
   const hitRate = GC.attacks ? Math.round(GC.hits / GC.attacks * 100) : 0;
   const tally = (key) => { const m = {}; rows.forEach(r => r[key].forEach(x => { m[x.n] = (m[x.n] || 0) + x.c; })); return Object.entries(m).sort((a, b) => b[1] - a[1]); };
+  const spellTallyWithCaster = () => {
+    const map = new Map();
+    rows.forEach(r => r.spells.forEach(sp => {
+      if (!sp?.n || !sp.c) return;
+      const cur = map.get(sp.n) || { n: sp.n, c: 0, casters: new Map() };
+      cur.c += sp.c;
+      cur.casters.set(r.id, (cur.casters.get(r.id) || 0) + sp.c);
+      map.set(sp.n, cur);
+    }));
+    return [...map.values()].sort((a, b) => b.c - a.c).map(sp => {
+      const casters = [...sp.casters.entries()].sort((a, b) => b[1] - a[1]).map(([id, count]) => {
+        const row = rows.find(r => r.id === id);
+        return row ? { id: row.id, name: row.name, count } : null;
+      }).filter(Boolean);
+      return { n: sp.n, c: sp.c, casters, caster: casters[0] || null };
+    });
+  };
   const skillAgg = {};
   rows.forEach(r => r.perSkill.forEach(s => { (skillAgg[s.sk] ??= 0); skillAgg[s.sk] += s.rolls; }));
   const skillTally = Object.entries(skillAgg).sort((a, b) => b[1] - a[1]);
   const topSkill = skillTally[0];
-  const spellTally = tally('spells'), emoteTally = tally('emotes');
-  const topSpell = spellTally[0], topEmote = emoteTally[0];
+  const spellTally = spellTallyWithCaster(), emoteTally = tally('emotes');
 
   const best = (key) => [...rows].filter(r => r.combat[key] > 0).sort((a, b) => b.combat[key] - a.combat[key])[0];
   const topDmg = best('dmgDealt'), topKo = best('kosDealt'), topHeal = best('heal'), topBig = best('biggestHit'), topTank = best('dmgTaken'), topMage = best('spellsCast');
@@ -511,12 +675,14 @@ function _statsRender(scope) {
   // Award : renvoie { html, txt } pour mutualiser affichage et export.
   const awards = [];
   // Carte-trophée : icône + intitulé + gagnant · valeur, liseré coloré (--tc).
-  const award = (ic, lbl, who, val, col) => { if (!who) return ''; awards.push(`${ic} ${lbl} : ${who} (${val})`);
+  const award = (ic, lbl, row, val, col) => { if (!row?.name) return ''; awards.push(`${ic} ${lbl} : ${row.name} (${val})`);
+    const char = STATE.characters?.find(x => x.id === row.id) || { nom: row.name };
     return `<div class="stats-trophy" style="--tc:${col}">
       <span class="stats-trophy-ic">${ic}</span>
+      ${characterAvatarHtml(char, { size: 30, className: 'stats-trophy-av', title: row.name, border: '1px solid rgba(255,255,255,.12)', background: `${col}20`, color: col })}
       <div class="stats-trophy-tx">
         <span class="stats-trophy-lbl">${lbl}</span>
-        <span class="stats-trophy-who">${_esc(who)}<b> · ${val}</b></span>
+        <span class="stats-trophy-line"><span class="stats-trophy-who">${_esc(row.name)}</span><b>${val}</b></span>
       </div></div>`; };
 
   const charBlock = (r) => {
@@ -570,21 +736,21 @@ function _statsRender(scope) {
   const combatTitle = dateKey ? `⚔️ Combat — séance du ${_statsFmtDate(dateKey)}`
     : isMission ? `⚔️ Combat — ${_esc(missionName)}` : '⚔️ Combat (table)';
   const awardsHtml = [
-    award('🏆', 'Plus gros frappeur', topDmg?.name, `${topDmg?.combat.dmgDealt} dmg`, '#f4c430'),
-    award('💢', 'Plus gros coup', topBig?.name, `${topBig?.combat.biggestHit}`, '#ff8b6b'),
-    award('🎯', 'Meilleur taux', topHit?.name, topHit ? `${topHit.hr}%` : '', '#22c38e'),
-    award('☠️', 'Bourreau', topKo?.name, `${topKo?.combat.kosDealt} KO`, '#ef4444'),
-    award('💚', 'Plus grand soigneur', topHeal?.name, `${topHeal?.combat.heal} PV`, '#4fd3a6'),
-    award('🧙', 'Le Mage', topMage?.name, `${topMage?.combat.spellsCast} sorts`, '#bca0ff'),
-    award('🪨', "L'Increvable", topTank?.name, `${topTank?.combat.dmgTaken} dmg subis`, '#9aa0aa'),
-    award('💬', 'Le Bavard', topEmoter?.name, `${topEmoter?.emoteTotal} émotes`, '#4f8cff'),
-    award('🎲', 'Le Joueur', topRoller?.name, `${topRoller?.sRolls} jets`, '#7fb0ff'),
-    award('🤡', 'Le plus malchanceux', topFumble?.name, `${topFumble?.tf} échec${topFumble?.tf > 1 ? 's' : ''}`, '#ff6b6b'),
+    award('🏆', 'Plus gros frappeur', topDmg, `${topDmg?.combat.dmgDealt} dmg`, '#f4c430'),
+    award('💢', 'Plus gros coup', topBig, `${topBig?.combat.biggestHit}`, '#ff8b6b'),
+    award('🎯', 'Meilleur taux', topHit, topHit ? `${topHit.hr}%` : '', '#22c38e'),
+    award('☠️', 'Bourreau', topKo, `${topKo?.combat.kosDealt} KO`, '#ef4444'),
+    award('💚', 'Plus grand soigneur', topHeal, `${topHeal?.combat.heal} PV`, '#4fd3a6'),
+    award('🧙', 'Le Mage', topMage, `${topMage?.combat.spellsCast} sorts`, '#bca0ff'),
+    award('🪨', "L'Increvable", topTank, `${topTank?.combat.dmgTaken} dmg subis`, '#9aa0aa'),
+    award('💬', 'Le Bavard', topEmoter, `${topEmoter?.emoteTotal} émotes`, '#4f8cff'),
+    award('🎲', 'Le Joueur', topRoller, `${topRoller?.sRolls} jets`, '#7fb0ff'),
+    award('🤡', 'Le plus malchanceux', topFumble, `${topFumble?.tf} échec${topFumble?.tf > 1 ? 's' : ''}`, '#ff6b6b'),
   ].join('');
 
   // Récap texte (export) — construit à partir du scope courant.
   const scopeLabel = dateKey ? `séance du ${_statsFmtDate(dateKey)}`
-    : isMission ? `mission « ${missionName} »` : 'toute la campagne';
+    : isMission ? `mission « ${missionName} »${groupScopeText ? ` · groupes ${groupScopeText}` : ''}` : 'toute la campagne';
   const sumLines = [
     `📊 Stats — ${scopeLabel}`,
     `⚔️ ${GC.attacks} attaques (${hitRate}%) · 🗡️ ${GC.dmgDealt} dmg · ☠️ ${GC.kosDealt} KO · 💚 ${GC.heal} PV soignés · 🔮 ${GC.spellsCast} sorts`,
@@ -663,7 +829,12 @@ function _statsRender(scope) {
     <section class="stats-sec">
       <div class="stats-sec-hd">🏅 Palmarès</div>
       <div class="stats-podiums">
-        ${_statsPodium('🔮 Sorts les + lancés', spellTally)}
+        ${_statsPodium('🔮 Sorts les + lancés', spellTally, null, {
+          meta: (e) => e.caster ? `<span class="stats-pod-caster" title="${_esc((e.casters || []).map(c => `${c.name} ×${c.count}`).join(' · '))}">
+            <span class="stats-pod-caster-avatars">${(e.casters || []).slice(0, 4).map(c => _statsAvatar(c.id, c.name, 18)).join('')}${(e.casters || []).length > 4 ? `<span class="stats-pod-more">+${(e.casters || []).length - 4}</span>` : ''}</span>
+            <span>${_esc(e.caster.name)}${(e.casters || []).length > 1 ? ` +${(e.casters || []).length - 1}` : ''}</span>${e.caster.count !== e.c ? `<small>×${e.caster.count}</small>` : ''}
+          </span>` : ''
+        })}
         ${_statsPodium('🎲 Compétences les + jouées', skillTally)}
         ${_statsPodium('😄 Émotes les + utilisées', emoteTally, (l) => _statsEmoteHtml(l, 'stats-emote-sm'))}
       </div>
@@ -2271,17 +2442,21 @@ const PAGES = {
     const content = document.getElementById('main-content');
     content.innerHTML = `${pageHeaderHtml('📊 Statistiques', 'Jets, réussites et exploits de la table')}
       <div id="stats-root" class="stats-root">${loadingHtml('Chargement des statistiques…')}</div>`;
-    const [data, emoteDoc, chars] = await Promise.all([
+    const [data, emoteDoc, chars, quests] = await Promise.all([
       loadStats(),
       getDocData('world', 'vtt_emotes').catch(() => null),
       // Charge les persos (avec leur portrait) pour les afficher à côté du nom.
       loadChars().catch(() => null),
+      loadCollection('quests').catch(() => []),
     ]);
     if (Array.isArray(chars) && chars.length) STATE.characters = chars;
+    _statsQuests = Array.isArray(quests) ? quests : [];
     _statsData = data;
     _statsEmoteUrl = new Map((emoteDoc?.emotes || []).filter(e => e?.name && e?.url).map(e => [e.name, e.url]));
     _statsScope = null;
     _statsPlayerSel = null;
+    _statsGroupSel = null;
+    _statsGroupMissionId = '';
     _statsRender(null);
   },
 
@@ -2340,7 +2515,7 @@ registerActions({
     const done = await deleteDateStats(d);
     showNotif(done ? 'Séance supprimée.' : 'Échec de la suppression.', done ? 'success' : 'error');
     closeModalDirect();
-    if (done) { if (_statsScope === d) _statsScope = null; PAGES.statistiques(); }
+    if (done) { if (_statsScope === d) _statsScope = null; _statsGroupSel = null; PAGES.statistiques(); }
   },
   // Supprime les stats liées à une mission (toutes ses séances).
   _statsDelMission: async (btn) => {
@@ -2353,7 +2528,7 @@ registerActions({
     const done = await deleteMissionStats(mid);
     showNotif(done ? 'Stats de la mission supprimées.' : 'Échec de la suppression.', done ? 'success' : 'error');
     closeModalDirect();
-    if (done) { _statsScope = null; PAGES.statistiques(); }
+    if (done) { _statsScope = null; _statsGroupSel = null; _statsGroupMissionId = ''; PAGES.statistiques(); }
   },
   // Réinitialisation TOTALE — confirmation par saisie (« RESET »).
   _statsResetAsk: async () => {
@@ -2366,7 +2541,7 @@ registerActions({
     const done = await resetStats();
     showNotif(done ? 'Toutes les statistiques ont été réinitialisées.' : 'Échec de la réinitialisation.', done ? 'success' : 'error');
     closeModalDirect();
-    if (done) { _statsScope = null; _statsPlayerSel = null; PAGES.statistiques(); }
+    if (done) { _statsScope = null; _statsPlayerSel = null; _statsGroupSel = null; _statsGroupMissionId = ''; PAGES.statistiques(); }
   },
   _statsDelChar: async (btn) => {
     if (!STATE.isAdmin) return;
@@ -2418,6 +2593,19 @@ registerActions({
     }
     _statsRender(_statsScope);
   },
+  // Filtre « groupes ciblés » : bascule un ou plusieurs groupes de la mission courante.
+  _statsToggleGroup: (btn) => {
+    const key = btn.dataset.groupKey;
+    if (!key) return;
+    if (key === '__all') { _statsGroupSel = null; }
+    else {
+      if (!_statsGroupSel) _statsGroupSel = new Set();
+      _statsGroupSel.has(key) ? _statsGroupSel.delete(key) : _statsGroupSel.add(key);
+      if (!_statsGroupSel.size) _statsGroupSel = null;
+    }
+    const missionScope = _statsGroupMissionId ? `mission:${_statsGroupMissionId}` : _statsScope;
+    _statsRender(missionScope);
+  },
   // Métriques des graphiques (comparatif / évolution).
   _statsCmpMetric: (el) => { _statsCmpMetric = el.value; _statsRender(_statsScope); },
   _statsEvoMetric: (el) => { _statsEvoMetric = el.value; _statsRender(_statsScope); },
@@ -2462,7 +2650,10 @@ registerActions({
       return;
     }
     const story = getCachedCollection('story') || [];
-    const groupes = (story.find(x => x.id === mid)?.groupes) || [];
+    let quests = _statsQuests?.length ? _statsQuests : getCachedCollection('quests');
+    if (!quests || !quests.length) quests = await loadCollection('quests').catch(() => []);
+    _statsQuests = Array.isArray(quests) ? quests : [];
+    const groupes = _statsGroupsForMission(story, quests, mid);
     if (Array.isArray(groupes) && groupes.length) { _statsGroupStep(dk, mid, mission, groupes); return; }
     closeModalDirect();
     await setSessionMission(dk, { mission, missionId: mid });
