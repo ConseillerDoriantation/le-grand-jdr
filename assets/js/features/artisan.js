@@ -49,6 +49,7 @@ const FRAGMENT_CAT_BY_ID = Object.fromEntries(FRAGMENT_CATEGORIES.map(c => [c.id
 
 const STORE = {
   activeCharId: null,
+  activeItemIndex: null,   // objet sélectionné dans l'établi (index inventaire)
   mjFreeMode: false,
 };
 
@@ -139,6 +140,7 @@ function _getActiveArtisanChar() {
 export async function openArtisanModal() {
   await loadUpgradeSettings();
   STORE.activeCharId = null; // reset à chaque ouverture
+  STORE.activeItemIndex = null;
   STORE.mjFreeMode = false;          // sécurité : MJ doit ré-activer le mode gratuit à chaque session
   _renderArtisanModal();
 }
@@ -183,10 +185,18 @@ function _renderArtisanModal() {
       <div style="font-size:.85rem;color:var(--gold);font-weight:700;white-space:nowrap">💰 ${or} PO</div>
     </div>
 
-    ${_renderFragmentBag(c)}
-
-    ${modalSection('🛠️ Inventaire améliorable', _renderUpgradeableItemsList(c))}
-  `, { subtitle: 'Pose des fragments pour améliorer ton équipement', accent: '#f4c430' });
+    <div class="art-layout">
+      <div class="art-left">
+        <div class="art-left-hd">🛠️ Ton équipement</div>
+        ${_renderItemList(c)}
+        ${_renderFragmentBag(c)}
+      </div>
+      <div class="art-right">
+        ${_renderWorkbench(c)}
+      </div>
+    </div>
+  `, { subtitle: 'Choisis un objet à gauche pour l\'améliorer', accent: '#f4c430' });
+  document.getElementById('modal-box')?.classList.add('modal--artisan');
 }
 
 // ── Sac de fragments ────────────────────────────────────────────────
@@ -216,75 +226,101 @@ function _renderFragmentBag(c) {
     <div class="art-frag-bag">
       <div class="art-frag-bag-hd">
         <span style="font-size:.78rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim)">
-          Sac de fragments
+          🎒 Sac de fragments
         </span>
         <span style="font-size:.7rem;color:var(--text-dim)">${totalCount} fragment${totalCount > 1 ? 's' : ''}</span>
       </div>
-      ${sections || `<div class="art-frag-empty">Aucun fragment — détruis un équipement avec un trait pour en obtenir un.</div>`}
+      <div class="art-frag-hint">Obtenus en <strong>recyclant</strong> un objet à trait. Sers-t'en pour <strong>ajouter</strong> un trait à un objet de la même catégorie.</div>
+      ${sections || `<div class="art-frag-empty">Aucun fragment — recycle un équipement à trait pour en obtenir.</div>`}
     </div>`;
 }
 
-// ── Liste des items améliorables ────────────────────────────────────
-function _renderUpgradeableItemsList(c) {
+// Résumé d'un item pour la liste (traits + bonus de stats en une ligne courte).
+function _itemSummary(item) {
+  const totalTraits = _getTraits(item).length;
+  const slotCount = getItemTraitsSlotCount(item);
+  const upBonus = ITEM_STAT_META
+    .map(m => [m.short, getItemUpgradeStatBonus(item, m.full)])
+    .filter(([, v]) => v > 0)
+    .map(([s, v]) => `+${v}${s}`).join(' ');
+  const parts = [];
+  if (slotCount > 0) parts.push(`${totalTraits}/${slotCount} trait${slotCount > 1 ? 's' : ''}`);
+  if (upBonus) parts.push(upBonus);
+  return parts.join(' · ');
+}
+
+// ── Liste des objets améliorables (colonne gauche, sélectionnable) ──────
+function _renderItemList(c) {
   if (!c) return `<div class="art-empty">Sélectionne un personnage.</div>`;
   const inv = Array.isArray(c.inventaire) ? c.inventaire : [];
-
-  // Filtrer les items qui ont une catégorie de fragment (= éligibles)
   const eligible = inv
     .map((it, idx) => ({ it, idx, cat: getItemFragmentCategory(it) }))
     .filter(({ cat }) => cat !== null);
 
   if (!eligible.length) {
-    return `<div class="art-empty">Aucun équipement améliorable dans l'inventaire.</div>`;
+    return `<div class="art-empty">Aucun équipement améliorable dans l'inventaire.<br>
+      <span style="font-size:.9em">Achète une arme, une armure ou un bijou dans la boutique.</span></div>`;
   }
 
   return `<div class="art-item-list">
-    ${eligible.map(({ it, idx, cat }) => _renderUpgradeableItemRow(it, idx, cat)).join('')}
+    ${eligible.map(({ it, idx, cat }) => {
+      const meta = FRAGMENT_CAT_BY_ID[cat];
+      const active = idx === STORE.activeItemIndex;
+      const summary = _itemSummary(it);
+      return `<button class="art-item-card${active ? ' is-active' : ''}" data-action="_artisanSelectItem" data-i="${idx}">
+        <span class="art-item-cat" title="${_esc(meta?.label || '')}">${meta?.icon || '📦'}</span>
+        <span class="art-item-card-body">
+          <span class="art-item-name">${_esc(it.nom || 'Sans nom')}</span>
+          ${summary ? `<span class="art-item-sum">${summary}</span>` : ''}
+        </span>
+        <span class="art-item-chev">${active ? '▾' : '›'}</span>
+      </button>`;
+    }).join('')}
   </div>`;
 }
 
-function _renderUpgradeableItemRow(item, invIndex, category) {
-  const cat = FRAGMENT_CAT_BY_ID[category];
-  const baseTraits  = _getBaseTraits(item);
-  const addedTraits = _getAddedTraits(item);
-  const slotCount   = getItemTraitsSlotCount(item);
-  const totalTraits = baseTraits.length + addedTraits.length;
+// ── Établi (colonne droite) : tout ce qu'on peut faire à l'objet choisi ──
+function _renderWorkbench(c) {
+  if (!c) return '';
+  if (STORE.activeItemIndex == null) {
+    return `<div class="art-wb-empty">
+      <div class="art-wb-empty-ic">🔨</div>
+      <div>Choisis un objet à gauche pour voir ce que tu peux améliorer.</div>
+    </div>`;
+  }
+  const item = (c.inventaire || [])[STORE.activeItemIndex];
+  const cat = item ? getItemFragmentCategory(item) : null;
+  if (!item || !cat) { STORE.activeItemIndex = null; return _renderWorkbench(c); }
+  const meta = FRAGMENT_CAT_BY_ID[cat];
+  const i = STORE.activeItemIndex;
 
-  // Synthèse des stats d'amélioration en cours
-  const upBonusEntries = ITEM_STAT_META
-    .map(meta => [meta.short, getItemUpgradeStatBonus(item, meta.full)])
-    .filter(([, v]) => v > 0);
-  const upBonusText = upBonusEntries.length
-    ? upBonusEntries.map(([s, v]) => `<span class="art-up-chip">+${v} ${s}</span>`).join('')
+  // État actuel (bonus de stats + traits)
+  const upBonus = ITEM_STAT_META
+    .map(m => [m.short, getItemUpgradeStatBonus(item, m.full)])
+    .filter(([, v]) => v > 0)
+    .map(([s, v]) => `<span class="art-up-chip">+${v} ${s}</span>`).join('');
+  const allTraits = _getTraits(item);
+  const traitState = allTraits.length
+    ? allTraits.map(t => `<span class="art-trait-chip">${_esc(t)}</span>`).join('')
+    : '<span class="art-muted" style="font-size:.72rem">aucun trait</span>';
+
+  const histBtn = Array.isArray(item?.upgrades?.history) && item.upgrades.history.length
+    ? `<button class="art-wb-hist" data-action="_artisanOpenHistory" data-i="${i}" title="Historique des améliorations">📜 ${item.upgrades.history.length}</button>`
     : '';
 
-  const traitChips = baseTraits.map(t =>
-    `<span class="art-trait-chip">${_esc(t)}</span>`
-  ).concat(addedTraits.map(t =>
-    `<span class="art-trait-chip art-trait-chip--added" title="Trait ajouté par amélioration">${_esc(t)} ★</span>`
-  )).join('');
+  return `<div class="art-wb">
+    <div class="art-wb-hd">
+      <span class="art-wb-ico">${meta?.icon || '📦'}</span>
+      <span class="art-wb-name">${_esc(item.nom || 'Sans nom')}</span>
+      <span class="art-wb-cat">${_esc(meta?.label || cat)}${item.format ? ` · ${_esc(item.format)}` : ''}</span>
+      ${histBtn}
+    </div>
+    <div class="art-wb-state">${upBonus}${upBonus && allTraits.length ? '' : ''}${traitState}</div>
 
-  const slotsBadge = `<span class="art-slot-count">${totalTraits}/${slotCount} slot${slotCount > 1 ? 's' : ''}</span>`;
-
-  return `
-    <div class="art-item-row">
-      <div class="art-item-hd">
-        <span class="art-item-cat" title="${_esc(cat?.label || '')}">${cat?.icon || '📦'}</span>
-        <span class="art-item-name">${_esc(item.nom || 'Sans nom')}</span>
-        ${slotsBadge}
-      </div>
-      <div class="art-item-meta">
-        ${traitChips || '<span class="art-no-traits">Aucun trait</span>'}
-        ${upBonusText ? `<span class="art-up-bonus-wrap">${upBonusText}</span>` : ''}
-      </div>
-      <div class="art-item-actions">
-        <button class="btn btn-outline btn-sm" data-action="_artisanOpenTraitsActions" data-i="${invIndex}">🔖 Traits</button>
-        <button class="btn btn-outline btn-sm" data-action="_artisanOpenStatsActions" data-i="${invIndex}">📈 Stats</button>
-        ${Array.isArray(item?.upgrades?.history) && item.upgrades.history.length
-          ? `<button class="btn btn-outline btn-sm" data-action="_artisanOpenHistory" data-i="${invIndex}" title="Historique des améliorations">📜 ${item.upgrades.history.length}</button>`
-          : ''}
-      </div>
-    </div>`;
+    ${_renderTraitsSection(item, i, c, cat)}
+    ${_renderStatsSection(item, i, c, cat)}
+    ${_renderRecycleSection(item, i, cat)}
+  </div>`;
 }
 
 // ── Toggle MJ gratuit (admins seulement) ────────────────────────────
@@ -415,122 +451,73 @@ async function _persistChar(c) {
 }
 
 // ══════════════════════════════════════════════
-// ACTIONS — TRAITS
-// Sous-modale ouverte depuis le bouton "🔖 Traits" sur un item de la liste.
+// ÉTABLI — SECTION TRAITS (inline)
 // ══════════════════════════════════════════════
 
-function _artisanOpenTraitsActions(invIndex) {
-  const c = _getActiveArtisanChar();
-  if (!c) return;
-  const item = (c.inventaire || [])[invIndex];
-  if (!item) return;
-
-  const cat        = getItemFragmentCategory(item);
+function _renderTraitsSection(item, invIndex, c, cat) {
   const catMeta    = FRAGMENT_CAT_BY_ID[cat];
   const baseTraits = _getBaseTraits(item);
-  const addedTraits= _getAddedTraits(item);
   const allTraits  = [..._getTraits(item)];
   const slotCount  = getItemTraitsSlotCount(item);
   const totalUsed  = allTraits.length;
   const slotsLibres= Math.max(0, slotCount - totalUsed);
+  const s          = getUpgradeSettings();
+  const fragments  = c.traitFragments?.[cat] || {};
+  const fragNames  = Object.entries(fragments).filter(([, n]) => (parseInt(n) || 0) > 0).map(([name, n]) => ({ name, n }));
 
-  const s         = getUpgradeSettings();
-  const fragments = c.traitFragments?.[cat] || {};
-  const fragNames = Object.entries(fragments).filter(([, n]) => (parseInt(n) || 0) > 0).map(([name, n]) => ({ name, n }));
+  if (slotCount <= 0) return '';
 
-  const or = Math.floor(calcOr(c));
+  // Pastilles d'emplacements (pleins / libres)
+  const pips = Array.from({ length: slotCount }, (_, k) =>
+    `<span class="art-pip${k < totalUsed ? ' is-on' : ''}"></span>`).join('');
 
-  // ── Section "Détruire" ──
-  const destroyExtractInfo = s.trait.extractAllTraits
-    ? `→ tous les traits récupérés (${allTraits.length})`
-    : (allTraits.length > 1 ? '→ choisir le trait à extraire' : '→ trait extrait');
+  // Chips des traits actuels (base + ajoutés★) avec bouton « remplacer »
+  const traitRows = allTraits.length
+    ? allTraits.map((t, k) => {
+        const isAdded = k >= baseTraits.length;
+        const canOw = fragNames.length > 0;
+        return `<span class="art-trait-chip${isAdded ? ' art-trait-chip--added' : ''}">${_esc(t)}${isAdded ? ' ★' : ''}${canOw
+          ? `<button class="art-chip-x" data-action="_artisanOverwriteStart" data-i="${invIndex}" data-trait="${_esc(t)}" title="Remplacer ce trait par un fragment (${s.trait.overwriteTrait} PO)">↻</button>`
+          : ''}</span>`;
+      }).join('')
+    : '<span class="art-muted" style="font-size:.72rem">Aucun trait posé.</span>';
 
-  const destroyBtn = allTraits.length === 0
-    ? `<button class="btn btn-outline btn-sm" disabled style="opacity:.5;cursor:not-allowed">Aucun trait à extraire</button>`
-    : `<button class="btn btn-danger btn-sm" data-action="_artisanDestroyStart" data-i="${invIndex}">
-         🗑️ Détruire — ${s.trait.deconstructCost} PO
-       </button>`;
-
-  // ── Section "Ajouter" ──
-  let addSection;
+  // Ajout depuis fragments
+  let addHtml;
   if (slotsLibres <= 0) {
-    addSection = `<div class="art-muted">Aucun slot libre (${totalUsed}/${slotCount}).</div>`;
+    addHtml = `<div class="art-muted" style="font-size:.72rem">Emplacements pleins — remplace un trait (↻) pour en changer.</div>`;
   } else if (!fragNames.length) {
-    addSection = `<div class="art-muted">Aucun fragment compatible dans le sac (${catMeta?.label || cat}).</div>`;
+    addHtml = `<div class="art-muted" style="font-size:.72rem">Aucun fragment « ${catMeta?.label || cat} » dans ton sac. Recycle un objet pour en obtenir.</div>`;
   } else {
-    addSection = `
-      <div style="display:flex;flex-direction:column;gap:.35rem">
-        ${fragNames.map(f => `
-          <div class="art-frag-row">
-            <span class="art-trait-chip">${_esc(f.name)}</span>
-            <span class="art-frag-row-n">×${f.n}</span>
-            <button class="btn btn-gold btn-sm" style="margin-left:auto"
-              data-action="_artisanAddTrait" data-i="${invIndex}" data-frag="${_esc(f.name)}">
-              + Poser — ${s.trait.addTraitFromFragment} PO
-            </button>
-          </div>
-        `).join('')}
-      </div>`;
+    addHtml = `<div class="art-act-row">
+      ${fragNames.map(f => `<button class="art-act art-act--gold" data-action="_artisanAddTrait" data-i="${invIndex}" data-frag="${_esc(f.name)}">
+        ＋ ${_esc(f.name)} <span class="art-act-cost">${s.trait.addTraitFromFragment} PO</span> <span class="art-act-n">×${f.n}</span>
+      </button>`).join('')}
+    </div>`;
   }
 
-  // ── Section "Écraser" ──
-  let overwriteSection;
-  if (!allTraits.length) {
-    overwriteSection = `<div class="art-muted">Aucun trait à écraser.</div>`;
-  } else if (!fragNames.length) {
-    overwriteSection = `<div class="art-muted">Aucun fragment compatible dans le sac (${catMeta?.label || cat}).</div>`;
-  } else {
-    overwriteSection = `
-      <div style="display:flex;flex-direction:column;gap:.35rem">
-        <div class="art-muted" style="font-size:.72rem">Choisis le trait à écraser :</div>
-        ${allTraits.map((t, i) => {
-          const isAdded = i >= baseTraits.length;
-          return `<div class="art-frag-row">
-            <span class="art-trait-chip${isAdded ? ' art-trait-chip--added' : ''}">${_esc(t)}${isAdded ? ' ★' : ''}</span>
-            <button class="btn btn-outline btn-sm" style="margin-left:auto"
-              data-action="_artisanOverwriteStart" data-i="${invIndex}" data-trait="${_esc(t)}">
-              Écraser…
-            </button>
-          </div>`;
-        }).join('')}
-      </div>`;
-  }
+  return `<div class="art-wb-sec">
+    <div class="art-wb-sec-hd">🔖 Traits <span class="art-wb-sec-sub">${totalUsed}/${slotCount} emplacement${slotCount > 1 ? 's' : ''}</span><span class="art-pips">${pips}</span></div>
+    <div class="art-trait-current">${traitRows}</div>
+    ${addHtml}
+  </div>`;
+}
 
-  pushModal(`🔖 Traits — ${item.nom || ''}`, `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem;font-size:.78rem;color:var(--text-dim)">
-      <span>${catMeta?.icon || ''} ${catMeta?.label || cat} · ${totalUsed}/${slotCount} slot${slotCount > 1 ? 's' : ''}</span>
-      <span style="color:var(--gold);font-weight:700">💰 ${or} PO</span>
+// Section « Recycler » (ex-destruction) — récupère les traits en fragments.
+function _renderRecycleSection(item, invIndex, cat) {
+  const s = getUpgradeSettings();
+  const allTraits = _getTraits(item);
+  if (!allTraits.length) return '';
+  const extractInfo = s.trait.extractAllTraits
+    ? `Tu récupères ${allTraits.length} fragment${allTraits.length > 1 ? 's' : ''}.`
+    : (allTraits.length > 1 ? 'Tu choisiras le trait à récupérer (les autres sont perdus).' : 'Tu récupères son trait en fragment.');
+  return `<div class="art-wb-sec art-wb-sec--danger">
+    <div class="art-wb-sec-hd">♻️ Recycler en fragments</div>
+    <div class="art-recycle">
+      <button class="art-act art-act--danger" data-action="_artisanDestroyStart" data-i="${invIndex}">♻️ Recycler <span class="art-act-cost">${s.trait.deconstructCost} PO</span></button>
+      <span class="art-muted" style="font-size:.72rem">Détruit l'objet. ${extractInfo}</span>
     </div>
-
-    <div class="art-section">
-      <div class="art-section-hd">🗑️ Détruire pour fragment</div>
-      <div class="art-section-bd">
-        <div class="art-muted" style="font-size:.72rem;margin-bottom:.35rem">
-          L'objet est supprimé de l'inventaire. ${destroyExtractInfo}.
-        </div>
-        ${destroyBtn}
-      </div>
-    </div>
-
-    <div class="art-section">
-      <div class="art-section-hd">＋ Ajouter un trait</div>
-      <div class="art-section-bd">${addSection}</div>
-    </div>
-
-    <div class="art-section">
-      <div class="art-section-hd">↻ Écraser un trait existant</div>
-      <div class="art-section-bd">
-        <div class="art-muted" style="font-size:.72rem;margin-bottom:.35rem">
-          Coût : ${s.trait.overwriteTrait} PO + 1 fragment. L'ancien trait est <strong>perdu</strong>.
-        </div>
-        ${overwriteSection}
-      </div>
-    </div>
-
-    <div style="display:flex;gap:.4rem;margin-top:.7rem">
-      <button class="btn btn-outline btn-sm" style="flex:1" data-action="_artisanBack">← Retour</button>
-    </div>
-  `);
+  </div>`;
 }
 
 // ── Détruire : si plusieurs traits et !extractAllTraits, demander lequel ──
@@ -594,6 +581,7 @@ async function _artisanDoDestroy(invIndex, traitsToExtract) {
   const inv = [...(c.inventaire || [])];
   inv.splice(invIndex, 1);
   c.inventaire = inv;
+  STORE.activeItemIndex = null;   // l'objet recyclé n'existe plus → établi vide
 
   // 2) Sync équipement (décale les sourceInvIndex)
   const sync = syncEquipmentAfterInventoryMutation(c, [invIndex]);
@@ -764,21 +752,25 @@ async function _artisanOverwriteConfirm(invIndex, oldTraitName, newFragmentName)
 
 function _artisanSelectChar(id) {
   STORE.activeCharId = id;
+  STORE.activeItemIndex = null;   // repart sans objet sélectionné
   _renderArtisanModal();
 };
 
-function _artisanOpenStatsActions(invIndex) {
-  const c = _getActiveArtisanChar();
-  if (!c) return;
-  const item = (c.inventaire || [])[invIndex];
-  if (!item) return;
+// Sélection d'un objet dans la colonne gauche → affiche/masque son établi.
+function _artisanSelectItem(invIndex) {
+  STORE.activeItemIndex = (STORE.activeItemIndex === invIndex) ? null : invIndex;
+  _renderArtisanModal();
+}
 
-  const cat = getItemFragmentCategory(item);
-  if (cat === 'Anneau')   return _openRingStatsModal(invIndex);
-  if (cat === 'Amulette') return _openAmuletStatsModal(invIndex);
-  if (cat === 'arme')     return _openWeaponStatsModal(invIndex);
-
-  showNotif(`Cet item ne supporte pas l'amélioration de stats.`, 'info');
+// Section « Stats » de l'établi — dispatch inline selon la catégorie.
+function _renderStatsSection(item, invIndex, c, cat) {
+  if (cat === 'Anneau')   return _renderRingStats(item, invIndex, c);
+  if (cat === 'Amulette') return _renderAmuletStats(item, invIndex, c);
+  if (cat === 'arme')     return _renderWeaponStats(item, invIndex, c);
+  return `<div class="art-wb-sec">
+    <div class="art-wb-sec-hd">📈 Stats</div>
+    <div class="art-muted" style="font-size:.72rem">Cet objet s'améliore uniquement par ses <strong>traits</strong> (pas de bonus de stats).</div>
+  </div>`;
 }
 
 // ── Helpers communs ──────────────────────────────────────────────────
@@ -811,102 +803,85 @@ function _getUpgradedStatEntries(item) {
 //   • Effet flat (effectBonus)     — paliers 1..cap
 // Tarif `s.ring[N]` partagé pour les deux tracks.
 // ══════════════════════════════════════════════
-function _openRingStatsModal(invIndex) {
-  const c = _getActiveArtisanChar();
-  const item = c.inventaire[invIndex];
+function _renderRingStats(item, invIndex, c) {
   const s = getUpgradeSettings();
   const cap = s.caps?.ring ?? 1;
-
   const primary = _detectPrimaryStat(item);
-  if (!primary) {
-    pushModal(`💍 Anneau — ${item.nom || ''}`, `
-      <div class="art-muted" style="text-align:center;padding:1rem">
-        Cet anneau n'a pas de stat de base — l'amélioration de stat n'est pas possible.
-        <br>Tu peux quand même améliorer l'<strong>effet</strong> ci-dessous.
-      </div>
-      ${_renderRingEffectSection(item, invIndex, s, cap)}
-      <div style="display:flex;gap:.4rem;margin-top:.7rem">
-        <button class="btn btn-outline btn-sm" style="flex:1" data-action="_artisanBack">← Retour</button>
-      </div>`);
-    return;
+  const statLevel   = primary ? (parseInt(item.upgrades?.statBonus?.[primary.store]) || 0) : 0;
+  const effectLevel = parseInt(item.upgrades?.effectBonus) || 0;
+
+  const acts = [];
+  if (primary) {
+    const nextStatLvl = statLevel + 1;
+    if (nextStatLvl <= cap) {
+      const cost = s.ring?.[nextStatLvl] || 0;
+      acts.push(`<button class="art-act art-act--emerald" data-action="_artisanRingUpgradeStat" data-i="${invIndex}">📈 +1 ${primary.short} <span class="art-act-cost">${cost} PO</span></button>`);
+    }
+  }
+  const nextEff = effectLevel + 1;
+  if (nextEff <= cap) {
+    const cost = s.ring?.[nextEff] || 0;
+    acts.push(`<button class="art-act art-act--gold" data-action="_artisanRingUpgradeEffect" data-i="${invIndex}">✨ Renforcer l'effet <span class="art-act-cost">${cost} PO</span></button>`);
   }
 
-  const statLevel   = parseInt(item.upgrades?.statBonus?.[primary.store]) || 0;
-  const effectLevel = parseInt(item.upgrades?.effectBonus) || 0;
-  const baseStatVal = getItemBaseStatBonus(item, primary.full);
-  const totalStat   = baseStatVal + statLevel;
-  const or = Math.floor(calcOr(c));
+  const totalStat = primary ? getItemBaseStatBonus(item, primary.full) + statLevel : 0;
+  const cur = [];
+  if (primary) cur.push(`<span class="art-up-chip">+${totalStat} ${primary.short}</span>`);
+  cur.push(`<span class="art-up-chip">Effet +${effectLevel}</span>`);
+  const baseEffect = item.effet ? `<div class="art-muted" style="font-size:.7rem;margin-top:.35rem">Effet : <em>${_esc(item.effet)}</em></div>` : '';
 
-  const nextStatLvl   = statLevel + 1;
-  const canUpStat     = nextStatLvl <= cap;
-  const statCost      = canUpStat ? (s.ring?.[nextStatLvl] || 0) : 0;
-
-  pushModal(`💍 Anneau — ${item.nom || ''}`, `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem;font-size:.78rem;color:var(--text-dim)">
-      <span>Stat de base : <strong style="color:var(--text)">${primary.label}</strong></span>
-      <span style="color:var(--gold);font-weight:700">💰 ${or} PO</span>
-    </div>
-
-    <div class="art-section">
-      <div class="art-section-hd">⭐ État actuel</div>
-      <div class="art-section-bd" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">
-        <span class="art-up-chip">+${totalStat} ${primary.short}${statLevel > 0 ? ` (base +${baseStatVal} · upg +${statLevel})` : ''}</span>
-        <span class="art-up-chip">Effet renforcé +${effectLevel}</span>
-        <span class="art-slot-count" style="margin-left:auto">Stat ${statLevel}/${cap} · Effet ${effectLevel}/${cap}</span>
-      </div>
-    </div>
-
-    <div class="art-section">
-      <div class="art-section-hd">📈 Améliorer la stat (${primary.label})</div>
-      <div class="art-section-bd">
-        ${canUpStat ? `
-          <div class="art-muted" style="font-size:.78rem;margin-bottom:.5rem">
-            Palier suivant : <strong>+${nextStatLvl} ${primary.short}</strong> (cumulé sur la stat de base).
-          </div>
-          <button class="btn btn-gold btn-sm" style="width:100%"
-            data-action="_artisanRingUpgradeStat" data-i="${invIndex}">
-            Améliorer la stat — ${statCost} PO
-          </button>
-        ` : `<div class="art-muted">Stat au palier maximum (${cap}/${cap}).</div>`}
-      </div>
-    </div>
-
-    ${_renderRingEffectSection(item, invIndex, s, cap)}
-
-    <div style="display:flex;gap:.4rem;margin-top:.7rem">
-      <button class="btn btn-outline btn-sm" style="flex:1" data-action="_artisanBack">← Retour</button>
-    </div>
-  `);
+  return `<div class="art-wb-sec">
+    <div class="art-wb-sec-hd">📈 Stats d'anneau <span class="art-wb-sec-sub">stat ${statLevel}/${cap} · effet ${effectLevel}/${cap}</span></div>
+    <div class="art-trait-current">${cur.join('')}</div>
+    ${acts.length ? `<div class="art-act-row">${acts.join('')}</div>` : `<div class="art-muted" style="font-size:.72rem">Tout est au palier maximum.</div>`}
+    ${baseEffect}
+  </div>`;
 }
 
-// Section "Améliorer l'effet" — réutilisable (avec ou sans stat de base)
-function _renderRingEffectSection(item, invIndex, s, cap) {
-  const effectLevel  = parseInt(item.upgrades?.effectBonus) || 0;
-  const nextEffectLvl = effectLevel + 1;
-  const canUpEff     = nextEffectLvl <= cap;
-  const effCost      = canUpEff ? (s.ring?.[nextEffectLvl] || 0) : 0;
-  const baseEffect   = item.effet || '';
+function _renderAmuletStats(item, invIndex, c) {
+  const s = getUpgradeSettings();
+  const cap = s.caps?.amulet ?? 3;
+  const used = _getUpgradedStatEntries(item);
+  const usedSet = new Set(used.map(e => e.meta.full));
+  const slotN = used.length + 1;
+  const cost = slotN <= cap ? (s.amulet?.[slotN] || 0) : 0;
+  const remaining = ITEM_STAT_META.filter(m => !usedSet.has(m.full));
+  const canAdd = used.length < cap && remaining.length > 0;
 
-  return `
-    <div class="art-section">
-      <div class="art-section-hd">✨ Améliorer l'effet</div>
-      <div class="art-section-bd">
-        ${baseEffect
-          ? `<div class="art-muted" style="font-size:.74rem;margin-bottom:.4rem">
-               Effet de base : <em>${_esc(baseEffect)}</em>
-             </div>`
-          : ''}
-        ${canUpEff ? `
-          <div class="art-muted" style="font-size:.78rem;margin-bottom:.5rem">
-            Palier suivant : <strong>+${nextEffectLvl} à l'effet</strong> (renforce le bonus flat de l'anneau).
-          </div>
-          <button class="btn btn-gold btn-sm" style="width:100%"
-            data-action="_artisanRingUpgradeEffect" data-i="${invIndex}">
-            Améliorer l'effet — ${effCost} PO
-          </button>
-        ` : `<div class="art-muted">Effet au palier maximum (${cap}/${cap}).</div>`}
-      </div>
-    </div>`;
+  const cur = used.length ? used.map(e => `<span class="art-up-chip">+${e.val} ${e.meta.short}</span>`).join('') : '<span class="art-muted" style="font-size:.72rem">aucune stat améliorée</span>';
+  const add = canAdd
+    ? `<div class="art-act-row">${remaining.map(m => `<button class="art-act art-act--emerald" data-action="_artisanAmuletAddStat" data-i="${invIndex}" data-stat="${_esc(m.full)}">+1 ${m.short} <span class="art-act-cost">${cost} PO</span></button>`).join('')}</div>`
+    : `<div class="art-muted" style="font-size:.72rem">${used.length >= cap ? `Plafond atteint (${cap} stats).` : 'Toutes les stats sont déjà améliorées.'}</div>`;
+
+  return `<div class="art-wb-sec">
+    <div class="art-wb-sec-hd">📈 Stats d'amulette <span class="art-wb-sec-sub">${used.length}/${cap} stats</span></div>
+    <div class="art-trait-current">${cur}</div>
+    ${add}
+  </div>`;
+}
+
+function _renderWeaponStats(item, invIndex, c) {
+  const s = getUpgradeSettings();
+  const is2H = /2M|2m/.test(String(item.format || ''));
+  const cap = is2H ? (s.caps?.weapon2H ?? 4) : (s.caps?.weapon1H ?? 2);
+  const tariff = is2H ? (s.weapon?.['2H'] || {}) : (s.weapon?.['1H'] || {});
+  const used = _getUpgradedStatEntries(item);
+  const total = used.reduce((a, e) => a + e.val, 0);
+  const slotN = total + 1;
+  const cost = total < cap ? (tariff[slotN] || 0) : 0;
+  const canAdd = total < cap;
+
+  const cur = used.length ? used.map(e => `<span class="art-up-chip">+${e.val} ${e.meta.short}</span>`).join('') : '<span class="art-muted" style="font-size:.72rem">aucun point placé</span>';
+  const bar = `<span class="art-bar"><span style="width:${Math.round(total / cap * 100)}%"></span></span>`;
+  const add = canAdd
+    ? `<div class="art-act-row">${ITEM_STAT_META.map(m => `<button class="art-act art-act--emerald" data-action="_artisanWeaponAddPoint" data-i="${invIndex}" data-stat="${_esc(m.full)}">+1 ${m.short} <span class="art-act-cost">${cost} PO</span></button>`).join('')}</div>`
+    : `<div class="art-muted" style="font-size:.72rem">Plafond atteint (${total}/${cap} points).</div>`;
+
+  return `<div class="art-wb-sec">
+    <div class="art-wb-sec-hd">📈 Stats d'arme <span class="art-wb-sec-sub">${total}/${cap} points</span>${bar}</div>
+    <div class="art-trait-current">${cur}</div>
+    ${add}
+  </div>`;
 }
 
 // — Action : améliorer la stat de l'anneau seule
@@ -978,68 +953,6 @@ async function _artisanRingUpgradeEffect(invIndex) {
 // ══════════════════════════════════════════════
 // AMULETTE — jusqu'à N stats DISTINCTES, +1 chacune
 // ══════════════════════════════════════════════
-function _openAmuletStatsModal(invIndex) {
-  const c = _getActiveArtisanChar();
-  const item = c.inventaire[invIndex];
-  const s = getUpgradeSettings();
-  const cap = s.caps?.amulet ?? 3;
-
-  const used = _getUpgradedStatEntries(item);
-  const usedSet = new Set(used.map(e => e.meta.full));
-  const usedCount = used.length;
-  const slotN = usedCount + 1;
-  const cost = slotN <= cap ? (s.amulet?.[slotN] || 0) : 0;
-  const or = Math.floor(calcOr(c));
-
-  const remainingStats = ITEM_STAT_META.filter(m => !usedSet.has(m.full));
-  const canAdd = usedCount < cap && remainingStats.length > 0;
-
-  const usedHtml = used.length
-    ? used.map(e => `<span class="art-up-chip">+${e.val} ${e.meta.short}</span>`).join('')
-    : `<span class="art-muted" style="font-size:.74rem">Aucune amélioration.</span>`;
-
-  let addHtml;
-  if (!canAdd) {
-    addHtml = usedCount >= cap
-      ? `<div class="art-muted">Plafond atteint (${cap}/${cap}).</div>`
-      : `<div class="art-muted">Toutes les stats sont déjà améliorées.</div>`;
-  } else {
-    addHtml = `
-      <div class="art-muted" style="font-size:.78rem;margin-bottom:.5rem">
-        ${usedCount}/${cap} stat(s) déjà ajoutée(s). Coût de la suivante : <strong>${cost} PO</strong>.
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:.35rem">
-        ${remainingStats.map(m => `
-          <button class="btn btn-outline btn-sm"
-            data-action="_artisanAmuletAddStat" data-i="${invIndex}" data-stat="${_esc(m.full)}">
-            +1 ${m.short}
-          </button>
-        `).join('')}
-      </div>`;
-  }
-
-  pushModal(`📿 Amulette — ${item.nom || ''}`, `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem;font-size:.78rem;color:var(--text-dim)">
-      <span>Stats distinctes : ${usedCount}/${cap}</span>
-      <span style="color:var(--gold);font-weight:700">💰 ${or} PO</span>
-    </div>
-
-    <div class="art-section">
-      <div class="art-section-hd">⭐ Améliorations actuelles</div>
-      <div class="art-section-bd" style="display:flex;gap:.4rem;flex-wrap:wrap">${usedHtml}</div>
-    </div>
-
-    <div class="art-section">
-      <div class="art-section-hd">＋ Ajouter une stat</div>
-      <div class="art-section-bd">${addHtml}</div>
-    </div>
-
-    <div style="display:flex;gap:.4rem;margin-top:.7rem">
-      <button class="btn btn-outline btn-sm" style="flex:1" data-action="_artisanBack">← Retour</button>
-    </div>
-  `);
-}
-
 async function _artisanAmuletAddStat(invIndex, statFullKey) {
   const c = _getActiveArtisanChar();
   if (!c) return;
@@ -1083,68 +996,6 @@ async function _artisanAmuletAddStat(invIndex, statFullKey) {
 // ARME — points distribuables (cap 1H ou 2H)
 // Le joueur peut cumuler plusieurs points sur la même stat ou répartir.
 // ══════════════════════════════════════════════
-function _openWeaponStatsModal(invIndex) {
-  const c = _getActiveArtisanChar();
-  const item = c.inventaire[invIndex];
-  const s = getUpgradeSettings();
-
-  const fmt = String(item.format || '');
-  const is2H = /2M|2m/.test(fmt);
-  const cap = is2H ? (s.caps?.weapon2H ?? 4) : (s.caps?.weapon1H ?? 2);
-  const tariffTable = is2H ? (s.weapon?.['2H'] || {}) : (s.weapon?.['1H'] || {});
-  const handLabel = is2H ? '2M' : '1M';
-
-  const used = _getUpgradedStatEntries(item);
-  const total = used.reduce((s2, e) => s2 + e.val, 0);
-  const slotN = total + 1;
-  const cost = total < cap ? (tariffTable[slotN] || 0) : 0;
-  const or = Math.floor(calcOr(c));
-  const canAdd = total < cap;
-
-  const usedHtml = used.length
-    ? used.map(e => `<span class="art-up-chip">+${e.val} ${e.meta.short}</span>`).join('')
-    : `<span class="art-muted" style="font-size:.74rem">Aucune amélioration.</span>`;
-
-  let addHtml;
-  if (!canAdd) {
-    addHtml = `<div class="art-muted">Plafond atteint (${total}/${cap} points).</div>`;
-  } else {
-    addHtml = `
-      <div class="art-muted" style="font-size:.78rem;margin-bottom:.5rem">
-        ${total}/${cap} points utilisés. Coût du ${slotN}ᵉ point : <strong>${cost} PO</strong>.
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:.35rem">
-        ${ITEM_STAT_META.map(m => `
-          <button class="btn btn-outline btn-sm"
-            data-action="_artisanWeaponAddPoint" data-i="${invIndex}" data-stat="${_esc(m.full)}">
-            +1 ${m.short}
-          </button>
-        `).join('')}
-      </div>`;
-  }
-
-  pushModal(`⚔️ Arme — ${item.nom || ''}`, `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem;font-size:.78rem;color:var(--text-dim)">
-      <span>Format ${handLabel} · Points : ${total}/${cap}</span>
-      <span style="color:var(--gold);font-weight:700">💰 ${or} PO</span>
-    </div>
-
-    <div class="art-section">
-      <div class="art-section-hd">⭐ Améliorations actuelles</div>
-      <div class="art-section-bd" style="display:flex;gap:.4rem;flex-wrap:wrap">${usedHtml}</div>
-    </div>
-
-    <div class="art-section">
-      <div class="art-section-hd">＋ Ajouter un point de stat</div>
-      <div class="art-section-bd">${addHtml}</div>
-    </div>
-
-    <div style="display:flex;gap:.4rem;margin-top:.7rem">
-      <button class="btn btn-outline btn-sm" style="flex:1" data-action="_artisanBack">← Retour</button>
-    </div>
-  `);
-}
-
 async function _artisanWeaponAddPoint(invIndex, statFullKey) {
   const c = _getActiveArtisanChar();
   if (!c) return;
@@ -1189,9 +1040,8 @@ async function _artisanWeaponAddPoint(invIndex, statFullKey) {
 
 registerActions({
   _artisanSelectChar: (el) => _artisanSelectChar(el.value),
+  _artisanSelectItem: (btn) => _artisanSelectItem(Number(btn.dataset.i)),
   _artisanToggleMjFree: (el) => _artisanToggleMjFree(el.checked),
-  _artisanOpenTraitsActions: (btn) => _artisanOpenTraitsActions(Number(btn.dataset.i)),
-  _artisanOpenStatsActions: (btn) => _artisanOpenStatsActions(Number(btn.dataset.i)),
   _artisanOpenHistory: (btn) => _artisanOpenHistory(Number(btn.dataset.i)),
   _artisanDestroyStart: (btn) => _artisanDestroyStart(Number(btn.dataset.i)),
   _artisanDestroyConfirm: (btn) => _artisanDestroyConfirm(Number(btn.dataset.i), btn.dataset.trait),
