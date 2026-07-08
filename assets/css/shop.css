@@ -5523,35 +5523,12 @@ body .sh-page--v2 .sh-item-desc {
   background: rgba(157,111,255,.16); border-color: rgba(157,111,255,.45); color: #c9b3ff;
 }
 
-/* ── Filtre par trait (barre au-dessus de la liste d'articles) ── */
-.atelier-trait-bar {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
-  padding: .4rem .5rem; margin-bottom: .5rem;
-  background: rgba(79,140,255,.05); border: 1px solid rgba(79,140,255,.2); border-radius: 10px;
-}
-.atelier-trait-bar-lbl { font-size: .66rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; margin-right: 2px; }
-.atelier-trait-chip {
-  background: rgba(255,255,255,.03); border: 1px solid var(--border);
-  color: var(--text-soft, #c8d4e8); border-radius: 999px; padding: 3px 10px;
-  font-family: inherit; font-size: .7rem; font-weight: 600; cursor: pointer; white-space: nowrap;
-  transition: background .12s, color .12s, border-color .12s;
-}
-.atelier-trait-chip:hover { color: var(--text); border-color: rgba(79,140,255,.4); }
-.atelier-trait-chip.is-active { background: rgba(79,140,255,.2); border-color: rgba(79,140,255,.6); color: #9cc3ff; }
-.atelier-trait-clear {
-  margin-left: auto; background: transparent; border: 1px solid rgba(255,90,126,.3);
-  color: var(--crimson-light, #ff8ca7); border-radius: 999px; width: 20px; height: 20px;
-  cursor: pointer; font-size: .7rem; line-height: 1; flex-shrink: 0;
-}
-.atelier-trait-clear:hover { background: rgba(255,90,126,.14); }
-
 /* ── Traits affichés sur chaque article ── */
 .atelier-item-traits { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; font-size: .62rem; color: var(--text-dim); }
 .atelier-item-trait {
   font-size: .62rem; padding: 1px 7px; border-radius: 999px;
   background: rgba(180,127,255,.12); border: 1px solid rgba(180,127,255,.32); color: #c9b3ff;
 }
-.atelier-item-trait.is-active { background: rgba(79,140,255,.22); border-color: rgba(79,140,255,.55); color: #9cc3ff; }
 .atelier-item-trait-more { font-size: .6rem; color: var(--text-muted); }
 
 /* ── Double croix : l'Atelier a son propre header (.atelier-head) avec un ✕ ;

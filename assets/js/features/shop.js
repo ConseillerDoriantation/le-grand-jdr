@@ -3489,7 +3489,7 @@ const _ATELIER_SLOTS = [
   { name: 'Bottes',          ico: '👢', kind: 'armure' },
   { name: 'Objet magique',   ico: '🔮', kind: 'bijou'  },
 ];
-let _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: 'rarity', traitFilter: '' };
+let _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: 'rarity' };
 
 /** Filtre les items boutique compatibles avec un slot d'équipement donné. */
 function _atelierItemsForSlot(slotName) {
@@ -3739,19 +3739,7 @@ function _renderAtelierItems() {
   }
   const q = _norm(_atelier.itemSearch || '');
   let items = _atelierItemsForSlot(slot);
-  // Traits distincts du slot (pour la barre de filtre) — calculés avant filtrage.
-  const traitSet = new Set();
-  items.forEach(it => _getItemTraits(it).forEach(t => traitSet.add(t)));
-  const traitList = [...traitSet].sort((a, b) => a.localeCompare(b, 'fr'));
-  const traitFilter = _atelier.traitFilter || '';
-  const traitBar = traitList.length ? `<div class="atelier-trait-bar">
-    <span class="atelier-trait-bar-lbl">🔖 Trait :</span>
-    ${traitList.map(t => `<button class="atelier-trait-chip${traitFilter === t ? ' is-active' : ''}" data-sh-action="atelierSetTrait" data-trait="${_esc(t)}" title="Filtrer les ${_esc(slot.toLowerCase())} ayant « ${_esc(t)} »">${_esc(t)}</button>`).join('')}
-    ${traitFilter ? `<button class="atelier-trait-clear" data-sh-action="atelierSetTrait" data-trait="" title="Retirer le filtre">✕</button>` : ''}
-  </div>` : '';
-
   if (q) items = items.filter(it => _searchIncludes(_itemSearchText(it), q));
-  if (traitFilter) items = items.filter(it => _getItemTraits(it).includes(traitFilter));
   const sortMode = _atelier.sort || 'rarity';
   const byName = (a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr');
   const byRare = (a, b) => (_getRareteNum(b.rarete) - _getRareteNum(a.rarete)) || byName(a, b);
@@ -3785,17 +3773,17 @@ function _renderAtelierItems() {
   }).slice(0, 40);
 
   if (!items.length) {
-    return traitBar + `<div class="atelier-items-empty">
+    return `<div class="atelier-items-empty">
       <div class="atelier-items-empty-ico">🔎</div>
       <div><b>Aucun article compatible</b></div>
-      <div class="atelier-items-empty-hint">${traitFilter ? `Aucun ${_esc(slot.toLowerCase())} avec le trait « ${_esc(traitFilter)} ».` : `Aucun article boutique ne correspond au slot « ${_esc(slot)} ».`}</div>
+      <div class="atelier-items-empty-hint">Aucun article boutique ne correspond au slot « ${_esc(slot)} ».</div>
     </div>`;
   }
 
   const c = _getActiveShopChar();
   const solde = calcOr(c);
 
-  return traitBar + items.map(it => {
+  return items.map(it => {
     const tried = _atelier.simulated[slot]?.id === it.id;
     const rareNum = _getRareteNum(it.rarete);
     const rareCol = rareNum > 0 ? _rareteColor(RARETE_NAMES[rareNum]) : 'var(--border)';
@@ -3833,7 +3821,7 @@ function _renderAtelierItems() {
         ${bonus.length ? `<div class="atelier-item-bonus">
           ${bonus.slice(0,4).map(b => `<span class="sh-item-bonus-chip" style="border-color:${b.color}55;background:${b.color}18;color:${b.color}">${b.short} ${b.val>0?'+':''}${b.val}</span>`).join('')}
         </div>` : ''}
-        ${(() => { const tr = _getItemTraits(it); return tr.length ? `<div class="atelier-item-traits">🔖 ${tr.slice(0,4).map(t => `<span class="atelier-item-trait${_atelier.traitFilter===t?' is-active':''}">${_esc(t)}</span>`).join('')}${tr.length>4?`<span class="atelier-item-trait-more">+${tr.length-4}</span>`:''}</div>` : ''; })()}
+        ${(() => { const tr = _getItemTraits(it); return tr.length ? `<div class="atelier-item-traits">🔖 ${tr.slice(0,4).map(t => `<span class="atelier-item-trait">${_esc(t)}</span>`).join('')}${tr.length>4?`<span class="atelier-item-trait-more">+${tr.length-4}</span>`:''}</div>` : ''; })()}
       </div>
       <span class="atelier-item-fav ${_isFav(it.id)?'is-fav':''}" data-sh-action="toggleFav" data-id="${it.id}"
         title="${_isFav(it.id)?'Retirer des favoris':'Ajouter aux favoris'}">${_isFav(it.id)?'★':'☆'}</span>
@@ -3897,7 +3885,7 @@ async function _atelierBuyAll() {
     try { await confirmBuyItem(it.id, 1); bought++; } catch (e) { console.warn('[atelier buyAll]', e); }
   }
   showNotif(`✅ ${bought} article${bought>1?'s':''} acheté${bought>1?'s':''} pour ${totalCost} or !`, 'success');
-  _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: _atelier.sort || 'rarity', traitFilter: '' };
+  _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: _atelier.sort || 'rarity' };
   _renderAtelier();
 }
 
@@ -3956,7 +3944,7 @@ function openAtelierModal(prefillItemId) {
   const char = _getActiveShopChar();
   if (!char) { showNotif('Sélectionne d\'abord un personnage.', 'error'); return; }
   // Reset état
-  _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: 'rarity', traitFilter: '' };
+  _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: 'rarity' };
   if (prefillItemId) {
     const item = _items.find(i => i.id === prefillItemId);
     const slot = item ? _resolveSlotForItem(item) : null;
@@ -4009,13 +3997,11 @@ Object.assign(shHandlers, {
   atelierSelectSlot: (el) => {
     const s = el.dataset.slot || '';
     _atelier.activeSlot = (_atelier.activeSlot === s) ? null : s;
-    _atelier.traitFilter = '';   // les traits diffèrent d'un slot à l'autre
     _renderAtelier();
   },
   // Onglet de slot : sélection directe (pas de toggle off, contrairement à la silhouette).
   atelierGoSlot: (el) => {
     _atelier.activeSlot = el.dataset.slot || null;
-    _atelier.traitFilter = '';
     _renderAtelier();
   },
   atelierClearSlot: (el, ev) => {
@@ -4034,13 +4020,11 @@ Object.assign(shHandlers, {
     _renderAtelier();
   },
   atelierReset: () => {
-    _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: _atelier.sort || 'rarity', traitFilter: '' };
+    _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: _atelier.sort || 'rarity' };
     _renderAtelier();
   },
   atelierSearch:      (el) => { _atelier.itemSearch = el.value || ''; _renderAtelier(); },
   atelierSetSort:     (el) => { _atelier.sort = el.dataset.sort || 'rarity'; _renderAtelier(); },
-  // Filtre par trait : bascule (re-clic ou ✕ = retire le filtre).
-  atelierSetTrait:    (el) => { const t = el.dataset.trait || ''; _atelier.traitFilter = (_atelier.traitFilter === t) ? '' : t; _renderAtelier(); },
   atelierBuyAll:      () => _atelierBuyAll(),
   atelierSaveBuild:   () => _atelierSaveBuild(),
   atelierLoadBuild:   (el) => _atelierLoadBuild(el.dataset.id),
