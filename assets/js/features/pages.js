@@ -656,11 +656,26 @@ function _statsRender(scope) {
     ${allRows.map(r => `<button class="stats-chip stats-chip-player${sel && sel.has(r.id) ? ' active' : ''}" data-action="_statsTogglePlayer" data-id="${r.id}">${_statsAvatar(r.id, r.name, 18)}<span>${_esc(r.name)}</span></button>`).join('')}
   </div>` : '';
 
+  const viewPills = [];
+  if (selectedMissionId) viewPills.push(`🎯 ${_esc(selectedMission?.name || missionName || 'Mission')}`);
+  else viewPills.push('🌍 Toute la campagne');
+  if (dateKey) viewPills.push(`📅 ${_statsFmtDate(dateKey)}`);
+  else if (isMission) viewPills.push(`📅 ${scopeDates.length} séance${scopeDates.length > 1 ? 's' : ''}`);
+  if (groupScopeText) viewPills.push(`👥 ${_esc(groupScopeText)}`);
+  if (sel && sel.size) viewPills.push(`🧑 ${rows.length}/${allRows.length} joueur${rows.length > 1 ? 's' : ''}`);
+  const filtersActive = !!scope || !!(sel && sel.size) || !!(_statsGroupSel && _statsGroupSel.size);
+  const activeView = `<div class="stats-active-view">
+    <span class="stats-active-label">Vue actuelle</span>
+    <span class="stats-active-pills">${viewPills.map(p => `<span>${p}</span>`).join('')}</span>
+    ${filtersActive ? '<button class="stats-active-reset" data-action="_statsResetFilters">Réinitialiser</button>' : ''}
+  </div>`;
+
   const exportBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExport" title="Copier un récap texte (Discord…)">📋 Copier le récap</button>` : '';
   const visualBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExportImage" title="Télécharger un récap visuel PNG">🖼️ Récap visuel</button>` : '';
   const manageBtn = STATE.isAdmin ? `<button class="stats-tool-btn" data-action="_statsManage" title="Relier les séances aux missions · supprimer des données">⚙ Gérer les données</button>` : '';
   const controls = `<div class="stats-controls">
     <div class="stats-controls-top">${sessionsBar}<div class="stats-toolbar-actions">${exportBtn}${visualBtn}${manageBtn}</div></div>
+    ${activeView}
     ${playersBar}
   </div>`;
 
@@ -738,6 +753,16 @@ function _statsRender(scope) {
   const topFumble = [...rows].map(r => ({ ...r, tf: r.combat.fumbles + r.sFumbles })).filter(r => r.tf > 0).sort((a, b) => b.tf - a.tf)[0];
   const topEmoter = [...rows].filter(r => r.emoteTotal > 0).sort((a, b) => b.emoteTotal - a.emoteTotal)[0];
   const topRoller = [...rows].filter(r => r.sRolls > 0).sort((a, b) => b.sRolls - a.sRolls)[0];
+  const impactScore = (r) => Math.round(
+    (r.combat.dmgDealt || 0) +
+    (r.combat.heal || 0) * 1.15 +
+    (r.combat.kosDealt || 0) * 12 +
+    (r.combat.spellsCast || 0) * 4 +
+    (r.sRolls || 0) * 2 +
+    (r.sCrits || 0) * 6 -
+    ((r.combat.fumbles || 0) + (r.sFumbles || 0)) * 3
+  );
+  const mvp = [...rows].map(r => ({ ...r, impact: impactScore(r) })).filter(r => r.impact > 0).sort((a, b) => b.impact - a.impact)[0];
   const insightItems = [];
   if (groupCompare.length > 1) {
     const byDmg = [...groupCompare].sort((a, b) => b.combat.dmgDealt - a.combat.dmgDealt)[0];
@@ -858,18 +883,37 @@ function _statsRender(scope) {
       <div class="stats-sec-hd">🧭 Lecture rapide</div>
       <div class="stats-insights">${insightItems.slice(0, 5).map(x => `<div class="stats-insight">${x}</div>`).join('')}</div>
     </section>` : '';
+  const mvpSec = mvp ? (() => {
+    const parts = [];
+    if (mvp.combat.dmgDealt) parts.push(`🗡️ ${mvp.combat.dmgDealt} dégâts`);
+    if (mvp.combat.heal) parts.push(`💚 ${mvp.combat.heal} soin`);
+    if (mvp.combat.spellsCast) parts.push(`🔮 ${mvp.combat.spellsCast} sorts`);
+    if (mvp.sRolls) parts.push(`🎲 ${mvp.sRolls} jets`);
+    if (mvp.combat.kosDealt) parts.push(`☠️ ${mvp.combat.kosDealt} KO`);
+    return `<section class="stats-sec stats-mvp-sec">
+      <div class="stats-mvp-card">
+        <div class="stats-mvp-id">${_statsAvatar(mvp.id, mvp.name, 42)}<div><span class="stats-mvp-eyebrow">MVP d'impact</span><b>${_esc(mvp.name)}</b></div></div>
+        <div class="stats-mvp-score">${mvp.impact}<span>score</span></div>
+        <div class="stats-mvp-breakdown">${parts.slice(0, 5).map(p => `<span>${p}</span>`).join('')}</div>
+      </div>
+    </section>`;
+  })() : '';
   const groupMax = {
-    dmg: Math.max(1, ...groupCompare.map(g => g.combat.dmgDealt || 0)),
-    heal: Math.max(1, ...groupCompare.map(g => g.combat.heal || 0)),
-    spells: Math.max(1, ...groupCompare.map(g => g.combat.spellsCast || 0)),
-    rolls: Math.max(1, ...groupCompare.map(g => g.skills.rolls || 0)),
+    dmg: Math.max(1, ...groupCompare.map(g => (g.combat.dmgDealt || 0) / Math.max(1, g.count))),
+    heal: Math.max(1, ...groupCompare.map(g => (g.combat.heal || 0) / Math.max(1, g.count))),
+    spells: Math.max(1, ...groupCompare.map(g => (g.combat.spellsCast || 0) / Math.max(1, g.count))),
+    rolls: Math.max(1, ...groupCompare.map(g => (g.skills.rolls || 0) / Math.max(1, g.count))),
     hit: Math.max(1, ...groupCompare.map(g => g.hitRate || 0)),
   };
-  const groupMetricLine = (ic, lbl, val, max, col, suffix = '') => `<div class="stats-group-metric" style="--gm:${col}">
+  const groupMetricLine = (ic, lbl, val, max, col, suffix = '', sessions = 1, normalize = true) => {
+    const base = normalize ? (_statsNum(val) / Math.max(1, sessions)) : _statsNum(val);
+    const avg = normalize && sessions > 1 ? `<small>${Number.isInteger(base) ? base : base.toFixed(1)}/séance</small>` : '';
+    return `<div class="stats-group-metric" style="--gm:${col}">
     <span class="stats-group-metric-lbl"><span>${ic}</span>${lbl}</span>
-    <span class="stats-group-metric-bar"><span style="width:${Math.max(3, Math.round((_statsNum(val) / max) * 100))}%"></span></span>
-    <b>${val}${suffix}</b>
+    <span class="stats-group-metric-bar"><span style="width:${Math.max(3, Math.round((base / max) * 100))}%"></span></span>
+    <b>${val}${suffix}${avg}</b>
   </div>`;
+  };
   const groupSessionItem = (x) => `<div class="stats-group-session">
     <div class="stats-group-session-main">
       <span class="stats-time-date">📅 ${_statsFmtDate(x.d)}</span>
@@ -903,11 +947,11 @@ function _statsRender(scope) {
               <span class="stats-group-members">${g.quest ? _statsGroupMembersMiniHtml(g.quest) : g.rows.slice(0, 5).map(r => _statsAvatar(r.id, r.name, 18)).join('')}</span>
             </div>
             <div class="stats-group-metrics">
-              ${groupMetricLine('🗡️', 'Dégâts', g.combat.dmgDealt, groupMax.dmg, '#c9b6ff')}
-              ${groupMetricLine('💚', 'Soin', g.combat.heal, groupMax.heal, '#4fd3a6')}
-              ${groupMetricLine('🔮', 'Sorts', g.combat.spellsCast, groupMax.spells, '#bca0ff')}
-              ${groupMetricLine('🎲', 'Jets', g.skills.rolls, groupMax.rolls, '#7fb0ff')}
-              ${groupMetricLine('🎯', 'Touche', g.hitRate, groupMax.hit, '#22c38e', '%')}
+              ${groupMetricLine('🗡️', 'Dégâts', g.combat.dmgDealt, groupMax.dmg, '#c9b6ff', '', g.count)}
+              ${groupMetricLine('💚', 'Soin', g.combat.heal, groupMax.heal, '#4fd3a6', '', g.count)}
+              ${groupMetricLine('🔮', 'Sorts', g.combat.spellsCast, groupMax.spells, '#bca0ff', '', g.count)}
+              ${groupMetricLine('🎲', 'Jets', g.skills.rolls, groupMax.rolls, '#7fb0ff', '', g.count)}
+              ${groupMetricLine('🎯', 'Touche', g.hitRate, groupMax.hit, '#22c38e', '%', 1, false)}
             </div>
             ${sessions.length ? `<div class="stats-group-sessions"><div class="stats-group-subtitle">Séances jouées</div>${sessions.map(groupSessionItem).join('')}</div>` : ''}
           </div>`;
@@ -925,7 +969,15 @@ function _statsRender(scope) {
       ['Jets', GS.rolls, '#7fb0ff'],
     ],
     awards: awards.slice(0, 6),
-    groups: groupCompare.slice(0, 4).map(g => ({ label: g.label, dmg: g.combat.dmgDealt, heal: g.combat.heal, rolls: g.skills.rolls, sessions: g.count })),
+    mvp: mvp ? { name: mvp.name, score: mvp.impact } : null,
+    groups: groupCompare.slice(0, 4).map(g => ({
+      label: g.label,
+      dmg: g.combat.dmgDealt,
+      heal: g.combat.heal,
+      rolls: g.skills.rolls,
+      sessions: g.count,
+      dmgAvg: Math.round((g.combat.dmgDealt || 0) / Math.max(1, g.count)),
+    })),
   };
 
   // ── Graphiques (SVG/HTML, sans dépendance) ──
@@ -960,25 +1012,39 @@ function _statsRender(scope) {
     </section>`;
 
   // ── Sections (recomposées en colonnes plus bas) ──
+  const emoteTotal = rows.reduce((s, r) => s + r.emoteTotal, 0);
   const combatSec = `
     <section class="stats-sec">
       <div class="stats-sec-hd">${combatTitle}</div>
       <div class="stats-kpis">
+        ${statCard('⚔️', GC.attacks, 'Attaques', '#ff9d7a')}
+        ${statCard('🎯', `${hitRate}%`, 'Taux de réussite', '#22c38e')}
+        ${statCard('🗡️', GC.dmgDealt, 'Dégâts infligés', '#c9b6ff')}
         ${statCard('💥', GC.crits, 'Réussites critiques', '#f4c430')}
         ${statCard('💔', GC.fumbles, 'Échecs critiques', '#ff6b6b')}
         ${statCard('🛡️', GC.dmgTaken, 'Dégâts subis', '#9aa0aa')}
         ${statCard('☠️', GC.kosDealt, 'KO infligés', '#ef4444')}
         ${statCard('💀', GC.kosTaken, 'Fois mis KO', '#b06a6a')}
+      </div>
+    </section>`;
+  const magicSec = `
+    <section class="stats-sec">
+      <div class="stats-sec-hd">🔮 Magie & soutien</div>
+      <div class="stats-kpis">
+        ${statCard('🔮', GC.spellsCast, 'Sorts lancés', '#bca0ff')}
         ${statCard('🔋', GC.pmSpent, 'PM dépensés', '#4f8cff')}
+        ${statCard('💚', GC.heal, 'Soin prodigué', '#4fd3a6')}
+        ${statCard('🧙', topMage ? _esc(topMage.name) : '—', 'Mage le + actif', '#bca0ff')}
       </div>
     </section>`;
   const competencesSec = `
     <section class="stats-sec">
-      <div class="stats-sec-hd">🎲 Compétences</div>
+      <div class="stats-sec-hd">🎲 Compétences & RP</div>
       <div class="stats-kpis">
         ${statCard('🎲', GS.rolls, 'Jets de compétence', '#4f8cff')}
         ${statCard('💥', GS.crits, 'Réussites critiques', '#22c38e')}
         ${statCard('💔', GS.fumbles, 'Échecs critiques', '#ff6b6b')}
+        ${statCard('💬', emoteTotal, 'Émotes utilisées', '#4f8cff')}
         ${statCard('🏅', topSkill ? _esc(topSkill[0]) : '—', 'Compétence la + jouée', '#f4c430')}
       </div>
     </section>`;
@@ -1021,11 +1087,13 @@ function _statsRender(scope) {
       </div>
     </section>
     ${insightsSec}
+    ${mvpSec}
     ${missionGroupsSec}
 
     <div class="stats-columns">
       <div class="stats-col-group">
         ${combatSec}
+        ${magicSec}
         ${competencesSec}
         ${chartsHtml}
       </div>
@@ -2747,6 +2815,13 @@ registerActions({
   _statsScope: (el) => { _statsRender(el.value || null); },
   // Frise de séances : clic sur une chip → change la vue (sans relecture réseau).
   _statsSetScope: (btn) => { _statsRender(btn.dataset.scope || null); },
+  _statsResetFilters: () => {
+    _statsScope = null;
+    _statsPlayerSel = null;
+    _statsGroupSel = null;
+    _statsGroupMissionId = '';
+    _statsRender(null);
+  },
   // Filtre « joueurs ciblés » : bascule un joueur (ou « Tous ») puis recalcule tout.
   _statsTogglePlayer: (btn) => {
     const id = btn.dataset.id;
@@ -2922,16 +2997,22 @@ registerActions({
       text(value, cx + 20, y + 44, 34, color, '900');
       text(label, cx + 20, y + 76, 18, '#9fb0c7', '700');
     });
-    y = 370;
+    y = 360;
+    if (s.mvp) {
+      round(56, y, 500, 78, 18); ctx.fillStyle = 'rgba(244,196,48,.12)'; ctx.fill(); ctx.strokeStyle = 'rgba(244,196,48,.35)'; ctx.stroke();
+      text('MVP d’impact', 78, y + 30, 18, '#f4c430', '900');
+      text(`${s.mvp.name} · ${s.mvp.score} pts`, 78, y + 58, 24, '#e6edf7', '900');
+      y += 112;
+    }
     text('Distinctions', 56, y, 26, '#f4c430', '900'); y += 44;
     (s.awards.length ? s.awards : ['Aucune distinction affichée']).slice(0, 6).forEach(a => { y = wrap(a, 72, y, 500, 30); });
     if (s.groups.length) {
-      let gy = 370;
+      let gy = 360;
       text('Groupes', 650, gy, 26, '#c9b6ff', '900'); gy += 34;
       s.groups.forEach(g => {
         round(650, gy, 410, 72, 14); ctx.fillStyle = 'rgba(9,18,32,.7)'; ctx.fill();
         text(g.label, 670, gy + 28, 21, '#e6edf7', '800');
-        text(`${g.sessions} séances · ${g.dmg} dmg · ${g.heal} soin · ${g.rolls} jets`, 670, gy + 54, 17, '#9fb0c7', '700');
+        text(`${g.sessions} séances · ${g.dmgAvg}/séance · ${g.heal} soin · ${g.rolls} jets`, 670, gy + 54, 17, '#9fb0c7', '700');
         gy += 86;
       });
     }
