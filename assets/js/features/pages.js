@@ -792,7 +792,12 @@ function _statsRender(scope) {
       ((cm.fumbles || 0) + (r.sFumbles || 0)) * 3
     );
   };
-  const mvp = [...rows].map(r => ({ ...r, impact: impactScore(r) })).filter(r => r.impact > 0).sort((a, b) => b.impact - a.impact)[0];
+  const impactRows = [...rows]
+    .map(r => ({ ...r, impact: impactScore(r) }))
+    .filter(r => r.impact > 0)
+    .sort((a, b) => (b.impact - a.impact) || String(a.name || '').localeCompare(String(b.name || ''), 'fr'));
+  const topImpact = impactRows[0]?.impact || 0;
+  const mvps = topImpact > 0 ? impactRows.filter(r => r.impact === topImpact) : [];
   const insightItems = [];
   if (groupCompare.length > 1) {
     const byDmg = [...groupCompare].sort((a, b) => b.combat.dmgDealt - a.combat.dmgDealt)[0];
@@ -913,23 +918,35 @@ function _statsRender(scope) {
       <div class="stats-sec-hd">🧭 Lecture rapide</div>
       <div class="stats-insights">${insightItems.slice(0, 5).map(x => `<div class="stats-insight">${x}</div>`).join('')}</div>
     </section>` : '';
-  const mvpSec = mvp ? (() => {
+  const mvpSec = mvps.length ? (() => {
+    const mvpParts = (leader) => {
+      const parts = [];
+      if (leader.combat.dmgDealt) parts.push(`🗡️ ${leader.combat.dmgDealt} dégâts`);
+      if (leader.combat.heal) parts.push(`💚 ${leader.combat.heal} soin`);
+      if (leader.combat.spellsCast) parts.push(`🔮 ${leader.combat.spellsCast} sorts`);
+      if (leader.combat.tacticalSpells) parts.push(`✨ ${leader.combat.tacticalSpells} tactique`);
+      if (leader.combat.supportSpells) parts.push(`🛡️ ${leader.combat.supportSpells} soutien`);
+      if (leader.combat.afflictionSpells) parts.push(`💀 ${leader.combat.afflictionSpells} affliction`);
+      if (leader.combat.attacksTaken) parts.push(`🧱 ${leader.combat.attacksTaken} ciblages`);
+      if (leader.combat.attacksAvoided) parts.push(`🛡️ ${leader.combat.attacksAvoided} évitées`);
+      if (leader.combat.dmgTaken) parts.push(`🩸 ${leader.combat.dmgTaken} subis`);
+      if (leader.sRolls) parts.push(`🎲 ${leader.sRolls} jets`);
+      if (leader.combat.kosDealt) parts.push(`☠️ ${leader.combat.kosDealt} KO`);
+      if (leader.combat.kosTaken) parts.push(`💀 ${leader.combat.kosTaken} à terre`);
+      return parts;
+    };
     const parts = [];
-    if (mvp.combat.dmgDealt) parts.push(`🗡️ ${mvp.combat.dmgDealt} dégâts`);
-    if (mvp.combat.heal) parts.push(`💚 ${mvp.combat.heal} soin`);
-    if (mvp.combat.spellsCast) parts.push(`🔮 ${mvp.combat.spellsCast} sorts`);
-    if (mvp.combat.tacticalSpells) parts.push(`✨ ${mvp.combat.tacticalSpells} tactique`);
-    if (mvp.combat.supportSpells) parts.push(`🛡️ ${mvp.combat.supportSpells} soutien`);
-    if (mvp.combat.afflictionSpells) parts.push(`💀 ${mvp.combat.afflictionSpells} affliction`);
-    if (mvp.combat.attacksTaken) parts.push(`🧱 ${mvp.combat.attacksTaken} ciblages`);
-    if (mvp.combat.attacksAvoided) parts.push(`🛡️ ${mvp.combat.attacksAvoided} évitées`);
-    if (mvp.combat.dmgTaken) parts.push(`🩸 ${mvp.combat.dmgTaken} subis`);
-    if (mvp.sRolls) parts.push(`🎲 ${mvp.sRolls} jets`);
-    if (mvp.combat.kosDealt) parts.push(`☠️ ${mvp.combat.kosDealt} KO`);
+    if (mvps.length === 1) parts.push(...mvpParts(mvps[0]));
+    else mvps.forEach(leader => parts.push(`${_esc(leader.name)} · ${mvpParts(leader).slice(0, 3).join(' · ') || 'impact équilibré'}`));
+    const title = mvps.length > 1 ? "MVP d'impact ex æquo" : "MVP d'impact";
+    const leadersHtml = mvps.map(leader => `<div class="stats-mvp-leader">
+      ${_statsAvatar(leader.id, leader.name, 42)}
+      <div><span class="stats-mvp-eyebrow">${title}</span><b>${_esc(leader.name)}</b></div>
+    </div>`).join('');
     return `<section class="stats-sec stats-mvp-sec">
       <div class="stats-mvp-card">
-        <div class="stats-mvp-id">${_statsAvatar(mvp.id, mvp.name, 42)}<div><span class="stats-mvp-eyebrow">MVP d'impact</span><b>${_esc(mvp.name)}</b></div></div>
-        <div class="stats-mvp-score">${mvp.impact}<span>score</span></div>
+        <div class="stats-mvp-id stats-mvp-id--multi">${leadersHtml}</div>
+        <div class="stats-mvp-score">${topImpact}<span>score</span></div>
         <div class="stats-mvp-breakdown">${parts.slice(0, 5).map(p => `<span>${p}</span>`).join('')}</div>
       </div>
     </section>`;
@@ -1005,7 +1022,7 @@ function _statsRender(scope) {
       ['Jets', GS.rolls, '#7fb0ff'],
     ],
     awards: awards.slice(0, 6),
-    mvp: mvp ? { name: mvp.name, score: mvp.impact } : null,
+    mvp: mvps.length ? { name: mvps.map(x => x.name).join(' & '), score: topImpact } : null,
     groups: groupCompare.slice(0, 4).map(g => ({
       label: g.label,
       dmg: g.combat.dmgDealt,

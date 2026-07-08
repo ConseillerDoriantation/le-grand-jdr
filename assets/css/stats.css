@@ -334,6 +334,11 @@
 }
 .stats-mvp-id { display: flex; align-items: center; gap: .7rem; min-width: 0; }
 .stats-mvp-id > div { min-width: 0; display: flex; flex-direction: column; gap: .08rem; }
+.stats-mvp-id--multi { flex-wrap: wrap; align-items: stretch; }
+.stats-mvp-id--multi > .stats-mvp-leader {
+  min-width: min(100%, 180px); display: flex; flex-direction: row; align-items: center; gap: .65rem;
+}
+.stats-mvp-leader > div { min-width: 0; display: flex; flex-direction: column; gap: .08rem; }
 .stats-mvp-eyebrow { color: var(--gold, #f4c430); text-transform: uppercase; letter-spacing: .05em; font-size: .66rem; font-weight: 800; }
 .stats-mvp-id b { color: var(--text); font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stats-mvp-score { color: var(--gold, #f4c430); font-family: 'Cinzel', serif; font-size: 1.45rem; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
