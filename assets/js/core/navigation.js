@@ -31,6 +31,7 @@ const FEATURE_MAP = {
   histoire:     () => import('../features/histoire.js'),
   vtt:          () => import('../features/vtt/vtt.js'),
   agenda:       () => import('../features/agenda.js'),
+  sessions:     () => import('../features/session-center.js'),
 };
 
 // Garde les modules déjà chargés pour ne pas re-importer
@@ -70,6 +71,7 @@ const FEATURE_CSS = {
   // modale d'ajout de butin s'affiche sans style hors VTT.
   bestiaire:  ['bestiary.css', 'shop-picker.css'],
   agenda:     ['agenda.css', 'recipes.css'],
+  sessions:   ['session-center.css'],
   recettes:   ['recipes.css'],
   account:    ['account.css'],
 };
