@@ -15,7 +15,7 @@ import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
-import { dedupeQuestParticipants, questParticipantFromChar } from '../shared/participants.js';
+import { dedupeQuestParticipants, questParticipantFromChar, toggleQuestParticipant } from '../shared/participants.js';
 
 import { charSession } from '../shared/char-session.js';
 import { openAdventureSwitcher } from '../core/layout.js';
@@ -2143,6 +2143,64 @@ const PAGES = {
       </section>`;
     }
 
+    function _playerJoinableGroupsPanel() {
+      if (!isFeatureEnabled('story') || STATE.isAdmin) return '';
+      const charById = new Map(allChars.map(c => [c.id, c]));
+      const playerHasChar = allChars.some(c => _myUidAliases.includes(c.uid));
+      const rows = activeGroups
+        .map(q => {
+          const parts = dedupeQuestParticipants(q.participants || [], { uidAliases: _myUidAliases });
+          const joined = parts.some(p => _myUidAliases.includes(p.uid));
+          return { q, parts, joined, missionTitle: _missionTitleById.get(q.missionId) || 'Mission' };
+        })
+        .sort((a, b) => Number(a.joined) - Number(b.joined) || (b.q.createdAt || '').localeCompare(a.q.createdAt || ''))
+        .slice(0, 5);
+      return `
+      <section class="dv2-dash-panel dv2-groups-panel">
+        <div class="dv2-section-label">
+          <span class="dv2-section-label-text">Groupes ouverts</span>
+          <div class="dv2-section-label-line"></div>
+          <button class="dv2-section-action" data-navigate="story">Trame -></button>
+        </div>
+        <div class="dv2-groups-list">
+          ${rows.length ? rows.map(({ q, parts, joined, missionTitle }) => {
+            const members = parts.map(p => {
+              const c = p.charId ? charById.get(p.charId) : null;
+              const person = c ? { ...p, ...c } : p;
+              return { raw: p, char: c, html: characterAvatarHtml(person, {
+                size: 30,
+                className: 'dv2-group-avatar',
+                title: c?.nom || p.nom || '?',
+                border: joined && _myUidAliases.includes(p.uid) ? '2px solid rgba(34,195,142,.8)' : '2px solid var(--bg-panel)',
+                background: 'rgba(79,140,255,.14)',
+              }) };
+            });
+            return `
+            <article class="dv2-group-card${joined ? ' is-joined' : ''}">
+              <div class="dv2-group-top">
+                <span class="dv2-group-state">${joined ? 'Rejoint' : 'Ouvert'}</span>
+                <span class="dv2-group-mission">${_esc(missionTitle)}</span>
+              </div>
+              <div class="dv2-group-name">${_esc(q.titre || 'Groupe')}</div>
+              <div class="dv2-group-members">
+                ${members.length ? members.slice(0, 6).map(m => m.char
+                  ? `<button type="button" class="dv2-group-avatar-btn" data-action="_dashQuickChar" data-id="${m.char.id}" title="${_esc(m.char.nom || '?')}">${m.html}</button>`
+                  : `<span class="dv2-group-avatar-btn is-static" title="${_esc(m.raw.nom || '?')}">${m.html}</span>`).join('')
+                  : `<span class="dv2-group-none">Aucun membre</span>`}
+                ${members.length > 6 ? `<span class="dv2-group-more">+${members.length - 6}</span>` : ''}
+              </div>
+              <div class="dv2-group-foot">
+                <span>${members.length} membre${members.length > 1 ? 's' : ''}</span>
+                <button type="button" class="dv2-group-join${joined ? ' is-leave' : ''}" data-action="_dashToggleQuest" data-id="${_esc(q.id)}" ${playerHasChar || joined ? '' : 'disabled'}>
+                  ${joined ? 'Quitter' : playerHasChar ? 'Rejoindre' : 'Créer une fiche'}
+                </button>
+              </div>
+            </article>`;
+          }).join('') : `<div class="dv2-dash-empty">Aucun groupe ouvert pour le moment.</div>`}
+        </div>
+      </section>`;
+    }
+
     function _playerProgressPanel() {
       const achievementCount = achievements.length;
       return `
@@ -2357,6 +2415,7 @@ const PAGES = {
             </div>
             ${heroBlock}
           </div>
+          ${_playerJoinableGroupsPanel()}
           <div class="dv2-player-adventure">
             <div class="dv2-section-label">
               <span class="dv2-section-label-text">Aventure</span>
@@ -3020,9 +3079,104 @@ async function goToChar(id, tab = null) {
   navigate('characters');
 }
 
+async function _dashQuickChar(id) {
+  if (!id) return;
+  const { quickViewChar } = await import('./characters/quick-view.js');
+  quickViewChar(id);
+}
+
+function _uidAliasesForCurrentUser() {
+  return [
+    STATE.user?.uid,
+    ...(Array.isArray(STATE.profile?.previousUids) ? STATE.profile.previousUids : []),
+    ...(Array.isArray(STATE.profile?.uidAliases) ? STATE.profile.uidAliases : []),
+  ].filter(Boolean);
+}
+
+function _charsForUidAliases(chars = [], uidAliases = []) {
+  const aliases = new Set((Array.isArray(uidAliases) ? uidAliases : []).filter(Boolean));
+  if (!aliases.size) return [];
+  return sortCharactersForDisplay((chars || []).filter(c => aliases.has(c?.uid)));
+}
+
+async function _dashSaveQuestParticipants(questId, participants, { leaving = false } = {}) {
+  try {
+    await saveDoc('quests', questId, { participants });
+    showNotif(leaving ? 'Tu as quitté ce groupe.' : 'Tu as rejoint ce groupe !', leaving ? 'info' : 'success');
+    return true;
+  } catch (e) {
+    console.error('[dashboard] quest participants save failed', e);
+    showNotif(e?.code === 'permission-denied' ? 'Action non autorisée sur ce groupe.' : 'Erreur de sauvegarde du groupe.', 'error');
+    return false;
+  }
+}
+
+async function _dashToggleQuest(btn) {
+  const questId = btn?.dataset?.id;
+  if (!questId) return;
+  const quests = getCachedCollection('quests') || await loadCollection('quests');
+  const q = (quests || []).find(x => x.id === questId);
+  if (!q) { showNotif('Groupe introuvable.', 'error'); return; }
+  const uid = STATE.user?.uid || '';
+  const uidAliases = _uidAliasesForCurrentUser();
+  const cur = toggleQuestParticipant(q.participants || [], { uid, uidAliases });
+  if (cur.leaving) {
+    if (btn) btn.disabled = true;
+    await _dashSaveQuestParticipants(questId, cur.participants, { leaving: true });
+    if (btn) btn.disabled = false;
+    return;
+  }
+  const myChars = _charsForUidAliases(getCachedCollection('characters') || [], uidAliases);
+  if (!myChars.length) {
+    showNotif('Crée d’abord un personnage pour rejoindre un groupe.', 'info');
+    goToChar('');
+    return;
+  }
+  if (myChars.length > 1) {
+    const rows = myChars.map(c => {
+      const av = characterAvatarHtml(c, { size: 38, border: 'none', background: 'rgba(79,140,255,.18)', color: 'var(--gold)' });
+      const sub = [c.classe, c.race].filter(Boolean).join(' · ');
+      return `<button class="btn btn-outline" style="display:flex;align-items:center;gap:.75rem;padding:.6rem .9rem;text-align:left;width:100%"
+        data-action="_dashPickQuestChar" data-id="${_esc(questId)}" data-char="${_esc(c.id)}">
+        ${av}
+        <span style="min-width:0">
+          <span style="display:block;font-weight:750;color:var(--text)">${_esc(c.nom || '?')}</span>
+          ${sub ? `<small style="display:block;color:var(--text-dim)">${_esc(sub)}</small>` : ''}
+        </span>
+      </button>`;
+    }).join('');
+    openModal('Rejoindre le groupe', `<div style="display:flex;flex-direction:column;gap:.45rem">${rows}</div>`);
+    return;
+  }
+  const next = toggleQuestParticipant(q.participants || [], { uid, uidAliases, char: myChars[0] });
+  if (btn) btn.disabled = true;
+  await _dashSaveQuestParticipants(questId, next.participants);
+  if (btn) btn.disabled = false;
+}
+
+async function _dashPickQuestChar(btn) {
+  const questId = btn?.dataset?.id;
+  const charId = btn?.dataset?.char;
+  if (!questId || !charId) return;
+  const quests = getCachedCollection('quests') || await loadCollection('quests');
+  const q = (quests || []).find(x => x.id === questId);
+  const char = (getCachedCollection('characters') || []).find(c => c.id === charId);
+  if (!q || !char) { showNotif('Groupe ou personnage introuvable.', 'error'); return; }
+  const next = toggleQuestParticipant(q.participants || [], {
+    uid: STATE.user?.uid || '',
+    uidAliases: _uidAliasesForCurrentUser(),
+    char,
+  });
+  const saved = await _dashSaveQuestParticipants(questId, next.participants);
+  if (saved) closeModalDirect();
+}
+
 registerActions({
   // Dashboard
   _goToChar:             (btn) => goToChar(btn.dataset.id, btn.dataset.tab),
+  _dashQuickChar:        (btn) => _dashQuickChar(btn.dataset.id),
+  _dashToggleQuest:      (btn) => _dashToggleQuest(btn),
+  _dashPickQuestChar:    (btn) => _dashPickQuestChar(btn),
   openAdventureSwitcher: ()    => openAdventureSwitcher(),
   _adminRepairQuestParticipants: () => _adminRepairQuestParticipants(),
   _adminRepairVttData:           () => _adminRepairVttData(),
