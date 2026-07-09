@@ -12,6 +12,7 @@
 // (registre data-action / data-change / data-blur).
 // ══════════════════════════════════════════════════════════════════════════════
 import { charSession } from '../../shared/char-session.js';
+import { STATE } from '../../core/state.js';
 import { updateInCol } from '../../data/firestore.js';
 import { _esc } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
@@ -119,6 +120,7 @@ export function renderCharProfilV3(c, canEdit) {
   const quote = c.quote || '';
   const identity = _mergeIdentityDefaults(c.identity);
   const presCache = _profilCache?.[c.id] || null;
+  const canManageIllustration = STATE.isAdmin;
   const bioHtml = presCache?.content || c.bio || '';
   // Source de vérité des traits = c.tags (le V3 écrit dessus via updateInCol
   // 'characters'). On ne lit presCache.tags QUE si c.tags est absent : sinon un
@@ -237,7 +239,7 @@ export function renderCharProfilV3(c, canEdit) {
         <div class="profil-facts-grid">${identityHtml}</div>
         ${canEdit ? `<button class="section-action" style="margin-top:.6rem;width:100%" data-action="csV3AddFact" data-id="${c.id}">＋ Champ personnalisé</button>` : ''}
       </div>
-      ${canEdit ? `
+      ${(canManageIllustration || presCache?.imageUrl) ? `
       <div class="profil-side-card profil-illu-card">
         <h4>🖼️ Illustration page Joueurs</h4>
         <div class="profil-illu-row">
@@ -248,12 +250,12 @@ export function renderCharProfilV3(c, canEdit) {
           </div>
           <div class="profil-illu-meta">
             <div class="profil-img-hint">L'image apparaît sur la page Joueurs comme illustration grand format du personnage.</div>
-            <div class="profil-img-actions">
+            ${canManageIllustration ? `<div class="profil-img-actions">
               <button class="section-action" style="flex:1" data-action="openProfilImageUpload" data-id="${c.id}">
                 ${presCache?.imageUrl ? '🔄 Changer' : '📷 Upload image'}
               </button>
               ${presCache?.imageUrl ? `<button class="section-action" style="color:var(--crimson-light,#ff8ca7);border-color:rgba(255,90,126,.3)" data-action="removeProfilImage" data-id="${c.id}" title="Retirer">✕</button>` : ''}
-            </div>
+            </div>` : ''}
           </div>
         </div>
       </div>` : ''}

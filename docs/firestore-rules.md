@@ -178,7 +178,9 @@ service cloud.firestore {
       return isAdvAdmin(adventureId) ||
              (inAdventure(adventureId) &&
               request.resource.data.keys().hasAny(["charId"]) &&
-              ownsAdventureCharacter(adventureId, request.resource.data.charId));
+              ownsAdventureCharacter(adventureId, request.resource.data.charId) &&
+              (!request.resource.data.keys().hasAny(["imageUrl"]) ||
+               request.resource.data.imageUrl == ""));
     }
 
     function canUpdateAdventurePlayer(adventureId) {
@@ -186,7 +188,9 @@ service cloud.firestore {
              (inAdventure(adventureId) &&
               resource.data.keys().hasAny(["charId"]) &&
               ownsAdventureCharacter(adventureId, resource.data.charId) &&
-              request.resource.data.charId == resource.data.charId);
+              request.resource.data.charId == resource.data.charId &&
+              !request.resource.data.diff(resource.data)
+                .affectedKeys().hasAny(["imageUrl"]));
     }
 
     function canSpendCharacterPmViaToken(adventureId, charId, tokenId) {

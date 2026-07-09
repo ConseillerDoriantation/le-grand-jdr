@@ -855,6 +855,7 @@ export function invalidateProfilCache(charId) {
 
 // Enregistre l'URL d'illustration dans le doc `players` du perso + re-render.
 async function _applyProfilImageUrl(charId, imageUrl) {
+  if (!STATE.isAdmin) throw new Error('Seul le MJ peut modifier cette illustration.');
   const pres = _profilCache[charId];
   const data = pres
     ? { imageUrl }
@@ -872,6 +873,10 @@ async function _applyProfilImageUrl(charId, imageUrl) {
 }
 
 export async function openProfilImageUpload(charId) {
+  if (!STATE.isAdmin) {
+    showNotif('Seul le MJ peut modifier cette illustration.', 'error');
+    return;
+  }
   // Mode gratuit (Cloudinary off) : l'illustration HD est pointée par URL
   // (ex. image hébergée dans un dossier GitHub) → qualité conservée, zéro poids
   // Firestore, aucun hébergeur payant.
@@ -916,6 +921,10 @@ export async function openProfilImageUpload(charId) {
 }
 
 export async function removeProfilImage(charId) {
+  if (!STATE.isAdmin) {
+    showNotif('Seul le MJ peut retirer cette illustration.', 'error');
+    return;
+  }
   const pres = _profilCache[charId];
   if (!pres?.id) return;
   await updateInCol('players', pres.id, { imageUrl: '' });
