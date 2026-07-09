@@ -1,0 +1,42 @@
+#!/bin/sh
+# Pre-commit — check unique du repo (aucun build, Node uniquement).
+#   1. node --check sur chaque .js stagé      → erreurs de syntaxe
+#   2. git diff --cached --check              → espaces parasites + marqueurs de conflit (<<<<<<< )
+#   3. node --test                            → suite de tests (tests/*.test.js)
+# Bypass ponctuel : git commit --no-verify
+set -e
+
+fail=0
+
+# --- 1. Syntaxe des JS stagés (Added/Copied/Modified, pas les supprimés) ---
+js_files=$(git diff --cached --name-only --diff-filter=ACM -- '*.js')
+if [ -n "$js_files" ]; then
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    [ -f "$f" ] || continue
+    if ! node --check "$f" 2>&1; then
+      echo "  ❌ syntaxe : $f"
+      fail=1
+    fi
+  done <<EOF
+$js_files
+EOF
+fi
+
+# --- 2. Espaces parasites / marqueurs de conflit dans le staged ---
+if ! git diff --cached --check; then
+  echo "  ❌ espaces en fin de ligne ou marqueur de conflit dans le staged"
+  fail=1
+fi
+
+# --- 3. Suite de tests ---
+if ! node --test; then
+  echo "  ❌ tests en échec"
+  fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo ""
+  echo "Pre-commit bloqué. Corrige, ou 'git commit --no-verify' pour forcer."
+  exit 1
+fi
