@@ -986,6 +986,7 @@ function _statsRender(scope) {
     <section class="stats-context">
       ${contextItems.slice(0, 4).map(x => `<span>${_esc(x)}</span>`).join('')}
     </section>` : '';
+  let mvpDetailSec = '';
   const mvpSec = mvps.length ? (() => {
     const mvpParts = (leader) => {
       const parts = [];
@@ -1049,12 +1050,15 @@ function _statsRender(scope) {
         </div>
       </div>`;
     }).join('');
+    mvpDetailSec = drawer('Détail du calcul MVP', `<div class="stats-mvp-calcs">${calcHtml}</div>`, {
+      key: 'mvp-detail',
+      count: `${mvps.length} fiche${mvps.length > 1 ? 's' : ''}`,
+    });
     return `<section class="stats-sec stats-mvp-sec">
       <div class="stats-mvp-card">
         <div class="stats-mvp-id stats-mvp-id--multi">${leadersHtml}</div>
         <div class="stats-mvp-score">${topImpact}<span>score</span></div>
         <div class="stats-mvp-breakdown">${parts.slice(0, 5).map(p => `<span>${p}</span>`).join('')}</div>
-        ${drawer('Détail du calcul MVP', `<div class="stats-mvp-calcs">${calcHtml}</div>`, { key: 'mvp-detail', count: `${mvps.length} fiche${mvps.length > 1 ? 's' : ''}` })}
       </div>
     </section>`;
   })() : '';
@@ -1334,6 +1338,7 @@ function _statsRender(scope) {
       ${heroSec}
       ${mvpSec}
     </div>
+    ${mvpDetailSec ? `<div class="stats-mvp-detail-wide">${mvpDetailSec}</div>` : ''}
     ${contextSec}
     ${missionGroupsSec}
     ${distinctionsSec}
