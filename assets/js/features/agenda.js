@@ -21,6 +21,7 @@ import { _esc, appSplashHtml } from '../shared/html.js';
 import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import PAGES from './pages.js';
 import { registerActions } from '../core/actions.js';
+import { characterAvatarHtml } from '../shared/portraits.js';
 
 // ── Constantes ────────────────────────────────────────────────────────────
 const SLOTS = [
@@ -178,6 +179,9 @@ function _questParticipants(quest = {}) {
 function _planningGroups() {
   return (_ag.quests || []).filter(q => q && q.missionId);
 }
+function _activePlanningGroups() {
+  return _planningGroups().filter(q => (q.statut || 'active') === 'active');
+}
 // Anciennes quêtes autonomes (sans missionId) — à supprimer (on se base sur la Trame).
 function _legacyQuests() {
   return (_ag.quests || []).filter(q => q && !q.missionId);
@@ -192,6 +196,28 @@ function _myUidAliases() {
 function _questHasMe(quest = {}) {
   const aliases = new Set(_myUidAliases());
   return (quest.participants || []).some(p => aliases.has(p?.uid));
+}
+function _participantHasAvailability(p = {}) {
+  const av = _availabilityForUid(p.uid);
+  if (!av) return false;
+  return Boolean(
+    Object.keys(av.slots || {}).length ||
+    Object.keys(av.recurring || {}).length
+  );
+}
+function _participantAvatar(p = {}, size = 28) {
+  return characterAvatarHtml(p, {
+    size,
+    className: 'ag-avatar',
+    title: p.nom || p.pseudo || '?',
+    border: '2px solid rgba(255,255,255,.08)',
+    background: 'rgba(79,140,255,.14)',
+  });
+}
+function _formatBestSuggestion(sug) {
+  if (!sug) return 'Aucun créneau exploitable';
+  const date = sug.date.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+  return `${date} · ${sug.slot.emoji} ${sug.slot.label}`;
 }
 let _cleanupTimer = null;
 function _scheduleQuestParticipantCleanup() {
@@ -214,6 +240,7 @@ async function _cleanupQuestParticipants() {
     }
   }
   if (changed) {
+    _renderAgendaOverview();
     _renderSuggestions();
     _renderGroupView();
   }
@@ -249,6 +276,7 @@ async function _saveAvail() {
   const idx = _ag.allAvails.findIndex(a => a.uid === STATE.user.uid);
   if (idx >= 0) _ag.allAvails[idx] = { id: STATE.user.uid, ...payload };
   else _ag.allAvails.push({ id: STATE.user.uid, ...payload });
+  _renderAgendaOverview();
   _renderSuggestions();
   _renderGroupView();
 }
@@ -292,6 +320,7 @@ function setRecurringPattern(preset) {
   if (preset === 'reset')     _ag.myAvail.recurring = {};
   _scheduleSave();
   _renderCalendar();
+  _renderAgendaOverview();
   showNotif('Pattern récurrent appliqué', 'success');
 }
 async function clearOverrides() {
@@ -300,6 +329,7 @@ async function clearOverrides() {
   _ag.myAvail.slots = {};
   _scheduleSave();
   _renderCalendar();
+  _renderAgendaOverview();
   showNotif('Dispos ponctuelles effacées', 'success');
 }
 
@@ -342,8 +372,7 @@ function _computeQuestSuggestions(quest, daysAhead = 28) {
 function _renderSuggestions() {
   const el = document.getElementById('ag-suggestions');
   if (!el) return;
-  const myQuests = _planningGroups().filter(q => {
-    if ((q.statut || 'active') !== 'active') return false; // seulement les groupes « En cours »
+  const myQuests = _activePlanningGroups().filter(q => {
     if (STATE.isAdmin) return true; // MJ voit tout
     return _questHasMe(q);
   });
@@ -360,6 +389,26 @@ function _renderSuggestions() {
   el.innerHTML = myQuests.map(q => {
     const sugs = _computeQuestSuggestions(q);
     const parts = _questParticipants(q);
+    const renderSuggestion = (s, idx) => {
+      const isFull = s.okCount === s.total;
+      const isValidated = _isSlotValidated(q.id, s.iso, s.slot.id);
+      const cls = (isValidated ? 'ag-sug--validated ' : '') + (isFull ? 'ag-sug--full' : 'ag-sug--partial');
+      const dateStr = _formatDateFr(s.date);
+      return `<div class="ag-sug ${cls}" data-sug-idx="${idx}" data-quest-id="${q.id}"
+        data-action="_agShowSugDetail" data-id="${q.id}" data-idx="${idx}">
+        <div class="ag-sug-rank">${isValidated ? '✓' : (idx + 1)}</div>
+        <div class="ag-sug-body">
+          <div class="ag-sug-date">${_esc(dateStr)} <span class="ag-sug-slot">${s.slot.emoji} ${s.slot.label}</span>${isValidated ? ' <span class="ag-sug-badge">Validée</span>' : ''}</div>
+          <div class="ag-sug-people">
+            ${s.detail.map(d => `<span class="ag-sug-chip ag-sug-chip--${d.state||'none'}" title="${_esc(d.nom||'?')} : ${STATE_LABELS[d.state]||'?'}">${STATE_EMOJI[d.state]||'⚪'} ${_esc((d.nom||'?').slice(0,8))}</span>`).join('')}
+          </div>
+        </div>
+        <div class="ag-sug-score">
+          <span class="ag-sug-score-val">${s.okCount}/${s.total}</span>
+          ${s.maybeCount ? `<span class="ag-sug-score-maybe">+${s.maybeCount}?</span>` : ''}
+        </div>
+      </div>`;
+    };
     if (!sugs.length) {
       return `<div class="ag-quest-card">
         <div class="ag-quest-hd">
@@ -375,32 +424,93 @@ function _renderSuggestions() {
         <span class="ag-quest-count">${parts.length} participant${parts.length>1?'s':''}</span>
       </div>
       <div class="ag-sug-list">
-        ${sugs.map((s, idx) => {
-          const isFull = s.okCount === s.total;
-          const isValidated = _isSlotValidated(q.id, s.iso, s.slot.id);
-          const cls = (isValidated ? 'ag-sug--validated ' : '') + (isFull ? 'ag-sug--full' : 'ag-sug--partial');
-          const dateStr = _formatDateFr(s.date);
-          return `<div class="ag-sug ${cls}" data-sug-idx="${idx}" data-quest-id="${q.id}"
-            data-action="_agShowSugDetail" data-id="${q.id}" data-idx="${idx}">
-            <div class="ag-sug-rank">${isValidated ? '✓' : (idx + 1)}</div>
-            <div class="ag-sug-body">
-              <div class="ag-sug-date">${_esc(dateStr)} <span class="ag-sug-slot">${s.slot.emoji} ${s.slot.label}</span>${isValidated ? ' <span class="ag-sug-badge">Validée</span>' : ''}</div>
-              <div class="ag-sug-people">
-                ${s.detail.map(d => `<span class="ag-sug-chip ag-sug-chip--${d.state||'none'}" title="${_esc(d.nom||'?')} : ${STATE_LABELS[d.state]||'?'}">${STATE_EMOJI[d.state]||'⚪'} ${_esc((d.nom||'?').slice(0,8))}</span>`).join('')}
-              </div>
-            </div>
-            <div class="ag-sug-score">
-              <span class="ag-sug-score-val">${s.okCount}/${s.total}</span>
-              ${s.maybeCount ? `<span class="ag-sug-score-maybe">+${s.maybeCount}?</span>` : ''}
-            </div>
-          </div>`;
-        }).join('')}
+        ${renderSuggestion(sugs[0], 0)}
+        ${sugs.length > 1 ? `<details class="ag-sug-more">
+          <summary>Autres créneaux <span>${sugs.length - 1}</span></summary>
+          <div class="ag-sug-more-list">${sugs.slice(1).map((s, i) => renderSuggestion(s, i + 1)).join('')}</div>
+        </details>` : ''}
       </div>
     </div>`;
   }).join('');
 
   // Garder en mémoire la dernière computation pour le détail modal
   _ag._lastSugs = Object.fromEntries(myQuests.map(q => [q.id, _computeQuestSuggestions(q)]));
+}
+
+function _renderAgendaOverview() {
+  const el = document.getElementById('ag-overview');
+  if (!el) return;
+
+  const visibleGroups = _activePlanningGroups().filter(q => STATE.isAdmin || _questHasMe(q));
+  const sessions = _validatedSessions().filter(_sessionVisibleToMe);
+  const memberKeys = new Map();
+  visibleGroups.forEach(q => _questParticipants(q).forEach(p => {
+    const key = _uidIdentityKey(p.uid);
+    if (!memberKeys.has(key)) memberKeys.set(key, p);
+  }));
+  const members = [...memberKeys.values()];
+  const withAvail = members.filter(_participantHasAvailability).length;
+  const completeGroups = visibleGroups.filter(q => {
+    const parts = _questParticipants(q);
+    return parts.length > 0 && parts.every(_participantHasAvailability);
+  }).length;
+  const myFilledSlots = Object.values(_ag.myAvail?.slots || {}).reduce((sum, day) => sum + Object.keys(day || {}).length, 0);
+  const myRecurringSlots = Object.values(_ag.myAvail?.recurring || {}).reduce((sum, day) => sum + Object.keys(day || {}).length, 0);
+
+  const groupCards = visibleGroups.map(q => {
+    const parts = _questParticipants(q);
+    const filled = parts.filter(_participantHasAvailability).length;
+    const missing = parts.filter(p => !_participantHasAvailability(p));
+    const best = _computeQuestSuggestions(q, 28)[0];
+    const isReady = parts.length > 0 && filled === parts.length && Boolean(best);
+    return `
+      <article class="ag-team-card${isReady ? ' is-ready' : ''}">
+        <div class="ag-team-top">
+          <div class="ag-team-title">${_esc(q.titre || q.nom || 'Groupe')}</div>
+          <span class="ag-team-count">${filled}/${parts.length || 0}</span>
+        </div>
+        <div class="ag-team-avatars">
+          ${parts.length
+            ? parts.slice(0, 7).map(p => `<span class="${_participantHasAvailability(p) ? '' : 'is-missing'}">${_participantAvatar(p, 28)}</span>`).join('')
+            : `<span class="ag-team-empty">Aucun membre</span>`}
+          ${parts.length > 7 ? `<span class="ag-team-more">+${parts.length - 7}</span>` : ''}
+        </div>
+        ${parts.length ? `<div class="ag-team-names">${parts.slice(0, 4).map(p => _esc(p.nom || '?')).join(', ')}${parts.length > 4 ? ` +${parts.length - 4}` : ''}</div>` : ''}
+        <div class="ag-team-best">
+          <span>${best ? 'Meilleur créneau' : 'À compléter'}</span>
+          <strong>${_esc(_formatBestSuggestion(best))}</strong>
+        </div>
+        ${missing.length ? `<div class="ag-team-missing">${missing.slice(0, 3).map(p => _esc(p.nom || '?')).join(', ')} ${missing.length > 3 ? `+${missing.length - 3}` : ''}</div>` : ''}
+        <button type="button" class="ag-team-link" data-action="_agFocusGroup" data-group="${_esc(q.id)}">Voir les dispos</button>
+      </article>`;
+  }).join('');
+
+  el.innerHTML = `
+    <section class="ag-side-card ag-side-card--summary">
+      <div class="ag-side-label">Pilotage</div>
+      <div class="ag-kpis">
+        <div class="ag-kpi"><strong>${visibleGroups.length}</strong><span>groupes actifs</span></div>
+        <div class="ag-kpi"><strong>${completeGroups}</strong><span>groupes complets</span></div>
+        <div class="ag-kpi"><strong>${withAvail}/${members.length || 0}</strong><span>joueurs renseignés</span></div>
+        <div class="ag-kpi"><strong>${sessions.length}</strong><span>séances validées</span></div>
+      </div>
+      <div class="ag-my-status">
+        <span>Mes dispos</span>
+        <strong>${myFilledSlots} ponctuelle${myFilledSlots > 1 ? 's' : ''} · ${myRecurringSlots} récurrente${myRecurringSlots > 1 ? 's' : ''}</strong>
+      </div>
+    </section>
+    <section class="ag-side-card">
+      <div class="ag-side-head">
+        <div>
+          <div class="ag-side-label">Groupes à planifier</div>
+          <div class="ag-side-sub">${STATE.isAdmin ? 'Tous les groupes actifs' : 'Tes groupes actifs'}</div>
+        </div>
+        <button class="ag-side-link" type="button" data-navigate="story">Trame →</button>
+      </div>
+      <div class="ag-team-list">
+        ${groupCards || `<div class="ag-side-empty">Aucun groupe actif à planifier.</div>`}
+      </div>
+    </section>`;
 }
 
 function showSuggestionDetail(questId, idx) {
@@ -492,6 +602,7 @@ async function validateSlot(questId, iso, slotId) {
     closeModal();
     showNotif('✓ Créneau validé. Visible par le groupe concerné (et le MJ).', 'success');
     _renderSessionBanner();
+    _renderAgendaOverview();
     _renderSuggestions();
   } catch (e) {
     if (e?.code === 'permission-denied') {
@@ -510,6 +621,7 @@ async function unvalidateSlot(questId, iso, slotId) {
     closeModal();
     showNotif('Créneau retiré.', 'info');
     _renderSessionBanner();
+    _renderAgendaOverview();
     _renderSuggestions();
   } catch (e) {
     if (e?.code === 'permission-denied') {
@@ -606,6 +718,7 @@ function _renderCalendar() {
 function cycleAgendaSlot(iso, slotId) {
   _cycleSlot(iso, slotId);
   _renderCalendar();
+  _renderAgendaOverview();
 }
 
 // ── Modal pattern récurrent ───────────────────────────────────────────────
@@ -649,6 +762,7 @@ function cycleRecurringSlot(dayId, slotId, btn) {
   btn.textContent = STATE_EMOJI[state] || '⚪';
   btn.title = STATE_LABELS[state] || 'Non renseigné';
   _renderCalendar();
+  _renderAgendaOverview();
   _renderSuggestions();
 }
 
@@ -743,12 +857,20 @@ function _renderGroupView() {
 function toggleGroupView() {
   _ag.groupView = !_ag.groupView;
   const btn = document.getElementById('ag-group-toggle');
-  if (btn) btn.textContent = _ag.groupView ? '🙈 Masquer' : '👁 Afficher';
+  if (btn) btn.textContent = _ag.groupView ? 'Masquer' : 'Afficher';
   _renderGroupView();
 }
 function setGroupFilter(groupId) {
   _ag.groupFilter = groupId || null;
   _renderGroupView();
+}
+function focusGroupAvailability(groupId) {
+  _ag.groupView = true;
+  _ag.groupFilter = groupId || null;
+  const btn = document.getElementById('ag-group-toggle');
+  if (btn) btn.textContent = 'Masquer';
+  _renderGroupView();
+  document.getElementById('ag-group-view')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // Bouton MJ de nettoyage des anciennes quêtes autonomes (sans missionId).
@@ -797,50 +919,74 @@ async function renderAgendaPage() {
   content.innerHTML = `
     <div class="ag-root">
 
-      <div class="ag-hero">
+      <header class="ag-hero">
         <div class="ag-hero-text">
-          <h1 class="ag-hero-title">📅 Agenda du groupe</h1>
-          <p class="ag-hero-sub">Marque tes dispos, on calcule les meilleurs créneaux pour vos prochaines sessions.</p>
+          <div class="ag-eyebrow">Planification</div>
+          <h1 class="ag-hero-title">Agenda</h1>
+          <p class="ag-hero-sub">Disponibilités, groupes de trame et validation des prochaines séances.</p>
         </div>
         <div class="ag-hero-actions">
-          <button class="btn btn-gold" data-action="_agOpenRecurringEditor">📆 Mon planning récurrent</button>
+          <button class="ag-primary-action" data-action="_agOpenRecurringEditor">📆 Planning récurrent</button>
           <span id="ag-legacy-cleanup"></span>
         </div>
+      </header>
+
+      <div class="ag-layout">
+        <aside class="ag-rail">
+          <div id="ag-session-banner"></div>
+          <div id="ag-overview"></div>
+        </aside>
+
+        <main class="ag-workbench">
+          <section class="ag-section ag-panel ag-calendar-panel">
+            <div class="ag-section-hd">
+              <div>
+                <h2 class="ag-section-title">Mon calendrier</h2>
+                <p class="ag-section-sub">Clique un créneau pour passer de libre à peut-être, indisponible, puis non renseigné.</p>
+              </div>
+              <div class="ag-section-actions">
+                <button class="btn btn-outline btn-sm" data-action="_agClearOverrides" title="Efface les dispos ponctuelles (les patterns récurrents restent)">Effacer ponctuelles</button>
+              </div>
+            </div>
+            <div class="ag-state-strip" aria-hidden="true">
+              <span><i class="ag-legend ag-slot--ok">✓</i> Disponible</span>
+              <span><i class="ag-legend ag-slot--maybe">?</i> Peut-être</span>
+              <span><i class="ag-legend ag-slot--no">×</i> Indisponible</span>
+              <span><i class="ag-legend ag-slot--none"></i> Non renseigné</span>
+            </div>
+            <div id="ag-calendar" class="ag-calendar"></div>
+          </section>
+
+          <section class="ag-section ag-panel">
+            <div class="ag-section-hd">
+              <div>
+                <h2 class="ag-section-title">Créneaux recommandés</h2>
+                <p class="ag-section-sub">Les meilleurs choix par groupe actif, classés selon les disponibilités des membres.</p>
+              </div>
+            </div>
+            <div id="ag-suggestions" class="ag-suggestions"></div>
+          </section>
+
+          <section class="ag-section ag-panel ag-group-panel">
+            <div class="ag-section-hd">
+              <div>
+                <h2 class="ag-section-title">Vue de groupe</h2>
+                <p class="ag-section-sub">Lecture détaillée sur deux semaines, utile pour départager un créneau.</p>
+              </div>
+              <div class="ag-section-actions">
+                <button class="btn btn-outline btn-sm" id="ag-group-toggle" data-action="_agToggleGroupView">Afficher</button>
+              </div>
+            </div>
+            <div id="ag-group-view" class="ag-group-view"></div>
+          </section>
+        </main>
       </div>
-
-      <div id="ag-session-banner"></div>
-
-      <section class="ag-section">
-        <h2 class="ag-section-title">🎯 Sessions compatibles</h2>
-        <p class="ag-section-sub">Top 5 créneaux par groupe « En cours » de la Trame, selon les dispos de leurs membres.</p>
-        <div id="ag-suggestions" class="ag-suggestions"></div>
-      </section>
-
-      <section class="ag-section">
-        <div class="ag-section-hd">
-          <h2 class="ag-section-title">🗓 Mon calendrier</h2>
-          <div class="ag-section-actions">
-            <button class="btn btn-outline btn-sm" data-action="_agClearOverrides" title="Efface les dispos ponctuelles (les patterns récurrents restent)">🧹 Effacer ponctuelles</button>
-          </div>
-        </div>
-        <p class="ag-section-sub">Clic sur un créneau pour cycler : <span class="ag-legend">⚪</span> rien → <span class="ag-legend ag-slot--ok">✅</span> ok → <span class="ag-legend ag-slot--maybe">❓</span> peut-être → <span class="ag-legend ag-slot--no">❌</span> non. Les créneaux <em>récurrents</em> sont automatiquement appliqués.</p>
-        <div id="ag-calendar" class="ag-calendar"></div>
-      </section>
-
-      <section class="ag-section">
-        <div class="ag-section-hd">
-          <h2 class="ag-section-title">👥 Dispos du groupe</h2>
-          <div class="ag-section-actions">
-            <button class="btn btn-outline btn-sm" id="ag-group-toggle" data-action="_agToggleGroupView">👁 Afficher</button>
-          </div>
-        </div>
-        <div id="ag-group-view" class="ag-group-view"></div>
-      </section>
 
     </div>
   `;
 
   _renderSessionBanner();
+  _renderAgendaOverview();
   _renderSuggestions();
   _renderCalendar();
   _renderGroupView();
@@ -859,6 +1005,7 @@ async function renderAgendaPage() {
     }
     _scheduleQuestParticipantCleanup();
     _renderCalendar();
+    _renderAgendaOverview();
     _renderSuggestions();
     _renderGroupView();
   });
@@ -866,6 +1013,7 @@ async function renderAgendaPage() {
   watchPageCollection('agenda-quests', 'quests', 'agenda', data => {
     _ag.quests = data;
     _scheduleQuestParticipantCleanup();
+    _renderAgendaOverview();
     _renderSuggestions();
     _renderGroupView();
     _renderLegacyCleanup();
@@ -879,6 +1027,7 @@ async function renderAgendaPage() {
   watchPageDoc('agenda-session', 'agenda_session', 'next', 'agenda', data => {
     _ag.nextSession = data;
     _renderSessionBanner();
+    _renderAgendaOverview();
     _renderSuggestions();
   });
 }
@@ -895,6 +1044,7 @@ registerActions({
   _agOpenRecurringEditor:   ()    => openRecurringEditor(),
   _agToggleGroupView:       ()    => toggleGroupView(),
   _agSetGroupFilter:        (btn) => setGroupFilter(btn.dataset.group),
+  _agFocusGroup:            (btn) => focusGroupAvailability(btn.dataset.group),
   _agDeleteLegacyQuests:    ()    => deleteLegacyQuests(),
   _agClearOverrides:        ()    => clearOverrides(),
 });
