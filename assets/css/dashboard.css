@@ -1666,6 +1666,153 @@
   color: var(--text-dim);
   font-size: .74rem;
 }
+.dv2-groups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dv2-dashboard-main .dv2-groups-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.dv2-group-card {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(0,0,0,.12);
+}
+.dv2-dashboard-main .dv2-group-card {
+  min-height: 132px;
+  display: flex;
+  flex-direction: column;
+}
+.dv2-group-card.is-joined {
+  border-color: rgba(34,195,142,.28);
+  background: rgba(34,195,142,.055);
+}
+.dv2-group-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.dv2-group-state {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid rgba(79,140,255,.26);
+  border-radius: 999px;
+  background: rgba(79,140,255,.09);
+  color: #7fb0ff;
+  font-size: .54rem;
+  font-weight: 850;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.dv2-group-card.is-joined .dv2-group-state {
+  border-color: rgba(34,195,142,.34);
+  background: rgba(34,195,142,.11);
+  color: #4fd3a6;
+}
+.dv2-group-mission {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: .64rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dv2-group-name {
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: .84rem;
+  font-weight: 850;
+}
+.dv2-group-members {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 9px;
+}
+.dv2-dashboard-main .dv2-group-members {
+  margin-top: auto;
+  padding-top: 11px;
+}
+.dv2-group-avatar-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+.dv2-group-avatar-btn:hover {
+  transform: translateY(-1px);
+}
+.dv2-group-avatar-btn.is-static {
+  cursor: default;
+}
+.dv2-group-avatar-btn.is-static:hover {
+  transform: none;
+}
+.dv2-group-none {
+  color: var(--text-dim);
+  font-size: .68rem;
+  font-style: italic;
+}
+.dv2-group-more {
+  height: 24px;
+  min-width: 24px;
+  display: inline-grid;
+  place-items: center;
+  margin-left: 2px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.06);
+  color: var(--text-dim);
+  font-size: .58rem;
+  font-weight: 800;
+}
+.dv2-group-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+}
+.dv2-group-foot > span {
+  color: var(--text-dim);
+  font-size: .65rem;
+}
+.dv2-group-join {
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid rgba(79,140,255,.38);
+  border-radius: 6px;
+  background: rgba(79,140,255,.11);
+  color: #9fc4ff;
+  font-size: .67rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+.dv2-group-join:hover:not(:disabled) {
+  border-color: rgba(127,176,255,.68);
+  background: rgba(79,140,255,.17);
+}
+.dv2-group-join.is-leave {
+  border-color: rgba(255,125,82,.28);
+  background: rgba(255,125,82,.065);
+  color: #ffad8f;
+}
+.dv2-group-join:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
 .dv2-dashboard-side #dash-presence .dv2-panel-card,
 .dv2-dashboard-side .dv2-progress-card,
 .dv2-dashboard-side .dv2-bastion-card {
@@ -1990,7 +2137,8 @@
 [data-theme="light"] .dv2-dash-metric,
 [data-theme="light"] .dv2-dash-action,
 [data-theme="light"] .dv2-dash-watch,
-[data-theme="light"] .dv2-dash-empty {
+[data-theme="light"] .dv2-dash-empty,
+[data-theme="light"] .dv2-group-card {
   border-color: var(--border) !important;
   background: var(--bg-elevated) !important;
   box-shadow: none !important;
@@ -2003,6 +2151,20 @@
   border-color: rgba(37,99,235,.24) !important;
   background: rgba(37,99,235,.04) !important;
   box-shadow: none !important;
+}
+[data-theme="light"] .dv2-group-card.is-joined {
+  border-color: rgba(5,150,105,.25) !important;
+  background: rgba(5,150,105,.055) !important;
+}
+[data-theme="light"] .dv2-group-join {
+  border-color: rgba(37,99,235,.35);
+  background: rgba(37,99,235,.08);
+  color: #1d4ed8;
+}
+[data-theme="light"] .dv2-group-join.is-leave {
+  border-color: rgba(234,88,12,.25);
+  background: rgba(234,88,12,.06);
+  color: #c2410c;
 }
 [data-theme="light"] .dv2-root .dv2-bastion-card::before {
   display: none !important;
