@@ -14,7 +14,7 @@ import { makeSortable } from '../../shared/sortable-helper.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
-import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor } from './spells-calc.js';
 
 let _sortsSearch = '';
 let _sortsView = 'all';
@@ -39,6 +39,7 @@ let _sortTypesEdit = new Set(['utilitaire']);
 let _deplModeEdit = null;
 let _actionModeEdit = 'reaction';
 let _protModeEdit = 'ca';   // mode rune Protection en cours d'édition ('ca'|'soin') — source fiable (≠ DOM périmé)
+let _zoneShapeEdit = 'rect'; // forme de zone combo Amp+Disp en cours d'édition ('rect'|'cross')
 let _enchantExtraSavedEdit = [];   // états d'enchantement supplémentaires sauvegardés (slots 2..n)
 let _invImageEdit = '';      // image (dataUrl) de l'invocation en cours d'édition
 let _invCrop = null;         // instance du cropper pan/zoom inline de l'image d'invocation
@@ -1257,23 +1258,21 @@ function _runeLiveContribution(nom, counts) {
     case 'Amplification': {
       const len = _ampLength(cnt);
       const nbDisp = counts['Dispersion'] || 0;
-      const size = _ampDispCircleSize(cnt, nbDisp);
-      const combo  = nbDisp > 0 ? ` · combo Dispersion → ${size}×${size} cases` : '';
-      return {
-        main:  `Zone ${len}×1 cases${combo}`,
-      };
+      if (nbDisp > 0) {
+        const h = _ampDispDim(cnt), w = _ampDispDim(nbDisp);
+        const shape = _zoneShapeEdit === 'cross' ? 'croix' : 'rectangle';
+        return { main: `Combo Dispersion → ${shape} ${h}×${w} cases (hauteur ${h} · largeur ${w})` };
+      }
+      return { main: `Zone ${len}×1 cases (ligne)` };
     }
     case 'Dispersion': {
       const nbAmp = counts['Amplification'] || 0;
       if (nbAmp > 0) {
-        const size = _ampDispCircleSize(nbAmp, cnt);
-        return {
-          main:  `Combo Amp+Disp → zone ${size}×${size} cases plaçable`,
-        };
+        const h = _ampDispDim(nbAmp), w = _ampDispDim(cnt);
+        const shape = _zoneShapeEdit === 'cross' ? 'croix' : 'rectangle';
+        return { main: `Combo Amp+Disp → ${shape} ${h}×${w} cases (Amp=hauteur, Disp=largeur)` };
       }
-      return {
-        main:  `${1 + cnt} cibles différentes`,
-      };
+      return { main: `${1 + cnt} cibles différentes` };
     }
     case 'Lacération': {
       const red = cnt;
@@ -1588,6 +1587,7 @@ export async function openSortModal(idx, s) {
   const runeCounts = {};
   _actionModeEdit = _spellActionMode(s);
   _protModeEdit = s?.protectionMode || 'ca';   // fixé depuis la donnée (pas le DOM périmé)
+  _zoneShapeEdit = s?.zoneShape === 'cross' ? 'cross' : 'rect';
   _enchantExtraSavedEdit = Array.isArray(s?.enchantEtatIds) ? s.enchantEtatIds.slice(1) : [];
   runesSrc.forEach(r => {
     const nom = (r === 'Réaction' || r === 'Action Bonus') ? ACTION_RUNE : r;
@@ -2047,7 +2047,23 @@ export async function openSortModal(idx, s) {
 
       <div id="s-amp-zone-section" style="${ampMode==='zone'?'':'display:none'}">
         <div style="font-size:.74rem;color:var(--text-dim);padding:.1rem .1rem .3rem">
-          📐 Zone calculée depuis les runes (longueur 3N cases, largeur via Dispersion).
+          📐 Zone depuis les runes : sans Dispersion → <b>ligne 3N×1</b>. Combo <b>Amp + Dispersion</b> → <b>Amplification = hauteur</b>, <b>Dispersion = largeur</b> (chaque rune agrandit son axe).
+        </div>
+        <div id="s-amp-shape-row" class="form-group" style="${hasDisp?'':'display:none'}">
+          <label style="font-size:.72rem">✚ Forme (combo Amplification + Dispersion)</label>
+          <div style="display:flex;gap:.4rem">
+            ${[
+              { v:'rect',  label:'▭ Rectangle / Carré', color:'#4f8cff' },
+              { v:'cross', label:'✚ Croix',             color:'#a855f7' },
+            ].map(o => {
+              const sel = _zoneShapeEdit === o.v;
+              return `<button type="button" data-action="_selectZoneShape" data-val="${o.v}"
+                style="flex:1;padding:.42rem;border-radius:8px;cursor:pointer;transition:all .15s;
+                border:2px solid ${sel?o.color:'var(--border)'};background:${sel?o.color+'18':'var(--bg-elevated)'};
+                text-align:center;font-size:.75rem;font-weight:700;color:${sel?o.color:'var(--text-dim)'}">${o.label}</button>`;
+            }).join('')}
+          </div>
+          <input type="hidden" id="s-zone-shape" value="${_zoneShapeEdit}">
         </div>
       </div>
 
@@ -2972,6 +2988,21 @@ function _selectAmpMode(mode) {
   _updateSortPreview();
 }
 
+// Forme de la zone combo Amp+Disp ('rect' | 'cross').
+function _selectZoneShape(shape) {
+  _zoneShapeEdit = shape === 'cross' ? 'cross' : 'rect';
+  const hidden = document.getElementById('s-zone-shape');
+  if (hidden) hidden.value = _zoneShapeEdit;
+  document.querySelectorAll('[data-action="_selectZoneShape"]').forEach(btn => {
+    const active = btn.dataset.val === _zoneShapeEdit;
+    const col = btn.dataset.val === 'cross' ? '#a855f7' : '#4f8cff';
+    btn.style.borderColor = active ? col : 'var(--border)';
+    btn.style.background  = active ? col + '18' : 'var(--bg-elevated)';
+    btn.style.color       = active ? col : 'var(--text-dim)';
+  });
+  _updateSortPreview();
+}
+
 function _selectActionMode(mode) {
   _actionModeEdit = mode === 'action_bonus' ? 'action_bonus' : 'reaction';
   const hidden = document.getElementById('s-action-mode');
@@ -3416,6 +3447,7 @@ function _buildSortFromDOM() {
     dureeBase: dureeBase >= 2 ? dureeBase : null,
     deplacement: deplMode ? { mode: deplMode } : null,
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
+    zoneShape: _zoneShapeEdit === 'cross' ? 'cross' : 'rect',
     // Portée + stats overrides : doivent être lus du DOM pour que la preview live
     // et les chips auto reflètent la sélection courante (sinon auto-dérivation kick in).
     portee:      (() => {
@@ -3785,6 +3817,7 @@ export async function saveSort(idx) {
       dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
       deplacement: deplMode ? { mode: deplMode } : null,
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
+    zoneShape: _zoneShapeEdit === 'cross' ? 'cross' : 'rect',
       // Portée override : 0 ou vide = utilise la portée de l'arme par défaut (côté VTT)
       portee:     (() => {
         const raw = document.getElementById('s-portee')?.value;
@@ -3904,6 +3937,7 @@ function _buildSortFromForm(idx, prevList = []) {
     dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
     deplacement: deplMode ? { mode: deplMode } : null,
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
+    zoneShape: _zoneShapeEdit === 'cross' ? 'cross' : 'rect',
     portee:     (() => {
       const raw = document.getElementById('s-portee')?.value;
       if (raw === '' || raw == null) return null;
@@ -3996,6 +4030,7 @@ registerActions({
   _selectActionMode:      (btn) => _selectActionMode(btn.dataset.val),
   _selectProtMode:        (btn) => _selectProtMode(btn.dataset.val),
   _selectAmpMode:         (btn) => _selectAmpMode(btn.dataset.val),
+  _selectZoneShape:       (btn) => _selectZoneShape(btn.dataset.val),
   _selectEnchantMode:     (btn) => _selectEnchantMode(btn.dataset.val),
   _selectAfflictionMode:  (btn) => _selectAfflictionMode(btn.dataset.val),
   _toggleSortIconPicker:  ()    => _toggleSortIconPicker(),

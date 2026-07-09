@@ -3014,21 +3014,19 @@ function _buildSpellOption(s, ctx) {
                    && runes.filter(r => r === 'Invocation').length === 0;
   let zoneW = (_isDepl || _enchActive) ? 0 : (s.zoneW || 0);
   let zoneH = (_isDepl || _enchActive) ? 0 : (s.zoneH || 0);
-  // Si pas de zone manuelle : calcule depuis les runes (Amplification × Dispersion).
-  // Miroir EXACT de _calcSortZone (spells.js) : Amp seul → ligne 3N ;
-  // Amp+Disp → zone carrée plaçable 3×3, puis 7×7, 11×11...
-  // L'éditeur affiche ces nombres comme la taille de zone (ex. 1 Amp + 1 Disp = 3×3) ;
-  // le VTT doit poser la MÊME grille → 1 case par unité (pas de reconversion mètres→cases,
-  // qui rétrécissait le sort, ex. 3×3 affiché → 2×2 posé).
+  let zoneShape = 'rect';   // 'rect' | 'cross' (combo Amp+Disp uniquement)
+  // Miroir EXACT de _calcSortZone (spells-calc) : Amp seul → ligne 3N×1 ;
+  // combo Amp+Disp → Amplification = HAUTEUR, Dispersion = LARGEUR (4N−1 par axe),
+  // forme rectangle/carré ou croix selon s.zoneShape. 1 case par unité (pas de conversion mètres).
   if (!_isDepl && !_enchActive && zoneW <= 0 && zoneH <= 0) {
     const _runes = s.runes || [];
     const _nbAmp  = _runes.filter(r => r === 'Amplification').length;
     const _nbDisp = _runes.filter(r => r === 'Dispersion').length;
     if (_nbAmp >= 1) {
       if (_nbDisp >= 1) {
-        const size = _vttAmpDispCircleSize(_nbAmp, _nbDisp);
-        zoneW = size;
-        zoneH = size;
+        zoneH = 4 * _nbAmp - 1;    // Amplification → hauteur
+        zoneW = 4 * _nbDisp - 1;   // Dispersion → largeur
+        zoneShape = s.zoneShape === 'cross' ? 'cross' : 'rect';
       } else {
         zoneW = 3 * _nbAmp;
         zoneH = 1;
@@ -3054,7 +3052,7 @@ function _buildSpellOption(s, ctx) {
   const common = {
     id, sortIdx, portee,
     pmCost, basePm, pmRaw, pmSetDelta,
-    nbCibles, zoneW, zoneH, mods, actionType,
+    nbCibles, zoneW, zoneH, zoneShape, mods, actionType,
     mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
     ...extras,
   };
@@ -3828,7 +3826,7 @@ function _vttSpellPills(o) {
   if (targetSelf) {
     pills.push(_vttAoptPill('targets self', `🧍 Sur soi`));
   } else if (o.zoneW > 0 || o.zoneH > 0) {
-    pills.push(_vttAoptPill('zone', `📐 ${o.zoneW||o.zoneH}×${o.zoneH||o.zoneW}c`));
+    pills.push(_vttAoptPill('zone', `${o.zoneShape === 'cross' ? '✚' : '📐'} ${o.zoneW||o.zoneH}×${o.zoneH||o.zoneW}c`));
   } else if ((o.nbCibles || 1) > 1) {
     const lbl = isFriendly ? 'alliés' : isHostile ? 'ennemis' : 'cibles';
     pills.push(_vttAoptPill('targets', `👥 ${o.nbCibles} ${lbl}`));
@@ -4671,7 +4669,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
       ${(opt.zoneW>0||opt.zoneH>0) || (opt.nbCibles||1) > 1 || opt.pmCost > 0 || (opt.pmCost===0 && opt.basePm>0) ? `
       <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.7rem">
         ${(opt.zoneW>0||opt.zoneH>0)?`<span style="font-size:.7rem;color:#f97316;display:flex;align-items:center;gap:.25rem">
-          📐 Zone <strong style="color:#fde047">${opt.zoneW}×${opt.zoneH} cases</strong>
+          ${opt.zoneShape === 'cross' ? '✚' : '📐'} Zone <strong style="color:#fde047">${opt.zoneShape === 'cross' ? 'croix ' : ''}${opt.zoneW}×${opt.zoneH} cases</strong>
           · <strong>${allTargets?.length||1}</strong> cible${(allTargets?.length||1)>1?'s':''}
           ${opt.pmCost===0&&opt.basePm>0?'<span style="color:#22c38e;font-size:.65rem">(PM déjà payé)</span>':''}
         </span>`:''}
@@ -4972,22 +4970,30 @@ function _buildZonePreview() {
   const K = window.Konva;
   const { wPx, hPx, x, y } = _zoneCtx;
   const group = new K.Group({ x, y, listening: false, name: 'zone-preview' });
-  group.add(new K.Rect({
-    x: -wPx / 2, y: -hPx / 2,
-    width: wPx, height: hPx,
-    fill: 'rgba(253,224,71,0.22)',
-    stroke: '#fde047',
-    strokeWidth: 3, dash: [10, 5],
-    cornerRadius: 3, listening: false,
-  }));
-  // Halo intérieur pour la lisibilité sur fond clair ou sombre
-  group.add(new K.Rect({
-    x: -wPx / 2 + 2, y: -hPx / 2 + 2,
-    width: wPx - 4, height: hPx - 4,
-    fill: 'transparent',
-    stroke: 'rgba(253,224,71,0.45)',
-    strokeWidth: 1, listening: false,
-  }));
+  const _fill = 'rgba(253,224,71,0.22)', _stroke = '#fde047';
+  if (_zoneCtx.opt?.zoneShape === 'cross') {
+    // Croix : barre verticale (1 case × hauteur) + barre horizontale (largeur × 1 case).
+    group.add(new K.Rect({ x: -CELL / 2, y: -hPx / 2, width: CELL, height: hPx,
+      fill: _fill, stroke: _stroke, strokeWidth: 3, dash: [10, 5], listening: false }));
+    group.add(new K.Rect({ x: -wPx / 2, y: -CELL / 2, width: wPx, height: CELL,
+      fill: _fill, stroke: _stroke, strokeWidth: 3, dash: [10, 5], listening: false }));
+  } else {
+    group.add(new K.Rect({
+      x: -wPx / 2, y: -hPx / 2,
+      width: wPx, height: hPx,
+      fill: _fill, stroke: _stroke,
+      strokeWidth: 3, dash: [10, 5],
+      cornerRadius: 3, listening: false,
+    }));
+    // Halo intérieur pour la lisibilité sur fond clair ou sombre
+    group.add(new K.Rect({
+      x: -wPx / 2 + 2, y: -hPx / 2 + 2,
+      width: wPx - 4, height: hPx - 4,
+      fill: 'transparent',
+      stroke: 'rgba(253,224,71,0.45)',
+      strokeWidth: 1, listening: false,
+    }));
+  }
   group.add(new K.Text({
     x: -wPx / 2 + 5, y: -hPx / 2 + 4,
     text: `${_zoneCtx.opt.zoneW}×${_zoneCtx.opt.zoneH}c`,
@@ -5079,6 +5085,7 @@ async function _vttPlaceSpellZone(srcId, opt, { x, y, wPx, hPx }) {
   const data = {
     type: 'spellzone',
     x, y, w: wPx, h: hPx,
+    shape: opt.zoneShape === 'cross' ? 'cross' : 'rect',
     color, fill: true, strokeWidth: 2,
     label: opt.label || 'Zone', icon: opt.icon || '✨',
     totalDuration: dur, startRound: round, expiresAtRound,
@@ -5130,16 +5137,19 @@ async function _zoneValidate() {
     }
   }
 
-  // Détection des tokens dans le rectangle (centré sur x, y)
+  // Détection des tokens dans la zone (centrée sur x, y). Croix = colonne + rangée centrales.
   const x1 = x - wPx / 2, x2 = x + wPx / 2;
   const y1 = y - hPx / 2, y2 = y + hPx / 2;
+  const _isCross = opt.zoneShape === 'cross';
   const targets = Object.values(VS.tokens)
     .filter(e => {
       if (!e.data || e.data.pageId !== VS.activePage?.id) return false;
       if (e.data.id === srcId) return false;   // le lanceur ne subit JAMAIS sa propre zone
       if (!e.data.visible && !STATE.isAdmin) return false;
       const tc = _tokenCenter(e.data);
-      return tc.x >= x1 && tc.x <= x2 && tc.y >= y1 && tc.y <= y2;
+      if (tc.x < x1 || tc.x > x2 || tc.y < y1 || tc.y > y2) return false;
+      if (!_isCross) return true;
+      return Math.abs(tc.x - x) <= CELL / 2 || Math.abs(tc.y - y) <= CELL / 2;
     })
     .map(e => e.data.id);
 

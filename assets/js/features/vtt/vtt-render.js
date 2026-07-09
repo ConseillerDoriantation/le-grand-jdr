@@ -355,9 +355,18 @@ export function _buildAnnotVisual(K, data) {
     // visible de tous, posé au centre (x,y). Auto-supprimé à expiration (par round).
     const zw = data.w || CELL, zh = data.h || CELL;
     const g = new K.Group({ name: 'annot', listening: false });
-    g.add(new K.Rect({ x: 0, y: 0, width: zw, height: zh, offsetX: zw / 2, offsetY: zh / 2,
-      fill: col + '24', stroke: col, strokeWidth: data.strokeWidth || 2, dash: [10, 6], cornerRadius: 4,
-      hitStrokeWidth: 0, listening: true }));
+    const _zsw = data.strokeWidth || 2;
+    if (data.shape === 'cross') {
+      // Croix : barre verticale (1 case × hauteur) + barre horizontale (largeur × 1 case).
+      g.add(new K.Rect({ x: -CELL / 2, y: -zh / 2, width: CELL, height: zh,
+        fill: col + '24', stroke: col, strokeWidth: _zsw, dash: [10, 6], hitStrokeWidth: 0, listening: true }));
+      g.add(new K.Rect({ x: -zw / 2, y: -CELL / 2, width: zw, height: CELL,
+        fill: col + '24', stroke: col, strokeWidth: _zsw, dash: [10, 6], hitStrokeWidth: 0, listening: true }));
+    } else {
+      g.add(new K.Rect({ x: 0, y: 0, width: zw, height: zh, offsetX: zw / 2, offsetY: zh / 2,
+        fill: col + '24', stroke: col, strokeWidth: _zsw, dash: [10, 6], cornerRadius: 4,
+        hitStrokeWidth: 0, listening: true }));
+    }
     if (data.label) {
       g.add(new K.Text({ text: `${data.icon ? data.icon + ' ' : ''}${data.label}`,
         fontSize: 13, fontStyle: 'bold', fill: '#fff', align: 'center',

@@ -696,6 +696,12 @@ export function _ampDispCircleSize(nbAmp, nbDisp) {
   return rank >= 1 ? (4 * rank - 1) : 0;
 }
 
+/** Taille d'un AXE de la zone combo Amp+Disp, par nombre de runes de cet axe.
+ *  1 → 3, 2 → 7, 3 → 11 (4N−1). L'Amplification pilote la HAUTEUR, la Dispersion
+ *  la LARGEUR : chaque rune ajoutée agrandit son axe (pas d'effet « payé pour rien »).
+ */
+export function _ampDispDim(n) { const v = parseInt(n) || 0; return v >= 1 ? (4 * v - 1) : 0; }
+
 /** Zone calculée :
  *  - Si zoneW/H manuels saisis → ils priment (override MJ)
  *  - Sinon, calculé depuis les runes Amplification (+ Dispersion en combo) :
@@ -721,12 +727,15 @@ export function _calcSortZone(s) {
   if (nbAmp === 0) return null;
 
   if (nbDisp >= 1) {
-    const size = _ampDispCircleSize(nbAmp, nbDisp);
-    return { w: size, h: size, source: 'runes', amp: nbAmp, disp: nbDisp };
+    // Combo : Amplification → hauteur, Dispersion → largeur (chaque rune agrandit son axe).
+    const h = _ampDispDim(nbAmp);
+    const w = _ampDispDim(nbDisp);
+    const shape = s.zoneShape === 'cross' ? 'cross' : 'rect';
+    return { w, h, shape, source: 'runes', amp: nbAmp, disp: nbDisp };
   }
 
   const length = _ampLength(nbAmp);
-  return { w: length, h: 1, source: 'runes', amp: nbAmp, disp: nbDisp };
+  return { w: length, h: 1, shape: 'rect', source: 'runes', amp: nbAmp, disp: nbDisp };
 }
 
 /** Déplacement (rune Amplification en mode 'deplacement').
