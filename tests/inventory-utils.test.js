@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeInventaire, inventaireNeedsNorm } from '../assets/js/shared/inventory-utils.js';
+import {
+  normalizeInventaire,
+  inventaireNeedsNorm,
+  getInventoryItemValue,
+  getInventoryItemResaleValue,
+  getInventoryItemImage,
+} from '../assets/js/shared/inventory-utils.js';
 
 test('inventaireNeedsNorm : vrai dès qu’une entrée a qte > 1', () => {
   assert.equal(inventaireNeedsNorm([{ qte: 2 }]), true);
@@ -30,4 +36,26 @@ test('normalizeInventaire : mix qte=1 et qte>1', () => {
 test('normalizeInventaire : valeur non-tableau renvoyée telle quelle', () => {
   assert.equal(normalizeInventaire(null), null);
   assert.equal(normalizeInventaire(undefined), undefined);
+});
+
+test('valeur inventaire : catalogue puis prixAchat puis anciens champs', () => {
+  assert.equal(getInventoryItemValue({ prixAchat: 480, prix: 200 }), 480);
+  assert.equal(getInventoryItemValue({ prixAchat: 480 }, { prix: 520 }), 520);
+  assert.equal(getInventoryItemValue({ prix: 200 }), 200);
+  assert.equal(getInventoryItemValue({ price: 75 }), 75);
+});
+
+test('valeur de vente : valeur explicite puis ratio de 60 %', () => {
+  assert.equal(getInventoryItemResaleValue({ prixAchat: 480, prixVente: 288 }), 288);
+  assert.equal(getInventoryItemResaleValue({ prixAchat: 480 }), 288);
+  assert.equal(
+    getInventoryItemResaleValue({ prixAchat: 200, prixVente: 120 }, { prix: 480, prixVente: 288 }),
+    288,
+  );
+});
+
+test('image inventaire : image locale puis illustration du catalogue', () => {
+  assert.equal(getInventoryItemImage({ image: 'local.webp' }, { image: 'shop.webp' }), 'local.webp');
+  assert.equal(getInventoryItemImage({ itemId: 'x' }, { image: 'shop.webp' }), 'shop.webp');
+  assert.equal(getInventoryItemImage({}, { imageUrl: 'shop-url.webp' }), 'shop-url.webp');
 });

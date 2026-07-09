@@ -10,7 +10,7 @@ import { characterPortraitContent } from '../shared/portraits.js';
 import {
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax,
   calcOr, calcPalier, pct, getItemStatBonus, getItemEffectText,
-  sortCharactersForDisplay,
+  sortCharactersForDisplay, modStr,
 } from '../shared/char-stats.js';
 
 import { getCharacterById, getVisibleCharacters } from '../shared/character-state.js';
@@ -58,8 +58,14 @@ import {
   addInvItem, saveInvItemFromShop,
   editInvItem, saveInvItem,
   renderInvPersonalLine, saveInvPersonalLine,
-  filterInvRows,
+  filterInvRows, openInventoryItemDetail,
+  ensureInventoryCatalog, isInventoryCatalogReady, getInventoryCatalogItem,
 } from './characters/inventory.js';
+import {
+  getInventoryItemValue,
+  getInventoryItemResaleValue,
+  getInventoryItemImage,
+} from '../shared/inventory-utils.js';
 
 import { editEquipSlot } from './characters/equipment.js';
 
@@ -98,13 +104,16 @@ import { loadDamageTypes, getMagicTypes } from '../shared/damage-types.js';
 import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
-import { closeModalDirect } from '../shared/modal.js';
+import { openModal, closeModalDirect } from '../shared/modal.js';
+import { lsJson } from '../shared/local-storage.js';
 
 // Caches partagés Phase 2 — chargés à la demande au 1er affichage Combat
 let _combatTabCache = { styles: null, dmgTypes: null };
 let _charAdminFilter = null;
 let _currentTopTab   = 'combat';
 let _csV3InvFilter = { cat: 'all', search: '' };
+let _csV3InvDensity = lsJson.get('cs-inventory-density') === 'list' ? 'list' : 'cards';
+let _inventoryCatalogRefreshQueued = false;
 
 // Palette d'auras — constante partagée par renderCharSheet et setCharAura
 const AURA_PALETTE = {
@@ -113,6 +122,168 @@ const AURA_PALETTE = {
 };
 const _auraColor = (key) => AURA_PALETTE[key] || AURA_PALETTE.blue;
 const _charBlurActions = {};
+
+const _calcRow = (label, value, detail = '') => `
+  <div class="cs-calc-row">
+    <div><span>${_esc(label)}</span>${detail ? `<small>${_esc(detail)}</small>` : ''}</div>
+    <strong>${_esc(String(value))}</strong>
+  </div>`;
+
+function _derivedBonusSources(c, key) {
+  return Object.entries(c?.equipement || {}).flatMap(([slot, item]) => {
+    const base = parseInt(item?.[key]);
+    if (!Number.isFinite(base) || base === 0) return [];
+    const upgrade = base > 0 ? Math.max(0, parseInt(item?.upgrades?.effectBonus) || 0) : 0;
+    return [{ label: item.nom || slot, value: base + upgrade, detail: slot }];
+  });
+}
+
+function _calcEquipmentRows(c, key) {
+  const sources = _derivedBonusSources(c, key);
+  if (!sources.length) return _calcRow('Équipement', '0', 'Aucun bonus actif');
+  return sources.map(source =>
+    _calcRow(source.label, modStr(source.value), source.detail)
+  ).join('');
+}
+
+function _weaponForSlot(c, slot = 'Main principale') {
+  const raw = c?.equipement?.[slot] || {};
+  return slot === 'Main principale' && !raw.nom ? getMainWeapon(c) : raw;
+}
+
+function openCharCalculation(btn) {
+  const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
+  if (!c) return;
+
+  const type = btn.dataset.calc;
+  const level = c.niveau || 1;
+  let title = 'Détail du calcul';
+  let result = '';
+  let rows = '';
+  let note = '';
+
+  if (type === 'pv' || type === 'pm') {
+    const isPv = type === 'pv';
+    const statKey = isPv ? 'constitution' : 'sagesse';
+    const statLabel = isPv ? 'Constitution' : 'Sagesse';
+    const base = c[isPv ? 'pvBase' : 'pmBase'] || 10;
+    const mod = getMod(c, statKey);
+    const progression = mod > 0 ? Math.floor(mod * (level - 1)) : mod;
+    const derivedKey = isPv ? 'pvMaxBonus' : 'pmMaxBonus';
+    title = isPv ? 'Points de Vie maximum' : 'Points de Magie maximum';
+    result = isPv ? calcPVMax(c) : calcPMMax(c);
+    rows = [
+      _calcRow(isPv ? 'PV de base' : 'PM de base', base),
+      _calcRow(`Progression de ${statLabel}`, modStr(progression),
+        mod > 0 ? `${modStr(mod)} × ${level - 1} niveau(x) gagné(s)` : `Malus ${modStr(mod)} appliqué une fois`),
+      _calcEquipmentRows(c, derivedKey),
+    ].join('');
+    note = `Le modificateur de ${statLabel} provient de la valeur totale de la caractéristique.`;
+  } else if (type === 'ca') {
+    const equip = c.equipement || {};
+    const torse = equip.Torse || {};
+    const armorType = torse.typeArmure || 'Sans armure';
+    const armorBases = { 'Légère': 10, 'Intermédiaire': 12, 'Lourde': 14 };
+    const armorBase = armorBases[armorType] || 8;
+    const dex = getMod(c, 'dexterite');
+    const rawCaSources = Object.entries(equip).flatMap(([slot, item]) => {
+      const value = parseInt(item?.ca) || 0;
+      return value ? [{ slot, item, value }] : [];
+    });
+    const secondary = equip['Main secondaire'];
+    const secondaryName = (secondary?.sousType || secondary?.nom || '').toLowerCase();
+    const hasShield = secondaryName.includes('bouclier') || secondaryName.includes('shield');
+    const shieldOwnBonus = Number.isFinite(parseInt(secondary?.caBonus)) && parseInt(secondary.caBonus) !== 0;
+    title = 'Classe d’Armure';
+    result = calcCA(c);
+    rows = [
+      _calcRow(`Base · ${armorType}`, armorBase),
+      _calcRow('Modificateur de Dextérité', modStr(dex)),
+      ...rawCaSources.map(({ slot, item, value }) => _calcRow(item.nom || slot, modStr(value), slot)),
+      _calcEquipmentRows(c, 'caBonus'),
+      hasShield && !shieldOwnBonus ? _calcRow('Bouclier', '+2', 'Bonus par défaut') : '',
+    ].join('');
+    note = 'La CA additionne la base de l’armure de torse, la Dextérité et les bonus de l’équipement.';
+  } else if (type === 'speed') {
+    const strength = getMod(c, 'force');
+    title = 'Vitesse';
+    result = `${calcVitesse(c)} m`;
+    rows = [
+      _calcRow('Base', '3 m'),
+      _calcRow('Modificateur de Force', `${modStr(strength)} m`),
+      _calcEquipmentRows(c, 'vitesseBonus'),
+    ].join('');
+    note = 'La vitesse ne peut pas descendre sous 0 m.';
+  } else if (type === 'deck') {
+    const intMod = getMod(c, 'intelligence');
+    const progression = Math.floor(Math.max(0, intMod) * Math.pow(Math.max(0, level - 1), 0.75));
+    const penalty = Math.min(0, intMod);
+    const active = (c.deck_sorts || []).filter(spell => spell.actif).length;
+    title = 'Capacité du deck';
+    result = `${active} / ${calcDeckMax(c)}`;
+    rows = [
+      _calcRow('Capacité de base', 3),
+      _calcRow('Malus d’Intelligence', modStr(penalty)),
+      _calcRow('Progression', modStr(progression), `Intelligence ${modStr(intMod)} · niveau ${level}`),
+    ].join('');
+    note = 'Le premier nombre correspond aux sorts actifs, le second à la capacité maximale.';
+  } else if (type?.startsWith('weapon-')) {
+    const slot = btn.dataset.slot || 'Main principale';
+    const item = _weaponForSlot(c, slot);
+    const fallback = item.statAttaque === 'dexterite'
+      ? 'dexterite'
+      : item.statAttaque === 'intelligence' ? 'intelligence' : 'force';
+    if (!item?.nom) return;
+
+    if (type === 'weapon-touch') {
+      const parts = getWeaponToucherParts(c, item, fallback);
+      title = `Toucher · ${item.nom}`;
+      result = parts.roll;
+      rows = parts.statLabel
+        ? [
+            _calcRow('Jet de base', '1d20'),
+            _calcRow(`Modificateur de ${parts.statLabel}`, modStr(parts.statMod || 0)),
+            _calcRow('Bonus de set', modStr(parts.setBonus || 0)),
+          ].join('')
+        : [
+            _calcRow('Jet défini par l’arme', item.toucher || parts.roll),
+            _calcRow('Bonus de set', modStr(parts.setBonus || 0)),
+          ].join('');
+      note = `Arme équipée en ${slot}.`;
+    } else if (type === 'weapon-damage') {
+      const parts = getWeaponDegatsParts(c, item, fallback);
+      title = `Dégâts · ${item.nom}`;
+      result = parts?.roll || '—';
+      rows = parts ? [
+        _calcRow('Dés de l’arme', item.degats),
+        _calcRow(`Modificateur · ${parts.statLabel}`, modStr(parts.statMod || 0)),
+        _calcRow('Maîtrise', modStr(parts.maitriseBonus || 0)),
+      ].join('') : _calcRow('Dégâts', 'Aucun');
+      note = 'La maîtrise utilisée est la meilleure maîtrise compatible avec cette arme.';
+    } else {
+      title = `Portée · ${item.nom}`;
+      result = item.portee || '1 case';
+      rows = [
+        _calcRow('Portée de l’arme', item.portee || '1 case'),
+        _calcRow('Source', item.nom, slot),
+      ].join('');
+      note = 'Les sorts utilisant la portée de l’arme reprennent cette valeur, sauf réglage propre au sort.';
+    }
+  } else {
+    return;
+  }
+
+  openModal(`ⓘ ${title}`, `
+    <div class="cs-calc-modal">
+      <div class="cs-calc-result"><span>Valeur finale</span><strong>${_esc(String(result))}</strong></div>
+      <div class="cs-calc-rows">${rows}</div>
+      ${note ? `<p class="cs-calc-note">${_esc(note)}</p>` : ''}
+    </div>`, {
+    subtitle: 'Origine de chaque valeur',
+    accent: '#4f8cff',
+  });
+}
+
 function registerCharBlurActions(map) { Object.assign(_charBlurActions, map); }
 document.addEventListener('focusout', (event) => {
   const el = event.target?.closest?.('[data-blur]');
@@ -327,7 +498,7 @@ function _buildTabsHtml(c, v3Tab) {
     { k: 'combat',  ico: 'sword',       lbl: 'Combat' },
     { k: 'sorts',   ico: 'sparkles',    lbl: 'Sorts',      badge: `${(c.deck_sorts||[]).filter(x=>x.actif).length}/${calcDeckMax(c)}` },
     { k: 'inv',     ico: 'bag',         lbl: 'Inventaire', badge: `${(c.inventaire||[]).length||''}` },
-    { k: 'compte',  ico: 'coin',        lbl: 'Compte' },
+    { k: 'compte',  ico: 'coin',        lbl: 'Bourse' },
     { k: 'journal', ico: 'book',        lbl: 'Journal' },
     { k: 'profil',  ico: 'user-circle', lbl: 'Profil' },
   ].map(t => `<button class="tab-v3 ${t.k===v3Tab?'active':''}" id="cs-tab-${t.k}"
@@ -408,7 +579,7 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
       <div class="vital-body">
         <div class="vital-head">
           <span class="vital-label">Points de Vie</span>
-          <span class="vital-num"><span id="pv-val">${pvCur}</span><small>/ ${pvMax}</small></span>
+          <span class="vital-num"><span id="pv-val">${pvCur}</span><button class="cs-calc-inline" data-action="openCharCalculation" data-calc="pv" data-id="${c.id}" title="Voir le calcul des PV maximum">/ ${pvMax} ⓘ</button></span>
         </div>
         <div class="vital-bar"><div class="${hpBarCls}" id="pv-bar" style="width:${pvPct}%"></div></div>
         <div class="vital-ctrls">
@@ -434,7 +605,7 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
       <div class="vital-body">
         <div class="vital-head">
           <span class="vital-label">Points de Magie</span>
-          <span class="vital-num"><span id="pm-val">${pmCur}</span><small>/ ${pmMax}</small></span>
+          <span class="vital-num"><span id="pm-val">${pmCur}</span><button class="cs-calc-inline" data-action="openCharCalculation" data-calc="pm" data-id="${c.id}" title="Voir le calcul des PM maximum">/ ${pmMax} ⓘ</button></span>
         </div>
         <div class="vital-bar"><div class="vital-bar-fill" id="pm-bar" style="width:${pmPct}%"></div></div>
         <div class="vital-ctrls">
@@ -456,9 +627,9 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
 
     <!-- Mini stats : CA · Vit. · Deck (3 colonnes) -->
     <div class="cs-mini-grid cs-mini-grid-3">
-      <div class="cs-mini"><span class="cs-mini-icon">🛡️</span><div class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val">${calcCA(c)}</span></div></div>
-      <div class="cs-mini"><span class="cs-mini-icon">🏃</span><div class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val">${calcVitesse(c)}m</span></div></div>
-      <div class="cs-mini" title="Sorts actifs / capacité du deck (basée sur l'INT)" data-action="showCharTab" data-tab="sorts" style="cursor:pointer"><span class="cs-mini-icon">✦</span><div class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}<small style="font-size:.62rem;color:var(--text-dim);font-weight:600;margin-left:1px">/${deckMax}</small></span></div></div>
+      <button class="cs-mini cs-calc-trigger" data-action="openCharCalculation" data-calc="ca" data-id="${c.id}" title="Voir le calcul de la CA"><span class="cs-mini-icon">🛡️</span><span class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val">${calcCA(c)}</span></span></button>
+      <button class="cs-mini cs-calc-trigger" data-action="openCharCalculation" data-calc="speed" data-id="${c.id}" title="Voir le calcul de la vitesse"><span class="cs-mini-icon">🏃</span><span class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val">${calcVitesse(c)}m</span></span></button>
+      <button class="cs-mini cs-calc-trigger" data-action="openCharCalculation" data-calc="deck" data-id="${c.id}" title="Voir le calcul de la capacité du deck"><span class="cs-mini-icon">✦</span><span class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}<small style="font-size:.62rem;color:var(--text-dim);font-weight:600;margin-left:1px">/${deckMax}</small></span></span></button>
     </div>
 
     <!-- Or -->
@@ -612,6 +783,15 @@ function _renderTabV3(tab, c, canEdit) {
   if (tab === 'journal' && sub === 'notes') { bindQuillEditors(area); _bindNotesDnd(c, canEdit); }
   if (tab === 'journal' && sub === 'quetes') _bindQuetesDnd(c, canEdit);
   if (tab === 'sorts') { _bindSortsCatDrag(c, canEdit); bindSortCardsDnd(c, canEdit); }
+  if (tab === 'inv' && !isInventoryCatalogReady() && !_inventoryCatalogRefreshQueued) {
+    _inventoryCatalogRefreshQueued = true;
+    ensureInventoryCatalog().finally(() => {
+      _inventoryCatalogRefreshQueued = false;
+      if (charSession.getCurrentChar()?.id === c.id && charSession.getCurrentCharTab() === 'inv') {
+        _renderTabV3('inv', c, canEdit);
+      }
+    });
+  }
   if (samePanel && savedScroll != null) _restoreTabScroll(savedScroll);
 }
 
@@ -1091,17 +1271,20 @@ function _invFilters(inv) {
 
 function renderCharInventaireV3(c, canEdit) {
   const inv = c.inventaire || [];
-  const totalItems = inv.length;
+  const totalItems = inv.reduce((sum, item) =>
+    sum + (parseInt(item.quantite || item.qte || 1) || 1), 0);
   let equipped = 0;
   try {
     const equipMap = getEquippedInventoryIndexMap?.(c) || new Map();
     equipped = equipMap.size;
   } catch {}
-  const valeur = inv.reduce((s, it) => {
-    const p = parseInt(it.prix || it.price || 0);
+  const totals = inv.reduce((sum, it) => {
+    const catalogItem = getInventoryCatalogItem(it.itemId);
     const q = parseInt(it.quantite || it.qte || 1) || 1;
-    return s + (Number.isFinite(p) ? p * q : 0);
-  }, 0);
+    sum.value += getInventoryItemValue(it, catalogItem) * q;
+    sum.resale += getInventoryItemResaleValue(it, catalogItem) * q;
+    return sum;
+  }, { value: 0, resale: 0 });
 
   // État du filtre / search module-local
   const filter = _csV3InvFilter;
@@ -1115,7 +1298,8 @@ function renderCharInventaireV3(c, canEdit) {
   // Garde la liste d'indices originaux pour les actions (vente/envoi/suppression bulk).
   const stackMap = new Map();
   inv.forEach((it, idx) => {
-    const baseKey = it.itemId || `${it.nom||''}|${it.template||it.type||''}|${parseInt(it.rarete||it.rare||0)}|${parseInt(it.prix||0)}`;
+    const catalogItem = getInventoryCatalogItem(it.itemId);
+    const baseKey = it.itemId || `${it.nom||''}|${it.template||it.type||''}|${parseInt(it.rarete||it.rare||0)}|${getInventoryItemValue(it, catalogItem)}`;
     const traitsKey = (_getTraits?.(it) || []).join('\u001f');
     const key = `${baseKey}|traits:${traitsKey}`;
     if (!stackMap.has(key)) {
@@ -1135,25 +1319,43 @@ function renderCharInventaireV3(c, canEdit) {
     return hay.includes(q);
   });
 
-  const summaryHtml = `<div class="inv-summary">
-    <div class="inv-sum-item"><span class="inv-sum-lbl">Objets</span><span class="inv-sum-val">${totalItems}</span></div>
-    <div class="inv-sum-item"><span class="inv-sum-lbl">Équipés</span><span class="inv-sum-val">${equipped}</span></div>
-    <div class="inv-sum-item"><span class="inv-sum-lbl">Valeur totale</span><span class="inv-sum-val gold">${valeur} or</span></div>
-    ${canEdit?`<button class="section-action" style="margin-left:auto;align-self:center" data-action="addInvItem" data-id="${c.id}">＋ Ajouter un objet</button>`:''}
+  const categoryCount = catId => inv.reduce((count, item) => {
+    if (catId !== 'all' && _detectInvCategory(item) !== catId) return count;
+    return count + (parseInt(item.quantite || item.qte || 1) || 1);
+  }, 0);
+
+  const summaryHtml = `<div class="inv-overview">
+    <span><b>${totalItems}</b> objet${totalItems > 1 ? 's' : ''}</span>
+    <span><b>${equipped}</b> équipé${equipped > 1 ? 's' : ''}</span>
+    <span class="value"><small>Valeur</small><b>${totals.value} or</b></span>
+    <span class="resale"><small>Revente</small><b>${totals.resale} or</b></span>
   </div>`;
 
-  const filterBarHtml = `<div class="inv-search">
-    <input placeholder="🔍 Rechercher dans l'inventaire…" value="${_esc(filter.search)}"
-      data-input="_csV3InvSetSearch">
-    <div class="filter-chips">
-      ${filters.map(f => `<button class="filter-chip ${activeCat===f.id?'on':''}" data-action="csV3InvSetCat" data-cat="${_esc(f.id)}">
-        ${f.icon} ${_esc(f.lbl)}
-      </button>`).join('')}
+  const filterBarHtml = `<div class="inv-toolbar">
+    <div class="inv-search">
+      <svg class="inv-search-ico" aria-hidden="true"><use href="./assets/img/icons.svg#icon-search"/></svg>
+      <input placeholder="Rechercher un objet…" value="${_esc(filter.search)}"
+        aria-label="Rechercher dans l’inventaire" data-input="_csV3InvSetSearch">
+      ${filter.search ? `<button class="inv-search-clear" data-action="csV3InvClearSearch" title="Effacer la recherche" aria-label="Effacer la recherche">×</button>` : ''}
     </div>
+    <div class="inv-densityseg" role="group" aria-label="Mode d’affichage">
+      <button class="${_csV3InvDensity === 'cards' ? 'on' : ''}" data-action="csV3InvSetDensity"
+        data-density="cards" aria-pressed="${_csV3InvDensity === 'cards'}" title="Vue cartes">▦</button>
+      <button class="${_csV3InvDensity === 'list' ? 'on' : ''}" data-action="csV3InvSetDensity"
+        data-density="list" aria-pressed="${_csV3InvDensity === 'list'}" title="Vue liste">☰</button>
+    </div>
+    ${canEdit ? `<button class="btn btn-gold btn-sm inv-add-btn" data-action="addInvItem" data-id="${c.id}" title="Ajouter un objet">＋ <span>Objet</span></button>` : ''}
+  </div>
+  <div class="inv-category-bar" role="tablist" aria-label="Catégories de l’inventaire">
+    ${filters.map(f => `<button class="inv-category ${activeCat===f.id?'on':''}" role="tab"
+      aria-selected="${activeCat===f.id}" data-action="csV3InvSetCat" data-cat="${_esc(f.id)}">
+      ${f.icon ? `<span aria-hidden="true">${f.icon}</span>` : ''}${_esc(f.lbl)}
+      <b>${categoryCount(f.id)}</b>
+    </button>`).join('')}
   </div>`;
 
   if (filteredInv.length === 0) {
-    return summaryHtml + filterBarHtml + `<div class="q-empty">${inv.length===0?"Inventaire vide.":"Aucun objet ne correspond aux filtres."}</div>`;
+    return `<div class="cs-section cs-section--compact cs-inventory-v3">${filterBarHtml}${summaryHtml}<div class="q-empty">${inv.length===0?"Inventaire vide.":"Aucun objet ne correspond aux filtres."}</div></div>`;
   }
 
   const cardsHtml = filteredInv.map(({ it, indices, qte }) => {
@@ -1167,26 +1369,31 @@ function renderCharInventaireV3(c, canEdit) {
     const allIdxB64 = btoa(JSON.stringify(allIdx));
 
     // Prix d'achat (référence) et prix de vente (au joueur quand il revend)
-    const prixAchat = parseFloat(it.prix || it.prixAchat || 0) || 0;
-    const prixVente = parseFloat(it.prixVente) || Math.round(prixAchat * 0.6);
+    const catalogItem = getInventoryCatalogItem(it.itemId);
+    const prixAchat = getInventoryItemValue(it, catalogItem);
+    const prixVente = getInventoryItemResaleValue(it, catalogItem);
+    const image = getInventoryItemImage(it, catalogItem);
 
-    // Propriétés : on génère des kv selon ce qui existe
+    // Effet principal : une seule information forte, le reste devient secondaire.
+    const caTotal = (parseInt(it.ca) || 0) + (parseInt(it.caBonus) || 0);
+    const effetTxt = getItemEffectText(it);
+    const hero = it.degats
+      ? { k: 'Dégâts', v: it.degats, c: 'dmg', icon: '⚔' }
+      : caTotal
+        ? { k: 'Armure', v: `CA ${caTotal > 0 ? '+' : ''}${caTotal}`, c: 'ca', icon: '◈' }
+        : effetTxt
+          ? { k: 'Effet', v: effetTxt, c: 'effect', icon: '✦' }
+          : null;
+
+    // Propriétés secondaires
     const props = [];
-    if (it.degats) props.push({ k: 'Dégâts', v: it.degats, c: 'dmg' });
     if (it.toucher) props.push({ k: 'Toucher', v: it.toucher });
     if (it.portee) props.push({ k: 'Portée', v: it.portee });
     if (it.typeArmure) props.push({ k: 'Type', v: it.typeArmure });
     if (it.slotArmure)  props.push({ k: 'Slot', v: it.slotArmure });
     else if (it.slotBijou) props.push({ k: 'Slot', v: it.slotBijou });
-    if (it.ca || it.caBonus) {
-      const total = (parseInt(it.ca)||0) + (parseInt(it.caBonus)||0);
-      if (total) props.push({ k: 'CA', v: '+'+total });
-    }
     if (it.format) props.push({ k: 'Format', v: it.format });
-    // Effet : applique les upgrades (Artisan) au texte affiché
-    const effetTxt = getItemEffectText(it);
-    if (effetTxt) props.push({ k: 'Effet', v: effetTxt });
-    if (prixAchat) props.push({ k: 'Prix', v: prixAchat + ' or', c: 'gold' });
+    if (effetTxt && hero?.k !== 'Effet') props.push({ k: 'Effet', v: effetTxt, c: 'effect' });
     const traits = _getTraits?.(it) || [];
 
     const equipMap = (() => { try { return getEquippedInventoryIndexMap?.(c) || new Map(); } catch { return new Map(); } })();
@@ -1194,16 +1401,29 @@ function renderCharInventaireV3(c, canEdit) {
 
     return `<div class="inv-card ${isEquipped?'is-equipped':''}" style="--rare-c:${col}">
       <div class="inv-card-head">
-        <div style="min-width:0;flex:1">
+        <button class="inv-card-visual" data-action="openInventoryItemDetail" data-id="${c.id}"
+          data-indices="${allIdxB64}" title="Inspecter ${_esc(it.nom || 'l’objet')}">
+          ${image ? `<img src="${_esc(image)}" alt="">` : `<span aria-hidden="true">${_invCat(it).icon || '◇'}</span>`}
+        </button>
+        <div class="inv-card-identity">
           <div class="inv-card-name">${_esc(it.nom || 'Sans nom')}</div>
-          ${rareIdx > 0
-            ? `<div class="inv-card-rare" style="color:${col}">${stars} ${_RARE_NAMES[rareIdx]}</div>`
-            : ''}
+          <div class="inv-card-subline">
+            ${rareIdx > 0
+              ? `<span class="inv-card-rare" style="color:${col}">${stars} ${_RARE_NAMES[rareIdx]}</span>`
+              : `<span>${_esc(_invCat(it).lbl)}</span>`}
+            ${isEquipped ? '<span class="inv-equipped-badge">Équipé</span>' : ''}
+          </div>
         </div>
-        ${qte > 1
-          ? `<span class="inv-qte" title="${qte} items empilés">×${qte}</span>`
-          : `<span class="inv-qte">×1</span>`}
+        <div class="inv-card-head-actions">
+          ${qte > 1
+            ? `<span class="inv-qte" title="${qte} items empilés">×${qte}</span>`
+            : `<span class="inv-qte">×1</span>`}
+        </div>
       </div>
+      ${hero ? `<div class="inv-card-hero ${hero.c}">
+        <span class="inv-card-hero-icon" aria-hidden="true">${hero.icon}</span>
+        <span><small>${hero.k}</small><strong>${_esc(hero.v)}</strong></span>
+      </div>` : ''}
       ${props.length?`<div class="inv-card-props">
         ${props.map(p => `<span class="kv">
           <span class="k">${_esc(p.k)}</span>
@@ -1222,15 +1442,26 @@ function renderCharInventaireV3(c, canEdit) {
       })()}
       ${it.description?`<div class="inv-card-desc">${_esc(it.description)}</div>`:''}
       ${renderInvPersonalLine(c, allIdx, allIdxB64, 'card', canEdit)}
-      ${canEdit?`<div class="inv-card-actions">
-        <button class="inv-act sell" data-action="openSellInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-prix="${prixVente}" data-name="${_esc(it.nom||'')}" title="Vendre ${prixVente} or/u">💰 Vendre ${prixVente}or</button>
-        <button class="inv-act send" data-action="openSendInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-name="${_esc(it.nom||'')}" title="Envoyer">↗ Envoyer</button>
-        <button class="inv-act del" data-action="openDeleteInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-name="${_esc(it.nom||'')}" title="Supprimer">🗑️</button>
-      </div>`:''}
+      <div class="inv-card-footer">
+        <button class="inv-detail-btn" data-action="openInventoryItemDetail" data-id="${c.id}" data-indices="${allIdxB64}">Détails</button>
+        <div class="inv-card-values">
+          ${prixAchat ? `<span title="Valeur unitaire"><small>Valeur</small>${prixAchat}</span>` : ''}
+          ${prixVente ? `<span class="resale" title="Revente unitaire"><small>Revente</small>${prixVente}</span>` : ''}
+        </div>
+        ${canEdit?`<div class="inv-card-actions">
+          <button class="inv-act sell" data-action="openSellInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-prix="${prixVente}" data-name="${_esc(it.nom||'')}" title="Vendre ${prixVente} or/u" aria-label="Vendre"><svg aria-hidden="true"><use href="./assets/img/icons.svg#icon-coin"/></svg></button>
+          <button class="inv-act send" data-action="openSendInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-name="${_esc(it.nom||'')}" title="Envoyer" aria-label="Envoyer">↗</button>
+          <button class="inv-act del" data-action="openDeleteInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-name="${_esc(it.nom||'')}" title="Supprimer" aria-label="Supprimer">×</button>
+        </div>`:''}
+      </div>
     </div>`;
   }).join('');
 
-  return summaryHtml + filterBarHtml + `<div class="inv-grid">${cardsHtml}</div>`;
+  return `<div class="cs-section cs-section--compact cs-inventory-v3">
+    ${filterBarHtml}
+    ${summaryHtml}
+    <div class="inv-grid ${_csV3InvDensity === 'list' ? 'is-list' : 'is-cards'}">${cardsHtml}</div>
+  </div>`;
 }
 
 function _csV3InvSetCat(cat) {
@@ -1246,6 +1477,20 @@ function _csV3InvSetSearch(search) {
     const inp = document.querySelector('.inv-search input');
     if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch {} }
   });
+}
+
+function _csV3InvClearSearch() {
+  _csV3InvSetSearch('');
+}
+
+function _csV3InvSetDensity(density) {
+  const next = density === 'list' ? 'list' : 'cards';
+  if (next === _csV3InvDensity) return;
+  _csV3InvDensity = next;
+  lsJson.set('cs-inventory-density', next);
+  if (charSession.getCurrentChar() && charSession.getCurrentCharTab() === 'inv') {
+    _renderTabV3('inv', charSession.getCurrentChar(), charSession.getCanEditChar());
+  }
 }
 
 // ── Allocation ±1 point de niveau sur une stat depuis le stats banner ───────
@@ -1473,6 +1718,7 @@ registerActions({
   removeProfilImage:        (btn)   => removeProfilImage(btn.dataset.id),
 
   // Équipement & combat
+  openCharCalculation:       (btn)   => openCharCalculation(btn),
   editEquipSlot:            (btn)   => editEquipSlot(btn.dataset.slot),
   openCombatStylesAdmin:    ()      => openCombatStylesAdmin(),
   openDamageTypesAdmin:     ()      => openDamageTypesAdmin(),
@@ -1483,8 +1729,11 @@ registerActions({
   editMaitrise:             (btn)   => editMaitrise(Number(btn.dataset.idx)),
 
   // Inventaire
+  openInventoryItemDetail:  (btn)   => openInventoryItemDetail(btn.dataset.id, btn.dataset.indices),
   addInvItem:               ()      => addInvItem(),
   csV3InvSetCat:            (btn)   => _csV3InvSetCat(btn.dataset.cat),
+  csV3InvClearSearch:       ()      => _csV3InvClearSearch(),
+  csV3InvSetDensity:        (btn)   => _csV3InvSetDensity(btn.dataset.density),
   openSellInvModal:         (btn)   => openSellInvModal(btn.dataset.id, btn.dataset.indices, Number(btn.dataset.prix), btn.dataset.name),
   openSendInvModal:         (btn)   => openSendInvModal(btn.dataset.id, btn.dataset.indices, btn.dataset.name),
   openDeleteInvModal:       (btn)   => openDeleteInvModal(btn.dataset.id, btn.dataset.indices, btn.dataset.name),
