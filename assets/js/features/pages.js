@@ -65,6 +65,11 @@ const _statsCompareSelection = { players: [], groups: [] };
 let _statsQuests    = [];              // groupes de mission (collection quests) pour libellés/portraits
 let _statsStory     = [];              // missions de la Trame pour ordre/titres du sélecteur stats
 let _statsDrawerState = new Map();     // key → état ouvert/fermé des onglets stats durant la session
+let _statsRequestedScope = null;       // navigation ciblée depuis le Centre de session
+
+export function requestStatsScope(scope = null) {
+  _statsRequestedScope = scope || null;
+}
 
 // Avatar (rond) d'un perso par id — devant son nom dans les chips/graphiques.
 const _statsAvatar = (id, name, size = 18) =>
@@ -1377,9 +1382,21 @@ const PAGES = {
     let bastionDoc      = null;
     let nextSession     = null;
 
-    let _dashDecorated   = false;  // animations d'entrée + particules : 1 seule fois
     let _presenceWatched = false;  // abonnement présence MJ : 1 seule fois
     let _paintQueued     = false;
+    let _sessionCenterModulePromise = null;
+
+    const mountSessionCenter = () => {
+      _sessionCenterModulePromise ||= import('./session-center.js');
+      _sessionCenterModulePromise
+        .then(({ renderSessionCenterInto }) => renderSessionCenterInto('dashboard-session-center', {
+          agendaDoc: nextSession,
+          quests,
+          story: storyItems,
+          chars: allChars,
+        }))
+        .catch(err => console.error('[dashboard] centre de session indisponible', err));
+    };
 
     const paint = () => {
       _paintQueued = false;
@@ -2007,6 +2024,142 @@ const PAGES = {
     }
 
     // ── Render ──────────────────────────────────────────────────────────
+    function _dashboardMetric({ page, icon, value, label, tone = '#7fb0ff', sub = '' }) {
+      if (page && !isFeatureEnabled(page)) return '';
+      return `
+      <button type="button" class="dv2-dash-metric" data-navigate="${page}">
+        <span class="dv2-dash-metric-ico" style="color:${tone}">${icon}</span>
+        <span class="dv2-dash-metric-main">
+          <strong style="color:${tone}">${value}</strong>
+          <span>${label}</span>
+          ${sub ? `<small>${sub}</small>` : ''}
+        </span>
+      </button>`;
+    }
+
+    function _quickActionButton({ page, icon, label, note, tone = '#7fb0ff' }) {
+      if (!isFeatureEnabled(page)) return '';
+      return `
+      <button type="button" class="dv2-dash-action" data-navigate="${page}">
+        <span class="dv2-dash-action-ico" style="color:${tone}">${icon}</span>
+        <span class="dv2-dash-action-copy">
+          <strong>${label}</strong>
+          <small>${note}</small>
+        </span>
+      </button>`;
+    }
+
+    function _gmPilotPanel() {
+      const visibleSessionCount = _visibleSessions.length;
+      const activeMissionCount = storyItems.filter(i => i.type === 'mission' && i.statut === 'En cours').length;
+      return `
+      <section class="dv2-dash-panel dv2-dash-panel--pilot">
+        <div class="dv2-section-label">
+          <span class="dv2-section-label-text">Pilotage</span>
+          <div class="dv2-section-label-line"></div>
+        </div>
+        <div class="dv2-dash-metrics">
+          ${_dashboardMetric({ page: 'characters', icon: _svg('users'), value: chars.length, label: 'personnages' })}
+          ${_dashboardMetric({ page: 'story', icon: _svg('scroll'), value: activeGroups.length, label: 'groupes actifs', tone: '#b99fff', sub: `${activeMissionCount} mission${activeMissionCount > 1 ? 's' : ''}` })}
+          ${_dashboardMetric({ page: 'agenda', icon: _svg('calendar'), value: visibleSessionCount, label: 'seances calees', tone: '#22c38e' })}
+          ${_dashboardMetric({ page: 'collection', icon: _svg('layers'), value: `${collectionUnlocked}/${collectionTotal}`, label: 'collection', tone: '#f4c430', sub: collectionTotal ? `${collectionPct}% debloque` : 'vide' })}
+        </div>
+      </section>`;
+    }
+
+    function _gmAttentionPanel() {
+      const statusRows = chars
+        .map(c => {
+          const pvMax = calcPVMax(c) || c.pvBase || 10;
+          const pmMax = calcPMMax(c) || c.pmBase || 10;
+          const pvCur = c.pvActuel ?? pvMax;
+          const pmCur = c.pmActuel ?? pmMax;
+          const pvPct = pvMax > 0 ? Math.round((pvCur / pvMax) * 100) : 100;
+          const pmPct = pmMax > 0 ? Math.round((pmCur / pmMax) * 100) : 100;
+          const reasons = [];
+          if (pvPct <= 35) reasons.push(`PV ${pvCur}/${pvMax}`);
+          if (pmPct <= 25) reasons.push(`PM ${pmCur}/${pmMax}`);
+          return { c, pvPct, pmPct, reasons };
+        })
+        .filter(row => row.reasons.length)
+        .sort((a, b) => (a.pvPct - b.pvPct) || (a.pmPct - b.pmPct))
+        .slice(0, 5);
+      if (!statusRows.length) return '';
+      return `
+      <section class="dv2-dash-panel">
+        <div class="dv2-section-label">
+          <span class="dv2-section-label-text">PV / PM bas</span>
+          <div class="dv2-section-label-line"></div>
+          <button class="dv2-section-action" data-navigate="characters">Fiches -></button>
+        </div>
+        <div class="dv2-dash-watchlist">
+          ${statusRows.map(({ c, reasons }) => {
+            const avatar = characterAvatarHtml(c, { size: 34, border: '2px solid rgba(255,90,126,.4)', background: 'rgba(255,90,126,.12)' });
+            return `
+            <button type="button" class="dv2-dash-watch" data-action="_goToChar" data-id="${c.id}">
+              ${avatar}
+              <span class="dv2-dash-watch-copy">
+                <strong>${_esc(c.nom || '?')}</strong>
+                <small>${_esc(reasons.join(' · '))}</small>
+              </span>
+            </button>`;
+          }).join('')}
+        </div>
+      </section>`;
+    }
+
+    function _gmActionsPanel() {
+      const actions = [
+        { page: 'vtt', icon: _svg('dice'), label: 'Ouvrir la table', note: 'jouer, tokens, combats', tone: '#7fb0ff' },
+        { page: 'story', icon: _svg('scroll'), label: 'Preparer la trame', note: 'missions et groupes', tone: '#22d3ee' },
+        { page: 'statistiques', icon: _svg('trophy'), label: 'Lire les stats', note: 'recaps de session', tone: '#a78bfa' },
+        { page: 'bestiaire', icon: _svg('sword'), label: 'Bestiaire', note: 'creatures et rencontres', tone: '#ff5a7e' },
+        { page: 'shop', icon: _svg('coin'), label: 'Boutique', note: 'objets et economie', tone: '#f4c430' },
+        { page: 'admin', icon: _svg('cog'), label: 'Reglages', note: 'outils MJ', tone: '#ff9544' },
+      ];
+      return `
+      <section class="dv2-dash-panel">
+        <div class="dv2-section-label">
+          <span class="dv2-section-label-text">Actions MJ</span>
+          <div class="dv2-section-label-line"></div>
+        </div>
+        <div class="dv2-dash-actions">${actions.map(_quickActionButton).join('')}</div>
+      </section>`;
+    }
+
+    function _playerActionsPanel() {
+      const actions = [
+        { page: 'characters', icon: _svg('scroll'), label: 'Ouvrir la fiche', note: 'profil, combat, inventaire', tone: '#e8b84b' },
+        { page: 'collection', icon: _svg('layers'), label: 'Collection', note: 'cartes debloquees', tone: '#22d3ee' },
+        { page: 'map', icon: _svg('map'), label: 'Carte', note: 'monde et reperes', tone: '#4f8cff' },
+      ];
+      return `
+      <section class="dv2-dash-panel">
+        <div class="dv2-section-label">
+          <span class="dv2-section-label-text">Reprendre</span>
+          <div class="dv2-section-label-line"></div>
+        </div>
+        <div class="dv2-dash-actions">${actions.map(_quickActionButton).join('')}</div>
+      </section>`;
+    }
+
+    function _playerProgressPanel() {
+      const achievementCount = achievements.length;
+      return `
+      <section class="dv2-dash-panel dv2-dash-panel--pilot">
+        <div class="dv2-section-label">
+          <span class="dv2-section-label-text">Mes reperes</span>
+          <div class="dv2-section-label-line"></div>
+        </div>
+        <div class="dv2-dash-metrics">
+          ${_dashboardMetric({ page: 'characters', icon: _svg('users'), value: chars.length, label: 'personnage' + (chars.length > 1 ? 's' : '') })}
+          ${_dashboardMetric({ page: 'collection', icon: _svg('layers'), value: `${collectionUnlocked}/${collectionTotal}`, label: 'cartes', tone: '#22d3ee', sub: collectionTotal ? `${collectionPct}%` : 'vide' })}
+          ${_dashboardMetric({ page: 'achievements', icon: _svg('trophy'), value: achievementCount, label: 'hauts-faits', tone: '#22c38e' })}
+          ${bastionDoc ? _dashboardMetric({ page: 'bastion', icon: _svg('shield'), value: bastionLevel || 1, label: 'bastion', tone: '#f4c430' }) : ''}
+        </div>
+      </section>`;
+    }
+
     const advBanner = STATE.adventure ? `
     <div class="dash-adv-banner" data-action="openAdventureSwitcher" style="cursor:${(STATE.adventures?.length||0)>1?'pointer':'default'}">
       <span style="font-size:1.1rem">${STATE.adventure.emoji||'⚔️'}</span>
@@ -2014,6 +2167,14 @@ const PAGES = {
       ${(STATE.adventures?.length||0)>1?`<span style="font-size:.7rem;color:var(--text-dim);border:1px solid var(--border);border-radius:6px;padding:1px 6px">⇄ Changer</span>`:''}
       <span class="dash-adv-tag">Aventure active</span>
     </div>` : '';
+    const sessionHub = `
+      <section class="dv2-session-hub">
+        <div class="dv2-section-label">
+          <span class="dv2-section-label-text">Session</span>
+          <div class="dv2-section-label-line"></div>
+        </div>
+        <div id="dashboard-session-center" class="sc-root">${appSplashHtml('Chargement des séances…')}</div>
+      </section>`;
 
     if (STATE.isAdmin) {
 
@@ -2028,102 +2189,41 @@ const PAGES = {
           <div class="dv2-greeting-label">Console Maître du Jeu</div>
           <div class="dv2-greeting-title">Bonjour, ${_esc(pseudo)}</div>
         </div>
-        <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Session active</div>
+        <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Aventure active</div>
       </div>
 
-      <!-- Action du moment -->
-      ${primaryBlock}
+      ${sessionHub}
 
-      <!-- Stats 4-col -->
-      <div class="dv2-stats-grid">
-        <div class="dv2-stat-card dv2-sc-shield" data-navigate="characters">
-          <span class="dv2-stat-card-icon">${_svg('scroll', 'var(--gold-2)')}</span>
-          <div class="dv2-stat-card-val" style="color:var(--gold-2)">${chars.length}</div>
-          <div class="dv2-stat-card-lbl">Personnage${chars.length!==1?'s':''}</div>
+      <section class="dv2-dashboard-grid dv2-dashboard-grid--admin">
+        <aside class="dv2-dashboard-side">
+          ${_gmPilotPanel()}
+          ${_gmAttentionPanel()}
+          <div id="dash-presence"></div>
+          ${_gmActionsPanel()}
+          ${totalMissions > 0 ? `
+          <section class="dv2-dash-panel">
+            <div class="dv2-section-label">
+              <span class="dv2-section-label-text">Progression aventure</span>
+              <div class="dv2-section-label-line"></div>
+              <button class="dv2-section-action" data-navigate="story">Ouvrir -></button>
+            </div>
+            ${_progBar()}
+          </section>` : ''}
+        </aside>
+        <div class="dv2-dashboard-main">
+          <section class="dv2-dash-panel">
+            <div class="dv2-section-label">
+              <span class="dv2-section-label-text">Personnages</span>
+              <div class="dv2-section-label-line"></div>
+              <button class="dv2-section-action" data-navigate="characters">Voir tous -></button>
+            </div>
+            <div class="dv2-panel-card">${charsHtml
+              ? `<div style="padding:12px">${charsHtml}</div>`
+              : `<div class="dv2-empty-md">Aucun personnage dans cette aventure.</div>`}
+            </div>
+          </section>
         </div>
-        <div class="dv2-stat-card dv2-sc-mp" data-navigate="story">
-          <span class="dv2-stat-card-icon">${_svg('users', '#b99fff')}</span>
-          <div class="dv2-stat-card-val" style="color:#b99fff">${activeGroups.length}</div>
-          <div class="dv2-stat-card-lbl">Groupe${activeGroups.length!==1?'s':''} en cours</div>
-        </div>
-        <div class="dv2-stat-card dv2-sc-hp" data-navigate="achievements">
-          <span class="dv2-stat-card-icon">${_svg('trophy', '#22c38e')}</span>
-          <div class="dv2-stat-card-val" style="color:#22c38e">${achievements.length}</div>
-          <div class="dv2-stat-card-lbl">Haut${achievements.length!==1?'s':''}-fait${achievements.length!==1?'s':''}</div>
-        </div>
-        <div class="dv2-stat-card dv2-sc-gold dv2-stat-card--collection${collectionUnlocked === 0 ? ' is-empty' : ''}" data-navigate="collection" style="--collection-progress:${collectionPct}%" aria-label="Collection, ${collectionUnlocked} cartes débloquées sur ${collectionTotal}">
-          <span class="dv2-stat-card-icon">${_svg('layers', '#f4c430')}</span>
-          <div class="dv2-stat-card-val dv2-collection-val" style="color:#f4c430">${collectionUnlocked}<span>/${collectionTotal}</span></div>
-          <div class="dv2-stat-card-lbl">Collection</div>
-          <div class="dv2-collection-meter" aria-hidden="true"><span></span></div>
-          <div class="dv2-stat-card-sub">${collectionTotal ? `${collectionPct}% de progression` : 'Aucune carte'}</div>
-        </div>
-      </div>
-
-      <!-- Joueurs connectés (rempli en temps réel) -->
-      <div id="dash-presence"></div>
-
-      <!-- Personnages -->
-      <div>
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Personnages</span>
-          <div class="dv2-section-label-line"></div>
-          <button class="dv2-section-action" data-navigate="characters">Voir tous →</button>
-        </div>
-        <div class="dv2-panel-card">${charsHtml
-          ? `<div style="padding:12px">${charsHtml}</div>`
-          : `<div class="dv2-empty-md">Aucun personnage dans cette aventure.</div>`}
-        </div>
-      </div>
-
-      <!-- Mission active -->
-      ${_missionCardV2()}
-
-      <!-- Console MJ -->
-      <div>
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Console MJ</span>
-          <div class="dv2-section-label-line"></div>
-        </div>
-        <div class="dv2-shortcuts-grid dv2-shortcuts-grid--mj">
-          ${[
-            { page:'story',     icon:'📚', label:'Trame',     bg:'rgba(34,211,238,.15)',  bc:'rgba(34,211,238,.3)',  col:'#22d3ee' },
-            { page:'shop',      icon:'🛍️', label:'Boutique',  bg:'rgba(244,196,48,.15)',  bc:'rgba(244,196,48,.3)',  col:'#f4c430' },
-            { page:'npcs',      icon:'👥', label:'PNJ',       bg:'rgba(34,195,142,.15)',  bc:'rgba(34,195,142,.3)',  col:'#22c38e' },
-            { page:'bestiaire', icon:'🐉', label:'Bestiaire', bg:'rgba(255,90,126,.15)',  bc:'rgba(255,90,126,.3)',  col:'#ff5a7e' },
-            { page:'map',       icon:'🗺️', label:'Carte',     bg:'rgba(79,140,255,.15)',  bc:'rgba(79,140,255,.3)',  col:'#4f8cff' },
-            { page:'statistiques', icon:'📊', label:'Stats',  bg:'rgba(167,139,250,.15)', bc:'rgba(167,139,250,.3)', col:'#a78bfa' },
-            { page:'admin',     icon:'⚙️', label:'Admin',     bg:'rgba(255,149,68,.15)',  bc:'rgba(255,149,68,.3)',  col:'#ff9544' },
-          ].filter(s => isFeatureEnabled(s.page)).map(s => `
-          <button class="dv2-shortcut" data-navigate="${s.page}">
-            <div class="dv2-shortcut-icon" style="background:${s.bg};border-color:${s.bc};color:${s.col}">${s.icon}</div>
-            <span class="dv2-shortcut-label">${s.label}</span>
-          </button>`).join('')}
-        </div>
-      </div>
-
-      <!-- Groupes en cours (issus de la Trame) -->
-      <div>
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Groupes en cours</span>
-          <div class="dv2-section-label-line"></div>
-          <button class="dv2-section-action" data-navigate="story">Gérer dans la Trame →</button>
-        </div>
-        ${activeGroups.length
-          ? `<div class="quest-grid">${activeGroups.slice(0,4).map(_dashGroupCard).join('')}</div>${activeGroups.length > 4 ? `<button class="dv2-section-action" data-navigate="story" style="align-self:flex-end;margin-top:6px">+${activeGroups.length-4} de plus →</button>` : ''}`
-          : `<div class="dv2-panel-card"><div class="dv2-empty-md"><span style="opacity:.3">👥</span> Aucun groupe en cours. Crée-en sur une mission de la Trame.</div></div>`}
-      </div>
-
-      <!-- Trame progression -->
-      ${totalMissions > 0 ? `
-      <div>
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Progression aventure</span>
-          <div class="dv2-section-label-line"></div>
-          <button class="dv2-section-action" data-navigate="story">Ouvrir →</button>
-        </div>
-        ${_progBar()}
-      </div>` : ''}`;
+      </section>`;
 
       // ── Présence temps réel (MJ uniquement) ─────────────────────────
       // Filtre : actif si lastSeen < 2 min (cohérent avec la présence VTT)
@@ -2209,18 +2309,16 @@ const PAGES = {
         </div>`;
       } else if (chars.length === 1) {
         heroBlock = `
-        <div class="dv2-hero-grid">
+        <div class="dash-grid-herocards dash-grid-herocards--single">
           ${_heroCardV2(chars[0])}
-          ${_partyCardV2(partyMembers)}
         </div>`;
       } else {
-        // Plusieurs personnages : grille adaptative + carte groupe en dessous
+        // Plusieurs personnages : grille adaptative.
         // auto-fit (vs auto-fill) étire les colonnes pour utiliser toute la largeur
         heroBlock = `
         <div class="dash-grid-herocards">
           ${chars.map(c => _heroCardV2(c)).join('')}
-        </div>
-        ${_partyCardV2(partyMembers)}`;
+        </div>`;
       }
 
       dash.className = 'dv2-root';
@@ -2232,49 +2330,46 @@ const PAGES = {
           <div class="dv2-greeting-label">Bonjour, aventurier</div>
           <div class="dv2-greeting-title">Bienvenue, ${_esc(pseudo)}</div>
         </div>
-        <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Session active</div>
+        <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Aventure active</div>
       </div>
 
-      <div class="dv2-player-action">
-        ${primaryBlock}
-      </div>
+      ${sessionHub}
 
-      <div class="dv2-player-hero">
-        ${heroBlock}
-      </div>
-
-      ${_missionCardV2()}
-
-      <div class="dv2-player-shortcuts">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Navigation rapide</span>
-          <div class="dv2-section-label-line"></div>
+      <section class="dv2-dashboard-grid dv2-dashboard-grid--player">
+        <aside class="dv2-dashboard-side">
+          ${_playerActionsPanel()}
+          ${_playerProgressPanel()}
+          ${bastionDoc ? `
+          <div>
+            <div class="dv2-section-label">
+              <span class="dv2-section-label-text">Bastion</span>
+              <div class="dv2-section-label-line"></div>
+            </div>
+            ${_bastionCardV2()}
+          </div>` : ''}
+        </aside>
+        <div class="dv2-dashboard-main">
+          <div class="dv2-player-hero">
+            <div class="dv2-section-label">
+              <span class="dv2-section-label-text">Mon personnage</span>
+              <div class="dv2-section-label-line"></div>
+              <button class="dv2-section-action" data-navigate="characters">Ouvrir la fiche -></button>
+            </div>
+            ${heroBlock}
+          </div>
+          <div class="dv2-player-adventure">
+            <div class="dv2-section-label">
+              <span class="dv2-section-label-text">Aventure</span>
+              <div class="dv2-section-label-line"></div>
+            </div>
+            ${_achievementsPanelV2()}
+          </div>
         </div>
-        ${_shortcutsV2()}
-      </div>
-
-      <div class="dv2-player-adventure">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Aventure</span>
-          <div class="dv2-section-label-line"></div>
-        </div>
-        <div class="dv2-two-col">
-          ${_groupsPanelV2()}
-          ${_achievementsPanelV2()}
-        </div>
-      </div>
-
-      ${bastionDoc ? `
-      <div>
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Bastion</span>
-          <div class="dv2-section-label-line"></div>
-        </div>
-        ${_bastionCardV2()}
-      </div>` : ''}`;
+      </section>`;
     }
 
     // ── Fonctionnalités désactivées : masquer les blocs + sections orphelines ──
+    mountSessionCenter();
     _hideDisabledDashboardBlocks(dash);
 
     // ── Navigation personnage ──────────────────────────────────────────
@@ -2305,28 +2400,6 @@ const PAGES = {
         });
       });
 
-      // ── Décor (animations d'entrée + particules) : UNE SEULE FOIS ──────
-      // (sinon re-flash à chaque re-rendu réactif)
-      if (!_dashDecorated) {
-        _dashDecorated = true;
-        document.querySelectorAll('.dv2-root > *').forEach((el, i) => {
-          el.style.opacity = '0';
-          el.style.transform = 'translateY(16px)';
-          setTimeout(() => {
-            el.style.transition = 'opacity 0.4s ease, transform 0.4s cubic-bezier(0.22,1,0.36,1)';
-            el.style.opacity = '1';
-            el.style.transform = 'translateY(0)';
-          }, i * 60);
-        });
-        const _pcols = ['rgba(79,140,255,0.6)', 'rgba(157,111,255,0.5)', 'rgba(34,195,142,0.4)'];
-        for (let i = 0; i < 12; i++) {
-          const p = document.createElement('div');
-          p.className = 'dv2-particle';
-          const sz = 1 + Math.random() * 2;
-          p.style.cssText = `left:${Math.random()*100}%;background:${_pcols[i%3]};width:${sz}px;height:${sz}px;animation-duration:${8+Math.random()*12}s;animation-delay:${Math.random()*10}s;--drift:${(Math.random()-.5)*80}px`;
-          document.body.appendChild(p);
-        }
-      }
     }; // ── fin paint() ────────────────────────────────────────────────────
 
     // Coalescing : plusieurs sources qui arrivent dans la même frame → 1 paint.
@@ -2929,11 +3002,14 @@ const PAGES = {
     _statsLoadAwardPrefs();
     _statsData = data;
     _statsEmoteUrl = new Map((emoteDoc?.emotes || []).filter(e => e?.name && e?.url).map(e => [e.name, e.url]));
-    _statsScope = null;
+    const requestedScope = _statsRequestedScope;
+    _statsRequestedScope = null;
+    const availableDates = new Set(Object.values(data?.chars || {}).flatMap(c => Object.keys(c?.byDate || {})));
+    _statsScope = requestedScope && availableDates.has(requestedScope) ? requestedScope : null;
     _statsPlayerSel = null;
     _statsGroupSel = null;
     _statsGroupMissionId = '';
-    _statsRender(null);
+    _statsRender(_statsScope);
   },
 
 };

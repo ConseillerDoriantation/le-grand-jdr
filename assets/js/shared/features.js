@@ -35,7 +35,7 @@ export const DEFAULT_ENABLED = ['characters', 'story', 'agenda', 'bestiaire'];
 
 // Pages toujours disponibles (jamais togglables). `admin` = Console MJ, gardée
 // via son propre gating admin-only ; le reste = socle de navigation.
-export const ALWAYS_ON = new Set(['dashboard', 'aventures', 'account', 'admin']);
+export const ALWAYS_ON = new Set(['dashboard', 'sessions', 'aventures', 'account', 'admin']);
 
 export function isToggleable(page) {
   return _TOGGLEABLE_KEYS.has(page);
