@@ -14,7 +14,7 @@ import { makeSortable } from '../../shared/sortable-helper.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
-import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor } from './spells-calc.js';
 
 let _sortsSearch = '';
 let _sortsView = 'all';
@@ -1259,18 +1259,20 @@ function _runeLiveContribution(nom, counts) {
       const len = _ampLength(cnt);
       const nbDisp = counts['Dispersion'] || 0;
       if (nbDisp > 0) {
-        const h = _ampDispDim(cnt), w = _ampDispDim(nbDisp);
-        const shape = _zoneShapeEdit === 'cross' ? 'croix' : 'rectangle';
-        return { main: `Combo Dispersion → ${shape} ${h}×${w} cases (hauteur ${h} · largeur ${w})` };
+        const cross = _zoneShapeEdit === 'cross';
+        const dim = cross ? _ampCrossDim : _ampDispDim;
+        const h = dim(cnt), w = dim(nbDisp);
+        return { main: cross ? `Combo → croix ${h}×${w} (longue portée, sans diagonales)` : `Combo Dispersion → rectangle ${h}×${w} cases` };
       }
       return { main: `Zone ${len}×1 cases (ligne)` };
     }
     case 'Dispersion': {
       const nbAmp = counts['Amplification'] || 0;
       if (nbAmp > 0) {
-        const h = _ampDispDim(nbAmp), w = _ampDispDim(cnt);
-        const shape = _zoneShapeEdit === 'cross' ? 'croix' : 'rectangle';
-        return { main: `Combo Amp+Disp → ${shape} ${h}×${w} cases (Amp=hauteur, Disp=largeur)` };
+        const cross = _zoneShapeEdit === 'cross';
+        const dim = cross ? _ampCrossDim : _ampDispDim;
+        const h = dim(nbAmp), w = dim(cnt);
+        return { main: cross ? `Combo → croix ${h}×${w} (Amp=bras vertical, Disp=bras horizontal)` : `Combo Amp+Disp → rectangle ${h}×${w} (Amp=hauteur, Disp=largeur)` };
       }
       return { main: `${1 + cnt} cibles différentes` };
     }
@@ -2051,6 +2053,9 @@ export async function openSortModal(idx, s) {
         </div>
         <div id="s-amp-shape-row" class="form-group" style="${hasDisp?'':'display:none'}">
           <label style="font-size:.72rem">✚ Forme (combo Amplification + Dispersion)</label>
+          <div style="font-size:.66rem;color:var(--text-dim);padding:0 .1rem .25rem;line-height:1.4">
+            <b>Carré</b> = plus de cases (diagonales comprises). <b>Croix</b> = bras plus longs (6N−1) → frappe plus loin en ligne, mais sans les diagonales.
+          </div>
           <div style="display:flex;gap:.4rem">
             ${[
               { v:'rect',  label:'▭ Rectangle / Carré', color:'#4f8cff' },

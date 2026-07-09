@@ -702,6 +702,13 @@ export function _ampDispCircleSize(nbAmp, nbDisp) {
  */
 export function _ampDispDim(n) { const v = parseInt(n) || 0; return v >= 1 ? (4 * v - 1) : 0; }
 
+/** Longueur d'un BRAS de la croix, par nombre de runes de cet axe : 6N−1
+ *  (1 → 5, 2 → 11, 3 → 17). Plus long que le côté du carré (4N−1) : la croix
+ *  échange les cases diagonales contre une PORTÉE cardinale supérieure
+ *  (au 1er palier : 9 cases comme le carré 3×3, mais atteint 2 cases au lieu d'1).
+ */
+export function _ampCrossDim(n) { const v = parseInt(n) || 0; return v >= 1 ? (6 * v - 1) : 0; }
+
 /** Zone calculée :
  *  - Si zoneW/H manuels saisis → ils priment (override MJ)
  *  - Sinon, calculé depuis les runes Amplification (+ Dispersion en combo) :
@@ -728,10 +735,10 @@ export function _calcSortZone(s) {
 
   if (nbDisp >= 1) {
     // Combo : Amplification → hauteur, Dispersion → largeur (chaque rune agrandit son axe).
-    const h = _ampDispDim(nbAmp);
-    const w = _ampDispDim(nbDisp);
+    // Croix = bras plus longs (6N−1) que le carré (4N−1) → portée > mais pas de diagonales.
     const shape = s.zoneShape === 'cross' ? 'cross' : 'rect';
-    return { w, h, shape, source: 'runes', amp: nbAmp, disp: nbDisp };
+    const dim = shape === 'cross' ? _ampCrossDim : _ampDispDim;
+    return { w: dim(nbDisp), h: dim(nbAmp), shape, source: 'runes', amp: nbAmp, disp: nbDisp };
   }
 
   const length = _ampLength(nbAmp);

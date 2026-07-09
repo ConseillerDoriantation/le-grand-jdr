@@ -3024,9 +3024,10 @@ function _buildSpellOption(s, ctx) {
     const _nbDisp = _runes.filter(r => r === 'Dispersion').length;
     if (_nbAmp >= 1) {
       if (_nbDisp >= 1) {
-        zoneH = 4 * _nbAmp - 1;    // Amplification → hauteur
-        zoneW = 4 * _nbDisp - 1;   // Dispersion → largeur
         zoneShape = s.zoneShape === 'cross' ? 'cross' : 'rect';
+        const _m = zoneShape === 'cross' ? 6 : 4;   // croix : bras plus longs (6N−1)
+        zoneH = _m * _nbAmp - 1;    // Amplification → hauteur
+        zoneW = _m * _nbDisp - 1;   // Dispersion → largeur
       } else {
         zoneW = 3 * _nbAmp;
         zoneH = 1;
