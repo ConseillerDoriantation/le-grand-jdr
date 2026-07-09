@@ -524,7 +524,11 @@
 }
 .stats-drawer-body > .stats-sec:last-child,
 .stats-drawer-body > .stats-columns:last-child { margin-bottom: 0; }
-.stats-mvp-card > .stats-drawer { grid-column: 1 / -1; background: rgba(0,0,0,.12); }
+.stats-mvp-detail-wide { margin: -.35rem 0 1rem; }
+.stats-mvp-detail-wide > .stats-drawer {
+  background: linear-gradient(135deg, rgba(244,196,48,.055), rgba(79,140,255,.025));
+  border-color: rgba(244,196,48,.18);
+}
 .stats-mvp-sec { min-width: 0; }
 .stats-group-card .stats-drawer { background: rgba(255,255,255,.02); border-color: rgba(255,255,255,.055); }
 .stats-group-card .stats-drawer > summary { min-height: 34px; padding: .5rem .6rem; font-size: .76rem; }
