@@ -804,7 +804,7 @@ function _statsRender(scope) {
     };
     add('Dégâts infligés', cm.dmgDealt, cm.dmgDealt, '🗡️');
     add('Soin prodigué', cm.heal, cm.heal * 1.15, '💚');
-    add('KO infligés', cm.kosDealt, cm.kosDealt * 12, '☠️');
+    add('KO infligés', cm.kosDealt, cm.kosDealt * 3, '☠️');
     add('Sorts classiques', plainCasts, plainCasts * 3, '🔮');
     add('Sorts tactiques', tactical, tactical * 5, '✨');
     add('Soutien', cm.supportSpells, cm.supportSpells * 3, '🛡️');
