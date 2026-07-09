@@ -5186,7 +5186,9 @@ async function _zoneValidate() {
     (opt.afflictionMode === 'dot' && String(opt.afflictionDotFormula || '').trim())
     || (opt.afflictionMode === 'etat' && opt.afflictionEtatId)
   );
-  const _zoneAppliesEffect = opt.isHeal || opt.isRegen || opt.isEnchant || _afflHasEffect;
+  // Sorts à effet INSTANTANÉ (dégâts, soin, CA, enchant, régén, affliction-avec-effet) :
+  // ils appliquent leur effet aux cibles de la zone et ne laissent PAS de marqueur.
+  const _zoneAppliesEffect = opt.isHeal || opt.isRegen || opt.isEnchant || opt.isCaSort || _afflHasEffect;
   if (opt.isUtil && (opt.zoneW > 0 || opt.zoneH > 0) && !_zoneAppliesEffect
       && !opt?.mods?.invocation && !opt?.mods?.sentinelle) {
     const _zid = await _vttPlaceSpellZone(srcId, opt, { x, y, wPx, hPx });
