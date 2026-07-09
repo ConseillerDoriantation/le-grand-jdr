@@ -275,11 +275,16 @@ function _renderSelectedSession() {
   const session = STORE.sessions.find(s => s.key === STORE.selectedKey) || STORE.sessions[0];
   if (!session) {
     root.innerHTML = `
-      <div class="sc-empty">
-        <div class="sc-empty-icon">◇</div>
-        <h2>Aucune séance pour le moment</h2>
-        <p>Planifie un créneau depuis l’Agenda. Les séances jouées apparaîtront ensuite automatiquement grâce aux statistiques du VTT.</p>
-        ${isFeatureEnabled('agenda') ? '<button class="btn btn-gold" data-action="_scNavigate" data-page="agenda">Ouvrir l’Agenda</button>' : ''}
+      <div class="sc-empty sc-empty-session">
+        <div class="sc-empty-mark">◇</div>
+        <div class="sc-empty-copy">
+          <h2>Préparer la prochaine séance</h2>
+          <p>Planifie une date, relie un groupe à sa mission, puis le récapitulatif se remplira automatiquement après le VTT.</p>
+        </div>
+        <div class="sc-empty-actions">
+          ${isFeatureEnabled('agenda') ? '<button class="sc-empty-primary" data-action="_scNavigate" data-page="agenda">Planifier une séance</button>' : ''}
+          ${isFeatureEnabled('story') ? '<button class="sc-empty-secondary" data-action="_scNavigate" data-page="story">Préparer la trame</button>' : ''}
+        </div>
       </div>`;
     return;
   }
