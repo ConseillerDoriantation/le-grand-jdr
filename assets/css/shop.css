@@ -1973,13 +1973,17 @@ body.sh-dragging * { cursor: grabbing !important; }
   display: inline-flex;
   align-items: center;
   gap: .3rem;
+  max-width: 100%;
   font-size: .72rem;
   font-weight: 600;
   background: rgba(180, 127, 255, 0.1);
   border: 1px solid rgba(180, 127, 255, 0.28);
   color: #c084fc;
-  padding: .2rem .5rem;
-  border-radius: 999px;
+  padding: .2rem .55rem;
+  border-radius: 8px;               /* rectangle arrondi : plus de « boule » sur nom long */
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.3;
 }
 .art-frag-chip-n {
   font-size: .68rem;
@@ -2064,6 +2068,10 @@ body.sh-dragging * { cursor: grabbing !important; }
   padding: .12rem .45rem;
   border-radius: 6px;
   font-style: italic;
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.3;
 }
 .art-trait-chip--added {
   color: #fbbf24;
@@ -2223,6 +2231,30 @@ body.sh-dragging * { cursor: grabbing !important; }
 .art-act--danger:hover { border-color: rgba(239,68,68,.7); }
 .art-recycle { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
 .art-frag-hint { font-size: .68rem; color: var(--text-muted); line-height: 1.4; margin: .2rem 0 .5rem; }
+
+/* Sous-sections « Ajouter » / « Remplacer » (même poids visuel) */
+.art-sub { margin-top: .55rem; }
+.art-sub-lbl { display: block; font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; margin-bottom: .3rem; }
+.art-sub-lbl--add { color: var(--gold, #f4c430); }
+.art-sub-lbl--replace { color: #b9a0ff; }
+/* Nom (fragment/trait) tronqué dans un bouton d'action */
+.art-act-lbl { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Bouton « Remplacer » — arcane, aussi visible que l'ajout doré */
+.art-act--replace { background: rgba(157,111,255,.14); border-color: rgba(157,111,255,.5); color: #c9b6ff; }
+.art-act--replace:hover { border-color: rgba(157,111,255,.8); }
+
+/* Sélecteur (remplacer un trait / recycler) : options pleines, choix = action */
+.art-ow-list { display: flex; flex-direction: column; gap: .4rem; }
+.art-ow-opt {
+  display: flex; align-items: center; gap: .5rem; width: 100%; text-align: left; cursor: pointer;
+  font-family: inherit; padding: .5rem .65rem; border-radius: 10px;
+  background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text);
+  transition: border-color .12s, background .12s;
+}
+.art-ow-opt:hover { border-color: rgba(157,111,255,.6); background: rgba(157,111,255,.08); }
+.art-ow-opt-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: .84rem; }
+.art-ow-opt-n { flex-shrink: 0; font-size: .72rem; color: var(--text-muted); font-weight: 700; }
+.art-ow-opt-cta { flex-shrink: 0; font-size: .74rem; font-weight: 700; color: #c9b6ff; background: rgba(157,111,255,.16); border-radius: 999px; padding: .18rem .55rem; }
 
 /* ── Panneau de comparaison équipement (modal détail boutique) ────────────── */
 .sh-cmp {

@@ -471,35 +471,37 @@ function _renderTraitsSection(item, invIndex, c, cat) {
   const pips = Array.from({ length: slotCount }, (_, k) =>
     `<span class="art-pip${k < totalUsed ? ' is-on' : ''}"></span>`).join('');
 
-  // Chips des traits actuels (base + ajoutés★) avec bouton « remplacer »
+  // Chips des traits actuels (base + ajoutés★) — lecture seule (le remplacement
+  // a maintenant sa propre rangée d'actions, aussi visible que l'ajout).
   const traitRows = allTraits.length
-    ? allTraits.map((t, k) => {
-        const isAdded = k >= baseTraits.length;
-        const canOw = fragNames.length > 0;
-        return `<span class="art-trait-chip${isAdded ? ' art-trait-chip--added' : ''}">${_esc(t)}${isAdded ? ' ★' : ''}${canOw
-          ? `<button class="art-chip-x" data-action="_artisanOverwriteStart" data-i="${invIndex}" data-trait="${_esc(t)}" title="Remplacer ce trait par un fragment (${s.trait.overwriteTrait} PO)">↻</button>`
-          : ''}</span>`;
-      }).join('')
+    ? allTraits.map((t, k) => `<span class="art-trait-chip${k >= baseTraits.length ? ' art-trait-chip--added' : ''}">${_esc(t)}${k >= baseTraits.length ? ' ★' : ''}</span>`).join('')
     : '<span class="art-muted" style="font-size:.72rem">Aucun trait posé.</span>';
 
-  // Ajout depuis fragments
-  let addHtml;
-  if (slotsLibres <= 0) {
-    addHtml = `<div class="art-muted" style="font-size:.72rem">Emplacements pleins — remplace un trait (↻) pour en changer.</div>`;
-  } else if (!fragNames.length) {
-    addHtml = `<div class="art-muted" style="font-size:.72rem">Aucun fragment « ${catMeta?.label || cat} » dans ton sac. Recycle un objet pour en obtenir.</div>`;
-  } else {
-    addHtml = `<div class="art-act-row">
-      ${fragNames.map(f => `<button class="art-act art-act--gold" data-action="_artisanAddTrait" data-i="${invIndex}" data-frag="${_esc(f.name)}">
-        ＋ ${_esc(f.name)} <span class="art-act-cost">${s.trait.addTraitFromFragment} PO</span> <span class="art-act-n">×${f.n}</span>
-      </button>`).join('')}
+  // ── Ajouter (slot libre) ──
+  let addHtml = '';
+  if (slotsLibres > 0) {
+    addHtml = fragNames.length
+      ? `<div class="art-sub"><span class="art-sub-lbl art-sub-lbl--add">＋ Ajouter un trait</span>
+          <div class="art-act-row">${fragNames.map(f => `<button class="art-act art-act--gold" data-action="_artisanAddTrait" data-i="${invIndex}" data-frag="${_esc(f.name)}" title="Poser « ${_esc(f.name)} » (${s.trait.addTraitFromFragment} PO)">
+            <span class="art-act-lbl">${_esc(f.name)}</span><span class="art-act-cost">${s.trait.addTraitFromFragment} PO</span><span class="art-act-n">×${f.n}</span></button>`).join('')}</div>
+        </div>`
+      : `<div class="art-muted" style="font-size:.72rem">Aucun fragment « ${_esc(catMeta?.label || cat)} » dans ton sac. Recycle un objet pour en obtenir.</div>`;
+  }
+
+  // ── Remplacer (même poids visuel que l'ajout) ──
+  let owHtml = '';
+  if (allTraits.length && fragNames.length) {
+    owHtml = `<div class="art-sub"><span class="art-sub-lbl art-sub-lbl--replace">↻ Remplacer un trait</span>
+      <div class="art-act-row">${allTraits.map(t => `<button class="art-act art-act--replace" data-action="_artisanOverwriteStart" data-i="${invIndex}" data-trait="${_esc(t)}" title="Remplacer « ${_esc(t)} » par un fragment (${s.trait.overwriteTrait} PO)">
+        <span class="art-act-lbl">${_esc(t)}</span><span class="art-act-cost">${s.trait.overwriteTrait} PO</span></button>`).join('')}</div>
     </div>`;
   }
 
   return `<div class="art-wb-sec">
     <div class="art-wb-sec-hd">🔖 Traits <span class="art-wb-sec-sub">${totalUsed}/${slotCount} emplacement${slotCount > 1 ? 's' : ''}</span><span class="art-pips">${pips}</span></div>
     <div class="art-trait-current">${traitRows}</div>
-    ${addHtml}
+    ${addHtml}${owHtml}
+    ${(slotsLibres <= 0 && !allTraits.length) ? '' : ''}
   </div>`;
 }
 
@@ -530,22 +532,28 @@ async function _artisanDestroyStart(invIndex) {
   const s = getUpgradeSettings();
   const allTraits = _getTraits(item);
   if (!allTraits.length) return;
+  const cost = s.trait.deconstructCost || 0;
+  const costTxt = STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`;
 
   if (s.trait.extractAllTraits || allTraits.length === 1) {
-    // Pas de choix
+    // Cas simple → une seule confirmation.
+    const list = allTraits.map(t => `« ${_esc(t)} »`).join(', ');
+    if (!await confirmModal(`Recycler « ${_esc(item.nom || 'objet')} » ?<br>Tu récupères ${allTraits.length} fragment${allTraits.length > 1 ? 's' : ''} (${list}). L'objet est détruit.<br><span style="color:var(--gold)">${costTxt}</span>`,
+      { title: '♻️ Recycler en fragments', confirmLabel: 'Recycler', danger: true, icon: '♻️' })) return;
     return _artisanDoDestroy(invIndex, allTraits);
   }
 
-  // Choix du trait à extraire
-  pushModal(`Choisir le trait à extraire`, `
-    <div class="art-muted" style="font-size:.78rem;margin-bottom:.5rem">
-      Quel trait veux-tu récupérer en fragment ? Les autres seront perdus.
+  // Plusieurs traits → le choix EST la confirmation (pas de 2ᵉ modale).
+  pushModal(`♻️ Recycler « ${item.nom || 'objet'} »`, `
+    <div class="art-muted" style="font-size:.8rem;margin-bottom:.6rem;line-height:1.5">
+      Quel trait veux-tu <strong>récupérer en fragment</strong> ? Les autres seront <strong style="color:#ff8ca7">perdus</strong>, et l'objet détruit.<br>
+      <span style="color:var(--gold)">${costTxt}</span> · action <strong>immédiate</strong>.
     </div>
-    <div style="display:flex;flex-direction:column;gap:.35rem">
+    <div class="art-ow-list">
       ${allTraits.map(t => `
-        <button class="btn btn-outline btn-sm" style="text-align:left"
-          data-action="_artisanDestroyConfirm" data-i="${invIndex}" data-trait="${_esc(t)}">
-          <span class="art-trait-chip">${_esc(t)}</span>
+        <button class="art-ow-opt" data-action="_artisanDestroyConfirm" data-i="${invIndex}" data-trait="${_esc(t)}">
+          <span class="art-ow-opt-name">${_esc(t)}</span>
+          <span class="art-ow-opt-cta">♻️ Récupérer</span>
         </button>
       `).join('')}
     </div>
@@ -556,7 +564,7 @@ async function _artisanDestroyStart(invIndex) {
 };
 
 function _artisanDestroyConfirm(invIndex, traitName) {
-  closeModalDirect(); // ferme la sous-modale de choix
+  closeModalDirect(); // ferme le sélecteur (qui servait de confirmation)
   _artisanDoDestroy(invIndex, [traitName]);
 }
 
@@ -572,10 +580,6 @@ async function _artisanDoDestroy(invIndex, traitsToExtract) {
   const s    = getUpgradeSettings();
   const cost = s.trait.deconstructCost || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
-
-  const traitList = traitsToExtract.map(t => `« ${t} »`).join(', ');
-  const confirmMsg = `Détruire « ${item.nom} » et récupérer ${traitsToExtract.length} fragment${traitsToExtract.length > 1 ? 's' : ''} (${traitList}) ?`;
-  if (!await confirmModal(confirmMsg, { title: 'Confirmation', danger: true })) return;
 
   // 1) Supprimer l'item de l'inventaire
   const inv = [...(c.inventaire || [])];
@@ -621,6 +625,9 @@ async function _artisanAddTrait(invIndex, fragmentName) {
   const cost = s.trait.addTraitFromFragment || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
 
+  if (!await confirmModal(`Poser le trait « ${_esc(fragmentName)} » sur « ${_esc(item.nom || 'objet')} » ?<br><span style="color:var(--gold)">${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`}</span> · consomme 1 fragment.`,
+    { title: '🔖 Ajouter un trait', confirmLabel: 'Poser', danger: false, icon: '🔖' })) return;
+
   // Mutation
   const inv = [...(c.inventaire || [])];
   const newItem = { ...item };
@@ -658,21 +665,18 @@ function _artisanOverwriteStart(invIndex, oldTraitName) {
 
   const s = getUpgradeSettings();
 
-  pushModal(`Écraser « ${oldTraitName} »`, `
-    <div class="art-muted" style="font-size:.78rem;margin-bottom:.5rem">
-      Choisis le fragment à poser à la place. <strong>${_esc(oldTraitName)}</strong> sera <strong>perdu</strong>.<br>
-      Coût : ${s.trait.overwriteTrait} PO + 1 fragment.
+  pushModal(`↻ Remplacer « ${oldTraitName} »`, `
+    <div class="art-muted" style="font-size:.8rem;margin-bottom:.6rem;line-height:1.5">
+      Choisis le fragment à poser à la place. <strong style="color:#ff8ca7">« ${_esc(oldTraitName)} » sera définitivement perdu</strong>.<br>
+      Coût : <strong style="color:var(--gold)">${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${s.trait.overwriteTrait} PO`}</strong> + 1 fragment. Le choix ci-dessous est <strong>immédiat</strong>.
     </div>
-    <div style="display:flex;flex-direction:column;gap:.35rem">
+    <div class="art-ow-list">
       ${fragNames.map(f => `
-        <div class="art-frag-row">
-          <span class="art-trait-chip">${_esc(f.name)}</span>
-          <span class="art-frag-row-n">×${f.n}</span>
-          <button class="btn btn-gold btn-sm" style="margin-left:auto"
-            data-action="_artisanOverwriteConfirm" data-i="${invIndex}" data-old="${_esc(oldTraitName)}" data-frag="${_esc(f.name)}">
-            Confirmer
-          </button>
-        </div>
+        <button class="art-ow-opt" data-action="_artisanOverwriteConfirm" data-i="${invIndex}" data-old="${_esc(oldTraitName)}" data-frag="${_esc(f.name)}">
+          <span class="art-ow-opt-name">${_esc(f.name)}</span>
+          <span class="art-ow-opt-n">×${f.n}</span>
+          <span class="art-ow-opt-cta">↻ Poser${STORE.mjFreeMode ? '' : ` · ${s.trait.overwriteTrait} PO`}</span>
+        </button>
       `).join('')}
     </div>
     <div style="display:flex;gap:.4rem;margin-top:.7rem">
@@ -696,11 +700,9 @@ async function _artisanOverwriteConfirm(invIndex, oldTraitName, newFragmentName)
   const cost = s.trait.overwriteTrait || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
 
-  closeModalDirect(); // ferme la sous-modale de choix de fragment
-
-  if (!await confirmModal(
-    `Écraser « ${oldTraitName} » par « ${newFragmentName} » ?\nL'ancien trait sera perdu.`,
-    { title: 'Confirmation', danger: true })) return;
+  // Le sélecteur de fragment EST la confirmation (il annonce clairement la perte
+  // et le coût) → on applique directement, sans 2ᵉ modale.
+  closeModalDirect(); // ferme le sélecteur
 
   // Mutation
   const inv = [...(c.inventaire || [])];
@@ -903,6 +905,9 @@ async function _artisanRingUpgradeStat(invIndex) {
   const cost = s.ring?.[nextLevel] || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
 
+  if (!await confirmModal(`Améliorer ${primary.label} au palier ${nextLevel} ?<br><span style="color:var(--gold)">${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`}</span>`,
+    { title: '📈 Améliorer la stat', confirmLabel: 'Améliorer', danger: false, icon: '📈' })) return;
+
   const inv = [...c.inventaire];
   const newItem = { ...item };
   const up = newItem.upgrades || {};
@@ -935,6 +940,9 @@ async function _artisanRingUpgradeEffect(invIndex) {
 
   const cost = s.ring?.[nextLevel] || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
+
+  if (!await confirmModal(`Renforcer l'effet de l'anneau au palier ${nextLevel} ?<br><span style="color:var(--gold)">${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`}</span>`,
+    { title: '✨ Renforcer l\'effet', confirmLabel: 'Renforcer', danger: false, icon: '✨' })) return;
 
   const inv = [...c.inventaire];
   const newItem = { ...item };
@@ -974,6 +982,9 @@ async function _artisanAmuletAddStat(invIndex, statFullKey) {
   const slotN = used.length + 1;
   const cost = s.amulet?.[slotN] || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
+
+  if (!await confirmModal(`Ajouter +1 ${meta.label} à l'amulette ?<br><span style="color:var(--gold)">${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`}</span>`,
+    { title: '📈 Améliorer l\'amulette', confirmLabel: 'Ajouter', danger: false, icon: '📈' })) return;
 
   const inv = [...c.inventaire];
   const newItem = { ...item };
@@ -1018,6 +1029,9 @@ async function _artisanWeaponAddPoint(invIndex, statFullKey) {
   const slotN = total + 1;
   const cost = tariffTable[slotN] || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
+
+  if (!await confirmModal(`Ajouter +1 ${meta.label} à l'arme ?<br><span style="color:var(--gold)">${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`}</span>`,
+    { title: '📈 Améliorer l\'arme', confirmLabel: 'Ajouter', danger: false, icon: '📈' })) return;
 
   const inv = [...c.inventaire];
   const newItem = { ...item };
