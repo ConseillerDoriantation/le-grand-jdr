@@ -43,6 +43,36 @@ export function inventaireNeedsNorm(inv) {
   return inv.some(it => (parseInt(it?.qte) || 1) > 1);
 }
 
+function _firstFiniteNumber(...values) {
+  for (const value of values) {
+    if (value === '' || value === null || value === undefined) continue;
+    const parsed = parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+export function getInventoryItemValue(item = {}, catalogItem = null) {
+  return Math.max(0, _firstFiniteNumber(
+    catalogItem?.prix,
+    item?.prixAchat,
+    item?.prix,
+    item?.price,
+  ));
+}
+
+export function getInventoryItemResaleValue(item = {}, catalogItem = null) {
+  const explicit = _firstFiniteNumber(catalogItem?.prixVente, item?.prixVente);
+  if (explicit > 0) return explicit;
+  return Math.round(getInventoryItemValue(item, catalogItem) * 0.6);
+}
+
+export function getInventoryItemImage(item = {}, catalogItem = null) {
+  return item?.image || item?.imageUrl || item?.illustration
+    || catalogItem?.image || catalogItem?.imageUrl || catalogItem?.illustration
+    || '';
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // SOURCE UNIQUE DE VÉRITÉ : item boutique → entrée d'inventaire.
 //

@@ -96,18 +96,21 @@ export function renderCharEquip(c, canEdit) {
       <div class="cs-weap-rolls">
         <div class="cs-weap-roll-block">
           <span class="cs-weap-roll-lbl">Toucher</span>
-          <span class="cs-weap-roll-val cs-weap-toucher">${tp.roll}</span>
+          <button class="cs-weap-roll-val cs-weap-toucher cs-calc-link" data-action="openCharCalculation"
+            data-calc="weapon-touch" data-slot="${slot}" data-id="${c.id}" title="Voir le calcul du toucher">${tp.roll}</button>
           ${toucherSub ? `<span class="cs-weap-roll-sub">${toucherSub}</span>` : ''}
         </div>
         <div class="cs-weap-roll-sep"></div>
         <div class="cs-weap-roll-block">
           <span class="cs-weap-roll-lbl">Dégâts</span>
-          <span class="cs-weap-roll-val cs-weap-dmg">${dp ? dp.roll : '—'}</span>
+          <button class="cs-weap-roll-val cs-weap-dmg cs-calc-link" data-action="openCharCalculation"
+            data-calc="weapon-damage" data-slot="${slot}" data-id="${c.id}" title="Voir le calcul des dégâts">${dp ? dp.roll : '—'}</button>
           ${degatsSub ? `<span class="cs-weap-roll-sub">${degatsSub}</span>` : ''}
         </div>
       </div>
       ${item.portee || bonusDisplay ? `<div class="cs-weap-meta">
-        ${item.portee ? `<span class="cs-weap-portee">↗ ${item.portee}</span>` : ''}
+        ${item.portee ? `<button class="cs-weap-portee cs-calc-link" data-action="openCharCalculation"
+          data-calc="weapon-range" data-slot="${slot}" data-id="${c.id}" title="Voir l’origine de la portée">↗ ${item.portee}</button>` : ''}
         ${bonusDisplay ? `<span class="cs-cbadge cs-cbadge--blue">${bonusDisplay}</span>` : ''}
       </div>` : ''}
       ${traits.length ? `<div class="cs-weap-traits">${traits.map(t=>`<span class="cs-trait">${t}</span>`).join('')}</div>` : ''}`;

@@ -10,7 +10,12 @@ import { lsJson } from '../../shared/local-storage.js';
 import { RARETE_NAMES, _rareteColor } from '../../shared/rarity.js';
 import { statShort, formatItemBonusText, calcOr, getItemEffectText } from '../../shared/char-stats.js';
 import { useGoldMulti } from '../../shared/economy.js';
-import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
+import {
+  shopItemToInvEntry,
+  getInventoryItemValue,
+  getInventoryItemResaleValue,
+  getInventoryItemImage,
+} from '../../shared/inventory-utils.js';
 import { getWeaponDamageStatKeys } from '../../shared/equipment-utils.js';
 import { characterAvatarHtml, characterPortraitContent } from '../../shared/portraits.js';
 import { calcUpgradeRefund, getUpgradeTotalCost, hasUpgrades, getUpgradeSettings } from '../../shared/upgrade-settings.js';
@@ -26,6 +31,7 @@ let _invCatOpen = {};
 let _sellRefundsCum = [];
 let _modalCharTargets = [];
 let _shopItemsCache = null;
+let _shopItemsLoading = null;
 let _shopCatsCache = null;
 let _lootItems = [];
 let _lootSelId = null;
@@ -35,6 +41,32 @@ let _lootFilter = () => {};
 let _lootSelect = () => {};
 let _lootSaveRecent = null;
 let _lootRenderGrid = null;
+
+export function isInventoryCatalogReady() {
+  return Array.isArray(_shopItemsCache);
+}
+
+export async function ensureInventoryCatalog() {
+  if (isInventoryCatalogReady()) return _shopItemsCache;
+  if (!_shopItemsLoading) {
+    _shopItemsLoading = loadCollection('shop')
+      .then(items => {
+        _shopItemsCache = Array.isArray(items) ? items : [];
+        return _shopItemsCache;
+      })
+      .catch(() => {
+        _shopItemsCache = [];
+        return _shopItemsCache;
+      })
+      .finally(() => { _shopItemsLoading = null; });
+  }
+  return _shopItemsLoading;
+}
+
+export function getInventoryCatalogItem(itemId) {
+  if (!itemId || !isInventoryCatalogReady()) return null;
+  return _shopItemsCache.find(item => item.id === itemId) || null;
+}
 
 function _renderInventoryChar(c, tab = 'inventaire') {
   charSession.renderSheet?.(c, tab || charSession.getCurrentCharTab() || 'inventaire');
@@ -380,6 +412,106 @@ function getInvPersonalLineForIndices(inv, indices) {
   if (notes.length === 0) return { text: '', multiple: false };
   if (notes.length === 1) return { text: notes[0], multiple: false };
   return { text: 'Notes différentes selon les exemplaires.', multiple: true };
+}
+
+export async function openInventoryItemDetail(charId, indicesB64) {
+  const c = getCharacterById(charId);
+  const indices = _decodeIndices(indicesB64);
+  const item = c?.inventaire?.[indices[0]];
+  if (!c || !item || !indices.length) return;
+
+  await ensureInventoryCatalog();
+  const catalogItem = getInventoryCatalogItem(item.itemId);
+  const quantity = indices.reduce((sum, idx) =>
+    sum + (parseInt(c.inventaire?.[idx]?.quantite || c.inventaire?.[idx]?.qte || 1) || 1), 0);
+  const rarityIndex = Math.max(0, Math.min(5, parseInt(item.rarete || item.rare || 0) || 0));
+  const rarityName = RARETE_NAMES[rarityIndex] || '';
+  const rarityColor = _rareteColor(rarityName) || '#7a8fa8';
+  const equippedMap = getEquippedInventoryIndexMap(c);
+  const equippedSlots = [...new Set(indices.flatMap(idx => equippedMap.get(idx) || []))];
+  const traits = _getTraits(item);
+  const bonusText = formatItemBonusText(item);
+  const effectText = getItemEffectText(item);
+  const personal = getInvPersonalLineForIndices(c.inventaire || [], indices);
+  const price = getInventoryItemValue(item, catalogItem);
+  const resale = getInventoryItemResaleValue(item, catalogItem);
+  const image = getInventoryItemImage(item, catalogItem);
+
+  const facts = [
+    ['Catégorie', item.type || item.categorie],
+    ['Sous-type', item.sousType || item.typeArme],
+    ['Format', item.format],
+    ['Armure', item.typeArmure],
+    ['Emplacement', item.slotArmure || item.slotBijou],
+    ['Dégâts', item.degats],
+    ['Toucher', item.toucher || (item.toucherStat ? statShort(item.toucherStat) : '')],
+    ['Portée', item.portee],
+    ['CA', (() => {
+      const value = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0);
+      return value ? (value > 0 ? `+${value}` : value) : '';
+    })()],
+    ['Valeur', price ? `${price} or` : ''],
+    ['Revente', resale ? `${resale} or / unité` : ''],
+    ['Quantité', quantity],
+  ].filter(([, value]) => value !== '' && value !== undefined && value !== null);
+
+  const factHtml = facts.map(([label, value]) => `
+    <div class="inv-detail-fact">
+      <span>${_esc(label)}</span>
+      <strong>${_esc(String(value))}</strong>
+    </div>`).join('');
+
+  openModal(`ⓘ ${item.nom || 'Objet'}`, `
+    <div class="inv-detail" style="--inv-detail-accent:${rarityColor}">
+      <header class="inv-detail-hero">
+        ${image
+          ? `<img src="${_esc(image)}" alt="${_esc(item.nom || 'Objet')}">`
+          : `<div class="inv-detail-placeholder" aria-hidden="true">◇</div>`}
+        <div class="inv-detail-identity">
+          <div class="inv-detail-kicker">${_esc(rarityName || 'Objet')}</div>
+          <h3>${_esc(item.nom || 'Sans nom')}</h3>
+          <div class="inv-detail-status">
+            <span>×${quantity}</span>
+            ${equippedSlots.length
+              ? `<span class="is-equipped">Équipé · ${_esc(equippedSlots.join(', '))}</span>`
+              : '<span>Non équipé</span>'}
+          </div>
+        </div>
+      </header>
+
+      <div class="inv-detail-facts">${factHtml}</div>
+
+      ${bonusText || effectText ? `<section class="inv-detail-section">
+        <h4>Effets</h4>
+        ${bonusText ? `<p class="inv-detail-bonus">${_esc(bonusText)}</p>` : ''}
+        ${effectText ? `<p>${_esc(effectText)}</p>` : ''}
+      </section>` : ''}
+
+      ${traits.length ? `<section class="inv-detail-section">
+        <h4>Traits</h4>
+        <div class="inv-detail-traits">${traits.map(trait => `<span>${_esc(trait)}</span>`).join('')}</div>
+      </section>` : ''}
+
+      ${item.description ? `<section class="inv-detail-section">
+        <h4>Description</h4>
+        <p>${_esc(item.description)}</p>
+      </section>` : ''}
+
+      ${personal.text ? `<section class="inv-detail-section inv-detail-note">
+        <h4>Note personnelle</h4>
+        <p>${_esc(personal.text)}</p>
+      </section>` : ''}
+
+      <footer class="inv-detail-footer">
+        ${charSession.getCanEditChar()
+          ? `<button class="btn btn-outline" data-action="editInvItem" data-idx="${indices[0]}">✎ Modifier</button>`
+          : ''}
+        <button class="btn btn-primary" data-action="close-modal">Fermer</button>
+      </footer>
+    </div>`, {
+    subtitle: 'Fiche complète de l’objet',
+    accent: rarityColor,
+  });
 }
 
 export function renderInvPersonalLine(c, indices, indicesB64, variant = 'row', canEdit = false) {
