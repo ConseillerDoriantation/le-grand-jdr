@@ -122,12 +122,93 @@ const AURA_PALETTE = {
 };
 const _auraColor = (key) => AURA_PALETTE[key] || AURA_PALETTE.blue;
 const _charBlurActions = {};
+let _charCalcPopover = null;
+let _charCalcAnchor = null;
 
 const _calcRow = (label, value, detail = '') => `
   <div class="cs-calc-row">
     <div><span>${_esc(label)}</span>${detail ? `<small>${_esc(detail)}</small>` : ''}</div>
     <strong>${_esc(String(value))}</strong>
   </div>`;
+
+function _closeCharCalculationPopover() {
+  if (_charCalcAnchor) _charCalcAnchor.classList.remove('is-open');
+  if (_charCalcPopover) _charCalcPopover.remove();
+  _charCalcPopover = null;
+  _charCalcAnchor = null;
+  document.removeEventListener('pointerdown', _onCharCalcOutside, true);
+  document.removeEventListener('keydown', _onCharCalcKeydown, true);
+  window.removeEventListener('resize', _positionCharCalculationPopover);
+  window.removeEventListener('scroll', _positionCharCalculationPopover, true);
+}
+
+function _onCharCalcOutside(event) {
+  if (_charCalcPopover?.contains(event.target) || _charCalcAnchor?.contains(event.target)) return;
+  _closeCharCalculationPopover();
+}
+
+function _onCharCalcKeydown(event) {
+  if (event.key === 'Escape') _closeCharCalculationPopover();
+}
+
+function _positionCharCalculationPopover() {
+  if (!_charCalcPopover || !_charCalcAnchor) return;
+  const gap = 10;
+  const pad = 10;
+  const anchorRect = _charCalcAnchor.getBoundingClientRect();
+  const popRect = _charCalcPopover.getBoundingClientRect();
+  const maxLeft = Math.max(pad, window.innerWidth - popRect.width - pad);
+  const centered = anchorRect.left + anchorRect.width / 2 - popRect.width / 2;
+  const left = Math.min(maxLeft, Math.max(pad, centered));
+  const below = anchorRect.bottom + gap;
+  const above = anchorRect.top - popRect.height - gap;
+  const top = below + popRect.height <= window.innerHeight - pad
+    ? below
+    : Math.max(pad, above);
+  const arrowLeft = Math.min(popRect.width - 18, Math.max(18, anchorRect.left + anchorRect.width / 2 - left));
+
+  _charCalcPopover.style.left = `${left}px`;
+  _charCalcPopover.style.top = `${top}px`;
+  _charCalcPopover.style.setProperty('--calc-arrow-left', `${arrowLeft}px`);
+  _charCalcPopover.classList.toggle('is-above', top < anchorRect.top);
+}
+
+function _showCharCalculationPopover(anchor, { title, result, rows, note }) {
+  const wasOpenOnSameAnchor = _charCalcAnchor === anchor && _charCalcPopover;
+  _closeCharCalculationPopover();
+  if (wasOpenOnSameAnchor) return;
+
+  const popover = document.createElement('div');
+  popover.className = 'cs-calc-popover';
+  popover.setAttribute('role', 'dialog');
+  popover.setAttribute('aria-label', title);
+  popover.innerHTML = `
+    <div class="cs-calc-popover-head">
+      <div>
+        <span>Calcul</span>
+        <strong>${_esc(title)}</strong>
+      </div>
+      <button type="button" class="cs-calc-popover-close" aria-label="Fermer" data-calc-popover-close>×</button>
+    </div>
+    <div class="cs-calc-modal">
+      <div class="cs-calc-result"><span>Valeur finale</span><strong>${_esc(String(result))}</strong></div>
+      <div class="cs-calc-rows">${rows}</div>
+      ${note ? `<p class="cs-calc-note">${_esc(note)}</p>` : ''}
+    </div>`;
+
+  document.body.appendChild(popover);
+  _charCalcPopover = popover;
+  _charCalcAnchor = anchor;
+  anchor.classList.add('is-open');
+  popover.querySelector('[data-calc-popover-close]')?.addEventListener('click', _closeCharCalculationPopover);
+  _positionCharCalculationPopover();
+  setTimeout(() => {
+    document.addEventListener('pointerdown', _onCharCalcOutside, true);
+    document.addEventListener('keydown', _onCharCalcKeydown, true);
+    window.addEventListener('resize', _positionCharCalculationPopover);
+    window.addEventListener('scroll', _positionCharCalculationPopover, true);
+  }, 0);
+}
 
 function _derivedBonusSources(c, key) {
   return Object.entries(c?.equipement || {}).flatMap(([slot, item]) => {
@@ -273,15 +354,7 @@ function openCharCalculation(btn) {
     return;
   }
 
-  openModal(`ⓘ ${title}`, `
-    <div class="cs-calc-modal">
-      <div class="cs-calc-result"><span>Valeur finale</span><strong>${_esc(String(result))}</strong></div>
-      <div class="cs-calc-rows">${rows}</div>
-      ${note ? `<p class="cs-calc-note">${_esc(note)}</p>` : ''}
-    </div>`, {
-    subtitle: 'Origine de chaque valeur',
-    accent: '#4f8cff',
-  });
+  _showCharCalculationPopover(btn, { title, result, rows, note });
 }
 
 function registerCharBlurActions(map) { Object.assign(_charBlurActions, map); }

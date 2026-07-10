@@ -11400,6 +11400,10 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   opacity: .72;
 }
 .cs-v3 .cs-calc-inline:hover { opacity: 1; color: var(--gold-2, #7eb0ff); }
+.cs-v3 .cs-calc-inline.is-open {
+  opacity: 1;
+  color: var(--gold-2, #7eb0ff);
+}
 .cs-v3 .cs-mini.cs-calc-trigger {
   width: 100%;
   font: inherit;
@@ -11411,6 +11415,10 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   border-color: rgba(79,140,255,.35);
   background: rgba(79,140,255,.07);
 }
+.cs-v3 .cs-mini.cs-calc-trigger.is-open {
+  border-color: rgba(79,140,255,.48);
+  background: rgba(79,140,255,.10);
+}
 .cs-v3 .cs-calc-link {
   padding: 0;
   border: 0;
@@ -11420,19 +11428,100 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 }
 .cs-v3 .cs-calc-link:hover { filter: brightness(1.2); text-decoration: underline dotted; }
 
+.cs-calc-popover {
+  --calc-arrow-left: 32px;
+  position: fixed;
+  z-index: calc(var(--z-popover, 1000) + 30);
+  width: min(360px, calc(100vw - 20px));
+  max-height: min(460px, calc(100vh - 20px));
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid rgba(79,140,255,.28);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(79,140,255,.18), transparent 42%),
+    linear-gradient(180deg, rgba(18,28,45,.98), rgba(10,17,30,.98));
+  box-shadow: 0 18px 44px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.06);
+  color: var(--text, #e7edf7);
+  backdrop-filter: blur(12px);
+}
+.cs-calc-popover::before {
+  content: "";
+  position: absolute;
+  left: var(--calc-arrow-left);
+  top: -6px;
+  width: 10px;
+  height: 10px;
+  transform: translateX(-50%) rotate(45deg);
+  background: #121c2d;
+  border-left: 1px solid rgba(79,140,255,.28);
+  border-top: 1px solid rgba(79,140,255,.28);
+}
+.cs-calc-popover.is-above::before {
+  top: auto;
+  bottom: -6px;
+  border: 0;
+  border-right: 1px solid rgba(79,140,255,.28);
+  border-bottom: 1px solid rgba(79,140,255,.28);
+}
+.cs-calc-popover-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 2px 9px;
+  border-bottom: 1px solid rgba(255,255,255,.07);
+}
+.cs-calc-popover-head > div {
+  min-width: 0;
+}
+.cs-calc-popover-head span {
+  display: block;
+  color: var(--gold-2, #7eb0ff);
+  font-size: .58rem;
+  font-weight: 900;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+.cs-calc-popover-head strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--text, #e7edf7);
+  font-size: .88rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.cs-calc-popover-close {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 7px;
+  background: rgba(255,255,255,.04);
+  color: var(--text-dim, #8ea0ba);
+  cursor: pointer;
+}
+.cs-calc-popover-close:hover {
+  color: var(--text, #e7edf7);
+  background: rgba(255,255,255,.08);
+}
 .cs-calc-modal {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 .cs-calc-result {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 13px 15px;
+  gap: 12px;
+  padding: 10px 11px;
   border-left: 3px solid #4f8cff;
   background: rgba(79,140,255,.08);
+  border-radius: 0 8px 8px 0;
 }
 .cs-calc-result span {
   color: var(--text-muted);
@@ -11443,16 +11532,17 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 }
 .cs-calc-result strong {
   color: var(--text);
-  font-size: 1.25rem;
+  font-size: 1.12rem;
+  text-align: right;
 }
 .cs-calc-rows { border-top: 1px solid var(--border); }
 .cs-calc-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 46px;
-  padding: 8px 2px;
+  gap: 12px;
+  min-height: 38px;
+  padding: 7px 2px;
   border-bottom: 1px solid var(--border);
 }
 .cs-calc-row > div {
@@ -11462,7 +11552,12 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 }
 .cs-calc-row span { color: var(--text-soft); font-size: .84rem; }
 .cs-calc-row small { color: var(--text-dim); font-size: .68rem; }
-.cs-calc-row strong { color: var(--gold-2, #7eb0ff); white-space: nowrap; }
+.cs-calc-row strong {
+  min-width: 0;
+  color: var(--gold-2, #7eb0ff);
+  text-align: right;
+  white-space: nowrap;
+}
 .cs-calc-note {
   margin: 0;
   color: var(--text-muted);
