@@ -385,21 +385,35 @@ async function _createCharForOwner(uid, ownerPseudo) {
 async function _advMembersSorted() {
   const adv = STATE.adventure;
   const allUsers = await loadAllUsers();
-  const memberUids = new Set([
+  const byId     = new Map(allUsers.map(u => [u.id, u]));
+  const profiles = adv?.memberProfiles || {};
+  const absorbed = new Set(Object.keys(adv?.accountRelinks || {}));
+
+  // Source de vérité = les UID membres de l'aventure, PAS la lecture des docs
+  // users (qui échoue si le MJ n'est pas super-admin global → un membre pouvait
+  // disparaître du sélecteur). Le nom vient du doc users si lisible, sinon de
+  // memberProfiles (dénormalisé, toujours lisible), sinon fallback UID. On écarte
+  // les comptes ABSORBÉS (fusionnés) et on dédoublonne par email.
+  const memberUids = [...new Set([
     ...(adv?.admins || []),
     ...(adv?.players || []),
     ...(adv?.accessList || []),
     STATE.user.uid, // toujours pouvoir créer pour soi
-  ]);
-  let members = allUsers.filter(u => memberUids.has(u.id));
-  // Écarte les comptes ABSORBÉS (fusionnés via accountRelinks) puis dédoublonne
-  // par email : un même email = une même personne → un seul choix de propriétaire
-  // (évite qu'un compte fantôme, ex. « Hanna », apparaisse deux fois).
-  const absorbed = new Set(Object.keys(adv?.accountRelinks || {}));
+  ])].filter(uid => uid && !absorbed.has(uid));
+
+  const profOf = (uid) => {
+    const p = profiles[uid];
+    return typeof p === 'string' ? { pseudo: p } : (p || {});
+  };
+  let members = memberUids.map(uid => {
+    const u = byId.get(uid) || {};
+    const p = profOf(uid);
+    return { id: uid, pseudo: u.pseudo || p.pseudo || '', email: u.email || p.email || '' };
+  });
+
   const seenEmail = new Set();
-  members = members.filter(u => {
-    if (absorbed.has(u.id)) return false;
-    const email = String(u.email || '').trim().toLowerCase();
+  members = members.filter(m => {
+    const email = String(m.email || '').trim().toLowerCase();
     if (!email) return true;
     if (seenEmail.has(email)) return false;
     seenEmail.add(email);
