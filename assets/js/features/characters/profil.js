@@ -167,15 +167,16 @@ export function renderCharProfilV3(c, canEdit) {
           <button class="profil-tag-add-btn" ${tagsFull?'disabled':''}
             data-action="csV3AddProfilTagFromInput" data-id="${c.id}">Ajouter</button>
         </div>
-        <div class="profil-tag-suggest-label">Suggestions :</div>
-        <div class="profil-tag-suggest-row">
-          ${V3_TAG_SUGGESTIONS.map(s => {
-            const used = tagsLow.includes(s.toLowerCase());
-            return `<button class="profil-tag-suggest ${used?'is-used':''}" ${used||tagsFull?'disabled':''}
-              data-action="csV3AddProfilTag" data-id="${c.id}" data-tag="${_esc(s)}">${_esc(s)}</button>`;
-          }).join('')}
-        </div>
-        <div class="profil-tag-counter">${tags.length} / ${TAG_MAX_V3} traits</div>
+        <details class="profil-tag-suggest-details">
+          <summary>Suggestions rapides</summary>
+          <div class="profil-tag-suggest-row">
+            ${V3_TAG_SUGGESTIONS.map(s => {
+              const used = tagsLow.includes(s.toLowerCase());
+              return `<button class="profil-tag-suggest ${used?'is-used':''}" ${used||tagsFull?'disabled':''}
+                data-action="csV3AddProfilTag" data-id="${c.id}" data-tag="${_esc(s)}">${_esc(s)}</button>`;
+            }).join('')}
+          </div>
+        </details>
       </div>`
     : '';
 
@@ -213,33 +214,27 @@ export function renderCharProfilV3(c, canEdit) {
         : `<div class="profil-text"><p style="color:var(--text-dim);font-style:italic">${canEdit?'Clique sur ✎ pour rédiger une bio.':'Aucune biographie publique.'}</p></div>`}
       ${canEdit ? `<button class="section-action" style="align-self:flex-start;margin-top:6px"
         data-action="csV3EnterBioEdit" data-id="${c.id}">✎ Modifier la bio</button>` : ''}`;
-
-  return `
-  ${canEdit
-    ? `<input class="profil-quote profil-quote-edit ${!quote ? 'is-empty' : ''}" type="text"
+  const quoteHtml = canEdit
+    ? `<label class="profil-quote-block">
+        <span class="profil-field-label">Citation</span>
+        <input class="profil-quote profil-quote-edit ${!quote ? 'is-empty' : ''}" type="text"
         value="${_esc(quote)}"
         placeholder="Ajoute une citation pour ton personnage…"
         data-input="_csQuoteToggleEmpty"
         data-blur="csV3SaveQuote" data-id="${c.id}"
-        data-enter="blur" data-esc="revert-blur">`
-    : (quote
-        ? `<div class="profil-quote">${_esc(quote)}</div>`
-        : '')}
-  <div class="profil-tags-block">
-    ${canEdit ? `<div class="profil-tags-title">🎭 Traits de caractère</div>` : ''}
+        data-enter="blur" data-esc="revert-blur">
+      </label>`
+    : (quote ? `<div class="profil-quote-block"><span class="profil-field-label">Citation</span><div class="profil-quote">${_esc(quote)}</div></div>` : '');
+  const tagsBlockHtml = (canEdit || tags.length) ? `<div class="profil-tags-block">
+    ${canEdit ? `<div class="profil-tags-head">
+      <div class="profil-tags-title">🎭 Traits de caractère</div>
+      <span class="profil-tag-counter">${tags.length} / ${TAG_MAX_V3}</span>
+    </div>` : ''}
     <div class="profil-tags">${tagChips || (canEdit ? '<span class="profil-tags-empty">Aucun trait pour l\'instant</span>' : '')}</div>
     ${tagEditor}
-  </div>
-
-  <div class="profil-layout">
-    <div class="profil-main">
-      ${bioBlockHtml}
-      <div class="profil-side-card">
-        <h4>📜 Identité</h4>
-        <div class="profil-facts-grid">${identityHtml}</div>
-        ${canEdit ? `<button class="section-action" style="margin-top:.6rem;width:100%" data-action="csV3AddFact" data-id="${c.id}">＋ Champ personnalisé</button>` : ''}
-      </div>
-      ${(canManageIllustration || presCache?.imageUrl) ? `
+  </div>` : '';
+  const heroSub = [c.classe, c.race].filter(Boolean).map(_esc).join(' · ') || 'Identité à préciser';
+  const illustrationCardHtml = (canManageIllustration || presCache?.imageUrl) ? `
       <div class="profil-side-card profil-illu-card">
         <h4>🖼️ Illustration page Joueurs</h4>
         <div class="profil-illu-row">
@@ -258,13 +253,40 @@ export function renderCharProfilV3(c, canEdit) {
             </div>` : ''}
           </div>
         </div>
-      </div>` : ''}
+      </div>` : '';
+
+  return `
+  <div class="profil-layout">
+    <div class="profil-main">
+      <div class="profil-side-card profil-bio-card">
+        <h4>✎ Biographie</h4>
+        ${bioBlockHtml}
+      </div>
+      <div class="profil-meta-stack">
+        <section class="profil-hero">
+          <div class="profil-hero-head">
+            <div>
+              <span class="profil-hero-kicker">Profil</span>
+              <h3>${_esc(c.nom || 'Sans nom')}</h3>
+              <p>${heroSub}</p>
+            </div>
+          </div>
+          ${quoteHtml}
+          ${tagsBlockHtml}
+        </section>
+        <div class="profil-side-card profil-identity-card">
+          <h4>📜 Identité</h4>
+          <div class="profil-facts-grid">${identityHtml}</div>
+          ${canEdit ? `<button class="section-action" style="margin-top:.6rem;width:100%" data-action="csV3AddFact" data-id="${c.id}">＋ Champ personnalisé</button>` : ''}
+        </div>
+      </div>
     </div>
     <div class="profil-side">
       <div class="profil-side-card">
         <h4>🎯 Profil de stats</h4>
         ${_renderRadarV3(c)}
       </div>
+      ${illustrationCardHtml}
       ${canEdit ? `
       <div class="profil-side-card">
         <h4>👁️ Visible par les joueurs</h4>

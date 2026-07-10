@@ -514,12 +514,18 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
   return `<aside class="id-side" id="cs-sidebar" data-aura="${c.auraColor?'custom':(c.aura||'blue')}">
 
     <div class="id-identity">
-      ${canEdit?`<div class="id-actions-mini" aria-label="Actions du personnage">
-        <button class="id-default-btn${c.isDefault?' is-on':''}"
+      ${(canEdit || STATE.isAdmin)?`<div class="id-actions-mini" aria-label="Actions du personnage">
+        ${STATE.isAdmin
+          ? `<button class="id-owner-btn" data-action="reassignCharOwner" data-id="${c.id}" title="Réassigner à un autre compte joueur">
+              <span class="id-owner-ico">👤</span>
+              <span class="id-owner-label">${_esc(c.ownerPseudo || (c.uid ? 'Compte lié' : 'Sans compte'))}</span>
+            </button>`
+          : ''}
+        ${canEdit ? `<button class="id-default-btn${c.isDefault?' is-on':''}"
           title="${c.isDefault?"Personnage favori — sélectionné d'office dans les sélecteurs et le VTT":'Mettre ce personnage en favori'}"
           data-action="_setDefaultCharacter" data-id="${c.id}">${c.isDefault?'★':'☆'}</button>
         <button title="Exporter" data-action="openCharExportMenu" data-id="${c.id}">⇩</button>
-        <button class="id-del-btn" title="Supprimer ce personnage" data-action="deleteChar" data-id="${c.id}">⌫</button>
+        <button class="id-del-btn" title="Supprimer ce personnage" data-action="deleteChar" data-id="${c.id}">⌫</button>` : ''}
       </div>`:''}
       <div class="id-portrait-wrap">
         <div class="id-portrait"
@@ -549,9 +555,6 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
         ${canEdit
           ? `<span class="id-chip race" data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${_esc(c.race||'Race')}</span>`
           : (c.race?`<span class="id-chip race">${_esc(c.race)}</span>`:'')}
-        ${STATE.isAdmin
-          ? `<span class="id-chip owner" data-action="reassignCharOwner" data-id="${c.id}" title="Réassigner à un autre compte joueur">👤 ${_esc(c.ownerPseudo || (c.uid ? 'Compte lié' : 'Sans compte'))}</span>`
-          : ''}
       </div>
     </div>
 
