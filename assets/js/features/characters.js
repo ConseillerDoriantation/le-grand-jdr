@@ -514,6 +514,13 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
   return `<aside class="id-side" id="cs-sidebar" data-aura="${c.auraColor?'custom':(c.aura||'blue')}">
 
     <div class="id-identity">
+      ${canEdit?`<div class="id-actions-mini" aria-label="Actions du personnage">
+        <button class="id-default-btn${c.isDefault?' is-on':''}"
+          title="${c.isDefault?"Personnage par défaut — il représente le joueur":'Définir comme personnage par défaut'}"
+          data-action="_setDefaultCharacter" data-id="${c.id}">${c.isDefault?'★':'☆'}</button>
+        <button title="Exporter" data-action="openCharExportMenu" data-id="${c.id}">⇩</button>
+        <button class="id-del-btn" title="Supprimer ce personnage" data-action="deleteChar" data-id="${c.id}">⌫</button>
+      </div>`:''}
       <div class="id-portrait-wrap">
         <div class="id-portrait"
              ${canEdit ? `data-action="open-character-photo" data-charid="${c.id}"` : ''}>
@@ -531,14 +538,6 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
         ${canEdit
           ? `<span class="id-name" data-action="inlineEditText" data-id="${c.id}" data-field="nom" title="Renommer">${_esc(c.nom||'Sans nom')}</span>`
           : `<span class="id-name">${_esc(c.nom||'Sans nom')}</span>`}
-        <span class="id-actions-mini">
-          ${canEdit?`<button class="id-default-btn${c.isDefault?' is-on':''}"
-            title="${c.isDefault?"Personnage par défaut — il représente le joueur":'Définir comme personnage par défaut'}"
-            data-action="_setDefaultCharacter" data-id="${c.id}">${c.isDefault?'★':'☆'}</button>`:''}
-          ${canEdit?`<button title="Renommer" data-action="inlineEditText" data-id="${c.id}" data-field="nom" data-target-sel=".id-name">✎</button>`:''}
-          ${canEdit?`<button title="Exporter" data-action="openCharExportMenu" data-id="${c.id}">📤</button>`:''}
-          ${canEdit?`<button class="id-del-btn" title="Supprimer ce personnage" data-action="deleteChar" data-id="${c.id}">🗑️</button>`:''}
-        </span>
       </div>
 
       ${titresChips}
@@ -558,18 +557,28 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
 
     <!-- XP -->
     <div class="xp-block">
-      <div class="xp-row"><span>Expérience</span><span class="xp-pct">${xpPct}%</span></div>
-      <div class="xp-track"><div class="xp-fill" id="xp-bar-fill" style="width:${xpPct}%"></div></div>
+      <div class="xp-head">
+        <div>
+          <span class="xp-kicker">Progression</span>
+          <strong>Niveau ${c.niveau||1}</strong>
+        </div>
+        <span class="xp-pct">${xpPct}%</span>
+      </div>
+      <div class="xp-track" aria-label="Progression d'expérience">
+        <div class="xp-fill" id="xp-bar-fill" style="width:${xpPct}%"></div>
+      </div>
       <div class="xp-meta">
         <span>${canEdit
-          ? `<button type="button" class="xp-set-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="exp" data-min="0" data-max="${xpPalier}" title="Définir l'XP total" style="background:none;border:none;color:inherit;font:inherit;cursor:pointer;padding:0;text-decoration:underline dotted">${xpCur.toLocaleString('fr-FR').replace(/ /g,' ')}</button>`
+          ? `<button type="button" class="xp-set-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="exp" data-min="0" data-max="${xpPalier}" title="Définir l'XP total">${xpCur.toLocaleString('fr-FR').replace(/ /g,' ')}</button>`
           : xpCur.toLocaleString('fr-FR').replace(/ /g,' ')} / ${xpPalier.toLocaleString('fr-FR').replace(/ /g,' ')} XP</span>
-        <span>→ Niv. ${(c.niveau||1)+1}</span>
+        <span>Prochain : Niv. ${(c.niveau||1)+1}</span>
       </div>
       ${canEdit?`<div class="xp-add">
-        <label>＋ XP</label>
-        <input type="number" id="xp-add-input-${c.id}" placeholder="0" data-char-id="${c.id}" data-xp-input>
-        <button data-action="addXpDelta" data-id="${c.id}">Ajouter</button>
+        <label for="xp-add-input-${c.id}">Gain d'XP</label>
+        <div class="xp-add-control">
+          <input type="number" id="xp-add-input-${c.id}" placeholder="0" data-char-id="${c.id}" data-xp-input>
+          <button data-action="addXpDelta" data-id="${c.id}">Ajouter</button>
+        </div>
       </div>`:''}
     </div>
 
