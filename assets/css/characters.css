@@ -10240,7 +10240,7 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
 }
 .cs-v3 .weap-card { min-width: 0; width: 100%; }
-@media (max-width: 760px) { .cs-v3 .weap-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .cs-v3 .weap-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .cs-v3 .weap-card {
   background: rgba(0,0,0,.18);
   border: 1px solid var(--border);
@@ -12597,9 +12597,29 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   .cs-v3 .tab-v3 .tab-ico { font-size: .82rem; }
   .cs-v3 .tab-body-v3 { padding: 14px; }
   .cs-v3 .section { padding: 2px 0 16px; border-radius: 0; }
-  .cs-v3 .weap-grid { grid-template-columns: 1fr; }
+  .cs-v3 .weap-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cs-v3 .armor-grid { grid-template-columns: repeat(2, 1fr) !important; }
-  .cs-v3 .weap-rolls { flex-direction: column; gap: 8px; }
+  .cs-v3 .weap-card,
+  .cs-v3 .armor-card { min-width: 0; }
+  .cs-v3 .weap-head,
+  .cs-v3 .armor-slot { min-width: 0; }
+  .cs-v3 .weap-head > div,
+  .cs-v3 .armor-slot-name { min-width: 0; }
+  .cs-v3 .weap-name,
+  .cs-v3 .armor-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cs-v3 .weap-slot,
+  .cs-v3 .armor-slot,
+  .cs-v3 .weap-format,
+  .cs-v3 .armor-type-pill { font-size: .54rem; }
+  .cs-v3 .weap-roll-val { font-size: .98rem; line-height: 1.05; }
+  .cs-v3 .weap-roll-lbl,
+  .cs-v3 .weap-roll-sub { font-size: .58rem; }
+  .cs-v3 .weap-card { padding: 10px; }
+  .cs-v3 .armor-card { padding: 9px; }
+  .cs-v3 .weap-rolls { grid-template-columns: 1fr; gap: 6px; padding: 4px 0; }
   .cs-v3 .weap-rolls-sep { display: none; }
   .cs-v3 .set-slots-row { grid-template-columns: 1fr; gap: 4px; }
   .cs-v3 .set-slot { flex-direction: row; align-items: center; justify-content: space-between; }
@@ -12704,31 +12724,23 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
     border-radius: 8px;
   }
   .cs-v3 .stats-banner {
-    grid-template-columns: none !important;
-    grid-auto-flow: column;
-    grid-auto-columns: 230px;
-    overflow-x: auto;
-    overscroll-behavior-inline: contain;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(79,140,255,.28) transparent;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    overflow: visible;
   }
-  .cs-v3 .stats-banner::-webkit-scrollbar { height: 4px; }
-  .cs-v3 .stats-banner::-webkit-scrollbar-thumb {
-    background: rgba(79,140,255,.28);
-    border-radius: 2px;
-  }
-  .cs-v3 .stat-tile { scroll-snap-align: start; }
 }
 @container character-sheet (max-width: 480px) {
   .cs-v3 .id-side { grid-template-columns: 1fr; }
   .cs-v3 .vital.hp,
   .cs-v3 .vital.mp { grid-column: 1; }
+  .cs-v3 .stats-banner,
+  .cs-v3 .weap-grid,
+  .cs-v3 .armor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
 }
 @media (max-width: 420px) {
   .cs-v3 .app-shell { padding: 6px 6px 50px; }
   .cs-v3 .stats-banner { grid-template-columns: 1fr 1fr !important; }
-  .cs-v3 .armor-grid { grid-template-columns: 1fr !important; }
+  .cs-v3 .weap-grid,
+  .cs-v3 .armor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
   .cs-v3 .stat-tile-total { font-size: 1.4rem; }
   .cs-v3 .id-side { grid-template-columns: 1fr; }
   .cs-v3 .vital.hp,
@@ -13024,10 +13036,39 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 @media (max-width: 760px) {
   .cs-v3 .cs-section--compact { padding: 12px; }
   .cs-v3 .cs-weap-grid,
-  .cs-v3 .cs-armor-grid3,
-  .cs-v3 .cs-actions-row {
+  .cs-v3 .cs-armor-grid3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cs-v3 .cs-weap-card,
+  .cs-v3 .cs-armor-card {
+    min-width: 0;
+    padding: 10px;
+  }
+  .cs-v3 .cs-weap-card-hdr,
+  .cs-v3 .cs-weap-card-nom,
+  .cs-v3 .cs-armor-card-hdr {
+    min-width: 0;
+  }
+  .cs-v3 .cs-weap-nom,
+  .cs-v3 .cs-armor-card-nom {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cs-v3 .cs-weap-rolls {
     grid-template-columns: 1fr;
   }
+  .cs-v3 .cs-weap-roll-sep {
+    width: auto;
+    height: 1px;
+  }
+  .cs-v3 .cs-weap-roll-block {
+    padding: 7px 8px;
+  }
+  .cs-v3 .cs-weap-roll-val {
+    font-size: .98rem;
+    overflow-wrap: anywhere;
+  }
+  .cs-v3 .cs-actions-row { grid-template-columns: 1fr; }
   .cs-v3 .cs-rule-note {
     align-items: flex-start;
   }
