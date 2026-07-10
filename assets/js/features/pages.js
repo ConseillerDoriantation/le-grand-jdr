@@ -307,6 +307,72 @@ async function _adminRelinkPlayer(oldUid, newUid, name = '') {
   }
 }
 
+// ── Fusion des comptes en double (MJ) ────────────────────────────────────────
+// Le MJ choisit le compte à GARDER ; les autres UID (même email) sont fusionnés
+// dedans : personnages transférés + retrait de l'aventure (relinkPlayerAccount)
+// puis suppression de leur doc `users`. accountRelinks est posé → le fantôme ne
+// peut plus se ré-inscrire (cf. auto-rattachement dans core/adventure.js).
+let _mergeDupUids = [];
+async function _adminMergeDuplicate(uidsCsv, email = '') {
+  if (!STATE.adventure?.id) return;
+  const uids = String(uidsCsv || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (uids.length < 2) { showNotif('Rien à fusionner.', 'info'); return; }
+  _mergeDupUids = uids;
+
+  const users = await loadAllUsers();
+  const byId  = new Map(users.map(u => [u.id, u]));
+  const chars = STATE.characters || [];
+  const cc    = (uid) => chars.filter(c => c.uid === uid).length;
+  const adv   = STATE.adventure;
+  const memberUids = new Set([...(adv.admins || []), ...(adv.players || []), ...(adv.accessList || [])]);
+  const label = (uid) => byId.get(uid)?.pseudo || byId.get(uid)?.email || `UID ${uid.slice(0, 6)}…`;
+  // Survivant suggéré : le plus de personnages, puis un membre.
+  const suggested = [...uids].sort((a, b) =>
+    (cc(b) - cc(a)) || ((memberUids.has(b) ? 1 : 0) - (memberUids.has(a) ? 1 : 0)))[0];
+
+  const rows = uids.map(uid => `
+    <label style="display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;border:1px solid var(--border);border-radius:9px;margin-bottom:.4rem;cursor:pointer">
+      <input type="radio" name="merge-survivor" value="${_esc(uid)}" ${uid === suggested ? 'checked' : ''}>
+      <span style="flex:1;min-width:0">
+        <b>${_esc(label(uid))}</b>
+        <span style="font-size:.74rem;color:var(--text-dim)"> · ${cc(uid)} perso${cc(uid) > 1 ? 's' : ''}${memberUids.has(uid) ? ' · membre' : ''}${byId.has(uid) ? '' : ' · doc absent'}</span>
+        <br><span style="font-size:.64rem;color:var(--text-dim);font-family:monospace">${_esc(uid)}</span>
+      </span>
+    </label>`).join('');
+
+  openModal('🪪 Fusionner les comptes en double', `
+    <p style="font-size:.84rem;line-height:1.5;margin-bottom:.7rem">
+      Même email <b>${_esc(email)}</b>. Choisis le compte à <b>garder</b> — les autres sont fusionnés
+      dedans : personnages transférés, comptes retirés de l'aventure puis supprimés. Irréversible.
+    </p>
+    ${rows}
+    <div style="display:flex;gap:.5rem;margin-top:.9rem">
+      <button class="btn btn-gold" style="flex:1" data-action="_adminMergeDuplicateConfirm">Fusionner</button>
+      <button class="btn btn-outline btn-sm" data-action="_adminMergeDuplicateCancel">Annuler</button>
+    </div>
+  `, { subtitle: 'Nettoyage des comptes fantômes', accent: '#e8b84b' });
+}
+
+async function _adminMergeDuplicateConfirm() {
+  const survivor = document.querySelector('input[name="merge-survivor"]:checked')?.value;
+  if (!survivor || _mergeDupUids.length < 2) return;
+  const ghosts = _mergeDupUids.filter(u => u !== survivor);
+  closeModalDirect();
+  try {
+    let migrated = 0;
+    for (const g of ghosts) {
+      const r = await relinkPlayerAccount(STATE.adventure.id, g, survivor);
+      migrated += r?.migrated || 0;
+      try { await deleteFromCol('users', g); } catch (_) { /* doc déjà absent */ }
+    }
+    _mergeDupUids = [];
+    showNotif(`Fusion effectuée — ${ghosts.length} compte(s) absorbé(s), ${migrated} perso(s) transféré(s).`, 'success');
+    await PAGES.admin();
+  } catch (e) {
+    showNotif(e.message || 'Échec de la fusion.', 'error');
+  }
+}
+
 async function _adminRepairQuestParticipants() {
   if (!STATE.isAdmin) return;
   const ok = await confirmModal(
@@ -2876,7 +2942,8 @@ const PAGES = {
         title: 'Compte doublonné probable',
         text: `${g.email} · ${g.uids.length} comptes actifs`,
         tone: 'is-warn',
-        attrs: '',
+        attrs: `data-action="_adminMergeDuplicate" data-uids="${_esc(g.uids.join(','))}" data-email="${_esc(g.email)}"`,
+        action: 'Fusionner',
       })),
       ...invalidOwnerChars.map(c => ({
         icon: '👤',
@@ -3589,6 +3656,9 @@ registerActions({
     dispatchAction(proxy, new Event('click'));
   },
   _adminRelinkPlayer: (btn) => _adminRelinkPlayer(btn.dataset.oldUid, btn.dataset.newUid, btn.dataset.name),
+  _adminMergeDuplicate: (btn) => _adminMergeDuplicate(btn.dataset.uids, btn.dataset.email),
+  _adminMergeDuplicateConfirm: () => _adminMergeDuplicateConfirm(),
+  _adminMergeDuplicateCancel: () => closeModalDirect(),
 });
 
 export default PAGES;
