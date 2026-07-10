@@ -42,6 +42,14 @@ let _lootSelect = () => {};
 let _lootSaveRecent = null;
 let _lootRenderGrid = null;
 
+function _invLooksMechanicalEffect(text = '') {
+  const raw = String(text || '').trim();
+  if (!raw || raw.length > 90) return false;
+  const n = _norm(raw);
+  if (/[+\-]?\d/.test(raw)) return true;
+  return /\b(pv|pm|ca|degat|degats|soin|vitesse|portee|toucher|critique|avantage|desavantage|relance|dd|etat|reaction|action bonus|resistance|immunite|mana)\b/.test(n);
+}
+
 export function isInventoryCatalogReady() {
   return Array.isArray(_shopItemsCache);
 }
@@ -431,7 +439,13 @@ export async function openInventoryItemDetail(charId, indicesB64) {
   const equippedSlots = [...new Set(indices.flatMap(idx => equippedMap.get(idx) || []))];
   const traits = _getTraits(item);
   const bonusText = formatItemBonusText(item);
-  const effectText = getItemEffectText(item);
+  const rawEffectText = String(getItemEffectText(item) || '').trim();
+  const descriptionText = String(item.description || '').trim();
+  const effectCandidateText = rawEffectText && _norm(rawEffectText) !== _norm(descriptionText)
+    ? rawEffectText
+    : '';
+  const effectText = _invLooksMechanicalEffect(effectCandidateText) ? effectCandidateText : '';
+  const detailDescription = descriptionText || (!effectText ? effectCandidateText : '');
   const personal = getInvPersonalLineForIndices(c.inventaire || [], indices);
   const price = getInventoryItemValue(item, catalogItem);
   const resale = getInventoryItemResaleValue(item, catalogItem);
@@ -492,9 +506,9 @@ export async function openInventoryItemDetail(charId, indicesB64) {
         <div class="inv-detail-traits">${traits.map(trait => `<span>${_esc(trait)}</span>`).join('')}</div>
       </section>` : ''}
 
-      ${item.description ? `<section class="inv-detail-section">
+      ${detailDescription ? `<section class="inv-detail-section">
         <h4>Description</h4>
-        <p>${_esc(item.description)}</p>
+        <p>${_esc(detailDescription)}</p>
       </section>` : ''}
 
       ${personal.text ? `<section class="inv-detail-section inv-detail-note">
@@ -503,9 +517,6 @@ export async function openInventoryItemDetail(charId, indicesB64) {
       </section>` : ''}
 
       <footer class="inv-detail-footer">
-        ${charSession.getCanEditChar()
-          ? `<button class="btn btn-outline" data-action="editInvItem" data-idx="${indices[0]}">✎ Modifier</button>`
-          : ''}
         <button class="btn btn-primary" data-action="close-modal">Fermer</button>
       </footer>
     </div>`, {

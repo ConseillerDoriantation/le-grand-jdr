@@ -1278,6 +1278,14 @@ function _invFilters(inv) {
   return [{ id: 'all', lbl: 'Tout', icon: '' }, ...fixed, ...dyn, ...(autre ? [autre] : [])];
 }
 
+function _invLooksMechanicalEffect(text = '') {
+  const raw = String(text || '').trim();
+  if (!raw || raw.length > 90) return false;
+  const n = _norm(raw);
+  if (/[+\-]?\d/.test(raw)) return true;
+  return /\b(pv|pm|ca|degat|degats|soin|vitesse|portee|toucher|critique|avantage|desavantage|relance|dd|etat|reaction|action bonus|resistance|immunite|mana)\b/.test(n);
+}
+
 function renderCharInventaireV3(c, canEdit) {
   const inv = c.inventaire || [];
   const totalItems = inv.reduce((sum, item) =>
@@ -1324,7 +1332,8 @@ function renderCharInventaireV3(c, canEdit) {
   const filteredInv = [...stackMap.values()].filter(({ it }) => {
     if (activeCat !== 'all' && _detectInvCategory(it) !== activeCat) return false;
     if (!q) return true;
-    const hay = _norm(`${it.nom||''} ${it.type||''} ${it.template||''} ${it.description||''}`);
+    const traits = (_getTraits?.(it) || []).join(' ');
+    const hay = _norm(`${it.nom||''} ${it.type||''} ${it.template||''} ${it.description||''} ${getItemEffectText(it)||''} ${traits}`);
     return hay.includes(q);
   });
 
@@ -1334,10 +1343,10 @@ function renderCharInventaireV3(c, canEdit) {
   }, 0);
 
   const summaryHtml = `<div class="inv-overview">
-    <span><b>${totalItems}</b> objet${totalItems > 1 ? 's' : ''}</span>
-    <span><b>${equipped}</b> équipé${equipped > 1 ? 's' : ''}</span>
-    <span class="value"><small>Valeur</small><b>${totals.value} or</b></span>
-    <span class="resale"><small>Revente</small><b>${totals.resale} or</b></span>
+    <span class="inv-overview-tile count"><small>Total</small><b>${totalItems}</b><em>objet${totalItems > 1 ? 's' : ''}</em></span>
+    <span class="inv-overview-tile equipped"><small>Porté</small><b>${equipped}</b><em>équipé${equipped > 1 ? 's' : ''}</em></span>
+    <span class="inv-overview-tile value"><small>Valeur</small><b>${totals.value} or</b></span>
+    <span class="inv-overview-tile resale"><small>Revente</small><b>${totals.resale} or</b></span>
   </div>`;
 
   const filterBarHtml = `<div class="inv-toolbar">
@@ -1370,6 +1379,7 @@ function renderCharInventaireV3(c, canEdit) {
   const cardsHtml = filteredInv.map(({ it, indices, qte }) => {
     const idx = indices[0];               // index principal pour Modifier
     const allIdx = indices;               // tous les indices pour bulk actions
+    const cat = _invCat(it);
     // Rareté : 0=aucune, 1=Commun → 5=Légendaire (aligné sur la boutique)
     const rareRaw = parseInt(it.rarete || it.rare || 0) || 0;
     const rareIdx = Math.min(5, Math.max(0, rareRaw));
@@ -1385,17 +1395,32 @@ function renderCharInventaireV3(c, canEdit) {
 
     // Effet principal : une seule information forte, le reste devient secondaire.
     const caTotal = (parseInt(it.ca) || 0) + (parseInt(it.caBonus) || 0);
-    const effetTxt = getItemEffectText(it);
+    const rawEffectTxt = String(getItemEffectText(it) || '').trim();
+    const descriptionTxt = String(it.description || '').trim();
+    const effectCandidateTxt = rawEffectTxt && _norm(rawEffectTxt) !== _norm(descriptionTxt)
+      ? rawEffectTxt
+      : '';
+    const effetTxt = _invLooksMechanicalEffect(effectCandidateTxt) ? effectCandidateTxt : '';
+    const displayDescription = descriptionTxt || (!effetTxt ? effectCandidateTxt : '');
+    const heroEffectTxt = effetTxt.length > 56 ? `${effetTxt.slice(0, 53).trim()}…` : effetTxt;
     const hero = it.degats
       ? { k: 'Dégâts', v: it.degats, c: 'dmg', icon: '⚔' }
       : caTotal
         ? { k: 'Armure', v: `CA ${caTotal > 0 ? '+' : ''}${caTotal}`, c: 'ca', icon: '◈' }
         : effetTxt
-          ? { k: 'Effet', v: effetTxt, c: 'effect', icon: '✦' }
+          ? { k: 'Effet', v: heroEffectTxt, c: 'effect', icon: '✦' }
           : null;
 
     // Propriétés secondaires
     const props = [];
+    const rawType = String(it.sousType || it.type || '').trim();
+    if (rawType) {
+      const rawTypeNorm = _norm(rawType);
+      const catNorm = _norm(cat.lbl || '');
+      if (!catNorm.includes(rawTypeNorm) && !rawTypeNorm.includes(catNorm)) {
+        props.push({ k: 'Type', v: rawType });
+      }
+    }
     if (it.toucher) props.push({ k: 'Toucher', v: it.toucher });
     if (it.portee) props.push({ k: 'Portée', v: it.portee });
     if (it.typeArmure) props.push({ k: 'Type', v: it.typeArmure });
@@ -1412,14 +1437,15 @@ function renderCharInventaireV3(c, canEdit) {
       <div class="inv-card-head">
         <button class="inv-card-visual" data-action="openInventoryItemDetail" data-id="${c.id}"
           data-indices="${allIdxB64}" title="Inspecter ${_esc(it.nom || 'l’objet')}">
-          ${image ? `<img src="${_esc(image)}" alt="">` : `<span aria-hidden="true">${_invCat(it).icon || '◇'}</span>`}
+          ${image ? `<img src="${_esc(image)}" alt="">` : `<span aria-hidden="true">${cat.icon || '◇'}</span>`}
         </button>
         <div class="inv-card-identity">
           <div class="inv-card-name">${_esc(it.nom || 'Sans nom')}</div>
           <div class="inv-card-subline">
+            <span class="inv-card-cat">${cat.icon ? `<span aria-hidden="true">${cat.icon}</span>` : ''}${_esc(cat.lbl)}</span>
             ${rareIdx > 0
               ? `<span class="inv-card-rare" style="color:${col}">${stars} ${_RARE_NAMES[rareIdx]}</span>`
-              : `<span>${_esc(_invCat(it).lbl)}</span>`}
+              : ''}
             ${isEquipped ? '<span class="inv-equipped-badge">Équipé</span>' : ''}
           </div>
         </div>
@@ -1449,10 +1475,10 @@ function renderCharInventaireV3(c, canEdit) {
         const badges = _itemBonusBadges(it);
         return badges.length ? `<div class="inv-card-badges">${badges.map(b=>`<span class="badge-chip ${b.cls}">${b.lbl}</span>`).join('')}</div>` : '';
       })()}
-      ${it.description?`<div class="inv-card-desc">${_esc(it.description)}</div>`:''}
+      ${displayDescription?`<div class="inv-card-desc">${_esc(displayDescription)}</div>`:''}
       ${renderInvPersonalLine(c, allIdx, allIdxB64, 'card', canEdit)}
       <div class="inv-card-footer">
-        <button class="inv-detail-btn" data-action="openInventoryItemDetail" data-id="${c.id}" data-indices="${allIdxB64}">Détails</button>
+        <button class="inv-detail-btn" data-action="openInventoryItemDetail" data-id="${c.id}" data-indices="${allIdxB64}">Inspecter</button>
         <div class="inv-card-values">
           ${prixAchat ? `<span title="Valeur unitaire"><small>Valeur</small>${prixAchat}</span>` : ''}
           ${prixVente ? `<span class="resale" title="Revente unitaire"><small>Revente</small>${prixVente}</span>` : ''}
