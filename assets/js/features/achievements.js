@@ -510,6 +510,85 @@ function _sortAchievementsByDate(items, desc = false) {
     .map(entry => entry.item);
 }
 
+function _achCategoryFor(item) {
+  return ACH_CATS.find(c => c.id === (item?.categorie || 'epique')) || ACH_CATS[0];
+}
+
+function _achGalleryOverviewHtml(items) {
+  const count = items.length;
+  if (!count) return '';
+
+  const filter = STORE.filter || 'all';
+  const charFilter = STORE.charFilter || 'all';
+  const search = (STORE.search || '').trim();
+  const filteredChar = charFilter !== 'all'
+    ? (STATE.characters || []).find(c => c.id === charFilter)
+    : null;
+  const filterParts = [
+    filter !== 'all' ? _achCategoryFor({ categorie: filter }).label : 'Toutes catégories',
+    filteredChar?.nom ? filteredChar.nom : null,
+    search ? `"${search}"` : null,
+  ].filter(Boolean);
+
+  const latest = [...items]
+    .map((item, idx) => ({ item, idx, ts: parseDate(item.date) }))
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0) || a.idx - b.idx)[0]?.item;
+  const latestCat = _achCategoryFor(latest);
+  const latestDate = _formatDateFr(latest?.date);
+
+  const linkedCount = items.filter(item => item.missionId).length;
+  const secretCount = STATE.isAdmin ? items.filter(item => item.secret).length : 0;
+  const contribCounts = new Map();
+  items.forEach(item => (item.contributeurs || []).forEach(id => {
+    contribCounts.set(id, (contribCounts.get(id) || 0) + 1);
+  }));
+  const topContributor = [...contribCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+  const topChar = topContributor ? (STATE.characters || []).find(c => c.id === topContributor[0]) : null;
+
+  const catCounts = new Map();
+  items.forEach(item => {
+    const cat = _achCategoryFor(item);
+    catCounts.set(cat.id, (catCounts.get(cat.id) || 0) + 1);
+  });
+  const mainCat = [...catCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+  const mainCatDef = mainCat ? _achCategoryFor({ categorie: mainCat[0] }) : ACH_CATS[0];
+
+  return `<section class="ach-overview" aria-label="Resume des hauts-faits affiches">
+    <div class="ach-overview-main" style="--c:${mainCatDef.color};--c-glow:${mainCatDef.glow}">
+      <div class="ach-overview-kicker">Galerie active</div>
+      <div class="ach-overview-count">${count}</div>
+      <div class="ach-overview-label">${count > 1 ? 'hauts-faits visibles' : 'haut-fait visible'}</div>
+      <div class="ach-overview-filter">${_esc(filterParts.join(' - '))}</div>
+    </div>
+    <div class="ach-overview-card">
+      <div class="ach-overview-icon" style="--c:${latestCat.color};--c-glow:${latestCat.glow}">${latestCat.emoji}</div>
+      <div class="ach-overview-copy">
+        <span>Dernier souvenir</span>
+        <strong>${_esc(latest?.titre || 'Sans titre')}</strong>
+        ${latestDate ? `<em>${_esc(latestDate)}</em>` : ''}
+      </div>
+    </div>
+    <div class="ach-overview-card">
+      ${topChar
+        ? characterAvatarHtml(topChar, { className: 'ach-overview-avatar', border: '1px solid rgba(126,176,255,.6)', background: 'rgba(126,176,255,.12)', color: '#7eb0ff' })
+        : `<div class="ach-overview-icon" style="--c:#7eb0ff;--c-glow:rgba(126,176,255,.18)">👥</div>`}
+      <div class="ach-overview-copy">
+        <span>Figure marquante</span>
+        <strong>${_esc(topChar?.nom || 'Aucun contributeur')}</strong>
+        ${topContributor ? `<em>${topContributor[1]} apparition${topContributor[1] > 1 ? 's' : ''}</em>` : ''}
+      </div>
+    </div>
+    <div class="ach-overview-card">
+      <div class="ach-overview-icon" style="--c:#55d6aa;--c-glow:rgba(34,195,142,.18)">📖</div>
+      <div class="ach-overview-copy">
+        <span>Reliés à la Trame</span>
+        <strong>${linkedCount}/${count}</strong>
+        ${secretCount ? `<em>${secretCount} secret${secretCount > 1 ? 's' : ''} MJ</em>` : '<em>archives publiques</em>'}
+      </div>
+    </div>
+  </section>`;
+}
+
 function _refreshAchievementCounters() {
   const all = STORE.items || [];
   const visible = STATE.isAdmin ? all : all.filter(a => !a.secret);
@@ -1034,7 +1113,7 @@ async function _achRenderContent() {
   }
 
   if ((STORE.view || 'galerie') === 'timeline') {
-    contentEl.innerHTML = _renderTimeline(filtered);
+    contentEl.innerHTML = _achGalleryOverviewHtml(filtered) + _renderTimeline(filtered);
     return;
   }
 
@@ -1044,7 +1123,7 @@ async function _achRenderContent() {
   const galleryEl = document.createElement('div');
   galleryEl.id        = 'ach-gallery';
   galleryEl.className = 'ach-justified';
-  contentEl.innerHTML = '';
+  contentEl.innerHTML = _achGalleryOverviewHtml(filtered);
   contentEl.appendChild(galleryEl);
 
   await _achRenderJustified(filter, filtered, galleryEl);
@@ -1100,31 +1179,45 @@ function _achOpenLightbox(itemId) {
     <div class="ach-lb-contribs">
       ${contribs.map(c => {
         const col = CHAR_COLS[(c.nom?.charCodeAt(0) || 0) % 6];
-        return `<span style="display:flex;align-items:center;gap:4px;font-size:.68rem;color:${col}">
-          <span style="width:16px;height:16px;border-radius:50%;background:${col}22;border:1px solid ${col};
-            display:flex;align-items:center;justify-content:center;font-size:.55rem;font-family:'Cinzel',serif;font-weight:700">
-            ${(c.nom||'?')[0]}
-          </span>${_esc(c.nom || '?')}</span>`;
+        return `<span class="ach-lb-contrib" style="--c:${col}">
+          ${characterAvatarHtml(c, { className: 'ach-lb-contrib-av', border: `1px solid ${col}`, background: `${col}22`, color: col })}
+          ${_esc(c.nom || '?')}
+        </span>`;
       }).join('')}
     </div>` : '';
 
+  const dateDisplay = _formatDateFr(item.date);
+  const secretHtml = STATE.isAdmin && item.secret ? `<span class="ach-lb-pill ach-lb-pill--secret">Secret MJ</span>` : '';
+  const mission = _missionFor(item);
   const overlay = document.createElement('div');
   overlay.id = 'ach-lightbox';
   overlay.className = 'ach-lightbox-rich';
   overlay.innerHTML = `
-    ${item.imageUrl ? `<img class="ach-lb-image-rich" src="${item.imageUrl}" alt="${_esc(item.nom || item.titre || '')}">` : ""}
-    <div class="ach-lb-info${item.imageUrl ? "" : " is-empty"}">
-      <div class="ach-lb-cat" style="background:${cat.glow};border-color:${cat.line};color:${cat.color}">${cat.emoji} ${cat.label}</div>
-      <div class="ach-lb-title">${_esc(item.titre || 'Haut-Fait')}</div>
-      ${item.description ? `<div class="ach-lb-desc">${_esc(item.description)}</div>` : ''}
-      ${_missionLinkHtml(item, 'ach-lb-mission')}
-      ${contribsHtml}
+    <div class="ach-lb-frame" style="--c:${cat.color};--c-glow:${cat.glow};--c-line:${cat.line}">
+      <div class="ach-lb-media${item.imageUrl ? '' : ' is-empty'}">
+        ${item.imageUrl
+          ? `<img class="ach-lb-image-rich" src="${item.imageUrl}" alt="${_esc(item.nom || item.titre || '')}">`
+          : `<div class="ach-lb-empty-rich">${item.emoji || cat.emoji}</div>`}
+      </div>
+      <aside class="ach-lb-info${item.imageUrl ? '' : ' is-empty'}">
+        <div class="ach-lb-cat" style="background:${cat.glow};border-color:${cat.line};color:${cat.color}">${cat.emoji} ${cat.label}</div>
+        <div class="ach-lb-title">${_esc(item.titre || 'Haut-Fait')}</div>
+        <div class="ach-lb-meta-line">
+          ${dateDisplay ? `<span class="ach-lb-pill">${_esc(dateDisplay)}</span>` : ''}
+          ${mission ? `<span class="ach-lb-pill">${_esc(mission.type === 'event' ? 'Evenement' : 'Mission')}</span>` : ''}
+          ${secretHtml}
+        </div>
+        ${item.description ? `<div class="ach-lb-desc">${_esc(item.description)}</div>` : ''}
+        ${_missionLinkHtml(item, 'ach-lb-mission')}
+        ${contribsHtml || '<div class="ach-lb-muted">Aucun contributeur renseigné.</div>'}
+      </aside>
     </div>
-    <button class="ach-lb-close" type="button">✕</button>
+    <button class="ach-lb-close" type="button">x</button>
   `;
 
   const close = () => { overlay.style.opacity = '0'; setTimeout(() => overlay.remove(), 160); };
   overlay.addEventListener('click', close);
+  overlay.querySelector('.ach-lb-frame')?.addEventListener('click', e => e.stopPropagation());
   overlay.querySelector('.ach-lb-close').addEventListener('click', e => { e.stopPropagation(); close(); });
   const onKey = e => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
   document.addEventListener('keydown', onKey);
