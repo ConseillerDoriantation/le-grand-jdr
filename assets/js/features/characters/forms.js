@@ -392,6 +392,19 @@ async function _advMembersSorted() {
     STATE.user.uid, // toujours pouvoir créer pour soi
   ]);
   let members = allUsers.filter(u => memberUids.has(u.id));
+  // Écarte les comptes ABSORBÉS (fusionnés via accountRelinks) puis dédoublonne
+  // par email : un même email = une même personne → un seul choix de propriétaire
+  // (évite qu'un compte fantôme, ex. « Hanna », apparaisse deux fois).
+  const absorbed = new Set(Object.keys(adv?.accountRelinks || {}));
+  const seenEmail = new Set();
+  members = members.filter(u => {
+    if (absorbed.has(u.id)) return false;
+    const email = String(u.email || '').trim().toLowerCase();
+    if (!email) return true;
+    if (seenEmail.has(email)) return false;
+    seenEmail.add(email);
+    return true;
+  });
   if (!members.length) members = [{ id: STATE.user.uid, pseudo: STATE.profile?.pseudo || 'Moi' }];
   const selfId = STATE.user.uid;
   members.sort((a, b) =>

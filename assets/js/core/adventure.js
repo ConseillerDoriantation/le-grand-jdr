@@ -141,9 +141,15 @@ export async function repairCurrentUserAdventureLinks(adventures = []) {
     let cur = adv;
 
     // 1. Auto-rattachement : email invité mais uid pas encore dans accessList.
+    // EXCEPTION : un uid ABSORBÉ (déjà fusionné vers un autre compte via
+    // accountRelinks) ne doit JAMAIS se ré-inscrire — sinon le compte fantôme
+    // ressuscite à chaque connexion et le MJ doit refaire la fusion en boucle.
+    // Ce login-là doit rester "hors aventure" (la vraie correction = 1 seul uid
+    // par email côté Firebase, ou reconnexion avec la méthode conservée).
     const accessEmails = cur.accessEmails || [];
+    const isAbsorbed = Boolean((cur.accountRelinks || {})[uid]);
     const hasEmailAccess = emailKeys.some(email => accessEmails.includes(email));
-    if (hasEmailAccess && !(cur.accessList || []).includes(uid)) {
+    if (!isAbsorbed && hasEmailAccess && !(cur.accessList || []).includes(uid)) {
       const accessList = _uniq([...(cur.accessList || []), uid]);
       const players = _uniq([...(cur.players || []), uid]);
       try {

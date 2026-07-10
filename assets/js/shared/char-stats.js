@@ -398,3 +398,15 @@ export function getMyCharacters(chars = [], uid = '') {
   if (!uid) return [];
   return sortCharactersForDisplay((chars || []).filter(c => c?.uid === uid));
 }
+
+/**
+ * Réordonne une liste de personnages (supposée déjà filtrée sur un joueur) pour
+ * placer le FAVORI (isDefault) en tête, le reste en ordre d'affichage habituel.
+ * Sert les sélecteurs où le favori doit être proposé/sélectionné en priorité
+ * (mini-fiche VTT, butin VTT…). N'affecte pas sortCharactersForDisplay (alpha pur).
+ */
+export function favoriteFirst(chars = []) {
+  const sorted = sortCharactersForDisplay(chars);
+  const fav = sorted.find(c => c?.isDefault);
+  return fav ? [fav, ...sorted.filter(c => c !== fav)] : sorted;
+}
