@@ -330,7 +330,8 @@ export async function _vttApplyRegeneration(srcId, targetIds, opt) {
     });
     if (!hpApplied) continue;
     // Statistiques : soin réel attribué au soigneur (proc immédiat de Régénération).
-    if (_caster?.characterId) bumpHeal(_caster.characterId, _caster.name, effectiveHeal);
+    const _healCharId = _caster?.characterId || _caster?.summonOwnerCharId || null;
+    if (_healCharId) bumpHeal(_healCharId, _caster.name, effectiveHeal);
     await addDoc(_logCol(), {
       type: 'dot-tick',
       isHeal: true,

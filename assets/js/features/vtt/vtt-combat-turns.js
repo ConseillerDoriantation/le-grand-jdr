@@ -135,7 +135,8 @@ export async function _vttNextRound() {
       _regenBuffs.forEach((d, i) => {
         const share = totalHeal > 0 ? Math.round(effectiveHeal * ((healRolls[i]?.rolled || 0) / totalHeal)) : 0;
         const hc = VS.tokens[d.casterId]?.data;
-        if (hc?.characterId && share > 0) bumpHeal(hc.characterId, hc.name, share);
+        const _hcId = hc?.characterId || hc?.summonOwnerCharId || null;
+        if (_hcId && share > 0) bumpHeal(_hcId, hc.name, share);
       });
       dotNotifs.push(`💚 ${effectiveHeal} PV Régénération → ${tgtName}`);
       await addDoc(_logCol(), {

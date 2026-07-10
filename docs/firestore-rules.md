@@ -34,7 +34,7 @@ service cloud.firestore {
     function isUserSelfUpdate(uid) {
       return isLoggedIn() &&
              uid == request.auth.uid &&
-             request.resource.data.diff(resource.data).affectedKeys().hasOnly(["email", "pseudo"]);
+             request.resource.data.diff(resource.data).affectedKeys().hasOnly(["email", "pseudo", "avatarIcon"]);
     }
 
     function hasPreviousUid(uid) {
@@ -471,6 +471,19 @@ service cloud.firestore {
       match /vttTokens/{id} {
         allow read: if inAdventure(adventureId);
         allow write: if isAdvAdmin(adventureId);
+        // Invocations JOUEUR : un joueur peut CRÉER un token de summon qui LUI
+        // appartient (ownerId == lui), rattaché à un token source qu'il contrôle
+        // (son perso). Sans ça, seuls les sorts d'invocation du MJ fonctionnent
+        // (la création de token est refusée côté joueur → l'invocation échoue).
+        // Bornage : c'est forcément un summon (pas de characterId/npcId/beastId),
+        // et le token source pointé doit lui appartenir → pas de forge de token.
+        allow create: if inAdventure(adventureId)
+          && request.resource.data.ownerId == request.auth.uid
+          && request.resource.data.characterId == null
+          && request.resource.data.npcId == null
+          && request.resource.data.beastId == null
+          && request.resource.data.summonOwnerId is string
+          && get(/databases/$(database)/documents/adventures/$(adventureId)/vttTokens/$(request.resource.data.summonOwnerId)).data.ownerId == request.auth.uid;
         // Contrôle du token : propriétaire OU délégué de contrôle.
         // `pageId`/`visible` permettent au joueur d'« Invoquer mon token » (le poser
         // sur la carte active). Les compteurs d'action et PM sont écrits lors d'une
