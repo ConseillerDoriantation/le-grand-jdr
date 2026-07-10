@@ -2671,6 +2671,20 @@ export async function _persistInvocationState(tokData) {
   } catch (_) { /* non bloquant */ }
 }
 
+// Personnage crédité par les statistiques pour un token donné : le perso lié, ou
+// — pour une INVOCATION (characterId null) — le personnage du LANCEUR
+// (summonOwnerCharId). Ainsi les dégâts/soins/actions d'une invocation comptent
+// pour son propriétaire. Le nom est résolu sur le perso propriétaire (pas le nom
+// « 🐾 … de X » de l'invocation).
+function _statsActor(t) {
+  if (t?.characterId) return { id: t.characterId, name: t.name || '' };
+  if (t?.summonOwnerCharId) {
+    const oc = VS.characters[t.summonOwnerCharId];
+    return { id: t.summonOwnerCharId, name: oc?.nom || t.name || '' };
+  }
+  return { id: null, name: t?.name || '' };
+}
+
 /**
  * Crée un token "convoqué" (sentinelle, arme invoquée, etc.) sur la page active.
  * - kind: 'sentinelle' | 'arme_invoquee'
@@ -2737,7 +2751,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
       name: `🐾 ${name} de ${ownerName}`,
       type: 'npc',
       characterId: null, npcId: null, beastId: null,
-      ownerId: src.characterId ? STATE.user?.uid || null : null,
+      ownerId: src.characterId ? (VS.characters[src.characterId]?.uid || STATE.user?.uid || null) : null,
       summonOwnerId: srcId,
       summonOwnerCharId: src.characterId || null,
       summonKind: 'invocation',
@@ -2765,7 +2779,13 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
       createdAt: serverTimestamp(),
     };
     const ref = doc(_toksCol());
-    await setDoc(ref, tokenData).catch(() => {});
+    try {
+      await setDoc(ref, tokenData);
+    } catch (e) {
+      console.error('[vtt] création invocation refusée', e);
+      showNotif("Invocation impossible — mets à jour les règles Firestore (création de token par un joueur).", 'error');
+      return null;
+    }
     return { id: ref.id, ...tokenData };
   }
 
@@ -2801,7 +2821,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
     name: baseName,
     type: 'npc',                       // allié contrôlable
     characterId: null, npcId: null, beastId: null,
-    ownerId: src.characterId ? STATE.user?.uid || null : null,
+    ownerId: src.characterId ? (VS.characters[src.characterId]?.uid || STATE.user?.uid || null) : null,
     summonOwnerId: srcId,              // lien vers le lanceur (contrôle + cleanup)
     summonKind: kind,
     summonSortLabel: opt?.label || '',
@@ -5985,8 +6005,9 @@ async function _vttRollAttack() {
         const tgtNames = targetIds.map(tid => _live(VS.tokens[tid]?.data || {}).displayName).filter(Boolean).join(', ');
         // Stats : soin raté → compte quand même 1 sort lancé + PM (soin 0), réversible.
         const _healDelta = { chars: {} };
-        if (src.characterId) {
-          accCastDelta(_healDelta, { casterId: src.characterId, casterName: src.name, spellName: opt.label || 'Soin', pm: opt.pmCost || 0, heal: 0 });
+        const _healActor = _statsActor(src);
+        if (_healActor.id) {
+          accCastDelta(_healDelta, { casterId: _healActor.id, casterName: _healActor.name, spellName: opt.label || 'Soin', pm: opt.pmCost || 0, heal: 0 });
           applyStatsDelta(_healDelta, +1);
         }
         await addDoc(_logCol(), {
@@ -6055,8 +6076,9 @@ async function _vttRollAttack() {
       }
       // Statistiques (soin) : 1 sort lancé + PM + soin réel, réversible à l'annulation.
       const _healDelta = { chars: {} };
-      if (src.characterId) {
-        accCastDelta(_healDelta, { casterId: src.characterId, casterName: src.name, spellName: opt.label || 'Soin', pm: opt.pmCost || 0, heal: _healActual });
+      const _healActor = _statsActor(src);
+      if (_healActor.id) {
+        accCastDelta(_healDelta, { casterId: _healActor.id, casterName: _healActor.name, spellName: opt.label || 'Soin', pm: opt.pmCost || 0, heal: _healActual });
         applyStatsDelta(_healDelta, +1);
       }
 
@@ -6394,9 +6416,10 @@ async function _vttRollAttack() {
 
       // ── Statistiques de combat : accumule (écrit une fois après la boucle,
       //    stocké dans le log pour pouvoir l'annuler avec l'action) ──
+      const _atkActor = _statsActor(src);
       accAttackDelta(_statsDelta, {
-        attackerId:   src.characterId || null,
-        attackerName: src.name || '',
+        attackerId:   _atkActor.id,
+        attackerName: _atkActor.name,
         targetId:     curTgtData.characterId || null,
         targetName:   curTgtData.name || '',
         hit, crit: isCrit, fumble: isFumble,
@@ -6549,9 +6572,10 @@ async function _vttRollAttack() {
     );
 
     // ── Statistiques : cast (sort lancé + PM) puis écriture du delta ──
-    if (src.characterId && (opt.sortIdx !== undefined || (opt.pmCost || 0) > 0)) {
+    const _castActor = _statsActor(src);
+    if (_castActor.id && (opt.sortIdx !== undefined || (opt.pmCost || 0) > 0)) {
       accCastDelta(_statsDelta, {
-        casterId: src.characterId, casterName: src.name,
+        casterId: _castActor.id, casterName: _castActor.name,
         spellName: opt.sortIdx !== undefined ? (opt.label || 'Sort') : null,
         pm: opt.pmCost || 0,
         tactical: _isTacticalCast ? 1 : 0,
@@ -6560,7 +6584,7 @@ async function _vttRollAttack() {
       });
     }
     applyStatsDelta(_statsDelta, +1);
-    if (src.characterId && _maxHit > 0) bumpBiggestHit(src.characterId, src.name, _maxHit);
+    if (_castActor.id && _maxHit > 0) bumpBiggestHit(_castActor.id, _castActor.name, _maxHit);
 
     // ── Un seul message dans le log ────────────────────────────────────
     // Strip _data (référence token interne, non sérialisable Firestore)
