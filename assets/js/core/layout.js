@@ -7,6 +7,7 @@ import { navigate } from './navigation.js';
 import { appSplashHtml, _esc } from '../shared/html.js';
 import { CLOUDINARY_ENABLED } from '../shared/upload-cloudinary.js';
 import { isToggleable, isFeatureEnabled } from '../shared/features.js';
+import { avatarSrcOf } from '../shared/avatar.js';
 
 // Masque le splash de boot dès qu'un écran principal est prêt à s'afficher.
 function _hideBootSplash() {
@@ -115,42 +116,7 @@ function _initSidebarExpansion() {
   const sidebar = document.getElementById('sidebar');
   if (!sidebar || sidebar.dataset.expandBound) return;
   sidebar.dataset.expandBound = '1';
-
-  let openTimer = null;
-  let closeTimer = null;
-  const canHover = () => window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-  const clearTimers = () => {
-    clearTimeout(openTimer);
-    clearTimeout(closeTimer);
-    openTimer = null;
-    closeTimer = null;
-  };
-
-  sidebar.addEventListener('mouseenter', () => {
-    if (!canHover() || sidebar.classList.contains('nav-collapse')) return;
-    clearTimeout(closeTimer);
-    openTimer = setTimeout(() => {
-      sidebar.classList.add('is-expanded');
-    }, 180);
-  });
-
-  sidebar.addEventListener('mouseleave', () => {
-    clearTimeout(openTimer);
-    closeTimer = setTimeout(() => {
-      sidebar.classList.remove('is-expanded', 'nav-collapse');
-    }, 140);
-  });
-
-  sidebar.addEventListener('focusin', () => {
-    if (!canHover()) return;
-    clearTimers();
-    sidebar.classList.add('is-expanded');
-  });
-
-  sidebar.addEventListener('focusout', () => {
-    if (sidebar.contains(document.activeElement)) return;
-    closeTimer = setTimeout(() => sidebar.classList.remove('is-expanded'), 120);
-  });
+  sidebar.classList.remove('is-expanded', 'nav-collapse');
 }
 
 // ── Persistance du repli des sections sidebar ──────
@@ -297,8 +263,9 @@ function _updateSidebarProfile() {
   const pseudo = STATE.profile?.pseudo || STATE.user?.email?.split('@')[0] || '?';
 
   if (avatarEl) {
-    // Initial de l'utilisateur dans l'avatar
-    avatarEl.textContent = pseudo[0]?.toUpperCase() || '?';
+    // Toujours une image : icône choisie sinon image de base (silhouette).
+    avatarEl.innerHTML = `<img src="${_esc(avatarSrcOf(STATE.profile))}" alt="" class="sidebar-avatar-img">`;
+    avatarEl.classList.add('has-avatar-img');
     // Rendre l'avatar cliquable → page compte
     avatarEl.style.cursor = 'pointer';
     avatarEl.onclick = () => navigate('account');
@@ -308,6 +275,9 @@ function _updateSidebarProfile() {
     roleEl.style.display = STATE.isAdmin ? 'block' : 'none';
   }
 }
+
+// Re-render du profil sidebar (avatar + pseudo) après une modif côté compte.
+export function refreshSidebarProfile() { _updateSidebarProfile(); }
 
 // ── Bottom nav mobile dynamique ─────────────────
 function _updateMobileBottomNav() {
