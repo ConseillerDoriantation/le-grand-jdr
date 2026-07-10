@@ -18,7 +18,7 @@ import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js
 import { getDamageTypeById } from '../../shared/damage-types.js';
 import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, calcOr,
          computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, getMod,
-         sortCharactersForDisplay } from '../../shared/char-stats.js';
+         sortCharactersForDisplay, favoriteFirst } from '../../shared/char-stats.js';
 import { useGold } from '../../shared/economy.js';
 import { loadCollection } from '../../data/firestore.js'; // lecture recettes/boutique (couche quota)
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
@@ -1233,7 +1233,8 @@ function _renderMiniSheetImpl(uid) {
   const pres = VS.presence[uid];
   if (!uid || !pres) { panel.classList.remove('open'); panel.innerHTML = ''; return; }
 
-  const chars = sortCharactersForDisplay(Object.values(VS.characters).filter(c => c.uid === uid));
+  // Favori en tête → sélection d'office du perso favori si aucun choix explicite.
+  const chars = favoriteFirst(Object.values(VS.characters).filter(c => c.uid === uid));
   if (!chars.length) {
     panel.classList.add('open');
     panel.innerHTML = `<div class="vtt-ms-empty">Aucun personnage lié pour ${_esc(pres.pseudo)}.</div>`;

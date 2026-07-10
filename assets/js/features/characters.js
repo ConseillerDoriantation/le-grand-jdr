@@ -397,11 +397,11 @@ function _buildCharSwitchHtml(activeCharId, canEdit) {
 
   const pillsHtml = switchable.map(ch => {
     const col = _auraColor(ch.aura);
-    const titleSuffix = ch.isDefault ? ' · ★ Par défaut' : '';
+    const titleSuffix = ch.isDefault ? ' · ★ Favori' : '';
     return `<button class="char-pill${ch.id===activeCharId?' active':''}${ch.isDefault?' is-default':''}"
       data-charid="${ch.id}" data-action="selectChar" data-id="${ch.id}"
       style="--av-c:${col}" title="${_esc(ch.nom || 'Sans nom')} — Niv.${ch.niveau||1}${ch.classe?' · '+_esc(ch.classe):''}${titleSuffix}">
-      <span class="char-pill-av">${characterPortraitContent(ch)}${ch.isDefault?'<span class="char-pill-star" title="Personnage par défaut">★</span>':''}</span>
+      <span class="char-pill-av">${characterPortraitContent(ch)}${ch.isDefault?'<span class="char-pill-star" title="Personnage favori">★</span>':''}</span>
       <span class="char-pill-name">${_esc(ch.nom || 'Sans nom')}</span>
     </button>`;
   }).join('');
@@ -516,7 +516,7 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
     <div class="id-identity">
       ${canEdit?`<div class="id-actions-mini" aria-label="Actions du personnage">
         <button class="id-default-btn${c.isDefault?' is-on':''}"
-          title="${c.isDefault?"Personnage par défaut — il représente le joueur":'Définir comme personnage par défaut'}"
+          title="${c.isDefault?"Personnage favori — sélectionné d'office dans les sélecteurs et le VTT":'Mettre ce personnage en favori'}"
           data-action="_setDefaultCharacter" data-id="${c.id}">${c.isDefault?'★':'☆'}</button>
         <button title="Exporter" data-action="openCharExportMenu" data-id="${c.id}">⇩</button>
         <button class="id-del-btn" title="Supprimer ce personnage" data-action="deleteChar" data-id="${c.id}">⌫</button>
@@ -1552,8 +1552,8 @@ async function _setDefaultCharacter(charId) {
     updates.push(updateInCol('characters', charId, { isDefault: c.isDefault }));
     await Promise.all(updates);
     showNotif(c.isDefault
-      ? `★ ${c.nom || 'Personnage'} défini comme personnage par défaut`
-      : 'Personnage par défaut retiré', 'success');
+      ? `★ ${c.nom || 'Personnage'} mis en favori — sélectionné d'office`
+      : 'Favori retiré', 'success');
     // Re-render la sheet pour mettre à jour les pills et l'étoile
     if (charSession.getCurrentChar()?.id === charId) {
       renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
