@@ -205,6 +205,10 @@ function _refreshStGroupsRow(groups) {
   // Nouvelle vue par cards (modal v2)
   const list = document.getElementById('st-groups-list');
   if (list) list.innerHTML = _renderGroupCards(groups);
+  const summary = document.getElementById('st-groups-summary');
+  if (summary) summary.innerHTML = _renderMissionGroupSummary(groups);
+  const count = document.getElementById('mn-tab-count-groupes');
+  if (count) count.textContent = groups.length || '';
 }
 
 function _stGroupField(groupId, field, value) {
@@ -343,13 +347,14 @@ function _storyGroupCardHtml(g, missionId) {
 
   if (isAdmin) {
     const presentIds = new Set(parts.map(p => p.charId).filter(Boolean));
-    // Sélection des participants par portrait (plus lisible qu'un menu déroulant)
-    const addChips = sortCharactersForDisplay(allChars)
+    const addOptions = sortCharactersForDisplay(allChars)
       .filter(c => !presentIds.has(c.id))
-      .map(c => `<button type="button" class="mv-grp-addchip" data-action="_stGroupAddMember" data-id="${g.id}" data-mission="${missionId}" data-char="${_esc(c.id)}" title="Ajouter ${_esc(c.nom || '?')}${c.ownerPseudo ? ` · ${_esc(c.ownerPseudo)}` : ''}">
-          ${characterAvatarHtml(c, { size: 26, className: 'mv-avatar', border: 'none', background: 'rgba(34,195,142,.16)', color: '#22c38e' })}
-          <span class="mv-grp-addchip-name">${_esc(c.nom || '?')}</span>
-        </button>`).join('');
+      .map(c => `<button type="button" class="mv-group-addpick" data-action="_stGroupAddMember" data-id="${g.id}" data-mission="${missionId}" data-char="${_esc(c.id)}" title="Ajouter ${_esc(c.nom || '?')}${c.ownerPseudo ? ` · ${_esc(c.ownerPseudo)}` : ''}">
+          ${characterAvatarHtml(c, { size: 28, className: 'mv-avatar', border: 'none', background: 'rgba(34,195,142,.16)', color: '#22c38e' })}
+          <span class="mv-group-addpick-name">${_esc(c.nom || '?')}</span>
+          ${c.ownerPseudo ? `<small>${_esc(c.ownerPseudo)}</small>` : ''}
+        </button>`)
+      .join('');
     const dc = (field, extra = '') => `data-change="_stGroupFieldSave" data-id="${g.id}" data-mission="${missionId}" data-field="${field}" ${extra}`;
     return `<article class="mv-group mv-group--edit" data-gid="${g.id}" style="--gr-color:${o.color}">
       <header class="mv-group-head">
@@ -366,8 +371,10 @@ function _storyGroupCardHtml(g, missionId) {
       </div>
       <div class="mv-group-bar"><div class="mv-group-bar-fill" style="width:${gr}%"></div></div>
       <div class="mv-group-members">${membersHtml}</div>
-      ${addChips ? `<div class="mv-group-addlabel">＋ Assigner un personnage</div>
-      <div class="mv-group-addgrid">${addChips}</div>` : ''}
+      ${addOptions ? `<details class="mv-group-addpicker">
+        <summary>＋ Ajouter un personnage</summary>
+        <div class="mv-group-addpicker-list">${addOptions}</div>
+      </details>` : ''}
       <textarea class="mv-group-notesinp" rows="2" placeholder="Notes de réussite (une par ligne)…" ${dc('notesReussite')}>${_esc(g.notesReussite || '')}</textarea>
     </article>`;
   }
@@ -695,7 +702,9 @@ function _initMissionModalUI(item) {
 function _renderGroupCards(groups) {
   if (!groups.length) {
     return `<div class="st-groups-empty">
-      Aucun groupe. Crée-en un pour rattacher des personnages.
+      <span class="st-groups-empty-icon">👥</span>
+      <strong>Aucun groupe pour cette mission</strong>
+      <span>Crée un groupe pour rattacher les personnages et suivre leur réussite séparément.</span>
     </div>`;
   }
   const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
@@ -707,9 +716,16 @@ function _renderGroupCards(groups) {
     const notes = g.notesReussite || '';
     const reusVal = parseInt(g.reussite) || 0;
     const reusColor = reusVal>=80 ? '#22c38e' : reusVal>=40 ? '#e8b84b' : reusVal>0 ? '#ff8a4c' : 'var(--text-dim)';
-    return `<div class="st-group-card">
+    const outcome = groupOutcome({ ...g, reussite: reusVal });
+    return `<div class="st-group-card" style="--grp-c:${outcome.color}">
       <div class="st-group-card-head">
-        <div class="st-group-card-title">${_esc(g.nom)}</div>
+        <div class="st-group-card-title-wrap">
+          <div class="st-group-card-title">${_esc(g.nom)}</div>
+          <div class="st-group-card-meta">
+            <span>${membres.length} membre${membres.length > 1 ? 's' : ''}</span>
+            <span style="color:${outcome.color}">${outcome.icon} ${outcome.label}</span>
+          </div>
+        </div>
         <div class="st-group-card-actions">
           <button type="button" class="st-icon-btn" title="Modifier" data-action="_stEditGroup" data-id="${g.id}">✎</button>
           <button type="button" class="st-icon-btn st-icon-btn--danger" title="Supprimer" data-action="_stDeleteGroup" data-id="${g.id}">🗑️</button>
@@ -723,6 +739,9 @@ function _renderGroupCards(groups) {
             <span class="st-group-member-name">${_esc(c.nom||'')}</span>
           </div>`;
         }).join('') : '<span class="st-group-empty-members">Aucun membre — édite le groupe pour en ajouter.</span>'}
+      </div>
+      <div class="st-group-progress" title="Réussite du groupe">
+        <div class="st-group-progress-fill" style="width:${Math.max(0, Math.min(100, reusVal))}%;background:${reusColor}"></div>
       </div>
       <div class="st-group-card-fields">
         <label class="st-group-field">
@@ -747,6 +766,36 @@ function _renderGroupCards(groups) {
       </div>
     </div>`;
   }).join('');
+}
+
+function _renderMissionGroupSummary(groups) {
+  const chars = sortCharactersForDisplay(STATE.characters || []);
+  const selected = new Set(groups.flatMap(g => Array.isArray(g.membres) ? g.membres : []));
+  const reussites = groups
+    .map(g => parseInt(g.reussite))
+    .filter(Number.isFinite);
+  const avg = reussites.length ? Math.round(reussites.reduce((a, b) => a + b, 0) / reussites.length) : 0;
+  const rewards = groups.filter(g => (g.recompense || '').trim()).length;
+  const unassigned = Math.max(0, chars.length - selected.size);
+  return `<div class="st-groups-summary">
+    <div class="st-groups-summary-card">
+      <span class="st-groups-summary-k">Groupes</span>
+      <strong>${groups.length}</strong>
+    </div>
+    <div class="st-groups-summary-card">
+      <span class="st-groups-summary-k">Personnages</span>
+      <strong>${selected.size}</strong>
+      ${unassigned ? `<em>${unassigned} non assigné${unassigned > 1 ? 's' : ''}</em>` : ''}
+    </div>
+    <div class="st-groups-summary-card">
+      <span class="st-groups-summary-k">Réussite moy.</span>
+      <strong>${avg}<small>%</small></strong>
+    </div>
+    <div class="st-groups-summary-card">
+      <span class="st-groups-summary-k">Récompenses</span>
+      <strong>${rewards}</strong>
+    </div>
+  </div>`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1845,6 +1894,12 @@ async function openStoryDetail(id) {
       style: `--col:${col}`,
     });
   };
+  const avgGroupSuccess = groups.length
+    ? Math.round(groups.reduce((sum, g) => sum + (parseInt(g.reussite) || 0), 0) / groups.length)
+    : 0;
+  const rewardedGroups = groups.filter(g => (g.recompense || '').trim()).length;
+  const synthProgress = groups.length ? avgGroupSuccess : prog;
+  const synthColor = groups.length ? groupOutcome({ reussite: avgGroupSuccess }).color : st.color;
 
   openModal('', `
   <div class="mv-shell">
@@ -1902,6 +1957,8 @@ async function openStoryDetail(id) {
 
     <!-- ── Body : sections ────────────────────────────────────── -->
     <div class="mv-body">
+      <div class="mv-layout">
+        <main class="mv-main">
 
       <!-- Récit -->
       ${item.description ? `
@@ -1928,6 +1985,41 @@ async function openStoryDetail(id) {
           ${groups.map(g => _storyGroupCardHtml(g, item.id)).join('')}
         </div>` : `<div class="mv-empty"><span>👥</span><span>${STATE.isAdmin ? 'Aucun groupe. Crée-en un pour que les joueurs le rejoignent.' : 'Aucun groupe ouvert pour cette mission pour le moment.'}</span></div>`}
       </section>`}
+
+        </main>
+
+        <aside class="mv-side">
+          <section class="mv-side-card">
+            <div class="mv-side-title">Synthèse</div>
+            <div class="mv-side-progress" style="--mv-prog:${synthColor}">
+              <span>${synthProgress}<small>%</small></span>
+              <div><i style="width:${synthProgress}%"></i></div>
+            </div>
+            <div class="mv-side-grid">
+              <span><b>${groups.length}</b><small>groupes</small></span>
+              <span><b>${totalMembers}</b><small>persos</small></span>
+              <span><b>${avgGroupSuccess}</b><small>réussite moy.</small></span>
+              <span><b>${rewardedGroups}</b><small>récompenses</small></span>
+            </div>
+          </section>
+
+          <section class="mv-side-card">
+            <div class="mv-side-title">Repères</div>
+            <dl class="mv-side-list">
+              <div><dt>Statut</dt><dd style="color:${st.color}">${st.icon} ${_esc(item.statut || 'En attente')}</dd></div>
+              ${item.axe ? `<div><dt>Axe</dt><dd style="color:${axeCol}">● ${_esc(item.axe)}</dd></div>` : ''}
+              ${item.date ? `<div><dt>Date</dt><dd>${_esc(item.date)}</dd></div>` : ''}
+              ${item.lieu ? `<div><dt>Lieu</dt><dd>${_esc(item.lieu)}</dd></div>` : ''}
+              <div><dt>Visibilité</dt><dd>${item.visibleJoueurs === false ? 'MJ uniquement' : 'Joueurs'}</dd></div>
+            </dl>
+          </section>
+
+          ${STATE.isAdmin ? `<section class="mv-side-card mv-side-card--actions">
+            <button class="btn btn-gold" data-action="_stEditAfterClose" data-id="${item.id}">✏️ Modifier</button>
+            <button class="btn btn-outline btn-sm" data-action="_ouvrirHistoire" data-id="${item.id}" data-titre="${_esc(item.titre||'')}" data-acte="${_esc(item.acte||'')}">✍️ Ouvrir l'histoire</button>
+          </section>` : ''}
+        </aside>
+      </div>
 
       <!-- Hauts-Faits issus de cette mission -->
       ${achItems.length ? `
@@ -2068,6 +2160,7 @@ async function openStoryModal(item = null) {
     <!-- ════ TABS ════════════════════════════════════════════════ -->
     <div class="mn-tabs" role="tablist">
       <button type="button" class="mn-tab is-active" data-tab="histoire">📜 Histoire</button>
+      <button type="button" class="mn-tab" data-tab="groupes">👥 Groupes <span class="mn-tab-count" id="mn-tab-count-groupes">${STORE.modalGroupes.length || ''}</span></button>
       ${autresItems.length ? `<button type="button" class="mn-tab" data-tab="liens">↝ Liens <span class="mn-tab-count" id="mn-tab-count-liens">${(item?.liens||[]).length || ''}</span></button>` : ''}
       <button type="button" class="mn-tab" data-tab="reglages">⚙️ Réglages</button>
     </div>
@@ -2148,6 +2241,9 @@ async function openStoryModal(item = null) {
         <div class="mn-panel-intro">
           Les personnages sont rattachés à un <strong>groupe</strong>. Plusieurs groupes peuvent
           mener la même mission en parallèle, chacun avec sa propre réussite et récompense.
+        </div>
+        <div id="st-groups-summary">
+          ${_renderMissionGroupSummary(STORE.modalGroupes)}
         </div>
         <div id="st-groups-list" class="st-groups-list">
           ${_renderGroupCards(STORE.modalGroupes)}
