@@ -1105,10 +1105,10 @@ function renderCharCombatV3(c, canEdit) {
       ${traits.length?`<div class="armor-traits">${traits.map(t=>`<span class="trait">${_esc(t)}</span>`).join('')}</div>`:''}
     </div>`;
   };
-  // Rangée 1 (3 cols) + rangée 2 (3 cols)
+  // Une seule grille permet au responsive mobile de rester en 2 par 2 sans
+  // créer deux cartes orphelines (3 slots + 3 slots).
   const armorRows = `
-    <div class="armor-grid">${armorSlotsRow1.map(renderArmor).join('')}</div>
-    <div class="armor-grid" style="margin-top:8px">${armorSlotsRow2.map(renderArmor).join('')}</div>`;
+    <div class="armor-grid armor-grid--equipment">${[...armorSlotsRow1, ...armorSlotsRow2].map(renderArmor).join('')}</div>`;
 
   // Set bonus — actif UNIQUEMENT si Tête + Torse + Bottes du même type (Légère / Intermédiaire / Lourde)
   // Rendu compacté : un badge dans l'en-tête de la section (le type de chaque
