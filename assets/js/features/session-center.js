@@ -62,10 +62,12 @@ function _myUidAliases() {
 }
 
 function _groupName(group = {}) {
+  group = group || {};
   return (group.titre || group.nom || group.name || '').trim() || 'Groupe sans nom';
 }
 
 function _missionName(mission = {}, fallback = '') {
+  mission = mission || {};
   return (mission.titre || mission.nom || fallback || '').trim() || 'Mission non reliée';
 }
 
@@ -84,8 +86,8 @@ function _visibleToCurrentUser(raw = {}, group = null) {
 }
 
 function _normalizeSessions({ agendaDoc, stats, quests, story }) {
-  const questById = new Map((quests || []).map(q => [q.id, q]));
-  const missionById = new Map((story || []).map(m => [m.id, m]));
+  const questById = new Map((quests || []).filter(q => q?.id).map(q => [q.id, q]));
+  const missionById = new Map((story || []).filter(m => m?.id).map(m => [m.id, m]));
   const map = new Map();
   const agendaSessions = Array.isArray(agendaDoc?.sessions)
     ? agendaDoc.sessions.filter(Boolean)
