@@ -19,7 +19,7 @@ import {
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { refreshSidebarProfile }  from '../core/layout.js';
-import { avatarSrcOf }            from '../shared/avatar.js';
+import { avatarSrcOf, resolveAvatarUrl } from '../shared/avatar.js';
 import { STATE, setProfile }     from '../core/state.js';
 import PAGES                     from './pages.js';
 import { registerActions }        from '../core/actions.js';
@@ -225,7 +225,7 @@ async function openAvatarPicker() {
     ? `<div class="avatar-grid">${catalog.map(ic => `
         <button class="avatar-opt${cur === ic.url ? ' is-sel' : ''}" data-action="chooseAvatar"
           data-url="${_esc(ic.url)}" title="${_esc(ic.label || '')}">
-          <img src="${_esc(ic.url)}" alt="${_esc(ic.label || '')}" loading="lazy">
+          <img src="${_esc(resolveAvatarUrl(ic.url))}" alt="${_esc(ic.label || '')}" loading="lazy">
         </button>`).join('')}</div>`
     : `<div class="acc-avatar-empty">Aucun avatar disponible pour l'instant.${STATE.isAdmin ? ' Ajoutes-en via « Gérer les avatars ».' : ''}</div>`;
 
@@ -266,7 +266,7 @@ function _renderAvatarManager(catalog) {
   const rows = catalog.length
     ? catalog.map((ic, i) => `
       <div class="avatar-mng-row">
-        <img src="${_esc(ic.url)}" alt="" class="avatar-mng-thumb" loading="lazy">
+        <img src="${_esc(resolveAvatarUrl(ic.url))}" alt="" class="avatar-mng-thumb" loading="lazy">
         <div class="avatar-mng-meta">
           <div class="avatar-mng-lbl">${_esc(ic.label || '—')}</div>
           <div class="avatar-mng-url">${_esc(ic.url)}</div>
