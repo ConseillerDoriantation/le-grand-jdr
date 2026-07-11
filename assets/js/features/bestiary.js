@@ -1,8 +1,8 @@
-// ══════════════════════════════════════════════════════════════════════════════
-// BESTIARY.JS — Le Bestiaire
-// ✓ Admin : CRUD créatures, image+crop, attaques/traits/butins dynamiques
-// ✓ Joueur : galerie + suivi personnel (PV/PM live, notes)
-// ══════════════════════════════════════════════════════════════════════════════
+﻿// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// BESTIARY.JS â€” Le Bestiaire
+// âœ“ Admin : CRUD crÃ©atures, image+crop, attaques/traits/butins dynamiques
+// âœ“ Joueur : galerie + suivi personnel (PV/PM live, notes)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 import { loadCollection, getCachedCollection, loadChars, addToCol, updateInCol, getDocData, saveDoc } from '../data/firestore.js';
 import { trySave, confirmDelete, tryDoc } from '../shared/crud.js';
 import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
@@ -23,31 +23,33 @@ import { makeSortable } from '../shared/sortable-helper.js';
 import { spellActionCardHtml } from '../shared/spell-action-card.js';
 import { DAMAGE_RELATIONS } from '../shared/damage-profile.js';
 
-// ══════════════════════════════════════════════════════════════════════════════
-// DÉLÉGATION D'ÉVÉNEMENTS — remplace les onclick/oninput/onchange inline
-// Pattern : <button data-bst-action="open" data-id="…">…</button>
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// DÃ‰LÃ‰GATION D'Ã‰VÃ‰NEMENTS â€” remplace les onclick/oninput/onchange inline
+// Pattern : <button data-bst-action="open" data-id="â€¦">â€¦</button>
 // + bstHandlers.open = (el) => _bstOpen(el.dataset.id)
-// Un seul listener par type d'événement, idempotent, scope module.
-// ══════════════════════════════════════════════════════════════════════════════
+// Un seul listener par type d'Ã©vÃ©nement, idempotent, scope module.
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const bstHandlers = {};
 bindScopedActions('bst', bstHandlers);
 
-// ── État local ────────────────────────────────────────────────────────────────
+// â”€â”€ Ã‰tat local â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let _bstCropper = null;
 const STORE = {
-  creatures:     [],      // liste des créatures du bestiaire actif
+  creatures:     [],      // liste des crÃ©atures du bestiaire actif
   tracker:       {},      // { [creatureId]: { pvActuel, pmActuel, notes, deductions } }
-  damageTypes:   null,    // types de dégâts (chargés au premier affichage)
+  damageTypes:   null,    // types de dÃ©gÃ¢ts (chargÃ©s au premier affichage)
   searchVal:     '',
-  filterType:    '',      // filtre par type de créature
+  filterType:    '',      // filtre par type de crÃ©ature
   filterRang:    '',      // filtre par rang (classique, elite, boss)
-  activeId:      null,    // créature ouverte dans le panneau
+  filterPrep:    '',      // filtre de preparation MJ (pret, incomplet, cache, etc.)
+  compareIds:    [],      // comparaison rapide MJ
+  activeId:      null,    // crÃ©ature ouverte dans le panneau
   bestiaireId:   'main',  // id du bestiaire actif
   currentCol:    'bestiary',
   bestiaireList: [{ id: 'main', label: 'Bestiaire principal' }],
   viewAsUid:     null,    // admin : voir le bestiaire d'un joueur
-  _authUid:      null,    // uid de la session courante — détecte un changement de compte
-  playersList:   [],      // [{ uid, pseudo }] peuplé côté admin
+  _authUid:      null,    // uid de la session courante â€” dÃ©tecte un changement de compte
+  playersList:   [],      // [{ uid, pseudo }] peuplÃ© cÃ´tÃ© admin
 };
 
 
@@ -58,7 +60,7 @@ let _bstReordering = false;
 let _pendingTargetBeastId = null;
 
 // Vue "MJ" effective : admin ET pas en train de consulter un joueur.
-// Quand l'admin bascule sur un joueur, on rend exactement comme côté joueur
+// Quand l'admin bascule sur un joueur, on rend exactement comme cÃ´tÃ© joueur
 // pour pouvoir voir/modifier ses estimations.
 function _isViewingPlayer() {
   return STATE.isAdmin && STORE.viewAsUid && STORE.viewAsUid !== STATE.user?.uid;
@@ -88,20 +90,20 @@ function _bstNextOrderIndex() {
 
 const RANG_STYLE = {
   classique: { label:'Classique', color:'#94a3b8', glow:'rgba(148,163,184,0.18)', border:'rgba(148,163,184,0.40)', bg:'rgba(148,163,184,0.10)' },
-  elite:     { label:'Élite',     color:'#e8b84b', glow:'rgba(232,184,75,0.22)',  border:'rgba(232,184,75,0.40)',  bg:'rgba(232,184,75,0.12)'  },
+  elite:     { label:'Elite',     color:'#e8b84b', glow:'rgba(232,184,75,0.22)',  border:'rgba(232,184,75,0.40)',  bg:'rgba(232,184,75,0.12)'  },
   boss:      { label:'Boss',      color:'#ff5a7e', glow:'rgba(255,90,126,0.24)',  border:'rgba(255,90,126,0.40)',  bg:'rgba(255,90,126,0.12)'  },
 };
 
-// ──────────────────────────────────────────────────────────────────────────────
-// ARMES NATURELLES + ACTIONS — métadonnées partagées avec la modal de sorts.
-// Les actions de créature utilisent EXACTEMENT le même schéma que les sorts de
-// personnage et les actions d'objet (boutique). On délègue à `editItemSpell`.
-// ──────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ARMES NATURELLES + ACTIONS â€” mÃ©tadonnÃ©es partagÃ©es avec la modal de sorts.
+// Les actions de crÃ©ature utilisent EXACTEMENT le mÃªme schÃ©ma que les sorts de
+// personnage et les actions d'objet (boutique). On dÃ©lÃ¨gue Ã  `editItemSpell`.
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const _BST_STAT_OPTIONS = [
-  { key:'none',         short:'—',   label:'Aucun' },
+  { key:'none',         short:'-',   label:'Aucun' },
   { key:'force',        short:'For', label:'Force' },
-  { key:'dexterite',    short:'Dex', label:'Dextérité' },
+  { key:'dexterite',    short:'Dex', label:'Dexterite' },
   { key:'intelligence', short:'Int', label:'Intelligence' },
   { key:'sagesse',      short:'Sag', label:'Sagesse' },
   { key:'constitution', short:'Con', label:'Constitution' },
@@ -110,7 +112,7 @@ const _BST_STAT_OPTIONS = [
 
 function _bstUuid() { return 'a_' + Math.random().toString(36).slice(2, 9); }
 
-// ── Cache des objets boutique (pour le picker de butins) ─────────────────────
+// â”€â”€ Cache des objets boutique (pour le picker de butins) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let _bstShopItemsCache = null;
 let _bstShopItemsLoading = null;
 async function _bstEnsureShopItems() {
@@ -127,7 +129,7 @@ async function _bstEnsureShopItems() {
   return _bstShopItemsLoading;
 }
 
-/** Re-render des selects de butins (après chargement async des items). */
+/** Re-render des selects de butins (aprÃ¨s chargement async des items). */
 function _bstRefreshButinSelects(cid) {
   const host = document.getElementById(`bst-p-butins-${cid}`);
   if (!host) return;
@@ -136,8 +138,8 @@ function _bstRefreshButinSelects(cid) {
   host.innerHTML = butins.map((b,i) => _panelButinRow(b, cid, i)).join('');
 }
 
-/** Convertit une créature en "char-like" object utilisable par la modal de sort.
- *  L'arme naturelle choisie est placée sur l'emplacement "Main principale". */
+/** Convertit une crÃ©ature en "char-like" object utilisable par la modal de sort.
+ *  L'arme naturelle choisie est placÃ©e sur l'emplacement "Main principale". */
 function _bstCreatureToChar(c, armeId) {
   const armes = Array.isArray(c?.armesNaturelles) ? c.armesNaturelles : [];
   const arme  = armes.find(a => a.id === armeId) || armes[0] || null;
@@ -151,9 +153,9 @@ function _bstCreatureToChar(c, armeId) {
   };
   const equipement = {};
   if (arme) {
-    // Bonus fixes : on les place dans la formule de dégâts s'ils existent et
-    // qu'aucun bonus n'est déjà collé à la fin de la formule. Ça permet à
-    // _calcSortDegats de les "ramasser" comme un bonus de maîtrise.
+    // Bonus fixes : on les place dans la formule de dÃ©gÃ¢ts s'ils existent et
+    // qu'aucun bonus n'est dÃ©jÃ  collÃ© Ã  la fin de la formule. Ã‡a permet Ã 
+    // _calcSortDegats de les "ramasser" comme un bonus de maÃ®trise.
     let degats = arme.degats || '';
     const flatD = parseInt(arme.degatsFlat) || 0;
     if (flatD && !/[+\-]\s*\d+\s*$/.test(degats)) {
@@ -176,7 +178,7 @@ function _bstCreatureToChar(c, armeId) {
   }
   return {
     id:        c?.id || '',
-    nom:       c?.nom || 'Créature',
+    nom:       c?.nom || 'Creature',
     photoURL:  c?.imageUrl || '',
     stats,
     statsBonus: {},
@@ -185,10 +187,10 @@ function _bstCreatureToChar(c, armeId) {
   };
 }
 
-// Cache local des actions de la créature en cours d'édition (admin)
+// Cache local des actions de la crÃ©ature en cours d'Ã©dition (admin)
 let _bstActionsCache = [];
 let _bstActionsCreatureId = null;
-let _bstActionsArmeIdCtx  = null; // arme naturelle utilisée pour le calcul
+let _bstActionsArmeIdCtx  = null; // arme naturelle utilisÃ©e pour le calcul
 
 function _bstActionsCacheLoad(creatureId, actions) {
   _bstActionsCreatureId = creatureId || null;
@@ -196,9 +198,9 @@ function _bstActionsCacheLoad(creatureId, actions) {
 }
 
 async function _bstEnsureSpellsModule() {
-  // L'éditeur de sorts est stylé par characters.css (+ shop.css pour le sous-modal
-  // matrices) — chargés en lazy uniquement sur la page Perso. Ouvert depuis le
-  // bestiaire sans y être passé → CSS absente = modale non stylée. On la charge ici.
+  // L'Ã©diteur de sorts est stylÃ© par characters.css (+ shop.css pour le sous-modal
+  // matrices) â€” chargÃ©s en lazy uniquement sur la page Perso. Ouvert depuis le
+  // bestiaire sans y Ãªtre passÃ© â†’ CSS absente = modale non stylÃ©e. On la charge ici.
   const [mod] = await Promise.all([
     import('./characters/spells.js'),
     _ensureFeatureCss('characters'),
@@ -230,7 +232,7 @@ function _bstRenderActionCard(act, idx) {
 
 function _bstRenderActionsList() {
   if (!_bstActionsCache.length) {
-    return `<div class="bst-actions-empty">Aucune action — clique sur ＋ Ajouter pour ouvrir l'éditeur de sort.</div>`;
+    return `<div class="bst-actions-empty">Aucune action - clique sur + Ajouter pour ouvrir l'editeur de sort.</div>`;
   }
   return _bstActionsCache.map((a,i) => _bstRenderActionCard(a,i)).join('');
 }
@@ -241,7 +243,7 @@ async function _bstAddAction() {
   const c = STORE.creatures.find(x => x.id === _bstActionsCreatureId);
   if (!c) return;
   const charForCalc = _bstCreatureToChar(c, _bstActionsArmeIdCtx);
-  const fakeItem = { actions: _bstActionsCache, nom: c.nom || 'Créature' };
+  const fakeItem = { actions: _bstActionsCache, nom: c.nom || 'Creature' };
   mod.addItemSpell(fakeItem, async (updatedItem) => {
     _bstActionsCache = Array.isArray(updatedItem?.actions) ? updatedItem.actions.map(a => ({...a})) : [];
     _bstActionsPersist();
@@ -255,7 +257,7 @@ async function _bstEditAction(idx) {
   const c = STORE.creatures.find(x => x.id === _bstActionsCreatureId);
   if (!c) return;
   const charForCalc = _bstCreatureToChar(c, _bstActionsArmeIdCtx);
-  const fakeItem = { actions: _bstActionsCache, nom: c.nom || 'Créature' };
+  const fakeItem = { actions: _bstActionsCache, nom: c.nom || 'Creature' };
   mod.editItemSpell(fakeItem, idx, async (updatedItem) => {
     _bstActionsCache = Array.isArray(updatedItem?.actions) ? updatedItem.actions.map(a => ({...a})) : [];
     _bstActionsPersist();
@@ -271,36 +273,32 @@ async function _bstRemoveAction(idx) {
   _bstRefreshActionsHost();
 }
 
-// ── Armes naturelles : édition inline ─────────────────────────────────────────
+// â”€â”€ Armes naturelles : Ã©dition inline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _bstRenderArmeRow(a = {}, cid, idx) {
   const optsHTML = (sel) => _BST_STAT_OPTIONS.map(s =>
     `<option value="${s.key}"${sel===s.key?' selected':''}>${s.short}</option>`).join('');
-  // Note : tous les inputs/selects sauvent via la délégation `saveArmes`. L'attribut
-  // `data-bst-on` filtre l'event (sinon le click de focus déclencherait aussi).
   const inputAttrs  = `data-bst-action="saveArmes" data-bst-on="input"  data-id="${cid}"`;
   const selectAttrs = `data-bst-action="saveArmes" data-bst-on="change" data-id="${cid}"`;
   return `<div class="bst-p-row bst-arme-card" data-arme-id="${a.id || ''}">
-    <!-- Ligne 1 : nom · formule de dés · supprimer -->
     <div class="bst-arme-head">
-      <input class="bst-p-input bst-arme-nom" data-f="nom" placeholder="Nom (Griffes, Morsure…)"
+      <input class="bst-p-input bst-arme-nom" data-f="nom" placeholder="Nom (Griffes, Morsure...)"
         value="${_esc(a.nom||'')}" ${inputAttrs}>
-      <input class="bst-p-input bst-arme-dice" data-f="degats" placeholder="⚔️ 1d8+2"
+      <input class="bst-p-input bst-arme-dice" data-f="degats" placeholder="1d8+2"
         value="${_esc(a.degats||'')}" ${inputAttrs}>
-      <button class="bst-p-row-remove" data-bst-action="removeArme" data-id="${cid}" title="Retirer">✕</button>
+      <button class="bst-p-row-remove" data-bst-action="removeArme" data-id="${cid}" title="Retirer">x</button>
     </div>
 
-    <!-- Ligne 2 : groupes Dégâts / Toucher (stat + bonus côte à côte) -->
     <div class="bst-arme-duo">
       <div class="bst-arme-grp">
-        <div class="bst-arme-grp-hd">⚔️ Dégâts</div>
+        <div class="bst-arme-grp-hd">Degats</div>
         <div class="bst-arme-grp-fields">
-          <select class="bst-p-input" data-f="degatsStat" title="Statistique de dégâts" ${selectAttrs}>${optsHTML(a.degatsStat || 'force')}</select>
+          <select class="bst-p-input" data-f="degatsStat" title="Statistique de degats" ${selectAttrs}>${optsHTML(a.degatsStat || 'force')}</select>
           <input class="bst-p-input" data-f="degatsFlat" type="number" placeholder="+0"
-            title="Bonus fixe aux dégâts" value="${a.degatsFlat ?? ''}" ${inputAttrs}>
+            title="Bonus fixe aux degats" value="${a.degatsFlat ?? ''}" ${inputAttrs}>
         </div>
       </div>
       <div class="bst-arme-grp">
-        <div class="bst-arme-grp-hd">🎯 Toucher</div>
+        <div class="bst-arme-grp-hd">Toucher</div>
         <div class="bst-arme-grp-fields">
           <select class="bst-p-input" data-f="toucherStat" title="Statistique de toucher" ${selectAttrs} ${a.toucherAuto ? 'disabled' : ''}>${optsHTML(a.toucherStat || a.degatsStat || 'force')}</select>
           <input class="bst-p-input" data-f="toucherFlat" type="number" placeholder="+0"
@@ -309,40 +307,36 @@ function _bstRenderArmeRow(a = {}, cid, idx) {
       </div>
     </div>
 
-    <!-- Toucher automatique : pleine largeur sous le duo Dégâts/Toucher -->
-    <label class="bst-arme-auto${a.toucherAuto ? ' is-on' : ''}" title="L'attaque touche automatiquement (aucun jet de toucher). Les dégâts restent normaux.">
+    <label class="bst-arme-auto${a.toucherAuto ? ' is-on' : ''}" title="L'attaque touche automatiquement. Les degats restent normaux.">
       <input type="checkbox" data-f="toucherAuto" ${a.toucherAuto ? 'checked' : ''} ${selectAttrs}>
-      <span>🎯 Toucher automatique</span>
-      <span class="bst-arme-auto-hint">— touche toujours, dégâts normaux</span>
+      <span>Toucher automatique</span>
+      <span class="bst-arme-auto-hint">- touche toujours, degats normaux</span>
     </label>
 
-    <!-- Ligne 3 : portée · format · type de dégâts -->
     <div class="bst-arme-trio">
-      <label class="bst-p-mini">Portée
+      <label class="bst-p-mini">Portee
         <input class="bst-p-input" data-f="portee" placeholder="Contact, 9m"
           value="${_esc(a.portee||'')}" ${inputAttrs}>
       </label>
       <label class="bst-p-mini">Format
         <select class="bst-p-input" data-f="format" ${selectAttrs}>
-          <option value="physique"${(a.format||'physique')==='physique'?' selected':''}>⚔️ Physique</option>
-          <option value="magique"${a.format==='magique'?' selected':''}>✨ Magique</option>
+          <option value="physique"${(a.format||'physique')==='physique'?' selected':''}>Physique</option>
+          <option value="magique"${a.format==='magique'?' selected':''}>Magique</option>
         </select>
       </label>
-      <label class="bst-p-mini" title="Type de dégâts (défini dans la console MJ). Un type magique applique ses règles (ex : ½ dégâts) côté VTT.">Type de dégâts
+      <label class="bst-p-mini" title="Type de degats defini dans la console MJ.">Type de degats
         <select class="bst-p-input" data-f="damageTypeId" ${selectAttrs}>
           ${(STORE.damageTypes || []).map(t =>
-            `<option value="${t.id}"${(a.damageTypeId||'physique')===t.id?' selected':''}>${t.icon||''} ${_esc(t.label)}</option>`).join('')}
+            `<option value="${t.id}"${(a.damageTypeId||'physique')===t.id?' selected':''}>${_esc(t.label)}</option>`).join('')}
         </select>
       </label>
     </div>
 
-    <!-- Ligne 4 : effet complémentaire -->
     <input class="bst-p-input bst-arme-info" data-f="info"
-      placeholder="ℹ️ Effet complémentaire — ex : « Si touche, applique Poison »"
+      placeholder="Effet complementaire - ex : Si touche, applique Poison"
       value="${_esc(a.info||'')}" ${inputAttrs}>
   </div>`;
 }
-
 function _bstAddArme(cid) {
   const host = document.getElementById(`bst-p-armes-${cid}`);
   if (!host) return;
@@ -385,7 +379,7 @@ function _bstSaveArmes(cid) {
   const c = STORE.creatures.find(x => x.id === cid);
   if (c) c.armesNaturelles = armes;
   _bstQueueSave(cid, { armesNaturelles: armes });
-  // Si l'arme contextuelle a disparu, on prend la première dispo
+  // Si l'arme contextuelle a disparu, on prend la premiÃ¨re dispo
   if (cid === _bstActionsCreatureId && !armes.find(a => a.id === _bstActionsArmeIdCtx)) {
     _bstActionsArmeIdCtx = armes[0]?.id || null;
   }
@@ -421,19 +415,52 @@ function _beastSearchText(c = {}) {
   ].filter(v => v !== undefined && v !== null && v !== '').join(' '));
 }
 
-function _beastMatchesFilters(c, { search = STORE.searchVal, type = STORE.filterType, rang = STORE.filterRang } = {}) {
+function _beastAlerts(c) {
+  const alerts = [];
+  const hasActions = Array.isArray(c.actions) && c.actions.length > 0;
+  const hasLoot = Array.isArray(c.butins) && c.butins.length > 0;
+  if (!String(c.nom || '').trim() || /^nouvelle cr/i.test(String(c.nom || ''))) alerts.push({ key:'name', label:'nom', level:'hard' });
+  if (!(parseInt(c.pvMax) > 0)) alerts.push({ key:'pv', label:'PV', level:'hard' });
+  if (!(parseInt(c.ca) > 0)) alerts.push({ key:'ca', label:'CA', level:'hard' });
+  if (!hasActions) alerts.push({ key:'actions', label:'action', level:'hard' });
+  if (!c.imageUrl) alerts.push({ key:'image', label:'image', level:'soft' });
+  if (!hasLoot) alerts.push({ key:'loot', label:'butin', level:'soft' });
+  return alerts;
+}
+
+function _beastHardAlerts(c) {
+  return _beastAlerts(c).filter(a => a.level === 'hard');
+}
+
+function _beastIsReady(c) {
+  return _beastHardAlerts(c).length === 0;
+}
+
+function _beastMatchesPrep(c, prep = STORE.filterPrep) {
+  switch (prep) {
+    case 'ready': return _beastIsReady(c);
+    case 'incomplete': return _beastAlerts(c).length > 0;
+    case 'hidden': return !!c.hidden;
+    case 'visible': return !c.hidden;
+    case 'loot': return Array.isArray(c.butins) && c.butins.length > 0;
+    case 'noAction': return !(Array.isArray(c.actions) && c.actions.length > 0);
+    default: return true;
+  }
+}
+
+function _beastMatchesFilters(c, { search = STORE.searchVal, type = STORE.filterType, rang = STORE.filterRang, prep = STORE.filterPrep } = {}) {
   const q = _norm(search);
   const fType = _norm(type);
   const fRang = _norm(rang);
   const matchSearch = !q || _searchIncludes(_beastSearchText(c), search);
   const matchType = !fType || _norm(c.type) === fType;
   const matchRang = !fRang || _norm(c.rang || 'classique') === fRang;
-  return matchSearch && matchType && matchRang;
+  return matchSearch && matchType && matchRang && _beastMatchesPrep(c, prep);
 }
 
 function _damageTypeBadge(typeId, types, color) {
   const type = (types || []).find(t => t.id === typeId);
-  const label = type ? `${type.icon||''} ${_esc(type.label)}` : _esc(typeId);
+  const label = type ? `${_esc(type.label)}` : _esc(typeId);
   return `<span style="font-size:.72rem;padding:.18rem .5rem;border-radius:999px;border:1px solid ${color};color:${color};background:${color}1a">${label}</span>`;
 }
 
@@ -442,7 +469,7 @@ function _renderRelationCard(rel, ids, types) {
   return `<div style="display:flex;flex-direction:column;gap:.35rem;padding:.5rem .6rem;
     border:1px solid ${rel.color}33;background:${rel.color}10;border-radius:10px;border-left:3px solid ${rel.color}">
     <div style="display:flex;align-items:center;gap:.4rem">
-      <span style="font-size:.9rem">${rel.icon}</span>
+      <span style="font-size:.9rem">${_esc(rel.shortLabel || '')}</span>
       <span style="font-size:.74rem;font-weight:700;color:${rel.color};letter-spacing:.02em">${rel.label}</span>
       <span style="font-size:.62rem;color:var(--text-dim);margin-left:auto">${rel.shortLabel}</span>
     </div>
@@ -459,12 +486,11 @@ function _renderDamageProfile(beast, types) {
     if (!ids.length) return null;
     const tags = ids.map(id => {
       const type = (types||[]).find(t => t.id === id);
-      const label = type ? `${type.icon||''} ${_esc(type.label)}` : _esc(id);
+      const label = type ? `${_esc(type.label)}` : _esc(id);
       return `<span class="bst-dmg-tag" style="border-color:${rel.color}55;color:${rel.color}">${label}</span>`;
     }).join('');
     return `<div class="bst-dmg-card" style="border-color:${rel.color}33;border-left-color:${rel.color}">
       <div class="bst-dmg-head">
-        <span class="bst-dmg-icon">${rel.icon}</span>
         <span class="bst-dmg-name" style="color:${rel.color}">${rel.label}</span>
         <span class="bst-dmg-rule">${rel.shortLabel}</span>
       </div>
@@ -473,12 +499,12 @@ function _renderDamageProfile(beast, types) {
   }).filter(Boolean);
   if (!cards.length) return '';
   return `<div class="bst-section">
-    <div class="bst-section-title">🛡️ Relations aux dégâts</div>
+    <div class="bst-section-title">Relations aux degats</div>
     <div class="bst-dmg-grid">${cards.join('')}</div>
   </div>`;
 }
 
-/** Mini-récap pictogrammes pour la card admin (compact). */
+/** Mini-rÃ©cap pictogrammes pour la card admin (compact). */
 function _renderDamageProfileMini(beast) {
   if (!beast) return '';
   const parts = DAMAGE_RELATIONS
@@ -492,9 +518,9 @@ function _renderDamageProfileMini(beast) {
   return `<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:.3rem">${parts.join('')}</div>`;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ÉDITION INLINE — Panneau admin (auto-save Firestore)
-// ══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// Ã‰DITION INLINE â€” Panneau admin (auto-save Firestore)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const _bstPending = {};
 let _bstSaveTimer = null;
 
@@ -520,7 +546,7 @@ function _bstQueueSave(id, patch) {
   _bstSaveTimer = setTimeout(_bstFlushSaves, 1200);
 }
 
-// Auto-save générique (texte / select)
+// Auto-save gÃ©nÃ©rique (texte / select)
 function _bstUpdate(id, field, val) { _bstQueueSave(id, { [field]: val }); }
 function _bstUpdateNum(id, field, val) { _bstQueueSave(id, { [field]: parseInt(val) || 0 }); }
 function _bstToggleHidden(id) {
@@ -529,7 +555,7 @@ function _bstToggleHidden(id) {
   const next = !c.hidden;
   c.hidden = next;
   _bstQueueSave(id, { hidden: next });
-  // Re-render panel + cartes pour refléter le badge
+  // Re-render panel + cartes pour reflÃ©ter le badge
   if (typeof _syncActivePanel === 'function') _syncActivePanel();
   if (typeof _render === 'function') _render();
 }
@@ -541,7 +567,7 @@ function _bstUpdateNom(id, val) {
     .forEach(el => el.textContent = val || '?');
 }
 
-// Caracs : sauve + recalcule le modificateur affiché
+// Caracs : sauve + recalcule le modificateur affichÃ©
 function _bstUpdateCarac(id, key, val) {
   _bstQueueSave(id, { [key]: parseInt(val) || 0 });
   const n = parseInt(val);
@@ -555,7 +581,7 @@ function _bstUpdateCarac(id, key, val) {
   if (modEl) { modEl.textContent = txt; modEl.className = `bst-carac-mod ${cls}`; }
 }
 
-// Changement de rang : sauve + met à jour cartes + panneau (couleurs + label)
+// Changement de rang : sauve + met Ã  jour cartes + panneau (couleurs + label)
 function _bstSelectRangPanel(id, rang) {
   _bstQueueSave(id, { rang });
   const rs = RANG_STYLE[rang] || RANG_STYLE.classique;
@@ -581,7 +607,7 @@ function _bstSelectRangPanel(id, rang) {
   });
 }
 
-// Toggle relation aux dégâts
+// Toggle relation aux dÃ©gÃ¢ts
 function _bstToggleDmg(id, rel, typeId) {
   const c = STORE.creatures.find(x => x.id === id);
   if (!c) return;
@@ -601,7 +627,7 @@ function _bstToggleDmg(id, rel, typeId) {
 }
 
 // Lecture + save d'un tableau dynamique (traits / butins) depuis le panneau.
-// Les attaques sont gérées via `actions` + `armesNaturelles` ailleurs.
+// Les attaques sont gÃ©rÃ©es via `actions` + `armesNaturelles` ailleurs.
 function _bstSaveArr(id, type) {
   const container = document.getElementById(`bst-p-${type}-${id}`);
   if (!container) return;
@@ -613,9 +639,9 @@ function _bstSaveArr(id, type) {
       description: row.querySelector('[data-f=desc]')?.value?.trim() || '',
     })).filter(t => t.nom || t.description);
   } else {
-    // butins : objets boutique. Préserve la dénorm (nom/image) existante du
+    // butins : objets boutique. PrÃ©serve la dÃ©norm (nom/image) existante du
     // butin pour ne pas la perdre quand l'utilisateur modifie juste qte/chance
-    // avant que le cache boutique soit chargé.
+    // avant que le cache boutique soit chargÃ©.
     const items   = _bstShopItemsCache || [];
     const creature = STORE.creatures.find(x => x.id === id);
     const prev    = Array.isArray(creature?.butins) ? creature.butins : [];
@@ -634,7 +660,7 @@ function _bstSaveArr(id, type) {
     }).filter(b => b.itemId);
   }
   _bstQueueSave(id, { [type]: arr });
-  // Met à jour le compteur en titre
+  // Met Ã  jour le compteur en titre
   const countEl = document.querySelector(`[data-bst-count="${id}-${type}"]`);
   if (countEl) countEl.textContent = arr.length;
 }
@@ -643,7 +669,7 @@ function _bstAddPanelRow(id, type) {
   const container = document.getElementById(`bst-p-${type}-${id}`);
   if (!container) return;
   // Seules les sections "traits" passent ici. Les butins ont leur propre picker,
-  // les armes naturelles et actions ont leurs handlers dédiés.
+  // les armes naturelles et actions ont leurs handlers dÃ©diÃ©s.
   if (type !== 'traits') return;
   const i = container.querySelectorAll('.bst-p-row').length;
   const tpl = document.createElement('div');
@@ -664,60 +690,60 @@ function _panelTraitRow(t = {}, id, i) {
   return `<div class="bst-p-row">
     <div class="bst-p-row-grid" style="grid-template-columns:1fr auto">
       <input class="bst-p-input" data-f="nom" placeholder="Nom du trait" value="${_esc(t.nom||'')}" ${inputAttrs}>
-      <button class="bst-p-row-remove" data-bst-action="removeRow" data-id="${id}" data-type="traits" title="Retirer">✕</button>
+      <button class="bst-p-row-remove" data-bst-action="removeRow" data-id="${id}" data-type="traits" title="Retirer">x</button>
     </div>
-    <input class="bst-p-input" data-f="desc" placeholder="Description…" value="${_esc(t.description||'')}" ${inputAttrs}>
+    <input class="bst-p-input" data-f="desc" placeholder="Description..." value="${_esc(t.description||'')}" ${inputAttrs}>
   </div>`;
 }
 
 function _panelButinRow(b = {}, id, i) {
-  // Carte compacte : pas de sélecteur — l'objet est piqué via la modal picker.
-  // Si l'item n'existe plus en boutique, on tombe sur les valeurs dénormalisées.
+  // Carte compacte : pas de sÃ©lecteur â€” l'objet est piquÃ© via la modal picker.
+  // Si l'item n'existe plus en boutique, on tombe sur les valeurs dÃ©normalisÃ©es.
   const items = _bstShopItemsCache || [];
   const ref   = b.itemId ? items.find(x => x.id === b.itemId) : null;
-  const nom   = ref?.nom   || b.nom   || '? Objet supprimé';
+  const nom   = ref?.nom   || b.nom   || 'Objet supprime';
   const image = ref?.image || b.image || '';
   const rar   = ref?.rarete || '';
   const rarColor = _bstRarColor(rar);
   const orphan = b.itemId && !ref ? true : false;
-  return `<div class="bst-p-row bst-butin-card${orphan?' is-orphan':''}" data-butin-id="${b.itemId || ''}" title="${_esc(nom)}${orphan?' (supprimé de la boutique)':''}">
+  return `<div class="bst-p-row bst-butin-card${orphan?' is-orphan':''}" data-butin-id="${b.itemId || ''}" title="${_esc(nom)}${orphan?' (supprime de la boutique)':''}">
     <span class="bst-butin-dot" style="background:${rarColor}"></span>
     ${image
       ? `<img class="bst-butin-img" src="${_esc(image)}" alt="">`
-      : `<span class="bst-butin-img bst-butin-img--empty">📦</span>`}
-    <span class="bst-butin-name">${_esc(nom)}${orphan?` <span class="bst-butin-orphan-tag">⚠</span>`:''}</span>
-    <input class="bst-p-input bst-butin-mini" data-f="qte" type="text" placeholder="1" title="Quantité"
+      : `<span class="bst-butin-img bst-butin-img--empty">?</span>`}
+    <span class="bst-butin-name">${_esc(nom)}${orphan?` <span class="bst-butin-orphan-tag">!</span>`:''}</span>
+    <input class="bst-p-input bst-butin-mini" data-f="qte" type="text" placeholder="1" title="Quantite"
       value="${_esc(b.quantite||'')}"
       data-bst-action="saveArr" data-bst-on="input" data-id="${id}" data-type="butins">
     <input class="bst-p-input bst-butin-mini" data-f="chance" type="text" placeholder="100%" title="Chance"
       value="${_esc(b.chance||'')}"
       data-bst-action="saveArr" data-bst-on="input" data-id="${id}" data-type="butins">
     <input type="hidden" data-f="itemId" value="${_esc(b.itemId||'')}">
-    <button class="bst-p-row-remove" data-bst-action="removeRow" data-id="${id}" data-type="butins" title="Retirer">✕</button>
+    <button class="bst-p-row-remove" data-bst-action="removeRow" data-id="${id}" data-type="butins" title="Retirer">x</button>
   </div>`;
 }
 
-// Couleur par rareté — délègue au composant partagé.
+// Couleur par raretÃ© â€” dÃ©lÃ¨gue au composant partagÃ©.
 const _bstRarColor = getRareteColor;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PICKER OBJET BOUTIQUE — utilise le composant partagé shared/shop-picker.js
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// PICKER OBJET BOUTIQUE â€” utilise le composant partagÃ© shared/shop-picker.js
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function _bstButinPickerOpen(creatureId) {
   if (!creatureId) return;
   const c = STORE.creatures.find(x => x.id === creatureId);
   if (!c) return;
   await openShopPicker({
-    title: '🎒 Ajouter un butin',
+    title: 'Ajouter un butin',
     modalMode: 'push',
-    hint: 'Tu peux enchaîner les ajouts sans fermer cette fenêtre.',
-    ownedBadgeTitle: 'Déjà dans le butin',
+    hint: 'Tu peux enchainer les ajouts sans fermer cette fenetre.',
+    ownedBadgeTitle: 'Deja dans le butin',
     alreadyPicked: () => new Set((c.butins || []).map(b => b.itemId).filter(Boolean)),
     onPick: (item) => {
       const butins = Array.isArray(c.butins) ? [...c.butins] : [];
       if (butins.find(b => b.itemId === item.id)) {
-        showNotif('Déjà dans le butin de cette créature', 'warning');
-        return false; // empêche l'ajout
+        showNotif('Deja dans le butin de cette creature', 'warning');
+        return false; // empÃªche l'ajout
       }
       butins.push({
         itemId:   item.id,
@@ -735,8 +761,8 @@ async function _bstButinPickerOpen(creatureId) {
   });
 }
 
-// Or lâché par la créature : nombre brut ("20") ou formule de dés ("5d4").
-// Le jet n'est pas fait ici — il l'est dans le VTT à l'envoi vers la réserve MJ.
+// Or lÃ¢chÃ© par la crÃ©ature : nombre brut ("20") ou formule de dÃ©s ("5d4").
+// Le jet n'est pas fait ici â€” il l'est dans le VTT Ã  l'envoi vers la rÃ©serve MJ.
 function _bstSaveOr(id, val) {
   const c = STORE.creatures.find(x => x.id === id);
   if (!c) return;
@@ -744,16 +770,15 @@ function _bstSaveOr(id, val) {
   _bstQueueSave(id, { or: c.or });
 }
 
-// Matrice de relations aux dégâts (panneau, version chips compacte)
+// Matrice de relations aux dÃ©gÃ¢ts (panneau, version chips compacte)
 function _renderDamageMatrixPanel(c, types) {
   return `<div class="bst-section">
-    <div class="bst-section-title">🛡️ Relations aux dégâts</div>
+    <div class="bst-section-title">Relations aux degats</div>
     <div class="bst-dmg-edit">
       ${DAMAGE_RELATIONS.map(rel => {
         const active = Array.isArray(c[rel.key]) ? c[rel.key] : [];
         return `<div class="bst-dmg-edit-row" style="border-left:3px solid ${rel.color};background:${rel.color}08">
           <div class="bst-dmg-edit-head">
-            <span class="bst-dmg-icon">${rel.icon}</span>
             <span class="bst-dmg-name" style="color:${rel.color}">${rel.label}</span>
             <span class="bst-dmg-rule">${rel.shortLabel}</span>
           </div>
@@ -764,7 +789,7 @@ function _renderDamageMatrixPanel(c, types) {
                 class="bst-dmg-chip${isActive?' active':''}"
                 style="${isActive?`color:${rel.color};border-color:${rel.color};background:${rel.color}1a`:''}"
                 data-bst-action="toggleDmg" data-id="${c.id}" data-key="${rel.key}" data-tid="${t.id}">
-                ${t.icon||''} ${_esc(t.label)}
+                ${_esc(t.label)}
               </button>`;
             }).join('')}
           </div>
@@ -775,9 +800,9 @@ function _renderDamageMatrixPanel(c, types) {
 }
 
 /**
- * Matrice unique : lignes = types de dégâts, colonnes = catégories.
- * Vue compacte qui rend les conflits (un type coché dans 2 catégories)
- * immédiatement visibles sur une même ligne.
+ * Matrice unique : lignes = types de dÃ©gÃ¢ts, colonnes = catÃ©gories.
+ * Vue compacte qui rend les conflits (un type cochÃ© dans 2 catÃ©gories)
+ * immÃ©diatement visibles sur une mÃªme ligne.
  */
 function _renderDamageTypeMatrix(beast, types) {
   const rels = DAMAGE_RELATIONS;
@@ -810,7 +835,7 @@ function _renderDamageTypeMatrix(beast, types) {
         <span style="font-size:.95rem;flex-shrink:0">${t.icon||''}</span>
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(t.label)}</span>
         <span data-bst-row-warn="${t.id}" style="display:none;margin-left:auto;font-size:.62rem;color:#f59e0b;font-weight:700"
-          title="Ce type est sélectionné dans plusieurs catégories">⚠</span>
+          title="Ce type est selectionne dans plusieurs categories">!</span>
       </div>${cells}`;
   }).join('');
 
@@ -823,7 +848,7 @@ function _renderDamageTypeMatrix(beast, types) {
   </div>`;
 }
 
-/** Met en évidence les types de dégâts cochés dans plusieurs catégories (matrice). */
+/** Met en Ã©vidence les types de dÃ©gÃ¢ts cochÃ©s dans plusieurs catÃ©gories (matrice). */
 function _bstSyncDmgConflicts() {
   const matrix = document.querySelector('[data-bst-matrix]');
   if (!matrix) return;
@@ -851,14 +876,14 @@ function _readDamageTypeSelections(name) {
   return [...document.querySelectorAll(`input[name=bst-${name}]:checked`)].map(el => el.value).filter(Boolean);
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// BANDEAU AVATARS — sélecteur de vue (MJ ↔ joueur)
-// ══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// BANDEAU AVATARS â€” sÃ©lecteur de vue (MJ â†” joueur)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function _avatarTile({ active, ringColor, uid, imageUrl, fallback, pseudo, charNom }) {
   const ring = active ? ringColor : 'var(--border)';
   const shadow = active ? `0 0 0 2px ${ringColor}33` : 'none';
   const labelColor = active ? ringColor : 'var(--text-dim)';
-  return `<button data-bst-action="viewAs" data-uid="${uid || ''}" title="${_esc(pseudo)}${charNom?` — ${_esc(charNom)}`:''}"
+  return `<button data-bst-action="viewAs" data-uid="${uid || ''}" title="${_esc(pseudo)}${charNom?` - ${_esc(charNom)}`:''}"
     style="display:flex;flex-direction:column;align-items:center;gap:.25rem;padding:.25rem;
     border:none;background:none;cursor:pointer;border-radius:8px;min-width:54px;
     transition:background .12s"
@@ -884,7 +909,7 @@ function _renderPlayerAvatars() {
       ringColor: 'var(--gold)',
       uid:       '',
       imageUrl:  '',
-      fallback:  '👑',
+      fallback:  'MJ',
       pseudo:    'MJ',
       charNom:   '',
     })}
@@ -901,19 +926,19 @@ function _renderPlayerAvatars() {
   </div>`;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // RENDU PRINCIPAL
-// ══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 export async function renderBestiary() {
   const content = document.getElementById('main-content');
-  content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)"><div style="font-size:2rem">⏳</div></div>`;
+  content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)"><div style="font-size:2rem">...</div></div>`;
   const target = consumeTargetEntity('bestiary');
   _pendingTargetBeastId = target?.id || _pendingTargetBeastId;
 
-  // SÉCURITÉ : la vue "bestiaire d'un joueur" (viewAsUid) ne doit JAMAIS persister
-  // hors d'une session admin ni à travers un changement de compte. L'app est une
-  // SPA (pas de reload au login) → sans ce reset, l'uid d'un joueur précédemment
-  // consulté en MJ resterait collé et ses estimations seraient écrasées par le
+  // SÃ‰CURITÃ‰ : la vue "bestiaire d'un joueur" (viewAsUid) ne doit JAMAIS persister
+  // hors d'une session admin ni Ã  travers un changement de compte. L'app est une
+  // SPA (pas de reload au login) â†’ sans ce reset, l'uid d'un joueur prÃ©cÃ©demment
+  // consultÃ© en MJ resterait collÃ© et ses estimations seraient Ã©crasÃ©es par le
   // compte suivant.
   if (!STATE.isAdmin || STORE._authUid !== STATE.user?.uid) STORE.viewAsUid = null;
   STORE._authUid = STATE.user?.uid || null;
@@ -926,23 +951,23 @@ export async function renderBestiary() {
     STORE.bestiaireList = list;
 
     // Liste des joueurs (uid + pseudo) pour la vue "bestiaire d'un joueur".
-    // Source primaire : STATE.characters (déjà chargé via la page d'accueil).
+    // Source primaire : STATE.characters (dÃ©jÃ  chargÃ© via la page d'accueil).
     // Fallback : loadChars(null) si on arrive direct au bestiaire.
     let chars = STATE.characters;
     if (!chars || !chars.length) {
       try { chars = await loadChars(null); } catch { chars = []; }
     }
-    // Portrait du PJ : même ordre de fallback que le VTT pour la cohérence.
-    // Tout est déjà en mémoire (STATE.characters), aucune lecture Firestore en plus.
+    // Portrait du PJ : mÃªme ordre de fallback que le VTT pour la cohÃ©rence.
+    // Tout est dÃ©jÃ  en mÃ©moire (STATE.characters), aucune lecture Firestore en plus.
     const seen = new Map();
-    // Itère sur la liste triée → le perso ★ par défaut est rencontré en premier
+    // ItÃ¨re sur la liste triÃ©e â†’ le perso â˜… par dÃ©faut est rencontrÃ© en premier
     // pour chaque uid, et devient donc le "visage" du joueur.
     sortCharactersForDisplay(chars || []).forEach(c => {
       if (!c?.uid || c.uid === STATE.user?.uid) return;
       const pseudo = c.ownerPseudo || c.nom || c.uid;
       const photo  = c.photoURL || c.photo || c.avatar || c.portraitUrl || c.imageUrl || '';
       const existing = seen.get(c.uid);
-      // Le premier rencontré (★ par défaut) gagne, sauf si lui n'a pas de photo
+      // Le premier rencontrÃ© (â˜… par dÃ©faut) gagne, sauf si lui n'a pas de photo
       // et qu'un autre en a une.
       if (!existing || (!existing.portraitUrl && photo)) {
         seen.set(c.uid, {
@@ -958,8 +983,8 @@ export async function renderBestiary() {
       .sort((a,b) => a.pseudo.localeCompare(b.pseudo, 'fr', { sensitivity:'base' }));
   }
 
-  // Bestiaire actif — hydraté depuis le cache TTL (instant si chaud) puis
-  // tenu à jour par le watch ci-dessous.
+  // Bestiaire actif â€” hydratÃ© depuis le cache TTL (instant si chaud) puis
+  // tenu Ã  jour par le watch ci-dessous.
   const col = STORE.bestiaireId === 'main' ? 'bestiary' : `bestiary_${STORE.bestiaireId}`;
   STORE.tracker = {};
   STORE.currentCol = col;
@@ -972,9 +997,9 @@ export async function renderBestiary() {
 
   const trackerUid = (STATE.isAdmin && STORE.viewAsUid) || STATE.user?.uid;
 
-  // ── Abonnements temps réel ─────────────────────────────────────────────
-  // Les noms 'bst-creatures'/'bst-tracker' sont réutilisés : si l'admin
-  // switche de bestiaire/viewAs, watch() kill l'ancien listener et crée
+  // â”€â”€ Abonnements temps rÃ©el â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Les noms 'bst-creatures'/'bst-tracker' sont rÃ©utilisÃ©s : si l'admin
+  // switche de bestiaire/viewAs, watch() kill l'ancien listener et crÃ©e
   // le nouveau sur la bonne collection / doc.
   watchPageCollection('bst-creatures', col, 'bestiaire', data => {
     if (_bstShouldSkipLiveRender()) return;
@@ -993,9 +1018,9 @@ export async function renderBestiary() {
   }
 }
 
-// Applique une liste fraîche à STORE.creatures : filtre les `hidden` pour les
-// joueurs et trie par ordre manuel puis par nom. Source unique utilisée par le watch et l'hydratation
-// — toute logique de mise à jour de la liste doit passer par ici.
+// Applique une liste fraÃ®che Ã  STORE.creatures : filtre les `hidden` pour les
+// joueurs et trie par ordre manuel puis par nom. Source unique utilisÃ©e par le watch et l'hydratation
+// â€” toute logique de mise Ã  jour de la liste doit passer par ici.
 function _bstApplyData(all) {
   const arr = all || [];
   STORE.creatures = (STATE.isAdmin ? [...arr] : arr.filter(c => !c.hidden))
@@ -1009,16 +1034,16 @@ function _bstApplyData(all) {
   }
 }
 
-// Re-charge STORE.creatures depuis loadCollection (cache TTL en mémoire patché par
-// addToCol/updateInCol/deleteFromCol, sinon IndexedDB Firestore). Sert à
-// rester cohérent juste après une opération CRUD, sans dépendre du timing du
-// watch (qui peut être skippé si un input du panneau précédent a le focus).
+// Re-charge STORE.creatures depuis loadCollection (cache TTL en mÃ©moire patchÃ© par
+// addToCol/updateInCol/deleteFromCol, sinon IndexedDB Firestore). Sert Ã 
+// rester cohÃ©rent juste aprÃ¨s une opÃ©ration CRUD, sans dÃ©pendre du timing du
+// watch (qui peut Ãªtre skippÃ© si un input du panneau prÃ©cÃ©dent a le focus).
 async function _bstHydrate() {
   const col = STORE.currentCol || 'bestiary';
   _bstApplyData(await loadCollection(col));
 }
 
-// ── Drag & drop : ordre manuel partagé ───────────────────────────────────────
+// â”€â”€ Drag & drop : ordre manuel partagÃ© â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _installBestiaryClickGuard() {
   if (_bstClickGuardInstalled) return;
   _bstClickGuardInstalled = true;
@@ -1100,7 +1125,7 @@ function _mountBestiarySortable() {
 
       try {
         const changed = await _persistBestiaryManualOrder(visibleOrder);
-        if (changed) showNotif('Ordre du bestiaire sauvegardé.', 'success');
+        if (changed) showNotif('Ordre du bestiaire sauvegarde.', 'success');
         _render();
       } catch (err) {
         notifySaveError(err);
@@ -1113,16 +1138,16 @@ function _mountBestiarySortable() {
   });
 }
 
-// Signature des données qui pilotent le rendu de la page (cartes + panneau
-// joueur). Mise à jour par _render à la fin, comparée par les watchers
+// Signature des donnÃ©es qui pilotent le rendu de la page (cartes + panneau
+// joueur). Mise Ã  jour par _render Ã  la fin, comparÃ©e par les watchers
 // onSnapshot avant de re-rendre : un fire qui n'apporte aucun changement
-// (cache → serveur, hydratation → 1er fire) ne reconstruit pas le DOM et
+// (cache â†’ serveur, hydratation â†’ 1er fire) ne reconstruit pas le DOM et
 // les cartes ne clignotent pas.
 let _bstRenderSig = '';
-// Sérialisation stable (clés triées récursivement) : Firestore renvoie les clés
-// de map triées alphabétiquement alors que l'objet local est en ordre d'insertion.
-// Sans ça, l'écho d'une écriture créant de nouvelles clés (1re estimation saisie)
-// produirait une signature différente → _render() inutile → scroll qui remonte.
+// SÃ©rialisation stable (clÃ©s triÃ©es rÃ©cursivement) : Firestore renvoie les clÃ©s
+// de map triÃ©es alphabÃ©tiquement alors que l'objet local est en ordre d'insertion.
+// Sans Ã§a, l'Ã©cho d'une Ã©criture crÃ©ant de nouvelles clÃ©s (1re estimation saisie)
+// produirait une signature diffÃ©rente â†’ _render() inutile â†’ scroll qui remonte.
 function _stableStringify(v) {
   if (v === null || typeof v !== 'object') return JSON.stringify(v);
   if (Array.isArray(v)) return '[' + v.map(_stableStringify).join(',') + ']';
@@ -1130,10 +1155,10 @@ function _stableStringify(v) {
 }
 function _bstSig() { return JSON.stringify(STORE.creatures) + '|' + _stableStringify(STORE.tracker); }
 
-// Évite d'écraser une édition admin en cours : la fiche du panneau a des
-// inputs/textarea avec auto-save debouncé (_bstQueueSave 400ms). Si on
-// re-render alors qu'un champ est focus, le curseur saute. On préfère
-// attendre le prochain snapshot (qui arrivera après la sauvegarde).
+// Ã‰vite d'Ã©craser une Ã©dition admin en cours : la fiche du panneau a des
+// inputs/textarea avec auto-save debouncÃ© (_bstQueueSave 400ms). Si on
+// re-render alors qu'un champ est focus, le curseur saute. On prÃ©fÃ¨re
+// attendre le prochain snapshot (qui arrivera aprÃ¨s la sauvegarde).
 function _bstShouldSkipLiveRender() {
   if (_bstReordering || document.body.classList.contains('bst-dragging')) return true;
   const ae = document.activeElement;
@@ -1144,12 +1169,12 @@ function _bstShouldSkipLiveRender() {
   return !!(main && main.contains(ae));
 }
 
-// ── Création rapide d'une créature sans modal ──────────────────────────────────
+// â”€â”€ CrÃ©ation rapide d'une crÃ©ature sans modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function _bstCreateDraft() {
   if (!STATE.isAdmin) return;
   const col = STORE.currentCol || 'bestiary';
   const data = {
-    nom: 'Nouvelle créature', emoji: '🐲', rang: 'classique',
+    nom: 'Nouvelle creature', emoji: '?', rang: 'classique',
     type: '', environnement: '', niveau: 0, dangerositeXp: 0,
     pvMax: 0, pmMax: 0, ca: 0, vitesse: 0, initiative: 0,
     force: 0, dexterite: 0, constitution: 0, intelligence: 0, sagesse: 0, charisme: 0,
@@ -1176,128 +1201,151 @@ let _bstRenderedActiveId = null;
 function _render() {
   const content = document.getElementById('main-content');
 
-  // Préserve le scroll quand on re-rend le MÊME panneau ouvert (ex. saisie d'une
-  // estimation → write tracker → echo du watch → _render). Sans ça, le rebuild
-  // innerHTML remet le panneau (et la page) tout en haut à chaque blur d'input.
-  // main-content scrolle sur mobile (overflow auto), la fenêtre scrolle sur desktop :
-  // on capture les deux, on restaure les deux (la valeur nulle est sans effet).
-  const sameActive    = STORE.activeId && STORE.activeId === _bstRenderedActiveId;
-  const prevSlotTop   = sameActive ? (content.querySelector('.bst-panel-slot')?.scrollTop || 0) : 0;
-  const prevContentTop= sameActive ? (content.scrollTop || 0) : 0;
-  const prevWinTop    = sameActive ? (window.scrollY || 0) : 0;
+  const sameActive = STORE.activeId && STORE.activeId === _bstRenderedActiveId;
+  const prevSlotTop = sameActive ? (content.querySelector('.bst-panel-slot')?.scrollTop || 0) : 0;
+  const prevContentTop = sameActive ? (content.scrollTop || 0) : 0;
+  const prevWinTop = sameActive ? (window.scrollY || 0) : 0;
 
-  const allTypes = [...new Set(STORE.creatures.map(c => c.type||'').filter(Boolean))].sort();
+  const allTypes = [...new Set(STORE.creatures.map(c => c.type || '').filter(Boolean))].sort();
   const filtered = STORE.creatures.filter(c => _beastMatchesFilters(c));
+  const hiddenCount = STORE.creatures.filter(c => c.hidden).length;
+  const actionCount = STORE.creatures.reduce((n, c) => n + (Array.isArray(c.actions) ? c.actions.length : 0), 0);
+  const lootCount = STORE.creatures.reduce((n, c) => n + (Array.isArray(c.butins) ? c.butins.length : 0), 0);
+  const byRang = { classique: 0, elite: 0, boss: 0 };
+  STORE.creatures.forEach(c => { const r = c.rang || 'classique'; if (byRang[r] !== undefined) byRang[r]++; });
 
-  // Comptes par rang (total, sans filtre rang)
-  const byRang = { classique:0, elite:0, boss:0 };
-  STORE.creatures.forEach(c => { const r = c.rang||'classique'; if (byRang[r]!==undefined) byRang[r]++; });
-
-  const ribbonData = [
-    { label:'Total',    icon:'🐾', count:STORE.creatures.length, c:'#7eb0ff',              filter:'' },
-    { label:'Classique',icon:'◆',  count:byRang.classique,  c:RANG_STYLE.classique.color, filter:'classique' },
-    { label:'Élite',    icon:'★',  count:byRang.elite,      c:RANG_STYLE.elite.color,     filter:'elite'     },
-    { label:'Boss',     icon:'☠',  count:byRang.boss,       c:RANG_STYLE.boss.color,      filter:'boss'      },
+  const activeBest = (STORE.bestiaireList || []).find(b => b.id === STORE.bestiaireId);
+  const playerLabel = _isViewingPlayer()
+    ? (STORE.playersList.find(p => p.uid === STORE.viewAsUid)?.pseudo || 'joueur')
+    : '';
+  const typeOptions = allTypes.map(t => `
+    <button class="bst-filter-pill${_norm(STORE.filterType) === _norm(t) ? ' active' : ''}"
+      data-bst-action="setType" data-type="${_esc(t)}">${_esc(t)}</button>`).join('');
+  const rangPills = [
+    { key: '', label: 'Tous', count: STORE.creatures.length, tone: '#7eb0ff' },
+    { key: 'classique', label: 'Classiques', count: byRang.classique, tone: RANG_STYLE.classique.color },
+    { key: 'elite', label: 'Elites', count: byRang.elite, tone: RANG_STYLE.elite.color },
+    { key: 'boss', label: 'Boss', count: byRang.boss, tone: RANG_STYLE.boss.color },
   ];
-
-  const bstList = STORE.bestiaireList || [{ id:'main', label:'Bestiaire principal' }];
-  const tabsHtml = STATE.isAdmin ? `
-    <div class="bst-tabs">
-      ${bstList.map(b => `
-        <button class="bst-tab${b.id===STORE.bestiaireId?' active':''}" data-bst-action="switchBest" data-id="${b.id}">
-          📜 ${_esc(b.label)}
-        </button>`).join('')}
-      <button class="bst-tab add" data-bst-action="createBest">+ Nouveau</button>
+  const prepPills = _isAdminView() ? [
+    { key:'', label:'Tous', count: STORE.creatures.length },
+    { key:'ready', label:'Prets', count: STORE.creatures.filter(c => _beastMatchesPrep(c, 'ready')).length },
+    { key:'incomplete', label:'A completer', count: STORE.creatures.filter(c => _beastMatchesPrep(c, 'incomplete')).length },
+    { key:'hidden', label:'Caches', count: STORE.creatures.filter(c => _beastMatchesPrep(c, 'hidden')).length },
+    { key:'noAction', label:'Sans action', count: STORE.creatures.filter(c => _beastMatchesPrep(c, 'noAction')).length },
+    { key:'loot', label:'Avec butin', count: STORE.creatures.filter(c => _beastMatchesPrep(c, 'loot')).length },
+  ] : [];
+  const bestiaireTabs = STATE.isAdmin ? `
+    <div class="bst-library-tabs" aria-label="Bestiaires">
+      ${(STORE.bestiaireList || [{ id: 'main', label: 'Bestiaire principal' }]).map(b => `
+        <button class="bst-library-tab${b.id === STORE.bestiaireId ? ' active' : ''}"
+          data-bst-action="switchBest" data-id="${_esc(b.id)}">${_esc(b.label)}</button>`).join('')}
+      <button class="bst-library-tab is-add" data-bst-action="createBest">+ Nouveau</button>
     </div>` : '';
 
   content.innerHTML = `
-  <div class="bst-page ${STORE.activeId ? 'has-panel' : 'no-panel'}">
-
-  <!-- ═ HERO ═══════════════════════════════════════════════════════════════ -->
-  <div class="bst-hero">
-    <div class="bst-hero-row">
-      <div class="bst-hero-title-block">
-        <div class="bst-eyebrow">Encyclopédie des Créatures</div>
-        <h1 class="bst-title">✦ Cartulaire des Bêtes ✦</h1>
+  <div class="bst-page bst-page-v2 ${STORE.activeId ? 'has-panel' : 'no-panel'}">
+    <header class="bst-shell-head">
+      <div class="bst-title-cluster">
+        <span class="bst-kicker">Bestiaire</span>
+        <h1>${_esc(activeBest?.label || 'Bestiaire principal')}</h1>
+        <p>${_isViewingPlayer()
+          ? `Vue joueur de ${_esc(playerLabel)} - estimations personnelles`
+          : 'Catalogue des creatures, rencontres et informations tactiques'}</p>
       </div>
-      ${tabsHtml ? `<div>${tabsHtml}</div>` : ''}
-    </div>
+      <div class="bst-head-actions">
+        ${STATE.isAdmin ? `<button class="bst-tool-btn" data-bst-action="exportBeasts">Exporter</button>` : ''}
+        ${STATE.isAdmin ? `<button class="bst-primary-btn" data-bst-action="createDraft">+ Creature</button>` : ''}
+      </div>
+    </header>
 
-    <div class="bst-ribbon">
-      ${ribbonData.map(r => `
-        <div class="bst-ribbon-item${(!r.filter && !STORE.filterRang)||(r.filter && STORE.filterRang===r.filter)?' active':''}"
-          style="--c:${r.c}"
-          data-bst-action="setRang" data-rang="${r.filter}">
-          <div class="bst-ribbon-icon">${r.icon}</div>
-          <div>
-            <div class="bst-ribbon-num">${r.count}</div>
-            <div class="bst-ribbon-lbl">${r.label}</div>
+    ${bestiaireTabs}
+
+    ${_isViewingPlayer() ? `
+      <div class="bst-view-banner">
+        <span>Vue joueur active</span>
+        <b>${_esc(playerLabel)}</b>
+        <button data-bst-action="viewAs" data-uid="">Revenir a la vue MJ</button>
+      </div>` : ''}
+
+    ${STATE.isAdmin && STORE.playersList.length ? `<section class="bst-player-strip">${_renderPlayerAvatars()}</section>` : ''}
+
+    <section class="bst-command-board">
+      <div class="bst-search-card">
+        <label for="bst-search">Recherche</label>
+        <div class="bst-search-field">
+          <span>?</span>
+          <input type="text" id="bst-search" placeholder="Nom, type, environnement, trait..."
+            value="${_esc(STORE.searchVal)}" data-bst-action="search" data-bst-on="input">
+        </div>
+      </div>
+
+      <div class="bst-summary-strip">
+        <div class="bst-summary-card"><b>${STORE.creatures.length}</b><span>creatures</span></div>
+        <div class="bst-summary-card"><b data-bst-visible-count>${filtered.length}</b><span>affichees</span></div>
+        <div class="bst-summary-card"><b>${actionCount}</b><span>actions</span></div>
+        <div class="bst-summary-card"><b>${lootCount}</b><span>butins</span></div>
+        ${STATE.isAdmin ? `<div class="bst-summary-card"><b>${hiddenCount}</b><span>cachees</span></div>` : ''}
+      </div>
+
+      <div class="bst-filter-panel">
+        <div class="bst-filter-group">
+          <span class="bst-filter-label">Rang</span>
+          <div class="bst-filter-row">
+            ${rangPills.map(r => `
+              <button class="bst-filter-pill${STORE.filterRang === r.key ? ' active' : ''}" style="--tone:${r.tone}"
+                data-bst-action="setRang" data-rang="${r.key}">
+                <span>${_esc(r.label)}</span><b>${r.count}</b>
+              </button>`).join('')}
           </div>
-        </div>`).join('')}
-    </div>
+        </div>
+        <div class="bst-filter-group">
+          <span class="bst-filter-label">Type</span>
+          <div class="bst-filter-row">
+            <button class="bst-filter-pill${!STORE.filterType ? ' active' : ''}" data-bst-action="setType" data-type="">Tous</button>
+            ${typeOptions || '<span class="bst-muted-mini">Aucun type renseigne</span>'}
+          </div>
+        </div>
+        ${_isAdminView() ? `
+          <div class="bst-filter-group bst-filter-group-wide">
+            <span class="bst-filter-label">Preparation</span>
+            <div class="bst-filter-row">
+              ${prepPills.map(p => `
+                <button class="bst-filter-pill${STORE.filterPrep === p.key ? ' active' : ''}" data-bst-action="setPrep" data-prep="${p.key}">
+                  <span>${p.label}</span><b>${p.count}</b>
+                </button>`).join('')}
+            </div>
+          </div>` : ''}
+      </div>
+    </section>
 
-    ${STATE.isAdmin && STORE.playersList.length ? _renderPlayerAvatars() : ''}
-  </div>
+    ${_isAdminView() ? _renderCompareTray() : ''}
 
-  ${_isViewingPlayer() ? `
-  <div style="display:flex;align-items:center;gap:.6rem;padding:.6rem 2rem;
-    border-bottom:1px solid rgba(79,140,255,.2);background:rgba(79,140,255,.06)">
-    <span>👁</span>
-    <span style="font-size:.78rem;color:var(--text)">
-      Vue du bestiaire de <strong style="color:#4f8cff">${_esc(STORE.playersList.find(p=>p.uid===STORE.viewAsUid)?.pseudo||'?')}</strong>
-      — tes modifications sont enregistrées chez ce joueur.
-    </span>
-    <button data-bst-action="viewAs" data-uid="" style="margin-left:auto;font-size:.7rem;padding:3px 10px;
-      border-radius:999px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-dim);cursor:pointer">
-      Revenir à la vue MJ
-    </button>
-  </div>` : ''}
-
-  <!-- ═ CONTROLS ════════════════════════════════════════════════════════════ -->
-  <div class="bst-controls-bar">
-    <div class="bst-search-wrap">
-      <span style="color:var(--text-dim);font-size:.9rem;flex-shrink:0">🔍</span>
-      <input type="text" id="bst-search" placeholder="Rechercher…"
-        value="${_esc(STORE.searchVal)}"
-        data-bst-action="search" data-bst-on="input"
-        style="background:none;border:none;outline:none;color:var(--text);font-size:.8rem;flex:1;min-width:0">
-    </div>
-    <div class="chip-row">
-      <button class="chip${!STORE.filterType?' active':''}" data-bst-action="setType" data-type="">Tous</button>
-      ${allTypes.map(t => `
-        <button class="chip${_norm(STORE.filterType)===_norm(t)?' active':''}"
-          data-bst-action="setType" data-type="${_esc(t)}">
-          ${_esc(t)}
-        </button>`).join('')}
-    </div>
-    ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" style="white-space:nowrap;flex-shrink:0" data-bst-action="exportBeasts" title="Exporter toutes les créatures en document (.html imprimable)">📄 Exporter</button>` : ''}
-    ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="white-space:nowrap;flex-shrink:0" data-bst-action="createDraft">+ Créature</button>` : ''}
-  </div>
-
-  <!-- ═ LAYOUT ═══════════════════════════════════════════════════════════════ -->
-  <div class="bst-layout ${STORE.activeId ? 'has-panel' : 'no-panel'}">
-    <div class="bst-grid-wrap">
-      ${filtered.length === 0 ? `
-        <div class="bst-empty">
-          <div class="bst-empty-icon">🐉</div>
-          <div class="bst-empty-title">${STORE.creatures.length===0 ? 'Aucune créature dans le bestiaire' : 'Aucun résultat'}</div>
-          <div class="bst-empty-sub">${STORE.creatures.length===0 ? 'Ajoutez la première créature pour commencer.' : 'Essayez un filtre différent.'}</div>
-          ${STATE.isAdmin && STORE.creatures.length===0 ? `<button class="btn btn-outline btn-sm" style="margin-top:1rem" data-bst-action="createDraft">+ Ajouter la première créature</button>` : ''}
-        </div>` : `
-        <div class="bst-grid${_isAdminView() ? ' bst-sortable' : ''}">
-          ${filtered.map(c => _renderCard(c)).join('')}
-        </div>`}
-    </div>
-
-    <div class="bst-panel-slot">
-      ${STORE.activeId ? _renderPanel(STORE.creatures.find(c => c.id === STORE.activeId)) : ''}
-    </div>
-  </div>
+    <main class="bst-layout ${STORE.activeId ? 'has-panel' : 'no-panel'}">
+      <section class="bst-grid-wrap">
+        <div class="bst-list-head">
+          <div><b data-bst-list-count>${filtered.length}</b> resultat<span data-bst-list-plural>${filtered.length > 1 ? 's' : ''}</span></div>
+          ${_isAdminView() ? '<span>Glisse les cartes pour organiser l\'ordre manuel</span>' : '<span>Ouvre une fiche pour renseigner tes estimations</span>'}
+        </div>
+        ${filtered.length === 0 ? `
+          <div class="bst-empty bst-empty-v2">
+            <div class="bst-empty-icon">?</div>
+            <div class="bst-empty-title">${STORE.creatures.length === 0 ? 'Bestiaire vide' : 'Aucun resultat'}</div>
+            <div class="bst-empty-sub">${STORE.creatures.length === 0 ? 'Ajoute une creature pour commencer.' : 'Modifie la recherche ou retire un filtre.'}</div>
+            ${STATE.isAdmin && STORE.creatures.length === 0 ? `<button class="bst-primary-btn" data-bst-action="createDraft">+ Ajouter une creature</button>` : ''}
+          </div>` : `
+          <div class="bst-grid${_isAdminView() ? ' bst-sortable' : ''}">
+            ${filtered.map(c => _renderCard(c)).join('')}
+          </div>`}
+      </section>
+      <aside class="bst-panel-slot">
+        ${STORE.activeId ? _renderPanel(STORE.creatures.find(c => c.id === STORE.activeId)) : ''}
+      </aside>
+    </main>
   </div>`;
 
   _mountBestiarySortable();
 
-  // Restaure le scroll préservé (cf. plus haut).
   if (sameActive) {
     const slot = content.querySelector('.bst-panel-slot');
     if (slot && prevSlotTop) slot.scrollTop = prevSlotTop;
@@ -1308,71 +1356,141 @@ function _render() {
   _bstRenderSig = _bstSig();
 }
 
-// ── Card créature ─────────────────────────────────────────────────────────────
-function _renderCard(c) {
-  const isActive = c.id === STORE.activeId;
-  const rang     = c.rang || 'classique';
-  const rs       = RANG_STYLE[rang] || RANG_STYLE.classique;
-  const track    = STORE.tracker[c.id] || {};
-
-  const pvMax    = _isAdminView() ? (parseInt(c.pvMax)||0) : 0;
-  const pvActuel = track.pvActuel !== undefined ? parseInt(track.pvActuel) : pvMax;
-  const pvPct    = pvMax > 0 ? Math.max(0, Math.min(100, Math.round(pvActuel/pvMax*100))) : 0;
-
-  return `<div class="bst-card${isActive?' active':''}${_isAdminView()?' bst-sortable-item':''}"
-    style="--rang-c:${rs.color};--rang-glow:${rs.glow}"
-    data-beast-id="${_esc(c.id)}"
-    data-bst-action="open" data-id="${c.id}">
-
-    ${c.imageUrl
-      ? `<img class="bst-card-img" src="${_esc(c.imageUrl)}" alt="${_esc(c.nom||'')}" loading="lazy">`
-      : `<div class="bst-card-empty">${c.emoji||'🐲'}</div>`}
-
-    <div class="bst-card-rang">${_esc(rs.label)}</div>
-    ${c.niveau ? `<div class="bst-card-niveau">${c.niveau}</div>` : ''}
-    ${STATE.isAdmin && c.hidden ? `<div class="bst-card-hidden" title="Caché aux joueurs">🔒</div>` : ''}
-
-    <div class="bst-card-body">
-      <div class="bst-card-name">${_esc(c.nom||'?')}</div>
-      ${c.type||c.environnement
-        ? `<div class="bst-card-meta">${_esc([c.type,c.environnement].filter(Boolean).join(' · '))}</div>`
-        : ''}
-
-      ${_isAdminView() && (c.pvMax||c.ca||c.vitesse) ? `
-      <div class="bst-card-stats">
-        ${c.pvMax   ? `<span class="bst-card-stat">❤️ ${c.pvMax}</span>`   : ''}
-        ${c.ca      ? `<span class="bst-card-stat">🛡️ ${c.ca}</span>`      : ''}
-        ${c.vitesse ? `<span class="bst-card-stat">💨 ${c.vitesse}m</span>` : ''}
-      </div>` : ''}
-
-      ${_isAdminView() && pvMax > 0 ? `
-      <div class="bst-card-pv">
-        <div class="bst-card-pv-fill" style="width:${pvPct}%"></div>
+// â”€â”€ Card crÃ©ature â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function _renderCompareTray() {
+  const beasts = STORE.compareIds
+    .map(id => STORE.creatures.find(c => c.id === id))
+    .filter(Boolean)
+    .slice(0, 4);
+  if (!beasts.length) return '';
+  const rows = [
+    ['PV', c => parseInt(c.pvMax) || 0],
+    ['CA', c => parseInt(c.ca) || 0],
+    ['Vit.', c => parseInt(c.vitesse) || 0],
+    ['Actions', c => Array.isArray(c.actions) ? c.actions.length : 0],
+    ['Traits', c => Array.isArray(c.traits) ? c.traits.length : 0],
+    ['Butins', c => Array.isArray(c.butins) ? c.butins.length : 0],
+    ['Etat', c => _beastIsReady(c) ? 'Pret' : `${_beastHardAlerts(c).length} blocage(s)`],
+  ];
+  return `<section class="bst-compare-tray">
+    <div class="bst-compare-head">
+      <div>
+        <span class="bst-filter-label">Comparaison rapide</span>
+        <b>${beasts.length}/4 creatures</b>
       </div>
-      <div class="bst-card-pv-lbl"><span>${pvActuel} PV</span><span>/ ${pvMax}</span></div>` : ''}
+      <button class="bst-tool-btn" data-bst-action="clearCompare">Vider</button>
     </div>
+    <div class="bst-compare-table" style="--compare-cols:${beasts.length}">
+      <div class="bst-compare-cell is-label">Critere</div>
+      ${beasts.map(c => `<div class="bst-compare-cell is-head">
+        <button data-bst-action="toggleCompare" data-id="${_esc(c.id)}" title="Retirer">x</button>
+        <strong>${_esc(c.nom || 'Creature')}</strong>
+        <span>${_esc((RANG_STYLE[c.rang || 'classique'] || RANG_STYLE.classique).label)}</span>
+      </div>`).join('')}
+      ${rows.map(([label, getter]) => `
+        <div class="bst-compare-cell is-label">${label}</div>
+        ${beasts.map(c => `<div class="bst-compare-cell">${_esc(getter(c))}</div>`).join('')}
+      `).join('')}
+    </div>
+  </section>`;
+}
 
-    ${STATE.isAdmin ? `
-    <div style="display:flex;gap:3px;padding:.35rem .6rem;border-top:1px solid var(--border);justify-content:flex-end">
-      <button class="btn-icon" style="font-size:.7rem;color:#ff5a7e" data-bst-action="deleteBeast" data-id="${c.id}" title="Supprimer">🗑️</button>
-    </div>` : ''}
+function _bstIcon(name) {
+  const icons = {
+    compare: '<path d="M8 7h10"/><path d="m15 4 3 3-3 3"/><path d="M16 17H6"/><path d="m9 14-3 3 3 3"/>',
+    visible: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    hidden: '<path d="m2 2 20 20"/><path d="M10.6 10.6A3 3 0 0 0 13.4 13.4"/><path d="M7.1 7.1C3.8 8.8 2 12 2 12s3.5 6 10 6c1.5 0 2.9-.3 4.1-.8"/><path d="M14.1 5.3C18.8 6.2 22 12 22 12s-.9 1.6-2.6 3.1"/>',
+    copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 15-5-5L5 21"/>',
+  };
+  return `<svg class="bst-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${icons[name] || ''}</svg>`;
+}
+
+function _renderTacticalSummary(c) {
+  if (!_isAdminView()) return '';
+  const alerts = _beastAlerts(c);
+  if (!alerts.length) return '';
+  return `<div class="bst-section bst-tactical-summary">
+    <div class="bst-section-title">Points a verifier</div>
+    <div class="bst-tactical-alerts">
+      ${alerts.map(a => `<span class="${a.level === 'hard' ? 'hard' : ''}">${_esc(a.label)}</span>`).join('')}
+    </div>
   </div>`;
 }
 
-// Champ texte libre d'estimation joueur : <textarea> auto-dimensionné
-// (field-sizing:content) au lieu d'un <input> — le texte long passe à la ligne et
-// reste entièrement visible. La valeur va entre les balises (échappée).
+function _renderCard(c) {
+  const isActive = c.id === STORE.activeId;
+  const rang = c.rang || 'classique';
+  const rs = RANG_STYLE[rang] || RANG_STYLE.classique;
+  const track = STORE.tracker[c.id] || {};
+  const pvMax = _isAdminView() ? (parseInt(c.pvMax) || 0) : 0;
+  const pvActuel = track.pvActuel !== undefined ? parseInt(track.pvActuel) : pvMax;
+  const pvPct = pvMax > 0 ? Math.max(0, Math.min(100, Math.round(pvActuel / pvMax * 100))) : 0;
+  const actions = Array.isArray(c.actions) ? c.actions.length : 0;
+  const traits = Array.isArray(c.traits) ? c.traits.length : 0;
+  const loot = Array.isArray(c.butins) ? c.butins.length : 0;
+  const subtitle = [c.type, c.environnement].filter(Boolean).join(' - ');
+  const alerts = _isAdminView() ? _beastAlerts(c) : [];
+  const hardAlerts = alerts.filter(a => a.level === 'hard');
+  const isCompared = STORE.compareIds.includes(c.id);
+
+  return `<article class="bst-card bst-card-v2${isActive ? ' active' : ''}${isCompared ? ' is-compared' : ''}${_isAdminView() ? ' bst-sortable-item' : ''}"
+    style="--rang-c:${rs.color};--rang-glow:${rs.glow};--rang-border:${rs.border}"
+    data-beast-id="${_esc(c.id)}" data-bst-action="open" data-id="${_esc(c.id)}">
+    <div class="bst-card-media">
+      ${c.imageUrl
+        ? `<img class="bst-card-img" src="${_esc(c.imageUrl)}" alt="${_esc(c.nom || '')}" loading="lazy">`
+        : `<div class="bst-card-empty"><span>${_esc(c.emoji || '?')}</span></div>`}
+      <span class="bst-card-rang">${_esc(rs.label)}</span>
+      ${c.niveau ? `<span class="bst-card-level">Niv. ${_esc(c.niveau)}</span>` : ''}
+      ${STATE.isAdmin && c.hidden ? `<span class="bst-card-hidden" title="Cache aux joueurs">Cachee</span>` : ''}
+    </div>
+    <div class="bst-card-body">
+      <div class="bst-card-mainline">
+        <div>
+          <h3 class="bst-card-name">${_esc(c.nom || '?')}</h3>
+          ${subtitle ? `<p class="bst-card-meta">${_esc(subtitle)}</p>` : '<p class="bst-card-meta">Sans classification</p>'}
+        </div>
+      </div>
+      <div class="bst-card-stats">
+        ${c.pvMax ? `<span class="bst-card-stat"><b>${_esc(c.pvMax)}</b> PV</span>` : ''}
+        ${c.ca ? `<span class="bst-card-stat"><b>${_esc(c.ca)}</b> CA</span>` : ''}
+        ${c.vitesse ? `<span class="bst-card-stat"><b>${_esc(c.vitesse)}</b> m</span>` : ''}
+        ${actions ? `<span class="bst-card-stat"><b>${actions}</b> act.</span>` : ''}
+      </div>
+      <div class="bst-card-tags">
+        ${traits ? `<span>${traits} trait${traits > 1 ? 's' : ''}</span>` : ''}
+        ${loot ? `<span>${loot} butin${loot > 1 ? 's' : ''}</span>` : ''}
+        ${!traits && !loot ? '<span>Fiche a completer</span>' : ''}
+      </div>
+      ${_isAdminView() ? `
+        <div class="bst-card-alerts ${hardAlerts.length ? 'has-hard' : ''}${alerts.length ? '' : ' is-empty'}" ${alerts.length ? '' : 'aria-hidden="true"'}>
+          ${alerts.slice(0, 3).map(a => `<span class="${a.level === 'hard' ? 'hard' : ''}">${_esc(a.label)}</span>`).join('') + (alerts.length > 3 ? `<span>+${alerts.length - 3}</span>` : '')}
+        </div>` : ''}
+      ${_isAdminView() && pvMax > 0 ? `
+        <div class="bst-card-pv"><div class="bst-card-pv-fill" style="width:${pvPct}%"></div></div>
+        <div class="bst-card-pv-lbl"><span>${pvActuel} PV</span><span>${pvMax}</span></div>` : ''}
+    </div>
+    ${_isAdminView() ? `
+      <div class="bst-card-actions bst-card-actions-v2">
+        <button class="bst-card-icon-btn${isCompared ? ' active' : ''}" data-bst-action="toggleCompare" data-id="${_esc(c.id)}" title="Comparer" aria-label="Comparer">${_bstIcon('compare')}</button>
+        <button class="bst-card-icon-btn" data-bst-action="quickToggleHidden" data-id="${_esc(c.id)}" title="${c.hidden ? 'Rendre visible' : 'Cacher aux joueurs'}" aria-label="${c.hidden ? 'Rendre visible' : 'Cacher aux joueurs'}">${_bstIcon(c.hidden ? 'visible' : 'hidden')}</button>
+        <button class="bst-card-icon-btn" data-bst-action="duplicateBeast" data-id="${_esc(c.id)}" title="Dupliquer" aria-label="Dupliquer">${_bstIcon('copy')}</button>
+        <button class="bst-card-danger" data-bst-action="deleteBeast" data-id="${_esc(c.id)}" title="Supprimer">Supprimer</button>
+      </div>` : ''}
+  </article>`;
+}
 function _bstDeductArea(val, placeholder, attrs, style = '') {
   return `<textarea class="bst-deduct-input" rows="1"${style ? ` style="${style}"` : ''} placeholder="${_esc(placeholder)}" ${attrs}>${_esc(val || '')}</textarea>`;
 }
 
-// ── Panneau détail ────────────────────────────────────────────────────────────
+// â”€â”€ Panneau dÃ©tail â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _renderPanel(c) {
   if (!c) return '';
   const rang  = c.rang || 'classique';
   const rs    = RANG_STYLE[rang] || RANG_STYLE.classique;
 
-  // MJ : panneau entièrement éditable (auto-save Firestore)
+  // MJ : panneau entiÃ¨rement Ã©ditable (auto-save Firestore)
   if (_isAdminView()) return _renderPanelAdmin(c, rs);
 
   const track = STORE.tracker[c.id] || {};
@@ -1390,6 +1508,7 @@ function _renderPanel(c) {
 
   const traits    = Array.isArray(c.traits) ? c.traits : [];
   const description = c.description == null ? '' : String(c.description);
+  const knownStats = [pvActuel, pmActuel, caEstimee, vitEstimee, xpEstimee].filter(v => v !== null && v !== '').length;
 
   const mod = (val) => {
     const n = parseInt(val);
@@ -1397,39 +1516,40 @@ function _renderPanel(c) {
     return modStr(Math.floor((n - 10) / 2));
   };
 
-  // ── Hero du panneau ──────────────────────────────────────────────────────
+  // â”€â”€ Hero du panneau â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const heroHtml = `
     <div class="bst-panel-hero">
       ${c.imageUrl
         ? `<img class="bst-panel-img" src="${_esc(c.imageUrl)}" alt="${_esc(c.nom||'')}">`
-        : `<div class="bst-panel-empty">${c.emoji||'🐲'}</div>`}
+        : `<div class="bst-panel-empty">${c.emoji||'?'}</div>`}
       ${_isAdminView() ? `<div class="bst-panel-mj-badge">MJ</div>` : ''}
-      <button class="bst-panel-close" data-bst-action="close">✕</button>
+      <button class="bst-panel-close" data-bst-action="close">x</button>
       <div class="bst-panel-hero-info">
         <div class="bst-panel-rang">${_esc(rs.label)}</div>
         <div class="bst-panel-name">${_esc(c.nom||'?')}</div>
         ${c.type||c.environnement
-          ? `<div class="bst-panel-meta">${_esc([c.type,c.environnement].filter(Boolean).join(' · '))}</div>`
+          ? `<div class="bst-panel-meta">${_esc([c.type,c.environnement].filter(Boolean).join(' - '))}</div>`
           : ''}
       </div>
     </div>`;
 
-  // ── Vitaux (5) ───────────────────────────────────────────────────────────
-  // MJ : valeurs réelles (lecture seule, depuis c.pvMax / c.pmMax / c.ca / …)
-  // Joueur : estimations modifiables (track.pvActuel, etc.) — synchronisées
-  //          avec le VTT en temps réel (saisie ici → "?" disparaît côté VTT).
+  // â”€â”€ Vitaux (5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // MJ : valeurs rÃ©elles (lecture seule, depuis c.pvMax / c.pmMax / c.ca / â€¦)
+  // Joueur : estimations modifiables (track.pvActuel, etc.) â€” synchronisÃ©es
+  //          avec le VTT en temps rÃ©el (saisie ici â†’ "?" disparaÃ®t cÃ´tÃ© VTT).
   const _estCell = (cls, lbl, trackKey, trackVal) => `
-    <div class="bst-stat-cell ${cls}" data-bst-action="focusInput">
+    <div class="bst-stat-cell bst-est-cell ${cls}" data-bst-action="focusInput">
+      <div class="bst-stat-lbl">${lbl}</div>
       <input type="number" id="bst-${cls}-${c.id}"
         value="${trackVal || ''}" placeholder="?" min="0"
         class="bst-stat-track-input"
         data-bst-action="setStat" data-bst-on="change" data-id="${c.id}" data-key="${trackKey}">
-      <div class="bst-stat-lbl">${lbl}</div>
     </div>`;
 
   const vitalsHtml = `
-    <div class="bst-section">
-      <div class="bst-section-title">Statistiques</div>
+    <div class="bst-section bst-intel-card">
+      <div class="bst-section-title">Estimations joueur <span class="bst-section-count">${knownStats}/5 renseignees</span></div>
+      <div class="bst-section-hint">Note ce que ton personnage pense avoir compris. Ces valeurs restent separees de la fiche MJ.</div>
       <div class="bst-stats-base">
         ${_estCell('pv',  'PV',   'pvActuel',   pvActuel)}
         ${_estCell('pm',  'PM',   'pmActuel',   pmActuel)}
@@ -1439,10 +1559,10 @@ function _renderPanel(c) {
       </div>
     </div>`;
 
-  // ── Caracs (6) : MJ seulement ────────────────────────────────────────────
+  // â”€â”€ Caracs (6) : MJ seulement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const caracsHtml = _isAdminView() ? `
     <div class="bst-section">
-      <div class="bst-section-title">Caractéristiques</div>
+      <div class="bst-section-title">Caracteristiques</div>
       <div class="bst-caracs">
         ${[
           ['FOR', c.force],['DEX', c.dexterite],['CON', c.constitution],
@@ -1451,7 +1571,7 @@ function _renderPanel(c) {
           const m = mod(val);
           const posNeg = !m ? 'zero' : parseInt(m) > 0 ? 'pos' : 'neg';
           return `<div class="bst-carac">
-            <div class="bst-carac-val">${val||'—'}</div>
+            <div class="bst-carac-val">${val||'-'}</div>
             ${m ? `<div class="bst-carac-mod ${posNeg}">${m}</div>` : ''}
             <div class="bst-carac-lbl">${lbl}</div>
           </div>`;
@@ -1459,40 +1579,40 @@ function _renderPanel(c) {
       </div>
     </div>` : '';
 
-  // ── Description ──────────────────────────────────────────────────────────
+  // â”€â”€ Description â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const descHtml = description ? `
     <div class="bst-section">
       <div class="bst-section-title">Description</div>
       <div class="bst-desc">${_esc(description).replace(/\n/g,'<br>')}</div>
     </div>` : '';
 
-  // ── Relations aux dégâts : MJ SEULEMENT ─────────────────────────────────
+  // â”€â”€ Relations aux dÃ©gÃ¢ts : MJ SEULEMENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const dmgHtml = _isAdminView() ? _renderDamageProfile(c, STORE.damageTypes) : '';
 
 
-  // ── Attaques observées (Joueur) : armes naturelles + actions ──────────────
-  // Le joueur note juste ce qu'il observe au VTT (nom, toucher, dégâts, portée,
-  // effet) — aucun accès au gestionnaire de runes. Indexé par id stable (fallback
-  // idx). Les clés `act_*` restent rétro-compatibles ; `*_effet_*` et `arme_*` sont
-  // de nouvelles clés (sans impact sur les estimations existantes).
+  // â”€â”€ Attaques observÃ©es (Joueur) : armes naturelles + actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Le joueur note juste ce qu'il observe au VTT (nom, toucher, dÃ©gÃ¢ts, portÃ©e,
+  // effet) â€” aucun accÃ¨s au gestionnaire de runes. IndexÃ© par id stable (fallback
+  // idx). Les clÃ©s `act_*` restent rÃ©tro-compatibles ; `*_effet_*` et `arme_*` sont
+  // de nouvelles clÃ©s (sans impact sur les estimations existantes).
   const _obsRow = (prefix, k) => {
     const a = (suffix) => `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="${prefix}_${suffix}_${k}"`;
     return `<div class="bst-atk">
-      ${_bstDeductArea(ded[`${prefix}_nom_${k}`], "Nom de l'attaque…", a('nom'), 'margin-bottom:6px;font-weight:600')}
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px">
-        <input class="bst-deduct-input" placeholder="🎯 Toucher" value="${_esc(ded[`${prefix}_toucher_${k}`]||'')}" ${a('toucher')}>
-        <input class="bst-deduct-input" placeholder="⚔️ Dégâts"  value="${_esc(ded[`${prefix}_degats_${k}`]||'')}"  ${a('degats')}>
-        <input class="bst-deduct-input" placeholder="📏 Portée"  value="${_esc(ded[`${prefix}_portee_${k}`]||'')}"  ${a('portee')}>
+      ${_bstDeductArea(ded[`${prefix}_nom_${k}`], "Nom de l'attaque...", a('nom'), 'margin-bottom:6px;font-weight:600')}
+      <div class="bst-observed-grid">
+        <input class="bst-deduct-input" placeholder="Toucher" value="${_esc(ded[`${prefix}_toucher_${k}`]||'')}" ${a('toucher')}>
+        <input class="bst-deduct-input" placeholder="Degats"  value="${_esc(ded[`${prefix}_degats_${k}`]||'')}"  ${a('degats')}>
+        <input class="bst-deduct-input" placeholder="Portee"  value="${_esc(ded[`${prefix}_portee_${k}`]||'')}"  ${a('portee')}>
       </div>
-      ${_bstDeductArea(ded[`${prefix}_effet_${k}`], '✨ Effet observé…', a('effet'), 'margin-top:5px')}
+      ${_bstDeductArea(ded[`${prefix}_effet_${k}`], 'Effet observe...', a('effet'), 'margin-top:5px')}
     </div>`;
   };
 
   const armesJ = Array.isArray(c.armesNaturelles) ? c.armesNaturelles : [];
   const armesJoueurHtml = !_isAdminView() && armesJ.length ? `
     <div class="bst-section">
-      <div class="bst-section-title">🐾 Armes naturelles
-        <span class="bst-section-count">${armesJ.length} observée${armesJ.length>1?'s':''}</span>
+      <div class="bst-section-title">Armes naturelles
+        <span class="bst-section-count">${armesJ.length} observee${armesJ.length>1?'s':''}</span>
       </div>
       ${armesJ.map((arme, i) => _obsRow('arme', arme.id || `idx_${i}`)).join('')}
     </div>` : '';
@@ -1500,64 +1620,77 @@ function _renderPanel(c) {
   const actsJ = Array.isArray(c.actions) ? c.actions : [];
   const attaquesJoueurHtml = !_isAdminView() && actsJ.length ? `
     <div class="bst-section">
-      <div class="bst-section-title">⚔️ Actions
-        <span class="bst-section-count">${actsJ.length} observée${actsJ.length>1?'s':''}</span>
+      <div class="bst-section-title">Actions
+        <span class="bst-section-count">${actsJ.length} observee${actsJ.length>1?'s':''}</span>
       </div>
       ${actsJ.map((act, i) => _obsRow('act', act.id || `idx_${i}`)).join('')}
     </div>` : '';
 
-  // ── Traits Joueur : lignes vides à compléter ──────────────────────────────
+  // â”€â”€ Traits Joueur : lignes vides Ã  complÃ©ter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const traitsJoueurHtml = !_isAdminView() && traits.length ? `
     <div class="bst-section">
-      <div class="bst-section-title">✨ Traits & Capacités
+      <div class="bst-section-title">Traits & Capacites
         <span class="bst-section-count">${traits.length} trait${traits.length>1?'s':''}</span>
       </div>
       ${traits.map((_, i) => {
         const dedAttr = (suffix) => `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="tr_${suffix}_${i}"`;
         return `<div class="bst-trait">
-          ${_bstDeductArea(ded['tr_nom_'+i], 'Nom du trait…', dedAttr('nom'), 'margin-bottom:5px;font-weight:600')}
-          ${_bstDeductArea(ded['tr_desc_'+i], 'Description…', dedAttr('desc'))}
+          ${_bstDeductArea(ded['tr_nom_'+i], 'Nom du trait...', dedAttr('nom'), 'margin-bottom:5px;font-weight:600')}
+          ${_bstDeductArea(ded['tr_desc_'+i], 'Description...', dedAttr('desc'))}
         </div>`;
       }).join('')}
     </div>` : '';
 
-  // ── Butin estimé (Joueur) : objets supposés + nombre ──────────────────────
-  // Le joueur ne voit pas le CONTENU des butins réels (MJ uniquement), mais on lui
-  // donne autant de lignes que la créature a de butins → il sait combien d'objets
-  // estimer et remplit son hypothèse pour chacun. Estimations stockées dans SON
-  // tracker perso : aucun effet sur le VTT (qui ne lit que la créature).
+  // â”€â”€ Butin estimÃ© (Joueur) : objets supposÃ©s + nombre â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Le joueur ne voit pas le CONTENU des butins rÃ©els (MJ uniquement), mais on lui
+  // donne autant de lignes que la crÃ©ature a de butins â†’ il sait combien d'objets
+  // estimer et remplit son hypothÃ¨se pour chacun. Estimations stockÃ©es dans SON
+  // tracker perso : aucun effet sur le VTT (qui ne lit que la crÃ©ature).
   const _lootRows = Array.isArray(c.butins) ? c.butins.length : 0;
-  const butinJoueurHtml = !_isAdminView() && _lootRows ? `
+  const _hasGoldLoot = String(c.or || '').trim().length > 0;
+  const _lootEstimateCount = _lootRows + (_hasGoldLoot ? 1 : 0);
+  const butinJoueurHtml = !_isAdminView() && _lootEstimateCount ? `
     <div class="bst-section">
-      <div class="bst-section-title">🎒 Butin estimé
-        <span class="bst-section-count">${_lootRows} objet${_lootRows>1?'s':''} à deviner</span>
+      <div class="bst-section-title">Butin estime
+        <span class="bst-section-count">${_lootRows ? `${_lootRows} objet${_lootRows>1?'s':''}` : ''}${_lootRows && _hasGoldLoot ? ' + ' : ''}${_hasGoldLoot ? 'or' : ''} a deviner</span>
       </div>
       ${Array.from({ length: _lootRows }, (_, i) => {
         const a = (suffix) => `data-bst-action="setLoot" data-bst-on="change" data-id="${c.id}" data-idx="${i}" data-key="but_${suffix}_${i}"`;
         const filled = ded[`but_nom_${i}`] || ded[`but_qte_${i}`];
         return `<div class="bst-loot-est" data-loot-cid="${c.id}" data-loot-idx="${i}">
-          ${_bstDeductArea(ded[`but_nom_${i}`], 'Objet supposé…', a('nom'))}
+          ${_bstDeductArea(ded[`but_nom_${i}`], 'Objet suppose...', a('nom'))}
           <input class="bst-deduct-input bst-loot-qte" placeholder="Nb" value="${_esc(ded[`but_qte_${i}`]||'')}" ${a('qte')}>
           ${filled
-            ? `<button type="button" class="bst-loot-del" data-bst-action="clearLoot" data-id="${c.id}" data-idx="${i}" title="Effacer cette ligne">✕</button>`
+            ? `<button type="button" class="bst-loot-del" data-bst-action="clearLoot" data-id="${c.id}" data-idx="${i}" title="Effacer cette ligne">x</button>`
             : `<span class="bst-loot-del-spacer"></span>`}
         </div>`;
       }).join('')}
+      ${_hasGoldLoot ? (() => {
+        const a = (suffix) => `data-bst-action="setLoot" data-bst-on="change" data-id="${c.id}" data-idx="or" data-key="but_${suffix}_or"`;
+        const filled = ded.but_nom_or || ded.but_qte_or;
+        return `<div class="bst-loot-est bst-loot-est-gold" data-loot-cid="${c.id}" data-loot-idx="or">
+          ${_bstDeductArea(ded.but_nom_or, 'Or suppose...', a('nom'))}
+          <input class="bst-deduct-input bst-loot-qte" placeholder="Montant" value="${_esc(ded.but_qte_or||'')}" ${a('qte')}>
+          ${filled
+            ? `<button type="button" class="bst-loot-del" data-bst-action="clearLoot" data-id="${c.id}" data-idx="or" title="Effacer cette ligne">x</button>`
+            : `<span class="bst-loot-del-spacer"></span>`}
+        </div>`;
+      })() : ''}
     </div>` : '';
 
-  // ── Relations aux dégâts supposées (Joueur) ───────────────────────────────
-  // Le joueur estime faiblesses / résistances / immunités / absorptions à partir
-  // de ce qu'il observe en combat. Profil réel = MJ uniquement (dmgHtml plus haut).
+  // â”€â”€ Relations aux dÃ©gÃ¢ts supposÃ©es (Joueur) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Le joueur estime faiblesses / rÃ©sistances / immunitÃ©s / absorptions Ã  partir
+  // de ce qu'il observe en combat. Profil rÃ©el = MJ uniquement (dmgHtml plus haut).
   const relJoueurHtml = !_isAdminView() ? `
     <div class="bst-section">
-      <div class="bst-section-title">🩸 Relations aux dégâts
-        <span class="bst-section-count">supposées</span>
+      <div class="bst-section-title">Relations aux degats
+        <span class="bst-section-count">supposees</span>
       </div>
       ${DAMAGE_RELATIONS.map(r => {
         const a = `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="rel_${r.key}"`;
         return `<div class="bst-rel-est" style="--rel-c:${r.color}">
-          <span class="bst-rel-est-lbl">${r.icon} ${r.label}</span>
-          ${_bstDeductArea(ded[`rel_${r.key}`], 'Types de dégâts supposés…', a)}
+          <span class="bst-rel-est-lbl">${r.label}</span>
+          ${_bstDeductArea(ded[`rel_${r.key}`], 'Types de degats supposes...', a)}
         </div>`;
       }).join('')}
     </div>` : '';
@@ -1567,6 +1700,7 @@ function _renderPanel(c) {
     ${heroHtml}
     <div class="bst-panel-body">
       ${vitalsHtml}
+      ${_renderTacticalSummary(c)}
       ${descHtml}
       ${armesJoueurHtml}
       ${attaquesJoueurHtml}
@@ -1577,9 +1711,9 @@ function _renderPanel(c) {
   </div>`;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// PANNEAU MJ — entièrement éditable, auto-save
-// ══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// PANNEAU MJ â€” entiÃ¨rement Ã©ditable, auto-save
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function _renderPanelAdmin(c, rs) {
   const types     = STORE.damageTypes || [];
   const traits    = Array.isArray(c.traits) ? c.traits : [];
@@ -1592,16 +1726,16 @@ function _renderPanelAdmin(c, rs) {
     return { txt: modStr(m), cls: m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero' };
   };
 
-  // ── Hero éditable : image cliquable, rang selector, nom, type, env ──────
+  // â”€â”€ Hero Ã©ditable : image cliquable, rang selector, nom, type, env â”€â”€â”€â”€â”€â”€
   const heroHtml = `
     <div class="bst-panel-hero">
       ${c.imageUrl
         ? `<img class="bst-panel-img" src="${_esc(c.imageUrl)}" alt="${_esc(c.nom||'')}"
              style="cursor:pointer" data-bst-action="openImage" data-id="${c.id}">`
-        : `<div class="bst-panel-empty" style="cursor:pointer" data-bst-action="openImage" data-id="${c.id}">${c.emoji||'🐲'}</div>`}
-      <button class="bst-panel-img-edit" data-bst-action="openImage" data-id="${c.id}" title="Changer l'image">📷</button>
+        : `<div class="bst-panel-empty" style="cursor:pointer" data-bst-action="openImage" data-id="${c.id}">${c.emoji||'?'}</div>`}
+      <button class="bst-panel-img-edit" data-bst-action="openImage" data-id="${c.id}" title="Changer l'image" aria-label="Changer l'image">${_bstIcon('image')}</button>
       <div class="bst-panel-mj-badge">MJ</div>
-      <button class="bst-panel-close" data-bst-action="close">✕</button>
+      <button class="bst-panel-close" data-bst-action="close">x</button>
       <div class="bst-panel-hero-info">
         <div class="bst-panel-rang-selector">
           ${Object.entries(RANG_STYLE).map(([r, rst]) => {
@@ -1613,27 +1747,28 @@ function _renderPanelAdmin(c, rs) {
           }).join('')}
           <button type="button" class="bst-rang-btn bst-hidden-toggle${c.hidden?' active':''}"
             data-bst-action="toggleHidden" data-id="${c.id}"
-            title="${c.hidden ? 'Visible : actuellement cachée aux joueurs — clic pour afficher' : 'Cacher cette créature aux joueurs (boss spoiler, contenu surprise)'}"
+            title="${c.hidden ? 'Visible : actuellement cachee aux joueurs - clic pour afficher' : 'Cacher cette creature aux joueurs (boss spoiler, contenu surprise)'}"
             style="${c.hidden ? 'color:#b47fff;border-color:#b47fff;background:rgba(180,127,255,0.10)' : ''}">
-            ${c.hidden ? '🔒 Cachée' : '👁 Visible'}
+            ${c.hidden ? 'Cachee' : 'Visible'}
           </button>
         </div>
-        <input class="bst-panel-name-input" value="${_esc(c.nom||'')}" placeholder="Nom de la créature…"
+        <input class="bst-panel-name-input" value="${_esc(c.nom||'')}" placeholder="Nom de la creature..."
           data-bst-action="updateNom" data-bst-on="input" data-id="${c.id}">
         <div class="bst-panel-meta-edit">
           <input class="bst-panel-edit-inline" placeholder="Type" value="${_esc(c.type||'')}"
             data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="type">
-          <span class="bst-panel-meta-dot">·</span>
+          <span class="bst-panel-meta-dot">-</span>
           <input class="bst-panel-edit-inline" placeholder="Environnement" value="${_esc(c.environnement||'')}"
             data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="environnement">
         </div>
       </div>
     </div>`;
 
-  // ── Statistiques (5 cellules : PV PM CA Vit XP) + niveau + initiative ───
+  // â”€â”€ Statistiques (5 cellules : PV PM CA Vit XP) + niveau + initiative â”€â”€â”€
   const vitalsHtml = `
-    <div class="bst-section">
-      <div class="bst-section-title">Statistiques</div>
+    <div class="bst-section bst-admin-identity">
+      <div class="bst-section-title">Fiche technique</div>
+      <div class="bst-section-hint">Base de combat utilisee par le VTT et par les cartes du bestiaire.</div>
       <div class="bst-stats-base">
         ${[
           ['pv',  'PV',     'pvMax',         c.pvMax],
@@ -1643,31 +1778,31 @@ function _renderPanelAdmin(c, rs) {
           ['init','XP',     'dangerositeXp', c.dangerositeXp],
         ].map(([cls, lbl, field, val]) => `
           <div class="bst-stat-cell ${cls}" data-bst-action="focusInput">
+            <div class="bst-stat-lbl">${lbl}</div>
             <input type="number" min="0" value="${val||''}" placeholder="0" class="bst-stat-track-input"
               data-bst-action="updateNum" data-bst-on="input" data-id="${c.id}" data-field="${field}">
-            <div class="bst-stat-lbl">${lbl}</div>
           </div>`).join('')}
       </div>
-      <div class="bst-niv-row">
+      <div class="bst-niv-row bst-admin-mini-grid">
         <span class="bst-niv-lbl">Niveau / FP</span>
-        <input type="number" min="0" value="${c.niveau||''}" placeholder="—"
+        <input type="number" min="0" value="${c.niveau||''}" placeholder="-"
           class="bst-p-input bst-p-input-sm"
           data-bst-action="updateNum" data-bst-on="input" data-id="${c.id}" data-field="niveau">
         <span class="bst-niv-lbl">Initiative</span>
-        <input type="number" value="${c.initiative||''}" placeholder="—"
+        <input type="number" value="${c.initiative||''}" placeholder="-"
           class="bst-p-input bst-p-input-sm"
           data-bst-action="updateNum" data-bst-on="input" data-id="${c.id}" data-field="initiative">
         <span class="bst-niv-lbl">Emoji</span>
-        <input value="${_esc(c.emoji||'🐲')}" placeholder="🐲"
+        <input value="${_esc(c.emoji||'?')}" placeholder="?"
           class="bst-p-input bst-p-input-sm" style="width:40px"
           data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="emoji">
       </div>
     </div>`;
 
-  // ── Caracs (6, avec auto-modificateur) ─────────────────────────────────
+  // â”€â”€ Caracs (6, avec auto-modificateur) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const caracsHtml = `
-    <div class="bst-section">
-      <div class="bst-section-title">Caractéristiques</div>
+    <div class="bst-section bst-admin-caracs">
+      <div class="bst-section-title">Caracteristiques</div>
       <div class="bst-caracs">
         ${[
           ['FOR','force'],['DEX','dexterite'],['CON','constitution'],
@@ -1675,7 +1810,7 @@ function _renderPanelAdmin(c, rs) {
         ].map(([lbl, key]) => {
           const { txt, cls } = modOf(c[key]);
           return `<div class="bst-carac">
-            <input type="number" min="0" value="${c[key]||''}" placeholder="—"
+            <input type="number" min="0" value="${c[key]||''}" placeholder="-"
               class="bst-carac-input"
               data-bst-action="updateCarac" data-bst-on="input" data-id="${c.id}" data-key="${key}">
             <div class="bst-carac-mod ${cls}" data-bst-mod="${c.id}-${key}">${txt}</div>
@@ -1685,7 +1820,7 @@ function _renderPanelAdmin(c, rs) {
       </div>
     </div>`;
 
-  // ── Token VTT (taille en cases) ────────────────────────────────────────
+  // â”€â”€ Token VTT (taille en cases) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const tokenHtml = `
     <div class="bst-section">
       <div class="bst-section-title">Token VTT (cases)</div>
@@ -1694,7 +1829,7 @@ function _renderPanelAdmin(c, rs) {
         <select class="bst-p-input bst-p-input-sm" data-bst-action="updateNum" data-bst-on="change" data-id="${c.id}" data-field="tokenW">
           ${[1,2,3,4,5].map(n => `<option value="${n}"${(c.tokenW||c.tokenSize||1)===n?' selected':''}>${n}</option>`).join('')}
         </select>
-        <span class="bst-niv-lbl">×</span>
+        <span class="bst-niv-lbl">x</span>
         <span class="bst-niv-lbl">Hauteur</span>
         <select class="bst-p-input bst-p-input-sm" data-bst-action="updateNum" data-bst-on="change" data-id="${c.id}" data-field="tokenH">
           ${[1,2,3,4,5].map(n => `<option value="${n}"${(c.tokenH||c.tokenSize||1)===n?' selected':''}>${n}</option>`).join('')}
@@ -1702,37 +1837,37 @@ function _renderPanelAdmin(c, rs) {
       </div>
     </div>`;
 
-  // ── Description (textarea) ─────────────────────────────────────────────
+  // â”€â”€ Description (textarea) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const descHtml = `
     <div class="bst-section">
       <div class="bst-section-title">Description</div>
-      <textarea class="bst-panel-textarea" placeholder="Apparence, comportement, lore…" rows="3"
+      <textarea class="bst-panel-textarea" placeholder="Apparence, comportement, lore..." rows="3"
         data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="description">${_esc(c.description||'')}</textarea>
     </div>`;
 
-  // ── Relations aux dégâts (matrice chips compacte) ─────────────────────
+  // â”€â”€ Relations aux dÃ©gÃ¢ts (matrice chips compacte) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const dmgHtml = _renderDamageMatrixPanel(c, types);
 
-  // ── Armes naturelles + Actions (sortilèges-style) ─────────────────────
-  // 1) Armes naturelles : sources de dégâts de base (comme une arme équipée).
-  //    Chaque action peut s'y référer via la modal de sort (preview = dégâts arme).
-  // 2) Actions : sorts au format unifié, éditées via la même modal que les
+  // â”€â”€ Armes naturelles + Actions (sortilÃ¨ges-style) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // 1) Armes naturelles : sources de dÃ©gÃ¢ts de base (comme une arme Ã©quipÃ©e).
+  //    Chaque action peut s'y rÃ©fÃ©rer via la modal de sort (preview = dÃ©gÃ¢ts arme).
+  // 2) Actions : sorts au format unifiÃ©, Ã©ditÃ©es via la mÃªme modal que les
   //    sorts de personnage et les actions d'objet.
   const armes = Array.isArray(c.armesNaturelles) ? c.armesNaturelles : [];
   const acts  = Array.isArray(c.actions)         ? c.actions         : [];
 
-  // Charge le cache d'actions de CETTE créature pour les handlers _bstAddAction/_bstEditAction
+  // Charge le cache d'actions de CETTE crÃ©ature pour les handlers _bstAddAction/_bstEditAction
   _bstActionsCacheLoad(c.id, acts);
   _bstActionsArmeIdCtx = armes[0]?.id || null;
 
   const armesHtml = `
     <div class="bst-section">
       <div class="bst-section-title">
-        🦷 Armes naturelles
+        Armes naturelles
         <span class="bst-section-count" data-bst-count="${c.id}-armes">${armes.length}</span>
         <button class="bst-add-row-btn" data-bst-action="addArme" data-id="${c.id}">+ Ajouter</button>
       </div>
-      <div class="bst-section-hint">Comme une arme équipée pour les sorts dérivés. La 1ʳᵉ sert de référence par défaut aux actions.</div>
+      <div class="bst-section-hint">Comme une arme equipee pour les sorts derives. La premiere sert de reference par defaut aux actions.</div>
       <div id="bst-p-armes-${c.id}" class="bst-p-rows">
         ${armes.map((a, i) => _bstRenderArmeRow(a, c.id, i)).join('')}
       </div>
@@ -1741,11 +1876,11 @@ function _renderPanelAdmin(c, rs) {
   const actionsHtml = `
     <div class="bst-section">
       <div class="bst-section-title">
-        ⚔️ Actions
+        Actions
         <span class="bst-section-count" data-bst-count="${c.id}-actions">${acts.length}</span>
         <button class="bst-add-row-btn" data-bst-action="addAction">+ Ajouter</button>
       </div>
-      <div class="bst-section-hint">Sorts unifiés — même éditeur que les sorts de personnage et les actions d'objet.</div>
+      <div class="bst-section-hint">Sorts unifies - meme editeur que les sorts de personnage et les actions d'objet.</div>
       <div id="bst-p-actions-${c.id}" class="bst-p-rows bst-actions-host">
         ${_bstRenderActionsList()}
       </div>
@@ -1761,7 +1896,7 @@ function _renderPanelAdmin(c, rs) {
   const traitsHtml = `
     <div class="bst-section">
       <div class="bst-section-title">
-        ✨ Traits & Capacités
+        Traits & Capacites
         <span class="bst-section-count" data-bst-count="${c.id}-traits">${traits.length}</span>
         <button class="bst-add-row-btn" data-bst-action="addRow" data-id="${c.id}" data-type="traits">+ Ajouter</button>
       </div>
@@ -1773,14 +1908,14 @@ function _renderPanelAdmin(c, rs) {
   const butinsHtml = `
     <div class="bst-section">
       <div class="bst-section-title">
-        💰 Butins
+        Butins
         <span class="bst-section-count" data-bst-count="${c.id}-butins">${butins.length}</span>
         <button class="bst-add-row-btn" data-bst-action="pickerOpen" data-id="${c.id}">+ Ajouter</button>
       </div>
       <div class="bst-butin-or-row">
-        <span class="bst-butin-or-ic">🪙</span>
-        <input class="bst-p-input bst-butin-or-input" type="text" placeholder="Or lâché — ex : 5d4 ou 20"
-          value="${_esc(c.or || '')}" title="Or lâché à la mort : nombre brut (20) ou formule de dés (5d4, 2d6+3). Le jet est fait dans le VTT."
+        <span class="bst-butin-or-ic">Or</span>
+        <input class="bst-p-input bst-butin-or-input" type="text" placeholder="Or lache - ex : 5d4 ou 20"
+          value="${_esc(c.or || '')}" title="Or lache a la mort : nombre brut (20) ou formule de des (5d4, 2d6+3). Le jet est fait dans le VTT."
           data-bst-action="saveOr" data-bst-on="input" data-id="${c.id}">
         <span class="bst-butin-or-hint">brut ou XdY</span>
       </div>
@@ -1794,6 +1929,7 @@ function _renderPanelAdmin(c, rs) {
     ${heroHtml}
     <div class="bst-panel-body">
       ${vitalsHtml}
+      ${_renderTacticalSummary(c)}
       ${caracsHtml}
       ${tokenHtml}
       ${descHtml}
@@ -1802,7 +1938,7 @@ function _renderPanelAdmin(c, rs) {
       ${traitsHtml}
       ${butinsHtml}
       <div class="bst-admin-actions">
-        <button class="bst-btn-delete" style="flex:1" data-bst-action="deleteBeast" data-id="${c.id}">🗑️ Supprimer cette créature</button>
+        <button class="bst-btn-delete" style="flex:1" data-bst-action="deleteBeast" data-id="${c.id}">Supprimer cette creature</button>
       </div>
     </div>
   </div>`;
@@ -1811,25 +1947,25 @@ function _renderPanelAdmin(c, rs) {
 export async function deleteBeast(id) {
   const col = STORE.currentCol || 'bestiary';
   const c = STORE.creatures.find(x=>x.id===id);
-  if (!await confirmDelete(col, id, `Supprimer "${c?.nom||'cette créature'}" ?`, {title: 'Supprimer la créature'})) return;
+  if (!await confirmDelete(col, id, `Supprimer "${c?.nom||'cette creature'}" ?`, {title: 'Supprimer la creature'})) return;
   if (STORE.activeId === id) STORE.activeId = null;
   await _bstHydrate();
   _render();
-  showNotif('Créature supprimée.','success');
+  showNotif('Creature supprimee.','success');
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // SUIVI JOUEUR
-// ══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 async function _saveTracker() {
-  // Le tracker vient d'être muté localement et le DOM reflète déjà la saisie
-  // (input.value, barres PV/PM patchées par _bstAdjust). On aligne la signature
-  // de rendu sur cet état AVANT l'écriture : quand l'écho du watch reviendra avec
-  // exactement la même donnée, `_bstSig() === _bstRenderSig` → pas de _render(),
+  // Le tracker vient d'Ãªtre mutÃ© localement et le DOM reflÃ¨te dÃ©jÃ  la saisie
+  // (input.value, barres PV/PM patchÃ©es par _bstAdjust). On aligne la signature
+  // de rendu sur cet Ã©tat AVANT l'Ã©criture : quand l'Ã©cho du watch reviendra avec
+  // exactement la mÃªme donnÃ©e, `_bstSig() === _bstRenderSig` â†’ pas de _render(),
   // donc pas de rebuild innerHTML qui remettrait le scroll du panneau en haut.
   _bstRenderSig = _bstSig();
-  // viewAsUid n'est respecté QUE pour un admin — sinon un joueur écrirait dans le
-  // doc d'un autre joueur (uid périmé d'une session MJ précédente).
+  // viewAsUid n'est respectÃ© QUE pour un admin â€” sinon un joueur Ã©crirait dans le
+  // doc d'un autre joueur (uid pÃ©rimÃ© d'une session MJ prÃ©cÃ©dente).
   const uid = (STATE.isAdmin && STORE.viewAsUid) || STATE.user?.uid; if (!uid) return;
   await tryDoc('bestiary_tracker', uid, { data: STORE.tracker });
 }
@@ -1894,20 +2030,62 @@ function _bstSelectRang(rang) {
     btn.style.color      = active ? rst.color : 'var(--text-dim)';
   });
 }
-// Recherche : met à jour la valeur et filtre la grille SANS rerender complet
+// Recherche : met Ã  jour la valeur et filtre la grille SANS rerender complet
 function _bstSearchInput(val) {
   STORE.searchVal = val;
+  let visible = 0;
   // Filtrer en live sans reconstruire toute la page
   document.querySelectorAll('.bst-card').forEach(card => {
     const id = card.dataset.beastId;
     const c  = STORE.creatures.find(x => x.id === id);
     if (!c) return;
-    card.style.display = _beastMatchesFilters(c, { search: val }) ? '' : 'none';
+    const match = _beastMatchesFilters(c, { search: val });
+    card.style.display = match ? '' : 'none';
+    if (match) visible++;
   });
+  document.querySelectorAll('[data-bst-visible-count], [data-bst-list-count]').forEach(el => {
+    el.textContent = String(visible);
+  });
+  const plural = document.querySelector('[data-bst-list-plural]');
+  if (plural) plural.textContent = visible > 1 ? 's' : '';
 }
 
 function _bstSearch(val) { STORE.searchVal = val; _render(); } // legacy
 function _bstSetType(type) { STORE.filterType = type; _render(); }
+function _bstSetPrep(prep) { STORE.filterPrep = prep || ''; _render(); }
+function _bstClearCompare() { STORE.compareIds = []; _render(); }
+function _bstToggleCompare(id) {
+  if (!STATE.isAdmin || !id) return;
+  const set = new Set(STORE.compareIds);
+  if (set.has(id)) set.delete(id);
+  else {
+    if (set.size >= 4) showNotif('Comparaison limitee a 4 creatures.', 'info');
+    else set.add(id);
+  }
+  STORE.compareIds = [...set];
+  _render();
+}
+
+async function _bstDuplicateBeast(id) {
+  if (!STATE.isAdmin || !id) return;
+  const source = STORE.creatures.find(c => c.id === id);
+  if (!source) return;
+  const col = STORE.currentCol || 'bestiary';
+  const copy = JSON.parse(JSON.stringify(source));
+  delete copy.id;
+  copy.nom = `${source.nom || 'Creature'} (copie)`;
+  copy.hidden = true;
+  copy.ordre = _bstNextOrderIndex();
+  try {
+    const newId = await addToCol(col, copy);
+    await _bstHydrate();
+    STORE.activeId = newId;
+    _render();
+    showNotif('Creature dupliquee et cachee aux joueurs.', 'success');
+  } catch (e) {
+    notifySaveError(e);
+  }
+}
 
 // Switch de bestiaire (admin uniquement)
 async function _bstSwitchBestiaire(id) {
@@ -1916,11 +2094,13 @@ async function _bstSwitchBestiaire(id) {
   STORE.searchVal   = '';
   STORE.filterType  = '';
   STORE.filterRang  = '';
+  STORE.filterPrep  = '';
+  STORE.compareIds  = [];
   await renderBestiary();
 }
 
-// Vue admin → joueur : voir/modifier les estimations d'un joueur.
-// uid vide ou égal à l'UID admin → retour à la vue MJ.
+// Vue admin â†’ joueur : voir/modifier les estimations d'un joueur.
+// uid vide ou Ã©gal Ã  l'UID admin â†’ retour Ã  la vue MJ.
 async function _bstViewAs(uid) {
   if (!STATE.isAdmin) return;
   STORE.viewAsUid = (uid && uid !== STATE.user?.uid) ? uid : null;
@@ -1939,18 +2119,20 @@ async function _bstCreateBestiaire() {
   STORE.bestiaireId = id;
   STORE.activeId    = null;
   STORE.filterRang  = '';
+  STORE.filterPrep  = '';
+  STORE.compareIds  = [];
   await renderBestiary();
 }
 
 // Affiche/retire la croix d'une ligne de butin selon qu'elle est remplie, en DOM
-// pur (pas de _render → pas de saut de scroll). La délégation scopée capte les
-// boutons ajoutés dynamiquement.
+// pur (pas de _render â†’ pas de saut de scroll). La dÃ©lÃ©gation scopÃ©e capte les
+// boutons ajoutÃ©s dynamiquement.
 function _bstLootRefreshDel(id, idx) {
   const row = document.querySelector(`.bst-loot-est[data-loot-cid="${id}"][data-loot-idx="${idx}"]`);
   if (!row) return;
   const ded    = STORE.tracker[id]?.deductions || {};
   const filled = !!(ded[`but_nom_${idx}`] || ded[`but_qte_${idx}`]);
-  if (filled === !!row.querySelector('.bst-loot-del')) return;  // déjà dans le bon état
+  if (filled === !!row.querySelector('.bst-loot-del')) return;  // dÃ©jÃ  dans le bon Ã©tat
   row.querySelector('.bst-loot-del, .bst-loot-del-spacer')?.remove();
   if (filled) {
     const btn = document.createElement('button');
@@ -1960,7 +2142,7 @@ function _bstLootRefreshDel(id, idx) {
     btn.dataset.id = id;
     btn.dataset.idx = idx;
     btn.title = 'Effacer cette ligne';
-    btn.textContent = '✕';
+    btn.textContent = 'x';
     row.appendChild(btn);
   } else {
     const sp = document.createElement('span');
@@ -1969,24 +2151,24 @@ function _bstLootRefreshDel(id, idx) {
   }
 }
 
-// Saisie d'un input de butin : sauvegarde + bascule la croix immédiatement.
+// Saisie d'un input de butin : sauvegarde + bascule la croix immÃ©diatement.
 function _bstSetLoot(el) {
   _bstSetDeduction(el.dataset.id, el.dataset.key, el.value);
   _bstLootRefreshDel(el.dataset.id, el.dataset.idx);
 }
 
-// Efface une ligne de butin estimé en un clic : retire les clés, vide les inputs
-// et la croix dans le DOM (pas de _render → pas de saut de scroll, cf. _saveTracker).
+// Efface une ligne de butin estimÃ© en un clic : retire les clÃ©s, vide les inputs
+// et la croix dans le DOM (pas de _render â†’ pas de saut de scroll, cf. _saveTracker).
 function _bstClearLoot(id, idx) {
   const d = STORE.tracker[id]?.deductions;
   if (d) { delete d[`but_nom_${idx}`]; delete d[`but_qte_${idx}`]; }
   const row = document.querySelector(`.bst-loot-est[data-loot-cid="${id}"][data-loot-idx="${idx}"]`);
   if (row) row.querySelectorAll('.bst-deduct-input').forEach(inp => { inp.value = ''; });
-  _bstLootRefreshDel(id, idx);  // ligne vide → remplace la croix par le spacer
+  _bstLootRefreshDel(id, idx);  // ligne vide â†’ remplace la croix par le spacer
   _saveTracker();
 }
 
-// Déductions joueur
+// DÃ©ductions joueur
 function _bstSetDeduction(id, key, val) {
   if (!STORE.tracker[id]) STORE.tracker[id] = {};
   if (!STORE.tracker[id].deductions) STORE.tracker[id].deductions = {};
@@ -2002,7 +2184,7 @@ function _bstAdjust(id, type, delta) {
   const c = STORE.creatures.find(x=>x.id===id); if (!c) return;
   if (!STORE.tracker[id]) STORE.tracker[id] = {};
   const curKey = type==='pv'?'pvActuel':'pmActuel';
-  // Vue MJ : connaît le max et le respecte. Vue joueur (ou MJ consultant un joueur) : pas de borne max.
+  // Vue MJ : connaÃ®t le max et le respecte. Vue joueur (ou MJ consultant un joueur) : pas de borne max.
   const max    = _isAdminView() ? (parseInt(c[type==='pv'?'pvMax':'pmMax'])||0) : null;
   const cur    = STORE.tracker[id][curKey] !== undefined ? parseInt(STORE.tracker[id][curKey]) : (max ?? 0);
   const newVal = max !== null ? Math.max(0, Math.min(max, cur + delta)) : Math.max(0, cur + delta);
@@ -2038,7 +2220,7 @@ function _bstSetNotes(id, val) {
 
 function _bstReset(id) {
   const c = STORE.creatures.find(x=>x.id===id); if (!c) return;
-  // Vue MJ : remet les vraies valeurs. Vue joueur (ou MJ consultant un joueur) : remet les estimations à zéro.
+  // Vue MJ : remet les vraies valeurs. Vue joueur (ou MJ consultant un joueur) : remet les estimations Ã  zÃ©ro.
   STORE.tracker[id] = _isAdminView()
     ? { pvActuel: parseInt(c.pvMax)||0, pmActuel: parseInt(c.pmMax)||0, notes:'' }
     : { pvActuel: 0, pmActuel: 0, caEstimee: 0, vitEstimee: 0, xpEstimee: 0, pvCombat: 0, notes:'', deductions:{} };
@@ -2046,18 +2228,18 @@ function _bstReset(id) {
   _render();
 }
 
-// ── Override PAGES.bestiaire + exports ───────────────────────────────────────
+// â”€â”€ Override PAGES.bestiaire + exports â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 PAGES.bestiaire = renderBestiary;
 
-// ──────────────────────────────────────────────────────────────────────────────
-// MODAL IMAGE — éditeur d'image dédié de la créature (depuis le panneau)
-// ──────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// MODAL IMAGE â€” Ã©diteur d'image dÃ©diÃ© de la crÃ©ature (depuis le panneau)
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function openBeastImageModal(id) {
   const c = STORE.creatures.find(x => x.id === id);
   if (!c) return;
   _bstCropper?.destroy(); _bstCropper = null;
 
-  openModal(`📷 Image — ${_esc(c.nom || 'Créature')}`, `
+  openModal(`Image - ${_esc(c.nom || 'Creature')}`, `
     <div class="form-group">
       <label>Image (ratio 4:3)</label>
       <div id="bst-img-drop" style="border:2px dashed var(--border-strong);border-radius:12px;
@@ -2067,13 +2249,13 @@ export async function openBeastImageModal(id) {
       <div id="bst-img-crop-wrap" style="display:none;margin-top:.75rem">
         <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">Recadrez l'image</div>
         <canvas id="bst-img-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
-        <button type="button" class="btn btn-gold btn-sm" id="bst-img-confirm" style="margin-top:.5rem;width:100%">✂️ Confirmer le recadrage</button>
+        <button type="button" class="btn btn-gold btn-sm" id="bst-img-confirm" style="margin-top:.5rem;width:100%">Confirmer le recadrage</button>
         <div id="bst-img-ok" style="display:none;font-size:.75rem;text-align:center;margin-top:4px"></div>
       </div>
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" data-bst-action="saveImage" data-id="${id}">💾 Enregistrer</button>
-      ${c.imageUrl ? `<button class="btn btn-outline" data-bst-action="removeImage" data-id="${id}">🗑 Retirer</button>` : ''}
+      <button class="btn btn-gold" style="flex:1" data-bst-action="saveImage" data-id="${id}">Enregistrer</button>
+      ${c.imageUrl ? `<button class="btn btn-outline" data-bst-action="removeImage" data-id="${id}">Retirer</button>` : ''}
     </div>
   `);
 
@@ -2119,7 +2301,7 @@ async function _bstSaveImage(id) {
       }
       if (img) img.src = imageUrl;
     }
-    showNotif('Image mise à jour.', 'success');
+    showNotif('Image mise a jour.', 'success');
   }
 }
 
@@ -2131,24 +2313,24 @@ async function _bstRemoveImage(id) {
     _bstCropper?.destroy(); _bstCropper = null;
     closeModal();
     _syncActivePanel();
-    showNotif('Image retirée.', 'success');
+    showNotif('Image retiree.', 'success');
   }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// HANDLERS DE DÉLÉGATION — chaque entrée lit ses paramètres dans `el.dataset`
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// HANDLERS DE DÃ‰LÃ‰GATION â€” chaque entrÃ©e lit ses paramÃ¨tres dans `el.dataset`
 // et appelle la fonction existante. Les fonctions restent sur `window` tant que
 // d'autres features (legacy) peuvent encore les invoquer.
-// ──────────────────────────────────────────────────────────────────────────────
-// ── Export : document HTML imprimable de toutes les créatures (MJ) ────────────
-// Génère un fichier .html autonome (lisible + imprimable en PDF depuis le
-// navigateur) listant chaque créature et ses infos. Téléchargement direct.
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€ Export : document HTML imprimable de toutes les crÃ©atures (MJ) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// GÃ©nÃ¨re un fichier .html autonome (lisible + imprimable en PDF depuis le
+// navigateur) listant chaque crÃ©ature et ses infos. TÃ©lÃ©chargement direct.
 async function _bstExportDocument() {
   if (!STATE.isAdmin) return;
   const list = (STORE.creatures || []).slice()
     .sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
-  if (!list.length) { showNotif('Aucune créature à exporter', 'info'); return; }
-  // Types de dégâts (pour résoudre id → libellé des résistances/immunités…).
+  if (!list.length) { showNotif('Aucune creature a exporter', 'info'); return; }
+  // Types de dÃ©gÃ¢ts (pour rÃ©soudre id â†’ libellÃ© des rÃ©sistances/immunitÃ©sâ€¦).
   if (!STORE.damageTypes) { try { STORE.damageTypes = await loadDamageTypes(); } catch { STORE.damageTypes = []; } }
   try {
     const blob = new Blob([_bstBuildExportHtml(list)], { type: 'text/html;charset=utf-8' });
@@ -2158,14 +2340,14 @@ async function _bstExportDocument() {
     a.download = `bestiaire-${new Date().toISOString().slice(0, 10)}.html`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
-    showNotif(`📄 Bestiaire exporté (${list.length} créature${list.length > 1 ? 's' : ''}).`, 'success');
+    showNotif(`Bestiaire exporte (${list.length} creature${list.length > 1 ? 's' : ''}).`, 'success');
   } catch (e) {
     console.error('[bestiaire] export', e);
-    showNotif("Échec de l'export", 'error');
+    showNotif("Echec de l'export", 'error');
   }
 }
 
-// id (ou objet) de type de dégât → libellé lisible (via STORE.damageTypes).
+// id (ou objet) de type de dÃ©gÃ¢t â†’ libellÃ© lisible (via STORE.damageTypes).
 function _bstDmgLabel(v) {
   const id = (v && typeof v === 'object') ? (v.id || v.type || v.damageTypeId || '') : v;
   const dt = (STORE.damageTypes || []).find(t => t.id === id);
@@ -2184,72 +2366,72 @@ function _bstBuildExportHtml(list) {
   // Trait : nom + effet (description).
   const traitLine = (t) => {
     if (!t || typeof t !== 'object') return `<li>${txt(t)}</li>`;
-    return `<li><b>${e(t.nom || 'Trait')}</b>${t.description ? ` — ${e(t.description)}` : ''}</li>`;
+    return `<li><b>${e(t.nom || 'Trait')}</b>${t.description ? ` - ${e(t.description)}` : ''}</li>`;
   };
-  // Arme naturelle : dégâts (+ bonus, type), portée, toucher, info.
+  // Arme naturelle : dÃ©gÃ¢ts (+ bonus, type), portÃ©e, toucher, info.
   const armeLine = (a) => {
     const parts = [];
     if (a.degats) parts.push(`${e(a.degats)}${a.degatsFlat ? '+' + e(String(a.degatsFlat)) : ''}`);
     const dt = a.damageTypeId ? _bstDmgLabel(a.damageTypeId) : '';
     if (dt) parts.push(dt);
-    if (a.portee) parts.push(`portée ${e(a.portee)}`);
+    if (a.portee) parts.push(`portee ${e(a.portee)}`);
     const toucher = a.toucherAuto ? 'toucher auto'
       : (a.toucherFlat ? `toucher +${e(String(a.toucherFlat))}` : '');
     if (toucher) parts.push(toucher);
-    const meta = parts.length ? ` — ${parts.join(' · ')}` : '';
+    const meta = parts.length ? ` - ${parts.join(' - ')}` : '';
     const info = a.info ? ` <i>${e(a.info)}</i>` : '';
     return `<li><b>${e(a.nom || 'Arme')}</b>${meta}${info}</li>`;
   };
-  // Action (sort de créature) : PM, dégâts, portée, types, runes, effet.
+  // Action (sort de crÃ©ature) : PM, dÃ©gÃ¢ts, portÃ©e, types, runes, effet.
   const actLine = (a) => {
     const parts = [];
     const pm = a.pmOverride ?? a.pm;
     if (pm != null && pm !== '') parts.push(`${e(String(pm))} PM`);
     if (a.degats) parts.push(`${e(a.degats)}${a.degatsFlat ? '+' + e(String(a.degatsFlat)) : ''}`);
-    if (a.portee) parts.push(`portée ${e(a.portee)}`);
+    if (a.portee) parts.push(`portee ${e(a.portee)}`);
     if (Array.isArray(a.types) && a.types.length) parts.push(a.types.map(e).join('/'));
     if (Array.isArray(a.runes) && a.runes.length) parts.push(`runes : ${a.runes.map(e).join(', ')}`);
-    const meta = parts.length ? ` — ${parts.join(' · ')}` : '';
+    const meta = parts.length ? ` - ${parts.join(' - ')}` : '';
     const info = a.info ? ` <i>${e(a.info)}</i>` : '';
     return `<li><b>${a.icon ? e(a.icon) + ' ' : ''}${e(a.nom || 'Action')}</b>${meta}${info}</li>`;
   };
-  // Butin : objet (quantité · chance). L'or éventuel est ajouté à part.
+  // Butin : objet (quantitÃ© Â· chance). L'or Ã©ventuel est ajoutÃ© Ã  part.
   const butinLine = (b) => {
     if (!b || typeof b !== 'object') return `<li>${txt(b)}</li>`;
-    const meta = [b.quantite && `×${e(String(b.quantite))}`, b.chance && e(String(b.chance))].filter(Boolean).join(' · ');
-    return `<li><b>${e(b.nom || 'Objet')}</b>${meta ? ` — ${meta}` : ''}</li>`;
+    const meta = [b.quantite && `x${e(String(b.quantite))}`, b.chance && e(String(b.chance))].filter(Boolean).join(' - ');
+    return `<li><b>${e(b.nom || 'Objet')}</b>${meta ? ` - ${meta}` : ''}</li>`;
   };
   const butinsSection = (c) => {
     const items = (Array.isArray(c.butins) ? c.butins : []).map(butinLine).join('');
-    const or = c.or ? `<li><b>🪙 Or :</b> ${e(String(c.or))}</li>` : '';
+    const or = c.or ? `<li><b>Or :</b> ${e(String(c.or))}</li>` : '';
     return (items || or) ? `<h3>Butins</h3><ul>${items}${or}</ul>` : '';
   };
   const ul = (arr, fn) => (Array.isArray(arr) && arr.length) ? `<ul>${arr.map(fn).join('')}</ul>` : '';
   const section = (label, html) => html ? `<h3>${label}</h3>${html}` : '';
   const relHtml = (c) => {
     const rows = [
-      ['Résistances (½ dégâts)', _bstDmgList(c.resistances)],
-      ['Immunités (0 dégât)',    _bstDmgList(c.immunites)],
+      ['Resistances (1/2 degats)', _bstDmgList(c.resistances)],
+      ['Immunites (0 degat)',    _bstDmgList(c.immunites)],
       ['Absorptions (soigne)',   _bstDmgList(c.absorptions)],
-      ['Faiblesses (×2 dégâts)', _bstDmgList(c.faiblesses)],
+      ['Faiblesses (x2 degats)', _bstDmgList(c.faiblesses)],
     ].filter(([, v]) => v.length);
     return rows.length ? `<ul>${rows.map(([l, v]) => `<li><b>${l} :</b> ${v.map(e).join(', ')}</li>`).join('')}</ul>` : '';
   };
   const card = (c) => {
     const rs = RANG_STYLE[c.rang || 'classique'] || RANG_STYLE.classique;
-    const meta = [rs.label, c.type, c.environnement].filter(Boolean).map(e).join(' · ');
-    const vit = [c.pvMax && `❤️ ${e(String(c.pvMax))} PV`, c.pmMax && `✦ ${e(String(c.pmMax))} PM`,
-      c.ca && `🛡️ CA ${e(String(c.ca))}`, c.vitesse && `💨 ${e(String(c.vitesse))} m`,
-      c.initiative && `⚡ Init ${e(String(c.initiative))}`,
-      c.dangerositeXp && `🏆 ${e(String(c.dangerositeXp))} XP`,
-      ((+c.tokenW > 1) || (+c.tokenH > 1)) && `⬛ ${e(String(c.tokenW || 1))}×${e(String(c.tokenH || 1))} cases`].filter(Boolean).join(' · ');
+    const meta = [rs.label, c.type, c.environnement].filter(Boolean).map(e).join(' - ');
+    const vit = [c.pvMax && `${e(String(c.pvMax))} PV`, c.pmMax && `${e(String(c.pmMax))} PM`,
+      c.ca && `CA ${e(String(c.ca))}`, c.vitesse && `${e(String(c.vitesse))} m`,
+      c.initiative && `Init ${e(String(c.initiative))}`,
+      c.dangerositeXp && `${e(String(c.dangerositeXp))} XP`,
+      ((+c.tokenW > 1) || (+c.tokenH > 1)) && `${e(String(c.tokenW || 1))}x${e(String(c.tokenH || 1))} cases`].filter(Boolean).join(' - ');
     const st = statsHtml(c);
     return `<article class="card">
-      <h2>${e(c.emoji || '🐲')} ${e(c.nom || '?')}${c.niveau ? ` <span class="lvl">Niv. ${e(String(c.niveau))}</span>` : ''}${c.hidden ? ` <span class="hid">🔒 caché aux joueurs</span>` : ''}</h2>
+      <h2>${e(c.emoji || '?')} ${e(c.nom || '?')}${c.niveau ? ` <span class="lvl">Niv. ${e(String(c.niveau))}</span>` : ''}${c.hidden ? ` <span class="hid">cache aux joueurs</span>` : ''}</h2>
       ${meta ? `<div class="meta">${meta}</div>` : ''}
       ${vit ? `<div class="vit">${vit}</div>` : ''}
       ${st ? `<div class="stats">${st}</div>` : ''}
-      ${section('Relations aux dégâts', relHtml(c))}
+      ${section('Relations aux degats', relHtml(c))}
       ${section('Traits', ul(c.traits, traitLine))}
       ${section('Armes naturelles', ul(c.armesNaturelles, armeLine))}
       ${section('Actions', ul(c.actions, actLine))}
@@ -2257,7 +2439,7 @@ function _bstBuildExportHtml(list) {
       ${c.description ? `<div class="desc">${e(c.description)}</div>` : ''}
     </article>`;
   };
-  // Données structurées (pour analyse automatique : id de dégât → libellé résolu).
+  // DonnÃ©es structurÃ©es (pour analyse automatique : id de dÃ©gÃ¢t â†’ libellÃ© rÃ©solu).
   const data = list.map(c => ({
     nom: c.nom || '', rang: c.rang || 'classique', type: c.type || '', environnement: c.environnement || '',
     niveau: c.niveau ?? null, xp: c.dangerositeXp ?? null,
@@ -2299,9 +2481,9 @@ function _bstBuildExportHtml(list) {
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8">`
     + `<meta name="viewport" content="width=device-width,initial-scale=1">`
     + `<title>Bestiaire (${list.length})</title><style>${css}</style></head>`
-    + `<body><header><h1>📖 Bestiaire</h1><p>${list.length} créature${list.length > 1 ? 's' : ''} · exporté le ${e(new Date().toLocaleDateString('fr-FR'))}</p></header>`
+    + `<body><header><h1>Bestiaire</h1><p>${list.length} creature${list.length > 1 ? 's' : ''} - exporte le ${e(new Date().toLocaleDateString('fr-FR'))}</p></header>`
     + `${list.map(card).join('')}`
-    + `<details class="data"><summary>Données structurées (JSON) — pour analyse automatique</summary><pre>${jsonEmbed}</pre></details>`
+    + `<details class="data"><summary>Donnees structurees (JSON) - pour analyse automatique</summary><pre>${jsonEmbed}</pre></details>`
     + `<script type="application/json" id="bestiaire-data">${jsonEmbed}</script>`
     + `</body></html>`;
 }
@@ -2316,10 +2498,15 @@ Object.assign(bstHandlers, {
   createBest:     ()   => _bstCreateBestiaire(),
   setRang:        (el) => _bstSetRang(el.dataset.rang),
   setType:        (el) => _bstSetType(el.dataset.type),
+  setPrep:        (el) => _bstSetPrep(el.dataset.prep),
   search:         (el) => _bstSearchInput(el.value),
   viewAs:         (el) => _bstViewAs(el.dataset.uid || ''),
+  toggleCompare:  (el, ev) => { ev?.stopPropagation?.(); _bstToggleCompare(el.dataset.id); },
+  clearCompare:   (el, ev) => { ev?.stopPropagation?.(); _bstClearCompare(); },
+  quickToggleHidden: (el, ev) => { ev?.stopPropagation?.(); _bstToggleHidden(el.dataset.id); },
+  duplicateBeast: (el, ev) => { ev?.stopPropagation?.(); _bstDuplicateBeast(el.dataset.id); },
 
-  // Panneau admin : édition inline
+  // Panneau admin : Ã©dition inline
   updateNom:      (el) => _bstUpdateNom(el.dataset.id, el.value),
   update:         (el) => _bstUpdate(el.dataset.id, el.dataset.field, el.value),
   updateNum:      (el) => _bstUpdateNum(el.dataset.id, el.dataset.field, el.value),
@@ -2330,7 +2517,7 @@ Object.assign(bstHandlers, {
   syncDmgConfl:   ()   => _bstSyncDmgConflicts(),
   focusInput:     (el) => el.querySelector('input')?.focus(),
 
-  // Vue joueur : estimations / déductions
+  // Vue joueur : estimations / dÃ©ductions
   setStat:        (el) => _bstSetStat(el.dataset.id, el.dataset.key, el.value),
   setDeduction:   (el) => _bstSetDeduction(el.dataset.id, el.dataset.key, el.value),
   setLoot:        (el) => _bstSetLoot(el),
@@ -2348,7 +2535,7 @@ Object.assign(bstHandlers, {
   saveOr:         (el) => _bstSaveOr(el.dataset.id, el.value),
   removeRow:      (el) => _bstRemovePanelRow(el.dataset.id, el.dataset.type, el),
 
-  // Picker de butin (délégation au composant partagé shop-picker.js — pas de handlers locaux)
+  // Picker de butin (dÃ©lÃ©gation au composant partagÃ© shop-picker.js â€” pas de handlers locaux)
   pickerOpen:     (el) => _bstButinPickerOpen(el.dataset.id),
 
   // Image
@@ -2356,6 +2543,6 @@ Object.assign(bstHandlers, {
   saveImage:      (el) => _bstSaveImage(el.dataset.id),
   removeImage:    (el) => _bstRemoveImage(el.dataset.id),
 
-  // Suppression créature
+  // Suppression crÃ©ature
   deleteBeast:    (el, ev) => { ev?.stopPropagation?.(); deleteBeast(el.dataset.id); },
 });
