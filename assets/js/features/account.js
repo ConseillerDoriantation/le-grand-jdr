@@ -13,7 +13,7 @@ import {
 
 import {
   loadChars, loadCollection, deleteFromCol, updateInCol,
-  getDocDataSilent, saveDoc,
+  getDocDataSilent, saveDoc, loadCharsForAdventure,
 } from '../data/firestore.js';
 
 import { openModal, closeModal } from '../shared/modal.js';
@@ -202,41 +202,66 @@ async function renderAccount() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// AVATAR — sélection d'icône proposée par le MJ (catalogue partagé de l'aventure)
+// AVATAR — catalogue d'avatars GLOBAL à l'app + portraits des persos du joueur
 // ══════════════════════════════════════════════════════════════════════════════
-// Catalogue : settings/profileIcons (scope aventure → lisible par tout membre,
-// écriture MJ, aucune règle nouvelle). Choix du joueur : users/{uid}.avatarIcon
-// (doc global). ⚠️ nécessite d'autoriser la clé `avatarIcon` dans la règle
-// isUserSelfUpdate (cf. docs/firestore-rules.md).
+// Catalogue : app_config/profileIcons (GLOBAL à l'app → partagé par toutes les
+// aventures, lecture tout membre connecté, écriture admin). Choix du joueur :
+// users/{uid}.avatarIcon (doc global). ⚠️ nécessite (cf. docs/firestore-rules.md) :
+//  - la clé `avatarIcon` autorisée dans la règle isUserSelfUpdate ;
+//  - une règle lecture/écriture sur la collection globale `app_config`.
 const PROFILE_ICONS_DOC = 'profileIcons';
 let _iconCatalog = null; // cache session
 
 async function _loadIconCatalog(force = false) {
   if (_iconCatalog && !force) return _iconCatalog;
-  const doc = await getDocDataSilent('settings', PROFILE_ICONS_DOC);
+  const doc = await getDocDataSilent('app_config', PROFILE_ICONS_DOC);
   _iconCatalog = Array.isArray(doc?.icons) ? doc.icons.filter(i => i && i.url) : [];
   return _iconCatalog;
 }
 
+// Portrait d'un personnage (mêmes champs que _live côté VTT).
+const _charPortrait = (c) => c?.photoURL || c?.photo || c?.avatar || c?.imageUrl || '';
+
 async function openAvatarPicker() {
   const catalog = await _loadIconCatalog(true);
   const cur = STATE.profile?.avatarIcon || '';
-  const grid = catalog.length
-    ? `<div class="avatar-grid">${catalog.map(ic => `
-        <button class="avatar-opt${cur === ic.url ? ' is-sel' : ''}" data-action="chooseAvatar"
-          data-url="${_esc(ic.url)}" title="${_esc(ic.label || '')}">
-          <img src="${_esc(resolveAvatarUrl(ic.url))}" alt="${_esc(ic.label || '')}" loading="lazy">
-        </button>`).join('')}</div>`
+  const uid = STATE.user?.uid || auth.currentUser?.uid || '';
+  const _lbl = (txt) => `<div style="font-size:.74rem;font-weight:700;color:var(--text-dim);letter-spacing:.02em;margin:.3rem 0 .45rem">${txt}</div>`;
+  const _optBtn = (url, label) => `
+    <button class="avatar-opt${cur === url ? ' is-sel' : ''}" data-action="chooseAvatar"
+      data-url="${_esc(url)}" title="${_esc(label || '')}">
+      <img src="${_esc(resolveAvatarUrl(url))}" alt="${_esc(label || '')}" loading="lazy">
+    </button>`;
+
+  // Portraits des personnages DU JOUEUR sur TOUTES ses aventures : on lit ses
+  // persos (filtrés sur son uid) dans CHACUNE de ses aventures (STATE.adventures),
+  // via les index/règles standard — pas de collectionGroup ni d'index spécial. On
+  // fusionne avec l'aventure courante (déjà en mémoire), dédoublonne par id, et
+  // filtre à ses propres persos ayant un portrait.
+  const _advs = Array.isArray(STATE.adventures) ? STATE.adventures : [];
+  const _cross = (await Promise.all(_advs.map(a => loadCharsForAdventure(a?.id, uid).catch(() => [])))).flat();
+  const _byId = new Map();
+  [...(_cross || []), ...(STATE.characters || [])]
+    .filter(c => c?.uid === uid && _charPortrait(c))
+    .forEach(c => { if (c.id && !_byId.has(c.id)) _byId.set(c.id, c); });
+  const myChars = [..._byId.values()];
+  const charsSection = myChars.length
+    ? _lbl('🧙 Mes personnages') + `<div class="avatar-grid">${myChars.map(c => _optBtn(_charPortrait(c), c.nom || 'Personnage')).join('')}</div>`
+    : '';
+
+  const catalogSection = catalog.length
+    ? _lbl('🎭 Avatars de l\'app') + `<div class="avatar-grid">${catalog.map(ic => _optBtn(ic.url, ic.label)).join('')}</div>`
     : `<div class="acc-avatar-empty">Aucun avatar disponible pour l'instant.${STATE.isAdmin ? ' Ajoutes-en via « Gérer les avatars ».' : ''}</div>`;
 
   openModal('🎭 Choisir un avatar', `
-    ${grid}
+    ${charsSection}
+    ${catalogSection}
     <div style="display:flex;gap:.5rem;margin-top:.9rem;flex-wrap:wrap;align-items:center">
       ${cur ? `<button class="btn btn-outline btn-sm" data-action="chooseAvatar" data-url="">↩︎ Avatar par défaut</button>` : ''}
       ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="openAvatarManager">⚙️ Gérer les avatars</button>` : ''}
       <button class="btn btn-outline btn-sm" style="margin-left:auto" data-action="_accClose">Fermer</button>
     </div>
-  `, { subtitle: 'Sélection proposée par le Maître de Jeu', accent: '#4f8cff' });
+  `, { subtitle: "Tes personnages ou les avatars de l'app", accent: '#4f8cff' });
 }
 
 async function chooseAvatar(url) {
@@ -290,12 +315,12 @@ function _renderAvatarManager(catalog) {
       <button class="btn btn-gold" style="flex:1" data-action="addAvatarIcon">＋ Ajouter</button>
       <button class="btn btn-outline btn-sm" data-action="openAvatarPicker">‹ Retour</button>
     </div>
-  `, { subtitle: "Catalogue partagé de l'aventure", accent: '#e8b84b' });
+  `, { subtitle: "Catalogue global de l'app", accent: '#e8b84b' });
 }
 
 async function _persistCatalog(icons) {
   _iconCatalog = icons;
-  await saveDoc('settings', PROFILE_ICONS_DOC, { icons });
+  await saveDoc('app_config', PROFILE_ICONS_DOC, { icons });
 }
 
 async function addAvatarIcon() {

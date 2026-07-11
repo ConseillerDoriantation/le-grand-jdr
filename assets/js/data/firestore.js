@@ -19,7 +19,7 @@
 import {
   db,
   doc, setDoc, getDoc,
-  collection, getDocs,
+  collection, collectionGroup, getDocs,
   addDoc, updateDoc, deleteDoc,
   onSnapshot,
   query, where,
@@ -29,8 +29,10 @@ import {
 // ── Scope aventure ─────────────────────────────
 let _adventureId = null;
 
-// Collections globales — non scopées à une aventure
-const _GLOBAL_COLS = new Set(['users', 'adventures']);
+// Collections globales — non scopées à une aventure.
+// `app_config` : réglages app-wide (ex. catalogue d'avatars) — partagés par
+// toutes les aventures, lecture tout membre connecté, écriture admin.
+const _GLOBAL_COLS = new Set(['users', 'adventures', 'app_config']);
 
 export function setCurrentAdventure(id) {
   if (id === _adventureId) return;
@@ -834,6 +836,42 @@ export async function deleteFromCol(col, id) {
 // ── Spécifique personnages ─────────────────────
 const _inventoryNormAttempted = new Set();
 const _lacerationMigrAttempted = new Set();
+
+// Personnages d'un joueur dans TOUTES ses aventures (via collectionGroup).
+// Sert l'écran Compte (portraits d'avatar cross-aventures). Requiert une règle
+// collectionGroup `characters` (uid == self) + un index collection-group sur
+// `uid`. Échec (règle/index absents) → [] (l'appelant retombe sur l'aventure
+// courante). Lecture ponctuelle, hors des caches session-live.
+export async function loadMyCharactersAcrossAdventures(uid) {
+  if (!uid) return [];
+  try {
+    const snap = await getDocs(query(collectionGroup(db, 'characters'), where('uid', '==', uid)));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    // On logge le MESSAGE complet (pas juste le code) : en cas d'index manquant,
+    // Firestore y met un lien direct « create index » à cliquer.
+    console.warn('[firestore] characters cross-aventures (collectionGroup) — index/règle manquant ?',
+      '\ncode:', e?.code, '\n', e?.message || e);
+    return [];
+  }
+}
+
+// Personnages d'UNE aventure donnée (par id), sans toucher au scope courant.
+// Filtre optionnel sur `uid`. Utilise l'index single-field AUTOMATIQUE sur `uid`
+// (scope collection) + la règle characters existante (inAdventure) → aucun index
+// ni règle spéciale à créer. Sert à agréger les persos cross-aventures (écran
+// Compte). Échec (droits) → [].
+export async function loadCharsForAdventure(adventureId, uid = null) {
+  if (!adventureId) return [];
+  try {
+    const col = collection(db, 'adventures', adventureId, 'characters');
+    const snap = await getDocs(uid ? query(col, where('uid', '==', uid)) : col);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.warn('[firestore] loadCharsForAdventure', adventureId, e?.code || e);
+    return [];
+  }
+}
 
 export async function loadChars(uid = null) {
   const path = _colPath('characters');
