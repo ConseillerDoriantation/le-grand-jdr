@@ -1925,6 +1925,19 @@ select.input-field, select.input-sm { cursor:pointer; }
 .notif.show { transform:translateY(0) scale(1); opacity:1; }
 .notif.success { background:rgba(53,211,153,0.16); border:1px solid rgba(53,211,153,0.28); color:#67e7b4; }
 .notif.error { background:rgba(255,107,122,0.16); border:1px solid rgba(255,107,122,0.28); color:#ff9aa5; }
+/* Bouton d'action optionnel dans le toast (ex. « ↺ Annuler ») */
+.notif .notif-action {
+  margin-left:0.8rem;
+  padding:0.3rem 0.7rem;
+  border-radius:10px;
+  border:1px solid currentColor;
+  background:transparent;
+  color:inherit;
+  font:inherit;
+  font-weight:700;
+  cursor:pointer;
+}
+.notif .notif-action:hover { background:rgba(255,255,255,0.10); }
 
 /* LOADING */
 .loading {

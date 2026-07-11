@@ -13,6 +13,7 @@ import {
   formatItemBonusText, STAT_META, modStr,
 } from '../../shared/char-stats.js';
 import { getArmorSetData, getMainWeapon, getWeaponToucherParts, getWeaponDegatsParts } from './data.js';
+import { spellVM } from './spells-calc.js';
 
 const EXPORT_VERSION = 1;
 
@@ -210,21 +211,24 @@ function _buildArmor(c) {
 function _buildSpells(c) {
   const sorts = (c.deck_sorts || []).filter(s => s.actif);
   if (!sorts.length) return '';
+  // Présentateur partagé : coût effectif (override MJ + Set Léger) et champs
+  // actuels (icon/pm/effet) avec tolérance legacy (icone/cout/description).
+  const pmDelta = getArmorSetData(c)?.modifiers?.spellPmDelta || 0;
   return `
     <section class="ps-section ps-section--spells">
       <h2 class="ps-section-title">Sorts actifs <span class="ps-section-count">${sorts.length}</span></h2>
       <div class="ps-spells">
         ${sorts.map(s => {
-          const cost = s.cout != null ? `${s.cout} PM` : '';
+          const vm = spellVM(s, pmDelta);
           const noyau = s.noyauNom || s.noyau || '';
           return `<div class="ps-spell">
             <div class="ps-spell-hd">
-              <span class="ps-spell-ico">${s.icone || '✨'}</span>
+              <span class="ps-spell-ico">${vm.icon}</span>
               <span class="ps-spell-name">${_esc(s.nom || 'Sort sans nom')}</span>
-              ${cost ? `<span class="ps-spell-cost">${cost}</span>` : ''}
+              ${vm.pm != null ? `<span class="ps-spell-cost">${vm.pm} PM</span>` : ''}
             </div>
             ${noyau ? `<div class="ps-spell-noyau">${_esc(noyau)}</div>` : ''}
-            ${s.description ? `<div class="ps-spell-desc">${_esc(s.description)}</div>` : ''}
+            ${vm.effet ? `<div class="ps-spell-desc">${_esc(vm.effet)}</div>` : ''}
           </div>`;
         }).join('')}
       </div>

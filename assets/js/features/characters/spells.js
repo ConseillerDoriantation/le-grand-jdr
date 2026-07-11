@@ -5,7 +5,7 @@ import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal, pushModal, popModal, closeModalDirect, updateModalContent, confirmModal, setModalCloseGuard, clearModalCloseGuard } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br, _norm } from '../../shared/html.js';
-import { calcDeckMax, getMaitriseBonus as getSharedMaitriseBonus } from '../../shared/char-stats.js';
+import { calcDeckMax, calcPMMax, getMaitriseBonus as getSharedMaitriseBonus } from '../../shared/char-stats.js';
 import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, getMatrixSuggestions, getComboConfig } from '../../shared/spell-matrices.js';
@@ -14,17 +14,27 @@ import { makeSortable } from '../../shared/sortable-helper.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
-import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds } from './spells-calc.js';
 
 let _sortsSearch = '';
-let _sortsView = 'all';
-let _sortsTypeFilter = '';
+// Facettes COMBINABLES : type ET rune ET noyau (chacune toggle indépendamment).
+let _sortsTypeFilter = '';    // '' | 'offensif' | 'defensif' | 'utilitaire'
+let _sortsRuneFilter = '';    // '' | nom de rune
+let _sortsNoyauFilter = '';   // '' | clé de noyau (_noyauFilterKey)
 let _sortsPmFilter = '';   // filtre par coût en PM : '' | 'low' | 'mid' | 'high'
-// Densité d'affichage : 'cards' (grille) | 'list' (une ligne par sort) | 'tiles'
-// (Grimoire : tuiles + tooltip de jeu + deck en sockets). Préférence d'affichage
-// persistée en localStorage — PAS un filtre (jamais reset par ↺).
-let _sortsDensity = ['list', 'tiles'].includes(lsJson.get('cs-sorts-density')) ? lsJson.get('cs-sorts-density') : 'cards';
+// Mode de l'onglet : 'grimoire' (gérer — cartes/liste, catégories, édition) |
+// 'prepare' (préparer le Deck — tuiles + sockets + PM). Persisté en localStorage
+// (globalement en défaut + par personnage via cs-sorts-ui).
+// Rétro-compat : ancienne densité 'tiles' stockée = mode Préparer.
+let _sortsMode = ['grimoire', 'prepare'].includes(lsJson.get('cs-sorts-mode'))
+  ? lsJson.get('cs-sorts-mode')
+  : (lsJson.get('cs-sorts-density') === 'tiles' ? 'prepare' : 'grimoire');
+// Densité du Grimoire : 'list' (une ligne par sort — défaut, scan rapide) |
+// 'cards' (grille détaillée). Préférence persistée — PAS un filtre (jamais reset par ↺).
+let _sortsDensity = lsJson.get('cs-sorts-density') === 'cards' ? 'cards' : 'list';
 let _sortsValidationFilter = '';
+let _sortsReplaceIdx = null;   // mode « Remplacer quel sort ? » : index du sort entrant
+let _sortsUiCharId = null;     // perso dont l'état UI (mode/densité/pliage) est chargé
 let _sortsOrder = 'manual';
 let _sortsSearchTimer = null;
 let _sortsCatCollapsed = {};
@@ -69,7 +79,36 @@ function _sortValidationState(s) {
 
 function _sortsHasActiveOrderFilter() {
   const hasCollapsedCat = Object.values(_sortsCatCollapsed || {}).some(Boolean);
-  return !!(_sortsSearch || _sortsTypeFilter || _sortsPmFilter || _sortsView === 'deck' || _sortsOrder !== 'manual' || (STATE.isAdmin && _sortsValidationFilter) || hasCollapsedCat);
+  return !!(_sortsSearch || _sortsTypeFilter || _sortsRuneFilter || _sortsNoyauFilter
+    || _sortsPmFilter || _sortsOrder !== 'manual' || _sortsValidationFilter || hasCollapsedCat);
+}
+
+// Densité effective : le mode Préparer rend toujours en tuiles, le Grimoire
+// suit la préférence cartes/liste.
+function _sortsEffDensity() {
+  return _sortsMode === 'prepare' ? 'tiles' : _sortsDensity;
+}
+
+// ── État UI PAR PERSONNAGE (mode / densité / catégories pliées) ─────────────
+// Un seul doc localStorage `cs-sorts-ui` : { [charId]: { mode, density, collapsed } }.
+// Au changement de perso : on charge son état et on remet les filtres transitoires
+// à zéro (recherche/facettes appartiennent à une session de consultation, pas au perso).
+function _sortsLoadUiFor(charId) {
+  if (!charId || charId === _sortsUiCharId) return;
+  _sortsUiCharId = charId;
+  const ui = (lsJson.get('cs-sorts-ui') || {})[charId] || {};
+  if (['grimoire', 'prepare'].includes(ui.mode)) _sortsMode = ui.mode;
+  if (['cards', 'list'].includes(ui.density))    _sortsDensity = ui.density;
+  _sortsCatCollapsed = (ui.collapsed && typeof ui.collapsed === 'object') ? { ...ui.collapsed } : {};
+  _sortsSearch = ''; _sortsTypeFilter = ''; _sortsRuneFilter = ''; _sortsNoyauFilter = '';
+  _sortsPmFilter = ''; _sortsValidationFilter = ''; _sortsOrder = 'manual';
+  _sortsReplaceIdx = null; _openSortIdx = null;
+}
+function _sortsPersistUi() {
+  if (!_sortsUiCharId) return;
+  const all = lsJson.get('cs-sorts-ui') || {};
+  all[_sortsUiCharId] = { mode: _sortsMode, density: _sortsDensity, collapsed: _sortsCatCollapsed || {} };
+  lsJson.set('cs-sorts-ui', all);
 }
 
 function _noyauFilterKey(t) {
@@ -77,10 +116,8 @@ function _noyauFilterKey(t) {
 }
 
 function _effectiveSortPm(s, pmDelta = 0) {
-  const base = Number.isFinite(parseInt(s?.pmOverride)) ? parseInt(s.pmOverride)
-    : Number.isFinite(parseInt(s?.pm)) ? parseInt(s.pm)
-      : 0;
-  return Math.max(0, base + (parseInt(pmDelta) || 0));
+  // Une seule vérité : le présentateur partagé (override MJ > pm > cout legacy + delta).
+  return spellVM(s, pmDelta).pm ?? 0;
 }
 
 // Tranche de coût d'un sort (PM effectif, set léger inclus) — pour le filtre par mana.
@@ -162,10 +199,13 @@ function _renderDeckStats(activeSorts = [], deckMax = Infinity, pmDelta = 0) {
 // Chaque sort préparé = un socket rempli (clic = retirer, hover = fiche) ;
 // la capacité INT restante = sockets vides en pointillés (clic = suggère les
 // sorts préparables). Remplace la ligne 📊 deckstrip en densité 'tiles'.
-function _renderDeckSockets(entries, deckMax, pmDelta, canEdit) {
+function _renderDeckSockets(entries, deckMax, pmDelta, canEdit, pmCur = null, pmMax = null) {
   const over = Number.isFinite(deckMax) && entries.length > deckMax;
+  const replacing = _sortsReplaceIdx != null;
   const slots = entries.map(({ s, i }) => canEdit
-    ? `<button class="cs-sock is-filled" data-action="toggleSort" data-idx="${i}" title="${_esc(s.nom || 'Sort')} — retirer du Deck"><span class="cs-sock-ic">${s.icon ? _esc(s.icon) : '✦'}</span><span class="cs-sock-x">✕</span></button>`
+    ? (replacing
+      ? `<button class="cs-sock is-filled is-swap" data-action="_sortsReplaceWith" data-idx="${i}" title="Remplacer ${_esc(s.nom || 'ce sort')} par le sort choisi"><span class="cs-sock-ic">${s.icon ? _esc(s.icon) : '✦'}</span><span class="cs-sock-x">⇄</span></button>`
+      : `<button class="cs-sock is-filled" data-action="toggleSort" data-idx="${i}" title="${_esc(s.nom || 'Sort')} — retirer du Deck"><span class="cs-sock-ic">${s.icon ? _esc(s.icon) : '✦'}</span><span class="cs-sock-x">✕</span></button>`)
     : `<span class="cs-sock is-filled" data-idx="${i}" title="${_esc(s.nom || 'Sort')}"><span class="cs-sock-ic">${s.icon ? _esc(s.icon) : '✦'}</span></span>`);
   if (Number.isFinite(deckMax)) {
     for (let k = entries.length; k < deckMax; k++) {
@@ -175,12 +215,111 @@ function _renderDeckSockets(entries, deckMax, pmDelta, canEdit) {
     }
   }
   const pmSum = entries.reduce((a, { s }) => a + _effectiveSortPm(s, pmDelta), 0);
-  return `<div class="cs-sorts-sockets ${over ? 'is-over' : ''}">
+  const pmRes = pmMax != null
+    ? `<span class="cs-sorts-pmres ${pmCur <= Math.floor(pmMax / 4) ? 'is-low' : ''}" title="Tes points de magie actuels / maximum">💧 <b>${pmCur}</b><small>/${pmMax} PM</small></span>`
+    : '';
+  return `<div class="cs-sorts-sockets ${over ? 'is-over' : ''} ${replacing ? 'is-replacing' : ''}">
     <span class="cs-sorts-sockets-lbl" title="Ton Deck : sorts préparés / capacité (INT)">⚡</span>
     <div class="cs-sorts-sockets-row">${slots.join('')}</div>
-    ${pmSum ? `<span class="cs-sorts-sockets-pm" title="Coût total si chaque sort préparé est lancé une fois">Σ <b>${pmSum} PM</b></span>` : ''}
+    ${replacing ? `<span class="cs-sorts-swaphint">Remplacer quel sort ?</span>
+      <button class="cs-sorts-swapcancel" data-action="_sortsCancelReplace" title="Annuler le remplacement">✕ Annuler</button>` : ''}
+    <span class="cs-sorts-sockets-right">
+      ${pmSum ? `<span class="cs-sorts-sockets-pm" title="Coût total si chaque sort préparé est lancé une fois">Σ <b>${pmSum} PM</b></span>` : ''}
+      ${pmRes}
+    </span>
   </div>`;
 }
+
+// ── Interactions tuile (mode Préparer) ───────────────────────────────────────
+// Pointeur fin : clic = préparer/retirer, avec flux « Remplacer quel sort ? » si
+// le Deck est plein. Tactile (pas de survol) ou lecture seule : tap = fiche rapide
+// (le tap ne prépare JAMAIS à l'aveugle — la tooltip n'existe pas sur tactile).
+function _sortsTileTap(i) {
+  const canEdit = charSession.getCanEditChar();
+  if (!canEdit || !window.matchMedia?.('(hover: hover)').matches) { _sortsOpenSheet(i); return; }
+  _sortsTileToggle(i);
+}
+
+async function _sortsTileToggle(i) {
+  const c = _getCurrentSpellChar(); if (!c) return;
+  const s = (c.deck_sorts || [])[i]; if (!s) return;
+  const validated = STATE.isAdmin || _sortValidationState(s) === 'ok';
+  const deckMax = calcDeckMax(c);
+  const deckCount = (c.deck_sorts || []).filter(x => x?.actif).length;
+  if (!s.actif && validated && Number.isFinite(deckMax) && deckCount >= deckMax) {
+    _sortsReplaceIdx = i;
+    _sortsRerender();
+    showNotif('Deck plein — choisis dans le tray ⚡ le sort à remplacer.', 'info');
+    return;
+  }
+  // Import dynamique : évite un cycle statique spells → forms (→ pages → characters).
+  const { toggleSort } = await import('./forms.js');
+  toggleSort(i);
+}
+
+function _sortsCancelReplace() { _sortsReplaceIdx = null; _sortsRerender(); }
+
+// Échange en UNE écriture : le sort du socket sort du Deck, le sort choisi y entre.
+async function _sortsReplaceWith(outIdx) {
+  const c = _getCurrentSpellChar();
+  const inIdx = _sortsReplaceIdx;
+  _sortsReplaceIdx = null;
+  if (!c || inIdx == null) { _sortsRerender(); return; }
+  const sorts = [...(c.deck_sorts || [])];
+  const sIn = sorts[inIdx], sOut = sorts[outIdx];
+  if (!sIn || !sOut || !sOut.actif || sIn.actif) { _sortsRerender(); return; }
+  sorts[outIdx] = { ...sOut, actif: false };
+  sorts[inIdx]  = { ...sIn,  actif: true };
+  ensureSpellIds(sorts);
+  if (await trySave('characters', c.id, { deck_sorts: sorts })) {
+    c.deck_sorts = sorts;
+    if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
+    if (charSession.getCurrentChar()?.id === c.id)
+      charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+    showNotif(`⚡ ${_esc(sIn.nom || 'Sort')} remplace ${_esc(sOut.nom || 'ce sort')} dans le Deck`, 'success');
+  }
+  _renderSpellsTab(c);
+}
+
+// ── Fiche rapide (tactile / lecture seule) : clone de la carte en bottom-sheet ──
+let _spellSheetEl = null;
+function _sortsCloseSheet() { _spellSheetEl?.remove(); _spellSheetEl = null; }
+function _sortsOpenSheet(i) {
+  _sortsCloseSheet();
+  _spellTTHide();
+  const c = _getCurrentSpellChar();
+  const s = (c?.deck_sorts || [])[i]; if (!s) return;
+  const canEdit = charSession.getCanEditChar();
+  const card = document.querySelector(`.cs-spellcard[data-sort-idx="${i}"]`); if (!card) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'cs-spell-sheet-overlay';
+  wrap.innerHTML = `<div class="cs-v3 cs-spell-sheet" role="dialog" aria-modal="true" aria-label="${_esc(s.nom || 'Sort')}">
+    <div class="cs-spell-sheet-card"></div>
+    <div class="cs-spell-sheet-btns">
+      ${canEdit ? `<button class="btn btn-sm ${s.actif ? 'btn-outline' : 'btn-gold'}" data-action="_sortsSheetToggle" data-idx="${i}">${s.actif ? '− Retirer du Deck' : '⚡ Préparer'}</button>` : ''}
+      ${canEdit ? `<button class="btn btn-outline btn-sm" data-action="editSort" data-idx="${i}">✏️ Modifier</button>` : ''}
+      <button class="btn btn-outline btn-sm cs-spell-sheet-close" type="button">Fermer</button>
+    </div>
+  </div>`;
+  const clone = card.cloneNode(true);
+  clone.classList.remove('is-open', 'cs-hintme');
+  clone.removeAttribute('data-action');
+  clone.removeAttribute('tabindex');
+  clone.removeAttribute('role');
+  wrap.querySelector('.cs-spell-sheet-card').appendChild(clone);
+  // Fermeture : tap sur le fond, « Fermer », ou après toute action (le dispatch
+  // global data-action tourne sur document → on laisse l'événement remonter,
+  // puis on retire la fiche au tick suivant).
+  wrap.addEventListener('click', (e) => {
+    if (e.target === wrap || e.target.closest('.cs-spell-sheet-close') || e.target.closest('[data-action]')) {
+      setTimeout(_sortsCloseSheet, 0);
+    }
+  });
+  document.body.appendChild(wrap);
+  _spellSheetEl = wrap;
+}
+// Préparer depuis la fiche : réutilise le flux tuile (garde deck plein incluse).
+function _sortsSheetToggle(i) { _sortsTileToggle(i); }
 
 // ── Tooltip « objet de jeu » (vue Grimoire) ─────────────────────────────────
 // Au survol/focus d'une tuile (ou d'un socket), on clone la CARTE complète dans
@@ -230,8 +369,19 @@ function _spellTTTarget(e) {
 }
 function _bindSpellTilesTooltip() {
   if (_spellTTBound) return;
-  if (!window.matchMedia?.('(hover: hover)').matches) return;   // tactile : pas de survol
   _spellTTBound = true;
+  // Clavier : Enter/Espace activent les contrôles non-boutons de l'onglet Sorts
+  // (toggle du Deck, tuile, en-tête de catégorie) — alternative au pointeur.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const el = e.target;
+    if (!(el instanceof Element)) return;
+    if (el.matches('input, textarea, select, button, a')) return;
+    if (!el.matches('.cs-spellcard .toggle[data-action], .cs-sort-cat-hdr[data-action], article.cs-spellcard[data-action]')) return;
+    e.preventDefault();
+    el.click();
+  });
+  if (!window.matchMedia?.('(hover: hover)').matches) return;   // tactile : pas de survol (tap = fiche rapide)
   document.addEventListener('mouseover', (e) => {
     const t = _spellTTTarget(e);
     if (t) _spellTTShow(t.card, t.anchor); else _spellTTHide();
@@ -297,11 +447,27 @@ export function bindSortCardsDnd(c, canEdit) {
         if (next.length !== old.length) { _renderSpellsTab(c); return; }
         // Ordre inchangé ET aucune recatégorisation → rien à faire.
         if (!changed && next.every((s, k) => s === old[k])) return;
+        ensureSpellIds(next);
+        const prevOrder = [...old];
         c.deck_sorts = next;
         if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
         if (charSession.getCurrentChar()?.id === c.id)
           charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
-        await trySave('characters', c.id, { deck_sorts: next });
+        if (await trySave('characters', c.id, { deck_sorts: next })) {
+          showNotif('Ordre des sorts mis à jour', 'info', {
+            duration: 5000,
+            action: {
+              label: '↺ Annuler',
+              onClick: async () => {
+                c.deck_sorts = prevOrder;
+                if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
+                if (charSession.getCurrentChar()?.id === c.id)
+                  charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+                if (await trySave('characters', c.id, { deck_sorts: prevOrder })) _renderSpellsTab(c);
+              },
+            },
+          });
+        }
         _renderSpellsTab(c);
       },
     }));
@@ -309,24 +475,27 @@ export function bindSortCardsDnd(c, canEdit) {
 }
 
 export function renderCharDeck(c, canEdit) {
+  _sortsLoadUiFor(c.id);   // état UI par personnage (mode/densité/pliage) + reset des filtres transitoires
   const allSorts = c.deck_sorts || [];
   const cats     = c.sort_cats  || [];
   const mainP    = getMainWeapon(c);
   const armeDeg  = mainP.degats;
-  // En Grimoire (tuiles), pas de dépli en place : la tooltip fait le travail.
-  const openIdx  = _sortsDensity === 'tiles' ? null : (_openSortIdx ?? null);
+  // En mode Préparer (tuiles), pas de dépli en place : la tooltip fait le travail.
+  const openIdx  = _sortsEffDensity() === 'tiles' ? null : (_openSortIdx ?? null);
 
   const armorSet = getArmorSetData(c);
   const pmDelta  = armorSet.modifiers?.spellPmDelta || 0;
 
   // ── État UI persistant (filtres / recherche / pliage) ─────────────
   const search   = _norm(_sortsSearch || '');   // minuscules + sans accents
-  const view     = _sortsView || 'all';          // 'all' | 'deck'
-  const typeFlt  = _sortsTypeFilter || '';        // '' | 'offensif' | 'defensif' | 'soin' | 'enchantement' | 'affliction' | 'utilitaire'
+  const mode     = _sortsMode;                    // 'grimoire' | 'prepare'
+  const typeFlt  = _sortsTypeFilter || '';        // '' | 'offensif' | 'defensif' | 'utilitaire'
+  const runeFlt  = _sortsRuneFilter || '';        // '' | nom de rune (combinable)
+  const noyFlt   = _sortsNoyauFilter || '';       // '' | clé de noyau (combinable)
   const pmFlt    = _sortsPmFilter || '';          // '' | 'low' | 'mid' | 'high' (coût en PM)
-  const validationFlt = STATE.isAdmin ? (_sortsValidationFilter || '') : '';
+  const validationFlt = _sortsValidationFilter || '';
   const order = ['manual', 'pm', 'nom', 'validation'].includes(_sortsOrder) ? _sortsOrder : 'manual';
-  const density = _sortsDensity;                  // 'cards' | 'list' (préférence d'affichage)
+  const density = _sortsEffDensity();             // 'cards' | 'list' (Grimoire) | 'tiles' (Préparer)
   const hasOrderFilter = _sortsHasActiveOrderFilter();
   const collapsed = _sortsCatCollapsed || {};     // { catId: true } = replié
 
@@ -337,14 +506,17 @@ export function renderCharDeck(c, canEdit) {
   const activeSorts = allSorts.filter(s => s.actif);
   const deckCount = activeSorts.length;
   const deckMax   = calcDeckMax(c);
+  // PM du perso (mode Préparer) : ressource courante pour signaler les sorts
+  // trop chers — même source que la fiche (pmActuel, défaut = max).
+  const pmMax = calcPMMax(c);
+  const pmCur = Number.isFinite(parseInt(c.pmActuel)) ? parseInt(c.pmActuel) : pmMax;
   const validationCounts = allSorts.reduce((acc, s) => {
     acc[_sortValidationState(s)] = (acc[_sortValidationState(s)] || 0) + 1;
     return acc;
   }, { pending: 0, ok: 0, no: 0 });
 
-  // ── Application des filtres : view + search + type ───────────────
+  // ── Application des filtres : search + statut + coût + type ──────
   const matchSpell = (s) => {
-    if (view === 'deck' && !s.actif) return false;
     if (search) {
       const catName = cats.find(ct => ct.id === s.catId)?.nom || '';
       const hay = _norm([
@@ -356,20 +528,15 @@ export function renderCharDeck(c, canEdit) {
     }
     if (validationFlt && _sortValidationState(s) !== validationFlt) return false;
     if (pmFlt && _sortPmBucket(_effectiveSortPm(s, pmDelta)) !== pmFlt) return false;
+    // Facettes COMBINABLES : type ET rune ET noyau (chacune indépendante)
     if (typeFlt) {
-      if (typeFlt.startsWith('rune:')) {
-        // Filtre par rune utilisée
-        if (!_displayRunes(s.runes || []).includes(typeFlt.slice(5))) return false;
-      } else if (typeFlt.startsWith('noyau:')) {
-        const wanted = typeFlt.slice(6);
-        if (!noyauTypesFor(s).some(t => _noyauFilterKey(t) === wanted)) return false;
-      } else {
-        const types = _getSortTypes(s);
-        if (typeFlt === 'offensif'   && !types.includes('offensif')) return false;
-        if (typeFlt === 'defensif'   && !types.includes('defensif')) return false;
-        if (typeFlt === 'utilitaire' && !(types.includes('utilitaire') && !types.includes('offensif') && !types.includes('defensif'))) return false;
-      }
+      const types = _getSortTypes(s);
+      if (typeFlt === 'offensif'   && !types.includes('offensif')) return false;
+      if (typeFlt === 'defensif'   && !types.includes('defensif')) return false;
+      if (typeFlt === 'utilitaire' && !(types.includes('utilitaire') && !types.includes('offensif') && !types.includes('defensif'))) return false;
     }
+    if (runeFlt && !_displayRunes(s.runes || []).includes(runeFlt)) return false;
+    if (noyFlt && !noyauTypesFor(s).some(t => _noyauFilterKey(t) === noyFlt)) return false;
     return true;
   };
 
@@ -415,7 +582,7 @@ export function renderCharDeck(c, canEdit) {
   //   Ligne 2 : regarder (Tous / Deck, jauge intégrée)
   //   Le reste (menu, filtres, analyse) est repliable.
   const deckOver = deckCount > deckMax;
-  const filtersActive = !!(typeFlt || pmFlt || validationFlt || order !== 'manual');
+  const filtersActive = !!(typeFlt || runeFlt || noyFlt || pmFlt || validationFlt || order !== 'manual');
   let html = `<div class="cs-section cs-section--compact cs-sorts-v3">
 
     <!-- ① Barre d'action : recherche · créer · filtres · plus -->
@@ -438,21 +605,20 @@ export function renderCharDeck(c, canEdit) {
       </button>
     </div>
 
-    <!-- ② Vue : sélecteur segmenté Tous / Deck + densité Cartes / Liste à droite -->
+    <!-- ② Modes : Grimoire (gérer) / Préparer (deck) + densité Cartes / Liste à droite -->
     <div class="cs-sorts-viewrow">
-      <div class="cs-sorts-viewseg" role="tablist" aria-label="Vue des sorts">
-        <button class="cs-sorts-seg ${view==='all'?'on':''}" role="tab" aria-selected="${view==='all'}" data-action="_sortsSetView" data-view="all">
-          <span class="cs-sorts-seg-ico">📚</span> Tous <b>${allSorts.length}</b>
+      <div class="cs-sorts-viewseg" role="tablist" aria-label="Mode de l'onglet Sorts">
+        <button class="cs-sorts-seg ${mode==='grimoire'?'on':''}" role="tab" aria-selected="${mode==='grimoire'}" data-action="_sortsSetMode" data-mode="grimoire" title="Gérer tes sorts : catégories, filtres, édition">
+          <span class="cs-sorts-seg-ico">📖</span> Grimoire <b>${allSorts.length}</b>
         </button>
-        <button class="cs-sorts-seg cs-sorts-seg--deck ${view==='deck'?'on':''} ${deckOver?'is-over':''}" role="tab" aria-selected="${view==='deck'}" data-action="_sortsSetView" data-view="deck" title="Sorts préparés / capacité (INT)">
-          <span class="cs-sorts-seg-ico">⚡</span> Deck <b>${deckCount}<small>/${deckMax}</small></b>
+        <button class="cs-sorts-seg cs-sorts-seg--deck ${mode==='prepare'?'on':''} ${deckOver?'is-over':''}" role="tab" aria-selected="${mode==='prepare'}" data-action="_sortsSetMode" data-mode="prepare" title="Préparer ton Deck : clique une tuile pour ajouter ou retirer un sort (capacité INT)">
+          <span class="cs-sorts-seg-ico">⚡</span> Préparer <b>${deckCount}<small>/${deckMax}</small></b>
         </button>
       </div>
-      <div class="cs-sorts-viewseg cs-sorts-densityseg" role="group" aria-label="Densité d'affichage">
+      ${mode==='grimoire' ? `<div class="cs-sorts-viewseg cs-sorts-densityseg" role="group" aria-label="Densité d'affichage">
         <button class="cs-sorts-seg cs-sorts-seg--dens ${density==='cards'?'on':''}" data-action="_sortsSetDensity" data-density="cards" aria-pressed="${density==='cards'}" title="Vue cartes — le détail visible">▦</button>
         <button class="cs-sorts-seg cs-sorts-seg--dens ${density==='list'?'on':''}" data-action="_sortsSetDensity" data-density="list" aria-pressed="${density==='list'}" title="Vue liste — une ligne par sort">☰</button>
-        <button class="cs-sorts-seg cs-sorts-seg--dens ${density==='tiles'?'on':''}" data-action="_sortsSetDensity" data-density="tiles" aria-pressed="${density==='tiles'}" title="Grimoire — tuiles, fiche au survol, deck en sockets">⬚</button>
-      </div>
+      </div>` : ''}
     </div>
 
     <!-- ②bis Menu « Plus d'outils » (repliable) -->
@@ -477,13 +643,13 @@ export function renderCharDeck(c, canEdit) {
         ${[['manual','Manuel'],['pm','PM'],['nom','Nom'],['validation','MJ']]
           .map(([v,lbl]) => `<button class="cs-sorts-chip sort ${order===v?'on':''}" data-action="_sortsSetOrder" data-order="${v}">${lbl}</button>`).join('')}
       </div>
-      ${STATE.isAdmin ? `<div class="cs-sorts-filt-row cs-sorts-filt-row--mj">
-        <span class="cs-sorts-filt-lbl">Validation</span>
-        <button class="cs-sorts-chip mj ${validationFlt===''?'on':''}" data-action="_sortsSetValidation" data-val="">Toutes</button>
-        <button class="cs-sorts-chip mj wait ${validationFlt==='pending'?'on':''}" data-action="_sortsSetValidation" data-val="pending" title="À valider">⏳ ${validationCounts.pending || 0}</button>
-        <button class="cs-sorts-chip mj ok ${validationFlt==='ok'?'on':''}" data-action="_sortsSetValidation" data-val="ok" title="Validés">✅ ${validationCounts.ok || 0}</button>
-        <button class="cs-sorts-chip mj no ${validationFlt==='no'?'on':''}" data-action="_sortsSetValidation" data-val="no" title="Refusés">❌ ${validationCounts.no || 0}</button>
-      </div>` : ''}
+      <div class="cs-sorts-filt-row cs-sorts-filt-row--mj">
+        <span class="cs-sorts-filt-lbl">Statut</span>
+        <button class="cs-sorts-chip mj ${validationFlt===''?'on':''}" data-action="_sortsSetValidation" data-val="">Tous</button>
+        <button class="cs-sorts-chip mj wait ${validationFlt==='pending'?'on':''}" data-action="_sortsSetValidation" data-val="pending" title="En attente de validation MJ">⏳ ${validationCounts.pending || 0}</button>
+        <button class="cs-sorts-chip mj ok ${validationFlt==='ok'?'on':''}" data-action="_sortsSetValidation" data-val="ok" title="Validés par le MJ">✅ ${validationCounts.ok || 0}</button>
+        <button class="cs-sorts-chip mj no ${validationFlt==='no'?'on':''}" data-action="_sortsSetValidation" data-val="no" title="Refusés — à corriger">❌ ${validationCounts.no || 0}</button>
+      </div>
       ${usedPmBuckets.size > 1 ? `<div class="cs-sorts-filt-row">
         <span class="cs-sorts-filt-lbl">Coût</span>
         <button class="cs-sorts-chip pm ${pmFlt===''?'on':''}" data-action="_sortsSetPm" data-pm="">Tous</button>
@@ -492,30 +658,28 @@ export function renderCharDeck(c, canEdit) {
       </div>` : ''}
       ${(usedTypes.size || usedRuneMetas.length || usedNoyauMetas.length) ? `<div class="cs-sorts-filt-row">
         <span class="cs-sorts-filt-lbl">Filtrer</span>
-        <button class="cs-sorts-chip type ${typeFlt===''?'on':''}" data-action="_sortsSetType" data-type="">Tout</button>
+        <button class="cs-sorts-chip type ${(!typeFlt && !runeFlt && !noyFlt)?'on':''}" data-action="_sortsClearFacets" title="Effacer type, rune et noyau">Tout</button>
         ${['offensif','defensif','utilitaire'].filter(t => usedTypes.has(t)).map(t => {
           const m = TYPE_META[t];
-          return `<button class="cs-sorts-chip type ${m.cls} ${typeFlt===t?'on':''}" data-action="_sortsSetType" data-type="${t}">${m.lbl}</button>`;
+          return `<button class="cs-sorts-chip type ${m.cls} ${typeFlt===t?'on':''}" data-action="_sortsSetType" data-type="${t}" title="Combinable avec une rune et un noyau">${m.lbl}</button>`;
         }).join('')}
         ${usedRuneMetas.length ? `<span class="cs-sorts-filt-sep"></span>` : ''}
-        ${usedRuneMetas.map(rm => {
-          const v = `rune:${rm.nom}`;
-          return `<button class="cs-sorts-chip rune ${typeFlt===v?'on':''}" style="--c:${rm.color}" data-action="_sortsSetType" data-type="${v}" title="${_esc(rm.effet || rm.nom)}">${rm.icon} ${_esc(rm.nom)}</button>`;
-        }).join('')}
+        ${usedRuneMetas.map(rm =>
+          `<button class="cs-sorts-chip rune ${runeFlt===rm.nom?'on':''}" style="--c:${rm.color}" data-action="_sortsSetRune" data-rune="${_esc(rm.nom)}" title="${_esc(rm.effet || rm.nom)} — combinable avec type et noyau">${rm.icon} ${_esc(rm.nom)}</button>`
+        ).join('')}
         ${usedNoyauMetas.length ? `<span class="cs-sorts-filt-sep"></span>` : ''}
-        ${usedNoyauMetas.map(([key, nt]) => {
-          const v = `noyau:${key}`;
-          return `<button class="cs-sorts-chip noyau ${typeFlt===v?'on':''}" style="--c:${nt.color || '#8aa'}" data-action="_sortsSetType" data-type="${v}" title="Noyau ${_esc(nt.label || nt.nom || '')}">${nt.icon || '✦'} ${_esc(nt.label || nt.nom || 'Noyau')}</button>`;
-        }).join('')}
+        ${usedNoyauMetas.map(([key, nt]) =>
+          `<button class="cs-sorts-chip noyau ${noyFlt===key?'on':''}" style="--c:${nt.color || '#8aa'}" data-action="_sortsSetNoyau" data-noyau="${_esc(key)}" title="Noyau ${_esc(nt.label || nt.nom || '')} — combinable avec type et rune">${nt.icon || '✦'} ${_esc(nt.label || nt.nom || 'Noyau')}</button>`
+        ).join('')}
       </div>` : ''}
       ${filtersActive ? `<div class="cs-sorts-filt-row cs-sorts-filt-row--reset">
         <button class="cs-sorts-chip reset" data-action="_sortsResetFilters" title="Réinitialiser filtres et tri">↺ Réinitialiser</button>
       </div>` : ''}
     </div>` : ''}
 
-    <!-- ④ Répartition du deck : sockets (Grimoire) ou ligne 📊 discrète (+ Set Léger) -->
-    ${density === 'tiles' ? `<div class="cs-sorts-deckinfo">
-      ${_renderDeckSockets(allSorts.map((s, gi) => ({ s, i: gi })).filter(x => x.s.actif), deckMax, pmDelta, canEdit)}
+    <!-- ④ Tray du Deck (Préparer : sockets + PM, sticky) ou ligne 📊 discrète (+ Set Léger) -->
+    ${density === 'tiles' ? `<div class="cs-sorts-deckinfo is-tray">
+      ${_renderDeckSockets(allSorts.map((s, gi) => ({ s, i: gi })).filter(x => x.s.actif), deckMax, pmDelta, canEdit, pmCur, pmMax)}
       ${pmDelta !== 0 ? `<span class="cs-sorts-setlight" title="Le Set Léger équipé modifie automatiquement le coût de tes sorts">
         🧙 Set Léger <b>${pmDelta > 0 ? '+' : ''}${pmDelta} PM</b>
       </span>` : ''}
@@ -539,16 +703,13 @@ export function renderCharDeck(c, canEdit) {
     return html;
   }
   if (visibleCount === 0) {
-    const deckEmpty = view === 'deck' && deckCount === 0;
-    html += `<div class="cs-sorts-empty-state ${deckEmpty?'cs-sorts-empty-state--deck':'cs-sorts-noresult'}">
-      <div class="cs-sorts-empty-ico">${deckEmpty ? '⚡' : '🔎'}</div>
+    html += `<div class="cs-sorts-empty-state cs-sorts-noresult">
+      <div class="cs-sorts-empty-ico">🔎</div>
       <div class="cs-sorts-empty-body">
-        <b>${deckEmpty ? 'Deck vide' : 'Aucun sort ne correspond'}</b>
-        <span>${deckEmpty
-          ? 'Active un sort validé depuis la liste complète pour le préparer en combat.'
-          : (search ? `« ${_esc(search)} » ${typeFlt?' · '+typeFlt:''}${validationFlt?' · validation '+validationFlt:''}${view==='deck'?' · Deck uniquement':''}` : 'Essaie un autre filtre.')}</span>
+        <b>Aucun sort ne correspond</b>
+        <span>${search ? `« ${_esc(search)} »${typeFlt?' · '+typeFlt:''}${validationFlt?' · statut filtré':''}` : 'Essaie un autre filtre.'}</span>
       </div>
-      <button class="btn btn-outline btn-sm" data-action="${deckEmpty?'_sortsSetView':'_sortsResetFilters'}" ${deckEmpty?'data-view="all"':''}>${deckEmpty?'Voir tous les sorts':'Réinitialiser'}</button>
+      <button class="btn btn-outline btn-sm" data-action="_sortsResetFilters">Réinitialiser</button>
     </div></div>`;
     return html;
   }
@@ -568,7 +729,8 @@ export function renderCharDeck(c, canEdit) {
     html += `<div class="cs-sort-cat-block ${isDefault?'is-default':''} ${isCollapsed?'is-collapsed':''}" data-cat-id="${cat.id}">`;
     if (cats.length > 0) {
       html += `<div class="cs-sort-cat-hdr" style="--cat-col:${cat.couleur}"
-          data-action="_sortsToggleCat" data-id="${cat.id}">
+          data-action="_sortsToggleCat" data-id="${cat.id}"
+          tabindex="0" role="button" aria-expanded="${!isCollapsed}">
         ${(!isDefault && canEdit) ? `<span class="cs-sort-cat-drag" title="Glisser pour réordonner" data-stop-propagation>⠿</span>` : ''}
         <span class="cs-sort-cat-chev">${isCollapsed?'▸':'▾'}</span>
         <span class="cs-sort-cat-name">${_esc(cat.nom)}</span>
@@ -576,9 +738,9 @@ export function renderCharDeck(c, canEdit) {
       </div>`;
     }
     if (!isCollapsed) {
-      html += `<div class="cs-spellcard-grid ${density==='list'?'is-list':density==='tiles'?'is-tiles':''} ${visibleEntries.length?'':'is-empty'}" data-cat="${cat.id}">`;
+      html += `<div class="cs-spellcard-grid ${density==='list'?'is-list':density==='tiles'?'is-tiles':'is-cards'} ${visibleEntries.length?'':'is-empty'}" data-cat="${cat.id}">`;
       visibleEntries.forEach(({ s, globalIdx: i }) => {
-        html += _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats, pmDelta, deckCount, deckMax);
+        html += _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats, pmDelta, deckCount, deckMax, pmCur);
       });
       if (!visibleEntries.length) {
         html += `<div class="cs-spellcard-emptydrop">Dépose un sort ici</div>`;
@@ -612,25 +774,55 @@ export function renderCharDeck(c, canEdit) {
 function _sortsRerender() {
   _renderSpellsTab();
 }
+// Le re-render détruit l'input → on lui rend le focus (caret en fin) pour que
+// la frappe continue sans interruption.
+function _sortsRestoreSearchFocus() {
+  const el = document.getElementById('cs-sorts-search');
+  if (!el) return;
+  el.focus({ preventScroll: true });
+  const n = el.value.length;
+  try { el.setSelectionRange(n, n); } catch { /* type non textuel */ }
+}
 function _sortsSetSearch(v, opts = {}) {
   _sortsSearch = v || '';
   if (_sortsSearchTimer) clearTimeout(_sortsSearchTimer);
   if (opts.immediate) {
     _sortsSearchTimer = null;
     _sortsRerender();
+    _sortsRestoreSearchFocus();
     return;
   }
   _sortsSearchTimer = setTimeout(() => {
     _sortsSearchTimer = null;
     _sortsRerender();
+    _sortsRestoreSearchFocus();
   }, 150);
 }
-function _sortsSetView(v) {
-  _sortsView = (v === 'deck') ? 'deck' : 'all';
+function _sortsSetMode(m) {
+  const mode = m === 'prepare' ? 'prepare' : 'grimoire';
+  if (mode === _sortsMode) return;
+  _sortsMode = mode;
+  _sortsReplaceIdx = null;
+  lsJson.set('cs-sorts-mode', mode);   // défaut global (nouveaux persos)
+  _sortsPersistUi();
   _sortsRerender();
 }
+// Facettes combinables : re-cliquer une facette active la désactive.
 function _sortsSetType(t) {
-  _sortsTypeFilter = t || '';
+  const v = ['offensif', 'defensif', 'utilitaire'].includes(t) ? t : '';
+  _sortsTypeFilter = (v && v !== _sortsTypeFilter) ? v : '';
+  _sortsRerender();
+}
+function _sortsSetRune(r) {
+  _sortsRuneFilter = (r && r !== _sortsRuneFilter) ? r : '';
+  _sortsRerender();
+}
+function _sortsSetNoyau(k) {
+  _sortsNoyauFilter = (k && k !== _sortsNoyauFilter) ? k : '';
+  _sortsRerender();
+}
+function _sortsClearFacets() {
+  _sortsTypeFilter = ''; _sortsRuneFilter = ''; _sortsNoyauFilter = '';
   _sortsRerender();
 }
 function _sortsSetPm(v) {
@@ -638,10 +830,11 @@ function _sortsSetPm(v) {
   _sortsRerender();
 }
 function _sortsSetDensity(v) {
-  const d = ['list', 'tiles'].includes(v) ? v : 'cards';
+  const d = v === 'list' ? 'list' : 'cards';
   if (d === _sortsDensity) return;
   _sortsDensity = d;
-  lsJson.set('cs-sorts-density', d);
+  lsJson.set('cs-sorts-density', d);   // défaut global (nouveaux persos)
+  _sortsPersistUi();
   _sortsRerender();
 }
 function _sortsSetValidation(v) {
@@ -680,6 +873,7 @@ async function _sortsSetCardCat(idx, catId) {
   const prevCatId = s.catId || '';
   if (prevCatId === cleanCatId) return;
   sorts[idx] = { ...s, catId: cleanCatId };
+  ensureSpellIds(sorts);
   c.deck_sorts = sorts;
   if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
   if (charSession.getCurrentChar()?.id === c.id)
@@ -698,6 +892,7 @@ async function _sortsSetCardCat(idx, catId) {
 function _sortsToggleCat(catId) {
   _sortsCatCollapsed = { ...(_sortsCatCollapsed || {}) };
   _sortsCatCollapsed[catId] = !_sortsCatCollapsed[catId];
+  _sortsPersistUi();
   _sortsRerender();
 }
 function _sortsToggleAllCats() {
@@ -709,25 +904,56 @@ function _sortsToggleAllCats() {
   const next = {};
   all.forEach(id => { next[id] = anyOpen; });   // si au moins 1 ouvert → tout plier; sinon tout déplier
   _sortsCatCollapsed = next;
+  _sortsPersistUi();
   _sortsRerender();
 }
 function _sortsResetFilters() {
   if (_sortsSearchTimer) clearTimeout(_sortsSearchTimer);
   _sortsSearchTimer = null;
   _sortsSearch = '';
-  _sortsView = 'all';
   _sortsTypeFilter = '';
+  _sortsRuneFilter = '';
+  _sortsNoyauFilter = '';
   _sortsPmFilter = '';
   _sortsValidationFilter = '';
   _sortsOrder = 'manual';
   _sortsRerender();
 }
+
+// ── Réordonner SANS drag (alternative WCAG) : ↑/↓ échangent avec le voisin ──
+// de la MÊME catégorie dans l'ordre global.
+async function _sortsMoveCard(i, dir) {
+  if (_sortsHasActiveOrderFilter()) {
+    showNotif('Réinitialise filtres et tri pour réordonner.', 'info');
+    return;
+  }
+  const c = _getCurrentSpellChar(); if (!c) return;
+  const sorts = [...(c.deck_sorts || [])];
+  const s = sorts[i]; if (!s) return;
+  const cats = c.sort_cats || [];
+  const catOf = (x) => (x?.catId && cats.some(ct => ct.id === x.catId)) ? x.catId : '';
+  const myCat = catOf(s);
+  const step = dir < 0 ? -1 : 1;
+  let j = i + step;
+  while (j >= 0 && j < sorts.length && catOf(sorts[j]) !== myCat) j += step;
+  if (j < 0 || j >= sorts.length) return;
+  [sorts[i], sorts[j]] = [sorts[j], sorts[i]];
+  ensureSpellIds(sorts);
+  if (await trySave('characters', c.id, { deck_sorts: sorts })) {
+    c.deck_sorts = sorts;
+    if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
+    if (charSession.getCurrentChar()?.id === c.id)
+      charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+    _renderSpellsTab(c);
+  }
+}
 // Panneaux repliables de l'onglet (anti-cockpit) : filtres/tri, menu outils, analyse.
 function _sortsToggleFilters() { _sortsFiltersOpen = !_sortsFiltersOpen; _sortsRerender(); }
 function _sortsToggleMenu()    { _sortsMenuOpen    = !_sortsMenuOpen;    _sortsRerender(); }
 
-function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta = 0, deckCount = 0, deckMax = Infinity) {
+function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta = 0, deckCount = 0, deckMax = Infinity, pmCur = null) {
   const isOpen   = openIdx === i;
+  const isTiles  = _sortsEffDensity() === 'tiles';
   const runesAll = s.runes || [];
   const types    = _getSortTypes(s);
   const { action, concentration } = _getSortAction(s);
@@ -889,15 +1115,33 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
     chips.push({ icon:'🔮', val:`Suspendu · ${2 + 2 * nbDur}t`, color:'#a855f7', lbl:'Sort suspendu : déclenché plus tard, hors de ton tour' });
   }
 
+  // ── Mode Préparer : sort trop cher pour les PM actuels — informatif, pas bloquant ──
+  const pmShort = isTiles && pmCur != null
+    ? Math.max(0, _effectiveSortPm(s, pmDelta) - pmCur)
+    : 0;
+  if (pmShort > 0) {
+    chips.push({ icon:'💧', val:`Il manque ${pmShort} PM`, color:'#4f8cff', lbl:'PM insuffisants pour le lancer maintenant', dim:true });
+  }
+
   // ── Effet principal promu en ligne « héros » ; le reste en chips secondaires ──
   // primaryChip = 1er effet réel (non-dim). Les chips dim (cibles/zone/durée/DD)
   // restent en secondaire. Si aucun effet réel, pas de héros (que du secondaire).
   const primaryChip = chips.find(ch => !ch.dim) || null;
   const restChips   = primaryChip ? chips.filter(ch => ch !== primaryChip) : chips;
 
+  // ── Coût PM : UNE seule vérité (override MJ > pm calculé, + Set Léger) ──
+  // La valeur affichée = coût réellement payé (identique Deck/filtres/VTT) ;
+  // le title déroule la chaîne Base → Ajustement MJ → Set Léger → final.
+  const pmAuto  = parseInt(s.pm) || 0;
+  const pmOvr   = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : null;
+  const pmBase  = pmOvr ?? pmAuto;
+  const pmFinal = _effectiveSortPm(s, pmDelta);
+  const pmTitle = (pmOvr != null && pmOvr !== pmAuto) || pmDelta !== 0
+    ? `Coût : base ${pmAuto} PM${pmOvr != null && pmOvr !== pmAuto ? ` · ajusté MJ ${pmOvr}` : ''}${pmDelta !== 0 ? ` · Set Léger ${pmDelta > 0 ? '+' : ''}${pmDelta}` : ''} → ${pmFinal} PM`
+    : 'Coût en points de magie';
   const pmVal = pmDelta !== 0
-    ? `<span class="cs-sort-pm-old">${s.pm||0}</span><span class="cs-sort-pm-new">${Math.max(0,(s.pm||0)+pmDelta)}</span>`
-    : `${s.pm||0}`;
+    ? `<span class="cs-sort-pm-old">${pmBase}</span><span class="cs-sort-pm-new">${pmFinal}</span>`
+    : `${pmFinal}`;
 
   const typeCol = types.includes('offensif') ? '#ff6b6b'
                 : types.includes('defensif')  ? '#22c38e'
@@ -938,20 +1182,21 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
       ? `Deck plein (${deckCount}/${deckMax}) — retire un sort avant d'en ajouter un`
       : (s.actif?'Retirer du deck':'Ajouter au deck');
 
-  // Grimoire (tuiles) : la tuile ENTIÈRE = préparer/retirer (toggleSort est gardé :
-  // validation MJ + deck plein → notif). Les boutons enfants gagnent au dispatch
-  // (closest [data-action]) donc ✏️/⧉/🗑️ restent sûrs. tabindex → tooltip clavier.
-  const isTiles = _sortsDensity === 'tiles';
+  // Mode Préparer (tuiles) : la tuile ENTIÈRE = _sortsTileTap (pointeur : préparer/
+  // retirer avec flux « Remplacer » si deck plein ; tactile ou lecture seule : fiche
+  // rapide). Les boutons enfants gagnent au dispatch (closest [data-action]) donc
+  // ✏️/⧉/🗑️ restent sûrs. tabindex → tooltip + activation clavier.
   const tileAttrs = isTiles
-    ? ` tabindex="0"${canEdit ? ` data-action="toggleSort" data-idx="${i}" role="button" aria-pressed="${s.actif?'true':'false'}"` : ''}`
+    ? ` tabindex="0" data-action="_sortsTileTap" data-idx="${i}"${canEdit ? ` role="button" aria-pressed="${s.actif?'true':'false'}"` : ''}`
     : '';
+  const isSwapIn = isTiles && _sortsReplaceIdx === i;
 
-  return `<article class="cs-spellcard ${s.actif?'is-actif':''} ${isOpen?'is-open':''} ${vs==='no'?'is-refused':''}" style="--type-col:${typeCol}"
+  return `<article class="cs-spellcard ${s.actif?'is-actif':''} ${isOpen?'is-open':''} ${vs==='no'?'is-refused':''} ${pmShort>0?'is-pmshort':''} ${isSwapIn?'is-swapin':''}" style="--type-col:${typeCol}"
     data-sort-idx="${i}"${tileAttrs}>
 
     <header class="cs-spellcard-head">
       ${canEdit
-        ? `<div class="toggle ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" role="switch" aria-pressed="${s.actif?'true':'false'}" data-action="toggleSort" data-idx="${i}" data-stop-propagation title="${lockTitle}"></div>`
+        ? `<div class="toggle ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" role="switch" tabindex="0" aria-checked="${s.actif?'true':'false'}" aria-label="Préparer ${_esc(s.nom||'ce sort')} dans le Deck" data-action="toggleSort" data-idx="${i}" data-stop-propagation title="${lockTitle}"></div>`
         : `<div class="toggle ${s.actif?'on':''}"></div>`}
       <span class="cs-spellcard-icon">${s.icon ? _esc(s.icon) : '✦'}</span>
       <div class="cs-spellcard-id">
@@ -965,7 +1210,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
           ${noyauPills}
         </div>
       </div>
-      <span class="cs-spellcard-pm" title="Coût en points de magie">${pmVal}<small>PM</small></span>
+      <span class="cs-spellcard-pm" title="${_esc(pmTitle)}">${pmVal}<small>PM</small></span>
     </header>
 
     ${(primaryChip || restChips.length) ? `<div class="cs-spellcard-tags">
@@ -999,6 +1244,8 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
     <footer class="cs-spellcard-foot" data-action="">
       <button class="cs-spellcard-detailbtn" data-action="toggleSortDetail" data-idx="${i}">${isOpen?'▲ Replier':'▼ Détails'}</button>
       ${canEdit ? `<div class="cs-spellcard-acts" data-stop-propagation>
+        <button class="btn-icon cs-spellcard-move" data-action="_sortsMoveCard" data-idx="${i}" data-dir="-1" title="Monter dans la catégorie (alternative au glisser-déposer)">↑</button>
+        <button class="btn-icon cs-spellcard-move" data-action="_sortsMoveCard" data-idx="${i}" data-dir="1" title="Descendre dans la catégorie (alternative au glisser-déposer)">↓</button>
         ${runesAll.includes('Invocation') ? `<button class="btn-icon" data-action="_openInvocationConfig" data-idx="${i}" title="Configurer l'invocation (créatures à invoquer)">🐾</button>` : ''}
         <button class="btn-icon" data-action="duplicateSort" data-idx="${i}" title="Dupliquer le sort">⧉</button>
         <button class="btn-icon" data-action="editSort" data-idx="${i}" title="Éditer le sort">✏️</button>
@@ -3674,15 +3921,17 @@ export function selectNoyau(el, noyauId, noyauLabel, noyauColor) {
 
 
 // Signature du CONTENU jouable d'un sort (hors champs volatils : actif, validation,
-// catégorie, PM dérivé, notes/flags MJ). Sert à détecter une modification réelle.
-// `types` (+ son dérivé legacy `typeSoin`) est exclu : changer le type d'un sort
-// (offensif/défensif/utilitaire) ne redéclenche PAS la validation MJ. Un changement
-// de mode Protection reste capté par `protectionMode` (non exclu).
+// catégorie, PM dérivé, notes/flags MJ, id). Sert à détecter une modification réelle.
+// `types` est mécanique (offensif active les dégâts d'impact côté carte/VTT) →
+// inclus sous forme CANONIQUE via _getSortTypes (dérive aussi le legacy typeSoin,
+// sinon un vieux sort sans champ `types` diffèrerait au premier resave sans
+// changement réel). `typeSoin` brut reste exclu (dérivé, redondant).
 function _sortContentSig(s) {
   if (!s) return '';
-  const SKIP = new Set(['actif','mjValidation','mjValidated','catId','pm','pmOverride','mjNotes','mjAlwaysMax','enchantSlot','types','typeSoin']);
+  const SKIP = new Set(['actif','mjValidation','mjValidated','catId','pm','pmOverride','mjNotes','mjAlwaysMax','enchantSlot','types','typeSoin','id']);
   const o = {};
   Object.keys(s).filter(k => !SKIP.has(k)).sort().forEach(k => { o[k] = s[k]; });
+  o.types = [...(_getSortTypes(s) || [])].sort();
   return JSON.stringify(o);
 }
 
@@ -3730,14 +3979,23 @@ function _sanitizeAbsorbedComboFields(s) {
   return s;
 }
 
-export async function saveSort(idx) {
+// Anti double-clic : une sauvegarde de sort à la fois. L'état local n'est modifié
+// QU'APRÈS le succès Firestore (plus de doublon possible sur retry après échec).
+let _sortSaving = false;
+export async function saveSort(idx, btn = null) {
   // Si on édite une action d'item (depuis le shop), on aiguille vers le bon save
   if (_itemEditCtx) return _saveItemSpell();
+  if (_sortSaving) return;
   const hasName = _requireSortName();
   const hasNoyau = _requireNoyauSelection();
   if (!hasName || !hasNoyau) return;
     const c = STATE.activeChar; if(!c) return;
     const sorts = c.deck_sorts||[];
+  _sortSaving = true;
+  const saveBtn = btn || document.querySelector('[data-action="saveSort"]');
+  saveBtn?.setAttribute('disabled', '');
+  saveBtn?.setAttribute('aria-busy', 'true');
+  try {
     const noyau       = document.getElementById('s-noyau')?.value||'';
     const noyauTypeId = document.getElementById('s-noyau-id')?.value||'';
 
@@ -3836,37 +4094,54 @@ export async function saveSort(idx) {
       toucherStat: _readVisibleStatOverride('s-toucher-stat'),
       degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
       invocation:   _buildInvocationFromDOM(),
-      mjNotes:      document.getElementById('s-mj-notes')?.value?.trim() || '',
+      // Note MJ : VERROUILLÉE côté joueur — un joueur ne peut ni la modifier ni
+      // l'effacer, elle est reconduite telle quelle (le champ de la forge n'est
+      // qu'un affichage pour lui).
+      mjNotes:      STATE.isAdmin
+        ? (document.getElementById('s-mj-notes')?.value?.trim() || '')
+        : (idx >= 0 ? (sorts[idx]?.mjNotes || '') : ''),
     });
-    // Validation : un sort VALIDÉ modifié par un JOUEUR repasse « À valider » et
-    // sort du Deck (un sort non validé ne peut pas rester actif). Le MJ pilote la
-    // validation explicitement (sélecteur) → on ne touche pas à son choix.
-    if (!STATE.isAdmin && idx >= 0 && prevVal === 'ok'
+    // Id STABLE (les index bougent au tri/drag ; le VTT peut référencer le sort).
+    newSort.id = (idx >= 0 && sorts[idx]?.id) || spellUid();
+    // Validation : côté JOUEUR, un sort VALIDÉ modifié repasse « À valider » et
+    // sort du Deck ; un sort REFUSÉ corrigé repart AUSSI dans la file du MJ
+    // (sinon il resterait refusé à jamais). Le MJ pilote la validation
+    // explicitement (sélecteur) → on ne touche pas à son choix.
+    if (!STATE.isAdmin && idx >= 0 && (prevVal === 'ok' || prevVal === 'no')
         && _sortContentSig(sorts[idx]) !== _sortContentSig(newSort)) {
       newSort.mjValidation = 'pending';
       newSort.mjValidated  = false;
       newSort.actif        = false;
-      showNotif('Sort modifié → repasse « À valider » et sort du Deck.', 'info');
+      showNotif(prevVal === 'ok'
+        ? 'Sort modifié → repasse « À valider » et sort du Deck.'
+        : 'Sort corrigé → renvoyé en validation au MJ.', 'info');
     }
 
     const isNew = idx < 0;
-    if (idx>=0) sorts[idx]=newSort; else sorts.push(newSort);
-    c.deck_sorts=sorts;
+    // Copie de travail : l'état local (c.deck_sorts) n'est modifié QU'AU SUCCÈS.
+    const next = [...sorts];
+    if (idx >= 0) next[idx] = newSort; else next.push(newSort);
+    ensureSpellIds(next);
+    if (!(await trySave('characters', c.id, { deck_sorts: next }))) return;   // échec : modal ouverte, rien perdu
+
+    c.deck_sorts = next;
     // Sync les références pour que les filtres / re-render lisent la version fraîche
     if (charSession.getCurrentChar()?.id === c.id) charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
     if (STATE.activeChar?.id === c.id)    STATE.activeChar    = c;
-    if (await trySave('characters',c.id,{deck_sorts:sorts})) {
-      _sortModalBaseline = null; clearModalCloseGuard();   // désarme la garde avant la fermeture
-      closeModal();
-      showNotif(`Sort enregistré — ${newSort.pm} PM`, 'success');
-    }
+    _sortModalBaseline = null; clearModalCloseGuard();   // désarme la garde avant la fermeture
+    closeModal();
+    const _setDelta = getArmorSetData(c)?.modifiers?.spellPmDelta || 0;
+    showNotif(`Sort enregistré — ${_effectiveSortPm(newSort, _setDelta)} PM`, 'success');
 
     // ── Sur ajout : s'assure que le nouveau sort soit visible ────────
     if (isNew) {
       // Reset les filtres qui pourraient cacher le sort fraîchement créé
       _sortsSearch = '';
       _sortsTypeFilter = '';
-      _sortsView = 'all';
+      _sortsRuneFilter = '';
+      _sortsNoyauFilter = '';
+      _sortsPmFilter = '';
+      _sortsValidationFilter = '';
       // Déplie la catégorie où le sort vient d'être ajouté
       const newCatId = newSort.catId
         && (c.sort_cats || []).find(cat => cat.id === newSort.catId)
@@ -3877,6 +4152,11 @@ export async function saveSort(idx) {
 
     // Force un re-render du tab Sorts en V3 si dispo, sinon fallback legacy
     _renderSpellsTab(c);
+  } finally {
+    _sortSaving = false;
+    saveBtn?.removeAttribute('disabled');
+    saveBtn?.removeAttribute('aria-busy');
+  }
 }
 
 /** Build d'un objet "sort" depuis le formulaire courant — réutilisable pour items. */
@@ -4002,7 +4282,7 @@ registerActions({
   openSortCatEditor:      ()    => openSortCatEditor(),
   toggleSortDetail:       (btn) => toggleSortDetail(Number(btn.dataset.idx)),
   editSort:               (btn) => editSort(Number(btn.dataset.idx)),
-  saveSort:               (btn) => saveSort(Number(btn.dataset.idx)),
+  saveSort:               (btn) => saveSort(Number(btn.dataset.idx), btn),
   selectNoyau:            (btn) => selectNoyau(btn, btn.dataset.noyauId, btn.dataset.noyauLabel, btn.dataset.noyauColor),
   runeIncrement:          (btn) => runeIncrement(btn.dataset.nom),
   runeDecrement:          (btn) => runeDecrement(btn.dataset.nom),
@@ -4011,11 +4291,19 @@ registerActions({
   _enableSortCustom:      (btn) => _enableSortCustom(btn.dataset.field),
   _disableSortCustom:     (btn) => _disableSortCustom(btn.dataset.field),
   _sortsSetSearch:        (btn) => _sortsSetSearch(btn.dataset.val, { immediate: true }),
-  _sortsSetView:          (btn) => _sortsSetView(btn.dataset.view),
+  _sortsSetMode:          (btn) => _sortsSetMode(btn.dataset.mode),
   _sortsSetType:          (btn) => _sortsSetType(btn.dataset.type),
+  _sortsSetRune:          (btn) => _sortsSetRune(btn.dataset.rune),
+  _sortsSetNoyau:         (btn) => _sortsSetNoyau(btn.dataset.noyau),
+  _sortsClearFacets:      ()    => _sortsClearFacets(),
   _sortsSetPm:            (btn) => _sortsSetPm(btn.dataset.pm),
   _sortsSetDensity:       (btn) => _sortsSetDensity(btn.dataset.density),
   _sortsHintPreparable:   ()    => _sortsHintPreparable(),
+  _sortsTileTap:          (btn) => _sortsTileTap(Number(btn.dataset.idx)),
+  _sortsSheetToggle:      (btn) => _sortsSheetToggle(Number(btn.dataset.idx)),
+  _sortsReplaceWith:      (btn) => _sortsReplaceWith(Number(btn.dataset.idx)),
+  _sortsCancelReplace:    ()    => _sortsCancelReplace(),
+  _sortsMoveCard:         (btn) => _sortsMoveCard(Number(btn.dataset.idx), Number(btn.dataset.dir)),
   _sortsSetValidation:    (btn) => _sortsSetValidation(btn.dataset.val),
   _sortsSetOrder:         (btn) => _sortsSetOrder(btn.dataset.order),
   _sortsAdjRuneLimit:     (btn) => _sortsAdjRuneLimit(btn.dataset.delta),

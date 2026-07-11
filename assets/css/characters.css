@@ -9768,7 +9768,7 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   background: var(--amber, #e8b84b); box-shadow: 0 0 0 2px rgba(0,0,0,.25);
 }
 
-/* Vue Tous / Deck — segment large et clair */
+/* Modes Grimoire / Préparer — segment large et clair */
 /* Sélecteur segmenté compact (pas de barres pleine largeur) — aligné à gauche */
 .cs-v3 .cs-sorts-viewseg {
   display: inline-flex; gap: 3px; margin-top: 8px;
@@ -9918,6 +9918,38 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
   margin-top: 8px; padding: 0 2px;
 }
+/* Tray du Deck (mode Préparer) : épinglé sous la barre d'action pendant qu'on
+   parcourt les tuiles — même traitement visuel que la barre sticky au-dessus. */
+.cs-v3 .cs-sorts-deckinfo.is-tray {
+  position: sticky; top: 54px; z-index: 5;
+  padding: 6px 8px; border-radius: 12px;
+  background: rgba(0,0,0,.22); border: 1px solid var(--border);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 10px 22px -20px rgba(0,0,0,.85);
+}
+/* Dans le tray, la boîte sockets perd son propre cadre (pas de boîte-dans-boîte) */
+.cs-v3 .cs-sorts-deckinfo.is-tray .cs-sorts-sockets {
+  flex: 1; padding: 0; border: none; background: transparent;
+}
+@media (max-width: 560px) {
+  /* La barre d'action passe sur 2 rangs : plus d'offset fiable → tray non sticky */
+  .cs-v3 .cs-sorts-deckinfo.is-tray { position: static; }
+}
+[data-theme="light"] .cs-v3 .cs-sorts-deckinfo.is-tray { background: rgba(255,255,255,.75); }
+/* Groupe droit du tray : Σ coût du deck + ressource PM du perso */
+.cs-v3 .cs-sorts-sockets-right {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+}
+.cs-v3 .cs-sorts-pmres {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  padding: 3px 9px; border-radius: 999px;
+  background: rgba(79,140,255,.10); border: 1px solid rgba(79,140,255,.28);
+  color: var(--text-muted); font-size: .72rem; font-weight: 700; white-space: nowrap;
+}
+.cs-v3 .cs-sorts-pmres b { font-family: 'Outfit', sans-serif; color: #7eb0ff; }
+.cs-v3 .cs-sorts-pmres small { font-size: .62rem; color: var(--text-dim); }
+.cs-v3 .cs-sorts-pmres.is-low { background: rgba(255,90,126,.10); border-color: rgba(255,90,126,.35); }
+.cs-v3 .cs-sorts-pmres.is-low b { color: var(--crimson-light, #ff8ca7); }
 .cs-v3 .cs-sorts-deckstrip {
   display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0;
 }
@@ -13576,7 +13608,19 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   .cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-sub { display: none; }
 }
 
-/* ── Vue GRIMOIRE (tuiles) : le sort en tuile de jeu vidéo ────────────────────
+/* ── Vue CARTES allégée : fermée = nom · statut · action · coût · effet héros ·
+   description 1 ligne. Chips secondaires, noyaux, runes et note MJ complète
+   vivent dans le dépli (▼ Détails). La tooltip du mode Préparer garde tout
+   (le clone .cs-spell-tt n'est pas dans .is-cards). ── */
+.cs-v3 .is-cards .cs-spellcard:not(.is-open) .cs-spellcard-tags .cs-sort-sstat,
+.cs-v3 .is-cards .cs-spellcard:not(.is-open) .cs-spellcard-runes,
+.cs-v3 .is-cards .cs-spellcard:not(.is-open) .cs-spellcard-noyau { display: none; }
+.cs-v3 .is-cards .cs-spellcard:not(.is-open) .cs-spellcard-desc { -webkit-line-clamp: 1; }
+.cs-v3 .is-cards .cs-spellcard:not(.is-open) .cs-spellcard-mjnote-tx {
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* ── Mode PRÉPARER (tuiles) : le sort en tuile de jeu vidéo ────────────────────
    Même markup que la carte, replié en tuile : icône (grande) + nom + badge PM +
    pastille validation. Toute l'info vit dans la tooltip (.cs-spell-tt = clone
    flottant de la carte). Clic sur la tuile = préparer/retirer (toggleSort). */
@@ -13677,6 +13721,12 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 /* Non validé : tuile assombrie (la pastille ⏳/❌ + la tooltip expliquent) */
 .cs-v3 .is-tiles .cs-spellcard:has(.toggle.is-locked) { opacity: .72; }
 .cs-v3 .is-tiles .cs-spellcard:has(.toggle.is-locked) .cs-spellcard-icon { filter: grayscale(.45); }
+/* Sort trop cher pour les PM actuels : badge PM en alerte (informatif, pas bloquant) */
+.cs-v3 .is-tiles .cs-spellcard.is-pmshort .cs-spellcard-pm,
+.cs-v3 .is-tiles .cs-spellcard.is-pmshort .cs-spellcard-pm .cs-sort-pm-new {
+  color: var(--crimson-light, #ff8ca7);
+}
+.cs-v3 .is-tiles .cs-spellcard.is-pmshort .cs-spellcard-pm { border-color: rgba(255,90,126,.45); }
 /* Socket vide cliqué : les tuiles préparables pulsent */
 .cs-v3 .is-tiles .cs-spellcard.cs-hintme { animation: csTileHint 1.1s ease 2; }
 @keyframes csTileHint {
@@ -13740,9 +13790,68 @@ button.cs-sock.is-empty:hover { border-color: rgba(232,184,75,.55); color: var(-
 .cs-v3 .cs-sorts-sockets-pm b { color: var(--gold, #e8b84b); }
 [data-theme="light"] .cs-v3 .cs-sock.is-empty { background: rgba(0,0,0,.03); }
 
+/* ── Mode « Remplacer quel sort ? » (deck plein) ─────────────────────────
+   Les sockets remplis deviennent les candidats au remplacement (pulse or),
+   la tuile entrante est mise en avant, ✕ annule. */
+@keyframes csSockPulse { 50% { box-shadow: 0 0 12px -2px rgba(232,184,75,.65); } }
+.cs-v3 .cs-sorts-sockets.is-replacing .cs-sock.is-filled {
+  border-color: var(--gold, #e8b84b);
+  animation: csSockPulse 1.2s ease infinite;
+}
+.cs-v3 .cs-sock.is-swap .cs-sock-x { opacity: 1; color: var(--gold, #e8b84b); }
+.cs-v3 .cs-sorts-swaphint { font-size: .74rem; font-weight: 700; color: var(--amber, #e8b84b); white-space: nowrap; }
+.cs-v3 .cs-sorts-swapcancel {
+  border: 1px solid var(--border-strong, var(--border)); background: transparent;
+  color: var(--text-muted); border-radius: 8px; padding: 4px 10px;
+  font: inherit; font-size: .72rem; font-weight: 700; cursor: pointer;
+}
+.cs-v3 .cs-sorts-swapcancel:hover { color: var(--text); border-color: rgba(232,184,75,.4); }
+.cs-v3 .is-tiles .cs-spellcard.is-swapin {
+  border-color: var(--gold, #e8b84b);
+  box-shadow: 0 0 14px -4px rgba(232,184,75,.55);
+}
+
+/* ── Fiche rapide (tactile / lecture seule) : carte en bottom-sheet ──────
+   Même principe que la tooltip : clone de la carte, hors .is-tiles il reprend
+   la mise en page complète. Boutons ≥ 44px (confort tactile). */
+.cs-spell-sheet-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(0,0,0,.55);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.cs-spell-sheet {
+  width: min(100%, 440px);
+  max-height: 82vh; overflow-y: auto;
+  background: var(--bg-panel, #131a2a);
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 16px 16px 0 0;
+  padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  display: flex; flex-direction: column; gap: 10px;
+  animation: csSheetUp .18s ease;
+}
+@keyframes csSheetUp { from { transform: translateY(24px); opacity: .6; } }
+.cs-spell-sheet .cs-spellcard { cursor: default; margin: 0; }
+.cs-spell-sheet .cs-spellcard-head .toggle,
+.cs-spell-sheet .cs-spellcard-mj-actions,
+.cs-spell-sheet .cs-spellcard-foot { display: none; }
+.cs-spell-sheet .cs-spellcard-desc { -webkit-line-clamp: unset; display: block; cursor: default; }
+.cs-spell-sheet-btns { display: flex; gap: 8px; }
+.cs-spell-sheet-btns .btn { flex: 1; min-height: 44px; }
+[data-theme="light"] .cs-spell-sheet { background: #fff; }
+
+/* ── Cibles tactiles & focus clavier ── */
+.cs-v3 .is-tiles .cs-spellcard-acts .btn-icon { width: 26px; height: 26px; font-size: .78rem; }
+.cs-v3 .cs-spellcard-detailbtn { padding: 5px 0; }
+.cs-v3 .cs-spellcard .toggle:focus-visible,
+.cs-v3 .cs-sort-cat-hdr:focus-visible {
+  outline: 2px solid var(--gold, #e8b84b); outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cs-v3 .is-tiles .cs-spellcard.is-actif .cs-spellcard-icon,
-  .cs-v3 .is-tiles .cs-spellcard.cs-hintme { animation: none; }
+  .cs-v3 .is-tiles .cs-spellcard.cs-hintme,
+  .cs-v3 .cs-sorts-sockets.is-replacing .cs-sock.is-filled,
+  .cs-spell-sheet { animation: none; }
   .cs-spell-tt { transition: none; }
   button.cs-sock, .cs-v3 .is-tiles .cs-spellcard { transition: none; }
 }

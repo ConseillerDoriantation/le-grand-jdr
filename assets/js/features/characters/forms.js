@@ -6,6 +6,7 @@ import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal, confirmModal, modalSection } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { calcDeckMax, calcPVMax, calcPMMax, pct } from '../../shared/char-stats.js';
+import { spellUid, ensureSpellIds } from './spells-calc.js';
 import { loadAllUsers } from '../../core/adventure.js';
 import { _esc } from '../../shared/html.js';
 import { makeSortable } from '../../shared/sortable-helper.js';
@@ -89,11 +90,12 @@ export async function toggleSort(idx, btn = null) {
   const paint = (active) => {
     if (!btn) return;
     btn.classList.toggle('on', active);
-    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    btn.setAttribute('aria-checked', active ? 'true' : 'false');
     btn.closest('.cs-spellcard')?.classList.toggle('is-actif', active);
   };
 
   s.actif=nextActif;
+  ensureSpellIds(sorts);   // backfill opportuniste des ids stables
   c.deck_sorts=sorts;
   paint(nextActif);
   if (charSession.getCurrentChar()?.id === c.id)
@@ -179,24 +181,38 @@ export async function saveQuete(idx = null) {
 // ══════════════════════════════════════════════
 // INVENTAIRE — suppression legacy
 // ══════════════════════════════════════════════
+// Restaure un tableau deck_sorts précédent (Undo des notifs suppression/duplication).
+async function _restoreDeckSorts(c, prev) {
+  c.deck_sorts = prev;
+  if (await trySave('characters', c.id, { deck_sorts: prev })) _renderFormsChar(c, 'sorts');
+}
+
 export async function deleteSort(idx) {
   const c=STATE.activeChar; if(!c) return;
   const nom = (c.deck_sorts||[])[idx]?.nom || 'ce sort';
   if (!await confirmModal(`Supprimer <b>${_esc(nom)}</b> ?`, {
     title: 'Confirmation', confirmLabel: 'Supprimer', icon: '🗑️',
   })) return;
+  const prev = [...(c.deck_sorts||[])];
   c.deck_sorts.splice(idx,1);
-  if (await trySave('characters',c.id,{deck_sorts:c.deck_sorts})) _renderFormsChar(c, 'sorts');
+  if (await trySave('characters',c.id,{deck_sorts:c.deck_sorts})) {
+    _renderFormsChar(c, 'sorts');
+    showNotif(`Sort supprimé — ${nom}`, 'info', {
+      duration: 6000,
+      action: { label: '↺ Annuler', onClick: () => _restoreDeckSorts(c, prev) },
+    });
+  }
 }
 
 export async function duplicateSort(idx) {
   const c=STATE.activeChar; if(!c) return;
-  const sorts = [...(c.deck_sorts||[])];
+  const prev = [...(c.deck_sorts||[])];
+  const sorts = [...prev];
   const src = sorts[idx]; if (!src) return;
   const clone = (typeof structuredClone === 'function')
     ? structuredClone(src)
     : JSON.parse(JSON.stringify(src));
-  clone.id = `s${Date.now().toString(36)}`;
+  clone.id = spellUid();
   clone.nom = `${(src.nom || 'Sort').trim() || 'Sort'} (copie)`;
   clone.actif = false;
   clone.mjValidation = 'pending';
@@ -204,7 +220,10 @@ export async function duplicateSort(idx) {
   sorts.splice(idx + 1, 0, clone);
   c.deck_sorts = sorts;
   if (await trySave('characters', c.id, {deck_sorts: sorts})) {
-    showNotif('Sort dupliqué — à valider par le MJ.', 'success');
+    showNotif('Sort dupliqué — à valider par le MJ.', 'success', {
+      duration: 6000,
+      action: { label: '↺ Annuler', onClick: () => _restoreDeckSorts(c, prev) },
+    });
     _renderFormsChar(c, 'sorts');
   }
 }
