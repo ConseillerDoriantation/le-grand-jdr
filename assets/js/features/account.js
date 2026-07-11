@@ -13,7 +13,7 @@ import {
 
 import {
   loadChars, loadCollection, deleteFromCol, updateInCol,
-  getDocDataSilent, saveDoc, loadMyCharactersAcrossAdventures,
+  getDocDataSilent, saveDoc, loadCharsForAdventure,
 } from '../data/firestore.js';
 
 import { openModal, closeModal } from '../shared/modal.js';
@@ -233,10 +233,13 @@ async function openAvatarPicker() {
       <img src="${_esc(resolveAvatarUrl(url))}" alt="${_esc(label || '')}" loading="lazy">
     </button>`;
 
-  // Portraits des personnages DU JOUEUR sur TOUTES ses aventures (collectionGroup),
-  // fusionnés avec l'aventure courante (déjà en mémoire), dédoublonnés par id, et
-  // filtrés à ses propres persos ayant un portrait.
-  const _cross = await loadMyCharactersAcrossAdventures(uid).catch(() => []);
+  // Portraits des personnages DU JOUEUR sur TOUTES ses aventures : on lit ses
+  // persos (filtrés sur son uid) dans CHACUNE de ses aventures (STATE.adventures),
+  // via les index/règles standard — pas de collectionGroup ni d'index spécial. On
+  // fusionne avec l'aventure courante (déjà en mémoire), dédoublonne par id, et
+  // filtre à ses propres persos ayant un portrait.
+  const _advs = Array.isArray(STATE.adventures) ? STATE.adventures : [];
+  const _cross = (await Promise.all(_advs.map(a => loadCharsForAdventure(a?.id, uid).catch(() => [])))).flat();
   const _byId = new Map();
   [...(_cross || []), ...(STATE.characters || [])]
     .filter(c => c?.uid === uid && _charPortrait(c))

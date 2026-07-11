@@ -856,6 +856,23 @@ export async function loadMyCharactersAcrossAdventures(uid) {
   }
 }
 
+// Personnages d'UNE aventure donnée (par id), sans toucher au scope courant.
+// Filtre optionnel sur `uid`. Utilise l'index single-field AUTOMATIQUE sur `uid`
+// (scope collection) + la règle characters existante (inAdventure) → aucun index
+// ni règle spéciale à créer. Sert à agréger les persos cross-aventures (écran
+// Compte). Échec (droits) → [].
+export async function loadCharsForAdventure(adventureId, uid = null) {
+  if (!adventureId) return [];
+  try {
+    const col = collection(db, 'adventures', adventureId, 'characters');
+    const snap = await getDocs(uid ? query(col, where('uid', '==', uid)) : col);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.warn('[firestore] loadCharsForAdventure', adventureId, e?.code || e);
+    return [];
+  }
+}
+
 export async function loadChars(uid = null) {
   const path = _colPath('characters');
 
