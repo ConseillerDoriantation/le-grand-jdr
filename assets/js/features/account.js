@@ -251,14 +251,14 @@ async function openAvatarPicker() {
 
   const catalogSection = catalog.length
     ? _lbl('🎭 Avatars de l\'app') + `<div class="avatar-grid">${catalog.map(ic => _optBtn(ic.url, ic.label)).join('')}</div>`
-    : `<div class="acc-avatar-empty">Aucun avatar disponible pour l'instant.${STATE.isAdmin ? ' Ajoutes-en via « Gérer les avatars ».' : ''}</div>`;
+    : `<div class="acc-avatar-empty">Aucun avatar disponible pour l'instant.${STATE.isSuperAdmin ? ' Ajoutes-en via « Gérer les avatars ».' : ''}</div>`;
 
   openModal('🎭 Choisir un avatar', `
     ${charsSection}
     ${catalogSection}
     <div style="display:flex;gap:.5rem;margin-top:.9rem;flex-wrap:wrap;align-items:center">
       ${cur ? `<button class="btn btn-outline btn-sm" data-action="chooseAvatar" data-url="">↩︎ Avatar par défaut</button>` : ''}
-      ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="openAvatarManager">⚙️ Gérer les avatars</button>` : ''}
+      ${STATE.isSuperAdmin ? `<button class="btn btn-outline btn-sm" data-action="openAvatarManager">⚙️ Gérer les avatars</button>` : ''}
       <button class="btn btn-outline btn-sm" style="margin-left:auto" data-action="_accClose">Fermer</button>
     </div>
   `, { subtitle: "Tes personnages ou les avatars de l'app", accent: '#4f8cff' });
@@ -283,7 +283,7 @@ async function chooseAvatar(url) {
 
 // ── Gestionnaire admin du catalogue ──────────────────────────────────────────
 function openAvatarManager() {
-  if (!STATE.isAdmin) return;
+  if (!STATE.isSuperAdmin) return;   // gestion du catalogue global = super-admin uniquement
   _renderAvatarManager(_iconCatalog || []);
 }
 
