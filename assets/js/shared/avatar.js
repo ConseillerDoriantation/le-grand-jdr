@@ -14,5 +14,24 @@ export const DEFAULT_AVATAR = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   </svg>`
 );
 
-/** Source d'image de l'avatar d'un profil : icône choisie sinon image de base. */
-export const avatarSrcOf = (profile) => profile?.avatarIcon || DEFAULT_AVATAR;
+// Racine du site déduite de l'emplacement de CE module (assets/js/shared/avatar.js
+// → 3 niveaux au-dessus = racine). Robuste quelle que soit l'URL de page :
+//   prod  → https://…/le-grand-jdr/       · local → http://…/
+const _SITE_ROOT = new URL('../../../', import.meta.url).href;
+
+// Résout une URL d'avatar stockée (souvent relative : "images/avatar/x.png" ou
+// "/images/avatar/x.png") contre la racine du site. Indispensable en prod : le
+// site est servi sous /le-grand-jdr/ (GitHub Pages project site), donc un chemin
+// racine "/images/..." pointe hors du projet → 404. On retire le "/" initial et on
+// résout contre la racine réelle. Les URLs absolues (http(s):// ou //) et data:
+// sont laissées telles quelles.
+export function resolveAvatarUrl(u) {
+  if (!u) return u;
+  const s = String(u);
+  if (/^(https?:)?\/\//i.test(s) || s.startsWith('data:')) return s;
+  try { return new URL(s.replace(/^\/+/, ''), _SITE_ROOT).href; }
+  catch { return s; }
+}
+
+/** Source d'image de l'avatar d'un profil : icône choisie (résolue) sinon image de base. */
+export const avatarSrcOf = (profile) => resolveAvatarUrl(profile?.avatarIcon) || DEFAULT_AVATAR;
