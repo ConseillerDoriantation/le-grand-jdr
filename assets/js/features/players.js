@@ -64,6 +64,47 @@ function _tagColor(text) {
 const _ACCENT_COLORS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
 const _accentColor = (nom = '') => _ACCENT_COLORS[(nom.charCodeAt(0) || 0) % _ACCENT_COLORS.length];
 
+function _plainExcerpt(value = '', max = 150) {
+  const text = String(value || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return '';
+  return text.length > max ? `${text.slice(0, max).trim()}...` : text;
+}
+
+function _ppIcon(name, className = 'pp-icon') {
+  const icons = {
+    search: '<circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path>',
+    x: '<path d="M18 6 6 18"></path><path d="m6 6 12 12"></path>',
+    eye: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle>',
+    eyeOff: '<path d="m2 2 20 20"></path><path d="M10.6 10.6a3 3 0 0 0 3.8 3.8"></path><path d="M9.9 5.2A10.5 10.5 0 0 1 12 5c6.5 0 10 7 10 7a18.5 18.5 0 0 1-2.3 3.2"></path><path d="M6.1 6.1C3.4 7.9 2 12 2 12s3.5 7 10 7c1.3 0 2.5-.3 3.6-.8"></path>',
+    edit: '<path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>',
+    grip: '<path d="M9 5h.01"></path><path d="M15 5h.01"></path><path d="M9 12h.01"></path><path d="M15 12h.01"></path><path d="M9 19h.01"></path><path d="M15 19h.01"></path>',
+    cards: '<rect x="5" y="4" width="12" height="16" rx="2"></rect><path d="M9 8h4"></path><path d="M9 12h4"></path><path d="M7 20h10"></path>',
+    relations: '<circle cx="6" cy="7" r="3"></circle><circle cx="18" cy="7" r="3"></circle><circle cx="12" cy="18" r="3"></circle><path d="m8.5 9.5 2 5"></path><path d="m15.5 9.5-2 5"></path><path d="M9 7h6"></path>',
+    arrowLeft: '<path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path>',
+    arrowRight: '<path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path>',
+    book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5Z"></path>',
+    calendar: '<path d="M8 2v4"></path><path d="M16 2v4"></path><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M3 10h18"></path>',
+    flag: '<path d="M4 22V4"></path><path d="M4 4h13l-1.5 4L17 12H4"></path>',
+    image: '<rect x="3" y="5" width="18" height="14" rx="2"></rect><circle cx="8.5" cy="10.5" r="1.5"></circle><path d="m21 15-5-5L5 21"></path>',
+    mapPin: '<path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"></path><circle cx="12" cy="10" r="3"></circle>',
+    trophy: '<path d="M8 21h8"></path><path d="M12 17v4"></path><path d="M7 4h10v5a5 5 0 0 1-10 0Z"></path><path d="M5 6H3v2a4 4 0 0 0 4 4"></path><path d="M19 6h2v2a4 4 0 0 1-4 4"></path>',
+    plus: '<path d="M12 5v14"></path><path d="M5 12h14"></path>',
+    reset: '<path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v6h6"></path>',
+    lock: '<rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path>',
+    heart: '<path d="M20.8 8.6c0 5.1-8.8 10.4-8.8 10.4S3.2 13.7 3.2 8.6A4.6 4.6 0 0 1 12 6a4.6 4.6 0 0 1 8.8 2.6Z"></path>',
+    spark: '<path d="M12 2 9.5 9.5 2 12l7.5 2.5L12 22l2.5-7.5L22 12l-7.5-2.5Z"></path>',
+    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path>',
+    coin: '<circle cx="12" cy="12" r="8"></circle><path d="M12 8v8"></path><path d="M9.5 10.5c0-1.2 1.1-2 2.5-2 1.3 0 2.5.7 2.5 2 0 1.2-1 1.6-2.5 2s-2.5.8-2.5 2c0 1.3 1.2 2 2.5 2 1.4 0 2.5-.8 2.5-2"></path>',
+    user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>',
+    users: '<path d="M16 21a6 6 0 0 0-12 0"></path><circle cx="10" cy="8" r="4"></circle><path d="M22 21a5 5 0 0 0-5-5"></path><path d="M17 4a4 4 0 0 1 0 8"></path>',
+  };
+  return `<svg class="${className}" viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.user}</svg>`;
+}
+
 // ── État module ───────────────────────────────────────────────────────────────
 let _ppCropper = null;             // cropper de l'illustration de la fiche (sélection)
 let _ppCardCropper = null;         // cropper de l'image de la card (pan-zoom 3:4)
@@ -81,6 +122,7 @@ const STORE = {
   relSelected:   null,      // Set<charId> | null (null = tous visibles)
   relPositions:  {},        // charId → {x,y} (positions custom après drag, en coords SVG)
   relPickerOpen: false,
+  chroniqueExpanded: {},
   presentations: [],
   characters:    [],
   achievements:  [],
@@ -289,14 +331,14 @@ function _applyFilters(items) {
 // ── Calcul des missions du PJ (pour la chronologie de fiche) ─────────────────
 function _computeRecentMissions(currentCharId, limit = 5) {
   if (!currentCharId || !STORE.story.length) return [];
-  return STORE.story
+  const all = STORE.story
     .filter(ev => {
       // Inclut si participant direct OU membre d'un groupe (quête liée à la mission)
       if ((ev.participants || []).some(p => p.id === currentCharId)) return true;
       return _missionGroupCharIds(ev.id).has(currentCharId);
     })
-    .sort(_compareMissionsChronoDesc)
-    .slice(0, limit);
+    .sort(_compareMissionsChronoDesc);
+  return Number.isFinite(limit) ? all.slice(0, limit) : all;
 }
 
 // ── Calcul des partenaires d'aventure (basé sur les quêtes-groupes) ──────────
@@ -327,28 +369,51 @@ function _renderHero(items, filtered) {
   const classes = new Set(items.map(i => i.classe).filter(Boolean));
   const joueursList = [...joueurs].sort((a, b) => a.localeCompare(b, 'fr'));
   const isFiltered = !!(STORE.filterSearch || STORE.filterJoueur);
+  const visibleCount = items.filter(i => i.visible !== false).length;
+  const hiddenCount = items.length - visibleCount;
+  const linkedCount = items.filter(i => i.charId).length;
+  const avgLevel = items.length
+    ? Math.round(items.reduce((sum, it) => sum + (Number(it.level) || 0), 0) / items.length)
+    : 0;
 
   return `
   <div class="pp-hero">
     <div class="pp-hero-band">
       <div class="pp-hero-title-block">
-        <div class="pp-hero-eyebrow">Compagnons d'Aventure</div>
-        <h1 class="pp-hero-title">✦ Roster de Campagne ✦</h1>
+        <div class="pp-hero-eyebrow">Compagnons d'aventure</div>
+        <h1 class="pp-hero-title">Joueurs de la campagne</h1>
+        <p class="pp-hero-subtitle">Une vue claire des personnages, des comptes liés et des informations publiées.</p>
       </div>
       <div class="pp-hero-stats">
         <div class="pp-hero-stat"><div class="pp-hero-stat-num">${items.length}</div><div class="pp-hero-stat-lbl">Personnage${items.length>1?'s':''}</div></div>
-        <div class="pp-hero-stat"><div class="pp-hero-stat-num">${joueurs.size}</div><div class="pp-hero-stat-lbl">Joueur${joueurs.size>1?'s':''}</div></div>
-        <div class="pp-hero-stat"><div class="pp-hero-stat-num">${classes.size}</div><div class="pp-hero-stat-lbl">Classe${classes.size>1?'s':''}</div></div>
+        <div class="pp-hero-stat"><div class="pp-hero-stat-num">${joueurs.size}</div><div class="pp-hero-stat-lbl">Compte${joueurs.size>1?'s':''}</div></div>
+        <div class="pp-hero-stat"><div class="pp-hero-stat-num">${visibleCount}</div><div class="pp-hero-stat-lbl">Publié${visibleCount>1?'s':''}</div></div>
+        <div class="pp-hero-stat"><div class="pp-hero-stat-num">${avgLevel}</div><div class="pp-hero-stat-lbl">Niv. moyen</div></div>
+      </div>
+    </div>
+
+    <div class="pp-roster-summary">
+      <div class="pp-roster-summary-card">
+        <span class="pp-roster-summary-icon">${_ppIcon('users')}</span>
+        <div><strong>${linkedCount}/${items.length}</strong><small>fiches personnage liées</small></div>
+      </div>
+      <div class="pp-roster-summary-card">
+        <span class="pp-roster-summary-icon">${_ppIcon('cards')}</span>
+        <div><strong>${classes.size}</strong><small>classe${classes.size>1?'s':''} représentée${classes.size>1?'s':''}</small></div>
+      </div>
+      <div class="pp-roster-summary-card">
+        <span class="pp-roster-summary-icon">${_ppIcon(hiddenCount ? 'eyeOff' : 'eye')}</span>
+        <div><strong>${hiddenCount}</strong><small>présentation${hiddenCount>1?'s':''} masquée${hiddenCount>1?'s':''}</small></div>
       </div>
     </div>
 
     <div class="pp-filters">
       <div class="pp-filter-search">
-        <span class="pp-filter-icon">🔍</span>
+        <span class="pp-filter-icon">${_ppIcon('search')}</span>
         <input type="text" placeholder="Rechercher un nom, une classe, un trait…"
           value="${_esc(STORE.filterSearch || '')}"
           data-pp-action="search" data-pp-on="input">
-        ${STORE.filterSearch ? `<button class="pp-filter-clear" data-pp-action="clearSearch" title="Effacer">✕</button>` : ''}
+        ${STORE.filterSearch ? `<button class="pp-filter-clear" data-pp-action="clearSearch" title="Effacer">${_ppIcon('x')}</button>` : ''}
       </div>
       ${joueursList.length > 1 ? `
         <select class="pp-filter-select" data-pp-action="setJoueur" data-pp-on="change" aria-label="Filtrer par joueur">
@@ -356,19 +421,19 @@ function _renderHero(items, filtered) {
           ${joueursList.map(j => `<option value="${_esc(j)}" ${STORE.filterJoueur===j?'selected':''}>${_esc(j)}</option>`).join('')}
         </select>` : ''}
       <select class="pp-filter-select" data-pp-action="setSort" data-pp-on="change" aria-label="Trier par" title="Trier le sommaire">
-        <option value="ordre"  ${STORE.sortBy==='ordre' ?'selected':''}>↕ Ordre manuel</option>
-        <option value="nom"    ${STORE.sortBy==='nom'   ?'selected':''}>A → Z</option>
-        <option value="niveau" ${STORE.sortBy==='niveau'?'selected':''}>Niveau ↓</option>
+        <option value="ordre"  ${STORE.sortBy==='ordre' ?'selected':''}>Ordre manuel</option>
+        <option value="nom"    ${STORE.sortBy==='nom'   ?'selected':''}>Nom A-Z</option>
+        <option value="niveau" ${STORE.sortBy==='niveau'?'selected':''}>Niveau</option>
         <option value="joueur" ${STORE.sortBy==='joueur'?'selected':''}>Joueur</option>
         <option value="classe" ${STORE.sortBy==='classe'?'selected':''}>Classe</option>
       </select>
-      ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" data-pp-action="newPlayer">+ Présentation</button>` : ''}
-      ${isFiltered ? `<button class="pp-filter-reset" data-pp-action="resetFilters" title="Réinitialiser tous les filtres">↺ Réinitialiser</button>` : ''}
+      ${STATE.isAdmin ? `<button class="pp-action-primary" data-pp-action="newPlayer">${_ppIcon('plus')} Présentation</button>` : ''}
+      ${isFiltered ? `<button class="pp-filter-reset" data-pp-action="resetFilters" title="Réinitialiser tous les filtres">${_ppIcon('reset')} Réinitialiser</button>` : ''}
       <div class="pp-view-toggle" role="tablist" aria-label="Mode d'affichage">
         <button class="pp-view-tab ${STORE.viewMode==='gallery'?'is-active':''}"
-          data-pp-action="setViewMode" data-mode="gallery" title="Galerie de cards" role="tab">🎴 Galerie</button>
+          data-pp-action="setViewMode" data-mode="gallery" title="Galerie de cards" role="tab">${_ppIcon('cards')} Galerie</button>
         <button class="pp-view-tab ${STORE.viewMode==='relations'?'is-active':''}"
-          data-pp-action="setViewMode" data-mode="relations" title="Carte des liens d'aventure" role="tab">🕸️ Relations</button>
+          data-pp-action="setViewMode" data-mode="relations" title="Carte des liens d'aventure" role="tab">${_ppIcon('relations')} Relations</button>
       </div>
     </div>
 
@@ -397,17 +462,17 @@ function _renderCard(item, idx) {
     ? `position:absolute;left:${(cc.offX*100).toFixed(2)}%;top:${(cc.offY*100).toFixed(2)}%;width:${(cc.imgW*100).toFixed(2)}%;height:auto;max-width:none`
     : 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
 
-  // Vitaux mini (badges discrets sous le nom)
-  const vitaux = [
+  // Vitaux exacts : visibles uniquement par le MJ sur cette page publique.
+  const vitaux = STATE.isAdmin ? [
     item.afficherPV && item.pvMax !== null
-      ? `<span class="pp-card-vital pp-card-vital--pv">❤ ${item.pvActuel ?? item.pvMax}<small>/${item.pvMax}</small></span>` : '',
+      ? `<span class="pp-card-vital pp-card-vital--pv">${_ppIcon('heart')} <b>${item.pvActuel ?? item.pvMax}</b><small>/${item.pvMax} PV</small></span>` : '',
     item.afficherPM && item.pmMax !== null
-      ? `<span class="pp-card-vital pp-card-vital--pm">✦ ${item.pmActuel ?? item.pmMax}<small>/${item.pmMax}</small></span>` : '',
+      ? `<span class="pp-card-vital pp-card-vital--pm">${_ppIcon('spark')} <b>${item.pmActuel ?? item.pmMax}</b><small>/${item.pmMax} PM</small></span>` : '',
     item.afficherCA && item.ca !== null
-      ? `<span class="pp-card-vital pp-card-vital--ca">🛡 ${item.ca}</span>` : '',
+      ? `<span class="pp-card-vital pp-card-vital--ca">${_ppIcon('shield')} <b>${item.ca}</b><small>CA</small></span>` : '',
     item.afficherOr && item.gold !== null
-      ? `<span class="pp-card-vital pp-card-vital--or">🪙 ${item.gold}</span>` : '',
-  ].filter(Boolean);
+      ? `<span class="pp-card-vital pp-card-vital--or">${_ppIcon('coin')} <b>${item.gold}</b><small>or</small></span>` : '',
+  ].filter(Boolean) : [];
 
   // Tags max 2 visibles (gain de place — détaillés sur la fiche)
   const tagsHtml = (item.tags || []).slice(0, 2).map(t => {
@@ -419,13 +484,13 @@ function _renderCard(item, idx) {
   return `
   <article class="pp-card${hidden?' is-hidden':''}${locked?' is-locked':''}" data-pp-id="${_esc(item.id)}"
     style="--card-accent:${col}">
-    ${isAdmin ? `<div class="pp-card-drag" title="Réordonner">⠿</div>` : ''}
+    ${isAdmin ? `<div class="pp-card-drag" title="Réordonner">${_ppIcon('grip')}</div>` : ''}
     ${isAdmin ? `
       <div class="pp-card-admin">
         <button class="pp-card-admin-btn" title="${hidden?'Afficher':'Masquer'} aux joueurs"
-          data-pp-action="toggleVisible" data-id="${_esc(item.id)}">${hidden?'🚫':'👁'}</button>
+          data-pp-action="toggleVisible" data-id="${_esc(item.id)}">${_ppIcon(hidden ? 'eyeOff' : 'eye')}</button>
         ${item.presentationId ? `<button class="pp-card-admin-btn" title="Modifier"
-          data-pp-action="editPres" data-id="${_esc(item.presentationId)}">✏️</button>` : ''}
+          data-pp-action="editPres" data-id="${_esc(item.presentationId)}">${_ppIcon('edit')}</button>` : ''}
       </div>` : ''}
 
     <button class="pp-card-clickarea" data-pp-action="openFiche" data-id="${_esc(item.id)}">
@@ -439,7 +504,7 @@ function _renderCard(item, idx) {
           : `<div class="pp-card-image-empty">${item.initials}</div>`}
         <!-- Badges flottants -->
         ${item.afficherNiveau ? `<span class="pp-card-level">Niv. ${item.level}</span>` : ''}
-        ${hidden ? `<span class="pp-card-hidden-badge">🔒 Masqué</span>` : ''}
+        ${hidden ? `<span class="pp-card-hidden-badge">${_ppIcon('lock')} Masqué</span>` : ''}
       </div>
 
       <!-- Panneau info net en bas (style trading card) -->
@@ -464,7 +529,7 @@ function _renderSommaire(items) {
   if (!filtered.length) {
     return heroHtml + `
       <div class="pp-empty">
-        <div class="pp-empty-icon">🕯️</div>
+        <div class="pp-empty-icon">${_ppIcon('search')}</div>
         <p class="pp-empty-title">Aucun personnage ne correspond à ta recherche.</p>
         <p class="pp-empty-sub">Essaie de modifier les filtres ou de les réinitialiser.</p>
       </div>`;
@@ -777,7 +842,7 @@ function _renderFiche(item, items) {
     </div>`;
 
   // ── Vitaux affichés sous l'image ─────────────────────────────────────
-  const vitaux = [
+  const vitaux = STATE.isAdmin ? [
     item.afficherPV && item.pvMax !== null
       ? `<div class="pp-vital pp-vital--pv"><div class="pp-vital-lbl">PV</div><div class="pp-vital-val">${item.pvActuel ?? item.pvMax}<small>/${item.pvMax}</small></div></div>` : '',
     item.afficherPM && item.pmMax !== null
@@ -786,7 +851,7 @@ function _renderFiche(item, items) {
       ? `<div class="pp-vital pp-vital--ca"><div class="pp-vital-lbl">CA</div><div class="pp-vital-val">${item.ca}</div></div>` : '',
     item.afficherOr && item.gold !== null
       ? `<div class="pp-vital pp-vital--or"><div class="pp-vital-lbl">Or</div><div class="pp-vital-val">${item.gold}</div></div>` : '',
-  ].filter(Boolean);
+  ].filter(Boolean) : [];
 
   // ── Tags purement informatifs ────────────────────────────────────────
   const tagsHtml = (item.tags || []).length
@@ -811,7 +876,7 @@ function _renderFiche(item, items) {
   }).filter(e => e && e.v);
   const identityHtml = item.afficherIdentite && identityNorm.length
     ? `<section class="pp-fiche-card">
-        <h3 class="pp-fiche-card-title">📜 Identité</h3>
+        <h3 class="pp-fiche-card-title">${_ppIcon('user')} Identité</h3>
         <div class="pp-fiche-identity-list">
           ${identityNorm.map(({ k, v }) => `<div class="pp-fiche-identity-row">
             <span class="pp-fiche-identity-k">${_esc(k)}</span>
@@ -836,7 +901,7 @@ function _renderFiche(item, items) {
   // ── Sections sidebar (stats / équipement / hauts-faits / partenaires) ─
   const statsHtml = item.afficherStats && item.stats.length
     ? `<section class="pp-fiche-card">
-        <h3 class="pp-fiche-card-title">Statistiques</h3>
+        <h3 class="pp-fiche-card-title">${_ppIcon('spark')} Profil de stats</h3>
         ${_renderStatsHexagon(item.stats)}
       </section>` : '';
 
@@ -851,6 +916,30 @@ function _renderFiche(item, items) {
   const imageBlockHtml = item.imageUrl
     ? `<img class="pp-fiche-portrait" src="${_esc(item.imageUrl)}" alt="${_esc(item.nom)}">`
     : `<div class="pp-fiche-portrait pp-fiche-portrait-empty">${item.initials}</div>`;
+  const profileCharId = item.char?.id || item.charId;
+  const profileMissionCount = profileCharId ? STORE.story.filter(ev => {
+    if ((ev.participants || []).some(p => p.id === profileCharId)) return true;
+    return _missionGroupCharIds(ev.id).has(profileCharId);
+  }).length : 0;
+  const profileAchievementCount = profileCharId
+    ? STORE.achievements.filter(a => (a.contributeurs || []).includes(profileCharId)).length
+    : 0;
+  const profilePartnerCount = profileCharId ? _computeTopAdventurers(profileCharId, items, 99).length : 0;
+  const overviewHtml = `
+    <div class="pp-profile-overview">
+      <div class="pp-profile-overview-item">
+        <strong>${profileMissionCount}</strong>
+        <span>Aventure${profileMissionCount>1?'s':''}</span>
+      </div>
+      <div class="pp-profile-overview-item">
+        <strong>${profileAchievementCount}</strong>
+        <span>Haut${profileAchievementCount>1?'s':''}-fait${profileAchievementCount>1?'s':''}</span>
+      </div>
+      <div class="pp-profile-overview-item">
+        <strong>${profilePartnerCount}</strong>
+        <span>Partenaire${profilePartnerCount>1?'s':''}</span>
+      </div>
+    </div>`;
 
   return `
   <div class="pp-fiche" style="--fiche-accent:${col}">
@@ -858,18 +947,18 @@ function _renderFiche(item, items) {
     <!-- Toolbar sticky : retour + édition admin + strip de navigation -->
     <nav class="pp-fiche-toolbar">
       <button class="pp-toolbar-back" data-pp-action="back">
-        <span class="pp-toolbar-back-icon">←</span>
+        ${_ppIcon('arrowLeft')}
         <span class="pp-toolbar-back-text">Roster</span>
       </button>
       ${stripHtml}
       ${STATE.isAdmin && item.presentationId
-        ? `<button class="btn btn-outline btn-sm pp-toolbar-edit" data-pp-action="editPres" data-id="${_esc(item.presentationId)}">✏️ Modifier</button>`
+        ? `<button class="pp-toolbar-edit" data-pp-action="editPres" data-id="${_esc(item.presentationId)}">${_ppIcon('edit')} Modifier</button>`
         : ''}
     </nav>
 
     <!-- Badge masqué (admin) -->
     ${STATE.isAdmin && !item.visible
-      ? `<div class="pp-fiche-hidden-banner">🔒 Cette présentation est masquée aux joueurs</div>`
+      ? `<div class="pp-fiche-hidden-banner">${_ppIcon('lock')} Cette présentation est masquée aux joueurs</div>`
       : ''}
 
     <!-- Layout principal 2 colonnes -->
@@ -886,21 +975,25 @@ function _renderFiche(item, items) {
           <h1 class="pp-fiche-name">${_esc(item.nom)}</h1>
           ${item.subtitle ? `<div class="pp-fiche-subtitle">${_esc(item.subtitle)}</div>` : ''}
           <div class="pp-fiche-meta">
-            ${item.joueur ? `<span class="pp-fiche-meta-item">👤 ${_esc(item.joueur)}</span>` : ''}
+            ${item.joueur ? `<span class="pp-fiche-meta-item">${_ppIcon('user')} ${_esc(item.joueur)}</span>` : ''}
+            ${profileCharId ? `<span class="pp-fiche-meta-item">${_ppIcon('cards')} Fiche liée</span>` : ''}
+            ${item.visible === false
+              ? `<span class="pp-fiche-meta-item pp-fiche-meta-item--hidden">${_ppIcon('eyeOff')} Masquée</span>`
+              : `<span class="pp-fiche-meta-item">${_ppIcon('eye')} Publiée</span>`}
             ${item.afficherNiveau ? `<span class="pp-fiche-level">Niv. ${item.level}</span>` : ''}
           </div>
+          ${titlesHtml}
+          ${tagsHtml}
+          ${citationHtml}
+          ${overviewHtml}
           ${vitaux.length ? `<div class="pp-fiche-vitals">${vitaux.join('')}</div>` : ''}
         </div>
       </div>
 
       <!-- Colonne centrale : narratif principal -->
       <div class="pp-fiche-narrative-col">
-        ${titlesHtml}
-        ${tagsHtml}
-        ${citationHtml}
-
         ${item.afficherBio ? `<section class="pp-fiche-card pp-fiche-narrative">
-          <h3 class="pp-fiche-card-title">Présentation</h3>
+          <h3 class="pp-fiche-card-title">${_ppIcon('book')} Présentation</h3>
           ${narrative}
         </section>` : ''}
 
@@ -925,6 +1018,49 @@ function _renderFiche(item, items) {
 // valeurs superposé sur la grille hexagonale. Plus visuel et lisible que les
 // barres horizontales.
 function _renderStatsHexagon(stats, opts = {}) {
+  const STAT_MAX = 22;
+  const statList = (stats || []).map(s => ({
+    ...s,
+    value: Number(s.value) || 0,
+    mod: getModFromScore(Number(s.value) || 0),
+  }));
+  if (!statList.length) return '';
+
+  const orderedStats = [...statList].sort((a, b) => b.value - a.value || a.label.localeCompare(b.label, 'fr'));
+  const strongest = orderedStats[0];
+  const weakest = orderedStats[orderedStats.length - 1];
+  const average = Math.round(statList.reduce((sum, s) => sum + s.value, 0) / statList.length);
+  const averageMod = getModFromScore(average);
+
+  return `
+    <div class="pp-stat-profile">
+      <div class="pp-stat-profile-top">
+        <div class="pp-stat-focus" style="--stat-color:${strongest.color}">
+          <span>Point fort</span>
+          <strong>${_esc(strongest.label)}</strong>
+          <em>${strongest.value} · ${modStr(strongest.mod)}</em>
+        </div>
+        <div class="pp-stat-focus pp-stat-focus--quiet" style="--stat-color:${weakest.color}">
+          <span>Moyenne</span>
+          <strong>${average}</strong>
+          <em>${modStr(averageMod)}</em>
+        </div>
+      </div>
+      <div class="pp-stat-lines">
+        ${statList.map(s => {
+          const pct = Math.max(0, Math.min(100, Math.round((s.value / STAT_MAX) * 100)));
+          return `<div class="pp-stat-line" style="--stat-color:${s.color};--stat-pct:${pct}%">
+            <div class="pp-stat-line-head">
+              <span class="pp-stat-name">${_esc(s.label)}</span>
+              <span class="pp-stat-score">${s.value}</span>
+              <span class="pp-stat-mod">${modStr(s.mod)}</span>
+            </div>
+            <div class="pp-stat-track" aria-hidden="true"><span></span></div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+
   const size = opts.size || 260;
   const cx = size / 2, cy = size / 2;
   const R  = size * 0.36;          // rayon des axes
@@ -1088,7 +1224,7 @@ function _renderEquipBlock(char) {
 
   return `
     <section class="pp-fiche-card">
-      <h3 class="pp-fiche-card-title">Équipement</h3>
+      <h3 class="pp-fiche-card-title">${_ppIcon('shield')} Équipement</h3>
       <div class="pp-side-equip">
         ${rows.map(r => `
           <div class="pp-equip-row">
@@ -1118,7 +1254,7 @@ function _renderAchievementsBlock(item) {
 
   return `
     <section class="pp-fiche-card">
-      <h3 class="pp-fiche-card-title">Hauts-Faits <span class="pp-fiche-card-count">${total}</span></h3>
+      <h3 class="pp-fiche-card-title">${_ppIcon('trophy')} Hauts-Faits <span class="pp-fiche-card-count">${total}</span></h3>
       <div class="pp-side-achievements">
         ${CATS.filter(c => byCat[c.id]).map(c => `
           <div class="pp-ach-cell" style="--ach-color:${c.color}">
@@ -1136,7 +1272,7 @@ function _renderGalleryBlock(item) {
   if (!photos.length) return '';
   return `
     <section class="pp-fiche-card pp-fiche-card--gallery">
-      <h3 class="pp-fiche-card-title">Galerie <span class="pp-fiche-card-count">${photos.length}</span></h3>
+      <h3 class="pp-fiche-card-title">${_ppIcon('image')} Galerie <span class="pp-fiche-card-count">${photos.length}</span></h3>
       <div class="pp-gallery-view">
         ${photos.map((g, i) => `
           <button type="button" class="pp-gallery-view-item"
@@ -1144,7 +1280,7 @@ function _renderGalleryBlock(item) {
             <img src="${_esc(g.url || g.thumb)}" alt="Photo ${i+1} de ${_esc(item.nom)}"
                  loading="lazy" decoding="async" referrerpolicy="no-referrer">
             ${g.isPortrait ? '<span class="pp-gallery-view-portrait-flag">Portrait</span>' : ''}
-            <span class="pp-gallery-view-zoom" aria-hidden="true">🔍</span>
+            <span class="pp-gallery-view-zoom" aria-hidden="true">${_ppIcon('search')}</span>
           </button>`).join('')}
       </div>
     </section>`;
@@ -1154,18 +1290,72 @@ function _renderGalleryBlock(item) {
 function _renderChroniqueBlock(item) {
   const charId = item.char?.id || item.charId;
   if (!charId) return '';
-  const missions = _computeRecentMissions(charId, 6);
-  if (!missions.length) return '';
+  const allMissions = _computeRecentMissions(charId, Infinity);
+  if (!allMissions.length) return '';
+  const visibleLimit = 6;
+  const isExpanded = Boolean(STORE.chroniqueExpanded?.[charId]);
+  const missions = isExpanded ? allMissions : allMissions.slice(0, visibleLimit);
+  const remainingCount = Math.max(0, allMissions.length - visibleLimit);
 
   // Compte le total des missions auxquelles le PJ a participé
   const totalCount = STORE.story.filter(ev => {
     if ((ev.participants || []).some(p => p.id === charId)) return true;
     return _missionGroupCharIds(ev.id).has(charId);
   }).length;
+  const latest = allMissions[0];
+  const missionCount = allMissions.filter(m => m.type === 'mission').length;
+  const storyCount = allMissions.length - missionCount;
+
+  return `
+    <section class="pp-fiche-card pp-fiche-card--chronique">
+      <h3 class="pp-fiche-card-title">${_ppIcon('book')} Chronique <span class="pp-fiche-card-count">${totalCount}</span></h3>
+      <div class="pp-chronique-head">
+        <div>
+          <p class="pp-fiche-card-sub">Les dernières aventures auxquelles ${_esc(item.nom)} a pris part.</p>
+          <div class="pp-chronique-last">
+            <span>Dernière trace</span>
+            <strong>${_esc(latest?.titre || 'Sans titre')}</strong>
+          </div>
+        </div>
+        <div class="pp-chronique-kpis">
+          <span><b>${missionCount}</b> mission${missionCount>1?'s':''}</span>
+          <span><b>${storyCount}</b> note${storyCount>1?'s':''}</span>
+        </div>
+      </div>
+      <div class="pp-chronique">
+        ${missions.map((m, idx) => {
+          const isMission = m.type === 'mission';
+          const groupCount = STORE.quests.filter(q => q.missionId === m.id).length;
+          const status = m.statut || m.status || '';
+          return `<button type="button" class="pp-chronique-item ${idx === 0 ? 'is-latest' : ''}" data-pp-action="openChroniqueMission" data-id="${_esc(m.id || '')}">
+            <div class="pp-chronique-step">
+              <span>${String(idx + 1).padStart(2, '0')}</span>
+            </div>
+            <div class="pp-chronique-body">
+              <div class="pp-chronique-row">
+                <span class="pp-chronique-type">${_ppIcon(isMission ? 'flag' : 'book')} ${isMission ? 'Mission' : 'Note'}</span>
+                ${m.date ? `<span class="pp-chronique-date">${_ppIcon('calendar')} ${_esc(m.date)}</span>` : ''}
+              </div>
+              <div class="pp-chronique-titre">${_esc(m.titre || 'Sans titre')}</div>
+              <div class="pp-chronique-meta">
+                ${m.acte ? `<span>${_ppIcon('cards')} ${_esc(m.acte)}</span>` : ''}
+                ${m.lieu ? `<span>${_ppIcon('mapPin')} ${_esc(m.lieu)}</span>` : ''}
+                ${status ? `<span>${_ppIcon('spark')} ${_esc(status)}</span>` : ''}
+                ${groupCount ? `<span>${_ppIcon('users')} ${groupCount} groupe${groupCount>1?'s':''}</span>` : ''}
+              </div>
+              <span class="pp-chronique-open">Ouvrir ${_ppIcon('arrowRight')}</span>
+            </div>
+          </button>`;
+        }).join('')}
+      </div>
+      ${remainingCount ? `<button type="button" class="pp-chronique-toggle" data-pp-action="toggleChronique" data-char-id="${_esc(charId)}">
+        ${isExpanded ? `${_ppIcon('arrowLeft')} Réduire le fil` : `${_ppIcon('plus')} Afficher ${remainingCount} aventure${remainingCount>1?'s':''} plus ancienne${remainingCount>1?'s':''}`}
+      </button>` : ''}
+    </section>`;
 
   return `
     <section class="pp-fiche-card">
-      <h3 class="pp-fiche-card-title">Chronique <span class="pp-fiche-card-count">${totalCount}</span></h3>
+      <h3 class="pp-fiche-card-title">${_ppIcon('book')} Chronique <span class="pp-fiche-card-count">${totalCount}</span></h3>
       <p class="pp-fiche-card-sub">Les dernières aventures auxquelles ${_esc(item.nom)} a pris part.</p>
       <div class="pp-chronique">
         ${missions.map(m => {
@@ -1197,7 +1387,7 @@ function _renderTopAdventurersBlock(item, items) {
 
   return `
     <section class="pp-fiche-card">
-      <h3 class="pp-fiche-card-title">Partenaires d'aventure ${top.length ? `<span class="pp-fiche-card-count">${top.length}</span>` : ''}</h3>
+      <h3 class="pp-fiche-card-title">${_ppIcon('users')} Partenaires d'aventure ${top.length ? `<span class="pp-fiche-card-count">${top.length}</span>` : ''}</h3>
       <p class="pp-fiche-card-sub">Compagnons les plus rencontrés en mission (trame).</p>
       ${top.length ? `
         <div class="pp-partenaires-grid">
@@ -1245,19 +1435,19 @@ export async function renderPlayersPage() {
       <div class="pp-hero">
         <div class="pp-hero-band">
           <div class="pp-hero-title-block">
-            <h1 class="pp-hero-title">✦ Roster de Campagne ✦</h1>
-            <p class="pp-hero-subtitle">— Aucun héros ne s'est encore présenté —</p>
+            <h1 class="pp-hero-title">Joueurs de la campagne</h1>
+            <p class="pp-hero-subtitle">Aucun personnage ne s'est encore présenté.</p>
           </div>
         </div>
       </div>
       ${STATE.isAdmin
         ? `<div class="pp-empty">
-            <div class="pp-empty-icon">⚔️</div>
+            <div class="pp-empty-icon">${_ppIcon('cards')}</div>
             <p class="pp-empty-title">Aucun personnage dans le roster.</p>
-            <button class="btn btn-gold" data-pp-action="newPlayer" style="margin-top:.8rem">+ Ajouter le premier</button>
+            <button class="pp-action-primary" data-pp-action="newPlayer" style="margin-top:.8rem">${_ppIcon('plus')} Ajouter le premier</button>
           </div>`
         : `<div class="pp-empty">
-            <div class="pp-empty-icon">🕯️</div>
+            <div class="pp-empty-icon">${_ppIcon('eyeOff')}</div>
             <p class="pp-empty-title">Aucune présentation publiée.</p>
           </div>`}`;
     return;
@@ -1318,6 +1508,26 @@ Object.assign(ppHandlers, {
   setJoueur:     (el) => { STORE.filterJoueur = el.value; STORE.activeId = ''; _refreshView(); },
   setSort:       (el) => { STORE.sortBy = el.value; STORE.activeId = ''; _refreshView(); },
   setViewMode:   (el) => { STORE.viewMode = el.dataset.mode || 'gallery'; STORE.activeId = ''; _refreshView(); },
+  toggleChronique: (el) => {
+    const charId = el.dataset.charId;
+    if (!charId) return;
+    const y = window.scrollY || 0;
+    STORE.chroniqueExpanded[charId] = !STORE.chroniqueExpanded[charId];
+    _refreshView();
+    requestAnimationFrame(() => window.scrollTo({ top: y, left: 0, behavior: 'auto' }));
+  },
+  openChroniqueMission: async (el) => {
+    const id = el.dataset.id;
+    if (!id) return;
+    try {
+      await navigate('story');
+      const { openStoryDetail } = await import('./story.js');
+      await openStoryDetail(id);
+    } catch (err) {
+      console.warn('[players] ouverture mission chronique impossible', err);
+      showNotif('Impossible d’ouvrir cette mission dans la Trame.', 'error');
+    }
+  },
   relTogglePicker: () => { STORE.relPickerOpen = !STORE.relPickerOpen; _refreshView(); },
   relToggleChar: (el) => {
     const id = el.dataset.charId; if (!id) return;
