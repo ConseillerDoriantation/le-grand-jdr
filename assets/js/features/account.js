@@ -293,9 +293,10 @@ function _renderAvatarManager(catalog) {
       <div class="avatar-mng-row">
         <img src="${_esc(resolveAvatarUrl(ic.url))}" alt="" class="avatar-mng-thumb" loading="lazy">
         <div class="avatar-mng-meta">
-          <div class="avatar-mng-lbl">${_esc(ic.label || '—')}</div>
-          <div class="avatar-mng-url">${_esc(ic.url)}</div>
+          <input class="input-field avatar-mng-input" id="av-edit-label-${i}" value="${_esc(ic.label || '')}" placeholder="Nom (optionnel)">
+          <input class="input-field avatar-mng-input avatar-mng-input--url" id="av-edit-url-${i}" value="${_esc(ic.url)}" placeholder="URL de l'image">
         </div>
+        <button class="acc-edit-btn" data-action="updateAvatarIcon" data-idx="${i}" title="Enregistrer les modifications">💾</button>
         <button class="acc-edit-btn" data-action="removeAvatarIcon" data-idx="${i}" title="Retirer">🗑️</button>
       </div>`).join('')
     : `<div class="acc-avatar-empty">Aucun avatar. Ajoute le premier ci-dessous.</div>`;
@@ -332,6 +333,22 @@ async function addAvatarIcon() {
   try {
     await _persistCatalog(icons);
     showNotif('Avatar ajouté.', 'success');
+    _renderAvatarManager(icons);
+  } catch (e) { notifySaveError(e); }
+}
+
+// Modifie l'URL / le nom d'un avatar existant (lu depuis les champs de sa ligne).
+async function updateAvatarIcon(idx) {
+  const url   = document.getElementById(`av-edit-url-${idx}`)?.value?.trim();
+  const label = document.getElementById(`av-edit-label-${idx}`)?.value?.trim() || '';
+  if (!url) { showNotif('L\'URL ne peut pas être vide.', 'error'); return; }
+  if ((_iconCatalog || []).some((ic, i) => i !== idx && ic.url === url)) {
+    showNotif('Un autre avatar utilise déjà cette URL.', 'error'); return;
+  }
+  const icons = (_iconCatalog || []).map((ic, i) => i === idx ? { url, label } : ic);
+  try {
+    await _persistCatalog(icons);
+    showNotif('Avatar modifié.', 'success');
     _renderAvatarManager(icons);
   } catch (e) { notifySaveError(e); }
 }
@@ -605,6 +622,7 @@ registerActions({
   chooseAvatar:        (btn) => chooseAvatar(btn.dataset.url || ''),
   openAvatarManager:   () => openAvatarManager(),
   addAvatarIcon:       () => addAvatarIcon(),
+  updateAvatarIcon:    (btn) => updateAvatarIcon(Number(btn.dataset.idx)),
   removeAvatarIcon:    (btn) => removeAvatarIcon(Number(btn.dataset.idx)),
   openEditPseudo:      () => openEditPseudo(),
   openEditEmail:       () => openEditEmail(),
