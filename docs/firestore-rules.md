@@ -540,6 +540,18 @@ match /adventures/{adventureId} {
     allow read:  if inAdventure(adventureId);
     allow write: if isAdvAdmin(adventureId);
   }
+
+  // Chat de l'aventure : tout membre lit et poste. Le message doit être signé
+  // par son auteur (senderId == uid). Pas d'édition/suppression (MVP).
+  match /chatMessages/{id} {
+    allow read:   if inAdventure(adventureId);
+    allow create: if inAdventure(adventureId)
+      && request.resource.data.senderId == request.auth.uid;
+  }
+  // État de lecture (badge non-lus) : chacun le sien.
+  match /chatReads/{uid} {
+    allow read, write: if inAdventure(adventureId) && uid == request.auth.uid;
+  }
     }
   }
 }

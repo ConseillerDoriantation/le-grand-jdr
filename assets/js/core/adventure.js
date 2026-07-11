@@ -20,6 +20,7 @@ import {
 
 import { setCurrentAdventure, primeSessionData } from '../data/firestore.js';
 import { startPresence } from '../shared/presence.js';
+import { initChat } from '../features/chat.js';
 import { DEFAULT_ENABLED } from '../shared/features.js';
 // Caches module-level de « défauts MJ » scopés par aventure (types de dégâts,
 // formats d'arme, matrices de sorts, conditions, améliorations, picker boutique) :
@@ -204,6 +205,9 @@ export function selectAdventure(adv) {
 
   // Heartbeat de présence pour cette aventure
   if (uid) startPresence(adv.id, uid);
+
+  // Chat flottant de l'aventure (bulle en bas à droite, sur toutes les pages)
+  if (uid) initChat(uid);
 }
 
 // ── Créer une aventure ──────────────────────────
