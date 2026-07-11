@@ -218,25 +218,39 @@ async function _loadIconCatalog(force = false) {
   return _iconCatalog;
 }
 
+// Portrait d'un personnage (mêmes champs que _live côté VTT).
+const _charPortrait = (c) => c?.photoURL || c?.photo || c?.avatar || c?.imageUrl || '';
+
 async function openAvatarPicker() {
   const catalog = await _loadIconCatalog(true);
   const cur = STATE.profile?.avatarIcon || '';
-  const grid = catalog.length
-    ? `<div class="avatar-grid">${catalog.map(ic => `
-        <button class="avatar-opt${cur === ic.url ? ' is-sel' : ''}" data-action="chooseAvatar"
-          data-url="${_esc(ic.url)}" title="${_esc(ic.label || '')}">
-          <img src="${_esc(resolveAvatarUrl(ic.url))}" alt="${_esc(ic.label || '')}" loading="lazy">
-        </button>`).join('')}</div>`
-    : `<div class="acc-avatar-empty">Aucun avatar disponible pour l'instant.${STATE.isAdmin ? ' Ajoutes-en via « Gérer les avatars ».' : ''}</div>`;
+  const uid = STATE.user?.uid || auth.currentUser?.uid || '';
+  const _lbl = (txt) => `<div style="font-size:.74rem;font-weight:700;color:var(--text-dim);letter-spacing:.02em;margin:.3rem 0 .45rem">${txt}</div>`;
+  const _optBtn = (url, label) => `
+    <button class="avatar-opt${cur === url ? ' is-sel' : ''}" data-action="chooseAvatar"
+      data-url="${_esc(url)}" title="${_esc(label || '')}">
+      <img src="${_esc(resolveAvatarUrl(url))}" alt="${_esc(label || '')}" loading="lazy">
+    </button>`;
+
+  // Portraits des personnages DU JOUEUR (seulement les siens, avec une image).
+  const myChars = (STATE.characters || []).filter(c => c?.uid === uid && _charPortrait(c));
+  const charsSection = myChars.length
+    ? _lbl('🧙 Mes personnages') + `<div class="avatar-grid">${myChars.map(c => _optBtn(_charPortrait(c), c.nom || 'Personnage')).join('')}</div>`
+    : '';
+
+  const catalogSection = catalog.length
+    ? _lbl('🎭 Proposés par le MJ') + `<div class="avatar-grid">${catalog.map(ic => _optBtn(ic.url, ic.label)).join('')}</div>`
+    : `<div class="acc-avatar-empty">Aucun avatar proposé par le MJ pour l'instant.${STATE.isAdmin ? ' Ajoutes-en via « Gérer les avatars ».' : ''}</div>`;
 
   openModal('🎭 Choisir un avatar', `
-    ${grid}
+    ${charsSection}
+    ${catalogSection}
     <div style="display:flex;gap:.5rem;margin-top:.9rem;flex-wrap:wrap;align-items:center">
       ${cur ? `<button class="btn btn-outline btn-sm" data-action="chooseAvatar" data-url="">↩︎ Avatar par défaut</button>` : ''}
       ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="openAvatarManager">⚙️ Gérer les avatars</button>` : ''}
       <button class="btn btn-outline btn-sm" style="margin-left:auto" data-action="_accClose">Fermer</button>
     </div>
-  `, { subtitle: 'Sélection proposée par le Maître de Jeu', accent: '#4f8cff' });
+  `, { subtitle: 'Tes personnages ou la sélection du MJ', accent: '#4f8cff' });
 }
 
 async function chooseAvatar(url) {
