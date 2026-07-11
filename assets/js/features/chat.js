@@ -150,7 +150,8 @@ function _renderList() {
   const advRow = _convoRow(ADV, '💬', 'Chat de l\'aventure', advPrev, advN);
   const groupRows = _groups.map(g => {
     const prev = g.lastText ? `${g.lastSenderName || ''} : ${g.lastText}` : 'Nouveau groupe';
-    return _convoRow(g.id, '👥', g.name || 'Groupe', prev, _groupUnread(g) ? '•' : 0);
+    const ico = g.lastSenderId ? `<img class="chat-conv-avimg" src="${_esc(avatarSrcOf(_profileOf(g.lastSenderId)))}" alt="">` : '👥';
+    return _convoRow(g.id, ico, g.name || 'Groupe', prev, _groupUnread(g) ? '•' : 0);
   }).join('');
   el.innerHTML = _panelShell('Discussions', '',
     `<div class="chat-convo-list">${advRow}${groupRows}</div>`,
@@ -187,13 +188,25 @@ function _renderMessages() {
   list.scrollTop = list.scrollHeight;
 }
 
+// Profil (pour l'avatar) d'un uni : le mien via STATE, les autres via
+// memberProfiles (avatar dénormalisé → aucune lecture users/{uid}).
+function _profileOf(uid) {
+  if (uid === _uid) return STATE.profile || {};
+  const p = (STATE.adventure?.memberProfiles || {})[uid];
+  return (p && typeof p === 'object') ? p : {};
+}
+
 function _msgRow(m) {
   const mine = m.senderId === _uid;
   const time = new Date(_atMillis(m) || Date.now()).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const av = mine ? '' : `<img class="chat-msg-av" src="${_esc(avatarSrcOf(_profileOf(m.senderId)))}" alt="" loading="lazy">`;
   return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}">
-    ${mine ? '' : `<span class="chat-msg-author">${_esc(m.senderName || '?')}</span>`}
-    <span class="chat-msg-bubble">${_esc(m.text || '')}</span>
-    <span class="chat-msg-time">${time}</span></div>`;
+    ${av}
+    <span class="chat-msg-content">
+      ${mine ? '' : `<span class="chat-msg-author">${_esc(m.senderName || '?')}</span>`}
+      <span class="chat-msg-bubble">${_esc(m.text || '')}</span>
+      <span class="chat-msg-time">${time}</span>
+    </span></div>`;
 }
 
 // Vue NOUVELLE DISCUSSION : nom + choix des membres
