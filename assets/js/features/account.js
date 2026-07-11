@@ -202,7 +202,7 @@ async function renderAccount() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// AVATAR — sélection d'icône proposée par le MJ (catalogue partagé de l'aventure)
+// AVATAR — catalogue d'avatars GLOBAL à l'app + portraits des persos du joueur
 // ══════════════════════════════════════════════════════════════════════════════
 // Catalogue : app_config/profileIcons (GLOBAL à l'app → partagé par toutes les
 // aventures, lecture tout membre connecté, écriture admin). Choix du joueur :
@@ -250,8 +250,8 @@ async function openAvatarPicker() {
     : '';
 
   const catalogSection = catalog.length
-    ? _lbl('🎭 Proposés par le MJ') + `<div class="avatar-grid">${catalog.map(ic => _optBtn(ic.url, ic.label)).join('')}</div>`
-    : `<div class="acc-avatar-empty">Aucun avatar proposé par le MJ pour l'instant.${STATE.isAdmin ? ' Ajoutes-en via « Gérer les avatars ».' : ''}</div>`;
+    ? _lbl('🎭 Avatars de l\'app') + `<div class="avatar-grid">${catalog.map(ic => _optBtn(ic.url, ic.label)).join('')}</div>`
+    : `<div class="acc-avatar-empty">Aucun avatar disponible pour l'instant.${STATE.isAdmin ? ' Ajoutes-en via « Gérer les avatars ».' : ''}</div>`;
 
   openModal('🎭 Choisir un avatar', `
     ${charsSection}
@@ -261,7 +261,7 @@ async function openAvatarPicker() {
       ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="openAvatarManager">⚙️ Gérer les avatars</button>` : ''}
       <button class="btn btn-outline btn-sm" style="margin-left:auto" data-action="_accClose">Fermer</button>
     </div>
-  `, { subtitle: 'Tes personnages ou la sélection du MJ', accent: '#4f8cff' });
+  `, { subtitle: "Tes personnages ou les avatars de l'app", accent: '#4f8cff' });
 }
 
 async function chooseAvatar(url) {
@@ -315,7 +315,7 @@ function _renderAvatarManager(catalog) {
       <button class="btn btn-gold" style="flex:1" data-action="addAvatarIcon">＋ Ajouter</button>
       <button class="btn btn-outline btn-sm" data-action="openAvatarPicker">‹ Retour</button>
     </div>
-  `, { subtitle: "Catalogue partagé de l'aventure", accent: '#e8b84b' });
+  `, { subtitle: "Catalogue global de l'app", accent: '#e8b84b' });
 }
 
 async function _persistCatalog(icons) {
