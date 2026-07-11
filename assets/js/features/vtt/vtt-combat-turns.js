@@ -72,9 +72,13 @@ export async function _vttToggleCombat() {
   } else showNotif('Combat terminé.','success');
 }
 export async function _vttNextRound() {
-  if (!STATE.isAdmin||!VS.session?.combat?.active) return;
-  const round=(VS.session.combat.round??1)+1;
-  await setDoc(_sesRef(),{combat:{active:true,round}},{merge:true});
+  if (!STATE.isAdmin) return;
+  // Fonctionne AUSSI hors combat : « passer un tour » égrène les durées (états,
+  // buffs, invocations à durée) et applique les ticks DoT/Régén, SANS forcer
+  // l'entrée en combat (on préserve l'état actif courant). En combat : inchangé.
+  const wasActive = !!VS.session?.combat?.active;
+  const round=(VS.session?.combat?.round ?? 0)+1;
+  await setDoc(_sesRef(),{combat:{active:wasActive,round}},{merge:true});
 
   // ── Application des effets périodiques en début de round (avant cleanup) ──
   // DoT : dégâts/tour · Regen : soin/tour
@@ -159,11 +163,12 @@ export async function _vttNextRound() {
   Object.keys(VS.tokens).forEach(id => {
     const tokData = VS.tokens[id]?.data;
     if (!tokData) return;
-    // ── Cleanup auto des tokens summons expirés (sentinelle, arme invoquée) ──
-    // Les summons non-canalisés expirent à round > summonExpiresAtRound.
-    // Les summons canalisés (summonCanalise: true) persistent tant que la
-    // concentration tient, puis deviennent temporaires après rupture.
-    if (tokData.summonExpiresAtRound != null && !tokData.summonCanalise && round > tokData.summonExpiresAtRound) {
+    // ── Cleanup auto des tokens summons expirés (invocation, sentinelle, arme) ──
+    // Tout summon dont la durée est atteinte se dissipe (round > summonExpiresAtRound),
+    // y compris les canalisés : summonExpiresAtRound porte le plafond de durée de la
+    // concentration (10 rounds). Une rupture de concentration anticipée est gérée à
+    // part (grace) en repassant summonCanalise à false → couvert par ce même test.
+    if (tokData.summonExpiresAtRound != null && round > tokData.summonExpiresAtRound) {
       expiredNotifs.push(`${tokData.summonKind === 'invocation' ? '🐾' : tokData.summonKind === 'sentinelle' ? '🪤' : '⚔️'} ${tokData.name} dissipé`);
       _persistInvocationState(tokData);   // PV/PM persistants avant dissipation (invocations)
       b.delete(_tokRef(id));

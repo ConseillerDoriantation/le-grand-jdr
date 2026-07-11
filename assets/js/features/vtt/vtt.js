@@ -95,6 +95,7 @@ import {
   _vttSortDmgFormula, _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode,
   _vttDisplayRunes,
 } from './vtt-spell-display.js';
+import { _getSortTypes } from '../characters/spells-calc.js';
 import {
   _musicStateRef, _syncMusicPlayback, _resetMusicState, _closeMusicPanel,
   _vttToggleMusicCat, _vttToggleAllMusicCats, _vttToggleMusic, _vttPlaySound,
@@ -2381,7 +2382,7 @@ function _vttSpellMods(s) {
             attaque:     has(ov.attaque)     ? String(ov.attaque)     : `${1 + nbP}d4 +2`,
             toucher:     has(ov.toucher)     ? parseInt(ov.toucher)     : (2 + 2 * nbCh),
             pv:          has(ov.pv)          ? parseInt(ov.pv)          : (10 + 5 * nbProt),
-            ca:          has(ov.ca)          ? parseInt(ov.ca)          : 10,
+            ca:          has(ov.ca)          ? parseInt(ov.ca)          : (10 + 2 * nbProt),
             deplacement: has(ov.deplacement) ? parseInt(ov.deplacement) : (3 + 3 * nbAmp),
             image:       s.invocation?.image || null,
             actions:     Array.isArray(s.invocation?.actions) ? s.invocation.actions : [],
@@ -2727,7 +2728,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
       if (b.nbP > 0) { const m = attaque.match(/^(\d+)(d\d+)(.*)$/i); attaque = m ? `${parseInt(m[1]) + b.nbP}${m[2]}${m[3]}` : `${attaque} +${b.nbP}d6`; }
       toucher     = (parseInt(base.toucher) || 0) + 2 * (b.nbCh || 0);
       pvMax       = (parseInt(base.pv) || 10) + 5 * (b.nbProt || 0);
-      ca          = parseInt(base.ca) || 10;
+      ca          = (parseInt(base.ca) || 10) + 2 * (b.nbProt || 0);   // Protection → +2 CA / rune
       deplacement = (parseInt(base.deplacement) || 0) + 3 * (b.nbAmp || 0);
       pmMax       = parseInt(base.pmMax) || 0;
       name        = invDef.nom || 'Invocation';
@@ -3307,11 +3308,39 @@ function _buildAttackOptions(t) {
         if (_ownerChar) _ownerSetPmDelta = getArmorSetData(_ownerChar).modifiers?.spellPmDelta || 0;
       }
       t.summonActions.forEach((a, ai) => {
-        // Seules les actions offensives sont jouables ici (effets complexes : à venir)
-        const isOff = (Array.isArray(a.types) && a.types.includes('offensif'))
+        // Type de l'action : dérivé comme dans la gestion de sort (_getSortTypes),
+        // et PAS depuis un champ `a.types` inexistant sur les actions → sinon TOUTES
+        // les actions étaient filtrées et donc injouables.
+        const _aTypes = _getSortTypes(a);
+        const isOff = _aTypes.includes('offensif')
                    || (Array.isArray(a.runes) && (a.runes.includes('Lacération')
                        || (a.afflictionMode === 'laceration' && a.runes.includes('Affliction'))));
-        if (!isOff) return;
+        const soinFormula = (!isOff && (_aTypes.includes('defensif') || a.typeSoin))
+          ? String(_vttSortSoinFormula(a, _cChar) || '').trim() : '';
+        const isHealAct = !isOff && !!soinFormula;
+        // Offensif OU soin gérés ; buffs/utilitaires complexes restent à venir.
+        if (!isOff && !isHealAct) return;
+
+        const basePm = parseInt(a.pm) || 0;
+        // Coût payé sur le perso du LANCEUR (cf. _vttRollAttack → _pmPayerCharId),
+        // réduit par son set léger.
+        const pmCost = Math.max(0, basePm + _ownerSetPmDelta);
+
+        if (isHealAct) {
+          options.push({
+            id: `summon_action_${ai}`,
+            icon: a.icon || '💚',
+            label: a.nom || 'Soin',
+            isHeal: true, friendlyOnly: true,
+            rawDice: soinFormula, dice: soinFormula,
+            portee: parseInt(a.portee) || t.range || 1,
+            pmCost, basePm, pmSetDelta: _ownerSetPmDelta,
+            toucher: 0, dmgStatMod: 0, dmgStatLabel: '—', maitriseBonus: 0,
+            halfOnMiss: false, mods: {},
+          });
+          return;
+        }
+
         const dmg  = _vttSortDmgFormula(a, _cChar);
         const elId = a.noyauTypeId || t.summonElementId || 'physique';
         const elObj = getDamageTypeById(VS.damageTypes, elId);
@@ -3323,10 +3352,7 @@ function _buildAttackOptions(t) {
           label: a.nom || 'Action',
           rawDice: dmg, dice: dmg,
           portee: parseInt(a.portee) || t.range || 1,
-          // Coût payé sur le perso du lanceur (cf. _vttRollAttack), réduit par son set léger
-          pmCost: Math.max(0, (parseInt(a.pm) || 0) + _ownerSetPmDelta),
-          basePm: parseInt(a.pm) || 0,
-          pmSetDelta: _ownerSetPmDelta,
+          pmCost, basePm, pmSetDelta: _ownerSetPmDelta,
           toucher: t.attack ?? 0,
           dmgStatMod: 0, dmgStatLabel: '—', maitriseBonus: 0,
           halfOnMiss: false,

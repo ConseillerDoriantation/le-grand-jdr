@@ -132,24 +132,36 @@ export function _live(t) {
   const b = t.beastId     ? VS.bestiary[t.beastId]       : null;
   const e = c || n || b;
 
-  if (!e) return {
-    ...t,
-    displayName:     t.name,
-    displayImage:    t.imageUrl ?? null,
-    displayHp:       t.hp    ?? 20,
-    displayHpMax:    t.hpMax ?? 20,
-    displayMovement: Math.max(0, (t.movement ?? 6) + _conditionMoveBonusOf(t)),
-    displayAttack:   t.attack   ?? 5,
-    displayAttackDice: t.attackDice || '1d6',
-    displayDefense:  t.defense  ?? 0,
-    realDefense:     t.defense  ?? 0,
-    // Ennemi custom (posé sur la carte, sans fiche) : pas d'estimation possible
-    // → "?" pour les joueurs, jamais la CA réelle saisie par le MJ.
-    caBadge:         (!STATE.isAdmin && t.type === 'enemy') ? '?' : String(t.defense ?? 0),
-    displayRange:    t.range    ?? 1,
-    displayTokenW:   Math.max(1, Math.min(5, t.tokenW ?? t.tokenSize ?? 1)),
-    displayTokenH:   Math.max(1, Math.min(5, t.tokenH ?? t.tokenSize ?? 1)),
-  };
+  if (!e) {
+    // Token SANS fiche liée (invocation, ennemi custom) : on applique quand même
+    // les BUFFS posés sur le token (CA, portée, déplacement) + les états, sinon un
+    // état « +CA / Renforcé » sur une invocation n'aurait aucun effet. Le bonus de
+    // toucher/dégâts (enchantement) s'applique frais au jet (_touchBuffOf / états).
+    const _r = VS.session?.combat?.round ?? 0;
+    const _act = (bf, ty) => bf?.type === ty && (bf.expiresAtRound == null || _r === 0 || _r <= bf.expiresAtRound);
+    const _sum = (ty) => (t.buffs || []).filter(bf => _act(bf, ty)).reduce((s, bf) => s + (bf.bonus || 0), 0);
+    const _ca  = (t.defense ?? 0) + _sum('ca');
+    const _mv  = (t.buffs || []).filter(bf => _act(bf, 'move_bonus') || _act(bf, 'move_debuff')).reduce((s, bf) => s + (bf.bonus || 0), 0);
+    return {
+      ...t,
+      displayName:     t.name,
+      displayImage:    t.imageUrl ?? null,
+      displayHp:       t.hp    ?? 20,
+      displayHpMax:    t.hpMax ?? 20,
+      displayMovement: Math.max(0, (t.movement ?? 6) + _mv + _conditionMoveBonusOf(t)),
+      displayAttack:   t.attack   ?? 5,
+      displayAttackDice: t.attackDice || '1d6',
+      displayDefense:  _ca,
+      realDefense:     _ca,
+      _activeCaBuff:   (t.buffs || []).find(bf => _act(bf, 'ca')) ?? null,
+      // Ennemi custom (posé sur la carte, sans fiche) : pas d'estimation possible
+      // → "?" pour les joueurs, jamais la CA réelle saisie par le MJ.
+      caBadge:         (!STATE.isAdmin && t.type === 'enemy') ? '?' : String(_ca),
+      displayRange:    (t.range ?? 1) + _sum('range_bonus') + _conditionRangeBonusOf(t),
+      displayTokenW:   Math.max(1, Math.min(5, t.tokenW ?? t.tokenSize ?? 1)),
+      displayTokenH:   Math.max(1, Math.min(5, t.tokenH ?? t.tokenSize ?? 1)),
+    };
+  }
 
   const npcHpMax = n ? _numOr(e.pv, _numOr(e.hpMax, _numOr(e.pvMax, 20))) : null;
   const npcPmMax = n ? _numOr(e.pmMax, _numOr(e.pm, null)) : null;
