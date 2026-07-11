@@ -15,6 +15,7 @@ import {
 import { setProfile } from './state.js';
 import { unwatchAll } from '../shared/realtime.js';
 import { releaseSessionData, saveDoc } from '../data/firestore.js';
+import { teardownChat } from '../features/chat.js';
 export { showApp, showAuth } from './layout.js';
 
 function clearAuthError() {
@@ -224,6 +225,7 @@ export async function doLogout() {
     // Stoppe d'abord les abonnements temps réel pour éviter les
     // "Accès refusé" lorsque l'auth est révoquée.
     try { unwatchAll(); } catch {}
+    try { teardownChat(); } catch {}
     try { releaseSessionData(); } catch {}
     await signOut(auth);
   } catch (error) {

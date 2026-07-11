@@ -540,6 +540,37 @@ match /adventures/{adventureId} {
     allow read:  if inAdventure(adventureId);
     allow write: if isAdvAdmin(adventureId);
   }
+
+  // Conversations de GROUPE : lecture/écriture réservées à leurs membres.
+  // Création : l'auteur doit être dans members + être createdBy. Update : un
+  // membre ne peut toucher QUE l'aperçu du dernier message.
+  match /chatConvos/{cid} {
+    allow read:   if inAdventure(adventureId) && request.auth.uid in resource.data.members;
+    allow create: if inAdventure(adventureId)
+      && request.auth.uid in request.resource.data.members
+      && request.resource.data.createdBy == request.auth.uid;
+    allow update: if inAdventure(adventureId) && request.auth.uid in resource.data.members
+      && request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['lastText', 'lastSenderName', 'lastSenderId', 'lastAt']);
+  }
+  // Messages : conv « aventure » = tout membre ; conv de groupe = membres du
+  // groupe (vérifiés via le doc chatConvos). Message signé par son auteur.
+  match /chatMessages/{id} {
+    allow read: if inAdventure(adventureId) && (
+      resource.data.convoId == 'adventure' ||
+      request.auth.uid in get(/databases/$(database)/documents/adventures/$(adventureId)/chatConvos/$(resource.data.convoId)).data.members
+    );
+    allow create: if inAdventure(adventureId)
+      && request.resource.data.senderId == request.auth.uid
+      && (
+        request.resource.data.convoId == 'adventure' ||
+        request.auth.uid in get(/databases/$(database)/documents/adventures/$(adventureId)/chatConvos/$(request.resource.data.convoId)).data.members
+      );
+  }
+  // État de lecture (badge non-lus) : map convoId→millis, chacun le sien.
+  match /chatReads/{uid} {
+    allow read, write: if inAdventure(adventureId) && uid == request.auth.uid;
+  }
     }
   }
 }

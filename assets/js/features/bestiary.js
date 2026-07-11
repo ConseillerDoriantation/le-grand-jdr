@@ -1452,10 +1452,7 @@ function _renderCard(c) {
           ${subtitle ? `<p class="bst-card-meta">${_esc(subtitle)}</p>` : '<p class="bst-card-meta">Sans classification</p>'}
         </div>
       </div>
-      <div class="bst-card-stats">
-        ${c.pvMax ? `<span class="bst-card-stat"><b>${_esc(c.pvMax)}</b> PV</span>` : ''}
-        ${c.ca ? `<span class="bst-card-stat"><b>${_esc(c.ca)}</b> CA</span>` : ''}
-        ${c.vitesse ? `<span class="bst-card-stat"><b>${_esc(c.vitesse)}</b> m</span>` : ''}
+      <div class="bst-card-stats bst-card-stats--public">
         ${actions ? `<span class="bst-card-stat"><b>${actions}</b> act.</span>` : ''}
       </div>
       <div class="bst-card-tags">
