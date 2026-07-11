@@ -20,7 +20,9 @@ import { registerActions } from '../core/actions.js';
 import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { consumeTargetEntity } from '../shared/entity-navigation.js';
-import { getItemStatBonus, sortCharactersForDisplay, getMyCharacters, getModFromScore } from '../shared/char-stats.js';
+import { getItemStatBonus, sortCharactersForDisplay, getMyCharacters, getModFromScore,
+  computeEquipStatsBonus, computeEquipDerivedBonus, formatItemBonusText } from '../shared/char-stats.js';
+import { buildEquippedItemFromInventory } from '../shared/equipment-utils.js';
 import { _getTraits } from './characters/data.js';
 import { listPlaces } from './map/data/places.repo.js';
 import { listOrganizations } from './map/data/organizations.repo.js';
@@ -29,8 +31,10 @@ import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
 
 // ── Stats PNJ (admin) ────────────────────────────────────────────────────────
-// Schéma volontairement simple pour les PNJ : pas de formule équipement comme
-// pour les persos joueurs — chaque vitale est saisie directement.
+// Les vitales/caractéristiques saisies sont les valeurs DE BASE. Les objets
+// équipés (n.equipement, même forme que les persos joueurs) ajoutent leurs
+// bonus par-dessus, calculés via les helpers purs de char-stats.js. Un PNJ sans
+// équipement affiche donc exactement ses valeurs de base (rétro-compat).
 const NPC_VITALS = [
   { key: 'pv',      label: 'PV',      icon: '❤️' },
   { key: 'pm',      label: 'PM',      icon: '✨' },
@@ -46,6 +50,18 @@ const NPC_STATS = [
   { key: 'charisme',     short: 'CHA' },
 ];
 const NPC_COMBAT_DEFAULT = { weaponName: '', damage: '', range: null };
+// Emplacements d'équipement PNJ — identiques aux persos joueurs. `kind` pilote
+// le filtrage des objets boutique éligibles au slot.
+const NPC_EQUIP_SLOTS = [
+  { slot: 'Main principale', icon: '⚔️', kind: 'weapon' },
+  { slot: 'Main secondaire', icon: '🗡️', kind: 'weapon' },
+  { slot: 'Tête',            icon: '🪖', kind: 'armor', armVal: 'Tête' },
+  { slot: 'Torse',           icon: '🛡️', kind: 'armor', armVal: 'Torse' },
+  { slot: 'Bottes',          icon: '🥾', kind: 'armor', armVal: 'Pieds' },
+  { slot: 'Amulette',        icon: '📿', kind: 'bijou' },
+  { slot: 'Anneau',          icon: '💍', kind: 'bijou' },
+  { slot: 'Objet magique',   icon: '🔮', kind: 'bijou' },
+];
 const NPC_ACTIVITES = [
   ['forge', '🔨 Forge'], ['atelier_confection', '🧵 Atelier de confection'],
   ['atelier_orfevre', '💎 Orfèvre'], ['herboristerie', '🌿 Herboristerie'],
@@ -155,6 +171,7 @@ let _places        = [];   // [{ id, name }] — alimente l'autocomplete Lieu
 let _organisations = [];   // [{ id, name }] — alimente la sélection Organisations
 let _orgIcons      = {};   // { [orgName]: emoji } — émoji personnalisé par catégorie (MJ)
 let _shopWeapons   = [];   // armes issues de la boutique pour l'espace combat PNJ
+let _shopItems     = [];   // tous les objets boutique (armes/armures/bijoux) — équipement PNJ
 let _activeId      = null;
 let _pendingTargetNpcId = null;
 let _filterSearch  = '';
@@ -180,7 +197,8 @@ async function _load() {
   _npcs           = npcs || [];
   _places        = (places || []).filter(p => p?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   _organisations = (orgs   || []).filter(o => o?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
-  _shopWeapons   = (shopItems || []).filter(_isShopWeapon).sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr'));
+  _shopItems     = (shopItems || []).slice().sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr'));
+  _shopWeapons   = _shopItems.filter(_isShopWeapon);
 }
 
 // ── Helpers types ─────────────────────────────────────────────────────────────
@@ -1074,54 +1092,147 @@ function _npcPickOrgIcon(btn)       { _saveOrgIcon(btn.dataset.org, btn.dataset.
 function _npcResetOrgIcon(btn)      { _saveOrgIcon(btn.dataset.org, ''); }
 function _npcApplyOrgIconInput(btn) { _saveOrgIcon(btn.dataset.org, document.getElementById('npc-emoji-input')?.value || ''); }
 
+// ── Équipement PNJ ────────────────────────────────────────────────────────────
+const _isShield = (i = {}) => (i.sousType || i.nom || '').toLowerCase().includes('bouclier');
+
+// Objets boutique éligibles à un slot donné.
+function _shopItemsForSlot(def) {
+  if (def.kind === 'weapon') return _shopItems.filter(i => _isShopWeapon(i) || _isShield(i));
+  if (def.kind === 'armor')  return _shopItems.filter(i => i.slotArmure === def.armVal);
+  return _shopItems.filter(i => i.slotBijou === def.slot);
+}
+
+// Contribution agrégée de l'équipement (bonus de stats + bonus dérivés + CA).
+function _npcEquipEffect(n) {
+  const equip   = n?.equipement || {};
+  const sBonus  = computeEquipStatsBonus(equip);
+  const dBonus  = computeEquipDerivedBonus(equip);
+  const caEquip = Object.values(equip).reduce((s, it) => s + (parseInt(it?.ca) || 0), 0);
+  return { equip, sBonus, dBonus, caEquip };
+}
+
+// Petits badges de bonus pour l'objet équipé dans un slot.
+function _npcEquipBadges(eq, def) {
+  const parts = [];
+  if (def.kind === 'weapon' && eq.degats) parts.push(`🗡️ ${eq.degats}`);
+  const bonusText = formatItemBonusText(eq);
+  if (bonusText) parts.push(bonusText);
+  const ca = (parseInt(eq.ca) || 0) + (parseInt(eq.caBonus) || 0);
+  if (ca) parts.push(`CA ${ca > 0 ? '+' : ''}${ca}`);
+  [['pvMaxBonus', 'PV'], ['pmMaxBonus', 'PM'], ['vitesseBonus', 'Vit']].forEach(([k, lbl]) => {
+    const v = parseInt(eq[k]) || 0;
+    if (v) parts.push(`${lbl} ${v > 0 ? '+' : ''}${v}`);
+  });
+  return parts.map(p => `<span class="npc-eq-badge">${_esc(p)}</span>`).join('');
+}
+
+function _renderNpcEquip(n, equip, summary) {
+  const slotCard = (def) => {
+    const eq   = equip[def.slot] || null;
+    const opts = _shopItemsForSlot(def);
+    const options = ['<option value="">— Vide —</option>']
+      .concat(opts.map(i => `<option value="${i.id}" ${eq?.itemId === i.id ? 'selected' : ''}>${_esc(i.nom || '?')}</option>`))
+      .join('');
+    const badges = eq ? _npcEquipBadges(eq, def) : '';
+    return `
+      <div class="npc-eq-cell${eq ? ' is-on' : ''}">
+        <div class="npc-eq-slot">${def.icon} ${def.slot}</div>
+        <select class="npc-select npc-eq-sel" data-change="npcEquipSlot" data-npc-id="${n.id}" data-slot="${_esc(def.slot)}">
+          ${options}
+        </select>
+        ${badges ? `<div class="npc-eq-badges">${badges}</div>` : ''}
+      </div>`;
+  };
+  return `
+    <div class="npc-eq-block">
+      <div class="npc-eq-hd">
+        <span class="npc-edit-lbl">🎒 Équipement</span>
+        <span class="npc-eq-combat">🗡️ ${_esc(summary.dmg)} · ⌖ ${_esc(summary.range)}</span>
+      </div>
+      <div class="npc-eq-grid">${NPC_EQUIP_SLOTS.map(slotCard).join('')}</div>
+    </div>`;
+}
+
 function _renderStatsPanel(n) {
   if (!STATE.isAdmin) return ''; // bloc réservé MJ
   const stats = n?.stats || {};
-  const combat = _npcCombat(n);
-  const weapon = combat.weapon || null;
+  const { equip, sBonus, dBonus, caEquip } = _npcEquipEffect(n);
 
-  // Cellules éditables inline (admin) — vitaux + caractéristiques.
-  const vitals = NPC_VITALS.map(v => `
+  // Résumé combat : arme équipée en Main principale, sinon arme legacy (combat).
+  const mainW  = equip['Main principale'];
+  const combat = _npcCombat(n);
+  const dmg    = mainW?.degats || combat.weapon?.degats || combat.damage || '—';
+  const range  = mainW?.portee || combat.range || combat.weapon?.portee || '—';
+
+  // Vitaux : base saisie + contribution équipement = total.
+  const vitalEquip = {
+    pv:      dBonus.pvMaxBonus,
+    pm:      dBonus.pmMaxBonus,
+    ca:      caEquip + dBonus.caBonus,
+    vitesse: dBonus.vitesseBonus,
+  };
+  const vitals = NPC_VITALS.map(v => {
+    const base  = n?.[v.key];
+    const bonus = vitalEquip[v.key] || 0;
+    const total = (Number(base) || 0) + bonus;
+    return `
     <div class="npc-stat-cell">
       <div class="npc-stat-k">${v.icon} ${v.label}</div>
       <input type="number" class="npc-inline" data-change="npcInlineSave"
-        data-npc-id="${n.id}" data-field="${v.key}" value="${n?.[v.key] ?? ''}" placeholder="—">
-    </div>`).join('');
+        data-npc-id="${n.id}" data-field="${v.key}" value="${base ?? ''}" placeholder="—"
+        title="Valeur de base (hors équipement)">
+      ${bonus ? `<div class="npc-stat-mod" title="Base ${Number(base) || 0} + équipement ${bonus > 0 ? '+' : ''}${bonus}">= ${total} <span class="npc-eq-plus">(${bonus > 0 ? '+' : ''}${bonus})</span></div>` : ''}
+    </div>`;
+  }).join('');
+
   const statCells = NPC_STATS.map(s => {
     const score = stats[s.key];
+    const bonus = sBonus[s.key] || 0;
+    const effScore = score != null ? (Number(score) || 0) + bonus : null;
     return `
     <div class="npc-stat-cell">
       <div class="npc-stat-k">${s.short}</div>
       <input type="number" class="npc-inline" data-change="npcInlineSave"
-        data-npc-id="${n.id}" data-field="stat:${s.key}" value="${score ?? ''}" placeholder="—">
-      <div class="npc-stat-mod">${score != null ? _modStr(score) : '&nbsp;'}</div>
+        data-npc-id="${n.id}" data-field="stat:${s.key}" value="${score ?? ''}" placeholder="—"
+        title="Score de base (hors équipement)">
+      <div class="npc-stat-mod">${effScore != null ? `${_modStr(effScore)}${bonus ? ` <span class="npc-eq-plus">(${bonus > 0 ? '+' : ''}${bonus})</span>` : ''}` : '&nbsp;'}</div>
     </div>`;
   }).join('');
-
-  const dmg   = weapon?.degats || combat.damage || '—';
-  const range = combat.range ?? weapon?.portee ?? '—';
 
   return `
     <div class="npc-card npc-stats-card">
       <div class="npc-card-hd">
         <div class="npc-card-title">🛡️ Combat &amp; stats <span style="font-weight:400;color:var(--text-dim)">(MJ)</span></div>
       </div>
-      <div class="npc-weapon">
-        <span class="npc-edit-lbl">Arme</span>
-        <div class="npc-weapon-row">
-          ${_shopWeapons.length
-            ? `<select class="npc-select" data-change="npcSetWeapon" data-npc-id="${n.id}">
-                <option value="">— Aucune arme —</option>
-                ${_shopWeapons.map(w => `<option value="${w.id}" ${weapon?.itemId === w.id ? 'selected' : ''}>${_esc(_weaponLabel(w))}</option>`).join('')}
-              </select>`
-            : `<span class="npc-hint">Aucune arme en boutique.</span>`}
-          <span class="npc-weapon-stat">🗡️ ${_esc(dmg)}</span>
-          <span class="npc-weapon-stat">⌖ ${_esc(range)}</span>
-        </div>
-      </div>
       <div class="npc-stat-grid">${vitals}</div>
       <div class="npc-stat-grid npc-stat-grid--6">${statCells}</div>
+      ${_renderNpcEquip(n, equip, { dmg, range })}
     </div>`;
+}
+
+// Équipe / retire un objet boutique sur un slot PNJ, recalcule le bonus de stats.
+async function _npcEquipSlot(el) {
+  if (!STATE.isAdmin || !el) return;
+  const id = el.dataset.npcId, slot = el.dataset.slot;
+  const n = _npcs.find(x => x.id === id); if (!n || !slot) return;
+  const equip = { ...(n.equipement || {}) };
+  const itemId = el.value;
+  if (!itemId) {
+    delete equip[slot];
+  } else {
+    const item = _shopItems.find(i => i.id === itemId);
+    if (!item) return;
+    const built = buildEquippedItemFromInventory(slot, item, null);
+    if (!built) return;
+    built.itemId = item.id; // identité boutique (buildEquipped… lit item.itemId, absent ici)
+    equip[slot] = built;
+  }
+  const statsBonus = computeEquipStatsBonus(equip);
+  n.equipement = equip; n.statsBonus = statsBonus;
+  if (await trySave('npcs', id, { equipement: equip, statsBonus })) {
+    showNotif(itemId ? 'Équipement mis à jour.' : 'Emplacement vidé.', 'success');
+  }
+  _refreshActivePanel();
 }
 
 // ── Vue MJ : tableau condensé de tous les PNJ avec stats ────────────────────
@@ -1978,6 +2089,7 @@ registerActions({
   npcInlineSave:             (el) => _npcInlineSave(el),
   npcSaveOrgs:               (el) => _npcSaveOrgs(el),
   npcSetWeapon:              (el) => _npcSetWeapon(el),
+  npcEquipSlot:              (el) => _npcEquipSlot(el),
   npcSetPhoto:               (btn) => _npcSetPhoto(btn),
   npcViewPhoto:              (btn) => _npcViewPhoto(btn),
   npcSetStatut:              (btn) => _npcSetStatut(btn),

@@ -671,6 +671,32 @@ textarea.npc-inline { resize: vertical; min-height: 2.4em; line-height: 1.6; fon
 .npc-stats-card .npc-stat-grid--6 { margin-top: .35rem; }
 .npc-stats-card .npc-stat-cell { padding: .3rem .2rem; }
 .npc-stats-card .npc-stat-cell input.npc-inline { font-size: .9rem; padding: 0 2px; }
+.npc-eq-plus { color: var(--gold); font-weight: 700; }
+
+/* Équipement PNJ */
+.npc-eq-block { margin-top: .6rem; border-top: 1px solid var(--border); padding-top: .5rem; }
+.npc-eq-hd { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .4rem; }
+.npc-eq-combat {
+  font-size: .74rem; font-weight: 600; color: var(--text-soft);
+  background: rgba(232,184,75,.08); border: 1px solid rgba(232,184,75,.22);
+  border-radius: 6px; padding: 2px 9px; white-space: nowrap;
+}
+.npc-eq-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .4rem; }
+.npc-eq-cell {
+  display: flex; flex-direction: column; gap: .25rem;
+  background: rgba(255,255,255,.02); border: 1px solid var(--border);
+  border-radius: 8px; padding: .4rem .45rem;
+}
+.npc-eq-cell.is-on { border-color: rgba(232,184,75,.3); background: rgba(232,184,75,.05); }
+.npc-eq-slot { font-size: .68rem; font-weight: 700; color: var(--text-muted); letter-spacing: .02em; }
+.npc-eq-sel { min-width: 0; max-width: none; width: 100%; padding: .3rem .45rem; font-size: .78rem; }
+.npc-eq-badges { display: flex; flex-wrap: wrap; gap: .25rem; }
+.npc-eq-badge {
+  font-size: .62rem; font-weight: 600; color: var(--text-soft);
+  background: rgba(79,140,255,.1); border: 1px solid rgba(79,140,255,.24);
+  border-radius: 5px; padding: 1px 6px;
+}
+@media (max-width: 640px) { .npc-eq-grid { grid-template-columns: 1fr; } }
 
 /* Empty fiche */
 .npc-fiche-empty {
