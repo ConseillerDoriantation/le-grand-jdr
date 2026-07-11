@@ -269,6 +269,18 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Réglages GLOBAUX de l'app (ex. catalogue d'avatars → app_config/profileIcons) :
+    // lisibles par tout utilisateur connecté, écriture réservée à l'admin global.
+    match /app_config/{id} { allow read: if isLoggedIn(); allow write: if isAdmin(); }
+
+    // Requête collectionGroup 'characters' (écran Compte : portraits d'avatar de
+    // TOUTES les aventures du joueur). Un joueur ne peut lire par ce biais QUE ses
+    // PROPRES personnages (uid == soi). Nécessite aussi un index collection-group
+    // sur `uid` (Firestore fournit le lien de création au 1er appel).
+    match /{path=**}/characters/{charId} {
+      allow read: if isLoggedIn() && resource.data.uid == request.auth.uid;
+    }
+
     match /adventures/{adventureId} {
       allow list:   if isAdmin() ||
                        (isLoggedIn() &&

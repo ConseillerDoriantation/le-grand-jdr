@@ -13,7 +13,7 @@ import {
 
 import {
   loadChars, loadCollection, deleteFromCol, updateInCol,
-  getDocDataSilent, saveDoc,
+  getDocDataSilent, saveDoc, loadMyCharactersAcrossAdventures,
 } from '../data/firestore.js';
 
 import { openModal, closeModal } from '../shared/modal.js';
@@ -204,16 +204,17 @@ async function renderAccount() {
 // ══════════════════════════════════════════════════════════════════════════════
 // AVATAR — sélection d'icône proposée par le MJ (catalogue partagé de l'aventure)
 // ══════════════════════════════════════════════════════════════════════════════
-// Catalogue : settings/profileIcons (scope aventure → lisible par tout membre,
-// écriture MJ, aucune règle nouvelle). Choix du joueur : users/{uid}.avatarIcon
-// (doc global). ⚠️ nécessite d'autoriser la clé `avatarIcon` dans la règle
-// isUserSelfUpdate (cf. docs/firestore-rules.md).
+// Catalogue : app_config/profileIcons (GLOBAL à l'app → partagé par toutes les
+// aventures, lecture tout membre connecté, écriture admin). Choix du joueur :
+// users/{uid}.avatarIcon (doc global). ⚠️ nécessite (cf. docs/firestore-rules.md) :
+//  - la clé `avatarIcon` autorisée dans la règle isUserSelfUpdate ;
+//  - une règle lecture/écriture sur la collection globale `app_config`.
 const PROFILE_ICONS_DOC = 'profileIcons';
 let _iconCatalog = null; // cache session
 
 async function _loadIconCatalog(force = false) {
   if (_iconCatalog && !force) return _iconCatalog;
-  const doc = await getDocDataSilent('settings', PROFILE_ICONS_DOC);
+  const doc = await getDocDataSilent('app_config', PROFILE_ICONS_DOC);
   _iconCatalog = Array.isArray(doc?.icons) ? doc.icons.filter(i => i && i.url) : [];
   return _iconCatalog;
 }
@@ -232,8 +233,15 @@ async function openAvatarPicker() {
       <img src="${_esc(resolveAvatarUrl(url))}" alt="${_esc(label || '')}" loading="lazy">
     </button>`;
 
-  // Portraits des personnages DU JOUEUR (seulement les siens, avec une image).
-  const myChars = (STATE.characters || []).filter(c => c?.uid === uid && _charPortrait(c));
+  // Portraits des personnages DU JOUEUR sur TOUTES ses aventures (collectionGroup),
+  // fusionnés avec l'aventure courante (déjà en mémoire), dédoublonnés par id, et
+  // filtrés à ses propres persos ayant un portrait.
+  const _cross = await loadMyCharactersAcrossAdventures(uid).catch(() => []);
+  const _byId = new Map();
+  [...(_cross || []), ...(STATE.characters || [])]
+    .filter(c => c?.uid === uid && _charPortrait(c))
+    .forEach(c => { if (c.id && !_byId.has(c.id)) _byId.set(c.id, c); });
+  const myChars = [..._byId.values()];
   const charsSection = myChars.length
     ? _lbl('🧙 Mes personnages') + `<div class="avatar-grid">${myChars.map(c => _optBtn(_charPortrait(c), c.nom || 'Personnage')).join('')}</div>`
     : '';
@@ -309,7 +317,7 @@ function _renderAvatarManager(catalog) {
 
 async function _persistCatalog(icons) {
   _iconCatalog = icons;
-  await saveDoc('settings', PROFILE_ICONS_DOC, { icons });
+  await saveDoc('app_config', PROFILE_ICONS_DOC, { icons });
 }
 
 async function addAvatarIcon() {
