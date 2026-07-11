@@ -13,10 +13,13 @@ import {
 
 import {
   loadChars, loadCollection, deleteFromCol, updateInCol,
+  getDocDataSilent, saveDoc,
 } from '../data/firestore.js';
 
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
+import { refreshSidebarProfile }  from '../core/layout.js';
+import { avatarSrcOf }            from '../shared/avatar.js';
 import { STATE, setProfile }     from '../core/state.js';
 import PAGES                     from './pages.js';
 import { registerActions }        from '../core/actions.js';
@@ -113,16 +116,18 @@ async function renderAccount() {
   const nbChars = chars.length;
   const pseudo = profile.pseudo || 'Aventurier';
   const email = user.email || '';
-  const avatarInitial = (pseudo || '?')[0]?.toUpperCase?.() || '?';
-
   content.innerHTML = `
   <!-- ═══ HEADER ═══════════════════════════════════════════════════════════ -->
   <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem">
-    <div class="acc-avatar">${_esc(avatarInitial)}</div>
+    <button class="acc-avatar acc-avatar-btn has-img" data-action="openAvatarPicker" title="Changer d'avatar">
+      <img src="${_esc(avatarSrcOf(profile))}" alt="" class="acc-avatar-img">
+      <span class="acc-avatar-edit" title="Changer d'avatar">📷</span>
+    </button>
     <div>
       <h1 style="font-family:'Cinzel',serif;font-size:1.5rem;color:var(--gold);letter-spacing:1px;margin:0">${_esc(pseudo)}</h1>
       <div style="font-size:.78rem;color:var(--text-dim);margin-top:.2rem">${_esc(email)}</div>
       <div style="font-size:.72rem;color:var(--text-dim);margin-top:.1rem">${STATE.isAdmin?'🛡️ Maître de Jeu':'⚔️ Joueur'} · ${nbChars} personnage${nbChars!==1?'s':''}</div>
+      <button class="acc-avatar-change" data-action="openAvatarPicker">🎭 Changer d'avatar</button>
     </div>
   </div>
 
@@ -194,6 +199,125 @@ async function renderAccount() {
     </div>
   </div>
   `;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AVATAR — sélection d'icône proposée par le MJ (catalogue partagé de l'aventure)
+// ══════════════════════════════════════════════════════════════════════════════
+// Catalogue : settings/profileIcons (scope aventure → lisible par tout membre,
+// écriture MJ, aucune règle nouvelle). Choix du joueur : users/{uid}.avatarIcon
+// (doc global). ⚠️ nécessite d'autoriser la clé `avatarIcon` dans la règle
+// isUserSelfUpdate (cf. docs/firestore-rules.md).
+const PROFILE_ICONS_DOC = 'profileIcons';
+let _iconCatalog = null; // cache session
+
+async function _loadIconCatalog(force = false) {
+  if (_iconCatalog && !force) return _iconCatalog;
+  const doc = await getDocDataSilent('settings', PROFILE_ICONS_DOC);
+  _iconCatalog = Array.isArray(doc?.icons) ? doc.icons.filter(i => i && i.url) : [];
+  return _iconCatalog;
+}
+
+async function openAvatarPicker() {
+  const catalog = await _loadIconCatalog(true);
+  const cur = STATE.profile?.avatarIcon || '';
+  const grid = catalog.length
+    ? `<div class="avatar-grid">${catalog.map(ic => `
+        <button class="avatar-opt${cur === ic.url ? ' is-sel' : ''}" data-action="chooseAvatar"
+          data-url="${_esc(ic.url)}" title="${_esc(ic.label || '')}">
+          <img src="${_esc(ic.url)}" alt="${_esc(ic.label || '')}" loading="lazy">
+        </button>`).join('')}</div>`
+    : `<div class="acc-avatar-empty">Aucun avatar disponible pour l'instant.${STATE.isAdmin ? ' Ajoutes-en via « Gérer les avatars ».' : ''}</div>`;
+
+  openModal('🎭 Choisir un avatar', `
+    ${grid}
+    <div style="display:flex;gap:.5rem;margin-top:.9rem;flex-wrap:wrap;align-items:center">
+      ${cur ? `<button class="btn btn-outline btn-sm" data-action="chooseAvatar" data-url="">↩︎ Avatar par défaut</button>` : ''}
+      ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="openAvatarManager">⚙️ Gérer les avatars</button>` : ''}
+      <button class="btn btn-outline btn-sm" style="margin-left:auto" data-action="_accClose">Fermer</button>
+    </div>
+  `, { subtitle: 'Sélection proposée par le Maître de Jeu', accent: '#4f8cff' });
+}
+
+async function chooseAvatar(url) {
+  const user = auth.currentUser;
+  if (!user) return;
+  try {
+    await updateInCol('users', user.uid, { avatarIcon: url || '' });
+    setProfile({ ...(STATE.profile || {}), avatarIcon: url || '' });
+    closeModal();
+    showNotif(url ? 'Avatar mis à jour !' : 'Avatar réinitialisé.', 'success');
+    renderAccount();
+    refreshSidebarProfile();
+  } catch (err) {
+    console.error('[account] chooseAvatar:', err);
+    // Cause probable : règle isUserSelfUpdate n'autorise pas encore `avatarIcon`.
+    showNotif("Impossible d'enregistrer l'avatar (règles Firestore à mettre à jour ?).", 'error');
+  }
+}
+
+// ── Gestionnaire admin du catalogue ──────────────────────────────────────────
+function openAvatarManager() {
+  if (!STATE.isAdmin) return;
+  _renderAvatarManager(_iconCatalog || []);
+}
+
+function _renderAvatarManager(catalog) {
+  const rows = catalog.length
+    ? catalog.map((ic, i) => `
+      <div class="avatar-mng-row">
+        <img src="${_esc(ic.url)}" alt="" class="avatar-mng-thumb" loading="lazy">
+        <div class="avatar-mng-meta">
+          <div class="avatar-mng-lbl">${_esc(ic.label || '—')}</div>
+          <div class="avatar-mng-url">${_esc(ic.url)}</div>
+        </div>
+        <button class="acc-edit-btn" data-action="removeAvatarIcon" data-idx="${i}" title="Retirer">🗑️</button>
+      </div>`).join('')
+    : `<div class="acc-avatar-empty">Aucun avatar. Ajoute le premier ci-dessous.</div>`;
+
+  openModal('⚙️ Gérer les avatars disponibles', `
+    <p style="font-size:.78rem;color:var(--text-dim);margin-bottom:.7rem;line-height:1.6">
+      URL d'images hébergées (dossier <code>images/</code> du site ou URL complète).
+      Les joueurs choisiront leur avatar parmi cette sélection.
+    </p>
+    <div class="avatar-mng-list">${rows}</div>
+    <div class="form-group" style="margin-top:.85rem">
+      <label>Ajouter un avatar</label>
+      <input class="input-field" id="av-url" placeholder="images/avatars/chevalier.png ou https://…">
+      <input class="input-field" id="av-label" placeholder="Nom (optionnel)" style="margin-top:.4rem">
+    </div>
+    <div style="display:flex;gap:.5rem;margin-top:.6rem">
+      <button class="btn btn-gold" style="flex:1" data-action="addAvatarIcon">＋ Ajouter</button>
+      <button class="btn btn-outline btn-sm" data-action="openAvatarPicker">‹ Retour</button>
+    </div>
+  `, { subtitle: "Catalogue partagé de l'aventure", accent: '#e8b84b' });
+}
+
+async function _persistCatalog(icons) {
+  _iconCatalog = icons;
+  await saveDoc('settings', PROFILE_ICONS_DOC, { icons });
+}
+
+async function addAvatarIcon() {
+  const url   = document.getElementById('av-url')?.value?.trim();
+  const label = document.getElementById('av-label')?.value?.trim() || '';
+  if (!url) { showNotif('Indique une URL d\'image.', 'error'); return; }
+  if ((_iconCatalog || []).some(i => i.url === url)) { showNotif('Cet avatar est déjà dans la liste.', 'error'); return; }
+  const icons = [...(_iconCatalog || []), { url, label }];
+  try {
+    await _persistCatalog(icons);
+    showNotif('Avatar ajouté.', 'success');
+    _renderAvatarManager(icons);
+  } catch (e) { notifySaveError(e); }
+}
+
+async function removeAvatarIcon(idx) {
+  const icons = (_iconCatalog || []).filter((_, i) => i !== idx);
+  try {
+    await _persistCatalog(icons);
+    showNotif('Avatar retiré.', 'success');
+    _renderAvatarManager(icons);
+  } catch (e) { notifySaveError(e); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -452,6 +576,11 @@ PAGES.account = renderAccount;
 
 
 registerActions({
+  openAvatarPicker:    () => openAvatarPicker(),
+  chooseAvatar:        (btn) => chooseAvatar(btn.dataset.url || ''),
+  openAvatarManager:   () => openAvatarManager(),
+  addAvatarIcon:       () => addAvatarIcon(),
+  removeAvatarIcon:    (btn) => removeAvatarIcon(Number(btn.dataset.idx)),
   openEditPseudo:      () => openEditPseudo(),
   openEditEmail:       () => openEditEmail(),
   openEditPassword:    () => openEditPassword(),

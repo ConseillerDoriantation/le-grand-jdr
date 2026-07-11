@@ -385,32 +385,36 @@ async function _createCharForOwner(uid, ownerPseudo) {
 async function _advMembersSorted() {
   const adv = STATE.adventure;
   const allUsers = await loadAllUsers();
-  const byId     = new Map(allUsers.map(u => [u.id, u]));
+  const byId = new Map(allUsers.map(u => [u.id, u]));
   const profiles = adv?.memberProfiles || {};
   const absorbed = new Set(Object.keys(adv?.accountRelinks || {}));
 
-  // Source de vérité = les UID membres de l'aventure, PAS la lecture des docs
-  // users (qui échoue si le MJ n'est pas super-admin global → un membre pouvait
-  // disparaître du sélecteur). Le nom vient du doc users si lisible, sinon de
-  // memberProfiles (dénormalisé, toujours lisible), sinon fallback UID. On écarte
-  // les comptes ABSORBÉS (fusionnés) et on dédoublonne par email.
-  const memberUids = [...new Set([
-    ...(adv?.admins || []),
-    ...(adv?.players || []),
-    ...(adv?.accessList || []),
-    STATE.user.uid, // toujours pouvoir créer pour soi
-  ])].filter(uid => uid && !absorbed.has(uid));
-
+  // Source de verite = UID membres de l'aventure + proprietaires reels des personnages.
+  // La lecture users peut echouer si le MJ n'est pas super-admin ; les fallbacks
+  // memberProfiles/ownerPseudo gardent donc le selecteur complet et reutilisable.
+  const charOwners = new Map();
+  (STATE.characters || []).forEach(c => {
+    if (c?.uid) charOwners.set(c.uid, c.ownerPseudo || charOwners.get(c.uid) || '');
+  });
   const profOf = (uid) => {
     const p = profiles[uid];
     return typeof p === 'string' ? { pseudo: p } : (p || {});
   };
+  const memberUids = [...new Set([
+    ...(adv?.admins || []),
+    ...(adv?.players || []),
+    ...(adv?.accessList || []),
+    ...charOwners.keys(),
+    STATE.user.uid, // toujours pouvoir creer pour soi
+  ])].filter(uid => uid && !absorbed.has(uid));
+
   let members = memberUids.map(uid => {
     const u = byId.get(uid) || {};
     const p = profOf(uid);
-    return { id: uid, pseudo: u.pseudo || p.pseudo || '', email: u.email || p.email || '' };
+    return { id: uid, pseudo: u.pseudo || p.pseudo || charOwners.get(uid) || '', email: u.email || p.email || '' };
   });
 
+  // Dedoublonne par email : meme email = meme personne -> un seul choix.
   const seenEmail = new Set();
   members = members.filter(m => {
     const email = String(m.email || '').trim().toLowerCase();
