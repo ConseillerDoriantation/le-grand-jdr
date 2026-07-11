@@ -67,13 +67,18 @@ function _renderCombatTracker() {
     _trackerWasActive = false;
     if (!mj) { el.style.display = 'none'; el.innerHTML = ''; return; }
     el.style.display = 'block';
+    const idleRound = VS.session?.combat?.round ?? 0;
     el.innerHTML = `
       <div class="vct-header vct-header--idle">
         <div class="vct-title">
           <span class="vct-title-ico">⚔️</span>
           <span class="vct-title-txt vct-title-txt--idle">Combat</span>
+          ${idleRound > 0 ? `<span class="vct-round">Tour ${idleRound}</span>` : ''}
         </div>
-        <button class="vct-mj-btn vct-mj-btn--start" data-vtt-fn="_vttToggleCombat" title="Démarrer le combat — reset déplacement et actions de tous les tokens">▶ Démarrer</button>
+        <div class="vct-mj-ctrls">
+          <button class="vct-mj-btn" data-vtt-fn="_vttNextRound" title="Passer un tour — fait expirer les états, buffs et invocations à durée, sans lancer le combat">⏭ Tour</button>
+          <button class="vct-mj-btn vct-mj-btn--start" data-vtt-fn="_vttToggleCombat" title="Démarrer le combat — reset déplacement et actions de tous les tokens">▶ Démarrer</button>
+        </div>
       </div>`;
     return;
   }
