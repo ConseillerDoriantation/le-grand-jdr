@@ -34,6 +34,8 @@ let _groups  = [];                                 // convos de groupe où je su
 let _convoMsgs = [];                               // messages du GROUPE ouvert
 let _reads = {};                                   // convoId → millis lus
 let _unsubAdv = null, _unsubGroups = null, _unsubConvo = null;
+let _baseTitle = '';                               // titre d'onglet sans compteur
+let _prevUnread = 0;                               // pour ne pulser QUE sur du neuf
 
 // ── Refs ──────────────────────────────────────────────────────────────────────
 const _adv = () => getCurrentAdventureId();
@@ -54,6 +56,8 @@ export async function initChat(uid) {
   _uid = uid || STATE.user?.uid || null;
   _teardownListeners();
   _advMsgs = []; _groups = []; _convoMsgs = []; _open = false; _view = 'list'; _openId = null;
+  _baseTitle = (document.title || 'Le Grand JDR').replace(/^\(\d+\)\s*/, '');
+  _prevUnread = 0;
   _mount();
 
   try { const s = await getDoc(_readRef()); const d = s.data() || {}; _reads = { ...d, [ADV]: Number(d[ADV] ?? d.at) || 0 }; }
@@ -77,7 +81,23 @@ export async function initChat(uid) {
 export function teardownChat() {
   _teardownListeners();
   document.getElementById('chat-widget')?.remove();
-  _open = false; _advMsgs = []; _groups = []; _convoMsgs = [];
+  if (_baseTitle) document.title = _baseTitle;
+  _open = false; _advMsgs = []; _groups = []; _convoMsgs = []; _prevUnread = 0;
+}
+
+// Notifications discrètes (aucune règle Firestore) : compteur dans le titre de
+// l'onglet + pulsation de la bulle quand du NON-LU apparaît (chat fermé ou autre
+// conversation). Restauré à la lecture.
+function _notify() {
+  const n = _totalUnread();
+  if (_baseTitle) document.title = n > 0 ? `(${n}) ${_baseTitle}` : _baseTitle;
+  if (n > _prevUnread) _pulseBubble();
+  _prevUnread = n;
+}
+function _pulseBubble() {
+  const el = document.getElementById('chat-widget'); if (!el) return;
+  el.classList.remove('chat-notify'); void el.offsetWidth; el.classList.add('chat-notify');
+  setTimeout(() => el.classList.remove('chat-notify'), 1200);
 }
 function _teardownListeners() {
   [_unsubAdv, _unsubGroups, _unsubConvo].forEach(u => { if (u) try { u(); } catch {} });
@@ -86,13 +106,14 @@ function _teardownListeners() {
 
 // Nouveau lot de données reçu (source = ADV | 'groups' | 'convo')
 function _onData(source) {
-  if (!_open) { _renderBubble(); return; }
+  if (!_open) { _renderBubble(); _notify(); return; }
   if (_view === 'list') _renderList();
   else if (_view === 'convo') {
     // Rafraîchit le fil si la conv ouverte est concernée
     if ((_openId === ADV && source === ADV) || (_openId !== ADV && source === 'convo')) { _renderMessages(); _markReadLocal(_openId); }
     else _renderConvoHeaderBadge();
   }
+  _notify();
 }
 
 // ── Montage ───────────────────────────────────────────────────────────────────
@@ -270,6 +291,7 @@ function _markReadLocal(convoId) {
 }
 async function _markRead(convoId) {
   _markReadLocal(convoId);
+  _notify();                       // titre d'onglet à jour après lecture
   const ref = _readRef(); if (!ref) return;
   try { await setDoc(ref, { [convoId]: _reads[convoId] }, { merge: true }); } catch { /* non bloquant */ }
 }
