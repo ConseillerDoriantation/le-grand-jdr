@@ -270,6 +270,16 @@ async function chooseAvatar(url) {
   try {
     await updateInCol('users', user.uid, { avatarIcon: url || '' });
     setProfile({ ...(STATE.profile || {}), avatarIcon: url || '' });
+    // Propage l'avatar dans le profil dénormalisé (memberProfiles) de chaque aventure
+    // du joueur → visible par les autres (chat, pickers) sans lecture de users/{uid}.
+    // Autorisé par la règle isMemberProfileSelfUpdate (on ne touche que sa propre entrée).
+    for (const a of (STATE.adventures || [])) {
+      const inAdv = a?.accessList?.includes(user.uid) || a?.admins?.includes(user.uid);
+      if (!a?.id || !inAdv) continue;
+      updateInCol('adventures', a.id, { [`memberProfiles.${user.uid}.avatarIcon`]: url || '' })
+        .then(() => { if (a.memberProfiles?.[user.uid]) a.memberProfiles[user.uid].avatarIcon = url || ''; })
+        .catch(() => {});
+    }
     closeModal();
     showNotif(url ? 'Avatar mis à jour !' : 'Avatar réinitialisé.', 'success');
     renderAccount();

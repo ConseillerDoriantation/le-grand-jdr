@@ -238,6 +238,38 @@ function _renderNew() {
        <div class="chat-member-list" id="chat-members">${rows}</div>
      </div>`,
     `<div class="chat-list-foot"><button class="chat-newbtn" data-action="chatCreateGroup">Créer le groupe</button></div>`);
+  _backfillAvatars(members);
+}
+
+// Super-admin uniquement : pour les membres dont le profil dénormalisé n'a pas
+// encore d'avatar (jamais reconnectés depuis la feature), on lit users/{uid}
+// (lecture autorisée au super-admin) et on backfille memberProfiles → tout le
+// monde voit le bon avatar. Affichage immédiat (mémoire) + persistance best-effort.
+async function _backfillAvatars(members) {
+  if (!STATE.isSuperAdmin) return;
+  const adv = STATE.adventure; if (!adv?.id) return;
+  const profiles = adv.memberProfiles || {};
+  const missing = members.filter(u => {
+    const p = profiles[u];
+    return !(p && typeof p === 'object' && p.avatarIcon);
+  });
+  if (!missing.length) return;
+  const found = {};
+  for (const u of missing) {
+    try { const ai = (await getDoc(doc(db, 'users', u))).data()?.avatarIcon; if (ai) found[u] = ai; }
+    catch { /* accès refusé / doc absent → on ignore */ }
+  }
+  const uids = Object.keys(found);
+  if (!uids.length) return;
+  adv.memberProfiles = adv.memberProfiles || {};
+  const patch = {};
+  uids.forEach(u => {
+    if (typeof adv.memberProfiles[u] !== 'object' || !adv.memberProfiles[u]) adv.memberProfiles[u] = {};
+    adv.memberProfiles[u].avatarIcon = found[u];
+    patch[`memberProfiles.${u}.avatarIcon`] = found[u];
+  });
+  if (_open && _view === 'new') _renderNew();            // ré-affiche avec les avatars
+  updateDoc(doc(db, 'adventures', adv.id), patch).catch(() => {}); // profite à tous si admin de l'aventure
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
