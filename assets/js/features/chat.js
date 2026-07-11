@@ -22,6 +22,7 @@ import { getCurrentAdventureId } from '../data/firestore.js';
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { showNotif } from '../shared/notifications.js';
+import { avatarSrcOf } from '../shared/avatar.js';
 import { _esc } from '../shared/html.js';
 
 const ADV = 'adventure';   // id de la conversation d'aventure
@@ -149,7 +150,8 @@ function _renderList() {
   const advRow = _convoRow(ADV, '💬', 'Chat de l\'aventure', advPrev, advN);
   const groupRows = _groups.map(g => {
     const prev = g.lastText ? `${g.lastSenderName || ''} : ${g.lastText}` : 'Nouveau groupe';
-    return _convoRow(g.id, '👥', g.name || 'Groupe', prev, _groupUnread(g) ? '•' : 0);
+    const ico = g.lastSenderId ? `<img class="chat-conv-avimg" src="${_esc(avatarSrcOf(_profileOf(g.lastSenderId)))}" alt="">` : '👥';
+    return _convoRow(g.id, ico, g.name || 'Groupe', prev, _groupUnread(g) ? '•' : 0);
   }).join('');
   el.innerHTML = _panelShell('Discussions', '',
     `<div class="chat-convo-list">${advRow}${groupRows}</div>`,
@@ -186,13 +188,25 @@ function _renderMessages() {
   list.scrollTop = list.scrollHeight;
 }
 
+// Profil (pour l'avatar) d'un uni : le mien via STATE, les autres via
+// memberProfiles (avatar dénormalisé → aucune lecture users/{uid}).
+function _profileOf(uid) {
+  if (uid === _uid) return STATE.profile || {};
+  const p = (STATE.adventure?.memberProfiles || {})[uid];
+  return (p && typeof p === 'object') ? p : {};
+}
+
 function _msgRow(m) {
   const mine = m.senderId === _uid;
   const time = new Date(_atMillis(m) || Date.now()).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const av = mine ? '' : `<img class="chat-msg-av" src="${_esc(avatarSrcOf(_profileOf(m.senderId)))}" alt="" loading="lazy">`;
   return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}">
-    ${mine ? '' : `<span class="chat-msg-author">${_esc(m.senderName || '?')}</span>`}
-    <span class="chat-msg-bubble">${_esc(m.text || '')}</span>
-    <span class="chat-msg-time">${time}</span></div>`;
+    ${av}
+    <span class="chat-msg-content">
+      ${mine ? '' : `<span class="chat-msg-author">${_esc(m.senderName || '?')}</span>`}
+      <span class="chat-msg-bubble">${_esc(m.text || '')}</span>
+      <span class="chat-msg-time">${time}</span>
+    </span></div>`;
 }
 
 // Vue NOUVELLE DISCUSSION : nom + choix des membres
@@ -200,12 +214,22 @@ function _renderNew() {
   const el = document.getElementById('chat-widget'); if (!el) return;
   const adv = STATE.adventure || {};
   const profiles = adv.memberProfiles || {};
-  const members = [...new Set([...(adv.admins || []), ...(adv.players || []), ...(adv.accessList || [])])]
-    .filter(u => u && u !== _uid);
-  const nameOf = (u) => (typeof profiles[u] === 'string' ? profiles[u] : profiles[u]?.pseudo) || `Joueur ${u.slice(0, 6)}…`;
+  // On ne propose que les VRAIS membres : ceux ayant un profil dénormalisé
+  // (memberProfiles). Exclut les uids fantômes (comptes retirés/supprimés) qui
+  // traînent dans accessList mais n'ont plus de profil → plus de « Joueur wO9ttk… ».
+  const members = Object.keys(profiles).filter(u => u && u !== _uid);
+  const profOf = (u) => (typeof profiles[u] === 'string' ? { pseudo: profiles[u] } : (profiles[u] || {}));
   const rows = members.length
-    ? members.map(u => `<label class="chat-member"><input type="checkbox" value="${_esc(u)}"><span>${_esc(nameOf(u))}</span></label>`).join('')
-    : `<div class="chat-empty">Aucun autre membre dans l'aventure.</div>`;
+    ? members.map(u => {
+        const p = profOf(u);
+        const name = p.pseudo || p.email || `Joueur ${u.slice(0, 6)}…`;
+        return `<label class="chat-member">
+          <input type="checkbox" value="${_esc(u)}">
+          <img class="chat-member-av" src="${_esc(avatarSrcOf(p))}" alt="" loading="lazy">
+          <span class="chat-member-name">${_esc(name)}</span>
+        </label>`;
+      }).join('')
+    : `<div class="chat-empty">Aucun autre membre à ajouter.</div>`;
   el.innerHTML = _panelShell('Nouvelle discussion',
     '<button class="chat-back" data-action="chatBack" aria-label="Retour">‹</button>',
     `<div class="chat-new">
@@ -214,6 +238,38 @@ function _renderNew() {
        <div class="chat-member-list" id="chat-members">${rows}</div>
      </div>`,
     `<div class="chat-list-foot"><button class="chat-newbtn" data-action="chatCreateGroup">Créer le groupe</button></div>`);
+  _backfillAvatars(members);
+}
+
+// Super-admin uniquement : pour les membres dont le profil dénormalisé n'a pas
+// encore d'avatar (jamais reconnectés depuis la feature), on lit users/{uid}
+// (lecture autorisée au super-admin) et on backfille memberProfiles → tout le
+// monde voit le bon avatar. Affichage immédiat (mémoire) + persistance best-effort.
+async function _backfillAvatars(members) {
+  if (!STATE.isSuperAdmin) return;
+  const adv = STATE.adventure; if (!adv?.id) return;
+  const profiles = adv.memberProfiles || {};
+  const missing = members.filter(u => {
+    const p = profiles[u];
+    return !(p && typeof p === 'object' && p.avatarIcon);
+  });
+  if (!missing.length) return;
+  const found = {};
+  for (const u of missing) {
+    try { const ai = (await getDoc(doc(db, 'users', u))).data()?.avatarIcon; if (ai) found[u] = ai; }
+    catch { /* accès refusé / doc absent → on ignore */ }
+  }
+  const uids = Object.keys(found);
+  if (!uids.length) return;
+  adv.memberProfiles = adv.memberProfiles || {};
+  const patch = {};
+  uids.forEach(u => {
+    if (typeof adv.memberProfiles[u] !== 'object' || !adv.memberProfiles[u]) adv.memberProfiles[u] = {};
+    adv.memberProfiles[u].avatarIcon = found[u];
+    patch[`memberProfiles.${u}.avatarIcon`] = found[u];
+  });
+  if (_open && _view === 'new') _renderNew();            // ré-affiche avec les avatars
+  updateDoc(doc(db, 'adventures', adv.id), patch).catch(() => {}); // profite à tous si admin de l'aventure
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────

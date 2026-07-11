@@ -54,6 +54,9 @@ const _selfEmail   = () => _emailRaw(STATE.profile?.email || STATE.user?.email);
 const _selfProfile = () => ({
   pseudo: STATE.profile?.pseudo || _selfEmail() || 'Aventurier',
   email:  _selfEmail(),
+  // Avatar dénormalisé : permet d'afficher la photo des membres (chat, pickers)
+  // sans lire users/{uid} (verrouillé anti-moisson pour un MJ non super-admin).
+  avatarIcon: STATE.profile?.avatarIcon || '',
 });
 
 async function _userEmailByUid(uid) {
@@ -167,7 +170,7 @@ export async function repairCurrentUserAdventureLinks(adventures = []) {
     // que si absent ou périmé (0 écriture aux logins suivants).
     const isMember = (cur.accessList || []).includes(uid) || (cur.admins || []).includes(uid);
     const mine = cur.memberProfiles?.[uid];
-    if (isMember && (!mine || mine.pseudo !== self.pseudo || mine.email !== self.email)) {
+    if (isMember && (!mine || mine.pseudo !== self.pseudo || mine.email !== self.email || (mine.avatarIcon || '') !== self.avatarIcon)) {
       const memberProfiles = { ...(cur.memberProfiles || {}), [uid]: self };
       try {
         await updateDoc(doc(db, 'adventures', cur.id), { memberProfiles });
