@@ -247,7 +247,10 @@ match /users/{uid} {
   allow delete: if isAdmin();
 }
 // Réglages GLOBAUX de l'app (ex. catalogue d'avatars → app_config/profileIcons) :
-// lisibles par tout utilisateur connecté, écriture réservée à l'admin global.
+// lecture par tout utilisateur connecté ; écriture réservée au SUPER-ADMIN
+// (isAdmin() = users/{uid}.isAdmin == true). Les MJ d'aventure (adventures.admins,
+// sans users.isAdmin) ne peuvent PAS écrire. `isAdmin` n'est pas auto-attribuable
+// (isUserSelfUpdate le borne à email/pseudo/avatarIcon → seul un admin/la console le pose).
 match /app_config/{id} { allow read: if isLoggedIn(); allow write: if isAdmin(); }
 // Requête collectionGroup 'characters' (écran Compte : portraits d'avatar de
 // TOUTES les aventures du joueur). Un joueur ne peut lire par ce biais QUE ses

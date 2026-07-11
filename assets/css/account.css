@@ -166,3 +166,5 @@
 .avatar-mng-meta { flex: 1; min-width: 0; }
 .avatar-mng-lbl { font-size: .82rem; font-weight: 600; color: var(--text); }
 .avatar-mng-url { font-size: .68rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avatar-mng-input { width: 100%; font-size: .78rem; padding: .28rem .5rem; }
+.avatar-mng-input--url { font-size: .68rem; margin-top: .25rem; font-family: monospace; }
