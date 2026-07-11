@@ -848,7 +848,10 @@ export async function loadMyCharactersAcrossAdventures(uid) {
     const snap = await getDocs(query(collectionGroup(db, 'characters'), where('uid', '==', uid)));
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (e) {
-    console.warn('[firestore] characters cross-aventures (collectionGroup) :', e?.code || e?.message || e);
+    // On logge le MESSAGE complet (pas juste le code) : en cas d'index manquant,
+    // Firestore y met un lien direct « create index » à cliquer.
+    console.warn('[firestore] characters cross-aventures (collectionGroup) — index/règle manquant ?',
+      '\ncode:', e?.code, '\n', e?.message || e);
     return [];
   }
 }
