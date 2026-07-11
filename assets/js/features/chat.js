@@ -22,6 +22,7 @@ import { getCurrentAdventureId } from '../data/firestore.js';
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { showNotif } from '../shared/notifications.js';
+import { avatarSrcOf } from '../shared/avatar.js';
 import { _esc } from '../shared/html.js';
 
 const ADV = 'adventure';   // id de la conversation d'aventure
@@ -200,12 +201,22 @@ function _renderNew() {
   const el = document.getElementById('chat-widget'); if (!el) return;
   const adv = STATE.adventure || {};
   const profiles = adv.memberProfiles || {};
-  const members = [...new Set([...(adv.admins || []), ...(adv.players || []), ...(adv.accessList || [])])]
-    .filter(u => u && u !== _uid);
-  const nameOf = (u) => (typeof profiles[u] === 'string' ? profiles[u] : profiles[u]?.pseudo) || `Joueur ${u.slice(0, 6)}…`;
+  // On ne propose que les VRAIS membres : ceux ayant un profil dénormalisé
+  // (memberProfiles). Exclut les uids fantômes (comptes retirés/supprimés) qui
+  // traînent dans accessList mais n'ont plus de profil → plus de « Joueur wO9ttk… ».
+  const members = Object.keys(profiles).filter(u => u && u !== _uid);
+  const profOf = (u) => (typeof profiles[u] === 'string' ? { pseudo: profiles[u] } : (profiles[u] || {}));
   const rows = members.length
-    ? members.map(u => `<label class="chat-member"><input type="checkbox" value="${_esc(u)}"><span>${_esc(nameOf(u))}</span></label>`).join('')
-    : `<div class="chat-empty">Aucun autre membre dans l'aventure.</div>`;
+    ? members.map(u => {
+        const p = profOf(u);
+        const name = p.pseudo || p.email || `Joueur ${u.slice(0, 6)}…`;
+        return `<label class="chat-member">
+          <input type="checkbox" value="${_esc(u)}">
+          <img class="chat-member-av" src="${_esc(avatarSrcOf(p))}" alt="" loading="lazy">
+          <span class="chat-member-name">${_esc(name)}</span>
+        </label>`;
+      }).join('')
+    : `<div class="chat-empty">Aucun autre membre à ajouter.</div>`;
   el.innerHTML = _panelShell('Nouvelle discussion',
     '<button class="chat-back" data-action="chatBack" aria-label="Retour">‹</button>',
     `<div class="chat-new">
