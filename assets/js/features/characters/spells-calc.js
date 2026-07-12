@@ -614,7 +614,33 @@ export function noyauTypesFor(s) {
   const ids = (Array.isArray(s?.noyauTypeIds) && s.noyauTypeIds.length)
     ? s.noyauTypeIds
     : (s?.noyauTypeId ? [s.noyauTypeId] : []);
-  return ids.map(id => types.find(t => t.id === id)).filter(Boolean);
+  const resolved = ids.map(id => types.find(t => t.id === id)).filter(Boolean);
+  if (resolved.length) return resolved;
+
+  // Compatibilité des sorts historiques : avant noyauTypeId, le noyau était
+  // stocké sous forme de libellé libre ("Feu", "Feu 🔥", etc.).
+  const legacyLabel = String(s?.noyau || '').trim();
+  if (!legacyLabel) return [];
+  const norm = value => String(value || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().trim();
+  const legacyNorm = norm(legacyLabel);
+  const matched = types.find(t => {
+    const label = norm(t.label || t.nom);
+    return label && (legacyNorm === label || legacyNorm.startsWith(label) || label.startsWith(legacyNorm));
+  });
+  if (matched) return [matched];
+
+  // Le catalogue peut encore être en chargement : on montre au moins le libellé
+  // historique au lieu d'affirmer à tort que le sort est "sans noyau".
+  return [{
+    id: `legacy:${legacyNorm || 'noyau'}`,
+    label: legacyLabel,
+    nom: legacyLabel,
+    icon: '✦',
+    color: '#7c8aa5',
+    legacy: true,
+  }];
 }
 
 /** Détermine si le noyau du sort est magique (depuis la matrice damage_types).
