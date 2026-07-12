@@ -569,18 +569,18 @@ function _renderFicheHeader(n) {
   const initial = (n.nom || '?')[0].toUpperCase();
   const portInner = n.imageUrl ? `<img src="${n.imageUrl}" alt="">` : `<span>${initial}</span>`;
 
-  const portraitEl = adm
-    ? `<button class="npc-hero-portrait npc-portrait-btn ${n.imageUrl ? '' : 'is-empty'}"
-         data-action="npcSetPhoto" data-id="${n.id}" title="Cliquer pour changer le portrait">
-         ${portInner}<span class="npc-portrait-cam">📷</span></button>`
-    : (n.imageUrl
-        ? `<img class="npc-hero-portrait" src="${n.imageUrl}" alt="">`
+  const portraitEl = n.imageUrl
+    ? `<button class="npc-hero-portrait npc-portrait-btn npc-portrait-btn--view"
+         data-action="npcViewPhoto" data-id="${n.id}" title="Voir l'image complète">
+         ${portInner}</button>`
+    : (adm
+        ? `<button class="npc-hero-portrait npc-portrait-btn is-empty"
+           data-action="npcSetPhoto" data-id="${n.id}" title="Ajouter un portrait">${portInner}</button>`
         : `<div class="npc-hero-portrait npc-hero-portrait--ph">${initial}</div>`);
-  // Badge « agrandir » visible par tous (joueurs compris) → image pleine non cadrée.
-  const viewBadge = n.imageUrl
-    ? `<button class="npc-portrait-view" data-action="npcViewPhoto" data-id="${n.id}" title="Voir l'image en grand">⛶</button>`
+  const editBadge = adm
+    ? `<button class="npc-portrait-edit" data-action="npcSetPhoto" data-id="${n.id}" title="${n.imageUrl ? 'Changer le portrait' : 'Ajouter un portrait'}">📷</button>`
     : '';
-  const portrait = `<div class="npc-portrait-box">${portraitEl}${viewBadge}</div>`;
+  const portrait = `<div class="npc-portrait-box">${portraitEl}${editBadge}</div>`;
 
   const nameEl = adm
     ? `<input class="npc-inline npc-inline-name" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="nom" value="${_esc(n.nom || '')}" placeholder="Nom du PNJ">`
@@ -1025,9 +1025,12 @@ function _renderNpcWorkHeader(n, af) {
   const adm = STATE.isAdmin;
   const initial = (n.nom || '?')[0].toUpperCase();
   const portraitInner = n.imageUrl ? `<img src="${n.imageUrl}" alt="">` : `<span>${initial}</span>`;
-  const portrait = adm
-    ? `<button class="npc-work-portrait npc-work-portrait--btn" data-action="npcSetPhoto" data-id="${n.id}" title="Changer le portrait">${portraitInner}</button>`
-    : `<div class="npc-work-portrait">${portraitInner}</div>`;
+  const portraitMain = n.imageUrl
+    ? `<button class="npc-work-portrait npc-work-portrait--btn" data-action="npcViewPhoto" data-id="${n.id}" title="Voir l'image complète">${portraitInner}</button>`
+    : (adm
+        ? `<button class="npc-work-portrait npc-work-portrait--btn" data-action="npcSetPhoto" data-id="${n.id}" title="Ajouter un portrait">${portraitInner}</button>`
+        : `<div class="npc-work-portrait">${portraitInner}</div>`);
+  const portrait = `<div class="npc-work-portrait-box">${portraitMain}${adm ? `<button class="npc-portrait-edit" data-action="npcSetPhoto" data-id="${n.id}" title="${n.imageUrl ? 'Changer le portrait' : 'Ajouter un portrait'}">📷</button>` : ''}</div>`;
   const orgs = Array.isArray(n.organisations) ? n.organisations.filter(Boolean) : [];
   const status = NPC_STATUTS[n.statut]?.lbl || 'Vivant';
   return `

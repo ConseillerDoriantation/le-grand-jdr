@@ -33,95 +33,221 @@ async function renderAventuresPage() {
   const content = document.getElementById('main-content');
   if (!content) return;
 
-  const adventures = STATE.adventures;
+  const adventures = Array.isArray(STATE.adventures) ? STATE.adventures : [];
   const uid        = STATE.user?.uid;
+  const current    = adventures.find(a => a.id === STATE.adventure?.id) || STATE.adventure || null;
+  const adminCount = adventures.filter(a => a.admins?.includes(uid)).length;
+  const playerCount = adventures.filter(a => !a.admins?.includes(uid)).length;
+  const totalMembers = adventures.reduce((sum, a) => sum + (a.accessList || []).length, 0);
 
-  let html = `<div class="page-header">
-    <h1 class="page-title">🗺️ Aventures</h1>
-    <button class="btn btn-gold" data-action="openCreateAdventureModal">+ Nouvelle aventure</button>
-  </div>`;
+  let html = `
+  <div class="adv-page-v2">
+    <section class="adv-command">
+      <div class="adv-command-main">
+        <span class="adv-kicker">Campagnes</span>
+        <h1>Aventures</h1>
+        <p>Choisis la campagne active, gère les membres et crée un nouvel espace de jeu.</p>
+      </div>
+      <div class="adv-command-actions">
+        <button class="adv-primary-action" data-action="openCreateAdventureModal">
+          <span>+</span>
+          <strong>Nouvelle aventure</strong>
+        </button>
+      </div>
+    </section>
+
+    <section class="adv-overview">
+      <article class="adv-current-panel">
+        ${current ? _renderCurrentAdventure(current) : _renderNoCurrentAdventure()}
+      </article>
+      <aside class="adv-side-panel">
+        <div class="adv-side-title">Repères</div>
+        <div class="adv-side-stats">
+          ${_renderStat('Aventures', adventures.length)}
+          ${_renderStat('MJ', adminCount)}
+          ${_renderStat('Joueur', playerCount)}
+          ${_renderStat('Membres', totalMembers)}
+        </div>
+        <button class="adv-secondary-action" data-action="_advCreateFromBackup">Créer depuis un backup</button>
+      </aside>
+    </section>`;
 
   if (adventures.length === 0) {
-    html += `<div class="cs-empty">Aucune aventure disponible.</div>`;
+    html += _renderAdventureEmpty();
   } else {
-    html += `<div class="adv-manage-list">`;
+    html += `<section class="adv-library">
+      <div class="adv-section-head">
+        <div>
+          <span class="adv-kicker">Bibliothèque</span>
+          <h2>Toutes tes aventures</h2>
+        </div>
+        <span>${adventures.length} campagne${adventures.length > 1 ? 's' : ''}</span>
+      </div>
+      <div class="adv-manage-list">`;
     for (const adv of adventures) {
       const isAdvAdmin = adv.admins?.includes(uid);
       const isCurrent  = STATE.adventure?.id === adv.id;
       html += _renderAdventureCard(adv, isAdvAdmin, isCurrent);
     }
-    html += `</div>`;
+    html += `</div></section>`;
   }
 
+  html += `</div>`;
   content.innerHTML = html;
+}
+
+function _renderStat(label, value) {
+  return `<div class="adv-stat">
+    <strong>${value}</strong>
+    <span>${label}</span>
+  </div>`;
+}
+
+function _roleLabel(adv) {
+  const uid = STATE.user?.uid;
+  if (adv.createdBy === uid) return 'Créateur';
+  if (adv.admins?.includes(uid)) return 'MJ';
+  return 'Joueur';
+}
+
+function _memberInitials(adv) {
+  const profiles = adv.memberProfiles || {};
+  const uids = [...new Set([...(adv.admins || []), ...(adv.players || []), ...(adv.accessList || [])])].slice(0, 5);
+  return uids.map(uid => {
+    const p = profiles[uid];
+    const label = typeof p === 'string' ? p : (p?.pseudo || p?.email || uid);
+    const initial = String(label || '?').trim().charAt(0).toUpperCase() || '?';
+    return `<span class="adv-member-dot" title="${_esc(label)}">${_esc(initial)}</span>`;
+  }).join('');
+}
+
+function _renderCurrentAdventure(adv) {
+  const members = (adv.accessList || []).length;
+  const enabledCount = enabledFeaturesOf(adv).length;
+  return `
+    <div class="adv-current-badge">Aventure active</div>
+    <div class="adv-current-body">
+      <div class="adv-current-emoji">${adv.emoji || '⚔️'}</div>
+      <div class="adv-current-copy">
+        <span class="adv-kicker">${_esc(_roleLabel(adv))}</span>
+        <h2>${_esc(adv.nom || 'Aventure sans nom')}</h2>
+        <p>${_esc(adv.description || 'Aucune description renseignée pour cette aventure.')}</p>
+      </div>
+    </div>
+    <div class="adv-current-foot">
+      <span>${members} membre${members > 1 ? 's' : ''}</span>
+      <span>${enabledCount} page${enabledCount > 1 ? 's' : ''} active${enabledCount > 1 ? 's' : ''}</span>
+      <span class="adv-current-members">${_memberInitials(adv)}</span>
+    </div>`;
+}
+
+function _renderNoCurrentAdventure() {
+  return `
+    <div class="adv-current-badge">Aucune active</div>
+    <div class="adv-current-body">
+      <div class="adv-current-emoji">◇</div>
+      <div class="adv-current-copy">
+        <span class="adv-kicker">Sélection</span>
+        <h2>Choisis une aventure</h2>
+        <p>La campagne sélectionnée devient le contexte de toutes les pages.</p>
+      </div>
+    </div>`;
+}
+
+function _renderAdventureEmpty() {
+  return `<section class="adv-empty-v2">
+    <div class="adv-empty-mark">◇</div>
+    <h2>Aucune aventure disponible</h2>
+    <p>Crée une première campagne ou restaure un backup JSON si tu repars d'une sauvegarde.</p>
+    <div class="adv-empty-actions">
+      <button class="btn btn-gold" data-action="openCreateAdventureModal">Créer une aventure</button>
+      <button class="btn btn-outline" data-action="_advCreateFromBackup">Créer depuis un backup</button>
+    </div>
+  </section>`;
 }
 
 function _renderAdventureCard(adv, isAdvAdmin, isCurrent) {
   const members  = (adv.accessList || []).length;
   const adminCnt = (adv.admins    || []).length;
-  // Quitter : réservé aux membres NON créateurs (le créateur supprime l'aventure).
+  const enabledCount = enabledFeaturesOf(adv).length;
+  const pendingCount = new Set((adv.invitedEmails || []).map(e => String(e).toLowerCase())).size;
   const canLeave = adv.createdBy !== STATE.user?.uid;
   return `
   <div class="adv-manage-card ${isCurrent ? 'adv-manage-card--active' : ''}">
+    <div class="adv-card-topline">
+      <span class="adv-role-pill">${_esc(_roleLabel(adv))}</span>
+      ${isCurrent ? `<span class="adv-badge-active">Active</span>` : ''}
+    </div>
     <div class="adv-manage-card-hdr">
       <span class="adv-manage-emoji">${adv.emoji || '⚔️'}</span>
       <div class="adv-manage-info">
-        <span class="adv-manage-nom">${_esc(adv.nom)}</span>
-        <span class="adv-manage-meta">👥 ${members} membre${members>1?'s':''} · ⚙️ ${adminCnt} MJ</span>
-      </div>
-      <div class="adv-manage-actions">
-        ${isCurrent
-          ? `<span class="adv-badge-active">Actuelle</span>`
-          : `<button class="btn btn-outline btn-sm" data-action="pickAdventure" data-id="${adv.id}">Rejoindre</button>`}
-        ${isAdvAdmin ? `<button class="btn btn-outline btn-sm" data-action="openManageAdventureModal" data-id="${adv.id}">⚙️ Gérer</button>` : ''}
-        ${canLeave ? `<button class="btn btn-outline btn-sm adv-leave-btn" data-action="_advLeave" data-id="${adv.id}" title="Quitter cette aventure (supprime ton personnage)">🚪 Quitter</button>` : ''}
+        <span class="adv-manage-nom">${_esc(adv.nom || 'Aventure sans nom')}</span>
+        <span class="adv-manage-meta">${members} membre${members>1?'s':''} · ${adminCnt} MJ · ${enabledCount} page${enabledCount>1?'s':''}</span>
       </div>
     </div>
-    ${adv.description ? `<p class="adv-manage-desc">${_esc(adv.description)}</p>` : ''}
+    <p class="adv-manage-desc">${_esc(adv.description || 'Aucune description renseignée.')}</p>
+    <div class="adv-card-metrics">
+      <span>${_memberInitials(adv) || '<i>Aucun membre</i>'}</span>
+      ${pendingCount ? `<span>${pendingCount} invitation${pendingCount>1?'s':''}</span>` : ''}
+    </div>
+    <div class="adv-manage-actions">
+      ${isCurrent
+        ? `<button class="adv-card-action is-current" type="button" disabled>Campagne active</button>`
+        : `<button class="adv-card-action" data-action="pickAdventure" data-id="${adv.id}">Entrer</button>`}
+      ${isAdvAdmin ? `<button class="adv-card-action adv-card-action--muted" data-action="openManageAdventureModal" data-id="${adv.id}">Gérer</button>` : ''}
+      ${canLeave ? `<button class="adv-card-action adv-card-action--danger" data-action="_advLeave" data-id="${adv.id}" title="Quitter cette aventure et supprimer ton personnage">Quitter</button>` : ''}
+    </div>
   </div>`;
 }
-
 // ── Modal création d'aventure ──────────────────
 export function openCreateAdventureModal() {
   const EMOJIS = ['⚔️','🏰','🗺️','🐉','🌙','🔮','🌊','🔥','🌿','⚡','🧙','🏴'];
-  openModal('✨ Nouvelle aventure', `
-    <div style="display:flex;flex-direction:column;gap:.85rem">
-      <div class="form-group">
-        <label>Nom de l'aventure *</label>
-        <input type="text" id="adv-nom" placeholder="Ex : La Chute des Dieux" maxlength="60"
-          style="width:100%;padding:.6rem .8rem;border-radius:10px;border:1px solid var(--border);
-          background:var(--bg-elevated);color:var(--text);font-size:.9rem">
-      </div>
-      <div class="form-group">
-        <label>Emoji</label>
-        <div style="display:flex;gap:.4rem;flex-wrap:wrap">
-          ${EMOJIS.map(e => `<button type="button" class="adv-emoji-btn"
-            data-action="_advPickEmoji" data-emoji="${e}" data-target-id="adv-emoji"
-            style="font-size:1.4rem;background:var(--bg-elevated);border:1px solid var(--border);
-            border-radius:8px;width:2.4rem;height:2.4rem;cursor:pointer">${e}</button>`).join('')}
-          <input type="hidden" id="adv-emoji" value="⚔️">
+  openModal('Nouvelle aventure', `
+    <div class="adv-create-modal">
+      <div class="adv-create-head">
+        <div class="adv-create-mark">✦</div>
+        <div>
+          <span class="adv-kicker">Nouvelle campagne</span>
+          <h3>Prépare un nouvel espace de jeu</h3>
+          <p>Tu pourras ensuite inviter les joueurs, choisir les pages actives et importer un backup si besoin.</p>
         </div>
       </div>
-      <div class="form-group">
-        <label>Description (optionnel)</label>
-        <textarea id="adv-desc" rows="2" placeholder="Un court résumé de l'aventure…"
-          style="width:100%;padding:.6rem .8rem;border-radius:10px;border:1px solid var(--border);
-          background:var(--bg-elevated);color:var(--text);font-size:.88rem;resize:vertical"></textarea>
-      </div>
-      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:.4rem">
-        <button class="btn btn-outline btn-sm" data-action="_advClose">Annuler</button>
-        <button class="btn btn-gold btn-sm" data-action="_doCreateAdventure">Créer</button>
+
+      <div class="adv-create-grid">
+        <div class="adv-create-field adv-create-field--wide">
+          <label>Nom de l'aventure *</label>
+          <input type="text" id="adv-nom" placeholder="Ex : La Chute des Dieux" maxlength="60">
+        </div>
+
+        <div class="adv-create-field adv-create-field--wide">
+          <label>Emblème</label>
+          <div class="adv-create-emojis">
+            ${EMOJIS.map((e, i) => `<button type="button" class="adv-emoji-btn adv-create-emoji ${i === 0 ? 'selected' : ''}"
+              data-action="_advPickEmoji" data-emoji="${e}" data-target-id="adv-emoji">${e}</button>`).join('')}
+            <input type="hidden" id="adv-emoji" value="⚔️">
+          </div>
+        </div>
+
+        <div class="adv-create-field adv-create-field--wide">
+          <label>Description</label>
+          <textarea id="adv-desc" rows="4" placeholder="Ambiance, promesse de campagne, ton général..."></textarea>
+        </div>
       </div>
 
-      <hr style="border:none;border-top:1px solid var(--border);margin:.2rem 0 0">
-      <div style="display:flex;flex-direction:column;gap:.35rem">
-        <span style="font-size:.78rem;color:var(--text-dim)">…ou recréer une campagne supprimée depuis sa sauvegarde :</span>
-        <button class="btn btn-outline btn-sm" data-action="_advCreateFromBackup" style="align-self:flex-start">
-          📥 Créer depuis un backup (JSON)
-        </button>
+      <div class="adv-create-actions">
+        <button class="btn btn-outline btn-sm" data-action="_advClose">Annuler</button>
+        <button class="btn btn-gold btn-sm" data-action="_doCreateAdventure">Créer l'aventure</button>
+      </div>
+
+      <div class="adv-create-backup">
+        <div>
+          <strong>Repartir d'une sauvegarde</strong>
+          <span>Crée une nouvelle aventure puis restaure le contenu du fichier JSON.</span>
+        </div>
+        <button class="btn btn-outline btn-sm" data-action="_advCreateFromBackup">Créer depuis un backup</button>
       </div>
     </div>
-  `);
+  `, { subtitle: 'Campagne, accès et sauvegarde', accent: '#7fb2ff' });
 }
 
 async function doCreateAdventure() {
@@ -247,136 +373,149 @@ export async function openManageAdventureModal(adventureId) {
   const pendingInvites = [...pendingByLower.values()];
   const currentEmoji = adv.emoji || '⚔️';
 
-  openModal(`⚙️ Gérer — ${currentEmoji} ${adv.nom}`, `
-    <div style="display:flex;flex-direction:column;gap:1.1rem">
+  const enabled = new Set(enabledFeaturesOf(adv));
+  const featuresHtml = TOGGLEABLE_FEATURES.map(f => `
+    <button type="button" class="adv-feat-toggle ${enabled.has(f.key) ? 'is-on' : ''}"
+      data-action="_advToggleFeature" data-adv-id="${adventureId}" data-feature="${f.key}"
+      aria-pressed="${enabled.has(f.key)}">
+      <span class="adv-feat-ico">${f.icon}</span>
+      <span class="adv-feat-name">${_esc(f.label)}</span>
+      <span class="adv-feat-switch" aria-hidden="true"></span>
+    </button>`).join('');
 
-      <!-- Infos de l'aventure -->
-      <div>
-        <div style="font-size:.78rem;font-weight:600;color:var(--text-dim);margin-bottom:.5rem">INFOS DE L'AVENTURE</div>
-        <div style="display:flex;flex-direction:column;gap:.6rem">
-          <div style="display:flex;gap:.4rem;flex-wrap:wrap">
-            ${_ADV_EMOJIS.map(e => `<button type="button" class="adv-emoji-btn ${e === currentEmoji ? 'selected' : ''}"
-              data-action="_advPickEmoji" data-emoji="${e}" data-target-id="adv-edit-emoji"
-              style="font-size:1.4rem;background:var(--bg-elevated);border:2px solid ${e === currentEmoji ? 'var(--gold)' : 'var(--border)'};
-              border-radius:8px;width:2.4rem;height:2.4rem;cursor:pointer">${e}</button>`).join('')}
+  const pendingHtml = pendingInvites.length ? `
+    <section class="adv-manage-panel adv-manage-panel--compact">
+      <div class="adv-panel-head">
+        <div>
+          <span class="adv-kicker">Invitations</span>
+          <h3>En attente</h3>
+        </div>
+        <span class="adv-panel-count">${pendingInvites.length}</span>
+      </div>
+      <div class="adv-manage-stack">
+        ${pendingInvites.map(e => `<div class="adv-member-row adv-member-row--pending">
+          <span class="adv-member-pseudo">${_esc(e)}</span>
+          <span class="adv-role adv-role--joueur">Invité</span>
+          <div class="adv-member-actions">
+            <button class="btn-icon" title="Annuler l'invitation"
+              data-action="_advCancelInvite" data-adv-id="${adventureId}" data-email="${_esc(e)}">×</button>
+          </div>
+        </div>`).join('')}
+      </div>
+    </section>` : '';
+
+  const dangerHtml = STATE.isSuperAdmin ? `
+    <section class="adv-manage-panel adv-manage-panel--danger">
+      <div class="adv-panel-head">
+        <div>
+          <span class="adv-kicker">Danger</span>
+          <h3>Suppression</h3>
+        </div>
+      </div>
+      <p>Supprimer l'aventure efface définitivement ses données. Cette action est réservée au super-admin.</p>
+      <div id="adv-delete-confirm" class="adv-delete-confirm" style="display:none">
+        <strong>Supprimer ${_esc(adv.nom)} ?</strong>
+        <span>Cette action est irréversible.</span>
+        <div class="adv-danger-actions">
+          <button class="adv-danger-confirm" data-action="_advDelete" data-id="${adventureId}">Supprimer définitivement</button>
+          <button class="btn btn-outline btn-sm" data-action="_advHideDeleteConfirm">Annuler</button>
+        </div>
+      </div>
+      <button class="adv-danger-trigger" data-action="_advShowDeleteConfirm">Supprimer l'aventure</button>
+    </section>` : '';
+
+  openModal(`Gérer — ${currentEmoji} ${adv.nom}`, `
+    <div class="adv-manage-modal">
+      <header class="adv-manage-hero">
+        <div class="adv-manage-hero-mark">${currentEmoji}</div>
+        <div class="adv-manage-hero-copy">
+          <span class="adv-kicker">Configuration</span>
+          <h3>${_esc(adv.nom || 'Aventure sans nom')}</h3>
+          <p>${access.length} membre${access.length > 1 ? 's' : ''} · ${admins.length} MJ · ${enabled.size} page${enabled.size > 1 ? 's' : ''} active${enabled.size > 1 ? 's' : ''}</p>
+        </div>
+      </header>
+
+      <div class="adv-manage-grid">
+        <section class="adv-manage-panel adv-manage-panel--identity">
+          <div class="adv-panel-head">
+            <div>
+              <span class="adv-kicker">Identité</span>
+              <h3>Présentation</h3>
+            </div>
+            <button class="adv-panel-save" data-action="_advSaveMeta" data-id="${adventureId}">Enregistrer</button>
+          </div>
+          <div class="adv-edit-emojis">
+            ${_ADV_EMOJIS.map(e => `<button type="button" class="adv-emoji-btn adv-edit-emoji ${e === currentEmoji ? 'selected' : ''}"
+              data-action="_advPickEmoji" data-emoji="${e}" data-target-id="adv-edit-emoji">${e}</button>`).join('')}
             <input type="hidden" id="adv-edit-emoji" value="${currentEmoji}">
           </div>
-          <input type="text" id="adv-edit-nom" value="${_esc(adv.nom)}" maxlength="60"
-            style="width:100%;padding:.55rem .8rem;border-radius:10px;border:1px solid var(--border);
-            background:var(--bg-elevated);color:var(--text);font-size:.9rem">
-          <textarea id="adv-edit-desc" rows="2"
-            style="width:100%;padding:.55rem .8rem;border-radius:10px;border:1px solid var(--border);
-            background:var(--bg-elevated);color:var(--text);font-size:.85rem;resize:vertical"
-            placeholder="Description (optionnel)">${_esc(adv.description || '')}</textarea>
-          <div style="display:flex;justify-content:flex-end">
-            <button class="btn btn-gold btn-sm" data-action="_advSaveMeta" data-id="${adventureId}">💾 Enregistrer</button>
-          </div>
-        </div>
-      </div>
+          <label class="adv-edit-field">
+            <span>Nom</span>
+            <input type="text" id="adv-edit-nom" value="${_esc(adv.nom || '')}" maxlength="60">
+          </label>
+          <label class="adv-edit-field">
+            <span>Description</span>
+            <textarea id="adv-edit-desc" rows="4" placeholder="Description optionnelle">${_esc(adv.description || '')}</textarea>
+          </label>
+        </section>
 
-      <hr style="border:none;border-top:1px solid var(--border);margin:0">
-
-      <!-- Membres -->
-      <div>
-        <div style="font-size:.78rem;font-weight:600;color:var(--text-dim);margin-bottom:.4rem">MEMBRES (${access.length})</div>
-        <div id="adv-members-list" style="display:flex;flex-direction:column;gap:.3rem">
-          ${memberLines.join('') || '<div style="color:var(--text-dim);font-size:.82rem">Aucun membre</div>'}
-        </div>
-      </div>
-
-      <!-- Inviter par email -->
-      <div>
-        <div style="font-size:.78rem;font-weight:600;color:var(--text-dim);margin-bottom:.4rem">INVITER UN JOUEUR</div>
-        <div style="display:flex;gap:.4rem;align-items:center">
-          <input type="email" id="adv-invite-email" placeholder="email@exemple.com"
-            data-enter-click="#_advInvite-${adventureId}"
-            style="flex:1;padding:.5rem .7rem;border-radius:9px;border:1px solid var(--border);
-            background:var(--bg-elevated);color:var(--text);font-size:.85rem">
-          <button class="btn btn-gold btn-sm" id="_advInvite-${adventureId}" data-action="_advInvite" data-id="${adventureId}">Inviter</button>
-        </div>
-        <p style="font-size:.74rem;color:var(--text-dim);margin:.4rem 0 0">
-          Le joueur reçoit une invitation à accepter à sa prochaine connexion. Il peut ne pas encore avoir de compte.
-        </p>
-      </div>
-
-      ${pendingInvites.length ? `<div>
-        <div style="font-size:.78rem;font-weight:600;color:var(--text-dim);margin-bottom:.4rem">INVITATIONS EN ATTENTE (${pendingInvites.length})</div>
-        <div style="display:flex;flex-direction:column;gap:.3rem">
-          ${pendingInvites.map(e => `<div class="adv-member-row">
-            <span class="adv-member-pseudo">${_esc(e)}</span>
-            <span class="adv-role adv-role--joueur">Invité</span>
-            <div class="adv-member-actions">
-              <button class="btn-icon" title="Annuler l'invitation" style="color:#ff6b6b"
-                data-action="_advCancelInvite" data-adv-id="${adventureId}" data-email="${_esc(e)}">✕</button>
+        <section class="adv-manage-panel adv-manage-panel--members">
+          <div class="adv-panel-head">
+            <div>
+              <span class="adv-kicker">Membres</span>
+              <h3>Accès joueurs</h3>
             </div>
-          </div>`).join('')}
-        </div>
-      </div>` : ''}
-
-      <hr style="border:none;border-top:1px solid var(--border);margin:0">
-
-      <!-- Fonctionnalités activées -->
-      <div>
-        <div style="font-size:.78rem;font-weight:600;color:var(--text-dim);margin-bottom:.4rem">FONCTIONNALITÉS</div>
-        <p style="font-size:.78rem;color:var(--text-dim);margin:0 0 .55rem">
-          Choisis les pages actives pour cette aventure. Modifiable à tout moment.
-        </p>
-        <div class="adv-feat-grid">
-          ${(() => {
-            const enabled = new Set(enabledFeaturesOf(adv));
-            return TOGGLEABLE_FEATURES.map(f => `
-              <button type="button" class="adv-feat-toggle ${enabled.has(f.key) ? 'is-on' : ''}"
-                data-action="_advToggleFeature" data-adv-id="${adventureId}" data-feature="${f.key}"
-                aria-pressed="${enabled.has(f.key)}">
-                <span class="adv-feat-ico">${f.icon}</span>
-                <span class="adv-feat-name">${_esc(f.label)}</span>
-                <span class="adv-feat-switch" aria-hidden="true"></span>
-              </button>`).join('');
-          })()}
-        </div>
-      </div>
-
-      <hr style="border:none;border-top:1px solid var(--border);margin:0">
-
-      <!-- Sauvegarde -->
-      <div>
-        <div style="font-size:.78rem;font-weight:600;color:var(--text-dim);margin-bottom:.4rem">SAUVEGARDE</div>
-        <p style="font-size:.8rem;color:var(--text-dim);margin:0 0 .5rem">
-          Backup JSON complet de la campagne (persos, récit, monde, VTT…) — filet de sécurité contre une fausse manip.
-          La restauration réécrit les docs du backup <strong>sans rien supprimer</strong> et ne touche pas aux membres/permissions.
-        </p>
-        <div style="display:flex;gap:.4rem;flex-wrap:wrap">
-          <button class="btn btn-outline btn-sm" data-action="_advExport" data-id="${adventureId}">💾 Exporter (backup JSON)</button>
-          <button class="btn btn-outline btn-sm" data-action="_advImport" data-id="${adventureId}">♻️ Restaurer (import JSON)</button>
-        </div>
-      </div>
-
-      ${STATE.isSuperAdmin ? `
-      <hr style="border:none;border-top:1px solid var(--border);margin:0">
-      <div>
-        <div style="font-size:.78rem;font-weight:600;color:#ff6b6b;margin-bottom:.4rem">ZONE DANGEREUSE</div>
-        <div id="adv-delete-confirm" style="display:none;background:rgba(255,107,107,.08);border:1px solid #ff6b6b44;
-          border-radius:10px;padding:.7rem .9rem;margin-bottom:.5rem;font-size:.85rem;color:var(--text)">
-          ⚠️ Supprimer <strong>${_esc(adv.nom)}</strong> et toutes ses données ?
-          Cette action est <strong>irréversible</strong>.
-          <div style="display:flex;gap:.4rem;margin-top:.6rem">
-            <button class="btn btn-sm" style="background:#ff6b6b;color:#fff;border:none"
-              data-action="_advDelete" data-id="${adventureId}">Oui, supprimer définitivement</button>
-            <button class="btn btn-outline btn-sm"
-              data-action="_advHideDeleteConfirm">Annuler</button>
+            <span class="adv-panel-count">${access.length}</span>
           </div>
-        </div>
-        <button class="btn btn-outline btn-sm" style="color:#ff6b6b;border-color:#ff6b6b44"
-          data-action="_advShowDeleteConfirm">
-          🗑️ Supprimer l'aventure
-        </button>
-      </div>` : ''}
+          <div id="adv-members-list" class="adv-manage-stack adv-members-list-v2">
+            ${memberLines.join('') || '<div class="adv-muted-line">Aucun membre</div>'}
+          </div>
+          <div class="adv-invite-box">
+            <label for="adv-invite-email">Inviter par email</label>
+            <div class="adv-invite-row">
+              <input type="email" id="adv-invite-email" placeholder="email@exemple.com" data-enter-click="#_advInvite-${adventureId}">
+              <button class="adv-panel-save" id="_advInvite-${adventureId}" data-action="_advInvite" data-id="${adventureId}">Inviter</button>
+            </div>
+            <p>L'invitation sera visible à la prochaine connexion du joueur.</p>
+          </div>
+        </section>
 
-      <div style="display:flex;justify-content:flex-end">
-        <button class="btn btn-outline btn-sm" data-action="_advClose">Fermer</button>
+        ${pendingHtml}
+
+        <section class="adv-manage-panel adv-manage-panel--features">
+          <div class="adv-panel-head">
+            <div>
+              <span class="adv-kicker">Pages</span>
+              <h3>Fonctionnalités actives</h3>
+            </div>
+            <span class="adv-panel-count">${enabled.size}</span>
+          </div>
+          <p class="adv-panel-note">Choisis les sections accessibles pour cette aventure. Les changements sont sauvegardés immédiatement.</p>
+          <div class="adv-feat-grid adv-feat-grid--modal">${featuresHtml}</div>
+        </section>
+
+        <section class="adv-manage-panel adv-manage-panel--backup">
+          <div class="adv-panel-head">
+            <div>
+              <span class="adv-kicker">Sauvegarde</span>
+              <h3>Backup JSON</h3>
+            </div>
+          </div>
+          <p>Exporter crée une copie complète. Restaurer réécrit les documents du backup sans supprimer ce qui existe déjà.</p>
+          <div class="adv-backup-actions">
+            <button class="adv-card-action adv-card-action--muted" data-action="_advExport" data-id="${adventureId}">Exporter</button>
+            <button class="adv-card-action adv-card-action--muted" data-action="_advImport" data-id="${adventureId}">Restaurer</button>
+          </div>
+        </section>
+
+        ${dangerHtml}
       </div>
+
+      <footer class="adv-manage-footer">
+        <button class="btn btn-outline btn-sm" data-action="_advClose">Fermer</button>
+      </footer>
     </div>
-  `);
+  `, { subtitle: 'Membres, pages actives et sauvegardes', accent: '#7fb2ff' });
 }
 
 async function saveAdventureMeta(advId) {
@@ -716,7 +855,7 @@ registerActions({
   _advDelete: (btn) => deleteAdventureAndRefresh(btn.dataset.id),
   _advHideDeleteConfirm: () => { document.getElementById('adv-delete-confirm').style.display = 'none'; },
   _advShowDeleteConfirm: (btn) => {
-    document.getElementById('adv-delete-confirm').style.display = 'block';
+    document.getElementById('adv-delete-confirm').style.display = 'grid';
     btn.style.display = 'none';
   },
   _advPromote: (btn) => promoteAdventurePlayer(btn.dataset.advId, btn.dataset.uid),
