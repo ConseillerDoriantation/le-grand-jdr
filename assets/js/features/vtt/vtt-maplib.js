@@ -11,7 +11,7 @@ import { showNotif } from '../../shared/notifications.js';
 import { promptModal } from '../../shared/modal.js';
 import { db, doc, setDoc, updateDoc } from '../../config/firebase.js';
 import { _pgRef } from './vtt-refs.js';
-import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile } from '../../shared/github-folder.js';
+import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile, fileKey } from '../../shared/github-folder.js';
 
 export let _libFolder = null;   // null = racine, string = folderId ouvert
 let _libOpen   = true;   // section collapsible dans le tray
@@ -93,10 +93,14 @@ export async function _vttLibImportGithub() {
   try { files = await listGithubFolder(path, { exts: GH_IMAGE_EXTS }); }
   catch (e) { showNotif(e.message, 'error'); return; }
   if (!files.length) { showNotif('Aucune image dans ce dossier', 'info'); return; }
-  const existing = new Set((VS.mapLib.images || []).map(i => i.url));
-  const added = files
-    .filter(f => !existing.has(f.url))
-    .map(f => ({ id: `${Date.now()}${Math.random().toString(36).slice(2, 6)}`, url: f.url, name: prettyNameFromFile(f.name), folderId: _libFolder || null }));
+  const seen = new Set((VS.mapLib.images || []).map(i => fileKey(i.url)));
+  const added = [];
+  for (const f of files) {
+    const k = fileKey(f.url);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    added.push({ id: `${Date.now()}${Math.random().toString(36).slice(2, 6)}`, url: f.url, name: prettyNameFromFile(f.name), folderId: _libFolder || null });
+  }
   if (!added.length) { showNotif('Toutes ces images sont déjà présentes', 'info'); return; }
   VS.mapLib.images = [...(VS.mapLib.images || []), ...added];
   await _saveMapLib();

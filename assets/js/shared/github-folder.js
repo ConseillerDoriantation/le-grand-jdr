@@ -35,6 +35,16 @@ export function prettyNameFromFile(filename) {
   return String(filename).replace(/\.[^.]+$/, '').replace(/[._-]+/g, ' ').trim();
 }
 
+// Clé d'identité d'une image = son nom de fichier (dernier segment), sans query
+// ni casse. Sert au dédoublonnage robuste : `images/avatar/X.png`,
+// `./images/avatars/X.png` ou `https://site/…/X.png` donnent tous la même clé.
+// (Compromis : deux images de dossiers différents mais de même nom sont vues
+// comme un doublon — négligeable pour des avatars/émotes.)
+export function fileKey(url) {
+  const s = String(url || '').split(/[?#]/)[0].replace(/\/+$/, '');
+  return (s.split('/').pop() || s).trim().toLowerCase();
+}
+
 // Slug d'émote depuis un nom de fichier : minuscules, alphanum, séparés par _.
 // (Ex: 'Gros Rire!.png' → 'gros_rire'.)
 export function slugFromFile(filename) {
