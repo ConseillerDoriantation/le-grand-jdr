@@ -9,6 +9,7 @@ import { unwatchAll } from '../shared/realtime.js';
 import { appSplashHtml } from '../shared/html.js';
 import { dispatchAction, dispatchValueAction } from './actions.js';
 import { isFeatureEnabled } from '../shared/features.js';
+import { parseRoute, routeUrl } from '../shared/route.js';
 
 // ── Carte page → module feature chargé en lazy ────────────────────────────
 // Chaque module est importé une seule fois : le navigateur le met en cache
@@ -93,6 +94,38 @@ export function _ensureFeatureCss(page) {
   return files ? Promise.all(files.map(_loadCss)) : Promise.resolve();
 }
 
+// ── Deep-link : une page = une URL (#page[/sous-route]) ───────────────────
+// L'app est une SPA sans URL de page : sans ça, un onglet ouvert au clic molette
+// retomberait toujours sur le dashboard. Le hash rend chaque page adressable
+// (partageable, rechargeable) ; l'aventure, elle, est déjà restaurée au boot via
+// localStorage (`jdr-last-adventure`). La sous-route (onglet) est gérée par la
+// feature elle-même via shared/route.js.
+
+// Page connue = feature lazy OU page déjà enregistrée dans PAGES (dashboard, admin…).
+export function isKnownPage(page) {
+  return Boolean(page && (FEATURE_MAP[page] || PAGES[page]));
+}
+
+// Deep-link d'ouverture : lu UNE fois au chargement du module, consommé à la 1re
+// navigation. Évite qu'un hash resté dans l'onglet (logout/relogin, changement
+// d'aventure) ne détourne les navigations suivantes vers dashboard.
+let _bootPage = isKnownPage(parseRoute().page) ? parseRoute().page : null;
+export function consumeBootPage(fallback = 'dashboard') {
+  const page = _bootPage;
+  _bootPage = null;
+  return page || fallback;
+}
+
+function _syncHash(page) {
+  // Même page → on laisse l'URL intacte : sa sous-route (onglet en cours, ou
+  // deep-link pas encore consommé par la feature) doit survivre au rendu.
+  // Page différente → l'ancienne sous-route n'a plus de sens, on repart propre.
+  // replaceState : pas d'entrée d'historique (le bouton Retour ne change pas de
+  // comportement) et pas de `hashchange`.
+  if (parseRoute().page === page) return;
+  history.replaceState(null, '', routeUrl(page));
+}
+
 // ── Naviguer vers une page ─────────────────────
 export async function navigate(page) {
   closeMoreMenu(); // referme le menu mobile quelle que soit la source (clic, clavier, palette)
@@ -113,6 +146,7 @@ export async function navigate(page) {
   if (mc) { mc.style.overflow = ''; mc.style.height = ''; mc.style.padding = ''; mc.style.paddingBottom = ''; }
 
   setPage(page);
+  _syncHash(page);
   _syncNav(page);
   _renderLoading();
 
@@ -176,8 +210,52 @@ export function closeMoreMenu() {
   _setMoreExpanded(false);
 }
 
+// ── Ouverture dans un nouvel onglet ───────────
+// Les cibles de nav sont des <button>/<div> (pas des <a href>) : le navigateur ne
+// sait pas les ouvrir seul. On reproduit son comportement natif (clic molette,
+// Ctrl/⌘+clic) en ouvrant le deep-link correspondant. Deux marqueurs :
+//   `data-navigate="shop"`          → une page (sidebar, bottom-nav, « Plus », dashboard) ;
+//   `data-nav-sub="char_17/sorts"`  → un onglet DANS la page courante (fiche perso…),
+//                                     `data-nav-page` si l'onglet vise une autre page.
+const NAV_TARGETS = '[data-navigate],[data-nav-sub]';
+
+function _newTabUrl(target) {
+  const subEl = target?.closest?.('[data-nav-sub]');
+  // L'onglet l'emporte : il est plus spécifique que la page qui le contient.
+  const page  = subEl
+    ? (subEl.dataset.navPage || STATE.currentPage)
+    : target?.closest?.('[data-navigate]')?.dataset.navigate;
+  if (!isKnownPage(page) || !isFeatureEnabled(page)) return null;
+  return routeUrl(page, subEl?.dataset.navSub || '');
+}
+
+function _openInNewTab(url) {
+  window.open(url, '_blank', 'noopener');
+  closeMoreMenu();
+}
+
 // ── Délégation d'événements globale ───────────
 export function initEventDelegation() {
+  // Clic molette : mousedown pour couper l'auto-scroll du navigateur, auxclick
+  // pour l'action (mouseup molette).
+  document.addEventListener('mousedown', (e) => {
+    if (e.button === 1 && e.target.closest(NAV_TARGETS)) e.preventDefault();
+  });
+  document.addEventListener('auxclick', (e) => {
+    if (e.button !== 1) return;
+    const url = _newTabUrl(e.target);
+    if (url) { e.preventDefault(); _openInNewTab(url); }
+  });
+
+  // Deep-link modifié à la main (URL éditée, lien collé dans l'onglet courant).
+  // Ignoré tant qu'aucune aventure n'est active : le boot s'en charge déjà.
+  // On re-navigue même à page égale : la feature relira sa sous-route au rendu.
+  window.addEventListener('hashchange', () => {
+    const { page } = parseRoute();
+    if (!STATE.adventure || !isKnownPage(page)) return;
+    navigate(page);
+  });
+
   document.addEventListener('click', (e) => {
     // Fermer le more-menu si clic en dehors
     const menu = document.getElementById('more-menu');
@@ -187,6 +265,14 @@ export function initEventDelegation() {
       !e.target.closest('[data-toggle-more]')
     ) {
       closeMoreMenu();
+    }
+
+    // Ctrl/⌘+clic sur une page ou un onglet → nouvel onglet, comme un vrai lien.
+    // Avant tout le reste : les onglets portent aussi un `data-action` qui, sinon,
+    // basculerait l'onglet dans la page courante.
+    if (e.ctrlKey || e.metaKey) {
+      const url = _newTabUrl(e.target);
+      if (url) { e.preventDefault(); _openInNewTab(url); return; }
     }
 
     // Navigation via data-navigate

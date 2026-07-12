@@ -29,7 +29,9 @@ import {
 } from "./state.js";
 
 import { showAppLoading, showAuth, showAdventurePicker, showAdventureLoadError } from "./layout.js";
-import { navigate } from "./navigation.js";
+// consumeBootPage : page demandée par l'URL (#page, ex. onglet ouvert au clic
+// molette) pour la 1re navigation ; 'dashboard' ensuite.
+import { navigate, consumeBootPage } from "./navigation.js";
 import {
   loadUserAdventures, repairCurrentUserAdventureLinks, selectAdventure,
   loadUserInvitations, acceptInvitation, declineInvitation,
@@ -54,7 +56,7 @@ export async function pickAdventure(adventureId) {
   const { hideAdventurePicker } = await import('./layout.js');
   hideAdventurePicker();
   showAppLoading();
-  await navigate('dashboard');
+  await navigate(consumeBootPage());
 }
 
 // openCreateAdventureModal est fourni par aventures.js (lazy).
@@ -79,7 +81,7 @@ export async function acceptAdventureInvitation(adventureId) {
     const { hideAdventurePicker } = await import('./layout.js');
     hideAdventurePicker();
     showAppLoading();
-    await navigate('dashboard');
+    await navigate(consumeBootPage());
   } catch (e) {
     const { showNotif } = await import('../shared/notifications.js');
     showNotif(e.message || "Échec de l'acceptation.", 'error');
@@ -219,7 +221,7 @@ async function loadAndRouteAdventures(user) {
   if (adventures.length === 1) {
     selectAdventure(adventures[0]);
     showAppLoading();
-    await navigate('dashboard');
+    await navigate(consumeBootPage());
     return;
   }
 
@@ -229,7 +231,7 @@ async function loadAndRouteAdventures(user) {
   if (lastAdv) {
     selectAdventure(lastAdv);
     showAppLoading();
-    await navigate('dashboard');
+    await navigate(consumeBootPage());
     return;
   }
 

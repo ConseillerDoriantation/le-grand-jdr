@@ -83,6 +83,9 @@ import {
 } from './characters/tabs.js';
 import { bindQuillEditors } from '../shared/rich-text-quill.js';
 import { registerActions } from '../core/actions.js';
+// URL de la fiche : #characters/<idPerso>/<onglet> — permet le clic molette sur
+// un onglet (nouvel onglet navigateur sur CE perso) et le partage d'un lien direct.
+import { setRouteSub } from '../shared/route.js';
 
 import {
   inlineEditText, inlineEditNum, inlineEditChip,
@@ -577,7 +580,8 @@ function _buildTabsHtml(c, v3Tab) {
   ].map(t => `<button class="tab-v3 ${t.k===v3Tab?'active':''}" id="cs-tab-${t.k}"
     role="tab" aria-selected="${t.k===v3Tab?'true':'false'}" aria-controls="char-tab-content"
     tabindex="${t.k===v3Tab?'0':'-1'}"
-    data-tab-v3="${t.k}" data-action="showCharTab" data-tab="${t.k}">
+    data-tab-v3="${t.k}" data-action="showCharTab" data-tab="${t.k}"
+    data-nav-sub="${c.id}/${t.k}">
     <span class="tab-ico" aria-hidden="true">${_ico(t.ico)}</span> ${t.lbl}
     ${t.badge?`<span class="tab-badge">${t.badge}</span>`:''}
   </button>`).join('');
@@ -780,6 +784,7 @@ function renderCharSheet(c, keepTab) {
   const v3Tab = _resolveV3Tab(keepTab || charSession.getCurrentCharTab() || 'combat');
   charSession.set(c, canEdit, v3Tab);
   _currentTopTab = v3Tab;
+  setRouteSub('characters', `${c.id}/${v3Tab}`);
 
   // ── Valeurs dérivées ──────────────────────────
   const pvMax  = calcPVMax(c), pmMax = calcPMMax(c);
@@ -1714,6 +1719,8 @@ function showCharTab(tab, el) {
 
   _currentTopTab  = v3;
   charSession.set(charSession.getCurrentChar(), charSession.getCanEditChar(), v3);
+  // L'URL suit l'onglet affiché (le perso, lui, ne change pas ici → prevChar).
+  if (prevChar) setRouteSub('characters', `${prevChar}/${v3}`);
 
   // Onglets v3 (nouveau template) — classe active + ARIA (sélection + roving tabindex)
   document.querySelectorAll('#char-tabs-v3 .tab-v3').forEach(t => {
