@@ -426,6 +426,7 @@ function _teardownConvo() {
   if (_unsubConvo) { try { _unsubConvo(); } catch {} _unsubConvo = null; }
   _convoMsgs = [];
   _editingId = null; _replyTo = null; _searchOpen = false; _searchQ = '';   // états liés à la conv
+  _closeEmojiPop();
 }
 
 function chatNew() { _view = 'new'; _renderNew(); }
@@ -716,9 +717,23 @@ function chatMsgMenu(btn) {
 }
 
 // ── Emoji dans la saisie ─────────────────────────────────────────────────────
+let _emojiOutside = null;
+const _emojiBtn = () => document.querySelector('[data-action="chatEmojiToggle"]');
+function _closeEmojiPop() {
+  document.getElementById('chat-emoji-pop')?.setAttribute('hidden', '');
+  _emojiBtn()?.classList.remove('is-open');
+  if (_emojiOutside) { document.removeEventListener('mousedown', _emojiOutside, true); _emojiOutside = null; }
+}
 function chatEmojiToggle() {
   const pop = document.getElementById('chat-emoji-pop'); if (!pop) return;
-  if (pop.hasAttribute('hidden')) pop.removeAttribute('hidden'); else pop.setAttribute('hidden', '');
+  if (!pop.hasAttribute('hidden')) { _closeEmojiPop(); return; }
+  pop.removeAttribute('hidden');
+  _emojiBtn()?.classList.add('is-open');
+  _emojiOutside = (e) => {
+    const b = _emojiBtn();
+    if (!pop.contains(e.target) && e.target !== b && !b?.contains(e.target)) _closeEmojiPop();
+  };
+  requestAnimationFrame(() => document.addEventListener('mousedown', _emojiOutside, true));
 }
 function chatInsertEmoji(btn) {
   const emo = btn?.dataset?.emo; if (!emo) return;
