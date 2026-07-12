@@ -225,7 +225,6 @@ function _renderConvo() {
      </div>
      <div class="chat-msgs" id="chat-msgs"></div>`,
     `<form class="chat-form" id="chat-form">
-       <div class="chat-emoji-pop" id="chat-emoji-pop" hidden>${EMOJIS.map(e => `<button type="button" class="chat-emoji-opt" data-action="chatInsertEmoji" data-emo="${e}">${e}</button>`).join('')}</div>
        <div class="chat-edit-bar" id="chat-edit-bar" hidden>✏️ Édition — <button type="button" class="chat-edit-cancel" data-action="chatCancelEdit">annuler</button></div>
        <div class="chat-reply-bar" id="chat-reply-bar" hidden></div>
        <div class="chat-form-row">
@@ -720,19 +719,25 @@ function chatMsgMenu(btn) {
 let _emojiOutside = null;
 const _emojiBtn = () => document.querySelector('[data-action="chatEmojiToggle"]');
 function _closeEmojiPop() {
-  document.getElementById('chat-emoji-pop')?.setAttribute('hidden', '');
+  document.getElementById('chat-emoji-pop')?.remove();
   _emojiBtn()?.classList.remove('is-open');
   if (_emojiOutside) { document.removeEventListener('mousedown', _emojiOutside, true); _emojiOutside = null; }
 }
+// Popover ancré au body + positionné en JS (comme le menu ⋯) → indépendant du
+// flux du formulaire : s'affiche juste au-dessus du bouton 😊, ne décale rien.
 function chatEmojiToggle() {
-  const pop = document.getElementById('chat-emoji-pop'); if (!pop) return;
-  if (!pop.hasAttribute('hidden')) { _closeEmojiPop(); return; }
-  pop.removeAttribute('hidden');
-  _emojiBtn()?.classList.add('is-open');
-  _emojiOutside = (e) => {
-    const b = _emojiBtn();
-    if (!pop.contains(e.target) && e.target !== b && !b?.contains(e.target)) _closeEmojiPop();
-  };
+  if (document.getElementById('chat-emoji-pop')) { _closeEmojiPop(); return; }
+  const btn = _emojiBtn(); if (!btn) return;
+  const pop = document.createElement('div');
+  pop.id = 'chat-emoji-pop'; pop.className = 'chat-emoji-pop';
+  pop.innerHTML = EMOJIS.map(e => `<button type="button" class="chat-emoji-opt" data-action="chatInsertEmoji" data-emo="${e}">${e}</button>`).join('');
+  document.body.appendChild(pop);
+  btn.classList.add('is-open');
+  const r = btn.getBoundingClientRect();
+  const w = pop.offsetWidth || 250, h = pop.offsetHeight || 210;
+  pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
+  pop.style.top = `${Math.max(8, r.top - h - 8)}px`;   // au-dessus du bouton
+  _emojiOutside = (e) => { if (!pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) _closeEmojiPop(); };
   requestAnimationFrame(() => document.addEventListener('mousedown', _emojiOutside, true));
 }
 function chatInsertEmoji(btn) {

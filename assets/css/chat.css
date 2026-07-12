@@ -243,16 +243,11 @@
 }
 .chat-emoji-btn:hover { background: rgba(79,140,255,.18); }
 .chat-emoji-pop {
-  position: absolute; bottom: calc(100% + 8px); left: .5rem; z-index: 6;
-  width: min(280px, calc(100% - 1rem)); max-height: 210px; overflow-y: auto;
+  position: fixed; z-index: 1000;                 /* ancré au body, positionné en JS */
+  width: 250px; max-height: 220px; overflow-y: auto;
   display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; padding: .5rem;
   background: var(--bg-card, #141b26); border: 1px solid var(--border, rgba(255,255,255,.14));
   border-radius: 14px; box-shadow: 0 12px 34px rgba(0,0,0,.5);
-}
-/* petite flèche pointant vers le bouton 😊 */
-.chat-emoji-pop::after {
-  content: ''; position: absolute; top: 100%; left: 14px;
-  border: 7px solid transparent; border-top-color: var(--bg-card, #141b26);
 }
 .chat-emoji-btn.is-open { background: rgba(79,140,255,.28); }
 .chat-emoji-opt { background: none; border: none; cursor: pointer; font-size: 1.2rem; line-height: 1; padding: 4px; border-radius: 8px; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; }
