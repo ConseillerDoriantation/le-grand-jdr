@@ -100,6 +100,12 @@ async function _purgeUserCharacters(uid) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+function _accountProviderLabel(user) {
+  const providers = (user?.providerData || []).map(p => p.providerId).filter(Boolean);
+  if (providers.includes('google.com')) return 'Google';
+  if (providers.includes('password')) return 'Email + mot de passe';
+  return providers[0] || 'Compte Firebase';
+}
 // RENDU PRINCIPAL
 // ══════════════════════════════════════════════════════════════════════════════
 async function renderAccount() {
@@ -112,97 +118,158 @@ async function renderAccount() {
     return;
   }
 
-  // Compter les personnages
   const chars = await loadChars(user.uid);
   const nbChars = chars.length;
   const pseudo = profile.pseudo || 'Aventurier';
   const email = user.email || '';
+  const adventuresCount = Array.isArray(STATE.adventures) ? STATE.adventures.length : 0;
+  const roleLabel = STATE.isAdmin ? 'Maître de Jeu' : 'Joueur';
+  const providerLabel = _accountProviderLabel(user);
+
   content.innerHTML = `
-  <!-- ═══ HEADER ═══════════════════════════════════════════════════════════ -->
-  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem">
-    <button class="acc-avatar acc-avatar-btn has-img" data-action="openAvatarPicker" title="Changer d'avatar">
-      <img src="${_esc(avatarSrcOf(profile))}" alt="" class="acc-avatar-img">
-      <span class="acc-avatar-edit" title="Changer d'avatar">📷</span>
-    </button>
-    <div>
-      <h1 style="font-family:'Cinzel',serif;font-size:1.5rem;color:var(--gold);letter-spacing:1px;margin:0">${_esc(pseudo)}</h1>
-      <div style="font-size:.78rem;color:var(--text-dim);margin-top:.2rem">${_esc(email)}</div>
-      <div style="font-size:.72rem;color:var(--text-dim);margin-top:.1rem">${STATE.isAdmin?'🛡️ Maître de Jeu':'⚔️ Joueur'} · ${nbChars} personnage${nbChars!==1?'s':''}</div>
-      <button class="acc-avatar-change" data-action="openAvatarPicker">🎭 Changer d'avatar</button>
-    </div>
-  </div>
-
-  <!-- ═══ INFORMATIONS ════════════════════════════════════════════════════ -->
-  <div class="acc-section">
-    <div class="acc-section-header">
-      <span style="font-size:1rem">👤</span>
-      <div class="acc-section-title">Informations du compte</div>
-    </div>
-    <div class="acc-section-body">
-
-      <div class="acc-field">
-        <div class="acc-inline">
-          <div>
-            <div class="acc-label">Pseudo</div>
-            <div class="acc-value">${_esc(pseudo || '—')}</div>
-          </div>
-          <button class="acc-edit-btn" data-action="openEditPseudo">✏️ Modifier</button>
-        </div>
-      </div>
-
-      <div style="height:1px;background:var(--border);margin:.6rem 0"></div>
-
-      <div class="acc-field">
-        <div class="acc-inline">
-          <div>
-            <div class="acc-label">Adresse email</div>
-            <div class="acc-value">${_esc(email)}</div>
-          </div>
-          <button class="acc-edit-btn" data-action="openEditEmail">✏️ Modifier</button>
-        </div>
-      </div>
-
-      <div style="height:1px;background:var(--border);margin:.6rem 0"></div>
-
-      <div class="acc-field">
-        <div class="acc-inline">
-          <div>
-            <div class="acc-label">Mot de passe</div>
-            <div class="acc-value">••••••••</div>
-          </div>
-          <button class="acc-edit-btn" data-action="openEditPassword">✏️ Modifier</button>
-        </div>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- ═══ ZONE DANGER ══════════════════════════════════════════════════════ -->
-  <div class="acc-section" style="border-color:rgba(255,107,107,.2)">
-    <div class="acc-section-header" style="background:rgba(255,107,107,.06)">
-      <span style="font-size:1rem">⚠️</span>
-      <div class="acc-section-title" style="color:#ff6b6b">Zone de danger</div>
-    </div>
-    <div class="acc-section-body">
-      <p style="font-size:.82rem;color:var(--text-muted);margin-bottom:.75rem;line-height:1.6">
-        La suppression du compte est <strong style="color:#ff6b6b">irréversible</strong>.
-        Tous tes personnages seront supprimés et leurs objets boutique seront automatiquement
-        remis en stock.
-      </p>
-      ${nbChars > 0 ? `
-      <div style="background:rgba(255,107,107,.06);border:1px solid rgba(255,107,107,.2);border-radius:8px;padding:.6rem .85rem;margin-bottom:.75rem;font-size:.78rem;color:#ff6b6b">
-        ⚠️ ${nbChars} personnage${nbChars!==1?'s':''} seront supprimés.
-        Leurs objets boutique seront remis en vente automatiquement.
-      </div>` : ''}
-      <button class="acc-danger-btn" data-action="openDeleteAccount">
-        🗑️ Supprimer mon compte
+  <div class="account-page">
+    <section class="account-hero">
+      <button class="acc-avatar acc-avatar-btn has-img account-avatar-xl" data-action="openAvatarPicker" title="Changer d'avatar">
+        <img src="${_esc(avatarSrcOf(profile))}" alt="" class="acc-avatar-img">
+        <span class="acc-avatar-edit" title="Changer d'avatar">📷</span>
       </button>
+      <div class="account-hero-main">
+        <span class="account-kicker">Compte connecté</span>
+        <h1>${_esc(pseudo)}</h1>
+        <p>${_esc(email || 'Email non renseigné')}</p>
+        <div class="account-badges">
+          <span>${STATE.isAdmin ? '🛡️' : '⚔️'} ${_esc(roleLabel)}</span>
+          <span>${_esc(providerLabel)}</span>
+        </div>
+      </div>
+      <div class="account-hero-actions">
+        <button class="btn btn-gold btn-sm" data-action="openAvatarPicker">Changer l'avatar</button>
+        <button class="btn btn-outline btn-sm" data-action="openEditPseudo">Renommer</button>
+      </div>
+    </section>
+
+    <section class="account-summary">
+      <div class="account-summary-card">
+        <span>Personnages</span>
+        <strong>${nbChars}</strong>
+        <small>${nbChars === 1 ? 'fiche liée' : 'fiches liées'}</small>
+      </div>
+      <div class="account-summary-card">
+        <span>Aventures</span>
+        <strong>${adventuresCount}</strong>
+        <small>${adventuresCount === 1 ? 'campagne' : 'campagnes'}</small>
+      </div>
+      <div class="account-summary-card">
+        <span>Rôle</span>
+        <strong>${_esc(roleLabel)}</strong>
+        <small>${STATE.isAdmin ? 'gestion active' : 'accès joueur'}</small>
+      </div>
+      <div class="account-summary-card">
+        <span>Connexion</span>
+        <strong>${_esc(providerLabel)}</strong>
+        <small>sécurité du compte</small>
+      </div>
+    </section>
+
+    <div class="account-layout">
+      <main class="account-main-stack">
+        <section class="acc-section account-panel">
+          <div class="acc-section-header">
+            <span>👤</span>
+            <div>
+              <div class="acc-section-title">Profil public</div>
+              <p>Ces informations servent à t'identifier auprès de la table.</p>
+            </div>
+          </div>
+          <div class="acc-section-body">
+            <div class="account-setting-row">
+              <div>
+                <span class="acc-label">Pseudo</span>
+                <strong>${_esc(pseudo || 'Aventurier')}</strong>
+                <small>Visible dans l'interface, le chat et les fiches liées.</small>
+              </div>
+              <button class="acc-edit-btn" data-action="openEditPseudo">Modifier</button>
+            </div>
+            <div class="account-setting-row">
+              <div>
+                <span class="acc-label">Avatar</span>
+                <strong>Portrait du compte</strong>
+                <small>Utilisé dans la navigation et certains sélecteurs.</small>
+              </div>
+              <button class="acc-edit-btn" data-action="openAvatarPicker">Choisir</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="acc-section account-panel">
+          <div class="acc-section-header">
+            <span>🔐</span>
+            <div>
+              <div class="acc-section-title">Connexion & sécurité</div>
+              <p>Les modifications sensibles demandent une confirmation.</p>
+            </div>
+          </div>
+          <div class="acc-section-body">
+            <div class="account-setting-row">
+              <div>
+                <span class="acc-label">Adresse email</span>
+                <strong>${_esc(email || 'Non renseignée')}</strong>
+                <small>Adresse utilisée pour te connecter et récupérer ton compte.</small>
+              </div>
+              <button class="acc-edit-btn" data-action="openEditEmail">Modifier</button>
+            </div>
+            <div class="account-setting-row">
+              <div>
+                <span class="acc-label">Mot de passe</span>
+                <strong>••••••••</strong>
+                <small>À changer si tu suspectes un accès non voulu.</small>
+              </div>
+              <button class="acc-edit-btn" data-action="openEditPassword">Modifier</button>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <aside class="account-side-stack">
+        <section class="acc-section account-panel account-identity-card">
+          <div class="acc-section-header">
+            <span>🧭</span>
+            <div>
+              <div class="acc-section-title">Repères</div>
+              <p>Résumé rapide du compte.</p>
+            </div>
+          </div>
+          <div class="acc-section-body">
+            <div class="account-meta-line"><span>UID</span><code>${_esc(user.uid)}</code></div>
+            <div class="account-meta-line"><span>Profil</span><strong>${_esc(roleLabel)}</strong></div>
+            <div class="account-meta-line"><span>Connexion</span><strong>${_esc(providerLabel)}</strong></div>
+          </div>
+        </section>
+
+        <section class="acc-section account-panel account-danger-panel">
+          <div class="acc-section-header">
+            <span>⚠️</span>
+            <div>
+              <div class="acc-section-title">Zone de danger</div>
+              <p>Action définitive.</p>
+            </div>
+          </div>
+          <div class="acc-section-body">
+            <p>
+              La suppression du compte est irréversible. Les personnages seront supprimés et leurs objets boutique remis en stock.
+            </p>
+            ${nbChars > 0 ? `
+            <div class="account-danger-note">
+              ${nbChars} personnage${nbChars!==1?'s':''} concerné${nbChars!==1?'s':''}.
+            </div>` : ''}
+            <button class="acc-danger-btn" data-action="openDeleteAccount">Supprimer mon compte</button>
+          </div>
+        </section>
+      </aside>
     </div>
   </div>
   `;
 }
-
-// ══════════════════════════════════════════════════════════════════════════════
 // AVATAR — catalogue d'avatars GLOBAL à l'app + portraits des persos du joueur
 // ══════════════════════════════════════════════════════════════════════════════
 // Catalogue : app_config/profileIcons (GLOBAL à l'app → partagé par toutes les
