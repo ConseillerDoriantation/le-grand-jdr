@@ -153,7 +153,9 @@
 .chat-edit-cancel { background: none; border: none; color: #4f8cff; cursor: pointer; font: inherit; font-size: .72rem; padding: 0; text-decoration: underline; }
 
 /* ── Actions au survol d'un message (réagir / modifier / supprimer) ── */
-.chat-msg-bubble-wrap { position: relative; display: inline-flex; }
+.chat-msg-bubble-wrap { position: relative; display: flex; align-items: flex-end; gap: .15rem; max-width: 100%; }
+.chat-msg--mine .chat-msg-bubble-wrap { flex-direction: row-reverse; }
+.chat-msg-bubble-wrap .chat-msg-bubble { min-width: 0; }
 .chat-msg-actions {
   position: absolute; bottom: calc(100% - 2px); z-index: 3;
   display: flex; align-items: center; gap: 1px; padding: 2px;
@@ -201,6 +203,52 @@
 .chat-manage-foot { display: flex; gap: .4rem; }
 .chat-newbtn--danger { border-color: rgba(255,71,87,.4); background: rgba(255,71,87,.12); }
 .chat-newbtn--danger:hover { background: rgba(255,71,87,.2); }
+
+/* ── Bouton ⋯ d'un message (ouvre le menu réactions/modifier/supprimer) ── */
+.chat-msg-menu-btn {
+  align-self: center; flex-shrink: 0;
+  background: none; border: none; cursor: pointer; line-height: 1;
+  color: var(--text-dim, #9aa4b2); font-size: 1rem; padding: 0 .2rem;
+  border-radius: 6px; opacity: .45; transition: opacity .12s, background .12s;
+}
+.chat-msg:hover .chat-msg-menu-btn { opacity: 1; }
+.chat-msg-menu-btn:hover { background: rgba(255,255,255,.1); color: var(--text, #fff); }
+
+/* ── Popover menu d'un message (ancré au body) ── */
+.chat-msg-menu {
+  position: fixed; z-index: 1000; min-width: 190px;
+  background: var(--bg-card, #141b26); border: 1px solid var(--border, rgba(255,255,255,.14));
+  border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  padding: .35rem; display: flex; flex-direction: column; gap: .15rem;
+}
+.chat-msg-menu-reacts { display: flex; justify-content: space-between; gap: .1rem; padding: .1rem .1rem .25rem; border-bottom: 1px solid var(--border, rgba(255,255,255,.1)); }
+.chat-act-emo {
+  background: none; border: none; cursor: pointer; line-height: 1;
+  padding: 4px; border-radius: 50%; font-size: 1.05rem;
+}
+.chat-act-emo:hover { background: rgba(255,255,255,.12); transform: scale(1.18); }
+.chat-msg-menu-item {
+  display: flex; align-items: center; gap: .4rem; width: 100%;
+  background: none; border: none; cursor: pointer; text-align: left;
+  color: var(--text, #e8edf4); font: inherit; font-size: .82rem;
+  padding: .45rem .5rem; border-radius: 8px;
+}
+.chat-msg-menu-item:hover { background: var(--bg-elevated, #1e2836); }
+
+/* ── Bouton 😊 + palette d'emoji de la saisie ── */
+.chat-emoji-btn {
+  flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%;
+  border: none; cursor: pointer; background: var(--bg-elevated, #1e2836);
+  font-size: 1.05rem; line-height: 1; display: flex; align-items: center; justify-content: center;
+}
+.chat-emoji-btn:hover { background: rgba(79,140,255,.18); }
+.chat-emoji-pop {
+  display: grid; grid-template-columns: repeat(8, 1fr); gap: .1rem;
+  max-height: 172px; overflow-y: auto; margin-bottom: .1rem; padding: .35rem;
+  background: var(--bg-elevated, #1e2836); border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 10px;
+}
+.chat-emoji-opt { background: none; border: none; cursor: pointer; font-size: 1.15rem; line-height: 1; padding: 3px; border-radius: 7px; }
+.chat-emoji-opt:hover { background: rgba(255,255,255,.12); transform: scale(1.15); }
 
 /* ── Mobile : au-dessus de la barre de navigation du bas ── */
 @media (max-width: 780px) {

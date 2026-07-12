@@ -35,6 +35,8 @@ import { _esc } from '../shared/html.js';
 const ADV = 'adventure';   // id de la conversation d'aventure
 const HISTORY = 40;
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🎉'];   // palette de réactions
+// Emoji insérables dans un message (bouton 😊 de la saisie).
+const EMOJIS = ['😀','😁','😂','🤣','😅','😊','😇','🙂','😉','😍','😘','😗','😎','🤩','🥳','🤔','🤨','😐','😴','😮','😯','😲','😳','🥺','😢','😭','😱','😤','😡','🤬','😈','👻','💀','🤝','🙏','👍','👎','👏','🙌','💪','🔥','✨','🎉','❤️','🧡','💛','💚','💙','💜','💔','💯','👀','🎲','⚔️','🛡️','🏹','🏰','🐉','🧙','💰','🍺','🗝️','☠️'];
 
 let _uid = null, _open = false, _view = 'list';   // 'list' | 'convo' | 'new' | 'manage'
 let _openId = null;                                // conv ouverte (ADV | convoId)
@@ -196,8 +198,10 @@ function _renderConvo() {
     '<button class="chat-back" data-action="chatBack" aria-label="Retour">‹</button>',
     `<div class="chat-msgs" id="chat-msgs"></div>`,
     `<form class="chat-form" id="chat-form">
+       <div class="chat-emoji-pop" id="chat-emoji-pop" hidden>${EMOJIS.map(e => `<button type="button" class="chat-emoji-opt" data-action="chatInsertEmoji" data-emo="${e}">${e}</button>`).join('')}</div>
        <div class="chat-edit-bar" id="chat-edit-bar" hidden>✏️ Édition — <button type="button" class="chat-edit-cancel" data-action="chatCancelEdit">annuler</button></div>
        <div class="chat-form-row">
+         <button type="button" class="chat-emoji-btn" data-action="chatEmojiToggle" title="Emoji" aria-label="Insérer un emoji">😊</button>
          <input id="chat-input" class="chat-input" placeholder="Écris un message…" autocomplete="off" maxlength="1000">
          <button type="submit" class="chat-send" aria-label="Envoyer">➤</button>
        </div>
@@ -274,16 +278,11 @@ function _msgRow(m) {
       </span></div>`;
   }
   const edited = m.editedAt ? ' <span class="chat-msg-edited">(modifié)</span>' : '';
-  const reactBtns = REACTIONS.map(e =>
-    `<button class="chat-act-emo" data-action="chatReact" data-msg="${_esc(m.id)}" data-emo="${e}" title="Réagir ${e}">${e}</button>`).join('');
-  const ownBtns = mine
-    ? `<button class="chat-act-btn" data-action="chatEditMsg" data-msg="${_esc(m.id)}" title="Modifier">✏️</button>
-       <button class="chat-act-btn" data-action="chatDeleteMsg" data-msg="${_esc(m.id)}" title="Supprimer">🗑️</button>` : '';
   return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}">${av}
     <span class="chat-msg-content">${author}
       <span class="chat-msg-bubble-wrap">
         <span class="chat-msg-bubble">${_esc(m.text || '')}</span>
-        <span class="chat-msg-actions">${reactBtns}${ownBtns}</span>
+        <button class="chat-msg-menu-btn" data-action="chatMsgMenu" data-msg="${_esc(m.id)}" title="Réagir / modifier" aria-label="Options du message">⋯</button>
       </span>
       ${_reactionsHtml(m)}
       <span class="chat-msg-time">${time}${edited}</span>
@@ -474,6 +473,7 @@ async function chatStartDm(btn) {
 async function chatReact(btn) {
   const id = btn?.dataset?.msg, emo = btn?.dataset?.emo;
   if (!id || !emo || !_uid) return;
+  _closeMsgMenu();
   const msgs = _openId === ADV ? _advMsgs : _convoMsgs;
   const m = msgs.find(x => x.id === id); if (!m || m.deleted) return;
   const cur = (m.reactions || {})[_uid] || '';
@@ -486,6 +486,7 @@ async function chatReact(btn) {
 // ── Édition / suppression de SES messages ───────────────────────────────────
 function chatEditMsg(btn) {
   const id = btn?.dataset?.msg; if (!id) return;
+  _closeMsgMenu();
   const msgs = _openId === ADV ? _advMsgs : _convoMsgs;
   const m = msgs.find(x => x.id === id); if (!m || m.senderId !== _uid || m.deleted) return;
   _editingId = id;
@@ -511,6 +512,7 @@ async function _saveEdit(text) {
 
 async function chatDeleteMsg(btn) {
   const id = btn?.dataset?.msg; if (!id) return;
+  _closeMsgMenu();
   const msgs = _openId === ADV ? _advMsgs : _convoMsgs;
   const m = msgs.find(x => x.id === id); if (!m || m.senderId !== _uid) return;
   if (!await confirmModal('Supprimer ce message ?')) return;
@@ -609,6 +611,54 @@ async function chatDeleteGroup() {
   } catch (e) { console.warn('[chat] delGroup', e?.code || e); showNotif('Suppression refusée — règles Firestore ?', 'error'); }
 }
 
+// ── Menu ⋯ d'un message (réactions + modifier/supprimer) ─────────────────────
+// Popover ancré au bouton, ajouté au body (échappe au clip du scroll). Découvrable
+// (bouton visible) et compatible tactile — remplace les actions au survol.
+let _msgMenuOutside = null;
+function _closeMsgMenu() {
+  document.getElementById('chat-msg-menu')?.remove();
+  if (_msgMenuOutside) { document.removeEventListener('mousedown', _msgMenuOutside, true); _msgMenuOutside = null; }
+}
+function chatMsgMenu(btn) {
+  const id = btn?.dataset?.msg;
+  const already = document.getElementById('chat-msg-menu');
+  _closeMsgMenu();
+  if (already && already.dataset.msg === id) return;   // re-clic = fermer
+  if (!id) return;
+  const msgs = _openId === ADV ? _advMsgs : _convoMsgs;
+  const m = msgs.find(x => x.id === id); if (!m || m.deleted) return;
+  const mine = m.senderId === _uid;
+  const pop = document.createElement('div');
+  pop.id = 'chat-msg-menu'; pop.className = 'chat-msg-menu'; pop.dataset.msg = id;
+  pop.innerHTML = `
+    <div class="chat-msg-menu-reacts">${REACTIONS.map(e =>
+      `<button class="chat-act-emo" data-action="chatReact" data-msg="${_esc(id)}" data-emo="${e}" title="Réagir ${e}">${e}</button>`).join('')}</div>
+    ${mine ? `<button class="chat-msg-menu-item" data-action="chatEditMsg" data-msg="${_esc(id)}">✏️ Modifier</button>
+              <button class="chat-msg-menu-item" data-action="chatDeleteMsg" data-msg="${_esc(id)}">🗑️ Supprimer</button>` : ''}`;
+  document.body.appendChild(pop);
+  const r = btn.getBoundingClientRect();
+  const w = pop.offsetWidth || 220, h = pop.offsetHeight || 40;
+  pop.style.left = `${Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))}px`;
+  // au-dessus si pas la place en dessous
+  pop.style.top = (r.bottom + h + 8 > window.innerHeight) ? `${Math.max(8, r.top - h - 4)}px` : `${r.bottom + 4}px`;
+  _msgMenuOutside = (e) => { if (!pop.contains(e.target) && e.target !== btn) _closeMsgMenu(); };
+  requestAnimationFrame(() => document.addEventListener('mousedown', _msgMenuOutside, true));
+}
+
+// ── Emoji dans la saisie ─────────────────────────────────────────────────────
+function chatEmojiToggle() {
+  const pop = document.getElementById('chat-emoji-pop'); if (!pop) return;
+  if (pop.hasAttribute('hidden')) pop.removeAttribute('hidden'); else pop.setAttribute('hidden', '');
+}
+function chatInsertEmoji(btn) {
+  const emo = btn?.dataset?.emo; if (!emo) return;
+  const inp = document.getElementById('chat-input'); if (!inp) return;
+  const s = inp.selectionStart ?? inp.value.length, e = inp.selectionEnd ?? inp.value.length;
+  inp.value = inp.value.slice(0, s) + emo + inp.value.slice(e);
+  const pos = s + emo.length;
+  inp.focus(); try { inp.setSelectionRange(pos, pos); } catch {}
+}
+
 registerActions({
   chatToggle:      () => chatToggle(),
   chatBack:        () => chatBack(),
@@ -616,6 +666,9 @@ registerActions({
   chatNew:         () => chatNew(),
   chatCreateGroup: () => chatCreateGroup(),
   chatStartDm:     (btn) => chatStartDm(btn),
+  chatMsgMenu:     (btn) => chatMsgMenu(btn),
+  chatEmojiToggle: () => chatEmojiToggle(),
+  chatInsertEmoji: (btn) => chatInsertEmoji(btn),
   chatReact:       (btn) => chatReact(btn),
   chatEditMsg:     (btn) => chatEditMsg(btn),
   chatDeleteMsg:   (btn) => chatDeleteMsg(btn),
