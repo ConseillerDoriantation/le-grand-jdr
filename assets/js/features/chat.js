@@ -68,7 +68,7 @@ export async function initChat(uid) {
   if (mcol) _unsubAdv = onSnapshot(
     query(mcol, where('convoId', '==', ADV), orderBy('at', 'desc'), limit(HISTORY)),
     snap => { _advMsgs = snap.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) })).reverse(); _onData(ADV); },
-    err => console.warn('[chat] adv', err?.code || err),
+    err => console.warn('[chat] adv', err?.code, err?.message || err),
   );
 
   const ccol = _convosCol();
@@ -291,7 +291,7 @@ function chatOpenConvo(btn) {
     if (mcol) _unsubConvo = onSnapshot(
       query(mcol, where('convoId', '==', id), orderBy('at', 'desc'), limit(HISTORY)),
       snap => { _convoMsgs = snap.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) })).reverse(); _onData('convo'); },
-      err => console.warn('[chat] convo', err?.code || err),
+      err => console.warn('[chat] convo', err?.code, err?.message || err),
     );
     _markRead(id);
   }

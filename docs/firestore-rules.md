@@ -555,6 +555,9 @@ match /adventures/{adventureId} {
   }
   // Messages : conv « aventure » = tout membre ; conv de groupe = membres du
   // groupe (vérifiés via le doc chatConvos). Message signé par son auteur.
+  // INDEX COMPOSITE REQUIS (sinon listener en failed-precondition, conv vide) :
+  //   Collection `chatMessages` (scope Collection) — convoId ASC, at DESC.
+  //   La 1re fois, la console logue un lien « create index » cliquable.
   match /chatMessages/{id} {
     allow read: if inAdventure(adventureId) && (
       resource.data.convoId == 'adventure' ||
