@@ -102,6 +102,38 @@ async function _load() {
 
 const _save = () => tryDoc('world', 'main', { categories: STORE.categories, sections: STORE.sections });
 
+function _worldVisibleData() {
+  const visibleCats = STORE.categories.filter(c => c.visible !== false || STATE.isAdmin);
+  const visibleCatIds = new Set(visibleCats.map(c => c.id));
+  const visibleSections = STORE.sections.filter(s =>
+    (s.visible !== false && visibleCatIds.has(s.categoryId)) || STATE.isAdmin);
+  return { visibleCats, visibleSections };
+}
+
+function _worldCategoryFor(section) {
+  return STORE.categories.find(c => c.id === section?.categoryId) || DEFAULT_CAT;
+}
+
+function _worldExcerpt(raw = '', max = 150) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = _contentToHtml(raw);
+  const text = (tmp.textContent || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  return text.length > max ? `${text.slice(0, max).trimEnd()}…` : text;
+}
+
+function _worldStats(visibleCats, visibleSections) {
+  const hiddenCats = STORE.categories.filter(c => c.visible === false).length;
+  const hiddenSections = STORE.sections.filter(s => s.visible === false).length;
+  const illustrated = visibleSections.filter(s => !!s.imageUrl).length;
+  return [
+    { icon: '📚', label: 'Catégories', value: visibleCats.length },
+    { icon: '📖', label: 'Sections', value: visibleSections.length },
+    { icon: '🖼️', label: 'Illustrées', value: illustrated },
+    ...(STATE.isAdmin ? [{ icon: '🔒', label: 'Masquées', value: hiddenCats + hiddenSections }] : []),
+  ];
+}
+
 // ── Rendu principal ───────────────────────────────────────────────────────────
 async function renderWorld() {
   const content = document.getElementById('main-content');
@@ -111,66 +143,60 @@ async function renderWorld() {
 
   // Catégories + section active visibles. Pour un joueur, une section dans une
   // catégorie masquée est elle aussi masquée (cohérence nav ↔ contenu).
-  const visibleCats   = STORE.categories.filter(c => c.visible !== false || STATE.isAdmin);
-  const visibleCatIds = new Set(visibleCats.map(c => c.id));
-  const visibleSections = STORE.sections.filter(s =>
-    (s.visible !== false && visibleCatIds.has(s.categoryId)) || STATE.isAdmin);
+  const { visibleCats, visibleSections } = _worldVisibleData();
   if (!STORE.activeId || !visibleSections.find(s => s.id === STORE.activeId)) {
     STORE.activeId = visibleSections[0]?.id || null;
   }
   const activeSection = visibleSections.find(s => s.id === STORE.activeId) || null;
+  const activeCat = _worldCategoryFor(activeSection);
+  const stats = _worldStats(visibleCats, visibleSections);
 
   content.innerHTML = `
-  <div class="world-shell" style="display:grid;grid-template-columns:300px 1fr;gap:1.2rem;align-items:start;margin:0 auto">
-
-    <!-- ── SIDEBAR NAVIGATION ───────────────────────────────────────────── -->
-    <div class="world-sidebar" style="position:sticky;top:1rem">
-      <div style="background:var(--bg-card);border:1px solid var(--border);
-        border-radius:var(--radius-lg);overflow:hidden">
-
-        <!-- Header sidebar -->
-        <div style="padding:.85rem 1rem;border-bottom:1px solid var(--border);
-          background:linear-gradient(135deg,rgba(255,255,255,.02),transparent);
-          display:flex;align-items:center;justify-content:space-between">
-          <div>
-            <div style="font-family:'Cinzel',serif;font-size:.88rem;color:var(--gold);
-              letter-spacing:1px">📖 Le Monde</div>
-            <div style="font-size:.68rem;color:var(--text-dim);margin-top:1px">
-              ${visibleCats.length} catégorie${visibleCats.length>1?'s':''} · ${visibleSections.length} section${visibleSections.length>1?'s':''}
-            </div>
-          </div>
-          ${STATE.isAdmin ? `
-          <button data-action="openWorldCategoryModal"
-            style="width:28px;height:28px;border-radius:8px;border:1px solid rgba(232,184,75,.3);
-            background:rgba(232,184,75,.08);color:var(--gold);cursor:pointer;font-size:1rem;
-            display:flex;align-items:center;justify-content:center;transition:all .15s"
-            title="Nouvelle catégorie">+</button>` : ''}
-        </div>
-
-        <!-- Catégories + sections -->
-        <div id="world-nav-list" style="padding:.3rem 0">
-          ${visibleCats.map(cat => _renderCategoryGroup(cat)).join('')}
-          ${visibleCats.length === 0 ? `
-          <div style="padding:1.5rem 1rem;text-align:center;color:var(--text-dim);
-            font-size:.78rem;font-style:italic">Aucune catégorie</div>` : ''}
-        </div>
+  <div class="world-shell world-atlas">
+    <section class="world-hero-panel">
+      <div class="world-hero-copy">
+        <span class="world-kicker">${_esc(activeCat?.nom || 'Atlas')}</span>
+        <h1>Le Monde</h1>
+        <p>Repères, lieux, peuples, factions et vérités connues de l'aventure.</p>
       </div>
-
-      <!-- Actions admin en bas de la sidebar -->
+      <div class="world-stat-grid">
+        ${stats.map(stat => `
+          <div class="world-stat">
+            <span>${_esc(stat.icon)}</span>
+            <strong>${stat.value}</strong>
+            <small>${_esc(stat.label)}</small>
+          </div>`).join('')}
+      </div>
       ${STATE.isAdmin ? `
-      <div style="margin-top:.6rem;display:flex;flex-direction:column;gap:.35rem">
-        <button data-action="openWorldCategoryModal"
-          class="btn btn-outline btn-sm" style="width:100%;font-size:.75rem">
-          + Ajouter une catégorie
-        </button>
-      </div>` : ''}
-    </div>
+        <div class="world-hero-actions">
+          <button data-action="openWorldSectionModal" class="btn btn-gold btn-sm">+ Section</button>
+          <button data-action="openWorldCategoryModal" class="btn btn-outline btn-sm">+ Catégorie</button>
+        </div>` : ''}
+    </section>
 
-    <!-- ── CONTENU PRINCIPAL ─────────────────────────────────────────────── -->
-    <div id="world-main-content">
-      ${activeSection ? _renderSection(activeSection) : _renderEmpty()}
-    </div>
+    <div class="world-layout">
+      <aside class="world-sidebar">
+        <div class="world-nav-card">
+          <div class="world-nav-head">
+            <div>
+              <strong>Sommaire</strong>
+              <span>${visibleSections.length} entrée${visibleSections.length > 1 ? 's' : ''}</span>
+            </div>
+            ${STATE.isAdmin ? `<button data-action="openWorldCategoryModal" class="world-icon-btn" title="Nouvelle catégorie">+</button>` : ''}
+          </div>
+          <div id="world-nav-list" class="world-nav-list">
+            ${visibleCats.map(cat => _renderCategoryGroup(cat)).join('')}
+            ${visibleCats.length === 0 ? `<div class="world-empty-note">Aucune catégorie</div>` : ''}
+          </div>
+        </div>
+      </aside>
 
+      <main class="world-reader">
+        <div id="world-main-content">
+          ${activeSection ? _renderSection(activeSection, visibleSections) : _renderEmpty()}
+        </div>
+      </main>
+    </div>
   </div>`;
 
   // Bind drag & drop des items nav (admin)
@@ -181,145 +207,132 @@ async function renderWorld() {
 function _renderCategoryGroup(cat) {
   const isHidden = cat.visible === false;
   const secs = STORE.sections.filter(s => s.categoryId === cat.id && (s.visible !== false || STATE.isAdmin));
-  return `<div class="world-cat-group" data-cat-id="${cat.id}" style="margin-bottom:.15rem">
-    <div class="world-cat-head" style="display:flex;align-items:center;gap:.5rem;
-      padding:.5rem 1rem .35rem;${isHidden?'opacity:.5;':''}">
-      <span style="font-size:.92rem;flex-shrink:0">${cat.icone||'📁'}</span>
-      <span style="flex:1;font-family:'Cinzel',serif;font-size:.72rem;letter-spacing:.06em;
-        text-transform:uppercase;color:var(--text-dim);font-weight:700;
-        white-space:normal;overflow-wrap:anywhere;line-height:1.3">${_esc(cat.nom||'Catégorie')}</span>
-      ${isHidden ? `<span style="font-size:.58rem;color:#ff6b6b;flex-shrink:0">●</span>` : ''}
+  return `<div class="world-cat-group${isHidden ? ' is-hidden' : ''}" data-cat-id="${_esc(cat.id)}">
+    <div class="world-cat-head">
+      <span class="world-cat-icon">${_esc(cat.icone || '📁')}</span>
+      <span class="world-cat-name">${_esc(cat.nom || 'Catégorie')}</span>
+      <span class="world-cat-count">${secs.length}</span>
+      ${isHidden ? `<span class="world-hidden-dot" title="Masquée aux joueurs"></span>` : ''}
       ${STATE.isAdmin ? `
-      <div class="world-cat-actions" style="display:flex;gap:.1rem;flex-shrink:0">
+      <div class="world-cat-actions">
         <button data-action="openWorldSectionModal" data-cat-id="${cat.id}" data-stop-propagation
-          style="background:none;border:none;cursor:pointer;color:var(--gold);font-size:.82rem;
-          padding:0 3px" title="Ajouter une section ici">＋</button>
+          class="world-mini-btn" title="Ajouter une section ici">+</button>
         <button data-action="openWorldCategoryModal" data-id="${cat.id}" data-stop-propagation
-          style="background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.72rem;
-          padding:0 3px" title="Modifier la catégorie">✏️</button>
+          class="world-mini-btn" title="Modifier la catégorie">✎</button>
         <button data-action="deleteWorldCategory" data-id="${cat.id}" data-stop-propagation
-          style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.72rem;
-          padding:0 3px" title="Supprimer la catégorie">🗑️</button>
+          class="world-mini-btn world-mini-btn--danger" title="Supprimer la catégorie">×</button>
       </div>` : ''}
     </div>
     <div class="world-cat-sections">
       ${secs.map(s => _renderNavItem(s)).join('')}
-      ${secs.length === 0 ? `<div style="padding:.3rem 1rem .5rem 2.1rem;color:var(--text-dim);
-        font-size:.72rem;font-style:italic">${STATE.isAdmin?'Vide — ＋ pour ajouter':'—'}</div>` : ''}
+      ${secs.length === 0 ? `<div class="world-cat-empty">${STATE.isAdmin ? 'Vide - ajoute une section' : '-'}</div>` : ''}
     </div>
   </div>`;
 }
 
-// ── Nav item ─────────────────────────────────────────────────────────────────
+// ── Nav item ──────────────────────────────────────────────────────────────────
 function _renderNavItem(s) {
   const isActive = s.id === STORE.activeId;
   const isHidden = s.visible === false;
   return `<div
     data-nav-id="${s.id}" data-sec-id="${s.id}"
     data-action="selectWorldSection" data-id="${s.id}"
-    style="display:flex;align-items:center;gap:.5rem;padding:.42rem 1rem .42rem 1.9rem;
-      cursor:pointer;transition:all .12s;position:relative;
-      background:${isActive ? 'rgba(232,184,75,.07)' : 'transparent'};
-      border-left:3px solid ${isActive ? 'var(--gold)' : 'transparent'};
-      opacity:${isHidden ? '.45' : '1'}"
-    data-hov-bg="rgba(255,255,255,.03)" data-hov-skip-if-bg="184">
-    <span style="font-size:1rem;flex-shrink:0">${s.icone||'📖'}</span>
-    <span style="font-size:.83rem;color:${isActive?'var(--gold)':'var(--text)'};
-      font-weight:${isActive?'600':'400'};flex:1;white-space:normal;
-      overflow-wrap:anywhere;line-height:1.3">${s.titre||'Section'}</span>
-    ${isHidden ? `<span style="font-size:.6rem;color:#ff6b6b;flex-shrink:0">●</span>` : ''}
+    class="world-nav-item${isActive ? ' is-active' : ''}${isHidden ? ' is-hidden' : ''}">
+    <span class="world-nav-icon">${_esc(s.icone || '📖')}</span>
+    <span class="world-nav-title">${_esc(s.titre || 'Section')}</span>
+    ${isHidden ? `<span class="world-hidden-dot" title="Masquée aux joueurs"></span>` : ''}
     ${STATE.isAdmin ? `
-    <div class="world-nav-actions" style="display:flex;gap:.2rem;flex-shrink:0">
+    <div class="world-nav-actions">
       <button data-action="openWorldSectionModal" data-id="${s.id}" data-stop-propagation
-        style="background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.78rem;
-        padding:1px 3px" title="Modifier">✏️</button>
+        class="world-mini-btn" title="Modifier">✎</button>
       <button data-action="deleteWorldSection" data-id="${s.id}" data-stop-propagation
-        style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.78rem;
-        padding:1px 3px" title="Supprimer">🗑️</button>
+        class="world-mini-btn world-mini-btn--danger" title="Supprimer">×</button>
     </div>` : ''}
   </div>`;
 }
 
 // ── Contenu d'une section ─────────────────────────────────────────────────────
-function _renderSection(s) {
+function _renderSection(s, visibleSections = null) {
   const isHidden = s.visible === false;
-  return `<div style="background:var(--bg-card);border:1px solid var(--border);
-    border-radius:var(--radius-lg);overflow:hidden;
-    ${isHidden ? 'border-style:dashed;opacity:.75' : ''}">
-
-    <!-- Image bannière -->
+  const cat = _worldCategoryFor(s);
+  const sections = visibleSections || _worldVisibleData().visibleSections;
+  return `<article class="world-section-panel${isHidden ? ' is-hidden' : ''}">
     ${s.imageUrl ? `
-    <div style="width:100%;aspect-ratio:16/6;overflow:hidden;position:relative">
-      <img src="${s.imageUrl}" alt="${_esc(s.titre || '')}" style="width:100%;height:100%;object-fit:cover;display:block">
-      <div style="position:absolute;inset:0;background:linear-gradient(to bottom,transparent 50%,rgba(11,17,24,.85))"></div>
-    </div>` : ''}
+      <div class="world-section-cover">
+        <img src="${_esc(s.imageUrl)}" alt="${_esc(s.titre || '')}">
+      </div>` : ''}
 
-    <!-- Header section -->
-    <div class="world-sec-head" style="padding:1.4rem 1.6rem ${s.imageUrl ? '.75rem' : '1rem'};
-      ${s.imageUrl ? 'margin-top:-4rem;position:relative;z-index:1' : ''}">
-      <div class="world-sec-headrow" style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem">
-        <div>
-          <div style="display:flex;align-items:center;gap:.65rem;margin-bottom:.4rem">
-            <span style="font-size:1.4rem">${s.icone||'📖'}</span>
-            <h1 style="font-family:'Cinzel',serif;font-size:1.4rem;color:var(--gold);
-              letter-spacing:1.5px;margin:0;line-height:1.2">${s.titre||'Section'}</h1>
+    <header class="world-sec-head${s.imageUrl ? ' has-cover' : ''}">
+      <div class="world-sec-headrow">
+        <div class="world-section-titleblock">
+          <span class="world-section-crumb">${_esc(cat?.icone || '📁')} ${_esc(cat?.nom || 'Catégorie')}</span>
+          <div class="world-section-titleline">
+            <span>${_esc(s.icone || '📖')}</span>
+            <h1>${_esc(s.titre || 'Section')}</h1>
           </div>
-          ${isHidden ? `<span style="font-size:.7rem;color:#ff6b6b;
-            background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.25);
-            border-radius:4px;padding:1px 7px">🔒 Masquée aux joueurs</span>` : ''}
+          ${isHidden ? `<span class="world-hidden-badge">🔒 Masquée aux joueurs</span>` : ''}
         </div>
         ${STATE.isAdmin ? `
-        <div style="display:flex;gap:.4rem;flex-shrink:0">
+        <div class="world-section-actions">
           <button data-action="openWorldSectionModal" data-id="${s.id}"
-            class="btn btn-outline btn-sm" style="font-size:.72rem">✏️ Modifier</button>
+            class="btn btn-outline btn-sm">Modifier</button>
           <button data-action="deleteWorldSection" data-id="${s.id}"
-            class="btn btn-outline btn-sm" style="font-size:.72rem;color:#ff6b6b;
-            border-color:rgba(255,107,107,.3)">🗑️</button>
+            class="btn btn-outline btn-sm world-danger-btn">Supprimer</button>
         </div>` : ''}
       </div>
-    </div>
+    </header>
 
-    <!-- Séparateur -->
-    <div style="height:1px;background:var(--border);margin:0 1.6rem"></div>
-
-    <!-- Contenu -->
-    <div class="world-sec-body" style="padding:1.2rem 1.6rem 1.6rem">
+    <div class="world-sec-body">
       ${s.contenu
         ? richTextContentHtml({
             html: _contentToHtml(s.contenu),
             className: 'world-section-content',
-            attrs: { style: 'font-size:.88rem;color:var(--text-muted);line-height:1.85' },
+            attrs: {},
           })
-        : `<div style="color:var(--text-dim);font-style:italic;font-size:.85rem">
-            Aucun contenu. ${STATE.isAdmin ? '<span style="color:var(--gold)">Cliquez sur Modifier pour ajouter du texte.</span>' : ''}</div>`}
+        : `<div class="world-empty-copy">
+            Aucun contenu. ${STATE.isAdmin ? '<span>Utilise Modifier pour ajouter du texte.</span>' : ''}</div>`}
     </div>
-  </div>`;
+
+    ${_renderSectionCards(s, sections)}
+  </article>`;
+}
+
+function _renderSectionCards(activeSection, visibleSections) {
+  const siblings = visibleSections
+    .filter(sec => sec.categoryId === activeSection.categoryId && sec.id !== activeSection.id)
+    .slice(0, 6);
+  if (!siblings.length) return '';
+  return `<section class="world-related">
+    <div class="world-related-head">
+      <span>Dans la même catégorie</span>
+      <strong>${_esc(_worldCategoryFor(activeSection)?.nom || 'Catégorie')}</strong>
+    </div>
+    <div class="world-related-grid">
+      ${siblings.map(sec => `
+        <button type="button" class="world-related-card" data-action="selectWorldSection" data-id="${sec.id}">
+          ${sec.imageUrl ? `<img src="${_esc(sec.imageUrl)}" alt="">` : `<span class="world-related-icon">${_esc(sec.icone || '📖')}</span>`}
+          <strong>${_esc(sec.titre || 'Section')}</strong>
+          <small>${_esc(_worldExcerpt(sec.contenu, 92) || 'Aucun contenu renseigné.')}</small>
+        </button>`).join('')}
+    </div>
+  </section>`;
 }
 
 function _renderEmpty() {
-  return `<div style="background:var(--bg-card);border:1px solid var(--border);
-    border-radius:var(--radius-lg);padding:4rem 2rem;text-align:center">
-    <div style="font-size:3rem;margin-bottom:1rem;opacity:.3">📖</div>
-    <p style="color:var(--text-dim);font-style:italic;font-size:.85rem">
+  return `<div class="world-empty-state">
+    <div>📖</div>
+    <p>
       ${STATE.isAdmin ? 'Aucune section. Ajoutez du lore depuis le bouton +.' : 'Aucun contenu disponible pour l\'instant.'}
     </p>
-    ${STATE.isAdmin ? `<button data-action="openWorldSectionModal" class="btn btn-gold btn-sm" style="margin-top:1rem">
-      + Créer la première section</button>` : ''}
+    ${STATE.isAdmin ? `<button data-action="openWorldSectionModal" class="btn btn-gold btn-sm">+ Créer la première section</button>` : ''}
   </div>`;
 }
-
 // ── Sélection section ─────────────────────────────────────────────────────────
 function selectWorldSection(id) {
   STORE.activeId = id;
-  // Mettre à jour la nav
   document.querySelectorAll('[data-nav-id]').forEach(el => {
-    const active = el.dataset.navId === id;
-    el.style.background    = active ? 'rgba(232,184,75,.07)' : 'transparent';
-    el.style.borderLeft    = `3px solid ${active ? 'var(--gold)' : 'transparent'}`;
-    const span = el.querySelector('span:nth-child(2)');
-    if (span) { span.style.color = active ? 'var(--gold)' : 'var(--text)'; span.style.fontWeight = active ? '600' : '400'; }
+    el.classList.toggle('is-active', el.dataset.navId === id);
   });
-  // Mettre à jour le contenu
   const section = STORE.sections.find(s => s.id === id);
   const main = document.getElementById('world-main-content');
   if (main && section) main.innerHTML = _renderSection(section);

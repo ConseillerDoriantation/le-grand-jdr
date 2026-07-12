@@ -144,7 +144,7 @@
 .chat-gear:hover { background: rgba(255,255,255,.08); }
 
 /* ── Barre de saisie : ligne + barre d'édition ── */
-.chat-form { flex-direction: column; gap: .35rem; }
+.chat-form { position: relative; flex-direction: column; gap: .35rem; }
 .chat-form-row { display: flex; gap: .4rem; align-items: center; }
 .chat-edit-bar {
   font-size: .72rem; color: var(--text-dim, #9aa4b2);
@@ -243,12 +243,44 @@
 }
 .chat-emoji-btn:hover { background: rgba(79,140,255,.18); }
 .chat-emoji-pop {
-  display: grid; grid-template-columns: repeat(8, 1fr); gap: .1rem;
-  max-height: 172px; overflow-y: auto; margin-bottom: .1rem; padding: .35rem;
-  background: var(--bg-elevated, #1e2836); border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 10px;
+  position: fixed; z-index: 1000;                 /* ancré au body, positionné en JS */
+  width: 250px; max-height: 220px; overflow-y: auto;
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; padding: .5rem;
+  background: var(--bg-card, #141b26); border: 1px solid var(--border, rgba(255,255,255,.14));
+  border-radius: 14px; box-shadow: 0 12px 34px rgba(0,0,0,.5);
 }
-.chat-emoji-opt { background: none; border: none; cursor: pointer; font-size: 1.15rem; line-height: 1; padding: 3px; border-radius: 7px; }
+.chat-emoji-btn.is-open { background: rgba(79,140,255,.28); }
+.chat-emoji-opt { background: none; border: none; cursor: pointer; font-size: 1.2rem; line-height: 1; padding: 4px; border-radius: 8px; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; }
 .chat-emoji-opt:hover { background: rgba(255,255,255,.12); transform: scale(1.15); }
+
+/* ── Barre de recherche (sous l'en-tête) ── */
+.chat-search { padding: .45rem .6rem; border-bottom: 1px solid var(--border, rgba(255,255,255,.1)); }
+.chat-search .chat-input { width: 100%; box-sizing: border-box; }
+
+/* ── Barre de réponse (au-dessus de la saisie) ── */
+.chat-reply-bar {
+  display: flex; align-items: center; gap: .35rem;
+  font-size: .74rem; color: var(--text-dim, #9aa4b2);
+  border-left: 3px solid #4f8cff; padding: .25rem .5rem; background: rgba(79,140,255,.08); border-radius: 6px;
+}
+.chat-reply-snippet { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-reply-bar .chat-edit-cancel { text-decoration: none; font-size: .9rem; }
+
+/* ── Citation dans une bulle ── */
+.chat-msg-quote {
+  display: block; margin-bottom: .25rem; padding: .2rem .45rem;
+  border-left: 3px solid rgba(255,255,255,.4); border-radius: 4px;
+  background: rgba(0,0,0,.18); font-size: .74rem; line-height: 1.3;
+}
+.chat-msg--mine .chat-msg-quote { background: rgba(255,255,255,.18); border-left-color: rgba(255,255,255,.7); }
+.chat-quote-name { display: block; font-weight: 700; opacity: .9; }
+.chat-quote-text { display: block; opacity: .8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-msg-btext { display: block; }
+
+/* ── Image dans un message ── */
+.chat-msg-img { display: block; max-width: 100%; max-height: 240px; border-radius: 10px; cursor: default; margin: .1rem 0; }
+.chat-msg-bubble--media { padding: .2rem; background: transparent; border: none; }
+.chat-msg--mine .chat-msg-bubble--media { background: transparent; }
 
 /* ── Mobile : au-dessus de la barre de navigation du bas ── */
 @media (max-width: 780px) {
