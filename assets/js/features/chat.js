@@ -669,7 +669,7 @@ async function chatDeleteMsg(btn) {
   if (!await confirmModal('Supprimer ce message ?')) return;
   if (_editingId === id) chatCancelEdit();
   const ref = _msgRef(id); if (!ref) return;
-  try { await updateDoc(ref, { deleted: true, text: '' }); }
+  try { await deleteDoc(ref); }   // vraie suppression : le message disparaît
   catch (e) { console.warn('[chat] del', e?.code || e); showNotif('Suppression refusée — règles Firestore ?', 'error'); }
 }
 
