@@ -20,7 +20,8 @@ import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-
 import { bumpSkill, bumpEmote } from '../../shared/stats.js';
 import { _logCol, _logGmCol, _reactionRef } from './vtt-refs.js';
 import { _STAT_KEY } from './vtt-constants.js';
-import { openModal, closeModalDirect, confirmModal } from '../../shared/modal.js';
+import { openModal, closeModalDirect, confirmModal, promptModal } from '../../shared/modal.js';
+import { listGithubFolder, GH_IMAGE_EXTS, slugFromFile } from '../../shared/github-folder.js';
 import { VTT_ACTIONS, _showEmoteBubble, _canControlToken, _tokenStatMod, _vttLogTargetFields } from './vtt.js'; // circ. (runtime)
 import { _renderInspector } from './vtt-inspector.js?v=20260630-max-v2'; // re-render après changement de mode de jet
 
@@ -361,6 +362,11 @@ export async function _ouvrirGestionEmotes() {
           data-vtt-fn="_vttSetEmoteAlbum" data-vtt-on="input" data-vtt-args="$value">
       </div>
       <hr style="border:none;border-top:1px solid var(--border);margin:0">
+      <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" data-vtt-fn="_vttImportEmotesGithub">📥 Importer un dossier GitHub</button>
+        <span style="font-size:.72rem;color:var(--text-muted)">Toutes les images d'un dossier du repo, sans doublon</span>
+      </div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:0">
       <div style="font-weight:600;font-size:.85rem">➕ Ajouter une émote</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem">
         <div class="form-group" style="margin:0">
@@ -463,6 +469,37 @@ export async function _ouvrirGestionEmotes() {
     list[i] = em;
     await _saveEmotes(list); _refresh();
     showNotif(`✓ :${newName}: mis à jour`, 'success');
+  };
+
+  // ── Importer un dossier GitHub (toutes les images, sans doublon) ──
+  VTT_ACTIONS._vttImportEmotesGithub = async () => {
+    const KEY = 'vtt-emote-gh-folder';
+    const def = localStorage.getItem(KEY) || 'images/emotes';
+    const path = (await promptModal('Dossier du repo à importer (ex : images/emotes) :',
+      { title: 'Importer des émotes', default: def, placeholder: 'images/emotes' }))?.trim();
+    if (!path) return;
+    localStorage.setItem(KEY, path);
+    const statusEl = document.getElementById('emote-add-status');
+    if (statusEl) statusEl.textContent = '⏳ Lecture du dossier…';
+    let files;
+    try { files = await listGithubFolder(path, { exts: GH_IMAGE_EXTS }); }
+    catch (e) { if (statusEl) statusEl.textContent = '⚠ ' + e.message; showNotif(e.message, 'error'); return; }
+    if (!files.length) { if (statusEl) statusEl.textContent = 'Aucune image dans ce dossier'; return; }
+    // Dédoublonnage : par URL (chemin) ET par nom (:tag: unique).
+    const urls  = new Set(_emotes.map(e => e.url));
+    const names = new Set(_emotes.map(e => e.name));
+    const add = [];
+    for (const f of files) {
+      const name = slugFromFile(f.name);
+      if (!name || urls.has(f.url) || names.has(name)) continue;
+      urls.add(f.url); names.add(name);
+      add.push({ id: `${Date.now()}${Math.random().toString(36).slice(2, 6)}`, name, url: f.url });
+    }
+    if (!add.length) { if (statusEl) statusEl.textContent = 'Toutes ces émotes sont déjà présentes'; return; }
+    await _saveEmotes([..._emotes, ...add]);
+    _refresh();
+    if (statusEl) statusEl.textContent = `✓ ${add.length} émote(s) importée(s)`;
+    showNotif(`✅ ${add.length} émote(s) importée(s)`, 'success');
   };
 
   // ── Ajouter ──────────────────────────────────────────────────────

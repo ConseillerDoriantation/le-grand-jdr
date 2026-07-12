@@ -67,7 +67,7 @@ import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttSkillFilter, _v
 import {
   _renderLibSection, _resetMapLib, _libFolder, _vttLibToggle, _vttLibOpenFolder, _vttLibNewFolder,
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,
-  _vttLibMoveToAndClose, _mapLibRef,
+  _vttLibMoveToAndClose, _mapLibRef, _vttLibImportGithub,
 } from './vtt-maplib.js';
 import { _markCharsReady, _markNpcsReady, _markToksReady, _resetAutoSync, _charsReady, _cleanupReserveDuplicates } from './vtt-autosync.js';
 import { _vttPanelError, _showCtxMenu, _hideCtxMenu, _tokenEntityKey } from './vtt-utils.js';
@@ -9152,7 +9152,7 @@ function _buildHtml() {
           <div id="vtt-bestiary-body"></div>
         </div>
         <div class="vtt-tray-view${_trayTab==='images'?' active':''}" data-view="images">
-          <div class="vtt-tray-section-hd"><span>📁 Bibliothèque</span><button class="vtt-tray-add-btn" data-vtt-fn="_vttLibNewFolder" title="Nouveau dossier">📁</button></div>
+          <div class="vtt-tray-section-hd"><span>📁 Bibliothèque</span><span style="margin-left:auto;display:flex;gap:.25rem"><button class="vtt-tray-add-btn" data-vtt-fn="_vttLibImportGithub" title="Importer un dossier GitHub">📥</button><button class="vtt-tray-add-btn" data-vtt-fn="_vttLibNewFolder" title="Nouveau dossier">📁</button></span></div>
           <div id="vtt-tray-library"></div>
         </div>
       </div>
@@ -9610,6 +9610,7 @@ export const VTT_ACTIONS = {
   _vttKickPresence,
   _vttLibDelFolder,
   _vttLibDelImg,
+  _vttLibImportGithub,
   _vttLibMoveMenu,
   _vttLibMoveRoot,
   _vttLibMoveTo,

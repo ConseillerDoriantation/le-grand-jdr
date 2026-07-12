@@ -16,7 +16,8 @@ import {
   getDocDataSilent, saveDoc, loadCharsForAdventure,
 } from '../data/firestore.js';
 
-import { openModal, closeModal } from '../shared/modal.js';
+import { openModal, closeModal, promptModal } from '../shared/modal.js';
+import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile } from '../shared/github-folder.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { refreshSidebarProfile }  from '../core/layout.js';
 import { avatarSrcOf, resolveAvatarUrl } from '../shared/avatar.js';
@@ -326,6 +327,11 @@ function _renderAvatarManager(catalog) {
       <button class="btn btn-gold" style="flex:1" data-action="addAvatarIcon">＋ Ajouter</button>
       <button class="btn btn-outline btn-sm" data-action="openAvatarPicker">‹ Retour</button>
     </div>
+    <hr style="border:none;border-top:1px solid var(--border);margin:.85rem 0 .6rem">
+    <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+      <button class="btn btn-outline btn-sm" data-action="importAvatarsGithub">📥 Importer un dossier GitHub</button>
+      <span style="font-size:.72rem;color:var(--text-dim)">Toutes les images d'un dossier du repo, sans doublon</span>
+    </div>
   `, { subtitle: "Catalogue global de l'app", accent: '#e8b84b' });
 }
 
@@ -343,6 +349,34 @@ async function addAvatarIcon() {
   try {
     await _persistCatalog(icons);
     showNotif('Avatar ajouté.', 'success');
+    _renderAvatarManager(icons);
+  } catch (e) { notifySaveError(e); }
+}
+
+// Importe toutes les images d'un dossier du repo GitHub dans le catalogue (dédup
+// par URL). Le chemin est mémorisé en localStorage. Réservé au super-admin (le
+// manager l'est déjà, cf. openAvatarManager).
+async function importAvatarsGithub() {
+  const KEY = 'avatar-gh-folder';
+  const def = localStorage.getItem(KEY) || 'images/avatar';
+  const path = (await promptModal('Dossier du repo à importer (ex : images/avatar) :',
+    { title: 'Importer des avatars', default: def, placeholder: 'images/avatar' }))?.trim();
+  if (!path) return;
+  localStorage.setItem(KEY, path);
+  showNotif('Lecture du dossier…', 'info');
+  let files;
+  try { files = await listGithubFolder(path, { exts: GH_IMAGE_EXTS }); }
+  catch (e) { showNotif(e.message, 'error'); return; }
+  if (!files.length) { showNotif('Aucune image dans ce dossier.', 'info'); return; }
+  const existing = new Set((_iconCatalog || []).map(i => i.url));
+  const added = files
+    .filter(f => !existing.has(f.url))
+    .map(f => ({ url: f.url, label: prettyNameFromFile(f.name) }));
+  if (!added.length) { showNotif('Tous ces avatars sont déjà dans la liste.', 'info'); return; }
+  const icons = [...(_iconCatalog || []), ...added];
+  try {
+    await _persistCatalog(icons);
+    showNotif(`✅ ${added.length} avatar(s) importé(s).`, 'success');
     _renderAvatarManager(icons);
   } catch (e) { notifySaveError(e); }
 }
@@ -632,6 +666,7 @@ registerActions({
   chooseAvatar:        (btn) => chooseAvatar(btn.dataset.url || ''),
   openAvatarManager:   () => openAvatarManager(),
   addAvatarIcon:       () => addAvatarIcon(),
+  importAvatarsGithub: () => importAvatarsGithub(),
   updateAvatarIcon:    (btn) => updateAvatarIcon(Number(btn.dataset.idx)),
   removeAvatarIcon:    (btn) => removeAvatarIcon(Number(btn.dataset.idx)),
   openEditPseudo:      () => openEditPseudo(),
