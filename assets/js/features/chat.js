@@ -30,6 +30,7 @@ import { registerActions } from '../core/actions.js';
 import { showNotif } from '../shared/notifications.js';
 import { confirmModal } from '../shared/modal.js';
 import { avatarSrcOf } from '../shared/avatar.js';
+import { uploadJpeg } from '../shared/image-upload.js';
 import { _esc } from '../shared/html.js';
 
 const ADV = 'adventure';   // id de la conversation d'aventure
@@ -41,6 +42,9 @@ const EMOJIS = ['😀','😁','😂','🤣','😅','😊','😇','🙂','😉','
 let _uid = null, _open = false, _view = 'list';   // 'list' | 'convo' | 'new' | 'manage'
 let _openId = null;                                // conv ouverte (ADV | convoId)
 let _editingId = null;                             // message en cours d'édition (id) | null
+let _replyTo = null;                               // message cité { id, senderName, text } | null
+let _searchOpen = false, _searchQ = '';            // recherche dans la conv ouverte
+let _muted = false, _audioCtx = null, _soundReady = false;   // notif sonore (pas de bip au 1er rendu)
 let _advMsgs = [];                                 // messages Aventure (live session)
 let _groups  = [];                                 // convos de groupe où je suis membre
 let _convoMsgs = [];                               // messages du GROUPE ouvert
@@ -71,7 +75,8 @@ export async function initChat(uid) {
   _uid = uid || STATE.user?.uid || null;
   _teardownListeners();
   _advMsgs = []; _groups = []; _convoMsgs = []; _open = false; _view = 'list'; _openId = null;
-  _editingId = null; _ghosts = new Set();
+  _editingId = null; _ghosts = new Set(); _replyTo = null; _searchOpen = false; _searchQ = '';
+  _muted = localStorage.getItem('chat-muted') === '1'; _soundReady = false;
   _baseTitle = (document.title || 'Le Grand JDR').replace(/^\(\d+\)\s*/, '');
   _prevUnread = 0;
   _mount();
@@ -107,8 +112,25 @@ export function teardownChat() {
 function _notify() {
   const n = _totalUnread();
   if (_baseTitle) document.title = n > 0 ? `(${n}) ${_baseTitle}` : _baseTitle;
-  if (n > _prevUnread) _pulseBubble();
-  _prevUnread = n;
+  if (n > _prevUnread) { _pulseBubble(); if (_soundReady) _beep(); }
+  _prevUnread = n; _soundReady = true;   // les non-lus déjà là au chargement ne sonnent pas
+}
+// Bip court (WebAudio, sans asset). Coupé si mute ; best-effort (autoplay).
+function _beep() {
+  if (_muted) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext; if (!Ctx) return;
+    _audioCtx = _audioCtx || new Ctx();
+    const ctx = _audioCtx; if (ctx.state === 'suspended') ctx.resume();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(660, ctx.currentTime);
+    o.frequency.setValueAtTime(880, ctx.currentTime + 0.08);
+    g.gain.setValueAtTime(0.05, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.22);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + 0.22);
+  } catch { /* autoplay bloqué → silencieux */ }
 }
 function _pulseBubble() {
   const el = document.getElementById('chat-widget'); if (!el) return;
@@ -174,7 +196,8 @@ function _renderList() {
   }).join('');
   el.innerHTML = _panelShell('Discussions', '',
     `<div class="chat-convo-list">${advRow}${groupRows}</div>`,
-    `<div class="chat-list-foot"><button class="chat-newbtn" data-action="chatNew">＋ Nouvelle discussion</button></div>`);
+    `<div class="chat-list-foot"><button class="chat-newbtn" data-action="chatNew">＋ Nouvelle discussion</button></div>`,
+    `<button class="chat-gear" data-action="chatToggleMute" title="${_muted ? 'Activer le son' : 'Couper le son'}" aria-label="Son des notifications">${_muted ? '🔕' : '🔔'}</button>`);
 }
 
 function _convoRow(id, icon, name, preview, badge) {
@@ -194,30 +217,44 @@ function _renderConvo() {
   // ⚙️ Gérer : uniquement pour un vrai GROUPE (pas l'aventure, pas un DM).
   const gear = (g && g.type !== 'dm')
     ? '<button class="chat-gear" data-action="chatManage" title="Gérer le groupe" aria-label="Gérer le groupe">⚙️</button>' : '';
+  const search = '<button class="chat-gear" data-action="chatSearchToggle" title="Rechercher" aria-label="Rechercher">🔍</button>';
   el.innerHTML = _panelShell(title,
     '<button class="chat-back" data-action="chatBack" aria-label="Retour">‹</button>',
-    `<div class="chat-msgs" id="chat-msgs"></div>`,
+    `<div class="chat-search" id="chat-search" ${_searchOpen ? '' : 'hidden'}>
+       <input id="chat-search-inp" class="chat-input" placeholder="🔍 Rechercher dans la conversation…" value="${_esc(_searchQ)}" autocomplete="off">
+     </div>
+     <div class="chat-msgs" id="chat-msgs"></div>`,
     `<form class="chat-form" id="chat-form">
        <div class="chat-emoji-pop" id="chat-emoji-pop" hidden>${EMOJIS.map(e => `<button type="button" class="chat-emoji-opt" data-action="chatInsertEmoji" data-emo="${e}">${e}</button>`).join('')}</div>
        <div class="chat-edit-bar" id="chat-edit-bar" hidden>✏️ Édition — <button type="button" class="chat-edit-cancel" data-action="chatCancelEdit">annuler</button></div>
+       <div class="chat-reply-bar" id="chat-reply-bar" hidden></div>
        <div class="chat-form-row">
          <button type="button" class="chat-emoji-btn" data-action="chatEmojiToggle" title="Emoji" aria-label="Insérer un emoji">😊</button>
+         <button type="button" class="chat-emoji-btn" data-action="chatPickImage" title="Envoyer une image" aria-label="Envoyer une image">📎</button>
+         <input type="file" id="chat-file" accept="image/*" hidden>
          <input id="chat-input" class="chat-input" placeholder="Écris un message…" autocomplete="off" maxlength="1000">
          <button type="submit" class="chat-send" aria-label="Envoyer">➤</button>
        </div>
      </form>`,
-    gear);
+    search + gear);
   el.querySelector('#chat-form')?.addEventListener('submit', (e) => { e.preventDefault(); _send(); });
+  el.querySelector('#chat-search-inp')?.addEventListener('input', (e) => { _searchQ = e.target.value; _renderMessages(); });
+  el.querySelector('#chat-file')?.addEventListener('change', (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) _sendImage(f); });
+  if (_replyTo) _showReplyBar();
   _renderMessages();
-  el.querySelector('#chat-input')?.focus();
+  el.querySelector(_searchOpen ? '#chat-search-inp' : '#chat-input')?.focus();
 }
 function _renderConvoHeaderBadge() { /* pas de badge d'en-tête pour l'instant */ }
 
 function _renderMessages() {
   const list = document.getElementById('chat-msgs'); if (!list) return;
-  const msgs = _openId === ADV ? _advMsgs : _convoMsgs;
-  list.innerHTML = msgs.length ? msgs.map(_msgRow).join('') : `<div class="chat-empty">Aucun message. Lance la discussion !</div>`;
-  list.scrollTop = list.scrollHeight;
+  let msgs = _openId === ADV ? _advMsgs : _convoMsgs;
+  const q = _searchOpen ? _searchQ.trim().toLowerCase() : '';
+  if (q) msgs = msgs.filter(m => !m.deleted && (m.text || '').toLowerCase().includes(q));
+  list.innerHTML = msgs.length
+    ? msgs.map(_msgRow).join('')
+    : `<div class="chat-empty">${q ? 'Aucun message trouvé.' : 'Aucun message. Lance la discussion !'}</div>`;
+  if (!q) list.scrollTop = list.scrollHeight;   // pas d'auto-scroll pendant une recherche
 }
 
 // Profil (pour l'avatar) d'un uni : le mien via STATE, les autres via
@@ -278,10 +315,14 @@ function _msgRow(m) {
       </span></div>`;
   }
   const edited = m.editedAt ? ' <span class="chat-msg-edited">(modifié)</span>' : '';
+  const quote = m.replyTo
+    ? `<span class="chat-msg-quote"><span class="chat-quote-name">${_esc(m.replyTo.senderName || '')}</span><span class="chat-quote-text">${_esc(m.replyTo.text || '📷 Image')}</span></span>` : '';
+  const img = m.image ? `<img class="chat-msg-img" src="${_esc(m.image)}" alt="image" loading="lazy">` : '';
+  const txt = m.text ? `<span class="chat-msg-btext">${_esc(m.text)}</span>` : '';
   return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}">${av}
     <span class="chat-msg-content">${author}
       <span class="chat-msg-bubble-wrap">
-        <span class="chat-msg-bubble">${_esc(m.text || '')}</span>
+        <span class="chat-msg-bubble${m.image && !m.text ? ' chat-msg-bubble--media' : ''}">${quote}${img}${txt}</span>
         <button class="chat-msg-menu-btn" data-action="chatMsgMenu" data-msg="${_esc(m.id)}" title="Réagir / modifier" aria-label="Options du message">⋯</button>
       </span>
       ${_reactionsHtml(m)}
@@ -381,7 +422,11 @@ function chatOpenConvo(btn) {
     _markRead(id);
   }
 }
-function _teardownConvo() { if (_unsubConvo) { try { _unsubConvo(); } catch {} _unsubConvo = null; } _convoMsgs = []; }
+function _teardownConvo() {
+  if (_unsubConvo) { try { _unsubConvo(); } catch {} _unsubConvo = null; }
+  _convoMsgs = [];
+  _editingId = null; _replyTo = null; _searchOpen = false; _searchQ = '';   // états liés à la conv
+}
 
 function chatNew() { _view = 'new'; _renderNew(); }
 
@@ -404,6 +449,14 @@ async function chatCreateGroup() {
   } catch (e) { console.warn('[chat] createGroup', e?.code || e); showNotif('Création impossible (règles Firestore ?).', 'error'); }
 }
 
+function _senderName() { return STATE.profile?.pseudo || STATE.user?.email?.split('@')[0] || 'Joueur'; }
+// Met à jour l'aperçu du dernier message (groupe/DM) pour la liste + non-lus.
+function _bumpConvoPreview(preview, senderName) {
+  if (_openId === ADV) return;
+  const ref = _convoRef(_openId);
+  if (ref) updateDoc(ref, { lastText: preview, lastSenderName: senderName, lastSenderId: _uid, lastAt: serverTimestamp() }).catch(() => {});
+}
+
 async function _send() {
   const inp = document.getElementById('chat-input');
   const text = (inp?.value || '').trim();
@@ -411,19 +464,35 @@ async function _send() {
   if (_editingId) { _saveEdit(text); return; }        // mode édition d'un message
   const col = _msgsCol(); if (!col || !_uid) return;
   inp.value = '';
-  const senderName = STATE.profile?.pseudo || STATE.user?.email?.split('@')[0] || 'Joueur';
+  const senderName = _senderName();
+  const reply = _replyTo; _clearReply();
+  const msg = { convoId: _openId, text, senderId: _uid, senderName, at: serverTimestamp() };
+  if (reply) msg.replyTo = reply;
   try {
-    await addDoc(col, { convoId: _openId, text, senderId: _uid, senderName, at: serverTimestamp() });
-    // Metadata du groupe (dernier message → aperçu + non-lus des autres)
-    if (_openId !== ADV) {
-      const ref = _convoRef(_openId);
-      if (ref) updateDoc(ref, { lastText: text, lastSenderName: senderName, lastSenderId: _uid, lastAt: serverTimestamp() }).catch(() => {});
-    }
+    await addDoc(col, msg);
+    _bumpConvoPreview(text, senderName);
   } catch (e) {
     console.warn('[chat] send', e?.code || e);
     showNotif('Message non envoyé — règles Firestore ?', 'error');
     if (inp) inp.value = text;
   }
+}
+
+// Envoi d'une image : compressée en JPEG base64 borné (reste sous la limite
+// Firestore de 1 Mo). Pas de règle à ajouter (le champ `image` s'ajoute au doc).
+async function _sendImage(file) {
+  if (!file || !_openId) return;
+  const col = _msgsCol(); if (!col || !_uid) return;
+  let image;
+  try { image = await uploadJpeg(file, { max: 1000, quality: 0.72 }); }
+  catch { showNotif('Image invalide.', 'error'); return; }
+  if (!image || image.length > 950000) { showNotif('Image trop lourde même compressée.', 'error'); return; }
+  const senderName = _senderName();
+  const reply = _replyTo; _clearReply();
+  const msg = { convoId: _openId, text: '', image, senderId: _uid, senderName, at: serverTimestamp() };
+  if (reply) msg.replyTo = reply;
+  try { await addDoc(col, msg); _bumpConvoPreview('📷 Image', senderName); }
+  catch (e) { console.warn('[chat] img', e?.code || e); showNotif('Image non envoyée — règles Firestore ?', 'error'); }
 }
 
 function _markReadLocal(convoId) {
@@ -633,6 +702,7 @@ function chatMsgMenu(btn) {
   pop.innerHTML = `
     <div class="chat-msg-menu-reacts">${REACTIONS.map(e =>
       `<button class="chat-act-emo" data-action="chatReact" data-msg="${_esc(id)}" data-emo="${e}" title="Réagir ${e}">${e}</button>`).join('')}</div>
+    <button class="chat-msg-menu-item" data-action="chatReplyMsg" data-msg="${_esc(id)}">↩︎ Répondre</button>
     ${mine ? `<button class="chat-msg-menu-item" data-action="chatEditMsg" data-msg="${_esc(id)}">✏️ Modifier</button>
               <button class="chat-msg-menu-item" data-action="chatDeleteMsg" data-msg="${_esc(id)}">🗑️ Supprimer</button>` : ''}`;
   document.body.appendChild(pop);
@@ -659,6 +729,43 @@ function chatInsertEmoji(btn) {
   inp.focus(); try { inp.setSelectionRange(pos, pos); } catch {}
 }
 
+// ── Répondre / citer ─────────────────────────────────────────────────────────
+function _showReplyBar() {
+  const bar = document.getElementById('chat-reply-bar'); if (!bar || !_replyTo) return;
+  bar.innerHTML = `↩︎ <b>${_esc(_replyTo.senderName || '')}</b> <span class="chat-reply-snippet">${_esc(_replyTo.text || '📷 Image')}</span><button type="button" class="chat-edit-cancel" data-action="chatCancelReply" aria-label="Annuler la réponse">✕</button>`;
+  bar.removeAttribute('hidden');
+}
+function _clearReply() {
+  _replyTo = null;
+  const bar = document.getElementById('chat-reply-bar'); if (bar) { bar.innerHTML = ''; bar.setAttribute('hidden', ''); }
+}
+function chatCancelReply() { _clearReply(); }
+function chatReplyMsg(btn) {
+  const id = btn?.dataset?.msg; if (!id) return;
+  _closeMsgMenu();
+  const msgs = _openId === ADV ? _advMsgs : _convoMsgs;
+  const m = msgs.find(x => x.id === id); if (!m || m.deleted) return;
+  _replyTo = { id, senderName: m.senderName || _nameOf(m.senderId), text: (m.text || (m.image ? '📷 Image' : '')).slice(0, 120) };
+  _showReplyBar();
+  document.getElementById('chat-input')?.focus();
+}
+
+// ── Recherche / image / son ──────────────────────────────────────────────────
+function chatSearchToggle() {
+  _searchOpen = !_searchOpen;
+  if (!_searchOpen) _searchQ = '';
+  const bar = document.getElementById('chat-search');
+  if (bar) { if (_searchOpen) bar.removeAttribute('hidden'); else bar.setAttribute('hidden', ''); }
+  _renderMessages();
+  if (_searchOpen) document.getElementById('chat-search-inp')?.focus();
+}
+function chatPickImage() { document.getElementById('chat-file')?.click(); }
+function chatToggleMute() {
+  _muted = !_muted;
+  localStorage.setItem('chat-muted', _muted ? '1' : '0');
+  if (_view === 'list') _renderList();
+}
+
 registerActions({
   chatToggle:      () => chatToggle(),
   chatBack:        () => chatBack(),
@@ -669,6 +776,11 @@ registerActions({
   chatMsgMenu:     (btn) => chatMsgMenu(btn),
   chatEmojiToggle: () => chatEmojiToggle(),
   chatInsertEmoji: (btn) => chatInsertEmoji(btn),
+  chatReplyMsg:    (btn) => chatReplyMsg(btn),
+  chatCancelReply: () => chatCancelReply(),
+  chatSearchToggle:() => chatSearchToggle(),
+  chatPickImage:   () => chatPickImage(),
+  chatToggleMute:  () => chatToggleMute(),
   chatReact:       (btn) => chatReact(btn),
   chatEditMsg:     (btn) => chatEditMsg(btn),
   chatDeleteMsg:   (btn) => chatDeleteMsg(btn),
