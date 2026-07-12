@@ -36,8 +36,13 @@ import { _esc } from '../shared/html.js';
 const ADV = 'adventure';   // id de la conversation d'aventure
 const HISTORY = 40;
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🎉'];   // palette de réactions
-// Emoji insérables dans un message (bouton 😊 de la saisie).
-const EMOJIS = ['😀','😁','😂','🤣','😅','😊','😇','🙂','😉','😍','😘','😗','😎','🤩','🥳','🤔','🤨','😐','😴','😮','😯','😲','😳','🥺','😢','😭','😱','😤','😡','🤬','😈','👻','💀','🤝','🙏','👍','👎','👏','🙌','💪','🔥','✨','🎉','❤️','🧡','💛','💚','💙','💜','💔','💯','👀','🎲','⚔️','🛡️','🏹','🏰','🐉','🧙','💰','🍺','🗝️','☠️'];
+// Emoji insérables (bouton 😊), classés par catégorie pour un picker navigable.
+const EMOJI_CATS = [
+  { label: 'Visages', emojis: ['😀','😁','😂','🤣','😅','😊','😇','🙂','😉','😍','😘','😗','😎','🤩','🥳','😜','😝','🤪','🤔','🤨','😐','😑','😶','🙄','😴','😪','😵','🤯','😳','🥺','😢','😭','😤','😡','🤬','😱','😨','😰','😬','🤗'] },
+  { label: 'Gestes', emojis: ['👍','👎','👏','🙌','🙏','💪','🤝','👀','✌️','🤞','👌','🤙','✋','👋','🤛','🤜','👊','☝️','👇','🫡'] },
+  { label: 'Cœurs & symboles', emojis: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','💔','💯','✨','🔥','⭐','🎉','💫','⚡','💥','❓','❗','✅'] },
+  { label: 'JDR & objets', emojis: ['🎲','⚔️','🛡️','🏹','🗡️','🪓','🏰','🐉','🧙','🧝','🧟','💀','☠️','👻','😈','🗝️','💰','🍺','🧪','📜','🔮','🕯️','🗺️','💎'] },
+];
 
 let _uid = null, _open = false, _view = 'list';   // 'list' | 'convo' | 'new' | 'manage'
 let _openId = null;                                // conv ouverte (ADV | convoId)
@@ -723,6 +728,22 @@ function _closeEmojiPop() {
   _emojiBtn()?.classList.remove('is-open');
   if (_emojiOutside) { document.removeEventListener('mousedown', _emojiOutside, true); _emojiOutside = null; }
 }
+// Récents (localStorage) : la ligne du haut du picker.
+function _emojiRecents() { try { return JSON.parse(localStorage.getItem('chat-emoji-recents') || '[]'); } catch { return []; } }
+function _pushEmojiRecent(emo) {
+  const r = [emo, ..._emojiRecents().filter(x => x !== emo)].slice(0, 16);
+  localStorage.setItem('chat-emoji-recents', JSON.stringify(r));
+}
+const _emojiOptBtn = (e) => `<button type="button" class="chat-emoji-opt" data-action="chatInsertEmoji" data-emo="${e}" title="${e}">${e}</button>`;
+function _emojiPickerHtml() {
+  const rec = _emojiRecents();
+  const recBlock = rec.length
+    ? `<div class="chat-emoji-cat"><div class="chat-emoji-catlbl">🕘 Récents</div><div class="chat-emoji-grid">${rec.map(_emojiOptBtn).join('')}</div></div>` : '';
+  const cats = EMOJI_CATS.map(c =>
+    `<div class="chat-emoji-cat"><div class="chat-emoji-catlbl">${_esc(c.label)}</div><div class="chat-emoji-grid">${c.emojis.map(_emojiOptBtn).join('')}</div></div>`).join('');
+  return recBlock + cats;
+}
+
 // Popover ancré au body + positionné en JS (comme le menu ⋯) → indépendant du
 // flux du formulaire : s'affiche juste au-dessus du bouton 😊, ne décale rien.
 function chatEmojiToggle() {
@@ -730,11 +751,11 @@ function chatEmojiToggle() {
   const btn = _emojiBtn(); if (!btn) return;
   const pop = document.createElement('div');
   pop.id = 'chat-emoji-pop'; pop.className = 'chat-emoji-pop';
-  pop.innerHTML = EMOJIS.map(e => `<button type="button" class="chat-emoji-opt" data-action="chatInsertEmoji" data-emo="${e}">${e}</button>`).join('');
+  pop.innerHTML = _emojiPickerHtml();
   document.body.appendChild(pop);
   btn.classList.add('is-open');
   const r = btn.getBoundingClientRect();
-  const w = pop.offsetWidth || 250, h = pop.offsetHeight || 210;
+  const w = pop.offsetWidth || 300, h = pop.offsetHeight || 300;
   pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
   pop.style.top = `${Math.max(8, r.top - h - 8)}px`;   // au-dessus du bouton
   _emojiOutside = (e) => { if (!pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) _closeEmojiPop(); };
@@ -747,6 +768,7 @@ function chatInsertEmoji(btn) {
   inp.value = inp.value.slice(0, s) + emo + inp.value.slice(e);
   const pos = s + emo.length;
   inp.focus(); try { inp.setSelectionRange(pos, pos); } catch {}
+  _pushEmojiRecent(emo);   // remonté dans « Récents » à la prochaine ouverture
 }
 
 // ── Répondre / citer ─────────────────────────────────────────────────────────

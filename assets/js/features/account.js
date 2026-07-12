@@ -21,7 +21,7 @@ import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile, fileKey } from '..
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { refreshSidebarProfile }  from '../core/layout.js';
 import { avatarSrcOf, resolveAvatarUrl } from '../shared/avatar.js';
-import { STATE, setProfile }     from '../core/state.js';
+import { STATE, setAdventure, setProfile }     from '../core/state.js';
 import PAGES                     from './pages.js';
 import { registerActions }        from '../core/actions.js';
 import { _esc, _norm }           from '../shared/html.js';
@@ -105,6 +105,34 @@ function _accountProviderLabel(user) {
   if (providers.includes('google.com')) return 'Google';
   if (providers.includes('password')) return 'Email + mot de passe';
   return providers[0] || 'Compte Firebase';
+}
+
+async function _syncCurrentMemberProfiles(patch = {}) {
+  const uid = STATE.user?.uid || auth.currentUser?.uid;
+  if (!uid || !patch || !Object.keys(patch).length) return;
+
+  const adventures = Array.isArray(STATE.adventures) ? STATE.adventures : [];
+  await Promise.all(adventures.map(async (a) => {
+    const inAdv = a?.accessList?.includes(uid) || a?.admins?.includes(uid);
+    if (!a?.id || !inAdv) return;
+    const update = {};
+    Object.entries(patch).forEach(([key, value]) => {
+      update[`memberProfiles.${uid}.${key}`] = value || '';
+    });
+    try {
+      await updateInCol('adventures', a.id, update);
+      const memberProfiles = {
+        ...(a.memberProfiles || {}),
+        [uid]: { ...(a.memberProfiles?.[uid] || {}), ...patch },
+      };
+      a.memberProfiles = memberProfiles;
+      if (STATE.adventure?.id === a.id) {
+        setAdventure({ ...STATE.adventure, memberProfiles });
+      }
+    } catch (e) {
+      console.warn('[account] sync memberProfile ignored:', a.id, e?.code || e);
+    }
+  }));
 }
 // RENDU PRINCIPAL
 // ══════════════════════════════════════════════════════════════════════════════
@@ -535,6 +563,7 @@ async function savePseudo() {
     await updateInCol('users', user.uid, { pseudo: newPseudo });
     const newProfile = { ...(STATE.profile||{}), pseudo: newPseudo };
     setProfile(newProfile);
+    await _syncCurrentMemberProfiles({ pseudo: newPseudo });
 
     // Mettre à jour ownerPseudo sur tous les personnages du joueur
     const chars = (STATE.characters||[]).filter(c => c.uid === user.uid);
@@ -584,6 +613,7 @@ async function saveEmail() {
     await updateInCol('users', auth.currentUser.uid, { email: newEmail });
     const newProfile = { ...(STATE.profile||{}), email: newEmail };
     setProfile(newProfile);
+    await _syncCurrentMemberProfiles({ email: newEmail });
     closeModal();
     showNotif('Email mis à jour !', 'success');
     renderAccount();

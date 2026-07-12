@@ -16,6 +16,7 @@ import {
   setAdventure,
   setAdventures,
   setAdmin,
+  setProfile,
 } from './state.js';
 
 import { setCurrentAdventure, primeSessionData } from '../data/firestore.js';
@@ -84,6 +85,135 @@ async function _userProfileByUid(uid) {
   }
 }
 
+function _profileEmailOf(profiles = {}, uid = '') {
+  const p = profiles?.[uid];
+  if (!p || typeof p === 'string') return '';
+  return _emailRaw(p.email);
+}
+
+function _sameEmail(a = '', b = '') {
+  return Boolean(_emailKey(a) && _emailKey(a) === _emailKey(b));
+}
+
+function _uidAliasesForCurrentUser(uid = STATE.user?.uid) {
+  return _uniq([
+    uid,
+    ...(Array.isArray(STATE.profile?.previousUids) ? STATE.profile.previousUids : []),
+    ...(Array.isArray(STATE.profile?.uidAliases) ? STATE.profile.uidAliases : []),
+  ]);
+}
+
+async function _appendPreviousUidToProfile(uid, oldUid) {
+  if (!uid || !oldUid || uid === oldUid) return false;
+  try {
+    const ref = doc(db, 'users', uid);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return false;
+    const data = snap.data() || {};
+    const previousUids = _uniq([...(Array.isArray(data.previousUids) ? data.previousUids : []), oldUid]);
+    await updateDoc(ref, { previousUids });
+    if (STATE.user?.uid === uid) setProfile({ ...(STATE.profile || {}), previousUids });
+    return true;
+  } catch (e) {
+    console.warn('[adventure] previousUid cible non mémorisé', uid, oldUid, e?.code || e);
+    return false;
+  }
+}
+
+function _findSameEmailUid(adv, uid, email) {
+  if (!adv || !uid || !_emailKey(email)) return '';
+  const profiles = adv.memberProfiles || {};
+  const absorbed = new Set(Object.keys(adv.accountRelinks || {}));
+  const candidates = _uniq([
+    ...(adv.accessList || []),
+    ...(adv.players || []),
+    ...(adv.admins || []),
+    ...Object.keys(profiles),
+  ]);
+
+  return candidates.find(otherUid => {
+    if (!otherUid || otherUid === uid || absorbed.has(otherUid)) return false;
+    return _sameEmail(_profileEmailOf(profiles, otherUid), email);
+  }) || '';
+}
+
+function _replaceUidInList(arr = [], oldUid, newUid) {
+  const hadEither = (arr || []).includes(oldUid) || (arr || []).includes(newUid);
+  const out = (arr || []).filter(u => u !== oldUid && u !== newUid);
+  if (hadEither) out.push(newUid);
+  return _uniq(out);
+}
+
+async function _migrateSelfCharacters(adventureId, oldUid, newUid) {
+  const charsSnap = await getDocs(
+    query(collection(db, 'adventures', adventureId, 'characters'), where('uid', '==', oldUid))
+  );
+  if (charsSnap.empty) return 0;
+  const batch = writeBatch(db);
+  let migrated = 0;
+  charsSnap.forEach(d => {
+    batch.update(d.ref, { uid: newUid });
+    migrated++;
+  });
+  await batch.commit();
+  return migrated;
+}
+
+async function _selfMergeSameEmailAccount(adv, oldUid) {
+  const uid = STATE.user?.uid;
+  if (!uid || !adv?.id || !oldUid || oldUid === uid) return adv;
+
+  const self = _selfProfile();
+  const oldProfile = adv.memberProfiles?.[oldUid] || {};
+  if (!_sameEmail(self.email, oldProfile.email)) return adv;
+
+  const accessList = _replaceUidInList(adv.accessList, oldUid, uid);
+  const players    = _replaceUidInList(adv.players, oldUid, uid);
+  const admins     = _replaceUidInList(adv.admins, oldUid, uid);
+  const accessEmails = _uniq([...(adv.accessEmails || []), ..._emailKeys(self.email), ..._emailKeys(oldProfile.email)]);
+  const memberProfiles = { ...(adv.memberProfiles || {}) };
+  memberProfiles[uid] = {
+    ...(typeof oldProfile === 'object' ? oldProfile : {}),
+    ...self,
+    email: self.email || oldProfile.email || '',
+  };
+  delete memberProfiles[oldUid];
+
+  const accountRelinks = { ...(adv.accountRelinks || {}) };
+  delete accountRelinks[uid];
+  Object.entries(accountRelinks).forEach(([from, to]) => {
+    if (to === oldUid) delete accountRelinks[from];
+  });
+  accountRelinks[oldUid] = uid;
+  const lastSelfRelink = {
+    from: oldUid,
+    to: uid,
+    email: self.email || '',
+    at: new Date().toISOString(),
+  };
+
+  try {
+    await updateDoc(doc(db, 'adventures', adv.id), {
+      accessList,
+      players,
+      admins,
+      accessEmails,
+      memberProfiles,
+      accountRelinks,
+      lastSelfRelink,
+    });
+    try {
+      await _migrateSelfCharacters(adv.id, oldUid, uid);
+    } catch (e) {
+      console.warn('[adventure] migration des personnages du compte fantôme ignorée', adv.id, oldUid, e?.code || e);
+    }
+    return { ...adv, accessList, players, admins, accessEmails, memberProfiles, accountRelinks, lastSelfRelink };
+  } catch (e) {
+    console.warn('[adventure] fusion automatique de compte ignorée', adv.id, oldUid, e?.code || e);
+    return adv;
+  }
+}
+
 async function _getDocsSafe(q, { preferServer = false } = {}) {
   if (preferServer) {
     try {
@@ -112,7 +242,10 @@ function _mergeAdventureDocs(...snaps) {
 // Hors-ligne, on se rabat sur le cache (le joueur déjà venu garde l'accès).
 // Sans option : comportement historique (cache OK, erreur avalée en []).
 export async function loadUserAdventures(uid, { preferServer = false, email = '' } = {}) {
-  const uidQuery = query(collection(db, 'adventures'), where('accessList', 'array-contains', uid));
+  const uidAliases = _uidAliasesForCurrentUser(uid);
+  const uidQueries = uidAliases.map(alias =>
+    query(collection(db, 'adventures'), where('accessList', 'array-contains', alias))
+  );
   const emailKey = _emailKey(email || STATE.profile?.email || STATE.user?.email);
   const emailQuery = emailKey
     ? query(collection(db, 'adventures'), where('accessEmails', 'array-contains', emailKey))
@@ -120,7 +253,7 @@ export async function loadUserAdventures(uid, { preferServer = false, email = ''
 
   try {
     const snaps = await Promise.all([
-      _getDocsSafe(uidQuery, { preferServer }),
+      ...uidQueries.map(q => _getDocsSafe(q, { preferServer })),
       emailQuery ? _getDocsSafe(emailQuery, { preferServer }) : null,
     ]);
     return _mergeAdventureDocs(...snaps);
@@ -143,6 +276,14 @@ export async function repairCurrentUserAdventureLinks(adventures = []) {
   const repaired = [];
   for (const adv of adventures) {
     let cur = adv;
+
+    // 0. Fusion automatique : si le joueur revient avec un nouvel uid mais que
+    // l'ancien uid porte le même email dans memberProfiles, on remplace l'ancien
+    // uid par le nouveau au lieu de créer un second membre fantôme.
+    const previousUid = _findSameEmailUid(cur, uid, self.email);
+    if (previousUid) {
+      cur = await _selfMergeSameEmailAccount(cur, previousUid);
+    }
 
     // 1. Auto-rattachement : email invité mais uid pas encore dans accessList.
     // EXCEPTION : un uid ABSORBÉ (déjà fusionné vers un autre compte via
@@ -484,6 +625,7 @@ export async function relinkPlayerAccount(adventureId, oldUid, newUid) {
   const admins     = repl(adv.admins);
   const newProfile = await _userProfileByUid(newUid);
   const newEmail = newProfile?.email || '';
+  await _appendPreviousUidToProfile(newUid, oldUid);
   const accessEmails = _uniq([...(adv.accessEmails || []), ..._emailKeys(newEmail)]);
   // Re-key du profil dénormalisé oldUid→newUid (conserve le pseudo affiché).
   const memberProfiles = { ...(adv.memberProfiles || {}) };
