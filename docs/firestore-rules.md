@@ -61,6 +61,45 @@ function isAccountSelfRepair(before, after) {
          after.accessList.hasAny([request.auth.uid]) &&
          after.players.hasAll(before.players);
 }
+// Fusion self-service d'un compte fantome : si un joueur revient avec un nouvel
+// uid mais que l'ancien uid porte exactement le meme email dans memberProfiles,
+// il peut remplacer CET ancien uid par son uid courant. La cle lastSelfRelink
+// rend l'ancien uid explicite pour que la regle puisse tout borner.
+function isSameEmailSelfRelink(before, after) {
+  let marker = after.get("lastSelfRelink", {});
+  let oldUid = marker.get("from", "");
+  return isLoggedIn() &&
+         request.auth.token.email != null &&
+         marker.keys().hasOnly(["from", "to", "email", "at"]) &&
+         marker.get("to", "") == request.auth.uid &&
+         marker.get("email", "") == request.auth.token.email &&
+         oldUid is string &&
+         oldUid != request.auth.uid &&
+         (
+           before.accessList.hasAny([oldUid]) ||
+           before.players.hasAny([oldUid]) ||
+           before.admins.hasAny([oldUid])
+         ) &&
+         before.get("memberProfiles", {}).keys().hasAny([oldUid]) &&
+         before.get("memberProfiles", {})[oldUid].email == request.auth.token.email &&
+         after.diff(before).affectedKeys().hasOnly([
+           "accessList", "players", "admins", "accessEmails",
+           "memberProfiles", "accountRelinks", "lastSelfRelink"
+         ]) &&
+         before.accessList.toSet().difference(after.accessList.toSet()).hasOnly([oldUid]) &&
+         after.accessList.toSet().difference(before.accessList.toSet()).hasOnly([request.auth.uid]) &&
+         before.players.toSet().difference(after.players.toSet()).hasOnly([oldUid]) &&
+         after.players.toSet().difference(before.players.toSet()).hasOnly([request.auth.uid]) &&
+         before.admins.toSet().difference(after.admins.toSet()).hasOnly([oldUid]) &&
+         after.admins.toSet().difference(before.admins.toSet()).hasOnly([request.auth.uid]) &&
+         after.accessEmails.hasAll(before.accessEmails) &&
+         request.auth.token.email in after.accessEmails &&
+         after.get("accountRelinks", {})[oldUid] == request.auth.uid &&
+         after.get("memberProfiles", {}).diff(before.get("memberProfiles", {}))
+           .affectedKeys().hasOnly([oldUid, request.auth.uid]) &&
+         after.get("memberProfiles", {}).keys().hasAny([request.auth.uid]) &&
+         after.get("memberProfiles", {})[request.auth.uid].email == request.auth.token.email;
+}
 // Invitation en attente : l'utilisateur est invité (email dans invitedEmails)
 // mais pas encore membre. Sert à autoriser get/list pour afficher l'invitation.
 function hasEmailInvite(data) {
@@ -131,6 +170,17 @@ function isInviteDecline(before, after) {
 function isCharacterUidSelfRepair(before, after) {
   return isLoggedIn() &&
          hasPreviousUid(before.uid) &&
+         after.diff(before).affectedKeys().hasOnly(["uid"]) &&
+         after.uid == request.auth.uid;
+}
+function isCharacterUidSameEmailRelink(adventureId, before, after) {
+  let adv = get(/databases/$(database)/documents/adventures/$(adventureId)).data;
+  let marker = adv.get("lastSelfRelink", {});
+  return isLoggedIn() &&
+         request.auth.token.email != null &&
+         marker.get("from", "") == before.uid &&
+         marker.get("to", "") == request.auth.uid &&
+         marker.get("email", "") == request.auth.token.email &&
          after.diff(before).affectedKeys().hasOnly(["uid"]) &&
          after.uid == request.auth.uid;
 }
@@ -287,6 +337,7 @@ match /adventures/{adventureId} {
                     request.resource.data.accessList == [request.auth.uid]);
   allow update: if isAdvAdmin(adventureId) ||
                    isAccountSelfRepair(resource.data, request.resource.data) ||
+                   isSameEmailSelfRelink(resource.data, request.resource.data) ||
                    isInviteAccept(resource.data, request.resource.data) ||
                    isInviteDecline(resource.data, request.resource.data) ||
                    isMemberProfileSelfUpdate(resource.data, request.resource.data) ||
@@ -364,6 +415,7 @@ match /adventures/{adventureId} {
       resource.data.uid == request.auth.uid ||
       isAdvAdmin(adventureId) ||
       isCharacterUidSelfRepair(resource.data, request.resource.data) ||
+      isCharacterUidSameEmailRelink(adventureId, resource.data, request.resource.data) ||
       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['inventaire', 'compte']) ||
       // Dépense de PM par le propriétaire ou le délégué du token lanceur.
       // `vttControlTokenId` fournit à la règle le token précis à vérifier.

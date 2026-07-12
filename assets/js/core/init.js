@@ -243,7 +243,17 @@ async function loadProfile(user) {
   const snap = await getDoc(ref);
 
   if (snap.exists()) {
-    setProfile(snap.data());
+    const data = snap.data() || {};
+    const patch = {};
+    if (user.email && data.email !== user.email) patch.email = user.email;
+    if (Object.keys(patch).length) {
+      try {
+        await updateDoc(ref, patch);
+      } catch (error) {
+        console.warn("[init] profile email sync ignored:", error?.code || error);
+      }
+    }
+    setProfile({ ...data, ...patch, uid: data.uid || user.uid });
     return;
   }
 
