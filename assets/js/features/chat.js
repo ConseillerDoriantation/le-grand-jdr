@@ -444,20 +444,30 @@ async function _markRead(convoId) {
 async function chatStartDm(btn) {
   const other = btn?.dataset?.uid; if (!other || other === _uid || !_uid) return;
   const id = _dmId(_uid, other);
+  // Le DM existe déjà (déjà dans mes convos via le listener array-contains) → on ouvre.
+  // On NE lit PAS le doc : lire un doc inexistant fait échouer la règle read
+  // (resource == null) → permission-denied. Sinon on le CRÉE (règle create OK).
+  if (_convoById(id)) { _teardownConvo(); chatOpenConvo({ dataset: { convo: id } }); return; }
   const ref = _convoRef(id); if (!ref) return;
   try {
-    const snap = await getDoc(ref);
-    if (!snap.exists()) {
-      await setDoc(ref, {
-        type: 'dm', name: '', members: [_uid, other], createdBy: _uid,
-        lastText: '', lastSenderName: '', lastSenderId: '', lastAt: serverTimestamp(),
-      });
-    }
-    // Optimiste : présent tout de suite dans _groups (le listener remplacera).
-    if (!_convoById(id)) _groups = [{ id, type: 'dm', members: [_uid, other], name: '', lastAt: 0 }, ..._groups];
+    await setDoc(ref, {
+      type: 'dm', name: '', members: [_uid, other], createdBy: _uid,
+      lastText: '', lastSenderName: '', lastSenderId: '', lastAt: serverTimestamp(),
+    });
+    // Optimiste : présent tout de suite (le listener le confirmera).
+    _groups = [{ id, type: 'dm', members: [_uid, other], name: '', lastAt: 0 }, ..._groups];
     _teardownConvo();
     chatOpenConvo({ dataset: { convo: id } });
-  } catch (e) { console.warn('[chat] startDm', e?.code || e); showNotif('Ouverture du DM impossible (règles Firestore ?).', 'error'); }
+  } catch (e) {
+    console.warn('[chat] startDm', e?.code || e);
+    // Cas rare : l'autre vient de créer le DM (course) → il apparaîtra via le
+    // listener ; on tente une ouverture directe plutôt qu'une erreur.
+    if (e?.code === 'permission-denied' || e?.code === 'already-exists') {
+      _teardownConvo(); chatOpenConvo({ dataset: { convo: id } });
+    } else {
+      showNotif('Ouverture du DM impossible (règles Firestore ?).', 'error');
+    }
+  }
 }
 
 // ── Réactions emoji ─────────────────────────────────────────────────────────
