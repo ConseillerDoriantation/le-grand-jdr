@@ -11,6 +11,7 @@ import { showNotif } from '../../shared/notifications.js';
 import { promptModal } from '../../shared/modal.js';
 import { db, doc, setDoc, updateDoc } from '../../config/firebase.js';
 import { _pgRef } from './vtt-refs.js';
+import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile, fileKey } from '../../shared/github-folder.js';
 
 export let _libFolder = null;   // null = racine, string = folderId ouvert
 let _libOpen   = true;   // section collapsible dans le tray
@@ -75,6 +76,36 @@ export async function _vttLibNewFolder() {
   if (!name) return;
   VS.mapLib.folders.push({ id: crypto.randomUUID(), name });
   _saveMapLib();
+}
+
+// Importe toutes les images d'un dossier du repo GitHub dans la bibliothèque
+// (dédup par URL). Ajoutées dans le dossier courant (_libFolder) ou en racine.
+// Chemin mémorisé en localStorage.
+export async function _vttLibImportGithub() {
+  const KEY = 'vtt-maplib-gh-folder';
+  const def = localStorage.getItem(KEY) || 'images/maps';
+  const path = (await promptModal('Dossier du repo à importer (ex : images/maps) :',
+    { title: 'Importer des images', default: def, placeholder: 'images/maps' }))?.trim();
+  if (!path) return;
+  localStorage.setItem(KEY, path);
+  showNotif('Lecture du dossier…', 'info');
+  let files;
+  try { files = await listGithubFolder(path, { exts: GH_IMAGE_EXTS }); }
+  catch (e) { showNotif(e.message, 'error'); return; }
+  if (!files.length) { showNotif('Aucune image dans ce dossier', 'info'); return; }
+  const seen = new Set((VS.mapLib.images || []).map(i => fileKey(i.url)));
+  const added = [];
+  for (const f of files) {
+    const k = fileKey(f.url);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    added.push({ id: `${Date.now()}${Math.random().toString(36).slice(2, 6)}`, url: f.url, name: prettyNameFromFile(f.name), folderId: _libFolder || null });
+  }
+  if (!added.length) { showNotif('Toutes ces images sont déjà présentes', 'info'); return; }
+  VS.mapLib.images = [...(VS.mapLib.images || []), ...added];
+  await _saveMapLib();
+  _renderLibSection();
+  showNotif(`✅ ${added.length} image(s) importée(s)`, 'success');
 }
 
 export function _vttLibDelFolder(id) {
