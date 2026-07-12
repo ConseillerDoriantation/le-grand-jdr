@@ -9,27 +9,36 @@
 //   quand il est ouvert. Écriture d'état de lecture ~à l'ouverture/fermeture.
 //
 // Données (scope aventure) :
-//   adventures/{advId}/chatMessages/{id} : { convoId, text, senderId, senderName, at }
-//   adventures/{advId}/chatConvos/{id}   : { type:'group', name, members[], createdBy,
+//   adventures/{advId}/chatMessages/{id} : { convoId, text, senderId, senderName, at,
+//                                            editedAt?, deleted?, reactions?:{uid:emoji} }
+//   adventures/{advId}/chatConvos/{id}   : { type:'group'|'dm', name, members[], createdBy,
 //                                            lastText, lastSenderName, lastSenderId, lastAt }
+//     · DM : id déterministe `dm_<uidA>_<uidB>` (1 par paire), name vide (affiche l'autre).
 //   adventures/{advId}/chatReads/{uid}   : { [convoId]: millis }
+//
+// Fonctions : chat d'aventure + groupes + DM 1-à-1 · édition/suppression de ses
+// messages · réactions emoji · gestion de groupe (renommer / membres / quitter /
+// supprimer). Edit/delete/réactions/gestion nécessitent les règles Firestore MAJ.
 // ══════════════════════════════════════════════════════════════════════════════
 import {
   db, collection, query, where, orderBy, limit, onSnapshot, addDoc, updateDoc,
-  serverTimestamp, doc, getDoc, setDoc,
+  serverTimestamp, doc, getDoc, setDoc, deleteDoc, deleteField,
 } from '../config/firebase.js';
 import { getCurrentAdventureId } from '../data/firestore.js';
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { showNotif } from '../shared/notifications.js';
+import { confirmModal } from '../shared/modal.js';
 import { avatarSrcOf } from '../shared/avatar.js';
 import { _esc } from '../shared/html.js';
 
 const ADV = 'adventure';   // id de la conversation d'aventure
 const HISTORY = 40;
+const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🎉'];   // palette de réactions
 
-let _uid = null, _open = false, _view = 'list';   // 'list' | 'convo' | 'new'
-let _openId = null;                                // conv ouverte (ADV | groupId)
+let _uid = null, _open = false, _view = 'list';   // 'list' | 'convo' | 'new' | 'manage'
+let _openId = null;                                // conv ouverte (ADV | convoId)
+let _editingId = null;                             // message en cours d'édition (id) | null
 let _advMsgs = [];                                 // messages Aventure (live session)
 let _groups  = [];                                 // convos de groupe où je suis membre
 let _convoMsgs = [];                               // messages du GROUPE ouvert
@@ -43,7 +52,9 @@ const _adv = () => getCurrentAdventureId();
 const _msgsCol  = () => { const a = _adv(); return a ? collection(db, 'adventures', a, 'chatMessages') : null; };
 const _convosCol = () => { const a = _adv(); return a ? collection(db, 'adventures', a, 'chatConvos') : null; };
 const _convoRef = (id) => { const a = _adv(); return a ? doc(db, 'adventures', a, 'chatConvos', id) : null; };
+const _msgRef   = (id) => { const a = _adv(); return a ? doc(db, 'adventures', a, 'chatMessages', id) : null; };
 const _readRef  = () => { const a = _adv(); return (a && _uid) ? doc(db, 'adventures', a, 'chatReads', _uid) : null; };
+const _dmId = (a, b) => 'dm_' + [a, b].sort().join('_');   // id déterministe → 1 DM par paire
 const _atMillis = (m) => (m?.at?.toMillis ? m.at.toMillis() : (Number(m?.at) || 0));
 const _lastMillis = (g) => (g?.lastAt?.toMillis ? g.lastAt.toMillis() : (Number(g?.lastAt) || 0));
 
@@ -109,6 +120,7 @@ function _teardownListeners() {
 function _onData(source) {
   if (!_open) { _renderBubble(); _notify(); return; }
   if (_view === 'list') _renderList();
+  else if (_view === 'manage' && source === 'groups') _renderManage();
   else if (_view === 'convo') {
     // Rafraîchit le fil si la conv ouverte est concernée
     if ((_openId === ADV && source === ADV) || (_openId !== ADV && source === 'convo')) { _renderMessages(); _markReadLocal(_openId); }
@@ -132,11 +144,11 @@ function _renderBubble() {
     <span class="chat-bubble-ico">💬</span>${n > 0 ? `<span class="chat-badge">${n > 99 ? '99+' : n}</span>` : ''}</button>`;
 }
 
-function _panelShell(title, headLeft, body, foot = '') {
+function _panelShell(title, headLeft, body, foot = '', headRight = '') {
   return `<div class="chat-panel" role="dialog" aria-label="Discussions">
     <div class="chat-head">
       <span class="chat-head-left">${headLeft}<span class="chat-head-title">${_esc(title)}</span></span>
-      <button class="chat-close" data-action="chatToggle" aria-label="Fermer">✕</button>
+      <span class="chat-head-right">${headRight}<button class="chat-close" data-action="chatToggle" aria-label="Fermer">✕</button></span>
     </div>
     ${body}${foot}
   </div>`;
@@ -149,9 +161,12 @@ function _renderList() {
   const advN = _advUnread();
   const advRow = _convoRow(ADV, '💬', 'Chat de l\'aventure', advPrev, advN);
   const groupRows = _groups.map(g => {
-    const prev = g.lastText ? `${g.lastSenderName || ''} : ${g.lastText}` : 'Nouveau groupe';
-    const ico = g.lastSenderId ? `<img class="chat-conv-avimg" src="${_esc(avatarSrcOf(_profileOf(g.lastSenderId)))}" alt="">` : '👥';
-    return _convoRow(g.id, ico, g.name || 'Groupe', prev, _groupUnread(g) ? '•' : 0);
+    const isDm = g.type === 'dm';
+    const prev = g.lastText ? `${g.lastSenderName || ''} : ${g.lastText}` : (isDm ? 'Nouvelle discussion' : 'Nouveau groupe');
+    // DM : avatar de l'autre membre ; groupe : avatar du dernier auteur.
+    const avUid = isDm ? _otherDmUid(g) : g.lastSenderId;
+    const ico = avUid ? `<img class="chat-conv-avimg" src="${_esc(avatarSrcOf(_profileOf(avUid)))}" alt="">` : (isDm ? '👤' : '👥');
+    return _convoRow(g.id, ico, _convoTitle(g), prev, _groupUnread(g) ? '•' : 0);
   }).join('');
   el.innerHTML = _panelShell('Discussions', '',
     `<div class="chat-convo-list">${advRow}${groupRows}</div>`,
@@ -170,11 +185,22 @@ function _convoRow(id, icon, name, preview, badge) {
 // Vue CONVERSATION : fil de messages
 function _renderConvo() {
   const el = document.getElementById('chat-widget'); if (!el) return;
-  const title = _openId === ADV ? 'Chat de l\'aventure' : (_groups.find(g => g.id === _openId)?.name || 'Groupe');
+  const g = _convoById(_openId);
+  const title = _openId === ADV ? 'Chat de l\'aventure' : _convoTitle(g);
+  // ⚙️ Gérer : uniquement pour un vrai GROUPE (pas l'aventure, pas un DM).
+  const gear = (g && g.type !== 'dm')
+    ? '<button class="chat-gear" data-action="chatManage" title="Gérer le groupe" aria-label="Gérer le groupe">⚙️</button>' : '';
   el.innerHTML = _panelShell(title,
     '<button class="chat-back" data-action="chatBack" aria-label="Retour">‹</button>',
     `<div class="chat-msgs" id="chat-msgs"></div>`,
-    `<form class="chat-form" id="chat-form"><input id="chat-input" class="chat-input" placeholder="Écris un message…" autocomplete="off" maxlength="1000"><button type="submit" class="chat-send" aria-label="Envoyer">➤</button></form>`);
+    `<form class="chat-form" id="chat-form">
+       <div class="chat-edit-bar" id="chat-edit-bar" hidden>✏️ Édition — <button type="button" class="chat-edit-cancel" data-action="chatCancelEdit">annuler</button></div>
+       <div class="chat-form-row">
+         <input id="chat-input" class="chat-input" placeholder="Écris un message…" autocomplete="off" maxlength="1000">
+         <button type="submit" class="chat-send" aria-label="Envoyer">➤</button>
+       </div>
+     </form>`,
+    gear);
   el.querySelector('#chat-form')?.addEventListener('submit', (e) => { e.preventDefault(); _send(); });
   _renderMessages();
   el.querySelector('#chat-input')?.focus();
@@ -195,17 +221,57 @@ function _profileOf(uid) {
   const p = (STATE.adventure?.memberProfiles || {})[uid];
   return (p && typeof p === 'object') ? p : {};
 }
+function _nameOf(uid) { const p = _profileOf(uid); return p.pseudo || p.email || `Joueur ${String(uid || '').slice(0, 6)}…`; }
+
+// Groupe ↔ DM : titre + autre interlocuteur. Un DM (type:'dm') affiche l'AUTRE
+// membre (nom + avatar) ; un groupe affiche son nom.
+const _convoById = (id) => _groups.find(g => g.id === id) || null;
+function _otherDmUid(g) { return (g?.members || []).find(u => u !== _uid) || null; }
+function _convoTitle(g) {
+  if (!g) return 'Discussion';
+  if (g.id === ADV) return 'Chat de l\'aventure';
+  if (g.type === 'dm') return _nameOf(_otherDmUid(g));
+  return g.name || 'Groupe';
+}
+
+// Agrège reactions {uid:emoji} → puces {emoji: count}, la mienne surlignée.
+function _reactionsHtml(m) {
+  const r = m.reactions || {};
+  const counts = {};
+  for (const u in r) { const e = r[u]; if (e) counts[e] = (counts[e] || 0) + 1; }
+  const emojis = Object.keys(counts);
+  if (!emojis.length) return '';
+  const mine = r[_uid] || '';
+  return `<span class="chat-msg-reacts">${emojis.map(e =>
+    `<button class="chat-react-chip${e === mine ? ' is-mine' : ''}" data-action="chatReact" data-msg="${_esc(m.id)}" data-emo="${_esc(e)}">${e} ${counts[e]}</button>`
+  ).join('')}</span>`;
+}
 
 function _msgRow(m) {
   const mine = m.senderId === _uid;
   const time = new Date(_atMillis(m) || Date.now()).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   const av = mine ? '' : `<img class="chat-msg-av" src="${_esc(avatarSrcOf(_profileOf(m.senderId)))}" alt="" loading="lazy">`;
-  return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}">
-    ${av}
-    <span class="chat-msg-content">
-      ${mine ? '' : `<span class="chat-msg-author">${_esc(m.senderName || '?')}</span>`}
-      <span class="chat-msg-bubble">${_esc(m.text || '')}</span>
-      <span class="chat-msg-time">${time}</span>
+  const author = mine ? '' : `<span class="chat-msg-author">${_esc(m.senderName || '?')}</span>`;
+  if (m.deleted) {
+    return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}">${av}
+      <span class="chat-msg-content">${author}
+        <span class="chat-msg-bubble chat-msg-bubble--del">Message supprimé</span>
+      </span></div>`;
+  }
+  const edited = m.editedAt ? ' <span class="chat-msg-edited">(modifié)</span>' : '';
+  const reactBtns = REACTIONS.map(e =>
+    `<button class="chat-act-emo" data-action="chatReact" data-msg="${_esc(m.id)}" data-emo="${e}" title="Réagir ${e}">${e}</button>`).join('');
+  const ownBtns = mine
+    ? `<button class="chat-act-btn" data-action="chatEditMsg" data-msg="${_esc(m.id)}" title="Modifier">✏️</button>
+       <button class="chat-act-btn" data-action="chatDeleteMsg" data-msg="${_esc(m.id)}" title="Supprimer">🗑️</button>` : '';
+  return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}">${av}
+    <span class="chat-msg-content">${author}
+      <span class="chat-msg-bubble-wrap">
+        <span class="chat-msg-bubble">${_esc(m.text || '')}</span>
+        <span class="chat-msg-actions">${reactBtns}${ownBtns}</span>
+      </span>
+      ${_reactionsHtml(m)}
+      <span class="chat-msg-time">${time}${edited}</span>
     </span></div>`;
 }
 
@@ -223,18 +289,21 @@ function _renderNew() {
     ? members.map(u => {
         const p = profOf(u);
         const name = p.pseudo || p.email || `Joueur ${u.slice(0, 6)}…`;
-        return `<label class="chat-member">
-          <input type="checkbox" value="${_esc(u)}">
-          <img class="chat-member-av" src="${_esc(avatarSrcOf(p))}" alt="" loading="lazy">
-          <span class="chat-member-name">${_esc(name)}</span>
-        </label>`;
+        return `<div class="chat-member-row">
+          <label class="chat-member">
+            <input type="checkbox" value="${_esc(u)}">
+            <img class="chat-member-av" src="${_esc(avatarSrcOf(p))}" alt="" loading="lazy">
+            <span class="chat-member-name">${_esc(name)}</span>
+          </label>
+          <button type="button" class="chat-mini-btn" data-action="chatStartDm" data-uid="${_esc(u)}" title="Message privé">💬</button>
+        </div>`;
       }).join('')
     : `<div class="chat-empty">Aucun autre membre à ajouter.</div>`;
   el.innerHTML = _panelShell('Nouvelle discussion',
     '<button class="chat-back" data-action="chatBack" aria-label="Retour">‹</button>',
     `<div class="chat-new">
        <input id="chat-new-name" class="chat-input chat-new-name" placeholder="Nom du groupe" maxlength="40">
-       <div class="chat-new-lbl">Membres</div>
+       <div class="chat-new-lbl">Membres <span style="font-weight:400;opacity:.7">— coche pour un groupe, ou 💬 pour un message privé</span></div>
        <div class="chat-member-list" id="chat-members">${rows}</div>
      </div>`,
     `<div class="chat-list-foot"><button class="chat-newbtn" data-action="chatCreateGroup">Créer le groupe</button></div>`);
@@ -323,6 +392,7 @@ async function _send() {
   const inp = document.getElementById('chat-input');
   const text = (inp?.value || '').trim();
   if (!text || !_openId) return;
+  if (_editingId) { _saveEdit(text); return; }        // mode édition d'un message
   const col = _msgsCol(); if (!col || !_uid) return;
   inp.value = '';
   const senderName = STATE.profile?.pseudo || STATE.user?.email?.split('@')[0] || 'Joueur';
@@ -352,10 +422,182 @@ async function _markRead(convoId) {
   try { await setDoc(ref, { [convoId]: _reads[convoId] }, { merge: true }); } catch { /* non bloquant */ }
 }
 
+// ── Messages privés (DM) ────────────────────────────────────────────────────
+// Convo déterministe (1 par paire). Créée à la volée si absente, puis ouverte.
+async function chatStartDm(btn) {
+  const other = btn?.dataset?.uid; if (!other || other === _uid || !_uid) return;
+  const id = _dmId(_uid, other);
+  const ref = _convoRef(id); if (!ref) return;
+  try {
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      await setDoc(ref, {
+        type: 'dm', name: '', members: [_uid, other], createdBy: _uid,
+        lastText: '', lastSenderName: '', lastSenderId: '', lastAt: serverTimestamp(),
+      });
+    }
+    // Optimiste : présent tout de suite dans _groups (le listener remplacera).
+    if (!_convoById(id)) _groups = [{ id, type: 'dm', members: [_uid, other], name: '', lastAt: 0 }, ..._groups];
+    _teardownConvo();
+    chatOpenConvo({ dataset: { convo: id } });
+  } catch (e) { console.warn('[chat] startDm', e?.code || e); showNotif('Ouverture du DM impossible (règles Firestore ?).', 'error'); }
+}
+
+// ── Réactions emoji ─────────────────────────────────────────────────────────
+async function chatReact(btn) {
+  const id = btn?.dataset?.msg, emo = btn?.dataset?.emo;
+  if (!id || !emo || !_uid) return;
+  const msgs = _openId === ADV ? _advMsgs : _convoMsgs;
+  const m = msgs.find(x => x.id === id); if (!m || m.deleted) return;
+  const cur = (m.reactions || {})[_uid] || '';
+  const ref = _msgRef(id); if (!ref) return;
+  const field = `reactions.${_uid}`;
+  try { await updateDoc(ref, { [field]: cur === emo ? deleteField() : emo }); }
+  catch (e) { console.warn('[chat] react', e?.code || e); showNotif('Réaction refusée — règles Firestore ?', 'error'); }
+}
+
+// ── Édition / suppression de SES messages ───────────────────────────────────
+function chatEditMsg(btn) {
+  const id = btn?.dataset?.msg; if (!id) return;
+  const msgs = _openId === ADV ? _advMsgs : _convoMsgs;
+  const m = msgs.find(x => x.id === id); if (!m || m.senderId !== _uid || m.deleted) return;
+  _editingId = id;
+  const inp = document.getElementById('chat-input'); if (inp) { inp.value = m.text || ''; inp.focus(); }
+  document.getElementById('chat-edit-bar')?.removeAttribute('hidden');
+}
+function _cancelEditUi() { _editingId = null; document.getElementById('chat-edit-bar')?.setAttribute('hidden', ''); }
+function chatCancelEdit() { _cancelEditUi(); const inp = document.getElementById('chat-input'); if (inp) inp.value = ''; }
+
+async function _saveEdit(text) {
+  const id = _editingId; const ref = _msgRef(id); if (!ref) return;
+  try {
+    await updateDoc(ref, { text, editedAt: serverTimestamp() });
+    _cancelEditUi();
+    const inp = document.getElementById('chat-input'); if (inp) inp.value = '';
+    // Si c'était le dernier message d'un groupe/DM, met l'aperçu à jour.
+    if (_openId !== ADV) {
+      const msgs = _convoMsgs; const last = msgs[msgs.length - 1];
+      if (last && last.id === id) { const r = _convoRef(_openId); if (r) updateDoc(r, { lastText: text }).catch(() => {}); }
+    }
+  } catch (e) { console.warn('[chat] edit', e?.code || e); showNotif('Modification refusée — règles Firestore ?', 'error'); }
+}
+
+async function chatDeleteMsg(btn) {
+  const id = btn?.dataset?.msg; if (!id) return;
+  const msgs = _openId === ADV ? _advMsgs : _convoMsgs;
+  const m = msgs.find(x => x.id === id); if (!m || m.senderId !== _uid) return;
+  if (!await confirmModal('Supprimer ce message ?')) return;
+  if (_editingId === id) chatCancelEdit();
+  const ref = _msgRef(id); if (!ref) return;
+  try { await updateDoc(ref, { deleted: true, text: '' }); }
+  catch (e) { console.warn('[chat] del', e?.code || e); showNotif('Suppression refusée — règles Firestore ?', 'error'); }
+}
+
+// ── Gestion d'un groupe ─────────────────────────────────────────────────────
+function chatManage() { const g = _convoById(_openId); if (!g || g.type === 'dm') return; _view = 'manage'; _renderManage(); }
+function chatManageBack() { _view = 'convo'; _renderConvo(); }
+
+function _renderManage() {
+  const el = document.getElementById('chat-widget'); if (!el) return;
+  const g = _convoById(_openId);
+  if (!g || g.type === 'dm') { chatBack(); return; }
+  const amCreator = g.createdBy === _uid;
+  const members = g.members || [];
+  const memberRows = members.map(u => `
+    <div class="chat-member-row">
+      <span class="chat-member">
+        <img class="chat-member-av" src="${_esc(avatarSrcOf(_profileOf(u)))}" alt="" loading="lazy">
+        <span class="chat-member-name">${_esc(_nameOf(u))}${u === g.createdBy ? ' <span class="chat-tag">créateur</span>' : ''}</span>
+      </span>
+      ${(amCreator && u !== _uid) ? `<button class="chat-mini-btn" data-action="chatRemoveMember" data-uid="${_esc(u)}" title="Retirer">✕</button>` : ''}
+    </div>`).join('');
+  const profiles = STATE.adventure?.memberProfiles || {};
+  const addable = amCreator ? Object.keys(profiles).filter(u => u && !members.includes(u)) : [];
+  const addRows = addable.map(u => `
+    <div class="chat-member-row">
+      <span class="chat-member">
+        <img class="chat-member-av" src="${_esc(avatarSrcOf(_profileOf(u)))}" alt="" loading="lazy">
+        <span class="chat-member-name">${_esc(_nameOf(u))}</span>
+      </span>
+      <button class="chat-mini-btn" data-action="chatAddMember" data-uid="${_esc(u)}" title="Ajouter">＋</button>
+    </div>`).join('');
+  el.innerHTML = _panelShell('Gérer le groupe',
+    '<button class="chat-back" data-action="chatManageBack" aria-label="Retour">‹</button>',
+    `<div class="chat-new">
+       ${amCreator ? `<div class="chat-new-lbl">Nom du groupe</div>
+       <div class="chat-form-row">
+         <input id="chat-mng-name" class="chat-input" maxlength="40" value="${_esc(g.name || '')}">
+         <button class="chat-send" data-action="chatRenameGroup" title="Renommer" aria-label="Renommer">✓</button>
+       </div>` : ''}
+       <div class="chat-new-lbl">Membres (${members.length})</div>
+       <div class="chat-member-list">${memberRows}</div>
+       ${addable.length ? `<div class="chat-new-lbl">Ajouter un membre</div><div class="chat-member-list">${addRows}</div>` : ''}
+     </div>`,
+    `<div class="chat-list-foot chat-manage-foot">
+       <button class="chat-newbtn chat-newbtn--danger" data-action="chatLeaveGroup">Quitter</button>
+       ${amCreator ? '<button class="chat-newbtn chat-newbtn--danger" data-action="chatDeleteGroup">Supprimer le groupe</button>' : ''}
+     </div>`);
+}
+
+async function chatRenameGroup() {
+  const name = (document.getElementById('chat-mng-name')?.value || '').trim();
+  if (!name) { showNotif('Le nom ne peut pas être vide.', 'error'); return; }
+  const ref = _convoRef(_openId); if (!ref) return;
+  try { await updateDoc(ref, { name }); showNotif('Groupe renommé.', 'success'); }
+  catch (e) { console.warn('[chat] rename', e?.code || e); showNotif('Renommage refusé — règles Firestore ?', 'error'); }
+}
+
+async function _updateMembers(members, okMsg) {
+  const ref = _convoRef(_openId); if (!ref) return;
+  try { await updateDoc(ref, { members }); showNotif(okMsg, 'success'); }
+  catch (e) { console.warn('[chat] members', e?.code || e); showNotif('Modification refusée — règles Firestore ?', 'error'); }
+}
+async function chatAddMember(btn) {
+  const u = btn?.dataset?.uid; const g = _convoById(_openId); if (!u || !g) return;
+  await _updateMembers([...new Set([...(g.members || []), u])], 'Membre ajouté.');
+}
+async function chatRemoveMember(btn) {
+  const u = btn?.dataset?.uid; const g = _convoById(_openId); if (!u || !g) return;
+  await _updateMembers((g.members || []).filter(x => x !== u), 'Membre retiré.');
+}
+
+async function chatLeaveGroup() {
+  const g = _convoById(_openId); if (!g) return;
+  if (!await confirmModal('Quitter ce groupe ?')) return;
+  const ref = _convoRef(_openId); if (!ref) return;
+  try {
+    await updateDoc(ref, { members: (g.members || []).filter(x => x !== _uid) });
+    _teardownConvo(); _view = 'list'; _openId = null; _renderList();
+    showNotif('Tu as quitté le groupe.', 'success');
+  } catch (e) { console.warn('[chat] leave', e?.code || e); showNotif('Impossible de quitter — règles Firestore ?', 'error'); }
+}
+async function chatDeleteGroup() {
+  const g = _convoById(_openId); if (!g || g.createdBy !== _uid) return;
+  if (!await confirmModal('Supprimer définitivement ce groupe ?')) return;
+  const ref = _convoRef(_openId); if (!ref) return;
+  try {
+    await deleteDoc(ref);
+    _teardownConvo(); _view = 'list'; _openId = null; _renderList();
+    showNotif('Groupe supprimé.', 'success');
+  } catch (e) { console.warn('[chat] delGroup', e?.code || e); showNotif('Suppression refusée — règles Firestore ?', 'error'); }
+}
+
 registerActions({
   chatToggle:      () => chatToggle(),
   chatBack:        () => chatBack(),
   chatOpenConvo:   (btn) => chatOpenConvo(btn),
   chatNew:         () => chatNew(),
   chatCreateGroup: () => chatCreateGroup(),
+  chatStartDm:     (btn) => chatStartDm(btn),
+  chatReact:       (btn) => chatReact(btn),
+  chatEditMsg:     (btn) => chatEditMsg(btn),
+  chatDeleteMsg:   (btn) => chatDeleteMsg(btn),
+  chatCancelEdit:  () => chatCancelEdit(),
+  chatManage:      () => chatManage(),
+  chatManageBack:  () => chatManageBack(),
+  chatRenameGroup: () => chatRenameGroup(),
+  chatAddMember:   (btn) => chatAddMember(btn),
+  chatRemoveMember:(btn) => chatRemoveMember(btn),
+  chatLeaveGroup:  () => chatLeaveGroup(),
+  chatDeleteGroup: () => chatDeleteGroup(),
 });
