@@ -277,8 +277,59 @@ function _roomTargetLabel(slug, b, isUnlimited) {
   return `Niv. ${lbl(s.niveau)}`;
 }
 
+function _decodeBastionEntities(value = '') {
+  let text = String(value ?? '');
+  const named = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    nbsp: ' ',
+  };
+  for (let i = 0; i < 3; i++) {
+    const next = text.replace(/&(#(\d+)|#x([0-9a-f]+)|[a-z]+);/gi, (m, body, dec, hex) => {
+      if (dec) return String.fromCodePoint(Number(dec));
+      if (hex) return String.fromCodePoint(parseInt(hex, 16));
+      return named[body.toLowerCase()] ?? m;
+    });
+    if (next === text) break;
+    text = next;
+  }
+  return text;
+}
+
+function _mojibakeScore(text = '') {
+  return (String(text).match(/[ÃÂâð]|�/g) || []).length;
+}
+
+function _repairBastionText(value = '') {
+  let text = _decodeBastionEntities(value);
+  if (!_mojibakeScore(text)) return text;
+
+  if ([...text].every(ch => ch.codePointAt(0) <= 255) && typeof TextDecoder !== 'undefined') {
+    try {
+      const bytes = Uint8Array.from([...text], ch => ch.codePointAt(0));
+      const fixed = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      if (_mojibakeScore(fixed) < _mojibakeScore(text)) return fixed;
+    } catch (_) {}
+  }
+
+  const replacements = [
+    ['Ã€', 'À'], ['Ã‚', 'Â'], ['Ã‡', 'Ç'], ['Ãˆ', 'È'], ['Ã‰', 'É'], ['ÃŠ', 'Ê'], ['Ã‹', 'Ë'],
+    ['ÃŽ', 'Î'], ['Ã', 'Ï'], ['Ã”', 'Ô'], ['Ã™', 'Ù'], ['Ã›', 'Û'], ['Ãœ', 'Ü'],
+    ['Ã ', 'à'], ['Ã¢', 'â'], ['Ã§', 'ç'], ['Ã¨', 'è'], ['Ã©', 'é'], ['Ãª', 'ê'], ['Ã«', 'ë'],
+    ['Ã®', 'î'], ['Ã¯', 'ï'], ['Ã´', 'ô'], ['Ã¶', 'ö'], ['Ã¹', 'ù'], ['Ã»', 'û'], ['Ã¼', 'ü'],
+    ['Å“', 'œ'], ['Å’', 'Œ'], ['Ã¦', 'æ'], ['Ã†', 'Æ'],
+    ['Â·', '·'], ['Â«', '«'], ['Â»', '»'], ['Â°', '°'], ['Â²', '²'], ['Â ', ' '],
+    ['â€“', '-'], ['â€”', '-'], ['â€¦', '…'], ['â€˜', "'"], ['â€™', "'"], ['â€œ', '"'], ['â€', '"'],
+  ];
+  for (const [from, to] of replacements) text = text.split(from).join(to);
+  return text;
+}
+
 function _addHistorique(b, type, msg) {
-  const e = { week: b.semaine, type, msg, ts: Date.now() };
+  const e = { week: b.semaine, type, msg: _repairBastionText(msg), ts: Date.now() };
   b.historique = [e, ...(b.historique || [])].slice(0, 30);
 }
 
@@ -704,7 +755,7 @@ async function _bastionDoDeposit() {
         originalItem: { ...item, qte: 1 },
       });
     }
-    _addHistorique(b, 'depot_item', `📥 ${_esc(char.nom || 'Un héros')} dépose ${qte}× ${_esc(item.nom || '?')}`);
+    _addHistorique(b, 'depot_item', `📥 ${char.nom || 'Un héros'} dépose ${qte}× ${item.nom || '?'}`);
     await _save(b);
 
     closeModal();
@@ -767,7 +818,7 @@ async function _bastionDoWithdraw(coffreId) {
     char.inventaire = inv;
     await updateInCol('characters', char.id, { inventaire: inv });
 
-    _addHistorique(b, 'retrait_item', `📤 ${_esc(char.nom || 'Un héros')} retire ${qte}× ${_esc(coffreItem.nom || '?')}`);
+    _addHistorique(b, 'retrait_item', `📤 ${char.nom || 'Un héros'} retire ${qte}× ${coffreItem.nom || '?'}`);
     await _save(b);
 
     closeModal();
@@ -1319,7 +1370,7 @@ async function _bastionDoHire() {
     roomSlug,
     hiredAtWeek: b.semaine || 1,
   }];
-  _addHistorique(b, 'hire', `🤝 ${_esc(npc.nom)} rejoint ${_esc(def?.nom || 'le bastion')}`);
+  _addHistorique(b, 'hire', `🤝 ${npc.nom || '?'} rejoint ${def?.nom || 'le bastion'}`);
   try {
     await _save(b);
     closeModal();
@@ -1339,7 +1390,7 @@ async function _bastionFireEmployee(empId) {
   if (!ok) return;
   const b = { ...STORE.bastion };
   b.personnel = (b.personnel || []).filter(e => e.id !== empId);
-  _addHistorique(b, 'fire', `👋 ${_esc(emp.nom)} quitte le bastion`);
+  _addHistorique(b, 'fire', `👋 ${emp.nom || '?'} quitte le bastion`);
   await _save(b);
   closeModal();
   showNotif(`${emp.nom} a quitté le bastion.`, 'success');
@@ -2136,7 +2187,7 @@ async function _bastionSaveQuest(id) {
     if (idx >= 0) b.bastionQuests[idx] = { ...b.bastionQuests[idx], ...data };
   } else {
     b.bastionQuests.push(data);
-    _addHistorique(b, 'quest', `📋 Nouvelle quête du Bastion : ${_esc(titre)}`);
+    _addHistorique(b, 'quest', `📋 Nouvelle quête du Bastion : ${titre}`);
   }
   await _save(b);
   closeModal();
@@ -2219,7 +2270,7 @@ function _renderHistorique(b) {
         ${visible.map(({ e, idx }) => `
           <div class="bs-histo-row bs-histo-row--${e.type}">
             <span class="bs-histo-week">P${e.week}</span>
-            <span class="bs-histo-msg">${_esc(e.msg)}</span>
+            <span class="bs-histo-msg">${_esc(_repairBastionText(e.msg))}</span>
             ${isMj ? `<button class="bs-histo-del" data-action="_bastionDeleteHisto" data-idx="${idx}" title="Supprimer cette ligne">🗑</button>` : ''}
           </div>`).join('')}
       </div>
