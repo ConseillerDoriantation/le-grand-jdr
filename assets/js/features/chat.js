@@ -43,6 +43,7 @@ let _advMsgs = [];                                 // messages Aventure (live se
 let _groups  = [];                                 // convos de groupe où je suis membre
 let _convoMsgs = [];                               // messages du GROUPE ouvert
 let _reads = {};                                   // convoId → millis lus
+let _ghosts = new Set();                            // uids confirmés fantômes (compte supprimé) → masqués
 let _unsubAdv = null, _unsubGroups = null, _unsubConvo = null;
 let _baseTitle = '';                               // titre d'onglet sans compteur
 let _prevUnread = 0;                               // pour ne pulser QUE sur du neuf
@@ -68,6 +69,7 @@ export async function initChat(uid) {
   _uid = uid || STATE.user?.uid || null;
   _teardownListeners();
   _advMsgs = []; _groups = []; _convoMsgs = []; _open = false; _view = 'list'; _openId = null;
+  _editingId = null; _ghosts = new Set();
   _baseTitle = (document.title || 'Le Grand JDR').replace(/^\(\d+\)\s*/, '');
   _prevUnread = 0;
   _mount();
@@ -223,6 +225,19 @@ function _profileOf(uid) {
 }
 function _nameOf(uid) { const p = _profileOf(uid); return p.pseudo || p.email || `Joueur ${String(uid || '').slice(0, 6)}…`; }
 
+// Membres de l'aventure (hors moi et hors fantômes confirmés). Source AUTORITAIRE :
+// union de accessList/admins/players/memberProfiles → un vrai membre apparaît
+// toujours, même sans profil dénormalisé (les noms/avatars, eux, viennent de
+// memberProfiles, complété au besoin par _healMembers pour le super-admin).
+function _advMembers() {
+  const adv = STATE.adventure || {};
+  const set = new Set([
+    ...(adv.accessList || []), ...(adv.admins || []),
+    ...(adv.players || []), ...Object.keys(adv.memberProfiles || {}),
+  ]);
+  return [...set].filter(u => u && u !== _uid && !_ghosts.has(u));
+}
+
 // Groupe ↔ DM : titre + autre interlocuteur. Un DM (type:'dm') affiche l'AUTRE
 // membre (nom + avatar) ; un groupe affiche son nom.
 const _convoById = (id) => _groups.find(g => g.id === id) || null;
@@ -280,10 +295,10 @@ function _renderNew() {
   const el = document.getElementById('chat-widget'); if (!el) return;
   const adv = STATE.adventure || {};
   const profiles = adv.memberProfiles || {};
-  // On ne propose que les VRAIS membres : ceux ayant un profil dénormalisé
-  // (memberProfiles). Exclut les uids fantômes (comptes retirés/supprimés) qui
-  // traînent dans accessList mais n'ont plus de profil → plus de « Joueur wO9ttk… ».
-  const members = Object.keys(profiles).filter(u => u && u !== _uid);
+  // Liste depuis la source autoritaire (accessList…), pas seulement memberProfiles :
+  // un vrai membre ne disparaît jamais faute de profil dénormalisé. Les fantômes
+  // (comptes supprimés) sont détectés puis masqués par _healMembers (super-admin).
+  const members = _advMembers();
   const profOf = (u) => (typeof profiles[u] === 'string' ? { pseudo: profiles[u] } : (profiles[u] || {}));
   const rows = members.length
     ? members.map(u => {
@@ -307,38 +322,40 @@ function _renderNew() {
        <div class="chat-member-list" id="chat-members">${rows}</div>
      </div>`,
     `<div class="chat-list-foot"><button class="chat-newbtn" data-action="chatCreateGroup">Créer le groupe</button></div>`);
-  _backfillAvatars(members);
+  _healMembers(members);
 }
 
-// Super-admin uniquement : pour les membres dont le profil dénormalisé n'a pas
-// encore d'avatar (jamais reconnectés depuis la feature), on lit users/{uid}
-// (lecture autorisée au super-admin) et on backfille memberProfiles → tout le
-// monde voit le bon avatar. Affichage immédiat (mémoire) + persistance best-effort.
-async function _backfillAvatars(members) {
+// Super-admin uniquement : complète memberProfiles (pseudo + email + avatar) pour
+// les membres au profil manquant/incomplet en lisant users/{uid} (autorisé au
+// super-admin). Un compte SUPPRIMÉ (doc users absent) est marqué fantôme → masqué.
+// Affichage immédiat (mémoire) + persistance best-effort (profite à tous si tu es
+// admin de l'aventure). Sans ça, la liste reste correcte (source = accessList).
+async function _healMembers(members) {
   if (!STATE.isSuperAdmin) return;
   const adv = STATE.adventure; if (!adv?.id) return;
-  const profiles = adv.memberProfiles || {};
-  const missing = members.filter(u => {
-    const p = profiles[u];
-    return !(p && typeof p === 'object' && p.avatarIcon);
-  });
-  if (!missing.length) return;
-  const found = {};
-  for (const u of missing) {
-    try { const ai = (await getDoc(doc(db, 'users', u))).data()?.avatarIcon; if (ai) found[u] = ai; }
-    catch { /* accès refusé / doc absent → on ignore */ }
-  }
-  const uids = Object.keys(found);
-  if (!uids.length) return;
   adv.memberProfiles = adv.memberProfiles || {};
-  const patch = {};
-  uids.forEach(u => {
-    if (typeof adv.memberProfiles[u] !== 'object' || !adv.memberProfiles[u]) adv.memberProfiles[u] = {};
-    adv.memberProfiles[u].avatarIcon = found[u];
-    patch[`memberProfiles.${u}.avatarIcon`] = found[u];
+  const profiles = adv.memberProfiles;
+  const toCheck = members.filter(u => {
+    const p = profiles[u];
+    return !(p && typeof p === 'object' && p.pseudo && p.avatarIcon !== undefined);
   });
-  if (_open && _view === 'new') _renderNew();            // ré-affiche avec les avatars
-  updateDoc(doc(db, 'adventures', adv.id), patch).catch(() => {}); // profite à tous si admin de l'aventure
+  if (!toCheck.length) return;
+  const patch = {}; let changed = false, ghostFound = false;
+  for (const u of toCheck) {
+    try {
+      const snap = await getDoc(doc(db, 'users', u));
+      if (!snap.exists()) { _ghosts.add(u); ghostFound = true; continue; }   // compte supprimé
+      const d = snap.data() || {};
+      const entry = { pseudo: d.pseudo || d.email || '', email: d.email || '', avatarIcon: d.avatarIcon || '' };
+      profiles[u] = { ...(typeof profiles[u] === 'object' && profiles[u] ? profiles[u] : {}), ...entry };
+      patch[`memberProfiles.${u}`] = profiles[u];
+      changed = true;
+    } catch { /* accès refusé → on ignore, la liste reste bonne */ }
+  }
+  if (_open && _view === 'new') _renderNew();
+  else if (_open && _view === 'manage') _renderManage();
+  if (changed) updateDoc(doc(db, 'adventures', adv.id), patch).catch(() => {});
+  void ghostFound;
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -427,20 +444,30 @@ async function _markRead(convoId) {
 async function chatStartDm(btn) {
   const other = btn?.dataset?.uid; if (!other || other === _uid || !_uid) return;
   const id = _dmId(_uid, other);
+  // Le DM existe déjà (déjà dans mes convos via le listener array-contains) → on ouvre.
+  // On NE lit PAS le doc : lire un doc inexistant fait échouer la règle read
+  // (resource == null) → permission-denied. Sinon on le CRÉE (règle create OK).
+  if (_convoById(id)) { _teardownConvo(); chatOpenConvo({ dataset: { convo: id } }); return; }
   const ref = _convoRef(id); if (!ref) return;
   try {
-    const snap = await getDoc(ref);
-    if (!snap.exists()) {
-      await setDoc(ref, {
-        type: 'dm', name: '', members: [_uid, other], createdBy: _uid,
-        lastText: '', lastSenderName: '', lastSenderId: '', lastAt: serverTimestamp(),
-      });
-    }
-    // Optimiste : présent tout de suite dans _groups (le listener remplacera).
-    if (!_convoById(id)) _groups = [{ id, type: 'dm', members: [_uid, other], name: '', lastAt: 0 }, ..._groups];
+    await setDoc(ref, {
+      type: 'dm', name: '', members: [_uid, other], createdBy: _uid,
+      lastText: '', lastSenderName: '', lastSenderId: '', lastAt: serverTimestamp(),
+    });
+    // Optimiste : présent tout de suite (le listener le confirmera).
+    _groups = [{ id, type: 'dm', members: [_uid, other], name: '', lastAt: 0 }, ..._groups];
     _teardownConvo();
     chatOpenConvo({ dataset: { convo: id } });
-  } catch (e) { console.warn('[chat] startDm', e?.code || e); showNotif('Ouverture du DM impossible (règles Firestore ?).', 'error'); }
+  } catch (e) {
+    console.warn('[chat] startDm', e?.code || e);
+    // Cas rare : l'autre vient de créer le DM (course) → il apparaîtra via le
+    // listener ; on tente une ouverture directe plutôt qu'une erreur.
+    if (e?.code === 'permission-denied' || e?.code === 'already-exists') {
+      _teardownConvo(); chatOpenConvo({ dataset: { convo: id } });
+    } else {
+      showNotif('Ouverture du DM impossible (règles Firestore ?).', 'error');
+    }
+  }
 }
 
 // ── Réactions emoji ─────────────────────────────────────────────────────────
@@ -511,8 +538,7 @@ function _renderManage() {
       </span>
       ${(amCreator && u !== _uid) ? `<button class="chat-mini-btn" data-action="chatRemoveMember" data-uid="${_esc(u)}" title="Retirer">✕</button>` : ''}
     </div>`).join('');
-  const profiles = STATE.adventure?.memberProfiles || {};
-  const addable = amCreator ? Object.keys(profiles).filter(u => u && !members.includes(u)) : [];
+  const addable = amCreator ? _advMembers().filter(u => !members.includes(u)) : [];
   const addRows = addable.map(u => `
     <div class="chat-member-row">
       <span class="chat-member">
@@ -537,6 +563,7 @@ function _renderManage() {
        <button class="chat-newbtn chat-newbtn--danger" data-action="chatLeaveGroup">Quitter</button>
        ${amCreator ? '<button class="chat-newbtn chat-newbtn--danger" data-action="chatDeleteGroup">Supprimer le groupe</button>' : ''}
      </div>`);
+  _healMembers([...members, ...addable]);
 }
 
 async function chatRenameGroup() {

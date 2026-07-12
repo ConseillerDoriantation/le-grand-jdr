@@ -277,8 +277,59 @@ function _roomTargetLabel(slug, b, isUnlimited) {
   return `Niv. ${lbl(s.niveau)}`;
 }
 
+function _decodeBastionEntities(value = '') {
+  let text = String(value ?? '');
+  const named = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    nbsp: ' ',
+  };
+  for (let i = 0; i < 3; i++) {
+    const next = text.replace(/&(#(\d+)|#x([0-9a-f]+)|[a-z]+);/gi, (m, body, dec, hex) => {
+      if (dec) return String.fromCodePoint(Number(dec));
+      if (hex) return String.fromCodePoint(parseInt(hex, 16));
+      return named[body.toLowerCase()] ?? m;
+    });
+    if (next === text) break;
+    text = next;
+  }
+  return text;
+}
+
+function _mojibakeScore(text = '') {
+  return (String(text).match(/[ÃÂâð]|�/g) || []).length;
+}
+
+function _repairBastionText(value = '') {
+  let text = _decodeBastionEntities(value);
+  if (!_mojibakeScore(text)) return text;
+
+  if ([...text].every(ch => ch.codePointAt(0) <= 255) && typeof TextDecoder !== 'undefined') {
+    try {
+      const bytes = Uint8Array.from([...text], ch => ch.codePointAt(0));
+      const fixed = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      if (_mojibakeScore(fixed) < _mojibakeScore(text)) return fixed;
+    } catch (_) {}
+  }
+
+  const replacements = [
+    ['Ã€', 'À'], ['Ã‚', 'Â'], ['Ã‡', 'Ç'], ['Ãˆ', 'È'], ['Ã‰', 'É'], ['ÃŠ', 'Ê'], ['Ã‹', 'Ë'],
+    ['ÃŽ', 'Î'], ['Ã', 'Ï'], ['Ã”', 'Ô'], ['Ã™', 'Ù'], ['Ã›', 'Û'], ['Ãœ', 'Ü'],
+    ['Ã ', 'à'], ['Ã¢', 'â'], ['Ã§', 'ç'], ['Ã¨', 'è'], ['Ã©', 'é'], ['Ãª', 'ê'], ['Ã«', 'ë'],
+    ['Ã®', 'î'], ['Ã¯', 'ï'], ['Ã´', 'ô'], ['Ã¶', 'ö'], ['Ã¹', 'ù'], ['Ã»', 'û'], ['Ã¼', 'ü'],
+    ['Å“', 'œ'], ['Å’', 'Œ'], ['Ã¦', 'æ'], ['Ã†', 'Æ'],
+    ['Â·', '·'], ['Â«', '«'], ['Â»', '»'], ['Â°', '°'], ['Â²', '²'], ['Â ', ' '],
+    ['â€“', '-'], ['â€”', '-'], ['â€¦', '…'], ['â€˜', "'"], ['â€™', "'"], ['â€œ', '"'], ['â€', '"'],
+  ];
+  for (const [from, to] of replacements) text = text.split(from).join(to);
+  return text;
+}
+
 function _addHistorique(b, type, msg) {
-  const e = { week: b.semaine, type, msg, ts: Date.now() };
+  const e = { week: b.semaine, type, msg: _repairBastionText(msg), ts: Date.now() };
   b.historique = [e, ...(b.historique || [])].slice(0, 30);
 }
 
@@ -704,7 +755,7 @@ async function _bastionDoDeposit() {
         originalItem: { ...item, qte: 1 },
       });
     }
-    _addHistorique(b, 'depot_item', `📥 ${_esc(char.nom || 'Un héros')} dépose ${qte}× ${_esc(item.nom || '?')}`);
+    _addHistorique(b, 'depot_item', `📥 ${char.nom || 'Un héros'} dépose ${qte}× ${item.nom || '?'}`);
     await _save(b);
 
     closeModal();
@@ -767,7 +818,7 @@ async function _bastionDoWithdraw(coffreId) {
     char.inventaire = inv;
     await updateInCol('characters', char.id, { inventaire: inv });
 
-    _addHistorique(b, 'retrait_item', `📤 ${_esc(char.nom || 'Un héros')} retire ${qte}× ${_esc(coffreItem.nom || '?')}`);
+    _addHistorique(b, 'retrait_item', `📤 ${char.nom || 'Un héros'} retire ${qte}× ${coffreItem.nom || '?'}`);
     await _save(b);
 
     closeModal();
@@ -1319,7 +1370,7 @@ async function _bastionDoHire() {
     roomSlug,
     hiredAtWeek: b.semaine || 1,
   }];
-  _addHistorique(b, 'hire', `🤝 ${_esc(npc.nom)} rejoint ${_esc(def?.nom || 'le bastion')}`);
+  _addHistorique(b, 'hire', `🤝 ${npc.nom || '?'} rejoint ${def?.nom || 'le bastion'}`);
   try {
     await _save(b);
     closeModal();
@@ -1339,7 +1390,7 @@ async function _bastionFireEmployee(empId) {
   if (!ok) return;
   const b = { ...STORE.bastion };
   b.personnel = (b.personnel || []).filter(e => e.id !== empId);
-  _addHistorique(b, 'fire', `👋 ${_esc(emp.nom)} quitte le bastion`);
+  _addHistorique(b, 'fire', `👋 ${emp.nom || '?'} quitte le bastion`);
   await _save(b);
   closeModal();
   showNotif(`${emp.nom} a quitté le bastion.`, 'success');
@@ -1713,6 +1764,93 @@ function _renderGauges(b) {
     </div>`;
 }
 
+function _bastionProductionSummary(b) {
+  const summary = { or: 0, items: [], rooms: [] };
+  _getRoomCatalog(b).forEach(def => {
+    const niv = _roomNiveau(b, def.slug);
+    if (niv <= 0 || _roomBuilding(b, def.slug)) return;
+    const data = _getNiveauData(def, niv) || {};
+    const prod = data.prod || {};
+    const items = (prod.items || []).map(item => ({ ...item, room: def.nom }));
+    summary.or += Number(prod.or) || 0;
+    summary.items.push(...items);
+    if ((prod.or || 0) > 0 || items.length) {
+      summary.rooms.push({ def, niv, prod });
+    }
+  });
+  return summary;
+}
+
+function _renderBastionOverview(b) {
+  const catalog = _getRoomCatalog(b);
+  const built = catalog.filter(def => _roomNiveau(b, def.slug) > 0);
+  const building = catalog.filter(def => _roomBuilding(b, def.slug));
+  const used = _bastionInvCount(b);
+  const capacity = _bastionCapacity(b);
+  const personnel = b.personnel || [];
+  const salaries = personnel.reduce((s, e) => s + (parseInt(e.salaire) || 0), 0);
+  const prod = _bastionProductionSummary(b);
+  const storagePct = capacity ? Math.round((used / capacity) * 100) : 0;
+  const cards = [
+    { icon: '💰', label: 'Trésor', value: `${b.or || 0}`, unit: 'or', tone: '#e8b84b' },
+    { icon: '📦', label: 'Coffre', value: `${used}/${capacity}`, unit: `${storagePct}%`, tone: storagePct >= 90 ? '#ff5a7e' : '#4f8cff' },
+    { icon: '🏛', label: 'Salles actives', value: `${built.length}`, unit: `${catalog.length} plans`, tone: '#7eb0ff' },
+    { icon: '🏗', label: 'Chantiers', value: `${building.length}`, unit: building.length ? 'en cours' : 'calme', tone: '#ff9544' },
+    { icon: '👥', label: 'Personnel', value: `${personnel.length}`, unit: `${salaries} or/période`, tone: '#22c38e' },
+    { icon: '🪙', label: 'Production', value: `+${prod.or}`, unit: `${prod.items.length} objet${prod.items.length > 1 ? 's' : ''}`, tone: '#b47fff' },
+  ];
+  return `
+    <section class="bs-overview" aria-label="Résumé du Bastion">
+      ${cards.map(c => `
+        <div class="bs-overview-card" style="--tone:${c.tone}">
+          <span class="bs-overview-icon">${_esc(c.icon)}</span>
+          <div>
+            <span>${_esc(c.label)}</span>
+            <strong>${_esc(c.value)}</strong>
+            <small>${_esc(c.unit)}</small>
+          </div>
+        </div>`).join('')}
+    </section>`;
+}
+
+function _renderOperationsPanel(b) {
+  const catalog = _getRoomCatalog(b);
+  const prod = _bastionProductionSummary(b);
+  const building = catalog
+    .filter(def => _roomBuilding(b, def.slug))
+    .map(def => ({ def, state: b.salles?.[def.slug] || {} }));
+  const itemPreview = prod.items.slice(0, 4);
+
+  return `
+    <section class="bs-side-panel bs-side-panel--ops">
+      <div class="bs-side-panel-hd">
+        <span>🧭</span>
+        <div>
+          <small>Pilotage</small>
+          <strong>Prochaine période</strong>
+        </div>
+      </div>
+      <div class="bs-next-ledger">
+        <div><span>Or produit</span><strong>+${prod.or}</strong></div>
+        <div><span>Objets produits</span><strong>${prod.items.length}</strong></div>
+        <div><span>Chantiers</span><strong>${building.length}</strong></div>
+      </div>
+      ${itemPreview.length ? `
+        <div class="bs-mini-list">
+          ${itemPreview.map(item => `<div><b>${_esc(item.emoji || '📦')}</b><span>${_esc(item.nom)}${item.q > 1 ? ` ×${item.q}` : ''}</span><small>${_esc(item.room)}</small></div>`).join('')}
+          ${prod.items.length > itemPreview.length ? `<em>+${prod.items.length - itemPreview.length} autre${prod.items.length - itemPreview.length > 1 ? 's' : ''}</em>` : ''}
+        </div>` : `<p class="bs-side-empty">Aucune production d'objet active.</p>`}
+      ${building.length ? `
+        <div class="bs-build-list">
+          ${building.map(({ def, state }) => `
+            <div class="bs-build-line" style="--c:${def.color}">
+              <span>${_esc(def.emoji)}</span>
+              <div><strong>${_esc(def.nom)}</strong><small>Niv. ${state.targetNiveau || '?'} · ${state.weeksLeftToBuild || 0} période(s)</small></div>
+            </div>`).join('')}
+        </div>` : `<p class="bs-side-empty">Aucun chantier en cours.</p>`}
+    </section>`;
+}
+
 function _renderRoomCard(def, b) {
   const isMj = STATE.isAdmin;
   const curNiv  = _roomNiveau(b, def.slug);
@@ -2049,7 +2187,7 @@ async function _bastionSaveQuest(id) {
     if (idx >= 0) b.bastionQuests[idx] = { ...b.bastionQuests[idx], ...data };
   } else {
     b.bastionQuests.push(data);
-    _addHistorique(b, 'quest', `📋 Nouvelle quête du Bastion : ${_esc(titre)}`);
+    _addHistorique(b, 'quest', `📋 Nouvelle quête du Bastion : ${titre}`);
   }
   await _save(b);
   closeModal();
@@ -2132,7 +2270,7 @@ function _renderHistorique(b) {
         ${visible.map(({ e, idx }) => `
           <div class="bs-histo-row bs-histo-row--${e.type}">
             <span class="bs-histo-week">P${e.week}</span>
-            <span class="bs-histo-msg">${_esc(e.msg)}</span>
+            <span class="bs-histo-msg">${_esc(_repairBastionText(e.msg))}</span>
             ${isMj ? `<button class="bs-histo-del" data-action="_bastionDeleteHisto" data-idx="${idx}" title="Supprimer cette ligne">🗑</button>` : ''}
           </div>`).join('')}
       </div>
@@ -2265,14 +2403,22 @@ function _renderPage() {
   if (!content) return;
   const b = STORE.bastion || _defaultBastion();
   content.innerHTML = `
-    <div class="bs-root">
+    <div class="bs-root bs-root-v2">
       ${_renderHeader(b)}
-      ${_renderGauges(b)}
-      ${_renderBastionQuests(b)}
-      ${_renderAnnonces(b)}
-      ${_renderRooms(b)}
-      ${_renderCoffre(b)}
-      ${_renderHistorique(b)}
+      ${_renderBastionOverview(b)}
+      <div class="bs-layout">
+        <main class="bs-main-stack">
+          ${_renderRooms(b)}
+          ${_renderCoffre(b)}
+        </main>
+        <aside class="bs-side-stack">
+          ${_renderGauges(b)}
+          ${_renderOperationsPanel(b)}
+          ${_renderBastionQuests(b)}
+          ${_renderAnnonces(b)}
+          ${_renderHistorique(b)}
+        </aside>
+      </div>
     </div>`;
 }
 
