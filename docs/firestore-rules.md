@@ -654,9 +654,17 @@ match /adventures/{adventureId} {
             && request.resource.data.get('reactions', {}).diff(resource.data.get('reactions', {})).affectedKeys().hasOnly([request.auth.uid]))
       );
   }
-  // État de lecture (badge non-lus) : map convoId→millis, chacun le sien.
+  // État de lecture (badge non-lus + accusés « vu ») : map convoId→millis.
+  // Lecture par tout membre (pour afficher « Vu » en DM), écriture chacun le sien.
   match /chatReads/{uid} {
-    allow read, write: if inAdventure(adventureId) && uid == request.auth.uid;
+    allow read:  if inAdventure(adventureId);
+    allow write: if inAdventure(adventureId) && uid == request.auth.uid;
+  }
+  // Indicateur « écrit… » (éphémère, 1 doc par joueur) : { convoId, at }.
+  // Lecture par tout membre (conv ouverte), écriture chacun la sienne.
+  match /chatTyping/{uid} {
+    allow read:  if inAdventure(adventureId);
+    allow write: if inAdventure(adventureId) && uid == request.auth.uid;
   }
     }
   }

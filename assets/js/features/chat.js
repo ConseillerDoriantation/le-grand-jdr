@@ -56,6 +56,9 @@ let _convoMsgs = [];                               // messages du GROUPE ouvert
 let _reads = {};                                   // convoId → millis lus
 let _ghosts = new Set();                            // uids confirmés fantômes (compte supprimé) → masqués
 let _unsubAdv = null, _unsubGroups = null, _unsubConvo = null;
+let _unsubTyping = null, _unsubReads = null;       // « écrit… » (conv ouverte) + « vu » (DM ouvert)
+let _typing = [], _otherReads = 0;                 // uids en train d'écrire · millis lus par l'autre (DM)
+let _typingWroteAt = 0, _typingClearTimer = null, _typingRenderTimer = null;
 let _baseTitle = '';                               // titre d'onglet sans compteur
 let _prevUnread = 0;                               // pour ne pulser QUE sur du neuf
 
@@ -66,6 +69,9 @@ const _convosCol = () => { const a = _adv(); return a ? collection(db, 'adventur
 const _convoRef = (id) => { const a = _adv(); return a ? doc(db, 'adventures', a, 'chatConvos', id) : null; };
 const _msgRef   = (id) => { const a = _adv(); return a ? doc(db, 'adventures', a, 'chatMessages', id) : null; };
 const _readRef  = () => { const a = _adv(); return (a && _uid) ? doc(db, 'adventures', a, 'chatReads', _uid) : null; };
+const _readsRefOf = (u) => { const a = _adv(); return (a && u) ? doc(db, 'adventures', a, 'chatReads', u) : null; };
+const _typingCol = () => { const a = _adv(); return a ? collection(db, 'adventures', a, 'chatTyping') : null; };
+const _typingRef = () => { const a = _adv(); return (a && _uid) ? doc(db, 'adventures', a, 'chatTyping', _uid) : null; };
 const _dmId = (a, b) => 'dm_' + [a, b].sort().join('_');   // id déterministe → 1 DM par paire
 const _atMillis = (m) => (m?.at?.toMillis ? m.at.toMillis() : (Number(m?.at) || 0));
 const _lastMillis = (g) => (g?.lastAt?.toMillis ? g.lastAt.toMillis() : (Number(g?.lastAt) || 0));
@@ -143,8 +149,9 @@ function _pulseBubble() {
   setTimeout(() => el.classList.remove('chat-notify'), 1200);
 }
 function _teardownListeners() {
-  [_unsubAdv, _unsubGroups, _unsubConvo].forEach(u => { if (u) try { u(); } catch {} });
-  _unsubAdv = _unsubGroups = _unsubConvo = null;
+  [_unsubAdv, _unsubGroups, _unsubConvo, _unsubTyping, _unsubReads].forEach(u => { if (u) try { u(); } catch {} });
+  _unsubAdv = _unsubGroups = _unsubConvo = _unsubTyping = _unsubReads = null;
+  clearTimeout(_typingClearTimer); clearTimeout(_typingRenderTimer);
 }
 
 // Nouveau lot de données reçu (source = ADV | 'groups' | 'convo')
@@ -228,7 +235,8 @@ function _renderConvo() {
     `<div class="chat-search" id="chat-search" ${_searchOpen ? '' : 'hidden'}>
        <input id="chat-search-inp" class="chat-input" placeholder="🔍 Rechercher dans la conversation…" value="${_esc(_searchQ)}" autocomplete="off">
      </div>
-     <div class="chat-msgs" id="chat-msgs"></div>`,
+     <div class="chat-msgs" id="chat-msgs"></div>
+     <div class="chat-typing" id="chat-typing" hidden></div>`,
     `<form class="chat-form" id="chat-form">
        <div class="chat-edit-bar" id="chat-edit-bar" hidden>✏️ Édition — <button type="button" class="chat-edit-cancel" data-action="chatCancelEdit">annuler</button></div>
        <div class="chat-reply-bar" id="chat-reply-bar" hidden></div>
@@ -244,6 +252,8 @@ function _renderConvo() {
   el.querySelector('#chat-form')?.addEventListener('submit', (e) => { e.preventDefault(); _send(); });
   el.querySelector('#chat-search-inp')?.addEventListener('input', (e) => { _searchQ = e.target.value; _renderMessages(); });
   el.querySelector('#chat-file')?.addEventListener('change', (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) _sendImage(f); });
+  el.querySelector('#chat-input')?.addEventListener('input', _signalTyping);
+  if (_typing.length) _renderTyping();
   if (_replyTo) _showReplyBar();
   _renderMessages();
   el.querySelector(_searchOpen ? '#chat-search-inp' : '#chat-input')?.focus();
@@ -255,9 +265,16 @@ function _renderMessages() {
   let msgs = _openId === ADV ? _advMsgs : _convoMsgs;
   const q = _searchOpen ? _searchQ.trim().toLowerCase() : '';
   if (q) msgs = msgs.filter(m => !m.deleted && (m.text || '').toLowerCase().includes(q));
-  list.innerHTML = msgs.length
+  let html = msgs.length
     ? msgs.map(_msgRow).join('')
     : `<div class="chat-empty">${q ? 'Aucun message trouvé.' : 'Aucun message. Lance la discussion !'}</div>`;
+  // « Vu » (DM) : sous mon dernier message si l'autre l'a lu.
+  if (!q && _convoById(_openId)?.type === 'dm') {
+    const mine = (_openId === ADV ? _advMsgs : _convoMsgs).filter(m => m.senderId === _uid && !m.deleted);
+    const last = mine[mine.length - 1];
+    if (last && _otherReads >= _atMillis(last)) html += '<div class="chat-seen">Vu</div>';
+  }
+  list.innerHTML = html;
   if (!q) list.scrollTop = list.scrollHeight;   // pas d'auto-scroll pendant une recherche
 }
 
@@ -425,12 +442,71 @@ function chatOpenConvo(btn) {
     );
     _markRead(id);
   }
+  _subscribeTyping(id);
+  if (_convoById(id)?.type === 'dm') _subscribeReads(id);
 }
 function _teardownConvo() {
   if (_unsubConvo) { try { _unsubConvo(); } catch {} _unsubConvo = null; }
-  _convoMsgs = [];
+  if (_unsubTyping) { try { _unsubTyping(); } catch {} _unsubTyping = null; }
+  if (_unsubReads) { try { _unsubReads(); } catch {} _unsubReads = null; }
+  _convoMsgs = []; _typing = []; _otherReads = 0;
+  clearTimeout(_typingClearTimer); clearTimeout(_typingRenderTimer);
+  if (_typingWroteAt) _clearTyping();   // signale qu'on n'écrit plus
   _editingId = null; _replyTo = null; _searchOpen = false; _searchQ = '';   // états liés à la conv
   _closeEmojiPop();
+}
+
+// ── « écrit… » (typing) — quota strict : 1 doc/joueur, write throttlé à 4 s,
+// suspendu si onglet caché, listener seulement quand une conv est ouverte. ──
+function _subscribeTyping(convoId) {
+  const col = _typingCol(); if (!col) return;
+  _unsubTyping = onSnapshot(col, snap => {
+    const now = Date.now();
+    _typing = snap.docs
+      .map(d => ({ uid: d.id, ...d.data({ serverTimestamps: 'estimate' }) }))
+      .filter(t => t.uid !== _uid && t.convoId === convoId && _atMillis({ at: t.at }) > now - 6000)
+      .map(t => t.uid);
+    _renderTyping();
+  }, err => console.warn('[chat] typing', err?.code || err));
+}
+function _signalTyping() {
+  if (document.hidden || !_openId) return;
+  const now = Date.now();
+  if (now - _typingWroteAt > 4000) {   // throttle : jamais par frappe
+    _typingWroteAt = now;
+    const ref = _typingRef();
+    if (ref) setDoc(ref, { convoId: _openId, at: serverTimestamp() }).catch(() => {});
+  }
+  clearTimeout(_typingClearTimer);
+  _typingClearTimer = setTimeout(_clearTyping, 5000);   // arrêt de frappe → efface
+}
+function _clearTyping() {
+  clearTimeout(_typingClearTimer);
+  if (!_typingWroteAt) return;
+  _typingWroteAt = 0;
+  const ref = _typingRef();
+  if (ref) setDoc(ref, { convoId: '', at: 0 }).catch(() => {});
+}
+function _renderTyping() {
+  const el = document.getElementById('chat-typing'); if (!el) return;
+  const names = _typing.map(_nameOf);
+  if (!names.length) { el.textContent = ''; el.hidden = true; return; }
+  el.textContent = '✍️ ' + (names.length === 1
+    ? `${names[0]} écrit…`
+    : `${names.slice(0, 2).join(', ')}${names.length > 2 ? '…' : ''} écrivent…`);
+  el.hidden = false;
+  clearTimeout(_typingRenderTimer);
+  _typingRenderTimer = setTimeout(() => { _typing = []; _renderTyping(); }, 6000);
+}
+
+// ── « Vu » (DM) : on écoute le doc chatReads de l'AUTRE (1 listener). ──
+function _subscribeReads(convoId) {
+  const other = _otherDmUid(_convoById(convoId)); if (!other) return;
+  const ref = _readsRefOf(other); if (!ref) return;
+  _unsubReads = onSnapshot(ref, snap => {
+    _otherReads = Number(snap.data()?.[convoId]) || 0;
+    if (_view === 'convo' && _openId === convoId) _renderMessages();
+  }, err => console.warn('[chat] reads', err?.code || err));
 }
 
 function chatNew() { _view = 'new'; _renderNew(); }
@@ -473,6 +549,7 @@ async function _send() {
   const reply = _replyTo; _clearReply();
   const msg = { convoId: _openId, text, senderId: _uid, senderName, at: serverTimestamp() };
   if (reply) msg.replyTo = reply;
+  _clearTyping();
   try {
     await addDoc(col, msg);
     _bumpConvoPreview(text, senderName);
