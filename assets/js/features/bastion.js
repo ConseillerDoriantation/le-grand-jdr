@@ -1713,6 +1713,93 @@ function _renderGauges(b) {
     </div>`;
 }
 
+function _bastionProductionSummary(b) {
+  const summary = { or: 0, items: [], rooms: [] };
+  _getRoomCatalog(b).forEach(def => {
+    const niv = _roomNiveau(b, def.slug);
+    if (niv <= 0 || _roomBuilding(b, def.slug)) return;
+    const data = _getNiveauData(def, niv) || {};
+    const prod = data.prod || {};
+    const items = (prod.items || []).map(item => ({ ...item, room: def.nom }));
+    summary.or += Number(prod.or) || 0;
+    summary.items.push(...items);
+    if ((prod.or || 0) > 0 || items.length) {
+      summary.rooms.push({ def, niv, prod });
+    }
+  });
+  return summary;
+}
+
+function _renderBastionOverview(b) {
+  const catalog = _getRoomCatalog(b);
+  const built = catalog.filter(def => _roomNiveau(b, def.slug) > 0);
+  const building = catalog.filter(def => _roomBuilding(b, def.slug));
+  const used = _bastionInvCount(b);
+  const capacity = _bastionCapacity(b);
+  const personnel = b.personnel || [];
+  const salaries = personnel.reduce((s, e) => s + (parseInt(e.salaire) || 0), 0);
+  const prod = _bastionProductionSummary(b);
+  const storagePct = capacity ? Math.round((used / capacity) * 100) : 0;
+  const cards = [
+    { icon: '💰', label: 'Trésor', value: `${b.or || 0}`, unit: 'or', tone: '#e8b84b' },
+    { icon: '📦', label: 'Coffre', value: `${used}/${capacity}`, unit: `${storagePct}%`, tone: storagePct >= 90 ? '#ff5a7e' : '#4f8cff' },
+    { icon: '🏛', label: 'Salles actives', value: `${built.length}`, unit: `${catalog.length} plans`, tone: '#7eb0ff' },
+    { icon: '🏗', label: 'Chantiers', value: `${building.length}`, unit: building.length ? 'en cours' : 'calme', tone: '#ff9544' },
+    { icon: '👥', label: 'Personnel', value: `${personnel.length}`, unit: `${salaries} or/période`, tone: '#22c38e' },
+    { icon: '🪙', label: 'Production', value: `+${prod.or}`, unit: `${prod.items.length} objet${prod.items.length > 1 ? 's' : ''}`, tone: '#b47fff' },
+  ];
+  return `
+    <section class="bs-overview" aria-label="Résumé du Bastion">
+      ${cards.map(c => `
+        <div class="bs-overview-card" style="--tone:${c.tone}">
+          <span class="bs-overview-icon">${_esc(c.icon)}</span>
+          <div>
+            <span>${_esc(c.label)}</span>
+            <strong>${_esc(c.value)}</strong>
+            <small>${_esc(c.unit)}</small>
+          </div>
+        </div>`).join('')}
+    </section>`;
+}
+
+function _renderOperationsPanel(b) {
+  const catalog = _getRoomCatalog(b);
+  const prod = _bastionProductionSummary(b);
+  const building = catalog
+    .filter(def => _roomBuilding(b, def.slug))
+    .map(def => ({ def, state: b.salles?.[def.slug] || {} }));
+  const itemPreview = prod.items.slice(0, 4);
+
+  return `
+    <section class="bs-side-panel bs-side-panel--ops">
+      <div class="bs-side-panel-hd">
+        <span>🧭</span>
+        <div>
+          <small>Pilotage</small>
+          <strong>Prochaine période</strong>
+        </div>
+      </div>
+      <div class="bs-next-ledger">
+        <div><span>Or produit</span><strong>+${prod.or}</strong></div>
+        <div><span>Objets produits</span><strong>${prod.items.length}</strong></div>
+        <div><span>Chantiers</span><strong>${building.length}</strong></div>
+      </div>
+      ${itemPreview.length ? `
+        <div class="bs-mini-list">
+          ${itemPreview.map(item => `<div><b>${_esc(item.emoji || '📦')}</b><span>${_esc(item.nom)}${item.q > 1 ? ` ×${item.q}` : ''}</span><small>${_esc(item.room)}</small></div>`).join('')}
+          ${prod.items.length > itemPreview.length ? `<em>+${prod.items.length - itemPreview.length} autre${prod.items.length - itemPreview.length > 1 ? 's' : ''}</em>` : ''}
+        </div>` : `<p class="bs-side-empty">Aucune production d'objet active.</p>`}
+      ${building.length ? `
+        <div class="bs-build-list">
+          ${building.map(({ def, state }) => `
+            <div class="bs-build-line" style="--c:${def.color}">
+              <span>${_esc(def.emoji)}</span>
+              <div><strong>${_esc(def.nom)}</strong><small>Niv. ${state.targetNiveau || '?'} · ${state.weeksLeftToBuild || 0} période(s)</small></div>
+            </div>`).join('')}
+        </div>` : `<p class="bs-side-empty">Aucun chantier en cours.</p>`}
+    </section>`;
+}
+
 function _renderRoomCard(def, b) {
   const isMj = STATE.isAdmin;
   const curNiv  = _roomNiveau(b, def.slug);
@@ -2265,14 +2352,22 @@ function _renderPage() {
   if (!content) return;
   const b = STORE.bastion || _defaultBastion();
   content.innerHTML = `
-    <div class="bs-root">
+    <div class="bs-root bs-root-v2">
       ${_renderHeader(b)}
-      ${_renderGauges(b)}
-      ${_renderBastionQuests(b)}
-      ${_renderAnnonces(b)}
-      ${_renderRooms(b)}
-      ${_renderCoffre(b)}
-      ${_renderHistorique(b)}
+      ${_renderBastionOverview(b)}
+      <div class="bs-layout">
+        <main class="bs-main-stack">
+          ${_renderRooms(b)}
+          ${_renderCoffre(b)}
+        </main>
+        <aside class="bs-side-stack">
+          ${_renderGauges(b)}
+          ${_renderOperationsPanel(b)}
+          ${_renderBastionQuests(b)}
+          ${_renderAnnonces(b)}
+          ${_renderHistorique(b)}
+        </aside>
+      </div>
     </div>`;
 }
 
