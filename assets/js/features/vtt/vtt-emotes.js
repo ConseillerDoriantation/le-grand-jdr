@@ -21,7 +21,7 @@ import { bumpSkill, bumpEmote } from '../../shared/stats.js';
 import { _logCol, _logGmCol, _reactionRef } from './vtt-refs.js';
 import { _STAT_KEY } from './vtt-constants.js';
 import { openModal, closeModalDirect, confirmModal, promptModal } from '../../shared/modal.js';
-import { listGithubFolder, GH_IMAGE_EXTS, slugFromFile } from '../../shared/github-folder.js';
+import { listGithubFolder, GH_IMAGE_EXTS, slugFromFile, fileKey } from '../../shared/github-folder.js';
 import { VTT_ACTIONS, _showEmoteBubble, _canControlToken, _tokenStatMod, _vttLogTargetFields } from './vtt.js'; // circ. (runtime)
 import { _renderInspector } from './vtt-inspector.js?v=20260630-max-v2'; // re-render après changement de mode de jet
 
@@ -485,14 +485,15 @@ export async function _ouvrirGestionEmotes() {
     try { files = await listGithubFolder(path, { exts: GH_IMAGE_EXTS }); }
     catch (e) { if (statusEl) statusEl.textContent = '⚠ ' + e.message; showNotif(e.message, 'error'); return; }
     if (!files.length) { if (statusEl) statusEl.textContent = 'Aucune image dans ce dossier'; return; }
-    // Dédoublonnage : par URL (chemin) ET par nom (:tag: unique).
-    const urls  = new Set(_emotes.map(e => e.url));
+    // Dédoublonnage : par nom de fichier (robuste au chemin) ET par nom (:tag:).
+    const urls  = new Set(_emotes.map(e => fileKey(e.url)));
     const names = new Set(_emotes.map(e => e.name));
     const add = [];
     for (const f of files) {
       const name = slugFromFile(f.name);
-      if (!name || urls.has(f.url) || names.has(name)) continue;
-      urls.add(f.url); names.add(name);
+      const k = fileKey(f.url);
+      if (!name || urls.has(k) || names.has(name)) continue;
+      urls.add(k); names.add(name);
       add.push({ id: `${Date.now()}${Math.random().toString(36).slice(2, 6)}`, name, url: f.url });
     }
     if (!add.length) { if (statusEl) statusEl.textContent = 'Toutes ces émotes sont déjà présentes'; return; }
