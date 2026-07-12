@@ -150,6 +150,8 @@
   font-size: .72rem; color: var(--text-dim, #9aa4b2);
   display: flex; align-items: center; gap: .35rem;
 }
+/* L'attribut hidden doit l'emporter sur le display:flex ci-dessus */
+.chat-edit-bar[hidden], .chat-reply-bar[hidden] { display: none !important; }
 .chat-edit-cancel { background: none; border: none; color: #4f8cff; cursor: pointer; font: inherit; font-size: .72rem; padding: 0; text-decoration: underline; }
 
 /* ── Actions au survol d'un message (réagir / modifier / supprimer) ── */

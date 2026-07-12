@@ -599,18 +599,18 @@ textarea.npc-inline { resize: vertical; min-height: 2.4em; line-height: 1.6; fon
   display: flex; align-items: center; justify-content: center;
   font-family: 'Cinzel', serif; font-weight: 700; font-size: 2rem; color: var(--af);
 }
-.npc-portrait-cam {
-  position: absolute; left: 0; right: 0; bottom: 0; text-align: center; font-size: .7rem;
-  padding: 1px 0; background: rgba(0,0,0,.55); opacity: 0; transition: opacity .15s;
+.npc-portrait-btn--view:hover img,
+.npc-work-portrait--btn:hover img {
+  filter: brightness(1.08);
 }
-.npc-portrait-btn:hover .npc-portrait-cam { opacity: 1; }
 
 /* Boîte du portrait : permet de superposer le badge « agrandir » en sibling du
    bouton (donc non rogné par son overflow:hidden). */
 .npc-portrait-box { position: relative; width: 84px; height: 84px; flex-shrink: 0; }
 .npc-portrait-box > .npc-hero-portrait,
 .npc-portrait-box > .npc-portrait-btn { width: 100%; height: 100%; }
-.npc-portrait-view {
+.npc-portrait-view,
+.npc-portrait-edit {
   position: absolute; top: -6px; right: -6px; z-index: 3;
   width: 24px; height: 24px; border-radius: 50%; padding: 0;
   display: flex; align-items: center; justify-content: center;
@@ -619,7 +619,14 @@ textarea.npc-inline { resize: vertical; min-height: 2.4em; line-height: 1.6; fon
   border: 1px solid var(--border); box-shadow: 0 1px 4px rgba(0,0,0,.45);
   opacity: .82; transition: opacity .15s, transform .15s;
 }
-.npc-portrait-view:hover { opacity: 1; transform: scale(1.12); }
+.npc-portrait-view:hover,
+.npc-portrait-edit:hover { opacity: 1; transform: scale(1.12); }
+
+.npc-portrait-edit {
+  background: rgba(8, 13, 22, .92);
+  border-color: rgba(232, 184, 75, .38);
+  color: var(--gold, #e8b84b);
+}
 
 /* Lightbox image pleine (non cadrée) — accessible à tous, joueurs compris. */
 .npc-img-lightbox {
@@ -1847,6 +1854,18 @@ textarea.npc-inline { resize: vertical; min-height: 2.4em; line-height: 1.6; fon
   font-family: 'Cinzel', serif;
   font-size: 2rem;
   font-weight: 900;
+}
+
+.npc-work-portrait-box {
+  position: relative;
+  width: 112px;
+  height: 142px;
+  flex-shrink: 0;
+}
+
+.npc-work-portrait-box > .npc-work-portrait {
+  width: 100%;
+  height: 100%;
 }
 
 .npc-work-portrait--btn {
