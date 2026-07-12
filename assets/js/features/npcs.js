@@ -172,6 +172,8 @@ let _organisations = [];   // [{ id, name }] — alimente la sélection Organisa
 let _orgIcons      = {};   // { [orgName]: emoji } — émoji personnalisé par catégorie (MJ)
 let _shopWeapons   = [];   // armes issues de la boutique pour l'espace combat PNJ
 let _shopItems     = [];   // tous les objets boutique (armes/armures/bijoux) — équipement PNJ
+let _relationCharacters = []; // cache characters pour retrouver les portraits côté joueur
+let _playerProfiles = [];  // profils publics de la page Joueurs, utiles pour les portraits visibles côté joueur
 let _activeId      = null;
 let _pendingTargetNpcId = null;
 let _filterSearch  = '';
@@ -181,6 +183,7 @@ let _filterStatus  = '';     // ''=tous | 'mort' | 'disparu' | 'alive' (ni mort 
 let _filterHidden  = false;  // MJ : n'afficher que les PNJ cachés
 let _histEditDelta = 0;
 let _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
+let _equipPickerState = { npcId: '', slot: '', q: '' };
 
 // ── Chargement ────────────────────────────────────────────────────────────────
 // `npcs` et `shop` sont session-live → 0 lecture facturée. `npc_affinites` est
@@ -188,17 +191,21 @@ let _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLOR
 // types/seuils + relations PJ↔PNJ). `places` et `organizations` restent un fetch
 // page-scoped (1 lecture initiale, servi du cache IndexedDB sur cache chaud).
 async function _load() {
-  const [npcs, places, orgs, shopItems] = await Promise.all([
+  const [npcs, places, orgs, shopItems, relationCharacters, playerProfiles] = await Promise.all([
     loadCollection('npcs'),
     listPlaces().catch(() => []),
     listOrganizations().catch(() => []),
     loadCollection('shop').catch(() => []),
+    loadCollection('characters').catch(() => []),
+    loadCollection('players').catch(() => []),
   ]);
   _npcs           = npcs || [];
   _places        = (places || []).filter(p => p?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   _organisations = (orgs   || []).filter(o => o?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
   _shopItems     = (shopItems || []).slice().sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr'));
   _shopWeapons   = _shopItems.filter(_isShopWeapon);
+  _relationCharacters = relationCharacters || [];
+  _playerProfiles = playerProfiles || [];
 }
 
 // ── Helpers types ─────────────────────────────────────────────────────────────
@@ -206,11 +213,22 @@ const _getAffiniteType      = (id) => _affiniteTypes.find(t => t.id === id) || n
 const _getAffiniteTypeLabel = (id, fb = '') => _getAffiniteType(id)?.label   || fb || '';
 const _getAffiniteTypeColor = (id) => _getAffiniteType(id)?.couleur || TYPE_COLORS[0];
 const _getAffiniteTypeEmoji = (id) => _getAffiniteType(id)?.emoji   || '✨';
-// Vue résumée pour les chips d'affinité spécifique (label déjà échappé).
+const _decodeHtmlEntities = (v = '') => String(v)
+  .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n) || 0))
+  .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16) || 0))
+  .replace(/&quot;/g, '"')
+  .replace(/&#39;/g, "'")
+  .replace(/&apos;/g, "'")
+  .replace(/&lt;/g, '<')
+  .replace(/&gt;/g, '>')
+  .replace(/&amp;/g, '&');
+const _displayText = (v = '') => _decodeHtmlEntities(v).trim();
+// Vue résumée pour les chips d'affinité spécifique. Le label reste brut ici :
+// l'échappement HTML se fait uniquement au rendu final pour éviter les doubles entités.
 const _typeView = (a) => ({
   emoji: _getAffiniteTypeEmoji(a.typeId),
   color: _getAffiniteTypeColor(a.typeId),
-  label: _esc(_getAffiniteTypeLabel(a.typeId, a.typeLabel)) || '—',
+  label: _displayText(_getAffiniteTypeLabel(a.typeId, a.typeLabel)) || '—',
 });
 
 // ── Helpers affinité (mode groupe vs valeur) ─────────────────────────────────
@@ -338,6 +356,11 @@ function _renderPage(content) {
   const filtered = _getFiltered();
   const active   = _npcs.find(n => n.id === _activeId) || filtered[0] || null;
 
+  content.innerHTML = _renderNpcsShell(filtered, active);
+  _bindNpcListScroll();
+  _scheduleNpcListScrollHint();
+  return;
+
   content.innerHTML = `
   <div class="npc-page">
 
@@ -378,11 +401,114 @@ function _renderPage(content) {
   _scheduleNpcListScrollHint();
 }
 
+function _renderNpcsShell(filtered, active) {
+  return `
+  <div class="npc-page npc-page-v2 npc-page-v3">
+    <aside class="npc-sidebar npc-roster-panel npc-command-panel">
+      <div class="npc-command-head">
+        <div>
+          <span class="npc-dashboard-kicker">Registre</span>
+          <h1>PNJ</h1>
+        </div>
+        ${STATE.isAdmin ? `<button class="npc-btn-icon npc-btn-icon--gold" data-action="npcCreate" title="Nouveau PNJ">+</button>` : ''}
+      </div>
+
+      <label class="npc-searchbox npc-command-search">
+        <span>Recherche</span>
+        <input id="npc-search" class="input-field" placeholder="Nom, rôle, lieu, organisation..."
+          value="${_filterSearch}" data-input="_npcSearch">
+      </label>
+
+      ${_renderRosterMetrics(filtered)}
+
+      ${STATE.isAdmin ? `
+      <div class="npc-command-actions">
+        <button class="npc-primary-btn" data-action="npcCreate">+ Nouveau PNJ</button>
+        <button class="npc-secondary-btn" data-action="_openMjStatsView">Stats rapides</button>
+      </div>` : ''}
+
+      <div id="npc-list-shell" class="npc-list-shell">
+        <div id="npc-list-items" class="npc-list-items">
+          ${_buildListHtml(filtered)}
+        </div>
+      </div>
+    </aside>
+
+    <main id="npc-detail-panel" class="npc-detail-panel">
+      ${active ? _renderFiche(active) : _renderEmpty()}
+    </main>
+  </div>`;
+}
+
+function _renderPageKpis(filtered) {
+  const total = _npcs.length;
+  const visible = STATE.isAdmin ? _npcs.filter(n => n.embauchable !== false).length : filtered.length;
+  const allies = filtered.filter(n => _affiniteNiveau(n) >= 4).length;
+  const bastion = filtered.filter(n => (n.activites || []).length || n.passif || n.salaireSuggere).length;
+  const vttReady = filtered.filter(n =>
+    n.pv || n.pm || n.ca || n.vitesse || Object.keys(n.stats || {}).length || Object.keys(n.equipement || {}).length
+  ).length;
+  const cells = [
+    ['Total', total],
+    ['Visibles', visible],
+    ['Alliés', allies],
+    ['VTT', vttReady],
+    ['Bastion', bastion],
+  ];
+  if (STATE.isAdmin) cells.push(['Cachés', _npcs.filter(n => n.embauchable === false).length]);
+  return cells.map(([label, value]) => `
+    <div class="npc-dashboard-stat">
+      <strong>${value}</strong>
+      <span>${label}</span>
+    </div>`).join('');
+}
+
 // ── Nav item ──────────────────────────────────────────────────────────────────
+function _renderDashboardFocus(n) {
+  const af = afx(_affiniteNiveau(n));
+  const orgs = Array.isArray(n.organisations) ? n.organisations.filter(Boolean) : [];
+  const status = NPC_STATUTS[n.statut]?.lbl || 'Vivant';
+  const hasVtt = n.pv || n.pm || n.ca || n.vitesse || Object.keys(n.stats || {}).length || Object.keys(n.equipement || {}).length;
+  return `
+    <div class="npc-dashboard-focus" style="${_afVars(af)}">
+      <div class="npc-dashboard-focus-avatar">
+        ${n.imageUrl ? `<img src="${n.imageUrl}" alt="">` : `<span>${_esc((n.nom || '?')[0].toUpperCase())}</span>`}
+      </div>
+      <div class="npc-dashboard-focus-main">
+        <span>Sélection</span>
+        <strong>${_esc(n.nom || 'PNJ sans nom')}</strong>
+        <small>${_esc([n.role, n.lieu].filter(Boolean).join(' - ') || 'Dossier à compléter')}</small>
+      </div>
+      <div class="npc-dashboard-focus-tags">
+        <em>${af.icon} ${af.label}</em>
+        <em>${_esc(status)}</em>
+        ${hasVtt ? '<em>VTT</em>' : ''}
+        ${orgs[0] ? `<em>${_esc(orgs[0])}</em>` : ''}
+      </div>
+    </div>`;
+}
+
+function _renderRosterMetrics(filtered) {
+  const visible = filtered.length;
+  const allies = filtered.filter(n => _affiniteNiveau(n) >= 4).length;
+  const hidden = STATE.isAdmin ? filtered.filter(n => n.embauchable === false).length : 0;
+  const ready = filtered.filter(n => n.pv || n.pm || n.ca || n.vitesse || Object.keys(n.stats || {}).length || Object.keys(n.equipement || {}).length).length;
+  return `
+    <div class="npc-roster-metrics">
+      <span><b>${visible}</b> affichés</span>
+      <span><b>${allies}</b> alliés</span>
+      <span><b>${ready}</b> VTT</span>
+      ${STATE.isAdmin ? `<span><b>${hidden}</b> cachés</span>` : ''}
+    </div>`;
+}
+
 function _renderNavItem(n) {
   const isActive = n.id === _activeId;
   const niv      = _affiniteNiveau(n);
   const af       = afx(niv);
+  const orgs = Array.isArray(n.organisations) ? n.organisations.filter(Boolean) : [];
+  const place = n.lieu || orgs[0] || '';
+  const hasVtt = n.pv || n.pm || n.ca || n.vitesse || Object.keys(n.stats || {}).length || Object.keys(n.equipement || {}).length;
   return `
   <div class="npc-nav-item ${isActive ? 'is-active' : ''} ${n.statut === 'mort' ? 'npc-nav-item--dead' : ''}" style="${_afVars(af)}"
     data-action="selectNpc" data-id="${n.id}" data-npc-id="${n.id}">
@@ -395,11 +521,13 @@ function _renderNavItem(n) {
 
     <div class="npc-nav-body">
       <div class="npc-nav-name">${_esc(n.nom || '?')}${NPC_STATUTS[n.statut] ? ` <span class="npc-status-tag" title="${NPC_STATUTS[n.statut].lbl}">${NPC_STATUTS[n.statut].ico}</span>` : ''}${STATE.isAdmin && n.embauchable === false ? ` <span class="npc-hidden-tag" title="Caché aux joueurs">🚫</span>` : ''}</div>
+      <div class="npc-nav-sub">${_esc([n.role, place].filter(Boolean).join(' - ') || 'Profil à compléter')}</div>
       <div class="npc-nav-affi">
         <div class="npc-nav-dots">
           ${AFFINITE.map((a, i) => `<div class="npc-nav-dot" ${i <= niv ? `style="background:${a.couleur}"` : ''}></div>`).join('')}
         </div>
         <span class="npc-nav-affi-lbl">${af.label}</span>
+        ${STATE.isAdmin && hasVtt ? `<span class="npc-nav-vtt">VTT</span>` : ''}
       </div>
     </div>
 
@@ -409,6 +537,32 @@ function _renderNavItem(n) {
 // ══ Fiche PNJ — composants ════════════════════════════════════════════════════
 
 // Portrait + identité (portrait reconnaissable, pas de bannière dans le corps)
+function _renderNpcVttSnapshot(n) {
+  if (!STATE.isAdmin) return '';
+  const { equip, dBonus, caEquip } = _npcEquipEffect(n);
+  const mainW = equip['Main principale'];
+  const combat = _npcCombat(n);
+  const vitalEquip = {
+    pv: dBonus.pvMaxBonus,
+    pm: dBonus.pmMaxBonus,
+    ca: caEquip + dBonus.caBonus,
+    vitesse: dBonus.vitesseBonus,
+  };
+  const total = (key) => (Number(n?.[key]) || 0) + (vitalEquip[key] || 0);
+  const dmg = mainW?.degats || combat.weapon?.degats || combat.damage || '-';
+  const range = mainW?.portee || combat.range || combat.weapon?.portee || '-';
+  const weapon = mainW?.nom || combat.weaponName || combat.weapon?.nom || 'Aucune arme';
+  return `
+    <div class="npc-vtt-strip">
+      <span><b>${total('pv') || '-'}</b> PV</span>
+      <span><b>${total('pm') || '-'}</b> PM</span>
+      <span><b>${total('ca') || '-'}</b> CA</span>
+      <span><b>${total('vitesse') || '-'}</b> m</span>
+      <span class="npc-vtt-strip-wide"><b>${_esc(dmg)}</b> ${_esc(weapon)}</span>
+      <span><b>${_esc(range)}</b> portée</span>
+    </div>`;
+}
+
 function _renderFicheHeader(n) {
   const af  = afx(_affiniteNiveau(n));
   const adm = STATE.isAdmin;
@@ -452,6 +606,7 @@ function _renderFicheHeader(n) {
         ${lieuEl}
         ${orgsEl}
       </div>
+      ${_renderNpcVttSnapshot(n)}
     </div>
     ${adm ? `
     <div class="npc-hero-actions">
@@ -617,7 +772,7 @@ function _renderRelationChip(a, npcId) {
   const { emoji, color } = _typeView(a);
   const vars = `--rc:${color};--rc-bg:${color}12;--rc-bd:${color}30`;
   const typeOpts = _affiniteTypes.map(t =>
-    `<option value="${t.id}" ${t.id === a.typeId ? 'selected' : ''}>${t.emoji || '✨'} ${_esc(t.label)}</option>`).join('');
+    `<option value="${t.id}" ${t.id === a.typeId ? 'selected' : ''}>${t.emoji || '✨'} ${_esc(_displayText(t.label))}</option>`).join('');
   return `
   <div class="npc-rel-chip npc-rel-chip--edit" style="${vars}">
     <span class="npc-rel-emoji">${emoji}</span>
@@ -645,7 +800,7 @@ function _renderRelationChipPlayer(a) {
   <div class="npc-rel-chip" style="${vars}">
     <span class="npc-rel-emoji">${emoji}</span>
     <div class="npc-rel-body">
-      <div class="npc-rel-label">${label}</div>
+      <div class="npc-rel-label">${_esc(label)}</div>
       <div class="npc-rel-target">${_affiTargetAvatar(a)}${_esc(a.charNom || '?')}</div>
       ${a.notePublique ? `<div class="npc-rel-note">🌐 ${_esc(a.notePublique)}</div>` : ''}
       ${a.note ? `<div class="npc-rel-note">🔒 ${_esc(a.note)}</div>` : ''}
@@ -661,7 +816,7 @@ function _renderRelationChipPublic(a) {
   <div class="npc-rel-chip" style="${vars}">
     <span class="npc-rel-emoji" style="opacity:.85">${emoji}</span>
     <div class="npc-rel-body">
-      <div class="npc-rel-label">${label}</div>
+      <div class="npc-rel-label">${_esc(label)}</div>
       <div class="npc-rel-target">${_affiTargetAvatar(a)}${_esc(a.charNom || '?')}</div>
       ${(a.notePublique || '').trim() ? `<div class="npc-rel-note">🌐 ${_esc(a.notePublique)}</div>` : ''}
     </div>
@@ -708,7 +863,7 @@ function _renderRelationsPanel(n) {
           </div>
           <select class="npc-select" id="afp-type-${n.id}">
             <option value="">— Type —</option>
-            ${_affiniteTypes.map(t => `<option value="${t.id}">${t.emoji || '✨'} ${_esc(t.label)}</option>`).join('')}
+            ${_affiniteTypes.map(t => `<option value="${t.id}">${t.emoji || '✨'} ${_esc(_displayText(t.label))}</option>`).join('')}
           </select>
           <button class="npc-event-btn" data-action="npcAddAffiPerso" data-npc-id="${n.id}">＋ Ajouter</button>
         </div>
@@ -738,7 +893,7 @@ function _renderRelationsPanel(n) {
 }
 
 // Fiche principale assemblée
-function _renderFiche(n) {
+function _renderFicheLegacy(n) {
   const desc = STATE.isAdmin
     ? `<div class="npc-edit-block">
         <span class="npc-edit-lbl">Description</span>
@@ -783,6 +938,306 @@ function _renderFiche(n) {
       ${body}
     </div>
   </div>`;
+}
+
+function _renderFicheV3(n) {
+  const desc = STATE.isAdmin
+    ? `<textarea class="npc-inline npc-field-textarea" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="description"
+          rows="4" placeholder="Apparence, personnalite, secrets...">${_esc(n.description || '')}</textarea>`
+    : (n.description ? `<div class="npc-desc">${_esc(n.description)}</div>` : '<div class="npc-empty-line">Aucune description publique.</div>');
+
+  const statutSel = STATE.isAdmin ? `
+    <div class="npc-statut-bar npc-statut-bar--panel">
+      <span class="npc-edit-lbl">Statut narratif</span>
+      <div class="npc-statut-seg">
+        ${[['', 'Vivant'], ['mort', 'Mort'], ['disparu', 'Disparu']].map(([v, lbl]) =>
+          `<button type="button" class="npc-statut-btn ${(n.statut || '') === v ? 'is-on' : ''}" data-action="npcSetStatut" data-id="${n.id}" data-statut="${v}">${lbl}</button>`).join('')}
+      </div>
+    </div>` : '';
+
+  const noteMJ = STATE.isAdmin ? `
+    <textarea class="npc-inline npc-field-textarea npc-note-mj-field" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="noteMJ"
+      rows="4" placeholder="Intrigue, vraie identite, objectif secret...">${_esc(n.noteMJ || '')}</textarea>` : '';
+
+  const dossier = `
+    <div class="npc-dossier-grid">
+      <section class="npc-dossier-card npc-dossier-card--story">
+        <div class="npc-dossier-title">
+          <span>Dossier public</span>
+          ${STATE.isAdmin ? '<small>Visible par les joueurs</small>' : ''}
+        </div>
+        ${desc}
+      </section>
+      ${STATE.isAdmin ? `
+      <section class="npc-dossier-card npc-dossier-card--gm">
+        <div class="npc-dossier-title">
+          <span>Pilotage MJ</span>
+          <small>Privé</small>
+        </div>
+        ${statutSel}
+        <div class="npc-edit-block npc-note-mj">
+          <span class="npc-edit-lbl">Notes MJ</span>
+          ${noteMJ}
+        </div>
+      </section>` : ''}
+    </div>`;
+
+  const main = [_renderAffiniteGroupe(n), _renderStatsPanel(n)].filter(Boolean).join('');
+  const side = [_renderRelationsPanel(n), _renderBastionProfil(n)].filter(Boolean).join('');
+
+  const body = side
+    ? `<div class="npc-cols">
+         <div class="npc-col npc-col--main">${main}</div>
+         <div class="npc-col npc-col--side">${side}</div>
+       </div>`
+    : main;
+
+  return `
+  <div class="npc-fiche">
+    ${_renderFicheHeader(n)}
+    <div class="npc-body">
+      ${dossier}
+      ${body}
+    </div>
+  </div>`;
+}
+
+function _renderFiche(n) {
+  const af = afx(_affiniteNiveau(n));
+  return `
+  <article class="npc-workfile" style="${_afVars(af)}">
+    ${_renderNpcWorkHeader(n, af)}
+    <div class="npc-workfile-grid">
+      <section class="npc-workfile-main">
+        ${_renderNpcRelationDesk(n, af)}
+        ${_renderNpcStoryDesk(n)}
+        ${_renderNpcTimelineDesk(n)}
+      </section>
+      <aside class="npc-workfile-side">
+        ${_renderNpcTacticalDesk(n)}
+        ${_renderNpcPeopleDesk(n)}
+      </aside>
+    </div>
+  </article>`;
+}
+
+function _renderNpcWorkHeader(n, af) {
+  const adm = STATE.isAdmin;
+  const initial = (n.nom || '?')[0].toUpperCase();
+  const portraitInner = n.imageUrl ? `<img src="${n.imageUrl}" alt="">` : `<span>${initial}</span>`;
+  const portrait = adm
+    ? `<button class="npc-work-portrait npc-work-portrait--btn" data-action="npcSetPhoto" data-id="${n.id}" title="Changer le portrait">${portraitInner}</button>`
+    : `<div class="npc-work-portrait">${portraitInner}</div>`;
+  const orgs = Array.isArray(n.organisations) ? n.organisations.filter(Boolean) : [];
+  const status = NPC_STATUTS[n.statut]?.lbl || 'Vivant';
+  return `
+    <header class="npc-work-head">
+      ${portrait}
+      <div class="npc-work-id">
+        ${adm
+          ? `<input class="npc-inline npc-work-name" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="nom" value="${_esc(n.nom || '')}" placeholder="Nom du PNJ">`
+          : `<h2 class="npc-work-name">${_esc(n.nom || '?')}</h2>`}
+        <div class="npc-work-fields">
+          ${adm
+            ? `<input class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="role" value="${_esc(n.role || '')}" placeholder="Rôle">
+               <input class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="lieu" value="${_esc(n.lieu || '')}" placeholder="Lieu">
+               <input class="npc-inline" data-change="npcSaveOrgs" data-npc-id="${n.id}" value="${_esc(orgs.join(', '))}" placeholder="Organisations">`
+            : `<span>${_esc(n.role || 'Rôle inconnu')}</span><span>${_esc(n.lieu || 'Lieu inconnu')}</span>${orgs.length ? `<span>${orgs.map(_esc).join(', ')}</span>` : ''}`}
+        </div>
+        <div class="npc-work-tags">
+          <span>${af.icon} ${af.label}</span>
+          <span>${_esc(status)}</span>
+          ${orgs.slice(0, 2).map(o => `<span>${_esc(o)}</span>`).join('')}
+          ${n.embauchable === false && adm ? '<span>Caché joueurs</span>' : ''}
+        </div>
+      </div>
+      ${adm ? `
+      <div class="npc-work-actions">
+        <button class="npc-mini-btn ${n.embauchable === false ? 'npc-mini-btn--off' : ''}" data-action="npcToggleEmbauchable" data-id="${n.id}">${n.embauchable !== false ? 'Visible joueurs' : 'Caché joueurs'}</button>
+        <button class="npc-mini-btn npc-mini-btn--danger" data-action="deleteNpc" data-id="${n.id}">Supprimer</button>
+      </div>` : ''}
+    </header>`;
+}
+
+function _renderNpcRelationDesk(n, af) {
+  const valeur = Number(n.affinite?.valeur) || 0;
+  const segments = AFFINITE.map((a, i) => `<span class="${i <= _affiniteNiveau(n) ? 'is-on' : ''}" style="--seg:${a.couleur}">${a.label}</span>`).join('');
+  return `
+    <section class="npc-work-card npc-work-card--relation">
+      <div class="npc-work-card-head">
+        <div><small>Relation groupe</small><strong>${af.icon} ${af.label}</strong></div>
+        ${STATE.isAdmin ? `<button class="npc-card-act npc-card-act--ghost" data-action="openAffiniteSeuilsModal">Seuils</button>` : ''}
+      </div>
+      <div class="npc-relation-scale">${segments}</div>
+      <div class="npc-relation-state">
+        <p>${_esc(af.desc || '')}</p>
+        ${STATE.isAdmin ? `<b>${valeur > 0 ? '+' + valeur : valeur}</b>` : ''}
+      </div>
+      ${STATE.isAdmin ? `
+      <div class="npc-relation-edit">
+        <textarea class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="affinite.note"
+          rows="2" placeholder="Note de relation...">${_esc(n.affinite?.note || '')}</textarea>
+      </div>` : (n.affinite?.note ? `<div class="npc-af-note">${_esc(n.affinite.note)}</div>` : '')}
+    </section>`;
+}
+
+function _renderNpcStoryDesk(n) {
+  if (STATE.isAdmin) {
+    return `
+      <section class="npc-work-card npc-work-card--story">
+        <div class="npc-work-card-head"><div><small>Carnet</small><strong>Public et privé</strong></div></div>
+        <div class="npc-story-split">
+          <label><span>Description publique</span><textarea class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="description" rows="6" placeholder="Ce que les joueurs peuvent savoir...">${_esc(n.description || '')}</textarea></label>
+          <label><span>Notes MJ</span><textarea class="npc-inline npc-note-mj-field" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="noteMJ" rows="6" placeholder="Secrets, objectifs, révélations...">${_esc(n.noteMJ || '')}</textarea></label>
+        </div>
+        <div class="npc-statut-bar npc-statut-bar--panel">
+          <span class="npc-edit-lbl">Statut</span>
+          <div class="npc-statut-seg">
+            ${[['', 'Vivant'], ['mort', 'Mort'], ['disparu', 'Disparu']].map(([v, lbl]) =>
+              `<button type="button" class="npc-statut-btn ${(n.statut || '') === v ? 'is-on' : ''}" data-action="npcSetStatut" data-id="${n.id}" data-statut="${v}">${lbl}</button>`).join('')}
+          </div>
+        </div>
+      </section>`;
+  }
+  return n.description ? `<section class="npc-work-card npc-work-card--story"><div class="npc-desc">${_esc(n.description)}</div></section>` : '';
+}
+
+function _renderNpcTimelineDesk(n) {
+  const histo = n.affinite?.historique || [];
+  return `
+    <section class="npc-work-card npc-work-card--timeline">
+      <div class="npc-work-card-head"><div><small>Chronologie</small><strong>${histo.length ? `${histo.length} événements` : 'Aucun événement'}</strong></div></div>
+      ${STATE.isAdmin ? `
+      <div class="npc-timeline-compose">
+        <input type="number" class="npc-inline npc-event-delta" id="afg-d-${n.id}" placeholder="+/-" title="Variation d'affinité">
+        <input type="text" class="npc-inline npc-event-text" id="afg-e-${n.id}" placeholder="Ce qui vient de se passer dans l'histoire...">
+        <button class="npc-event-btn" data-action="npcAddEvent" data-id="${n.id}">Ajouter à la chronologie</button>
+      </div>` : ''}
+      <div class="npc-work-timeline">
+        ${histo.length ? histo.slice().reverse().slice(0, 8).map((h, reversedIndex) => {
+          const realIndex = histo.length - 1 - reversedIndex;
+          const d = Number(h.delta) || 0;
+          return `<div class="npc-work-timeline-row">
+            <b class="${d > 0 ? 'is-good' : d < 0 ? 'is-bad' : ''}">${d > 0 ? '+' + d : d || '~'}</b>
+            <span>${h.texte ? _esc(h.texte) : 'Événement sans titre'}</span>
+            ${h.date ? `<small>${_esc(h.date)}</small>` : ''}
+            ${STATE.isAdmin ? `<button class="npc-icon-btn" data-action="editHistoriqueEntry" data-npc-id="${n.id}" data-idx="${realIndex}">Edit</button>` : ''}
+          </div>`;
+        }).join('') : '<div class="npc-work-timeline-empty">Aucun événement pour le moment. Ajoute le premier directement ici.</div>'}
+      </div>
+    </section>`;
+}
+
+function _renderNpcTacticalDesk(n) {
+  if (!STATE.isAdmin) return '';
+  const stats = n?.stats || {};
+  const { equip, sBonus, dBonus, caEquip } = _npcEquipEffect(n);
+  const mainW = equip['Main principale'];
+  const combat = _npcCombat(n);
+  const dmg = mainW?.degats || combat.weapon?.degats || combat.damage || '-';
+  const range = mainW?.portee || combat.range || combat.weapon?.portee || '-';
+  const vitalEquip = { pv: dBonus.pvMaxBonus, pm: dBonus.pmMaxBonus, ca: caEquip + dBonus.caBonus, vitesse: dBonus.vitesseBonus };
+  const vitals = NPC_VITALS.map(v => {
+    const base = n?.[v.key];
+    const bonus = vitalEquip[v.key] || 0;
+    return `<label class="npc-tactic-cell"><span>${v.label}</span><input type="number" class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="${v.key}" value="${base ?? ''}" placeholder="-">${bonus ? `<em>${bonus > 0 ? '+' : ''}${bonus}</em>` : ''}</label>`;
+  }).join('');
+  const statCells = NPC_STATS.map(s => {
+    const score = stats[s.key];
+    const bonus = sBonus[s.key] || 0;
+    const effScore = score != null ? (Number(score) || 0) + bonus : null;
+    return `<label class="npc-tactic-cell npc-tactic-cell--stat"><span>${s.short}</span><input type="number" class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="stat:${s.key}" value="${score ?? ''}" placeholder="-"><small>${effScore != null ? _modStr(effScore) : ''}</small></label>`;
+  }).join('');
+  return `
+    <section class="npc-work-card npc-work-card--tactic">
+      <div class="npc-work-card-head"><div><small>VTT</small><strong>Fiche tactique</strong></div><span>${_esc(dmg)} / ${_esc(range)}</span></div>
+      <div class="npc-tactic-grid">${vitals}</div>
+      <div class="npc-tactic-grid npc-tactic-grid--stats">${statCells}</div>
+      ${_renderNpcEquip(n, equip, { dmg, range })}
+    </section>`;
+}
+
+function _renderNpcPeopleDesk(n) {
+  const blocks = [_renderNpcSpecificRelationsDesk(n), _renderBastionProfil(n)].filter(Boolean).join('');
+  return blocks ? `<div class="npc-people-stack">${blocks}</div>` : '';
+}
+
+function _renderNpcSpecificRelationsDesk(n) {
+  const persoList = _affiPerso.filter(a => a.npcId === n.id);
+  const myChars = getMyCharacters(STATE.characters, STATE.user?.uid);
+  const myAffi = persoList.filter(a => myChars.some(c => c.id === a.charId));
+
+  if (STATE.isAdmin) {
+    const chars = sortCharactersForDisplay(STATE.characters || []);
+    return `
+      <section class="npc-work-card npc-work-card--links">
+        <div class="npc-work-card-head">
+          <div><small>Liens personnels</small><strong>${persoList.length ? `${persoList.length} relations` : 'Aucune relation'}</strong></div>
+          <button class="npc-card-act npc-card-act--ghost" data-action="openAffiniteTypesManager">Types</button>
+        </div>
+        <div class="npc-link-board">
+          ${persoList.length ? persoList.map(a => _renderNpcRelationCard(a)).join('') : '<div class="npc-link-empty">Aucun lien spécifique. Ajoute une relation avec un personnage pour donner du relief au PNJ.</div>'}
+        </div>
+        <div class="npc-link-composer">
+          <div class="npc-charpick">
+            <input type="hidden" id="afp-char-${n.id}" value="">
+            <button type="button" class="npc-charpick-trigger" data-action="npcCharPickToggle" data-npc-id="${n.id}">
+              <span class="npc-charpick-current"><span class="npc-charpick-ph">Choisir un personnage...</span></span>
+              <span class="npc-charpick-caret">▾</span>
+            </button>
+            <div class="npc-charpick-panel">
+              ${chars.length ? chars.map(c => `
+                <button type="button" class="npc-charpick-opt" data-action="npcCharPickSelect"
+                  data-npc-id="${n.id}" data-char-id="${c.id}" data-char-nom="${_esc(c.nom || '?')}">
+                  ${_charAvatar(c)}
+                  <span class="npc-charpick-opt-txt"><b>${_esc(c.nom || '?')}</b><small>${_esc(c.ownerPseudo || '?')}</small></span>
+                </button>`).join('') : '<div class="npc-empty-line">Aucun personnage</div>'}
+            </div>
+          </div>
+          <select class="npc-select" id="afp-type-${n.id}">
+            <option value="">Type de relation</option>
+            ${_affiniteTypes.map(t => `<option value="${t.id}">${t.emoji || '*'} ${_esc(_displayText(t.label))}</option>`).join('')}
+          </select>
+          <button class="npc-event-btn" data-action="npcAddAffiPerso" data-npc-id="${n.id}">Lier</button>
+        </div>
+      </section>`;
+  }
+
+  const others = persoList.filter(a => !myChars.some(c => c.id === a.charId));
+  if (!persoList.length) return '';
+  return `
+    <section class="npc-work-card npc-work-card--links">
+      <div class="npc-work-card-head"><div><small>Liens personnels</small><strong>Relations connues</strong></div></div>
+      ${myAffi.length ? `<div class="npc-link-board npc-link-board--own">${myAffi.map(a => _renderNpcRelationCard(a, { playerView: true })).join('')}</div>` : ''}
+      ${others.length ? `<div class="npc-link-board">${others.map(a => _renderNpcRelationCard(a, { publicOnly: true })).join('')}</div>` : ''}
+    </section>`;
+}
+
+function _renderNpcRelationCard(a, { publicOnly = false, playerView = false } = {}) {
+  const { emoji, color, label } = _typeView(a);
+  const vars = `--rc:${color};--rc-bg:${color}12;--rc-bd:${color}34`;
+  const typeOpts = _affiniteTypes.map(t =>
+    `<option value="${t.id}" ${t.id === a.typeId ? 'selected' : ''}>${t.emoji || '*'} ${_esc(_displayText(t.label))}</option>`).join('');
+  const publicNote = (a.notePublique || '').trim();
+  const privateNote = (a.note || '').trim();
+  return `
+    <article class="npc-link-card${playerView ? ' is-own' : ''}" style="${vars}">
+      <div class="npc-link-avatar">${_affiTargetAvatar(a)}</div>
+      <div class="npc-link-content">
+        <div class="npc-link-top">
+          <strong>${_esc(a.charNom || '?')}</strong>
+          <span>${emoji} ${_esc(label || 'Relation')}</span>
+        </div>
+        ${STATE.isAdmin && !publicOnly ? `
+          <select class="npc-select npc-link-type" data-change="npcAffiField" data-aff-id="${a.id}" data-field="typeId">${typeOpts}</select>
+          <input class="npc-inline" data-change="npcAffiField" data-aff-id="${a.id}" data-field="notePublique" value="${_esc(a.notePublique || '')}" placeholder="Note publique">
+          <input class="npc-inline npc-link-secret" data-change="npcAffiField" data-aff-id="${a.id}" data-field="note" value="${_esc(a.note || '')}" placeholder="Note privée MJ">`
+          : `
+          ${publicNote ? `<p>${_esc(publicNote)}</p>` : ''}
+          ${playerView && privateNote ? `<p class="npc-link-secret-text">${_esc(privateNote)}</p>` : ''}`}
+      </div>
+      ${STATE.isAdmin && !publicOnly ? `<button class="npc-icon-btn npc-icon-btn--danger npc-link-delete" data-action="deleteAffinitePerso" data-id="${a.id}">X</button>` : ''}
+    </article>`;
 }
 
 function _renderEmpty() {
@@ -1126,7 +1581,149 @@ function _npcEquipBadges(eq, def) {
   return parts.map(p => `<span class="npc-eq-badge">${_esc(p)}</span>`).join('');
 }
 
+function _npcEquipSearchText(item = {}) {
+  return _norm([
+    item.nom,
+    item.type,
+    item.template,
+    item.sousType,
+    item.typeArme,
+    item.slotArmure,
+    item.slotBijou,
+    item.rarete,
+    item.degats,
+    item.effet,
+    item.particularite,
+    item.description,
+    formatItemBonusText(item),
+  ].map(_searchPart).join(' '));
+}
+
+function _npcEquipPreviewBadges(item, def) {
+  const built = buildEquippedItemFromInventory(def.slot, item, null) || { ...item };
+  built.itemId = item.id || item.itemId || '';
+  built.nom = built.nom || item.nom || '';
+  return _npcEquipBadges(built, def);
+}
+
+function _npcEquipPickerTitle() {
+  const def = NPC_EQUIP_SLOTS.find(s => s.slot === _equipPickerState.slot);
+  return `Équiper ${def?.slot || 'PNJ'}`;
+}
+
+function _renderEquipPickerHtml() {
+  const { npcId, slot, q } = _equipPickerState;
+  const n = _npcs.find(x => x.id === npcId);
+  const def = NPC_EQUIP_SLOTS.find(s => s.slot === slot);
+  if (!n || !def) return '<div class="npc-equip-picker-empty">Emplacement introuvable.</div>';
+
+  const equip = n.equipement || {};
+  const current = equip[slot] || null;
+  const all = _shopItemsForSlot(def);
+  const query = _norm(q || '');
+  const filtered = query ? all.filter(i => _searchIncludes(_npcEquipSearchText(i), query)) : all;
+  const shown = filtered.slice(0, 80);
+  const more = Math.max(0, filtered.length - shown.length);
+
+  return `
+    <div class="npc-equip-picker">
+      <div class="npc-equip-picker-head">
+        <div>
+          <div class="npc-equip-picker-slot">${def.icon} ${_esc(def.slot)}</div>
+          <div class="npc-equip-picker-current">${current ? `Actuel : <b>${_esc(current.nom || 'Objet équipé')}</b>` : 'Aucun objet équipé'}</div>
+        </div>
+        ${current ? `
+          <button class="btn btn-outline btn-sm" data-action="npcClearEquipSlot"
+            data-npc-id="${_esc(npcId)}" data-slot="${_esc(slot)}">
+            Retirer
+          </button>` : ''}
+      </div>
+
+      <input class="input-field npc-equip-search" data-input="npcEquipPickerSearch"
+        value="${_esc(q || '')}" placeholder="Rechercher par nom, type, dégâts, bonus..." autocomplete="off">
+      <div class="npc-equip-picker-meta">
+        ${filtered.length} / ${all.length} objets compatibles
+        ${more ? `<span>${more} autres disponibles en affinant la recherche</span>` : ''}
+      </div>
+
+      <div class="npc-equip-results">
+        ${shown.length ? shown.map(item => {
+          const badges = _npcEquipPreviewBadges(item, def);
+          const selected = current?.itemId === item.id;
+          const sub = [item.sousType || item.typeArme || item.type, item.slotArmure || item.slotBijou, item.rarete].filter(Boolean).join(' - ');
+          return `
+            <button type="button" class="npc-equip-result${selected ? ' is-selected' : ''}"
+              data-action="npcPickEquipItem" data-npc-id="${_esc(npcId)}" data-slot="${_esc(slot)}" data-item-id="${_esc(item.id)}">
+              <span class="npc-equip-result-main">
+                <strong>${_esc(item.nom || 'Objet sans nom')}</strong>
+                ${sub ? `<small>${_esc(sub)}</small>` : ''}
+              </span>
+              ${badges ? `<span class="npc-eq-badges">${badges}</span>` : '<span class="npc-equip-no-bonus">Aucun bonus direct</span>'}
+            </button>`;
+        }).join('') : '<div class="npc-equip-picker-empty">Aucun objet compatible avec cette recherche.</div>'}
+      </div>
+    </div>`;
+}
+
+function _npcOpenEquipPicker(btn) {
+  if (!STATE.isAdmin || !btn) return;
+  _equipPickerState = { npcId: btn.dataset.npcId || '', slot: btn.dataset.slot || '', q: '' };
+  openModal(_npcEquipPickerTitle(), _renderEquipPickerHtml(), { subtitle: 'Objets compatibles de la boutique' });
+  requestAnimationFrame(() => document.querySelector('.npc-equip-search')?.focus());
+}
+
+function _npcEquipPickerSearch(el) {
+  if (!el) return;
+  const caret = el.selectionStart || 0;
+  _equipPickerState.q = el.value || '';
+  updateModalContent(_npcEquipPickerTitle(), _renderEquipPickerHtml(), { subtitle: 'Objets compatibles de la boutique' });
+  requestAnimationFrame(() => {
+    const next = document.querySelector('.npc-equip-search');
+    if (!next) return;
+    next.focus();
+    try { next.setSelectionRange(caret, caret); } catch {}
+  });
+}
+
 function _renderNpcEquip(n, equip, summary) {
+  const modernSlotCard = (def) => {
+    const eq = equip[def.slot] || null;
+    const opts = _shopItemsForSlot(def);
+    const badges = eq ? _npcEquipBadges(eq, def) : '';
+    const itemSub = eq ? [eq.sousType || eq.typeArme || eq.type, eq.slotArmure || eq.slotBijou].filter(Boolean).join(' - ') : '';
+    return `
+      <div class="npc-eq-cell${eq ? ' is-on' : ''}">
+        <div class="npc-eq-slot">
+          <span>${def.icon} ${_esc(def.slot)}</span>
+          <small>${opts.length} choix</small>
+        </div>
+        <div class="npc-eq-current${eq ? '' : ' is-empty'}">
+          <strong>${eq ? _esc(eq.nom || 'Objet équipé') : 'Vide'}</strong>
+          <span>${eq ? _esc(itemSub || 'Objet boutique') : 'Aucun objet équipé'}</span>
+        </div>
+        ${badges ? `<div class="npc-eq-badges">${badges}</div>` : ''}
+        <div class="npc-eq-actions">
+          <button class="npc-eq-pick-btn" type="button" data-action="npcOpenEquipPicker"
+            data-npc-id="${_esc(n.id)}" data-slot="${_esc(def.slot)}">
+            Choisir
+          </button>
+          ${eq ? `
+            <button class="npc-eq-clear-btn" type="button" title="Vider l'emplacement" data-action="npcClearEquipSlot"
+              data-npc-id="${_esc(n.id)}" data-slot="${_esc(def.slot)}">
+              X
+            </button>` : ''}
+        </div>
+      </div>`;
+  };
+  return `
+    <div class="npc-eq-block">
+      <div class="npc-eq-hd">
+        <span class="npc-edit-lbl">Équipement</span>
+        <span class="npc-eq-combat">${_esc(summary.dmg)} - portée ${_esc(summary.range)}</span>
+      </div>
+      <div class="npc-eq-grid">${NPC_EQUIP_SLOTS.map(modernSlotCard).join('')}</div>
+    </div>`;
+
   const slotCard = (def) => {
     const eq   = equip[def.slot] || null;
     const opts = _shopItemsForSlot(def);
@@ -1213,10 +1810,23 @@ function _renderStatsPanel(n) {
 // Équipe / retire un objet boutique sur un slot PNJ, recalcule le bonus de stats.
 async function _npcEquipSlot(el) {
   if (!STATE.isAdmin || !el) return;
-  const id = el.dataset.npcId, slot = el.dataset.slot;
+  await _npcApplyEquipSlot(el.dataset.npcId, el.dataset.slot, el.value);
+}
+
+async function _npcPickEquipItem(btn) {
+  if (!STATE.isAdmin || !btn) return;
+  await _npcApplyEquipSlot(btn.dataset.npcId, btn.dataset.slot, btn.dataset.itemId, { closePicker: true });
+}
+
+async function _npcClearEquipSlot(btn) {
+  if (!STATE.isAdmin || !btn) return;
+  await _npcApplyEquipSlot(btn.dataset.npcId, btn.dataset.slot, '', { closePicker: !!btn.closest('.npc-equip-picker') });
+}
+
+async function _npcApplyEquipSlot(id, slot, itemId, { closePicker = false } = {}) {
+  if (!STATE.isAdmin) return;
   const n = _npcs.find(x => x.id === id); if (!n || !slot) return;
   const equip = { ...(n.equipement || {}) };
-  const itemId = el.value;
   if (!itemId) {
     delete equip[slot];
   } else {
@@ -1232,6 +1842,7 @@ async function _npcEquipSlot(el) {
   if (await trySave('npcs', id, { equipement: equip, statsBonus })) {
     showNotif(itemId ? 'Équipement mis à jour.' : 'Emplacement vidé.', 'success');
   }
+  if (closePicker) closeModal();
   _refreshActivePanel();
 }
 
@@ -1518,7 +2129,7 @@ function _getAffiniteTypesManagerHtml() {
           border:1px solid ${isEditing ? col + '66' : col + '28'};border-radius:9px;
           transition:all .15s">
           <span style="font-size:1.2rem;flex-shrink:0">${t.emoji || '✨'}</span>
-          <span style="flex:1;font-size:.85rem;font-weight:700;color:${col}">${_esc(t.label)}</span>
+          <span style="flex:1;font-size:.85rem;font-weight:700;color:${col}">${_esc(_displayText(t.label))}</span>
           <div style="display:flex;gap:.25rem">
             <button type="button" data-action="_aftEditType" data-id="${t.id}"
               style="background:${isEditing ? col + '33' : 'none'};border:1px solid ${isEditing ? col : 'var(--border)'};
@@ -1548,7 +2159,7 @@ function _getAffiniteTypesManagerHtml() {
     <div>
       <div style="font-size:.72rem;font-weight:700;color:${isEdit ? 'var(--gold)' : 'var(--text-dim)'};
         text-transform:uppercase;letter-spacing:1px;margin-bottom:.65rem">
-        ${isEdit ? `✏️ Modifier — ${_esc(_affiniteTypes.find(t => t.id === s.editingId)?.label || '')}` : '➕ Ajouter un type'}</div>
+        ${isEdit ? `✏️ Modifier — ${_esc(_displayText(_affiniteTypes.find(t => t.id === s.editingId)?.label || ''))}` : '➕ Ajouter un type'}</div>
 
       <!-- Emoji -->
       <div style="margin-bottom:.55rem">
@@ -1983,8 +2594,18 @@ async function _npcAddAffiPerso(btn) {
   if (!charSel) { showNotif('Choisis un personnage.', 'error'); return; }
   if (!typeId)  { showNotif('Choisis un type d\'affinité.', 'error'); return; }
   const [charId, charNom] = charSel.split('|');
+  const char = (STATE.characters || []).find(c => c.id === charId);
   const type = _getAffiniteType(typeId);
-  const data = { npcId, charId, charNom, typeId, typeLabel: type?.label || '', note: '', notePublique: '' };
+  const data = {
+    npcId,
+    charId,
+    charNom,
+    charPhoto: _charPortraitSrc(char),
+    typeId,
+    typeLabel: type?.label || '',
+    note: '',
+    notePublique: '',
+  };
   try {
     const newId = await addToCol('npc_affinites', data);
     const entry = { id: newId || `afp_${Date.now()}`, ...data };
@@ -1994,16 +2615,52 @@ async function _npcAddAffiPerso(btn) {
 }
 
 // ── Sélecteur de personnage avec portraits (pour l'ajout d'affinité) ─────────
-const _charAvatar = (c) => c.photo
-  ? `<img class="npc-charpick-av" src="${_esc(c.photo)}" alt="">`
+const _profilePortraitSrc = (p = {}) => p.portraitUrl || p.photo || p.avatar || p.avatarUrl || '';
+const _playerProfileForChar = (charId = '', charNom = '') => {
+  const byId = charId ? _playerProfiles.find(p =>
+    p.charId === charId || p.characterId === charId || p.persoId === charId || p.linkedCharId === charId
+  ) : null;
+  if (byId) return byId;
+  const targetName = _norm(charNom || '');
+  return targetName ? _playerProfiles.find(p => _norm(p.nom || p.name || '') === targetName) || null : null;
+};
+const _charPortraitSrc = (c = {}, profile = null) =>
+  c.photo || c.portraitUrl || c.avatar || c.avatarUrl || _profilePortraitSrc(profile) || '';
+const _relationCharacterFor = (a = {}) => {
+  const chars = [...(STATE.characters || []), ..._relationCharacters];
+  const byId = a.charId ? chars.find(x => x.id === a.charId) : null;
+  if (byId) return byId;
+  const targetName = _norm(a.charNom || '');
+  return targetName ? chars.find(x => _norm(x.nom || x.name || '') === targetName) || null : null;
+};
+const _charAvatar = (c) => _charPortraitSrc(c)
+  ? `<img class="npc-charpick-av" src="${_esc(_charPortraitSrc(c))}" alt="">`
   : `<span class="npc-charpick-av npc-charpick-av--ph">${_esc((c.nom || '?')[0].toUpperCase())}</span>`;
+
+const _storedRelationPortraitSrc = (a = {}, profile = null) => {
+  const stored = a.charPhoto || a.photo || a.portraitUrl || a.avatar || a.avatarUrl || '';
+  if (!stored) return '';
+  return stored === profile?.imageUrl ? '' : stored;
+};
+
+const _profileCroppedAvatar = (profile = {}) => {
+  const src = profile.imageUrl || '';
+  if (!src) return '';
+  const cc = profile.cardCrop;
+  const imgStyle = cc
+    ? `position:absolute;left:${(cc.offX * 100).toFixed(2)}%;top:${(cc.offY * 100).toFixed(2)}%;width:${(cc.imgW * 100).toFixed(2)}%;height:auto;max-width:none`
+    : 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top';
+  return `<span class="npc-rel-av npc-rel-av--crop"><img src="${_esc(src)}" alt="" loading="lazy" decoding="async" style="${imgStyle}"></span>`;
+};
 
 // Avatar du personnage cible d'une affinité spécifique (retrouvé via charId).
 const _affiTargetAvatar = (a) => {
-  const c = (STATE.characters || []).find(x => x.id === a.charId);
-  return c?.photo
-    ? `<img class="npc-rel-av" src="${_esc(c.photo)}" alt="">`
-    : `<span class="npc-rel-av npc-rel-av--ph">${_esc((a.charNom || '?')[0].toUpperCase())}</span>`;
+  const c = _relationCharacterFor(a);
+  const profile = _playerProfileForChar(a.charId, a.charNom);
+  const src = _charPortraitSrc(c, profile) || _storedRelationPortraitSrc(a, profile);
+  return src
+    ? `<img class="npc-rel-av" src="${_esc(src)}" alt="" loading="lazy" decoding="async">`
+    : _profileCroppedAvatar(profile) || `<span class="npc-rel-av npc-rel-av--ph">${_esc((a.charNom || '?')[0].toUpperCase())}</span>`;
 };
 
 function _npcCharPickToggle(btn) {
@@ -2090,6 +2747,10 @@ registerActions({
   npcSaveOrgs:               (el) => _npcSaveOrgs(el),
   npcSetWeapon:              (el) => _npcSetWeapon(el),
   npcEquipSlot:              (el) => _npcEquipSlot(el),
+  npcOpenEquipPicker:        (btn) => _npcOpenEquipPicker(btn),
+  npcEquipPickerSearch:      (el) => _npcEquipPickerSearch(el),
+  npcPickEquipItem:          (btn) => _npcPickEquipItem(btn),
+  npcClearEquipSlot:         (btn) => _npcClearEquipSlot(btn),
   npcSetPhoto:               (btn) => _npcSetPhoto(btn),
   npcViewPhoto:              (btn) => _npcViewPhoto(btn),
   npcSetStatut:              (btn) => _npcSetStatut(btn),

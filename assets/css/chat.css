@@ -138,8 +138,74 @@
 .chat-member-av { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex-shrink: 0; background: var(--bg-elevated, #1e2836); }
 .chat-member-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ── En-tête : bouton droit (⚙️ gérer) ── */
+.chat-head-right { display: flex; align-items: center; gap: .1rem; }
+.chat-gear { background: none; border: none; cursor: pointer; font-size: .95rem; padding: 2px 4px; border-radius: 6px; line-height: 1; }
+.chat-gear:hover { background: rgba(255,255,255,.08); }
+
+/* ── Barre de saisie : ligne + barre d'édition ── */
+.chat-form { flex-direction: column; gap: .35rem; }
+.chat-form-row { display: flex; gap: .4rem; align-items: center; }
+.chat-edit-bar {
+  font-size: .72rem; color: var(--text-dim, #9aa4b2);
+  display: flex; align-items: center; gap: .35rem;
+}
+.chat-edit-cancel { background: none; border: none; color: #4f8cff; cursor: pointer; font: inherit; font-size: .72rem; padding: 0; text-decoration: underline; }
+
+/* ── Actions au survol d'un message (réagir / modifier / supprimer) ── */
+.chat-msg-bubble-wrap { position: relative; display: inline-flex; }
+.chat-msg-actions {
+  position: absolute; bottom: calc(100% - 2px); z-index: 3;
+  display: flex; align-items: center; gap: 1px; padding: 2px;
+  background: var(--bg-card, #141b26); border: 1px solid var(--border, rgba(255,255,255,.14));
+  border-radius: 999px; box-shadow: 0 4px 12px rgba(0,0,0,.35);
+  opacity: 0; pointer-events: none; transition: opacity .12s;
+}
+.chat-msg:not(.chat-msg--mine) .chat-msg-actions { left: 0; }
+.chat-msg--mine .chat-msg-actions { right: 0; }
+.chat-msg:hover .chat-msg-actions { opacity: 1; pointer-events: auto; }
+.chat-act-emo, .chat-act-btn {
+  background: none; border: none; cursor: pointer; line-height: 1;
+  padding: 3px; border-radius: 50%; font-size: .82rem;
+}
+.chat-act-emo:hover, .chat-act-btn:hover { background: rgba(255,255,255,.12); transform: scale(1.15); }
+.chat-act-btn { font-size: .74rem; }
+
+/* ── Réactions posées (puces sous la bulle) ── */
+.chat-msg-reacts { display: flex; flex-wrap: wrap; gap: .2rem; margin: .15rem .3rem 0; }
+.chat-msg--mine .chat-msg-reacts { justify-content: flex-end; }
+.chat-react-chip {
+  display: inline-flex; align-items: center; gap: .15rem;
+  font-size: .68rem; line-height: 1; padding: .12rem .35rem; cursor: pointer;
+  border-radius: 999px; border: 1px solid var(--border, rgba(255,255,255,.14));
+  background: var(--bg-elevated, #1e2836); color: var(--text, #e8edf4);
+}
+.chat-react-chip.is-mine { border-color: rgba(79,140,255,.7); background: rgba(79,140,255,.18); }
+
+/* ── Marqueurs « modifié » / « supprimé » ── */
+.chat-msg-edited { font-style: italic; opacity: .7; }
+.chat-msg-bubble--del { font-style: italic; opacity: .6; background: transparent; border: 1px dashed var(--border, rgba(255,255,255,.2)); }
+
+/* ── Rangée de membre (picker + gestion) : label + bouton d'action ── */
+.chat-member-row { display: flex; align-items: center; gap: .3rem; }
+.chat-member-row .chat-member { flex: 1; min-width: 0; }
+.chat-mini-btn {
+  flex-shrink: 0; background: none; border: 1px solid var(--border, rgba(255,255,255,.14));
+  color: var(--text, #e8edf4); cursor: pointer; border-radius: 8px;
+  width: 30px; height: 30px; font-size: .9rem; line-height: 1;
+}
+.chat-mini-btn:hover { background: rgba(79,140,255,.15); border-color: rgba(79,140,255,.5); }
+.chat-tag { font-size: .6rem; color: var(--text-dim, #9aa4b2); border: 1px solid var(--border, rgba(255,255,255,.18)); border-radius: 6px; padding: 0 .25rem; margin-left: .2rem; }
+
+/* ── Pied de la vue « gérer » ── */
+.chat-manage-foot { display: flex; gap: .4rem; }
+.chat-newbtn--danger { border-color: rgba(255,71,87,.4); background: rgba(255,71,87,.12); }
+.chat-newbtn--danger:hover { background: rgba(255,71,87,.2); }
+
 /* ── Mobile : au-dessus de la barre de navigation du bas ── */
 @media (max-width: 780px) {
   #chat-widget { right: 14px; bottom: 78px; }
   .chat-panel { height: min(460px, calc(100vh - 160px)); }
+  /* Tactile : pas de survol → actions toujours visibles, plus discrètes */
+  .chat-msg-actions { opacity: 1; pointer-events: auto; position: static; box-shadow: none; background: transparent; border: none; padding: 0; }
 }

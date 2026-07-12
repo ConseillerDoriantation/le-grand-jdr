@@ -542,19 +542,38 @@ match /adventures/{adventureId} {
   }
 
   // Conversations de GROUPE : lecture/écriture réservées à leurs membres.
-  // Création : l'auteur doit être dans members + être createdBy. Update : un
-  // membre ne peut toucher QUE l'aperçu du dernier message.
+  // Conversations de GROUPE et DM (type:'group'|'dm').
+  // Création : l'auteur doit être dans members + être createdBy.
+  // Update (tout membre) : aperçu du dernier message ; (créateur) : renommer ou
+  //   gérer les membres ; (soi-même) : quitter (se retirer de members).
+  // Delete : le créateur peut supprimer la conversation.
   match /chatConvos/{cid} {
     allow read:   if inAdventure(adventureId) && request.auth.uid in resource.data.members;
     allow create: if inAdventure(adventureId)
       && request.auth.uid in request.resource.data.members
       && request.resource.data.createdBy == request.auth.uid;
-    allow update: if inAdventure(adventureId) && request.auth.uid in resource.data.members
-      && request.resource.data.diff(resource.data).affectedKeys()
-           .hasOnly(['lastText', 'lastSenderName', 'lastSenderId', 'lastAt']);
+    allow update: if inAdventure(adventureId) && request.auth.uid in resource.data.members && (
+      // Aperçu du dernier message (tout membre)
+      request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['lastText', 'lastSenderName', 'lastSenderId', 'lastAt'])
+      // Renommer (créateur)
+      || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+          && resource.data.createdBy == request.auth.uid)
+      // Gérer les membres (créateur)
+      || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
+          && resource.data.createdBy == request.auth.uid)
+      // Quitter : le membre se retire LUI-MÊME (rien d'autre ne change)
+      || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
+          && !(request.auth.uid in request.resource.data.members)
+          && resource.data.members.removeAll(request.resource.data.members).hasOnly([request.auth.uid])
+          && request.resource.data.members.removeAll(resource.data.members).size() == 0)
+    );
+    allow delete: if inAdventure(adventureId) && resource.data.createdBy == request.auth.uid;
   }
-  // Messages : conv « aventure » = tout membre ; conv de groupe = membres du
-  // groupe (vérifiés via le doc chatConvos). Message signé par son auteur.
+  // Messages : conv « aventure » = tout membre ; conv de groupe/DM = membres du
+  // doc chatConvos. Message signé par son auteur.
+  // Update : (auteur) modifier/supprimer son message (text/editedAt/deleted) ;
+  //   (tout membre) poser/retirer SA réaction (seule sa clé de la map reactions).
   // INDEX COMPOSITE REQUIS (sinon listener en failed-precondition, conv vide) :
   //   Collection `chatMessages` (scope Collection) — convoId ASC, at DESC.
   //   La 1re fois, la console logue un lien « create index » cliquable.
@@ -568,6 +587,19 @@ match /adventures/{adventureId} {
       && (
         request.resource.data.convoId == 'adventure' ||
         request.auth.uid in get(/databases/$(database)/documents/adventures/$(adventureId)/chatConvos/$(request.resource.data.convoId)).data.members
+      );
+    allow update: if inAdventure(adventureId)
+      && (
+        resource.data.convoId == 'adventure' ||
+        request.auth.uid in get(/databases/$(database)/documents/adventures/$(adventureId)/chatConvos/$(resource.data.convoId)).data.members
+      )
+      && (
+        // L'auteur modifie / supprime son message
+        (resource.data.senderId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'editedAt', 'deleted']))
+        // Tout membre pose / retire SA réaction (seule sa clé bouge)
+        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+            && request.resource.data.get('reactions', {}).diff(resource.data.get('reactions', {})).affectedKeys().hasOnly([request.auth.uid]))
       );
   }
   // État de lecture (badge non-lus) : map convoId→millis, chacun le sien.
