@@ -1015,7 +1015,11 @@ function _closeMentionMenu() {
 }
 function _renderMentionMenu(mq) {
   const ql = mq.q.toLowerCase();
-  const members = _advMembers().map(u => ({ u, name: _nameOf(u) }))
+  // Cible : membres de la conversation (groupe/DM) ; tout le monde en chat d'aventure.
+  const pool = _openId === ADV
+    ? _advMembers()
+    : (_convoById(_openId)?.members || []).filter(u => u && u !== _uid && !_ghosts.has(u));
+  const members = pool.map(u => ({ u, name: _nameOf(u) }))
     .filter(x => !ql || x.name.toLowerCase().includes(ql)).slice(0, 6);
   _closeMentionMenu();
   if (!members.length) return;
