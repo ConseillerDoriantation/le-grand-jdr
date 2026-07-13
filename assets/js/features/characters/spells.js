@@ -792,35 +792,10 @@ export function renderCharDeck(c, canEdit) {
     if (ok) visibleCount += 1;
   });
 
-  // ── En-tête réorganisé par intention (anti-cockpit) ──────────────
-  //   Ligne 1 : agir (chercher · créer · filtres · plus)
-  //   Ligne 2 : regarder (Tous / Deck, jauge intégrée)
-  //   Le reste (menu, filtres, analyse) est repliable.
+  // L'en-tête reste volontairement limité à la recherche et aux deux modes.
   const deckOver = deckCount > deckMax;
   const filtersActive = !!(typeFlt || runeFlt || noyFlt || pmFlt || validationFlt || _sortsDuplicateOnly || _sortsRecipeKeyFilter || order !== 'manual');
-  const validationOk = validationCounts.ok || 0;
-  const validationPending = validationCounts.pending || 0;
   let html = `<div class="cs-section cs-section--compact cs-sorts-v3 is-${mode} ${mode==='grimoire' && _sortsCompareKeys.length===1?'is-compare-picking':''}">
-
-    <!-- Tableau de bord du grimoire : identité, progression et action principale -->
-    <section class="cs-spellbook-hero" aria-labelledby="cs-spellbook-title">
-      <div class="cs-spellbook-hero-main">
-        <span class="cs-spellbook-kicker">ARSENAL ARCANIQUE</span>
-        <h2 id="cs-spellbook-title">Grimoire de ${_esc(c.nom || 'l’aventurier')}</h2>
-        <p>${mode === 'prepare' ? 'Compose ton deck de combat. Sélectionne les sorts que tu veux emporter avant la prochaine rencontre.' : 'Retrouve, classe et améliore tous les sorts que tu as forgés.'}</p>
-        ${canEdit ? `<button class="cs-spellbook-forge" data-action="addSort">
-          <span class="cs-spellbook-forge-ico">✦</span>
-          <span><b>Forger un nouveau sort</b><small>Noyau, runes et effets</small></span>
-          <span class="cs-spellbook-forge-arrow">→</span>
-        </button>` : ''}
-      </div>
-      <div class="cs-spellbook-stats" aria-label="Résumé du grimoire">
-        <div class="cs-spellbook-stat"><span class="cs-spellbook-stat-ico">◆</span><span><b>${allSorts.length}</b><small>sort${allSorts.length > 1 ? 's' : ''} connu${allSorts.length > 1 ? 's' : ''}</small></span></div>
-        <div class="cs-spellbook-stat is-deck ${deckOver ? 'is-danger' : ''}"><span class="cs-spellbook-stat-ico">⚡</span><span><b>${deckCount}<i>/${deckMax}</i></b><small>dans le deck</small></span></div>
-        <div class="cs-spellbook-stat is-valid"><span class="cs-spellbook-stat-ico">✓</span><span><b>${validationOk}</b><small>validé${validationOk > 1 ? 's' : ''}</small></span></div>
-        ${validationPending ? `<button class="cs-spellbook-stat is-pending" data-action="_sortsSetValidation" data-val="pending" title="Afficher les sorts en attente"><span class="cs-spellbook-stat-ico">⌛</span><span><b>${validationPending}</b><small>en attente</small></span></button>` : ''}
-      </div>
-    </section>
 
     <!-- Barre d'action : retrouver et affiner la bibliothèque -->
     <div class="cs-sorts-bar">
@@ -1594,8 +1569,8 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
 
     <header class="cs-spellcard-head">
       ${canEdit
-        ? `<div class="toggle cs-spellcard-equip ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" data-label="${s.actif?'⚡ Deck':(!canActivate?'🔒':'＋ Deck')}" role="switch" tabindex="0" aria-checked="${s.actif?'true':'false'}" aria-label="Préparer ${_esc(s.nom||'ce sort')} dans le Deck" data-action="toggleSort" data-idx="${i}" data-stop-propagation title="${lockTitle}"></div>`
-        : `<div class="toggle cs-spellcard-equip ${s.actif?'on':''}" data-label="${s.actif?'⚡ Deck':'Hors deck'}"></div>`}
+        ? `<button type="button" class="toggle cs-spellcard-equip ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" data-label="${s.actif?'✓ Dans le deck':(!canActivate?'🔒 Indisponible':'＋ Ajouter')}" aria-pressed="${s.actif?'true':'false'}" aria-label="${s.actif?'Retirer':'Ajouter'} ${_esc(s.nom||'ce sort')} ${s.actif?'du':'au'} deck" data-action="toggleSort" data-idx="${i}" data-stop-propagation title="${lockTitle}"></button>`
+        : `<span class="toggle cs-spellcard-equip ${s.actif?'on':''}" data-label="${s.actif?'✓ Dans le deck':'Hors deck'}"></span>`}
       <span class="cs-spellcard-icon">${s.icon ? _esc(s.icon) : '✦'}</span>
       <div class="cs-spellcard-id">
         <div class="cs-spellcard-name-row">

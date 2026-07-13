@@ -1,5 +1,5 @@
 import { STATE } from '../core/state.js';
-import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { loadCollection, loadChars, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { trySave } from '../shared/crud.js';
 import { openModal, closeModalDirect, confirmModal, promptModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -125,6 +125,8 @@ const PRIX_VENTE_RATIO = 0.6; // 60%
 let _cats  = [];
 let _items = [];
 let _shopSousTypes = [];
+let _shopCharactersScope = '';
+let _shopCharactersLoad = null;
 // Index local des objets visibles : recherches et filtres sans lecture Firestore.
 let _shopSearchIndex = [];
 function _setShopCharId(id = '') {
@@ -207,6 +209,23 @@ async function loadShopData() {
   _rebuildShopSearchIndex();
 }
 
+async function loadShopCharacters() {
+  const scope = `${STATE.adventure?.id || ''}:${STATE.isAdmin ? 'all' : STATE.user?.uid || ''}`;
+  if (_shopCharactersScope === scope) return;
+  if (_shopCharactersLoad?.scope === scope) return _shopCharactersLoad.promise;
+
+  const promise = loadChars(STATE.isAdmin ? null : STATE.user?.uid)
+    .then(chars => {
+      STATE.characters = chars;
+      _shopCharactersScope = scope;
+    })
+    .finally(() => {
+      if (_shopCharactersLoad?.scope === scope) _shopCharactersLoad = null;
+    });
+  _shopCharactersLoad = { scope, promise };
+  return promise;
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════════════════════════════════════════
@@ -269,7 +288,7 @@ function _animateCount(el, from, to, duration = 400) {
 // RENDER PRINCIPAL
 // ══════════════════════════════════════════════════════════════════════════════
 export async function renderShop() {
-  await loadShopData();
+  await Promise.all([loadShopData(), loadShopCharacters()]);
   const target = consumeTargetEntity('shop');
   const targetItemId = target?.id || _pendingTargetShopItemId;
   const targetMode = target?.meta?.mode || _pendingTargetShopMode || 'detail';

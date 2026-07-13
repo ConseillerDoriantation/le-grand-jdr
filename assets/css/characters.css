@@ -14392,189 +14392,12 @@ button.cs-sock.is-empty:hover { border-color: rgba(232,184,75,.55); color: var(-
   overflow: visible;
 }
 
-/* Hero / tableau de bord */
-.cs-v3 .cs-spellbook-hero {
-  position: relative;
-  isolation: isolate;
-  min-height: 220px;
-  display: grid;
-  grid-template-columns: minmax(280px, 1.2fr) minmax(340px, .8fr);
-  align-items: stretch;
-  gap: 24px;
-  overflow: hidden;
-  padding: 26px 28px;
-  border: 1px solid color-mix(in srgb, var(--spell-violet) 34%, var(--border));
-  border-radius: 20px;
-  background:
-    radial-gradient(circle at 87% 15%, rgba(98,167,255,.18), transparent 28%),
-    radial-gradient(circle at 9% 100%, rgba(155,124,255,.16), transparent 34%),
-    linear-gradient(125deg, rgba(18,22,39,.98), rgba(9,12,24,.94));
-  box-shadow: 0 24px 55px -38px rgba(0,0,0,.95), inset 0 1px rgba(255,255,255,.05);
-}
-.cs-v3 .cs-spellbook-hero::before {
-  content: "✦";
-  position: absolute;
-  z-index: -1;
-  top: -82px;
-  right: 4%;
-  font-size: 270px;
-  line-height: 1;
-  color: rgba(155,124,255,.045);
-  transform: rotate(12deg);
-  text-shadow: 0 0 70px rgba(98,167,255,.18);
-}
-.cs-v3 .cs-spellbook-hero::after {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  opacity: .25;
-  background-image:
-    linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,.02) 1px, transparent 1px);
-  background-size: 32px 32px;
-  mask-image: linear-gradient(90deg, transparent, #000 55%);
-}
-.cs-v3 .cs-spellbook-hero-main {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-}
-.cs-v3 .cs-spellbook-kicker,
 .cs-v3 .cs-spellbook-library-kicker {
   color: var(--spell-gold);
   font-size: .63rem;
   font-weight: 900;
   letter-spacing: .2em;
 }
-.cs-v3 .cs-spellbook-hero h2 {
-  margin: 7px 0 7px;
-  color: #f4f0ff;
-  font-family: var(--font-display, 'Cinzel', serif);
-  font-size: clamp(1.45rem, 2.7vw, 2.15rem);
-  line-height: 1.06;
-  letter-spacing: -.02em;
-}
-.cs-v3 .cs-spellbook-hero-main > p {
-  max-width: 610px;
-  margin: 0;
-  color: #9eabc4;
-  font-size: .84rem;
-  line-height: 1.55;
-}
-.cs-v3 .cs-spellbook-forge {
-  min-width: min(100%, 300px);
-  display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  margin-top: 19px;
-  padding: 9px 11px;
-  border: 1px solid rgba(241,199,91,.55);
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(241,199,91,.2), rgba(155,124,255,.12));
-  color: #fff5d5;
-  text-align: left;
-  font: inherit;
-  cursor: pointer;
-  box-shadow: 0 12px 28px -20px rgba(241,199,91,.8), inset 0 1px rgba(255,255,255,.08);
-  transition: transform .15s, border-color .15s, box-shadow .15s;
-}
-.cs-v3 .cs-spellbook-forge:hover {
-  transform: translateY(-2px);
-  border-color: var(--spell-gold);
-  box-shadow: 0 18px 34px -20px rgba(241,199,91,.95), inset 0 1px rgba(255,255,255,.12);
-}
-.cs-v3 .cs-spellbook-forge-ico {
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: rgba(241,199,91,.16);
-  font-size: 1.15rem;
-  box-shadow: inset 0 0 0 1px rgba(241,199,91,.22);
-}
-.cs-v3 .cs-spellbook-forge > span:nth-child(2) {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-}
-.cs-v3 .cs-spellbook-forge b { font-size: .82rem; }
-.cs-v3 .cs-spellbook-forge small { color: #b6a986; font-size: .64rem; }
-.cs-v3 .cs-spellbook-forge-arrow { color: var(--spell-gold); font-size: 1.1rem; }
-
-.cs-v3 .cs-spellbook-stats {
-  align-self: center;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(130px, 1fr));
-  gap: 9px;
-}
-.cs-v3 .cs-spellbook-stat {
-  min-width: 0;
-  min-height: 74px;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 12px;
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: 13px;
-  background: rgba(255,255,255,.035);
-  color: inherit;
-  text-align: left;
-  font: inherit;
-  box-shadow: inset 0 1px rgba(255,255,255,.035);
-}
-button.cs-spellbook-stat {
-  cursor: pointer;
-  transition: border-color .14s, background .14s, transform .14s;
-}
-button.cs-spellbook-stat:hover {
-  transform: translateY(-1px);
-  border-color: rgba(241,199,91,.38);
-  background: rgba(241,199,91,.08);
-}
-.cs-v3 .cs-spellbook-stat-ico {
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: rgba(155,124,255,.13);
-  color: #baa7ff;
-  font-size: .9rem;
-}
-.cs-v3 .cs-spellbook-stat > span:last-child {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.cs-v3 .cs-spellbook-stat b {
-  color: #f5f1ff;
-  font-family: 'Outfit', sans-serif;
-  font-size: 1.24rem;
-  line-height: 1;
-}
-.cs-v3 .cs-spellbook-stat b i {
-  color: #707b94;
-  font-size: .72rem;
-  font-style: normal;
-}
-.cs-v3 .cs-spellbook-stat small {
-  margin-top: 4px;
-  color: #7f8da9;
-  font-size: .62rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.cs-v3 .cs-spellbook-stat.is-deck .cs-spellbook-stat-ico { color: #ffe08a; background: rgba(241,199,91,.13); }
-.cs-v3 .cs-spellbook-stat.is-valid .cs-spellbook-stat-ico { color: #68e2b7; background: rgba(34,195,142,.13); }
-.cs-v3 .cs-spellbook-stat.is-pending .cs-spellbook-stat-ico { color: #ffc86b; background: rgba(245,158,11,.13); }
-.cs-v3 .cs-spellbook-stat.is-danger { border-color: rgba(255,90,126,.35); }
 
 /* Recherche = commande centrale, plus lisible et moins technique */
 .cs-v3 .cs-sorts-bar {
@@ -14914,20 +14737,6 @@ button.cs-spellbook-stat:hover {
 .cs-v3 .cs-sorts-empty-ico { font-size: 2rem; filter: drop-shadow(0 0 12px rgba(155,124,255,.45)); }
 
 /* Thème clair */
-[data-theme="light"] .cs-v3 .cs-spellbook-hero {
-  border-color: rgba(100,72,190,.18);
-  background:
-    radial-gradient(circle at 87% 15%, rgba(98,167,255,.16), transparent 30%),
-    radial-gradient(circle at 9% 100%, rgba(155,124,255,.13), transparent 35%),
-    linear-gradient(125deg, #fbfaff, #f2f5ff);
-}
-[data-theme="light"] .cs-v3 .cs-spellbook-hero h2,
-[data-theme="light"] .cs-v3 .cs-spellbook-stat b { color: #27213c; }
-[data-theme="light"] .cs-v3 .cs-spellbook-hero-main > p,
-[data-theme="light"] .cs-v3 .cs-spellbook-stat small { color: #667085; }
-[data-theme="light"] .cs-v3 .cs-spellbook-stat { border-color: rgba(52,39,90,.1); background: rgba(255,255,255,.62); }
-[data-theme="light"] .cs-v3 .cs-spellbook-forge { color: #604400; background: rgba(217,119,6,.1); }
-[data-theme="light"] .cs-v3 .cs-spellbook-forge small { color: #8a6b23; }
 [data-theme="light"] .cs-v3 .cs-sorts-menu,
 [data-theme="light"] .cs-v3 .cs-sorts-filterpanel { background: #fff; }
 [data-theme="light"] .cs-v3 .cs-spellcard {
@@ -14937,28 +14746,13 @@ button.cs-spellbook-stat:hover {
 }
 
 /* Responsive */
-@media (max-width: 900px) {
-  .cs-v3 .cs-spellbook-hero {
-    grid-template-columns: 1fr;
-    gap: 18px;
-    padding: 22px;
-  }
-  .cs-v3 .cs-spellbook-stats { grid-template-columns: repeat(4, minmax(105px, 1fr)); }
-  .cs-v3 .cs-spellbook-stat { min-height: 62px; padding: 9px; }
-}
 @media (max-width: 700px) {
-  .cs-v3 .cs-spellbook-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cs-v3 .cs-sorts-viewrow { flex-direction: column; }
   .cs-v3 .cs-sorts-viewrow > .cs-sorts-viewseg:first-child { grid-template-columns: 1fr; }
   .cs-v3 .cs-sorts-densityseg { align-self: flex-end; }
   .cs-v3 .cs-sorts-deckinfo.is-tray { position: static; }
 }
 @media (max-width: 480px) {
-  .cs-v3 .cs-spellbook-hero { min-height: 0; padding: 19px 16px; border-radius: 16px; }
-  .cs-v3 .cs-spellbook-hero::before { font-size: 190px; right: -35px; }
-  .cs-v3 .cs-spellbook-forge { width: 100%; min-width: 0; }
-  .cs-v3 .cs-spellbook-stat-ico { width: 29px; height: 29px; }
-  .cs-v3 .cs-spellbook-stat b { font-size: 1.05rem; }
   .cs-v3 .cs-sorts-bar { top: 4px; }
   .cs-v3 .cs-sorts-toolbtn { flex: 1; justify-content: center; }
   .cs-v3 .cs-sorts-toolbtn-lbl { display: inline; }
@@ -17459,4 +17253,62 @@ button.cs-spellbook-stat:hover {
 }
 .cs-v3 .cs-spellinspector-effects-list > div > p {
   min-width: 0;
+}
+
+/* Action de deck : le texte porte l'etat, sans dependre d'un simple halo jaune. */
+.cs-v3 .cs-spellcard-head .toggle.cs-spellcard-equip {
+  width: 92px;
+  min-width: 92px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgba(98,167,255,.34);
+  background: rgba(98,167,255,.09);
+  color: #b9d5f7;
+  appearance: none;
+}
+.cs-v3 .cs-spellcard-head .toggle.cs-spellcard-equip::before {
+  color: inherit;
+  font-size: .56rem;
+}
+.cs-v3 .cs-spellcard-head .toggle.cs-spellcard-equip:hover:not(.is-locked) {
+  border-color: rgba(98,167,255,.65);
+  background: rgba(98,167,255,.16);
+  color: #e3f0ff;
+}
+.cs-v3 .cs-spellcard-head .toggle.cs-spellcard-equip.on {
+  border-color: #f1c75b !important;
+  background: #f1c75b !important;
+  color: #241b04;
+  box-shadow: none !important;
+}
+.cs-v3 .cs-spellcard-head .toggle.cs-spellcard-equip.on::before { color: inherit; }
+.cs-v3 .cs-spellcard-head .toggle.cs-spellcard-equip.is-locked {
+  border-color: rgba(104,116,138,.22);
+  background: rgba(104,116,138,.06);
+  color: #68748a;
+}
+.cs-v3 .is-cards .cs-spellcard:not(.is-open) .cs-spellcard-head {
+  grid-template-columns: 32px minmax(0, 1fr) auto 92px;
+}
+.cs-v3 .is-list .cs-spellcard:not(.is-open) {
+  grid-template-columns: 92px 30px minmax(120px, 1fr) minmax(180px, 1.35fr) minmax(90px, .75fr) auto;
+}
+[data-theme="light"] .cs-v3 .cs-spellcard-head .toggle.cs-spellcard-equip:not(.on) {
+  border-color: rgba(48,103,168,.28);
+  background: rgba(48,103,168,.07);
+  color: #315f92;
+}
+@container (max-width: 760px) {
+  .cs-v3 .is-list .cs-spellcard:not(.is-open) {
+    grid-template-columns: 92px 30px minmax(0, 1fr) auto;
+  }
+}
+@container (max-width: 520px) {
+  .cs-v3 .is-list .cs-spellcard:not(.is-open) {
+    grid-template-columns: 88px minmax(0, 1fr) auto;
+  }
+  .cs-v3 .cs-spellcard-head .toggle.cs-spellcard-equip {
+    width: 88px;
+    min-width: 88px;
+  }
 }
