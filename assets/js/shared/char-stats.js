@@ -41,7 +41,15 @@ export function statShort(key) {
 export function getItemBaseStatBonus(item = {}, statOrStore = '') {
   const meta = ITEM_STAT_BY_FULL[statOrStore] || ITEM_STAT_BY_STORE[statOrStore];
   if (!meta) return 0;
-  const stores = [meta.store, ...(meta.aliases || [])];
+  const stores = [meta.store, meta.full, ...(meta.aliases || [])];
+  const bags = [item?.statBonuses, item?.statsBonus].filter(bag => bag && typeof bag === 'object');
+  for (const bag of bags) {
+    for (const store of stores) {
+      if (bag?.[store] === undefined || bag?.[store] === '') continue;
+      const val = parseInt(bag[store]);
+      return Number.isNaN(val) ? 0 : val;
+    }
+  }
   for (const store of stores) {
     if (item?.[store] === undefined || item?.[store] === '') continue;
     const val = parseInt(item[store]);
@@ -57,8 +65,13 @@ export function getItemBaseStatBonus(item = {}, statOrStore = '') {
 export function getItemUpgradeStatBonus(item = {}, statOrStore = '') {
   const meta = ITEM_STAT_BY_FULL[statOrStore] || ITEM_STAT_BY_STORE[statOrStore];
   if (!meta) return 0;
-  const v = parseInt(item?.upgrades?.statBonus?.[meta.store]);
-  return Number.isNaN(v) ? 0 : v;
+  const stores = [meta.store, meta.full, ...(meta.aliases || [])];
+  for (const store of stores) {
+    if (item?.upgrades?.statBonus?.[store] === undefined || item?.upgrades?.statBonus?.[store] === '') continue;
+    const v = parseInt(item.upgrades.statBonus[store]);
+    return Number.isNaN(v) ? 0 : v;
+  }
+  return 0;
 }
 
 /**

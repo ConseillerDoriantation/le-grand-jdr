@@ -370,15 +370,6 @@ export function syncEquipmentAfterInventoryMutation(c, removedIndices = []) {
     .filter(v => Number.isInteger(v) && v >= 0))].sort((a, b) => a - b);
 
   const currentEquip = c?.equipement || {};
-  if (!removed.length) {
-    return {
-      equipement:   currentEquip,
-      statsBonus:   c?.statsBonus || computeEquipStatsBonus(currentEquip),
-      changed:      false,
-      removedSlots: [],
-    };
-  }
-
   const removedSet = new Set(removed);
   const countRemovedBefore = idx => {
     let count = 0;
@@ -400,6 +391,14 @@ export function syncEquipmentAfterInventoryMutation(c, removedIndices = []) {
     if (removedSet.has(srcIdx)) { changed = true; removedSlots.push(slot); return; }
 
     const nextIdx  = srcIdx - countRemovedBefore(srcIdx);
+    const sourceItem = removed.length ? null : c?.inventaire?.[srcIdx];
+    const rebuilt = sourceItem ? buildEquippedItemFromInventory(slot, sourceItem, nextIdx) : null;
+    if (rebuilt) {
+      nextEquip[slot] = rebuilt;
+      if (JSON.stringify(item) !== JSON.stringify(rebuilt)) changed = true;
+      return;
+    }
+
     const rawStored = item?.sourceInvIndex;
     const storedIdx = Number.isInteger(rawStored) ? rawStored : parseInt(rawStored, 10);
     // Réécrit sourceInvIndex à l'index correct post-mutation (répare aussi un index périmé).

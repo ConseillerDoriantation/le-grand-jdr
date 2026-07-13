@@ -5189,6 +5189,40 @@ body.shop-cols-5 .sh-page--v2 .sh-item-grid { grid-template-columns: repeat(5, m
   color: #bca0ff;
 }
 
+.rar-admin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rar-admin-row {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr) 56px auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(0,0,0,.18);
+}
+.rar-admin-row input[type="color"] {
+  min-width: 48px;
+  padding: 3px;
+}
+.rar-admin-empty {
+  padding: 16px;
+  border: 1px dashed var(--border-md);
+  border-radius: 10px;
+  background: rgba(255,255,255,.025);
+  color: var(--text-dim);
+  text-align: center;
+  font-size: .78rem;
+}
+@media (max-width: 560px) {
+  .rar-admin-row { grid-template-columns: 70px minmax(0, 1fr); }
+  .rar-admin-row input[type="color"],
+  .rar-admin-row button { width: 100%; }
+}
+
 /* Variantes de teinte du header selon la modale */
 .sh-admin-modal.is-cat       { --admin-tint: rgba(244,196,48,.10); --admin-glow: rgba(244,196,48,.40); --admin-bd: rgba(244,196,48,.32); --admin-accent: var(--amber, var(--amber)); }
 .sh-admin-modal.is-formats   { --admin-tint: rgba(255,107,107,.10); --admin-glow: rgba(255,107,107,.40); --admin-bd: rgba(255,107,107,.32); --admin-accent: #ff8b8b; }

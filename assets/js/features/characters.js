@@ -70,6 +70,7 @@ import {
   getInventoryItemResaleValue,
   getInventoryItemImage,
 } from '../shared/inventory-utils.js';
+import { RARETE_NAMES, _rareteColor, _rareteLabel } from '../shared/rarity.js';
 
 import { editEquipSlot } from './characters/equipment.js';
 
@@ -1314,11 +1315,6 @@ function renderCharCombatV3(c, canEdit) {
 // ══════════════════════════════════════════════════════════════════════════════
 // V3 — INVENTAIRE (.inv-card grid + summary + filter chips + search)
 // ══════════════════════════════════════════════════════════════════════════════
-// Aligné sur shared/rarity.js (5 niveaux + niveau 0 sans rareté)
-// 1=Commun · 2=Singulier · 3=Rare · 4=Mythique · 5=Légendaire
-const _RARE_NAMES = ['', 'Commun', 'Singulier', 'Rare', 'Mythique', 'Légendaire'];
-const _RARE_COLS  = ['#7a8fa8', '#9ca3af', '#4ade80', '#60a5fa', '#c084fc', '#f97316'];
-
 // Regroupements spécifiques par type (le MJ saisit le type libre des objets).
 // Clé = type normalisé (minuscules, sans accents) → catégorie cible.
 const _INV_MATERIAUX = { id: 'materiaux', lbl: 'Matériaux', icon: '🧱' };
@@ -1568,11 +1564,10 @@ function renderCharInventaireV3(c, canEdit) {
     const idx = indices[0];               // index principal pour Modifier
     const allIdx = indices;               // tous les indices pour bulk actions
     const cat = _invCat(it);
-    // Rareté : 0=aucune, 1=Commun → 5=Légendaire (aligné sur la boutique)
     const rareRaw = parseInt(it.rarete || it.rare || 0) || 0;
-    const rareIdx = Math.min(5, Math.max(0, rareRaw));
-    const col = _RARE_COLS[rareIdx];
-    const stars = rareIdx > 0 ? ('★'.repeat(rareIdx) + '☆'.repeat(5 - rareIdx)) : '';
+    const rareIdx = Math.max(0, rareRaw);
+    const rareName = RARETE_NAMES[rareIdx] || '';
+    const col = rareName ? _rareteColor(rareName) : '#7a8fa8';
     const allIdxB64 = btoa(JSON.stringify(allIdx));
 
     // Prix d'achat (référence) et prix de vente (au joueur quand il revend)
@@ -1633,8 +1628,8 @@ function renderCharInventaireV3(c, canEdit) {
           <div class="inv-card-name">${_esc(it.nom || 'Sans nom')}</div>
           <div class="inv-card-subline">
             <span class="inv-card-cat">${cat.icon ? `<span aria-hidden="true">${cat.icon}</span>` : ''}${_esc(cat.lbl)}</span>
-            ${rareIdx > 0
-              ? `<span class="inv-card-rare" style="color:${col}">${stars} ${_RARE_NAMES[rareIdx]}</span>`
+            ${rareName
+              ? `<span class="inv-card-rare" style="color:${col}">${_rareteLabel(rareIdx)}</span>`
               : ''}
             ${buildBadgesHtml}
           </div>

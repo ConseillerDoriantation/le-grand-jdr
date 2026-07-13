@@ -26,6 +26,7 @@ import {
 } from '../shared/equipment-utils.js';
 import { loadUpgradeSettings, getUpgradeSettings } from '../shared/upgrade-settings.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
+import { patchBuildLocally } from '../shared/character-builds.js';
 
 // ══════════════════════════════════════════════
 // CATÉGORIES DE FRAGMENTS
@@ -439,12 +440,15 @@ function _logUpgradeHistory(item, entry) {
 async function _persistChar(c) {
   c.equipement = _rebuildAllEquipment(c);
   c.statsBonus = computeEquipStatsBonus(c.equipement);
+  patchBuildLocally(c, { equipement: c.equipement, statsBonus: c.statsBonus });
   await trySave('characters', c.id, {
     inventaire:     c.inventaire     || [],
     traitFragments: c.traitFragments || {},
     compte:         c.compte         || { recettes: [], depenses: [] },
     equipement:     c.equipement,
     statsBonus:     c.statsBonus,
+    builds:         c.builds,
+    activeBuildId:  c.activeBuildId,
   });
   closeModalDirect();
   _renderArtisanModal();
