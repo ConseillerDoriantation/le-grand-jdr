@@ -6,16 +6,22 @@
 // au module. Extrait de vtt.js (cf. docs/vtt-decomposition.md).
 // ==============================================================================
 import { VS, aid } from './vtt-state.js';
-import { _esc } from '../../shared/html.js';
+import { _esc, normalizeImageUrl } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { promptModal } from '../../shared/modal.js';
 import { db, doc, setDoc, updateDoc } from '../../config/firebase.js';
 import { _pgRef } from './vtt-refs.js';
-import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile, fileKey } from '../../shared/github-folder.js';
+import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile, fileKey, githubRawUrl } from '../../shared/github-folder.js';
 
 export let _libFolder = null;   // null = racine, string = folderId ouvert
 let _libOpen   = true;   // section collapsible dans le tray
 export const _mapLibRef = () => doc(db, `adventures/${aid()}/vtt/mapLibrary`);
+
+function _resolveMapImageUrl(url) {
+  const raw = String(url || '').trim();
+  if (/^\.?\/?images\/maps\//i.test(raw)) return githubRawUrl(raw);
+  return normalizeImageUrl(raw);
+}
 
 // Reset au teardown / changement d'aventure (appelé par vtt.js).
 export function _resetMapLib() { _libFolder = null; }
@@ -49,7 +55,7 @@ export function _renderLibSection() {
   const imgGrid = visible.length
     ? `<div class="vtt-lib-grid">${visible.map(img => `
         <div class="vtt-lib-card" title="${_esc(img.name||'')}">
-          <img src="${img.url}" alt="${_esc(img.name||'')}" loading="lazy" data-img-err="mark-parent" data-img-err-class="vtt-lib-card--err">
+          <img src="${_esc(_resolveMapImageUrl(img.url))}" alt="${_esc(img.name||'')}" loading="lazy" data-img-err="mark-parent" data-img-err-class="vtt-lib-card--err">
           <div class="vtt-lib-card-ov">
             <button data-vtt-fn="_vttLibPlace" data-vtt-args="${img.id}" title="Placer sur la carte">▶</button>
             ${folders.length && !_libFolder ? `<button data-vtt-fn="_vttLibMoveMenu" data-vtt-args="${img.id}|event" title="Déplacer dans un dossier">📁</button>` : ''}
@@ -90,7 +96,7 @@ export async function _vttLibImportGithub() {
   localStorage.setItem(KEY, path);
   showNotif('Lecture du dossier…', 'info');
   let files;
-  try { files = await listGithubFolder(path, { exts: GH_IMAGE_EXTS }); }
+  try { files = await listGithubFolder(path, { exts: GH_IMAGE_EXTS, urlMode: 'raw' }); }
   catch (e) { showNotif(e.message, 'error'); return; }
   if (!files.length) { showNotif('Aucune image dans ce dossier', 'info'); return; }
   const seen = new Set((VS.mapLib.images || []).map(i => fileKey(i.url)));
@@ -99,7 +105,7 @@ export async function _vttLibImportGithub() {
     const k = fileKey(f.url);
     if (seen.has(k)) continue;
     seen.add(k);
-    added.push({ id: `${Date.now()}${Math.random().toString(36).slice(2, 6)}`, url: f.url, name: prettyNameFromFile(f.name), folderId: _libFolder || null });
+    added.push({ id: `${Date.now()}${Math.random().toString(36).slice(2, 6)}`, url: f.url, sourcePath: f.path, name: prettyNameFromFile(f.name), folderId: _libFolder || null });
   }
   if (!added.length) { showNotif('Toutes ces images sont déjà présentes', 'info'); return; }
   VS.mapLib.images = [...(VS.mapLib.images || []), ...added];
@@ -155,7 +161,7 @@ export function _vttLibPlace(imgId) {
   const img = VS.mapLib.images.find(i => i.id === imgId);
   if (!img) return;
   const imgs = [...(VS.activePage.backgroundImages??[]), {
-    id: Date.now().toString(), url: img.url, x: 0, y: 0,
+    id: Date.now().toString(), url: _resolveMapImageUrl(img.url), sourcePath: img.sourcePath || null, x: 0, y: 0,
     w: VS.activePage.cols, h: VS.activePage.rows,
   }];
   updateDoc(_pgRef(VS.activePage.id), { backgroundImages: imgs })
