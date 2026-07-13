@@ -19,6 +19,7 @@ import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, cal
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
 import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED, getCharDamageProfile } from '../../shared/equipment-utils.js';
+import { buildProjectionPatch, switchBuild } from '../../shared/character-builds.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../../shared/damage-types.js';
 import { playSigil, playImpact, playProjectile, playSlash } from './vtt-rune-sigil.js';
@@ -63,7 +64,7 @@ import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
   _scaledEnchantConditionFields, _vttPrimaryWeapon, _conditionCritRangeBonusOf,
 } from './vtt-effective.js';
-import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js?v=20260630-max-v2';
+import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js?v=20260713-build-switch';
 import {
   _renderLibSection, _resetMapLib, _libFolder, _vttLibToggle, _vttLibOpenFolder, _vttLibNewFolder,
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,
@@ -8345,6 +8346,37 @@ async function _vttSetPm(tokenId,pm) {
   else if (t.npcId)  await updateDoc(_npcRef(t.npcId),{pmCurrent:v}).catch(()=>{});
 }
 
+async function _vttSwitchCharacterBuild(charId, buildId) {
+  const c = VS.characters[charId]; if (!c) return;
+  const controlledToken = Object.values(VS.tokens || {})
+    .map(e => e?.data)
+    .find(t => t?.characterId === charId && _canControlToken(t));
+  if (!STATE.isAdmin && !controlledToken) {
+    showNotif("Tu ne contrôles pas ce personnage.", "error");
+    return;
+  }
+  const target = switchBuild(c, buildId);
+  if (!target) return;
+  const payload = buildProjectionPatch(c, target);
+  VS.characters[charId] = { ...c, ...payload };
+  try {
+    await updateDoc(_chrRef(charId), payload);
+    showNotif(`Build actif : ${target.name || 'Build'}`, 'success');
+  } catch (e) {
+    console.error('[vtt] switch build', e);
+    showNotif("Impossible de changer de build.", "error");
+    return;
+  }
+  Object.entries(VS.tokens || {}).forEach(([tokenId, entry]) => {
+    if (entry?.data?.characterId !== charId) return;
+    _patchShape(tokenId);
+    if (VS.selected === tokenId) _renderInspectorSoon();
+    _refreshRanges(tokenId);
+  });
+  _renderTraySoon();
+  if (controlledToken?.id && VS.selected === controlledToken.id && !_aimOpt) _showActBar(controlledToken.id);
+}
+
 // Bonus temporaire manuel (Mouvement / CA / Portée) via le système de BUFFS du
 // token. Avantages : déjà intégré dans displayMovement/Defense/Range ET la
 // logique de jeu (portée d'attaque, déplacement sur le plateau), et les `buffs`
@@ -9620,6 +9652,7 @@ export const VTT_ACTIONS = {
   _vttOpenSource,
   _vttSkillFilter,
   _vttSkillFilterClear,
+  _vttSwitchCharacterBuild,
   _vttInvokeMyToken,
   _vttKickPresence,
   _vttLibDelFolder,

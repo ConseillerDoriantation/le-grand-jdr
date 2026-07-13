@@ -2,6 +2,7 @@ import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { loadCollectionWhere, updateInCol } from '../../data/firestore.js';
 import { showNotif } from '../../shared/notifications.js';
+import { saveBuildPatch } from '../../shared/character-builds.js';
 
 import { getCharacterById } from '../../shared/character-state.js';
 // ══════════════════════════════════════════════
@@ -20,7 +21,11 @@ export function inlineEditText(charId, field, el) {
     const c = getCharacterById(charId);
     if (!c || val === cur) { el.textContent = cur; input.replaceWith(el); return; }
     c[field] = val;
-    await updateInCol('characters', charId, {[field]: val});
+    if (['pvBase', 'pmBase'].includes(field)) {
+      await saveBuildPatch(charId, c, { [field]: val });
+    } else {
+      await updateInCol('characters', charId, {[field]: val});
+    }
     el.textContent = val;
     input.replaceWith(el);
     if (field === 'nom') {
@@ -148,9 +153,10 @@ export function inlineEditStat(charId, statKey, el) {
     c.statsLevelUps = c.statsLevelUps || {};
     c.statsBase[statKey] = val;
     c.stats[statKey] = val + (c.statsLevelUps[statKey] || 0);
-    await updateInCol('characters', charId, {
+    await saveBuildPatch(charId, c, {
       stats: c.stats,
       statsBase: c.statsBase,
+      statsLevelUps: c.statsLevelUps,
     });
     input.replaceWith(el);
     charSession.renderSheet(c, charSession.getCurrentCharTab());

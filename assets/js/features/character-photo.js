@@ -1,10 +1,10 @@
 import { STATE } from '../core/state.js';
 import { charSession } from '../shared/char-session.js';
 import { openModal, closeModal } from '../shared/modal.js';
-import { trySave } from '../shared/crud.js';
 import { showNotif } from '../shared/notifications.js';
 import { pickImageFile } from '../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
+import { saveBuildPatch } from '../shared/character-builds.js';
 
 import { getCharacterById } from '../shared/character-state.js';
 // ══════════════════════════════════════════════════════════════════════════════
@@ -77,11 +77,14 @@ async function saveCroppedCharacterPhoto(charId) {
   if (!c) { showNotif('Personnage introuvable.', 'error'); return; }
 
   c.photo = dataUrl; c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
-  if (await trySave('characters', charId, { photo: dataUrl, photoZoom: 1, photoX: 0, photoY: 0 })) {
+  try {
+    await saveBuildPatch(charId, c, { photo: dataUrl, photoZoom: 1, photoX: 0, photoY: 0 });
     _destroyCharacterPhotoCrop();
     closeModal();
     showNotif('Photo enregistrée !', 'success');
     charSession.renderSheet(c, charSession.getCurrentCharTab() || 'combat');
+  } catch (e) {
+    showNotif(e?.message || 'Erreur de sauvegarde.', 'error');
   }
 }
 
@@ -89,9 +92,12 @@ async function deleteCharPhoto(charId) {
   const c = getCharacterById(charId);
   if (!c) return;
   c.photo = null; c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
-  if (await trySave('characters', charId, { photo: null, photoZoom: 1, photoX: 0, photoY: 0 })) {
+  try {
+    await saveBuildPatch(charId, c, { photo: null, photoZoom: 1, photoX: 0, photoY: 0 });
     showNotif('Photo supprimée.', 'success');
     charSession.renderSheet(c, charSession.getCurrentCharTab() || 'combat');
+  } catch (e) {
+    showNotif(e?.message || 'Erreur de sauvegarde.', 'error');
   }
 }
 

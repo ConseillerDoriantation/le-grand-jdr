@@ -1,10 +1,10 @@
 import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
-import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif } from '../../shared/notifications.js';
 import { computeEquipStatsBonus, getItemStatBonus, getItemEffectText } from '../../shared/char-stats.js';
+import { saveBuildPatch } from '../../shared/character-builds.js';
 import { _esc } from '../../shared/html.js';
 import { _getTraits, inferAttackStatFromItem, buildEquippedItemFromInventory } from '../../shared/equipment-utils.js';
 
@@ -44,9 +44,12 @@ export async function equipSlotFromInv(val, slot) {
   c.equipement = equip;
   c.statsBonus = bonus;
 
-  if (await trySave('characters', c.id, { equipement: equip, statsBonus: bonus })) {
+  try {
+    await saveBuildPatch(c.id, c, { equipement: equip, statsBonus: bonus });
     closeModal();
     showNotif(`Équipement mis à jour : ${item.nom || 'objet'} → ${slot}`, 'success');
+  } catch (e) {
+    showNotif(e?.message || 'Erreur de sauvegarde.', 'error');
   }
   _renderEquipmentChar(c);
 }
@@ -298,9 +301,12 @@ export async function saveEquipSlot(slot) {
   c.equipement = equip;
   const bonus = computeEquipStatsBonus(equip);
   c.statsBonus = bonus;
-  if (await trySave('characters', c.id, {equipement:equip, statsBonus:bonus})) {
+  try {
+    await saveBuildPatch(c.id, c, { equipement: equip, statsBonus: bonus });
     closeModal();
     showNotif('Équipement mis à jour !','success');
+  } catch (e) {
+    showNotif(e?.message || 'Erreur de sauvegarde.', 'error');
   }
   _renderEquipmentChar(c);
 }
@@ -315,9 +321,12 @@ export async function clearEquipSlot(slot) {
   c.equipement = equip;
   const bonus = computeEquipStatsBonus(equip);
   c.statsBonus = bonus;
-  if (await trySave('characters', c.id, {equipement:equip, statsBonus:bonus})) {
+  try {
+    await saveBuildPatch(c.id, c, { equipement: equip, statsBonus: bonus });
     closeModal();
     showNotif('Emplacement libéré.','success');
+  } catch (e) {
+    showNotif(e?.message || 'Erreur de sauvegarde.', 'error');
   }
   _renderEquipmentChar(c);
 }

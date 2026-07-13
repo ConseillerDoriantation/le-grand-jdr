@@ -11063,6 +11063,53 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   text-transform: uppercase;
   letter-spacing: .04em;
 }
+.cs-v3 .inv-build-badges {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+.cs-v3 .inv-build-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 118px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: .015em;
+}
+.cs-v3 .inv-build-badge.is-active {
+  padding-inline: 5px 6px;
+  background: rgba(79,140,255,.10);
+  border: 1px solid rgba(79,140,255,.24);
+  color: var(--gold-2, #7eb0ff);
+}
+.cs-v3 .inv-build-badge.is-active::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+.cs-v3 .inv-build-badge.is-other {
+  background: rgba(232,184,75,.11);
+  border: 1px solid rgba(232,184,75,.28);
+  color: var(--amber, #e8b84b);
+}
+.cs-v3 .inv-card.is-equipped-active {
+  border-color: color-mix(in srgb, #7eb0ff 40%, var(--border));
+  background:
+    linear-gradient(180deg, rgba(79,140,255,.06), rgba(255,255,255,.012)),
+    rgba(7,15,27,.72);
+}
+.cs-v3 .inv-card.is-equipped-other:not(.is-equipped-active) {
+  border-color: color-mix(in srgb, var(--amber, #e8b84b) 34%, var(--border));
+}
 .cs-v3 .inv-qte {
   font-size: .68rem;
   padding: 2px 9px; border-radius: 999px;
@@ -14036,6 +14083,27 @@ button.cs-sock.is-empty:hover { border-color: rgba(232,184,75,.55); color: var(-
   min-width: 30px;
   text-align: center;
   box-sizing: border-box;
+}
+.cs-v3 .inv-grid.is-list .inv-build-badges {
+  flex-wrap: nowrap;
+  max-width: 100%;
+}
+.cs-v3 .inv-grid.is-list .inv-build-badge {
+  max-width: 92px;
+  padding-inline: 5px;
+  font-size: .53rem;
+}
+.cs-v3 .inv-grid.is-cards .inv-card.is-equipped-active,
+.cs-v3 .inv-grid.is-list .inv-card.is-equipped-active {
+  background:
+    linear-gradient(180deg, rgba(79,140,255,.07), rgba(255,255,255,.012)),
+    rgba(7,15,27,.72);
+}
+.cs-v3 .inv-grid.is-cards .inv-card.is-equipped-other:not(.is-equipped-active),
+.cs-v3 .inv-grid.is-list .inv-card.is-equipped-other:not(.is-equipped-active) {
+  background:
+    linear-gradient(180deg, rgba(232,184,75,.055), rgba(255,255,255,.012)),
+    rgba(7,15,27,.72);
 }
 
 @media (max-width: 980px) {

@@ -8,6 +8,10 @@ import { _esc, _norm, loadingHtml } from '../shared/html.js';
 import { charSession } from '../shared/char-session.js';
 import { characterPortraitContent } from '../shared/portraits.js';
 import {
+  applyActiveBuild, buildProjectionPatch, createBuild, deleteBuild,
+  getActiveBuild, normalizeCharacterBuilds, renameBuild, saveBuildPatch, switchBuild,
+} from '../shared/character-builds.js';
+import {
   getMod, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax,
   calcOr, calcPalier, pct, getItemStatBonus, getItemEffectText,
   sortCharactersForDisplay, modStr,
@@ -588,6 +592,7 @@ function _buildTabsHtml(c, v3Tab) {
 }
 
 function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckMax, titresChips }) {
+  const buildSwitcher = _buildBuildSwitcherHtml(c, canEdit);
   return `<aside class="id-side" id="cs-sidebar" data-aura="${c.auraColor?'custom':(c.aura||'blue')}">
 
     <div class="id-identity">
@@ -633,6 +638,8 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
           ? `<span class="id-chip race" data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${_esc(c.race||'Race')}</span>`
           : (c.race?`<span class="id-chip race">${_esc(c.race)}</span>`:'')}
       </div>
+
+      ${buildSwitcher}
     </div>
 
     <!-- XP -->
@@ -752,6 +759,20 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
   </aside>`;
 }
 
+function _buildBuildSwitcherHtml(c, canEdit) {
+  const { builds, activeBuildId } = normalizeCharacterBuilds(c);
+  const active = builds.find(b => b.id === activeBuildId) || builds[0];
+  if (!canEdit && builds.length <= 1) return '';
+  return `<div class="cs-build-box" title="${_esc(`${active?.name || 'Principal'} modifie image, équipement, stats et bases PV/PM.`)}">
+    <span class="cs-build-label">Build</span>
+    <select class="cs-build-select" data-change="switchCharacterBuild" data-id="${c.id}" ${canEdit ? '' : 'disabled'}>
+      ${builds.map(b => `<option value="${_esc(b.id)}" ${b.id === activeBuildId ? 'selected' : ''}>${_esc(b.name || 'Build')}</option>`).join('')}
+    </select>
+    ${builds.length > 1 ? `<span class="cs-build-count" title="${builds.length} builds">${builds.length}</span>` : ''}
+    ${canEdit ? `<button type="button" class="cs-build-manage" data-action="openCharacterBuildsModal" data-id="${c.id}" title="Gérer les builds" aria-label="Gérer les builds">⚙</button>` : ''}
+  </div>`;
+}
+
 function _buildMainColHtml(canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, v3Tab }) {
   return `<section class="main-col">
 
@@ -779,6 +800,7 @@ function _buildMainColHtml(canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, v
 function renderCharSheet(c, keepTab) {
   const area = document.getElementById('char-sheet-area');
   if (!area) return;
+  applyActiveBuild(c);
   const canEdit = STATE.isAdmin || c.uid === STATE.user?.uid;
 
   const v3Tab = _resolveV3Tab(keepTab || charSession.getCurrentCharTab() || 'combat');
@@ -1367,6 +1389,90 @@ function _invLooksMechanicalEffect(text = '') {
   return /\b(pv|pm|ca|degat|degats|soin|vitesse|portee|toucher|critique|avantage|desavantage|relance|dd|etat|reaction|action bonus|resistance|immunite|mana)\b/.test(n);
 }
 
+function _inventoryBuildUsageMap(c = {}) {
+  const inv = Array.isArray(c?.inventaire) ? c.inventaire : [];
+  const { builds, activeBuildId } = normalizeCharacterBuilds(c);
+  const usageMap = new Map();
+  const sameItem = (entry, eq) => {
+    if (!entry || !eq) return false;
+    if (eq.itemId && entry.itemId) return entry.itemId === eq.itemId;
+    return String(entry.nom || '') === String(eq.nom || '');
+  };
+  const readIdx = value => {
+    const n = Number.isInteger(value) ? value : parseInt(value, 10);
+    return Number.isInteger(n) && n >= 0 ? n : -1;
+  };
+
+  builds.forEach((build, buildIndex) => {
+    const claimed = new Set();
+    Object.entries(build?.equipement || {}).forEach(([slot, eq]) => {
+      if (!eq?.nom) return;
+      let idx = readIdx(eq.sourceInvIndex);
+      if (!(idx >= 0 && !claimed.has(idx) && sameItem(inv[idx], eq))) {
+        idx = inv.findIndex((entry, i) => !claimed.has(i) && sameItem(entry, eq));
+      }
+      if (idx < 0) return;
+      claimed.add(idx);
+      const list = usageMap.get(idx) || [];
+      list.push({
+        buildId: build.id || `build-${buildIndex}`,
+        buildName: build.name || build.nom || `Build ${buildIndex + 1}`,
+        slot,
+        active: (build.id || '') === activeBuildId,
+      });
+      usageMap.set(idx, list);
+    });
+  });
+
+  return usageMap;
+}
+
+function _inventoryBuildUsagesForIndices(usageMap, indices = []) {
+  const seen = new Set();
+  const out = [];
+  indices.forEach(rawIdx => {
+    const idx = Number.isInteger(rawIdx) ? rawIdx : parseInt(rawIdx, 10);
+    (usageMap.get(idx) || []).forEach(usage => {
+      const key = `${usage.buildId}|${usage.slot}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(usage);
+    });
+  });
+  return out.sort((a, b) => Number(b.active) - Number(a.active)
+    || String(a.buildName).localeCompare(String(b.buildName), 'fr', { sensitivity: 'base' })
+    || String(a.slot).localeCompare(String(b.slot), 'fr', { sensitivity: 'base' }));
+}
+
+function _renderInventoryBuildBadges(usages = []) {
+  if (!usages.length) return '';
+  const active = usages.filter(u => u.active);
+  const otherByBuild = new Map();
+  usages.filter(u => !u.active).forEach(u => {
+    if (!otherByBuild.has(u.buildId)) otherByBuild.set(u.buildId, { name: u.buildName, slots: [] });
+    otherByBuild.get(u.buildId).slots.push(u.slot);
+  });
+
+  const detail = usages
+    .map(u => `${u.active ? 'Build actif' : u.buildName} - ${u.slot}`)
+    .join('\n');
+  const title = _esc(detail);
+  const badges = [];
+
+  if (active.length) {
+    badges.push(`<span class="inv-equipped-badge inv-build-badge is-active" title="${title}">Actif${active.length > 1 ? ` x${active.length}` : ''}</span>`);
+  }
+
+  const others = [...otherByBuild.values()];
+  if (others.length === 1) {
+    badges.push(`<span class="inv-equipped-badge inv-build-badge is-other" title="${title}">${_esc(others[0].name)}</span>`);
+  } else if (others.length > 1) {
+    badges.push(`<span class="inv-equipped-badge inv-build-badge is-other" title="${title}">${others.length} builds</span>`);
+  }
+
+  return `<span class="inv-build-badges">${badges.join('')}</span>`;
+}
+
 function renderCharInventaireV3(c, canEdit) {
   const inv = c.inventaire || [];
   const totalItems = inv.reduce((sum, item) =>
@@ -1391,6 +1497,7 @@ function renderCharInventaireV3(c, canEdit) {
   // (ex. ancienne catégorie supprimée) retombe sur « Tout ».
   const filters = _invFilters(inv);
   const activeCat = filters.some(f => f.id === filter.cat) ? filter.cat : 'all';
+  const buildUsageMap = _inventoryBuildUsageMap(c);
 
   // Stack : regroupe les items identiques qui portent aussi les mêmes traits.
   // Garde la liste d'indices originaux pour les actions (vente/envoi/suppression bulk).
@@ -1511,10 +1618,12 @@ function renderCharInventaireV3(c, canEdit) {
     if (effetTxt && hero?.k !== 'Effet') props.push({ k: 'Effet', v: effetTxt, c: 'effect' });
     const traits = _getTraits?.(it) || [];
 
-    const equipMap = (() => { try { return getEquippedInventoryIndexMap?.(c) || new Map(); } catch { return new Map(); } })();
-    const isEquipped = allIdx.some(i => equipMap.has(i));
+    const buildUsages = _inventoryBuildUsagesForIndices(buildUsageMap, allIdx);
+    const isEquipped = buildUsages.length > 0;
+    const hasActiveBuildUsage = buildUsages.some(u => u.active);
+    const buildBadgesHtml = _renderInventoryBuildBadges(buildUsages);
 
-    return `<div class="inv-card ${isEquipped?'is-equipped':''}" style="--rare-c:${col}">
+    return `<div class="inv-card ${isEquipped ? `is-equipped ${hasActiveBuildUsage ? 'is-equipped-active' : 'is-equipped-other'}` : ''}" style="--rare-c:${col}">
       <div class="inv-card-head">
         <button class="inv-card-visual" data-action="openInventoryItemDetail" data-id="${c.id}"
           data-indices="${allIdxB64}" title="Inspecter ${_esc(it.nom || 'l’objet')}">
@@ -1527,7 +1636,7 @@ function renderCharInventaireV3(c, canEdit) {
             ${rareIdx > 0
               ? `<span class="inv-card-rare" style="color:${col}">${stars} ${_RARE_NAMES[rareIdx]}</span>`
               : ''}
-            ${isEquipped ? '<span class="inv-equipped-badge">Équipé</span>' : ''}
+            ${buildBadgesHtml}
           </div>
         </div>
         <div class="inv-card-head-actions">
@@ -1630,7 +1739,7 @@ async function allocateStat(charId, key, delta = 1) {
   levelUps[key] = Math.max(0, lvlNow + delta);
 
   c.stats = stats; c.statsLevelUps = levelUps;
-  await updateInCol('characters', charId, { stats, statsLevelUps: levelUps });
+  await saveBuildPatch(charId, c, { stats, statsLevelUps: levelUps });
   renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
 }
 
@@ -1673,6 +1782,115 @@ async function _setDefaultCharacter(charId) {
     notifySaveError(e);
   }
 };
+
+async function _persistCharacterBuildState(c) {
+  const payload = buildProjectionPatch(c, getActiveBuild(c));
+  await updateInCol('characters', c.id, payload);
+  const idx = (STATE.characters || []).findIndex(x => x.id === c.id);
+  if (idx >= 0) STATE.characters[idx] = { ...STATE.characters[idx], ...payload };
+  if (STATE.activeChar?.id === c.id) STATE.activeChar = { ...STATE.activeChar, ...payload };
+}
+
+function _renderBuildsModalBody(c) {
+  const { builds, activeBuildId } = normalizeCharacterBuilds(c);
+  return `<div class="cs-build-modal">
+    <div class="cs-build-modal-head">
+      <div>
+        <span>Configurations</span>
+        <strong>${_esc(c.nom || 'Personnage')}</strong>
+      </div>
+      <button class="btn btn-gold btn-sm" data-action="createCharacterBuild" data-id="${c.id}">+ Nouveau build</button>
+    </div>
+    <p>Chaque build garde sa propre image, son équipement, ses stats de base, ses points par niveau et ses bases PV/PM. Le reste de la fiche reste partagé.</p>
+    <div class="cs-build-list">
+      ${builds.map((b, idx) => `<div class="cs-build-row ${b.id === activeBuildId ? 'is-active' : ''}">
+        <div class="cs-build-row-main">
+          <span class="cs-build-row-badge">${b.id === activeBuildId ? 'Actif' : `#${idx + 1}`}</span>
+          <input value="${_esc(b.name || `Build ${idx + 1}`)}" data-build-name="${_esc(b.id)}" maxlength="32">
+        </div>
+        <div class="cs-build-row-actions">
+          ${b.id === activeBuildId ? '<span class="cs-build-row-lock">sélectionné</span>' : `<button class="btn btn-outline btn-sm" data-action="switchCharacterBuild" data-id="${c.id}" data-build-id="${_esc(b.id)}">Activer</button>`}
+          <button class="btn btn-outline btn-sm" data-action="renameCharacterBuild" data-id="${c.id}" data-build-id="${_esc(b.id)}">Renommer</button>
+          ${builds.length > 1 ? `<button class="btn btn-danger btn-sm" data-action="deleteCharacterBuild" data-id="${c.id}" data-build-id="${_esc(b.id)}">Supprimer</button>` : ''}
+        </div>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function openCharacterBuildsModal(charId) {
+  const c = getCharacterById(charId);
+  if (!c) return;
+  applyActiveBuild(c);
+  openModal('Builds du personnage', _renderBuildsModalBody(c), {
+    subtitle: 'Image, équipement et statistiques alternatives',
+    accent: '#7c3aed',
+  });
+}
+
+async function switchCharacterBuild(charId, buildId) {
+  const c = getCharacterById(charId);
+  if (!c || !buildId) return;
+  const target = switchBuild(c, buildId);
+  if (!target) return;
+  try {
+    await _persistCharacterBuildState(c);
+    showNotif(`Build actif : ${target.name || 'Build'}`, 'success');
+    renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
+  } catch (e) {
+    notifySaveError(e);
+  }
+}
+
+async function createCharacterBuild(charId) {
+  const c = getCharacterById(charId);
+  if (!c) return;
+  const build = createBuild(c, { fromActive: true });
+  try {
+    await _persistCharacterBuildState(c);
+    closeModalDirect();
+    showNotif(`Build créé : ${build.name}`, 'success');
+    renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
+    openCharacterBuildsModal(charId);
+  } catch (e) {
+    notifySaveError(e);
+  }
+}
+
+async function renameCharacterBuild(charId, buildId) {
+  const c = getCharacterById(charId);
+  const input = document.querySelector(`[data-build-name="${CSS.escape(buildId)}"]`);
+  if (!c || !input) return;
+  const build = renameBuild(c, buildId, input.value);
+  if (!build) return;
+  try {
+    await _persistCharacterBuildState(c);
+    showNotif('Build renommé.', 'success');
+    openCharacterBuildsModal(charId);
+    renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
+  } catch (e) {
+    notifySaveError(e);
+  }
+}
+
+async function deleteCharacterBuild(charId, buildId) {
+  const c = getCharacterById(charId);
+  if (!c) return;
+  const active = deleteBuild(c, buildId);
+  if (!active) {
+    showNotif('Impossible de supprimer le dernier build.', 'error');
+    return;
+  }
+  try {
+    await _persistCharacterBuildState(c);
+    closeModalDirect();
+    showNotif('Build supprimé.', 'success');
+    renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
+    openCharacterBuildsModal(charId);
+  } catch (e) {
+    notifySaveError(e);
+  }
+}
 
 async function setCharAura(charId, aura) {
   const c = getCharacterById(charId);
@@ -1771,6 +1989,11 @@ registerActions({
   createNewChar:           ()       => createNewChar(),
   filterAdminChars:        (btn)    => filterAdminChars(btn.dataset.pseudo, btn),
   _setDefaultCharacter:    (btn)    => _setDefaultCharacter(btn.dataset.id),
+  openCharacterBuildsModal: (btn)    => openCharacterBuildsModal(btn.dataset.id),
+  switchCharacterBuild:    (el)     => switchCharacterBuild(el.dataset.id, el.dataset.buildId || el.value),
+  createCharacterBuild:    (btn)    => createCharacterBuild(btn.dataset.id),
+  renameCharacterBuild:    (btn)    => renameCharacterBuild(btn.dataset.id, btn.dataset.buildId),
+  deleteCharacterBuild:    (btn)    => deleteCharacterBuild(btn.dataset.id, btn.dataset.buildId),
 
   // Tabs
   showCharTab:             (btn)    => showCharTab(btn.dataset.tab, btn),

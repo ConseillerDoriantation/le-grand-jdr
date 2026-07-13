@@ -10,6 +10,7 @@ import { richTextContentHtml } from '../../shared/rich-text.js';
 import { quillEditorHtml, getQuillHtml } from '../../shared/rich-text-quill.js';
 import { uploadJpeg } from '../../shared/image-upload.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
+import { saveBuildPatch } from '../../shared/character-builds.js';
 
 import { getCharacterById } from '../../shared/character-state.js';
 // ══════════════════════════════════════════════
@@ -750,7 +751,7 @@ export async function allocStatPoint(charId, key, delta) {
   c.statsLevelUps[key] = newLvl;
   c.stats[key] = (c.statsBase[key] || 8) + newLvl;
 
-  await trySave('characters', charId, {
+  await saveBuildPatch(charId, c, {
     stats:         c.stats,
     statsBase:     c.statsBase,
     statsLevelUps: c.statsLevelUps,
@@ -783,7 +784,7 @@ export async function adjVitalBase(charId, field, delta) {
   const next = Math.max(1, Math.min(999, cur + (parseInt(delta) || 0)));
   if (next === cur) return;
   c[field] = next;
-  await updateInCol('characters', charId, { [field]: next });
+  await saveBuildPatch(charId, c, { [field]: next });
   charSession.renderSheet(c, charSession.getCurrentCharTab());
 }
 
