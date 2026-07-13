@@ -10,6 +10,7 @@ import { VS } from './vtt-state.js';
 import { STATE } from '../../core/state.js';
 import { _esc, _searchIncludes } from '../../shared/html.js';
 import { computeEquipSkillBonus, statShort, calcCA } from '../../shared/char-stats.js';
+import { normalizeCharacterBuilds } from '../../shared/character-builds.js';
 import { hpColor, TYPE_COLOR, _STAT_COLOR, _STAT_KEY, _MS_BONUS_BUFF, _VTT_RUNE_META } from './vtt-constants.js';
 import { DAMAGE_INTERACTIONS } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
@@ -26,6 +27,34 @@ let _skillFilter = '';          // filtre live du panneau « Jets de compétence
 // Regroupement des compétences par caractéristique (scan plus rapide pour le joueur).
 const _SK_STAT_ORDER = ['FOR', 'DEX', 'CON', 'INT', 'SAG', 'CHA', ''];
 const _SK_STAT_LABEL = { FOR:'Force', DEX:'Dextérité', CON:'Constitution', INT:'Intelligence', SAG:'Sagesse', CHA:'Charisme', '':'Autres' };
+
+function _buildTokenBuildSwitcher(t) {
+  if (!t?.characterId) return '';
+  const c = VS.characters[t.characterId];
+  if (!c) return '';
+  const { builds, activeBuildId } = normalizeCharacterBuilds(c);
+  if (builds.length <= 1) return '';
+  const canSwitch = _canControlToken(t);
+  const active = builds.find(b => b.id === activeBuildId) || builds[0];
+  const buildButtons = builds.map(b =>
+    `<button type="button" class="vtt-ins-build-option ${b.id === activeBuildId ? 'active' : ''}"
+      data-vtt-fn="_vttSwitchCharacterBuild" data-vtt-args="${_esc(t.characterId)}|${_esc(b.id)}"
+      ${canSwitch ? '' : 'disabled'}>
+      <span>${_esc(b.name || 'Build')}</span>
+      ${b.id === activeBuildId ? '<b>Actif</b>' : ''}
+    </button>`
+  ).join('');
+  return `<div class="vtt-ins-build-switch" title="${_esc(`${active?.name || 'Build'} : image, équipement, stats et bases PV/PM.`)}">
+    <span class="vtt-ins-build-label">Build</span>
+    <details class="vtt-ins-build-menu">
+      <summary class="vtt-ins-build-current">
+        <span>${_esc(active?.name || 'Build')}</span>
+      </summary>
+      <div class="vtt-ins-build-options">${buildButtons}</div>
+    </details>
+    <span class="vtt-ins-build-count">${builds.length}</span>
+  </div>`;
+}
 
 export function _renderInspectorSoon() {
   if (_inspectorDirty) return;
@@ -95,6 +124,7 @@ export function _renderInspectorImpl(t) {
   const lbl={player:'Joueur',enemy:'Ennemi',npc:'PNJ'}[t.type]??t.type;
   const img=ld.displayImage;
   const linked=t.characterId||t.npcId;
+  const buildSwitcherHtml = _buildTokenBuildSwitcher(t);
 
   const pageOpts=STATE.isAdmin
     ? Object.values(VS.pages).filter(p=>p.id!==t.pageId)
@@ -696,6 +726,7 @@ export function _renderInspectorImpl(t) {
         <div class="vtt-ins-type">${icon} ${lbl}${linked?' · 🔗':''}</div>
       </div>
     </div>
+    ${buildSwitcherHtml}
     ${vitalsHtml}
     ${_tabBar}
     <div class="vtt-ins-tabbody">${_tabBody}</div>`;

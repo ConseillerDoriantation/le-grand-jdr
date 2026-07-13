@@ -19,6 +19,7 @@ import {
 import { getWeaponDamageStatKeys } from '../../shared/equipment-utils.js';
 import { characterAvatarHtml, characterPortraitContent } from '../../shared/portraits.js';
 import { calcUpgradeRefund, getUpgradeTotalCost, hasUpgrades, getUpgradeSettings } from '../../shared/upgrade-settings.js';
+import { patchBuildLocally } from '../../shared/character-builds.js';
 import {
   _getTraits,
   getEquippedInventoryIndexMap,
@@ -730,6 +731,9 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
     if (equipSync.changed) {
       extraPayload.equipement = equipSync.equipement;
       extraPayload.statsBonus = equipSync.statsBonus;
+      patchBuildLocally(c, { equipement: equipSync.equipement, statsBonus: equipSync.statsBonus });
+      extraPayload.builds = c.builds;
+      extraPayload.activeBuildId = c.activeBuildId;
     }
 
     // Une ligne par produit financier : vente + reprise (si > 0), une seule écriture
@@ -819,6 +823,9 @@ export async function deleteInvItemBulk(charId, indicesB64) {
   if (equipSync.changed) {
     payload.equipement = equipSync.equipement;
     payload.statsBonus = equipSync.statsBonus;
+    patchBuildLocally(c, { equipement: equipSync.equipement, statsBonus: equipSync.statsBonus });
+    payload.builds = c.builds;
+    payload.activeBuildId = c.activeBuildId;
   }
   if (await trySave('characters', charId, payload)) {
     c.inventaire = inv;
@@ -972,6 +979,9 @@ export async function sendInvItem(fromCharId, indicesB64) {
   if (equipSync.changed) {
     fromPayload.equipement = equipSync.equipement;
     fromPayload.statsBonus = equipSync.statsBonus;
+    patchBuildLocally(fromChar, { equipement: equipSync.equipement, statsBonus: equipSync.statsBonus });
+    fromPayload.builds = fromChar.builds;
+    fromPayload.activeBuildId = fromChar.activeBuildId;
   }
 
   await Promise.all([
