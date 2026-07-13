@@ -653,8 +653,9 @@ match /adventures/{adventureId} {
         || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
             && request.resource.data.get('reactions', {}).diff(resource.data.get('reactions', {})).affectedKeys().hasOnly([request.auth.uid]))
       );
-    // Suppression : l'auteur peut supprimer son propre message.
-    allow delete: if inAdventure(adventureId) && resource.data.senderId == request.auth.uid;
+    // Suppression : l'auteur, ou le MJ de l'aventure (modération).
+    allow delete: if inAdventure(adventureId) &&
+      (resource.data.senderId == request.auth.uid || isAdvAdmin(adventureId));
   }
   // État de lecture (badge non-lus + accusés « vu ») : map convoId→millis.
   // Lecture par tout membre (pour afficher « Vu » en DM), écriture chacun le sien.

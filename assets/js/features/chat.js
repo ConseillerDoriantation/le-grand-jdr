@@ -53,6 +53,7 @@ let _searchOpen = false, _searchQ = '';            // recherche dans la conv ouv
 let _muted = false, _audioCtx = null, _soundReady = false;   // notif sonore (pas de bip au 1er rendu)
 let _chatEmotes = [];                              // émotes custom :nom: (world/vtt_emotes)
 let _lastRenderedLastId = null;                    // dernier msg rendu (scroll intelligent)
+let _advLimit = HISTORY, _convoLimit = HISTORY;    // pagination « charger plus »
 let _advMsgs = [];                                 // messages Aventure (live session)
 let _groups  = [];                                 // convos de groupe où je suis membre
 let _convoMsgs = [];                               // messages du GROUPE ouvert
@@ -100,12 +101,8 @@ export async function initChat(uid) {
   try { const s = await getDoc(_readRef()); const d = s.data() || {}; _reads = { ...d, [ADV]: Number(d[ADV] ?? d.at) || 0 }; }
   catch { _reads = {}; }
 
-  const mcol = _msgsCol();
-  if (mcol) _unsubAdv = onSnapshot(
-    query(mcol, where('convoId', '==', ADV), orderBy('at', 'desc'), limit(HISTORY)),
-    snap => { _advMsgs = snap.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) })).reverse(); _onData(ADV); },
-    err => console.warn('[chat] adv', err?.code, err?.message || err),
-  );
+  _advLimit = HISTORY;
+  _subscribeAdv();
 
   const ccol = _convosCol();
   if (ccol && _uid) _unsubGroups = onSnapshot(
@@ -179,6 +176,26 @@ function _teardownListeners() {
   [_unsubAdv, _unsubGroups, _unsubConvo, _unsubTyping, _unsubReads].forEach(u => { if (u) try { u(); } catch {} });
   _unsubAdv = _unsubGroups = _unsubConvo = _unsubTyping = _unsubReads = null;
   clearTimeout(_typingClearTimer); clearTimeout(_typingRenderTimer);
+}
+
+// Abonnements messages (avec limite paginée). Re-souscrits par « charger plus ».
+function _subscribeAdv() {
+  if (_unsubAdv) { try { _unsubAdv(); } catch {} _unsubAdv = null; }
+  const mcol = _msgsCol(); if (!mcol) return;
+  _unsubAdv = onSnapshot(
+    query(mcol, where('convoId', '==', ADV), orderBy('at', 'desc'), limit(_advLimit)),
+    snap => { _advMsgs = snap.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) })).reverse(); _onData(ADV); },
+    err => console.warn('[chat] adv', err?.code, err?.message || err),
+  );
+}
+function _subscribeConvo(id) {
+  if (_unsubConvo) { try { _unsubConvo(); } catch {} _unsubConvo = null; }
+  const mcol = _msgsCol(); if (!mcol) return;
+  _unsubConvo = onSnapshot(
+    query(mcol, where('convoId', '==', id), orderBy('at', 'desc'), limit(_convoLimit)),
+    snap => { _convoMsgs = snap.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) })).reverse(); _onData('convo'); },
+    err => console.warn('[chat] convo', err?.code, err?.message || err),
+  );
 }
 
 // Nouveau lot de données reçu (source = ADV | 'groups' | 'convo')
@@ -326,9 +343,12 @@ function _renderMessages() {
   const isNew = lastId && lastId !== _lastRenderedLastId;
 
   let html = '';
+  const curLimit = _openId === ADV ? _advLimit : _convoLimit;
   if (!msgs.length) {
     html = `<div class="chat-empty">${q ? 'Aucun message trouvé.' : 'Aucun message. Lance la discussion !'}</div>`;
   } else {
+    // Il y a peut-être plus ancien si on a atteint la limite courante.
+    if (!q && all.length >= curLimit) html += `<button class="chat-load-more" data-action="chatLoadMore">⤒ Messages plus anciens</button>`;
     let prevDay = '';
     for (const m of msgs) {
       const day = _dayLabel(_atMillis(m) || Date.now());
@@ -418,6 +438,16 @@ function _applyMentions(escaped) {
   return escaped.replace(/@\[([\w-]+)\]/g, (_m, uid) =>
     `<span class="chat-mention${uid === _uid ? ' chat-mention--me' : ''}">@${_esc(_nameOf(uid))}</span>`);
 }
+// URLs → liens cliquables. Appliqué EN DERNIER : [^\s<] stoppe aux balises déjà
+// injectées (émotes/mentions), donc ne casse rien.
+function _linkify(html) {
+  return html.replace(/(https?:\/\/[^\s<]+)/g, (m) => {
+    const t = m.match(/[)\].,!?;:]+$/);
+    const tail = t ? t[0] : '';
+    const url = tail ? m.slice(0, -tail.length) : m;
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>${tail}`;
+  });
+}
 
 function _msgRow(m) {
   const mine = m.senderId === _uid;
@@ -434,7 +464,7 @@ function _msgRow(m) {
   const quote = m.replyTo
     ? `<span class="chat-msg-quote"><span class="chat-quote-name">${_esc(m.replyTo.senderName || '')}</span><span class="chat-quote-text">${_esc(m.replyTo.text || '📷 Image')}</span></span>` : '';
   const img = m.image ? `<img class="chat-msg-img" src="${_esc(m.image)}" alt="image" loading="lazy">` : '';
-  const txt = m.text ? `<span class="chat-msg-btext">${_applyMentions(_applyChatEmotes(_esc(m.text)))}</span>` : '';
+  const txt = m.text ? `<span class="chat-msg-btext">${_linkify(_applyMentions(_applyChatEmotes(_esc(m.text))))}</span>` : '';
   const mentionsMe = !mine && _uid && (m.text || '').includes(`@[${_uid}]`);
   return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}${mentionsMe ? ' chat-msg--mention' : ''}">${av}
     <span class="chat-msg-content">${author}
@@ -530,12 +560,8 @@ function chatOpenConvo(btn) {
   _renderConvo();
   if (id === ADV) { _markRead(ADV); }
   else {
-    const mcol = _msgsCol();
-    if (mcol) _unsubConvo = onSnapshot(
-      query(mcol, where('convoId', '==', id), orderBy('at', 'desc'), limit(HISTORY)),
-      snap => { _convoMsgs = snap.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) })).reverse(); _onData('convo'); },
-      err => console.warn('[chat] convo', err?.code, err?.message || err),
-    );
+    _convoLimit = HISTORY;
+    _subscribeConvo(id);
     _markRead(id);
   }
   _subscribeTyping(id);
@@ -770,7 +796,7 @@ async function chatDeleteMsg(btn) {
   const id = btn?.dataset?.msg; if (!id) return;
   _closeMsgMenu();
   const msgs = _openId === ADV ? _advMsgs : _convoMsgs;
-  const m = msgs.find(x => x.id === id); if (!m || m.senderId !== _uid) return;
+  const m = msgs.find(x => x.id === id); if (!m || (m.senderId !== _uid && !STATE.isAdmin)) return;
   if (!await confirmModal('Supprimer ce message ?')) return;
   if (_editingId === id) chatCancelEdit();
   const ref = _msgRef(id); if (!ref) return;
@@ -890,8 +916,8 @@ function chatMsgMenu(btn) {
     <div class="chat-msg-menu-reacts">${REACTIONS.map(e =>
       `<button class="chat-act-emo" data-action="chatReact" data-msg="${_esc(id)}" data-emo="${e}" title="Réagir ${e}">${e}</button>`).join('')}</div>
     <button class="chat-msg-menu-item" data-action="chatReplyMsg" data-msg="${_esc(id)}">↩︎ Répondre</button>
-    ${mine ? `<button class="chat-msg-menu-item" data-action="chatEditMsg" data-msg="${_esc(id)}">✏️ Modifier</button>
-              <button class="chat-msg-menu-item" data-action="chatDeleteMsg" data-msg="${_esc(id)}">🗑️ Supprimer</button>` : ''}`;
+    ${mine ? `<button class="chat-msg-menu-item" data-action="chatEditMsg" data-msg="${_esc(id)}">✏️ Modifier</button>` : ''}
+    ${(mine || STATE.isAdmin) ? `<button class="chat-msg-menu-item" data-action="chatDeleteMsg" data-msg="${_esc(id)}">🗑️ Supprimer${!mine ? ' (MJ)' : ''}</button>` : ''}`;
   document.body.appendChild(pop);
   const r = btn.getBoundingClientRect();
   const w = pop.offsetWidth || 220, h = pop.offsetHeight || 40;
@@ -1095,6 +1121,11 @@ function chatScrollBottom() {
   const list = document.getElementById('chat-msgs'); if (list) list.scrollTop = list.scrollHeight;
   _hideNewPill();
 }
+// Charge un lot plus ancien (re-souscription avec limite augmentée).
+function chatLoadMore() {
+  if (_openId === ADV) { _advLimit += HISTORY; _subscribeAdv(); }
+  else if (_openId) { _convoLimit += HISTORY; _subscribeConvo(_openId); }
+}
 function chatToggleMute() {
   _muted = !_muted;
   localStorage.setItem('chat-muted', _muted ? '1' : '0');
@@ -1118,6 +1149,7 @@ registerActions({
   chatSearchToggle:() => chatSearchToggle(),
   chatPickImage:   () => chatPickImage(),
   chatScrollBottom:() => chatScrollBottom(),
+  chatLoadMore:    () => chatLoadMore(),
   chatToggleMute:  () => chatToggleMute(),
   chatReact:       (btn) => chatReact(btn),
   chatEditMsg:     (btn) => chatEditMsg(btn),

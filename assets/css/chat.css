@@ -311,6 +311,17 @@
 .chat-input-ce:empty::before { content: attr(data-placeholder); color: var(--text-dim, #9aa4b2); pointer-events: none; }
 .chat-input-ce .chat-emote-inline { height: 1.5em; width: 1.5em; vertical-align: -0.35em; margin: 0 1px; }
 
+/* ── Liens + charger plus ── */
+.chat-msg-btext a { color: #7fb0ff; text-decoration: underline; word-break: break-all; }
+.chat-msg--mine .chat-msg-btext a { color: #dbe7ff; }
+.chat-load-more {
+  align-self: center; margin: .2rem auto .4rem; cursor: pointer;
+  background: var(--bg-elevated, #1e2836); color: var(--text-dim, #9aa4b2);
+  border: 1px solid var(--border, rgba(255,255,255,.14)); border-radius: 999px;
+  font-size: .72rem; padding: .25rem .7rem;
+}
+.chat-load-more:hover { color: var(--text, #fff); border-color: rgba(79,140,255,.5); }
+
 /* ── Mentions @pseudo ── */
 .chat-mention { color: #7fb0ff; font-weight: 600; background: rgba(79,140,255,.14); border-radius: 4px; padding: 0 3px; white-space: nowrap; }
 .chat-mention--me { color: #ffd479; background: rgba(232,184,75,.2); }
