@@ -61,6 +61,7 @@ let _reads = {};                                   // convoId → millis lus
 let _ghosts = new Set();                            // uids confirmés fantômes (compte supprimé) → masqués
 let _unsubAdv = null, _unsubGroups = null, _unsubConvo = null;
 let _unsubTyping = null, _unsubReads = null;       // « écrit… » (conv ouverte) + « vu » (DM ouvert)
+let _unsubPresence = null, _online = new Set();    // statut en ligne (abonné quand panneau ouvert)
 let _typing = [], _otherReads = 0;                 // uids en train d'écrire · millis lus par l'autre (DM)
 let _typingWroteAt = 0, _typingClearTimer = null, _typingRenderTimer = null;
 let _baseTitle = '';                               // titre d'onglet sans compteur
@@ -173,9 +174,36 @@ function _pulseBubble() {
   setTimeout(() => el.classList.remove('chat-notify'), 1200);
 }
 function _teardownListeners() {
-  [_unsubAdv, _unsubGroups, _unsubConvo, _unsubTyping, _unsubReads].forEach(u => { if (u) try { u(); } catch {} });
-  _unsubAdv = _unsubGroups = _unsubConvo = _unsubTyping = _unsubReads = null;
+  [_unsubAdv, _unsubGroups, _unsubConvo, _unsubTyping, _unsubReads, _unsubPresence].forEach(u => { if (u) try { u(); } catch {} });
+  _unsubAdv = _unsubGroups = _unsubConvo = _unsubTyping = _unsubReads = _unsubPresence = null;
   clearTimeout(_typingClearTimer); clearTimeout(_typingRenderTimer);
+}
+
+// ── Statut en ligne (présence) : abonné seulement quand le panneau est ouvert ──
+const _isOnline = (uid) => _online.has(uid);
+function _subscribePresence() {
+  if (_unsubPresence) return;
+  const a = _adv(); if (!a) return;
+  _unsubPresence = onSnapshot(collection(db, 'adventures', a, 'presence'), snap => {
+    const now = Date.now(); const on = new Set();
+    snap.docs.forEach(d => {
+      const ls = d.data({ serverTimestamps: 'estimate' }).lastSeen;
+      const ms = ls?.toMillis ? ls.toMillis() : 0;
+      if (d.id !== _uid && now - ms < 120000) on.add(d.id);   // expiration 120 s, hors moi
+    });
+    _online = on;
+    _updateOnlineDots();
+  }, err => console.warn('[chat] presence', err?.code || err));
+}
+function _teardownPresence() {
+  if (_unsubPresence) { try { _unsubPresence(); } catch {} _unsubPresence = null; }
+  _online = new Set();
+}
+// Bascule la pastille sur les avatars déjà rendus (sans re-render → cases cochées préservées).
+function _updateOnlineDots() {
+  document.querySelectorAll('#chat-widget [data-online-uid]').forEach(el => {
+    el.classList.toggle('is-online', _online.has(el.getAttribute('data-online-uid')));
+  });
 }
 
 // Abonnements messages (avec limite paginée). Re-souscrits par « charger plus ».
@@ -247,7 +275,9 @@ function _renderList() {
     const prev = g.lastText ? `${g.lastSenderName || ''} : ${g.lastText}` : (isDm ? 'Nouvelle discussion' : 'Nouveau groupe');
     // DM : avatar de l'autre membre ; groupe : avatar du dernier auteur.
     const avUid = isDm ? _otherDmUid(g) : g.lastSenderId;
-    const ico = avUid ? `<img class="chat-conv-avimg" src="${_esc(avatarSrcOf(_profileOf(avUid)))}" alt="">` : (isDm ? '👤' : '👥');
+    const ico = avUid
+      ? `<img class="chat-conv-avimg${isDm && _isOnline(avUid) ? ' is-online' : ''}"${isDm ? ` data-online-uid="${_esc(avUid)}"` : ''} src="${_esc(avatarSrcOf(_profileOf(avUid)))}" alt="">`
+      : (isDm ? '👤' : '👥');
     return _convoRow(g.id, ico, _convoTitle(g), prev, _groupUnread(g) ? '•' : 0);
   }).join('');
   el.innerHTML = _panelShell('Discussions', '',
@@ -288,6 +318,7 @@ function _renderConvo() {
        <div class="chat-form-row">
          <button type="button" class="chat-emoji-btn" data-action="chatEmojiToggle" title="Emoji" aria-label="Insérer un emoji">😊</button>
          <button type="button" class="chat-emoji-btn" data-action="chatPickImage" title="Envoyer une image" aria-label="Envoyer une image">📎</button>
+         <button type="button" class="chat-emoji-btn" data-action="chatRollHint" title="Lancer des dés (ex : /roll 1d20+3)" aria-label="Lancer des dés">🎲</button>
          <input type="file" id="chat-file" accept="image/*" hidden>
          <div id="chat-input" class="chat-input chat-input-ce" contenteditable="true" role="textbox" aria-label="Message" data-placeholder="Écris un message…"></div>
          <button type="submit" class="chat-send" aria-label="Envoyer">➤</button>
@@ -313,6 +344,7 @@ function _renderConvo() {
   });
   if (_typing.length) _renderTyping();
   if (_replyTo) _showReplyBar();
+  if (!_editingId) _restoreDraft();
   _renderMessages();
   el.querySelector(_searchOpen ? '#chat-search-inp' : '#chat-input')?.focus();
 }
@@ -349,11 +381,16 @@ function _renderMessages() {
   } else {
     // Il y a peut-être plus ancien si on a atteint la limite courante.
     if (!q && all.length >= curLimit) html += `<button class="chat-load-more" data-action="chatLoadMore">⤒ Messages plus anciens</button>`;
-    let prevDay = '';
+    let prevDay = '', prevSender = null, prevAt = 0;
     for (const m of msgs) {
-      const day = _dayLabel(_atMillis(m) || Date.now());
-      if (day !== prevDay) { html += `<div class="chat-date-sep"><span>${_esc(day)}</span></div>`; prevDay = day; }
-      html += _msgRow(m);
+      const at = _atMillis(m) || Date.now();
+      const day = _dayLabel(at);
+      const dayChanged = day !== prevDay;
+      if (dayChanged) { html += `<div class="chat-date-sep"><span>${_esc(day)}</span></div>`; prevDay = day; prevSender = null; }
+      // Regroupement : même auteur, < 5 min, même jour → on masque avatar + nom.
+      const grouped = !dayChanged && !m.deleted && m.senderId === prevSender && (at - prevAt) < 300000;
+      html += _msgRow(m, grouped);
+      prevSender = m.deleted ? null : m.senderId; prevAt = at;
     }
   }
   // « Vu » (DM) : sous mon dernier message si l'autre l'a lu.
@@ -438,6 +475,11 @@ function _applyMentions(escaped) {
   return escaped.replace(/@\[([\w-]+)\]/g, (_m, uid) =>
     `<span class="chat-mention${uid === _uid ? ' chat-mention--me' : ''}">@${_esc(_nameOf(uid))}</span>`);
 }
+// Variante pour le composer : jetons ré-sérialisables (data-uid, non éditables).
+function _mentionsToTokens(escaped) {
+  return escaped.replace(/@\[([\w-]+)\]/g, (_m, uid) =>
+    `<span class="chat-mention" contenteditable="false" data-uid="${_esc(uid)}">@${_esc(_nameOf(uid))}</span>`);
+}
 // URLs → liens cliquables. Appliqué sur le TEXTE échappé (avant émotes/mentions)
 // pour ne jamais capturer une URL présente dans un attribut (ex. src d'émote).
 function _linkify(html) {
@@ -449,29 +491,65 @@ function _linkify(html) {
   });
 }
 
-function _msgRow(m) {
+// Jet de dés : parse « 2d6+3 », « d20 », « 1d20+1d4-1 » → { expr, total, parts }.
+function _rollDice(expr) {
+  const clean = String(expr || '').trim().toLowerCase().replace(/\s+/g, '');
+  if (!clean || !/^[0-9d+-]+$/.test(clean)) return null;
+  const terms = clean.match(/[+-]?[^+-]+/g); if (!terms) return null;
+  let total = 0; const parts = [];
+  for (let t of terms) {
+    let sign = 1;
+    if (t[0] === '+') t = t.slice(1);
+    else if (t[0] === '-') { sign = -1; t = t.slice(1); }
+    const dm = t.match(/^(\d*)d(\d+)$/);
+    if (dm) {
+      const n = parseInt(dm[1] || '1', 10), faces = parseInt(dm[2], 10);
+      if (!faces || n < 1 || n > 100 || faces > 1000) return null;
+      const rolls = [];
+      for (let i = 0; i < n; i++) rolls.push(1 + Math.floor(Math.random() * faces));
+      total += sign * rolls.reduce((a, b) => a + b, 0);
+      parts.push({ type: 'dice', label: `${n}d${faces}`, rolls, sign });
+    } else if (/^\d+$/.test(t)) {
+      total += sign * parseInt(t, 10);
+      parts.push({ type: 'mod', value: parseInt(t, 10), sign });
+    } else return null;
+  }
+  return { expr: clean, total, parts };
+}
+function _rollCardHtml(roll) {
+  const detail = (roll.parts || []).map(p => p.type === 'dice'
+    ? `${p.sign < 0 ? '−' : ''}${p.label} [${p.rolls.join(', ')}]`
+    : `${p.sign < 0 ? '−' : '+'}${p.value}`).join(' ');
+  return `<span class="chat-roll"><span class="chat-roll-total">🎲 ${_esc(String(roll.total))}</span><span class="chat-roll-detail">${_esc(roll.expr)} · ${_esc(detail)}</span></span>`;
+}
+
+function _msgRow(m, grouped = false) {
   const mine = m.senderId === _uid;
   const time = new Date(_atMillis(m) || Date.now()).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  const av = mine ? '' : `<img class="chat-msg-av" src="${_esc(avatarSrcOf(_profileOf(m.senderId)))}" alt="" loading="lazy">`;
-  const author = mine ? '' : `<span class="chat-msg-author">${_esc(m.senderName || '?')}</span>`;
+  // Message groupé (même auteur qui enchaîne) : avatar → espaceur, pas de nom.
+  const av = mine ? '' : (grouped
+    ? '<span class="chat-msg-av-spacer"></span>'
+    : `<img class="chat-msg-av" src="${_esc(avatarSrcOf(_profileOf(m.senderId)))}" alt="" loading="lazy">`);
+  const author = (mine || grouped) ? '' : `<span class="chat-msg-author">${_esc(m.senderName || '?')}</span>`;
+  const grpCls = grouped ? ' chat-msg--grouped' : '';
   if (m.deleted) {
-    return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}">${av}
+    return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}${grpCls}" data-mid="${_esc(m.id)}">${av}
       <span class="chat-msg-content">${author}
         <span class="chat-msg-bubble chat-msg-bubble--del">Message supprimé</span>
       </span></div>`;
   }
   const edited = m.editedAt ? ' <span class="chat-msg-edited">(modifié)</span>' : '';
   const quote = m.replyTo
-    ? `<span class="chat-msg-quote"><span class="chat-quote-name">${_esc(m.replyTo.senderName || '')}</span><span class="chat-quote-text">${_esc(m.replyTo.text || '📷 Image')}</span></span>` : '';
+    ? `<span class="chat-msg-quote" role="button" data-action="chatJumpTo" data-msg="${_esc(m.replyTo.id || '')}" title="Aller au message"><span class="chat-quote-name">${_esc(m.replyTo.senderName || '')}</span><span class="chat-quote-text">${_esc(m.replyTo.text || '📷 Image')}</span></span>` : '';
   const img = m.image ? `<img class="chat-msg-img" src="${_esc(m.image)}" alt="image" loading="lazy">` : '';
   // Ordre : échappe → linkify (sur texte pur) → émotes/mentions. Linkifier en
   // dernier capturait l'URL du src des <img> d'émote (→ src cassé, 404).
   const txt = m.text ? `<span class="chat-msg-btext">${_applyMentions(_applyChatEmotes(_linkify(_esc(m.text))))}</span>` : '';
   const mentionsMe = !mine && _uid && (m.text || '').includes(`@[${_uid}]`);
-  return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}${mentionsMe ? ' chat-msg--mention' : ''}">${av}
+  return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}${mentionsMe ? ' chat-msg--mention' : ''}${grpCls}" data-mid="${_esc(m.id)}">${av}
     <span class="chat-msg-content">${author}
       <span class="chat-msg-bubble-wrap">
-        <span class="chat-msg-bubble${m.image && !m.text ? ' chat-msg-bubble--media' : ''}">${quote}${img}${txt}</span>
+        <span class="chat-msg-bubble${(m.image && !m.text) || m.roll ? ' chat-msg-bubble--media' : ''}">${quote}${m.roll ? _rollCardHtml(m.roll) : `${img}${txt}`}</span>
         <button class="chat-msg-menu-btn" data-action="chatMsgMenu" data-msg="${_esc(m.id)}" title="Réagir / modifier" aria-label="Options du message">⋯</button>
       </span>
       ${_reactionsHtml(m)}
@@ -496,7 +574,7 @@ function _renderNew() {
         return `<div class="chat-member-row">
           <label class="chat-member">
             <input type="checkbox" value="${_esc(u)}">
-            <img class="chat-member-av" src="${_esc(avatarSrcOf(p))}" alt="" loading="lazy">
+            <img class="chat-member-av${_isOnline(u) ? ' is-online' : ''}" data-online-uid="${_esc(u)}" src="${_esc(avatarSrcOf(p))}" alt="" loading="lazy">
             <span class="chat-member-name">${_esc(name)}</span>
           </label>
           <button type="button" class="chat-mini-btn" data-action="chatStartDm" data-uid="${_esc(u)}" title="Message privé">💬</button>
@@ -550,8 +628,8 @@ async function _healMembers(members) {
 // ── Actions ───────────────────────────────────────────────────────────────────
 function chatToggle() {
   _open = !_open;
-  if (_open) { _maybeRequestNotifPerm(); _view = 'list'; _renderList(); }
-  else { if (_openId) _markRead(_openId); _teardownConvo(); _renderBubble(); }
+  if (_open) { _maybeRequestNotifPerm(); _subscribePresence(); _view = 'list'; _renderList(); }
+  else { if (_openId) _markRead(_openId); _teardownConvo(); _teardownPresence(); _renderBubble(); }
 }
 function chatBack() { _teardownConvo(); _view = 'list'; _renderList(); }
 
@@ -688,9 +766,28 @@ async function _send() {
   const text = _composerText();
   if (!text) return;
   if (_editingId) { _saveEdit(text); return; }        // mode édition d'un message
+  // Commande /roll (ou /r) : jet de dés → message-jet.
+  const rm = text.match(/^\/(?:roll|r)\s+(.+)$/i);
+  if (rm) {
+    const roll = _rollDice(rm[1]);
+    if (roll) { _clearComposer(); _clearDraft(); _sendRoll(roll); return; }
+    showNotif('Jet invalide. Ex : /roll 1d20+3', 'error'); return;
+  }
   _clearComposer();
   const ok = await _sendText(text);
   if (!ok) _setComposer(text);                         // restaure en cas d'échec
+  else _clearDraft();
+}
+async function _sendRoll(roll) {
+  const col = _msgsCol(); if (!col || !_openId || !_uid) return;
+  const senderName = _senderName();
+  const fallback = `🎲 ${roll.expr} = ${roll.total}`;
+  const reply = _replyTo; _clearReply();
+  const msg = { convoId: _openId, text: fallback, roll, senderId: _uid, senderName, at: serverTimestamp() };
+  if (reply) msg.replyTo = reply;
+  _clearTyping();
+  try { await addDoc(col, msg); _bumpConvoPreview(fallback, senderName); }
+  catch (e) { console.warn('[chat] roll', e?.code || e); showNotif('Jet non envoyé — règles Firestore ?', 'error'); }
 }
 
 // Envoi d'une image : compressée en JPEG base64 borné (reste sous la limite
@@ -819,7 +916,7 @@ function _renderManage() {
   const memberRows = members.map(u => `
     <div class="chat-member-row">
       <span class="chat-member">
-        <img class="chat-member-av" src="${_esc(avatarSrcOf(_profileOf(u)))}" alt="" loading="lazy">
+        <img class="chat-member-av${_isOnline(u) ? ' is-online' : ''}" data-online-uid="${_esc(u)}" src="${_esc(avatarSrcOf(_profileOf(u)))}" alt="" loading="lazy">
         <span class="chat-member-name">${_esc(_nameOf(u))}${u === g.createdBy ? ' <span class="chat-tag">créateur</span>' : ''}</span>
       </span>
       ${(amCreator && u !== _uid) ? `<button class="chat-mini-btn" data-action="chatRemoveMember" data-uid="${_esc(u)}" title="Retirer">✕</button>` : ''}
@@ -828,7 +925,7 @@ function _renderManage() {
   const addRows = addable.map(u => `
     <div class="chat-member-row">
       <span class="chat-member">
-        <img class="chat-member-av" src="${_esc(avatarSrcOf(_profileOf(u)))}" alt="" loading="lazy">
+        <img class="chat-member-av${_isOnline(u) ? ' is-online' : ''}" data-online-uid="${_esc(u)}" src="${_esc(avatarSrcOf(_profileOf(u)))}" alt="" loading="lazy">
         <span class="chat-member-name">${_esc(_nameOf(u))}</span>
       </span>
       <button class="chat-mini-btn" data-action="chatAddMember" data-uid="${_esc(u)}" title="Ajouter">＋</button>
@@ -993,7 +1090,7 @@ function _composerText() {
   return out.trim().slice(0, 1000);
 }
 function _clearComposer() { const el = _composerEl(); if (el) el.innerHTML = ''; }
-function _setComposer(text) { const el = _composerEl(); if (el) { el.innerHTML = _applyChatEmotes(_esc(text || '')); el.focus(); } }
+function _setComposer(text) { const el = _composerEl(); if (el) { el.innerHTML = _mentionsToTokens(_applyChatEmotes(_esc(text || ''))); el.focus(); } }
 function _insertNodeAtCursor(node) {
   const el = _composerEl(); if (!el) return;
   el.focus();
@@ -1084,6 +1181,7 @@ function chatPickMention(btn) {
 }
 function _onComposerInput() {
   _signalTyping();
+  _saveDraft();
   const mq = _mentionQuery();
   if (mq) _renderMentionMenu(mq); else _closeMentionMenu();
 }
@@ -1119,6 +1217,7 @@ function chatSearchToggle() {
   if (_searchOpen) document.getElementById('chat-search-inp')?.focus();
 }
 function chatPickImage() { document.getElementById('chat-file')?.click(); }
+function chatRollHint() { const el = _composerEl(); if (!el) return; el.focus(); _insertText('/roll 1d20'); }
 function chatScrollBottom() {
   const list = document.getElementById('chat-msgs'); if (list) list.scrollTop = list.scrollHeight;
   _hideNewPill();
@@ -1128,6 +1227,28 @@ function chatLoadMore() {
   if (_openId === ADV) { _advLimit += HISTORY; _subscribeAdv(); }
   else if (_openId) { _convoLimit += HISTORY; _subscribeConvo(_openId); }
 }
+// Clic sur une citation → défile jusqu'au message d'origine + flash.
+function chatJumpTo(btn) {
+  const id = btn?.dataset?.msg; if (!id) return;
+  let el = null;
+  try { el = document.querySelector(`.chat-msg[data-mid="${CSS.escape(id)}"]`); } catch { el = null; }
+  if (!el) { showNotif('Message trop ancien — charge plus haut.', 'info'); return; }
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  el.classList.remove('chat-msg--flash'); void el.offsetWidth; el.classList.add('chat-msg--flash');
+  setTimeout(() => el.classList.remove('chat-msg--flash'), 1600);
+}
+
+// ── Brouillon par conversation (localStorage) ────────────────────────────────
+function _draftKey() { return `chat-draft-${_adv()}-${_openId}`; }
+function _saveDraft() {
+  try {
+    if (!_openId || _editingId) return;
+    const t = _composerText();
+    if (t) localStorage.setItem(_draftKey(), t); else localStorage.removeItem(_draftKey());
+  } catch { /* localStorage indispo */ }
+}
+function _restoreDraft() { try { const d = _openId && localStorage.getItem(_draftKey()); if (d) _setComposer(d); } catch {} }
+function _clearDraft() { try { localStorage.removeItem(_draftKey()); } catch {} }
 function chatToggleMute() {
   _muted = !_muted;
   localStorage.setItem('chat-muted', _muted ? '1' : '0');
@@ -1150,8 +1271,10 @@ registerActions({
   chatCancelReply: () => chatCancelReply(),
   chatSearchToggle:() => chatSearchToggle(),
   chatPickImage:   () => chatPickImage(),
+  chatRollHint:    () => chatRollHint(),
   chatScrollBottom:() => chatScrollBottom(),
   chatLoadMore:    () => chatLoadMore(),
+  chatJumpTo:      (btn) => chatJumpTo(btn),
   chatToggleMute:  () => chatToggleMute(),
   chatReact:       (btn) => chatReact(btn),
   chatEditMsg:     (btn) => chatEditMsg(btn),
