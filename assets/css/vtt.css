@@ -2968,8 +2968,8 @@ html:not([data-theme="light"]) .vtt-root {
    On utilise une classe explicite .modal--aopt (posée par JS) plutôt que :has()
    pour garantir l'application dans tous les navigateurs. */
 .modal.modal--aopt {
-  max-width: min(820px, 94vw);
-  width: min(820px, 94vw);
+  max-width: min(900px, 94vw);
+  width: min(900px, 94vw);
   display: flex; flex-direction: column;
   overflow: hidden;
   max-height: min(90vh, 820px);
@@ -3080,9 +3080,12 @@ html:not([data-theme="light"]) .vtt-root {
 }
 .vtt-aopt-modal-hd {
   display: flex; align-items: center; justify-content: space-between;
-  gap: .5rem; padding: .55rem .7rem;
-  background: var(--bg-elevated); border: 1px solid var(--border);
-  border-radius: 8px; font-size: .85rem;
+  gap: .65rem; padding: .65rem .75rem;
+  background:
+    linear-gradient(135deg, rgba(79,140,255,.10), transparent 64%),
+    var(--bg-elevated);
+  border: 1px solid rgba(126,176,255,.18);
+  border-radius: 10px; font-size: .85rem;
 }
 .vtt-aopt-modal-targets {
   display: flex; align-items: center; gap: .5rem;
@@ -3112,11 +3115,11 @@ html:not([data-theme="light"]) .vtt-root {
   flex-shrink: 0;
   background: rgba(255,255,255,.02);
   border: 1px solid var(--border);
-  border-radius: 7px; overflow: hidden;
+  border-radius: 10px; overflow: hidden;
 }
 .vtt-aopt-section-hd {
   display: flex; align-items: center; gap: .45rem;
-  padding: .35rem .65rem;
+  padding: .45rem .7rem;
   background: linear-gradient(90deg, color-mix(in oklab, var(--cat-col) 22%, transparent), transparent);
   border-bottom: 1px solid var(--border);
   border-left: 3px solid var(--cat-col);
@@ -3133,9 +3136,7 @@ html:not([data-theme="light"]) .vtt-root {
 }
 .vtt-aopt-section-body {
   display: grid;
-  /* Panneau latéral : 1 carte pleine largeur par ligne (lisible). La grille
-     multi-colonnes ne sert qu'au tiroir bas mobile (cf. média). */
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 7px;
   padding: 6px;
   align-items: stretch;
@@ -3460,7 +3461,7 @@ html:not([data-theme="light"]) .vtt-root {
 /* Type d'action : chip net sous le nom. */
 .vtt-aopt-hud .cs-spellcard-sub { margin-top: 2px; flex-wrap: wrap; }
 .vtt-aopt-hud .cs-spellcard-act { font-size: .68rem; padding: 2px 7px; }
-.vtt-aopt-hud .vtt-aopt-source {
+.vtt-aopt-source {
   display: inline-flex;
   align-items: center;
   max-width: 100%;
@@ -3472,15 +3473,7 @@ html:not([data-theme="light"]) .vtt-root {
   font-size: .66rem;
   font-weight: 700;
   line-height: 1.2;
-}
-.vtt-aopt-hud .vtt-aopt-source[data-vtt-fn] {
-  cursor: pointer;
-  transition: border-color .15s, background .15s, color .15s;
-}
-.vtt-aopt-hud .vtt-aopt-source[data-vtt-fn]:hover {
-  border-color: rgba(232,184,75,.5);
-  color: #f8d982;
-  background: rgba(232,184,75,.1);
+  pointer-events: none;
 }
 .vtt-aopt-hud .cs-spellcard-pm { font-size: 1rem; }
 /* Pills : largeur bornée par la carte → le texte long passe à la ligne au lieu
@@ -3502,16 +3495,53 @@ html:not([data-theme="light"]) .vtt-root {
 .cs-v3 .vtt-castcard {
   cursor: pointer; text-align: left; font-family: inherit; width: 100%;
   appearance: none; -webkit-appearance: none;
+  overflow: hidden;
+  border-left-width: 4px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--type-col, #b47fff) 10%, transparent), transparent 58%),
+    var(--bg-elevated, rgba(255,255,255,.03));
+}
+.cs-v3 .vtt-castcard .cs-spellcard-head {
+  align-items: flex-start;
+  gap: 9px;
 }
 .cs-v3 .vtt-castcard:hover {
   border-color: color-mix(in srgb, var(--type-col, var(--gold)) 60%, var(--border));
-  box-shadow: 0 3px 16px -8px var(--type-col, transparent);
-  transform: translateX(1px);
+  box-shadow: 0 10px 24px -18px var(--type-col, transparent), 0 8px 24px -18px rgba(0,0,0,.75);
+  transform: translateY(-1px);
 }
-.cs-v3 .vtt-castcard:active { transform: translateX(1px) translateY(1px); }
-.cs-v3 .vtt-castcard.is-oor { opacity: .5; }
+.cs-v3 .vtt-castcard:active { transform: translateY(0); }
+.cs-v3 .vtt-castcard.is-oor {
+  opacity: .55;
+  cursor: not-allowed;
+  filter: saturate(.75);
+}
+.cs-v3 .vtt-castcard.is-oor .vtt-castcard-cta {
+  color: #fca5a5;
+  border-color: rgba(248,113,113,.35);
+  background: rgba(248,113,113,.10);
+}
 /* Le badge PM (réutilisé) se cale à droite de l'en-tête de carte */
 .cs-v3 .vtt-castcard .vtt-aopt-pm { margin-left: auto; align-self: flex-start; }
+.vtt-castcard-cta {
+  flex-shrink: 0;
+  align-self: flex-start;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--type-col, #b47fff) 36%, transparent);
+  background: color-mix(in srgb, var(--type-col, #b47fff) 12%, transparent);
+  color: color-mix(in srgb, var(--type-col, #b47fff) 78%, var(--text));
+  font-size: .62rem;
+  font-weight: 900;
+  letter-spacing: .03em;
+  white-space: nowrap;
+}
+.cs-v3 .vtt-castcard.is-ready:hover .vtt-castcard-cta,
+.cs-v3 .vtt-castcard.is-aim:hover .vtt-castcard-cta {
+  background: color-mix(in srgb, var(--type-col, #b47fff) 20%, transparent);
+  border-color: color-mix(in srgb, var(--type-col, #b47fff) 52%, transparent);
+  color: var(--text);
+}
 /* Chips d'effet « pleins » comme sur la fiche (cs-sort-sstat) plutôt qu'en contour */
 .cs-v3 .vtt-castcard .vtt-aopt-pill {
   font-weight: 700;
@@ -7869,7 +7899,8 @@ html:not([data-theme="light"]) .vtt-root {
   top: 14px;
   right: 14px;
   bottom: 14px;
-  width: min(388px, 42vw);
+  width: clamp(410px, 34vw, 540px);
+  max-width: calc(100% - 28px);
   padding: .7rem;
   border-radius: 16px;
   border-color: rgba(126,176,255,.22);
@@ -7881,18 +7912,68 @@ html:not([data-theme="light"]) .vtt-root {
 }
 
 .vtt-aopt-hud {
-  gap: .42rem;
+  gap: .5rem;
 }
 
 .vtt-aopt-hud .vtt-aopt-tabs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
   padding: 3px;
   border: 1px solid var(--vtt-stroke);
   border-radius: 12px;
   background: rgba(0,0,0,.2);
+  overflow: visible;
 }
 
 .vtt-aopt-hud .vtt-aopt-tab {
+  justify-content: center;
+  min-width: 0;
   border-radius: 9px;
+}
+
+.vtt-aopt-hud .vtt-aopt-tab-lbl {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vtt-aopt-hud .vtt-aopt-modal-hd {
+  padding: .46rem 3.65rem .46rem .6rem;
+  border-radius: 12px;
+}
+
+.vtt-aopt-hud .vtt-aopt-search {
+  padding: .32rem .5rem;
+  border-radius: 11px;
+}
+
+.vtt-aopt-hud .vtt-aopt-list {
+  gap: .55rem;
+}
+
+.vtt-aopt-hud .vtt-aopt-section {
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.015));
+}
+
+.vtt-aopt-hud .vtt-aopt-section-hd {
+  padding: .38rem .55rem;
+}
+
+.vtt-aopt-hud .vtt-aopt-section-title {
+  font-size: .76rem;
+}
+
+.vtt-aopt-hud .vtt-aopt-section-count {
+  margin-left: auto;
+  font-size: .66rem;
+}
+
+.vtt-aopt-hud .vtt-aopt-section-body {
+  grid-template-columns: repeat(auto-fit, minmax(162px, 1fr));
+  gap: 7px;
+  padding: 7px;
 }
 
 .vtt-aopt,
@@ -7902,6 +7983,86 @@ html:not([data-theme="light"]) .vtt-root {
   border-color: var(--vtt-stroke);
   background:
     linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.025));
+}
+
+.vtt-aopt-hud .vtt-castcard {
+  min-height: 112px;
+  padding: 9px;
+  gap: 5px;
+}
+
+.vtt-aopt-hud .vtt-castcard .cs-spellcard-head {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 7px;
+  padding-right: 26px;
+}
+
+.vtt-aopt-hud .vtt-castcard .cs-spellcard-icon {
+  width: 28px;
+  height: 28px;
+  font-size: 1rem;
+  border-radius: 8px;
+}
+
+.vtt-aopt-hud .vtt-castcard .cs-spellcard-name {
+  font-size: .8rem;
+  line-height: 1.18;
+  -webkit-line-clamp: 2;
+}
+
+.vtt-aopt-hud .vtt-castcard .cs-spellcard-sub {
+  gap: 3px;
+}
+
+.vtt-aopt-hud .vtt-castcard .cs-spellcard-act,
+.vtt-aopt-hud .vtt-castcard .vtt-aopt-source {
+  font-size: .58rem;
+  padding: 1px 5px;
+}
+
+.vtt-aopt-hud .vtt-castcard .vtt-aopt-pm {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin: 0;
+  font-size: .72rem;
+  padding: 2px 7px;
+}
+
+.vtt-aopt-hud .vtt-castcard .vtt-castcard-cta {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  font-size: 0;
+}
+
+.vtt-aopt-hud .vtt-castcard .vtt-castcard-cta::before {
+  content: '▶';
+  font-size: .66rem;
+  line-height: 1;
+}
+
+.vtt-aopt-hud .vtt-castcard.is-aim .vtt-castcard-cta::before { content: '🎯'; }
+.vtt-aopt-hud .vtt-castcard.is-oor .vtt-castcard-cta::before { content: '×'; }
+
+.vtt-aopt-hud .vtt-castcard .cs-spellcard-tags {
+  gap: 3px;
+  margin-top: auto;
+}
+
+.vtt-aopt-hud .vtt-castcard .vtt-aopt-pill {
+  font-size: .62rem;
+  line-height: 1.15;
+  padding: 1px 5px;
+}
+
+.vtt-aopt-hud .vtt-castcard .cs-spellcard-tags .vtt-aopt-pill:nth-child(n+4) {
+  display: none;
 }
 
 .vtt-aopt:hover,
