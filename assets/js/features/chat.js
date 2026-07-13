@@ -48,6 +48,7 @@ let _uid = null, _open = false, _view = 'list';   // 'list' | 'convo' | 'new' | 
 let _openId = null;                                // conv ouverte (ADV | convoId)
 let _editingId = null;                             // message en cours d'édition (id) | null
 let _replyTo = null;                               // message cité { id, senderName, text } | null
+let _mentionQ = null, _mentionOutside = null;      // autocomplétion @pseudo
 let _searchOpen = false, _searchQ = '';            // recherche dans la conv ouverte
 let _muted = false, _audioCtx = null, _soundReady = false;   // notif sonore (pas de bip au 1er rendu)
 let _chatEmotes = [];                              // émotes custom :nom: (world/vtt_emotes)
@@ -127,8 +128,30 @@ export function teardownChat() {
 function _notify() {
   const n = _totalUnread();
   if (_baseTitle) document.title = n > 0 ? `(${n}) ${_baseTitle}` : _baseTitle;
-  if (n > _prevUnread) { _pulseBubble(); if (_soundReady) _beep(); }
+  if (n > _prevUnread) { _pulseBubble(); if (_soundReady) { _beep(); _desktopNotify(); } }
   _prevUnread = n; _soundReady = true;   // les non-lus déjà là au chargement ne sonnent pas
+}
+// Aperçu du message non-lu le plus récent (pour la notif desktop).
+function _lastPreview() {
+  let best = null, bestAt = 0;
+  const a = _advMsgs[_advMsgs.length - 1];
+  if (a && a.senderId !== _uid) { best = `${a.senderName || ''}: ${a.text || '📷'}`; bestAt = _atMillis(a); }
+  for (const g of _groups) {
+    const at = _lastMillis(g);
+    if (g.lastSenderId && g.lastSenderId !== _uid && at > bestAt) { best = `${g.lastSenderName || ''}: ${g.lastText || ''}`; bestAt = at; }
+  }
+  return best;
+}
+function _maybeRequestNotifPerm() {
+  try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {}
+}
+// Popup navigateur : seulement onglet caché + permission accordée + son non coupé.
+function _desktopNotify() {
+  try {
+    if (_muted || !document.hidden || !('Notification' in window) || Notification.permission !== 'granted') return;
+    const n = new Notification('Le Grand JDR — messagerie', { body: _lastPreview() || 'Nouveau message', tag: 'grandjdr-chat' });
+    n.onclick = () => { try { window.focus(); } catch {} n.close(); };
+  } catch { /* best-effort */ }
 }
 // Bip court (WebAudio, sans asset). Coupé si mute ; best-effort (autoplay).
 function _beep() {
@@ -258,8 +281,15 @@ function _renderConvo() {
   el.querySelector('#chat-search-inp')?.addEventListener('input', (e) => { _searchQ = e.target.value; _renderMessages(); });
   el.querySelector('#chat-file')?.addEventListener('change', (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) _sendImage(f); });
   const ce = el.querySelector('#chat-input');
-  ce?.addEventListener('input', _signalTyping);
-  ce?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _send(); } });
+  ce?.addEventListener('input', _onComposerInput);
+  ce?.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('chat-mention-menu')) { _closeMentionMenu(); return; }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const first = document.querySelector('#chat-mention-menu [data-uid]');
+      if (first) first.click(); else _send();   // menu mention ouvert → sélectionne, sinon envoie
+    }
+  });
   el.querySelector('#chat-msgs')?.addEventListener('scroll', (e) => {
     const l = e.target;
     if (l.scrollHeight - l.scrollTop - l.clientHeight < 60) _hideNewPill();
@@ -383,6 +413,11 @@ function _applyChatEmotes(escaped) {
   }
   return escaped;
 }
+// Mentions @[uid] → @pseudo surligné (la mienne en évidence).
+function _applyMentions(escaped) {
+  return escaped.replace(/@\[([\w-]+)\]/g, (_m, uid) =>
+    `<span class="chat-mention${uid === _uid ? ' chat-mention--me' : ''}">@${_esc(_nameOf(uid))}</span>`);
+}
 
 function _msgRow(m) {
   const mine = m.senderId === _uid;
@@ -399,8 +434,9 @@ function _msgRow(m) {
   const quote = m.replyTo
     ? `<span class="chat-msg-quote"><span class="chat-quote-name">${_esc(m.replyTo.senderName || '')}</span><span class="chat-quote-text">${_esc(m.replyTo.text || '📷 Image')}</span></span>` : '';
   const img = m.image ? `<img class="chat-msg-img" src="${_esc(m.image)}" alt="image" loading="lazy">` : '';
-  const txt = m.text ? `<span class="chat-msg-btext">${_applyChatEmotes(_esc(m.text))}</span>` : '';
-  return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}">${av}
+  const txt = m.text ? `<span class="chat-msg-btext">${_applyMentions(_applyChatEmotes(_esc(m.text)))}</span>` : '';
+  const mentionsMe = !mine && _uid && (m.text || '').includes(`@[${_uid}]`);
+  return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}${mentionsMe ? ' chat-msg--mention' : ''}">${av}
     <span class="chat-msg-content">${author}
       <span class="chat-msg-bubble-wrap">
         <span class="chat-msg-bubble${m.image && !m.text ? ' chat-msg-bubble--media' : ''}">${quote}${img}${txt}</span>
@@ -482,7 +518,7 @@ async function _healMembers(members) {
 // ── Actions ───────────────────────────────────────────────────────────────────
 function chatToggle() {
   _open = !_open;
-  if (_open) { _view = 'list'; _renderList(); }
+  if (_open) { _maybeRequestNotifPerm(); _view = 'list'; _renderList(); }
   else { if (_openId) _markRead(_openId); _teardownConvo(); _renderBubble(); }
 }
 function chatBack() { _teardownConvo(); _view = 'list'; _renderList(); }
@@ -513,7 +549,7 @@ function _teardownConvo() {
   clearTimeout(_typingClearTimer); clearTimeout(_typingRenderTimer);
   if (_typingWroteAt) _clearTyping();   // signale qu'on n'écrit plus
   _editingId = null; _replyTo = null; _searchOpen = false; _searchQ = '';   // états liés à la conv
-  _closeEmojiPop();
+  _closeEmojiPop(); _closeMentionMenu();
 }
 
 // ── « écrit… » (typing) — quota strict : 1 doc/joueur, write throttlé à 4 s,
@@ -922,6 +958,7 @@ function _composerText() {
     if (n.nodeType === 3) out += n.nodeValue;
     else if (n.nodeName === 'IMG') out += n.dataset.emote || '';
     else if (n.nodeName === 'BR') out += '\n';
+    else if (n.nodeType === 1 && n.dataset && n.dataset.uid) out += `@[${n.dataset.uid}]`;   // mention
     else walk(n);
   });
   walk(el);
@@ -957,6 +994,66 @@ function chatInsertEmote(btn) {
   img.className = 'chat-emote-inline'; img.dataset.emote = tag; img.src = em.url; img.alt = tag;
   _insertNodeAtCursor(img);
   _signalTyping();
+}
+
+// ── Autocomplétion @mention ──────────────────────────────────────────────────
+function _mentionQuery() {
+  const el = _composerEl(); if (!el) return null;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  const node = sel.anchorNode;
+  if (!node || node.nodeType !== 3 || !el.contains(node)) return null;
+  const before = node.nodeValue.slice(0, sel.anchorOffset);
+  const m = before.match(/(?:^|\s)@([\p{L}0-9_]{0,20})$/u);
+  if (!m) return null;
+  return { q: m[1], node, from: sel.anchorOffset - m[1].length - 1, to: sel.anchorOffset };
+}
+function _closeMentionMenu() {
+  document.getElementById('chat-mention-menu')?.remove();
+  _mentionQ = null;
+  if (_mentionOutside) { document.removeEventListener('mousedown', _mentionOutside, true); _mentionOutside = null; }
+}
+function _renderMentionMenu(mq) {
+  const ql = mq.q.toLowerCase();
+  const members = _advMembers().map(u => ({ u, name: _nameOf(u) }))
+    .filter(x => !ql || x.name.toLowerCase().includes(ql)).slice(0, 6);
+  _closeMentionMenu();
+  if (!members.length) return;
+  _mentionQ = mq;
+  const el = _composerEl(); if (!el) return;
+  const pop = document.createElement('div');
+  pop.id = 'chat-mention-menu'; pop.className = 'chat-mention-menu';
+  pop.innerHTML = members.map(x =>
+    `<button type="button" class="chat-mention-item" data-action="chatPickMention" data-uid="${_esc(x.u)}">
+       <img class="chat-member-av" src="${_esc(avatarSrcOf(_profileOf(x.u)))}" alt="">
+       <span class="chat-member-name">${_esc(x.name)}</span>
+     </button>`).join('');
+  document.body.appendChild(pop);
+  const r = el.getBoundingClientRect();
+  const w = pop.offsetWidth || 220, h = pop.offsetHeight || 40;
+  pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
+  pop.style.top = `${Math.max(8, r.top - h - 6)}px`;
+  _mentionOutside = (e) => { if (!pop.contains(e.target) && !el.contains(e.target)) _closeMentionMenu(); };
+  requestAnimationFrame(() => document.addEventListener('mousedown', _mentionOutside, true));
+}
+function chatPickMention(btn) {
+  const uid = btn?.dataset?.uid, mq = _mentionQ; if (!uid || !mq) return;
+  const range = document.createRange();
+  try { range.setStart(mq.node, mq.from); range.setEnd(mq.node, mq.to); } catch { _closeMentionMenu(); return; }
+  range.deleteContents();
+  const span = document.createElement('span');
+  span.className = 'chat-mention'; span.contentEditable = 'false'; span.dataset.uid = uid; span.textContent = '@' + _nameOf(uid);
+  range.insertNode(span);
+  const sp = document.createTextNode(' '); span.after(sp);
+  const sel = window.getSelection(); const r2 = document.createRange();
+  r2.setStartAfter(sp); r2.collapse(true); sel.removeAllRanges(); sel.addRange(r2);
+  _closeMentionMenu();
+  _composerEl()?.focus();
+}
+function _onComposerInput() {
+  _signalTyping();
+  const mq = _mentionQuery();
+  if (mq) _renderMentionMenu(mq); else _closeMentionMenu();
 }
 
 // ── Répondre / citer ─────────────────────────────────────────────────────────
@@ -1011,6 +1108,7 @@ registerActions({
   chatEmojiToggle: () => chatEmojiToggle(),
   chatInsertEmoji: (btn) => chatInsertEmoji(btn),
   chatInsertEmote: (btn) => chatInsertEmote(btn),
+  chatPickMention: (btn) => chatPickMention(btn),
   chatReplyMsg:    (btn) => chatReplyMsg(btn),
   chatCancelReply: () => chatCancelReply(),
   chatSearchToggle:() => chatSearchToggle(),
