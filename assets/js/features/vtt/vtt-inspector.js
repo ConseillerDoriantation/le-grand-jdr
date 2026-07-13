@@ -13,6 +13,7 @@ import { computeEquipSkillBonus, statShort, calcCA } from '../../shared/char-sta
 import { normalizeCharacterBuilds } from '../../shared/character-builds.js';
 import { hpColor, TYPE_COLOR, _STAT_COLOR, _STAT_KEY, _MS_BONUS_BUFF, _VTT_RUNE_META } from './vtt-constants.js';
 import { DAMAGE_INTERACTIONS } from '../../shared/damage-profile.js';
+import { getDamageTypeById } from '../../shared/damage-types.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
 import { _live } from './vtt-effective.js';
 import { _vttPanelError } from './vtt-utils.js';
@@ -271,7 +272,13 @@ export function _renderInspectorImpl(t) {
 
         const _affHtml = ((arr, label, color) => {
           if (!Array.isArray(arr) || !arr.length) return '';
-          return `<div class="vtt-creat-aff"><span class="vtt-creat-aff-lbl" style="color:${color}">${label}</span> ${arr.map(x => _esc(typeof x === 'object' ? (x.nom || x.type || '?') : x)).join(', ')}</div>`;
+          // Résout un id de type de dégâts (natif « lumiere » ou custom « dt_… ») en libellé.
+          const _lbl = (x) => {
+            if (x && typeof x === 'object') return _esc(x.nom || x.label || x.type || '?');
+            const dt = getDamageTypeById(VS.damageTypes, x);
+            return dt ? `${dt.icon ? dt.icon + ' ' : ''}${_esc(dt.label)}` : _esc(String(x));
+          };
+          return `<div class="vtt-creat-aff"><span class="vtt-creat-aff-lbl" style="color:${color}">${label}</span> ${arr.map(_lbl).join(', ')}</div>`;
         });
 
         const realCaBuffed = (typeof calcCA === 'function' && ld.displayDefense !== undefined) ? ld.displayDefense : (beast.ca ?? 0);
@@ -289,6 +296,7 @@ export function _renderInspectorImpl(t) {
               <span class="vtt-creat-vital">🏃 Vit. <b>${beast.vitesse ?? '?'}</b></span>
               ${beast.initiative ? `<span class="vtt-creat-vital">⚡ Init. <b>${beast.initiative}</b></span>` : ''}
               ${beast.niveau ? `<span class="vtt-creat-vital">📊 Nv. <b>${beast.niveau}</b></span>` : ''}
+              ${beast.dangerositeXp ? `<span class="vtt-creat-vital">✨ XP <b>${beast.dangerositeXp}</b></span>` : ''}
             </div>
             ${_stats6 ? `<div class="vtt-creat-stats6">${_stats6}</div>` : ''}
             ${_affHtml(beast.faiblesses,  'Faiblesses',   '#f87171')}

@@ -64,7 +64,7 @@ import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
   _scaledEnchantConditionFields, _vttPrimaryWeapon, _conditionCritRangeBonusOf,
 } from './vtt-effective.js';
-import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js?v=20260713-build-switch';
+import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js?v=20260713-creature-info';
 import {
   _renderLibSection, _resetMapLib, _libFolder, _vttLibToggle, _vttLibOpenFolder, _vttLibNewFolder,
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,
@@ -4069,11 +4069,12 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       if (src.characterId) return { label: '⚔ Arme équipée', args: `char|${src.characterId}|combat`, title: 'Ouvrir le combat du personnage' };
       return { label: '⚔ Action', args: '', title: 'Action' };
     })();
-    const sourceArgs = STATE.isAdmin ? source?.args : '';
-    const sourceAttrs = sourceArgs
-      ? ` data-vtt-fn="_vttOpenSource" data-vtt-args="${_esc(sourceArgs)}" title="${_esc(source.title)}"`
-      : ` title="${_esc(source?.title || '')}"`;
-    const sourceChip = source?.label ? `<span class="vtt-aopt-source"${sourceAttrs}>${_esc(source.label)}</span>` : '';
+    // IMPORTANT : la carte entière est le bouton de lancement. Garder un
+    // data-vtt-fn imbriqué ici rendait la puce "Bestiaire" prioritaire au clic
+    // (dispatcher en capture), ce qui envoyait le MJ sur la page Bestiaire.
+    const sourceChip = source?.label
+      ? `<span class="vtt-aopt-source" title="${_esc(source?.title || 'Source')}">${_esc(source.label)}</span>`
+      : '';
 
     // ── Coût en PM : badge dédié à DROITE du titre (pas en pill) ──────
     let pmBadge = '';
@@ -4116,10 +4117,19 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
     // Runes du sort (chips lecture seule) — comme sur la carte de la fiche perso.
     const runeChipsHtml = _vttSpellRuneChips(o, srcChar);
 
+    const cardKind = o._itemAction ? 'is-item'
+      : o.sortIdx !== undefined ? 'is-spell'
+      : o.isDeplacement ? 'is-move'
+      : 'is-weapon';
+    const cardState = noTgt ? 'is-aim' : canHit ? 'is-ready' : 'is-oor';
+    const cardHint = noTgt ? 'Choisir puis viser'
+      : canHit ? 'Lancer'
+      : 'Hors portée';
+
     // Carte d'action — présentation identique aux cartes de sort de la fiche perso
     // (.cs-spellcard, scope .cs-v3), cliquable pour lancer.
     return `
-      <button class="cs-spellcard vtt-castcard ${canHit?'':'is-oor'}" style="--type-col:${accentCol}" data-vtt-fn="${noTgt?'_vttAimOpt':'_vttPickOpt'}" data-vtt-args="${noTgt?`${srcId}|${i}`:`${srcId}|${tgtId}|${i}`}">
+      <button type="button" class="cs-spellcard vtt-castcard ${cardKind} ${cardState}" style="--type-col:${accentCol}" data-vtt-fn="${noTgt?'_vttAimOpt':'_vttPickOpt'}" data-vtt-args="${noTgt?`${srcId}|${i}`:`${srcId}|${tgtId}|${i}`}">
         <header class="cs-spellcard-head">
           <span class="cs-spellcard-icon">${o.icon}</span>
           <div class="cs-spellcard-id">
@@ -4127,6 +4137,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
             <div class="cs-spellcard-sub">${actChip}${sourceChip}${elemPastille}${stack}</div>
           </div>
           ${pmBadge}
+          <span class="vtt-castcard-cta">${cardHint}</span>
         </header>
         ${pills.length ? `<div class="cs-spellcard-tags">${pills.join('')}</div>` : ''}
         ${runeChipsHtml}
@@ -4199,10 +4210,11 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   if (canEditSrc && (!only || only === 'basic')) {
     // Carte d'action de base — même présentation (.cs-spellcard) que les sorts.
     const _basicCard = (icon, name, desc, col, fn, args) => `
-        <button class="cs-spellcard vtt-castcard" style="--type-col:${col}" data-name="${_norm(name).replace(/"/g,'')}" data-vtt-fn="${fn}" data-vtt-args="${args}">
+        <button type="button" class="cs-spellcard vtt-castcard is-basic is-ready" style="--type-col:${col}" data-name="${_norm(name).replace(/"/g,'')}" data-vtt-fn="${fn}" data-vtt-args="${args}">
           <header class="cs-spellcard-head">
             <span class="cs-spellcard-icon">${icon}</span>
             <div class="cs-spellcard-id"><div class="cs-spellcard-name" title="${name}">${name}</div></div>
+            <span class="vtt-castcard-cta">Faire</span>
           </header>
           <div class="cs-spellcard-tags"><span class="vtt-aopt-pill" style="color:${col};border-color:${col}66">${desc}</span></div>
         </button>`;
