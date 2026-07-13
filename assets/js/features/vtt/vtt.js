@@ -2035,6 +2035,17 @@ export function _rollDiceDetailed(formula) {
   return { rolls, mod: p.mod, total, n: p.n, sides: p.sides, formula: String(formula) };
 }
 
+function _diceLogFields(prefix, det) {
+  if (!det || !Array.isArray(det.rolls) || !det.rolls.length) return {};
+  return {
+    [`${prefix}Rolls`]: det.rolls,
+    [`${prefix}Sides`]: det.sides || 0,
+    [`${prefix}Mod`]: det.mod || 0,
+    [`${prefix}Count`]: det.n || det.rolls.length,
+    [`${prefix}FormulaDetail`]: det.formula || '',
+  };
+}
+
 // [_maxDice / _maxEffectDisplay / _effectDisplay → vtt-spell-display.js (importés en haut)]
 
 function _optionFixedBonus(opt) {
@@ -6079,6 +6090,9 @@ async function _vttRollAttack() {
       // Crit : max(dés) + 1 roll supplémentaire + 2× les bonus fixes
       // Si opt.mjAlwaysMax (flag MJ) : remplace le jet par la valeur max systématique
       let healRaw, healTotal;
+      let healRollsDetail = null;
+      let healCritRollsDetail = null;
+      let healCritNormalMax = 0;
       if (opt.mjAlwaysMax) {
         // Valeur max garantie (potion 1d6+4 → toujours 10, etc.)
         const maxDice = _maxDice(effectiveDice);
@@ -6086,13 +6100,24 @@ async function _vttRollAttack() {
         healTotal = Math.max(1, maxDice + healFixed);
       } else if (hIsCrit) {
         const maxDice = _maxDice(effectiveDice);
+        healCritNormalMax = maxDice + healFixed;
         // Rune Chance (opt.mods.chance) → double max : la 2e partie est aussi maximisée
         // (max + max) au lieu de max + relance. Le buff Chanceux ne passe pas par ce mod.
-        const critRoll = opt.mods?.chance ? maxDice : _rollDice(effectiveDice);
+        const critDet = opt.mods?.chance ? null : _rollDiceDetailed(effectiveDice);
+        const critRoll = opt.mods?.chance ? maxDice : critDet.total;
+        healCritRollsDetail = critDet ? {
+          rolls: critDet.rolls, sides: critDet.sides, mod: critDet.mod,
+          n: critDet.n, formula: critDet.formula,
+        } : null;
         healRaw   = critRoll;          // pour le log (le "raw" est le 2e jet)
         healTotal = Math.max(1, maxDice + critRoll + 2 * healFixed);
       } else {
-        healRaw   = _rollDice(effectiveDice);
+        const det = _rollDiceDetailed(effectiveDice);
+        healRaw   = det.total;
+        healRollsDetail = {
+          rolls: det.rolls, sides: det.sides, mod: det.mod,
+          n: det.n, formula: det.formula,
+        };
         healTotal = Math.max(1, healRaw + healFixed);
       }
 
@@ -6152,6 +6177,11 @@ async function _vttRollAttack() {
           dmgEffectiveDice: bonusDmgDice ? effectiveDice : null,
           dmgMaitriseBonus: opt.maitriseBonus??0,
           dmgRaw: healRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
+          dmgRollsDetail: healRollsDetail || null,
+          critRollsDetail: healCritRollsDetail || null,
+          ..._diceLogFields('dmg', healRollsDetail),
+          ..._diceLogFields('crit', healCritRollsDetail),
+          critNormalMax: healCritNormalMax || 0,
           targets: healResults.map(r => ({ ...r, hit: true, halfDmg: false, dmgTotal: healTotal, targetCA: HEAL_DD })),
           createdAt: serverTimestamp(),
         }).catch(()=>{});
@@ -6178,6 +6208,11 @@ async function _vttRollAttack() {
             dmgEffectiveDice: bonusDmgDice ? effectiveDice : null,
             dmgMaitriseBonus: opt.maitriseBonus??0,
             dmgRaw: healRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
+            dmgRollsDetail: healRollsDetail || null,
+            critRollsDetail: healCritRollsDetail || null,
+            ..._diceLogFields('dmg', healRollsDetail),
+            ..._diceLogFields('crit', healCritRollsDetail),
+            critNormalMax: healCritNormalMax || 0,
             dmgTotal: healTotal, newHp: r.newHp, hpMax: r.hpMax,
             createdAt: serverTimestamp(),
           }).catch(()=>{});
@@ -6294,7 +6329,10 @@ async function _vttRollAttack() {
         } else {
           const critDet = _rollDiceDetailed(effectiveDice);
           sharedCritRaw2      = critDet.total;
-          sharedCritRollsDetail = { rolls: critDet.rolls, sides: critDet.sides, mod: critDet.mod };
+          sharedCritRollsDetail = {
+            rolls: critDet.rolls, sides: critDet.sides, mod: critDet.mod,
+            n: critDet.n, formula: critDet.formula,
+          };
         }
         sharedCritFixed2    = totalFixed;
         sharedDmgRaw        = sharedCritRaw2;
@@ -6302,7 +6340,10 @@ async function _vttRollAttack() {
       } else {
         const det = _rollDiceDetailed(effectiveDice);
         sharedDmgRaw      = det.total;
-        sharedDmgRollsDetail = { rolls: det.rolls, sides: det.sides, mod: det.mod };
+        sharedDmgRollsDetail = {
+          rolls: det.rolls, sides: det.sides, mod: det.mod,
+          n: det.n, formula: det.formula,
+        };
         sharedDmgTotalHit = Math.max(1, sharedDmgRaw + totalFixed);
       }
       if (missEffect === 'half')  sharedDmgTotalHalf = Math.max(1, Math.floor(sharedDmgTotalHit / 2));
@@ -6380,14 +6421,25 @@ async function _vttRollAttack() {
       // ── Bonus de dégâts subis depuis les états actifs de la cible (Marqué, etc.) ──
       // Roule la formule (ex: "1d6") par état. Appliqué sur hit ET demi-dégâts.
       const _condDmgNotes = [];
+      const _condDmgDetails = [];
       if ((hit || halfDmg) && dmgTotal > 0) {
         for (const { lib } of _activeConditionsOf(curTgtData)) {
           const f = lib?.effects?.dmgTakenBonus;
           if (!f) continue;
-          const b = _rollDice(String(f));
-          if (b > 0) {
-            dmgTotal += b;
-            _condDmgNotes.push(`+${b} ${lib.icon || ''} ${lib.label}`);
+          const det = _rollDiceDetailed(String(f));
+          if (det.total > 0) {
+            dmgTotal += det.total;
+            _condDmgNotes.push(`+${det.total} ${lib.icon || ''} ${lib.label}`);
+            _condDmgDetails.push({
+              type: 'taken_bonus',
+              formula: String(f),
+              icon: lib.icon || '💢',
+              label: lib.label || 'État',
+              rolls: det.rolls || [],
+              sides: det.sides || null,
+              mod: det.mod || 0,
+              total: det.total,
+            });
           }
         }
       }
@@ -6405,6 +6457,15 @@ async function _vttRollAttack() {
           dmgTotal = bestPct >= 100 ? 0 : Math.max(0, Math.floor(dmgTotal * (1 - bestPct / 100)));
           if (bestLib) {
             _condDmgNotes.push(`−${before - dmgTotal} ${bestLib.icon || '🛡'} ${bestLib.label} (${bestPct}%)`);
+            _condDmgDetails.push({
+              type: 'reduction_pct',
+              icon: bestLib.icon || '🛡',
+              label: bestLib.label || 'Réduction',
+              pct: bestPct,
+              before,
+              total: before - dmgTotal,
+              after: dmgTotal,
+            });
           }
         }
       }
@@ -6497,7 +6558,7 @@ async function _vttRollAttack() {
         dmgTotal, dmgPre, dmgReduction, newHp, hpMax, interaction,
         tokenId: curTgtData.id,   // pour l'annulation manuelle (bouclier réactif)
         shieldBlocked: isBlocked,
-        condDmgNotes: _condDmgNotes, consumedNotes: _consumedNotes,
+        condDmgNotes: _condDmgNotes, condDmgDetails: _condDmgDetails, consumedNotes: _consumedNotes,
         // Métadonnées pour le rendu côté joueur (estimation CA, portrait)
         beastId: curTgtData.beastId || null,
         npcId:   curTgtData.npcId   || null,
@@ -6664,6 +6725,8 @@ async function _vttRollAttack() {
         buffDmgDetail: buffDmgDetail || null,
         dmgRollsDetail: sharedDmgRollsDetail || null,
         critRollsDetail: sharedCritRollsDetail || null,
+        ..._diceLogFields('dmg', sharedDmgRollsDetail),
+        ..._diceLogFields('crit', sharedCritRollsDetail),
         targets: cleanResults,
         createdAt: serverTimestamp(),
       }).catch(()=>{});
@@ -6711,8 +6774,13 @@ async function _vttRollAttack() {
         buffDmgBonus: buffDmgBonus || 0,
         buffDmgNotes: buffDmgNotes.length ? buffDmgNotes : null,
         buffDmgDetail: buffDmgDetail || null,
+        condDmgNotes: r.condDmgNotes?.length ? r.condDmgNotes : null,
+        condDmgDetails: r.condDmgDetails?.length ? r.condDmgDetails : null,
+        consumedNotes: r.consumedNotes?.length ? r.consumedNotes : null,
         dmgRollsDetail: sharedDmgRollsDetail || null,
         critRollsDetail: sharedCritRollsDetail || null,
+        ..._diceLogFields('dmg', sharedDmgRollsDetail),
+        ..._diceLogFields('crit', sharedCritRollsDetail),
         interaction: r.interaction || null,
         createdAt: serverTimestamp(),
       }).catch(()=>{});

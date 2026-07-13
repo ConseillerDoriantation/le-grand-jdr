@@ -153,30 +153,67 @@ export function _renderChatLogImpl(msgs) {
   // Bouton de toggle détail (avec écouteur attaché plus bas)
   const _toggle = (id) => `<button class="vtt-log-toggle" data-detail="${id}">détail ▾</button>`;
 
-  // Ligne de détail (formule + valeur) — finale = surlignée à la couleur du type
-  const _row = (label, val, { op = '🎲', isFinal = false } = {}) => `
+  const _num = (v, fallback = 0) => Number.isFinite(Number(v)) ? Number(v) : fallback;
+  const _html = v => v == null ? '' : String(v);
+  const _signed = (v) => {
+    const n = _num(v, 0);
+    return n > 0 ? `+${n}` : n < 0 ? `${n}` : '0';
+  };
+  const _diceTotal = (det, fallback = null) => {
+    if (det?.total != null) return _num(det.total, 0);
+    if (Array.isArray(det?.rolls)) return det.rolls.reduce((a, b) => a + _num(b, 0), 0) + _num(det.mod, 0);
+    return fallback == null ? null : _num(fallback, 0);
+  };
+  const _rollChips = (rolls, kept = null) => {
+    if (!Array.isArray(rolls) || !rolls.length) return '';
+    return `<span class="vtt-log-dice-rolls">${rolls.map((r, idx) => {
+      const isDropped = kept != null && rolls.length > 1 && r !== kept && idx !== rolls.indexOf(kept);
+      return `<b class="${isDropped ? 'drop' : ''}">${_esc(r)}</b>`;
+    }).join('')}</span>`;
+  };
+  const _formulaLabel = (det, fallback = '') => {
+    if (det?.formula) return _esc(det.formula);
+    if (det?.sides) return `${det.n || det.rolls?.length || 1}d${det.sides}${det.mod ? _signed(det.mod) : ''}`;
+    return _esc(fallback || '');
+  };
+  const _detailFromFlat = (m, prefix, fallbackFormula = '') => {
+    const rolls = Array.isArray(m?.[`${prefix}Rolls`]) ? m[`${prefix}Rolls`].map(v => _num(v, 0)) : [];
+    if (!rolls.length) return null;
+    const mod = _num(m?.[`${prefix}Mod`], 0);
+    return {
+      rolls,
+      mod,
+      n: _num(m?.[`${prefix}Count`], rolls.length) || rolls.length,
+      sides: _num(m?.[`${prefix}Sides`], 0),
+      formula: m?.[`${prefix}FormulaDetail`] || fallbackFormula || '',
+      total: rolls.reduce((a, b) => a + b, 0) + mod,
+    };
+  };
+
+  // Ligne de détail (formule + valeur) — finale = surlignée à la couleur du type.
+  // Les anciens logs pouvaient contenir des formules très longues : on laisse le
+  // libellé passer sur plusieurs lignes, et la valeur reste lisible à droite.
+  const _row = (label, val, { op = '🎲', isFinal = false, muted = false } = {}) => `
     <div class="vtt-log-detail-row${isFinal ? ' is-final' : ''}">
-      <span class="vtt-log-detail-label"><span class="op">${op}</span>${label}</span>
+      <span class="vtt-log-detail-label${muted ? ' is-muted' : ''}"><span class="op">${op}</span><span class="vtt-log-detail-main">${label}</span></span>
       <span class="vtt-log-detail-val">${val}</span>
     </div>`;
 
   // Affichage d'un jet de dés : 1d6(4) ou 2d6(3,5) — gras sur les rolls individuels
   const _dice = (det, fallback = '?') => {
     if (det?.rolls?.length) {
-      const rollsTxt = det.rolls.map(r => `<strong>${r}</strong>`).join(',');
       const modPart = det.mod > 0 ? ` +${det.mod}` : det.mod < 0 ? ` ${det.mod}` : '';
-      return `${det.rolls.length}d${det.sides}(${rollsTxt})${modPart}`;
+      return `<span class="vtt-log-dice-expr">${det.rolls.length}d${det.sides}${_rollChips(det.rolls)}${modPart ? `<span class="vtt-log-dice-mod">${modPart}</span>` : ''}</span>`;
     }
-    return String(fallback);
+    return `<span class="vtt-log-dice-expr is-legacy">${_esc(fallback)}<small>détail non enregistré</small></span>`;
   };
 
   // d20 avec adv/dis (dé rejeté barré)
   const _d20 = (kept, allRolls) => {
     if (Array.isArray(allRolls) && allRolls.length > 1) {
-      const dropped = allRolls.find(r => r !== kept) ?? allRolls[1];
-      return `d20[<strong>${kept}</strong>&thinsp;<span style="text-decoration:line-through;color:var(--text-dim);font-weight:400">${dropped}</span>]`;
+      return `<span class="vtt-log-dice-expr">d20${_rollChips(allRolls, kept)}</span>`;
     }
-    return `d20[<strong>${kept ?? '?'}</strong>]`;
+    return `<span class="vtt-log-dice-expr">d20${_rollChips([kept ?? '?'])}</span>`;
   };
 
   // Estimation CA visible par le joueur (pas spoil pour les non-MJ)
@@ -345,43 +382,81 @@ export function _renderChatLogImpl(msgs) {
     if (m.hitToucherSetBonus > 0) touchParts.push(`+${m.hitToucherSetBonus}${sub('Set')}`);
     if (m.hitTouchBuff > 0) touchParts.push(`+${m.hitTouchBuff}${sub('🎯 Ench')}`);
     if (m.hitBonus) touchParts.push(`${sn(m.hitBonus)}${sub('bonus')}`);
-    if (m.extraHitRolls?.length) m.extraHitRolls.forEach(r => touchParts.push(`+d20[${r}]`));
+    if (m.extraHitRolls?.length) m.extraHitRolls.forEach(r => touchParts.push(`+${_d20(r, [r])}`));
     const _caShown = isHeal ? null : _viewCA(m, m.targetCA);
-    rows.push(_row(touchParts.join(' '), `<strong>${m.hitTotal ?? '?'}</strong>${isHeal ? ` vs DD ${m.healDD ?? 2}` : ` vs CA ${_caShown}`}`, { op: '🎯', isFinal: false }));
+    rows.push(_row(touchParts.join(' '), `<strong>${m.hitTotal ?? '?'}</strong>${isHeal ? ` <small>vs DD ${m.healDD ?? 2}</small>` : ` <small>vs CA ${_caShown}</small>`}`, { op: '🎯' }));
 
     // ── DÉGÂTS / SOIN ──
     if (m.hit || m.halfDmg || isHeal) {
-      const baseRoll = _dice(m.dmgRollsDetail, `${_esc(m.dmgEffectiveDice || m.dmgRawDice || m.dmgFormula || '')}(${m.dmgRaw})`);
-      const critRoll = _dice(m.critRollsDetail, baseRoll);
-      const mods = [];
-      if (m.dmgStatMod) mods.push(`${sn(m.dmgStatMod)}${sub(m.dmgStatLabel || '')}`);
-      if (m.dmgMaitriseBonus > 0) mods.push(`+${m.dmgMaitriseBonus}${sub('Maîtrise')}`);
-      if (m.dmgBonus) mods.push(`${sn(m.dmgBonus)}${sub('bonus')}`);
-      if (m.dmgBonusDice) mods.push(`${sn(m.dmgBonusDice)}${sub('dés')}`);
+      const diceFormula = m.dmgEffectiveDice || m.dmgRawDice || m.dmgFormula || 'dés';
+      const baseDetail = m.dmgRollsDetail || _detailFromFlat(m, 'dmg', diceFormula);
+      const critDetail = m.critRollsDetail || _detailFromFlat(m, 'crit', diceFormula);
+      const baseRoll = _dice(baseDetail, `${diceFormula} = ${m.dmgRaw ?? '?'}`);
+      const critRoll = critDetail
+        ? _dice(critDetail, m.critRaw2 ?? m.dmgRaw)
+        : `<span class="vtt-log-dice-expr">max</span>`;
+      const baseRaw = _diceTotal(baseDetail, m.dmgRaw);
+      const critRaw = _diceTotal(critDetail, m.critRaw2 ?? m.dmgRaw);
+      const baseLabel = _formulaLabel(baseDetail, diceFormula);
+
+      if (m.isCrit && m.critNormalMax) {
+        rows.push(_row(`Base critique max ${sub(baseLabel)}`, `<strong>${m.critNormalMax}</strong>`, { op: '💥' }));
+        rows.push(_row(`Relance critique ${critRoll}`, `<strong>${critRaw ?? '?'}</strong>`, { op: '🎲' }));
+      } else {
+        rows.push(_row(`Dés de base ${baseRoll}`, `<strong>${baseRaw ?? m.dmgRaw ?? '?'}</strong>`, { op: isHeal ? '💚' : '🎲' }));
+      }
+
+      if (m.dmgStatMod) rows.push(_row(`Modificateur ${sub(m.dmgStatLabel || '')}`, `<strong>${_signed(m.dmgStatMod)}</strong>`, { op: '◇', muted: true }));
+      if (m.dmgMaitriseBonus > 0) rows.push(_row(`Maîtrise`, `<strong>+${m.dmgMaitriseBonus}</strong>`, { op: '✦', muted: true }));
+      if (m.dmgBonus) rows.push(_row(`Bonus contextuel`, `<strong>${_signed(m.dmgBonus)}</strong>`, { op: '＋', muted: true }));
+      if (m.dmgBonusDice) rows.push(_row(`Dés ajoutés à la formule`, `<strong>${_signed(m.dmgBonusDice)}</strong>`, { op: '🎲', muted: true }));
+
       // Bonus enchant détaillé
       if (m.buffDmgDetail) {
         const bd = m.buffDmgDetail;
-        const rollsTxt = bd.rolls?.length ? bd.rolls.map(r=>`<strong>${r}</strong>`).join(',') : '';
-        const modStr = bd.mod > 0 ? ` +${bd.mod}` : bd.mod < 0 ? ` ${bd.mod}` : '';
-        mods.push(`+${bd.rolls?.length ? `${bd.rolls.length}d${bd.sides}(${rollsTxt})${modStr}` : bd.total}${sub(bd.sortLabel || 'Enchant')}`);
+        rows.push(_row(`${_esc(bd.sortLabel || 'Enchantement')} ${_dice(bd, bd.formula || bd.total)}`, `<strong>+${bd.total}</strong>`, { op: '✨' }));
       } else if (m.buffDmgBonus) {
-        mods.push(`+${m.buffDmgBonus}${sub('Enchant')}`);
+        rows.push(_row(`Enchantement`, `<strong>+${m.buffDmgBonus}</strong>`, { op: '✨' }));
       }
-      const formula = m.isCrit && m.critNormalMax
-        ? `max(${m.critNormalMax}) + ${critRoll} ${mods.join(' ')}`
-        : `${baseRoll} ${mods.join(' ')}`;
 
-      // Si tout droit : valeur finale = dmgFull
-      const fullVal = m.dmgFull ?? m.dmgTotal;
+      const targetCondRows = [];
+      const addCondRows = (details, targetName = '') => {
+        if (!Array.isArray(details)) return;
+        for (const d of details) {
+          const suffix = targetName ? ` ${sub(targetName)}` : '';
+          if (d.type === 'taken_bonus') {
+            targetCondRows.push(_row(`${_esc(d.icon || '💢')} ${_esc(d.label || 'État')}${suffix} ${_dice(d, d.formula || d.total)}`, `<strong>+${d.total}</strong>`, { op: '💢' }));
+          } else if (d.type === 'reduction_pct') {
+            targetCondRows.push(_row(`${_esc(d.icon || '🛡')} ${_esc(d.label || 'Réduction')}${suffix} <small>${d.pct || 0}% · ${d.before} → ${d.after}</small>`, `<strong>−${d.total}</strong>`, { op: '🛡' }));
+          }
+        }
+      };
+      addCondRows(m.condDmgDetails);
+      if (!m.condDmgDetails?.length && Array.isArray(m.condDmgNotes)) {
+        for (const n of m.condDmgNotes) targetCondRows.push(_row(_esc(n), '', { op: '💢', muted: true }));
+      }
+      if (Array.isArray(m.targets)) {
+        for (const t of m.targets) addCondRows(t.condDmgDetails, t.name);
+      }
+      rows.push(...targetCondRows);
+      const consumedNotes = [
+        ...(Array.isArray(m.consumedNotes) ? m.consumedNotes : []),
+        ...(Array.isArray(m.targets) ? m.targets.flatMap(t => (t.consumedNotes || []).map(n => `${n} (${t.name})`)) : []),
+      ];
+      consumedNotes.forEach(n => rows.push(_row(_esc(n), '', { op: '⌁', muted: true })));
+
+      // Si tout droit : valeur finale = dmgPre (après bonus/réductions d'états de
+      // la cible), sinon dmgFull partagé ou total final pour les anciens logs.
+      const fullVal = m.dmgPre ?? m.dmgFull ?? m.dmgTotal;
       const halfVal = m.halfDmg ? Math.max(1, Math.floor(fullVal / 2)) : null;
       const hasReduction = m.dmgReduction > 0;
       const hasInter = m.interaction && m.dmgTotal !== (halfVal ?? fullVal);
 
       const isFinalBrut = !halfVal && !hasInter && !hasReduction;
-      rows.push(_row(formula, `<strong>${fullVal}</strong>`, { op: isHeal ? '💚' : '⚔️', isFinal: isFinalBrut }));
+      rows.push(_row(isHeal ? 'Soin total' : 'Dégâts avant mitigation', `<strong>${fullVal}</strong>`, { op: isHeal ? '💚' : '⚔️', isFinal: isFinalBrut }));
 
       if (halfVal != null && halfVal !== fullVal) {
-        rows.push(_row(`Échec ½ (sort/arme magique)`, `<strong>${halfVal}</strong>`, { op: '✦', isFinal: !hasInter && !hasReduction }));
+        rows.push(_row(`Échec : demi-effet`, `<strong>${halfVal}</strong>`, { op: '✦', isFinal: !hasInter && !hasReduction }));
       }
       if (hasInter) {
         const im = DAMAGE_INTERACTIONS[m.interaction];
