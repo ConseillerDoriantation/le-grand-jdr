@@ -5,7 +5,7 @@ import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal, pushModal, popModal, closeModalDirect, updateModalContent, confirmModal, setModalCloseGuard, clearModalCloseGuard } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br, _norm } from '../../shared/html.js';
-import { calcDeckMax, getMaitriseBonus as getSharedMaitriseBonus } from '../../shared/char-stats.js';
+import { calcDeckMax, calcPMMax, getMaitriseBonus as getSharedMaitriseBonus } from '../../shared/char-stats.js';
 import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, getMatrixSuggestions, getComboConfig } from '../../shared/spell-matrices.js';
@@ -14,23 +14,38 @@ import { makeSortable } from '../../shared/sortable-helper.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
-import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds } from './spells-calc.js';
 
 let _sortsSearch = '';
-let _sortsView = 'all';
-let _sortsTypeFilter = '';
+// Facettes COMBINABLES : type ET rune ET noyau (chacune toggle indépendamment).
+let _sortsTypeFilter = '';    // '' | 'offensif' | 'defensif' | 'utilitaire'
+let _sortsRuneFilter = '';    // '' | nom de rune
+let _sortsNoyauFilter = '';   // '' | clé de noyau (_noyauFilterKey)
 let _sortsPmFilter = '';   // filtre par coût en PM : '' | 'low' | 'mid' | 'high'
-// Densité d'affichage : 'cards' (grille) | 'list' (une ligne par sort) | 'tiles'
-// (Grimoire : tuiles + tooltip de jeu + deck en sockets). Préférence d'affichage
-// persistée en localStorage — PAS un filtre (jamais reset par ↺).
-let _sortsDensity = ['list', 'tiles'].includes(lsJson.get('cs-sorts-density')) ? lsJson.get('cs-sorts-density') : 'cards';
+// Mode de l'onglet : 'grimoire' (gérer — cartes/liste, catégories, édition) |
+// 'prepare' (préparer le Deck — tuiles + sockets + PM). Persisté en localStorage
+// (globalement en défaut + par personnage via cs-sorts-ui).
+// Rétro-compat : ancienne densité 'tiles' stockée = mode Préparer.
+let _sortsMode = ['grimoire', 'prepare'].includes(lsJson.get('cs-sorts-mode'))
+  ? lsJson.get('cs-sorts-mode')
+  : (lsJson.get('cs-sorts-density') === 'tiles' ? 'prepare' : 'grimoire');
+// Densité du Grimoire : 'list' (une ligne par sort — défaut, scan rapide) |
+// 'cards' (grille détaillée). Préférence persistée — PAS un filtre (jamais reset par ↺).
+let _sortsDensity = lsJson.get('cs-sorts-density') === 'cards' ? 'cards' : 'list';
 let _sortsValidationFilter = '';
+let _sortsDuplicateOnly = false; // vue ciblée : uniquement les recettes utilisées plusieurs fois
+let _sortsRecipeKeyFilter = '';  // empreinte exacte ciblée depuis une alerte « Recette ×N »
+let _sortsCompareKeys = [];      // sélection temporaire de 0 à 2 sorts dans le compendium
+let _sortsInspectorKey = '';      // sort consulté dans l'inspecteur RPG latéral
+let _sortsReplaceIdx = null;   // mode « Remplacer quel sort ? » : index du sort entrant
+let _sortsUiCharId = null;     // perso dont l'état UI (mode/densité/pliage) est chargé
 let _sortsOrder = 'manual';
 let _sortsSearchTimer = null;
 let _sortsCatCollapsed = {};
 let _sortsCatPanelOpen = false;   // panneau inline de gestion des catégories (remplace la modale)
 let _sortsFiltersOpen = false;    // panneau repliable Filtres & tri (anti-cockpit)
 let _sortsMenuOpen = false;       // menu repliable « Plus d'outils » (invocations, catégories…)
+let _sortsAnalysisOpen = false;   // outils avancés du rail, masqués par défaut
 let _newSortCatColor = '#4f8cff';
 let _runeCountsEdit = {};
 let _sortAllowedNoyauIds = null;
@@ -49,6 +64,24 @@ let _sortIconPickerOutsideBound = false;
 let _sortModalBaseline = null;   // instantané du sort à l'ouverture (garde anti-perte)
 let _sortEditWasOk = false;          // édite-t-on un sort DÉJÀ validé, côté joueur ? (bandeau avant/après)
 let _sortEditContentBaseline = null; // signature de CONTENU jouable au mount (≠ nom/note/cat)
+let _spellRenderCachesReady = false;
+let _spellRenderCachesPromise = null;
+
+// Le grimoire a besoin des matrices dès son premier rendu (pas seulement quand
+// la forge s'ouvre), sinon les noyaux par id restent temporairement introuvables.
+function _ensureSpellRenderCaches() {
+  if (_spellRenderCachesReady || _spellRenderCachesPromise) return;
+  _spellRenderCachesPromise = Promise.all([loadDamageTypes(), loadSpellMatrices()])
+    .then(([damageTypes, matrices]) => {
+      setSpellCaches(matrices, damageTypes);
+      _spellRenderCachesReady = true;
+      if (charSession.getCurrentCharTab() === 'sorts') _renderSpellsTab();
+    })
+    .catch(err => {
+      console.warn('[sorts] Impossible de charger les noyaux du grimoire', err);
+      _spellRenderCachesPromise = null;
+    });
+}
 
 function _renderSpellsTab(c = _getCurrentSpellChar()) {
   if (!c) return;
@@ -68,8 +101,41 @@ function _sortValidationState(s) {
 }
 
 function _sortsHasActiveOrderFilter() {
-  const hasCollapsedCat = Object.values(_sortsCatCollapsed || {}).some(Boolean);
-  return !!(_sortsSearch || _sortsTypeFilter || _sortsPmFilter || _sortsView === 'deck' || _sortsOrder !== 'manual' || (STATE.isAdmin && _sortsValidationFilter) || hasCollapsedCat);
+  // Plier une catégorie ne change ni l'ordre ni le sous-ensemble de ses cartes :
+  // le drag & drop doit donc rester disponible dans les catégories ouvertes.
+  return !!(_sortsSearch || _sortsTypeFilter || _sortsRuneFilter || _sortsNoyauFilter
+    || _sortsPmFilter || _sortsOrder !== 'manual' || _sortsValidationFilter
+    || _sortsDuplicateOnly || _sortsRecipeKeyFilter);
+}
+
+// Densité effective : le mode Préparer rend toujours en tuiles, le Grimoire
+// suit la préférence cartes/liste.
+function _sortsEffDensity() {
+  return _sortsMode === 'prepare' ? 'tiles' : _sortsDensity;
+}
+
+// ── État UI PAR PERSONNAGE (mode / densité / catégories pliées) ─────────────
+// Un seul doc localStorage `cs-sorts-ui` : { [charId]: { mode, density, collapsed } }.
+// Au changement de perso : on charge son état et on remet les filtres transitoires
+// à zéro (recherche/facettes appartiennent à une session de consultation, pas au perso).
+function _sortsLoadUiFor(charId) {
+  if (!charId || charId === _sortsUiCharId) return;
+  _sortsUiCharId = charId;
+  const ui = (lsJson.get('cs-sorts-ui') || {})[charId] || {};
+  if (['grimoire', 'prepare'].includes(ui.mode)) _sortsMode = ui.mode;
+  if (['cards', 'list'].includes(ui.density))    _sortsDensity = ui.density;
+  _sortsCatCollapsed = (ui.collapsed && typeof ui.collapsed === 'object') ? { ...ui.collapsed } : {};
+  _sortsSearch = ''; _sortsTypeFilter = ''; _sortsRuneFilter = ''; _sortsNoyauFilter = '';
+  _sortsPmFilter = ''; _sortsValidationFilter = ''; _sortsOrder = 'manual';
+  _sortsDuplicateOnly = false; _sortsRecipeKeyFilter = ''; _sortsCompareKeys = [];
+  _sortsInspectorKey = ''; _sortsAnalysisOpen = false;
+  _sortsReplaceIdx = null; _openSortIdx = null;
+}
+function _sortsPersistUi() {
+  if (!_sortsUiCharId) return;
+  const all = lsJson.get('cs-sorts-ui') || {};
+  all[_sortsUiCharId] = { mode: _sortsMode, density: _sortsDensity, collapsed: _sortsCatCollapsed || {} };
+  lsJson.set('cs-sorts-ui', all);
 }
 
 function _noyauFilterKey(t) {
@@ -77,10 +143,160 @@ function _noyauFilterKey(t) {
 }
 
 function _effectiveSortPm(s, pmDelta = 0) {
-  const base = Number.isFinite(parseInt(s?.pmOverride)) ? parseInt(s.pmOverride)
-    : Number.isFinite(parseInt(s?.pm)) ? parseInt(s.pm)
-      : 0;
-  return Math.max(0, base + (parseInt(pmDelta) || 0));
+  // Une seule vérité : le présentateur partagé (override MJ > pm > cout legacy + delta).
+  return spellVM(s, pmDelta).pm ?? 0;
+}
+
+// Empreinte de fabrication : noyaux + multiset de runes. Deux sorts portant la
+// même empreinte partagent la même recette, même si leur nom ou leur catégorie diffère.
+function _spellRecipeKey(s) {
+  const runeCounts = new Map();
+  _displayRunes(s?.runes || []).forEach(r => runeCounts.set(r, (runeCounts.get(r) || 0) + 1));
+  const runes = [...runeCounts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, 'fr', { sensitivity: 'base' }))
+    .map(([name, count]) => `${_norm(name)}:${count}`);
+  const noyaux = noyauTypesFor(s)
+    .map(t => _noyauFilterKey(t))
+    .filter(Boolean)
+    .sort();
+  return `${noyaux.join('+') || 'sans-noyau'}|${runes.join('+') || 'sans-rune'}`;
+}
+
+function _spellCompareKey(s, index) {
+  return s?.id || `legacy:${index}:${_norm(s?.nom || '')}:${_spellRecipeKey(s)}`;
+}
+
+function _spellRank(s, pmDelta = 0) {
+  const runeCount = _displayRunes(s?.runes || []).length;
+  const noyauCount = Math.max(1, noyauTypesFor(s).length);
+  const complexity = _effectiveSortPm(s, pmDelta) + runeCount * 2 + Math.max(0, noyauCount - 1) * 2;
+  if (complexity <= 6) return { n: 1, roman: 'I', label: 'Initiation', color: '#7c8aa5' };
+  if (complexity <= 11) return { n: 2, roman: 'II', label: 'Adepte', color: '#4f8cff' };
+  if (complexity <= 16) return { n: 3, roman: 'III', label: 'Expert', color: '#b47fff' };
+  if (complexity <= 22) return { n: 4, roman: 'IV', label: 'Maître', color: '#e8b84b' };
+  return { n: 5, roman: 'V', label: 'Légendaire', color: '#ff6b6b' };
+}
+
+function _spellCompareRuneText(s) {
+  const counts = new Map();
+  _displayRunes(s?.runes || []).forEach(r => counts.set(r, (counts.get(r) || 0) + 1));
+  return [...counts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, 'fr', { sensitivity: 'base' }))
+    .map(([name, count]) => `${name}${count > 1 ? ` ×${count}` : ''}`)
+    .join(' · ') || 'Aucune rune';
+}
+
+function _renderSpellInspector(allSorts, pmDelta, c, canEdit) {
+  if (!_sortsInspectorKey) return '';
+  const entry = allSorts.map((s, index) => ({ s, index, key: _spellCompareKey(s, index) }))
+    .find(item => item.key === _sortsInspectorKey);
+  if (!entry) return '';
+  const { s, index, key } = entry;
+  const isCompared = _sortsCompareKeys.includes(key);
+  const rank = _spellRank(s, pmDelta);
+  const noyaux = noyauTypesFor(s);
+  const runeCounts = new Map();
+  _displayRunes(s.runes || []).forEach(r => runeCounts.set(r, (runeCounts.get(r) || 0) + 1));
+  const runeHtml = [...runeCounts.entries()].map(([name, count]) => {
+    const meta = RUNE_META.find(rm => rm.nom === name);
+    return `<span style="--c:${meta?.color || '#7c8aa5'}"><i>${meta?.icon || '✦'}</i><b>${_esc(name)}</b>${count > 1 ? `<em>×${count}</em>` : ''}</span>`;
+  }).join('');
+  const effects = _buildSortResume(s, c);
+
+  return `<aside class="cs-spellinspector" style="--rank-col:${rank.color}" aria-label="Détails de ${_esc(s.nom || 'ce sort')}">
+    <header class="cs-spellinspector-hero">
+      <button class="cs-spellinspector-close" data-action="_sortsCloseInspector" title="Fermer">✕</button>
+      <span class="cs-spellinspector-icon">${s.icon || '✦'}</span>
+      <div><span>RANG ${rank.roman} · ${rank.label.toUpperCase()}</span><h3>${_esc(s.nom || 'Sort sans nom')}</h3></div>
+      <strong>${_effectiveSortPm(s, pmDelta)}<small>PM</small></strong>
+    </header>
+    <div class="cs-spellinspector-recipe">
+      <span>COMPOSITION</span>
+      <div class="cs-spellinspector-noyaux">${noyaux.length ? noyaux.map(t => `<b style="--c:${t.color || '#888'}">${t.icon || '✦'} ${_esc(t.label || t.nom || 'Noyau')}</b>`).join('') : '<b class="is-missing">⚠ Noyau à définir</b>'}</div>
+      <div class="cs-spellinspector-runes">${runeHtml || '<span class="is-empty">Aucune rune</span>'}</div>
+    </div>
+    <div class="cs-spellinspector-state">
+      <span><small>STATUT</small><b>${_sortValidationState(s)==='ok'?'✓ Validé':_sortValidationState(s)==='no'?'✕ À corriger':'⌛ En attente'}</b></span>
+      <span><small>DECK</small><b>${s.actif?'⚡ Dans le deck':'Hors du deck'}</b></span>
+    </div>
+    ${s.effet ? `<div class="cs-spellinspector-description"><span>DESCRIPTION</span><p>${_esc(s.effet)}</p></div>` : ''}
+    <details class="cs-spellinspector-effects">
+      <summary><span>Voir les effets calculés</span><b>${effects.length}</b></summary>
+      <div class="cs-spellinspector-effects-list">
+        ${effects.map(line => `<div><i>${line.icon || '•'}</i><p><b>${_esc(line.label)}</b>${line.detail ? `<small>${_esc(line.detail)}</small>` : ''}</p></div>`).join('')}
+      </div>
+    </details>
+    <footer>
+      <button class="is-compare ${isCompared?'on':''}" data-action="_sortsToggleCompare" data-idx="${index}">${isCompared?'✓ Sélectionné':'◫ Comparer'}</button>
+      ${canEdit ? `<button data-action="duplicateSort" data-idx="${index}">⧉ Dupliquer</button>
+      ${(s.runes || []).includes('Invocation') ? `<button data-action="_openInvocationConfig" data-idx="${index}">🐾 Invocation</button>` : ''}
+      <button data-action="toggleSort" data-idx="${index}">${s.actif?'− Retirer du deck':'⚡ Ajouter au deck'}</button>
+      <button class="is-primary" data-action="editSort" data-idx="${index}">✏ Modifier</button>
+      <button class="is-danger" data-action="deleteSort" data-idx="${index}">🗑 Supprimer</button>` : ''}
+    </footer>
+  </aside>`;
+}
+
+function _renderSpellComparePanel(allSorts, pmDelta, c) {
+  const selected = _sortsCompareKeys
+    .map(key => allSorts.map((s, index) => ({ s, index, key: _spellCompareKey(s, index) })).find(entry => entry.key === key))
+    .filter(Boolean);
+  if (!selected.length) return '';
+  if (selected.length === 1) {
+    const { s } = selected[0];
+    return `<section class="cs-spellcompare cs-spellcompare--waiting" tabindex="-1" aria-live="polite">
+      <span class="cs-spellcompare-wait-icon">◫</span>
+      <div><b>${_esc(s.nom || 'Sort')} sélectionné</b><small>Clique sur une autre carte : la comparaison s’ouvrira immédiatement.</small></div>
+      <button data-action="_sortsClearCompare">Annuler</button>
+    </section>`;
+  }
+
+  const [left, right] = selected;
+  const factsFor = ({ s }) => {
+    const { action } = _getSortAction(s);
+    const actionLabel = { action: 'Action', action_bonus: 'Action bonus', reaction: 'Réaction' }[action] || 'Action';
+    const noyaux = noyauTypesFor(s).map(t => t.label || t.nom).filter(Boolean).join(' + ') || 'À définir';
+    const types = _getSortTypes(s).map(type => ({ offensif:'Offensif', defensif:'Soutien', utilitaire:'Utilitaire' }[type] || type)).join(' + ');
+    return {
+      pm: { label: 'Coût', value: `${_effectiveSortPm(s, pmDelta)} PM` },
+      noyau: { label: 'Noyau', value: noyaux },
+      runes: { label: 'Runes', value: _spellCompareRuneText(s) },
+      role: { label: 'Rôle', value: types || 'Non défini' },
+      action: { label: 'Activation', value: actionLabel },
+      deck: { label: 'Deck', value: s.actif ? 'Équipé' : 'Hors deck' },
+      effect: { label: 'Effet', value: String(s.effet || 'Aucune description') },
+      recipe: { label: 'Empreinte', value: _spellRecipeKey(s) },
+    };
+  };
+  const a = factsFor(left), b = factsFor(right);
+  const rows = ['pm','noyau','runes','role','action','deck'].map(key => {
+    const diff = _norm(a[key].value) !== _norm(b[key].value);
+    return `<div class="cs-spellcompare-row ${diff ? 'is-diff' : 'is-same'}">
+      <span class="cs-spellcompare-row-label">${a[key].label}</span>
+      <span>${_esc(a[key].value)}</span>
+      <i>${diff ? '≠' : '='}</i>
+      <span>${_esc(b[key].value)}</span>
+    </div>`;
+  }).join('');
+  const sameRecipe = a.recipe.value === b.recipe.value;
+
+  return `<section class="cs-spellcompare" tabindex="-1" aria-live="polite">
+    <header class="cs-spellcompare-head">
+      <div><span>ANALYSE CROISÉE</span><b>Comparaison de sorts</b></div>
+      <span class="cs-spellcompare-verdict ${sameRecipe ? 'is-same' : 'is-different'}">${sameRecipe ? '⚠ Même recette' : '✦ Recettes distinctes'}</span>
+      <button data-action="_sortsClearCompare" title="Fermer la comparaison">✕</button>
+    </header>
+    <div class="cs-spellcompare-titles">
+      <div><span>${left.s.icon || '✦'}</span><b>${_esc(left.s.nom || 'Sort')}</b></div>
+      <span>VS</span>
+      <div><span>${right.s.icon || '✦'}</span><b>${_esc(right.s.nom || 'Sort')}</b></div>
+    </div>
+    <div class="cs-spellcompare-rows">${rows}</div>
+    <div class="cs-spellcompare-effects">
+      <article><span>EFFET</span><p>${_esc(a.effect.value)}</p></article>
+      <article><span>EFFET</span><p>${_esc(b.effect.value)}</p></article>
+    </div>
+  </section>`;
 }
 
 // Tranche de coût d'un sort (PM effectif, set léger inclus) — pour le filtre par mana.
@@ -108,6 +324,9 @@ function _sortsOrderComparator(order, pmDelta = 0) {
       if (d) return d;
     } else if (order === 'validation') {
       const d = (valRank[_sortValidationState(sa)] ?? 9) - (valRank[_sortValidationState(sb)] ?? 9);
+      if (d) return d;
+    } else if (order === 'recipe') {
+      const d = _spellRecipeKey(sa).localeCompare(_spellRecipeKey(sb), 'fr', { sensitivity: 'base' });
       if (d) return d;
     }
     return (a?.globalIdx || 0) - (b?.globalIdx || 0);
@@ -162,25 +381,127 @@ function _renderDeckStats(activeSorts = [], deckMax = Infinity, pmDelta = 0) {
 // Chaque sort préparé = un socket rempli (clic = retirer, hover = fiche) ;
 // la capacité INT restante = sockets vides en pointillés (clic = suggère les
 // sorts préparables). Remplace la ligne 📊 deckstrip en densité 'tiles'.
-function _renderDeckSockets(entries, deckMax, pmDelta, canEdit) {
+function _renderDeckSockets(entries, deckMax, pmDelta, canEdit, pmCur = null, pmMax = null) {
   const over = Number.isFinite(deckMax) && entries.length > deckMax;
-  const slots = entries.map(({ s, i }) => canEdit
-    ? `<button class="cs-sock is-filled" data-action="toggleSort" data-idx="${i}" title="${_esc(s.nom || 'Sort')} — retirer du Deck"><span class="cs-sock-ic">${s.icon ? _esc(s.icon) : '✦'}</span><span class="cs-sock-x">✕</span></button>`
-    : `<span class="cs-sock is-filled" data-idx="${i}" title="${_esc(s.nom || 'Sort')}"><span class="cs-sock-ic">${s.icon ? _esc(s.icon) : '✦'}</span></span>`);
+  const replacing = _sortsReplaceIdx != null;
+  const slots = entries.map(({ s, i }, slotIndex) => canEdit
+    ? (replacing
+      ? `<button class="cs-sock is-filled is-swap" data-action="_sortsReplaceWith" data-idx="${i}" title="Remplacer ${_esc(s.nom || 'ce sort')} par le sort choisi"><span class="cs-sock-key">${slotIndex + 1}</span><span class="cs-sock-ic">${s.icon ? _esc(s.icon) : '✦'}</span><span class="cs-sock-x">⇄</span></button>`
+      : `<button class="cs-sock is-filled" data-action="toggleSort" data-idx="${i}" title="${_esc(s.nom || 'Sort')} — retirer du Deck"><span class="cs-sock-key">${slotIndex + 1}</span><span class="cs-sock-ic">${s.icon ? _esc(s.icon) : '✦'}</span><span class="cs-sock-x">✕</span></button>`)
+    : `<span class="cs-sock is-filled" data-idx="${i}" title="${_esc(s.nom || 'Sort')}"><span class="cs-sock-key">${slotIndex + 1}</span><span class="cs-sock-ic">${s.icon ? _esc(s.icon) : '✦'}</span></span>`);
   if (Number.isFinite(deckMax)) {
     for (let k = entries.length; k < deckMax; k++) {
       slots.push(canEdit
-        ? `<button class="cs-sock is-empty" data-action="_sortsHintPreparable" title="Emplacement libre — montre les sorts préparables">＋</button>`
-        : `<span class="cs-sock is-empty">＋</span>`);
+        ? `<button class="cs-sock is-empty" data-action="_sortsHintPreparable" title="Emplacement ${k + 1} libre — montre les sorts préparables"><span class="cs-sock-key">${k + 1}</span>＋</button>`
+        : `<span class="cs-sock is-empty"><span class="cs-sock-key">${k + 1}</span>＋</span>`);
     }
   }
   const pmSum = entries.reduce((a, { s }) => a + _effectiveSortPm(s, pmDelta), 0);
-  return `<div class="cs-sorts-sockets ${over ? 'is-over' : ''}">
+  const pmRes = pmMax != null
+    ? `<span class="cs-sorts-pmres ${pmCur <= Math.floor(pmMax / 4) ? 'is-low' : ''}" title="Tes points de magie actuels / maximum">💧 <b>${pmCur}</b><small>/${pmMax} PM</small></span>`
+    : '';
+  return `<div class="cs-sorts-sockets ${over ? 'is-over' : ''} ${replacing ? 'is-replacing' : ''}">
     <span class="cs-sorts-sockets-lbl" title="Ton Deck : sorts préparés / capacité (INT)">⚡</span>
     <div class="cs-sorts-sockets-row">${slots.join('')}</div>
-    ${pmSum ? `<span class="cs-sorts-sockets-pm" title="Coût total si chaque sort préparé est lancé une fois">Σ <b>${pmSum} PM</b></span>` : ''}
+    ${replacing ? `<span class="cs-sorts-swaphint">Remplacer quel sort ?</span>
+      <button class="cs-sorts-swapcancel" data-action="_sortsCancelReplace" title="Annuler le remplacement">✕ Annuler</button>` : ''}
+    <span class="cs-sorts-sockets-right">
+      ${pmSum ? `<span class="cs-sorts-sockets-pm" title="Coût total si chaque sort préparé est lancé une fois">Σ <b>${pmSum} PM</b></span>` : ''}
+      ${pmRes}
+    </span>
   </div>`;
 }
+
+// ── Interactions tuile (mode Préparer) ───────────────────────────────────────
+// Pointeur fin : clic = préparer/retirer, avec flux « Remplacer quel sort ? » si
+// le Deck est plein. Tactile (pas de survol) ou lecture seule : tap = fiche rapide
+// (le tap ne prépare JAMAIS à l'aveugle — la tooltip n'existe pas sur tactile).
+function _sortsTileTap(i) {
+  const canEdit = charSession.getCanEditChar();
+  if (!canEdit || !window.matchMedia?.('(hover: hover)').matches) { _sortsOpenSheet(i); return; }
+  _sortsTileToggle(i);
+}
+
+async function _sortsTileToggle(i) {
+  const c = _getCurrentSpellChar(); if (!c) return;
+  const s = (c.deck_sorts || [])[i]; if (!s) return;
+  const validated = STATE.isAdmin || _sortValidationState(s) === 'ok';
+  const deckMax = calcDeckMax(c);
+  const deckCount = (c.deck_sorts || []).filter(x => x?.actif).length;
+  if (!s.actif && validated && Number.isFinite(deckMax) && deckCount >= deckMax) {
+    _sortsReplaceIdx = i;
+    _sortsRerender();
+    showNotif('Deck plein — choisis dans le tray ⚡ le sort à remplacer.', 'info');
+    return;
+  }
+  // Import dynamique : évite un cycle statique spells → forms (→ pages → characters).
+  const { toggleSort } = await import('./forms.js');
+  toggleSort(i);
+}
+
+function _sortsCancelReplace() { _sortsReplaceIdx = null; _sortsRerender(); }
+
+// Échange en UNE écriture : le sort du socket sort du Deck, le sort choisi y entre.
+async function _sortsReplaceWith(outIdx) {
+  const c = _getCurrentSpellChar();
+  const inIdx = _sortsReplaceIdx;
+  _sortsReplaceIdx = null;
+  if (!c || inIdx == null) { _sortsRerender(); return; }
+  const sorts = [...(c.deck_sorts || [])];
+  const sIn = sorts[inIdx], sOut = sorts[outIdx];
+  if (!sIn || !sOut || !sOut.actif || sIn.actif) { _sortsRerender(); return; }
+  sorts[outIdx] = { ...sOut, actif: false };
+  sorts[inIdx]  = { ...sIn,  actif: true };
+  ensureSpellIds(sorts);
+  if (await trySave('characters', c.id, { deck_sorts: sorts })) {
+    c.deck_sorts = sorts;
+    if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
+    if (charSession.getCurrentChar()?.id === c.id)
+      charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+    showNotif(`⚡ ${_esc(sIn.nom || 'Sort')} remplace ${_esc(sOut.nom || 'ce sort')} dans le Deck`, 'success');
+  }
+  _renderSpellsTab(c);
+}
+
+// ── Fiche rapide (tactile / lecture seule) : clone de la carte en bottom-sheet ──
+let _spellSheetEl = null;
+function _sortsCloseSheet() { _spellSheetEl?.remove(); _spellSheetEl = null; }
+function _sortsOpenSheet(i) {
+  _sortsCloseSheet();
+  _spellTTHide();
+  const c = _getCurrentSpellChar();
+  const s = (c?.deck_sorts || [])[i]; if (!s) return;
+  const canEdit = charSession.getCanEditChar();
+  const card = document.querySelector(`.cs-spellcard[data-sort-idx="${i}"]`); if (!card) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'cs-spell-sheet-overlay';
+  wrap.innerHTML = `<div class="cs-v3 cs-spell-sheet" role="dialog" aria-modal="true" aria-label="${_esc(s.nom || 'Sort')}">
+    <div class="cs-spell-sheet-card"></div>
+    <div class="cs-spell-sheet-btns">
+      ${canEdit ? `<button class="btn btn-sm ${s.actif ? 'btn-outline' : 'btn-gold'}" data-action="_sortsSheetToggle" data-idx="${i}">${s.actif ? '− Retirer du Deck' : '⚡ Préparer'}</button>` : ''}
+      ${canEdit ? `<button class="btn btn-outline btn-sm" data-action="editSort" data-idx="${i}">✏️ Modifier</button>` : ''}
+      <button class="btn btn-outline btn-sm cs-spell-sheet-close" type="button">Fermer</button>
+    </div>
+  </div>`;
+  const clone = card.cloneNode(true);
+  clone.classList.remove('is-open', 'cs-hintme');
+  clone.removeAttribute('data-action');
+  clone.removeAttribute('tabindex');
+  clone.removeAttribute('role');
+  wrap.querySelector('.cs-spell-sheet-card').appendChild(clone);
+  // Fermeture : tap sur le fond, « Fermer », ou après toute action (le dispatch
+  // global data-action tourne sur document → on laisse l'événement remonter,
+  // puis on retire la fiche au tick suivant).
+  wrap.addEventListener('click', (e) => {
+    if (e.target === wrap || e.target.closest('.cs-spell-sheet-close') || e.target.closest('[data-action]')) {
+      setTimeout(_sortsCloseSheet, 0);
+    }
+  });
+  document.body.appendChild(wrap);
+  _spellSheetEl = wrap;
+}
+// Préparer depuis la fiche : réutilise le flux tuile (garde deck plein incluse).
+function _sortsSheetToggle(i) { _sortsTileToggle(i); }
 
 // ── Tooltip « objet de jeu » (vue Grimoire) ─────────────────────────────────
 // Au survol/focus d'une tuile (ou d'un socket), on clone la CARTE complète dans
@@ -218,7 +539,6 @@ function _spellTTShow(card, anchor) {
 }
 function _spellTTTarget(e) {
   // Dock d'actions (⧉✏️🗑️) : on vise un bouton → pas de tooltip par-dessus.
-  if (e.target.closest?.('.is-tiles .cs-spellcard-foot')) return null;
   const tile = e.target.closest?.('.is-tiles .cs-spellcard');
   if (tile) return { card: tile, anchor: tile };
   const sock = e.target.closest?.('.cs-sock[data-idx]');
@@ -230,8 +550,19 @@ function _spellTTTarget(e) {
 }
 function _bindSpellTilesTooltip() {
   if (_spellTTBound) return;
-  if (!window.matchMedia?.('(hover: hover)').matches) return;   // tactile : pas de survol
   _spellTTBound = true;
+  // Clavier : Enter/Espace activent les contrôles non-boutons de l'onglet Sorts
+  // (toggle du Deck, tuile, en-tête de catégorie) — alternative au pointeur.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const el = e.target;
+    if (!(el instanceof Element)) return;
+    if (el.matches('input, textarea, select, button, a')) return;
+    if (!el.matches('.cs-spellcard .toggle[data-action], .cs-sort-cat-hdr[data-action], article.cs-spellcard[data-action]')) return;
+    e.preventDefault();
+    el.click();
+  });
+  if (!window.matchMedia?.('(hover: hover)').matches) return;   // tactile : pas de survol (tap = fiche rapide)
   document.addEventListener('mouseover', (e) => {
     const t = _spellTTTarget(e);
     if (t) _spellTTShow(t.card, t.anchor); else _spellTTHide();
@@ -268,6 +599,7 @@ export function bindSortCardsDnd(c, canEdit) {
       prefix: 'cs',
       group: 'cs-spell-cards',
       draggable: '.cs-spellcard',
+      handle: '.cs-spellcard-drag',
       animation: 90,
       delay: 0,
       forceFallback: false,
@@ -282,26 +614,56 @@ export function bindSortCardsDnd(c, canEdit) {
         const cats = c.sort_cats || [];
         const next = [];
         let changed = false;
-        wrap.querySelectorAll('.cs-spellcard-grid').forEach(g => {
-          const raw = g.dataset.cat;
-          // Catégorie cible : '' si bloc « Sans catégorie » ou catégorie inconnue.
-          const catId = (raw && raw !== '__none' && cats.some(ct => ct.id === raw)) ? raw : '';
-          g.querySelectorAll('.cs-spellcard').forEach(card => {
-            const s = old[Number(card.dataset.sortIdx)];
-            if (!s) return;
-            if ((s.catId || '') !== catId) { next.push({ ...s, catId }); changed = true; }
-            else next.push(s);
+        const gridByCat = new Map(
+          [...wrap.querySelectorAll('.cs-spellcard-grid')].map(g => [g.dataset.cat || '__none', g])
+        );
+        const oldCatId = (spell) => (spell?.catId && cats.some(ct => ct.id === spell.catId)) ? spell.catId : '';
+
+        // Une catégorie repliée n'a pas de grille dans le DOM : on conserve alors
+        // ses sorts dans leur ordre actuel. Les catégories ouvertes reprennent
+        // l'ordre visible après la dépose, y compris les transferts entre elles.
+        [...cats.map(cat => cat.id), ''].forEach(catId => {
+          const grid = gridByCat.get(catId || '__none');
+          if (!grid) {
+            next.push(...old.filter(spell => oldCatId(spell) === catId));
+            return;
+          }
+          grid.querySelectorAll('.cs-spellcard').forEach(card => {
+            const spell = old[Number(card.dataset.sortIdx)];
+            if (!spell) return;
+            if (oldCatId(spell) !== catId) {
+              next.push({ ...spell, catId });
+              changed = true;
+            } else {
+              next.push(spell);
+            }
           });
         });
-        // Sécurité : on ne persiste que si tous les sorts sont bien retrouvés.
+        // Sécurité : on ne persiste que si chaque sort est retrouvé exactement une fois.
         if (next.length !== old.length) { _renderSpellsTab(c); return; }
         // Ordre inchangé ET aucune recatégorisation → rien à faire.
         if (!changed && next.every((s, k) => s === old[k])) return;
+        ensureSpellIds(next);
+        const prevOrder = [...old];
         c.deck_sorts = next;
         if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
         if (charSession.getCurrentChar()?.id === c.id)
           charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
-        await trySave('characters', c.id, { deck_sorts: next });
+        if (await trySave('characters', c.id, { deck_sorts: next })) {
+          showNotif('Ordre des sorts mis à jour', 'info', {
+            duration: 5000,
+            action: {
+              label: '↺ Annuler',
+              onClick: async () => {
+                c.deck_sorts = prevOrder;
+                if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
+                if (charSession.getCurrentChar()?.id === c.id)
+                  charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+                if (await trySave('characters', c.id, { deck_sorts: prevOrder })) _renderSpellsTab(c);
+              },
+            },
+          });
+        }
         _renderSpellsTab(c);
       },
     }));
@@ -309,24 +671,29 @@ export function bindSortCardsDnd(c, canEdit) {
 }
 
 export function renderCharDeck(c, canEdit) {
+  _ensureSpellRenderCaches();
+  _sortsLoadUiFor(c.id);   // état UI par personnage (mode/densité/pliage) + reset des filtres transitoires
   const allSorts = c.deck_sorts || [];
   const cats     = c.sort_cats  || [];
   const mainP    = getMainWeapon(c);
   const armeDeg  = mainP.degats;
-  // En Grimoire (tuiles), pas de dépli en place : la tooltip fait le travail.
-  const openIdx  = _sortsDensity === 'tiles' ? null : (_openSortIdx ?? null);
+  // Les détails vivent désormais dans l'inspecteur intégré : aucune carte ne
+  // change de hauteur, ce qui stabilise les vues Cartes et Liste.
+  const openIdx = null;
 
   const armorSet = getArmorSetData(c);
   const pmDelta  = armorSet.modifiers?.spellPmDelta || 0;
 
   // ── État UI persistant (filtres / recherche / pliage) ─────────────
   const search   = _norm(_sortsSearch || '');   // minuscules + sans accents
-  const view     = _sortsView || 'all';          // 'all' | 'deck'
-  const typeFlt  = _sortsTypeFilter || '';        // '' | 'offensif' | 'defensif' | 'soin' | 'enchantement' | 'affliction' | 'utilitaire'
+  const mode     = _sortsMode;                    // 'grimoire' | 'prepare'
+  const typeFlt  = _sortsTypeFilter || '';        // '' | 'offensif' | 'defensif' | 'utilitaire'
+  const runeFlt  = _sortsRuneFilter || '';        // '' | nom de rune (combinable)
+  const noyFlt   = _sortsNoyauFilter || '';       // '' | clé de noyau (combinable)
   const pmFlt    = _sortsPmFilter || '';          // '' | 'low' | 'mid' | 'high' (coût en PM)
-  const validationFlt = STATE.isAdmin ? (_sortsValidationFilter || '') : '';
-  const order = ['manual', 'pm', 'nom', 'validation'].includes(_sortsOrder) ? _sortsOrder : 'manual';
-  const density = _sortsDensity;                  // 'cards' | 'list' (préférence d'affichage)
+  const validationFlt = _sortsValidationFilter || '';
+  const order = ['manual', 'pm', 'nom', 'validation', 'recipe'].includes(_sortsOrder) ? _sortsOrder : 'manual';
+  const density = _sortsEffDensity();             // 'cards' | 'list' (Grimoire) | 'tiles' (Préparer)
   const hasOrderFilter = _sortsHasActiveOrderFilter();
   const collapsed = _sortsCatCollapsed || {};     // { catId: true } = replié
 
@@ -337,14 +704,17 @@ export function renderCharDeck(c, canEdit) {
   const activeSorts = allSorts.filter(s => s.actif);
   const deckCount = activeSorts.length;
   const deckMax   = calcDeckMax(c);
+  // PM du perso (mode Préparer) : ressource courante pour signaler les sorts
+  // trop chers — même source que la fiche (pmActuel, défaut = max).
+  const pmMax = calcPMMax(c);
+  const pmCur = Number.isFinite(parseInt(c.pmActuel)) ? parseInt(c.pmActuel) : pmMax;
   const validationCounts = allSorts.reduce((acc, s) => {
     acc[_sortValidationState(s)] = (acc[_sortValidationState(s)] || 0) + 1;
     return acc;
   }, { pending: 0, ok: 0, no: 0 });
 
-  // ── Application des filtres : view + search + type ───────────────
+  // ── Application des filtres : search + statut + coût + type ──────
   const matchSpell = (s) => {
-    if (view === 'deck' && !s.actif) return false;
     if (search) {
       const catName = cats.find(ct => ct.id === s.catId)?.nom || '';
       const hay = _norm([
@@ -356,26 +726,24 @@ export function renderCharDeck(c, canEdit) {
     }
     if (validationFlt && _sortValidationState(s) !== validationFlt) return false;
     if (pmFlt && _sortPmBucket(_effectiveSortPm(s, pmDelta)) !== pmFlt) return false;
+    if (_sortsDuplicateOnly && (recipeCounts.get(_spellRecipeKey(s)) || 0) < 2) return false;
+    if (_sortsRecipeKeyFilter && _spellRecipeKey(s) !== _sortsRecipeKeyFilter) return false;
+    // Facettes COMBINABLES : type ET rune ET noyau (chacune indépendante)
     if (typeFlt) {
-      if (typeFlt.startsWith('rune:')) {
-        // Filtre par rune utilisée
-        if (!_displayRunes(s.runes || []).includes(typeFlt.slice(5))) return false;
-      } else if (typeFlt.startsWith('noyau:')) {
-        const wanted = typeFlt.slice(6);
-        if (!noyauTypesFor(s).some(t => _noyauFilterKey(t) === wanted)) return false;
-      } else {
-        const types = _getSortTypes(s);
-        if (typeFlt === 'offensif'   && !types.includes('offensif')) return false;
-        if (typeFlt === 'defensif'   && !types.includes('defensif')) return false;
-        if (typeFlt === 'utilitaire' && !(types.includes('utilitaire') && !types.includes('offensif') && !types.includes('defensif'))) return false;
-      }
+      const types = _getSortTypes(s);
+      if (typeFlt === 'offensif'   && !types.includes('offensif')) return false;
+      if (typeFlt === 'defensif'   && !types.includes('defensif')) return false;
+      if (typeFlt === 'utilitaire' && !(types.includes('utilitaire') && !types.includes('offensif') && !types.includes('defensif'))) return false;
     }
+    if (runeFlt && !_displayRunes(s.runes || []).includes(runeFlt)) return false;
+    if (noyFlt && !noyauTypesFor(s).some(t => _noyauFilterKey(t) === noyFlt)) return false;
     return true;
   };
 
   // ── Filtre INTELLIGENT : ne proposer que les types et runes RÉELLEMENT utilisés ──
   const usedTypes = new Set();   // 'offensif' | 'defensif' | 'utilitaire'
   const usedRunes = new Set();   // noms de runes présents dans au moins un sort
+  const runeUsageCounts = new Map(); // occurrences totales : atlas du grimoire
   const usedNoyaux = new Map();  // noyaux/éléments présents dans au moins un sort
   const usedPmBuckets = new Set(); // tranches de coût présentes (pour le filtre mana)
   allSorts.forEach(s => {
@@ -384,7 +752,10 @@ export function renderCharDeck(c, canEdit) {
     if (t.includes('offensif')) usedTypes.add('offensif');
     if (t.includes('defensif')) usedTypes.add('defensif');
     if (t.includes('utilitaire') && !t.includes('offensif') && !t.includes('defensif')) usedTypes.add('utilitaire');
-    _displayRunes(s.runes || []).forEach(r => usedRunes.add(r));
+    _displayRunes(s.runes || []).forEach(r => {
+      usedRunes.add(r);
+      runeUsageCounts.set(r, (runeUsageCounts.get(r) || 0) + 1);
+    });
     noyauTypesFor(s).forEach(nt => {
       const k = _noyauFilterKey(nt);
       if (k && !usedNoyaux.has(k)) usedNoyaux.set(k, nt);
@@ -399,6 +770,17 @@ export function renderCharDeck(c, canEdit) {
   const usedRuneMetas = RUNE_META.filter(rm => usedRunes.has(rm.nom));
   const usedNoyauMetas = [...usedNoyaux.entries()]
     .sort((a, b) => String(a[1].label || '').localeCompare(String(b[1].label || ''), 'fr', { sensitivity: 'base' }));
+
+  const recipeCounts = new Map();
+  allSorts.forEach(s => {
+    if (!_displayRunes(s.runes || []).length) return;
+    const key = _spellRecipeKey(s);
+    recipeCounts.set(key, (recipeCounts.get(key) || 0) + 1);
+  });
+  const repeatedRecipeGroups = [...recipeCounts.values()].filter(count => count > 1).length;
+  const repeatedRecipeExtras = [...recipeCounts.values()].reduce((sum, count) => sum + Math.max(0, count - 1), 0);
+  const dominantRune = [...runeUsageCounts.entries()].sort((a, b) => b[1] - a[1])[0] || null;
+  const dominantRuneMeta = dominantRune ? RUNE_META.find(rm => rm.nom === dominantRune[0]) : null;
 
   const sortsByCat = {};
   allCats.forEach(cat => { sortsByCat[cat.id] = []; });
@@ -415,10 +797,32 @@ export function renderCharDeck(c, canEdit) {
   //   Ligne 2 : regarder (Tous / Deck, jauge intégrée)
   //   Le reste (menu, filtres, analyse) est repliable.
   const deckOver = deckCount > deckMax;
-  const filtersActive = !!(typeFlt || pmFlt || validationFlt || order !== 'manual');
-  let html = `<div class="cs-section cs-section--compact cs-sorts-v3">
+  const filtersActive = !!(typeFlt || runeFlt || noyFlt || pmFlt || validationFlt || _sortsDuplicateOnly || _sortsRecipeKeyFilter || order !== 'manual');
+  const validationOk = validationCounts.ok || 0;
+  const validationPending = validationCounts.pending || 0;
+  let html = `<div class="cs-section cs-section--compact cs-sorts-v3 is-${mode} ${mode==='grimoire' && _sortsCompareKeys.length===1?'is-compare-picking':''}">
 
-    <!-- ① Barre d'action : recherche · créer · filtres · plus -->
+    <!-- Tableau de bord du grimoire : identité, progression et action principale -->
+    <section class="cs-spellbook-hero" aria-labelledby="cs-spellbook-title">
+      <div class="cs-spellbook-hero-main">
+        <span class="cs-spellbook-kicker">ARSENAL ARCANIQUE</span>
+        <h2 id="cs-spellbook-title">Grimoire de ${_esc(c.nom || 'l’aventurier')}</h2>
+        <p>${mode === 'prepare' ? 'Compose ton deck de combat. Sélectionne les sorts que tu veux emporter avant la prochaine rencontre.' : 'Retrouve, classe et améliore tous les sorts que tu as forgés.'}</p>
+        ${canEdit ? `<button class="cs-spellbook-forge" data-action="addSort">
+          <span class="cs-spellbook-forge-ico">✦</span>
+          <span><b>Forger un nouveau sort</b><small>Noyau, runes et effets</small></span>
+          <span class="cs-spellbook-forge-arrow">→</span>
+        </button>` : ''}
+      </div>
+      <div class="cs-spellbook-stats" aria-label="Résumé du grimoire">
+        <div class="cs-spellbook-stat"><span class="cs-spellbook-stat-ico">◆</span><span><b>${allSorts.length}</b><small>sort${allSorts.length > 1 ? 's' : ''} connu${allSorts.length > 1 ? 's' : ''}</small></span></div>
+        <div class="cs-spellbook-stat is-deck ${deckOver ? 'is-danger' : ''}"><span class="cs-spellbook-stat-ico">⚡</span><span><b>${deckCount}<i>/${deckMax}</i></b><small>dans le deck</small></span></div>
+        <div class="cs-spellbook-stat is-valid"><span class="cs-spellbook-stat-ico">✓</span><span><b>${validationOk}</b><small>validé${validationOk > 1 ? 's' : ''}</small></span></div>
+        ${validationPending ? `<button class="cs-spellbook-stat is-pending" data-action="_sortsSetValidation" data-val="pending" title="Afficher les sorts en attente"><span class="cs-spellbook-stat-ico">⌛</span><span><b>${validationPending}</b><small>en attente</small></span></button>` : ''}
+      </div>
+    </section>
+
+    <!-- Barre d'action : retrouver et affiner la bibliothèque -->
     <div class="cs-sorts-bar">
       <div class="cs-sorts-search-wrap">
         <span class="cs-sorts-search-ico">🔍</span>
@@ -429,7 +833,6 @@ export function renderCharDeck(c, canEdit) {
           data-input="_sortsSearchInput">
         ${search ? `<button class="cs-sorts-search-clear" data-action="_sortsSetSearch" data-val="" title="Effacer">✕</button>` : ''}
       </div>
-      ${canEdit ? `<button class="btn btn-gold btn-sm cs-sorts-create" data-action="addSort" title="Créer un sort">＋ <span class="cs-sorts-create-lbl">Sort</span></button>` : ''}
       <button class="cs-sorts-toolbtn ${_sortsFiltersOpen?'is-active':''}${filtersActive?' has-dot':''}" data-action="_sortsToggleFilters" aria-pressed="${_sortsFiltersOpen?'true':'false'}" title="Filtres & tri">
         <span class="cs-sorts-toolbtn-ico">⚙</span><span class="cs-sorts-toolbtn-lbl">Filtres</span>
       </button>
@@ -438,21 +841,24 @@ export function renderCharDeck(c, canEdit) {
       </button>
     </div>
 
-    <!-- ② Vue : sélecteur segmenté Tous / Deck + densité Cartes / Liste à droite -->
+    <!-- Deux espaces mentaux distincts : collection / équipement -->
     <div class="cs-sorts-viewrow">
-      <div class="cs-sorts-viewseg" role="tablist" aria-label="Vue des sorts">
-        <button class="cs-sorts-seg ${view==='all'?'on':''}" role="tab" aria-selected="${view==='all'}" data-action="_sortsSetView" data-view="all">
-          <span class="cs-sorts-seg-ico">📚</span> Tous <b>${allSorts.length}</b>
+      <div class="cs-sorts-viewseg" role="tablist" aria-label="Mode de l'onglet Sorts">
+        <button class="cs-sorts-seg ${mode==='grimoire'?'on':''}" role="tab" aria-selected="${mode==='grimoire'}" data-action="_sortsSetMode" data-mode="grimoire" title="Gérer tes sorts : catégories, filtres, édition">
+          <span class="cs-sorts-seg-ico">📖</span>
+          <span class="cs-sorts-seg-copy"><strong>Ma collection</strong><small>Classer et modifier les sorts</small></span>
+          <b>${allSorts.length}</b>
         </button>
-        <button class="cs-sorts-seg cs-sorts-seg--deck ${view==='deck'?'on':''} ${deckOver?'is-over':''}" role="tab" aria-selected="${view==='deck'}" data-action="_sortsSetView" data-view="deck" title="Sorts préparés / capacité (INT)">
-          <span class="cs-sorts-seg-ico">⚡</span> Deck <b>${deckCount}<small>/${deckMax}</small></b>
+        <button class="cs-sorts-seg cs-sorts-seg--deck ${mode==='prepare'?'on':''} ${deckOver?'is-over':''}" role="tab" aria-selected="${mode==='prepare'}" data-action="_sortsSetMode" data-mode="prepare" title="Préparer ton Deck : clique une tuile pour ajouter ou retirer un sort (capacité INT)">
+          <span class="cs-sorts-seg-ico">⚡</span>
+          <span class="cs-sorts-seg-copy"><strong>Mon deck</strong><small>Choisir les sorts de combat</small></span>
+          <b>${deckCount}<small>/${deckMax}</small></b>
         </button>
       </div>
-      <div class="cs-sorts-viewseg cs-sorts-densityseg" role="group" aria-label="Densité d'affichage">
+      ${mode==='grimoire' ? `<div class="cs-sorts-viewseg cs-sorts-densityseg" role="group" aria-label="Densité d'affichage">
         <button class="cs-sorts-seg cs-sorts-seg--dens ${density==='cards'?'on':''}" data-action="_sortsSetDensity" data-density="cards" aria-pressed="${density==='cards'}" title="Vue cartes — le détail visible">▦</button>
         <button class="cs-sorts-seg cs-sorts-seg--dens ${density==='list'?'on':''}" data-action="_sortsSetDensity" data-density="list" aria-pressed="${density==='list'}" title="Vue liste — une ligne par sort">☰</button>
-        <button class="cs-sorts-seg cs-sorts-seg--dens ${density==='tiles'?'on':''}" data-action="_sortsSetDensity" data-density="tiles" aria-pressed="${density==='tiles'}" title="Grimoire — tuiles, fiche au survol, deck en sockets">⬚</button>
-      </div>
+      </div>` : ''}
     </div>
 
     <!-- ②bis Menu « Plus d'outils » (repliable) -->
@@ -474,16 +880,16 @@ export function renderCharDeck(c, canEdit) {
     ${_sortsFiltersOpen ? `<div class="cs-sorts-filterpanel">
       <div class="cs-sorts-filt-row">
         <span class="cs-sorts-filt-lbl">Trier</span>
-        ${[['manual','Manuel'],['pm','PM'],['nom','Nom'],['validation','MJ']]
+        ${[['manual','Manuel'],['pm','PM'],['nom','Nom'],['recipe','Recette'],['validation','MJ']]
           .map(([v,lbl]) => `<button class="cs-sorts-chip sort ${order===v?'on':''}" data-action="_sortsSetOrder" data-order="${v}">${lbl}</button>`).join('')}
       </div>
-      ${STATE.isAdmin ? `<div class="cs-sorts-filt-row cs-sorts-filt-row--mj">
-        <span class="cs-sorts-filt-lbl">Validation</span>
-        <button class="cs-sorts-chip mj ${validationFlt===''?'on':''}" data-action="_sortsSetValidation" data-val="">Toutes</button>
-        <button class="cs-sorts-chip mj wait ${validationFlt==='pending'?'on':''}" data-action="_sortsSetValidation" data-val="pending" title="À valider">⏳ ${validationCounts.pending || 0}</button>
-        <button class="cs-sorts-chip mj ok ${validationFlt==='ok'?'on':''}" data-action="_sortsSetValidation" data-val="ok" title="Validés">✅ ${validationCounts.ok || 0}</button>
-        <button class="cs-sorts-chip mj no ${validationFlt==='no'?'on':''}" data-action="_sortsSetValidation" data-val="no" title="Refusés">❌ ${validationCounts.no || 0}</button>
-      </div>` : ''}
+      <div class="cs-sorts-filt-row cs-sorts-filt-row--mj">
+        <span class="cs-sorts-filt-lbl">Statut</span>
+        <button class="cs-sorts-chip mj ${validationFlt===''?'on':''}" data-action="_sortsSetValidation" data-val="">Tous</button>
+        <button class="cs-sorts-chip mj wait ${validationFlt==='pending'?'on':''}" data-action="_sortsSetValidation" data-val="pending" title="En attente de validation MJ">⏳ ${validationCounts.pending || 0}</button>
+        <button class="cs-sorts-chip mj ok ${validationFlt==='ok'?'on':''}" data-action="_sortsSetValidation" data-val="ok" title="Validés par le MJ">✅ ${validationCounts.ok || 0}</button>
+        <button class="cs-sorts-chip mj no ${validationFlt==='no'?'on':''}" data-action="_sortsSetValidation" data-val="no" title="Refusés — à corriger">❌ ${validationCounts.no || 0}</button>
+      </div>
       ${usedPmBuckets.size > 1 ? `<div class="cs-sorts-filt-row">
         <span class="cs-sorts-filt-lbl">Coût</span>
         <button class="cs-sorts-chip pm ${pmFlt===''?'on':''}" data-action="_sortsSetPm" data-pm="">Tous</button>
@@ -492,30 +898,28 @@ export function renderCharDeck(c, canEdit) {
       </div>` : ''}
       ${(usedTypes.size || usedRuneMetas.length || usedNoyauMetas.length) ? `<div class="cs-sorts-filt-row">
         <span class="cs-sorts-filt-lbl">Filtrer</span>
-        <button class="cs-sorts-chip type ${typeFlt===''?'on':''}" data-action="_sortsSetType" data-type="">Tout</button>
+        <button class="cs-sorts-chip type ${(!typeFlt && !runeFlt && !noyFlt)?'on':''}" data-action="_sortsClearFacets" title="Effacer type, rune et noyau">Tout</button>
         ${['offensif','defensif','utilitaire'].filter(t => usedTypes.has(t)).map(t => {
           const m = TYPE_META[t];
-          return `<button class="cs-sorts-chip type ${m.cls} ${typeFlt===t?'on':''}" data-action="_sortsSetType" data-type="${t}">${m.lbl}</button>`;
+          return `<button class="cs-sorts-chip type ${m.cls} ${typeFlt===t?'on':''}" data-action="_sortsSetType" data-type="${t}" title="Combinable avec une rune et un noyau">${m.lbl}</button>`;
         }).join('')}
         ${usedRuneMetas.length ? `<span class="cs-sorts-filt-sep"></span>` : ''}
-        ${usedRuneMetas.map(rm => {
-          const v = `rune:${rm.nom}`;
-          return `<button class="cs-sorts-chip rune ${typeFlt===v?'on':''}" style="--c:${rm.color}" data-action="_sortsSetType" data-type="${v}" title="${_esc(rm.effet || rm.nom)}">${rm.icon} ${_esc(rm.nom)}</button>`;
-        }).join('')}
+        ${usedRuneMetas.map(rm =>
+          `<button class="cs-sorts-chip rune ${runeFlt===rm.nom?'on':''}" style="--c:${rm.color}" data-action="_sortsSetRune" data-rune="${_esc(rm.nom)}" title="${_esc(rm.effet || rm.nom)} — combinable avec type et noyau">${rm.icon} ${_esc(rm.nom)}</button>`
+        ).join('')}
         ${usedNoyauMetas.length ? `<span class="cs-sorts-filt-sep"></span>` : ''}
-        ${usedNoyauMetas.map(([key, nt]) => {
-          const v = `noyau:${key}`;
-          return `<button class="cs-sorts-chip noyau ${typeFlt===v?'on':''}" style="--c:${nt.color || '#8aa'}" data-action="_sortsSetType" data-type="${v}" title="Noyau ${_esc(nt.label || nt.nom || '')}">${nt.icon || '✦'} ${_esc(nt.label || nt.nom || 'Noyau')}</button>`;
-        }).join('')}
+        ${usedNoyauMetas.map(([key, nt]) =>
+          `<button class="cs-sorts-chip noyau ${noyFlt===key?'on':''}" style="--c:${nt.color || '#8aa'}" data-action="_sortsSetNoyau" data-noyau="${_esc(key)}" title="Noyau ${_esc(nt.label || nt.nom || '')} — combinable avec type et rune">${nt.icon || '✦'} ${_esc(nt.label || nt.nom || 'Noyau')}</button>`
+        ).join('')}
       </div>` : ''}
       ${filtersActive ? `<div class="cs-sorts-filt-row cs-sorts-filt-row--reset">
         <button class="cs-sorts-chip reset" data-action="_sortsResetFilters" title="Réinitialiser filtres et tri">↺ Réinitialiser</button>
       </div>` : ''}
     </div>` : ''}
 
-    <!-- ④ Répartition du deck : sockets (Grimoire) ou ligne 📊 discrète (+ Set Léger) -->
-    ${density === 'tiles' ? `<div class="cs-sorts-deckinfo">
-      ${_renderDeckSockets(allSorts.map((s, gi) => ({ s, i: gi })).filter(x => x.s.actif), deckMax, pmDelta, canEdit)}
+    <!-- ④ Tray du Deck (Préparer : sockets + PM, sticky) ou ligne 📊 discrète (+ Set Léger) -->
+    ${density === 'tiles' ? `<div class="cs-sorts-deckinfo is-tray">
+      ${_renderDeckSockets(allSorts.map((s, gi) => ({ s, i: gi })).filter(x => x.s.actif), deckMax, pmDelta, canEdit, pmCur, pmMax)}
       ${pmDelta !== 0 ? `<span class="cs-sorts-setlight" title="Le Set Léger équipé modifie automatiquement le coût de tes sorts">
         🧙 Set Léger <b>${pmDelta > 0 ? '+' : ''}${pmDelta} PM</b>
       </span>` : ''}
@@ -539,22 +943,98 @@ export function renderCharDeck(c, canEdit) {
     return html;
   }
   if (visibleCount === 0) {
-    const deckEmpty = view === 'deck' && deckCount === 0;
-    html += `<div class="cs-sorts-empty-state ${deckEmpty?'cs-sorts-empty-state--deck':'cs-sorts-noresult'}">
-      <div class="cs-sorts-empty-ico">${deckEmpty ? '⚡' : '🔎'}</div>
+    html += `<div class="cs-sorts-empty-state cs-sorts-noresult">
+      <div class="cs-sorts-empty-ico">🔎</div>
       <div class="cs-sorts-empty-body">
-        <b>${deckEmpty ? 'Deck vide' : 'Aucun sort ne correspond'}</b>
-        <span>${deckEmpty
-          ? 'Active un sort validé depuis la liste complète pour le préparer en combat.'
-          : (search ? `« ${_esc(search)} » ${typeFlt?' · '+typeFlt:''}${validationFlt?' · validation '+validationFlt:''}${view==='deck'?' · Deck uniquement':''}` : 'Essaie un autre filtre.')}</span>
+        <b>Aucun sort ne correspond</b>
+        <span>${search ? `« ${_esc(search)} »${typeFlt?' · '+typeFlt:''}${validationFlt?' · statut filtré':''}` : 'Essaie un autre filtre.'}</span>
       </div>
-      <button class="btn btn-outline btn-sm" data-action="${deckEmpty?'_sortsSetView':'_sortsResetFilters'}" ${deckEmpty?'data-view="all"':''}>${deckEmpty?'Voir tous les sorts':'Réinitialiser'}</button>
+      <button class="btn btn-outline btn-sm" data-action="_sortsResetFilters">Réinitialiser</button>
     </div></div>`;
     return html;
   }
 
-  // ── Liste catégorisée avec catégories repliables ─────────────────
-  html += `<div class="cs-sort-cats-wrap" id="cs-sort-cats-wrap">`;
+  // ── Espace de travail : navigation latérale + collection ──────────
+  const libraryHead = `<div class="cs-spellbook-library-head">
+    <div>
+      <span class="cs-spellbook-library-kicker">${mode === 'prepare' ? 'SÉLECTION DE COMBAT' : 'COMPENDIUM'}</span>
+      <h3>${mode === 'prepare' ? 'Choisis tes sorts' : 'Bibliothèque de sorts'}</h3>
+      <p>${mode === 'prepare' ? 'Clique sur une compétence pour l’ajouter ou la retirer du deck.' : 'Parcours, compare et modifie ton arsenal magique.'}</p>
+    </div>
+    <div class="cs-spellbook-library-tools">
+      ${_sortsRecipeKeyFilter ? `<button class="cs-spellbook-recipefilter" data-action="_sortsClearRecipeFilter" title="Afficher de nouveau toutes les recettes">≈ Recette ciblée <span>✕</span></button>` : ''}
+      <span class="cs-spellbook-library-count">${visibleCount} affiché${visibleCount > 1 ? 's' : ''}</span>
+    </div>
+  </div>`;
+  const comparePanel = mode === 'grimoire' ? _renderSpellComparePanel(allSorts, pmDelta, c) : '';
+  const inspectorPanel = mode === 'grimoire' ? _renderSpellInspector(allSorts, pmDelta, c, canEdit) : '';
+  const catManagerPanel = mode === 'grimoire' && canEdit && _sortsCatPanelOpen ? _renderCatManager(cats) : '';
+
+  if (mode === 'grimoire') {
+    const sidebarCats = allCats.map(cat => {
+      const entries = (sortsByCat[cat.id] || []).filter(e => !e.hidden);
+      const total = (sortsByCat[cat.id] || []).length;
+      if (!total && !canEdit) return '';
+      const prepared = entries.filter(e => e.s.actif).length;
+      return `<button class="cs-spellnav-cat" style="--cat-col:${cat.couleur}" data-action="_sortsFocusCategory" data-id="${cat.id}">
+        <span class="cs-spellnav-cat-mark"></span>
+        <span class="cs-spellnav-cat-copy"><b>${_esc(cat.nom)}</b><small>${prepared} dans le deck</small></span>
+        <span class="cs-spellnav-cat-count">${entries.length}</span>
+      </button>`;
+    }).join('');
+
+    html += `<div class="cs-spellbook-workspace ${inspectorPanel?'has-inspector':''}">
+      <aside class="cs-spellbook-sidebar ${_sortsAnalysisOpen?'is-analysis-open':''}" aria-label="Navigation du grimoire">
+        <div class="cs-spellnav-head">
+          <span class="cs-spellnav-rune">✦</span>
+          <div><b>Mon grimoire</b><small>${allSorts.length} sorts maîtrisés</small></div>
+        </div>
+        ${canEdit ? `<button class="cs-spellnav-create" data-action="addSort"><span>＋</span><b>Créer un sort</b><small>Ouvrir la forge</small></button>` : ''}
+        <div class="cs-spellnav-section">
+          <span class="cs-spellnav-label">CATÉGORIES</span>
+          <div class="cs-spellnav-cats">${sidebarCats}</div>
+        </div>
+        <button class="cs-spellnav-analysis-toggle ${_sortsAnalysisOpen?'on':''}" data-action="_sortsToggleAnalysis">
+          <span>⌁</span><b>Analyse du grimoire</b><i>${_sortsAnalysisOpen?'−':'＋'}</i>
+        </button>
+        ${usedRuneMetas.length ? `<div class="cs-spellnav-section cs-spellnav-rune-section cs-spellnav-advanced">
+          <span class="cs-spellnav-label">RUNES UTILISÉES</span>
+          <div class="cs-spellnav-runes">
+            ${usedRuneMetas.map(rm => `<button class="${runeFlt===rm.nom?'on':''}" style="--rune-col:${rm.color}" data-action="_sortsSetRune" data-rune="${_esc(rm.nom)}" title="Afficher les sorts avec la rune ${_esc(rm.nom)}">
+              <span class="cs-spellnav-rune-icon">${rm.icon}</span>
+              <span class="cs-spellnav-rune-name">${_esc(rm.nom)}</span>
+              <b>×${runeUsageCounts.get(rm.nom) || 0}</b>
+            </button>`).join('')}
+          </div>
+        </div>` : ''}
+        <div class="cs-spellnav-section cs-spellnav-insight-section cs-spellnav-advanced">
+          <span class="cs-spellnav-label">DIVERSITÉ DU GRIMOIRE</span>
+          <div class="cs-spellnav-insights">
+            <div><span class="is-unique">✦</span><p><b>${recipeCounts.size}</b><small>recettes distinctes</small></p></div>
+            ${repeatedRecipeGroups ? `<button class="has-warning ${_sortsDuplicateOnly?'on':''}" data-action="_sortsToggleDuplicateRecipes" title="Afficher uniquement les recettes répétées"><span>≈</span><p><b>${repeatedRecipeExtras}</b><small>sort${repeatedRecipeExtras > 1 ? 's' : ''} à recette répétée</small></p></button>` : `<div><span class="is-ok">✓</span><p><b>Unique</b><small>aucune recette répétée</small></p></div>`}
+            ${dominantRune && dominantRuneMeta ? `<div style="--rune-col:${dominantRuneMeta.color}"><span class="is-rune">${dominantRuneMeta.icon}</span><p><b>${_esc(dominantRune[0])}</b><small>rune dominante · ×${dominantRune[1]}</small></p></div>` : ''}
+          </div>
+        </div>
+        <div class="cs-spellnav-section cs-spellnav-advanced">
+          <span class="cs-spellnav-label">SUIVI MJ</span>
+          <div class="cs-spellnav-statuses">
+            <button data-action="_sortsSetValidation" data-val="" class="${validationFlt===''?'on':''}"><span>◆</span> Tous <b>${allSorts.length}</b></button>
+            <button data-action="_sortsSetValidation" data-val="ok" class="is-ok ${validationFlt==='ok'?'on':''}"><span>✓</span> Validés <b>${validationCounts.ok || 0}</b></button>
+            <button data-action="_sortsSetValidation" data-val="pending" class="is-wait ${validationFlt==='pending'?'on':''}"><span>⌛</span> En attente <b>${validationCounts.pending || 0}</b></button>
+            ${validationCounts.no ? `<button data-action="_sortsSetValidation" data-val="no" class="is-no ${validationFlt==='no'?'on':''}"><span>!</span> À corriger <b>${validationCounts.no}</b></button>` : ''}
+          </div>
+        </div>
+        ${canEdit ? `<button class="cs-spellnav-manage ${_sortsCatPanelOpen?'on':''}" data-action="openSortCatEditor"
+          aria-expanded="${_sortsCatPanelOpen}" aria-controls="cs-catmgr" title="Ajouter, renommer, colorer ou supprimer une catégorie">
+          <span class="cs-spellnav-manage-icon">✎</span>
+          <span class="cs-spellnav-manage-copy"><b>${_sortsCatPanelOpen?'Fermer l’éditeur':'Modifier les catégories'}</b><small>Ajouter, renommer ou colorer</small></span>
+          <i>${_sortsCatPanelOpen?'−':'›'}</i>
+        </button>` : ''}
+      </aside>
+      <main class="cs-spellbook-collection">${libraryHead}${comparePanel}${catManagerPanel}<div class="cs-sort-cats-wrap" id="cs-sort-cats-wrap">`;
+  } else {
+    html += `${libraryHead}<div class="cs-sort-cats-wrap" id="cs-sort-cats-wrap">`;
+  }
   allCats.forEach(cat => {
     const entries = sortsByCat[cat.id] || [];
     const visibleEntries = entries.filter(e => !e.hidden);
@@ -565,20 +1045,22 @@ export function renderCharDeck(c, canEdit) {
     const isCollapsed = !!collapsed[cat.id];
     const activeInCat = visibleEntries.filter(e => e.s.actif).length;
 
-    html += `<div class="cs-sort-cat-block ${isDefault?'is-default':''} ${isCollapsed?'is-collapsed':''}" data-cat-id="${cat.id}">`;
+    html += `<div class="cs-sort-cat-block ${isDefault?'is-default':''} ${isCollapsed?'is-collapsed':''}" data-cat-id="${cat.id}" style="--cat-col:${cat.couleur}">`;
     if (cats.length > 0) {
       html += `<div class="cs-sort-cat-hdr" style="--cat-col:${cat.couleur}"
-          data-action="_sortsToggleCat" data-id="${cat.id}">
-        ${(!isDefault && canEdit) ? `<span class="cs-sort-cat-drag" title="Glisser pour réordonner" data-stop-propagation>⠿</span>` : ''}
+          data-action="_sortsToggleCat" data-id="${cat.id}"
+          tabindex="0" role="button" aria-expanded="${!isCollapsed}">
+        ${(!isDefault && canEdit) ? `<span class="cs-sort-cat-drag" title="Glisser pour réordonner" data-action="" data-stop-propagation>⠿</span>` : ''}
         <span class="cs-sort-cat-chev">${isCollapsed?'▸':'▾'}</span>
         <span class="cs-sort-cat-name">${_esc(cat.nom)}</span>
-        <span class="cs-sort-cat-count">${visibleEntries.length} sort${visibleEntries.length>1?'s':''} · ${activeInCat} actif${activeInCat>1?'s':''}</span>
+        <span class="cs-sort-cat-count">${visibleEntries.length} sort${visibleEntries.length>1?'s':''} · ${activeInCat} dans le deck</span>
       </div>`;
     }
     if (!isCollapsed) {
-      html += `<div class="cs-spellcard-grid ${density==='list'?'is-list':density==='tiles'?'is-tiles':''} ${visibleEntries.length?'':'is-empty'}" data-cat="${cat.id}">`;
+      html += `<div class="cs-spellcard-grid ${density==='list'?'is-list':density==='tiles'?'is-tiles':'is-cards'} ${visibleEntries.length?'':'is-empty'}" data-cat="${cat.id}">`;
       visibleEntries.forEach(({ s, globalIdx: i }) => {
-        html += _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats, pmDelta, deckCount, deckMax);
+        html += _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats, pmDelta, deckCount, deckMax, pmCur, recipeCounts.get(_spellRecipeKey(s)) || 1, canEdit && !hasOrderFilter);
+        if (inspectorPanel && _spellCompareKey(s, i) === _sortsInspectorKey) html += inspectorPanel;
       });
       if (!visibleEntries.length) {
         html += `<div class="cs-spellcard-emptydrop">Dépose un sort ici</div>`;
@@ -588,21 +1070,9 @@ export function renderCharDeck(c, canEdit) {
     html += `</div>`;  // /cat-block
   });
 
-  // ── Pied de liste : ajouter / gérer les catégories, là où vit la structure ──
-  // (motif « ajouter une colonne » : l'action est au bout des blocs, pas dans la barre)
-  if (canEdit) {
-    html += `<div class="cs-sort-cats-foot">
-      <button class="cs-sort-catadd ${_sortsCatPanelOpen?'is-open':''}" data-action="openSortCatEditor" title="Ajouter ou gérer les catégories">
-        <span class="cs-sort-catadd-plus">${_sortsCatPanelOpen?'✕':'＋'}</span>
-        <span>${_sortsCatPanelOpen?'Fermer la gestion':'Catégorie'}</span>
-      </button>
-    </div>`;
-  }
   html += `</div>`;  // /cats-wrap
 
-  // Gestionnaire de catégories (add / renommer / recolorier / supprimer) : rendu
-  // juste sous la tuile qui le déclenche, dans la zone de contenu où vivent les catégories.
-  if (canEdit && _sortsCatPanelOpen) html += _renderCatManager(cats);
+  if (mode === 'grimoire') html += `</main></div>`; // /collection /workspace
 
   html += `</div>`;
   return html;
@@ -612,25 +1082,55 @@ export function renderCharDeck(c, canEdit) {
 function _sortsRerender() {
   _renderSpellsTab();
 }
+// Le re-render détruit l'input → on lui rend le focus (caret en fin) pour que
+// la frappe continue sans interruption.
+function _sortsRestoreSearchFocus() {
+  const el = document.getElementById('cs-sorts-search');
+  if (!el) return;
+  el.focus({ preventScroll: true });
+  const n = el.value.length;
+  try { el.setSelectionRange(n, n); } catch { /* type non textuel */ }
+}
 function _sortsSetSearch(v, opts = {}) {
   _sortsSearch = v || '';
   if (_sortsSearchTimer) clearTimeout(_sortsSearchTimer);
   if (opts.immediate) {
     _sortsSearchTimer = null;
     _sortsRerender();
+    _sortsRestoreSearchFocus();
     return;
   }
   _sortsSearchTimer = setTimeout(() => {
     _sortsSearchTimer = null;
     _sortsRerender();
+    _sortsRestoreSearchFocus();
   }, 150);
 }
-function _sortsSetView(v) {
-  _sortsView = (v === 'deck') ? 'deck' : 'all';
+function _sortsSetMode(m) {
+  const mode = m === 'prepare' ? 'prepare' : 'grimoire';
+  if (mode === _sortsMode) return;
+  _sortsMode = mode;
+  _sortsReplaceIdx = null;
+  lsJson.set('cs-sorts-mode', mode);   // défaut global (nouveaux persos)
+  _sortsPersistUi();
   _sortsRerender();
 }
+// Facettes combinables : re-cliquer une facette active la désactive.
 function _sortsSetType(t) {
-  _sortsTypeFilter = t || '';
+  const v = ['offensif', 'defensif', 'utilitaire'].includes(t) ? t : '';
+  _sortsTypeFilter = (v && v !== _sortsTypeFilter) ? v : '';
+  _sortsRerender();
+}
+function _sortsSetRune(r) {
+  _sortsRuneFilter = (r && r !== _sortsRuneFilter) ? r : '';
+  _sortsRerender();
+}
+function _sortsSetNoyau(k) {
+  _sortsNoyauFilter = (k && k !== _sortsNoyauFilter) ? k : '';
+  _sortsRerender();
+}
+function _sortsClearFacets() {
+  _sortsTypeFilter = ''; _sortsRuneFilter = ''; _sortsNoyauFilter = '';
   _sortsRerender();
 }
 function _sortsSetPm(v) {
@@ -638,10 +1138,11 @@ function _sortsSetPm(v) {
   _sortsRerender();
 }
 function _sortsSetDensity(v) {
-  const d = ['list', 'tiles'].includes(v) ? v : 'cards';
+  const d = v === 'list' ? 'list' : 'cards';
   if (d === _sortsDensity) return;
   _sortsDensity = d;
-  lsJson.set('cs-sorts-density', d);
+  lsJson.set('cs-sorts-density', d);   // défaut global (nouveaux persos)
+  _sortsPersistUi();
   _sortsRerender();
 }
 function _sortsSetValidation(v) {
@@ -649,7 +1150,7 @@ function _sortsSetValidation(v) {
   _sortsRerender();
 }
 function _sortsSetOrder(v) {
-  _sortsOrder = ['manual', 'pm', 'nom', 'validation'].includes(v) ? v : 'manual';
+  _sortsOrder = ['manual', 'pm', 'nom', 'validation', 'recipe'].includes(v) ? v : 'manual';
   _sortsRerender();
 }
 // MJ : règle le nombre de runes d'effet débloquées (characters.maxRunes) directement
@@ -680,6 +1181,7 @@ async function _sortsSetCardCat(idx, catId) {
   const prevCatId = s.catId || '';
   if (prevCatId === cleanCatId) return;
   sorts[idx] = { ...s, catId: cleanCatId };
+  ensureSpellIds(sorts);
   c.deck_sorts = sorts;
   if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
   if (charSession.getCurrentChar()?.id === c.id)
@@ -698,6 +1200,7 @@ async function _sortsSetCardCat(idx, catId) {
 function _sortsToggleCat(catId) {
   _sortsCatCollapsed = { ...(_sortsCatCollapsed || {}) };
   _sortsCatCollapsed[catId] = !_sortsCatCollapsed[catId];
+  _sortsPersistUi();
   _sortsRerender();
 }
 function _sortsToggleAllCats() {
@@ -709,25 +1212,130 @@ function _sortsToggleAllCats() {
   const next = {};
   all.forEach(id => { next[id] = anyOpen; });   // si au moins 1 ouvert → tout plier; sinon tout déplier
   _sortsCatCollapsed = next;
+  _sortsPersistUi();
   _sortsRerender();
 }
 function _sortsResetFilters() {
   if (_sortsSearchTimer) clearTimeout(_sortsSearchTimer);
   _sortsSearchTimer = null;
   _sortsSearch = '';
-  _sortsView = 'all';
   _sortsTypeFilter = '';
+  _sortsRuneFilter = '';
+  _sortsNoyauFilter = '';
   _sortsPmFilter = '';
   _sortsValidationFilter = '';
+  _sortsDuplicateOnly = false;
+  _sortsRecipeKeyFilter = '';
   _sortsOrder = 'manual';
   _sortsRerender();
 }
+
 // Panneaux repliables de l'onglet (anti-cockpit) : filtres/tri, menu outils, analyse.
 function _sortsToggleFilters() { _sortsFiltersOpen = !_sortsFiltersOpen; _sortsRerender(); }
 function _sortsToggleMenu()    { _sortsMenuOpen    = !_sortsMenuOpen;    _sortsRerender(); }
+function _sortsToggleAnalysis() { _sortsAnalysisOpen = !_sortsAnalysisOpen; _sortsRerender(); }
 
-function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta = 0, deckCount = 0, deckMax = Infinity) {
+// Navigation du compendium : déplie si nécessaire puis amène l'école choisie au centre.
+function _sortsFocusCategory(id) {
+  const scrollToCat = () => {
+    const target = [...document.querySelectorAll('.cs-sort-cat-block')]
+      .find(el => el.dataset.catId === id);
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  if (_sortsCatCollapsed?.[id]) {
+    _sortsCatCollapsed[id] = false;
+    _sortsPersistUi();
+    _sortsRerender();
+    requestAnimationFrame(() => requestAnimationFrame(scrollToCat));
+    return;
+  }
+  scrollToCat();
+}
+
+function _sortsToggleDuplicateRecipes() {
+  _sortsDuplicateOnly = !_sortsDuplicateOnly;
+  if (_sortsDuplicateOnly) _sortsRecipeKeyFilter = '';
+  _sortsRerender();
+}
+
+function _sortsFocusRecipe(key) {
+  _sortsRecipeKeyFilter = key && key !== _sortsRecipeKeyFilter ? key : '';
+  if (_sortsRecipeKeyFilter) _sortsDuplicateOnly = false;
+  _sortsRerender();
+}
+
+function _sortsClearRecipeFilter() {
+  _sortsRecipeKeyFilter = '';
+  _sortsRerender();
+}
+
+function _sortsInspectSpell(index) {
+  const c = _getCurrentSpellChar();
+  const s = (c?.deck_sorts || [])[index];
+  if (!s) return;
+  const key = _spellCompareKey(s, index);
+
+  // Comparaison guidée : après le premier choix, cliquer une autre carte
+  // sélectionne directement le second sort au lieu d'ouvrir une nouvelle fiche.
+  if (_sortsCompareKeys.length === 1 && !_sortsCompareKeys.includes(key)) {
+    _sortsToggleCompare(index);
+    return;
+  }
+
+  const opening = _sortsInspectorKey !== key;
+  _sortsInspectorKey = opening ? key : '';
+  _sortsRerender();
+  if (opening) {
+    requestAnimationFrame(() => document.querySelector('.cs-spellinspector')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+  }
+}
+
+function _sortsCloseInspector() {
+  _sortsInspectorKey = '';
+  _sortsRerender();
+}
+
+function _sortsFocusComparePanel() {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const panel = document.querySelector('.cs-spellcompare');
+    panel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    panel?.focus({ preventScroll: true });
+  }));
+}
+
+function _sortsToggleCompare(index) {
+  const c = _getCurrentSpellChar();
+  const s = (c?.deck_sorts || [])[index];
+  if (!s) return;
+  const key = _spellCompareKey(s, index);
+  if (_sortsCompareKeys.includes(key)) {
+    _sortsCompareKeys = _sortsCompareKeys.filter(k => k !== key);
+  } else if (_sortsCompareKeys.length < 2) {
+    _sortsCompareKeys = [..._sortsCompareKeys, key];
+  } else {
+    _sortsCompareKeys = [key];
+    showNotif('Nouvelle comparaison — choisis un deuxième sort.', 'info');
+  }
+
+  // Un seul sort sélectionné = mode de choix guidé. On libère la place occupée
+  // par la fiche et on garde le bandeau d'instruction visible.
+  if (_sortsCompareKeys.length === 1) _sortsInspectorKey = '';
+  _sortsRerender();
+  if (_sortsCompareKeys.length) _sortsFocusComparePanel();
+}
+
+function _sortsClearCompare() {
+  _sortsCompareKeys = [];
+  _sortsRerender();
+}
+
+function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta = 0, deckCount = 0, deckMax = Infinity, pmCur = null, recipeRepeats = 1, canDrag = false) {
   const isOpen   = openIdx === i;
+  const isTiles  = _sortsEffDensity() === 'tiles';
+  const compareKey = _spellCompareKey(s, i);
+  const isCompared = _sortsCompareKeys.includes(compareKey);
+  const isInspected = _sortsInspectorKey === compareKey;
   const runesAll = s.runes || [];
   const types    = _getSortTypes(s);
   const { action, concentration } = _getSortAction(s);
@@ -889,15 +1497,33 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
     chips.push({ icon:'🔮', val:`Suspendu · ${2 + 2 * nbDur}t`, color:'#a855f7', lbl:'Sort suspendu : déclenché plus tard, hors de ton tour' });
   }
 
+  // ── Mode Préparer : sort trop cher pour les PM actuels — informatif, pas bloquant ──
+  const pmShort = isTiles && pmCur != null
+    ? Math.max(0, _effectiveSortPm(s, pmDelta) - pmCur)
+    : 0;
+  if (pmShort > 0) {
+    chips.push({ icon:'💧', val:`Il manque ${pmShort} PM`, color:'#4f8cff', lbl:'PM insuffisants pour le lancer maintenant', dim:true });
+  }
+
   // ── Effet principal promu en ligne « héros » ; le reste en chips secondaires ──
   // primaryChip = 1er effet réel (non-dim). Les chips dim (cibles/zone/durée/DD)
   // restent en secondaire. Si aucun effet réel, pas de héros (que du secondaire).
   const primaryChip = chips.find(ch => !ch.dim) || null;
   const restChips   = primaryChip ? chips.filter(ch => ch !== primaryChip) : chips;
 
+  // ── Coût PM : UNE seule vérité (override MJ > pm calculé, + Set Léger) ──
+  // La valeur affichée = coût réellement payé (identique Deck/filtres/VTT) ;
+  // le title déroule la chaîne Base → Ajustement MJ → Set Léger → final.
+  const pmAuto  = parseInt(s.pm) || 0;
+  const pmOvr   = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : null;
+  const pmBase  = pmOvr ?? pmAuto;
+  const pmFinal = _effectiveSortPm(s, pmDelta);
+  const pmTitle = (pmOvr != null && pmOvr !== pmAuto) || pmDelta !== 0
+    ? `Coût : base ${pmAuto} PM${pmOvr != null && pmOvr !== pmAuto ? ` · ajusté MJ ${pmOvr}` : ''}${pmDelta !== 0 ? ` · Set Léger ${pmDelta > 0 ? '+' : ''}${pmDelta}` : ''} → ${pmFinal} PM`
+    : 'Coût en points de magie';
   const pmVal = pmDelta !== 0
-    ? `<span class="cs-sort-pm-old">${s.pm||0}</span><span class="cs-sort-pm-new">${Math.max(0,(s.pm||0)+pmDelta)}</span>`
-    : `${s.pm||0}`;
+    ? `<span class="cs-sort-pm-old">${pmBase}</span><span class="cs-sort-pm-new">${pmFinal}</span>`
+    : `${pmFinal}`;
 
   const typeCol = types.includes('offensif') ? '#ff6b6b'
                 : types.includes('defensif')  ? '#22c38e'
@@ -909,7 +1535,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   const valTitle = vs === 'ok' ? 'Sort validé par le Maître du Jeu'
                  : vs === 'no' ? 'Sort refusé par le Maître du Jeu'
                  : 'Pas encore validé par le Maître du Jeu';
-  const valStatus = `<span class="cs-spellcard-status cs-spellcard-status--${vs}" title="${valTitle}">${vs==='ok'?'✅':vs==='no'?'❌':'⏳'}</span>`;
+  const valStatus = vs === 'ok' ? '' : `<span class="cs-spellcard-status cs-spellcard-status--${vs}" title="${valTitle}">${vs==='no'?'❌':'⏳'}</span>`;
   const valActions = STATE.isAdmin ? `<span class="cs-spellcard-mj-actions" data-stop-propagation>
     <button class="cs-spellcard-mjbtn ok ${vs==='ok'?'is-active':''}" data-action="setSortValidation" data-idx="${i}" data-val="ok" title="Valider ce sort">✅</button>
     <button class="cs-spellcard-mjbtn no ${vs==='no'?'is-active':''}" data-action="setSortValidation" data-idx="${i}" data-val="no" title="Refuser ce sort">❌</button>
@@ -928,6 +1554,21 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   const runeChips = runeMetas.length ? `<div class="cs-spellcard-runes">
     ${runeMetas.map(rm => `<span class="cs-runechip" style="--c:${rm.color}" title="${_esc(rm.nom)} — ${_esc(rm.effet)}">${rm.icon} ${_esc(rm.nom)}${(counts[rm.nom]>1)?` ×${counts[rm.nom]}`:''}</span>`).join('')}
   </div>` : '';
+
+  const recipeStrip = `<div class="cs-spellrecipe ${recipeRepeats > 1 ? 'has-twin' : ''}" aria-label="Composition du sort">
+    <span class="cs-spellrecipe-label">RECETTE</span>
+    <div class="cs-spellrecipe-flow">
+      <span class="cs-spellrecipe-noyaux">
+        ${nts.length ? nts.map(t => `<span style="--c:${t.color || '#888'}" title="Noyau ${_esc(t.label || t.nom || '')}">${t.icon || '✦'}<i>${_esc(t.label || t.nom || 'Noyau')}</i></span>`).join('') : '<span class="is-empty is-missing" title="Ce sort ne contient aucun noyau enregistré">⚠<i>Noyau à définir</i></span>'}
+      </span>
+      <span class="cs-spellrecipe-arrow">›</span>
+      <span class="cs-spellrecipe-runes">
+        ${runeMetas.length ? runeMetas.map(rm => `<span style="--c:${rm.color}" title="${_esc(rm.nom)} — ${_esc(rm.effet || '')}"><i>${rm.icon}</i><b>${_esc(rm.nom)}</b>${counts[rm.nom] > 1 ? `<em>×${counts[rm.nom]}</em>` : ''}</span>`).join('') : '<span class="is-empty"><i>◇</i><b>Aucune rune</b></span>'}
+      </span>
+    </div>
+    ${recipeRepeats > 1 ? `<button class="cs-spellrecipe-twin ${_sortsRecipeKeyFilter===_spellRecipeKey(s)?'on':''}" data-action="_sortsFocusRecipe" data-recipe="${_esc(_spellRecipeKey(s))}" title="Afficher les ${recipeRepeats} sorts utilisant exactement cette recette">⚠ Recette ×${recipeRepeats}</button>` : ''}
+  </div>`;
+
   const validationAllows = STATE.isAdmin || vs === 'ok';
   const deckFull = deckCount >= deckMax;
   const deckAllows = s.actif || !deckFull;
@@ -938,21 +1579,23 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
       ? `Deck plein (${deckCount}/${deckMax}) — retire un sort avant d'en ajouter un`
       : (s.actif?'Retirer du deck':'Ajouter au deck');
 
-  // Grimoire (tuiles) : la tuile ENTIÈRE = préparer/retirer (toggleSort est gardé :
-  // validation MJ + deck plein → notif). Les boutons enfants gagnent au dispatch
-  // (closest [data-action]) donc ✏️/⧉/🗑️ restent sûrs. tabindex → tooltip clavier.
-  const isTiles = _sortsDensity === 'tiles';
+  // Mode Préparer (tuiles) : la tuile ENTIÈRE = _sortsTileTap (pointeur : préparer/
+  // retirer avec flux « Remplacer » si deck plein ; tactile ou lecture seule : fiche
+  // rapide). Les boutons enfants gagnent au dispatch (closest [data-action]) donc
+  // Le bouton Deck et la poignée gagnent au dispatch. tabindex → activation clavier.
   const tileAttrs = isTiles
-    ? ` tabindex="0"${canEdit ? ` data-action="toggleSort" data-idx="${i}" role="button" aria-pressed="${s.actif?'true':'false'}"` : ''}`
-    : '';
+    ? ` tabindex="0" data-action="_sortsTileTap" data-idx="${i}"${canEdit ? ` role="button" aria-pressed="${s.actif?'true':'false'}"` : ''}`
+    : ` tabindex="0" data-action="_sortsInspectSpell" data-idx="${i}" role="button" aria-label="${_sortsCompareKeys.length===1 && !isCompared?'Choisir comme second sort : ':'Inspecter '}${_esc(s.nom || 'ce sort')}"`;
+  const isSwapIn = isTiles && _sortsReplaceIdx === i;
 
-  return `<article class="cs-spellcard ${s.actif?'is-actif':''} ${isOpen?'is-open':''} ${vs==='no'?'is-refused':''}" style="--type-col:${typeCol}"
+  return `<article class="cs-spellcard ${s.actif?'is-actif':''} ${isOpen?'is-open':''} ${isCompared?'is-compared':''} ${isInspected?'is-inspected':''} ${vs==='no'?'is-refused':''} ${pmShort>0?'is-pmshort':''} ${isSwapIn?'is-swapin':''}" style="--type-col:${typeCol}"
     data-sort-idx="${i}"${tileAttrs}>
+    ${canDrag ? `<span class="cs-spellcard-drag" data-action="" data-stop-propagation title="Maintenir puis glisser pour déplacer le sort" aria-label="Déplacer le sort">⠿</span>` : ''}
 
     <header class="cs-spellcard-head">
       ${canEdit
-        ? `<div class="toggle ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" role="switch" aria-pressed="${s.actif?'true':'false'}" data-action="toggleSort" data-idx="${i}" data-stop-propagation title="${lockTitle}"></div>`
-        : `<div class="toggle ${s.actif?'on':''}"></div>`}
+        ? `<div class="toggle cs-spellcard-equip ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" data-label="${s.actif?'⚡ Deck':(!canActivate?'🔒':'＋ Deck')}" role="switch" tabindex="0" aria-checked="${s.actif?'true':'false'}" aria-label="Préparer ${_esc(s.nom||'ce sort')} dans le Deck" data-action="toggleSort" data-idx="${i}" data-stop-propagation title="${lockTitle}"></div>`
+        : `<div class="toggle cs-spellcard-equip ${s.actif?'on':''}" data-label="${s.actif?'⚡ Deck':'Hors deck'}"></div>`}
       <span class="cs-spellcard-icon">${s.icon ? _esc(s.icon) : '✦'}</span>
       <div class="cs-spellcard-id">
         <div class="cs-spellcard-name-row">
@@ -965,15 +1608,17 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
           ${noyauPills}
         </div>
       </div>
-      <span class="cs-spellcard-pm" title="Coût en points de magie">${pmVal}<small>PM</small></span>
+      <span class="cs-spellcard-pm" title="${_esc(pmTitle)}">${pmVal}<small>PM</small></span>
     </header>
+
+    ${recipeStrip}
 
     ${(primaryChip || restChips.length) ? `<div class="cs-spellcard-tags">
       ${primaryChip ? `<span class="cs-spellcard-hero" style="--c:${primaryChip.color}"${primaryChip.lbl?` title="${_esc(primaryChip.lbl)}"`:''}><span class="cs-spellcard-hero-ic">${primaryChip.icon}</span><span class="cs-spellcard-hero-val">${_esc(primaryChip.val)}</span></span>` : ''}
       ${restChips.map(ch => `<span class="cs-sort-sstat${ch.dim?' cs-sort-sstat--dim':''}" style="--c:${ch.color}"${ch.lbl?` title="${_esc(ch.lbl)}"`:''}>${ch.icon} ${_esc(ch.val)}</span>`).join('')}
     </div>` : ''}
 
-    ${s.effet ? `<p class="cs-spellcard-desc ${isOpen?'is-full':''}" data-action="toggleSortDetail" data-idx="${i}" title="Cliquer pour ${isOpen?'replier':'voir le détail'}">${isOpen ? _nl2br(s.effet) : _esc(s.effet)}</p>` : ''}
+    ${s.effet ? `<p class="cs-spellcard-desc" data-action="_sortsInspectSpell" data-idx="${i}" title="Ouvrir la fiche du sort">${_esc(s.effet)}</p>` : ''}
 
     ${s.mjNotes ? `<div class="cs-spellcard-mjnote" title="Note / restriction du Maître du Jeu">
       <span class="cs-spellcard-mjnote-ic">📌</span>
@@ -994,17 +1639,6 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
       </div>
     </div>` : ''}
 
-    <!-- data-action vide = bouclier : en tuile, un clic raté dans le footer
-         s'arrête ici (no-op) au lieu de remonter au toggleSort de la tuile -->
-    <footer class="cs-spellcard-foot" data-action="">
-      <button class="cs-spellcard-detailbtn" data-action="toggleSortDetail" data-idx="${i}">${isOpen?'▲ Replier':'▼ Détails'}</button>
-      ${canEdit ? `<div class="cs-spellcard-acts" data-stop-propagation>
-        ${runesAll.includes('Invocation') ? `<button class="btn-icon" data-action="_openInvocationConfig" data-idx="${i}" title="Configurer l'invocation (créatures à invoquer)">🐾</button>` : ''}
-        <button class="btn-icon" data-action="duplicateSort" data-idx="${i}" title="Dupliquer le sort">⧉</button>
-        <button class="btn-icon" data-action="editSort" data-idx="${i}" title="Éditer le sort">✏️</button>
-        <button class="btn-icon" data-action="deleteSort" data-idx="${i}" title="Supprimer">🗑️</button>
-      </div>` : ''}
-    </footer>
   </article>`;
 }
 
@@ -1016,10 +1650,10 @@ const _CAT_COLORS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'
 function _renderCatManager(cats = []) {
   const swatch = (col, action, idx, sel) =>
     `<button type="button" class="cs-catmgr-col ${sel?'on':''}" style="background:${col}" data-action="${action}" data-stop-propagation${idx!=null?` data-idx="${idx}"`:''} data-col="${col}" title="${sel?'Couleur actuelle':'Choisir cette couleur'}"></button>`;
-  return `<div class="cs-catmgr">
+  return `<div class="cs-catmgr" id="cs-catmgr" tabindex="-1" aria-label="Modifier les catégories">
     <div class="cs-catmgr-head">
-      <span class="cs-catmgr-title">📂 Catégories</span>
-      <span class="cs-catmgr-sub">Glisse un sort d'une catégorie à l'autre. Supprimer une catégorie ne supprime pas ses sorts.</span>
+      <span class="cs-catmgr-title">📂 Modifier les catégories</span>
+      <span class="cs-catmgr-sub">Ajoute, renomme ou colore tes sections. Supprimer une catégorie conserve toujours ses sorts.</span>
     </div>
     ${cats.length ? `<div class="cs-catmgr-list">
       ${cats.map((cat, i) => `
@@ -1043,6 +1677,11 @@ function _renderCatManager(cats = []) {
 export function openSortCatEditor() {
   _sortsCatPanelOpen = !_sortsCatPanelOpen;
   _renderSpellsTab();
+  if (_sortsCatPanelOpen) requestAnimationFrame(() => requestAnimationFrame(() => {
+    const panel = document.getElementById('cs-catmgr');
+    panel?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    panel?.focus({ preventScroll: true });
+  }));
 }
 
 function _pickNewSortCatColor(btn) {
@@ -3674,15 +4313,17 @@ export function selectNoyau(el, noyauId, noyauLabel, noyauColor) {
 
 
 // Signature du CONTENU jouable d'un sort (hors champs volatils : actif, validation,
-// catégorie, PM dérivé, notes/flags MJ). Sert à détecter une modification réelle.
-// `types` (+ son dérivé legacy `typeSoin`) est exclu : changer le type d'un sort
-// (offensif/défensif/utilitaire) ne redéclenche PAS la validation MJ. Un changement
-// de mode Protection reste capté par `protectionMode` (non exclu).
+// catégorie, PM dérivé, notes/flags MJ, id). Sert à détecter une modification réelle.
+// `types` est mécanique (offensif active les dégâts d'impact côté carte/VTT) →
+// inclus sous forme CANONIQUE via _getSortTypes (dérive aussi le legacy typeSoin,
+// sinon un vieux sort sans champ `types` diffèrerait au premier resave sans
+// changement réel). `typeSoin` brut reste exclu (dérivé, redondant).
 function _sortContentSig(s) {
   if (!s) return '';
-  const SKIP = new Set(['actif','mjValidation','mjValidated','catId','pm','pmOverride','mjNotes','mjAlwaysMax','enchantSlot','types','typeSoin']);
+  const SKIP = new Set(['actif','mjValidation','mjValidated','catId','pm','pmOverride','mjNotes','mjAlwaysMax','enchantSlot','types','typeSoin','id']);
   const o = {};
   Object.keys(s).filter(k => !SKIP.has(k)).sort().forEach(k => { o[k] = s[k]; });
+  o.types = [...(_getSortTypes(s) || [])].sort();
   return JSON.stringify(o);
 }
 
@@ -3730,14 +4371,23 @@ function _sanitizeAbsorbedComboFields(s) {
   return s;
 }
 
-export async function saveSort(idx) {
+// Anti double-clic : une sauvegarde de sort à la fois. L'état local n'est modifié
+// QU'APRÈS le succès Firestore (plus de doublon possible sur retry après échec).
+let _sortSaving = false;
+export async function saveSort(idx, btn = null) {
   // Si on édite une action d'item (depuis le shop), on aiguille vers le bon save
   if (_itemEditCtx) return _saveItemSpell();
+  if (_sortSaving) return;
   const hasName = _requireSortName();
   const hasNoyau = _requireNoyauSelection();
   if (!hasName || !hasNoyau) return;
     const c = STATE.activeChar; if(!c) return;
     const sorts = c.deck_sorts||[];
+  _sortSaving = true;
+  const saveBtn = btn || document.querySelector('[data-action="saveSort"]');
+  saveBtn?.setAttribute('disabled', '');
+  saveBtn?.setAttribute('aria-busy', 'true');
+  try {
     const noyau       = document.getElementById('s-noyau')?.value||'';
     const noyauTypeId = document.getElementById('s-noyau-id')?.value||'';
 
@@ -3836,37 +4486,54 @@ export async function saveSort(idx) {
       toucherStat: _readVisibleStatOverride('s-toucher-stat'),
       degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
       invocation:   _buildInvocationFromDOM(),
-      mjNotes:      document.getElementById('s-mj-notes')?.value?.trim() || '',
+      // Note MJ : VERROUILLÉE côté joueur — un joueur ne peut ni la modifier ni
+      // l'effacer, elle est reconduite telle quelle (le champ de la forge n'est
+      // qu'un affichage pour lui).
+      mjNotes:      STATE.isAdmin
+        ? (document.getElementById('s-mj-notes')?.value?.trim() || '')
+        : (idx >= 0 ? (sorts[idx]?.mjNotes || '') : ''),
     });
-    // Validation : un sort VALIDÉ modifié par un JOUEUR repasse « À valider » et
-    // sort du Deck (un sort non validé ne peut pas rester actif). Le MJ pilote la
-    // validation explicitement (sélecteur) → on ne touche pas à son choix.
-    if (!STATE.isAdmin && idx >= 0 && prevVal === 'ok'
+    // Id STABLE (les index bougent au tri/drag ; le VTT peut référencer le sort).
+    newSort.id = (idx >= 0 && sorts[idx]?.id) || spellUid();
+    // Validation : côté JOUEUR, un sort VALIDÉ modifié repasse « À valider » et
+    // sort du Deck ; un sort REFUSÉ corrigé repart AUSSI dans la file du MJ
+    // (sinon il resterait refusé à jamais). Le MJ pilote la validation
+    // explicitement (sélecteur) → on ne touche pas à son choix.
+    if (!STATE.isAdmin && idx >= 0 && (prevVal === 'ok' || prevVal === 'no')
         && _sortContentSig(sorts[idx]) !== _sortContentSig(newSort)) {
       newSort.mjValidation = 'pending';
       newSort.mjValidated  = false;
       newSort.actif        = false;
-      showNotif('Sort modifié → repasse « À valider » et sort du Deck.', 'info');
+      showNotif(prevVal === 'ok'
+        ? 'Sort modifié → repasse « À valider » et sort du Deck.'
+        : 'Sort corrigé → renvoyé en validation au MJ.', 'info');
     }
 
     const isNew = idx < 0;
-    if (idx>=0) sorts[idx]=newSort; else sorts.push(newSort);
-    c.deck_sorts=sorts;
+    // Copie de travail : l'état local (c.deck_sorts) n'est modifié QU'AU SUCCÈS.
+    const next = [...sorts];
+    if (idx >= 0) next[idx] = newSort; else next.push(newSort);
+    ensureSpellIds(next);
+    if (!(await trySave('characters', c.id, { deck_sorts: next }))) return;   // échec : modal ouverte, rien perdu
+
+    c.deck_sorts = next;
     // Sync les références pour que les filtres / re-render lisent la version fraîche
     if (charSession.getCurrentChar()?.id === c.id) charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
     if (STATE.activeChar?.id === c.id)    STATE.activeChar    = c;
-    if (await trySave('characters',c.id,{deck_sorts:sorts})) {
-      _sortModalBaseline = null; clearModalCloseGuard();   // désarme la garde avant la fermeture
-      closeModal();
-      showNotif(`Sort enregistré — ${newSort.pm} PM`, 'success');
-    }
+    _sortModalBaseline = null; clearModalCloseGuard();   // désarme la garde avant la fermeture
+    closeModal();
+    const _setDelta = getArmorSetData(c)?.modifiers?.spellPmDelta || 0;
+    showNotif(`Sort enregistré — ${_effectiveSortPm(newSort, _setDelta)} PM`, 'success');
 
     // ── Sur ajout : s'assure que le nouveau sort soit visible ────────
     if (isNew) {
       // Reset les filtres qui pourraient cacher le sort fraîchement créé
       _sortsSearch = '';
       _sortsTypeFilter = '';
-      _sortsView = 'all';
+      _sortsRuneFilter = '';
+      _sortsNoyauFilter = '';
+      _sortsPmFilter = '';
+      _sortsValidationFilter = '';
       // Déplie la catégorie où le sort vient d'être ajouté
       const newCatId = newSort.catId
         && (c.sort_cats || []).find(cat => cat.id === newSort.catId)
@@ -3877,6 +4544,11 @@ export async function saveSort(idx) {
 
     // Force un re-render du tab Sorts en V3 si dispo, sinon fallback legacy
     _renderSpellsTab(c);
+  } finally {
+    _sortSaving = false;
+    saveBtn?.removeAttribute('disabled');
+    saveBtn?.removeAttribute('aria-busy');
+  }
 }
 
 /** Build d'un objet "sort" depuis le formulaire courant — réutilisable pour items. */
@@ -4002,7 +4674,7 @@ registerActions({
   openSortCatEditor:      ()    => openSortCatEditor(),
   toggleSortDetail:       (btn) => toggleSortDetail(Number(btn.dataset.idx)),
   editSort:               (btn) => editSort(Number(btn.dataset.idx)),
-  saveSort:               (btn) => saveSort(Number(btn.dataset.idx)),
+  saveSort:               (btn) => saveSort(Number(btn.dataset.idx), btn),
   selectNoyau:            (btn) => selectNoyau(btn, btn.dataset.noyauId, btn.dataset.noyauLabel, btn.dataset.noyauColor),
   runeIncrement:          (btn) => runeIncrement(btn.dataset.nom),
   runeDecrement:          (btn) => runeDecrement(btn.dataset.nom),
@@ -4011,20 +4683,36 @@ registerActions({
   _enableSortCustom:      (btn) => _enableSortCustom(btn.dataset.field),
   _disableSortCustom:     (btn) => _disableSortCustom(btn.dataset.field),
   _sortsSetSearch:        (btn) => _sortsSetSearch(btn.dataset.val, { immediate: true }),
-  _sortsSetView:          (btn) => _sortsSetView(btn.dataset.view),
+  _sortsSetMode:          (btn) => _sortsSetMode(btn.dataset.mode),
   _sortsSetType:          (btn) => _sortsSetType(btn.dataset.type),
+  _sortsSetRune:          (btn) => _sortsSetRune(btn.dataset.rune),
+  _sortsSetNoyau:         (btn) => _sortsSetNoyau(btn.dataset.noyau),
+  _sortsClearFacets:      ()    => _sortsClearFacets(),
   _sortsSetPm:            (btn) => _sortsSetPm(btn.dataset.pm),
   _sortsSetDensity:       (btn) => _sortsSetDensity(btn.dataset.density),
   _sortsHintPreparable:   ()    => _sortsHintPreparable(),
+  _sortsTileTap:          (btn) => _sortsTileTap(Number(btn.dataset.idx)),
+  _sortsSheetToggle:      (btn) => _sortsSheetToggle(Number(btn.dataset.idx)),
+  _sortsReplaceWith:      (btn) => _sortsReplaceWith(Number(btn.dataset.idx)),
+  _sortsCancelReplace:    ()    => _sortsCancelReplace(),
   _sortsSetValidation:    (btn) => _sortsSetValidation(btn.dataset.val),
   _sortsSetOrder:         (btn) => _sortsSetOrder(btn.dataset.order),
   _sortsAdjRuneLimit:     (btn) => _sortsAdjRuneLimit(btn.dataset.delta),
   _sortsSetCardCat:       (el)  => _sortsSetCardCat(Number(el.dataset.idx), el.value),
   _sortsToggleCat:        (btn) => _sortsToggleCat(btn.dataset.id),
+  _sortsFocusCategory:    (btn) => _sortsFocusCategory(btn.dataset.id),
+  _sortsToggleDuplicateRecipes: () => _sortsToggleDuplicateRecipes(),
+  _sortsFocusRecipe:      (btn) => _sortsFocusRecipe(btn.dataset.recipe),
+  _sortsClearRecipeFilter: ()   => _sortsClearRecipeFilter(),
+  _sortsInspectSpell:     (btn) => _sortsInspectSpell(Number(btn.dataset.idx)),
+  _sortsCloseInspector:   ()    => _sortsCloseInspector(),
+  _sortsToggleCompare:    (btn) => _sortsToggleCompare(Number(btn.dataset.idx)),
+  _sortsClearCompare:     ()    => _sortsClearCompare(),
   _sortsToggleAllCats:    ()    => _sortsToggleAllCats(),
   _sortsResetFilters:     ()    => _sortsResetFilters(),
   _sortsToggleFilters:    ()    => _sortsToggleFilters(),
   _sortsToggleMenu:       ()    => _sortsToggleMenu(),
+  _sortsToggleAnalysis:   ()    => _sortsToggleAnalysis(),
   _renameSortCat:         (el)  => _renameSortCat(Number(el.dataset.idx), el.value),
   _recolorSortCat:        (btn) => _recolorSortCat(Number(btn.dataset.idx), btn.dataset.col),
   _delSortCat:            (btn) => _delSortCat(Number(btn.dataset.idx)),

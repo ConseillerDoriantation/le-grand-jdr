@@ -512,6 +512,14 @@ export function _resolveUidName(uid) {
   return uid.slice(0, 6) + '…';
 }
 
+// ── Ressource PM CANONIQUE d'un perso ────────────────────────────────────────
+// La fiche écrit `pmActuel` ; le VTT écrivait `pm` → deux vérités qui divergent
+// (PM pleins affichés sur la fiche après plusieurs lancements). Lecture :
+// pmActuel (fiche) > pm (legacy VTT) > max. Écriture : LES DEUX champs, pour
+// rester cohérent avec les anciennes sessions et tous les consommateurs.
+export function _charPmCur(c) { return c?.pmActuel ?? c?.pm ?? calcPMMax(c); }
+export function _charPmPatch(v) { return { pm: v, pmActuel: v }; }
+
 // HP écrit sur la fiche source (bidirectionnel)
 export async function _setHp(t, newHp) {
   const v = Math.max(0, newHp);
@@ -2484,7 +2492,7 @@ async function _vttSpendSpellPm(src, opt) {
   const c = _characterForToken(src);
   if (opt.pmCost > 0 && c?.id) {
     await updateDoc(_chrRef(c.id), {
-      pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost),
+      ..._charPmPatch(Math.max(0, _charPmCur(c) - opt.pmCost)),
       vttControlTokenId: src.id,
     });
   }
@@ -3009,7 +3017,7 @@ export const _STAT_SHORT = { force:'For', dexterite:'Dex', constitution:'Con', s
  */
 function _buildSpellOption(s, ctx) {
   const {
-    id, sortIdx, label,
+    id, sortIdx, spellId = null, label,
     c,                              // char ou char synthétique (utilisé par getMod / formules)
     portee,
     pmCost, basePm, pmRaw, pmSetDelta = 0,
@@ -3073,7 +3081,7 @@ function _buildSpellOption(s, ctx) {
 
   // Bloc de champs communs réutilisé dans chaque variante d'option
   const common = {
-    id, sortIdx, portee,
+    id, sortIdx, spellId, portee,
     pmCost, basePm, pmRaw, pmSetDelta,
     nbCibles, zoneW, zoneH, zoneShape, mods, actionType,
     mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
@@ -3649,10 +3657,13 @@ function _buildAttackOptions(t) {
       const freeCasts = _multiCastFree.get(freeKey) || 0;
       // Sort suspendu actif pour CE sort (buff non expiré) → une version GRATUITE
       // du sort est dispo dans la liste (cast une fois → consomme le buff).
+      // Match par ID STABLE (s.id) d'abord — un réordonnancement du Grimoire ne
+      // doit pas faire pointer le buff vers un autre sort ; sortIdx = legacy.
       const _rNow = VS.session?.combat?.round ?? 0;
       const hasSuspendedBuff = (t.buffs || []).some(b =>
-        b.type === 'suspended_spell' && b.sortIdx === idx &&
-        (b.expiresAtRound == null || _rNow === 0 || _rNow <= b.expiresAtRound));
+        b.type === 'suspended_spell'
+        && ((b.spellId && s.id) ? b.spellId === s.id : b.sortIdx === idx)
+        && (b.expiresAtRound == null || _rNow === 0 || _rNow <= b.expiresAtRound));
       const isOneShot = _freeNextCast.has(freeKey) || hasSuspendedBuff;
       const cout      = (freeCasts > 0 || isOneShot) ? 0 : basePm;
       // Catégorie pour le tri dans le modal VTT
@@ -3661,7 +3672,7 @@ function _buildAttackOptions(t) {
       const catMeta  = { catId: s.catId || null, catLabel: sortCat?.nom || null, catColor: sortCat?.couleur || null };
 
       options.push(_buildSpellOption(s, {
-        id: `sort_${idx}`, sortIdx: idx, label: s.nom || `Sort ${idx+1}`,
+        id: `sort_${idx}`, sortIdx: idx, spellId: s.id || null, label: s.nom || `Sort ${idx+1}`,
         c,
         portee: baseRange,
         pmCost: cout, basePm, pmRaw, pmSetDelta: spellPmDelta,
@@ -3833,7 +3844,7 @@ function _effectiveTokenPm(t) {
 function _captureUndoSnapshot(srcId, targetIds) {
   const ids = [...new Set([srcId, ...(targetIds || [])].filter(Boolean))];
   const tokens = {}, chars = {};
-  const addChar = (cid) => { if (cid && chars[cid] === undefined) { const c = VS.characters[cid]; chars[cid] = { pm: c ? (c.pm ?? calcPMMax(c)) : null }; } };
+  const addChar = (cid) => { if (cid && chars[cid] === undefined) { const c = VS.characters[cid]; chars[cid] = { pm: c ? _charPmCur(c) : null }; } };
   for (const id of ids) {
     const t = VS.tokens[id]?.data; if (!t) continue;
     tokens[id] = {
@@ -5592,7 +5603,7 @@ async function _vttRollAttack() {
     if (_pmPayerCharId) {
       const c = VS.characters[_pmPayerCharId];
       if (c) await updateDoc(_chrRef(_pmPayerCharId), {
-        pm: Math.max(0, (c.pm ?? calcPMMax(c)) - opt.pmCost),
+        ..._charPmPatch(Math.max(0, _charPmCur(c) - opt.pmCost)),
         vttControlTokenId: src.id,
       });
       return;
@@ -5666,7 +5677,7 @@ async function _vttRollAttack() {
     if (opt.pmCost > 0 && _pmPayerCharId) {
       const cPm = VS.characters[_pmPayerCharId];
       if (cPm) {
-        const actualPm = cPm.pm ?? calcPMMax(cPm);
+        const actualPm = _charPmCur(cPm);
         if (actualPm < opt.pmCost) {
           const _who = src.summonOwnerId ? ' du lanceur' : '';
           showNotif(`⚠ PM insuffisants${_who} (${actualPm}/${opt.pmCost} requis)`, 'error');
@@ -5682,7 +5693,9 @@ async function _vttRollAttack() {
     // Cast de la version gratuite (le buff existe) : on consomme le buff puis on
     // laisse l'exécution onHit normale suivre — pas de re-suspension.
     if (opt.mods?.sortSuspendu) {
-      const alreadySuspended = (src.buffs || []).some(b => b.type === 'suspended_spell' && b.sortIdx === opt.sortIdx);
+      const _suspMatch = (b) => b.type === 'suspended_spell'
+        && ((b.spellId && opt.spellId) ? b.spellId === opt.spellId : b.sortIdx === opt.sortIdx);
+      const alreadySuspended = (src.buffs || []).some(_suspMatch);
       if (!alreadySuspended) {
         await _deductPm();
         // Durée de stockage pilotée par le combo (2 tours + 2 par rune Durée),
@@ -5695,6 +5708,7 @@ async function _vttRollAttack() {
           ...sharedSusp,
           type: 'suspended_spell',
           sortIdx: opt.sortIdx ?? null,
+          spellId: opt.spellId ?? null,   // id STABLE : survit au réordonnancement du Grimoire
           icon: '🔮',
           totalDuration: graceTurns,
           expiresAtRound: baseRound + graceTurns - 1,
@@ -5707,7 +5721,7 @@ async function _vttRollAttack() {
       }
       // Version gratuite : retire le buff (consommé), puis l'effet onHit s'exécute
       // normalement (coût déjà 0). Pas de return → on continue le flux d'attaque.
-      const remaining = (src.buffs || []).filter(b => !(b.type === 'suspended_spell' && b.sortIdx === opt.sortIdx));
+      const remaining = (src.buffs || []).filter(b => !_suspMatch(b));
       await updateDoc(_tokRef(srcId), { buffs: remaining }).catch(() => {});
     }
 
@@ -8118,7 +8132,7 @@ async function _vttRemoveBuff(tokenId, idx) {
 export function _findUsableReactiveShield(dtok, rank) {
   const char = _characterForToken(dtok);
   if (!char) return null;
-  const curPm = char.pm ?? calcPMMax(char);
+  const curPm = _charPmCur(char);
   let chosen = null;
   for (const s of (char.deck_sorts || [])) {
     if (!s?.actif) continue;
@@ -8150,13 +8164,13 @@ async function _vttShieldCancelAttack(logId) {
   const hpMax = m.hpMax ?? lt.displayHpMax ?? 20;
   const curHp = lt.displayHp ?? dtok.hp ?? 0;
   const newHp = Math.min(hpMax, curHp + restore);
-  const curPm = pick.char.pm ?? calcPMMax(pick.char);
+  const curPm = _charPmCur(pick.char);
 
   try {
     await _setHp(dtok, newHp);
     await _syncDownedCondition(dtok, newHp);
     await updateDoc(_chrRef(pick.char.id), {
-      pm: Math.max(0, curPm - pick.cost),
+      ..._charPmPatch(Math.max(0, curPm - pick.cost)),
       vttControlTokenId: dtok.id,
     });
     await updateDoc(doc(_logCol(), logId), {
@@ -8202,7 +8216,7 @@ async function _vttUndoAction(logId) {
       if (t && st.hp != null) await _setHp(t, st.hp).catch(() => {});
     }
     for (const [cid, st] of Object.entries(snap.chars || {})) {
-      if (st.pm != null) await updateDoc(_chrRef(cid), { pm: st.pm }).catch(() => {});
+      if (st.pm != null) await updateDoc(_chrRef(cid), _charPmPatch(st.pm)).catch(() => {});
     }
     // Statistiques : réverse le delta enregistré avec l'action (décrémente).
     if (m.statsDelta) applyStatsDelta(m.statsDelta, -1);
@@ -8328,7 +8342,7 @@ async function _vttSetHp(tokenId,hp) {
 async function _vttSetPm(tokenId,pm) {
   const t=VS.tokens[tokenId]?.data; if (!t) return;
   const v=Math.max(0,pm);
-  if (t.characterId) await updateDoc(_chrRef(t.characterId), { pm:v, vttControlTokenId:tokenId }).catch(()=>{});
+  if (t.characterId) await updateDoc(_chrRef(t.characterId), { ..._charPmPatch(v), vttControlTokenId:tokenId }).catch(()=>{});
   else if (t.npcId)  await updateDoc(_npcRef(t.npcId),{pmCurrent:v}).catch(()=>{});
 }
 

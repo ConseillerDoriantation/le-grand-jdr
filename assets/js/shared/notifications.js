@@ -4,13 +4,31 @@
 
 let _timer = null;
 
-export function showNotif(msg, type = 'success') {
+/**
+ * Toast. `opts` (optionnel) :
+ *   action   — { label, onClick } : bouton d'action dans le toast (ex. « ↺ Annuler »)
+ *   duration — durée d'affichage en ms (défaut 3000)
+ */
+export function showNotif(msg, type = 'success', opts = {}) {
   const el = document.getElementById('notif');
   if (!el) return;
   el.textContent = msg;
+  if (opts.action?.label && typeof opts.action.onClick === 'function') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'notif-action';
+    btn.textContent = opts.action.label;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      clearTimeout(_timer);
+      el.classList.remove('show');
+      opts.action.onClick();
+    }, { once: true });
+    el.appendChild(btn);
+  }
   el.className   = `notif ${type} show`;
   clearTimeout(_timer);
-  _timer = setTimeout(() => el.classList.remove('show'), 3000);
+  _timer = setTimeout(() => el.classList.remove('show'), opts.duration || 3000);
 }
 
 /**

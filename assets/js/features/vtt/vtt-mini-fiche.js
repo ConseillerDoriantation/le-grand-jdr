@@ -423,7 +423,8 @@ async function _vttMsDeleteItem(charId, uid, invIndex) {
 
 function _msTabCombat(c, uid, canEdit) {
   const pvMax = calcPVMax(c), pmMax = calcPMMax(c);
-  const pvCur = c?.hp ?? pvMax, pmCur = c?.pm ?? pmMax;
+  // PM canonique : pmActuel (fiche) > pm (legacy VTT) > max — cf. _charPmCur (vtt.js)
+  const pvCur = c?.hp ?? pvMax, pmCur = c?.pmActuel ?? c?.pm ?? pmMax;
   const pvPct = pvMax > 0 ? Math.round(Math.max(0, pvCur) / pvMax * 100) : 0;
   const pmPct = pmMax > 0 ? Math.round(Math.max(0, pmCur) / pmMax * 100) : 0;
   const pvCol = pvPct > 50 ? '#22c38e' : pvPct > 25 ? '#f59e0b' : '#ef4444';
@@ -651,7 +652,7 @@ function _vttSpellCardHtml(s, i, c, uid, canEdit, deckCount = 0, deckMax = Infin
           ${noyauPills}
         </div>
       </div>
-      <span class="cs-spellcard-pm" title="Coût en PM">${s.pm||0}<small>PM</small></span>
+      <span class="cs-spellcard-pm" title="Coût en PM (ajustement MJ inclus)">${Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : (parseInt(s.pm) || 0)}<small>PM</small></span>
     </header>
     <div class="cs-spellcard-tags">${valBadge}${chips.map(ch => `<span class="cs-sort-sstat${ch.dim?' cs-sort-sstat--dim':''}" style="--c:${ch.color}"${ch.lbl?` title="${_esc(ch.lbl)}"`:''}>${ch.icon} ${_esc(ch.val)}</span>`).join('')}</div>
     ${s.effet ? `<p class="cs-spellcard-desc">${_esc(s.effet)}</p>` : ''}

@@ -125,6 +125,8 @@ const PRIX_VENTE_RATIO = 0.6; // 60%
 let _cats  = [];
 let _items = [];
 let _shopSousTypes = [];
+// Index local des objets visibles : recherches et filtres sans lecture Firestore.
+let _shopSearchIndex = [];
 function _setShopCharId(id = '') {
   setShopCharId(id);
 }
@@ -163,6 +165,7 @@ function toggleFav(id) {
   else renderShop();
 }
 const SMART_KINDS = ['fav', 'payable', 'boost', 'upgrade', 'stock', 'new'];
+const CHAR_SMART_KINDS = new Set(['payable', 'boost', 'upgrade']);
 
 // ── Tweaks utilisateur (lot 7) : préférences d'affichage persistées en LS ──
 // Layout : 'sidebar' (catégories à gauche) | 'tabs' (catégories en pastilles
@@ -201,6 +204,7 @@ async function loadShopData() {
   _cats.sort((a,b) => (a.ordre||0)-(b.ordre||0));
   _items.sort((a,b) => (a.ordre??999)-(b.ordre??999));
   _shopSousTypes = [...new Set(_items.filter(i=>i.sousType).map(i=>i.sousType))].sort();
+  _rebuildShopSearchIndex();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -335,9 +339,7 @@ export async function renderShop() {
       </div>
 
       <div class="sh-topbar-tools">
-        ${charStripHtml}
-        <button class="btn btn-arcane btn-sm" data-sh-action="openAtelier" title="Essayer / construire un équipement">🪄 Atelier</button>
-        <button class="btn btn-gold btn-sm" data-sh-action="openArtisan" title="Améliorer ton équipement">🔨 Artisan</button>
+        <div class="sh-topbar-character">${charStripHtml}</div>
         <button class="btn btn-outline btn-sm sh-tweaks-btn" data-sh-action="openTweaks" title="Affichage : layout, densité, colonnes">⚙️</button>`;
 
   if (STATE.isAdmin) {
@@ -354,6 +356,29 @@ export async function renderShop() {
   html += `
       </div>
     </div>
+
+    <section class="sh-workshop-launchers" aria-label="Atelier et artisan">
+      <button type="button" class="sh-workshop-card sh-workshop-card--atelier"
+        data-sh-action="openAtelier" title="Essayer et construire un équipement">
+        <span class="sh-workshop-card-icon" aria-hidden="true">🪄</span>
+        <span class="sh-workshop-card-copy">
+          <span class="sh-workshop-card-kicker">Préparer son équipement</span>
+          <strong>Atelier</strong>
+          <span class="sh-workshop-card-desc">Composer un build et comparer ses statistiques avant achat</span>
+        </span>
+        <span class="sh-workshop-card-arrow" aria-hidden="true">→</span>
+      </button>
+      <button type="button" class="sh-workshop-card sh-workshop-card--artisan"
+        data-sh-action="openArtisan" title="Améliorer son équipement">
+        <span class="sh-workshop-card-icon" aria-hidden="true">🔨</span>
+        <span class="sh-workshop-card-copy">
+          <span class="sh-workshop-card-kicker">Faire évoluer son équipement</span>
+          <strong>Artisan</strong>
+          <span class="sh-workshop-card-desc">Améliorer, sertir et recycler les objets du personnage</span>
+        </span>
+        <span class="sh-workshop-card-arrow" aria-hidden="true">→</span>
+      </button>
+    </section>
 
     ${_shopTweaks.layout === 'tabs' ? _renderCatTabsBar() : ''}
 
@@ -502,7 +527,7 @@ function _renderCatTabsBar() {
 // Rangée de chips contextuelles (payable / boost / upgrade / stock / new),
 // avec compteurs live. S'insère au-dessus de la grille d'articles.
 function _renderSmartBar() {
-  const base = _visibleItems();
+  const base = _getCachedVisibleItems();
   const SMART_META = [
     { k:'fav',     ico:'⭐', lbl:'Mes favoris',                cls:'fav'     },
     { k:'payable', ico:'💰', lbl:'Je peux me payer',         cls:'payable' },
@@ -511,11 +536,13 @@ function _renderSmartBar() {
     { k:'stock',   ico:'📦', lbl:'En stock',                   cls:'stock'   },
     { k:'new',     ico:'✨', lbl:'Nouveautés',                 cls:'new'     },
   ];
+  const activeChar = _getActiveShopChar();
   const chips = SMART_META.map(m => {
-    const on = _smartFilters.has(m.k);
-    const n  = _shopSmartCount(m.k, base);
+    const unavailable = CHAR_SMART_KINDS.has(m.k) && !activeChar;
+    const on = !unavailable && _smartFilters.has(m.k);
+    const n  = unavailable ? "—" : _shopSmartCount(m.k, base);
     return `<button class="sh-smart-chip ${m.cls} ${on?'on':''}"
-      data-sh-action="toggleSmart" data-smart="${m.k}"
+      data-sh-action="toggleSmart" data-smart="${m.k}" ${unavailable ? "disabled" : ""}
       title="${_esc(m.lbl)}">
       <span class="sh-smart-ico">${m.ico}</span>
       <span class="sh-smart-lbl">${_esc(m.lbl)}</span>
@@ -607,7 +634,7 @@ function _renderHome() {
 }
 
 function _renderHomeResults() {
-  if (_norm(_filterSearch)) return _renderHomeSearchResults();
+  if (_norm(_filterSearch) || _smartFilters.size > 0) return _renderHomeSearchResults();
 
   const cats     = _visibleCats();
   const orphaned = _items.filter(i => !_cats.find(c => c.id === i.categorieId));
@@ -665,14 +692,15 @@ function _renderHomeResults() {
 
 function _renderHomeSearchResults() {
   const search = _norm(_filterSearch);
-  let matched = _visibleItems()
-    .filter(i => _searchIncludes(_itemSearchText(i), search));
+  let matched = _shopSearchIndex
+    .filter(entry => _searchIncludes(entry.text, search))
+    .map(entry => entry.item);
   // Smart filters s'appliquent aussi à la recherche home transverse
   matched = _shopApplySmart(matched);
   matched.sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity:'base' }));
 
   if (matched.length === 0) {
-    return emptyStateHtml('🔍', `Aucun résultat pour « ${_esc(_filterSearch)} ».`);
+    return emptyStateHtml('🔍', 'Aucun objet ne correspond à la recherche et aux filtres actifs.');
   }
 
   const total = matched.length;
@@ -779,6 +807,17 @@ function _itemSearchText(item = {}) {
     item.effet,
     ...(Array.isArray(item.traits) ? item.traits : []),
   ].filter(Boolean).join(' '));
+}
+
+function _rebuildShopSearchIndex() {
+  _shopSearchIndex = _visibleItems().map(item => ({
+    item,
+    text: _itemSearchText(item),
+  }));
+}
+
+function _getCachedVisibleItems() {
+  return _shopSearchIndex.map(entry => entry.item);
 }
 
 function _getFilteredItems(catId) {
@@ -1151,7 +1190,8 @@ function _shopSmartCtx() {
 function _shopApplySmart(items) {
   if (!_smartFilters.size) return items;
   const ctx = _shopSmartCtx();
-  const active = [..._smartFilters];
+  const active = [..._smartFilters]
+    .filter(k => ctx.char || !CHAR_SMART_KINDS.has(k));
   return items.filter(it => active.every(k => _shopItemMatchesSmart(it, k, ctx)));
 }
 
@@ -2225,6 +2265,13 @@ function _updateHomeOnly() {
   if (!results) { renderShop(); return; }
   results.innerHTML = _renderHomeResults();
   _mountSortables();
+}
+
+function _refreshSmartFiltersFromCache() {
+  const smartBar = document.querySelector('.sh-hero .sh-smart-bar');
+  if (smartBar) smartBar.outerHTML = _renderSmartBar();
+  if (_view === 'home') _updateHomeOnly();
+  else _updateItemsOnly();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -4076,9 +4123,13 @@ Object.assign(shHandlers, {
     if (!k || !SMART_KINDS.includes(k)) return;
     if (_smartFilters.has(k)) _smartFilters.delete(k); else _smartFilters.add(k);
     _page = 1;
-    renderShop();
+    _refreshSmartFiltersFromCache();
   },
-  resetSmart:     () => { _smartFilters.clear(); _page = 1; renderShop(); },
+  resetSmart:     () => {
+    _smartFilters.clear();
+    _page = 1;
+    _refreshSmartFiltersFromCache();
+  },
   toggleFav:      (el) => toggleFav(el?.dataset?.id || ''),
   // Sidebar / catégories
   goHome:         () => shopGoHome(),

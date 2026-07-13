@@ -2746,6 +2746,8 @@ body.sh-dragging * { cursor: grabbing !important; }
   cursor: pointer; transition: all .15s; white-space: nowrap;
 }
 .sh-smart-chip:hover { transform: translateY(-1px); border-color: rgba(79,140,255,.32); }
+.sh-smart-chip:disabled { opacity: .46; cursor: not-allowed; filter: grayscale(.35); }
+.sh-smart-chip:disabled:hover { transform: none; border-color: var(--border-md, rgba(255,255,255,.10)); }
 .sh-smart-ico { font-size: .78rem; }
 .sh-smart-count {
   font-family: 'Outfit', sans-serif; font-weight: 700; font-size: .66rem;
@@ -2856,6 +2858,140 @@ body.sh-dragging * { cursor: grabbing !important; }
 }
 .sh-page--v2 .sh-topbar-tools {
   display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  overflow: visible;
+}
+.sh-page--v2 .sh-topbar-character {
+  position: relative; z-index: 3;
+  display: flex !important; align-items: center;
+  flex: 0 0 auto; min-width: 0;
+  visibility: visible !important; opacity: 1 !important;
+}
+.sh-page--v2 .sh-topbar-character .sh-char-strip {
+  display: inline-flex !important;
+  flex: 0 0 auto;
+  visibility: visible !important; opacity: 1 !important;
+}
+.sh-page--v2 .sh-topbar-character .sh-char-strip-sel {
+  position: relative; z-index: 2;
+  pointer-events: auto;
+}
+
+/* ── Accès majeurs : Atelier + Artisan ── */
+.sh-workshop-launchers {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px; margin: -2px 0 14px;
+}
+.sh-workshop-card {
+  --hub-rgb: 139, 92, 246;
+  --hub-accent: #bca0ff;
+  position: relative; isolation: isolate; overflow: hidden;
+  display: grid; grid-template-columns: 54px minmax(0, 1fr) 32px;
+  align-items: center; gap: 13px;
+  min-height: 88px; padding: 13px 15px;
+  border: 1px solid rgba(var(--hub-rgb), .42);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 8% 50%, rgba(var(--hub-rgb), .22), transparent 35%),
+    linear-gradient(120deg, rgba(var(--hub-rgb), .11), rgba(9,14,25,.92) 58%);
+  color: var(--text); text-align: left; font-family: inherit;
+  cursor: pointer;
+  box-shadow:
+    0 10px 28px rgba(0,0,0,.28),
+    inset 0 1px 0 rgba(255,255,255,.07);
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+.sh-workshop-card::before {
+  content: ""; position: absolute; z-index: -1;
+  width: 150px; height: 150px; left: -68px; top: 50%;
+  border-radius: 50%; transform: translateY(-50%);
+  background: rgba(var(--hub-rgb), .20);
+  filter: blur(28px); pointer-events: none;
+}
+.sh-workshop-card::after {
+  content: ""; position: absolute; inset: 0;
+  border-radius: inherit; pointer-events: none;
+  background: linear-gradient(105deg, rgba(255,255,255,.08), transparent 25%, transparent 74%, rgba(var(--hub-rgb), .05));
+}
+.sh-workshop-card--artisan {
+  --hub-rgb: 224, 158, 36;
+  --hub-accent: #ffd66b;
+}
+.sh-workshop-card-icon {
+  position: relative; z-index: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 52px; height: 52px;
+  border: 1px solid rgba(var(--hub-rgb), .58);
+  border-radius: 16px;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.13), transparent 46%),
+    rgba(var(--hub-rgb), .17);
+  font-size: 1.45rem; line-height: 1;
+  box-shadow:
+    0 0 22px rgba(var(--hub-rgb), .22),
+    inset 0 1px 0 rgba(255,255,255,.14);
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.sh-workshop-card-copy {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column; align-items: flex-start;
+  min-width: 0;
+}
+.sh-workshop-card-kicker {
+  margin-bottom: 3px;
+  color: var(--hub-accent);
+  font-size: .56rem; line-height: 1;
+  font-weight: 800; letter-spacing: .13em; text-transform: uppercase;
+}
+.sh-workshop-card strong {
+  color: #fff; font-family: "Cinzel", serif;
+  font-size: 1.02rem; line-height: 1.15;
+  font-weight: 750; letter-spacing: .02em;
+}
+.sh-workshop-card-desc {
+  margin-top: 4px; color: var(--text-muted);
+  font-size: .68rem; line-height: 1.25;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 100%;
+}
+.sh-workshop-card-arrow {
+  position: relative; z-index: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; justify-self: end;
+  border: 1px solid rgba(var(--hub-rgb), .34);
+  border-radius: 50%;
+  background: rgba(var(--hub-rgb), .10);
+  color: var(--hub-accent); font-size: 1rem;
+  transition: transform .18s ease, background .18s ease;
+}
+.sh-workshop-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(var(--hub-rgb), .74);
+  box-shadow:
+    0 14px 34px rgba(0,0,0,.34),
+    0 0 24px rgba(var(--hub-rgb), .13),
+    inset 0 1px 0 rgba(255,255,255,.10);
+}
+.sh-workshop-card:hover .sh-workshop-card-icon {
+  transform: scale(1.04) rotate(-2deg);
+  box-shadow: 0 0 28px rgba(var(--hub-rgb), .34), inset 0 1px 0 rgba(255,255,255,.18);
+}
+.sh-workshop-card:hover .sh-workshop-card-arrow {
+  transform: translateX(3px); background: rgba(var(--hub-rgb), .20);
+}
+.sh-workshop-card:focus-visible {
+  outline: 2px solid var(--hub-accent); outline-offset: 3px;
+}
+@media (max-width: 720px) {
+  .sh-page--v2 .sh-topbar-tools {
+    width: 100%; justify-content: flex-end;
+  }
+  .sh-workshop-launchers { grid-template-columns: 1fr; }
+  .sh-workshop-card { min-height: 80px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sh-workshop-card,
+  .sh-workshop-card-icon,
+  .sh-workshop-card-arrow { transition: none; }
 }
 .sh-page--v2 .sh-topbar-admin {
   display: inline-flex; flex-wrap: wrap; gap: 4px;

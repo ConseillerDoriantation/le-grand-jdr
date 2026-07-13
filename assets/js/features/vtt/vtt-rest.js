@@ -132,10 +132,11 @@ async function _applyShortRest({ forced = false } = {}) {
     const maxHp = calcPVMax(c);
     const maxPm = calcPMMax(c);
     const curHp = Math.max(0, Number(c.hp) || 0);
-    const curPm = Math.max(0, Number(c.pm) || 0);
+    // PM canonique : pmActuel (fiche) > pm (legacy VTT) ; on écrit les deux.
+    const curPm = Math.max(0, Number(c.pmActuel ?? c.pm) || 0);
     const newHp = Math.min(maxHp, curHp + Math.ceil(maxHp / 2));
     const newPm = Math.min(maxPm, curPm + Math.ceil(maxPm / 2));
-    return updateDoc(_chrRef(c.id), { hp: newHp, pm: newPm }).catch(() => {});
+    return updateDoc(_chrRef(c.id), { hp: newHp, pm: newPm, pmActuel: newPm }).catch(() => {});
   }));
   const newCount = (sr.count || 0) + 1;
   await setDoc(_sesRef(), { shortRest: { ...sr, count: newCount, vote: null } }, { merge: true });

@@ -60,9 +60,41 @@ export function modalSection(title, html) {
   return `<div class="modal-section"><div class="modal-section-title">${title}</div>${html}</div>`;
 }
 
+// ── Accessibilité (rôle dialog + retour de focus + piège Tab) ────────────────
+// Le focus revient à l'élément actif AVANT l'ouverture quand la modale se ferme
+// pour de bon ; Tab boucle à l'intérieur de la modale tant qu'elle est visible.
+let _lastFocus = null;
+function _a11yOnShow() {
+  const overlay = document.getElementById('modal-overlay');
+  if (!overlay) return;
+  if (!overlay.classList.contains('show')) _lastFocus = document.activeElement;
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-labelledby', 'modal-title');
+}
+function _a11yOnClose() {
+  if (_lastFocus && typeof _lastFocus.focus === 'function' && document.contains(_lastFocus)) {
+    try { _lastFocus.focus(); } catch { /* élément non focalisable */ }
+  }
+  _lastFocus = null;
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  const overlay = document.getElementById('modal-overlay');
+  if (!overlay?.classList.contains('show')) return;
+  const foc = overlay.querySelectorAll(
+    'a[href], button:not([disabled]), textarea, input:not([type="hidden"]), select, [tabindex]:not([tabindex="-1"])');
+  if (!foc.length) return;
+  const first = foc[0], last = foc[foc.length - 1];
+  const inside = overlay.contains(document.activeElement);
+  if (e.shiftKey && (!inside || document.activeElement === first)) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && (!inside || document.activeElement === last)) { e.preventDefault(); first.focus(); }
+});
+
 export function openModal(title, bodyHtml, opts = {}) {
   _modalStack.length = 0;
   _closeGuard = null;   // nouvelle modale de base → aucun garde hérité
+  _a11yOnShow();
   _applyModalHeader(title, opts);
   const bodyEl  = document.getElementById('modal-body');
   const overlay = document.getElementById('modal-overlay');
@@ -75,6 +107,7 @@ export function pushModal(title, bodyHtml, restore = null, opts = {}) {
   const bar     = document.getElementById('modal-title');
   const overlay = document.getElementById('modal-overlay');
 
+  _a11yOnShow();
   if (bodyEl && overlay?.classList.contains('show')) {
     _modalStack.push({
       title: bar?.dataset.title || '',   // titre brut (cf. _applyModalHeader)
@@ -128,6 +161,7 @@ export function closeModalDirect() {
     return popModal();
   }
   document.getElementById('modal-overlay')?.classList.remove('show');
+  _a11yOnClose();
 }
 
 // ── Confirmation stylisée — remplace window.confirm() ─────────────────────

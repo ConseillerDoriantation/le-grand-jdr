@@ -614,7 +614,33 @@ export function noyauTypesFor(s) {
   const ids = (Array.isArray(s?.noyauTypeIds) && s.noyauTypeIds.length)
     ? s.noyauTypeIds
     : (s?.noyauTypeId ? [s.noyauTypeId] : []);
-  return ids.map(id => types.find(t => t.id === id)).filter(Boolean);
+  const resolved = ids.map(id => types.find(t => t.id === id)).filter(Boolean);
+  if (resolved.length) return resolved;
+
+  // Compatibilité des sorts historiques : avant noyauTypeId, le noyau était
+  // stocké sous forme de libellé libre ("Feu", "Feu 🔥", etc.).
+  const legacyLabel = String(s?.noyau || '').trim();
+  if (!legacyLabel) return [];
+  const norm = value => String(value || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().trim();
+  const legacyNorm = norm(legacyLabel);
+  const matched = types.find(t => {
+    const label = norm(t.label || t.nom);
+    return label && (legacyNorm === label || legacyNorm.startsWith(label) || label.startsWith(legacyNorm));
+  });
+  if (matched) return [matched];
+
+  // Le catalogue peut encore être en chargement : on montre au moins le libellé
+  // historique au lieu d'affirmer à tort que le sort est "sans noyau".
+  return [{
+    id: `legacy:${legacyNorm || 'noyau'}`,
+    label: legacyLabel,
+    nom: legacyLabel,
+    icon: '✦',
+    color: '#7c8aa5',
+    legacy: true,
+  }];
 }
 
 /** Détermine si le noyau du sort est magique (depuis la matrice damage_types).
@@ -1214,4 +1240,38 @@ export function _buildSortResume(s, c) {
 
 export function _getCurrentSpellChar() {
   return STATE.activeChar || charSession.getCurrentChar() || null;
+}
+
+// ── Présentateur partagé : UNE seule vérité d'affichage pour un sort ─────────
+// Tolérant au legacy (icone/cout/description → icon/pm/effet). `pm` = coût
+// effectif : override MJ > pm calculé > cout legacy, + delta Set Léger équipé.
+// Consommé par la fiche, la quick-view, l'impression (le VTT a la même règle).
+export function spellVM(s, pmDelta = 0) {
+  const base = Number.isFinite(parseInt(s?.pmOverride)) ? parseInt(s.pmOverride)
+    : Number.isFinite(parseInt(s?.pm)) ? parseInt(s.pm)
+      : Number.isFinite(parseInt(s?.cout)) ? parseInt(s.cout)
+        : null;
+  return {
+    icon:  s?.icon || s?.icone || '✨',
+    nom:   s?.nom || 'Sort sans nom',
+    pm:    base == null ? null : Math.max(0, base + (parseInt(pmDelta) || 0)),
+    pmBase: base,
+    effet: s?.effet || s?.description || '',
+  };
+}
+
+// Identifiant STABLE d'un sort (les index bougent au tri/drag ; le VTT peut
+// mémoriser un sort — sort suspendu — au-delà d'un réordonnancement).
+export function spellUid() {
+  return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+// Backfill opportuniste : pose un id stable sur les sorts qui n'en ont pas,
+// à chaque écriture du tableau complet. Retourne true si au moins un ajout.
+export function ensureSpellIds(sorts) {
+  let changed = false;
+  (sorts || []).forEach(s => {
+    if (s && typeof s === 'object' && !s.id) { s.id = spellUid(); changed = true; }
+  });
+  return changed;
 }

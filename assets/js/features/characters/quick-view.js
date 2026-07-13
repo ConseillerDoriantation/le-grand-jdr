@@ -12,6 +12,7 @@ import {
   STAT_META, modStr,
 } from '../../shared/char-stats.js';
 import { getMainWeapon, getArmorSetData, getWeaponToucherParts, getWeaponDegatsParts } from './data.js';
+import { spellVM } from './spells-calc.js';
 import { getDashboardPartyChars } from '../../shared/dashboard-session.js';
 import { setTargetCharacter } from '../../shared/character-navigation.js';
 
@@ -96,10 +97,16 @@ function _armorBlock(c) {
 function _spellsBlock(c) {
   const actives = (c.deck_sorts || []).filter(s => s.actif);
   if (!actives.length) return '';
+  // Présentateur partagé : coût effectif (override MJ + Set Léger) et champs
+  // actuels (icon/pm/effet) avec tolérance legacy (icone/cout/description).
+  const pmDelta = getArmorSetData(c)?.modifiers?.spellPmDelta || 0;
   return `<div class="qv-block">
     <div class="qv-block-title">✨ Sorts actifs <span class="qv-count">${actives.length}</span></div>
     <div class="qv-spells">
-      ${actives.map(s => `<span class="qv-spell" title="${_esc(s.description || '')}">${_esc(s.icone || '✨')} ${_esc(s.nom || '?')}${s.cout != null ? ` <span class="qv-spell-cost">${s.cout}PM</span>` : ''}</span>`).join('')}
+      ${actives.map(s => {
+        const vm = spellVM(s, pmDelta);
+        return `<span class="qv-spell" title="${_esc(vm.effet)}">${_esc(vm.icon)} ${_esc(s.nom || '?')}${vm.pm != null ? ` <span class="qv-spell-cost">${vm.pm}PM</span>` : ''}</span>`;
+      }).join('')}
     </div>
   </div>`;
 }

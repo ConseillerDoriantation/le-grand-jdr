@@ -14,6 +14,7 @@ import { confirmModal, openModal, promptModal, closeModalDirect } from '../share
 import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
+import { getRouteSub } from '../shared/route.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
 import { dedupeQuestParticipants, questParticipantFromChar, toggleQuestParticipant } from '../shared/participants.js';
 
@@ -2577,8 +2578,13 @@ const PAGES = {
     content.innerHTML = html;
     if (chars.length > 0) {
       const target = consumeTargetCharacter();
-      const targetId = typeof target === 'string' ? target : target?.id;
-      const targetTab = typeof target === 'object' ? target?.tab : null;
+      // Deep-link : #characters/<idPerso>/<onglet> (onglet ouvert au clic molette,
+      // lien partagé). Formes tolérées : ".../<onglet>" seul, ou id seul.
+      const [routeA, routeB] = getRouteSub('characters').split('/');
+      const routeId  = routeB ? routeA : '';
+      const routeTab = routeB || routeA || '';
+      const targetId = (typeof target === 'string' ? target : target?.id) || routeId;
+      const targetTab = (typeof target === 'object' ? target?.tab : null) || routeTab || null;
       // Sélection par défaut : la cible explicite (VTT…), sinon le perso favori
       // (★ par défaut) du joueur, sinon le premier.
       const charToShow = (targetId ? chars.find(c => c.id === targetId) : null)
