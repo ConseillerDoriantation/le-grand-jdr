@@ -36,6 +36,9 @@ const STORE = {
   lightboxItems: {},        // { [catId]: item[] } cache lightbox
   filter:        'all',     // 'all' | 'epique' | 'comique' | 'histoire'
   charFilter:    'all',     // 'all' | charId
+  charFilters:   [],        // sélection multiple de personnages
+  charMatchMode: 'any',     // 'any' = au moins un sélectionné | 'shared' = tous les sélectionnés
+  charPickerOpen:false,
   view:          'galerie', // 'galerie' | 'timeline'
   search:        '',
   timelineDesc:  false,     // true = plus récent en haut
@@ -52,6 +55,29 @@ let _achToggleContrib = () => {};
 
 export function getAchievementsShellState() {
   return { items: STORE.items, filter: STORE.filter, view: STORE.view, search: STORE.search };
+}
+
+function _achSelectedCharIds() {
+  if (Array.isArray(STORE.charFilters) && STORE.charFilters.length) {
+    return [...new Set(STORE.charFilters.filter(Boolean))];
+  }
+  return STORE.charFilter && STORE.charFilter !== 'all' ? [STORE.charFilter] : [];
+}
+
+function _achSetSelectedCharIds(ids) {
+  const clean = [...new Set((ids || []).filter(Boolean))];
+  STORE.charFilters = clean;
+  STORE.charFilter = clean.length === 1 ? clean[0] : 'all';
+  if (clean.length < 2) STORE.charMatchMode = 'any';
+}
+
+function _achMatchesCharSelection(item, selectedIds = _achSelectedCharIds()) {
+  if (!selectedIds.length) return true;
+  const contribs = Array.isArray(item?.contributeurs) ? item.contributeurs : [];
+  if ((STORE.charMatchMode || 'any') === 'shared' && selectedIds.length > 1) {
+    return selectedIds.every(id => contribs.includes(id));
+  }
+  return selectedIds.some(id => contribs.includes(id));
 }
 
 function _missionFor(item) {
@@ -519,14 +545,19 @@ function _achGalleryOverviewHtml(items) {
   if (!count) return '';
 
   const filter = STORE.filter || 'all';
-  const charFilter = STORE.charFilter || 'all';
+  const selectedCharIds = _achSelectedCharIds();
   const search = (STORE.search || '').trim();
-  const filteredChar = charFilter !== 'all'
-    ? (STATE.characters || []).find(c => c.id === charFilter)
-    : null;
+  const selectedChars = selectedCharIds
+    .map(id => (STATE.characters || []).find(c => c.id === id))
+    .filter(Boolean);
+  const charLabel = selectedChars.length === 1
+    ? selectedChars[0].nom
+    : selectedChars.length > 1
+      ? `${(STORE.charMatchMode || 'any') === 'shared' ? 'Partagés' : 'Sélection'} : ${selectedChars.length} joueurs`
+      : null;
   const filterParts = [
     filter !== 'all' ? _achCategoryFor({ categorie: filter }).label : 'Toutes catégories',
-    filteredChar?.nom ? filteredChar.nom : null,
+    charLabel,
     search ? `"${search}"` : null,
   ].filter(Boolean);
 
@@ -1017,40 +1048,114 @@ function _achRenderControlsExtras() {
     root.insertBefore(bar, root.firstChild);
   }
 
-  // Chips perso : seulement ceux qui ont au moins 1 HF visible pour l'utilisateur
+  // Filtre perso : seulement ceux qui ont au moins 1 HF visible pour l'utilisateur.
   const all = STORE.items || [];
   const visible = STATE.isAdmin ? all : all.filter(a => !a.secret);
   const counts = new Map();
   visible.forEach(a => (a.contributeurs || []).forEach(cid => counts.set(cid, (counts.get(cid)||0)+1)));
-  const chars = (STATE.characters || []).filter(c => counts.has(c.id));
+  const chars = sortCharactersForDisplay(STATE.characters || [])
+    .filter(c => c?.id)
+    .sort((a, b) => (counts.get(b.id) || 0) - (counts.get(a.id) || 0) || (a.nom || '').localeCompare(b.nom || ''));
   const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-  const active = STORE.charFilter || 'all';
+  const charColor = (c) => CHAR_COLS[(c?.nom?.charCodeAt(0) || 0) % CHAR_COLS.length];
+  const selectedIds = _achSelectedCharIds();
+  const selectedSet = new Set(selectedIds);
+  const selectedChars = chars.filter(c => selectedSet.has(c.id));
+  const matchMode = selectedIds.length > 1 ? (STORE.charMatchMode || 'any') : 'any';
   const isTimeline = (STORE.view || 'galerie') === 'timeline';
   const desc = !!STORE.timelineDesc;
+  const filterLabel = selectedChars.length === 1
+    ? selectedChars[0].nom
+    : selectedChars.length > 1
+      ? `${selectedChars.length} joueurs sélectionnés`
+      : 'Tous les joueurs';
+  const totalLabel = `${visible.length} haut${visible.length > 1 ? 's' : ''}-fait${visible.length > 1 ? 's' : ''}`;
+  const activeCount = visible.filter(item => _achMatchesCharSelection(item, selectedIds)).length;
+  const selectedPreview = selectedChars.slice(0, 4).map(c => {
+    const col = charColor(c);
+    return characterAvatarHtml(c, {
+      tag: 'span',
+      className: 'ach-player-picker-av',
+      border: 'none',
+      background: 'transparent',
+      color: col,
+      fallbackStyle: "font-family:'Cinzel',serif;font-weight:700",
+    });
+  }).join('');
 
   const charChips = chars.length ? `
-    <div class="ach-char-filter">
-      <button class="ach-char-chip${active==='all'?' active':''}" data-charid="all"
-        data-action="_achSetCharFilter" title="Tous les personnages">👥 Tous</button>
-      ${chars.map(c => {
-        const col = CHAR_COLS[(c.nom?.charCodeAt(0) || 0) % 6];
-        const isOn = active === c.id;
-        return `<button class="ach-char-chip${isOn?' active':''}" data-charid="${c.id}"
-          data-action="_achSetCharFilter"
-          style="--c:${col}" title="${_esc(c.nom||'?')} — ${counts.get(c.id)} haut${counts.get(c.id)>1?'s':''}-fait${counts.get(c.id)>1?'s':''}">
-          ${characterAvatarHtml(c, {
-            tag: 'span',
-            className: 'ach-char-chip-av',
-            border: 'none',
-            background: 'transparent',
-            color: col,
-            fallbackStyle: "font-family:'Cinzel',serif;font-weight:700",
-          })}
-          <span class="ach-char-chip-name">${_esc((c.nom||'?').slice(0,12))}</span>
-          <span class="ach-char-chip-count">${counts.get(c.id)}</span>
-        </button>`;
-      }).join('')}
-    </div>` : '';
+    <section class="ach-player-filter" aria-label="Filtrer les hauts-faits par joueur">
+      <div class="ach-player-filter-head">
+        <div class="ach-player-filter-title">
+          <span>Filtre joueur</span>
+          <strong>${_esc(filterLabel)}</strong>
+        </div>
+        <span class="ach-player-filter-total">${totalLabel}</span>
+      </div>
+      <details class="ach-player-picker"${STORE.charPickerOpen ? ' open' : ''}>
+        <summary class="ach-player-picker-summary">
+          ${selectedPreview
+            ? `<span class="ach-player-picker-stack">${selectedPreview}${selectedChars.length > 4 ? `<span class="ach-player-picker-more">+${selectedChars.length - 4}</span>` : ''}</span>`
+            : '<span class="ach-player-picker-all">Tous</span>'}
+          <span class="ach-player-picker-copy">
+            <small>Afficher</small>
+            <strong>${_esc(filterLabel)}</strong>
+          </span>
+          <span class="ach-player-picker-count">${activeCount}</span>
+          <span class="ach-player-picker-chevron">⌄</span>
+        </summary>
+        <div class="ach-player-menu">
+          <div class="ach-player-menu-tools">
+            <button type="button" class="ach-player-clear${!selectedIds.length ? ' active' : ''}"
+              data-action="_achClearCharFilters" title="Afficher tous les personnages">
+              Tous
+            </button>
+            ${selectedIds.length > 1 ? `
+              <div class="ach-player-mode" aria-label="Mode de filtre">
+                <button type="button" class="${matchMode === 'any' ? 'active' : ''}" data-action="_achSetCharMatchMode" data-mode="any">
+                  Chacun
+                </button>
+                <button type="button" class="${matchMode === 'shared' ? 'active' : ''}" data-action="_achSetCharMatchMode" data-mode="shared">
+                  Partagés
+                </button>
+              </div>` : ''}
+          </div>
+          <button type="button" class="ach-player-option${!selectedIds.length?' active':''}" data-charid="all"
+            data-action="_achClearCharFilters" title="Tous les personnages">
+            <span class="ach-player-option-all">Tous</span>
+            <span class="ach-player-option-main">
+              <strong>Tous les joueurs</strong>
+              <small>${visible.length} haut${visible.length > 1 ? 's' : ''}-fait${visible.length > 1 ? 's' : ''}</small>
+            </span>
+            <span class="ach-player-option-count">${visible.length}</span>
+            <span class="ach-player-option-check">${selectedIds.length ? '+' : '✓'}</span>
+          </button>
+          ${chars.map(c => {
+            const col = charColor(c);
+            const isOn = selectedSet.has(c.id);
+            const count = counts.get(c.id) || 0;
+            return `<button type="button" class="ach-player-option${isOn?' active':''}${count ? '' : ' is-empty'}" data-charid="${_esc(c.id)}"
+            data-action="_achToggleCharFilter"
+            style="--c:${col}" title="${_esc(c.nom||'?')} - ${count} haut${count>1?'s':''}-fait${count>1?'s':''}">
+            ${characterAvatarHtml(c, {
+              tag: 'span',
+              className: 'ach-player-option-av',
+              border: 'none',
+              background: 'transparent',
+              color: col,
+              fallbackStyle: "font-family:'Cinzel',serif;font-weight:700",
+            })}
+            <span class="ach-player-option-main">
+              <strong>${_esc(c.nom||'?')}</strong>
+              <small>${count ? `${count} haut${count > 1 ? 's' : ''}-fait${count > 1 ? 's' : ''}` : 'Aucun pour le moment'}</small>
+            </span>
+            <span class="ach-player-option-count">${count}</span>
+            <span class="ach-player-option-check">${isOn ? '✓' : '+'}</span>
+          </button>`;
+          }).join('')}
+        </div>
+      </details>
+    </section>` : '';
 
   const sortBtn = isTimeline ? `
     <button class="ach-sort-toggle" data-action="_achToggleTimelineDir"
@@ -1059,7 +1164,7 @@ function _achRenderControlsExtras() {
     </button>` : '';
 
   bar.innerHTML = charChips + sortBtn;
-  bar.style.display = (charChips || sortBtn) ? 'flex' : 'none';
+  bar.style.display = (charChips || sortBtn) ? 'grid' : 'none';
 }
 
 // ── Rendu du contenu (filtre + vue) ──────────────────────────────────────────
@@ -1071,7 +1176,7 @@ async function _achRenderContent() {
 
   const all        = STORE.items || [];
   const filter     = STORE.filter || 'all';
-  const charFilter = STORE.charFilter || 'all';
+  const selectedCharIds = _achSelectedCharIds();
   const search     = _normalize(STORE.search || '');   // minuscules + sans accents
   const isAdmin    = STATE.isAdmin;
 
@@ -1080,7 +1185,7 @@ async function _achRenderContent() {
   // 2. Filtre catégorie
   if (filter !== 'all') filtered = filtered.filter(a => (a.categorie || 'epique') === filter);
   // 3. Filtre par perso contributeur
-  if (charFilter !== 'all') filtered = filtered.filter(a => (a.contributeurs || []).includes(charFilter));
+  if (selectedCharIds.length) filtered = filtered.filter(a => _achMatchesCharSelection(a, selectedCharIds));
   // 4. Recherche
   if (search) {
     filtered = filtered.filter(a =>
@@ -1095,9 +1200,16 @@ async function _achRenderContent() {
 
   if (!filtered.length) {
     const catDef = ACH_CATS.find(c => c.id === filter);
-    const charName = charFilter !== 'all'
-      ? ((STATE.characters || []).find(c => c.id === charFilter)?.nom || 'ce personnage')
-      : null;
+    const selectedNames = selectedCharIds
+      .map(id => (STATE.characters || []).find(c => c.id === id)?.nom)
+      .filter(Boolean);
+    const charName = selectedNames.length === 1
+      ? selectedNames[0]
+      : selectedNames.length > 1
+        ? ((STORE.charMatchMode || 'any') === 'shared'
+          ? `ces ${selectedNames.length} personnages ensemble`
+          : `${selectedNames.length} personnages sélectionnés`)
+        : null;
     let title = 'Aucun haut-fait';
     let sub = STATE.isAdmin ? 'Ajoutez le premier !' : '';
     if (search) { title = 'Aucun résultat'; sub = `pour « ${_esc(search)} »`; }
@@ -1152,10 +1264,32 @@ function _achSetSearch(val) {
   _achSearchTimer = setTimeout(_achRenderContent, 240);
 };
 function _achSetCharFilter(charId) {
-  STORE.charFilter = charId || 'all';
-  document.querySelectorAll('.ach-char-chip').forEach(el => {
+  STORE.charPickerOpen = true;
+  _achSetSelectedCharIds(charId && charId !== 'all' ? [charId] : []);
+  document.querySelectorAll('.ach-player-option').forEach(el => {
     el.classList.toggle('active', el.dataset.charid === STORE.charFilter);
   });
+  _achRenderContent();
+};
+function _achToggleCharFilter(charId) {
+  if (!charId || charId === 'all') return _achClearCharFilters();
+  STORE.charPickerOpen = true;
+  const selected = new Set(_achSelectedCharIds());
+  selected.has(charId) ? selected.delete(charId) : selected.add(charId);
+  _achSetSelectedCharIds([...selected]);
+  document.querySelectorAll('.ach-player-option').forEach(el => {
+    el.classList.toggle('active', selected.has(el.dataset.charid));
+  });
+  _achRenderContent();
+};
+function _achClearCharFilters() {
+  STORE.charPickerOpen = true;
+  _achSetSelectedCharIds([]);
+  _achRenderContent();
+};
+function _achSetCharMatchMode(mode) {
+  STORE.charPickerOpen = true;
+  STORE.charMatchMode = mode === 'shared' ? 'shared' : 'any';
   _achRenderContent();
 };
 function _achToggleTimelineDir() {
@@ -1270,6 +1404,8 @@ PAGES.achievements = async function() {
   STORE.items       = _composeItems();
   STORE.missions    = (story || []).filter(item => item.type === 'mission' || item.type === 'event');
   STORE.filter ??= 'all';
+  if (!Array.isArray(STORE.charFilters)) STORE.charFilters = STORE.charFilter && STORE.charFilter !== 'all' ? [STORE.charFilter] : [];
+  STORE.charMatchMode = STORE.charMatchMode === 'shared' ? 'shared' : 'any';
   STORE.view   ??= 'galerie';
   STORE.search ??= '';
   PAGES._achievementsShellState = getAchievementsShellState();
@@ -1316,6 +1452,9 @@ registerActions({
   deleteAchievement:     (btn) => deleteAchievement(btn.dataset.id),
   _achOpenLightbox:      (btn) => _achOpenLightbox(btn.dataset.id),
   _achSetCharFilter:     (btn) => _achSetCharFilter(btn.dataset.charid),
+  _achToggleCharFilter:  (btn) => _achToggleCharFilter(btn.dataset.charid),
+  _achClearCharFilters:  ()    => _achClearCharFilters(),
+  _achSetCharMatchMode:  (btn) => _achSetCharMatchMode(btn.dataset.mode),
   _achToggleTimelineDir: ()    => _achToggleTimelineDir(),
   _achOpenMission:       (btn) => _achOpenMission(btn.dataset.id),
 });
