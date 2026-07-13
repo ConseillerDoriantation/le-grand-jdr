@@ -247,7 +247,7 @@ function _renderConvo() {
          <button type="button" class="chat-emoji-btn" data-action="chatEmojiToggle" title="Emoji" aria-label="Insérer un emoji">😊</button>
          <button type="button" class="chat-emoji-btn" data-action="chatPickImage" title="Envoyer une image" aria-label="Envoyer une image">📎</button>
          <input type="file" id="chat-file" accept="image/*" hidden>
-         <input id="chat-input" class="chat-input" placeholder="Écris un message…" autocomplete="off" maxlength="1000">
+         <div id="chat-input" class="chat-input chat-input-ce" contenteditable="true" role="textbox" aria-label="Message" data-placeholder="Écris un message…"></div>
          <button type="submit" class="chat-send" aria-label="Envoyer">➤</button>
        </div>
      </form>`,
@@ -255,7 +255,9 @@ function _renderConvo() {
   el.querySelector('#chat-form')?.addEventListener('submit', (e) => { e.preventDefault(); _send(); });
   el.querySelector('#chat-search-inp')?.addEventListener('input', (e) => { _searchQ = e.target.value; _renderMessages(); });
   el.querySelector('#chat-file')?.addEventListener('change', (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) _sendImage(f); });
-  el.querySelector('#chat-input')?.addEventListener('input', _signalTyping);
+  const ce = el.querySelector('#chat-input');
+  ce?.addEventListener('input', _signalTyping);
+  ce?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _send(); } });
   if (_typing.length) _renderTyping();
   if (_replyTo) _showReplyBar();
   _renderMessages();
@@ -337,7 +339,7 @@ function _applyChatEmotes(escaped) {
   for (const em of _chatEmotes) {
     const key = `:${em.name}:`;
     if (escaped.indexOf(key) === -1) continue;
-    escaped = escaped.split(key).join(`<img class="chat-emote-inline" src="${_esc(em.url)}" alt="${_esc(key)}" title="${_esc(key)}">`);
+    escaped = escaped.split(key).join(`<img class="chat-emote-inline" data-emote="${_esc(key)}" src="${_esc(em.url)}" alt="${_esc(key)}" title="${_esc(key)}">`);
   }
   return escaped;
 }
@@ -578,13 +580,13 @@ async function _sendText(text, preview) {
 }
 
 async function _send() {
-  const inp = document.getElementById('chat-input');
-  const text = (inp?.value || '').trim();
-  if (!text || !_openId) return;
+  if (!_openId) return;
+  const text = _composerText();
+  if (!text) return;
   if (_editingId) { _saveEdit(text); return; }        // mode édition d'un message
-  inp.value = '';
+  _clearComposer();
   const ok = await _sendText(text);
-  if (!ok && inp) inp.value = text;                    // restaure en cas d'échec
+  if (!ok) _setComposer(text);                         // restaure en cas d'échec
 }
 
 // Envoi d'une image : compressée en JPEG base64 borné (reste sous la limite
@@ -668,18 +670,18 @@ function chatEditMsg(btn) {
   const msgs = _openId === ADV ? _advMsgs : _convoMsgs;
   const m = msgs.find(x => x.id === id); if (!m || m.senderId !== _uid || m.deleted) return;
   _editingId = id;
-  const inp = document.getElementById('chat-input'); if (inp) { inp.value = m.text || ''; inp.focus(); }
+  _setComposer(m.text || '');
   document.getElementById('chat-edit-bar')?.removeAttribute('hidden');
 }
 function _cancelEditUi() { _editingId = null; document.getElementById('chat-edit-bar')?.setAttribute('hidden', ''); }
-function chatCancelEdit() { _cancelEditUi(); const inp = document.getElementById('chat-input'); if (inp) inp.value = ''; }
+function chatCancelEdit() { _cancelEditUi(); _clearComposer(); }
 
 async function _saveEdit(text) {
   const id = _editingId; const ref = _msgRef(id); if (!ref) return;
   try {
     await updateDoc(ref, { text, editedAt: serverTimestamp() });
     _cancelEditUi();
-    const inp = document.getElementById('chat-input'); if (inp) inp.value = '';
+    _clearComposer();
     // Si c'était le dernier message d'un groupe/DM, met l'aperçu à jour.
     if (_openId !== ADV) {
       const msgs = _convoMsgs; const last = msgs[msgs.length - 1];
@@ -844,7 +846,7 @@ function _emojiPickerHtml() {
   // Émotes custom :nom: de l'aventure (images), insérées comme balise texte.
   const emoteBlock = _chatEmotes.length
     ? `<div class="chat-emoji-cat"><div class="chat-emoji-catlbl">😄 Émotes</div><div class="chat-emoji-grid chat-emote-grid">${_chatEmotes.map(em =>
-        `<button type="button" class="chat-emoji-opt chat-emote-opt" data-action="chatSendEmote" data-emo=":${_esc(em.name)}:" title="Envoyer :${_esc(em.name)}:"><img src="${_esc(em.url)}" alt=":${_esc(em.name)}:" loading="lazy"></button>`).join('')}</div></div>`
+        `<button type="button" class="chat-emoji-opt chat-emote-opt" data-action="chatInsertEmote" data-emo=":${_esc(em.name)}:" title=":${_esc(em.name)}:"><img src="${_esc(em.url)}" alt=":${_esc(em.name)}:" loading="lazy"></button>`).join('')}</div></div>`
     : '';
   const recBlock = rec.length
     ? `<div class="chat-emoji-cat"><div class="chat-emoji-catlbl">🕘 Récents</div><div class="chat-emoji-grid">${rec.map(_emojiOptBtn).join('')}</div></div>` : '';
@@ -870,23 +872,51 @@ function chatEmojiToggle() {
   _emojiOutside = (e) => { if (!pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) _closeEmojiPop(); };
   requestAnimationFrame(() => document.addEventListener('mousedown', _emojiOutside, true));
 }
-function _insertText(str) {
-  const inp = document.getElementById('chat-input'); if (!inp) return;
-  const s = inp.selectionStart ?? inp.value.length, e = inp.selectionEnd ?? inp.value.length;
-  inp.value = inp.value.slice(0, s) + str + inp.value.slice(e);
-  const pos = s + str.length;
-  inp.focus(); try { inp.setSelectionRange(pos, pos); } catch {}
+// Composer = div contenteditable : les émotes y sont des <img> (data-emote).
+// Sérialisation → texte + balises :nom: (émotes) + \n (sauts de ligne).
+function _composerEl() { return document.getElementById('chat-input'); }
+function _composerText() {
+  const el = _composerEl(); if (!el) return '';
+  let out = '';
+  const walk = (node) => node.childNodes.forEach(n => {
+    if (n.nodeType === 3) out += n.nodeValue;
+    else if (n.nodeName === 'IMG') out += n.dataset.emote || '';
+    else if (n.nodeName === 'BR') out += '\n';
+    else walk(n);
+  });
+  walk(el);
+  return out.trim().slice(0, 1000);
 }
+function _clearComposer() { const el = _composerEl(); if (el) el.innerHTML = ''; }
+function _setComposer(text) { const el = _composerEl(); if (el) { el.innerHTML = _applyChatEmotes(_esc(text || '')); el.focus(); } }
+function _insertNodeAtCursor(node) {
+  const el = _composerEl(); if (!el) return;
+  el.focus();
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount && el.contains(sel.anchorNode)) {
+    const range = sel.getRangeAt(0);
+    range.deleteContents(); range.insertNode(node);
+    range.setStartAfter(node); range.collapse(true);
+    sel.removeAllRanges(); sel.addRange(range);
+  } else {
+    el.appendChild(node);
+  }
+}
+function _insertText(str) { _insertNodeAtCursor(document.createTextNode(str)); }
 function chatInsertEmoji(btn) {
   const emo = btn?.dataset?.emo; if (!emo) return;
   _insertText(emo);
   _pushEmojiRecent(emo);   // remonté dans « Récents » à la prochaine ouverture
 }
-// Clic sur une émote → envoi DIRECT (pas de texte :nom: dans la saisie).
-function chatSendEmote(btn) {
+// Clic sur une émote → l'insère dans le composer sous forme d'IMAGE (pas de texte
+// :nom: visible). L'envoi se fait à la validation (Entrée / bouton ➤).
+function chatInsertEmote(btn) {
   const tag = btn?.dataset?.emo; if (!tag) return;
-  _closeEmojiPop();
-  _sendText(tag, '😄 Émote');
+  const em = _chatEmotes.find(e => `:${e.name}:` === tag); if (!em) return;
+  const img = document.createElement('img');
+  img.className = 'chat-emote-inline'; img.dataset.emote = tag; img.src = em.url; img.alt = tag;
+  _insertNodeAtCursor(img);
+  _signalTyping();
 }
 
 // ── Répondre / citer ─────────────────────────────────────────────────────────
@@ -936,7 +966,7 @@ registerActions({
   chatMsgMenu:     (btn) => chatMsgMenu(btn),
   chatEmojiToggle: () => chatEmojiToggle(),
   chatInsertEmoji: (btn) => chatInsertEmoji(btn),
-  chatSendEmote:   (btn) => chatSendEmote(btn),
+  chatInsertEmote: (btn) => chatInsertEmote(btn),
   chatReplyMsg:    (btn) => chatReplyMsg(btn),
   chatCancelReply: () => chatCancelReply(),
   chatSearchToggle:() => chatSearchToggle(),
