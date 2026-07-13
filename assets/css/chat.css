@@ -322,6 +322,11 @@
 }
 .chat-load-more:hover { color: var(--text, #fff); border-color: rgba(79,140,255,.5); }
 
+/* ── Jet de dés /roll ── */
+.chat-roll { display: inline-flex; flex-direction: column; gap: .05rem; }
+.chat-roll-total { font-size: 1.1rem; font-weight: 800; letter-spacing: .02em; }
+.chat-roll-detail { font-size: .68rem; opacity: .82; }
+
 /* ── Regroupement de messages consécutifs + saut au message ── */
 .chat-msg-av-spacer { width: 26px; flex-shrink: 0; }
 .chat-msg--grouped { margin-top: -.3rem; }

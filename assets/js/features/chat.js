@@ -288,6 +288,7 @@ function _renderConvo() {
        <div class="chat-form-row">
          <button type="button" class="chat-emoji-btn" data-action="chatEmojiToggle" title="Emoji" aria-label="Insérer un emoji">😊</button>
          <button type="button" class="chat-emoji-btn" data-action="chatPickImage" title="Envoyer une image" aria-label="Envoyer une image">📎</button>
+         <button type="button" class="chat-emoji-btn" data-action="chatRollHint" title="Lancer des dés (ex : /roll 1d20+3)" aria-label="Lancer des dés">🎲</button>
          <input type="file" id="chat-file" accept="image/*" hidden>
          <div id="chat-input" class="chat-input chat-input-ce" contenteditable="true" role="textbox" aria-label="Message" data-placeholder="Écris un message…"></div>
          <button type="submit" class="chat-send" aria-label="Envoyer">➤</button>
@@ -460,6 +461,38 @@ function _linkify(html) {
   });
 }
 
+// Jet de dés : parse « 2d6+3 », « d20 », « 1d20+1d4-1 » → { expr, total, parts }.
+function _rollDice(expr) {
+  const clean = String(expr || '').trim().toLowerCase().replace(/\s+/g, '');
+  if (!clean || !/^[0-9d+-]+$/.test(clean)) return null;
+  const terms = clean.match(/[+-]?[^+-]+/g); if (!terms) return null;
+  let total = 0; const parts = [];
+  for (let t of terms) {
+    let sign = 1;
+    if (t[0] === '+') t = t.slice(1);
+    else if (t[0] === '-') { sign = -1; t = t.slice(1); }
+    const dm = t.match(/^(\d*)d(\d+)$/);
+    if (dm) {
+      const n = parseInt(dm[1] || '1', 10), faces = parseInt(dm[2], 10);
+      if (!faces || n < 1 || n > 100 || faces > 1000) return null;
+      const rolls = [];
+      for (let i = 0; i < n; i++) rolls.push(1 + Math.floor(Math.random() * faces));
+      total += sign * rolls.reduce((a, b) => a + b, 0);
+      parts.push({ type: 'dice', label: `${n}d${faces}`, rolls, sign });
+    } else if (/^\d+$/.test(t)) {
+      total += sign * parseInt(t, 10);
+      parts.push({ type: 'mod', value: parseInt(t, 10), sign });
+    } else return null;
+  }
+  return { expr: clean, total, parts };
+}
+function _rollCardHtml(roll) {
+  const detail = (roll.parts || []).map(p => p.type === 'dice'
+    ? `${p.sign < 0 ? '−' : ''}${p.label} [${p.rolls.join(', ')}]`
+    : `${p.sign < 0 ? '−' : '+'}${p.value}`).join(' ');
+  return `<span class="chat-roll"><span class="chat-roll-total">🎲 ${_esc(String(roll.total))}</span><span class="chat-roll-detail">${_esc(roll.expr)} · ${_esc(detail)}</span></span>`;
+}
+
 function _msgRow(m, grouped = false) {
   const mine = m.senderId === _uid;
   const time = new Date(_atMillis(m) || Date.now()).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
@@ -486,7 +519,7 @@ function _msgRow(m, grouped = false) {
   return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}${mentionsMe ? ' chat-msg--mention' : ''}${grpCls}" data-mid="${_esc(m.id)}">${av}
     <span class="chat-msg-content">${author}
       <span class="chat-msg-bubble-wrap">
-        <span class="chat-msg-bubble${m.image && !m.text ? ' chat-msg-bubble--media' : ''}">${quote}${img}${txt}</span>
+        <span class="chat-msg-bubble${(m.image && !m.text) || m.roll ? ' chat-msg-bubble--media' : ''}">${quote}${m.roll ? _rollCardHtml(m.roll) : `${img}${txt}`}</span>
         <button class="chat-msg-menu-btn" data-action="chatMsgMenu" data-msg="${_esc(m.id)}" title="Réagir / modifier" aria-label="Options du message">⋯</button>
       </span>
       ${_reactionsHtml(m)}
@@ -703,10 +736,28 @@ async function _send() {
   const text = _composerText();
   if (!text) return;
   if (_editingId) { _saveEdit(text); return; }        // mode édition d'un message
+  // Commande /roll (ou /r) : jet de dés → message-jet.
+  const rm = text.match(/^\/(?:roll|r)\s+(.+)$/i);
+  if (rm) {
+    const roll = _rollDice(rm[1]);
+    if (roll) { _clearComposer(); _clearDraft(); _sendRoll(roll); return; }
+    showNotif('Jet invalide. Ex : /roll 1d20+3', 'error'); return;
+  }
   _clearComposer();
   const ok = await _sendText(text);
   if (!ok) _setComposer(text);                         // restaure en cas d'échec
   else _clearDraft();
+}
+async function _sendRoll(roll) {
+  const col = _msgsCol(); if (!col || !_openId || !_uid) return;
+  const senderName = _senderName();
+  const fallback = `🎲 ${roll.expr} = ${roll.total}`;
+  const reply = _replyTo; _clearReply();
+  const msg = { convoId: _openId, text: fallback, roll, senderId: _uid, senderName, at: serverTimestamp() };
+  if (reply) msg.replyTo = reply;
+  _clearTyping();
+  try { await addDoc(col, msg); _bumpConvoPreview(fallback, senderName); }
+  catch (e) { console.warn('[chat] roll', e?.code || e); showNotif('Jet non envoyé — règles Firestore ?', 'error'); }
 }
 
 // Envoi d'une image : compressée en JPEG base64 borné (reste sous la limite
@@ -1136,6 +1187,7 @@ function chatSearchToggle() {
   if (_searchOpen) document.getElementById('chat-search-inp')?.focus();
 }
 function chatPickImage() { document.getElementById('chat-file')?.click(); }
+function chatRollHint() { const el = _composerEl(); if (!el) return; el.focus(); _insertText('/roll 1d20'); }
 function chatScrollBottom() {
   const list = document.getElementById('chat-msgs'); if (list) list.scrollTop = list.scrollHeight;
   _hideNewPill();
@@ -1189,6 +1241,7 @@ registerActions({
   chatCancelReply: () => chatCancelReply(),
   chatSearchToggle:() => chatSearchToggle(),
   chatPickImage:   () => chatPickImage(),
+  chatRollHint:    () => chatRollHint(),
   chatScrollBottom:() => chatScrollBottom(),
   chatLoadMore:    () => chatLoadMore(),
   chatJumpTo:      (btn) => chatJumpTo(btn),
