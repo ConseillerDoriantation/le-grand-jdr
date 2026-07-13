@@ -34,6 +34,7 @@
 
 /* ── Panneau ── */
 .chat-panel {
+  position: relative;
   width: 340px; max-width: calc(100vw - 32px);
   height: 460px; max-height: calc(100vh - 120px);
   display: flex; flex-direction: column;
@@ -309,6 +310,20 @@
 .chat-input-ce:focus { outline: none; border-color: rgba(79,140,255,.5); }
 .chat-input-ce:empty::before { content: attr(data-placeholder); color: var(--text-dim, #9aa4b2); pointer-events: none; }
 .chat-input-ce .chat-emote-inline { height: 1.5em; width: 1.5em; vertical-align: -0.35em; margin: 0 1px; }
+
+/* ── Séparateurs de date + pill « nouveaux messages » ── */
+.chat-date-sep { display: flex; align-items: center; justify-content: center; margin: .45rem 0 .3rem; }
+.chat-date-sep span {
+  font-size: .64rem; color: var(--text-dim, #9aa4b2); text-transform: capitalize;
+  background: var(--bg-elevated, #1e2836); padding: .12rem .6rem; border-radius: 999px;
+}
+.chat-new-pill {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 66px; z-index: 5;
+  border: none; cursor: pointer; background: #4f8cff; color: #fff;
+  font-size: .72rem; font-weight: 600; padding: .32rem .75rem; border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.4);
+}
+.chat-new-pill:hover { background: #3a7bff; }
 
 /* ── « écrit… » + « Vu » ── */
 .chat-typing { padding: .05rem .8rem .35rem; font-size: .72rem; font-style: italic; color: var(--text-dim, #9aa4b2); }

@@ -51,6 +51,7 @@ let _replyTo = null;                               // message cité { id, sender
 let _searchOpen = false, _searchQ = '';            // recherche dans la conv ouverte
 let _muted = false, _audioCtx = null, _soundReady = false;   // notif sonore (pas de bip au 1er rendu)
 let _chatEmotes = [];                              // émotes custom :nom: (world/vtt_emotes)
+let _lastRenderedLastId = null;                    // dernier msg rendu (scroll intelligent)
 let _advMsgs = [];                                 // messages Aventure (live session)
 let _groups  = [];                                 // convos de groupe où je suis membre
 let _convoMsgs = [];                               // messages du GROUPE ouvert
@@ -239,6 +240,7 @@ function _renderConvo() {
        <input id="chat-search-inp" class="chat-input" placeholder="🔍 Rechercher dans la conversation…" value="${_esc(_searchQ)}" autocomplete="off">
      </div>
      <div class="chat-msgs" id="chat-msgs"></div>
+     <button class="chat-new-pill" id="chat-new-pill" data-action="chatScrollBottom" hidden>↓ Nouveaux messages</button>
      <div class="chat-typing" id="chat-typing" hidden></div>`,
     `<form class="chat-form" id="chat-form">
        <div class="chat-edit-bar" id="chat-edit-bar" hidden>✏️ Édition — <button type="button" class="chat-edit-cancel" data-action="chatCancelEdit">annuler</button></div>
@@ -258,6 +260,10 @@ function _renderConvo() {
   const ce = el.querySelector('#chat-input');
   ce?.addEventListener('input', _signalTyping);
   ce?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _send(); } });
+  el.querySelector('#chat-msgs')?.addEventListener('scroll', (e) => {
+    const l = e.target;
+    if (l.scrollHeight - l.scrollTop - l.clientHeight < 60) _hideNewPill();
+  });
   if (_typing.length) _renderTyping();
   if (_replyTo) _showReplyBar();
   _renderMessages();
@@ -265,22 +271,56 @@ function _renderConvo() {
 }
 function _renderConvoHeaderBadge() { /* pas de badge d'en-tête pour l'instant */ }
 
+// Libellé de jour pour les séparateurs de date.
+function _dayLabel(ms) {
+  const d = new Date(ms), now = new Date();
+  const day0 = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day0(now) - day0(d)) / 86400000);
+  if (diff === 0) return "Aujourd'hui";
+  if (diff === 1) return 'Hier';
+  return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+function _showNewPill() { document.getElementById('chat-new-pill')?.removeAttribute('hidden'); }
+function _hideNewPill() { document.getElementById('chat-new-pill')?.setAttribute('hidden', ''); }
+
 function _renderMessages() {
   const list = document.getElementById('chat-msgs'); if (!list) return;
-  let msgs = _openId === ADV ? _advMsgs : _convoMsgs;
+  const all = _openId === ADV ? _advMsgs : _convoMsgs;
   const q = _searchOpen ? _searchQ.trim().toLowerCase() : '';
-  if (q) msgs = msgs.filter(m => !m.deleted && (m.text || '').toLowerCase().includes(q));
-  let html = msgs.length
-    ? msgs.map(_msgRow).join('')
-    : `<div class="chat-empty">${q ? 'Aucun message trouvé.' : 'Aucun message. Lance la discussion !'}</div>`;
+  const msgs = q ? all.filter(m => !m.deleted && (m.text || '').toLowerCase().includes(q)) : all;
+
+  // Scroll intelligent : suivre le bas seulement si on y est déjà.
+  const prevTop = list.scrollTop, prevHeight = list.scrollHeight;
+  const nearBottom = prevHeight - prevTop - list.clientHeight < 60;
+  const lastId = all.length ? all[all.length - 1].id : null;
+  const isNew = lastId && lastId !== _lastRenderedLastId;
+
+  let html = '';
+  if (!msgs.length) {
+    html = `<div class="chat-empty">${q ? 'Aucun message trouvé.' : 'Aucun message. Lance la discussion !'}</div>`;
+  } else {
+    let prevDay = '';
+    for (const m of msgs) {
+      const day = _dayLabel(_atMillis(m) || Date.now());
+      if (day !== prevDay) { html += `<div class="chat-date-sep"><span>${_esc(day)}</span></div>`; prevDay = day; }
+      html += _msgRow(m);
+    }
+  }
   // « Vu » (DM) : sous mon dernier message si l'autre l'a lu.
   if (!q && _convoById(_openId)?.type === 'dm') {
-    const mine = (_openId === ADV ? _advMsgs : _convoMsgs).filter(m => m.senderId === _uid && !m.deleted);
+    const mine = all.filter(m => m.senderId === _uid && !m.deleted);
     const last = mine[mine.length - 1];
     if (last && _otherReads >= _atMillis(last)) html += '<div class="chat-seen">Vu</div>';
   }
   list.innerHTML = html;
-  if (!q) list.scrollTop = list.scrollHeight;   // pas d'auto-scroll pendant une recherche
+
+  if (q) { list.scrollTop = 0; }
+  else if (nearBottom) { list.scrollTop = list.scrollHeight; _hideNewPill(); }
+  else {
+    list.scrollTop = prevTop + (list.scrollHeight - prevHeight);   // préserve la position
+    if (isNew) _showNewPill();
+  }
+  _lastRenderedLastId = lastId;
 }
 
 // Profil (pour l'avatar) d'un uni : le mien via STATE, les autres via
@@ -469,7 +509,7 @@ function _teardownConvo() {
   if (_unsubConvo) { try { _unsubConvo(); } catch {} _unsubConvo = null; }
   if (_unsubTyping) { try { _unsubTyping(); } catch {} _unsubTyping = null; }
   if (_unsubReads) { try { _unsubReads(); } catch {} _unsubReads = null; }
-  _convoMsgs = []; _typing = []; _otherReads = 0;
+  _convoMsgs = []; _typing = []; _otherReads = 0; _lastRenderedLastId = null;
   clearTimeout(_typingClearTimer); clearTimeout(_typingRenderTimer);
   if (_typingWroteAt) _clearTyping();   // signale qu'on n'écrit plus
   _editingId = null; _replyTo = null; _searchOpen = false; _searchQ = '';   // états liés à la conv
@@ -950,6 +990,10 @@ function chatSearchToggle() {
   if (_searchOpen) document.getElementById('chat-search-inp')?.focus();
 }
 function chatPickImage() { document.getElementById('chat-file')?.click(); }
+function chatScrollBottom() {
+  const list = document.getElementById('chat-msgs'); if (list) list.scrollTop = list.scrollHeight;
+  _hideNewPill();
+}
 function chatToggleMute() {
   _muted = !_muted;
   localStorage.setItem('chat-muted', _muted ? '1' : '0');
@@ -971,6 +1015,7 @@ registerActions({
   chatCancelReply: () => chatCancelReply(),
   chatSearchToggle:() => chatSearchToggle(),
   chatPickImage:   () => chatPickImage(),
+  chatScrollBottom:() => chatScrollBottom(),
   chatToggleMute:  () => chatToggleMute(),
   chatReact:       (btn) => chatReact(btn),
   chatEditMsg:     (btn) => chatEditMsg(btn),
