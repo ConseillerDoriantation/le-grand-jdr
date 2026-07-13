@@ -292,6 +292,7 @@
 
 /* ── Émotes custom :nom: (rondes, comme le VTT) ── */
 .chat-emote-inline {
+  display: inline-block;   /* base.css met img{display:block} → forcerait un saut de ligne */
   height: 2.2em; width: 2.2em; object-fit: contain; border-radius: 50%;
   vertical-align: -0.7em; margin: 0 2px;
 }
