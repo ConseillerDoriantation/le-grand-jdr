@@ -322,6 +322,16 @@
 }
 .chat-load-more:hover { color: var(--text, #fff); border-color: rgba(79,140,255,.5); }
 
+/* ── Regroupement de messages consécutifs + saut au message ── */
+.chat-msg-av-spacer { width: 26px; flex-shrink: 0; }
+.chat-msg--grouped { margin-top: -.3rem; }
+.chat-msg--grouped .chat-msg-time { display: none; }
+.chat-msg--grouped:hover .chat-msg-time { display: block; }
+.chat-msg-quote { cursor: pointer; }
+.chat-msg-quote:hover { filter: brightness(1.18); }
+@keyframes chatFlash { 0%, 100% { background: transparent; } 25% { background: rgba(79,140,255,.28); } }
+.chat-msg--flash { border-radius: 10px; animation: chatFlash 1.6s ease; }
+
 /* ── Mentions @pseudo ── */
 .chat-mention { color: #7fb0ff; font-weight: 600; background: rgba(79,140,255,.14); border-radius: 4px; padding: 0 3px; white-space: nowrap; }
 .chat-mention--me { color: #ffd479; background: rgba(232,184,75,.2); }

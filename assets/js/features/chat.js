@@ -313,6 +313,7 @@ function _renderConvo() {
   });
   if (_typing.length) _renderTyping();
   if (_replyTo) _showReplyBar();
+  if (!_editingId) _restoreDraft();
   _renderMessages();
   el.querySelector(_searchOpen ? '#chat-search-inp' : '#chat-input')?.focus();
 }
@@ -349,11 +350,16 @@ function _renderMessages() {
   } else {
     // Il y a peut-être plus ancien si on a atteint la limite courante.
     if (!q && all.length >= curLimit) html += `<button class="chat-load-more" data-action="chatLoadMore">⤒ Messages plus anciens</button>`;
-    let prevDay = '';
+    let prevDay = '', prevSender = null, prevAt = 0;
     for (const m of msgs) {
-      const day = _dayLabel(_atMillis(m) || Date.now());
-      if (day !== prevDay) { html += `<div class="chat-date-sep"><span>${_esc(day)}</span></div>`; prevDay = day; }
-      html += _msgRow(m);
+      const at = _atMillis(m) || Date.now();
+      const day = _dayLabel(at);
+      const dayChanged = day !== prevDay;
+      if (dayChanged) { html += `<div class="chat-date-sep"><span>${_esc(day)}</span></div>`; prevDay = day; prevSender = null; }
+      // Regroupement : même auteur, < 5 min, même jour → on masque avatar + nom.
+      const grouped = !dayChanged && !m.deleted && m.senderId === prevSender && (at - prevAt) < 300000;
+      html += _msgRow(m, grouped);
+      prevSender = m.deleted ? null : m.senderId; prevAt = at;
     }
   }
   // « Vu » (DM) : sous mon dernier message si l'autre l'a lu.
@@ -438,6 +444,11 @@ function _applyMentions(escaped) {
   return escaped.replace(/@\[([\w-]+)\]/g, (_m, uid) =>
     `<span class="chat-mention${uid === _uid ? ' chat-mention--me' : ''}">@${_esc(_nameOf(uid))}</span>`);
 }
+// Variante pour le composer : jetons ré-sérialisables (data-uid, non éditables).
+function _mentionsToTokens(escaped) {
+  return escaped.replace(/@\[([\w-]+)\]/g, (_m, uid) =>
+    `<span class="chat-mention" contenteditable="false" data-uid="${_esc(uid)}">@${_esc(_nameOf(uid))}</span>`);
+}
 // URLs → liens cliquables. Appliqué sur le TEXTE échappé (avant émotes/mentions)
 // pour ne jamais capturer une URL présente dans un attribut (ex. src d'émote).
 function _linkify(html) {
@@ -449,26 +460,30 @@ function _linkify(html) {
   });
 }
 
-function _msgRow(m) {
+function _msgRow(m, grouped = false) {
   const mine = m.senderId === _uid;
   const time = new Date(_atMillis(m) || Date.now()).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  const av = mine ? '' : `<img class="chat-msg-av" src="${_esc(avatarSrcOf(_profileOf(m.senderId)))}" alt="" loading="lazy">`;
-  const author = mine ? '' : `<span class="chat-msg-author">${_esc(m.senderName || '?')}</span>`;
+  // Message groupé (même auteur qui enchaîne) : avatar → espaceur, pas de nom.
+  const av = mine ? '' : (grouped
+    ? '<span class="chat-msg-av-spacer"></span>'
+    : `<img class="chat-msg-av" src="${_esc(avatarSrcOf(_profileOf(m.senderId)))}" alt="" loading="lazy">`);
+  const author = (mine || grouped) ? '' : `<span class="chat-msg-author">${_esc(m.senderName || '?')}</span>`;
+  const grpCls = grouped ? ' chat-msg--grouped' : '';
   if (m.deleted) {
-    return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}">${av}
+    return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}${grpCls}" data-mid="${_esc(m.id)}">${av}
       <span class="chat-msg-content">${author}
         <span class="chat-msg-bubble chat-msg-bubble--del">Message supprimé</span>
       </span></div>`;
   }
   const edited = m.editedAt ? ' <span class="chat-msg-edited">(modifié)</span>' : '';
   const quote = m.replyTo
-    ? `<span class="chat-msg-quote"><span class="chat-quote-name">${_esc(m.replyTo.senderName || '')}</span><span class="chat-quote-text">${_esc(m.replyTo.text || '📷 Image')}</span></span>` : '';
+    ? `<span class="chat-msg-quote" role="button" data-action="chatJumpTo" data-msg="${_esc(m.replyTo.id || '')}" title="Aller au message"><span class="chat-quote-name">${_esc(m.replyTo.senderName || '')}</span><span class="chat-quote-text">${_esc(m.replyTo.text || '📷 Image')}</span></span>` : '';
   const img = m.image ? `<img class="chat-msg-img" src="${_esc(m.image)}" alt="image" loading="lazy">` : '';
   // Ordre : échappe → linkify (sur texte pur) → émotes/mentions. Linkifier en
   // dernier capturait l'URL du src des <img> d'émote (→ src cassé, 404).
   const txt = m.text ? `<span class="chat-msg-btext">${_applyMentions(_applyChatEmotes(_linkify(_esc(m.text))))}</span>` : '';
   const mentionsMe = !mine && _uid && (m.text || '').includes(`@[${_uid}]`);
-  return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}${mentionsMe ? ' chat-msg--mention' : ''}">${av}
+  return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}${mentionsMe ? ' chat-msg--mention' : ''}${grpCls}" data-mid="${_esc(m.id)}">${av}
     <span class="chat-msg-content">${author}
       <span class="chat-msg-bubble-wrap">
         <span class="chat-msg-bubble${m.image && !m.text ? ' chat-msg-bubble--media' : ''}">${quote}${img}${txt}</span>
@@ -691,6 +706,7 @@ async function _send() {
   _clearComposer();
   const ok = await _sendText(text);
   if (!ok) _setComposer(text);                         // restaure en cas d'échec
+  else _clearDraft();
 }
 
 // Envoi d'une image : compressée en JPEG base64 borné (reste sous la limite
@@ -993,7 +1009,7 @@ function _composerText() {
   return out.trim().slice(0, 1000);
 }
 function _clearComposer() { const el = _composerEl(); if (el) el.innerHTML = ''; }
-function _setComposer(text) { const el = _composerEl(); if (el) { el.innerHTML = _applyChatEmotes(_esc(text || '')); el.focus(); } }
+function _setComposer(text) { const el = _composerEl(); if (el) { el.innerHTML = _mentionsToTokens(_applyChatEmotes(_esc(text || ''))); el.focus(); } }
 function _insertNodeAtCursor(node) {
   const el = _composerEl(); if (!el) return;
   el.focus();
@@ -1084,6 +1100,7 @@ function chatPickMention(btn) {
 }
 function _onComposerInput() {
   _signalTyping();
+  _saveDraft();
   const mq = _mentionQuery();
   if (mq) _renderMentionMenu(mq); else _closeMentionMenu();
 }
@@ -1128,6 +1145,28 @@ function chatLoadMore() {
   if (_openId === ADV) { _advLimit += HISTORY; _subscribeAdv(); }
   else if (_openId) { _convoLimit += HISTORY; _subscribeConvo(_openId); }
 }
+// Clic sur une citation → défile jusqu'au message d'origine + flash.
+function chatJumpTo(btn) {
+  const id = btn?.dataset?.msg; if (!id) return;
+  let el = null;
+  try { el = document.querySelector(`.chat-msg[data-mid="${CSS.escape(id)}"]`); } catch { el = null; }
+  if (!el) { showNotif('Message trop ancien — charge plus haut.', 'info'); return; }
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  el.classList.remove('chat-msg--flash'); void el.offsetWidth; el.classList.add('chat-msg--flash');
+  setTimeout(() => el.classList.remove('chat-msg--flash'), 1600);
+}
+
+// ── Brouillon par conversation (localStorage) ────────────────────────────────
+function _draftKey() { return `chat-draft-${_adv()}-${_openId}`; }
+function _saveDraft() {
+  try {
+    if (!_openId || _editingId) return;
+    const t = _composerText();
+    if (t) localStorage.setItem(_draftKey(), t); else localStorage.removeItem(_draftKey());
+  } catch { /* localStorage indispo */ }
+}
+function _restoreDraft() { try { const d = _openId && localStorage.getItem(_draftKey()); if (d) _setComposer(d); } catch {} }
+function _clearDraft() { try { localStorage.removeItem(_draftKey()); } catch {} }
 function chatToggleMute() {
   _muted = !_muted;
   localStorage.setItem('chat-muted', _muted ? '1' : '0');
@@ -1152,6 +1191,7 @@ registerActions({
   chatPickImage:   () => chatPickImage(),
   chatScrollBottom:() => chatScrollBottom(),
   chatLoadMore:    () => chatLoadMore(),
+  chatJumpTo:      (btn) => chatJumpTo(btn),
   chatToggleMute:  () => chatToggleMute(),
   chatReact:       (btn) => chatReact(btn),
   chatEditMsg:     (btn) => chatEditMsg(btn),
