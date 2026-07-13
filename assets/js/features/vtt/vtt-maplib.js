@@ -6,6 +6,7 @@
 // au module. Extrait de vtt.js (cf. docs/vtt-decomposition.md).
 // ==============================================================================
 import { VS, aid } from './vtt-state.js';
+import { STATE } from '../../core/state.js';
 import { _esc, normalizeImageUrl } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { promptModal } from '../../shared/modal.js';
@@ -15,7 +16,9 @@ import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile, fileKey, githubRaw
 
 export let _libFolder = null;   // null = racine, string = folderId ouvert
 let _libOpen   = true;   // section collapsible dans le tray
+let _libSearch = '';
 export const _mapLibRef = () => doc(db, `adventures/${aid()}/vtt/mapLibrary`);
+const _libCanWrite = () => !!STATE.isAdmin;
 
 function _resolveMapImageUrl(url) {
   const raw = String(url || '').trim();
@@ -27,6 +30,7 @@ function _resolveMapImageUrl(url) {
 export function _resetMapLib() { _libFolder = null; }
 
 export async function _saveMapLib() {
+  if (!_libCanWrite()) return;
   await setDoc(_mapLibRef(), { folders: VS.mapLib.folders, images: VS.mapLib.images });
 }
 
@@ -39,45 +43,85 @@ export function _renderLibSection() {
   const folders = VS.mapLib.folders || [];
   const images  = VS.mapLib.images  || [];
   const curFolder = _libFolder ? folders.find(f => f.id === _libFolder) : null;
-  const visible = _libFolder
+  const folderImages = _libFolder
     ? images.filter(i => i.folderId === _libFolder)
     : images.filter(i => !i.folderId);
+  const query = _libSearch.trim().toLowerCase();
+  const visible = folderImages
+    .filter(i => !query || [i.name, i.sourcePath, i.url].some(v => String(v || '').toLowerCase().includes(query)))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' }));
 
-  const folderChips = !_libFolder ? folders.map(f => {
+  const folderChips = folders.map(f => {
     const cnt = images.filter(i => i.folderId === f.id).length;
-    return `<div class="vtt-lib-folder-chip" data-vtt-fn="_vttLibOpenFolder" data-vtt-args="${f.id}">
-      <span>📁 ${_esc(f.name)}</span>
+    return `<div class="vtt-lib-folder-chip ${_libFolder === f.id ? 'active' : ''}" role="button" tabindex="0" data-vtt-fn="_vttLibOpenFolder" data-vtt-args="${f.id}" title="${_esc(f.name)}">
+      <span>📁</span>
+      <strong>${_esc(f.name)}</strong>
       <span class="vtt-lib-chip-cnt">${cnt}</span>
       <button class="vtt-icon-btn" data-vtt-fn="_vttLibDelFolder" data-vtt-args="${f.id}" title="Supprimer le dossier">✕</button>
     </div>`;
-  }).join('') : '';
+  }).join('');
+  const rootCount = images.filter(i => !i.folderId).length;
+  const curLabel = _libFolder ? (curFolder?.name || 'Dossier') : 'Racine';
+  const clearBtn = _libSearch ? `<button class="vtt-tray-search-clr" data-vtt-fn="_vttLibSearchClear" title="Effacer">✕</button>` : '';
 
   const imgGrid = visible.length
     ? `<div class="vtt-lib-grid">${visible.map(img => `
-        <div class="vtt-lib-card" title="${_esc(img.name||'')}">
-          <img src="${_esc(_resolveMapImageUrl(img.url))}" alt="${_esc(img.name||'')}" loading="lazy" data-img-err="mark-parent" data-img-err-class="vtt-lib-card--err">
-          <div class="vtt-lib-card-ov">
-            <button data-vtt-fn="_vttLibPlace" data-vtt-args="${img.id}" title="Placer sur la carte">▶</button>
-            ${folders.length && !_libFolder ? `<button data-vtt-fn="_vttLibMoveMenu" data-vtt-args="${img.id}|event" title="Déplacer dans un dossier">📁</button>` : ''}
-            ${_libFolder ? `<button data-vtt-fn="_vttLibMoveRoot" data-vtt-args="${img.id}" title="Retirer du dossier">↩</button>` : ''}
-            <button data-vtt-fn="_vttLibDelImg" data-vtt-args="${img.id}" title="Supprimer">🗑</button>
+        <div class="vtt-lib-card" role="button" tabindex="0" draggable="true" data-vtt-drag="image:${img.id}" data-vtt-fn="_vttLibPlace" data-vtt-args="${img.id}" title="${_esc(img.name||'Image')} · clic = pleine carte · glisser = placement précis">
+          <div class="vtt-lib-card-thumb">
+            <img src="${_esc(_resolveMapImageUrl(img.url))}" alt="${_esc(img.name||'')}" loading="lazy" data-img-err="mark-parent" data-img-err-class="vtt-lib-card--err">
           </div>
-          <div class="vtt-lib-card-name">${_esc(img.name||'image')}</div>
+          <div class="vtt-lib-card-meta">
+            <div class="vtt-lib-card-name">${_esc(img.name||'image')}</div>
+            ${img.sourcePath ? `<div class="vtt-lib-card-src">${_esc(String(img.sourcePath).split('/').slice(-2).join('/'))}</div>` : ''}
+          </div>
+          <div class="vtt-lib-card-actions">
+            <button class="vtt-lib-card-action primary" data-vtt-fn="_vttLibPlace" data-vtt-args="${img.id}" title="Placer en pleine carte">▶</button>
+            ${folders.length && !_libFolder ? `<button class="vtt-lib-card-action" data-vtt-fn="_vttLibMoveMenu" data-vtt-args="${img.id}|event" title="Déplacer dans un dossier">📁</button>` : ''}
+            ${_libFolder ? `<button class="vtt-lib-card-action" data-vtt-fn="_vttLibMoveRoot" data-vtt-args="${img.id}" title="Retirer du dossier">↩</button>` : ''}
+            <button class="vtt-lib-card-action danger" data-vtt-fn="_vttLibDelImg" data-vtt-args="${img.id}" title="Supprimer">🗑</button>
+          </div>
         </div>`).join('')}</div>`
-    : `<div class="vtt-tray-empty">Aucune image${_libFolder ? ' dans ce dossier' : ''}</div>`;
+    : `<div class="vtt-tray-empty">${query ? 'Aucune image ne correspond' : `Aucune image${_libFolder ? ' dans ce dossier' : ''}`}</div>`;
 
   el.innerHTML = `
-    ${_libFolder
-      ? `<button class="vtt-lib-back" data-vtt-fn="_vttLibOpenFolder" data-vtt-args="null">← ${_esc(curFolder?.name||'Racine')}</button>`
-      : folderChips}
+    <div class="vtt-lib-command">
+      <div class="vtt-lib-head">
+        <div>
+          <strong>${_esc(curLabel)}</strong>
+          <span>${visible.length}/${folderImages.length} images · ${images.length} au total</span>
+        </div>
+        <div class="vtt-lib-actions">
+          <button class="vtt-lib-action" data-vtt-fn="_vttLibImportGithub" title="Importer un dossier GitHub">📥</button>
+          <button class="vtt-lib-action" data-vtt-fn="_vttLibNewFolder" title="Nouveau dossier">📁</button>
+        </div>
+      </div>
+      <div class="vtt-tray-search">
+        <span class="vtt-tray-search-ic">🔍</span>
+        <input type="text" class="vtt-tray-search-input" data-search="maplib" placeholder="Rechercher une image…"
+          value="${_esc(_libSearch)}" data-vtt-fn="_vttLibSearch" data-vtt-on="input" data-vtt-args="$value">
+        ${clearBtn}
+      </div>
+      <div class="vtt-lib-folder-row">
+        <div class="vtt-lib-folder-chip ${!_libFolder ? 'active' : ''}" role="button" tabindex="0" data-vtt-fn="_vttLibOpenFolder" data-vtt-args="null">
+          <span>⌂</span><strong>Racine</strong><span class="vtt-lib-chip-cnt">${rootCount}</span>
+        </div>
+        ${folderChips}
+      </div>
+    </div>
     ${imgGrid}`;
 }
 
-export function _vttLibOpenFolder(id) { _libFolder = id; _renderLibSection(); }
+export function _vttLibOpenFolder(id) {
+  _libFolder = !id || id === 'null' ? null : id;
+  _renderLibSection();
+}
 export function _vttLibToggle() { _libOpen = !_libOpen; _renderLibSection();
   document.getElementById('vtt-lib-toggle')?.classList.toggle('open', _libOpen); }
+export function _vttLibSearch(v) { _libSearch = String(v || ''); _renderLibSection(); }
+export function _vttLibSearchClear() { _libSearch = ''; _renderLibSection(); }
 
 export async function _vttLibNewFolder() {
+  if (!_libCanWrite()) return;
   const name = (await promptModal('Nom du dossier :', { title: 'Bibliothèque de cartes', required: true }))?.trim();
   if (!name) return;
   VS.mapLib.folders.push({ id: crypto.randomUUID(), name });
@@ -88,6 +132,7 @@ export async function _vttLibNewFolder() {
 // (dédup par URL). Ajoutées dans le dossier courant (_libFolder) ou en racine.
 // Chemin mémorisé en localStorage.
 export async function _vttLibImportGithub() {
+  if (!_libCanWrite()) return;
   const KEY = 'vtt-maplib-gh-folder';
   const def = localStorage.getItem(KEY) || 'images/maps';
   const path = (await promptModal('Dossier du repo à importer (ex : images/maps) :',
@@ -115,6 +160,7 @@ export async function _vttLibImportGithub() {
 }
 
 export function _vttLibDelFolder(id) {
+  if (!_libCanWrite()) return;
   // Retirer les images du dossier (les remettre en racine)
   VS.mapLib.images  = VS.mapLib.images.map(i => i.folderId === id ? { ...i, folderId: null } : i);
   VS.mapLib.folders = VS.mapLib.folders.filter(f => f.id !== id);
@@ -123,16 +169,20 @@ export function _vttLibDelFolder(id) {
 }
 
 export function _vttLibDelImg(id) {
+  if (!_libCanWrite()) return;
   VS.mapLib.images = VS.mapLib.images.filter(i => i.id !== id);
   _saveMapLib();
 }
 
 export function _vttLibMoveRoot(id) {
+  if (!_libCanWrite()) return;
   VS.mapLib.images = VS.mapLib.images.map(i => i.id === id ? { ...i, folderId: null } : i);
   _saveMapLib();
+  _renderLibSection();
 }
 
 export function _vttLibMoveMenu(imgId, evt) {
+  if (!_libCanWrite()) return;
   evt.stopPropagation();
   // Mini popup de sélection de dossier
   const existing = document.getElementById('vtt-lib-move-popup');
@@ -152,17 +202,24 @@ export function _vttLibMoveMenu(imgId, evt) {
 }
 
 export function _vttLibMoveTo(imgId, folderId) {
+  if (!_libCanWrite()) return;
   VS.mapLib.images = VS.mapLib.images.map(i => i.id === imgId ? { ...i, folderId } : i);
   _saveMapLib();
+  _renderLibSection();
 }
 
-export function _vttLibPlace(imgId) {
+export function _vttLibPlace(imgId, cell = null) {
+  if (!_libCanWrite()) return;
   if (!VS.activePage) { showNotif('Aucune page active', 'error'); return; }
   const img = VS.mapLib.images.find(i => i.id === imgId);
   if (!img) return;
+  const isDrop = cell && Number.isFinite(cell.col) && Number.isFinite(cell.row);
+  const w = isDrop ? Math.max(1, Math.min(8, VS.activePage.cols)) : VS.activePage.cols;
+  const h = isDrop ? Math.max(1, Math.min(5, VS.activePage.rows)) : VS.activePage.rows;
+  const x = isDrop ? Math.max(0, Math.min(VS.activePage.cols - w, cell.col - Math.floor(w / 2))) : 0;
+  const y = isDrop ? Math.max(0, Math.min(VS.activePage.rows - h, cell.row - Math.floor(h / 2))) : 0;
   const imgs = [...(VS.activePage.backgroundImages??[]), {
-    id: Date.now().toString(), url: _resolveMapImageUrl(img.url), sourcePath: img.sourcePath || null, x: 0, y: 0,
-    w: VS.activePage.cols, h: VS.activePage.rows,
+    id: Date.now().toString(), url: _resolveMapImageUrl(img.url), sourcePath: img.sourcePath || null, x, y, w, h,
   }];
   updateDoc(_pgRef(VS.activePage.id), { backgroundImages: imgs })
     .then(() => showNotif('Image placée sur la carte', 'success'))

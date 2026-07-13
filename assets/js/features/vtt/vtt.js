@@ -68,7 +68,7 @@ import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttSkillFilter, _v
 import {
   _renderLibSection, _resetMapLib, _libFolder, _vttLibToggle, _vttLibOpenFolder, _vttLibNewFolder,
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,
-  _vttLibMoveToAndClose, _mapLibRef, _vttLibImportGithub,
+  _vttLibMoveToAndClose, _mapLibRef, _vttLibImportGithub, _vttLibSearch, _vttLibSearchClear,
 } from './vtt-maplib.js';
 import { _markCharsReady, _markNpcsReady, _markToksReady, _resetAutoSync, _charsReady, _cleanupReserveDuplicates } from './vtt-autosync.js';
 import { _vttPanelError, _showCtxMenu, _hideCtxMenu, _tokenEntityKey } from './vtt-utils.js';
@@ -89,7 +89,8 @@ import {
 import {
   _renderTraySoon, _renderPageTabs, _switchPage, _trayTab, _resetTraySearch,
   _vttTrayFilter, _vttTraySearch, _vttTrayClearSearch, _vttBstSearch, _vttBstClearSearch, _vttTrayTab,
-  _vttToggleOn, _vttToggleOff, _vttToggleNpc, _vttPageSearch, _vttPageSearchClear, _vttPageFolderToggle,
+  _vttToggleOn, _vttToggleOff, _vttToggleNpc, _vttReserveFilter, _vttPageSearch, _vttPageSearchClear, _vttPageFolderToggle,
+  _vttPageFolderFilter, _vttPageFavToggle,
 } from './vtt-tray.js';
 import {
   VTT_ACTION_RUNE, _parseDice, _maxDice, _maxEffectDisplay, _effectDisplay,
@@ -736,7 +737,7 @@ function _cleanup() {
 // CANVAS
 // ── Drag & drop tray → canvas ──────────────────────────────────────
 // Rend les items du tray déposables sur la case voulue (au lieu du clic → case
-// fixe). Le clic reste (fallback tactile). Payload = "beast:<id>" | "token:<id>"
+// fixe). Le clic reste (fallback tactile). Payload = "beast:<id>" | "token:<id>" | "image:<id>"
 // posé par un dragstart délégué (les items portent draggable + data-vtt-drag).
 const _VTT_DND_MIME = 'text/vtt-place';
 function _wireTrayDrop(container) {
@@ -769,6 +770,7 @@ function _wireTrayDrop(container) {
     const kind = payload.slice(0, sep), id = payload.slice(sep + 1);
     if (kind === 'beast') _vttPlaceFromBestiary(id, cell);
     else if (kind === 'token') _vttPlace(id, cell);
+    else if (kind === 'image') _vttLibPlace(id, cell);
   };
   document.addEventListener('dragstart', onDragStart);
   container.addEventListener('dragover', onDragOver);
@@ -8514,6 +8516,29 @@ async function _vttMsSetNiveau(charId, uid, niveau) {
   c.niveau = val;
   _renderMiniSheet(uid);
 }
+
+async function _vttMsSetHp(charId, uid, hp) {
+  if (!_msCanEdit(uid)) return;
+  const c = VS.characters[charId]; if (!c) return;
+  if (!STATE.isAdmin && c.uid !== STATE.user?.uid) return;
+  const max = calcPVMax(c);
+  const val = Math.max(0, Math.min(max, Math.round(hp)));
+  await updateDoc(_chrRef(charId), { hp: val }).catch(() => {});
+  c.hp = val;
+  _renderMiniSheet(uid);
+}
+
+async function _vttMsSetPm(charId, uid, pm) {
+  if (!_msCanEdit(uid)) return;
+  const c = VS.characters[charId]; if (!c) return;
+  if (!STATE.isAdmin && c.uid !== STATE.user?.uid) return;
+  const max = calcPMMax(c);
+  const val = Math.max(0, Math.min(max, Math.round(pm)));
+  await updateDoc(_chrRef(charId), _charPmPatch(val)).catch(() => {});
+  c.pm = val;
+  c.pmActuel = val;
+  _renderMiniSheet(uid);
+}
 function _vttEditToken(id) { return _openStatsModal(VS.tokens[id]?.data??null); }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -8869,6 +8894,7 @@ async function _vttDuplicateToken(tokenId) {
 
 // Placer une instance depuis le bestiaire (crée + place sur la page active)
 async function _vttPlaceFromBestiary(beastId, cell = null) {
+  if (!STATE.isAdmin) return;
   if (!VS.activePage) return showNotif('Aucune page active — ouvre une page d\'abord','error');
   const b=VS.bestiary[beastId]; if (!b) return;
   // Purger les tokens fantômes (anciens auto-créés, non placés, non modifiés)
@@ -9255,7 +9281,7 @@ function _buildHtml() {
       </div>
       <div class="vtt-tray-views">
         <div class="vtt-tray-view${_trayTab==='scenes'?' active':''}" data-view="scenes">
-          <div class="vtt-tray-section-hd"><span>Pages</span><button class="vtt-tray-add-btn" data-vtt-fn="_vttAddPage" title="Nouvelle page">＋</button></div>
+          <div class="vtt-tray-section-hd"><span>Pilotage des scènes</span></div>
           <div id="vtt-tray-pages">${loadingHtml('Chargement…', { compact: true })}</div>
           <div class="vtt-tray-section-hd vtt-scene-tok-hd"><span>🗺 Sur la scène</span></div>
           <div id="vtt-scene-tokens"></div>
@@ -9266,7 +9292,6 @@ function _buildHtml() {
           <div id="vtt-bestiary-body"></div>
         </div>
         <div class="vtt-tray-view${_trayTab==='images'?' active':''}" data-view="images">
-          <div class="vtt-tray-section-hd"><span>📁 Bibliothèque</span><span style="margin-left:auto;display:flex;gap:.25rem"><button class="vtt-tray-add-btn" data-vtt-fn="_vttLibImportGithub" title="Importer un dossier GitHub">📥</button><button class="vtt-tray-add-btn" data-vtt-fn="_vttLibNewFolder" title="Nouveau dossier">📁</button></span></div>
           <div id="vtt-tray-library"></div>
         </div>
       </div>
@@ -9733,6 +9758,8 @@ export const VTT_ACTIONS = {
   _vttLibNewFolder,
   _vttLibOpenFolder,
   _vttLibPlace,
+  _vttLibSearch,
+  _vttLibSearchClear,
   _vttLootAddItemToStash,
   _vttLootClaimEdit,
   _vttLootClaimSetChar,
@@ -9772,6 +9799,8 @@ export const VTT_ACTIONS = {
   _vttMsSaveNote,
   _vttMsSendPicker,
   _vttMsSetNiveau,
+  _vttMsSetHp,
+  _vttMsSetPm,
   _vttMsSlotChange,
   _vttMsSortCat,
   _vttMsSortClear,
@@ -9787,6 +9816,8 @@ export const VTT_ACTIONS = {
   _vttPickElement,
   _vttPickEmote,
   _vttPageFolderToggle,
+  _vttPageFolderFilter,
+  _vttPageFavToggle,
   _vttPageSearch,
   _vttPageSearchClear,
   _vttPgPreset,
@@ -9802,6 +9833,7 @@ export const VTT_ACTIONS = {
   _vttRemoveSoundFromPlaylist,
   _vttRemoveTokenDelegate,
   _vttRenderDelegateModalBody,
+  _vttReserveFilter,
   _vttResetTurn,
   _vttResolveArg,
   _vttRetireMyToken,

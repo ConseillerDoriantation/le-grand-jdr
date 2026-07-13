@@ -54,6 +54,17 @@ const _MS_SLOTS = [
   'Anneau', 'Amulette', 'Objet magique',
 ];
 
+const _MS_SLOT_ICON = {
+  'Main principale': '⚔',
+  'Main secondaire': '🛡',
+  'Tête': '🎩',
+  'Torse': '🦺',
+  'Bottes': '🥾',
+  'Anneau': '💍',
+  'Amulette': '📿',
+  'Objet magique': '✦',
+};
+
 // ─── Helpers locaux ───────────────────────────────────────────────
 
 function _msCatItem(item) {
@@ -245,6 +256,72 @@ function _msSyncClearBtn(kind) {
   } else if (!query && btn) {
     btn.remove();
   }
+}
+
+function _msPct(cur, max) {
+  return max > 0 ? Math.max(0, Math.min(100, Math.round((Math.max(0, cur) / max) * 100))) : 0;
+}
+
+function _msVitalColor(kind, pct) {
+  if (kind === 'pm') return '#7eb0ff';
+  return pct > 50 ? '#22c38e' : pct > 25 ? '#f59e0b' : '#ef4444';
+}
+
+function _msVitalCard({ kind, label, icon, cur, max, color, charId, uid, canEdit }) {
+  const pct = _msPct(cur, max);
+  const fn = kind === 'pm' ? '_vttMsSetPm' : '_vttMsSetHp';
+  const input = canEdit
+    ? `<input class="vtt-ms-vital-input" type="number" min="0" max="${max}" value="${cur}"
+        data-vtt-fn="${fn}" data-vtt-on="change" data-vtt-args="${charId}|${uid}|$value"
+        title="${label} actuels">`
+    : `<strong>${cur}</strong>`;
+  const maxBtn = canEdit
+    ? `<button class="vtt-ms-vital-max" data-vtt-fn="${fn}" data-vtt-args="${charId}|${uid}|${max}" title="Remettre au maximum">Max</button>`
+    : '';
+  return `<div class="vtt-ms-vital-card ${kind}" style="--vital-c:${color}">
+    <div class="vtt-ms-vital-top">
+      <span class="vtt-ms-vital-icon">${icon}</span>
+      <span class="vtt-ms-vital-label">${label}</span>
+      <span class="vtt-ms-vital-value">${input}<small>/${max}</small></span>
+    </div>
+    <div class="vtt-ms-vital-track"><div class="vtt-ms-vital-fill" style="width:${pct}%"></div></div>
+    ${maxBtn}
+  </div>`;
+}
+
+function _msTabIntro(icon, title, meta = '', sub = '') {
+  return `<div class="vtt-ms-tab-intro">
+    <div class="vtt-ms-tab-intro-icon">${icon}</div>
+    <div class="vtt-ms-tab-intro-main">
+      <strong>${_esc(title)}</strong>
+      ${sub ? `<span>${_esc(sub)}</span>` : ''}
+    </div>
+    ${meta ? `<div class="vtt-ms-tab-intro-meta">${meta}</div>` : ''}
+  </div>`;
+}
+
+function _msQuickSummary(c, uid, canEdit) {
+  const pvMax = calcPVMax(c);
+  const pmMax = calcPMMax(c);
+  const pvCur = Math.max(0, Math.min(pvMax, c?.hp ?? pvMax));
+  const pmCur = Math.max(0, Math.min(pmMax, c?.pmActuel ?? c?.pm ?? pmMax));
+  const pvPct = _msPct(pvCur, pvMax);
+  const pmPct = _msPct(pmCur, pmMax);
+  const deckMax = calcDeckMax(c);
+  const deckCount = (c?.sorts || []).filter(s => s && s.actif).length;
+  const gold = calcOr(c);
+  return `<div class="vtt-ms-summary">
+    <div class="vtt-ms-vitals">
+      ${_msVitalCard({ kind:'hp', label:'PV', icon:'❤', cur:pvCur, max:pvMax, color:_msVitalColor('hp', pvPct), charId:c.id, uid, canEdit })}
+      ${_msVitalCard({ kind:'pm', label:'PM', icon:'✦', cur:pmCur, max:pmMax, color:_msVitalColor('pm', pmPct), charId:c.id, uid, canEdit })}
+    </div>
+    <div class="vtt-ms-quickfacts">
+      <span><b>${calcCA(c)}</b><small>CA</small></span>
+      <span><b>${calcVitesse(c)}</b><small>VIT.</small></span>
+      <span><b>${deckCount}/${deckMax}</b><small>DECK</small></span>
+      <span><b>${gold}</b><small>OR</small></span>
+    </div>
+  </div>`;
 }
 
 async function _vttMsEquip(charId, uid, slot, invIndex) {
@@ -443,6 +520,8 @@ function _msTabCombat(c, uid, canEdit) {
   }).join('');
 
   const weapon = c?.equipement?.['Main principale'];
+  let attackDice = '—';
+  let attackTouch = '+0';
   const weaponHtml = weapon?.nom ? (() => {
     const wDmgStat = weapon.degatsStat || weapon.degatStat || 'force';
     const wTchStat = weapon.toucherStat || weapon.statAttaque || 'force';
@@ -450,20 +529,34 @@ function _msTabCombat(c, uid, canEdit) {
     const maitrise = getMaitriseBonus(c, weapon);
     const dmgMod   = getMod(c, wDmgStat);
     const tchTotal = getMod(c, wTchStat) + maitrise + setBonus;
+    attackDice = `${weapon.degats||'—'}${dmgMod!==0?' '+(dmgMod>=0?'+'+dmgMod:dmgMod):''}`;
+    attackTouch = `${tchTotal>=0?'+'+tchTotal:tchTotal}`;
     return `<div class="vtt-ms-weapon">
-      <div class="vtt-ms-weapon-nom">⚔️ ${weapon.nom}</div>
+      <div class="vtt-ms-weapon-nom">⚔ ${_esc(weapon.nom)}</div>
       <div class="vtt-ms-weapon-stats">
-        <span>🎲 ${weapon.degats||'—'}${dmgMod!==0?' '+(dmgMod>=0?'+'+dmgMod:dmgMod):''}</span>
-        <span>🎯 ${tchTotal>=0?'+'+tchTotal:tchTotal}</span>
+        <span>🎲 ${attackDice}</span>
+        <span>🎯 ${attackTouch}</span>
       </div>
+      ${weapon.particularite ? `<div class="vtt-ms-weapon-note">${_esc(weapon.particularite)}</div>` : ''}
     </div>`;
   })() : '';
 
   const setData = getArmorSetData(c);
-  const setHtml = setData?.active ? `<div class="vtt-ms-setbonus">✨ Set ${setData.type}</div>` : '';
+  const setHtml = setData?.active ? `<div class="vtt-ms-setbonus">✨ Set ${_esc(setData.type)}</div>` : '';
 
   return `
-    <div class="vtt-ms-bars">
+    <div class="vtt-ms-combat-hero">
+      <div class="vtt-ms-combat-main">
+        <span class="vtt-ms-combat-kicker">Attaque équipée</span>
+        <strong>${attackDice}</strong>
+        <small>${weapon?.nom ? _esc(weapon.nom) : 'Aucune arme équipée'}</small>
+      </div>
+      <div class="vtt-ms-combat-touch">
+        <span>Toucher</span>
+        <strong>${attackTouch}</strong>
+      </div>
+    </div>
+    <div class="vtt-ms-bars is-hidden">
       <div class="vtt-ms-bar-row">
         <span class="vtt-ms-bar-lbl">❤ PV</span>
         <div class="vtt-ms-bar-track"><div class="vtt-ms-bar-fill" style="width:${pvPct}%;background:${pvCol}"></div></div>
@@ -528,15 +621,25 @@ function _msXpSection(c, uid, canEdit) {
 
 function _msTabEquipement(c, uid, canEdit) {
   const equip = c?.equipement||{}, inv = c?.inventaire||[];
-  return `<div class="vtt-ms-slots">${_MS_SLOTS.map((slot, slotIdx) => {
+  const equippedCount = _MS_SLOTS.filter(slot => equip[slot]?.nom).length;
+  const setData = getArmorSetData(c);
+  const setLabel = setData?.active ? `Set ${setData.type}` : 'Aucun set actif';
+  const intro = _msTabIntro('🧰', 'Équipement', `${equippedCount}/${_MS_SLOTS.length}`, setLabel);
+
+  return `${intro}<div class="vtt-ms-slots is-upgraded">${_MS_SLOTS.map((slot, slotIdx) => {
     const equipped    = equip[slot];
     const equippedIdx = equipped?.sourceInvIndex ?? -1;
     const opts = inv.map((item, i) => {
       if (!_msItemFitsSlot(item, slot, equip, i)) return '';
       return `<option value="${i}"${equippedIdx===i?' selected':''}>${item.nom}${(item.qte||1)>1?' ×'+item.qte:''}</option>`;
     }).join('');
-    return `<div class="vtt-ms-slot-row">
-      <span class="vtt-ms-slot-lbl">${slot}</span>
+    const slotIcon = _MS_SLOT_ICON[slot] || '•';
+    return `<div class="vtt-ms-slot-row ${equipped?.nom ? 'is-filled' : 'is-empty'}">
+      <span class="vtt-ms-slot-icon">${slotIcon}</span>
+      <div class="vtt-ms-slot-main">
+        <span class="vtt-ms-slot-lbl">${slot}</span>
+        <span class="vtt-ms-slot-current" title="${_esc(equipped?.nom || 'Emplacement libre')}">${_esc(equipped?.nom || 'Emplacement libre')}</span>
+      </div>
       <div class="vtt-ms-slot-ctrl">${canEdit
         ? `<select class="vtt-ms-slot-sel" data-vtt-fn="_vttMsSlotChange" data-vtt-on="change" data-vtt-args="$this|${c.id}|${uid}|${slotIdx}">
              <option value="">— vide —</option>${opts}</select>`
@@ -667,6 +770,12 @@ function _msTabSorts(c, uid, canEdit) {
   const deckCount = sorts.filter(s => s.actif).length;
   const deckMax = calcDeckMax(c);
   const over = deckCount > deckMax;
+  const validCount = sorts.filter(s => (s.mjValidation || (s.mjValidated ? 'ok' : 'pending')) === 'ok').length;
+  const pmTotal = sorts.filter(s => s.actif).reduce((sum, s) => {
+    const pm = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : (parseInt(s.pm) || 0);
+    return sum + Math.max(0, pm);
+  }, 0);
+  const intro = _msTabIntro('✦', 'Sorts', `${deckCount}/${deckMax}`, `${validCount} validé${validCount > 1 ? 's' : ''} · ${pmTotal} PM dans le deck`);
 
   // Barre de filtre : Tous · ⚡ Deck actif · catégories du perso (présentes) · Sans cat.
   let filterBar = '';
@@ -686,6 +795,7 @@ function _msTabSorts(c, uid, canEdit) {
   }
 
   return `
+    ${intro}
     <div class="vtt-ms-deckbar${over ? ' is-over' : ''}">
       <span class="vtt-ms-deck-lbl">⚡ Deck</span>
       <span class="vtt-ms-deck-val">${deckCount}<small>/${deckMax}</small></span>
@@ -736,7 +846,9 @@ function _msTabCompte(c, uid, canEdit) {
       </div>`).join('');
   };
 
-  return `<div class="vtt-ms-cpt">
+  const txCount = recettes.length + depenses.length;
+  return `${_msTabIntro('💰', 'Bourse', `${solde} or`, `${txCount} mouvement${txCount > 1 ? 's' : ''} enregistré${txCount > 1 ? 's' : ''}`)}
+  <div class="vtt-ms-cpt">
     <div class="vtt-ms-cpt-solde">
       <div class="vtt-ms-cpt-solde-main">💰 <strong>${solde}</strong><span class="vtt-ms-cpt-or">or</span></div>
       <div class="vtt-ms-cpt-solde-sub">
@@ -870,6 +982,9 @@ function _msTabInventaire(c, uid, canEdit) {
   for (const g of [...stacksById.values(), ...singletons]) {
     cats[_msCatItem(g.item)].push(g);
   }
+  const totalUnitsAll = Object.values(cats).flat().reduce((s, g) => s + g.indices.length, 0);
+  const equippedCount = Object.values(equip).filter(e => e?.nom).length;
+  const presentCatCount = Object.values(cats).filter(g => g.length).length;
 
   const _rarColor = (rar) => ({
     commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff',
@@ -888,7 +1003,8 @@ function _msTabInventaire(c, uid, canEdit) {
     filterBar = _msFilterBar('inv', chips, _msInvQuery);
   } else { _msInvCat = 'all'; _msInvQuery = ''; }
 
-  let html = filterBar + '<div class="vtt-ms-inv">';
+  let html = _msTabIntro('🎒', 'Sac', `${totalUnitsAll}`, `${equippedCount} équipé${equippedCount > 1 ? 's' : ''} · ${presentCatCount} catégorie${presentCatCount > 1 ? 's' : ''}`)
+    + filterBar + '<div class="vtt-ms-inv">';
   for (const [cat, groups] of Object.entries(cats)) {
     if (!groups.length) continue;
     const totalUnits = groups.reduce((s,g) => s + g.indices.length, 0);
@@ -1005,8 +1121,10 @@ function _msTabCraft(c, uid, canEdit) {
   const cards  = known
     .map(r => ({ r, st: _msRecipeIngrStatus(r, counts) }))
     .sort((a, b) => (b.st.allOk - a.st.allOk) || (a.r.nom || '').localeCompare(b.r.nom || ''));
+  const craftableCount = cards.filter(x => x.st.allOk).length;
 
-  return _msFilterBar('craft', [], _msCraftQuery)
+  return _msTabIntro('🔨', 'Craft rapide', `${craftableCount}/${known.length}`, `DD ${_MS_CRAFT_DD} · Artisanat INT`)
+    + _msFilterBar('craft', [], _msCraftQuery)
     + `<div class="vtt-ms-filter-empty" data-kind="craft" style="display:none">Aucune recette ne correspond.</div>`
     + `<div class="vtt-ms-craft">${cards.map(({ r, st }) => {
     const icon = _MS_CRAFT_TYPE_ICON[r.type] || '🔨';
@@ -1122,7 +1240,9 @@ async function _vttMsCraft(charId, uid, recipeId) {
 // ── Onglet Notes (modèle notesList partagé avec la vraie fiche) ──────────
 function _msTabNotes(c, uid, canEdit) {
   const notes = c?.notesList || [];
-  let html = `<div class="vtt-ms-notes">`;
+  const openCount = _msOpenNote !== null && notes[_msOpenNote] ? 1 : 0;
+  let html = `${_msTabIntro('📝', 'Notes', `${notes.length}`, openCount ? 'Une note ouverte' : 'Carnet de table')}
+  <div class="vtt-ms-notes">`;
   if (canEdit) {
     html += `<button class="vtt-ms-note-add" data-vtt-fn="_vttMsAddNote" data-vtt-args="${c.id}|${uid}">+ Nouvelle note</button>`;
   }
@@ -1296,6 +1416,7 @@ function _renderMiniSheetImpl(uid) {
       <button class="vtt-ms-close" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${uid}" title="Fermer">✕</button>
     </div>
     ${selectorHtml}
+    ${_msQuickSummary(c, uid, canEdit)}
     ${tabBarHtml}
     <div class="vtt-ms-tab-content">${tabHtml}</div>`;
 
