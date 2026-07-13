@@ -49,7 +49,7 @@ let _openId = null;                                // conv ouverte (ADV | convoI
 let _editingId = null;                             // message en cours d'édition (id) | null
 let _replyTo = null;                               // message cité { id, senderName, text } | null
 let _mentionQ = null, _mentionOutside = null;      // autocomplétion @pseudo
-let _searchOpen = false, _searchQ = '';            // recherche dans la conv ouverte
+let _searchOpen = false, _searchQ = '', _listQ = ''; // recherche dans la conv ouverte + filtre conversations
 let _muted = false, _audioCtx = null, _soundReady = false;   // notif sonore (pas de bip au 1er rendu)
 let _chatEmotes = [];                              // émotes custom :nom: (world/vtt_emotes)
 let _lastRenderedLastId = null;                    // dernier msg rendu (scroll intelligent)
@@ -254,10 +254,10 @@ function _renderBubble() {
     <span class="chat-bubble-ico">💬</span>${n > 0 ? `<span class="chat-badge">${n > 99 ? '99+' : n}</span>` : ''}</button>`;
 }
 
-function _panelShell(title, headLeft, body, foot = '', headRight = '') {
-  return `<div class="chat-panel" role="dialog" aria-label="Discussions">
+function _panelShell(title, headLeft, body, foot = '', headRight = '', subtitle = '') {
+  return `<div class="chat-panel chat-panel--${_esc(_view)}" role="dialog" aria-label="Discussions">
     <div class="chat-head">
-      <span class="chat-head-left">${headLeft}<span class="chat-head-title">${_esc(title)}</span></span>
+      <span class="chat-head-left">${headLeft}<span class="chat-head-copy"><span class="chat-head-title">${_esc(title)}</span>${subtitle ? `<span class="chat-head-subtitle">${_esc(subtitle)}</span>` : ''}</span></span>
       <span class="chat-head-right">${headRight}<button class="chat-close" data-action="chatToggle" aria-label="Fermer">✕</button></span>
     </div>
     ${body}${foot}
@@ -269,29 +269,66 @@ function _renderList() {
   const el = document.getElementById('chat-widget'); if (!el) return;
   const advPrev = _advMsgs.length ? `${_advMsgs[_advMsgs.length - 1].senderName || ''} : ${_advMsgs[_advMsgs.length - 1].text || ''}` : 'Aucun message';
   const advN = _advUnread();
-  const advRow = _convoRow(ADV, '💬', 'Chat de l\'aventure', advPrev, advN);
+  const queryText = _listQ.trim().toLowerCase();
+  const matches = (name, preview) => !queryText
+    || String(name || '').toLowerCase().includes(queryText)
+    || String(preview || '').toLowerCase().includes(queryText);
+  const advRow = matches('Chat de l\'aventure', advPrev)
+    ? _convoRow(ADV, '💬', 'Chat de l\'aventure', advPrev, advN, {
+        meta: `${_advMembers().length + 1} membres`,
+        time: _advMsgs.length ? _formatTime(_atMillis(_advMsgs[_advMsgs.length - 1])) : '',
+        featured: true,
+      })
+    : '';
   const groupRows = _groups.map(g => {
     const isDm = g.type === 'dm';
     const prev = g.lastText ? `${g.lastSenderName || ''} : ${g.lastText}` : (isDm ? 'Nouvelle discussion' : 'Nouveau groupe');
+    if (!matches(_convoTitle(g), prev)) return '';
     // DM : avatar de l'autre membre ; groupe : avatar du dernier auteur.
     const avUid = isDm ? _otherDmUid(g) : g.lastSenderId;
     const ico = avUid
       ? `<img class="chat-conv-avimg${isDm && _isOnline(avUid) ? ' is-online' : ''}"${isDm ? ` data-online-uid="${_esc(avUid)}"` : ''} src="${_esc(avatarSrcOf(_profileOf(avUid)))}" alt="">`
       : (isDm ? '👤' : '👥');
-    return _convoRow(g.id, ico, _convoTitle(g), prev, _groupUnread(g) ? '•' : 0);
+    return _convoRow(g.id, ico, _convoTitle(g), prev, _groupUnread(g) ? '•' : 0, {
+      meta: isDm ? (_isOnline(avUid) ? 'En ligne' : 'Message privé') : `${(g.members || []).length} membres`,
+      time: _formatTime(_atMillis({ at: g.lastAt })),
+      online: isDm && _isOnline(avUid),
+    });
   }).join('');
-  el.innerHTML = _panelShell('Discussions', '',
-    `<div class="chat-convo-list">${advRow}${groupRows}</div>`,
+  const rows = `${advRow}${groupRows}` || `<div class="chat-empty chat-empty--list">${queryText ? 'Aucune discussion trouvée.' : 'Aucune discussion pour le moment.'}</div>`;
+  const unread = _totalUnread();
+  el.innerHTML = _panelShell('Messages', '',
+    `<div class="chat-list-tools">
+       <div class="chat-list-search">
+         <span class="chat-list-search-ico">🔎</span>
+         <input id="chat-list-search" value="${_esc(_listQ)}" placeholder="Rechercher une discussion..." autocomplete="off">
+         ${_listQ ? '<button class="chat-list-clear" data-action="chatClearListSearch" aria-label="Effacer la recherche">✕</button>' : ''}
+       </div>
+     </div>
+     <div class="chat-convo-list">${rows}</div>`,
     `<div class="chat-list-foot"><button class="chat-newbtn" data-action="chatNew">＋ Nouvelle discussion</button></div>`,
-    `<button class="chat-gear" data-action="chatToggleMute" title="${_muted ? 'Activer le son' : 'Couper le son'}" aria-label="Son des notifications">${_muted ? '🔕' : '🔔'}</button>`);
+    `<button class="chat-gear" data-action="chatToggleMute" title="${_muted ? 'Activer le son' : 'Couper le son'}" aria-label="Son des notifications">${_muted ? '🔕' : '🔔'}</button>`,
+    unread ? `${unread} non lu${unread > 1 ? 's' : ''}` : 'Aventure et messages privés');
+  const search = el.querySelector('#chat-list-search');
+  search?.addEventListener('input', (e) => {
+    _listQ = e.target.value;
+    _renderList();
+    const next = document.getElementById('chat-list-search');
+    next?.focus();
+    next?.setSelectionRange(next.value.length, next.value.length);
+  });
 }
 
-function _convoRow(id, icon, name, preview, badge) {
+function _convoRow(id, icon, name, preview, badge, opts = {}) {
   const b = badge === '•' ? '<span class="chat-conv-dot"></span>'
           : (badge > 0 ? `<span class="chat-badge chat-badge--inline">${badge > 99 ? '99+' : badge}</span>` : '');
-  return `<button class="chat-conv" data-action="chatOpenConvo" data-convo="${_esc(id)}">
-    <span class="chat-conv-ico">${icon}</span>
-    <span class="chat-conv-body"><span class="chat-conv-name">${_esc(name)}</span><span class="chat-conv-prev">${_esc(preview)}</span></span>
+  return `<button class="chat-conv${opts.featured ? ' chat-conv--featured' : ''}" data-action="chatOpenConvo" data-convo="${_esc(id)}">
+    <span class="chat-conv-ico${opts.online ? ' is-online' : ''}">${icon}</span>
+    <span class="chat-conv-body">
+      <span class="chat-conv-top"><span class="chat-conv-name">${_esc(name)}</span>${opts.time ? `<span class="chat-conv-time">${_esc(opts.time)}</span>` : ''}</span>
+      <span class="chat-conv-prev">${_esc(preview)}</span>
+      ${opts.meta ? `<span class="chat-conv-meta">${_esc(opts.meta)}</span>` : ''}
+    </span>
     ${b}</button>`;
 }
 
@@ -300,12 +337,21 @@ function _renderConvo() {
   const el = document.getElementById('chat-widget'); if (!el) return;
   const g = _convoById(_openId);
   const title = _openId === ADV ? 'Chat de l\'aventure' : _convoTitle(g);
+  const otherUid = g?.type === 'dm' ? _otherDmUid(g) : null;
+  const subtitle = _openId === ADV
+    ? `${_advMembers().length + 1} membres`
+    : (g?.type === 'dm' ? (_isOnline(otherUid) ? 'En ligne' : 'Message privé') : `${(g?.members || []).length} membres`);
+  const headAvatar = _openId === ADV
+    ? '<span class="chat-head-avatar">💬</span>'
+    : (otherUid
+        ? `<img class="chat-head-avatar${_isOnline(otherUid) ? ' is-online' : ''}" data-online-uid="${_esc(otherUid)}" src="${_esc(avatarSrcOf(_profileOf(otherUid)))}" alt="">`
+        : '<span class="chat-head-avatar">👥</span>');
   // ⚙️ Gérer : uniquement pour un vrai GROUPE (pas l'aventure, pas un DM).
   const gear = (g && g.type !== 'dm')
     ? '<button class="chat-gear" data-action="chatManage" title="Gérer le groupe" aria-label="Gérer le groupe">⚙️</button>' : '';
   const search = '<button class="chat-gear" data-action="chatSearchToggle" title="Rechercher" aria-label="Rechercher">🔍</button>';
   el.innerHTML = _panelShell(title,
-    '<button class="chat-back" data-action="chatBack" aria-label="Retour">‹</button>',
+    `<button class="chat-back" data-action="chatBack" aria-label="Retour">‹</button>${headAvatar}`,
     `<div class="chat-search" id="chat-search" ${_searchOpen ? '' : 'hidden'}>
        <input id="chat-search-inp" class="chat-input" placeholder="🔍 Rechercher dans la conversation…" value="${_esc(_searchQ)}" autocomplete="off">
      </div>
@@ -324,7 +370,8 @@ function _renderConvo() {
          <button type="submit" class="chat-send" aria-label="Envoyer">➤</button>
        </div>
      </form>`,
-    search + gear);
+    search + gear,
+    subtitle);
   el.querySelector('#chat-form')?.addEventListener('submit', (e) => { e.preventDefault(); _send(); });
   el.querySelector('#chat-search-inp')?.addEventListener('input', (e) => { _searchQ = e.target.value; _renderMessages(); });
   el.querySelector('#chat-file')?.addEventListener('change', (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) _sendImage(f); });
@@ -358,6 +405,15 @@ function _dayLabel(ms) {
   if (diff === 0) return "Aujourd'hui";
   if (diff === 1) return 'Hier';
   return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+function _formatTime(ms) {
+  if (!ms) return '';
+  const d = new Date(ms), now = new Date();
+  const day0 = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day0(now) - day0(d)) / 86400000);
+  if (diff === 0) return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  if (diff === 1) return 'Hier';
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
 }
 function _showNewPill() { document.getElementById('chat-new-pill')?.removeAttribute('hidden'); }
 function _hideNewPill() { document.getElementById('chat-new-pill')?.setAttribute('hidden', ''); }
@@ -1254,6 +1310,10 @@ function chatToggleMute() {
   localStorage.setItem('chat-muted', _muted ? '1' : '0');
   if (_view === 'list') _renderList();
 }
+function chatClearListSearch() {
+  _listQ = '';
+  if (_view === 'list') _renderList();
+}
 
 registerActions({
   chatToggle:      () => chatToggle(),
@@ -1276,6 +1336,7 @@ registerActions({
   chatLoadMore:    () => chatLoadMore(),
   chatJumpTo:      (btn) => chatJumpTo(btn),
   chatToggleMute:  () => chatToggleMute(),
+  chatClearListSearch: () => chatClearListSearch(),
   chatReact:       (btn) => chatReact(btn),
   chatEditMsg:     (btn) => chatEditMsg(btn),
   chatDeleteMsg:   (btn) => chatDeleteMsg(btn),
