@@ -4089,8 +4089,9 @@ function _buildSortFromDOM() {
  *  Permet à _buildSortResume / _calcSortDegats / etc. de calculer un aperçu générique. */
 // ── Garde anti-perte de la forge ────────────────────────────────────────────
 // Compare l'état d'édition courant à l'instantané pris à l'ouverture. Le hook
-// dans closeModalDirect() consulte _sortModalCloseGuard sur TOUTE fermeture
-// (✕ barre, ✕ forge, Échap, clic overlay). Désarmé au save et au discard confirmé.
+// dans closeModalDirect() consulte _sortModalCloseGuard quand la forge elle-même
+// va se fermer (✕ barre, ✕ forge, Échap, clic overlay), jamais lorsqu'une couche
+// de confirmation empilée est simplement annulée. Désarmé au save et au discard.
 function _snapshotSortModal() {
   try { return JSON.stringify(_buildSortFromDOM()); } catch { return null; }
 }

@@ -5,16 +5,38 @@
 import { _esc } from './html.js';
 
 const _modalStack = [];
+let _activeDismiss = null;
 
 // ── Garde de fermeture (opt-in) ─────────────────────────────────────────────
-// Une feature peut poser un « garde » consulté par closeModalDirect sur TOUTE
-// fermeture (✕, Échap, clic overlay). Le garde renvoie `true` pour BLOQUER la
-// fermeture (il gère lui-même la confirmation), `false`/rien pour laisser fermer.
+// Une feature peut poser un « garde » consulté par closeModalDirect lorsque la
+// modale de fond va réellement être fermée (✕, Échap, clic overlay). Les couches
+// empilées (confirmation, prompt…) sont toujours dépilées avant de consulter ce
+// garde. Le garde renvoie `true` pour BLOQUER la fermeture (il gère lui-même la
+// confirmation), `false`/rien pour laisser fermer.
 // Réinitialisé à chaque nouvelle modale de base (openModal) pour éviter un garde
 // périmé qui bloquerait une modale sans rapport.
 let _closeGuard = null;
 export function setModalCloseGuard(fn) { _closeGuard = typeof fn === 'function' ? fn : null; }
 export function clearModalCloseGuard() { _closeGuard = null; }
+
+function _dismissActiveLayer() {
+  const dismiss = _activeDismiss;
+  _activeDismiss = null;
+  if (typeof dismiss === 'function') {
+    try { dismiss(); } catch { /* la fermeture de la modale doit rester possible */ }
+  }
+}
+
+function _dismissAllLayers() {
+  _dismissActiveLayer();
+  for (let i = _modalStack.length - 1; i >= 0; i--) {
+    const dismiss = _modalStack[i]?.dismiss;
+    if (typeof dismiss === 'function') {
+      try { dismiss(); } catch { /* idem */ }
+    }
+  }
+  _modalStack.length = 0;
+}
 
 // Construit l'en-tête de la modale de base. Sans `opts` → titre texte simple
 // (comportement historique). Avec `opts.icon`/`opts.subtitle`/`opts.accent` →
@@ -92,7 +114,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 export function openModal(title, bodyHtml, opts = {}) {
-  _modalStack.length = 0;
+  _dismissAllLayers();
   _closeGuard = null;   // nouvelle modale de base → aucun garde hérité
   _a11yOnShow();
   _applyModalHeader(title, opts);
@@ -107,14 +129,23 @@ export function pushModal(title, bodyHtml, restore = null, opts = {}) {
   const bar     = document.getElementById('modal-title');
   const overlay = document.getElementById('modal-overlay');
 
+  const isLayered = !!(bodyEl && overlay?.classList.contains('show'));
   _a11yOnShow();
-  if (bodyEl && overlay?.classList.contains('show')) {
+  if (isLayered) {
     _modalStack.push({
       title: bar?.dataset.title || '',   // titre brut (cf. _applyModalHeader)
       body: bodyEl.innerHTML || '',
       restore,
+      dismiss: _activeDismiss,
     });
+  } else {
+    // pushModal sert aussi à ouvrir confirmModal/promptModal sans modale de fond.
+    // Dans ce cas il s'agit d'une nouvelle base : aucun garde/état périmé ne doit
+    // survivre à la modale précédemment fermée.
+    _dismissAllLayers();
+    _closeGuard = null;
   }
+  _activeDismiss = typeof opts.onDismiss === 'function' ? opts.onDismiss : null;
 
   _applyModalHeader(title, opts);
   if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
@@ -128,9 +159,11 @@ export function popModal() {
   }
 
   const previous = _modalStack.pop();
+  _dismissActiveLayer();
   const bodyEl  = document.getElementById('modal-body');
   _applyModalHeader(previous.title);
   if (bodyEl)  bodyEl.innerHTML    = previous.body;
+  _activeDismiss = previous.dismiss || null;
   if (typeof previous.restore === 'function') {
     previous.restore();
   }
@@ -150,6 +183,11 @@ export function closeModal(e) {
 
 // Ferme toujours — utilisée par le bouton ✕ et Escape
 export function closeModalDirect() {
+  // Une confirmation/prompt au-dessus de la modale de fond se ferme sans jamais
+  // déclencher la garde de cette dernière.
+  if (_modalStack.length > 0) {
+    return popModal();
+  }
   // Garde opt-in : si posé et qu'il renvoie true, la fermeture est bloquée
   // (le garde gère sa propre confirmation puis rappellera closeModalDirect).
   if (_closeGuard) {
@@ -157,9 +195,8 @@ export function closeModalDirect() {
     try { blocked = _closeGuard() === true; } catch { blocked = false; }
     if (blocked) return;
   }
-  if (_modalStack.length > 0) {
-    return popModal();
-  }
+  _dismissActiveLayer();
+  _closeGuard = null;
   document.getElementById('modal-overlay')?.classList.remove('show');
   _a11yOnClose();
 }
@@ -215,26 +252,50 @@ export function confirmModal(message, {
       </div>`;
 
     const overlay = document.getElementById('modal-overlay');
-    pushModal(title || '', bodyHtml);
+    let settled = false;
 
+    const cleanup = () => {
+      document.removeEventListener('keydown', onKey, true);
+      overlay?.removeEventListener('click', onOverlay, true);
+    };
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
     const done = (result) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       closeModalDirect();
       resolve(result);
     };
+
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      done(false);
+    };
+    const onOverlay = (e) => {
+      if (e.target !== overlay) return;
+      e.stopImmediatePropagation();
+      done(false);
+    };
+
+    pushModal(title || '', bodyHtml, null, { onDismiss: () => settle(false) });
 
     // Boutons
     document.getElementById('cm-confirm')?.addEventListener('click', () => done(true),  { once: true });
     document.getElementById('cm-cancel') ?.addEventListener('click', () => done(false), { once: true });
 
-    // Escape = annuler
-    const onKey = (e) => { if (e.key === 'Escape') { document.removeEventListener('keydown', onKey); done(false); } };
-    document.addEventListener('keydown', onKey);
+    // Escape = annuler. Capture l'événement avant le gestionnaire global pour
+    // qu'une seule couche soit fermée.
+    document.addEventListener('keydown', onKey, true);
 
-    // Clic overlay = annuler
-    const onOverlay = (e) => {
-      if (e.target === overlay) { overlay.removeEventListener('click', onOverlay); done(false); }
-    };
-    overlay?.addEventListener('click', onOverlay);
+    // Clic overlay = annuler, avec la même protection contre la double fermeture.
+    overlay?.addEventListener('click', onOverlay, true);
   });
 }
 
@@ -290,7 +351,21 @@ export function promptModal(label, {
       </div>`;
 
     const overlay = document.getElementById('modal-overlay');
-    pushModal(title || '', bodyHtml);
+    let settled = false;
+    let onKey = null;
+    let onOverlay = null;
+
+    const cleanup = () => {
+      if (onKey) document.removeEventListener('keydown', onKey, true);
+      if (onOverlay) overlay?.removeEventListener('click', onOverlay, true);
+    };
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
+    pushModal(title || '', bodyHtml, null, { onDismiss: () => settle(null) });
 
     const input = document.getElementById('pm-input');
     const confirmBtn = document.getElementById('pm-confirm');
@@ -303,28 +378,38 @@ export function promptModal(label, {
       confirmBtn.style.cursor = empty ? 'not-allowed' : 'pointer';
     };
 
-    const cleanup = () => {
-      document.removeEventListener('keydown', onKey);
-      overlay?.removeEventListener('click', onOverlay);
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      closeModalDirect();
+      resolve(result);
     };
-    const done = (result) => { cleanup(); closeModalDirect(); resolve(result); };
     const submit = () => {
       const v = input?.value ?? '';
       if (required && !v.trim()) return;
       done(v);
     };
 
-    const onKey = (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); done(null); }
+    onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        done(null);
+      }
       else if (e.key === 'Enter' && !multiline) { e.preventDefault(); submit(); }
     };
-    const onOverlay = (e) => { if (e.target === overlay) done(null); };
+    onOverlay = (e) => {
+      if (e.target !== overlay) return;
+      e.stopImmediatePropagation();
+      done(null);
+    };
 
     confirmBtn?.addEventListener('click', submit);
     document.getElementById('pm-cancel')?.addEventListener('click', () => done(null));
     input?.addEventListener('input', syncRequired);
-    document.addEventListener('keydown', onKey);
-    overlay?.addEventListener('click', onOverlay);
+    document.addEventListener('keydown', onKey, true);
+    overlay?.addEventListener('click', onOverlay, true);
 
     syncRequired();
     // Focus + sélection après le rendu de la modale.
