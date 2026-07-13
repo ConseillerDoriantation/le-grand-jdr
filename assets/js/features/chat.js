@@ -48,9 +48,12 @@ let _uid = null, _open = false, _view = 'list';   // 'list' | 'convo' | 'new' | 
 let _openId = null;                                // conv ouverte (ADV | convoId)
 let _editingId = null;                             // message en cours d'édition (id) | null
 let _replyTo = null;                               // message cité { id, senderName, text } | null
+let _mentionQ = null, _mentionOutside = null;      // autocomplétion @pseudo
 let _searchOpen = false, _searchQ = '';            // recherche dans la conv ouverte
 let _muted = false, _audioCtx = null, _soundReady = false;   // notif sonore (pas de bip au 1er rendu)
 let _chatEmotes = [];                              // émotes custom :nom: (world/vtt_emotes)
+let _lastRenderedLastId = null;                    // dernier msg rendu (scroll intelligent)
+let _advLimit = HISTORY, _convoLimit = HISTORY;    // pagination « charger plus »
 let _advMsgs = [];                                 // messages Aventure (live session)
 let _groups  = [];                                 // convos de groupe où je suis membre
 let _convoMsgs = [];                               // messages du GROUPE ouvert
@@ -98,12 +101,8 @@ export async function initChat(uid) {
   try { const s = await getDoc(_readRef()); const d = s.data() || {}; _reads = { ...d, [ADV]: Number(d[ADV] ?? d.at) || 0 }; }
   catch { _reads = {}; }
 
-  const mcol = _msgsCol();
-  if (mcol) _unsubAdv = onSnapshot(
-    query(mcol, where('convoId', '==', ADV), orderBy('at', 'desc'), limit(HISTORY)),
-    snap => { _advMsgs = snap.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) })).reverse(); _onData(ADV); },
-    err => console.warn('[chat] adv', err?.code, err?.message || err),
-  );
+  _advLimit = HISTORY;
+  _subscribeAdv();
 
   const ccol = _convosCol();
   if (ccol && _uid) _unsubGroups = onSnapshot(
@@ -126,8 +125,30 @@ export function teardownChat() {
 function _notify() {
   const n = _totalUnread();
   if (_baseTitle) document.title = n > 0 ? `(${n}) ${_baseTitle}` : _baseTitle;
-  if (n > _prevUnread) { _pulseBubble(); if (_soundReady) _beep(); }
+  if (n > _prevUnread) { _pulseBubble(); if (_soundReady) { _beep(); _desktopNotify(); } }
   _prevUnread = n; _soundReady = true;   // les non-lus déjà là au chargement ne sonnent pas
+}
+// Aperçu du message non-lu le plus récent (pour la notif desktop).
+function _lastPreview() {
+  let best = null, bestAt = 0;
+  const a = _advMsgs[_advMsgs.length - 1];
+  if (a && a.senderId !== _uid) { best = `${a.senderName || ''}: ${a.text || '📷'}`; bestAt = _atMillis(a); }
+  for (const g of _groups) {
+    const at = _lastMillis(g);
+    if (g.lastSenderId && g.lastSenderId !== _uid && at > bestAt) { best = `${g.lastSenderName || ''}: ${g.lastText || ''}`; bestAt = at; }
+  }
+  return best;
+}
+function _maybeRequestNotifPerm() {
+  try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {}
+}
+// Popup navigateur : seulement onglet caché + permission accordée + son non coupé.
+function _desktopNotify() {
+  try {
+    if (_muted || !document.hidden || !('Notification' in window) || Notification.permission !== 'granted') return;
+    const n = new Notification('Le Grand JDR — messagerie', { body: _lastPreview() || 'Nouveau message', tag: 'grandjdr-chat' });
+    n.onclick = () => { try { window.focus(); } catch {} n.close(); };
+  } catch { /* best-effort */ }
 }
 // Bip court (WebAudio, sans asset). Coupé si mute ; best-effort (autoplay).
 function _beep() {
@@ -155,6 +176,26 @@ function _teardownListeners() {
   [_unsubAdv, _unsubGroups, _unsubConvo, _unsubTyping, _unsubReads].forEach(u => { if (u) try { u(); } catch {} });
   _unsubAdv = _unsubGroups = _unsubConvo = _unsubTyping = _unsubReads = null;
   clearTimeout(_typingClearTimer); clearTimeout(_typingRenderTimer);
+}
+
+// Abonnements messages (avec limite paginée). Re-souscrits par « charger plus ».
+function _subscribeAdv() {
+  if (_unsubAdv) { try { _unsubAdv(); } catch {} _unsubAdv = null; }
+  const mcol = _msgsCol(); if (!mcol) return;
+  _unsubAdv = onSnapshot(
+    query(mcol, where('convoId', '==', ADV), orderBy('at', 'desc'), limit(_advLimit)),
+    snap => { _advMsgs = snap.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) })).reverse(); _onData(ADV); },
+    err => console.warn('[chat] adv', err?.code, err?.message || err),
+  );
+}
+function _subscribeConvo(id) {
+  if (_unsubConvo) { try { _unsubConvo(); } catch {} _unsubConvo = null; }
+  const mcol = _msgsCol(); if (!mcol) return;
+  _unsubConvo = onSnapshot(
+    query(mcol, where('convoId', '==', id), orderBy('at', 'desc'), limit(_convoLimit)),
+    snap => { _convoMsgs = snap.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) })).reverse(); _onData('convo'); },
+    err => console.warn('[chat] convo', err?.code, err?.message || err),
+  );
 }
 
 // Nouveau lot de données reçu (source = ADV | 'groups' | 'convo')
@@ -239,6 +280,7 @@ function _renderConvo() {
        <input id="chat-search-inp" class="chat-input" placeholder="🔍 Rechercher dans la conversation…" value="${_esc(_searchQ)}" autocomplete="off">
      </div>
      <div class="chat-msgs" id="chat-msgs"></div>
+     <button class="chat-new-pill" id="chat-new-pill" data-action="chatScrollBottom" hidden>↓ Nouveaux messages</button>
      <div class="chat-typing" id="chat-typing" hidden></div>`,
     `<form class="chat-form" id="chat-form">
        <div class="chat-edit-bar" id="chat-edit-bar" hidden>✏️ Édition — <button type="button" class="chat-edit-cancel" data-action="chatCancelEdit">annuler</button></div>
@@ -256,8 +298,19 @@ function _renderConvo() {
   el.querySelector('#chat-search-inp')?.addEventListener('input', (e) => { _searchQ = e.target.value; _renderMessages(); });
   el.querySelector('#chat-file')?.addEventListener('change', (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) _sendImage(f); });
   const ce = el.querySelector('#chat-input');
-  ce?.addEventListener('input', _signalTyping);
-  ce?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _send(); } });
+  ce?.addEventListener('input', _onComposerInput);
+  ce?.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('chat-mention-menu')) { _closeMentionMenu(); return; }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const first = document.querySelector('#chat-mention-menu [data-uid]');
+      if (first) first.click(); else _send();   // menu mention ouvert → sélectionne, sinon envoie
+    }
+  });
+  el.querySelector('#chat-msgs')?.addEventListener('scroll', (e) => {
+    const l = e.target;
+    if (l.scrollHeight - l.scrollTop - l.clientHeight < 60) _hideNewPill();
+  });
   if (_typing.length) _renderTyping();
   if (_replyTo) _showReplyBar();
   _renderMessages();
@@ -265,22 +318,59 @@ function _renderConvo() {
 }
 function _renderConvoHeaderBadge() { /* pas de badge d'en-tête pour l'instant */ }
 
+// Libellé de jour pour les séparateurs de date.
+function _dayLabel(ms) {
+  const d = new Date(ms), now = new Date();
+  const day0 = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day0(now) - day0(d)) / 86400000);
+  if (diff === 0) return "Aujourd'hui";
+  if (diff === 1) return 'Hier';
+  return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+function _showNewPill() { document.getElementById('chat-new-pill')?.removeAttribute('hidden'); }
+function _hideNewPill() { document.getElementById('chat-new-pill')?.setAttribute('hidden', ''); }
+
 function _renderMessages() {
   const list = document.getElementById('chat-msgs'); if (!list) return;
-  let msgs = _openId === ADV ? _advMsgs : _convoMsgs;
+  const all = _openId === ADV ? _advMsgs : _convoMsgs;
   const q = _searchOpen ? _searchQ.trim().toLowerCase() : '';
-  if (q) msgs = msgs.filter(m => !m.deleted && (m.text || '').toLowerCase().includes(q));
-  let html = msgs.length
-    ? msgs.map(_msgRow).join('')
-    : `<div class="chat-empty">${q ? 'Aucun message trouvé.' : 'Aucun message. Lance la discussion !'}</div>`;
+  const msgs = q ? all.filter(m => !m.deleted && (m.text || '').toLowerCase().includes(q)) : all;
+
+  // Scroll intelligent : suivre le bas seulement si on y est déjà.
+  const prevTop = list.scrollTop, prevHeight = list.scrollHeight;
+  const nearBottom = prevHeight - prevTop - list.clientHeight < 60;
+  const lastId = all.length ? all[all.length - 1].id : null;
+  const isNew = lastId && lastId !== _lastRenderedLastId;
+
+  let html = '';
+  const curLimit = _openId === ADV ? _advLimit : _convoLimit;
+  if (!msgs.length) {
+    html = `<div class="chat-empty">${q ? 'Aucun message trouvé.' : 'Aucun message. Lance la discussion !'}</div>`;
+  } else {
+    // Il y a peut-être plus ancien si on a atteint la limite courante.
+    if (!q && all.length >= curLimit) html += `<button class="chat-load-more" data-action="chatLoadMore">⤒ Messages plus anciens</button>`;
+    let prevDay = '';
+    for (const m of msgs) {
+      const day = _dayLabel(_atMillis(m) || Date.now());
+      if (day !== prevDay) { html += `<div class="chat-date-sep"><span>${_esc(day)}</span></div>`; prevDay = day; }
+      html += _msgRow(m);
+    }
+  }
   // « Vu » (DM) : sous mon dernier message si l'autre l'a lu.
   if (!q && _convoById(_openId)?.type === 'dm') {
-    const mine = (_openId === ADV ? _advMsgs : _convoMsgs).filter(m => m.senderId === _uid && !m.deleted);
+    const mine = all.filter(m => m.senderId === _uid && !m.deleted);
     const last = mine[mine.length - 1];
     if (last && _otherReads >= _atMillis(last)) html += '<div class="chat-seen">Vu</div>';
   }
   list.innerHTML = html;
-  if (!q) list.scrollTop = list.scrollHeight;   // pas d'auto-scroll pendant une recherche
+
+  if (q) { list.scrollTop = 0; }
+  else if (nearBottom) { list.scrollTop = list.scrollHeight; _hideNewPill(); }
+  else {
+    list.scrollTop = prevTop + (list.scrollHeight - prevHeight);   // préserve la position
+    if (isNew) _showNewPill();
+  }
+  _lastRenderedLastId = lastId;
 }
 
 // Profil (pour l'avatar) d'un uni : le mien via STATE, les autres via
@@ -343,6 +433,21 @@ function _applyChatEmotes(escaped) {
   }
   return escaped;
 }
+// Mentions @[uid] → @pseudo surligné (la mienne en évidence).
+function _applyMentions(escaped) {
+  return escaped.replace(/@\[([\w-]+)\]/g, (_m, uid) =>
+    `<span class="chat-mention${uid === _uid ? ' chat-mention--me' : ''}">@${_esc(_nameOf(uid))}</span>`);
+}
+// URLs → liens cliquables. Appliqué sur le TEXTE échappé (avant émotes/mentions)
+// pour ne jamais capturer une URL présente dans un attribut (ex. src d'émote).
+function _linkify(html) {
+  return html.replace(/(https?:\/\/[^\s<]+)/g, (m) => {
+    const t = m.match(/[)\].,!?;:]+$/);
+    const tail = t ? t[0] : '';
+    const url = tail ? m.slice(0, -tail.length) : m;
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>${tail}`;
+  });
+}
 
 function _msgRow(m) {
   const mine = m.senderId === _uid;
@@ -359,8 +464,11 @@ function _msgRow(m) {
   const quote = m.replyTo
     ? `<span class="chat-msg-quote"><span class="chat-quote-name">${_esc(m.replyTo.senderName || '')}</span><span class="chat-quote-text">${_esc(m.replyTo.text || '📷 Image')}</span></span>` : '';
   const img = m.image ? `<img class="chat-msg-img" src="${_esc(m.image)}" alt="image" loading="lazy">` : '';
-  const txt = m.text ? `<span class="chat-msg-btext">${_applyChatEmotes(_esc(m.text))}</span>` : '';
-  return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}">${av}
+  // Ordre : échappe → linkify (sur texte pur) → émotes/mentions. Linkifier en
+  // dernier capturait l'URL du src des <img> d'émote (→ src cassé, 404).
+  const txt = m.text ? `<span class="chat-msg-btext">${_applyMentions(_applyChatEmotes(_linkify(_esc(m.text))))}</span>` : '';
+  const mentionsMe = !mine && _uid && (m.text || '').includes(`@[${_uid}]`);
+  return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}${mentionsMe ? ' chat-msg--mention' : ''}">${av}
     <span class="chat-msg-content">${author}
       <span class="chat-msg-bubble-wrap">
         <span class="chat-msg-bubble${m.image && !m.text ? ' chat-msg-bubble--media' : ''}">${quote}${img}${txt}</span>
@@ -442,7 +550,7 @@ async function _healMembers(members) {
 // ── Actions ───────────────────────────────────────────────────────────────────
 function chatToggle() {
   _open = !_open;
-  if (_open) { _view = 'list'; _renderList(); }
+  if (_open) { _maybeRequestNotifPerm(); _view = 'list'; _renderList(); }
   else { if (_openId) _markRead(_openId); _teardownConvo(); _renderBubble(); }
 }
 function chatBack() { _teardownConvo(); _view = 'list'; _renderList(); }
@@ -454,12 +562,8 @@ function chatOpenConvo(btn) {
   _renderConvo();
   if (id === ADV) { _markRead(ADV); }
   else {
-    const mcol = _msgsCol();
-    if (mcol) _unsubConvo = onSnapshot(
-      query(mcol, where('convoId', '==', id), orderBy('at', 'desc'), limit(HISTORY)),
-      snap => { _convoMsgs = snap.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) })).reverse(); _onData('convo'); },
-      err => console.warn('[chat] convo', err?.code, err?.message || err),
-    );
+    _convoLimit = HISTORY;
+    _subscribeConvo(id);
     _markRead(id);
   }
   _subscribeTyping(id);
@@ -469,11 +573,11 @@ function _teardownConvo() {
   if (_unsubConvo) { try { _unsubConvo(); } catch {} _unsubConvo = null; }
   if (_unsubTyping) { try { _unsubTyping(); } catch {} _unsubTyping = null; }
   if (_unsubReads) { try { _unsubReads(); } catch {} _unsubReads = null; }
-  _convoMsgs = []; _typing = []; _otherReads = 0;
+  _convoMsgs = []; _typing = []; _otherReads = 0; _lastRenderedLastId = null;
   clearTimeout(_typingClearTimer); clearTimeout(_typingRenderTimer);
   if (_typingWroteAt) _clearTyping();   // signale qu'on n'écrit plus
   _editingId = null; _replyTo = null; _searchOpen = false; _searchQ = '';   // états liés à la conv
-  _closeEmojiPop();
+  _closeEmojiPop(); _closeMentionMenu();
 }
 
 // ── « écrit… » (typing) — quota strict : 1 doc/joueur, write throttlé à 4 s,
@@ -694,7 +798,7 @@ async function chatDeleteMsg(btn) {
   const id = btn?.dataset?.msg; if (!id) return;
   _closeMsgMenu();
   const msgs = _openId === ADV ? _advMsgs : _convoMsgs;
-  const m = msgs.find(x => x.id === id); if (!m || m.senderId !== _uid) return;
+  const m = msgs.find(x => x.id === id); if (!m || (m.senderId !== _uid && !STATE.isAdmin)) return;
   if (!await confirmModal('Supprimer ce message ?')) return;
   if (_editingId === id) chatCancelEdit();
   const ref = _msgRef(id); if (!ref) return;
@@ -814,8 +918,8 @@ function chatMsgMenu(btn) {
     <div class="chat-msg-menu-reacts">${REACTIONS.map(e =>
       `<button class="chat-act-emo" data-action="chatReact" data-msg="${_esc(id)}" data-emo="${e}" title="Réagir ${e}">${e}</button>`).join('')}</div>
     <button class="chat-msg-menu-item" data-action="chatReplyMsg" data-msg="${_esc(id)}">↩︎ Répondre</button>
-    ${mine ? `<button class="chat-msg-menu-item" data-action="chatEditMsg" data-msg="${_esc(id)}">✏️ Modifier</button>
-              <button class="chat-msg-menu-item" data-action="chatDeleteMsg" data-msg="${_esc(id)}">🗑️ Supprimer</button>` : ''}`;
+    ${mine ? `<button class="chat-msg-menu-item" data-action="chatEditMsg" data-msg="${_esc(id)}">✏️ Modifier</button>` : ''}
+    ${(mine || STATE.isAdmin) ? `<button class="chat-msg-menu-item" data-action="chatDeleteMsg" data-msg="${_esc(id)}">🗑️ Supprimer${!mine ? ' (MJ)' : ''}</button>` : ''}`;
   document.body.appendChild(pop);
   const r = btn.getBoundingClientRect();
   const w = pop.offsetWidth || 220, h = pop.offsetHeight || 40;
@@ -882,6 +986,7 @@ function _composerText() {
     if (n.nodeType === 3) out += n.nodeValue;
     else if (n.nodeName === 'IMG') out += n.dataset.emote || '';
     else if (n.nodeName === 'BR') out += '\n';
+    else if (n.nodeType === 1 && n.dataset && n.dataset.uid) out += `@[${n.dataset.uid}]`;   // mention
     else walk(n);
   });
   walk(el);
@@ -919,6 +1024,70 @@ function chatInsertEmote(btn) {
   _signalTyping();
 }
 
+// ── Autocomplétion @mention ──────────────────────────────────────────────────
+function _mentionQuery() {
+  const el = _composerEl(); if (!el) return null;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  const node = sel.anchorNode;
+  if (!node || node.nodeType !== 3 || !el.contains(node)) return null;
+  const before = node.nodeValue.slice(0, sel.anchorOffset);
+  const m = before.match(/(?:^|\s)@([\p{L}0-9_]{0,20})$/u);
+  if (!m) return null;
+  return { q: m[1], node, from: sel.anchorOffset - m[1].length - 1, to: sel.anchorOffset };
+}
+function _closeMentionMenu() {
+  document.getElementById('chat-mention-menu')?.remove();
+  _mentionQ = null;
+  if (_mentionOutside) { document.removeEventListener('mousedown', _mentionOutside, true); _mentionOutside = null; }
+}
+function _renderMentionMenu(mq) {
+  const ql = mq.q.toLowerCase();
+  // Cible : membres de la conversation (groupe/DM) ; tout le monde en chat d'aventure.
+  const pool = _openId === ADV
+    ? _advMembers()
+    : (_convoById(_openId)?.members || []).filter(u => u && u !== _uid && !_ghosts.has(u));
+  const members = pool.map(u => ({ u, name: _nameOf(u) }))
+    .filter(x => !ql || x.name.toLowerCase().includes(ql)).slice(0, 6);
+  _closeMentionMenu();
+  if (!members.length) return;
+  _mentionQ = mq;
+  const el = _composerEl(); if (!el) return;
+  const pop = document.createElement('div');
+  pop.id = 'chat-mention-menu'; pop.className = 'chat-mention-menu';
+  pop.innerHTML = members.map(x =>
+    `<button type="button" class="chat-mention-item" data-action="chatPickMention" data-uid="${_esc(x.u)}">
+       <img class="chat-member-av" src="${_esc(avatarSrcOf(_profileOf(x.u)))}" alt="">
+       <span class="chat-member-name">${_esc(x.name)}</span>
+     </button>`).join('');
+  document.body.appendChild(pop);
+  const r = el.getBoundingClientRect();
+  const w = pop.offsetWidth || 220, h = pop.offsetHeight || 40;
+  pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
+  pop.style.top = `${Math.max(8, r.top - h - 6)}px`;
+  _mentionOutside = (e) => { if (!pop.contains(e.target) && !el.contains(e.target)) _closeMentionMenu(); };
+  requestAnimationFrame(() => document.addEventListener('mousedown', _mentionOutside, true));
+}
+function chatPickMention(btn) {
+  const uid = btn?.dataset?.uid, mq = _mentionQ; if (!uid || !mq) return;
+  const range = document.createRange();
+  try { range.setStart(mq.node, mq.from); range.setEnd(mq.node, mq.to); } catch { _closeMentionMenu(); return; }
+  range.deleteContents();
+  const span = document.createElement('span');
+  span.className = 'chat-mention'; span.contentEditable = 'false'; span.dataset.uid = uid; span.textContent = '@' + _nameOf(uid);
+  range.insertNode(span);
+  const sp = document.createTextNode(' '); span.after(sp);
+  const sel = window.getSelection(); const r2 = document.createRange();
+  r2.setStartAfter(sp); r2.collapse(true); sel.removeAllRanges(); sel.addRange(r2);
+  _closeMentionMenu();
+  _composerEl()?.focus();
+}
+function _onComposerInput() {
+  _signalTyping();
+  const mq = _mentionQuery();
+  if (mq) _renderMentionMenu(mq); else _closeMentionMenu();
+}
+
 // ── Répondre / citer ─────────────────────────────────────────────────────────
 function _showReplyBar() {
   const bar = document.getElementById('chat-reply-bar'); if (!bar || !_replyTo) return;
@@ -950,6 +1119,15 @@ function chatSearchToggle() {
   if (_searchOpen) document.getElementById('chat-search-inp')?.focus();
 }
 function chatPickImage() { document.getElementById('chat-file')?.click(); }
+function chatScrollBottom() {
+  const list = document.getElementById('chat-msgs'); if (list) list.scrollTop = list.scrollHeight;
+  _hideNewPill();
+}
+// Charge un lot plus ancien (re-souscription avec limite augmentée).
+function chatLoadMore() {
+  if (_openId === ADV) { _advLimit += HISTORY; _subscribeAdv(); }
+  else if (_openId) { _convoLimit += HISTORY; _subscribeConvo(_openId); }
+}
 function chatToggleMute() {
   _muted = !_muted;
   localStorage.setItem('chat-muted', _muted ? '1' : '0');
@@ -967,10 +1145,13 @@ registerActions({
   chatEmojiToggle: () => chatEmojiToggle(),
   chatInsertEmoji: (btn) => chatInsertEmoji(btn),
   chatInsertEmote: (btn) => chatInsertEmote(btn),
+  chatPickMention: (btn) => chatPickMention(btn),
   chatReplyMsg:    (btn) => chatReplyMsg(btn),
   chatCancelReply: () => chatCancelReply(),
   chatSearchToggle:() => chatSearchToggle(),
   chatPickImage:   () => chatPickImage(),
+  chatScrollBottom:() => chatScrollBottom(),
+  chatLoadMore:    () => chatLoadMore(),
   chatToggleMute:  () => chatToggleMute(),
   chatReact:       (btn) => chatReact(btn),
   chatEditMsg:     (btn) => chatEditMsg(btn),
