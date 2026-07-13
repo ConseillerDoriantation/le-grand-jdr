@@ -290,6 +290,12 @@
 .chat-quote-text { display: block; opacity: .8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-msg-btext { display: block; }
 
+/* ── Émotes custom :nom: ── */
+.chat-emote-inline { height: 1.4em; width: auto; vertical-align: -0.3em; margin: 0 1px; }
+.chat-emote-grid { grid-template-columns: repeat(6, 1fr); }
+.chat-emote-opt { padding: 3px; }
+.chat-emote-opt img { width: 100%; height: 100%; max-height: 30px; object-fit: contain; }
+
 /* ── « écrit… » + « Vu » ── */
 .chat-typing { padding: .05rem .8rem .35rem; font-size: .72rem; font-style: italic; color: var(--text-dim, #9aa4b2); }
 .chat-seen { align-self: flex-end; font-size: .62rem; color: var(--text-dim, #9aa4b2); padding: .05rem .35rem 0; }

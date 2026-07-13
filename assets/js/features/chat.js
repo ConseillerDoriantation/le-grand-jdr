@@ -24,7 +24,7 @@ import {
   db, collection, query, where, orderBy, limit, onSnapshot, addDoc, updateDoc,
   serverTimestamp, doc, getDoc, setDoc, deleteDoc, deleteField,
 } from '../config/firebase.js';
-import { getCurrentAdventureId } from '../data/firestore.js';
+import { getCurrentAdventureId, getDocData } from '../data/firestore.js';
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { showNotif } from '../shared/notifications.js';
@@ -50,6 +50,7 @@ let _editingId = null;                             // message en cours d'éditio
 let _replyTo = null;                               // message cité { id, senderName, text } | null
 let _searchOpen = false, _searchQ = '';            // recherche dans la conv ouverte
 let _muted = false, _audioCtx = null, _soundReady = false;   // notif sonore (pas de bip au 1er rendu)
+let _chatEmotes = [];                              // émotes custom :nom: (world/vtt_emotes)
 let _advMsgs = [];                                 // messages Aventure (live session)
 let _groups  = [];                                 // convos de groupe où je suis membre
 let _convoMsgs = [];                               // messages du GROUPE ouvert
@@ -88,6 +89,8 @@ export async function initChat(uid) {
   _advMsgs = []; _groups = []; _convoMsgs = []; _open = false; _view = 'list'; _openId = null;
   _editingId = null; _ghosts = new Set(); _replyTo = null; _searchOpen = false; _searchQ = '';
   _muted = localStorage.getItem('chat-muted') === '1'; _soundReady = false;
+  _chatEmotes = [];
+  _loadChatEmotes().then(() => { if (_open && _view === 'convo') _renderMessages(); });
   _baseTitle = (document.title || 'Le Grand JDR').replace(/^\(\d+\)\s*/, '');
   _prevUnread = 0;
   _mount();
@@ -324,6 +327,21 @@ function _reactionsHtml(m) {
   ).join('')}</span>`;
 }
 
+// Émotes custom :nom: → <img> (mêmes émotes que le VTT, world/vtt_emotes).
+async function _loadChatEmotes() {
+  try { const d = await getDocData('world', 'vtt_emotes'); _chatEmotes = Array.isArray(d?.emotes) ? d.emotes.filter(e => e && e.name && e.url) : []; }
+  catch { _chatEmotes = []; }
+}
+function _applyChatEmotes(escaped) {
+  if (!_chatEmotes.length) return escaped;
+  for (const em of _chatEmotes) {
+    const key = `:${em.name}:`;
+    if (escaped.indexOf(key) === -1) continue;
+    escaped = escaped.split(key).join(`<img class="chat-emote-inline" src="${_esc(em.url)}" alt="${_esc(key)}" title="${_esc(key)}">`);
+  }
+  return escaped;
+}
+
 function _msgRow(m) {
   const mine = m.senderId === _uid;
   const time = new Date(_atMillis(m) || Date.now()).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
@@ -339,7 +357,7 @@ function _msgRow(m) {
   const quote = m.replyTo
     ? `<span class="chat-msg-quote"><span class="chat-quote-name">${_esc(m.replyTo.senderName || '')}</span><span class="chat-quote-text">${_esc(m.replyTo.text || '📷 Image')}</span></span>` : '';
   const img = m.image ? `<img class="chat-msg-img" src="${_esc(m.image)}" alt="image" loading="lazy">` : '';
-  const txt = m.text ? `<span class="chat-msg-btext">${_esc(m.text)}</span>` : '';
+  const txt = m.text ? `<span class="chat-msg-btext">${_applyChatEmotes(_esc(m.text))}</span>` : '';
   return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}">${av}
     <span class="chat-msg-content">${author}
       <span class="chat-msg-bubble-wrap">
@@ -814,11 +832,16 @@ function _pushEmojiRecent(emo) {
 const _emojiOptBtn = (e) => `<button type="button" class="chat-emoji-opt" data-action="chatInsertEmoji" data-emo="${e}" title="${e}">${e}</button>`;
 function _emojiPickerHtml() {
   const rec = _emojiRecents();
+  // Émotes custom :nom: de l'aventure (images), insérées comme balise texte.
+  const emoteBlock = _chatEmotes.length
+    ? `<div class="chat-emoji-cat"><div class="chat-emoji-catlbl">😄 Émotes</div><div class="chat-emoji-grid chat-emote-grid">${_chatEmotes.map(em =>
+        `<button type="button" class="chat-emoji-opt chat-emote-opt" data-action="chatInsertEmote" data-emo=":${_esc(em.name)}:" title=":${_esc(em.name)}:"><img src="${_esc(em.url)}" alt=":${_esc(em.name)}:" loading="lazy"></button>`).join('')}</div></div>`
+    : '';
   const recBlock = rec.length
     ? `<div class="chat-emoji-cat"><div class="chat-emoji-catlbl">🕘 Récents</div><div class="chat-emoji-grid">${rec.map(_emojiOptBtn).join('')}</div></div>` : '';
   const cats = EMOJI_CATS.map(c =>
     `<div class="chat-emoji-cat"><div class="chat-emoji-catlbl">${_esc(c.label)}</div><div class="chat-emoji-grid">${c.emojis.map(_emojiOptBtn).join('')}</div></div>`).join('');
-  return recBlock + cats;
+  return emoteBlock + recBlock + cats;
 }
 
 // Popover ancré au body + positionné en JS (comme le menu ⋯) → indépendant du
@@ -838,14 +861,22 @@ function chatEmojiToggle() {
   _emojiOutside = (e) => { if (!pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) _closeEmojiPop(); };
   requestAnimationFrame(() => document.addEventListener('mousedown', _emojiOutside, true));
 }
-function chatInsertEmoji(btn) {
-  const emo = btn?.dataset?.emo; if (!emo) return;
+function _insertText(str) {
   const inp = document.getElementById('chat-input'); if (!inp) return;
   const s = inp.selectionStart ?? inp.value.length, e = inp.selectionEnd ?? inp.value.length;
-  inp.value = inp.value.slice(0, s) + emo + inp.value.slice(e);
-  const pos = s + emo.length;
+  inp.value = inp.value.slice(0, s) + str + inp.value.slice(e);
+  const pos = s + str.length;
   inp.focus(); try { inp.setSelectionRange(pos, pos); } catch {}
+}
+function chatInsertEmoji(btn) {
+  const emo = btn?.dataset?.emo; if (!emo) return;
+  _insertText(emo);
   _pushEmojiRecent(emo);   // remonté dans « Récents » à la prochaine ouverture
+}
+// Insère la balise :nom: d'une émote custom (rendue en image à l'affichage).
+function chatInsertEmote(btn) {
+  const tag = btn?.dataset?.emo; if (!tag) return;
+  _insertText(tag);
 }
 
 // ── Répondre / citer ─────────────────────────────────────────────────────────
@@ -895,6 +926,7 @@ registerActions({
   chatMsgMenu:     (btn) => chatMsgMenu(btn),
   chatEmojiToggle: () => chatEmojiToggle(),
   chatInsertEmoji: (btn) => chatInsertEmoji(btn),
+  chatInsertEmote: (btn) => chatInsertEmote(btn),
   chatReplyMsg:    (btn) => chatReplyMsg(btn),
   chatCancelReply: () => chatCancelReply(),
   chatSearchToggle:() => chatSearchToggle(),
