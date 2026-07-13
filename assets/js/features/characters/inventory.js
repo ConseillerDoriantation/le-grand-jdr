@@ -7,7 +7,7 @@ import { openModal, closeModal, modalSection } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _norm } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
-import { RARETE_NAMES, _rareteColor } from '../../shared/rarity.js';
+import { RARETE_NAMES, _rareteColor, _rareteLabel } from '../../shared/rarity.js';
 import { statShort, formatItemBonusText, calcOr, getItemEffectText } from '../../shared/char-stats.js';
 import { useGoldMulti } from '../../shared/economy.js';
 import {
@@ -147,7 +147,7 @@ export function _renderInventaireBoutique(char) {
           <div style="font-family:'Cinzel',serif;font-size:.88rem;color:var(--text);font-weight:600;line-height:1.2">
             ${item.nom || '?'}
           </div>
-          ${rareteL ? `<div style="font-size:.68rem;color:${rareteC};margin-top:1px">${'★'.repeat(rareteN)+'☆'.repeat(5-rareteN)} ${rareteL}</div>` : ''}
+          ${rareteL ? `<div style="font-size:.68rem;color:${rareteC};margin-top:1px">${_rareteLabel(rareteN)}</div>` : ''}
         </div>
         <span style="font-size:.72rem;background:var(--bg-elevated);border:1px solid var(--border);
           border-radius:999px;padding:2px 8px;color:var(--text-muted);flex-shrink:0">×${g.qte}</span>
@@ -433,7 +433,7 @@ export async function openInventoryItemDetail(charId, indicesB64) {
   const catalogItem = getInventoryCatalogItem(item.itemId);
   const quantity = indices.reduce((sum, idx) =>
     sum + (parseInt(c.inventaire?.[idx]?.quantite || c.inventaire?.[idx]?.qte || 1) || 1), 0);
-  const rarityIndex = Math.max(0, Math.min(5, parseInt(item.rarete || item.rare || 0) || 0));
+  const rarityIndex = Math.max(0, parseInt(item.rarete || item.rare || 0) || 0);
   const rarityName = RARETE_NAMES[rarityIndex] || '';
   const rarityColor = _rareteColor(rarityName) || '#7a8fa8';
   const equippedMap = getEquippedInventoryIndexMap(c);

@@ -3,7 +3,7 @@ import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/fi
 import { trySave } from '../shared/crud.js';
 import { openModal, closeModalDirect, confirmModal, promptModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
-import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete } from '../shared/rarity.js';
+import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete, loadRarities, openRaritiesAdmin } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes, loadingHtml } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
@@ -196,11 +196,15 @@ function _shopTweaksSave() {
 // CHARGEMENT
 // ══════════════════════════════════════════════════════════════════════════════
 async function loadShopData() {
-  [_cats, _items, _weaponFormats] = await Promise.all([
+  const [cats, items, weaponFormats] = await Promise.all([
     loadCollection('shopCategories'),
     loadCollection('shop'),
     loadWeaponFormats(),
+    loadRarities(),
   ]);
+  _cats = cats;
+  _items = items;
+  _weaponFormats = weaponFormats;
   _cats.sort((a,b) => (a.ordre||0)-(b.ordre||0));
   _items.sort((a,b) => (a.ordre??999)-(b.ordre??999));
   _shopSousTypes = [...new Set(_items.filter(i=>i.sousType).map(i=>i.sousType))].sort();
@@ -348,6 +352,7 @@ export async function renderShop() {
         <button class="btn btn-outline btn-sm" data-sh-action="openCatModal" title="Créer une catégorie">📁 Catégorie</button>
         <button class="btn btn-outline btn-sm" data-sh-action="openItemModal" title="Créer un article">＋ Article</button>
         <button class="btn btn-outline btn-sm" data-sh-action="openWeaponFmts" title="Gérer les formats d'armes">⚙️ Formats</button>
+        <button class="btn btn-outline btn-sm" data-sh-action="openRarities" title="Gérer les raretés">★ Raretés</button>
         <button class="btn btn-outline btn-sm" data-sh-action="openUpgradeStg" title="Tarifs et plafonds des améliorations">⚙️ Améliorations</button>
         <button class="btn btn-outline btn-sm" data-sh-action="openExport" title="Exporter / Importer la boutique">⬆️ Export</button>
       </span>`;
@@ -4110,6 +4115,7 @@ Object.assign(shHandlers, {
   openCatModal:   (el) => openCatModal(el.dataset.id || ''),
   openItemModal:  (el) => openItemModal(el.dataset.id || ''),
   openWeaponFmts: () => openWeaponFormatsAdmin(),
+  openRarities:   () => openRaritiesAdmin(),
   openUpgradeStg: () => openUpgradeSettingsAdmin(),
   openExport:     () => openShopExport({
     getCats: () => _cats,

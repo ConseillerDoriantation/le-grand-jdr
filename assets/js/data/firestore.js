@@ -100,6 +100,7 @@ const _DOC_CACHE_TTL = {
     weapon_formats:  30 * 60_000,
     damage_types:    30 * 60_000,
     spell_matrices:  30 * 60_000,
+    rarities:        30 * 60_000,
     conditions:      30 * 60_000,
     dice_skills:     30 * 60_000,  // aussi couvert en lazy session-doc
     upgrade_settings:30 * 60_000,
@@ -389,6 +390,7 @@ const _LAZY_SESSION_DOCS = new Set([
   'world/main',             // page Monde, parfois volumineux
   'achievements_meta/order',// page Hauts-faits
   'world/dice_skills',      // histoire.js, shop.js, vtt.js
+  'world/rarities',         // boutique/inventaire, stable par aventure
   'world/map',              // config fond de carte, stable mais image potentiellement lourde
 ]);
 const _sessionDocKey = (col, id) => `${col}/${id}`;

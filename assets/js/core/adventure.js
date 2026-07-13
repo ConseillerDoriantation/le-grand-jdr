@@ -33,6 +33,7 @@ import { invalidateSpellMatricesCache } from '../shared/spell-matrices.js';
 import { invalidateUpgradeSettingsCache } from '../shared/upgrade-settings.js';
 import { invalidateShopPickerCache } from '../shared/shop-picker.js';
 import { clearConditionLibraryCache } from '../shared/conditions.js';
+import { invalidateRaritiesCache, loadRarities } from '../shared/rarity.js';
 
 function _invalidateScopedCaches() {
   invalidateDamageTypesCache();
@@ -41,6 +42,7 @@ function _invalidateScopedCaches() {
   invalidateUpgradeSettingsCache();
   invalidateShopPickerCache();
   clearConditionLibraryCache();
+  invalidateRaritiesCache();
 }
 
 const _emailRaw = (email = '') => String(email || '').trim();
@@ -341,6 +343,12 @@ export function selectAdventure(adv) {
   const uid = STATE.user?.uid;
   const isAdvAdmin = Array.isArray(adv.admins) && adv.admins.includes(uid);
   setAdmin(STATE.isSuperAdmin || isAdvAdmin);
+
+  // Raretés scopées par aventure : valeurs standards par défaut, personnalisation
+  // possible via world/rarities.
+  void loadRarities().catch(e =>
+    console.warn('[adventure] raretés non chargées', e?.code || e)
+  );
 
   // Démarre les listeners session-live (1 onSnapshot/collection partagée
   // par toutes les pages — coupe la majorité des lectures pour la session).

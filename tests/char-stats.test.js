@@ -61,6 +61,8 @@ test('calcCA : bouclier sans bonus propre → +2 (rétro-compat)', () => {
 test('getItemStatBonus : accepte le store canonique et les alias boutique', () => {
   assert.equal(getItemStatBonus({ fo: 3 }, 'force'), 3);
   assert.equal(getItemStatBonus({ for: 2 }, 'force'), 2, 'alias "for" → Force');
+  assert.equal(getItemStatBonus({ statBonuses: { sagesse: 1 } }, 'sagesse'), 1, 'objet boutique legacy statBonuses.full');
+  assert.equal(getItemStatBonus({ statBonuses: { sa: 1 }, upgrades: { statBonus: { sagesse: 1 } } }, 'sagesse'), 2, 'base + upgrade avec cles mixtes');
   assert.equal(getItemStatBonus({ fo: 2, upgrades: { statBonus: { fo: 1 } } }, 'force'), 3, 'base + upgrade');
   assert.equal(getItemStatBonus({}, 'force'), 0);
 });
