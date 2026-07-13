@@ -556,13 +556,11 @@ function _bumpConvoPreview(preview, senderName) {
   if (ref) updateDoc(ref, { lastText: preview, lastSenderName: senderName, lastSenderId: _uid, lastAt: serverTimestamp() }).catch(() => {});
 }
 
-async function _send() {
-  const inp = document.getElementById('chat-input');
-  const text = (inp?.value || '').trim();
-  if (!text || !_openId) return;
-  if (_editingId) { _saveEdit(text); return; }        // mode édition d'un message
-  const col = _msgsCol(); if (!col || !_uid) return;
-  inp.value = '';
+// Envoi d'un message texte (réutilisé pour l'envoi direct d'une émote).
+async function _sendText(text, preview) {
+  text = (text || '').trim();
+  if (!text || !_openId) return false;
+  const col = _msgsCol(); if (!col || !_uid) return false;
   const senderName = _senderName();
   const reply = _replyTo; _clearReply();
   const msg = { convoId: _openId, text, senderId: _uid, senderName, at: serverTimestamp() };
@@ -570,12 +568,23 @@ async function _send() {
   _clearTyping();
   try {
     await addDoc(col, msg);
-    _bumpConvoPreview(text, senderName);
+    _bumpConvoPreview(preview || text, senderName);
+    return true;
   } catch (e) {
     console.warn('[chat] send', e?.code || e);
     showNotif('Message non envoyé — règles Firestore ?', 'error');
-    if (inp) inp.value = text;
+    return false;
   }
+}
+
+async function _send() {
+  const inp = document.getElementById('chat-input');
+  const text = (inp?.value || '').trim();
+  if (!text || !_openId) return;
+  if (_editingId) { _saveEdit(text); return; }        // mode édition d'un message
+  inp.value = '';
+  const ok = await _sendText(text);
+  if (!ok && inp) inp.value = text;                    // restaure en cas d'échec
 }
 
 // Envoi d'une image : compressée en JPEG base64 borné (reste sous la limite
@@ -835,7 +844,7 @@ function _emojiPickerHtml() {
   // Émotes custom :nom: de l'aventure (images), insérées comme balise texte.
   const emoteBlock = _chatEmotes.length
     ? `<div class="chat-emoji-cat"><div class="chat-emoji-catlbl">😄 Émotes</div><div class="chat-emoji-grid chat-emote-grid">${_chatEmotes.map(em =>
-        `<button type="button" class="chat-emoji-opt chat-emote-opt" data-action="chatInsertEmote" data-emo=":${_esc(em.name)}:" title=":${_esc(em.name)}:"><img src="${_esc(em.url)}" alt=":${_esc(em.name)}:" loading="lazy"></button>`).join('')}</div></div>`
+        `<button type="button" class="chat-emoji-opt chat-emote-opt" data-action="chatSendEmote" data-emo=":${_esc(em.name)}:" title="Envoyer :${_esc(em.name)}:"><img src="${_esc(em.url)}" alt=":${_esc(em.name)}:" loading="lazy"></button>`).join('')}</div></div>`
     : '';
   const recBlock = rec.length
     ? `<div class="chat-emoji-cat"><div class="chat-emoji-catlbl">🕘 Récents</div><div class="chat-emoji-grid">${rec.map(_emojiOptBtn).join('')}</div></div>` : '';
@@ -873,10 +882,11 @@ function chatInsertEmoji(btn) {
   _insertText(emo);
   _pushEmojiRecent(emo);   // remonté dans « Récents » à la prochaine ouverture
 }
-// Insère la balise :nom: d'une émote custom (rendue en image à l'affichage).
-function chatInsertEmote(btn) {
+// Clic sur une émote → envoi DIRECT (pas de texte :nom: dans la saisie).
+function chatSendEmote(btn) {
   const tag = btn?.dataset?.emo; if (!tag) return;
-  _insertText(tag);
+  _closeEmojiPop();
+  _sendText(tag, '😄 Émote');
 }
 
 // ── Répondre / citer ─────────────────────────────────────────────────────────
@@ -926,7 +936,7 @@ registerActions({
   chatMsgMenu:     (btn) => chatMsgMenu(btn),
   chatEmojiToggle: () => chatEmojiToggle(),
   chatInsertEmoji: (btn) => chatInsertEmoji(btn),
-  chatInsertEmote: (btn) => chatInsertEmote(btn),
+  chatSendEmote:   (btn) => chatSendEmote(btn),
   chatReplyMsg:    (btn) => chatReplyMsg(btn),
   chatCancelReply: () => chatCancelReply(),
   chatSearchToggle:() => chatSearchToggle(),
