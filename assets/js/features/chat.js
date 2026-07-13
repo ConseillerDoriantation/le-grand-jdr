@@ -438,8 +438,8 @@ function _applyMentions(escaped) {
   return escaped.replace(/@\[([\w-]+)\]/g, (_m, uid) =>
     `<span class="chat-mention${uid === _uid ? ' chat-mention--me' : ''}">@${_esc(_nameOf(uid))}</span>`);
 }
-// URLs → liens cliquables. Appliqué EN DERNIER : [^\s<] stoppe aux balises déjà
-// injectées (émotes/mentions), donc ne casse rien.
+// URLs → liens cliquables. Appliqué sur le TEXTE échappé (avant émotes/mentions)
+// pour ne jamais capturer une URL présente dans un attribut (ex. src d'émote).
 function _linkify(html) {
   return html.replace(/(https?:\/\/[^\s<]+)/g, (m) => {
     const t = m.match(/[)\].,!?;:]+$/);
@@ -464,7 +464,9 @@ function _msgRow(m) {
   const quote = m.replyTo
     ? `<span class="chat-msg-quote"><span class="chat-quote-name">${_esc(m.replyTo.senderName || '')}</span><span class="chat-quote-text">${_esc(m.replyTo.text || '📷 Image')}</span></span>` : '';
   const img = m.image ? `<img class="chat-msg-img" src="${_esc(m.image)}" alt="image" loading="lazy">` : '';
-  const txt = m.text ? `<span class="chat-msg-btext">${_linkify(_applyMentions(_applyChatEmotes(_esc(m.text))))}</span>` : '';
+  // Ordre : échappe → linkify (sur texte pur) → émotes/mentions. Linkifier en
+  // dernier capturait l'URL du src des <img> d'émote (→ src cassé, 404).
+  const txt = m.text ? `<span class="chat-msg-btext">${_applyMentions(_applyChatEmotes(_linkify(_esc(m.text))))}</span>` : '';
   const mentionsMe = !mine && _uid && (m.text || '').includes(`@[${_uid}]`);
   return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}${mentionsMe ? ' chat-msg--mention' : ''}">${av}
     <span class="chat-msg-content">${author}
