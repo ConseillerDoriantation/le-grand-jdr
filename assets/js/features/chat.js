@@ -61,6 +61,7 @@ let _reads = {};                                   // convoId → millis lus
 let _ghosts = new Set();                            // uids confirmés fantômes (compte supprimé) → masqués
 let _unsubAdv = null, _unsubGroups = null, _unsubConvo = null;
 let _unsubTyping = null, _unsubReads = null;       // « écrit… » (conv ouverte) + « vu » (DM ouvert)
+let _unsubPresence = null, _online = new Set();    // statut en ligne (abonné quand panneau ouvert)
 let _typing = [], _otherReads = 0;                 // uids en train d'écrire · millis lus par l'autre (DM)
 let _typingWroteAt = 0, _typingClearTimer = null, _typingRenderTimer = null;
 let _baseTitle = '';                               // titre d'onglet sans compteur
@@ -173,9 +174,36 @@ function _pulseBubble() {
   setTimeout(() => el.classList.remove('chat-notify'), 1200);
 }
 function _teardownListeners() {
-  [_unsubAdv, _unsubGroups, _unsubConvo, _unsubTyping, _unsubReads].forEach(u => { if (u) try { u(); } catch {} });
-  _unsubAdv = _unsubGroups = _unsubConvo = _unsubTyping = _unsubReads = null;
+  [_unsubAdv, _unsubGroups, _unsubConvo, _unsubTyping, _unsubReads, _unsubPresence].forEach(u => { if (u) try { u(); } catch {} });
+  _unsubAdv = _unsubGroups = _unsubConvo = _unsubTyping = _unsubReads = _unsubPresence = null;
   clearTimeout(_typingClearTimer); clearTimeout(_typingRenderTimer);
+}
+
+// ── Statut en ligne (présence) : abonné seulement quand le panneau est ouvert ──
+const _isOnline = (uid) => _online.has(uid);
+function _subscribePresence() {
+  if (_unsubPresence) return;
+  const a = _adv(); if (!a) return;
+  _unsubPresence = onSnapshot(collection(db, 'adventures', a, 'presence'), snap => {
+    const now = Date.now(); const on = new Set();
+    snap.docs.forEach(d => {
+      const ls = d.data({ serverTimestamps: 'estimate' }).lastSeen;
+      const ms = ls?.toMillis ? ls.toMillis() : 0;
+      if (d.id !== _uid && now - ms < 120000) on.add(d.id);   // expiration 120 s, hors moi
+    });
+    _online = on;
+    _updateOnlineDots();
+  }, err => console.warn('[chat] presence', err?.code || err));
+}
+function _teardownPresence() {
+  if (_unsubPresence) { try { _unsubPresence(); } catch {} _unsubPresence = null; }
+  _online = new Set();
+}
+// Bascule la pastille sur les avatars déjà rendus (sans re-render → cases cochées préservées).
+function _updateOnlineDots() {
+  document.querySelectorAll('#chat-widget [data-online-uid]').forEach(el => {
+    el.classList.toggle('is-online', _online.has(el.getAttribute('data-online-uid')));
+  });
 }
 
 // Abonnements messages (avec limite paginée). Re-souscrits par « charger plus ».
@@ -247,7 +275,9 @@ function _renderList() {
     const prev = g.lastText ? `${g.lastSenderName || ''} : ${g.lastText}` : (isDm ? 'Nouvelle discussion' : 'Nouveau groupe');
     // DM : avatar de l'autre membre ; groupe : avatar du dernier auteur.
     const avUid = isDm ? _otherDmUid(g) : g.lastSenderId;
-    const ico = avUid ? `<img class="chat-conv-avimg" src="${_esc(avatarSrcOf(_profileOf(avUid)))}" alt="">` : (isDm ? '👤' : '👥');
+    const ico = avUid
+      ? `<img class="chat-conv-avimg${isDm && _isOnline(avUid) ? ' is-online' : ''}"${isDm ? ` data-online-uid="${_esc(avUid)}"` : ''} src="${_esc(avatarSrcOf(_profileOf(avUid)))}" alt="">`
+      : (isDm ? '👤' : '👥');
     return _convoRow(g.id, ico, _convoTitle(g), prev, _groupUnread(g) ? '•' : 0);
   }).join('');
   el.innerHTML = _panelShell('Discussions', '',
@@ -544,7 +574,7 @@ function _renderNew() {
         return `<div class="chat-member-row">
           <label class="chat-member">
             <input type="checkbox" value="${_esc(u)}">
-            <img class="chat-member-av" src="${_esc(avatarSrcOf(p))}" alt="" loading="lazy">
+            <img class="chat-member-av${_isOnline(u) ? ' is-online' : ''}" data-online-uid="${_esc(u)}" src="${_esc(avatarSrcOf(p))}" alt="" loading="lazy">
             <span class="chat-member-name">${_esc(name)}</span>
           </label>
           <button type="button" class="chat-mini-btn" data-action="chatStartDm" data-uid="${_esc(u)}" title="Message privé">💬</button>
@@ -598,8 +628,8 @@ async function _healMembers(members) {
 // ── Actions ───────────────────────────────────────────────────────────────────
 function chatToggle() {
   _open = !_open;
-  if (_open) { _maybeRequestNotifPerm(); _view = 'list'; _renderList(); }
-  else { if (_openId) _markRead(_openId); _teardownConvo(); _renderBubble(); }
+  if (_open) { _maybeRequestNotifPerm(); _subscribePresence(); _view = 'list'; _renderList(); }
+  else { if (_openId) _markRead(_openId); _teardownConvo(); _teardownPresence(); _renderBubble(); }
 }
 function chatBack() { _teardownConvo(); _view = 'list'; _renderList(); }
 
@@ -886,7 +916,7 @@ function _renderManage() {
   const memberRows = members.map(u => `
     <div class="chat-member-row">
       <span class="chat-member">
-        <img class="chat-member-av" src="${_esc(avatarSrcOf(_profileOf(u)))}" alt="" loading="lazy">
+        <img class="chat-member-av${_isOnline(u) ? ' is-online' : ''}" data-online-uid="${_esc(u)}" src="${_esc(avatarSrcOf(_profileOf(u)))}" alt="" loading="lazy">
         <span class="chat-member-name">${_esc(_nameOf(u))}${u === g.createdBy ? ' <span class="chat-tag">créateur</span>' : ''}</span>
       </span>
       ${(amCreator && u !== _uid) ? `<button class="chat-mini-btn" data-action="chatRemoveMember" data-uid="${_esc(u)}" title="Retirer">✕</button>` : ''}
@@ -895,7 +925,7 @@ function _renderManage() {
   const addRows = addable.map(u => `
     <div class="chat-member-row">
       <span class="chat-member">
-        <img class="chat-member-av" src="${_esc(avatarSrcOf(_profileOf(u)))}" alt="" loading="lazy">
+        <img class="chat-member-av${_isOnline(u) ? ' is-online' : ''}" data-online-uid="${_esc(u)}" src="${_esc(avatarSrcOf(_profileOf(u)))}" alt="" loading="lazy">
         <span class="chat-member-name">${_esc(_nameOf(u))}</span>
       </span>
       <button class="chat-mini-btn" data-action="chatAddMember" data-uid="${_esc(u)}" title="Ajouter">＋</button>

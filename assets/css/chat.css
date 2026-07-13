@@ -322,6 +322,9 @@
 }
 .chat-load-more:hover { color: var(--text, #fff); border-color: rgba(79,140,255,.5); }
 
+/* ── Statut en ligne (anneau vert sur l'avatar) ── */
+.chat-member-av.is-online, .chat-conv-avimg.is-online { border: 2px solid #22c55e; box-sizing: border-box; }
+
 /* ── Jet de dés /roll ── */
 .chat-roll { display: inline-flex; flex-direction: column; gap: .05rem; }
 .chat-roll-total { font-size: 1.1rem; font-weight: 800; letter-spacing: .02em; }
