@@ -2838,6 +2838,7 @@ const PAGES = {
       { g:'combat', ic:'⚡', t:'Types de dégâts',     s:'Éléments, résistances, couleurs', a:'#f4c430', fn:'openDamageTypesAdmin',   mod:'characters' },
       { g:'combat', ic:'🗡️', t:'Styles de combat',    s:"Bonus selon l'arme équipée",      a:'#9d8cff', fn:'openCombatStylesAdmin',  mod:'characters' },
       { g:'combat', ic:'🔮', t:'Matrices de sorts',   s:'Runes, noyaux, combinaisons',     a:'#bca0ff', fn:'openSpellMatricesAdmin', mod:'characters' },
+      { g:'combat', ic:'∑',  t:'Règles de personnage', s:'Modificateurs, PV, PM, CA, deck', a:'#5bc0eb', fn:'openCharacterRulesAdmin', mod:'characters' },
       { g:'table',  ic:'🎲', t:'Compétences de dés',  s:'Jets personnalisés',              a:'#4f8cff', fn:'_ouvrirGestionDes',      mod:'histoire' },
       { g:'table',  ic:'😄', t:'Émotes VTT',          s:'Réactions sur la table',          a:'#22c38e', fn:'_ouvrirGestionEmotes',   mod:'vtt/vtt' },
       { g:'table',  ic:'🎭', t:'États & conditions',  s:'Effets appliqués aux tokens',     a:'#f97316', fn:'_vttConditionConfig',    mod:'vtt/vtt' },

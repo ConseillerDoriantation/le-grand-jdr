@@ -52,7 +52,7 @@ export async function pickAdventure(adventureId) {
   const adv = STATE.adventures.find(a => a.id === adventureId);
   if (!adv) return;
   localStorage.setItem(LAST_ADV_KEY, adventureId);
-  selectAdventure(adv);
+  await selectAdventure(adv);
   const { hideAdventurePicker } = await import('./layout.js');
   hideAdventurePicker();
   showAppLoading();
@@ -77,7 +77,7 @@ export async function acceptAdventureInvitation(adventureId) {
     const joined = await acceptInvitation(inv);
     _pendingInvitations = _pendingInvitations.filter(a => a.id !== adventureId);
     localStorage.setItem(LAST_ADV_KEY, joined.id);
-    selectAdventure(joined);
+    await selectAdventure(joined);
     const { hideAdventurePicker } = await import('./layout.js');
     hideAdventurePicker();
     showAppLoading();
@@ -219,7 +219,7 @@ async function loadAndRouteAdventures(user) {
   }
 
   if (adventures.length === 1) {
-    selectAdventure(adventures[0]);
+    await selectAdventure(adventures[0]);
     showAppLoading();
     await navigate(consumeBootPage());
     return;
@@ -229,7 +229,7 @@ async function loadAndRouteAdventures(user) {
   const lastId  = localStorage.getItem(LAST_ADV_KEY);
   const lastAdv = lastId && adventures.find(a => a.id === lastId);
   if (lastAdv) {
-    selectAdventure(lastAdv);
+    await selectAdventure(lastAdv);
     showAppLoading();
     await navigate(consumeBootPage());
     return;

@@ -7,6 +7,7 @@ import { loadDamageTypes, saveDamageTypes, DEFAULT_DAMAGE_TYPES } from '../../sh
 import { loadSpellMatrices, saveSpellMatrices, SPELL_SLOTS, SLOT_LABELS, COMBO_IDS, COMBO_DEFAULTS } from '../../shared/spell-matrices.js';
 import { _esc, modStr } from '../../shared/html.js';
 import { computeEquipStatsBonus, getMod, getMaitriseBonus as _getMaitriseBonus } from '../../shared/char-stats.js';
+import { openCharacterRulesAdmin } from '../../shared/character-rules.js';
 import { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, resolveEquippedInventoryIndices, _getBaseTraits, _getAddedTraits, _getTraits } from '../../shared/equipment-utils.js';
 export { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, _getBaseTraits, _getAddedTraits, _getTraits };
 
@@ -959,6 +960,7 @@ registerActions({
   openWeaponFormatsAdmin:   ()    => openWeaponFormatsAdmin(),
   openDamageTypesAdmin:     ()    => openDamageTypesAdmin(),
   openSpellMatricesAdmin:   ()    => openSpellMatricesAdmin(),
+  openCharacterRulesAdmin:  ()    => openCharacterRulesAdmin(),
   _addDmgType:              ()    => _addDmgType(),
   _deleteDmgType:           (btn) => _deleteDmgType(Number(btn.dataset.idx)),
   _switchSpellMatrixTab:    (btn) => _switchSpellMatrixTab(btn.dataset.tab),

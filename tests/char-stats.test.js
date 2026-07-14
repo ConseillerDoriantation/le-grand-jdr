@@ -1,19 +1,54 @@
-import { test } from 'node:test';
+import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  getMod, getModFromScore, calcCA, calcPVMax, calcPMMax, calcPalier, pct,
+  getMod, getModFromScore, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax, calcPalier, pct,
   getItemStatBonus, getDefaultCharForUser, getMyCharacters, sortCharactersForDisplay,
 } from '../assets/js/shared/char-stats.js';
+import { DEFAULT_CHARACTER_RULES, LEGACY_CHARACTER_RULES, setCharacterRulesForTests } from '../assets/js/shared/character-rules.js';
 
-test('getModFromScore : modificateur D&D, plafonné à un score de 22', () => {
+afterEach(() => setCharacterRulesForTests(null));
+
+test('regles par aventure : limites positive et negative personnalisables', () => {
+  setCharacterRulesForTests({
+    ...DEFAULT_CHARACTER_RULES,
+    modifier: { ...DEFAULT_CHARACTER_RULES.modifier, min: -4, max: 4 },
+  });
+  assert.equal(getModFromScore(30), 4);
+  assert.equal(getModFromScore(1), -4);
+});
+
+test('regles par aventure : une limite vide supprime le plafond', () => {
+  setCharacterRulesForTests({
+    ...DEFAULT_CHARACTER_RULES,
+    modifier: { ...DEFAULT_CHARACTER_RULES.modifier, min: null, max: null },
+  });
+  assert.equal(getModFromScore(30), 10);
+});
+
+test('regles par aventure : formules derivees personnalisables', () => {
+  setCharacterRulesForTests({
+    ...DEFAULT_CHARACTER_RULES,
+    formulas: {
+      ...DEFAULT_CHARACTER_RULES.formulas,
+      speed: '5 + forceMod + equipBonus',
+      deck: '2 + intMod * level',
+      xp: '250 * level',
+    },
+  });
+  assert.equal(calcVitesse({ stats: { force: 14 }, niveau: 3 }), 7);
+  assert.equal(calcDeckMax({ stats: { intelligence: 14 }, niveau: 3 }), 8);
+  assert.equal(calcPalier(3), 750);
+});
+
+test('getModFromScore : formule D&D par défaut sans plafond artificiel', () => {
   assert.equal(getModFromScore(8), -1);
   assert.equal(getModFromScore(10), 0);
   assert.equal(getModFromScore(14), 2);
   assert.equal(getModFromScore(22), 6);
-  assert.equal(getModFromScore(30), 6, 'plafond à 22 → +6');
+  assert.equal(getModFromScore(30), 10);
 });
 
-test('getMod : lit stats + statsBonus, défaut 8, plafond 22', () => {
+test('getMod : lit stats + statsBonus, défaut 8', () => {
   assert.equal(getMod({ stats: { force: 16 } }, 'force'), 3);
   assert.equal(getMod({ stats: { force: 16 }, statsBonus: { force: 4 } }, 'force'), 5, '20 → +5');
   assert.equal(getMod({}, 'force'), -1, 'stat absente → 8 → -1');
@@ -32,30 +67,38 @@ test('pct : borné 0–100, garde-fou max=0', () => {
   assert.equal(pct(5, 0), 0);
 });
 
-test('calcPVMax : Constitution positive scale avec le niveau, négative une seule fois', () => {
-  // Con 14 (+2) au niveau 3 → 10 + floor(2×2) = 14
-  assert.equal(calcPVMax({ pvBase: 10, stats: { constitution: 14 }, niveau: 3 }), 14);
-  // Con 8 (-1) niveau 1 → malus appliqué une fois → 9
+test('calcPVMax : Constitution appliquée à chaque niveau avec le préréglage D&D', () => {
+  // D&D : le modificateur de Constitution s'applique à chaque niveau.
+  assert.equal(calcPVMax({ pvBase: 10, stats: { constitution: 14 }, niveau: 3 }), 16);
+  // Con 8 (-1) niveau 1 → 9
   assert.equal(calcPVMax({ pvBase: 10, stats: { constitution: 8 }, niveau: 1 }), 9);
   // Plancher à 1 (pvBase 3, Con 1 → mod -5 → 3-5=-2 → 1)
   assert.equal(calcPVMax({ pvBase: 3, stats: { constitution: 1 } }), 1);
 });
 
-test('calcPMMax : Sagesse, plancher 0', () => {
-  assert.equal(calcPMMax({ pmBase: 10, stats: { sagesse: 14 }, niveau: 3 }), 14);
-  // pmBase 3, Sag 1 → mod -5 → 3-5=-2 → plancher 0
-  assert.equal(calcPMMax({ pmBase: 3, stats: { sagesse: 1 } }), 0);
+test('calcPMMax : valeur de base conservée avec le préréglage compatible D&D', () => {
+  assert.equal(calcPMMax({ pmBase: 10, stats: { sagesse: 14 }, niveau: 3 }), 10);
+  assert.equal(calcPMMax({ pmBase: 3, stats: { sagesse: 1 } }), 3);
 });
 
-test('calcCA : base selon armure Torse + mod Dex', () => {
-  assert.equal(calcCA({ equipement: { Torse: { typeArmure: 'Légère' } }, stats: { dexterite: 14 } }), 12);
-  assert.equal(calcCA({ equipement: { Torse: { typeArmure: 'Lourde' } }, stats: { dexterite: 10 } }), 14);
-  assert.equal(calcCA({ stats: { dexterite: 10 } }), 8, 'sans torse → base 8');
+test('calcCA : bases D&D et Dextérité autorisée selon l’armure', () => {
+  assert.equal(calcCA({ equipement: { Torse: { typeArmure: 'Légère' } }, stats: { dexterite: 14 } }), 13);
+  assert.equal(calcCA({ equipement: { Torse: { typeArmure: 'Intermédiaire' } }, stats: { dexterite: 18 } }), 15, 'Dex plafonnée à +2');
+  assert.equal(calcCA({ equipement: { Torse: { typeArmure: 'Lourde' } }, stats: { dexterite: 18 } }), 16, 'armure lourde sans Dex');
+  assert.equal(calcCA({ stats: { dexterite: 10 } }), 10, 'sans torse → base 10');
 });
 
 test('calcCA : bouclier sans bonus propre → +2 (rétro-compat)', () => {
   const ca = calcCA({ equipement: { 'Main secondaire': { nom: 'Bouclier en bois' } }, stats: { dexterite: 10 } });
-  assert.equal(ca, 10, '8 (base) + 0 (Dex) + 2 (bouclier)');
+  assert.equal(ca, 12, '10 (base) + 0 (Dex) + 2 (bouclier)');
+});
+
+test('préréglage historique : conserve les calculs de le-grand-jdr', () => {
+  setCharacterRulesForTests(LEGACY_CHARACTER_RULES);
+  assert.equal(getModFromScore(30), 6);
+  assert.equal(calcCA({ stats: { dexterite: 10 } }), 8);
+  assert.equal(calcPVMax({ pvBase: 10, stats: { constitution: 14 }, niveau: 3 }), 14);
+  assert.equal(calcPMMax({ pmBase: 10, stats: { sagesse: 14 }, niveau: 3 }), 14);
 });
 
 test('getItemStatBonus : accepte le store canonique et les alias boutique', () => {

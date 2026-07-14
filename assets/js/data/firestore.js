@@ -104,6 +104,7 @@ const _DOC_CACHE_TTL = {
     conditions:      30 * 60_000,
     dice_skills:     30 * 60_000,  // aussi couvert en lazy session-doc
     upgrade_settings:30 * 60_000,
+    character_rules: 30 * 60_000,
     combat_styles:   30 * 60_000,
     vtt_emotes:      30 * 60_000,  // admin définit une fois par campagne
     map:             30 * 60_000,  // config image/fond, ne change pas pendant le jeu

@@ -31,6 +31,7 @@ import { invalidateDamageTypesCache } from '../shared/damage-types.js';
 import { invalidateWeaponFormatsCache } from '../shared/weapon-formats.js';
 import { invalidateSpellMatricesCache } from '../shared/spell-matrices.js';
 import { invalidateUpgradeSettingsCache } from '../shared/upgrade-settings.js';
+import { invalidateCharacterRulesCache, loadCharacterRules } from '../shared/character-rules.js';
 import { invalidateShopPickerCache } from '../shared/shop-picker.js';
 import { clearConditionLibraryCache } from '../shared/conditions.js';
 import { invalidateRaritiesCache, loadRarities } from '../shared/rarity.js';
@@ -40,6 +41,7 @@ function _invalidateScopedCaches() {
   invalidateWeaponFormatsCache();
   invalidateSpellMatricesCache();
   invalidateUpgradeSettingsCache();
+  invalidateCharacterRulesCache();
   invalidateShopPickerCache();
   clearConditionLibraryCache();
   invalidateRaritiesCache();
@@ -329,7 +331,7 @@ export async function repairCurrentUserAdventureLinks(adventures = []) {
   return repaired;
 }
 
-export function selectAdventure(adv) {
+export async function selectAdventure(adv) {
   setAdventure(adv);
   // `setCurrentAdventure` tear-down les listeners session de l'aventure
   // précédente avant de changer de scope.
@@ -348,6 +350,12 @@ export function selectAdventure(adv) {
   // possible via world/rarities.
   void loadRarities().catch(e =>
     console.warn('[adventure] raretés non chargées', e?.code || e)
+  );
+
+  // Les calculs de personnage doivent etre prets avant le premier rendu.
+  // Chaque aventure possede son propre document world/character_rules.
+  await loadCharacterRules().catch(e =>
+    console.warn('[adventure] regles de personnage non chargees', e?.code || e)
   );
 
   // Démarre les listeners session-live (1 onSnapshot/collection partagée

@@ -702,7 +702,7 @@ async function leaveAdventure(advId) {
 
   try {
     // La cascade purgeCharacter cible l'aventure active → s'y placer si nécessaire.
-    if (STATE.adventure?.id !== advId) selectAdventure(adv);
+    if (STATE.adventure?.id !== advId) await selectAdventure(adv);
 
     // Requête directe (pas le cache-live qui peut bloquer sur une collection vide).
     const myChars = await loadMyCharacters(advId);
