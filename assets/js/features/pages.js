@@ -17,6 +17,7 @@ import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-
 import { getRouteSub } from '../shared/route.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
 import { dedupeQuestParticipants, questParticipantFromChar, toggleQuestParticipant } from '../shared/participants.js';
+import { avatarSrcOf } from '../shared/avatar.js';
 
 import { charSession } from '../shared/char-session.js';
 import { openAdventureSwitcher } from '../core/layout.js';
@@ -75,6 +76,66 @@ export function requestStatsScope(scope = null) {
 // Avatar (rond) d'un perso par id — devant son nom dans les chips/graphiques.
 const _statsAvatar = (id, name, size = 18) =>
   characterAvatarHtml(STATE.characters?.find(x => x.id === id) || { nom: name }, { size, className: 'stats-av-xs', title: name });
+
+function _characterOwnerKey(c = {}) {
+  return c.uid ? `uid:${c.uid}` : `owner:${c.ownerPseudo || 'unknown'}`;
+}
+
+function _renderCharacterAdminFilter(chars = []) {
+  const profiles = STATE.adventure?.memberProfiles || {};
+  const byOwner = new Map();
+  chars.forEach(c => {
+    const key = _characterOwnerKey(c);
+    if (!byOwner.has(key)) byOwner.set(key, []);
+    byOwner.get(key).push(c);
+  });
+
+  const owners = [...byOwner.entries()].map(([key, list]) => {
+    const uid = key.startsWith('uid:') ? key.slice(4) : '';
+    const profile = uid ? (profiles[uid] || {}) : {};
+    const sorted = sortCharactersForDisplay(list);
+    const main = sorted[0] || {};
+    const name = profile.pseudo || main.ownerPseudo || profile.email || 'Compte sans nom';
+    const email = profile.email || (uid ? '' : 'Ancien rattachement');
+    return { key, uid, profile, chars: sorted, name, email };
+  }).sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
+
+  const ownerButtons = owners.map(owner => {
+    const previews = owner.chars.slice(0, 2).map(ch => `
+      <span class="cs-admin-filter-char" title="${_esc(ch.nom || 'Personnage')}">
+        ${characterPortraitContent(ch, { fallbackTag: 'span' })}
+      </span>`).join('');
+    const more = Math.max(0, owner.chars.length - 2);
+    return `<button type="button" class="cs-admin-filter cs-admin-filter-card"
+      data-owner-key="${_esc(owner.key)}" data-action="filterAdminChars"
+      title="${_esc(owner.name)}${owner.email ? ' - ' + _esc(owner.email) : ''}">
+      <span class="cs-admin-filter-avatar"><img src="${_esc(avatarSrcOf(owner.profile))}" alt="" loading="lazy" decoding="async"></span>
+      <span class="cs-admin-filter-body">
+        <strong>${_esc(owner.name)}</strong>
+        ${owner.email ? `<small>${_esc(owner.email)}</small>` : '<small>Compte sans email</small>'}
+      </span>
+      <span class="cs-admin-filter-preview">
+        ${previews}
+        ${more ? `<span class="cs-admin-filter-more">+${more}</span>` : ''}
+      </span>
+      <span class="cs-admin-filter-count">${owner.chars.length}</span>
+    </button>`;
+  }).join('');
+
+  return `<div class="admin-section cs-admin-filter-section">
+    <div class="cs-admin-filter-head">
+      <span>Filtrer par compte</span>
+      <small>${owners.length} compte${owners.length > 1 ? 's' : ''} · ${chars.length} personnage${chars.length > 1 ? 's' : ''}</small>
+    </div>
+    <div class="char-select-bar cs-admin-filter-grid" id="admin-player-filter">
+      <button type="button" class="cs-admin-filter cs-admin-filter-all active" data-owner-key="" data-action="filterAdminChars">
+        <span>Tous les comptes</span>
+        <strong>${chars.length}</strong>
+      </button>
+      ${ownerButtons}
+    </div>
+  </div>`;
+}
 function _statsCaptureDrawerState(root = document.getElementById('stats-root')) {
   if (!root) return;
   root.querySelectorAll('details[data-drawer-key]').forEach(d => {
@@ -1039,12 +1100,13 @@ function _statsRender(scope) {
   _statsLastSummary = sumLines.join('\n');
 
   const heroMetric = (v, l, c) => `<div class="stats-hm"><span class="stats-hm-v" style="color:${c}">${v}</span><span class="stats-hm-l">${l}</span></div>`;
-  const drawer = (title, body, { open = false, count = '', key = title } = {}) => {
+  const drawer = (title, body, { open = false, count = '', key = title, className = '' } = {}) => {
     if (!body) return '';
     const drawerKey = String(key || title);
     const shouldOpen = _statsDrawerState.has(drawerKey) ? _statsDrawerState.get(drawerKey) : open;
+    const extraClass = className ? ` ${_esc(className)}` : '';
     return `
-    <details class="stats-drawer" data-drawer-key="${_esc(drawerKey)}"${shouldOpen ? ' open' : ''}>
+    <details class="stats-drawer${extraClass}" data-drawer-key="${_esc(drawerKey)}"${shouldOpen ? ' open' : ''}>
       <summary><span>${title}</span>${count ? `<small>${count}</small>` : ''}</summary>
       <div class="stats-drawer-body">${body}</div>
     </details>`;
@@ -1418,8 +1480,30 @@ function _statsRender(scope) {
       ${drawer('Analyse visuelle', chartsHtml, { key: 'charts', count: _statsAnalysisMode === 'compare' ? 'comparaison' : 'graphiques' })}
       ${drawer('Chiffres détaillés', detailedKpisHtml, { key: 'details', count: 'combat · magie · RP' })}
       ${drawer('Palmarès', palmaresSec, { key: 'palmares', count: 'top 5' })}
-      ${drawer('Par personnage', charsHtml, { key: 'characters', count: `${rows.length}` })}
+      ${drawer('Par personnage', charsHtml, { key: 'characters', count: `${rows.length}`, className: 'stats-drawer--characters' })}
     </div>`;
+
+  let hasOpenCharacter = false;
+  root.querySelectorAll('.stats-char[open]').forEach(charDetails => {
+    if (!hasOpenCharacter) {
+      hasOpenCharacter = true;
+      return;
+    }
+    charDetails.open = false;
+    if (charDetails.dataset.drawerKey) _statsDrawerState.set(charDetails.dataset.drawerKey, false);
+  });
+
+  root.querySelectorAll('.stats-char').forEach(charDetails => {
+    charDetails.addEventListener('toggle', () => {
+      if (!charDetails.open) return;
+      root.querySelectorAll('.stats-char[open]').forEach(otherDetails => {
+        if (otherDetails === charDetails) return;
+        otherDetails.open = false;
+        if (otherDetails.dataset.drawerKey) _statsDrawerState.set(otherDetails.dataset.drawerKey, false);
+      });
+      if (charDetails.dataset.drawerKey) _statsDrawerState.set(charDetails.dataset.drawerKey, true);
+    });
+  });
 }
 
 
@@ -2559,15 +2643,7 @@ const PAGES = {
     // V3 : page-header standard (titre comme les autres pages) + shell de la fiche.
     let html = `${pageHeaderHtml(STATE.isAdmin ? '📜 Tous les Personnages' : '📜 Mes Personnages', 'Gérez vos fiches de personnage')}`;
     if (STATE.isAdmin && chars.length > 0) {
-      const byUser = {};
-      chars.forEach(c => { if (!byUser[c.ownerPseudo]) byUser[c.ownerPseudo] = []; byUser[c.ownerPseudo].push(c); });
-      html += `<div class="admin-section" style="margin-bottom:.6rem">
-        <div class="admin-label" style="font-size:.7rem;color:var(--text-dim);letter-spacing:.1em;text-transform:uppercase;font-weight:700;margin-bottom:.4rem">Filtre admin :</div>
-        <div class="char-select-bar" id="admin-player-filter" style="display:flex;gap:6px;flex-wrap:wrap">
-          <button type="button" class="cs-admin-filter active" data-pseudo="" data-action="filterAdminChars">Tous</button>
-          ${Object.keys(byUser).map(p => `<button type="button" class="cs-admin-filter" data-pseudo="${_esc(p)}" data-action="filterAdminChars">${_esc(p)} <span style="opacity:.5">·${byUser[p].length}</span></button>`).join('')}
-        </div>
-      </div>`;
+      html += _renderCharacterAdminFilter(chars);
     }
     if (chars.length === 0) {
       html += emptyStateHtml('📜', 'Aucun personnage. Crée ton premier héros !')
@@ -2703,7 +2779,7 @@ const PAGES = {
     content.innerHTML = `<div class="hall-root">
     <div class="hall-hero">
       <div class="hall-eyebrow"></div>
-      <h1 class="hall-title">✦ Hauts-Faits ✦</h1>
+      <h1 class="hall-title">Hauts-Faits</h1>
       <p class="hall-sub">Les exploits de la compagnie, consignés pour l'éternité.</p>
       <div class="hall-counters">
         <div class="hall-counter${activeFilter === 'all' ? ' active' : ''}" style="--c:#7eb0ff" data-filter="all" data-action="_achSetFilter" data-val="all">

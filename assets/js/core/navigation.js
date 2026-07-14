@@ -143,7 +143,13 @@ export async function navigate(page) {
   // Reset des inline styles que certaines pages posent sur #main-content
   // (ex. VTT: overflow/height/paddingBottom ; map: padding/height).
   const mc = document.getElementById('main-content');
-  if (mc) { mc.style.overflow = ''; mc.style.height = ''; mc.style.padding = ''; mc.style.paddingBottom = ''; }
+  if (mc) {
+    mc.style.overflow = '';
+    mc.style.height = '';
+    mc.style.padding = '';
+    mc.style.paddingBottom = '';
+    mc.dataset.page = page;
+  }
 
   setPage(page);
   _syncHash(page);
