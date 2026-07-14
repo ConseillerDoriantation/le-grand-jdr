@@ -383,14 +383,23 @@ function selectChar(id, el) {
   if (c) { STATE.activeChar=c; renderCharSheet(c, charSession.getCurrentCharTab()||'carac'); }
 }
 
-function filterAdminChars(pseudo, el) {
-  // Met à jour la pill active du filtre admin
+function _adminOwnerKey(c = {}) {
+  return c.uid ? `uid:${c.uid}` : `owner:${c.ownerPseudo || 'unknown'}`;
+}
+
+function _adminFilterMatches(c) {
+  if (!_charAdminFilter) return true;
+  return _adminOwnerKey(c) === _charAdminFilter;
+}
+
+function filterAdminChars(ownerKey, el) {
+  // Met à jour la carte active du filtre admin
   document.querySelectorAll('#admin-player-filter .cs-admin-filter').forEach(p=>p.classList.remove('active'));
   if (el) el.classList.add('active');
   // Mémorise le filtre actif pour que renderCharSheet le réutilise au prochain rendu
-  _charAdminFilter = pseudo || null;
+  _charAdminFilter = ownerKey || null;
   // Sélectionne le 1er perso du filtre et rerendre
-  const filtered = pseudo ? STATE.characters.filter(c=>c.ownerPseudo===pseudo) : STATE.characters;
+  const filtered = _charAdminFilter ? STATE.characters.filter(_adminFilterMatches) : STATE.characters;
   // Sélectionne le ★ par défaut du joueur filtré si possible, sinon le premier (alpha)
   const chars = sortCharactersForDisplay(filtered);
   // Affichage alphabétique, mais on sélectionne le ★ par défaut du joueur si présent.
@@ -473,7 +482,7 @@ function _applyAuraVars(c) {
 function _buildCharSwitchHtml(activeCharId, canEdit) {
   let switchable = getVisibleCharacters();
   if (STATE.isAdmin && _charAdminFilter)
-    switchable = switchable.filter(x => x.ownerPseudo === _charAdminFilter);
+    switchable = switchable.filter(_adminFilterMatches);
   switchable = sortCharactersForDisplay(switchable);
 
   const pillsHtml = switchable.map(ch => {
@@ -1982,7 +1991,7 @@ registerActions({
   // Sélection
   selectChar:              (btn)    => selectChar(btn.dataset.id, btn),
   createNewChar:           ()       => createNewChar(),
-  filterAdminChars:        (btn)    => filterAdminChars(btn.dataset.pseudo, btn),
+  filterAdminChars:        (btn)    => filterAdminChars(btn.dataset.ownerKey || btn.dataset.pseudo, btn),
   _setDefaultCharacter:    (btn)    => _setDefaultCharacter(btn.dataset.id),
   openCharacterBuildsModal: (btn)    => openCharacterBuildsModal(btn.dataset.id),
   switchCharacterBuild:    (el)     => switchCharacterBuild(el.dataset.id, el.dataset.buildId || el.value),

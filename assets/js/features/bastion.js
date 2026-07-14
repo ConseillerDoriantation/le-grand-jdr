@@ -1814,7 +1814,7 @@ function _renderHeader(b) {
       <div class="bs-hero-emoji">${_esc(b.emoji || '🏰')}</div>
       <div class="bs-hero-body">
         <div class="bs-hero-eyebrow">Période ${b.semaine || 1}${b.lieu ? ` · ${_esc(b.lieu)}` : ''}</div>
-        <h1 class="bs-hero-title">${_esc(b.nom || 'Le Bastion')}</h1>
+        <strong class="bs-hero-title">${_esc(b.nom || 'Le Bastion')}</strong>
         ${b.description ? `<p class="bs-hero-desc">${_esc(b.description)}</p>` : ''}
       </div>
       <div class="bs-hero-actions">
