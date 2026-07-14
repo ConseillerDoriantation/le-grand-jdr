@@ -121,7 +121,7 @@ export async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
 }
 
 /** Applique une affliction : JS Sa de la cible, buff selon slot si échec. */
-export async function _vttApplyAfflictions(srcId, targetIds, opt) {
+export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null, statsDelta = null } = {}) {
   const aff = opt.mods?.affliction; if (!aff) return;
   const shared = _buffShared(opt, srcId);
   const statShortStr = _STAT_SHORT[aff.saveStat] || aff.saveStat;
@@ -138,6 +138,8 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt) {
   }).join(', ');
   await addDoc(_logCol(), {
     type: 'affliction-cast',
+    ...(undo ? { undo } : {}),
+    ...(statsDelta ? { statsDelta } : {}),
     authorId: STATE.user?.uid || null,
     authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
     casterName: srcName, characterImage: srcTok?.image || null,
