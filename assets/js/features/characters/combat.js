@@ -10,6 +10,7 @@ import {
   _getTraits, getArmorTypeMeta, getArmorSetChipText, getArmorSetData,
   getWeaponToucherParts, getWeaponDegatsParts, getMainWeapon,
 } from './data.js';
+import { getEquipmentSlots, getPrimaryWeaponSlotId, getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 
 // ── renderCharEquip ───────────────────────────────────────────────────────────
 
@@ -41,7 +42,10 @@ function _renderElementAccessHtml(c, magicTypes, canManageElements) {
 }
 export function renderCharEquip(c, canEdit) {
   const equip      = c.equipement||{};
-  const weaponSlots = ['Main principale','Main secondaire'];
+  const slotDefs = getEquipmentSlots();
+  const weaponSlots = slotDefs.filter(slot => slot.kind === 'weapon');
+  const armorSlots = slotDefs.filter(slot => slot.kind !== 'weapon');
+  const primaryWeaponSlot = getPrimaryWeaponSlotId();
   const armorSet    = getArmorSetData(c);
   const armorSetChipText = getArmorSetChipText(armorSet);
 
@@ -57,10 +61,11 @@ export function renderCharEquip(c, canEdit) {
     </div>
     <div class="cs-weap-grid">`;
 
-  weaponSlots.forEach(slot => {
+  weaponSlots.forEach(slotDef => {
+    const slot = slotDef.id;
     // Main principale vide → poings par défaut. Main secondaire vide reste vide.
     const rawItem = equip[slot] || {};
-    const item    = (slot === 'Main principale' && !rawItem.nom) ? getMainWeapon(c) : rawItem;
+    const item    = (slot === primaryWeaponSlot && !rawItem.nom) ? getMainWeapon(c) : rawItem;
     const statKey = item.statAttaque==='dexterite' ? 'dexterite'
                   : item.statAttaque==='intelligence' ? 'intelligence' : 'force';
     const traits       = item.nom ? _getTraits(item) : [];
@@ -68,7 +73,7 @@ export function renderCharEquip(c, canEdit) {
 
     html += `<div class="cs-weap-card${item.isDefault ? ' cs-weap-card--default' : ''}">
       <div class="cs-weap-card-hdr">
-        <span class="cs-weap-slot-lbl">${slot}</span>
+        <span class="cs-weap-slot-lbl">${slotDef.icon} ${slotDef.label}</span>
         ${canEdit ? `<button class="cs-weap-edit" data-action="editEquipSlot" data-slot="${slot}">✏️</button>` : ''}
       </div>`;
 
@@ -168,8 +173,6 @@ export function renderCharEquip(c, canEdit) {
   }, 0);
 
   // ── 2. Armures & Accessoires + Set d'armure ──────────────────────────────
-  const armorRow1 = ['Tête','Torse','Bottes'];
-  const armorRow2 = ['Anneau','Amulette','Objet magique'];
   const totals = {fo:0,dex:0,in:0,sa:0,co:0,ch:0,ca:0};
   const statByStore = { fo:'force', dex:'dexterite', in:'intelligence', sa:'sagesse', co:'constitution', ch:'charisme' };
   const statDisplay = { fo:'FOR', dex:'DEX', in:'IN', sa:'SA', co:'CO', ch:'CH', ca:'CA' };
@@ -179,7 +182,8 @@ export function renderCharEquip(c, canEdit) {
   });
   const totalStr = Object.entries(totals).filter(([,v])=>v!==0).map(([k,v])=>`${statDisplay[k] || k.toUpperCase()} ${v>0?'+'+v:v}`).join(' · ');
 
-  const _armorCard = (slot) => {
+  const _armorCard = (slotDef) => {
+    const slot = slotDef.id;
     const item          = equip[slot]||{};
     const statBonuses   = Object.entries(statByStore)
       .map(([store, full]) => [store, getItemStatBonus(item, full)])
@@ -189,7 +193,7 @@ export function renderCharEquip(c, canEdit) {
     const traits        = _getTraits(item);
     return `<div class="cs-armor-card${item.nom?' cs-armor-card--on':''}">
       <div class="cs-armor-card-hdr">
-        <span class="cs-armor-card-slot">${slot}</span>
+        <span class="cs-armor-card-slot">${slotDef.icon} ${slotDef.label}</span>
         ${canEdit?`<button class="cs-weap-edit" data-action="editEquipSlot" data-slot="${slot}">✏️</button>`:''}
       </div>
       <span class="cs-armor-card-nom">${item.nom||'—'}</span>
@@ -203,7 +207,7 @@ export function renderCharEquip(c, canEdit) {
   };
 
   // Effet de set — calculé avant de l'afficher sous les armures
-  const mainS  = equip['Main secondaire'];
+  const mainS  = equip[getSecondaryWeaponSlotId()];
   const stypeS = (mainS?.sousType || mainS?.nom || '').toLowerCase();
   const hasShield = stypeS.includes('bouclier') || stypeS.includes('shield');
 
@@ -237,8 +241,7 @@ export function renderCharEquip(c, canEdit) {
       ${totalStr?`<span class="cs-hint">${totalStr}</span>`:''}
     </div>
     <div class="cs-armor-grid3">
-      ${armorRow1.map(_armorCard).join('')}
-      ${armorRow2.map(_armorCard).join('')}
+      ${armorSlots.map(_armorCard).join('')}
     </div>
     ${setHtml}
   </div>`;

@@ -369,6 +369,12 @@ export function _buildAnnotVisual(K, data) {
         fill: col + '24', stroke: col, strokeWidth: _zsw, dash: [10, 6], hitStrokeWidth: 0, listening: true }));
       g.add(new K.Rect({ x: -zw / 2, y: -CELL / 2, width: zw, height: CELL,
         fill: col + '24', stroke: col, strokeWidth: _zsw, dash: [10, 6], hitStrokeWidth: 0, listening: true }));
+    } else if (data.shape === 'diamond') {
+      g.add(new K.Line({
+        points: [0, -zh / 2, zw / 2, 0, 0, zh / 2, -zw / 2, 0],
+        closed: true, fill: col + '24', stroke: col, strokeWidth: _zsw,
+        dash: [10, 6], hitStrokeWidth: 0, listening: true,
+      }));
     } else {
       g.add(new K.Rect({ x: 0, y: 0, width: zw, height: zh, offsetX: zw / 2, offsetY: zh / 2,
         fill: col + '24', stroke: col, strokeWidth: _zsw, dash: [10, 6], cornerRadius: 4,

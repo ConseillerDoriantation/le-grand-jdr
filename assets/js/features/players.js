@@ -37,6 +37,7 @@ import { richTextContentHtml } from '../shared/rich-text.js';
 import { quillEditorHtml, getQuillHtml, bindQuillEditors } from '../shared/rich-text-quill.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import { characterPortraitContent } from '../shared/portraits.js';
+import { getEquipmentSlots } from '../shared/equipment-slots.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS (cohérent bestiary/shop, voir shared/scoped-actions.js)
@@ -1206,19 +1207,11 @@ function _bindHexagonTooltips() {
 // ── Bloc Équipement ──────────────────────────────────────────────────────────
 function _renderEquipBlock(char) {
   const equip = char.equipement || {};
-  const main  = equip['Main principale'];
-  const sec   = equip['Main secondaire'];
-  const tete  = equip['Tête'];
-  const torse = equip['Torse'];
-  const pieds = equip['Bottes'] || equip['Pieds'];
-
-  const rows = [
-    main && main.nom ? { slot: 'Arme principale', name: main.nom, detail: main.degats || '' } : null,
-    sec  && sec.nom  ? { slot: 'Main secondaire', name: sec.nom,  detail: sec.degats  || '' } : null,
-    tete && tete.nom ? { slot: 'Tête',            name: tete.nom, detail: tete.typeArmure || '' } : null,
-    torse && torse.nom ? { slot: 'Torse',         name: torse.nom, detail: torse.typeArmure || '' } : null,
-    pieds && pieds.nom ? { slot: 'Bottes',        name: pieds.nom, detail: pieds.typeArmure || '' } : null,
-  ].filter(Boolean);
+  const rows = getEquipmentSlots().map(slot => {
+    const item = equip[slot.id];
+    if (!item?.nom) return null;
+    return { slot: slot.label, name: item.nom, detail: item.degats || item.typeArmure || '' };
+  }).filter(Boolean);
 
   if (!rows.length) return '';
 

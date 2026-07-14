@@ -4317,6 +4317,19 @@ html:not([data-theme="light"]) .vtt-root {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   max-width: 9rem;
 }
+.vtt-aopt-pill.cooldown {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, .38);
+  background: rgba(251, 191, 36, .075);
+}
+.vtt-aopt-pill.cooldown.ready { color: #94a3b8; border-color: var(--border); background: transparent; }
+.cs-v3 .vtt-castcard.is-cooldown {
+  opacity: .58;
+  cursor: not-allowed;
+  filter: saturate(.55);
+}
+.cs-v3 .vtt-castcard.is-cooldown:hover { transform: none; box-shadow: none; }
+.cs-v3 .vtt-castcard.is-cooldown .vtt-castcard-cta { color: #fbbf24; }
 .vtt-log-source-btn {
   width: 20px;
   height: 20px;

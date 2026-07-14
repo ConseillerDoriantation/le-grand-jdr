@@ -71,6 +71,10 @@ import {
   getInventoryItemImage,
 } from '../shared/inventory-utils.js';
 import { RARETE_NAMES, _rareteColor, _rareteLabel } from '../shared/rarity.js';
+import {
+  getArmorTorsoSlotId, getEquipmentSlots, getPrimaryWeaponSlotId,
+  getSecondaryWeaponSlotId,
+} from '../shared/equipment-slots.js';
 
 import { editEquipSlot } from './characters/equipment.js';
 
@@ -235,9 +239,9 @@ function _calcEquipmentRows(c, key) {
   ).join('');
 }
 
-function _weaponForSlot(c, slot = 'Main principale') {
+function _weaponForSlot(c, slot = getPrimaryWeaponSlotId()) {
   const raw = c?.equipement?.[slot] || {};
-  return slot === 'Main principale' && !raw.nom ? getMainWeapon(c) : raw;
+  return slot === getPrimaryWeaponSlotId() && !raw.nom ? getMainWeapon(c) : raw;
 }
 
 function openCharCalculation(btn) {
@@ -270,7 +274,7 @@ function openCharCalculation(btn) {
     note = `Le modificateur de ${statLabel} provient de la valeur totale de la caractéristique.`;
   } else if (type === 'ca') {
     const equip = c.equipement || {};
-    const torse = equip.Torse || {};
+    const torse = equip[getArmorTorsoSlotId()] || {};
     const armorType = torse.typeArmure || 'Sans armure';
     const armorBases = { 'Légère': 10, 'Intermédiaire': 12, 'Lourde': 14 };
     const armorBase = armorBases[armorType] || 8;
@@ -279,7 +283,7 @@ function openCharCalculation(btn) {
       const value = parseInt(item?.ca) || 0;
       return value ? [{ slot, item, value }] : [];
     });
-    const secondary = equip['Main secondaire'];
+    const secondary = equip[getSecondaryWeaponSlotId()];
     const secondaryName = (secondary?.sousType || secondary?.nom || '').toLowerCase();
     const hasShield = secondaryName.includes('bouclier') || secondaryName.includes('shield');
     const shieldOwnBonus = Number.isFinite(parseInt(secondary?.caBonus)) && parseInt(secondary.caBonus) !== 0;
@@ -317,7 +321,7 @@ function openCharCalculation(btn) {
     ].join('');
     note = 'Le premier nombre correspond aux sorts actifs, le second à la capacité maximale.';
   } else if (type?.startsWith('weapon-')) {
-    const slot = btn.dataset.slot || 'Main principale';
+    const slot = btn.dataset.slot || getPrimaryWeaponSlotId();
     const item = _weaponForSlot(c, slot);
     const fallback = item.statAttaque === 'dexterite'
       ? 'dexterite'
@@ -1009,17 +1013,19 @@ function renderCharCombatV3(c, canEdit) {
       .find(([, slots]) => slots.includes(slot))?.[0];
     return Number.isInteger(invIndex) ? (c.inventaire?.[invIndex] || fallback) : fallback;
   };
-  const weaponSlots = ['Main principale', 'Main secondaire'];
-  const armorSlotsRow1 = ['Tête', 'Torse', 'Bottes'];
-  const armorSlotsRow2 = ['Anneau', 'Amulette', 'Objet magique'];
+  const slotDefs = getEquipmentSlots();
+  const weaponSlots = slotDefs.filter(slot => slot.kind === 'weapon');
+  const armorSlots = slotDefs.filter(slot => slot.kind !== 'weapon');
+  const primaryWeaponSlot = getPrimaryWeaponSlotId();
 
   // ── ARMES
-  const weapsHtml = weaponSlots.map(slot => {
+  const weapsHtml = weaponSlots.map(slotDef => {
+    const slot = slotDef.id;
     const raw = equip[slot] || {};
     let item = raw;
     let isDefault = false;
     try {
-      if (slot === 'Main principale' && !raw.nom && typeof getMainWeapon === 'function') {
+      if (slot === primaryWeaponSlot && !raw.nom && typeof getMainWeapon === 'function') {
         item = getMainWeapon(c) || {};
         isDefault = !!item.isDefault;
       }
@@ -1035,17 +1041,17 @@ function renderCharCombatV3(c, canEdit) {
       return `<div class="weap-card" style="opacity:.65;border-style:dashed">
         <div class="weap-head">
           <div>
-            <div class="weap-slot">${slot}</div>
+            <div class="weap-slot">${_esc(slotDef.icon)} ${_esc(slotDef.label)}</div>
             <div class="weap-name" style="color:var(--text-dim);font-style:italic">— Vide —</div>
           </div>
           ${canEdit?`<button class="weap-edit" data-action="editEquipSlot" data-slot="${slot}" title="Équiper">✏️</button>`:''}
         </div>
       </div>`;
     }
-    return `<div class="weap-card ${slot==='Main principale'?'main':''}">
+    return `<div class="weap-card ${slot === primaryWeaponSlot ? 'main' : ''}">
       <div class="weap-head">
         <div>
-          <div class="weap-slot">${slot}</div>
+          <div class="weap-slot">${_esc(slotDef.icon)} ${_esc(slotDef.label)}</div>
           <div class="weap-name">${_esc(item.nom)}${isDefault?' <span class="def">par défaut</span>':''}</div>
         </div>
         <div style="display:flex;gap:6px;align-items:center">
@@ -1091,13 +1097,14 @@ function renderCharCombatV3(c, canEdit) {
     'Intermédiaire': { key: 'medium', short: 'Inter.' },
     'Lourde':        { key: 'heavy',  short: 'Lourde' },
   };
-  const renderArmor = slot => {
+  const renderArmor = slotDef => {
+    const slot = slotDef.id;
     const it = equip[slot] || {};
     const has = !!it.nom;
     if (!has) {
       return `<div class="armor-card empty">
         <div class="armor-slot">
-          <span>${_esc(slot)}</span>
+          <span>${_esc(slotDef.icon)} ${_esc(slotDef.label)}</span>
           ${canEdit?`<button class="weap-edit" data-action="editEquipSlot" data-slot="${slot}" title="Équiper">✎</button>`:''}
         </div>
         <div class="armor-name muted">— Vide —</div>
@@ -1131,7 +1138,7 @@ function renderCharCombatV3(c, canEdit) {
     const traits = (_getTraits?.(getEquippedInventoryItem(slot, it)) || []);
     return `<div class="armor-card equipped">
       <div class="armor-slot">
-        <span class="armor-slot-name">${_esc(slot)}</span>
+        <span class="armor-slot-name">${_esc(slotDef.icon)} ${_esc(slotDef.label)}</span>
         <span class="armor-slot-right">
           ${typePill}
           ${canEdit?`<button class="weap-edit" data-action="editEquipSlot" data-slot="${slot}" title="Changer">✎</button>`:''}
@@ -1144,8 +1151,7 @@ function renderCharCombatV3(c, canEdit) {
   };
   // Une seule grille permet au responsive mobile de rester en 2 par 2 sans
   // créer deux cartes orphelines (3 slots + 3 slots).
-  const armorRows = `
-    <div class="armor-grid armor-grid--equipment">${[...armorSlotsRow1, ...armorSlotsRow2].map(renderArmor).join('')}</div>`;
+  const armorRows = `<div class="armor-grid armor-grid--equipment">${armorSlots.map(renderArmor).join('')}</div>`;
 
   // Set bonus — actif UNIQUEMENT si Tête + Torse + Bottes du même type (Légère / Intermédiaire / Lourde)
   // Rendu compacté : un badge dans l'en-tête de la section (le type de chaque
@@ -1153,7 +1159,7 @@ function renderCharCombatV3(c, canEdit) {
   let setBadgeHtml = '', setHintHtml = '';
   try {
     const setData = getArmorSetData?.(c) || {};
-    const trackedSlots = setData.trackedSlots || ['Tête', 'Torse', 'Bottes'];
+    const trackedSlots = setData.trackedSlots || [];
     const slots = setData.slots || trackedSlots.map(s => ({ slot: s, type: '', equipped: false }));
     const counts = setData.counts || {};
     const fullType = setData.fullType || ''; // 'Légère' / 'Intermédiaire' / 'Lourde'
@@ -1167,18 +1173,22 @@ function renderCharCombatV3(c, canEdit) {
       'Lourde':        { tag: 'Lourd',         fx: 'Réduction de 2 dégâts (toute source)' },
     };
 
-    if (isActive) {
+    if (trackedSlots.length !== 3) {
+      setBadgeHtml = '';
+      setHintHtml = '';
+    } else if (isActive) {
       const fx   = EFFECT_BY_TYPE[fullType] || { tag: fullType, fx: setData.activeEffect?.chipText || '' };
       const ico  = TYPE_ICONS[fullType] || '✨';
       const tkey = ARMOR_TYPE_META[fullType]?.key || '';
-      setBadgeHtml = `<span class="set-badge active ${tkey}" title="Tête, Torse et Bottes de type ${_esc(fullType)} équipés (set complet)">
+      const setLabels = trackedSlots.map(id => slotDefs.find(slot => slot.id === id)?.label || id).join(', ');
+      setBadgeHtml = `<span class="set-badge active ${tkey}" title="${_esc(setLabels)} de type ${_esc(fullType)} équipés (set complet)">
         <span class="set-badge-ico">${ico}</span><b>Set ${_esc(fx.tag)} 3/3</b><span class="set-badge-fx">${_esc(fx.fx)}</span>
       </span>`;
     } else {
       const types = Object.keys(counts);
       let reason;
       if (equippedCount < 3) {
-        reason = `Équipe Tête, Torse et Bottes du même type pour activer un bonus d'ensemble.`;
+        reason = `Équipe les 3 pièces de set du même type pour activer un bonus d'ensemble.`;
       } else if (types.length > 1) {
         const list = types.map(t => `${counts[t]}× ${t}`).join(', ');
         reason = `Types mélangés (${list}) — il faut 3× le même type.`;
@@ -1285,23 +1295,23 @@ function renderCharCombatV3(c, canEdit) {
   </div>` : `<div class="q-empty">Aucune maîtrise enregistrée.</div>`;
 
   return `
-  <div class="section">
+  ${weaponSlots.length ? `<div class="section">
     <div class="section-head">
       <div class="section-title"><span class="ico">⚔️</span> Armes équipées</div>
-      ${canEdit?`<button class="section-action" data-action="editEquipSlot" data-slot="Main principale">＋ Équiper</button>`:''}
+      ${canEdit?`<button class="section-action" data-action="editEquipSlot" data-slot="${_esc(primaryWeaponSlot)}">＋ Équiper</button>`:''}
     </div>
     <div class="weap-grid">${weapsHtml}</div>
     ${styleHtml}
-  </div>
+  </div>` : ''}
 
-  <div class="section">
+  ${armorSlots.length ? `<div class="section">
     <div class="section-head">
       <div class="section-title"><span class="ico">🪖</span> Armures & Accessoires</div>
       ${setBadgeHtml}
     </div>
     ${armorRows}
     ${setHintHtml}
-  </div>
+  </div>` : ''}
 
   <div class="section">
     <div class="section-head">

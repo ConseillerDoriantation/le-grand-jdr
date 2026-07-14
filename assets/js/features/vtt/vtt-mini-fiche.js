@@ -29,6 +29,10 @@ import { _effectDisplay, _vttSortDmgFormula,
          _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode, _vttDisplayRunes,
          } from './vtt-spell-display.js'; // formules de sorts (leaf — mini-fiche découplée de vtt.js)
 import { _renderPresenceCol } from './vtt-presence.js'; // circ. (toggle mini → refresh colonne)
+import {
+  equipmentSlotAcceptsItem, getEquipmentSlot, getEquipmentSlots,
+  getPrimaryWeaponSlotId,
+} from '../../shared/equipment-slots.js';
 
 let _miniTab = 'combat'; // onglet actif de la mini-fiche (état local)
 
@@ -48,22 +52,7 @@ let _msCraftQuery = '';   // filtre de recherche de l'onglet Craft
 
 // Slots canoniques — mêmes clés que la vraie fiche personnage (characters/combat.js
 // + characters/equipment.js). NE PAS inventer d'emplacements ici.
-const _MS_SLOTS = [
-  'Main principale', 'Main secondaire',
-  'Tête', 'Torse', 'Bottes',
-  'Anneau', 'Amulette', 'Objet magique',
-];
-
-const _MS_SLOT_ICON = {
-  'Main principale': '⚔',
-  'Main secondaire': '🛡',
-  'Tête': '🎩',
-  'Torse': '🦺',
-  'Bottes': '🥾',
-  'Anneau': '💍',
-  'Amulette': '📿',
-  'Objet magique': '✦',
-};
+const _msSlots = () => getEquipmentSlots();
 
 // ─── Helpers locaux ───────────────────────────────────────────────
 
@@ -78,7 +67,7 @@ function _msCatItem(item) {
 
 function _msBuildEquipItem(slot, item, invIndex) {
   if (!item) return null;
-  const isWeapon = slot.startsWith('Main');
+  const isWeapon = getEquipmentSlot(slot)?.kind === 'weapon';
   const base = {
     nom: item.nom||'',
     fo: getItemStatBonus(item, 'force'), dex: getItemStatBonus(item, 'dexterite'),
@@ -110,42 +99,7 @@ function _msItemFitsSlot(item, slot, equip, idx) {
   // Déjà équipé dans un autre slot → exclu
   if (Object.entries(equip).some(([s, e]) => s !== slot && e?.sourceInvIndex === idx)) return false;
 
-  const tpl = item.template || '';
-
-  // ── Armes (Main principale / Main secondaire) ────────────────────
-  if (slot.startsWith('Main')) {
-    if (tpl === 'arme') return true;
-    const WFMT = new Set([
-      'Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.',
-      'Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)',
-    ]);
-    if (item.format && WFMT.has(item.format)) return true;
-    const combined = [item.type, item.sousType, item.nom, item.categorie]
-      .map(v => (v||'').toLowerCase()).join(' ');
-    return ['arme','weapon','épée','lance','hache','arc','arbalète','dague',
-      'baguette','baton','bouclier','shield','torche','masse','marteau',
-      'fléau','rapière','cimeterre','sabre'].some(k => combined.includes(k));
-  }
-
-  // ── Armures (Tête / Torse / Bottes) ─────────────────────────────
-  // slotArmure stocké côté item = 'Tête' | 'Torse' | 'Pieds'
-  // (libellé "Bottes" pour l'affichage, mais valeur réelle "Pieds")
-  const ARMOR_MAP = { 'Tête':'Tête', 'Torse':'Torse', 'Bottes':'Pieds' };
-  if (ARMOR_MAP[slot] !== undefined) {
-    if (tpl === 'armure' || item.slotArmure) {
-      return item.slotArmure === ARMOR_MAP[slot];
-    }
-    const t = (item.type||'').toLowerCase();
-    return ['armure','armor','casque','torse','cuirasse','botte','chapeau'].some(k => t.includes(k));
-  }
-
-  // ── Bijoux / accessoires (Anneau / Amulette / Objet magique) ─────
-  // Règle stricte = même que la vraie fiche : item.slotBijou === slot
-  if (slot === 'Anneau' || slot === 'Amulette' || slot === 'Objet magique') {
-    return item.slotBijou === slot;
-  }
-
-  return false;
+  return equipmentSlotAcceptsItem(slot, item);
 }
 
 // ─── Handlers exposés ────────────────────────────────────────────
@@ -356,7 +310,7 @@ async function _vttMsUnequip(charId, uid, slot) {
 
 // Appelé par le <select> de l'onglet Équipement
 function _vttMsSlotChange(sel, charId, uid, slotIdx) {
-  const slot = _MS_SLOTS[parseInt(slotIdx)]; if (!slot) return;
+  const slot = _msSlots()[parseInt(slotIdx)]?.id; if (!slot) return;
   const val = sel.value;
   if (val === '') _vttMsUnequip(charId, uid, slot);
   else            _vttMsEquip(charId, uid, slot, parseInt(val));
@@ -370,13 +324,13 @@ function _vttMsEquipPicker(charId, uid, invIndex) {
   const item = (c.inventaire||[])[invIndex]; if (!item) return;
   const equip = c.equipement||{};
   // Seuls les slots compatibles avec cet item (sans check "usedElsewhere" pour qu'on puisse déplacer)
-  const slots = _MS_SLOTS.filter(s => _msItemFitsSlot(item, s, {}, invIndex));
+  const slots = _msSlots().filter(s => _msItemFitsSlot(item, s.id, {}, invIndex));
   if (!slots.length) { showNotif('Aucun slot compatible pour cet objet', 'info'); return; }
-  if (slots.length === 1) { _vttMsEquip(charId, uid, slots[0], invIndex); return; }
+  if (slots.length === 1) { _vttMsEquip(charId, uid, slots[0].id, invIndex); return; }
   openModal(`⚔️ Équiper "${item.nom}"`, `
     <div style="display:flex;flex-direction:column;gap:.4rem">
       ${slots.map(s => `<button class="btn btn-outline"
-        data-vtt-fn="_vttCloseAnd" data-vtt-args="_vttMsEquip|${charId}|${uid}|${s}|${invIndex}">${s}</button>`).join('')}
+        data-vtt-fn="_vttCloseAnd" data-vtt-args="_vttMsEquip|${charId}|${uid}|${s.id}|${invIndex}">${_esc(s.icon)} ${_esc(s.label)}</button>`).join('')}
       <button class="btn btn-outline btn-sm" style="margin-top:.3rem" data-vtt-fn="closeModal">Annuler</button>
     </div>`);
 }
@@ -519,7 +473,7 @@ function _msTabCombat(c, uid, canEdit) {
     </div>`;
   }).join('');
 
-  const weapon = c?.equipement?.['Main principale'];
+  const weapon = c?.equipement?.[getPrimaryWeaponSlotId()];
   let attackDice = '—';
   let attackTouch = '+0';
   const weaponHtml = weapon?.nom ? (() => {
@@ -621,23 +575,25 @@ function _msXpSection(c, uid, canEdit) {
 
 function _msTabEquipement(c, uid, canEdit) {
   const equip = c?.equipement||{}, inv = c?.inventaire||[];
-  const equippedCount = _MS_SLOTS.filter(slot => equip[slot]?.nom).length;
+  const slots = _msSlots();
+  const equippedCount = slots.filter(slot => equip[slot.id]?.nom).length;
   const setData = getArmorSetData(c);
   const setLabel = setData?.active ? `Set ${setData.type}` : 'Aucun set actif';
-  const intro = _msTabIntro('🧰', 'Équipement', `${equippedCount}/${_MS_SLOTS.length}`, setLabel);
+  const intro = _msTabIntro('🧰', 'Équipement', `${equippedCount}/${slots.length}`, setLabel);
 
-  return `${intro}<div class="vtt-ms-slots is-upgraded">${_MS_SLOTS.map((slot, slotIdx) => {
+  return `${intro}<div class="vtt-ms-slots is-upgraded">${slots.map((slotDef, slotIdx) => {
+    const slot = slotDef.id;
     const equipped    = equip[slot];
     const equippedIdx = equipped?.sourceInvIndex ?? -1;
     const opts = inv.map((item, i) => {
       if (!_msItemFitsSlot(item, slot, equip, i)) return '';
       return `<option value="${i}"${equippedIdx===i?' selected':''}>${item.nom}${(item.qte||1)>1?' ×'+item.qte:''}</option>`;
     }).join('');
-    const slotIcon = _MS_SLOT_ICON[slot] || '•';
+    const slotIcon = slotDef.icon || '•';
     return `<div class="vtt-ms-slot-row ${equipped?.nom ? 'is-filled' : 'is-empty'}">
       <span class="vtt-ms-slot-icon">${slotIcon}</span>
       <div class="vtt-ms-slot-main">
-        <span class="vtt-ms-slot-lbl">${slot}</span>
+        <span class="vtt-ms-slot-lbl">${_esc(slotDef.label)}</span>
         <span class="vtt-ms-slot-current" title="${_esc(equipped?.nom || 'Emplacement libre')}">${_esc(equipped?.nom || 'Emplacement libre')}</span>
       </div>
       <div class="vtt-ms-slot-ctrl">${canEdit
@@ -657,12 +613,17 @@ function _msTabEquipement(c, uid, canEdit) {
 // natifs du VTT (cache-free → cohérents avec les options d'attaque du VTT).
 function _vttSpellChips(s, c) {
   const chips = [];
+  const isClassic = s?.designMode === 'classic';
   const types = (Array.isArray(s.types) && s.types.length) ? s.types
               : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : []));
   const runes = s.runes || [];
   const _isLac = runes.includes('Lacération') || (s.afflictionMode === 'laceration' && runes.includes('Affliction'));
   if (types.includes('offensif') || _isLac) {
-    const dmg = _vttSortDmgFormula(s, c);
+    let dmg = _vttSortDmgFormula(s, c);
+    if (isClassic && s.degatsStat && s.degatsStat !== 'none') {
+      const mod = getMod(c, s.degatsStat);
+      if (mod) dmg += `${mod > 0 ? ' +' : ' '}${mod}`;
+    }
     if (dmg) chips.push({ icon:'⚔️', val: _effectDisplay(s, dmg), color:'#ff6b6b', lbl:'Dégâts infligés' });
   }
   if (runes.includes('Protection') && runes.includes('Affliction') && !_isLac) {
@@ -677,22 +638,48 @@ function _vttSpellChips(s, c) {
     && !runes.includes('Protection');
   if (!(runes.includes('Protection') && runes.includes('Affliction') && !_isLac)
       && types.includes('defensif') && (s.protectionMode === 'soin' || s.typeSoin || isAmpSupportHeal)) {
-    const soin = _vttSortSoinFormula(s, c);
+    let soin = _vttSortSoinFormula(s, c);
+    if (isClassic && s.degatsStat && s.degatsStat !== 'none') {
+      const mod = getMod(c, s.degatsStat);
+      if (mod) soin += `${mod > 0 ? ' +' : ' '}${mod}`;
+    }
     if (soin) chips.push({ icon:'💚', val: _effectDisplay(s, soin), color:'#22c38e', lbl:'Soin' });
+  }
+  if (isClassic && s.classicEffect === 'utility' && s.effet) {
+    chips.push({ icon:'✨', val:s.effet, color:'#b47fff', lbl:'Effet utilitaire' });
+  }
+  if (isClassic && s.classicStateId) {
+    chips.push({
+      icon:s.classicStateIcon || '◈',
+      val:s.classicStateLabel || 'État',
+      color:s.classicTarget === 'enemy' ? '#ef4444' : '#e8b84b',
+      lbl:s.classicTarget === 'enemy'
+        ? `Jet de sauvegarde DD ${parseInt(s.classicStateDC) || 11}`
+        : 'État appliqué à la cible',
+    });
   }
   const nbT = calcSpellTargets(s);
   if (nbT > 1) chips.push({ icon:'🎯', val:`×${nbT}`, color:'#4f8cff', lbl:'Nombre de cibles', dim:true });
   const nbAmp = runes.filter(r => r === 'Amplification').length;
   // Avec Enchantement (hors Invocation), l'Amplification booste l'effet → pas de zone.
   const _enchNoZone = runes.includes('Enchantement') && !runes.includes('Invocation');
-  if (nbAmp > 0 && s.ampMode !== 'deplacement' && !_enchNoZone) {
+  if (isClassic && (parseInt(s.zoneW) || 0) > 0 && (parseInt(s.zoneH) || 0) > 0) {
+    const zoneIcon = s.zoneShape === 'cross' ? '✚' : s.zoneShape === 'diamond' ? '◇' : '📐';
+    const zoneLabel = s.zoneShape === 'cross' ? 'Zone en croix'
+      : s.zoneShape === 'diamond' ? 'Zone circulaire sur la grille' : 'Zone rectangulaire';
+    chips.push({ icon:zoneIcon, val:`${parseInt(s.zoneW)}×${parseInt(s.zoneH)} cases`, color:'#b47fff', lbl:zoneLabel, dim:true });
+  } else if (nbAmp > 0 && s.ampMode !== 'deplacement' && !_enchNoZone) {
     const nbDisp = runes.filter(r => r === 'Dispersion').length;
     const zoneW = nbDisp >= 1 ? _vttAmpDispCircleSize(nbAmp, nbDisp) : 3 * nbAmp;
     const zoneH = nbDisp >= 1 ? zoneW : 1;
     chips.push({ icon:'📐', val:`${zoneW}×${zoneH} cases`, color:'#b47fff', lbl:'Zone d\'effet (cases)', dim:true });
   }
-  if (runes.includes('Durée') || (s.dureeBase && s.dureeBase >= 2)) {
+  if ((isClassic && (parseInt(s.classicDuration ?? s.dureeBase) || 0) > 0)
+      || runes.includes('Durée') || (s.dureeBase && s.dureeBase >= 2)) {
     chips.push({ icon:'⏱️', val:`${calcSpellDuration(s)}t`, color:'#9ca3af', lbl:'Durée de l\'effet (tours)', dim:true });
+  }
+  if (isClassic && (parseInt(s.cooldownTurns) || 0) > 0) {
+    chips.push({ icon:'↻', val:`${parseInt(s.cooldownTurns)}t`, color:'#fbbf24', lbl:'Temps de recharge en combat', dim:true });
   }
   return chips;
 }

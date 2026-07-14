@@ -39,9 +39,10 @@ export async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
     const buildCond = (etatId, idx) => {
       const lib = CONDITION_BY_ID[etatId];
       const isConsumed = !!lib.effects?.consumedByAttackAgainst;
-      const dur = opt.mods?.concentration ? 10 : (
+      const dur = opt.mods?.concentration ? 10 : (opt.classicDuration > 0
+        ? opt.classicDuration : (
         Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0 ? lib.defaultDuration : 2
-      );
+      ));
       const expiresAtRound = (round > 0 && !isConsumed && dur > 0) ? round + dur - 1 : null;
       const pendingDuration = (round === 0 && !isConsumed && dur > 0) ? dur : null;
       const scaledFields = _scaledEnchantConditionFields(
@@ -209,10 +210,11 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt) {
       }
       const round = VS.session?.combat?.round ?? 0;
       const isConsumed = !!lib.effects?.consumedByAttackAgainst;
-      const dur = opt.mods?.concentration ? 10 : (
+      const dur = opt.mods?.concentration ? 10 : (opt.classicDuration > 0
+        ? opt.classicDuration : (
         Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
           ? lib.defaultDuration : 2
-      );
+      ));
       // Si combat actif (round > 0) : expiresAtRound calculé direct
       // Si combat inactif (round = 0) : on stocke pendingDuration pour reporter
       //   le calcul au démarrage du combat (sinon l'état durerait à l'infini)

@@ -7,6 +7,7 @@ import { computeEquipStatsBonus, getItemStatBonus, getItemEffectText } from '../
 import { saveBuildPatch } from '../../shared/character-builds.js';
 import { _esc } from '../../shared/html.js';
 import { _getTraits, inferAttackStatFromItem, buildEquippedItemFromInventory } from '../../shared/equipment-utils.js';
+import { equipmentSlotAcceptsItem, getEquipmentSlot } from '../../shared/equipment-slots.js';
 
 let _equipCompatibles = [];
 let _equipSelectedMeta = {};
@@ -60,25 +61,9 @@ export async function equipSlotFromInv(val, slot) {
 export function editEquipSlot(slot) {
   const c = STATE.activeChar; if(!c) return;
   const equipped = (c.equipement||{})[slot]||{};
-  const isWeapon = slot.startsWith('Main');
-
-  // Tous les formats d'arme connus — un item ayant l'un de ces formats est une arme
-  const WEAPON_FORMATS = new Set([
-    'Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.',
-    'Arme 2M CaC Mag.','Arme 2M Dist Mag.','Arme Secondaire (Bouclier, Torche...)',
-  ]);
-
-  // `slot` = clé Firestore du slot, `slotArmure` = valeur stockée sur l'objet,
-  // `keywords` = repli legacy (objets sans `slotArmure`) — SPÉCIFIQUES au slot
-  // pour qu'une tête ne soit jamais proposée dans torse/bottes, etc.
-  const SLOT_ARMURE = {
-    'Tête':   { slot: 'Tête',  keywords: ['casque','heaume','chapeau','coiffe','capuche','tête','tete','tiare','couronne'] },
-    'Torse':  { slot: 'Torse', keywords: ['torse','cuirasse','plastron','armure','armor','robe','cotte','harnois','tunique','mailles'] },
-    'Bottes': { slot: 'Pieds', keywords: ['botte','bottes','chausse','soleret','jambière','jambiere','grève','greve','sandale','pied','pieds'] },
-    'Amulette':    null,
-    'Anneau':      null,
-    'Objet magique': null,
-  };
+  const slotDef = getEquipmentSlot(slot);
+  if (!slotDef) return;
+  const isWeapon = slotDef.kind === 'weapon';
 
   const inv = c.inventaire||[];
   const equippedEntries = Object.entries(c.equipement || {});
@@ -94,35 +79,7 @@ export function editEquipSlot(slot) {
       );
       if (alreadyEquippedElsewhere) return false;
 
-      const tpl = item.template || '';
-
-      if (isWeapon) {
-        // 1. Template explicite « arme » → OK
-        if (tpl === 'arme') return true;
-        // 2. Sinon, marqueurs d'arme présents peu importe le template :
-        //    degats / toucher / sousType / format weapon → c'est une arme.
-        //    (Permet de récupérer un Espadon depuis butin / cadeau MJ même
-        //    si le template enregistré côté boutique n'était pas 'arme'.)
-        if (item.degats || item.toucher || item.sousType ||
-            (item.format && WEAPON_FORMATS.has(item.format))) return true;
-        return false;
-      }
-
-      const armureRule = SLOT_ARMURE[slot];
-      if (armureRule !== undefined) {
-        if (armureRule === null) {
-          return item.slotBijou === slot;
-        }
-        // Source de vérité : slotArmure (posé à l'achat / template armure).
-        if (item.slotArmure) {
-          return item.slotArmure === armureRule.slot;
-        }
-        // Repli legacy (objets sans slotArmure) : mots-clés SPÉCIFIQUES au slot.
-        const t = (item.type||'').toLowerCase();
-        return armureRule.keywords.some(k => t.includes(k));
-      }
-
-      return false;
+      return equipmentSlotAcceptsItem(slotDef, item);
     });
 
   const invOptions = compatibles.map(({ item, invIndex }) => {
@@ -134,13 +91,13 @@ export function editEquipSlot(slot) {
   }).join('');
 
   const hasCompat = compatibles.length > 0;
-  const isBijou = ['Amulette','Anneau','Objet magique'].includes(slot);
+  const isBijou = slotDef.kind === 'accessory';
 
   // Aperçu inventaire-only pour armures & bijoux : l'objet équipé est lu depuis l'inventaire,
   // plus de saisie manuelle pour ces slots. Les armes (Main…) gardent leur logique meta.
   const equippedHasItem = !!equipped?.nom;
 
-  openModal(`${isWeapon?'⚔️':isBijou?'💍':'🛡️'} Équiper — ${slot}`, `
+  openModal(`${slotDef.icon || (isWeapon?'⚔️':isBijou?'💍':'🛡️')} Équiper — ${slotDef.label}`, `
     ${hasCompat
       ? `<div class="form-group">
           <label>Choisir depuis l'inventaire <span style="font-size:0.72rem;color:var(--text-dim)">· équipe immédiatement</span></label>
@@ -212,7 +169,7 @@ export function previewEquipFromInv(val, slot) {
   const item = compat?.item || compat;
   if (!item) return;
 
-  const isWeapon = slot.startsWith('Main');
+  const isWeapon = getEquipmentSlot(slot)?.kind === 'weapon';
   if (isWeapon) {
     const inferredStat = item.statAttaque || item.toucherStat ||
       (item.format?.includes('Mag.')  ? 'intelligence' :
@@ -267,9 +224,7 @@ export async function saveEquipSlot(slot) {
   const c = STATE.activeChar; if(!c) return;
   const equip = c.equipement||{};
   const meta = _equipSelectedMeta || {};
-  const isBijou = ['Amulette','Anneau','Objet magique'].includes(slot);
-
-  if (slot.startsWith('Main')) {
+  if (getEquipmentSlot(slot)?.kind === 'weapon') {
     equip[slot] = {
       nom:           meta.nom           || '',
       degats:        meta.degats        || '',

@@ -1544,6 +1544,10 @@ function _vttActBarCat(srcId, cat) {
 function _vttAimOpt(srcId, idx) {
   const opt = _atkOptsCache[`${srcId}__`]?.[+idx];
   if (!opt) return;
+  if ((opt.cooldownRemaining || 0) > 0) {
+    showNotif(`Sort en recharge (${opt.cooldownRemaining} tour${opt.cooldownRemaining > 1 ? 's' : ''}).`, 'warning');
+    return;
+  }
   closeModalDirect();
   if (opt.targetSelf) { _resolveAim(srcId, srcId, opt); return; }  // potions/buffs perso : direct
   // Sort de zone (ou invocation, zone min 1×1) : pas besoin de viser une cible →
@@ -2192,6 +2196,31 @@ const _tokenAttackDistance = (src, tgt, portee = null) => {
  */
 function _vttSpellMods(s) {
   if (!s) return null;
+  if (s.designMode === 'classic') {
+    const stateId = s.classicStateId || s.enchantEtatId || s.afflictionEtatId || null;
+    if (!stateId) return null;
+    const friendly = s.classicTarget === 'ally' || s.classicTarget === 'self';
+    return {
+      concentration: null,
+      enchantEtatId: friendly ? stateId : null,
+      enchantEtatIds: friendly ? [stateId] : [],
+      enchantStatePower: 0,
+      enchantStateAmplification: 0,
+      enchantStateChance: 0,
+      affliction: friendly ? null : {
+        slot: 'torse',
+        mode: 'etat',
+        effect: s.effet || '',
+        element: s.noyauTypeId || null,
+        dd: Math.max(1, parseInt(s.classicStateDC) || 11),
+        nbAff: 1,
+        nbP: 0,
+        dotFormula: '',
+        etatId: stateId,
+        saveStat: s.classicStateSaveStat || s.afflictionSaveStat || 'sagesse',
+      },
+    };
+  }
   const runes = s.runes || [];
   const counts = {};
   runes.forEach(r => { counts[r] = (counts[r] || 0) + 1; });
@@ -2509,6 +2538,34 @@ async function _vttSpendSpellPm(src, opt) {
       vttControlTokenId: src.id,
     });
   }
+}
+
+function _vttCooldownRemaining(token, opt) {
+  if (!VS.session?.combat?.active || !opt?.cooldownTurns || !opt?.cooldownKey) return 0;
+  const round = Math.max(0, parseInt(VS.session?.combat?.round) || 0);
+  const readyRound = parseInt(token?.spellCooldowns?.[opt.cooldownKey]) || 0;
+  return Math.max(0, readyRound - round);
+}
+
+function _withSpellCooldown(token, opt) {
+  if (opt) opt.cooldownRemaining = _vttCooldownRemaining(token, opt);
+  return opt;
+}
+
+function _vttCooldownPatch(token, opt) {
+  if (!VS.session?.combat?.active || !opt?.cooldownTurns || !opt?.cooldownKey) return null;
+  const round = Math.max(0, parseInt(VS.session?.combat?.round) || 0);
+  return {
+    ...(token?.spellCooldowns || {}),
+    [opt.cooldownKey]: round + Math.max(1, parseInt(opt.cooldownTurns) || 1),
+  };
+}
+
+async function _vttStartSpellCooldown(token, opt) {
+  const spellCooldowns = _vttCooldownPatch(token, opt);
+  if (!spellCooldowns || !token?.id) return;
+  token.spellCooldowns = spellCooldowns;
+  await updateDoc(_tokRef(token.id), { spellCooldowns }).catch(() => {});
 }
 
 // Vrai si la case (col,row) pour un token de dimensions dim recouvre un autre token.
@@ -3057,7 +3114,7 @@ function _buildSpellOption(s, ctx) {
                    && runes.filter(r => r === 'Invocation').length === 0;
   let zoneW = (_isDepl || _enchActive) ? 0 : (s.zoneW || 0);
   let zoneH = (_isDepl || _enchActive) ? 0 : (s.zoneH || 0);
-  let zoneShape = 'rect';   // 'rect' | 'cross' (combo Amp+Disp uniquement)
+  let zoneShape = ['cross', 'diamond'].includes(s.zoneShape) ? s.zoneShape : 'rect';
   // Miroir EXACT de _calcSortZone (spells-calc) : Amp seul → ligne 3N×1 ;
   // combo Amp+Disp → Amplification = HAUTEUR, Dispersion = LARGEUR (4N−1 par axe),
   // forme rectangle/carré ou croix selon s.zoneShape. 1 case par unité (pas de conversion mètres).
@@ -3097,6 +3154,14 @@ function _buildSpellOption(s, ctx) {
     id, sortIdx, spellId, portee,
     pmCost, basePm, pmRaw, pmSetDelta,
     nbCibles, zoneW, zoneH, zoneShape, mods, actionType,
+    sortDuree: _sortDureeVtt(s),
+    classicDuration: s.designMode === 'classic' ? _sortDureeVtt(s) : null,
+    cooldownTurns: Math.max(0, parseInt(s.cooldownTurns) || 0),
+    cooldownKey: spellId || id || null,
+    friendlyOnly: s.designMode === 'classic' && s.classicTarget === 'ally',
+    hostileOnly: s.designMode === 'classic' && s.classicTarget === 'enemy',
+    targetSelf: !!s.targetSelf || (s.designMode === 'classic' && s.classicTarget === 'self'),
+    actionDescription: s.designMode === 'classic' ? (s.effet || '') : '',
     mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
     ...extras,
   };
@@ -3128,10 +3193,13 @@ function _buildSpellOption(s, ctx) {
   }
 
   const _enchBuffNoImpact = !!mods?.enchantToucher || !!mods?.enchantMove;
-  const isEnchantOnly = _enchBuffNoImpact || (enchantOnlyAlsoEtat
+  const _classicHasPrimary = s.designMode === 'classic'
+    && ((s.classicEffect === 'damage' && !!String(s.degats || '').trim())
+      || (s.classicEffect === 'heal' && !!String(s.soin || '').trim()));
+  const isEnchantOnly = !_classicHasPrimary && (_enchBuffNoImpact || (enchantOnlyAlsoEtat
     ? (!!mods?.enchantArmeDmg || !!mods?.enchantEtatId) && !((s.degats || '').trim())
-    : ( !!mods?.enchantArmeDmg && !((s.degats || '').trim())));
-  const isAfflictionOnly = !!mods?.affliction;
+    : ( !!mods?.enchantArmeDmg && !((s.degats || '').trim()))));
+  const isAfflictionOnly = !!mods?.affliction && !_classicHasPrimary;
 
   if (isEnchantOnly) {
     const enchMode  = s.enchantMode || 'dmg';
@@ -3220,7 +3288,8 @@ function _buildSpellOption(s, ctx) {
     && (s.runes || []).includes('Amplification')
     && s.ampMode !== 'deplacement'
     && !(s.runes || []).includes('Protection');
-  if (types.includes('defensif') && (protMode === 'soin' || isAmpSupportHeal)) {
+  const isClassicHeal = s.designMode === 'classic' && s.classicEffect === 'heal' && !!String(s.soin || '').trim();
+  if (types.includes('defensif') && (isClassicHeal || protMode === 'soin' || isAmpSupportHeal)) {
     const soinFormula = _vttSortSoinFormula(s, c);
     const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(soinFormula);
     // Stat de soin : override > auto (magique → stat arme magique ou Int ; physique → Con)
@@ -3514,7 +3583,7 @@ function _buildAttackOptions(t) {
                     ? s.pmOverride : (parseInt(s.pm) || 0);
       const cout  = Math.max(0, pmRaw);
 
-      options.push(_buildSpellOption(s, {
+      options.push(_withSpellCooldown(t, _buildSpellOption(s, {
         id:    `beast_act_${actIdx}`,
         sortIdx: `b${actIdx}`,
         label: s.nom || `Action ${actIdx+1}`,
@@ -3524,7 +3593,7 @@ function _buildAttackOptions(t) {
         fallbackTouchStat: bStatKey, fallbackDmgStat: bStatKey,
         touchSetBonus: 0,
         enchantOnlyAlsoEtat: true,
-      }));
+      })));
     });
   }
 
@@ -3684,7 +3753,7 @@ function _buildAttackOptions(t) {
       const sortCat  = s.catId ? sortCats.find(ct => ct.id === s.catId) : null;
       const catMeta  = { catId: s.catId || null, catLabel: sortCat?.nom || null, catColor: sortCat?.couleur || null };
 
-      options.push(_buildSpellOption(s, {
+      options.push(_withSpellCooldown(t, _buildSpellOption(s, {
         id: `sort_${idx}`, sortIdx: idx, spellId: s.id || null, label: s.nom || `Sort ${idx+1}`,
         c,
         portee: baseRange,
@@ -3694,7 +3763,7 @@ function _buildAttackOptions(t) {
         touchSetBonus: wSetBonus,
         enchantOnlyAlsoEtat: true,
         extras: catMeta,
-      }));
+      })));
     });
   }
 
@@ -3748,7 +3817,7 @@ function _buildAttackOptions(t) {
         const labelBase = s.nom || `Action ${actIdx+1}`;
         const fullLabel = `${item.nom || 'Objet'} — ${labelBase}`;
 
-        options.push(_buildSpellOption(s, {
+        options.push(_withSpellCooldown(t, _buildSpellOption(s, {
           id: `itemact_${invIdx}_${actIdx}`,
           sortIdx: `i${invIdx}_${actIdx}`,
           label: fullLabel,
@@ -3761,7 +3830,7 @@ function _buildAttackOptions(t) {
           // (pas enchantEtatId). Préservé pour rétrocompat.
           enchantOnlyAlsoEtat: false,
           extras: { _itemAction: itemMeta },
-        }));
+        })));
       });
     });
   }
@@ -3892,13 +3961,16 @@ function _vttSpellPills(o) {
   const isEnchant = !!o.isEnchant;
   if (o.actionType === 'bonus')         pills.push(_vttAoptPill('action-bonus', `💫 Action Bonus`));
   else if (o.actionType === 'reaction') pills.push(_vttAoptPill('action-reaction', `⚡ Réaction`));
+  if (o.cooldownRemaining > 0) pills.push(_vttAoptPill('cooldown', `⏳ Recharge ${o.cooldownRemaining} tour${o.cooldownRemaining > 1 ? 's' : ''}`));
+  else if (o.cooldownTurns > 0) pills.push(_vttAoptPill('cooldown ready', `↻ Recharge ${o.cooldownTurns} tour${o.cooldownTurns > 1 ? 's' : ''}`));
   if (!targetSelf) pills.push(_vttAoptPill('range', `🎯 ${o.portee}c`));
   const isFriendly = isEnchant || isHeal || o.isRegen || o.friendlyOnly;
-  const isHostile  = !!o.isAffliction;
+  const isHostile  = !!o.isAffliction || !!o.hostileOnly;
   if (targetSelf) {
     pills.push(_vttAoptPill('targets self', `🧍 Sur soi`));
   } else if (o.zoneW > 0 || o.zoneH > 0) {
-    pills.push(_vttAoptPill('zone', `${o.zoneShape === 'cross' ? '✚' : '📐'} ${o.zoneW||o.zoneH}×${o.zoneH||o.zoneW}c`));
+    const zoneIcon = o.zoneShape === 'cross' ? '✚' : o.zoneShape === 'diamond' ? '◇' : '📐';
+    pills.push(_vttAoptPill('zone', `${zoneIcon} ${o.zoneW||o.zoneH}×${o.zoneH||o.zoneW}c`));
   } else if ((o.nbCibles || 1) > 1) {
     const lbl = isFriendly ? 'alliés' : isHostile ? 'ennemis' : 'cibles';
     pills.push(_vttAoptPill('targets', `👥 ${o.nbCibles} ${lbl}`));
@@ -3990,6 +4062,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
     ? options
     : options.filter(o => {
         if (o.friendlyOnly && tgt.type === 'enemy') return false;
+        if (o.hostileOnly && tgt.type !== 'enemy') return false;
         return o.targetSelf || _tokenAttackDistance(src, tgt, o.portee) <= o.portee;
       });
   if (!noTgt) {
@@ -4045,6 +4118,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   const _optBtn = (o, i) => {
     const dist     = noTgt ? null : _tokenAttackDistance(src, tgt, o.portee);
     const canHit   = noTgt ? true : dist <= o.portee;
+    const onCooldown = (o.cooldownRemaining || 0) > 0;
     const isHeal   = !!o.isHeal;
     const isUtil   = !!(o.isCaSort || o.isUtil);
     const stack    = o._itemAction?.stackCount > 1 && o._itemAction?.consommable
@@ -4121,15 +4195,16 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       : o.sortIdx !== undefined ? 'is-spell'
       : o.isDeplacement ? 'is-move'
       : 'is-weapon';
-    const cardState = noTgt ? 'is-aim' : canHit ? 'is-ready' : 'is-oor';
-    const cardHint = noTgt ? 'Choisir puis viser'
+    const cardState = onCooldown ? 'is-cooldown' : noTgt ? 'is-aim' : canHit ? 'is-ready' : 'is-oor';
+    const cardHint = onCooldown ? `Recharge ${o.cooldownRemaining}t`
+      : noTgt ? 'Choisir puis viser'
       : canHit ? 'Lancer'
       : 'Hors portée';
 
     // Carte d'action — présentation identique aux cartes de sort de la fiche perso
     // (.cs-spellcard, scope .cs-v3), cliquable pour lancer.
     return `
-      <button type="button" class="cs-spellcard vtt-castcard ${cardKind} ${cardState}" style="--type-col:${accentCol}" data-vtt-fn="${noTgt?'_vttAimOpt':'_vttPickOpt'}" data-vtt-args="${noTgt?`${srcId}|${i}`:`${srcId}|${tgtId}|${i}`}">
+      <button type="button" class="cs-spellcard vtt-castcard ${cardKind} ${cardState}" style="--type-col:${accentCol}" data-vtt-fn="${noTgt?'_vttAimOpt':'_vttPickOpt'}" data-vtt-args="${noTgt?`${srcId}|${i}`:`${srcId}|${tgtId}|${i}`}" ${onCooldown ? 'disabled aria-disabled="true"' : ''}>
         <header class="cs-spellcard-head">
           <span class="cs-spellcard-icon">${o.icon}</span>
           <div class="cs-spellcard-id">
@@ -4460,6 +4535,10 @@ function _vttAtkSetElement(elemId) {
 function _vttPickOpt(srcId, tgtId, idx) {
   const opt = _atkOptsCache[`${srcId}__${tgtId}`]?.[+idx];
   if (!opt) return;
+  if ((opt.cooldownRemaining || 0) > 0) {
+    showNotif(`Sort en recharge (${opt.cooldownRemaining} tour${opt.cooldownRemaining > 1 ? 's' : ''}).`, 'warning');
+    return;
+  }
   closeModalDirect();
 
   // Auto-cible le lanceur si l'action est marquée "sur soi" (potions, buffs perso, etc.)
@@ -4753,7 +4832,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
       ${(opt.zoneW>0||opt.zoneH>0) || (opt.nbCibles||1) > 1 || opt.pmCost > 0 || (opt.pmCost===0 && opt.basePm>0) ? `
       <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.7rem">
         ${(opt.zoneW>0||opt.zoneH>0)?`<span style="font-size:.7rem;color:#f97316;display:flex;align-items:center;gap:.25rem">
-          ${opt.zoneShape === 'cross' ? '✚' : '📐'} Zone <strong style="color:#fde047">${opt.zoneShape === 'cross' ? 'croix ' : ''}${opt.zoneW}×${opt.zoneH} cases</strong>
+          ${opt.zoneShape === 'cross' ? '✚' : opt.zoneShape === 'diamond' ? '◇' : '📐'} Zone <strong style="color:#fde047">${opt.zoneShape === 'cross' ? 'croix ' : opt.zoneShape === 'diamond' ? 'cercle ' : ''}${opt.zoneW}×${opt.zoneH} cases</strong>
           · <strong>${allTargets?.length||1}</strong> cible${(allTargets?.length||1)>1?'s':''}
           ${opt.pmCost===0&&opt.basePm>0?'<span style="color:#22c38e;font-size:.65rem">(PM déjà payé)</span>':''}
         </span>`:''}
@@ -5061,6 +5140,12 @@ function _buildZonePreview() {
       fill: _fill, stroke: _stroke, strokeWidth: 3, dash: [10, 5], listening: false }));
     group.add(new K.Rect({ x: -wPx / 2, y: -CELL / 2, width: wPx, height: CELL,
       fill: _fill, stroke: _stroke, strokeWidth: 3, dash: [10, 5], listening: false }));
+  } else if (_zoneCtx.opt?.zoneShape === 'diamond') {
+    group.add(new K.Line({
+      points: [0, -hPx / 2, wPx / 2, 0, 0, hPx / 2, -wPx / 2, 0],
+      closed: true,
+      fill: _fill, stroke: _stroke, strokeWidth: 3, dash: [10, 5], listening: false,
+    }));
   } else {
     group.add(new K.Rect({
       x: -wPx / 2, y: -hPx / 2,
@@ -5169,7 +5254,7 @@ async function _vttPlaceSpellZone(srcId, opt, { x, y, wPx, hPx }) {
   const data = {
     type: 'spellzone',
     x, y, w: wPx, h: hPx,
-    shape: opt.zoneShape === 'cross' ? 'cross' : 'rect',
+    shape: ['cross', 'diamond'].includes(opt.zoneShape) ? opt.zoneShape : 'rect',
     color, fill: true, strokeWidth: 2,
     label: opt.label || 'Zone', icon: opt.icon || '✨',
     totalDuration: dur, startRound: round, expiresAtRound,
@@ -5225,13 +5310,21 @@ async function _zoneValidate() {
   const x1 = x - wPx / 2, x2 = x + wPx / 2;
   const y1 = y - hPx / 2, y2 = y + hPx / 2;
   const _isCross = opt.zoneShape === 'cross';
+  const _isDiamond = opt.zoneShape === 'diamond';
   const targets = Object.values(VS.tokens)
     .filter(e => {
       if (!e.data || e.data.pageId !== VS.activePage?.id) return false;
       if (e.data.id === srcId) return false;   // le lanceur ne subit JAMAIS sa propre zone
       if (!e.data.visible && !STATE.isAdmin) return false;
+      if (opt.friendlyOnly && e.data.type === 'enemy') return false;
+      if (opt.hostileOnly && e.data.type !== 'enemy') return false;
       const tc = _tokenCenter(e.data);
       if (tc.x < x1 || tc.x > x2 || tc.y < y1 || tc.y > y2) return false;
+      if (_isDiamond) {
+        const rx = Math.max(1, wPx / 2);
+        const ry = Math.max(1, hPx / 2);
+        return Math.abs(tc.x - x) / rx + Math.abs(tc.y - y) / ry <= 1;
+      }
       if (!_isCross) return true;
       return Math.abs(tc.x - x) <= CELL / 2 || Math.abs(tc.y - y) <= CELL / 2;
     })
@@ -5279,6 +5372,7 @@ async function _zoneValidate() {
     const _snap = _captureUndoSnapshot(srcId, []);
     if (_zid) _snap.createdAnnots = [_zid];
     if (srcD) await _vttSpendSpellPm(srcD, opt);
+    if (srcD) await _vttStartSpellCooldown(srcD, opt);
     await _vttApplyCasterConcentration(srcId, opt);
     await addDoc(_logCol(), {
       type: 'cast', undo: _snap,
@@ -5668,7 +5762,13 @@ async function _vttRollAttack() {
       : opt.actionType === 'reaction'
         ? 'reactionThisTurn'
         : 'attackedThisTurn';
-    await updateDoc(_tokRef(src.id), { [field]: true }).catch(()=>{});
+    const patch = { [field]: true };
+    const spellCooldowns = _vttCooldownPatch(src, opt);
+    if (spellCooldowns) {
+      patch.spellCooldowns = spellCooldowns;
+      src.spellCooldowns = spellCooldowns;
+    }
+    await updateDoc(_tokRef(src.id), patch).catch(()=>{});
   };
   const _cleanup = () => {
     VS.tokens[srcId]?.shape?.findOne('.atk')?.visible(false);

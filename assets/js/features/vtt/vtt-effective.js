@@ -12,6 +12,7 @@ import { STATE } from '../../core/state.js';
 import { _norm } from '../../shared/html.js';
 import { getMod, calcPVMax, calcPMMax, calcCA, calcVitesse } from '../../shared/char-stats.js';
 import { getMainWeapon, getArmorSetData } from '../../shared/equipment-utils.js';
+import { getEquipmentSlots, getPrimaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { _numOr, _activeConditionsOf, _npcStatMod, _npcCombat } from './vtt.js'; // circ. (runtime)
 
 /** Somme des bonus de toucher actifs (enchantement mode Toucher) sur un token.
@@ -98,10 +99,10 @@ export function _rangeVal(value, fallback = 1) {
 
 export function _vttEquippedWeapons(c) {
   const equip = c?.equipement || {};
-  const entries = ['Main principale', 'Main secondaire']
+  const entries = getEquipmentSlots().filter(slot => slot.kind === 'weapon').map(slot => slot.id)
     .map(slot => ({ slot, item: equip[slot] || null }))
     .filter(entry => entry.item?.nom);
-  return entries.length ? entries : [{ slot: 'Main principale', item: getMainWeapon(c) }];
+  return entries.length ? entries : [{ slot: getPrimaryWeaponSlotId(), item: getMainWeapon(c) }];
 }
 
 export function _vttBestWeaponRange(c) {

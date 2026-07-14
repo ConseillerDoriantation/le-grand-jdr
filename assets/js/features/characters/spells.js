@@ -10,6 +10,7 @@ import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, getMatrixSuggestions, getComboConfig } from '../../shared/spell-matrices.js';
 import { getArmorSetData, getMainWeapon } from './data.js';
+import { getSpellSystemMode, loadSpellSystem } from '../../shared/spell-system.js';
 import { makeSortable } from '../../shared/sortable-helper.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
@@ -66,6 +67,7 @@ let _sortEditWasOk = false;          // édite-t-on un sort DÉJÀ validé, côt
 let _sortEditContentBaseline = null; // signature de CONTENU jouable au mount (≠ nom/note/cat)
 let _spellRenderCachesReady = false;
 let _spellRenderCachesPromise = null;
+let _classicDamageTypes = [];
 
 // Le grimoire a besoin des matrices dès son premier rendu (pas seulement quand
 // la forge s'ouvre), sinon les noyaux par id restent temporairement introuvables.
@@ -150,6 +152,7 @@ function _effectiveSortPm(s, pmDelta = 0) {
 // Empreinte de fabrication : noyaux + multiset de runes. Deux sorts portant la
 // même empreinte partagent la même recette, même si leur nom ou leur catégorie diffère.
 function _spellRecipeKey(s) {
+  if (s?.designMode === 'classic') return `classic|${s?.id || s?.nom || ''}`;
   const runeCounts = new Map();
   _displayRunes(s?.runes || []).forEach(r => runeCounts.set(r, (runeCounts.get(r) || 0) + 1));
   const runes = [...runeCounts.entries()]
@@ -178,6 +181,7 @@ function _spellRank(s, pmDelta = 0) {
 }
 
 function _spellCompareRuneText(s) {
+  if (s?.designMode === 'classic') return 'Création classique';
   const counts = new Map();
   _displayRunes(s?.runes || []).forEach(r => counts.set(r, (counts.get(r) || 0) + 1));
   return [...counts.entries()]
@@ -211,9 +215,9 @@ function _renderSpellInspector(allSorts, pmDelta, c, canEdit) {
       <strong>${_effectiveSortPm(s, pmDelta)}<small>PM</small></strong>
     </header>
     <div class="cs-spellinspector-recipe">
-      <span>COMPOSITION</span>
-      <div class="cs-spellinspector-noyaux">${noyaux.length ? noyaux.map(t => `<b style="--c:${t.color || '#888'}">${t.icon || '✦'} ${_esc(t.label || t.nom || 'Noyau')}</b>`).join('') : '<b class="is-missing">⚠ Noyau à définir</b>'}</div>
-      <div class="cs-spellinspector-runes">${runeHtml || '<span class="is-empty">Aucune rune</span>'}</div>
+      <span>${s.designMode === 'classic' ? 'SYSTÈME' : 'COMPOSITION'}</span>
+      <div class="cs-spellinspector-noyaux">${noyaux.length ? noyaux.map(t => `<b style="--c:${t.color || '#888'}">${t.icon || '✦'} ${_esc(t.label || t.nom || 'Noyau')}</b>`).join('') : s.designMode === 'classic' ? '<b>◇ Neutre</b>' : '<b class="is-missing">⚠ Noyau à définir</b>'}</div>
+      <div class="cs-spellinspector-runes">${s.designMode === 'classic' ? '<span class="is-empty">✦ Sort classique</span>' : (runeHtml || '<span class="is-empty">Aucune rune</span>')}</div>
     </div>
     <div class="cs-spellinspector-state">
       <span><small>STATUT</small><b>${_sortValidationState(s)==='ok'?'✓ Validé':_sortValidationState(s)==='no'?'✕ À corriger':'⌛ En attente'}</b></span>
@@ -1312,6 +1316,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   const isCompared = _sortsCompareKeys.includes(compareKey);
   const isInspected = _sortsInspectorKey === compareKey;
   const runesAll = s.runes || [];
+  const isClassic = s.designMode === 'classic';
   const types    = _getSortTypes(s);
   const { action, concentration } = _getSortAction(s);
   const nbCibles = _calcSortCibles(s);
@@ -1361,8 +1366,26 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   if ((types.includes('offensif') || isLaceration) && !suppressImpactDmg) {
     const degBase = _calcSortDegats(s, c);
     let val = degBase;
-    if (statMod !== 0) val += ` · ${statLbl}${statModS}`;
+    if (!isClassic && statMod !== 0) val += ` · ${statLbl}${statModS}`;
     chips.push({ icon:'⚔️', val, color:'#ff6b6b', lbl:'Dégâts infligés' });
+  }
+
+  if (isClassic && s.classicEffect === 'heal' && s.soin) {
+    chips.push({ icon:'💚', val:_calcSortSoin(s, c), color:'#22c38e', lbl:'Soin' });
+  } else if (isClassic && s.classicEffect === 'utility' && s.effet) {
+    chips.push({ icon:'✨', val:s.effet, color:'#b47fff', lbl:'Effet utilitaire' });
+  }
+
+  if (isClassic && s.classicStateId) {
+    const condition = _conditionsLibCache?.find(item => item.id === s.classicStateId);
+    chips.push({
+      icon: condition?.icon || '◈',
+      val: condition?.label || 'État',
+      color: s.classicTarget === 'enemy' ? '#ef4444' : '#e8b84b',
+      lbl: s.classicTarget === 'enemy'
+        ? `Jet de sauvegarde DD ${parseInt(s.classicStateDC) || 11}`
+        : 'État appliqué à la cible',
+    });
   }
 
   // ── 2. Affliction : mode décide (DoT / État / Lacération) ──
@@ -1457,6 +1480,9 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
     const duree = _calcSortDuree(s);
     if (duree) chips.push({ icon:'⏱️', val:`${duree}t`, color:'#9ca3af', lbl:'Durée de l\'effet (tours)', dim:true });
   }
+  if (isClassic && (parseInt(s.cooldownTurns) || 0) > 0) {
+    chips.push({ icon:'↻', val:`${parseInt(s.cooldownTurns)}t`, color:'#fbbf24', lbl:'Temps de recharge en combat', dim:true });
+  }
 
   // ── 6. Pill JS sauvegarde pour Affliction (info utile au combat) ──
   // (Pas de JS en branche Lacération : c'est une frappe + réduction de CA.)
@@ -1530,7 +1556,16 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
     ${runeMetas.map(rm => `<span class="cs-runechip" style="--c:${rm.color}" title="${_esc(rm.nom)} — ${_esc(rm.effet)}">${rm.icon} ${_esc(rm.nom)}${(counts[rm.nom]>1)?` ×${counts[rm.nom]}`:''}</span>`).join('')}
   </div>` : '';
 
-  const recipeStrip = `<div class="cs-spellrecipe ${recipeRepeats > 1 ? 'has-twin' : ''}" aria-label="Composition du sort">
+  const recipeStrip = isClassic ? `<div class="cs-spellrecipe" aria-label="Paramètres du sort classique">
+    <span class="cs-spellrecipe-label">CLASSIQUE</span>
+    <div class="cs-spellrecipe-flow">
+      <span class="cs-spellrecipe-noyaux">
+        ${nts.length ? nts.map(t => `<span style="--c:${t.color || '#888'}" title="Élément ${_esc(t.label || '')}">${t.icon || '✦'}<i>${_esc(t.label || 'Élément')}</i></span>`).join('') : '<span class="is-empty"><i>◇</i><b>Neutre</b></span>'}
+      </span>
+      <span class="cs-spellrecipe-arrow">›</span>
+      <span class="cs-spellrecipe-runes"><span style="--c:#5bc0eb"><i>✦</i><b>${s.classicEffect === 'damage' ? 'Dégâts' : s.classicEffect === 'heal' ? 'Soin' : 'Utilitaire'}</b></span></span>
+    </div>
+  </div>` : `<div class="cs-spellrecipe ${recipeRepeats > 1 ? 'has-twin' : ''}" aria-label="Composition du sort">
     <span class="cs-spellrecipe-label">RECETTE</span>
     <div class="cs-spellrecipe-flow">
       <span class="cs-spellrecipe-noyaux">
@@ -2185,15 +2220,305 @@ function _renderPmBreakdown() {
     .join('<span class="cs-pmbd-plus">+</span>');
 }
 
+function _classicInt(id, fallback = 0, min = 0, max = 999) {
+  const value = parseInt(document.getElementById(id)?.value);
+  return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+}
+
+function _isClassicFormulaValid(value) {
+  return /^\s*(?:\d+d\d+|\d+)(?:\s*[+-]\s*\d+)?\s*$/i.test(String(value || ''));
+}
+
+function _classicSelectOptions(options, selected) {
+  return options.map(([value, label]) => `<option value="${_esc(value)}" ${value === selected ? 'selected' : ''}>${_esc(label)}</option>`).join('');
+}
+
+function _buildClassicSortFromDOM(idx = -1, prevList = []) {
+  const prev = idx >= 0 ? (prevList[idx] || {}) : {};
+  const effectKind = document.getElementById('s-classic-effect')?.value || 'damage';
+  const target = document.getElementById('s-classic-target')?.value || (effectKind === 'heal' ? 'ally' : 'enemy');
+  const stateEnabled = !!document.getElementById('s-classic-state-enabled')?.checked;
+  const stateId = stateEnabled ? (document.getElementById('s-classic-state')?.value || '') : '';
+  const stateMeta = stateId ? _conditionsLibCache?.find(condition => condition.id === stateId) : null;
+  const zoneEnabled = target !== 'self' && !!document.getElementById('s-classic-zone-enabled')?.checked;
+  const elementId = document.getElementById('s-classic-element')?.value || '';
+  const element = _classicDamageTypes.find(type => type.id === elementId);
+  const duration = _classicInt('s-classic-duration', 0, 0, 99);
+  const pm = _classicInt('s-classic-pm', 0, 0, 99);
+  const types = effectKind === 'damage' ? ['offensif']
+    : effectKind === 'heal' ? ['defensif'] : ['utilitaire'];
+  const hostileState = stateId && target === 'enemy';
+  const friendlyState = stateId && (target === 'ally' || target === 'self');
+  const previousValidation = _sortValidationState(prev);
+  const validation = STATE.isAdmin
+    ? (document.getElementById('s-classic-validation')?.value || 'pending')
+    : previousValidation;
+  return {
+    designMode: 'classic',
+    classicFormulaFinal: true,
+    icon: (document.getElementById('s-classic-icon')?.value || '').trim() || '✦',
+    nom: (document.getElementById('s-nom')?.value || '').trim(),
+    catId: document.getElementById('s-classic-catid')?.value || '',
+    effet: (document.getElementById('s-classic-description')?.value || '').trim(),
+    types,
+    typeSoin: effectKind === 'heal',
+    classicEffect: effectKind,
+    classicTarget: target,
+    targetSelf: target === 'self',
+    degats: effectKind === 'damage' ? (document.getElementById('s-classic-formula')?.value || '').trim() : '',
+    soin: effectKind === 'heal' ? (document.getElementById('s-classic-formula')?.value || '').trim() : '',
+    protectionMode: effectKind === 'heal' ? 'soin' : 'ca',
+    toucherStat: effectKind === 'damage' ? (document.getElementById('s-classic-touch-stat')?.value || '') : 'none',
+    degatsStat: effectKind === 'utility'
+      ? 'none'
+      : (document.getElementById('s-classic-effect-stat')?.value || 'none'),
+    noyau: element ? `${element.label} ${element.icon || ''}`.trim() : '',
+    noyauTypeId: elementId || null,
+    noyauTypeIds: elementId ? [elementId] : [],
+    runes: [],
+    actionMode: document.getElementById('s-classic-action')?.value || 'action',
+    pm,
+    pmOverride: null,
+    portee: target === 'self' ? 0 : _classicInt('s-classic-range', 1, 0, 99),
+    zoneW: zoneEnabled ? _classicInt('s-classic-zone-w', 1, 1, 50) : null,
+    zoneH: zoneEnabled ? _classicInt('s-classic-zone-h', 1, 1, 50) : null,
+    zoneShape: zoneEnabled ? (document.getElementById('s-classic-zone-shape')?.value || 'rect') : 'rect',
+    dureeBase: duration,
+    classicDuration: duration,
+    cooldownTurns: _classicInt('s-classic-cooldown', 0, 0, 99),
+    classicStateId: stateId || null,
+    classicStateLabel: stateId ? (stateMeta?.label || prev.classicStateLabel || stateId) : null,
+    classicStateIcon: stateId ? (stateMeta?.icon || prev.classicStateIcon || '') : null,
+    classicStateDC: hostileState ? _classicInt('s-classic-state-dc', 11, 1, 40) : null,
+    classicStateSaveStat: hostileState ? (document.getElementById('s-classic-state-stat')?.value || 'sagesse') : null,
+    enchantMode: friendlyState ? 'etat' : null,
+    enchantEtatId: friendlyState ? stateId : null,
+    enchantEtatIds: friendlyState ? [stateId] : [],
+    afflictionMode: hostileState ? 'etat' : null,
+    afflictionEtatId: hostileState ? stateId : null,
+    afflictionSaveStat: hostileState ? (document.getElementById('s-classic-state-stat')?.value || 'sagesse') : '',
+    mjAutoHit: !!document.getElementById('s-classic-auto-hit')?.checked,
+    mjAlwaysMax: STATE.isAdmin
+      ? !!document.getElementById('s-classic-always-max')?.checked
+      : !!prev.mjAlwaysMax,
+    mjNotes: STATE.isAdmin
+      ? (document.getElementById('s-classic-mj-notes')?.value || '').trim()
+      : (prev.mjNotes || ''),
+    mjValidation: validation,
+    mjValidated: validation === 'ok',
+    actif: idx >= 0 ? !!prev.actif : false,
+    id: prev.id || null,
+  };
+}
+
+function _refreshClassicSpellForm() {
+  const effect = document.getElementById('s-classic-effect')?.value || 'damage';
+  const target = document.getElementById('s-classic-target')?.value || 'enemy';
+  const stateOn = !!document.getElementById('s-classic-state-enabled')?.checked;
+  const zoneOn = target !== 'self' && !!document.getElementById('s-classic-zone-enabled')?.checked;
+  const formula = document.getElementById('s-classic-formula-group');
+  if (formula) formula.style.display = effect === 'utility' ? 'none' : '';
+  const effectStat = document.getElementById('s-classic-effect-stat-group');
+  if (effectStat) effectStat.style.display = effect === 'utility' ? 'none' : '';
+  const formulaLabel = document.getElementById('s-classic-formula-label');
+  if (formulaLabel) formulaLabel.textContent = effect === 'heal' ? 'Formule de soin' : 'Formule de dégâts';
+  const touch = document.getElementById('s-classic-touch-group');
+  if (touch) touch.style.display = effect === 'damage' ? '' : 'none';
+  const state = document.getElementById('s-classic-state-fields');
+  if (state) state.style.display = stateOn ? '' : 'none';
+  const save = document.getElementById('s-classic-save-fields');
+  if (save) save.style.display = stateOn && target === 'enemy' ? '' : 'none';
+  const zone = document.getElementById('s-classic-zone-fields');
+  if (zone) zone.style.display = zoneOn ? '' : 'none';
+  const zoneToggle = document.getElementById('s-classic-zone-toggle');
+  if (zoneToggle) zoneToggle.style.display = target === 'self' ? 'none' : '';
+  const range = document.getElementById('s-classic-range');
+  if (range) range.disabled = target === 'self';
+
+  const preview = document.getElementById('s-classic-preview');
+  if (preview) {
+    const spell = _buildClassicSortFromDOM();
+    const condition = spell.classicStateId ? _conditionsLibCache?.find(item => item.id === spell.classicStateId) : null;
+    const action = { action:'Action', action_bonus:'Action Bonus', reaction:'Réaction' }[spell.actionMode] || 'Action';
+    const effectText = spell.classicEffect === 'damage' ? `⚔️ ${spell.degats || 'Formule manquante'}`
+      : spell.classicEffect === 'heal' ? `💚 ${spell.soin || 'Formule manquante'}`
+        : `✨ ${spell.effet || 'Effet utilitaire'}`;
+    const zoneText = spell.zoneW && spell.zoneH
+      ? ` · zone ${spell.zoneW}×${spell.zoneH}` : '';
+    preview.innerHTML = `
+      <div><strong>${_esc(action)}</strong><span>${spell.pm} PM</span></div>
+      <p>${_esc(effectText)}</p>
+      <small>Portée ${spell.portee} case${spell.portee > 1 ? 's' : ''}${_esc(zoneText)}${spell.classicDuration ? ` · ${spell.classicDuration} tour${spell.classicDuration > 1 ? 's' : ''}` : ' · instantané'}</small>
+      ${condition ? `<small>${_esc(`${condition.icon || ''} ${condition.label}`)}${spell.classicStateDC ? ` · JS ${_esc(spell.classicStateSaveStat)} DD ${spell.classicStateDC}` : ''}</small>` : ''}
+      ${spell.cooldownTurns ? `<small>Recharge : ${spell.cooldownTurns} tour${spell.cooldownTurns > 1 ? 's' : ''}</small>` : ''}`;
+  }
+}
+
+async function _populateClassicStateSelect(savedId = '', { preserveUnsupported = true } = {}) {
+  const select = document.getElementById('s-classic-state');
+  if (!select) return;
+  const conditions = await _loadAllConditions();
+  const target = document.getElementById('s-classic-target')?.value || 'enemy';
+  const usage = target === 'ally' || target === 'self' ? 'enchantment' : 'affliction';
+  const filtered = target === 'any'
+    ? conditions
+    : conditions.filter(condition => _conditionSupportsSpellUsage(condition, usage)
+      || (preserveUnsupported && condition.id === savedId));
+  select.innerHTML = '<option value="">— Choisir un état —</option>'
+    + filtered.map(condition => `<option value="${_esc(condition.id)}" ${condition.id === savedId ? 'selected' : ''}>${_esc(`${condition.icon || ''} ${condition.label}`)}</option>`).join('');
+  _refreshClassicSpellForm();
+}
+
+async function _classicTargetChanged() {
+  const savedId = document.getElementById('s-classic-state')?.value || '';
+  await _populateClassicStateSelect(savedId, { preserveUnsupported: false });
+  _refreshClassicSpellForm();
+}
+
+function _classicStateChanged() {
+  const id = document.getElementById('s-classic-state')?.value || '';
+  const condition = id ? _conditionsLibCache?.find(item => item.id === id) : null;
+  if (condition && document.getElementById('s-classic-target')?.value === 'enemy') {
+    const stat = document.getElementById('s-classic-state-stat');
+    const dc = document.getElementById('s-classic-state-dc');
+    if (stat && condition.defaultSaveStat) stat.value = condition.defaultSaveStat;
+    if (dc) dc.value = condition.defaultDC ?? 11;
+  }
+  _refreshClassicSpellForm();
+}
+
+async function _openClassicSortModal(idx, s, allTypes) {
+  _classicDamageTypes = Array.isArray(allTypes) ? allTypes : [];
+  const effect = s?.classicEffect || (s?.soin ? 'heal' : s?.degats ? 'damage' : 'utility');
+  const target = s?.classicTarget || (effect === 'heal' ? 'ally' : 'enemy');
+  const hasZone = (parseInt(s?.zoneW) || 0) > 0 || (parseInt(s?.zoneH) || 0) > 0;
+  const hasState = !!(s?.classicStateId || s?.enchantEtatId || s?.afflictionEtatId);
+  const stateId = s?.classicStateId || s?.enchantEtatId || s?.afflictionEtatId || '';
+  const selectedElement = s?.noyauTypeId || '';
+  const charForAccess = _modalChar();
+  const charElements = new Set(charForAccess?.elements || []);
+  let elements = STATE.isAdmin || !charForAccess
+    ? [...allTypes]
+    : allTypes.filter(type => !type.isMagic || charElements.has(type.id));
+  const legacyElement = selectedElement ? allTypes.find(type => type.id === selectedElement) : null;
+  if (legacyElement && !elements.some(type => type.id === selectedElement)) elements = [...elements, legacyElement];
+  const formula = effect === 'heal' ? (s?.soin || '') : (s?.degats || '');
+  const validation = _sortValidationState(s);
+  const _modalOpen = _itemEditCtx ? pushModal : openModal;
+  _modalOpen('', `
+    <div class="sh-admin-modal is-spell is-classic-spell" id="s-classic-form">
+      <div class="sh-admin-head">
+        <div class="sh-admin-head-ico">✦</div>
+        <div class="sh-admin-head-title">
+          <h2>${idx >= 0 ? 'Modifier le sort' : 'Nouveau sort classique'}</h2>
+          <small>Définis directement le résultat en jeu, sans noyaux ni runes d’effet.</small>
+        </div>
+        <button class="sh-admin-close" data-action="closeModalDirect" aria-label="Fermer">×</button>
+      </div>
+      <div class="sh-admin-body">
+        <div class="classic-spell-layout">
+          <main class="classic-spell-main">
+            <section class="classic-spell-section">
+              <div class="classic-spell-section-head"><span>1</span><div><b>Identité</b><small>Ce que les joueurs reconnaîtront immédiatement.</small></div></div>
+              <div class="classic-spell-identity">
+                <label><span>Icône</span><input id="s-classic-icon" class="input-field" maxlength="4" value="${_esc(s?.icon || '✦')}"></label>
+                <label class="is-wide"><span>Nom du sort</span><input id="s-nom" class="input-field" value="${_esc(s?.nom || '')}" placeholder="Boule de feu, Mot de soin…"></label>
+                <label><span>Catégorie</span><select id="s-classic-catid" class="input-field"><option value="">— Aucune —</option>${(_modalChar()?.sort_cats || []).map(cat => `<option value="${_esc(cat.id)}" ${s?.catId === cat.id ? 'selected' : ''}>${_esc(cat.nom)}</option>`).join('')}</select></label>
+              </div>
+              <label><span>Description / effet libre</span><textarea id="s-classic-description" class="input-field" rows="2" placeholder="Décris le résultat, l’apparence ou les conditions particulières…">${_esc(s?.effet || '')}</textarea></label>
+            </section>
+
+            <section class="classic-spell-section">
+              <div class="classic-spell-section-head"><span>2</span><div><b>Effet principal</b><small>La formule saisie est finale : aucun bonus de rune ne sera ajouté.</small></div></div>
+              <div class="classic-spell-grid">
+                <label><span>Nature</span><select id="s-classic-effect" class="input-field" data-change="_classicRefresh">${_classicSelectOptions([['damage','Dégâts'],['heal','Soin'],['utility','Utilitaire']], effect)}</select></label>
+                <label><span>Élément</span><select id="s-classic-element" class="input-field"><option value="">— Neutre / aucun —</option>${elements.map(type => `<option value="${_esc(type.id)}" ${type.id === selectedElement ? 'selected' : ''}>${_esc(`${type.icon || ''} ${type.label}`)}</option>`).join('')}</select></label>
+                <label id="s-classic-formula-group" class="classic-spell-span-2"><span id="s-classic-formula-label">Formule</span><input id="s-classic-formula" class="input-field" value="${_esc(formula)}" placeholder="Ex. 2d8+3 ou 12"></label>
+                <label id="s-classic-effect-stat-group"><span>Bonus de caractéristique</span><select id="s-classic-effect-stat" class="input-field">${_SPELL_STAT_OPTIONS(s?.degatsStat || 'none')}</select></label>
+                <label id="s-classic-touch-group"><span>Jet d’attaque</span><select id="s-classic-touch-stat" class="input-field">${_SPELL_STAT_OPTIONS(s?.toucherStat)}</select></label>
+                <label class="classic-spell-check"><input type="checkbox" id="s-classic-auto-hit" ${s?.mjAutoHit ? 'checked' : ''}><span><b>Réussite automatique</b><small>Le sort ne demande aucun jet de toucher.</small></span></label>
+              </div>
+            </section>
+
+            <section class="classic-spell-section">
+              <div class="classic-spell-section-head"><span>3</span><div><b>Ciblage et zone</b><small>La zone sera placée dans la portée du sort sur la table virtuelle.</small></div></div>
+              <div class="classic-spell-grid">
+                <label><span>Cible</span><select id="s-classic-target" class="input-field" data-change="_classicTargetChanged">${_classicSelectOptions([['enemy','Ennemi'],['ally','Allié'],['self','Lanceur'],['any','Toute cible']], target)}</select></label>
+                <label><span>Portée</span><div class="classic-spell-unit"><input type="number" id="s-classic-range" class="input-field" min="0" max="99" value="${s?.portee ?? 1}"><span>cases</span></div></label>
+                <label id="s-classic-zone-toggle" class="classic-spell-check classic-spell-span-2"><input type="checkbox" id="s-classic-zone-enabled" data-change="_classicRefresh" ${hasZone ? 'checked' : ''}><span><b>Sort de zone plaçable</b><small>Toutes les cibles compatibles dans la zone subissent l’effet.</small></span></label>
+                <div id="s-classic-zone-fields" class="classic-spell-zone classic-spell-span-2">
+                  <label><span>Largeur</span><input type="number" id="s-classic-zone-w" class="input-field" min="1" max="50" value="${parseInt(s?.zoneW) || 3}"></label>
+                  <label><span>Hauteur</span><input type="number" id="s-classic-zone-h" class="input-field" min="1" max="50" value="${parseInt(s?.zoneH) || 3}"></label>
+                  <label><span>Forme</span><select id="s-classic-zone-shape" class="input-field">${_classicSelectOptions([['rect','Rectangle / carré'],['cross','Croix'],['diamond','Cercle sur la grille']], s?.zoneShape || 'rect')}</select></label>
+                </div>
+              </div>
+            </section>
+
+            <section class="classic-spell-section">
+              <div class="classic-spell-section-head"><span>4</span><div><b>État appliqué</b><small>Optionnel, en plus de l’effet principal.</small></div></div>
+              <label class="classic-spell-check"><input type="checkbox" id="s-classic-state-enabled" data-change="_classicRefresh" ${hasState ? 'checked' : ''}><span><b>Appliquer un état</b><small>Buff sur un allié, affliction avec sauvegarde sur un ennemi.</small></span></label>
+              <div id="s-classic-state-fields" class="classic-spell-grid classic-spell-subfields">
+                <label class="classic-spell-span-2"><span>État</span><select id="s-classic-state" class="input-field" data-change="_classicStateChanged"><option value="">Chargement…</option></select></label>
+                <div id="s-classic-save-fields" class="classic-spell-zone classic-spell-span-2">
+                  <label><span>Sauvegarde</span><select id="s-classic-state-stat" class="input-field">${_classicSelectOptions([['force','Force'],['dexterite','Dextérité'],['constitution','Constitution'],['intelligence','Intelligence'],['sagesse','Sagesse'],['charisme','Charisme']], s?.classicStateSaveStat || s?.afflictionSaveStat || 'sagesse')}</select></label>
+                  <label><span>DD</span><input type="number" id="s-classic-state-dc" class="input-field" min="1" max="40" value="${s?.classicStateDC || 11}"></label>
+                </div>
+              </div>
+            </section>
+          </main>
+
+          <aside class="classic-spell-side">
+            <section class="classic-spell-preview" id="s-classic-preview"></section>
+            <section class="classic-spell-section">
+              <div class="classic-spell-section-head"><span>5</span><div><b>Coût et rythme</b><small>Valeurs directement utilisées dans le VTT.</small></div></div>
+              <div class="classic-spell-grid is-compact">
+                <label><span>Coût</span><div class="classic-spell-unit"><input type="number" id="s-classic-pm" class="input-field" min="0" max="99" value="${s?.pmOverride ?? s?.pm ?? 0}"><span>PM</span></div></label>
+                <label><span>Action</span><select id="s-classic-action" class="input-field">${_classicSelectOptions([['action','Action'],['action_bonus','Action Bonus'],['reaction','Réaction']], s?.actionMode || 'action')}</select></label>
+                <label><span>Durée</span><div class="classic-spell-unit"><input type="number" id="s-classic-duration" class="input-field" min="0" max="99" value="${s?.classicDuration ?? s?.dureeBase ?? 0}"><span>tours</span></div></label>
+                <label><span>Recharge</span><div class="classic-spell-unit"><input type="number" id="s-classic-cooldown" class="input-field" min="0" max="99" value="${s?.cooldownTurns ?? 0}"><span>tours</span></div></label>
+              </div>
+            </section>
+            <section class="classic-spell-section classic-spell-mj">
+              <div class="classic-spell-section-head"><span>MJ</span><div><b>Validation</b><small>Équilibrage et exceptions.</small></div></div>
+              ${STATE.isAdmin ? `
+                <label><span>Statut</span><select id="s-classic-validation" class="input-field">${_classicSelectOptions([['ok','Validé'],['pending','En attente'],['no','Refusé']], validation)}</select></label>
+                <label class="classic-spell-check"><input type="checkbox" id="s-classic-always-max" ${s?.mjAlwaysMax ? 'checked' : ''}><span><b>Toujours valeur maximum</b><small>Les dés prennent leur valeur maximale.</small></span></label>
+                <label><span>Notes MJ</span><textarea id="s-classic-mj-notes" class="input-field" rows="2">${_esc(s?.mjNotes || '')}</textarea></label>`
+              : `<div class="classic-spell-readonly">${validation === 'ok' ? '✓ Validé' : validation === 'no' ? '✕ Refusé' : '◷ En attente de validation'}</div>`}
+            </section>
+          </aside>
+        </div>
+      </div>
+      <div class="sh-admin-footer">
+        <button class="btn btn-outline btn-sm" data-action="closeModalDirect">Annuler</button>
+        <button class="btn btn-gold btn-sm" data-action="saveSort" data-idx="${idx}">Enregistrer le sort</button>
+      </div>
+    </div>`);
+
+  const modal = document.querySelector('.modal');
+  modal?.addEventListener('input', _refreshClassicSpellForm);
+  modal?.addEventListener('change', _refreshClassicSpellForm);
+  await _populateClassicStateSelect(stateId);
+  _refreshClassicSpellForm();
+  if (idx < 0) document.getElementById('s-nom')?.focus();
+  if (!_itemEditCtx) {
+    _sortModalBaseline = JSON.stringify(_buildClassicSortFromDOM());
+    setModalCloseGuard(_sortModalCloseGuard);
+  }
+}
+
 export async function openSortModal(idx, s) {
   _rezPrevLit = new Set();   // réinitialise l'anim d'ignition à chaque ouverture
   // Bandeau avant/après : uniquement quand un JOUEUR édite un sort DÉJÀ validé
   // (l'admin pilote la validation lui-même → pas de retour automatique en attente).
   _sortEditWasOk = idx >= 0 && !STATE.isAdmin && _sortValidationState(s) === 'ok';
   _sortEditContentBaseline = null;   // capturé au mount (après stabilisation des dropdowns)
-  const [allTypes, matrices] = await Promise.all([loadDamageTypes(), loadSpellMatrices()]);
+  const [allTypes, matrices] = await Promise.all([loadDamageTypes(), loadSpellMatrices(), loadSpellSystem()]);
   // Caches globaux utilisés par _getSortCA, _calcSortSoin, suggestions...
   setSpellCaches(matrices, allTypes);
+  const useClassic = s?.designMode === 'classic'
+    || (idx < 0 && getSpellSystemMode() === 'classic');
+  if (useClassic) return _openClassicSortModal(idx, s || {}, allTypes);
   // Tous les types de dégâts restent la source globale des noyaux.
   // L'accès joueur aux noyaux magiques est ensuite filtré par personnage (c.elements).
   const RUNES = RUNE_META; // alias local pour compat ascendante
@@ -4093,7 +4418,11 @@ function _buildSortFromDOM() {
 // va se fermer (✕ barre, ✕ forge, Échap, clic overlay), jamais lorsqu'une couche
 // de confirmation empilée est simplement annulée. Désarmé au save et au discard.
 function _snapshotSortModal() {
-  try { return JSON.stringify(_buildSortFromDOM()); } catch { return null; }
+  try {
+    return document.getElementById('s-classic-form')
+      ? JSON.stringify(_buildClassicSortFromDOM())
+      : JSON.stringify(_buildSortFromDOM());
+  } catch { return null; }
 }
 function _sortModalIsDirty() {
   const b = _sortModalBaseline;
@@ -4350,7 +4679,119 @@ function _sanitizeAbsorbedComboFields(s) {
 // Anti double-clic : une sauvegarde de sort à la fois. L'état local n'est modifié
 // QU'APRÈS le succès Firestore (plus de doublon possible sur retry après échec).
 let _sortSaving = false;
+
+async function _saveClassicSort(idx, btn = null) {
+  if (_sortSaving) return false;
+  if (!_requireSortName()) return false;
+
+  const effect = document.getElementById('s-classic-effect')?.value || 'damage';
+  const formula = document.getElementById('s-classic-formula')?.value?.trim() || '';
+  if (effect !== 'utility' && !formula) {
+    showNotif(`Indique une formule de ${effect === 'heal' ? 'soin' : 'dégâts'}.`, 'warning');
+    document.getElementById('s-classic-formula')?.focus();
+    return false;
+  }
+  if (effect !== 'utility' && !_isClassicFormulaValid(formula)) {
+    showNotif('Formule invalide. Utilise par exemple 2d8+3 ou 12.', 'warning');
+    document.getElementById('s-classic-formula')?.focus();
+    return false;
+  }
+  if (document.getElementById('s-classic-state-enabled')?.checked
+      && !document.getElementById('s-classic-state')?.value) {
+    showNotif('Choisis l\'état appliqué par le sort.', 'warning');
+    document.getElementById('s-classic-state')?.focus();
+    return false;
+  }
+  if (document.getElementById('s-classic-state-enabled')?.checked
+      && document.getElementById('s-classic-target')?.value === 'any') {
+    showNotif('Pour un état, précise si la cible est un ennemi, un allié ou le lanceur.', 'warning');
+    document.getElementById('s-classic-target')?.focus();
+    return false;
+  }
+
+  _sortSaving = true;
+  const saveBtn = btn || document.querySelector('[data-action="saveSort"]');
+  saveBtn?.setAttribute('disabled', '');
+  saveBtn?.setAttribute('aria-busy', 'true');
+  try {
+    if (_itemEditCtx) {
+      const { item, idx: itemIdx, onSave } = _itemEditCtx;
+      const actions = Array.isArray(item.actions) ? [...item.actions] : [];
+      const spell = _buildClassicSortFromDOM(itemIdx, actions);
+      spell.id = spell.id || (itemIdx >= 0 ? actions[itemIdx]?.id : null) || `a${Date.now().toString(36)}`;
+      if (itemIdx >= 0) actions[itemIdx] = { ...actions[itemIdx], ...spell };
+      else actions.push(spell);
+      item.actions = actions;
+      _itemEditCtx = null;
+      _sortModalBaseline = null;
+      clearModalCloseGuard();
+      closeModal();
+      await onSave(item);
+      showNotif(`Action enregistrée · ${spell.pm} PM`, 'success');
+      return true;
+    }
+
+    const character = STATE.activeChar;
+    if (!character) return false;
+    const spells = Array.isArray(character.deck_sorts) ? character.deck_sorts : [];
+    const previous = idx >= 0 ? spells[idx] : null;
+    const previousValidation = _sortValidationState(previous);
+    const spell = _buildClassicSortFromDOM(idx, spells);
+    spell.id = spell.id || spellUid();
+
+    if (!STATE.isAdmin && previous
+        && (previousValidation === 'ok' || previousValidation === 'no')
+        && _sortContentSig(previous) !== _sortContentSig(spell)) {
+      spell.mjValidation = 'pending';
+      spell.mjValidated = false;
+      spell.actif = false;
+      showNotif(previousValidation === 'ok'
+        ? 'Sort modifié : il repasse en validation et sort du Deck.'
+        : 'Sort corrigé : il est renvoyé en validation au MJ.', 'info');
+    }
+
+    const isNew = idx < 0;
+    const next = [...spells];
+    if (idx >= 0) next[idx] = spell;
+    else next.push(spell);
+    ensureSpellIds(next);
+    if (!(await trySave('characters', character.id, { deck_sorts: next }))) return false;
+
+    character.deck_sorts = next;
+    if (charSession.getCurrentChar()?.id === character.id) {
+      charSession.set(character, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+    }
+    if (STATE.activeChar?.id === character.id) STATE.activeChar = character;
+    _sortModalBaseline = null;
+    clearModalCloseGuard();
+    closeModal();
+    showNotif(`Sort enregistré · ${spell.pm} PM`, 'success');
+
+    if (isNew) {
+      _sortsSearch = '';
+      _sortsTypeFilter = '';
+      _sortsRuneFilter = '';
+      _sortsNoyauFilter = '';
+      _sortsPmFilter = '';
+      _sortsValidationFilter = '';
+      const catId = spell.catId && (character.sort_cats || []).some(cat => cat.id === spell.catId)
+        ? spell.catId : '__none';
+      _sortsCatCollapsed = { ...(_sortsCatCollapsed || {}), [catId]: false };
+    }
+    _renderSpellsTab(character);
+    return true;
+  } catch (error) {
+    notifySaveError(error);
+    return false;
+  } finally {
+    _sortSaving = false;
+    saveBtn?.removeAttribute('disabled');
+    saveBtn?.removeAttribute('aria-busy');
+  }
+}
+
 export async function saveSort(idx, btn = null) {
+  if (document.getElementById('s-classic-form')) return _saveClassicSort(idx, btn);
   // Si on édite une action d'item (depuis le shop), on aiguille vers le bon save
   if (_itemEditCtx) return _saveItemSpell();
   if (_sortSaving) return;
@@ -4636,6 +5077,9 @@ async function _saveItemSpell() {
 // (le check _itemEditCtx est désormais en tête de saveSort — pas de monkey-patch)
 
 registerActions({
+  _classicRefresh:        ()    => _refreshClassicSpellForm(),
+  _classicTargetChanged:  ()    => _classicTargetChanged(),
+  _classicStateChanged:   ()    => _classicStateChanged(),
   _sortsSearchInput:      (el)  => _sortsSetSearch(el.value),
   _refreshAutoValChips:   ()    => _refreshAutoValChips(),
   _csMjValToggle:         (el)  => el.closest('.cs-mj-validation')?.classList.toggle('is-on', el.checked),

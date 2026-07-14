@@ -40,3 +40,13 @@ test('calcSpellDuration : dureeBase explicite (≥ 2) sert de base', () => {
   // dureeBase < 2 est ignoré (retombe sur 2)
   assert.equal(calcSpellDuration(sort([], { dureeBase: 1 })), 2);
 });
+
+test('les sorts classiques gardent une cible logique même avec une zone', () => {
+  assert.equal(calcSpellTargets({ designMode: 'classic', zoneW: 5, zoneH: 3 }), 1);
+});
+
+test('les sorts classiques utilisent leur durée exacte, instantané inclus', () => {
+  assert.equal(calcSpellDuration({ designMode: 'classic', classicDuration: 0 }), 0);
+  assert.equal(calcSpellDuration({ designMode: 'classic', classicDuration: 3 }), 3);
+  assert.equal(calcSpellDuration({ designMode: 'classic', dureeBase: 6 }), 6);
+});

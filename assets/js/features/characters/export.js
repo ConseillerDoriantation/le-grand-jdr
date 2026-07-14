@@ -14,6 +14,7 @@ import {
 } from '../../shared/char-stats.js';
 import { getArmorSetData, getMainWeapon, getWeaponToucherParts, getWeaponDegatsParts } from './data.js';
 import { spellVM } from './spells-calc.js';
+import { getEquipmentSlots, getPrimaryWeaponSlotId } from '../../shared/equipment-slots.js';
 
 const EXPORT_VERSION = 1;
 
@@ -144,11 +145,13 @@ function _buildStats(c) {
 
 function _buildWeapons(c) {
   const equip = c.equipement || {};
-  const slots = ['Main principale', 'Main secondaire'];
-  const items = slots.map(slot => {
+  const slots = getEquipmentSlots().filter(slot => slot.kind === 'weapon');
+  const primarySlot = getPrimaryWeaponSlotId();
+  const items = slots.map(slotDef => {
+    const slot = slotDef.id;
     const raw = equip[slot] || {};
-    const item = (slot === 'Main principale' && !raw.nom) ? getMainWeapon(c) : raw;
-    return { slot, item };
+    const item = (slot === primarySlot && !raw.nom) ? getMainWeapon(c) : raw;
+    return { slot: slotDef.label, item };
   }).filter(({ item }) => item && item.nom);
 
   if (!items.length) return '';
@@ -180,9 +183,9 @@ function _buildWeapons(c) {
 
 function _buildArmor(c) {
   const equip = c.equipement || {};
-  const slots = ['Casque', 'Torse', 'Pieds', 'Bouclier', 'Cape', 'Accessoire 1', 'Accessoire 2'];
+  const slots = getEquipmentSlots().filter(slot => slot.kind !== 'weapon');
   const items = slots
-    .map(slot => ({ slot, item: equip[slot] }))
+    .map(slot => ({ slot: slot.label, item: equip[slot.id] }))
     .filter(({ item }) => item && item.nom);
 
   const setData = getArmorSetData(c);

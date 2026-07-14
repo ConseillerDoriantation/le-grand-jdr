@@ -4,6 +4,7 @@
 // vtt.js, artisan.js, shop.js peuvent importer ici sans couplage cross-features.
 // ══════════════════════════════════════════════════════════════════════════════
 import { computeEquipStatsBonus, getItemEffectText, getItemStatBonus } from './char-stats.js';
+import { getArmorSetSlotIds, getPrimaryWeaponSlotId } from './equipment-slots.js';
 
 // ── Arme par défaut (mains nues) ──────────────────────────────────────────────
 export const DEFAULT_UNARMED = Object.freeze({
@@ -18,7 +19,7 @@ export const DEFAULT_UNARMED = Object.freeze({
 
 /** Retourne l'arme principale équipée, ou un objet "Poings" virtuel si vide. */
 export function getMainWeapon(c) {
-  const mainP = c?.equipement?.['Main principale'];
+  const mainP = c?.equipement?.[getPrimaryWeaponSlotId()];
   if (mainP && mainP.nom) return mainP;
   return { ...DEFAULT_UNARMED };
 }
@@ -308,7 +309,7 @@ export function getArmorSetChipText(setData = {}) {
 
 export function getArmorSetData(c = {}) {
   const equip = c?.equipement || {};
-  const trackedSlots = ['Tête', 'Torse', 'Bottes'];
+  const trackedSlots = getArmorSetSlotIds();
   const slots = trackedSlots.map(slot => {
     const item = equip?.[slot] || {};
     return { slot, item, type: normalizeArmorType(item?.typeArmure), equipped: Boolean(item?.nom) };
@@ -317,14 +318,16 @@ export function getArmorSetData(c = {}) {
   const equippedCount = slots.filter(entry => entry.equipped).length;
   const typedSlots    = slots.filter(entry => entry.type);
   const counts        = typedSlots.reduce((acc, entry) => { acc[entry.type] = (acc[entry.type] || 0) + 1; return acc; }, {});
-  const fullType      = ['Légère', 'Intermédiaire', 'Lourde'].find(type => counts[type] === trackedSlots.length) || '';
+  const fullType      = trackedSlots.length === 3
+    ? (['Légère', 'Intermédiaire', 'Lourde'].find(type => counts[type] === trackedSlots.length) || '')
+    : '';
   const activeEffect  = fullType ? getArmorTypeMeta(fullType) : null;
   const mixed         = !fullType && Object.keys(counts).length > 1;
   const dominantType  = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
 
   return {
     trackedSlots, slots, counts, equippedCount, fullType, dominantType, mixed,
-    isComplete: equippedCount === trackedSlots.length,
+    isComplete: trackedSlots.length === 3 && equippedCount === trackedSlots.length,
     isActive:   Boolean(activeEffect),
     activeEffect,
     modifiers:  activeEffect?.modifiers || { spellPmDelta: 0, toucherBonus: 0, damageReduction: 0 },

@@ -6,6 +6,7 @@
 
 // ── Métadonnées des statistiques ──────────────────────────────────────────────
 import { evaluateCharacterFormula, getCharacterRules } from './character-rules.js';
+import { getArmorTorsoSlotId, getSecondaryWeaponSlotId } from './equipment-slots.js';
 
 export const STAT_META = [
   { key: 'force',        label: 'Force',        color: '#ff6b6b' },
@@ -177,7 +178,7 @@ export function modStr(m) {
  */
 export function calcCA(c) {
   const equip = c?.equipement || {};
-  const torse = equip['Torse']?.typeArmure || '';
+  const torse = equip[getArmorTorsoSlotId()]?.typeArmure || '';
   const rules = getCharacterRules();
   let caBase = rules.armorBases.none;
   if (torse === 'Légère')        caBase = rules.armorBases.light;
@@ -188,7 +189,7 @@ export function calcCA(c) {
   // Bonus dérivé "caBonus" configurable par item (boucliers, amulettes, etc.)
   const caBonusDerived = computeEquipDerivedBonus(equip).caBonus;
   // Fallback rétrocompat : un bouclier sans caBonus défini garde +2
-  const mainS  = equip['Main secondaire'];
+  const mainS  = equip[getSecondaryWeaponSlotId()];
   const stypeS = (mainS?.sousType || mainS?.nom || '').toLowerCase();
   const isShield = stypeS.includes('bouclier') || stypeS.includes('shield');
   const shieldHasOwnBonus = Number.isFinite(parseInt(mainS?.caBonus)) && parseInt(mainS.caBonus) !== 0;

@@ -8,6 +8,8 @@ import { loadSpellMatrices, saveSpellMatrices, SPELL_SLOTS, SLOT_LABELS, COMBO_I
 import { _esc, modStr } from '../../shared/html.js';
 import { computeEquipStatsBonus, getMod, getMaitriseBonus as _getMaitriseBonus } from '../../shared/char-stats.js';
 import { openCharacterRulesAdmin } from '../../shared/character-rules.js';
+import { openEquipmentSlotsAdmin, getPrimaryWeaponSlotId, getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
+import { openSpellSystemAdmin } from '../../shared/spell-system.js';
 import { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, resolveEquippedInventoryIndices, _getBaseTraits, _getAddedTraits, _getTraits } from '../../shared/equipment-utils.js';
 export { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, _getBaseTraits, _getAddedTraits, _getTraits };
 
@@ -96,8 +98,8 @@ export function _defaultCombatStyles() {
  */
 export function detectCombatStyle(c, styles) {
   const equip  = c?.equipement || {};
-  const mainP  = equip['Main principale'];
-  const mainS  = equip['Main secondaire'];
+  const mainP  = equip[getPrimaryWeaponSlotId()];
+  const mainS  = equip[getSecondaryWeaponSlotId()];
   const fmtP   = mainP?.format   || '';
   const fmtS   = mainS?.format   || '';
   const stypeS = (mainS?.sousType || mainS?.nom || '').toLowerCase();
@@ -961,6 +963,8 @@ registerActions({
   openDamageTypesAdmin:     ()    => openDamageTypesAdmin(),
   openSpellMatricesAdmin:   ()    => openSpellMatricesAdmin(),
   openCharacterRulesAdmin:  ()    => openCharacterRulesAdmin(),
+  openEquipmentSlotsAdmin:  ()    => openEquipmentSlotsAdmin(),
+  openSpellSystemAdmin:     ()    => openSpellSystemAdmin(),
   _addDmgType:              ()    => _addDmgType(),
   _deleteDmgType:           (btn) => _deleteDmgType(Number(btn.dataset.idx)),
   _switchSpellMatrixTab:    (btn) => _switchSpellMatrixTab(btn.dataset.tab),
