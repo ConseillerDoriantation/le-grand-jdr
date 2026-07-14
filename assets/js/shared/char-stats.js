@@ -5,6 +5,8 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 // ── Métadonnées des statistiques ──────────────────────────────────────────────
+import { evaluateCharacterFormula, getCharacterRules } from './character-rules.js';
+
 export const STAT_META = [
   { key: 'force',        label: 'Force',        color: '#ff6b6b' },
   { key: 'dexterite',    label: 'Dextérité',    color: '#22c38e' },
@@ -122,20 +124,46 @@ export function getItemStatBonus(item = {}, statOrStore = '') {
 // ── Calculs de base ───────────────────────────────────────────────────────────
 
 /**
- * Modificateur d'une stat pour un personnage (plafonné à score 22 → +6).
+ * Modificateur d'une stat selon les règles de l'aventure active.
  */
 export function getMod(c, key) {
   const base  = (c?.stats  || {})[key] || 8;
   const bonus = (c?.statsBonus || {})[key] || 0;
-  const total = Math.min(22, base + bonus);
-  return Math.floor((total - 10) / 2);
+  return getModFromScore(base + bonus);
 }
 
 /**
  * Même logique que getMod mais sans objet personnage (score brut).
  */
 export function getModFromScore(score) {
-  return Math.floor((Math.min(22, score) - 10) / 2);
+  const rule = getCharacterRules().modifier;
+  const numericScore = Number(score) || 0;
+  let result = evaluateCharacterFormula(
+    rule.formula,
+    { score: numericScore },
+    Math.floor((numericScore - 10) / 2)
+  );
+  if (rule.min != null) result = Math.max(Number(rule.min), result);
+  if (rule.max != null) result = Math.min(Number(rule.max), result);
+  return result;
+}
+
+function _characterFormulaStats(c = {}) {
+  const score = key => Number((c.stats || {})[key] || 8) + Number((c.statsBonus || {})[key] || 0);
+  return {
+    forceScore: score('force'),
+    dexScore: score('dexterite'),
+    conScore: score('constitution'),
+    intScore: score('intelligence'),
+    sagScore: score('sagesse'),
+    chaScore: score('charisme'),
+    forceMod: getMod(c, 'force'),
+    dexMod: getMod(c, 'dexterite'),
+    conMod: getMod(c, 'constitution'),
+    intMod: getMod(c, 'intelligence'),
+    sagMod: getMod(c, 'sagesse'),
+    chaMod: getMod(c, 'charisme'),
+  };
 }
 
 /** Formate un modificateur de stat en chaîne signée : +3, -1, +0. */
@@ -150,10 +178,11 @@ export function modStr(m) {
 export function calcCA(c) {
   const equip = c?.equipement || {};
   const torse = equip['Torse']?.typeArmure || '';
-  let caBase = 8;
-  if (torse === 'Légère')        caBase = 10;
-  else if (torse === 'Intermédiaire') caBase = 12;
-  else if (torse === 'Lourde')   caBase = 14;
+  const rules = getCharacterRules();
+  let caBase = rules.armorBases.none;
+  if (torse === 'Légère')        caBase = rules.armorBases.light;
+  else if (torse === 'Intermédiaire') caBase = rules.armorBases.medium;
+  else if (torse === 'Lourde')   caBase = rules.armorBases.heavy;
 
   const caEquip = Object.values(equip).reduce((s, it) => s + (it?.ca || 0), 0);
   // Bonus dérivé "caBonus" configurable par item (boucliers, amulettes, etc.)
@@ -165,28 +194,60 @@ export function calcCA(c) {
   const shieldHasOwnBonus = Number.isFinite(parseInt(mainS?.caBonus)) && parseInt(mainS.caBonus) !== 0;
   const bouclierFallback = (isShield && !shieldHasOwnBonus) ? 2 : 0;
 
-  return caBase + getMod(c, 'dexterite') + caEquip + caBonusDerived + bouclierFallback;
+  const formulaStats = _characterFormulaStats(c);
+  const dexMod = formulaStats.dexMod;
+  const armorDexMod = torse === 'Lourde' ? 0 : torse === 'Intermédiaire' ? Math.min(2, dexMod) : dexMod;
+  const fallback = caBase + dexMod + caEquip + caBonusDerived + bouclierFallback;
+  return evaluateCharacterFormula(rules.formulas.ca, {
+    ...formulaStats,
+    armorBase: caBase,
+    armorDexMod,
+    dexMod,
+    equipCA: caEquip,
+    equipBonus: caBonusDerived,
+    shieldBonus: bouclierFallback,
+    level: c?.niveau || 1,
+  }, fallback);
 }
 
 /** Vitesse de déplacement (base + bonus items équipés). */
 export function calcVitesse(c) {
-  const base = 3 + getMod(c, 'force');
+  const rules = getCharacterRules();
+  const formulaStats = _characterFormulaStats(c);
+  const forceMod = formulaStats.forceMod;
   const bonus = computeEquipDerivedBonus(c?.equipement).vitesseBonus;
-  return Math.max(0, base + bonus);
+  const fallback = 3 + forceMod + bonus;
+  return Math.max(0, evaluateCharacterFormula(rules.formulas.speed, {
+    ...formulaStats,
+    forceMod,
+    equipBonus: bonus,
+    level: c?.niveau || 1,
+  }, fallback));
 }
 
 /** Initiative (mod Dex + bonus items équipés). */
 export function calcInitiative(c) {
-  const base = getMod(c, 'dexterite');
+  const rules = getCharacterRules();
+  const formulaStats = _characterFormulaStats(c);
+  const dexMod = formulaStats.dexMod;
   const bonus = computeEquipDerivedBonus(c?.equipement).initiativeBonus;
-  return base + bonus;
+  const fallback = dexMod + bonus;
+  return evaluateCharacterFormula(rules.formulas.initiative, {
+    ...formulaStats,
+    dexMod,
+    equipBonus: bonus,
+    level: c?.niveau || 1,
+  }, fallback);
 }
 
 /** Capacité maximale du deck de sorts. */
 export function calcDeckMax(c) {
-  const modIn  = getMod(c, 'intelligence');
+  const rules  = getCharacterRules();
+  const formulaStats = _characterFormulaStats(c);
+  const modIn  = formulaStats.intMod;
   const niveau = c?.niveau || 1;
-  return 3 + Math.min(0, modIn) + Math.floor(Math.max(0, modIn) * Math.pow(Math.max(0, niveau - 1), 0.75));
+  const fallback = 3 + Math.min(0, modIn) + Math.floor(Math.max(0, modIn) * Math.pow(Math.max(0, niveau - 1), 0.75));
+  return evaluateCharacterFormula(rules.formulas.deck, { ...formulaStats, intMod: modIn, level: niveau }, fallback);
 }
 
 /**
@@ -196,22 +257,42 @@ export function calcDeckMax(c) {
  * Bonus items équipés : ajouté à la fin.
  */
 export function calcPVMax(c) {
-  const modCo = getMod(c, 'constitution');
+  const rules = getCharacterRules();
+  const formulaStats = _characterFormulaStats(c);
+  const modCo = formulaStats.conMod;
   const niv   = c?.niveau || 1;
   const progression = modCo > 0 ? Math.floor(modCo * (niv - 1)) : modCo;
   const equipBonus = computeEquipDerivedBonus(c?.equipement).pvMaxBonus;
-  return Math.max(1, (c?.pvBase || 10) + progression + equipBonus);
+  const pvBase = c?.pvBase || 10;
+  const fallback = pvBase + progression + equipBonus;
+  return Math.max(1, evaluateCharacterFormula(rules.formulas.pv, {
+    ...formulaStats,
+    pvBase,
+    conMod: modCo,
+    level: niv,
+    equipBonus,
+  }, fallback));
 }
 
 /**
  * PM maximum (même logique que PV avec Sagesse + bonus items équipés).
  */
 export function calcPMMax(c) {
-  const modSa = getMod(c, 'sagesse');
+  const rules = getCharacterRules();
+  const formulaStats = _characterFormulaStats(c);
+  const modSa = formulaStats.sagMod;
   const niv   = c?.niveau || 1;
   const progression = modSa > 0 ? Math.floor(modSa * (niv - 1)) : modSa;
   const equipBonus = computeEquipDerivedBonus(c?.equipement).pmMaxBonus;
-  return Math.max(0, (c?.pmBase || 10) + progression + equipBonus);
+  const pmBase = c?.pmBase || 10;
+  const fallback = pmBase + progression + equipBonus;
+  return Math.max(0, evaluateCharacterFormula(rules.formulas.pm, {
+    ...formulaStats,
+    pmBase,
+    sagMod: modSa,
+    level: niv,
+    equipBonus,
+  }, fallback));
 }
 
 /**
@@ -231,7 +312,12 @@ export function calcOr(c) {
  * Palier XP requis pour le niveau donné.
  */
 export function calcPalier(niveau) {
-  return 100 * niveau * niveau;
+  const level = Number(niveau) || 1;
+  return Math.max(0, evaluateCharacterFormula(
+    getCharacterRules().formulas.xp,
+    { level },
+    100 * level * level
+  ));
 }
 
 /** Pourcentage borné 0–100. */
