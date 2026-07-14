@@ -2794,6 +2794,75 @@ function _statsActor(t) {
   return { id: null, name: t?.name || '' };
 }
 
+function _hasStatsDelta(delta) {
+  return !!(delta?.chars && Object.keys(delta.chars).length);
+}
+
+function _castStatKinds(opt = {}) {
+  const mods = opt.mods || {};
+  const support = !!(
+    opt.isCaSort
+    || opt.isRegen
+    || opt.isEnchant
+    || mods.enchant
+    || mods.regeneration
+    || mods.enchantArmeDmg
+    || mods.enchantPieds
+    || mods.enchantGeneric
+    || mods.enchantEtatId
+    || mods.enchantToucher
+    || mods.enchantMove
+    || opt.enchantMode === 'etat'
+    || opt.enchantEtatId
+    || mods.rangeBuff
+    || mods.hot
+    || opt.category === 'support'
+  );
+  const affliction = !!(
+    opt.isAffliction
+    || mods.affliction
+    || mods.laceration
+    || opt.afflictionMode
+    || opt.afflictionEtatId
+  );
+  const tactical = support || affliction || !!(
+    opt.isInvocation
+    || mods.invocation
+    || mods.sentinelle
+    || mods.move
+    || mods.push
+    || mods.pull
+    || mods.zone
+    || opt.zoneW > 0
+    || opt.zoneH > 0
+  );
+  return { tactical, support, affliction };
+}
+
+function _buildCastStatsDelta(src, opt) {
+  const actor = _statsActor(src);
+  const delta = { chars: {} };
+  const isSpellLike = opt?.sortIdx !== undefined || !!opt?.spellId || !!opt?.isUtil || !!opt?.isCaSort || !!opt?.isHeal || !!opt?.isInvocation;
+  if (!actor.id || (!isSpellLike && !(opt?.pmCost > 0))) return delta;
+  const kinds = _castStatKinds(opt);
+  accCastDelta(delta, {
+    casterId: actor.id,
+    casterName: actor.name,
+    spellName: isSpellLike ? (opt.label || 'Sort') : null,
+    pm: opt.pmCost || 0,
+    tactical: kinds.tactical ? 1 : 0,
+    support: kinds.support ? 1 : 0,
+    affliction: kinds.affliction ? 1 : 0,
+  });
+  return delta;
+}
+
+function _applyCastStatsDelta(src, opt) {
+  const delta = _buildCastStatsDelta(src, opt);
+  if (_hasStatsDelta(delta)) applyStatsDelta(delta, +1);
+  return delta;
+}
+
 /**
  * Crée un token "convoqué" (sentinelle, arme invoquée, etc.) sur la page active.
  * - kind: 'sentinelle' | 'arme_invoquee'
@@ -2815,6 +2884,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
   // ── Invocation : résout la N-ième invocation choisie sur la bibliothèque du
   //    lanceur, applique base + bonus de runes, et RESTAURE les PV/PM persistants. ──
   if (kind === 'invocation') {
+    const ownerCharId = src.characterId || src.summonOwnerCharId || null;
     const mod = opt?.mods?.invocation || {};
     const idx = _zoneCtx?.invocationsDone || 0;   // quelle invocation on pose (0-based)
     const selIds = opt._invSelIds || null;        // créatures choisies au lancement
@@ -2824,7 +2894,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
     let restoreHp = null, restorePm = null;
 
     if (selIds && selIds.length) {
-      const c = src.characterId ? VS.characters[src.characterId] : null;
+      const c = ownerCharId ? VS.characters[ownerCharId] : null;
       const invDef = (c?.invocations || []).find(iv => iv.id === selIds[idx])
                   || (c?.invocations || []).find(iv => selIds.includes(iv.id));
       if (!invDef) return null;   // invocation supprimée de la bibliothèque
@@ -2860,9 +2930,9 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
       name: `🐾 ${name} de ${ownerName}`,
       type: 'npc',
       characterId: null, npcId: null, beastId: null,
-      ownerId: src.characterId ? (VS.characters[src.characterId]?.uid || STATE.user?.uid || null) : null,
+      ownerId: ownerCharId ? (VS.characters[ownerCharId]?.uid || STATE.user?.uid || null) : null,
       summonOwnerId: srcId,
-      summonOwnerCharId: src.characterId || null,
+      summonOwnerCharId: ownerCharId,
       summonKind: 'invocation',
       summonInvId,
       summonSortLabel: opt?.label || '',
@@ -3412,76 +3482,64 @@ function _buildAttackOptions(t) {
 
     // ── Invocation : ses actions (sorts connus) deviennent des attaques ──
     if (_isInvoc && Array.isArray(t.summonActions) && t.summonActions.length) {
-      // Perso "créature" virtuel : arme principale = l'attaque de l'invocation
-      // (base des dégâts), stats neutres → aucun modificateur parasite.
       const _cChar = {
+        id: `__summon_${t.id || 'token'}`,
+        nom: t.name || 'Invocation',
         stats: { force:10, dexterite:10, constitution:10, intelligence:10, sagesse:10, charisme:10 },
         statsBonus: {}, maitrises: {},
-        equipement: { 'Main principale': { nom: 'Attaque', degats: t.summonBaseAttack || t.attackDice || '1d4', statAttaque: 'force', isDefault: true } },
+        equipement: { 'Main principale': {
+          nom: 'Attaque',
+          degats: t.summonBaseAttack || t.attackDice || '1d4',
+          statAttaque: 'force',
+          toucherStat: 'force',
+          degatsStat: 'force',
+          portee: t.range || 1,
+          isDefault: true,
+        } },
+        sort_cats: [],
+        elements: [],
       };
-      // L'invocation profite du SET du lanceur : le set léger (spellPmDelta -2)
-      // réduit le coût en mana de ses sorts (payés par le lanceur).
       let _ownerSetPmDelta = 0;
       if (t.summonOwnerId) {
         const _ownerData = VS.tokens[t.summonOwnerId]?.data;
         const _ownerChar = _ownerData?.characterId ? VS.characters[_ownerData.characterId] : null;
         if (_ownerChar) _ownerSetPmDelta = getArmorSetData(_ownerChar).modifiers?.spellPmDelta || 0;
       }
+      const summonTouchBonus = Number.isFinite(parseInt(t.attack)) ? parseInt(t.attack) : 0;
       t.summonActions.forEach((a, ai) => {
-        // Type de l'action : dérivé comme dans la gestion de sort (_getSortTypes),
-        // et PAS depuis un champ `a.types` inexistant sur les actions → sinon TOUTES
-        // les actions étaient filtrées et donc injouables.
-        const _aTypes = _getSortTypes(a);
-        const isOff = _aTypes.includes('offensif')
-                   || (Array.isArray(a.runes) && (a.runes.includes('Lacération')
-                       || (a.afflictionMode === 'laceration' && a.runes.includes('Affliction'))));
-        const soinFormula = (!isOff && (_aTypes.includes('defensif') || a.typeSoin))
-          ? String(_vttSortSoinFormula(a, _cChar) || '').trim() : '';
-        const isHealAct = !isOff && !!soinFormula;
-        // Offensif OU soin gérés ; buffs/utilitaires complexes restent à venir.
-        if (!isOff && !isHealAct) return;
-
-        const basePm = parseInt(a.pm) || 0;
-        // Coût payé sur le perso du LANCEUR (cf. _vttRollAttack → _pmPayerCharId),
-        // réduit par son set léger.
-        const pmCost = Math.max(0, basePm + _ownerSetPmDelta);
-
-        if (isHealAct) {
-          options.push({
-            id: `summon_action_${ai}`,
-            icon: a.icon || '💚',
-            label: a.nom || 'Soin',
-            isHeal: true, friendlyOnly: true,
-            rawDice: soinFormula, dice: soinFormula,
-            portee: parseInt(a.portee) || t.range || 1,
-            pmCost, basePm, pmSetDelta: _ownerSetPmDelta,
-            toucher: 0, dmgStatMod: 0, dmgStatLabel: '—', maitriseBonus: 0,
-            halfOnMiss: false, mods: {},
-          });
-          return;
-        }
-
-        const dmg  = _vttSortDmgFormula(a, _cChar);
-        const elId = a.noyauTypeId || t.summonElementId || 'physique';
-        const elObj = getDamageTypeById(VS.damageTypes, elId);
-        const nbCh = Array.isArray(a.runes) ? a.runes.filter(r => r === 'Chance').length : 0;
-        const rc   = nbCh > 0 ? Math.max(2, 20 - nbCh) : (t.summonChanceRc ?? 20);
-        options.push({
+        const baseRange = (a.portee != null && Number.isFinite(parseInt(a.portee)))
+          ? parseInt(a.portee)
+          : (t.range || 1);
+        const pmRaw = (Number.isFinite(a.pmOverride) && a.pmOverride >= 0)
+          ? a.pmOverride
+          : (parseInt(a.pm) || 0);
+        const pmCost = Math.max(0, pmRaw + _ownerSetPmDelta);
+        const opt = _buildSpellOption(a, {
           id: `summon_action_${ai}`,
-          icon: a.icon || '✨',
-          label: a.nom || 'Action',
-          rawDice: dmg, dice: dmg,
-          portee: parseInt(a.portee) || t.range || 1,
-          pmCost, basePm, pmSetDelta: _ownerSetPmDelta,
-          toucher: t.attack ?? 0,
-          dmgStatMod: 0, dmgStatLabel: '—', maitriseBonus: 0,
-          halfOnMiss: false,
-          typeRules: getDamageTypeRules(VS.damageTypes, elId),
-          damageTypeId: elId,
-          damageTypeIcon: elObj?.icon || '',
-          damageTypeColor: elObj?.color || '',
-          mods: { chance: (rc < 20) ? { rc } : null },
+          sortIdx: `summon_${t.id || 'token'}_${ai}`,
+          spellId: a.id || null,
+          label: a.nom || `Action ${ai + 1}`,
+          c: _cChar,
+          portee: baseRange,
+          pmCost,
+          basePm: Math.max(0, pmRaw),
+          pmRaw,
+          pmSetDelta: _ownerSetPmDelta,
+          fallbackTouchStat: 'force',
+          fallbackDmgStat: 'force',
+          fallbackTouchMod: summonTouchBonus,
+          fallbackDmgMod: 0,
+          touchSetBonus: 0,
+          enchantOnlyAlsoEtat: true,
+          extras: { _summonAction: true },
         });
+        if (!opt) return;
+        if (!opt.autoHit && opt.toucher === undefined) {
+          opt.toucherMod = summonTouchBonus;
+          opt.toucherSetBonus = 0;
+          opt.toucherStatLabel = 'Invoc.';
+        }
+        options.push(_withSpellCooldown(t, opt));
       });
     }
     return options;
@@ -3970,6 +4028,7 @@ function _captureUndoSnapshot(srcId, targetIds) {
   }
   const srcT = VS.tokens[srcId]?.data;
   addChar(_characterForToken(srcT)?.id);
+  if (srcT?.summonOwnerCharId) addChar(srcT.summonOwnerCharId);
   if (srcT?.summonOwnerId) addChar(_characterForToken(VS.tokens[srcT.summonOwnerId]?.data)?.id);
   return { tokens, chars };
 }
@@ -5406,8 +5465,10 @@ async function _zoneValidate() {
     if (srcD) await _vttSpendSpellPm(srcD, opt);
     if (srcD) await _vttStartSpellCooldown(srcD, opt);
     await _vttApplyCasterConcentration(srcId, opt);
+    const _statsDelta = srcD ? _applyCastStatsDelta(srcD, opt) : null;
     await addDoc(_logCol(), {
       type: 'cast', undo: _snap,
+      ...(_hasStatsDelta(_statsDelta) ? { statsDelta: _statsDelta } : {}),
       ..._vttLogSourceFields(srcD),
       authorId: STATE.user?.uid || null,
       authorName: STATE.profile?.pseudo || STATE.profile?.prenom || STATE.user?.displayName || 'MJ',
@@ -5448,8 +5509,10 @@ async function _zoneValidate() {
     _snap.createdTokens = [..._summonSpawnIds];
     if (srcD) await _vttSpendSpellPm(srcD, opt);
     await _vttApplyCasterConcentration(srcId, opt);
+    const _statsDelta = srcD ? _applyCastStatsDelta(srcD, opt) : null;
     await addDoc(_logCol(), {
       type: 'cast', undo: _snap,
+      ...(_hasStatsDelta(_statsDelta) ? { statsDelta: _statsDelta } : {}),
       ..._vttLogSourceFields(srcD),
       authorId: STATE.user?.uid || null,
       authorName: STATE.profile?.pseudo || STATE.profile?.prenom || STATE.user?.displayName || 'MJ',
@@ -5496,8 +5559,10 @@ async function _zoneValidate() {
     const _srcD = VS.tokens[srcId]?.data;
     const _snap = _captureUndoSnapshot(srcId, []);
     _snap.createdTokens = [..._summonSpawnIds];
+    const _statsDelta = !targets.length && _srcD ? _applyCastStatsDelta(_srcD, opt) : null;
     await addDoc(_logCol(), {
       type: 'cast', undo: _snap,
+      ...(_hasStatsDelta(_statsDelta) ? { statsDelta: _statsDelta } : {}),
       ..._vttLogSourceFields(_srcD),
       authorId: STATE.user?.uid || null,
       authorName: STATE.profile?.pseudo || STATE.profile?.prenom || STATE.user?.displayName || 'MJ',
@@ -5744,11 +5809,12 @@ async function _vttRollAttack() {
   const _undoSnap = _captureUndoSnapshot(srcId, targetIds);
 
   const authorName = STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'MJ';
+  let _preAppliedCastStatsDelta = null;
   // Payeur du mana : un token convoqué (invocation) n'a pas de PM propre — ses
   // sorts/actions sont payés sur le personnage du LANCEUR (summonOwnerId).
   const _srcChar = _characterForToken(src);
   const _ownerTok = src.summonOwnerId ? VS.tokens[src.summonOwnerId]?.data : null;
-  const _pmPayerCharId = _srcChar?.id || (_ownerTok ? _characterForToken(_ownerTok)?.id : null);
+  const _pmPayerCharId = src.summonOwnerCharId || _srcChar?.id || (_ownerTok ? _characterForToken(_ownerTok)?.id : null);
   const _deductPm  = async () => {
     if (opt.pmCost <= 0) return;
     if (_pmPayerCharId) {
@@ -6018,7 +6084,11 @@ async function _vttRollAttack() {
 
     // ── Afflictions : JS Sa de la cible, buff (DoT, débuff mouvement, etc.) sur échec ──
     if (opt.mods?.affliction) {
-      await _vttApplyAfflictions(srcId, allTargets && allTargets.length ? allTargets : [tgtId], opt);
+      if (opt.isCaSort || opt.isUtil) _preAppliedCastStatsDelta = _applyCastStatsDelta(src, opt);
+      await _vttApplyAfflictions(srcId, allTargets && allTargets.length ? allTargets : [tgtId], opt, {
+        undo: _undoSnap,
+        statsDelta: _hasStatsDelta(_preAppliedCastStatsDelta) ? _preAppliedCastStatsDelta : null,
+      });
       await _vttApplyCasterConcentration(srcId, opt);
     }
 
@@ -6036,6 +6106,7 @@ async function _vttRollAttack() {
       await _consumeItem();
       await _markActionUsed();
       const rCa = _handleMultiCast();
+      const _utilStatsDelta = _preAppliedCastStatsDelta || _applyCastStatsDelta(src, opt);
 
 
       // Appliquer le buff CA sur chaque cible
@@ -6114,6 +6185,7 @@ async function _vttRollAttack() {
         await addDoc(_logCol(), {
           type: 'cast',
           undo: _undoSnap,
+          ...(_hasStatsDelta(_utilStatsDelta) ? { statsDelta: _utilStatsDelta } : {}),
           ..._vttLogSourceFields(src),
           ..._vttLogSingleTargetFields(targetIds),
           authorId: STATE.user?.uid||null, authorName,
@@ -6798,26 +6870,7 @@ async function _vttRollAttack() {
       }
     }
 
-    const _isSupportCast = !!(
-      opt.mods?.enchant
-      || opt.enchantMode === 'etat'
-      || opt.enchantEtatId
-      || opt.mods?.rangeBuff
-      || opt.mods?.hot
-      || opt.category === 'support'
-    );
-    const _isAfflictionCast = !!(
-      opt.mods?.affliction
-      || opt.mods?.laceration
-      || opt.afflictionMode
-      || opt.afflictionEtatId
-    );
-    const _isTacticalCast = _isSupportCast || _isAfflictionCast || !!(
-      opt.mods?.move
-      || opt.mods?.push
-      || opt.mods?.pull
-      || opt.mods?.zone
-    );
+    const _castKinds = _castStatKinds(opt);
 
     // ── Statistiques : cast (sort lancé + PM) puis écriture du delta ──
     const _castActor = _statsActor(src);
@@ -6826,9 +6879,9 @@ async function _vttRollAttack() {
         casterId: _castActor.id, casterName: _castActor.name,
         spellName: opt.sortIdx !== undefined ? (opt.label || 'Sort') : null,
         pm: opt.pmCost || 0,
-        tactical: _isTacticalCast ? 1 : 0,
-        support: _isSupportCast ? 1 : 0,
-        affliction: _isAfflictionCast ? 1 : 0,
+        tactical: _castKinds.tactical ? 1 : 0,
+        support: _castKinds.support ? 1 : 0,
+        affliction: _castKinds.affliction ? 1 : 0,
       });
     }
     applyStatsDelta(_statsDelta, +1);
