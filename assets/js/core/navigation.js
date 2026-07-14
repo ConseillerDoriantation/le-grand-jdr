@@ -5,7 +5,9 @@
 import { STATE, setPage } from './state.js';
 import { showNotif } from '../shared/notifications.js';
 import PAGES from '../features/pages.js';
+import { loadChars } from '../data/firestore.js';
 import { unwatchAll } from '../shared/realtime.js';
+import { sortCharactersForDisplay } from '../shared/char-stats.js';
 import { appSplashHtml } from '../shared/html.js';
 import { dispatchAction, dispatchValueAction } from './actions.js';
 import { isFeatureEnabled } from '../shared/features.js';
@@ -37,6 +39,46 @@ const FEATURE_MAP = {
 
 // Garde les modules déjà chargés pour ne pas re-importer
 const _loaded = new Set();
+
+const CHARACTER_DATA_PAGES = new Set([
+  'characters',
+  'shop',
+  'npcs',
+  'story',
+  'histoire',
+  'bastion',
+  'achievements',
+  'players',
+  'bestiaire',
+  'statistiques',
+  'sessions',
+  'agenda',
+  'recettes',
+  'collection',
+  'account',
+  'aventures',
+  'admin',
+]);
+let _charactersReadyPromise = null;
+
+async function _ensureCharactersReady(page) {
+  if (!CHARACTER_DATA_PAGES.has(page) || !STATE.adventure?.id) return;
+  const key = STATE.adventure.id;
+  if (_charactersReadyPromise?.key === key) return _charactersReadyPromise.promise;
+
+  const promise = loadChars()
+    .then(chars => {
+      STATE.characters = sortCharactersForDisplay(Array.isArray(chars) ? chars : []);
+    })
+    .catch(err => {
+      console.warn('[nav] personnages indisponibles pour la page', page, err?.code || err);
+    })
+    .finally(() => {
+      if (_charactersReadyPromise?.key === key) _charactersReadyPromise = null;
+    });
+  _charactersReadyPromise = { key, promise };
+  return promise;
+}
 
 // ── CSS chargé en lazy par feature ────────────────────────────────────────
 // Les feuilles spécifiques à une page sont retirées de index.html et chargées
@@ -184,6 +226,7 @@ export async function navigate(page) {
 
   // Rendre la page
   try {
+    await _ensureCharactersReady(page);
     await PAGES[page]();
   } catch (err) {
     console.error(`[nav] page "${page}" a planté :`, err);

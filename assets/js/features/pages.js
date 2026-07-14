@@ -1558,7 +1558,10 @@ const PAGES = {
       const allPartyChars = uid ? allChars.filter(c => c.uid !== uid) : [];
       // Les hauts-faits secrets restent invisibles aux joueurs partout
       const achievements = STATE.isAdmin ? achievementsRaw : achievementsRaw.filter(a => !a.secret);
-      STATE.characters = chars;
+      // STATE.characters est le cache global de l'aventure. Les vues filtrent
+      // localement ce qu'elles affichent, sinon les pages liées aux personnages
+      // perdent les portraits/participants après un passage par le dashboard.
+      STATE.characters = allChars;
 
     // Formate la prochaine séance pour affichage (date FR + créneau)
     const _SLOT_LABELS = { m: '🌞 Matin', a: '☀️ Aprem', s: '🌙 Soir' };
@@ -2636,9 +2639,10 @@ const PAGES = {
 
   // ─── CHARACTERS ─────────────────────────────────────────────────────────────
   async characters() {
-    const uid   = STATE.isAdmin ? null : STATE.user.uid;
-    const chars = sortCharactersForDisplay(await loadChars(uid));
-    STATE.characters = chars;
+    const uid      = STATE.user.uid;
+    const allChars = sortCharactersForDisplay(await loadChars());
+    STATE.characters = allChars;
+    const chars = STATE.isAdmin ? allChars : allChars.filter(c => c.uid === uid);
     const content = document.getElementById('main-content');
     // V3 : page-header standard (titre comme les autres pages) + shell de la fiche.
     let html = `${pageHeaderHtml(STATE.isAdmin ? '📜 Tous les Personnages' : '📜 Mes Personnages', 'Gérez vos fiches de personnage')}`;
