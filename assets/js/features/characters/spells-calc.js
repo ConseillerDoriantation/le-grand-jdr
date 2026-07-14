@@ -7,7 +7,7 @@
 
 import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
-import { getMaitriseBonus as getSharedMaitriseBonus, statShort } from '../../shared/char-stats.js';
+import { getMaitriseBonus as getSharedMaitriseBonus, getMod, statShort } from '../../shared/char-stats.js';
 import { getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getMainWeapon } from './data.js';
 import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js';
@@ -32,6 +32,8 @@ let _conditionsLibCache = [];
 const ACTION_RUNE = 'Déclenchement';
 
 function _spellActionMode(s) {
+  if (s?.designMode === 'classic'
+      && ['action', 'action_bonus', 'reaction'].includes(s?.actionMode)) return s.actionMode;
   const runes = s?.runes || [];
   if (runes.includes(ACTION_RUNE) && (s?.actionMode === 'reaction' || s?.actionMode === 'action_bonus')) return s.actionMode;
   if (runes.includes('Réaction')) return 'reaction';
@@ -88,6 +90,11 @@ export function _getSortAction(s) {
  * - Chaque rune Puissance : +1 dé
  */
 export function _calcSortDegats(s, c) {
+  if (s?.designMode === 'classic' && s?.classicFormulaFinal) {
+    const base = (s?.degats || '').trim();
+    const mod = s?.degatsStat && s.degatsStat !== 'none' ? getMod(c, s.degatsStat) : 0;
+    return mod ? `${base}${mod > 0 ? ' +' : ' '}${mod}` : base;
+  }
   // Un sort en mode déplacement (rune Amplification → Déplacement) n'inflige jamais de dégâts.
   if (s.ampMode === 'deplacement') return '';
   const mainP   = getMainWeapon(c);
@@ -130,6 +137,11 @@ export function _calcSortDegats(s, c) {
  * - Format texte libre (ex: "moitié des dégâts") → affiché tel quel, rien ajouté
  */
 export function _calcSortSoin(s, c) {
+  if (s?.designMode === 'classic' && s?.classicFormulaFinal) {
+    const base = (s?.soin || '').trim();
+    const mod = s?.degatsStat && s.degatsStat !== 'none' ? getMod(c, s.degatsStat) : 0;
+    return mod ? `${base}${mod > 0 ? ' +' : ' '}${mod}` : base;
+  }
   const runes  = s.runes || [];
   const nbProt = runes.filter(r => r === 'Protection').length;
   const base   = (s.soin || '').trim();
@@ -191,6 +203,11 @@ function _scaleDiceFormulaDice(formula, extraDice = 0) {
 }
 
 function _calcImpactDisplayParts(s, c) {
+  if (s?.designMode === 'classic' && s?.classicFormulaFinal) {
+    const statKey = s?.degatsStat || 'none';
+    const statMod = statKey !== 'none' ? getMod(c, statKey) : 0;
+    return { label: _calcSortDegats(s, c), statLbl: statKey !== 'none' ? statShort(statKey) : '', statMod, maitrise: 0 };
+  }
   const mainP = getMainWeapon(c);
   const baseRaw = (s?.degats || '').trim();
   const base = (!baseRaw || baseRaw.toLowerCase() === '= arme')
@@ -212,6 +229,11 @@ function _calcImpactDisplayParts(s, c) {
 }
 
 function _calcHealDisplayParts(s, c) {
+  if (s?.designMode === 'classic' && s?.classicFormulaFinal) {
+    const statKey = s?.degatsStat || 'none';
+    const statMod = statKey !== 'none' ? getMod(c, statKey) : 0;
+    return { label: _calcSortSoin(s, c), statLbl: statKey !== 'none' ? statShort(statKey) : '', statMod, maitrise: 0 };
+  }
   const runes = s?.runes || [];
   const nbProt = runes.filter(r => r === 'Protection').length;
   const baseRaw = (s?.soin || '').trim();
@@ -673,6 +695,7 @@ function _getSortSoinStatKey(s, c) {
  *  Affiché conditionnellement dans le modal — Protection CA, Enchant, Affliction, ou rune Durée.
  */
 export function _needsDureeBase(s) {
+  if (s?.designMode === 'classic') return (parseInt(s?.classicDuration ?? s?.dureeBase) || 0) > 0;
   const runes = s?.runes || [];
   if (!runes.length) return false;
   if (runes.includes('Durée')) return true;
@@ -753,7 +776,10 @@ export function _calcSortZone(s) {
       && runes.filter(r => r === 'Invocation').length === 0) return null;
   const wMan = s.zoneW ? parseInt(s.zoneW) : 0;
   const hMan = s.zoneH ? parseInt(s.zoneH) : 0;
-  if (wMan > 0 || hMan > 0) return { w: wMan, h: hMan, source: 'manual' };
+  if (wMan > 0 || hMan > 0) {
+    const shape = ['cross', 'diamond'].includes(s?.zoneShape) ? s.zoneShape : 'rect';
+    return { w: wMan || hMan, h: hMan || wMan, shape, source: 'manual' };
+  }
 
   const nbAmp  = runes.filter(r => r === 'Amplification').length;
   const nbDisp = runes.filter(r => r === 'Dispersion').length;
@@ -906,7 +932,54 @@ export function _calcSummonStats(invDef, runes = []) {
  * Génère le résumé textuel complet des effets d'un sort
  * sous forme de tableau de lignes {icon, label, detail}
  */
+function _buildClassicSortResume(s) {
+  const lines = [];
+  const action = { action:'Action', action_bonus:'Action Bonus', reaction:'Réaction' }[s?.actionMode] || 'Action';
+  const duration = Math.max(0, parseInt(s?.classicDuration ?? s?.dureeBase) || 0);
+  lines.push({
+    icon: '',
+    label: `${action} · ${duration ? `Persistant ${duration} tour${duration > 1 ? 's' : ''}` : 'Instantané'}`,
+    detail: s?.cooldownTurns ? `Recharge : ${parseInt(s.cooldownTurns) || 0} tour(s)` : '',
+  });
+
+  const target = { enemy:'ennemi', ally:'allié', self:'lanceur', any:'toute cible' }[s?.classicTarget] || 'cible';
+  lines.push({ icon:'🎯', label:`Portée ${Math.max(0, parseInt(s?.portee) || 0)} cases`, detail:`Cible : ${target}` });
+
+  if (s?.classicEffect === 'damage' && s?.degats) {
+    lines.push({ icon:'⚔️', label:String(s.degats), detail:'Dégâts · formule finale' });
+  } else if (s?.classicEffect === 'heal' && s?.soin) {
+    lines.push({ icon:'💚', label:String(s.soin), detail:'Soin - formule finale' });
+  } else {
+    lines.push({ icon:'✨', label:s?.effet || 'Effet utilitaire', detail:'Aucun dégât ni soin automatique' });
+  }
+
+  const zone = _calcSortZone(s);
+  if (zone) {
+    const shape = { rect:'rectangle', cross:'croix', diamond:'cercle sur grille' }[zone.shape || s?.zoneShape] || 'rectangle';
+    lines.push({ icon:'📐', label:`Zone ${zone.w}×${zone.h} cases`, detail:`Forme : ${shape} · zone plaçable` });
+  }
+
+  const stateId = s?.classicStateId || s?.enchantEtatId || s?.afflictionEtatId;
+  if (stateId) {
+    const condition = _conditionsLibCache?.find(item => item.id === stateId);
+    const hostile = s?.classicTarget === 'enemy';
+    lines.push({
+      icon: condition?.icon || '◈',
+      label: condition?.label || 'État appliqué',
+      detail: hostile
+        ? `Jet de sauvegarde ${s?.classicStateSaveStat || s?.afflictionSaveStat || 'sagesse'} DD ${parseInt(s?.classicStateDC) || 11}`
+        : `Applique a ${target}`,
+    });
+  }
+
+  if (s?.effet && s?.classicEffect !== 'utility') {
+    lines.push({ icon:'📝', label:s.effet, detail:'Description' });
+  }
+  return lines;
+}
+
 export function _buildSortResume(s, c) {
+  if (s?.designMode === 'classic') return _buildClassicSortResume(s);
   const lines = [];
   const runes  = s.runes || [];
   const types  = _getSortTypes(s);

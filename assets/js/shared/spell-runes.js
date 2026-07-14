@@ -3,6 +3,7 @@ export function runeCount(spell = {}, runeName) {
 }
 
 export function calcSpellTargets(spell = {}) {
+  if (spell?.designMode === 'classic') return 1;
   const nbDisp = runeCount(spell, 'Dispersion');
   const nbAmp = runeCount(spell, 'Amplification');
   const nbAff = runeCount(spell, 'Affliction');
@@ -13,6 +14,9 @@ export function calcSpellTargets(spell = {}) {
 }
 
 export function calcSpellDuration(spell = {}) {
+  if (spell?.designMode === 'classic') {
+    return Math.max(0, parseInt(spell?.classicDuration ?? spell?.dureeBase) || 0);
+  }
   const nbDur = runeCount(spell, 'Durée');
   const base = (spell?.dureeBase && spell.dureeBase >= 2) ? +spell.dureeBase : 2;
   const dur = base + (nbDur > 0 ? 2 * nbDur : 0);

@@ -49,6 +49,7 @@ export function _effectDisplay(opt, formula, fixed = 0) {
  * Inclut : dés de base + runes Puissance + maîtrise arme principale.
  */
 export function _vttSortDmgFormula(s, c, opts = {}) {
+  if (s?.designMode === 'classic' && s?.classicFormulaFinal) return (s?.degats || '').trim();
   // ⚠️ Utiliser getMainWeapon(c) pour récupérer le Poings (2d4) par défaut
   // si aucune arme principale équipée — aligne avec _calcSortDegats du sheet.
   const mainP   = c ? getMainWeapon(c) : null;
@@ -83,6 +84,7 @@ export function _vttSortDmgFormula(s, c, opts = {}) {
  *  - Noyau physique / pas de noyau → Constitution
  */
 export function _vttSortSoinFormula(s, c) {
+  if (s?.designMode === 'classic' && s?.classicFormulaFinal) return (s?.soin || '').trim();
   // Aligne sur le sheet : getMainWeapon retourne Poings par défaut si vide.
   const mainP    = c ? getMainWeapon(c) : null;
   const maitrise = getMaitriseBonus(c, mainP || {});

@@ -32,6 +32,8 @@ import { invalidateWeaponFormatsCache } from '../shared/weapon-formats.js';
 import { invalidateSpellMatricesCache } from '../shared/spell-matrices.js';
 import { invalidateUpgradeSettingsCache } from '../shared/upgrade-settings.js';
 import { invalidateCharacterRulesCache, loadCharacterRules } from '../shared/character-rules.js';
+import { invalidateEquipmentSlotsCache, loadEquipmentSlots } from '../shared/equipment-slots.js';
+import { invalidateSpellSystemCache, loadSpellSystem } from '../shared/spell-system.js';
 import { invalidateShopPickerCache } from '../shared/shop-picker.js';
 import { clearConditionLibraryCache } from '../shared/conditions.js';
 import { invalidateRaritiesCache, loadRarities } from '../shared/rarity.js';
@@ -42,6 +44,8 @@ function _invalidateScopedCaches() {
   invalidateSpellMatricesCache();
   invalidateUpgradeSettingsCache();
   invalidateCharacterRulesCache();
+  invalidateEquipmentSlotsCache();
+  invalidateSpellSystemCache();
   invalidateShopPickerCache();
   clearConditionLibraryCache();
   invalidateRaritiesCache();
@@ -356,6 +360,15 @@ export async function selectAdventure(adv) {
   // Chaque aventure possede son propre document world/character_rules.
   await loadCharacterRules().catch(e =>
     console.warn('[adventure] regles de personnage non chargees', e?.code || e)
+  );
+
+  // La fiche, la boutique et le VTT partagent les slots de cette aventure.
+  await loadEquipmentSlots().catch(e =>
+    console.warn('[adventure] emplacements d\'equipement non charges', e?.code || e)
+  );
+
+  await loadSpellSystem().catch(e =>
+    console.warn('[adventure] systeme de sorts non charge', e?.code || e)
   );
 
   // Démarre les listeners session-live (1 onSnapshot/collection partagée

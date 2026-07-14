@@ -15,6 +15,7 @@ import { getMainWeapon, getArmorSetData, getWeaponToucherParts, getWeaponDegatsP
 import { spellVM } from './spells-calc.js';
 import { getDashboardPartyChars } from '../../shared/dashboard-session.js';
 import { setTargetCharacter } from '../../shared/character-navigation.js';
+import { getEquipmentSlots, getPrimaryWeaponSlotId } from '../../shared/equipment-slots.js';
 
 // Cherche le perso dans plusieurs sources : ses propres persos, le cache du
 // groupe (rempli par le dashboard) — permet de quick-view les autres joueurs
@@ -43,10 +44,12 @@ function _statRow(c) {
 
 function _weaponsBlock(c) {
   const equip = c.equipement || {};
-  const slots = ['Main principale', 'Main secondaire'];
-  const rows = slots.map(slot => {
+  const slots = getEquipmentSlots().filter(slot => slot.kind === 'weapon');
+  const primarySlot = getPrimaryWeaponSlotId();
+  const rows = slots.map(slotDef => {
+    const slot = slotDef.id;
     const raw = equip[slot] || {};
-    const item = (slot === 'Main principale' && !raw.nom) ? getMainWeapon(c) : raw;
+    const item = (slot === primarySlot && !raw.nom) ? getMainWeapon(c) : raw;
     if (!item || !item.nom) return null;
     const statKey = item.statAttaque === 'dexterite' ? 'dexterite'
                   : item.statAttaque === 'intelligence' ? 'intelligence' : 'force';
@@ -55,7 +58,7 @@ function _weaponsBlock(c) {
     try { const dp = getWeaponDegatsParts(c, item, statKey); if (dp?.roll) dStr = dp.roll; } catch {}
     return `
       <div class="qv-weapon">
-        <div class="qv-weapon-slot">${slot.replace('Main ', '')}</div>
+        <div class="qv-weapon-slot">${_esc(slotDef.label)}</div>
         <div class="qv-weapon-body">
           <div class="qv-weapon-name">${_esc(item.nom)}</div>
           <div class="qv-weapon-stats">
@@ -74,9 +77,9 @@ function _weaponsBlock(c) {
 
 function _armorBlock(c) {
   const equip = c.equipement || {};
-  const slots = ['Casque', 'Torse', 'Pieds', 'Bouclier', 'Cape', 'Accessoire 1', 'Accessoire 2'];
+  const slots = getEquipmentSlots().filter(slot => slot.kind !== 'weapon');
   const items = slots
-    .map(s => ({ slot: s, item: equip[s] }))
+    .map(slot => ({ slot: slot.label, item: equip[slot.id] }))
     .filter(({ item }) => item && item.nom);
   const setData = getArmorSetData(c);
   const setName = setData?.name && setData.completion >= 2

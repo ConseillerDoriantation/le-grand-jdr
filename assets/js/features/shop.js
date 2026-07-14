@@ -36,6 +36,10 @@ import { makeSortable } from '../shared/sortable-helper.js';
 import { spellActionCardHtml } from '../shared/spell-action-card.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { consumeTargetEntity } from '../shared/entity-navigation.js';
+import {
+  equipmentSlotAcceptsItem, getEquipmentItemOptions, getEquipmentSlot,
+  getEquipmentSlots, resolveEquipmentSlotForItem,
+} from '../shared/equipment-slots.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS — remplace les onclick/oninput/onchange inline
@@ -1665,12 +1669,7 @@ function _renderItemRow(item, tplKey, itemIdx) {
 // Résout le slot d'équipement ciblé par un item boutique.
 // Armes → 'Main principale' par défaut. Armures/bijoux → leur slot dédié.
 function _resolveSlotForItem(item) {
-  if (item.degats || item.toucherStat || item.degatsStat) return 'Main principale';
-  if (item.slotArmure) {
-    return item.slotArmure === 'Pieds' ? 'Bottes' : item.slotArmure;
-  }
-  if (item.slotBijou) return item.slotBijou;
-  return null;
+  return resolveEquipmentSlotForItem(item);
 }
 
 // Construit un item équipé minimal à partir d'un item boutique
@@ -3054,10 +3053,13 @@ function _buildFieldsHtml(tpl,item) {
           </button>
         </div></div>`;
     } else if(f.type==='select'){
+      const configured = f.id === 'slotArmure' ? getEquipmentItemOptions('armor')
+        : f.id === 'slotBijou' ? getEquipmentItemOptions('accessory') : (f.options || []);
+      const options = [...new Set([...configured, ...(val ? [val] : [])])];
       html+=`<div class="form-group"><label>${f.label}</label>
         <select class="input-field sh-modal-select" id="si-${f.id}">
           <option value="">— Choisir —</option>
-          ${(f.options||[]).map(o=>`<option value="${o}" ${val===o?'selected':''}>${o}</option>`).join('')}
+          ${options.map(o=>`<option value="${_esc(o)}" ${val===o?'selected':''}>${_esc(o)}</option>`).join('')}
         </select></div>`;
     } else if(f.type==='format_select'){
       html+=`<div class="form-group"><label>${f.label}</label>
@@ -3541,8 +3543,7 @@ async function deleteShopItem(itemId) {
 // ══════════════════════════════════════════════════════════════════════════════
 // ATELIER D'ESSAYAGE — version simplifiée
 // Modale plein écran à 3 colonnes :
-//   • Doll : silhouette du perso avec 8 slots cliquables (Tête/Amulette/Torse/
-//     Anneau/Main principale/Main secondaire/Bottes/Objet magique).
+//   • Doll : silhouette du perso avec les slots configurés pour l'aventure.
 //   • Stats : 6 caracs + 4 dérivés (CA, PV max, PM max, Vitesse) avec
 //     cur → next + delta coloré live.
 //   • Items : liste des articles compatibles avec le slot actif, clic = toggle
@@ -3550,42 +3551,21 @@ async function deleteShopItem(itemId) {
 // État local (réinitialisé à chaque ouverture) :
 //   _atelier = { activeSlot, simulated: { slot → shopItem } }
 // ══════════════════════════════════════════════════════════════════════════════
-const _ATELIER_SLOTS = [
-  { name: 'Tête',            ico: '🪖', kind: 'armure' },
-  { name: 'Amulette',        ico: '📿', kind: 'bijou'  },
-  { name: 'Torse',           ico: '🛡️', kind: 'armure' },
-  { name: 'Anneau',          ico: '💍', kind: 'bijou'  },
-  { name: 'Main principale', ico: '⚔️', kind: 'arme'   },
-  { name: 'Main secondaire', ico: '🗡️', kind: 'arme'   },
-  { name: 'Bottes',          ico: '👢', kind: 'armure' },
-  { name: 'Objet magique',   ico: '🔮', kind: 'bijou'  },
-];
+const _atelierSlots = () => getEquipmentSlots().map(slot => ({
+  name: slot.id,
+  label: slot.label,
+  ico: slot.icon,
+}));
 let _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: 'rarity' };
 
 /** Filtre les items boutique compatibles avec un slot d'équipement donné. */
 function _atelierItemsForSlot(slotName) {
   if (!slotName) return [];
-  const slotMeta = _ATELIER_SLOTS.find(s => s.name === slotName);
+  const slotMeta = getEquipmentSlot(slotName);
   if (!slotMeta) return [];
   return _visibleItems().filter(it => {
     if (!it.nom) return false;
-    if (slotMeta.kind === 'arme') {
-      const tpl = it.template || '';
-      if (tpl === 'arme') return true;
-      // Idem que editEquipSlot : marqueurs d'arme suffisants
-      return !!(it.degats || it.toucher || it.sousType ||
-                (it.format && ['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 2M Dist Phy.',
-                              'Arme 2M CaC Mag.','Arme 2M Dist Mag.',
-                              'Arme Secondaire (Bouclier, Torche...)'].includes(it.format)));
-    }
-    if (slotMeta.kind === 'armure') {
-      const wantSlot = slotName === 'Bottes' ? 'Pieds' : slotName;
-      return it.slotArmure === wantSlot;
-    }
-    if (slotMeta.kind === 'bijou') {
-      return it.slotBijou === slotName;
-    }
-    return false;
+    return equipmentSlotAcceptsItem(slotMeta, it);
   });
 }
 
@@ -3604,7 +3584,7 @@ function _renderAtelierDoll() {
   const av = _shopCharAvatarColor(c);
   const init = (c.nom || '?')[0].toUpperCase();
 
-  const slotsHtml = _ATELIER_SLOTS.map(s => {
+  const slotsHtml = _atelierSlots().map(s => {
     const cur = eq[s.name];
     const sim = _atelier.simulated[s.name];
     const filled = !!cur?.nom;
@@ -3617,9 +3597,9 @@ function _renderAtelierDoll() {
     else if (filled) classes.push('is-filled');
     return `<button class="${classes.join(' ')}" data-slot="${_esc(s.name)}"
       data-sh-action="atelierSelectSlot"
-      title="${_esc(s.name)}${itemName?` — ${_esc(itemName)}`:''}">
+      title="${_esc(s.label)}${itemName?` — ${_esc(itemName)}`:''}">
       <span class="atelier-slot-ico">${s.ico}</span>
-      <span class="atelier-slot-name">${_esc(s.name)}</span>
+      <span class="atelier-slot-name">${_esc(s.label)}</span>
       ${itemName ? `<span class="atelier-slot-item">${_esc(itemName)}</span>` : ''}
       ${simulated ? `<span class="atelier-slot-clear"
         data-sh-action="atelierClearSlot" data-slot="${_esc(s.name)}"
@@ -3768,15 +3748,15 @@ function _renderAtelierSavedBuilds(c) {
  *  clic = sélectionne directement le slot (sans repasser par la silhouette),
  *  avec le nombre d'articles compatibles et un point vert si un essai est en cours. */
 function _renderAtelierSlotTabs() {
-  return _ATELIER_SLOTS.map(s => {
+  return _atelierSlots().map(s => {
     const active = _atelier.activeSlot === s.name;
     const count  = _atelierItemsForSlot(s.name).length;
     const sim    = !!_atelier.simulated[s.name];
     return `<button class="atelier-slot-tab${active?' is-active':''}${sim?' is-simulated':''}${count?'':' is-empty'}"
       data-sh-action="atelierGoSlot" data-slot="${_esc(s.name)}"
-      title="${_esc(s.name)} — ${count} article${count>1?'s':''} compatible${count>1?'s':''}">
+      title="${_esc(s.label)} — ${count} article${count>1?'s':''} compatible${count>1?'s':''}">
       <span class="atelier-slot-tab-ico">${s.ico}</span>
-      <span class="atelier-slot-tab-name">${_esc(s.name)}</span>
+      <span class="atelier-slot-tab-name">${_esc(s.label)}</span>
       <span class="atelier-slot-tab-count">${count}</span>
     </button>`;
   }).join('');
@@ -3847,7 +3827,7 @@ function _renderAtelierItems() {
     return `<div class="atelier-items-empty">
       <div class="atelier-items-empty-ico">🔎</div>
       <div><b>Aucun article compatible</b></div>
-      <div class="atelier-items-empty-hint">Aucun article boutique ne correspond au slot « ${_esc(slot)} ».</div>
+      <div class="atelier-items-empty-hint">Aucun article boutique ne correspond au slot « ${_esc(getEquipmentSlot(slot)?.label || slot)} ».</div>
     </div>`;
   }
 
@@ -3918,7 +3898,7 @@ function _renderAtelier() {
   if (tabs)    tabs.innerHTML  = _renderAtelierSlotTabs();
   const sortEl = document.getElementById('atelier-items-sort');
   if (sortEl)  sortEl.innerHTML = _renderAtelierSort();
-  if (slotLbl) slotLbl.textContent = _atelier.activeSlot || '—';
+  if (slotLbl) slotLbl.textContent = getEquipmentSlot(_atelier.activeSlot)?.label || '—';
 
   // Restaure focus + caret de la search (n'est pas re-rendue, mais sa value oui
   // si on perd le focus pendant un re-render distant)
