@@ -2815,6 +2815,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
   // ── Invocation : résout la N-ième invocation choisie sur la bibliothèque du
   //    lanceur, applique base + bonus de runes, et RESTAURE les PV/PM persistants. ──
   if (kind === 'invocation') {
+    const ownerCharId = src.characterId || src.summonOwnerCharId || null;
     const mod = opt?.mods?.invocation || {};
     const idx = _zoneCtx?.invocationsDone || 0;   // quelle invocation on pose (0-based)
     const selIds = opt._invSelIds || null;        // créatures choisies au lancement
@@ -2824,7 +2825,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
     let restoreHp = null, restorePm = null;
 
     if (selIds && selIds.length) {
-      const c = src.characterId ? VS.characters[src.characterId] : null;
+      const c = ownerCharId ? VS.characters[ownerCharId] : null;
       const invDef = (c?.invocations || []).find(iv => iv.id === selIds[idx])
                   || (c?.invocations || []).find(iv => selIds.includes(iv.id));
       if (!invDef) return null;   // invocation supprimée de la bibliothèque
@@ -2860,9 +2861,9 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
       name: `🐾 ${name} de ${ownerName}`,
       type: 'npc',
       characterId: null, npcId: null, beastId: null,
-      ownerId: src.characterId ? (VS.characters[src.characterId]?.uid || STATE.user?.uid || null) : null,
+      ownerId: ownerCharId ? (VS.characters[ownerCharId]?.uid || STATE.user?.uid || null) : null,
       summonOwnerId: srcId,
-      summonOwnerCharId: src.characterId || null,
+      summonOwnerCharId: ownerCharId,
       summonKind: 'invocation',
       summonInvId,
       summonSortLabel: opt?.label || '',
@@ -3412,76 +3413,64 @@ function _buildAttackOptions(t) {
 
     // ── Invocation : ses actions (sorts connus) deviennent des attaques ──
     if (_isInvoc && Array.isArray(t.summonActions) && t.summonActions.length) {
-      // Perso "créature" virtuel : arme principale = l'attaque de l'invocation
-      // (base des dégâts), stats neutres → aucun modificateur parasite.
       const _cChar = {
+        id: `__summon_${t.id || 'token'}`,
+        nom: t.name || 'Invocation',
         stats: { force:10, dexterite:10, constitution:10, intelligence:10, sagesse:10, charisme:10 },
         statsBonus: {}, maitrises: {},
-        equipement: { 'Main principale': { nom: 'Attaque', degats: t.summonBaseAttack || t.attackDice || '1d4', statAttaque: 'force', isDefault: true } },
+        equipement: { 'Main principale': {
+          nom: 'Attaque',
+          degats: t.summonBaseAttack || t.attackDice || '1d4',
+          statAttaque: 'force',
+          toucherStat: 'force',
+          degatsStat: 'force',
+          portee: t.range || 1,
+          isDefault: true,
+        } },
+        sort_cats: [],
+        elements: [],
       };
-      // L'invocation profite du SET du lanceur : le set léger (spellPmDelta -2)
-      // réduit le coût en mana de ses sorts (payés par le lanceur).
       let _ownerSetPmDelta = 0;
       if (t.summonOwnerId) {
         const _ownerData = VS.tokens[t.summonOwnerId]?.data;
         const _ownerChar = _ownerData?.characterId ? VS.characters[_ownerData.characterId] : null;
         if (_ownerChar) _ownerSetPmDelta = getArmorSetData(_ownerChar).modifiers?.spellPmDelta || 0;
       }
+      const summonTouchBonus = Number.isFinite(parseInt(t.attack)) ? parseInt(t.attack) : 0;
       t.summonActions.forEach((a, ai) => {
-        // Type de l'action : dérivé comme dans la gestion de sort (_getSortTypes),
-        // et PAS depuis un champ `a.types` inexistant sur les actions → sinon TOUTES
-        // les actions étaient filtrées et donc injouables.
-        const _aTypes = _getSortTypes(a);
-        const isOff = _aTypes.includes('offensif')
-                   || (Array.isArray(a.runes) && (a.runes.includes('Lacération')
-                       || (a.afflictionMode === 'laceration' && a.runes.includes('Affliction'))));
-        const soinFormula = (!isOff && (_aTypes.includes('defensif') || a.typeSoin))
-          ? String(_vttSortSoinFormula(a, _cChar) || '').trim() : '';
-        const isHealAct = !isOff && !!soinFormula;
-        // Offensif OU soin gérés ; buffs/utilitaires complexes restent à venir.
-        if (!isOff && !isHealAct) return;
-
-        const basePm = parseInt(a.pm) || 0;
-        // Coût payé sur le perso du LANCEUR (cf. _vttRollAttack → _pmPayerCharId),
-        // réduit par son set léger.
-        const pmCost = Math.max(0, basePm + _ownerSetPmDelta);
-
-        if (isHealAct) {
-          options.push({
-            id: `summon_action_${ai}`,
-            icon: a.icon || '💚',
-            label: a.nom || 'Soin',
-            isHeal: true, friendlyOnly: true,
-            rawDice: soinFormula, dice: soinFormula,
-            portee: parseInt(a.portee) || t.range || 1,
-            pmCost, basePm, pmSetDelta: _ownerSetPmDelta,
-            toucher: 0, dmgStatMod: 0, dmgStatLabel: '—', maitriseBonus: 0,
-            halfOnMiss: false, mods: {},
-          });
-          return;
-        }
-
-        const dmg  = _vttSortDmgFormula(a, _cChar);
-        const elId = a.noyauTypeId || t.summonElementId || 'physique';
-        const elObj = getDamageTypeById(VS.damageTypes, elId);
-        const nbCh = Array.isArray(a.runes) ? a.runes.filter(r => r === 'Chance').length : 0;
-        const rc   = nbCh > 0 ? Math.max(2, 20 - nbCh) : (t.summonChanceRc ?? 20);
-        options.push({
+        const baseRange = (a.portee != null && Number.isFinite(parseInt(a.portee)))
+          ? parseInt(a.portee)
+          : (t.range || 1);
+        const pmRaw = (Number.isFinite(a.pmOverride) && a.pmOverride >= 0)
+          ? a.pmOverride
+          : (parseInt(a.pm) || 0);
+        const pmCost = Math.max(0, pmRaw + _ownerSetPmDelta);
+        const opt = _buildSpellOption(a, {
           id: `summon_action_${ai}`,
-          icon: a.icon || '✨',
-          label: a.nom || 'Action',
-          rawDice: dmg, dice: dmg,
-          portee: parseInt(a.portee) || t.range || 1,
-          pmCost, basePm, pmSetDelta: _ownerSetPmDelta,
-          toucher: t.attack ?? 0,
-          dmgStatMod: 0, dmgStatLabel: '—', maitriseBonus: 0,
-          halfOnMiss: false,
-          typeRules: getDamageTypeRules(VS.damageTypes, elId),
-          damageTypeId: elId,
-          damageTypeIcon: elObj?.icon || '',
-          damageTypeColor: elObj?.color || '',
-          mods: { chance: (rc < 20) ? { rc } : null },
+          sortIdx: `summon_${t.id || 'token'}_${ai}`,
+          spellId: a.id || null,
+          label: a.nom || `Action ${ai + 1}`,
+          c: _cChar,
+          portee: baseRange,
+          pmCost,
+          basePm: Math.max(0, pmRaw),
+          pmRaw,
+          pmSetDelta: _ownerSetPmDelta,
+          fallbackTouchStat: 'force',
+          fallbackDmgStat: 'force',
+          fallbackTouchMod: summonTouchBonus,
+          fallbackDmgMod: 0,
+          touchSetBonus: 0,
+          enchantOnlyAlsoEtat: true,
+          extras: { _summonAction: true },
         });
+        if (!opt) return;
+        if (!opt.autoHit && opt.toucher === undefined) {
+          opt.toucherMod = summonTouchBonus;
+          opt.toucherSetBonus = 0;
+          opt.toucherStatLabel = 'Invoc.';
+        }
+        options.push(_withSpellCooldown(t, opt));
       });
     }
     return options;
@@ -3970,6 +3959,7 @@ function _captureUndoSnapshot(srcId, targetIds) {
   }
   const srcT = VS.tokens[srcId]?.data;
   addChar(_characterForToken(srcT)?.id);
+  if (srcT?.summonOwnerCharId) addChar(srcT.summonOwnerCharId);
   if (srcT?.summonOwnerId) addChar(_characterForToken(VS.tokens[srcT.summonOwnerId]?.data)?.id);
   return { tokens, chars };
 }
@@ -5748,7 +5738,7 @@ async function _vttRollAttack() {
   // sorts/actions sont payés sur le personnage du LANCEUR (summonOwnerId).
   const _srcChar = _characterForToken(src);
   const _ownerTok = src.summonOwnerId ? VS.tokens[src.summonOwnerId]?.data : null;
-  const _pmPayerCharId = _srcChar?.id || (_ownerTok ? _characterForToken(_ownerTok)?.id : null);
+  const _pmPayerCharId = src.summonOwnerCharId || _srcChar?.id || (_ownerTok ? _characterForToken(_ownerTok)?.id : null);
   const _deductPm  = async () => {
     if (opt.pmCost <= 0) return;
     if (_pmPayerCharId) {
