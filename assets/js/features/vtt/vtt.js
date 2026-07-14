@@ -2197,6 +2197,35 @@ const _tokenAttackDistance = (src, tgt, portee = null) => {
 function _vttSpellMods(s) {
   if (!s) return null;
   if (s.designMode === 'classic') {
+    if (s.classicEffect === 'summon') {
+      const inv = (s.invocation && typeof s.invocation === 'object') ? s.invocation : {};
+      const maxInvocations = Math.max(1, parseInt(inv.max ?? s.classicInvocationCount) || 1);
+      const defaultIds = Array.isArray(inv.ids) ? inv.ids.filter(Boolean).slice(0, maxInvocations) : [];
+      const legacyStats = inv.stats || {};
+      const legacy = {
+        attaque: legacyStats.attaque || '1d4 +2',
+        toucher: Number.isFinite(parseInt(legacyStats.toucher)) ? parseInt(legacyStats.toucher) : 2,
+        pv: Number.isFinite(parseInt(legacyStats.pv)) ? parseInt(legacyStats.pv) : 10,
+        ca: Number.isFinite(parseInt(legacyStats.ca)) ? parseInt(legacyStats.ca) : 10,
+        deplacement: Number.isFinite(parseInt(legacyStats.deplacement)) ? parseInt(legacyStats.deplacement) : 3,
+        image: inv.image || null,
+        actions: Array.isArray(inv.actions) ? inv.actions : [],
+        name: s.nom || 'Invocation',
+      };
+      return {
+        concentration: null,
+        invocation: {
+          maxInvocations,
+          defaultIds,
+          elementId: s.noyauTypeId || null,
+          legacy,
+          bonuses: { nbP: 0, nbCh: 0, nbProt: 0, nbAmp: 0 },
+          concentration: false,
+          duree: Math.max(1, parseInt(s.classicDuration ?? s.dureeBase) || 2),
+          nbInvocations: defaultIds.length || maxInvocations,
+        },
+      };
+    }
     const stateId = s.classicStateId || s.enchantEtatId || s.afflictionEtatId || null;
     if (!stateId) return null;
     const friendly = s.classicTarget === 'ally' || s.classicTarget === 'self';
@@ -4001,6 +4030,9 @@ function _vttSpellPills(o) {
     }
   } else if (o.isRegen) {
     pills.push(`<span class="vtt-aopt-pill heal" style="color:#22c38e;border-color:#22c38e66;background:#22c38e1a">💚 ${_esc(_effectDisplay(o, o.dice || '2d4/tour'))}</span>`);
+  } else if (o.isInvocation) {
+    const maxInv = o.mods?.invocation?.maxInvocations || o.mods?.invocation?.nbInvocations || 1;
+    pills.push(`<span class="vtt-aopt-pill" style="color:#f3d27d;border-color:#a1620766;background:#a162071a">🐾 ${maxInv} invocation${maxInv > 1 ? 's' : ''}</span>`);
   } else if (o.isAffliction) {
     const elemIcon = o.afflictionElementIcon || '💀';
     const elemCol  = o.afflictionElementColor || '#ef4444';

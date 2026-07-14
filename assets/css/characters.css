@@ -18005,6 +18005,118 @@ body .modal:has(.sh-admin-modal.is-equipment-slots) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 9px;
 }
+.classic-spell-note {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 58px;
+  padding: 9px 10px;
+  border: 1px solid rgba(161, 98, 7, .28);
+  border-radius: 7px;
+  background: rgba(161, 98, 7, .08);
+}
+.classic-spell-note b {
+  color: #f3d27d;
+  font-size: .7rem;
+}
+.classic-spell-note span {
+  margin-top: 3px;
+  color: var(--text-dim);
+  font-size: .62rem;
+  line-height: 1.35;
+}
+.classic-inv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 9px;
+  margin-top: 11px;
+  max-height: 240px;
+  overflow: auto;
+  padding-right: 2px;
+}
+.classic-inv-card {
+  display: grid;
+  grid-template-columns: auto 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .025);
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, transform .15s ease;
+}
+.classic-inv-card:hover {
+  border-color: rgba(232, 184, 75, .45);
+  background: rgba(232, 184, 75, .06);
+}
+.classic-inv-card.is-on {
+  border-color: rgba(232, 184, 75, .75);
+  background: rgba(232, 184, 75, .12);
+}
+.classic-inv-card input {
+  margin: 0;
+  accent-color: #e8b84b;
+}
+.classic-inv-portrait {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: rgba(161, 98, 7, .16);
+  color: #f3d27d;
+  font-size: 1.1rem;
+}
+.classic-inv-portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.classic-inv-body {
+  min-width: 0;
+}
+.classic-inv-body b,
+.classic-inv-body small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.classic-inv-body b {
+  color: var(--text);
+  font-size: .74rem;
+}
+.classic-inv-body small {
+  margin-top: 3px;
+  color: var(--text-dim);
+  font-size: .62rem;
+}
+.classic-inv-foot,
+.classic-inv-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  color: var(--text-dim);
+  font-size: .66rem;
+  line-height: 1.35;
+}
+.classic-inv-empty {
+  align-items: flex-start;
+  flex-direction: column;
+  padding: 12px;
+  border: 1px dashed rgba(232, 184, 75, .3);
+  border-radius: 7px;
+  background: rgba(232, 184, 75, .045);
+}
+.classic-inv-empty strong {
+  color: #f3d27d;
+  font-size: .72rem;
+}
 .classic-spell-subfields { padding-top: 10px; }
 .classic-spell-preview {
   margin-bottom: 16px;
