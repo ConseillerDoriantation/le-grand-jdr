@@ -1372,6 +1372,9 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
 
   if (isClassic && s.classicEffect === 'heal' && s.soin) {
     chips.push({ icon:'💚', val:_calcSortSoin(s, c), color:'#22c38e', lbl:'Soin' });
+  } else if (isClassic && s.classicEffect === 'summon') {
+    const maxInv = Math.max(1, parseInt(s.invocation?.max ?? s.classicInvocationCount) || 1);
+    chips.push({ icon:'🐾', val:`${maxInv} invocation${maxInv > 1 ? 's' : ''}`, color:'#a16207', lbl:'Créature invoquée' });
   } else if (isClassic && s.classicEffect === 'utility' && s.effet) {
     chips.push({ icon:'✨', val:s.effet, color:'#b47fff', lbl:'Effet utilitaire' });
   }
@@ -1563,7 +1566,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
         ${nts.length ? nts.map(t => `<span style="--c:${t.color || '#888'}" title="Élément ${_esc(t.label || '')}">${t.icon || '✦'}<i>${_esc(t.label || 'Élément')}</i></span>`).join('') : '<span class="is-empty"><i>◇</i><b>Neutre</b></span>'}
       </span>
       <span class="cs-spellrecipe-arrow">›</span>
-      <span class="cs-spellrecipe-runes"><span style="--c:#5bc0eb"><i>✦</i><b>${s.classicEffect === 'damage' ? 'Dégâts' : s.classicEffect === 'heal' ? 'Soin' : 'Utilitaire'}</b></span></span>
+      <span class="cs-spellrecipe-runes"><span style="--c:#5bc0eb"><i>✦</i><b>${s.classicEffect === 'damage' ? 'Dégâts' : s.classicEffect === 'heal' ? 'Soin' : s.classicEffect === 'summon' ? 'Invocation' : 'Utilitaire'}</b></span></span>
     </div>
   </div>` : `<div class="cs-spellrecipe ${recipeRepeats > 1 ? 'has-twin' : ''}" aria-label="Composition du sort">
     <span class="cs-spellrecipe-label">RECETTE</span>
@@ -2233,20 +2236,31 @@ function _classicSelectOptions(options, selected) {
   return options.map(([value, label]) => `<option value="${_esc(value)}" ${value === selected ? 'selected' : ''}>${_esc(label)}</option>`).join('');
 }
 
+function _classicInvocationIdsFromDOM(max = 1) {
+  return [...document.querySelectorAll('input[name="s-classic-invocation-id"]:checked')]
+    .map(input => input.value)
+    .filter(Boolean)
+    .slice(0, Math.max(1, parseInt(max) || 1));
+}
+
 function _buildClassicSortFromDOM(idx = -1, prevList = []) {
   const prev = idx >= 0 ? (prevList[idx] || {}) : {};
   const effectKind = document.getElementById('s-classic-effect')?.value || 'damage';
-  const target = document.getElementById('s-classic-target')?.value || (effectKind === 'heal' ? 'ally' : 'enemy');
-  const stateEnabled = !!document.getElementById('s-classic-state-enabled')?.checked;
+  const target = effectKind === 'summon'
+    ? 'any'
+    : (document.getElementById('s-classic-target')?.value || (effectKind === 'heal' ? 'ally' : 'enemy'));
+  const stateEnabled = effectKind !== 'summon' && !!document.getElementById('s-classic-state-enabled')?.checked;
   const stateId = stateEnabled ? (document.getElementById('s-classic-state')?.value || '') : '';
   const stateMeta = stateId ? _conditionsLibCache?.find(condition => condition.id === stateId) : null;
-  const zoneEnabled = target !== 'self' && !!document.getElementById('s-classic-zone-enabled')?.checked;
+  const zoneEnabled = effectKind !== 'summon' && target !== 'self' && !!document.getElementById('s-classic-zone-enabled')?.checked;
   const elementId = document.getElementById('s-classic-element')?.value || '';
   const element = _classicDamageTypes.find(type => type.id === elementId);
   const duration = _classicInt('s-classic-duration', 0, 0, 99);
   const pm = _classicInt('s-classic-pm', 0, 0, 99);
   const types = effectKind === 'damage' ? ['offensif']
     : effectKind === 'heal' ? ['defensif'] : ['utilitaire'];
+  const invCount = _classicInt('s-classic-invocation-count', 1, 1, 12);
+  const invIds = effectKind === 'summon' ? _classicInvocationIdsFromDOM(invCount) : [];
   const hostileState = stateId && target === 'enemy';
   const friendlyState = stateId && (target === 'ally' || target === 'self');
   const previousValidation = _sortValidationState(prev);
@@ -2297,6 +2311,15 @@ function _buildClassicSortFromDOM(idx = -1, prevList = []) {
     afflictionMode: hostileState ? 'etat' : null,
     afflictionEtatId: hostileState ? stateId : null,
     afflictionSaveStat: hostileState ? (document.getElementById('s-classic-state-stat')?.value || 'sagesse') : '',
+    invocation: effectKind === 'summon'
+      ? {
+          ids: invIds,
+          max: invCount,
+          stats: prev.invocation?.stats || null,
+          actions: Array.isArray(prev.invocation?.actions) ? prev.invocation.actions : [],
+          image: prev.invocation?.image || '',
+        }
+      : null,
     mjAutoHit: !!document.getElementById('s-classic-auto-hit')?.checked,
     mjAlwaysMax: STATE.isAdmin
       ? !!document.getElementById('s-classic-always-max')?.checked
@@ -2316,24 +2339,36 @@ function _refreshClassicSpellForm() {
   const target = document.getElementById('s-classic-target')?.value || 'enemy';
   const stateOn = !!document.getElementById('s-classic-state-enabled')?.checked;
   const zoneOn = target !== 'self' && !!document.getElementById('s-classic-zone-enabled')?.checked;
+  const isSummon = effect === 'summon';
   const formula = document.getElementById('s-classic-formula-group');
-  if (formula) formula.style.display = effect === 'utility' ? 'none' : '';
+  if (formula) formula.style.display = (effect === 'utility' || isSummon) ? 'none' : '';
   const effectStat = document.getElementById('s-classic-effect-stat-group');
-  if (effectStat) effectStat.style.display = effect === 'utility' ? 'none' : '';
+  if (effectStat) effectStat.style.display = (effect === 'utility' || isSummon) ? 'none' : '';
   const formulaLabel = document.getElementById('s-classic-formula-label');
   if (formulaLabel) formulaLabel.textContent = effect === 'heal' ? 'Formule de soin' : 'Formule de dégâts';
   const touch = document.getElementById('s-classic-touch-group');
   if (touch) touch.style.display = effect === 'damage' ? '' : 'none';
+  const autoHit = document.getElementById('s-classic-auto-hit-group');
+  if (autoHit) autoHit.style.display = effect === 'damage' ? '' : 'none';
   const state = document.getElementById('s-classic-state-fields');
   if (state) state.style.display = stateOn ? '' : 'none';
   const save = document.getElementById('s-classic-save-fields');
   if (save) save.style.display = stateOn && target === 'enemy' ? '' : 'none';
   const zone = document.getElementById('s-classic-zone-fields');
-  if (zone) zone.style.display = zoneOn ? '' : 'none';
+  if (zone) zone.style.display = (zoneOn && !isSummon) ? '' : 'none';
   const zoneToggle = document.getElementById('s-classic-zone-toggle');
-  if (zoneToggle) zoneToggle.style.display = target === 'self' ? 'none' : '';
+  if (zoneToggle) zoneToggle.style.display = (target === 'self' || isSummon) ? 'none' : '';
+  const stateSection = document.getElementById('s-classic-state-section');
+  if (stateSection) stateSection.style.display = isSummon ? 'none' : '';
+  const targetGroup = document.getElementById('s-classic-target-group');
+  if (targetGroup) targetGroup.style.display = isSummon ? 'none' : '';
+  const invocationSection = document.getElementById('s-classic-invocation-section');
+  if (invocationSection) invocationSection.style.display = isSummon ? '' : 'none';
+  document.querySelectorAll('.classic-inv-card').forEach(card => {
+    card.classList.toggle('is-on', !!card.querySelector('input[name="s-classic-invocation-id"]')?.checked);
+  });
   const range = document.getElementById('s-classic-range');
-  if (range) range.disabled = target === 'self';
+  if (range) range.disabled = target === 'self' && !isSummon;
 
   const preview = document.getElementById('s-classic-preview');
   if (preview) {
@@ -2342,7 +2377,8 @@ function _refreshClassicSpellForm() {
     const action = { action:'Action', action_bonus:'Action Bonus', reaction:'Réaction' }[spell.actionMode] || 'Action';
     const effectText = spell.classicEffect === 'damage' ? `⚔️ ${spell.degats || 'Formule manquante'}`
       : spell.classicEffect === 'heal' ? `💚 ${spell.soin || 'Formule manquante'}`
-        : `✨ ${spell.effet || 'Effet utilitaire'}`;
+        : spell.classicEffect === 'summon' ? `🐾 ${spell.invocation?.max || 1} invocation${(spell.invocation?.max || 1) > 1 ? 's' : ''}`
+          : `✨ ${spell.effet || 'Effet utilitaire'}`;
     const zoneText = spell.zoneW && spell.zoneH
       ? ` · zone ${spell.zoneW}×${spell.zoneH}` : '';
     preview.innerHTML = `
@@ -2350,6 +2386,7 @@ function _refreshClassicSpellForm() {
       <p>${_esc(effectText)}</p>
       <small>Portée ${spell.portee} case${spell.portee > 1 ? 's' : ''}${_esc(zoneText)}${spell.classicDuration ? ` · ${spell.classicDuration} tour${spell.classicDuration > 1 ? 's' : ''}` : ' · instantané'}</small>
       ${condition ? `<small>${_esc(`${condition.icon || ''} ${condition.label}`)}${spell.classicStateDC ? ` · JS ${_esc(spell.classicStateSaveStat)} DD ${spell.classicStateDC}` : ''}</small>` : ''}
+      ${spell.classicEffect === 'summon' && spell.invocation?.ids?.length ? `<small>${spell.invocation.ids.length} invocation${spell.invocation.ids.length > 1 ? 's' : ''} présélectionnée${spell.invocation.ids.length > 1 ? 's' : ''}</small>` : ''}
       ${spell.cooldownTurns ? `<small>Recharge : ${spell.cooldownTurns} tour${spell.cooldownTurns > 1 ? 's' : ''}</small>` : ''}`;
   }
 }
@@ -2387,10 +2424,41 @@ function _classicStateChanged() {
   _refreshClassicSpellForm();
 }
 
+function _renderClassicInvocationPicker(selectedIds = [], max = 1) {
+  const invs = _libInvs();
+  const selected = new Set((selectedIds || []).filter(Boolean));
+  const limit = Math.max(1, parseInt(max) || 1);
+  if (!invs.length) {
+    return `<div class="classic-inv-empty">
+      <strong>Aucune invocation enregistrée.</strong>
+      <span>Crée d'abord des invocations depuis le menu “Mes invocations” du grimoire.</span>
+    </div>`;
+  }
+  return `<div class="classic-inv-grid">
+    ${invs.map(iv => {
+      const checked = selected.has(iv.id);
+      const hpTxt = (iv.currentHp != null && iv.stats?.pv != null && parseInt(iv.currentHp) < parseInt(iv.stats.pv))
+        ? `${iv.currentHp}/${iv.stats.pv}` : (iv.stats?.pv ?? '?');
+      return `<label class="classic-inv-card ${checked ? 'is-on' : ''}">
+        <input type="checkbox" name="s-classic-invocation-id" value="${_esc(iv.id)}" ${checked ? 'checked' : ''}>
+        <span class="classic-inv-portrait">${iv.image ? `<img src="${iv.image}" alt="">` : '🐾'}</span>
+        <span class="classic-inv-body">
+          <b>${_esc(iv.nom || 'Invocation')}</b>
+          <small>❤️ ${hpTxt} · 🛡️ ${iv.stats?.ca ?? 10} · ⚔️ ${_esc(iv.stats?.attaque || '1d4 +2')}</small>
+        </span>
+      </label>`;
+    }).join('')}
+  </div>
+  <div class="classic-inv-foot">
+    <span>Le VTT proposera ces créatures en priorité. Limite : ${limit} invocation${limit > 1 ? 's' : ''}.</span>
+    <span>Bibliothèque : menu “Mes invocations”.</span>
+  </div>`;
+}
+
 async function _openClassicSortModal(idx, s, allTypes) {
   _classicDamageTypes = Array.isArray(allTypes) ? allTypes : [];
-  const effect = s?.classicEffect || (s?.soin ? 'heal' : s?.degats ? 'damage' : 'utility');
-  const target = s?.classicTarget || (effect === 'heal' ? 'ally' : 'enemy');
+  const effect = s?.classicEffect || (s?.invocation ? 'summon' : s?.soin ? 'heal' : s?.degats ? 'damage' : 'utility');
+  const target = effect === 'summon' ? 'any' : (s?.classicTarget || (effect === 'heal' ? 'ally' : 'enemy'));
   const hasZone = (parseInt(s?.zoneW) || 0) > 0 || (parseInt(s?.zoneH) || 0) > 0;
   const hasState = !!(s?.classicStateId || s?.enchantEtatId || s?.afflictionEtatId);
   const stateId = s?.classicStateId || s?.enchantEtatId || s?.afflictionEtatId || '';
@@ -2403,6 +2471,8 @@ async function _openClassicSortModal(idx, s, allTypes) {
   const legacyElement = selectedElement ? allTypes.find(type => type.id === selectedElement) : null;
   if (legacyElement && !elements.some(type => type.id === selectedElement)) elements = [...elements, legacyElement];
   const formula = effect === 'heal' ? (s?.soin || '') : (s?.degats || '');
+  const invocationMax = Math.max(1, parseInt(s?.invocation?.max ?? s?.classicInvocationCount) || 1);
+  const invocationIds = Array.isArray(s?.invocation?.ids) ? s.invocation.ids : [];
   const validation = _sortValidationState(s);
   const _modalOpen = _itemEditCtx ? pushModal : openModal;
   _modalOpen('', `
@@ -2431,19 +2501,19 @@ async function _openClassicSortModal(idx, s, allTypes) {
             <section class="classic-spell-section">
               <div class="classic-spell-section-head"><span>2</span><div><b>Effet principal</b><small>La formule saisie est finale : aucun bonus de rune ne sera ajouté.</small></div></div>
               <div class="classic-spell-grid">
-                <label><span>Nature</span><select id="s-classic-effect" class="input-field" data-change="_classicRefresh">${_classicSelectOptions([['damage','Dégâts'],['heal','Soin'],['utility','Utilitaire']], effect)}</select></label>
+                <label><span>Nature</span><select id="s-classic-effect" class="input-field" data-change="_classicRefresh">${_classicSelectOptions([['damage','Dégâts'],['heal','Soin'],['summon','Invocation'],['utility','Utilitaire']], effect)}</select></label>
                 <label><span>Élément</span><select id="s-classic-element" class="input-field"><option value="">— Neutre / aucun —</option>${elements.map(type => `<option value="${_esc(type.id)}" ${type.id === selectedElement ? 'selected' : ''}>${_esc(`${type.icon || ''} ${type.label}`)}</option>`).join('')}</select></label>
                 <label id="s-classic-formula-group" class="classic-spell-span-2"><span id="s-classic-formula-label">Formule</span><input id="s-classic-formula" class="input-field" value="${_esc(formula)}" placeholder="Ex. 2d8+3 ou 12"></label>
                 <label id="s-classic-effect-stat-group"><span>Bonus de caractéristique</span><select id="s-classic-effect-stat" class="input-field">${_SPELL_STAT_OPTIONS(s?.degatsStat || 'none')}</select></label>
                 <label id="s-classic-touch-group"><span>Jet d’attaque</span><select id="s-classic-touch-stat" class="input-field">${_SPELL_STAT_OPTIONS(s?.toucherStat)}</select></label>
-                <label class="classic-spell-check"><input type="checkbox" id="s-classic-auto-hit" ${s?.mjAutoHit ? 'checked' : ''}><span><b>Réussite automatique</b><small>Le sort ne demande aucun jet de toucher.</small></span></label>
+                <label id="s-classic-auto-hit-group" class="classic-spell-check"><input type="checkbox" id="s-classic-auto-hit" ${s?.mjAutoHit ? 'checked' : ''}><span><b>Réussite automatique</b><small>Le sort ne demande aucun jet de toucher.</small></span></label>
               </div>
             </section>
 
             <section class="classic-spell-section">
               <div class="classic-spell-section-head"><span>3</span><div><b>Ciblage et zone</b><small>La zone sera placée dans la portée du sort sur la table virtuelle.</small></div></div>
               <div class="classic-spell-grid">
-                <label><span>Cible</span><select id="s-classic-target" class="input-field" data-change="_classicTargetChanged">${_classicSelectOptions([['enemy','Ennemi'],['ally','Allié'],['self','Lanceur'],['any','Toute cible']], target)}</select></label>
+                <label id="s-classic-target-group"><span>Cible</span><select id="s-classic-target" class="input-field" data-change="_classicTargetChanged">${_classicSelectOptions([['enemy','Ennemi'],['ally','Allié'],['self','Lanceur'],['any','Toute cible']], target)}</select></label>
                 <label><span>Portée</span><div class="classic-spell-unit"><input type="number" id="s-classic-range" class="input-field" min="0" max="99" value="${s?.portee ?? 1}"><span>cases</span></div></label>
                 <label id="s-classic-zone-toggle" class="classic-spell-check classic-spell-span-2"><input type="checkbox" id="s-classic-zone-enabled" data-change="_classicRefresh" ${hasZone ? 'checked' : ''}><span><b>Sort de zone plaçable</b><small>Toutes les cibles compatibles dans la zone subissent l’effet.</small></span></label>
                 <div id="s-classic-zone-fields" class="classic-spell-zone classic-spell-span-2">
@@ -2454,7 +2524,16 @@ async function _openClassicSortModal(idx, s, allTypes) {
               </div>
             </section>
 
-            <section class="classic-spell-section">
+            <section class="classic-spell-section" id="s-classic-invocation-section">
+              <div class="classic-spell-section-head"><span>4</span><div><b>Invocation</b><small>Choisis combien de créatures le sort peut placer, et lesquelles proposer par défaut.</small></div></div>
+              <div class="classic-spell-grid">
+                <label><span>Nombre maximum</span><div class="classic-spell-unit"><input type="number" id="s-classic-invocation-count" class="input-field" min="1" max="12" value="${invocationMax}"><span>invoc.</span></div></label>
+                <div class="classic-spell-note"><b>Placement VTT</b><span>Au lancement, le joueur pose les invocations une par une dans la portée du sort.</span></div>
+              </div>
+              ${_renderClassicInvocationPicker(invocationIds, invocationMax)}
+            </section>
+
+            <section class="classic-spell-section" id="s-classic-state-section">
               <div class="classic-spell-section-head"><span>4</span><div><b>État appliqué</b><small>Optionnel, en plus de l’effet principal.</small></div></div>
               <label class="classic-spell-check"><input type="checkbox" id="s-classic-state-enabled" data-change="_classicRefresh" ${hasState ? 'checked' : ''}><span><b>Appliquer un état</b><small>Buff sur un allié, affliction avec sauvegarde sur un ennemi.</small></span></label>
               <div id="s-classic-state-fields" class="classic-spell-grid classic-spell-subfields">
@@ -4686,12 +4765,12 @@ async function _saveClassicSort(idx, btn = null) {
 
   const effect = document.getElementById('s-classic-effect')?.value || 'damage';
   const formula = document.getElementById('s-classic-formula')?.value?.trim() || '';
-  if (effect !== 'utility' && !formula) {
+  if (!['utility', 'summon'].includes(effect) && !formula) {
     showNotif(`Indique une formule de ${effect === 'heal' ? 'soin' : 'dégâts'}.`, 'warning');
     document.getElementById('s-classic-formula')?.focus();
     return false;
   }
-  if (effect !== 'utility' && !_isClassicFormulaValid(formula)) {
+  if (!['utility', 'summon'].includes(effect) && !_isClassicFormulaValid(formula)) {
     showNotif('Formule invalide. Utilise par exemple 2d8+3 ou 12.', 'warning');
     document.getElementById('s-classic-formula')?.focus();
     return false;

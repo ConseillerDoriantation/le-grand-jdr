@@ -949,6 +949,14 @@ function _buildClassicSortResume(s) {
     lines.push({ icon:'⚔️', label:String(s.degats), detail:'Dégâts · formule finale' });
   } else if (s?.classicEffect === 'heal' && s?.soin) {
     lines.push({ icon:'💚', label:String(s.soin), detail:'Soin - formule finale' });
+  } else if (s?.classicEffect === 'summon') {
+    const maxInv = Math.max(1, parseInt(s?.invocation?.max ?? s?.classicInvocationCount) || 1);
+    const selected = Array.isArray(s?.invocation?.ids) ? s.invocation.ids.filter(Boolean).length : 0;
+    lines.push({
+      icon:'🐾',
+      label:`${maxInv} invocation${maxInv > 1 ? 's' : ''}`,
+      detail:selected ? `${selected} présélectionnée${selected > 1 ? 's' : ''} · placement libre dans la portée` : 'Choix au lancement · placement libre dans la portée',
+    });
   } else {
     lines.push({ icon:'✨', label:s?.effet || 'Effet utilitaire', detail:'Aucun dégât ni soin automatique' });
   }

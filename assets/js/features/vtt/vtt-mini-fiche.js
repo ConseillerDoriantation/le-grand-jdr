@@ -648,6 +648,10 @@ function _vttSpellChips(s, c) {
   if (isClassic && s.classicEffect === 'utility' && s.effet) {
     chips.push({ icon:'✨', val:s.effet, color:'#b47fff', lbl:'Effet utilitaire' });
   }
+  if (isClassic && s.classicEffect === 'summon') {
+    const maxInv = Math.max(1, parseInt(s.invocation?.max ?? s.classicInvocationCount) || 1);
+    chips.push({ icon:'🐾', val:`${maxInv} invocation${maxInv > 1 ? 's' : ''}`, color:'#a16207', lbl:'Créature invoquée' });
+  }
   if (isClassic && s.classicStateId) {
     chips.push({
       icon:s.classicStateIcon || '◈',
