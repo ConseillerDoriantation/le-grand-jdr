@@ -2784,38 +2784,53 @@ const PAGES = {
     const activeView   = achState.view   ?? 'galerie';
 
     content.innerHTML = `<div class="hall-root">
-    <div class="hall-hero">
-      <div class="hall-eyebrow"></div>
-      <h1 class="hall-title">Hauts-Faits</h1>
-      <p class="hall-sub">Les exploits de la compagnie, consignés pour l'éternité.</p>
-      <div class="hall-counters">
-        <div class="hall-counter${activeFilter === 'all' ? ' active' : ''}" style="--c:#7eb0ff" data-filter="all" data-action="_achSetFilter" data-val="all">
-          <div class="hall-counter-icon">🏆</div>
-          <div class="hall-counter-info"><div class="hall-counter-num">${total}</div><div class="hall-counter-lbl">Total</div></div>
+    <section class="hall-command" aria-label="Filtres des hauts-faits">
+      <div class="hall-command-head">
+        <div class="hall-command-title">
+          <span class="hall-kicker">Hauts-Faits</span>
+          <strong>Galerie de campagne</strong>
+          <small>${total} ${total > 1 ? 'hauts-faits archivés' : 'haut-fait archivé'}</small>
         </div>
-        ${CATS.map(c => `
-        <div class="hall-counter${activeFilter === c.id ? ' active' : ''}" style="--c:${c.color}" data-filter="${c.id}" data-action="_achSetFilter" data-val="${c.id}">
-          <div class="hall-counter-icon">${c.emoji}</div>
-          <div class="hall-counter-info"><div class="hall-counter-num">${byCat[c.id] || 0}</div><div class="hall-counter-lbl">${c.label}</div></div>
-        </div>`).join('')}
-      </div>
-    </div>
-    <div class="controls-bar">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <div class="view-toggle">
-          <button class="view-tab${activeView !== 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="galerie">▦ Galerie</button>
-          <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline">⋮ Chronologie</button>
+        <div class="hall-command-tools">
+          <div class="view-toggle">
+            <button class="view-tab${activeView !== 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="galerie">▦ Galerie</button>
+            <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline">⋮ Chronologie</button>
+          </div>
+          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="openAchievementCategoriesAdmin">Catégories</button>` : ''}
+          ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" data-action="openAchievementModal">+ Ajouter</button>` : ''}
         </div>
-        ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="openAchievementCategoriesAdmin">Catégories</button>` : ''}
-        ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" data-action="openAchievementModal">+ Ajouter</button>` : ''}
       </div>
-      <div class="search-wrap">
-        <span style="color:var(--text-dim);font-size:.85rem">⌕</span>
-        <input type="text" placeholder="Rechercher…" id="ach-search-input"
-          value="${_esc(achState.search || '')}"
-          data-input="_achSetSearch">
+      <div class="hall-filter-board">
+        <button type="button" class="hall-filter-card${activeFilter === 'all' ? ' active' : ''}" style="--c:#7eb0ff" data-filter="all" data-action="_achSetFilter" data-val="all">
+          <span class="hall-filter-icon">🏆</span>
+          <span class="hall-filter-copy">
+            <strong>Tous les hauts-faits</strong>
+            <small><span class="hall-filter-num">${total}</span> ${total > 1 ? 'archives' : 'archive'}</small>
+          </span>
+          <span class="hall-filter-cta">Filtrer</span>
+        </button>
+        ${CATS.map(c => {
+          const count = byCat[c.id] || 0;
+          return `
+        <button type="button" class="hall-filter-card${activeFilter === c.id ? ' active' : ''}" style="--c:${c.color}" data-filter="${c.id}" data-action="_achSetFilter" data-val="${c.id}">
+          <span class="hall-filter-icon">${c.emoji}</span>
+          <span class="hall-filter-copy">
+            <strong>${_esc(c.label)}</strong>
+            <small><span class="hall-filter-num">${count}</span> ${count > 1 ? 'hauts-faits' : 'haut-fait'}</small>
+          </span>
+          <span class="hall-filter-cta">Filtrer</span>
+        </button>`;
+        }).join('')}
       </div>
-    </div>
+      <div class="hall-command-search">
+        <div class="search-wrap">
+          <span style="color:var(--text-dim);font-size:.85rem">⌕</span>
+          <input type="text" placeholder="Rechercher…" id="ach-search-input"
+            value="${_esc(achState.search || '')}"
+            data-input="_achSetSearch">
+        </div>
+      </div>
+    </section>
     <div class="hall-content">
       <div id="ach-content">${appSplashHtml('')}</div>
     </div>
