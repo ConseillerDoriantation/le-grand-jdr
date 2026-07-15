@@ -2769,13 +2769,16 @@ const PAGES = {
     const items = STATE.isAdmin ? allItems : allItems.filter(a => !a.secret);
     const content = document.getElementById('main-content');
 
-    const CATS = [
-      { id: 'epique',   label: 'Épique',   emoji: '⚔️',  color: '#4f8cff' },
-      { id: 'comique',  label: 'Comique',  emoji: '🎭',  color: '#e8b84b' },
-      { id: 'histoire', label: 'Histoire', emoji: '📖',  color: '#22c38e' },
-    ];
-    const byCat = { epique: 0, comique: 0, histoire: 0 };
-    items.forEach(a => { const c = a.categorie || 'epique'; if (c in byCat) byCat[c]++; });
+    const CATS = Array.isArray(achState.categories) && achState.categories.length
+      ? achState.categories
+      : [
+        { id: 'epique',   label: 'Épique',   emoji: '⚔️',  color: '#4f8cff' },
+        { id: 'comique',  label: 'Comique',  emoji: '🎭',  color: '#e8b84b' },
+        { id: 'histoire', label: 'Histoire', emoji: '📖',  color: '#22c38e' },
+      ];
+    const defaultCat = CATS[0]?.id || 'epique';
+    const byCat = Object.fromEntries(CATS.map(c => [c.id, 0]));
+    items.forEach(a => { const c = a.categorie || defaultCat; if (c in byCat) byCat[c]++; });
     const total        = items.length;
     const activeFilter = achState.filter ?? 'all';
     const activeView   = achState.view   ?? 'galerie';
@@ -2803,6 +2806,7 @@ const PAGES = {
           <button class="view-tab${activeView !== 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="galerie">▦ Galerie</button>
           <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline">⋮ Chronologie</button>
         </div>
+        ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="openAchievementCategoriesAdmin">Catégories</button>` : ''}
         ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" data-action="openAchievementModal">+ Ajouter</button>` : ''}
       </div>
       <div class="search-wrap">
@@ -2846,6 +2850,8 @@ const PAGES = {
       { g:'combat', ic:'🎒', t:"Slots d'équipement", s:'Emplacements utilisés sur les fiches', a:'#22c38e', fn:'openEquipmentSlotsAdmin', mod:'characters' },
       { g:'combat', ic:'🧩', t:"Types d'armure", s:'Types boutique et bonus de set', a:'#7eb0ff', fn:'openArmorSetsAdmin', mod:'characters' },
       { g:'combat', ic:'✦',  t:'Système de sorts', s:'Forge de runes ou création classique', a:'#e8b84b', fn:'openSpellSystemAdmin', mod:'characters' },
+      { g:'table',  ic:'🏆', t:'Catégories de hauts-faits', s:'Galerie, filtres et couleurs', a:'#e8b84b', fn:'openAchievementCategoriesAdmin', mod:'achievements', requires:'achievements' },
+      { g:'table',  ic:'👹', t:'Rangs du bestiaire', s:'Menaces, filtres et couleurs', a:'#ff5a7e', fn:'openBestiaryRanksAdmin', mod:'bestiary', requires:'bestiaire' },
       { g:'table',  ic:'🎲', t:'Compétences de dés',  s:'Jets personnalisés',              a:'#4f8cff', fn:'_ouvrirGestionDes',      mod:'histoire' },
       { g:'table',  ic:'😄', t:'Émotes VTT',          s:'Réactions sur la table',          a:'#22c38e', fn:'_ouvrirGestionEmotes',   mod:'vtt/vtt' },
       { g:'table',  ic:'🎭', t:'États & conditions',  s:'Effets appliqués aux tokens',     a:'#f97316', fn:'_vttConditionConfig',    mod:'vtt/vtt' },
@@ -2856,7 +2862,7 @@ const PAGES = {
         <span class="adm-tile-txt"><span class="adm-tile-t">${_esc(x.t)}</span><span class="adm-tile-s">${_esc(x.s)}</span></span>
         <span class="adm-tile-arrow">→</span>
       </button>`;
-    const grid = (g) => `<div class="adm-tiles">${SETTINGS.filter(x => x.g === g).map(tile).join('')}</div>`;
+    const grid = (g) => `<div class="adm-tiles">${SETTINGS.filter(x => x.g === g && (!x.requires || isFeatureEnabled(x.requires))).map(tile).join('')}</div>`;
 
     const adv = STATE.adventure || {};
     const memberUids = new Set([...(adv.accessList || []), ...(adv.players || []), ...(adv.admins || [])]);

@@ -18,6 +18,7 @@ import { sortCharactersForDisplay, modStr } from '../shared/char-stats.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import { openShopPicker, getRareteColor } from '../shared/shop-picker.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
+import { registerActions } from '../core/actions.js';
 import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { spellActionCardHtml } from '../shared/spell-action-card.js';
@@ -88,11 +89,70 @@ function _bstNextOrderIndex() {
   return orders.length ? Math.max(...orders) + 1 : STORE.creatures.length;
 }
 
-const RANG_STYLE = {
-  classique: { label:'Classique', color:'#94a3b8', glow:'rgba(148,163,184,0.18)', border:'rgba(148,163,184,0.40)', bg:'rgba(148,163,184,0.10)' },
-  elite:     { label:'Elite',     color:'#e8b84b', glow:'rgba(232,184,75,0.22)',  border:'rgba(232,184,75,0.40)',  bg:'rgba(232,184,75,0.12)'  },
-  boss:      { label:'Boss',      color:'#ff5a7e', glow:'rgba(255,90,126,0.24)',  border:'rgba(255,90,126,0.40)',  bg:'rgba(255,90,126,0.12)'  },
-};
+const DEFAULT_BESTIARY_RANKS = [
+  { id:'classique', label:'Classique', plural:'Classiques', color:'#94a3b8', glow:'rgba(148,163,184,0.18)', border:'rgba(148,163,184,0.40)', bg:'rgba(148,163,184,0.10)', enabled:true },
+  { id:'elite',     label:'Elite',     plural:'Elites',     color:'#e8b84b', glow:'rgba(232,184,75,0.22)',  border:'rgba(232,184,75,0.40)',  bg:'rgba(232,184,75,0.12)',  enabled:true },
+  { id:'boss',      label:'Boss',      plural:'Boss',       color:'#ff5a7e', glow:'rgba(255,90,126,0.24)',  border:'rgba(255,90,126,0.40)',  bg:'rgba(255,90,126,0.12)',  enabled:true },
+];
+const BESTIARY_RANK_PALETTE = ['#94a3b8', '#e8b84b', '#ff5a7e', '#4f8cff', '#22c38e', '#b47fff', '#f97316', '#f8fafc'];
+let BESTIARY_RANKS = DEFAULT_BESTIARY_RANKS.map(r => ({ ...r }));
+let RANG_STYLE = Object.fromEntries(BESTIARY_RANKS.map(r => [r.id, r]));
+
+function _rankId(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || `rang_${Date.now()}`;
+}
+
+function _normalizeBestiaryRank(raw = {}, index = 0) {
+  const base = DEFAULT_BESTIARY_RANKS[index] || DEFAULT_BESTIARY_RANKS[0];
+  const label = String(raw.label || raw.nom || base.label || 'Rang').trim();
+  const color = String(raw.color || base.color || '#94a3b8').trim();
+  return {
+    id: _rankId(raw.id || label),
+    label,
+    plural: String(raw.plural || raw.labelPlural || `${label}s`).trim(),
+    color,
+    glow: raw.glow || `${color}2e`,
+    border: raw.border || `${color}66`,
+    bg: raw.bg || `${color}1a`,
+    enabled: raw.enabled !== false,
+  };
+}
+
+function _setBestiaryRanks(ranks = DEFAULT_BESTIARY_RANKS) {
+  const normalized = (Array.isArray(ranks) && ranks.length ? ranks : DEFAULT_BESTIARY_RANKS)
+    .map(_normalizeBestiaryRank)
+    .filter(r => r.enabled !== false);
+  BESTIARY_RANKS = normalized.length ? normalized : DEFAULT_BESTIARY_RANKS.map(r => ({ ...r }));
+  RANG_STYLE = Object.fromEntries(BESTIARY_RANKS.map(r => [r.id, r]));
+  if (STORE.filterRang && !RANG_STYLE[STORE.filterRang]) STORE.filterRang = '';
+}
+
+function _defaultRankId() {
+  return BESTIARY_RANKS[0]?.id || DEFAULT_BESTIARY_RANKS[0].id;
+}
+
+function _rankStyle(id) {
+  return RANG_STYLE[id] || RANG_STYLE[_defaultRankId()] || DEFAULT_BESTIARY_RANKS[0];
+}
+
+async function _loadBestiaryRanks() {
+  const doc = await getDocData('bestiary_meta', 'ranks').catch(() => null);
+  _setBestiaryRanks(Array.isArray(doc?.ranks) && doc.ranks.length ? doc.ranks : DEFAULT_BESTIARY_RANKS);
+  return BESTIARY_RANKS;
+}
+
+async function _saveBestiaryRanks(ranks) {
+  const normalized = (ranks || []).map(_normalizeBestiaryRank).filter(r => r.enabled !== false);
+  await saveDoc('bestiary_meta', 'ranks', { ranks: normalized });
+  _setBestiaryRanks(normalized);
+  return BESTIARY_RANKS;
+}
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // ARMES NATURELLES + ACTIONS â€” mÃ©tadonnÃ©es partagÃ©es avec la modal de sorts.
@@ -454,7 +514,7 @@ function _beastMatchesFilters(c, { search = STORE.searchVal, type = STORE.filter
   const fRang = _norm(rang);
   const matchSearch = !q || _searchIncludes(_beastSearchText(c), search);
   const matchType = !fType || _norm(c.type) === fType;
-  const matchRang = !fRang || _norm(c.rang || 'classique') === fRang;
+  const matchRang = !fRang || _norm(c.rang || _defaultRankId()) === fRang;
   return matchSearch && matchType && matchRang && _beastMatchesPrep(c, prep);
 }
 
@@ -584,7 +644,7 @@ function _bstUpdateCarac(id, key, val) {
 // Changement de rang : sauve + met Ã  jour cartes + panneau (couleurs + label)
 function _bstSelectRangPanel(id, rang) {
   _bstQueueSave(id, { rang });
-  const rs = RANG_STYLE[rang] || RANG_STYLE.classique;
+  const rs = _rankStyle(rang);
   document.querySelectorAll(`.bst-card[data-beast-id="${id}"]`).forEach(card => {
     card.style.setProperty('--rang-c', rs.color);
     card.style.setProperty('--rang-glow', rs.glow);
@@ -598,7 +658,7 @@ function _bstSelectRangPanel(id, rang) {
   }
   document.querySelectorAll('[data-bst-rang-btn]').forEach(btn => {
     const r = btn.dataset.bstRangBtn;
-    const rst = RANG_STYLE[r] || RANG_STYLE.classique;
+    const rst = _rankStyle(r);
     const active = r === rang;
     btn.classList.toggle('active', active);
     btn.style.color       = active ? rst.color : '';
@@ -943,6 +1003,8 @@ export async function renderBestiary() {
   if (!STATE.isAdmin || STORE._authUid !== STATE.user?.uid) STORE.viewAsUid = null;
   STORE._authUid = STATE.user?.uid || null;
 
+  await _loadBestiaryRanks();
+
   // Admin : charger la liste des bestiaires disponibles
   if (STATE.isAdmin) {
     const meta = await getDocData('bestiary_meta', 'list');
@@ -1005,6 +1067,11 @@ export async function renderBestiary() {
     if (_bstShouldSkipLiveRender()) return;
     _bstApplyData(data);
     if (_bstSig() === _bstRenderSig) return;
+    _render();
+  });
+
+  watchPageDoc('bst-ranks', 'bestiary_meta', 'ranks', 'bestiaire', doc => {
+    _setBestiaryRanks(doc?.ranks);
     _render();
   });
 
@@ -1174,7 +1241,7 @@ async function _bstCreateDraft() {
   if (!STATE.isAdmin) return;
   const col = STORE.currentCol || 'bestiary';
   const data = {
-    nom: 'Nouvelle creature', emoji: '?', rang: 'classique',
+    nom: 'Nouvelle creature', emoji: '?', rang: _defaultRankId(),
     type: '', environnement: '', niveau: 0, dangerositeXp: 0,
     pvMax: 0, pmMax: 0, ca: 0, vitesse: 0, initiative: 0,
     force: 0, dexterite: 0, constitution: 0, intelligence: 0, sagesse: 0, charisme: 0,
@@ -1211,8 +1278,11 @@ function _render() {
   const hiddenCount = STORE.creatures.filter(c => c.hidden).length;
   const actionCount = STORE.creatures.reduce((n, c) => n + (Array.isArray(c.actions) ? c.actions.length : 0), 0);
   const lootCount = STORE.creatures.reduce((n, c) => n + (Array.isArray(c.butins) ? c.butins.length : 0), 0);
-  const byRang = { classique: 0, elite: 0, boss: 0 };
-  STORE.creatures.forEach(c => { const r = c.rang || 'classique'; if (byRang[r] !== undefined) byRang[r]++; });
+  const byRang = Object.fromEntries(BESTIARY_RANKS.map(r => [r.id, 0]));
+  STORE.creatures.forEach(c => {
+    const r = RANG_STYLE[c.rang] ? c.rang : _defaultRankId();
+    byRang[r] = (byRang[r] || 0) + 1;
+  });
 
   const activeBest = (STORE.bestiaireList || []).find(b => b.id === STORE.bestiaireId);
   const playerLabel = _isViewingPlayer()
@@ -1223,9 +1293,7 @@ function _render() {
       data-bst-action="setType" data-type="${_esc(t)}">${_esc(t)}</button>`).join('');
   const rangPills = [
     { key: '', label: 'Tous', count: STORE.creatures.length, tone: '#7eb0ff' },
-    { key: 'classique', label: 'Classiques', count: byRang.classique, tone: RANG_STYLE.classique.color },
-    { key: 'elite', label: 'Elites', count: byRang.elite, tone: RANG_STYLE.elite.color },
-    { key: 'boss', label: 'Boss', count: byRang.boss, tone: RANG_STYLE.boss.color },
+    ...BESTIARY_RANKS.map(r => ({ key: r.id, label: r.plural || r.label, count: byRang[r.id] || 0, tone: r.color })),
   ];
   const prepPills = _isAdminView() ? [
     { key:'', label:'Tous', count: STORE.creatures.length },
@@ -1254,6 +1322,7 @@ function _render() {
           : 'Catalogue des creatures, rencontres et informations tactiques'}</p>
       </div>
       <div class="bst-head-actions">
+        ${STATE.isAdmin ? `<button class="bst-tool-btn" data-action="openBestiaryRanksAdmin">Rangs</button>` : ''}
         ${STATE.isAdmin ? `<button class="bst-tool-btn" data-bst-action="exportBeasts">Exporter</button>` : ''}
         ${STATE.isAdmin ? `<button class="bst-primary-btn" data-bst-action="createDraft">+ Creature</button>` : ''}
       </div>
@@ -1385,7 +1454,7 @@ function _renderCompareTray() {
       ${beasts.map(c => `<div class="bst-compare-cell is-head">
         <button data-bst-action="toggleCompare" data-id="${_esc(c.id)}" title="Retirer">x</button>
         <strong>${_esc(c.nom || 'Creature')}</strong>
-        <span>${_esc((RANG_STYLE[c.rang || 'classique'] || RANG_STYLE.classique).label)}</span>
+        <span>${_esc(_rankStyle(c.rang).label)}</span>
       </div>`).join('')}
       ${rows.map(([label, getter]) => `
         <div class="bst-compare-cell is-label">${label}</div>
@@ -1420,8 +1489,8 @@ function _renderTacticalSummary(c) {
 
 function _renderCard(c) {
   const isActive = c.id === STORE.activeId;
-  const rang = c.rang || 'classique';
-  const rs = RANG_STYLE[rang] || RANG_STYLE.classique;
+  const rang = c.rang || _defaultRankId();
+  const rs = _rankStyle(rang);
   const track = STORE.tracker[c.id] || {};
   const pvMax = _isAdminView() ? (parseInt(c.pvMax) || 0) : 0;
   const pvActuel = track.pvActuel !== undefined ? parseInt(track.pvActuel) : pvMax;
@@ -1484,8 +1553,8 @@ function _bstDeductArea(val, placeholder, attrs, style = '') {
 // â”€â”€ Panneau dÃ©tail â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _renderPanel(c) {
   if (!c) return '';
-  const rang  = c.rang || 'classique';
-  const rs    = RANG_STYLE[rang] || RANG_STYLE.classique;
+  const rang  = c.rang || _defaultRankId();
+  const rs    = _rankStyle(rang);
 
   // MJ : panneau entiÃ¨rement Ã©ditable (auto-save Firestore)
   if (_isAdminView()) return _renderPanelAdmin(c, rs);
@@ -1735,8 +1804,9 @@ function _renderPanelAdmin(c, rs) {
       <button class="bst-panel-close" data-bst-action="close">x</button>
       <div class="bst-panel-hero-info">
         <div class="bst-panel-rang-selector">
-          ${Object.entries(RANG_STYLE).map(([r, rst]) => {
-            const active = (c.rang||'classique') === r;
+          ${BESTIARY_RANKS.map(rst => {
+            const r = rst.id;
+            const active = (c.rang || _defaultRankId()) === r;
             return `<button type="button" data-bst-rang-btn="${r}"
               class="bst-rang-btn${active?' active':''}"
               style="${active?`color:${rst.color};border-color:${rst.color};background:${rst.color}1a`:''}"
@@ -2012,6 +2082,85 @@ function _bstClose() {
   STORE.activeId = null;
   _syncActivePanel();
 }
+
+let _bstRankDraft = [];
+
+function _renderBestiaryRanksAdmin() {
+  const rows = _bstRankDraft.map((rank, index) => `
+    <article class="bst-rank-admin-card" style="--rank-color:${_esc(rank.color || '#94a3b8')};--rank-glow:${_esc(rank.glow || 'rgba(148,163,184,.18)')}" data-index="${index}">
+      <div class="bst-rank-admin-preview">
+        <span class="bst-rank-admin-badge">${_esc(rank.label || 'Rang')}</span>
+        <div class="bst-rank-admin-name">
+          <strong>${_esc(rank.label || 'Rang')}</strong>
+          <small>Apparaît sur les cartes et la fiche créature</small>
+        </div>
+      </div>
+
+      <label class="bst-rank-admin-field">
+        <span>Nom du rang</span>
+        <input class="input-field" value="${_esc(rank.label || '')}" data-input="_bstRankField" data-index="${index}" data-field="label" placeholder="Ex. Elite">
+      </label>
+
+      <label class="bst-rank-admin-field">
+        <span>Libellé des filtres</span>
+        <input class="input-field" value="${_esc(rank.plural || '')}" data-input="_bstRankField" data-index="${index}" data-field="plural" placeholder="Ex. Elites">
+      </label>
+
+      <div class="bst-rank-admin-color">
+        <label class="bst-rank-color-picker">
+          <span>Couleur</span>
+          <input type="color" value="${_esc(rank.color || '#94a3b8')}" data-change="_bstRankField" data-index="${index}" data-field="color">
+        </label>
+        <div class="bst-rank-swatches" aria-label="Couleurs rapides">
+          ${BESTIARY_RANK_PALETTE.map(color => `
+            <button type="button" class="bst-rank-swatch${(rank.color || '').toLowerCase() === color.toLowerCase() ? ' is-active' : ''}"
+              style="--sw:${color}" data-action="_bstRankColor" data-index="${index}" data-color="${color}" aria-label="Couleur ${color}"></button>`).join('')}
+        </div>
+      </div>
+
+      <div class="bst-rank-admin-actions">
+        <button type="button" class="btn btn-outline btn-sm" data-action="_bstRankMove" data-index="${index}" data-dir="-1" title="Monter" ${index === 0 ? 'disabled' : ''}>↑</button>
+        <button type="button" class="btn btn-outline btn-sm" data-action="_bstRankMove" data-index="${index}" data-dir="1" title="Descendre" ${index === _bstRankDraft.length - 1 ? 'disabled' : ''}>↓</button>
+        <button type="button" class="btn btn-outline btn-sm is-danger" data-action="_bstRankDelete" data-index="${index}" title="Supprimer">×</button>
+      </div>
+    </article>`).join('');
+
+  openModal('', `
+    <div class="sh-admin-modal is-bestiary-ranks">
+      <div class="sh-admin-head">
+        <div class="sh-admin-head-ico">👹</div>
+        <div class="sh-admin-head-title">
+          <h2>Rangs du bestiaire</h2>
+          <small>Ces rangs alimentent les filtres, les cartes, la fiche des créatures et les exports de cette aventure.</small>
+        </div>
+        <button class="sh-admin-close" data-action="_bstRankClose" aria-label="Fermer">×</button>
+      </div>
+      <div class="sh-admin-body bst-rank-admin-body">
+        <div class="bst-rank-admin-guide">
+          <div><b>Rang tactique</b><small>Le nom est affiché sur chaque créature et dans les exports.</small></div>
+          <div><b>Filtre de galerie</b><small>Le libellé pluriel sert aux boutons de filtre du bestiaire.</small></div>
+        </div>
+        <div class="bst-rank-admin-list">
+        ${rows || '<div class="eqs-admin-empty">Aucun rang. Ajoute au moins un rang pour classer les créatures.</div>'}
+        </div>
+        <button class="bst-rank-admin-add" data-action="_bstRankAdd">+ Ajouter un rang</button>
+      </div>
+      <div class="sh-admin-footer">
+        <button class="btn btn-outline btn-sm" data-action="_bstRankClose">Annuler</button>
+        <button class="btn btn-gold btn-sm" data-action="_bstRankSave">Enregistrer</button>
+      </div>
+    </div>`);
+}
+
+export async function openBestiaryRanksAdmin() {
+  if (!STATE.isAdmin) return;
+  await _ensureFeatureCss('shop');
+  await _ensureFeatureCss('bestiaire');
+  await _loadBestiaryRanks();
+  _bstRankDraft = BESTIARY_RANKS.map(r => ({ ...r }));
+  _renderBestiaryRanksAdmin();
+}
+
 function _bstSetRang(rang) { STORE.filterRang = rang; _render(); }
 function _bstSelectRang(rang) {
   const sel = document.getElementById('bst-rang-selector');
@@ -2020,7 +2169,7 @@ function _bstSelectRang(rang) {
   sel.querySelectorAll('[data-rang-btn]').forEach(btn => {
     const r = btn.dataset.rangBtn;
     const active = r === rang;
-    const rst = RANG_STYLE[r] || RANG_STYLE.classique;
+    const rst = _rankStyle(r);
     btn.style.fontWeight = active ? '700' : '400';
     btn.style.border     = `1px solid ${active ? rst.border : 'var(--border)'}`;
     btn.style.background = active ? rst.bg  : 'var(--bg-elevated)';
@@ -2415,7 +2564,7 @@ function _bstBuildExportHtml(list) {
     return rows.length ? `<ul>${rows.map(([l, v]) => `<li><b>${l} :</b> ${v.map(e).join(', ')}</li>`).join('')}</ul>` : '';
   };
   const card = (c) => {
-    const rs = RANG_STYLE[c.rang || 'classique'] || RANG_STYLE.classique;
+    const rs = _rankStyle(c.rang);
     const meta = [rs.label, c.type, c.environnement].filter(Boolean).map(e).join(' - ');
     const vit = [c.pvMax && `${e(String(c.pvMax))} PV`, c.pmMax && `${e(String(c.pmMax))} PM`,
       c.ca && `CA ${e(String(c.ca))}`, c.vitesse && `${e(String(c.vitesse))} m`,
@@ -2438,7 +2587,7 @@ function _bstBuildExportHtml(list) {
   };
   // DonnÃ©es structurÃ©es (pour analyse automatique : id de dÃ©gÃ¢t â†’ libellÃ© rÃ©solu).
   const data = list.map(c => ({
-    nom: c.nom || '', rang: c.rang || 'classique', type: c.type || '', environnement: c.environnement || '',
+    nom: c.nom || '', rang: c.rang || _defaultRankId(), type: c.type || '', environnement: c.environnement || '',
     niveau: c.niveau ?? null, xp: c.dangerositeXp ?? null,
     pvMax: c.pvMax ?? null, pmMax: c.pmMax ?? null, ca: c.ca ?? null, vitesse: c.vitesse ?? null, initiative: c.initiative ?? null,
     tokenW: c.tokenW ?? 1, tokenH: c.tokenH ?? 1,
@@ -2542,4 +2691,60 @@ Object.assign(bstHandlers, {
 
   // Suppression crÃ©ature
   deleteBeast:    (el, ev) => { ev?.stopPropagation?.(); deleteBeast(el.dataset.id); },
+});
+
+registerActions({
+  openBestiaryRanksAdmin: () => openBestiaryRanksAdmin(),
+  _bstRankClose: () => closeModal(),
+  _bstRankField: el => {
+    const rank = _bstRankDraft[Number(el.dataset.index)];
+    if (!rank) return;
+    rank[el.dataset.field] = el.value;
+    if (el.dataset.field === 'label' && !rank.plural) rank.plural = `${el.value}s`;
+    if (el.dataset.field === 'color') {
+      rank.glow = `${el.value}2e`;
+      rank.border = `${el.value}66`;
+      rank.bg = `${el.value}1a`;
+    }
+  },
+  _bstRankColor: btn => {
+    const rank = _bstRankDraft[Number(btn.dataset.index)];
+    if (!rank) return;
+    rank.color = btn.dataset.color || rank.color;
+    rank.glow = `${rank.color}2e`;
+    rank.border = `${rank.color}66`;
+    rank.bg = `${rank.color}1a`;
+    _renderBestiaryRanksAdmin();
+  },
+  _bstRankMove: btn => {
+    const from = Number(btn.dataset.index);
+    const to = from + Number(btn.dataset.dir);
+    if (!_bstRankDraft[from] || to < 0 || to >= _bstRankDraft.length) return;
+    [_bstRankDraft[from], _bstRankDraft[to]] = [_bstRankDraft[to], _bstRankDraft[from]];
+    _renderBestiaryRanksAdmin();
+  },
+  _bstRankDelete: btn => {
+    const index = Number(btn.dataset.index);
+    if (!_bstRankDraft[index]) return;
+    _bstRankDraft.splice(index, 1);
+    _renderBestiaryRanksAdmin();
+  },
+  _bstRankAdd: () => {
+    _bstRankDraft.push(_normalizeBestiaryRank({ id: `rang_${Date.now()}`, label: 'Nouveau rang', plural: 'Nouveaux rangs', color: '#94a3b8' }, _bstRankDraft.length));
+    _renderBestiaryRanksAdmin();
+  },
+  _bstRankSave: async () => {
+    if (!_bstRankDraft.some(r => String(r.label || '').trim())) {
+      showNotif('Ajoute au moins un rang.', 'error');
+      return;
+    }
+    try {
+      await _saveBestiaryRanks(_bstRankDraft);
+      showNotif('Rangs du bestiaire enregistrés.', 'success');
+      closeModal();
+      _render();
+    } catch (error) {
+      notifySaveError(error);
+    }
+  },
 });

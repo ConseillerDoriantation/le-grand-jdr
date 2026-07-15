@@ -173,8 +173,8 @@ export async function saveArmorSetSettings(sets) {
   const { saveDoc } = await import('../data/firestore.js');
   await saveDoc('world', DOC_ID, normalized);
   _settings = normalized;
-  await _propagateArmorTypeRenames(_detectArmorTypeRenames(previous.sets, normalized.sets));
-  return _settings;
+  const propagation = await _propagateArmorTypeRenames(_detectArmorTypeRenames(previous.sets, normalized.sets));
+  return { ..._settings, propagation };
 }
 
 function _detectArmorTypeRenames(previousSets = [], nextSets = []) {
@@ -407,21 +407,33 @@ async function _ensureAdminUi() {
         }, _draft.length));
         _renderAdmin();
       },
-      _armorSetsSave: async () => {
+      _armorSetsSave: async (button) => {
         const missing = _draft.find(set => set.enabled !== false && !String(set.type || '').trim());
         if (missing) { showNotif("Chaque set actif doit avoir un type d'armure.", 'error'); return; }
+        const oldText = button?.textContent || '';
         try {
           const before = getArmorSetSettings().sets || [];
           const next = _draft.map(set => ({ ...set, label: set.type || set.label || '' }));
           const renames = _detectArmorTypeRenames(before, _normalizeSettings({ sets: next }, _baseSets).sets);
+          if (button) {
+            button.disabled = true;
+            button.textContent = renames.size ? 'Propagation...' : 'Enregistrement...';
+          }
+          if (renames.size) showNotif('Renommage détecté : propagation dans les objets, personnages et contenus liés...', 'info');
           const result = await saveArmorSetSettings(next);
+          const updated = Number(result?.propagation?.updated || 0);
           showNotif(renames.size
-            ? `Types enregistrés. ${renames.size} renommage${renames.size > 1 ? 's' : ''} propagé${renames.size > 1 ? 's' : ''}.`
+            ? `Types enregistrés. ${renames.size} renommage${renames.size > 1 ? 's' : ''} propagé${renames.size > 1 ? 's' : ''} dans ${updated} document${updated > 1 ? 's' : ''}.`
             : 'Types et bonus de set enregistrés.', 'success');
           closeModalDirect();
           return result;
         } catch (error) {
           showNotif(error?.message || 'Erreur de sauvegarde.', 'error');
+        } finally {
+          if (button) {
+            button.disabled = false;
+            button.textContent = oldText || 'Enregistrer';
+          }
         }
       },
     });

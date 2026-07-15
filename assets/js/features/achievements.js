@@ -14,6 +14,7 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
 import { STATE } from '../core/state.js';
+import { _ensureFeatureCss } from '../core/navigation.js';
 import { attachDropAndResize } from '../shared/image-crop.js';
 import { sortCharactersForDisplay } from '../shared/char-stats.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
@@ -21,11 +22,68 @@ import PAGES from './pages.js';
 import { registerActions } from '../core/actions.js';
 
 // ── Constantes ────────────────────────────────────────────────────────────────
-const CATS = [
-  { id: 'epique',   label: '⚔️ Épique',   color: '#4f8cff', glow: 'rgba(79,140,255,0.14)'  },
-  { id: 'comique',  label: '🎭 Comique',  color: '#e8b84b', glow: 'rgba(232,184,75,0.14)'  },
-  { id: 'histoire', label: '📖 Histoire', color: '#22c38e', glow: 'rgba(34,195,142,0.14)'  },
+const DEFAULT_ACH_CATS = [
+  { id:'epique',   label:'Épique',   emoji:'⚔️',  color:'#4f8cff', glow:'rgba(79,140,255,0.18)',  line:'rgba(79,140,255,0.35)', enabled:true },
+  { id:'comique',  label:'Comique',  emoji:'🎭',  color:'#e8b84b', glow:'rgba(232,184,75,0.18)',  line:'rgba(232,184,75,0.35)', enabled:true },
+  { id:'histoire', label:'Histoire', emoji:'📖',  color:'#22c38e', glow:'rgba(34,195,142,0.18)', line:'rgba(34,195,142,0.35)', enabled:true },
 ];
+let ACH_CATS = DEFAULT_ACH_CATS.map(c => ({ ...c }));
+const ACH_CAT_PALETTE = ['#4f8cff', '#e8b84b', '#22c38e', '#b47fff', '#ff5a7e', '#55d6aa', '#f97316', '#f8fafc'];
+
+function _achCategoryId(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || `categorie_${Date.now()}`;
+}
+
+function _normalizeAchCategory(raw = {}, index = 0) {
+  const base = DEFAULT_ACH_CATS[index] || DEFAULT_ACH_CATS[0];
+  const label = String(raw.label || raw.nom || base.label || 'Catégorie').trim();
+  const emoji = String(raw.emoji || base.emoji || '🏆').trim();
+  const color = String(raw.color || base.color || '#7eb0ff').trim();
+  return {
+    id: _achCategoryId(raw.id || label),
+    label,
+    emoji,
+    color,
+    glow: raw.glow || `${color}29`,
+    line: raw.line || `${color}59`,
+    enabled: raw.enabled !== false,
+  };
+}
+
+function _setAchievementCategories(categories = DEFAULT_ACH_CATS) {
+  const normalized = (Array.isArray(categories) && categories.length ? categories : DEFAULT_ACH_CATS)
+    .map(_normalizeAchCategory)
+    .filter(c => c.enabled !== false);
+  ACH_CATS = normalized.length ? normalized : DEFAULT_ACH_CATS.map(c => ({ ...c }));
+  if (STORE.filter !== 'all' && !ACH_CATS.some(c => c.id === STORE.filter)) STORE.filter = 'all';
+}
+
+function _achDefaultCategoryId() {
+  return ACH_CATS[0]?.id || DEFAULT_ACH_CATS[0].id;
+}
+
+function _achModalCats() {
+  return ACH_CATS.map(c => ({ ...c, modalLabel: `${c.emoji || ''} ${c.label || ''}`.trim() }));
+}
+
+async function _loadAchievementCategories() {
+  const doc = await getDocData('achievements_meta', 'categories').catch(() => null);
+  _setAchievementCategories(Array.isArray(doc?.categories) && doc.categories.length ? doc.categories : DEFAULT_ACH_CATS);
+  return ACH_CATS;
+}
+
+async function _saveAchievementCategories(categories) {
+  const normalized = (categories || []).map(_normalizeAchCategory).filter(c => c.enabled !== false);
+  await saveDoc('achievements_meta', 'categories', { categories: normalized });
+  _setAchievementCategories(normalized);
+  return ACH_CATS;
+}
 
 
 const STORE = {
@@ -153,7 +211,8 @@ export function openAchievementModal(id = null) {
   const curTrame = ex?.missionId ? trame.find(m => m.id === ex.missionId) : null;
   _achUploader?.destroy(); _achUploader = null;
 
-  const curCat = CATS.find(c => c.id === (ex?.categorie || 'epique')) || CATS[0];
+  const modalCats = _achModalCats();
+  const curCat = modalCats.find(c => c.id === (ex?.categorie || _achDefaultCategoryId())) || modalCats[0];
 
   openModal('', `
     <div class="achm">
@@ -182,10 +241,10 @@ export function openAchievementModal(id = null) {
         <div class="form-group">
           <label>Catégorie</label>
           <div class="achm-cats">
-            ${CATS.map(c => `<button type="button" id="ach-cat-${c.id}" class="achm-cat"
-              data-action="_achSelectCat" data-id="${c.id}" style="--cc:${c.color}">${c.label}</button>`).join('')}
+            ${modalCats.map(c => `<button type="button" id="ach-cat-${c.id}" class="achm-cat"
+              data-action="_achSelectCat" data-id="${c.id}" style="--cc:${c.color}">${c.modalLabel}</button>`).join('')}
           </div>
-          <input type="hidden" id="ach-categorie" value="${ex?.categorie || 'epique'}">
+          <input type="hidden" id="ach-categorie" value="${ex?.categorie || _achDefaultCategoryId()}">
         </div>
         <div class="achm-grid2">
           <div class="form-group">
@@ -343,7 +402,7 @@ export function openAchievementModal(id = null) {
   _achSelectCat = (catId) => {
     document.getElementById('ach-categorie').value = catId;
     let active = null;
-    CATS.forEach(c => {
+    _achModalCats().forEach(c => {
       const btn = document.getElementById(`ach-cat-${c.id}`);
       const on  = c.id === catId;
       if (on) active = c;
@@ -352,11 +411,11 @@ export function openAchievementModal(id = null) {
     });
     // Sync en-tête
     if (active) {
-      if (_headCat) _headCat.textContent = active.label;
+      if (_headCat) _headCat.textContent = active.modalLabel || active.label;
       if (_headWrap) _headWrap.style.setProperty('--cc', active.color);
     }
   };
-  _achSelectCat(ex?.categorie || 'epique');
+  _achSelectCat(ex?.categorie || _achDefaultCategoryId());
 
   _achToggleContrib = (charId) => {
     const hidden = document.getElementById('ach-contributeurs');
@@ -420,7 +479,7 @@ async function saveAchievement(id = '') {
     const contributeurs = contribRaw ? contribRaw.split(',').filter(Boolean) : [];
     const payload = {
       titre,
-      categorie:    document.getElementById('ach-categorie')?.value || 'epique',
+      categorie:    document.getElementById('ach-categorie')?.value || _achDefaultCategoryId(),
       description:  document.getElementById('ach-desc')?.value?.trim()  || '',
       imageUrl,
       emoji:        document.getElementById('ach-emoji')?.value?.trim() || '🏆',
@@ -537,7 +596,7 @@ function _sortAchievementsByDate(items, desc = false) {
 }
 
 function _achCategoryFor(item) {
-  return ACH_CATS.find(c => c.id === (item?.categorie || 'epique')) || ACH_CATS[0];
+  return ACH_CATS.find(c => c.id === (item?.categorie || _achDefaultCategoryId())) || ACH_CATS[0];
 }
 
 function _achGalleryOverviewHtml(items) {
@@ -624,8 +683,8 @@ function _refreshAchievementCounters() {
   const all = STORE.items || [];
   const visible = STATE.isAdmin ? all : all.filter(a => !a.secret);
   const counts = { all: visible.length };
-  CATS.forEach(c => {
-    counts[c.id] = visible.filter(a => (a.categorie || 'epique') === c.id).length;
+  ACH_CATS.forEach(c => {
+    counts[c.id] = visible.filter(a => (a.categorie || _achDefaultCategoryId()) === c.id).length;
   });
   document.querySelectorAll('.hall-counter[data-filter]').forEach(el => {
     const num = el.querySelector('.hall-counter-num');
@@ -639,7 +698,7 @@ function _mergeCategoryOrder(catId, catOrder, globalOrder) {
   const missingIds  = allIds.filter(id => !globalIds.includes(id));
   const fullOrder   = [...globalIds, ...missingIds];
   const catIds     = new Set((STORE.items || [])
-    .filter(a => (a.categorie || 'epique') === catId)
+    .filter(a => (a.categorie || _achDefaultCategoryId()) === catId)
     .map(a => a.id));
   const cleanOrder = catOrder.filter(id => catIds.has(id));
   const others     = fullOrder.filter(id => !catIds.has(id));
@@ -739,12 +798,6 @@ function _achOpenImage(url) {
 
 // ── JUSTIFIED LAYOUT ENGINE ───────────────────────────────────────────────────
 
-const ACH_CATS = [
-  { id:'epique',   label:'Épique',   emoji:'⚔️',  color:'#4f8cff', glow:'rgba(79,140,255,0.18)',  line:'rgba(79,140,255,0.35)'  },
-  { id:'comique',  label:'Comique',  emoji:'🎭',  color:'#e8b84b', glow:'rgba(232,184,75,0.18)',  line:'rgba(232,184,75,0.35)'  },
-  { id:'histoire', label:'Histoire', emoji:'📖',  color:'#22c38e', glow:'rgba(34,195,142,0.18)', line:'rgba(34,195,142,0.35)' },
-];
-
 // Mesure les aspect-ratios manquants en chargeant les images
 async function _achMeasureRatios(items) {
   return Promise.all(items.map(item => {
@@ -790,7 +843,7 @@ function _achCardHTML(item, isAdmin) {
   const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
   const chars     = sortCharactersForDisplay(STATE.characters || []);
   const contribs  = (item.contributeurs || []).map(id => chars.find(c => c.id === id)).filter(Boolean);
-  const cat       = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
+  const cat       = _achCategoryFor(item);
 
   const contribsHtml = contribs.length ? `
     <div class="ach-contribs">
@@ -851,7 +904,7 @@ async function _achRenderJustified(catId, items, container) {
   container.innerHTML = rows.map((row, rowIdx) => `
     <div class="ach-row" style="height:${row.h}px">
       ${row.items.map((item, colIdx) => {
-        const icat    = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
+        const icat    = _achCategoryFor(item);
         const noDesc  = !item.description ? ' no-desc' : '';
         const delay   = (rowIdx * 4 + colIdx) * 30;
         return `<div class="ach-item${isAdmin ? ' ach-sortable-item' : ''}${noDesc}" data-ach-id="${item.id}"
@@ -958,7 +1011,7 @@ function _renderTimeline(items) {
   }
 
   const cardHTML = (item) => {
-    const cat     = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
+    const cat     = _achCategoryFor(item);
     const contribs = (item.contributeurs || []).map(id => chars.find(c => c.id === id)).filter(Boolean);
     const imgEl   = item.imageUrl
       ? `<img class="tl-card-img" src="${item.imageUrl}" alt="${_esc(item.nom || item.titre || '')}" loading="lazy">`
@@ -1001,7 +1054,7 @@ function _renderTimeline(items) {
   const nodeHTML = (group) => {
     const datedItems = group.items.filter(item => parseDate(item.date));
     const source = datedItems[0] || group.items[0];
-    const cat = ACH_CATS.find(c => c.id === (source.categorie || 'epique')) || ACH_CATS[0];
+    const cat = _achCategoryFor(source);
     const dateText = group.dateKey ? _formatDateFr(group.dateKey) : _formatDateFr(source.date);
     const dotText = group.items.length > 1 ? group.items.length : cat.emoji;
     return `<div class="tl-node-wrap">
@@ -1183,7 +1236,7 @@ async function _achRenderContent() {
   // 1. Filtre secret (joueurs ne voient pas les HF secrets)
   let filtered = isAdmin ? all : all.filter(a => !a.secret);
   // 2. Filtre catégorie
-  if (filter !== 'all') filtered = filtered.filter(a => (a.categorie || 'epique') === filter);
+  if (filter !== 'all') filtered = filtered.filter(a => (a.categorie || _achDefaultCategoryId()) === filter);
   // 3. Filtre par perso contributeur
   if (selectedCharIds.length) filtered = filtered.filter(a => _achMatchesCharSelection(a, selectedCharIds));
   // 4. Recherche
@@ -1301,7 +1354,7 @@ function _achToggleTimelineDir() {
 function _achOpenLightbox(itemId) {
   const item = (STORE.lightboxItems || {})[itemId] || (STORE.items || []).find(a => a.id === itemId);
   if (!item) return;
-  const cat       = ACH_CATS.find(c => c.id === (item.categorie || 'epique')) || ACH_CATS[0];
+  const cat       = _achCategoryFor(item);
   const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
   const chars     = sortCharactersForDisplay(STATE.characters || []);
   const contribs  = (item.contributeurs || []).map(id => chars.find(c => c.id === id)).filter(Boolean);
@@ -1357,6 +1410,78 @@ function _achOpenLightbox(itemId) {
   document.addEventListener('keydown', onKey);
   document.body.appendChild(overlay);
 }
+
+let _achCatDraft = [];
+
+function _renderAchievementCategoriesAdmin() {
+  const rows = _achCatDraft.map((cat, index) => `
+    <article class="ach-cat-admin-card" style="--cat-color:${_esc(cat.color || '#7eb0ff')};--cat-glow:${_esc(cat.glow || 'rgba(126,176,255,.18)')}" data-index="${index}">
+      <div class="ach-cat-admin-preview">
+        <input class="ach-cat-admin-emoji" value="${_esc(cat.emoji || '')}" data-input="_achCatField" data-index="${index}" data-field="emoji" placeholder="🏆" maxlength="4" aria-label="Icône">
+        <div class="ach-cat-admin-name">
+          <strong>${_esc(cat.label || 'Catégorie')}</strong>
+          <small>Filtre, badge et fiche de haut-fait</small>
+        </div>
+      </div>
+
+      <label class="ach-cat-admin-field">
+        <span>Nom affiché</span>
+        <input class="input-field" value="${_esc(cat.label || '')}" data-input="_achCatField" data-index="${index}" data-field="label" placeholder="Ex. Épique">
+      </label>
+
+      <div class="ach-cat-admin-color">
+        <label class="ach-cat-color-picker">
+          <span>Couleur</span>
+          <input type="color" value="${_esc(cat.color || '#7eb0ff')}" data-change="_achCatField" data-index="${index}" data-field="color">
+        </label>
+        <div class="ach-cat-swatches" aria-label="Couleurs rapides">
+          ${ACH_CAT_PALETTE.map(color => `
+            <button type="button" class="ach-cat-swatch${(cat.color || '').toLowerCase() === color.toLowerCase() ? ' is-active' : ''}"
+              style="--sw:${color}" data-action="_achCatColor" data-index="${index}" data-color="${color}" aria-label="Couleur ${color}"></button>`).join('')}
+        </div>
+      </div>
+
+      <div class="ach-cat-admin-actions">
+        <button type="button" class="btn btn-outline btn-sm" data-action="_achCatMove" data-index="${index}" data-dir="-1" title="Monter" ${index === 0 ? 'disabled' : ''}>↑</button>
+        <button type="button" class="btn btn-outline btn-sm" data-action="_achCatMove" data-index="${index}" data-dir="1" title="Descendre" ${index === _achCatDraft.length - 1 ? 'disabled' : ''}>↓</button>
+        <button type="button" class="btn btn-outline btn-sm is-danger" data-action="_achCatDelete" data-index="${index}" title="Supprimer">×</button>
+      </div>
+    </article>`).join('');
+
+  openModal('', `
+    <div class="sh-admin-modal is-ach-categories">
+      <div class="sh-admin-head">
+        <div class="sh-admin-head-ico">🏆</div>
+        <div class="sh-admin-head-title">
+          <h2>Catégories de hauts-faits</h2>
+          <small>Ces catégories alimentent la galerie, les filtres et la création de hauts-faits pour cette aventure.</small>
+        </div>
+        <button class="sh-admin-close" data-action="_achCatClose" aria-label="Fermer">×</button>
+      </div>
+      <div class="sh-admin-body ach-cat-admin-body">
+        <div class="ach-cat-admin-guide">
+          <div><b>Ordre des filtres</b><small>Le premier rang devient la catégorie par défaut des nouveaux hauts-faits.</small></div>
+          <div><b>Identité visuelle</b><small>L'icône et la couleur sont reprises dans les cartes, compteurs et modales.</small></div>
+        </div>
+        <div class="ach-cat-admin-list">
+        ${rows || '<div class="eqs-admin-empty">Aucune catégorie. Ajoute au moins une catégorie pour classer les hauts-faits.</div>'}
+        </div>
+        <button class="ach-cat-admin-add" data-action="_achCatAdd">+ Ajouter une catégorie</button>
+      </div>
+      <div class="sh-admin-footer">
+        <button class="btn btn-outline btn-sm" data-action="_achCatClose">Annuler</button>
+        <button class="btn btn-gold btn-sm" data-action="_achCatSave">Enregistrer</button>
+      </div>
+    </div>`);
+}
+
+export async function openAchievementCategoriesAdmin() {
+  if (!STATE.isAdmin) return;
+  await _ensureFeatureCss('shop');
+  await _loadAchievementCategories();
+  _achCatDraft = ACH_CATS.map(c => ({ ...c }));
+  _renderAchievementCategoriesAdmin();
+}
 // Ouverture de la lightbox depuis un autre module (ex. fiche mission de la Trame).
 // Charge les hauts-faits si nécessaire (collection session-live → 0 lecture en plus).
 export async function openAchievementLightbox(id) {
@@ -1377,6 +1502,7 @@ PAGES.achievements = async function() {
     loadCollection('achievements'),
     _loadOrder(),
     loadCollection('story').catch(() => []),
+    _loadAchievementCategories(),
   ]);
 
   // Hauts-faits secrets : chargés (MJ uniquement) depuis la sous-collection MJ-only.
@@ -1408,7 +1534,7 @@ PAGES.achievements = async function() {
   STORE.charMatchMode = STORE.charMatchMode === 'shared' ? 'shared' : 'any';
   STORE.view   ??= 'galerie';
   STORE.search ??= '';
-  PAGES._achievementsShellState = getAchievementsShellState();
+  PAGES._achievementsShellState = { ...getAchievementsShellState(), categories: ACH_CATS };
 
   await _origPage();    // génère le shell (hero + controls + #ach-content)
   await _achRenderContent();
@@ -1435,6 +1561,12 @@ PAGES.achievements = async function() {
     STORE.items = _composeItems();
     _achRenderContent();
   });
+
+  watchPageDoc('ach-categories', 'achievements_meta', 'categories', 'achievements', doc => {
+    _setAchievementCategories(doc?.categories);
+    PAGES._achievementsShellState = { ...getAchievementsShellState(), categories: ACH_CATS };
+    _achRenderContent();
+  });
 };
 
 registerActions({
@@ -1442,6 +1574,7 @@ registerActions({
   _achSetFilter:         (btn) => _achSetFilter(btn.dataset.val),
   _achSetView:           (btn) => _achSetView(btn.dataset.val),
   openAchievementModal:  ()    => openAchievementModal(),
+  openAchievementCategoriesAdmin: () => openAchievementCategoriesAdmin(),
   _achSelectCat:         (btn) => _achSelectCat(btn.dataset.id),
   _achTogglePick:        ()    => _achTogglePick(),
   _achPickSelect:        (btn) => _achPickSelect(btn.dataset.id || ''),
@@ -1457,4 +1590,53 @@ registerActions({
   _achSetCharMatchMode:  (btn) => _achSetCharMatchMode(btn.dataset.mode),
   _achToggleTimelineDir: ()    => _achToggleTimelineDir(),
   _achOpenMission:       (btn) => _achOpenMission(btn.dataset.id),
+  _achCatClose:          ()    => closeModal(),
+  _achCatField:          (el)  => {
+    const cat = _achCatDraft[Number(el.dataset.index)];
+    if (!cat) return;
+    cat[el.dataset.field] = el.value;
+    if (el.dataset.field === 'color') {
+      cat.glow = `${el.value}29`;
+      cat.line = `${el.value}59`;
+    }
+  },
+  _achCatColor:          (btn) => {
+    const cat = _achCatDraft[Number(btn.dataset.index)];
+    if (!cat) return;
+    cat.color = btn.dataset.color || cat.color;
+    cat.glow = `${cat.color}29`;
+    cat.line = `${cat.color}59`;
+    _renderAchievementCategoriesAdmin();
+  },
+  _achCatMove:           (btn) => {
+    const from = Number(btn.dataset.index);
+    const to = from + Number(btn.dataset.dir);
+    if (!_achCatDraft[from] || to < 0 || to >= _achCatDraft.length) return;
+    [_achCatDraft[from], _achCatDraft[to]] = [_achCatDraft[to], _achCatDraft[from]];
+    _renderAchievementCategoriesAdmin();
+  },
+  _achCatDelete:         (btn) => {
+    const index = Number(btn.dataset.index);
+    if (!_achCatDraft[index]) return;
+    _achCatDraft.splice(index, 1);
+    _renderAchievementCategoriesAdmin();
+  },
+  _achCatAdd:            ()    => {
+    _achCatDraft.push(_normalizeAchCategory({ id: `categorie_${Date.now()}`, label: 'Nouvelle catégorie', emoji: '🏆', color: '#7eb0ff' }, _achCatDraft.length));
+    _renderAchievementCategoriesAdmin();
+  },
+  _achCatSave:           async () => {
+    if (!_achCatDraft.some(c => String(c.label || '').trim())) {
+      showNotif('Ajoute au moins une catégorie.', 'error');
+      return;
+    }
+    try {
+      await _saveAchievementCategories(_achCatDraft);
+      showNotif('Catégories de hauts-faits enregistrées.', 'success');
+      closeModal();
+      _achRenderContent();
+    } catch (error) {
+      notifySaveError(error);
+    }
+  },
 });
