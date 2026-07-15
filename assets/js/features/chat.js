@@ -31,6 +31,9 @@ import { showNotif } from '../shared/notifications.js';
 import { confirmModal } from '../shared/modal.js';
 import { avatarSrcOf } from '../shared/avatar.js';
 import { uploadJpeg } from '../shared/image-upload.js';
+import {
+  linkify, applyEmotes, applyMentions, mentionsToTokens, dayLabel, rollDice, rollCardHtml,
+} from './chat/chat-format.js';
 import { _esc } from '../shared/html.js';
 
 const ADV = 'adventure';   // id de la conversation d'aventure
@@ -397,15 +400,8 @@ function _renderConvo() {
 }
 function _renderConvoHeaderBadge() { /* pas de badge d'en-tête pour l'instant */ }
 
-// Libellé de jour pour les séparateurs de date.
-function _dayLabel(ms) {
-  const d = new Date(ms), now = new Date();
-  const day0 = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diff = Math.round((day0(now) - day0(d)) / 86400000);
-  if (diff === 0) return "Aujourd'hui";
-  if (diff === 1) return 'Hier';
-  return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-}
+// Libellé de jour pour les séparateurs de date (logique pure → chat-format.js).
+const _dayLabel = (ms) => dayLabel(ms);
 function _formatTime(ms) {
   if (!ms) return '';
   const d = new Date(ms), now = new Date();
@@ -517,67 +513,14 @@ async function _loadChatEmotes() {
   try { const d = await getDocData('world', 'vtt_emotes'); _chatEmotes = Array.isArray(d?.emotes) ? d.emotes.filter(e => e && e.name && e.url) : []; }
   catch { _chatEmotes = []; }
 }
-function _applyChatEmotes(escaped) {
-  if (!_chatEmotes.length) return escaped;
-  for (const em of _chatEmotes) {
-    const key = `:${em.name}:`;
-    if (escaped.indexOf(key) === -1) continue;
-    escaped = escaped.split(key).join(`<img class="chat-emote-inline" data-emote="${_esc(key)}" src="${_esc(em.url)}" alt="${_esc(key)}" title="${_esc(key)}">`);
-  }
-  return escaped;
-}
-// Mentions @[uid] → @pseudo surligné (la mienne en évidence).
-function _applyMentions(escaped) {
-  return escaped.replace(/@\[([\w-]+)\]/g, (_m, uid) =>
-    `<span class="chat-mention${uid === _uid ? ' chat-mention--me' : ''}">@${_esc(_nameOf(uid))}</span>`);
-}
-// Variante pour le composer : jetons ré-sérialisables (data-uid, non éditables).
-function _mentionsToTokens(escaped) {
-  return escaped.replace(/@\[([\w-]+)\]/g, (_m, uid) =>
-    `<span class="chat-mention" contenteditable="false" data-uid="${_esc(uid)}">@${_esc(_nameOf(uid))}</span>`);
-}
-// URLs → liens cliquables. Appliqué sur le TEXTE échappé (avant émotes/mentions)
-// pour ne jamais capturer une URL présente dans un attribut (ex. src d'émote).
-function _linkify(html) {
-  return html.replace(/(https?:\/\/[^\s<]+)/g, (m) => {
-    const t = m.match(/[)\].,!?;:]+$/);
-    const tail = t ? t[0] : '';
-    const url = tail ? m.slice(0, -tail.length) : m;
-    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>${tail}`;
-  });
-}
-
-// Jet de dés : parse « 2d6+3 », « d20 », « 1d20+1d4-1 » → { expr, total, parts }.
-function _rollDice(expr) {
-  const clean = String(expr || '').trim().toLowerCase().replace(/\s+/g, '');
-  if (!clean || !/^[0-9d+-]+$/.test(clean)) return null;
-  const terms = clean.match(/[+-]?[^+-]+/g); if (!terms) return null;
-  let total = 0; const parts = [];
-  for (let t of terms) {
-    let sign = 1;
-    if (t[0] === '+') t = t.slice(1);
-    else if (t[0] === '-') { sign = -1; t = t.slice(1); }
-    const dm = t.match(/^(\d*)d(\d+)$/);
-    if (dm) {
-      const n = parseInt(dm[1] || '1', 10), faces = parseInt(dm[2], 10);
-      if (!faces || n < 1 || n > 100 || faces > 1000) return null;
-      const rolls = [];
-      for (let i = 0; i < n; i++) rolls.push(1 + Math.floor(Math.random() * faces));
-      total += sign * rolls.reduce((a, b) => a + b, 0);
-      parts.push({ type: 'dice', label: `${n}d${faces}`, rolls, sign });
-    } else if (/^\d+$/.test(t)) {
-      total += sign * parseInt(t, 10);
-      parts.push({ type: 'mod', value: parseInt(t, 10), sign });
-    } else return null;
-  }
-  return { expr: clean, total, parts };
-}
-function _rollCardHtml(roll) {
-  const detail = (roll.parts || []).map(p => p.type === 'dice'
-    ? `${p.sign < 0 ? '−' : ''}${p.label} [${p.rolls.join(', ')}]`
-    : `${p.sign < 0 ? '−' : '+'}${p.value}`).join(' ');
-  return `<span class="chat-roll"><span class="chat-roll-total">🎲 ${_esc(String(roll.total))}</span><span class="chat-roll-detail">${_esc(roll.expr)} · ${_esc(detail)}</span></span>`;
-}
+// Wrappers : la logique pure vit dans chat/chat-format.js (testée) ; ici on ne
+// fait qu'injecter l'état du module (émotes chargées, uid courant, pseudos).
+const _applyChatEmotes  = (s) => applyEmotes(s, _chatEmotes);
+const _applyMentions    = (s) => applyMentions(s, _uid, _nameOf);
+const _mentionsToTokens = (s) => mentionsToTokens(s, _nameOf);
+const _linkify          = linkify;
+const _rollDice         = rollDice;
+const _rollCardHtml     = rollCardHtml;
 
 function _msgRow(m, grouped = false) {
   const mine = m.senderId === _uid;
