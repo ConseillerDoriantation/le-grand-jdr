@@ -686,8 +686,8 @@ function _refreshAchievementCounters() {
   ACH_CATS.forEach(c => {
     counts[c.id] = visible.filter(a => (a.categorie || _achDefaultCategoryId()) === c.id).length;
   });
-  document.querySelectorAll('.hall-counter[data-filter]').forEach(el => {
-    const num = el.querySelector('.hall-counter-num');
+  document.querySelectorAll('.hall-filter-card[data-filter]').forEach(el => {
+    const num = el.querySelector('.hall-filter-num');
     if (num) num.textContent = counts[el.dataset.filter] ?? 0;
   });
 }
@@ -1278,7 +1278,7 @@ async function _achRenderContent() {
   }
 
   if ((STORE.view || 'galerie') === 'timeline') {
-    contentEl.innerHTML = _achGalleryOverviewHtml(filtered) + _renderTimeline(filtered);
+    contentEl.innerHTML = _renderTimeline(filtered);
     return;
   }
 
@@ -1288,7 +1288,7 @@ async function _achRenderContent() {
   const galleryEl = document.createElement('div');
   galleryEl.id        = 'ach-gallery';
   galleryEl.className = 'ach-justified';
-  contentEl.innerHTML = _achGalleryOverviewHtml(filtered);
+  contentEl.innerHTML = '';
   contentEl.appendChild(galleryEl);
 
   await _achRenderJustified(filter, filtered, galleryEl);
@@ -1298,7 +1298,7 @@ async function _achRenderContent() {
 // ── Actions état (appelées depuis les boutons HTML) ───────────────────────────
 function _achSetFilter(filter) {
   STORE.filter = filter;
-  document.querySelectorAll('.hall-counter').forEach(el => {
+  document.querySelectorAll('.hall-filter-card').forEach(el => {
     el.classList.toggle('active', el.dataset.filter === filter);
   });
   _achRenderContent();

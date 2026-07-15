@@ -677,36 +677,6 @@
 #main-content[data-page="collection"] .coll-head-counter { margin-left: 0; }
 #main-content[data-page="collection"] .coll-page-header:not(:has(.coll-head-counter)) { display: none; }
 
-/* Hauts-Faits : les compteurs deviennent la barre de contexte. */
-#main-content[data-page="achievements"] .hall-hero {
-  display: flex;
-  align-items: center;
-  margin: 0;
-  padding: 0 0 8px !important;
-  border: 0;
-  background: transparent !important;
-}
-
-#main-content[data-page="achievements"] .hall-hero::before,
-#main-content[data-page="achievements"] .hall-eyebrow,
-#main-content[data-page="achievements"] .hall-title,
-#main-content[data-page="achievements"] .hall-sub { display: none !important; }
-#main-content[data-page="achievements"] .hall-counters {
-  width: 100%;
-  justify-content: flex-start;
-  gap: 6px;
-  margin: 0;
-}
-#main-content[data-page="achievements"] .hall-counter {
-  min-width: 88px;
-  gap: 7px;
-  padding: 7px 9px;
-  border-radius: 8px;
-}
-#main-content[data-page="achievements"] .hall-counter-icon { font-size: 1rem; }
-#main-content[data-page="achievements"] .hall-counter-num { font-size: 1rem; }
-#main-content[data-page="achievements"] .hall-counter-lbl { margin-top: 1px; font-size: .5rem; }
-#main-content[data-page="achievements"] .controls-bar,
 #main-content[data-page="achievements"] .hall-content {
   padding-left: 0 !important;
   padding-right: 0 !important;
@@ -859,15 +829,6 @@
 
 @media (max-width: 768px) {
   #main-content[data-page] { --app-page-gutter: 0px; }
-
-  #main-content[data-page="achievements"] .hall-hero {
-    padding: 0 0 8px !important;
-  }
-  #main-content[data-page="achievements"] .hall-counters {
-    justify-content: flex-start;
-    margin-top: 0;
-  }
-  #main-content[data-page="achievements"] .hall-counter { min-width: 72px; padding: 6px 7px; }
 
   #main-content[data-page="world"] .world-hero-panel,
   #main-content[data-page="agenda"] .ag-hero,
