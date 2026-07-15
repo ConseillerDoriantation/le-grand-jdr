@@ -3,7 +3,7 @@ import { registerActions } from '../../core/actions.js';
 import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { loadWeaponFormats, saveWeaponFormats } from '../../shared/weapon-formats.js';
-import { loadDamageTypes, saveDamageTypes, DEFAULT_DAMAGE_TYPES } from '../../shared/damage-types.js';
+import { loadDamageTypes, saveDamageTypes } from '../../shared/damage-types.js';
 import { loadSpellMatrices, saveSpellMatrices, SPELL_SLOTS, SLOT_LABELS, COMBO_IDS, COMBO_DEFAULTS } from '../../shared/spell-matrices.js';
 import { _esc, modStr } from '../../shared/html.js';
 import { computeEquipStatsBonus, getMod, getMaitriseBonus as _getMaitriseBonus } from '../../shared/char-stats.js';
