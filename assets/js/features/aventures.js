@@ -28,6 +28,24 @@ import { exportAdventure, importAdventure } from '../data/firestore.js';
 import { unwatchAll } from '../shared/realtime.js';
 import { TOGGLEABLE_FEATURES, enabledFeaturesOf } from '../shared/features.js';
 
+const ADVENTURE_EMOJIS = [
+  '⚔️','🛡️','🏰','🗺️','📜','🧭','🏕️','⛩️','🏛️','🗝️',
+  '🐉','🦄','🦉','🐺','🦁','🐍','🕷️','🦇','🦅','🐾',
+  '🌙','☀️','⭐','🌌','🌋','🏔️','🌲','🌊','🔥','❄️',
+  '⚡','🌪️','🌿','🍄','💎','🔮','✨','🪄','🧙','🧝',
+  '👑','💀','👁️','🩸','🕯️','⚙️','🏴','🚩','🎭','🎲',
+];
+
+function _renderAdventureEmojiPicker(targetId, currentEmoji = '', className = '') {
+  const selected = String(currentEmoji ?? '');
+  return `
+    <div class="${className}">
+      ${ADVENTURE_EMOJIS.map(e => `<button type="button" class="adv-emoji-btn ${e === selected ? 'selected' : ''}"
+        data-action="_advPickEmoji" data-emoji="${e}" data-target-id="${targetId}" title="Cliquer à nouveau pour retirer">${e}</button>`).join('')}
+      <input type="hidden" id="${targetId}" value="${_esc(selected)}">
+    </div>`;
+}
+
 // ── Page principale ────────────────────────────
 async function renderAventuresPage() {
   const content = document.getElementById('main-content');
@@ -201,7 +219,6 @@ function _renderAdventureCard(adv, isAdvAdmin, isCurrent) {
 }
 // ── Modal création d'aventure ──────────────────
 export function openCreateAdventureModal() {
-  const EMOJIS = ['⚔️','🏰','🗺️','🐉','🌙','🔮','🌊','🔥','🌿','⚡','🧙','🏴'];
   openModal('Nouvelle aventure', `
     <div class="adv-create-modal">
       <div class="adv-create-head">
@@ -221,11 +238,8 @@ export function openCreateAdventureModal() {
 
         <div class="adv-create-field adv-create-field--wide">
           <label>Emblème</label>
-          <div class="adv-create-emojis">
-            ${EMOJIS.map((e, i) => `<button type="button" class="adv-emoji-btn adv-create-emoji ${i === 0 ? 'selected' : ''}"
-              data-action="_advPickEmoji" data-emoji="${e}" data-target-id="adv-emoji">${e}</button>`).join('')}
-            <input type="hidden" id="adv-emoji" value="⚔️">
-          </div>
+          ${_renderAdventureEmojiPicker('adv-emoji', '⚔️', 'adv-create-emojis')}
+          <small class="adv-emoji-hint">Clique une seconde fois sur l'emblème choisi pour le retirer.</small>
         </div>
 
         <div class="adv-create-field adv-create-field--wide">
@@ -252,7 +266,7 @@ export function openCreateAdventureModal() {
 
 async function doCreateAdventure() {
   const nom   = document.getElementById('adv-nom')?.value?.trim();
-  const emoji = document.getElementById('adv-emoji')?.value || '⚔️';
+  const emoji = document.getElementById('adv-emoji')?.value?.trim() ?? '⚔️';
   const desc  = document.getElementById('adv-desc')?.value?.trim() || '';
 
   if (!nom) { showNotif('Donne un nom à ton aventure.', 'error'); return; }
@@ -269,8 +283,6 @@ async function doCreateAdventure() {
     showNotif(e.message || 'Erreur lors de la création.', 'error');
   }
 }
-
-const _ADV_EMOJIS = ['⚔️','🏰','🗺️','🐉','🌙','🔮','🌊','🔥','🌿','⚡','🧙','🏴'];
 
 // ── Modal gestion d'une aventure (membres + infos) ──────
 export async function openManageAdventureModal(adventureId) {
@@ -371,7 +383,8 @@ export async function openManageAdventureModal(adventureId) {
     if (!pendingByLower.has(lower) || e !== lower) pendingByLower.set(lower, e);
   });
   const pendingInvites = [...pendingByLower.values()];
-  const currentEmoji = adv.emoji || '⚔️';
+  const currentEmoji = adv.emoji ?? '⚔️';
+  const displayEmoji = currentEmoji || '◇';
 
   const enabled = new Set(enabledFeaturesOf(adv));
   const featuresHtml = TOGGLEABLE_FEATURES.map(f => `
@@ -424,10 +437,10 @@ export async function openManageAdventureModal(adventureId) {
       <button class="adv-danger-trigger" data-action="_advShowDeleteConfirm">Supprimer l'aventure</button>
     </section>` : '';
 
-  openModal(`Gérer — ${currentEmoji} ${adv.nom}`, `
+  openModal(`Gérer — ${displayEmoji} ${adv.nom}`, `
     <div class="adv-manage-modal">
       <header class="adv-manage-hero">
-        <div class="adv-manage-hero-mark">${currentEmoji}</div>
+        <div class="adv-manage-hero-mark">${displayEmoji}</div>
         <div class="adv-manage-hero-copy">
           <span class="adv-kicker">Configuration</span>
           <h3>${_esc(adv.nom || 'Aventure sans nom')}</h3>
@@ -444,11 +457,8 @@ export async function openManageAdventureModal(adventureId) {
             </div>
             <button class="adv-panel-save" data-action="_advSaveMeta" data-id="${adventureId}">Enregistrer</button>
           </div>
-          <div class="adv-edit-emojis">
-            ${_ADV_EMOJIS.map(e => `<button type="button" class="adv-emoji-btn adv-edit-emoji ${e === currentEmoji ? 'selected' : ''}"
-              data-action="_advPickEmoji" data-emoji="${e}" data-target-id="adv-edit-emoji">${e}</button>`).join('')}
-            <input type="hidden" id="adv-edit-emoji" value="${currentEmoji}">
-          </div>
+          ${_renderAdventureEmojiPicker('adv-edit-emoji', currentEmoji, 'adv-edit-emojis')}
+          <small class="adv-emoji-hint">Clique une seconde fois sur l'emblème choisi pour le retirer.</small>
           <label class="adv-edit-field">
             <span>Nom</span>
             <input type="text" id="adv-edit-nom" value="${_esc(adv.nom || '')}" maxlength="60">
@@ -520,7 +530,7 @@ export async function openManageAdventureModal(adventureId) {
 
 async function saveAdventureMeta(advId) {
   const nom   = document.getElementById('adv-edit-nom')?.value?.trim();
-  const emoji = document.getElementById('adv-edit-emoji')?.value || '⚔️';
+  const emoji = document.getElementById('adv-edit-emoji')?.value?.trim() ?? '⚔️';
   const desc  = document.getElementById('adv-edit-desc')?.value?.trim() || '';
 
   if (!nom) { showNotif('Le nom ne peut pas être vide.', 'error'); return; }
@@ -837,10 +847,16 @@ registerActions({
   openCreateAdventureModal: () => openCreateAdventureModal(),
   openManageAdventureModal: (btn) => openManageAdventureModal(btn.dataset.id),
   _advPickEmoji: (btn) => {
-    btn.closest('[class]')?.querySelectorAll('.adv-emoji-btn').forEach(b => b.classList.remove('selected'));
-    btn.classList.add('selected');
+    const picker = btn.closest('.adv-create-emojis, .adv-edit-emojis');
+    const wasSelected = btn.classList.contains('selected');
+    picker?.querySelectorAll('.adv-emoji-btn').forEach(b => b.classList.remove('selected'));
     const target = document.getElementById(btn.dataset.targetId);
-    if (target) target.value = btn.dataset.emoji;
+    if (wasSelected) {
+      if (target) target.value = '';
+      return;
+    }
+    btn.classList.add('selected');
+    if (target) target.value = btn.dataset.emoji || '';
   },
   _advClose: () => closeModal(),
   _doCreateAdventure: () => doCreateAdventure(),
