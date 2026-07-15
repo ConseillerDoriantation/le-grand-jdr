@@ -398,10 +398,18 @@ export function _renderChatLogImpl(msgs) {
       const baseRaw = _diceTotal(baseDetail, m.dmgRaw);
       const critRaw = _diceTotal(critDetail, m.critRaw2 ?? m.dmgRaw);
       const baseLabel = _formulaLabel(baseDetail, diceFormula);
+      const finalEffectValue = m.dmgPre ?? m.dmgFull ?? m.dmgTotal ?? m.targets?.find(t => t?.dmgTotal != null)?.dmgTotal;
 
-      if (m.isCrit && m.critNormalMax) {
-        rows.push(_row(`Base critique max ${sub(baseLabel)}`, `<strong>${m.critNormalMax}</strong>`, { op: '💥' }));
-        rows.push(_row(`Relance critique ${critRoll}`, `<strong>${critRaw ?? '?'}</strong>`, { op: '🎲' }));
+      if (m.isCrit) {
+        if (baseDetail) {
+          rows.push(_row(`Jet de base ${baseRoll}`, `<strong>${baseRaw ?? m.dmgRaw ?? '?'}</strong>`, { op: isHeal ? '💚' : '🎲' }));
+        } else if (m.critNormalMax) {
+          rows.push(_row(`Base critique max ${sub(baseLabel)}`, `<strong>${m.critNormalMax}</strong>`, { op: '💥' }));
+        }
+        rows.push(_row(`Dé critique ${critRoll}`, `<strong>${critRaw ?? '?'}</strong>`, { op: '💥' }));
+        if (m.critFormula) {
+          rows.push(_row(`Formule critique ${sub(m.critFormula)}`, `<strong>${finalEffectValue ?? '?'}</strong>`, { op: '∑', muted: true }));
+        }
       } else {
         rows.push(_row(`Dés de base ${baseRoll}`, `<strong>${baseRaw ?? m.dmgRaw ?? '?'}</strong>`, { op: isHeal ? '💚' : '🎲' }));
       }
@@ -447,7 +455,7 @@ export function _renderChatLogImpl(msgs) {
 
       // Si tout droit : valeur finale = dmgPre (après bonus/réductions d'états de
       // la cible), sinon dmgFull partagé ou total final pour les anciens logs.
-      const fullVal = m.dmgPre ?? m.dmgFull ?? m.dmgTotal;
+      const fullVal = finalEffectValue;
       const halfVal = m.halfDmg ? Math.max(1, Math.floor(fullVal / 2)) : null;
       const hasReduction = m.dmgReduction > 0;
       const hasInter = m.interaction && m.dmgTotal !== (halfVal ?? fullVal);

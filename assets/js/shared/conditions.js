@@ -74,7 +74,7 @@ export const CONDITION_DEFAULT_LIBRARY = [
     defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
     effects:{ rangeBonus:2 } },
   { id:'chanceux',      label:'Chanceux',    icon:'🍀', color:'#22c55e',
-    desc:'L\'allié critique plus facilement : sa RC baisse de 1 par rune Chance du sort (plancher 17). Le critique reste NORMAL (max + relance) — pas le double-max de la rune Chance.',
+    desc:'L\'allié critique plus facilement : sa RC baisse de 1 par rune Chance du sort (plancher 17). Le critique utilise la formule critique de l\'aventure.',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
     effects:{ critRangeBonus:1 } },
   { id:'guided',        label:'Guidé',       icon:'🎯', color:'#facc15',

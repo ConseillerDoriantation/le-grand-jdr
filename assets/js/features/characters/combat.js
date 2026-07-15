@@ -2,8 +2,10 @@ import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { updateInCol } from '../../data/firestore.js';
 import { showNotif } from '../../shared/notifications.js';
+import { _esc } from '../../shared/html.js';
 import { formatItemBonusText, getItemStatBonus } from '../../shared/char-stats.js';
 import { loadDamageTypes, getMagicTypes } from '../../shared/damage-types.js';
+import { criticalEffectFormulaLabel } from '../../shared/character-rules.js';
 import {
   loadCombatStyles, detectCombatStyle,
   openCombatStylesAdmin, openWeaponFormatsAdmin,
@@ -129,7 +131,7 @@ export function renderCharEquip(c, canEdit) {
   // ── Placeholder éléments magiques (juste sous les armes) ────────────────
   const elemPlaceholderId = `cs-elements-${c.id||'x'}`;
   html += `</div>
-    <p class="cs-rule-note">🎲 Critique = maximum des dés + relance les dés de dégâts.</p>
+    <p class="cs-rule-note">🎲 Critique = ${_esc(criticalEffectFormulaLabel())}.</p>
     <div id="${elemPlaceholderId}"></div>
     <div id="${styleId}"></div>
   </div>`;
