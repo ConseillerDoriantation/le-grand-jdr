@@ -10403,6 +10403,32 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   cursor: pointer;
 }
 .cs-v3 .section-action:hover { background: rgba(79,140,255,.20); }
+.cs-v3 .armor-section-tools {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  margin-left: auto;
+}
+.cs-v3 .section-icon-action {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid rgba(126,176,255,.22);
+  border-radius: 8px;
+  background: rgba(79,140,255,.07);
+  color: var(--gold-2, #7eb0ff);
+  cursor: pointer;
+  opacity: .82;
+}
+.cs-v3 .section-icon-action:hover {
+  opacity: 1;
+  background: rgba(79,140,255,.16);
+  border-color: rgba(126,176,255,.42);
+}
 
 /* Badge de set d'armure compacté dans l'en-tête de section (remplace l'ancien
    gros bloc set-card qui re-listait Tête/Torse/Bottes déjà visibles sur chaque
@@ -10448,6 +10474,16 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   font-size: .7rem; color: var(--text-dim); font-style: italic;
   margin-top: 8px; padding: 6px 10px;
   background: rgba(255,255,255,.02); border: 1px dashed var(--border); border-radius: 10px;
+}
+@media (max-width: 720px) {
+  .cs-v3 .armor-section-tools {
+    width: 100%;
+    justify-content: space-between;
+    margin-left: 0;
+  }
+  .cs-v3 .armor-section-tools .set-badge {
+    flex: 1 1 auto;
+  }
 }
 
 /* Combat — armes : 2 cards égales (Main principale + Main secondaire) */
@@ -17588,6 +17624,145 @@ body .modal:has(.sh-admin-modal.is-equipment-slots) {
   .eqs-admin-presets > div { flex-basis: 100%; }
   .eqs-admin-row { grid-template-columns: 38px minmax(0, 1fr); }
   .eqs-admin-field:nth-of-type(n+2), .eqs-admin-actions { grid-column: 1 / -1; }
+}
+
+body .modal:has(.sh-admin-modal.is-armor-sets) {
+  width: min(1220px, 96vw) !important;
+  max-width: min(1220px, 96vw) !important;
+}
+.sh-admin-modal.is-armor-sets {
+  --admin-tint: rgba(126, 176, 255, .1);
+  --admin-glow: rgba(126, 176, 255, .38);
+  --admin-bd: rgba(126, 176, 255, .34);
+  --admin-accent: #7eb0ff;
+}
+.armor-sets-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 70vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+.armor-sets-guide {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.armor-sets-guide > div {
+  min-width: 0;
+  border: 1px solid rgba(126,176,255,.16);
+  background: rgba(79,140,255,.06);
+  border-radius: 10px;
+  padding: 10px;
+}
+.armor-sets-guide b {
+  display: block;
+  color: var(--text);
+  font-size: .82rem;
+}
+.armor-sets-guide small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+.armor-sets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.armor-type-card {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.05fr) minmax(260px, 1.35fr) minmax(260px, 1.3fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid rgba(126,176,255,.22);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(19,30,48,.96), rgba(10,16,27,.96));
+}
+.armor-type-card.is-disabled {
+  opacity: .58;
+  border-color: rgba(148,163,184,.14);
+}
+.armor-type-main,
+.armor-type-bonus,
+.armor-type-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+.armor-type-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+.armor-type-section-title {
+  color: var(--text-dim);
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.armor-type-bonus-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+.armor-type-bonus-grid label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.armor-type-help {
+  color: var(--text-dim);
+  font-size: .72rem;
+  line-height: 1.35;
+}
+.armor-type-effect-preview {
+  min-height: 38px;
+  border: 1px solid rgba(126,176,255,.16);
+  background: rgba(79,140,255,.06);
+  border-radius: 9px;
+  padding: 7px 9px;
+  color: var(--text-muted);
+  font-size: .76rem;
+  line-height: 1.35;
+}
+.armor-type-effect-preview strong { color: var(--text); }
+.armor-type-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-end;
+}
+.armor-sets-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@media (max-width: 1100px) {
+  .armor-type-card {
+    grid-template-columns: minmax(190px, 1fr) minmax(260px, 1.3fr);
+  }
+  .armor-type-actions {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    justify-content: flex-end;
+  }
+}
+@media (max-width: 760px) {
+  .armor-sets-guide,
+  .armor-type-card,
+  .armor-type-bonus-grid {
+    grid-template-columns: 1fr;
+  }
+  .armor-type-actions { justify-content: stretch; }
+  .armor-type-actions .btn { flex: 1; }
 }
 .sh-admin-modal.is-character-rules {
   --admin-tint: rgba(91, 192, 235, .1);

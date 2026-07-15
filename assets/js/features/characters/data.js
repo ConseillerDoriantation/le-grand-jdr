@@ -9,6 +9,7 @@ import { _esc, modStr } from '../../shared/html.js';
 import { computeEquipStatsBonus, getMod, getMaitriseBonus as _getMaitriseBonus } from '../../shared/char-stats.js';
 import { openCharacterRulesAdmin } from '../../shared/character-rules.js';
 import { openEquipmentSlotsAdmin, getPrimaryWeaponSlotId, getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
+import { openArmorSetsAdmin } from '../../shared/armor-set-settings.js';
 import { openSpellSystemAdmin } from '../../shared/spell-system.js';
 import { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, resolveEquippedInventoryIndices, _getBaseTraits, _getAddedTraits, _getTraits } from '../../shared/equipment-utils.js';
 export { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, _getBaseTraits, _getAddedTraits, _getTraits };
@@ -964,6 +965,7 @@ registerActions({
   openSpellMatricesAdmin:   ()    => openSpellMatricesAdmin(),
   openCharacterRulesAdmin:  ()    => openCharacterRulesAdmin(),
   openEquipmentSlotsAdmin:  ()    => openEquipmentSlotsAdmin(),
+  openArmorSetsAdmin:       ()    => openArmorSetsAdmin(),
   openSpellSystemAdmin:     ()    => openSpellSystemAdmin(),
   _addDmgType:              ()    => _addDmgType(),
   _deleteDmgType:           (btn) => _deleteDmgType(Number(btn.dataset.idx)),

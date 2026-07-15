@@ -14,6 +14,7 @@ import { loadDamageTypes } from '../shared/damage-types.js';
 import { DAMAGE_RELATIONS } from '../shared/damage-profile.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
+import { getArmorTypeOptions } from '../shared/armor-set-settings.js';
 import { openArtisanModal } from './artisan.js';
 import {
   openShopExport, switchShopExportTab, selectAllShopExport,
@@ -76,7 +77,7 @@ const TEMPLATES = {
       { id:'slotArmure',  label:'Emplacement',   type:'select',
         options:['Tête','Torse','Pieds'] },
       { id:'typeArmure',  label:'Type',          type:'select',
-        options:['Légère','Intermédiaire','Lourde'] },
+        options:[] },
       { id:'rarete',      label:'Rareté',        type:'rarete' },
       { id:'ca',          label:'CA bonus',      type:'number', placeholder:'0' },
       { id:'statBonuses', label:'Bonus de stats',type:'stat_bonus_grid' },
@@ -1056,8 +1057,8 @@ function _getItemTags(item) {
 
 function _buildTagGroups(items) {
   const uniq = arr => [...new Set(arr)].sort();
-  // Ordre forcé pour certains groupes (sinon alpha). Type armure : du plus lourd au plus léger.
-  const TYPE_ARMURE_ORDER = ['Lourde', 'Intermédiaire', 'Légère'];
+  // Ordre forcé pour certains groupes (sinon alpha). Type armure : ordre configuré par le MJ.
+  const TYPE_ARMURE_ORDER = getArmorTypeOptions({ includeDisabled: true });
   const orderBy = (arr, ref) => [...new Set(arr)].sort((a, b) => {
     const ia = ref.indexOf(a), ib = ref.indexOf(b);
     return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib) || a.localeCompare(b, 'fr');
@@ -3054,6 +3055,7 @@ function _buildFieldsHtml(tpl,item) {
         </div></div>`;
     } else if(f.type==='select'){
       const configured = f.id === 'slotArmure' ? getEquipmentItemOptions('armor')
+        : f.id === 'typeArmure' ? getArmorTypeOptions()
         : f.id === 'slotBijou' ? getEquipmentItemOptions('accessory') : (f.options || []);
       const options = [...new Set([...configured, ...(val ? [val] : [])])];
       html+=`<div class="form-group"><label>${f.label}</label>
@@ -3796,9 +3798,9 @@ function _renderAtelierItems() {
   const byRare = (a, b) => (_getRareteNum(b.rarete) - _getRareteNum(a.rarete)) || byName(a, b);
   // Type : tri selon les types *structurés* existants, dans leur ordre logique —
   // arme → format (ordre des _weaponFormats : Arme 1M CaC Phy., 2M CaC Phy.…),
-  // armure → typeArmure (Légère/Intermédiaire/Lourde), sinon slotBijou / type libre.
+  // armure → typeArmure configuré par le MJ, sinon slotBijou / type libre.
   // Renvoie [rang, libellé] : rang défini d'abord, puis alpha pour le reste.
-  const ARMURE_ORDER = TEMPLATES.armure.fields.find(f => f.id === 'typeArmure')?.options || [];
+  const ARMURE_ORDER = getArmorTypeOptions();
   const typeRank = (it) => {
     if (it.format)     { const i = _weaponFormats.findIndex(f => f.label === it.format); return [i < 0 ? 999 : i, it.format]; }
     if (it.sousType)   return [998, it.sousType]; // arme sans format défini → après les formats connus

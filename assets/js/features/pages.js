@@ -2844,6 +2844,7 @@ const PAGES = {
       { g:'combat', ic:'🔮', t:'Matrices de sorts',   s:'Runes, noyaux, combinaisons',     a:'#bca0ff', fn:'openSpellMatricesAdmin', mod:'characters' },
       { g:'combat', ic:'∑',  t:'Règles de personnage', s:'Modificateurs, PV, PM, CA, deck', a:'#5bc0eb', fn:'openCharacterRulesAdmin', mod:'characters' },
       { g:'combat', ic:'🎒', t:"Slots d'équipement", s:'Emplacements utilisés sur les fiches', a:'#22c38e', fn:'openEquipmentSlotsAdmin', mod:'characters' },
+      { g:'combat', ic:'🧩', t:"Types d'armure", s:'Types boutique et bonus de set', a:'#7eb0ff', fn:'openArmorSetsAdmin', mod:'characters' },
       { g:'combat', ic:'✦',  t:'Système de sorts', s:'Forge de runes ou création classique', a:'#e8b84b', fn:'openSpellSystemAdmin', mod:'characters' },
       { g:'table',  ic:'🎲', t:'Compétences de dés',  s:'Jets personnalisés',              a:'#4f8cff', fn:'_ouvrirGestionDes',      mod:'histoire' },
       { g:'table',  ic:'😄', t:'Émotes VTT',          s:'Réactions sur la table',          a:'#22c38e', fn:'_ouvrirGestionEmotes',   mod:'vtt/vtt' },

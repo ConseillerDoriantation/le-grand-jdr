@@ -84,7 +84,7 @@ export function renderCharEquip(c, canEdit) {
       // Sous-label toucher : stat + éventuel bonus de set
       const toucherSub = [
         tp.statLabel,
-        tp.setBonus > 0 ? `Set +${tp.setBonus}` : null,
+        tp.setBonus ? `Set ${tp.setBonus > 0 ? '+' : ''}${tp.setBonus}` : null,
       ].filter(Boolean).join(' · ');
 
       // Sous-label dégâts : stat + éventuel bonus de maîtrise
@@ -218,8 +218,8 @@ export function renderCharEquip(c, canEdit) {
     const TONE    = { light:'#22c38e', medium:'#4f8cff', heavy:'#e8b84b', neutral:'var(--text-dim)' };
     const col     = TONE[tone] || 'var(--text-dim)';
     const effects = [];
-    if (mod.spellPmDelta < 0)    effects.push({ icon:'🧙', txt:`Sorts −${Math.abs(mod.spellPmDelta)} PM` });
-    if (mod.toucherBonus > 0)    effects.push({ icon:'🎯', txt:`Toucher +${mod.toucherBonus}` });
+    if (mod.spellPmDelta)        effects.push({ icon:'🧙', txt:`Sorts ${mod.spellPmDelta > 0 ? '+' : '−'}${Math.abs(mod.spellPmDelta)} PM` });
+    if (mod.toucherBonus)        effects.push({ icon:'🎯', txt:`Toucher ${mod.toucherBonus > 0 ? '+' : ''}${mod.toucherBonus}` });
     if (mod.damageReduction > 0) effects.push({ icon:'🛡️', txt:`Réduction ${mod.damageReduction}` });
     if (hasShield)               effects.push({ icon:'🛡️', txt:'CA +2' });
     setHtml = `<div class="cs-set-row" style="--set-col:${col}">
@@ -238,6 +238,7 @@ export function renderCharEquip(c, canEdit) {
   html += `<div class="cs-section cs-section--compact">
     <div class="cs-section-hdr">
       <span class="cs-section-title">🛡️ Armures & Accessoires</span>
+      ${STATE.isAdmin ? '<button class="btn btn-outline btn-sm" data-action="openArmorSetsAdmin">🧩 Sets</button>' : ''}
       ${totalStr?`<span class="cs-hint">${totalStr}</span>`:''}
     </div>
     <div class="cs-armor-grid3">

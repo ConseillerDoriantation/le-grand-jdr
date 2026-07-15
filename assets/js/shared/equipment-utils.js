@@ -4,7 +4,12 @@
 // vtt.js, artisan.js, shop.js peuvent importer ici sans couplage cross-features.
 // ══════════════════════════════════════════════════════════════════════════════
 import { computeEquipStatsBonus, getItemEffectText, getItemStatBonus } from './char-stats.js';
-import { getArmorSetSlotIds, getPrimaryWeaponSlotId } from './equipment-slots.js';
+import { getEquipmentSlotsByKind, getPrimaryWeaponSlotId } from './equipment-slots.js';
+import {
+  formatArmorSetEffect,
+  getArmorSetDefinition,
+  getEmptyArmorSetModifiers,
+} from './armor-set-settings.js';
 
 // ── Arme par défaut (mains nues) ──────────────────────────────────────────────
 export const DEFAULT_UNARMED = Object.freeze({
@@ -268,7 +273,7 @@ export function serializeShopWeaponForCombat(item = {}) {
 
 export function normalizeArmorType(type = '') {
   const raw = String(type || '').trim().toLowerCase()
-    .normalize('NFD').replace(/[̀-ͯ]/g, '');
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   if (!raw) return '';
   if (['leger', 'legere', 'light'].includes(raw)) return 'Légère';
   if (['intermediaire', 'medium', 'mid'].includes(raw)) return 'Intermédiaire';
@@ -278,38 +283,27 @@ export function normalizeArmorType(type = '') {
 
 export function getArmorTypeMeta(type = '') {
   const label = normalizeArmorType(type);
-  if (label === 'Légère') {
+  const def = getArmorSetDefinition(label);
+  if (def) {
     return {
-      label, tone: 'light',
-      chipText: 'Léger : Coût des sorts -2 PM',
-      modifiers: { spellPmDelta: -2, toucherBonus: 0, damageReduction: 0 },
+      label,
+      tone: def.tone || 'neutral',
+      chipText: `${def.label || label} : ${formatArmorSetEffect(def)}`,
+      modifiers: { ...getEmptyArmorSetModifiers(), ...(def.modifiers || {}) },
+      set: def,
     };
   }
-  if (label === 'Intermédiaire') {
-    return {
-      label, tone: 'medium',
-      chipText: 'Intermédiaire : Toucher +2',
-      modifiers: { spellPmDelta: 0, toucherBonus: 2, damageReduction: 0 },
-    };
-  }
-  if (label === 'Lourde') {
-    return {
-      label, tone: 'heavy',
-      chipText: 'Lourd : Réduction 2 dégâts',
-      modifiers: { spellPmDelta: 0, toucherBonus: 0, damageReduction: 2 },
-    };
-  }
-  return { label, tone: 'neutral', chipText: '', modifiers: { spellPmDelta: 0, toucherBonus: 0, damageReduction: 0 } };
+  return { label, tone: 'neutral', chipText: '', modifiers: getEmptyArmorSetModifiers(), set: null };
 }
 
 export function getArmorSetChipText(setData = {}) {
   if (!setData?.isActive) return '';
-  return setData.activeEffect?.chipText || getArmorTypeMeta(setData.fullType).chipText || '';
+  return setData.activeEffect?.chipText || '';
 }
 
 export function getArmorSetData(c = {}) {
   const equip = c?.equipement || {};
-  const trackedSlots = getArmorSetSlotIds();
+  const trackedSlots = getEquipmentSlotsByKind('armor').map(slot => slot.id);
   const slots = trackedSlots.map(slot => {
     const item = equip?.[slot] || {};
     return { slot, item, type: normalizeArmorType(item?.typeArmure), equipped: Boolean(item?.nom) };
@@ -318,8 +312,8 @@ export function getArmorSetData(c = {}) {
   const equippedCount = slots.filter(entry => entry.equipped).length;
   const typedSlots    = slots.filter(entry => entry.type);
   const counts        = typedSlots.reduce((acc, entry) => { acc[entry.type] = (acc[entry.type] || 0) + 1; return acc; }, {});
-  const fullType      = trackedSlots.length === 3
-    ? (['Légère', 'Intermédiaire', 'Lourde'].find(type => counts[type] === trackedSlots.length) || '')
+  const fullType      = trackedSlots.length > 0
+    ? (Object.keys(counts).find(type => counts[type] === trackedSlots.length) || '')
     : '';
   const activeEffect  = fullType ? getArmorTypeMeta(fullType) : null;
   const mixed         = !fullType && Object.keys(counts).length > 1;
@@ -327,10 +321,10 @@ export function getArmorSetData(c = {}) {
 
   return {
     trackedSlots, slots, counts, equippedCount, fullType, dominantType, mixed,
-    isComplete: trackedSlots.length === 3 && equippedCount === trackedSlots.length,
-    isActive:   Boolean(activeEffect),
+    isComplete: trackedSlots.length > 0 && equippedCount === trackedSlots.length,
+    isActive:   Boolean(fullType && activeEffect?.set),
     activeEffect,
-    modifiers:  activeEffect?.modifiers || { spellPmDelta: 0, toucherBonus: 0, damageReduction: 0 },
+    modifiers:  (fullType && activeEffect?.set) ? activeEffect.modifiers : getEmptyArmorSetModifiers(),
   };
 }
 
