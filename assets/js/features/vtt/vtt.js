@@ -16,6 +16,7 @@ import {
   query, orderBy, limit,
 } from '../../config/firebase.js';
 import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcPalier, calcDeckMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../../shared/char-stats.js';
+import { calcCriticalEffectTotal, criticalEffectFormulaLabel } from '../../shared/character-rules.js';
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
 import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED, getCharDamageProfile } from '../../shared/equipment-utils.js';
@@ -2049,6 +2050,13 @@ export function _rollDiceDetailed(formula) {
   for (let i=0; i<p.n; i++) rolls.push(Math.floor(Math.random()*p.sides)+1);
   const total = rolls.reduce((a,b)=>a+b, 0) + p.mod;
   return { rolls, mod: p.mod, total, n: p.n, sides: p.sides, formula: String(formula) };
+}
+
+function _rollCritExtraDieDetailed(formula, { maximize = false } = {}) {
+  const p = _parseDice(formula);
+  if (!p || !p.sides) return { rolls: [], mod: 0, total: 0, n: 0, sides: 0, formula: '0' };
+  const roll = maximize ? p.sides : Math.floor(Math.random() * p.sides) + 1;
+  return { rolls: [roll], mod: 0, total: roll, n: 1, sides: p.sides, formula: `1d${p.sides}` };
 }
 
 function _diceLogFields(prefix, det) {
@@ -6335,16 +6343,24 @@ async function _vttRollAttack() {
       } else if (hIsCrit) {
         const maxDice = _maxDice(effectiveDice);
         healCritNormalMax = maxDice + healFixed;
-        // Rune Chance (opt.mods.chance) → double max : la 2e partie est aussi maximisée
-        // (max + max) au lieu de max + relance. Le buff Chanceux ne passe pas par ce mod.
-        const critDet = opt.mods?.chance ? null : _rollDiceDetailed(effectiveDice);
-        const critRoll = opt.mods?.chance ? maxDice : critDet.total;
-        healCritRollsDetail = critDet ? {
+        const baseDet = _rollDiceDetailed(effectiveDice);
+        healRaw = baseDet.total;
+        healRollsDetail = {
+          rolls: baseDet.rolls, sides: baseDet.sides, mod: baseDet.mod,
+          n: baseDet.n, formula: baseDet.formula,
+        };
+        const critDet = _rollCritExtraDieDetailed(effectiveDice, { maximize: !!opt.mods?.chance });
+        const critRoll = critDet.total;
+        healCritRollsDetail = critDet?.rolls?.length ? {
           rolls: critDet.rolls, sides: critDet.sides, mod: critDet.mod,
           n: critDet.n, formula: critDet.formula,
         } : null;
-        healRaw   = critRoll;          // pour le log (le "raw" est le 2e jet)
-        healTotal = Math.max(1, maxDice + critRoll + 2 * healFixed);
+        healTotal = Math.max(1, calcCriticalEffectTotal({
+          baseRoll: healRaw,
+          diceMax: maxDice,
+          critRoll,
+          fixedBonus: healFixed,
+        }));
       } else {
         const det = _rollDiceDetailed(effectiveDice);
         healRaw   = det.total;
@@ -6413,6 +6429,7 @@ async function _vttRollAttack() {
           dmgRaw: healRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
           dmgRollsDetail: healRollsDetail || null,
           critRollsDetail: healCritRollsDetail || null,
+          critFormula: criticalEffectFormulaLabel(),
           ..._diceLogFields('dmg', healRollsDetail),
           ..._diceLogFields('crit', healCritRollsDetail),
           critNormalMax: healCritNormalMax || 0,
@@ -6444,6 +6461,7 @@ async function _vttRollAttack() {
             dmgRaw: healRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
             dmgRollsDetail: healRollsDetail || null,
             critRollsDetail: healCritRollsDetail || null,
+            critFormula: criticalEffectFormulaLabel(),
             ..._diceLogFields('dmg', healRollsDetail),
             ..._diceLogFields('crit', healCritRollsDetail),
             critNormalMax: healCritNormalMax || 0,
@@ -6555,22 +6573,25 @@ async function _vttRollAttack() {
         sharedDmgTotalHit    = Math.max(1, maxDice + totalFixed);
       } else if (isCrit) {
         sharedCritNormalMax = _maxDice(effectiveDice) + totalFixed;
-        // Rune Chance (opt.mods.chance) → double max : la 2e partie est aussi maximisée
-        // (max+max) au lieu de max + relance. Le buff Chanceux (arme) n'a pas ce mod → crit normal.
-        if (opt.mods?.chance) {
-          sharedCritRaw2      = _maxDice(effectiveDice);
-          sharedCritRollsDetail = null; // valeur max, pas de rolls individuels
-        } else {
-          const critDet = _rollDiceDetailed(effectiveDice);
-          sharedCritRaw2      = critDet.total;
-          sharedCritRollsDetail = {
-            rolls: critDet.rolls, sides: critDet.sides, mod: critDet.mod,
-            n: critDet.n, formula: critDet.formula,
-          };
-        }
+        const baseDet = _rollDiceDetailed(effectiveDice);
+        sharedDmgRaw = baseDet.total;
+        sharedDmgRollsDetail = {
+          rolls: baseDet.rolls, sides: baseDet.sides, mod: baseDet.mod,
+          n: baseDet.n, formula: baseDet.formula,
+        };
+        const critDet = _rollCritExtraDieDetailed(effectiveDice, { maximize: !!opt.mods?.chance });
+        sharedCritRaw2 = critDet.total;
+        sharedCritRollsDetail = critDet?.rolls?.length ? {
+          rolls: critDet.rolls, sides: critDet.sides, mod: critDet.mod,
+          n: critDet.n, formula: critDet.formula,
+        } : null;
         sharedCritFixed2    = totalFixed;
-        sharedDmgRaw        = sharedCritRaw2;
-        sharedDmgTotalHit   = sharedCritNormalMax + sharedCritRaw2 + sharedCritFixed2;
+        sharedDmgTotalHit   = calcCriticalEffectTotal({
+          baseRoll: sharedDmgRaw,
+          diceMax: _maxDice(effectiveDice),
+          critRoll: sharedCritRaw2,
+          fixedBonus: totalFixed,
+        });
       } else {
         const det = _rollDiceDetailed(effectiveDice);
         sharedDmgRaw      = det.total;
@@ -6933,6 +6954,7 @@ async function _vttRollAttack() {
         dmgFull: sharedDmgTotalHit, dmgFullHalf: sharedDmgTotalHalf,
         bonusHitDice: bonusHitDice||null, extraHitRolls: extraHitRolls.length ? extraHitRolls : null,
         critNormalMax: sharedCritNormalMax, critRaw2: sharedCritRaw2, critFixed2: sharedCritFixed2,
+        critFormula: criticalEffectFormulaLabel(),
         damageTypeId: opt.damageTypeId||null, damageTypeIcon: opt.damageTypeIcon||null,
         damageTypeColor: opt.damageTypeColor||null,
         buffDmgBonus: buffDmgBonus || 0,
@@ -6983,6 +7005,7 @@ async function _vttRollAttack() {
         dmgTotal: r.dmgTotal, dmgFull: sharedDmgTotalHit, dmgPre: r.dmgPre ?? r.dmgTotal, dmgReduction: r.dmgReduction || 0,
         bonusHitDice: bonusHitDice||null, extraHitRolls: extraHitRolls.length ? extraHitRolls : null,
         critNormalMax: sharedCritNormalMax, critRaw2: sharedCritRaw2, critFixed2: sharedCritFixed2,
+        critFormula: criticalEffectFormulaLabel(),
         halfDmg: r.halfDmg, newHp: r.newHp, hpMax: r.hpMax,
         damageTypeId: opt.damageTypeId||null, damageTypeIcon: opt.damageTypeIcon||null,
         damageTypeColor: opt.damageTypeColor||null,

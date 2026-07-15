@@ -4,7 +4,7 @@ import {
   getMod, getModFromScore, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax, calcPalier, pct,
   getItemStatBonus, getDefaultCharForUser, getMyCharacters, sortCharactersForDisplay,
 } from '../assets/js/shared/char-stats.js';
-import { DEFAULT_CHARACTER_RULES, LEGACY_CHARACTER_RULES, setCharacterRulesForTests } from '../assets/js/shared/character-rules.js';
+import { DEFAULT_CHARACTER_RULES, LEGACY_CHARACTER_RULES, calcCriticalEffectTotal, setCharacterRulesForTests } from '../assets/js/shared/character-rules.js';
 
 afterEach(() => setCharacterRulesForTests(null));
 
@@ -33,11 +33,17 @@ test('regles par aventure : formules derivees personnalisables', () => {
       speed: '5 + forceMod + equipBonus',
       deck: '2 + intMod * level',
       xp: '250 * level',
+      crit: 'normalTotal + critRoll',
     },
   });
   assert.equal(calcVitesse({ stats: { force: 14 }, niveau: 3 }), 7);
   assert.equal(calcDeckMax({ stats: { intelligence: 14 }, niveau: 3 }), 8);
   assert.equal(calcPalier(3), 750);
+  assert.equal(calcCriticalEffectTotal({ baseRoll: 4, diceMax: 8, critRoll: 5, fixedBonus: 3 }), 12);
+});
+
+test('critique par defaut : ajoute un seul de supplementaire', () => {
+  assert.equal(calcCriticalEffectTotal({ baseRoll: 4, diceMax: 6, critRoll: 3, fixedBonus: 2 }), 9);
 });
 
 test('getModFromScore : formule D&D par défaut sans plafond artificiel', () => {

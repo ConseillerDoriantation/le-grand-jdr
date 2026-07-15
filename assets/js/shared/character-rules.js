@@ -24,6 +24,7 @@ export const LEGACY_CHARACTER_RULES = {
     pv: 'pvBase + floor(max(0, conMod) * max(0, level - 1)) + min(0, conMod) + equipBonus',
     pm: 'pmBase + floor(max(0, sagMod) * max(0, level - 1)) + min(0, sagMod) + equipBonus',
     xp: '100 * level * level',
+    crit: 'baseRoll + critRoll + fixedBonus',
   },
 };
 
@@ -50,6 +51,7 @@ export const DEFAULT_CHARACTER_RULES = {
     pv: 'pvBase + conMod * level + equipBonus',
     pm: 'pmBase + equipBonus',
     xp: '100 * level * level',
+    crit: 'baseRoll + critRoll + fixedBonus',
   },
 };
 
@@ -62,6 +64,8 @@ const FORMULA_META = [
   { key: 'pm', icon: '◆', label: 'PM maximum', vars: ['pmBase', 'sagMod', 'level', 'equipBonus'] },
   { key: 'xp', icon: '★', label: "Palier d'XP", vars: ['level'] },
 ];
+
+FORMULA_META.push({ key: 'crit', icon: '💥', label: 'Critique dégâts / soins', vars: ['baseRoll', 'critRoll', 'fixedBonus', 'normalTotal', 'diceMax'] });
 
 const MODIFIER_META = { key: 'modifier', icon: '±', label: 'Modificateur', vars: ['score'] };
 const ALL_FORMULA_META = [MODIFIER_META, ...FORMULA_META];
@@ -87,6 +91,11 @@ const VARIABLE_LABELS = {
   pvBase: 'PV de base',
   pmBase: 'PM de base',
   level: 'Niveau',
+  baseRoll: 'Jet normal des dés',
+  diceMax: 'Maximum des dés',
+  critRoll: 'Dé critique additionnel',
+  fixedBonus: 'Bonus fixe',
+  normalTotal: 'Total normal',
 };
 
 const CHARACTER_VARIABLES = [
@@ -108,6 +117,7 @@ const SAMPLE_CONTEXTS = {
   pv: { ...CHARACTER_SAMPLE, pvBase: 10, level: 5, equipBonus: 3 },
   pm: { ...CHARACTER_SAMPLE, pmBase: 10, level: 5, equipBonus: 3 },
   xp: { ...CHARACTER_SAMPLE, level: 5 },
+  crit: { baseRoll: 4, diceMax: 8, critRoll: 5, fixedBonus: 3, normalTotal: 7 },
 };
 
 let _rules = null;
@@ -317,6 +327,27 @@ export function evaluateCharacterFormula(formula, variables, fallback = 0) {
   }
 }
 
+export function calcCriticalEffectTotal({ baseRoll = 0, diceMax = 0, critRoll = 0, fixedBonus = 0 } = {}) {
+  const rules = getCharacterRules();
+  const normalTotal = Number(baseRoll || 0) + Number(fixedBonus || 0);
+  const fallback = Number(baseRoll || 0) + Number(critRoll || 0) + Number(fixedBonus || 0);
+  return Math.max(0, Math.round(evaluateCharacterFormula(
+    rules.formulas?.crit || DEFAULT_CHARACTER_RULES.formulas.crit,
+    {
+      baseRoll: Number(baseRoll || 0),
+      diceMax: Number(diceMax || 0),
+      critRoll: Number(critRoll || 0),
+      fixedBonus: Number(fixedBonus || 0),
+      normalTotal,
+    },
+    fallback
+  )));
+}
+
+export function criticalEffectFormulaLabel() {
+  return getCharacterRules().formulas?.crit || DEFAULT_CHARACTER_RULES.formulas.crit;
+}
+
 function _validateRules(rules) {
   _parseFormula(rules.modifier.formula, SAMPLE_CONTEXTS.modifier);
   FORMULA_META.forEach(meta => _parseFormula(rules.formulas[meta.key], SAMPLE_CONTEXTS[meta.key]));
@@ -385,7 +416,7 @@ function _renderFormulaWorkbench() {
       data-field="${path}" data-token="${variable}" title="Ajouter ${_esc(VARIABLE_LABELS[variable] || variable)}">
       <span>${_esc(VARIABLE_LABELS[variable] || variable)}</span><small>${variable}</small>
     </button>`).join('');
-  const otherVariables = ['modifier', 'xp'].includes(active.key)
+  const otherVariables = ['modifier', 'xp', 'crit'].includes(active.key)
     ? []
     : CHARACTER_VARIABLES.filter(variable => !active.vars.includes(variable));
   const otherVariableButtons = otherVariables.map(variable => `
