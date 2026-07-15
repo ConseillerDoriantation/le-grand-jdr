@@ -274,6 +274,16 @@ function _vttCancelEmoteEdit() {
 // [plcolor musique → vtt-music.js]
 // No-op pour les wrappers qui servaient juste à event.stopPropagation() (closest() suffit)
 function _vttNoop() {}
+function _vttIsTypingTarget(target) {
+  const el = target?.nodeType === 1 ? target : target?.parentElement;
+  if (!el?.closest) return false;
+  const editable = el.closest('[contenteditable]');
+  return !!(
+    el.closest('input, textarea, select, [role="textbox"]') ||
+    (editable && editable.getAttribute('contenteditable') !== 'false') ||
+    el.isContentEditable
+  );
+}
 
 function _vttBindDispatch() {
   if (_vttBindDispatch._bound) return;
@@ -1604,7 +1614,7 @@ function _showAimHud(opt) {
     <div class="vtt-mt-hud-actions">
       <button class="vtt-mt-btn-cancel" data-vtt-fn="_aimCancel">✕ Annuler</button>
     </div>`;
-  const onKey = e => { if (e.key === 'Escape') _aimCancel(); };
+  const onKey = e => { if (!_vttIsTypingTarget(e.target) && e.key === 'Escape') _aimCancel(); };
   document.addEventListener('keydown', onKey);
   hud._removeKey = () => document.removeEventListener('keydown', onKey);
   document.body.appendChild(hud);
@@ -2701,7 +2711,7 @@ function _showSelfHud() {
     <div class="vtt-mt-hud-actions">
       <button class="vtt-mt-btn-cancel" data-vtt-fn="_selfMoveCancel">✕ Annuler</button>
     </div>`;
-  const onKey = e => { if (e.key === 'Escape') _selfMoveCancel(); };
+  const onKey = e => { if (!_vttIsTypingTarget(e.target) && e.key === 'Escape') _selfMoveCancel(); };
   document.addEventListener('keydown', onKey);
   hud._removeKey = () => document.removeEventListener('keydown', onKey);
   document.body.appendChild(hud);
@@ -5083,7 +5093,11 @@ function _mtRefreshHud() {
   document.body.appendChild(div);
 
   // Entrée = valider
-  const _hudKey = e => { if (e.key === 'Enter') _mtValidate(); if (e.key === 'Escape') _mtCancel(); };
+  const _hudKey = e => {
+    if (_vttIsTypingTarget(e.target)) return;
+    if (e.key === 'Enter') _mtValidate();
+    if (e.key === 'Escape') _mtCancel();
+  };
   div._hudKey = _hudKey;
   document.addEventListener('keydown', _hudKey, { once: false });
   div._removeKey = () => document.removeEventListener('keydown', _hudKey);
@@ -5297,6 +5311,7 @@ function _showZoneHud() {
       <button class="vtt-mt-btn-validate" data-vtt-fn="_zoneValidate">✓ Valider</button>
     </div>`;
   const onKey = e => {
+    if (_vttIsTypingTarget(e.target)) return;
     if (e.key === 'Enter')              { e.preventDefault(); _zoneValidate(); }
     if (e.key === 'Escape')             _zoneCancel();
     if (e.key === 'r' || e.key === 'R') _zoneRotate();
@@ -9330,6 +9345,7 @@ function _vttEscapeCloseFloaters() {
 
 function _keyHandler(e) {
   if (!document.getElementById('vtt-canvas-wrap')) return;
+  const typingTarget = _vttIsTypingTarget(e.target);
 
   // Échap : traité AVANT le filtre de saisie, pour fermer un panneau dont le
   // champ de recherche a le focus (émotes, dés, musique…).
@@ -9341,7 +9357,7 @@ function _keyHandler(e) {
     // c) Fermer un panneau flottant / le HUD d'action (même si un de leurs champs a le focus).
     if (_vttEscapeCloseFloaters()) { e.preventDefault(); if (typeof e.target.blur === 'function') e.target.blur(); return; }
     // d) Focus dans un champ de saisie hors panneau (chat, notes…) → on se contente de blur.
-    if (e.target.matches('input,textarea,select')) { e.target.blur(); return; }
+    if (typingTarget) { if (typeof e.target.blur === 'function') e.target.blur(); return; }
     // d-bis) Polygone en cours → annuler le tracé (sans quitter l'outil dessin).
     if (_polyActive) { _polyCancel(); e.preventDefault(); return; }
     // e) Outil ≠ sélection → revenir à l'outil sélection.
@@ -9354,7 +9370,7 @@ function _keyHandler(e) {
   }
 
   // Autres raccourcis : ignorés quand la frappe vise un champ de saisie.
-  if (e.target.matches('input,textarea,select')) return;
+  if (typingTarget) return;
   // Entrée : ferme le polygone en cours.
   if (e.key === 'Enter' && _polyActive) { e.preventDefault(); _polyFinish(); return; }
   // Ctrl+C / Ctrl+V : copier / coller la sélection (tokens + dessins)
