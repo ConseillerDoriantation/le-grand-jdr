@@ -12,9 +12,9 @@ export const LEGACY_CHARACTER_RULES = {
   },
   armorBases: {
     none: 8,
-    light: 10,
-    medium: 12,
-    heavy: 14,
+    light: 8,
+    medium: 8,
+    heavy: 8,
   },
   formulas: {
     ca: 'armorBase + dexMod + equipCA + equipBonus + shieldBonus',
@@ -38,12 +38,12 @@ export const DEFAULT_CHARACTER_RULES = {
   },
   armorBases: {
     none: 10,
-    light: 11,
-    medium: 13,
-    heavy: 16,
+    light: 10,
+    medium: 10,
+    heavy: 10,
   },
   formulas: {
-    ca: 'armorBase + armorDexMod + equipCA + equipBonus + shieldBonus',
+    ca: 'armorBase + dexMod + equipCA + equipBonus + shieldBonus',
     speed: '6 + equipBonus',
     initiative: 'dexMod + equipBonus',
     deck: 'max(1, level + max(intMod, sagMod, chaMod))',
@@ -54,7 +54,7 @@ export const DEFAULT_CHARACTER_RULES = {
 };
 
 const FORMULA_META = [
-  { key: 'ca', icon: '🛡️', label: "Classe d'armure", vars: ['armorBase', 'armorDexMod', 'equipCA', 'equipBonus', 'shieldBonus'] },
+  { key: 'ca', icon: '🛡️', label: "Classe d'armure", vars: ['armorBase', 'dexMod', 'equipCA', 'equipBonus', 'shieldBonus'] },
   { key: 'speed', icon: '🏃', label: 'Vitesse', vars: ['forceMod', 'equipBonus', 'level'] },
   { key: 'initiative', icon: '⚡', label: 'Initiative', vars: ['dexMod', 'equipBonus', 'level'] },
   { key: 'deck', icon: '✦', label: 'Taille du deck', vars: ['intMod', 'sagMod', 'chaMod', 'level'] },
@@ -73,8 +73,8 @@ const VARIABLE_LABELS = {
   intScore: "Score d'Intelligence",
   sagScore: 'Score de Sagesse',
   chaScore: 'Score de Charisme',
-  armorBase: "Base d'armure",
-  armorDexMod: "Mod. Dex autorisé par l'armure",
+  armorBase: 'Base de CA',
+  armorDexMod: 'Mod. Dex (compat ancien calcul)',
   dexMod: 'Mod. Dextérité',
   forceMod: 'Mod. Force',
   intMod: 'Mod. Intelligence',
@@ -101,7 +101,7 @@ const CHARACTER_SAMPLE = {
 
 const SAMPLE_CONTEXTS = {
   modifier: { score: 14 },
-  ca: { ...CHARACTER_SAMPLE, armorBase: 11, armorDexMod: 2, equipCA: 0, equipBonus: 0, shieldBonus: 0, level: 5 },
+  ca: { ...CHARACTER_SAMPLE, armorBase: 10, armorDexMod: 2, equipCA: 0, equipBonus: 0, shieldBonus: 0, level: 5 },
   speed: { ...CHARACTER_SAMPLE, equipBonus: 1, level: 5 },
   initiative: { ...CHARACTER_SAMPLE, equipBonus: 1, level: 5 },
   deck: { ...CHARACTER_SAMPLE, level: 5 },
@@ -605,13 +605,11 @@ function _renderRulesModal() {
         </section>
 
         <section class="sh-admin-section">
-          <div class="sh-admin-section-title">Bases de classe d'armure</div>
-          <div class="cr-rule-number-grid is-four">
-            ${_numberInput('Sans armure', 'armorBases.none', r.armorBases.none)}
-            ${_numberInput('Légère', 'armorBases.light', r.armorBases.light)}
-            ${_numberInput('Intermédiaire', 'armorBases.medium', r.armorBases.medium)}
-            ${_numberInput('Lourde', 'armorBases.heavy', r.armorBases.heavy)}
+          <div class="sh-admin-section-title">Base de classe d'armure</div>
+          <div class="cr-rule-number-grid">
+            ${_numberInput('Base', 'armorBases.none', r.armorBases.none)}
           </div>
+          <p class="sh-admin-section-hint">Les types d'armure ne donnent plus de CA automatique. Renseigne le bonus directement sur l'équipement.</p>
         </section>
 
         <section class="sh-admin-section">

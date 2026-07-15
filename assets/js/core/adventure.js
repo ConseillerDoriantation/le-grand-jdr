@@ -33,6 +33,7 @@ import { invalidateSpellMatricesCache } from '../shared/spell-matrices.js';
 import { invalidateUpgradeSettingsCache } from '../shared/upgrade-settings.js';
 import { invalidateCharacterRulesCache, loadCharacterRules } from '../shared/character-rules.js';
 import { invalidateEquipmentSlotsCache, loadEquipmentSlots } from '../shared/equipment-slots.js';
+import { invalidateArmorSetSettingsCache, loadArmorSetSettings } from '../shared/armor-set-settings.js';
 import { invalidateSpellSystemCache, loadSpellSystem } from '../shared/spell-system.js';
 import { invalidateShopPickerCache } from '../shared/shop-picker.js';
 import { clearConditionLibraryCache } from '../shared/conditions.js';
@@ -45,6 +46,7 @@ function _invalidateScopedCaches() {
   invalidateUpgradeSettingsCache();
   invalidateCharacterRulesCache();
   invalidateEquipmentSlotsCache();
+  invalidateArmorSetSettingsCache();
   invalidateSpellSystemCache();
   invalidateShopPickerCache();
   clearConditionLibraryCache();
@@ -365,6 +367,10 @@ export async function selectAdventure(adv) {
   // La fiche, la boutique et le VTT partagent les slots de cette aventure.
   await loadEquipmentSlots().catch(e =>
     console.warn('[adventure] emplacements d\'equipement non charges', e?.code || e)
+  );
+
+  await loadArmorSetSettings().catch(e =>
+    console.warn('[adventure] bonus de set non charges', e?.code || e)
   );
 
   await loadSpellSystem().catch(e =>

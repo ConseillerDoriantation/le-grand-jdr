@@ -6,7 +6,7 @@
 
 // ── Métadonnées des statistiques ──────────────────────────────────────────────
 import { evaluateCharacterFormula, getCharacterRules } from './character-rules.js';
-import { getArmorTorsoSlotId, getSecondaryWeaponSlotId } from './equipment-slots.js';
+import { getSecondaryWeaponSlotId } from './equipment-slots.js';
 
 export const STAT_META = [
   { key: 'force',        label: 'Force',        color: '#ff6b6b' },
@@ -174,16 +174,12 @@ export function modStr(m) {
 
 /**
  * Classe d'Armure effective du personnage.
- * Base selon type d'armure Torse + Dex + bonus équipements + bouclier.
+ * Base unique + Dex + bonus explicites d'equipements + bouclier.
  */
 export function calcCA(c) {
   const equip = c?.equipement || {};
-  const torse = equip[getArmorTorsoSlotId()]?.typeArmure || '';
   const rules = getCharacterRules();
-  let caBase = rules.armorBases.none;
-  if (torse === 'Légère')        caBase = rules.armorBases.light;
-  else if (torse === 'Intermédiaire') caBase = rules.armorBases.medium;
-  else if (torse === 'Lourde')   caBase = rules.armorBases.heavy;
+  const caBase = rules.armorBases?.none ?? 10;
 
   const caEquip = Object.values(equip).reduce((s, it) => s + (it?.ca || 0), 0);
   // Bonus dérivé "caBonus" configurable par item (boucliers, amulettes, etc.)
@@ -197,7 +193,7 @@ export function calcCA(c) {
 
   const formulaStats = _characterFormulaStats(c);
   const dexMod = formulaStats.dexMod;
-  const armorDexMod = torse === 'Lourde' ? 0 : torse === 'Intermédiaire' ? Math.min(2, dexMod) : dexMod;
+  const armorDexMod = dexMod;
   const fallback = caBase + dexMod + caEquip + caBonusDerived + bouclierFallback;
   return evaluateCharacterFormula(rules.formulas.ca, {
     ...formulaStats,

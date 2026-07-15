@@ -81,10 +81,10 @@ test('calcPMMax : valeur de base conservée avec le préréglage compatible D&D'
   assert.equal(calcPMMax({ pmBase: 3, stats: { sagesse: 1 } }), 3);
 });
 
-test('calcCA : bases D&D et Dextérité autorisée selon l’armure', () => {
-  assert.equal(calcCA({ equipement: { Torse: { typeArmure: 'Légère' } }, stats: { dexterite: 14 } }), 13);
-  assert.equal(calcCA({ equipement: { Torse: { typeArmure: 'Intermédiaire' } }, stats: { dexterite: 18 } }), 15, 'Dex plafonnée à +2');
-  assert.equal(calcCA({ equipement: { Torse: { typeArmure: 'Lourde' } }, stats: { dexterite: 18 } }), 16, 'armure lourde sans Dex');
+test('calcCA : type d’armure neutre, bonus explicites uniquement', () => {
+  assert.equal(calcCA({ equipement: { Torse: { typeArmure: 'Légère', ca: 2 } }, stats: { dexterite: 14 } }), 14);
+  assert.equal(calcCA({ equipement: { Torse: { typeArmure: 'Intermédiaire', ca: 5 } }, stats: { dexterite: 18 } }), 19);
+  assert.equal(calcCA({ equipement: { Torse: { typeArmure: 'Lourde', ca: 6 } }, stats: { dexterite: 18 } }), 20);
   assert.equal(calcCA({ stats: { dexterite: 10 } }), 10, 'sans torse → base 10');
 });
 

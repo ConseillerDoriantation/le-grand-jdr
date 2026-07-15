@@ -16,13 +16,14 @@ import {
   calcOr, calcPalier, pct, getItemStatBonus, getItemEffectText,
   sortCharactersForDisplay, modStr,
 } from '../shared/char-stats.js';
+import { getCharacterRules } from '../shared/character-rules.js';
 
 import { getCharacterById, getVisibleCharacters } from '../shared/character-state.js';
 // ── Sous-modules ─────────────────────────────────────────────────────────────
 import {
   loadCombatStyles, detectCombatStyle,
   openCombatStylesAdmin, openDamageTypesAdmin,
-  _getTraits, getEquippedInventoryIndexMap, getArmorSetData,
+  _getTraits, getEquippedInventoryIndexMap, getArmorTypeMeta, getArmorSetData,
   // V3 — combat helpers
   getMainWeapon, getWeaponToucherParts, getWeaponDegatsParts,
 } from './characters/data.js';
@@ -274,10 +275,7 @@ function openCharCalculation(btn) {
     note = `Le modificateur de ${statLabel} provient de la valeur totale de la caractéristique.`;
   } else if (type === 'ca') {
     const equip = c.equipement || {};
-    const torse = equip[getArmorTorsoSlotId()] || {};
-    const armorType = torse.typeArmure || 'Sans armure';
-    const armorBases = { 'Légère': 10, 'Intermédiaire': 12, 'Lourde': 14 };
-    const armorBase = armorBases[armorType] || 8;
+    const armorBase = getCharacterRules().armorBases?.none ?? 10;
     const dex = getMod(c, 'dexterite');
     const rawCaSources = Object.entries(equip).flatMap(([slot, item]) => {
       const value = parseInt(item?.ca) || 0;
@@ -290,13 +288,13 @@ function openCharCalculation(btn) {
     title = 'Classe d’Armure';
     result = calcCA(c);
     rows = [
-      _calcRow(`Base · ${armorType}`, armorBase),
+      _calcRow('Base de CA', armorBase),
       _calcRow('Modificateur de Dextérité', modStr(dex)),
       ...rawCaSources.map(({ slot, item, value }) => _calcRow(item.nom || slot, modStr(value), slot)),
       _calcEquipmentRows(c, 'caBonus'),
       hasShield && !shieldOwnBonus ? _calcRow('Bouclier', '+2', 'Bonus par défaut') : '',
     ].join('');
-    note = 'La CA additionne la base de l’armure de torse, la Dextérité et les bonus de l’équipement.';
+    note = 'La CA additionne une base unique, la Dextérité et les bonus explicites de l’équipement. Le type d’armure sert à classer l’objet, pas à ajouter une CA automatique.';
   } else if (type === 'speed') {
     const strength = getMod(c, 'force');
     title = 'Vitesse';
@@ -1063,7 +1061,7 @@ function renderCharCombatV3(c, canEdit) {
         <div class="weap-roll">
           <span class="weap-roll-lbl">Toucher</span>
           <span class="weap-roll-val touch">${_esc(tp?.roll || '—')}</span>
-          ${tp?.statLabel?`<span class="weap-roll-sub">${_esc(tp.statLabel)}${tp.setBonus>0?` · Set +${tp.setBonus}`:''}</span>`:''}
+          ${tp?.statLabel?`<span class="weap-roll-sub">${_esc(tp.statLabel)}${tp.setBonus?` · Set ${tp.setBonus>0?'+':''}${tp.setBonus}`:''}</span>`:''}
         </div>
         <div class="weap-rolls-sep"></div>
         <div class="weap-roll">
@@ -1090,13 +1088,6 @@ function renderCharCombatV3(c, canEdit) {
     force: 'FOR', dexterite: 'DEX', intelligence: 'INT',
     constitution: 'CON', sagesse: 'SAG', charisme: 'CHA',
   };
-  // Code couleur des types d'armure (partagé pill de carte + badge de set) :
-  // Léger = bleu, Intermédiaire = vert, Lourd = rouge.
-  const ARMOR_TYPE_META = {
-    'Légère':        { key: 'light',  short: 'Légère' },
-    'Intermédiaire': { key: 'medium', short: 'Inter.' },
-    'Lourde':        { key: 'heavy',  short: 'Lourde' },
-  };
   const renderArmor = slotDef => {
     const slot = slotDef.id;
     const it = equip[slot] || {};
@@ -1110,11 +1101,9 @@ function renderCharCombatV3(c, canEdit) {
         <div class="armor-name muted">— Vide —</div>
       </div>`;
     }
-    // Type d'armure → pill colorée placée dans l'en-tête du slot (pas mélangée
-    // aux bonus de stats). Léger/Inter/Lourd = bleu/vert/rouge.
-    const tmeta = ARMOR_TYPE_META[it.typeArmure];
+    const tmeta = getArmorTypeMeta(it.typeArmure);
     const typePill = it.typeArmure
-      ? `<span class="armor-type-pill ${tmeta?.key || ''}">${_esc(tmeta?.short || it.typeArmure)}</span>`
+      ? `<span class="armor-type-pill ${tmeta?.tone || 'neutral'}">${_esc(tmeta?.label || it.typeArmure)}</span>`
       : '';
     // Bonus : stats + CA + caBonus + dérivés
     const badges = [];
@@ -1153,7 +1142,7 @@ function renderCharCombatV3(c, canEdit) {
   // créer deux cartes orphelines (3 slots + 3 slots).
   const armorRows = `<div class="armor-grid armor-grid--equipment">${armorSlots.map(renderArmor).join('')}</div>`;
 
-  // Set bonus — actif UNIQUEMENT si Tête + Torse + Bottes du même type (Légère / Intermédiaire / Lourde)
+  // Set bonus — actif si tous les slots d'armure configurés portent le même type.
   // Rendu compacté : un badge dans l'en-tête de la section (le type de chaque
   // pièce est déjà affiché sur sa carte → pas de liste slot-par-slot redondante).
   let setBadgeHtml = '', setHintHtml = '';
@@ -1162,40 +1151,37 @@ function renderCharCombatV3(c, canEdit) {
     const trackedSlots = setData.trackedSlots || [];
     const slots = setData.slots || trackedSlots.map(s => ({ slot: s, type: '', equipped: false }));
     const counts = setData.counts || {};
-    const fullType = setData.fullType || ''; // 'Légère' / 'Intermédiaire' / 'Lourde'
-    const isActive = setData.isActive || Boolean(fullType);
+    const fullType = setData.fullType || '';
+    const isActive = Boolean(setData.isActive);
     const equippedCount = setData.equippedCount || 0;
+    const setTotal = trackedSlots.length || 0;
 
-    const TYPE_ICONS = { 'Légère': '🪶', 'Intermédiaire': '🛡️', 'Lourde': '⛨' };
-    const EFFECT_BY_TYPE = {
-      'Légère':        { tag: 'Léger',         fx: 'Coût des sorts −2 PM' },
-      'Intermédiaire': { tag: 'Intermédiaire', fx: 'Toucher +2' },
-      'Lourde':        { tag: 'Lourd',         fx: 'Réduction de 2 dégâts (toute source)' },
-    };
-
-    if (trackedSlots.length !== 3) {
+    if (!setTotal) {
       setBadgeHtml = '';
       setHintHtml = '';
     } else if (isActive) {
-      const fx   = EFFECT_BY_TYPE[fullType] || { tag: fullType, fx: setData.activeEffect?.chipText || '' };
-      const ico  = TYPE_ICONS[fullType] || '✨';
-      const tkey = ARMOR_TYPE_META[fullType]?.key || '';
+      const fx   = { tag: setData.activeEffect?.set?.label || fullType, fx: setData.activeEffect?.chipText || '' };
+      const meta = getArmorTypeMeta(fullType);
+      const ico  = meta?.set?.icon || '✨';
+      const tkey = meta?.tone || '';
       const setLabels = trackedSlots.map(id => slotDefs.find(slot => slot.id === id)?.label || id).join(', ');
       setBadgeHtml = `<span class="set-badge active ${tkey}" title="${_esc(setLabels)} de type ${_esc(fullType)} équipés (set complet)">
-        <span class="set-badge-ico">${ico}</span><b>Set ${_esc(fx.tag)} 3/3</b><span class="set-badge-fx">${_esc(fx.fx)}</span>
+        <span class="set-badge-ico">${ico}</span><b>Set ${_esc(fx.tag)} ${setTotal}/${setTotal}</b><span class="set-badge-fx">${_esc(fx.fx)}</span>
       </span>`;
     } else {
       const types = Object.keys(counts);
       let reason;
-      if (equippedCount < 3) {
-        reason = `Équipe les 3 pièces de set du même type pour activer un bonus d'ensemble.`;
+      if (equippedCount < setTotal) {
+        reason = `Équipe les ${setTotal} pièces d'armure du même type pour activer un bonus d'ensemble.`;
       } else if (types.length > 1) {
         const list = types.map(t => `${counts[t]}× ${t}`).join(', ');
-        reason = `Types mélangés (${list}) — il faut 3× le même type.`;
+        reason = `Types mélangés (${list}) — il faut ${setTotal}× le même type.`;
+      } else if (fullType) {
+        reason = `Aucun bonus configuré pour le type ${fullType}.`;
       } else {
-        reason = `Continue d'équiper les 3 pièces d'un même type.`;
+        reason = `Continue d'équiper les pièces d'armure d'un même type.`;
       }
-      setBadgeHtml = `<span class="set-badge" title="${_esc(reason)}"><span class="set-badge-ico">🌱</span><b>Set ${equippedCount}/3</b></span>`;
+      setBadgeHtml = `<span class="set-badge" title="${_esc(reason)}"><span class="set-badge-ico">🌱</span><b>Set ${equippedCount}/${setTotal}</b></span>`;
       setHintHtml  = `<div class="set-hint">${_esc(reason)}</div>`;
     }
   } catch (e) { console.warn('[set bonus]', e); }
@@ -1307,7 +1293,10 @@ function renderCharCombatV3(c, canEdit) {
   ${armorSlots.length ? `<div class="section">
     <div class="section-head">
       <div class="section-title"><span class="ico">🪖</span> Armures & Accessoires</div>
-      ${setBadgeHtml}
+      <div class="armor-section-tools">
+        ${setBadgeHtml}
+        ${STATE.isAdmin ? `<button class="section-icon-action" data-action="openArmorSetsAdmin" title="Gérer les types d'armure et bonus de set" aria-label="Gérer les types d'armure et bonus de set">🧩</button>` : ''}
+      </div>
     </div>
     ${armorRows}
     ${setHintHtml}

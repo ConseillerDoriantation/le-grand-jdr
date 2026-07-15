@@ -1558,7 +1558,10 @@ const PAGES = {
       const allPartyChars = uid ? allChars.filter(c => c.uid !== uid) : [];
       // Les hauts-faits secrets restent invisibles aux joueurs partout
       const achievements = STATE.isAdmin ? achievementsRaw : achievementsRaw.filter(a => !a.secret);
-      STATE.characters = chars;
+      // STATE.characters est le cache global de l'aventure. Les vues filtrent
+      // localement ce qu'elles affichent, sinon les pages liées aux personnages
+      // perdent les portraits/participants après un passage par le dashboard.
+      STATE.characters = allChars;
 
     // Formate la prochaine séance pour affichage (date FR + créneau)
     const _SLOT_LABELS = { m: '🌞 Matin', a: '☀️ Aprem', s: '🌙 Soir' };
@@ -2636,9 +2639,10 @@ const PAGES = {
 
   // ─── CHARACTERS ─────────────────────────────────────────────────────────────
   async characters() {
-    const uid   = STATE.isAdmin ? null : STATE.user.uid;
-    const chars = sortCharactersForDisplay(await loadChars(uid));
-    STATE.characters = chars;
+    const uid      = STATE.user.uid;
+    const allChars = sortCharactersForDisplay(await loadChars());
+    STATE.characters = allChars;
+    const chars = STATE.isAdmin ? allChars : allChars.filter(c => c.uid === uid);
     const content = document.getElementById('main-content');
     // V3 : page-header standard (titre comme les autres pages) + shell de la fiche.
     let html = `${pageHeaderHtml(STATE.isAdmin ? '📜 Tous les Personnages' : '📜 Mes Personnages', 'Gérez vos fiches de personnage')}`;
@@ -2840,6 +2844,7 @@ const PAGES = {
       { g:'combat', ic:'🔮', t:'Matrices de sorts',   s:'Runes, noyaux, combinaisons',     a:'#bca0ff', fn:'openSpellMatricesAdmin', mod:'characters' },
       { g:'combat', ic:'∑',  t:'Règles de personnage', s:'Modificateurs, PV, PM, CA, deck', a:'#5bc0eb', fn:'openCharacterRulesAdmin', mod:'characters' },
       { g:'combat', ic:'🎒', t:"Slots d'équipement", s:'Emplacements utilisés sur les fiches', a:'#22c38e', fn:'openEquipmentSlotsAdmin', mod:'characters' },
+      { g:'combat', ic:'🧩', t:"Types d'armure", s:'Types boutique et bonus de set', a:'#7eb0ff', fn:'openArmorSetsAdmin', mod:'characters' },
       { g:'combat', ic:'✦',  t:'Système de sorts', s:'Forge de runes ou création classique', a:'#e8b84b', fn:'openSpellSystemAdmin', mod:'characters' },
       { g:'table',  ic:'🎲', t:'Compétences de dés',  s:'Jets personnalisés',              a:'#4f8cff', fn:'_ouvrirGestionDes',      mod:'histoire' },
       { g:'table',  ic:'😄', t:'Émotes VTT',          s:'Réactions sur la table',          a:'#22c38e', fn:'_ouvrirGestionEmotes',   mod:'vtt/vtt' },

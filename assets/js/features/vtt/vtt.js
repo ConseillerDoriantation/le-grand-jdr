@@ -4243,9 +4243,10 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
 
     // ── Coût en PM : badge dédié à DROITE du titre (pas en pill) ──────
     let pmBadge = '';
-    const _setReduc = o.pmSetDelta && o.pmSetDelta < 0;
-    const _setExtra = _setReduc
-      ? `<span class="vtt-aopt-pm-set" title="Set léger : −${-o.pmSetDelta} PM (coût brut ${o.pmRaw})">🍃 −${-o.pmSetDelta}</span>`
+    const _setDelta = o.pmSetDelta || 0;
+    const _setReduc = _setDelta < 0;
+    const _setExtra = _setDelta
+      ? `<span class="vtt-aopt-pm-set" title="Set d'armure : ${_setDelta > 0 ? '+' : '−'}${Math.abs(_setDelta)} PM (coût brut ${o.pmRaw})">${_setDelta > 0 ? '⬆' : '🍃'} ${_setDelta > 0 ? '+' : '−'}${Math.abs(_setDelta)}</span>`
       : '';
     if (o.pmCost > 0) {
       pmBadge = `<span class="vtt-aopt-pm ${_setReduc?'vtt-aopt-pm--reduced':''}">🔮 ${o.pmCost} PM${_setExtra}</span>`;
@@ -4714,7 +4715,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
   if (opt.toucherMod !== undefined) {
     const parts = []; let tot = 0;
     if (opt.toucherMod)        { tot += opt.toucherMod;      parts.push(`${opt.toucherStatLabel} ${sn(opt.toucherMod)}`); }
-    if (opt.toucherSetBonus>0) { tot += opt.toucherSetBonus; parts.push(`Set +${opt.toucherSetBonus}`); }
+    if (opt.toucherSetBonus)   { tot += opt.toucherSetBonus; parts.push(`Set ${sn(opt.toucherSetBonus)}`); }
     if (_touchBuff>0)          { tot += _touchBuff;          parts.push(`🎯 Ench +${_touchBuff}`); }
     toucherFormula = _mkCell(`<code style="font-size:.88rem;color:var(--gold)">1d20</code>`, tot, parts, 'var(--gold)');
   } else {

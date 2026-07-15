@@ -303,7 +303,7 @@ function _renderSpellComparePanel(allSorts, pmDelta, c) {
   </section>`;
 }
 
-// Tranche de coût d'un sort (PM effectif, set léger inclus) — pour le filtre par mana.
+// Tranche de coût d'un sort (PM effectif, set d'armure inclus) — pour le filtre par mana.
 function _sortPmBucket(pm) {
   if (pm <= 4) return 'low';
   if (pm <= 8) return 'mid';
@@ -896,16 +896,16 @@ export function renderCharDeck(c, canEdit) {
       </div>` : ''}
     </div>` : ''}
 
-    <!-- ④ Tray du Deck (Préparer : sockets + PM, sticky) ou ligne 📊 discrète (+ Set Léger) -->
+    <!-- ④ Tray du Deck (Préparer : sockets + PM, sticky) ou ligne 📊 discrète (+ set d'armure) -->
     ${density === 'tiles' ? `<div class="cs-sorts-deckinfo is-tray">
       ${_renderDeckSockets(allSorts.map((s, gi) => ({ s, i: gi })).filter(x => x.s.actif), deckMax, pmDelta, canEdit, pmCur, pmMax)}
-      ${pmDelta !== 0 ? `<span class="cs-sorts-setlight" title="Le Set Léger équipé modifie automatiquement le coût de tes sorts">
-        🧙 Set Léger <b>${pmDelta > 0 ? '+' : ''}${pmDelta} PM</b>
+      ${pmDelta !== 0 ? `<span class="cs-sorts-setlight" title="Le set d'armure équipé modifie automatiquement le coût de tes sorts">
+        🧙 Set d'armure <b>${pmDelta > 0 ? '+' : '−'}${Math.abs(pmDelta)} PM</b>
       </span>` : ''}
     </div>` : (activeSorts.length || pmDelta !== 0) ? `<div class="cs-sorts-deckinfo">
       ${_renderDeckStats(activeSorts, deckMax, pmDelta)}
-      ${pmDelta !== 0 ? `<span class="cs-sorts-setlight" title="Le Set Léger équipé modifie automatiquement le coût de tes sorts">
-        🧙 Set Léger <b>${pmDelta > 0 ? '+' : ''}${pmDelta} PM</b>
+      ${pmDelta !== 0 ? `<span class="cs-sorts-setlight" title="Le set d'armure équipé modifie automatiquement le coût de tes sorts">
+        🧙 Set d'armure <b>${pmDelta > 0 ? '+' : '−'}${Math.abs(pmDelta)} PM</b>
       </span>` : ''}
     </div>` : ''}`;
 
@@ -1515,15 +1515,15 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   const primaryChip = chips.find(ch => !ch.dim) || null;
   const restChips   = primaryChip ? chips.filter(ch => ch !== primaryChip) : chips;
 
-  // ── Coût PM : UNE seule vérité (override MJ > pm calculé, + Set Léger) ──
+  // ── Coût PM : UNE seule vérité (override MJ > pm calculé, + set d'armure) ──
   // La valeur affichée = coût réellement payé (identique Deck/filtres/VTT) ;
-  // le title déroule la chaîne Base → Ajustement MJ → Set Léger → final.
+  // le title déroule la chaîne Base → Ajustement MJ → set d'armure → final.
   const pmAuto  = parseInt(s.pm) || 0;
   const pmOvr   = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : null;
   const pmBase  = pmOvr ?? pmAuto;
   const pmFinal = _effectiveSortPm(s, pmDelta);
   const pmTitle = (pmOvr != null && pmOvr !== pmAuto) || pmDelta !== 0
-    ? `Coût : base ${pmAuto} PM${pmOvr != null && pmOvr !== pmAuto ? ` · ajusté MJ ${pmOvr}` : ''}${pmDelta !== 0 ? ` · Set Léger ${pmDelta > 0 ? '+' : ''}${pmDelta}` : ''} → ${pmFinal} PM`
+    ? `Coût : base ${pmAuto} PM${pmOvr != null && pmOvr !== pmAuto ? ` · ajusté MJ ${pmOvr}` : ''}${pmDelta !== 0 ? ` · Set d'armure ${pmDelta > 0 ? '+' : '−'}${Math.abs(pmDelta)}` : ''} → ${pmFinal} PM`
     : 'Coût en points de magie';
   const pmVal = pmDelta !== 0
     ? `<span class="cs-sort-pm-old">${pmBase}</span><span class="cs-sort-pm-new">${pmFinal}</span>`
@@ -3197,7 +3197,7 @@ export async function openSortModal(idx, s) {
 
       ${STATE.isAdmin ? `
       <div class="form-group" style="margin-bottom:.5rem">
-        <label style="font-size:.72rem">Coût PM personnalisé <span style="color:var(--text-dim);font-weight:400;font-size:.68rem">(MJ — vide = auto selon runes ; set léger appliqué par-dessus, jamais en dessous de 0)</span></label>
+        <label style="font-size:.72rem">Coût PM personnalisé <span style="color:var(--text-dim);font-weight:400;font-size:.68rem">(MJ — vide = auto selon runes ; set d'armure appliqué par-dessus, jamais en dessous de 0)</span></label>
         <input type="number" class="input-field" id="s-pm-override" min="0" max="50"
           value="${s?.pmOverride ?? ''}" placeholder="auto"
           style="max-width:120px">
