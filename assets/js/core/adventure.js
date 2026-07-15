@@ -728,7 +728,7 @@ export async function updateAdventureMeta(adventureId, { nom, emoji, description
 
   const update = {};
   if (nom)         update.nom         = nom;
-  if (emoji)       update.emoji       = emoji;
+  if (emoji !== undefined) update.emoji = emoji;
   if (description !== undefined) update.description = description;
 
   await updateDoc(ref, update);

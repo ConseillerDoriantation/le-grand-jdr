@@ -2970,7 +2970,12 @@ const PAGES = {
     });
     const duplicateEmailGroups = [];
     const emailGroups = new Map();
-    [...new Set([...memberUids, ...userEmailByUid.keys(), ...Object.keys(profiles)])]
+    const adventureScopedUids = new Set([
+      ...memberUids,
+      ...Object.keys(profiles).filter(uid => memberUids.has(uid)),
+      ...(STATE.characters || []).map(c => c?.uid).filter(Boolean),
+    ]);
+    [...adventureScopedUids]
       .filter(uid => uid && !absorbedUids.has(uid))
       .forEach(uid => {
         const email = emailOfUid(uid);
