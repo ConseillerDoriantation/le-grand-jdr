@@ -60,6 +60,16 @@
   --shadow-glow-arcane: 0 0 30px rgba(157,111,255,0.20);
   --shadow-glow-amber:  0 0 24px rgba(244,196,48,0.18);
   --shadow-glow-ember:  0 0 24px rgba(255,149,68,0.18);
+
+  /* Élévation — ombres appariées à l'échelle --surface-N : plus un élément
+     flotte haut, plus l'ombre est longue et douce (+ fin liseré lumineux en
+     haut pour détacher du fond nuit). Un panneau consomme --elev-N, jamais une
+     ombre en dur → la profondeur se règle ICI, en une ligne par niveau.
+     1 posé (carte) · 2 colonne dockée · 3 panneau flottant · 4 surcouche. */
+  --elev-1: 0 8px 24px rgba(0,0,0,.30);
+  --elev-2: 0 18px 50px rgba(0,0,0,.38);
+  --elev-3: 0 24px 64px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.04);
+  --elev-4: 0 30px 80px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.05);
   --green:     #22c38e;
   --green-dim: rgba(34,195,142,0.16);
   --blue:      #6aa7ff;
@@ -214,6 +224,13 @@
   --shadow-card: 0 1px 3px rgba(15,23,42,0.05), 0 0 0 1px rgba(15,23,42,0.04);
   --shadow-soft: 0 4px 18px rgba(15,23,42,0.08);
   --shadow-glow: 0 1px 0 rgba(255,255,255,0.7), 0 2px 6px rgba(15,23,42,0.05);
+
+  /* Élévation jour : mêmes niveaux, encre bleutée légère (les valeurs nuit en
+     dur écrasaient le mode jour d'ombres noires — corrigé en passant). */
+  --elev-1: 0 2px 8px rgba(15,23,42,.06);
+  --elev-2: 0 8px 24px rgba(15,23,42,.10);
+  --elev-3: 0 14px 40px rgba(15,23,42,.14), inset 0 1px 0 rgba(255,255,255,.65);
+  --elev-4: 0 20px 56px rgba(15,23,42,.18), inset 0 1px 0 rgba(255,255,255,.75);
   --green:     #059669;
   --green-dim: rgba(5,150,105,0.12);
   --blue:      #2563eb;

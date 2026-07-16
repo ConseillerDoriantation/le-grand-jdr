@@ -156,8 +156,8 @@ async function renderWorld() {
     <section class="world-hero-panel">
       <div class="world-hero-copy">
         <span class="world-kicker">${_esc(activeCat?.nom || 'Atlas')}</span>
-        <h1>Le Monde</h1>
-        <p>Repères, lieux, peuples, factions et vérités connues de l'aventure.</p>
+        <h1>Guide</h1>
+        <p>Tout ce que le MJ met à disposition de la table : règles maison, univers, repères.</p>
       </div>
       <div class="world-stat-grid">
         ${stats.map(stat => `

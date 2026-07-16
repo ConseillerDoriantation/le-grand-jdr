@@ -36,7 +36,7 @@ const PAGE_SHORTCUTS = [
   { id: 'story',        label: 'Trame',           icon: '📖', aliases: 'histoire scénario scenario récit recit campagne intrigue' },
   { id: 'agenda',       label: 'Agenda',          icon: '🗓️', aliases: 'dispo disponibilités disponibilites calendrier date session' },
   { id: 'achievements', label: 'Hauts-Faits',     icon: '🏆', aliases: 'succès succes achievements trophées trophees accomplissements' },
-  { id: 'world',        label: 'Monde',           icon: '🌍', aliases: 'lore univers encyclopédie encyclopedie histoire monde' },
+  { id: 'world',        label: 'Guide',           icon: '🌍', aliases: 'guide règles regles infos lore univers encyclopédie encyclopedie histoire monde' },
   { id: 'npcs',         label: 'PNJ',             icon: '👥', aliases: 'personnages non joueurs contacts factions npc' },
   { id: 'bestiaire',    label: 'Bestiaire',       icon: '🐉', aliases: 'monstres créatures creatures ennemis bêtes betes' },
   { id: 'recettes',     label: 'Recettes',        icon: '🧪', aliases: 'craft artisanat cuisine alchimie fabriquer' },

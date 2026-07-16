@@ -417,6 +417,14 @@ export async function createAdventure({ nom, emoji = '⚔️', description = '' 
   };
 
   await setDoc(doc(db, 'adventures', id), adv);
+
+  // Système de sorts : une NOUVELLE aventure démarre en « classique » (positionnement
+  // D&D-first ; les runes = contenu optionnel activable dans la config). Écrit
+  // explicitement : le fallback runtime reste 'runes' pour les aventures legacy
+  // sans doc (elles ne changent pas). Best-effort : sans ce doc, fallback runes.
+  setDoc(doc(db, 'adventures', id, 'world', 'spell_system'), { version: 1, mode: 'classic' })
+    .catch((e) => console.warn('[adventure] spell_system par défaut non écrit', e?.code || e));
+
   const created = { id, ...adv };
 
   // Mettre à jour la liste locale

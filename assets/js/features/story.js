@@ -381,6 +381,10 @@ function _storyGroupCardHtml(g, missionId) {
   const statut  = g.statut || 'active';
   const allChars = getCachedCollection('characters') || [];
   const av = (p) => characterAvatarHtml(p, { size: 28, className: 'mv-avatar', border: 'none', background: 'rgba(79,140,255,.18)', color: 'var(--gold)' });
+  const notes = (g.notesReussite || '').split('\n').map(l => l.trim()).filter(Boolean);
+  const notesHtml = notes.length
+    ? `<ul class="mv-group-notes">${notes.map(n => `<li>${_esc(n)}</li>`).join('')}</ul>`
+    : '';
 
   const membersHtml = parts.length
     ? parts.map(p => `<div class="mv-group-member">
@@ -420,12 +424,12 @@ function _storyGroupCardHtml(g, missionId) {
         <summary>＋ Ajouter un personnage</summary>
         <div class="mv-group-addpicker-list">${addOptions}</div>
       </details>` : ''}
-      <textarea class="mv-group-notesinp" rows="2" placeholder="Notes de réussite (une par ligne)…" ${dc('notesReussite')}>${_esc(g.notesReussite || '')}</textarea>
+      <textarea class="mv-group-notesinp" rows="${Math.max(2, Math.min(6, notes.length || 2))}" placeholder="Notes de réussite (une par ligne)..." ${dc('notesReussite')}>${_esc(g.notesReussite || '')}</textarea>
+      ${notesHtml ? `<div class="mv-group-notes-preview">${notesHtml}</div>` : ''}
     </article>`;
   }
 
   // Carte joueur — lecture seule + rejoindre
-  const notes   = (g.notesReussite || '').split('\n').map(l => l.trim()).filter(Boolean);
   const joined  = !!uid && parts.some(p => p?.uid === uid);
   const myChars = getMyCharacters(allChars, uid);
   const canJoin = myChars.length > 0 && statut === 'active';
@@ -438,7 +442,7 @@ function _storyGroupCardHtml(g, missionId) {
     </header>
     ${parts.length ? `<div class="mv-group-members">${membersHtml}</div>` : `<div class="mv-empty-small">Aucun membre${requis ? ` · ${requis} requis` : ''}.</div>`}
     ${gr > 0 ? `<div class="mv-group-bar"><div class="mv-group-bar-fill" style="width:${gr}%"></div></div>` : ''}
-    ${notes.length ? `<ul class="mv-group-notes">${notes.map(n => `<li>${_esc(n)}</li>`).join('')}</ul>` : ''}
+    ${notesHtml}
     ${g.recompense ? `<div class="mv-group-reward"><span class="mv-group-reward-icon">🏆</span><span>${_esc(g.recompense)}</span></div>` : ''}
     ${canJoin ? `<button class="btn btn-sm ${joined ? 'btn-outline' : 'btn-gold'} mv-group-join" data-action="_stGroupJoin" data-id="${g.id}" data-mission="${missionId}">${joined ? '✓ Quitter' : '＋ Rejoindre'}</button>` : ''}
   </article>`;
@@ -558,7 +562,10 @@ async function _stGroupFieldSave(el) {
   }
   try {
     await saveDoc('quests', id, { [field]: value });
+    const q = _grpQuest(id);
+    if (q) q[field] = value;
     if (field === 'reussite' || field === 'statut') _stPatchGroupOutcome(id);
+    if (field === 'notesReussite') _stReplaceGroupCard(id, el.dataset.mission);
   } catch (e) { notifySaveError(e); }
 }
 
@@ -1947,6 +1954,31 @@ async function openStoryDetail(id) {
   const synthColor = groups.length ? groupOutcome({ reussite: avgGroupSuccess }).color : st.color;
   const nextSession = await getDocData('agenda_session', 'next').catch(() => null);
   const missionSessions = _storyMissionSessions(nextSession, groups);
+  const trophyIcon = '\u{1F3C6}';
+  const achCardsHtml = achItems.map(a => `
+    <button type="button" class="mv-ach" data-action="_stOpenAch" data-id="${a.id}">
+      <span class="mv-ach-art">${a.imageUrl
+        ? `<img src="${_esc(a.imageUrl)}" alt="">`
+        : `<span class="mv-ach-emoji">${_esc(a.emoji || trophyIcon)}</span>`}</span>
+      <span class="mv-ach-body">
+        <span class="mv-ach-title">${_esc(a.titre || 'Haut-Fait')}</span>
+        ${a.description ? `<span class="mv-ach-desc">${_esc(a.description)}</span>` : ''}
+      </span>
+    </button>`).join('');
+  const missionAchievementsHtml = achItems.length || STATE.isAdmin ? `
+      <section class="mv-section">
+        <h3 class="mv-section-title">
+          ${trophyIcon} Hauts-Faits
+          <span class="mv-section-count">${achItems.length}</span>
+          <span class="mv-section-actions">
+            <button type="button" class="btn btn-outline btn-sm" data-action="_stMissionAchievements" data-id="${_esc(item.id)}">Voir la galerie</button>
+            ${STATE.isAdmin ? `<button type="button" class="btn btn-gold btn-sm" data-action="_stCreateMissionAchievement" data-id="${_esc(item.id)}">+ Ajouter un haut-fait</button>` : ''}
+          </span>
+        </h3>
+        ${achItems.length
+          ? `<div class="mv-achs">${achCardsHtml}</div>`
+          : `<div class="mv-empty"><span>${trophyIcon}</span><span>Aucun haut-fait n'est encore lie a cette mission.</span></div>`}
+      </section>` : '';
 
   openModal('', `
   <div class="mv-shell">
@@ -2085,25 +2117,7 @@ async function openStoryDetail(id) {
       </div>
 
       <!-- Hauts-Faits issus de cette mission -->
-      ${achItems.length ? `
-      <section class="mv-section">
-        <h3 class="mv-section-title">
-          🏆 Hauts-Faits
-          <span class="mv-section-count">${achItems.length}</span>
-        </h3>
-        <div class="mv-achs">
-          ${achItems.map(a => `
-            <button type="button" class="mv-ach" data-action="_stOpenAch" data-id="${a.id}">
-              <span class="mv-ach-art">${a.imageUrl
-                ? `<img src="${_esc(a.imageUrl)}" alt="">`
-                : `<span class="mv-ach-emoji">${_esc(a.emoji || '🏆')}</span>`}</span>
-              <span class="mv-ach-body">
-                <span class="mv-ach-title">${_esc(a.titre || 'Haut-Fait')}</span>
-                ${a.description ? `<span class="mv-ach-desc">${_esc(a.description)}</span>` : ''}
-              </span>
-            </button>`).join('')}
-        </div>
-      </section>` : ''}
+      ${missionAchievementsHtml}
 
       <!-- Suites ouvertes -->
       ${liensItems.length ? `
@@ -2663,6 +2677,18 @@ registerActions({
   _stOpenAfterClose:       (btn) => openStoryDetail(btn.dataset.id),
   _stDeleteAfterClose:     (btn) => { closeModalDirect(); deleteStory(btn.dataset.id); },
   _stEditAfterClose:       (btn) => { closeModalDirect(); editStory(btn.dataset.id); },
+  _stCreateMissionAchievement: async (btn) => {
+    const missionId = btn.dataset.id;
+    closeModalDirect();
+    const { createAchievementForMission } = await import('./achievements.js');
+    createAchievementForMission(missionId);
+  },
+  _stMissionAchievements:  async (btn) => {
+    const missionId = btn.dataset.id;
+    closeModalDirect();
+    const { openAchievementsForMission } = await import('./achievements.js');
+    openAchievementsForMission(missionId, 'galerie');
+  },
   _stGoAgenda:             ()    => { closeModalDirect(); navigate('agenda'); },
   _stGoAchievements:       ()    => { closeModalDirect(); navigate('achievements'); },
   _stMissionStats:         (btn) => { closeModalDirect(); _storyOpenMissionStats(btn.dataset.id); },

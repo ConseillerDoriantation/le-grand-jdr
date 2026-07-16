@@ -1,5 +1,10 @@
 // Adventure-scoped spell creation mode.
 // Firestore: world/spell_system
+//
+// DÉFAUTS — ne pas « corriger » : le fallback ci-dessous ('runes') ne sert que
+// pour les aventures LEGACY sans doc (elles gardent leur comportement d'origine).
+// Une NOUVELLE aventure écrit explicitement mode:'classic' à la création
+// (core/adventure.js — positionnement D&D-first, runes = contenu optionnel).
 
 const DOC_ID = 'spell_system';
 const DEFAULT_CONFIG = Object.freeze({ mode: 'runes' });
