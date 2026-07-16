@@ -5296,37 +5296,77 @@ body.shop-cols-5 .sh-page--v2 .sh-item-grid { grid-template-columns: repeat(5, m
   color: var(--amber, var(--amber));
 }
 
-/* ── Lignes de règles pour la modale Types de dégâts ── */
-.sh-dmg-rules {
-  display: flex; flex-wrap: wrap; gap: 6px 12px;
-  padding: 8px 10px;
-  background: rgba(0,0,0,.18);
-  border-radius: 6px;
-  font-size: .76rem;
-  margin-top: 6px;
+/* ══ Modale « Types de dégâts » ══════════════════════════════════════════════
+   Une ligne = IDENTITÉ (emoji + nom + couleur) · PARTICULARITÉS (combat) · NATURE.
+   L'emoji n'existe qu'à un seul endroit (l'input) → plus de doublon désynchronisé.
+   ═════════════════════════════════════════════════════════════════════════ */
+.dt-row {
+  flex-direction: column; align-items: stretch; gap: 10px;
+  border-left: 3px solid var(--dt-accent, var(--border-md));
 }
-.sh-dmg-rule {
-  display: inline-flex; align-items: center; gap: 5px;
-  color: var(--text-soft);
-  font-size: .72rem;
+.dt-head { display: flex; align-items: center; gap: 8px; }
+.dt-icon {
+  flex: 0 0 auto; width: 46px; padding: 5px; text-align: center;
+  background: rgba(0,0,0,.32); border: 1px solid var(--border-md); border-radius: 6px;
+  color: var(--text); font-family: inherit; font-size: 1.1rem; line-height: 1.2; outline: none;
 }
-.sh-dmg-rule-check { cursor: pointer; }
-.sh-dmg-rule-check input { accent-color: var(--amber, var(--amber)); }
-.sh-dmg-icon {
-  width: 38px; padding: 3px 5px; text-align: center;
-  background: rgba(0,0,0,.32);
-  border: 1px solid var(--border-md);
-  border-radius: 5px;
-  color: var(--text); font-family: inherit; font-size: .9rem;
-  outline: none;
+.dt-icon:focus, .dt-name:focus { border-color: var(--dt-accent, var(--amber)); }
+.dt-name {
+  flex: 1; min-width: 0; padding: 5px 8px;
+  background: rgba(0,0,0,.32); border: 1px solid var(--border-md); border-radius: 6px;
+  color: var(--text); font-family: inherit; font-weight: 600; font-size: .86rem; outline: none;
 }
-.sh-dmg-color {
-  width: 28px; height: 24px;
-  border: 1px solid var(--border-md);
-  border-radius: 5px;
-  cursor: pointer;
-  background: none; padding: 0;
+
+/* ── Couleur : pastilles rapides + sélecteur libre ── */
+.dt-colors { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.dt-colors-lbl {
+  font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  color: var(--text-dim); margin-right: 4px;
 }
+.dt-sw {
+  width: 20px; height: 20px; border-radius: 50%; cursor: pointer; padding: 0;
+  border: 2px solid transparent; box-shadow: 0 0 0 1px rgba(0,0,0,.35);
+  transition: transform .1s;
+}
+.dt-sw:hover { transform: scale(1.18); }
+.dt-sw.is-active { border-color: var(--text); transform: scale(1.12); }
+.dt-color-pick {
+  width: 26px; height: 22px; margin-left: 2px; padding: 0;
+  border: 1px solid var(--border-md); border-radius: 5px; background: none; cursor: pointer;
+}
+
+/* ── Particularités : une grille lisible, chaque champ avec son aide ── */
+.dt-rules { background: rgba(0,0,0,.18); border-radius: 8px; padding: 10px; }
+.dt-rules-title {
+  font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-soft); margin-bottom: 8px;
+}
+.dt-hint { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-dim); }
+.dt-rules-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px;
+}
+.dt-field { display: flex; flex-direction: column; gap: 4px; }
+.dt-field-lbl { font-size: .74rem; font-weight: 600; color: var(--text); }
+.dt-field-help { font-size: .66rem; color: var(--text-dim); line-height: 1.35; }
+.dt-input-wrap { display: flex; align-items: center; gap: 4px; }
+.dt-input {
+  width: 100%; padding: 4px 7px;
+  background: rgba(0,0,0,.32); border: 1px solid var(--border-md); border-radius: 5px;
+  color: var(--text); font-family: inherit; font-size: .78rem; outline: none;
+}
+.dt-input:focus { border-color: var(--dt-accent, var(--amber)); }
+.dt-unit { font-size: .72rem; color: var(--text-dim); }
+
+/* ── Nature : le toggle magique, enfin expliqué ── */
+.dt-magic {
+  display: flex; align-items: flex-start; gap: 8px; cursor: pointer;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-md);
+}
+.dt-magic input { margin-top: 2px; accent-color: var(--amber); flex: 0 0 auto; }
+.dt-magic-txt { display: flex; flex-direction: column; gap: 2px; }
+.dt-magic-txt b { font-size: .76rem; color: var(--text-soft); }
+.dt-magic-txt small { font-size: .66rem; color: var(--text-dim); line-height: 1.4; }
+.dt-magic:has(input:checked) b { color: #c084fc; }
 
 /* ── Export/Import (tabs) — réutilise les classes existantes mais améliore le visuel ── */
 .sh-export-tabs {

@@ -657,6 +657,23 @@ match /adventures/{adventureId} {
     allow delete: if inAdventure(adventureId) &&
       (resource.data.senderId == request.auth.uid || isAdvAdmin(adventureId));
   }
+  // Images du chat : le binaire (base64) vit ici, le message ne porte qu'un
+  // imageId → la liste des messages reste légère. Mêmes garanties que les
+  // messages : conv « aventure » = tout membre, groupe/DM = membres du doc convo.
+  match /chatImages/{id} {
+    allow read: if inAdventure(adventureId) && (
+      resource.data.convoId == 'adventure' ||
+      request.auth.uid in get(/databases/$(database)/documents/adventures/$(adventureId)/chatConvos/$(resource.data.convoId)).data.members
+    );
+    allow create: if inAdventure(adventureId)
+      && request.resource.data.senderId == request.auth.uid
+      && (
+        request.resource.data.convoId == 'adventure' ||
+        request.auth.uid in get(/databases/$(database)/documents/adventures/$(adventureId)/chatConvos/$(request.resource.data.convoId)).data.members
+      );
+    allow delete: if inAdventure(adventureId) &&
+      (resource.data.senderId == request.auth.uid || isAdvAdmin(adventureId));
+  }
   // État de lecture (badge non-lus + accusés « vu ») : map convoId→millis.
   // Lecture par tout membre (pour afficher « Vu » en DM), écriture chacun le sien.
   match /chatReads/{uid} {

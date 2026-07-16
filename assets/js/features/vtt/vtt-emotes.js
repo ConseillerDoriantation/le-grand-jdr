@@ -23,7 +23,7 @@ import { _STAT_KEY } from './vtt-constants.js';
 import { openModal, closeModalDirect, confirmModal, promptModal } from '../../shared/modal.js';
 import { listGithubFolder, GH_IMAGE_EXTS, slugFromFile, fileKey } from '../../shared/github-folder.js';
 import { VTT_ACTIONS, _showEmoteBubble, _canControlToken, _tokenStatMod, _vttLogTargetFields } from './vtt.js'; // circ. (runtime)
-import { _renderInspector } from './vtt-inspector.js?v=20260713-creature-info'; // re-render après changement de mode de jet
+import { _renderInspector } from './vtt-inspector.js'; // re-render après changement de mode de jet
 
 // État émotes (déplacé de vtt.js). _emotes exporté : préchargé au montage côté vtt.js.
 export let _emotes = [];        // [{id, name, url}] chargées depuis world/vtt_emotes

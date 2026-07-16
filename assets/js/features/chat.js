@@ -22,7 +22,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import {
   db, collection, query, where, orderBy, limit, onSnapshot, addDoc, updateDoc,
-  serverTimestamp, doc, getDoc, setDoc, deleteDoc, deleteField,
+  serverTimestamp, doc, getDoc, getDocFromCache, setDoc, deleteDoc, deleteField,
 } from '../config/firebase.js';
 import { getCurrentAdventureId, getDocData } from '../data/firestore.js';
 import { STATE } from '../core/state.js';
@@ -56,6 +56,7 @@ let _searchOpen = false, _searchQ = '', _listQ = ''; // recherche dans la conv o
 let _muted = false, _audioCtx = null, _soundReady = false;   // notif sonore (pas de bip au 1er rendu)
 let _chatEmotes = [];                              // émotes custom :nom: (world/vtt_emotes)
 let _lastRenderedLastId = null;                    // dernier msg rendu (scroll intelligent)
+let _imgCache = new Map();                         // imageId → dataUrl (session)
 let _advLimit = HISTORY, _convoLimit = HISTORY;    // pagination « charger plus »
 let _advMsgs = [];                                 // messages Aventure (live session)
 let _groups  = [];                                 // convos de groupe où je suis membre
@@ -76,6 +77,8 @@ const _msgsCol  = () => { const a = _adv(); return a ? collection(db, 'adventure
 const _convosCol = () => { const a = _adv(); return a ? collection(db, 'adventures', a, 'chatConvos') : null; };
 const _convoRef = (id) => { const a = _adv(); return a ? doc(db, 'adventures', a, 'chatConvos', id) : null; };
 const _msgRef   = (id) => { const a = _adv(); return a ? doc(db, 'adventures', a, 'chatMessages', id) : null; };
+const _imgsCol  = () => { const a = _adv(); return a ? collection(db, 'adventures', a, 'chatImages') : null; };
+const _imgRef   = (id) => { const a = _adv(); return a ? doc(db, 'adventures', a, 'chatImages', id) : null; };
 const _readRef  = () => { const a = _adv(); return (a && _uid) ? doc(db, 'adventures', a, 'chatReads', _uid) : null; };
 const _readsRefOf = (u) => { const a = _adv(); return (a && u) ? doc(db, 'adventures', a, 'chatReads', u) : null; };
 const _typingCol = () => { const a = _adv(); return a ? collection(db, 'adventures', a, 'chatTyping') : null; };
@@ -96,6 +99,7 @@ export async function initChat(uid) {
   _advMsgs = []; _groups = []; _convoMsgs = []; _open = false; _view = 'list'; _openId = null;
   _editingId = null; _ghosts = new Set(); _replyTo = null; _searchOpen = false; _searchQ = '';
   _muted = localStorage.getItem('chat-muted') === '1'; _soundReady = false;
+  _imgCache = new Map();
   _chatEmotes = [];
   _loadChatEmotes().then(() => { if (_open && _view === 'convo') _renderMessages(); });
   _baseTitle = (document.title || 'Le Grand JDR').replace(/^\(\d+\)\s*/, '');
@@ -460,6 +464,7 @@ function _renderMessages() {
     if (isNew) _showNewPill();
   }
   _lastRenderedLastId = lastId;
+  _hydrateImages();   // charge les images référencées (async, cache d'abord)
 }
 
 // Profil (pour l'avatar) d'un uni : le mien via STATE, les autres via
@@ -540,7 +545,9 @@ function _msgRow(m, grouped = false) {
   const edited = m.editedAt ? ' <span class="chat-msg-edited">(modifié)</span>' : '';
   const quote = m.replyTo
     ? `<span class="chat-msg-quote" role="button" data-action="chatJumpTo" data-msg="${_esc(m.replyTo.id || '')}" title="Aller au message"><span class="chat-quote-name">${_esc(m.replyTo.senderName || '')}</span><span class="chat-quote-text">${_esc(m.replyTo.text || '📷 Image')}</span></span>` : '';
-  const img = m.image ? `<img class="chat-msg-img" src="${_esc(m.image)}" alt="image" loading="lazy">` : '';
+  const img = m.image
+    ? `<img class="chat-msg-img" src="${_esc(m.image)}" alt="image" loading="lazy">`                    // legacy inline
+    : (m.imageId ? `<img class="chat-msg-img chat-msg-img--loading" data-img-id="${_esc(m.imageId)}" alt="image">` : '');
   // Ordre : échappe → linkify (sur texte pur) → émotes/mentions. Linkifier en
   // dernier capturait l'URL du src des <img> d'émote (→ src cassé, 404).
   const txt = m.text ? `<span class="chat-msg-btext">${_applyMentions(_applyChatEmotes(_linkify(_esc(m.text))))}</span>` : '';
@@ -548,7 +555,7 @@ function _msgRow(m, grouped = false) {
   return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}${mentionsMe ? ' chat-msg--mention' : ''}${grpCls}" data-mid="${_esc(m.id)}">${av}
     <span class="chat-msg-content">${author}
       <span class="chat-msg-bubble-wrap">
-        <span class="chat-msg-bubble${(m.image && !m.text) || m.roll ? ' chat-msg-bubble--media' : ''}">${quote}${m.roll ? _rollCardHtml(m.roll) : `${img}${txt}`}</span>
+        <span class="chat-msg-bubble${((m.image || m.imageId) && !m.text) || m.roll ? ' chat-msg-bubble--media' : ''}">${quote}${m.roll ? _rollCardHtml(m.roll) : `${img}${txt}`}</span>
         <button class="chat-msg-menu-btn" data-action="chatMsgMenu" data-msg="${_esc(m.id)}" title="Réagir / modifier" aria-label="Options du message">⋯</button>
       </span>
       ${_reactionsHtml(m)}
@@ -790,20 +797,53 @@ async function _sendRoll(roll) {
 }
 
 // Envoi d'une image : compressée en JPEG base64 borné (reste sous la limite
-// Firestore de 1 Mo). Pas de règle à ajouter (le champ `image` s'ajoute au doc).
+// Firestore de 1 Mo). QUOTA : le binaire vit dans sa PROPRE collection
+// (chatImages) et le message ne porte qu'un `imageId` → la liste des messages
+// reste légère (le listener session-live du chat d'aventure ne re-télécharge
+// plus les blobs), et l'image n'est chargée qu'à l'affichage, une fois par
+// session (cache mémoire + IndexedDB). Compat : les anciens messages `image`
+// inline restent rendus tels quels.
 async function _sendImage(file) {
   if (!file || !_openId) return;
-  const col = _msgsCol(); if (!col || !_uid) return;
+  const col = _msgsCol(), icol = _imgsCol(); if (!col || !icol || !_uid) return;
   let image;
   try { image = await uploadJpeg(file, { max: 1000, quality: 0.72 }); }
   catch { showNotif('Image invalide.', 'error'); return; }
   if (!image || image.length > 950000) { showNotif('Image trop lourde même compressée.', 'error'); return; }
   const senderName = _senderName();
   const reply = _replyTo; _clearReply();
-  const msg = { convoId: _openId, text: '', image, senderId: _uid, senderName, at: serverTimestamp() };
-  if (reply) msg.replyTo = reply;
-  try { await addDoc(col, msg); _bumpConvoPreview('📷 Image', senderName); }
-  catch (e) { console.warn('[chat] img', e?.code || e); showNotif('Image non envoyée — règles Firestore ?', 'error'); }
+  try {
+    const imgRef = await addDoc(icol, { convoId: _openId, data: image, senderId: _uid, at: serverTimestamp() });
+    _imgCache.set(imgRef.id, image);   // affichage immédiat sans relire
+    const msg = { convoId: _openId, text: '', imageId: imgRef.id, senderId: _uid, senderName, at: serverTimestamp() };
+    if (reply) msg.replyTo = reply;
+    await addDoc(col, msg);
+    _bumpConvoPreview('📷 Image', senderName);
+  } catch (e) { console.warn('[chat] img', e?.code || e); showNotif('Image non envoyée — règles Firestore ?', 'error'); }
+}
+
+// Charge une image référencée : mémoire → cache IndexedDB (0 lecture facturée)
+// → serveur (1 lecture, une seule fois par session).
+async function _getImage(id) {
+  if (_imgCache.has(id)) return _imgCache.get(id);
+  const ref = _imgRef(id); if (!ref) return null;
+  let snap = null;
+  try { snap = await getDocFromCache(ref); } catch { /* pas encore en cache */ }
+  if (!snap || !snap.exists()) { try { snap = await getDoc(ref); } catch { return null; } }
+  const data = snap?.data()?.data || null;
+  if (data) _imgCache.set(id, data);
+  return data;
+}
+// Remplit les <img data-img-id> du fil après rendu (async, sans re-render).
+function _hydrateImages() {
+  document.querySelectorAll('#chat-msgs img[data-img-id]:not([src])').forEach(async (el) => {
+    const data = await _getImage(el.getAttribute('data-img-id'));
+    if (!data) { el.closest('.chat-msg-bubble')?.insertAdjacentHTML('beforeend', '<span class="chat-msg-btext" style="opacity:.6">📷 Image indisponible</span>'); el.remove(); return; }
+    const list = document.getElementById('chat-msgs');
+    const stick = list && (list.scrollHeight - list.scrollTop - list.clientHeight < 60);
+    el.src = data;
+    el.onload = () => { if (stick && list) list.scrollTop = list.scrollHeight; };
+  });
 }
 
 function _markReadLocal(convoId) {
@@ -898,7 +938,10 @@ async function chatDeleteMsg(btn) {
   if (!await confirmModal('Supprimer ce message ?')) return;
   if (_editingId === id) chatCancelEdit();
   const ref = _msgRef(id); if (!ref) return;
-  try { await deleteDoc(ref); }   // vraie suppression : le message disparaît
+  try {
+    await deleteDoc(ref);   // vraie suppression : le message disparaît
+    if (m.imageId) { const ir = _imgRef(m.imageId); if (ir) deleteDoc(ir).catch(() => {}); }   // blob orphelin
+  }
   catch (e) { console.warn('[chat] del', e?.code || e); showNotif('Suppression refusée — règles Firestore ?', 'error'); }
 }
 

@@ -6,6 +6,7 @@ App web de gestion de campagne JDR multi-joueurs. Réponses **directement exploi
 - Web statique **sans build**, HTML/CSS/JS en ES modules, données **Firebase Firestore**, hébergé sur **GitHub Pages**.
 - Doit rester déployable tel quel : pas de build, framework ou dépendance lourde sans demande explicite.
 - Issu d'un refactor monolithe → modulaire. Reste du legacy de données et quelques ponts de compat ; cible = `data-action`/`bindScopedActions`/registre VTT. Le fonctionnement prime sur la pureté archi.
+- **Cache des assets** : toute modif CSS → `node tools/bump-assets.mjs` (bump `ASSET_VERSION` de `core/version.js` + les `?v=` d'index.html, jamais à la main). **Interdit** de versionner un import JS (`from './x.js?v=…'`) : deux URLs = module chargé en double.
 - Droits admin côté client (`STATE.isAdmin`) = **confort UI, jamais une sécurité**. La vraie protection = règles Firestore.
 
 ## Carte du repo

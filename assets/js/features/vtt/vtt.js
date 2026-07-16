@@ -65,7 +65,7 @@ import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
   _scaledEnchantConditionFields, _vttPrimaryWeapon, _conditionCritRangeBonusOf,
 } from './vtt-effective.js';
-import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js?v=20260713-creature-info';
+import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js';
 import {
   _renderLibSection, _resetMapLib, _libFolder, _vttLibToggle, _vttLibOpenFolder, _vttLibNewFolder,
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,

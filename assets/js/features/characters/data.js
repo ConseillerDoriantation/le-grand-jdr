@@ -395,48 +395,76 @@ async function _deleteWeaponFormat(i) {
 
 const MISS_EFFECT_LABELS = { none: 'Aucun', half: 'Moitié', full: 'Complets' };
 
+// Palette d'accès rapide (couvre les types par défaut) — le sélecteur libre reste dispo.
+const DT_SWATCHES = ['#9ca3af', '#f97316', '#4f8cff', '#22c38e', '#b47fff', '#6366f1', '#f9d71c', '#ef4444', '#ec4899', '#14b8a6'];
+
 function _renderDamageTypesModal(types) {
-  const mkRules = (t, i) => {
+  // Une ligne = identité (emoji + nom + couleur) puis particularités, puis nature.
+  const mkRow = (t, i) => {
     const r = t.rules || {};
-    const missOpts = ['none','half','full'].map(v =>
-      `<option value="${v}"${(r.missEffect||'none')===v?' selected':''}>${MISS_EFFECT_LABELS[v]}</option>`
+    const color = t.color || '#9ca3af';
+    const missOpts = ['none', 'half', 'full'].map(v =>
+      `<option value="${v}"${(r.missEffect || 'none') === v ? ' selected' : ''}>${MISS_EFFECT_LABELS[v]}</option>`
     ).join('');
-    const isMagic = !!t.isMagic;
+    const swatches = DT_SWATCHES.map(c =>
+      `<button type="button" class="dt-sw${c.toLowerCase() === color.toLowerCase() ? ' is-active' : ''}"
+         style="background:${c}" data-action="_setDmgColor" data-i="${i}" data-color="${c}"
+         title="${c}" aria-label="Couleur ${c}"></button>`).join('');
     return `
-    <div class="sh-dmg-rules">
-      <label class="sh-dmg-rule">
-        <input type="text" value="${_esc(t.icon||'')}"
-          class="sh-dmg-icon" placeholder="🔥" title="Icône"
+    <div class="sh-admin-list-item dt-row" data-row="${i}" style="--dt-accent:${_esc(color)}">
+      <div class="dt-head">
+        <input type="text" class="dt-icon" value="${_esc(t.icon || '')}" placeholder="🔥" maxlength="4"
+          title="Emoji du type" aria-label="Emoji du type"
           data-change="_saveDmgTypeProp" data-i="${i}" data-prop="icon">
-        <input type="color" value="${t.color||'#9ca3af'}" title="Couleur"
-          class="sh-dmg-color"
-          data-change="_saveDmgTypeProp" data-i="${i}" data-prop="color">
-      </label>
-      <label class="sh-dmg-rule sh-dmg-rule-check">
-        <input type="checkbox" ${isMagic ? 'checked' : ''}
-          data-change="_saveDmgTypeProp" data-i="${i}" data-prop="isMagic" data-vtype="bool">
-        <span>🔮 Magique</span>
-      </label>
-      <label class="sh-dmg-rule">
-        <span>Raté</span>
-        <select class="sh-admin-row-input" style="width:80px;text-align:left;font-family:inherit;font-weight:500;font-size:.76rem;padding:3px 6px"
-          data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.missEffect">
-          ${missOpts}
-        </select>
-      </label>
-      <label class="sh-dmg-rule">
-        <span>Pén. armure</span>
-        <input type="number" class="sh-admin-row-input small" min="0" max="100" value="${r.armorPen||0}"
-          style="width:50px"
-          data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.armorPen" data-vtype="num">
-        <span class="sh-admin-row-unit">%</span>
-      </label>
-      <label class="sh-dmg-rule">
-        <span>Bonus dégâts</span>
-        <input type="number" class="sh-admin-row-input small" value="${r.dmgBonus||0}"
-          style="width:50px"
-          data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.dmgBonus" data-vtype="num">
-      </label>
+        <input type="text" class="dt-name" value="${_esc(t.label)}" placeholder="Nom du type"
+          aria-label="Nom du type"
+          data-change="_saveDmgTypeProp" data-i="${i}" data-prop="label">
+        <button class="sh-admin-del-btn" data-action="_deleteDmgType" data-idx="${i}" title="Supprimer">🗑️</button>
+      </div>
+
+      <div class="dt-colors">
+        <span class="dt-colors-lbl">Couleur</span>
+        ${swatches}
+        <input type="color" class="dt-color-pick" value="${color}"
+          title="Couleur personnalisée" aria-label="Couleur personnalisée"
+          data-change="_setDmgColorPick" data-i="${i}">
+      </div>
+
+      <div class="dt-rules">
+        <div class="dt-rules-title">Particularités <span class="dt-hint">— comment ce type se comporte en combat</span></div>
+        <div class="dt-rules-grid">
+          <label class="dt-field">
+            <span class="dt-field-lbl">Sur un raté</span>
+            <select class="dt-input" data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.missEffect">${missOpts}</select>
+            <span class="dt-field-help">Dégâts infligés quand l'attaque échoue.</span>
+          </label>
+          <label class="dt-field">
+            <span class="dt-field-lbl">Pénétration d'armure</span>
+            <span class="dt-input-wrap">
+              <input type="number" class="dt-input" min="0" max="100" value="${r.armorPen || 0}"
+                data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.armorPen" data-vtype="num">
+              <span class="dt-unit">%</span>
+            </span>
+            <span class="dt-field-help">Part de la CA ignorée au jet de toucher.</span>
+          </label>
+          <label class="dt-field">
+            <span class="dt-field-lbl">Bonus de dégâts</span>
+            <input type="number" class="dt-input" value="${r.dmgBonus || 0}"
+              data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.dmgBonus" data-vtype="num">
+            <span class="dt-field-help">Ajouté (ou retiré) à chaque jet de ce type.</span>
+          </label>
+        </div>
+        <label class="dt-magic">
+          <input type="checkbox" ${t.isMagic ? 'checked' : ''}
+            data-change="_saveDmgTypeProp" data-i="${i}" data-prop="isMagic" data-vtype="bool">
+          <span class="dt-magic-txt">
+            <b>🔮 Élément magique</b>
+            <small>Nature du type, distincte des particularités ci-dessus : réservé aux personnages qui
+            connaissent cet élément (les types non magiques restent toujours disponibles), et les dégâts
+            utilisent la maîtrise + la stat magique au lieu de la Constitution.</small>
+          </span>
+        </label>
+      </div>
     </div>`;
   };
 
@@ -453,7 +481,9 @@ function _renderDamageTypesModal(types) {
 
     <div class="sh-admin-body">
       <p class="sh-admin-intro">
-        Marque un type comme <em>magique</em> pour qu'il soit choisissable par les armes magiques et les sorts.
+        Chaque type a une <strong>identité</strong> (emoji, nom, couleur), des <strong>particularités</strong>
+        (son comportement en combat, appliquées automatiquement dans le VTT) et une <strong>nature</strong>
+        (magique ou non, qui décide qui peut l'utiliser et avec quelle stat).
       </p>
 
       <div class="sh-admin-section">
@@ -461,17 +491,7 @@ function _renderDamageTypesModal(types) {
         <div class="sh-admin-list">
           ${types.length === 0
             ? '<div style="text-align:center;padding:1.5rem;color:var(--text-dim);font-style:italic">Aucun type — ajoute-en un ci-dessous.</div>'
-            : types.map((t, i) => `
-              <div class="sh-admin-list-item" style="flex-direction:column;align-items:stretch;gap:6px">
-                <div style="display:flex;align-items:center;gap:8px">
-                  <span style="font-size:1.1rem;min-width:1.5rem;text-align:center">${t.icon||'—'}</span>
-                  <input type="text" class="sh-admin-row-input" value="${_esc(t.label)}"
-                    style="flex:1;text-align:left;font-family:inherit;font-weight:500"
-                    data-change="_saveDmgTypeProp" data-i="${i}" data-prop="label">
-                  <button class="sh-admin-del-btn" data-action="_deleteDmgType" data-idx="${i}" title="Supprimer">🗑️</button>
-                </div>
-                ${mkRules(t, i)}
-              </div>`).join('')}
+            : types.map((t, i) => mkRow(t, i)).join('')}
         </div>
 
         <div class="sh-admin-add-row">
@@ -504,6 +524,20 @@ async function _saveDmgTypeProp(i, path, value) {
   }
   await saveDamageTypes(types);
   _damageTypes = types;
+}
+
+// Applique une couleur (pastille rapide ou sélecteur libre) : sauvegarde puis MAJ
+// live de la ligne — pas de re-render, donc aucun champ ne perd le focus.
+async function _setDmgColor(i, color) {
+  if (!color) return;
+  await _saveDmgTypeProp(i, 'color', color);
+  const row = document.querySelector(`.dt-row[data-row="${i}"]`);
+  if (!row) return;
+  row.style.setProperty('--dt-accent', color);
+  row.querySelectorAll('.dt-sw').forEach(b =>
+    b.classList.toggle('is-active', (b.dataset.color || '').toLowerCase() === color.toLowerCase()));
+  const pick = row.querySelector('.dt-color-pick');
+  if (pick && pick.value !== color) pick.value = color;
 }
 
 async function _addDmgType() {
@@ -969,6 +1003,8 @@ registerActions({
   openSpellSystemAdmin:     ()    => openSpellSystemAdmin(),
   _addDmgType:              ()    => _addDmgType(),
   _deleteDmgType:           (btn) => _deleteDmgType(Number(btn.dataset.idx)),
+  _setDmgColor:             (btn) => _setDmgColor(Number(btn.dataset.i), btn.dataset.color),
+  _setDmgColorPick:         (el)  => _setDmgColor(Number(el.dataset.i), el.value),
   _switchSpellMatrixTab:    (btn) => _switchSpellMatrixTab(btn.dataset.tab),
   _saveSpellMatrices:       ()    => _saveSpellMatrices(),
 });

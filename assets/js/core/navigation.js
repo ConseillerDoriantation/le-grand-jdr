@@ -12,6 +12,7 @@ import { appSplashHtml } from '../shared/html.js';
 import { dispatchAction, dispatchValueAction } from './actions.js';
 import { isFeatureEnabled } from '../shared/features.js';
 import { parseRoute, routeUrl } from '../shared/route.js';
+import { ASSET_VERSION } from './version.js';
 
 // ── Carte page → module feature chargé en lazy ────────────────────────────
 // Chaque module est importé une seule fois : le navigateur le met en cache
@@ -108,7 +109,7 @@ const FEATURE_CSS = {
   collection: ['histoire.css'],
   players:    ['histoire.css'],
   bastion:    ['bastion.css'],
-  vtt:        ['vtt.css?v=20260630-max-v2'],
+  vtt:        ['vtt.css'],
   // shop-picker.css : le picker de butins (shared/shop-picker.js) utilise des
   // classes `vtt-loot-*` qui ne vivent sinon que dans vtt.css → sans lui, la
   // modale d'ajout de butin s'affiche sans style hors VTT.
@@ -125,7 +126,9 @@ function _loadCss(file) {
   return new Promise((resolve) => {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = `./assets/css/${file}`;
+    // Même version que les liens eager d'index.html (cf. core/version.js) :
+    // bumper la version invalide TOUT le CSS d'un coup, eager comme lazy.
+    link.href = `./assets/css/${file}?v=${ASSET_VERSION}`;
     link.onload = () => resolve();
     link.onerror = () => { console.warn('[nav] CSS feature non chargée :', file); resolve(); };
     document.head.appendChild(link);
