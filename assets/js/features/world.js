@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// WORLD.JS — Le Monde
+// WORLD.JS — Guide (page renommée « Monde » → « Guide » ; id interne `world` conservé)
 // ✓ Sections de lore libres (texte riche, image optionnelle)
 // ✓ MJ : CRUD sections, réorganisation par drag & drop
 // ✓ Joueur : lecture seule, navigation par ancres
@@ -94,7 +94,7 @@ async function _load() {
     if (!STORE.categories.length) STORE.categories = [{ ...DEFAULT_CAT }];
     STORE.sections = [{
       id: 'intro', titre: 'Introduction', icone: '📖',
-      contenu: 'Les informations sur le monde seront ajoutées ici par le Maître de Jeu.',
+      contenu: 'Le Maître de Jeu partagera ici les informations utiles à la table : règles maison, univers, repères.',
       imageUrl: '', visible: true, categoryId: STORE.categories[0].id,
     }];
   }
