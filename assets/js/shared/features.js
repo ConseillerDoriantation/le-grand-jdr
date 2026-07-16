@@ -30,8 +30,10 @@ export const TOGGLEABLE_FEATURES = [
 const _TOGGLEABLE_KEYS = new Set(TOGGLEABLE_FEATURES.map(f => f.key));
 const _ALL_KEYS = TOGGLEABLE_FEATURES.map(f => f.key);
 
-// Activées par défaut sur une NOUVELLE aventure.
-export const DEFAULT_ENABLED = ['characters', 'story', 'agenda', 'bestiaire'];
+// Activées par défaut sur une NOUVELLE aventure : le socle d'une table classique
+// (fiches, missions, séances, créatures, PNJ, table virtuelle). Le reste s'active
+// via Gérer l'aventure. Décision produit 2026-07-16 (D&D-first).
+export const DEFAULT_ENABLED = ['characters', 'story', 'agenda', 'bestiaire', 'npcs', 'vtt'];
 
 // Pages toujours disponibles (jamais togglables). `admin` = Console MJ, gardée
 // via son propre gating admin-only ; le reste = socle de navigation.
