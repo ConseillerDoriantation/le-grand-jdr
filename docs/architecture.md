@@ -39,6 +39,7 @@ Chaque page orchestre son rendu, ses listeners et ses appels aux helpers. Les do
 - `features/characters/` : sous-modules de fiche personnage.
 - `features/map/` : modele propre avec `map.state.js`, repos data, rendu et UI.
 - `features/vtt/` : coeur VTT `vtt.js` + modules peripheriques (fog, musique, butin, des, presence, mini-fiche, timer, tracker combat).
+- `features/chat.js` + `features/chat/` : messagerie flottante toutes pages (aventure/groupes/DM). La logique pure (linkify, emotes, mentions, des) vit dans `chat/chat-format.js`, testee par `tests/chat-format.test.js` ; les images vivent dans la collection `chatImages` (le message ne porte qu'un id).
 
 ## Patterns UI
 
@@ -50,6 +51,8 @@ Chaque page orchestre son rendu, ses listeners et ses appels aux helpers. Les do
 ## Performance
 
 Le routeur charge les modules et CSS a la premiere navigation. Ne pas remettre les grosses feuilles de page dans `index.html`. Si une feature reutilise un widget visuel d'une autre page, extraire ou dupliquer le petit widget necessaire plutot que charger toute la CSS voisine.
+
+Cache des assets : version unique `ASSET_VERSION` (`core/version.js`) appliquee a tous les CSS (liens eager d'index.html + chargement lazy). Bump via `node tools/bump-assets.mjs` a chaque modif CSS. Ne jamais versionner un import JS (`?v=`) : deux URLs = module charge en double.
 
 ## Securite
 
