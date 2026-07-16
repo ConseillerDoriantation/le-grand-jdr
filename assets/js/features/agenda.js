@@ -72,6 +72,11 @@ function _formatDateFr(d) {
 function _formatDateShort(d) {
   return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
 }
+function _dateFromISO(iso) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return null;
+  const d = new Date(`${iso}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
 
 function _uniq(arr = []) {
   return [...new Set((arr || []).filter(Boolean))];
@@ -389,6 +394,9 @@ function _renderSuggestions() {
   el.innerHTML = myQuests.map(q => {
     const sugs = _computeQuestSuggestions(q);
     const parts = _questParticipants(q);
+    const manualBtn = STATE.isAdmin
+      ? `<button type="button" class="ag-quest-manual" data-action="_agOpenManualSession" data-quest-id="${_esc(q.id)}" title="Fixer une séance sans attendre les disponibilités">+ Date libre</button>`
+      : '';
     const renderSuggestion = (s, idx) => {
       const isFull = s.okCount === s.total;
       const isValidated = _isSlotValidated(q.id, s.iso, s.slot.id);
@@ -412,16 +420,22 @@ function _renderSuggestions() {
     if (!sugs.length) {
       return `<div class="ag-quest-card">
         <div class="ag-quest-hd">
-          <span class="ag-quest-title">${_esc(q.titre || q.nom || 'Quête')}</span>
-          <span class="ag-quest-count">${parts.length} participant${parts.length>1?'s':''}</span>
+          <div class="ag-quest-main">
+            <span class="ag-quest-title">${_esc(q.titre || q.nom || 'Quête')}</span>
+            <span class="ag-quest-count">${parts.length} participant${parts.length>1?'s':''}</span>
+          </div>
+          ${manualBtn}
         </div>
-        <div class="ag-quest-empty">Pas encore de créneau compatible. Demande aux joueurs de remplir leurs dispos.</div>
+        <div class="ag-quest-empty">Pas encore de créneau compatible. Le MJ peut fixer une date libre sans attendre les dispos.</div>
       </div>`;
     }
     return `<div class="ag-quest-card">
       <div class="ag-quest-hd">
-        <span class="ag-quest-title">${_esc(q.titre || q.nom || 'Quête')}</span>
-        <span class="ag-quest-count">${parts.length} participant${parts.length>1?'s':''}</span>
+        <div class="ag-quest-main">
+          <span class="ag-quest-title">${_esc(q.titre || q.nom || 'Quête')}</span>
+          <span class="ag-quest-count">${parts.length} participant${parts.length>1?'s':''}</span>
+        </div>
+        ${manualBtn}
       </div>
       <div class="ag-sug-list">
         ${renderSuggestion(sugs[0], 0)}
@@ -583,20 +597,61 @@ function _formatSession(s) {
   };
 }
 
-async function validateSlot(questId, iso, slotId) {
-  if (!STATE.isAdmin) return;
+function _buildSessionEntry(questId, iso, slotId, { manual = false } = {}) {
   const quest = _ag.quests.find(q => q.id === questId);
-  if (_isSlotValidated(questId, iso, slotId)) { closeModal(); return; }
-  const entry = {
+  return {
     questId,
-    questTitle:  quest?.titre || quest?.nom || 'Groupe',
-    date:        iso,
-    slot:        slotId,
-    // Membres du groupe concerné : seuls eux (+ le MJ) verront la séance.
+    questTitle: quest?.titre || quest?.nom || 'Groupe',
+    date: iso,
+    slot: slotId,
+    manual: Boolean(manual),
     participantUids: _questParticipants(quest).map(p => p.uid).filter(Boolean),
     validatedAt: Date.now(),
     validatedBy: STATE.user?.uid || null,
   };
+}
+
+function openManualSessionModal(questId) {
+  if (!STATE.isAdmin) return;
+  const quest = _ag.quests.find(q => q.id === questId);
+  if (!quest) return;
+  const todayISO = _toISO(_today());
+  const participants = _questParticipants(quest);
+  openModal(`Date libre · ${_esc(quest.titre || quest.nom || 'Groupe')}`, `
+    <div class="ag-manual">
+      <div class="ag-manual-note">
+        Cette séance sera validée pour le groupe même si les joueurs n'ont pas rempli leurs disponibilités.
+      </div>
+      <label class="ag-manual-field">
+        <span>Date</span>
+        <input id="ag-manual-date" class="ag-manual-input" type="date" min="${todayISO}" value="${todayISO}">
+      </label>
+      <label class="ag-manual-field">
+        <span>Créneau</span>
+        <select id="ag-manual-slot" class="ag-manual-input">
+          ${SLOTS.map(s => `<option value="${s.id}">${s.emoji} ${_esc(s.label)} · ${_esc(s.hours)}</option>`).join('')}
+        </select>
+      </label>
+      <div class="ag-manual-members">
+        <div class="ag-manual-members-title">${participants.length} participant${participants.length > 1 ? 's' : ''}</div>
+        <div class="ag-manual-avatars">
+          ${participants.length
+            ? participants.map(p => _participantAvatar(p, 30)).join('')
+            : `<span class="ag-manual-empty">Aucun membre dans ce groupe.</span>`}
+        </div>
+      </div>
+      <div class="ag-detail-actions">
+        <button type="button" class="btn btn-outline" data-action="_agCloseModal">Annuler</button>
+        <button type="button" class="btn btn-gold" data-action="_agValidateManualSlot" data-quest-id="${_esc(questId)}">Valider cette date</button>
+      </div>
+    </div>
+  `);
+}
+
+async function validateSlot(questId, iso, slotId) {
+  if (!STATE.isAdmin) return;
+  if (_isSlotValidated(questId, iso, slotId)) { closeModal(); return; }
+  const entry = _buildSessionEntry(questId, iso, slotId);
   try {
     await _saveSessions([..._validatedSessions(), entry]);
     closeModal();
@@ -612,6 +667,40 @@ async function validateSlot(questId, iso, slotId) {
     }
   }
 }
+
+async function validateManualSlot(questId) {
+  if (!STATE.isAdmin) return;
+  const iso = document.getElementById('ag-manual-date')?.value || '';
+  const slotId = document.getElementById('ag-manual-slot')?.value || '';
+  if (!_dateFromISO(iso)) {
+    showNotif('Choisis une date valide.', 'error');
+    return;
+  }
+  if (!SLOTS.some(s => s.id === slotId)) {
+    showNotif('Choisis un créneau valide.', 'error');
+    return;
+  }
+  if (_isSlotValidated(questId, iso, slotId)) {
+    showNotif('Ce créneau est déjà validé pour ce groupe.', 'info');
+    return;
+  }
+  const entry = _buildSessionEntry(questId, iso, slotId, { manual: true });
+  try {
+    await _saveSessions([..._validatedSessions(), entry]);
+    closeModal();
+    showNotif('Date libre validée pour le groupe.', 'success');
+    _renderSessionBanner();
+    _renderAgendaOverview();
+    _renderSuggestions();
+  } catch (e) {
+    if (e?.code === 'permission-denied') {
+      showNotif('Règle Firestore manquante pour agenda_session.', 'error');
+    } else {
+      notifySaveError(e);
+    }
+  }
+}
+
 async function unvalidateSlot(questId, iso, slotId) {
   if (!STATE.isAdmin) return;
   const k = `${questId}|${iso}|${slotId}`;
@@ -1036,6 +1125,9 @@ PAGES.agenda = renderAgendaPage;
 
 registerActions({
   _agShowSugDetail:         (btn) => showSuggestionDetail(btn.dataset.id, Number(btn.dataset.idx)),
+  _agOpenManualSession:     (btn) => openManualSessionModal(btn.dataset.questId),
+  _agValidateManualSlot:    (btn) => validateManualSlot(btn.dataset.questId),
+  _agCloseModal:            ()    => closeModal(),
   _agUnvalidateSlot:        (btn) => unvalidateSlot(btn.dataset.questId, btn.dataset.iso, btn.dataset.slotId),
   _agValidateSlot:          (btn) => validateSlot(btn.dataset.questId, btn.dataset.iso, btn.dataset.slotId),
   _agCycle:                 (btn) => cycleAgendaSlot(btn.dataset.iso, btn.dataset.slot),
