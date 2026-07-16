@@ -870,7 +870,9 @@ async function chatStartDm(btn) {
   const ref = _convoRef(id); if (!ref) return;
   try {
     await setDoc(ref, {
-      type: 'dm', name: '', members: [_uid, other], createdBy: _uid,
+      // members TRIÉS : la règle Firestore vérifie cid == 'dm_'+members[0]+'_'+members[1]
+      // (anti-squattage : l'id d'un DM doit correspondre exactement à sa paire).
+      type: 'dm', name: '', members: [_uid, other].sort(), createdBy: _uid,
       lastText: '', lastSenderName: '', lastSenderId: '', lastAt: serverTimestamp(),
     });
     // Optimiste : présent tout de suite (le listener le confirmera).
