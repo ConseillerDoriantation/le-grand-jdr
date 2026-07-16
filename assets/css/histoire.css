@@ -2681,6 +2681,7 @@
   grid-template-columns: minmax(0, 1fr) 280px;
   gap: 18px;
   align-items: start;
+  margin-bottom: 22px;
 }
 .mv-main {
   min-width: 0;
@@ -3108,21 +3109,25 @@
 }
 
 .mv-group-notes {
-  margin: 6px 0;
-  padding-left: 16px;
+  margin: 8px 0 0;
+  padding: 8px 10px 8px 24px;
+  background: rgba(232,184,75,.07);
+  border: 1px solid rgba(232,184,75,.14);
+  border-radius: 10px;
   list-style: none;
 }
 .mv-group-notes li {
   position: relative;
-  padding: 1px 0;
-  font-size: 0.74rem; color: var(--text-muted);
-  line-height: 1.4;
+  padding: 2px 0;
+  font-size: 0.78rem; color: var(--text-soft);
+  line-height: 1.45;
 }
 .mv-group-notes li::before {
   content: '·';
   position: absolute; left: -12px;
   color: var(--amber); font-weight: 900;
 }
+.mv-group-notes-preview { margin-top: 6px; }
 
 .mv-group-reward {
   display: flex; align-items: center; gap: 7px;
@@ -3175,7 +3180,7 @@
   outline: none; border-color: var(--gold);
 }
 .mv-group-addsel { margin-top: 2px; color: var(--gold); cursor: pointer; }
-.mv-group-notesinp { resize: vertical; min-height: 38px; }
+.mv-group-notesinp { resize: vertical; min-height: 58px; line-height: 1.45; }
 .mv-group-memx {
   border: none; background: rgba(255,107,107,.12); color: #ff6b6b;
   border-radius: 50%; width: 16px; height: 16px; line-height: 1; cursor: pointer;

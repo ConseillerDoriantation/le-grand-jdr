@@ -18,7 +18,7 @@ export const TOGGLEABLE_FEATURES = [
   { key: 'collection',   label: 'Collection',   icon: '🃏' },
   { key: 'achievements', label: 'Hauts-Faits',  icon: '🏆' },
   { key: 'map',          label: 'Carte',        icon: '🗺️' },
-  { key: 'world',        label: 'Monde',        icon: '🌍' },
+  { key: 'world',        label: 'Guide',        icon: '🌍' },   // id interne 'world' conservé (données)
   { key: 'npcs',         label: 'PNJ',          icon: '👥' },
   { key: 'players',      label: 'Joueurs',      icon: '🎭' },
   { key: 'bastion',      label: 'Bastion',      icon: '🏰' },

@@ -211,11 +211,11 @@ function _achLightboxContextHtml(item) {
       <span class="ach-lb-context-go">→</span>
     </button>
     <div class="ach-lb-context-actions">
-      <button type="button" data-action="_achFocusMissionGroup" data-mission-id="${_esc(mission.id)}">Voir les souvenirs de cette mission</button>
-      ${STATE.isAdmin ? `<button type="button" data-action="_achCreateForMission" data-mission-id="${_esc(mission.id)}">Ajouter un souvenir lié</button>` : ''}
+      <button type="button" data-action="_achFocusMissionGroup" data-mission-id="${_esc(mission.id)}">Voir les hauts-faits de cette mission</button>
+      ${STATE.isAdmin ? `<button type="button" data-action="_achCreateForMission" data-mission-id="${_esc(mission.id)}">Ajouter un haut-fait lié</button>` : ''}
     </div>
     ${related.length ? `<div class="ach-lb-related">
-      <div class="ach-lb-related-title">Autres souvenirs liés</div>
+      <div class="ach-lb-related-title">Autres hauts-faits liés</div>
       <div class="ach-lb-related-list">
         ${related.map(a => {
           const cat = _achCategoryFor(a);
@@ -783,7 +783,7 @@ function _achGalleryOverviewHtml(items) {
     <div class="ach-overview-card">
       <div class="ach-overview-icon" style="--c:${latestCat.color};--c-glow:${latestCat.glow}">${latestCat.emoji}</div>
       <div class="ach-overview-copy">
-        <span>Dernier souvenir</span>
+        <span>Dernier haut-fait</span>
         <strong>${_esc(latest?.titre || 'Sans titre')}</strong>
         ${latestDate ? `<em>${_esc(latestDate)}</em>` : ''}
       </div>
@@ -1334,7 +1334,7 @@ function _renderMissionGroups(items) {
         ? `<img src="${_esc(mission.imageUrl)}" alt="">`
         : `<span>${mission ? _trameIco(mission) : '∅'}</span>`;
       const title = mission?.titre || 'Sans mission liée';
-      const meta = mission ? _trameMeta(mission) : 'Souvenirs non rattachés à la Trame';
+      const meta = mission ? _trameMeta(mission) : 'Hauts-faits non rattachés à la Trame';
       const actionId = mission ? mission.id : '__none';
       const expanded = isIsolated && actionId === missionFilter;
       const visibleItems = expanded ? group.items : group.items.slice(0, 5);
@@ -1474,7 +1474,7 @@ function _achRenderControlsExtras() {
           </button>
           ${noMissionCount || missionFilter === '__none' ? `<button type="button" class="ach-mission-option${missionFilter === '__none' ? ' active' : ''}" data-action="_achSetMissionFilter" data-mission-id="__none">
             <span class="ach-mission-option-icon">∅</span>
-            <span class="ach-mission-option-main"><b>Sans mission liée</b><small>Souvenirs non rattachés à la Trame</small></span>
+            <span class="ach-mission-option-main"><b>Sans mission liée</b><small>Hauts-faits non rattachés à la Trame</small></span>
             <span class="ach-mission-option-count">${noMissionCount}</span>
           </button>` : ''}
           ${missionOptions.map(m => {
