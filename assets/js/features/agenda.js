@@ -19,7 +19,8 @@ import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc, appSplashHtml } from '../shared/html.js';
 import { openModal, closeModal, confirmModal } from '../shared/modal.js';
-import PAGES from './pages.js';
+import { navigate } from '../core/navigation.js';
+import PAGES, { requestStatsScope } from './pages.js';
 import { registerActions } from '../core/actions.js';
 import { characterAvatarHtml } from '../shared/portraits.js';
 
@@ -597,6 +598,78 @@ function _formatSession(s) {
   };
 }
 
+function _sessionQuest(s = {}) {
+  return (_ag.quests || []).find(q => q.id === s.questId) || null;
+}
+
+function _agNormKey(value = '') {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function _agIsTerminalOutcome(value) {
+  const key = _agNormKey(value);
+  return ['terminee', 'termine', 'reussie', 'reussite', 'echouee', 'echec', 'abandonnee'].includes(key);
+}
+
+function _sessionClosureState(quest = {}) {
+  const notes = String(quest?.notesReussite || quest?.notes || quest?.resolutionNotes || '').trim();
+  const hasOutcome =
+    _agIsTerminalOutcome(quest?.statut) ||
+    (quest?.reussite !== undefined && quest?.reussite !== null && String(quest.reussite).trim() !== '');
+  const closed = Boolean(hasOutcome && notes);
+  return {
+    closed,
+    hasOutcome,
+    hasNotes: Boolean(notes),
+    label: closed ? 'Cloturee' : hasOutcome ? 'Notes a finaliser' : 'A cloturer',
+    tone: closed ? 'done' : hasOutcome ? 'warn' : 'todo',
+  };
+}
+
+function _sessionAvailabilitySummary(quest = {}, iso = '', slotId = '') {
+  const date = _dateFromISO(iso);
+  const members = _questParticipants(quest);
+  const totals = { ok: 0, maybe: 0, no: 0, missing: 0 };
+  if (!date || !slotId || !members.length) return totals;
+  members.forEach(p => {
+    const state = _slotState(_availabilityForUid(p.uid), date, slotId);
+    if (state === 'ok') totals.ok += 1;
+    else if (state === 'maybe') totals.maybe += 1;
+    else if (state === 'no') totals.no += 1;
+    else totals.missing += 1;
+  });
+  return totals;
+}
+
+function _sessionStateForDate(s = {}, quest = {}) {
+  const closure = _sessionClosureState(quest);
+  if (closure.closed) return closure;
+  const d = _dateFromISO(s.date || '');
+  const played = d && d < _today();
+  if (!played && !closure.hasOutcome) return { ...closure, label: 'Planifiee', tone: 'planned' };
+  return closure;
+}
+
+async function _openAgendaMission(missionId) {
+  await navigate('story');
+  if (!missionId) return;
+  try {
+    const story = await import('./story.js');
+    story.openStoryDetail?.(missionId);
+  } catch (e) {
+    console.warn('[agenda] ouverture mission impossible', e);
+  }
+}
+
+function _openAgendaStats(date) {
+  requestStatsScope(date || null);
+  navigate('statistiques');
+}
+
 function _buildSessionEntry(questId, iso, slotId, { manual = false } = {}) {
   const quest = _ag.quests.find(q => q.id === questId);
   return {
@@ -740,18 +813,45 @@ function _renderSessionBanner() {
   const multi = sessions.length > 1;
   el.innerHTML = `
     <div class="ag-banner-list">
-      ${multi ? `<div class="ag-banner-listhd">📌 ${sessions.length} créneaux validés</div>` : ''}
+      ${multi ? `<div class="ag-banner-listhd">Sessions validées (${sessions.length})</div>` : ''}
       ${sessions.map(s => {
         const fmt = _formatSession(s);
         if (!fmt) return '';
-        return `<div class="ag-banner">
-          <div class="ag-banner-ico">🎲</div>
-          <div class="ag-banner-body">
-            <div class="ag-banner-eyebrow">${multi ? 'Séance validée' : 'Prochaine séance validée'}</div>
-            <div class="ag-banner-title">${_esc(fmt.dateFr)} — ${fmt.slotLabel} <span class="ag-banner-hours">${fmt.slotHours}</span></div>
-            ${fmt.questTitle ? `<div class="ag-banner-quest">Groupe : ${_esc(fmt.questTitle)}</div>` : ''}
+        const quest = _sessionQuest(s) || {};
+        const participants = _questParticipants(quest);
+        const av = _sessionAvailabilitySummary(quest, s.date, s.slot);
+        const state = _sessionStateForDate(s, quest);
+        const groupTitle = quest?.titre || quest?.nom || fmt.questTitle || 'Groupe';
+        return `<div class="ag-banner ag-session-card ag-session-card--${state.tone}">
+          <div class="ag-session-date">
+            <div class="ag-banner-eyebrow">${multi ? 'Session' : 'Prochaine session'}</div>
+            <div class="ag-banner-title">${_esc(fmt.dateFr)}</div>
+            <div class="ag-banner-hours">${fmt.slotLabel} ${_esc(fmt.slotHours)}</div>
           </div>
-          ${STATE.isAdmin ? `<button class="ag-banner-btn" data-action="_agUnvalidateSlot" data-quest-id="${_esc(s.questId || '')}" data-iso="${_esc(s.date || '')}" data-slot-id="${_esc(s.slot || '')}" title="Retirer ce créneau">✕</button>` : ''}
+          <div class="ag-session-main">
+            <div class="ag-session-top">
+              <span class="ag-session-state ag-session-state--${state.tone}">${_esc(state.label)}</span>
+              ${s.manual ? `<span class="ag-session-pill">Date MJ</span>` : ''}
+            </div>
+            <div class="ag-banner-quest">${_esc(groupTitle)}</div>
+            <div class="ag-session-avatars" aria-label="${participants.length} participants">
+              ${participants.length
+                ? participants.slice(0, 6).map(p => _participantAvatar(p, 26)).join('') + (participants.length > 6 ? `<span class="ag-session-more">+${participants.length - 6}</span>` : '')
+                : `<span class="ag-session-empty">Aucun participant</span>`}
+            </div>
+          </div>
+          <div class="ag-session-readiness" title="Disponibilités sur ce créneau">
+            <span class="is-ok">${av.ok} ok</span>
+            <span class="is-maybe">${av.maybe} ?</span>
+            <span class="is-no">${av.no} non</span>
+            <span class="is-missing">${av.missing} sans dispo</span>
+          </div>
+          <div class="ag-session-actions">
+            <button type="button" class="ag-session-action ag-session-action--primary" data-action="_agGoVtt">Table</button>
+            ${quest?.missionId ? `<button type="button" class="ag-session-action" data-action="_agOpenMission" data-mission-id="${_esc(quest.missionId)}">${state.closed ? 'Voir clôture' : 'Mission'}</button>` : ''}
+            <button type="button" class="ag-session-action" data-action="_agOpenStats" data-date="${_esc(s.date || '')}">Stats</button>
+            ${STATE.isAdmin ? `<button class="ag-banner-btn" data-action="_agUnvalidateSlot" data-quest-id="${_esc(s.questId || '')}" data-iso="${_esc(s.date || '')}" data-slot-id="${_esc(s.slot || '')}" title="Retirer ce créneau">×</button>` : ''}
+          </div>
         </div>`;
       }).join('')}
     </div>`;
@@ -1130,6 +1230,9 @@ registerActions({
   _agCloseModal:            ()    => closeModal(),
   _agUnvalidateSlot:        (btn) => unvalidateSlot(btn.dataset.questId, btn.dataset.iso, btn.dataset.slotId),
   _agValidateSlot:          (btn) => validateSlot(btn.dataset.questId, btn.dataset.iso, btn.dataset.slotId),
+  _agGoVtt:                 ()    => navigate('vtt'),
+  _agOpenMission:           (btn) => _openAgendaMission(btn.dataset.missionId),
+  _agOpenStats:             (btn) => _openAgendaStats(btn.dataset.date),
   _agCycle:                 (btn) => cycleAgendaSlot(btn.dataset.iso, btn.dataset.slot),
   _agRecCycle:              (btn) => cycleRecurringSlot(btn.dataset.day, btn.dataset.slot, btn),
   _agSetRecurringPattern:   (btn) => setRecurringPattern(btn.dataset.pattern),
