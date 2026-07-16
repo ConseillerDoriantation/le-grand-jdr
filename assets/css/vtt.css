@@ -183,6 +183,11 @@ html:not([data-theme="light"]) .vtt-root {
   border-color: oklch(72% 0.14 52 / 0.30);
   color: var(--gold);
 }
+.vtt-tool.vtt-tool-premium {
+  border-color: rgba(232, 184, 75, .36);
+  background: rgba(232, 184, 75, .10);
+  color: #f2cf7a;
+}
 
 .vtt-btn-sm {
   min-height: 30px;
@@ -2179,6 +2184,22 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-pgm-check {
   display: flex; align-items: center; gap: .5rem; cursor: pointer;
   font-size: .8rem; color: var(--text);
+}
+.vtt-pgm-check.is-premium-locked {
+  justify-content: space-between;
+  padding: .55rem .65rem;
+  border: 1px solid rgba(232, 184, 75, .28);
+  border-radius: 10px;
+  background: rgba(232, 184, 75, .08);
+  color: #f2cf7a;
+  cursor: default;
+}
+.vtt-pgm-check.is-premium-locked small {
+  font-size: .68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: #f2cf7a;
 }
 .vtt-pgm-actions {
   display: flex; gap: .5rem; justify-content: flex-end; margin-top: 1.1rem;

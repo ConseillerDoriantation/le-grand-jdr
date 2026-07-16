@@ -26,7 +26,8 @@ import {
 } from '../core/adventure.js';
 import { exportAdventure, importAdventure } from '../data/firestore.js';
 import { unwatchAll } from '../shared/realtime.js';
-import { TOGGLEABLE_FEATURES, enabledFeaturesOf } from '../shared/features.js';
+import { TOGGLEABLE_FEATURES, enabledFeaturesOf, isPremiumFeature, isFeatureAllowedByPlan } from '../shared/features.js';
+import { hasAdventurePremiumAccess } from '../shared/premium.js';
 
 const ADVENTURE_EMOJIS = [
   '⚔️','🛡️','🏰','🗺️','📜','🧭','🏕️','⛩️','🏛️','🗝️',
@@ -387,14 +388,19 @@ export async function openManageAdventureModal(adventureId) {
   const displayEmoji = currentEmoji || '◇';
 
   const enabled = new Set(enabledFeaturesOf(adv));
-  const featuresHtml = TOGGLEABLE_FEATURES.map(f => `
-    <button type="button" class="adv-feat-toggle ${enabled.has(f.key) ? 'is-on' : ''}"
+  const backupLocked = !hasAdventurePremiumAccess(adv);
+  const featuresHtml = TOGGLEABLE_FEATURES.map(f => {
+    const premiumLocked = isPremiumFeature(f.key) && !isFeatureAllowedByPlan(f.key, STATE.profile, adv);
+    return `
+    <button type="button" class="adv-feat-toggle ${enabled.has(f.key) ? 'is-on' : ''}${premiumLocked ? ' is-premium-locked' : ''}"
       data-action="_advToggleFeature" data-adv-id="${adventureId}" data-feature="${f.key}"
-      aria-pressed="${enabled.has(f.key)}">
+      aria-pressed="${enabled.has(f.key)}" ${premiumLocked ? 'aria-disabled="true"' : ''}>
       <span class="adv-feat-ico">${f.icon}</span>
       <span class="adv-feat-name">${_esc(f.label)}</span>
+      ${premiumLocked ? '<span class="adv-feat-plan">Premium</span>' : ''}
       <span class="adv-feat-switch" aria-hidden="true"></span>
-    </button>`).join('');
+    </button>`;
+  }).join('');
 
   const pendingHtml = pendingInvites.length ? `
     <section class="adv-manage-panel adv-manage-panel--compact">
@@ -513,8 +519,8 @@ export async function openManageAdventureModal(adventureId) {
           </div>
           <p>Exporter crée une copie complète. Restaurer réécrit les documents du backup sans supprimer ce qui existe déjà.</p>
           <div class="adv-backup-actions">
-            <button class="adv-card-action adv-card-action--muted" data-action="_advExport" data-id="${adventureId}">Exporter</button>
-            <button class="adv-card-action adv-card-action--muted" data-action="_advImport" data-id="${adventureId}">Restaurer</button>
+            <button class="adv-card-action adv-card-action--muted${backupLocked ? ' is-premium-locked' : ''}" data-action="_advExport" data-id="${adventureId}" title="${backupLocked ? 'Premium requis' : 'Exporter un backup JSON'}">Exporter${backupLocked ? ' · Premium' : ''}</button>
+            <button class="adv-card-action adv-card-action--muted${backupLocked ? ' is-premium-locked' : ''}" data-action="_advImport" data-id="${adventureId}" title="${backupLocked ? 'Premium requis' : 'Restaurer un backup JSON'}">Restaurer${backupLocked ? ' · Premium' : ''}</button>
           </div>
         </section>
 
@@ -549,6 +555,10 @@ async function saveAdventureMeta(advId) {
 // dédiée). Lecture directe via firestore.js, puis téléchargement Blob (cf. bastion).
 async function exportAdventureBackup(advId, btn) {
   const adv = STATE.adventures.find(a => a.id === advId);
+  if (!hasAdventurePremiumAccess(adv)) {
+    showNotif('Les backups JSON complets sont réservés aux aventures Premium.', 'info');
+    return;
+  }
   const label = btn ? btn.textContent : null;
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Export en cours…'; }
   try {
@@ -633,6 +643,11 @@ function createAdventureFromBackup() {
 // Restauration (phase 2) : choisit un fichier, valide, confirme fortement, puis
 // réécrit via firestore.js (upsert, aucune suppression, doc racine intouché).
 function importAdventureBackup(advId) {
+  const adv = STATE.adventures.find(a => a.id === advId);
+  if (!hasAdventurePremiumAccess(adv)) {
+    showNotif('La restauration de backup est réservée aux aventures Premium.', 'info');
+    return;
+  }
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'application/json,.json';
@@ -774,6 +789,12 @@ async function inviteAdventurePlayer(advId) {
 // Revert visuel en cas d'échec. Pas de re-render de la modale (fluide).
 async function toggleAdventureFeature(btn) {
   const advId = btn.dataset.advId;
+  const feature = btn.dataset.feature;
+  const adv = STATE.adventures.find(a => a.id === advId) || STATE.adventure;
+  if (isPremiumFeature(feature) && !isFeatureAllowedByPlan(feature, STATE.profile, adv)) {
+    showNotif('Cette page est réservée aux aventures Premium.', 'info');
+    return;
+  }
   const on = btn.classList.toggle('is-on');
   btn.setAttribute('aria-pressed', String(on));
   const keys = [...document.querySelectorAll('.adv-feat-toggle.is-on[data-feature]')]

@@ -248,6 +248,12 @@
   font-weight: 800;
 }
 
+.account-badges .account-badge-premium {
+  border-color: rgba(232,184,75,.34);
+  background: rgba(232,184,75,.12);
+  color: var(--gold);
+}
+
 .account-hero-actions {
   display: flex;
   flex-wrap: wrap;
@@ -386,6 +392,96 @@
   font-weight: 800;
 }
 
+.account-premium-panel.is-premium {
+  border-color: rgba(232,184,75,.24) !important;
+  background:
+    radial-gradient(circle at 0 0, rgba(232,184,75,.10), transparent 42%),
+    linear-gradient(180deg, rgba(18,18,30,.78), rgba(7,12,20,.62)) !important;
+}
+
+.account-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.account-plan-card {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(124,160,220,.12);
+  border-radius: 10px;
+  background: rgba(255,255,255,.035);
+}
+
+.account-plan-card strong,
+.account-premium-status strong,
+.account-premium-list b {
+  display: block;
+  color: var(--text);
+  font-size: .84rem;
+}
+
+.account-plan-card small,
+.account-premium-status span,
+.account-premium-list span {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-dim);
+  font-size: .72rem;
+  line-height: 1.35;
+}
+
+.account-plan-card.is-on {
+  border-color: rgba(34,195,142,.24);
+  background: rgba(34,195,142,.07);
+}
+
+.account-plan-card.is-off {
+  border-color: rgba(232,184,75,.20);
+  background: rgba(232,184,75,.06);
+}
+
+.account-plan-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.account-premium-modal {
+  display: grid;
+  gap: 12px;
+}
+
+.account-premium-status,
+.account-premium-list > div,
+.account-premium-note {
+  padding: 12px;
+  border: 1px solid rgba(124,160,220,.14);
+  border-radius: 12px;
+  background: rgba(255,255,255,.035);
+}
+
+.account-premium-status.is-premium {
+  border-color: rgba(232,184,75,.28);
+  background: rgba(232,184,75,.09);
+}
+
+.account-premium-list {
+  display: grid;
+  gap: 8px;
+}
+
+.account-premium-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: .78rem;
+  line-height: 1.6;
+}
+
+.account-premium-note code {
+  color: var(--gold);
+}
+
 .account-meta-line {
   display: grid;
   grid-template-columns: 76px minmax(0, 1fr);
@@ -484,6 +580,9 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .account-setting-row {
+    grid-template-columns: 1fr;
+  }
+  .account-plan-grid {
     grid-template-columns: 1fr;
   }
   .account-page .acc-edit-btn {

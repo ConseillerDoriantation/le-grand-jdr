@@ -21,6 +21,7 @@ export const STATE = {
   profile:     null,
   isAdmin:     false,      // vrai si admin de l'aventure courante OU admin global
   isSuperAdmin:false,      // vrai si profile.isAdmin === true (peut créer des aventures)
+  isPremium:   false,      // vrai si compte premium OU super-admin
   currentPage: 'dashboard',
   characters:  [],
   activeChar:  null,
@@ -41,6 +42,7 @@ export function setUser(user)         { STATE.user         = user; }
 export function setProfile(p)         { STATE.profile      = p;    }
 export function setAdmin(v)           { STATE.isAdmin      = v;    }
 export function setSuperAdmin(v)      { STATE.isSuperAdmin = v;    }
+export function setPremium(v)         { STATE.isPremium    = v;    }
 export function setPage(p)            { STATE.currentPage  = p;    }
 export function setAdventures(arr)    { STATE.adventures   = arr;  }
 export function setAdventure(adv)     { STATE.adventure    = adv;  }

@@ -7,6 +7,7 @@
 // navigation, la command palette et la modale de gestion d'aventure.
 // ══════════════════════════════════════════════
 import { STATE } from '../core/state.js';
+import { hasAdventurePremiumAccess } from './premium.js';
 
 // Clé = valeur `data-navigate` de la page. Ordre = ordre d'affichage des toggles.
 export const TOGGLEABLE_FEATURES = [
@@ -34,6 +35,7 @@ const _ALL_KEYS = TOGGLEABLE_FEATURES.map(f => f.key);
 // (fiches, missions, séances, créatures, PNJ, table virtuelle). Le reste s'active
 // via Gérer l'aventure. Décision produit 2026-07-16 (D&D-first).
 export const DEFAULT_ENABLED = ['characters', 'story', 'agenda', 'bestiaire', 'npcs', 'vtt'];
+export const FREE_FEATURES = new Set(DEFAULT_ENABLED);
 
 // Pages toujours disponibles (jamais togglables). `admin` = Console MJ, gardée
 // via son propre gating admin-only ; le reste = socle de navigation.
@@ -48,9 +50,18 @@ export function enabledFeaturesOf(adv = STATE.adventure) {
   return Array.isArray(adv?.enabledFeatures) ? adv.enabledFeatures : _ALL_KEYS;
 }
 
+export function isPremiumFeature(page) {
+  return _TOGGLEABLE_KEYS.has(page) && !FREE_FEATURES.has(page);
+}
+
+export function isFeatureAllowedByPlan(page, profile = STATE.profile, adv = STATE.adventure) {
+  if (!isPremiumFeature(page)) return true;
+  return hasAdventurePremiumAccess(adv, profile);
+}
+
 // Une page est-elle accessible pour l'aventure donnée ?
 export function isFeatureEnabled(page, adv = STATE.adventure) {
   if (ALWAYS_ON.has(page)) return true;
   if (!_TOGGLEABLE_KEYS.has(page)) return true; // page non gérée par les toggles
-  return enabledFeaturesOf(adv).includes(page);
+  return enabledFeaturesOf(adv).includes(page) && isFeatureAllowedByPlan(page, STATE.profile, adv);
 }

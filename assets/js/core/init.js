@@ -25,6 +25,7 @@ import {
   setProfile,
   setAdmin,
   setSuperAdmin,
+  setPremium,
   setAdventures,
 } from "./state.js";
 
@@ -40,6 +41,7 @@ import { unwatchAll } from "../shared/realtime.js";
 import { stopPresence } from "../shared/presence.js";
 import { releaseSessionData } from "../data/firestore.js";
 import { initErrorSensor } from "../shared/error-sensor.js";
+import { hasPremiumAccess } from "../shared/premium.js";
 
 // Capteur d'erreurs (window.onerror / unhandledrejection → Firestore borné).
 // Installé au plus tôt pour attraper les erreurs dès le chargement.
@@ -121,6 +123,7 @@ onAuthStateChanged(auth, async (user) => {
     setProfile(null);
     setAdmin(false);
     setSuperAdmin(false);
+    setPremium(false);
     setAdventures([]);
     showAuth();
     return;
@@ -142,6 +145,7 @@ onAuthStateChanged(auth, async (user) => {
   // Super-admin = rôle serveur users/{uid}.isAdmin. Pas de bootstrap par email côté client.
   const isSuperAdmin = STATE.profile?.isAdmin === true;
   setSuperAdmin(isSuperAdmin);
+  setPremium(hasPremiumAccess(STATE.profile));
 
   showAppLoading();
 

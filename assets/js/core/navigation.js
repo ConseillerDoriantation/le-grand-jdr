@@ -10,7 +10,7 @@ import { unwatchAll } from '../shared/realtime.js';
 import { sortCharactersForDisplay } from '../shared/char-stats.js';
 import { appSplashHtml } from '../shared/html.js';
 import { dispatchAction, dispatchValueAction } from './actions.js';
-import { isFeatureEnabled } from '../shared/features.js';
+import { isFeatureEnabled, isPremiumFeature, isFeatureAllowedByPlan } from '../shared/features.js';
 import { parseRoute, routeUrl } from '../shared/route.js';
 import { ASSET_VERSION } from './version.js';
 
@@ -179,7 +179,13 @@ export async function navigate(page) {
   // Garde : une feature désactivée pour l'aventure courante (lien direct, palette,
   // page devenue off) → on redirige vers le tableau de bord au lieu de l'ouvrir.
   if (!isFeatureEnabled(page)) {
-    showNotif('Cette fonctionnalité n\'est pas activée pour cette aventure.', 'info');
+    const premiumLocked = isPremiumFeature(page) && !isFeatureAllowedByPlan(page);
+    showNotif(
+      premiumLocked
+        ? 'Cette page est réservée aux aventures Premium.'
+        : 'Cette fonctionnalité n\'est pas activée pour cette aventure.',
+      'info'
+    );
     page = 'dashboard';
   }
 
