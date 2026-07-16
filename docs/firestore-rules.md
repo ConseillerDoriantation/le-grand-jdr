@@ -603,7 +603,18 @@ match /adventures/{adventureId} {
     allow read:   if inAdventure(adventureId) && request.auth.uid in resource.data.members;
     allow create: if inAdventure(adventureId)
       && request.auth.uid in request.resource.data.members
-      && request.resource.data.createdBy == request.auth.uid;
+      && request.resource.data.createdBy == request.auth.uid
+      && (
+        // DM : id déterministe dm_<uidA>_<uidB> (uids TRIÉS côté client) qui doit
+        // correspondre EXACTEMENT aux 2 membres. Sans ça, un tiers pouvait créer
+        // le doc dm_A_B en s'y mettant membre → interception des futurs DM A↔B.
+        (cid.matches('dm_.*')
+          && request.resource.data.type == 'dm'
+          && request.resource.data.members.size() == 2
+          && cid == 'dm_' + request.resource.data.members[0] + '_' + request.resource.data.members[1])
+        // Groupe : id auto Firestore (jamais dm_*), type ≠ dm.
+        || (!cid.matches('dm_.*') && request.resource.data.type != 'dm')
+      );
     allow update: if inAdventure(adventureId) && request.auth.uid in resource.data.members && (
       // Aperçu du dernier message (tout membre)
       request.resource.data.diff(resource.data).affectedKeys()
@@ -636,6 +647,9 @@ match /adventures/{adventureId} {
     );
     allow create: if inAdventure(adventureId)
       && request.resource.data.senderId == request.auth.uid
+      // Borne serveur (le maxlength client est contournable par un client forgé)
+      && request.resource.data.text is string
+      && request.resource.data.text.size() <= 2000
       && (
         request.resource.data.convoId == 'adventure' ||
         request.auth.uid in get(/databases/$(database)/documents/adventures/$(adventureId)/chatConvos/$(request.resource.data.convoId)).data.members
@@ -648,7 +662,9 @@ match /adventures/{adventureId} {
       && (
         // L'auteur modifie / supprime son message
         (resource.data.senderId == request.auth.uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'editedAt', 'deleted']))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'editedAt', 'deleted'])
+          && request.resource.data.text is string
+          && request.resource.data.text.size() <= 2000)
         // Tout membre pose / retire SA réaction (seule sa clé bouge)
         || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
             && request.resource.data.get('reactions', {}).diff(resource.data.get('reactions', {})).affectedKeys().hasOnly([request.auth.uid]))
