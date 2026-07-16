@@ -27,7 +27,7 @@ import {
 import { exportAdventure, importAdventure } from '../data/firestore.js';
 import { unwatchAll } from '../shared/realtime.js';
 import { TOGGLEABLE_FEATURES, enabledFeaturesOf, isPremiumFeature, isFeatureAllowedByPlan } from '../shared/features.js';
-import { hasAdventurePremiumAccess } from '../shared/premium.js';
+import { hasAdventurePremiumAccess, hasPremiumAccess } from '../shared/premium.js';
 
 const ADVENTURE_EMOJIS = [
   '⚔️','🛡️','🏰','🗺️','📜','🧭','🏕️','⛩️','🏛️','🗝️',
@@ -588,6 +588,10 @@ async function exportAdventureBackup(advId, btn) {
 // la création normale. Le créateur devient l'unique MJ : les anciens membres ne
 // sont pas recopiés (doc racine reconstruit par createAdventure, pas restauré).
 function createAdventureFromBackup() {
+  if (!hasPremiumAccess()) {
+    showNotif('La création depuis backup est réservée aux comptes Premium.', 'info');
+    return;
+  }
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'application/json,.json';
