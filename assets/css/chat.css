@@ -382,13 +382,7 @@
 .chat-msg-bubble--media { padding: .2rem; background: transparent; border: none; }
 .chat-msg--mine .chat-msg-bubble--media { background: transparent; }
 
-/* ── Mobile : au-dessus de la barre de navigation du bas ── */
-@media (max-width: 780px) {
-  #chat-widget { right: 14px; bottom: 78px; }
-  .chat-panel { height: min(460px, calc(100vh - 160px)); }
-  /* Tactile : pas de survol → actions toujours visibles, plus discrètes */
-  .chat-msg-actions { opacity: 1; pointer-events: auto; position: static; box-shadow: none; background: transparent; border: none; padding: 0; }
-}
+/* (media query mobile : voir le bloc unique en fin de fichier, section 2026) */
 
 /* ══════════════════════════════════════════════════════════════════════════════
    Messagerie 2026 — panneau plus proche d'une app de chat moderne
@@ -737,6 +731,8 @@ img.chat-head-avatar { display: block; }
     border-radius: 20px;
   }
   .chat-head-title, .chat-head-subtitle { max-width: 190px; }
+  /* Tactile : pas de survol → le bouton ⋯ reste visible et gagne en surface. */
+  .chat-msg-menu-btn { opacity: .8; font-size: 1.15rem; padding: 2px 6px; }
 }
 
 @media (max-width: 520px) {

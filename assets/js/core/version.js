@@ -11,4 +11,4 @@
 // eu avec vtt-inspector.js). GitHub Pages sert avec Cache-Control: max-age=600 :
 // le JS se revalide seul sous 10 min en prod ; en dev, Ctrl+F5.
 // ══════════════════════════════════════════════════════════════════════════════
-export const ASSET_VERSION = '20260716b';
+export const ASSET_VERSION = '20260716c';
