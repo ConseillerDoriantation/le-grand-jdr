@@ -8492,6 +8492,79 @@ html:not([data-theme="light"]) .vtt-root {
   line-height: 1.35;
 }
 
+.vtt-ms-equip-contrib {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .22rem;
+  min-width: 0;
+  margin-top: .36rem;
+}
+
+.vtt-ms-equip-contrib.is-compact {
+  margin-top: .22rem;
+}
+
+.vtt-ms-equip-label {
+  flex: 0 0 100%;
+  color: var(--text-dim);
+  font-size: .52rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.vtt-ms-equip-chip {
+  max-width: 100%;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: .16rem;
+  padding: .09rem .34rem;
+  border-radius: 999px;
+  border: 1px solid rgba(126,176,255,.16);
+  background: rgba(126,176,255,.07);
+  color: var(--text-muted);
+  font-size: .58rem;
+  font-weight: 850;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vtt-ms-equip-chip.is-positive {
+  border-color: rgba(34,195,142,.28);
+  background: rgba(34,195,142,.09);
+  color: #86efac;
+}
+
+.vtt-ms-equip-chip.is-negative {
+  border-color: rgba(239,68,68,.28);
+  background: rgba(239,68,68,.09);
+  color: #fca5a5;
+}
+
+.vtt-ms-equip-chip.is-trait {
+  border-color: rgba(240,191,87,.24);
+  background: rgba(240,191,87,.08);
+  color: var(--gold, #e8b84b);
+}
+
+.vtt-ms-equip-chip.is-more {
+  border-color: rgba(255,255,255,.12);
+  background: rgba(255,255,255,.045);
+  color: var(--text-dim);
+}
+
+.vtt-ms-slots.is-upgraded .vtt-ms-slot-row > .vtt-ms-equip-contrib {
+  grid-column: 1 / -1;
+  margin-top: .02rem;
+  padding: .38rem .46rem;
+  border: 1px solid rgba(240,191,87,.14);
+  border-radius: 10px;
+  background: rgba(240,191,87,.045);
+}
+
 .vtt-ms-xp {
   margin-top: .55rem;
   padding: .48rem .56rem;

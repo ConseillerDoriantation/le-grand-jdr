@@ -13,7 +13,7 @@ import { VS } from './vtt-state.js';
 import { _esc, _norm, loadingHtml } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal, promptModal } from '../../shared/modal.js';
-import { getArmorSetData, syncEquipmentAfterInventoryMutation } from '../../shared/equipment-utils.js';
+import { getArmorSetData, syncEquipmentAfterInventoryMutation, _getTraits } from '../../shared/equipment-utils.js';
 import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js';
 import { getDamageTypeById } from '../../shared/damage-types.js';
 import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, calcOr,
@@ -65,6 +65,48 @@ function _msCatItem(item) {
   return 'divers';
 }
 
+function _msEquipStatBonuses(item = {}) {
+  return _MS_STATS
+    .map(s => ({ ...s, value: getItemStatBonus(item, s.key) }))
+    .filter(s => s.value);
+}
+
+function _msEquipTraits(item = {}) {
+  return _getTraits(item).map(t => String(t || '').trim()).filter(Boolean);
+}
+
+function _msEquipSourceItem(equipped = {}, inv = []) {
+  if (!equipped?.nom) return equipped;
+  const idx = Number(equipped.sourceInvIndex);
+  const source = Number.isInteger(idx) && idx >= 0 ? inv[idx] : null;
+  if (!source?.nom) return equipped;
+  if (equipped.itemId && source.itemId && equipped.itemId !== source.itemId) return equipped;
+  if (equipped.itemId && source.itemId === equipped.itemId) return source;
+  return _norm(source.nom || '') === _norm(equipped.nom || '') ? source : equipped;
+}
+
+function _msEquipContributionHtml(item = {}, opts = {}) {
+  if (!item?.nom) return '';
+  const compact = !!opts.compact;
+  const label = opts.label ? `<span class="vtt-ms-equip-label">${_esc(opts.label)}</span>` : '';
+  const stats = _msEquipStatBonuses(item);
+  const traits = _msEquipTraits(item);
+  const statHtml = stats.map(s => `
+    <span class="vtt-ms-equip-chip is-stat ${s.value > 0 ? 'is-positive' : 'is-negative'}">
+      ${s.abbr} ${s.value > 0 ? '+' : ''}${s.value}
+    </span>`).join('');
+  const shownTraits = compact ? traits.slice(0, 3) : traits;
+  const traitHtml = shownTraits.map(t =>
+    `<span class="vtt-ms-equip-chip is-trait" title="${_esc(t)}">${_esc(t)}</span>`
+  ).join('');
+  const hiddenCount = traits.length - shownTraits.length;
+  const moreHtml = hiddenCount > 0
+    ? `<span class="vtt-ms-equip-chip is-more" title="${_esc(traits.slice(shownTraits.length).join(', '))}">+${hiddenCount}</span>`
+    : '';
+  if (!statHtml && !traitHtml && !moreHtml) return '';
+  return `<div class="vtt-ms-equip-contrib${compact ? ' is-compact' : ''}">${label}${statHtml}${traitHtml}${moreHtml}</div>`;
+}
+
 function _msBuildEquipItem(slot, item, invIndex) {
   if (!item) return null;
   const isWeapon = getEquipmentSlot(slot)?.kind === 'weapon';
@@ -73,6 +115,7 @@ function _msBuildEquipItem(slot, item, invIndex) {
     fo: getItemStatBonus(item, 'force'), dex: getItemStatBonus(item, 'dexterite'),
     in: getItemStatBonus(item, 'intelligence'), sa:  getItemStatBonus(item, 'sagesse'),
     co: getItemStatBonus(item, 'constitution'), ch:  getItemStatBonus(item, 'charisme'),
+    traits: _msEquipTraits(item),
     sourceInvIndex: invIndex, itemId: item.itemId||'',
   };
   if (isWeapon) {
@@ -474,6 +517,7 @@ function _msTabCombat(c, uid, canEdit) {
   }).join('');
 
   const weapon = c?.equipement?.[getPrimaryWeaponSlotId()];
+  const weaponSource = _msEquipSourceItem(weapon, c?.inventaire || []);
   let attackDice = '—';
   let attackTouch = '+0';
   const weaponHtml = weapon?.nom ? (() => {
@@ -491,6 +535,7 @@ function _msTabCombat(c, uid, canEdit) {
         <span>🎲 ${attackDice}</span>
         <span>🎯 ${attackTouch}</span>
       </div>
+      ${_msEquipContributionHtml(weaponSource, { label: 'Apports' })}
       ${weapon.particularite ? `<div class="vtt-ms-weapon-note">${_esc(weapon.particularite)}</div>` : ''}
     </div>`;
   })() : '';
@@ -590,12 +635,17 @@ function _msTabEquipement(c, uid, canEdit) {
       return `<option value="${i}"${equippedIdx===i?' selected':''}>${item.nom}${(item.qte||1)>1?' ×'+item.qte:''}</option>`;
     }).join('');
     const slotIcon = slotDef.icon || '•';
+    const contributionItem = _msEquipSourceItem(equipped, inv);
+    const contributionHtml = equipped?.nom
+      ? _msEquipContributionHtml(contributionItem, { label: 'Apports' })
+      : '';
     return `<div class="vtt-ms-slot-row ${equipped?.nom ? 'is-filled' : 'is-empty'}">
       <span class="vtt-ms-slot-icon">${slotIcon}</span>
       <div class="vtt-ms-slot-main">
         <span class="vtt-ms-slot-lbl">${_esc(slotDef.label)}</span>
         <span class="vtt-ms-slot-current" title="${_esc(equipped?.nom || 'Emplacement libre')}">${_esc(equipped?.nom || 'Emplacement libre')}</span>
       </div>
+      ${contributionHtml}
       <div class="vtt-ms-slot-ctrl">${canEdit
         ? `<select class="vtt-ms-slot-sel" data-vtt-fn="_vttMsSlotChange" data-vtt-on="change" data-vtt-args="$this|${c.id}|${uid}|${slotIdx}">
              <option value="">— vide —</option>${opts}</select>`
@@ -1029,6 +1079,7 @@ function _msTabInventaire(c, uid, canEdit) {
             ${isEq?'<span class="vtt-ms-inv-badge">équipé</span>':''}
           </div>
           ${detail?`<div class="vtt-ms-inv-detail">${_esc(detail)}</div>`:''}
+          ${(cat==='arme'||cat==='armure'||cat==='bijou') ? _msEquipContributionHtml(item, { compact: true }) : ''}
         </div>
         ${canEdit?`<div class="vtt-ms-inv-actions">
           ${(cat==='arme'||cat==='armure'||cat==='bijou') && (!isEq || total > 1)
