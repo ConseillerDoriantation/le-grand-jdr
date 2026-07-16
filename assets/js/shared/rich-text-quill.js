@@ -17,6 +17,7 @@ import { sanitizeRichTextHtml } from './rich-text.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal } from './upload-cloudinary.js';
 import { showNotif } from './notifications.js';
 import { STATE } from '../core/state.js';
+import { ASSET_VERSION } from '../core/version.js';
 
 const _instances = new Map(); // id → instance Quill
 
@@ -32,8 +33,8 @@ export function loadQuill() {
     document.head.appendChild(link);
   };
   _loading = new Promise((res, rej) => {
-    _css('quill-snow-css', './assets/css/vendor/quill.snow.css');
-    _css('quill-dark-css', './assets/css/rich-text-quill.css');
+    _css('quill-snow-css', './assets/css/vendor/quill.snow.css');       // vendor figé → pas de version
+    _css('quill-dark-css', `./assets/css/rich-text-quill.css?v=${ASSET_VERSION}`);
     const s = document.createElement('script');
     s.src = './assets/js/vendor/quill-2.0.3.min.js';
     s.onload = () => res(window.Quill);

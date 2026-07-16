@@ -17,7 +17,7 @@ import { openModal, closeModalDirect } from '../../shared/modal.js';
 import { CONDITION_DEFAULT_LIBRARY } from '../../shared/conditions.js';
 import { _tokRef, _logCol } from './vtt-refs.js';
 import { _live } from './vtt-effective.js';
-import { _renderInspectorSoon } from './vtt-inspector.js?v=20260713-creature-info';
+import { _renderInspectorSoon } from './vtt-inspector.js';
 import { CONDITION_LIBRARY, CONDITION_BY_ID, _loadConditionsOverrides, _consumeLuckyReroll, _vttLogTargetFields } from './vtt.js';
 
 function getVttConditionLibrary() {
