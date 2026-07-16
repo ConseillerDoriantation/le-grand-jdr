@@ -2458,10 +2458,173 @@ body .modal:has(.sh-admin-modal.is-ach-categories) {
 /* ── Barre extra : filtre par perso + tri timeline ────────────────────── */
 .ach-extra-bar {
   display:grid;
-  grid-template-columns:minmax(0, 1fr) auto;
+  grid-template-columns:minmax(250px, .78fr) minmax(340px, 1.22fr) auto;
   align-items:stretch;
   gap:10px;
   margin-bottom:14px;
+}
+.ach-mission-filter {
+  min-width:0;
+  padding:12px;
+  background:
+    linear-gradient(135deg, rgba(34,195,142,.10), transparent 58%),
+    rgba(12,18,29,.72);
+  border:1px solid rgba(85,214,170,.18);
+  border-radius:14px;
+  box-shadow:0 12px 28px rgba(0,0,0,.16);
+}
+.ach-mission-filter-head {
+  display:grid;
+  grid-template-columns:auto minmax(0, 1fr) auto;
+  align-items:center;
+  gap:8px;
+  margin-bottom:10px;
+}
+.ach-mission-filter-head span {
+  color:#55d6aa;
+  font-size:.62rem;
+  font-weight:900;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+}
+.ach-mission-filter-head strong {
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:var(--text);
+  font-size:.9rem;
+}
+.ach-mission-filter-head em {
+  min-width:28px;
+  padding:3px 9px;
+  border-radius:999px;
+  background:rgba(85,214,170,.10);
+  border:1px solid rgba(85,214,170,.20);
+  color:#8df5cf;
+  font-size:.68rem;
+  font-style:normal;
+  font-weight:900;
+  text-align:center;
+}
+.ach-mission-picker {
+  position:relative;
+}
+.ach-mission-summary {
+  min-height:46px;
+  display:grid;
+  grid-template-columns:auto minmax(0, 1fr) auto;
+  align-items:center;
+  gap:10px;
+  padding:7px 9px;
+  border-radius:12px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.10);
+  color:var(--text);
+  cursor:pointer;
+  list-style:none;
+}
+.ach-mission-summary::-webkit-details-marker { display:none; }
+.ach-mission-summary:hover,
+.ach-mission-picker[open] .ach-mission-summary {
+  border-color:rgba(85,214,170,.38);
+  background:rgba(85,214,170,.07);
+}
+.ach-mission-summary-icon,
+.ach-mission-option-icon {
+  width:30px;
+  height:30px;
+  border-radius:9px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:rgba(85,214,170,.12);
+  border:1px solid rgba(85,214,170,.22);
+  color:#a7f3d0;
+  font-weight:900;
+}
+.ach-mission-summary-copy,
+.ach-mission-option-main {
+  min-width:0;
+  display:grid;
+  gap:2px;
+}
+.ach-mission-summary-copy small,
+.ach-mission-option-main small {
+  color:var(--text-dim);
+  font-size:.62rem;
+  font-weight:800;
+}
+.ach-mission-summary-copy b,
+.ach-mission-option-main b {
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:var(--text);
+  font-size:.86rem;
+}
+.ach-mission-chevron {
+  color:#55d6aa;
+  font-weight:900;
+  transition:transform .15s;
+}
+.ach-mission-picker[open] .ach-mission-chevron { transform:rotate(180deg); }
+.ach-mission-menu {
+  position:absolute;
+  z-index:55;
+  top:calc(100% + 8px);
+  left:0;
+  width:min(560px, calc(100vw - 96px));
+  max-height:420px;
+  overflow:auto;
+  display:grid;
+  gap:7px;
+  padding:10px;
+  border-radius:14px;
+  background:rgba(8,13,21,.98);
+  border:1px solid rgba(85,214,170,.22);
+  box-shadow:0 24px 70px rgba(0,0,0,.55);
+}
+.ach-mission-option {
+  min-width:0;
+  display:grid;
+  grid-template-columns:auto minmax(0, 1fr) auto;
+  align-items:center;
+  gap:9px;
+  padding:8px;
+  border-radius:11px;
+  background:rgba(255,255,255,.035);
+  border:1px solid rgba(255,255,255,.08);
+  color:var(--text-muted);
+  cursor:pointer;
+  text-align:left;
+  transition:all .15s;
+}
+.ach-mission-option:hover {
+  transform:translateY(-1px);
+  border-color:rgba(85,214,170,.42);
+  color:var(--text);
+}
+.ach-mission-option.active {
+  border-color:rgba(85,214,170,.52);
+  background:rgba(85,214,170,.12);
+  box-shadow:0 0 0 1px rgba(85,214,170,.22) inset;
+}
+.ach-mission-option.is-empty { opacity:.62; }
+.ach-mission-option-count {
+  min-width:28px;
+  padding:2px 7px;
+  border-radius:999px;
+  background:rgba(255,255,255,.08);
+  color:var(--text-muted);
+  text-align:center;
+  font-size:.68rem;
+  font-weight:900;
+}
+.ach-mission-option.active .ach-mission-option-count {
+  background:rgba(85,214,170,.18);
+  color:#8df5cf;
 }
 .ach-player-filter {
   min-width:0;
@@ -3242,6 +3405,95 @@ body.ach-dragging * { cursor:grabbing !important; }
 }
 .ach-lb-mission {
   margin:0 0 16px;
+}
+.ach-lb-context {
+  margin:0 0 16px;
+  padding:12px;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:12px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--c, #7eb0ff) 11%, transparent), transparent 72%),
+    rgba(255,255,255,.025);
+}
+.ach-lb-context-head {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:8px;
+  color:var(--text-dim);
+  font-size:.62rem;
+  font-weight:900;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+.ach-lb-context-head small {
+  color:var(--c, #7eb0ff);
+  font-size:.6rem;
+}
+.ach-lb-context-card {
+  width:100%;
+  min-width:0;
+  display:grid;
+  grid-template-columns:44px minmax(0, 1fr) auto;
+  align-items:center;
+  gap:10px;
+  padding:8px;
+  border:1px solid rgba(255,255,255,.075);
+  border-radius:10px;
+  background:rgba(0,0,0,.16);
+  color:var(--text);
+  text-align:left;
+  cursor:pointer;
+  transition:border-color .15s ease, background .15s ease, transform .15s ease;
+}
+.ach-lb-context-card:hover {
+  transform:translateY(-1px);
+  border-color:color-mix(in srgb, var(--c, #7eb0ff) 45%, rgba(255,255,255,.12));
+  background:color-mix(in srgb, var(--c, #7eb0ff) 10%, rgba(0,0,0,.18));
+}
+.ach-lb-context-art {
+  width:44px;
+  height:44px;
+  overflow:hidden;
+  border-radius:9px;
+  background:rgba(255,255,255,.06);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:1.2rem;
+  flex-shrink:0;
+}
+.ach-lb-context-art img {
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+}
+.ach-lb-context-body {
+  min-width:0;
+  display:grid;
+  gap:3px;
+}
+.ach-lb-context-body b,
+.ach-lb-context-body small {
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.ach-lb-context-body b {
+  font-family:var(--font-display);
+  font-size:.82rem;
+}
+.ach-lb-context-body small {
+  color:var(--text-dim);
+  font-size:.68rem;
+  font-weight:700;
+}
+.ach-lb-context-go {
+  color:var(--c, #7eb0ff);
+  font-weight:900;
 }
 .ach-lb-contribs {
   justify-content:flex-start;
