@@ -35,11 +35,21 @@ self.addEventListener('fetch', (event) => {
       // Ne met en cache que les réponses propres (200, same-origin).
       if (res && res.ok && res.type === 'basic') {
         const cache = await caches.open(CACHE);
+        // Assets versionnés (?v=…) : purge les anciennes variantes du même
+        // fichier avant d'écrire la nouvelle — sinon chaque bump accumule
+        // une copie de plus (CSS ~pleins Ko) qui ne sera jamais servie en ligne.
+        if (url.search.includes('v=')) {
+          const stale = await cache.keys(req, { ignoreSearch: true });
+          await Promise.all(stale.filter(k => k.url !== req.url).map(k => cache.delete(k)));
+        }
         cache.put(req, res.clone()).catch(() => {});
       }
       return res;
     } catch (err) {
-      const cached = await caches.match(req);
+      // Hors-ligne : correspondance exacte, sinon (asset versionné dont le ?v a
+      // bumpé depuis la dernière visite) l'ancienne variante — mieux qu'un trou.
+      const cached = await caches.match(req)
+        || (url.search.includes('v=') ? await caches.match(req, { ignoreSearch: true }) : null);
       if (cached) return cached;
       // Navigation hors-ligne sans entrée exacte → on sert l'app shell en cache.
       if (req.mode === 'navigate') {
