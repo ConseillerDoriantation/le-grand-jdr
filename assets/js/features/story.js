@@ -7,7 +7,7 @@
 import { loadCollection, addToCol, updateInCol, saveDoc, deleteFromCol, getDocData, getCachedCollection } from '../data/firestore.js';
 import { confirmDelete, tryDoc } from '../shared/crud.js';
 import { navigate } from '../core/navigation.js';
-import { openModal, closeModal, closeModalDirect, confirmModal } from '../shared/modal.js';
+import { openModal, pushModal, popModal, closeModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
@@ -396,14 +396,7 @@ function _storyGroupCardHtml(g, missionId) {
 
   if (isAdmin) {
     const presentIds = new Set(parts.map(p => p.charId).filter(Boolean));
-    const addOptions = sortCharactersForDisplay(allChars)
-      .filter(c => !presentIds.has(c.id))
-      .map(c => `<button type="button" class="mv-group-addpick" data-action="_stGroupAddMember" data-id="${g.id}" data-mission="${missionId}" data-char="${_esc(c.id)}" title="Ajouter ${_esc(c.nom || '?')}${c.ownerPseudo ? ` · ${_esc(c.ownerPseudo)}` : ''}">
-          ${characterAvatarHtml(c, { size: 28, className: 'mv-avatar', border: 'none', background: 'rgba(34,195,142,.16)', color: '#22c38e' })}
-          <span class="mv-group-addpick-name">${_esc(c.nom || '?')}</span>
-          ${c.ownerPseudo ? `<small>${_esc(c.ownerPseudo)}</small>` : ''}
-        </button>`)
-      .join('');
+    const availableCount = allChars.filter(c => !presentIds.has(c.id)).length;
     const dc = (field, extra = '') => `data-change="_stGroupFieldSave" data-id="${g.id}" data-mission="${missionId}" data-field="${field}" ${extra}`;
     return `<article class="mv-group mv-group--edit" data-gid="${g.id}" style="--gr-color:${o.color}">
       <header class="mv-group-head">
@@ -420,10 +413,10 @@ function _storyGroupCardHtml(g, missionId) {
       </div>
       <div class="mv-group-bar"><div class="mv-group-bar-fill" style="width:${gr}%"></div></div>
       <div class="mv-group-members">${membersHtml}</div>
-      ${addOptions ? `<details class="mv-group-addpicker">
-        <summary>＋ Ajouter un personnage</summary>
-        <div class="mv-group-addpicker-list">${addOptions}</div>
-      </details>` : ''}
+      <button type="button" class="mv-group-addbtn" data-action="_stGroupOpenMemberPicker" data-id="${g.id}" data-mission="${missionId}" ${availableCount ? '' : 'disabled'}>
+        <span>＋ Ajouter un personnage</span>
+        <small>${availableCount ? `${availableCount} disponible${availableCount > 1 ? 's' : ''}` : 'Groupe complet'}</small>
+      </button>
       <textarea class="mv-group-notesinp" rows="${Math.max(2, Math.min(6, notes.length || 2))}" placeholder="Notes de réussite (une par ligne)..." ${dc('notesReussite')}>${_esc(g.notesReussite || '')}</textarea>
       ${notesHtml ? `<div class="mv-group-notes-preview">${notesHtml}</div>` : ''}
     </article>`;
@@ -569,6 +562,65 @@ async function _stGroupFieldSave(el) {
   } catch (e) { notifySaveError(e); }
 }
 
+function _stGroupOpenMemberPicker(btn) {
+  if (!STATE.isAdmin) return;
+  const id = btn.dataset.id;
+  const missionId = btn.dataset.mission;
+  const q = _grpQuest(id);
+  if (!q) return;
+  const presentIds = new Set(dedupeQuestParticipants(q.participants || []).map(p => p.charId).filter(Boolean));
+  const chars = sortCharactersForDisplay(getCachedCollection('characters') || [])
+    .filter(c => !presentIds.has(c.id));
+  const rows = chars.map(c => {
+    const sub = [c.ownerPseudo || c.ownerEmail, c.classe, c.race].filter(Boolean).join(' · ');
+    const search = [c.nom, c.ownerPseudo, c.ownerEmail, c.classe, c.race].filter(Boolean).join(' ').toLowerCase();
+    return `<button type="button" class="mv-picker-member" data-action="_stGroupAddMember" data-layer="picker"
+        data-id="${_esc(id)}" data-mission="${_esc(missionId)}" data-char="${_esc(c.id)}" data-search="${_esc(search)}">
+        ${characterAvatarHtml(c, { size: 42, className: 'mv-avatar', border: 'none', background: 'rgba(34,195,142,.16)', color: '#22c38e' })}
+        <span class="mv-picker-member-main">
+          <b>${_esc(c.nom || '?')}</b>
+          ${sub ? `<small>${_esc(sub)}</small>` : ''}
+        </span>
+        <span class="mv-picker-member-add">Ajouter</span>
+      </button>`;
+  }).join('');
+  pushModal('Ajouter au groupe', `
+    <div class="mv-picker">
+      <div class="mv-picker-head">
+        <div>
+          <strong>${_esc(q.titre || 'Groupe')}</strong>
+          <span>${chars.length} personnage${chars.length > 1 ? 's' : ''} disponible${chars.length > 1 ? 's' : ''}</span>
+        </div>
+        <input class="mv-picker-search" type="search" placeholder="Rechercher un personnage ou un joueur..." data-input="_stGroupMemberFilter" autofocus>
+      </div>
+      <div class="mv-picker-list">
+        ${rows || `<div class="mv-picker-empty">Tous les personnages sont déjà dans ce groupe.</div>`}
+      </div>
+      <div class="mv-picker-empty mv-picker-empty--filtered" hidden>Aucun personnage ne correspond à cette recherche.</div>
+      <div class="mv-picker-actions">
+        <button type="button" class="btn btn-outline btn-sm" data-action="closeModalDirect">Retour</button>
+      </div>
+    </div>`, () => {}, {
+      icon: '👥',
+      subtitle: 'Choisir un participant sans encombrer la carte du groupe',
+      accent: '#22c38e',
+    });
+}
+
+function _stGroupMemberFilter(input) {
+  const root = input.closest('.mv-picker');
+  if (!root) return;
+  const needle = String(input.value || '').trim().toLowerCase();
+  let visible = 0;
+  root.querySelectorAll('.mv-picker-member').forEach(btn => {
+    const ok = !needle || String(btn.dataset.search || '').includes(needle);
+    btn.hidden = !ok;
+    if (ok) visible += 1;
+  });
+  const empty = root.querySelector('.mv-picker-empty--filtered');
+  if (empty) empty.hidden = visible > 0;
+}
+
 // MJ : assigner un personnage d'office au groupe (clic sur un portrait).
 async function _stGroupAddMember(el) {
   if (!STATE.isAdmin) return;
@@ -580,7 +632,10 @@ async function _stGroupAddMember(el) {
   const parts = dedupeQuestParticipants([...(q.participants || []), questParticipantFromChar(char, char.uid || '')]);
   try {
     await saveDoc('quests', id, { participants: parts });
+    q.participants = parts;
+    if (el.dataset.layer === 'picker') popModal();
     _stReplaceGroupCard(id, missionId);
+    showNotif(`${char.nom || 'Personnage'} ajouté au groupe.`, 'success');
   } catch (e) { notifySaveError(e); }
 }
 
@@ -593,6 +648,7 @@ async function _stGroupRemoveMember(btn) {
   const parts = (q.participants || []).filter(p => charId ? p.charId !== charId : p.uid !== uid);
   try {
     await saveDoc('quests', id, { participants: parts });
+    q.participants = parts;
     _stReplaceGroupCard(id, missionId);
   } catch (e) { notifySaveError(e); }
 }
@@ -1903,6 +1959,31 @@ async function openStoryDetail(id) {
     .map(q => ({ ...q, _parts: dedupeQuestParticipants(q.participants || []) }))
     .sort((a, b) => (a.titre || '').localeCompare(b.titre || '', 'fr'));
   const liensItems = (item.liens || []).map(lid => items.find(i => i.id === lid)).filter(Boolean);
+  const parentItems = items
+    .filter(m => m.id !== item.id && Array.isArray(m.liens) && m.liens.includes(item.id))
+    .sort((a, b) => (a.acte || '').localeCompare(b.acte || '') || (a.ordre || 0) - (b.ordre || 0));
+  const relationCount = liensItems.length + parentItems.length;
+  const relationCardHtml = (l, direction) => {
+    const lst = stCfg(l);
+    const lAxeCol = l.axe ? (STORE.axeMap[l.axe] || 'var(--text-muted)') : 'var(--text-muted)';
+    const directionLabel = direction === 'from' ? 'Origine' : 'Suite';
+    return `<button class="mv-lien mv-lien--${direction}" data-action="_stOpenLien" data-id="${l.id}">
+      <div class="mv-lien-art">
+        ${l.imageUrl
+          ? `<img src="${_esc(l.imageUrl)}" alt="" loading="lazy">`
+          : `<div class="mv-lien-fallback">${l.type === 'mission' ? '🎯' : '📖'}</div>`}
+        <div class="mv-lien-statut" style="color:${lst.color};border-color:${lst.border}">${lst.icon}</div>
+      </div>
+      <div class="mv-lien-body">
+        <div class="mv-lien-kind">${direction === 'from' ? '← mène ici' : 'mène vers →'}</div>
+        <div class="mv-lien-title">${_esc(l.titre || 'Sans titre')}</div>
+        <div class="mv-lien-meta">
+          <span>${directionLabel}</span>
+          ${l.axe ? `<span style="color:${lAxeCol}">● ${_esc(l.axe)}</span>` : ''}
+        </div>
+      </div>
+    </button>`;
+  };
   // Hauts-Faits rattachés à cette mission (collection session-live → 0 lecture en plus).
   const achItems = (getCachedCollection('achievements') || await loadCollection('achievements').catch(() => []) || [])
     .filter(a => a.missionId === item.id);
@@ -2028,9 +2109,9 @@ async function openStoryDetail(id) {
         <div class="mv-stat-num">🏆 ${achItems.length}</div>
         <div class="mv-stat-lbl">Haut${achItems.length > 1 ? 's' : ''}-Fait${achItems.length > 1 ? 's' : ''}</div>
       </div>` : ''}
-      ${liensItems.length ? `<div class="mv-stat">
-        <div class="mv-stat-num">${liensItems.length}</div>
-        <div class="mv-stat-lbl">Suite${liensItems.length > 1 ? 's' : ''}</div>
+      ${relationCount ? `<div class="mv-stat">
+        <div class="mv-stat-num">${relationCount}</div>
+        <div class="mv-stat-lbl">Lien${relationCount > 1 ? 's' : ''}</div>
       </div>` : ''}
     </div>
 
@@ -2077,7 +2158,7 @@ async function openStoryDetail(id) {
               <button type="button" class="mv-rel-action" data-action="_stMissionStats" data-id="${_esc(item.id)}">
                 <span>📊</span><b>Stats</b><small>mission</small>
               </button>
-              <button type="button" class="mv-rel-action" data-action="_stGoAchievements">
+              <button type="button" class="mv-rel-action" data-action="_stMissionAchievements" data-id="${_esc(item.id)}">
                 <span>🏆</span><b>Hauts-faits</b><small>${achItems.length || 0} lié${achItems.length > 1 ? 's' : ''}</small>
               </button>
             </div>
@@ -2097,7 +2178,6 @@ async function openStoryDetail(id) {
               <span><b>${rewardedGroups}</b><small>récompenses</small></span>
             </div>
           </section>
-
           <section class="mv-side-card">
             <div class="mv-side-title">Repères</div>
             <dl class="mv-side-list">
@@ -2119,31 +2199,21 @@ async function openStoryDetail(id) {
       <!-- Hauts-Faits issus de cette mission -->
       ${missionAchievementsHtml}
 
-      <!-- Suites ouvertes -->
-      ${liensItems.length ? `
+      <!-- Relations de mission -->
+      ${relationCount ? `
       <section class="mv-section">
         <h3 class="mv-section-title">
-          ↝ Suites ouvertes
-          <span class="mv-section-count">${liensItems.length}</span>
+          ↝ Relations de mission
+          <span class="mv-section-count">${relationCount}</span>
         </h3>
-        <div class="mv-liens">
-          ${liensItems.map(l => {
-            const lst = stCfg(l);
-            const lAxeCol = l.axe ? (STORE.axeMap[l.axe] || 'var(--text-muted)') : 'var(--text-muted)';
-            return `<button class="mv-lien" data-action="_stOpenLien" data-id="${l.id}">
-              <div class="mv-lien-art">
-                ${l.imageUrl
-                  ? `<img src="${_esc(l.imageUrl)}" alt="" loading="lazy">`
-                  : `<div class="mv-lien-fallback">${l.type === 'mission' ? '🎯' : '📖'}</div>`}
-                <div class="mv-lien-statut" style="color:${lst.color};border-color:${lst.border}">${lst.icon}</div>
-              </div>
-              <div class="mv-lien-body">
-                <div class="mv-lien-title">${_esc(l.titre || 'Sans titre')}</div>
-                ${l.axe ? `<div class="mv-lien-axe" style="color:${lAxeCol}">● ${_esc(l.axe)}</div>` : ''}
-              </div>
-            </button>`;
-          }).join('')}
-        </div>
+        ${parentItems.length ? `<div class="mv-relation-block">
+          <div class="mv-relation-label">Origines</div>
+          <div class="mv-liens">${parentItems.map(l => relationCardHtml(l, 'from')).join('')}</div>
+        </div>` : ''}
+        ${liensItems.length ? `<div class="mv-relation-block">
+          <div class="mv-relation-label">Suites ouvertes</div>
+          <div class="mv-liens">${liensItems.map(l => relationCardHtml(l, 'to')).join('')}</div>
+        </div>` : ''}
       </section>` : ''}
 
     </div><!-- /mv-body -->
@@ -2670,6 +2740,8 @@ registerActions({
   _stGroupJoin:            (btn) => _stGroupJoin(btn.dataset.id, btn.dataset.mission),
   _stGroupPickChar:        (btn) => _stGroupPickChar(btn.dataset.id, btn.dataset.mission, btn.dataset.char),
   _stGroupFieldSave:       (el)  => _stGroupFieldSave(el),
+  _stGroupOpenMemberPicker:(btn) => _stGroupOpenMemberPicker(btn),
+  _stGroupMemberFilter:    (el)  => _stGroupMemberFilter(el),
   _stGroupAddMember:       (el)  => _stGroupAddMember(el),
   _stGroupRemoveMember:    (btn) => _stGroupRemoveMember(btn),
   _stGroupDelete:          (btn) => _stGroupDelete(btn.dataset.id, btn.dataset.mission),
