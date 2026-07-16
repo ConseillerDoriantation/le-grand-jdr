@@ -93,6 +93,7 @@ const STORE = {
   missions:      [],        // missions de la Trame disponibles pour les liaisons
   lightboxItems: {},        // { [catId]: item[] } cache lightbox
   filter:        'all',     // 'all' | 'epique' | 'comique' | 'histoire'
+  missionFilter: 'all',     // 'all' | '__none' | missionId
   charFilter:    'all',     // 'all' | charId
   charFilters:   [],        // sélection multiple de personnages
   charMatchMode: 'any',     // 'any' = au moins un sélectionné | 'shared' = tous les sélectionnés
@@ -112,7 +113,7 @@ let _achSelectCat = () => {};
 let _achToggleContrib = () => {};
 
 export function getAchievementsShellState() {
-  return { items: STORE.items, filter: STORE.filter, view: STORE.view, search: STORE.search };
+  return { items: STORE.items, filter: STORE.filter, missionFilter: STORE.missionFilter, view: STORE.view, search: STORE.search };
 }
 
 function _achSelectedCharIds() {
@@ -142,6 +143,13 @@ function _missionFor(item) {
   return item?.missionId ? (STORE.missions || []).find(m => m.id === item.missionId) : null;
 }
 
+function _achMissionFilterLabel() {
+  const val = STORE.missionFilter || 'all';
+  if (val === 'all') return 'Toutes les missions';
+  if (val === '__none') return 'Sans mission liée';
+  return (STORE.missions || []).find(m => m.id === val)?.titre || 'Mission';
+}
+
 // Icône selon le type d'élément de Trame
 function _trameIco(m) { return m?.type === 'event' ? '📖' : '🎯'; }
 // Méta discrète (acte · date) d'un élément de Trame
@@ -153,6 +161,30 @@ function _missionLinkHtml(item, className = 'ach-mission-link') {
   const mission = _missionFor(item);
   if (!mission) return '';
   return "<button type=\"button\" class=\"" + className + "\" data-action=\"_achOpenMission\" data-id=\"" + mission.id + "\" data-stop-propagation>" + _trameIco(mission) + " " + _esc(mission.titre || 'Mission') + "</button>";
+}
+
+function _achLightboxContextHtml(item) {
+  const mission = _missionFor(item);
+  if (!mission) return '';
+  const typeLabel = mission.type === 'event' ? 'Événement' : 'Mission';
+  const meta = _trameMeta(mission);
+  const art = mission.imageUrl
+    ? `<span class="ach-lb-context-art"><img src="${_esc(mission.imageUrl)}" alt=""></span>`
+    : `<span class="ach-lb-context-art ach-lb-context-art--empty">${_trameIco(mission)}</span>`;
+  return `<section class="ach-lb-context">
+    <div class="ach-lb-context-head">
+      <span>Relié à la Trame</span>
+      <small>${_esc(typeLabel)}</small>
+    </div>
+    <button type="button" class="ach-lb-context-card" data-action="_achOpenMission" data-id="${_esc(mission.id)}">
+      ${art}
+      <span class="ach-lb-context-body">
+        <b>${_esc(mission.titre || typeLabel)}</b>
+        ${meta ? `<small>${_esc(meta)}</small>` : '<small>Ouvrir le détail de Trame</small>'}
+      </span>
+      <span class="ach-lb-context-go">→</span>
+    </button>
+  </section>`;
 }
 
 // Normalisation recherche : minuscules sans accents
@@ -193,6 +225,7 @@ function _achPickOptionHtml(m, selectedId) {
 
 async function _achOpenMission(id) {
   document.getElementById('ach-lightbox')?.remove();
+  await _ensureFeatureCss('story');
   const { openStoryDetail } = await import('./story.js');
   openStoryDetail(id);
 }
@@ -604,6 +637,7 @@ function _achGalleryOverviewHtml(items) {
   if (!count) return '';
 
   const filter = STORE.filter || 'all';
+  const missionFilter = STORE.missionFilter || 'all';
   const selectedCharIds = _achSelectedCharIds();
   const search = (STORE.search || '').trim();
   const selectedChars = selectedCharIds
@@ -616,6 +650,7 @@ function _achGalleryOverviewHtml(items) {
       : null;
   const filterParts = [
     filter !== 'all' ? _achCategoryFor({ categorie: filter }).label : 'Toutes catégories',
+    missionFilter !== 'all' ? _achMissionFilterLabel() : null,
     charLabel,
     search ? `"${search}"` : null,
   ].filter(Boolean);
@@ -1124,6 +1159,72 @@ function _achRenderControlsExtras() {
       : 'Tous les joueurs';
   const totalLabel = `${visible.length} haut${visible.length > 1 ? 's' : ''}-fait${visible.length > 1 ? 's' : ''}`;
   const activeCount = visible.filter(item => _achMatchesCharSelection(item, selectedIds)).length;
+  const missionFilter = STORE.missionFilter || 'all';
+  const missionBase = visible
+    .filter(item => (STORE.filter || 'all') === 'all' || (item.categorie || _achDefaultCategoryId()) === STORE.filter)
+    .filter(item => !selectedIds.length || _achMatchesCharSelection(item, selectedIds))
+    .filter(item => {
+      const s = _normalize(STORE.search || '');
+      return !s || _normalize(item.titre || '').includes(s) || _normalize(item.description || '').includes(s);
+    });
+  const missionCounts = new Map();
+  let noMissionCount = 0;
+  missionBase.forEach(item => {
+    if (item.missionId) missionCounts.set(item.missionId, (missionCounts.get(item.missionId) || 0) + 1);
+    else noMissionCount += 1;
+  });
+  const missionOptions = (STORE.missions || [])
+    .filter(m => missionCounts.get(m.id) || m.id === missionFilter)
+    .sort((a, b) =>
+      (a.acte || '').localeCompare(b.acte || '') ||
+      (a.ordre || 0) - (b.ordre || 0) ||
+      (a.date || '').localeCompare(b.date || '') ||
+      (a.titre || '').localeCompare(b.titre || ''));
+  const missionActiveCount = missionFilter === 'all'
+    ? missionBase.length
+    : missionFilter === '__none'
+      ? noMissionCount
+      : missionCounts.get(missionFilter) || 0;
+  const missionLabel = _achMissionFilterLabel();
+  const missionFilterHtml = (missionOptions.length || noMissionCount || missionFilter !== 'all') ? `
+    <section class="ach-mission-filter" aria-label="Filtrer les hauts-faits par mission">
+      <div class="ach-mission-filter-head">
+        <span>Filtre mission</span>
+        <strong>${_esc(missionLabel)}</strong>
+        <em>${missionActiveCount}</em>
+      </div>
+      <details class="ach-mission-picker">
+        <summary class="ach-mission-summary">
+          <span class="ach-mission-summary-icon">${missionFilter === '__none' ? '∅' : '🎯'}</span>
+          <span class="ach-mission-summary-copy">
+            <small>Trame liée</small>
+            <b>${_esc(missionLabel)}</b>
+          </span>
+          <span class="ach-mission-chevron">⌄</span>
+        </summary>
+        <div class="ach-mission-menu">
+          <button type="button" class="ach-mission-option${missionFilter === 'all' ? ' active' : ''}" data-action="_achSetMissionFilter" data-mission-id="all">
+            <span class="ach-mission-option-icon">✦</span>
+            <span class="ach-mission-option-main"><b>Toutes les missions</b><small>${missionBase.length} haut${missionBase.length > 1 ? 's' : ''}-fait${missionBase.length > 1 ? 's' : ''}</small></span>
+            <span class="ach-mission-option-count">${missionBase.length}</span>
+          </button>
+          ${noMissionCount || missionFilter === '__none' ? `<button type="button" class="ach-mission-option${missionFilter === '__none' ? ' active' : ''}" data-action="_achSetMissionFilter" data-mission-id="__none">
+            <span class="ach-mission-option-icon">∅</span>
+            <span class="ach-mission-option-main"><b>Sans mission liée</b><small>Souvenirs non rattachés à la Trame</small></span>
+            <span class="ach-mission-option-count">${noMissionCount}</span>
+          </button>` : ''}
+          ${missionOptions.map(m => {
+            const count = missionCounts.get(m.id) || 0;
+            const active = missionFilter === m.id;
+            return `<button type="button" class="ach-mission-option${active ? ' active' : ''}${count ? '' : ' is-empty'}" data-action="_achSetMissionFilter" data-mission-id="${_esc(m.id)}">
+              <span class="ach-mission-option-icon">${_trameIco(m)}</span>
+              <span class="ach-mission-option-main"><b>${_esc(m.titre || 'Mission')}</b><small>${_esc(_trameMeta(m) || (m.type === 'event' ? 'Événement' : 'Mission'))}</small></span>
+              <span class="ach-mission-option-count">${count}</span>
+            </button>`;
+          }).join('')}
+        </div>
+      </details>
+    </section>` : '';
   const selectedPreview = selectedChars.slice(0, 4).map(c => {
     const col = charColor(c);
     return characterAvatarHtml(c, {
@@ -1216,8 +1317,8 @@ function _achRenderControlsExtras() {
       ${desc ? '↓ Plus récent en haut' : '↑ Plus ancien en haut'}
     </button>` : '';
 
-  bar.innerHTML = charChips + sortBtn;
-  bar.style.display = (charChips || sortBtn) ? 'grid' : 'none';
+  bar.innerHTML = missionFilterHtml + charChips + sortBtn;
+  bar.style.display = (missionFilterHtml || charChips || sortBtn) ? 'grid' : 'none';
 }
 
 // ── Rendu du contenu (filtre + vue) ──────────────────────────────────────────
@@ -1229,6 +1330,7 @@ async function _achRenderContent() {
 
   const all        = STORE.items || [];
   const filter     = STORE.filter || 'all';
+  const missionFilter = STORE.missionFilter || 'all';
   const selectedCharIds = _achSelectedCharIds();
   const search     = _normalize(STORE.search || '');   // minuscules + sans accents
   const isAdmin    = STATE.isAdmin;
@@ -1237,6 +1339,9 @@ async function _achRenderContent() {
   let filtered = isAdmin ? all : all.filter(a => !a.secret);
   // 2. Filtre catégorie
   if (filter !== 'all') filtered = filtered.filter(a => (a.categorie || _achDefaultCategoryId()) === filter);
+  if (missionFilter !== 'all') {
+    filtered = filtered.filter(a => missionFilter === '__none' ? !a.missionId : a.missionId === missionFilter);
+  }
   // 3. Filtre par perso contributeur
   if (selectedCharIds.length) filtered = filtered.filter(a => _achMatchesCharSelection(a, selectedCharIds));
   // 4. Recherche
@@ -1263,9 +1368,11 @@ async function _achRenderContent() {
           ? `ces ${selectedNames.length} personnages ensemble`
           : `${selectedNames.length} personnages sélectionnés`)
         : null;
+    const missionName = missionFilter !== 'all' ? _achMissionFilterLabel() : null;
     let title = 'Aucun haut-fait';
     let sub = STATE.isAdmin ? 'Ajoutez le premier !' : '';
     if (search) { title = 'Aucun résultat'; sub = `pour « ${_esc(search)} »`; }
+    else if (missionName) { title = 'Aucun haut-fait'; sub = `pour « ${_esc(missionName)} »`; }
     else if (charName) { title = `Aucun haut-fait`; sub = `pour « ${_esc(charName)} »`; }
     contentEl.innerHTML = `
       <div class="hall-empty">
@@ -1292,7 +1399,8 @@ async function _achRenderContent() {
   contentEl.appendChild(galleryEl);
 
   await _achRenderJustified(filter, filtered, galleryEl);
-  setupAchievementsDnd(filter !== 'all' ? filter : null);
+  const canManualSort = filter !== 'all' && missionFilter === 'all' && !selectedCharIds.length && !search;
+  setupAchievementsDnd(canManualSort ? filter : null);
 }
 
 // ── Actions état (appelées depuis les boutons HTML) ───────────────────────────
@@ -1310,6 +1418,10 @@ function _achSetView(view) {
   });
   _achRenderContent();
 };
+function _achSetMissionFilter(missionId) {
+  STORE.missionFilter = missionId || 'all';
+  _achRenderContent();
+}
 let _achSearchTimer = null;
 function _achSetSearch(val) {
   STORE.search = val;
@@ -1395,7 +1507,7 @@ function _achOpenLightbox(itemId) {
           ${secretHtml}
         </div>
         ${item.description ? `<div class="ach-lb-desc">${_esc(item.description)}</div>` : ''}
-        ${_missionLinkHtml(item, 'ach-lb-mission')}
+        ${_achLightboxContextHtml(item)}
         ${contribsHtml || '<div class="ach-lb-muted">Aucun contributeur renseigné.</div>'}
       </aside>
     </div>
@@ -1485,6 +1597,9 @@ export async function openAchievementCategoriesAdmin() {
 // Ouverture de la lightbox depuis un autre module (ex. fiche mission de la Trame).
 // Charge les hauts-faits si nécessaire (collection session-live → 0 lecture en plus).
 export async function openAchievementLightbox(id) {
+  if (!STORE.missions || !STORE.missions.length) {
+    STORE.missions = await loadCollection('story').catch(() => []);
+  }
   if (!STORE.items || !STORE.items.length) {
     try {
       STORE.publicItems = await loadCollection('achievements');
@@ -1572,6 +1687,7 @@ PAGES.achievements = async function() {
 registerActions({
   _achSetSearch:         (el)  => _achSetSearch(el.value),
   _achSetFilter:         (btn) => _achSetFilter(btn.dataset.val),
+  _achSetMissionFilter:  (btn) => _achSetMissionFilter(btn.dataset.missionId),
   _achSetView:           (btn) => _achSetView(btn.dataset.val),
   openAchievementModal:  ()    => openAchievementModal(),
   openAchievementCategoriesAdmin: () => openAchievementCategoriesAdmin(),

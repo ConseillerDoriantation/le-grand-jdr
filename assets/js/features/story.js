@@ -13,7 +13,7 @@ import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { _esc, _nl2br } from '../shared/html.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
-import PAGES from './pages.js';
+import PAGES, { requestStatsScope } from './pages.js';
 import { sortCharactersForDisplay, getMyCharacters } from '../shared/char-stats.js';
 import { setHistoireCtx } from '../shared/histoire-ctx.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
@@ -104,6 +104,51 @@ function itemProgress(item) {
 function _normalize(s) {
   return (s || '').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
+
+const STORY_SLOT_LABELS = {
+  m: { label: 'Matin', icon: '☀️', hours: '9h-13h' },
+  a: { label: 'Aprem', icon: '🌤️', hours: '14h-18h' },
+  s: { label: 'Soir', icon: '🌙', hours: '19h-23h' },
+};
+
+function _storyDateFr(iso = '') {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return '';
+  const d = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function _storyMissionSessions(nextSession, groups = []) {
+  const groupIds = new Set((groups || []).map(g => g.id).filter(Boolean));
+  const sessions = Array.isArray(nextSession?.sessions)
+    ? nextSession.sessions
+    : (nextSession?.date && nextSession?.slot ? [nextSession] : []);
+  return sessions
+    .filter(s => s?.date && groupIds.has(s.questId))
+    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.slot || '').localeCompare(b.slot || ''));
+}
+
+function _storyMissionSessionHtml(sessions = [], groups = []) {
+  if (!sessions.length) {
+    return `<div class="mv-rel-empty">Aucune séance validée pour cette mission.</div>`;
+  }
+  const byGroup = new Map((groups || []).map(g => [g.id, g]));
+  return `<div class="mv-rel-sessions">${sessions.slice(0, 3).map(s => {
+    const slot = STORY_SLOT_LABELS[s.slot] || { label: 'Créneau', icon: '•', hours: '' };
+    const group = byGroup.get(s.questId);
+    return `<div class="mv-rel-session">
+      <span class="mv-rel-date">${_esc(_storyDateFr(s.date))}</span>
+      <span class="mv-rel-slot">${slot.icon} ${_esc(slot.label)}${slot.hours ? ` <small>${_esc(slot.hours)}</small>` : ''}</span>
+      <span class="mv-rel-group">${_esc(group?.titre || group?.nom || s.questTitle || 'Groupe')}</span>
+    </div>`;
+  }).join('')}${sessions.length > 3 ? `<div class="mv-rel-more">+${sessions.length - 3} autre${sessions.length > 4 ? 's' : ''}</div>` : ''}</div>`;
+}
+
+function _storyOpenMissionStats(missionId) {
+  requestStatsScope(missionId ? `mission:${missionId}` : null);
+  navigate('statistiques');
+}
+
 function axeColor(axe){
   if(!axe) return '#555';
   if(!STORE.axeMap[axe]){ STORE.axeMap[axe] = AXE_COLORS[Object.keys(STORE.axeMap).length % AXE_COLORS.length]; }
@@ -1900,6 +1945,8 @@ async function openStoryDetail(id) {
   const rewardedGroups = groups.filter(g => (g.recompense || '').trim()).length;
   const synthProgress = groups.length ? avgGroupSuccess : prog;
   const synthColor = groups.length ? groupOutcome({ reussite: avgGroupSuccess }).color : st.color;
+  const nextSession = await getDocData('agenda_session', 'next').catch(() => null);
+  const missionSessions = _storyMissionSessions(nextSession, groups);
 
   openModal('', `
   <div class="mv-shell">
@@ -1989,6 +2036,22 @@ async function openStoryDetail(id) {
         </main>
 
         <aside class="mv-side">
+          <section class="mv-side-card mv-side-card--relations">
+            <div class="mv-side-title">Accès rapides</div>
+            <div class="mv-rel-actions">
+              <button type="button" class="mv-rel-action" data-action="_stGoAgenda">
+                <span>📅</span><b>Agenda</b><small>planifier</small>
+              </button>
+              <button type="button" class="mv-rel-action" data-action="_stMissionStats" data-id="${_esc(item.id)}">
+                <span>📊</span><b>Stats</b><small>mission</small>
+              </button>
+              <button type="button" class="mv-rel-action" data-action="_stGoAchievements">
+                <span>🏆</span><b>Hauts-faits</b><small>${achItems.length || 0} lié${achItems.length > 1 ? 's' : ''}</small>
+              </button>
+            </div>
+            <div class="mv-rel-subtitle">Séances liées</div>
+            ${_storyMissionSessionHtml(missionSessions, groups)}
+          </section>
           <section class="mv-side-card">
             <div class="mv-side-title">Synthèse</div>
             <div class="mv-side-progress" style="--mv-prog:${synthColor}">
@@ -2600,6 +2663,9 @@ registerActions({
   _stOpenAfterClose:       (btn) => openStoryDetail(btn.dataset.id),
   _stDeleteAfterClose:     (btn) => { closeModalDirect(); deleteStory(btn.dataset.id); },
   _stEditAfterClose:       (btn) => { closeModalDirect(); editStory(btn.dataset.id); },
+  _stGoAgenda:             ()    => { closeModalDirect(); navigate('agenda'); },
+  _stGoAchievements:       ()    => { closeModalDirect(); navigate('achievements'); },
+  _stMissionStats:         (btn) => { closeModalDirect(); _storyOpenMissionStats(btn.dataset.id); },
   _stDeleteAfterCloseModal:(btn) => { closeModal(); deleteStory(btn.dataset.id); },
   _stSetView:              (btn) => _stSetView(btn.dataset.view),
   _stSetFilter:            (btn) => _stSetFilter(btn.dataset.key, btn.dataset.val),
