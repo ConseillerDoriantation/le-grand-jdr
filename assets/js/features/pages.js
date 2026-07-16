@@ -2793,8 +2793,9 @@ const PAGES = {
         </div>
         <div class="hall-command-tools">
           <div class="view-toggle">
-            <button class="view-tab${activeView !== 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="galerie">▦ Galerie</button>
+            <button class="view-tab${activeView === 'galerie' ? ' active' : ''}" data-action="_achSetView" data-val="galerie">▦ Galerie</button>
             <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline">⋮ Chronologie</button>
+            <button class="view-tab${activeView === 'missions' ? ' active' : ''}" data-action="_achSetView" data-val="missions">🎯 Missions</button>
           </div>
           ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="openAchievementCategoriesAdmin">Catégories</button>` : ''}
           ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" data-action="openAchievementModal">+ Ajouter</button>` : ''}
@@ -2825,7 +2826,7 @@ const PAGES = {
       <div class="hall-command-search">
         <div class="search-wrap">
           <span style="color:var(--text-dim);font-size:.85rem">⌕</span>
-          <input type="text" placeholder="Rechercher…" id="ach-search-input"
+          <input type="text" placeholder="Rechercher haut-fait, mission, personnage…" id="ach-search-input"
             value="${_esc(achState.search || '')}"
             data-input="_achSetSearch">
         </div>

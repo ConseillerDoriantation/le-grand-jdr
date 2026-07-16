@@ -98,7 +98,7 @@ const STORE = {
   charFilters:   [],        // sélection multiple de personnages
   charMatchMode: 'any',     // 'any' = au moins un sélectionné | 'shared' = tous les sélectionnés
   charPickerOpen:false,
-  view:          'galerie', // 'galerie' | 'timeline'
+  view:          'galerie', // 'galerie' | 'timeline' | 'missions'
   search:        '',
   timelineDesc:  false,     // true = plus récent en haut
   order:         [],        // miroir de l'ordre Firestore
@@ -108,6 +108,7 @@ let _achRowSortables = [];
 let _achDragBlockClick = false;
 let _achClickGuardInstalled = false;
 let _achUploader = null;
+let _achLightboxKeyHandler = null;
 
 let _achSelectCat = () => {};
 let _achToggleContrib = () => {};
@@ -143,11 +144,31 @@ function _missionFor(item) {
   return item?.missionId ? (STORE.missions || []).find(m => m.id === item.missionId) : null;
 }
 
+function _achSearchHaystack(item) {
+  const mission = _missionFor(item);
+  const cat = _achCategoryFor(item);
+  const chars = (item?.contributeurs || [])
+    .map(id => (STATE.characters || []).find(c => c.id === id)?.nom)
+    .filter(Boolean);
+  return _normalize([
+    item?.titre,
+    item?.description,
+    item?.date,
+    item?.emoji,
+    cat?.label,
+    mission?.titre,
+    mission?.acte,
+    mission?.date,
+    mission?.type === 'event' ? 'événement' : mission ? 'mission' : '',
+    ...chars,
+  ].filter(Boolean).join(' '));
+}
+
 function _achMissionFilterLabel() {
   const val = STORE.missionFilter || 'all';
   if (val === 'all') return 'Toutes les missions';
   if (val === '__none') return 'Sans mission liée';
-  return (STORE.missions || []).find(m => m.id === val)?.titre || 'Mission';
+  return (STORE.missions || []).find(m => m.id === val)?.titre || 'Mission introuvable';
 }
 
 // Icône selon le type d'élément de Trame
@@ -168,6 +189,11 @@ function _achLightboxContextHtml(item) {
   if (!mission) return '';
   const typeLabel = mission.type === 'event' ? 'Événement' : 'Mission';
   const meta = _trameMeta(mission);
+  const visible = STATE.isAdmin ? (STORE.items || []) : (STORE.items || []).filter(a => !a.secret);
+  const related = _sortAchievementsByDate(
+    visible.filter(a => a.id !== item.id && a.missionId === item.missionId),
+    true,
+  ).slice(0, 4);
   const art = mission.imageUrl
     ? `<span class="ach-lb-context-art"><img src="${_esc(mission.imageUrl)}" alt=""></span>`
     : `<span class="ach-lb-context-art ach-lb-context-art--empty">${_trameIco(mission)}</span>`;
@@ -184,6 +210,27 @@ function _achLightboxContextHtml(item) {
       </span>
       <span class="ach-lb-context-go">→</span>
     </button>
+    <div class="ach-lb-context-actions">
+      <button type="button" data-action="_achFocusMissionGroup" data-mission-id="${_esc(mission.id)}">Voir les souvenirs de cette mission</button>
+      ${STATE.isAdmin ? `<button type="button" data-action="_achCreateForMission" data-mission-id="${_esc(mission.id)}">Ajouter un souvenir lié</button>` : ''}
+    </div>
+    ${related.length ? `<div class="ach-lb-related">
+      <div class="ach-lb-related-title">Autres souvenirs liés</div>
+      <div class="ach-lb-related-list">
+        ${related.map(a => {
+          const cat = _achCategoryFor(a);
+          return `<button type="button" class="ach-lb-related-item" data-action="_achOpenLightbox" data-id="${_esc(a.id)}" data-stop-propagation style="--c:${cat.color};--c-glow:${cat.glow};--c-line:${cat.line}">
+            <span class="ach-lb-related-art">
+              ${a.imageUrl ? `<img src="${_esc(a.imageUrl)}" alt="">` : `<span>${a.emoji || cat.emoji}</span>`}
+            </span>
+            <span class="ach-lb-related-copy">
+              <b>${_esc(a.titre || 'Haut-Fait')}</b>
+              <small>${_esc(_formatDateFr(a.date) || cat.label)}</small>
+            </span>
+          </button>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
   </section>`;
 }
 
@@ -231,7 +278,7 @@ async function _achOpenMission(id) {
 }
 
 // ── MODAL PRINCIPAL ──────────────────────────────────────────────────────────
-export function openAchievementModal(id = null) {
+export function openAchievementModal(id = null, preset = {}) {
   const ex = id ? (STORE.items || []).find(a => a.id === id) : null;
   // Éléments de Trame liables : missions ET événements
   const trame = (STORE.missions || [])
@@ -241,7 +288,11 @@ export function openAchievementModal(id = null) {
       (a.ordre || 0) - (b.ordre || 0) ||
       (a.date || '').localeCompare(b.date || ''));
   _achPickItems = trame;
-  const curTrame = ex?.missionId ? trame.find(m => m.id === ex.missionId) : null;
+  const currentMissionFilter = STORE.missionFilter && !['all', '__none'].includes(STORE.missionFilter)
+    ? STORE.missionFilter
+    : '';
+  const initialMissionId = ex?.missionId || preset.missionId || (!id ? currentMissionFilter : '');
+  const curTrame = initialMissionId ? trame.find(m => m.id === initialMissionId) : null;
   _achUploader?.destroy(); _achUploader = null;
 
   const modalCats = _achModalCats();
@@ -303,7 +354,7 @@ export function openAchievementModal(id = null) {
         </div>
         <div class="form-group">
           <label>Élément de la Trame <span class="achm-hint">(mission ou événement, optionnel)</span></label>
-          <input type="hidden" id="ach-mission-id" value="${ex?.missionId || ''}">
+          <input type="hidden" id="ach-mission-id" value="${curTrame?.id || ''}">
           <div class="achm-pick" id="ach-pick">
             <button type="button" class="achm-pick-trigger" id="ach-pick-trigger" data-action="_achTogglePick">
               ${_achPickTriggerHtml(curTrame)}
@@ -312,9 +363,9 @@ export function openAchievementModal(id = null) {
               <input class="input-field achm-pick-search" id="ach-pick-search"
                 placeholder="Rechercher une mission / un événement…" data-input="_achPickSearch" autocomplete="off">
               <div class="achm-pick-list" id="ach-pick-list">
-                <button type="button" class="achm-pick-opt achm-pick-opt--none ${!ex?.missionId ? 'is-active' : ''}"
+                <button type="button" class="achm-pick-opt achm-pick-opt--none ${!curTrame ? 'is-active' : ''}"
                   data-action="_achPickSelect" data-id="">✕ Aucun élément lié</button>
-                ${trame.map(m => _achPickOptionHtml(m, ex?.missionId || '')).join('')}
+                ${trame.map(m => _achPickOptionHtml(m, curTrame?.id || '')).join('')}
               </div>
             </div>
           </div>
@@ -630,6 +681,34 @@ function _sortAchievementsByDate(items, desc = false) {
 
 function _achCategoryFor(item) {
   return ACH_CATS.find(c => c.id === (item?.categorie || _achDefaultCategoryId())) || ACH_CATS[0];
+}
+
+function _achFilteredItemsForCurrentState({ ordered = false } = {}) {
+  const filter = STORE.filter || 'all';
+  let missionFilter = STORE.missionFilter || 'all';
+  if (missionFilter !== 'all' && missionFilter !== '__none' && !(STORE.missions || []).some(m => m.id === missionFilter)) {
+    STORE.missionFilter = '__none';
+    missionFilter = '__none';
+  }
+
+  const selectedCharIds = _achSelectedCharIds();
+  const search = _normalize(STORE.search || '');
+  const knownMissionIds = new Set((STORE.missions || []).map(m => m.id));
+
+  let filtered = STATE.isAdmin ? [...(STORE.items || [])] : (STORE.items || []).filter(a => !a.secret);
+  if (filter !== 'all') filtered = filtered.filter(a => (a.categorie || _achDefaultCategoryId()) === filter);
+  if (missionFilter !== 'all') {
+    filtered = filtered.filter(a => missionFilter === '__none'
+      ? !a.missionId || !knownMissionIds.has(a.missionId)
+      : a.missionId === missionFilter);
+  }
+  if (selectedCharIds.length) filtered = filtered.filter(a => _achMatchesCharSelection(a, selectedCharIds));
+  if (search) filtered = filtered.filter(a => _achSearchHaystack(a).includes(search));
+
+  if (!ordered) return filtered;
+  if ((STORE.view || 'galerie') === 'timeline') return _sortAchievementsByDate(filtered, !!STORE.timelineDesc);
+  if ((STORE.view || 'galerie') === 'missions') return _sortAchievementsByDate(filtered, true);
+  return filter === 'all' ? _sortAchievementsByDate(filtered) : filtered;
 }
 
 function _achGalleryOverviewHtml(items) {
@@ -1123,6 +1202,169 @@ function _renderTimeline(items) {
   </div>`;
 }
 
+function _achMissionComparator(a, b) {
+  return (a?.acte || '').localeCompare(b?.acte || '') ||
+    (a?.ordre || 0) - (b?.ordre || 0) ||
+    (a?.date || '').localeCompare(b?.date || '') ||
+    (a?.titre || '').localeCompare(b?.titre || '');
+}
+
+function _achMissionContextHtml(missionFilter, count) {
+  if (!missionFilter || missionFilter === 'all' || (STORE.view || 'galerie') === 'missions') return '';
+  const mission = missionFilter === '__none' ? null : (STORE.missions || []).find(m => m.id === missionFilter);
+  const isUnlinked = missionFilter === '__none' || !mission;
+  const title = isUnlinked ? 'Sans mission liee' : mission.titre || 'Mission';
+  const meta = isUnlinked
+    ? 'Hauts-faits a classer dans la Trame'
+    : [mission.type === 'event' ? 'Evenement de Trame' : 'Mission de Trame', _trameMeta(mission)].filter(Boolean).join(' - ');
+  const art = mission?.imageUrl
+    ? `<img src="${_esc(mission.imageUrl)}" alt="">`
+    : `<span>${isUnlinked ? '∅' : _trameIco(mission)}</span>`;
+  return `<section class="ach-mission-context${isUnlinked ? ' is-unlinked' : ''}">
+    <div class="ach-mission-context-art">${art}</div>
+    <div class="ach-mission-context-main">
+      <small>${_esc(meta)}</small>
+      <strong>${_esc(title)}</strong>
+      <em>${count} haut${count > 1 ? 's' : ''}-fait${count > 1 ? 's' : ''} affiche${count > 1 ? 's' : ''}</em>
+    </div>
+    <div class="ach-mission-context-actions">
+      <button type="button" data-action="_achSetMissionFilter" data-mission-id="all">Tout revoir</button>
+      ${mission ? `<button type="button" data-action="_achSetView" data-val="missions">Voir la mission</button>` : ''}
+      ${mission ? `<button type="button" data-action="_achOpenMission" data-id="${_esc(mission.id)}">Trame</button>` : ''}
+      ${STATE.isAdmin && mission ? `<button type="button" class="is-primary" data-action="_achCreateForMission" data-mission-id="${_esc(mission.id)}">Ajouter</button>` : ''}
+    </div>
+  </section>`;
+}
+
+function _renderMissionGroups(items) {
+  const chars = sortCharactersForDisplay(STATE.characters || []);
+  const missions = [...(STORE.missions || [])].sort(_achMissionComparator);
+  const missionOrder = new Map(missions.map((m, index) => [m.id, index]));
+  const missionsById = new Map(missions.map(m => [m.id, m]));
+  const knownMissionIds = new Set(missions.map(m => m.id));
+  const missionFilter = STORE.missionFilter || 'all';
+  const isIsolated = missionFilter !== 'all';
+  const buckets = new Map();
+
+  items.forEach(item => {
+    const key = item.missionId && knownMissionIds.has(item.missionId) ? item.missionId : '__none';
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(item);
+  });
+
+  const groups = [...buckets.entries()]
+    .map(([key, list]) => ({
+      key,
+      mission: key === '__none' ? null : missionsById.get(key),
+      items: _sortAchievementsByDate(list, true),
+    }))
+    .sort((a, b) => {
+      if (a.key === '__none') return 1;
+      if (b.key === '__none') return -1;
+      const ia = missionOrder.has(a.key) ? missionOrder.get(a.key) : 9999;
+      const ib = missionOrder.has(b.key) ? missionOrder.get(b.key) : 9999;
+      if (ia !== ib) return ia - ib;
+      return (a.mission?.titre || '').localeCompare(b.mission?.titre || '');
+    });
+
+  const groupContribs = (list) => {
+    const counts = new Map();
+    list.forEach(item => (item.contributeurs || []).forEach(id => counts.set(id, (counts.get(id) || 0) + 1)));
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([id, count]) => ({ char: chars.find(c => c.id === id), count }))
+      .filter(x => x.char);
+  };
+
+  const miniCard = (item) => {
+    const cat = _achCategoryFor(item);
+    const date = _formatDateFr(item.date);
+    return `<button type="button" class="ach-mission-mini" data-action="_achOpenLightbox" data-id="${_esc(item.id)}" style="--c:${cat.color};--c-glow:${cat.glow};--c-line:${cat.line}">
+      <span class="ach-mission-mini-art">
+        ${item.imageUrl
+          ? `<img src="${_esc(item.imageUrl)}" alt="">`
+          : `<span>${item.emoji || cat.emoji}</span>`}
+      </span>
+      <span class="ach-mission-mini-copy">
+        <b>${_esc(item.titre || 'Haut-Fait')}</b>
+        <small>${date ? _esc(date) : _esc(cat.label)}</small>
+      </span>
+    </button>`;
+  };
+
+  const backHtml = isIsolated ? `<div class="ach-mission-return">
+    <button type="button" data-action="_achSetMissionFilter" data-mission-id="all">← Toutes les missions</button>
+    <span>${groups.length ? `${groups[0].items.length} haut${groups[0].items.length > 1 ? 's' : ''}-fait${groups[0].items.length > 1 ? 's' : ''} affiché${groups[0].items.length > 1 ? 's' : ''}` : 'Aucun haut-fait affiché'}</span>
+  </div>` : '';
+
+  return `${backHtml}<div class="ach-mission-board">
+    ${groups.map(group => {
+      const mission = group.mission;
+      const count = group.items.length;
+      const latest = group.items[0];
+      const latestDate = _formatDateFr(latest?.date);
+      const catCounts = new Map();
+      group.items.forEach(item => {
+        const cat = _achCategoryFor(item);
+        catCounts.set(cat.id, (catCounts.get(cat.id) || 0) + 1);
+      });
+      const cats = [...catCounts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([id, n]) => ({ cat: _achCategoryFor({ categorie: id }), n }));
+      const contributors = groupContribs(group.items);
+      const art = mission?.imageUrl
+        ? `<img src="${_esc(mission.imageUrl)}" alt="">`
+        : `<span>${mission ? _trameIco(mission) : '∅'}</span>`;
+      const title = mission?.titre || 'Sans mission liée';
+      const meta = mission ? _trameMeta(mission) : 'Souvenirs non rattachés à la Trame';
+      const actionId = mission ? mission.id : '__none';
+      const expanded = isIsolated && actionId === missionFilter;
+      const visibleItems = expanded ? group.items : group.items.slice(0, 5);
+
+      return `<article class="ach-mission-group${mission ? '' : ' is-unlinked'}">
+        <div class="ach-mission-group-head">
+          <span class="ach-mission-group-art">${art}</span>
+          <span class="ach-mission-group-main">
+            <small>${mission ? (mission.type === 'event' ? 'Événement de Trame' : 'Mission de Trame') : 'Non classés'}</small>
+            <strong>${_esc(title)}</strong>
+            <em>${_esc(meta || 'Trame')} · ${count} haut${count > 1 ? 's' : ''}-fait${count > 1 ? 's' : ''}${latestDate ? ` · dernier : ${_esc(latestDate)}` : ''}</em>
+          </span>
+          <span class="ach-mission-group-actions">
+            ${mission ? `<button type="button" class="ach-mission-group-btn" data-action="_achOpenMission" data-id="${_esc(mission.id)}">Mission</button>` : ''}
+            ${expanded
+              ? `<button type="button" class="ach-mission-group-btn" data-action="_achSetMissionFilter" data-mission-id="all">Retour</button>`
+              : `<button type="button" class="ach-mission-group-btn" data-action="_achSetMissionFilter" data-mission-id="${_esc(actionId)}">Isoler</button>`}
+            ${STATE.isAdmin && mission ? `<button type="button" class="ach-mission-group-btn is-primary" data-action="_achCreateForMission" data-mission-id="${_esc(mission.id)}">Ajouter</button>` : ''}
+          </span>
+        </div>
+        <div class="ach-mission-group-meta">
+          <span class="ach-mission-group-cats">
+            ${cats.map(({ cat, n }) => `<span style="--c:${cat.color};--c-glow:${cat.glow}">${cat.emoji} ${_esc(cat.label)} <b>${n}</b></span>`).join('')}
+          </span>
+          <span class="ach-mission-group-players">
+            ${contributors.length
+              ? contributors.map(({ char, count: n }) => characterAvatarHtml(char, {
+                tag: 'span',
+                className: 'ach-mission-group-avatar',
+                border: '1px solid rgba(126,176,255,.45)',
+                background: 'rgba(126,176,255,.12)',
+                color: '#7eb0ff',
+                title: `${char.nom || 'Personnage'} · ${n}`,
+              })).join('')
+              : '<small>Aucun contributeur renseigné</small>'}
+          </span>
+        </div>
+        <div class="ach-mission-mini-list">
+          ${visibleItems.map(miniCard).join('')}
+          ${!expanded && group.items.length > 5 ? `<button type="button" class="ach-mission-more" data-action="_achSetMissionFilter" data-mission-id="${_esc(actionId)}">+${group.items.length - 5}<span>voir tout</span></button>` : ''}
+        </div>
+      </article>`;
+    }).join('')}
+  </div>`;
+}
+
 // ── Barre additionnelle : chips par perso + sens timeline ────────────────────
 function _achRenderControlsExtras() {
   // On l'injecte au-dessus de #ach-content, à l'intérieur de .hall-content
@@ -1159,18 +1401,23 @@ function _achRenderControlsExtras() {
       : 'Tous les joueurs';
   const totalLabel = `${visible.length} haut${visible.length > 1 ? 's' : ''}-fait${visible.length > 1 ? 's' : ''}`;
   const activeCount = visible.filter(item => _achMatchesCharSelection(item, selectedIds)).length;
-  const missionFilter = STORE.missionFilter || 'all';
+  let missionFilter = STORE.missionFilter || 'all';
+  if (missionFilter !== 'all' && missionFilter !== '__none' && !(STORE.missions || []).some(m => m.id === missionFilter)) {
+    STORE.missionFilter = '__none';
+    missionFilter = '__none';
+  }
   const missionBase = visible
     .filter(item => (STORE.filter || 'all') === 'all' || (item.categorie || _achDefaultCategoryId()) === STORE.filter)
     .filter(item => !selectedIds.length || _achMatchesCharSelection(item, selectedIds))
     .filter(item => {
       const s = _normalize(STORE.search || '');
-      return !s || _normalize(item.titre || '').includes(s) || _normalize(item.description || '').includes(s);
+      return !s || _achSearchHaystack(item).includes(s);
     });
   const missionCounts = new Map();
+  const knownMissionIds = new Set((STORE.missions || []).map(m => m.id));
   let noMissionCount = 0;
   missionBase.forEach(item => {
-    if (item.missionId) missionCounts.set(item.missionId, (missionCounts.get(item.missionId) || 0) + 1);
+    if (item.missionId && knownMissionIds.has(item.missionId)) missionCounts.set(item.missionId, (missionCounts.get(item.missionId) || 0) + 1);
     else noMissionCount += 1;
   });
   const missionOptions = (STORE.missions || [])
@@ -1192,6 +1439,7 @@ function _achRenderControlsExtras() {
         <span>Filtre mission</span>
         <strong>${_esc(missionLabel)}</strong>
         <em>${missionActiveCount}</em>
+        ${missionFilter !== 'all' ? `<button type="button" class="ach-mission-clear" data-action="_achSetMissionFilter" data-mission-id="all" title="Revoir toutes les missions">×</button>` : ''}
       </div>
       <details class="ach-mission-picker">
         <summary class="ach-mission-summary">
@@ -1316,9 +1564,18 @@ function _achRenderControlsExtras() {
       title="Inverser le sens de la chronologie">
       ${desc ? '↓ Plus récent en haut' : '↑ Plus ancien en haut'}
     </button>` : '';
+  const hasActiveFilters = (STORE.filter || 'all') !== 'all' ||
+    missionFilter !== 'all' ||
+    selectedIds.length > 0 ||
+    !!(STORE.search || '').trim();
+  const resetBtn = hasActiveFilters ? `
+    <button class="ach-reset-filters" type="button" data-action="_achResetFilters" title="Réinitialiser tous les filtres">
+      Réinitialiser
+    </button>` : '';
+  const actionsHtml = (resetBtn || sortBtn) ? `<div class="ach-extra-actions">${resetBtn}${sortBtn}</div>` : '';
 
-  bar.innerHTML = missionFilterHtml + charChips + sortBtn;
-  bar.style.display = (missionFilterHtml || charChips || sortBtn) ? 'grid' : 'none';
+  bar.innerHTML = missionFilterHtml + charChips + actionsHtml;
+  bar.style.display = (missionFilterHtml || charChips || actionsHtml) ? 'grid' : 'none';
 }
 
 // ── Rendu du contenu (filtre + vue) ──────────────────────────────────────────
@@ -1330,7 +1587,11 @@ async function _achRenderContent() {
 
   const all        = STORE.items || [];
   const filter     = STORE.filter || 'all';
-  const missionFilter = STORE.missionFilter || 'all';
+  let missionFilter = STORE.missionFilter || 'all';
+  if (missionFilter !== 'all' && missionFilter !== '__none' && !(STORE.missions || []).some(m => m.id === missionFilter)) {
+    STORE.missionFilter = '__none';
+    missionFilter = '__none';
+  }
   const selectedCharIds = _achSelectedCharIds();
   const search     = _normalize(STORE.search || '');   // minuscules + sans accents
   const isAdmin    = STATE.isAdmin;
@@ -1340,21 +1601,22 @@ async function _achRenderContent() {
   // 2. Filtre catégorie
   if (filter !== 'all') filtered = filtered.filter(a => (a.categorie || _achDefaultCategoryId()) === filter);
   if (missionFilter !== 'all') {
-    filtered = filtered.filter(a => missionFilter === '__none' ? !a.missionId : a.missionId === missionFilter);
+    const knownMissionIds = new Set((STORE.missions || []).map(m => m.id));
+    filtered = filtered.filter(a => missionFilter === '__none'
+      ? !a.missionId || !knownMissionIds.has(a.missionId)
+      : a.missionId === missionFilter);
   }
   // 3. Filtre par perso contributeur
   if (selectedCharIds.length) filtered = filtered.filter(a => _achMatchesCharSelection(a, selectedCharIds));
   // 4. Recherche
   if (search) {
-    filtered = filtered.filter(a =>
-      _normalize(a.titre || '').includes(search) ||
-      _normalize(a.description || '').includes(search)
-    );
+    filtered = filtered.filter(a => _achSearchHaystack(a).includes(search));
   }
 
   // Map lightbox (limitée aussi pour les joueurs : pas d'ouverture d'un HF secret)
   const visibleForLightbox = isAdmin ? all : all.filter(a => !a.secret);
   STORE.lightboxItems = Object.fromEntries(visibleForLightbox.map(a => [a.id, a]));
+  const missionContextHtml = _achMissionContextHtml(missionFilter, filtered.length);
 
   if (!filtered.length) {
     const catDef = ACH_CATS.find(c => c.id === filter);
@@ -1375,6 +1637,7 @@ async function _achRenderContent() {
     else if (missionName) { title = 'Aucun haut-fait'; sub = `pour « ${_esc(missionName)} »`; }
     else if (charName) { title = `Aucun haut-fait`; sub = `pour « ${_esc(charName)} »`; }
     contentEl.innerHTML = `
+      ${missionContextHtml}
       <div class="hall-empty">
         <div class="hall-empty-icon">${catDef?.emoji || '🏆'}</div>
         <div class="hall-empty-title">${title}</div>
@@ -1385,7 +1648,13 @@ async function _achRenderContent() {
   }
 
   if ((STORE.view || 'galerie') === 'timeline') {
-    contentEl.innerHTML = _renderTimeline(filtered);
+    contentEl.innerHTML = missionContextHtml + _renderTimeline(filtered);
+    return;
+  }
+
+  if ((STORE.view || 'galerie') === 'missions') {
+    contentEl.innerHTML = _renderMissionGroups(filtered);
+    setupAchievementsDnd(null);
     return;
   }
 
@@ -1395,7 +1664,7 @@ async function _achRenderContent() {
   const galleryEl = document.createElement('div');
   galleryEl.id        = 'ach-gallery';
   galleryEl.className = 'ach-justified';
-  contentEl.innerHTML = '';
+  contentEl.innerHTML = missionContextHtml;
   contentEl.appendChild(galleryEl);
 
   await _achRenderJustified(filter, filtered, galleryEl);
@@ -1404,29 +1673,46 @@ async function _achRenderContent() {
 }
 
 // ── Actions état (appelées depuis les boutons HTML) ───────────────────────────
+function _achRenderContentPreserveViewport() {
+  const anchor = document.getElementById('ach-content') || document.querySelector('.hall-content');
+  const beforeTop = anchor?.getBoundingClientRect?.().top;
+  const rendered = _achRenderContent();
+  Promise.resolve(rendered).finally(() => {
+    if (typeof beforeTop !== 'number') return;
+    const schedule = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb) => setTimeout(cb, 0);
+    schedule(() => {
+      if (!anchor?.isConnected) return;
+      const afterTop = anchor.getBoundingClientRect().top;
+      const delta = afterTop - beforeTop;
+      if (Math.abs(delta) > 1 && typeof window !== 'undefined') window.scrollBy(0, delta);
+    });
+  });
+  return rendered;
+}
+
 function _achSetFilter(filter) {
   STORE.filter = filter;
   document.querySelectorAll('.hall-filter-card').forEach(el => {
     el.classList.toggle('active', el.dataset.filter === filter);
   });
-  _achRenderContent();
+  _achRenderContentPreserveViewport();
 };
 function _achSetView(view) {
   STORE.view = view;
-  document.querySelectorAll('.view-tab').forEach((btn, i) => {
-    btn.classList.toggle('active', i === (view === 'timeline' ? 1 : 0));
+  document.querySelectorAll('.view-tab').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.val === view);
   });
-  _achRenderContent();
+  _achRenderContentPreserveViewport();
 };
 function _achSetMissionFilter(missionId) {
   STORE.missionFilter = missionId || 'all';
-  _achRenderContent();
+  _achRenderContentPreserveViewport();
 }
 let _achSearchTimer = null;
 function _achSetSearch(val) {
   STORE.search = val;
   clearTimeout(_achSearchTimer);
-  _achSearchTimer = setTimeout(_achRenderContent, 240);
+  _achSearchTimer = setTimeout(_achRenderContentPreserveViewport, 240);
 };
 function _achSetCharFilter(charId) {
   STORE.charPickerOpen = true;
@@ -1434,7 +1720,7 @@ function _achSetCharFilter(charId) {
   document.querySelectorAll('.ach-player-option').forEach(el => {
     el.classList.toggle('active', el.dataset.charid === STORE.charFilter);
   });
-  _achRenderContent();
+  _achRenderContentPreserveViewport();
 };
 function _achToggleCharFilter(charId) {
   if (!charId || charId === 'all') return _achClearCharFilters();
@@ -1445,24 +1731,68 @@ function _achToggleCharFilter(charId) {
   document.querySelectorAll('.ach-player-option').forEach(el => {
     el.classList.toggle('active', selected.has(el.dataset.charid));
   });
-  _achRenderContent();
+  _achRenderContentPreserveViewport();
 };
 function _achClearCharFilters() {
   STORE.charPickerOpen = true;
   _achSetSelectedCharIds([]);
-  _achRenderContent();
+  _achRenderContentPreserveViewport();
 };
 function _achSetCharMatchMode(mode) {
   STORE.charPickerOpen = true;
   STORE.charMatchMode = mode === 'shared' ? 'shared' : 'any';
-  _achRenderContent();
+  _achRenderContentPreserveViewport();
 };
 function _achToggleTimelineDir() {
   STORE.timelineDesc = !STORE.timelineDesc;
-  _achRenderContent();
+  _achRenderContentPreserveViewport();
+};
+function _achResetFilters() {
+  STORE.filter = 'all';
+  STORE.missionFilter = 'all';
+  STORE.search = '';
+  STORE.charPickerOpen = false;
+  _achSetSelectedCharIds([]);
+  document.querySelectorAll('.hall-filter-card').forEach(el => {
+    el.classList.toggle('active', el.dataset.filter === 'all');
+  });
+  const searchInput = document.getElementById('ach-search-input');
+  if (searchInput) searchInput.value = '';
+  _achRenderContentPreserveViewport();
+};
+function _achFocusMissionGroup(missionId) {
+  if (!missionId) return;
+  document.getElementById('ach-lightbox')?.remove();
+  STORE.missionFilter = missionId;
+  STORE.view = 'missions';
+  document.querySelectorAll('.view-tab').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.val === 'missions');
+  });
+  _achRenderContentPreserveViewport();
+};
+function _achCreateForMission(missionId) {
+  if (!STATE.isAdmin || !missionId) return;
+  document.getElementById('ach-lightbox')?.remove();
+  openAchievementModal(null, { missionId });
+};
+function _achEditFromLightbox(itemId) {
+  if (!STATE.isAdmin || !itemId) return;
+  document.getElementById('ach-lightbox')?.remove();
+  editAchievement(itemId);
+};
+function _achDeleteFromLightbox(itemId) {
+  if (!STATE.isAdmin || !itemId) return;
+  document.getElementById('ach-lightbox')?.remove();
+  deleteAchievement(itemId);
 };
 
 // ── LIGHTBOX ENRICHIE ─────────────────────────────────────────────────────────
+function _achClearLightboxKeyHandler() {
+  if (!_achLightboxKeyHandler) return;
+  document.removeEventListener('keydown', _achLightboxKeyHandler);
+  _achLightboxKeyHandler = null;
+}
+
 function _achOpenLightbox(itemId) {
   const item = (STORE.lightboxItems || {})[itemId] || (STORE.items || []).find(a => a.id === itemId);
   if (!item) return;
@@ -1470,9 +1800,14 @@ function _achOpenLightbox(itemId) {
   const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
   const chars     = sortCharactersForDisplay(STATE.characters || []);
   const contribs  = (item.contributeurs || []).map(id => chars.find(c => c.id === id)).filter(Boolean);
+  const navItems = _achFilteredItemsForCurrentState({ ordered: true });
+  const navIndex = navItems.findIndex(a => a.id === item.id);
+  const prevItem = navIndex > 0 ? navItems[navIndex - 1] : null;
+  const nextItem = navIndex >= 0 && navIndex < navItems.length - 1 ? navItems[navIndex + 1] : null;
 
   const existing = document.getElementById('ach-lightbox');
   if (existing) existing.remove();
+  _achClearLightboxKeyHandler();
 
   const contribsHtml = contribs.length ? `
     <div class="ach-lb-contribs">
@@ -1488,6 +1823,10 @@ function _achOpenLightbox(itemId) {
   const dateDisplay = _formatDateFr(item.date);
   const secretHtml = STATE.isAdmin && item.secret ? `<span class="ach-lb-pill ach-lb-pill--secret">Secret MJ</span>` : '';
   const mission = _missionFor(item);
+  const adminTools = STATE.isAdmin ? `<div class="ach-lb-admin">
+    <button type="button" data-action="_achEditFromLightbox" data-id="${_esc(item.id)}">Modifier</button>
+    <button type="button" class="is-danger" data-action="_achDeleteFromLightbox" data-id="${_esc(item.id)}">Supprimer</button>
+  </div>` : '';
   const overlay = document.createElement('div');
   overlay.id = 'ach-lightbox';
   overlay.className = 'ach-lightbox-rich';
@@ -1509,17 +1848,39 @@ function _achOpenLightbox(itemId) {
         ${item.description ? `<div class="ach-lb-desc">${_esc(item.description)}</div>` : ''}
         ${_achLightboxContextHtml(item)}
         ${contribsHtml || '<div class="ach-lb-muted">Aucun contributeur renseigné.</div>'}
+        ${adminTools}
       </aside>
     </div>
+    ${prevItem ? `<button class="ach-lb-nav ach-lb-nav--prev" type="button" data-action="_achOpenLightbox" data-id="${_esc(prevItem.id)}" data-stop-propagation title="${_esc(prevItem.titre || 'Haut-fait precedent')}">&lsaquo;</button>` : ''}
+    ${nextItem ? `<button class="ach-lb-nav ach-lb-nav--next" type="button" data-action="_achOpenLightbox" data-id="${_esc(nextItem.id)}" data-stop-propagation title="${_esc(nextItem.titre || 'Haut-fait suivant')}">&rsaquo;</button>` : ''}
+    ${navItems.length > 1 && navIndex >= 0 ? `<div class="ach-lb-progress">${navIndex + 1}<span>/</span>${navItems.length}</div>` : ''}
     <button class="ach-lb-close" type="button">x</button>
   `;
 
-  const close = () => { overlay.style.opacity = '0'; setTimeout(() => overlay.remove(), 160); };
+  const close = () => {
+    _achClearLightboxKeyHandler();
+    overlay.style.opacity = '0';
+    setTimeout(() => overlay.remove(), 160);
+  };
   overlay.addEventListener('click', close);
   overlay.querySelector('.ach-lb-frame')?.addEventListener('click', e => e.stopPropagation());
   overlay.querySelector('.ach-lb-close').addEventListener('click', e => { e.stopPropagation(); close(); });
-  const onKey = e => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
-  document.addEventListener('keydown', onKey);
+  overlay.querySelectorAll('.ach-lb-nav').forEach(btn => btn.addEventListener('click', e => {
+    e.stopPropagation();
+    _achOpenLightbox(btn.dataset.id);
+  }));
+  _achLightboxKeyHandler = (e) => {
+    if (e.key === 'Escape') return close();
+    if (e.key === 'ArrowLeft' && prevItem) {
+      e.preventDefault();
+      _achOpenLightbox(prevItem.id);
+    }
+    if (e.key === 'ArrowRight' && nextItem) {
+      e.preventDefault();
+      _achOpenLightbox(nextItem.id);
+    }
+  };
+  document.addEventListener('keydown', _achLightboxKeyHandler);
   document.body.appendChild(overlay);
 }
 
@@ -1705,6 +2066,11 @@ registerActions({
   _achClearCharFilters:  ()    => _achClearCharFilters(),
   _achSetCharMatchMode:  (btn) => _achSetCharMatchMode(btn.dataset.mode),
   _achToggleTimelineDir: ()    => _achToggleTimelineDir(),
+  _achResetFilters:      ()    => _achResetFilters(),
+  _achFocusMissionGroup: (btn) => _achFocusMissionGroup(btn.dataset.missionId),
+  _achCreateForMission:  (btn) => _achCreateForMission(btn.dataset.missionId),
+  _achEditFromLightbox:  (btn) => _achEditFromLightbox(btn.dataset.id),
+  _achDeleteFromLightbox:(btn) => _achDeleteFromLightbox(btn.dataset.id),
   _achOpenMission:       (btn) => _achOpenMission(btn.dataset.id),
   _achCatClose:          ()    => closeModal(),
   _achCatField:          (el)  => {
