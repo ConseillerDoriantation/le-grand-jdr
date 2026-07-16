@@ -2941,6 +2941,24 @@
 }
 
 /* ── Récit ──────────────────────────────────────────────────────────── */
+.mv-section-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.mv-section-actions .btn {
+  min-height: 30px;
+  padding: 5px 10px;
+  font-family: var(--font-ui);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
 .mv-recit {
   font-family: 'Outfit', 'Inter', sans-serif;
   font-size: 0.92rem;
@@ -3386,5 +3404,14 @@
   .mv-hero { height: 190px; }
   .mv-stat-num { font-size: 1.1rem; }
   .mv-stat-lbl { font-size: 0.56rem; }
+  .mv-section-title {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .mv-section-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
   .mv-liens { grid-template-columns: 1fr; }
 }

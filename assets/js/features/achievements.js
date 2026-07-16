@@ -14,7 +14,7 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc } from '../shared/html.js';
 import { STATE } from '../core/state.js';
-import { _ensureFeatureCss } from '../core/navigation.js';
+import { _ensureFeatureCss, navigate } from '../core/navigation.js';
 import { attachDropAndResize } from '../shared/image-crop.js';
 import { sortCharactersForDisplay } from '../shared/char-stats.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
@@ -278,6 +278,22 @@ async function _achOpenMission(id) {
 }
 
 // ── MODAL PRINCIPAL ──────────────────────────────────────────────────────────
+export async function createAchievementForMission(missionId) {
+  if (!STATE.isAdmin || !missionId) return;
+  if (!STORE.missions?.length) {
+    STORE.missions = await loadCollection('story').catch(() => []);
+  }
+  await _loadAchievementCategories();
+  openAchievementModal(null, { missionId });
+}
+
+export async function openAchievementsForMission(missionId, view = 'galerie') {
+  STORE.missionFilter = missionId || 'all';
+  STORE.view = ['galerie', 'timeline', 'missions'].includes(view) ? view : 'galerie';
+  STORE.search = '';
+  await navigate('achievements');
+}
+
 export function openAchievementModal(id = null, preset = {}) {
   const ex = id ? (STORE.items || []).find(a => a.id === id) : null;
   // Éléments de Trame liables : missions ET événements
