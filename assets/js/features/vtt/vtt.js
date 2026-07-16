@@ -40,6 +40,7 @@ import { openModal, closeModalDirect, confirmModal, updateModalContent, promptMo
 import { _esc, _norm, _searchIncludes, appSplashHtml, loadingHtml, normalizeImageUrl } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
+import { hasAdventurePremiumAccess } from '../../shared/premium.js';
 import PAGES from '../pages.js';
 import { VS, aid } from './vtt-state.js';
 import {
@@ -7931,7 +7932,17 @@ function _vttToggleMapMode() { return _setMapMode(!VS.mapMode); }
 // ═══════════════════════════════════════════════════════════════════
 // ACTIONS GLOBALES
 // ═══════════════════════════════════════════════════════════════════
-function _vttTool(t) { return _setTool(VS.tool === t ? 'select' : t); }
+function _vttAdvancedPremium() { return hasAdventurePremiumAccess(STATE.adventure); }
+function _vttPremiumInfo() {
+  showNotif('VTT avancé Premium : brouillard de guerre, murs et éclairage dynamique.', 'info');
+}
+function _vttTool(t) {
+  if (t === 'walls' && !_vttAdvancedPremium()) {
+    _vttPremiumInfo();
+    return _setTool('select');
+  }
+  return _setTool(VS.tool === t ? 'select' : t);
+}
 // ── Courir : double le mouvement de base pour ce tour ───────────────
 async function _vttCourir(id) {
   const tok = VS.tokens[id]?.data;
@@ -7956,15 +7967,17 @@ async function _moveSelectedBy(dc, dr) {
   fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
 }
 
-function _vttFogTool(t) { return fogSetEditTool(t, VS.activePage); }
-function _vttFogUndo() { if (!fogUndo()) showNotif('Rien à annuler', 'info'); }
-function _vttFogRedo() { if (!fogRedo()) showNotif('Rien à rétablir', 'info'); }
+function _vttFogTool(t) { if (!_vttAdvancedPremium()) return _vttPremiumInfo(); return fogSetEditTool(t, VS.activePage); }
+function _vttFogUndo() { if (!_vttAdvancedPremium()) return _vttPremiumInfo(); if (!fogUndo()) showNotif('Rien à annuler', 'info'); }
+function _vttFogRedo() { if (!_vttAdvancedPremium()) return _vttPremiumInfo(); if (!fogRedo()) showNotif('Rien à rétablir', 'info'); }
 async function _vttToggleFog() {
+  if (!_vttAdvancedPremium()) return _vttPremiumInfo();
   if (!VS.activePage) return;
   const next = !VS.activePage.fogEnabled;
   await updateDoc(_pgRef(VS.activePage.id), { fogEnabled: next }).catch(() => showNotif('Erreur fog','error'));
 }
 async function _vttFogClearOps() {
+  if (!_vttAdvancedPremium()) return _vttPremiumInfo();
   if (!VS.activePage) return;
   const n = (VS.activePage.fogOps || []).length;
   if (!n) { showNotif('Aucune zone de brouillard sur cette page', 'info'); return; }
@@ -8082,6 +8095,7 @@ const _PG_PRESETS = [
   { lb:'Vaste',   c:48, r:36 },
 ];
 function _pgModalBody(pfx, { name='', folder='', cols=24, rows=18, fog=null } = {}) {
+  const canUseAdvancedVtt = _vttAdvancedPremium();
   const presets = _PG_PRESETS.map(p =>
     `<button type="button" class="vtt-pgm-preset" data-vtt-fn="_vttPgPreset" data-vtt-args="${pfx}|${p.c}|${p.r}">${p.lb}<small>${p.c}×${p.r}</small></button>`
   ).join('');
@@ -8106,11 +8120,15 @@ function _pgModalBody(pfx, { name='', folder='', cols=24, rows=18, fog=null } = 
           <div><input id="${pfx}rows" type="number" value="${rows}" min="8" max="200"><span>lignes</span></div>
         </div>
       </div>
-      ${fog !== null ? `
+      ${fog !== null && canUseAdvancedVtt ? `
       <label class="vtt-pgm-check">
         <input type="checkbox" id="${pfx}fog" ${fog?'checked':''}>
         <span>👁 Éclairage dynamique (brouillard de guerre)</span>
-      </label>` : ''}
+      </label>` : (fog !== null ? `
+      <div class="vtt-pgm-check is-premium-locked">
+        <span>👁 Éclairage dynamique</span>
+        <small>Premium requis</small>
+      </div>` : '')}
     </div>`;
 }
 function _vttPgPreset(pfx, c, r) {
@@ -8164,7 +8182,9 @@ async function _vttConfirmEditPage(id) {
   const cols=Math.max(8,Math.min(200,parseInt(document.getElementById('vpe-cols')?.value)||24));
   const rows=Math.max(8,Math.min(200,parseInt(document.getElementById('vpe-rows')?.value)||18));
   if (!name) { showNotif('Nom requis','error'); return; }
-  const fogEnabled = document.getElementById('vpe-fog')?.checked ?? false;
+  const fogEnabled = _vttAdvancedPremium()
+    ? (document.getElementById('vpe-fog')?.checked ?? false)
+    : !!VS.pages[id]?.fogEnabled;
   closeModalDirect();
   await updateDoc(_pgRef(id),{name,folder,cols,rows,fogEnabled}).catch(()=>showNotif('Erreur','error'));
   if (VS.activePage?.id===id) { VS.activePage={...VS.activePage,name,folder,cols,rows,fogEnabled}; _drawGrid(); }
@@ -9698,7 +9718,9 @@ async function _vttMountTable(content) {
       <button class="vtt-tool active" data-tool="select" data-vtt-fn="_vttTool" data-vtt-args="select" title="↖ Sélection">↖</button>
       <button class="vtt-tool" data-tool="ruler"  data-vtt-fn="_vttTool" data-vtt-args="ruler"  title="📏 Règle (R) — clic gauche pour mesurer · clic droit pour annuler">📏</button>
       <button class="vtt-tool" data-tool="draw"   data-vtt-fn="_vttTool" data-vtt-args="draw"   title="✏️ Dessin">✏️</button>
-      ${STATE.isAdmin?`<button class="vtt-tool" data-tool="walls" data-vtt-fn="_vttTool" data-vtt-args="walls" title="🧱 Murs / Éclairage dynamique">🧱</button>`:''}
+      ${STATE.isAdmin ? (_vttAdvancedPremium()
+        ? `<button class="vtt-tool" data-tool="walls" data-vtt-fn="_vttTool" data-vtt-args="walls" title="🧱 Murs / Éclairage dynamique">🧱</button>`
+        : `<button class="vtt-tool vtt-tool-premium" data-vtt-fn="_vttPremiumInfo" title="Premium : murs, brouillard et éclairage dynamique">🧱</button>`) : ''}
     </div>
     <div id="vtt-draw-bar" class="vtt-draw-bar" style="display:none">
       <div class="vtt-draw-row">
@@ -9944,6 +9966,7 @@ export const VTT_ACTIONS = {
   _vttConfirmAddPage,
   _vttConfirmCreateEnemy,
   _vttConfirmEditPage,
+  _vttPremiumInfo,
   _vttCourir,
   _vttCourirAndClose,
   _vttCreatSendLootToStash,

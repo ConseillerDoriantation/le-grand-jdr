@@ -300,6 +300,44 @@
 }
 .adv-feat-toggle.is-on .adv-feat-switch { background: var(--gold); }
 .adv-feat-toggle.is-on .adv-feat-switch::after { transform: translateX(13px); background: #1a1205; }
+.adv-feat-toggle.is-premium-locked {
+  cursor: not-allowed;
+  opacity: .72;
+}
+.adv-feat-toggle.is-premium-locked .adv-feat-switch {
+  background: rgba(255,255,255,.08);
+}
+.adv-feat-toggle.is-premium-locked .adv-feat-switch::after {
+  background: rgba(255,255,255,.35);
+}
+.adv-feat-plan {
+  flex-shrink: 0;
+  padding: .12rem .38rem;
+  border: 1px solid rgba(232,184,75,.30);
+  border-radius: 999px;
+  background: rgba(232,184,75,.10);
+  color: var(--gold);
+  font-size: .56rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.adv-primary-action.is-premium-locked,
+.adv-secondary-action.is-premium-locked,
+.adv-card-action.is-premium-locked {
+  border-color: rgba(232, 184, 75, .36);
+  background: linear-gradient(135deg, rgba(232, 184, 75, .13), rgba(30, 38, 58, .74));
+  color: #f2cf7a;
+  box-shadow: none;
+}
+
+.adv-primary-action.is-premium-locked:hover,
+.adv-secondary-action.is-premium-locked:hover,
+.adv-card-action.is-premium-locked:hover {
+  border-color: rgba(232, 184, 75, .55);
+  transform: none;
+}
 
 .adv-badge-active {
   font-size: .72rem;

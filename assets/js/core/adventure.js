@@ -38,6 +38,7 @@ import { invalidateSpellSystemCache, loadSpellSystem } from '../shared/spell-sys
 import { invalidateShopPickerCache } from '../shared/shop-picker.js';
 import { clearConditionLibraryCache } from '../shared/conditions.js';
 import { invalidateRaritiesCache, loadRarities } from '../shared/rarity.js';
+import { hasPremiumAccess } from '../shared/premium.js';
 
 function _invalidateScopedCaches() {
   invalidateDamageTypesCache();
@@ -338,18 +339,33 @@ export async function repairCurrentUserAdventureLinks(adventures = []) {
 }
 
 export async function selectAdventure(adv) {
-  setAdventure(adv);
+  const uid = STATE.user?.uid;
+  let selected = adv;
+  if (uid && adv?.createdBy === uid && hasPremiumAccess() && adv.premiumAccess !== true) {
+    selected = {
+      ...adv,
+      premiumAccess: true,
+      premiumOwnerUid: uid,
+      premiumGrantedAt: new Date().toISOString(),
+    };
+    updateDoc(doc(db, 'adventures', adv.id), {
+      premiumAccess: true,
+      premiumOwnerUid: uid,
+      premiumGrantedAt: selected.premiumGrantedAt,
+    }).catch(e => console.warn('[adventure] premium sync ignored', e?.code || e));
+  }
+
+  setAdventure(selected);
   // `setCurrentAdventure` tear-down les listeners session de l'aventure
   // précédente avant de changer de scope.
-  setCurrentAdventure(adv.id);
+  setCurrentAdventure(selected.id);
 
   // Vider les caches « défauts MJ » de l'aventure précédente (sinon ses types de
   // dégâts / formats d'arme / etc. restent affichés dans la nouvelle aventure).
   _invalidateScopedCaches();
 
   // isAdmin : vrai si admin global (profile.isAdmin) OU admin de cette aventure
-  const uid = STATE.user?.uid;
-  const isAdvAdmin = Array.isArray(adv.admins) && adv.admins.includes(uid);
+  const isAdvAdmin = Array.isArray(selected.admins) && selected.admins.includes(uid);
   setAdmin(STATE.isSuperAdmin || isAdvAdmin);
 
   // Raretés scopées par aventure : valeurs standards par défaut, personnalisation
@@ -383,7 +399,7 @@ export async function selectAdventure(adv) {
   primeSessionData();
 
   // Heartbeat de présence pour cette aventure
-  if (uid) startPresence(adv.id, uid);
+  if (uid) startPresence(selected.id, uid);
 
   // Chat flottant de l'aventure (bulle en bas à droite, sur toutes les pages)
   if (uid) initChat(uid);
@@ -397,6 +413,7 @@ export async function createAdventure({ nom, emoji = '⚔️', description = '' 
   if (!uid) throw new Error('Non connecté');
 
   const id  = 'adv_' + Date.now();
+  const premiumAccess = hasPremiumAccess();
   const adv = {
     nom,
     emoji,
@@ -413,6 +430,11 @@ export async function createAdventure({ nom, emoji = '⚔️', description = '' 
     memberProfiles: { [uid]: _selfProfile() },
     // Fonctionnalités actives par défaut (le MJ ajuste ensuite via Gérer).
     enabledFeatures: [...DEFAULT_ENABLED],
+    premiumAccess,
+    ...(premiumAccess ? {
+      premiumOwnerUid: uid,
+      premiumGrantedAt: new Date().toISOString(),
+    } : {}),
     status:     'active',
   };
 
@@ -761,9 +783,15 @@ export async function setAdventureFeatures(adventureId, keys) {
   }
 
   const enabledFeatures = _uniq(keys);
-  await updateDoc(ref, { enabledFeatures });
+  const update = { enabledFeatures };
+  if (hasPremiumAccess()) {
+    update.premiumAccess = true;
+    update.premiumOwnerUid = uid;
+    update.premiumGrantedAt = new Date().toISOString();
+  }
+  await updateDoc(ref, update);
   if (STATE.adventure?.id === adventureId) {
-    setAdventure({ ...STATE.adventure, enabledFeatures });
+    setAdventure({ ...STATE.adventure, ...update });
   }
   return enabledFeatures;
 }

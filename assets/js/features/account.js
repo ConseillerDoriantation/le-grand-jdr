@@ -27,6 +27,7 @@ import { registerActions }        from '../core/actions.js';
 import { _esc, _norm }           from '../shared/html.js';
 import { emptyStateHtml }        from '../shared/list-renderer.js';
 import { calcOr }                from '../shared/char-stats.js';
+import { adminAdventureCount, hasPremiumAccess, planLabel, planLimits } from '../shared/premium.js';
 
 import { getCharacterById } from '../shared/character-state.js';
 // ══════════════════════════════════════════════════════════════════════════════
@@ -153,6 +154,12 @@ async function renderAccount() {
   const adventuresCount = Array.isArray(STATE.adventures) ? STATE.adventures.length : 0;
   const roleLabel = STATE.isAdmin ? 'Maître de Jeu' : 'Joueur';
   const providerLabel = _accountProviderLabel(user);
+  const premium = hasPremiumAccess(profile);
+  const currentPlan = planLabel(profile);
+  const limits = planLimits(profile);
+  const adventureLimit = Number.isFinite(limits.maxAdminAdventures) ? limits.maxAdminAdventures : 'illimitées';
+  const myAdminAdventures = adminAdventureCount();
+  const planSource = STATE.isSuperAdmin ? 'Super-admin : Premium automatique' : (premium ? 'Compte premium actif' : 'Compte gratuit');
 
   content.innerHTML = `
   <div class="account-page">
@@ -167,6 +174,7 @@ async function renderAccount() {
         <p>${_esc(email || 'Email non renseigné')}</p>
         <div class="account-badges">
           <span>${STATE.isAdmin ? '🛡️' : '⚔️'} ${_esc(roleLabel)}</span>
+          <span class="${premium ? 'account-badge-premium' : ''}">${premium ? '✨' : '◇'} ${_esc(currentPlan)}</span>
           <span>${_esc(providerLabel)}</span>
         </div>
       </div>
@@ -193,9 +201,9 @@ async function renderAccount() {
         <small>${STATE.isAdmin ? 'gestion active' : 'accès joueur'}</small>
       </div>
       <div class="account-summary-card">
-        <span>Connexion</span>
-        <strong>${_esc(providerLabel)}</strong>
-        <small>sécurité du compte</small>
+        <span>Plan</span>
+        <strong>${_esc(currentPlan)}</strong>
+        <small>${premium ? 'pages bonus ouvertes' : 'socle gratuit'}</small>
       </div>
     </section>
 
@@ -225,6 +233,39 @@ async function renderAccount() {
                 <small>Utilisé dans la navigation et certains sélecteurs.</small>
               </div>
               <button class="acc-edit-btn" data-action="openAvatarPicker">Choisir</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="acc-section account-panel account-premium-panel ${premium ? 'is-premium' : 'is-free'}">
+          <div class="acc-section-header">
+            <span>${premium ? '✨' : '◇'}</span>
+            <div>
+              <div class="acc-section-title">Plan ${_esc(currentPlan)}</div>
+              <p>${_esc(planSource)}</p>
+            </div>
+          </div>
+          <div class="acc-section-body">
+            <div class="account-plan-grid">
+              <div class="account-plan-card ${premium ? 'is-on' : 'is-off'}">
+                <strong>Pages bonus</strong>
+                <small>${premium ? 'Boutique, Collection, Hauts-Faits, Carte, Guide, Joueurs, Bastion, Recettes, Statistiques.' : 'Réservées aux comptes Premium.'}</small>
+              </div>
+              <div class="account-plan-card">
+                <strong>Aventures MJ</strong>
+                <small>${myAdminAdventures}/${adventureLimit}</small>
+              </div>
+              <div class="account-plan-card">
+                <strong>Images</strong>
+                <small>${limits.imageStorageMb} Mo prévus</small>
+              </div>
+              <div class="account-plan-card">
+                <strong>Musiques</strong>
+                <small>${limits.musicStorageMb} Mo prévus</small>
+              </div>
+            </div>
+            <div class="account-plan-actions">
+              <button class="acc-edit-btn" data-action="openPremiumInfo">${premium ? 'Voir le statut' : 'Comprendre Premium'}</button>
             </div>
           </div>
         </section>
@@ -270,6 +311,7 @@ async function renderAccount() {
           <div class="acc-section-body">
             <div class="account-meta-line"><span>UID</span><code>${_esc(user.uid)}</code></div>
             <div class="account-meta-line"><span>Profil</span><strong>${_esc(roleLabel)}</strong></div>
+            <div class="account-meta-line"><span>Plan</span><strong>${_esc(currentPlan)}</strong></div>
             <div class="account-meta-line"><span>Connexion</span><strong>${_esc(providerLabel)}</strong></div>
           </div>
         </section>
@@ -305,6 +347,32 @@ async function renderAccount() {
 // users/{uid}.avatarIcon (doc global). ⚠️ nécessite (cf. docs/firestore-rules.md) :
 //  - la clé `avatarIcon` autorisée dans la règle isUserSelfUpdate ;
 //  - une règle lecture/écriture sur la collection globale `app_config`.
+function openPremiumInfo() {
+  const profile = STATE.profile || {};
+  const premium = hasPremiumAccess(profile);
+  const limits = planLimits(profile);
+  const adventureLimit = Number.isFinite(limits.maxAdminAdventures) ? limits.maxAdminAdventures : 'illimitées';
+  openModal(`${premium ? '✨' : '◇'} Compte ${planLabel(profile)}`, `
+    <div class="account-premium-modal">
+      <div class="account-premium-status ${premium ? 'is-premium' : 'is-free'}">
+        <strong>${premium ? 'Premium actif' : 'Compte gratuit'}</strong>
+        <span>${STATE.isSuperAdmin ? 'Le super-admin est Premium automatiquement.' : (premium ? 'Les pages bonus sont accessibles.' : 'Les pages bonus restent verrouillées.')}</span>
+      </div>
+      <div class="account-premium-list">
+        <div><b>Aventures MJ</b><span>${adventureLimit} aventure${adventureLimit === 1 ? '' : 's'} administrée${adventureLimit === 1 ? '' : 's'}.</span></div>
+        <div><b>Pages bonus</b><span>Boutique, Collection, Hauts-Faits, Carte, Guide, Joueurs, Bastion, Recettes et Statistiques.</span></div>
+        <div><b>VTT avancé</b><span>Brouillard de guerre, murs et éclairage dynamique.</span></div>
+        <div><b>Stockage images</b><span>${limits.imageStorageMb} Mo prévus pour ce plan.</span></div>
+        <div><b>Stockage musiques</b><span>${limits.musicStorageMb} Mo prévus pour ce plan.</span></div>
+      </div>
+      <p class="account-premium-note">
+        Le paiement réel n'est pas encore branché. Le plan peut être activé en base par un super-admin via les champs
+        <code>plan: "premium"</code>, <code>premium: true</code> ou <code>subscription.status: "active"</code>.
+      </p>
+    </div>
+  `, { subtitle: 'Statut du compte et futures limites de stockage', accent: premium ? '#e8b84b' : '#7fb2ff' });
+}
+
 const PROFILE_ICONS_DOC = 'profileIcons';
 let _iconCatalog = null; // cache session
 
@@ -796,6 +864,7 @@ registerActions({
   updateAvatarIcon:    (btn) => updateAvatarIcon(Number(btn.dataset.idx)),
   removeAvatarIcon:    (btn) => removeAvatarIcon(Number(btn.dataset.idx)),
   openEditPseudo:      () => openEditPseudo(),
+  openPremiumInfo:     () => openPremiumInfo(),
   openEditEmail:       () => openEditEmail(),
   openEditPassword:    () => openEditPassword(),
   openDeleteAccount:   () => openDeleteAccount(),
