@@ -255,6 +255,12 @@
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
 }
+.ag-quest-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .ag-quest-title {
   font-family: var(--font-display);
   font-size: 0.98rem;
@@ -265,6 +271,24 @@
   font-size: 0.7rem;
   font-weight: 600;
   color: var(--text-dim);
+}
+.ag-quest-manual {
+  flex: 0 0 auto;
+  border: 1px solid rgba(245, 190, 80, .32);
+  background: rgba(245, 190, 80, .09);
+  color: #ffd98a;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: .68rem;
+  font-weight: 850;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s, border-color .15s, transform .15s;
+}
+.ag-quest-manual:hover {
+  background: rgba(245, 190, 80, .15);
+  border-color: rgba(245, 190, 80, .55);
+  transform: translateY(-1px);
 }
 .ag-quest-empty {
   padding: 14px 4px;
@@ -438,7 +462,62 @@
 .ag-detail-emoji { font-size: 1.1rem; }
 .ag-detail-name { flex: 1; font-weight: 600; color: var(--text); }
 .ag-detail-state { font-size: 0.78rem; color: var(--text-muted); }
-
+.ag-manual {
+  display: grid;
+  gap: 14px;
+}
+.ag-manual-note {
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 190, 80, .22);
+  border-radius: var(--r-sm);
+  background: rgba(245, 190, 80, .06);
+  color: var(--text-muted);
+  font-size: .84rem;
+  line-height: 1.45;
+}
+.ag-manual-field {
+  display: grid;
+  gap: 6px;
+}
+.ag-manual-field > span,
+.ag-manual-members-title {
+  color: var(--text-muted);
+  font-size: .68rem;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.ag-manual-input {
+  width: 100%;
+  min-height: 42px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  padding: 0 12px;
+  font: inherit;
+  font-weight: 700;
+}
+.ag-manual-input:focus {
+  outline: none;
+  border-color: rgba(79, 140, 255, .55);
+  box-shadow: 0 0 0 3px rgba(79, 140, 255, .12);
+}
+.ag-manual-members {
+  display: grid;
+  gap: 8px;
+}
+.ag-manual-avatars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.ag-manual-empty {
+  color: var(--text-dim);
+  font-size: .82rem;
+  font-style: italic;
+}
 /* ════════════════════════════════════════════════════════════════════
    CALENDRIER PERSONNEL
 ═══════════════════════════════════════════════════════════════════ */
