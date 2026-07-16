@@ -9,6 +9,88 @@ function currentProfile() {
 function isAdmin() {
   return isLoggedIn() && currentProfile().isAdmin == true;
 }
+function isPremiumProfile(profile) {
+  return profile.get("isAdmin", false) == true ||
+         profile.get("premium", false) == true ||
+         profile.get("plan", "") == "premium" ||
+         (
+           profile.get("premiumUntil", null) is timestamp &&
+           profile.get("premiumUntil", request.time) > request.time
+         ) ||
+         profile.get("subscription", {}).get("status", "") in ["active", "trialing", "paid", "manual"];
+}
+function isCurrentUserPremium() {
+  return isLoggedIn() && isPremiumProfile(currentProfile());
+}
+function freeFeatureKeys() {
+  return ["characters", "story", "agenda", "bestiaire", "npcs", "vtt"];
+}
+function premiumFeatureKeys() {
+  return ["shop", "collection", "achievements", "map", "world", "players", "bastion", "recettes", "statistiques"];
+}
+function premiumAdventureFields() {
+  return ["premiumAccess", "premiumOwnerUid", "premiumGrantedAt", "plan"];
+}
+function vttAdvancedFields() {
+  return ["fogEnabled", "walls", "lightSources", "fogOps"];
+}
+function isPremiumAdventureData(data) {
+  return data.get("premiumAccess", false) == true ||
+         (
+           data.keys().hasAny(["createdBy"]) &&
+           exists(/databases/$(database)/documents/users/$(data.createdBy)) &&
+           isPremiumProfile(get(/databases/$(database)/documents/users/$(data.createdBy)).data)
+         );
+}
+function isPremiumAdventure(adventureId) {
+  return isPremiumAdventureData(get(/databases/$(database)/documents/adventures/$(adventureId)).data);
+}
+function adventureCreatePlanAllowed(data) {
+  return isAdmin() ||
+         (
+           data.get("premiumAccess", false) == false &&
+           !data.keys().hasAny(["premiumOwnerUid", "premiumGrantedAt", "plan"])
+         ) ||
+         (
+           isCurrentUserPremium() &&
+           data.get("premiumAccess", false) == true &&
+           data.get("premiumOwnerUid", "") == request.auth.uid
+         );
+}
+function adventureCreateFeaturesAllowed(data) {
+  return !data.keys().hasAny(["enabledFeatures"]) ||
+         data.enabledFeatures.hasOnly(freeFeatureKeys()) ||
+         isCurrentUserPremium();
+}
+function adventurePremiumFieldsUpdateAllowed(before, after) {
+  return !after.diff(before).affectedKeys().hasAny(premiumAdventureFields()) ||
+         isAdmin() ||
+         (
+           isCurrentUserPremium() &&
+           after.get("premiumAccess", false) == true &&
+           after.get("premiumOwnerUid", "") == request.auth.uid
+         );
+}
+function adventureFeatureUpdateAllowed(before, after) {
+  return !after.diff(before).affectedKeys().hasAny(["enabledFeatures"]) ||
+         !after.keys().hasAny(["enabledFeatures"]) ||
+         after.enabledFeatures.hasOnly(freeFeatureKeys()) ||
+         isPremiumAdventureData(before) ||
+         isPremiumAdventureData(after);
+}
+function adventureAdminUpdateAllowed(before, after) {
+  return isAdmin() ||
+         (
+           adventurePremiumFieldsUpdateAllowed(before, after) &&
+           adventureFeatureUpdateAllowed(before, after)
+         );
+}
+function premiumFeatureAllowed(adventureId) {
+  return inAdventure(adventureId) && isPremiumAdventure(adventureId);
+}
+function premiumFeatureWriteAllowed(adventureId) {
+  return isAdvAdmin(adventureId) && isPremiumAdventure(adventureId);
+}
 function hasEmailAccess(data) {
   return isLoggedIn() &&
          request.auth.token.email != null &&
@@ -338,8 +420,11 @@ match /adventures/{adventureId} {
                    (isLoggedIn() &&
                     request.resource.data.createdBy == request.auth.uid &&
                     request.resource.data.admins == [request.auth.uid] &&
-                    request.resource.data.accessList == [request.auth.uid]);
-  allow update: if isAdvAdmin(adventureId) ||
+                    request.resource.data.accessList == [request.auth.uid] &&
+                    adventureCreatePlanAllowed(request.resource.data) &&
+                    adventureCreateFeaturesAllowed(request.resource.data));
+  allow update: if (isAdvAdmin(adventureId) &&
+                    adventureAdminUpdateAllowed(resource.data, request.resource.data)) ||
                    isAccountSelfRepair(resource.data, request.resource.data) ||
                    isSameEmailSelfRelink(resource.data, request.resource.data) ||
                    isInviteAccept(resource.data, request.resource.data) ||
@@ -350,18 +435,19 @@ match /adventures/{adventureId} {
   // Boutique : MJ écrit tout, les joueurs peuvent uniquement mettre à jour `dispo`
   // (décrément à l'achat, incrément à la revente).
   match /shop/{id} {
-    allow read:   if inAdventure(adventureId);
-    allow write:  if isAdvAdmin(adventureId);
+    allow read:   if premiumFeatureAllowed(adventureId);
+    allow write:  if premiumFeatureWriteAllowed(adventureId);
     allow update: if inAdventure(adventureId)
+      && isPremiumAdventure(adventureId)
       && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['dispo']);
   }
-  match /shopCategories/{id}    { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+  match /shopCategories/{id}    { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
   match /story/{id}             { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /story_meta/{id}        { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /places/{id}            { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /organizations/{id}     { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /place_types/{id}       { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
-  match /map_lieux/{id}         { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+  match /map_lieux/{id}         { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
   match /npcs/{id} {
     allow read:  if inAdventure(adventureId);
     allow write: if isAdvAdmin(adventureId);
@@ -373,38 +459,38 @@ match /adventures/{adventureId} {
   }
   match /npc_affinites/{id}     { allow read, write: if inAdventure(adventureId); }
   match /settings/{id}          { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
-  match /achievements/{id}      { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
-  match /achievements_meta/{id} { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+  match /achievements/{id}      { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
+  match /achievements_meta/{id} { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
   // Hauts-faits SECRETS (prophéties / twists) : sous-collection MJ-only.
   // Sortis de `achievements` pour ne PAS être téléchargés par les joueurs
   // (Firestore ne masque pas un doc à la lecture → vrai secret serveur, plus
   // seulement filtré dans l'UI). Révéler = déplacer le doc vers `achievements`.
-  match /achievements_secret/{id} { allow read, write: if isAdvAdmin(adventureId); }
+  match /achievements_secret/{id} { allow read, write: if premiumFeatureWriteAllowed(adventureId); }
   match /bestiary/{id}          { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /bestiary_meta/{id}     { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /bestiary_tracker/{id}  { allow read, write: if inAdventure(adventureId); }
-  match /collection/{id}        { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
-  match /collectionSettings/{id}{ allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+  match /collection/{id}        { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
+  match /collectionSettings/{id}{ allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
   // Contenu SECRET des cartes (recto / nom / défi des cartes non révélées) :
   // sous-collection MJ-only. Le doc public `collection/{id}` ne contient que la
   // projection révélée (cf. _publicProjection dans collection.js) → les joueurs
   // ne téléchargent plus le contenu des cartes verrouillées ou masquées.
-  match /collection_secret/{id} { allow read, write: if isAdvAdmin(adventureId); }
+  match /collection_secret/{id} { allow read, write: if premiumFeatureWriteAllowed(adventureId); }
   // Présentations joueurs : lecture membres, écriture MJ ou propriétaire du personnage lié.
   match /players/{id} {
-    allow read:   if inAdventure(adventureId);
-    allow create: if canCreateAdventurePlayer(adventureId);
-    allow update: if canUpdateAdventurePlayer(adventureId);
-    allow delete: if canUpdateAdventurePlayer(adventureId);
+    allow read:   if premiumFeatureAllowed(adventureId);
+    allow create: if premiumFeatureWriteAllowed(adventureId) && canCreateAdventurePlayer(adventureId);
+    allow update: if premiumFeatureWriteAllowed(adventureId) && canUpdateAdventurePlayer(adventureId);
+    allow delete: if premiumFeatureWriteAllowed(adventureId) && canUpdateAdventurePlayer(adventureId);
   }
-  match /world/{id}             { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
-  match /informations/{id}      { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
-  match /tutorial/{id}          { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
-  match /recettes/{id}          { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
-  match /recipes/{id}           { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+  match /world/{id}             { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
+  match /informations/{id}      { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
+  match /tutorial/{id}          { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
+  match /recettes/{id}          { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
+  match /recipes/{id}           { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
   match /combat_styles/{id}     { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /order/{id}             { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
-  match /bastion/{id}           { allow read, write: if inAdventure(adventureId); }
+  match /bastion/{id}           { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
   match /story_histories/{id}   { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /agenda_session/{id}    { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /availabilities/{uid} {
@@ -470,15 +556,29 @@ match /adventures/{adventureId} {
   // Statistiques d'aventure (compteurs incrémentaux) : tous les membres
   // lisent et incrémentent (un joueur compte ses propres jets/attaques).
   match /stats/{id} {
-    allow read, write: if inAdventure(adventureId);
+    allow read, write: if premiumFeatureAllowed(adventureId);
   }
   // Pages (cartes) : lecture tous, écriture MJ
   // Exception : les joueurs peuvent mettre à jour le champ `walls` (ouvrir/fermer portes et fenêtres)
   match /vttPages/{id} {
     allow read:  if inAdventure(adventureId);
-    allow write: if isAdvAdmin(adventureId);
-    allow update: if inAdventure(adventureId)
-      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['walls']);
+    allow create: if isAdvAdmin(adventureId) &&
+      (
+        !request.resource.data.keys().hasAny(vttAdvancedFields()) ||
+        isPremiumAdventure(adventureId)
+      );
+    allow update: if (
+      isAdvAdmin(adventureId) &&
+      (
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(vttAdvancedFields()) ||
+        isPremiumAdventure(adventureId)
+      )
+    ) || (
+      inAdventure(adventureId)
+      && isPremiumAdventure(adventureId)
+      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['walls'])
+    );
+    allow delete: if isAdvAdmin(adventureId);
   }
   // Annotations (dessins) : tous créent, chacun modifie/supprime les siennes, MJ gère tout
   match /vttAnnotations/{id} {

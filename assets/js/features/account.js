@@ -367,7 +367,7 @@ function openPremiumInfo() {
       </div>
       <p class="account-premium-note">
         Le paiement réel n'est pas encore branché. Le plan peut être activé en base par un super-admin via les champs
-        <code>plan: "premium"</code>, <code>premium: true</code> ou <code>subscription.status: "active"</code>.
+        <code>plan: "premium"</code>, <code>premium: true</code>, <code>premiumUntil</code> Timestamp futur ou <code>subscription.status: "active"</code>.
       </p>
     </div>
   `, { subtitle: 'Statut du compte et futures limites de stockage', accent: premium ? '#e8b84b' : '#7fb2ff' });
