@@ -4612,15 +4612,36 @@ function _atkInteractionHtml(opt) {
   </div>`;
 }
 
-// Note "½ / dégâts complets même en cas d'échec" — dépend du type de dégâts (élément).
+// « Dégâts sur un raté » (½ / complets) : PAR DÉFAUT, aucune règle magie/physique
+// n'est supposée — le missEffect du type s'applique à TOUTE attaque (rien =
+// comportement D&D usuel : un raté ne fait rien tant que le MJ ne configure pas).
+// Le MJ PEUT restreindre par type via `missScope` s'il a une distinction dans son
+// système : 'magic' = seulement sort/arme magique, 'physical' = seulement physique.
+// C'est ainsi qu'un même « Combustion » peut se comporter différemment sans doublon
+// — mais c'est un CHOIX du MJ, jamais une règle imposée par l'app.
+function _isMagicDelivery(opt) {
+  return !!(opt && (opt.isMagicWeapon === true || opt.pmCost > 0));
+}
+function _effectiveMissEffect(opt) {
+  const rules = opt?.typeRules || {};
+  const me = rules.missEffect || 'none';
+  if (me === 'none') return 'none';
+  const scope = rules.missScope || 'always';
+  if (scope === 'magic')    return _isMagicDelivery(opt) ? me : 'none';
+  if (scope === 'physical') return _isMagicDelivery(opt) ? 'none' : me;
+  return me;   // 'always' (défaut)
+}
+
+// Note "½ / dégâts complets même en cas d'échec" — magique uniquement.
 function _atkMissNoteHtml(opt) {
-  if (opt?.typeRules?.missEffect === 'full') {
+  const me = _effectiveMissEffect(opt);
+  if (me === 'full') {
     return `<div style="display:flex;align-items:center;gap:.3rem;font-size:.65rem;color:#f97316;padding:.25rem .1rem 0">
       <span>✦</span><span>Dégâts complets même en cas d'échec</span></div>`;
   }
-  if (opt?.typeRules?.missEffect === 'half' || opt?.pmCost > 0) {
+  if (me === 'half' || opt?.pmCost > 0) {
     return `<div style="display:flex;align-items:center;gap:.3rem;font-size:.65rem;color:#b47fff;padding:.25rem .1rem 0">
-      <span>✦</span><span>½ dégâts garantis même en cas d'échec${opt?.typeRules?.missEffect !== 'half' && opt?.pmCost > 0 ? ' (mana consommé)' : ''}</span></div>`;
+      <span>✦</span><span>½ dégâts garantis même en cas d'échec${me !== 'half' && opt?.pmCost > 0 ? ' (mana consommé)' : ''}</span></div>`;
   }
   return '';
 }
@@ -6525,7 +6546,11 @@ async function _vttRollAttack() {
     const rules      = opt.typeRules || {};
     const armorPen   = rules.armorPen || 0;
     const typeDmgBon = rules.dmgBonus || 0;
-    let   missEffect = rules.missEffect || 'none';
+    // missEffect du type = mécanique MAGIQUE → ne s'applique qu'à une attaque
+    // magique (arme magique / sort). Physique = 'none', même si l'élément définit
+    // 'half'/'full' (cf. _effectiveMissEffect). armorPen/dmgBonus, eux, restent
+    // des propriétés d'élément et s'appliquent quelle que soit la façon de frapper.
+    let   missEffect = _effectiveMissEffect(opt);
     // Règle générale : tout sort / compétence qui consomme du mana fait au moins
     // ½ dégâts (arrondi inf.) en cas d'échec. Si le type de dégâts définit déjà
     // 'half' ou 'full', on respecte (pas de cumul, on ne dégrade pas non plus).

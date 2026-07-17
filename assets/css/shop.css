@@ -5304,7 +5304,51 @@ body.shop-cols-5 .sh-page--v2 .sh-item-grid { grid-template-columns: repeat(5, m
   flex-direction: column; align-items: stretch; gap: 10px;
   border-left: 3px solid var(--dt-accent, var(--border-md));
 }
+/* Le hover partagé repeint TOUT le bord → on préserve le liseré de couleur. */
+.dt-row:hover { border-left-color: var(--dt-accent, var(--border-md)); }
+.dt-row.sortable-ghost { opacity: .4; }
+.dt-row.sortable-chosen { border-left-color: var(--dt-accent, var(--amber)); }
+
 .dt-head { display: flex; align-items: center; gap: 8px; }
+.dt-grip {
+  flex: 0 0 auto; cursor: grab; user-select: none;
+  color: var(--text-dim); font-size: 1rem; line-height: 1; padding: 2px 3px;
+}
+.dt-grip:active { cursor: grabbing; }
+.dt-emoji-btn {
+  flex: 0 0 auto; width: 46px; height: 38px; display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.32); border: 1px solid var(--border-md); border-radius: 8px;
+  color: var(--text); font-size: 1.35rem; line-height: 1; cursor: pointer; transition: border-color .12s, transform .1s;
+}
+.dt-emoji-btn:hover { border-color: var(--dt-accent, var(--amber)); transform: scale(1.05); }
+.dt-emoji-ph { color: var(--text-dim); font-size: 1.1rem; }
+
+/* Popover de sélection d'emoji (ancré au body, positionné en JS) */
+.dt-emoji-pop {
+  position: fixed; z-index: 1200; width: 264px; max-height: 300px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px; padding: 10px;
+  background: var(--bg-card, #141b26); border: 1px solid var(--border-md);
+  border-radius: 14px; box-shadow: var(--elev-4, 0 24px 64px rgba(0,0,0,.5));
+}
+.dt-emoji-paste { display: flex; gap: 6px; }
+.dt-emoji-paste input {
+  flex: 1; min-width: 0; padding: 6px 8px; border-radius: 7px;
+  background: rgba(0,0,0,.32); border: 1px solid var(--border-md); color: var(--text);
+  font: inherit; font-size: 1.05rem; text-align: center; outline: none;
+}
+.dt-emoji-paste input:focus { border-color: var(--amber); }
+.dt-emoji-none {
+  flex: 0 0 auto; padding: 0 10px; border-radius: 7px; cursor: pointer;
+  background: rgba(0,0,0,.25); border: 1px solid var(--border-md); color: var(--text-dim);
+  font-size: .72rem; font-weight: 600;
+}
+.dt-emoji-none:hover { color: var(--text); border-color: var(--border); }
+.dt-emoji-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.dt-emoji-opt {
+  aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+  background: none; border: none; border-radius: 8px; cursor: pointer; font-size: 1.35rem; line-height: 1;
+}
+.dt-emoji-opt:hover { background: rgba(255,255,255,.12); transform: scale(1.15); }
 .dt-icon {
   flex: 0 0 auto; width: 46px; padding: 5px; text-align: center;
   background: rgba(0,0,0,.32); border: 1px solid var(--border-md); border-radius: 6px;
@@ -5362,11 +5406,25 @@ body.shop-cols-5 .sh-page--v2 .sh-item-grid { grid-template-columns: repeat(5, m
   display: flex; align-items: flex-start; gap: 8px; cursor: pointer;
   margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-md);
 }
-.dt-magic input { margin-top: 2px; accent-color: var(--amber); flex: 0 0 auto; }
 .dt-magic-txt { display: flex; flex-direction: column; gap: 2px; }
 .dt-magic-txt b { font-size: .76rem; color: var(--text-soft); }
 .dt-magic-txt small { font-size: .66rem; color: var(--text-dim); line-height: 1.4; }
 .dt-magic:has(input:checked) b { color: #c084fc; }
+
+/* Interrupteur magie */
+.dt-switch { flex: 0 0 auto; position: relative; display: inline-block; margin-top: 2px; }
+.dt-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.dt-switch-track {
+  display: block; width: 38px; height: 21px; border-radius: 999px;
+  background: rgba(255,255,255,.12); border: 1px solid var(--border-md); transition: background .16s, border-color .16s;
+}
+.dt-switch-thumb {
+  position: absolute; top: 3px; left: 3px; width: 15px; height: 15px; border-radius: 50%;
+  background: #cbd5e1; transition: transform .16s, background .16s;
+}
+.dt-switch input:checked + .dt-switch-track { background: rgba(192,132,252,.35); border-color: #c084fc; }
+.dt-switch input:checked + .dt-switch-track .dt-switch-thumb { transform: translateX(17px); background: #c084fc; }
+.dt-switch input:focus-visible + .dt-switch-track { box-shadow: 0 0 0 2px rgba(192,132,252,.4); }
 
 /* ── Export/Import (tabs) — réutilise les classes existantes mais améliore le visuel ── */
 .sh-export-tabs {
