@@ -407,6 +407,9 @@ function _renderDamageTypesModal(types) {
     const missOpts = ['none', 'half', 'full'].map(v =>
       `<option value="${v}"${(r.missEffect || 'none') === v ? ' selected' : ''}>${MISS_EFFECT_LABELS[v]}</option>`
     ).join('');
+    const scopeOpts = [['always', 'Toute attaque'], ['magic', 'Attaques magiques'], ['physical', 'Attaques physiques']].map(([v, l]) =>
+      `<option value="${v}"${(r.missScope || 'always') === v ? ' selected' : ''}>${l}</option>`
+    ).join('');
     const swatches = DT_SWATCHES.map(c =>
       `<button type="button" class="dt-sw${c.toLowerCase() === color.toLowerCase() ? ' is-active' : ''}"
          style="background:${c}" data-action="_setDmgColor" data-i="${i}" data-color="${c}"
@@ -435,9 +438,14 @@ function _renderDamageTypesModal(types) {
         <div class="dt-rules-title">Particularités <span class="dt-hint">— comment ce type se comporte en combat</span></div>
         <div class="dt-rules-grid">
           <label class="dt-field">
-            <span class="dt-field-lbl">Sur un raté <span class="dt-tag-mag">magique</span></span>
+            <span class="dt-field-lbl">Sur un raté</span>
             <select class="dt-input" data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.missEffect">${missOpts}</select>
-            <span class="dt-field-help">S'applique <b>uniquement</b> quand cet élément est lancé en attaque magique (sort ou arme magique). En attaque physique, un raté ne fait aucun dégât — donc une même « Combustion » sert au guerrier et au mage, sans doublon.</span>
+            <span class="dt-field-help">Dégâts sur une attaque ratée. Par défaut <b>aucun</b> ; « Moitié » ou « Complets » = règle maison optionnelle.</span>
+          </label>
+          <label class="dt-field"${(r.missEffect || 'none') === 'none' ? ' style="opacity:.5"' : ''}>
+            <span class="dt-field-lbl">…s'applique à</span>
+            <select class="dt-input" data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.missScope">${scopeOpts}</select>
+            <span class="dt-field-help">Qui subit ce « raté ». Laisse <b>Toute attaque</b> si ton système ne distingue pas ; restreins aux magiques/physiques sinon (ex. une même Combustion : ½ en sort, rien à l'épée).</span>
           </label>
           <label class="dt-field">
             <span class="dt-field-lbl">Pénétration d'armure</span>
@@ -463,10 +471,9 @@ function _renderDamageTypesModal(types) {
           </span>
           <span class="dt-magic-txt">
             <b>🔮 Élément magique</b>
-            <small>Nature du type : réservé aux personnages qui connaissent cet élément (les types non
-            magiques restent toujours disponibles), et les dégâts magiques utilisent la maîtrise + la stat
-            magique au lieu de la Constitution. C'est la <b>façon de frapper</b> (arme magique / sort) qui
-            décide si le « raté » ci-dessus s'applique — pas cette case.</small>
+            <small>Réservé aux personnages qui connaissent cet élément (les types non magiques restent
+            toujours disponibles pour tous), et les dégâts magiques utilisent la maîtrise + la stat magique
+            au lieu de la Constitution.</small>
           </span>
         </label>
       </div>
@@ -632,8 +639,10 @@ async function _addDmgType() {
     label,
     icon,
     color:   '#9ca3af',
-    isMagic: true,
-    rules:   { missEffect: 'half', armorPen: 0, dmgBonus: 0 },
+    // Défaut NEUTRE (D&D-first) : pas de règle maison imposée. Le MJ active
+    // ensuite « magique » et/ou un effet de raté s'il le souhaite.
+    isMagic: false,
+    rules:   { missEffect: 'none', missScope: 'always', armorPen: 0, dmgBonus: 0 },
   });
   await saveDamageTypes(types);
   _damageTypes = types;

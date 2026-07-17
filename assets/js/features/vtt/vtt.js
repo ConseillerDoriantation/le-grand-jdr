@@ -4612,18 +4612,24 @@ function _atkInteractionHtml(opt) {
   </div>`;
 }
 
-// « ½ / dégâts complets sur échec » = mécanique MAGIQUE. Elle ne s'applique qu'à
-// une attaque MAGIQUE (arme magique ou sort à mana). Une attaque PHYSIQUE ne rate
-// jamais en demi-dégâts, MÊME si son élément (ex. Combustion) définit un
-// missEffect : l'élément n'est qu'une identité (couleur/icône), le comportement
-// « demi-dégâts sur échec » vient de la FAÇON de frapper, pas de l'élément.
-// → une seule « Combustion » sert au guerrier (physique = rien) et au mage
-//   (magique = ½), plus besoin de dupliquer le type.
+// « Dégâts sur un raté » (½ / complets) : PAR DÉFAUT, aucune règle magie/physique
+// n'est supposée — le missEffect du type s'applique à TOUTE attaque (rien =
+// comportement D&D usuel : un raté ne fait rien tant que le MJ ne configure pas).
+// Le MJ PEUT restreindre par type via `missScope` s'il a une distinction dans son
+// système : 'magic' = seulement sort/arme magique, 'physical' = seulement physique.
+// C'est ainsi qu'un même « Combustion » peut se comporter différemment sans doublon
+// — mais c'est un CHOIX du MJ, jamais une règle imposée par l'app.
 function _isMagicDelivery(opt) {
   return !!(opt && (opt.isMagicWeapon === true || opt.pmCost > 0));
 }
 function _effectiveMissEffect(opt) {
-  return _isMagicDelivery(opt) ? (opt?.typeRules?.missEffect || 'none') : 'none';
+  const rules = opt?.typeRules || {};
+  const me = rules.missEffect || 'none';
+  if (me === 'none') return 'none';
+  const scope = rules.missScope || 'always';
+  if (scope === 'magic')    return _isMagicDelivery(opt) ? me : 'none';
+  if (scope === 'physical') return _isMagicDelivery(opt) ? 'none' : me;
+  return me;   // 'always' (défaut)
 }
 
 // Note "½ / dégâts complets même en cas d'échec" — magique uniquement.
