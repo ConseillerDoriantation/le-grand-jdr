@@ -5309,6 +5309,27 @@ body.shop-cols-5 .sh-page--v2 .sh-item-grid { grid-template-columns: repeat(5, m
 .dt-row.sortable-ghost { opacity: .4; }
 .dt-row.sortable-chosen { border-left-color: var(--dt-accent, var(--amber)); }
 
+/* Accordéon : replié par défaut → une ligne par type, scroll court. */
+.dt-body { display: none; flex-direction: column; gap: 10px; }
+.dt-row.is-open .dt-body { display: flex; }
+.dt-row.is-open .dt-badges { display: none; }
+.dt-toggle {
+  flex: 0 0 auto; background: none; border: none; cursor: pointer;
+  color: var(--text-dim); font-size: .8rem; line-height: 1; padding: 4px 5px; border-radius: 6px;
+  transition: transform .15s, color .12s;
+}
+.dt-toggle:hover { color: var(--text); background: rgba(255,255,255,.08); }
+.dt-row.is-open .dt-toggle { transform: rotate(180deg); color: var(--dt-accent, var(--amber)); }
+
+/* Résumé des réglages, visible sans déplier */
+.dt-badges { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.dt-badge {
+  font-size: .6rem; font-weight: 600; white-space: nowrap;
+  color: var(--text-dim); background: rgba(0,0,0,.28);
+  border: 1px solid var(--border-md); border-radius: 999px; padding: 1px 6px;
+}
+.dt-badge--mag { color: #c084fc; border-color: rgba(192,132,252,.4); background: rgba(192,132,252,.14); }
+
 .dt-head { display: flex; align-items: center; gap: 8px; }
 .dt-grip {
   flex: 0 0 auto; cursor: grab; user-select: none;
@@ -5379,17 +5400,12 @@ body.shop-cols-5 .sh-page--v2 .sh-item-grid { grid-template-columns: repeat(5, m
   border: 1px solid var(--border-md); border-radius: 5px; background: none; cursor: pointer;
 }
 
-/* ── Particularités : une grille lisible, chaque champ avec son aide ── */
+/* ── Particularités : grille dense, aides courtes ── */
 .dt-rules { background: rgba(0,0,0,.18); border-radius: 8px; padding: 10px; }
-.dt-rules-title {
-  font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
-  color: var(--text-soft); margin-bottom: 8px;
-}
-.dt-hint { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-dim); }
 .dt-rules-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px 10px;
 }
-.dt-field { display: flex; flex-direction: column; gap: 4px; }
+.dt-field { display: flex; flex-direction: column; gap: 3px; }
 .dt-field-lbl { font-size: .74rem; font-weight: 600; color: var(--text); }
 .dt-field-help { font-size: .66rem; color: var(--text-dim); line-height: 1.35; }
 .dt-input-wrap { display: flex; align-items: center; gap: 4px; }
