@@ -399,6 +399,7 @@ const MISS_EFFECT_LABELS = { none: 'Aucun', half: 'Moitié', full: 'Complets' };
 const DT_SWATCHES = ['#9ca3af', '#f97316', '#4f8cff', '#22c38e', '#b47fff', '#6366f1', '#f9d71c', '#ef4444', '#ec4899', '#14b8a6'];
 
 function _renderDamageTypesModal(types) {
+  _closeDmgEmoji();   // pas de popover orphelin après un re-render
   // Une ligne = identité (emoji + nom + couleur) puis particularités, puis nature.
   const mkRow = (t, i) => {
     const r = t.rules || {};
@@ -413,9 +414,9 @@ function _renderDamageTypesModal(types) {
     return `
     <div class="sh-admin-list-item dt-row" data-row="${i}" style="--dt-accent:${_esc(color)}">
       <div class="dt-head">
-        <input type="text" class="dt-icon" value="${_esc(t.icon || '')}" placeholder="🔥" maxlength="4"
-          title="Emoji du type" aria-label="Emoji du type"
-          data-change="_saveDmgTypeProp" data-i="${i}" data-prop="icon">
+        <span class="dt-grip" title="Glisser pour réordonner" aria-hidden="true">⠿</span>
+        <button type="button" class="dt-emoji-btn" data-action="_openDmgEmoji" data-i="${i}"
+          title="Choisir un emoji">${t.icon ? _esc(t.icon) : '<span class="dt-emoji-ph">＋</span>'}</button>
         <input type="text" class="dt-name" value="${_esc(t.label)}" placeholder="Nom du type"
           aria-label="Nom du type"
           data-change="_saveDmgTypeProp" data-i="${i}" data-prop="label">
@@ -455,8 +456,11 @@ function _renderDamageTypesModal(types) {
           </label>
         </div>
         <label class="dt-magic">
-          <input type="checkbox" ${t.isMagic ? 'checked' : ''}
-            data-change="_saveDmgTypeProp" data-i="${i}" data-prop="isMagic" data-vtype="bool">
+          <span class="dt-switch">
+            <input type="checkbox" ${t.isMagic ? 'checked' : ''}
+              data-change="_saveDmgTypeProp" data-i="${i}" data-prop="isMagic" data-vtype="bool">
+            <span class="dt-switch-track"><span class="dt-switch-thumb"></span></span>
+          </span>
           <span class="dt-magic-txt">
             <b>🔮 Élément magique</b>
             <small>Nature du type, distincte des particularités ci-dessus : réservé aux personnages qui
@@ -511,6 +515,80 @@ function _renderDamageTypesModal(types) {
   </div>
   `);
   setTimeout(() => document.getElementById('dt-new-label')?.focus(), 60);
+  _initDmgSortable();
+}
+
+// ── Réordonnancement par glisser-déposer (Sortable, poignée ⠿) ──────────────
+async function _initDmgSortable() {
+  const list = document.querySelector('.sh-admin-modal.is-formats .sh-admin-list');
+  if (!list || list.dataset.sortable) return;
+  list.dataset.sortable = '1';
+  const { default: Sortable } = await import('../../vendor/sortable.esm.js');
+  new Sortable(list, {
+    animation: 160, handle: '.dt-grip',
+    ghostClass: 'sortable-ghost', chosenClass: 'sortable-chosen',
+    onEnd: async (evt) => {
+      if (evt.oldIndex === evt.newIndex) return;
+      const types = [...(_damageTypes || [])];
+      const [moved] = types.splice(evt.oldIndex, 1);
+      types.splice(evt.newIndex, 0, moved);
+      await saveDamageTypes(types);
+      _damageTypes = types;
+      _renderDamageTypesModal(types);
+    },
+  });
+}
+
+// ── Emoji : sélection dans une palette + collage du sien (borné à 1 emoji) ──
+const DT_EMOJIS = ['🔥','💧','🌊','🌬️','🪨','⛰️','🌱','⚡','❄️','☀️','🌙','🌑','✨','🌟','💥','💢','🔮','🌀','☠️','🧪','🩸','☣️','⚗️','🦠','🧨','🌋','🧊','♨️','🫧','🌩️','🗡️','🏹','🛡️','⚔️','👊','🦷','🐍','👁️','🪄','📖','⭐','💫'];
+
+// Premier « emoji » (grappheme) d'une chaîne collée → force 1 seul symbole.
+function _firstEmoji(str) {
+  const s = String(str || '').trim();
+  if (!s) return '';
+  try {
+    const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    return [...seg.segment(s)][0]?.segment || '';
+  } catch { return [...s][0] || ''; }
+}
+
+let _dmgEmojiOutside = null;
+function _closeDmgEmoji() {
+  document.getElementById('dt-emoji-pop')?.remove();
+  if (_dmgEmojiOutside) { document.removeEventListener('mousedown', _dmgEmojiOutside, true); _dmgEmojiOutside = null; }
+}
+function _openDmgEmoji(i, btn) {
+  const already = document.getElementById('dt-emoji-pop');
+  _closeDmgEmoji();
+  if (already && already.dataset.i === String(i)) return;   // re-clic = fermer
+  const pop = document.createElement('div');
+  pop.id = 'dt-emoji-pop'; pop.className = 'dt-emoji-pop'; pop.dataset.i = String(i);
+  pop.innerHTML = `
+    <div class="dt-emoji-paste">
+      <input type="text" id="dt-emoji-inp" placeholder="Colle ton emoji…" aria-label="Coller un emoji">
+      <button type="button" class="dt-emoji-none" data-action="_pickDmgEmoji" data-i="${i}" data-emo="">Aucun</button>
+    </div>
+    <div class="dt-emoji-grid">${DT_EMOJIS.map(e =>
+      `<button type="button" class="dt-emoji-opt" data-action="_pickDmgEmoji" data-i="${i}" data-emo="${e}">${e}</button>`).join('')}</div>`;
+  document.body.appendChild(pop);
+  const r = btn.getBoundingClientRect();
+  const w = pop.offsetWidth || 260, h = pop.offsetHeight || 240;
+  pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
+  pop.style.top = (r.bottom + h + 8 > window.innerHeight) ? `${Math.max(8, r.top - h - 6)}px` : `${r.bottom + 6}px`;
+  const inp = pop.querySelector('#dt-emoji-inp');
+  // Collage / saisie : on ne garde que le 1er emoji.
+  inp.addEventListener('input', () => { const e = _firstEmoji(inp.value); if (e && e !== inp.value) inp.value = e; });
+  inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); const e = _firstEmoji(inp.value); if (e) _pickDmgEmoji(i, e); } });
+  setTimeout(() => inp.focus(), 30);
+  _dmgEmojiOutside = (e) => { if (!pop.contains(e.target) && e.target !== btn) _closeDmgEmoji(); };
+  requestAnimationFrame(() => document.addEventListener('mousedown', _dmgEmojiOutside, true));
+}
+async function _pickDmgEmoji(i, emo) {
+  const clean = emo ? _firstEmoji(emo) : '';
+  await _saveDmgTypeProp(i, 'icon', clean);
+  const btn = document.querySelector(`.dt-emoji-btn[data-i="${i}"]`);
+  if (btn) btn.innerHTML = clean ? _esc(clean) : '<span class="dt-emoji-ph">＋</span>';
+  _closeDmgEmoji();
 }
 
 async function _saveDmgTypeProp(i, path, value) {
@@ -1005,6 +1083,8 @@ registerActions({
   _deleteDmgType:           (btn) => _deleteDmgType(Number(btn.dataset.idx)),
   _setDmgColor:             (btn) => _setDmgColor(Number(btn.dataset.i), btn.dataset.color),
   _setDmgColorPick:         (el)  => _setDmgColor(Number(el.dataset.i), el.value),
+  _openDmgEmoji:            (btn) => _openDmgEmoji(Number(btn.dataset.i), btn),
+  _pickDmgEmoji:            (btn) => _pickDmgEmoji(Number(btn.dataset.i), btn.dataset.emo),
   _switchSpellMatrixTab:    (btn) => _switchSpellMatrixTab(btn.dataset.tab),
   _saveSpellMatrices:       ()    => _saveSpellMatrices(),
 });
