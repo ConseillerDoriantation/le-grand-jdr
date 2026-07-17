@@ -5391,6 +5391,11 @@ body.shop-cols-5 .sh-page--v2 .sh-item-grid { grid-template-columns: repeat(5, m
 }
 .dt-field { display: flex; flex-direction: column; gap: 4px; }
 .dt-field-lbl { font-size: .74rem; font-weight: 600; color: var(--text); }
+.dt-tag-mag {
+  font-size: .58rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: #c084fc; background: rgba(192,132,252,.16); border: 1px solid rgba(192,132,252,.35);
+  border-radius: 5px; padding: 0 4px; vertical-align: middle;
+}
 .dt-field-help { font-size: .66rem; color: var(--text-dim); line-height: 1.35; }
 .dt-input-wrap { display: flex; align-items: center; gap: 4px; }
 .dt-input {

@@ -4612,15 +4612,30 @@ function _atkInteractionHtml(opt) {
   </div>`;
 }
 
-// Note "½ / dégâts complets même en cas d'échec" — dépend du type de dégâts (élément).
+// « ½ / dégâts complets sur échec » = mécanique MAGIQUE. Elle ne s'applique qu'à
+// une attaque MAGIQUE (arme magique ou sort à mana). Une attaque PHYSIQUE ne rate
+// jamais en demi-dégâts, MÊME si son élément (ex. Combustion) définit un
+// missEffect : l'élément n'est qu'une identité (couleur/icône), le comportement
+// « demi-dégâts sur échec » vient de la FAÇON de frapper, pas de l'élément.
+// → une seule « Combustion » sert au guerrier (physique = rien) et au mage
+//   (magique = ½), plus besoin de dupliquer le type.
+function _isMagicDelivery(opt) {
+  return !!(opt && (opt.isMagicWeapon === true || opt.pmCost > 0));
+}
+function _effectiveMissEffect(opt) {
+  return _isMagicDelivery(opt) ? (opt?.typeRules?.missEffect || 'none') : 'none';
+}
+
+// Note "½ / dégâts complets même en cas d'échec" — magique uniquement.
 function _atkMissNoteHtml(opt) {
-  if (opt?.typeRules?.missEffect === 'full') {
+  const me = _effectiveMissEffect(opt);
+  if (me === 'full') {
     return `<div style="display:flex;align-items:center;gap:.3rem;font-size:.65rem;color:#f97316;padding:.25rem .1rem 0">
       <span>✦</span><span>Dégâts complets même en cas d'échec</span></div>`;
   }
-  if (opt?.typeRules?.missEffect === 'half' || opt?.pmCost > 0) {
+  if (me === 'half' || opt?.pmCost > 0) {
     return `<div style="display:flex;align-items:center;gap:.3rem;font-size:.65rem;color:#b47fff;padding:.25rem .1rem 0">
-      <span>✦</span><span>½ dégâts garantis même en cas d'échec${opt?.typeRules?.missEffect !== 'half' && opt?.pmCost > 0 ? ' (mana consommé)' : ''}</span></div>`;
+      <span>✦</span><span>½ dégâts garantis même en cas d'échec${me !== 'half' && opt?.pmCost > 0 ? ' (mana consommé)' : ''}</span></div>`;
   }
   return '';
 }
@@ -6525,7 +6540,11 @@ async function _vttRollAttack() {
     const rules      = opt.typeRules || {};
     const armorPen   = rules.armorPen || 0;
     const typeDmgBon = rules.dmgBonus || 0;
-    let   missEffect = rules.missEffect || 'none';
+    // missEffect du type = mécanique MAGIQUE → ne s'applique qu'à une attaque
+    // magique (arme magique / sort). Physique = 'none', même si l'élément définit
+    // 'half'/'full' (cf. _effectiveMissEffect). armorPen/dmgBonus, eux, restent
+    // des propriétés d'élément et s'appliquent quelle que soit la façon de frapper.
+    let   missEffect = _effectiveMissEffect(opt);
     // Règle générale : tout sort / compétence qui consomme du mana fait au moins
     // ½ dégâts (arrondi inf.) en cas d'échec. Si le type de dégâts définit déjà
     // 'half' ou 'full', on respecte (pas de cumul, on ne dégrade pas non plus).

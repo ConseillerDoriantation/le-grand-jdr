@@ -435,9 +435,9 @@ function _renderDamageTypesModal(types) {
         <div class="dt-rules-title">Particularités <span class="dt-hint">— comment ce type se comporte en combat</span></div>
         <div class="dt-rules-grid">
           <label class="dt-field">
-            <span class="dt-field-lbl">Sur un raté</span>
+            <span class="dt-field-lbl">Sur un raté <span class="dt-tag-mag">magique</span></span>
             <select class="dt-input" data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.missEffect">${missOpts}</select>
-            <span class="dt-field-help">Dégâts infligés quand l'attaque échoue.</span>
+            <span class="dt-field-help">S'applique <b>uniquement</b> quand cet élément est lancé en attaque magique (sort ou arme magique). En attaque physique, un raté ne fait aucun dégât — donc une même « Combustion » sert au guerrier et au mage, sans doublon.</span>
           </label>
           <label class="dt-field">
             <span class="dt-field-lbl">Pénétration d'armure</span>
@@ -463,9 +463,10 @@ function _renderDamageTypesModal(types) {
           </span>
           <span class="dt-magic-txt">
             <b>🔮 Élément magique</b>
-            <small>Nature du type, distincte des particularités ci-dessus : réservé aux personnages qui
-            connaissent cet élément (les types non magiques restent toujours disponibles), et les dégâts
-            utilisent la maîtrise + la stat magique au lieu de la Constitution.</small>
+            <small>Nature du type : réservé aux personnages qui connaissent cet élément (les types non
+            magiques restent toujours disponibles), et les dégâts magiques utilisent la maîtrise + la stat
+            magique au lieu de la Constitution. C'est la <b>façon de frapper</b> (arme magique / sort) qui
+            décide si le « raté » ci-dessus s'applique — pas cette case.</small>
           </span>
         </label>
       </div>
