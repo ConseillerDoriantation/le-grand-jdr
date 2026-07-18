@@ -1625,6 +1625,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
       <div class="cs-spellcard-id">
         <div class="cs-spellcard-name-row">
           <span class="cs-spellcard-name" title="${_esc(s.nom||'Sans nom')}">${_esc(s.nom||'Sans nom')}</span>
+          ${canEdit ? `<button type="button" class="cs-spellcard-quickedit" data-action="editSort" data-idx="${i}" data-stop-propagation aria-label="Modifier ${_esc(s.nom || 'ce sort')}" title="Modifier ce sort"><span aria-hidden="true">✏️</span><span class="cs-spellcard-quickedit-label">Modifier</span></button>` : ''}
           ${valStatus}${valActions}
         </div>
         <div class="cs-spellcard-sub">
@@ -1634,7 +1635,6 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
         </div>
       </div>
       <span class="cs-spellcard-pm" title="${_esc(pmTitle)}">${pmVal}<small>PM</small></span>
-      ${canEdit ? `<button type="button" class="cs-spellcard-quickedit" data-action="editSort" data-idx="${i}" data-stop-propagation aria-label="Modifier ${_esc(s.nom || 'ce sort')}" title="Modifier ce sort">✏️</button>` : ''}
     </header>
 
     ${recipeStrip}
