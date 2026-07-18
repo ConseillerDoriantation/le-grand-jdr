@@ -903,6 +903,32 @@
   gap: 6px;
   align-items: center;
 }
+
+/* Contrôles natifs de l'éditeur : le menu déroulant Windows/Chromium hérite
+   sinon d'un fond clair alors que les options gardent le texte du thème nuit. */
+.bs-edit-form select.input-field {
+  color-scheme: dark;
+  background-color: var(--bg-elevated, #1a2535);
+  color: var(--text, #eef2fb);
+}
+.bs-edit-form select.input-field option {
+  background-color: var(--bg-elevated, #1a2535);
+  color: var(--text, #eef2fb);
+}
+
+/* Les spinners natifs WebKit ont une pastille claire peu lisible en thème
+   sombre. Les champs restent modifiables au clavier et à la molette. */
+.bs-edit-form input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.bs-edit-form input[type="number"]::-webkit-inner-spin-button,
+.bs-edit-form input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
 .bs-item-cat {
   display: inline-block;
   font-size: 0.6rem;
@@ -920,6 +946,15 @@
   background: rgba(37,99,235,0.08);
   border-color: rgba(37,99,235,0.30);
   color: #1d4ed8;
+}
+[data-theme="light"] .bs-edit-form select.input-field {
+  color-scheme: light;
+  background-color: var(--bg-elevated, #f5f7fa);
+  color: var(--text, #1f2937);
+}
+[data-theme="light"] .bs-edit-form select.input-field option {
+  background-color: var(--bg-elevated, #f5f7fa);
+  color: var(--text, #1f2937);
 }
 [data-theme="light"] .bs-item-row { background: var(--bg-card); }
 [data-theme="light"] .bs-items-picker { background: rgba(37,99,235,0.03); border-color: rgba(37,99,235,0.18); }

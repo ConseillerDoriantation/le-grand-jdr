@@ -25,6 +25,7 @@ import { _esc, _norm, appSplashHtml, skeletonHtml } from '../shared/html.js';
 import { calcOr, getDefaultCharForUser } from '../shared/char-stats.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { useGold } from '../shared/economy.js';
+import { shouldRestoreLegacyBastionCatalog } from '../shared/bastion-catalog.js';
 
 
 const STORE = {
@@ -41,6 +42,7 @@ const STORE = {
   coffreSearch:   '',
   histoExpanded:  false,
   catalogMigrationInFlight: false,
+  addingCustomRoom: false,
 };
 
 
@@ -242,20 +244,36 @@ function _legacyRoomCatalogFrom(b = {}) {
   return [...defaults, ...customs];
 }
 
+function _shouldRestoreLegacyRoomCatalog(source = {}) {
+  return shouldRestoreLegacyBastionCatalog(source, {
+    isLegacyAdventure: _isLegacyBastionAdventure(),
+    legacySlugs: DEFAULT_ROOM_CATALOG.map(room => room.slug),
+  });
+}
+
 function _normalizeBastionDoc(data) {
   const source = (data && typeof data === 'object') ? data : {};
   const b = { ..._defaultBastion(), ...source };
-  if (Array.isArray(source.roomCatalog)) {
-    b.roomCatalog = source.roomCatalog.map(_normalizeRoomDef).filter(r => r.slug);
+  const storedCatalog = Array.isArray(source.roomCatalog)
+    ? source.roomCatalog.map(_normalizeRoomDef).filter(r => r.slug)
+    : null;
+
+  if (storedCatalog?.length) {
+    b.roomCatalog = storedCatalog;
     b.roomCatalogVersion = source.roomCatalogVersion || ROOM_CATALOG_VERSION;
     return { bastion: b, migrated: false };
   }
-  if (data && _isLegacyBastionAdventure()) {
+
+  // Un tableau vide ne doit pas effacer visuellement le catalogue historique.
+  // On restaure aussi les aventures non historiques portant encore des traces
+  // explicites de l'ancien modèle (salles, overrides, customs ou personnel).
+  if (data && _shouldRestoreLegacyRoomCatalog(source)) {
     b.roomCatalog = _legacyRoomCatalogFrom(source);
     b.roomCatalogVersion = ROOM_CATALOG_VERSION;
     b.legacyRoomCatalogMigratedAt = b.legacyRoomCatalogMigratedAt || Date.now();
     return { bastion: b, migrated: true };
   }
+
   b.roomCatalog = [];
   b.roomCatalogVersion = ROOM_CATALOG_VERSION;
   return { bastion: b, migrated: false };
@@ -275,8 +293,11 @@ async function _persistBastionCatalogMigration(b) {
 
 // Catalogue effectif = catalogue stocké dans le Bastion courant.
 function _getRoomCatalog(b) {
-  if (Array.isArray(b?.roomCatalog)) return b.roomCatalog.map(_normalizeRoomDef).filter(r => r.slug);
-  return _isLegacyBastionAdventure() ? _legacyRoomCatalogFrom(b || {}) : [];
+  const catalog = Array.isArray(b?.roomCatalog)
+    ? b.roomCatalog.map(_normalizeRoomDef).filter(r => r.slug)
+    : [];
+  if (catalog.length) return catalog;
+  return _shouldRestoreLegacyRoomCatalog(b || {}) ? _legacyRoomCatalogFrom(b || {}) : [];
 }
 
 function _getRoomDef(slug, b) {
@@ -922,14 +943,21 @@ function _bastionOpenCatalogEditor() {
         ${rows}
       </div>`)}
     <div class="bs-edit-actions" style="margin-top:14px;justify-content:center">
-      <button class="btn btn-gold" data-action="_bastionAddCustomRoom">＋ Nouvelle salle</button>
+      <button class="btn btn-gold" data-action="_bastionAddCustomRoom">＋ Ajouter une salle / activité</button>
     </div>
   `, { subtitle: 'Nom, prix, durée, renommée, productions, bonus — appliqué à tous', accent: '#f4c430' });
 }
 
 async function _bastionAddCustomRoom() {
-  if (!STATE.isAdmin) return;
-  const slug = `custom_${Date.now().toString(36)}`;
+  if (!STATE.isAdmin || STORE.addingCustomRoom) return;
+
+  const current = STORE.bastion || _defaultBastion();
+  const existingSlugs = new Set(_getRoomCatalog(current).map(room => room.slug));
+  const slugBase = `custom_${Date.now().toString(36)}`;
+  let slug = slugBase;
+  let suffix = 2;
+  while (existingSlugs.has(slug)) slug = `${slugBase}_${suffix++}`;
+
   const newRoom = {
     slug,
     isCustom: true,
@@ -943,12 +971,25 @@ async function _bastionAddCustomRoom() {
       { cout: 1500, semaines: 3, renommee: 50, gainRenommee: 6, prod: { or: 0, items: [] }, bonus: '' },
     ],
   };
-  const b = { ...STORE.bastion };
-  b.roomCatalog = [..._getRoomCatalog(b), newRoom];
-  await _save(b);
-  closeModal();
-  // Ouvre directement l'éditeur de la nouvelle salle pour personnalisation immédiate
-  setTimeout(() => _bastionEditRoom(slug), 200);
+  const b = {
+    ...current,
+    roomCatalog: [..._getRoomCatalog(current), newRoom],
+  };
+
+  STORE.addingCustomRoom = true;
+  try {
+    if (!await _save(b)) return;
+
+    // Ne pas attendre le listener Firestore : l'état optimiste garantit que
+    // plusieurs ajouts successifs s'accumulent et que l'éditeur trouve tout de
+    // suite la salle qui vient d'être créée.
+    STORE.bastion = b;
+    closeModal();
+    if (STATE.currentPage === 'bastion') _renderPage();
+    await _bastionEditRoom(slug);
+  } finally {
+    STORE.addingCustomRoom = false;
+  }
 }
 
 async function _bastionDeleteCustomRoom(slug) {
@@ -2071,6 +2112,9 @@ function _renderRooms(b) {
     <section class="bs-section">
       <div class="bs-section-hd">
         <h2 class="bs-section-title">🏛 Salles &amp; activités</h2>
+        ${isMj ? `<button class="btn btn-gold btn-sm" data-action="_bastionAddCustomRoom">
+          ＋ Ajouter une salle / activité
+        </button>` : ''}
         ${isMj && anyBuilt ? `<button class="btn btn-outline btn-sm bs-reset-btn"
           data-action="_bastionResetRooms" title="Réinitialiser toutes les salles construites">
           🔄 Reset salles
