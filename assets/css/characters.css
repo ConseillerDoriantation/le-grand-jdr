@@ -13821,6 +13821,32 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   display: inline-flex; align-items: baseline; gap: 2px;
 }
 .cs-v3 .cs-spellcard-pm small { font-size: .56rem; font-weight: 700; opacity: .7; }
+.cs-v3 .cs-spellcard-quickedit {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--type-col, #b47fff) 42%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--type-col, #b47fff) 14%, var(--bg-panel, #131a2a));
+  color: var(--text);
+  font-size: .8rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: .75;
+  transition: opacity .15s ease, border-color .15s ease, background .15s ease, transform .15s ease;
+}
+.cs-v3 .cs-spellcard-quickedit:hover,
+.cs-v3 .cs-spellcard-quickedit:focus-visible {
+  opacity: 1;
+  border-color: var(--type-col, #b47fff);
+  background: color-mix(in srgb, var(--type-col, #b47fff) 24%, var(--bg-panel, #131a2a));
+  outline: none;
+  transform: translateY(-1px);
+}
+
 .cs-v3 .cs-spellcard-pm .cs-sort-pm-old { text-decoration: line-through; opacity: .5; font-size: .8rem; margin-right: 2px; }
 .cs-v3 .cs-spellcard-pm .cs-sort-pm-new { color: var(--emerald, #22c38e); }
 
@@ -14026,6 +14052,9 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-pm {
   order: 4; align-self: center; margin: 0; font-size: .9rem;
 }
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-quickedit {
+  order: 5; align-self: center;
+}
 .cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-foot {
   order: 5; margin: 0; padding: 0;
   display: inline-flex; align-items: center; gap: 4px;
@@ -14103,6 +14132,20 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .is-tiles .cs-spellcard-runes,
 .cs-v3 .is-tiles .cs-spellcard-detail,
 .cs-v3 .is-tiles .cs-spellcard-detailbtn { display: none; }   /* la tooltip fait le travail */
+.cs-v3 .is-tiles .cs-spellcard-quickedit {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  z-index: 4;
+  width: 25px;
+  height: 25px;
+  border-radius: 7px;
+  opacity: .58;
+}
+.cs-v3 .is-tiles .cs-spellcard:hover .cs-spellcard-quickedit,
+.cs-v3 .is-tiles .cs-spellcard-quickedit:focus-visible {
+  opacity: 1;
+}
 /* Actions ⧉✏️🗑️ : DOCK opaque révélé au survol, légèrement débordant sous la
    tuile (jamais un voile transparent sur le nom). La tooltip se cache quand on
    survole ce dock (géré en JS) pour ne pas se superposer aux boutons. */
@@ -14185,7 +14228,8 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 }
 .cs-spell-tt .cs-spellcard-head .toggle,
 .cs-spell-tt .cs-spellcard-mj-actions,
-.cs-spell-tt .cs-spellcard-foot { display: none; }
+.cs-spell-tt .cs-spellcard-foot,
+.cs-spell-tt .cs-spellcard-quickedit { display: none; }
 .cs-spell-tt .cs-spellcard-desc { -webkit-line-clamp: unset; display: block; cursor: default; }
 [data-theme="light"] .cs-spell-tt .cs-spellcard { background: #fff; }
 
@@ -14265,7 +14309,8 @@ button.cs-sock.is-empty:hover { border-color: rgba(232,184,75,.55); color: var(-
 .cs-spell-sheet .cs-spellcard { cursor: default; margin: 0; }
 .cs-spell-sheet .cs-spellcard-head .toggle,
 .cs-spell-sheet .cs-spellcard-mj-actions,
-.cs-spell-sheet .cs-spellcard-foot { display: none; }
+.cs-spell-sheet .cs-spellcard-foot,
+.cs-spell-sheet .cs-spellcard-quickedit { display: none; }
 .cs-spell-sheet .cs-spellcard-desc { -webkit-line-clamp: unset; display: block; cursor: default; }
 .cs-spell-sheet-btns { display: flex; gap: 8px; }
 .cs-spell-sheet-btns .btn { flex: 1; min-height: 44px; }

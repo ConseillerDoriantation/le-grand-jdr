@@ -73,14 +73,20 @@ let _classicDamageTypes = [];
 // la forge s'ouvre), sinon les noyaux par id restent temporairement introuvables.
 function _ensureSpellRenderCaches() {
   if (_spellRenderCachesReady || _spellRenderCachesPromise) return;
-  _spellRenderCachesPromise = Promise.all([loadDamageTypes(), loadSpellMatrices()])
-    .then(([damageTypes, matrices]) => {
+  _spellRenderCachesPromise = Promise.all([
+    loadDamageTypes(),
+    loadSpellMatrices(),
+    loadConditionLibrary(),
+  ])
+    .then(([damageTypes, matrices, conditions]) => {
       setSpellCaches(matrices, damageTypes);
+      _conditionsLibCache = Array.isArray(conditions) ? conditions : [];
+      setConditionsLibCache(_conditionsLibCache);
       _spellRenderCachesReady = true;
       if (charSession.getCurrentCharTab() === 'sorts') _renderSpellsTab();
     })
     .catch(err => {
-      console.warn('[sorts] Impossible de charger les noyaux du grimoire', err);
+      console.warn('[sorts] Impossible de charger les noyaux ou les états du grimoire', err);
       _spellRenderCachesPromise = null;
     });
 }
@@ -1405,7 +1411,13 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
       const etat = s.afflictionEtatId
         ? _conditionsLibCache?.find(c2 => c2.id === s.afflictionEtatId)
         : null;
-      const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ État non défini';
+      const lbl = etat
+        ? `${etat.icon || ''} ${etat.label}`
+        : s.afflictionEtatId && !Array.isArray(_conditionsLibCache)
+          ? 'État en chargement…'
+          : s.afflictionEtatId
+            ? '⚠ État introuvable'
+            : '⚠ État non défini';
       chips.push({ icon:'⛓', val: lbl, color:'#8b5cf6', lbl:'État infligé à l\'ennemi (Affliction)' });
     } else {
       // Mode DoT : formule scalée
@@ -1622,6 +1634,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
         </div>
       </div>
       <span class="cs-spellcard-pm" title="${_esc(pmTitle)}">${pmVal}<small>PM</small></span>
+      ${canEdit ? `<button type="button" class="cs-spellcard-quickedit" data-action="editSort" data-idx="${i}" data-stop-propagation aria-label="Modifier ${_esc(s.nom || 'ce sort')}" title="Modifier ce sort">✏️</button>` : ''}
     </header>
 
     ${recipeStrip}
