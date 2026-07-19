@@ -4323,11 +4323,24 @@ function ensureReaderInteractions() {
 }
 
 function runReaderInteraction(type, payload, sourceBlock = null) {
-  if (type === 'link' && payload.target) return window.open(payload.target, '_blank', 'noopener,noreferrer');
+  if (type === 'link' && payload.target) { const url = safeExternalUrl(payload.target); if (url) window.open(url, '_blank', 'noopener,noreferrer'); return; }
   if (type === 'page' && payload.target?.startsWith?.('slide:')) return switchReaderSlide(sourceBlock, payload.target.slice(6));
   if (type === 'page' && payload.target) { window.location.hash = payload.target.startsWith('#') ? payload.target : `#${payload.target}`; return; }
-  if (type === 'audio' && payload.target) { try { new Audio(payload.target).play(); } catch { showNotif("Impossible de lire l'audio.", 'error'); } return; }
+  if (type === 'audio' && payload.target) { const url = safeExternalUrl(payload.target); if (!url) return; try { new Audio(url).play(); } catch { showNotif("Impossible de lire l'audio.", 'error'); } return; }
   if (type === 'popup') return showFreePagePopupPage(payload.page, payload.layout, sourceBlock?.closest?.('.free-page-stage--reader'), payload.frame);
+}
+
+// Valide le schéma d'une cible d'interaction externe (lien/audio) avant de
+// l'ouvrir : http/https/mailto/tel uniquement. Bloque javascript:/data:/etc.
+// (le reste de l'app valide déjà les URLs ainsi ; les cibles internes de type
+// « page » — slide:/# — ne passent pas par ici).
+function safeExternalUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const url = new URL(raw, document.baseURI);
+    return ['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol.toLowerCase()) ? raw : '';
+  } catch { return ''; }
 }
 
 function switchReaderSlide(sourceBlock, slideId) {
