@@ -34,6 +34,7 @@ import { bindImageUploadDropZone, uploadJpeg } from '../shared/image-upload.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../shared/upload-cloudinary.js';
 import { lsJson } from '../shared/local-storage.js';
 import { richTextContentHtml } from '../shared/rich-text.js';
+import { hasFreePage, renderFreePageHtml } from '../shared/free-page.js';
 import { quillEditorHtml, getQuillHtml, bindQuillEditors } from '../shared/rich-text-quill.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import { characterPortraitContent } from '../shared/portraits.js';
@@ -254,6 +255,7 @@ function _buildRecord(char = null, pres = null) {
     quote:    char?.quote || '',
     identity: Array.isArray(char?.identity) ? char.identity : [],
     bio:            pres?.bio?.trim() || char?.bio || '',
+    bioPage:        char?.bioPage || pres?.bioPage || null,
     // Vitaux calculés
     pvActuel:       char?.pvActuel ?? null,
     pvMax:          char ? calcPVMax(char) : null,
@@ -892,7 +894,9 @@ function _renderFiche(item, items) {
       </div>` : '';
 
   const narrative = item.afficherBio
-    ? (item.content
+    ? (hasFreePage(item.bioPage)
+        ? renderFreePageHtml({ page: item.bioPage, className: 'pp-free-page' })
+        : item.content
         ? richTextContentHtml({ html: item.content, className: 'pp-rich-content' })
         : item.bio
           ? `<div class="pp-bio-legacy">${_nl2br(item.bio)}</div>`

@@ -18,8 +18,15 @@ import { _esc } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { getCharacterById } from '../../shared/character-state.js';
 import { promptModal } from '../../shared/modal.js';
-import { quillEditorHtml, getQuillHtml } from '../../shared/rich-text-quill.js';
 import { richTextContentHtml } from '../../shared/rich-text.js';
+import {
+  bindFreePageEditor,
+  freePageEditorHtml,
+  freePageToLegacyHtml,
+  getFreePageData,
+  hasFreePage,
+  renderFreePageHtml,
+} from '../../shared/free-page.js';
 import { renderCharProfil, getProfilCacheRef as _profilCache } from './tabs.js';
 
 // État module-local
@@ -122,6 +129,7 @@ export function renderCharProfilV3(c, canEdit) {
   const presCache = _profilCache?.[c.id] || null;
   const canManageIllustration = STATE.isAdmin;
   const bioHtml = presCache?.content || c.bio || '';
+  const bioPage = c.bioPage || presCache?.bioPage || null;
   // Source de vérité des traits = c.tags (le V3 écrit dessus via updateInCol
   // 'characters'). On ne lit presCache.tags QUE si c.tags est absent : sinon un
   // `tags:[]` périmé du doc players (truthy !) masquait les traits enregistrés.
@@ -199,21 +207,27 @@ export function renderCharProfilV3(c, canEdit) {
     </div>`;
   }).join('');
 
-  // Bio : édition rich-text quand active, sinon rendu fidèle via richTextContentHtml
+  // Bio : page libre structurée. L'ancien HTML est importé dans un premier bloc
+  // à la première édition, sans migration destructive du contenu existant.
   const editingBio = _csV3EditingBio === c.id;
   const bioBlockHtml = editingBio && canEdit
     ? `<div class="profil-bio-edit">
-        ${quillEditorHtml({ id: 'profil-bio-rt', html: bioHtml, minHeight: 220, placeholder: 'Décris ton personnage…' })}
-        <div style="display:flex;gap:8px;margin-top:10px">
-          <button class="btn btn-gold btn-sm" data-action="csV3SaveBioRt" data-id="${c.id}">💾 Enregistrer</button>
+        ${freePageEditorHtml({ id: 'profil-bio-page', page: bioPage, legacyHtml: bioHtml })}
+        <div class="profil-bio-savebar">
+          <span>La composition sera visible de la même façon sur la page Joueurs.</span>
+          <div class="profil-bio-saveactions">
+          <button class="btn btn-gold btn-sm" data-action="csV3SaveBioRt" data-free-page-save data-id="${c.id}">Enregistrer</button>
           <button class="btn btn-outline btn-sm" data-action="csV3CancelBio" data-id="${c.id}">Annuler</button>
+          </div>
         </div>
       </div>`
-    : `${bioHtml
-        ? richTextContentHtml({ html: bioHtml, className: 'profil-text' })
+    : `${hasFreePage(bioPage)
+        ? renderFreePageHtml({ page: bioPage, className: 'profil-free-page' })
+        : bioHtml
+          ? richTextContentHtml({ html: bioHtml, className: 'profil-text' })
         : `<div class="profil-text"><p style="color:var(--text-dim);font-style:italic">${canEdit?'Clique sur ✎ pour rédiger une bio.':'Aucune biographie publique.'}</p></div>`}
       ${canEdit ? `<button class="section-action" style="align-self:flex-start;margin-top:6px"
-        data-action="csV3EnterBioEdit" data-id="${c.id}">✎ Modifier la bio</button>` : ''}`;
+        data-action="csV3EnterBioEdit" data-id="${c.id}">Composer la biographie</button>` : ''}`;
   const quoteHtml = canEdit
     ? `<label class="profil-quote-block">
         <span class="profil-field-label">Citation</span>
@@ -256,7 +270,7 @@ export function renderCharProfilV3(c, canEdit) {
       </div>` : '';
 
   return `
-  <div class="profil-layout">
+  <div class="profil-layout ${editingBio ? 'is-bio-editing' : ''}">
     <div class="profil-main">
       <div class="profil-side-card profil-bio-card">
         <h4>✎ Biographie</h4>
@@ -411,19 +425,45 @@ export function _csV3CancelBio(charId) {
 }
 export async function _csV3SaveBioRt(charId) {
   const c = getCharacterById(charId); if (!c) return;
-  const html = getQuillHtml('profil-bio-rt') || '';
-  // Sauvegarde : on écrit sur c.bio (string HTML) ET sur pres.content si présence
+  const bioPage = getFreePageData(document.getElementById('profil-bio-page'));
+  if (!bioPage) return showNotif('Editeur de biographie indisponible.', 'error');
+  if (JSON.stringify(bioPage).length > 650000) {
+    return showNotif('Cette biographie est trop lourde. Retire une image ou utilise des images plus légères.', 'error');
+  }
+  const html = freePageToLegacyHtml(bioPage);
+  try {
+    await updateInCol('characters', charId, { bio: html, bioPage });
+  } catch (e) {
+    console.error('[bio page save]', e);
+    if (isFirestoreDocumentSizeError(e)) {
+      showNotif('Biographie trop lourde pour Firestore. Supprime une image ou remplace-la par une version plus lÃ©gÃ¨re.', 'error');
+      return;
+    }
+    showNotif('La biographie n\'a pas pu être enregistrée.', 'error');
+    return;
+  }
   c.bio = html;
-  await updateInCol('characters', charId, { bio: html });
+  c.bioPage = bioPage;
   const presCache = _profilCache?.[charId];
   if (presCache?.id) {
     try {
-      await updateInCol('players', presCache.id, { content: html });
+      await updateInCol('players', presCache.id, { content: html, bioPage });
       presCache.content = html;
+      presCache.bioPage = bioPage;
     } catch (e) { console.warn('[bio→pres sync]', e); }
   }
   _csV3EditingBio = null;
+  showNotif('Biographie enregistrée.', 'success');
   charSession.renderTab('profil', c, true);
+}
+
+function isFirestoreDocumentSizeError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return message.includes('exceeds the maximum allowed size') || message.includes('1,048,576');
+}
+
+export function bindCharProfilV3(root) {
+  bindFreePageEditor(root);
 }
 
 export async function _csV3SaveVisibility(charId, key, value) {

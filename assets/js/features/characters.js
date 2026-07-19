@@ -53,6 +53,7 @@ import {
   _csV3AddProfilTag, _csV3AddProfilTagFromInput, _csV3RemoveProfilTag,
   _csV3RenameIdentity, _csV3AddFact,
   _csV3EnterBioEdit, _csV3CancelBio, _csV3SaveBioRt,
+  bindCharProfilV3,
 } from './characters/profil.js';
 
 import {
@@ -902,7 +903,7 @@ function _renderTabV3(tab, c, canEdit) {
   void area.offsetWidth;
   area.classList.add('cs-tab-fadein');
   if (tab === 'profil') {
-    bindQuillEditors(area);
+    bindCharProfilV3(area);
   }
   if (tab === 'journal' && sub === 'notes') { bindQuillEditors(area); _bindNotesDnd(c, canEdit); }
   if (tab === 'journal' && sub === 'quetes') _bindQuetesDnd(c, canEdit);

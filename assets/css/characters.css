@@ -9404,15 +9404,34 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   font-size: .8rem;
   font-weight: 700;
 }
-.cs-v3 .profil-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; align-items: start; }
+.cs-v3 .profil-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 300px); gap: 14px; align-items: start; }
 .cs-v3 .profil-main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
   gap: 14px;
   align-items: start;
+  min-width: 0;
 }
 .cs-v3 .profil-bio-card {
   grid-column: 1;
+  min-width: 0;
+}
+.cs-v3 .profil-layout.is-bio-editing {
+  grid-template-columns: minmax(0, 1fr);
+}
+.cs-v3 .profil-layout.is-bio-editing .profil-main {
+  grid-template-columns: minmax(0, 1fr);
+}
+.cs-v3 .profil-layout.is-bio-editing .profil-bio-card {
+  grid-column: 1;
+}
+.cs-v3 .profil-layout.is-bio-editing .profil-meta-stack {
+  grid-column: 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.cs-v3 .profil-layout.is-bio-editing > .profil-side {
+  display: none;
 }
 .cs-v3 .profil-meta-stack {
   grid-column: 2;
@@ -9421,17 +9440,32 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   gap: 14px;
   min-width: 0;
 }
-@media (max-width: 1180px) {
+@media (max-width: 1360px) {
   .cs-v3 .profil-main { grid-template-columns: 1fr; }
   .cs-v3 .profil-bio-card,
   .cs-v3 .profil-meta-stack {
     grid-column: auto;
   }
-  .cs-v3 .profil-meta-stack { order: -2; }
+  .cs-v3 .profil-meta-stack {
+    order: -2;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .cs-v3 .profil-bio-card { order: -1; }
 }
-@media (max-width: 880px) {
+@media (max-width: 1040px) {
   .cs-v3 .profil-layout { grid-template-columns: 1fr; }
+  .cs-v3 .profil-side {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    align-items: start;
+  }
+}
+@media (max-width: 760px) {
+  .cs-v3 .profil-meta-stack,
+  .cs-v3 .profil-side {
+    grid-template-columns: 1fr;
+  }
 }
 /* Identité : champs en auto-fit (plusieurs colonnes étroites dans la colonne
    large) → label et valeur restent rapprochés, pas d'écart béant, hauteur basse. */
@@ -10287,6 +10321,42 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .profil-side-card h4 { margin: 0 0 10px; font-size: .68rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); }
 .cs-v3 .profil-bio-card .profil-text { width: 100%; max-width: none; margin: 0; box-sizing: border-box; }
 .cs-v3 .profil-bio-card .section-action { margin-top: 10px !important; }
+.cs-v3 .profil-bio-card:has(.free-page-editor) {
+  padding: 12px;
+}
+.cs-v3 .profil-bio-card:has(.free-page-editor) > h4 {
+  margin: 0 0 8px;
+}
+.cs-v3 .profil-bio-savebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,.07);
+}
+.cs-v3 .profil-bio-savebar > span {
+  color: var(--text-dim);
+  font-size: .7rem;
+}
+.cs-v3 .profil-bio-saveactions {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+.cs-v3 .profil-free-page {
+  width: 100%;
+  min-width: 0;
+  min-height: 220px;
+}
+@media (max-width: 760px) {
+  .cs-v3 .profil-layout.is-bio-editing .profil-meta-stack { grid-template-columns: 1fr; }
+  .cs-v3 .profil-bio-savebar { align-items: stretch; flex-direction: column; }
+  .cs-v3 .profil-bio-saveactions { width: 100%; }
+  .cs-v3 .profil-bio-saveactions .btn { flex: 1; }
+}
 .cs-v3 .profil-fact {
   display: grid;
   grid-template-columns: minmax(64px, .7fr) minmax(0, 1.3fr);

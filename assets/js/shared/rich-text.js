@@ -1373,7 +1373,7 @@ const RICH_TEXT_ALLOWED_STYLE_PROPS = new Set([
   'font-family', 'font-size', 'font-style', 'font-weight', 'margin',
   'margin-bottom', 'margin-left', 'margin-right', 'margin-top', 'opacity',
   'padding', 'padding-bottom', 'padding-left', 'padding-right', 'padding-top',
-  'text-align', 'text-decoration', 'user-select', 'vertical-align',
+  'text-align', 'text-decoration', 'text-transform', 'user-select', 'vertical-align',
   'white-space',
 ]);
 
