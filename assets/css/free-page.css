@@ -431,6 +431,26 @@
   text-transform: uppercase;
 }
 
+/* Indicateur de poids du diaporama (alerte à l'approche de la limite Firestore) */
+.free-page-weight {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--border, rgba(255,255,255,.12));
+  border-radius: 6px;
+  color: var(--text-dim, #7a8699);
+  font: 700 .66rem/1 'Outfit', sans-serif;
+  white-space: nowrap;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.free-page-weight.is-warn {
+  color: #f0c65a; border-color: rgba(240,198,90,.5); background: rgba(240,198,90,.08);
+}
+.free-page-weight.is-over {
+  color: #ff9b9b; border-color: rgba(255,107,107,.55); background: rgba(255,107,107,.1);
+}
+
 .free-page-tool,
 .free-page-select {
   min-height: 32px;

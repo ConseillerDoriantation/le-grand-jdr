@@ -722,6 +722,7 @@ export function freePageEditorHtml({ id = 'free-page-editor', page, legacyHtml =
       <div class="free-page-toolbar-spacer"></div>
       <button type="button" class="free-page-tool free-page-tool--primary" data-fpe-action="preview-deck" title="Tester le rendu et les interactions">Apercu</button>
       <span class="free-page-slide-size">Diapo 1000 x ${DEFAULT_HEIGHT}</span>
+      <span class="free-page-weight" data-fpe-weight title="Poids du diaporama — limite Firestore ~1000 Ko">—</span>
     </div>
     <div class="free-page-body">
       <aside class="free-page-slidebar" data-fpe-slides></aside>
@@ -786,7 +787,47 @@ function bindSingleFreePageEditor(editor) {
     if (event.target.closest('[data-fpe-inspector], [data-fpe-text-toolbar]')) saveEditorTextSelection(editor, { paint: true });
     if (event.target.closest('[data-fpe-command], [data-fpe-text-color]')) event.preventDefault();
   });
+  ensureUnsavedGuard();
+  editor.addEventListener('input', () => scheduleWeightUpdate(editor));
+  editor.addEventListener('change', () => scheduleWeightUpdate(editor));
+  editor.addEventListener('pointerup', () => scheduleWeightUpdate(editor));
   renderBlocks(editor, null);
+  updateFreePageWeight(editor);
+}
+
+// ── Indicateur de poids en direct ────────────────────────────────────────────
+// Affiche la taille (Ko) du deck tel qu'il sera enregistré, avec alerte visuelle
+// à l'approche de la limite Firestore (~1 Mo/doc) → l'utilisateur voit venir le
+// blocage au lieu de le subir à l'enregistrement.
+const FREE_PAGE_SAFE_BYTES = 1_000_000;
+function scheduleWeightUpdate(editor) {
+  clearTimeout(editor.__freePageWeightTimer);
+  editor.__freePageWeightTimer = setTimeout(() => updateFreePageWeight(editor), 450);
+}
+function updateFreePageWeight(editor) {
+  const badge = editor?.querySelector?.('[data-fpe-weight]');
+  if (!badge) return;
+  let bytes = 0;
+  try { bytes = new TextEncoder().encode(JSON.stringify(getFreePageData(editor) || {})).length; }
+  catch { return; }
+  badge.textContent = `${Math.round(bytes / 1024)} Ko`;
+  const pct = bytes / FREE_PAGE_SAFE_BYTES;
+  badge.classList.toggle('is-warn', pct >= 0.8 && pct < 1);
+  badge.classList.toggle('is-over', pct >= 1);
+}
+
+// ── Garde « modifications non enregistrées » ─────────────────────────────────
+// Avertit avant de recharger/fermer l'onglet s'il reste des changements non
+// sauvegardés dans un éditeur monté (undo non vide = au moins une mutation).
+let unsavedGuardBound = false;
+function ensureUnsavedGuard() {
+  if (unsavedGuardBound || typeof window === 'undefined') return;
+  unsavedGuardBound = true;
+  window.addEventListener('beforeunload', (event) => {
+    const dirty = [...document.querySelectorAll('[data-free-page-editor]')]
+      .some((el) => (el.__freePageUndo?.length || 0) > 0);
+    if (dirty) { event.preventDefault(); event.returnValue = ''; }
+  });
 }
 
 function handleEditorDoubleClick(editor, event) {
