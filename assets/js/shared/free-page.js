@@ -1565,7 +1565,7 @@ function navigateEditorSlide(editor, key) {
   if (nextIndex !== currentIndex) switchSlide(editor, slides[nextIndex].id);
 }
 
-function handleSlideField(editor, target) {
+function handleSlideField(editor, target, { live = false } = {}) {
   const slide = editor.__freePageDeck?.slides?.find((item) => item.id === target.dataset.slideId);
   if (!slide) return;
   if (target.dataset.fpeSlideField === 'title') slide.title = String(target.value || '').slice(0, 64);
@@ -1579,7 +1579,9 @@ function handleSlideField(editor, target) {
   if (target.dataset.fpeSlideField === 'password') slide.password = String(target.value || '').slice(0, 80);
   if (target.dataset.fpeSlideField === 'passwordMessage') slide.passwordMessage = String(target.value || DEFAULT_PASSWORD_MESSAGE).slice(0, 140);
   if (target.dataset.fpeSlideField === 'passwordPlaceholder') slide.passwordPlaceholder = String(target.value || DEFAULT_PASSWORD_PLACEHOLDER).slice(0, 80);
-  renderInspector(editor);
+  // Pendant la frappe (live), NE PAS re-rendre l'inspecteur : recréer l'input
+  // ferait sauter le focus à chaque caractère. Le rendu se fait au blur/change.
+  if (!live) renderInspector(editor);
 }
 
 function handleDeckField(editor, target) {
