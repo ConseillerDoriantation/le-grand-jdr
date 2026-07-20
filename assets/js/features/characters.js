@@ -67,6 +67,7 @@ import {
   filterInvRows, openInventoryItemDetail,
   ensureInventoryCatalog, isInventoryCatalogReady, getInventoryCatalogItem,
 } from './characters/inventory.js';
+import { openCreateItemModal } from './characters/item-forge.js';
 import {
   getInventoryItemValue,
   getInventoryItemResaleValue,
@@ -2076,6 +2077,7 @@ registerActions({
   // Inventaire
   openInventoryItemDetail:  (btn)   => openInventoryItemDetail(btn.dataset.id, btn.dataset.indices),
   addInvItem:               ()      => addInvItem(),
+  openCreateItemModal:      (btn)   => openCreateItemModal(btn?.dataset?.id),
   csV3InvSetCat:            (btn)   => _csV3InvSetCat(btn.dataset.cat),
   csV3InvClearSearch:       ()      => _csV3InvClearSearch(),
   csV3InvSetDensity:        (btn)   => _csV3InvSetDensity(btn.dataset.density),
