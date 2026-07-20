@@ -484,6 +484,9 @@ match /adventures/{adventureId} {
     allow delete: if premiumFeatureWriteAllowed(adventureId) && canUpdateAdventurePlayer(adventureId);
   }
   match /world/{id}             { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
+  // Contenu « diapo » des sections du Guide, déporté hors de world/main (1 doc/section,
+  // budget 1 Mo propre). Mêmes droits que world : lecture membre, écriture MJ.
+  match /worldPages/{id}        { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
   match /informations/{id}      { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
   match /tutorial/{id}          { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
   match /recettes/{id}          { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
