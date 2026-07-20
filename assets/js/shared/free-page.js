@@ -873,6 +873,24 @@ function packImageBlockForStorage(block, assets, srcToAssetId) {
   delete block.src;
 }
 
+// Recompresse toutes les images base64 d'un deck (elles vivent dans deck.assets
+// après sérialisation) pour faire tenir la page sous la limite Firestore (1 Mo/
+// doc). Dernier recours au moment d'enregistrer : mieux vaut une image un peu
+// plus compressée qu'un échec d'écriture. Renvoie un NOUVEAU deck (l'original
+// n'est pas muté). Les URLs distantes et data:SVG sont laissées intactes.
+export async function compressFreePageImages(deck, { max = 900, quality = 0.6 } = {}) {
+  if (!deck || typeof deck !== 'object' || !deck.assets || typeof deck.assets !== 'object') return deck;
+  const out = structuredClone(deck);
+  for (const [id, src] of Object.entries(out.assets)) {
+    if (typeof src !== 'string' || !/^data:image\/(?:png|jpe?g|gif|webp|avif)/i.test(src)) continue;
+    try {
+      const smaller = await compressDataUrl(src, { max, quality });
+      if (smaller && smaller.length < src.length) out.assets[id] = smaller;
+    } catch { /* on garde l'original si la recompression échoue */ }
+  }
+  return out;
+}
+
 function activateFreePageEditor(editor) {
   if (editor?.isConnected) activeFreePageEditor = editor;
 }

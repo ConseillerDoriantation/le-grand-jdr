@@ -21,6 +21,7 @@ import { promptModal } from '../../shared/modal.js';
 import { richTextContentHtml } from '../../shared/rich-text.js';
 import {
   bindFreePageEditor,
+  compressFreePageImages,
   freePageEditorHtml,
   freePageToLegacyHtml,
   getFreePageData,
@@ -423,14 +424,38 @@ export function _csV3CancelBio(charId) {
   const c = getCharacterById(charId); if (!c) return;
   charSession.renderTab('profil', c, true);
 }
+// Firestore plafonne un document à 1 048 576 octets. La bio (diapo) vit SUR le
+// doc perso, à côté de l'inventaire/builds/etc. → on doit borner le DOCUMENT
+// ENTIER, pas seulement la bio. Marge de sécurité sous la limite (noms de champs
+// + surcoût Firestore non comptés par JSON.stringify).
+const BIO_DOC_SAFE_BYTES = 1_000_000;
+const _utf8Len = (str) => new TextEncoder().encode(str).length;
+// Taille approx du doc perso résultant avec la nouvelle bio appliquée.
+const _projectedCharDocBytes = (c, extra) => _utf8Len(JSON.stringify({ ...c, ...extra }));
+
 export async function _csV3SaveBioRt(charId) {
   const c = getCharacterById(charId); if (!c) return;
-  const bioPage = getFreePageData(document.getElementById('profil-bio-page'));
+  let bioPage = getFreePageData(document.getElementById('profil-bio-page'));
   if (!bioPage) return showNotif('Editeur de biographie indisponible.', 'error');
-  if (JSON.stringify(bioPage).length > 650000) {
-    return showNotif('Cette biographie est trop lourde. Retire une image ou utilise des images plus légères.', 'error');
+  let html = freePageToLegacyHtml(bioPage);
+
+  // Garde-fou de taille : si le doc perso dépasserait la limite Firestore, on
+  // recompresse d'abord les images du deck (progressivement), et seulement en
+  // dernier recours on bloque avec un message chiffré — jamais d'écriture vouée
+  // à l'échec (cause du blocage « document size exceeds maximum »).
+  let bytes = _projectedCharDocBytes(c, { bio: html, bioPage });
+  if (bytes > BIO_DOC_SAFE_BYTES) {
+    for (const opts of [{ max: 900, quality: .6 }, { max: 720, quality: .5 }, { max: 560, quality: .42 }]) {
+      bioPage = await compressFreePageImages(bioPage, opts);
+      html = freePageToLegacyHtml(bioPage);
+      bytes = _projectedCharDocBytes(c, { bio: html, bioPage });
+      if (bytes <= BIO_DOC_SAFE_BYTES) { showNotif('Images recompressées pour tenir dans la limite Firestore.', 'info'); break; }
+    }
   }
-  const html = freePageToLegacyHtml(bioPage);
+  if (bytes > BIO_DOC_SAFE_BYTES) {
+    return showNotif(`Cette biographie est trop lourde (~${Math.round(bytes / 1024)} Ko pour une limite de ~${Math.round(BIO_DOC_SAFE_BYTES / 1024)} Ko). Retire une image ou une diapo.`, 'error');
+  }
+
   try {
     await updateInCol('characters', charId, { bio: html, bioPage });
   } catch (e) {
