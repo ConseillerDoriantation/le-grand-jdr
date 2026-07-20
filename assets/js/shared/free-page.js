@@ -6,7 +6,7 @@ import { showNotif } from './notifications.js';
 const PAGE_WIDTH = 1000;
 const DEFAULT_HEIGHT = 650;
 const MAX_BLOCKS = 30;
-const MAX_IMAGES = 3;
+const MAX_IMAGES = 20;
 const MAX_SLIDES = 18;
 const MAX_HISTORY = 50;
 const BLOCK_TYPES = new Set(['text', 'image', 'table', 'chart', 'shape']);
@@ -884,7 +884,12 @@ export async function compressFreePageImages(deck, { max = 900, quality = 0.6 } 
   for (const [id, src] of Object.entries(out.assets)) {
     if (typeof src !== 'string' || !/^data:image\/(?:png|jpe?g|gif|webp|avif)/i.test(src)) continue;
     try {
-      const smaller = await compressDataUrl(src, { max, quality });
+      // Transparence PRÉSERVÉE : les images à alpha passent par le WebP lossy
+      // (compressTransparentDataUrl) au lieu du JPEG (compressDataUrl) qui
+      // aplatirait le fond → sinon le garde-fou de taille détruisait l'alpha.
+      const smaller = await imageHasTransparency(src)
+        ? await compressTransparentDataUrl(src, max, quality)
+        : await compressDataUrl(src, { max, quality });
       if (smaller && smaller.length < src.length) out.assets[id] = smaller;
     } catch { /* on garde l'original si la recompression échoue */ }
   }
@@ -1809,7 +1814,7 @@ function addTextBlock(editor, { content = '<p>Nouveau texte</p>' } = {}) {
 
 function addImageBlock(editor) {
   const imageCount = editor.__freePageState.blocks.filter((block) => block.type === 'image').length;
-  if (imageCount >= MAX_IMAGES) return showNotif(`Maximum ${MAX_IMAGES} images dans une biographie.`, 'info');
+  if (imageCount >= MAX_IMAGES) return showNotif(`Maximum ${MAX_IMAGES} images par diapo.`, 'info');
   pickImageFile({ onImage: async ({ dataUrl }) => {
     showNotif("Preparation de l'image...", 'info');
     const src = await compressPageImage(dataUrl);
@@ -1876,8 +1881,10 @@ function addShapeBlock(editor, shape = 'rectangle') {
 
 async function compressPageImage(dataUrl) {
   if (await imageHasTransparency(dataUrl)) {
-    for (const max of [1000, 820, 680, 520]) {
-      const compressed = await compressTransparentDataUrl(dataUrl, max);
+    // WebP lossy : conserve l'alpha ET compresse fortement (le PNG sans perte
+    // faisait exploser la taille → rejet). On dégrade taille/qualité au besoin.
+    for (const { max, quality } of [{ max: 1200, quality: .82 }, { max: 1000, quality: .74 }, { max: 820, quality: .64 }, { max: 680, quality: .54 }]) {
+      const compressed = await compressTransparentDataUrl(dataUrl, max, quality);
       if (compressed && compressed.length <= 220000) return compressed;
     }
     return dataUrl.length <= 260000 ? dataUrl : null;
@@ -1922,7 +1929,7 @@ async function imageHasTransparency(dataUrl) {
   return false;
 }
 
-async function compressTransparentDataUrl(dataUrl, max = 900) {
+async function compressTransparentDataUrl(dataUrl, max = 900, quality = 0.82) {
   const img = await loadImageFromDataUrl(dataUrl);
   if (!img) return null;
   const ratio = Math.min(1, max / Math.max(img.width || 1, img.height || 1));
@@ -1934,8 +1941,14 @@ async function compressTransparentDataUrl(dataUrl, max = 900) {
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, w, h);
   ctx.drawImage(img, 0, 0, w, h);
-  try { return canvas.toDataURL('image/png'); }
-  catch { return null; }
+  try {
+    // WebP lossy PRÉSERVE la transparence tout en compressant bien plus qu'un PNG
+    // sans perte. Si le navigateur ne sait pas encoder en WebP, il retombe sur un
+    // PNG (préfixe différent) → on garde ce PNG en dernier recours.
+    const webp = canvas.toDataURL('image/webp', quality);
+    if (/^data:image\/webp/i.test(webp)) return webp;
+    return canvas.toDataURL('image/png');
+  } catch { return null; }
 }
 
 function mutateSelection(editor, action) {
