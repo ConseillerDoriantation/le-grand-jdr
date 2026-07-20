@@ -10415,6 +10415,15 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   padding-top: 10px;
   border-top: 1px solid rgba(255,255,255,.07);
 }
+/* Interrupteur MJ : autoriser le joueur à composer sa bio (admin-only) */
+.cs-v3 .profil-bio-lock {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin-top: 10px; padding: 6px 10px; border-radius: 999px;
+  background: rgba(244,196,48,.07); border: 1px solid rgba(244,196,48,.22);
+  color: var(--text-muted); font-size: .74rem; cursor: pointer; user-select: none;
+}
+.cs-v3 .profil-bio-lock input { accent-color: var(--amber, #f4c430); cursor: pointer; }
+.cs-v3 .profil-bio-lock:hover { border-color: rgba(244,196,48,.4); color: var(--text); }
 .cs-v3 .profil-bio-savebar > span {
   color: var(--text-dim);
   font-size: .7rem;

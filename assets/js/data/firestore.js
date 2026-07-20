@@ -378,6 +378,8 @@ const _LAZY_SESSION_COLLECTIONS = new Set([
   // Bio « diapo » déportée hors du doc perso (1 doc/perso, base64 lourd). Session-
   // live → 0 lecture en repeat ; lazy → amorcée à l'entrée d'aventure (initCharacterPages).
   'characterPages',
+  // Contenu « diapo » des sections du Guide, déporté hors de world/main (1 doc/section).
+  'worldPages',
   // Lourdes en base64 (bannières / 1400px / cartes) et non bloquantes pour le
   // 1er rendu du dashboard (réactif : il s'y abonne et se remplit à l'arrivée).
   // Restent session-live (partagées, 0 lecture en plus) mais amorcées à la demande.

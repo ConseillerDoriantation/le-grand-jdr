@@ -5512,6 +5512,16 @@ body.ach-dragging * { cursor:grabbing !important; }
   padding: 18px 20px 20px;
 }
 
+/* Contenu « diapo » (free-page) du Guide : rendu lecteur + éditeur plein cadre */
+.world-free-page { margin: 0 auto; }
+.world-content-editor { display: flex; flex-direction: column; gap: 10px; }
+.world-content-editor-bar {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding-top: 10px; border-top: 1px solid var(--border);
+  position: sticky; bottom: 0;
+  background: linear-gradient(180deg, transparent, var(--bg-card) 40%);
+}
+
 .world-section-content {
   color: var(--text-muted);
   font-size: .94rem;

@@ -11,8 +11,14 @@ import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc, _nl2br, _norm } from '../shared/html.js';
 import { richTextContentHtml } from '../shared/rich-text.js';
-import { quillEditorHtml, bindQuillEditors, getQuillHtml } from '../shared/rich-text-quill.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
+import {
+  freePageEditorHtml, bindFreePageEditor, getFreePageData,
+  renderFreePageHtml, hasFreePage, freePageToLegacyHtml, compressFreePageImages,
+} from '../shared/free-page.js';
+import {
+  worldPageFor, saveWorldPage, deleteWorldPage, setCachedWorldPage, onWorldPagesChange,
+} from '../shared/world-pages.js';
 import { STATE } from '../core/state.js';
 import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
@@ -58,6 +64,40 @@ const STORE = {
 
 let _sortables    = [];     // instances SortableJS (une par liste de catégorie)
 let _wiCropper    = null;
+let _editingContentId = null; // section dont le contenu (diapo) est en édition
+
+// Firestore plafonne un doc à 1 048 576 octets. Chaque section a son propre doc
+// worldPages/{id} → budget dédié. Marge de sécurité + recompression auto.
+const WORLD_PAGE_SAFE_BYTES = 1_000_000;
+const _utf8Len = (str) => new TextEncoder().encode(str).length;
+async function _fitWorldPage(page) {
+  let bytes = _utf8Len(JSON.stringify({ page })), shrunk = false;
+  if (bytes <= WORLD_PAGE_SAFE_BYTES) return { page, bytes, fitted: true, shrunk };
+  for (const opts of [{ max: 900, quality: .6 }, { max: 720, quality: .5 }, { max: 560, quality: .42 }]) {
+    page = await compressFreePageImages(page, opts); shrunk = true;
+    bytes = _utf8Len(JSON.stringify({ page }));
+    if (bytes <= WORLD_PAGE_SAFE_BYTES) return { page, bytes, fitted: true, shrunk };
+  }
+  return { page, bytes, fitted: false, shrunk };
+}
+
+// Re-render le Guide quand les contenus déportés (worldPages) arrivent — jamais
+// pendant une édition (l'éditeur porte l'état non enregistré).
+let _worldReactivityBound = false;
+function _ensureWorldReactivity() {
+  if (_worldReactivityBound) return;
+  _worldReactivityBound = true;
+  onWorldPagesChange(() => {
+    if (_editingContentId) return;
+    if (document.getElementById('world-main-content')) { try { renderWorld(); } catch (_) {} }
+  });
+}
+
+// Texte brut d'une section (deck déporté en priorité, sinon contenu legacy HTML).
+function _sectionPlainSource(s) {
+  const deck = worldPageFor(s?.id);
+  return hasFreePage(deck) ? freePageToLegacyHtml(deck) : (s?.contenu || '');
+}
 
 // Catégorie par défaut : accueille les sections sans catégorie (legacy / orphelines)
 const DEFAULT_CAT = { id: 'general', nom: 'Général', icone: '📖', visible: true };
@@ -136,6 +176,7 @@ function _worldStats(visibleCats, visibleSections) {
 
 // ── Rendu principal ───────────────────────────────────────────────────────────
 async function renderWorld() {
+  _ensureWorldReactivity();
   const content = document.getElementById('main-content');
   // Le splash pleine page de la navigation reste visible pendant _load (pas de
   // second loader propre — évite le flash splash→spinner, cf. npcs).
@@ -201,6 +242,7 @@ async function renderWorld() {
 
   // Bind drag & drop des items nav (admin)
   if (STATE.isAdmin) _bindNavDrag();
+  _bindWorldContentEditor();
 }
 
 // ── Groupe catégorie : en-tête + ses sections ─────────────────────────────────
@@ -272,10 +314,12 @@ function _renderSection(s, visibleSections = null) {
           </div>
           ${isHidden ? `<span class="world-hidden-badge">🔒 Masquée aux joueurs</span>` : ''}
         </div>
-        ${STATE.isAdmin ? `
+        ${STATE.isAdmin && _editingContentId !== s.id ? `
         <div class="world-section-actions">
+          <button data-action="worldEditContent" data-id="${s.id}"
+            class="btn btn-gold btn-sm">🖼️ Modifier le contenu</button>
           <button data-action="openWorldSectionModal" data-id="${s.id}"
-            class="btn btn-outline btn-sm">Modifier</button>
+            class="btn btn-outline btn-sm">Réglages</button>
           <button data-action="deleteWorldSection" data-id="${s.id}"
             class="btn btn-outline btn-sm world-danger-btn">Supprimer</button>
         </div>` : ''}
@@ -283,18 +327,40 @@ function _renderSection(s, visibleSections = null) {
     </header>
 
     <div class="world-sec-body">
-      ${s.contenu
-        ? richTextContentHtml({
-            html: _contentToHtml(s.contenu),
-            className: 'world-section-content',
-            attrs: {},
-          })
-        : `<div class="world-empty-copy">
-            Aucun contenu. ${STATE.isAdmin ? '<span>Utilise Modifier pour ajouter du texte.</span>' : ''}</div>`}
+      ${_renderSectionBody(s)}
     </div>
 
-    ${_renderSectionCards(s, sections)}
+    ${_editingContentId === s.id ? '' : _renderSectionCards(s, sections)}
   </article>`;
+}
+
+// Corps d'une section : éditeur diapo (admin en édition), sinon deck déporté, sinon
+// contenu legacy HTML (rich-text), sinon état vide.
+function _renderSectionBody(s) {
+  if (_editingContentId === s.id && STATE.isAdmin) return _renderContentEditor(s);
+  const deck = worldPageFor(s.id);
+  if (hasFreePage(deck)) return renderFreePageHtml({ page: deck, className: 'world-free-page' });
+  if (s.contenu) return richTextContentHtml({ html: _contentToHtml(s.contenu), className: 'world-section-content', attrs: {} });
+  return `<div class="world-empty-copy">Aucun contenu.${STATE.isAdmin ? ' <span>Utilise « Modifier le contenu » pour créer une diapo.</span>' : ''}</div>`;
+}
+
+function _renderContentEditor(s) {
+  const deck = worldPageFor(s.id);
+  const legacyHtml = hasFreePage(deck) ? '' : _contentToHtml(s.contenu || '');
+  return `<div class="world-content-editor">
+    ${freePageEditorHtml({ id: `world-page-${s.id}`, page: deck, legacyHtml })}
+    <div class="world-content-editor-bar">
+      <button class="btn btn-outline btn-sm" data-action="worldCancelContent">Annuler</button>
+      <button class="btn btn-gold btn-sm" data-action="worldSaveContent" data-id="${s.id}">Enregistrer le contenu</button>
+    </div>
+  </div>`;
+}
+
+// Monte l'éditeur free-page fraîchement injecté dans le lecteur (si édition).
+function _bindWorldContentEditor() {
+  if (!_editingContentId) return;
+  const host = document.getElementById('world-main-content');
+  if (host) bindFreePageEditor(host);
 }
 
 function _renderSectionCards(activeSection, visibleSections) {
@@ -312,7 +378,7 @@ function _renderSectionCards(activeSection, visibleSections) {
         <button type="button" class="world-related-card" data-action="selectWorldSection" data-id="${sec.id}">
           ${sec.imageUrl ? `<img src="${_esc(sec.imageUrl)}" alt="">` : `<span class="world-related-icon">${_esc(sec.icone || '📖')}</span>`}
           <strong>${_esc(sec.titre || 'Section')}</strong>
-          <small>${_esc(_worldExcerpt(sec.contenu, 92) || 'Aucun contenu renseigné.')}</small>
+          <small>${_esc(_worldExcerpt(_sectionPlainSource(sec), 92) || 'Aucun contenu renseigné.')}</small>
         </button>`).join('')}
     </div>
   </section>`;
@@ -329,13 +395,56 @@ function _renderEmpty() {
 }
 // ── Sélection section ─────────────────────────────────────────────────────────
 function selectWorldSection(id) {
+  _editingContentId = null;   // naviguer quitte l'éditeur de contenu
   STORE.activeId = id;
   document.querySelectorAll('[data-nav-id]').forEach(el => {
     el.classList.toggle('is-active', el.dataset.navId === id);
   });
   const section = STORE.sections.find(s => s.id === id);
   const main = document.getElementById('world-main-content');
+  if (main && section) { main.innerHTML = _renderSection(section); _bindWorldContentEditor(); }
+}
+
+// ── Édition du contenu diapo d'une section (mode plein cadre dans le lecteur) ──
+function worldEditContent(id) {
+  _editingContentId = id;
+  STORE.activeId = id;
+  const section = STORE.sections.find(s => s.id === id);
+  const main = document.getElementById('world-main-content');
+  if (main && section) { main.innerHTML = _renderSection(section); _bindWorldContentEditor(); }
+}
+
+function worldCancelContent() {
+  _editingContentId = null;
+  const section = STORE.sections.find(s => s.id === STORE.activeId);
+  const main = document.getElementById('world-main-content');
   if (main && section) main.innerHTML = _renderSection(section);
+}
+
+async function worldSaveContent(id) {
+  const page = getFreePageData(document.getElementById(`world-page-${id}`));
+  if (!page) return showNotif('Éditeur de contenu indisponible.', 'error');
+  const fit = await _fitWorldPage(page);
+  if (!fit.fitted) {
+    return showNotif(`Ce contenu est trop lourd (~${Math.round(fit.bytes / 1024)} Ko pour une limite de ~${Math.round(WORLD_PAGE_SAFE_BYTES / 1024)} Ko). Retire une image ou une diapo.`, 'error');
+  }
+  try {
+    await saveWorldPage(id, fit.page);
+  } catch (e) {
+    console.error('[world content save]', e);
+    const denied = String(e?.code || '') === 'permission-denied' || /permission|denied|insufficient/i.test(String(e?.message || ''));
+    return showNotif(denied
+      ? 'Écriture refusée : déploie la règle Firestore « worldPages » (voir docs/firestore-rules.md).'
+      : 'Le contenu n\'a pas pu être enregistré.', 'error');
+  }
+  // Auto-migration : efface le contenu legacy (HTML) désormais porté par worldPages.
+  const s = STORE.sections.find(x => x.id === id);
+  if (s && s.contenu) { s.contenu = ''; try { await _save(); } catch (_) {} }
+  setCachedWorldPage(id, fit.page);
+  _editingContentId = null;
+  if (fit.shrunk) showNotif('Images recompressées pour tenir dans la limite Firestore.', 'info');
+  showNotif('Contenu enregistré.', 'success');
+  renderWorld();
 }
 
 // ── Drag & drop des sections (SortableJS, cross-catégorie) ────────────────────
@@ -453,8 +562,11 @@ function openWorldSectionModal(id = null, presetCatId = null) {
       </div>
 
       <div class="mn-field">
-        <label class="mn-label">Contenu <span class="mn-label-hint">texte enrichi</span></label>
-        ${quillEditorHtml({ id: 'wi-contenu', html: _contentToHtml(s?.contenu || ''), placeholder: 'Décris ce chapitre du lore…', minHeight: 240 })}
+        <label class="mn-label">Contenu <span class="mn-label-hint">édité en diapo depuis la section</span></label>
+        <p class="mn-hint" style="margin:0;font-size:.82rem;color:var(--text-dim)">
+          Après avoir enregistré ces réglages, ouvre la section et clique
+          <strong>« 🖼️ Modifier le contenu »</strong> pour composer la diapo.
+        </p>
       </div>
 
       <label style="display:flex;align-items:center;gap:.6rem;
@@ -476,9 +588,6 @@ function openWorldSectionModal(id = null, presetCatId = null) {
 
   </div>
   `);
-
-  // Éditeur rich-text (Quill) du contenu (toolbar gras/listes/couleur…)
-  bindQuillEditors();
 
   // Upload + crop bannière → met à jour le fond du hero en live (onResult).
   _wiCropper?.destroy();
@@ -530,7 +639,6 @@ async function saveWorldSection() {
   const id        = document.getElementById('wi-id')?.value || `ws_${Date.now()}`;
   const isNew     = !document.getElementById('wi-id')?.value;
   const icone     = document.getElementById('wi-icon')?.value || '📖';
-  const contenu   = getQuillHtml('wi-contenu');
   const hidden    = document.getElementById('wi-hidden')?.checked || false;
   const categoryId = document.getElementById('wi-categorie')?.value
     || STORE.categories[0]?.id || DEFAULT_CAT.id;
@@ -543,6 +651,9 @@ async function saveWorldSection() {
   else if (cropResult === null)       imageUrl = '';
   _wiCropper?.destroy(); _wiCropper = null;
 
+  // Le contenu n'est plus édité ici (diapo via « Modifier le contenu ») : on
+  // préserve l'éventuel contenu legacy HTML jusqu'à sa migration en diapo.
+  const contenu = existing?.contenu || '';
   const section = { id, titre, icone, contenu, imageUrl, visible: !hidden, categoryId };
 
   if (isNew) {
@@ -563,6 +674,8 @@ async function deleteWorldSection(id) {
   if (!await confirmModal('Supprimer cette section définitivement ?')) return;
   STORE.sections = STORE.sections.filter(s => s.id !== id);
   if (STORE.activeId === id) STORE.activeId = STORE.sections[0]?.id || null;
+  if (_editingContentId === id) _editingContentId = null;
+  deleteWorldPage(id);   // nettoie le doc dédié (best-effort)
   await _save();
   showNotif('Section supprimée.', 'success');
   renderWorld();
@@ -678,6 +791,9 @@ registerActions({
   openWorldSectionModal:  (btn) => openWorldSectionModal(btn.dataset.id || undefined, btn.dataset.catId || undefined),
   selectWorldSection:     (btn) => selectWorldSection(btn.dataset.id),
   deleteWorldSection:     (btn) => deleteWorldSection(btn.dataset.id),
+  worldEditContent:       (btn) => worldEditContent(btn.dataset.id),
+  worldCancelContent:     ()    => worldCancelContent(),
+  worldSaveContent:       (btn) => worldSaveContent(btn.dataset.id),
   saveWorldSection:       ()    => saveWorldSection(),
   _selectWorldIcon:       (btn) => _selectWorldIcon(btn.dataset.id),
   openWorldCategoryModal: (btn) => openWorldCategoryModal(btn.dataset.id || undefined),
