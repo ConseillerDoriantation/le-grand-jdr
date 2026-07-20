@@ -2,6 +2,7 @@ import { _esc } from './html.js';
 import { sanitizeRichTextHtml } from './rich-text.js';
 import { compressDataUrl, pickImageFile } from './image-upload.js';
 import { showNotif } from './notifications.js';
+import { promptModal } from './modal.js';
 
 const PAGE_WIDTH = 1000;
 const DEFAULT_HEIGHT = 650;
@@ -1298,7 +1299,7 @@ function openContextMenu(editor, clientX, clientY, hasBlock, hasNav = false) {
     ? [['select-nav', 'Configurer le menu'], ['hide-nav', 'Masquer le menu']]
     : hasBlock
     ? [['copy', multiCount > 1 ? `Copier ${multiCount} blocs` : 'Copier le bloc'], ['duplicate', multiCount > 1 ? 'Dupliquer la selection' : 'Dupliquer'], ...(block?.type === 'image' && multiCount <= 1 ? [['crop-image', "Rogner l'image"], ['replace-image', "Remplacer l'image"]] : []), ...(multiCount <= 1 ? tableActions : []), ['reset-rotation', 'Remettre droit'], ['toggle-hidden-block', block?.hidden ? 'Afficher le bloc' : 'Masquer le bloc'], ['layer-up', 'Mettre devant'], ['layer-down', 'Mettre derriere'], ['toggle-lock', block?.locked ? 'Deverrouiller' : 'Verrouiller'], ['delete', multiCount > 1 ? 'Supprimer la selection' : 'Supprimer']]
-    : [['add-text', 'Ajouter texte'], ['add-image', 'Ajouter image'], ['add-table', 'Ajouter tableau'], ['add-chart', 'Ajouter graphique'], ['add-shape', 'Ajouter forme'], ['paste', 'Coller', !canPasteBlock(editor)], ['unlock-all', 'Deverrouiller tout', !editor.__freePageState.blocks.some((item) => item.locked)]];
+    : [['add-text', 'Ajouter texte'], ['add-image', 'Ajouter image'], ['add-image-url', 'Image par URL'], ['add-table', 'Ajouter tableau'], ['add-chart', 'Ajouter graphique'], ['add-shape', 'Ajouter forme'], ['paste', 'Coller', !canPasteBlock(editor)], ['unlock-all', 'Deverrouiller tout', !editor.__freePageState.blocks.some((item) => item.locked)]];
   menu.innerHTML = actions.map(([action, label, disabled]) => `<button type="button" data-fpe-context-action="${_esc(action)}" ${disabled ? 'disabled' : ''}>${_esc(label)}</button>`).join('');
   menu.hidden = false;
   const rect = menu.getBoundingClientRect();
@@ -1320,6 +1321,7 @@ function runAction(editor, action, event) {
   if (action.startsWith('position-')) return positionSelectionOnPage(editor, action.replace('position-', ''));
   if (action === 'add-text') return addTextBlock(editor);
   if (action === 'add-image') return addImageBlock(editor);
+  if (action === 'add-image-url') return addImageUrlBlock(editor);
   if (action === 'add-table') return addTableBlock(editor);
   if (action === 'add-chart') return addChartBlock(editor);
   if (action === 'add-nav') return activateNavComponent(editor);
@@ -1825,6 +1827,22 @@ function addImageBlock(editor) {
     editor.__freePageState.blocks.push(block);
     renderBlocks(editor, block.id);
   }});
+}
+
+// Image par URL (ex. hébergée sur GitHub Pages) : stockée comme simple URL, PAS
+// en base64 → poids quasi nul dans le document, images HD sans limite de taille.
+async function addImageUrlBlock(editor) {
+  const imageCount = editor.__freePageState.blocks.filter((b) => b.type === 'image').length;
+  if (imageCount >= MAX_IMAGES) return showNotif(`Maximum ${MAX_IMAGES} images par diapo.`, 'info');
+  const raw = await promptModal('URL de l’image (https://…) :', { title: 'Image par URL', placeholder: 'https://…' });
+  if (raw == null || !String(raw).trim()) return;   // annulé / vide
+  const src = safeImageUrl(String(raw).trim());
+  if (!src || isDataImageUrl(src)) return showNotif('URL d’image invalide (attendu https://…).', 'error');
+  const aspect = await imageAspectFromDataUrl(src);
+  pushHistory(editor);
+  const block = normalizeBlock({ type: 'image', x: 110, y: 90, w: 420, h: 260, z: nextZ(editor), src, imageAspect: aspect }, 0, editor.__freePageState.height);
+  editor.__freePageState.blocks.push(block);
+  renderBlocks(editor, block.id);
 }
 
 function replaceImageBlock(editor) {
@@ -3327,6 +3345,7 @@ function pageInspectorHtml(editor) {
       <div class="free-page-resource-grid">
         <button type="button" class="free-page-resource" data-fpe-action="add-text">Texte</button>
         <button type="button" class="free-page-resource" data-fpe-action="add-image">Image</button>
+        <button type="button" class="free-page-resource" data-fpe-action="add-image-url">Image URL</button>
         <button type="button" class="free-page-resource" data-fpe-action="add-table">Tableau</button>
         <button type="button" class="free-page-resource" data-fpe-action="add-chart">Graphique</button>
         <button type="button" class="free-page-resource" data-fpe-action="toggle-shape-popover">Formes</button>
