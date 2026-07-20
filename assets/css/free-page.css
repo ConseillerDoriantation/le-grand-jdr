@@ -2454,7 +2454,10 @@
   --shape-depth-x: calc(var(--shape-shadow, 22px) * .32);
   --shape-depth-y: calc(var(--shape-shadow, 22px) * .38);
   --shape-depth-blur: calc(var(--shape-shadow, 22px) * .24);
-  isolation: isolate;
+  /* Pas de `isolation: isolate` : sinon la forme devient racine de contexte
+     d'empilement et le bloc de profondeur (::before, z-index:-1) se peint
+     PAR-DESSUS son fond. Sans isolation, le ::before reste derrière la forme,
+     contenu par le bloc parent (.free-page-block porte déjà un z-index). */
 }
 
 .free-page-shape.is-shadowed {

@@ -1868,7 +1868,7 @@ function addShapeBlock(editor, shape = 'rectangle') {
   const block = normalizeBlock({
     type: 'shape', x: 135, y: 115, w: safeShape === 'line' ? 360 : 240, h: safeShape === 'line' ? 36 : 150,
     z: nextZ(editor), shape: safeShape, fill: safeShape === 'line' ? DEFAULT_SHAPE_STROKE : DEFAULT_SHAPE_FILL, stroke: DEFAULT_SHAPE_STROKE,
-    strokeWidth: safeShape === 'line' ? 4 : 2, radius: 12, shadow: safeShape !== 'line', shadowDepth: 28,
+    strokeWidth: safeShape === 'line' ? 4 : 1, radius: 12, shadow: false, shadowDepth: 28,
   }, 0, editor.__freePageState.height);
   editor.__freePageState.blocks.push(block);
   renderBlocks(editor, block.id);
