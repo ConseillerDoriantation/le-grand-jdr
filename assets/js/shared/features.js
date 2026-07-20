@@ -20,6 +20,7 @@ export const TOGGLEABLE_FEATURES = [
   { key: 'achievements', label: 'Hauts-Faits',  icon: '🏆' },
   { key: 'map',          label: 'Carte',        icon: '🗺️' },
   { key: 'world',        label: 'Guide',        icon: '🌍' },   // id interne 'world' conservé (données)
+  { key: 'diapo',        label: 'Diapo',        icon: '🎞️' },   // diaporama interactif MJ (premium : hors FREE_FEATURES)
   { key: 'npcs',         label: 'PNJ',          icon: '👥' },
   { key: 'players',      label: 'Joueurs',      icon: '🎭' },
   { key: 'bastion',      label: 'Bastion',      icon: '🏰' },

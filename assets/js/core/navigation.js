@@ -24,6 +24,7 @@ const FEATURE_MAP = {
   story:        () => import('../features/story.js'),
   bastion:      () => import('../features/bastion.js'),
   world:        () => import('../features/world.js'),
+  diapo:        () => import('../features/diapo.js'),
   achievements: () => import('../features/achievements.js'),
   collection:   () => import('../features/collection.js'),
   players:      () => import('../features/players.js'),
@@ -106,6 +107,7 @@ const FEATURE_CSS = {
   // Composant modal partagé `.mn-*` (hero/champs/footer) défini dans histoire.css
   // et réutilisé par ces pages → sinon leur modale s'affiche sans style.
   world:      ['histoire.css'],
+  diapo:      ['diapo.css'],
   collection: ['histoire.css'],
   players:    ['histoire.css'],
   bastion:    ['bastion.css'],
