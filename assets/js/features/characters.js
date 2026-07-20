@@ -52,7 +52,7 @@ import {
   _csV3SaveQuote, _csV3SaveIdentityValue, _csV3SaveVisibility,
   _csV3AddProfilTag, _csV3AddProfilTagFromInput, _csV3RemoveProfilTag,
   _csV3RenameIdentity, _csV3AddFact,
-  _csV3EnterBioEdit, _csV3CancelBio, _csV3SaveBioRt,
+  _csV3EnterBioEdit, _csV3CancelBio, _csV3SaveBioRt, csV3ToggleBioLock,
   bindCharProfilV3,
 } from './characters/profil.js';
 
@@ -2062,6 +2062,7 @@ registerActions({
   csV3SaveBioRt:            (btn)   => _csV3SaveBioRt(btn.dataset.id),
   csV3CancelBio:            (btn)   => _csV3CancelBio(btn.dataset.id),
   csV3EnterBioEdit:         (btn)   => _csV3EnterBioEdit(btn.dataset.id),
+  csV3ToggleBioLock:        (btn)   => csV3ToggleBioLock(btn.dataset.id),
   csV3AddFact:              (btn)   => _csV3AddFact(btn.dataset.id),
   openProfilImageUpload:    (btn)   => openProfilImageUpload(btn.dataset.id),
   removeProfilImage:        (btn)   => removeProfilImage(btn.dataset.id),

@@ -228,7 +228,17 @@ export function renderCharProfilV3(c, canEdit) {
   // Bio : page libre structurée. L'ancien HTML est importé dans un premier bloc
   // à la première édition, sans migration destructive du contenu existant.
   const editingBio = _csV3EditingBio === c.id;
-  const bioBlockHtml = editingBio && canEdit
+  // Verrou d'édition de la bio : le MJ édite toujours ; le joueur propriétaire
+  // seulement si le MJ l'y autorise (défaut = autorisé, pas de régression).
+  const bioLocked = c.bioLocked === true;
+  const canEditBio = _bioEditable(c);
+  const bioLockToggle = STATE.isAdmin
+    ? `<label class="profil-bio-lock" title="Autoriser le joueur (propriétaire) à composer sa biographie">
+        <input type="checkbox" ${bioLocked ? '' : 'checked'} data-action="csV3ToggleBioLock" data-id="${c.id}">
+        <span>Le joueur peut modifier la biographie</span>
+      </label>`
+    : '';
+  const bioBlockHtml = `${editingBio && canEditBio
     ? `<div class="profil-bio-edit">
         ${freePageEditorHtml({ id: 'profil-bio-page', page: bioPage, legacyHtml: bioHtml })}
         <div class="profil-bio-savebar">
@@ -243,9 +253,9 @@ export function renderCharProfilV3(c, canEdit) {
         ? renderFreePageHtml({ page: bioPage, className: 'profil-free-page' })
         : bioHtml
           ? richTextContentHtml({ html: bioHtml, className: 'profil-text' })
-        : `<div class="profil-text"><p style="color:var(--text-dim);font-style:italic">${canEdit?'Clique sur ✎ pour rédiger une bio.':'Aucune biographie publique.'}</p></div>`}
-      ${canEdit ? `<button class="section-action" style="align-self:flex-start;margin-top:6px"
-        data-action="csV3EnterBioEdit" data-id="${c.id}">Composer la biographie</button>` : ''}`;
+        : `<div class="profil-text"><p style="color:var(--text-dim);font-style:italic">${canEditBio ? 'Clique sur « Composer la biographie » pour la rédiger.' : 'Aucune biographie publique.'}</p></div>`}
+      ${canEditBio ? `<button class="section-action" style="align-self:flex-start;margin-top:6px"
+        data-action="csV3EnterBioEdit" data-id="${c.id}">Composer la biographie</button>` : ''}`}${bioLockToggle}`;
   const quoteHtml = canEdit
     ? `<label class="profil-quote-block">
         <span class="profil-field-label">Citation</span>
@@ -430,10 +440,27 @@ export async function _csV3AddFact(charId) {
   catch (e) { console.warn('[identity add]', e); }
   if (charSession.getCurrentCharTab() === 'profil') charSession.renderTab('profil', c, true);
 }
+// Le MJ édite toujours ; le joueur propriétaire seulement si non verrouillé.
+function _bioEditable(c) {
+  if (STATE.isAdmin) return true;
+  return (charSession.getCanEditChar?.() ?? false) && c?.bioLocked !== true;
+}
+
+// Le MJ (re)donne ou retire au joueur le droit de composer sa biographie.
+export async function csV3ToggleBioLock(charId) {
+  const c = getCharacterById(charId); if (!c || !STATE.isAdmin) return;
+  c.bioLocked = !(c.bioLocked === true);
+  try { await updateInCol('characters', charId, { bioLocked: c.bioLocked }); }
+  catch (e) { console.warn('[bioLock]', e); c.bioLocked = !c.bioLocked; return showNotif('Impossible de mettre à jour le réglage.', 'error'); }
+  showNotif(c.bioLocked ? 'Le joueur ne peut plus modifier sa biographie.' : 'Le joueur peut modifier sa biographie.', 'success');
+  charSession.renderTab('profil', c, true);
+}
+
 // Édition bio avec l'éditeur rich-text — mode "édition" toggle
 export function _csV3EnterBioEdit(charId) {
-  _csV3EditingBio = charId;
   const c = getCharacterById(charId); if (!c) return;
+  if (!_bioEditable(c)) return showNotif('La modification de la biographie est réservée au MJ pour ce personnage.', 'error');
+  _csV3EditingBio = charId;
   charSession.renderTab('profil', c, true);
 }
 export function _csV3CancelBio(charId) {
@@ -471,6 +498,7 @@ function _isPermissionDenied(e) {
 
 export async function _csV3SaveBioRt(charId) {
   const c = getCharacterById(charId); if (!c) return;
+  if (!_bioEditable(c)) { _csV3EditingBio = null; return showNotif('La modification de la biographie est réservée au MJ pour ce personnage.', 'error'); }
   const bioPage0 = getFreePageData(document.getElementById('profil-bio-page'));
   if (!bioPage0) return showNotif('Editeur de biographie indisponible.', 'error');
 
