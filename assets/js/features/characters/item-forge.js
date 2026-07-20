@@ -15,7 +15,7 @@ import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _esc } from '../../shared/html.js';
-import { RARETE_NAMES } from '../../shared/rarity.js';
+import { buildRaretePicker, loadRarities } from '../../shared/rarity.js';
 import { getCharacterById } from '../../shared/character-state.js';
 import { loadEquipmentSlots, getEquipmentItemOptions } from '../../shared/equipment-slots.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
@@ -54,16 +54,18 @@ function _blankDraft() {
 const _opt = (value, label, sel) =>
   `<option value="${_esc(value)}" ${String(sel) === String(value) ? 'selected' : ''}>${_esc(label)}</option>`;
 
-function _rarityOptions(sel) {
-  return `<option value="0">—</option>` +
-    RARETE_NAMES.map((name, i) => name ? _opt(i, name, sel) : '').join('');
-}
-function _statOptions(sel) {
-  return `<option value="">—</option>` + ITEM_STATS.map(s => _opt(s.key, s.label, sel)).join('');
+// Pastilles de stat : multi (dégâts) ou choix unique (toucher).
+function _statChips(action, isOn) {
+  const kind = action === '_forgeToucherPick' ? 'touch' : 'dmg';
+  return `<div class="forge-chips">` + ITEM_STATS.map(s =>
+    `<button type="button" class="forge-chip forge-chip--${kind} ${isOn(s.key) ? 'is-on' : ''}" data-action="${action}" data-stat="${s.key}">${s.short}</button>`
+  ).join('') + `</div>`;
 }
 
 // ── Briques de champ ─────────────────────────────────────────────────────────
 const _fRow = (label, inner) => `<label class="forge-field"><span>${label}</span>${inner}</label>`;
+const _section = (title, inner) => `<section class="forge-sec"><h4 class="forge-sec-t">${title}</h4>${inner}</section>`;
+const _row2 = (a, b) => `<div class="forge-row2">${a}${b}</div>`;
 const _fText = (f, ph = '') =>
   `<input class="input-field" data-forge-field="${f}" value="${_esc(_forge.draft[f] ?? '')}" placeholder="${_esc(ph)}">`;
 const _fNum = (f, ph = '') =>
@@ -98,51 +100,62 @@ function _slotField(field, options) {
 
 function _catBody() {
   const d = _forge.draft, cat = _forge.cat;
-  const common = _fRow('Nom *', _fText('nom', 'Nom de l’objet')) +
-    _fRow('Rareté', _fSelect('rarete', _rarityOptions(d.rarete)));
+  const identity = _section('Identité',
+    _row2(
+      _fRow('Nom', _fText('nom', 'Nom de l’objet')),
+      _fRow('Rareté', buildRaretePicker('forge', d.rarete)),
+    ));
 
   if (cat === 'arme') {
     const formatOpts = `<option value="">—</option>` +
       _forge.formats.map(fm => _opt(fm.label, fm.label, d.format)).join('');
-    const dmgChips = ITEM_STATS.map(s => {
-      const on = d.degatsStats.includes(s.key);
-      return `<button type="button" class="forge-chip ${on ? 'is-on' : ''}" data-action="_forgeStatToggle" data-stat="${s.key}">${s.short}</button>`;
-    }).join('');
-    return common +
-      _fRow('Format', _fSelect('format', formatOpts)) +
-      _fRow('Dégâts *', _fText('degats', 'Ex. 1d8')) +
-      _fRow('Stats de dégâts', `<div class="forge-chips">${dmgChips}</div>`) +
-      _fRow('Stat de toucher', _fSelect('toucherStat', _statOptions(d.toucherStat))) +
-      _fRow('Portée', _fText('portee', 'Ex. 1, 18/54…')) +
-      _fRow('Traits', _fText('traits', 'Séparés par des virgules')) +
-      _advanced('Bonus de stats', _statBonusGrid()) +
-      _fRow('Description', _fArea('description'));
+    return identity +
+      _section('Combat',
+        _fRow('Format', _fSelect('format', formatOpts)) +
+        _row2(
+          _fRow('Dégâts', _fText('degats', 'Ex. 1d8')),
+          _fRow('Portée', _fText('portee', 'Ex. 1, 18/54…')),
+        ) +
+        _fRow('Stats de dégâts', _statChips('_forgeStatToggle', k => d.degatsStats.includes(k))) +
+        _fRow('Stat de toucher', _statChips('_forgeToucherPick', k => d.toucherStat === k))) +
+      _section('Détails',
+        _fRow('Traits', _fText('traits', 'Séparés par des virgules')) +
+        _advanced('Bonus de stats', _statBonusGrid()) +
+        _fRow('Description', _fArea('description')));
   }
 
   if (cat === 'armure') {
-    return common +
-      _fRow('Emplacement *', _slotField('slotArmure', _forge.armorSlots)) +
-      _fRow('Type d’armure', `<input class="input-field" data-forge-field="typeArmure" list="forge-armor-types" value="${_esc(d.typeArmure || '')}" placeholder="Ex. Légère, Lourde…">`) +
-      _fRow('CA', _fNum('ca', '0')) +
-      _advanced('Bonus de stats', _statBonusGrid()) +
-      _advanced('Bonus dérivés', _derivedBonusGrid()) +
-      _fRow('Description', _fArea('description')) +
+    return identity +
+      _section('Protection',
+        _row2(
+          _fRow('Emplacement', _slotField('slotArmure', _forge.armorSlots)),
+          _fRow('Type d’armure', `<input class="input-field" data-forge-field="typeArmure" list="forge-armor-types" value="${_esc(d.typeArmure || '')}" placeholder="Ex. Légère, Lourde…">`),
+        ) +
+        _fRow('CA', _fNum('ca', '0'))) +
+      _section('Bonus & détails',
+        _advanced('Bonus de stats', _statBonusGrid()) +
+        _advanced('Bonus dérivés', _derivedBonusGrid()) +
+        _fRow('Description', _fArea('description'))) +
       `<datalist id="forge-armor-types">${_forge.armorTypes.map(t => `<option value="${_esc(t)}">`).join('')}</datalist>`;
   }
 
   if (cat === 'bijou') {
-    return common +
-      _fRow('Emplacement *', _slotField('slotBijou', _forge.accSlots)) +
-      _advanced('Bonus de stats', _statBonusGrid()) +
-      _advanced('Bonus dérivés', _derivedBonusGrid()) +
-      _fRow('Description', _fArea('description'));
+    return identity +
+      _section('Accessoire', _fRow('Emplacement', _slotField('slotBijou', _forge.accSlots))) +
+      _section('Bonus & détails',
+        _advanced('Bonus de stats', _statBonusGrid()) +
+        _advanced('Bonus dérivés', _derivedBonusGrid()) +
+        _fRow('Description', _fArea('description')));
   }
 
   // objet
-  return common +
-    _fRow('Type', _fText('type', 'Ex. Potion, Parchemin, Matériau…')) +
-    _fRow('Quantité', _fNum('quantite', '1')) +
-    _fRow('Description', _fArea('description'));
+  return identity +
+    _section('Objet',
+      _row2(
+        _fRow('Type', _fText('type', 'Ex. Potion, Matériau…')),
+        _fRow('Quantité', _fNum('quantite', '1')),
+      ) +
+      _fRow('Description', _fArea('description')));
 }
 
 function _renderForge() {
@@ -168,6 +181,9 @@ function _syncDraftFromDom() {
   document.querySelectorAll('[data-forge-field]').forEach(el => {
     _forge.draft[el.dataset.forgeField] = el.value;
   });
+  // Le sélecteur d'étoiles (rarity.js) écrit dans un input caché #forge-rarete.
+  const rar = document.getElementById('forge-rarete');
+  if (rar) _forge.draft.rarete = parseInt(rar.value) || 0;
 }
 
 function _pickStatBonuses(d) {
@@ -272,6 +288,12 @@ function _ensureForgeActions() {
       if (i >= 0) arr.splice(i, 1); else arr.push(key);
       _renderForge();
     },
+    _forgeToucherPick: (btn) => {
+      _syncDraftFromDom();
+      const key = btn.dataset.stat;
+      _forge.draft.toucherStat = _forge.draft.toucherStat === key ? '' : key;
+      _renderForge();
+    },
     _forgeClose: () => closeModal(),
     _forgeSave: () => _saveForge(),
   });
@@ -288,6 +310,7 @@ export async function openCreateItemModal(charId) {
     loadEquipmentSlots().catch(() => null),
     loadWeaponFormats().catch(() => []),
     loadArmorSetSettings().catch(() => null),
+    loadRarities().catch(() => null),
   ]);
   _forge = {
     charId: c.id,

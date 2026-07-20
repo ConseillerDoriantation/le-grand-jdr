@@ -1556,8 +1556,10 @@ function renderCharInventaireV3(c, canEdit) {
       <button class="${_csV3InvDensity === 'list' ? 'on' : ''}" data-action="csV3InvSetDensity"
         data-density="list" aria-pressed="${_csV3InvDensity === 'list'}" title="Vue liste">☰</button>
     </div>
-    ${canEdit ? `<button class="btn btn-outline btn-sm inv-add-btn" data-action="openCreateItemModal" data-id="${c.id}" title="Créer un objet selon les règles de l’aventure">🛠️ <span>Créer</span></button>` : ''}
-    ${canEdit ? `<button class="btn btn-gold btn-sm inv-add-btn" data-action="addInvItem" data-id="${c.id}" title="Ajouter un objet">＋ <span>Objet</span></button>` : ''}
+    ${canEdit ? `<div class="inv-add-group">
+      <button class="btn btn-outline btn-sm inv-add-btn" data-action="openCreateItemModal" data-id="${c.id}" title="Créer un objet selon les règles de l’aventure">🛠️ <span>Créer</span></button>
+      <button class="btn btn-gold btn-sm inv-add-btn" data-action="addInvItem" data-id="${c.id}" title="Ajouter un objet">＋ <span>Objet</span></button>
+    </div>` : ''}
   </div>
   <div class="inv-category-bar" role="tablist" aria-label="Catégories de l’inventaire">
     ${filters.map(f => `<button class="inv-category ${activeCat===f.id?'on':''}" role="tab"
