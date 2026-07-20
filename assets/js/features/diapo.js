@@ -65,16 +65,18 @@ function _renderShell() {
   }
 
   const hasContent = hasFreePage(_deck);
+  const showTopbar = hasContent || isAdmin;
   return `<div class="diapo-shell" id="diapo-root">
-    ${isAdmin ? `<div class="diapo-topbar">
+    ${showTopbar ? `<div class="diapo-topbar">
       <div class="diapo-title"><span class="diapo-kicker">Diaporama</span><h1>Diapo</h1></div>
       <div class="diapo-actions">
-        <button class="btn btn-gold btn-sm" data-action="diapoEdit">${hasContent ? '🖉 Modifier' : '＋ Composer le diaporama'}</button>
+        ${hasContent ? `<button class="btn btn-outline btn-sm" data-action="diapoFullscreen" title="Présenter en plein écran (← → pour naviguer)">⛶ Plein écran</button>` : ''}
+        ${isAdmin ? `<button class="btn btn-gold btn-sm" data-action="diapoEdit">${hasContent ? '🖉 Modifier' : '＋ Composer le diaporama'}</button>` : ''}
       </div>
     </div>` : ''}
-    <div class="diapo-stage">
+    <div class="diapo-stage" id="diapo-stage">
       ${hasContent
-        ? renderFreePageHtml({ page: _deck, className: 'diapo-reader' })
+        ? renderFreePageHtml({ page: _deck, className: 'diapo-reader', keyboard: true })
         : `<div class="diapo-empty">
             <div class="diapo-empty-ico">🎞️</div>
             <p>${isAdmin ? 'Aucun diaporama pour le moment. Clique sur « Composer le diaporama » pour le créer.' : 'Le MJ n’a pas encore publié de diaporama.'}</p>
@@ -87,6 +89,14 @@ function diapoEdit() {
   if (!STATE.isAdmin) return;
   _editing = true;
   renderDiapo();
+}
+
+function diapoFullscreen() {
+  const stage = document.getElementById('diapo-stage');
+  if (!stage) return;
+  if (document.fullscreenElement) { document.exitFullscreen?.(); return; }
+  try { stage.requestFullscreen?.().catch(() => showNotif('Plein écran indisponible.', 'info')); }
+  catch { showNotif('Plein écran indisponible.', 'info'); }
 }
 
 function diapoCancel() {
@@ -121,7 +131,8 @@ async function diapoSave() {
 PAGES.diapo = renderDiapo;
 
 registerActions({
-  diapoEdit:   () => diapoEdit(),
-  diapoCancel: () => diapoCancel(),
-  diapoSave:   () => diapoSave(),
+  diapoEdit:       () => diapoEdit(),
+  diapoCancel:     () => diapoCancel(),
+  diapoSave:       () => diapoSave(),
+  diapoFullscreen: () => diapoFullscreen(),
 });

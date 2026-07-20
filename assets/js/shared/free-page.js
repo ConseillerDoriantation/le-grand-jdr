@@ -662,13 +662,13 @@ function readerNavHtml(deck, currentId, previousId = '') {
   </div>`;
 }
 
-export function renderFreePageHtml({ page, legacyHtml = '', className = '' } = {}) {
+export function renderFreePageHtml({ page, legacyHtml = '', className = '', keyboard = false } = {}) {
   if (!hasFreePage(page)) return '';
   ensureReaderInteractions();
   const deck = normalizeFreePageDeck(page, { legacyHtml });
   const slide = defaultReaderSlide(deck);
   const normalized = slide.page;
-  return `<div class="free-page-reader ${_esc(className)}" data-free-page-reader data-free-page-current-slide="${_esc(slide.id)}" data-free-page-previous-slide="" data-free-page-deck="${_esc(JSON.stringify(deck))}" style="--free-page-ratio:${PAGE_WIDTH}/${normalized.height}">
+  return `<div class="free-page-reader ${_esc(className)}" data-free-page-reader ${keyboard ? 'data-free-page-keyboard' : ''} data-free-page-current-slide="${_esc(slide.id)}" data-free-page-previous-slide="" data-free-page-deck="${_esc(JSON.stringify(deck))}" style="--free-page-ratio:${PAGE_WIDTH}/${normalized.height}">
     ${readerStageHtml(deck, slide)}
     ${readerNavHtml(deck, slide.id)}
   </div>`;
@@ -4358,6 +4358,34 @@ function ensureReaderInteractions() {
     const block = event.target.closest?.('[data-fpe-reader-action="label"]');
     if (!block || block.contains(event.relatedTarget)) return;
     hideReaderTooltip();
+  });
+  // Navigation clavier ← → (et PageUp/Down) — pour parcourir un diaporama :
+  //  • toujours si un lecteur est en plein écran,
+  //  • sinon uniquement pour un lecteur ayant opté (data-free-page-keyboard) et
+  //    s'il est le seul → on ne vole pas les flèches des autres pages/lecteurs.
+  document.addEventListener('keydown', (event) => {
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+    const forward = event.key === 'ArrowRight' || event.key === 'PageDown';
+    const backward = event.key === 'ArrowLeft' || event.key === 'PageUp';
+    if (!forward && !backward) return;
+    const t = event.target;
+    if (t?.closest?.('input, textarea, select, [contenteditable="true"], [data-free-page-editor]')) return;
+    const fs = document.fullscreenElement;
+    let reader = fs ? (fs.matches?.('[data-free-page-reader]') ? fs : fs.querySelector?.('[data-free-page-reader]')) : null;
+    if (!reader) {
+      const opted = [...document.querySelectorAll('[data-free-page-reader][data-free-page-keyboard]')];
+      reader = opted.length === 1 ? opted[0] : null;
+    }
+    if (!reader) return;
+    const deck = normalizeFreePageDeck(safeJson(reader.dataset.freePageDeck || 'null'));
+    if (deck.canBrowse === false) return;
+    const slides = visibleSlides(deck);
+    if (slides.length <= 1) return;
+    const idx = Math.max(0, slides.findIndex((s) => s.id === reader.dataset.freePageCurrentSlide));
+    const next = slides[idx + (forward ? 1 : -1)];
+    if (!next) return;
+    event.preventDefault();
+    switchReaderSlide(reader, next.id);
   });
 }
 

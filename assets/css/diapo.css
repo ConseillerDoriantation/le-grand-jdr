@@ -44,3 +44,19 @@
 }
 .diapo-empty-ico { font-size: 2.4rem; margin-bottom: 10px; }
 .diapo-empty p { margin: 0; font-size: .9rem; }
+
+/* ── Présentation plein écran ─────────────────────────────────────────────── */
+.diapo-stage:fullscreen {
+  background: #05070c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+/* Le lecteur est plafonné à 1000px en flux normal ; en plein écran on lève le
+   plafond et on dimensionne par le viewport en gardant le ratio de la diapo. */
+.diapo-stage:fullscreen .free-page-reader { width: auto; max-width: 100%; }
+.diapo-stage:fullscreen .free-page-stage--reader {
+  width: min(99vw, calc(88vh * var(--free-page-ratio, 1000 / 650)));
+  max-width: 99vw;
+}
