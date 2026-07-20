@@ -1954,7 +1954,8 @@ function mutateSelection(editor, action) {
   if (action === 'paste') return pasteCopiedBlock(editor);
   if (action === 'duplicate') {
     pushHistory(editor);
-    const copies = selection.map((item, index) => normalizeBlock({ ...structuredClone(item), id: uid(), x: item.x + 25, y: item.y + 25, z: nextZ(editor) + index, locked: false }, 0, editor.__freePageState.height)).filter(Boolean);
+    // Tri stable par z croissant → la duplication préserve la superposition d'origine.
+    const copies = selection.slice().sort((a, b) => (Number(a.z) || 0) - (Number(b.z) || 0)).map((item, index) => normalizeBlock({ ...structuredClone(item), id: uid(), x: item.x + 25, y: item.y + 25, z: nextZ(editor) + index, locked: false }, 0, editor.__freePageState.height)).filter(Boolean);
     editor.__freePageState.blocks.push(...copies.slice(0, Math.max(0, MAX_BLOCKS - editor.__freePageState.blocks.length)));
     renderBlocks(editor, copies.at(-1)?.id || null);
     return;
@@ -2028,7 +2029,12 @@ function pasteCopiedBlock(editor) {
     && source.sourceSlideId === editor.__freePageSlideId;
   const offset = sameSlide ? (source.pasteCount || 0) * 22 : 0;
   const groupMap = new Map();
+  // Réassigner les z dans l'ORDRE DE SUPERPOSITION d'origine (tri stable par z
+  // croissant) → un texte devant une forme reste devant après collage. Sans ce
+  // tri, l'ordre du presse-papiers (ordre de sélection) écrasait l'empilement.
   const copies = source.blocks
+    .slice()
+    .sort((a, b) => (Number(a.z) || 0) - (Number(b.z) || 0))
     .slice(0, available)
     .filter((item) => item.type !== 'image' || imageCount + (++addedImages) <= MAX_IMAGES)
     .map((item, index) => normalizeBlock({
