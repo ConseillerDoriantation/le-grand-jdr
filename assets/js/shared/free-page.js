@@ -873,6 +873,24 @@ function packImageBlockForStorage(block, assets, srcToAssetId) {
   delete block.src;
 }
 
+// Recompresse toutes les images base64 d'un deck (elles vivent dans deck.assets
+// après sérialisation) pour faire tenir la page sous la limite Firestore (1 Mo/
+// doc). Dernier recours au moment d'enregistrer : mieux vaut une image un peu
+// plus compressée qu'un échec d'écriture. Renvoie un NOUVEAU deck (l'original
+// n'est pas muté). Les URLs distantes et data:SVG sont laissées intactes.
+export async function compressFreePageImages(deck, { max = 900, quality = 0.6 } = {}) {
+  if (!deck || typeof deck !== 'object' || !deck.assets || typeof deck.assets !== 'object') return deck;
+  const out = structuredClone(deck);
+  for (const [id, src] of Object.entries(out.assets)) {
+    if (typeof src !== 'string' || !/^data:image\/(?:png|jpe?g|gif|webp|avif)/i.test(src)) continue;
+    try {
+      const smaller = await compressDataUrl(src, { max, quality });
+      if (smaller && smaller.length < src.length) out.assets[id] = smaller;
+    } catch { /* on garde l'original si la recompression échoue */ }
+  }
+  return out;
+}
+
 function activateFreePageEditor(editor) {
   if (editor?.isConnected) activeFreePageEditor = editor;
 }
@@ -1565,7 +1583,7 @@ function navigateEditorSlide(editor, key) {
   if (nextIndex !== currentIndex) switchSlide(editor, slides[nextIndex].id);
 }
 
-function handleSlideField(editor, target) {
+function handleSlideField(editor, target, { live = false } = {}) {
   const slide = editor.__freePageDeck?.slides?.find((item) => item.id === target.dataset.slideId);
   if (!slide) return;
   if (target.dataset.fpeSlideField === 'title') slide.title = String(target.value || '').slice(0, 64);
@@ -1579,7 +1597,9 @@ function handleSlideField(editor, target) {
   if (target.dataset.fpeSlideField === 'password') slide.password = String(target.value || '').slice(0, 80);
   if (target.dataset.fpeSlideField === 'passwordMessage') slide.passwordMessage = String(target.value || DEFAULT_PASSWORD_MESSAGE).slice(0, 140);
   if (target.dataset.fpeSlideField === 'passwordPlaceholder') slide.passwordPlaceholder = String(target.value || DEFAULT_PASSWORD_PLACEHOLDER).slice(0, 80);
-  renderInspector(editor);
+  // Pendant la frappe (live), NE PAS re-rendre l'inspecteur : recréer l'input
+  // ferait sauter le focus à chaque caractère. Le rendu se fait au blur/change.
+  if (!live) renderInspector(editor);
 }
 
 function handleDeckField(editor, target) {
@@ -4323,11 +4343,24 @@ function ensureReaderInteractions() {
 }
 
 function runReaderInteraction(type, payload, sourceBlock = null) {
-  if (type === 'link' && payload.target) return window.open(payload.target, '_blank', 'noopener,noreferrer');
+  if (type === 'link' && payload.target) { const url = safeExternalUrl(payload.target); if (url) window.open(url, '_blank', 'noopener,noreferrer'); return; }
   if (type === 'page' && payload.target?.startsWith?.('slide:')) return switchReaderSlide(sourceBlock, payload.target.slice(6));
   if (type === 'page' && payload.target) { window.location.hash = payload.target.startsWith('#') ? payload.target : `#${payload.target}`; return; }
-  if (type === 'audio' && payload.target) { try { new Audio(payload.target).play(); } catch { showNotif("Impossible de lire l'audio.", 'error'); } return; }
+  if (type === 'audio' && payload.target) { const url = safeExternalUrl(payload.target); if (!url) return; try { new Audio(url).play(); } catch { showNotif("Impossible de lire l'audio.", 'error'); } return; }
   if (type === 'popup') return showFreePagePopupPage(payload.page, payload.layout, sourceBlock?.closest?.('.free-page-stage--reader'), payload.frame);
+}
+
+// Valide le schéma d'une cible d'interaction externe (lien/audio) avant de
+// l'ouvrir : http/https/mailto/tel uniquement. Bloque javascript:/data:/etc.
+// (le reste de l'app valide déjà les URLs ainsi ; les cibles internes de type
+// « page » — slide:/# — ne passent pas par ici).
+function safeExternalUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const url = new URL(raw, document.baseURI);
+    return ['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol.toLowerCase()) ? raw : '';
+  } catch { return ''; }
 }
 
 function switchReaderSlide(sourceBlock, slideId) {

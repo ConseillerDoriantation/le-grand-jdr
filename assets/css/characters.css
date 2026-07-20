@@ -6704,6 +6704,85 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   box-shadow: 0 0 12px rgba(244,196,48,0.15);
 }
 
+/* ── Forge d'objet (création perso, item-forge.js) ─────────────────────────── */
+.forge { display: flex; flex-direction: column; gap: 12px; }
+.forge-tabs {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  padding-bottom: 10px; border-bottom: 1px solid var(--border, rgba(255,255,255,.1));
+}
+.forge-tab {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 13px; border-radius: 999px; cursor: pointer;
+  background: var(--bg-elevated, rgba(255,255,255,.04));
+  border: 1px solid var(--border, rgba(255,255,255,.12));
+  color: var(--text-muted, #9aa6b8); font-size: .78rem; font-weight: 600;
+  transition: all .14s; white-space: nowrap;
+}
+.forge-tab:hover { border-color: var(--border-md, rgba(255,255,255,.24)); color: var(--text, #e8eef8); }
+.forge-tab.is-active {
+  background: rgba(244,196,48,.14); border-color: rgba(244,196,48,.5);
+  color: var(--amber, #f4c430);
+}
+.forge-body { display: flex; flex-direction: column; gap: 12px; }
+.forge-sec {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 13px; border-radius: 12px;
+  border: 1px solid var(--border, rgba(255,255,255,.1));
+  background: var(--bg-elevated, rgba(255,255,255,.022));
+}
+.forge-sec-t {
+  margin: 0; font-size: .64rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1.2px;
+  color: var(--text-dim, #7a8699);
+}
+.forge-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.forge-field { display: flex; flex-direction: column; gap: 5px; }
+.forge-field > span {
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--text-dim, #7a8699); font-weight: 600;
+}
+.forge-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.forge-chip {
+  padding: 4px 11px; border-radius: 999px; cursor: pointer;
+  background: var(--bg-elevated, rgba(255,255,255,.04));
+  border: 1px solid var(--border, rgba(255,255,255,.14));
+  color: var(--text-muted, #9aa6b8); font-size: .72rem; font-weight: 700;
+  transition: all .12s;
+}
+.forge-chip:hover { border-color: var(--border-md, rgba(255,255,255,.28)); color: var(--text, #e8eef8); }
+.forge-chip--dmg.is-on {
+  background: rgba(255,107,107,.16); border-color: rgba(255,107,107,.55); color: #ff9b9b;
+}
+.forge-chip--touch.is-on {
+  background: rgba(232,184,75,.16); border-color: rgba(232,184,75,.55); color: #f0c65a;
+}
+.forge-grid { display: grid; gap: 6px; }
+.forge-grid--6 { grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); }
+.forge-grid--5 { grid-template-columns: repeat(auto-fit, minmax(66px, 1fr)); }
+.forge-mini { display: flex; flex-direction: column; gap: 2px; align-items: center; }
+.forge-mini > span {
+  font-size: .62rem; text-transform: uppercase; letter-spacing: .4px;
+  color: var(--text-dim, #7a8699); font-weight: 600;
+}
+.forge-mini .input-field { text-align: center; padding-left: 4px; padding-right: 4px; }
+.forge-adv {
+  border: 1px solid var(--border, rgba(255,255,255,.1));
+  border-radius: var(--radius-sm, 10px);
+  padding: 8px 10px; background: var(--bg-elevated, rgba(255,255,255,.03));
+}
+.forge-adv > summary {
+  cursor: pointer; font-size: .72rem; font-weight: 600;
+  color: var(--text-muted, #9aa6b8); list-style: none;
+}
+.forge-adv > summary::-webkit-details-marker { display: none; }
+.forge-adv > summary::before { content: '▸ '; color: var(--text-dim, #7a8699); }
+.forge-adv[open] > summary::before { content: '▾ '; }
+.forge-adv[open] > summary { margin-bottom: 8px; }
+.forge-actions {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding-top: 10px; border-top: 1px solid var(--border, rgba(255,255,255,.1));
+}
+
 /* Barre de recherche */
 .inv-search-wrap {
   display: flex;
@@ -12073,6 +12152,9 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   border-radius: 8px;
   justify-self: end;
 }
+/* Les deux boutons d'ajout (Créer + Objet) occupent une seule cellule de grille
+   → ils restent côte à côte au lieu que « ＋ Objet » saute à la ligne. */
+.cs-v3 .inv-add-group { display: inline-flex; gap: 8px; justify-self: end; }
 .cs-v3 .inv-category-bar {
   gap: 6px;
   padding-bottom: 4px;

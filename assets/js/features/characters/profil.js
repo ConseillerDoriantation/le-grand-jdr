@@ -21,6 +21,7 @@ import { promptModal } from '../../shared/modal.js';
 import { richTextContentHtml } from '../../shared/rich-text.js';
 import {
   bindFreePageEditor,
+  compressFreePageImages,
   freePageEditorHtml,
   freePageToLegacyHtml,
   getFreePageData,
@@ -28,9 +29,25 @@ import {
   renderFreePageHtml,
 } from '../../shared/free-page.js';
 import { renderCharProfil, getProfilCacheRef as _profilCache } from './tabs.js';
+import { bioPageFor, saveCharacterPage, setCachedBioPage, onCharacterPagesChange } from '../../shared/character-pages.js';
 
 // État module-local
 let _csV3EditingBio = null;
+
+// Ré-render la fiche quand les bios déportées (characterPages) arrivent — mais
+// jamais pendant une édition (l'éditeur porte l'état non enregistré).
+let _bioReactivityBound = false;
+function _ensureBioReactivity() {
+  if (_bioReactivityBound) return;
+  _bioReactivityBound = true;
+  onCharacterPagesChange(() => {
+    if (_csV3EditingBio) return;
+    const c = STATE.activeChar;
+    if (c && charSession.getCurrentCharTab?.() === 'profil') {
+      try { charSession.renderTab('profil', c, true); } catch (_) {}
+    }
+  });
+}
 
 const _TAG_PALETTE = [
   ['rgba(79,140,255,.14)','rgba(79,140,255,.35)','#7fb0ff'],
@@ -119,6 +136,7 @@ function _mergeIdentityDefaults(arr) {
 }
 
 export function renderCharProfilV3(c, canEdit) {
+  _ensureBioReactivity();
   // Bootstrap pres cache pour récupérer la bio rich-text
   if (!(c.id in _profilCache)) {
     try { renderCharProfil(c, canEdit); } catch {}
@@ -129,7 +147,7 @@ export function renderCharProfilV3(c, canEdit) {
   const presCache = _profilCache?.[c.id] || null;
   const canManageIllustration = STATE.isAdmin;
   const bioHtml = presCache?.content || c.bio || '';
-  const bioPage = c.bioPage || presCache?.bioPage || null;
+  const bioPage = bioPageFor(c) || presCache?.bioPage || null;
   // Source de vérité des traits = c.tags (le V3 écrit dessus via updateInCol
   // 'characters'). On ne lit presCache.tags QUE si c.tags est absent : sinon un
   // `tags:[]` périmé du doc players (truthy !) masquait les traits enregistrés.
@@ -423,35 +441,82 @@ export function _csV3CancelBio(charId) {
   const c = getCharacterById(charId); if (!c) return;
   charSession.renderTab('profil', c, true);
 }
+// Firestore plafonne un document à 1 048 576 octets. Marge de sécurité sous la
+// limite (noms de champs + surcoût non comptés par JSON.stringify).
+const BIO_DOC_SAFE_BYTES = 1_000_000;
+const _utf8Len = (str) => new TextEncoder().encode(str).length;
+// Taille approx du doc perso résultant avec la nouvelle bio appliquée.
+const _projectedCharDocBytes = (c, extra) => _utf8Len(JSON.stringify({ ...c, ...extra }));
+
+// Recompresse progressivement les images du deck pour tenir sous `budget`
+// (mesuré par `measure`). Jamais d'écriture vouée à l'échec.
+async function _fitFreePage(bioPage, budget, measure) {
+  let bytes = measure(bioPage), shrunk = false;
+  if (bytes <= budget) return { bioPage, bytes, fitted: true, shrunk };
+  for (const opts of [{ max: 900, quality: .6 }, { max: 720, quality: .5 }, { max: 560, quality: .42 }]) {
+    bioPage = await compressFreePageImages(bioPage, opts); shrunk = true;
+    bytes = measure(bioPage);
+    if (bytes <= budget) return { bioPage, bytes, fitted: true, shrunk };
+  }
+  return { bioPage, bytes, fitted: false, shrunk };
+}
+
+const _tooBigMsg = (bytes) =>
+  `Cette biographie est trop lourde (~${Math.round(bytes / 1024)} Ko pour une limite de ~${Math.round(BIO_DOC_SAFE_BYTES / 1024)} Ko). Retire une image ou une diapo.`;
+
+function _isPermissionDenied(e) {
+  return String(e?.code || '') === 'permission-denied'
+    || /permission|insufficient|denied/i.test(String(e?.message || ''));
+}
+
 export async function _csV3SaveBioRt(charId) {
   const c = getCharacterById(charId); if (!c) return;
-  const bioPage = getFreePageData(document.getElementById('profil-bio-page'));
-  if (!bioPage) return showNotif('Editeur de biographie indisponible.', 'error');
-  if (JSON.stringify(bioPage).length > 650000) {
-    return showNotif('Cette biographie est trop lourde. Retire une image ou utilise des images plus légères.', 'error');
+  const bioPage0 = getFreePageData(document.getElementById('profil-bio-page'));
+  if (!bioPage0) return showNotif('Editeur de biographie indisponible.', 'error');
+
+  // ── Chemin 1 : document dédié characterPages/{charId} (budget 1 Mo propre) ──
+  const fit = await _fitFreePage(bioPage0, BIO_DOC_SAFE_BYTES, (bp) => _utf8Len(JSON.stringify({ bioPage: bp })));
+  if (!fit.fitted) return showNotif(_tooBigMsg(fit.bytes), 'error');
+  let bioPage = fit.bioPage;
+  let html = freePageToLegacyHtml(bioPage);
+  try {
+    await saveCharacterPage(charId, bioPage);                                 // bio dans SON doc
+    await updateInCol('characters', charId, { bio: html, bioPage: null });     // efface le lourd legacy → le doc perso rétrécit
+    c.bio = html; c.bioPage = null; setCachedBioPage(charId, bioPage);
+    const presCache = _profilCache?.[charId];
+    if (presCache?.id) {
+      try { await updateInCol('players', presCache.id, { content: html, bioPage: null }); presCache.content = html; presCache.bioPage = null; }
+      catch (e) { console.warn('[bio→pres sync]', e); }
+    }
+    if (fit.shrunk) showNotif('Images recompressées pour tenir dans la limite Firestore.', 'info');
+    _csV3EditingBio = null;
+    showNotif('Biographie enregistrée.', 'success');
+    charSession.renderTab('profil', c, true);
+    return;
+  } catch (e) {
+    if (!_isPermissionDenied(e)) { console.error('[bio page save]', e); return showNotif('La biographie n\'a pas pu être enregistrée.', 'error'); }
+    console.warn('[bio page save] écriture characterPages refusée (règle Firestore non déployée ?) → repli sur le doc perso', e);
   }
-  const html = freePageToLegacyHtml(bioPage);
+
+  // ── Chemin 2 (repli) : bio SUR le doc perso, garde-fou sur le DOCUMENT ENTIER ──
+  // Actif tant que la règle characterPages n'est pas déployée : rien ne casse.
+  const fitDoc = await _fitFreePage(bioPage0, BIO_DOC_SAFE_BYTES, (bp) => _projectedCharDocBytes(c, { bio: freePageToLegacyHtml(bp), bioPage: bp }));
+  if (!fitDoc.fitted) return showNotif(_tooBigMsg(fitDoc.bytes), 'error');
+  bioPage = fitDoc.bioPage;
+  html = freePageToLegacyHtml(bioPage);
   try {
     await updateInCol('characters', charId, { bio: html, bioPage });
   } catch (e) {
     console.error('[bio page save]', e);
-    if (isFirestoreDocumentSizeError(e)) {
-      showNotif('Biographie trop lourde pour Firestore. Supprime une image ou remplace-la par une version plus lÃ©gÃ¨re.', 'error');
-      return;
-    }
-    showNotif('La biographie n\'a pas pu être enregistrée.', 'error');
-    return;
+    return showNotif(isFirestoreDocumentSizeError(e) ? 'Biographie trop lourde pour Firestore. Retire une image ou une diapo.' : 'La biographie n\'a pas pu être enregistrée.', 'error');
   }
-  c.bio = html;
-  c.bioPage = bioPage;
+  c.bio = html; c.bioPage = bioPage; setCachedBioPage(charId, bioPage);
   const presCache = _profilCache?.[charId];
   if (presCache?.id) {
-    try {
-      await updateInCol('players', presCache.id, { content: html, bioPage });
-      presCache.content = html;
-      presCache.bioPage = bioPage;
-    } catch (e) { console.warn('[bio→pres sync]', e); }
+    try { await updateInCol('players', presCache.id, { content: html, bioPage }); presCache.content = html; presCache.bioPage = bioPage; }
+    catch (e) { console.warn('[bio→pres sync]', e); }
   }
+  if (fitDoc.shrunk) showNotif('Images recompressées pour tenir dans la limite Firestore.', 'info');
   _csV3EditingBio = null;
   showNotif('Biographie enregistrée.', 'success');
   charSession.renderTab('profil', c, true);

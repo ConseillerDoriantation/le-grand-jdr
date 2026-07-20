@@ -347,6 +347,7 @@ export function renderCharInventaire(c, canEdit) {
       <span class="cs-hint">${totalItems} objet${totalItems !== 1 ? 's' : ''}</span>
       <div style="display:flex;gap:.4rem;margin-left:auto;align-items:center">
         <button class="cs-inv-action-btn cs-inv-action-btn--gold" data-action="openSendGoldModal" data-id="${c.id}" title="Envoyer de l'or à un autre personnage">↗ Or</button>
+        ${canEdit ? `<button class="cs-inv-action-btn" data-action="openCreateItemModal" data-id="${c.id}" title="Créer un objet selon les règles de l'aventure">🛠️ Créer</button>` : ''}
         ${canEdit ? `<button class="cs-inv-action-btn" data-action="addInvItem">🎁 Butin</button>` : ''}
       </div>
     </div>`;
