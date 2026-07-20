@@ -22,6 +22,7 @@ import {
 import { setCurrentAdventure, primeSessionData } from '../data/firestore.js';
 import { startPresence } from '../shared/presence.js';
 import { initChat } from '../features/chat.js';
+import { initCharacterPages } from '../shared/character-pages.js';
 import { DEFAULT_ENABLED } from '../shared/features.js';
 // Caches module-level de « défauts MJ » scopés par aventure (types de dégâts,
 // formats d'arme, matrices de sorts, conditions, améliorations, picker boutique) :
@@ -397,6 +398,10 @@ export async function selectAdventure(adv) {
   // par toutes les pages — coupe la majorité des lectures pour la session).
   // Fire-and-forget : chaque page await sa ready si elle en a besoin.
   primeSessionData();
+
+  // Bios « diapo » déportées dans characterPages/{charId} (budget 1 Mo propre).
+  // Abonnement session-live unique, ré-armé à chaque changement d'aventure.
+  initCharacterPages();
 
   // Heartbeat de présence pour cette aventure
   if (uid) startPresence(selected.id, uid);

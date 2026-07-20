@@ -375,6 +375,9 @@ const _LAZY_SESSION_COLLECTIONS = new Set([
   'npcs',
   'organizations', // utilisé par npcs.js + histoire.js, TTL 5 min insuffisant
   'players',       // utilisé par character-sheet tabs + inline-edit, sans cache TTL
+  // Bio « diapo » déportée hors du doc perso (1 doc/perso, base64 lourd). Session-
+  // live → 0 lecture en repeat ; lazy → amorcée à l'entrée d'aventure (initCharacterPages).
+  'characterPages',
   // Lourdes en base64 (bannières / 1400px / cartes) et non bloquantes pour le
   // 1er rendu du dashboard (réactif : il s'y abonne et se remplit à l'arrivée).
   // Restent session-live (partagées, 0 lecture en plus) mais amorcées à la demande.

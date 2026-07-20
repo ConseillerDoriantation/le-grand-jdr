@@ -528,6 +528,14 @@ match /adventures/{adventureId} {
     allow delete: if inAdventure(adventureId) &&
       (resource.data.uid == request.auth.uid || isAdvAdmin(adventureId));
   }
+  // Bio « diapo » déportée hors du doc perso (budget 1 Mo propre). Doc id = charId.
+  // Lecture : membre de l'aventure. Écriture : propriétaire du perso lié ou MJ
+  // (mêmes droits que le doc perso). Aucune donnée sensible — juste la présentation.
+  match /characterPages/{charId} {
+    allow read:  if inAdventure(adventureId);
+    allow write: if inAdventure(adventureId) &&
+      (ownsAdventureCharacter(adventureId, charId) || isAdvAdmin(adventureId));
+  }
   // Quêtes : lecture tous, création/suppression MJ, mise à jour participants par les joueurs
   match /quests/{id} {
     allow read:           if inAdventure(adventureId);

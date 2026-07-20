@@ -21,6 +21,7 @@ let _ppEditingPlayer = null;
 import { STATE } from '../core/state.js';
 import { navigate } from '../core/navigation.js';
 import { charSession } from '../shared/char-session.js';
+import { bioPageFor } from '../shared/character-pages.js';
 import { loadCollection, updateInCol } from '../data/firestore.js';
 import { openModal, closeModal, promptModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
@@ -255,7 +256,7 @@ function _buildRecord(char = null, pres = null) {
     quote:    char?.quote || '',
     identity: Array.isArray(char?.identity) ? char.identity : [],
     bio:            pres?.bio?.trim() || char?.bio || '',
-    bioPage:        char?.bioPage || pres?.bioPage || null,
+    bioPage:        bioPageFor(char) || char?.bioPage || pres?.bioPage || null,
     // Vitaux calculés
     pvActuel:       char?.pvActuel ?? null,
     pvMax:          char ? calcPVMax(char) : null,
