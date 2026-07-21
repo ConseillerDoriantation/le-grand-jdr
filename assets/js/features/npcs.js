@@ -17,6 +17,7 @@ import { openModal, closeModal, pushModal, updateModalContent, confirmModal } fr
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
+import { isFeatureEnabled } from '../shared/features.js';
 import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { consumeTargetEntity } from '../shared/entity-navigation.js';
@@ -618,26 +619,33 @@ function _renderFicheHeader(n) {
 
 // Bloc "Profil bastion" : visible MJ toujours, joueur seulement si disposition = Allié
 function _renderBastionProfil(n) {
+  // Bastion désactivé pour l'aventure (ou non premium) → aucune info de recrutement.
+  if (!isFeatureEnabled('bastion')) return '';
   const adm = STATE.isAdmin;
+  // Recrutement autorisé par le MJ pour ce PNJ (défaut = oui, pas de régression).
+  const recrutable = n.recrutable !== false;
   // Côté joueur : visible dès Amical (≥3), recrutable seulement une fois Allié (≥4).
   const niv = _affiniteNiveau(n);
   const canSee     = niv >= 3;
   const canRecruit = niv >= 4;
-  if (!adm && !canSee) return '';
+  if (!adm && (!canSee || !recrutable)) return '';  // joueur : rien si non recrutable
 
   const hasInfo = (n.activites && n.activites.length) || n.passif || n.salaireSuggere;
   if (!adm && !hasInfo) return ''; // joueur : rien à montrer
 
   const actSet = new Set(n.activites || []);
   const mjBadge = !canSee ? `<span class="npc-badge-mj">MJ</span>` : '';
+  const recruitToggle = `<button class="npc-mini-btn ${recrutable ? '' : 'npc-mini-btn--off'}" data-action="npcToggleRecrutable" data-id="${n.id}" title="Autoriser ou non le recrutement de ce PNJ au Bastion">${recrutable ? '✅ Recrutable' : '🚫 Non recrutable'}</button>`;
 
   // ── Vue MJ : tout éditable inline ──
   if (adm) {
     return `
-    <div class="npc-card">
+    <div class="npc-card${recrutable ? '' : ' is-not-recrutable'}">
       <div class="npc-card-hd">
-        <div class="npc-card-title">🏰 Recrutable au Bastion${mjBadge}</div>
+        <div class="npc-card-title">🏰 Profil Bastion${mjBadge}</div>
+        ${recruitToggle}
       </div>
+      ${recrutable ? '' : '<div class="npc-bastion-note">🚫 Non recrutable — masqué aux joueurs.</div>'}
       <div class="npc-edit-block" style="margin-bottom:.45rem">
         <span class="npc-edit-lbl">Activités / spécialités</span>
         <div class="npc-bastion-pills">
@@ -2532,6 +2540,16 @@ async function _npcToggleEmbauchable(btn) {
   _refreshActivePanel();
 }
 
+// Toggle : ce PNJ peut-il être recruté au Bastion ? (défaut = oui)
+async function _npcToggleRecrutable(btn) {
+  if (!STATE.isAdmin) return;
+  const id = btn.dataset.id;
+  const n = _npcs.find(x => x.id === id); if (!n) return;
+  n.recrutable = !(n.recrutable !== false);
+  await trySave('npcs', id, { recrutable: n.recrutable });
+  _refreshActivePanel();
+}
+
 // Sélection d'arme (boutique) en inline.
 async function _npcSetWeapon(el) {
   if (!STATE.isAdmin) return;
@@ -2766,6 +2784,7 @@ registerActions({
   npcApplyOrgIconInput:      (btn) => _npcApplyOrgIconInput(btn),
   npcToggleActivite:         (btn) => _npcToggleActivite(btn),
   npcToggleEmbauchable:      (btn) => _npcToggleEmbauchable(btn),
+  npcToggleRecrutable:       (btn) => _npcToggleRecrutable(btn),
   npcAddEvent:               (btn) => _npcAddEvent(btn),
   npcAffiField:              (el) => _npcAffiField(el),
   npcAddAffiPerso:           (btn) => _npcAddAffiPerso(btn),
