@@ -487,6 +487,8 @@ match /adventures/{adventureId} {
   // Contenu « diapo » des sections du Guide, déporté hors de world/main (1 doc/section,
   // budget 1 Mo propre). Mêmes droits que world : lecture membre, écriture MJ.
   match /worldPages/{id}        { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
+  // Page « Diapo » : diaporama interactif du MJ (doc diapo/main). Lecture membre, écriture MJ.
+  match /diapo/{id}             { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
   match /informations/{id}      { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
   match /tutorial/{id}          { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
   match /recettes/{id}          { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
@@ -532,12 +534,16 @@ match /adventures/{adventureId} {
       (resource.data.uid == request.auth.uid || isAdvAdmin(adventureId));
   }
   // Bio « diapo » déportée hors du doc perso (budget 1 Mo propre). Doc id = charId.
-  // Lecture : membre de l'aventure. Écriture : propriétaire du perso lié ou MJ
-  // (mêmes droits que le doc perso). Aucune donnée sensible — juste la présentation.
+  // Lecture : membre de l'aventure. Écriture : le MJ toujours ; le propriétaire du
+  // perso lié SEULEMENT si le MJ ne l'a pas verrouillé (characters/{charId}.bioLocked
+  // != true) → vrai verrou serveur, pas seulement l'UI.
   match /characterPages/{charId} {
     allow read:  if inAdventure(adventureId);
-    allow write: if inAdventure(adventureId) &&
-      (ownsAdventureCharacter(adventureId, charId) || isAdvAdmin(adventureId));
+    allow write: if inAdventure(adventureId) && (
+      isAdvAdmin(adventureId) ||
+      (ownsAdventureCharacter(adventureId, charId) &&
+       get(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(charId)).data.get('bioLocked', false) != true)
+    );
   }
   // Quêtes : lecture tous, création/suppression MJ, mise à jour participants par les joueurs
   match /quests/{id} {

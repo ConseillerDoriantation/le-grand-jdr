@@ -1,0 +1,62 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   DIAPO.CSS — Page « Diapo » (diaporama interactif). L'éditeur et le lecteur
+   free-page portent leurs propres styles (free-page.css, chargé eager). Ici :
+   uniquement le shell de page (barre de titre + scène centrée).
+   ══════════════════════════════════════════════════════════════════════════ */
+.diapo-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 6px 4px 28px;
+}
+.diapo-topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.diapo-kicker {
+  display: block;
+  font-size: .68rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.diapo-title h1 {
+  margin: 2px 0 0;
+  font-family: 'Cinzel', serif;
+  font-size: 1.4rem;
+  color: var(--text);
+}
+.diapo-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.diapo-stage { display: flex; justify-content: center; }
+.diapo-reader { width: 100%; }
+.diapo-empty {
+  text-align: center;
+  padding: 52px 16px;
+  color: var(--text-dim);
+  border: 1px dashed var(--border-md, rgba(255,255,255,.14));
+  border-radius: 14px;
+  width: 100%;
+}
+.diapo-empty-ico { font-size: 2.4rem; margin-bottom: 10px; }
+.diapo-empty p { margin: 0; font-size: .9rem; }
+
+/* ── Présentation plein écran ─────────────────────────────────────────────── */
+.diapo-stage:fullscreen {
+  background: #05070c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+/* Le lecteur est plafonné à 1000px en flux normal ; en plein écran on lève le
+   plafond et on dimensionne par le viewport en gardant le ratio de la diapo. */
+.diapo-stage:fullscreen .free-page-reader { width: auto; max-width: 100%; }
+.diapo-stage:fullscreen .free-page-stage--reader {
+  width: min(99vw, calc(88vh * var(--free-page-ratio, 1000 / 650)));
+  max-width: 99vw;
+}

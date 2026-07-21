@@ -904,6 +904,7 @@ function setupAchievementsDnd(catId) {
 // ── LIGHTBOX IMAGE ────────────────────────────────────────────────────────────
 function _achOpenImage(url) {
   // Overlay plein écran avec l'image agrandie, clic ou Escape pour fermer
+  _achClearLightboxKeyHandler();   // coupe les flèches/Échap de la fiche riche si ouverte
   const existing = document.getElementById('ach-lightbox');
   if (existing) existing.remove();
 
@@ -1850,7 +1851,7 @@ function _achOpenLightbox(itemId) {
     <div class="ach-lb-frame" style="--c:${cat.color};--c-glow:${cat.glow};--c-line:${cat.line}">
       <div class="ach-lb-media${item.imageUrl ? '' : ' is-empty'}">
         ${item.imageUrl
-          ? `<img class="ach-lb-image-rich" src="${item.imageUrl}" alt="${_esc(item.nom || item.titre || '')}">`
+          ? `<img class="ach-lb-image-rich" src="${item.imageUrl}" alt="${_esc(item.nom || item.titre || '')}" data-ach-zoom title="Cliquer pour agrandir en plein écran">`
           : `<div class="ach-lb-empty-rich">${item.emoji || cat.emoji}</div>`}
       </div>
       <aside class="ach-lb-info${item.imageUrl ? '' : ' is-empty'}">
@@ -1880,6 +1881,8 @@ function _achOpenLightbox(itemId) {
   };
   overlay.addEventListener('click', close);
   overlay.querySelector('.ach-lb-frame')?.addEventListener('click', e => e.stopPropagation());
+  // Clic sur l'image de la fiche → viewer plein écran à sa vraie taille (hors cadre).
+  overlay.querySelector('[data-ach-zoom]')?.addEventListener('click', e => { e.stopPropagation(); _achOpenImage(item.imageUrl); });
   overlay.querySelector('.ach-lb-close').addEventListener('click', e => { e.stopPropagation(); close(); });
   overlay.querySelectorAll('.ach-lb-nav').forEach(btn => btn.addEventListener('click', e => {
     e.stopPropagation();

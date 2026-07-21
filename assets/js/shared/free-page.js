@@ -2,11 +2,12 @@ import { _esc } from './html.js';
 import { sanitizeRichTextHtml } from './rich-text.js';
 import { compressDataUrl, pickImageFile } from './image-upload.js';
 import { showNotif } from './notifications.js';
+import { promptModal } from './modal.js';
 
 const PAGE_WIDTH = 1000;
 const DEFAULT_HEIGHT = 650;
 const MAX_BLOCKS = 30;
-const MAX_IMAGES = 3;
+const MAX_IMAGES = 20;
 const MAX_SLIDES = 18;
 const MAX_HISTORY = 50;
 const BLOCK_TYPES = new Set(['text', 'image', 'table', 'chart', 'shape']);
@@ -662,13 +663,13 @@ function readerNavHtml(deck, currentId, previousId = '') {
   </div>`;
 }
 
-export function renderFreePageHtml({ page, legacyHtml = '', className = '' } = {}) {
+export function renderFreePageHtml({ page, legacyHtml = '', className = '', keyboard = false } = {}) {
   if (!hasFreePage(page)) return '';
   ensureReaderInteractions();
   const deck = normalizeFreePageDeck(page, { legacyHtml });
   const slide = defaultReaderSlide(deck);
   const normalized = slide.page;
-  return `<div class="free-page-reader ${_esc(className)}" data-free-page-reader data-free-page-current-slide="${_esc(slide.id)}" data-free-page-previous-slide="" data-free-page-deck="${_esc(JSON.stringify(deck))}" style="--free-page-ratio:${PAGE_WIDTH}/${normalized.height}">
+  return `<div class="free-page-reader ${_esc(className)}" data-free-page-reader ${keyboard ? 'data-free-page-keyboard' : ''} data-free-page-current-slide="${_esc(slide.id)}" data-free-page-previous-slide="" data-free-page-deck="${_esc(JSON.stringify(deck))}" style="--free-page-ratio:${PAGE_WIDTH}/${normalized.height}">
     ${readerStageHtml(deck, slide)}
     ${readerNavHtml(deck, slide.id)}
   </div>`;
@@ -721,6 +722,7 @@ export function freePageEditorHtml({ id = 'free-page-editor', page, legacyHtml =
       <div class="free-page-toolbar-spacer"></div>
       <button type="button" class="free-page-tool free-page-tool--primary" data-fpe-action="preview-deck" title="Tester le rendu et les interactions">Apercu</button>
       <span class="free-page-slide-size">Diapo 1000 x ${DEFAULT_HEIGHT}</span>
+      <span class="free-page-weight" data-fpe-weight title="Poids du diaporama — limite Firestore ~1000 Ko">—</span>
     </div>
     <div class="free-page-body">
       <aside class="free-page-slidebar" data-fpe-slides></aside>
@@ -785,7 +787,47 @@ function bindSingleFreePageEditor(editor) {
     if (event.target.closest('[data-fpe-inspector], [data-fpe-text-toolbar]')) saveEditorTextSelection(editor, { paint: true });
     if (event.target.closest('[data-fpe-command], [data-fpe-text-color]')) event.preventDefault();
   });
+  ensureUnsavedGuard();
+  editor.addEventListener('input', () => scheduleWeightUpdate(editor));
+  editor.addEventListener('change', () => scheduleWeightUpdate(editor));
+  editor.addEventListener('pointerup', () => scheduleWeightUpdate(editor));
   renderBlocks(editor, null);
+  updateFreePageWeight(editor);
+}
+
+// ── Indicateur de poids en direct ────────────────────────────────────────────
+// Affiche la taille (Ko) du deck tel qu'il sera enregistré, avec alerte visuelle
+// à l'approche de la limite Firestore (~1 Mo/doc) → l'utilisateur voit venir le
+// blocage au lieu de le subir à l'enregistrement.
+const FREE_PAGE_SAFE_BYTES = 1_000_000;
+function scheduleWeightUpdate(editor) {
+  clearTimeout(editor.__freePageWeightTimer);
+  editor.__freePageWeightTimer = setTimeout(() => updateFreePageWeight(editor), 450);
+}
+function updateFreePageWeight(editor) {
+  const badge = editor?.querySelector?.('[data-fpe-weight]');
+  if (!badge) return;
+  let bytes = 0;
+  try { bytes = new TextEncoder().encode(JSON.stringify(getFreePageData(editor) || {})).length; }
+  catch { return; }
+  badge.textContent = `${Math.round(bytes / 1024)} Ko`;
+  const pct = bytes / FREE_PAGE_SAFE_BYTES;
+  badge.classList.toggle('is-warn', pct >= 0.8 && pct < 1);
+  badge.classList.toggle('is-over', pct >= 1);
+}
+
+// ── Garde « modifications non enregistrées » ─────────────────────────────────
+// Avertit avant de recharger/fermer l'onglet s'il reste des changements non
+// sauvegardés dans un éditeur monté (undo non vide = au moins une mutation).
+let unsavedGuardBound = false;
+function ensureUnsavedGuard() {
+  if (unsavedGuardBound || typeof window === 'undefined') return;
+  unsavedGuardBound = true;
+  window.addEventListener('beforeunload', (event) => {
+    const dirty = [...document.querySelectorAll('[data-free-page-editor]')]
+      .some((el) => (el.__freePageUndo?.length || 0) > 0);
+    if (dirty) { event.preventDefault(); event.returnValue = ''; }
+  });
 }
 
 function handleEditorDoubleClick(editor, event) {
@@ -884,7 +926,12 @@ export async function compressFreePageImages(deck, { max = 900, quality = 0.6 } 
   for (const [id, src] of Object.entries(out.assets)) {
     if (typeof src !== 'string' || !/^data:image\/(?:png|jpe?g|gif|webp|avif)/i.test(src)) continue;
     try {
-      const smaller = await compressDataUrl(src, { max, quality });
+      // Transparence PRÉSERVÉE : les images à alpha passent par le WebP lossy
+      // (compressTransparentDataUrl) au lieu du JPEG (compressDataUrl) qui
+      // aplatirait le fond → sinon le garde-fou de taille détruisait l'alpha.
+      const smaller = await imageHasTransparency(src)
+        ? await compressTransparentDataUrl(src, max, quality)
+        : await compressDataUrl(src, { max, quality });
       if (smaller && smaller.length < src.length) out.assets[id] = smaller;
     } catch { /* on garde l'original si la recompression échoue */ }
   }
@@ -1293,7 +1340,7 @@ function openContextMenu(editor, clientX, clientY, hasBlock, hasNav = false) {
     ? [['select-nav', 'Configurer le menu'], ['hide-nav', 'Masquer le menu']]
     : hasBlock
     ? [['copy', multiCount > 1 ? `Copier ${multiCount} blocs` : 'Copier le bloc'], ['duplicate', multiCount > 1 ? 'Dupliquer la selection' : 'Dupliquer'], ...(block?.type === 'image' && multiCount <= 1 ? [['crop-image', "Rogner l'image"], ['replace-image', "Remplacer l'image"]] : []), ...(multiCount <= 1 ? tableActions : []), ['reset-rotation', 'Remettre droit'], ['toggle-hidden-block', block?.hidden ? 'Afficher le bloc' : 'Masquer le bloc'], ['layer-up', 'Mettre devant'], ['layer-down', 'Mettre derriere'], ['toggle-lock', block?.locked ? 'Deverrouiller' : 'Verrouiller'], ['delete', multiCount > 1 ? 'Supprimer la selection' : 'Supprimer']]
-    : [['add-text', 'Ajouter texte'], ['add-image', 'Ajouter image'], ['add-table', 'Ajouter tableau'], ['add-chart', 'Ajouter graphique'], ['add-shape', 'Ajouter forme'], ['paste', 'Coller', !canPasteBlock(editor)], ['unlock-all', 'Deverrouiller tout', !editor.__freePageState.blocks.some((item) => item.locked)]];
+    : [['add-text', 'Ajouter texte'], ['add-image', 'Ajouter image'], ['add-image-url', 'Image par URL'], ['add-table', 'Ajouter tableau'], ['add-chart', 'Ajouter graphique'], ['add-shape', 'Ajouter forme'], ['paste', 'Coller', !canPasteBlock(editor)], ['unlock-all', 'Deverrouiller tout', !editor.__freePageState.blocks.some((item) => item.locked)]];
   menu.innerHTML = actions.map(([action, label, disabled]) => `<button type="button" data-fpe-context-action="${_esc(action)}" ${disabled ? 'disabled' : ''}>${_esc(label)}</button>`).join('');
   menu.hidden = false;
   const rect = menu.getBoundingClientRect();
@@ -1315,6 +1362,7 @@ function runAction(editor, action, event) {
   if (action.startsWith('position-')) return positionSelectionOnPage(editor, action.replace('position-', ''));
   if (action === 'add-text') return addTextBlock(editor);
   if (action === 'add-image') return addImageBlock(editor);
+  if (action === 'add-image-url') return addImageUrlBlock(editor);
   if (action === 'add-table') return addTableBlock(editor);
   if (action === 'add-chart') return addChartBlock(editor);
   if (action === 'add-nav') return activateNavComponent(editor);
@@ -1809,7 +1857,7 @@ function addTextBlock(editor, { content = '<p>Nouveau texte</p>' } = {}) {
 
 function addImageBlock(editor) {
   const imageCount = editor.__freePageState.blocks.filter((block) => block.type === 'image').length;
-  if (imageCount >= MAX_IMAGES) return showNotif(`Maximum ${MAX_IMAGES} images dans une biographie.`, 'info');
+  if (imageCount >= MAX_IMAGES) return showNotif(`Maximum ${MAX_IMAGES} images par diapo.`, 'info');
   pickImageFile({ onImage: async ({ dataUrl }) => {
     showNotif("Preparation de l'image...", 'info');
     const src = await compressPageImage(dataUrl);
@@ -1820,6 +1868,22 @@ function addImageBlock(editor) {
     editor.__freePageState.blocks.push(block);
     renderBlocks(editor, block.id);
   }});
+}
+
+// Image par URL (ex. hébergée sur GitHub Pages) : stockée comme simple URL, PAS
+// en base64 → poids quasi nul dans le document, images HD sans limite de taille.
+async function addImageUrlBlock(editor) {
+  const imageCount = editor.__freePageState.blocks.filter((b) => b.type === 'image').length;
+  if (imageCount >= MAX_IMAGES) return showNotif(`Maximum ${MAX_IMAGES} images par diapo.`, 'info');
+  const raw = await promptModal('URL de l’image (https://…) :', { title: 'Image par URL', placeholder: 'https://…' });
+  if (raw == null || !String(raw).trim()) return;   // annulé / vide
+  const src = safeImageUrl(String(raw).trim());
+  if (!src || isDataImageUrl(src)) return showNotif('URL d’image invalide (attendu https://…).', 'error');
+  const aspect = await imageAspectFromDataUrl(src);
+  pushHistory(editor);
+  const block = normalizeBlock({ type: 'image', x: 110, y: 90, w: 420, h: 260, z: nextZ(editor), src, imageAspect: aspect }, 0, editor.__freePageState.height);
+  editor.__freePageState.blocks.push(block);
+  renderBlocks(editor, block.id);
 }
 
 function replaceImageBlock(editor) {
@@ -1868,7 +1932,7 @@ function addShapeBlock(editor, shape = 'rectangle') {
   const block = normalizeBlock({
     type: 'shape', x: 135, y: 115, w: safeShape === 'line' ? 360 : 240, h: safeShape === 'line' ? 36 : 150,
     z: nextZ(editor), shape: safeShape, fill: safeShape === 'line' ? DEFAULT_SHAPE_STROKE : DEFAULT_SHAPE_FILL, stroke: DEFAULT_SHAPE_STROKE,
-    strokeWidth: safeShape === 'line' ? 4 : 2, radius: 12, shadow: safeShape !== 'line', shadowDepth: 28,
+    strokeWidth: safeShape === 'line' ? 4 : 1, radius: 12, shadow: false, shadowDepth: 28,
   }, 0, editor.__freePageState.height);
   editor.__freePageState.blocks.push(block);
   renderBlocks(editor, block.id);
@@ -1876,8 +1940,10 @@ function addShapeBlock(editor, shape = 'rectangle') {
 
 async function compressPageImage(dataUrl) {
   if (await imageHasTransparency(dataUrl)) {
-    for (const max of [1000, 820, 680, 520]) {
-      const compressed = await compressTransparentDataUrl(dataUrl, max);
+    // WebP lossy : conserve l'alpha ET compresse fortement (le PNG sans perte
+    // faisait exploser la taille → rejet). On dégrade taille/qualité au besoin.
+    for (const { max, quality } of [{ max: 1200, quality: .82 }, { max: 1000, quality: .74 }, { max: 820, quality: .64 }, { max: 680, quality: .54 }]) {
+      const compressed = await compressTransparentDataUrl(dataUrl, max, quality);
       if (compressed && compressed.length <= 220000) return compressed;
     }
     return dataUrl.length <= 260000 ? dataUrl : null;
@@ -1922,7 +1988,7 @@ async function imageHasTransparency(dataUrl) {
   return false;
 }
 
-async function compressTransparentDataUrl(dataUrl, max = 900) {
+async function compressTransparentDataUrl(dataUrl, max = 900, quality = 0.82) {
   const img = await loadImageFromDataUrl(dataUrl);
   if (!img) return null;
   const ratio = Math.min(1, max / Math.max(img.width || 1, img.height || 1));
@@ -1934,8 +2000,14 @@ async function compressTransparentDataUrl(dataUrl, max = 900) {
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, w, h);
   ctx.drawImage(img, 0, 0, w, h);
-  try { return canvas.toDataURL('image/png'); }
-  catch { return null; }
+  try {
+    // WebP lossy PRÉSERVE la transparence tout en compressant bien plus qu'un PNG
+    // sans perte. Si le navigateur ne sait pas encoder en WebP, il retombe sur un
+    // PNG (préfixe différent) → on garde ce PNG en dernier recours.
+    const webp = canvas.toDataURL('image/webp', quality);
+    if (/^data:image\/webp/i.test(webp)) return webp;
+    return canvas.toDataURL('image/png');
+  } catch { return null; }
 }
 
 function mutateSelection(editor, action) {
@@ -1954,7 +2026,8 @@ function mutateSelection(editor, action) {
   if (action === 'paste') return pasteCopiedBlock(editor);
   if (action === 'duplicate') {
     pushHistory(editor);
-    const copies = selection.map((item, index) => normalizeBlock({ ...structuredClone(item), id: uid(), x: item.x + 25, y: item.y + 25, z: nextZ(editor) + index, locked: false }, 0, editor.__freePageState.height)).filter(Boolean);
+    // Tri stable par z croissant → la duplication préserve la superposition d'origine.
+    const copies = selection.slice().sort((a, b) => (Number(a.z) || 0) - (Number(b.z) || 0)).map((item, index) => normalizeBlock({ ...structuredClone(item), id: uid(), x: item.x + 25, y: item.y + 25, z: nextZ(editor) + index, locked: false }, 0, editor.__freePageState.height)).filter(Boolean);
     editor.__freePageState.blocks.push(...copies.slice(0, Math.max(0, MAX_BLOCKS - editor.__freePageState.blocks.length)));
     renderBlocks(editor, copies.at(-1)?.id || null);
     return;
@@ -2028,7 +2101,12 @@ function pasteCopiedBlock(editor) {
     && source.sourceSlideId === editor.__freePageSlideId;
   const offset = sameSlide ? (source.pasteCount || 0) * 22 : 0;
   const groupMap = new Map();
+  // Réassigner les z dans l'ORDRE DE SUPERPOSITION d'origine (tri stable par z
+  // croissant) → un texte devant une forme reste devant après collage. Sans ce
+  // tri, l'ordre du presse-papiers (ordre de sélection) écrasait l'empilement.
   const copies = source.blocks
+    .slice()
+    .sort((a, b) => (Number(a.z) || 0) - (Number(b.z) || 0))
     .slice(0, available)
     .filter((item) => item.type !== 'image' || imageCount + (++addedImages) <= MAX_IMAGES)
     .map((item, index) => normalizeBlock({
@@ -3308,6 +3386,7 @@ function pageInspectorHtml(editor) {
       <div class="free-page-resource-grid">
         <button type="button" class="free-page-resource" data-fpe-action="add-text">Texte</button>
         <button type="button" class="free-page-resource" data-fpe-action="add-image">Image</button>
+        <button type="button" class="free-page-resource" data-fpe-action="add-image-url">Image URL</button>
         <button type="button" class="free-page-resource" data-fpe-action="add-table">Tableau</button>
         <button type="button" class="free-page-resource" data-fpe-action="add-chart">Graphique</button>
         <button type="button" class="free-page-resource" data-fpe-action="toggle-shape-popover">Formes</button>
@@ -4339,6 +4418,34 @@ function ensureReaderInteractions() {
     const block = event.target.closest?.('[data-fpe-reader-action="label"]');
     if (!block || block.contains(event.relatedTarget)) return;
     hideReaderTooltip();
+  });
+  // Navigation clavier ← → (et PageUp/Down) — pour parcourir un diaporama :
+  //  • toujours si un lecteur est en plein écran,
+  //  • sinon uniquement pour un lecteur ayant opté (data-free-page-keyboard) et
+  //    s'il est le seul → on ne vole pas les flèches des autres pages/lecteurs.
+  document.addEventListener('keydown', (event) => {
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+    const forward = event.key === 'ArrowRight' || event.key === 'PageDown';
+    const backward = event.key === 'ArrowLeft' || event.key === 'PageUp';
+    if (!forward && !backward) return;
+    const t = event.target;
+    if (t?.closest?.('input, textarea, select, [contenteditable="true"], [data-free-page-editor]')) return;
+    const fs = document.fullscreenElement;
+    let reader = fs ? (fs.matches?.('[data-free-page-reader]') ? fs : fs.querySelector?.('[data-free-page-reader]')) : null;
+    if (!reader) {
+      const opted = [...document.querySelectorAll('[data-free-page-reader][data-free-page-keyboard]')];
+      reader = opted.length === 1 ? opted[0] : null;
+    }
+    if (!reader) return;
+    const deck = normalizeFreePageDeck(safeJson(reader.dataset.freePageDeck || 'null'));
+    if (deck.canBrowse === false) return;
+    const slides = visibleSlides(deck);
+    if (slides.length <= 1) return;
+    const idx = Math.max(0, slides.findIndex((s) => s.id === reader.dataset.freePageCurrentSlide));
+    const next = slides[idx + (forward ? 1 : -1)];
+    if (!next) return;
+    event.preventDefault();
+    switchReaderSlide(reader, next.id);
   });
 }
 

@@ -389,6 +389,9 @@
 .npc-mini-btn--off:hover { background: rgba(255,255,255,.08); }
 .npc-mini-btn--danger { border-color: rgba(255,107,107,.25); color: #ff6b6b; background: transparent; }
 .npc-mini-btn--danger:hover { background: rgba(255,107,107,.1); }
+/* Profil Bastion : PNJ marqué non recrutable (masqué aux joueurs) */
+.npc-bastion-note { font-size: .72rem; color: var(--text-dim); margin: -.2rem 0 .55rem; }
+.npc-card.is-not-recrutable { opacity: .82; }
 
 .npc-body { padding: 1rem 1.15rem; display: flex; flex-direction: column; gap: .9rem; }
 .npc-desc {
