@@ -2298,7 +2298,9 @@
 }
 
 .free-page-editor .free-page-block.is-selected {
-  z-index: 4800 !important;
+  /* Pas de z-index élevé : le bloc sélectionné/manipulé RESTE à son plan d'origine
+     (ne saute plus au premier plan). L'ordre se change explicitement via
+     « Mettre devant/derrière » ou le panneau des calques. */
   border-color: #6aa7ff;
   box-shadow: 0 0 0 1px rgba(106,167,255,.28), 0 8px 22px rgba(0,0,0,.25);
 }
