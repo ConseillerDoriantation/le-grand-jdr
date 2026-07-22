@@ -2172,12 +2172,26 @@ function blocksBounds(blocks) {
 
 function handlePointerDown(editor, event) {
   if (event.button !== 0) return;
-  const resizeHandle = event.target.closest('[data-fpe-resize]');
-  const radiusHandle = event.target.closest('[data-fpe-radius]');
-  const rotateHandle = event.target.closest('[data-fpe-rotate]');
+  // Poignées du bloc sélectionné : cible directe, sinon on cherche dans TOUTE la
+  // pile sous le curseur (restreinte au bloc sélectionné) → une poignée recouverte
+  // par un autre bloc reste saisissable, sans que le bloc saute au premier plan.
+  const _selId = editor.__freePageSelected;
+  const _handleAt = (sel) => {
+    const direct = event.target.closest(sel);
+    if (direct) return direct;
+    if (!_selId) return null;
+    for (const el of document.elementsFromPoint(event.clientX, event.clientY)) {
+      const h = el.closest?.(sel);
+      if (h && h.closest('[data-fpe-block]')?.dataset.fpeBlock === _selId) return h;
+    }
+    return null;
+  };
+  const resizeHandle = _handleAt('[data-fpe-resize]');
+  const radiusHandle = _handleAt('[data-fpe-radius]');
+  const rotateHandle = _handleAt('[data-fpe-rotate]');
   const cropDragHandle = event.target.closest('[data-fpe-crop-drag]');
   const cropZoomHandle = event.target.closest('[data-fpe-crop-zoom]');
-  const moveHandle = event.target.closest('[data-fpe-move]');
+  const moveHandle = _handleAt('[data-fpe-move]');
   const navEl = event.target.closest('[data-fpe-nav-block]');
   const directImageBlock = event.target.closest('.free-page-block--image[data-fpe-block]');
   const directBlock = event.target.closest('[data-fpe-block]');
@@ -2412,6 +2426,35 @@ function resizeBlockFromStart(editor, block, start, dx, dy, dir, pageHeight) {
   let y = start.y;
   let w = start.w;
   let h = start.h;
+
+  // ── Angles (diagonales) : redimensionnement PROPORTIONNEL, coin opposé ancré ──
+  if (dir.length === 2 && start.w > 0 && start.h > 0) {
+    const ratio = start.w / start.h;
+    const rawW = dir.includes('e') ? start.w + dx : start.w - dx;
+    const rawH = dir.includes('s') ? start.h + dy : start.h - dy;
+    // On garde le ratio en suivant l'axe le plus « étiré ».
+    let nw = (rawW / ratio >= rawH) ? Math.max(minW, rawW) : Math.max(minH, rawH) * ratio;
+    nw = snap(nw);
+    let nh = nw / ratio;
+    // Bornes de la page selon le coin ancré (le ratio est préservé en réduisant).
+    const right = start.x + start.w, bottom = start.y + start.h;
+    const maxW = dir.includes('w') ? right : PAGE_WIDTH - start.x;
+    const maxH = dir.includes('n') ? bottom : pageHeight - start.y;
+    if (nw > maxW) { nw = maxW; nh = nw / ratio; }
+    if (nh > maxH) { nh = maxH; nw = nh * ratio; }
+    w = Math.max(minW, nw);
+    h = Math.max(minH, nh);
+    x = dir.includes('w') ? right - w : start.x;
+    y = dir.includes('n') ? bottom - h : start.y;
+    block.x = clamp(x, 0, PAGE_WIDTH - minW);
+    block.y = clamp(y, 0, pageHeight - minH);
+    block.w = clamp(w, minW, PAGE_WIDTH - block.x);
+    block.h = clamp(h, minH, pageHeight - block.y);
+    if (block.type === 'image' && editor.__freePageCropBlockId === block.id) preserveCropImagePixels(block, start);
+    return;
+  }
+
+  // ── Bords : redimensionnement LIBRE (un seul axe) ──
   if (dir.includes('e')) w = clamp(start.w + dx, minW, PAGE_WIDTH - start.x);
   if (dir.includes('s')) h = clamp(start.h + dy, minH, pageHeight - start.y);
   if (dir.includes('w')) {
