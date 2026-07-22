@@ -3793,10 +3793,13 @@ body.ach-dragging * { cursor:grabbing !important; }
 }
 
 .ach-lb-frame {
-  width:min(1180px, 94vw);
-  max-height:86vh;
+  /* Largeur = celle de l'image à sa hauteur d'affichage (+ colonne infos).
+     `--ach-ar` est posé en JS depuis naturalWidth/naturalHeight. */
+  width:max-content;
+  max-width:96vw;
+  max-height:88vh;
   display:grid;
-  grid-template-columns:minmax(0, 1fr) minmax(280px, 360px);
+  grid-template-columns:auto minmax(300px, 340px);
   gap:0;
   overflow:hidden;
   border-radius:18px;
@@ -3809,13 +3812,16 @@ body.ach-dragging * { cursor:grabbing !important; }
   animation:ach-lb-scale .28s cubic-bezier(.22,1,.36,1);
 }
 .ach-lb-media {
+  align-self:center;
+  width:var(--ach-media-w, min(760px, calc(96vw - 340px)));
+  height:var(--ach-media-h, 60vh);
   min-width:0;
-  min-height:340px;
   display:flex;
   align-items:center;
   justify-content:center;
   background:#02050a;
 }
+.ach-lb-media.is-empty { width:min(520px, calc(96vw - 340px)); height:min(60vh, 420px); }
 .ach-lb-media.is-empty {
   background:radial-gradient(ellipse at 50% 38%, var(--c-glow, rgba(126,176,255,.16)), #050912 70%);
 }
@@ -3827,7 +3833,7 @@ body.ach-dragging * { cursor:grabbing !important; }
   width:100%;
   height:100%;
   max-width:none;
-  max-height:86vh;
+  max-height:none;
   object-fit:contain;
   border-radius:0;
   box-shadow:none;
@@ -3835,6 +3841,8 @@ body.ach-dragging * { cursor:grabbing !important; }
 }
 .ach-lb-info {
   position:static;
+  overflow-y:auto;
+  max-height:max(var(--ach-media-h, 60vh), 48vh);
   padding:26px 24px;
   background:linear-gradient(180deg, rgba(13,20,32,.96), rgba(7,11,18,.98));
   text-align:left;
@@ -4151,11 +4159,18 @@ body.ach-dragging * { cursor:grabbing !important; }
   .ach-lb-frame {
     grid-template-columns:1fr;
     width:min(760px, 94vw);
+    height:auto;
     max-height:88vh;
     overflow:auto;
   }
-  .ach-lb-media { min-height:240px; }
-  .ach-lb-image-rich { max-height:58vh; }
+  .ach-lb-media {
+    width:var(--ach-media-w, 100%);
+    max-width:100%;
+    height:var(--ach-media-h, auto);
+    max-height:62vh;
+    margin:0 auto;
+  }
+  .ach-lb-info { max-height:none; }
 }
 
 /* ── Empty state ───────────────────────────────────────────── */
@@ -4231,7 +4246,7 @@ body.ach-dragging * { cursor:grabbing !important; }
   .ach-mission-context-actions button {
     flex:1 1 auto;
   }
-  .ach-lb-frame { width:94vw; max-height:86vh; }
+  .ach-lb-frame { width:94vw; height:auto; max-height:86vh; }
   .ach-lb-info { padding:20px 18px; }
   .ach-lb-title { font-size:1.18rem; }
   .ach-lb-nav {

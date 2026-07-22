@@ -902,6 +902,12 @@ function setupAchievementsDnd(catId) {
 }
 
 // ── LIGHTBOX IMAGE ────────────────────────────────────────────────────────────
+// Largeur de la colonne infos et point de bascule en une seule colonne —
+// doivent rester alignés sur .ach-lb-frame / @media dans features.css.
+const ACH_LB_SIDE_W = 340;
+const ACH_LB_STACK_BP = 1100;
+const ACH_LB_STACK_W = 760;
+
 function _achOpenImage(url) {
   // Overlay plein écran avec l'image agrandie, clic ou Escape pour fermer
   _achClearLightboxKeyHandler();   // coupe les flèches/Échap de la fiche riche si ouverte
@@ -1876,11 +1882,41 @@ function _achOpenLightbox(itemId) {
 
   const close = () => {
     _achClearLightboxKeyHandler();
+    overlay.dispatchEvent(new Event('ach-lb-teardown'));
     overlay.style.opacity = '0';
     setTimeout(() => overlay.remove(), 160);
   };
   overlay.addEventListener('click', close);
-  overlay.querySelector('.ach-lb-frame')?.addEventListener('click', e => e.stopPropagation());
+  const frameEl = overlay.querySelector('.ach-lb-frame');
+  frameEl?.addEventListener('click', e => e.stopPropagation());
+  // Le cadre s'adapte au ratio RÉEL de l'image : sans ça la colonne média gardait
+  // un format fixe et l'image arrivait rétrécie entre deux bandes noires.
+  // Calculé en JS : en CSS, `aspect-ratio` sur une colonne de grille auto crée une
+  // dépendance circulaire largeur↔hauteur que le navigateur résout en rognant.
+  const mediaImg = overlay.querySelector('.ach-lb-image-rich');
+  if (frameEl && mediaImg) {
+    const fitFrameToImage = () => {
+      const ar = mediaImg.naturalWidth / mediaImg.naturalHeight;
+      if (!Number.isFinite(ar) || ar <= 0) return;
+      // Place réellement disponible, mesurée sur l'overlay (padding compris)
+      // plutôt que devinée depuis innerWidth : sinon la grille rogne la colonne.
+      const cs = getComputedStyle(overlay);
+      const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+      const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      const stacked = window.innerWidth <= ACH_LB_STACK_BP;
+      const sideW = stacked ? 0 : ACH_LB_SIDE_W;
+      const hostW = overlay.clientWidth - padX;
+      const availW = Math.max(240, (stacked ? Math.min(hostW, ACH_LB_STACK_W) : hostW - sideW) - 2);
+      const availH = Math.max(200, (overlay.clientHeight - padY - 2) * (stacked ? 0.62 : 1));
+      const w = Math.min(availW, availH * ar);
+      frameEl.style.setProperty('--ach-media-w', `${Math.round(w)}px`);
+      frameEl.style.setProperty('--ach-media-h', `${Math.round(w / ar)}px`);
+    };
+    if (mediaImg.complete && mediaImg.naturalWidth) fitFrameToImage();
+    else mediaImg.addEventListener('load', fitFrameToImage, { once: true });
+    window.addEventListener('resize', fitFrameToImage);
+    overlay.addEventListener('ach-lb-teardown', () => window.removeEventListener('resize', fitFrameToImage));
+  }
   // Clic sur l'image de la fiche → viewer plein écran à sa vraie taille (hors cadre).
   overlay.querySelector('[data-ach-zoom]')?.addEventListener('click', e => { e.stopPropagation(); _achOpenImage(item.imageUrl); });
   overlay.querySelector('.ach-lb-close').addEventListener('click', e => { e.stopPropagation(); close(); });
