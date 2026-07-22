@@ -257,6 +257,12 @@
   font-weight: 900;
 }
 
+/* Sélection multiple aux couleurs différentes → pas de couleur commune à montrer */
+.free-page-toolbar-color-button.is-mixed i {
+  background: transparent;
+  border: 1px dashed rgba(200,212,232,.55);
+}
+
 .free-page-toolbar-color-button i {
   position: absolute;
   right: 7px;

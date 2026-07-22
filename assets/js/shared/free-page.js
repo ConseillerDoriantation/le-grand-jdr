@@ -3475,25 +3475,43 @@ function syncToolbar(editor) {
   const redoBtn = editor.querySelector('[data-fpe-action="redo"]');
   if (undoBtn) undoBtn.disabled = !editor.__freePageUndo.length;
   if (redoBtn) redoBtn.disabled = !editor.__freePageRedo.length;
-  const block = selectedBlock(editor);
-  editor.classList.toggle('is-text-active', block?.type === 'text');
+  // La barre de texte reflète la sélection ENTIÈRE : on affiche la valeur commune
+  // à tous les blocs texte sélectionnés, et RIEN (champ vide) si elles diffèrent.
+  const blocks = selectedBlocks(editor);
+  const textBlocks = blocks.filter((item) => item.type === 'text');
+  const isTextSelection = textBlocks.length > 0 && textBlocks.length === blocks.length;
+  editor.classList.toggle('is-text-active', isTextSelection);
   const textToolbar = editor.querySelector('[data-fpe-text-toolbar]');
-  if (textToolbar && block?.type === 'text') {
+  if (textToolbar && isTextSelection) {
+    const common = (read) => {
+      const first = read(textBlocks[0]);
+      return textBlocks.every((item) => read(item) === first) ? first : null;
+    };
+    const sizeVal = common((item) => Number(item.fontSize) || 18);
+    const fontVal = common((item) => safeTextFont(item.fontFamily));
+    const colorVal = common((item) => safeColor(item.textColor, '#eef2fb'));
+    const upperVal = common((item) => item.textTransform === 'uppercase');
+
     const size = textToolbar.querySelector('[data-fpe-inspector-field="fontSize"]');
     const color = textToolbar.querySelector('[data-fpe-inspector-field="textColor"]');
     const fontLabel = textToolbar.querySelector('[data-fpe-font-label]');
     const transform = textToolbar.querySelector('[data-fpe-inspector-field="textTransform"]');
-    if (size && document.activeElement !== size) size.value = String(Number(block.fontSize) || 18);
-    if (color && document.activeElement !== color) color.value = safeColor(block.textColor, '#eef2fb');
-    if (fontLabel) {
-      const currentFont = safeTextFont(block.fontFamily);
-      fontLabel.textContent = fontNameOf(currentFont);
-      fontLabel.style.fontFamily = currentFont;
+
+    if (size && document.activeElement !== size) {
+      size.value = sizeVal == null ? '' : String(sizeVal);
+      size.placeholder = sizeVal == null ? '—' : '';
     }
-    if (transform) transform.classList.toggle('is-active', block.textTransform === 'uppercase');
-    const colorButton = textToolbar.querySelector('[data-fpe-action="toggle-text-color-popover"] i');
-    if (colorButton) colorButton.style.setProperty('--fpe-active-color', safeColor(block.textColor, '#eef2fb'));
-    syncTextColorPopover(editor, safeColor(block.textColor, '#eef2fb'));
+    if (color && document.activeElement !== color && colorVal) color.value = colorVal;
+    if (fontLabel) {
+      fontLabel.textContent = fontVal == null ? '—' : fontNameOf(fontVal);
+      fontLabel.style.fontFamily = fontVal || '';
+    }
+    if (transform) transform.classList.toggle('is-active', upperVal === true);
+    const colorButton = textToolbar.querySelector('[data-fpe-action="toggle-text-color-popover"]');
+    if (colorButton) colorButton.classList.toggle('is-mixed', colorVal == null);
+    const colorDot = colorButton?.querySelector('i');
+    if (colorDot) colorDot.style.setProperty('--fpe-active-color', colorVal || 'transparent');
+    syncTextColorPopover(editor, colorVal || '#eef2fb');
   }
   renderInspector(editor);
 }
