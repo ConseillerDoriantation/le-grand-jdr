@@ -210,16 +210,37 @@
   font: 800 .78rem/1 'Outfit', sans-serif;
 }
 
+/* Sélecteur de police : bouton compact ouvrant un popover d'aperçus */
 .free-page-toolbar-font {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   width: 132px;
   height: 31px;
   min-width: 104px;
+  padding: 0 8px;
+  box-sizing: border-box;
   border: 1px solid rgba(126,176,255,.22);
   border-radius: 6px;
   background: rgba(4,10,18,.72);
   color: var(--text, #eef2fb);
   font: 800 .72rem/1 'Outfit', sans-serif;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color .14s, background .14s;
 }
+.free-page-toolbar-font:hover { border-color: rgba(126,176,255,.5); background: rgba(10,20,34,.9); }
+.free-page-toolbar-font > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-size: .82rem;
+  font-weight: 600;
+}
+.free-page-toolbar-font > i { flex: 0 0 auto; font-style: normal; font-size: .68rem; opacity: .6; }
 
 .free-page-toolbar-color-button {
   position: relative;
@@ -273,6 +294,53 @@
   border-radius: 10px;
   background: rgba(8,14,24,.98);
   box-shadow: 0 18px 42px rgba(0,0,0,.38);
+}
+
+/* Popover du sélecteur de police : chaque entrée s'affiche dans sa propre typo */
+.free-page-font-popover {
+  position: absolute;
+  top: 48px;
+  left: 260px;
+  z-index: 32;
+  width: 260px;
+  max-height: 340px;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid rgba(126,176,255,.22);
+  border-radius: 10px;
+  background: rgba(8,14,24,.98);
+  box-shadow: 0 18px 42px rgba(0,0,0,.38);
+}
+.free-page-font-popover[hidden] { display: none !important; }
+.free-page-font-group + .free-page-font-group { margin-top: 8px; }
+.free-page-font-group-title {
+  display: block;
+  padding: 2px 4px 5px;
+  color: rgba(200,212,232,.6);
+  font: 800 .6rem/1 'Outfit', sans-serif;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.free-page-font-list { display: flex; flex-direction: column; gap: 2px; }
+.free-page-font-item {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text, #eef2fb);
+  font-size: 1rem;
+  line-height: 1.15;
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.free-page-font-item:hover { background: rgba(126,176,255,.12); border-color: rgba(126,176,255,.28); }
+.free-page-font-item.is-active {
+  background: rgba(126,176,255,.18);
+  border-color: rgba(126,176,255,.55);
 }
 
 .free-page-text-color-popover[hidden] {

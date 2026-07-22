@@ -3,6 +3,7 @@ import { sanitizeRichTextHtml } from './rich-text.js';
 import { compressDataUrl, pickImageFile } from './image-upload.js';
 import { showNotif } from './notifications.js';
 import { promptModal } from './modal.js';
+import { lsJson } from './local-storage.js';
 
 const PAGE_WIDTH = 1000;
 const DEFAULT_HEIGHT = 650;
@@ -705,7 +706,10 @@ export function freePageEditorHtml({ id = 'free-page-editor', page, legacyHtml =
         <button type="button" class="free-page-tool" data-fpe-action="add-nav">Menu</button>
       </div>
       <div class="free-page-toolbar-group free-page-toolbar-group--text" data-fpe-text-toolbar>
-        <select class="free-page-toolbar-font" data-fpe-inspector-field="fontFamily" title="Police">${fontOptionsHtml()}</select>
+        <button type="button" class="free-page-toolbar-font" data-fpe-action="toggle-font-popover" title="Police d'écriture">
+          <span data-fpe-font-label style="font-family:${_esc(TEXT_FONTS[0].value)}">${_esc(TEXT_FONTS[0].name)}</span>
+          <i aria-hidden="true">▾</i>
+        </button>
         <input class="free-page-toolbar-size" type="number" min="1" max="96" value="18" data-fpe-inspector-field="fontSize" title="Taille du texte">
         <button type="button" class="free-page-tool free-page-tool--icon" data-fpe-command="bold" title="Gras"><b>G</b></button>
         <button type="button" class="free-page-tool free-page-tool--icon" data-fpe-command="italic" title="Italique"><i>I</i></button>
@@ -733,6 +737,7 @@ export function freePageEditorHtml({ id = 'free-page-editor', page, legacyHtml =
       <div class="free-page-shape-popover" data-fpe-shape-popover hidden>${shapePopoverHtml()}</div>
       <div class="free-page-position-popover" data-fpe-position-popover hidden>${positionPopoverHtml()}</div>
       <div class="free-page-text-color-popover" data-fpe-text-color-popover hidden>${textColorPopoverHtml()}</div>
+      <div class="free-page-font-popover" data-fpe-font-popover hidden></div>
       <div class="free-page-toolbar-spacer"></div>
       <button type="button" class="free-page-tool free-page-tool--primary" data-fpe-action="preview-deck" title="Tester le rendu et les interactions">Apercu</button>
       <span class="free-page-slide-size">Diapo 1000 x ${DEFAULT_HEIGHT}</span>
@@ -1236,6 +1241,10 @@ function handleEditorClick(editor, event) {
     const colorPopover = editor.querySelector('[data-fpe-text-color-popover]');
     if (colorPopover) colorPopover.hidden = true;
   }
+  if (!event.target.closest('[data-fpe-font-popover], [data-fpe-action="toggle-font-popover"]')) {
+    const fontPopover = editor.querySelector('[data-fpe-font-popover]');
+    if (fontPopover) fontPopover.hidden = true;
+  }
   closeContextMenu(editor);
 
   const blockEl = event.target.closest('[data-fpe-block]');
@@ -1383,6 +1392,7 @@ function runAction(editor, action, event) {
   if (action === 'toggle-shape-popover') { toggleShapePopover(editor, event); return; }
   if (action === 'toggle-position-popover') { togglePositionPopover(editor, event); return; }
   if (action === 'toggle-text-color-popover') { toggleTextColorPopover(editor, event); return; }
+  if (action === 'toggle-font-popover') { toggleFontPopover(editor, event); return; }
   if (action.startsWith('position-')) return positionSelectionOnPage(editor, action.replace('position-', ''));
   if (action === 'add-text') return addTextBlock(editor);
   if (action === 'add-image') return addImageBlock(editor);
@@ -1509,6 +1519,57 @@ function toggleTextColorPopover(editor, event) {
   const editorRect = editor.getBoundingClientRect();
   const buttonRect = button.getBoundingClientRect();
   popover.style.left = `${Math.max(8, Math.min(buttonRect.left - editorRect.left - 28, editorRect.width - 306))}px`;
+  popover.style.top = `${buttonRect.bottom - editorRect.top + 6}px`;
+}
+
+// ── Sélecteur de police (popover avec aperçu + polices récentes) ─────────────
+const RECENT_FONTS_KEY = 'jdr_diapo_recent_fonts';
+const RECENT_FONTS_MAX = 5;
+
+function fontNameOf(value) {
+  return TEXT_FONTS.find((font) => font.value === value)?.name || 'Police';
+}
+function getRecentFonts() {
+  const list = lsJson.get(RECENT_FONTS_KEY, []);
+  return (Array.isArray(list) ? list : []).filter((value) => TEXT_FONT_VALUES.has(value));
+}
+function rememberRecentFont(value) {
+  const safe = safeTextFont(value);
+  const next = [safe, ...getRecentFonts().filter((item) => item !== safe)].slice(0, RECENT_FONTS_MAX);
+  try { lsJson.set(RECENT_FONTS_KEY, next); } catch { /* stockage indisponible */ }
+}
+function fontEntryHtml(font, selected) {
+  return `<button type="button" class="free-page-font-item ${font.value === selected ? 'is-active' : ''}"
+    data-fpe-inspector-field="fontFamily" value="${_esc(font.value)}"
+    style="font-family:${_esc(font.value)}" title="${_esc(font.name)}">${_esc(font.name)}</button>`;
+}
+function fontPopoverHtml(selected) {
+  const safe = safeTextFont(selected);
+  const recents = getRecentFonts()
+    .map((value) => TEXT_FONTS.find((font) => font.value === value))
+    .filter(Boolean);
+  const group = (title, fonts) => `<div class="free-page-font-group">
+    <span class="free-page-font-group-title">${title}</span>
+    <div class="free-page-font-list">${fonts.map((font) => fontEntryHtml(font, safe)).join('')}</div>
+  </div>`;
+  return (recents.length ? group('Récentes', recents) : '') + group('Toutes les polices', TEXT_FONTS);
+}
+function toggleFontPopover(editor, event) {
+  saveEditorTextSelection(editor, { paint: true });
+  const popover = editor.querySelector('[data-fpe-font-popover]');
+  const button = event?.target?.closest?.('[data-fpe-action="toggle-font-popover"]');
+  if (!popover) return;
+  const shouldOpen = popover.hidden;
+  ['[data-fpe-shape-popover]', '[data-fpe-position-popover]', '[data-fpe-text-color-popover]'].forEach((sel) => {
+    const other = editor.querySelector(sel);
+    if (other) other.hidden = true;
+  });
+  if (shouldOpen) popover.innerHTML = fontPopoverHtml(selectedBlock(editor)?.fontFamily);
+  popover.hidden = !shouldOpen;
+  if (!shouldOpen || !button) return;
+  const editorRect = editor.getBoundingClientRect();
+  const buttonRect = button.getBoundingClientRect();
+  popover.style.left = `${Math.max(8, Math.min(buttonRect.left - editorRect.left - 20, editorRect.width - 276))}px`;
   popover.style.top = `${buttonRect.bottom - editorRect.top + 6}px`;
 }
 
@@ -2703,6 +2764,11 @@ function handleInspectorInput(editor, event, { commit = false } = {}) {
     : '';
   const inlineTextApplied = field && applyInspectorTextRangeField(editor, block, field, target, toggleValue);
   if (field && !inlineTextApplied) applyInspectorField(block, field, target);
+  if (field === 'fontFamily') {
+    rememberRecentFont(target.value);                       // remonte la police en tête des « Récentes »
+    const fontPopover = editor.querySelector('[data-fpe-font-popover]');
+    if (fontPopover) fontPopover.hidden = true;             // referme après le choix
+  }
   updateSelectedElementStyle(editor, block);
   if (!inlineTextApplied) updateSelectedTextStyle(editor, block);
   updateSelectedImageStyle(editor, block);
@@ -3415,11 +3481,15 @@ function syncToolbar(editor) {
   if (textToolbar && block?.type === 'text') {
     const size = textToolbar.querySelector('[data-fpe-inspector-field="fontSize"]');
     const color = textToolbar.querySelector('[data-fpe-inspector-field="textColor"]');
-    const font = textToolbar.querySelector('[data-fpe-inspector-field="fontFamily"]');
+    const fontLabel = textToolbar.querySelector('[data-fpe-font-label]');
     const transform = textToolbar.querySelector('[data-fpe-inspector-field="textTransform"]');
     if (size && document.activeElement !== size) size.value = String(Number(block.fontSize) || 18);
     if (color && document.activeElement !== color) color.value = safeColor(block.textColor, '#eef2fb');
-    if (font && document.activeElement !== font) font.value = safeTextFont(block.fontFamily);
+    if (fontLabel) {
+      const currentFont = safeTextFont(block.fontFamily);
+      fontLabel.textContent = fontNameOf(currentFont);
+      fontLabel.style.fontFamily = currentFont;
+    }
     if (transform) transform.classList.toggle('is-active', block.textTransform === 'uppercase');
     const colorButton = textToolbar.querySelector('[data-fpe-action="toggle-text-color-popover"] i');
     if (colorButton) colorButton.style.setProperty('--fpe-active-color', safeColor(block.textColor, '#eef2fb'));
@@ -3832,11 +3902,6 @@ function inspectorTableSheetHtml(block) {
 
 function selectHtml(field, values, selected, labeler = (v) => v) {
   return `<select class="free-page-select" data-fpe-inspector-field="${_esc(field)}">${values.map((value) => `<option value="${_esc(value)}" ${String(value) === String(selected) ? 'selected' : ''}>${_esc(labeler(value))}</option>`).join('')}</select>`;
-}
-
-function fontOptionsHtml(selected = TEXT_FONTS[0].value) {
-  const safeSelected = safeTextFont(selected);
-  return TEXT_FONTS.map((font) => `<option value="${_esc(font.value)}" ${font.value === safeSelected ? 'selected' : ''}>${_esc(font.name)}</option>`).join('');
 }
 
 function interactionSelectHtml(selected) {
