@@ -3,6 +3,7 @@ import { sanitizeRichTextHtml } from './rich-text.js';
 import { compressDataUrl, pickImageFile } from './image-upload.js';
 import { showNotif } from './notifications.js';
 import { promptModal } from './modal.js';
+import { lsJson } from './local-storage.js';
 
 const PAGE_WIDTH = 1000;
 const DEFAULT_HEIGHT = 650;
@@ -58,6 +59,18 @@ const TEXT_FONTS = [
   { name: 'Palatino', value: "'Palatino Linotype', Palatino, serif" },
   { name: 'Courier', value: "'Courier New', monospace" },
   { name: 'Lucida', value: "'Lucida Console', Monaco, monospace" },
+  // Polices Google (chargées dans index.html) — décoratives + très utilisées.
+  { name: 'Unlock', value: "'Unlock', system-ui, sans-serif" },
+  { name: 'Wallpoet', value: "'Wallpoet', monospace" },
+  { name: 'Bebas Neue', value: "'Bebas Neue', Impact, sans-serif" },
+  { name: 'Anton', value: "'Anton', Impact, sans-serif" },
+  { name: 'Oswald', value: "'Oswald', 'Arial Narrow', sans-serif" },
+  { name: 'Roboto', value: "'Roboto', Arial, sans-serif" },
+  { name: 'Montserrat', value: "'Montserrat', 'Segoe UI', sans-serif" },
+  { name: 'Poppins', value: "'Poppins', 'Segoe UI', sans-serif" },
+  { name: 'Playfair Display', value: "'Playfair Display', Georgia, serif" },
+  { name: 'Lobster', value: "'Lobster', cursive" },
+  { name: 'Pacifico', value: "'Pacifico', cursive" },
 ];
 const TEXT_FONT_VALUES = new Set(TEXT_FONTS.map((font) => font.value));
 const SHAPE_COLOR_PRESETS = [
@@ -473,8 +486,10 @@ function popupTable(x, y, w, h) {
 function normalizeBlock(raw, index, pageHeight) {
   if (!raw || !BLOCK_TYPES.has(raw.type)) return null;
   const type = raw.type;
-  const minW = type === 'image' ? 120 : type === 'chart' ? 260 : type === 'shape' ? 40 : 180;
-  const minH = type === 'image' ? 100 : type === 'chart' ? 170 : type === 'shape' ? 20 : 90;
+  // Minimums alignés sur ceux du redimensionnement (resizeBlockFromStart) : sinon
+  // une zone texte réduite était re-agrandie de force au rechargement (min 180×90).
+  const minW = type === 'image' ? 120 : type === 'chart' ? 260 : type === 'shape' ? 40 : type === 'text' ? 20 : 180;
+  const minH = type === 'image' ? 100 : type === 'chart' ? 170 : type === 'shape' ? 20 : type === 'text' ? 12 : 90;
   const w = clamp(raw.w, minW, PAGE_WIDTH);
   const h = clamp(raw.h, minH, pageHeight);
   const block = {
@@ -691,7 +706,10 @@ export function freePageEditorHtml({ id = 'free-page-editor', page, legacyHtml =
         <button type="button" class="free-page-tool" data-fpe-action="add-nav">Menu</button>
       </div>
       <div class="free-page-toolbar-group free-page-toolbar-group--text" data-fpe-text-toolbar>
-        <select class="free-page-toolbar-font" data-fpe-inspector-field="fontFamily" title="Police">${fontOptionsHtml()}</select>
+        <button type="button" class="free-page-toolbar-font" data-fpe-action="toggle-font-popover" title="Police d'écriture">
+          <span data-fpe-font-label style="font-family:${_esc(TEXT_FONTS[0].value)}">${_esc(TEXT_FONTS[0].name)}</span>
+          <i aria-hidden="true">▾</i>
+        </button>
         <input class="free-page-toolbar-size" type="number" min="1" max="96" value="18" data-fpe-inspector-field="fontSize" title="Taille du texte">
         <button type="button" class="free-page-tool free-page-tool--icon" data-fpe-command="bold" title="Gras"><b>G</b></button>
         <button type="button" class="free-page-tool free-page-tool--icon" data-fpe-command="italic" title="Italique"><i>I</i></button>
@@ -719,6 +737,7 @@ export function freePageEditorHtml({ id = 'free-page-editor', page, legacyHtml =
       <div class="free-page-shape-popover" data-fpe-shape-popover hidden>${shapePopoverHtml()}</div>
       <div class="free-page-position-popover" data-fpe-position-popover hidden>${positionPopoverHtml()}</div>
       <div class="free-page-text-color-popover" data-fpe-text-color-popover hidden>${textColorPopoverHtml()}</div>
+      <div class="free-page-font-popover" data-fpe-font-popover hidden></div>
       <div class="free-page-toolbar-spacer"></div>
       <button type="button" class="free-page-tool free-page-tool--primary" data-fpe-action="preview-deck" title="Tester le rendu et les interactions">Apercu</button>
       <span class="free-page-slide-size">Diapo 1000 x ${DEFAULT_HEIGHT}</span>
@@ -778,6 +797,7 @@ function bindSingleFreePageEditor(editor) {
   editor.addEventListener('focusout', (event) => { if (isOwnEditorEvent(editor, event)) handleEditorFocusOut(editor, event); });
   editor.addEventListener('contextmenu', (event) => { if (isOwnEditorEvent(editor, event)) handleContextMenu(editor, event); });
   editor.addEventListener('pointerdown', (event) => { if (isOwnEditorEvent(editor, event)) handlePointerDown(editor, event); });
+  editor.addEventListener('pointermove', (event) => { if (isOwnEditorEvent(editor, event)) updateHandleCursor(editor, event); });
   editor.addEventListener('dragstart', (event) => { if (isOwnEditorEvent(editor, event)) handleSlideDragStart(editor, event); });
   editor.addEventListener('dragover', (event) => { if (isOwnEditorEvent(editor, event)) handleSlideDragOver(editor, event); });
   editor.addEventListener('drop', (event) => { if (isOwnEditorEvent(editor, event)) handleSlideDrop(editor, event); });
@@ -1069,6 +1089,15 @@ function handleDocumentShortcut(event) {
     return;
   }
   if (editing) {
+    // Échap SORT de l'édition de texte sans désélectionner : le bloc reste
+    // sélectionné → Suppr le supprime alors (cf. plus bas), au lieu d'effacer
+    // des caractères.
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      target.blur?.();
+      editor.focus?.({ preventScroll: true });
+      return;
+    }
     const content = target?.closest('[data-fpe-content]');
     const block = selectedBlock(editor);
     if (content && block?.type === 'text' && editor.__freePageTextRange?.blockId === block.id && hasPaintedTextSelection(content)) {
@@ -1211,6 +1240,10 @@ function handleEditorClick(editor, event) {
   if (!event.target.closest('[data-fpe-text-color-popover], [data-fpe-action="toggle-text-color-popover"]')) {
     const colorPopover = editor.querySelector('[data-fpe-text-color-popover]');
     if (colorPopover) colorPopover.hidden = true;
+  }
+  if (!event.target.closest('[data-fpe-font-popover], [data-fpe-action="toggle-font-popover"]')) {
+    const fontPopover = editor.querySelector('[data-fpe-font-popover]');
+    if (fontPopover) fontPopover.hidden = true;
   }
   closeContextMenu(editor);
 
@@ -1359,6 +1392,7 @@ function runAction(editor, action, event) {
   if (action === 'toggle-shape-popover') { toggleShapePopover(editor, event); return; }
   if (action === 'toggle-position-popover') { togglePositionPopover(editor, event); return; }
   if (action === 'toggle-text-color-popover') { toggleTextColorPopover(editor, event); return; }
+  if (action === 'toggle-font-popover') { toggleFontPopover(editor, event); return; }
   if (action.startsWith('position-')) return positionSelectionOnPage(editor, action.replace('position-', ''));
   if (action === 'add-text') return addTextBlock(editor);
   if (action === 'add-image') return addImageBlock(editor);
@@ -1485,6 +1519,57 @@ function toggleTextColorPopover(editor, event) {
   const editorRect = editor.getBoundingClientRect();
   const buttonRect = button.getBoundingClientRect();
   popover.style.left = `${Math.max(8, Math.min(buttonRect.left - editorRect.left - 28, editorRect.width - 306))}px`;
+  popover.style.top = `${buttonRect.bottom - editorRect.top + 6}px`;
+}
+
+// ── Sélecteur de police (popover avec aperçu + polices récentes) ─────────────
+const RECENT_FONTS_KEY = 'jdr_diapo_recent_fonts';
+const RECENT_FONTS_MAX = 5;
+
+function fontNameOf(value) {
+  return TEXT_FONTS.find((font) => font.value === value)?.name || 'Police';
+}
+function getRecentFonts() {
+  const list = lsJson.get(RECENT_FONTS_KEY, []);
+  return (Array.isArray(list) ? list : []).filter((value) => TEXT_FONT_VALUES.has(value));
+}
+function rememberRecentFont(value) {
+  const safe = safeTextFont(value);
+  const next = [safe, ...getRecentFonts().filter((item) => item !== safe)].slice(0, RECENT_FONTS_MAX);
+  try { lsJson.set(RECENT_FONTS_KEY, next); } catch { /* stockage indisponible */ }
+}
+function fontEntryHtml(font, selected) {
+  return `<button type="button" class="free-page-font-item ${font.value === selected ? 'is-active' : ''}"
+    data-fpe-inspector-field="fontFamily" value="${_esc(font.value)}"
+    style="font-family:${_esc(font.value)}" title="${_esc(font.name)}">${_esc(font.name)}</button>`;
+}
+function fontPopoverHtml(selected) {
+  const safe = safeTextFont(selected);
+  const recents = getRecentFonts()
+    .map((value) => TEXT_FONTS.find((font) => font.value === value))
+    .filter(Boolean);
+  const group = (title, fonts) => `<div class="free-page-font-group">
+    <span class="free-page-font-group-title">${title}</span>
+    <div class="free-page-font-list">${fonts.map((font) => fontEntryHtml(font, safe)).join('')}</div>
+  </div>`;
+  return (recents.length ? group('Récentes', recents) : '') + group('Toutes les polices', TEXT_FONTS);
+}
+function toggleFontPopover(editor, event) {
+  saveEditorTextSelection(editor, { paint: true });
+  const popover = editor.querySelector('[data-fpe-font-popover]');
+  const button = event?.target?.closest?.('[data-fpe-action="toggle-font-popover"]');
+  if (!popover) return;
+  const shouldOpen = popover.hidden;
+  ['[data-fpe-shape-popover]', '[data-fpe-position-popover]', '[data-fpe-text-color-popover]'].forEach((sel) => {
+    const other = editor.querySelector(sel);
+    if (other) other.hidden = true;
+  });
+  if (shouldOpen) popover.innerHTML = fontPopoverHtml(selectedBlock(editor)?.fontFamily);
+  popover.hidden = !shouldOpen;
+  if (!shouldOpen || !button) return;
+  const editorRect = editor.getBoundingClientRect();
+  const buttonRect = button.getBoundingClientRect();
+  popover.style.left = `${Math.max(8, Math.min(buttonRect.left - editorRect.left - 20, editorRect.width - 276))}px`;
   popover.style.top = `${buttonRect.bottom - editorRect.top + 6}px`;
 }
 
@@ -2172,12 +2257,26 @@ function blocksBounds(blocks) {
 
 function handlePointerDown(editor, event) {
   if (event.button !== 0) return;
-  const resizeHandle = event.target.closest('[data-fpe-resize]');
-  const radiusHandle = event.target.closest('[data-fpe-radius]');
-  const rotateHandle = event.target.closest('[data-fpe-rotate]');
+  // Poignées du bloc sélectionné : cible directe, sinon on cherche dans TOUTE la
+  // pile sous le curseur (restreinte au bloc sélectionné) → une poignée recouverte
+  // par un autre bloc reste saisissable, sans que le bloc saute au premier plan.
+  const _selId = editor.__freePageSelected;
+  const _handleAt = (sel) => {
+    const direct = event.target.closest(sel);
+    if (direct) return direct;
+    if (!_selId) return null;
+    for (const el of document.elementsFromPoint(event.clientX, event.clientY)) {
+      const h = el.closest?.(sel);
+      if (h && h.closest('[data-fpe-block]')?.dataset.fpeBlock === _selId) return h;
+    }
+    return null;
+  };
+  const resizeHandle = _handleAt('[data-fpe-resize]');
+  const radiusHandle = _handleAt('[data-fpe-radius]');
+  const rotateHandle = _handleAt('[data-fpe-rotate]');
   const cropDragHandle = event.target.closest('[data-fpe-crop-drag]');
   const cropZoomHandle = event.target.closest('[data-fpe-crop-zoom]');
-  const moveHandle = event.target.closest('[data-fpe-move]');
+  const moveHandle = _handleAt('[data-fpe-move]');
   const navEl = event.target.closest('[data-fpe-nav-block]');
   const directImageBlock = event.target.closest('.free-page-block--image[data-fpe-block]');
   const directBlock = event.target.closest('[data-fpe-block]');
@@ -2258,14 +2357,18 @@ function handlePointerDown(editor, event) {
         if (member && memberEl) memberEl.setAttribute('style', blockStyle(member, editor.__freePageState.height));
       });
     }
+    positionSelectionOverlay(editor); // le cadre visuel suit le bloc pendant le drag
   };
   const onUp = () => {
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
+    editor.__freePageDragging = false;
     blockEl.classList.remove('is-rotating');
     blockEl.classList.remove('is-rotation-snapped');
+    positionSelectionOverlay(editor);
     renderInspector(editor);
   };
+  editor.__freePageDragging = true;
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp, { once: true });
 }
@@ -2412,6 +2515,35 @@ function resizeBlockFromStart(editor, block, start, dx, dy, dir, pageHeight) {
   let y = start.y;
   let w = start.w;
   let h = start.h;
+
+  // ── Angles (diagonales) : redimensionnement PROPORTIONNEL, coin opposé ancré ──
+  if (dir.length === 2 && start.w > 0 && start.h > 0) {
+    const ratio = start.w / start.h;
+    const rawW = dir.includes('e') ? start.w + dx : start.w - dx;
+    const rawH = dir.includes('s') ? start.h + dy : start.h - dy;
+    // On garde le ratio en suivant l'axe le plus « étiré ».
+    let nw = (rawW / ratio >= rawH) ? Math.max(minW, rawW) : Math.max(minH, rawH) * ratio;
+    nw = snap(nw);
+    let nh = nw / ratio;
+    // Bornes de la page selon le coin ancré (le ratio est préservé en réduisant).
+    const right = start.x + start.w, bottom = start.y + start.h;
+    const maxW = dir.includes('w') ? right : PAGE_WIDTH - start.x;
+    const maxH = dir.includes('n') ? bottom : pageHeight - start.y;
+    if (nw > maxW) { nw = maxW; nh = nw / ratio; }
+    if (nh > maxH) { nh = maxH; nw = nh * ratio; }
+    w = Math.max(minW, nw);
+    h = Math.max(minH, nh);
+    x = dir.includes('w') ? right - w : start.x;
+    y = dir.includes('n') ? bottom - h : start.y;
+    block.x = clamp(x, 0, PAGE_WIDTH - minW);
+    block.y = clamp(y, 0, pageHeight - minH);
+    block.w = clamp(w, minW, PAGE_WIDTH - block.x);
+    block.h = clamp(h, minH, pageHeight - block.y);
+    if (block.type === 'image' && editor.__freePageCropBlockId === block.id) preserveCropImagePixels(block, start);
+    return;
+  }
+
+  // ── Bords : redimensionnement LIBRE (un seul axe) ──
   if (dir.includes('e')) w = clamp(start.w + dx, minW, PAGE_WIDTH - start.x);
   if (dir.includes('s')) h = clamp(start.h + dy, minH, pageHeight - start.y);
   if (dir.includes('w')) {
@@ -2632,6 +2764,11 @@ function handleInspectorInput(editor, event, { commit = false } = {}) {
     : '';
   const inlineTextApplied = field && applyInspectorTextRangeField(editor, block, field, target, toggleValue);
   if (field && !inlineTextApplied) applyInspectorField(block, field, target);
+  if (field === 'fontFamily') {
+    rememberRecentFont(target.value);                       // remonte la police en tête des « Récentes »
+    const fontPopover = editor.querySelector('[data-fpe-font-popover]');
+    if (fontPopover) fontPopover.hidden = true;             // referme après le choix
+  }
   updateSelectedElementStyle(editor, block);
   if (!inlineTextApplied) updateSelectedTextStyle(editor, block);
   updateSelectedImageStyle(editor, block);
@@ -3222,8 +3359,12 @@ function setSelected(editor, id) {
     editor.__freePageTextRange = null;
     editor.__freePageInlineTarget = null;
   }
+  const selectionChanged = editor.__freePageSelected !== nextId;
   editor.__freePageSelected = nextId;
   editor.__freePageSelectedIds = nextId && nextId !== NAV_BLOCK_ID ? [nextId] : [];
+  // Sélectionner un texte affiche d'emblée sa mise en forme (taille, couleur,
+  // police, alignement) : l'onglet « Contenu » ne sert à rien pour un texte.
+  if (selectionChanged && block?.type === 'text') editor.__freePageInspectorTab = 'config';
   applySelectionClasses(editor);
   syncToolbar(editor);
 }
@@ -3261,6 +3402,72 @@ function applySelectionClasses(editor) {
   editor.querySelectorAll('[data-fpe-nav-block]').forEach((el) => {
     el.classList.toggle('is-selected', editor.__freePageSelected === NAV_BLOCK_ID);
   });
+  positionSelectionOverlay(editor);
+}
+
+// ── Calque de sélection VISUEL (cadre + poignées) au-dessus de tous les blocs ──
+// Le bloc reste à son plan d'origine ; ce calque (pointer-events:none) montre le
+// cadre et les poignées EN PREMIER PLAN même quand un autre bloc recouvre la
+// forme. Les clics passent au travers et sont routés vers les vraies poignées
+// (dessous) via document.elementsFromPoint (cf. handlePointerDown).
+function _ensureSelOverlay(editor) {
+  const stage = editor.querySelector('[data-fpe-stage]');
+  if (!stage) return null;
+  let ov = stage.querySelector(':scope > [data-fpe-sel-overlay]');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.setAttribute('data-fpe-sel-overlay', '');
+    ov.className = 'free-page-sel-overlay';
+    ov.style.display = 'none';
+    ov.innerHTML = `<span class="free-page-sel-frame"></span>`;
+    stage.appendChild(ov);
+  } else if (ov !== stage.lastElementChild) {
+    stage.appendChild(ov); // rester le dernier enfant → au-dessus
+  }
+  return ov;
+}
+function positionSelectionOverlay(editor) {
+  const ov = _ensureSelOverlay(editor);
+  if (!ov) return;
+  const id = editor.__freePageSelected;
+  const single = (editor.__freePageSelectedIds || []).length <= 1;
+  const block = (single && id && id !== NAV_BLOCK_ID)
+    ? editor.__freePageState.blocks.find((b) => b.id === id) : null;
+  if (!block || block.locked || block.hidden || editor.__freePageCropBlockId === block.id) {
+    ov.style.display = 'none';
+    return;
+  }
+  const ph = editor.__freePageState.height || DEFAULT_HEIGHT;
+  ov.style.display = 'block';
+  ov.style.left = `${block.x / 10}%`;
+  ov.style.top = `${block.y / ph * 100}%`;
+  ov.style.width = `${block.w / 10}%`;
+  ov.style.height = `${block.h / ph * 100}%`;
+  ov.style.transform = `rotate(${normalizeRotation(block.rotation || 0)}deg)`;
+}
+
+// Force le curseur de redimensionnement/rotation quand le pointeur survole une
+// poignée du bloc sélectionné, MÊME si un autre bloc la recouvre (sinon le
+// navigateur affiche le curseur du bloc du dessus, ex. « texte »).
+const _CURSOR_BY_DIR = { nw: 'nwse', se: 'nwse', ne: 'nesw', sw: 'nesw', n: 'ns', s: 'ns', e: 'ew', w: 'ew' };
+function updateHandleCursor(editor, event) {
+  let cur = '';
+  const id = editor.__freePageSelected;
+  if (!editor.__freePageDragging && id && (editor.__freePageSelectedIds || []).length <= 1) {
+    for (const el of document.elementsFromPoint(event.clientX, event.clientY)) {
+      const inSel = (sel) => { const h = el.closest?.(sel); return h && h.closest('[data-fpe-block]')?.dataset.fpeBlock === id ? h : null; };
+      const rz = inSel('[data-fpe-resize]');
+      if (rz) { cur = _CURSOR_BY_DIR[rz.dataset.fpeResize] || ''; break; }
+      if (inSel('[data-fpe-rotate]')) { cur = 'grab'; break; }
+      if (inSel('[data-fpe-move]')) { cur = 'move'; break; }
+    }
+  }
+  editor.classList.toggle('fpe-cur-nwse', cur === 'nwse');
+  editor.classList.toggle('fpe-cur-nesw', cur === 'nesw');
+  editor.classList.toggle('fpe-cur-ns', cur === 'ns');
+  editor.classList.toggle('fpe-cur-ew', cur === 'ew');
+  editor.classList.toggle('fpe-cur-grab', cur === 'grab');
+  editor.classList.toggle('fpe-cur-move', cur === 'move');
 }
 
 function syncToolbar(editor) {
@@ -3268,21 +3475,43 @@ function syncToolbar(editor) {
   const redoBtn = editor.querySelector('[data-fpe-action="redo"]');
   if (undoBtn) undoBtn.disabled = !editor.__freePageUndo.length;
   if (redoBtn) redoBtn.disabled = !editor.__freePageRedo.length;
-  const block = selectedBlock(editor);
-  editor.classList.toggle('is-text-active', block?.type === 'text');
+  // La barre de texte reflète la sélection ENTIÈRE : on affiche la valeur commune
+  // à tous les blocs texte sélectionnés, et RIEN (champ vide) si elles diffèrent.
+  const blocks = selectedBlocks(editor);
+  const textBlocks = blocks.filter((item) => item.type === 'text');
+  const isTextSelection = textBlocks.length > 0 && textBlocks.length === blocks.length;
+  editor.classList.toggle('is-text-active', isTextSelection);
   const textToolbar = editor.querySelector('[data-fpe-text-toolbar]');
-  if (textToolbar && block?.type === 'text') {
+  if (textToolbar && isTextSelection) {
+    const common = (read) => {
+      const first = read(textBlocks[0]);
+      return textBlocks.every((item) => read(item) === first) ? first : null;
+    };
+    const sizeVal = common((item) => Number(item.fontSize) || 18);
+    const fontVal = common((item) => safeTextFont(item.fontFamily));
+    const colorVal = common((item) => safeColor(item.textColor, '#eef2fb'));
+    const upperVal = common((item) => item.textTransform === 'uppercase');
+
     const size = textToolbar.querySelector('[data-fpe-inspector-field="fontSize"]');
     const color = textToolbar.querySelector('[data-fpe-inspector-field="textColor"]');
-    const font = textToolbar.querySelector('[data-fpe-inspector-field="fontFamily"]');
+    const fontLabel = textToolbar.querySelector('[data-fpe-font-label]');
     const transform = textToolbar.querySelector('[data-fpe-inspector-field="textTransform"]');
-    if (size && document.activeElement !== size) size.value = String(Number(block.fontSize) || 18);
-    if (color && document.activeElement !== color) color.value = safeColor(block.textColor, '#eef2fb');
-    if (font && document.activeElement !== font) font.value = safeTextFont(block.fontFamily);
-    if (transform) transform.classList.toggle('is-active', block.textTransform === 'uppercase');
-    const colorButton = textToolbar.querySelector('[data-fpe-action="toggle-text-color-popover"] i');
-    if (colorButton) colorButton.style.setProperty('--fpe-active-color', safeColor(block.textColor, '#eef2fb'));
-    syncTextColorPopover(editor, safeColor(block.textColor, '#eef2fb'));
+
+    if (size && document.activeElement !== size) {
+      size.value = sizeVal == null ? '' : String(sizeVal);
+      size.placeholder = sizeVal == null ? '—' : '';
+    }
+    if (color && document.activeElement !== color && colorVal) color.value = colorVal;
+    if (fontLabel) {
+      fontLabel.textContent = fontVal == null ? '—' : fontNameOf(fontVal);
+      fontLabel.style.fontFamily = fontVal || '';
+    }
+    if (transform) transform.classList.toggle('is-active', upperVal === true);
+    const colorButton = textToolbar.querySelector('[data-fpe-action="toggle-text-color-popover"]');
+    if (colorButton) colorButton.classList.toggle('is-mixed', colorVal == null);
+    const colorDot = colorButton?.querySelector('i');
+    if (colorDot) colorDot.style.setProperty('--fpe-active-color', colorVal || 'transparent');
+    syncTextColorPopover(editor, colorVal || '#eef2fb');
   }
   renderInspector(editor);
 }
@@ -3691,11 +3920,6 @@ function inspectorTableSheetHtml(block) {
 
 function selectHtml(field, values, selected, labeler = (v) => v) {
   return `<select class="free-page-select" data-fpe-inspector-field="${_esc(field)}">${values.map((value) => `<option value="${_esc(value)}" ${String(value) === String(selected) ? 'selected' : ''}>${_esc(labeler(value))}</option>`).join('')}</select>`;
-}
-
-function fontOptionsHtml(selected = TEXT_FONTS[0].value) {
-  const safeSelected = safeTextFont(selected);
-  return TEXT_FONTS.map((font) => `<option value="${_esc(font.value)}" ${font.value === safeSelected ? 'selected' : ''}>${_esc(font.name)}</option>`).join('');
 }
 
 function interactionSelectHtml(selected) {

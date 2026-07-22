@@ -100,7 +100,14 @@ export function inlineEditNum(charId, field, el, min=0, max=99999) {
     const c = getCharacterById(charId);
     if (!c) { input.replaceWith(el); return; }
     c[field] = val;
-    await updateInCol('characters', charId, {[field]: val});
+    // pvBase / pmBase appartiennent au BUILD actif : les écrire en direct sur le
+    // perso laissait le build avec l'ancienne valeur, qui la réécrasait au rendu
+    // suivant → la modification semblait ne jamais s'enregistrer (sans erreur).
+    if (['pvBase', 'pmBase'].includes(field)) {
+      await saveBuildPatch(charId, c, { [field]: val });
+    } else {
+      await updateInCol('characters', charId, {[field]: val});
+    }
     if (field === 'niveau') await _syncPlayerNiveau(charId, val);
     el.textContent = field==='niveau' ? `Niv. ${val}` : field==='or' ? `💰 ${val} or` : val;
     input.replaceWith(el);

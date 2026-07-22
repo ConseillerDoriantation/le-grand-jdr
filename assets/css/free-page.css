@@ -210,16 +210,37 @@
   font: 800 .78rem/1 'Outfit', sans-serif;
 }
 
+/* Sélecteur de police : bouton compact ouvrant un popover d'aperçus */
 .free-page-toolbar-font {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   width: 132px;
   height: 31px;
   min-width: 104px;
+  padding: 0 8px;
+  box-sizing: border-box;
   border: 1px solid rgba(126,176,255,.22);
   border-radius: 6px;
   background: rgba(4,10,18,.72);
   color: var(--text, #eef2fb);
   font: 800 .72rem/1 'Outfit', sans-serif;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color .14s, background .14s;
 }
+.free-page-toolbar-font:hover { border-color: rgba(126,176,255,.5); background: rgba(10,20,34,.9); }
+.free-page-toolbar-font > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-size: .82rem;
+  font-weight: 600;
+}
+.free-page-toolbar-font > i { flex: 0 0 auto; font-style: normal; font-size: .68rem; opacity: .6; }
 
 .free-page-toolbar-color-button {
   position: relative;
@@ -234,6 +255,12 @@
   height: 20px;
   border-radius: 4px;
   font-weight: 900;
+}
+
+/* Sélection multiple aux couleurs différentes → pas de couleur commune à montrer */
+.free-page-toolbar-color-button.is-mixed i {
+  background: transparent;
+  border: 1px dashed rgba(200,212,232,.55);
 }
 
 .free-page-toolbar-color-button i {
@@ -273,6 +300,53 @@
   border-radius: 10px;
   background: rgba(8,14,24,.98);
   box-shadow: 0 18px 42px rgba(0,0,0,.38);
+}
+
+/* Popover du sélecteur de police : chaque entrée s'affiche dans sa propre typo */
+.free-page-font-popover {
+  position: absolute;
+  top: 48px;
+  left: 260px;
+  z-index: 32;
+  width: 260px;
+  max-height: 340px;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid rgba(126,176,255,.22);
+  border-radius: 10px;
+  background: rgba(8,14,24,.98);
+  box-shadow: 0 18px 42px rgba(0,0,0,.38);
+}
+.free-page-font-popover[hidden] { display: none !important; }
+.free-page-font-group + .free-page-font-group { margin-top: 8px; }
+.free-page-font-group-title {
+  display: block;
+  padding: 2px 4px 5px;
+  color: rgba(200,212,232,.6);
+  font: 800 .6rem/1 'Outfit', sans-serif;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.free-page-font-list { display: flex; flex-direction: column; gap: 2px; }
+.free-page-font-item {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text, #eef2fb);
+  font-size: 1rem;
+  line-height: 1.15;
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.free-page-font-item:hover { background: rgba(126,176,255,.12); border-color: rgba(126,176,255,.28); }
+.free-page-font-item.is-active {
+  background: rgba(126,176,255,.18);
+  border-color: rgba(126,176,255,.55);
 }
 
 .free-page-text-color-popover[hidden] {
@@ -2309,6 +2383,48 @@
   border-color: rgba(106,167,255,.58);
   box-shadow: 0 0 0 1px rgba(106,167,255,.18);
 }
+
+/* Calque de sélection VISUEL : cadre + poignées rendus AU-DESSUS de tous les
+   blocs (le bloc, lui, reste à son plan). pointer-events:none → les clics
+   passent aux vraies poignées dessous (routées via elementsFromPoint). */
+.free-page-sel-overlay {
+  position: absolute;
+  z-index: 6000;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+.free-page-sel-frame {
+  position: absolute;
+  inset: 0;
+  border: 1px solid #6aa7ff;
+  box-shadow: 0 0 0 1px rgba(106,167,255,.32);
+  border-radius: 5px;
+}
+.free-page-sel-dot {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  background: #fff;
+  border: 1px solid #6aa7ff;
+  border-radius: 2px;
+  transform: translate(-50%, -50%);
+}
+.free-page-sel-dot--nw { left: 0;    top: 0;    }
+.free-page-sel-dot--n  { left: 50%;  top: 0;    }
+.free-page-sel-dot--ne { left: 100%; top: 0;    }
+.free-page-sel-dot--e  { left: 100%; top: 50%;  }
+.free-page-sel-dot--se { left: 100%; top: 100%; }
+.free-page-sel-dot--s  { left: 50%;  top: 100%; }
+.free-page-sel-dot--sw { left: 0;    top: 100%; }
+.free-page-sel-dot--w  { left: 0;    top: 50%;  }
+
+/* Curseur forcé quand on survole une poignée du bloc sélectionné, même occultée. */
+.free-page-editor.fpe-cur-nwse, .free-page-editor.fpe-cur-nwse * { cursor: nwse-resize !important; }
+.free-page-editor.fpe-cur-nesw, .free-page-editor.fpe-cur-nesw * { cursor: nesw-resize !important; }
+.free-page-editor.fpe-cur-ns,   .free-page-editor.fpe-cur-ns   * { cursor: ns-resize   !important; }
+.free-page-editor.fpe-cur-ew,   .free-page-editor.fpe-cur-ew   * { cursor: ew-resize   !important; }
+.free-page-editor.fpe-cur-grab, .free-page-editor.fpe-cur-grab * { cursor: grab        !important; }
+.free-page-editor.fpe-cur-move, .free-page-editor.fpe-cur-move * { cursor: move        !important; }
 
 .free-page-editor .free-page-block.is-locked:hover {
   border-color: rgba(232,198,106,.20);
