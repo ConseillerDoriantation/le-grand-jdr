@@ -16,7 +16,7 @@ import { attachDropAndCrop } from '../shared/image-crop.js';
 import PAGES, { requestStatsScope } from './pages.js';
 import { sortCharactersForDisplay, getMyCharacters } from '../shared/char-stats.js';
 import { setHistoireCtx } from '../shared/histoire-ctx.js';
-import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
+import { characterAvatarHtml } from '../shared/portraits.js';
 import { storyParticipantsFromGroups, toggleQuestParticipant, dedupeQuestParticipants, questParticipantFromChar } from '../shared/participants.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 
@@ -169,202 +169,52 @@ async function loadActes() {
 }
 const saveActes = (list) => tryDoc('story_meta', 'actes', { list });
 
-// ── Groupes de participants (per-mission) ─────────────────────────────────────
-async function _saveModalGroupes() {
-  if (!STORE.modalStoryId) return; // nouvelle mission → sauvé avec le formulaire
-  try { await updateInCol('story', STORE.modalStoryId, { groupes: STORE.modalGroupes }); }
-  catch(e) { console.error('[saveGroupes]', e); showNotif('Erreur de sauvegarde.', 'error'); }
+// ── Groupes de mission (modèle unique) ────────────────────────────────────────
+// Un groupe = une quête liée à la mission (`quests.missionId`). La modale
+// d'édition et la fiche mission affichent EXACTEMENT les mêmes cartes
+// (`_storyGroupCardHtml`) : statut, réussite, récompense, membres, notes.
+// L'ancien modèle `story.groupes` (nom + membres seulement) n'est plus édité ;
+// il reste lisible pour la migration one-click (`_stMigrateGroups`).
+function _missionQuestGroups(missionId) {
+  if (!missionId) return [];
+  return (getCachedCollection('quests') || [])
+    .filter(q => q.missionId === missionId)
+    .sort((a, b) => (a.titre || '').localeCompare(b.titre || '', 'fr'));
 }
-function _renderGroupPills(groups) {
-  if (!groups.length) return `<span style="font-size:.75rem;color:var(--text-dim);font-style:italic">Aucun groupe. Créez-en un ci-dessous.</span>`;
-  const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-  const chars = sortCharactersForDisplay(STATE.characters || []);
-  return groups.map(g => {
-    const membres   = (g.membres||[]).map(id => chars.find(c => c.id === id)).filter(Boolean);
-    const reussite  = g.reussite != null ? g.reussite : '';
-    const recompense = g.recompense || '';
-    const notes     = g.notesReussite || '';
-    return `<div style="display:inline-flex;flex-direction:column;gap:.3rem;
-      padding:.45rem .55rem;border-radius:10px;vertical-align:top;
-      border:1px solid var(--border-strong);background:var(--bg-elevated);min-width:160px">
-      <div style="display:flex;align-items:center;gap:.35rem">
-        <button type="button" data-action="_stApplyGroup" data-members="${_esc(JSON.stringify(g.membres))}"
-          title="Appliquer ce groupe aux participants"
-          style="font-size:.75rem;color:var(--gold);font-family:'Cinzel',serif;
-            background:none;border:none;cursor:pointer;padding:0;line-height:1.2;flex:1;text-align:left">
-          ${g.nom}</button>
-        <span data-action="_stEditGroup" data-id="${g.id}"
-          title="Modifier ce groupe"
-          style="display:flex;align-items:center;justify-content:center;
-            width:15px;height:15px;border-radius:50%;background:rgba(79,140,255,.15);
-            color:#4f8cff;font-size:.68rem;cursor:pointer;flex-shrink:0">✎</span>
-        <span data-action="_stDeleteGroup" data-id="${g.id}"
-          style="display:flex;align-items:center;justify-content:center;
-            width:15px;height:15px;border-radius:50%;background:rgba(255,107,107,.15);
-            color:#ff6b6b;font-size:.72rem;font-weight:700;cursor:pointer;flex-shrink:0">×</span>
-      </div>
-      ${membres.length ? `<div style="display:flex;gap:3px;flex-wrap:wrap">
-        ${membres.map(c => {
-          const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
-          return characterAvatarHtml(c, {
-            size: 28,
-            border: `2px solid ${col}`,
-            background: `${col}18`,
-            color: col,
-            fallbackStyle: `font-family:'Cinzel',serif;font-weight:700;font-size:.62rem;color:${col}`,
-          });
-        }).join('')}
-      </div>` : ''}
-      <div style="border-top:1px solid var(--border);padding-top:.3rem;display:flex;flex-direction:column;gap:.25rem">
-        <div style="display:flex;gap:.35rem;align-items:center">
-          <span style="font-size:.65rem;color:var(--text-dim);white-space:nowrap">Réussite</span>
-          <input type="number" min="0" max="100" value="${reussite}" placeholder="—"
-            style="width:44px;padding:.1rem .25rem;font-size:.7rem;border-radius:4px;
-              border:1px solid var(--border);background:var(--bg-panel);color:var(--text)"
-            data-input="_stGroupField" data-id="${g.id}" data-field="reussite">
-          <span style="font-size:.65rem;color:var(--text-dim)">%</span>
-        </div>
-        <input type="text" value="${_esc(recompense)}" placeholder="Récompense…"
-          style="width:100%;box-sizing:border-box;padding:.1rem .25rem;font-size:.7rem;border-radius:4px;
-            border:1px solid var(--border);background:var(--bg-panel);color:var(--text)"
-          data-input="_stGroupField" data-id="${g.id}" data-field="recompense">
-        <textarea placeholder="Notes de réussite…" rows="2"
-          style="width:100%;box-sizing:border-box;padding:.15rem .3rem;font-size:.67rem;border-radius:4px;
-            border:1px solid var(--border);background:var(--bg-panel);color:var(--text);resize:vertical"
-          data-input="_stGroupField" data-id="${g.id}" data-field="notesReussite">${notes}</textarea>
-      </div>
+
+// Corps du panneau « Groupes » — identique à la section Groupes de la fiche.
+function _renderGroupsPanel(missionId) {
+  if (!missionId) {
+    return `<div class="st-groups-empty">
+      <span class="st-groups-empty-icon">👥</span>
+      <strong>Enregistre d'abord la mission</strong>
+      <span>Les groupes se rattachent à une mission existante. Enregistre, puis rouvre « Modifier » pour les gérer.</span>
     </div>`;
-  }).join('');
-}
-function _refreshStGroupsRow(groups) {
-  const row = document.getElementById('st-groups-row');
-  if (row) {
-    row.innerHTML = _renderGroupPills(groups) + `
-      <button type="button" data-action="_stSaveGroupDialog"
-        style="padding:.3rem .65rem;border-radius:999px;border:1px dashed rgba(232,184,75,.35);
-          background:transparent;color:var(--gold);font-size:.73rem;cursor:pointer;opacity:.8;
-          align-self:flex-start;margin-top:.1rem;transition:all .15s"
-        data-hov-opacity="1" data-hov-bg="rgba(232,184,75,.06)">
-        + Nouveau groupe</button>`;
   }
-  // Nouvelle vue par cards (modal v2)
+  const groups = _missionQuestGroups(missionId);
+  if (!groups.length) {
+    return `<div class="st-groups-empty">
+      <span class="st-groups-empty-icon">👥</span>
+      <strong>Aucun groupe pour cette mission</strong>
+      <span>Crée un groupe pour rattacher les personnages et suivre leur réussite séparément.</span>
+    </div>`;
+  }
+  return `<div class="mv-groups">${groups.map(g => _storyGroupCardHtml(g, missionId)).join('')}</div>`;
+}
+
+// Après une écriture sur un groupe : rafraîchir le panneau de la modale
+// d'édition s'il est ouvert, sinon rouvrir la fiche mission (comportement
+// d'origine quand l'action vient de la fiche).
+function _stRefreshGroups(missionId) {
   const list = document.getElementById('st-groups-list');
-  if (list) list.innerHTML = _renderGroupCards(groups);
+  if (!list) { openStoryDetail(missionId); return; }
+  const groups = _missionQuestGroups(missionId);
+  list.innerHTML = _renderGroupsPanel(missionId);
   const summary = document.getElementById('st-groups-summary');
   if (summary) summary.innerHTML = _renderMissionGroupSummary(groups);
   const count = document.getElementById('mn-tab-count-groupes');
   if (count) count.textContent = groups.length || '';
 }
-
-function _stGroupField(groupId, field, value) {
-  const g = STORE.modalGroupes.find(g => g.id === groupId);
-  if (g) g[field] = value;
-}
-
-function _stGroupPickToggle(charId, col) {
-  const el = document.getElementById(`st-gpick-${charId}`);
-  if (!el) return;
-  const picked = el.dataset.picked !== '1';
-  el.dataset.picked = picked ? '1' : '0';
-  el.style.borderColor = picked ? col : 'var(--border)';
-  el.style.background  = picked ? col + '18' : 'var(--bg-elevated)';
-  const circle = el.querySelector('div');
-  if (circle) circle.style.borderColor = picked ? col : 'rgba(255,255,255,.1)';
-  const nameEl = el.querySelector('span');
-  if (nameEl) {
-    nameEl.style.color = picked ? col : 'var(--text-dim)';
-    nameEl.style.fontWeight = picked ? '700' : '400';
-  }
-}
-
-function _resetGroupPicker() {
-  document.querySelectorAll('#st-group-picker [data-picked="1"]').forEach(el => {
-    el.dataset.picked = '0';
-    el.style.borderColor = 'var(--border)';
-    el.style.background  = 'var(--bg-elevated)';
-    const circle = el.querySelector('div');
-    if (circle) circle.style.borderColor = 'rgba(255,255,255,.1)';
-    const nameEl = el.querySelector('span');
-    if (nameEl) {
-      nameEl.style.color = 'var(--text-dim)';
-      nameEl.style.fontWeight = '400';
-    }
-  });
-}
-
-function _stSaveGroupDialog() {
-  const form = document.getElementById('st-save-group-form');
-  if (!form) return;
-  STORE.editingGroupId = null;
-  _resetGroupPicker();
-  const titleEl = document.getElementById('st-group-form-title');
-  if (titleEl) titleEl.textContent = 'Nouveau groupe';
-  form.style.display = 'block';
-  form.scrollIntoView?.({ behavior:'smooth', block:'nearest' });
-  const inp = document.getElementById('st-save-group-name');
-  if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 50); }
-}
-
-function _stCancelGroupForm() {
-  const form = document.getElementById('st-save-group-form');
-  if (form) form.style.display = 'none';
-  STORE.editingGroupId = null;
-  _resetGroupPicker();
-}
-
-function _stEditGroup(groupId) {
-  const g = STORE.modalGroupes.find(x => x.id === groupId);
-  if (!g) return;
-  const form = document.getElementById('st-save-group-form');
-  if (!form) return;
-  STORE.editingGroupId = groupId;
-  _resetGroupPicker();
-  const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-  (g.membres || []).forEach(charId => {
-    const el = document.getElementById(`st-gpick-${charId}`);
-    if (!el || el.dataset.picked === '1') return;
-    const char = (STATE.characters||[]).find(c => c.id === charId);
-    const col  = char ? PCOLS[char.nom?.charCodeAt(0)%6||0] : '#4f8cff';
-    _stGroupPickToggle(charId, col);
-  });
-  const titleEl = document.getElementById('st-group-form-title');
-  if (titleEl) titleEl.textContent = `Modifier « ${g.nom} »`;
-  form.style.display = 'block';
-  form.scrollIntoView?.({ behavior:'smooth', block:'nearest' });
-  const inp = document.getElementById('st-save-group-name');
-  if (inp) { inp.value = g.nom || ''; setTimeout(() => inp.focus(), 50); }
-}
-
-async function _stConfirmSaveGroup() {
-  const nom = document.getElementById('st-save-group-name')?.value?.trim();
-  if (!nom) { showNotif('Donne un nom au groupe.', 'error'); return; }
-  const membres = [...document.querySelectorAll('#st-group-picker [data-picked="1"]')]
-    .map(el => el.dataset.gmId).filter(Boolean);
-  if (!membres.length) { showNotif('Sélectionne au moins un membre.', 'error'); return; }
-  if (STORE.editingGroupId) {
-    STORE.modalGroupes = STORE.modalGroupes.map(g =>
-      g.id === STORE.editingGroupId ? { ...g, nom, membres } : g
-    );
-    STORE.editingGroupId = null;
-    showNotif(`Groupe « ${nom} » mis à jour.`, 'success');
-  } else {
-    STORE.modalGroupes = [...STORE.modalGroupes, { id: 'g' + Date.now(), nom, membres }];
-    showNotif(`Groupe « ${nom} » créé.`, 'success');
-  }
-  await _saveModalGroupes();
-  _refreshStGroupsRow(STORE.modalGroupes);
-  const form = document.getElementById('st-save-group-form');
-  if (form) form.style.display = 'none';
-}
-
-async function _stDeleteGroup(groupId) {
-  if (!await confirmModal('Supprimer ce groupe de participants ?')) return;
-  STORE.modalGroupes = STORE.modalGroupes.filter(g => g.id !== groupId);
-  await _saveModalGroupes();
-  _refreshStGroupsRow(STORE.modalGroupes);
-}
-
-function _stApplyGroup() {}
 
 // ── Groupes de mission = quêtes liées (missionId) ─────────────────────────────
 // Les joueurs rejoignent (champ participants, autorisé par les règles Firestore) ;
@@ -473,7 +323,7 @@ async function _stGroupNew(missionId) {
       participants: [], participantsRequis: 0, difficulte: 'moyen',
     });
     showNotif('Groupe créé. Les joueurs peuvent le rejoindre.', 'success');
-    openStoryDetail(missionId);
+    _stRefreshGroups(missionId);
   } catch (e) { notifySaveError(e); }
 }
 
@@ -484,7 +334,7 @@ async function _stGroupDelete(questId, missionId) {
   try {
     await deleteFromCol('quests', questId);
     showNotif('Groupe supprimé.', 'info');
-    openStoryDetail(missionId);
+    _stRefreshGroups(missionId);
   } catch (e) { notifySaveError(e); }
 }
 
@@ -535,7 +385,7 @@ async function _stGroupSaveParts(questId, parts, missionId, leaving) {
   try {
     await saveDoc('quests', questId, { participants: parts });
     showNotif(leaving ? 'Tu as quitté ce groupe.' : 'Tu as rejoint ce groupe !', leaving ? 'info' : 'success');
-    openStoryDetail(missionId);
+    _stRefreshGroups(missionId);
   } catch (e) {
     if (e?.code === 'permission-denied') showNotif('Action non autorisée.', 'error');
     else notifySaveError(e);
@@ -760,16 +610,6 @@ function _initMissionModalUI(item) {
     }
   });
 
-  // Filtre live du picker de groupe
-  const pickerSearch = shell.querySelector('#mn-picker-search');
-  pickerSearch?.addEventListener('input', () => {
-    const q = _normalize(pickerSearch.value);
-    shell.querySelectorAll('.st-group-pick').forEach(el => {
-      const name = _normalize(el.dataset.charName || '');
-      el.style.display = !q || name.includes(q) ? '' : 'none';
-    });
-  });
-
   // Filtre live des liens
   const liensSearch = shell.querySelector('#mn-liens-search');
   liensSearch?.addEventListener('input', () => {
@@ -778,12 +618,6 @@ function _initMissionModalUI(item) {
       const text = _normalize(el.textContent || '');
       el.style.display = !q || text.includes(q) ? '' : 'none';
     });
-  });
-
-  const groupNameInput = shell.querySelector('#st-save-group-name');
-  groupNameInput?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); _stConfirmSaveGroup(); }
-    if (e.key === 'Escape') { e.preventDefault(); _stCancelGroupForm(); }
   });
 
   // Raccourcis clavier : Ctrl+S = sauver, Escape = fermer (Escape déjà géré globalement)
@@ -805,80 +639,11 @@ function _initMissionModalUI(item) {
   }
 }
 
-// Cards de groupes pour la modale v2 — chaque card affiche : nom, membres,
-// réussite/récompense/notes (édition inline), boutons éditer/supprimer.
-function _renderGroupCards(groups) {
-  if (!groups.length) {
-    return `<div class="st-groups-empty">
-      <span class="st-groups-empty-icon">👥</span>
-      <strong>Aucun groupe pour cette mission</strong>
-      <span>Crée un groupe pour rattacher les personnages et suivre leur réussite séparément.</span>
-    </div>`;
-  }
-  const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-  const chars = sortCharactersForDisplay(STATE.characters || []);
-  return groups.map(g => {
-    const membres = (g.membres||[]).map(id => chars.find(c => c.id === id)).filter(Boolean);
-    const reussite = g.reussite != null ? g.reussite : '';
-    const recompense = g.recompense || '';
-    const notes = g.notesReussite || '';
-    const reusVal = parseInt(g.reussite) || 0;
-    const reusColor = reusVal>=80 ? '#22c38e' : reusVal>=40 ? '#e8b84b' : reusVal>0 ? '#ff8a4c' : 'var(--text-dim)';
-    const outcome = groupOutcome({ ...g, reussite: reusVal });
-    return `<div class="st-group-card" style="--grp-c:${outcome.color}">
-      <div class="st-group-card-head">
-        <div class="st-group-card-title-wrap">
-          <div class="st-group-card-title">${_esc(g.nom)}</div>
-          <div class="st-group-card-meta">
-            <span>${membres.length} membre${membres.length > 1 ? 's' : ''}</span>
-            <span style="color:${outcome.color}">${outcome.icon} ${outcome.label}</span>
-          </div>
-        </div>
-        <div class="st-group-card-actions">
-          <button type="button" class="st-icon-btn" title="Modifier" data-action="_stEditGroup" data-id="${g.id}">✎</button>
-          <button type="button" class="st-icon-btn st-icon-btn--danger" title="Supprimer" data-action="_stDeleteGroup" data-id="${g.id}">🗑️</button>
-        </div>
-      </div>
-      <div class="st-group-card-members">
-        ${membres.length ? membres.map(c => {
-          const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
-          return `<div class="st-group-member" title="${_esc(c.nom||'')}" style="--col:${col}">
-            ${characterAvatarHtml(c, { size: 22, border: `1px solid ${col}`, background: `${col}22`, color: col, title: false })}
-            <span class="st-group-member-name">${_esc(c.nom||'')}</span>
-          </div>`;
-        }).join('') : '<span class="st-group-empty-members">Aucun membre — édite le groupe pour en ajouter.</span>'}
-      </div>
-      <div class="st-group-progress" title="Réussite du groupe">
-        <div class="st-group-progress-fill" style="width:${Math.max(0, Math.min(100, reusVal))}%;background:${reusColor}"></div>
-      </div>
-      <div class="st-group-card-fields">
-        <label class="st-group-field">
-          <span class="st-group-field-lbl">Réussite</span>
-          <div class="st-group-field-row">
-            <input type="number" min="0" max="100" value="${reussite}" placeholder="0"
-              style="border-color:${reusColor};color:${reusColor}"
-              data-input="_stGroupField" data-id="${g.id}" data-field="reussite">
-            <span class="st-group-field-suffix" style="color:${reusColor}">%</span>
-          </div>
-        </label>
-        <label class="st-group-field st-group-field--wide">
-          <span class="st-group-field-lbl">🏆 Récompense</span>
-          <input type="text" value="${_esc(recompense)}" placeholder="XP, butin, faveur…"
-            data-input="_stGroupField" data-id="${g.id}" data-field="recompense">
-        </label>
-        <label class="st-group-field st-group-field--full">
-          <span class="st-group-field-lbl">📝 Notes de réussite</span>
-          <textarea rows="2" placeholder="Ce qui s'est passé, conséquences…"
-            data-input="_stGroupField" data-id="${g.id}" data-field="notesReussite">${_esc(notes)}</textarea>
-        </label>
-      </div>
-    </div>`;
-  }).join('');
-}
-
 function _renderMissionGroupSummary(groups) {
-  const chars = sortCharactersForDisplay(STATE.characters || []);
-  const selected = new Set(groups.flatMap(g => Array.isArray(g.membres) ? g.membres : []));
+  const chars = getCachedCollection('characters') || [];
+  const selected = new Set();
+  groups.forEach(g => dedupeQuestParticipants(g.participants || [])
+    .forEach(p => { const k = p.charId || p.uid || p.nom; if (k) selected.add(k); }));
   const reussites = groups
     .map(g => parseInt(g.reussite))
     .filter(Number.isFinite);
@@ -2307,7 +2072,7 @@ async function openStoryModal(item = null) {
     <!-- ════ TABS ════════════════════════════════════════════════ -->
     <div class="mn-tabs" role="tablist">
       <button type="button" class="mn-tab is-active" data-tab="histoire">📜 Histoire</button>
-      <button type="button" class="mn-tab" data-tab="groupes">👥 Groupes <span class="mn-tab-count" id="mn-tab-count-groupes">${STORE.modalGroupes.length || ''}</span></button>
+      <button type="button" class="mn-tab" data-tab="groupes">👥 Groupes <span class="mn-tab-count" id="mn-tab-count-groupes">${_missionQuestGroups(item?.id).length || ''}</span></button>
       ${autresItems.length ? `<button type="button" class="mn-tab" data-tab="liens">↝ Liens <span class="mn-tab-count" id="mn-tab-count-liens">${(item?.liens||[]).length || ''}</span></button>` : ''}
       <button type="button" class="mn-tab" data-tab="reglages">⚙️ Réglages</button>
     </div>
@@ -2388,53 +2153,15 @@ async function openStoryModal(item = null) {
         <div class="mn-panel-intro">
           Les personnages sont rattachés à un <strong>groupe</strong>. Plusieurs groupes peuvent
           mener la même mission en parallèle, chacun avec sa propre réussite et récompense.
+          Ce sont les mêmes groupes que sur la fiche de la mission.
         </div>
         <div id="st-groups-summary">
-          ${_renderMissionGroupSummary(STORE.modalGroupes)}
+          ${_renderMissionGroupSummary(_missionQuestGroups(item?.id))}
         </div>
         <div id="st-groups-list" class="st-groups-list">
-          ${_renderGroupCards(STORE.modalGroupes)}
+          ${_renderGroupsPanel(item?.id)}
         </div>
-        <button type="button" class="st-group-add" data-action="_stSaveGroupDialog">+ Nouveau groupe</button>
-
-        <div id="st-save-group-form" class="st-group-form" style="display:none">
-          <div id="st-group-form-title" class="st-form-section-sub">Nouveau groupe</div>
-          <div class="mn-field">
-            <label class="mn-label">Nom du groupe</label>
-            <input id="st-save-group-name" class="mn-input"
-              placeholder="Avant-garde, Trio des cendres…" maxlength="40">
-          </div>
-          <div class="mn-field">
-            <label class="mn-label">
-              Membres <span class="mn-label-hint">— clique pour cocher</span>
-            </label>
-            <div class="mn-picker-search-wrap">
-              <span>🔍</span>
-              <input type="text" id="mn-picker-search" placeholder="Filtrer un personnage…">
-            </div>
-            <div id="st-group-picker" class="st-group-picker">
-              ${(() => {
-                const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-                return (STATE.characters||[]).map(c => {
-                  const col = PCOLS[c.nom?.charCodeAt(0)%6||0];
-                  return `<div data-action="_stGroupPickToggle" data-id="${c.id}" data-col="${col}"
-                    id="st-gpick-${c.id}" data-gm-id="${c.id}" data-picked="0"
-                    data-char-name="${_esc((c.nom||'').toLowerCase())}"
-                    class="st-group-pick">
-                    <div class="st-group-pick-avatar" style="--col:${col}">
-                      ${characterPortraitContent(c)}
-                    </div>
-                    <span class="st-group-pick-name">${_esc(c.nom||'?')}</span>
-                  </div>`;
-                }).join('') || '<span style="font-size:.75rem;color:var(--text-dim)">Aucun personnage.</span>';
-              })()}
-            </div>
-          </div>
-          <div class="st-group-form-actions">
-            <button type="button" class="btn btn-gold" data-action="_stConfirmSaveGroup">✓ Enregistrer le groupe</button>
-            <button type="button" class="btn btn-outline btn-sm" data-action="_stCancelGroupForm">Annuler</button>
-          </div>
-        </div>
+        ${item?.id && STATE.isAdmin ? `<button type="button" class="st-group-add" data-action="_stGroupNew" data-mission="${_esc(item.id)}">+ Nouveau groupe</button>` : ''}
       </section>
 
     ${autresItems.length?`
@@ -2643,7 +2370,14 @@ async function saveStory(id = '') {
     // On les matérialise depuis STATE.characters pour conserver photo / photoX,Y.
     // C'est le seul moyen de rattacher des personnages à une mission désormais :
     // pas de participants individuels possibles.
-    const participants = storyParticipantsFromGroups(STORE.modalGroupes, STATE.characters);
+    const questGroups = _missionQuestGroups(id);
+    const participants = questGroups.length
+      ? storyParticipantsFromGroups(
+          questGroups.map(g => ({
+            membres: dedupeQuestParticipants(g.participants || []).map(p => p.charId).filter(Boolean),
+          })),
+          STATE.characters)
+      : storyParticipantsFromGroups(STORE.modalGroupes, STATE.characters);
 
     const allCb=document.querySelectorAll('[id^="lien-"]');
     const liens=[...allCb].filter(cb=>cb.checked).map(cb=>cb.id.replace('lien-',''));
@@ -2724,8 +2458,6 @@ PAGES.story = renderStory;
 export { renderStory, openStoryModal, openStoryDetail, openNewActeModal, saveStory, editStory, deleteStory };
 
 registerActions({
-  _stGroupField: (el) => _stGroupField(el.dataset.id, el.dataset.field,
-    el.dataset.field === 'reussite' ? (+el.value || 0) : el.value),
   openStoryDetail:         (btn) => openStoryDetail(btn.dataset.id),
   openStoryModal:          ()    => openStoryModal(),
   openNewActeModal:        ()    => openNewActeModal(),
@@ -2773,13 +2505,6 @@ registerActions({
   _stSwitchActe:           (btn) => _stSwitchActe(btn.dataset.acte),
   _stMapZoom:              (btn) => _stMapZoom(Number(btn.dataset.factor)),
   _stMapReset:             ()    => _stMapReset(),
-  _stApplyGroup:           (btn) => _stApplyGroup(JSON.parse(btn.dataset.members || '[]')),
-  _stEditGroup:            (btn) => _stEditGroup(btn.dataset.id),
-  _stDeleteGroup:          (btn) => _stDeleteGroup(btn.dataset.id),
-  _stSaveGroupDialog:      ()    => _stSaveGroupDialog(),
-  _stGroupPickToggle:      (btn) => _stGroupPickToggle(btn.dataset.id, btn.dataset.col),
-  _stConfirmSaveGroup:     ()    => _stConfirmSaveGroup(),
-  _stCancelGroupForm:      ()    => _stCancelGroupForm(),
   _toggleLien:             (btn) => _toggleLien(btn.dataset.id),
   openAxeOrder:            () => openAxeOrder(),
   saveAxeOrder:            () => saveAxeOrder(),
