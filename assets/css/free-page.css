@@ -2310,6 +2310,48 @@
   box-shadow: 0 0 0 1px rgba(106,167,255,.18);
 }
 
+/* Calque de sélection VISUEL : cadre + poignées rendus AU-DESSUS de tous les
+   blocs (le bloc, lui, reste à son plan). pointer-events:none → les clics
+   passent aux vraies poignées dessous (routées via elementsFromPoint). */
+.free-page-sel-overlay {
+  position: absolute;
+  z-index: 6000;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+.free-page-sel-frame {
+  position: absolute;
+  inset: 0;
+  border: 1px solid #6aa7ff;
+  box-shadow: 0 0 0 1px rgba(106,167,255,.32);
+  border-radius: 5px;
+}
+.free-page-sel-dot {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  background: #fff;
+  border: 1px solid #6aa7ff;
+  border-radius: 2px;
+  transform: translate(-50%, -50%);
+}
+.free-page-sel-dot--nw { left: 0;    top: 0;    }
+.free-page-sel-dot--n  { left: 50%;  top: 0;    }
+.free-page-sel-dot--ne { left: 100%; top: 0;    }
+.free-page-sel-dot--e  { left: 100%; top: 50%;  }
+.free-page-sel-dot--se { left: 100%; top: 100%; }
+.free-page-sel-dot--s  { left: 50%;  top: 100%; }
+.free-page-sel-dot--sw { left: 0;    top: 100%; }
+.free-page-sel-dot--w  { left: 0;    top: 50%;  }
+
+/* Curseur forcé quand on survole une poignée du bloc sélectionné, même occultée. */
+.free-page-editor.fpe-cur-nwse, .free-page-editor.fpe-cur-nwse * { cursor: nwse-resize !important; }
+.free-page-editor.fpe-cur-nesw, .free-page-editor.fpe-cur-nesw * { cursor: nesw-resize !important; }
+.free-page-editor.fpe-cur-ns,   .free-page-editor.fpe-cur-ns   * { cursor: ns-resize   !important; }
+.free-page-editor.fpe-cur-ew,   .free-page-editor.fpe-cur-ew   * { cursor: ew-resize   !important; }
+.free-page-editor.fpe-cur-grab, .free-page-editor.fpe-cur-grab * { cursor: grab        !important; }
+.free-page-editor.fpe-cur-move, .free-page-editor.fpe-cur-move * { cursor: move        !important; }
+
 .free-page-editor .free-page-block.is-locked:hover {
   border-color: rgba(232,198,106,.20);
 }

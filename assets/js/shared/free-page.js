@@ -778,6 +778,7 @@ function bindSingleFreePageEditor(editor) {
   editor.addEventListener('focusout', (event) => { if (isOwnEditorEvent(editor, event)) handleEditorFocusOut(editor, event); });
   editor.addEventListener('contextmenu', (event) => { if (isOwnEditorEvent(editor, event)) handleContextMenu(editor, event); });
   editor.addEventListener('pointerdown', (event) => { if (isOwnEditorEvent(editor, event)) handlePointerDown(editor, event); });
+  editor.addEventListener('pointermove', (event) => { if (isOwnEditorEvent(editor, event)) updateHandleCursor(editor, event); });
   editor.addEventListener('dragstart', (event) => { if (isOwnEditorEvent(editor, event)) handleSlideDragStart(editor, event); });
   editor.addEventListener('dragover', (event) => { if (isOwnEditorEvent(editor, event)) handleSlideDragOver(editor, event); });
   editor.addEventListener('drop', (event) => { if (isOwnEditorEvent(editor, event)) handleSlideDrop(editor, event); });
@@ -2272,14 +2273,18 @@ function handlePointerDown(editor, event) {
         if (member && memberEl) memberEl.setAttribute('style', blockStyle(member, editor.__freePageState.height));
       });
     }
+    positionSelectionOverlay(editor); // le cadre visuel suit le bloc pendant le drag
   };
   const onUp = () => {
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
+    editor.__freePageDragging = false;
     blockEl.classList.remove('is-rotating');
     blockEl.classList.remove('is-rotation-snapped');
+    positionSelectionOverlay(editor);
     renderInspector(editor);
   };
+  editor.__freePageDragging = true;
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp, { once: true });
 }
@@ -3304,6 +3309,72 @@ function applySelectionClasses(editor) {
   editor.querySelectorAll('[data-fpe-nav-block]').forEach((el) => {
     el.classList.toggle('is-selected', editor.__freePageSelected === NAV_BLOCK_ID);
   });
+  positionSelectionOverlay(editor);
+}
+
+// ── Calque de sélection VISUEL (cadre + poignées) au-dessus de tous les blocs ──
+// Le bloc reste à son plan d'origine ; ce calque (pointer-events:none) montre le
+// cadre et les poignées EN PREMIER PLAN même quand un autre bloc recouvre la
+// forme. Les clics passent au travers et sont routés vers les vraies poignées
+// (dessous) via document.elementsFromPoint (cf. handlePointerDown).
+function _ensureSelOverlay(editor) {
+  const stage = editor.querySelector('[data-fpe-stage]');
+  if (!stage) return null;
+  let ov = stage.querySelector(':scope > [data-fpe-sel-overlay]');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.setAttribute('data-fpe-sel-overlay', '');
+    ov.className = 'free-page-sel-overlay';
+    ov.style.display = 'none';
+    ov.innerHTML = `<span class="free-page-sel-frame"></span>`;
+    stage.appendChild(ov);
+  } else if (ov !== stage.lastElementChild) {
+    stage.appendChild(ov); // rester le dernier enfant → au-dessus
+  }
+  return ov;
+}
+function positionSelectionOverlay(editor) {
+  const ov = _ensureSelOverlay(editor);
+  if (!ov) return;
+  const id = editor.__freePageSelected;
+  const single = (editor.__freePageSelectedIds || []).length <= 1;
+  const block = (single && id && id !== NAV_BLOCK_ID)
+    ? editor.__freePageState.blocks.find((b) => b.id === id) : null;
+  if (!block || block.locked || block.hidden || editor.__freePageCropBlockId === block.id) {
+    ov.style.display = 'none';
+    return;
+  }
+  const ph = editor.__freePageState.height || DEFAULT_HEIGHT;
+  ov.style.display = 'block';
+  ov.style.left = `${block.x / 10}%`;
+  ov.style.top = `${block.y / ph * 100}%`;
+  ov.style.width = `${block.w / 10}%`;
+  ov.style.height = `${block.h / ph * 100}%`;
+  ov.style.transform = `rotate(${normalizeRotation(block.rotation || 0)}deg)`;
+}
+
+// Force le curseur de redimensionnement/rotation quand le pointeur survole une
+// poignée du bloc sélectionné, MÊME si un autre bloc la recouvre (sinon le
+// navigateur affiche le curseur du bloc du dessus, ex. « texte »).
+const _CURSOR_BY_DIR = { nw: 'nwse', se: 'nwse', ne: 'nesw', sw: 'nesw', n: 'ns', s: 'ns', e: 'ew', w: 'ew' };
+function updateHandleCursor(editor, event) {
+  let cur = '';
+  const id = editor.__freePageSelected;
+  if (!editor.__freePageDragging && id && (editor.__freePageSelectedIds || []).length <= 1) {
+    for (const el of document.elementsFromPoint(event.clientX, event.clientY)) {
+      const inSel = (sel) => { const h = el.closest?.(sel); return h && h.closest('[data-fpe-block]')?.dataset.fpeBlock === id ? h : null; };
+      const rz = inSel('[data-fpe-resize]');
+      if (rz) { cur = _CURSOR_BY_DIR[rz.dataset.fpeResize] || ''; break; }
+      if (inSel('[data-fpe-rotate]')) { cur = 'grab'; break; }
+      if (inSel('[data-fpe-move]')) { cur = 'move'; break; }
+    }
+  }
+  editor.classList.toggle('fpe-cur-nwse', cur === 'nwse');
+  editor.classList.toggle('fpe-cur-nesw', cur === 'nesw');
+  editor.classList.toggle('fpe-cur-ns', cur === 'ns');
+  editor.classList.toggle('fpe-cur-ew', cur === 'ew');
+  editor.classList.toggle('fpe-cur-grab', cur === 'grab');
+  editor.classList.toggle('fpe-cur-move', cur === 'move');
 }
 
 function syncToolbar(editor) {
