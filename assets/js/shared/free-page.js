@@ -58,6 +58,18 @@ const TEXT_FONTS = [
   { name: 'Palatino', value: "'Palatino Linotype', Palatino, serif" },
   { name: 'Courier', value: "'Courier New', monospace" },
   { name: 'Lucida', value: "'Lucida Console', Monaco, monospace" },
+  // Polices Google (chargées dans index.html) — décoratives + très utilisées.
+  { name: 'Unlock', value: "'Unlock', system-ui, sans-serif" },
+  { name: 'Wallpoet', value: "'Wallpoet', monospace" },
+  { name: 'Bebas Neue', value: "'Bebas Neue', Impact, sans-serif" },
+  { name: 'Anton', value: "'Anton', Impact, sans-serif" },
+  { name: 'Oswald', value: "'Oswald', 'Arial Narrow', sans-serif" },
+  { name: 'Roboto', value: "'Roboto', Arial, sans-serif" },
+  { name: 'Montserrat', value: "'Montserrat', 'Segoe UI', sans-serif" },
+  { name: 'Poppins', value: "'Poppins', 'Segoe UI', sans-serif" },
+  { name: 'Playfair Display', value: "'Playfair Display', Georgia, serif" },
+  { name: 'Lobster', value: "'Lobster', cursive" },
+  { name: 'Pacifico', value: "'Pacifico', cursive" },
 ];
 const TEXT_FONT_VALUES = new Set(TEXT_FONTS.map((font) => font.value));
 const SHAPE_COLOR_PRESETS = [
@@ -473,8 +485,10 @@ function popupTable(x, y, w, h) {
 function normalizeBlock(raw, index, pageHeight) {
   if (!raw || !BLOCK_TYPES.has(raw.type)) return null;
   const type = raw.type;
-  const minW = type === 'image' ? 120 : type === 'chart' ? 260 : type === 'shape' ? 40 : 180;
-  const minH = type === 'image' ? 100 : type === 'chart' ? 170 : type === 'shape' ? 20 : 90;
+  // Minimums alignés sur ceux du redimensionnement (resizeBlockFromStart) : sinon
+  // une zone texte réduite était re-agrandie de force au rechargement (min 180×90).
+  const minW = type === 'image' ? 120 : type === 'chart' ? 260 : type === 'shape' ? 40 : type === 'text' ? 20 : 180;
+  const minH = type === 'image' ? 100 : type === 'chart' ? 170 : type === 'shape' ? 20 : type === 'text' ? 12 : 90;
   const w = clamp(raw.w, minW, PAGE_WIDTH);
   const h = clamp(raw.h, minH, pageHeight);
   const block = {
@@ -1070,6 +1084,15 @@ function handleDocumentShortcut(event) {
     return;
   }
   if (editing) {
+    // Échap SORT de l'édition de texte sans désélectionner : le bloc reste
+    // sélectionné → Suppr le supprime alors (cf. plus bas), au lieu d'effacer
+    // des caractères.
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      target.blur?.();
+      editor.focus?.({ preventScroll: true });
+      return;
+    }
     const content = target?.closest('[data-fpe-content]');
     const block = selectedBlock(editor);
     if (content && block?.type === 'text' && editor.__freePageTextRange?.blockId === block.id && hasPaintedTextSelection(content)) {
@@ -3270,8 +3293,12 @@ function setSelected(editor, id) {
     editor.__freePageTextRange = null;
     editor.__freePageInlineTarget = null;
   }
+  const selectionChanged = editor.__freePageSelected !== nextId;
   editor.__freePageSelected = nextId;
   editor.__freePageSelectedIds = nextId && nextId !== NAV_BLOCK_ID ? [nextId] : [];
+  // Sélectionner un texte affiche d'emblée sa mise en forme (taille, couleur,
+  // police, alignement) : l'onglet « Contenu » ne sert à rien pour un texte.
+  if (selectionChanged && block?.type === 'text') editor.__freePageInspectorTab = 'config';
   applySelectionClasses(editor);
   syncToolbar(editor);
 }
