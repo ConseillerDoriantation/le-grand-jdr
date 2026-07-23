@@ -132,6 +132,7 @@ function _catBody() {
       _section('Détails',
         _fRow('Traits', _fText('traits', 'Séparés par des virgules')) +
         _advanced('Bonus de stats', _statBonusGrid()) +
+        _advanced('Bonus dérivés', _derivedBonusGrid()) +
         _fRow('Description', _fArea('description')));
   }
 
@@ -233,7 +234,7 @@ function _buildItem() {
       statAttaque: d.toucherStat || stats[0] || '',
       portee: String(d.portee || '').trim(),
       traits: _parseTraits(d.traits),
-      ..._pickStatBonuses(d),
+      ..._pickStatBonuses(d), ..._pickDerivedBonuses(d),
     };
   }
   if (cat === 'armure') {
