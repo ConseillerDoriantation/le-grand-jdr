@@ -33,6 +33,9 @@ const DERIVED_BONUSES = [
   ['vitesseBonus', 'Vit.'], ['initiativeBonus', 'Init.'],
 ];
 
+// Au-dela, on ouvre la forge sans attendre les regles de l'aventure.
+const FORGE_RULES_TIMEOUT_MS = 1500;
+
 let _actionsBound = false;
 let _forge = null;
 
@@ -311,11 +314,23 @@ export async function openCreateItemModal(charId) {
   if (!canEdit) { showNotif('Tu ne peux pas modifier ce personnage.', 'error'); return; }
 
   _ensureForgeActions();
+  // Les regles de l'aventure ne doivent JAMAIS empecher la modale de s'ouvrir.
+  // Un `.catch()` ne protege que d'un rejet : une lecture Firestore en attente
+  // ne rejette pas, elle patiente — et le `await` bloquait alors indefiniment
+  // (aucune modale, aucune erreur, clic sans effet). D'ou la course contre un
+  // delai, avec repli sur les valeurs par defaut deja prevues par les getters.
+  const _settle = (promise, fallback, nom) => Promise.race([
+    Promise.resolve(promise).catch(() => fallback),
+    new Promise(resolve => setTimeout(() => {
+      console.warn(`[forge] ${nom} trop lent — ouverture avec les valeurs par defaut`);
+      resolve(fallback);
+    }, FORGE_RULES_TIMEOUT_MS)),
+  ]);
   const [, formats] = await Promise.all([
-    loadEquipmentSlots().catch(() => null),
-    loadWeaponFormats().catch(() => []),
-    loadArmorSetSettings().catch(() => null),
-    loadRarities().catch(() => null),
+    _settle(loadEquipmentSlots(), null, 'emplacements d’equipement'),
+    _settle(loadWeaponFormats(), [], 'formats d’arme'),
+    _settle(loadArmorSetSettings(), null, 'types d’armure'),
+    _settle(loadRarities(), null, 'raretes'),
   ]);
   // Les règles de l'aventure sont un CONFORT : si un de ces documents manque ou
   // est refusé en lecture, la forge doit quand même s'ouvrir (listes vides)
