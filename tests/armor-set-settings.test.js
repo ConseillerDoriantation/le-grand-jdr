@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getArmorSetData } from '../assets/js/shared/equipment-utils.js';
+import { getArmorSetData, normalizeArmorType } from '../assets/js/shared/equipment-utils.js';
 import { LEGACY_EQUIPMENT_SLOTS, setEquipmentSlotsForTests } from '../assets/js/shared/equipment-slots.js';
 import { DEFAULT_ARMOR_SETS, LEGACY_ARMOR_SETS, getArmorTypeOptions, setArmorSetSettingsForTests } from '../assets/js/shared/armor-set-settings.js';
 
@@ -86,4 +86,41 @@ test('armor set : une nouvelle aventure ne force aucun type par défaut', () => 
 test.after(() => {
   setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
   setArmorSetSettingsForTests(LEGACY_ARMOR_SETS);
+});
+
+test('armor set : un type d’aventure nommé « Lourd » n’est pas réécrit en « Lourde »', () => {
+  // Régression : normalizeArmorType imposait les libellés hérités
+  // (Léger→Légère, Lourd→Lourde). Le type ne correspondait alors plus au set
+  // configuré par l’aventure et l’effet ne se déclenchait jamais.
+  setEquipmentSlotsForTests([
+    { id: 'Casque', label: 'Casque', kind: 'armor', itemField: 'slotArmure', itemValue: 'Casque' },
+    { id: 'Torse', label: 'Torse', kind: 'armor', itemField: 'slotArmure', itemValue: 'Torse' },
+  ]);
+  setArmorSetSettingsForTests([
+    { id: 'lourd', type: 'Lourd', label: 'Set Lourd', enabled: true, modifiers: { damageReduction: 3 } },
+    { id: 'leger', type: 'Léger', label: 'Set Léger', enabled: true, modifiers: { toucherBonus: 1 } },
+  ]);
+
+  assert.equal(normalizeArmorType('Lourd'), 'Lourd');
+  assert.equal(normalizeArmorType('lourd'), 'Lourd');   // casse libre
+  assert.equal(normalizeArmorType('Leger'), 'Léger');   // accent libre
+  assert.deepEqual(getArmorTypeOptions(), ['Lourd', 'Léger']);
+
+  const data = getArmorSetData({
+    equipement: {
+      Casque: { nom: 'Heaume', typeArmure: 'Lourd' },
+      Torse: { nom: 'Plastron', typeArmure: 'Lourd' },
+    },
+  });
+  assert.equal(data.isActive, true);
+  assert.equal(data.fullType, 'Lourd');
+  assert.equal(data.modifiers.damageReduction, 3);
+});
+
+test('armor set : les anciennes fiches « legere » / « heavy » restent lisibles', () => {
+  // Aucun set configuré ne correspond → repli historique conservé.
+  setArmorSetSettingsForTests(LEGACY_ARMOR_SETS);
+  assert.equal(normalizeArmorType('legere'), 'Légère');
+  assert.equal(normalizeArmorType('heavy'), 'Lourde');
+  assert.equal(normalizeArmorType('Runique'), 'Runique'); // type inconnu : inchangé
 });

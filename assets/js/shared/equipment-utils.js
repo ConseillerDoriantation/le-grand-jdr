@@ -8,7 +8,9 @@ import { getEquipmentSlotsByKind, getPrimaryWeaponSlotId } from './equipment-slo
 import {
   formatArmorSetEffect,
   getArmorSetDefinition,
+  getArmorTypeOptions,
   getEmptyArmorSetModifiers,
+  normalizeArmorSetKey,
 } from './armor-set-settings.js';
 
 // ── Arme par défaut (mains nues) ──────────────────────────────────────────────
@@ -272,6 +274,20 @@ export function serializeShopWeaponForCombat(item = {}) {
 // ── Normalisation et méta des types d'armure ─────────────────────────────────
 
 export function normalizeArmorType(type = '') {
+  const label = String(type || '').trim();
+  if (!label) return '';
+  // 1. Type defini par l'AVENTURE : on renvoie SON libelle exact. Sans ca, un set
+  //    nomme « Lourd » etait reecrit en « Lourde » par la table heritee ci-dessous,
+  //    ne correspondait plus a aucun set configure, et l'effet ne se declenchait pas.
+  const key = normalizeArmorSetKey(label);
+  const configure = getArmorTypeOptions({ includeDisabled: true })
+    .find(t => normalizeArmorSetKey(t) === key);
+  if (configure) return configure;
+  return _legacyArmorType(label);
+}
+
+// 2. Repli historique : anciennes fiches stockant « legere », « heavy »…
+function _legacyArmorType(type = '') {
   const raw = String(type || '').trim().toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   if (!raw) return '';

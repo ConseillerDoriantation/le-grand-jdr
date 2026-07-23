@@ -351,6 +351,19 @@ function _primeDoc(col, id) {
         if (!resolved) { resolved = true; resolve(null); }
       }
     );
+    // Filet ANTI-BLOCAGE, identique a celui des collections : un doc session-live
+    // ABSENT en ligne (aventure qui ne l'a jamais configure) ne recoit qu'un
+    // snapshot cache « inexistant », juge non fiable — `ready` n'etait alors
+    // JAMAIS resolue et tout `getDocData` sur ce doc restait suspendu pour de bon.
+    setTimeout(() => {
+      if (resolved) return;
+      entry.firstReceived = true;
+      entry.observers.forEach(o => {
+        try { o.cb(entry.data); } catch (e) { console.error('[firestore] observer error', e); }
+      });
+      resolved = true;
+      resolve(entry.data);
+    }, 6000);
   });
   return entry.ready;
 }
