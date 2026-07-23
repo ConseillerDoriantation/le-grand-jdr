@@ -801,6 +801,23 @@ function _renderAdmin() {
     </div>`);
 }
 
+function _getAdminScrollTop() {
+  return document.querySelector('.armor-sets-body')?.scrollTop || 0;
+}
+
+function _restoreAdminScrollTop(scrollTop = 0) {
+  requestAnimationFrame(() => {
+    const body = document.querySelector('.armor-sets-body');
+    if (body) body.scrollTop = scrollTop;
+  });
+}
+
+function _rerenderAdminAtSameScroll() {
+  const scrollTop = _getAdminScrollTop();
+  _renderAdmin();
+  _restoreAdminScrollTop(scrollTop);
+}
+
 async function _ensureAdminUi() {
   if (_adminUiPromise) return _adminUiPromise;
   _adminUiPromise = Promise.all([
@@ -823,7 +840,7 @@ async function _ensureAdminUi() {
         const set = _draft[Number(el.dataset.index)];
         if (!set) return;
         set.color = _safeColor(el.dataset.color || el.value, _toneColor(set.tone));
-        _renderAdmin();
+        _rerenderAdminAtSameScroll();
       },
       _armorSetMod: el => {
         const set = _draft[Number(el.dataset.index)];
@@ -842,7 +859,7 @@ async function _ensureAdminUi() {
         if (!stat) return;
         if (mode) set.modifiers.rollImpact.statModes[stat] = mode;
         else delete set.modifiers.rollImpact.statModes[stat];
-        _renderAdmin();
+        _rerenderAdminAtSameScroll();
       },
       _armorSetRollSkillAdd: button => {
         const set = _draft[Number(button.dataset.index)];
@@ -855,7 +872,7 @@ async function _ensureAdminUi() {
           return;
         }
         set.modifiers.rollImpact.skillModes.push({ name: firstAvailable, mode: 'disadvantage' });
-        _renderAdmin();
+        _rerenderAdminAtSameScroll();
       },
       _armorSetRollSkill: el => {
         const set = _draft[Number(el.dataset.index)];
@@ -864,7 +881,7 @@ async function _ensureAdminUi() {
         if (el.dataset.field === 'mode') rule.mode = _normalizeRollMode(el.value) || 'disadvantage';
         else {
           rule.name = el.value;
-          _renderAdmin();
+          _rerenderAdminAtSameScroll();
         }
       },
       _armorSetRollSkillMode: button => {
@@ -872,34 +889,34 @@ async function _ensureAdminUi() {
         const rule = set?.modifiers?.rollImpact?.skillModes?.[Number(button.dataset.rule)];
         if (!rule) return;
         rule.mode = _normalizeRollMode(button.dataset.mode);
-        _renderAdmin();
+        _rerenderAdminAtSameScroll();
       },
       _armorSetRollSkillDelete: button => {
         const set = _draft[Number(button.dataset.index)];
         if (!set) return;
         set.modifiers = _normalizeModifiers(set.modifiers || {});
         set.modifiers.rollImpact.skillModes.splice(Number(button.dataset.rule), 1);
-        _renderAdmin();
+        _rerenderAdminAtSameScroll();
       },
       _armorSetToggle: button => {
         const set = _draft[Number(button.dataset.index)];
         if (!set) return;
         set.enabled = set.enabled === false;
-        _renderAdmin();
+        _rerenderAdminAtSameScroll();
       },
       _armorSetMove: button => {
         const from = Number(button.dataset.index);
         const to = from + Number(button.dataset.dir);
         if (!_draft[from] || to < 0 || to >= _draft.length) return;
         [_draft[from], _draft[to]] = [_draft[to], _draft[from]];
-        _renderAdmin();
+        _rerenderAdminAtSameScroll();
       },
       _armorSetDelete: async button => {
         const index = Number(button.dataset.index);
         if (!_draft[index]) return;
         if (!await confirmModal('Supprimer ce bonus de set ?', { title: 'Confirmation' })) return;
         _draft.splice(index, 1);
-        _renderAdmin();
+        _rerenderAdminAtSameScroll();
       },
       _armorSetAdd: () => {
         _draft.push(_normalizeSet({
@@ -911,7 +928,7 @@ async function _ensureAdminUi() {
           description: '',
           modifiers: _emptyModifiers(),
         }, _draft.length));
-        _renderAdmin();
+        _rerenderAdminAtSameScroll();
       },
       _armorSetsSave: async (button) => {
         const missing = _draft.find(set => set.enabled !== false && !String(set.type || '').trim());
