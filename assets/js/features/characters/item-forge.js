@@ -302,7 +302,12 @@ function _ensureForgeActions() {
 export async function openCreateItemModal(charId) {
   const c = charId ? getCharacterById(charId) : STATE.activeChar;
   if (!c) { showNotif('Aucun personnage actif.', 'error'); return; }
-  const canEdit = charSession.getCanEditChar?.() ?? STATE.isAdmin;
+  // Même règle que celle qui AFFICHE le bouton (characters.js) : appliquée au
+  // personnage réellement forgé, pas à l'état de session. `charSession` reflète
+  // la dernière fiche rendue et vaut `false` tant qu'aucune fiche n'a été rendue
+  // par le chemin habituel (démarrage direct sur la page, mini-fiche VTT, fiche
+  // supprimée…) → le bouton s'affichait mais la forge refusait, sans rien ouvrir.
+  const canEdit = STATE.isAdmin || c.uid === STATE.user?.uid;
   if (!canEdit) { showNotif('Tu ne peux pas modifier ce personnage.', 'error'); return; }
 
   _ensureForgeActions();
