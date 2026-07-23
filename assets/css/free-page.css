@@ -9,7 +9,7 @@
 .free-page-toolbar {
   position: sticky;
   top: 4px;
-  z-index: 20;
+  z-index: 22000;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -34,7 +34,7 @@
   position: absolute;
   top: 48px;
   left: 286px;
-  z-index: 30;
+  z-index: 22100;
   display: grid;
   grid-template-columns: repeat(5, 34px);
   gap: 6px;
@@ -51,7 +51,7 @@
   position: absolute;
   top: 48px;
   left: 342px;
-  z-index: 31;
+  z-index: 22110;
   display: grid;
   grid-template-columns: repeat(3, 34px);
   gap: 7px;
@@ -292,7 +292,7 @@
   position: absolute;
   top: 48px;
   left: 420px;
-  z-index: 32;
+  z-index: 22120;
   width: 286px;
   box-sizing: border-box;
   padding: 10px;
@@ -307,7 +307,7 @@
   position: absolute;
   top: 48px;
   left: 260px;
-  z-index: 32;
+  z-index: 22120;
   width: 260px;
   max-height: 340px;
   overflow-y: auto;
@@ -374,6 +374,24 @@
 .free-page-color-tabs button.is-active {
   border-bottom-color: #8f72ff;
   color: #f4d56f;
+}
+
+.free-page-color-picker {
+  min-width: 0;
+}
+
+.free-page-color-picker.is-compact {
+  width: 100%;
+}
+
+.free-page-control-row--stacked {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.free-page-control-row--stacked > span:first-child {
+  align-self: flex-start;
 }
 
 .free-page-text-swatch-grid {
@@ -637,6 +655,24 @@
   height: 24px !important;
   padding: 3px !important;
   border-radius: 50% !important;
+}
+
+.free-page-color-hex {
+  width: 92px;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid rgba(126,176,255,.20);
+  border-radius: 8px;
+  background: rgba(4,10,18,.62);
+  color: #dce9ff;
+  font: 800 .72rem/1 'Outfit', sans-serif;
+  padding: 0 .5rem;
+  text-transform: uppercase;
+}
+
+.free-page-color-hex.is-invalid {
+  border-color: rgba(255,107,107,.72);
+  box-shadow: 0 0 0 2px rgba(255,107,107,.12);
 }
 
 .free-page-control-row {

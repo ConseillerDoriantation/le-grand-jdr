@@ -94,15 +94,18 @@ const GRID_SIZES = [5, 10, 20, 25, 50];
 const EDITOR_ZOOMS = [60, 75, 90, 100, 125];
 const PAGE_BACKGROUND_PRESETS = [
   { name: 'Nuit', value: '#0b121d' },
-  { name: 'Encre', value: '#07101b' },
   { name: 'Ardoise', value: '#111827' },
-  { name: 'Violet', value: '#17112a' },
-  { name: 'Foret', value: '#0c1d18' },
-  { name: 'Parchemin', value: '#241f18' },
-  { name: 'Bordeaux', value: '#24111a' },
-  { name: 'Ocean', value: '#071b24' },
-  { name: 'Emeraude', value: '#082019' },
+  { name: 'Encre bleue', value: '#0f1f35' },
+  { name: 'Indigo', value: '#1b1740' },
+  { name: 'Violet profond', value: '#2a1744' },
+  { name: 'Bordeaux', value: '#331523' },
+  { name: 'Foret', value: '#0f2a22' },
+  { name: 'Ocean', value: '#0a2a38' },
+  { name: 'Cuivre sombre', value: '#352315' },
+  { name: 'Parchemin', value: '#efe0bd' },
+  { name: 'Brume', value: '#dce6f3' },
   { name: 'Noir', value: '#05070c' },
+  { name: 'Blanc', value: '#f8fafc' },
 ];
 const POPUP_TEMPLATE_IDS = new Set(['center', 'left', 'right', 'round', 'triple', 'blank', 'side-image', 'notice', 'table', 'quote', 'dark']);
 const POPUP_LAYOUTS = new Set(['center', 'left', 'right', 'round', 'triple']);
@@ -486,10 +489,10 @@ function popupTable(x, y, w, h) {
 function normalizeBlock(raw, index, pageHeight) {
   if (!raw || !BLOCK_TYPES.has(raw.type)) return null;
   const type = raw.type;
-  // Minimums alignés sur ceux du redimensionnement (resizeBlockFromStart) : sinon
-  // une zone texte réduite était re-agrandie de force au rechargement (min 180×90).
-  const minW = type === 'image' ? 120 : type === 'chart' ? 260 : type === 'shape' ? 40 : type === 'text' ? 20 : 180;
-  const minH = type === 'image' ? 100 : type === 'chart' ? 170 : type === 'shape' ? 20 : type === 'text' ? 12 : 90;
+  // Minimums alignes sur ceux du redimensionnement : sinon un bloc reduit
+  // et colle au bord etait re-agrandi de force au rechargement.
+  const minW = type === 'image' ? 30 : type === 'chart' ? 260 : type === 'shape' ? 40 : type === 'text' ? 20 : 180;
+  const minH = type === 'image' ? 24 : type === 'chart' ? 170 : type === 'shape' ? 20 : type === 'text' ? 12 : 90;
   const w = clamp(raw.w, minW, PAGE_WIDTH);
   const h = clamp(raw.h, minH, pageHeight);
   const block = {
@@ -646,6 +649,10 @@ function readerStageHtml(deck, slide, previousId = '') {
     ${locked ? readerLockedSlideHtml(slide, previousId) : normalized.blocks.map((block) => blockHtml(block, normalized.height, false)).join('')}
     ${locked ? '' : deckNavHtml(deck, slide.id)}
   </div>`;
+}
+
+function textColorPopoverHtml(selected = '#eef2fb') {
+  return textColorPickerHtml(selected);
 }
 
 function readerLockedSlideHtml(slide, previousId = '') {
@@ -1225,8 +1232,8 @@ function handleEditorClick(editor, event) {
   }
   const tab = event.target.closest('[data-fpe-inspector-tab]')?.dataset.fpeInspectorTab;
   if (tab) { editor.__freePageFocusPanel = null; editor.__freePageInspectorTab = tab === 'config' ? 'config' : 'content'; renderInspector(editor); return; }
-  const colorTab = event.target.closest('[data-fpe-color-tab]')?.dataset.fpeColorTab;
-  if (colorTab) { switchTextColorPopoverTab(editor, colorTab); return; }
+  const colorTabButton = event.target.closest('[data-fpe-color-tab]');
+  if (colorTabButton) { switchColorPickerTab(editor, colorTabButton, colorTabButton.dataset.fpeColorTab); return; }
   const inspectorButton = event.target.closest('button[data-fpe-inspector-field]');
   if (inspectorButton) { handleInspectorInput(editor, { target: inspectorButton }, { commit: true }); return; }
   const pageButton = event.target.closest('button[data-fpe-page-field]');
@@ -1576,9 +1583,15 @@ function toggleFontPopover(editor, event) {
 function switchTextColorPopoverTab(editor, tab) {
   const popover = editor.querySelector('[data-fpe-text-color-popover]');
   if (!popover) return;
+  switchColorPickerTab(editor, popover.querySelector(`[data-fpe-color-tab="${tab === 'advanced' ? 'advanced' : 'samples'}"]`) || popover, tab);
+}
+
+function switchColorPickerTab(editor, trigger, tab) {
+  const picker = trigger?.closest?.('[data-fpe-color-picker]') || trigger?.closest?.('[data-fpe-text-color-popover]') || editor.querySelector('[data-fpe-text-color-popover]');
+  if (!picker) return;
   const safeTab = tab === 'advanced' ? 'advanced' : 'samples';
-  popover.querySelectorAll('[data-fpe-color-tab]').forEach((button) => button.classList.toggle('is-active', button.dataset.fpeColorTab === safeTab));
-  popover.querySelectorAll('[data-fpe-color-panel]').forEach((panel) => { panel.hidden = panel.dataset.fpeColorPanel !== safeTab; });
+  picker.querySelectorAll('[data-fpe-color-tab]').forEach((button) => button.classList.toggle('is-active', button.dataset.fpeColorTab === safeTab));
+  picker.querySelectorAll('[data-fpe-color-panel]').forEach((panel) => { panel.hidden = panel.dataset.fpeColorPanel !== safeTab; });
 }
 
 function runSlideAction(editor, action, slideId) {
@@ -1774,12 +1787,53 @@ function fitEditorZoom(editor) {
   if (select) select.value = String(zoom);
 }
 
-function handlePageField(editor, target) {
+function handlePageField(editor, target, { live = false } = {}) {
   if (!editor.__freePageState) return;
-  pushHistory(editor);
-  if (target.dataset.fpePageField === 'background') editor.__freePageState.background = safeColor(target.value, DEFAULT_PAGE_BG);
+  if (target.dataset.fpePageField !== 'background') return;
+  const raw = String(target.value || '').trim();
+  const color = normalizeHexColorInput(raw);
+  const isValid = Boolean(color);
+  target.classList.toggle('is-invalid', !isValid && raw.length > 0);
+  if (!isValid) return;
+  if (safeColor(editor.__freePageState.background, DEFAULT_PAGE_BG).toLowerCase() === color.toLowerCase()) return;
+  if (!live) pushHistory(editor);
+  else scheduleHistory(editor, { sync: false });
+  editor.__freePageState.background = color;
   syncCurrentSlide(editor);
-  renderBlocks(editor, editor.__freePageSelected);
+  updatePageBackgroundPreview(editor, color);
+  syncPageBackgroundControls(editor, color, target);
+  if (!live) {
+    renderSlides(editor);
+    renderInspector(editor);
+  }
+}
+
+function normalizeHexColorInput(value) {
+  const raw = String(value || '').trim();
+  if (HEX_COLOR_RE.test(raw)) return raw.startsWith('#') ? raw : `#${raw}`;
+  if (/^[0-9a-f]{6}$/i.test(raw)) return `#${raw}`;
+  return '';
+}
+
+function updatePageBackgroundPreview(editor, color) {
+  const safe = safeColor(color, DEFAULT_PAGE_BG);
+  const stage = editor.querySelector('[data-fpe-stage]');
+  if (stage) stage.style.setProperty('--free-page-bg', safe);
+  const slideId = editor.__freePageSlideId;
+  const activePreview = slideId
+    ? editor.querySelector(`[data-fpe-slide-id="${cssEscape(slideId)}"] .free-page-slide-preview`)
+    : null;
+  if (activePreview) activePreview.style.setProperty('--free-page-bg', safe);
+}
+
+function syncPageBackgroundControls(editor, color, source = null) {
+  const safe = safeColor(color, DEFAULT_PAGE_BG);
+  editor.querySelectorAll('[data-fpe-page-field="background"]').forEach((control) => {
+    if (control === source || document.activeElement === control) return;
+    if (control.matches('input')) control.value = safe;
+    if (control.matches('button')) control.classList.toggle('is-active', String(control.value || '').toLowerCase() === safe.toLowerCase());
+    control.classList.remove('is-invalid');
+  });
 }
 
 function handleNavField(editor, target, { live = false } = {}) {
@@ -2739,6 +2793,16 @@ function handleInspectorInput(editor, event, { commit = false } = {}) {
     }
   }
   if (!block) return;
+  const isColorField = ['textColor', 'tableTextColor', 'tableHeaderColor', 'tableBorderColor', 'fill', 'stroke'].includes(field);
+  if (isColorField && target.matches?.('input[type="text"]')) {
+    const isValidHex = HEX_COLOR_RE.test(String(target.value || '').trim());
+    target.classList.toggle('is-invalid', !isValidHex);
+    if (!isValidHex) {
+      const picker = target.closest('[data-fpe-color-picker]');
+      picker?.querySelectorAll('.free-page-color-preview').forEach((preview) => preview.style.setProperty('--fpe-dot', '#00000000'));
+      return;
+    }
+  }
   const hadPopupPage = field === 'interactionType' ? normalizeInteraction(block.interaction).page : null;
   scheduleHistory(editor, { sync: false });
   if (tableCell && block.type === 'table') {
@@ -2759,11 +2823,10 @@ function handleInspectorInput(editor, event, { commit = false } = {}) {
     }
   }
   if (chartOption && block.type === 'chart') block[chartOption] = target.checked;
-  const toggleValue = field === 'textTransform' && target.value === 'toggle'
-    ? (block.textTransform === 'uppercase' ? 'none' : 'uppercase')
-    : '';
+  const toggleValue = field === 'textTransform' ? String(target.value || '') : '';
   const inlineTextApplied = field && applyInspectorTextRangeField(editor, block, field, target, toggleValue);
   if (field && !inlineTextApplied) applyInspectorField(block, field, target);
+  if (isColorField) syncColorFieldControls(editor, field, safeColor(target.value, field === 'textColor' ? '#eef2fb' : '#6aa7ff'), target);
   if (field === 'fontFamily') {
     rememberRecentFont(target.value);                       // remonte la police en tête des « Récentes »
     const fontPopover = editor.querySelector('[data-fpe-font-popover]');
@@ -2825,9 +2888,28 @@ function applyInspectorTextRangeField(editor, block, field, target, toggleValue 
   if (field === 'fontSize') span.style.fontSize = responsiveFontSize(clamp(target.value, 1, 96));
   if (field === 'textColor') span.style.color = safeColor(target.value, '#eef2fb');
   if (field === 'fontFamily') span.style.fontFamily = safeTextFont(target.value);
-  if (field === 'textTransform') span.style.textTransform = toggleValue === 'uppercase' ? 'uppercase' : 'none';
+  if (field === 'textTransform') {
+    const nextTransform = toggleValue === 'toggle'
+      ? (inlineTextHasUppercaseTransform(span, block) ? 'none' : 'uppercase')
+      : (toggleValue === 'uppercase' ? 'uppercase' : 'none');
+    span.style.textTransform = nextTransform === 'uppercase' ? 'uppercase' : 'none';
+    if (nextTransform === 'none') {
+      span.querySelectorAll('*').forEach((node) => {
+        if (node instanceof HTMLElement && node.style.textTransform) node.style.textTransform = 'none';
+      });
+    }
+  }
   block.content = cleanFreePageTextHtml(content.innerHTML);
   return true;
+}
+
+function inlineTextHasUppercaseTransform(span, block) {
+  const direct = String(span?.style?.textTransform || '').toLowerCase();
+  if (direct === 'uppercase') return true;
+  if (direct === 'none') return false;
+  const childUppercase = [...(span?.querySelectorAll?.('*') || [])]
+    .some((node) => node instanceof HTMLElement && String(node.style.textTransform || '').toLowerCase() === 'uppercase');
+  return childUppercase || block?.textTransform === 'uppercase';
 }
 
 function selectedMarkedText(editor) {
@@ -3517,6 +3599,38 @@ function syncToolbar(editor) {
 }
 
 function syncTextColorPopover(editor, color) {
+  syncColorFieldControls(editor, 'textColor', color);
+}
+
+function syncColorFieldControls(editor, field, color, source = null) {
+  if (!editor || !field) return;
+  const fallback = field === 'textColor' ? '#eef2fb' : '#6aa7ff';
+  const safe = safeColor(color, fallback);
+  editor.querySelectorAll(`[data-fpe-inspector-field="${cssEscape(field)}"]`).forEach((control) => {
+    if (control === source) {
+      control.classList?.remove('is-invalid');
+      return;
+    }
+    if (control.matches?.('input')) {
+      if (document.activeElement !== control) control.value = safe;
+      control.classList?.remove('is-invalid');
+    }
+    if (control.matches?.('button')) {
+      control.classList.toggle('is-active', String(control.value || '').toLowerCase() === safe.toLowerCase());
+    }
+  });
+  editor.querySelectorAll('[data-fpe-color-picker], [data-fpe-text-color-popover]').forEach((picker) => {
+    if (!picker.querySelector(`[data-fpe-inspector-field="${cssEscape(field)}"]`)) return;
+    picker.querySelectorAll('.free-page-color-preview').forEach((preview) => preview.style.setProperty('--fpe-dot', safe));
+  });
+  if (field === 'textColor') {
+    const colorButton = editor.querySelector('[data-fpe-action="toggle-text-color-popover"]');
+    const colorDot = colorButton?.querySelector('i');
+    if (colorDot) colorDot.style.setProperty('--fpe-active-color', safe);
+  }
+}
+
+function syncTextColorPopoverLegacy(editor, color) {
   const popover = editor.querySelector('[data-fpe-text-color-popover]');
   if (!popover) return;
   const safe = safeColor(color, '#eef2fb');
@@ -3626,6 +3740,7 @@ function pageInspectorHtml(editor) {
       <summary>Fond de diapo</summary>
       <div class="free-page-control-row"><span>Couleur</span><span class="free-page-color-combo">
         ${pageColorButtonsHtml(page.background || DEFAULT_PAGE_BG)}
+        <input class="free-page-color-hex" type="text" value="${_esc(page.background || DEFAULT_PAGE_BG)}" data-fpe-page-field="background" spellcheck="false" inputmode="text" aria-label="Couleur de fond personnalisÃ©e">
         <input class="free-page-color-custom" type="color" value="${_esc(page.background || DEFAULT_PAGE_BG)}" data-fpe-page-field="background">
       </span></div>
     </details>
@@ -3793,7 +3908,7 @@ function typeSpecificConfig(block, editor = null) {
     </div>
     <label>Taille <input type="number" min="1" max="96" value="${Number(block.fontSize) || 18}" data-fpe-inspector-field="fontSize"></label>
     <div class="free-page-control-row"><span>Alignement</span>${alignmentButtonsHtml(block.align)}</div>
-    <div class="free-page-control-row"><span>Couleur</span><span class="free-page-color-combo">${colorPresetButtonsHtml('textColor', TEXT_COLOR_PRESETS, block.textColor || legacyTextColor(block.color))}<input class="free-page-color-custom" type="color" value="${_esc(block.textColor || legacyTextColor(block.color))}" data-fpe-inspector-field="textColor"></span></div>
+    <div class="free-page-control-row free-page-control-row--stacked"><span>Couleur</span>${textColorPickerHtml(block.textColor || legacyTextColor(block.color), { compact: true })}</div>
     <label>Fond ${selectHtml('surface', ['none', 'soft', 'dark'], block.surface, surfaceLabel)}</label>
   </div>`;
   if (block.type === 'image') {
@@ -3968,7 +4083,7 @@ function positionPopoverHtml() {
   return anchors.map(([anchor, label]) => `<button type="button" class="free-page-position-choice free-page-position-choice--${anchor}" data-fpe-action="position-${anchor}" title="${_esc(label)}" aria-label="${_esc(label)}"><span></span></button>`).join('');
 }
 
-function textColorPopoverHtml(selected = '#eef2fb') {
+function textColorPickerHtml(selected = '#eef2fb', { compact = false } = {}) {
   const safeSelected = safeColor(selected, '#eef2fb').toLowerCase();
   const swatches = TEXT_SWATCH_COLUMNS.map((row) => row.map((color) => {
     const safe = safeColor(color, '#eef2fb');
@@ -3979,16 +4094,18 @@ function textColorPopoverHtml(selected = '#eef2fb') {
     const none = safe === '#eef2fb' ? ' title="Blanc"' : '';
     return `<button type="button" class="free-page-color-dot ${safe.toLowerCase() === safeSelected ? 'is-active' : ''}" data-fpe-inspector-field="textColor" value="${_esc(safe)}" style="--fpe-dot:${_esc(safe)}"${none}></button>`;
   }).join('');
-  return `<div class="free-page-color-tabs">
+  const safeValue = safeColor(selected, '#eef2fb');
+  return `<div class="free-page-color-picker ${compact ? 'is-compact' : ''}" data-fpe-color-picker>
+  <div class="free-page-color-tabs">
     <button type="button" class="is-active" data-fpe-color-tab="samples">Échantillons</button>
     <button type="button" data-fpe-color-tab="advanced">Avancé</button>
   </div>
   <div class="free-page-color-panel" data-fpe-color-panel="samples">
     <div class="free-page-text-swatch-grid">${swatches}</div>
     <div class="free-page-color-edit-row">
-      <span class="free-page-color-preview" style="--fpe-dot:${_esc(safeColor(selected, '#eef2fb'))}"></span>
-      <input type="text" value="${_esc(safeColor(selected, '#eef2fb'))}" data-fpe-inspector-field="textColor">
-      <input type="color" value="${_esc(safeColor(selected, '#eef2fb'))}" data-fpe-inspector-field="textColor" title="Couleur personnalisée">
+      <span class="free-page-color-preview" style="--fpe-dot:${_esc(safeValue)}"></span>
+      <input class="free-page-color-hex" type="text" value="${_esc(safeValue)}" data-fpe-inspector-field="textColor" spellcheck="false" inputmode="text">
+      <input type="color" value="${_esc(safeValue)}" data-fpe-inspector-field="textColor" title="Couleur personnalisée">
     </div>
     <span class="free-page-color-subtitle">Couleurs récentes</span>
     <div class="free-page-color-recent-row">${recent}</div>
@@ -3997,14 +4114,15 @@ function textColorPopoverHtml(selected = '#eef2fb') {
   </div>
   <div class="free-page-color-panel free-page-color-panel--advanced" data-fpe-color-panel="advanced" hidden>
     <div class="free-page-color-advanced-plane"></div>
-    <input class="free-page-color-wide" type="color" value="${_esc(safeColor(selected, '#eef2fb'))}" data-fpe-inspector-field="textColor">
+    <input class="free-page-color-wide" type="color" value="${_esc(safeValue)}" data-fpe-inspector-field="textColor">
     <div class="free-page-color-edit-row">
-      <span class="free-page-color-preview" style="--fpe-dot:${_esc(safeColor(selected, '#eef2fb'))}"></span>
-      <input type="text" value="${_esc(safeColor(selected, '#eef2fb'))}" data-fpe-inspector-field="textColor">
+      <span class="free-page-color-preview" style="--fpe-dot:${_esc(safeValue)}"></span>
+      <input class="free-page-color-hex" type="text" value="${_esc(safeValue)}" data-fpe-inspector-field="textColor" spellcheck="false" inputmode="text">
     </div>
     <span class="free-page-color-subtitle">Couleurs récentes</span>
     <div class="free-page-color-recent-row">${recent}</div>
-  </div>`;
+  </div>
+</div>`;
 }
 
 function blockTypeLabel(type) { return ({ text: 'Texte', image: 'Image', table: 'Tableau', chart: 'Graphique', shape: 'Forme' })[type] || 'Bloc'; }

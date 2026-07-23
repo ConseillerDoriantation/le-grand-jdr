@@ -200,7 +200,7 @@ export function renderCharEquip(c, canEdit) {
       </div>
       <span class="cs-armor-card-nom">${item.nom||'—'}</span>
       ${armorTypeMeta.label||statBonuses.length||caBonus?`<div class="cs-armor-card-badges">
-        ${armorTypeMeta.label?`<span class="cs-cbadge cs-cbadge--${armorTypeMeta.tone||'dim'}">${armorTypeMeta.label}</span>`:''}
+        ${armorTypeMeta.label?`<span class="cs-cbadge cs-cbadge--${armorTypeMeta.tone||'dim'}" ${armorTypeMeta.color ? `style="--armor-type-color:${armorTypeMeta.color}"` : ''}>${armorTypeMeta.label}</span>`:''}
         ${statBonuses.map(([k, v])=>`<span class="cs-cbadge cs-cbadge--gold">${statDisplay[k] || k.toUpperCase()} ${v>0?'+'+v:v}</span>`).join('')}
         ${caBonus ? `<span class="cs-cbadge cs-cbadge--gold">CA ${caBonus>0?'+'+caBonus:caBonus}</span>` : ''}
       </div>`:''}
@@ -218,7 +218,7 @@ export function renderCharEquip(c, canEdit) {
     const mod     = armorSet.modifiers;
     const tone    = armorSet.activeEffect?.tone || 'neutral';
     const TONE    = { light:'#22c38e', medium:'#4f8cff', heavy:'#e8b84b', neutral:'var(--text-dim)' };
-    const col     = TONE[tone] || 'var(--text-dim)';
+    const col     = armorSet.activeEffect?.color || TONE[tone] || 'var(--text-dim)';
     const effects = [];
     if (mod.spellPmDelta)        effects.push({ icon:'🧙', txt:`Sorts ${mod.spellPmDelta > 0 ? '+' : '−'}${Math.abs(mod.spellPmDelta)} PM` });
     if (mod.toucherBonus)        effects.push({ icon:'🎯', txt:`Toucher ${mod.toucherBonus > 0 ? '+' : ''}${mod.toucherBonus}` });

@@ -304,12 +304,13 @@ export function getArmorTypeMeta(type = '') {
     return {
       label,
       tone: def.tone || 'neutral',
+      color: def.color || '',
       chipText: `${def.label || label} : ${formatArmorSetEffect(def)}`,
       modifiers: { ...getEmptyArmorSetModifiers(), ...(def.modifiers || {}) },
       set: def,
     };
   }
-  return { label, tone: 'neutral', chipText: '', modifiers: getEmptyArmorSetModifiers(), set: null };
+  return { label, tone: 'neutral', color: '', chipText: '', modifiers: getEmptyArmorSetModifiers(), set: null };
 }
 
 export function getArmorSetChipText(setData = {}) {
