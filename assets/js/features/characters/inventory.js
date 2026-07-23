@@ -452,6 +452,10 @@ export async function openInventoryItemDetail(charId, indicesB64) {
   const price = getInventoryItemValue(item, catalogItem);
   const resale = getInventoryItemResaleValue(item, catalogItem);
   const image = getInventoryItemImage(item, catalogItem);
+  // Seuls les objets FORGES sont modifiables : ceux issus de la boutique/du
+  // catalogue sont partages, les retoucher ici serait trompeur.
+  const canEditItem = item.source === 'custom'
+    && (STATE.isAdmin || c.uid === STATE.user?.uid);
 
   const facts = [
     ['Catégorie', item.type || item.categorie],
@@ -519,6 +523,9 @@ export async function openInventoryItemDetail(charId, indicesB64) {
       </section>` : ''}
 
       <footer class="inv-detail-footer">
+        ${canEditItem ? `<button class="btn btn-outline" data-action="openCreateItemModal"
+          data-id="${_esc(c.id)}" data-index="${indices[0]}"
+          title="Modifier cet objet dans la forge">🛠️ Modifier</button>` : ''}
         <button class="btn btn-primary" data-action="close-modal">Fermer</button>
       </footer>
     </div>`, {

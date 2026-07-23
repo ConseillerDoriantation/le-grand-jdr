@@ -20,6 +20,7 @@ import { getCharacterById } from '../../shared/character-state.js';
 import { loadEquipmentSlots, getEquipmentItemOptions } from '../../shared/equipment-slots.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
 import { loadArmorSetSettings, getArmorTypeOptions } from '../../shared/armor-set-settings.js';
+import { syncEquipmentAfterInventoryMutation } from '../../shared/equipment-utils.js';
 import { ITEM_STATS } from '../shop-item-stats.js';
 
 const FORGE_CATS = [
@@ -60,6 +61,38 @@ function _blankDraft() {
     // objet
     type: '', quantite: 1,
   };
+}
+
+// Reconstruit un brouillon a partir d'un objet deja en inventaire (inverse de
+// _buildItem) pour permettre sa MODIFICATION.
+function _draftFromItem(item = {}) {
+  const d = _blankDraft();
+  d.nom         = item.nom || '';
+  d.rarete      = parseInt(item.rarete) || 0;
+  d.description = item.description || '';
+  d.format      = item.format || '';
+  d.degats      = item.degats || '';
+  d.degatsStats = Array.isArray(item.degatsStats)
+    ? [...item.degatsStats]
+    : (item.degatsStat ? [item.degatsStat] : []);
+  d.toucherStat = item.toucherStat || '';
+  d.portee      = item.portee || '';
+  d.traits      = Array.isArray(item.traits) ? item.traits.join(', ') : (item.traits || '');
+  d.slotArmure  = item.slotArmure || '';
+  d.typeArmure  = item.typeArmure || '';
+  d.ca          = item.ca ?? '';
+  d.slotBijou   = item.slotBijou || '';
+  d.type        = item.type || '';
+  d.quantite    = 1;
+  ITEM_STATS.forEach(st => { if (item[st.store] != null) d[st.store] = item[st.store]; });
+  DERIVED_BONUSES.forEach(([k]) => { if (item[k] != null) d[k] = item[k]; });
+  return d;
+}
+
+// Categorie d'onglet correspondant a un objet existant.
+function _catFromItem(item = {}) {
+  const tpl = String(item.template || '').toLowerCase();
+  return ['arme', 'armure', 'bijou'].includes(tpl) ? tpl : 'objet';
 }
 
 const _opt = (value, label, sel) =>
@@ -180,10 +213,15 @@ function _renderForge() {
       <div class="forge-body">${_catBody()}</div>
       <div class="forge-actions">
         <button class="btn btn-outline btn-sm" data-action="_forgeClose">Annuler</button>
-        <button class="btn btn-gold btn-sm" data-action="_forgeSave">Créer l’objet</button>
+        <button class="btn btn-gold btn-sm" data-action="_forgeSave">${_forge.editIndex != null ? 'Enregistrer' : 'Créer l’objet'}</button>
       </div>
     </div>`;
-  openModal('🛠️ Créer un objet', body, { subtitle: 'Défini selon les règles de cette aventure' });
+  const edition = _forge.editIndex != null;
+  openModal(edition ? '🛠️ Modifier l’objet' : '🛠️ Créer un objet', body, {
+    subtitle: edition
+      ? 'Les modifications remplacent l’objet dans l’inventaire'
+      : 'Défini selon les règles de cette aventure',
+  });
 }
 
 // Relit les champs présents dans le DOM vers le brouillon (avant un changement
@@ -268,21 +306,53 @@ async function _saveForge() {
   if (_forge.cat === 'armure' && !item.slotArmure) { showNotif('Choisis un emplacement d’armure.', 'error'); return; }
   if (_forge.cat === 'bijou' && !item.slotBijou) { showNotif('Choisis un emplacement d’accessoire.', 'error'); return; }
 
-  const count = _forge.cat === 'objet'
-    ? Math.max(1, Math.min(999, parseInt(_forge.draft.quantite) || 1))
-    : 1;
-  const entries = Array.from({ length: count }, () => ({ ...item, qte: 1 }));
-  const inv = [...(Array.isArray(c.inventaire) ? c.inventaire : []), ...entries];
+  const invActuel = Array.isArray(c.inventaire) ? c.inventaire : [];
+  const edition = _forge.editIndex != null && invActuel[_forge.editIndex];
 
-  if (await trySave('characters', c.id, { inventaire: inv })) {
+  let inv;
+  let count = 1;
+  if (edition) {
+    // Remplacement en place : on conserve les champs propres a l'exemplaire
+    // (quantite, note personnelle) que la forge ne gere pas.
+    const ancien = invActuel[_forge.editIndex];
+    const remplacant = { ...item, qte: parseInt(ancien.qte) || 1 };
+    if (ancien.quantite != null) remplacant.quantite = ancien.quantite;
+    if (ancien.notePerso) remplacant.notePerso = ancien.notePerso;
+    if (ancien.createdBy) remplacant.createdBy = ancien.createdBy;
+    inv = invActuel.map((it, i) => (i === _forge.editIndex ? remplacant : it));
+  } else {
+    count = _forge.cat === 'objet'
+      ? Math.max(1, Math.min(999, parseInt(_forge.draft.quantite) || 1))
+      : 1;
+    inv = [...invActuel, ...Array.from({ length: count }, () => ({ ...item, qte: 1 }))];
+  }
+
+  // Un objet MODIFIE peut etre porte : la copie equipee doit etre reconstruite,
+  // sinon le personnage garde les anciennes stats jusqu'au prochain rehabillage.
+  const patch = { inventaire: inv };
+  if (edition) {
+    const invAvant = c.inventaire;
+    c.inventaire = inv;
+    const sync = syncEquipmentAfterInventoryMutation(c, []);
+    c.inventaire = invAvant;                 // pas de mutation avant l'ecriture reussie
+    if (sync.changed) {
+      patch.equipement = sync.equipement;
+      patch.statsBonus = sync.statsBonus;
+    }
+  }
+
+  if (await trySave('characters', c.id, patch)) {
+    if (patch.equipement) { c.equipement = patch.equipement; c.statsBonus = patch.statsBonus; }
     c.inventaire = inv;
     if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
     const stChar = (STATE.characters || []).find(x => x.id === c.id);
     if (stChar) stChar.inventaire = inv;
     closeModal();
-    showNotif(count > 1
-      ? `×${count} « ${item.nom} » ajoutés à l’inventaire.`
-      : `« ${item.nom} » créé et ajouté à l’inventaire.`, 'success');
+    showNotif(edition
+      ? `« ${item.nom} » mis à jour.`
+      : count > 1
+        ? `×${count} « ${item.nom} » ajoutés à l’inventaire.`
+        : `« ${item.nom} » créé et ajouté à l’inventaire.`, 'success');
     charSession.renderSheet?.(c, 'inventaire');
   }
 }
@@ -311,7 +381,7 @@ function _ensureForgeActions() {
   });
 }
 
-export async function openCreateItemModal(charId) {
+export async function openCreateItemModal(charId, options = {}) {
   const c = charId ? getCharacterById(charId) : STATE.activeChar;
   if (!c) { showNotif('Aucun personnage actif.', 'error'); return; }
   // Même règle que celle qui AFFICHE le bouton (characters.js) : appliquée au
@@ -328,10 +398,17 @@ export async function openCreateItemModal(charId) {
   // confort : les attendre rendait l'ouverture dependante de la latence d'une
   // lecture Firestore — et carrement impossible quand l'une d'elles ne revenait
   // jamais. Elles sont chargees en tache de fond puis injectees a l'arrivee.
+  // Modification d'un objet deja cree : on repart de son contenu et on retiendra
+  // sa position pour le REMPLACER au lieu d'en ajouter un nouveau.
+  const editIndex = Number.isInteger(options.index) ? options.index : null;
+  const existant = editIndex != null ? (c.inventaire || [])[editIndex] : null;
+  if (editIndex != null && !existant) { showNotif('Objet introuvable.', 'error'); return; }
+
   _forge = {
     charId: c.id,
-    cat: 'arme',
-    draft: _blankDraft(),
+    editIndex: existant ? editIndex : null,
+    cat: existant ? _catFromItem(existant) : 'arme',
+    draft: existant ? _draftFromItem(existant) : _blankDraft(),
     formats: [],
     armorSlots: _safeList(() => getEquipmentItemOptions('armor')),
     accSlots: _safeList(() => getEquipmentItemOptions('accessory')),
