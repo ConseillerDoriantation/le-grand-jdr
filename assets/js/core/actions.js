@@ -6,6 +6,24 @@
 
 const ACTIONS = {};
 
+// Un handler `async` qui échoue rendait un rejet que personne n'attendait :
+// aucune trace visible, le clic semblait simplement « ne rien faire ». On
+// signale désormais l'échec (console + toast) pour toutes les actions.
+function _runHandler(handler, el, event, action) {
+  const fail = (err) => {
+    console.error(`[action] ${action}`, err);
+    import('../shared/notifications.js')
+      .then(({ showNotif }) => showNotif('Action impossible — voir la console.', 'error'))
+      .catch(() => {});
+  };
+  try {
+    const out = handler(el, event);
+    if (out && typeof out.catch === 'function') out.catch(fail);
+  } catch (err) {
+    fail(err);
+  }
+}
+
 /**
  * Enregistre un ensemble d'actions depuis une feature.
  * Chaque handler reçoit (btn, event) où btn est l'élément [data-action].
@@ -27,7 +45,7 @@ export function dispatchAction(btn, event) {
   if (!handler) return false;
 
   if (btn.dataset.stopPropagation !== undefined) event.stopPropagation();
-  handler(btn, event);
+  _runHandler(handler, btn, event, action);
   return true;
 }
 
@@ -41,6 +59,6 @@ export function dispatchValueAction(el, event, attr) {
   const action = el.dataset[attr];
   const handler = ACTIONS[action];
   if (!handler) return false;
-  handler(el, event);
+  _runHandler(handler, el, event, action);
   return true;
 }
