@@ -584,6 +584,12 @@ function _renderDamageProfileMini(beast) {
 const _bstPending = {};
 let _bstSaveTimer = null;
 
+function _bstOptimisticPatch(id, patch = {}) {
+  const idx = STORE.creatures.findIndex(c => c.id === id);
+  if (idx >= 0) Object.assign(STORE.creatures[idx], patch);
+  _bstRenderSig = _bstSig();
+}
+
 function _bstFlushSaves() {
   const col = STORE.currentCol || 'bestiary';
   const ids = Object.keys(_bstPending);
@@ -601,23 +607,58 @@ function _bstFlushSaves() {
 }
 
 function _bstQueueSave(id, patch) {
+  _bstOptimisticPatch(id, patch);
   _bstPending[id] = { ...(_bstPending[id] || {}), ...patch };
   clearTimeout(_bstSaveTimer);
   _bstSaveTimer = setTimeout(_bstFlushSaves, 1200);
 }
 
-// Auto-save gÃ©nÃ©rique (texte / select)
-function _bstUpdate(id, field, val) { _bstQueueSave(id, { [field]: val }); }
-function _bstUpdateNum(id, field, val) { _bstQueueSave(id, { [field]: parseInt(val) || 0 }); }
+// Auto-save generique (texte / select)
+function _bstUpdate(id, field, val) {
+  _bstQueueSave(id, { [field]: val });
+  _bstPatchCardBasics(id);
+}
+function _bstUpdateNum(id, field, val) {
+  _bstQueueSave(id, { [field]: parseInt(val) || 0 });
+  _bstPatchCardBasics(id);
+}
 function _bstToggleHidden(id) {
   const c = STORE.creatures.find(x => x.id === id);
   if (!c) return;
   const next = !c.hidden;
   c.hidden = next;
   _bstQueueSave(id, { hidden: next });
-  // Re-render panel + cartes pour reflÃ©ter le badge
-  if (typeof _syncActivePanel === 'function') _syncActivePanel();
-  if (typeof _render === 'function') _render();
+  _bstPatchHiddenUi(id, next);
+}
+
+function _bstPatchHiddenUi(id, hidden) {
+  document.querySelectorAll(`.bst-card[data-beast-id="${id}"]`).forEach(card => {
+    const media = card.querySelector('.bst-card-media');
+    const existing = card.querySelector('.bst-card-hidden');
+    if (hidden && media && !existing) {
+      media.insertAdjacentHTML('beforeend', '<span class="bst-card-hidden" title="Cache aux joueurs">Cachee</span>');
+    } else if (!hidden) {
+      existing?.remove();
+    }
+    const quick = card.querySelector('[data-bst-action="quickToggleHidden"]');
+    if (quick) {
+      quick.title = hidden ? 'Rendre visible' : 'Cacher aux joueurs';
+      quick.setAttribute('aria-label', quick.title);
+      quick.innerHTML = _bstIcon(hidden ? 'visible' : 'hidden');
+    }
+  });
+
+  const panelBtn = document.querySelector(`.bst-hidden-toggle[data-id="${id}"]`);
+  if (panelBtn) {
+    panelBtn.classList.toggle('active', hidden);
+    panelBtn.title = hidden
+      ? 'Visible : actuellement cachee aux joueurs - clic pour afficher'
+      : 'Cacher cette creature aux joueurs (boss spoiler, contenu surprise)';
+    panelBtn.textContent = hidden ? 'Cachee' : 'Visible';
+    panelBtn.style.color = hidden ? '#b47fff' : '';
+    panelBtn.style.borderColor = hidden ? '#b47fff' : '';
+    panelBtn.style.background = hidden ? 'rgba(180,127,255,0.10)' : '';
+  }
 }
 
 // Nom : sync visuel des cartes et du hero
@@ -625,6 +666,29 @@ function _bstUpdateNom(id, val) {
   _bstQueueSave(id, { nom: val });
   document.querySelectorAll(`.bst-card[data-beast-id="${id}"] .bst-card-name`)
     .forEach(el => el.textContent = val || '?');
+}
+
+function _bstPatchCardBasics(id) {
+  const c = STORE.creatures.find(x => x.id === id);
+  if (!c) return;
+  document.querySelectorAll(`.bst-card[data-beast-id="${id}"]`).forEach(card => {
+    const meta = card.querySelector('.bst-card-meta');
+    if (meta) meta.textContent = [c.type, c.environnement].filter(Boolean).join(' - ') || 'Sans classification';
+
+    const level = card.querySelector('.bst-card-level');
+    const media = card.querySelector('.bst-card-media');
+    if (c.niveau && media && !level) media.insertAdjacentHTML('beforeend', `<span class="bst-card-level">Niv. ${_esc(c.niveau)}</span>`);
+    else if (level && c.niveau) level.textContent = `Niv. ${c.niveau}`;
+    else level?.remove();
+
+    const pvMax = parseInt(c.pvMax) || 0;
+    const track = STORE.tracker[id] || {};
+    const pvActuel = track.pvActuel !== undefined ? parseInt(track.pvActuel) : pvMax;
+    const fill = card.querySelector('.bst-card-pv-fill');
+    if (fill && pvMax) fill.style.width = `${Math.max(0, Math.min(100, Math.round(pvActuel / pvMax * 100)))}%`;
+    const lbl = card.querySelector('.bst-card-pv-lbl');
+    if (lbl && pvMax) lbl.innerHTML = `<span>${pvActuel} PV</span><span>${pvMax}</span>`;
+  });
 }
 
 // Caracs : sauve + recalcule le modificateur affichÃ©
@@ -1228,10 +1292,17 @@ function _bstSig() { return JSON.stringify(STORE.creatures) + '|' + _stableStrin
 // attendre le prochain snapshot (qui arrivera aprÃ¨s la sauvegarde).
 function _bstShouldSkipLiveRender() {
   if (_bstReordering || document.body.classList.contains('bst-dragging')) return true;
+  if (Object.keys(_bstPending).length) return true;
   const ae = document.activeElement;
   if (!ae) return false;
   const tag = ae.tagName;
-  if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !ae.isContentEditable) return false;
+  if (
+    tag !== 'INPUT' &&
+    tag !== 'TEXTAREA' &&
+    tag !== 'SELECT' &&
+    tag !== 'BUTTON' &&
+    !ae.isContentEditable
+  ) return false;
   const main = document.getElementById('main-content');
   return !!(main && main.contains(ae));
 }
@@ -1272,6 +1343,7 @@ function _render() {
   const prevSlotTop = sameActive ? (content.querySelector('.bst-panel-slot')?.scrollTop || 0) : 0;
   const prevContentTop = sameActive ? (content.scrollTop || 0) : 0;
   const prevWinTop = sameActive ? (window.scrollY || 0) : 0;
+  const focusState = _bstCaptureFocusState(content);
 
   const allTypes = [...new Set(STORE.creatures.map(c => c.type || '').filter(Boolean))].sort();
   const filtered = STORE.creatures.filter(c => _beastMatchesFilters(c));
@@ -1421,8 +1493,47 @@ function _render() {
     if (prevContentTop) content.scrollTop = prevContentTop;
     if (prevWinTop) window.scrollTo(0, prevWinTop);
   }
+  _bstRestoreFocusState(content, focusState);
   _bstRenderedActiveId = STORE.activeId;
   _bstRenderSig = _bstSig();
+}
+
+function _bstCaptureFocusState(root) {
+  const el = document.activeElement;
+  if (!root || !el || !root.contains(el)) return null;
+  if (!el.matches?.('input, textarea, select, [contenteditable="true"]')) return null;
+  const esc = (value) => globalThis.CSS?.escape
+    ? globalThis.CSS.escape(String(value))
+    : String(value).replace(/["\\]/g, '\\$&');
+  const selector = [
+    el.dataset?.bstAction ? `[data-bst-action="${esc(el.dataset.bstAction)}"]` : '',
+    el.dataset?.id ? `[data-id="${esc(el.dataset.id)}"]` : '',
+    el.dataset?.field ? `[data-field="${esc(el.dataset.field)}"]` : '',
+    el.dataset?.key ? `[data-key="${esc(el.dataset.key)}"]` : '',
+    el.dataset?.type ? `[data-type="${esc(el.dataset.type)}"]` : '',
+    el.dataset?.f ? `[data-f="${esc(el.dataset.f)}"]` : '',
+    el.id ? `#${esc(el.id)}` : '',
+  ].filter(Boolean).join('');
+  const matches = selector ? [...root.querySelectorAll(selector)] : [];
+  return {
+    selector,
+    index: Math.max(0, matches.indexOf(el)),
+    value: 'value' in el ? el.value : '',
+    start: Number.isFinite(el.selectionStart) ? el.selectionStart : null,
+    end: Number.isFinite(el.selectionEnd) ? el.selectionEnd : null,
+  };
+}
+
+function _bstRestoreFocusState(root, state) {
+  if (!root || !state?.selector) return;
+  const matches = [...root.querySelectorAll(state.selector)];
+  const el = matches[state.index] || matches[0];
+  if (!el) return;
+  if ('value' in el && state.value !== undefined) el.value = state.value;
+  el.focus?.({ preventScroll: true });
+  if (state.start !== null && typeof el.setSelectionRange === 'function') {
+    try { el.setSelectionRange(state.start, state.end ?? state.start); } catch {}
+  }
 }
 
 // â”€â”€ Card crÃ©ature â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2067,6 +2178,8 @@ function _syncActivePanel() {
         </div>` : '';
     }
   }
+  _bstRenderedActiveId = STORE.activeId;
+  _bstRenderSig = _bstSig();
 }
 
 export function openBestiaryEntry(id) {

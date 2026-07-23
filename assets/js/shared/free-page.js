@@ -7,7 +7,6 @@ import { lsJson } from './local-storage.js';
 
 const PAGE_WIDTH = 1000;
 const DEFAULT_HEIGHT = 650;
-const MAX_BLOCKS = 30;
 const MAX_IMAGES = 20;
 const MAX_SLIDES = 18;
 const MAX_HISTORY = 50;
@@ -17,7 +16,7 @@ const TEXT_SURFACES = new Set(['none', 'soft', 'dark']);
 const SHAPE_TYPES = new Set(['rectangle', 'circle', 'diamond', 'triangle', 'pentagon', 'hexagon', 'star', 'arrow', 'chevron', 'line']);
 const CHART_TYPES = new Set(['bar', 'horizontal-bar', 'line', 'area', 'pie', 'doughnut', 'radar', 'polar', 'scatter', 'lollipop', 'progress']);
 const INTERACTION_TYPES = new Set(['none', 'popup', 'label', 'audio', 'link', 'page']);
-const CHART_COLUMNS = ['color', 'label', 'value', 'note'];
+const CHART_COLUMNS = ['color', 'label', 'value', 'value2', 'value3', 'note'];
 const CHART_PALETTES = {
   arcane: ['#6aa7ff', '#9b7bff', '#57d7b0', '#e8c66a', '#ff8fa6', '#5ed6ff'],
   ember: ['#ff795e', '#ffad5c', '#ffd166', '#ef476f', '#d85bff', '#8f72ff'],
@@ -91,7 +90,7 @@ const DEFAULT_SHAPE_FILL = '#263957';
 const DEFAULT_SHAPE_STROKE = '#6aa7ff';
 const DEFAULT_PAGE_BG = '#0b121d';
 const GRID_SIZES = [5, 10, 20, 25, 50];
-const EDITOR_ZOOMS = [60, 75, 90, 100, 125];
+const EDITOR_ZOOMS = [60, 75, 90, 100, 125, 150, 175, 200];
 const PAGE_BACKGROUND_PRESETS = [
   { name: 'Nuit', value: '#0b121d' },
   { name: 'Ardoise', value: '#111827' },
@@ -110,6 +109,14 @@ const PAGE_BACKGROUND_PRESETS = [
 const POPUP_TEMPLATE_IDS = new Set(['center', 'left', 'right', 'round', 'triple', 'blank', 'side-image', 'notice', 'table', 'quote', 'dark']);
 const POPUP_LAYOUTS = new Set(['center', 'left', 'right', 'round', 'triple']);
 const NAV_STYLES = new Set(['bar', 'menu']);
+const NAV_THEMES = new Set(['dark', 'light']);
+const ANIMATION_PHASES = new Set(['in', 'loop', 'out']);
+const ANIMATION_TRIGGERS = new Set(['auto', 'hover', 'click']);
+const ANIMATION_EFFECTS = {
+  in: ['none', 'appear', 'frame', 'light', 'bounce', 'turn', 'zoom', 'slide', 'swirl'],
+  loop: ['none', 'pulse', 'turn', 'random', 'float', 'in-out', 'beat', 'flash', 'notification'],
+  out: ['none', 'disappear', 'blur', 'dim', 'drop', 'bounce', 'turn', 'zoom', 'slide', 'center', 'swirl', 'roll'],
+};
 const NAV_BLOCK_ID = '__free-page-nav__';
 const POPUP_FRAME_MIN_W = 240;
 const POPUP_FRAME_MIN_H = 170;
@@ -127,6 +134,25 @@ let sharedFreePageClipboard = null;
 let sharedFreePageSlideClipboard = null;
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, Number(value) || 0));
+const OFFSTAGE_HANDLE_MARGIN = 24;
+function blockXBounds(width = 1) {
+  const w = Math.max(1, Number(width) || 1);
+  const margin = Math.min(OFFSTAGE_HANDLE_MARGIN, w);
+  return { min: -w + margin, max: PAGE_WIDTH - margin };
+}
+function blockYBounds(height = 1, pageHeight = DEFAULT_HEIGHT) {
+  const h = Math.max(1, Number(height) || 1);
+  const margin = Math.min(OFFSTAGE_HANDLE_MARGIN, h);
+  return { min: -h + margin, max: pageHeight - margin };
+}
+function clampBlockX(x, width) {
+  const bounds = blockXBounds(width);
+  return clamp(x, bounds.min, bounds.max);
+}
+function clampBlockY(y, height, pageHeight = DEFAULT_HEIGHT) {
+  const bounds = blockYBounds(height, pageHeight);
+  return clamp(y, bounds.min, bounds.max);
+}
 const normalizeRotation = (value) => {
   let angle = Number(value) || 0;
   while (angle > 180) angle -= 360;
@@ -192,9 +218,18 @@ function normalizeItems(items, paletteName = 'arcane') {
   return source.slice(0, 12).map((item, index) => ({
     label: String(item?.label || `Donnee ${index + 1}`).slice(0, 34),
     value: clamp(item?.value ?? 0, 0, 999),
+    value2: optionalChartValue(item?.value2 ?? item?.secondaryValue),
+    value3: optionalChartValue(item?.value3),
+    value4: optionalChartValue(item?.value4),
     color: chartColor(item?.color, index, paletteName),
     note: String(item?.note || '').slice(0, 90),
   }));
+}
+
+function optionalChartValue(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? clamp(numeric, 0, 999) : '';
 }
 
 function normalizeInteraction(raw) {
@@ -203,11 +238,25 @@ function normalizeInteraction(raw) {
   return {
     type,
     title: String(raw?.title || '').slice(0, 80),
-    text: sanitizeRichTextHtml(raw?.text || ''),
+    text: normalizeFreePageTextHtml(raw?.text || ''),
     target: String(raw?.target || '').slice(0, 420),
     layout,
     frame: normalizePopupFrame(raw?.frame, layout),
     page: hasSingleFreePage(raw?.page) ? normalizeSingleFreePage(raw.page) : null,
+  };
+}
+
+function normalizeAnimation(raw) {
+  const phase = ANIMATION_PHASES.has(raw?.phase) ? raw.phase : 'in';
+  const trigger = ANIMATION_TRIGGERS.has(raw?.trigger) ? raw.trigger : 'auto';
+  const effects = ANIMATION_EFFECTS[phase] || ANIMATION_EFFECTS.in;
+  const effect = effects.includes(raw?.effect) ? raw.effect : 'none';
+  return {
+    phase,
+    trigger,
+    effect,
+    duration: clamp(raw?.duration ?? 700, 100, 5000),
+    delay: clamp(raw?.delay ?? 0, 0, 10000),
   };
 }
 
@@ -285,11 +334,13 @@ function normalizeDeckGrid(raw) {
 function normalizeDeckNav(raw, slides = []) {
   const ids = slides.map((slide) => slide.id);
   const style = NAV_STYLES.has(raw?.style) ? raw.style : 'bar';
+  const theme = NAV_THEMES.has(raw?.theme) ? raw.theme : 'dark';
   const fallback = style === 'menu'
     ? { x: 928, y: DEFAULT_HEIGHT - 64, w: 44, h: 44 }
     : { x: 170, y: DEFAULT_HEIGHT - 58, w: 660, h: 42 };
-  const w = clamp(raw?.w ?? fallback.w, style === 'menu' ? 44 : 220, PAGE_WIDTH);
-  const h = clamp(raw?.h ?? fallback.h, 34, 180);
+  const menuSize = clamp(raw?.size ?? raw?.w ?? raw?.h ?? fallback.w, 44, 96);
+  const w = style === 'menu' ? menuSize : clamp(raw?.w ?? fallback.w, 220, PAGE_WIDTH);
+  const h = style === 'menu' ? menuSize : clamp(raw?.h ?? fallback.h, 34, 180);
   const filterIds = (values, fallback) => {
     const source = Array.isArray(values) ? values.map(String) : fallback;
     return source.filter((id, index, list) => ids.includes(id) && list.indexOf(id) === index);
@@ -297,6 +348,7 @@ function normalizeDeckNav(raw, slides = []) {
   return {
     enabled: Boolean(raw?.enabled),
     style,
+    theme,
     label: String(raw?.label || 'Menu').slice(0, 40),
     x: Math.round(clamp(raw?.x ?? fallback.x, 0, PAGE_WIDTH - w)),
     y: Math.round(clamp(raw?.y ?? fallback.y, 0, DEFAULT_HEIGHT - h)),
@@ -498,8 +550,8 @@ function normalizeBlock(raw, index, pageHeight) {
   const block = {
     id: String(raw.id || uid()),
     type,
-    x: Math.round(clamp(raw.x, 0, PAGE_WIDTH - w)),
-    y: Math.round(clamp(raw.y, 0, pageHeight - h)),
+    x: Math.round(clampBlockX(raw.x, w)),
+    y: Math.round(clampBlockY(raw.y, h, pageHeight)),
     w: Math.round(w),
     h: Math.round(h),
     z: clamp(raw.z ?? index + 1, 1, 999),
@@ -509,9 +561,10 @@ function normalizeBlock(raw, index, pageHeight) {
     hidden: Boolean(raw.hidden),
     groupId: raw.groupId ? String(raw.groupId).slice(0, 40) : '',
     interaction: normalizeInteraction(raw.interaction),
+    animation: normalizeAnimation(raw.animation),
   };
   if (type === 'text') {
-    block.content = sanitizeRichTextHtml(raw.content || '');
+    block.content = normalizeFreePageTextHtml(raw.content || '');
     block.align = ['left', 'center', 'right'].includes(raw.align) ? raw.align : 'left';
     block.fontSize = clamp(raw.fontSize || 18, 1, 96);
     block.color = TEXT_COLORS.has(raw.color) ? raw.color : 'default';
@@ -552,7 +605,7 @@ function normalizeBlock(raw, index, pageHeight) {
     block.showLabels = raw.showLabels !== false;
     block.showTooltips = raw.showTooltips !== false;
     block.showValues = raw.showValues !== false;
-    block.chartColumnCount = clamp(raw.chartColumnCount || CHART_COLUMNS.length, 2, CHART_COLUMNS.length);
+    block.chartColumnCount = clamp(raw.chartColumnCount || 4, 2, CHART_COLUMNS.length);
     block.items = normalizeItems(raw.items, block.chartPalette);
   } else if (type === 'shape') {
     block.shape = raw.shape === 'rounded' || raw.shape === 'pill' ? 'rectangle' : SHAPE_TYPES.has(raw.shape) ? raw.shape : 'rectangle';
@@ -564,6 +617,13 @@ function normalizeBlock(raw, index, pageHeight) {
     block.shadowDepth = clamp(raw.shadowDepth ?? 22, 4, 80);
   }
   return block;
+}
+
+function normalizeFreePageTextHtml(html) {
+  return sanitizeRichTextHtml(html || '').replace(
+    /font-size:\s*clamp\(\s*1px\s*,\s*([0-9.]+)cqw\s*,\s*[0-9.]+px\s*\)/gi,
+    'font-size: calc($1cqw)',
+  );
 }
 
 function normalizeSingleFreePage(raw, { legacyHtml = '', assets = null } = {}) {
@@ -589,7 +649,7 @@ function normalizeSingleFreePage(raw, { legacyHtml = '', assets = null } = {}) {
       content: sanitizeRichTextHtml(legacyHtml), align: 'left', fontSize: 18, color: 'default', textColor: '#eef2fb', surface: 'none',
     }];
   }
-  return { version: 1, width: PAGE_WIDTH, height, background, blocks: blocks.slice(0, MAX_BLOCKS) };
+  return { version: 1, width: PAGE_WIDTH, height, background, blocks };
 }
 
 export function normalizeFreePage(raw, { legacyHtml = '' } = {}) {
@@ -819,6 +879,7 @@ function bindSingleFreePageEditor(editor) {
   editor.addEventListener('change', () => scheduleWeightUpdate(editor));
   editor.addEventListener('pointerup', () => scheduleWeightUpdate(editor));
   renderBlocks(editor, null);
+  requestAnimationFrame(() => fitEditorZoom(editor));
   updateFreePageWeight(editor);
 }
 
@@ -1354,6 +1415,8 @@ function applyInlineTextColor(editor, color) {
 }
 
 function handleContextMenu(editor, event) {
+  const chartSheet = event.target.closest('[data-fpe-chart-sheet]');
+  if (chartSheet) return openChartSheetContextMenu(editor, event, chartSheet);
   const stage = event.target.closest('[data-fpe-composition]');
   const blockEl = event.target.closest('[data-fpe-block]');
   const navEl = event.target.closest('[data-fpe-nav-block]');
@@ -1386,6 +1449,31 @@ function openContextMenu(editor, clientX, clientY, hasBlock, hasNav = false) {
   const rect = menu.getBoundingClientRect();
   menu.style.left = `${clamp(clientX, 8, Math.max(8, window.innerWidth - rect.width - 8))}px`;
   menu.style.top = `${clamp(clientY, 8, Math.max(8, window.innerHeight - rect.height - 8))}px`;
+}
+
+function openChartSheetContextMenu(editor, event, sheet) {
+  event.preventDefault();
+  const block = selectedBlock(editor);
+  if (block?.type !== 'chart') return;
+  const rowEl = event.target.closest('[data-fpe-chart-row]');
+  const rowIndex = Number(rowEl?.dataset.index ?? -1);
+  editor.__freePageChartContext = Number.isInteger(rowIndex) && rowIndex >= 0 ? { rowIndex } : null;
+  const items = normalizeItems(block.items, block.chartPalette);
+  const colCount = clamp(block.chartColumnCount || 4, 2, CHART_COLUMNS.length);
+  const actions = [
+    ['chart-row-add-after', 'Ajouter une ligne dessous'],
+    ['chart-row-add-before', 'Ajouter une ligne dessus', rowIndex < 0],
+    ['chart-row-duplicate', 'Dupliquer la ligne', rowIndex < 0],
+    ['chart-row-delete', 'Supprimer la ligne', rowIndex < 0 || items.length <= 1],
+    ['chart-col-add', 'Ajouter une colonne', colCount >= CHART_COLUMNS.length],
+    ['chart-col-remove', 'Supprimer une colonne', colCount <= 2],
+  ];
+  const menu = editor.querySelector('[data-fpe-context-menu]');
+  menu.innerHTML = actions.map(([action, label, disabled]) => `<button type="button" data-fpe-context-action="${_esc(action)}" ${disabled ? 'disabled' : ''}>${_esc(label)}</button>`).join('');
+  menu.hidden = false;
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = `${clamp(event.clientX, 8, Math.max(8, window.innerWidth - rect.width - 8))}px`;
+  menu.style.top = `${clamp(event.clientY, 8, Math.max(8, window.innerHeight - rect.height - 8))}px`;
 }
 
 function closeContextMenu(editor) {
@@ -1423,6 +1511,13 @@ function runAction(editor, action, event) {
     renderInspector(editor);
     return;
   }
+  if (action === 'open-animation') {
+    editor.__freePageInspectorTab = 'config';
+    editor.__freePageFocusPanel = 'animation';
+    renderInspector(editor);
+    return;
+  }
+  if (action === 'preview-animation') return previewSelectedAnimation(editor);
   if (action === 'finish-popup-edit') return finishInlinePopupEdit(editor);
   if (action === 'toggle-popup-frame-lock') return togglePopupFrameLock(editor);
   if (action === 'close-interaction-panel') {
@@ -1775,12 +1870,10 @@ function handleEditorField(editor, target) {
 
 function fitEditorZoom(editor) {
   const workspace = editor.querySelector('.free-page-workspace');
-  const page = normalizeSingleFreePage(editor.__freePageState);
   if (!workspace) return;
   const rect = workspace.getBoundingClientRect();
   const availableW = Math.max(320, rect.width - 22);
-  const availableH = Math.max(260, window.innerHeight - rect.top - 74);
-  const rawZoom = Math.min(availableW / PAGE_WIDTH, availableH / page.height) * 100;
+  const rawZoom = Math.min(200, availableW / PAGE_WIDTH * 100);
   const zoom = EDITOR_ZOOMS.reduce((best, value) => Math.abs(value - rawZoom) < Math.abs(best - rawZoom) ? value : best, 100);
   editor.style.setProperty('--free-page-editor-zoom', String(zoom / 100));
   const select = editor.querySelector('[data-fpe-editor-field="zoom"]');
@@ -1842,12 +1935,29 @@ function handleNavField(editor, target, { live = false } = {}) {
   deck.nav = normalizeDeckNav(deck.nav, deck.slides);
   const field = target.dataset.fpeNavField;
   if (field === 'enabled') deck.nav.enabled = Boolean(target.checked);
-  if (field === 'style') deck.nav.style = NAV_STYLES.has(target.value) ? target.value : 'bar';
+  if (field === 'style') {
+    const nextStyle = NAV_STYLES.has(target.value) ? target.value : 'bar';
+    deck.nav.style = nextStyle;
+    if (nextStyle === 'menu') {
+      const size = 44;
+      deck.nav.w = size;
+      deck.nav.h = size;
+      deck.nav.x = clamp(deck.nav.x, 0, PAGE_WIDTH - size);
+      deck.nav.y = clamp(deck.nav.y, 0, DEFAULT_HEIGHT - size);
+    }
+  }
+  if (field === 'theme') deck.nav.theme = NAV_THEMES.has(target.value) ? target.value : 'dark';
   if (field === 'label') deck.nav.label = String(target.value || 'Menu').slice(0, 40);
   if (field === 'x') deck.nav.x = clamp(target.value, 0, PAGE_WIDTH - deck.nav.w);
   if (field === 'y') deck.nav.y = clamp(target.value, 0, DEFAULT_HEIGHT - deck.nav.h);
-  if (field === 'w') deck.nav.w = clamp(target.value, deck.nav.style === 'menu' ? 44 : 220, PAGE_WIDTH - deck.nav.x);
-  if (field === 'h') deck.nav.h = clamp(target.value, 34, DEFAULT_HEIGHT - deck.nav.y);
+  if (field === 'w') {
+    deck.nav.w = clamp(target.value, deck.nav.style === 'menu' ? 44 : 220, PAGE_WIDTH - deck.nav.x);
+    if (deck.nav.style === 'menu') deck.nav.h = deck.nav.w;
+  }
+  if (field === 'h') {
+    deck.nav.h = clamp(target.value, 34, DEFAULT_HEIGHT - deck.nav.y);
+    if (deck.nav.style === 'menu') deck.nav.w = deck.nav.h;
+  }
   const slideField = target.dataset.fpeNavSlide;
   if (slideField) {
     const key = slideField === 'visible' ? 'visibleSlideIds' : 'targetSlideIds';
@@ -1986,7 +2096,6 @@ function switchSlide(editor, slideId) {
 }
 
 function addTextBlock(editor, { content = '<p>Nouveau texte</p>' } = {}) {
-  if (editor.__freePageState.blocks.length >= MAX_BLOCKS) return showNotif('Nombre maximum de blocs atteint.', 'info');
   pushHistory(editor);
   const offset = (editor.__freePageState.blocks.length % 6) * 18;
   const block = normalizeBlock({ type: 'text', x: 70 + offset, y: 55 + offset, w: 540, h: 180, z: nextZ(editor), content }, 0, editor.__freePageState.height);
@@ -2049,7 +2158,6 @@ function replaceImageBlock(editor) {
 }
 
 function addTableBlock(editor) {
-  if (editor.__freePageState.blocks.length >= MAX_BLOCKS) return showNotif('Nombre maximum de blocs atteint.', 'info');
   pushHistory(editor);
   const block = normalizeBlock({ type: 'table', x: 95, y: 85, w: 520, h: 210, z: nextZ(editor), rows: normalizeRows(), header: true }, 0, editor.__freePageState.height);
   editor.__freePageState.blocks.push(block);
@@ -2057,7 +2165,6 @@ function addTableBlock(editor) {
 }
 
 function addChartBlock(editor) {
-  if (editor.__freePageState.blocks.length >= MAX_BLOCKS) return showNotif('Nombre maximum de blocs atteint.', 'info');
   pushHistory(editor);
   const block = normalizeBlock({ type: 'chart', x: 115, y: 100, w: 450, h: 300, z: nextZ(editor), title: 'Graphique' }, 0, editor.__freePageState.height);
   editor.__freePageState.blocks.push(block);
@@ -2065,7 +2172,6 @@ function addChartBlock(editor) {
 }
 
 function addShapeBlock(editor, shape = 'rectangle') {
-  if (editor.__freePageState.blocks.length >= MAX_BLOCKS) return showNotif('Nombre maximum de blocs atteint.', 'info');
   pushHistory(editor);
   const safeShape = SHAPE_TYPES.has(shape) ? shape : 'rectangle';
   const block = normalizeBlock({
@@ -2167,7 +2273,7 @@ function mutateSelection(editor, action) {
     pushHistory(editor);
     // Tri stable par z croissant → la duplication préserve la superposition d'origine.
     const copies = selection.slice().sort((a, b) => (Number(a.z) || 0) - (Number(b.z) || 0)).map((item, index) => normalizeBlock({ ...structuredClone(item), id: uid(), x: item.x + 25, y: item.y + 25, z: nextZ(editor) + index, locked: false }, 0, editor.__freePageState.height)).filter(Boolean);
-    editor.__freePageState.blocks.push(...copies.slice(0, Math.max(0, MAX_BLOCKS - editor.__freePageState.blocks.length)));
+    editor.__freePageState.blocks.push(...copies);
     renderBlocks(editor, copies.at(-1)?.id || null);
     return;
   }
@@ -2197,10 +2303,7 @@ function mutateSelection(editor, action) {
   if (action === 'table-col' && block.type === 'table') { const rows = normalizeRows(block.rows); if ((rows[0]?.length || 0) >= 6) return; pushHistory(editor); block.rows = rows.map((row) => [...row, '']); renderBlocks(editor, block.id); return; }
   if (action === 'table-col-remove' && block.type === 'table') { const rows = normalizeRows(block.rows); if ((rows[0]?.length || 0) <= 1) return; pushHistory(editor); block.rows = rows.map((row) => row.slice(0, -1)); renderBlocks(editor, block.id); return; }
   if (action === 'table-header' && block.type === 'table') { pushHistory(editor); block.header = !block.header; renderBlocks(editor, block.id); return; }
-  if ((action === 'chart-item' || action === 'chart-row-add') && block.type === 'chart') { const items = normalizeItems(block.items, block.chartPalette); if (items.length >= 12) return; pushHistory(editor); block.items = [...items, { label: `Donnee ${items.length + 1}`, value: 1, color: chartColor('', items.length, block.chartPalette), note: '' }]; renderBlocks(editor, block.id); return; }
-  if ((action === 'chart-item-remove' || action === 'chart-row-remove') && block.type === 'chart') { const items = normalizeItems(block.items, block.chartPalette); if (items.length <= 1) return; pushHistory(editor); block.items = items.slice(0, -1); renderBlocks(editor, block.id); return; }
-  if (action === 'chart-col-add' && block.type === 'chart') { pushHistory(editor); block.chartColumnCount = clamp((block.chartColumnCount || 2) + 1, 2, CHART_COLUMNS.length); renderInspector(editor); return; }
-  if (action === 'chart-col-remove' && block.type === 'chart') { pushHistory(editor); block.chartColumnCount = clamp((block.chartColumnCount || CHART_COLUMNS.length) - 1, 2, CHART_COLUMNS.length); renderInspector(editor); return; }
+  if (action.startsWith('chart-') && block.type === 'chart') return mutateChartSheet(editor, block, action);
   if (action.startsWith('align-')) {
     pushHistory(editor);
     alignSelectedBlocks(editor, action);
@@ -2227,12 +2330,67 @@ function mutateSelection(editor, action) {
   if (action === 'layer-down') { pushHistory(editor); const min = Math.max(1, Math.min(...blocks.map((item) => item.z || 1)) - 1); selection.forEach((item, index) => { item.z = Math.max(1, min - index); }); renderBlocks(editor, editor.__freePageSelected); }
 }
 
+function mutateChartSheet(editor, block, action) {
+  const items = normalizeItems(block.items, block.chartPalette);
+  const contextIndex = Number(editor.__freePageChartContext?.rowIndex ?? -1);
+  const validContext = contextIndex >= 0 && contextIndex < items.length;
+  const fallbackIndex = Math.max(0, items.length - 1);
+  const makeRow = (index = items.length) => ({ label: `Donnee ${index + 1}`, value: 1, value2: '', value3: '', value4: '', color: chartColor('', index, block.chartPalette), note: '' });
+  const finish = ({ rerenderBlocks = true } = {}) => {
+    editor.__freePageChartContext = null;
+    if (rerenderBlocks) renderBlocks(editor, block.id);
+    renderInspector(editor);
+  };
+  if (action === 'chart-item' || action === 'chart-row-add' || action === 'chart-row-add-after') {
+    if (items.length >= 12) return;
+    pushHistory(editor);
+    const insertAt = action === 'chart-row-add-after' && validContext ? contextIndex + 1 : items.length;
+    items.splice(insertAt, 0, makeRow(insertAt));
+    block.items = items;
+    return finish();
+  }
+  if (action === 'chart-row-add-before') {
+    if (items.length >= 12 || !validContext) return;
+    pushHistory(editor);
+    items.splice(contextIndex, 0, makeRow(contextIndex));
+    block.items = items;
+    return finish();
+  }
+  if (action === 'chart-row-duplicate') {
+    if (items.length >= 12 || !validContext) return;
+    pushHistory(editor);
+    items.splice(contextIndex + 1, 0, { ...structuredClone(items[contextIndex]), label: `${items[contextIndex].label} copie` });
+    block.items = items;
+    return finish();
+  }
+  if (action === 'chart-item-remove' || action === 'chart-row-remove' || action === 'chart-row-delete') {
+    if (items.length <= 1) return;
+    pushHistory(editor);
+    const removeAt = action === 'chart-row-delete' && validContext ? contextIndex : fallbackIndex;
+    block.items = items.filter((_, index) => index !== removeAt);
+    return finish();
+  }
+  if (action === 'chart-col-add') {
+    const current = clamp(block.chartColumnCount || 4, 2, CHART_COLUMNS.length);
+    if (current >= CHART_COLUMNS.length) return;
+    pushHistory(editor);
+    block.chartColumnCount = current + 1;
+    return finish({ rerenderBlocks: false });
+  }
+  if (action === 'chart-col-remove') {
+    const current = clamp(block.chartColumnCount || 4, 2, CHART_COLUMNS.length);
+    if (current <= 2) return;
+    pushHistory(editor);
+    block.chartColumnCount = current - 1;
+    return finish({ rerenderBlocks: false });
+  }
+}
+
 function pasteCopiedBlock(editor) {
   const source = normalizeBlocksClipboard(editor.__freePageClipboard || sharedFreePageClipboard);
   if (!source) return showNotif('Aucun bloc a coller.', 'info');
   if (!canPasteBlock(editor)) return;
   pushHistory(editor);
-  const available = Math.max(0, MAX_BLOCKS - editor.__freePageState.blocks.length);
   const imageCount = editor.__freePageState.blocks.filter((block) => block.type === 'image').length;
   let addedImages = 0;
   const sameSlide = source.sourceDeckId
@@ -2246,13 +2404,12 @@ function pasteCopiedBlock(editor) {
   const copies = source.blocks
     .slice()
     .sort((a, b) => (Number(a.z) || 0) - (Number(b.z) || 0))
-    .slice(0, available)
     .filter((item) => item.type !== 'image' || imageCount + (++addedImages) <= MAX_IMAGES)
     .map((item, index) => normalizeBlock({
       ...structuredClone(item),
       id: uid(),
-      x: clamp(item.x + offset, 0, PAGE_WIDTH - Math.max(1, item.w)),
-      y: clamp(item.y + offset, 0, editor.__freePageState.height - Math.max(1, item.h)),
+      x: clampBlockX(item.x + offset, Math.max(1, item.w)),
+      y: clampBlockY(item.y + offset, Math.max(1, item.h), editor.__freePageState.height),
       z: nextZ(editor) + index,
       groupId: mapClipboardGroupId(item.groupId, groupMap),
     }, 0, editor.__freePageState.height));
@@ -2267,7 +2424,7 @@ function pasteCopiedBlock(editor) {
 
 function canPasteBlock(editor) {
   const source = normalizeBlocksClipboard(editor.__freePageClipboard || sharedFreePageClipboard);
-  if (!source?.blocks?.length || editor.__freePageState.blocks.length >= MAX_BLOCKS) return false;
+  if (!source?.blocks?.length) return false;
   const imageCount = editor.__freePageState.blocks.filter((block) => block.type === 'image').length;
   return source.blocks.some((block) => block.type !== 'image' || imageCount < MAX_IMAGES);
 }
@@ -2346,7 +2503,7 @@ function handlePointerDown(editor, event) {
   if (navEl) return startNavComponentDrag(editor, event, navEl, resizeHandle);
   if ((event.ctrlKey || event.metaKey) && directBlock && !resizeHandle && !radiusHandle && !rotateHandle && !cropDragHandle && !cropZoomHandle && !moveHandle) return;
   const canDirectDrag = directBlock
-    && !event.target.closest('[contenteditable="true"], input, textarea, select, button, [data-fpe-resize], [data-fpe-radius], [data-fpe-rotate], [data-fpe-crop-drag], [data-fpe-crop-zoom], [data-fpe-interaction-button]');
+    && !event.target.closest('[contenteditable="true"], input, textarea, select, button, [data-fpe-resize], [data-fpe-radius], [data-fpe-rotate], [data-fpe-crop-drag], [data-fpe-crop-zoom], [data-fpe-interaction-button], [data-fpe-animation-button]');
   const directImageMoveBlock = directImageBlock && editor.__freePageCropBlockId !== directImageBlock.dataset.fpeBlock ? directImageBlock : null;
   const handle = resizeHandle || radiusHandle || rotateHandle || cropDragHandle || cropZoomHandle || moveHandle || directImageMoveBlock || (canDirectDrag ? directBlock : null);
   if (!handle) {
@@ -2564,6 +2721,10 @@ function imageRenderedRect(block) {
 function resizeBlockFromStart(editor, block, start, dx, dy, dir, pageHeight) {
   const minW = block.type === 'text' ? 20 : block.type === 'chart' ? 180 : block.type === 'image' ? 30 : 12;
   const minH = block.type === 'text' ? 12 : block.type === 'shape' ? 8 : block.type === 'chart' ? 120 : block.type === 'image' ? 24 : 12;
+  if (normalizeRotation(start.rotation || 0) !== 0) {
+    resizeRotatedBlockFromStart(editor, block, start, dx, dy, dir, pageHeight, minW, minH);
+    return;
+  }
   const snap = (value) => snapValue(editor, value);
   let x = start.x;
   let y = start.y;
@@ -2581,39 +2742,138 @@ function resizeBlockFromStart(editor, block, start, dx, dy, dir, pageHeight) {
     let nh = nw / ratio;
     // Bornes de la page selon le coin ancré (le ratio est préservé en réduisant).
     const right = start.x + start.w, bottom = start.y + start.h;
-    const maxW = dir.includes('w') ? right : PAGE_WIDTH - start.x;
-    const maxH = dir.includes('n') ? bottom : pageHeight - start.y;
+    const maxW = dir.includes('w') ? right + PAGE_WIDTH : PAGE_WIDTH;
+    const maxH = dir.includes('n') ? bottom + pageHeight : pageHeight;
     if (nw > maxW) { nw = maxW; nh = nw / ratio; }
     if (nh > maxH) { nh = maxH; nw = nh * ratio; }
     w = Math.max(minW, nw);
     h = Math.max(minH, nh);
     x = dir.includes('w') ? right - w : start.x;
     y = dir.includes('n') ? bottom - h : start.y;
-    block.x = clamp(x, 0, PAGE_WIDTH - minW);
-    block.y = clamp(y, 0, pageHeight - minH);
-    block.w = clamp(w, minW, PAGE_WIDTH - block.x);
-    block.h = clamp(h, minH, pageHeight - block.y);
+    block.w = clamp(w, minW, PAGE_WIDTH);
+    block.h = clamp(h, minH, pageHeight);
+    block.x = clampBlockX(x, block.w);
+    block.y = clampBlockY(y, block.h, pageHeight);
     if (block.type === 'image' && editor.__freePageCropBlockId === block.id) preserveCropImagePixels(block, start);
     return;
   }
 
   // ── Bords : redimensionnement LIBRE (un seul axe) ──
-  if (dir.includes('e')) w = clamp(start.w + dx, minW, PAGE_WIDTH - start.x);
-  if (dir.includes('s')) h = clamp(start.h + dy, minH, pageHeight - start.y);
+  if (dir.includes('e')) w = clamp(start.w + dx, minW, PAGE_WIDTH);
+  if (dir.includes('s')) h = clamp(start.h + dy, minH, pageHeight);
   if (dir.includes('w')) {
-    const maxX = start.x + start.w - minW;
-    x = clamp(start.x + dx, 0, maxX);
+    const right = start.x + start.w;
+    const maxX = right - minW;
+    const minX = right - PAGE_WIDTH;
+    x = clamp(start.x + dx, minX, maxX);
     w = start.x + start.w - x;
   }
   if (dir.includes('n')) {
-    const maxY = start.y + start.h - minH;
-    y = clamp(start.y + dy, 0, maxY);
+    const bottom = start.y + start.h;
+    const maxY = bottom - minH;
+    const minY = bottom - pageHeight;
+    y = clamp(start.y + dy, minY, maxY);
     h = start.y + start.h - y;
   }
-  block.x = clamp(snap(x), 0, PAGE_WIDTH - minW);
-  block.y = clamp(snap(y), 0, pageHeight - minH);
-  block.w = clamp(snap(w), minW, PAGE_WIDTH - block.x);
-  block.h = clamp(snap(h), minH, pageHeight - block.y);
+  block.w = clamp(snap(w), minW, PAGE_WIDTH);
+  block.h = clamp(snap(h), minH, pageHeight);
+  block.x = clampBlockX(snap(x), block.w);
+  block.y = clampBlockY(snap(y), block.h, pageHeight);
+  if (block.type === 'image' && editor.__freePageCropBlockId === block.id) preserveCropImagePixels(block, start);
+}
+
+function rotatePageVector(x, y, angleDeg) {
+  const angle = normalizeRotation(angleDeg) * Math.PI / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: x * cos - y * sin,
+    y: x * sin + y * cos,
+  };
+}
+
+function unrotatePageVector(x, y, angleDeg) {
+  const angle = normalizeRotation(angleDeg) * Math.PI / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: x * cos + y * sin,
+    y: -x * sin + y * cos,
+  };
+}
+
+function resizeRotatedBlockFromStart(editor, block, start, dx, dy, dir, pageHeight, minW, minH) {
+  const snap = (value) => snapValue(editor, value);
+  const angle = normalizeRotation(start.rotation || 0);
+  const local = unrotatePageVector(dx, dy, angle);
+  const startCenter = {
+    x: start.x + start.w / 2,
+    y: start.y + start.h / 2,
+  };
+
+  let w = start.w;
+  let h = start.h;
+  let left = -start.w / 2;
+  let right = start.w / 2;
+  let top = -start.h / 2;
+  let bottom = start.h / 2;
+
+  const proportionalCorner = dir.length === 2 && start.w > 0 && start.h > 0;
+  if (proportionalCorner) {
+    const ratio = start.w / start.h;
+    const rawW = dir.includes('e') ? start.w + local.x : start.w - local.x;
+    const rawH = dir.includes('s') ? start.h + local.y : start.h - local.y;
+    let nextW = (rawW / ratio >= rawH) ? Math.max(minW, rawW) : Math.max(minH, rawH) * ratio;
+    nextW = snap(nextW);
+    let nextH = nextW / ratio;
+    nextW = Math.max(minW, nextW);
+    nextH = Math.max(minH, nextH);
+
+    const anchorX = dir.includes('e') ? -start.w / 2 : start.w / 2;
+    const anchorY = dir.includes('s') ? -start.h / 2 : start.h / 2;
+    if (dir.includes('e')) { left = anchorX; right = anchorX + nextW; }
+    else { right = anchorX; left = anchorX - nextW; }
+    if (dir.includes('s')) { top = anchorY; bottom = anchorY + nextH; }
+    else { bottom = anchorY; top = anchorY - nextH; }
+  } else {
+    if (dir.includes('e')) right = start.w / 2 + local.x;
+    if (dir.includes('w')) left = -start.w / 2 + local.x;
+    if (dir.includes('s')) bottom = start.h / 2 + local.y;
+    if (dir.includes('n')) top = -start.h / 2 + local.y;
+
+    if (right - left < minW) {
+      if (dir.includes('w')) left = right - minW;
+      else right = left + minW;
+    }
+    if (bottom - top < minH) {
+      if (dir.includes('n')) top = bottom - minH;
+      else bottom = top + minH;
+    }
+  }
+
+  w = snap(Math.max(minW, right - left));
+  h = proportionalCorner ? Math.max(minH, w / (start.w / start.h)) : snap(Math.max(minH, bottom - top));
+  if (dir.includes('e')) right = left + w;
+  else if (dir.includes('w')) left = right - w;
+  else { left = -w / 2; right = w / 2; }
+  if (dir.includes('s')) bottom = top + h;
+  else if (dir.includes('n')) top = bottom - h;
+  else { top = -h / 2; bottom = h / 2; }
+
+  const localCenter = {
+    x: (left + right) / 2,
+    y: (top + bottom) / 2,
+  };
+  const centerDelta = rotatePageVector(localCenter.x, localCenter.y, angle);
+  const nextCenter = {
+    x: startCenter.x + centerDelta.x,
+    y: startCenter.y + centerDelta.y,
+  };
+
+  block.w = clamp(w, minW, PAGE_WIDTH);
+  block.h = clamp(h, minH, pageHeight);
+  block.x = clampBlockX(Math.round(nextCenter.x - block.w / 2), block.w);
+  block.y = clampBlockY(Math.round(nextCenter.y - block.h / 2), block.h, pageHeight);
   if (block.type === 'image' && editor.__freePageCropBlockId === block.id) preserveCropImagePixels(block, start);
 }
 
@@ -2667,6 +2927,18 @@ function startNavComponentDrag(editor, event, navEl, resizeHandle) {
 function resizeNavFromStart(editor, nav, start, dx, dy, dir) {
   const minW = nav.style === 'menu' ? 44 : 220;
   const minH = 34;
+  if (nav.style === 'menu') {
+    const delta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
+    const signed = dir.includes('w') || dir.includes('n') ? -delta : delta;
+    const size = clamp(snapValue(editor, start.w + signed), 44, 96);
+    const right = start.x + start.w;
+    const bottom = start.y + start.h;
+    nav.w = Math.round(size);
+    nav.h = Math.round(size);
+    nav.x = Math.round(clamp(snapValue(dir.includes('w') ? right - size : start.x), 0, PAGE_WIDTH - nav.w));
+    nav.y = Math.round(clamp(snapValue(dir.includes('n') ? bottom - size : start.y), 0, DEFAULT_HEIGHT - nav.h));
+    return;
+  }
   let x = start.x;
   let y = start.y;
   let w = start.w;
@@ -2817,6 +3089,7 @@ function handleInspectorInput(editor, event, { commit = false } = {}) {
     const items = normalizeItems(block.items, block.chartPalette);
     if (items[index]) {
       if (chartField === 'value') items[index].value = clamp(target.value, 0, 999);
+      else if (chartField.startsWith('value')) items[index][chartField] = optionalChartValue(target.value);
       else if (chartField === 'color') items[index].color = chartColor(target.value, index, block.chartPalette);
       else items[index][chartField] = String(target.value || '').slice(0, chartField === 'note' ? 90 : 34);
       block.items = items;
@@ -2825,7 +3098,7 @@ function handleInspectorInput(editor, event, { commit = false } = {}) {
   if (chartOption && block.type === 'chart') block[chartOption] = target.checked;
   const toggleValue = field === 'textTransform' ? String(target.value || '') : '';
   const inlineTextApplied = field && applyInspectorTextRangeField(editor, block, field, target, toggleValue);
-  if (field && !inlineTextApplied) applyInspectorField(block, field, target);
+  if (field && !inlineTextApplied) applyInspectorField(editor, block, field, target);
   if (isColorField) syncColorFieldControls(editor, field, safeColor(target.value, field === 'textColor' ? '#eef2fb' : '#6aa7ff'), target);
   if (field === 'fontFamily') {
     rememberRecentFont(target.value);                       // remonte la police en tête des « Récentes »
@@ -2838,7 +3111,17 @@ function handleInspectorInput(editor, event, { commit = false } = {}) {
   updateSelectedTableStyle(editor, block);
   updateSelectedChartStyle(editor, block);
   updateSelectedShapeStyle(editor, block);
-  const needsRender = commit || chartOption || chartField === 'color' || ['shape', 'shadow', 'tableHeader', 'chartType', 'chartPalette', 'interactionType'].includes(field);
+  const isAnimationField = String(field || '').startsWith('animation');
+  const needsRender = (commit && !chartField && !chartOption && !isAnimationField)
+    || ['shape', 'shadow', 'tableHeader', 'chartType', 'chartPalette', 'interactionType'].includes(field);
+  if (field === 'animationPhase') {
+    renderBlocks(editor, block.id);
+    renderInspector(editor);
+    return;
+  }
+  if (['animationEffect', 'animationTrigger'].includes(field)) {
+    renderBlocks(editor, block.id);
+  }
   if (needsRender) {
     renderBlocks(editor, block.id);
   }
@@ -3114,9 +3397,20 @@ function textPositionIn(root, offset) {
   return last ? { node: last, offset: last.nodeValue?.length || 0 } : null;
 }
 
-function applyInspectorField(block, field, target) {
+function applyInspectorField(editor, block, field, target) {
   const value = target.type === 'checkbox' ? target.checked : target.value;
-  if (['x', 'y', 'w', 'h', 'opacity'].includes(field)) { block[field] = field === 'opacity' ? clamp(value, 15, 100) : Math.round(clamp(value, field === 'w' || field === 'h' ? 1 : 0, field === 'x' || field === 'w' ? PAGE_WIDTH : 1400)); return; }
+  if (['x', 'y', 'w', 'h', 'opacity'].includes(field)) {
+    if (field === 'opacity') block.opacity = clamp(value, 15, 100);
+    else if (field === 'w') {
+      block.w = Math.round(clamp(value, 1, PAGE_WIDTH));
+      block.x = clampBlockX(block.x, block.w);
+    } else if (field === 'h') {
+      block.h = Math.round(clamp(value, 1, 1400));
+      block.y = clampBlockY(block.y, block.h, editor.__freePageState?.height || DEFAULT_HEIGHT);
+    } else if (field === 'x') block.x = Math.round(clampBlockX(value, block.w));
+    else if (field === 'y') block.y = Math.round(clampBlockY(value, block.h, editor.__freePageState?.height || DEFAULT_HEIGHT));
+    return;
+  }
   if (field === 'rotation') { block.rotation = normalizeRotation(value); return; }
   if (field === 'groupId') { block.groupId = String(value || '').slice(0, 40); return; }
   if (field === 'fontSize' && block.type === 'text') { block.fontSize = clamp(value, 1, 96); return; }
@@ -3155,6 +3449,25 @@ function applyInspectorField(block, field, target) {
   if (field === 'interactionTitle') { block.interaction = { ...normalizeInteraction(block.interaction), title: String(value || '').slice(0, 80) }; return; }
   if (field === 'interactionText') { block.interaction = { ...normalizeInteraction(block.interaction), text: sanitizeRichTextHtml(String(value || '').replace(/\n/g, '<br>')) }; return; }
   if (field === 'interactionTarget') block.interaction = { ...normalizeInteraction(block.interaction), target: String(value || '').slice(0, 420) };
+  if (field === 'animationPhase') {
+    const current = normalizeAnimation(block.animation);
+    const phase = ANIMATION_PHASES.has(value) ? value : 'in';
+    const effects = ANIMATION_EFFECTS[phase] || ANIMATION_EFFECTS.in;
+    block.animation = { ...current, phase, effect: effects.includes(current.effect) ? current.effect : 'none' };
+    return;
+  }
+  if (field === 'animationTrigger') {
+    block.animation = { ...normalizeAnimation(block.animation), trigger: ANIMATION_TRIGGERS.has(value) ? value : 'auto' };
+    return;
+  }
+  if (field === 'animationEffect') {
+    const current = normalizeAnimation(block.animation);
+    const effects = ANIMATION_EFFECTS[current.phase] || ANIMATION_EFFECTS.in;
+    block.animation = { ...current, effect: effects.includes(value) ? value : 'none' };
+    return;
+  }
+  if (field === 'animationDuration') { block.animation = { ...normalizeAnimation(block.animation), duration: clamp(value, 100, 5000) }; return; }
+  if (field === 'animationDelay') block.animation = { ...normalizeAnimation(block.animation), delay: clamp(value, 0, 10000) };
 }
 
 function renderBlocks(editor, selectedId) {
@@ -3272,13 +3585,21 @@ function blockHtml(block, pageHeight, editable, { cropping = false } = {}) {
   if (block.type === 'image' && !block.src) return '';
   if (block.hidden && !editable) return '';
   const interaction = normalizeInteraction(block.interaction);
+  const animation = normalizeAnimation(block.animation);
   const interactionAttrs = !editable && interaction.type !== 'none'
     ? ` data-fpe-reader-action="${_esc(interaction.type)}" data-fpe-reader-title="${_esc(interaction.title)}" data-fpe-reader-text="${_esc(interaction.text)}" data-fpe-reader-target="${_esc(interaction.target)}" data-fpe-reader-layout="${_esc(interaction.layout)}" data-fpe-reader-frame="${_esc(JSON.stringify(interaction.frame || null))}" data-fpe-reader-page="${_esc(JSON.stringify(interaction.page || null))}" tabindex="0" role="button"`
     : '';
+  const animationAttrs = animation.effect !== 'none'
+    ? ` data-fpe-animation-phase="${_esc(animation.phase)}" data-fpe-animation-trigger="${_esc(animation.trigger)}" data-fpe-animation-effect="${_esc(animation.effect)}"`
+    : '';
+  const animationStyle = animation.effect !== 'none'
+    ? `;--fpe-animation-name:${animationCssName(animation)};--fpe-animation-duration:${animation.duration}ms;--fpe-animation-delay:${animation.delay}ms`
+    : '';
   const groupAttr = block.groupId ? ` data-fpe-group="${_esc(block.groupId)}"` : '';
-  return `<div class="free-page-block free-page-block--${block.type} ${block.locked ? 'is-locked' : ''} ${block.hidden ? 'is-hidden-block' : ''} ${cropping ? 'is-cropping' : ''}" data-fpe-block="${_esc(block.id)}"${groupAttr}${interactionAttrs} style="${blockStyle(block, pageHeight)}">
+  return `<div class="free-page-block free-page-block--${block.type} ${block.locked ? 'is-locked' : ''} ${block.hidden ? 'is-hidden-block' : ''} ${cropping ? 'is-cropping' : ''}" data-fpe-block="${_esc(block.id)}"${groupAttr}${interactionAttrs}${animationAttrs} style="${blockStyle(block, pageHeight)}${animationStyle}">
     ${editable && !block.locked ? '<button type="button" class="free-page-move" data-fpe-move title="Deplacer le bloc" aria-label="Deplacer le bloc">&#8942;</button>' : ''}
     ${editable ? `<button type="button" class="free-page-interaction-button ${interaction.type !== 'none' ? 'is-active' : ''}" data-fpe-interaction-button data-fpe-action="open-interaction" title="${_esc(interactionButtonLabel(interaction.type))}">${_esc(interactionButtonLabel(interaction.type))}</button>` : ''}
+    ${editable ? `<button type="button" class="free-page-animation-button ${animation.effect !== 'none' ? 'is-active' : ''}" data-fpe-animation-button data-fpe-action="open-animation" title="${_esc(animationButtonLabel(animation))}">${_esc(animationButtonLabel(animation))}</button>` : ''}
     ${editable && block.locked ? '<span class="free-page-lock-badge" title="Element verrouille">Verrouille</span>' : ''}
     ${blockBodyHtml(block, editable, { cropping })}
     ${editable && !block.locked && cropping ? cropHandlesHtml(block) : ''}
@@ -3325,13 +3646,13 @@ function shapeHtml(block) {
 
 function chartHtml(block, editable = false) {
   const items = normalizeItems(block.items, block.chartPalette);
-  const max = Math.max(1, ...items.map((item) => Number(item.value) || 0));
+  const max = chartMaxForType(block.chartType, items);
   const options = { showLegend: block.showLegend !== false, showLabels: block.showLabels !== false, showTooltips: block.showTooltips !== false, showValues: block.showValues !== false };
   const classes = `free-page-chart ${block.showChartBackground === false ? 'is-background-hidden' : ''} ${block.showChartFrame === false ? 'is-frame-hidden' : ''}`.trim();
   return `<div class="${classes}" data-chart-type="${_esc(block.chartType)}" data-chart-palette="${_esc(block.chartPalette)}">
     ${block.title || editable ? `<input class="free-page-chart-title" data-fpe-chart-title value="${_esc(block.title ?? '')}" placeholder="${editable ? 'Titre' : ''}" readonly tabindex="-1">` : ''}
     ${chartPlotHtml(block.chartType, items, max, options, block.chartPalette)}
-    ${options.showLegend ? `<div class="free-page-chart-data free-page-chart-data--legend">${items.map((item, index) => `<div class="free-page-chart-row" style="--chart-color:${chartColor(item.color, index, block.chartPalette)}"><span>${_esc(item.label)}</span><strong>${_esc(item.value)}</strong></div>`).join('')}</div>` : ''}
+    ${options.showLegend ? `<div class="free-page-chart-data free-page-chart-data--legend">${items.map((item, index) => `<div class="free-page-chart-row" style="--chart-color:${chartColor(item.color, index, block.chartPalette)}"><span>${_esc(item.label)}</span><strong>${_esc(chartDisplayValue(block.chartType, item))}</strong></div>`).join('')}</div>` : ''}
   </div>`;
 }
 
@@ -3339,10 +3660,13 @@ function chartPlotHtml(type, items, max, options, paletteName) {
   const valueOf = (item) => Math.max(0, Number(item.value) || 0);
   const pct = (item) => Math.round(valueOf(item) / max * 100);
   const colorOf = (item, index) => chartColor(item.color, index, paletteName);
-  const tip = (item) => options.showTooltips ? ` title="${_esc(`${item.label} : ${item.value}${item.note ? ` - ${item.note}` : ''}`)}"` : '';
+  const tip = (item) => options.showTooltips ? ` title="${_esc(chartTooltipText(type, item))}"` : '';
   const label = (item) => options.showLabels ? `<span>${_esc(item.label)}</span>` : '<span></span>';
-  const value = (item) => options.showValues ? `<strong>${_esc(item.value)}</strong>` : '<strong></strong>';
-  if (type === 'horizontal-bar' || type === 'progress') return `<div class="free-page-chart-plot free-page-chart-plot--rows">${items.map((item, index) => `<div class="free-page-chart-track-row"${tip(item)}>${label(item)}<i><b style="width:${pct(item)}%;--chart-color:${colorOf(item, index)}"></b></i>${value(item)}</div>`).join('')}</div>`;
+  const value = (item) => options.showValues ? `<strong>${_esc(chartDisplayValue(type, item))}</strong>` : '<strong></strong>';
+  if (type === 'horizontal-bar' || type === 'progress') return `<div class="free-page-chart-plot free-page-chart-plot--rows">${items.map((item, index) => {
+    const segments = chartValueSeries(item);
+    return `<div class="free-page-chart-track-row"${tip(item)}>${label(item)}<i>${segments.map((segment, segmentIndex) => `<b style="width:${Math.round(segment / max * 100)}%;--chart-color:${chartSegmentColor(item, index, segmentIndex, paletteName)}"></b>`).join('')}</i>${value(item)}</div>`;
+  }).join('')}</div>`;
   if (type === 'pie' || type === 'doughnut') {
     const total = Math.max(1, items.reduce((sum, item) => sum + valueOf(item), 0));
     let cursor = 0;
@@ -3358,6 +3682,40 @@ function chartPlotHtml(type, items, max, options, paletteName) {
   }
   const lollipop = type === 'lollipop';
   return `<div class="free-page-chart-plot free-page-chart-plot--columns">${items.map((item, index) => `<div class="free-page-chart-column${lollipop ? ' is-lollipop' : ''}" style="--chart-height:${pct(item)}%;--chart-color:${colorOf(item, index)}"${tip(item)}>${value(item)}<i></i>${label(item)}</div>`).join('')}</div>`;
+}
+
+function chartMaxForType(type, items) {
+  if (type === 'horizontal-bar' || type === 'progress') {
+    return Math.max(1, ...items.map((item) => chartValueSeries(item).reduce((sum, value) => sum + value, 0)));
+  }
+  return Math.max(1, ...items.map((item) => Number(item.value) || 0));
+}
+
+function chartValueSeries(item) {
+  const values = [Number(item.value) || 0];
+  ['value2', 'value3', 'value4'].forEach((key) => {
+    const value = optionalChartValue(item?.[key]);
+    if (value !== '') values.push(value);
+  });
+  const noteAsValue = optionalChartValue(item?.note);
+  if (noteAsValue !== '' && !values.slice(1).length) values.push(noteAsValue);
+  return values.filter((value) => value > 0);
+}
+
+function chartSegmentColor(item, rowIndex, segmentIndex, paletteName) {
+  if (segmentIndex === 0) return chartColor(item.color, rowIndex, paletteName);
+  return chartColor('', segmentIndex, paletteName);
+}
+
+function chartDisplayValue(type, item) {
+  if (type !== 'horizontal-bar' && type !== 'progress') return item.value;
+  return chartValueSeries(item).join(' + ') || 0;
+}
+
+function chartTooltipText(type, item) {
+  const note = optionalChartValue(item?.note) === '' ? String(item?.note || '') : '';
+  const value = chartDisplayValue(type, item);
+  return `${item.label} : ${value}${note ? ` - ${note}` : ''}`;
 }
 
 function radarHtml(items, max, options, paletteName) {
@@ -3388,12 +3746,15 @@ function deckNavHtml(deck, currentSlideId, { editor = false, selected = false } 
   const slides = visibleSlides(deck).filter((slide) => !nav.targetSlideIds.length || nav.targetSlideIds.includes(slide.id));
   if (!slides.length) return '';
   const editorAttrs = editor ? ` data-fpe-nav-block="${NAV_BLOCK_ID}"` : '';
-  const classes = `free-page-stage-nav ${editor ? 'free-page-stage-nav--editor ' : ''}${selected ? 'is-selected ' : ''}`;
+  const classes = `free-page-stage-nav free-page-stage-nav--${nav.theme} ${editor ? 'free-page-stage-nav--editor ' : ''}${selected ? 'is-selected ' : ''}`;
   const handles = editor && selected ? resizeHandlesHtml() : '';
   if (nav.style === 'menu') {
-    return `<details class="${classes}free-page-stage-nav--menu"${editorAttrs} style="${navBlockStyle(nav)}">
+    return `<details class="${classes}free-page-stage-nav--menu ${navMenuPlacementClass(nav)}"${editorAttrs} style="${navBlockStyle(nav)}">
       <summary aria-label="${_esc(nav.label || 'Menu')}" title="${_esc(nav.label || 'Menu')}"><span class="free-page-hamburger" aria-hidden="true"><i></i><i></i><i></i></span></summary>
-      <div>${slides.map((slide, index) => `<button type="button" class="${slide.id === currentSlideId ? 'is-active' : ''}" data-fpe-reader-slide="${_esc(slide.id)}">${index + 1}. ${_esc(slide.title || `Diapo ${index + 1}`)}</button>`).join('')}</div>
+      <div class="free-page-stage-nav-menu-panel">
+        <strong>${_esc(nav.label || 'Menu')}</strong>
+        ${slides.map((slide, index) => `<button type="button" class="${slide.id === currentSlideId ? 'is-active' : ''}" data-fpe-reader-slide="${_esc(slide.id)}">${_esc(slide.title || `Diapo ${index + 1}`)}</button>`).join('')}
+      </div>
       ${handles}
     </details>`;
   }
@@ -3401,6 +3762,17 @@ function deckNavHtml(deck, currentSlideId, { editor = false, selected = false } 
     ${slides.map((slide, index) => `<button type="button" class="${slide.id === currentSlideId ? 'is-active' : ''}" data-fpe-reader-slide="${_esc(slide.id)}">${_esc(slide.title || `Diapo ${index + 1}`)}</button>`).join('')}
     ${handles}
   </nav>`;
+}
+
+function navMenuPlacementClass(nav) {
+  const safe = normalizeDeckNav(nav, []);
+  const panelW = 220;
+  const panelH = 260;
+  const h = safe.x < panelW * .45 ? 'free-page-stage-nav--align-left'
+    : safe.x + safe.w > PAGE_WIDTH - panelW * .45 ? 'free-page-stage-nav--align-right'
+      : 'free-page-stage-nav--align-center';
+  const v = safe.y + safe.h + panelH > DEFAULT_HEIGHT ? 'free-page-stage-nav--open-up' : 'free-page-stage-nav--open-down';
+  return `${h} ${v}`;
 }
 
 function editorDeckNavPreviewHtml(editor, selectedId = editor.__freePageSelected) {
@@ -3416,7 +3788,7 @@ function blockStyle(block, pageHeight) {
 
 function responsiveFontSize(size) {
   const px = clamp(size, 1, 96);
-  return `clamp(1px, ${px / 10}cqw, ${px}px)`;
+  return `calc(${px / 10}cqw)`;
 }
 
 function imageInnerStyle(block) {
@@ -3693,6 +4065,13 @@ function renderInspector(editor) {
     bindFreePageEditor(panel);
     return;
   }
+  if (editor.__freePageFocusPanel === 'animation') {
+    panel.innerHTML = `<div class="free-page-inspector-head"><span>Bloc anime</span><strong>${blockTypeLabel(block.type)}</strong></div>
+      <button type="button" class="free-page-resource free-page-resource--back" data-fpe-action="close-interaction-panel">Retour configuration</button>
+      ${animationConfigHtml(normalizeAnimation(block.animation), true)}`;
+    bindFreePageEditor(panel);
+    return;
+  }
   const tab = editor.__freePageInspectorTab === 'config' ? 'config' : 'content';
   panel.innerHTML = `<div class="free-page-inspector-tabs">
     <button type="button" class="${tab === 'content' ? 'is-active' : ''}" data-fpe-inspector-tab="content">Contenu</button>
@@ -3830,12 +4209,18 @@ function navInspectorHtml(deck, currentSlideId, { selected = false, folded = fal
       <option value="bar" ${nav.style === 'bar' ? 'selected' : ''}>Barre</option>
       <option value="menu" ${nav.style === 'menu' ? 'selected' : ''}>Bouton menu</option>
     </select></label>
+    <label>Couleur <select class="free-page-select" data-fpe-nav-field="theme">
+      <option value="dark" ${nav.theme === 'dark' ? 'selected' : ''}>Sombre</option>
+      <option value="light" ${nav.theme === 'light' ? 'selected' : ''}>Clair</option>
+    </select></label>
     <label>Libelle <input value="${_esc(nav.label || 'Menu')}" data-fpe-nav-field="label" placeholder="Menu"></label>
     <div class="free-page-inspector-grid">
       <label>X <input type="number" min="0" max="${PAGE_WIDTH}" value="${Math.round(nav.x)}" data-fpe-nav-field="x"></label>
       <label>Y <input type="number" min="0" max="${DEFAULT_HEIGHT}" value="${Math.round(nav.y)}" data-fpe-nav-field="y"></label>
-      <label>Largeur <input type="number" min="${nav.style === 'menu' ? 44 : 220}" max="${PAGE_WIDTH}" value="${Math.round(nav.w)}" data-fpe-nav-field="w"></label>
-      <label>Hauteur <input type="number" min="34" max="${DEFAULT_HEIGHT}" value="${Math.round(nav.h)}" data-fpe-nav-field="h"></label>
+      ${nav.style === 'menu'
+        ? `<label>Taille <input type="number" min="44" max="96" value="${Math.round(nav.w)}" data-fpe-nav-field="w"></label>`
+        : `<label>Largeur <input type="number" min="220" max="${PAGE_WIDTH}" value="${Math.round(nav.w)}" data-fpe-nav-field="w"></label>
+          <label>Hauteur <input type="number" min="34" max="${DEFAULT_HEIGHT}" value="${Math.round(nav.h)}" data-fpe-nav-field="h"></label>`}
     </div>
     ${selected ? '<p>Place ce composant sur la diapo : les pages cochees l afficheront exactement au meme endroit.</p>' : '<button type="button" class="free-page-resource" data-fpe-action="add-nav">Placer le menu sur la diapo</button>'}
     <div class="free-page-nav-picker">
@@ -3872,8 +4257,8 @@ function blockInspectorConfig(block, editor) {
   ${typeSpecificConfig(block, editor)}
   <div class="free-page-inspector-section"><h4>Disposition</h4>
     <div class="free-page-inspector-grid">
-      <label>X <input type="number" min="0" max="${PAGE_WIDTH}" value="${Math.round(block.x)}" data-fpe-inspector-field="x"></label>
-      <label>Y <input type="number" min="0" max="1400" value="${Math.round(block.y)}" data-fpe-inspector-field="y"></label>
+      <label>X <input type="number" min="${Math.round(blockXBounds(block.w).min)}" max="${Math.round(blockXBounds(block.w).max)}" value="${Math.round(block.x)}" data-fpe-inspector-field="x"></label>
+      <label>Y <input type="number" min="${Math.round(blockYBounds(block.h, editor?.__freePageState?.height || DEFAULT_HEIGHT).min)}" max="${Math.round(blockYBounds(block.h, editor?.__freePageState?.height || DEFAULT_HEIGHT).max)}" value="${Math.round(block.y)}" data-fpe-inspector-field="y"></label>
       <label>Largeur <input type="number" min="1" max="${PAGE_WIDTH}" value="${Math.round(block.w)}" data-fpe-inspector-field="w"></label>
       <label>Hauteur <input type="number" min="1" max="1400" value="${Math.round(block.h)}" data-fpe-inspector-field="h"></label>
       <label>Rotation <input type="number" min="-180" max="180" value="${normalizeRotation(block.rotation || 0)}" data-fpe-inspector-field="rotation"></label>
@@ -3985,6 +4370,48 @@ function interactionConfigHtml(interaction, focused = false, editor = null) {
   </div>`;
 }
 
+function animationConfigHtml(animation, focused = false) {
+  const phase = normalizeAnimation(animation).phase;
+  const safe = normalizeAnimation(animation);
+  const phaseChoices = [
+    ['in', 'Entree', 'Lancement du bloc'],
+    ['loop', 'Continue', 'Pendant la lecture'],
+    ['out', 'Sortie', 'Fin du bloc'],
+  ];
+  const triggerChoices = [
+    ['auto', 'Automatique', 'Suit le rythme de la diapo'],
+    ['hover', 'Souris dessus', 'Au survol du bloc'],
+    ['click', 'Cliquer', 'Au clic sur le bloc'],
+  ];
+  const effects = ANIMATION_EFFECTS[phase] || ANIMATION_EFFECTS.in;
+  return `<div class="free-page-inspector-section free-page-animation-panel ${focused ? 'is-focused' : ''}" data-fpe-animation-panel>
+    <h4>Animation</h4>
+    <div class="free-page-animation-group">
+      <span>Type</span>
+      <div class="free-page-animation-cards free-page-animation-cards--phase">
+        ${phaseChoices.map(([value, label, hint]) => `<button type="button" class="free-page-animation-card ${safe.phase === value ? 'is-active' : ''}" data-fpe-inspector-field="animationPhase" value="${_esc(value)}"><i>${animationPhaseIcon(value)}</i><strong>${_esc(label)}</strong><small>${_esc(hint)}</small></button>`).join('')}
+      </div>
+    </div>
+    <div class="free-page-animation-group">
+      <span>Declenchement</span>
+      <div class="free-page-animation-cards free-page-animation-cards--trigger">
+        ${triggerChoices.map(([value, label, hint]) => `<button type="button" class="free-page-animation-card ${safe.trigger === value ? 'is-active' : ''}" data-fpe-inspector-field="animationTrigger" value="${_esc(value)}"><i>${animationTriggerIcon(value)}</i><strong>${_esc(label)}</strong><small>${_esc(hint)}</small></button>`).join('')}
+      </div>
+    </div>
+    <div class="free-page-animation-group">
+      <span>Effet</span>
+      <div class="free-page-animation-effects">
+        ${effects.map((effect) => `<label class="free-page-animation-radio"><input type="radio" name="free-page-animation-effect" data-fpe-inspector-field="animationEffect" value="${_esc(effect)}" ${safe.effect === effect ? 'checked' : ''}><span>${_esc(animationEffectLabel(effect, phase))}</span></label>`).join('')}
+      </div>
+    </div>
+    <div class="free-page-animation-timing">
+      <label>Duree <input type="number" min="100" max="5000" step="50" value="${_esc(safe.duration)}" data-fpe-inspector-field="animationDuration"><span>ms</span></label>
+      <label>Delai <input type="number" min="0" max="10000" step="50" value="${_esc(safe.delay)}" data-fpe-inspector-field="animationDelay"><span>ms</span></label>
+    </div>
+    <button type="button" class="free-page-tool free-page-tool--primary free-page-animation-preview" data-fpe-action="preview-animation">Apercu sur ce bloc</button>
+  </div>`;
+}
+
 function chartInspectorConfig(block) {
   return `<div class="free-page-inspector-section"><h4>Graphique</h4>
     <label>Titre <input value="${_esc(block.title ?? '')}" placeholder="Optionnel" data-fpe-inspector-field="title"></label>
@@ -4002,7 +4429,7 @@ function chartInspectorConfig(block) {
 function inspectorChartSheetHtml(block) {
   const items = normalizeItems(block.items, block.chartPalette);
   const columns = CHART_COLUMNS.slice(0, clamp(block.chartColumnCount || CHART_COLUMNS.length, 2, CHART_COLUMNS.length));
-  return `<div class="free-page-chart-sheet free-page-chart-sheet--inspector" role="grid" aria-label="Donnees du graphique">
+  return `<div class="free-page-chart-sheet free-page-chart-sheet--inspector" role="grid" aria-label="Donnees du graphique" data-fpe-chart-sheet>
     <div class="free-page-chart-sheet-actions">
       <button type="button" data-fpe-action="chart-row-add" title="Ajouter une ligne" aria-label="Ajouter une ligne">+L</button>
       <button type="button" data-fpe-action="chart-row-remove" title="Retirer la derniere ligne" aria-label="Retirer la derniere ligne">-L</button>
@@ -4010,7 +4437,7 @@ function inspectorChartSheetHtml(block) {
       <button type="button" data-fpe-action="chart-col-remove" title="Retirer la derniere colonne" aria-label="Retirer la derniere colonne">-C</button>
     </div>
     <div class="free-page-chart-sheet-head" style="--sheet-cols:${columns.length}"><span></span>${columns.map((_, index) => `<span>${String.fromCharCode(65 + index)}</span>`).join('')}</div>
-    ${items.map((item, index) => `<div class="free-page-chart-sheet-row" style="--chart-color:${chartColor(item.color, index, block.chartPalette)};--sheet-cols:${columns.length}">
+    ${items.map((item, index) => `<div class="free-page-chart-sheet-row" data-fpe-chart-row data-index="${index}" style="--chart-color:${chartColor(item.color, index, block.chartPalette)};--sheet-cols:${columns.length}">
       <span class="free-page-chart-sheet-index">${index + 1}</span>${columns.map((column) => chartCell(column, item, index, block.chartPalette)).join('')}
     </div>`).join('')}
   </div>`;
@@ -4019,6 +4446,7 @@ function inspectorChartSheetHtml(block) {
 function chartCell(column, item, index, paletteName) {
   if (column === 'color') return `<input type="color" data-fpe-inspector-chart-field="color" data-index="${index}" value="${_esc(chartColor(item.color, index, paletteName))}">`;
   if (column === 'value') return `<input type="number" min="0" max="999" data-fpe-inspector-chart-field="value" data-index="${index}" value="${_esc(item.value)}">`;
+  if (column.startsWith('value')) return `<input type="number" min="0" max="999" data-fpe-inspector-chart-field="${_esc(column)}" data-index="${index}" value="${_esc(item[column] ?? '')}" placeholder="+ valeur">`;
   if (column === 'note') return `<input data-fpe-inspector-chart-field="note" data-index="${index}" value="${_esc(item.note || '')}">`;
   return `<input data-fpe-inspector-chart-field="label" data-index="${index}" value="${_esc(item.label)}">`;
 }
@@ -4148,6 +4576,64 @@ function fitLabel(value) { return value === 'cover' ? 'Remplir le cadre' : 'Imag
 function alignLabel(value) { return ({ left: 'Gauche', center: 'Centre', right: 'Droite' })[value] || value; }
 function interactionLabel(value) { return ({ none: 'Aucune', popup: 'Fenetre', label: 'Etiquette', audio: 'Audio', link: 'Lien', page: 'Page' })[value] || 'Aucune'; }
 function interactionButtonLabel(value) { return ({ popup: 'Fenetre', label: 'Etiquette', audio: 'Audio', link: 'Lien', page: 'Page' })[value] || 'Interactivite'; }
+function animationButtonLabel(animation) {
+  const safe = normalizeAnimation(animation);
+  return safe.effect === 'none' ? 'Animation' : `Animation : ${animationEffectLabel(safe.effect, safe.phase)}`;
+}
+function animationEffectLabel(effect, phase = 'in') {
+  if (effect === 'bounce') return phase === 'out' ? 'Bond' : 'Rebond';
+  return ({
+    none: 'Aucun',
+    appear: 'Apparaitre',
+    frame: 'Cadrer',
+    light: 'Allumer',
+    turn: 'Tourner',
+    zoom: 'Zoom',
+    slide: 'Glisser',
+    swirl: 'Tourbillon',
+    pulse: 'Impulsion',
+    random: 'Aleatoire',
+    float: 'Flotter',
+    'in-out': 'Entree-Sortie',
+    beat: 'Battement',
+    flash: 'Flash',
+    notification: 'Notification',
+    disappear: 'Disparaitre',
+    blur: 'Flou',
+    dim: 'Eteindre',
+    drop: 'Decrocher',
+    center: 'Centrer',
+    roll: 'Rouler',
+  })[effect] || 'Aucun';
+}
+function animationPhaseIcon(value) { return ({ in: '↻', loop: '↔', out: '↷' })[value] || '↻'; }
+function animationTriggerIcon(value) { return ({ auto: '⏱', hover: '◌', click: '●' })[value] || '⏱'; }
+function animationCssName(animation) {
+  const safe = normalizeAnimation(animation);
+  return ({
+    appear: 'fpe-anim-appear',
+    frame: 'fpe-anim-frame',
+    light: 'fpe-anim-light',
+    bounce: 'fpe-anim-bounce',
+    turn: 'fpe-anim-turn',
+    zoom: 'fpe-anim-zoom',
+    slide: 'fpe-anim-slide',
+    swirl: 'fpe-anim-swirl',
+    pulse: 'fpe-anim-pulse',
+    random: 'fpe-anim-random',
+    float: 'fpe-anim-float',
+    'in-out': 'fpe-anim-in-out',
+    beat: 'fpe-anim-beat',
+    flash: 'fpe-anim-flash',
+    notification: 'fpe-anim-notification',
+    disappear: 'fpe-anim-disappear',
+    blur: 'fpe-anim-blur',
+    dim: 'fpe-anim-dim',
+    drop: 'fpe-anim-drop',
+    center: 'fpe-anim-center',
+    roll: 'fpe-anim-roll',
+  })[safe.effect] || 'none';
+}
 function legacyTextColor(value) { return ({ default: '#eef2fb', gold: '#e8c66a', blue: '#9ec2ff', green: '#69dbb5', red: '#ff9bae', violet: '#c7a6ff' })[value] || '#eef2fb'; }
 
 function layerIcon(type) {
@@ -4209,6 +4695,17 @@ function selectedElement(editor) {
   return editor.__freePageSelected ? editor.querySelector(`[data-fpe-block="${cssEscape(editor.__freePageSelected)}"]`) : null;
 }
 function nextZ(editor) { return Math.min(999, Math.max(0, ...editor.__freePageState.blocks.map((block) => block.z || 0)) + 1); }
+
+function previewSelectedAnimation(editor) {
+  const block = selectedBlock(editor);
+  const element = selectedElement(editor);
+  const animation = normalizeAnimation(block?.animation);
+  if (!block || !element || animation.effect === 'none') {
+    showNotif('Choisis un effet avant de le previsualiser.', 'info');
+    return;
+  }
+  playBlockAnimation(element, animation);
+}
 
 function currentSlide(editor) {
   return editor.__freePageDeck?.slides?.find((slide) => slide.id === editor.__freePageSlideId)
@@ -4274,8 +4771,8 @@ function clearHistoryTimer(editor) {
 function updateSelectedElementStyle(editor, block) {
   const el = selectedElement(editor);
   if (!el || !block) return;
-  block.x = clamp(block.x, 0, PAGE_WIDTH - block.w);
-  block.y = clamp(block.y, 0, editor.__freePageState.height - block.h);
+  block.x = clampBlockX(block.x, block.w);
+  block.y = clampBlockY(block.y, block.h, editor.__freePageState.height);
   el.setAttribute('style', blockStyle(block, editor.__freePageState.height));
 }
 
@@ -4323,10 +4820,25 @@ function updateSelectedChartStyle(editor, block) {
   if (block?.type !== 'chart') return;
   const chart = selectedElement(editor)?.querySelector('.free-page-chart');
   if (!chart) return;
+  const items = normalizeItems(block.items, block.chartPalette);
+  const max = chartMaxForType(block.chartType, items);
+  const options = { showLegend: block.showLegend !== false, showLabels: block.showLabels !== false, showTooltips: block.showTooltips !== false, showValues: block.showValues !== false };
   chart.classList.toggle('is-background-hidden', block.showChartBackground === false);
   chart.classList.toggle('is-frame-hidden', block.showChartFrame === false);
+  chart.dataset.chartType = block.chartType || 'bar';
+  chart.dataset.chartPalette = block.chartPalette || 'arcane';
   const title = chart.querySelector('[data-fpe-chart-title]');
   if (title) title.value = block.title ?? '';
+  const plot = chart.querySelector('.free-page-chart-plot');
+  if (plot) plot.outerHTML = chartPlotHtml(block.chartType, items, max, options, block.chartPalette);
+  const legend = chart.querySelector('.free-page-chart-data--legend');
+  if (options.showLegend) {
+    const html = `<div class="free-page-chart-data free-page-chart-data--legend">${items.map((item, index) => `<div class="free-page-chart-row" style="--chart-color:${chartColor(item.color, index, block.chartPalette)}"><span>${_esc(item.label)}</span><strong>${_esc(chartDisplayValue(block.chartType, item))}</strong></div>`).join('')}</div>`;
+    if (legend) legend.outerHTML = html;
+    else chart.insertAdjacentHTML('beforeend', html);
+  } else {
+    legend?.remove();
+  }
 }
 
 function updateSelectedShapeStyle(editor, block) {
@@ -4385,8 +4897,8 @@ function moveBlockGroup(editor, block, dx, dy) {
   const minY = Math.min(...members.map((item) => item.y));
   const maxX = Math.max(...members.map((item) => item.x + item.w));
   const maxY = Math.max(...members.map((item) => item.y + item.h));
-  const safeDx = clamp(dx, -minX, PAGE_WIDTH - maxX);
-  const safeDy = clamp(dy, -minY, editor.__freePageState.height - maxY);
+  const safeDx = clamp(dx, -maxX + OFFSTAGE_HANDLE_MARGIN, PAGE_WIDTH - OFFSTAGE_HANDLE_MARGIN - minX);
+  const safeDy = clamp(dy, -maxY + OFFSTAGE_HANDLE_MARGIN, editor.__freePageState.height - OFFSTAGE_HANDLE_MARGIN - minY);
   members.forEach((item) => { item.x = Math.round(item.x + safeDx); item.y = Math.round(item.y + safeDy); });
 }
 
@@ -4404,8 +4916,8 @@ function alignSelectedBlocks(editor, action) {
     if (action === 'align-top') item.y = minY;
     if (action === 'align-middle') item.y = Math.round((minY + maxY - item.h) / 2);
     if (action === 'align-bottom') item.y = maxY - item.h;
-    item.x = clamp(snapValue(editor, item.x), 0, PAGE_WIDTH - item.w);
-    item.y = clamp(snapValue(editor, item.y), 0, editor.__freePageState.height - item.h);
+    item.x = clampBlockX(snapValue(editor, item.x), item.w);
+    item.y = clampBlockY(snapValue(editor, item.y), item.h, editor.__freePageState.height);
   });
 }
 
@@ -4463,10 +4975,10 @@ function distributeSelectedBlocks(editor, axis) {
   let cursor = start;
   sorted.forEach((item) => {
     if (isX) {
-      item.x = clamp(snapValue(editor, cursor), 0, PAGE_WIDTH - item.w);
+      item.x = clampBlockX(snapValue(editor, cursor), item.w);
       cursor += item.w + gap;
     } else {
-      item.y = clamp(snapValue(editor, cursor), 0, editor.__freePageState.height - item.h);
+      item.y = clampBlockY(snapValue(editor, cursor), item.h, editor.__freePageState.height);
       cursor += item.h + gap;
     }
   });
@@ -4477,8 +4989,8 @@ function moveGroupFromStart(editor, groupStart, dx, dy) {
   const minY = Math.min(...groupStart.map((item) => item.y));
   const maxX = Math.max(...groupStart.map((item) => item.x + item.w));
   const maxY = Math.max(...groupStart.map((item) => item.y + item.h));
-  const safeDx = clamp(dx, -minX, PAGE_WIDTH - maxX);
-  const safeDy = clamp(dy, -minY, editor.__freePageState.height - maxY);
+  const safeDx = clamp(dx, -maxX + OFFSTAGE_HANDLE_MARGIN, PAGE_WIDTH - OFFSTAGE_HANDLE_MARGIN - minX);
+  const safeDy = clamp(dy, -maxY + OFFSTAGE_HANDLE_MARGIN, editor.__freePageState.height - OFFSTAGE_HANDLE_MARGIN - minY);
   groupStart.forEach((start) => {
     const item = editor.__freePageState.blocks.find((candidate) => candidate.id === start.id);
     if (item?.locked) return;
@@ -4720,6 +5232,25 @@ function closeFreePageModal() {
   document.querySelector('[data-free-page-popup]')?.remove();
 }
 
+function playBlockAnimation(block, animation = null) {
+  if (!block) return;
+  const safe = normalizeAnimation(animation || {
+    phase: block.dataset.fpeAnimationPhase,
+    trigger: block.dataset.fpeAnimationTrigger,
+    effect: block.dataset.fpeAnimationEffect,
+    duration: Number(String(block.style.getPropertyValue('--fpe-animation-duration') || '').replace('ms', '')),
+    delay: Number(String(block.style.getPropertyValue('--fpe-animation-delay') || '').replace('ms', '')),
+  });
+  if (safe.effect === 'none') return;
+  block.classList.remove('is-animation-playing', 'is-animation-preview');
+  void block.offsetWidth;
+  block.classList.add('is-animation-playing');
+  clearTimeout(block.__freePageAnimationTimer);
+  block.__freePageAnimationTimer = window.setTimeout(() => {
+    block.classList.remove('is-animation-playing', 'is-animation-preview');
+  }, safe.delay + safe.duration + 160);
+}
+
 function ensureReaderInteractions() {
   if (readerInteractionsBound || typeof document === 'undefined') return;
   readerInteractionsBound = true;
@@ -4732,6 +5263,8 @@ function ensureReaderInteractions() {
       switchReaderSlide(slideButton, slideId);
       return;
     }
+    const animationBlock = event.target.closest?.('.free-page-stage--reader [data-fpe-animation-trigger="click"]');
+    if (animationBlock) playBlockAnimation(animationBlock);
     const block = event.target.closest?.('[data-fpe-reader-action]');
     if (!block) return;
     if (block.dataset.fpeReaderAction === 'label') return;
