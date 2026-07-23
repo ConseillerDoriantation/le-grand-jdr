@@ -312,14 +312,26 @@ export async function openCreateItemModal(charId) {
     loadArmorSetSettings().catch(() => null),
     loadRarities().catch(() => null),
   ]);
+  // Les règles de l'aventure sont un CONFORT : si un de ces documents manque ou
+  // est refusé en lecture, la forge doit quand même s'ouvrir (listes vides)
+  // plutôt que d'échouer sans rien afficher.
+  const safe = (read, fallback = []) => {
+    try {
+      const out = read();
+      return Array.isArray(out) ? out : fallback;
+    } catch (err) {
+      console.warn('[forge] règle d’aventure illisible', err);
+      return fallback;
+    }
+  };
   _forge = {
     charId: c.id,
     cat: 'arme',
     draft: _blankDraft(),
     formats: Array.isArray(formats) ? formats : [],
-    armorSlots: getEquipmentItemOptions('armor'),
-    accSlots: getEquipmentItemOptions('accessory'),
-    armorTypes: getArmorTypeOptions(),
+    armorSlots: safe(() => getEquipmentItemOptions('armor')),
+    accSlots: safe(() => getEquipmentItemOptions('accessory')),
+    armorTypes: safe(() => getArmorTypeOptions()),
   };
   _renderForge();
 }
