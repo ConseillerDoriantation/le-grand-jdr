@@ -33,8 +33,16 @@ const DERIVED_BONUSES = [
   ['vitesseBonus', 'Vit.'], ['initiativeBonus', 'Init.'],
 ];
 
-// Au-dela, on ouvre la forge sans attendre les regles de l'aventure.
-const FORGE_RULES_TIMEOUT_MS = 1500;
+// Lecture defensive d'une regle d'aventure : jamais bloquante, jamais fatale.
+const _safeList = (read) => {
+  try {
+    const out = read();
+    return Array.isArray(out) ? out : [];
+  } catch (err) {
+    console.warn('[forge] regle d’aventure illisible', err);
+    return [];
+  }
+};
 
 let _actionsBound = false;
 let _forge = null;
@@ -314,44 +322,48 @@ export async function openCreateItemModal(charId) {
   if (!canEdit) { showNotif('Tu ne peux pas modifier ce personnage.', 'error'); return; }
 
   _ensureForgeActions();
-  // Les regles de l'aventure ne doivent JAMAIS empecher la modale de s'ouvrir.
-  // Un `.catch()` ne protege que d'un rejet : une lecture Firestore en attente
-  // ne rejette pas, elle patiente — et le `await` bloquait alors indefiniment
-  // (aucune modale, aucune erreur, clic sans effet). D'ou la course contre un
-  // delai, avec repli sur les valeurs par defaut deja prevues par les getters.
-  const _settle = (promise, fallback, nom) => Promise.race([
-    Promise.resolve(promise).catch(() => fallback),
-    new Promise(resolve => setTimeout(() => {
-      console.warn(`[forge] ${nom} trop lent — ouverture avec les valeurs par defaut`);
-      resolve(fallback);
-    }, FORGE_RULES_TIMEOUT_MS)),
-  ]);
-  const [, formats] = await Promise.all([
-    _settle(loadEquipmentSlots(), null, 'emplacements d’equipement'),
-    _settle(loadWeaponFormats(), [], 'formats d’arme'),
-    _settle(loadArmorSetSettings(), null, 'types d’armure'),
-    _settle(loadRarities(), null, 'raretes'),
-  ]);
-  // Les règles de l'aventure sont un CONFORT : si un de ces documents manque ou
-  // est refusé en lecture, la forge doit quand même s'ouvrir (listes vides)
-  // plutôt que d'échouer sans rien afficher.
-  const safe = (read, fallback = []) => {
-    try {
-      const out = read();
-      return Array.isArray(out) ? out : fallback;
-    } catch (err) {
-      console.warn('[forge] règle d’aventure illisible', err);
-      return fallback;
-    }
-  };
+  // La modale s'ouvre IMMEDIATEMENT, avec les valeurs par defaut des getters.
+  // Les regles de l'aventure (emplacements, formats, types, raretes) sont un
+  // confort : les attendre rendait l'ouverture dependante de la latence d'une
+  // lecture Firestore — et carrement impossible quand l'une d'elles ne revenait
+  // jamais. Elles sont chargees en tache de fond puis injectees a l'arrivee.
   _forge = {
     charId: c.id,
     cat: 'arme',
     draft: _blankDraft(),
-    formats: Array.isArray(formats) ? formats : [],
-    armorSlots: safe(() => getEquipmentItemOptions('armor')),
-    accSlots: safe(() => getEquipmentItemOptions('accessory')),
-    armorTypes: safe(() => getArmorTypeOptions()),
+    formats: [],
+    armorSlots: _safeList(() => getEquipmentItemOptions('armor')),
+    accSlots: _safeList(() => getEquipmentItemOptions('accessory')),
+    armorTypes: _safeList(() => getArmorTypeOptions()),
   };
+  _renderForge();
+  _hydrateForgeRules(c.id);
+}
+
+// Charge les regles d'aventure sans bloquer, puis re-rend la forge SI elle est
+// toujours ouverte sur le meme personnage et si les listes ont reellement change
+// (sinon on volerait le focus a la saisie en cours pour rien).
+async function _hydrateForgeRules(charId) {
+  const [, formats] = await Promise.all([
+    loadEquipmentSlots().catch(() => null),
+    loadWeaponFormats().catch(() => []),
+    loadArmorSetSettings().catch(() => null),
+    loadRarities().catch(() => null),
+  ]);
+  if (!_forge || _forge.charId !== charId) return;      // modale fermee ou changee
+  if (!document.querySelector('.forge')) return;
+
+  const frais = {
+    formats: Array.isArray(formats) ? formats : [],
+    armorSlots: _safeList(() => getEquipmentItemOptions('armor')),
+    accSlots: _safeList(() => getEquipmentItemOptions('accessory')),
+    armorTypes: _safeList(() => getArmorTypeOptions()),
+  };
+  const inchange = Object.keys(frais)
+    .every(k => JSON.stringify(frais[k]) === JSON.stringify(_forge[k]));
+  if (inchange) return;
+
+  _syncDraftFromDom();                                   // ne pas perdre la saisie
+  Object.assign(_forge, frais);
   _renderForge();
 }
