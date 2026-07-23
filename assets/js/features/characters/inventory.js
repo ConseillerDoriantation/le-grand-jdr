@@ -16,7 +16,7 @@ import {
   getInventoryItemResaleValue,
   getInventoryItemImage,
 } from '../../shared/inventory-utils.js';
-import { getWeaponDamageStatKeys } from '../../shared/equipment-utils.js';
+import { getArmorTypeMeta, getWeaponDamageStatKeys } from '../../shared/equipment-utils.js';
 import { characterAvatarHtml, characterPortraitContent } from '../../shared/portraits.js';
 import { calcUpgradeRefund, getUpgradeTotalCost, hasUpgrades, getUpgradeSettings } from '../../shared/upgrade-settings.js';
 import { patchBuildLocally } from '../../shared/character-builds.js';
@@ -256,7 +256,10 @@ function _invRowChips(item) {
   }
   if (item.slotArmure)       chips.push({ val: item.slotArmure, color: '#4f8cff' });
   else if (item.slotBijou)   chips.push({ val: item.slotBijou,  color: '#c084fc' });
-  if (item.typeArmure)       chips.push({ val: item.typeArmure, color: '#22c38e' });
+  if (item.typeArmure) {
+    const armorMeta = getArmorTypeMeta(item.typeArmure);
+    chips.push({ val: armorMeta?.label || item.typeArmure, color: armorMeta?.color || '#22c38e' });
+  }
   if (chips.length < 2 && item.sousType) chips.push({ val: item.sousType, color: '#a0aec0' });
   if (chips.length < 2 && item.format)   chips.push({ val: item.format,   color: '#a0aec0' });
   if (chips.length === 0 && item.effet)

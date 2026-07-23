@@ -1105,7 +1105,7 @@ function renderCharCombatV3(c, canEdit) {
     }
     const tmeta = getArmorTypeMeta(it.typeArmure);
     const typePill = it.typeArmure
-      ? `<span class="armor-type-pill ${tmeta?.tone || 'neutral'}">${_esc(tmeta?.label || it.typeArmure)}</span>`
+      ? `<span class="armor-type-pill ${tmeta?.tone || 'neutral'}" ${tmeta?.color ? `style="--armor-type-color:${_esc(tmeta.color)}"` : ''}>${_esc(tmeta?.label || it.typeArmure)}</span>`
       : '';
     // Bonus : stats + CA + caBonus + dérivés
     const badges = [];
@@ -1166,10 +1166,14 @@ function renderCharCombatV3(c, canEdit) {
       const meta = getArmorTypeMeta(fullType);
       const ico  = meta?.set?.icon || '✨';
       const tkey = meta?.tone || '';
+      const color = meta?.color || '';
       const setLabels = trackedSlots.map(id => slotDefs.find(slot => slot.id === id)?.label || id).join(', ');
       setBadgeHtml = `<span class="set-badge active ${tkey}" title="${_esc(setLabels)} de type ${_esc(fullType)} équipés (set complet)">
         <span class="set-badge-ico">${ico}</span><b>Set ${_esc(fx.tag)} ${setTotal}/${setTotal}</b><span class="set-badge-fx">${_esc(fx.fx)}</span>
       </span>`;
+      if (color) {
+        setBadgeHtml = setBadgeHtml.replace(`class="set-badge active ${tkey}"`, `class="set-badge active ${tkey}" style="--set-col:${_esc(color)}"`);
+      }
     } else {
       const types = Object.keys(counts);
       let reason;
@@ -2138,4 +2142,3 @@ document.addEventListener('keydown', (e) => {
     : tabs[(i + 1) % tabs.length];
   if (next) { next.focus(); showCharTab(next.dataset.tab, next); }
 });
-

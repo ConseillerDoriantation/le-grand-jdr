@@ -75,7 +75,12 @@ test('armor set : les types et effets personnalisés sont pilotés par aventure'
 
   assert.equal(data.isActive, true);
   assert.equal(data.trackedSlots.length, 2);
-  assert.deepEqual(data.modifiers, { spellPmDelta: 1, toucherBonus: -1, damageReduction: 3 });
+  assert.deepEqual(data.modifiers, {
+    spellPmDelta: 1,
+    toucherBonus: -1,
+    damageReduction: 3,
+    rollImpact: { statModes: {}, skillModes: [] },
+  });
 });
 
 test('armor set : une nouvelle aventure ne force aucun type par défaut', () => {

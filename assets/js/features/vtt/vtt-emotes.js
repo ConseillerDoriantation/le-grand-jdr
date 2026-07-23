@@ -14,6 +14,8 @@ import { showNotif } from '../../shared/notifications.js';
 import { getDocData, saveDoc } from '../../data/firestore.js';
 import { db, doc, getDoc, addDoc, setDoc, serverTimestamp } from '../../config/firebase.js';
 import { computeEquipSkillBonus } from '../../shared/char-stats.js';
+import { getArmorSetData } from '../../shared/equipment-utils.js';
+import { combineArmorRollMode, getArmorSetRollModeFor } from '../../shared/armor-set-settings.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import { uploadPng } from '../../shared/image-upload.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
@@ -98,11 +100,15 @@ export async function _vttRollSkill(skillName, stat) {
   const mod = _tokenStatMod(t, statKey);
   // Bonus de compétence depuis les items équipés (pour les PJ)
   const equipSkillBonus = c ? computeEquipSkillBonus(c.equipement || {}, skillName) : 0;
+  const armorRollMode = c
+    ? getArmorSetRollModeFor(getArmorSetData(c), { stat: statKey, skill: skillName })
+    : '';
+  const effectiveRollMode = combineArmorRollMode(VS.rollMode || 'normal', armorRollMode);
   const d20 = () => Math.floor(Math.random() * 20) + 1;
 
   let d1 = d20(), d2, roll;
-  if (VS.rollMode === 'advantage')    { d2 = d20(); roll = Math.max(d1, d2); }
-  else if (VS.rollMode === 'disadvantage') { d2 = d20(); roll = Math.min(d1, d2); }
+  if (effectiveRollMode === 'advantage')    { d2 = d20(); roll = Math.max(d1, d2); }
+  else if (effectiveRollMode === 'disadvantage') { d2 = d20(); roll = Math.min(d1, d2); }
   else                              { roll = d1; }
 
   const total   = roll + mod + VS.rollBonus + equipSkillBonus;
@@ -118,7 +124,9 @@ export async function _vttRollSkill(skillName, stat) {
       authorId: STATE.user?.uid || null,
       authorName, characterName, characterImage,
       ..._vttLogTargetFields(t),
-      rollMode: VS.rollMode,
+      rollMode: effectiveRollMode,
+      rollModeRequested: VS.rollMode || 'normal',
+      rollArmorMode: armorRollMode || null,
       rollDice: d2 !== undefined ? [d1, d2] : [d1],
       rollRaw: roll, rollMod: mod, rollBonus: VS.rollBonus || 0,
       rollResult: total,
