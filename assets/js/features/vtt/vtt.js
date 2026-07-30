@@ -1155,9 +1155,10 @@ function _buildShape(t) {
   g.on('mouseleave', () => _hideTokenTip());
 
   const canDrag = _canControlToken(t);
+  g.setAttr('vttCanDragToken', canDrag);
   let rightDown = null;
   if (canDrag) {
-    g.draggable(true);
+    g.draggable(VS.tool === 'select');
     g.on('mousedown', e => {
       if (e.evt.button === 2) rightDown = { x:e.evt.clientX, y:e.evt.clientY, dragged:false };
     });
@@ -1217,6 +1218,12 @@ function _buildShape(t) {
     });
     // ─ Fin du drag : commit Firestore ─
     g.on('dragend', async () => {
+      if (VS.tool !== 'select' || _zoneCtx || _mtCtx || _middlePanActive) {
+        g.position({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2 });
+        VS.layers.token?.batchDraw();
+        _multiDragOrigin = null;
+        return;
+      }
       const pg=VS.activePage; if (!pg) return;
       if (_multiDragOrigin && VS.selectedMulti.has(t.id) && VS.selectedMulti.size>1) {
         // Batch : sauver tous les tokens du groupe
@@ -1468,6 +1475,18 @@ export function _select(id) {
   } else {
     _hideActBar();
   }
+}
+
+function _updateTokenDraggable() {
+  const active = VS.tool === 'select';
+  Object.values(VS.tokens || {}).forEach(entry => {
+    const shape = entry?.shape;
+    if (!shape) return;
+    const canDrag = !!shape.getAttr('vttCanDragToken') && _canControlToken(entry.data);
+    shape.setAttr('vttCanDragToken', canDrag);
+    shape.draggable(active && canDrag);
+  });
+  VS.layers.token?.batchDraw();
 }
 
 export function _deselect() {
@@ -9311,6 +9330,7 @@ function _setTool(tool) {
   if (tool !== 'draw') _polyCancel();
   // Désélection annotation si on quitte le mode select
   if (tool !== 'select') _deselectAnnot();
+  _updateTokenDraggable();
   // Draggability des annotations
   _updateAnnotDraggable();
 }
