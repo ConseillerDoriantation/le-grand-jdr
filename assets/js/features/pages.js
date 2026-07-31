@@ -64,6 +64,7 @@ let _statsEvoMetric = 'dmgDealt';      // métrique du comparatif missions/group
 let _statsAnalysisMode = 'overview';   // 'overview' | 'compare'
 let _statsCompareKind = 'players';     // 'players' | 'groups'
 const _statsCompareSelection = { players: [], groups: [] };
+let _statsMissionPickerSearch = '';
 let _statsQuests    = [];              // groupes de mission (collection quests) pour libellés/portraits
 let _statsStory     = [];              // missions de la Trame pour ordre/titres du sélecteur stats
 let _statsDrawerState = new Map();     // key → état ouvert/fermé des onglets stats durant la session
@@ -187,6 +188,82 @@ function _statsMissionList() {
       if (b.story) return 1;
       return a.name.localeCompare(b.name, 'fr');
     });
+}
+function _statsMissionKind(story = {}) {
+  return story?.type === 'event' ? 'Événement' : 'Mission';
+}
+function _statsMissionIcon(story = {}) {
+  return story?.type === 'event' ? '📖' : '🎯';
+}
+function _statsMissionMeta(m = {}) {
+  const story = m.story || {};
+  const sessions = _statsMissionDates(m.id).length;
+  const bits = [
+    _statsMissionKind(story),
+    story.acte || 'Acte I',
+    Number.isFinite(Number(story.ordre)) ? String(story.ordre) : '',
+  ].filter(Boolean);
+  return `${bits.join(' · ')}${sessions ? ` · ${sessions} séance${sessions > 1 ? 's' : ''}` : ''}`;
+}
+function _statsMissionArtHtml(m = {}, size = 34) {
+  const story = m.story || {};
+  const img = story.imageUrl || story.image || story.coverUrl || '';
+  return img
+    ? `<span class="stats-mission-art" style="--s:${size}px"><img src="${_esc(img)}" alt=""></span>`
+    : `<span class="stats-mission-art stats-mission-art--ph" style="--s:${size}px">${_statsMissionIcon(story)}</span>`;
+}
+function _statsMissionPickOptionHtml(m = {}, selectedMissionId = '') {
+  const title = m.name || m.story?.titre || 'Mission';
+  const search = _norm([title, m.story?.acte, m.story?.date, _statsMissionKind(m.story)].filter(Boolean).join(' '));
+  return `<button type="button" class="stats-mission-option${m.id === selectedMissionId ? ' is-active' : ''}"
+    data-action="_statsMissionPickerPick" data-scope="mission:${_esc(m.id)}" data-search="${_esc(search)}">
+    ${_statsMissionArtHtml(m, 34)}
+    <span class="stats-mission-option-copy">
+      <b>${_esc(title)}</b>
+      <small>${_statsMissionIcon(m.story)} ${_esc(_statsMissionMeta(m))}</small>
+    </span>
+    ${m.id === selectedMissionId ? '<span class="stats-mission-check">✓</span>' : ''}
+  </button>`;
+}
+function _statsMissionPickerHtml(missions = [], selectedMissionId = '', selectedMission = null, scope = null) {
+  const isAll = !selectedMissionId && !scope;
+  const current = selectedMission
+    ? `${_statsMissionArtHtml(selectedMission, 36)}
+      <span class="stats-mission-current-copy">
+        <b>${_esc(selectedMission.name || 'Mission')}</b>
+        <small>${_statsMissionIcon(selectedMission.story)} ${_esc(_statsMissionMeta(selectedMission))}</small>
+      </span>`
+    : `<span class="stats-mission-art stats-mission-art--all" style="--s:36px">◉</span>
+      <span class="stats-mission-current-copy">
+        <b>${scope ? 'Séance isolée' : 'Toute la campagne'}</b>
+        <small>${scope ? 'Filtre par séance' : `${missions.length} mission${missions.length > 1 ? 's' : ''} suivie${missions.length > 1 ? 's' : ''}`}</small>
+      </span>`;
+  return `<div class="stats-mission-picker" data-picker="stats-mission">
+    <span class="stats-chips-lbl">Mission</span>
+    <div class="stats-mission-picker-shell">
+      <button type="button" class="stats-mission-current${isAll ? ' is-all' : ''}" data-action="_statsMissionPickerToggle" aria-expanded="false">
+        ${current}
+        <span class="stats-mission-caret">▾</span>
+      </button>
+      <div class="stats-mission-menu" hidden>
+        <input type="text" class="stats-mission-search" value="${_esc(_statsMissionPickerSearch)}"
+          placeholder="Rechercher une mission / un événement..." data-input="_statsMissionPickerSearch" autocomplete="off">
+        <div class="stats-mission-list">
+          <button type="button" class="stats-mission-option stats-mission-option--all${isAll ? ' is-active' : ''}"
+            data-action="_statsMissionPickerPick" data-scope="">
+            <span class="stats-mission-art stats-mission-art--all" style="--s:34px">◉</span>
+            <span class="stats-mission-option-copy">
+              <b>Toute la campagne</b>
+              <small>Vue globale de toutes les séances</small>
+            </span>
+            ${isAll ? '<span class="stats-mission-check">✓</span>' : ''}
+          </button>
+          ${missions.map(m => _statsMissionPickOptionHtml(m, selectedMissionId)).join('')}
+          ${missions.length ? '' : '<div class="stats-mission-empty">Aucune mission reliée aux statistiques.</div>'}
+        </div>
+      </div>
+    </div>
+  </div>`;
 }
 function _statsGroupName(g = {}, idx = 0) {
   return (g.titre || g.nom || g.name || '').trim() || `Groupe ${idx + 1}`;
@@ -623,7 +700,7 @@ function _statsPieChart(rows, key) {
     <text x="${cx}" y="${cy - 5}" text-anchor="middle" dominant-baseline="central" class="stats-pie-total">${total}</text>
     <text x="${cx}" y="${cy + 11}" text-anchor="middle" dominant-baseline="central" class="stats-pie-sub">${_esc(firstWord)}</text>
   </svg>`;
-  const legend = `<div class="stats-pie-legend">${arcs.map(a => `<div class="stats-pie-li"><span class="stats-pie-dot" style="background:${a.col}"></span><span class="stats-pie-nm" title="${_esc(a.s.name)}">${_esc(a.s.name)}</span><span class="stats-pie-vl">${a.pct}%</span></div>`).join('')}</div>`;
+  const legend = `<div class="stats-pie-legend">${arcs.map(a => `<div class="stats-pie-li"><span class="stats-pie-dot" style="background:${a.col}"></span>${a.s.id ? _statsAvatar(a.s.id, a.s.name, 18) : '<span class="stats-pie-avatar-fallback">+</span>'}<span class="stats-pie-nm" title="${_esc(a.s.name)}">${_esc(a.s.name)}</span><span class="stats-pie-vl">${a.pct}%</span></div>`).join('')}</div>`;
   return `<div class="stats-pie">${svg}${legend}</div>`;
 }
 
@@ -807,13 +884,7 @@ function _statsRender(scope) {
       ${g.quest ? `<span class="stats-chip-group-members">${_statsGroupMembersMiniHtml(g.quest)}</span>` : ''}
     </button>`).join('')}
   </div>` : '';
-  const missionSelect = `<label class="stats-scope-select-wrap">
-    <span class="stats-chips-lbl">Mission</span>
-    <select class="stats-scope-select" data-change="_statsScope">
-      <option value=""${!selectedMissionId && !dateKey ? ' selected' : ''}>Toute la campagne</option>
-      ${missions.map(m => `<option value="mission:${_esc(m.id)}"${selectedMissionId === m.id ? ' selected' : ''}>🎯 ${_esc(m.name)} (${_statsMissionDates(m.id).length})</option>`).join('')}
-    </select>
-  </label>`;
+  const missionSelect = _statsMissionPickerHtml(missions, selectedMissionId, selectedMission, scope);
   const sessionsBar = `<div class="stats-scope-panel">
     ${missionSelect}
     ${groupsBar}
@@ -926,35 +997,102 @@ function _statsRender(scope) {
   const topFumble = [...rows].map(r => ({ ...r, tf: r.combat.fumbles + r.sFumbles })).filter(r => r.tf > 0).sort((a, b) => b.tf - a.tf)[0];
   const topEmoter = [...rows].filter(r => r.emoteTotal > 0).sort((a, b) => b.emoteTotal - a.emoteTotal)[0];
   const topRoller = [...rows].filter(r => r.sRolls > 0).sort((a, b) => b.sRolls - a.sRolls)[0];
-  const impactBreakdown = (r) => {
+  const impactProfile = (r) => {
     const cm = r.combat || {};
     const tactical = cm.tacticalSpells || 0;
     const plainCasts = Math.max(0, (cm.spellsCast || 0) - tactical);
-    const entries = [];
-    const add = (label, count, points, icon) => {
-      if (!count || !points) return;
-      entries.push({ label, count, points, icon });
+    const fumbles = (cm.fumbles || 0) + (r.sFumbles || 0);
+    const axes = {
+      offense: { label: 'Offense', icon: '🗡️', cap: 100, soft: 70, raw: 0, parts: [] },
+      support: { label: 'Soutien & contrôle', icon: '✨', cap: 120, soft: 72, raw: 0, parts: [] },
+      protection: { label: 'Protection', icon: '🛡️', cap: 90, soft: 55, raw: 0, parts: [] },
+      skill: { label: 'Compétences & RP', icon: '🎲', cap: 60, soft: 40, raw: 0, parts: [] },
     };
-    add('Dégâts infligés', cm.dmgDealt, cm.dmgDealt, '🗡️');
-    add('Soin prodigué', cm.heal, cm.heal * 1.15, '💚');
-    add('KO infligés', cm.kosDealt, cm.kosDealt * 3, '☠️');
-    add('Sorts classiques', plainCasts, plainCasts * 3, '🔮');
-    add('Sorts tactiques', tactical, tactical * 5, '✨');
-    add('Soutien', cm.supportSpells, cm.supportSpells * 3, '🛡️');
-    add('Afflictions', cm.afflictionSpells, cm.afflictionSpells * 3, '💀');
-    add('Jets de compétence', r.sRolls, r.sRolls * 2, '🎲');
-    add('Critiques', (cm.crits || 0) + (r.sCrits || 0), ((cm.crits || 0) + (r.sCrits || 0)) * 6, '💥');
-    add('Ciblages encaissés', cm.attacksTaken, cm.attacksTaken * 3, '🧱');
-    add('Attaques évitées', cm.attacksAvoided, cm.attacksAvoided * 4, '🛡️');
-    add('Dégâts encaissés', cm.dmgTaken, cm.dmgTaken * 0.35, '🩸');
-    add('KO subis', cm.kosTaken, cm.kosTaken * -8, '💀');
-    add('Échecs critiques', (cm.fumbles || 0) + (r.sFumbles || 0), ((cm.fumbles || 0) + (r.sFumbles || 0)) * -3, '💔');
-    const raw = entries.reduce((sum, e) => sum + e.points, 0);
+    const penalties = [];
+    const add = (axisKey, label, value, coef, icon) => {
+      const count = Number(value) || 0;
+      const points = count * coef;
+      if (!count || !points) return;
+      const axis = axes[axisKey];
+      axis.raw += points;
+      axis.parts.push({ label, count, coef, points, icon });
+    };
+    const malus = (label, value, coef, icon) => {
+      const count = Number(value) || 0;
+      const points = count * coef;
+      if (!count || !points) return;
+      penalties.push({ label, count, coef, points: -points, icon });
+    };
+    add('offense', 'Dégâts infligés', cm.dmgDealt, 0.55, '🗡️');
+    add('offense', 'KO infligés', cm.kosDealt, 2.5, '☠️');
+    add('offense', 'Critiques d’attaque', cm.crits, 4, '💥');
+    add('offense', 'Plus gros coup', cm.biggestHit, 0.12, '💢');
+    add('support', 'Soin produit', cm.heal, 0.85, '💚');
+    add('support', 'Sorts tactiques', tactical, 9, '✨');
+    add('support', 'Soutiens appliqués', cm.supportSpells, 12, '🛡️');
+    add('support', 'Afflictions appliquées', cm.afflictionSpells, 12, '💀');
+    add('support', 'Sorts classiques', plainCasts, 1, '🔮');
+    add('protection', 'Ciblages encaissés', cm.attacksTaken, 1.2, '🧱');
+    add('protection', 'Attaques évitées', cm.attacksAvoided, 5, '🛡️');
+    add('protection', 'Dégâts encaissés', cm.dmgTaken, 0.16, '🩸');
+    add('skill', 'Jets de compétence', r.sRolls, 1.2, '🎲');
+    add('skill', 'Critiques de compétence', r.sCrits, 4, '💥');
+    malus('KO subis', cm.kosTaken, 10, '💀');
+    malus('Échecs critiques', fumbles, 4, '💔');
+    return { axes, penalties };
+  };
+  const impactProfileById = new Map((allRows.length ? allRows : rows).map(r => [r.id, impactProfile(r)]));
+  const impactBreakdown = (r) => {
+    const profile = impactProfileById.get(r.id) || impactProfile(r);
+    const _fmtAxis = (v) => {
+      const n = Number(v) || 0;
+      return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, '');
+    };
+    const _axisScore = (axis) => {
+      const raw = axis.raw || 0;
+      const soft = axis.soft || axis.cap * 0.7;
+      if (raw <= soft) return raw;
+      const tail = Math.max(1, axis.cap - soft);
+      return soft + tail * (1 - Math.exp(-(raw - soft) / tail));
+    };
+    const _impactEntries = [];
+    const _addAxis = (key) => {
+      const axis = profile.axes[key];
+      const raw = axis.raw || 0;
+      if (raw <= 0) return;
+      const scored = _axisScore(axis);
+      const reduced = Math.max(0, raw - scored);
+      _impactEntries.push({
+        label: axis.label,
+        count: 1,
+        icon: axis.icon,
+        points: scored,
+        formula: `${_fmtAxis(raw)} brut · plein rendement jusqu’à ${_fmtAxis(axis.soft)} · plafond doux ${axis.cap}${reduced ? ` · ${_fmtAxis(reduced)} réduit` : ''}`,
+        children: axis.parts,
+      });
+    };
+    _addAxis('offense');
+    _addAxis('support');
+    _addAxis('protection');
+    _addAxis('skill');
+    _impactEntries.sort((a, b) => b.points - a.points);
+    const _dampeners = [1, 0.58, 0.34, 0.18];
+    _impactEntries.forEach((e, i) => {
+      const dampener = _dampeners[i] ?? 0.08;
+      e.formula += ` · axe #${i + 1} × ${Math.round(dampener * 100)}%`;
+      e.points *= dampener;
+    });
+    const penaltyTotal = profile.penalties.reduce((sum, e) => sum + Math.abs(e.points), 0);
+    if (penaltyTotal > 0) {
+      _impactEntries.push({ label: 'Malus', count: 1, icon: '💀', points: -penaltyTotal, formula: `${_fmtAxis(penaltyTotal)} points perdus`, children: profile.penalties });
+    }
+    const _impactRawScore = _impactEntries.reduce((sum, e) => sum + e.points, 0);
     return {
-      entries,
-      gained: entries.filter(e => e.points > 0).reduce((sum, e) => sum + e.points, 0),
-      lost: Math.abs(entries.filter(e => e.points < 0).reduce((sum, e) => sum + e.points, 0)),
-      score: Math.round(raw),
+      entries: _impactEntries,
+      gained: _impactEntries.filter(e => e.points > 0).reduce((sum, e) => sum + e.points, 0),
+      lost: Math.abs(_impactEntries.filter(e => e.points < 0).reduce((sum, e) => sum + e.points, 0)),
+      rawScore: _impactRawScore,
+      score: Math.round(_impactRawScore),
     };
   };
   const impactRows = [...rows]
@@ -1151,16 +1289,24 @@ function _statsRender(scope) {
       const txt = Number.isInteger(abs) ? String(abs) : abs.toFixed(1).replace(/\.0$/, '');
       return `${v >= 0 ? '+' : '-'}${txt}`;
     };
-    const calcHtml = mvps.map(leader => {
+    const detailLeaders = impactRows.slice(0, Math.max(3, mvps.length));
+    const calcHtml = detailLeaders.map((leader, index) => {
       const details = leader.impactDetails || { entries: [], gained: 0, lost: 0, score: leader.impact || 0 };
       const fmtNum = (v) => Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
       const calcRow = (e) => {
         const unit = Math.abs(e.points / Math.max(1, e.count));
         const formula = e.count === 1 ? fmtPts(e.points) : `${e.points < 0 ? '-' : '+'}${e.count} × ${fmtNum(unit)}`;
+        const subRows = Array.isArray(e.children) && e.children.length
+          ? `<div class="stats-mvp-calc-subrows">${e.children.map(part => {
+              const sign = part.points >= 0 ? '+' : '-';
+              return `<span><i>${part.icon || ''}</i><b>${_esc(part.label)}</b><em>${fmtNum(part.count)} × ${fmtNum(Math.abs(part.coef || 0))}</em><strong>${sign}${fmtNum(Math.abs(part.points || 0))}</strong></span>`;
+            }).join('')}</div>`
+          : '';
         return `<div class="stats-mvp-calc-row${e.points < 0 ? ' is-loss' : ''}">
           <span class="stats-mvp-calc-main"><b>${e.icon}</b><span>${_esc(e.label)}</span></span>
-          <span class="stats-mvp-calc-formula">${formula}</span>
+          <span class="stats-mvp-calc-formula">${e.formula || formula}</span>
           <strong>${fmtPts(e.points)}</strong>
+          ${subRows}
         </div>`;
       };
       const calcGroup = (title, entries, cls) => `<div class="stats-mvp-calc-group ${cls}">
@@ -1171,7 +1317,7 @@ function _statsRender(scope) {
       const lostEntries = details.entries.filter(e => e.points < 0);
       return `<div class="stats-mvp-calc">
         <div class="stats-mvp-calc-head">
-          <div class="stats-mvp-calc-name">${mvps.length > 1 ? _esc(leader.name) : 'Score détaillé'}</div>
+          <div class="stats-mvp-calc-name">${_esc(leader.name)}${index === 0 ? ' · MVP' : ` · candidat #${index + 1}`}</div>
           <div class="stats-mvp-calc-net">${details.score}<span>net</span></div>
         </div>
         <div class="stats-mvp-calc-total">
@@ -1186,7 +1332,7 @@ function _statsRender(scope) {
     }).join('');
     mvpDetailSec = drawer('Détail du calcul MVP', `<div class="stats-mvp-calcs">${calcHtml}</div>`, {
       key: 'mvp-detail',
-      count: `${mvps.length} fiche${mvps.length > 1 ? 's' : ''}`,
+      count: `${detailLeaders.length} fiche${detailLeaders.length > 1 ? 's' : ''}`,
     });
     return `<section class="stats-sec stats-mvp-sec">
       <div class="stats-mvp-card">
@@ -1328,12 +1474,18 @@ function _statsRender(scope) {
   const duelSelect = (slot) => {
     const selected = duelEntities[slot]?.id || '';
     const other = duelEntities[slot === 0 ? 1 : 0]?.id || '';
-    return `<label class="stats-duel-picker">
-      <span>${slot === 0 ? 'Référence' : 'Comparé à'}</span>
-      <select data-change="_statsComparePick" data-slot="${slot}">
-        ${duelOptions.map(x => `<option value="${_esc(x.id)}"${x.id === selected ? ' selected' : ''}${x.id === other ? ' disabled' : ''}>${_esc(x.label)}</option>`).join('')}
-      </select>
-    </label>`;
+    const current = duelOptions.find(x => x.id === selected) || duelOptions[0];
+    return `<details class="stats-duel-picker">
+      <summary>
+        <span>${slot === 0 ? 'R&eacute;f&eacute;rence' : 'Compar&eacute; &agrave;'}</span>
+        <b>${current ? `${current.avatar}<em>${_esc(current.label)}</em>` : 'Aucun'}</b>
+      </summary>
+      <div class="stats-duel-picker-menu">
+        ${duelOptions.map(x => `<button type="button" class="${x.id === selected ? 'active' : ''}" data-action="_statsComparePick" data-slot="${slot}" data-value="${_esc(x.id)}"${x.id === other ? ' disabled' : ''}>
+          ${x.avatar}<span>${_esc(x.label)}</span>
+        </button>`).join('')}
+      </div>
+    </details>`;
   };
   const duelMetrics = [
     ['⚔️', 'Attaques', 'attacks', '#ff9d7a', true],
@@ -1446,42 +1598,92 @@ function _statsRender(scope) {
     </section>` : '';
 
   const detailedKpisHtml = `<div class="stats-detail-grid">${combatSec}${magicSec}${competencesSec}</div>`;
-  const charsHtml = `<section class="stats-sec">
-    <div class="stats-chars">${[...rows].sort((a, b) => (b.combat.attacks + b.sRolls) - (a.combat.attacks + a.sRolls)).map(charBlock).join('')}</div>
+  const sortedRows = [...rows].sort((a, b) => (b.combat.attacks + b.sRolls) - (a.combat.attacks + a.sRolls));
+  const charsHtml = `<section class="stats-sec stats-roster-sec">
+    <div class="stats-chars">${sortedRows.map(charBlock).join('')}</div>
   </section>`;
-  const heroSec = `<section class="stats-hero">
-    <div class="stats-hero-gauge">
-      ${_statsGauge(hitRate, '#22c38e', 104, 10, 'réussite')}
+  const statChip = (ic, value, label, color) => `<div class="stats-score-chip" style="--sc:${color}">
+    <span>${ic}</span><b>${value}</b><small>${label}</small>
+  </div>`;
+  const scopeDateCount = Array.isArray(scopeDates) ? scopeDates.length : allDates.length;
+  const heroSec = `<section class="stats-scoreboard">
+    <div class="stats-scoreboard-main">
+      <div class="stats-scoreboard-gauge">${_statsGauge(hitRate, '#22c38e', 118, 11, 'r&eacute;ussite')}</div>
+      <div class="stats-scoreboard-copy">
+        <span class="stats-scoreboard-kicker">Vue actuelle</span>
+        <h2>${_esc(scopeLabel)}</h2>
+        <p>${rows.length} personnage${rows.length > 1 ? 's' : ''} suivi${rows.length > 1 ? 's' : ''} &middot; ${scopeDateCount} s&eacute;ance${scopeDateCount > 1 ? 's' : ''} &middot; ${GC.attacks} attaque${GC.attacks > 1 ? 's' : ''}</p>
+      </div>
     </div>
-    <div class="stats-hero-body">
-      <div class="stats-hero-title">Résumé — ${scopeLabel}</div>
-      <div class="stats-hero-metrics">
-        ${heroMetric(GC.attacks, 'Attaques', '#ff9d7a')}
-        ${heroMetric(GC.dmgDealt, 'Dégâts infligés', '#c9b6ff')}
-        ${heroMetric(GC.spellsCast, 'Sorts lancés', '#bca0ff')}
-        ${heroMetric(GC.heal, 'Soin prodigué', '#4fd3a6')}
-        ${heroMetric(GS.rolls, 'Jets de compétence', '#7fb0ff')}
+    <div class="stats-score-grid">
+      ${statChip('DMG', GC.dmgDealt, 'D&eacute;g&acirc;ts', '#c9b6ff')}
+      ${statChip('PV', GC.heal, 'Soin', '#4fd3a6')}
+      ${statChip('MAG', GC.spellsCast, 'Sorts', '#bca0ff')}
+      ${statChip('D20', GS.rolls, 'Jets', '#7fb0ff')}
+      ${statChip('KO', GC.kosDealt, 'KO', '#ef4444')}
+    </div>
+  </section>`;
+  const navItems = [
+    ['temps-forts', 'TOP', 'Temps forts'],
+    groupCompare.length ? ['groupes', 'GRP', 'Groupes'] : null,
+    ['analyse', 'CHT', 'Comparer'],
+    ['personnages', 'PJ', 'Personnages'],
+    ['donnees', 'LOG', 'Donn&eacute;es'],
+  ].filter(Boolean);
+  const statsNav = `<nav class="stats-section-nav" aria-label="Sections des statistiques">
+    ${navItems.map(([id, ic, label]) => `<button type="button" data-action="_statsJumpSection" data-target="${id}"><span>${ic}</span>${label}</button>`).join('')}
+  </nav>`;
+  const spotlightHtml = `<section class="stats-surface" id="temps-forts">
+    <div class="stats-surface-head">
+      <div><span>Ce qu'on retient</span><h3>Temps forts</h3></div>
+      ${awardTotal ? `<button class="stats-sec-tool" data-action="_statsAwardsConfig" title="Choisir les distinctions affich&eacute;es">&#9881;</button>` : ''}
+    </div>
+    <div class="stats-spotlight-grid">
+      <div class="stats-mvp-stack">
+        ${mvpSec || '<div class="stats-empty-inline">Aucun MVP calculable pour cette vue.</div>'}
+        ${mvpDetailSec || ''}
+      </div>
+      <div class="stats-spotlight-awards">
+        ${awardsHtml ? `<div class="stats-trophies stats-trophies--all">${awardsHtml}</div>` : '<div class="stats-empty-inline">Aucune distinction visible pour cette vue.</div>'}
       </div>
     </div>
   </section>`;
+  const analysisHtml = `<section class="stats-surface" id="analyse">
+    <div class="stats-surface-head"><div><span>Lire les &eacute;carts</span><h3>Analyse & comparaisons</h3></div></div>
+    ${chartsHtml}
+  </section>`;
+  const palmaresHtml = palmaresSec ? `<section class="stats-surface stats-surface--compact">
+    <div class="stats-surface-head"><div><span>Classements</span><h3>Palmar&egrave;s</h3></div></div>
+    ${palmaresSec}
+  </section>` : '';
+  const rosterHtml = `<section class="stats-surface" id="personnages">
+    <div class="stats-surface-head"><div><span>Contributions individuelles</span><h3>Par personnage</h3></div><small>${rows.length} fiche${rows.length > 1 ? 's' : ''}</small></div>
+    ${charsHtml}
+  </section>`;
+  const detailsHtml = `<section class="stats-surface stats-surface--compact" id="donnees">
+    <div class="stats-surface-head"><div><span>Audit</span><h3>Donn&eacute;es d&eacute;taill&eacute;es</h3></div></div>
+    <div class="stats-drawer-stack">
+      ${drawer('Chiffres d&eacute;taill&eacute;s', detailedKpisHtml, { key: 'details', count: 'combat / magie / RP' })}
+    </div>
+  </section>`;
+  const groupsHtml = missionGroupsSec ? `<div id="groupes">${missionGroupsSec}</div>` : '';
 
   root.innerHTML = `
     ${controls}
     ${sessionBanner}
-    <div class="stats-topline${mvpSec ? '' : ' stats-topline--solo'}">
+    <div class="stats-board">
       ${heroSec}
-      ${mvpSec}
+      ${statsNav}
     </div>
-    ${mvpDetailSec ? `<div class="stats-mvp-detail-wide">${mvpDetailSec}</div>` : ''}
     ${contextSec}
-    ${missionGroupsSec}
-    ${distinctionsSec}
-    <div class="stats-drawer-stack">
-      ${drawer('Analyse visuelle', chartsHtml, { key: 'charts', count: _statsAnalysisMode === 'compare' ? 'comparaison' : 'graphiques' })}
-      ${drawer('Chiffres détaillés', detailedKpisHtml, { key: 'details', count: 'combat · magie · RP' })}
-      ${drawer('Palmarès', palmaresSec, { key: 'palmares', count: 'top 5' })}
-      ${drawer('Par personnage', charsHtml, { key: 'characters', count: `${rows.length}`, className: 'stats-drawer--characters' })}
-    </div>`;
+    ${spotlightHtml}
+    ${groupsHtml}
+    <div class="stats-content-grid${palmaresSec ? '' : ' stats-content-grid--solo'}">
+      ${analysisHtml}
+      ${palmaresHtml}
+    </div>
+    ${rosterHtml}
+    ${detailsHtml}`;
 
   let hasOpenCharacter = false;
   root.querySelectorAll('.stats-char[open]').forEach(charDetails => {
@@ -3523,6 +3725,43 @@ registerActions({
   },
   // Changement de scope (campagne entière ↔ une séance) — re-rend sans relecture.
   _statsScope: (el) => { _statsRender(el.value || null); },
+  _statsMissionPickerToggle: (btn) => {
+    const picker = btn.closest('.stats-mission-picker');
+    const menu = picker?.querySelector('.stats-mission-menu');
+    if (!picker || !menu) return;
+    const nextOpen = menu.hidden;
+    document.querySelectorAll('.stats-mission-picker').forEach(p => {
+      if (p === picker) return;
+      p.classList.remove('is-open');
+      p.querySelector('.stats-mission-menu')?.setAttribute('hidden', '');
+      p.querySelector('.stats-mission-current')?.setAttribute('aria-expanded', 'false');
+    });
+    menu.hidden = !nextOpen;
+    picker.classList.toggle('is-open', nextOpen);
+    btn.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+    if (nextOpen) {
+      const input = picker.querySelector('.stats-mission-search');
+      if (input) setTimeout(() => input.focus(), 0);
+    }
+  },
+  _statsMissionPickerSearch: (el) => {
+    _statsMissionPickerSearch = el.value || '';
+    const q = _norm(_statsMissionPickerSearch);
+    const picker = el.closest('.stats-mission-picker');
+    picker?.querySelectorAll('.stats-mission-option').forEach(opt => {
+      if (opt.classList.contains('stats-mission-option--all')) return;
+      opt.style.display = (!q || (opt.dataset.search || '').includes(q)) ? '' : 'none';
+    });
+  },
+  _statsMissionPickerPick: (btn) => {
+    _statsMissionPickerSearch = '';
+    _statsRender(btn.dataset.scope || null);
+  },
+  _statsJumpSection: (btn) => {
+    const id = btn.dataset.target;
+    if (!id) return;
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
   // Frise de séances : clic sur une chip → change la vue (sans relecture réseau).
   _statsSetScope: (btn) => { _statsRender(btn.dataset.scope || null); },
   _statsResetFilters: () => {
@@ -3573,7 +3812,7 @@ registerActions({
     const slot = Number(el.dataset.slot);
     if (slot !== 0 && slot !== 1) return;
     const pair = [...(_statsCompareSelection[_statsCompareKind] || [])];
-    pair[slot] = el.value;
+    pair[slot] = el.value || el.dataset.value || '';
     _statsCompareSelection[_statsCompareKind] = pair;
     _statsRender(_statsScope);
   },
