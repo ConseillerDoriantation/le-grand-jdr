@@ -70,11 +70,101 @@ let _statsStory     = [];              // missions de la Trame pour ordre/titres
 let _statsDrawerState = new Map();     // key → état ouvert/fermé des onglets stats durant la session
 let _statsRequestedScope = null;       // navigation ciblée depuis le Centre de session
 
+let _statsMvpDetailId = '';            // candidat actuellement affiche dans le detail MVP
+let _statsMvpOutsideClose = null;      // listeners temporaires du panneau detail MVP
+let _statsNavSpyCleanup = null;        // nettoyage du suivi de section active
+
 export function requestStatsScope(scope = null) {
   _statsRequestedScope = scope || null;
 }
 
 // Avatar (rond) d'un perso par id — devant son nom dans les chips/graphiques.
+function _statsUnbindMvpOutsideClose() {
+  if (!_statsMvpOutsideClose) return;
+  document.removeEventListener('pointerdown', _statsMvpOutsideClose.pointer, true);
+  document.removeEventListener('keydown', _statsMvpOutsideClose.key, true);
+  _statsMvpOutsideClose = null;
+}
+function _statsCloseMvpDetail(root) {
+  const drawer = root?.querySelector('.stats-mvp-stack > .stats-drawer[open]');
+  if (!drawer) return false;
+  drawer.open = false;
+  _statsDrawerState.set(drawer.dataset.drawerKey || 'mvp-detail', false);
+  return true;
+}
+function _statsBindMvpOutsideClose(root) {
+  _statsUnbindMvpOutsideClose();
+  if (!root) return;
+  const cleanupIfDetached = () => {
+    if (root.isConnected) return false;
+    _statsUnbindMvpOutsideClose();
+    return true;
+  };
+  const pointer = (event) => {
+    if (cleanupIfDetached()) return;
+    const drawer = root.querySelector('.stats-mvp-stack > .stats-drawer[open]');
+    if (!drawer || drawer.contains(event.target)) return;
+    _statsCloseMvpDetail(root);
+  };
+  const key = (event) => {
+    if (cleanupIfDetached() || event.key !== 'Escape') return;
+    if (_statsCloseMvpDetail(root)) event.preventDefault();
+  };
+  document.addEventListener('pointerdown', pointer, true);
+  document.addEventListener('keydown', key, true);
+  _statsMvpOutsideClose = { pointer, key };
+}
+
+function _statsUnbindNavSpy() {
+  if (!_statsNavSpyCleanup) return;
+  _statsNavSpyCleanup();
+  _statsNavSpyCleanup = null;
+}
+
+function _statsBindNavSpy(root) {
+  _statsUnbindNavSpy();
+  const nav = root?.querySelector('.stats-section-nav');
+  if (!root || !nav) return;
+  const buttons = [...nav.querySelectorAll('[data-target]')];
+  const sections = buttons
+    .map(btn => ({ btn, section: document.getElementById(btn.dataset.target || '') }))
+    .filter(x => x.section && root.contains(x.section));
+  if (!sections.length) return;
+
+  const setActive = (id) => {
+    buttons.forEach(btn => btn.classList.toggle('active', btn.dataset.target === id));
+  };
+  setActive(sections[0].section.id);
+
+  if ('IntersectionObserver' in window) {
+    const visible = new Map();
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => visible.set(entry.target.id, entry.isIntersecting ? entry.intersectionRatio : 0));
+      const best = sections
+        .map(x => ({
+          id: x.section.id,
+          ratio: visible.get(x.section.id) || 0,
+          top: Math.abs(x.section.getBoundingClientRect().top),
+        }))
+        .sort((a, b) => (b.ratio - a.ratio) || (a.top - b.top))[0];
+      if (best?.id) setActive(best.id);
+    }, { rootMargin: '-18% 0px -62% 0px', threshold: [0, .1, .25, .5, .75, 1] });
+    sections.forEach(x => observer.observe(x.section));
+    _statsNavSpyCleanup = () => observer.disconnect();
+    return;
+  }
+
+  const onScroll = () => {
+    const best = sections
+      .map(x => ({ id: x.section.id, top: Math.abs(x.section.getBoundingClientRect().top - 120) }))
+      .sort((a, b) => a.top - b.top)[0];
+    if (best?.id) setActive(best.id);
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  _statsNavSpyCleanup = () => window.removeEventListener('scroll', onScroll);
+  onScroll();
+}
+
 const _statsAvatar = (id, name, size = 18) =>
   characterAvatarHtml(STATE.characters?.find(x => x.id === id) || { nom: name }, { size, className: 'stats-av-xs', title: name });
 
@@ -171,6 +261,13 @@ function _statsStoryOrderCompare(a = {}, b = {}) {
     || (a.date || '').localeCompare(b.date || '', 'fr')
     || (a.titre || a.name || '').localeCompare(b.titre || b.name || '', 'fr');
 }
+function _statsActLabel(story = {}) {
+  const raw = story?.acte || story?.act || story?.arc || '';
+  return String(raw || 'Acte I').trim() || 'Acte I';
+}
+function _statsActKey(label = '') {
+  return _norm(label || 'Acte I').replace(/[^a-z0-9]+/g, '-') || 'acte-i';
+}
 function _statsMissionList() {
   const sessionNames = new Map();
   for (const s of Object.values(_statsData?.sessions || {})) {
@@ -189,6 +286,24 @@ function _statsMissionList() {
       return a.name.localeCompare(b.name, 'fr');
     });
 }
+function _statsActList(missions = _statsMissionList()) {
+  const map = new Map();
+  missions.forEach(m => {
+    const label = _statsActLabel(m.story);
+    const key = _statsActKey(label);
+    const entry = map.get(key) || { key, label, missions: [], dates: [] };
+    entry.missions.push(m);
+    entry.dates.push(..._statsMissionDates(m.id));
+    map.set(key, entry);
+  });
+  const storyOrder = (entry) => Math.min(...entry.missions.map(m => {
+    const v = Number(m.story?.ordre);
+    return Number.isFinite(v) ? v : Number.MAX_SAFE_INTEGER;
+  }));
+  return [...map.values()]
+    .map(entry => ({ ...entry, dates: [...new Set(entry.dates)].sort().reverse() }))
+    .sort((a, b) => storyOrder(a) - storyOrder(b) || a.label.localeCompare(b.label, 'fr'));
+}
 function _statsMissionKind(story = {}) {
   return story?.type === 'event' ? 'Événement' : 'Mission';
 }
@@ -200,7 +315,7 @@ function _statsMissionMeta(m = {}) {
   const sessions = _statsMissionDates(m.id).length;
   const bits = [
     _statsMissionKind(story),
-    story.acte || 'Acte I',
+    _statsActLabel(story),
     Number.isFinite(Number(story.ordre)) ? String(story.ordre) : '',
   ].filter(Boolean);
   return `${bits.join(' · ')}${sessions ? ` · ${sessions} séance${sessions > 1 ? 's' : ''}` : ''}`;
@@ -225,46 +340,66 @@ function _statsMissionPickOptionHtml(m = {}, selectedMissionId = '') {
     ${m.id === selectedMissionId ? '<span class="stats-mission-check">✓</span>' : ''}
   </button>`;
 }
-function _statsMissionPickerHtml(missions = [], selectedMissionId = '', selectedMission = null, scope = null) {
+function _statsMissionPickerHtml(missions = [], selectedMissionId = '', selectedMission = null, scope = null, acts = [], selectedAct = null) {
   const isAll = !selectedMissionId && !scope;
+  const isAct = !!selectedAct && typeof scope === 'string' && scope.startsWith('act:');
   const current = selectedMission
     ? `${_statsMissionArtHtml(selectedMission, 36)}
       <span class="stats-mission-current-copy">
         <b>${_esc(selectedMission.name || 'Mission')}</b>
         <small>${_statsMissionIcon(selectedMission.story)} ${_esc(_statsMissionMeta(selectedMission))}</small>
       </span>`
-    : `<span class="stats-mission-art stats-mission-art--all" style="--s:36px">◉</span>
+    : isAct
+    ? `<span class="stats-mission-art stats-mission-art--all" style="--s:36px">ACT</span>
       <span class="stats-mission-current-copy">
-        <b>${scope ? 'Séance isolée' : 'Toute la campagne'}</b>
-        <small>${scope ? 'Filtre par séance' : `${missions.length} mission${missions.length > 1 ? 's' : ''} suivie${missions.length > 1 ? 's' : ''}`}</small>
+        <b>${_esc(selectedAct.label)}</b>
+        <small>${selectedAct.missions.length} mission${selectedAct.missions.length > 1 ? 's' : ''} suivie${selectedAct.missions.length > 1 ? 's' : ''} &middot; ${selectedAct.dates.length} s&eacute;ance${selectedAct.dates.length > 1 ? 's' : ''}</small>
+      </span>`
+    : `<span class="stats-mission-art stats-mission-art--all" style="--s:36px">&#9673;</span>
+      <span class="stats-mission-current-copy">
+        <b>${scope ? 'S&eacute;ance isol&eacute;e' : 'Toute la campagne'}</b>
+        <small>${scope ? 'Filtre par s&eacute;ance' : `${missions.length} mission${missions.length > 1 ? 's' : ''} suivie${missions.length > 1 ? 's' : ''}`}</small>
       </span>`;
   return `<div class="stats-mission-picker" data-picker="stats-mission">
     <span class="stats-chips-lbl">Mission</span>
     <div class="stats-mission-picker-shell">
       <button type="button" class="stats-mission-current${isAll ? ' is-all' : ''}" data-action="_statsMissionPickerToggle" aria-expanded="false">
         ${current}
-        <span class="stats-mission-caret">▾</span>
+        <span class="stats-mission-caret">&#9662;</span>
       </button>
       <div class="stats-mission-menu" hidden>
         <input type="text" class="stats-mission-search" value="${_esc(_statsMissionPickerSearch)}"
-          placeholder="Rechercher une mission / un événement..." data-input="_statsMissionPickerSearch" autocomplete="off">
+          placeholder="Rechercher une mission / un &eacute;v&eacute;nement..." data-input="_statsMissionPickerSearch" autocomplete="off">
         <div class="stats-mission-list">
           <button type="button" class="stats-mission-option stats-mission-option--all${isAll ? ' is-active' : ''}"
             data-action="_statsMissionPickerPick" data-scope="">
-            <span class="stats-mission-art stats-mission-art--all" style="--s:34px">◉</span>
+            <span class="stats-mission-art stats-mission-art--all" style="--s:34px">&#9673;</span>
             <span class="stats-mission-option-copy">
               <b>Toute la campagne</b>
-              <small>Vue globale de toutes les séances</small>
+              <small>Vue globale de toutes les s&eacute;ances</small>
             </span>
-            ${isAll ? '<span class="stats-mission-check">✓</span>' : ''}
+            ${isAll ? '<span class="stats-mission-check">&#10003;</span>' : ''}
           </button>
+          ${acts.length ? `<div class="stats-mission-section-label">Par acte</div>` : ''}
+          ${acts.map(a => `<button type="button" class="stats-mission-option stats-mission-option--act${isAct && a.key === selectedAct.key ? ' is-active' : ''}"
+            data-action="_statsMissionPickerPick" data-scope="act:${_esc(a.key)}"
+            data-search="${_esc(_norm([a.label, ...a.missions.map(m => m.name)].join(' ')))}">
+            <span class="stats-mission-art stats-mission-art--all" style="--s:34px">ACT</span>
+            <span class="stats-mission-option-copy">
+              <b>${_esc(a.label)}</b>
+              <small>${a.missions.length} mission${a.missions.length > 1 ? 's' : ''} &middot; ${a.dates.length} s&eacute;ance${a.dates.length > 1 ? 's' : ''}</small>
+            </span>
+            ${isAct && a.key === selectedAct.key ? '<span class="stats-mission-check">&#10003;</span>' : ''}
+          </button>`).join('')}
+          ${missions.length ? '<div class="stats-mission-section-label">Par mission</div>' : ''}
           ${missions.map(m => _statsMissionPickOptionHtml(m, selectedMissionId)).join('')}
-          ${missions.length ? '' : '<div class="stats-mission-empty">Aucune mission reliée aux statistiques.</div>'}
+          ${missions.length ? '' : '<div class="stats-mission-empty">Aucune mission reli&eacute;e aux statistiques.</div>'}
         </div>
       </div>
     </div>
   </div>`;
 }
+
 function _statsGroupName(g = {}, idx = 0) {
   return (g.titre || g.nom || g.name || '').trim() || `Groupe ${idx + 1}`;
 }
@@ -796,19 +931,26 @@ function _statsRender(scope) {
   const root = document.getElementById('stats-root');
   if (!root) return;
   _statsCaptureDrawerState(root);
+  _statsUnbindMvpOutsideClose();
+  _statsUnbindNavSpy();
   // Scope : null (campagne) · 'YYYY-MM-DD' (une séance) · 'mission:{id}' (mission entière).
+  const isAct = typeof scope === 'string' && scope.startsWith('act:');
   const isMission = typeof scope === 'string' && scope.startsWith('mission:');
+  const actKey = isAct ? scope.slice(4) : '';
   const missionId = isMission ? scope.slice(8) : '';
-  const dateKey   = (scope && !isMission) ? scope : null;
+  const dateKey   = (scope && !isMission && !isAct) ? scope : null;
   const missions  = _statsMissionList();
+  const acts = _statsActList(missions);
   const allDates = [...new Set(Object.values(_statsData?.chars || {}).flatMap(c => Object.keys(c.byDate || {})))].sort().reverse();
 
   // Sélecteur hiérarchique : campagne/mission d'abord, séances ensuite.
   const currentSession = dateKey ? (_statsData?.sessions?.[dateKey] || {}) : null;
+  const selectedAct = isAct ? acts.find(a => a.key === actKey) : null;
   const selectedMissionId = isMission ? missionId : (currentSession?.missionId || '');
   const selectedMission = selectedMissionId ? missions.find(m => m.id === selectedMissionId) : null;
   const missionName = isMission ? (selectedMission?.name || 'Mission') : '';
   const selectedMissionDates = selectedMissionId ? _statsMissionDates(selectedMissionId).sort().reverse() : [];
+  const selectedActDates = selectedAct ? selectedAct.dates : [];
   const groupOptions = selectedMissionId ? _statsGroupOptionsForDates(dateKey ? [dateKey] : selectedMissionDates) : [];
   if (_statsGroupMissionId !== selectedMissionId) {
     _statsGroupMissionId = selectedMissionId;
@@ -824,7 +966,7 @@ function _statsRender(scope) {
     ? selectedMissionDates.filter(d => _statsGroupSel.has(_statsGroupKeyOf(d)))
     : selectedMissionDates;
   const displayedMissionDates = (_statsGroupSel && _statsGroupSel.size) ? filteredMissionDates : selectedMissionDates;
-  const scopeDates = isMission ? filteredMissionDates : (dateKey ? [dateKey] : null);
+  const scopeDates = isAct ? selectedActDates : (isMission ? filteredMissionDates : (dateKey ? [dateKey] : null));
 
   const allRows = _statsRowsFor(scopeDates);   // participants du scope courant
   // Filtre « joueurs ciblés » : recalcule toute la page sur le sous-ensemble choisi.
@@ -853,8 +995,9 @@ function _statsRender(scope) {
     ? missionGroupOptions.filter(g => !_statsGroupSel || !_statsGroupSel.size || _statsGroupSel.has(g.key))
     : [];
   const groupCompare = groupCompareOptions.map(comparableAggregate).filter(g => g.active);
+  const missionCompareSource = isAct && selectedAct ? selectedAct.missions : missions;
   const missionCompare = !selectedMissionId && !dateKey
-    ? missions.map(m => comparableAggregate({
+    ? missionCompareSource.map(m => comparableAggregate({
         key: m.id,
         label: m.name,
         dates: _statsMissionDates(m.id),
@@ -862,7 +1005,7 @@ function _statsRender(scope) {
     : [];
 
   const unlinkedDates = allDates.filter(d => !_statsData?.sessions?.[d]?.missionId);
-  const showUnlinkedDates = !selectedMissionId && unlinkedDates.length > 0;
+  const showUnlinkedDates = !selectedMissionId && !isAct && unlinkedDates.length > 0;
   const scopeChip = (val, label, active, sub = '', cls = '') =>
     `<button class="stats-chip ${cls}${active ? ' active' : ''}" data-action="_statsSetScope" data-scope="${val}"${sub ? ` title="${_esc(sub)}"` : ''}>
       <span class="stats-chip-date">${label}</span>${sub ? `<span class="stats-chip-mission">${_esc(sub)}</span>` : ''}
@@ -884,7 +1027,7 @@ function _statsRender(scope) {
       ${g.quest ? `<span class="stats-chip-group-members">${_statsGroupMembersMiniHtml(g.quest)}</span>` : ''}
     </button>`).join('')}
   </div>` : '';
-  const missionSelect = _statsMissionPickerHtml(missions, selectedMissionId, selectedMission, scope);
+  const missionSelect = _statsMissionPickerHtml(missions, selectedMissionId, selectedMission, scope, acts, selectedAct);
   const sessionsBar = `<div class="stats-scope-panel">
     ${missionSelect}
     ${groupsBar}
@@ -903,15 +1046,16 @@ function _statsRender(scope) {
   </div>` : '';
 
   const viewPills = [];
-  if (selectedMissionId) viewPills.push(`🎯 ${_esc(selectedMission?.name || missionName || 'Mission')}`);
+  if (isAct && selectedAct) viewPills.push(`📖 ${_esc(selectedAct.label)}`);
+  else if (selectedMissionId) viewPills.push(`🎯 ${_esc(selectedMission?.name || missionName || 'Mission')}`);
   else viewPills.push('🌍 Toute la campagne');
   if (dateKey) viewPills.push(`📅 ${_statsFmtDate(dateKey)}`);
-  else if (isMission) viewPills.push(`📅 ${scopeDates.length} séance${scopeDates.length > 1 ? 's' : ''}`);
+  else if (isAct || isMission) viewPills.push(`📅 ${scopeDates.length} séance${scopeDates.length > 1 ? 's' : ''}`);
   if (groupScopeText) viewPills.push(`👥 ${_esc(groupScopeText)}`);
   if (sel && sel.size) viewPills.push(`🧑 ${rows.length}/${allRows.length} joueur${rows.length > 1 ? 's' : ''}`);
   const filtersActive = !!scope || !!(sel && sel.size) || !!(_statsGroupSel && _statsGroupSel.size);
   const activeView = `<div class="stats-active-view">
-    <span class="stats-active-label">Vue actuelle</span>
+    <span class="stats-active-label">P&eacute;rim&egrave;tre</span>
     <span class="stats-active-pills">${viewPills.map(p => `<span>${p}</span>`).join('')}</span>
     ${filtersActive ? '<button class="stats-active-reset" data-action="_statsResetFilters">Réinitialiser</button>' : ''}
   </div>`;
@@ -945,7 +1089,13 @@ function _statsRender(scope) {
       </div>
       ${partsHtml ? `<div class="stats-sb-parts" title="Participants">${partsHtml}</div>` : ''}
     </div>`;
-  })() : isMission ? `<div class="stats-session-banner">
+  })() : isAct && selectedAct ? `<div class="stats-session-banner">
+      <div class="stats-sb-info">
+        <div class="stats-sb-date">📖 Acte — ${scopeDates.length} séance${scopeDates.length > 1 ? 's' : ''} agrégée${scopeDates.length > 1 ? 's' : ''}</div>
+        <div class="stats-sb-mission">${_esc(selectedAct.label)} <span class="stats-sb-group">· ${selectedAct.missions.length} mission${selectedAct.missions.length > 1 ? 's' : ''}</span></div>
+      </div>
+      ${partsHtml ? `<div class="stats-sb-parts" title="Participants">${partsHtml}</div>` : ''}
+    </div>` : isMission ? `<div class="stats-session-banner">
       <div class="stats-sb-info">
         <div class="stats-sb-date">🎯 Mission — ${scopeDates.length} séance${scopeDates.length > 1 ? 's' : ''} agrégée${scopeDates.length > 1 ? 's' : ''}</div>
         <div class="stats-sb-mission">${_esc(missionName)}${groupScopeText ? ` <span class="stats-sb-group">· 👥 ${_esc(groupScopeText)}</span>` : ''}</div>
@@ -1067,7 +1217,10 @@ function _statsRender(scope) {
         count: 1,
         icon: axis.icon,
         points: scored,
-        formula: `${_fmtAxis(raw)} brut · plein rendement jusqu’à ${_fmtAxis(axis.soft)} · plafond doux ${axis.cap}${reduced ? ` · ${_fmtAxis(reduced)} réduit` : ''}`,
+        raw,
+        soft: axis.soft,
+        cap: axis.cap,
+        reduced,
         children: axis.parts,
       });
     };
@@ -1079,7 +1232,8 @@ function _statsRender(scope) {
     const _dampeners = [1, 0.58, 0.34, 0.18];
     _impactEntries.forEach((e, i) => {
       const dampener = _dampeners[i] ?? 0.08;
-      e.formula += ` · axe #${i + 1} × ${Math.round(dampener * 100)}%`;
+      e.axisRank = i + 1;
+      e.dampener = dampener;
       e.points *= dampener;
     });
     const penaltyTotal = profile.penalties.reduce((sum, e) => sum + Math.abs(e.points), 0);
@@ -1216,6 +1370,7 @@ function _statsRender(scope) {
 
   // Récap texte (export) — construit à partir du scope courant.
   const scopeLabel = dateKey ? `séance du ${_statsFmtDate(dateKey)}`
+    : isAct && selectedAct ? `acte « ${selectedAct.label} »`
     : isMission ? `mission « ${missionName} »${groupScopeText ? ` · groupes ${groupScopeText}` : ''}` : 'toute la campagne';
   const sumLines = [
     `📊 Stats — ${scopeLabel}`,
@@ -1251,7 +1406,8 @@ function _statsRender(scope) {
   };
   const contextItems = [];
   if (groupCompare.length > 1) contextItems.push('Comparaison des groupes normalisée par séance.');
-  if (!selectedMissionId && unlinkedDates.length) contextItems.push(`${unlinkedDates.length} séance${unlinkedDates.length > 1 ? 's' : ''} non reliée${unlinkedDates.length > 1 ? 's' : ''} à une mission.`);
+  if (isAct && selectedAct) contextItems.push(`${selectedAct.missions.length} mission${selectedAct.missions.length > 1 ? 's' : ''} agrégée${selectedAct.missions.length > 1 ? 's' : ''} dans cet acte.`);
+  if (!selectedMissionId && !isAct && unlinkedDates.length) contextItems.push(`${unlinkedDates.length} séance${unlinkedDates.length > 1 ? 's' : ''} non reliée${unlinkedDates.length > 1 ? 's' : ''} à une mission.`);
   if (selectedMissionId && selectedMissionDates.length) contextItems.push(`${selectedMissionDates.length} séance${selectedMissionDates.length > 1 ? 's' : ''} liée${selectedMissionDates.length > 1 ? 's' : ''} à cette mission.`);
   if ((GC.attacksTaken || 0) === 0 && (GC.attacksAvoided || 0) === 0) contextItems.push('Attaques subies/évitées : nouvelles stats, non rétroactives.');
   const contextSec = contextItems.length ? `
@@ -1290,12 +1446,37 @@ function _statsRender(scope) {
       return `${v >= 0 ? '+' : '-'}${txt}`;
     };
     const detailLeaders = impactRows.slice(0, Math.max(3, mvps.length));
-    const calcHtml = detailLeaders.map((leader, index) => {
+    if (!_statsMvpDetailId || !detailLeaders.some(leader => leader.id === _statsMvpDetailId)) {
+      _statsMvpDetailId = detailLeaders[0]?.id || '';
+    }
+    const activeDetailLeader = detailLeaders.find(leader => leader.id === _statsMvpDetailId) || detailLeaders[0];
+    const detailTabsHtml = detailLeaders.length > 1 ? `<div class="stats-mvp-tabs">
+      ${detailLeaders.map((leader, index) => {
+        const details = leader.impactDetails || { score: leader.impact || 0 };
+        return `<button type="button" class="${leader.id === activeDetailLeader?.id ? 'active' : ''}" data-action="_statsMvpDetailPick" data-id="${_esc(leader.id)}">
+          ${_statsAvatar(leader.id, leader.name, 22)}
+          <span>${_esc(leader.name)}<small>${index === 0 ? 'MVP' : `#${index + 1}`}</small></span>
+          <b>${details.score}</b>
+        </button>`;
+      }).join('')}
+    </div>` : '';
+    const calcHtml = activeDetailLeader ? (() => {
+      const leader = activeDetailLeader;
+      const index = Math.max(0, detailLeaders.findIndex(x => x.id === leader.id));
       const details = leader.impactDetails || { entries: [], gained: 0, lost: 0, score: leader.impact || 0 };
       const fmtNum = (v) => Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
       const calcRow = (e) => {
         const unit = Math.abs(e.points / Math.max(1, e.count));
         const formula = e.count === 1 ? fmtPts(e.points) : `${e.points < 0 ? '-' : '+'}${e.count} × ${fmtNum(unit)}`;
+        const axisMeta = Number.isFinite(Number(e.raw))
+          ? `<span class="stats-mvp-axis-meta">
+              <small>Brut <b>${fmtNum(e.raw)}</b></small>
+              <small>Plein <b>${fmtNum(e.soft)}</b></small>
+              <small>Plafond <b>${fmtNum(e.cap)}</b></small>
+              ${e.reduced ? `<small>Réduit <b>${fmtNum(e.reduced)}</b></small>` : ''}
+              <small>Axe #${e.axisRank || 1} <b>${Math.round((e.dampener ?? 1) * 100)}%</b></small>
+            </span>`
+          : `<span class="stats-mvp-calc-formula">${e.formula || formula}</span>`;
         const subRows = Array.isArray(e.children) && e.children.length
           ? `<div class="stats-mvp-calc-subrows">${e.children.map(part => {
               const sign = part.points >= 0 ? '+' : '-';
@@ -1304,7 +1485,7 @@ function _statsRender(scope) {
           : '';
         return `<div class="stats-mvp-calc-row${e.points < 0 ? ' is-loss' : ''}">
           <span class="stats-mvp-calc-main"><b>${e.icon}</b><span>${_esc(e.label)}</span></span>
-          <span class="stats-mvp-calc-formula">${e.formula || formula}</span>
+          ${axisMeta}
           <strong>${fmtPts(e.points)}</strong>
           ${subRows}
         </div>`;
@@ -1329,8 +1510,8 @@ function _statsRender(scope) {
           ${calcGroup('Ce qui pénalise', lostEntries, 'is-loss')}
         </div>
       </div>`;
-    }).join('');
-    mvpDetailSec = drawer('Détail du calcul MVP', `<div class="stats-mvp-calcs">${calcHtml}</div>`, {
+    })() : '';
+    mvpDetailSec = drawer('Détail du calcul MVP', `${detailTabsHtml}<div class="stats-mvp-calcs">${calcHtml}</div>`, {
       key: 'mvp-detail',
       count: `${detailLeaders.length} fiche${detailLeaders.length > 1 ? 's' : ''}`,
     });
@@ -1431,7 +1612,7 @@ function _statsRender(scope) {
     <button class="stats-tt${_statsCmpType === 'pie' ? ' active' : ''}" data-action="_statsCmpType" data-type="pie" title="Camembert">🥧</button>
   </div>`;
   const contextCompare = isMission ? groupCompare : missionCompare;
-  const contextCompareLabel = isMission ? 'Comparatif — groupes' : 'Comparatif — missions';
+  const contextCompareLabel = isMission ? 'Comparatif — groupes' : (isAct ? 'Comparatif — missions de l’acte' : 'Comparatif — missions');
   const secondaryChartHtml = contextCompare.length > 1
     ? `<div class="stats-chart-card">
         <div class="stats-chart-hd"><span>${contextCompareLabel}<small>Moyenne par séance suivie</small></span>${_statsMetricSelect(_statsEvoMetric, '_statsEvoMetric')}</div>
@@ -1610,7 +1791,7 @@ function _statsRender(scope) {
     <div class="stats-scoreboard-main">
       <div class="stats-scoreboard-gauge">${_statsGauge(hitRate, '#22c38e', 118, 11, 'r&eacute;ussite')}</div>
       <div class="stats-scoreboard-copy">
-        <span class="stats-scoreboard-kicker">Vue actuelle</span>
+        <span class="stats-scoreboard-kicker">P&eacute;rim&egrave;tre analys&eacute;</span>
         <h2>${_esc(scopeLabel)}</h2>
         <p>${rows.length} personnage${rows.length > 1 ? 's' : ''} suivi${rows.length > 1 ? 's' : ''} &middot; ${scopeDateCount} s&eacute;ance${scopeDateCount > 1 ? 's' : ''} &middot; ${GC.attacks} attaque${GC.attacks > 1 ? 's' : ''}</p>
       </div>
@@ -1626,16 +1807,16 @@ function _statsRender(scope) {
   const navItems = [
     ['temps-forts', 'TOP', 'Temps forts'],
     groupCompare.length ? ['groupes', 'GRP', 'Groupes'] : null,
-    ['analyse', 'CHT', 'Comparer'],
+    ['analyse', 'CMP', 'Comparer'],
     ['personnages', 'PJ', 'Personnages'],
-    ['donnees', 'LOG', 'Donn&eacute;es'],
+    ['donnees', 'AUD', 'Audit'],
   ].filter(Boolean);
   const statsNav = `<nav class="stats-section-nav" aria-label="Sections des statistiques">
     ${navItems.map(([id, ic, label]) => `<button type="button" data-action="_statsJumpSection" data-target="${id}"><span>${ic}</span>${label}</button>`).join('')}
   </nav>`;
   const spotlightHtml = `<section class="stats-surface" id="temps-forts">
     <div class="stats-surface-head">
-      <div><span>Ce qu'on retient</span><h3>Temps forts</h3></div>
+      <div><span>R&eacute;sum&eacute; de performance</span><h3>Temps forts</h3></div>
       ${awardTotal ? `<button class="stats-sec-tool" data-action="_statsAwardsConfig" title="Choisir les distinctions affich&eacute;es">&#9881;</button>` : ''}
     </div>
     <div class="stats-spotlight-grid">
@@ -1649,7 +1830,7 @@ function _statsRender(scope) {
     </div>
   </section>`;
   const analysisHtml = `<section class="stats-surface" id="analyse">
-    <div class="stats-surface-head"><div><span>Lire les &eacute;carts</span><h3>Analyse & comparaisons</h3></div></div>
+    <div class="stats-surface-head"><div><span>Comparer sans perdre le contexte</span><h3>Analyse</h3></div></div>
     ${chartsHtml}
   </section>`;
   const palmaresHtml = palmaresSec ? `<section class="stats-surface stats-surface--compact">
@@ -1657,14 +1838,12 @@ function _statsRender(scope) {
     ${palmaresSec}
   </section>` : '';
   const rosterHtml = `<section class="stats-surface" id="personnages">
-    <div class="stats-surface-head"><div><span>Contributions individuelles</span><h3>Par personnage</h3></div><small>${rows.length} fiche${rows.length > 1 ? 's' : ''}</small></div>
+    <div class="stats-surface-head"><div><span>D&eacute;tail des contributions</span><h3>Joueurs</h3></div><small>${rows.length} fiche${rows.length > 1 ? 's' : ''}</small></div>
     ${charsHtml}
   </section>`;
   const detailsHtml = `<section class="stats-surface stats-surface--compact" id="donnees">
-    <div class="stats-surface-head"><div><span>Audit</span><h3>Donn&eacute;es d&eacute;taill&eacute;es</h3></div></div>
-    <div class="stats-drawer-stack">
-      ${drawer('Chiffres d&eacute;taill&eacute;s', detailedKpisHtml, { key: 'details', count: 'combat / magie / RP' })}
-    </div>
+    <div class="stats-surface-head"><div><span>Audit</span><h3>Donn&eacute;es source</h3></div></div>
+    ${detailedKpisHtml}
   </section>`;
   const groupsHtml = missionGroupsSec ? `<div id="groupes">${missionGroupsSec}</div>` : '';
 
@@ -1684,6 +1863,8 @@ function _statsRender(scope) {
     </div>
     ${rosterHtml}
     ${detailsHtml}`;
+  _statsBindMvpOutsideClose(root);
+  _statsBindNavSpy(root);
 
   let hasOpenCharacter = false;
   root.querySelectorAll('.stats-char[open]').forEach(charDetails => {
@@ -3760,7 +3941,13 @@ registerActions({
   _statsJumpSection: (btn) => {
     const id = btn.dataset.target;
     if (!id) return;
+    btn.closest('.stats-section-nav')?.querySelectorAll('button')
+      .forEach(b => b.classList.toggle('active', b === btn));
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  },
+  _statsMvpDetailPick: (btn) => {
+    _statsMvpDetailId = btn.dataset.id || '';
+    _statsRender(_statsScope);
   },
   // Frise de séances : clic sur une chip → change la vue (sans relecture réseau).
   _statsSetScope: (btn) => { _statsRender(btn.dataset.scope || null); },
