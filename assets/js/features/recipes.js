@@ -51,7 +51,25 @@ const STORE = {
   shopCats: [],
   tab: 'cuisine', // 'cuisine'|'potion'|'arme'|'armure'|'bijou'
   filterTxt: '',
+  adventureId: '',
+  loaded: false,
 };
+
+let _recipeReturnCharacterId = '';
+
+async function _ensureRecipeData() {
+  const adventureId = STATE.adventure?.id || '';
+  if (STORE.loaded && STORE.adventureId === adventureId) return;
+  [STORE.all, STORE.shopItems, STORE.shopCats] = await Promise.all([
+    loadCollection('recipes'),
+    loadCollection('shop'),
+    loadCollection('shopCategories').catch(() => []),
+  ]);
+  STORE.all.sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
+  STORE.shopItems.sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
+  STORE.adventureId = adventureId;
+  STORE.loaded = true;
+}
 
 function _myUid()   { return STATE.user?.uid || ''; }
 function _isAdmin() { return !!STATE.isAdmin; }
@@ -213,13 +231,7 @@ function _shopToRecipe(item) {
 async function renderRecipes() {
   const content = document.getElementById('main-content');
   content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)"><div style="font-size:2rem">⏳</div></div>`;
-  [STORE.all, STORE.shopItems, STORE.shopCats] = await Promise.all([
-    loadCollection('recipes'),
-    loadCollection('shop'),
-    loadCollection("shopCategories").catch(() => []),
-  ]);
-  STORE.all.sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
-  STORE.shopItems.sort((a, b) => (a.nom || "").localeCompare(b.nom || "", "fr", { sensitivity: "base" }));
+  await _ensureRecipeData();
   STORE.tab = STORE.tab || 'cuisine';
   _render();
 }
@@ -602,6 +614,30 @@ function openRecipeModal(type, id = '') {
   `);
 }
 
+function openCharacterRecipeCreatePicker(characterId) {
+  if (!_isAdmin()) return;
+  const character = (STATE.characters || []).find(item => item.id === characterId);
+  openModal('Nouvelle recette', `
+    <div class="rec-create-picker">
+      <header>
+        <span>Création MJ</span>
+        <strong>Quel type de recette voulez-vous ajouter ?</strong>
+        <p>La recette sera ajoutée au catalogue${character?.nom ? ` et connue automatiquement par ${_esc(character.nom)}` : ''}.</p>
+      </header>
+      <div class="rec-create-options">
+        <button type="button" data-action="createCharacterRecipe" data-type="cuisine" data-id="${_esc(characterId)}">
+          <span aria-hidden="true">🍳</span><strong>Recette de cuisine</strong>
+          <small>Préparation, durée, ingrédients et effet de groupe.</small>
+        </button>
+        <button type="button" data-action="createCharacterRecipe" data-type="potion" data-id="${_esc(characterId)}">
+          <span aria-hidden="true">🧪</span><strong>Potion</strong>
+          <small>Ingrédients, préparation et effet individuel.</small>
+        </button>
+      </div>
+      <p class="rec-create-hint">Les recettes d'armes, d'armures et de bijoux sont créées depuis les objets correspondants de la Boutique.</p>
+    </div>`, { icon: '＋', subtitle: 'Ajouter une recette au catalogue', accent: '#e8b84b' });
+}
+
 function _ingrRow(ig = {}, i) {
   return `<div class="rec-ingr-dyn" id="rec-ig-${i}"
     style="display:flex;align-items:center;gap:.4rem;background:var(--bg-elevated);
@@ -644,6 +680,9 @@ async function saveRecipe(id, fallbackType) {
     const existing = id ? STORE.all.find(r => r.id === id) : null;
     const type     = existing?.type || fallbackType || 'cuisine';
 
+    const returnCharacter = _recipeReturnCharacterId
+      ? (STATE.characters || []).find(character => character.id === _recipeReturnCharacterId)
+      : null;
     const data = {
       type, nom,
       famille:     document.getElementById('rec-famille')?.value?.trim()   || '',
@@ -651,7 +690,7 @@ async function saveRecipe(id, fallbackType) {
       effet:       document.getElementById('rec-effet')?.value?.trim()     || '',
       description: document.getElementById('rec-desc')?.value?.trim()     || '',
       ingredients: _readIngrs(),
-      acces:       existing?.acces || [],
+      acces:       existing?.acces || (returnCharacter?.uid ? [returnCharacter.uid] : []),
       atelierReq:  document.getElementById('rec-atelierReq')?.value?.trim()|| '',
       tempsCraft:  document.getElementById('rec-tempsCraft')?.value?.trim()|| '',
       shopItemId:  document.getElementById("rec-shopItemId")?.value || "",
@@ -668,10 +707,13 @@ async function saveRecipe(id, fallbackType) {
       STORE.all.sort((a, b) => (a.nom||'').localeCompare(b.nom||''));
     }
 
+    const returnCharacterId = _recipeReturnCharacterId;
+    _recipeReturnCharacterId = '';
     closeModal();
     showNotif(id ? `"${nom}" mis à jour !` : `"${nom}" créé !`, 'success');
     STORE.tab = data.type;
-    _render();
+    if (returnCharacterId) await openCharacterRecipeAccess(returnCharacterId);
+    else _render();
   } catch (e) { notifySaveError(e); }
 }
 
@@ -897,6 +939,154 @@ async function sendRecipe(id) {
 // ══════════════════════════════════════════════════════════════════════════════
 // NAVIGATION
 // ══════════════════════════════════════════════════════════════════════════════
+function _allRecipeEntries() {
+  return [
+    ...STORE.all.map(r => ({ ...r, _source: 'recipes' })),
+    ...STORE.shopItems.map(_shopToRecipe).filter(Boolean).map(r => ({ ...r, _source: 'shop' })),
+  ].sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
+}
+
+function _inventoryCounts(character) {
+  const counts = new Map();
+  (character?.inventaire || []).forEach(item => {
+    const key = _norm(item?.nom || '');
+    if (key) counts.set(key, (counts.get(key) || 0) + Math.max(1, parseInt(item.quantite || item.qte || 1) || 1));
+  });
+  return counts;
+}
+
+function _ingredientState(recipe, counts) {
+  return (Array.isArray(recipe.ingredients) ? recipe.ingredients : []).map(ingredient => {
+    const required = Math.max(1, parseInt(ingredient.quantite) || 1);
+    const owned = counts.get(_norm(ingredient.nom || '')) || 0;
+    return { ...ingredient, required, owned, ready: owned >= required };
+  });
+}
+
+function _recipeBookCard(recipe, character, canTransfer) {
+  const type = TABS.find(tab => tab.id === recipe.type) || TABS[0];
+  const ingredients = _ingredientState(recipe, _inventoryCounts(character));
+  const ready = ingredients.length > 0 && ingredients.every(item => item.ready);
+  const availability = ingredients.length ? (ready ? 'ready' : 'missing') : 'neutral';
+  return `<article class="rec-book-card" data-rec-book-row data-type="${_esc(recipe.type || '')}" data-ready="${availability}" data-search="${_esc(_recipeSearchText(recipe))}">
+    <header><span class="rec-book-icon">${type.emoji}</span><div><strong>${_esc(recipe.nom || 'Recette')}</strong><small>${_esc(type.label || recipe.type || 'Recette')}</small></div>
+      ${ingredients.length ? `<span class="rec-book-ready ${ready ? 'is-ready' : ''}">${ready ? 'Prête' : 'Ingrédients manquants'}</span>` : ''}</header>
+    ${recipe.effet ? `<p class="rec-book-effect">${_esc(recipe.effet)}</p>` : ''}
+    ${ingredients.length ? `<div class="rec-book-ingredients">${ingredients.map(item => `<span class="${item.ready ? 'is-ready' : 'is-missing'}"><b>${item.owned}/${item.required}</b> ${_esc(item.nom || 'Ingrédient')}</span>`).join('')}</div>` : '<p class="rec-book-empty-note">Aucun ingrédient renseigné.</p>'}
+    <footer><span>${_esc(recipe.atelierReq || '')}</span>${canTransfer ? `<button class="btn btn-outline btn-sm" data-action="openSendRecipeModal" data-id="${_esc(recipe.id)}">Transmettre</button>` : ''}</footer>
+  </article>`;
+}
+
+function _recipeTypeNav(recipes, scope) {
+  const counts = recipes.reduce((map, recipe) => {
+    map[recipe.type] = (map[recipe.type] || 0) + 1;
+    return map;
+  }, {});
+  return `<nav class="rec-context-nav" aria-label="Catégories de recettes">
+    <button class="is-active" data-action="setCharacterRecipeType" data-scope="${scope}" data-type="all"><span>📚</span><b>Toutes</b><em>${recipes.length}</em></button>
+    ${TABS.filter(tab => tab.id !== 'all' && counts[tab.id]).map(tab => `<button data-action="setCharacterRecipeType" data-scope="${scope}" data-type="${tab.id}"><span>${tab.emoji}</span><b>${_esc(tab.label)}</b><em>${counts[tab.id]}</em></button>`).join('')}
+  </nav>`;
+}
+
+export function recipeBookButton(character) {
+  return `<button class="inv-recipe-trigger" data-action="openCharacterRecipeBook" data-id="${_esc(character?.id || '')}" title="Voir les recettes connues"><span aria-hidden="true">📖</span><b>Recettes</b></button>`;
+}
+
+export async function openCharacterRecipeBook(characterId) {
+  await _ensureRecipeData();
+  const character = (STATE.characters || []).find(c => c.id === characterId);
+  if (!character) return;
+  const uid = character.uid || (character.id === STATE.activeChar?.id ? _myUid() : '');
+  const recipes = _allRecipeEntries().filter(recipe => uid && (recipe.acces || []).includes(uid));
+  const canTransfer = !_isAdmin() && uid === _myUid();
+  openModal(`Recettes de ${character.nom || 'ce personnage'}`, `
+    <div class="rec-book-shell">
+      <header class="rec-book-head"><div><span>Livre de recettes</span><strong>${recipes.length} recette${recipes.length !== 1 ? 's' : ''} connue${recipes.length !== 1 ? 's' : ''}</strong></div>
+        ${_isAdmin() ? `<button class="btn btn-gold btn-sm" data-action="openCharacterRecipeAccess" data-id="${_esc(character.id)}">Gérer les recettes connues</button>` : ''}</header>
+      <div class="rec-book-controls">
+        <label class="rec-book-search"><span aria-hidden="true">⌕</span><input data-input="filterCharacterRecipeBook" placeholder="Rechercher une recette ou un ingrédient…"></label>
+        <div class="rec-ready-filter" role="group" aria-label="Disponibilité des ingrédients">
+          <button class="is-active" data-action="setCharacterRecipeStatus" data-scope="book" data-status="all">Toutes</button>
+          <button data-action="setCharacterRecipeStatus" data-scope="book" data-status="ready">Fabricables</button>
+          <button data-action="setCharacterRecipeStatus" data-scope="book" data-status="missing">À compléter</button>
+        </div>
+      </div>
+      <div class="rec-context-layout">${_recipeTypeNav(recipes, 'book')}<div class="rec-book-grid">${recipes.length ? recipes.map(recipe => _recipeBookCard(recipe, character, canTransfer)).join('') : '<div class="rec-book-empty">Aucune recette connue pour le moment.</div>'}<div class="rec-context-empty" hidden>Aucune recette ne correspond à ces filtres.</div></div></div>
+    </div>`, { icon: '📖', subtitle: 'Recettes connues et ingrédients disponibles', accent: '#e8b84b' });
+}
+
+export async function openCharacterRecipeAccess(characterId) {
+  await _ensureRecipeData();
+  if (!_isAdmin()) return;
+  const character = (STATE.characters || []).find(c => c.id === characterId);
+  if (!character?.uid) { showNotif('Ce personnage doit être lié à un compte pour recevoir des recettes.', 'error'); return; }
+  const recipes = _allRecipeEntries();
+  const knownCount = recipes.filter(recipe => (recipe.acces || []).includes(character.uid)).length;
+  openModal(`Recettes connues · ${character.nom || 'Personnage'}`, `
+    <div class="rec-access-shell">
+      <header><div><span>Attribution MJ</span><strong>Cochez les recettes accessibles à ce compte.</strong></div><div class="rec-access-head-actions"><small id="rec-access-count">${knownCount}/${recipes.length} connues</small><button class="btn btn-gold btn-sm" data-action="openCharacterRecipeCreatePicker" data-id="${_esc(character.id)}">＋ Nouvelle recette</button></div></header>
+      <label class="rec-book-search"><span aria-hidden="true">⌕</span><input data-input="filterCharacterRecipeAccess" placeholder="Filtrer le catalogue…"></label>
+      <div class="rec-context-layout">${_recipeTypeNav(recipes, 'access')}<div class="rec-access-list">${recipes.map(recipe => {
+        const type = TABS.find(tab => tab.id === recipe.type) || TABS[0];
+        return `<label class="rec-access-row" data-rec-access-row data-type="${_esc(recipe.type || '')}" data-search="${_esc(_recipeSearchText(recipe))}"><input type="checkbox" data-change="updateCharacterRecipeAccessCount" data-recipe-id="${_esc(recipe.id)}" data-source="${recipe._source}" ${(recipe.acces || []).includes(character.uid) ? 'checked' : ''}><span class="rec-access-check"></span><span class="rec-book-icon">${type.emoji}</span><span class="rec-access-name"><strong>${_esc(recipe.nom || 'Recette')}</strong><small>${_esc(type.label || recipe.type || '')}</small></span></label>`;
+      }).join('') || '<div class="rec-book-empty">Le catalogue est vide.</div>'}<div class="rec-context-empty" hidden>Aucune recette ne correspond à ces filtres.</div></div></div>
+      <footer><button class="btn btn-outline" data-action="close-modal">Annuler</button><button class="btn btn-primary" data-action="saveCharacterRecipeAccess" data-id="${_esc(character.id)}">Enregistrer</button></footer>
+    </div>`, { icon: '📚', subtitle: 'Accès du compte lié au personnage', accent: '#e8b84b' });
+}
+
+function _applyRecipeContextFilters(scope) {
+  const shell = document.querySelector(scope === 'access' ? '.rec-access-shell' : '.rec-book-shell');
+  if (!shell) return;
+  const query = _norm(shell.querySelector('.rec-book-search input')?.value || '');
+  const type = shell.querySelector('.rec-context-nav .is-active')?.dataset.type || 'all';
+  const status = shell.querySelector('.rec-ready-filter .is-active')?.dataset.status || 'all';
+  const rows = shell.querySelectorAll(scope === 'access' ? '[data-rec-access-row]' : '[data-rec-book-row]');
+  rows.forEach(row => {
+    const matchesText = !query || (row.dataset.search || '').includes(query);
+    const matchesType = type === 'all' || row.dataset.type === type;
+    const matchesStatus = status === 'all' || row.dataset.ready === status;
+    row.hidden = !(matchesText && matchesType && matchesStatus);
+  });
+  const empty = shell.querySelector('.rec-context-empty');
+  if (empty) empty.hidden = !rows.length || [...rows].some(row => !row.hidden);
+}
+
+function _setRecipeContextFilter(button, kind) {
+  const shell = button.closest('.rec-book-shell, .rec-access-shell');
+  if (!shell) return;
+  const selector = kind === 'status' ? '.rec-ready-filter button' : '.rec-context-nav button';
+  shell.querySelectorAll(selector).forEach(item => item.classList.toggle('is-active', item === button));
+  _applyRecipeContextFilters(button.dataset.scope || (shell.classList.contains('rec-access-shell') ? 'access' : 'book'));
+}
+
+function _updateCharacterRecipeAccessCount() {
+  const checks = [...document.querySelectorAll('.rec-access-row input[type="checkbox"]')];
+  const count = checks.filter(check => check.checked).length;
+  const target = document.getElementById('rec-access-count');
+  if (target) target.textContent = `${count}/${checks.length} connues`;
+}
+
+async function saveCharacterRecipeAccess(characterId) {
+  const character = (STATE.characters || []).find(c => c.id === characterId);
+  if (!_isAdmin() || !character?.uid) return;
+  const changes = [];
+  document.querySelectorAll('.rec-access-row input[type="checkbox"]').forEach(check => {
+    const list = check.dataset.source === 'shop' ? STORE.shopItems : STORE.all;
+    const raw = list.find(item => item.id === check.dataset.recipeId);
+    if (!raw) return;
+    const current = Array.isArray(raw.acces) ? raw.acces : [];
+    if (current.includes(character.uid) === check.checked) return;
+    const acces = check.checked ? [...new Set([...current, character.uid])] : current.filter(uid => uid !== character.uid);
+    changes.push({ source: check.dataset.source, raw, acces });
+  });
+  try {
+    await Promise.all(changes.map(change => updateInCol(change.source, change.raw.id, { acces: change.acces })));
+    changes.forEach(change => { change.raw.acces = change.acces; });
+    showNotif(`${changes.length} accès mis à jour.`, 'success');
+    openCharacterRecipeBook(characterId);
+  } catch (error) { notifySaveError(error); }
+}
+
 function setRecipeTab(t) { STORE.tab = t; STORE.filterTxt = ""; _render(); }
 function searchRecipes(v) { STORE.filterTxt = v; _renderGrid(); }
 
@@ -908,7 +1098,7 @@ PAGES.recettes = renderRecipes;
 registerActions({
   recSetTab: (btn) => setRecipeTab(btn.dataset.id),
   recSearch: (el) => searchRecipes(el.value),
-  _recOpenModal: (btn) => openRecipeModal(btn.dataset.type),
+  _recOpenModal: (btn) => { _recipeReturnCharacterId = ''; openRecipeModal(btn.dataset.type); },
   _recEdit: (btn) => openRecipeModal(btn.dataset.type, btn.dataset.id),
   _recEditShop: (btn) => openShopRecipeModal(btn.dataset.id),
   _recDelete: (btn) => deleteRecipe(btn.dataset.id),
@@ -925,5 +1115,14 @@ registerActions({
   saveAcces: (btn) => saveAcces(btn.dataset.id),
   openSendRecipeModal: (btn) => openSendRecipeModal(btn.dataset.id),
   sendRecipe: (btn) => sendRecipe(btn.dataset.id),
+  openCharacterRecipeAccess: (btn) => openCharacterRecipeAccess(btn.dataset.id),
+  openCharacterRecipeCreatePicker: (btn) => openCharacterRecipeCreatePicker(btn.dataset.id),
+  createCharacterRecipe: (btn) => { _recipeReturnCharacterId = btn.dataset.id || ''; openRecipeModal(btn.dataset.type); },
+  saveCharacterRecipeAccess: (btn) => saveCharacterRecipeAccess(btn.dataset.id),
+  filterCharacterRecipeBook: () => _applyRecipeContextFilters('book'),
+  filterCharacterRecipeAccess: () => _applyRecipeContextFilters('access'),
+  setCharacterRecipeType: (btn) => _setRecipeContextFilter(btn, 'type'),
+  setCharacterRecipeStatus: (btn) => _setRecipeContextFilter(btn, 'status'),
+  updateCharacterRecipeAccessCount: () => _updateCharacterRecipeAccessCount(),
   _recClose: () => closeModal(),
 });

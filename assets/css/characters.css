@@ -8923,11 +8923,85 @@ body .modal:has(.cs-build-modal) {
   position: relative;
 }
 .cs-v3 .stats-banner::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(79,140,255,.28), transparent); }
+.cs-v3 .stats-summary {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+  padding: 8px 10px;
+  background: rgba(79,140,255,.045);
+  border: 1px solid rgba(79,140,255,.16);
+  border-radius: 7px;
+}
+.cs-v3 .stats-summary-title {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
+}
+.cs-v3 .stats-summary-title span {
+  color: var(--text-muted);
+  font-size: .65rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.cs-v3 .stats-summary-title strong {
+  color: var(--text);
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+.cs-v3 .stats-summary-formula {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.cs-v3 .stats-summary-formula > span {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+.cs-v3 .stats-summary-formula small {
+  color: var(--text-dim);
+  font-size: .56rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.cs-v3 .stats-summary-formula b {
+  color: var(--text-soft);
+  font-family: 'Outfit', sans-serif;
+  font-size: .78rem;
+}
+.cs-v3 .stats-summary-formula b.pos { color: var(--emerald); }
+.cs-v3 .stats-summary-formula b.neg { color: var(--crimson-light, #ff8ca7); }
+.cs-v3 .stats-summary-formula i {
+  color: var(--text-dim);
+  font-size: .7rem;
+  font-style: normal;
+  opacity: .65;
+}
+.cs-v3 .stats-summary-formula .is-total {
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+.cs-v3 .stats-summary-formula .is-total b { color: var(--blue-light, #7fb0ff); font-size: .95rem; }
 /* 6 colonnes réservées aux très grands écrans : en dessous, la colonne
    principale est trop étroite et la formule Base/Niveau/Équip déborderait.
    Sur écran classique on garde 3 colonnes larges (2 rangées de 3). */
 @media (min-width: 1700px) { .cs-v3 .stats-banner { grid-template-columns: repeat(6, 1fr); } }
 @media (max-width: 760px)  { .cs-v3 .stats-banner { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 760px) {
+  .cs-v3 .stats-summary { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .cs-v3 .stats-summary-formula { width: 100%; justify-content: space-between; gap: 4px; }
+  .cs-v3 .stats-summary-formula > span { flex-direction: column; gap: 1px; }
+  .cs-v3 .stats-summary-formula .is-total { padding-left: 7px; }
+}
 /* ── STAT TILE V2 — Layout : Header (Nom + Mod) / Total / Formule (Base + Niveau + Équip) */
 .cs-v3 .stat-tile {
   position: relative; background: rgba(255,255,255,.018);
