@@ -55,6 +55,30 @@ export function setConditionsLibCache(lib) {
 }
 export function getSpellMatricesCache() { return _spellMatricesCache; }
 
+function _conditionMeta(id, fallback = {}) {
+  const lib = Array.isArray(_conditionsLibCache) ? _conditionsLibCache : [];
+  const found = id ? lib.find(item => item?.id === id) : null;
+  if (found) return found;
+  const label = fallback.label || fallback.name || '';
+  if (!label) return null;
+  return {
+    id: id || fallback.id || '',
+    label,
+    icon: fallback.icon || '',
+    color: fallback.color || '',
+    defaultSaveStat: fallback.defaultSaveStat || null,
+    defaultDC: fallback.defaultDC || null,
+  };
+}
+
+function _afflictionStateId(s = {}) {
+  return s.afflictionEtatId
+    || s.afflictionStateId
+    || s.afflictionConditionId
+    || (s.afflictionMode === 'etat' ? (s.classicStateId || '') : '')
+    || '';
+}
+
 // ── Helpers calcul sorts ─────────────────────────────────────────────────────
 
 /**
@@ -969,7 +993,10 @@ function _buildClassicSortResume(s) {
 
   const stateId = s?.classicStateId || s?.enchantEtatId || s?.afflictionEtatId;
   if (stateId) {
-    const condition = _conditionsLibCache?.find(item => item.id === stateId);
+    const condition = _conditionMeta(stateId, {
+      label: s?.classicStateLabel || s?.afflictionEtatLabel || s?.enchantEtatLabel,
+      icon: s?.classicStateIcon || s?.afflictionEtatIcon || s?.enchantEtatIcon,
+    });
     const hostile = s?.classicTarget === 'enemy';
     lines.push({
       icon: condition?.icon || '◈',
@@ -1255,11 +1282,14 @@ export function _buildSortResume(s, c) {
     const mode = s.afflictionMode || 'dot';
     // Stat de JS dérivée (comme dans le VTT)
     let saveStat = 'constitution';
-    const lib = _conditionsLibCache || [];
-    const etat = mode === 'etat' && s.afflictionEtatId
-      ? lib.find(c2 => c2.id === s.afflictionEtatId)
+    const stateId = mode === 'etat' ? _afflictionStateId(s) : '';
+    const etat = stateId
+      ? _conditionMeta(stateId, {
+          label: s.afflictionEtatLabel || s.afflictionStateLabel || s.classicStateLabel,
+          icon: s.afflictionEtatIcon || s.afflictionStateIcon || s.classicStateIcon,
+        })
       : null;
-    if (mode === 'etat' && s.afflictionEtatId) {
+    if (mode === 'etat' && stateId) {
       if (etat?.defaultSaveStat) saveStat = etat.defaultSaveStat;
     }
     if (s.afflictionSaveStat && !(mode === 'etat' && etat?.defaultSaveStat)) saveStat = s.afflictionSaveStat;

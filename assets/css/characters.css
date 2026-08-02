@@ -8489,23 +8489,42 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 }
 
 .cs-build-modal {
-  min-width: min(640px, 86vw);
+  width: 100%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
+body .modal:has(.cs-build-modal) {
+  width: min(92vw, 820px);
+  max-width: 820px;
+}
 .cs-build-modal-head {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 14px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
+  padding: 12px;
+  border: 1px solid rgba(126,176,255,.16);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(126,176,255,.12), transparent 60%),
+    rgba(255,255,255,.025);
+}
+.cs-build-modal-head span {
+  display: block;
+  margin-bottom: 3px;
+  color: #9dbbff;
+  font-size: .66rem;
+  font-weight: 900;
+  letter-spacing: .12em;
+  text-transform: uppercase;
 }
 .cs-build-modal-head strong {
   display: block;
   color: var(--text);
-  font-size: 1rem;
+  font-family: var(--font-title);
+  font-size: 1.08rem;
 }
 .cs-build-modal-head small,
 .cs-build-modal > p {
@@ -8513,27 +8532,34 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   font-size: .78rem;
   line-height: 1.45;
 }
-.cs-build-modal > p { margin: 0; }
+.cs-build-modal > p {
+  margin: 0;
+  padding: 0 2px;
+}
 .cs-build-list {
   display: grid;
   gap: 8px;
   max-height: min(52vh, 440px);
   overflow: auto;
-  padding-right: 3px;
+  padding-right: 4px;
 }
 .cs-build-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  padding: 9px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: rgba(255,255,255,.025);
+  gap: 12px;
+  padding: 11px;
+  border: 1px solid rgba(255,255,255,.085);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012)),
+    rgba(8,15,27,.68);
 }
 .cs-build-row.is-active {
   border-color: rgba(79,140,255,.42);
-  background: linear-gradient(135deg, rgba(79,140,255,.12), rgba(157,111,255,.05));
+  background:
+    linear-gradient(135deg, rgba(79,140,255,.15), rgba(157,111,255,.06)),
+    rgba(8,15,27,.74);
 }
 .cs-build-row-main {
   min-width: 0;
@@ -8543,7 +8569,7 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   gap: 8px;
 }
 .cs-build-row-badge {
-  min-width: 46px;
+  min-width: 54px;
   padding: 4px 8px;
   border-radius: 999px;
   border: 1px solid rgba(255,255,255,.1);
@@ -8560,7 +8586,7 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 }
 .cs-build-row-main input {
   min-width: 0;
-  height: 34px;
+  height: 38px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: rgba(0,0,0,.18);
@@ -8580,15 +8606,22 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 6px;
+  max-width: 310px;
 }
 .cs-build-row-lock {
-  color: var(--text-dim);
+  padding: 6px 9px;
+  border: 1px solid rgba(79,140,255,.18);
+  border-radius: 999px;
+  background: rgba(79,140,255,.08);
+  color: #9dbbff;
   font-size: .68rem;
   font-weight: 800;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 720px) {
   .cs-build-modal { min-width: 0; width: 100%; }
+  body .modal:has(.cs-build-modal) { width: 94vw; }
+  .cs-build-modal-head { align-items: flex-start; flex-direction: column; }
   .cs-build-row { grid-template-columns: 1fr; }
   .cs-build-row-actions { justify-content: flex-start; }
 }
@@ -12157,7 +12190,7 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 }
 .cs-v3 .inv-toolbar {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto auto;
+  grid-template-columns: minmax(240px, 1fr) auto;
   gap: 10px;
   align-items: center;
 }
@@ -12184,6 +12217,13 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 }
 /* Les deux boutons d'ajout (Créer + Objet) occupent une seule cellule de grille
    → ils restent côte à côte au lieu que « ＋ Objet » saute à la ligne. */
+.cs-v3 .inv-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
 .cs-v3 .inv-add-group { display: inline-flex; gap: 8px; justify-self: end; }
 .cs-v3 .inv-category-bar {
   gap: 6px;
@@ -17765,6 +17805,111 @@ button.cs-sock.is-empty:hover { border-color: rgba(232,184,75,.55); color: var(-
   }
 }
 
+/* Sorts personnage : cartes plus stables + limites MJ visibles sans encombrer. */
+.cs-v3 .cs-spellcard-name-row:has(.cs-spellcard-quickedit) .cs-spellcard-name {
+  flex: 1 1 auto;
+}
+.cs-v3 .is-cards .cs-spellcard:not(.is-open) .cs-spellcard-name-row,
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-name-row {
+  display: flex;
+  align-items: center;
+}
+.cs-v3 .is-cards .cs-spellcard:not(.is-open) .cs-spellcard-quickedit,
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-quickedit {
+  width: 30px;
+  min-width: 30px;
+  height: 28px;
+  padding: 0;
+}
+.cs-v3 .is-cards .cs-spellcard:not(.is-open) .cs-spellcard-quickedit-label,
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-quickedit-label {
+  display: none;
+}
+.cs-v3 .cs-spellcard-mjlimits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+.cs-v3 .cs-spellcard-mjlimits > span {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 1px solid rgba(241,199,91,.18);
+  border-radius: 7px;
+  background: rgba(241,199,91,.07);
+  color: #d8bd74;
+  font-size: .56rem;
+  font-weight: 800;
+  line-height: 1.1;
+}
+.cs-v3 .cs-spellcard-mjlimits > span i {
+  font-style: normal;
+  line-height: 1;
+}
+.cs-v3 .cs-spellbook-collection .is-cards .cs-spellcard:not(.is-open) {
+  grid-template-areas:
+    "head head"
+    "recipe effect"
+    "limits limits";
+}
+.cs-v3 .is-cards .cs-spellcard:not(.is-open) .cs-spellcard-mjlimits {
+  grid-area: limits;
+}
+.cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-mjlimits,
+.cs-v3 .is-tiles .cs-spellcard-mjlimits {
+  display: none;
+}
+.cs-v3 .cs-spellbook-collection .cs-spellcard-grid > .cs-spellinspector {
+  width: min(100%, 1120px) !important;
+  justify-self: start;
+}
+.cs-v3 .cs-spellbook-collection .cs-spellcard-grid > .cs-spellinspector .cs-spellinspector-mjlimits {
+  grid-column: 1;
+}
+.cs-v3 .cs-spellinspector-mjlimits {
+  margin: 11px 12px 0;
+  padding: 9px;
+  border: 1px solid rgba(241,199,91,.12);
+  border-radius: 10px;
+  background: rgba(241,199,91,.045);
+}
+.cs-v3 .cs-spellinspector-mjlimits > span {
+  display: block;
+  margin-bottom: 7px;
+  color: #7e6b43;
+  font-size: .5rem;
+  font-weight: 900;
+  letter-spacing: .12em;
+}
+.cs-v3 .cs-spellinspector-mjlimits > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.cs-v3 .cs-spellinspector-mjlimits b {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  border: 1px solid rgba(241,199,91,.16);
+  border-radius: 8px;
+  background: rgba(0,0,0,.12);
+  color: #d8bd74;
+  font-size: .58rem;
+}
+.cs-v3 .cs-spellinspector-mjlimits i {
+  font-style: normal;
+}
+@media (min-width: 1500px) {
+  .cs-v3 .cs-spellbook-collection .cs-spellcard-grid > .cs-spellinspector {
+    margin-left: clamp(0px, 4vw, 70px);
+  }
+}
+
 /* Page Personnage : la fiche s'aligne sur le filtre admin et la gouttiere globale. */
 #main-content[data-page="characters"] .cs-v3 .app-shell {
   max-width: none !important;
@@ -19002,4 +19147,298 @@ body .modal:has(.sh-admin-modal.is-armor-sets) {
   .classic-spell-identity { grid-template-columns: 64px minmax(0, 1fr); }
   .classic-spell-identity label:last-child { grid-column: 1 / -1; }
   .classic-spell-span-2 { grid-column: auto; }
+}
+
+.inv-history {
+  margin-top: 14px;
+}
+
+.inv-history-trigger {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  border: 1px solid rgba(96, 165, 250, .22);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(96, 165, 250, .12), rgba(15, 23, 42, .68)),
+    rgba(8, 13, 24, .72);
+  color: var(--text);
+  cursor: pointer;
+  font-size: .72rem;
+  line-height: 1;
+  text-align: center;
+}
+
+.inv-history-trigger:hover {
+  border-color: rgba(96, 165, 250, .5);
+  transform: translateY(-1px);
+}
+
+.inv-history-trigger span {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: rgba(96, 165, 250, .14);
+  color: #93c5fd;
+  font-weight: 900;
+}
+
+.inv-history-trigger b {
+  color: #bfdbfe;
+  font-size: .72rem;
+  line-height: 1;
+}
+
+.inv-history-trigger em {
+  min-width: 20px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(96, 165, 250, .18);
+  color: #dbeafe;
+  font-style: normal;
+  font-weight: 900;
+  text-align: center;
+}
+
+body .modal:has(.inv-history-modal-shell) {
+  width: min(94vw, 920px);
+  max-width: 920px;
+}
+
+.inv-history-modal-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.inv-history-modal-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid rgba(96, 165, 250, .16);
+  border-radius: 12px;
+  background: rgba(96, 165, 250, .07);
+}
+
+.inv-history-modal-head span {
+  display: block;
+  color: #93c5fd;
+  font-size: .68rem;
+  font-weight: 900;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+
+.inv-history-modal-head strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--text);
+  font-family: var(--font-title);
+  font-size: 1.1rem;
+}
+
+.inv-history-modal-head small {
+  color: var(--text-dim);
+  text-align: right;
+}
+
+.inv-history-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 8px;
+}
+
+.inv-history-stat {
+  --hist-accent: #60a5fa;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-areas:
+    "ico value"
+    "ico label";
+  column-gap: 8px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--hist-accent) 28%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--hist-accent) 9%, rgba(8, 13, 24, .7));
+}
+
+.inv-history-stat i {
+  grid-area: ico;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--hist-accent) 18%, transparent);
+  color: var(--hist-accent);
+  font-style: normal;
+  font-weight: 900;
+}
+
+.inv-history-stat b {
+  grid-area: value;
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.inv-history-stat small {
+  grid-area: label;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: .66rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.inv-history--modal .inv-history-list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(58vh, 620px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.inv-history--modal > .cs-section-hdr {
+  margin: 2px 0 8px;
+  padding: 0 2px;
+}
+
+.inv-history--modal .inv-history-row {
+  grid-template-columns: 42px minmax(0, 1fr);
+  border-radius: 11px;
+}
+
+.inv-history-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, .12);
+}
+
+.inv-history-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px;
+}
+
+.inv-history-row {
+  --hist-accent: #6b87ff;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--hist-accent) 34%, var(--border));
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--hist-accent) 14%, transparent), transparent 56%),
+    rgba(10, 16, 27, .72);
+}
+
+.inv-history-row--good { --hist-accent: #34d399; }
+.inv-history-row--info { --hist-accent: #60a5fa; }
+.inv-history-row--gold { --hist-accent: #facc15; }
+.inv-history-row--bad { --hist-accent: #fb7185; }
+.inv-history-row--warn { --hist-accent: #f59e0b; }
+
+.inv-history-media {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: var(--hist-accent);
+  font-weight: 900;
+  background: color-mix(in srgb, var(--hist-accent) 16%, rgba(255,255,255,.04));
+  border: 1px solid color-mix(in srgb, var(--hist-accent) 35%, transparent);
+}
+
+.inv-history-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.inv-history-main {
+  min-width: 0;
+}
+
+.inv-history-title,
+.inv-history-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.inv-history-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.inv-history-title span {
+  flex: 0 0 auto;
+  color: var(--hist-accent);
+  font-weight: 800;
+}
+
+.inv-history-meta {
+  margin-top: 2px;
+  color: var(--text-dim);
+  font-size: .75rem;
+}
+
+.inv-history-meta b {
+  color: var(--hist-accent);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: .68rem;
+}
+
+.inv-history-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inv-history-note {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: .73rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inv-history-empty {
+  grid-column: 1 / -1;
+  padding: 14px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--text-dim);
+  text-align: center;
+  background: rgba(255,255,255,.025);
 }

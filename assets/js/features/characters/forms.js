@@ -10,6 +10,7 @@ import { spellUid, ensureSpellIds } from './spells-calc.js';
 import { loadAllUsers } from '../../core/adventure.js';
 import { _esc } from '../../shared/html.js';
 import { makeSortable } from '../../shared/sortable-helper.js';
+import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
 import PAGES from '../pages.js';
 
 import { getCharacterById } from '../../shared/character-state.js';
@@ -250,8 +251,15 @@ export async function setSortValidation(idx, status) {
 
 export async function deleteInvItem(idx) {
   const c=STATE.activeChar; if(!c) return;
+  const item = c.inventaire?.[idx];
   c.inventaire.splice(idx,1);
-  if (await trySave('characters',c.id,{inventaire:c.inventaire})) _renderFormsChar(c, 'inventaire');
+  const historyPatch = inventoryHistoryPayload(c, makeInventoryHistoryEntry('delete', item, 1, {
+    actorUid: STATE.user?.uid || '',
+    actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+    source: 'Inventaire',
+  }));
+  c.inventoryHistory = historyPatch.inventoryHistory;
+  if (await trySave('characters',c.id,{inventaire:c.inventaire, ...historyPatch})) _renderFormsChar(c, 'inventaire');
 }
 
 // ══════════════════════════════════════════════

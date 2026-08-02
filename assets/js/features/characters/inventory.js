@@ -16,6 +16,11 @@ import {
   getInventoryItemResaleValue,
   getInventoryItemImage,
 } from '../../shared/inventory-utils.js';
+import {
+  inventoryHistoryPayload,
+  inventoryHistoryTypeMeta,
+  makeInventoryHistoryEntry,
+} from '../../shared/inventory-history.js';
 import { getArmorTypeMeta, getWeaponDamageStatKeys } from '../../shared/equipment-utils.js';
 import { characterAvatarHtml, characterPortraitContent } from '../../shared/portraits.js';
 import { calcUpgradeRefund, getUpgradeTotalCost, hasUpgrades, getUpgradeSettings } from '../../shared/upgrade-settings.js';
@@ -79,6 +84,123 @@ export function getInventoryCatalogItem(itemId) {
 
 function _renderInventoryChar(c, tab = 'inventaire') {
   charSession.renderSheet?.(c, tab || charSession.getCurrentCharTab() || 'inventaire');
+}
+
+function _inventoryHistoryActor() {
+  return {
+    actorUid: STATE.user?.uid || '',
+    actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+  };
+}
+
+function _patchInventoryHistoryLocal(c, history) {
+  if (!c || !Array.isArray(history)) return;
+  c.inventoryHistory = history;
+  if (STATE.activeChar?.id === c.id) STATE.activeChar.inventoryHistory = history;
+  const stChar = (STATE.characters || []).find(x => x.id === c.id);
+  if (stChar) stChar.inventoryHistory = history;
+}
+
+function _historyDateLabel(at) {
+  const date = new Date(Number(at) || Date.now());
+  return date.toLocaleString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+export function renderInventoryHistory(c, opts = {}) {
+  const compact = !!opts.compact;
+  const history = Array.isArray(c?.inventoryHistory) ? c.inventoryHistory : [];
+  const latest = history.slice(0, compact ? 6 : 100);
+  const body = latest.length
+    ? latest.map(entry => {
+      const meta = inventoryHistoryTypeMeta(entry.type);
+      const actor = entry.actorName ? ` par ${entry.actorName}` : '';
+      const target = entry.targetName ? ` · ${entry.targetName}` : '';
+      const source = entry.source ? ` · ${entry.source}` : '';
+      const note = entry.note ? `<span class="inv-history-note">${_esc(entry.note)}</span>` : '';
+      return `<div class="inv-history-row inv-history-row--${meta.tone}">
+        <div class="inv-history-media">
+          ${entry.image
+            ? `<img src="${_esc(entry.image)}" alt="">`
+            : `<span>${_esc(entry.icon || meta.icon)}</span>`}
+        </div>
+        <div class="inv-history-main">
+          <div class="inv-history-title">
+            <strong>${_esc(entry.name || 'Objet')}</strong>
+            <span>×${Math.max(1, parseInt(entry.qty) || 1)}</span>
+          </div>
+          <div class="inv-history-meta">
+            <b>${_esc(entry.label || meta.label)}</b>
+            <span>${_esc(_historyDateLabel(entry.at))}${_esc(actor)}${_esc(target)}${_esc(source)}</span>
+          </div>
+          ${note}
+        </div>
+      </div>`;
+    }).join('')
+    : `<div class="inv-history-empty">
+      Aucun mouvement pour le moment. Les prochains ajouts, suppressions et objets consommés apparaîtront ici.
+    </div>`;
+
+  const tag = compact ? 'div' : 'section';
+  return `<${tag} class="${compact ? 'inv-history inv-history--compact' : 'inv-history inv-history--modal'}">
+    <div class="cs-section-hdr">
+      <span class="cs-section-title">Historique des objets</span>
+      <span class="cs-hint">${history.length} mouvement${history.length !== 1 ? 's' : ''}${history.length > latest.length ? ` - ${latest.length} derniers affiches` : ''}</span>
+    </div>
+    <div class="inv-history-list">${body}</div>
+  </${tag}>`;
+}
+
+export function inventoryHistoryButton(c) {
+  const count = Array.isArray(c?.inventoryHistory) ? c.inventoryHistory.length : 0;
+  return `<button class="inv-history-trigger" data-action="openInventoryHistoryModal" data-id="${_esc(c?.id || '')}" title="Voir les ajouts, suppressions et objets consommés">
+    <span aria-hidden="true">↺</span>
+    <b>Historique</b>
+    <em>${count}</em>
+  </button>`;
+}
+
+export function openInventoryHistoryModal(charId) {
+  const c = getCharacterById(charId) || charSession.getCurrentChar?.();
+  if (!c) return;
+  const history = Array.isArray(c.inventoryHistory) ? c.inventoryHistory : [];
+  const counts = history.reduce((acc, entry) => {
+    const meta = inventoryHistoryTypeMeta(entry.type);
+    const key = entry.type || 'move';
+    if (!acc[key]) acc[key] = { label: entry.label || meta.label, icon: entry.icon || meta.icon, count: 0, tone: meta.tone };
+    acc[key].count += Math.max(1, parseInt(entry.qty) || 1);
+    return acc;
+  }, {});
+  const countBadges = Object.values(counts).length
+    ? Object.values(counts).map(it => `<span class="inv-history-stat inv-history-row--${it.tone}">
+      <i>${_esc(it.icon)}</i><b>${it.count}</b><small>${_esc(it.label)}</small>
+    </span>`).join('')
+    : `<span class="inv-history-stat is-empty"><i>0</i><b>0</b><small>Mouvement</small></span>`;
+  openModal('Historique des objets', `
+    <div class="inv-history-modal-shell">
+      <div class="inv-history-modal-head">
+        <div>
+          <span>Inventaire</span>
+          <strong>${_esc(c.nom || 'Personnage')}</strong>
+        </div>
+        <small>${history.length ? `${history.length} mouvement${history.length > 1 ? 's' : ''} enregistre${history.length > 1 ? 's' : ''}` : 'Aucun mouvement enregistre'}</small>
+      </div>
+      <div class="inv-history-stats">${countBadges}</div>
+      ${renderInventoryHistory(c)}
+      <div class="inv-history-modal-foot">
+        <button class="btn btn-outline btn-sm" data-action="close-modal">Fermer</button>
+      </div>
+    </div>
+  `, {
+    icon: '↺',
+    subtitle: 'Journal des mouvements d’inventaire',
+    accent: '#60a5fa',
+  });
 }
 
 function _itemDegatsStatsShorts(item) {
@@ -738,7 +860,12 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
     }
 
     const equipSync = syncEquipmentAfterInventoryMutation(c, indicesToSell);
-    const extraPayload = { inventaire: inv };
+    const historyPatch = inventoryHistoryPayload(c, makeInventoryHistoryEntry('sell', item, qty, {
+      ..._inventoryHistoryActor(),
+      source: 'Inventaire',
+      note: `${totalPrix + refundTotal} or`,
+    }));
+    const extraPayload = { inventaire: inv, ...historyPatch };
     if (equipSync.changed) {
       extraPayload.equipement = equipSync.equipement;
       extraPayload.statsBonus = equipSync.statsBonus;
@@ -758,6 +885,7 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
 
     const res = await useGoldMulti(charId, entries, { charObj: c, extraPayload });
     if (!res.ok) { showNotif(res.error || 'Erreur vente', 'error'); return; }
+    _patchInventoryHistoryLocal(c, historyPatch.inventoryHistory);
 
     closeModal();
     const unequipMsg = equipSync.removedSlots.length
@@ -827,10 +955,15 @@ export async function deleteInvItemBulk(charId, indicesB64) {
   const qty = Math.min(Math.max(1, parseInt(document.getElementById('del-qty')?.value)||1), allIndices.length);
   const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
   const removedIndices = allIndices.slice(0, qty);
+  const removedItem = inv[removedIndices[0]];
   const sorted = [...removedIndices].sort((a,b)=>b-a);
   sorted.forEach(idx => inv.splice(idx, 1));
   const equipSync = syncEquipmentAfterInventoryMutation(c, removedIndices);
-  const payload = { inventaire: inv };
+  const historyPatch = inventoryHistoryPayload(c, makeInventoryHistoryEntry('delete', removedItem, qty, {
+    ..._inventoryHistoryActor(),
+    source: 'Inventaire',
+  }));
+  const payload = { inventaire: inv, ...historyPatch };
   if (equipSync.changed) {
     payload.equipement = equipSync.equipement;
     payload.statsBonus = equipSync.statsBonus;
@@ -844,6 +977,7 @@ export async function deleteInvItemBulk(charId, indicesB64) {
       c.equipement = equipSync.equipement;
       c.statsBonus = equipSync.statsBonus;
     }
+    _patchInventoryHistoryLocal(c, historyPatch.inventoryHistory);
     closeModal();
     const deleteMsg = equipSync.removedSlots.length
       ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
@@ -986,7 +1120,17 @@ export async function sendInvItem(fromCharId, indicesB64) {
   itemsToTransfer.forEach(it => toInv.push(it));
 
   const equipSync = syncEquipmentAfterInventoryMutation(fromChar, toSend);
-  const fromPayload = { inventaire: fromInv };
+  const fromHistoryPatch = inventoryHistoryPayload(fromChar, makeInventoryHistoryEntry('send', firstItem, qty, {
+    ..._inventoryHistoryActor(),
+    source: 'Inventaire',
+    targetName: toChar.nom || '',
+  }));
+  const toHistoryPatch = inventoryHistoryPayload(toChar, makeInventoryHistoryEntry('receive', firstItem, qty, {
+    ..._inventoryHistoryActor(),
+    source: fromChar.nom || 'Inventaire',
+    targetName: fromChar.nom || '',
+  }));
+  const fromPayload = { inventaire: fromInv, ...fromHistoryPatch };
   if (equipSync.changed) {
     fromPayload.equipement = equipSync.equipement;
     fromPayload.statsBonus = equipSync.statsBonus;
@@ -997,7 +1141,7 @@ export async function sendInvItem(fromCharId, indicesB64) {
 
   await Promise.all([
     updateInCol('characters', fromCharId, fromPayload),
-    updateInCol('characters', targetId,   { inventaire: toInv }),
+    updateInCol('characters', targetId,   { inventaire: toInv, ...toHistoryPatch }),
   ]);
   fromChar.inventaire = fromInv;
   if (equipSync.changed) {
@@ -1005,6 +1149,8 @@ export async function sendInvItem(fromCharId, indicesB64) {
     fromChar.statsBonus = equipSync.statsBonus;
   }
   toChar.inventaire   = toInv;
+  _patchInventoryHistoryLocal(fromChar, fromHistoryPatch.inventoryHistory);
+  _patchInventoryHistoryLocal(toChar, toHistoryPatch.inventoryHistory);
 
   closeModal();
   const sendMsg = equipSync.removedSlots.length
@@ -1329,11 +1475,16 @@ export async function saveInvItemFromShop() {
   for (let i = 0; i < qte; i++) {
     inv.push({ ...baseEntry, quantite: 1 });
   }
+  const historyPatch = inventoryHistoryPayload(c, makeInventoryHistoryEntry('add', baseEntry, qte, {
+    ..._inventoryHistoryActor(),
+    source: 'Butin',
+  }));
   c.inventaire = inv;
+  _patchInventoryHistoryLocal(c, historyPatch.inventoryHistory);
   if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
   const stChar = (STATE.characters || []).find(x => x.id === c.id);
   if (stChar) stChar.inventaire = inv;
-  if (await trySave('characters', c.id, { inventaire: inv })) {
+  if (await trySave('characters', c.id, { inventaire: inv, ...historyPatch })) {
     if (_lootSaveRecent) _lootSaveRecent(item.id);
     _lootSelId = null;
     showNotif(`${item.nom} ×${qte} ajouté !`, 'success');
@@ -1376,8 +1527,15 @@ export async function saveInvItem(idx) {
   } else {
     for (let i = 0; i < qte; i++) inv.push({ ...baseItem });
   }
+  const historyPatch = idx < 0
+    ? inventoryHistoryPayload(c, makeInventoryHistoryEntry('add', baseItem, qte, {
+      ..._inventoryHistoryActor(),
+      source: 'Creation manuelle',
+    }))
+    : {};
   c.inventaire = inv;
-  if (await trySave('characters',c.id,{inventaire:inv})) {
+  if (historyPatch.inventoryHistory) _patchInventoryHistoryLocal(c, historyPatch.inventoryHistory);
+  if (await trySave('characters',c.id,{inventaire:inv, ...historyPatch})) {
     closeModal();
     showNotif('Inventaire mis à jour !','success');
   }

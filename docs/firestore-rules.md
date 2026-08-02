@@ -646,7 +646,7 @@ match /adventures/{adventureId} {
               && request.auth.uid in resource.data.controlDelegates))
       && request.resource.data.diff(resource.data)
            .affectedKeys().hasOnly([
-             'col', 'row', 'movedThisTurn', 'movedCells', 'bonusMvt',
+             'col', 'row', 'movedThisTurn', 'movedCells', 'bonusMvt', 'moveOrigin',
              'pageId', 'visible',
              'attackedThisTurn', 'bonusActionThisTurn', 'reactionThisTurn',
              'pm', 'pmCombat'

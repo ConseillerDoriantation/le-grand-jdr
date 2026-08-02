@@ -12,7 +12,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
-import { db, updateDoc, setDoc, addDoc, serverTimestamp, writeBatch } from '../../config/firebase.js';
+import { db, updateDoc, setDoc, addDoc, serverTimestamp, writeBatch, deleteField } from '../../config/firebase.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _sesRef, _tokRef, _logCol } from './vtt-refs.js';
 import { _live } from './vtt-effective.js';
@@ -25,7 +25,7 @@ import {
 
 export async function _vttResetTurn(id) {
   if (!STATE.isAdmin) return;
-  await updateDoc(_tokRef(id), { movedThisTurn: false, movedCells: 0, bonusMvt: 0, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false })
+  await updateDoc(_tokRef(id), { movedThisTurn: false, movedCells: 0, bonusMvt: 0, moveOrigin: deleteField(), attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false })
     .catch(() => showNotif('Erreur reset tour', 'error'));
   showNotif('Tour réinitialisé', 'success');
 }
@@ -51,7 +51,7 @@ export async function _vttToggleCombat() {
     Object.keys(VS.tokens).forEach(id => {
       const tokData = VS.tokens[id]?.data;
       if (!tokData) return;
-      const updates = { movedThisTurn:false, movedCells:0, bonusMvt:0, attackedThisTurn:false, bonusActionThisTurn:false, reactionThisTurn:false };
+      const updates = { movedThisTurn:false, movedCells:0, bonusMvt:0, moveOrigin:deleteField(), attackedThisTurn:false, bonusActionThisTurn:false, reactionThisTurn:false };
       if (Array.isArray(tokData.conditions) && tokData.conditions.length) {
         let changed = false;
         const newConds = tokData.conditions.map(c => {
@@ -174,7 +174,7 @@ export async function _vttNextRound() {
       b.delete(_tokRef(id));
       return; // skip buff cleanup pour token supprimé
     }
-    const updates = { movedThisTurn: false, movedCells: 0, bonusMvt: 0, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false };
+    const updates = { movedThisTurn: false, movedCells: 0, bonusMvt: 0, moveOrigin: deleteField(), attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false };
     if (tokData.buffs?.length) {
       const remaining = tokData.buffs.filter(bf => {
         const isExpired =

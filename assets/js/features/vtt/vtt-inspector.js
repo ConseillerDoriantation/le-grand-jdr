@@ -19,7 +19,7 @@ import { _live } from './vtt-effective.js';
 import { _vttPanelError } from './vtt-utils.js';
 import {
   _canControlToken, _npcCombat, _tokenStatMod, _manualBuffVal, _signed,
-  CONDITION_BY_ID, _resolveUidName,
+  CONDITION_BY_ID, _resolveUidName, _getCombatMoveOrigin,
 } from './vtt.js'; // circ. (runtime)
 
 let _insTab = 'stats';          // onglet actif de l'inspecteur token
@@ -215,9 +215,15 @@ export function _renderInspectorImpl(t) {
           const rem     = _inCombat ? Math.max(0, maxMvt - (t.movedCells||0)) : null;
           const mvLabel = _inCombat ? `${rem} / ${maxMvt} cases` : `${baseMvt} cases`;
           const remColor = _inCombat ? (rem===0?'#f87171':rem<=2?'#f59e0b':'#4ade80') : 'inherit';
+          const origin = _getCombatMoveOrigin(t);
+          const canUndo = _inCombat && _canEditToken && origin
+            && origin.round === (VS.session?.combat?.round ?? 0)
+            && origin.pageId === (t.pageId || VS.activePage?.id || null);
           return `<div class="vtt-ins-stat"><span class="vtt-ins-stat-icon">🏃</span>`+
             `<span class="vtt-ins-stat-lbl">Mouvement</span>`+
-            `<span class="vtt-ins-stat-val" style="color:${remColor}">${mvLabel}${_badge('vitesse')}</span>${_steps('vitesse')}</div>`;
+            `<span class="vtt-ins-stat-val" style="color:${remColor}">${mvLabel}${_badge('vitesse')}</span>`+
+            `${canUndo ? `<button class="vtt-ins-undo-move" data-vtt-fn="_vttUndoMove" data-vtt-args="${_esc(t.id)}" title="Revenir à la position de début de tour et récupérer le mouvement">↶ Annuler</button>` : ''}`+
+            `${_steps('vitesse')}</div>`;
         })() +
         _stat('⚔️', 'Attaque', atkLabel) +
         `<div class="vtt-ins-stat"><span class="vtt-ins-stat-label">🛡 CA</span>`+
@@ -493,7 +499,7 @@ export function _renderInspectorImpl(t) {
           <button class="vtt-btn-sm" data-vtt-fn="_vttConditionAdd" data-vtt-args="${t.id}" title="Appliquer un état">＋</button>
           <button class="vtt-btn-sm" data-vtt-fn="_vttConditionConfig" title="Réglages : ce que chaque état fait, sa stat de JS et son DD par défaut">⚙</button>
         </span>` : '';
-    if (!_activeConds.length && !STATE.isAdmin) return ''; // joueurs : section cachée si vide
+    const glossaryBtn = `<button class="vtt-cond-guide-open" data-vtt-fn="_vttConditionGlossary" title="Comprendre tous les états">📖 Glossaire</button>`;
     const rows = _activeConds.map((cond, i) => {
       const lib = CONDITION_BY_ID[cond.id] || { label: cond.id, icon: '❓', color: '#888', desc: '' };
       const dur = cond.expiresAtRound != null && _r > 0
@@ -512,7 +518,7 @@ export function _renderInspectorImpl(t) {
       return `<div class="vtt-cond-item" style="--cond-c:${lib.color}">
         <div class="vtt-cond-hd">
           <span class="vtt-cond-ic">${lib.icon}</span>
-          <span class="vtt-cond-nom">${lib.label}</span>
+          <button class="vtt-cond-nom" data-vtt-fn="_vttConditionGlossary" data-vtt-args="${_esc(cond.id)}" title="Voir la règle complète">${lib.label}</button>
           <span class="vtt-cond-dur">${dur}</span>
         </div>
         <div class="vtt-cond-desc">${lib.desc}</div>
@@ -521,8 +527,8 @@ export function _renderInspectorImpl(t) {
       </div>`;
     }).join('');
     return `<div class="vtt-ins-section">
-      <div class="vtt-ins-section-title">⚡ États ${addBtn}</div>
-      <div class="vtt-cond-list">${rows || '<div style="font-size:.72rem;color:var(--text-dim);font-style:italic">Aucun état actif</div>'}</div>
+      <div class="vtt-ins-section-title">⚡ États <span class="vtt-ins-section-actions">${glossaryBtn}${addBtn}</span></div>
+      <div class="vtt-cond-list">${rows || '<div class="vtt-cond-empty">Aucun état actif sur ce token.</div>'}</div>
     </div>`;
   })();
 

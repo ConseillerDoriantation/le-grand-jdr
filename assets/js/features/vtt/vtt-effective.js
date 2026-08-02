@@ -10,7 +10,7 @@
 import { VS } from './vtt-state.js';
 import { STATE } from '../../core/state.js';
 import { _norm } from '../../shared/html.js';
-import { getMod, calcPVMax, calcPMMax, calcCA, calcVitesse } from '../../shared/char-stats.js';
+import { getMod, calcPVMax, calcPMMax, calcCA, calcVitesse, computeEquipDerivedBonus } from '../../shared/char-stats.js';
 import { getMainWeapon, getArmorSetData } from '../../shared/equipment-utils.js';
 import { getEquipmentSlots, getPrimaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { _numOr, _activeConditionsOf, _npcStatMod, _npcCombat } from './vtt.js'; // circ. (runtime)
@@ -164,8 +164,15 @@ export function _live(t) {
     };
   }
 
-  const npcHpMax = n ? _numOr(e.pv, _numOr(e.hpMax, _numOr(e.pvMax, 20))) : null;
-  const npcPmMax = n ? _numOr(e.pmMax, _numOr(e.pm, null)) : null;
+  const npcEquip = n ? (e.equipement || {}) : {};
+  const npcDerived = n ? computeEquipDerivedBonus(npcEquip) : {};
+  const npcCaEquip = n ? Object.values(npcEquip).reduce((sum, it) => sum + (_numOr(it?.ca, 0) || 0), 0) : 0;
+  const npcSetData = n ? getArmorSetData({ equipement: npcEquip }) : null;
+  const npcMainWeapon = n ? getMainWeapon({ equipement: npcEquip }) : null;
+  const npcHpBaseMax = n ? _numOr(e.pv, _numOr(e.hpMax, _numOr(e.pvMax, 20))) : null;
+  const npcPmBaseMax = n ? _numOr(e.pmMax, _numOr(e.pm, null)) : null;
+  const npcHpMax = n ? Math.max(0, npcHpBaseMax + (npcDerived.pvMaxBonus || 0)) : null;
+  const npcPmMax = n ? Math.max(0, (npcPmBaseMax ?? 0) + (npcDerived.pmMaxBonus || 0)) : null;
   const npcPmCur = n ? _numOr(e.pmCurrent, npcPmMax) : null;
   const npcCombat = n ? _npcCombat(e) : {};
   const npcWeapon = npcCombat.weapon || {};
@@ -191,7 +198,12 @@ export function _live(t) {
     ? (weapMod !== 0 ? `${weapon.degats}${weapMod>0?'+':''}${weapMod}` : weapon.degats)
     : null;
   const beastDice = b?.attaques?.[0]?.degats || null;
-  const npcDice   = npcWeapon.degats || npcCombat.damage || e.attackDice || null;
+  const npcDmgStats = n && npcMainWeapon
+    ? (npcMainWeapon.degatsStats?.length ? npcMainWeapon.degatsStats : [npcMainWeapon.degatsStat || npcMainWeapon.statAttaque || 'force'])
+    : [];
+  const npcDmgMod = n ? npcDmgStats.reduce((sum, stat) => sum + _npcStatMod(e, stat), 0) : 0;
+  const npcDiceRaw = n ? (npcMainWeapon?.degats || '2d4') : null;
+  const npcDice   = n ? `${npcDiceRaw}${npcDmgMod ? (npcDmgMod > 0 ? '+' : '') + npcDmgMod : ''}` : (npcWeapon.degats || npcCombat.damage || e.attackDice || null);
   const atkDice   = t.attackDice || weapDice || beastDice || npcDice
     || (c ? `1d6${weapMod>=0?'+':''}${weapMod}` : null)
     || (typeof t.attack==='string' ? t.attack : null)
@@ -200,13 +212,16 @@ export function _live(t) {
   // Valeurs dérivées calculées une seule fois pour éviter les recalculs dans result
   const _round   = VS.session?.combat?.round ?? 0;
   const _pmMax   = c ? calcPMMax(c) : n ? npcPmMax : (b ? _numOr(b.pmMax, 0) : null);
-  const _caBase  = t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0)))));
+  const _caBase  = t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0)) + npcCaEquip + (npcDerived.caBonus || 0))));
   const _caBuffs = (t.buffs || []).filter(bf => bf.type === 'ca' && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound));
   const _ca      = _caBase + _caBuffs.reduce((sum, bf) => sum + (bf.bonus || 0), 0);
   // Attaque de base (stat). Le bonus toucher d'enchantement N'est PAS inclus ici :
   // il est appliqué frais au moment du jet (_vttRollAttack) pour ne pas dépendre
   // d'une option figée à l'ouverture du panneau (le buff peut être posé après).
-  const _baseAtk = t.attack   ?? (c ? toucherMod+setBonus : (b ? (_numOr(b.attaques?.[0]?.toucher, 5)) : (_numOr(e.bonusAttaque, _numOr(e.attack, _numOr(npcWeapon.toucher, (npcWeapon.toucherStat || npcWeapon.statAttaque) ? _npcStatMod(e, npcWeapon.toucherStat || npcWeapon.statAttaque) : e.stats?.force != null ? _npcStatMod(e, 'force') : 5))))));
+  const _baseAtk = t.attack   ?? (c ? toucherMod+setBonus : (b ? (_numOr(b.attaques?.[0]?.toucher, 5)) : (() => {
+    const stat = npcMainWeapon?.toucherStats?.[0] || npcMainWeapon?.toucherStat || npcMainWeapon?.statAttaque || npcDmgStats[0] || 'force';
+    return _numOr(e.bonusAttaque, _numOr(e.attack, _numOr(npcWeapon.toucher, _npcStatMod(e, stat) + (npcSetData?.modifiers?.toucherBonus || 0))));
+  })()));
 
   const result = {
     ...t,
@@ -221,7 +236,7 @@ export function _live(t) {
     // Créature avec mana (perso, PNJ ou bestiaire pmMax>0) → jauge PM affichée.
     hasMana:           !!(c || (n && npcPmMax > 0) || (b && _pmMax > 0)),
     displayMovement: (() => {
-      const baseMv = t.movement ?? (c ? calcVitesse(c) : (b ? (_numOr(b.vitesse, 4)) : (_numOr(e.vitesse, _numOr(e.deplacement, 6)))));
+      const baseMv = t.movement ?? (c ? calcVitesse(c) : (b ? (_numOr(b.vitesse, 4)) : (_numOr(e.vitesse, _numOr(e.deplacement, 6)) + (npcDerived.vitesseBonus || 0))));
       const moveDelta = (t.buffs || [])
         .filter(bf => (bf.type === 'move_bonus' || bf.type === 'move_debuff')
           && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound))
@@ -245,7 +260,7 @@ export function _live(t) {
         : b
           ? (t.range > 1 ? t.range : (_numOr(b.attaques?.[0]?.portee, 1)))
           : n
-            ? (t.range > 1 ? t.range : (_numOr(npcCombat.range, _numOr(npcWeapon.portee, 1))))
+            ? (t.range > 1 ? t.range : (_numOr(npcMainWeapon?.portee, _numOr(npcCombat.range, _numOr(npcWeapon.portee, 1)))))
             : (t.range ?? 1);
       const r = VS.session?.combat?.round ?? 0;
       const rangeBonus = (t.buffs || [])

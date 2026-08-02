@@ -21,6 +21,7 @@ import { loadEquipmentSlots, getEquipmentItemOptions } from '../../shared/equipm
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
 import { loadArmorSetSettings, getArmorTypeOptions } from '../../shared/armor-set-settings.js';
 import { syncEquipmentAfterInventoryMutation } from '../../shared/equipment-utils.js';
+import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
 import { ITEM_STATS } from '../shop-item-stats.js';
 
 const FORGE_CATS = [
@@ -327,9 +328,17 @@ async function _saveForge() {
     inv = [...invActuel, ...Array.from({ length: count }, () => ({ ...item, qte: 1 }))];
   }
 
+  const historyPatch = !edition
+    ? inventoryHistoryPayload(c, makeInventoryHistoryEntry('add', item, count, {
+      actorUid: STATE.user?.uid || '',
+      actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+      source: 'Forge',
+    }))
+    : {};
+
   // Un objet MODIFIE peut etre porte : la copie equipee doit etre reconstruite,
   // sinon le personnage garde les anciennes stats jusqu'au prochain rehabillage.
-  const patch = { inventaire: inv };
+  const patch = { inventaire: inv, ...historyPatch };
   if (edition) {
     const invAvant = c.inventaire;
     c.inventaire = inv;
@@ -344,9 +353,14 @@ async function _saveForge() {
   if (await trySave('characters', c.id, patch)) {
     if (patch.equipement) { c.equipement = patch.equipement; c.statsBonus = patch.statsBonus; }
     c.inventaire = inv;
+    if (historyPatch.inventoryHistory) c.inventoryHistory = historyPatch.inventoryHistory;
     if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
     const stChar = (STATE.characters || []).find(x => x.id === c.id);
-    if (stChar) stChar.inventaire = inv;
+    if (STATE.activeChar?.id === c.id && historyPatch.inventoryHistory) STATE.activeChar.inventoryHistory = historyPatch.inventoryHistory;
+    if (stChar) {
+      stChar.inventaire = inv;
+      if (historyPatch.inventoryHistory) stChar.inventoryHistory = historyPatch.inventoryHistory;
+    }
     closeModal();
     showNotif(edition
       ? `« ${item.nom} » mis à jour.`
