@@ -22,6 +22,7 @@ import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, cal
 import { useGold } from '../../shared/economy.js';
 import { loadCollection } from '../../data/firestore.js'; // lecture recettes/boutique (couche quota)
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
+import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
 import { _chrRef, _logCol } from './vtt-refs.js'; // refs Firestore perso + log VTT (leaf)
 import { _STAT_COLOR, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js'; // constantes pures (leaf)
 import { _vttPanelError } from './vtt-utils.js'; // frontière d'erreur (leaf)
@@ -456,11 +457,27 @@ async function _vttMsConfirmSend(senderCharId, senderUid, invIndex, recipCharId)
   });
   const senderBonus = computeEquipStatsBonus(senderEquip);
   const recipInv = [...(recip.inventaire||[]), { ...item }];
+  const senderHistory = inventoryHistoryPayload(sender, makeInventoryHistoryEntry('send', item, 1, {
+    actorUid: STATE.user?.uid || '',
+    actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+    source: 'VTT',
+    targetName: recip.nom || '',
+  }));
+  const recipHistory = inventoryHistoryPayload(recip, makeInventoryHistoryEntry('receive', item, 1, {
+    actorUid: STATE.user?.uid || '',
+    actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+    source: sender.nom || 'VTT',
+    targetName: sender.nom || '',
+  }));
   try {
     const batch = writeBatch(db);
-    batch.update(_chrRef(senderCharId), { inventaire: senderInv, equipement: senderEquip, statsBonus: senderBonus });
-    batch.update(_chrRef(recipCharId), { inventaire: recipInv });
+    batch.update(_chrRef(senderCharId), { inventaire: senderInv, equipement: senderEquip, statsBonus: senderBonus, ...senderHistory });
+    batch.update(_chrRef(recipCharId), { inventaire: recipInv, ...recipHistory });
     await batch.commit();
+    sender.inventaire = senderInv;
+    sender.inventoryHistory = senderHistory.inventoryHistory;
+    recip.inventaire = recipInv;
+    recip.inventoryHistory = recipHistory.inventoryHistory;
     showNotif(`${item.nom||'Objet'} envoyé à ${recip.nom||'joueur'}`, 'success');
   } catch(e) {
     console.error('[vtt] send item', e);
@@ -487,8 +504,15 @@ async function _vttMsDeleteItem(charId, uid, invIndex) {
     else if (e.sourceInvIndex > invIndex) equip[s] = { ...e, sourceInvIndex: e.sourceInvIndex - 1 };
   });
   const bonus = computeEquipStatsBonus(equip);
+  const historyPatch = inventoryHistoryPayload(c, makeInventoryHistoryEntry('delete', item, 1, {
+    actorUid: STATE.user?.uid || '',
+    actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+    source: 'VTT',
+  }));
   try {
-    await updateDoc(_chrRef(charId), { inventaire: inv, equipement: equip, statsBonus: bonus });
+    await updateDoc(_chrRef(charId), { inventaire: inv, equipement: equip, statsBonus: bonus, ...historyPatch });
+    c.inventaire = inv;
+    c.inventoryHistory = historyPatch.inventoryHistory;
     showNotif(`${item.nom||'Objet'} supprimé`, 'info');
   } catch(e) { console.error('[vtt] delete item', e); showNotif('Erreur suppression', 'error'); }
 }
@@ -1249,14 +1273,29 @@ async function _vttMsCraft(charId, uid, recipeId) {
   const newInv = oldInv.filter((_, i) => !removedSet.has(i));
   let produced = null;
   if (passed) { produced = await _msBuildCraftResult(recipe); if (produced) newInv.push(produced); }
+  const historyEntries = status.rows.map(row => makeInventoryHistoryEntry('consume', { nom: row.nom }, row.need, {
+    actorUid: STATE.user?.uid || '',
+    actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+    source: 'Craft VTT',
+    note: recipe.nom || '',
+  }));
+  if (produced) {
+    historyEntries.push(makeInventoryHistoryEntry('add', produced, 1, {
+      actorUid: STATE.user?.uid || '',
+      actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+      source: 'Craft VTT',
+      note: recipe.nom || '',
+    }));
+  }
+  const historyPatch = inventoryHistoryPayload(c, historyEntries);
 
   // 4) Réindexe l'équipement (mêmes règles que l'artisan : indices d'origine).
   c.inventaire = newInv;
   const sync = syncEquipmentAfterInventoryMutation(c, removedIdx);
 
   try {
-    await updateDoc(_chrRef(charId), { inventaire: newInv, equipement: sync.equipement, statsBonus: sync.statsBonus });
-    c.equipement = sync.equipement; c.statsBonus = sync.statsBonus;
+    await updateDoc(_chrRef(charId), { inventaire: newInv, equipement: sync.equipement, statsBonus: sync.statsBonus, ...historyPatch });
+    c.equipement = sync.equipement; c.statsBonus = sync.statsBonus; c.inventoryHistory = historyPatch.inventoryHistory;
   } catch (e) { console.error('[vtt] craft', e); showNotif('Erreur sauvegarde', 'error'); return; }
 
   // 5) Log VTT (visible par toute la table).

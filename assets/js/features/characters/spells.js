@@ -196,6 +196,70 @@ function _spellCompareRuneText(s) {
     .join(' · ') || 'Aucune rune';
 }
 
+function _spellConditionMeta(id, fallback = {}) {
+  const lib = Array.isArray(_conditionsLibCache) ? _conditionsLibCache : [];
+  const found = id ? lib.find(item => item?.id === id) : null;
+  if (found) return found;
+  const label = fallback.label || fallback.name || '';
+  if (!label) return null;
+  return {
+    id: id || fallback.id || '',
+    label,
+    icon: fallback.icon || '',
+    color: fallback.color || '',
+  };
+}
+
+function _spellAfflictionStateId(s = {}) {
+  return s.afflictionEtatId
+    || s.afflictionStateId
+    || s.afflictionConditionId
+    || (s.afflictionMode === 'etat' ? (s.classicStateId || '') : '')
+    || '';
+}
+
+function _conditionSelectSnapshot(selectId) {
+  const sel = document.getElementById(selectId);
+  const id = sel?.value || '';
+  if (!id) return { id: null, label: null, icon: null };
+  const cached = _spellConditionMeta(id);
+  const rawLabel = sel?.selectedOptions?.[0]?.textContent?.trim() || '';
+  return {
+    id,
+    label: cached?.label || rawLabel || id,
+    icon: cached?.icon || '',
+  };
+}
+
+function _spellMjLimitChips(s = {}, pmAuto = 0, pmOverride = null) {
+  const chips = [];
+  if (pmOverride != null) {
+    chips.push({
+      icon: '⚙',
+      label: `PM MJ ${pmOverride}`,
+      title: pmOverride === pmAuto
+        ? `Coût verrouillé par le MJ à ${pmOverride} PM`
+        : `Coût automatique ${pmAuto} PM, forcé à ${pmOverride} PM par le MJ`,
+    });
+  }
+  if (s.mjAlwaysMax) {
+    chips.push({
+      icon: '🎲',
+      label: 'Effet max',
+      title: 'Les dés du sort prennent leur valeur maximum',
+    });
+  }
+  const note = String(s.mjNotes || '').trim();
+  if (note) {
+    chips.push({
+      icon: '📌',
+      label: 'Note MJ',
+      title: note,
+    });
+  }
+  return chips;
+}
+
 function _renderSpellInspector(allSorts, pmDelta, c, canEdit) {
   if (!_sortsInspectorKey) return '';
   const entry = allSorts.map((s, index) => ({ s, index, key: _spellCompareKey(s, index) }))
@@ -205,6 +269,9 @@ function _renderSpellInspector(allSorts, pmDelta, c, canEdit) {
   const isCompared = _sortsCompareKeys.includes(key);
   const rank = _spellRank(s, pmDelta);
   const noyaux = noyauTypesFor(s);
+  const pmAuto = parseInt(s.pm) || 0;
+  const pmOvr = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : null;
+  const mjLimitChips = _spellMjLimitChips(s, pmAuto, pmOvr);
   const runeCounts = new Map();
   _displayRunes(s.runes || []).forEach(r => runeCounts.set(r, (runeCounts.get(r) || 0) + 1));
   const runeHtml = [...runeCounts.entries()].map(([name, count]) => {
@@ -229,6 +296,10 @@ function _renderSpellInspector(allSorts, pmDelta, c, canEdit) {
       <span><small>STATUT</small><b>${_sortValidationState(s)==='ok'?'✓ Validé':_sortValidationState(s)==='no'?'✕ À corriger':'⌛ En attente'}</b></span>
       <span><small>DECK</small><b>${s.actif?'⚡ Dans le deck':'Hors du deck'}</b></span>
     </div>
+    ${mjLimitChips.length ? `<div class="cs-spellinspector-mjlimits">
+      <span>LIMITES MJ</span>
+      <div>${mjLimitChips.map(ch => `<b title="${_esc(ch.title)}"><i>${ch.icon}</i>${_esc(ch.label)}</b>`).join('')}</div>
+    </div>` : ''}
     ${s.effet ? `<div class="cs-spellinspector-description"><span>DESCRIPTION</span><p>${_esc(s.effet)}</p></div>` : ''}
     <details class="cs-spellinspector-effects">
       <summary><span>Voir les effets calculés</span><b>${effects.length}</b></summary>
@@ -1408,14 +1479,16 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   } else if (hasAfflictionDebuff && !activeIds.has('regeneration')) {
     if (afflictionMode === 'etat') {
       // Mode État : on affiche TOUJOURS un chip état, jamais DoT
-      const etat = s.afflictionEtatId
-        ? _conditionsLibCache?.find(c2 => c2.id === s.afflictionEtatId)
-        : null;
+      const stateId = _spellAfflictionStateId(s);
+      const etat = _spellConditionMeta(stateId, {
+        label: s.afflictionEtatLabel || s.afflictionStateLabel || s.classicStateLabel,
+        icon: s.afflictionEtatIcon || s.afflictionStateIcon || s.classicStateIcon,
+      });
       const lbl = etat
         ? `${etat.icon || ''} ${etat.label}`
-        : s.afflictionEtatId && !Array.isArray(_conditionsLibCache)
-          ? 'État en chargement…'
-          : s.afflictionEtatId
+        : stateId && !Array.isArray(_conditionsLibCache)
+          ? 'État en chargement...'
+          : stateId
             ? '⚠ État introuvable'
             : '⚠ État non défini';
       chips.push({ icon:'⛓', val: lbl, color:'#8b5cf6', lbl:'État infligé à l\'ennemi (Affliction)' });
@@ -1540,6 +1613,10 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   const pmVal = pmDelta !== 0
     ? `<span class="cs-sort-pm-old">${pmBase}</span><span class="cs-sort-pm-new">${pmFinal}</span>`
     : `${pmFinal}`;
+  const mjLimitChips = _spellMjLimitChips(s, pmAuto, pmOvr);
+  const mjLimitsHtml = mjLimitChips.length ? `<div class="cs-spellcard-mjlimits" aria-label="Limites MJ">
+    ${mjLimitChips.map(ch => `<span title="${_esc(ch.title)}"><i>${ch.icon}</i>${_esc(ch.label)}</span>`).join('')}
+  </div>` : '';
 
   const typeCol = types.includes('offensif') ? '#ff6b6b'
                 : types.includes('defensif')  ? '#22c38e'
@@ -1643,6 +1720,8 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
       ${primaryChip ? `<span class="cs-spellcard-hero" style="--c:${primaryChip.color}"${primaryChip.lbl?` title="${_esc(primaryChip.lbl)}"`:''}><span class="cs-spellcard-hero-ic">${primaryChip.icon}</span><span class="cs-spellcard-hero-val">${_esc(primaryChip.val)}</span></span>` : ''}
       ${restChips.map(ch => `<span class="cs-sort-sstat${ch.dim?' cs-sort-sstat--dim':''}" style="--c:${ch.color}"${ch.lbl?` title="${_esc(ch.lbl)}"`:''}>${ch.icon} ${_esc(ch.val)}</span>`).join('')}
     </div>` : ''}
+
+    ${mjLimitsHtml}
 
     ${s.effet ? `<p class="cs-spellcard-desc" data-action="_sortsInspectSpell" data-idx="${i}" title="Ouvrir la fiche du sort">${_esc(s.effet)}</p>` : ''}
 
@@ -4450,6 +4529,7 @@ function _buildSortFromDOM() {
   const deplMode = _deplModeEdit || null;
   const iconRaw  = document.getElementById('s-icon')?.value || '';
   const mjVal    = document.getElementById('s-mj-validation')?.value || 'pending';
+  const afflictionState = _conditionSelectSnapshot('s-affliction-etat');
   return {
     icon:        iconRaw.trim() || '',
     mjValidation: mjVal, mjValidated: mjVal === 'ok',
@@ -4474,7 +4554,9 @@ function _buildSortFromDOM() {
     afflictionSlot:   document.getElementById('s-affliction-slot')?.value || 'arme',
     afflictionMode:   document.getElementById('s-affliction-mode')?.value || 'dot',
     afflictionEffect: document.getElementById('s-affliction-effect')?.value || '',
-    afflictionEtatId: document.getElementById('s-affliction-etat')?.value || null,
+    afflictionEtatId: afflictionState.id,
+    afflictionEtatLabel: afflictionState.label,
+    afflictionEtatIcon: afflictionState.icon,
     afflictionDotFormula: document.getElementById('s-affliction-dot-formula')?.value?.trim() || '',
     regenerationFormula: document.getElementById('s-regeneration-formula')?.value?.trim() || '',
     afflictionSaveStat: document.getElementById('s-affliction-save-stat')?.value || '',
@@ -4749,6 +4831,8 @@ function _sanitizeAbsorbedComboFields(s) {
     s.afflictionEffect = '';
     s.afflictionDotFormula = '';
     s.afflictionEtatId = null;
+    s.afflictionEtatLabel = null;
+    s.afflictionEtatIcon = null;
   }
   if (clearAmpMode) {
     s.ampMode = 'zone';
@@ -4927,6 +5011,7 @@ export async function saveSort(idx, btn = null) {
     const pmOverride = (pmOvrInt != null && Number.isFinite(pmOvrInt) && pmOvrInt >= 0)
       ? pmOvrInt
       : (STATE.isAdmin ? null : (idx >= 0 ? sorts[idx]?.pmOverride ?? null : null));
+    const afflictionState = _conditionSelectSnapshot('s-affliction-etat');
     const newSort = _sanitizeAbsorbedComboFields({
       icon:     (document.getElementById('s-icon')?.value || '').trim() || '',
       mjValidation, mjValidated,
@@ -4975,7 +5060,9 @@ export async function saveSort(idx, btn = null) {
                          ?? (idx >= 0 ? (sorts[idx]?.afflictionEffect || '') : ''),
       afflictionDotFormula: document.getElementById('s-affliction-dot-formula')?.value?.trim() || '',
       regenerationFormula: document.getElementById('s-regeneration-formula')?.value?.trim() || '',
-      afflictionEtatId:  document.getElementById('s-affliction-etat')?.value || null,
+      afflictionEtatId:  afflictionState.id,
+      afflictionEtatLabel: afflictionState.label,
+      afflictionEtatIcon: afflictionState.icon,
       zoneW: null,
       zoneH: null,
       dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
@@ -5080,6 +5167,7 @@ function _buildSortFromForm(idx, prevList = []) {
   const pmOverride = (pmOvrInt != null && Number.isFinite(pmOvrInt) && pmOvrInt >= 0)
     ? pmOvrInt
     : (STATE.isAdmin ? null : (idx >= 0 ? prevList[idx]?.pmOverride ?? null : null));
+  const afflictionState = _conditionSelectSnapshot('s-affliction-etat');
   return _sanitizeAbsorbedComboFields({
     icon:     (document.getElementById('s-icon')?.value || '').trim() || '',
     mjValidation, mjValidated,
@@ -5118,7 +5206,9 @@ function _buildSortFromForm(idx, prevList = []) {
     afflictionEffect: document.getElementById('s-affliction-effect')?.value ?? '',
     afflictionDotFormula: document.getElementById('s-affliction-dot-formula')?.value?.trim() || '',
     regenerationFormula: document.getElementById('s-regeneration-formula')?.value?.trim() || '',
-    afflictionEtatId: document.getElementById('s-affliction-etat')?.value || null,
+    afflictionEtatId: afflictionState.id,
+    afflictionEtatLabel: afflictionState.label,
+    afflictionEtatIcon: afflictionState.icon,
     zoneW: null, zoneH: null,
     dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
     deplacement: deplMode ? { mode: deplMode } : null,

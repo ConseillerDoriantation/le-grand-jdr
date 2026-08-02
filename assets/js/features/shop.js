@@ -13,6 +13,7 @@ import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
 import { DAMAGE_RELATIONS } from '../shared/damage-profile.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
+import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../shared/inventory-history.js';
 import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
 import { getArmorTypeOptions } from '../shared/armor-set-settings.js';
 import { openArtisanModal } from './artisan.js';
@@ -51,6 +52,13 @@ const shHandlers = {};
 bindScopedActions('sh', shHandlers);
 
 // ══════════════════════════════════════════════════════════════════════════════
+function _inventoryHistoryActor() {
+  return {
+    actorUid: STATE.user?.uid || '',
+    actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+  };
+}
+
 // TEMPLATES DE CHAMPS PAR TYPE DE BOUTIQUE
 // ══════════════════════════════════════════════════════════════════════════════
 const TEMPLATES = {
@@ -2096,13 +2104,19 @@ async function confirmBuyItem(itemId, directQty) {
 
     const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
     for (let i = 0; i < qty; i++) inv.push({...invItem});
+    const historyPatch = inventoryHistoryPayload(c, makeInventoryHistoryEntry('add', invItem, qty, {
+      ..._inventoryHistoryActor(),
+      source: 'Boutique',
+      note: `${total} or`,
+    }));
 
     const libelle = qty > 1 ? `Achat ×${qty} : ${item.nom}` : `Achat : ${item.nom}`;
     const res = await useGold(charId, -total, libelle, {
       charObj: c,
-      extraPayload: { inventaire: inv },
+      extraPayload: { inventaire: inv, ...historyPatch },
     });
     if (!res.ok) { showNotif(res.error || 'Erreur achat', 'error'); return; }
+    c.inventoryHistory = historyPatch.inventoryHistory;
 
     const newOr = res.newBalance;
     if (directQty == null) closeModalDirect();
@@ -2164,7 +2178,12 @@ export async function sellInvItemFromShop(charId, invIndex, opts = {}) {
 
     inv.splice(invIndex, 1);
     const equipSync = syncEquipmentAfterInventoryMutation(c, [invIndex]);
-    const extraPayload = { inventaire: inv };
+    const historyPatch = inventoryHistoryPayload(c, makeInventoryHistoryEntry('sell', item, 1, {
+      ..._inventoryHistoryActor(),
+      source: 'Boutique',
+      note: `${prixVente} or`,
+    }));
+    const extraPayload = { inventaire: inv, ...historyPatch };
     if (equipSync.changed) {
       extraPayload.equipement = equipSync.equipement;
       extraPayload.statsBonus = equipSync.statsBonus;
@@ -2175,6 +2194,7 @@ export async function sellInvItemFromShop(charId, invIndex, opts = {}) {
       extraPayload,
     });
     if (!res.ok) { showNotif(res.error || 'Erreur vente', 'error'); return; }
+    c.inventoryHistory = historyPatch.inventoryHistory;
 
     const unequipMsg = equipSync.removedSlots.length
       ? ' Objet déséquipé automatiquement.'

@@ -25,6 +25,7 @@ import { _esc, _norm, appSplashHtml, skeletonHtml } from '../shared/html.js';
 import { calcOr, getDefaultCharForUser } from '../shared/char-stats.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { useGold } from '../shared/economy.js';
+import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../shared/inventory-history.js';
 import { shouldRestoreLegacyBastionCatalog } from '../shared/bastion-catalog.js';
 
 
@@ -826,7 +827,14 @@ async function _bastionDoDeposit() {
       }
     }
     char.inventaire = inv;
-    await updateInCol('characters', char.id, { inventaire: inv });
+    const depositHistory = inventoryHistoryPayload(char, makeInventoryHistoryEntry('send', group.item, qte, {
+      actorUid: STATE.user?.uid || '',
+      actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+      source: 'Bastion',
+      targetName: 'Coffre commun',
+    }));
+    char.inventoryHistory = depositHistory.inventoryHistory;
+    await updateInCol('characters', char.id, { inventaire: inv, ...depositHistory });
 
     // 2. Ajoute au coffre du bastion (template du groupe en originalItem)
     const item = group.item;
@@ -909,7 +917,13 @@ async function _bastionDoWithdraw(coffreId) {
       inv.push({ ...template, qte: 1 });
     }
     char.inventaire = inv;
-    await updateInCol('characters', char.id, { inventaire: inv });
+    const withdrawHistory = inventoryHistoryPayload(char, makeInventoryHistoryEntry('receive', template, qte, {
+      actorUid: STATE.user?.uid || '',
+      actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+      source: 'Coffre commun',
+    }));
+    char.inventoryHistory = withdrawHistory.inventoryHistory;
+    await updateInCol('characters', char.id, { inventaire: inv, ...withdrawHistory });
 
     _addHistorique(b, 'retrait_item', `📤 ${char.nom || 'Un héros'} retire ${qte}× ${coffreItem.nom || '?'}`);
     await _save(b);

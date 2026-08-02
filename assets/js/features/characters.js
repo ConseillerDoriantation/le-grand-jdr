@@ -64,7 +64,7 @@ import {
   addInvItem, saveInvItemFromShop,
   editInvItem, saveInvItem,
   renderInvPersonalLine, saveInvPersonalLine,
-  filterInvRows, openInventoryItemDetail,
+  filterInvRows, openInventoryItemDetail, inventoryHistoryButton, openInventoryHistoryModal,
   ensureInventoryCatalog, isInventoryCatalogReady, getInventoryCatalogItem,
 } from './characters/inventory.js';
 import { openCreateItemModal } from './characters/item-forge.js';
@@ -1554,6 +1554,8 @@ function renderCharInventaireV3(c, canEdit) {
         aria-label="Rechercher dans l’inventaire" data-input="_csV3InvSetSearch">
       ${filter.search ? `<button class="inv-search-clear" data-action="csV3InvClearSearch" title="Effacer la recherche" aria-label="Effacer la recherche">×</button>` : ''}
     </div>
+    <div class="inv-toolbar-actions">
+    ${inventoryHistoryButton(c)}
     <div class="inv-densityseg" role="group" aria-label="Mode d’affichage">
       <button class="${_csV3InvDensity === 'cards' ? 'on' : ''}" data-action="csV3InvSetDensity"
         data-density="cards" aria-pressed="${_csV3InvDensity === 'cards'}" title="Vue cartes">▦</button>
@@ -1564,6 +1566,7 @@ function renderCharInventaireV3(c, canEdit) {
       <button class="btn btn-outline btn-sm inv-add-btn" data-action="openCreateItemModal" data-id="${c.id}" title="Créer un objet selon les règles de l’aventure">🛠️ <span>Créer</span></button>
       <button class="btn btn-gold btn-sm inv-add-btn" data-action="addInvItem" data-id="${c.id}" title="Ajouter un objet">＋ <span>Objet</span></button>
     </div>` : ''}
+    </div>
   </div>
   <div class="inv-category-bar" role="tablist" aria-label="Catégories de l’inventaire">
     ${filters.map(f => `<button class="inv-category ${activeCat===f.id?'on':''}" role="tab"
@@ -2083,6 +2086,7 @@ registerActions({
   editMaitrise:             (btn)   => editMaitrise(Number(btn.dataset.idx)),
 
   // Inventaire
+  openInventoryHistoryModal:(btn)   => openInventoryHistoryModal(btn.dataset.id),
   openInventoryItemDetail:  (btn)   => openInventoryItemDetail(btn.dataset.id, btn.dataset.indices),
   addInvItem:               ()      => addInvItem(),
   openCreateItemModal:      (btn)   => openCreateItemModal(btn?.dataset?.id,

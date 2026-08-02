@@ -20,6 +20,7 @@ import {
   calcOr, getItemStatBonus, getItemBaseStatBonus, getItemUpgradeStatBonus,
   ITEM_STAT_META, ITEM_STAT_BY_FULL, computeEquipStatsBonus, getDefaultCharForUser,
 } from '../shared/char-stats.js';
+import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../shared/inventory-history.js';
 import {
   _getTraits, _getBaseTraits, _getAddedTraits,
   syncEquipmentAfterInventoryMutation, buildEquippedItemFromInventory,
@@ -449,6 +450,7 @@ async function _persistChar(c) {
     statsBonus:     c.statsBonus,
     builds:         c.builds,
     activeBuildId:  c.activeBuildId,
+    ...(Array.isArray(c.inventoryHistory) ? { inventoryHistory: c.inventoryHistory } : {}),
   });
   closeModalDirect();
   _renderArtisanModal();
@@ -600,6 +602,12 @@ async function _artisanDoDestroy(invIndex, traitsToExtract) {
   let frags = c.traitFragments || {};
   traitsToExtract.forEach(t => { frags = _addFragment(frags, cat, t, +1); });
   c.traitFragments = frags;
+  c.inventoryHistory = inventoryHistoryPayload(c, makeInventoryHistoryEntry('delete', item, 1, {
+    actorUid: STATE.user?.uid || '',
+    actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+    source: 'Artisan',
+    note: traitsToExtract.join(', '),
+  })).inventoryHistory;
 
   // 4) Débit or si applicable
   if (cost > 0) _logExpense(c, `Artisan : destruction de ${item.nom}`, cost);

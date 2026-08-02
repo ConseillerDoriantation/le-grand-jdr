@@ -14,6 +14,7 @@ import { showNotif } from '../../shared/notifications.js';
 import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
 import { promptModal } from '../../shared/modal.js';
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
+import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
 import { favoriteFirst } from '../../shared/char-stats.js';
 import { useGold } from '../../shared/economy.js';
 import { _chrRef } from './vtt-refs.js';   // ref Firestore perso (leaf)
@@ -468,6 +469,11 @@ async function _vttLootConfirmTake(id) {
   // Snapshot canonique loot → inventaire (préserve tous les champs présents et futurs)
   const baseEntry = shopItemToInvEntry(item, { source: 'butin' });
   for (let k = 0; k < qty; k++) inv.push({ ...baseEntry });
+  const historyPatch = inventoryHistoryPayload(char, makeInventoryHistoryEntry('add', baseEntry, qty, {
+    actorUid: STATE.user?.uid || '',
+    actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+    source: 'Butin VTT',
+  }));
 
   // Réduire ou retirer du butin
   if (item.qty - qty <= 0) {
@@ -478,10 +484,11 @@ async function _vttLootConfirmTake(id) {
 
   try {
     await Promise.all([
-      updateDoc(_chrRef(charId), { inventaire: inv }),
+      updateDoc(_chrRef(charId), { inventaire: inv, ...historyPatch }),
       _saveLoot(),
     ]);
     char.inventaire = inv;
+    char.inventoryHistory = historyPatch.inventoryHistory;
     delete _lootTakeState[id];
     showNotif(`×${qty} "${item.nom}" → ${_esc(char.nom || char.pseudo || '?')}`, 'success');
   } catch { showNotif('Erreur lors de la prise du butin', 'error'); }
@@ -756,7 +763,15 @@ async function _applyLootDistribution(id, { forced = false } = {}) {
       const inv = Array.isArray(char.inventaire) ? [...char.inventaire] : [];
       const baseEntry = shopItemToInvEntry(item, { source: 'butin' });
       for (let k = 0; k < n; k++) inv.push({ ...baseEntry });
-      writes.push(updateDoc(_chrRef(c.charId), { inventaire: inv }).then(() => { char.inventaire = inv; }));
+      const historyPatch = inventoryHistoryPayload(char, makeInventoryHistoryEntry('add', baseEntry, n, {
+        actorUid: STATE.user?.uid || '',
+        actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+        source: 'Butin VTT',
+      }));
+      writes.push(updateDoc(_chrRef(c.charId), { inventaire: inv, ...historyPatch }).then(() => {
+        char.inventaire = inv;
+        char.inventoryHistory = historyPatch.inventoryHistory;
+      }));
       summary.push(`${_esc(char.nom || c.name)}: ×${n}`);
     }
     item.qty = Math.max(0, (item.qty || 0) - allocated);

@@ -12,12 +12,13 @@ import Sortable from '../../vendor/sortable.esm.js';
 import { getDocData, getDocDataSilent, saveDoc, loadCollection, subscribeCollection } from '../../data/firestore.js';
 import {
   db, doc, getDoc, addDoc, updateDoc, deleteDoc,
-  setDoc, onSnapshot, serverTimestamp, writeBatch,
+  setDoc, onSnapshot, serverTimestamp, writeBatch, deleteField,
   query, orderBy, limit,
 } from '../../config/firebase.js';
 import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcPalier, calcDeckMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../../shared/char-stats.js';
 import { calcCriticalEffectTotal, criticalEffectFormulaLabel } from '../../shared/character-rules.js';
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
+import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
 import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
 import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED, getCharDamageProfile } from '../../shared/equipment-utils.js';
 import { buildProjectionPatch, switchBuild } from '../../shared/character-builds.js';
@@ -80,7 +81,7 @@ import {
 } from './vtt-conditions-config.js';
 import {
   _vttConditionAdd, _vttConditionApply, _vttConditionRemove, _vttConditionSave,
-  _vttConditionEdit, _vttConditionEditSave, _vttEnsureConditionsLoaded,
+  _vttConditionEdit, _vttConditionEditSave, _vttEnsureConditionsLoaded, _vttConditionGlossary,
 } from './vtt-conditions.js';
 import {
   _vttResetTurn, _vttToggleTurnFlag, _vttToggleCombat, _vttNextRound,
@@ -436,7 +437,11 @@ export const _numOr = (value, fallback = null) => {
   return Number.isFinite(n) ? n : fallback;
 }
 export const _signed = n => n > 0 ? `+${n}` : `${n}`;
-const _npcStatScore = (npc, key) => _numOr(npc?.stats?.[key], 8);
+const _npcStatScore = (npc, key) => {
+  const base = _numOr(npc?.stats?.[key], 10);
+  const equipBonus = computeEquipStatsBonus(npc?.equipement || {})[key] || 0;
+  return base + equipBonus;
+};
 export const _npcStatMod = (npc, key) => getModFromScore(_npcStatScore(npc, key));
 export const _npcCombat = (npc = {}) => npc?.combat || {};
 export const _tokenStatMod = (t, statKey) => {
@@ -1230,11 +1235,17 @@ function _buildShape(t) {
         const batch=writeBatch(db);
         for (const id of VS.selectedMulti) {
           const s=VS.tokens[id]?.shape; if (!s) continue;
-          const d2=_tokenDims(VS.tokens[id].data);
+          const tokenData=VS.tokens[id].data;
+          const d2=_tokenDims(tokenData);
           const nc=_clampTokenCell(Math.round((s.x()-d2.w*CELL/2)/CELL), d2.w, pg.cols);
           const nr=_clampTokenCell(Math.round((s.y()-d2.h*CELL/2)/CELL), d2.h, pg.rows);
           s.position({x:nc*CELL+d2.w*CELL/2,y:nr*CELL+d2.h*CELL/2});
-          batch.update(_tokRef(id),{col:nc,row:nr});
+          const movePatch={col:nc,row:nr};
+          if (VS.session?.combat?.active && (nc !== tokenData.col || nr !== tokenData.row)) {
+            const origin = _combatMoveOrigin(tokenData);
+            if (STATE.isAdmin) movePatch.moveOrigin = origin;
+          }
+          batch.update(_tokRef(id),movePatch);
         }
         VS.layers.token.batchDraw();
         await batch.commit().catch(()=>showNotif('Erreur déplacement groupe','error'));
@@ -1265,6 +1276,11 @@ function _buildShape(t) {
       }
       g.position({x:c*CELL+sw*CELL/2,y:r*CELL+sh*CELL/2}); VS.layers.token.batchDraw();
       const patch={col:c,row:r};
+      const moveCur=VS.tokens[t.id]?.data;
+      if (VS.session?.combat?.active && moveCur && (c !== moveCur.col || r !== moveCur.row)) {
+        const origin = _combatMoveOrigin(moveCur);
+        if (STATE.isAdmin) patch.moveOrigin = origin;
+      }
       if (!STATE.isAdmin&&VS.session?.combat?.active) {
         const cur=VS.tokens[t.id]?.data;
         const d=Math.abs(c-(cur?.col??c))+Math.abs(r-(cur?.row??r));
@@ -1278,6 +1294,7 @@ function _buildShape(t) {
         _entry.data.col=c; _entry.data.row=r;
         if (patch.movedCells!==undefined)   _entry.data.movedCells=patch.movedCells;
         if (patch.movedThisTurn!==undefined) _entry.data.movedThisTurn=patch.movedThisTurn;
+        if (patch.moveOrigin!==undefined) _entry.data.moveOrigin=patch.moveOrigin;
       }
       _refreshRanges(t.id, _entry?.data);
       fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
@@ -2043,6 +2060,11 @@ async function _moveTo(id, col, row) {
     }
   }
   const patch = {col, row};
+  const moved = !!cur && (col !== cur.col || row !== cur.row);
+  if (moved && VS.session?.combat?.active) {
+    const origin = _combatMoveOrigin(cur);
+    if (STATE.isAdmin) patch.moveOrigin = origin;
+  }
   if (!STATE.isAdmin && VS.session?.combat?.active && cur) {
     const d = Math.abs(col - cur.col) + Math.abs(row - cur.row);
     patch.movedCells = (cur.movedCells || 0) + d;
@@ -2057,8 +2079,73 @@ async function _moveTo(id, col, row) {
     entry.data.row = row;
     if (patch.movedCells  !== undefined) entry.data.movedCells  = patch.movedCells;
     if (patch.movedThisTurn !== undefined) entry.data.movedThisTurn = patch.movedThisTurn;
+    if (patch.moveOrigin !== undefined) entry.data.moveOrigin = patch.moveOrigin;
   }
   _refreshRanges(id, entry?.data);
+}
+
+const _combatMoveOrigins = new Map();
+
+export function _getCombatMoveOrigin(token = {}) {
+  return _combatMoveOrigins.get(token.id) || token.moveOrigin || null;
+}
+
+function _combatMoveOrigin(token = {}) {
+  const round = VS.session?.combat?.round ?? 0;
+  const pageId = token.pageId || VS.activePage?.id || null;
+  const existing = _getCombatMoveOrigin(token);
+  if (existing && existing.round === round && existing.pageId === pageId) return existing;
+  const origin = {
+    col: Number(token.col) || 0,
+    row: Number(token.row) || 0,
+    movedCells: Number(token.movedCells) || 0,
+    movedThisTurn: !!token.movedThisTurn,
+    round,
+    pageId,
+  };
+  if (token.id) _combatMoveOrigins.set(token.id, origin);
+  return origin;
+}
+
+async function _vttUndoMove(id) {
+  const entry = VS.tokens[id];
+  const token = entry?.data;
+  const origin = _getCombatMoveOrigin(token);
+  const round = VS.session?.combat?.round ?? 0;
+  const pageId = token?.pageId || VS.activePage?.id || null;
+  if (!token || !_canControlToken(token) || !VS.session?.combat?.active) return;
+  if (!origin || origin.round !== round || origin.pageId !== pageId) {
+    showNotif('Aucun déplacement à annuler pour ce tour.', 'info');
+    return;
+  }
+  const patch = {
+    col: Number(origin.col) || 0,
+    row: Number(origin.row) || 0,
+    movedCells: Number(origin.movedCells) || 0,
+    movedThisTurn: !!origin.movedThisTurn,
+  };
+  if (STATE.isAdmin) patch.moveOrigin = deleteField();
+  try {
+    await updateDoc(_tokRef(id), patch);
+    token.col = patch.col;
+    token.row = patch.row;
+    token.movedCells = patch.movedCells;
+    token.movedThisTurn = patch.movedThisTurn;
+    delete token.moveOrigin;
+    _combatMoveOrigins.delete(id);
+    const dims = _tokenDims(token);
+    entry.shape?.position({
+      x: patch.col * CELL + dims.w * CELL / 2,
+      y: patch.row * CELL + dims.h * CELL / 2,
+    });
+    VS.layers.token?.batchDraw();
+    _refreshRanges(id, token);
+    fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
+    showNotif('Déplacement annulé : position et mouvement restaurés.', 'success');
+  } catch (error) {
+    console.error('[vtt] undo move', error);
+    showNotif('Impossible d’annuler le déplacement.', 'error');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3757,21 +3844,29 @@ function _buildAttackOptions(t) {
   // ── PNJ : stats saisies dans la fiche PNJ ──
   if (!c && t.npcId) {
     const n = VS.npcs[t.npcId] || {};
-    const combat = _npcCombat(n);
-    const weapon = combat.weapon || {};
+    const weapon = getMainWeapon({ equipement: n.equipement || {} });
+    const setData = getArmorSetData({ equipement: n.equipement || {} });
     const dmgStat = (Array.isArray(weapon.degatsStats) && weapon.degatsStats.length
       ? weapon.degatsStats[0]
       : (weapon.degatsStat || weapon.statAttaque || 'force'));
+    const touchStat = weapon.toucherStats?.[0] || weapon.toucherStat || weapon.statAttaque || dmgStat;
     const dmgMod = _npcStatMod(n, dmgStat);
+    const touchMod = _npcStatMod(n, touchStat);
+    const setTouch = setData.modifiers?.toucherBonus || 0;
+    const rawDice = t.attackDice || weapon.degats || '2d4';
+    const dice = `${rawDice}${dmgMod ? (dmgMod > 0 ? '+' : '') + dmgMod : ''}`;
     options.push({
       id: 'npc_attack',
-      icon: '⚔️',
-      label: weapon.nom || combat.weaponName || 'Attaque',
-      rawDice: t.attackDice || weapon.degats || combat.damage || n.attackDice || '1d6',
-      dice: t.attackDice || weapon.degats || combat.damage || n.attackDice || '1d6',
+      icon: weapon.isDefault ? '👊' : '⚔️',
+      label: weapon.isDefault ? 'Coup de poing' : (weapon.nom || 'Attaque'),
+      rawDice,
+      dice,
       portee: ld.displayRange ?? 1,
       pmCost: 0,
-      toucher: ld.displayAttack ?? 5,
+      toucher: ld.displayAttack ?? (touchMod + setTouch),
+      toucherMod: touchMod,
+      toucherSetBonus: setTouch,
+      toucherStatLabel: statShort(touchStat) || touchStat,
       dmgStatMod: dmgMod,
       dmgStatLabel: statShort(dmgStat) || dmgStat,
       maitriseBonus: 0,
@@ -3781,6 +3876,54 @@ function _buildAttackOptions(t) {
       damageTypeIcon: '💪',
       damageTypeColor: '#9ca3af',
     });
+    if (Array.isArray(n.actions) && n.actions.length) {
+      const nChar = {
+        id: n.id || `npc_${t.npcId}`,
+        nom: n.nom || 'PNJ',
+        stats: {
+          force: _numOr(n.stats?.force, 10),
+          dexterite: _numOr(n.stats?.dexterite, 10),
+          intelligence: _numOr(n.stats?.intelligence, 10),
+          sagesse: _numOr(n.stats?.sagesse, 10),
+          constitution: _numOr(n.stats?.constitution, 10),
+          charisme: _numOr(n.stats?.charisme, 10),
+        },
+        statsBonus: computeEquipStatsBonus(n.equipement || {}),
+        equipement: n.equipement || {},
+        deck_sorts: n.actions,
+        sort_cats: [],
+        elements: [],
+      };
+      const pmSetDelta = setData.modifiers?.spellPmDelta || 0;
+      n.actions.forEach((s, actIdx) => {
+        if (s.actif === false) return;
+        const baseRange = (s.portee != null && Number.isFinite(parseInt(s.portee)))
+          ? parseInt(s.portee)
+          : (ld.displayRange || 1);
+        const pmRaw = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : (parseInt(s.pm) || 0);
+        const pmCost = Math.max(0, pmRaw + pmSetDelta);
+        const opt = _buildSpellOption(s, {
+          id: `npc_action_${actIdx}`,
+          sortIdx: `npc_${t.npcId}_${actIdx}`,
+          spellId: s.id || null,
+          label: s.nom || `Action ${actIdx + 1}`,
+          c: nChar,
+          portee: baseRange,
+          pmCost,
+          basePm: pmCost,
+          pmRaw,
+          pmSetDelta,
+          fallbackTouchStat: touchStat,
+          fallbackDmgStat: dmgStat,
+          fallbackTouchMod: touchMod,
+          fallbackDmgMod: dmgMod,
+          touchSetBonus: setTouch,
+          enchantOnlyAlsoEtat: true,
+          extras: { _npcAction: true },
+        });
+        if (opt) options.push(_withSpellCooldown(t, opt));
+      });
+    }
     return options;
   }
 
@@ -4063,7 +4206,7 @@ let _suspendedTriggerActive = false;
 // au bon endroit selon le type (perso → fiche, PNJ → doc PNJ, ennemi → token).
 function _effectiveTokenHp(t) {
   if (t.characterId) { const c = VS.characters[t.characterId]; return c ? (c.hp ?? calcPVMax(c)) : (t.hp ?? null); }
-  if (t.npcId)       { const n = VS.npcs[t.npcId];            return n ? _numOr(n.hp, _numOr(n.pvMax, t.hp ?? null)) : (t.hp ?? null); }
+  if (t.npcId)       { const n = VS.npcs[t.npcId];            return n ? _numOr(n.hp, _live(t)?.displayHpMax ?? t.hp ?? null) : (t.hp ?? null); }
   if (t.beastId)     { const b = VS.bestiary[t.beastId];      return t.hp != null ? t.hp : (b ? _numOr(b.pvMax, null) : null); }
   return t.hp ?? null;
 }
@@ -4072,6 +4215,11 @@ function _effectiveTokenHp(t) {
 // paient leurs compétences sur leur propre mana). null si le token ne porte pas
 // de PM (perso/PNJ → le PM est sur la fiche, capturé via `chars`).
 function _effectiveTokenPm(t) {
+  if (t.npcId) {
+    const n = VS.npcs[t.npcId];
+    if (!n) return t.pm ?? null;
+    return _numOr(n.pmCurrent, _live(t)?.displayPmMax ?? t.pm ?? null);
+  }
   if (t.beastId) { const b = VS.bestiary[t.beastId]; return t.pm != null ? t.pm : (b ? _numOr(b.pmMax, null) : null); }
   return t.pm ?? null;
 }
@@ -6036,6 +6184,7 @@ async function _vttRollAttack() {
   const _srcChar = _characterForToken(src);
   const _ownerTok = src.summonOwnerId ? VS.tokens[src.summonOwnerId]?.data : null;
   const _pmPayerCharId = src.summonOwnerCharId || _srcChar?.id || (_ownerTok ? _characterForToken(_ownerTok)?.id : null);
+  const _pmPayerNpcId = !_pmPayerCharId && src.npcId ? src.npcId : null;
   const _deductPm  = async () => {
     if (opt.pmCost <= 0) return;
     if (_pmPayerCharId) {
@@ -6044,6 +6193,15 @@ async function _vttRollAttack() {
         ..._charPmPatch(Math.max(0, _charPmCur(c) - opt.pmCost)),
         vttControlTokenId: src.id,
       });
+      return;
+    }
+    if (_pmPayerNpcId) {
+      const n = VS.npcs[_pmPayerNpcId];
+      if (n) {
+        const maxPm = _numOr(n.pmMax, _numOr(n.pm, 0));
+        const curPm = _numOr(n.pmCurrent, maxPm);
+        await updateDoc(_npcRef(_pmPayerNpcId), { pmCurrent: Math.max(0, curPm - opt.pmCost) }).catch(() => {});
+      }
       return;
     }
     // Créature du bestiaire avec mana : déduit du token. `pm` = PM réels (vus du
@@ -6070,8 +6228,17 @@ async function _vttRollAttack() {
     if (meta.itemId)  idx = inv.findIndex(it => it?.itemId === meta.itemId);
     if (idx < 0 && meta.itemNom) idx = inv.findIndex(it => it?.nom === meta.itemNom);
     if (idx < 0) return; // déjà consommé
+    const consumedItem = inv[idx];
+    const historyPatch = inventoryHistoryPayload(c, makeInventoryHistoryEntry('consume', consumedItem, 1, {
+      actorUid: STATE.user?.uid || '',
+      actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+      source: 'VTT',
+      note: opt.nom || opt.label || '',
+    }));
     inv.splice(idx, 1);
-    await updateDoc(_chrRef(_srcChar.id), { inventaire: inv }).catch(() => {});
+    await updateDoc(_chrRef(_srcChar.id), { inventaire: inv, ...historyPatch }).catch(() => {});
+    c.inventaire = inv;
+    c.inventoryHistory = historyPatch.inventoryHistory;
     showNotif(`🧪 ${meta.itemNom || 'Objet'} consommé`, 'info');
   };
   const _markActionUsed = async () => {
@@ -6125,6 +6292,17 @@ async function _vttRollAttack() {
         if (actualPm < opt.pmCost) {
           const _who = src.summonOwnerId ? ' du lanceur' : '';
           showNotif(`⚠ PM insuffisants${_who} (${actualPm}/${opt.pmCost} requis)`, 'error');
+          return;
+        }
+      }
+    }
+    if (opt.pmCost > 0 && _pmPayerNpcId) {
+      const nPm = VS.npcs[_pmPayerNpcId];
+      if (nPm) {
+        const maxPm = _numOr(nPm.pmMax, _numOr(nPm.pm, 0));
+        const actualPm = _numOr(nPm.pmCurrent, maxPm);
+        if (actualPm < opt.pmCost) {
+          showNotif(`⚠ PM insuffisants (${actualPm}/${opt.pmCost} requis)`, 'error');
           return;
         }
       }
@@ -10176,8 +10354,10 @@ export const VTT_ACTIONS = {
   _vttConditionConfigSelect,
   _vttConditionEdit,
   _vttConditionEditSave,
+  _vttConditionGlossary,
   _vttConditionRemove,
   _vttConditionSave,
+  _vttUndoMove,
   _vttConfirmAddBuff,
   _vttSyncAddBuffRows,
   _vttConfirmAddPage,

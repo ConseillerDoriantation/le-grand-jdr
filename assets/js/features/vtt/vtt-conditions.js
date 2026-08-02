@@ -26,6 +26,78 @@ function getVttConditionLibrary() {
   }));
 }
 
+function _conditionUsageBadges(condition = {}) {
+  const usage = condition.spellUsage || {};
+  const badges = [];
+  if (usage.enchantment) badges.push('<span class="vtt-cond-guide-tag is-buff">Enchantement</span>');
+  if (usage.affliction) badges.push('<span class="vtt-cond-guide-tag is-debuff">Affliction</span>');
+  if (!badges.length) badges.push('<span class="vtt-cond-guide-tag">État tactique</span>');
+  return badges.join('');
+}
+
+function _conditionRuleMeta(condition = {}) {
+  const rows = [];
+  if (condition.defaultSaveStat) {
+    const stat = statShort(condition.defaultSaveStat) || condition.defaultSaveStat;
+    rows.push(`<span>🎲 JS ${_esc(stat)} · DD ${Number(condition.defaultDC) || 11}</span>`);
+  } else {
+    rows.push('<span>∅ Aucun jet automatique</span>');
+  }
+  if (Number(condition.defaultDuration) > 0) {
+    const duration = Number(condition.defaultDuration);
+    rows.push(`<span>⏳ ${duration} tour${duration > 1 ? 's' : ''} par défaut</span>`);
+  }
+  return rows.join('');
+}
+
+function _conditionGlossaryRows(query = '') {
+  const q = String(query || '').trim().toLocaleLowerCase('fr');
+  const rows = CONDITION_LIBRARY.filter(condition => !q || [condition.label, condition.desc, condition.id]
+    .some(value => String(value || '').toLocaleLowerCase('fr').includes(q)));
+  if (!rows.length) {
+    return `<div class="vtt-cond-guide-empty"><span>🔎</span><b>Aucun état trouvé</b><small>Essaie un autre nom ou un mot présent dans son effet.</small></div>`;
+  }
+  return rows.map(condition => `
+    <article class="vtt-cond-guide-card" id="vtt-cond-guide-${_esc(condition.id)}" style="--cond-c:${_esc(condition.color || '#7f8da3')}">
+      <div class="vtt-cond-guide-icon" aria-hidden="true">${_esc(condition.icon || '✨')}</div>
+      <div class="vtt-cond-guide-copy">
+        <div class="vtt-cond-guide-head">
+          <h3>${_esc(condition.label || condition.id)}</h3>
+          <div class="vtt-cond-guide-tags">${_conditionUsageBadges(condition)}</div>
+        </div>
+        <p>${_esc(condition.desc || 'Aucune description renseignée par le MJ.')}</p>
+        <div class="vtt-cond-guide-meta">${_conditionRuleMeta(condition)}</div>
+      </div>
+    </article>`).join('');
+}
+
+/** Glossaire joueur : réutilise la bibliothèque déjà chargée par la table. */
+export async function _vttConditionGlossary(focusId = '') {
+  await _vttEnsureConditionsLoaded();
+  openModal('📖 Glossaire des états', `
+    <div class="vtt-cond-guide">
+      <div class="vtt-cond-guide-intro">
+        <div><b>Comprendre un état en un coup d'œil</b><span>Effet en jeu, jet éventuel et durée définie par l'aventure.</span></div>
+        <label class="vtt-cond-guide-search"><span>🔎</span><input id="vtt-cond-guide-search" type="search" autocomplete="off" placeholder="Rechercher un état ou un effet…"></label>
+      </div>
+      <div class="vtt-cond-guide-list" id="vtt-cond-guide-list">${_conditionGlossaryRows()}</div>
+    </div>`, {
+    subtitle: 'Les règles réellement utilisées dans cette aventure',
+    accent: '#818cf8',
+  });
+  const input = document.getElementById('vtt-cond-guide-search');
+  const list = document.getElementById('vtt-cond-guide-list');
+  input?.addEventListener('input', () => {
+    if (list) list.innerHTML = _conditionGlossaryRows(input.value);
+  });
+  requestAnimationFrame(() => {
+    if (!focusId) return input?.focus();
+    const card = document.getElementById(`vtt-cond-guide-${focusId}`);
+    card?.classList.add('is-focused');
+    card?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  });
+}
+
 export async function _vttEnsureConditionsLoaded() {
   if (CONDITION_LIBRARY.length <= CONDITION_DEFAULT_LIBRARY.length) {
     await _loadConditionsOverrides().catch(() => {});
