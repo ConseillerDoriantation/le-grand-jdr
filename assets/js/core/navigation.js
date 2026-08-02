@@ -94,7 +94,7 @@ const FEATURE_CSS = {
   // formats d'arme, styles de combat, matrices de sorts) réutilisent les styles
   // partagés `.sh-admin-*` / `.sh-dmg-*` définis dans shop.css → sinon, ouvertes
   // hors boutique, elles s'affichent sans mise en forme. Chargeur dédoublonné.
-  characters: ['characters.css', 'shop.css'],
+  characters: ['characters.css', 'shop.css', 'recipes.css'],
   shop:       ['shop.css'],
   // Console MJ : admin.css pour la page elle-même. Les CSS des modales (empruntées
   // à d'autres features) sont chargées à l'ouverture de chaque modale via

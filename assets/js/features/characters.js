@@ -17,6 +17,10 @@ import {
   sortCharactersForDisplay, modStr,
 } from '../shared/char-stats.js';
 import { getCharacterRules } from '../shared/character-rules.js';
+import { isFeatureEnabled } from '../shared/features.js';
+import {
+  recipeBookButton, openCharacterRecipeBook,
+} from './recipes.js';
 
 import { getCharacterById, getVisibleCharacters } from '../shared/character-state.js';
 // ── Sous-modules ─────────────────────────────────────────────────────────────
@@ -510,23 +514,46 @@ function _buildCharSwitchHtml(activeCharId, canEdit) {
 function _buildStatTilesHtml(c, canEdit, lvlPointsRemaining) {
   const s  = c.stats      || {};
   const sb = c.statsBonus || {};
+  const sLvl = c.statsLevelUps || {};
   const isAdmin = !!STATE.isAdmin;
   const STAT_FULL = {
     force: 'Force', dexterite: 'Dextérité', intelligence: 'Intelligence',
     constitution: 'Constitution', sagesse: 'Sagesse', charisme: 'Charisme',
   };
-  return [
+  const stats = [
     {key:'force',        abbr:'FOR'},
     {key:'dexterite',    abbr:'DEX'},
     {key:'intelligence', abbr:'INT'},
     {key:'constitution', abbr:'CON'},
     {key:'sagesse',      abbr:'SAG'},
     {key:'charisme',     abbr:'CHA'},
-  ].map(st => {
-    const totalBase = s[st.key]  || 8;
-    const lvlUp     = parseInt((c.statsLevelUps || {})[st.key]) || 0;
+  ];
+  const summary = stats.reduce((totals, st) => {
+    const value = Number(s[st.key]) || 8;
+    const level = Number.parseInt(sLvl[st.key], 10) || 0;
+    const equipment = Number(sb[st.key]) || 0;
+    totals.base += value - level;
+    totals.level += level;
+    totals.equipment += equipment;
+    totals.total += value + equipment;
+    return totals;
+  }, { base: 0, level: 0, equipment: 0, total: 0 });
+  const signed = value => value > 0 ? `+${value}` : String(value);
+  const summaryHtml = `<div class="stats-summary" title="Somme des six caractéristiques du personnage">
+    <div class="stats-summary-title"><span>Points de caractéristiques</span><strong>${summary.total}</strong></div>
+    <div class="stats-summary-formula" aria-label="Base ${summary.base}, niveau ${summary.level}, équipement ${summary.equipment}, total ${summary.total}">
+      <span><small>Base</small><b>${summary.base}</b></span><i>+</i>
+      <span><small>Niveau</small><b>${signed(summary.level)}</b></span><i>+</i>
+      <span><small>Équipement</small><b class="${summary.equipment > 0 ? 'pos' : summary.equipment < 0 ? 'neg' : ''}">${signed(summary.equipment)}</b></span><i>=</i>
+      <span class="is-total"><small>Total</small><b>${summary.total}</b></span>
+    </div>
+  </div>`;
+
+  return summaryHtml + stats.map(st => {
+    const totalBase = Number(s[st.key]) || 8;
+    const lvlUp     = Number.parseInt(sLvl[st.key], 10) || 0;
     const pureBase  = totalBase - lvlUp;
-    const bonus     = sb[st.key] || 0;
+    const bonus     = Number(sb[st.key]) || 0;
     const total     = totalBase + bonus;
     const m         = getMod(c, st.key);
     const mStr      = m >= 0 ? `+${m}` : String(m);
@@ -1555,6 +1582,7 @@ function renderCharInventaireV3(c, canEdit) {
       ${filter.search ? `<button class="inv-search-clear" data-action="csV3InvClearSearch" title="Effacer la recherche" aria-label="Effacer la recherche">×</button>` : ''}
     </div>
     <div class="inv-toolbar-actions">
+    ${isFeatureEnabled('recettes') ? recipeBookButton(c) : ''}
     ${inventoryHistoryButton(c)}
     <div class="inv-densityseg" role="group" aria-label="Mode d’affichage">
       <button class="${_csV3InvDensity === 'cards' ? 'on' : ''}" data-action="csV3InvSetDensity"
@@ -2086,6 +2114,7 @@ registerActions({
   editMaitrise:             (btn)   => editMaitrise(Number(btn.dataset.idx)),
 
   // Inventaire
+  openCharacterRecipeBook:    (btn)   => openCharacterRecipeBook(btn.dataset.id),
   openInventoryHistoryModal:(btn)   => openInventoryHistoryModal(btn.dataset.id),
   openInventoryItemDetail:  (btn)   => openInventoryItemDetail(btn.dataset.id, btn.dataset.indices),
   addInvItem:               ()      => addInvItem(),
