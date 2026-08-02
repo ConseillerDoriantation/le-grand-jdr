@@ -1339,17 +1339,26 @@ function _buildShape(t) {
     }
 
     if (_attackSrc) {
-      // Attaquant désigné → clic sur n'importe quel token (y compris soi-même) = attaque/soin
-      // Vérification portée uniquement pour les cibles différentes
-      if (_attackSrc !== t.id && opts.deselectOutOfRange && !_isAttackTargetInRange(_attackSrc, t.id)) {
-        _deselect();
+      const srcId = _attackSrc;
+      if (srcId === t.id) {
+        _renderInspector(t);
+        _execAttack(srcId, t.id, { selfTarget: true });
         return;
       }
-      _execAttack(_attackSrc, t.id);
+      if (!_isAttackTargetInRange(srcId, t.id)) {
+        _select(t.id);
+        return;
+      }
+      VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
+      VS.selected = t.id;
+      VS.tokens[t.id]?.shape?.findOne('.sel')?.visible(true);
+      _renderInspector(t);
+      VS.layers.token?.batchDraw();
+      _execAttack(srcId, t.id);
     } else {
-      // Sélectionner le token (si token propre, montre la portée d'attaque)
       _select(t.id);
     }
+
   };
 
   g.on('click', e => {
@@ -1466,12 +1475,12 @@ export function _select(id) {
   _renderInspector(data??null);
   // Clic sur un token allié/propre : portée de déplacement (bleu) + portée d'attaque (rouge)
   if (data && _canControlToken(data)) {
-    _attackSrc=id;
+    _showMoveRange(data);    // cases bleues cliquables (déplacement)
+    _attackSrc = id;
     VS.tokens[id]?.shape?.findOne('.atk')?.visible(true);
     VS.layers.token.batchDraw();
-    _showMoveRange(data);    // cases bleues cliquables (déplacement)
-    _showAttackRange(data);  // cases rouges par-dessus (visuel portée)
-    _showActBar(id);         // barre d'action ancrée (Armes/Sorts/Objets/Actions)
+    _showAttackRange(data);
+    _hideActBar();
   } else {
     _hideActBar();
   }
@@ -1515,6 +1524,10 @@ export function _deselect() {
 export function _showActBar(srcId) {
   const t = VS.tokens[srcId]?.data;
   if (!t || !_canControlToken(t)) { _hideActBar(); return; }
+  VS.tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
+  _attackSrc = srcId;
+  VS.tokens[srcId]?.shape?.findOne('.atk')?.visible(true);
+  VS.layers.token?.batchDraw();
   _execAttack(srcId, null).catch(e => console.error('[vtt] HUD action:', e));   // rend le picker dans le HUD (cf. fin de _execAttack)
 }
 
@@ -1533,7 +1546,6 @@ function _vttToggleHudCollapse() {
   try { localStorage.setItem('vtt-hud-collapsed', _hudCollapsed ? '1' : '0'); } catch {}
   _applyHudCollapsed();
 }
-
 // Conteneur du HUD : overlay absolu en bas du container Konva (créé à la volée).
 function _actionHudEl() {
   let hud = document.getElementById('vtt-action-hud');
@@ -1672,7 +1684,12 @@ function _aimCancel() {
   const sid = _aimSrcId;
   _clearAim();
   const d = VS.tokens[sid]?.data;   // restaure les portées de sélection normales
-  if (d && _canControlToken(d)) { _showMoveRange(d); _showAttackRange(d); }
+  if (d && _canControlToken(d)) {
+    _showMoveRange(d);
+    _showAttackRange(d);
+    VS.tokens[sid]?.shape?.findOne('.atk')?.visible(true);
+    VS.layers.token?.batchDraw();
+  }
   showNotif('Visée annulée', 'info');
 }
 
@@ -2096,6 +2113,17 @@ function _optionFixedBonus(opt) {
   return (opt?.rawDice !== undefined)
     ? ((opt.dmgStatMod || 0) + (opt.maitriseBonus || 0))
     : 0;
+}
+
+function _effectFormulaWithFixedBonus(opt, formula, fixed = 0) {
+  const displayed = _effectDisplay(opt, formula, fixed);
+  if (opt?.mjAlwaysMax || !fixed) return displayed;
+  const text = String(displayed || '').trim();
+  if (!text || !/\d+\s*d\s*\d+/i.test(text)) return text;
+  const suffixMatch = text.match(/(\s*\/\s*(?:tour|t)\b.*)$/i);
+  const suffix = suffixMatch ? suffixMatch[1] : '';
+  const core = suffix ? text.slice(0, -suffix.length).trim() : text;
+  return `${core}${fixed > 0 ? `+${fixed}` : fixed}${suffix}`;
 }
 
 // [_vttSortDmgFormula / _vttSortSoinFormula → vtt-spell-display.js (importés en haut)]
@@ -4085,27 +4113,24 @@ function _vttSpellPills(o) {
   const isHeal = !!o.isHeal;
   const isUtil = !!(o.isCaSort || o.isUtil);
   const isEnchant = !!o.isEnchant;
-  if (o.actionType === 'bonus')         pills.push(_vttAoptPill('action-bonus', `💫 Action Bonus`));
-  else if (o.actionType === 'reaction') pills.push(_vttAoptPill('action-reaction', `⚡ Réaction`));
   if (o.cooldownRemaining > 0) pills.push(_vttAoptPill('cooldown', `⏳ Recharge ${o.cooldownRemaining} tour${o.cooldownRemaining > 1 ? 's' : ''}`));
   else if (o.cooldownTurns > 0) pills.push(_vttAoptPill('cooldown ready', `↻ Recharge ${o.cooldownTurns} tour${o.cooldownTurns > 1 ? 's' : ''}`));
-  if (!targetSelf) pills.push(_vttAoptPill('range', `🎯 ${o.portee}c`));
   const isFriendly = isEnchant || isHeal || o.isRegen || o.friendlyOnly;
   const isHostile  = !!o.isAffliction || !!o.hostileOnly;
   if (targetSelf) {
     pills.push(_vttAoptPill('targets self', `🧍 Sur soi`));
   } else if (o.zoneW > 0 || o.zoneH > 0) {
     const zoneIcon = o.zoneShape === 'cross' ? '✚' : o.zoneShape === 'diamond' ? '◇' : '📐';
-    pills.push(_vttAoptPill('zone', `${zoneIcon} ${o.zoneW||o.zoneH}×${o.zoneH||o.zoneW}c`));
+    pills.push(_vttAoptPill('zone', `${zoneIcon} ${o.zoneW||o.zoneH}×${o.zoneH||o.zoneW}c · ${o.portee}c`));
   } else if ((o.nbCibles || 1) > 1) {
     const lbl = isFriendly ? 'alliés' : isHostile ? 'ennemis' : 'cibles';
-    pills.push(_vttAoptPill('targets', `👥 ${o.nbCibles} ${lbl}`));
+    pills.push(_vttAoptPill('targets', `🎯 ${o.nbCibles} ${lbl} · ${o.portee}c`));
   } else if (isFriendly) {
-    pills.push(_vttAoptPill('targets single', `🤝 1 allié`));
+    pills.push(_vttAoptPill('targets single', `🎯 1 allié · ${o.portee}c`));
   } else if (isHostile) {
-    pills.push(_vttAoptPill('targets single', `💢 1 ennemi`));
+    pills.push(_vttAoptPill('targets single', `🎯 1 ennemi · ${o.portee}c`));
   } else {
-    pills.push(_vttAoptPill('targets single', `🎯 1 cible`));
+    pills.push(_vttAoptPill('targets single', `🎯 1 cible · ${o.portee}c`));
   }
   // Effet principal (dégâts / soin / enchant / affliction / utilitaire)
   if (isEnchant) {
@@ -4147,14 +4172,12 @@ function _vttSpellPills(o) {
     pills.push(_vttAoptPill('util', `🔧 ${effetTxt ? _esc(effetTxt) : 'Utilitaire'}`));
   } else if (o.rawDice || o.dice) {
     const formula = o.rawDice || o.dice;
-    const displayFormula = _effectDisplay(o, formula, _optionFixedBonus(o));
-    pills.push(_vttAoptPill(isHeal ? 'heal' : 'dmg', `${isHeal ? '🩹' : '🎲'} ${isHeal ? '+' : ''}${_esc(displayFormula)}${isHeal ? ' PV' : ''}`));
-  }
-  // Stat utilisée (provenance du +X)
-  if (o.dmgStatLabel && (o.dmgStatMod !== undefined && o.dmgStatMod !== null)) {
-    const m = o.dmgStatMod;
-    const modStr = m > 0 ? `+${m}` : m < 0 ? `${m}` : '±0';
-    pills.push(_vttAoptPill('stat', `📊 ${_esc(o.dmgStatLabel)} ${modStr}`));
+    const fixedBonus = _optionFixedBonus(o);
+    const displayFormula = _effectFormulaWithFixedBonus(o, formula, fixedBonus);
+    const statNote = o.dmgStatLabel && (o.dmgStatMod !== undefined && o.dmgStatMod !== null)
+      ? ` (${_esc(o.dmgStatLabel)})`
+      : '';
+    pills.push(_vttAoptPill(isHeal ? 'heal' : 'dmg', `${isHeal ? '🩹' : '🎲'} ${isHeal ? '+' : ''}${_esc(displayFormula)}${statNote}${isHeal ? ' PV' : ''}`));
   }
   if (o.traits?.length) {
     pills.push(`<span class="vtt-aopt-pill traits">${o.traits.slice(0,2).map(_esc).join(' · ')}</span>`);
@@ -4183,6 +4206,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   if (!noTgt && !tgt) return;
   const lS=_live(src), lT = tgt ? _live(tgt) : null;
   const dist = noTgt ? null : _tokenAttackDistance(src, tgt);
+  const selfTarget = !!exOpts.selfTarget || (!noTgt && srcId === tgtId);
 
   const options = _buildAttackOptions(src);
   // Cible d'abord : filtre par portee, en gardant les actions "sur soi".
@@ -4192,6 +4216,9 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
     : options.filter(o => {
         if (o.friendlyOnly && tgt.type === 'enemy') return false;
         if (o.hostileOnly && tgt.type !== 'enemy') return false;
+        if (selfTarget) {
+          return !!(o.targetSelf || o.friendlyOnly || o.isHeal || o.isRegen || o.isEnchant || o.isCaSort || o.isUtil || o._itemAction);
+        }
         return o.targetSelf || _tokenAttackDistance(src, tgt, o.portee) <= o.portee;
       });
   if (!noTgt) {
@@ -4244,6 +4271,12 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
 
   // Rendu d'un bouton option — card avec stats pills bien lisibles
   const _pill = (cls, html) => `<span class="vtt-aopt-pill ${cls}">${html}</span>`;
+  const _actionKind = (o) => {
+    const raw = String(o?.actionType || o?.actionMode || o?.modeAction || o?._itemAction?.actionType || o?._itemAction?.actionMode || '').toLowerCase();
+    if (raw.includes('bonus')) return 'bonus';
+    if (raw.includes('reaction') || raw.includes('réaction') || raw.includes('reac') || raw.includes('réac')) return 'reaction';
+    return 'action';
+  };
   const _optBtn = (o, i) => {
     const dist     = noTgt ? null : _tokenAttackDistance(src, tgt, o.portee);
     const canHit   = noTgt ? true : dist <= o.portee;
@@ -4312,11 +4345,12 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       : (o.damageTypeIcon && o.damageTypeId && o.damageTypeId !== 'physique'
           ? `<span class="cs-spellcard-noyau" style="--c:${o.damageTypeColor||'#9ca3af'}" title="Élément">${o.damageTypeIcon}</span>` : '');
     // Chip de type d'action (même style que la carte de sort de la fiche).
-    const actChip = o.actionType === 'bonus'
-      ? `<span class="cs-spellcard-act" style="--c:#f97316">✴️ Bonus</span>`
-      : o.actionType === 'reaction'
-        ? `<span class="cs-spellcard-act" style="--c:#a78bfa">🔄 Réac.</span>`
-        : `<span class="cs-spellcard-act" style="--c:#e8b84b">⚡ Act.</span>`;
+    const actionKind = _actionKind(o);
+    const actChip = actionKind === 'bonus'
+      ? `<span class="cs-spellcard-act" style="--c:#f97316">✴️ Action bonus</span>`
+      : actionKind === 'reaction'
+        ? `<span class="cs-spellcard-act" style="--c:#a78bfa">🔄 Réaction</span>`
+        : `<span class="cs-spellcard-act" style="--c:#e8b84b">⚡ Action</span>`;
 
     // Runes du sort (chips lecture seule) — comme sur la carte de la fiche perso.
     const runeChipsHtml = _vttSpellRuneChips(o, srcChar);
@@ -4325,16 +4359,40 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       : o.sortIdx !== undefined ? 'is-spell'
       : o.isDeplacement ? 'is-move'
       : 'is-weapon';
+    const isPrimaryWeapon = cardKind === 'is-weapon' && weaponOpts[0] === o;
     const cardState = onCooldown ? 'is-cooldown' : noTgt ? 'is-aim' : canHit ? 'is-ready' : 'is-oor';
     const cardHint = onCooldown ? `Recharge ${o.cooldownRemaining}t`
       : noTgt ? 'Choisir puis viser'
       : canHit ? 'Lancer'
       : 'Hors portée';
 
-    // Carte d'action — présentation identique aux cartes de sort de la fiche perso
-    // (.cs-spellcard, scope .cs-v3), cliquable pour lancer.
+    const launchFn = noTgt ? '_vttAimOpt' : '_vttPickOpt';
+    const launchArgs = noTgt ? `${srcId}|${i}` : `${srcId}|${tgtId}|${i}`;
+    const buttonAttrs = `type="button" style="--type-col:${accentCol}" data-vtt-fn="${launchFn}" data-vtt-args="${launchArgs}" ${onCooldown ? 'disabled aria-disabled="true"' : ''}`;
+
+    if (!noTgt) {
+      return `
+      <button ${buttonAttrs} class="vtt-aopt vtt-castcard vtt-action-choice ${cardKind} ${cardState} ${isPrimaryWeapon ? 'is-primary-weapon' : ''}">
+        <span class="vtt-action-choice-icon">${o.icon}</span>
+        <span class="vtt-action-choice-body">
+          <span class="vtt-action-choice-head">
+            <strong title="${_esc(o.label)}">${_esc(o.label)}</strong>
+            <span class="vtt-action-choice-kinds">${actChip}${sourceChip}${elemPastille}${stack}</span>
+          </span>
+          ${pills.length ? `<span class="vtt-action-choice-tags">${pills.join('')}</span>` : ''}
+          ${runeChipsHtml}
+          ${desc ? `<span class="vtt-action-choice-desc">${_esc(desc)}</span>` : ''}
+        </span>
+        <span class="vtt-action-choice-end">
+          ${pmBadge || '<span class="vtt-aopt-pm vtt-aopt-pm--free">Sans PM</span>'}
+          <span class="vtt-castcard-cta">${cardHint}</span>
+        </span>
+      </button>`;
+    }
+
+    // Carte compacte pour le HUD action-d'abord.
     return `
-      <button type="button" class="cs-spellcard vtt-castcard ${cardKind} ${cardState}" style="--type-col:${accentCol}" data-vtt-fn="${noTgt?'_vttAimOpt':'_vttPickOpt'}" data-vtt-args="${noTgt?`${srcId}|${i}`:`${srcId}|${tgtId}|${i}`}" ${onCooldown ? 'disabled aria-disabled="true"' : ''}>
+      <button ${buttonAttrs} class="vtt-aopt cs-spellcard vtt-castcard ${cardKind} ${cardState} ${isPrimaryWeapon ? 'is-primary-weapon' : ''}">
         <header class="cs-spellcard-head">
           <span class="cs-spellcard-icon">${o.icon}</span>
           <div class="cs-spellcard-id">
@@ -4415,13 +4473,25 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   if (canEditSrc && (!only || only === 'basic')) {
     // Carte d'action de base — même présentation (.cs-spellcard) que les sorts.
     const _basicCard = (icon, name, desc, col, fn, args) => `
-        <button type="button" class="cs-spellcard vtt-castcard is-basic is-ready" style="--type-col:${col}" data-name="${_norm(name).replace(/"/g,'')}" data-vtt-fn="${fn}" data-vtt-args="${args}">
-          <header class="cs-spellcard-head">
-            <span class="cs-spellcard-icon">${icon}</span>
-            <div class="cs-spellcard-id"><div class="cs-spellcard-name" title="${name}">${name}</div></div>
-            <span class="vtt-castcard-cta">Faire</span>
-          </header>
-          <div class="cs-spellcard-tags"><span class="vtt-aopt-pill" style="color:${col};border-color:${col}66">${desc}</span></div>
+        <button type="button" class="vtt-aopt ${noTgt ? 'cs-spellcard' : 'vtt-action-choice'} vtt-castcard is-basic is-ready" style="--type-col:${col}" data-name="${_norm(name).replace(/"/g,'')}" data-vtt-fn="${fn}" data-vtt-args="${args}">
+          ${noTgt ? `
+            <header class="cs-spellcard-head">
+              <span class="cs-spellcard-icon">${icon}</span>
+              <div class="cs-spellcard-id"><div class="cs-spellcard-name" title="${name}">${name}</div></div>
+              <span class="vtt-castcard-cta">Faire</span>
+            </header>
+            <div class="cs-spellcard-tags"><span class="vtt-aopt-pill" style="color:${col};border-color:${col}66">${desc}</span></div>
+          ` : `
+            <span class="vtt-action-choice-icon">${icon}</span>
+            <span class="vtt-action-choice-body">
+              <span class="vtt-action-choice-head">
+                <strong title="${name}">${name}</strong>
+                <span class="vtt-action-choice-kinds"><span class="cs-spellcard-act" style="--c:${col}">Action</span></span>
+              </span>
+              <span class="vtt-action-choice-tags"><span class="vtt-aopt-pill" style="color:${col};border-color:${col}66">${desc}</span></span>
+            </span>
+            <span class="vtt-action-choice-end"><span class="vtt-castcard-cta">Faire</span></span>
+          `}
         </button>`;
     const selfBtn = (cond, icon, name, desc, col) =>
       _basicCard(icon, name, desc, col, '_vttSelfActionClose', `${srcId}|${cond}`);
@@ -4448,7 +4518,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   const showTabs = tabs.length > 1;
   const tabsHtml = showTabs ? `
     <div class="vtt-aopt-tabs" role="tablist">
-      <button type="button" class="vtt-aopt-tab is-active" data-tab="__all"
+      <button type="button" class="vtt-aopt-tab is-active" data-tab="__all" style="--tab-col:#f59e0b"
         data-vtt-fn="_vttAoptFilter" data-vtt-args="__all|$this">
         <span class="vtt-aopt-tab-ic">⚡</span>
         <span class="vtt-aopt-tab-lbl">Tous</span>
@@ -4473,12 +4543,34 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
         data-vtt-fn="_vttClearAoptSearch" data-vtt-args="$this">✕</button>
     </div>` : '';
 
+  const _tokenFace = (token, live, role, tone = '') => {
+    const name = live?.displayName ?? token?.name ?? 'Token';
+    const img = live?.displayImage || token?.imageUrl || '';
+    const initial = String(name || '?').trim().slice(0, 1).toUpperCase() || '?';
+    return `<span class="vtt-aopt-actor ${tone}">
+      <span class="vtt-aopt-actor-avatar">
+        ${img ? `<img src="${_esc(img)}" alt="">` : `<b>${_esc(initial)}</b>`}
+      </span>
+      <span class="vtt-aopt-actor-copy">
+        <small>${_esc(role)}</small>
+        <strong title="${_esc(name)}">${_esc(name)}</strong>
+      </span>
+    </span>`;
+  };
+  const sourceFace = _tokenFace(src, lS, 'Lanceur');
+  const targetFace = noTgt
+    ? `<span class="vtt-aopt-actor vtt-aopt-actor--pending">
+        <span class="vtt-aopt-actor-avatar">?</span>
+        <span class="vtt-aopt-actor-copy"><small>Cible</small><strong>À choisir</strong></span>
+      </span>`
+    : _tokenFace(tgt, lT, selfTarget ? 'Sur soi' : 'Cible', 'vtt-aopt-actor--target');
+
   const innerHtml = `
       <div class="vtt-aopt-modal-hd">
         <div class="vtt-aopt-modal-targets">
-          <span class="vtt-aopt-modal-src"><strong>${_esc(lS.displayName??src.name)}</strong></span>
-          ${noTgt ? '' : `<span class="vtt-aopt-modal-arrow">→</span>
-          <span class="vtt-aopt-modal-tgt"><strong>${_esc(lT.displayName??tgt.name)}</strong></span>`}
+          ${sourceFace}
+          <span class="vtt-aopt-modal-arrow">→</span>
+          ${targetFace}
         </div>
         ${noTgt
           ? `<span class="vtt-aopt-modal-dist" title="Choisis l'action puis clique une cible">🎯 puis clique une cible</span>`
@@ -4491,6 +4583,39 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
         <div class="vtt-aopt-empty" style="display:none"><span style="opacity:.5">Aucune action ne correspond.</span></div>
       </div>`;
 
+  const modalInnerHtml = `
+    <div class="vtt-action-picker">
+      <aside class="vtt-action-command">
+        <div class="vtt-action-command-label">Action tactique</div>
+        <div class="vtt-action-duel">
+          ${sourceFace}
+          <span class="vtt-action-duel-arrow">&darr;</span>
+          ${targetFace}
+        </div>
+        <div class="vtt-action-command-meta">
+          <span>${selfTarget ? 'Cible personnelle' : `Distance ${dist} case${dist > 1 ? 's' : ''}`}</span>
+          <span>${selfTarget ? 'Sur soi' : 'À portée'}</span>
+        </div>
+        ${pmBar ? `<div class="vtt-action-command-pm">${pmBar}</div>` : ''}
+      </aside>
+      <section class="vtt-action-workspace">
+        <div class="vtt-action-workspace-head">
+          <div class="vtt-action-workspace-title">
+            <div>
+              <span>Actions disponibles</span>
+              <strong>${selfTarget ? 'Sur soi' : _esc(lT?.displayName ?? tgt?.name ?? 'Cible')}</strong>
+            </div>
+            <span class="vtt-action-count">${totalCount} choix</span>
+          </div>
+          ${showTabs ? `<div class="vtt-action-filterbar">${tabsHtml}</div>` : ''}
+          ${searchHtml ? `<div class="vtt-action-searchbar">${searchHtml}</div>` : ''}
+        </div>
+        <div class="vtt-aopt-list vtt-action-list cs-v3">${optsHtml}${basicHtml}
+          <div class="vtt-aopt-empty" style="display:none"><span style="opacity:.5">Aucune action ne correspond.</span></div>
+        </div>
+      </section>
+    </div>`;
+
   // Flux « action d'abord » (sans cible) → HUD docké en bas du canvas.
   // Flux « clic sur une cible » → modale centrée (inchangé).
   if (noTgt) {
@@ -4501,8 +4626,8 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
     return;
   }
 
-  openModal('⚔️ Choisir une action', `
-    <div class="vtt-form vtt-aopt-modal">${innerHtml}
+  openModal('⚔️ Action tactique', `
+    <div class="vtt-form vtt-aopt-modal vtt-action-modal">${modalInnerHtml}
       <div class="vtt-aopt-footer">
         <button class="btn-secondary" data-action="close-modal">Annuler</button>
       </div>
@@ -4575,23 +4700,29 @@ function _vttAoptCheckEmpty() {
 function _vttAttackModeControlsHtml(comment = 'Sélecteur de mode') {
   return `
     <!-- ${comment} -->
-    <div style="margin-bottom:.85rem">
-      <div style="font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;color:var(--text-dim);margin-bottom:.4rem">Mode de lancer</div>
-      <div style="display:flex;gap:2px;background:var(--border);border-radius:9px;padding:3px">
-        <button id="atk-mode-dis" data-vtt-fn="_vttSetMode" data-vtt-args="dis"
-          style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
-                 font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
-          <div style="font-size:.9rem">⬇</div>Désavantage
+    <div class="vtt-atk-mode">
+      <div class="vtt-atk-mode-label">Mode de lancer</div>
+      <div class="vtt-atk-mode-toggle" role="group" aria-label="Mode de lancer">
+        <button id="atk-mode-dis" class="vtt-atk-mode-btn is-dis" data-vtt-fn="_vttSetMode" data-vtt-args="dis">
+          <span class="vtt-atk-mode-icon">−</span>
+          <span class="vtt-atk-mode-copy">
+            <strong>Désavantage</strong>
+            <small>Garde le plus bas</small>
+          </span>
         </button>
-        <button id="atk-mode-normal" data-vtt-fn="_vttSetMode" data-vtt-args="normal"
-          style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
-                 font-size:.75rem;font-weight:700;background:var(--bg-elevated);color:var(--text)">
-          Normal
+        <button id="atk-mode-normal" class="vtt-atk-mode-btn is-normal is-active" data-vtt-fn="_vttSetMode" data-vtt-args="normal">
+          <span class="vtt-atk-mode-icon">•</span>
+          <span class="vtt-atk-mode-copy">
+            <strong>Normal</strong>
+            <small>1d20</small>
+          </span>
         </button>
-        <button id="atk-mode-adv" data-vtt-fn="_vttSetMode" data-vtt-args="adv"
-          style="flex:1;padding:.5rem .3rem;border:none;border-radius:6px;cursor:pointer;font-family:inherit;
-                 font-size:.7rem;line-height:1.35;background:transparent;color:var(--text-dim);transition:none">
-          <div style="font-size:.9rem">⬆</div>Avantage
+        <button id="atk-mode-adv" class="vtt-atk-mode-btn is-adv" data-vtt-fn="_vttSetMode" data-vtt-args="adv">
+          <span class="vtt-atk-mode-icon">+</span>
+          <span class="vtt-atk-mode-copy">
+            <strong>Avantage</strong>
+            <small>Garde le plus haut</small>
+          </span>
         </button>
       </div>
     </div>
@@ -4801,14 +4932,32 @@ function _vttPickOpt(srcId, tgtId, idx) {
     degatsFormula = _mkCell(`${_dmgIcon} <code style="font-size:.88rem;color:${dmgAccent}">${_esc(displayDice)}</code>`, 0, detail, dmgAccent);
   }
 
-  const inpStyle = `width:52px;padding:4px 6px;text-align:center;font-size:.88rem;border-radius:7px;
-    border:1px solid var(--border);background:var(--bg-base,var(--bg));color:var(--text);font-family:inherit`;
-
   // Bloc central conditionnel selon le type
   const isCastOnly = opt.isCaSort || opt.isUtil;
   const btnColor   = opt.isHeal ? '#22c38e' : isCastOnly ? '#b47fff' : 'var(--gold,#f59e0b)';
   const btnFg      = opt.isHeal || isCastOnly ? '#fff' : '#1a1a1a';
   const btnLabel   = opt.isHeal ? '💚 Soigner !' : isCastOnly ? '✨ Activer !' : '🎲 Lancer !';
+  const _bonusInput = (id, label, title, extra = '') => `
+    <label class="vtt-atk-bonus-field" title="${_esc(title)}">
+      <span>${_esc(label)}</span>
+      <span class="vtt-atk-bonus-stepper">
+        <button type="button" data-vtt-fn="_vttAtkBonusStep" data-vtt-args="${id}|-1" data-vtt-blur title="Retirer 1">-</button>
+        <input type="number" id="${id}" value="0" ${extra} data-vtt-fn="_vttRollAttack" data-vtt-on="keydown-enter">
+        <button type="button" data-vtt-fn="_vttAtkBonusStep" data-vtt-args="${id}|1" data-vtt-blur title="Ajouter 1">+</button>
+      </span>
+    </label>`;
+  const _formulaPanel = (tone, icon, title, formulaHtml, controlsHtml, hint = '') => `
+    <div class="vtt-atk-formula-panel ${tone}">
+      <div class="vtt-atk-formula-main">
+        <span class="vtt-atk-formula-icon">${icon}</span>
+        <div class="vtt-atk-formula-copy">
+          <small>${_esc(title)}</small>
+          ${formulaHtml}
+        </div>
+      </div>
+      ${controlsHtml ? `<div class="vtt-atk-bonus-grid">${controlsHtml}</div>` : ''}
+      ${hint ? `<div class="vtt-atk-formula-hint">${hint}</div>` : ''}
+    </div>`;
 
   // ── Preview d'interaction (immunité / résistance / faiblesse / absorption) ──
   // Aperçu donné pour l'attaque offensive uniquement, et seulement si la cible
@@ -4884,44 +5033,30 @@ function _vttPickOpt(srcId, tgtId, idx) {
   }
 
   const centerBlock = (isAffCast || isEnchCast) ? utilBlock : isCastOnly ? `
-    <div style="background:var(--bg-elevated);border-radius:10px;padding:.85rem;margin-bottom:.85rem;
-                display:flex;align-items:center;gap:.6rem">
-      <span style="font-size:1.2rem">${opt.icon}</span>
-      <div style="flex:1;min-width:0">${degatsFormula}</div>
-    </div>
+    ${_formulaPanel('util', opt.icon, 'Effet', degatsFormula, '')}
   ` : opt.isHeal ? `
-    <div style="background:var(--bg-elevated);border-radius:10px;padding:.7rem .85rem;margin-bottom:.85rem">
-      <div style="display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;row-gap:.6rem;column-gap:.5rem">
-        <div style="grid-column:1/3"></div>
-        <span style="font-size:.55rem;text-align:center;color:var(--text-dim)">±mod</span>
-        <span style="font-size:.55rem;text-align:center;color:var(--text-dim)">+dés</span>
-        <span style="font-size:.68rem;color:#22c38e;white-space:nowrap">💚 Soin</span>
-        ${degatsFormula}
-        <input type="number" id="atk-bonus-dmg" value="0" style="${inpStyle}" placeholder="0" title="Bonus / malus flat au soin">
-        <input type="number" id="atk-bonus-dmg-dice" value="0" min="-9" max="20" style="${inpStyle}" placeholder="0" title="Dés bonus au soin (même type de dé)">
-        <div style="grid-column:1/-1;font-size:.62rem;color:var(--text-dim);font-style:italic;padding-top:.15rem">
-          ✦ Jet de toucher (DD 2) — vise les critiques 💥 et les fumbles 💔
-        </div>
-      </div>
+    <div class="vtt-atk-formula-stack">
+      ${_formulaPanel('hit', '🎯', 'Jet de soin', toucherFormula, `
+        ${_bonusInput('atk-bonus-hit', 'Bonus au jet', 'Bonus / malus fixe ajouté au d20')}
+        ${_bonusInput('atk-bonus-hit-dice', 'd20 bonus', 'd20 supplémentaires au jet de soin, sommés au résultat', 'min="-9" max="20"')}
+      `, 'DD 2 : sert surtout à gérer critique et échec critique.')}
+      ${_formulaPanel('heal', '💚', 'Soin produit', degatsFormula, `
+        ${_bonusInput('atk-bonus-dmg', 'Bonus au soin', 'Bonus / malus fixe au soin')}
+        ${_bonusInput('atk-bonus-dmg-dice', 'Dés de soin', 'Dés supplémentaires au soin, même type de dé', 'min="-9" max="20"')}
+      `)}
     </div>
     ${_vttAttackModeControlsHtml('Sélecteur de mode (Avantage / Normal / Désavantage) — partagé avec les attaques')}
   ` : `
-    <div style="background:var(--bg-elevated);border-radius:10px;padding:.7rem .85rem;margin-bottom:.85rem">
-      <div style="display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;row-gap:.6rem;column-gap:.5rem">
-        <div style="grid-column:1/3"></div>
-        <span style="font-size:.55rem;text-align:center;color:var(--text-dim)">±mod</span>
-        <span style="font-size:.55rem;text-align:center;color:var(--text-dim)">+dés</span>
-        <span style="font-size:.68rem;color:var(--text-dim);white-space:nowrap">🎯 Toucher</span>
-        ${toucherFormula}
-        <input type="number" id="atk-bonus-hit" value="0" style="${inpStyle}" placeholder="0" title="Bonus flat au toucher">
-        <input type="number" id="atk-bonus-hit-dice" value="0" min="-9" max="20" style="${inpStyle}" placeholder="0" title="d20 supplémentaires au toucher (sommés)">
-
-        <div style="grid-column:1/-1;height:1px;background:var(--border);margin:-.1rem 0"></div>
-
-        <span style="font-size:.68rem;color:var(--text-dim);white-space:nowrap">⚔️ Dégâts</span>
-        ${degatsFormula}
-        <input type="number" id="atk-bonus-dmg" value="0" style="${inpStyle}" placeholder="0" title="Bonus flat aux dégâts">
-        <input type="number" id="atk-bonus-dmg-dice" value="0" min="-9" max="20" style="${inpStyle}" placeholder="0" title="Dés supplémentaires aux dégâts (même type)">
+    <div class="vtt-atk-formula-stack">
+      ${_formulaPanel('hit', '🎯', 'Jet pour toucher', toucherFormula, `
+        ${_bonusInput('atk-bonus-hit', 'Bonus au jet', 'Bonus / malus fixe ajouté au d20')}
+        ${_bonusInput('atk-bonus-hit-dice', 'd20 bonus', 'd20 supplémentaires au toucher, sommés au résultat', 'min="-9" max="20"')}
+      `)}
+      ${_formulaPanel('damage', '⚔️', 'Dégâts infligés', degatsFormula, `
+        ${_bonusInput('atk-bonus-dmg', 'Bonus dégâts', 'Bonus / malus fixe aux dégâts')}
+        ${_bonusInput('atk-bonus-dmg-dice', 'Dés dégâts', 'Dés supplémentaires aux dégâts, même type de dé', 'min="-9" max="20"')}
+      `)}
+      <div class="vtt-atk-extra-info">
         <div id="atk-miss-note" style="grid-column:1/-1">${_atkMissNoteHtml(opt)}</div>
         <div id="atk-interaction" style="grid-column:1/-1">${_atkInteractionHtml(opt)}</div>
       </div>
@@ -4929,81 +5064,94 @@ function _vttPickOpt(srcId, tgtId, idx) {
     ${_vttAttackModeControlsHtml()}
   `;
 
-  openModal(`${opt.icon} ${opt.label}`, `
-    <div class="vtt-form" style="min-width:260px;max-width:340px">
+  const _atkFace = (token, live, role, tone = '') => {
+    const name = live?.displayName ?? token?.name ?? 'Token';
+    const img = live?.displayImage || token?.imageUrl || '';
+    const initial = String(name || '?').trim().slice(0, 1).toUpperCase() || '?';
+    return `<span class="vtt-atk-actor ${tone}">
+      <span class="vtt-atk-actor-avatar">${img ? `<img src="${_esc(img)}" alt="">` : `<b>${_esc(initial)}</b>`}</span>
+      <span class="vtt-atk-actor-copy">
+        <small>${_esc(role)}</small>
+        <strong title="${_esc(name)}">${_esc(name)}</strong>
+      </span>
+    </span>`;
+  };
+  const targetTone = opt.isHeal ? 'is-heal' : 'is-target';
+  const targetFace = allTargets && allTargets.length > 1
+    ? `<span class="vtt-atk-actor is-multi">
+        <span class="vtt-atk-actor-avatar">🎯</span>
+        <span class="vtt-atk-actor-copy"><small>Cibles</small><strong>${allTargets.length} cibles</strong></span>
+      </span>`
+    : _atkFace(tgt, lT, opt.isHeal ? 'Allié' : 'Cible', targetTone);
+  const targetChips = allTargets && allTargets.length > 1 ? `
+    <div class="vtt-atk-targets">
+      ${allTargets.map(id => {
+        const td = VS.tokens[id]?.data;
+        const tl = td ? _live(td) : null;
+        const nm = tl?.displayName ?? td?.name ?? id;
+        const img = tl?.displayImage || td?.imageUrl || '';
+        return `<span class="vtt-atk-target-chip">${img ? `<img src="${_esc(img)}" alt="">` : ''}${_esc(nm)}</span>`;
+      }).join('')}
+    </div>` : '';
+  const infoChips = [];
+  if (opt.zoneW > 0 || opt.zoneH > 0) {
+    const zoneIcon = opt.zoneShape === 'cross' ? '✚' : opt.zoneShape === 'diamond' ? '◇' : '📐';
+    infoChips.push(`${zoneIcon} Zone ${opt.zoneShape === 'cross' ? 'croix ' : opt.zoneShape === 'diamond' ? 'cercle ' : ''}${opt.zoneW}×${opt.zoneH}`);
+  } else if ((opt.nbCibles || 1) > 1) {
+    infoChips.push(`🎯 ${opt.nbCibles} cibles`);
+  }
+  if (opt.pmCost > 0) infoChips.push(`✨ ${opt.pmCost} PM`);
+  else if (opt.pmCost === 0 && opt.basePm > 0) infoChips.push('✨ Gratuit');
 
-      <!-- En-tête : retour + attaquant → cible(s) -->
-      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.85rem">
-        <button data-vtt-fn="_vttBackToAtk"
-          style="flex-shrink:0;display:flex;align-items:center;gap:.25rem;background:none;
-                 border:1px solid var(--border);border-radius:7px;color:var(--text-dim);
-                 cursor:pointer;font-family:inherit;font-size:.75rem;padding:.3rem .55rem;
-                 white-space:nowrap">
-          ← Retour
-        </button>
-        <div style="flex:1;min-width:0;text-align:center;overflow:hidden;text-overflow:ellipsis;font-size:.82rem">
-          <strong>${_esc(lS.displayName??src.name)}</strong>
-          <span style="color:var(--text-dim);margin:0 .3rem">→</span>
-          ${allTargets && allTargets.length > 1
-            ? `<strong style="color:#4f8cff">🎯 ${allTargets.length} cibles</strong>`
-            : `<strong style="color:${opt.isHeal?'#22c38e':'#ef4444'}">${_esc(lT.displayName??tgt.name)}</strong>`}
+  openModal('⚔️ Résoudre l’action', `
+    <div class="vtt-form vtt-atk-confirm" style="--atk-accent:${btnColor};--atk-fg:${btnFg}">
+      <section class="vtt-atk-hero">
+        <button type="button" class="vtt-atk-back" data-vtt-fn="_vttBackToAtk">← Retour</button>
+        <div class="vtt-atk-action-title">
+          <span class="vtt-atk-action-icon">${opt.icon}</span>
+          <div>
+            <small>Action choisie</small>
+            <strong title="${_esc(opt.label)}">${_esc(opt.label)}</strong>
+          </div>
         </div>
-        <span style="flex-shrink:0;font-size:.62rem;color:var(--text-dim);background:var(--bg-elevated);
-                     padding:.18rem .45rem;border-radius:999px">${dist}c</span>
-      </div>
-      ${allTargets && allTargets.length > 1 ? `
-      <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.7rem">
-        ${allTargets.map(id => {
-          const td = VS.tokens[id]?.data;
-          const nm = td ? (_live(td).displayName ?? td.name ?? id) : id;
-          return `<span style="font-size:.65rem;padding:.15rem .45rem;border-radius:999px;
-            background:rgba(79,140,255,.12);border:1px solid rgba(79,140,255,.3);color:#4f8cff">${_esc(nm)}</span>`;
-        }).join('')}
-      </div>` : ''}
+        <span class="vtt-atk-dist">${dist} case${dist > 1 ? 's' : ''}</span>
+      </section>
 
-      <!-- Pills + runes IDENTIQUES à la carte d'action (source unique _vttSpellPills) -->
-      <div class="cs-v3 vtt-atk-pills" style="display:flex;flex-direction:column;gap:.4rem;margin-bottom:.85rem">
+      <section class="vtt-atk-route">
+        ${_atkFace(src, lS, 'Lanceur')}
+        <span class="vtt-atk-route-arrow">→</span>
+        ${targetFace}
+      </section>
+      ${targetChips}
+
+      <section class="cs-v3 vtt-atk-summary">
         ${(() => { const p = _vttSpellPills(opt); return p.length ? `<div class="cs-spellcard-tags">${p.join('')}</div>` : ''; })()}
         ${_vttSpellRuneChips(opt, srcChar)}
-      </div>
+        ${infoChips.length ? `<div class="vtt-atk-infochips">${infoChips.map(x => `<span>${_esc(x)}</span>`).join('')}</div>` : ''}
+      </section>
 
       ${elemSelectorHtml}
 
-      ${centerBlock}
+      <section class="vtt-atk-resolve">
+        ${centerBlock}
+      </section>
 
-      <!-- Effet complémentaire de l'attaque (ex : « Si touche, applique Poison ») -->
+      ${!isCastOnly && !isAffCast && !isEnchCast ? `
+      <div class="vtt-atk-reset-row">
+        <button type="button" data-vtt-fn="_vttAtkBonusReset" data-vtt-blur>Réinitialiser les bonus</button>
+        <span>Entrée valide le jet depuis un champ.</span>
+      </div>` : ''}
+
       ${opt.actionDescription ? `
-      <div style="display:flex;gap:.4rem;font-size:.72rem;color:var(--text-soft);line-height:1.35;
-                  background:rgba(232,184,75,.08);border:1px solid rgba(232,184,75,.25);
-                  border-radius:8px;padding:.45rem .6rem;margin-bottom:.7rem">
-        <span>ℹ️</span><span>${_esc(opt.actionDescription)}</span>
-      </div>` : ''}
+      <section class="vtt-atk-note">
+        <span>ℹ️</span><p>${_esc(opt.actionDescription)}</p>
+      </section>` : ''}
 
-      <!-- Infos zone / multi-cibles + PM -->
-      ${(opt.zoneW>0||opt.zoneH>0) || (opt.nbCibles||1) > 1 || opt.pmCost > 0 || (opt.pmCost===0 && opt.basePm>0) ? `
-      <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.7rem">
-        ${(opt.zoneW>0||opt.zoneH>0)?`<span style="font-size:.7rem;color:#f97316;display:flex;align-items:center;gap:.25rem">
-          ${opt.zoneShape === 'cross' ? '✚' : opt.zoneShape === 'diamond' ? '◇' : '📐'} Zone <strong style="color:#fde047">${opt.zoneShape === 'cross' ? 'croix ' : opt.zoneShape === 'diamond' ? 'cercle ' : ''}${opt.zoneW}×${opt.zoneH} cases</strong>
-          · <strong>${allTargets?.length||1}</strong> cible${(allTargets?.length||1)>1?'s':''}
-          ${opt.pmCost===0&&opt.basePm>0?'<span style="color:#22c38e;font-size:.65rem">(PM déjà payé)</span>':''}
-        </span>`:''}
-        ${!(opt.zoneW>0||opt.zoneH>0)&&(opt.nbCibles||1)>1?`<span style="font-size:.7rem;color:#4f8cff;display:flex;align-items:center;gap:.25rem">
-          🎯 <strong>${opt.nbCibles}</strong> cibles différentes
-          ${opt.pmCost===0&&opt.basePm>0?'<span style="color:#22c38e;font-size:.65rem">(PM déjà payé)</span>':''}
-        </span>`:''}
-        ${opt.pmCost>0?`<span style="font-size:.7rem;color:#b47fff">✨ ${opt.pmCost} PM</span>`:''}
-        ${opt.pmCost===0&&opt.basePm>0&&(opt.nbCibles||1)<=1&&!(opt.zoneW>0||opt.zoneH>0)?`<span style="font-size:.7rem;color:#22c38e">✨ Gratuit</span>`:''}
-      </div>` : ''}
-
-      <!-- Bouton Lancer -->
       <input type="hidden" id="atk-mode" value="normal">
-      <button data-vtt-fn="_vttRollAttack"
-        style="width:100%;height:46px;border:none;border-radius:10px;cursor:pointer;font-family:inherit;
-               font-size:.95rem;font-weight:700;letter-spacing:.02em;
-               background:${btnColor};color:${btnFg}">
-        ${btnLabel}
-      </button>
-
+      <footer class="vtt-atk-footer">
+        <button type="button" class="btn-secondary" data-vtt-fn="_vttBackToAtk">Retour</button>
+        <button type="button" class="vtt-atk-launch" data-vtt-fn="_vttRollAttack">${btnLabel}</button>
+      </footer>
     </div>`);
   // Cette modale (jet) n'est PAS le grand sélecteur d'actions : on bascule sur une
   // largeur ajustée au formulaire (.modal--atk) et on retire la large .modal--aopt
@@ -5047,22 +5195,30 @@ function _vttBackToAtk() {
 
 /** Met à jour le toggle Désavantage / Normal / Avantage. */
 function _vttSetMode(mode) {
-  const cfg = {
-    dis:    { bg:'rgba(239,68,68,.18)',  color:'#f87171', weight:'700' },
-    normal: { bg:'var(--bg-elevated)',   color:'var(--text)', weight:'700' },
-    adv:    { bg:'rgba(34,195,142,.18)', color:'#22c38e', weight:'700' },
-  };
-  const off = { bg:'transparent', color:'var(--text-dim)', weight:'400' };
   ['dis','normal','adv'].forEach(m => {
     const el = document.getElementById(`atk-mode-${m}`);
     if (!el) return;
-    const s = m === mode ? cfg[m] : off;
-    el.style.background  = s.bg;
-    el.style.color       = s.color;
-    el.style.fontWeight  = s.weight;
+    el.classList.toggle('is-active', m === mode);
   });
   const inp = document.getElementById('atk-mode');
   if (inp) inp.value = mode;
+}
+
+function _vttAtkBonusStep(id, delta = 0) {
+  const input = document.getElementById(String(id || ''));
+  if (!input) return;
+  const min = input.min !== '' ? Number(input.min) : -99;
+  const max = input.max !== '' ? Number(input.max) : 99;
+  const next = Math.max(min, Math.min(max, (parseInt(input.value, 10) || 0) + Number(delta || 0)));
+  input.value = String(next);
+  input.classList.toggle('has-value', next !== 0);
+}
+
+function _vttAtkBonusReset() {
+  document.querySelectorAll('.vtt-atk-bonus-field input').forEach(input => {
+    input.value = '0';
+    input.classList.remove('has-value');
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -6315,11 +6471,21 @@ async function _vttRollAttack() {
       let hD20   = hMode === 'adv' ? Math.max(hRoll1, hRoll2)
                  : hMode === 'dis' ? Math.min(hRoll1, hRoll2)
                  : hRoll1;
-      let hHitTotal = hD20 + hTouchMod + hSetBon + bonusHit;
+      const hExtraHitRolls = [];
+      let hExtraHitSum = 0;
+      if (bonusHitDice !== 0) {
+        const cnt = Math.abs(bonusHitDice);
+        for (let k = 0; k < cnt; k++) {
+          const r = Math.floor(Math.random() * 20) + 1;
+          hExtraHitRolls.push(r);
+          hExtraHitSum += bonusHitDice > 0 ? r : -r;
+        }
+      }
+      let hHitTotal = hD20 + hTouchMod + hSetBon + bonusHit + hExtraHitSum;
       const hLuck = await _consumeLuckyReroll(srcId, src, hD20, hD20 === 1 || hHitTotal < HEAL_DD);
       if (hLuck) {
         hD20 = hLuck.d20;
-        hHitTotal = hD20 + hTouchMod + hSetBon + bonusHit;
+        hHitTotal = hD20 + hTouchMod + hSetBon + bonusHit + hExtraHitSum;
       }
       // Combo Chance : élargit la plage critique (RC abaissé sur le sort)
       const hCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
@@ -6360,7 +6526,9 @@ async function _vttRollAttack() {
           hitD20rolls: hLuck ? [hRoll1, ...(hRoll2 != null ? [hRoll2] : []), hLuck.reroll] : (hRoll2 != null ? [hRoll1, hRoll2] : null),
           hitToucherMod: hTouchMod, hitToucherSetBonus: hSetBon,
           hitToucherStatLabel: opt.toucherStatLabel || '',
-          hitBonus: bonusHit, hitTotal: hHitTotal, healDD: HEAL_DD,
+          hitBonus: bonusHit, bonusHitDice: bonusHitDice || null,
+          extraHitRolls: hExtraHitRolls.length ? hExtraHitRolls : null,
+          hitTotal: hHitTotal, healDD: HEAL_DD,
           dmgTotal: 0, newHp: null, hpMax: null,
           dmgFormula: opt.dice, pmCost: opt.pmCost || 0,
           createdAt: serverTimestamp(),
@@ -6450,7 +6618,9 @@ async function _vttRollAttack() {
         hitD20rolls: hLuck ? [hRoll1, ...(hRoll2 != null ? [hRoll2] : []), hLuck.reroll] : (hRoll2 != null ? [hRoll1, hRoll2] : null),
         hitToucherMod: hTouchMod, hitToucherSetBonus: hSetBon,
         hitToucherStatLabel: opt.toucherStatLabel || '',
-        hitBonus: bonusHit, hitTotal: hHitTotal, healDD: HEAL_DD,
+        hitBonus: bonusHit, bonusHitDice: bonusHitDice || null,
+        extraHitRolls: hExtraHitRolls.length ? hExtraHitRolls : null,
+        hitTotal: hHitTotal, healDD: HEAL_DD,
       };
 
       if (isMultiHeal) {
@@ -8744,7 +8914,6 @@ async function _vttSwitchCharacterBuild(charId, buildId) {
     _refreshRanges(tokenId);
   });
   _renderTraySoon();
-  if (controlledToken?.id && VS.selected === controlledToken.id && !_aimOpt) _showActBar(controlledToken.id);
 }
 
 // Bonus temporaire manuel (Mouvement / CA / Portée) via le système de BUFFS du
@@ -9935,6 +10104,7 @@ export const VTT_ACTIONS = {
   },
   _vttActBarCat,
   _vttAimOpt,
+  _showActBar,
   _hideActBar,
   _vttToggleHudCollapse,
   _aimCancel,
@@ -9977,6 +10147,8 @@ export const VTT_ACTIONS = {
   _vttAoptCheckEmpty,
   _vttAoptFilter,
   _vttAoptSearch,
+  _vttAtkBonusReset,
+  _vttAtkBonusStep,
   _vttApplyAfflictions,
   _vttApplyDeplacement,
   _vttApplyEnchantBuffs,

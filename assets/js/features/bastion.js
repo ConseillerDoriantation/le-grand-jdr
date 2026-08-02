@@ -948,29 +948,166 @@ function _bastionOpenCatalogEditor() {
   `, { subtitle: 'Nom, prix, durée, renommée, productions, bonus — appliqué à tous', accent: '#f4c430' });
 }
 
-async function _bastionAddCustomRoom() {
+const BASTION_ROOM_TEMPLATES = {
+  production: {
+    label: 'Production',
+    icon: '⚒️',
+    nom: 'Atelier',
+    emoji: '⚒️',
+    desc: 'Produit des ressources utiles au groupe à chaque période.',
+    color: '#f59e0b',
+    niveaux: [
+      { cout: 200, semaines: 1, renommee: 0, gainRenommee: 2, prod: { or: 20, items: [] }, bonus: '' },
+      { cout: 500, semaines: 2, renommee: 20, gainRenommee: 4, prod: { or: 50, items: [] }, bonus: '' },
+      { cout: 1500, semaines: 3, renommee: 50, gainRenommee: 6, prod: { or: 120, items: [] }, bonus: '' },
+    ],
+  },
+  service: {
+    label: 'Service',
+    icon: '✨',
+    nom: 'Salle de service',
+    emoji: '✨',
+    desc: 'Débloque une activité de soutien entre deux sessions.',
+    color: '#7eb0ff',
+    niveaux: [
+      { cout: 200, semaines: 1, renommee: 0, gainRenommee: 2, prod: { or: 0, items: [] }, bonus: 'Service mineur disponible.' },
+      { cout: 500, semaines: 2, renommee: 20, gainRenommee: 4, prod: { or: 0, items: [] }, bonus: 'Service amélioré.' },
+      { cout: 1500, semaines: 3, renommee: 50, gainRenommee: 6, prod: { or: 0, items: [] }, bonus: 'Service majeur disponible.' },
+    ],
+  },
+  stockage: {
+    label: 'Stockage',
+    icon: '📦',
+    nom: 'Réserve',
+    emoji: '📦',
+    desc: 'Organise les ressources et sécurise les biens du Bastion.',
+    color: '#22c38e',
+    niveaux: [
+      { cout: 150, semaines: 1, renommee: 0, gainRenommee: 1, prod: { or: 0, items: [] }, bonus: '+10 capacité de coffre.' },
+      { cout: 400, semaines: 1, renommee: 15, gainRenommee: 3, prod: { or: 0, items: [] }, bonus: '+25 capacité de coffre.' },
+      { cout: 1000, semaines: 2, renommee: 35, gainRenommee: 5, prod: { or: 0, items: [] }, bonus: '+50 capacité de coffre.' },
+    ],
+  },
+  recrutement: {
+    label: 'Recrutement',
+    icon: '👥',
+    nom: 'Quartier du personnel',
+    emoji: '👥',
+    desc: 'Permet d’accueillir, d’organiser et de valoriser le personnel.',
+    color: '#b47fff',
+    niveaux: [
+      { cout: 250, semaines: 1, renommee: 0, gainRenommee: 2, prod: { or: 0, items: [] }, bonus: '1 contact recrutable.' },
+      { cout: 650, semaines: 2, renommee: 25, gainRenommee: 4, prod: { or: 0, items: [] }, bonus: 'Réseau de recrutement fiable.' },
+      { cout: 1600, semaines: 3, renommee: 55, gainRenommee: 6, prod: { or: 0, items: [] }, bonus: 'Personnel spécialisé plus facile à obtenir.' },
+    ],
+  },
+};
+
+function _bastionTemplate(kind = 'service') {
+  return BASTION_ROOM_TEMPLATES[kind] || BASTION_ROOM_TEMPLATES.service;
+}
+
+function _bastionFillCreateRoomTemplate(kind = 'service') {
+  const tpl = _bastionTemplate(kind);
+  document.querySelectorAll('.bs-room-template').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.template === kind);
+  });
+  const setVal = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.value = value ?? '';
+  };
+  setVal('bas-room-emoji', tpl.emoji);
+  setVal('bas-room-nom', tpl.nom);
+  setVal('bas-room-color', tpl.color);
+  setVal('bas-room-desc', tpl.desc);
+  tpl.niveaux.forEach((n, i) => {
+    setVal(`bas-room-cout-${i}`, n.cout || 0);
+    setVal(`bas-room-sem-${i}`, n.semaines || 1);
+    setVal(`bas-room-prod-${i}`, n.prod?.or || 0);
+    setVal(`bas-room-bonus-${i}`, n.bonus || '');
+  });
+}
+
+function _bastionReadCreateRoom() {
+  const nom = document.getElementById('bas-room-nom')?.value?.trim();
+  if (!nom) return null;
+  return _normalizeRoomDef({
+    slug: '',
+    isCustom: true,
+    nom,
+    emoji: document.getElementById('bas-room-emoji')?.value?.trim() || '🏠',
+    color: document.getElementById('bas-room-color')?.value || '#7eb0ff',
+    desc: document.getElementById('bas-room-desc')?.value?.trim() || '',
+    niveaux: [0, 1, 2].map(i => ({
+      cout: parseInt(document.getElementById(`bas-room-cout-${i}`)?.value) || 0,
+      semaines: Math.max(1, parseInt(document.getElementById(`bas-room-sem-${i}`)?.value) || 1),
+      renommee: i === 0 ? 0 : i === 1 ? 20 : 50,
+      gainRenommee: i === 0 ? 2 : i === 1 ? 4 : 6,
+      prod: { or: parseInt(document.getElementById(`bas-room-prod-${i}`)?.value) || 0, items: [] },
+      bonus: document.getElementById(`bas-room-bonus-${i}`)?.value?.trim() || '',
+    })),
+  });
+}
+
+function _bastionAddCustomRoom() {
+  if (!STATE.isAdmin) return;
+  const tpl = _bastionTemplate('service');
+  const levelRow = (n, i) => `
+    <div class="bs-room-create-level">
+      <strong>Niv. ${NIVEAU_LABEL[i + 1]}</strong>
+      <label>Coût<input type="number" class="input-field" id="bas-room-cout-${i}" value="${n.cout || 0}" min="0"></label>
+      <label>Périodes<input type="number" class="input-field" id="bas-room-sem-${i}" value="${n.semaines || 1}" min="1"></label>
+      <label>Or / période<input type="number" class="input-field" id="bas-room-prod-${i}" value="${n.prod?.or || 0}" min="0"></label>
+      <label class="bs-room-create-bonus">Bonus
+        <input type="text" class="input-field" id="bas-room-bonus-${i}" value="${_esc(n.bonus || '')}" placeholder="ex: permet de...">
+      </label>
+    </div>`;
+
+  openModal('＋ Nouvelle salle du Bastion', `
+    <div class="bs-room-create">
+      <div class="bs-room-create-templates" aria-label="Modèles rapides">
+        ${Object.entries(BASTION_ROOM_TEMPLATES).map(([key, item]) => `
+          <button type="button" class="bs-room-template${key === 'service' ? ' active' : ''}" data-action="_bastionPickRoomTemplate" data-template="${key}">
+            <span>${item.icon}</span>
+            <strong>${_esc(item.label)}</strong>
+          </button>`).join('')}
+      </div>
+      <div class="bs-room-create-card">
+        <div class="bs-room-create-id">
+          <label>Icône<input type="text" class="input-field" id="bas-room-emoji" value="${_esc(tpl.emoji)}" maxlength="4"></label>
+          <label>Nom<input type="text" class="input-field" id="bas-room-nom" value="${_esc(tpl.nom)}" placeholder="Nom de la salle"></label>
+          <label>Couleur<input type="color" class="input-field" id="bas-room-color" value="${tpl.color}"></label>
+        </div>
+        <label>Description
+          <textarea class="input-field" id="bas-room-desc" rows="3" placeholder="Ce que cette salle apporte au Bastion...">${_esc(tpl.desc)}</textarea>
+        </label>
+      </div>
+      <div class="bs-room-create-levels">
+        ${tpl.niveaux.map(levelRow).join('')}
+      </div>
+      <div class="bs-room-create-actions">
+        <button type="button" class="btn btn-outline" data-action="_bastionCloseModal">Annuler</button>
+        <button type="button" class="btn btn-gold" data-action="_bastionCreateCustomRoom">Créer la salle</button>
+      </div>
+    </div>
+  `, { subtitle: 'Choisis un modèle, ajuste les coûts et les bonus, puis crée la salle.', accent: '#7eb0ff' });
+}
+
+async function _bastionCreateCustomRoom() {
   if (!STATE.isAdmin || STORE.addingCustomRoom) return;
 
+  const newRoomData = _bastionReadCreateRoom();
+  if (!newRoomData) {
+    showNotif('Le nom de la salle est requis.', 'error');
+    return;
+  }
   const current = STORE.bastion || _defaultBastion();
   const existingSlugs = new Set(_getRoomCatalog(current).map(room => room.slug));
   const slugBase = `custom_${Date.now().toString(36)}`;
   let slug = slugBase;
   let suffix = 2;
   while (existingSlugs.has(slug)) slug = `${slugBase}_${suffix++}`;
-
-  const newRoom = {
-    slug,
-    isCustom: true,
-    nom: 'Nouvelle salle',
-    emoji: '🏠',
-    desc: 'À personnaliser.',
-    color: '#7eb0ff',
-    niveaux: [
-      { cout: 200, semaines: 1, renommee: 0,  gainRenommee: 2, prod: { or: 0, items: [] }, bonus: '' },
-      { cout: 500, semaines: 2, renommee: 20, gainRenommee: 4, prod: { or: 0, items: [] }, bonus: '' },
-      { cout: 1500, semaines: 3, renommee: 50, gainRenommee: 6, prod: { or: 0, items: [] }, bonus: '' },
-    ],
-  };
+  const newRoom = _normalizeRoomDef({ ...newRoomData, slug, isCustom: true });
   const b = {
     ...current,
     roomCatalog: [..._getRoomCatalog(current), newRoom],
@@ -986,7 +1123,7 @@ async function _bastionAddCustomRoom() {
     STORE.bastion = b;
     closeModal();
     if (STATE.currentPage === 'bastion') _renderPage();
-    await _bastionEditRoom(slug);
+    showNotif('Salle créée.', 'success');
   } finally {
     STORE.addingCustomRoom = false;
   }
@@ -2096,6 +2233,14 @@ function _renderRoomCard(def, b) {
     </div>`;
 }
 
+function _renderAddRoomCard() {
+  return `
+    <button type="button" class="bs-room-add-card" data-action="_bastionAddCustomRoom" title="Ajouter une salle / activité" aria-label="Ajouter une salle ou activité au Bastion">
+      <span class="bs-room-add-plus">+</span>
+      <span class="bs-room-add-label">Nouvelle salle</span>
+    </button>`;
+}
+
 function _renderRooms(b) {
   const isMj = STATE.isAdmin;
   const anyBuilt = Object.values(b.salles || {}).some(s => (s?.niveau || 0) > 0 || s?.weeksLeftToBuild > 0);
@@ -2103,18 +2248,13 @@ function _renderRooms(b) {
   const roomsHtml = catalog.length ? `
       <div class="bs-rooms-grid">
         ${catalog.map(def => _renderRoomCard(def, b)).join('')}
+        ${isMj ? _renderAddRoomCard() : ''}
       </div>` : `
-      <div class="bs-coffre-empty">
-        Aucune salle n'est définie pour cette aventure.
-        ${isMj ? '<br><button class="btn btn-gold btn-sm" data-action="_bastionOpenCatalogEditor" style="margin-top:10px">＋ Créer les salles du Bastion</button>' : ''}
-      </div>`;
+      ${isMj ? `<div class="bs-rooms-grid bs-rooms-grid--empty">${_renderAddRoomCard()}</div>` : `<div class="bs-coffre-empty">Aucune salle n'est définie pour cette aventure.</div>`}`;
   return `
     <section class="bs-section">
       <div class="bs-section-hd">
         <h2 class="bs-section-title">🏛 Salles &amp; activités</h2>
-        ${isMj ? `<button class="btn btn-gold btn-sm" data-action="_bastionAddCustomRoom">
-          ＋ Ajouter une salle / activité
-        </button>` : ''}
         ${isMj && anyBuilt ? `<button class="btn btn-outline btn-sm bs-reset-btn"
           data-action="_bastionResetRooms" title="Réinitialiser toutes les salles construites">
           🔄 Reset salles
@@ -2628,6 +2768,9 @@ registerActions({
   _bastionDoWithdraw:       (btn) => _bastionDoWithdraw(btn.dataset.id),
   _bastionEditRoom:         (btn) => _bastionEditRoom(btn.dataset.slug),
   _bastionAddCustomRoom:    () => _bastionAddCustomRoom(),
+  _bastionPickRoomTemplate: (btn) => _bastionFillCreateRoomTemplate(btn.dataset.template || 'service'),
+  _bastionCreateCustomRoom: () => _bastionCreateCustomRoom(),
+  _bastionCloseModal:       () => closeModal(),
   _bastionDeleteCustomRoom: (btn) => _bastionDeleteCustomRoom(btn.dataset.slug),
   _bastionResetRoom:        (btn) => _bastionResetRoom(btn.dataset.slug),
   _bastionSaveRoom:         (btn) => _bastionSaveRoom(btn.dataset.slug),

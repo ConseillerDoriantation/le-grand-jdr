@@ -18,8 +18,8 @@ import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
 import { _live } from './vtt-effective.js';
 import { _vttPanelError } from './vtt-utils.js';
 import {
-  _canControlToken, _npcCombat, _tokenStatMod, _manualBuffVal, _showActBar, _signed,
-  _aimOpt, CONDITION_BY_ID, _resolveUidName,
+  _canControlToken, _npcCombat, _tokenStatMod, _manualBuffVal, _signed,
+  CONDITION_BY_ID, _resolveUidName,
 } from './vtt.js'; // circ. (runtime)
 
 let _insTab = 'stats';          // onglet actif de l'inspecteur token
@@ -70,14 +70,7 @@ export function _renderInspectorSoon() {
     }
     const t = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : null;
     _renderInspector(t);
-    // HUD d'action : (ré)affiché pour le token sélectionné contrôlable, avec PM
-    // et options à jour. On ne reconstruit PAS pendant une visée (_aimOpt), tant
-    // qu'une modale est ouverte, ni si l'utilisateur tape dans la recherche.
-    const modalOpen = document.getElementById('modal-overlay')?.classList.contains('show');
-    if (t && _canControlToken(t) && !_aimOpt && !modalOpen
-        && !document.activeElement?.classList?.contains('vtt-aopt-search-input')) {
-      _showActBar(VS.selected);
-    }
+    // L'ouverture du HUD d'actions est volontairement explicite via le bouton Actions.
   });
 }
 
@@ -660,6 +653,13 @@ export function _renderInspectorImpl(t) {
         </select>
       </div>` : '';
 
+  const _quickActionHtml = _canControlToken(t) ? `
+    <div class="vtt-ins-action-row">
+      <button type="button" class="vtt-ins-action-main" data-vtt-fn="_showActBar" data-vtt-args="${t.id}" title="Ouvrir les attaques, sorts, objets et actions">
+        <span>⚡</span><b>Actions</b>
+      </button>
+    </div>` : '';
+
   const _sourceLinksHtml = STATE.isAdmin ? (() => {
     const links = [];
     if (t.characterId) {
@@ -729,10 +729,11 @@ export function _renderInspectorImpl(t) {
     <div class="vtt-ins-header">
       ${img?`<img src="${img}" class="vtt-ins-avatar" alt="">`
            :`<div class="vtt-ins-avatar-icon" style="background:${TYPE_COLOR[t.type]??'#888'}">${icon}</div>`}
-      <div style="min-width:0">
+      <div class="vtt-ins-title">
         <div class="vtt-ins-name">${ld.displayName??t.name}</div>
         <div class="vtt-ins-type">${icon} ${lbl}${linked?' · 🔗':''}</div>
       </div>
+      ${_quickActionHtml}
     </div>
     ${buildSwitcherHtml}
     ${vitalsHtml}
