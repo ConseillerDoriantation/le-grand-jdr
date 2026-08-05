@@ -74,7 +74,7 @@ let _stMapReset = () => {};
 
 // ── Préférences persistées (handoff STORY.md §11) ─────────────────────────────
 const STORY_PREFS_KEY = 'story-prefs-v2';
-const STORY_PREFS_DEFAULT = { view: 'carte', search: '', statut: '', zoom: 1, panX: 0, panY: 0 };
+const STORY_PREFS_DEFAULT = { view: 'carte', search: '', statut: '', playerScope: 'all', zoom: 1, panX: 0, panY: 0 };
 function getStoryPrefs() {
   try { return { ...STORY_PREFS_DEFAULT, ...(JSON.parse(localStorage.getItem(STORY_PREFS_KEY)) || {}) }; }
   catch { return { ...STORY_PREFS_DEFAULT }; }
@@ -82,6 +82,37 @@ function getStoryPrefs() {
 function setStoryPrefs(patch) {
   try { localStorage.setItem(STORY_PREFS_KEY, JSON.stringify({ ...getStoryPrefs(), ...patch })); }
   catch {}
+}
+
+function _storyMissionIdsForPlayer(items = [], groups = []) {
+  const uid = STATE.user?.uid || '';
+  const chars = getMyCharacters(getCachedCollection('characters') || STATE.characters || [], uid);
+  const charIds = new Set(chars.map(char => char.id).filter(Boolean));
+  const missionIds = new Set();
+
+  (groups || []).forEach(group => {
+    const belongsToPlayer = dedupeQuestParticipants(group?.participants || []).some(participant =>
+      (uid && participant?.uid === uid) || (participant?.charId && charIds.has(participant.charId))
+    );
+    if (belongsToPlayer && group?.missionId) missionIds.add(group.missionId);
+  });
+
+  (items || []).forEach(item => {
+    const belongsToPlayer = (Array.isArray(item?.participants) ? item.participants : []).some(participant => {
+      const charId = typeof participant === 'string' ? participant : participant?.id || participant?.charId;
+      return (uid && participant?.uid === uid) || (charId && charIds.has(charId));
+    });
+    const belongsToLegacyGroup = (Array.isArray(item?.groupes) ? item.groupes : []).some(group => {
+      const memberIds = Array.isArray(group?.membres) ? group.membres : [];
+      const participants = Array.isArray(group?.participants) ? group.participants : [];
+      return memberIds.some(charId => charIds.has(charId)) || participants.some(participant =>
+        (uid && participant?.uid === uid) || (participant?.charId && charIds.has(participant.charId))
+      );
+    });
+    if ((belongsToPlayer || belongsToLegacyGroup) && item?.id) missionIds.add(item.id);
+  });
+
+  return missionIds;
 }
 
 // Avancement d'une mission : 100 si Terminée, 0 si Échouée, sinon moyenne des
@@ -679,19 +710,26 @@ async function renderStory() {
   const content = document.getElementById('main-content');
   STORE.axeMap = {};
 
-  const [items, savedActes, axesDoc] = await Promise.all([
+  const [items, savedActes, axesDoc, questGroups] = await Promise.all([
     loadCollection('story'),
     loadActes(),
     getDocData('story_meta', 'axes'),
+    STATE.isAdmin ? Promise.resolve([]) : loadCollection('quests').catch(() => []),
   ]);
   // Ordre des axes défini par le MJ (story_meta/axes.order). Les axes absents de
   // la liste sont placés après, dans leur ordre d'apparition.
   STORE.axeOrder = Array.isArray(axesDoc?.order) ? axesDoc.order : [];
 
   const prefs = getStoryPrefs();
+  const visibleItems = items.filter(i => STATE.isAdmin || i.visibleJoueurs !== false);
+  const playerMissionIds = STATE.isAdmin ? new Set() : _storyMissionIdsForPlayer(visibleItems, questGroups);
+  const personalScope = !STATE.isAdmin && prefs.playerScope === 'mine';
+  const scopedItems = personalScope
+    ? visibleItems.filter(item => playerMissionIds.has(item.id))
+    : visibleItems;
 
-  const fromItems = [...new Set(items.map(i => i.acte).filter(Boolean))];
-  const allActes  = [...new Set([...savedActes, ...fromItems])].sort();
+  const fromItems = [...new Set(scopedItems.map(i => i.acte).filter(Boolean))];
+  const allActes = [...new Set([...(STATE.isAdmin ? savedActes : []), ...fromItems])].sort();
   if (!allActes.length) allActes.push('Acte I');
 
   const activeActe = STORE.storyActe && allActes.includes(STORE.storyActe)
@@ -700,9 +738,7 @@ async function renderStory() {
   STORE.storyActe = activeActe;
 
   // Items de l'acte courant, visibles selon rôle
-  const acteItems = items
-    .filter(i => (i.acte || 'Acte I') === activeActe)
-    .filter(i => STATE.isAdmin || i.visibleJoueurs !== false);
+  const acteItems = scopedItems.filter(i => (i.acte || 'Acte I') === activeActe);
 
   // Filtres recherche (insensible aux accents) + statut
   const qNorm = _normalize((prefs.search || '').trim());
@@ -801,7 +837,7 @@ async function renderStory() {
       <div class="acts">
         ${allActes.map(acte => {
           const active = acte === activeActe;
-          const n = items.filter(i => (i.acte || 'Acte I') === acte).length;
+          const n = scopedItems.filter(i => (i.acte || 'Acte I') === acte).length;
           // data-acte + délégation : robuste aux apostrophes / guillemets dans le nom
           return `<button class="act ${active ? 'active' : ''}"
             data-acte="${_esc(acte)}"
@@ -826,6 +862,14 @@ async function renderStory() {
         <option value="">Tous les statuts</option>
         ${Object.keys(STATUT_CFG).map(s => `<option value="${s}" ${prefs.statut===s?'selected':''}>${STATUT_CFG[s].icon} ${s}</option>`).join('')}
       </select>
+      ${!STATE.isAdmin ? `<div class="story-player-scope" role="group" aria-label="Missions affichees">
+        <button type="button" class="story-player-scope-btn ${!personalScope ? 'active' : ''}" data-action="_stSetPlayerScope" data-scope="all">
+          <span aria-hidden="true">&#9776;</span><b>Toute la trame</b>
+        </button>
+        <button type="button" class="story-player-scope-btn ${personalScope ? 'active' : ''}" data-action="_stSetPlayerScope" data-scope="mine">
+          <span aria-hidden="true">&#9673;</span><b>Mes missions</b><em>${playerMissionIds.size}</em>
+        </button>
+      </div>` : ''}
       <div class="view-toggle" role="tablist">
         <button class="view-tab ${prefs.view==='carte'?'active':''}" data-action="_stSetView" data-view="carte">🗺️ Carte</button>
         <button class="view-tab ${prefs.view==='saga'?'active':''}" data-action="_stSetView" data-view="saga">📚 Saga</button>
@@ -841,7 +885,11 @@ async function renderStory() {
       ${filteredItems.length === 0 ? `
         <div style="text-align:center;padding:5rem 2rem;color:var(--text-dim)">
           <div style="font-size:3rem;margin-bottom:1rem;opacity:.3">📜</div>
-          <p style="font-style:italic">${qNorm || prefs.statut ? 'Aucune mission ne correspond aux filtres.' : `Aucune mission pour ${_esc(activeActe)}.`}</p>
+          <p style="font-style:italic">${qNorm || prefs.statut
+            ? 'Aucune mission ne correspond aux filtres.'
+            : personalScope
+              ? "Tu n'as participé à aucune mission de cet acte."
+              : `Aucune mission pour ${_esc(activeActe)}.`}</p>
           ${qNorm || prefs.statut
             ? `<button class="btn btn-outline btn-sm" data-action="_stResetFilters">↺ Réinitialiser</button>`
             : (STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="openStoryModal">+ Ajouter la première</button>` : '')}
@@ -884,6 +932,10 @@ async function renderStory() {
 function _stSetFilter(key, val) { setStoryPrefs({ [key]: val }); PAGES.story?.(); }
 function _stSetView(view) { setStoryPrefs({ view }); PAGES.story?.(); }
 function _stResetFilters() { setStoryPrefs({ search:'', statut:'' }); PAGES.story?.(); }
+function _stSetPlayerScope(scope) {
+  setStoryPrefs({ playerScope: scope === 'mine' ? 'mine' : 'all' });
+  PAGES.story?.();
+}
 // Bascule entre actes — passe par data-attribute pour être immunisé aux
 // caractères spéciaux (apostrophes, guillemets) dans les noms d'acte.
 function _stSwitchActe(acte) {
@@ -2501,6 +2553,7 @@ registerActions({
   _stSetFilter:            (btn) => _stSetFilter(btn.dataset.key, btn.dataset.val),
   _stOnSearch:             (el)  => _stOnSearch(el),
   _stSetStatut:            (el)  => _stSetFilter('statut', el.value),
+  _stSetPlayerScope:       (btn) => _stSetPlayerScope(btn.dataset.scope),
   _stResetFilters:         ()    => _stResetFilters(),
   _stSwitchActe:           (btn) => _stSwitchActe(btn.dataset.acte),
   _stMapZoom:              (btn) => _stMapZoom(Number(btn.dataset.factor)),
