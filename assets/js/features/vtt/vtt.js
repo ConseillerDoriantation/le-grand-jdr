@@ -1170,6 +1170,14 @@ function _buildShape(t) {
     });
     // ─ Début du drag : mémoriser les positions du groupe ─
     g.on('dragstart', () => {
+      // La delegation peut changer apres la creation du shape : revalider au
+      // moment exact du geste, pas uniquement lors du rendu initial.
+      if (!_canControlToken(VS.tokens[t.id]?.data || t)) {
+        g.stopDrag();
+        g.position({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2 });
+        VS.layers.token?.batchDraw();
+        return;
+      }
       if (rightDown) rightDown.dragged = true;
       _hideTokenTip();
       // En mode Règle (mesure) ou Dessin : le token ne doit pas se déplacer — la
@@ -1197,6 +1205,7 @@ function _buildShape(t) {
       if (VS.selectedMulti.has(t.id) && VS.selectedMulti.size>1) {
         _multiDragOrigin={};
         for (const id of VS.selectedMulti) {
+          if (!_canControlToken(VS.tokens[id]?.data)) continue;
           const s=VS.tokens[id]?.shape;
           if (s) _multiDragOrigin[id]={x:s.x(),y:s.y()};
         }
@@ -1204,6 +1213,12 @@ function _buildShape(t) {
     });
     // ─ Pendant le drag : snap + déplacer le groupe ─
     g.on('dragmove', () => {
+      if (!_canControlToken(VS.tokens[t.id]?.data || t)) {
+        g.stopDrag();
+        g.position({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2 });
+        VS.layers.token?.batchDraw();
+        return;
+      }
       if (rightDown) rightDown.dragged = true;
       const sx=Math.round((g.x()-sw*CELL/2)/CELL)*CELL+sw*CELL/2;
       const sy=Math.round((g.y()-sh*CELL/2)/CELL)*CELL+sh*CELL/2;
@@ -1224,6 +1239,12 @@ function _buildShape(t) {
     });
     // ─ Fin du drag : commit Firestore ─
     g.on('dragend', async () => {
+      if (!_canControlToken(VS.tokens[t.id]?.data || t)) {
+        g.position({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2 });
+        VS.layers.token?.batchDraw();
+        _multiDragOrigin = null;
+        return;
+      }
       if (VS.tool !== 'select' || _zoneCtx || _mtCtx || _middlePanActive) {
         g.position({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2 });
         VS.layers.token?.batchDraw();
@@ -1237,6 +1258,7 @@ function _buildShape(t) {
         for (const id of VS.selectedMulti) {
           const s=VS.tokens[id]?.shape; if (!s) continue;
           const tokenData=VS.tokens[id].data;
+          if (!_canControlToken(tokenData)) continue;
           const d2=_tokenDims(tokenData);
           const nc=_clampTokenCell(Math.round((s.x()-d2.w*CELL/2)/CELL), d2.w, pg.cols);
           const nr=_clampTokenCell(Math.round((s.y()-d2.h*CELL/2)/CELL), d2.h, pg.rows);
@@ -1509,7 +1531,7 @@ function _updateTokenDraggable() {
   Object.values(VS.tokens || {}).forEach(entry => {
     const shape = entry?.shape;
     if (!shape) return;
-    const canDrag = !!shape.getAttr('vttCanDragToken') && _canControlToken(entry.data);
+    const canDrag = _canControlToken(entry.data);
     shape.setAttr('vttCanDragToken', canDrag);
     shape.draggable(active && canDrag);
   });
@@ -1972,8 +1994,11 @@ function _clearMultiSelect() {
 }
 
 function _toggleMultiSelect(id) {
+  const target = VS.tokens[id]?.data;
+  if (!_canControlToken(target)) return;
   // Inclure le token principal courant dans la multi-sélection
-  if (VS.selected && !VS.selectedMulti.has(VS.selected)) {
+  if (VS.selected && _canControlToken(VS.tokens[VS.selected]?.data)
+      && !VS.selectedMulti.has(VS.selected)) {
     VS.selectedMulti.add(VS.selected);
     VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(true);
   }
@@ -2043,6 +2068,10 @@ function _showAttackRange(t) {
 }
 async function _moveTo(id, col, row) {
   const cur = VS.tokens[id]?.data;
+  if (!cur || !_canControlToken(cur)) {
+    showNotif('Tu ne peux pas déplacer ce token.', 'info');
+    return false;
+  }
   // Blocage par les murs (joueurs seulement)
   if (!STATE.isAdmin && (VS.activePage?.walls||[]).length) {
     if (cur && fogWallBlocksPath(cur.col, cur.row, col, row, VS.activePage.walls)) {
@@ -2071,7 +2100,12 @@ async function _moveTo(id, col, row) {
     patch.movedCells = (cur.movedCells || 0) + d;
     patch.movedThisTurn = true;
   }
-  await updateDoc(_tokRef(id), patch).catch(() => showNotif('Déplacement refusé', 'error'));
+  try {
+    await updateDoc(_tokRef(id), patch);
+  } catch (e) {
+    showNotif('Déplacement refusé', 'error');
+    return false;
+  }
 
   // Mise à jour optimiste : ne pas attendre le snapshot Firestore pour rafraîchir les zones
   const entry = VS.tokens[id];
@@ -2083,6 +2117,7 @@ async function _moveTo(id, col, row) {
     if (patch.moveOrigin !== undefined) entry.data.moveOrigin = patch.moveOrigin;
   }
   _refreshRanges(id, entry?.data);
+  return true;
 }
 
 const _combatMoveOrigins = new Map();
@@ -7691,6 +7726,9 @@ function _selectByRect(r) {
   // Tokens sur la page active
   for (const [id, {data: t}] of Object.entries(VS.tokens)) {
     if (!t || t.pageId !== VS.activePage?.id) continue;
+    // Une cible reste inspectable par clic, mais ne rejoint jamais un groupe
+    // de déplacement si le joueur n'en a pas le contrôle.
+    if (!STATE.isAdmin && !_canControlToken(t)) continue;
     const { x: cx, y: cy } = _tokenCenter(t);
     if (_inRect(cx, cy, r)) {
       VS.selectedMulti.add(id);
@@ -8401,7 +8439,7 @@ async function _vttCourir(id) {
 async function _moveSelectedBy(dc, dr) {
   if (!VS.selected || !VS.activePage || VS.tool !== 'select') return;
   const tok = VS.tokens[VS.selected]?.data;
-  if (!tok || tok.pageId !== VS.activePage.id) return;
+  if (!tok || tok.pageId !== VS.activePage.id || !_canControlToken(tok)) return;
   const ld  = _live(tok);
   const sw  = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
   const nc  = _clampTokenCell(tok.col + dc, sw, VS.activePage.cols);

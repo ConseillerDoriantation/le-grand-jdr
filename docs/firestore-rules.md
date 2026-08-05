@@ -511,7 +511,10 @@ match /adventures/{adventureId} {
       isAdvAdmin(adventureId) ||
       isCharacterUidSelfRepair(resource.data, request.resource.data) ||
       isCharacterUidSameEmailRelink(adventureId, resource.data, request.resource.data) ||
-      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['inventaire', 'compte']) ||
+      // Don entre membres : le destinataire recoit l'objet et sa trace dans
+      // l'historique au sein du meme batch atomique.
+      request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['inventaire', 'inventoryHistory', 'compte']) ||
       // Dépense de PM par le propriétaire ou le délégué du token lanceur.
       // `vttControlTokenId` fournit à la règle le token précis à vérifier.
       (

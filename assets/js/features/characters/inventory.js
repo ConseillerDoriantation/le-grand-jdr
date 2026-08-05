@@ -1,7 +1,7 @@
 import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
-import { updateInCol, loadCollection } from '../../data/firestore.js';
+import { batchUpdateInCol, updateInCol, loadCollection } from '../../data/firestore.js';
 import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal, modalSection } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
@@ -1139,10 +1139,16 @@ export async function sendInvItem(fromCharId, indicesB64) {
     fromPayload.activeBuildId = fromChar.activeBuildId;
   }
 
-  await Promise.all([
-    updateInCol('characters', fromCharId, fromPayload),
-    updateInCol('characters', targetId,   { inventaire: toInv, ...toHistoryPatch }),
-  ]);
+  try {
+    await batchUpdateInCol([
+      { col: 'characters', id: fromCharId, data: fromPayload },
+      { col: 'characters', id: targetId, data: { inventaire: toInv, ...toHistoryPatch } },
+    ]);
+  } catch (e) {
+    // Le lot est atomique : l'inventaire local reste intact si Firestore refuse.
+    console.error('[inventory] item transfer failed', e);
+    return;
+  }
   fromChar.inventaire = fromInv;
   if (equipSync.changed) {
     fromChar.equipement = equipSync.equipement;
