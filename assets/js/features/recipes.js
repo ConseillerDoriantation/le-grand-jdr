@@ -912,12 +912,17 @@ function openSendRecipeModal(id) {
   const uid       = _myUid();
   const joueurs   = _getJoueurs();
   const accesUids = r.acces || [];
+  const type      = TABS.find(tab => tab.id === r.type) || TABS[0];
 
   // Destinataires : joueurs qui n'ont PAS encore la recette (sauf l'envoyeur)
   const cibles = joueurs.filter(j => j.uid !== uid && !accesUids.includes(j.uid));
   if (!cibles.length) { showNotif('Tous les joueurs ont déjà cette recette.', 'success'); return; }
 
   openModal(`↗ Transmettre — ${r.nom}`, `
+    <div class="rec-send-recipe">
+      <span class="rec-book-icon">${type.emoji}</span>
+      <div><small>Recette transmise</small><strong>${_esc(r.nom || 'Recette')}</strong><span>${_esc(type.label || r.type || 'Recette')}</span></div>
+    </div>
     <div style="background:rgba(255,107,107,.06);border:1px solid rgba(255,107,107,.2);border-radius:10px;
       padding:.6rem .85rem;margin-bottom:.85rem;font-size:.8rem;color:var(--text-muted)">
       ⚠️ En transmettant cette recette, <strong style="color:#ff6b6b">tu n'y auras plus accès</strong>. Elle appartient désormais à l'autre joueur.
@@ -997,7 +1002,7 @@ function _recipeBookCard(recipe, character, canTransfer) {
   const availability = ingredients.length ? (ready ? 'ready' : 'missing') : 'neutral';
   const output = _linkedShopItem(recipe);
   return `<article class="rec-book-card" data-rec-book-row data-type="${_esc(recipe.type || '')}" data-ready="${availability}" data-search="${_esc(_recipeSearchText(recipe))}">
-    <header><span class="rec-book-icon">${type.emoji}</span><div><strong>${_esc(recipe.nom || 'Recette')}</strong><small>${_esc(type.label || recipe.type || 'Recette')}</small></div>
+    <header><span class="rec-book-icon">${type.emoji}</span><div class="rec-book-identity"><strong class="rec-book-name">${_esc(recipe.nom || 'Recette')}</strong><small>${_esc(type.label || recipe.type || 'Recette')}</small></div>
       ${ingredients.length ? `<span class="rec-book-ready ${ready ? 'is-ready' : ''}">${ready ? 'Prête' : 'Ingrédients manquants'}</span>` : ''}</header>
     ${recipe.effet ? `<p class="rec-book-effect">${_esc(recipe.effet)}</p>` : ''}
     ${output ? `<div class="rec-book-output"><span>Objet produit</span><strong>${_esc(output.nom || recipe.nom || 'Objet')}</strong></div>` : `<div class="rec-book-output is-missing"><span>Résultat</span><strong>Objet non lié</strong></div>`}
@@ -1059,7 +1064,7 @@ export async function openCharacterRecipeAccess(characterId) {
         const type = TABS.find(tab => tab.id === recipe.type) || TABS[0];
         const output = _linkedShopItem(recipe);
         return `<div class="rec-access-row" data-rec-access-row data-type="${_esc(recipe.type || '')}" data-search="${_esc(_recipeSearchText(recipe))}">
-          <label class="rec-access-toggle"><input type="checkbox" data-change="updateCharacterRecipeAccessCount" data-recipe-id="${_esc(recipe.id)}" data-source="${recipe._source}" ${(recipe.acces || []).includes(character.uid) ? 'checked' : ''}><span class="rec-access-check"></span><span class="rec-book-icon">${type.emoji}</span><span class="rec-access-name"><strong>${_esc(recipe.nom || 'Recette')}</strong><small>${_esc(type.label || recipe.type || '')}</small></span></label>
+          <label class="rec-access-toggle"><input type="checkbox" data-change="updateCharacterRecipeAccessCount" data-recipe-id="${_esc(recipe.id)}" data-source="${recipe._source}" ${(recipe.acces || []).includes(character.uid) ? 'checked' : ''}><span class="rec-access-check"></span><span class="rec-book-icon">${type.emoji}</span><span class="rec-access-name"><strong title="${_esc(recipe.nom || 'Recette')}">${_esc(recipe.nom || 'Recette')}</strong><small>${_esc(type.label || recipe.type || '')}</small></span></label>
           ${recipe._source === 'recipes' ? `<button type="button" class="rec-access-output ${output ? 'is-linked' : ''}" data-action="openCharacterRecipeOutput" data-character-id="${_esc(character.id)}" data-recipe-id="${_esc(recipe.id)}"><span>${output ? 'Objet produit' : 'Résultat du craft'}</span><strong>${_esc(output?.nom || 'Lier un objet')}</strong><i aria-hidden="true">›</i></button>` : `<span class="rec-access-output is-native"><span>Objet produit</span><strong>${_esc(recipe.nom || 'Objet boutique')}</strong></span>`}
         </div>`;
       }).join('') || '<div class="rec-book-empty">Le catalogue est vide.</div>'}<div class="rec-context-empty" hidden>Aucune recette ne correspond à ces filtres.</div></div></div>

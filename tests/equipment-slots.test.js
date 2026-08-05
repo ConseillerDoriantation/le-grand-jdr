@@ -46,6 +46,16 @@ test('configured slots drive item compatibility and automatic target slot', () =
   assert.equal(resolveEquipmentSlotForItem(sword), 'Arme');
 });
 
+test('configured armor slots reject consumables and equipment for another slot', () => {
+  setEquipmentSlotsForTests([
+    { id: 'Torse', label: 'Torse', kind: 'armor', itemField: 'slotArmure', itemValue: 'Torse' },
+    { id: 'Bottes', label: 'Bottes', kind: 'armor', itemField: 'slotArmure', itemValue: 'Pieds' },
+  ]);
+  assert.equal(equipmentSlotAcceptsItem('Torse', { nom: 'Potion de cuirasse', template: 'consommable' }), false);
+  assert.equal(equipmentSlotAcceptsItem('Torse', { nom: 'Bottes de marche', slotArmure: 'Pieds' }), false);
+  assert.equal(equipmentSlotAcceptsItem('Torse', { nom: 'Plastron', slotArmure: 'torse' }), true);
+});
+
 test('disabled slots disappear without losing their stable stored id', () => {
   setEquipmentSlotsForTests([
     { id: 'Main principale', label: 'Arme', kind: 'weapon', role: 'primaryWeapon' },

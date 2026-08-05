@@ -132,20 +132,20 @@ export function isWeaponItem(item = {}) {
   return tpl === 'arme' || Boolean(item.degats || item.toucher || item.toucherStat || item.degatsStat || item.sousType || String(item.format || '').startsWith('Arme'));
 }
 
+function _normalizedCategory(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
 export function equipmentSlotAcceptsItem(slotOrId, item = {}) {
   const slot = typeof slotOrId === 'string' ? getEquipmentSlot(slotOrId) : slotOrId;
   if (!slot || !item?.nom) return false;
   if (slot.kind === 'weapon') return isWeaponItem(item);
-  if (slot.itemField && slot.itemValue && item[slot.itemField] === slot.itemValue) return true;
-  if (item[slot.itemField]) return false;
-  // Legacy objects created before structured equipment categories existed.
-  const haystack = `${item.type || ''} ${item.nom || ''}`.toLowerCase();
-  const keywords = {
-    armorHead: ['casque', 'heaume', 'chapeau', 'coiffe', 'capuche', 'tête', 'tete', 'tiare', 'couronne'],
-    armorTorso: ['torse', 'cuirasse', 'plastron', 'armure', 'armor', 'robe', 'cotte', 'harnois', 'tunique', 'mailles'],
-    armorFeet: ['botte', 'chausse', 'soleret', 'jambière', 'jambiere', 'grève', 'greve', 'sandale', 'pied'],
-  }[slot.role] || [];
-  return keywords.some(keyword => haystack.includes(keyword));
+  if (!slot.itemField || !slot.itemValue) return false;
+  return _normalizedCategory(item[slot.itemField]) === _normalizedCategory(slot.itemValue);
 }
 
 export function resolveEquipmentSlotForItem(item = {}) {

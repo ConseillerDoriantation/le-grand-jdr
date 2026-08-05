@@ -734,6 +734,20 @@
 .rec-access-name { display: grid; min-width: 0; gap: .1rem; }
 .rec-book-card strong,
 .rec-access-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rec-book-card .rec-book-name {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+.rec-access-name strong {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+}
 .rec-book-card small,
 .rec-access-name small { color: var(--text-dim); font-size: .68rem; }
 .rec-book-icon {
@@ -783,6 +797,30 @@
 .rec-book-card footer { display: flex; align-items: center; justify-content: space-between; margin-top: auto; color: var(--text-dim); font-size: .68rem; }
 .rec-book-actions { display: flex; align-items: center; justify-content: flex-end; gap: .35rem; flex-wrap: wrap; }
 .rec-book-empty { grid-column: 1 / -1; padding: 2rem; color: var(--text-dim); text-align: center; border: 1px dashed var(--border); border-radius: 7px; }
+.rec-send-recipe {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: .7rem;
+  margin-bottom: .75rem;
+  padding: .65rem .75rem;
+  background: color-mix(in srgb, #4f8cff 8%, var(--bg-elevated));
+  border: 1px solid color-mix(in srgb, #4f8cff 28%, var(--border));
+  border-radius: 7px;
+}
+.rec-send-recipe > div { display: grid; min-width: 0; gap: .12rem; }
+.rec-send-recipe small {
+  color: #7fb0ff;
+  font-size: .62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.rec-send-recipe strong {
+  color: var(--text);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.rec-send-recipe div > span { color: var(--text-dim); font-size: .7rem; }
 .rec-context-empty {
   grid-column: 1 / -1;
   padding: 2rem 1rem;
@@ -803,7 +841,7 @@
 }
 .rec-access-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(120px, .72fr);
+  grid-template-columns: minmax(0, 1.25fr) minmax(112px, .65fr);
   align-items: center;
   gap: .55rem;
   min-width: 0;

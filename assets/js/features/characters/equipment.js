@@ -28,6 +28,12 @@ export async function equipSlotFromInv(val, slot) {
   const item = (c.inventaire || [])[invIndex];
   if (!item) return;
 
+  const slotDef = getEquipmentSlot(slot);
+  if (!slotDef || !equipmentSlotAcceptsItem(slotDef, item)) {
+    showNotif(`Cet objet n'est pas compatible avec l'emplacement ${slotDef?.label || slot}.`, 'error');
+    return;
+  }
+
   const equip = { ...(c.equipement || {}) };
 
   Object.keys(equip).forEach(otherSlot => {
