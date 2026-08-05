@@ -208,6 +208,7 @@ function _shopToRecipe(item) {
   return {
     id:          item.id,
     _fromShop:   true,
+    shopItemId:  item.id,
     type,
     nom:         item.nom || '?',
     rarete:      item.rarete || 0,
@@ -394,6 +395,7 @@ function _renderCard(r, accent) {
         ${TABS.find(t=>t.id===r.type)?.emoji||''} ${TABS.find(t=>t.id===r.type)?.label||r.type}
       </div>
       <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
+        ${isAdmin && !r._fromShop ? `<button class="rec-btn rec-btn-output ${linkedItem ? 'is-linked' : ''}" data-action="_recOpenOutputPicker" data-id="${r.id}" data-type="${r.type}" data-stop-propagation>${linkedItem ? '📦 Changer l’objet produit' : '＋ Lier l’objet produit'}</button>` : ''}
         ${isAdmin ? `<button class="rec-btn rec-btn-acces" data-action="openAccesModal" data-id="${r.id}">👥 Accès</button>` : ''}
         ${canSend ? `<button class="rec-btn rec-btn-send" data-action="openSendRecipeModal" data-id="${r.id}">↗ Transmettre</button>` : ''}
       </div>
@@ -410,21 +412,28 @@ function _shopItemOptionLabel(item = {}) {
 
 function _shopItemOptionsHtml(selectedId = "", query = "") {
   const q = (query || "").trim();
-  return STORE.shopItems
-    // L'objet sélectionné reste toujours présent (pour ne pas perdre le lien en filtrant).
-    .filter(item => !q || item.id === selectedId || _searchIncludes(`${item.nom || ""} ${_shopItemKind(item)}`, q))
-    .map(item => `
-    <option value="${_esc(item.id)}" ${item.id === selectedId ? "selected" : ""}>
-      ${_esc(_shopItemOptionLabel(item))}
-    </option>`).join("");
+  const items = STORE.shopItems.filter(item => !q || _searchIncludes(`${item.nom || ""} ${_shopItemKind(item)}`, q));
+  if (!items.length) return `<div class="rec-shop-picker-empty">Aucun objet ne correspond à cette recherche.</div>`;
+  return items.map(item => `<button type="button" class="rec-shop-picker-option ${item.id === selectedId ? 'is-selected' : ''}"
+      data-action="_recSelectLinkedShop" data-id="${_esc(item.id)}">
+      ${item.image ? `<img src="${_esc(item.image)}" alt="">` : `<span class="rec-shop-picker-fallback">📦</span>`}
+      <span><strong>${_esc(item.nom || 'Objet sans nom')}</strong><small>${_esc(_shopItemKind(item))}${item.prix !== undefined && item.prix !== '' ? ` · ${_esc(item.prix)} or` : ''}</small></span>
+      <i aria-hidden="true">${item.id === selectedId ? '✓' : ''}</i>
+    </button>`).join('');
 }
-// Filtre live de la liste déroulante "Objet boutique associé" (toute la boutique).
+
 function _recFilterShopOptions(query) {
-  const select = document.getElementById("rec-shopItemId");
-  if (!select) return;
-  const current = select.value;
-  select.innerHTML = `<option value="">Aucun objet associé</option>` + _shopItemOptionsHtml(current, query);
-  if (current) select.value = current;   // préserve la sélection même hors filtre
+  const list = document.getElementById('rec-shop-options');
+  const current = document.getElementById('rec-shopItemId')?.value || '';
+  if (list) list.innerHTML = _shopItemOptionsHtml(current, query);
+}
+
+function selectLinkedShopItem(itemId) {
+  const input = document.getElementById('rec-shopItemId');
+  if (!input || !_findShopItem(itemId)) return;
+  input.value = itemId;
+  refreshLinkedShopPreview(itemId);
+  _recFilterShopOptions(document.getElementById('rec-shop-filter')?.value || '');
 }
 
 function _linkedShopPreviewHtml(itemId = "") {
@@ -453,12 +462,18 @@ function refreshLinkedShopPreview(itemId = "") {
   if (preview) preview.innerHTML = _linkedShopPreviewHtml(itemId);
   const clearBtn = document.querySelector("[data-action=\"_recClearLinkedShop\"]");
   if (clearBtn) clearBtn.disabled = !itemId;
+  const status = document.querySelector('.rec-output-status');
+  if (status) {
+    status.textContent = itemId ? 'Objet lié' : 'À définir';
+    status.classList.toggle('is-linked', !!itemId);
+  }
 }
 
 function clearLinkedShopItem() {
-  const select = document.getElementById("rec-shopItemId");
-  if (select) select.value = "";
+  const input = document.getElementById("rec-shopItemId");
+  if (input) input.value = "";
   refreshLinkedShopPreview("");
+  _recFilterShopOptions(document.getElementById('rec-shop-filter')?.value || '');
 }
 
 // MODAL DÉTAIL ITEM (arme / armure / bijou)
@@ -566,17 +581,17 @@ function openRecipeModal(type, id = '') {
       ${craftFields}
     </div>
 
-    <div class="form-group rec-linked-control">
-      <label>Objet boutique associé <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">(toute la boutique)</span></label>
-      <input type="text" class="input-field" id="rec-shop-filter" placeholder="🔍 Filtrer la boutique (nom, type…)"
-        data-input="_recShopFilter" style="margin-bottom:.4rem" autocomplete="off">
-      <div class="rec-linked-select-row">
-        <select class="input-field" id="rec-shopItemId" data-change="_recLinkedShopChange">
-          <option value="">Aucun objet associé</option>
-          ${_shopItemOptionsHtml(linkedItemId)}
-        </select>
-        <button type="button" class="btn btn-outline btn-sm" data-action="_recClearLinkedShop" ${linkedItemId ? "" : "disabled"}>Retirer</button>
+    <div class="form-group rec-linked-control" id="rec-output-picker">
+      <div class="rec-output-heading">
+        <span class="rec-output-heading-icon">📦</span>
+        <div><strong>Objet produit en cas de réussite</strong><small>Choisis l’objet existant qui sera ajouté à l’inventaire lors du craft dans le VTT.</small></div>
+        <span class="rec-output-status ${linkedItemId ? 'is-linked' : ''}">${linkedItemId ? 'Objet lié' : 'À définir'}</span>
       </div>
+      <input type="hidden" id="rec-shopItemId" value="${_esc(linkedItemId)}">
+      <input type="text" class="input-field" id="rec-shop-filter" placeholder="🔍 Rechercher l’objet produit…"
+        data-input="_recShopFilter" style="margin-bottom:.4rem" autocomplete="off">
+      <div class="rec-shop-picker" id="rec-shop-options">${_shopItemOptionsHtml(linkedItemId)}</div>
+      <div class="rec-linked-select-row"><span>${STORE.shopItems.length} objet${STORE.shopItems.length !== 1 ? 's' : ''} disponible${STORE.shopItems.length !== 1 ? 's' : ''}</span><button type="button" class="btn btn-outline btn-sm" data-action="_recClearLinkedShop" ${linkedItemId ? "" : "disabled"}>Retirer le lien</button></div>
       <div id="rec-linked-preview">${_linkedShopPreviewHtml(linkedItemId)}</div>
     </div>
 
@@ -612,6 +627,18 @@ function openRecipeModal(type, id = '') {
       ${r ? 'Enregistrer' : 'Créer la recette'}
     </button>
   `);
+}
+
+function openRecipeOutputPicker(type, id) {
+  openRecipeModal(type, id);
+  requestAnimationFrame(() => {
+    const section = document.getElementById('rec-output-picker');
+    const search = document.getElementById('rec-shop-filter');
+    section?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    section?.classList.add('is-guided');
+    setTimeout(() => section?.classList.remove('is-guided'), 1400);
+    search?.focus({ preventScroll: true });
+  });
 }
 
 function openCharacterRecipeCreatePicker(characterId) {
@@ -968,12 +995,14 @@ function _recipeBookCard(recipe, character, canTransfer) {
   const ingredients = _ingredientState(recipe, _inventoryCounts(character));
   const ready = ingredients.length > 0 && ingredients.every(item => item.ready);
   const availability = ingredients.length ? (ready ? 'ready' : 'missing') : 'neutral';
+  const output = _linkedShopItem(recipe);
   return `<article class="rec-book-card" data-rec-book-row data-type="${_esc(recipe.type || '')}" data-ready="${availability}" data-search="${_esc(_recipeSearchText(recipe))}">
     <header><span class="rec-book-icon">${type.emoji}</span><div><strong>${_esc(recipe.nom || 'Recette')}</strong><small>${_esc(type.label || recipe.type || 'Recette')}</small></div>
       ${ingredients.length ? `<span class="rec-book-ready ${ready ? 'is-ready' : ''}">${ready ? 'Prête' : 'Ingrédients manquants'}</span>` : ''}</header>
     ${recipe.effet ? `<p class="rec-book-effect">${_esc(recipe.effet)}</p>` : ''}
+    ${output ? `<div class="rec-book-output"><span>Objet produit</span><strong>${_esc(output.nom || recipe.nom || 'Objet')}</strong></div>` : `<div class="rec-book-output is-missing"><span>Résultat</span><strong>Objet non lié</strong></div>`}
     ${ingredients.length ? `<div class="rec-book-ingredients">${ingredients.map(item => `<span class="${item.ready ? 'is-ready' : 'is-missing'}"><b>${item.owned}/${item.required}</b> ${_esc(item.nom || 'Ingrédient')}</span>`).join('')}</div>` : '<p class="rec-book-empty-note">Aucun ingrédient renseigné.</p>'}
-    <footer><span>${_esc(recipe.atelierReq || '')}</span>${canTransfer ? `<button class="btn btn-outline btn-sm" data-action="openSendRecipeModal" data-id="${_esc(recipe.id)}">Transmettre</button>` : ''}</footer>
+    <footer><span>${_esc(recipe.atelierReq || '')}</span><div class="rec-book-actions">${canTransfer ? `<button class="btn btn-outline btn-sm" data-action="openSendRecipeModal" data-id="${_esc(recipe.id)}">Transmettre</button>` : ''}</div></footer>
   </article>`;
 }
 
@@ -1028,10 +1057,59 @@ export async function openCharacterRecipeAccess(characterId) {
       <label class="rec-book-search"><span aria-hidden="true">⌕</span><input data-input="filterCharacterRecipeAccess" placeholder="Filtrer le catalogue…"></label>
       <div class="rec-context-layout">${_recipeTypeNav(recipes, 'access')}<div class="rec-access-list">${recipes.map(recipe => {
         const type = TABS.find(tab => tab.id === recipe.type) || TABS[0];
-        return `<label class="rec-access-row" data-rec-access-row data-type="${_esc(recipe.type || '')}" data-search="${_esc(_recipeSearchText(recipe))}"><input type="checkbox" data-change="updateCharacterRecipeAccessCount" data-recipe-id="${_esc(recipe.id)}" data-source="${recipe._source}" ${(recipe.acces || []).includes(character.uid) ? 'checked' : ''}><span class="rec-access-check"></span><span class="rec-book-icon">${type.emoji}</span><span class="rec-access-name"><strong>${_esc(recipe.nom || 'Recette')}</strong><small>${_esc(type.label || recipe.type || '')}</small></span></label>`;
+        const output = _linkedShopItem(recipe);
+        return `<div class="rec-access-row" data-rec-access-row data-type="${_esc(recipe.type || '')}" data-search="${_esc(_recipeSearchText(recipe))}">
+          <label class="rec-access-toggle"><input type="checkbox" data-change="updateCharacterRecipeAccessCount" data-recipe-id="${_esc(recipe.id)}" data-source="${recipe._source}" ${(recipe.acces || []).includes(character.uid) ? 'checked' : ''}><span class="rec-access-check"></span><span class="rec-book-icon">${type.emoji}</span><span class="rec-access-name"><strong>${_esc(recipe.nom || 'Recette')}</strong><small>${_esc(type.label || recipe.type || '')}</small></span></label>
+          ${recipe._source === 'recipes' ? `<button type="button" class="rec-access-output ${output ? 'is-linked' : ''}" data-action="openCharacterRecipeOutput" data-character-id="${_esc(character.id)}" data-recipe-id="${_esc(recipe.id)}"><span>${output ? 'Objet produit' : 'Résultat du craft'}</span><strong>${_esc(output?.nom || 'Lier un objet')}</strong><i aria-hidden="true">›</i></button>` : `<span class="rec-access-output is-native"><span>Objet produit</span><strong>${_esc(recipe.nom || 'Objet boutique')}</strong></span>`}
+        </div>`;
       }).join('') || '<div class="rec-book-empty">Le catalogue est vide.</div>'}<div class="rec-context-empty" hidden>Aucune recette ne correspond à ces filtres.</div></div></div>
       <footer><button class="btn btn-outline" data-action="close-modal">Annuler</button><button class="btn btn-primary" data-action="saveCharacterRecipeAccess" data-id="${_esc(character.id)}">Enregistrer</button></footer>
     </div>`, { icon: '📚', subtitle: 'Accès du compte lié au personnage', accent: '#e8b84b' });
+}
+
+async function openCharacterRecipeOutput(characterId, recipeId) {
+  await _ensureRecipeData();
+  if (!_isAdmin()) return;
+  const recipe = STORE.all.find(item => item.id === recipeId);
+  const character = (STATE.characters || []).find(item => item.id === characterId);
+  if (!recipe || !character) return;
+  const linkedItemId = recipe.shopItemId || '';
+  openModal(`Objet produit · ${recipe.nom || 'Recette'}`, `
+    <div class="rec-output-modal">
+      <header><span>Résultat du craft</span><strong>Quel objet doit recevoir ${_esc(character.nom || 'le personnage')} en cas de réussite ?</strong><p>Recherche un objet existant, puis clique sur sa ligne pour le sélectionner.</p></header>
+      <input type="hidden" id="rec-shopItemId" value="${_esc(linkedItemId)}">
+      <input type="text" class="input-field" id="rec-shop-filter" placeholder="🔍 Rechercher par nom ou type…" data-input="_recShopFilter" autocomplete="off">
+      <div class="rec-shop-picker rec-shop-picker--modal" id="rec-shop-options">${_shopItemOptionsHtml(linkedItemId)}</div>
+      <div id="rec-linked-preview">${_linkedShopPreviewHtml(linkedItemId)}</div>
+      <footer><button type="button" class="btn btn-outline" data-action="close-modal">Annuler</button><button type="button" class="btn btn-primary" data-action="saveCharacterRecipeOutput" data-character-id="${_esc(characterId)}" data-recipe-id="${_esc(recipeId)}">Enregistrer l’objet produit</button></footer>
+    </div>`, { icon: '📦', subtitle: 'Objet ajouté à l’inventaire après un craft réussi', accent: '#e8b84b' });
+}
+
+async function saveCharacterRecipeOutput(characterId, recipeId) {
+  if (!_isAdmin()) return;
+  const recipe = STORE.all.find(item => item.id === recipeId);
+  const shopItemId = document.getElementById('rec-shopItemId')?.value || '';
+  if (!recipe || !shopItemId || !_findShopItem(shopItemId)) {
+    showNotif('Sélectionne l’objet produit avant d’enregistrer.', 'error');
+    return;
+  }
+  try {
+    await updateInCol('recipes', recipeId, { shopItemId });
+    recipe.shopItemId = shopItemId;
+    closeModal();
+    showNotif(`Objet produit lié à « ${recipe.nom || 'la recette'} ».`, 'success');
+    const restored = document.querySelector('.rec-access-shell');
+    if (!restored) openCharacterRecipeAccess(characterId);
+    else {
+      const row = restored.querySelector(`[data-recipe-id="${CSS.escape(recipeId)}"]`)?.closest('.rec-access-row');
+      const output = row?.querySelector('.rec-access-output');
+      if (output) {
+        output.classList.add('is-linked');
+        output.querySelector('span').textContent = 'Objet produit';
+        output.querySelector('strong').textContent = _findShopItem(shopItemId)?.nom || 'Objet lié';
+      }
+    }
+  } catch (error) { notifySaveError(error); }
 }
 
 function _applyRecipeContextFilters(scope) {
@@ -1101,12 +1179,13 @@ registerActions({
   _recOpenModal: (btn) => { _recipeReturnCharacterId = ''; openRecipeModal(btn.dataset.type); },
   _recEdit: (btn) => openRecipeModal(btn.dataset.type, btn.dataset.id),
   _recEditShop: (btn) => openShopRecipeModal(btn.dataset.id),
+  _recOpenOutputPicker: (btn) => openRecipeOutputPicker(btn.dataset.type, btn.dataset.id),
   _recDelete: (btn) => deleteRecipe(btn.dataset.id),
   _recDeleteShop: (btn) => deleteShopRecipe(btn.dataset.id),
   _recSave: (btn) => saveRecipe(btn.dataset.id, btn.dataset.type),
   _recAddIngr: () => addIngredientRow(),
   _recRemIngr: (btn) => removeIngredientRow(Number(btn.dataset.idx)),
-  _recLinkedShopChange: (el) => refreshLinkedShopPreview(el.value),
+  _recSelectLinkedShop: (btn) => selectLinkedShopItem(btn.dataset.id),
   _recShopFilter: (el) => _recFilterShopOptions(el.value),
   _recClearLinkedShop: () => clearLinkedShopItem(),
   saveShopRecipe: (btn) => saveShopRecipe(btn.dataset.id),
@@ -1116,6 +1195,8 @@ registerActions({
   openSendRecipeModal: (btn) => openSendRecipeModal(btn.dataset.id),
   sendRecipe: (btn) => sendRecipe(btn.dataset.id),
   openCharacterRecipeAccess: (btn) => openCharacterRecipeAccess(btn.dataset.id),
+  openCharacterRecipeOutput: (btn) => openCharacterRecipeOutput(btn.dataset.characterId, btn.dataset.recipeId),
+  saveCharacterRecipeOutput: (btn) => saveCharacterRecipeOutput(btn.dataset.characterId, btn.dataset.recipeId),
   openCharacterRecipeCreatePicker: (btn) => openCharacterRecipeCreatePicker(btn.dataset.id),
   createCharacterRecipe: (btn) => { _recipeReturnCharacterId = btn.dataset.id || ''; openRecipeModal(btn.dataset.type); },
   saveCharacterRecipeAccess: (btn) => saveCharacterRecipeAccess(btn.dataset.id),

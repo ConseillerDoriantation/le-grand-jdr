@@ -28,6 +28,7 @@ import {
 import { loadUpgradeSettings, getUpgradeSettings } from '../shared/upgrade-settings.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { patchBuildLocally } from '../shared/character-builds.js';
+import { characterAvatarHtml } from '../shared/portraits.js';
 
 // ══════════════════════════════════════════════
 // CATÉGORIES DE FRAGMENTS
@@ -148,6 +149,10 @@ export async function openArtisanModal() {
 }
 
 function _renderArtisanModal() {
+  const previousModal = document.getElementById('modal-box');
+  const previousScrollTop = previousModal?.classList.contains('modal--artisan')
+    ? previousModal.scrollTop
+    : 0;
   const chars = _getEligibleChars();
   const c = _getActiveArtisanChar();
 
@@ -161,30 +166,47 @@ function _renderArtisanModal() {
   }
 
   const charSelect = chars.length > 1 || STATE.isAdmin
-    ? `<select class="input-field" style="font-size:.85rem;padding:.4rem .55rem"
-        data-change="_artisanSelectChar">
-        ${chars.map(ch => `<option value="${ch.id}"${ch.id === c?.id ? ' selected' : ''}>${_esc(ch.nom || '?')}${STATE.isAdmin ? ` (${_esc(ch.ownerPseudo || '')})` : ''}</option>`).join('')}
-      </select>`
-    : `<div style="font-size:.92rem;font-weight:700;color:var(--text)">${_esc(c?.nom || '?')}</div>`;
+    ? `<details class="art-char-picker">
+        <summary class="art-char-picker-trigger">
+          ${characterAvatarHtml(c, { size: 32, className: 'art-char-avatar', border: '1px solid rgba(255,255,255,.14)' })}
+          <span class="art-char-picker-copy"><small>Personnage</small><strong>${_esc(c?.nom || '?')}</strong></span>
+          <span class="art-char-picker-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="art-char-picker-menu">
+          ${chars.map(ch => `<button type="button" class="art-char-picker-option${ch.id === c?.id ? ' is-active' : ''}"
+            data-action="_artisanSelectChar" data-id="${_esc(ch.id)}">
+            ${characterAvatarHtml(ch, { size: 34, className: 'art-char-avatar', border: '1px solid rgba(255,255,255,.14)' })}
+            <span class="art-char-picker-option-copy">
+              <strong>${_esc(ch.nom || '?')}</strong>
+              ${STATE.isAdmin && ch.ownerPseudo ? `<small>${_esc(ch.ownerPseudo)}</small>` : ''}
+            </span>
+            ${ch.id === c?.id ? '<span class="art-char-picker-check">✓</span>' : ''}
+          </button>`).join('')}
+        </div>
+      </details>`
+    : `<div class="art-char-static">
+        ${characterAvatarHtml(c, { size: 32, className: 'art-char-avatar', border: '1px solid rgba(255,255,255,.14)' })}
+        <span><small>Personnage</small><strong>${_esc(c?.nom || '?')}</strong></span>
+      </div>`;
 
   const or = c ? Math.floor(calcOr(c)) : 0;
 
   const mjToggle = STATE.isAdmin ? `
-    <label style="display:flex;align-items:center;gap:.4rem;font-size:.74rem;
-      color:${STORE.mjFreeMode ? '#ff6b6b' : 'var(--text-dim)'};cursor:pointer;
-      padding:.3rem .55rem;border-radius:6px;border:1px solid ${STORE.mjFreeMode ? 'rgba(255,107,107,.4)' : 'var(--border)'};
-      background:${STORE.mjFreeMode ? 'rgba(255,107,107,.08)' : 'transparent'};white-space:nowrap">
-      <input type="checkbox" ${STORE.mjFreeMode ? 'checked' : ''}
-        data-change="_artisanToggleMjFree"
-        style="margin:0;cursor:pointer">
-      🔧 MJ gratuit
+    <label class="art-mj-toggle${STORE.mjFreeMode ? ' is-active' : ''}">
+      <input type="checkbox" ${STORE.mjFreeMode ? 'checked' : ''} data-change="_artisanToggleMjFree">
+      <span class="art-mj-switch" aria-hidden="true"><span></span></span>
+      <span class="art-mj-toggle-copy">
+        <strong>Mode MJ gratuit</strong>
+        <small>${STORE.mjFreeMode ? 'Les coûts sont ignorés' : 'Les coûts restent appliqués'}</small>
+      </span>
+      <span class="art-mj-toggle-state">${STORE.mjFreeMode ? 'Actif' : 'Inactif'}</span>
     </label>` : '';
 
   openModal('🔨 Artisan — Améliorations d\'équipement', `
-    <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.85rem">
-      <div style="flex:1">${charSelect}</div>
+    <div class="art-toolbar">
+      <div class="art-toolbar-character">${charSelect}</div>
       ${mjToggle}
-      <div style="font-size:.85rem;color:var(--gold);font-weight:700;white-space:nowrap">💰 ${or} PO</div>
+      <div class="art-wallet"><small>Solde</small><strong>💰 ${or} PO</strong></div>
     </div>
 
     <div class="art-layout">
@@ -198,7 +220,9 @@ function _renderArtisanModal() {
       </div>
     </div>
   `, { subtitle: 'Choisis un objet à gauche pour l\'améliorer', accent: '#f4c430' });
-  document.getElementById('modal-box')?.classList.add('modal--artisan');
+  const modal = document.getElementById('modal-box');
+  modal?.classList.add('modal--artisan');
+  if (modal && previousScrollTop > 0) modal.scrollTop = previousScrollTop;
 }
 
 // ── Sac de fragments ────────────────────────────────────────────────
@@ -213,26 +237,29 @@ function _renderFragmentBag(c) {
     const frags = bag[cat.id] || {};
     const entries = Object.entries(frags).filter(([, n]) => (parseInt(n) || 0) > 0);
     if (!entries.length) return '';
-    const chips = entries.map(([name, n]) =>
-      `<span class="art-frag-chip" title="${_esc(name)} — pose-able sur un ${_esc(cat.label.toLowerCase())}">
-        ${_esc(name)} <span class="art-frag-chip-n">×${n}</span>
-      </span>`
+    const categoryCount = entries.reduce((sum, [, n]) => sum + (parseInt(n) || 0), 0);
+    const rows = entries.map(([name, n]) =>
+      `<div class="art-frag-entry" title="Compatible avec : ${_esc(cat.label)}">
+        <span class="art-frag-entry-name">${_esc(name)}</span>
+        <span class="art-frag-chip-n">×${n}</span>
+      </div>`
     ).join('');
-    return `<div class="art-frag-cat">
-      <span class="art-frag-cat-hd">${cat.icon} ${_esc(cat.label)}</span>
-      <div class="art-frag-cat-chips">${chips}</div>
-    </div>`;
+    return `<details class="art-frag-cat" open>
+      <summary class="art-frag-cat-hd">
+        <span>${cat.icon} ${_esc(cat.label)}</span>
+        <span class="art-frag-cat-count">${categoryCount}</span>
+      </summary>
+      <div class="art-frag-cat-list">${rows}</div>
+    </details>`;
   }).filter(Boolean).join('');
 
   return `
     <div class="art-frag-bag">
       <div class="art-frag-bag-hd">
-        <span style="font-size:.78rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim)">
-          🎒 Sac de fragments
-        </span>
-        <span style="font-size:.7rem;color:var(--text-dim)">${totalCount} fragment${totalCount > 1 ? 's' : ''}</span>
+        <span class="art-frag-bag-title">🎒 Sac de fragments</span>
+        <span class="art-frag-total">${totalCount}</span>
       </div>
-      <div class="art-frag-hint">Obtenus en <strong>recyclant</strong> un objet à trait. Sers-t'en pour <strong>ajouter</strong> un trait à un objet de la même catégorie.</div>
+      <div class="art-frag-hint">Recycle un objet à trait, puis utilise son fragment sur un équipement de même catégorie.</div>
       ${sections || `<div class="art-frag-empty">Aucun fragment — recycle un équipement à trait pour en obtenir.</div>`}
     </div>`;
 }
@@ -1065,7 +1092,7 @@ async function _artisanWeaponAddPoint(invIndex, statFullKey) {
 
 
 registerActions({
-  _artisanSelectChar: (el) => _artisanSelectChar(el.value),
+  _artisanSelectChar: (el) => _artisanSelectChar(el.dataset.id),
   _artisanSelectItem: (btn) => _artisanSelectItem(Number(btn.dataset.i)),
   _artisanToggleMjFree: (el) => _artisanToggleMjFree(el.checked),
   _artisanOpenHistory: (btn) => _artisanOpenHistory(Number(btn.dataset.i)),
