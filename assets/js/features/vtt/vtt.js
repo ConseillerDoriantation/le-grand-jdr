@@ -21,6 +21,7 @@ import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
 import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
 import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED, getCharDamageProfile } from '../../shared/equipment-utils.js';
+import { getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { buildProjectionPatch, switchBuild } from '../../shared/character-builds.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../../shared/damage-types.js';
@@ -65,7 +66,7 @@ import {
 } from './vtt-emotes.js';
 import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
-  _scaledEnchantConditionFields, _vttPrimaryWeapon, _conditionCritRangeBonusOf,
+  _scaledEnchantConditionFields, _vttPrimaryWeapon, _vttBestWeaponRange, _conditionCritRangeBonusOf,
 } from './vtt-effective.js';
 import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js';
 import {
@@ -4008,6 +4009,57 @@ function _buildAttackOptions(t) {
     enchantedElement: _enchantBuff?.element || null,
   });
 
+  // ── Arme secondaire équipée ─────────────────────────────────────────────
+  // Contrairement à la main principale, un slot vide ne génère jamais de
+  // poings de secours. Une vraie arme secondaire reste une Action normale et
+  // conserve ses propres stats, sa portée, sa maîtrise et son type de dégâts.
+  const secondaryWeapon = c?.equipement?.[getSecondaryWeaponSlotId()] || null;
+  if (secondaryWeapon?.nom && secondaryWeapon?.degats) {
+    const secondaryDmgStats = Array.isArray(secondaryWeapon.degatsStats) && secondaryWeapon.degatsStats.length
+      ? secondaryWeapon.degatsStats
+      : [secondaryWeapon.degatsStat || secondaryWeapon.statAttaque || 'force'];
+    const secondaryTouchStat = secondaryWeapon.toucherStats?.[0]
+      || secondaryWeapon.toucherStat
+      || secondaryWeapon.statAttaque
+      || secondaryDmgStats[0];
+    const secondaryDmgMod = secondaryDmgStats.reduce((sum, stat) => sum + getMod(c, stat), 0);
+    const secondaryTouchMod = getMod(c, secondaryTouchStat);
+    const secondaryMastery = getMaitriseBonus(c, secondaryWeapon);
+    const secondaryFormat = VS.weaponFormats?.find(format => format.label === secondaryWeapon.format);
+    const secondaryMagic = secondaryFormat?.isMagic === true;
+    const secondaryTypeId = secondaryMagic ? null : (secondaryFormat?.damageType || 'physique');
+    const secondaryType = secondaryTypeId ? getDamageTypeById(VS.damageTypes, secondaryTypeId) : null;
+    const secondaryBaseRange = Math.max(1, parseInt(secondaryWeapon.portee) || 1);
+    const secondaryRangeBonus = Math.max(0, (ld.displayRange || secondaryBaseRange) - _vttBestWeaponRange(c));
+
+    options.push({
+      id: 'weapon_secondary',
+      icon: '🗡️',
+      label: `${secondaryWeapon.nom} · main secondaire`,
+      rawDice: secondaryWeapon.degats,
+      dice: secondaryWeapon.degats,
+      portee: secondaryBaseRange + secondaryRangeBonus,
+      pmCost: 0,
+      actionType: 'action',
+      toucherMod: secondaryTouchMod,
+      toucherSetBonus: wSetBonus,
+      toucherStatLabel: statShort(secondaryTouchStat) || secondaryTouchStat,
+      dmgStatMod: secondaryDmgMod,
+      dmgStatLabel: secondaryDmgStats.map(stat => statShort(stat) || stat).join('+'),
+      maitriseBonus: secondaryMastery,
+      typeRules: secondaryMagic
+        ? getDamageTypeRules(VS.damageTypes, 'physique')
+        : getDamageTypeRules(VS.damageTypes, secondaryTypeId),
+      damageTypeId: secondaryTypeId,
+      damageTypeIcon: secondaryType?.icon || '',
+      damageTypeColor: secondaryType?.color || '',
+      isMagicWeapon: secondaryMagic,
+      charElements: secondaryMagic ? (c.elements || []) : [],
+      traits: Array.isArray(secondaryWeapon.traits) ? secondaryWeapon.traits : [],
+      weaponSlot: 'secondary',
+    });
+  }
+
   // ── Tous les sorts actifs du deck ──
   // Silence : si le porteur a un état avec cantCastSpells, on saute toute la
   // génération des options de sort. Les attaques d'arme restent disponibles.
@@ -7005,7 +7057,7 @@ async function _vttRollAttack() {
     //  • Bonus appliqué UNIQUEMENT sur un coup réussi (pas sur les demi-dégâts).
     //  • Non cumulable : un seul buff dmg_bonus actif (le dernier appliqué wins,
     //    déjà garanti par _vttApplyEnchantBuffs qui retire les anciens).
-    const _isWeaponAttack = opt.id === 'weapon' || opt.id === 'npc_attack' || opt.id?.startsWith?.('beast_');
+    const _isWeaponAttack = opt.id === 'weapon' || opt.id === 'weapon_secondary' || opt.id === 'npc_attack' || opt.id?.startsWith?.('beast_');
     const _isActionType   = !opt.actionType || opt.actionType === 'action';
     const _eligibleForEnchant = (_isWeaponAttack || opt.sortIdx !== undefined) && _isActionType;
     let buffDmgBonus = 0;
