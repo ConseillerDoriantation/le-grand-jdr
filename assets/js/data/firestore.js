@@ -845,6 +845,27 @@ export async function updateInCol(col, id, data) {
   }
 }
 
+// Met a jour plusieurs documents dans un seul commit Firestore. Soit toutes
+// les ecritures passent, soit aucune (transferts d'inventaire/or notamment).
+export async function batchUpdateInCol(updates = []) {
+  if (!Array.isArray(updates) || !updates.length) return;
+  const resolved = updates.map(({ col, id, data }) => ({
+    path: _colPath(col),
+    id,
+    data,
+  }));
+  try {
+    const batch = writeBatch(db);
+    resolved.forEach(({ path, id, data }) => batch.update(doc(db, path, id), data));
+    await batch.commit();
+    resolved.forEach(({ path, id, data }) => _cachePatchUpdate(path, id, data));
+  } catch (e) {
+    const targets = resolved.map(({ path, id }) => `${path}/${id}`).join(', ');
+    _handleFirestoreError(e, `batchUpdateInCol(${targets})`);
+    throw e;
+  }
+}
+
 export async function deleteFromCol(col, id) {
   const path = _colPath(col);
   try {
