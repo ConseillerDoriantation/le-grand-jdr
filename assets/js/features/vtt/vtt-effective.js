@@ -10,7 +10,7 @@
 import { VS } from './vtt-state.js';
 import { STATE } from '../../core/state.js';
 import { _norm } from '../../shared/html.js';
-import { getMod, calcPVMax, calcPMMax, calcCA, calcVitesse, computeEquipDerivedBonus } from '../../shared/char-stats.js';
+import { getMod, calcPVMax, calcPMMax, calcCA, calcVitesse, computeEquipStatsBonus, computeEquipDerivedBonus } from '../../shared/char-stats.js';
 import { getMainWeapon, getArmorSetData } from '../../shared/equipment-utils.js';
 import { getEquipmentSlots, getPrimaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { _numOr, _activeConditionsOf, _npcStatMod, _npcCombat } from './vtt.js'; // circ. (runtime)
@@ -169,10 +169,16 @@ export function _live(t) {
   const npcCaEquip = n ? Object.values(npcEquip).reduce((sum, it) => sum + (_numOr(it?.ca, 0) || 0), 0) : 0;
   const npcSetData = n ? getArmorSetData({ equipement: npcEquip }) : null;
   const npcMainWeapon = n ? getMainWeapon({ equipement: npcEquip }) : null;
-  const npcHpBaseMax = n ? _numOr(e.pv, _numOr(e.hpMax, _numOr(e.pvMax, 20))) : null;
-  const npcPmBaseMax = n ? _numOr(e.pmMax, _numOr(e.pm, null)) : null;
-  const npcHpMax = n ? Math.max(0, npcHpBaseMax + (npcDerived.pvMaxBonus || 0)) : null;
-  const npcPmMax = n ? Math.max(0, (npcPmBaseMax ?? 0) + (npcDerived.pmMaxBonus || 0)) : null;
+  const npcCalcEntity = n ? {
+    ...e,
+    niveau: Math.max(1, parseInt(e.niveau, 10) || 1),
+    pvBase: _numOr(e.pvBase, _numOr(e.pv, 20)),
+    pmBase: _numOr(e.pmBase, _numOr(e.pm, 0)),
+    statsBonus: computeEquipStatsBonus(npcEquip),
+    equipement: npcEquip,
+  } : null;
+  const npcHpMax = n ? calcPVMax(npcCalcEntity) : null;
+  const npcPmMax = n ? calcPMMax(npcCalcEntity) : null;
   const npcPmCur = n ? _numOr(e.pmCurrent, npcPmMax) : null;
   const npcCombat = n ? _npcCombat(e) : {};
   const npcWeapon = npcCombat.weapon || {};
@@ -212,7 +218,7 @@ export function _live(t) {
   // Valeurs dérivées calculées une seule fois pour éviter les recalculs dans result
   const _round   = VS.session?.combat?.round ?? 0;
   const _pmMax   = c ? calcPMMax(c) : n ? npcPmMax : (b ? _numOr(b.pmMax, 0) : null);
-  const _caBase  = t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : (_numOr(e.ca, _numOr(e.defense, 0)) + npcCaEquip + (npcDerived.caBonus || 0))));
+  const _caBase  = t.defense ?? (c ? calcCA(c) : (b ? (_numOr(b.ca, 10)) : calcCA(npcCalcEntity)));
   const _caBuffs = (t.buffs || []).filter(bf => bf.type === 'ca' && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound));
   const _ca      = _caBase + _caBuffs.reduce((sum, bf) => sum + (bf.bonus || 0), 0);
   // Attaque de base (stat). Le bonus toucher d'enchantement N'est PAS inclus ici :
@@ -236,7 +242,7 @@ export function _live(t) {
     // Créature avec mana (perso, PNJ ou bestiaire pmMax>0) → jauge PM affichée.
     hasMana:           !!(c || (n && npcPmMax > 0) || (b && _pmMax > 0)),
     displayMovement: (() => {
-      const baseMv = t.movement ?? (c ? calcVitesse(c) : (b ? (_numOr(b.vitesse, 4)) : (_numOr(e.vitesse, _numOr(e.deplacement, 6)) + (npcDerived.vitesseBonus || 0))));
+      const baseMv = t.movement ?? (c ? calcVitesse(c) : (b ? (_numOr(b.vitesse, 4)) : calcVitesse(npcCalcEntity)));
       const moveDelta = (t.buffs || [])
         .filter(bf => (bf.type === 'move_bonus' || bf.type === 'move_debuff')
           && (bf.expiresAtRound == null || _round === 0 || _round <= bf.expiresAtRound))

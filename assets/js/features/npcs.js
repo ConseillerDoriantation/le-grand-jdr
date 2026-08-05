@@ -22,7 +22,8 @@ import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { consumeTargetEntity } from '../shared/entity-navigation.js';
 import { getItemStatBonus, sortCharactersForDisplay, getMyCharacters, getModFromScore,
-  computeEquipStatsBonus, computeEquipDerivedBonus, formatItemBonusText } from '../shared/char-stats.js';
+  computeEquipStatsBonus, computeEquipDerivedBonus, formatItemBonusText,
+  calcPVMax, calcPMMax, calcCA, calcVitesse } from '../shared/char-stats.js';
 import {
   buildEquippedItemFromInventory,
   getArmorSetData,
@@ -43,8 +44,8 @@ import { confirmDelete, trySave } from '../shared/crud.js';
 // bonus par-dessus, calculés via les helpers purs de char-stats.js. Un PNJ sans
 // équipement affiche donc exactement ses valeurs de base (rétro-compat).
 const NPC_VITALS = [
-  { key: 'pv',      label: 'PV',      icon: '❤️' },
-  { key: 'pm',      label: 'PM',      icon: '✨' },
+  { key: 'pv',      field: 'pvBase', label: 'PV',   icon: '❤️', editable: true },
+  { key: 'pm',      field: 'pmBase', label: 'PM',   icon: '✨', editable: true },
   { key: 'ca',      label: 'CA',      icon: '🛡️' },
   { key: 'vitesse', label: 'Vit.',    icon: '👟' },
 ];
@@ -92,7 +93,9 @@ const _modStr = (v) => { const m = getModFromScore(Number(v) || 8); return m >= 
 const _signedNum = (n) => n > 0 ? `+${n}` : String(n);
 const _npcBaseStats = (n = {}) => ({ ...NPC_BASE_STATS, ...(n.stats || {}) });
 const _npcBaseVital = (n = {}, key) => {
-  const raw = n?.[key];
+  const raw = key === 'pv' ? (n?.pvBase ?? n?.pv)
+    : key === 'pm' ? (n?.pmBase ?? n?.pm)
+      : n?.[key];
   const v = parseInt(raw, 10);
   return Number.isFinite(v) ? v : NPC_BASE_VITALS[key];
 };
@@ -103,17 +106,31 @@ const _npcEffectiveStat = (n = {}, key) => {
   return safeBase + bonus;
 };
 const _npcEffectiveMod = (n = {}, key) => getModFromScore(_npcEffectiveStat(n, key));
+const _npcCalcEntity = (n = {}, equipement = n?.equipement || {}) => ({
+  ...n,
+  niveau: Math.max(1, parseInt(n?.niveau, 10) || 1),
+  pvBase: _npcBaseVital(n, 'pv'),
+  pmBase: _npcBaseVital(n, 'pm'),
+  stats: _npcBaseStats(n),
+  statsBonus: computeEquipStatsBonus(equipement),
+  equipement,
+});
 const _npcVitalTotals = (n = {}) => {
   const { equip, sBonus, dBonus, caEquip, setData } = _npcEquipEffect(n);
-  const equipBonus = {
-    pv: dBonus.pvMaxBonus || 0,
-    pm: dBonus.pmMaxBonus || 0,
-    ca: (caEquip || 0) + (dBonus.caBonus || 0),
-    vitesse: dBonus.vitesseBonus || 0,
+  const totalEntity = _npcCalcEntity(n, equip);
+  const nakedEntity = _npcCalcEntity(n, {});
+  const totals = {
+    pv: calcPVMax(totalEntity), pm: calcPMMax(totalEntity),
+    ca: calcCA(totalEntity), vitesse: calcVitesse(totalEntity),
   };
-  const totals = {};
-  NPC_VITALS.forEach(v => { totals[v.key] = _npcBaseVital(n, v.key) + (equipBonus[v.key] || 0); });
-  return { equip, sBonus, dBonus, caEquip, setData, equipBonus, totals };
+  const withoutEquipment = {
+    pv: calcPVMax(nakedEntity), pm: calcPMMax(nakedEntity),
+    ca: calcCA(nakedEntity), vitesse: calcVitesse(nakedEntity),
+  };
+  const bases = { pv: _npcBaseVital(n, 'pv'), pm: _npcBaseVital(n, 'pm'), ca: withoutEquipment.ca, vitesse: withoutEquipment.vitesse };
+  const equipBonus = Object.fromEntries(Object.keys(totals).map(key => [key, totals[key] - withoutEquipment[key]]));
+  const levelBonus = { pv: withoutEquipment.pv - bases.pv, pm: withoutEquipment.pm - bases.pm, ca: 0, vitesse: 0 };
+  return { equip, sBonus, dBonus, caEquip, setData, bases, levelBonus, equipBonus, totals };
 };
 const _npcWeaponInfo = (n = {}) => {
   const weapon = getMainWeapon({ equipement: n?.equipement || {} });
@@ -1105,8 +1122,36 @@ function _renderNpcSectionHead(kicker, title, meta = '') {
 function _renderNpcStatsSection(n) {
   return `
     <section class="npc-character-stats">
+      ${_renderNpcDerivedControls(n)}
       ${_renderNpcStatsBanner(n)}
     </section>`;
+}
+
+function _renderNpcDerivedControls(n) {
+  const { totals } = _npcVitalTotals(n);
+  const level = Math.max(1, parseInt(n?.niveau, 10) || 1);
+  return `
+    <div class="npc-derived-controls">
+      <label class="npc-derived-field is-level">
+        <span>Niveau</span>
+        <input type="number" min="1" max="99" class="npc-inline" data-input="npcPreviewDerived" data-change="npcInlineSave"
+          data-npc-id="${_esc(n.id)}" data-field="niveau" value="${level}">
+      </label>
+      <label class="npc-derived-field">
+        <span>PV de base</span>
+        <input type="number" min="1" class="npc-inline" data-input="npcPreviewDerived" data-change="npcInlineSave"
+          data-npc-id="${_esc(n.id)}" data-field="pvBase" value="${_npcBaseVital(n, 'pv')}">
+        <small><b data-npc-derived="pv">${totals.pv}</b> max</small>
+      </label>
+      <label class="npc-derived-field">
+        <span>PM de base</span>
+        <input type="number" min="0" class="npc-inline" data-input="npcPreviewDerived" data-change="npcInlineSave"
+          data-npc-id="${_esc(n.id)}" data-field="pmBase" value="${_npcBaseVital(n, 'pm')}">
+        <small><b data-npc-derived="pm">${totals.pm}</b> max</small>
+      </label>
+      <div class="npc-derived-field is-calculated"><span>Classe d'armure</span><b data-npc-derived="ca">${totals.ca}</b><small>Calcul aventure</small></div>
+      <div class="npc-derived-field is-calculated"><span>Vitesse</span><b data-npc-derived="vitesse">${totals.vitesse}</b><small>Calcul aventure</small></div>
+    </div>`;
 }
 
 function _renderNpcEquipmentSection(n) {
@@ -1206,21 +1251,27 @@ function _renderNpcProfileHeader(n, af) {
 
 function _renderNpcStatsBanner(n) {
   const stats = _npcBaseStats(n);
+  const levelUps = n?.statsLevelUps || {};
   const equipBonus = computeEquipStatsBonus(n?.equipement || {});
+  const level = Math.max(1, parseInt(n?.niveau, 10) || 1);
+  const spent = NPC_STATS.reduce((sum, stat) => sum + (parseInt(levelUps[stat.key], 10) || 0), 0);
+  const remaining = Math.max(0, level - 1 - spent);
   return `
     <div class="stats-banner npc-stats-banner">
       ${NPC_STATS.map(s => {
-        const base = parseInt(stats[s.key], 10);
-        const safeBase = Number.isFinite(base) ? base : 10;
+        const stored = parseInt(stats[s.key], 10);
+        const safeStored = Number.isFinite(stored) ? stored : 10;
+        const levelUp = Math.max(0, parseInt(levelUps[s.key], 10) || 0);
+        const safeBase = safeStored - levelUp;
         const bonus = equipBonus[s.key] || 0;
-        const total = safeBase + bonus;
+        const total = safeStored + bonus;
         const mod = _npcEffectiveMod(n, s.key);
         const mCls = mod > 0 ? 'pos' : mod < 0 ? 'neg' : 'zero';
         const bCls = bonus > 0 ? 'pos' : bonus < 0 ? 'neg' : 'zero';
         const bDisp = bonus > 0 ? `+${bonus}` : bonus < 0 ? String(bonus) : '0';
         return `
           <div class="stat-tile npc-stat-tile" data-stat="${_esc(s.key)}"
-            title="${_esc(NPC_STAT_LABELS[s.key] || s.key)} - Base ${safeBase} + Niveau +0 + Equip. ${bDisp} = ${total}">
+            title="${_esc(NPC_STAT_LABELS[s.key] || s.key)} - Base ${safeBase} + Niveau +${levelUp} + Equip. ${bDisp} = ${total}">
             <header class="stat-tile-head">
               <span class="stat-tile-name">${_esc(NPC_STAT_LABELS[s.key] || s.short)}</span>
               <span class="stat-tile-mod ${mCls}">${mod >= 0 ? '+' + mod : mod}</span>
@@ -1232,13 +1283,17 @@ function _renderNpcStatsBanner(n) {
             <div class="stat-tile-formula">
               <label class="stat-seg stat-seg-base editable" title="Modifier la base PNJ">
                 <input type="number" class="npc-inline npc-stat-seg-input" data-change="npcInlineSave"
-                  data-npc-id="${_esc(n.id)}" data-field="stat:${_esc(s.key)}" value="${safeBase}" placeholder="${safeBase}">
+                  data-npc-id="${_esc(n.id)}" data-field="statBase:${_esc(s.key)}" value="${safeBase}" placeholder="${safeBase}">
                 <span class="stat-seg-lbl">Base</span>
               </label>
               <span class="stat-formula-op">+</span>
-              <div class="stat-seg stat-seg-niv zero">
-                <span class="stat-seg-val">+0</span>
+              <div class="stat-seg stat-seg-niv ${levelUp ? 'has' : 'zero'}">
+                <span class="stat-seg-val">+${levelUp}</span>
                 <span class="stat-seg-lbl">Niveau</span>
+                <span class="stat-seg-ctrls">
+                  <button class="stat-lvl-btn" type="button" ${levelUp ? '' : 'disabled'} data-action="npcAllocateStat" data-npc-id="${_esc(n.id)}" data-stat="${_esc(s.key)}" data-delta="-1" title="Retirer un point">−</button>
+                  <button class="stat-lvl-btn plus" type="button" ${remaining ? '' : 'disabled'} data-action="npcAllocateStat" data-npc-id="${_esc(n.id)}" data-stat="${_esc(s.key)}" data-delta="1" title="Ajouter un point">+</button>
+                </span>
               </div>
               <span class="stat-formula-op">+</span>
               <div class="stat-seg stat-seg-eq ${bCls}">
@@ -1562,7 +1617,7 @@ function _npcCalcChar(n = {}) {
   return {
     id: n.id || 'npc',
     nom: n.nom || 'PNJ',
-    niveau: 1,
+    niveau: Math.max(1, parseInt(n.niveau, 10) || 1),
     stats: _npcBaseStats(n),
     statsBonus: computeEquipStatsBonus(equip),
     equipement: equip,
@@ -3106,7 +3161,7 @@ async function _npcInlineSave(el) {
   const n = _npcs.find(x => x.id === id);
   if (!n || !field) return;
 
-  const NUM_FIELDS = ['pv', 'pm', 'ca', 'vitesse', 'salaireSuggere'];
+  const NUM_FIELDS = ['pv', 'pm', 'pvBase', 'pmBase', 'niveau', 'ca', 'vitesse', 'salaireSuggere'];
   const toNum = (raw) => {
     const t = (raw ?? '').toString().trim();
     if (t === '') return null;
@@ -3115,7 +3170,14 @@ async function _npcInlineSave(el) {
   };
 
   let patch;
-  if (field.startsWith('stat:')) {
+  if (field.startsWith('statBase:')) {
+    const key = field.slice(9);
+    const stats = { ...(n.stats || {}) };
+    const levelUp = Math.max(0, parseInt(n.statsLevelUps?.[key], 10) || 0);
+    const v = toNum(el.value);
+    if (v == null) delete stats[key]; else stats[key] = v + levelUp;
+    n.stats = stats; patch = { stats };
+  } else if (field.startsWith('stat:')) {
     const key = field.slice(5);
     const stats = { ...(n.stats || {}) };
     const v = toNum(el.value);
@@ -3126,7 +3188,8 @@ async function _npcInlineSave(el) {
     n.affinite = affinite; patch = { affinite };
   } else if (NUM_FIELDS.includes(field)) {
     const v = toNum(el.value);
-    n[field] = v; patch = { [field]: v };
+    const safe = field === 'niveau' ? Math.max(1, v || 1) : v;
+    n[field] = safe; patch = { [field]: safe };
   } else {
     const v = (el.value || '').trim();
     n[field] = v; patch = { [field]: v };
@@ -3137,6 +3200,39 @@ async function _npcInlineSave(el) {
     _refreshActivePanel();
     if (['nom', 'role', 'lieu'].includes(field)) _refreshList({ keepScroll: true });
   }
+}
+
+function _npcPreviewDerived(el) {
+  const n = _npcs.find(item => item.id === el?.dataset?.npcId);
+  const field = el?.dataset?.field;
+  if (!n || !['niveau', 'pvBase', 'pmBase'].includes(field)) return;
+  const value = parseInt(el.value, 10);
+  const preview = { ...n, [field]: Number.isFinite(value) ? value : (field === 'niveau' ? 1 : 0) };
+  const { totals } = _npcVitalTotals(preview);
+  const scope = el.closest('.npc-character-stats');
+  Object.entries(totals).forEach(([key, total]) => {
+    const target = scope?.querySelector(`[data-npc-derived="${key}"]`);
+    if (target) target.textContent = total;
+  });
+}
+
+async function _npcAllocateStat(btn) {
+  if (!STATE.isAdmin) return;
+  const n = _npcs.find(item => item.id === btn?.dataset?.npcId);
+  const key = btn?.dataset?.stat;
+  const delta = parseInt(btn?.dataset?.delta, 10) || 0;
+  if (!n || !NPC_STATS.some(stat => stat.key === key) || !delta) return;
+  const level = Math.max(1, parseInt(n.niveau, 10) || 1);
+  const levelUps = { ...(n.statsLevelUps || {}) };
+  const current = Math.max(0, parseInt(levelUps[key], 10) || 0);
+  const spent = NPC_STATS.reduce((sum, stat) => sum + (parseInt(levelUps[stat.key], 10) || 0), 0);
+  if (delta > 0 && spent >= level - 1) return;
+  if (delta < 0 && current <= 0) return;
+  const stats = { ..._npcBaseStats(n), [key]: (_npcBaseStats(n)[key] || 10) + delta };
+  levelUps[key] = Math.max(0, current + delta);
+  n.stats = stats;
+  n.statsLevelUps = levelUps;
+  if (await trySave('npcs', n.id, { stats, statsLevelUps: levelUps })) _refreshActivePanel();
 }
 
 // Clic sur le portrait → choisir une image, compresser, enregistrer (base64).
@@ -3421,8 +3517,13 @@ async function _npcCreate() {
       imageUrl: '',
       embauchable: true,
       activites: [],
-      ...NPC_BASE_VITALS,
+      niveau: 1,
+      pvBase: NPC_BASE_VITALS.pv,
+      pmBase: NPC_BASE_VITALS.pm,
+      hp: NPC_BASE_VITALS.pv,
+      pmCurrent: NPC_BASE_VITALS.pm,
       stats: { ...NPC_BASE_STATS },
+      statsLevelUps: {},
       equipement: {},
       statsBonus: {},
       actions: [],
@@ -3472,6 +3573,8 @@ PAGES.npcs = renderNpcs;
 registerActions({
   _npcSearch:                (el) => _npcSearch(el.value),
   npcInlineSave:             (el) => _npcInlineSave(el),
+  npcPreviewDerived:         (el) => _npcPreviewDerived(el),
+  npcAllocateStat:           (btn) => _npcAllocateStat(btn),
   npcSaveOrgs:               (el) => _npcSaveOrgs(el),
   npcSetWeapon:              (el) => _npcSetWeapon(el),
   npcEquipSlot:              (el) => _npcEquipSlot(el),
