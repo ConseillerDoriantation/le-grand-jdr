@@ -260,7 +260,8 @@ export function calcPVMax(c) {
   const niv   = c?.niveau || 1;
   const progression = modCo > 0 ? Math.floor(modCo * (niv - 1)) : modCo;
   const equipBonus = computeEquipDerivedBonus(c?.equipement).pvMaxBonus;
-  const pvBase = c?.pvBase || 10;
+  const parsedPvBase = parseInt(c?.pvBase, 10);
+  const pvBase = Number.isFinite(parsedPvBase) ? parsedPvBase : 10;
   const fallback = pvBase + progression + equipBonus;
   return Math.max(1, evaluateCharacterFormula(rules.formulas.pv, {
     ...formulaStats,
@@ -281,7 +282,8 @@ export function calcPMMax(c) {
   const niv   = c?.niveau || 1;
   const progression = modSa > 0 ? Math.floor(modSa * (niv - 1)) : modSa;
   const equipBonus = computeEquipDerivedBonus(c?.equipement).pmMaxBonus;
-  const pmBase = c?.pmBase || 10;
+  const parsedPmBase = parseInt(c?.pmBase, 10);
+  const pmBase = Number.isFinite(parsedPmBase) ? parsedPmBase : 10;
   const fallback = pmBase + progression + equipBonus;
   return Math.max(0, evaluateCharacterFormula(rules.formulas.pm, {
     ...formulaStats,

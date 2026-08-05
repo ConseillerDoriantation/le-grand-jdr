@@ -2684,9 +2684,13 @@ export async function openSortModal(idx, s) {
   // (l'admin pilote la validation lui-même → pas de retour automatique en attente).
   _sortEditWasOk = idx >= 0 && !STATE.isAdmin && _sortValidationState(s) === 'ok';
   _sortEditContentBaseline = null;   // capturé au mount (après stabilisation des dropdowns)
-  const [allTypes, matrices] = await Promise.all([loadDamageTypes(), loadSpellMatrices(), loadSpellSystem()]);
+  const [allTypes, matrices, , conditions] = await Promise.all([
+    loadDamageTypes(), loadSpellMatrices(), loadSpellSystem(), loadConditionLibrary(),
+  ]);
   // Caches globaux utilisés par _getSortCA, _calcSortSoin, suggestions...
   setSpellCaches(matrices, allTypes);
+  _conditionsLibCache = Array.isArray(conditions) ? conditions : [];
+  setConditionsLibCache(_conditionsLibCache);
   const useClassic = s?.designMode === 'classic'
     || (idx < 0 && getSpellSystemMode() === 'classic');
   if (useClassic) return _openClassicSortModal(idx, s || {}, allTypes);

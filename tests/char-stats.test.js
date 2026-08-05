@@ -85,6 +85,7 @@ test('calcPVMax : Constitution appliquée à chaque niveau avec le préréglage 
 test('calcPMMax : valeur de base conservée avec le préréglage compatible D&D', () => {
   assert.equal(calcPMMax({ pmBase: 10, stats: { sagesse: 14 }, niveau: 3 }), 10);
   assert.equal(calcPMMax({ pmBase: 3, stats: { sagesse: 1 } }), 3);
+  assert.equal(calcPMMax({ pmBase: 0, stats: { sagesse: 10 }, niveau: 1 }), 0);
 });
 
 test('calcCA : type d’armure neutre, bonus explicites uniquement', () => {

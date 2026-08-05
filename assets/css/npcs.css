@@ -4207,6 +4207,60 @@ input.npc-side-name {
   background: linear-gradient(180deg, rgba(14, 23, 37, .72), rgba(7, 12, 21, .74));
 }
 
+.npc-derived-controls {
+  display: grid;
+  grid-template-columns: minmax(92px, .65fr) repeat(2, minmax(130px, 1fr)) repeat(2, minmax(110px, .8fr));
+  gap: 8px;
+  margin: 12px 12px 0;
+}
+
+.npc-derived-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 3px 8px;
+  min-width: 0;
+  min-height: 58px;
+  padding: 8px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.npc-derived-field > span {
+  grid-column: 1 / -1;
+  color: var(--text-dim);
+  font-size: .62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.npc-derived-field input {
+  width: 68px;
+  min-width: 0;
+  padding: 4px 6px;
+  color: var(--text);
+  font-size: .95rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.npc-derived-field > b { color: var(--text); font-size: 1.15rem; }
+.npc-derived-field > small { color: var(--text-dim); font-size: .62rem; text-align: right; }
+.npc-derived-field small b { color: var(--emerald); font-size: .8rem; }
+.npc-derived-field.is-calculated { grid-template-columns: 1fr; }
+.npc-derived-field.is-calculated > b { color: var(--blue-light, #7fb0ff); }
+.npc-derived-field.is-calculated > small { text-align: left; }
+
+@media (max-width: 1100px) {
+  .npc-derived-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .npc-derived-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .npc-derived-field.is-level { grid-column: 1 / -1; }
+}
+
 .npc-sheet-scroll .npc-character-stats .stats-banner {
   display: grid;
   grid-template-columns: repeat(6, minmax(130px, 1fr));
