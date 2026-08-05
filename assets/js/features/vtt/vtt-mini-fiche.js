@@ -23,6 +23,7 @@ import { useGold } from '../../shared/economy.js';
 import { loadCollection } from '../../data/firestore.js'; // lecture recettes/boutique (couche quota)
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
+import { bumpSkill } from '../../shared/stats.js';
 import { _chrRef, _logCol } from './vtt-refs.js'; // refs Firestore perso + log VTT (leaf)
 import { _STAT_COLOR, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js'; // constantes pures (leaf)
 import { _vttPanelError } from './vtt-utils.js'; // frontière d'erreur (leaf)
@@ -1267,6 +1268,7 @@ async function _vttMsCraft(charId, uid, recipeId) {
   const d20    = Math.floor(Math.random() * 20) + 1;
   const total  = d20 + mod;
   const passed = d20 !== 1 && (d20 === 20 || total >= _MS_CRAFT_DD);
+  await bumpSkill(c.id, c.nom || '', 'Artisanat', { crit: d20 === 20, fumble: d20 === 1 });
 
   // 3) Nouvel inventaire (ingrédients retirés) + objet appendé si réussite & objet lié.
   const removedIdx = [...removedSet];
