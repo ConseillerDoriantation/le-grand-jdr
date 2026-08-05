@@ -7,6 +7,16 @@ import { lsJson } from './local-storage.js';
 
 const PAGE_WIDTH = 1000;
 const DEFAULT_HEIGHT = 650;
+const MIN_PAGE_HEIGHT = 350;
+const MAX_PAGE_HEIGHT = 1800;
+const SLIDE_FORMATS = [
+  { id: 'default', label: 'Classique', width: 1000, height: 650 },
+  { id: 'landscape', label: 'Paysage 16:9', width: 1600, height: 900 },
+  { id: 'wide', label: 'Panoramique 21:9', width: 2100, height: 900 },
+  { id: 'square', label: 'Carré 1:1', width: 1000, height: 1000 },
+  { id: 'portrait', label: 'Portrait 9:16', width: 900, height: 1600 },
+  { id: 'document', label: 'Document A4', width: 794, height: 1123 },
+];
 const MAX_IMAGES = 20;
 const MAX_SLIDES = 18;
 const MAX_HISTORY = 50;
@@ -129,6 +139,7 @@ const DEFAULT_PASSWORD_PLACEHOLDER = 'Mot de passe';
 let activeFreePageEditor = null;
 let documentShortcutsBound = false;
 let readerInteractionsBound = false;
+let contextMenuDismissBound = false;
 let activeReaderTooltip = null;
 let sharedFreePageClipboard = null;
 let sharedFreePageSlideClipboard = null;
@@ -260,7 +271,7 @@ function normalizeAnimation(raw) {
   };
 }
 
-function normalizeSlide(raw, index = 0, { legacyHtml = '', assets = null } = {}) {
+function normalizeSlide(raw, index = 0, { legacyHtml = '', assets = null, targetHeight = null } = {}) {
   const pageSource = hasSingleFreePage(raw?.page) ? raw.page : hasSingleFreePage(raw) ? raw : raw?.page;
   const password = String(raw?.password || '').slice(0, 80);
   const requirePassword = raw?.requirePassword === undefined ? Boolean(password) : Boolean(raw?.requirePassword);
@@ -272,15 +283,32 @@ function normalizeSlide(raw, index = 0, { legacyHtml = '', assets = null } = {})
     password,
     passwordMessage: String(raw?.passwordMessage || DEFAULT_PASSWORD_MESSAGE).slice(0, 140),
     passwordPlaceholder: String(raw?.passwordPlaceholder || DEFAULT_PASSWORD_PLACEHOLDER).slice(0, 80),
-    page: normalizeSingleFreePage(pageSource, { legacyHtml: index === 0 ? legacyHtml : '', assets }),
+    page: normalizeSingleFreePage(pageSource, { legacyHtml: index === 0 ? legacyHtml : '', assets, targetHeight }),
   };
+}
+
+function normalizeDeckFormat(raw, fallbackHeight = DEFAULT_HEIGHT) {
+  const source = raw || (fallbackHeight === DEFAULT_HEIGHT
+    ? { preset: 'default' }
+    : { preset: 'custom', width: PAGE_WIDTH, height: fallbackHeight });
+  const preset = SLIDE_FORMATS.find(item => item.id === source?.preset);
+  const width = Math.round(clamp(preset?.width || source?.width || PAGE_WIDTH, 320, 4000));
+  const height = Math.round(clamp(preset?.height || source?.height || Math.round(width * fallbackHeight / PAGE_WIDTH), 240, 5000));
+  return { preset: preset?.id || 'custom', width, height };
+}
+
+function formatLogicalHeight(format) {
+  return Math.round(clamp(PAGE_WIDTH * format.height / format.width, MIN_PAGE_HEIGHT, MAX_PAGE_HEIGHT));
 }
 
 function normalizeFreePageDeck(raw, { legacyHtml = '' } = {}) {
   if (raw?.version === 2 && Array.isArray(raw.slides)) {
     const assets = normalizeFreePageAssets(raw.assets);
-    const slides = raw.slides.slice(0, MAX_SLIDES).map((slide, index) => normalizeSlide(slide, index, { assets })).filter(Boolean);
-    const safeSlides = slides.length ? slides : [normalizeSlide(null, 0, { legacyHtml, assets })];
+    const fallbackHeight = raw.slides[0]?.page?.height || DEFAULT_HEIGHT;
+    const format = normalizeDeckFormat(raw.format, fallbackHeight);
+    const targetHeight = formatLogicalHeight(format);
+    const slides = raw.slides.slice(0, MAX_SLIDES).map((slide, index) => normalizeSlide(slide, index, { assets, targetHeight })).filter(Boolean);
+    const safeSlides = slides.length ? slides : [normalizeSlide(null, 0, { legacyHtml, assets, targetHeight })];
     safeSlides.forEach((slide) => hydratePageAssets(slide.page, assets));
     const activeSlideId = safeSlides.some((slide) => slide.id === raw.activeSlideId) ? raw.activeSlideId : safeSlides[0].id;
     return {
@@ -288,6 +316,7 @@ function normalizeFreePageDeck(raw, { legacyHtml = '' } = {}) {
       id: String(raw.id || uid()),
       activeSlideId,
       canBrowse: raw.canBrowse !== false,
+      format,
       grid: normalizeDeckGrid(raw.grid),
       nav: normalizeDeckNav(raw.nav, safeSlides),
       assets,
@@ -295,7 +324,7 @@ function normalizeFreePageDeck(raw, { legacyHtml = '' } = {}) {
     };
   }
   const slide = normalizeSlide({ id: 'slide-1', title: 'Diapo 1', page: raw }, 0, { legacyHtml });
-  return { version: 2, id: String(raw?.id || uid()), activeSlideId: slide.id, canBrowse: true, grid: normalizeDeckGrid(null), nav: normalizeDeckNav(null, [slide]), assets: {}, slides: [slide] };
+  return { version: 2, id: String(raw?.id || uid()), activeSlideId: slide.id, canBrowse: true, format: normalizeDeckFormat(null), grid: normalizeDeckGrid(null), nav: normalizeDeckNav(null, [slide]), assets: {}, slides: [slide] };
 }
 
 function normalizeFreePageAssets(raw) {
@@ -626,9 +655,9 @@ function normalizeFreePageTextHtml(html) {
   );
 }
 
-function normalizeSingleFreePage(raw, { legacyHtml = '', assets = null } = {}) {
-  const sourceHeight = clamp(raw?.height || DEFAULT_HEIGHT, 420, 1400);
-  const height = DEFAULT_HEIGHT;
+function normalizeSingleFreePage(raw, { legacyHtml = '', assets = null, targetHeight = null } = {}) {
+  const sourceHeight = clamp(raw?.height || targetHeight || DEFAULT_HEIGHT, MIN_PAGE_HEIGHT, MAX_PAGE_HEIGHT);
+  const height = clamp(targetHeight || sourceHeight, MIN_PAGE_HEIGHT, MAX_PAGE_HEIGHT);
   const background = safeColor(raw?.background, DEFAULT_PAGE_BG);
   let blocks = Array.isArray(raw?.blocks)
     ? raw.blocks.map((block, index) => {
@@ -751,7 +780,7 @@ export function renderFreePageHtml({ page, legacyHtml = '', className = '', keyb
   const deck = normalizeFreePageDeck(page, { legacyHtml });
   const slide = defaultReaderSlide(deck);
   const normalized = slide.page;
-  return `<div class="free-page-reader ${_esc(className)}" data-free-page-reader ${keyboard ? 'data-free-page-keyboard' : ''} data-free-page-current-slide="${_esc(slide.id)}" data-free-page-previous-slide="" data-free-page-deck="${_esc(JSON.stringify(deck))}" style="--free-page-ratio:${PAGE_WIDTH}/${normalized.height}">
+  return `<div class="free-page-reader ${_esc(className)}" data-free-page-reader ${keyboard ? 'data-free-page-keyboard' : ''} data-free-page-current-slide="${_esc(slide.id)}" data-free-page-previous-slide="" data-free-page-deck="${_esc(JSON.stringify(deck))}" style="--free-page-ratio:${normalized.width}/${normalized.height}">
     ${readerStageHtml(deck, slide)}
     ${readerNavHtml(deck, slide.id)}
   </div>`;
@@ -761,10 +790,12 @@ export function freePageEditorHtml({ id = 'free-page-editor', page, legacyHtml =
   const deck = normalizeFreePageDeck(page, { legacyHtml });
   const normalized = deck.slides.find((slide) => slide.id === deck.activeSlideId)?.page || deck.slides[0].page;
   const grid = normalizeDeckGrid(deck.grid);
-  return `<div class="free-page-editor" id="${_esc(id)}" data-free-page-editor tabindex="-1" style="--free-page-ratio:${PAGE_WIDTH}/${normalized.height};--free-page-editor-zoom:1">
+  return `<div class="free-page-editor" id="${_esc(id)}" data-free-page-editor tabindex="-1" style="--free-page-ratio:${normalized.width}/${normalized.height};--free-page-editor-zoom:1">
     <textarea data-fpe-initial hidden>${_esc(JSON.stringify(deck))}</textarea>
     <div class="free-page-toolbar" role="toolbar" aria-label="Outils de composition">
-      <div class="free-page-toolbar-group">
+      <div class="free-page-toolbar-main">
+      <div class="free-page-toolbar-group free-page-toolbar-group--insert" aria-label="Ajouter un élément">
+        <span class="free-page-toolbar-label">Ajouter</span>
         <button type="button" class="free-page-tool free-page-tool--primary" data-fpe-action="add-text">+ Texte</button>
         <button type="button" class="free-page-tool" data-fpe-action="add-image">Image</button>
         <button type="button" class="free-page-tool" data-fpe-action="add-table">Tableau</button>
@@ -773,6 +804,7 @@ export function freePageEditorHtml({ id = 'free-page-editor', page, legacyHtml =
         <button type="button" class="free-page-tool" data-fpe-action="add-nav">Menu</button>
       </div>
       <div class="free-page-toolbar-group free-page-toolbar-group--text" data-fpe-text-toolbar>
+        <span class="free-page-toolbar-label">Texte</span>
         <button type="button" class="free-page-toolbar-font" data-fpe-action="toggle-font-popover" title="Police d'écriture">
           <span data-fpe-font-label style="font-family:${_esc(TEXT_FONTS[0].value)}">${_esc(TEXT_FONTS[0].name)}</span>
           <i aria-hidden="true">▾</i>
@@ -783,12 +815,28 @@ export function freePageEditorHtml({ id = 'free-page-editor', page, legacyHtml =
         <button type="button" class="free-page-tool free-page-tool--icon" data-fpe-command="underline" title="Souligner"><u>S</u></button>
         <button type="button" class="free-page-tool free-page-tool--icon free-page-text-case" data-fpe-inspector-field="textTransform" value="toggle" title="Majuscules / normal">Tt</button>
         <button type="button" class="free-page-tool free-page-tool--icon free-page-toolbar-color-button" data-fpe-action="toggle-text-color-popover" title="Couleur du texte"><span>A</span><i style="--fpe-active-color:#eef2fb"></i></button>
+        ${alignmentButtonsHtml('left')}
       </div>
-      <div class="free-page-toolbar-group">
+      <div class="free-page-toolbar-group free-page-toolbar-group--layers" data-fpe-selection-toolbar hidden>
+        <span class="free-page-toolbar-label">Calques</span>
+        <button type="button" class="free-page-tool free-page-tool--icon free-page-layer-tool" data-fpe-action="layer-down" title="Reculer la selection" aria-label="Reculer la selection"><span aria-hidden="true">&#8681;</span></button>
+        <button type="button" class="free-page-tool free-page-tool--icon free-page-layer-tool" data-fpe-action="layer-up" title="Avancer la selection" aria-label="Avancer la selection"><span aria-hidden="true">&#8679;</span></button>
+      </div>
+      <div class="free-page-toolbar-group free-page-toolbar-group--history" aria-label="Organisation et historique">
+        <span class="free-page-toolbar-label">Organiser</span>
         <button type="button" class="free-page-tool free-page-tool--position" data-fpe-action="toggle-position-popover" title="Placer sur la diapo" aria-label="Placer sur la diapo"><span></span></button>
-        <button type="button" class="free-page-tool" data-fpe-action="undo" title="Annuler">Annuler</button>
-        <button type="button" class="free-page-tool" data-fpe-action="redo" title="Retablir">Retablir</button>
+        <button type="button" class="free-page-tool free-page-tool--icon" data-fpe-action="undo" title="Annuler (Ctrl+Z)" aria-label="Annuler">↶</button>
+        <button type="button" class="free-page-tool free-page-tool--icon" data-fpe-action="redo" title="Rétablir (Ctrl+Y)" aria-label="Rétablir">↷</button>
       </div>
+      <div class="free-page-toolbar-spacer"></div>
+      <div class="free-page-toolbar-summary">
+        <span class="free-page-slide-size" data-fpe-slide-size>${deck.format.width} × ${deck.format.height}</span>
+        <span class="free-page-weight" data-fpe-weight title="Poids du diaporama — limite Firestore ~1000 Ko">—</span>
+        <button type="button" class="free-page-tool free-page-tool--preview" data-fpe-action="preview-deck" title="Tester le rendu et les interactions">Aperçu</button>
+      </div>
+      </div>
+      <div class="free-page-toolbar-viewbar">
+      <span class="free-page-toolbar-label">Affichage</span>
       <div class="free-page-toolbar-group free-page-toolbar-group--view">
         <label class="free-page-toggle">Grille <input type="checkbox" data-fpe-grid-field="show" ${grid.show ? 'checked' : ''}></label>
         <label class="free-page-toggle" title="Affiche une marge de securite pour eviter les bords trop charges">Zone sure <input type="checkbox" data-fpe-grid-field="safe" ${grid.safe ? 'checked' : ''}></label>
@@ -801,14 +849,11 @@ export function freePageEditorHtml({ id = 'free-page-editor', page, legacyHtml =
         </select>
         <button type="button" class="free-page-tool" data-fpe-action="fit-zoom" title="Adapter la diapo a l'espace disponible">Adapter</button>
       </div>
+      </div>
       <div class="free-page-shape-popover" data-fpe-shape-popover hidden>${shapePopoverHtml()}</div>
       <div class="free-page-position-popover" data-fpe-position-popover hidden>${positionPopoverHtml()}</div>
       <div class="free-page-text-color-popover" data-fpe-text-color-popover hidden>${textColorPopoverHtml()}</div>
       <div class="free-page-font-popover" data-fpe-font-popover hidden></div>
-      <div class="free-page-toolbar-spacer"></div>
-      <button type="button" class="free-page-tool free-page-tool--primary" data-fpe-action="preview-deck" title="Tester le rendu et les interactions">Apercu</button>
-      <span class="free-page-slide-size">Diapo 1000 x ${DEFAULT_HEIGHT}</span>
-      <span class="free-page-weight" data-fpe-weight title="Poids du diaporama — limite Firestore ~1000 Ko">—</span>
     </div>
     <div class="free-page-body">
       <aside class="free-page-slidebar" data-fpe-slides></aside>
@@ -847,6 +892,7 @@ function bindSingleFreePageEditor(editor) {
   editor.__freePageFoldState = {};
   editor.__freePageCropBlockId = null;
   ensureDocumentShortcuts();
+  ensureContextMenuDismissal();
   activateFreePageEditor(editor);
   editor.addEventListener('pointerdown', (event) => {
     if (!isOwnEditorEvent(editor, event)) return;
@@ -879,7 +925,9 @@ function bindSingleFreePageEditor(editor) {
   editor.addEventListener('change', () => scheduleWeightUpdate(editor));
   editor.addEventListener('pointerup', () => scheduleWeightUpdate(editor));
   renderBlocks(editor, null);
-  requestAnimationFrame(() => fitEditorZoom(editor));
+  editor.style.setProperty('--free-page-editor-zoom', '1');
+  const zoomSelect = editor.querySelector('[data-fpe-editor-field="zoom"]');
+  if (zoomSelect) zoomSelect.value = '100';
   updateFreePageWeight(editor);
 }
 
@@ -1216,8 +1264,9 @@ function handleDocumentShortcut(event) {
       event.preventDefault();
       const nav = editor.__freePageDeck.nav = normalizeDeckNav(editor.__freePageDeck.nav, editor.__freePageDeck.slides);
       const d = event.shiftKey ? snapUnit(editor) * 4 : snapUnit(editor);
+      const pageHeight = editor.__freePageState?.height || DEFAULT_HEIGHT;
       nav.x = Math.round(clamp(snapValue(editor, nav.x + (event.key === 'ArrowLeft' ? -d : event.key === 'ArrowRight' ? d : 0)), 0, PAGE_WIDTH - nav.w));
-      nav.y = Math.round(clamp(snapValue(editor, nav.y + (event.key === 'ArrowUp' ? -d : event.key === 'ArrowDown' ? d : 0)), 0, DEFAULT_HEIGHT - nav.h));
+      nav.y = Math.round(clamp(snapValue(editor, nav.y + (event.key === 'ArrowUp' ? -d : event.key === 'ArrowDown' ? d : 0)), 0, pageHeight - nav.h));
       renderBlocks(editor, NAV_BLOCK_ID);
       return;
     }
@@ -1281,6 +1330,7 @@ function hasNativeTextSelection(target) {
 }
 
 function handleEditorClick(editor, event) {
+  if (editor.__freePageIgnoreClickUntil && performance.now() < editor.__freePageIgnoreClickUntil) return;
   const contextAction = event.target.closest('[data-fpe-context-action]')?.dataset.fpeContextAction;
   if (contextAction) { closeContextMenu(editor); runAction(editor, contextAction, event); return; }
   const layerButton = event.target.closest('[data-fpe-layer-action]');
@@ -1315,7 +1365,12 @@ function handleEditorClick(editor, event) {
   }
   closeContextMenu(editor);
 
-  const blockEl = event.target.closest('[data-fpe-block]');
+  const priorityBlockId = editor.__freePagePointerPriorityId;
+  editor.__freePagePointerPriorityId = null;
+  const priorityBlockEl = priorityBlockId
+    ? editor.querySelector(`[data-fpe-block="${cssEscape(priorityBlockId)}"]`)
+    : null;
+  const blockEl = priorityBlockEl || event.target.closest('[data-fpe-block]');
   const navEl = event.target.closest('[data-fpe-nav-block]');
   const action = event.target.closest('[data-fpe-action]')?.dataset.fpeAction;
   const command = event.target.closest('[data-fpe-command]');
@@ -1326,7 +1381,9 @@ function handleEditorClick(editor, event) {
       editor.__freePageTextRange = null;
       editor.__freePageInlineTarget = null;
     }
-    event.ctrlKey || event.metaKey ? toggleSelected(editor, blockEl.dataset.fpeBlock) : setSelected(editor, blockEl.dataset.fpeBlock);
+    const selectedIds = new Set(editor.__freePageSelectedIds || []);
+    if (event.ctrlKey || event.metaKey) toggleSelected(editor, blockEl.dataset.fpeBlock);
+    else if (!(selectedIds.size > 1 && selectedIds.has(blockEl.dataset.fpeBlock))) setSelected(editor, blockEl.dataset.fpeBlock);
   }
   else if (navEl) setSelected(editor, NAV_BLOCK_ID);
   else if (event.target.closest('[data-fpe-composition]') && !action) setSelected(editor, null);
@@ -1347,7 +1404,10 @@ function handleEditorChange(editor, event) {
 }
 
 function handleEditorInput(editor, event) {
-  if (event.target.matches('[data-fpe-deck-field]')) { handleDeckField(editor, event.target); return; }
+  if (event.target.matches('[data-fpe-deck-field]')) {
+    if (!['formatWidth', 'formatHeight'].includes(event.target.dataset.fpeDeckField)) handleDeckField(editor, event.target);
+    return;
+  }
   if (event.target.matches('[data-fpe-grid-field]')) { handleGridField(editor, event.target); return; }
   if (event.target.matches('[data-fpe-editor-field]')) { handleEditorField(editor, event.target); return; }
   if (event.target.matches('[data-fpe-slide-field]')) { handleSlideField(editor, event.target, { live: true }); return; }
@@ -1435,14 +1495,18 @@ function handleContextMenu(editor, event) {
 function openContextMenu(editor, clientX, clientY, hasBlock, hasNav = false) {
   const menu = editor.querySelector('[data-fpe-context-menu]');
   const block = selectedBlock(editor);
-  const multiCount = selectedBlocks(editor).length;
+  const selected = selectedBlocks(editor);
+  const multiCount = selected.length;
+  const selectedGroupIds = new Set(selected.map((item) => item.groupId).filter(Boolean));
+  const isSingleGroup = multiCount > 1 && selectedGroupIds.size === 1 && selected.every((item) => item.groupId);
+  const canUngroupSelection = selectedGroupIds.size > 0;
   const tableActions = block?.type === 'table'
     ? [['table-row', 'Ajouter une ligne'], ['table-row-remove', 'Retirer une ligne'], ['table-col', 'Ajouter une colonne'], ['table-col-remove', 'Retirer une colonne'], ['table-header', block.header ? "Masquer l'en-tete" : "Afficher l'en-tete"]]
     : [];
   const actions = hasNav
     ? [['select-nav', 'Configurer le menu'], ['hide-nav', 'Masquer le menu']]
     : hasBlock
-    ? [['copy', multiCount > 1 ? `Copier ${multiCount} blocs` : 'Copier le bloc'], ['duplicate', multiCount > 1 ? 'Dupliquer la selection' : 'Dupliquer'], ...(block?.type === 'image' && multiCount <= 1 ? [['crop-image', "Rogner l'image"], ['replace-image', "Remplacer l'image"]] : []), ...(multiCount <= 1 ? tableActions : []), ['reset-rotation', 'Remettre droit'], ['toggle-hidden-block', block?.hidden ? 'Afficher le bloc' : 'Masquer le bloc'], ['layer-up', 'Mettre devant'], ['layer-down', 'Mettre derriere'], ['toggle-lock', block?.locked ? 'Deverrouiller' : 'Verrouiller'], ['delete', multiCount > 1 ? 'Supprimer la selection' : 'Supprimer']]
+    ? [['copy', multiCount > 1 ? `Copier ${multiCount} blocs` : 'Copier le bloc'], ['duplicate', multiCount > 1 ? 'Dupliquer la selection' : 'Dupliquer'], ...(multiCount > 1 && !isSingleGroup ? [['group-selected', 'Grouper la selection']] : []), ...(canUngroupSelection ? [['ungroup', 'Dégrouper la sélection']] : []), ...(block?.type === 'image' && multiCount <= 1 ? [['crop-image', "Rogner l'image"], ['replace-image', "Remplacer l'image"]] : []), ...(multiCount <= 1 ? tableActions : []), ['reset-rotation', 'Remettre droit'], ['toggle-hidden-block', block?.hidden ? 'Afficher le bloc' : 'Masquer le bloc'], ['layer-up', 'Mettre devant'], ['layer-down', 'Mettre derriere'], ['toggle-lock', block?.locked ? 'Deverrouiller' : 'Verrouiller'], ['delete', multiCount > 1 ? 'Supprimer la selection' : 'Supprimer']]
     : [['add-text', 'Ajouter texte'], ['add-image', 'Ajouter image'], ['add-image-url', 'Image par URL'], ['add-table', 'Ajouter tableau'], ['add-chart', 'Ajouter graphique'], ['add-shape', 'Ajouter forme'], ['paste', 'Coller', !canPasteBlock(editor)], ['unlock-all', 'Deverrouiller tout', !editor.__freePageState.blocks.some((item) => item.locked)]];
   menu.innerHTML = actions.map(([action, label, disabled]) => `<button type="button" data-fpe-context-action="${_esc(action)}" ${disabled ? 'disabled' : ''}>${_esc(label)}</button>`).join('');
   menu.hidden = false;
@@ -1481,6 +1545,18 @@ function closeContextMenu(editor) {
   if (!menu) return;
   menu.hidden = true;
   menu.innerHTML = '';
+}
+
+function ensureContextMenuDismissal() {
+  if (contextMenuDismissBound) return;
+  contextMenuDismissBound = true;
+  document.addEventListener('pointerdown', (event) => {
+    document.querySelectorAll('[data-fpe-context-menu]:not([hidden])').forEach((menu) => {
+      if (menu.contains(event.target)) return;
+      const editor = menu.closest('[data-free-page-editor]');
+      if (editor) closeContextMenu(editor);
+    });
+  }, true);
 }
 
 function runAction(editor, action, event) {
@@ -1696,7 +1772,11 @@ function runSlideAction(editor, action, slideId) {
   const slide = slides.find((item) => item.id === slideId);
   if (action === 'add') {
     if (slides.length >= MAX_SLIDES) return showNotif('Nombre maximum de diapos atteint.', 'info');
-    const next = normalizeSlide({ title: `Diapo ${slides.length + 1}`, page: { version: 1, blocks: [] } }, slides.length);
+    const next = normalizeSlide(
+      { title: `Diapo ${slides.length + 1}`, page: { version: 1, blocks: [] } },
+      slides.length,
+      { targetHeight: formatLogicalHeight(normalizeDeckFormat(editor.__freePageDeck.format)) },
+    );
     slides.push(next);
     switchSlide(editor, next.id);
     return;
@@ -1845,10 +1925,47 @@ function handleSlideField(editor, target, { live = false } = {}) {
 
 function handleDeckField(editor, target) {
   if (!editor.__freePageDeck) return;
-  if (target.dataset.fpeDeckField === 'canBrowse') {
+  const field = target.dataset.fpeDeckField;
+  if (field === 'canBrowse') {
     editor.__freePageDeck.canBrowse = Boolean(target.checked);
     renderSlides(editor);
+    return;
   }
+  if (field === 'formatPreset') {
+    const preset = SLIDE_FORMATS.find(item => item.id === target.value);
+    if (preset) applyDeckFormat(editor, { preset: preset.id, width: preset.width, height: preset.height });
+    else applyDeckFormat(editor, { ...normalizeDeckFormat(editor.__freePageDeck.format), preset: 'custom' });
+    return;
+  }
+  if (field === 'formatWidth' || field === 'formatHeight') {
+    const current = normalizeDeckFormat(editor.__freePageDeck.format);
+    applyDeckFormat(editor, {
+      preset: 'custom',
+      width: field === 'formatWidth' ? target.value : current.width,
+      height: field === 'formatHeight' ? target.value : current.height,
+    });
+  }
+}
+
+function applyDeckFormat(editor, nextFormat) {
+  const format = normalizeDeckFormat(nextFormat);
+  const logicalHeight = formatLogicalHeight(format);
+  syncCurrentSlide(editor);
+  editor.__freePageDeck.format = format;
+  editor.__freePageDeck.slides.forEach((slide) => {
+    const page = normalizeSingleFreePage(slide.page);
+    page.height = logicalHeight;
+    slide.page = page;
+  });
+  const slide = currentSlide(editor);
+  editor.__freePageState = slide?.page || normalizeSingleFreePage(null, { targetHeight: logicalHeight });
+  editor.__freePageDeck.nav = normalizeDeckNav(editor.__freePageDeck.nav, editor.__freePageDeck.slides);
+  editor.__freePageDeck.nav.y = clamp(editor.__freePageDeck.nav.y, 0, Math.max(0, logicalHeight - editor.__freePageDeck.nav.h));
+  editor.style.setProperty('--free-page-ratio', `${PAGE_WIDTH}/${logicalHeight}`);
+  const size = editor.querySelector('[data-fpe-slide-size]');
+  if (size) size.textContent = `${format.width} × ${format.height}`;
+  renderBlocks(editor, null);
+  renderInspector(editor);
 }
 
 function handleGridField(editor, target) {
@@ -1927,11 +2044,16 @@ function syncPageBackgroundControls(editor, color, source = null) {
     if (control.matches('button')) control.classList.toggle('is-active', String(control.value || '').toLowerCase() === safe.toLowerCase());
     control.classList.remove('is-invalid');
   });
+  editor.querySelectorAll('[data-fpe-color-picker]').forEach((picker) => {
+    if (!picker.querySelector('[data-fpe-page-field="background"]')) return;
+    picker.querySelectorAll('.free-page-color-preview, .free-page-color-advanced-plane').forEach((preview) => preview.style.setProperty('--fpe-dot', safe));
+  });
 }
 
 function handleNavField(editor, target, { live = false } = {}) {
   if (!editor.__freePageDeck) return;
   const deck = editor.__freePageDeck;
+  const pageHeight = editor.__freePageState?.height || DEFAULT_HEIGHT;
   deck.nav = normalizeDeckNav(deck.nav, deck.slides);
   const field = target.dataset.fpeNavField;
   if (field === 'enabled') deck.nav.enabled = Boolean(target.checked);
@@ -1943,19 +2065,19 @@ function handleNavField(editor, target, { live = false } = {}) {
       deck.nav.w = size;
       deck.nav.h = size;
       deck.nav.x = clamp(deck.nav.x, 0, PAGE_WIDTH - size);
-      deck.nav.y = clamp(deck.nav.y, 0, DEFAULT_HEIGHT - size);
+      deck.nav.y = clamp(deck.nav.y, 0, pageHeight - size);
     }
   }
   if (field === 'theme') deck.nav.theme = NAV_THEMES.has(target.value) ? target.value : 'dark';
   if (field === 'label') deck.nav.label = String(target.value || 'Menu').slice(0, 40);
   if (field === 'x') deck.nav.x = clamp(target.value, 0, PAGE_WIDTH - deck.nav.w);
-  if (field === 'y') deck.nav.y = clamp(target.value, 0, DEFAULT_HEIGHT - deck.nav.h);
+  if (field === 'y') deck.nav.y = clamp(target.value, 0, pageHeight - deck.nav.h);
   if (field === 'w') {
     deck.nav.w = clamp(target.value, deck.nav.style === 'menu' ? 44 : 220, PAGE_WIDTH - deck.nav.x);
     if (deck.nav.style === 'menu') deck.nav.h = deck.nav.w;
   }
   if (field === 'h') {
-    deck.nav.h = clamp(target.value, 34, DEFAULT_HEIGHT - deck.nav.y);
+    deck.nav.h = clamp(target.value, 34, pageHeight - deck.nav.y);
     if (deck.nav.style === 'menu') deck.nav.w = deck.nav.h;
   }
   const slideField = target.dataset.fpeNavSlide;
@@ -2271,10 +2393,12 @@ function mutateSelection(editor, action) {
   if (action === 'paste') return pasteCopiedBlock(editor);
   if (action === 'duplicate') {
     pushHistory(editor);
+    const groupMap = new Map();
     // Tri stable par z croissant → la duplication préserve la superposition d'origine.
-    const copies = selection.slice().sort((a, b) => (Number(a.z) || 0) - (Number(b.z) || 0)).map((item, index) => normalizeBlock({ ...structuredClone(item), id: uid(), x: item.x + 25, y: item.y + 25, z: nextZ(editor) + index, locked: false }, 0, editor.__freePageState.height)).filter(Boolean);
+    const copies = selection.slice().sort((a, b) => (Number(a.z) || 0) - (Number(b.z) || 0)).map((item, index) => normalizeBlock({ ...structuredClone(item), id: uid(), groupId: mapClipboardGroupId(item.groupId, groupMap), x: item.x + 25, y: item.y + 25, z: nextZ(editor) + index, locked: false }, 0, editor.__freePageState.height)).filter(Boolean);
     editor.__freePageState.blocks.push(...copies);
     renderBlocks(editor, copies.at(-1)?.id || null);
+    setMultiSelected(editor, copies.map((item) => item.id));
     return;
   }
   if (action === 'toggle-lock') {
@@ -2318,14 +2442,26 @@ function mutateSelection(editor, action) {
     return;
   }
   if (action === 'group-selected') {
+    const targets = expandedSelectionBlocks(editor, selection.length > 1 ? selection : blocks.filter((item) => item.id === block.id || blocksOverlap(block, item)));
+    if (targets.length < 2) return;
     pushHistory(editor);
-    const groupId = block.groupId || `grp-${Date.now().toString(36)}`;
-    const targets = selection.length > 1 ? selection : blocks.filter((item) => item.id === block.id || blocksOverlap(block, item));
+    const groupId = `grp-${Date.now().toString(36)}`;
+    const targetIds = targets.map((item) => item.id);
     targets.forEach((item) => { item.groupId = groupId; });
     renderBlocks(editor, block.id);
+    setMultiSelected(editor, targetIds);
     return;
   }
-  if (action === 'ungroup') { pushHistory(editor); blocks.forEach((item) => { if (!block.groupId || item.groupId === block.groupId) item.groupId = ''; }); renderBlocks(editor, block.id); return; }
+  if (action === 'ungroup') {
+    const targets = expandedSelectionBlocks(editor, selection).filter((item) => item.groupId);
+    if (!targets.length) return;
+    pushHistory(editor);
+    targets.forEach((item) => { item.groupId = ''; });
+    const targetIds = targets.map((item) => item.id);
+    renderBlocks(editor, block.id);
+    setMultiSelected(editor, targetIds);
+    return;
+  }
   if (action === 'layer-up') { pushHistory(editor); selection.forEach((item, index) => { item.z = nextZ(editor) + index; }); renderBlocks(editor, editor.__freePageSelected); return; }
   if (action === 'layer-down') { pushHistory(editor); const min = Math.max(1, Math.min(...blocks.map((item) => item.z || 1)) - 1); selection.forEach((item, index) => { item.z = Math.max(1, min - index); }); renderBlocks(editor, editor.__freePageSelected); }
 }
@@ -2472,6 +2608,13 @@ function handlePointerDown(editor, event) {
   // pile sous le curseur (restreinte au bloc sélectionné) → une poignée recouverte
   // par un autre bloc reste saisissable, sans que le bloc saute au premier plan.
   const _selId = editor.__freePageSelected;
+  editor.__freePagePointerPriorityId = null;
+  const selectedHitBlock = !event.ctrlKey && !event.metaKey && _selId && _selId !== NAV_BLOCK_ID
+    ? document.elementsFromPoint(event.clientX, event.clientY)
+      .map((el) => el.closest?.('[data-fpe-block]'))
+      .find((el) => el?.dataset.fpeBlock === _selId)
+    : null;
+  if (selectedHitBlock) editor.__freePagePointerPriorityId = _selId;
   const _handleAt = (sel) => {
     const direct = event.target.closest(sel);
     if (direct) return direct;
@@ -2489,8 +2632,9 @@ function handlePointerDown(editor, event) {
   const cropZoomHandle = event.target.closest('[data-fpe-crop-zoom]');
   const moveHandle = _handleAt('[data-fpe-move]');
   const navEl = event.target.closest('[data-fpe-nav-block]');
-  const directImageBlock = event.target.closest('.free-page-block--image[data-fpe-block]');
-  const directBlock = event.target.closest('[data-fpe-block]');
+  const targetBlock = event.target.closest('[data-fpe-block]');
+  const directBlock = selectedHitBlock || targetBlock;
+  const directImageBlock = directBlock?.classList.contains('free-page-block--image') ? directBlock : null;
   const workspace = event.target.closest('.free-page-workspace');
   const croppingId = editor.__freePageCropBlockId;
   const clickedCroppingBlock = croppingId && event.target.closest(`[data-fpe-block="${cssEscape(croppingId)}"]`);
@@ -2502,8 +2646,9 @@ function handlePointerDown(editor, event) {
   if (event.target.closest('[data-fpe-popup-frame-move], [data-fpe-popup-frame-resize]')) return startPopupFrameDrag(editor, event);
   if (navEl) return startNavComponentDrag(editor, event, navEl, resizeHandle);
   if ((event.ctrlKey || event.metaKey) && directBlock && !resizeHandle && !radiusHandle && !rotateHandle && !cropDragHandle && !cropZoomHandle && !moveHandle) return;
+  const selectedHasPriority = Boolean(selectedHitBlock && selectedHitBlock !== targetBlock);
   const canDirectDrag = directBlock
-    && !event.target.closest('[contenteditable="true"], input, textarea, select, button, [data-fpe-resize], [data-fpe-radius], [data-fpe-rotate], [data-fpe-crop-drag], [data-fpe-crop-zoom], [data-fpe-interaction-button], [data-fpe-animation-button]');
+    && (selectedHasPriority || !event.target.closest('[contenteditable="true"], input, textarea, select, button, [data-fpe-resize], [data-fpe-radius], [data-fpe-rotate], [data-fpe-crop-drag], [data-fpe-crop-zoom], [data-fpe-interaction-button], [data-fpe-animation-button]'));
   const directImageMoveBlock = directImageBlock && editor.__freePageCropBlockId !== directImageBlock.dataset.fpeBlock ? directImageBlock : null;
   const handle = resizeHandle || radiusHandle || rotateHandle || cropDragHandle || cropZoomHandle || moveHandle || directImageMoveBlock || (canDirectDrag ? directBlock : null);
   if (!handle) {
@@ -2512,7 +2657,7 @@ function handlePointerDown(editor, event) {
     }
     return;
   }
-  const blockEl = directImageBlock || handle.closest('[data-fpe-block]');
+  const blockEl = directImageBlock || handle.closest('[data-fpe-block]') || selectedElement(editor);
   const block = editor.__freePageState.blocks.find((item) => item.id === blockEl?.dataset.fpeBlock);
   if (!block) return;
   if (block.locked) return;
@@ -2524,13 +2669,26 @@ function handlePointerDown(editor, event) {
   handle.setPointerCapture?.(event.pointerId);
   const stage = blockEl.closest('[data-fpe-composition]') || editor.querySelector('[data-fpe-stage]');
   const rect = stage.getBoundingClientRect();
+  const pageHeight = editor.__freePageState?.height || DEFAULT_HEIGHT;
   const blockRect = blockEl.getBoundingClientRect();
-  const center = { x: blockRect.left + blockRect.width / 2, y: blockRect.top + blockRect.height / 2 };
-  const startAngle = Math.atan2(event.clientY - center.y, event.clientX - center.x) * 180 / Math.PI;
+  let center = { x: blockRect.left + blockRect.width / 2, y: blockRect.top + blockRect.height / 2 };
+  let startAngle = Math.atan2(event.clientY - center.y, event.clientX - center.x) * 180 / Math.PI;
   const start = { clientX: event.clientX, clientY: event.clientY, x: block.x, y: block.y, w: block.w, h: block.h, radius: block.radius || 0, rotation: block.rotation || 0, imageX: block.imageX ?? 0, imageY: block.imageY ?? 0, imageW: block.imageW ?? 100, imageH: block.imageH ?? 100 };
   const resizeDir = resizeHandle?.dataset.fpeResize || 'se';
-  const moveTargets = draggingMultiSelection ? selectedBlocks(editor).filter((item) => !item.locked) : groupMembers(editor, block);
-  const groupStart = moveTargets.map((item) => ({ id: item.id, x: item.x, y: item.y, w: item.w, h: item.h }));
+  const selectedTargets = draggingMultiSelection ? selectedBlocks(editor) : groupMembers(editor, block);
+  const isStoredGroup = Boolean(block.groupId && selectedTargets.some((item) => item.groupId === block.groupId));
+  if (isStoredGroup && selectedTargets.some((item) => item.locked)) return;
+  const moveTargets = isStoredGroup ? selectedTargets : selectedTargets.filter((item) => !item.locked);
+  if (!moveTargets.length) return;
+  const groupStart = moveTargets.map((item) => ({ id: item.id, x: item.x, y: item.y, w: item.w, h: item.h, rotation: item.rotation || 0 }));
+  const groupBoundsStart = selectionBounds(groupStart);
+  if (moveTargets.length > 1) {
+    center = {
+      x: rect.left + (groupBoundsStart.x + groupBoundsStart.w / 2) / PAGE_WIDTH * rect.width,
+      y: rect.top + (groupBoundsStart.y + groupBoundsStart.h / 2) / pageHeight * rect.height,
+    };
+    startAngle = Math.atan2(event.clientY - center.y, event.clientX - center.x) * 180 / Math.PI;
+  }
   let historyCaptured = false;
   const rotationBadge = rotateHandle ? blockEl.querySelector('[data-fpe-rotation-badge]') : null;
   if (rotateHandle) {
@@ -2541,21 +2699,31 @@ function handlePointerDown(editor, event) {
   const onMove = (moveEvent) => {
     if (!historyCaptured) { pushHistory(editor); historyCaptured = true; }
     const dx = (moveEvent.clientX - start.clientX) / rect.width * PAGE_WIDTH;
-    const dy = (moveEvent.clientY - start.clientY) / rect.height * editor.__freePageState.height;
+    const dy = (moveEvent.clientY - start.clientY) / rect.height * pageHeight;
     if (rotateHandle) {
       const angle = Math.atan2(moveEvent.clientY - center.y, moveEvent.clientX - center.x) * 180 / Math.PI;
       const next = start.rotation + angle - startAngle;
       const snapped = snapRotation(next, { forceStep: moveEvent.shiftKey ? 15 : 0 });
-      block.rotation = snapped.angle;
+      if (moveTargets.length > 1) rotateSelectionFromStart(editor, groupStart, groupBoundsStart, snapped.angle - start.rotation);
+      else block.rotation = snapped.angle;
       blockEl.classList.toggle('is-rotation-snapped', snapped.snapped);
-      blockEl.setAttribute('style', blockStyle(block, editor.__freePageState.height));
+      groupStart.forEach((item) => {
+        const member = editor.__freePageState.blocks.find((candidate) => candidate.id === item.id);
+        const memberEl = editor.querySelector(`[data-fpe-block="${cssEscape(item.id)}"]`);
+        if (member && memberEl) memberEl.setAttribute('style', blockStyle(member, editor.__freePageState.height));
+      });
       if (rotationBadge) rotationBadge.textContent = `${block.rotation}\u00B0`;
     } else if (radiusHandle) {
       block.radius = Math.round(clamp(start.radius - dx, 0, 80));
       blockEl.querySelector('.free-page-shape')?.style.setProperty('--shape-radius', `${block.radius}px`);
     } else if (resizeHandle) {
-      resizeBlockFromStart(editor, block, start, dx, dy, resizeDir, editor.__freePageState.height);
-      blockEl.setAttribute('style', blockStyle(block, editor.__freePageState.height));
+      if (moveTargets.length > 1) resizeSelectionFromStart(editor, groupStart, groupBoundsStart, dx, dy, resizeDir, pageHeight);
+      else resizeBlockFromStart(editor, block, start, dx, dy, resizeDir, editor.__freePageState.height);
+      groupStart.forEach((item) => {
+        const member = editor.__freePageState.blocks.find((candidate) => candidate.id === item.id);
+        const memberEl = editor.querySelector(`[data-fpe-block="${cssEscape(item.id)}"]`);
+        if (member && memberEl) memberEl.setAttribute('style', blockStyle(member, editor.__freePageState.height));
+      });
       if (block.type === 'image' && editor.__freePageCropBlockId === block.id) {
         updateSelectedImageStyle(editor, block);
         syncImageCropInspector(editor, block);
@@ -2578,6 +2746,10 @@ function handlePointerDown(editor, event) {
     blockEl.classList.remove('is-rotation-snapped');
     positionSelectionOverlay(editor);
     renderInspector(editor);
+    const priorityId = editor.__freePagePointerPriorityId;
+    setTimeout(() => {
+      if (editor.__freePagePointerPriorityId === priorityId) editor.__freePagePointerPriorityId = null;
+    }, 0);
   };
   editor.__freePageDragging = true;
   window.addEventListener('pointermove', onMove);
@@ -2911,9 +3083,9 @@ function startNavComponentDrag(editor, event, navEl, resizeHandle) {
       resizeNavFromStart(editor, nav, start, dx, dy, resizeDir);
     } else {
       nav.x = Math.round(clamp(snapValue(editor, start.x + dx), 0, PAGE_WIDTH - nav.w));
-      nav.y = Math.round(clamp(snapValue(editor, start.y + dy), 0, DEFAULT_HEIGHT - nav.h));
+      nav.y = Math.round(clamp(snapValue(editor, start.y + dy), 0, pageHeight - nav.h));
     }
-    navEl.setAttribute('style', navBlockStyle(nav));
+    navEl.setAttribute('style', navBlockStyle(nav, editor.__freePageState?.height || DEFAULT_HEIGHT));
   };
   const onUp = () => {
     window.removeEventListener('pointermove', onMove);
@@ -2927,6 +3099,7 @@ function startNavComponentDrag(editor, event, navEl, resizeHandle) {
 function resizeNavFromStart(editor, nav, start, dx, dy, dir) {
   const minW = nav.style === 'menu' ? 44 : 220;
   const minH = 34;
+  const pageHeight = editor.__freePageState?.height || DEFAULT_HEIGHT;
   if (nav.style === 'menu') {
     const delta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
     const signed = dir.includes('w') || dir.includes('n') ? -delta : delta;
@@ -2936,7 +3109,7 @@ function resizeNavFromStart(editor, nav, start, dx, dy, dir) {
     nav.w = Math.round(size);
     nav.h = Math.round(size);
     nav.x = Math.round(clamp(snapValue(dir.includes('w') ? right - size : start.x), 0, PAGE_WIDTH - nav.w));
-    nav.y = Math.round(clamp(snapValue(dir.includes('n') ? bottom - size : start.y), 0, DEFAULT_HEIGHT - nav.h));
+    nav.y = Math.round(clamp(snapValue(dir.includes('n') ? bottom - size : start.y), 0, pageHeight - nav.h));
     return;
   }
   let x = start.x;
@@ -2944,7 +3117,7 @@ function resizeNavFromStart(editor, nav, start, dx, dy, dir) {
   let w = start.w;
   let h = start.h;
   if (dir.includes('e')) w = clamp(start.w + dx, minW, PAGE_WIDTH - start.x);
-  if (dir.includes('s')) h = clamp(start.h + dy, minH, DEFAULT_HEIGHT - start.y);
+  if (dir.includes('s')) h = clamp(start.h + dy, minH, pageHeight - start.y);
   if (dir.includes('w')) {
     const maxX = start.x + start.w - minW;
     x = clamp(start.x + dx, 0, maxX);
@@ -2956,50 +3129,72 @@ function resizeNavFromStart(editor, nav, start, dx, dy, dir) {
     h = start.y + start.h - y;
   }
   nav.x = Math.round(clamp(snapValue(editor, x), 0, PAGE_WIDTH - minW));
-  nav.y = Math.round(clamp(snapValue(editor, y), 0, DEFAULT_HEIGHT - minH));
+  nav.y = Math.round(clamp(snapValue(editor, y), 0, pageHeight - minH));
   nav.w = Math.round(clamp(snapValue(editor, w), minW, PAGE_WIDTH - nav.x));
-  nav.h = Math.round(clamp(snapValue(editor, h), minH, DEFAULT_HEIGHT - nav.y));
+  nav.h = Math.round(clamp(snapValue(editor, h), minH, pageHeight - nav.y));
 }
 
 function startMarqueeSelection(editor, event) {
+  editor.__freePageMarqueeCleanup?.();
   const stage = event.target.closest('[data-fpe-composition]') || editor.querySelector('[data-fpe-composition]');
   if (!stage) return;
   event.preventDefault();
+  event.stopPropagation();
   const rect = stage.getBoundingClientRect();
   const box = document.createElement('div');
   box.className = 'free-page-marquee';
+  box.hidden = true;
   stage.appendChild(box);
-  const start = {
-    x: clamp((event.clientX - rect.left) / rect.width * PAGE_WIDTH, 0, PAGE_WIDTH),
-    y: clamp((event.clientY - rect.top) / rect.height * editor.__freePageState.height, 0, editor.__freePageState.height),
-  };
+  const pointerStart = { x: event.clientX, y: event.clientY };
   const inherited = event.ctrlKey || event.metaKey ? new Set(editor.__freePageSelectedIds || []) : new Set();
+  setMultiSelected(editor, [...inherited], { deferUi: true });
+  let moved = false;
   const paint = (moveEvent) => {
-    const current = {
-      x: clamp((moveEvent.clientX - rect.left) / rect.width * PAGE_WIDTH, 0, PAGE_WIDTH),
-      y: clamp((moveEvent.clientY - rect.top) / rect.height * editor.__freePageState.height, 0, editor.__freePageState.height),
-    };
+    if (moveEvent.pointerId !== event.pointerId) return;
+    if (!moved && Math.hypot(moveEvent.clientX - pointerStart.x, moveEvent.clientY - pointerStart.y) < 4) return;
+    moved = true;
+    box.hidden = false;
     const area = {
-      x: Math.min(start.x, current.x),
-      y: Math.min(start.y, current.y),
-      w: Math.abs(current.x - start.x),
-      h: Math.abs(current.y - start.y),
+      left: Math.min(pointerStart.x, moveEvent.clientX),
+      top: Math.min(pointerStart.y, moveEvent.clientY),
+      right: Math.max(pointerStart.x, moveEvent.clientX),
+      bottom: Math.max(pointerStart.y, moveEvent.clientY),
     };
-    box.style.left = `${area.x / 10}%`;
-    box.style.top = `${area.y / editor.__freePageState.height * 100}%`;
-    box.style.width = `${area.w / 10}%`;
-    box.style.height = `${area.h / editor.__freePageState.height * 100}%`;
+    const scaleX = rect.width / Math.max(1, stage.offsetWidth);
+    const scaleY = rect.height / Math.max(1, stage.offsetHeight);
+    box.style.left = `${(area.left - rect.left) / scaleX}px`;
+    box.style.top = `${(area.top - rect.top) / scaleY}px`;
+    box.style.width = `${(area.right - area.left) / scaleX}px`;
+    box.style.height = `${(area.bottom - area.top) / scaleY}px`;
     const picked = editor.__freePageState.blocks
-      .filter((block) => blocksOverlap({ ...area, id: '__marquee__' }, block))
+      .filter((block) => {
+        if (block.hidden) return false;
+        const blockEl = editor.querySelector(`[data-fpe-block="${cssEscape(block.id)}"]`);
+        if (!blockEl) return false;
+        const blockRect = blockEl.getBoundingClientRect();
+        return blockRect.right >= area.left && blockRect.left <= area.right
+          && blockRect.bottom >= area.top && blockRect.top <= area.bottom;
+      })
       .map((block) => block.id);
-    setMultiSelected(editor, [...inherited, ...picked]);
+    setMultiSelected(editor, [...inherited, ...picked], { deferUi: true });
   };
-  const done = () => {
+  const cleanup = () => {
     window.removeEventListener('pointermove', paint);
     box.remove();
+    window.removeEventListener('pointerup', done);
+    window.removeEventListener('pointercancel', done);
+    if (editor.__freePageMarqueeCleanup === cleanup) editor.__freePageMarqueeCleanup = null;
   };
+  const done = (upEvent) => {
+    if (upEvent.pointerId !== event.pointerId) return;
+    cleanup();
+    editor.__freePageIgnoreClickUntil = performance.now() + 160;
+    syncToolbar(editor);
+  };
+  editor.__freePageMarqueeCleanup = cleanup;
   window.addEventListener('pointermove', paint);
-  window.addEventListener('pointerup', done, { once: true });
+  window.addEventListener('pointerup', done);
+  window.addEventListener('pointercancel', done);
 }
 
 function togglePopupFrameLock(editor) {
@@ -3067,13 +3262,21 @@ function handleInspectorInput(editor, event, { commit = false } = {}) {
   if (!block) return;
   const isColorField = ['textColor', 'tableTextColor', 'tableHeaderColor', 'tableBorderColor', 'fill', 'stroke'].includes(field);
   if (isColorField && target.matches?.('input[type="text"]')) {
-    const isValidHex = HEX_COLOR_RE.test(String(target.value || '').trim());
+    const normalizedColor = normalizeHexColorInput(target.value);
+    const isValidHex = Boolean(normalizedColor);
     target.classList.toggle('is-invalid', !isValidHex);
     if (!isValidHex) {
       const picker = target.closest('[data-fpe-color-picker]');
       picker?.querySelectorAll('.free-page-color-preview').forEach((preview) => preview.style.setProperty('--fpe-dot', '#00000000'));
       return;
     }
+    target.value = normalizedColor;
+  }
+  if (chartField === 'color' && target.matches?.('input[type="text"]')) {
+    const normalizedColor = normalizeHexColorInput(target.value);
+    target.classList.toggle('is-invalid', !normalizedColor);
+    if (!normalizedColor) return;
+    target.value = normalizedColor;
   }
   const hadPopupPage = field === 'interactionType' ? normalizeInteraction(block.interaction).page : null;
   scheduleHistory(editor, { sync: false });
@@ -3093,12 +3296,28 @@ function handleInspectorInput(editor, event, { commit = false } = {}) {
       else if (chartField === 'color') items[index].color = chartColor(target.value, index, block.chartPalette);
       else items[index][chartField] = String(target.value || '').slice(0, chartField === 'note' ? 90 : 34);
       block.items = items;
+      if (chartField === 'color') {
+        const safe = chartColor(items[index].color, index, block.chartPalette);
+        target.closest('.free-page-chart-color-cell')?.style.setProperty('--fpe-dot', safe);
+        editor.querySelectorAll(`[data-fpe-inspector-chart-field="color"][data-index="${index}"]`).forEach((control) => {
+          if (control !== target && document.activeElement !== control) control.value = safe;
+        });
+      }
     }
   }
   if (chartOption && block.type === 'chart') block[chartOption] = target.checked;
   const toggleValue = field === 'textTransform' ? String(target.value || '') : '';
   const inlineTextApplied = field && applyInspectorTextRangeField(editor, block, field, target, toggleValue);
   if (field && !inlineTextApplied) applyInspectorField(editor, block, field, target);
+  if (field?.startsWith('interaction')) propagateGroupInteraction(editor, block);
+  if (field === 'shadowDepth') {
+    const value = String(Math.round(clamp(target.value, 4, 80)));
+    editor.querySelectorAll('[data-fpe-inspector-field="shadowDepth"]').forEach((control) => {
+      if (control !== target && document.activeElement !== control) control.value = value;
+    });
+    const output = editor.querySelector('[data-fpe-depth-value]');
+    if (output) output.textContent = `${value} px`;
+  }
   if (isColorField) syncColorFieldControls(editor, field, safeColor(target.value, field === 'textColor' ? '#eef2fb' : '#6aa7ff'), target);
   if (field === 'fontFamily') {
     rememberRecentFont(target.value);                       // remonte la police en tête des « Récentes »
@@ -3734,9 +3953,9 @@ function stageStyle(page) {
   return `--free-page-height:${normalized.height};--free-page-bg:${_esc(normalized.background || DEFAULT_PAGE_BG)}`;
 }
 
-function navBlockStyle(nav) {
+function navBlockStyle(nav, pageHeight = DEFAULT_HEIGHT) {
   const safe = normalizeDeckNav(nav, []);
-  return `left:${safe.x / 10}%;top:${safe.y / DEFAULT_HEIGHT * 100}%;width:${safe.w / 10}%;height:${safe.h / DEFAULT_HEIGHT * 100}%;z-index:${safe.z || 1200}`;
+  return `left:${safe.x / 10}%;top:${safe.y / pageHeight * 100}%;width:${safe.w / 10}%;height:${safe.h / pageHeight * 100}%;z-index:${safe.z || 1200}`;
 }
 
 function deckNavHtml(deck, currentSlideId, { editor = false, selected = false } = {}) {
@@ -3746,10 +3965,11 @@ function deckNavHtml(deck, currentSlideId, { editor = false, selected = false } 
   const slides = visibleSlides(deck).filter((slide) => !nav.targetSlideIds.length || nav.targetSlideIds.includes(slide.id));
   if (!slides.length) return '';
   const editorAttrs = editor ? ` data-fpe-nav-block="${NAV_BLOCK_ID}"` : '';
+  const pageHeight = deck?.slides?.find(slide => slide.id === currentSlideId)?.page?.height || DEFAULT_HEIGHT;
   const classes = `free-page-stage-nav free-page-stage-nav--${nav.theme} ${editor ? 'free-page-stage-nav--editor ' : ''}${selected ? 'is-selected ' : ''}`;
   const handles = editor && selected ? resizeHandlesHtml() : '';
   if (nav.style === 'menu') {
-    return `<details class="${classes}free-page-stage-nav--menu ${navMenuPlacementClass(nav)}"${editorAttrs} style="${navBlockStyle(nav)}">
+    return `<details class="${classes}free-page-stage-nav--menu ${navMenuPlacementClass(nav, pageHeight)}"${editorAttrs} style="${navBlockStyle(nav, pageHeight)}">
       <summary aria-label="${_esc(nav.label || 'Menu')}" title="${_esc(nav.label || 'Menu')}"><span class="free-page-hamburger" aria-hidden="true"><i></i><i></i><i></i></span></summary>
       <div class="free-page-stage-nav-menu-panel">
         <strong>${_esc(nav.label || 'Menu')}</strong>
@@ -3758,20 +3978,20 @@ function deckNavHtml(deck, currentSlideId, { editor = false, selected = false } 
       ${handles}
     </details>`;
   }
-  return `<nav class="${classes}free-page-stage-nav--bar"${editorAttrs} style="${navBlockStyle(nav)}" aria-label="Navigation du diaporama">
+  return `<nav class="${classes}free-page-stage-nav--bar"${editorAttrs} style="${navBlockStyle(nav, pageHeight)}" aria-label="Navigation du diaporama">
     ${slides.map((slide, index) => `<button type="button" class="${slide.id === currentSlideId ? 'is-active' : ''}" data-fpe-reader-slide="${_esc(slide.id)}">${_esc(slide.title || `Diapo ${index + 1}`)}</button>`).join('')}
     ${handles}
   </nav>`;
 }
 
-function navMenuPlacementClass(nav) {
+function navMenuPlacementClass(nav, pageHeight = DEFAULT_HEIGHT) {
   const safe = normalizeDeckNav(nav, []);
   const panelW = 220;
   const panelH = 260;
   const h = safe.x < panelW * .45 ? 'free-page-stage-nav--align-left'
     : safe.x + safe.w > PAGE_WIDTH - panelW * .45 ? 'free-page-stage-nav--align-right'
       : 'free-page-stage-nav--align-center';
-  const v = safe.y + safe.h + panelH > DEFAULT_HEIGHT ? 'free-page-stage-nav--open-up' : 'free-page-stage-nav--open-down';
+  const v = safe.y + safe.h + panelH > pageHeight ? 'free-page-stage-nav--open-up' : 'free-page-stage-nav--open-down';
   return `${h} ${v}`;
 }
 
@@ -3815,7 +4035,9 @@ function setSelected(editor, id) {
   }
   const selectionChanged = editor.__freePageSelected !== nextId;
   editor.__freePageSelected = nextId;
-  editor.__freePageSelectedIds = nextId && nextId !== NAV_BLOCK_ID ? [nextId] : [];
+  editor.__freePageSelectedIds = block?.groupId
+    ? editor.__freePageState.blocks.filter((item) => item.groupId === block.groupId).map((item) => item.id)
+    : nextId && nextId !== NAV_BLOCK_ID ? [nextId] : [];
   // Sélectionner un texte affiche d'emblée sa mise en forme (taille, couleur,
   // police, alignement) : l'onglet « Contenu » ne sert à rien pour un texte.
   if (selectionChanged && block?.type === 'text') editor.__freePageInspectorTab = 'config';
@@ -3829,21 +4051,33 @@ function toggleSelected(editor, id) {
   syncLiveBlock(editor);
   syncInteractionPageEditor(editor);
   const current = new Set(editor.__freePageSelectedIds?.length ? editor.__freePageSelectedIds : editor.__freePageSelected ? [editor.__freePageSelected] : []);
-  current.has(id) ? current.delete(id) : current.add(id);
+  const targetIds = block.groupId
+    ? editor.__freePageState.blocks.filter((item) => item.groupId === block.groupId).map((item) => item.id)
+    : [id];
+  const removeGroup = targetIds.every((targetId) => current.has(targetId));
+  targetIds.forEach((targetId) => removeGroup ? current.delete(targetId) : current.add(targetId));
   editor.__freePageSelectedIds = [...current];
-  editor.__freePageSelected = editor.__freePageSelectedIds.at(-1) || null;
+  editor.__freePageSelected = removeGroup
+    ? editor.__freePageSelectedIds.at(-1) || null
+    : id;
   applySelectionClasses(editor);
   syncToolbar(editor);
 }
 
-function setMultiSelected(editor, ids) {
-  const valid = [...new Set(ids)].filter((id) => editor.__freePageState.blocks.some((block) => block.id === id));
-  syncLiveBlock(editor);
-  syncInteractionPageEditor(editor);
+function setMultiSelected(editor, ids, { deferUi = false } = {}) {
+  const requested = new Set(ids);
+  const selectedGroupIds = new Set(editor.__freePageState.blocks.filter((block) => requested.has(block.id) && block.groupId).map((block) => block.groupId));
+  const valid = editor.__freePageState.blocks
+    .filter((block) => requested.has(block.id) || (block.groupId && selectedGroupIds.has(block.groupId)))
+    .map((block) => block.id);
+  if (!deferUi) {
+    syncLiveBlock(editor);
+    syncInteractionPageEditor(editor);
+  }
   editor.__freePageSelectedIds = valid;
   editor.__freePageSelected = valid.at(-1) || null;
   applySelectionClasses(editor);
-  syncToolbar(editor);
+  if (!deferUi) syncToolbar(editor);
 }
 
 function applySelectionClasses(editor) {
@@ -3873,7 +4107,9 @@ function _ensureSelOverlay(editor) {
     ov.setAttribute('data-fpe-sel-overlay', '');
     ov.className = 'free-page-sel-overlay';
     ov.style.display = 'none';
-    ov.innerHTML = `<span class="free-page-sel-frame"></span>`;
+    ov.innerHTML = `<span class="free-page-sel-frame"></span>
+      ${['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map((dir) => `<span class="free-page-resize free-page-resize--${dir}" data-fpe-resize="${dir}" title="Redimensionner le groupe"></span>`).join('')}
+      <span class="free-page-rotate" data-fpe-rotate title="Faire pivoter le groupe"><i></i><b data-fpe-rotation-badge>0°</b></span>`;
     stage.appendChild(ov);
   } else if (ov !== stage.lastElementChild) {
     stage.appendChild(ov); // rester le dernier enfant → au-dessus
@@ -3884,20 +4120,24 @@ function positionSelectionOverlay(editor) {
   const ov = _ensureSelOverlay(editor);
   if (!ov) return;
   const id = editor.__freePageSelected;
-  const single = (editor.__freePageSelectedIds || []).length <= 1;
-  const block = (single && id && id !== NAV_BLOCK_ID)
-    ? editor.__freePageState.blocks.find((b) => b.id === id) : null;
-  if (!block || block.locked || block.hidden || editor.__freePageCropBlockId === block.id) {
+  const selection = selectedBlocks(editor).filter((block) => !block.hidden);
+  const block = id && id !== NAV_BLOCK_ID ? editor.__freePageState.blocks.find((item) => item.id === id) : null;
+  if (!block || !selection.length || selection.every((item) => item.locked) || editor.__freePageCropBlockId === block.id) {
     ov.style.display = 'none';
+    ov.classList.remove('is-group-selection');
+    editor.classList.remove('has-group-selection');
     return;
   }
   const ph = editor.__freePageState.height || DEFAULT_HEIGHT;
+  const bounds = selectionBounds(selection);
   ov.style.display = 'block';
-  ov.style.left = `${block.x / 10}%`;
-  ov.style.top = `${block.y / ph * 100}%`;
-  ov.style.width = `${block.w / 10}%`;
-  ov.style.height = `${block.h / ph * 100}%`;
-  ov.style.transform = `rotate(${normalizeRotation(block.rotation || 0)}deg)`;
+  ov.style.left = `${bounds.x / 10}%`;
+  ov.style.top = `${bounds.y / ph * 100}%`;
+  ov.style.width = `${bounds.w / 10}%`;
+  ov.style.height = `${bounds.h / ph * 100}%`;
+  ov.style.transform = selection.length === 1 ? `rotate(${normalizeRotation(block.rotation || 0)}deg)` : 'none';
+  ov.classList.toggle('is-group-selection', selection.length > 1);
+  editor.classList.toggle('has-group-selection', selection.length > 1);
 }
 
 // Force le curseur de redimensionnement/rotation quand le pointeur survole une
@@ -3935,6 +4175,8 @@ function syncToolbar(editor) {
   const textBlocks = blocks.filter((item) => item.type === 'text');
   const isTextSelection = textBlocks.length > 0 && textBlocks.length === blocks.length;
   editor.classList.toggle('is-text-active', isTextSelection);
+  const selectionToolbar = editor.querySelector('[data-fpe-selection-toolbar]');
+  if (selectionToolbar) selectionToolbar.hidden = blocks.length === 0;
   const textToolbar = editor.querySelector('[data-fpe-text-toolbar]');
   if (textToolbar && isTextSelection) {
     const common = (read) => {
@@ -3945,6 +4187,7 @@ function syncToolbar(editor) {
     const fontVal = common((item) => safeTextFont(item.fontFamily));
     const colorVal = common((item) => safeColor(item.textColor, '#eef2fb'));
     const upperVal = common((item) => item.textTransform === 'uppercase');
+    const alignVal = common((item) => item.align || 'left');
 
     const size = textToolbar.querySelector('[data-fpe-inspector-field="fontSize"]');
     const color = textToolbar.querySelector('[data-fpe-inspector-field="textColor"]');
@@ -3961,6 +4204,9 @@ function syncToolbar(editor) {
       fontLabel.style.fontFamily = fontVal || '';
     }
     if (transform) transform.classList.toggle('is-active', upperVal === true);
+    textToolbar.querySelectorAll('[data-fpe-inspector-field="align"]').forEach((button) => {
+      button.classList.toggle('is-active', alignVal != null && button.value === alignVal);
+    });
     const colorButton = textToolbar.querySelector('[data-fpe-action="toggle-text-color-popover"]');
     if (colorButton) colorButton.classList.toggle('is-mixed', colorVal == null);
     const colorDot = colorButton?.querySelector('i');
@@ -3976,8 +4222,21 @@ function syncTextColorPopover(editor, color) {
 
 function syncColorFieldControls(editor, field, color, source = null) {
   if (!editor || !field) return;
-  const fallback = field === 'textColor' ? '#eef2fb' : '#6aa7ff';
+  const fallback = ({
+    textColor: '#eef2fb',
+    fill: DEFAULT_SHAPE_FILL,
+    stroke: DEFAULT_SHAPE_STROKE,
+    tableTextColor: '#c8d4e8',
+    tableHeaderColor: '#e8c66a',
+    tableBorderColor: '#263957',
+  })[field] || '#6aa7ff';
   const safe = safeColor(color, fallback);
+  editor.querySelectorAll(`[data-fpe-color-disclosure="${cssEscape(field)}"]`).forEach((details) => {
+    const swatch = details.querySelector('.free-page-color-disclosure-value i');
+    const code = details.querySelector('.free-page-color-disclosure-value code');
+    if (swatch) swatch.style.setProperty('--fpe-dot', safe);
+    if (code) code.textContent = safe.toUpperCase();
+  });
   editor.querySelectorAll(`[data-fpe-inspector-field="${cssEscape(field)}"]`).forEach((control) => {
     if (control === source) {
       control.classList?.remove('is-invalid');
@@ -3993,7 +4252,7 @@ function syncColorFieldControls(editor, field, color, source = null) {
   });
   editor.querySelectorAll('[data-fpe-color-picker], [data-fpe-text-color-popover]').forEach((picker) => {
     if (!picker.querySelector(`[data-fpe-inspector-field="${cssEscape(field)}"]`)) return;
-    picker.querySelectorAll('.free-page-color-preview').forEach((preview) => preview.style.setProperty('--fpe-dot', safe));
+    picker.querySelectorAll('.free-page-color-preview, .free-page-color-advanced-plane').forEach((preview) => preview.style.setProperty('--fpe-dot', safe));
   });
   if (field === 'textColor') {
     const colorButton = editor.querySelector('[data-fpe-action="toggle-text-color-popover"]');
@@ -4098,7 +4357,10 @@ function foldOpenAttr(editor, key, defaultOpen = false) {
 
 function pageInspectorHtml(editor) {
   const deck = editor.__freePageDeck ? normalizeFreePageDeck(editor.__freePageDeck) : null;
-  if (deck) editor.__freePageDeck.nav = deck.nav;
+  if (deck) {
+    editor.__freePageDeck.nav = deck.nav;
+    editor.__freePageDeck.format = deck.format;
+  }
   const page = normalizeSingleFreePage(editor.__freePageState);
   return `<div class="free-page-inspector-head"><span>Composition</span><strong>Diapo</strong></div>
     ${currentSlideInspectorHtml(editor)}
@@ -4115,15 +4377,31 @@ function pageInspectorHtml(editor) {
         <button type="button" class="free-page-resource" data-fpe-action="add-nav">Menu</button>
       </div>
     </details>
+    ${deck ? slideFormatInspectorHtml(deck, editor) : ''}
     <details class="free-page-inspector-section free-page-inspector-fold" data-fpe-fold="background" ${foldOpenAttr(editor, 'background')}>
       <summary>Fond de diapo</summary>
-      <div class="free-page-control-row"><span>Couleur</span><span class="free-page-color-combo">
-        ${pageColorButtonsHtml(page.background || DEFAULT_PAGE_BG)}
-        <input class="free-page-color-hex" type="text" value="${_esc(page.background || DEFAULT_PAGE_BG)}" data-fpe-page-field="background" spellcheck="false" inputmode="text" aria-label="Couleur de fond personnalisÃ©e">
-        <input class="free-page-color-custom" type="color" value="${_esc(page.background || DEFAULT_PAGE_BG)}" data-fpe-page-field="background">
-      </span></div>
+      <div class="free-page-control-row free-page-control-row--stacked"><span>Couleur</span>${colorPickerHtml('background', page.background || DEFAULT_PAGE_BG, { compact: true, fallback: DEFAULT_PAGE_BG, pageField: true })}</div>
     </details>
     ${deck ? navInspectorHtml(deck, editor.__freePageSlideId, { folded: true, editor }) : ''}`;
+}
+
+function slideFormatInspectorHtml(deck, editor) {
+  const format = normalizeDeckFormat(deck.format, editor?.__freePageState?.height || DEFAULT_HEIGHT);
+  return `<details class="free-page-inspector-section free-page-inspector-fold" data-fpe-fold="format" ${foldOpenAttr(editor, 'format', true)}>
+    <summary>Format du diaporama</summary>
+    <label>Orientation et ratio
+      <select class="free-page-select" data-fpe-deck-field="formatPreset">
+        ${SLIDE_FORMATS.map(item => `<option value="${item.id}" ${format.preset === item.id ? 'selected' : ''}>${item.label} · ${item.width} × ${item.height}</option>`).join('')}
+        <option value="custom" ${format.preset === 'custom' ? 'selected' : ''}>Taille personnalisée</option>
+      </select>
+    </label>
+    <div class="free-page-format-dimensions">
+      <label>Largeur <input type="number" min="320" max="4000" value="${format.width}" data-fpe-deck-field="formatWidth"></label>
+      <span aria-hidden="true">×</span>
+      <label>Hauteur <input type="number" min="240" max="5000" value="${format.height}" data-fpe-deck-field="formatHeight"></label>
+    </div>
+    <p>Le format s'applique à toutes les diapos. Les anciens diaporamas conservent automatiquement leur format classique.</p>
+  </details>`;
 }
 
 function currentSlideInspectorHtml(editor) {
@@ -4191,6 +4469,7 @@ function layerRowHtml(layer, active) {
 
 function navInspectorHtml(deck, currentSlideId, { selected = false, folded = false, editor = null } = {}) {
   const nav = normalizeDeckNav(deck.nav, deck.slides);
+  const pageHeight = editor?.__freePageState?.height || deck.slides.find(slide => slide.id === currentSlideId)?.page?.height || DEFAULT_HEIGHT;
   const target = new Set(nav.targetSlideIds || []);
   const visible = new Set(nav.visibleSlideIds || []);
   const slideRows = (kind, set) => `<div class="free-page-nav-slide-list">
@@ -4216,11 +4495,11 @@ function navInspectorHtml(deck, currentSlideId, { selected = false, folded = fal
     <label>Libelle <input value="${_esc(nav.label || 'Menu')}" data-fpe-nav-field="label" placeholder="Menu"></label>
     <div class="free-page-inspector-grid">
       <label>X <input type="number" min="0" max="${PAGE_WIDTH}" value="${Math.round(nav.x)}" data-fpe-nav-field="x"></label>
-      <label>Y <input type="number" min="0" max="${DEFAULT_HEIGHT}" value="${Math.round(nav.y)}" data-fpe-nav-field="y"></label>
+      <label>Y <input type="number" min="0" max="${pageHeight}" value="${Math.round(nav.y)}" data-fpe-nav-field="y"></label>
       ${nav.style === 'menu'
         ? `<label>Taille <input type="number" min="44" max="96" value="${Math.round(nav.w)}" data-fpe-nav-field="w"></label>`
         : `<label>Largeur <input type="number" min="220" max="${PAGE_WIDTH}" value="${Math.round(nav.w)}" data-fpe-nav-field="w"></label>
-          <label>Hauteur <input type="number" min="34" max="${DEFAULT_HEIGHT}" value="${Math.round(nav.h)}" data-fpe-nav-field="h"></label>`}
+          <label>Hauteur <input type="number" min="34" max="${pageHeight}" value="${Math.round(nav.h)}" data-fpe-nav-field="h"></label>`}
     </div>
     ${selected ? '<p>Place ce composant sur la diapo : les pages cochees l afficheront exactement au meme endroit.</p>' : '<button type="button" class="free-page-resource" data-fpe-action="add-nav">Placer le menu sur la diapo</button>'}
     <div class="free-page-nav-picker">
@@ -4293,7 +4572,7 @@ function typeSpecificConfig(block, editor = null) {
     </div>
     <label>Taille <input type="number" min="1" max="96" value="${Number(block.fontSize) || 18}" data-fpe-inspector-field="fontSize"></label>
     <div class="free-page-control-row"><span>Alignement</span>${alignmentButtonsHtml(block.align)}</div>
-    <div class="free-page-control-row free-page-control-row--stacked"><span>Couleur</span>${textColorPickerHtml(block.textColor || legacyTextColor(block.color), { compact: true })}</div>
+    ${colorDisclosureHtml(editor, 'textColor', 'Couleur', block.textColor || legacyTextColor(block.color), { fallback: '#eef2fb' })}
     <label>Fond ${selectHtml('surface', ['none', 'soft', 'dark'], block.surface, surfaceLabel)}</label>
   </div>`;
   if (block.type === 'image') {
@@ -4314,20 +4593,26 @@ function typeSpecificConfig(block, editor = null) {
   }
   if (block.type === 'shape') return `<div class="free-page-inspector-section"><h4>Forme</h4>
     <label>Type ${selectHtml('shape', [...SHAPE_TYPES], block.shape, shapeLabel)}</label>
-    <div class="free-page-control-row"><span>Remplissage</span><span class="free-page-color-combo">${colorPresetButtonsHtml('fill', SHAPE_COLOR_PRESETS, block.fill || DEFAULT_SHAPE_FILL)}<input class="free-page-color-custom" type="color" value="${_esc(block.fill || DEFAULT_SHAPE_FILL)}" data-fpe-inspector-field="fill"></span></div>
-    <div class="free-page-control-row"><span>Contour</span><span class="free-page-color-combo">${colorPresetButtonsHtml('stroke', INLINE_TEXT_COLORS, block.stroke || DEFAULT_SHAPE_STROKE)}<input class="free-page-color-custom" type="color" value="${_esc(block.stroke || DEFAULT_SHAPE_STROKE)}" data-fpe-inspector-field="stroke"></span></div>
+    ${colorDisclosureHtml(editor, 'fill', 'Remplissage', block.fill || DEFAULT_SHAPE_FILL, { fallback: DEFAULT_SHAPE_FILL })}
+    ${colorDisclosureHtml(editor, 'stroke', 'Contour', block.stroke || DEFAULT_SHAPE_STROKE, { fallback: DEFAULT_SHAPE_STROKE })}
     <label>Epaisseur <input type="number" min="0" max="12" value="${Number(block.strokeWidth) || 0}" data-fpe-inspector-field="strokeWidth"></label>
     <label class="free-page-inspector-check">Ombre / profondeur <input type="checkbox" data-fpe-inspector-field="shadow" ${block.shadow ? 'checked' : ''}></label>
-    ${block.shadow ? `<label>Profondeur <input type="range" min="4" max="80" value="${Number(block.shadowDepth) || 22}" data-fpe-inspector-field="shadowDepth"></label>` : ''}
+    ${block.shadow ? `<div class="free-page-depth-control">
+      <div class="free-page-depth-heading"><span>Profondeur</span><output data-fpe-depth-value>${Number(block.shadowDepth) || 22} px</output></div>
+      <div class="free-page-depth-fields">
+        <input type="range" min="4" max="80" step="1" value="${Number(block.shadowDepth) || 22}" data-fpe-inspector-field="shadowDepth" aria-label="Profondeur visuelle">
+        <label><input type="number" min="4" max="80" step="1" value="${Number(block.shadowDepth) || 22}" data-fpe-inspector-field="shadowDepth" aria-label="Profondeur en pixels"><span>px</span></label>
+      </div>
+    </div>` : ''}
     ${block.shape === 'rectangle' ? `<label>Arrondi <input type="number" min="0" max="80" value="${Number(block.radius) || 0}" data-fpe-inspector-field="radius"></label>` : ''}
     ${block.shape === 'line' ? '<p>Mode actuel : ligne libre. Les connecteurs attaches entre deux blocs seront geres separement pour rester fiables quand les blocs bougent.</p>' : ''}
   </div>`;
   if (block.type === 'table') return `<div class="free-page-inspector-section"><h4>Tableau</h4>
     <label class="free-page-inspector-check">Ligne d'en-tête <input type="checkbox" data-fpe-inspector-field="tableHeader" ${block.header !== false ? 'checked' : ''}></label>
     <label>Taille texte <input type="number" min="10" max="28" value="${Number(block.fontSize) || 14}" data-fpe-inspector-field="tableFontSize"></label>
-    <div class="free-page-control-row"><span>Texte</span><span class="free-page-color-combo">${colorPresetButtonsHtml('tableTextColor', TEXT_COLOR_PRESETS, block.textColor || '#c8d4e8')}<input class="free-page-color-custom" type="color" value="${_esc(block.textColor || '#c8d4e8')}" data-fpe-inspector-field="tableTextColor"></span></div>
-    <div class="free-page-control-row"><span>En-tête</span><span class="free-page-color-combo">${colorPresetButtonsHtml('tableHeaderColor', INLINE_TEXT_COLORS, block.headerColor || '#e8c66a')}<input class="free-page-color-custom" type="color" value="${_esc(block.headerColor || '#e8c66a')}" data-fpe-inspector-field="tableHeaderColor"></span></div>
-    <div class="free-page-control-row"><span>Bordures</span><span class="free-page-color-combo">${colorPresetButtonsHtml('tableBorderColor', SHAPE_COLOR_PRESETS, block.borderColor || '#263957')}<input class="free-page-color-custom" type="color" value="${_esc(block.borderColor || '#263957')}" data-fpe-inspector-field="tableBorderColor"></span></div>
+    ${colorDisclosureHtml(editor, 'tableTextColor', 'Texte', block.textColor || '#c8d4e8', { fallback: '#c8d4e8' })}
+    ${colorDisclosureHtml(editor, 'tableHeaderColor', 'En-tete', block.headerColor || '#e8c66a', { fallback: '#e8c66a' })}
+    ${colorDisclosureHtml(editor, 'tableBorderColor', 'Bordures', block.borderColor || '#263957', { fallback: '#263957' })}
   </div>`;
   return '';
 }
@@ -4444,7 +4729,10 @@ function inspectorChartSheetHtml(block) {
 }
 
 function chartCell(column, item, index, paletteName) {
-  if (column === 'color') return `<input type="color" data-fpe-inspector-chart-field="color" data-index="${index}" value="${_esc(chartColor(item.color, index, paletteName))}">`;
+  if (column === 'color') {
+    const color = chartColor(item.color, index, paletteName);
+    return `<label class="free-page-chart-color-cell" style="--fpe-dot:${_esc(color)}"><input type="color" data-fpe-inspector-chart-field="color" data-index="${index}" value="${_esc(color)}" title="Choisir visuellement"><input class="free-page-color-hex" type="text" data-fpe-inspector-chart-field="color" data-index="${index}" value="${_esc(color)}" spellcheck="false" inputmode="text" aria-label="Code hexadécimal"></label>`;
+  }
   if (column === 'value') return `<input type="number" min="0" max="999" data-fpe-inspector-chart-field="value" data-index="${index}" value="${_esc(item.value)}">`;
   if (column.startsWith('value')) return `<input type="number" min="0" max="999" data-fpe-inspector-chart-field="${_esc(column)}" data-index="${index}" value="${_esc(item[column] ?? '')}" placeholder="+ valeur">`;
   if (column === 'note') return `<input data-fpe-inspector-chart-field="note" data-index="${index}" value="${_esc(item.note || '')}">`;
@@ -4511,18 +4799,19 @@ function positionPopoverHtml() {
   return anchors.map(([anchor, label]) => `<button type="button" class="free-page-position-choice free-page-position-choice--${anchor}" data-fpe-action="position-${anchor}" title="${_esc(label)}" aria-label="${_esc(label)}"><span></span></button>`).join('');
 }
 
-function textColorPickerHtml(selected = '#eef2fb', { compact = false } = {}) {
-  const safeSelected = safeColor(selected, '#eef2fb').toLowerCase();
+function colorPickerHtml(field, selected = '#eef2fb', { compact = false, fallback = '#eef2fb', pageField = false } = {}) {
+  const safeSelected = safeColor(selected, fallback).toLowerCase();
+  const fieldAttr = pageField ? 'data-fpe-page-field' : 'data-fpe-inspector-field';
   const swatches = TEXT_SWATCH_COLUMNS.map((row) => row.map((color) => {
-    const safe = safeColor(color, '#eef2fb');
-    return `<button type="button" class="free-page-text-swatch ${safe.toLowerCase() === safeSelected ? 'is-active' : ''}" data-fpe-inspector-field="textColor" value="${_esc(safe)}" style="--fpe-dot:${_esc(safe)}" title="${_esc(safe)}" aria-label="${_esc(safe)}"></button>`;
+    const safe = safeColor(color, fallback);
+    return `<button type="button" class="free-page-text-swatch ${safe.toLowerCase() === safeSelected ? 'is-active' : ''}" ${fieldAttr}="${_esc(field)}" value="${_esc(safe)}" style="--fpe-dot:${_esc(safe)}" title="${_esc(safe)}" aria-label="${_esc(safe)}"></button>`;
   }).join('')).join('');
   const recent = TEXT_RECENT_COLORS.map((color) => {
-    const safe = safeColor(color, '#eef2fb');
+    const safe = safeColor(color, fallback);
     const none = safe === '#eef2fb' ? ' title="Blanc"' : '';
-    return `<button type="button" class="free-page-color-dot ${safe.toLowerCase() === safeSelected ? 'is-active' : ''}" data-fpe-inspector-field="textColor" value="${_esc(safe)}" style="--fpe-dot:${_esc(safe)}"${none}></button>`;
+    return `<button type="button" class="free-page-color-dot ${safe.toLowerCase() === safeSelected ? 'is-active' : ''}" ${fieldAttr}="${_esc(field)}" value="${_esc(safe)}" style="--fpe-dot:${_esc(safe)}"${none}></button>`;
   }).join('');
-  const safeValue = safeColor(selected, '#eef2fb');
+  const safeValue = safeColor(selected, fallback);
   return `<div class="free-page-color-picker ${compact ? 'is-compact' : ''}" data-fpe-color-picker>
   <div class="free-page-color-tabs">
     <button type="button" class="is-active" data-fpe-color-tab="samples">Échantillons</button>
@@ -4532,25 +4821,43 @@ function textColorPickerHtml(selected = '#eef2fb', { compact = false } = {}) {
     <div class="free-page-text-swatch-grid">${swatches}</div>
     <div class="free-page-color-edit-row">
       <span class="free-page-color-preview" style="--fpe-dot:${_esc(safeValue)}"></span>
-      <input class="free-page-color-hex" type="text" value="${_esc(safeValue)}" data-fpe-inspector-field="textColor" spellcheck="false" inputmode="text">
-      <input type="color" value="${_esc(safeValue)}" data-fpe-inspector-field="textColor" title="Couleur personnalisée">
+      <input class="free-page-color-hex" type="text" value="${_esc(safeValue)}" ${fieldAttr}="${_esc(field)}" spellcheck="false" inputmode="text" aria-label="Code hexadécimal">
+      <input type="color" value="${_esc(safeValue)}" ${fieldAttr}="${_esc(field)}" title="Choisir visuellement">
     </div>
     <span class="free-page-color-subtitle">Couleurs récentes</span>
     <div class="free-page-color-recent-row">${recent}</div>
     <span class="free-page-color-subtitle">Palette de création</span>
-    <div class="free-page-color-recent-row">${TEXT_COLOR_PRESETS.slice(0, 4).map((color) => `<button type="button" class="free-page-color-dot" data-fpe-inspector-field="textColor" value="${_esc(color.value)}" style="--fpe-dot:${_esc(color.value)}" title="${_esc(color.name)}"></button>`).join('')}</div>
+    <div class="free-page-color-recent-row">${TEXT_COLOR_PRESETS.slice(0, 4).map((color) => `<button type="button" class="free-page-color-dot" ${fieldAttr}="${_esc(field)}" value="${_esc(color.value)}" style="--fpe-dot:${_esc(color.value)}" title="${_esc(color.name)}"></button>`).join('')}</div>
   </div>
   <div class="free-page-color-panel free-page-color-panel--advanced" data-fpe-color-panel="advanced" hidden>
-    <div class="free-page-color-advanced-plane"></div>
-    <input class="free-page-color-wide" type="color" value="${_esc(safeValue)}" data-fpe-inspector-field="textColor">
+    <label class="free-page-color-advanced-plane" style="--fpe-dot:${_esc(safeValue)}" title="Ouvrir le sélecteur visuel">
+      <input class="free-page-color-wide" type="color" value="${_esc(safeValue)}" ${fieldAttr}="${_esc(field)}" aria-label="Ouvrir le sélecteur visuel">
+      <span>Choisir visuellement</span>
+    </label>
     <div class="free-page-color-edit-row">
       <span class="free-page-color-preview" style="--fpe-dot:${_esc(safeValue)}"></span>
-      <input class="free-page-color-hex" type="text" value="${_esc(safeValue)}" data-fpe-inspector-field="textColor" spellcheck="false" inputmode="text">
+      <input class="free-page-color-hex" type="text" value="${_esc(safeValue)}" ${fieldAttr}="${_esc(field)}" spellcheck="false" inputmode="text" aria-label="Code hexadécimal">
     </div>
     <span class="free-page-color-subtitle">Couleurs récentes</span>
     <div class="free-page-color-recent-row">${recent}</div>
   </div>
 </div>`;
+}
+
+function colorDisclosureHtml(editor, field, label, selected, { fallback = '#eef2fb' } = {}) {
+  const color = safeColor(selected, fallback);
+  const foldKey = `color-${field}`;
+  return `<details class="free-page-color-disclosure" data-fpe-fold="${_esc(foldKey)}" data-fpe-color-disclosure="${_esc(field)}" ${foldOpenAttr(editor, foldKey)}>
+    <summary>
+      <span>${_esc(label)}</span>
+      <span class="free-page-color-disclosure-value"><i style="--fpe-dot:${_esc(color)}"></i><code>${_esc(color.toUpperCase())}</code><b aria-hidden="true">&#8964;</b></span>
+    </summary>
+    <div class="free-page-color-disclosure-panel">${colorPickerHtml(field, color, { compact: true, fallback })}</div>
+  </details>`;
+}
+
+function textColorPickerHtml(selected = '#eef2fb', options = {}) {
+  return colorPickerHtml('textColor', selected, { ...options, fallback: '#eef2fb' });
 }
 
 function blockTypeLabel(type) { return ({ text: 'Texte', image: 'Image', table: 'Tableau', chart: 'Graphique', shape: 'Forme' })[type] || 'Bloc'; }
@@ -4727,7 +5034,21 @@ function pushHistory(editor, { sync = true } = {}) {
   editor.__freePageUndo.push(snapshot);
   if (editor.__freePageUndo.length > MAX_HISTORY) editor.__freePageUndo.shift();
   editor.__freePageRedo = [];
+  setEditorDirty(editor, true);
   if (sync) syncToolbar(editor);
+}
+
+function setEditorDirty(editor, dirty) {
+  if (!editor) return;
+  editor.dataset.freePageDirty = dirty ? 'true' : 'false';
+  const shell = editor.closest('[data-free-page-shell], .profil-bio-edit, .world-content-editor');
+  const save = shell?.querySelector('[data-free-page-save]');
+  const status = shell?.querySelector('[data-free-page-save-status]');
+  save?.classList.toggle('is-dirty', dirty);
+  if (status) {
+    status.classList.toggle('is-dirty', dirty);
+    status.textContent = dirty ? 'Modifications non enregistrées' : 'Tout est enregistré';
+  }
 }
 
 function scheduleHistory(editor, options = {}) {
@@ -4870,16 +5191,36 @@ function syncInteractionPageEditor(editor) {
       frame: normalizePopupFrame(session.frame, session.layout),
       page: normalizeSingleFreePage(structuredClone(editor.__freePageState)),
     };
+    propagateGroupInteractionInState(session.rootState, block);
     return;
   }
   const block = selectedBlock(editor);
   const popupEditor = editor.querySelector('[data-fpe-popup-editor] [data-free-page-editor]');
   if (!block || !popupEditor?.__freePageState) return;
   block.interaction = { ...normalizeInteraction(block.interaction), page: getFreePageData(popupEditor) };
+  propagateGroupInteraction(editor, block);
 }
 
 function blocksOverlap(a, b) { return a && b && a.id !== b.id && a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
-function groupMembers(editor, block) { return (block?.groupId ? editor.__freePageState.blocks.filter((item) => item.groupId === block.groupId) : [block].filter(Boolean)).filter((item) => !item.locked); }
+function groupMembers(editor, block) { return block?.groupId ? editor.__freePageState.blocks.filter((item) => item.groupId === block.groupId) : [block].filter(Boolean); }
+
+function propagateGroupInteraction(editor, source) {
+  propagateGroupInteractionInState(editor?.__freePageState, source);
+}
+
+function propagateGroupInteractionInState(state, source) {
+  if (!state || !source?.groupId) return;
+  const interaction = structuredClone(normalizeInteraction(source.interaction));
+  state.blocks
+    .filter((item) => item.groupId === source.groupId && item.id !== source.id)
+    .forEach((item) => { item.interaction = structuredClone(interaction); });
+}
+
+function expandedSelectionBlocks(editor, selection = []) {
+  const ids = new Set(selection.map((item) => item.id));
+  const groupIds = new Set(selection.map((item) => item.groupId).filter(Boolean));
+  return editor.__freePageState.blocks.filter((item) => ids.has(item.id) || (item.groupId && groupIds.has(item.groupId)));
+}
 
 function snapUnit(editor) {
   const grid = normalizeDeckGrid(editor.__freePageDeck?.grid);
@@ -4998,6 +5339,40 @@ function moveGroupFromStart(editor, groupStart, dx, dy) {
   });
 }
 
+function resizeSelectionFromStart(editor, groupStart, bounds, dx, dy, dir, pageHeight) {
+  const next = { ...bounds, type: 'shape', rotation: 0 };
+  resizeBlockFromStart(editor, next, { ...bounds, rotation: 0 }, dx, dy, dir, pageHeight);
+  const scaleX = next.w / Math.max(1, bounds.w);
+  const scaleY = next.h / Math.max(1, bounds.h);
+  groupStart.forEach((start) => {
+    const item = editor.__freePageState.blocks.find((candidate) => candidate.id === start.id);
+    if (!item) return;
+    item.x = Math.round(next.x + (start.x - bounds.x) * scaleX);
+    item.y = Math.round(next.y + (start.y - bounds.y) * scaleY);
+    item.w = Math.max(8, Math.round(start.w * scaleX));
+    item.h = Math.max(8, Math.round(start.h * scaleY));
+  });
+}
+
+function rotateSelectionFromStart(editor, groupStart, bounds, delta) {
+  const centerX = bounds.x + bounds.w / 2;
+  const centerY = bounds.y + bounds.h / 2;
+  const angle = delta * Math.PI / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  groupStart.forEach((start) => {
+    const item = editor.__freePageState.blocks.find((candidate) => candidate.id === start.id);
+    if (!item) return;
+    const itemCenterX = start.x + start.w / 2;
+    const itemCenterY = start.y + start.h / 2;
+    const relX = itemCenterX - centerX;
+    const relY = itemCenterY - centerY;
+    item.x = Math.round(centerX + relX * cos - relY * sin - start.w / 2);
+    item.y = Math.round(centerY + relX * sin + relY * cos - start.h / 2);
+    item.rotation = normalizeRotation(start.rotation + delta);
+  });
+}
+
 function popupTemplateDefs() {
   return [
     ['center', 'Fenetre centree', 'Une fenetre classique au centre de la composition.'],
@@ -5040,7 +5415,7 @@ function openFreePagePreview(editor) {
       <button type="button" class="free-page-popup-close" data-fpe-preview-close aria-label="Fermer">&times;</button>
     </div>
     <div class="free-page-preview-reader">
-      <div class="free-page-reader free-page-reader--preview" data-free-page-reader data-free-page-current-slide="${_esc(slide.id)}" data-free-page-previous-slide="" data-free-page-deck="${_esc(JSON.stringify(deck))}" style="--free-page-ratio:${PAGE_WIDTH}/${page.height}">
+      <div class="free-page-reader free-page-reader--preview" data-free-page-reader data-free-page-current-slide="${_esc(slide.id)}" data-free-page-previous-slide="" data-free-page-deck="${_esc(JSON.stringify(deck))}" style="--free-page-ratio:${page.width}/${page.height}">
         ${readerStageHtml(deck, slide)}
         ${readerNavHtml(deck, slide.id)}
       </div>
@@ -5164,6 +5539,7 @@ function finishInlinePopupEdit(editor) {
     frame: normalizePopupFrame(session.frame, session.layout),
     page,
   };
+  propagateGroupInteractionInState(rootState, block);
   editor.__freePageState = rootState;
   const slide = editor.__freePageDeck?.slides?.find((item) => item.id === session.rootSlideId);
   if (slide) slide.page = rootState;
@@ -5195,6 +5571,7 @@ function choosePopupTemplate(editor, templateId) {
   pushHistory(editor);
   const layout = POPUP_LAYOUTS.has(templateId) ? templateId : 'center';
   block.interaction = { ...normalizeInteraction(block.interaction), type: 'popup', layout, frame: defaultPopupFrame(layout), page: defaultPopupPage(templateId) };
+  propagateGroupInteraction(editor, block);
   closeFreePageModal();
   startInlinePopupEdit(editor, block);
 }
@@ -5209,6 +5586,7 @@ function runPopupModalAction(editor, action) {
   if (action === 'remove') {
     pushHistory(editor);
     block.interaction = { ...normalizeInteraction(block.interaction), type: 'none', page: null };
+    propagateGroupInteraction(editor, block);
     closeFreePageModal();
     renderBlocks(editor, block.id);
     renderInspector(editor);
@@ -5221,6 +5599,7 @@ function runPopupModalAction(editor, action) {
     pushHistory(editor);
     const current = normalizeInteraction(block.interaction);
     block.interaction = { ...current, type: 'popup', frame: current.frame, page };
+    propagateGroupInteraction(editor, block);
     closeFreePageModal();
     renderBlocks(editor, block.id);
     renderInspector(editor);
@@ -5378,7 +5757,7 @@ function renderReaderSlide(reader, deck, slide, previousId = '') {
   const page = normalizeSingleFreePage(slide.page);
   reader.dataset.freePageCurrentSlide = slide.id;
   reader.dataset.freePagePreviousSlide = previousId || '';
-  reader.style.setProperty('--free-page-ratio', `${PAGE_WIDTH}/${page.height}`);
+  reader.style.setProperty('--free-page-ratio', `${page.width}/${page.height}`);
   reader.innerHTML = `${readerStageHtml(deck, slide, previousId)}${readerNavHtml(deck, slide.id, previousId)}`;
 }
 

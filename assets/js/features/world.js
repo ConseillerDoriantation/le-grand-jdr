@@ -10,7 +10,9 @@ import { tryDoc } from '../shared/crud.js';
 import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc, _nl2br, _norm } from '../shared/html.js';
-import { richTextContentHtml } from '../shared/rich-text.js';
+import {
+  richTextContentHtml, richTextEditorHtml, bindRichTextEditors, getRichTextHtml,
+} from '../shared/rich-text.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import {
   freePageEditorHtml, bindFreePageEditor, getFreePageData,
@@ -46,12 +48,15 @@ function _contentToHtml(raw) {
   let s = String(raw || '');
   if (!s) return '';
   s = _collapseOverEscape(s);  // soigne les contenus déjà corrompus (affichage ET éditeur)
-  // « Déjà HTML » si présence d'une BALISE *ou* d'une ENTITÉ (&amp; &#39; &eacute;…).
-  // Sans le test d'entité, un contenu rich-text sans balise (ex. une seule ligne
-  // "Tom &amp; Jerry" / "l&#39;épée" produite par l'éditeur) était re-échappé à
-  // chaque rendu → le & devenait &amp; à chaque fois (accumulation "amp;amp;…").
-  const looksHtml = /<[a-z][\s\S]*?>/i.test(s) || /&(#\d+|#x[0-9a-f]+|[a-z][a-z0-9]*);/i.test(s);
-  return looksHtml ? s : _nl2br(s);
+  const hasTag = /<[a-z][\s\S]*?>/i.test(s);
+  if (hasTag) return s;
+
+  // Un ancien texte peut contenir des entités HTML sans aucune balise. Il ne
+  // faut pas le ré-échapper, mais ses retours à la ligne restent bien du texte
+  // et doivent donc devenir des <br> pour être identiques en édition/lecture.
+  const hasEntity = /&(#\d+|#x[0-9a-f]+|[a-z][a-z0-9]*);/i.test(s);
+  if (hasEntity) return s.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r?\n/g, '<br>');
+  return _nl2br(s);
 }
 
 // ── État local ────────────────────────────────────────────────────────────────
@@ -95,8 +100,14 @@ function _ensureWorldReactivity() {
 
 // Texte brut d'une section (deck déporté en priorité, sinon contenu legacy HTML).
 function _sectionPlainSource(s) {
+  if (_sectionContentMode(s) === 'rich') return s?.contenu || '';
   const deck = worldPageFor(s?.id);
   return hasFreePage(deck) ? freePageToLegacyHtml(deck) : (s?.contenu || '');
+}
+
+function _sectionContentMode(s) {
+  if (s?.contentMode === 'rich' || s?.contentMode === 'slides') return s.contentMode;
+  return hasFreePage(worldPageFor(s?.id)) ? 'slides' : 'rich';
 }
 
 // Catégorie par défaut : accueille les sections sans catégorie (legacy / orphelines)
@@ -317,7 +328,7 @@ function _renderSection(s, visibleSections = null) {
         ${STATE.isAdmin && _editingContentId !== s.id ? `
         <div class="world-section-actions">
           <button data-action="worldEditContent" data-id="${s.id}"
-            class="btn btn-gold btn-sm">🖼️ Modifier le contenu</button>
+            class="btn btn-gold btn-sm">${_sectionContentMode(s) === 'slides' ? 'Modifier le diaporama' : 'Modifier le texte'}</button>
           <button data-action="openWorldSectionModal" data-id="${s.id}"
             class="btn btn-outline btn-sm">Réglages</button>
           <button data-action="deleteWorldSection" data-id="${s.id}"
@@ -338,17 +349,33 @@ function _renderSection(s, visibleSections = null) {
 // contenu legacy HTML (rich-text), sinon état vide.
 function _renderSectionBody(s) {
   if (_editingContentId === s.id && STATE.isAdmin) return _renderContentEditor(s);
+  if (_sectionContentMode(s) === 'rich') {
+    if (s.contenu) return richTextContentHtml({ html: _contentToHtml(s.contenu), className: 'world-section-content', attrs: {} });
+    return `<div class="world-empty-copy">Aucun contenu.${STATE.isAdmin ? ' <span>Utilise « Modifier le texte » pour rédiger cette section.</span>' : ''}</div>`;
+  }
   const deck = worldPageFor(s.id);
   if (hasFreePage(deck)) return renderFreePageHtml({ page: deck, className: 'world-free-page' });
-  if (s.contenu) return richTextContentHtml({ html: _contentToHtml(s.contenu), className: 'world-section-content', attrs: {} });
-  return `<div class="world-empty-copy">Aucun contenu.${STATE.isAdmin ? ' <span>Utilise « Modifier le contenu » pour créer une diapo.</span>' : ''}</div>`;
+  return `<div class="world-empty-copy">Aucun contenu.${STATE.isAdmin ? ' <span>Utilise « Modifier le diaporama » pour composer cette section.</span>' : ''}</div>`;
 }
 
 function _renderContentEditor(s) {
+  if (_sectionContentMode(s) === 'rich') {
+    return `<div class="world-content-editor world-content-editor--rich">
+      ${richTextEditorHtml({
+        id: `world-rich-${s.id}`,
+        html: _contentToHtml(s.contenu || ''),
+        placeholder: 'Rédige le contenu de cette section…',
+        minHeight: 360,
+      })}
+      <div class="world-content-editor-bar">
+        <button class="btn btn-outline btn-sm" data-action="worldCancelContent">Annuler</button>
+        <button class="btn btn-gold btn-sm" data-action="worldSaveContent" data-id="${s.id}">Enregistrer le texte</button>
+      </div>
+    </div>`;
+  }
   const deck = worldPageFor(s.id);
-  const legacyHtml = hasFreePage(deck) ? '' : _contentToHtml(s.contenu || '');
   return `<div class="world-content-editor">
-    ${freePageEditorHtml({ id: `world-page-${s.id}`, page: deck, legacyHtml })}
+    ${freePageEditorHtml({ id: `world-page-${s.id}`, page: deck })}
     <div class="world-content-editor-bar">
       <button class="btn btn-outline btn-sm" data-action="worldCancelContent">Annuler</button>
       <button class="btn btn-gold btn-sm" data-action="worldSaveContent" data-id="${s.id}">Enregistrer le contenu</button>
@@ -360,7 +387,10 @@ function _renderContentEditor(s) {
 function _bindWorldContentEditor() {
   if (!_editingContentId) return;
   const host = document.getElementById('world-main-content');
-  if (host) bindFreePageEditor(host);
+  if (!host) return;
+  const section = STORE.sections.find(s => s.id === _editingContentId);
+  if (_sectionContentMode(section) === 'rich') bindRichTextEditors(host);
+  else bindFreePageEditor(host);
 }
 
 function _renderSectionCards(activeSection, visibleSections) {
@@ -422,6 +452,21 @@ function worldCancelContent() {
 }
 
 async function worldSaveContent(id) {
+  const section = STORE.sections.find(s => s.id === id);
+  if (_sectionContentMode(section) === 'rich') {
+    if (!section) return showNotif('Section introuvable.', 'error');
+    section.contenu = getRichTextHtml(`world-rich-${id}`);
+    try {
+      await _save();
+    } catch (e) {
+      console.error('[world rich content save]', e);
+      return showNotif('Le texte n\'a pas pu être enregistré.', 'error');
+    }
+    _editingContentId = null;
+    showNotif('Texte enregistré.', 'success');
+    renderWorld();
+    return;
+  }
   const page = getFreePageData(document.getElementById(`world-page-${id}`));
   if (!page) return showNotif('Éditeur de contenu indisponible.', 'error');
   const fit = await _fitWorldPage(page);
@@ -437,9 +482,6 @@ async function worldSaveContent(id) {
       ? 'Écriture refusée : déploie la règle Firestore « worldPages » (voir docs/firestore-rules.md).'
       : 'Le contenu n\'a pas pu être enregistré.', 'error');
   }
-  // Auto-migration : efface le contenu legacy (HTML) désormais porté par worldPages.
-  const s = STORE.sections.find(x => x.id === id);
-  if (s && s.contenu) { s.contenu = ''; try { await _save(); } catch (_) {} }
   setCachedWorldPage(id, fit.page);
   _editingContentId = null;
   if (fit.shrunk) showNotif('Images recompressées pour tenir dans la limite Firestore.', 'info');
@@ -562,11 +604,18 @@ function openWorldSectionModal(id = null, presetCatId = null) {
       </div>
 
       <div class="mn-field">
-        <label class="mn-label">Contenu <span class="mn-label-hint">édité en diapo depuis la section</span></label>
-        <p class="mn-hint" style="margin:0;font-size:.82rem;color:var(--text-dim)">
-          Après avoir enregistré ces réglages, ouvre la section et clique
-          <strong>« 🖼️ Modifier le contenu »</strong> pour composer la diapo.
-        </p>
+        <label class="mn-label">Présentation du contenu</label>
+        <div class="world-content-mode" role="radiogroup" aria-label="Présentation du contenu">
+          <label class="world-content-mode-option">
+            <input type="radio" name="wi-content-mode" value="rich" ${_sectionContentMode(s) === 'rich' ? 'checked' : ''}>
+            <span><strong>Texte enrichi</strong><small>Lecture fluide pour du lore, des règles ou des notes.</small></span>
+          </label>
+          <label class="world-content-mode-option">
+            <input type="radio" name="wi-content-mode" value="slides" ${_sectionContentMode(s) === 'slides' ? 'checked' : ''}>
+            <span><strong>Diaporama</strong><small>Mise en page libre, images, graphiques et interactions.</small></span>
+          </label>
+        </div>
+        <p class="mn-hint world-content-mode-hint">Le changement de mode conserve les deux versions du contenu.</p>
       </div>
 
       <label style="display:flex;align-items:center;gap:.6rem;
@@ -642,6 +691,8 @@ async function saveWorldSection() {
   const hidden    = document.getElementById('wi-hidden')?.checked || false;
   const categoryId = document.getElementById('wi-categorie')?.value
     || STORE.categories[0]?.id || DEFAULT_CAT.id;
+  const contentMode = document.querySelector('input[name="wi-content-mode"]:checked')?.value === 'slides'
+    ? 'slides' : 'rich';
 
   // Résoudre l'image : nouveau crop > existante > effacée
   const existing = STORE.sections.find(s => s.id === id);
@@ -654,7 +705,7 @@ async function saveWorldSection() {
   // Le contenu n'est plus édité ici (diapo via « Modifier le contenu ») : on
   // préserve l'éventuel contenu legacy HTML jusqu'à sa migration en diapo.
   const contenu = existing?.contenu || '';
-  const section = { id, titre, icone, contenu, imageUrl, visible: !hidden, categoryId };
+  const section = { id, titre, icone, contenu, imageUrl, visible: !hidden, categoryId, contentMode };
 
   if (isNew) {
     STORE.sections.push(section);
