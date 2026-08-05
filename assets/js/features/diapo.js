@@ -16,6 +16,7 @@ import PAGES from './pages.js';
 import { registerActions } from '../core/actions.js';
 import { getDocData, saveDoc } from '../data/firestore.js';
 import { showNotif } from '../shared/notifications.js';
+import { confirmModal } from '../shared/modal.js';
 import {
   freePageEditorHtml, bindFreePageEditor, getFreePageData,
   renderFreePageHtml, hasFreePage, compressFreePageImages,
@@ -52,12 +53,15 @@ async function renderDiapo() {
 function _renderShell() {
   const isAdmin = STATE.isAdmin;
   if (_editing && isAdmin) {
-    return `<div class="diapo-shell is-editing" id="diapo-root">
+    return `<div class="diapo-shell is-editing" id="diapo-root" data-free-page-shell>
       <div class="diapo-topbar">
         <div class="diapo-title"><span class="diapo-kicker">Diaporama</span><h1>Édition</h1></div>
         <div class="diapo-actions">
+          <span class="diapo-save-status" data-free-page-save-status>Tout est enregistré</span>
           <button class="btn btn-outline btn-sm" data-action="diapoCancel">Annuler</button>
-          <button class="btn btn-gold btn-sm" data-action="diapoSave">Enregistrer</button>
+          <button class="btn btn-gold diapo-save-btn" data-action="diapoSave" data-free-page-save title="Enregistrer (Ctrl+S)">
+            <span aria-hidden="true">💾</span><span>Enregistrer les modifications</span><kbd>Ctrl S</kbd>
+          </button>
         </div>
       </div>
       ${freePageEditorHtml({ id: 'diapo-editor', page: _deck })}
@@ -99,7 +103,12 @@ function diapoFullscreen() {
   catch { showNotif('Plein écran indisponible.', 'info'); }
 }
 
-function diapoCancel() {
+async function diapoCancel() {
+  const editor = document.getElementById('diapo-editor');
+  if (editor?.dataset.freePageDirty === 'true') {
+    const confirmed = await confirmModal('Des modifications ne sont pas enregistrées. Quitter l’éditeur et les perdre ?');
+    if (!confirmed) return;
+  }
   _editing = false;
   renderDiapo();
 }

@@ -5530,11 +5530,61 @@ body.ach-dragging * { cursor:grabbing !important; }
 /* Contenu « diapo » (free-page) du Guide : rendu lecteur + éditeur plein cadre */
 .world-free-page { margin: 0 auto; }
 .world-content-editor { display: flex; flex-direction: column; gap: 10px; }
+.world-content-editor--rich .rte-editor {
+  min-height: 360px;
+  background: rgba(5, 11, 20, .54);
+}
 .world-content-editor-bar {
   display: flex; justify-content: flex-end; gap: 8px;
   padding-top: 10px; border-top: 1px solid var(--border);
   position: sticky; bottom: 0;
   background: linear-gradient(180deg, transparent, var(--bg-card) 40%);
+}
+
+.world-content-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.world-content-mode-option {
+  position: relative;
+  display: block;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.world-content-mode-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.world-content-mode-option > span {
+  display: flex;
+  min-height: 74px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(8, 15, 26, .58);
+  transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+}
+
+.world-content-mode-option strong { color: var(--text); font-size: .88rem; }
+.world-content-mode-option small { color: var(--text-dim); font-size: .76rem; line-height: 1.35; }
+.world-content-mode-option:hover > span { border-color: rgba(106, 167, 255, .45); }
+.world-content-mode-option input:checked + span {
+  border-color: #6aa7ff;
+  background: rgba(61, 116, 204, .14);
+  box-shadow: inset 3px 0 #6aa7ff;
+}
+.world-content-mode-hint { margin: 7px 0 0; color: var(--text-dim); font-size: .76rem; }
+
+@media (max-width: 620px) {
+  .world-content-mode { grid-template-columns: 1fr; }
 }
 
 .world-section-content {
