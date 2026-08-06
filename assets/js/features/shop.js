@@ -281,7 +281,9 @@ function _visibleCats() {
 function _visibleItems() {
   if (STATE.isAdmin) return _items;
   const hidden = new Set(_cats.filter(c => c.masquee).map(c => c.id));
-  return _items.filter(i => !hidden.has(i.categorieId));
+  // Un article `masque` (par le MJ) est caché aux joueurs, comme une catégorie
+  // masquée. Il reste récupérable en butin et revendable (prix stocké sur l'objet).
+  return _items.filter(i => !i.masque && !hidden.has(i.categorieId));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1502,7 +1504,7 @@ function _renderItemCard(item, tplKey, itemIdx) {
       <div class="sh-item-body" data-sh-action="openDetail" data-id="${item.id}">
         <div class="sh-item-row1">
           <div class="sh-item-name-wrap">
-            <span class="sh-item-name">${_esc(item.nom || '?')}</span>
+            <span class="sh-item-name">${edit && item.masque ? '<span title="Masqué aux joueurs">🙈</span> ' : ''}${_esc(item.nom || '?')}</span>
             <span class="sh-item-type">${typeLine}</span>
           </div>
           ${rareteNum ? `<span class="sh-item-rare-pill" style="color:${rareteColor};border-color:${rareteColor};background:${rareteColor}1a">${_esc(rareteName)}</span>` : ''}
@@ -1556,6 +1558,8 @@ function _renderItemCard(item, tplKey, itemIdx) {
         <div class="sh-item-actions" data-sh-action="stop">
           ${epuise ? `<button class="btn-icon sh-restock-btn" title="Restocker +1 (MJ)" aria-label="Restocker"
             data-sh-action="restockItem" data-id="${item.id}">📦</button>` : ''}
+          <button class="btn-icon" title="${item.masque ? 'Rendre visible aux joueurs' : 'Masquer aux joueurs'}" aria-label="${item.masque ? 'Rendre visible' : 'Masquer'}"
+            data-sh-action="toggleItemVis" data-id="${item.id}">${item.masque ? '🙈' : '👁️'}</button>
           <button class="btn-icon" title="Modifier l'article" aria-label="Modifier l'article" data-sh-action="openItemModal" data-id="${item.id}">✏️</button>
           <button class="btn-icon" title="Supprimer l'article" aria-label="Supprimer l'article" data-sh-action="deleteItem" data-id="${item.id}">🗑️</button>
         </div>
@@ -1651,7 +1655,7 @@ function _renderItemRow(item, tplKey, itemIdx) {
         title="${_isFav(item.id) ? 'Retirer des favoris' : 'Ajouter aux favoris'}" aria-label="Favori">${_isFav(item.id) ? '★' : '☆'}</button>
       <span class="sh-list-thumb" style="${imgBg}">${item.image ? '' : (cat?.emoji || _catEmoji(cat?.nom || item.type || ''))}</span>
       <div class="sh-list-name">
-        <span class="sh-list-name-txt">${_esc(item.nom || '?')}</span>
+        <span class="sh-list-name-txt">${edit && item.masque ? '<span title="Masqué aux joueurs">🙈</span> ' : ''}${_esc(item.nom || '?')}</span>
         <span class="sh-list-type">${typeLine}</span>
       </div>
       <div class="sh-list-info">${infoBits.join('')}</div>
@@ -1667,6 +1671,8 @@ function _renderItemRow(item, tplKey, itemIdx) {
         ${hasChar ? `<button class="sh-try-cta sh-try-cta--icon" data-sh-action="openAtelier" data-id="${item.id}" title="Essayer dans l'Atelier" aria-label="Essayer dans l'Atelier">🪄</button>` : ''}
         ${buyBtnHtml}
         ${edit ? `
+          <button class="btn-icon" title="${item.masque ? 'Rendre visible aux joueurs' : 'Masquer aux joueurs'}" aria-label="${item.masque ? 'Rendre visible' : 'Masquer'}"
+            data-sh-action="toggleItemVis" data-id="${item.id}">${item.masque ? '🙈' : '👁️'}</button>
           <button class="btn-icon" title="Modifier l'article" aria-label="Modifier l'article" data-sh-action="openItemModal" data-id="${item.id}">✏️</button>
           <button class="btn-icon" title="Supprimer l'article" aria-label="Supprimer l'article" data-sh-action="deleteItem" data-id="${item.id}">🗑️</button>
         ` : ''}
@@ -2008,6 +2014,11 @@ async function buyItem(itemId) {
 
   const item = _items.find(i => i.id === itemId);
   if (!item) return;
+  // Un article masqué (ou d'une catégorie masquée) n'est pas achetable par un
+  // joueur — garde UI, la vraie protection reste les règles Firestore.
+  if (!STATE.isAdmin && !_visibleItems().some(i => i.id === itemId)) {
+    showNotif('Cet article n’est pas disponible.', 'error'); return;
+  }
 
   const dispo    = (item.dispo !== undefined && item.dispo !== '') ? parseInt(item.dispo) : null;
   const illimite = dispo === null || dispo < 0;
@@ -2145,6 +2156,17 @@ export async function restockShopItem(itemId) {
     await updateInCol('shop', itemId, { dispo: cur + 1 });
     shopItem.dispo = cur + 1;
   }
+}
+
+// MJ : bascule la visibilité d'un article aux joueurs (un clic, sans modale).
+// Retourne le nouvel état `masque` pour le feedback appelant.
+export async function toggleShopItemVisibility(itemId) {
+  const shopItem = _items.find(i => i.id === itemId);
+  if (!shopItem) return null;
+  const next = !shopItem.masque;
+  await updateInCol('shop', itemId, { masque: next });
+  shopItem.masque = next;
+  return next;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2881,6 +2903,13 @@ function _siBuildTabContent(tab, tpl, item, tplKey) {
       : 'Place l\'article dans le filtre « Nouveautés » pendant 2 semaines, puis se désactive seul.';
     return `<div class="si-meta-grid">
       <label class="si-meta-row">
+        <input type="checkbox" id="si-masque" ${item?.masque ? 'checked' : ''}>
+        <span>
+          <strong>🙈 Masquer aux joueurs</strong>
+          <em>L'article n'apparaît plus dans la boutique pour les joueurs (visible du MJ). Reste récupérable en butin.</em>
+        </span>
+      </label>
+      <label class="si-meta-row">
         <input type="checkbox" id="si-new" ${newActive ? 'checked' : ''}>
         <span>
           <strong>✨ Nouveauté (2 semaines)</strong>
@@ -3447,6 +3476,8 @@ async function saveShopItem(itemId) {
     if (dmgProfile) data.damageProfile = dmgProfile;
     // Flag consommable (item-level) : retire 1 exemplaire à chaque usage d'action
     data.consommable = !!document.getElementById('si-consommable')?.checked;
+    // Masqué aux joueurs (MJ) — confort d'affichage, cf. _visibleItems.
+    data.masque = !!document.getElementById('si-masque')?.checked;
 
     // Nouveauté : toggle → fenêtre de 2 semaines (newUntil). On ne ré-arme la
     // fenêtre que si elle n'est pas déjà active (éditer un item en cours de
@@ -4109,6 +4140,14 @@ Object.assign(shHandlers, {
     const itemId = el.dataset.id; if (!itemId) return;
     await restockShopItem(itemId);
     showNotif('📦 Stock +1', 'success');
+    renderShop();
+  },
+  toggleItemVis:  async (el, ev) => {
+    ev?.stopPropagation?.();
+    if (!STATE.isAdmin) return;
+    const itemId = el.dataset.id; if (!itemId) return;
+    const masque = await toggleShopItemVisibility(itemId);
+    showNotif(masque ? '🙈 Article masqué aux joueurs' : '👁️ Article visible', masque ? 'info' : 'success');
     renderShop();
   },
   // Tweaks d'affichage (lot 7)
