@@ -38,7 +38,7 @@ import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
   fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath, fogUndo, fogRedo,
 } from './vtt-fog.js';
-import { openModal, closeModalDirect, confirmModal, updateModalContent, promptModal } from '../../shared/modal.js';
+import { openModal, closeModalDirect, confirmModal, updateModalContent, promptModal, setModalCloseGuard } from '../../shared/modal.js';
 import { _esc, _norm, _searchIncludes, appSplashHtml, loadingHtml, normalizeImageUrl } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
@@ -1736,6 +1736,7 @@ function _aimCancel() {
 // ── Portée de mouvement ─────────────────────────────────────────────
 function _showMoveRange(t) {
   _clearHL(); if (!VS.activePage) return;
+  const moveTokenId = t.id;
   const K=window.Konva, ld=_live(t);
   const inCombat = !!VS.session?.combat?.active;
   const maxMvt = (ld.displayMovement??6) + (t.bonusMvt||0);
@@ -1777,7 +1778,17 @@ function _showMoveRange(t) {
       }
       if (_mtCtx) { e.cancelBubble = true; return; }
       e.cancelBubble = true;
-      if (VS.selected) await _moveTo(VS.selected, tc, tr);
+      const moveToken = VS.tokens[moveTokenId]?.data;
+      if (!moveToken || !_canControlToken(moveToken)) {
+        _clearHL();
+        showNotif('Tu ne peux pas déplacer ce token.', 'info');
+        return;
+      }
+      // La portée appartient au token qui l'a générée. Une cible d'attaque peut
+      // temporairement remplacer VS.selected : elle ne doit jamais devenir le
+      // token déplacé quand le joueur clique ensuite sur une case bleue.
+      if (VS.selected !== moveTokenId) _select(moveTokenId);
+      await _moveTo(moveTokenId, tc, tr);
     };
     rect.on('click', e => { if (e.evt.button!==0) return; moveSelectedHere(e); });
     rect.on('contextmenu', e => { e.evt.preventDefault(); moveSelectedHere(e); });
@@ -4864,9 +4875,10 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   openModal('⚔️ Action tactique', `
     <div class="vtt-form vtt-aopt-modal vtt-action-modal">${modalInnerHtml}
       <div class="vtt-aopt-footer">
-        <button class="btn-secondary" data-action="close-modal">Annuler</button>
+        <button class="btn-secondary" data-vtt-fn="_closeActionModal">Annuler</button>
       </div>
     </div>`);
+  setModalCloseGuard(() => { _restoreAttackSourceSelection(); return false; });
   // Marque #modal-box pour le styling spécifique (plus fiable que :has() seul).
   // Nettoyé à chaque réouverture (au cas où) et au close via observer.
   const box = document.getElementById('modal-box');
@@ -5388,6 +5400,9 @@ function _vttPickOpt(srcId, tgtId, idx) {
         <button type="button" class="vtt-atk-launch" data-vtt-fn="_vttRollAttack">${btnLabel}</button>
       </footer>
     </div>`);
+  // Toute fermeture du sélecteur (bouton, croix, Échap ou clic sur l'overlay)
+  // rend la sélection au lanceur. La cible n'est qu'un contexte temporaire.
+  setModalCloseGuard(() => { _restoreAttackSourceSelection(); return false; });
   // Cette modale (jet) n'est PAS le grand sélecteur d'actions : on bascule sur une
   // largeur ajustée au formulaire (.modal--atk) et on retire la large .modal--aopt
   // (héritée car l'overlay n'est pas masqué entre les deux) → plus de boîte 808px
@@ -5396,8 +5411,13 @@ function _vttPickOpt(srcId, tgtId, idx) {
   if (_mb) { _mb.classList.remove('modal--aopt'); _mb.classList.add('modal--atk'); }
 }
 
-function _vttCancelAtk() { _atkCtx=null; closeModalDirect(); }
-function _closeActionModal() { closeModalDirect(); }
+function _restoreAttackSourceSelection() {
+  const srcId = _attackSrc;
+  const src = VS.tokens[srcId]?.data;
+  if (srcId && src && _canControlToken(src) && VS.selected !== srcId) _select(srcId);
+}
+function _vttCancelAtk() { _atkCtx=null; _restoreAttackSourceSelection(); closeModalDirect(); }
+function _closeActionModal() { _restoreAttackSourceSelection(); closeModalDirect(); }
 
 /** Affiche le sélecteur d'élément pour une arme magique. */
 function _vttPickElement(srcId, tgtId, optIdx, elementId) {
