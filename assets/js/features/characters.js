@@ -18,6 +18,7 @@ import {
 } from '../shared/char-stats.js';
 import { getCharacterRules } from '../shared/character-rules.js';
 import { isFeatureEnabled } from '../shared/features.js';
+import { recordRecentNavigation } from '../shared/recent-navigation.js';
 import {
   recipeBookButton, openCharacterRecipeBook,
 } from './recipes.js';
@@ -102,6 +103,10 @@ import { registerActions } from '../core/actions.js';
 // URL de la fiche : #characters/<idPerso>/<onglet> — permet le clic molette sur
 // un onglet (nouvel onglet navigateur sur CE perso) et le partage d'un lien direct.
 import { setRouteSub } from '../shared/route.js';
+import {
+  captureViewContext,
+  restoreViewContextAfterRender,
+} from '../shared/view-context.js';
 
 import {
   inlineEditText, inlineEditNum, inlineEditChip,
@@ -957,6 +962,11 @@ async function _removeCharTitle(btn) {
 function renderCharSheet(c, keepTab) {
   const area = document.getElementById('char-sheet-area');
   if (!area) return;
+  if (c?.id) recordRecentNavigation({ type: 'character', id: c.id, title: c.nom || '' });
+  const previousCharId = charSession.getCurrentChar()?.id;
+  const sheetViewContext = previousCharId === c?.id
+    ? captureViewContext(area, { includeWindow: true, includeFocus: true })
+    : null;
   applyActiveBuild(c);
   const canEdit = STATE.isAdmin || c.uid === STATE.user?.uid;
 
@@ -1008,6 +1018,11 @@ function renderCharSheet(c, keepTab) {
   document.querySelector('[data-xp-input]')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); addXpDelta(e.currentTarget.dataset.charId); }
   });
+  restoreViewContextAfterRender(area, sheetViewContext, {
+    includeWindow: true,
+    includeFocus: true,
+    shouldRestore: () => charSession.getCurrentChar()?.id === c.id,
+  });
 }
 
 
@@ -1023,6 +1038,9 @@ function _renderTabV3(tab, c, canEdit) {
   const area = document.getElementById('char-tab-content');
   if (!area) return;
   const samePanel = area.dataset.renderedTab === tab && area.dataset.renderedCharId === String(c?.id || '');
+  const viewContext = samePanel
+    ? captureViewContext(area, { includeFocus: true })
+    : null;
   const savedScroll = samePanel ? _readTabScroll(area) : null;
   if (samePanel && savedScroll > 0 && c?.id) _scrollByTab.set(_scrollKey(c.id, tab), savedScroll);
   const sub = getCurrentJournalSub() || 'notes';
@@ -1055,6 +1073,13 @@ function _renderTabV3(tab, c, canEdit) {
       }
     });
   }
+  restoreViewContextAfterRender(area, viewContext, {
+    includeFocus: true,
+    shouldRestore: () => (
+      charSession.getCurrentChar()?.id === c.id
+      && charSession.getCurrentCharTab() === tab
+    ),
+  });
   if (samePanel && savedScroll != null) _restoreTabScroll(savedScroll);
 }
 

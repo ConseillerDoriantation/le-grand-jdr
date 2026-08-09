@@ -662,4 +662,4 @@ registerActions({
 });
 
 // Ancien lien conservé uniquement pour rediriger les favoris et onglets déjà ouverts.
-PAGES.sessions = () => navigate('dashboard');
+PAGES.sessions = () => navigate('dashboard', { historyMode: 'replace' });

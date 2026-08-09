@@ -43,5 +43,5 @@ export function setRouteSub(page, sub = '') {
   if (route.page !== page) return; // page changée entre-temps → ne rien écraser
   const next = _sub(sub);
   if (route.sub === next) return;
-  history.replaceState(null, '', routeUrl(page, next));
+  history.pushState(null, '', routeUrl(page, next));
 }

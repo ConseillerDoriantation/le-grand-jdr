@@ -3,6 +3,10 @@
 // ══════════════════════════════════════════════
 
 import { _esc } from './html.js';
+import {
+  captureViewContext,
+  restoreViewContextAfterRender,
+} from './view-context.js';
 
 const _modalStack = [];
 let _activeDismiss = null;
@@ -114,14 +118,19 @@ document.addEventListener('keydown', (e) => {
 });
 
 export function openModal(title, bodyHtml, opts = {}) {
+  const bodyEl  = document.getElementById('modal-body');
+  const overlay = document.getElementById('modal-overlay');
+  const bar = document.getElementById('modal-title');
+  const isSameOpenModal = overlay?.classList.contains('show') && bar?.dataset.title === title;
+  const viewContext = isSameOpenModal ? captureViewContext(bodyEl, { includeFocus: true }) : null;
+
   _dismissAllLayers();
   _closeGuard = null;   // nouvelle modale de base → aucun garde hérité
   _a11yOnShow();
   _applyModalHeader(title, opts);
-  const bodyEl  = document.getElementById('modal-body');
-  const overlay = document.getElementById('modal-overlay');
   if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
   overlay?.classList.add('show');
+  restoreViewContextAfterRender(bodyEl, viewContext, { includeFocus: true });
 }
 
 export function pushModal(title, bodyHtml, restore = null, opts = {}) {
@@ -135,6 +144,7 @@ export function pushModal(title, bodyHtml, restore = null, opts = {}) {
     _modalStack.push({
       title: bar?.dataset.title || '',   // titre brut (cf. _applyModalHeader)
       body: bodyEl.innerHTML || '',
+      viewContext: captureViewContext(bodyEl, { includeFocus: true }),
       restore,
       dismiss: _activeDismiss,
     });
@@ -163,6 +173,7 @@ export function popModal() {
   const bodyEl  = document.getElementById('modal-body');
   _applyModalHeader(previous.title);
   if (bodyEl)  bodyEl.innerHTML    = previous.body;
+  restoreViewContextAfterRender(bodyEl, previous.viewContext, { includeFocus: true });
   _activeDismiss = previous.dismiss || null;
   if (typeof previous.restore === 'function') {
     previous.restore();
@@ -171,8 +182,10 @@ export function popModal() {
 
 export function updateModalContent(title, bodyHtml, opts = {}) {
   const bodyEl  = document.getElementById('modal-body');
+  const viewContext = captureViewContext(bodyEl, { includeFocus: true });
   _applyModalHeader(title, opts);
   if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
+  restoreViewContextAfterRender(bodyEl, viewContext, { includeFocus: true });
 }
 
 // Ferme seulement si clic sur l'overlay lui-même (pas sur la modal)

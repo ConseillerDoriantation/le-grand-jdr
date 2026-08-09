@@ -2673,3 +2673,31 @@ select.input-field, select.input-sm { cursor:pointer; }
     margin: 0 !important;
   }
 }
+/* Navigation SPA : conserve la page courante jusqu'au prochain rendu. */
+.main-content.is-page-transitioning {
+  position: relative;
+  pointer-events: none;
+  cursor: progress;
+}
+
+.main-content.is-page-transitioning::after {
+  content: '';
+  position: fixed;
+  z-index: 10000;
+  top: 0;
+  left: var(--sidebar-width, 0px);
+  width: min(36vw, 420px);
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--accent, #6ea8ff), transparent);
+  animation: page-transition-progress .85s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes page-transition-progress {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(calc(100vw + 110%)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .main-content.is-page-transitioning::after { animation-duration: 1.8s; }
+}

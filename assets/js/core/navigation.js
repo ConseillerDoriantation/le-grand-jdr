@@ -13,6 +13,11 @@ import { dispatchAction, dispatchValueAction } from './actions.js';
 import { isFeatureEnabled, isPremiumFeature, isFeatureAllowedByPlan } from '../shared/features.js';
 import { parseRoute, routeUrl } from '../shared/route.js';
 import { ASSET_VERSION } from './version.js';
+import {
+  captureViewContext,
+  restoreViewContextAfterRender,
+} from '../shared/view-context.js';
+import { recordRecentNavigation } from '../shared/recent-navigation.js';
 
 // ── Carte page → module feature chargé en lazy ────────────────────────────
 // Chaque module est importé une seule fois : le navigateur le met en cache
@@ -41,6 +46,11 @@ const FEATURE_MAP = {
 
 // Garde les modules déjà chargés pour ne pas re-importer
 const _loaded = new Set();
+const _pageViewContexts = new Map();
+
+function _pageViewKey(page) {
+  return `${STATE.adventure?.id || 'global'}:${page}`;
+}
 
 const CHARACTER_DATA_PAGES = new Set([
   'characters',
@@ -163,18 +173,34 @@ export function consumeBootPage(fallback = 'dashboard') {
   return page || fallback;
 }
 
-function _syncHash(page) {
+let _hasSyncedRoute = Boolean(parseRoute().page);
+let _handlingPopState = false;
+
+function _syncHash(page, historyMode = 'push') {
   // Même page → on laisse l'URL intacte : sa sous-route (onglet en cours, ou
   // deep-link pas encore consommé par la feature) doit survivre au rendu.
   // Page différente → l'ancienne sous-route n'a plus de sens, on repart propre.
   // replaceState : pas d'entrée d'historique (le bouton Retour ne change pas de
   // comportement) et pas de `hashchange`.
   if (parseRoute().page === page) return;
-  history.replaceState(null, '', routeUrl(page));
+  const method = historyMode === 'none'
+    ? null
+    : (!_hasSyncedRoute || historyMode === 'replace' ? 'replaceState' : 'pushState');
+  if (method) history[method](null, '', routeUrl(page));
+  _hasSyncedRoute = true;
 }
 
 // ── Naviguer vers une page ─────────────────────
-export async function navigate(page) {
+export async function navigate(page, { historyMode = 'push' } = {}) {
+  const previousPage = STATE.currentPage;
+  const previousContent = document.getElementById('main-content');
+  if (previousContent && previousPage) {
+    _pageViewContexts.set(
+      _pageViewKey(previousPage),
+      captureViewContext(previousContent, { includeWindow: true })
+    );
+  }
+
   closeMoreMenu(); // referme le menu mobile quelle que soit la source (clic, clavier, palette)
   _collapseRailAfterNav(); // referme la sidebar déployée (rail) après navigation
 
@@ -201,11 +227,10 @@ export async function navigate(page) {
     mc.style.height = '';
     mc.style.padding = '';
     mc.style.paddingBottom = '';
-    mc.dataset.page = page;
   }
 
   setPage(page);
-  _syncHash(page);
+  _syncHash(page, historyMode);
   _syncNav(page);
   _renderLoading();
 
@@ -238,7 +263,19 @@ export async function navigate(page) {
   // Rendre la page
   try {
     await _ensureCharactersReady(page);
+    if (mc) mc.dataset.page = page;
     await PAGES[page]();
+    recordRecentNavigation({ type: 'page', id: page });
+    _finishLoading();
+    const context = _pageViewContexts.get(_pageViewKey(page));
+    if (context) {
+      restoreViewContextAfterRender(mc, context, {
+        includeWindow: true,
+        shouldRestore: () => STATE.currentPage === page,
+      });
+    } else if (previousPage !== page) {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    }
   } catch (err) {
     console.error(`[nav] page "${page}" a planté :`, err);
     _renderPageError(page, err);
@@ -310,10 +347,18 @@ export function initEventDelegation() {
   // Deep-link modifié à la main (URL éditée, lien collé dans l'onglet courant).
   // Ignoré tant qu'aucune aventure n'est active : le boot s'en charge déjà.
   // On re-navigue même à page égale : la feature relira sa sous-route au rendu.
-  window.addEventListener('hashchange', () => {
+  const navigateFromHistory = () => {
     const { page } = parseRoute();
     if (!STATE.adventure || !isKnownPage(page)) return;
-    navigate(page);
+    navigate(page, { historyMode: 'none' });
+  };
+  window.addEventListener('popstate', () => {
+    _handlingPopState = true;
+    navigateFromHistory();
+    setTimeout(() => { _handlingPopState = false; }, 0);
+  });
+  window.addEventListener('hashchange', () => {
+    if (!_handlingPopState) navigateFromHistory();
   });
 
   document.addEventListener('click', (e) => {
@@ -454,12 +499,22 @@ function _syncNav(page) {
 function _renderLoading() {
   const content = document.getElementById('main-content');
   if (!content) return;
-  content.innerHTML = appSplashHtml();
+  content.classList.add('is-page-transitioning');
+  content.setAttribute('aria-busy', 'true');
+  if (!content.firstElementChild) content.innerHTML = appSplashHtml();
+}
+
+function _finishLoading() {
+  const content = document.getElementById('main-content');
+  if (!content) return;
+  content.classList.remove('is-page-transitioning');
+  content.removeAttribute('aria-busy');
 }
 
 function _renderPageError(page, err) {
   const content = document.getElementById('main-content');
   if (!content) return;
+  _finishLoading();
   const isOffline = !navigator.onLine;
   const isPerm    = err?.code === 'permission-denied';
   const icon      = isOffline ? '📡' : isPerm ? '🔒' : '⚠️';
