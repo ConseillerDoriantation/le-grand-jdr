@@ -58,7 +58,7 @@ export async function pickAdventure(adventureId) {
   const { hideAdventurePicker } = await import('./layout.js');
   hideAdventurePicker();
   showAppLoading();
-  await navigate(consumeBootPage());
+  await navigate(consumeBootPage(), { historyMode: 'replace' });
 }
 
 // openCreateAdventureModal est fourni par aventures.js (lazy).
@@ -83,7 +83,7 @@ export async function acceptAdventureInvitation(adventureId) {
     const { hideAdventurePicker } = await import('./layout.js');
     hideAdventurePicker();
     showAppLoading();
-    await navigate(consumeBootPage());
+    await navigate(consumeBootPage(), { historyMode: 'replace' });
   } catch (e) {
     const { showNotif } = await import('../shared/notifications.js');
     showNotif(e.message || "Échec de l'acceptation.", 'error');
@@ -225,7 +225,7 @@ async function loadAndRouteAdventures(user) {
   if (adventures.length === 1) {
     await selectAdventure(adventures[0]);
     showAppLoading();
-    await navigate(consumeBootPage());
+    await navigate(consumeBootPage(), { historyMode: 'replace' });
     return;
   }
 
@@ -235,7 +235,7 @@ async function loadAndRouteAdventures(user) {
   if (lastAdv) {
     await selectAdventure(lastAdv);
     showAppLoading();
-    await navigate(consumeBootPage());
+    await navigate(consumeBootPage(), { historyMode: 'replace' });
     return;
   }
 

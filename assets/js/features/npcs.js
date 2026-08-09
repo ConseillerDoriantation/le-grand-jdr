@@ -21,6 +21,7 @@ import { isFeatureEnabled } from '../shared/features.js';
 import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { consumeTargetEntity } from '../shared/entity-navigation.js';
+import { recordRecentNavigation } from '../shared/recent-navigation.js';
 import { getItemStatBonus, sortCharactersForDisplay, getMyCharacters, getModFromScore,
   computeEquipStatsBonus, computeEquipDerivedBonus, formatItemBonusText,
   calcPVMax, calcPMMax, calcCA, calcVitesse } from '../shared/char-stats.js';
@@ -37,6 +38,7 @@ import { listOrganizations } from './map/data/organizations.repo.js';
 import { pickImageFile, compressDataUrl } from '../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
+import { replaceHtmlPreservingView } from '../shared/view-context.js';
 
 // ── Stats PNJ (admin) ────────────────────────────────────────────────────────
 // Les vitales/caractéristiques saisies sont les valeurs DE BASE. Les objets
@@ -1810,6 +1812,8 @@ function _renderFlatList(filtered) {
 // ── Sélection & filtres ───────────────────────────────────────────────────────
 export function selectNpc(id) {
   _activeId = id;
+  const npc = _npcs.find(item => item.id === id);
+  if (npc) recordRecentNavigation({ type: 'npc', id, title: npc.nom || npc.name || '' });
 
   _refreshList();
   _refreshActivePanel();
@@ -3554,7 +3558,11 @@ function _refreshActivePanel() {
     _activeId = active?.id || null;
   }
 
-  panel.innerHTML = active ? _renderFiche(active) : _renderEmpty();
+  replaceHtmlPreservingView(
+    panel,
+    active ? _renderFiche(active) : _renderEmpty(),
+    { includeFocus: true }
+  );
 }
 
 

@@ -10,6 +10,7 @@ import { _esc, _norm, _searchIncludes, _trunc, loadingHtml } from '../shared/htm
 import { charSession } from '../shared/char-session.js';
 import { navigate } from '../core/navigation.js';
 import { isFeatureEnabled } from '../shared/features.js';
+import { getRecentNavigation, recordRecentNavigation } from '../shared/recent-navigation.js';
 
 const MAX_RESULTS = 30;
 
@@ -253,7 +254,20 @@ function _filterAndSort(entries, query) {
   const q = _norm(query);
   if (!q) {
     // Vue par défaut : pages d'abord (raccourcis)
-    return entries.filter(e => e.type === 'page').slice(0, MAX_RESULTS);
+    const byKey = new Map(entries.map(entry => [`${entry.type}:${entry.id}`, entry]));
+    const recent = getRecentNavigation()
+      .map(item => byKey.get(`${item.type}:${item.id}`))
+      .filter(Boolean)
+      .map(entry => ({
+        ...entry,
+        groupKey: 'recent',
+        groupLabel: 'Récemment ouverts',
+      }));
+    const recentKeys = new Set(recent.map(entry => `${entry.type}:${entry.id}`));
+    const pages = entries
+      .filter(entry => entry.type === 'page' && !recentKeys.has(`page:${entry.id}`))
+      .map(entry => ({ ...entry, groupKey: 'page', groupLabel: 'Pages' }));
+    return [...recent, ...pages].slice(0, MAX_RESULTS);
   }
   const scored = [];
   for (const e of entries) {
@@ -283,6 +297,7 @@ function _highlight(selector) {
 async function _executeEntry(entry) {
   closePalette();
   const go = (page) => navigate(page);
+  recordRecentNavigation(entry);
 
   try {
     switch (entry.type) {
@@ -389,11 +404,13 @@ function _renderList() {
   }
 
   let html = '';
-  let lastType = null;
+  let lastGroup = null;
   _results.forEach((e, i) => {
-    if (e.type !== lastType) {
-      html += `<div class="cmd-palette-group">${_esc(e.typeLabel)}</div>`;
-      lastType = e.type;
+    const groupKey = e.groupKey || e.type;
+    const groupLabel = e.groupLabel || e.typeLabel;
+    if (groupKey !== lastGroup) {
+      html += `<div class="cmd-palette-group">${_esc(groupLabel)}</div>`;
+      lastGroup = groupKey;
     }
     const active = i === _activeIndex ? ' is-active' : '';
     html += `
