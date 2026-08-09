@@ -113,7 +113,7 @@ import {
   toggleSort, toggleQuete, deleteQuete,
   duplicateSort, setSortValidation,
   deleteSort, deleteChar, createNewChar,
-  manageTitres, addQuete,
+  addQuete,
 } from './characters/forms.js';
 
 import { openCharExportMenu } from './characters/export.js';
@@ -838,6 +838,122 @@ function _buildMainColHtml(canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, v
   </section>`;
 }
 
+function _characterTitlesHtml(c, canEdit) {
+  const titres = Array.isArray(c.titres) ? c.titres : [];
+  if (!titres.length && !canEdit) return '';
+  return `<div class="id-titres${canEdit ? ' is-editable' : ''}" id="char-titles-${_esc(c.id)}">
+    ${titres.map((titre, index) => canEdit
+      ? `<span class="id-titre-item">
+          <span class="id-titre-drag" title="Glisser pour réordonner" aria-hidden="true">⠿</span>
+          <input class="id-titre id-titre-input-inline" value="${_esc(titre)}"
+            aria-label="Modifier le titre ${_esc(titre)}"
+            data-change="renameCharTitle" data-id="${c.id}" data-index="${index}"
+            data-enter="change-blur" data-esc="revert-blur">
+          <button type="button" class="id-titre-remove" data-action="removeCharTitle"
+            data-id="${c.id}" data-index="${index}" title="Retirer ${_esc(titre)}" aria-label="Retirer ${_esc(titre)}">×</button>
+        </span>`
+      : `<span class="id-titre">${_esc(titre)}</span>`).join('')}
+    ${canEdit ? `<span class="id-titre-new">
+      <input id="char-title-new-${_esc(c.id)}" placeholder="Ajouter un titre…" maxlength="80"
+        aria-label="Nouveau titre" data-enter-click="#char-title-add-${_esc(c.id)}">
+      <button type="button" id="char-title-add-${_esc(c.id)}" data-action="addCharTitle"
+        data-id="${c.id}" title="Ajouter le titre" aria-label="Ajouter le titre">＋</button>
+    </span>` : ''}
+  </div>`;
+}
+
+let _characterTitlesSortable = null;
+
+function _initCharacterTitlesSortable(c) {
+  const host = document.getElementById(`char-titles-${c.id}`);
+  if (!host) return;
+  try { _characterTitlesSortable?.destroy(); } catch {}
+  _characterTitlesSortable = makeSortable(host, {
+    prefix: 'char-title',
+    draggable: '.id-titre-item',
+    handle: '.id-titre-drag',
+    fallbackOnBody: false,
+    onEnd: async () => {
+      const previous = [...(c.titres || [])];
+      const next = [...host.querySelectorAll('.id-titre-input-inline')]
+        .map(input => input.value.trim())
+        .filter(Boolean);
+      if (next.length !== previous.length || next.every((titre, index) => titre === previous[index])) return;
+      if (await _saveCharacterTitles(c, next, previous)) _refreshCharacterTitles(c);
+    },
+  });
+}
+
+function _refreshCharacterTitles(c) {
+  const host = document.getElementById(`char-titles-${c.id}`);
+  if (!host) return;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = _characterTitlesHtml(c, true);
+  host.replaceWith(wrap.firstElementChild);
+  _initCharacterTitlesSortable(c);
+}
+
+async function _saveCharacterTitles(c, nextTitles, previousTitles) {
+  c.titres = nextTitles;
+  try {
+    await updateInCol('characters', c.id, { titres: nextTitles });
+    return true;
+  } catch (error) {
+    c.titres = previousTitles;
+    notifySaveError(error);
+    _refreshCharacterTitles(c);
+    return false;
+  }
+}
+
+async function _addCharTitle(btn) {
+  const c = getCharacterById(btn.dataset.id);
+  const input = document.getElementById(`char-title-new-${btn.dataset.id}`);
+  const titre = input?.value.trim();
+  if (!c || !titre) { input?.focus(); return; }
+  const previous = [...(c.titres || [])];
+  if (previous.some(t => _norm(t) === _norm(titre))) {
+    showNotif('Ce titre est déjà présent.', 'info');
+    input.select();
+    return;
+  }
+  if (await _saveCharacterTitles(c, [...previous, titre], previous)) {
+    _refreshCharacterTitles(c);
+    document.getElementById(`char-title-new-${c.id}`)?.focus();
+  }
+}
+
+async function _renameCharTitle(input) {
+  const c = getCharacterById(input.dataset.id);
+  const index = Number(input.dataset.index);
+  if (!c || !Number.isInteger(index)) return;
+  const previous = [...(c.titres || [])];
+  if (index < 0 || index >= previous.length) return;
+  const titre = input.value.trim();
+  if (!titre) {
+    input.value = previous[index];
+    return;
+  }
+  if (titre === previous[index]) return;
+  const next = [...previous];
+  next[index] = titre;
+  if (await _saveCharacterTitles(c, next, previous)) {
+    input.value = titre;
+    input.classList.add('is-saved');
+    setTimeout(() => input.classList.remove('is-saved'), 500);
+  }
+}
+
+async function _removeCharTitle(btn) {
+  const c = getCharacterById(btn.dataset.id);
+  const index = Number(btn.dataset.index);
+  if (!c || !Number.isInteger(index)) return;
+  const previous = [...(c.titres || [])];
+  if (index < 0 || index >= previous.length) return;
+  const next = previous.filter((_, i) => i !== index);
+  if (await _saveCharacterTitles(c, next, previous)) _refreshCharacterTitles(c);
+}
+
 function renderCharSheet(c, keepTab) {
   const area = document.getElementById('char-sheet-area');
   if (!area) return;
@@ -856,7 +972,6 @@ function renderCharSheet(c, keepTab) {
   const xpCur  = c.exp || 0, xpPalier = calcPalier(c.niveau || 1), xpPct = pct(xpCur, xpPalier);
   const deckActifs = (c.deck_sorts || []).filter(s => s.actif).length;
   const deckMax    = calcDeckMax(c);
-  const titres     = c.titres || [];
   const hpBarCls   = pvPct < 25 ? 'vital-bar-fill low' : pvPct < 50 ? 'vital-bar-fill mid' : 'vital-bar-fill';
 
   // ── Points de niveau restants ──────────────────
@@ -871,14 +986,7 @@ function renderCharSheet(c, keepTab) {
   const tilesHtml      = _buildStatTilesHtml(c, canEdit, lvlPointsRemaining);
   const tabsHtml       = _buildTabsHtml(c, v3Tab);
 
-  const titresChips = (titres.length || canEdit)
-    ? `<div class="id-titres">
-        ${titres.map(t => `<span class="id-titre">${_esc(t)}</span>`).join('')}
-        ${canEdit ? `<button class="id-titre id-titre-add"
-          data-action="manageTitres" data-id="${c.id}"
-          title="${titres.length ? 'Gérer les titres' : 'Ajouter un titre'}">${titres.length ? '✎ Titres' : '＋ Titre'}</button>` : ''}
-      </div>`
-    : '';
+  const titresChips = _characterTitlesHtml(c, canEdit);
 
   const sidebarHtml = _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckMax, titresChips });
   const mainColHtml = _buildMainColHtml(canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, v3Tab });
@@ -892,6 +1000,8 @@ function renderCharSheet(c, keepTab) {
     </div>
   </div>
 </div>`;
+
+  if (canEdit) _initCharacterTitlesSortable(c);
 
   _renderTabV3(v3Tab, c, canEdit);
 
@@ -2058,7 +2168,9 @@ registerActions({
   addXpDelta:              (btn)    => addXpDelta(btn.dataset.id),
 
   // Actions identité
-  manageTitres:            (btn)    => manageTitres(btn.dataset.id),
+  addCharTitle:            (btn)    => _addCharTitle(btn),
+  renameCharTitle:         (input)  => _renameCharTitle(input),
+  removeCharTitle:         (btn)    => _removeCharTitle(btn),
   openCharExportMenu:      (btn)    => openCharExportMenu(btn.dataset.id, btn),
   deleteChar:              (btn)    => deleteChar(btn.dataset.id),
   setCharAura:             (btn)    => setCharAura(btn.dataset.id, btn.dataset.auraKey),
