@@ -645,13 +645,35 @@ function _sessionAvailabilitySummary(quest = {}, iso = '', slotId = '') {
   return totals;
 }
 
-function _sessionStateForDate(s = {}, quest = {}) {
-  const closure = _sessionClosureState(quest);
-  if (closure.closed) return closure;
+// État d'une SÉANCE, indépendant de la mission : à venir / aujourd'hui / passée
+// / jouée. Le MJ marque « jouée » d'un clic. Cet état ne réclame JAMAIS la
+// clôture de la mission (autre cycle, cf. _missionHint) : une séance peut être
+// finie sans que la mission le soit.
+function _sessionState(s = {}) {
+  if (s.done) return { key: 'done', label: 'Jouée', tone: 'done' };
   const d = _dateFromISO(s.date || '');
-  const played = d && d < _today();
-  if (!played && !closure.hasOutcome) return { ...closure, label: 'Planifiee', tone: 'planned' };
-  return closure;
+  if (!d) return { key: 'past', label: 'Passée', tone: 'past' };
+  const today = _today();
+  if (d.getTime() === today.getTime()) return { key: 'today', label: "Aujourd'hui", tone: 'today' };
+  if (d < today) return { key: 'past', label: 'Passée', tone: 'past' };
+  return { key: 'upcoming', label: 'À venir', tone: 'planned' };
+}
+
+// Une séance est « à venir » (zone principale) si elle n'est pas jouée et que sa
+// date n'est pas passée. Tout le reste (passé, jouée) part dans l'historique
+// replié → le rail ne grossit plus indéfiniment.
+function _sessionIsUpcoming(s = {}) {
+  if (s.done) return false;
+  const d = _dateFromISO(s.date || '');
+  return Boolean(d) && d >= _today();
+}
+
+// Info mission (secondaire, non bloquante) : simple lien vers la trame, jamais
+// un rappel « à clôturer » posé sur la séance.
+function _missionHint(quest = {}) {
+  if (!quest?.missionId) return null;
+  const closure = _sessionClosureState(quest);
+  return { closed: closure.closed, label: closure.closed ? 'Mission clôturée' : 'Mission en cours' };
 }
 
 async function _openAgendaMission(missionId) {
@@ -729,7 +751,7 @@ async function validateSlot(questId, iso, slotId) {
     await _saveSessions([..._validatedSessions(), entry]);
     closeModal();
     showNotif('✓ Créneau validé. Visible par le groupe concerné (et le MJ).', 'success');
-    _renderSessionBanner();
+    _renderSessions();
     _renderAgendaOverview();
     _renderSuggestions();
   } catch (e) {
@@ -762,7 +784,7 @@ async function validateManualSlot(questId) {
     await _saveSessions([..._validatedSessions(), entry]);
     closeModal();
     showNotif('Date libre validée pour le groupe.', 'success');
-    _renderSessionBanner();
+    _renderSessions();
     _renderAgendaOverview();
     _renderSuggestions();
   } catch (e) {
@@ -782,13 +804,92 @@ async function unvalidateSlot(questId, iso, slotId) {
     await _saveSessions(next);
     closeModal();
     showNotif('Créneau retiré.', 'info');
-    _renderSessionBanner();
+    _renderSessions();
     _renderAgendaOverview();
     _renderSuggestions();
   } catch (e) {
     if (e?.code === 'permission-denied') {
       showNotif('⚠ Règle Firestore manquante pour agenda_session.', 'error');
     } else { notifySaveError(e); }
+  }
+}
+
+// ── Cycle de vie d'une séance (MJ) : jouée / rétablie, et édition date+créneau ──
+// La séance est identifiée par sa clé questId|date|slot. Éditer la date/créneau
+// change la clé → on repère l'entrée par son ancienne clé puis on la remplace.
+async function _mutateSession(questId, iso, slotId, patch) {
+  if (!STATE.isAdmin) return false;
+  const k = `${questId}|${iso}|${slotId}`;
+  const next = _validatedSessions().map(s => (_sessionKey(s) === k ? { ...s, ...patch } : s));
+  try {
+    await _saveSessions(next);
+    _renderSessions();
+    _renderAgendaOverview();
+    _renderSuggestions();
+    return true;
+  } catch (e) {
+    if (e?.code === 'permission-denied') showNotif('⚠ Règle Firestore manquante pour agenda_session.', 'error');
+    else notifySaveError(e);
+    return false;
+  }
+}
+
+async function markSessionDone(questId, iso, slotId, done) {
+  const ok = await _mutateSession(questId, iso, slotId, { done: Boolean(done) });
+  if (ok) showNotif(done ? '✓ Séance marquée jouée (rangée dans l’historique).' : 'Séance remise à venir.', done ? 'success' : 'info');
+}
+
+function openEditSessionModal(questId, iso, slotId) {
+  if (!STATE.isAdmin) return;
+  const s = _validatedSessions().find(x => _sessionKey(x) === `${questId}|${iso}|${slotId}`);
+  if (!s) return;
+  const quest = _ag.quests.find(q => q.id === questId);
+  const title = quest?.titre || quest?.nom || s.questTitle || 'Groupe';
+  openModal(`Modifier la séance · ${_esc(title)}`, `
+    <div class="ag-manual">
+      <label class="ag-manual-field">
+        <span>Date</span>
+        <input id="ag-edit-date" class="ag-manual-input" type="date" value="${_esc(iso)}">
+      </label>
+      <label class="ag-manual-field">
+        <span>Créneau</span>
+        <select id="ag-edit-slot" class="ag-manual-input">
+          ${SLOTS.map(x => `<option value="${x.id}" ${x.id === slotId ? 'selected' : ''}>${x.emoji} ${_esc(x.label)} · ${_esc(x.hours)}</option>`).join('')}
+        </select>
+      </label>
+      <div class="ag-detail-actions">
+        <button type="button" class="btn btn-outline" data-action="_agCloseModal">Annuler</button>
+        <button type="button" class="btn btn-gold" data-action="_agConfirmEditSession" data-quest-id="${_esc(questId)}" data-iso="${_esc(iso)}" data-slot-id="${_esc(slotId)}">Enregistrer</button>
+      </div>
+    </div>
+  `);
+}
+
+async function confirmEditSession(questId, oldIso, oldSlot) {
+  if (!STATE.isAdmin) return;
+  const newIso = document.getElementById('ag-edit-date')?.value || '';
+  const newSlot = document.getElementById('ag-edit-slot')?.value || '';
+  if (!_dateFromISO(newIso)) { showNotif('Choisis une date valide.', 'error'); return; }
+  if (!SLOTS.some(x => x.id === newSlot)) { showNotif('Choisis un créneau valide.', 'error'); return; }
+  if (newIso === oldIso && newSlot === oldSlot) { closeModal(); return; }
+  const oldKey = `${questId}|${oldIso}|${oldSlot}`;
+  const newKey = `${questId}|${newIso}|${newSlot}`;
+  const sessions = _validatedSessions();
+  if (sessions.some(s => _sessionKey(s) === newKey)) {
+    showNotif('Une séance existe déjà sur ce créneau pour ce groupe.', 'error');
+    return;
+  }
+  const next = sessions.map(s => (_sessionKey(s) === oldKey ? { ...s, date: newIso, slot: newSlot } : s));
+  try {
+    await _saveSessions(next);
+    closeModal();
+    showNotif('Séance mise à jour.', 'success');
+    _renderSessions();
+    _renderAgendaOverview();
+    _renderSuggestions();
+  } catch (e) {
+    if (e?.code === 'permission-denied') showNotif('⚠ Règle Firestore manquante pour agenda_session.', 'error');
+    else notifySaveError(e);
   }
 }
 
@@ -802,60 +903,116 @@ function _sessionVisibleToMe(s) {
   return _myUidAliases().some(uid => uids.includes(uid));
 }
 
+function _renderSessions() {
+  _renderSessionBanner();
+  _renderSessionHistory();
+}
+
+function _sessionCardHtml(s, primary) {
+  const fmt = _formatSession(s);
+  if (!fmt) return '';
+  const quest = _sessionQuest(s) || {};
+  const participants = _questParticipants(quest);
+  const av = _sessionAvailabilitySummary(quest, s.date, s.slot);
+  const state = _sessionState(s);
+  const mission = _missionHint(quest);
+  const group = quest?.titre || quest?.nom || fmt.questTitle || 'Groupe';
+  const admin = STATE.isAdmin;
+  const dq = `data-quest-id="${_esc(s.questId || '')}" data-iso="${_esc(s.date || '')}" data-slot-id="${_esc(s.slot || '')}"`;
+  return `<article class="ag-sess ag-sess--${state.tone}${primary ? ' ag-sess--primary' : ''}">
+    <div class="ag-sess-when">
+      <div class="ag-sess-date">${_esc(fmt.dateFr)}</div>
+      <div class="ag-sess-slot">${fmt.slotLabel} · ${_esc(fmt.slotHours)}</div>
+    </div>
+    <div class="ag-sess-row">
+      <span class="ag-sess-state ag-sess-state--${state.tone}">${_esc(state.label)}</span>
+      ${s.manual ? `<span class="ag-sess-tag">Date MJ</span>` : ''}
+      ${mission ? `<button type="button" class="ag-sess-tag ag-sess-tag--link" data-action="_agOpenMission" data-mission-id="${_esc(quest.missionId)}" title="Ouvrir la mission dans la trame">${mission.closed ? '🏁' : '📖'} ${_esc(mission.label)}</button>` : ''}
+    </div>
+    <div class="ag-sess-group">${_esc(group)}</div>
+    <div class="ag-sess-people">
+      <span class="ag-sess-avatars" aria-label="${participants.length} participants">
+        ${participants.length
+          ? participants.slice(0, 6).map(p => _participantAvatar(p, 24)).join('') + (participants.length > 6 ? `<span class="ag-sess-more">+${participants.length - 6}</span>` : '')
+          : `<span class="ag-sess-empty">Aucun participant</span>`}
+      </span>
+      <span class="ag-sess-avail" title="Disponibilités : dispo / peut-être / non">
+        <b class="is-ok">${av.ok}</b><i>/</i><b class="is-maybe">${av.maybe}</b><i>/</i><b class="is-no">${av.no}</b>
+      </span>
+    </div>
+    <div class="ag-sess-acts">
+      <button type="button" class="ag-sess-btn ag-sess-btn--go" data-action="_agGoVtt">Table</button>
+      <button type="button" class="ag-sess-btn" data-action="_agOpenStats" data-date="${_esc(s.date || '')}">Stats</button>
+      ${admin ? `
+        <button type="button" class="ag-sess-btn" data-action="_agMarkDone" ${dq} title="Marquer la séance jouée (déplace dans l'historique)">✓ Jouée</button>
+        <button type="button" class="ag-sess-btn" data-action="_agEditSession" ${dq} title="Modifier la date ou le créneau">✎</button>
+        <button type="button" class="ag-sess-btn ag-sess-btn--del" data-action="_agUnvalidateSlot" ${dq} title="Supprimer la séance">🗑</button>
+      ` : ''}
+    </div>
+  </article>`;
+}
+
 function _renderSessionBanner() {
   const el = document.getElementById('ag-session-banner');
   if (!el) return;
   const sessions = _validatedSessions()
     .filter(_sessionVisibleToMe)
+    .filter(_sessionIsUpcoming)
     .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.slot || '').localeCompare(b.slot || ''));
   if (!sessions.length) { el.innerHTML = ''; el.style.display = 'none'; return; }
   el.style.display = '';
-  const multi = sessions.length > 1;
   el.innerHTML = `
-    <div class="ag-banner-list">
-      ${multi ? `<div class="ag-banner-listhd">Sessions validées (${sessions.length})</div>` : ''}
-      ${sessions.map(s => {
-        const fmt = _formatSession(s);
-        if (!fmt) return '';
-        const quest = _sessionQuest(s) || {};
-        const participants = _questParticipants(quest);
-        const av = _sessionAvailabilitySummary(quest, s.date, s.slot);
-        const state = _sessionStateForDate(s, quest);
-        const groupTitle = quest?.titre || quest?.nom || fmt.questTitle || 'Groupe';
-        return `<div class="ag-banner ag-session-card ag-session-card--${state.tone}">
-          <div class="ag-session-date">
-            <div class="ag-banner-eyebrow">${multi ? 'Session' : 'Prochaine session'}</div>
-            <div class="ag-banner-title">${_esc(fmt.dateFr)}</div>
-            <div class="ag-banner-hours">${fmt.slotLabel} ${_esc(fmt.slotHours)}</div>
-          </div>
-          <div class="ag-session-main">
-            <div class="ag-session-top">
-              <span class="ag-session-state ag-session-state--${state.tone}">${_esc(state.label)}</span>
-              ${s.manual ? `<span class="ag-session-pill">Date MJ</span>` : ''}
-            </div>
-            <div class="ag-banner-quest">${_esc(groupTitle)}</div>
-            <div class="ag-session-avatars" aria-label="${participants.length} participants">
-              ${participants.length
-                ? participants.slice(0, 6).map(p => _participantAvatar(p, 26)).join('') + (participants.length > 6 ? `<span class="ag-session-more">+${participants.length - 6}</span>` : '')
-                : `<span class="ag-session-empty">Aucun participant</span>`}
-            </div>
-          </div>
-          <div class="ag-session-readiness" title="Disponibilités sur ce créneau">
-            <span class="is-ok">${av.ok} ok</span>
-            <span class="is-maybe">${av.maybe} ?</span>
-            <span class="is-no">${av.no} non</span>
-            <span class="is-missing">${av.missing} sans dispo</span>
-          </div>
-          <div class="ag-session-actions">
-            <button type="button" class="ag-session-action ag-session-action--primary" data-action="_agGoVtt">Table</button>
-            ${quest?.missionId ? `<button type="button" class="ag-session-action" data-action="_agOpenMission" data-mission-id="${_esc(quest.missionId)}">${state.closed ? 'Voir clôture' : 'Mission'}</button>` : ''}
-            <button type="button" class="ag-session-action" data-action="_agOpenStats" data-date="${_esc(s.date || '')}">Stats</button>
-            ${STATE.isAdmin ? `<button class="ag-banner-btn" data-action="_agUnvalidateSlot" data-quest-id="${_esc(s.questId || '')}" data-iso="${_esc(s.date || '')}" data-slot-id="${_esc(s.slot || '')}" title="Retirer ce créneau">×</button>` : ''}
-          </div>
-        </div>`;
-      }).join('')}
+    <div class="ag-sess-block">
+      <div class="ag-sess-hd"><span class="ag-sess-hd-t">Prochaines séances</span><span class="ag-sess-hd-n">${sessions.length}</span></div>
+      <div class="ag-sess-cards">
+        ${sessions.map((s, i) => _sessionCardHtml(s, i === 0)).join('')}
+      </div>
     </div>`;
 }
+
+// Historique : séances passées ou marquées jouées. Compact et replié par défaut
+// pour ne pas envahir le rail quand elles s'accumulent sur une campagne.
+function _renderSessionHistory() {
+  const el = document.getElementById('ag-session-history');
+  if (!el) return;
+  const sessions = _validatedSessions()
+    .filter(_sessionVisibleToMe)
+    .filter(s => !_sessionIsUpcoming(s))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.slot || '').localeCompare(a.slot || ''));
+  if (!sessions.length) { el.innerHTML = ''; el.style.display = 'none'; return; }
+  el.style.display = '';
+  const admin = STATE.isAdmin;
+  el.innerHTML = `
+    <details class="ag-hist">
+      <summary class="ag-hist-sum">
+        <span class="ag-hist-sum-t">Historique des séances</span>
+        <span class="ag-hist-n">${sessions.length}</span>
+      </summary>
+      <div class="ag-hist-list">
+        ${sessions.map(s => {
+          const fmt = _formatSession(s);
+          if (!fmt) return '';
+          const quest = _sessionQuest(s) || {};
+          const state = _sessionState(s);
+          const group = quest?.titre || quest?.nom || fmt.questTitle || 'Groupe';
+          const dq = `data-quest-id="${_esc(s.questId || '')}" data-iso="${_esc(s.date || '')}" data-slot-id="${_esc(s.slot || '')}"`;
+          return `<div class="ag-hist-row ag-hist-row--${state.tone}">
+            <span class="ag-hist-state ag-hist-state--${state.tone}">${_esc(state.label)}</span>
+            <span class="ag-hist-when">${_esc(fmt.dateFr)} <em>${fmt.slotLabel}</em></span>
+            <span class="ag-hist-group">${_esc(group)}</span>
+            ${admin ? `<span class="ag-hist-acts">
+              ${state.key === 'done'
+                ? `<button type="button" class="ag-hist-btn" data-action="_agMarkUndone" ${dq} title="Remettre à venir">↩</button>`
+                : `<button type="button" class="ag-hist-btn" data-action="_agMarkDone" ${dq} title="Marquer jouée">✓</button>`}
+              <button type="button" class="ag-hist-btn" data-action="_agEditSession" ${dq} title="Modifier">✎</button>
+              <button type="button" class="ag-hist-btn ag-hist-btn--del" data-action="_agUnvalidateSlot" ${dq} title="Supprimer">🗑</button>
+            </span>` : ''}
+          </div>`;
+        }).join('')}
+      </div>
+    </details>`;
+}
+
 
 // ── Rendu : calendrier personnel ──────────────────────────────────────────
 function _renderCalendar() {
@@ -1124,6 +1281,7 @@ async function renderAgendaPage() {
         <aside class="ag-rail">
           <div id="ag-session-banner"></div>
           <div id="ag-overview"></div>
+          <div id="ag-session-history"></div>
         </aside>
 
         <main class="ag-workbench">
@@ -1174,7 +1332,7 @@ async function renderAgendaPage() {
     </div>
   `;
 
-  _renderSessionBanner();
+  _renderSessions();
   _renderAgendaOverview();
   _renderSuggestions();
   _renderCalendar();
@@ -1215,7 +1373,7 @@ async function renderAgendaPage() {
 
   watchPageDoc('agenda-session', 'agenda_session', 'next', 'agenda', data => {
     _ag.nextSession = data;
-    _renderSessionBanner();
+    _renderSessions();
     _renderAgendaOverview();
     _renderSuggestions();
   });
@@ -1229,6 +1387,10 @@ registerActions({
   _agValidateManualSlot:    (btn) => validateManualSlot(btn.dataset.questId),
   _agCloseModal:            ()    => closeModal(),
   _agUnvalidateSlot:        (btn) => unvalidateSlot(btn.dataset.questId, btn.dataset.iso, btn.dataset.slotId),
+  _agMarkDone:              (btn) => markSessionDone(btn.dataset.questId, btn.dataset.iso, btn.dataset.slotId, true),
+  _agMarkUndone:            (btn) => markSessionDone(btn.dataset.questId, btn.dataset.iso, btn.dataset.slotId, false),
+  _agEditSession:           (btn) => openEditSessionModal(btn.dataset.questId, btn.dataset.iso, btn.dataset.slotId),
+  _agConfirmEditSession:    (btn) => confirmEditSession(btn.dataset.questId, btn.dataset.iso, btn.dataset.slotId),
   _agValidateSlot:          (btn) => validateSlot(btn.dataset.questId, btn.dataset.iso, btn.dataset.slotId),
   _agGoVtt:                 ()    => navigate('vtt'),
   _agOpenMission:           (btn) => _openAgendaMission(btn.dataset.missionId),
