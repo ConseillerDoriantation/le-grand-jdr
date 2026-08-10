@@ -6008,6 +6008,154 @@ body .sh-page--v2 .sh-item-desc {
   border-top: 1px dashed rgba(255,255,255,.04);
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   BOUTIQUE — petits écrans de bureau
+   Les breakpoints historiques passent directement de la tablette au desktop.
+   Cette couche intermédiaire garde les catégories visibles sans transformer la
+   page en longue colonne, puis compacte le chrome quand la hauteur est faible.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (min-width: 960px) and (max-width: 1280px) {
+  .sh-page--v2 .sh-layout {
+    grid-template-columns: 194px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .sh-page--v2 .sh-sidebar-col {
+    top: 8px;
+    max-height: calc(100dvh - 16px);
+  }
+
+  .sh-page--v2 .sh-sidebar {
+    padding: 8px 6px;
+    border-radius: 16px;
+  }
+
+  .sh-page--v2 .sh-sidebar-section { margin-bottom: 8px; }
+  .sh-page--v2 .sh-sidebar-label { padding: 0 6px 4px; }
+  .sh-page--v2 .sh-side-link {
+    gap: 7px;
+    padding: 6px 7px;
+    border-radius: 9px;
+  }
+  .sh-page--v2 .sh-side-link-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    font-size: .92rem;
+  }
+  .sh-page--v2 .sh-side-link-text strong { font-size: .74rem; }
+  .sh-page--v2 .sh-side-link-text small { display: none; }
+}
+
+/* Entre tablette et petit portable, les catégories deviennent une grille
+   horizontale compacte au lieu d'occuper une longue colonne au-dessus des items. */
+@media (min-width: 769px) and (max-width: 959px) {
+  .sh-page--v2 .sh-sidebar-col {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+  .sh-page--v2 .sh-sidebar { padding: 8px; border-radius: 16px; }
+  .sh-page--v2 .sh-side-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    gap: 4px;
+  }
+  .sh-page--v2 .sh-side-link { padding: 6px 8px; border-radius: 9px; }
+  .sh-page--v2 .sh-side-link-icon { width: 28px; height: 28px; }
+  .sh-page--v2 .sh-side-link-text small { display: none; }
+}
+
+@media (min-width: 769px) and (max-width: 1280px),
+       (min-width: 769px) and (max-height: 720px) {
+  .sh-page--v2 { padding: 8px 10px 36px; }
+
+  .sh-page--v2 .sh-topbar--v2 {
+    gap: 8px;
+    margin-bottom: 8px;
+    padding: 8px 10px;
+    border-radius: 16px;
+  }
+
+  .sh-page--v2 .sh-topbar-title-wrap {
+    flex: 0 1 auto;
+    min-width: 146px;
+  }
+  .sh-page--v2 .sh-topbar-title-row { gap: 8px; }
+  .sh-page--v2 .sh-topbar-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    font-size: 1.05rem;
+  }
+  .sh-page--v2 .sh-topbar-title { font-size: .96rem; }
+  .sh-page--v2 .sh-topbar-subtitle { display: none; }
+
+  .sh-page--v2 .sh-topbar-tools {
+    flex: 1 1 520px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+    padding-bottom: 2px;
+  }
+  .sh-page--v2 .sh-topbar-admin {
+    flex-wrap: nowrap;
+    flex: 0 0 auto;
+  }
+  .sh-page--v2 .sh-topbar-tools .btn { white-space: nowrap; }
+
+  .sh-workshop-launchers {
+    gap: 7px;
+    margin-bottom: 8px;
+  }
+  .sh-workshop-card {
+    grid-template-columns: 38px minmax(0, 1fr) 26px;
+    gap: 9px;
+    min-height: 62px;
+    padding: 8px 10px;
+    border-radius: 13px;
+  }
+  .sh-workshop-card-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+    font-size: 1.05rem;
+  }
+  .sh-workshop-card-desc { display: none; }
+  .sh-workshop-card-arrow { width: 24px; height: 24px; }
+
+  .sh-page--v2 .sh-main { gap: 8px; }
+  .sh-page--v2 .sh-main-head--category {
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 13px;
+  }
+  .sh-page--v2 .sh-main-head--category .sh-main-head-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    font-size: 1.25rem;
+  }
+  .sh-page--v2 .sh-main-head--category .sh-main-title { font-size: 1.25rem; }
+}
+
+/* Les grandes modales de boutique doivent exploiter la hauteur disponible sur
+   un portable 600/720 px au lieu de conserver un bandeau vide autour d'elles. */
+@media (min-width: 769px) and (max-height: 720px) {
+  .modal:has(.atelier-shell),
+  .modal:has(.sh-detail) {
+    max-height: 96dvh !important;
+  }
+  .atelier-shell { height: 94dvh; max-height: 94dvh; }
+  .atelier-head { padding: 8px 12px; }
+  .atelier-head-ico { width: 32px; height: 32px; }
+  .sh-detail { max-height: 94dvh; }
+  .sh-detail-hero { height: 132px; }
+  .sh-detail-body { padding: 10px 14px; gap: 8px; }
+  .sh-detail-footer { padding: 8px 14px; }
+}
+
 /* ── Helpers texte répétés ──────────────────────────────────────────────── */
 .sh-dim-pill { padding:0 4px;color:var(--text-dim) }
 .sh-label    { font-weight:400;color:var(--text-dim);font-family:inherit }
