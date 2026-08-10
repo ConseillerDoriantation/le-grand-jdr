@@ -43,21 +43,8 @@ const PAGE_TITLES = {
   admin: 'Administration',
 };
 
-function _updateDocumentTitle() {
-  const adventure = STATE.adventure;
-  if (!adventure?.id) return;
-  const page = PAGE_TITLES[STATE.currentPage] || 'Grimorium';
-  const adventureName = String(adventure.nom || adventure.name || 'Aventure').trim();
-  const baseTitle = `${page} · ${adventureName} — Grimorium`;
-  const unreadPrefix = document.title.match(/^\(\d+\)\s*/)?.[0] || '';
-  document.title = `${unreadPrefix}${baseTitle}`;
-  document.dispatchEvent(new CustomEvent('app:base-title-changed', { detail: { title: baseTitle } }));
-}
-
 function _initDocumentTitles() {
-  document.addEventListener('app:page-changed', _updateDocumentTitle);
-  document.addEventListener('app:adventure-changed', _updateDocumentTitle);
-  _updateDocumentTitle();
+  document.title = 'Grimorium';
 }
 
 function _mountPageAnnouncer() {

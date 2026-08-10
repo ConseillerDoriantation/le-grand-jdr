@@ -68,7 +68,6 @@ let _unsubTyping = null, _unsubReads = null;       // « écrit… » (conv ouve
 let _unsubPresence = null, _online = new Set();    // statut en ligne (abonné quand panneau ouvert)
 let _typing = [], _otherReads = 0;                 // uids en train d'écrire · millis lus par l'autre (DM)
 let _typingWroteAt = 0, _typingClearTimer = null, _typingRenderTimer = null;
-let _baseTitle = '';                               // titre d'onglet sans compteur
 let _prevUnread = 0;                               // pour ne pulser QUE sur du neuf
 
 // ── Refs ──────────────────────────────────────────────────────────────────────
@@ -102,7 +101,6 @@ export async function initChat(uid) {
   _imgCache = new Map();
   _chatEmotes = [];
   _loadChatEmotes().then(() => { if (_open && _view === 'convo') _renderMessages(); });
-  _baseTitle = (document.title || 'Le Grand JDR').replace(/^\(\d+\)\s*/, '');
   _prevUnread = 0;
   _mount();
 
@@ -123,26 +121,17 @@ export async function initChat(uid) {
 export function teardownChat() {
   _teardownListeners();
   document.getElementById('chat-widget')?.remove();
-  if (_baseTitle) document.title = _baseTitle;
   _open = false; _advMsgs = []; _groups = []; _convoMsgs = []; _prevUnread = 0;
 }
 
-// Notifications discrètes (aucune règle Firestore) : compteur dans le titre de
-// l'onglet + pulsation de la bulle quand du NON-LU apparaît (chat fermé ou autre
-// conversation). Restauré à la lecture.
+// Notifications discrètes (aucune règle Firestore) : pulsation de la bulle
+// quand du NON-LU apparaît (chat fermé ou autre conversation).
 function _notify() {
   const n = _totalUnread();
-  if (_baseTitle) document.title = n > 0 ? `(${n}) ${_baseTitle}` : _baseTitle;
   if (n > _prevUnread) { _pulseBubble(); if (_soundReady) { _beep(); _desktopNotify(); } }
   _prevUnread = n; _soundReady = true;   // les non-lus déjà là au chargement ne sonnent pas
 }
 
-document.addEventListener('app:base-title-changed', (event) => {
-  const next = String(event.detail?.title || '').trim();
-  if (!next) return;
-  _baseTitle = next;
-  if (_uid) _notify();
-});
 // Aperçu du message non-lu le plus récent (pour la notif desktop).
 function _lastPreview() {
   let best = null, bestAt = 0;
