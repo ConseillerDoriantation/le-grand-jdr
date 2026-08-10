@@ -10878,3 +10878,102 @@ html:not([data-theme="light"]) .vtt-root {
     width: 180px;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   VTT — petits écrans de bureau
+   Les règles mobiles masquent déjà les panneaux sous 768 px. Entre 769 et
+   1366 px, on conserve toutes les fonctions mais on rend chaque colonne plus
+   compacte afin que la carte reste réellement jouable.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (min-width: 769px) and (max-width: 1366px) {
+  .vtt-body {
+    gap: 4px;
+    padding: 4px;
+  }
+
+  .vtt-presence-col {
+    width: 52px;
+    padding-top: .25rem;
+  }
+
+  .vtt-pres-avatar {
+    width: 32px;
+    height: 32px;
+  }
+
+  .vtt-mini-panel.open { width: 230px; }
+  .vtt-tray { width: clamp(188px, 16vw, 218px); }
+  .vtt-right-col {
+    width: clamp(252px, 21vw, 286px);
+    gap: 4px;
+    padding: 4px;
+  }
+
+  .vtt-tray-tabs { margin: 4px 4px 3px; }
+  .vtt-tray-tab { padding-inline: .28rem; }
+  .vtt-inspector { padding: .62rem; }
+  .vtt-tool-float { top: 6px; right: 6px; }
+  .vtt-overlay-tl { top: 6px; left: 6px; gap: 5px; }
+  .vtt-canvas-wrap { border-radius: 12px; }
+}
+
+@media (min-width: 769px) and (max-width: 1050px) {
+  .vtt-presence-col { width: 46px; }
+  .vtt-tray { width: 184px; }
+  .vtt-right-col { width: 248px; }
+  .vtt-tray-tab { font-size: 0; }
+  .vtt-tray-tab .vtt-tt-ic { font-size: .98rem; }
+  .vtt-combat-tracker {
+    width: 250px;
+    max-width: calc(100% - 12px);
+  }
+}
+
+/* Une tablette paysage légèrement au-dessus de 768 px n'a pas de place pour
+   trois colonnes dockées. Elle reprend donc le canvas plein écran du mobile. */
+@media (pointer: coarse) and (max-width: 1024px) {
+  .vtt-presence-col,
+  .vtt-mini-panel,
+  .vtt-tray,
+  .vtt-right-col { display: none; }
+}
+
+/* Faible hauteur : densifier le chrome, préserver le canvas et rendre tous les
+   panneaux flottants défilables plutôt que de les laisser sortir de l'écran. */
+@media (min-width: 769px) and (max-height: 720px) {
+  .vtt-toolbar {
+    min-height: 38px;
+    padding: 3px 6px;
+    gap: 4px;
+  }
+
+  .vtt-tool { width: 32px; height: 30px; border-radius: 8px; }
+  .vtt-btn-sm { min-height: 29px; padding-inline: .48rem; }
+  .vtt-body { gap: 4px; padding: 4px; }
+  .vtt-hint { display: none; }
+  .vtt-right-col { gap: 4px; padding: 4px; }
+  .vtt-inspector { max-height: 44%; padding: .52rem; gap: .35rem; }
+  .vtt-chat-hd { padding: .38rem .55rem; }
+  .vtt-chat-log { padding: .35rem; gap: 4px; }
+  .vtt-chat-input-row { padding: .3rem; }
+  .vtt-tray-tabs { margin-block: 4px 3px; }
+  .vtt-tray-tab { min-height: 29px; }
+  .vtt-tray-section-hd,
+  .vtt-tray-sect-hd { min-height: 28px; padding-block: .3rem; }
+
+  .vtt-combat-tracker {
+    max-height: calc(100dvh - 96px);
+  }
+
+  :is(
+    .vtt-dice-panel,
+    .vtt-music-panel,
+    .vtt-loot-panel,
+    .vtt-emote-picker,
+    .vtt-rest-panel
+  ) {
+    max-height: calc(100dvh - 58px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
