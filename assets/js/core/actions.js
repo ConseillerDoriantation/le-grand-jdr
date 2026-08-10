@@ -6,19 +6,59 @@
 
 const ACTIONS = {};
 
+function _dispatchSettled(el, action, ok, error = null) {
+  if (typeof document.dispatchEvent !== 'function' || typeof CustomEvent !== 'function') return;
+  document.dispatchEvent(new CustomEvent('app:action-settled', {
+    detail: { element: el, action, ok, error },
+  }));
+}
+
+function _setPending(el) {
+  if (!el || el.dataset.actionPending === 'true') return false;
+  el.dataset.actionPending = 'true';
+  el.dataset.pendingWasDisabled = el.disabled ? 'true' : 'false';
+  el.setAttribute('aria-busy', 'true');
+  if ('disabled' in el) el.disabled = true;
+  el.classList.add('is-action-pending');
+  el._pendingTimer = setTimeout(() => {
+    if (el.dataset.actionPending === 'true') el.classList.add('is-action-pending-visible');
+  }, 180);
+  return true;
+}
+
+function _clearPending(el) {
+  if (!el) return;
+  clearTimeout(el._pendingTimer);
+  delete el._pendingTimer;
+  if ('disabled' in el && el.dataset.pendingWasDisabled !== 'true') el.disabled = false;
+  delete el.dataset.pendingWasDisabled;
+  delete el.dataset.actionPending;
+  el.removeAttribute('aria-busy');
+  el.classList.remove('is-action-pending', 'is-action-pending-visible');
+}
+
 // Un handler `async` qui échoue rendait un rejet que personne n'attendait :
 // aucune trace visible, le clic semblait simplement « ne rien faire ». On
 // signale désormais l'échec (console + toast) pour toutes les actions.
 function _runHandler(handler, el, event, action) {
   const fail = (err) => {
     console.error(`[action] ${action}`, err);
+    _dispatchSettled(el, action, false, err);
     import('../shared/notifications.js')
       .then(({ showNotif }) => showNotif('Action impossible — voir la console.', 'error'))
       .catch(() => {});
   };
   try {
     const out = handler(el, event);
-    if (out && typeof out.catch === 'function') out.catch(fail);
+    if (out && typeof out.then === 'function') {
+      _setPending(el);
+      Promise.resolve(out)
+        .then(result => _dispatchSettled(el, action, result !== false))
+        .catch(fail)
+        .finally(() => _clearPending(el));
+    } else {
+      _dispatchSettled(el, action, out !== false);
+    }
   } catch (err) {
     fail(err);
   }
@@ -43,6 +83,7 @@ export function dispatchAction(btn, event) {
   const action = btn.dataset.action;
   const handler = ACTIONS[action];
   if (!handler) return false;
+  if (btn.dataset.actionPending === 'true') return true;
 
   if (btn.dataset.stopPropagation !== undefined) event.stopPropagation();
   _runHandler(handler, btn, event, action);

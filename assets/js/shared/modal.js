@@ -11,6 +11,11 @@ import {
 const _modalStack = [];
 let _activeDismiss = null;
 
+function _dispatchModalEvent(name) {
+  if (typeof document.dispatchEvent !== 'function' || typeof CustomEvent !== 'function') return;
+  document.dispatchEvent(new CustomEvent(name));
+}
+
 // ── Garde de fermeture (opt-in) ─────────────────────────────────────────────
 // Une feature peut poser un « garde » consulté par closeModalDirect lorsque la
 // modale de fond va réellement être fermée (✕, Échap, clic overlay). Les couches
@@ -20,8 +25,11 @@ let _activeDismiss = null;
 // Réinitialisé à chaque nouvelle modale de base (openModal) pour éviter un garde
 // périmé qui bloquerait une modale sans rapport.
 let _closeGuard = null;
+let _autoCloseGuard = null;
 export function setModalCloseGuard(fn) { _closeGuard = typeof fn === 'function' ? fn : null; }
 export function clearModalCloseGuard() { _closeGuard = null; }
+export function setAutomaticModalCloseGuard(fn) { _autoCloseGuard = typeof fn === 'function' ? fn : null; }
+export function clearAutomaticModalCloseGuard() { _autoCloseGuard = null; }
 
 function _dismissActiveLayer() {
   const dismiss = _activeDismiss;
@@ -126,10 +134,12 @@ export function openModal(title, bodyHtml, opts = {}) {
 
   _dismissAllLayers();
   _closeGuard = null;   // nouvelle modale de base → aucun garde hérité
+  _autoCloseGuard = null;
   _a11yOnShow();
   _applyModalHeader(title, opts);
   if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
   overlay?.classList.add('show');
+  _dispatchModalEvent('app:modal-opened');
   restoreViewContextAfterRender(bodyEl, viewContext, { includeFocus: true });
 }
 
@@ -154,6 +164,7 @@ export function pushModal(title, bodyHtml, restore = null, opts = {}) {
     // survivre à la modale précédemment fermée.
     _dismissAllLayers();
     _closeGuard = null;
+    _autoCloseGuard = null;
   }
   _activeDismiss = typeof opts.onDismiss === 'function' ? opts.onDismiss : null;
 
@@ -208,9 +219,16 @@ export function closeModalDirect() {
     try { blocked = _closeGuard() === true; } catch { blocked = false; }
     if (blocked) return;
   }
+  if (_autoCloseGuard) {
+    let blocked = false;
+    try { blocked = _autoCloseGuard() === true; } catch { blocked = false; }
+    if (blocked) return;
+  }
   _dismissActiveLayer();
   _closeGuard = null;
+  _autoCloseGuard = null;
   document.getElementById('modal-overlay')?.classList.remove('show');
+  _dispatchModalEvent('app:modal-closed');
   _a11yOnClose();
 }
 

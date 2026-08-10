@@ -2473,8 +2473,12 @@ function editStory(id){
   if(item) openStoryModal(item);
 }
 async function deleteStory(id){
-  if (!await confirmDelete('story', id, 'Supprimer cet élément de la trame ?')) return;
-  showNotif('Élément supprimé.','success');
+  const snapshot = (getCachedCollection('story') || []).find(item => item.id === id);
+  if (!await confirmDelete('story', id, 'Supprimer cet élément de la trame ?', {
+    snapshot,
+    successMessage: 'Élément supprimé.',
+    onRestore: () => PAGES.story(),
+  })) return;
   await PAGES.story();
 }
 

@@ -2064,8 +2064,12 @@ async function _savePlayerPresent(id = '') {
 }
 
 async function _deletePlayerPresent(id) {
-  if (!await confirmDelete('players', id, 'Supprimer cette présentation ?')) return;
-  showNotif('Présentation supprimée.', 'success');
+  const snapshot = STORE.presentations.find(p => p.id === id);
+  if (!await confirmDelete('players', id, 'Supprimer cette présentation ?', {
+    snapshot,
+    successMessage: 'Présentation supprimée.',
+    onRestore: () => PAGES.players(),
+  })) return;
   STORE.activeId = '';
   await PAGES.players();
 }

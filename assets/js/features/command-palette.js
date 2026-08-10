@@ -11,6 +11,7 @@ import { charSession } from '../shared/char-session.js';
 import { navigate } from '../core/navigation.js';
 import { isFeatureEnabled } from '../shared/features.js';
 import { getRecentNavigation, recordRecentNavigation } from '../shared/recent-navigation.js';
+import { characterAvatarHtml } from '../shared/portraits.js';
 
 const MAX_RESULTS = 30;
 
@@ -47,6 +48,41 @@ const PAGE_SHORTCUTS = [
   { id: 'aventures',    label: 'Aventures',       icon: '🗡️', aliases: 'campagne changer aventure switch sélectionner selectionner' },
   { id: 'account',      label: 'Mon compte',      icon: '👤', aliases: 'compte profil utilisateur préférences preferences' },
   { id: 'admin',        label: 'Console MJ',      icon: '⚙️', adminOnly: true, aliases: 'mj console gestion admin configuration' },
+];
+
+const QUICK_COMMANDS = [
+  {
+    id: 'keyboard-help', label: 'Afficher les raccourcis clavier', icon: '⌨️', page: '',
+    aliases: 'aide clavier commandes raccourcis touches', directAction: 'keyboard-help',
+  },
+  {
+    id: 'new-character', label: 'Créer un personnage', icon: '➕', page: 'characters',
+    selector: '[data-action="createNewChar"]', aliases: 'nouveau personnage fiche perso pj',
+  },
+  {
+    id: 'new-npc', label: 'Créer un PNJ', icon: '👤', page: 'npcs', adminOnly: true,
+    selector: '[data-action="npcCreate"]', aliases: 'nouveau pnj npc personnage non joueur',
+  },
+  {
+    id: 'new-mission', label: 'Créer une mission', icon: '📖', page: 'story', adminOnly: true,
+    selector: '[data-action="openStoryModal"]', aliases: 'nouvelle mission trame histoire scénario',
+  },
+  {
+    id: 'new-achievement', label: 'Créer un haut-fait', icon: '🏆', page: 'achievements', adminOnly: true,
+    selector: '[data-action="openAchievementModal"]', aliases: 'nouveau haut fait souvenir trophée',
+  },
+  {
+    id: 'new-beast', label: 'Créer une créature', icon: '🐉', page: 'bestiaire', adminOnly: true,
+    selector: '[data-bst-action="createDraft"]', aliases: 'nouvelle créature monstre bestiaire',
+  },
+  {
+    id: 'new-shop-item', label: 'Créer un article', icon: '🛒', page: 'shop', adminOnly: true,
+    selector: '[data-sh-action="openItemModal"]', aliases: 'nouvel objet boutique équipement',
+  },
+  {
+    id: 'new-adventure', label: 'Créer une aventure', icon: '🗡️', page: '',
+    aliases: 'nouvelle aventure campagne', directAction: 'create-adventure',
+  },
 ];
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -87,6 +123,28 @@ async function _loadEntries() {
 
   const entries = [];
 
+  // Already loaded during bootstrap: switching adventure adds no Firestore read.
+  for (const adventure of STATE.adventures || []) {
+    const title = _firstStr(adventure, ['nom', 'name']) || adventure.id;
+    entries.push({
+      type: 'adventure', typeLabel: 'Aventure', id: adventure.id, title,
+      subtitle: adventure.id === STATE.adventure?.id ? 'Aventure active' : "Changer d'aventure",
+      icon: adventure.emoji || '⚔️',
+      search: _norm([title, adventure.id, 'aventure campagne changer switch'].filter(Boolean).join(' ')),
+    });
+  }
+
+  for (const command of QUICK_COMMANDS) {
+    if (command.adminOnly && !STATE.isAdmin) continue;
+    if (command.page && !isFeatureEnabled(command.page)) continue;
+    entries.push({
+      type: 'command', typeLabel: 'Action', id: command.id,
+      title: command.label, subtitle: 'Action rapide', icon: command.icon,
+      search: _norm(`${command.label} ${command.aliases || ''}`),
+      payload: command,
+    });
+  }
+
   // Pages
   for (const p of PAGE_SHORTCUTS) {
     if (p.adminOnly && !STATE.isAdmin) continue;
@@ -106,6 +164,7 @@ async function _loadEntries() {
       type: 'npc', typeLabel: 'PNJ', id: n.id, title,
       subtitle: _firstStr(n, ['fonction', 'role', 'titre', 'description']),
       icon: '👤',
+      avatarHtml: characterAvatarHtml(n, { size: 32, className: 'cmd-palette-avatar' }),
       search: _norm([title, n.fonction, n.role, n.description, n.notes].filter(Boolean).join(' ')),
     });
   }
@@ -118,6 +177,7 @@ async function _loadEntries() {
       type: 'character', typeLabel: 'Personnage', id: c.id, title,
       subtitle: [c.classe, c.race, c.ownerPseudo].filter(Boolean).join(' · '),
       icon: '⚔️',
+      avatarHtml: characterAvatarHtml(c, { size: 32, className: 'cmd-palette-avatar' }),
       search: _norm([title, c.classe, c.race, c.ownerPseudo].filter(Boolean).join(' ')),
       payload: c,
     });
@@ -212,6 +272,10 @@ function _buildBestiaryEntries(bestiary) {
       type: 'beast', typeLabel: 'Bestiaire', id: b.id, title,
       subtitle: _firstStr(b, ['type', 'description', 'famille']),
       icon: '🐉',
+      avatarHtml: characterAvatarHtml({
+        ...b,
+        photo: _firstStr(b, ['photo', 'portrait', 'image', 'illustration', 'imageUrl']),
+      }, { size: 32, className: 'cmd-palette-avatar' }),
       search: _norm([title, b.type, b.famille, b.description].filter(Boolean).join(' ')),
     });
   }
@@ -264,10 +328,17 @@ function _filterAndSort(entries, query) {
         groupLabel: 'Récemment ouverts',
       }));
     const recentKeys = new Set(recent.map(entry => `${entry.type}:${entry.id}`));
+    const adventures = entries
+      .filter(entry => entry.type === 'adventure' && !recentKeys.has(`adventure:${entry.id}`))
+      .sort((a, b) => Number(b.id === STATE.adventure?.id) - Number(a.id === STATE.adventure?.id))
+      .map(entry => ({ ...entry, groupKey: 'adventure', groupLabel: 'Aventures' }));
+    const commands = entries
+      .filter(entry => entry.type === 'command' && !recentKeys.has(`command:${entry.id}`))
+      .map(entry => ({ ...entry, groupKey: 'command', groupLabel: 'Actions rapides' }));
     const pages = entries
       .filter(entry => entry.type === 'page' && !recentKeys.has(`page:${entry.id}`))
       .map(entry => ({ ...entry, groupKey: 'page', groupLabel: 'Pages' }));
-    return [...recent, ...pages].slice(0, MAX_RESULTS);
+    return [...recent, ...commands, ...adventures, ...pages].slice(0, MAX_RESULTS);
   }
   const scored = [];
   for (const e of entries) {
@@ -301,6 +372,36 @@ async function _executeEntry(entry) {
 
   try {
     switch (entry.type) {
+      case 'command': {
+        const command = entry.payload;
+        if (command?.directAction === 'keyboard-help') {
+          document.dispatchEvent(new CustomEvent('app:open-keyboard-help'));
+          return;
+        }
+        if (command?.directAction === 'create-adventure') {
+          const { openCreateAdventureModal } = await import('../core/init.js');
+          await openCreateAdventureModal();
+          return;
+        }
+        if (!command?.page || !command.selector) return;
+        await go(command.page);
+        await _nextTick();
+        const trigger = document.querySelector(command.selector);
+        if (!trigger) throw new Error(`Action rapide indisponible : ${command.id}`);
+        trigger.click();
+        return;
+      }
+
+      case 'adventure': {
+        if (entry.id === STATE.adventure?.id) {
+          await go('dashboard');
+          return;
+        }
+        const { pickAdventure } = await import('../core/init.js');
+        await pickAdventure(entry.id);
+        return;
+      }
+
       case 'page':
         await go(entry.id);
         return;
@@ -415,7 +516,7 @@ function _renderList() {
     const active = i === _activeIndex ? ' is-active' : '';
     html += `
       <div class="cmd-palette-row${active}" data-cmd-idx="${i}" role="option" aria-selected="${i===_activeIndex}">
-        <span class="cmd-palette-row-icon">${e.icon || '•'}</span>
+        ${e.avatarHtml || `<span class="cmd-palette-row-icon">${e.icon || '•'}</span>`}
         <div class="cmd-palette-row-text">
           <div class="cmd-palette-row-title">${_esc(e.title)}</div>
           ${e.subtitle ? `<div class="cmd-palette-row-sub">${_esc(e.subtitle)}</div>` : ''}

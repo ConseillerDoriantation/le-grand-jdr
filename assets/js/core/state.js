@@ -45,4 +45,13 @@ export function setSuperAdmin(v)      { STATE.isSuperAdmin = v;    }
 export function setPremium(v)         { STATE.isPremium    = v;    }
 export function setPage(p)            { STATE.currentPage  = p;    }
 export function setAdventures(arr)    { STATE.adventures   = arr;  }
-export function setAdventure(adv)     { STATE.adventure    = adv;  }
+export function setAdventure(adv)     {
+  const previousId = STATE.adventure?.id || null;
+  STATE.adventure = adv;
+  const nextId = adv?.id || null;
+  if (previousId !== nextId && typeof document !== 'undefined' && typeof CustomEvent !== 'undefined') {
+    document.dispatchEvent(new CustomEvent('app:adventure-changed', {
+      detail: { previousId, adventureId: nextId },
+    }));
+  }
+}
