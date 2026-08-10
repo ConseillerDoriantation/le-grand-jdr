@@ -28,16 +28,19 @@ const _ALL_DICE = [4, 6, 8, 10, 12, 20, 100];
 function _closeDicePanel() {
   const panel = document.getElementById('vtt-dice-panel');
   const btn   = document.getElementById('vtt-dice-trigger');
-  if (panel) { panel.dataset.open='0'; panel.style.display='none'; }
+  if (panel) { panel.dataset.open='0'; panel.style.display='none'; panel.setAttribute('aria-hidden', 'true'); }
   btn?.classList.remove('active');
+  btn?.setAttribute('aria-expanded', 'false');
   if (_diceCloseOut) { document.removeEventListener('mousedown', _diceCloseOut, true); _diceCloseOut=null; }
 }
 
 function _vttToggleDice() {
   const panel = document.getElementById('vtt-dice-panel'); if (!panel) return;
   if (panel.dataset.open==='1') { _closeDicePanel(); return; }
-  panel.dataset.open='1'; panel.style.display='flex';
-  document.getElementById('vtt-dice-trigger')?.classList.add('active');
+  panel.dataset.open='1'; panel.style.display='flex'; panel.setAttribute('aria-hidden', 'false');
+  const trigger = document.getElementById('vtt-dice-trigger');
+  trigger?.classList.add('active');
+  trigger?.setAttribute('aria-expanded', 'true');
   _renderDicePanel();
   _diceCloseOut = e => { const f=document.querySelector('.vtt-dice-float'); if(f&&!f.contains(e.target)) _closeDicePanel(); };
   document.addEventListener('mousedown', _diceCloseOut, true);

@@ -31,35 +31,87 @@ export function _vttPanelError(label, e, elId) {
 // ── Menu contextuel générique (clic-droit) ───────────────────────────────────
 // Pur DOM, sans état VTT → utilisable par vtt.js et les sous-modules (musique…).
 let _ctxClose = null;
+let _ctxRestoreFocus = null;
 const _CTX_ACTIONS = {};
 
-export function _hideCtxMenu() {
+export function _hideCtxMenu({ restoreFocus = false } = {}) {
   document.getElementById('vtt-ctx-menu')?.remove();
   if (_ctxClose) { document.removeEventListener('mousedown', _ctxClose); _ctxClose=null; }
+  const restore = _ctxRestoreFocus;
+  _ctxRestoreFocus = null;
+  if (restoreFocus && restore?.isConnected) restore.focus({ preventScroll: true });
 }
 
 export function _showCtxMenu(x, y, items) {
   _hideCtxMenu();
+  _ctxRestoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  Object.keys(_CTX_ACTIONS).forEach(key => delete _CTX_ACTIONS[key]);
   const el=document.createElement('div');
   el.id='vtt-ctx-menu'; el.className='vtt-ctx-menu';
+  el.setAttribute('role', 'menu');
+  el.setAttribute('aria-label', 'Actions contextuelles');
   let idx=0;
   el.innerHTML=items.map(item=>{
-    if (item==='---') return '<div class="vtt-ctx-sep"></div>';
+    if (item==='---') return '<div class="vtt-ctx-sep" role="separator"></div>';
+    if (typeof item.fn !== 'function') return `<div class="vtt-ctx-label">${item.label}</div>`;
     const i=idx++;
     _CTX_ACTIONS[i]=item.fn;
-    return `<div class="vtt-ctx-item" data-i="${i}">${item.label}</div>`;
+    return `<button type="button" class="vtt-ctx-item" role="menuitem" tabindex="-1" data-i="${i}">${item.label}</button>`;
   }).join('');
   el.addEventListener('click', e=>{
     const i=e.target.closest('.vtt-ctx-item')?.dataset.i;
     if (i!=null) { _CTX_ACTIONS[+i]?.(); _hideCtxMenu(); }
   });
+  el.addEventListener('keydown', e => {
+    const menuItems = [...el.querySelectorAll('.vtt-ctx-item')];
+    const current = menuItems.indexOf(document.activeElement);
+    let next = null;
+    if (e.key === 'ArrowDown') next = (current + 1) % menuItems.length;
+    else if (e.key === 'ArrowUp') next = (current - 1 + menuItems.length) % menuItems.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = menuItems.length - 1;
+    else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      document.activeElement?.click();
+      return;
+    }
+    else if (e.key === 'Escape') {
+      e.preventDefault();
+      _hideCtxMenu({ restoreFocus: true });
+      return;
+    }
+    if (next != null && menuItems[next]) {
+      e.preventDefault();
+      menuItems.forEach((item, index) => { item.tabIndex = index === next ? 0 : -1; });
+      menuItems[next].focus({ preventScroll: true });
+    }
+  });
+  el.addEventListener('focusout', () => {
+    queueMicrotask(() => {
+      if (el.isConnected && !el.contains(document.activeElement)) _hideCtxMenu();
+    });
+  });
   // Positionner en évitant de sortir de l'écran
-  el.style.cssText=`left:${x}px;top:${y}px;visibility:hidden`;
+  let posX = Number(x) || 0;
+  let posY = Number(y) || 0;
+  if (posX <= 0 && posY <= 0 && _ctxRestoreFocus && _ctxRestoreFocus !== document.body) {
+    const anchor = _ctxRestoreFocus.getBoundingClientRect();
+    posX = anchor.left;
+    posY = anchor.bottom;
+  }
+  el.style.cssText=`left:${posX}px;top:${posY}px;visibility:hidden`;
   document.body.appendChild(el);
   const r=el.getBoundingClientRect(), vw=window.innerWidth, vh=window.innerHeight;
-  const left = r.right  > vw ? Math.max(0, x - r.width)  : x;
-  const top  = r.bottom > vh ? Math.max(0, y - r.height) : y;
+  const left = r.right  > vw ? Math.max(0, posX - r.width)  : Math.max(0, posX);
+  const top  = r.bottom > vh ? Math.max(0, posY - r.height) : Math.max(0, posY);
   el.style.cssText=`left:${left}px;top:${top}px;`;
   _ctxClose=e=>{ if (!el.contains(e.target)) _hideCtxMenu(); };
-  requestAnimationFrame(()=>document.addEventListener('mousedown',_ctxClose));
+  requestAnimationFrame(() => {
+    document.addEventListener('mousedown', _ctxClose);
+    const first = el.querySelector('.vtt-ctx-item');
+    if (first) {
+      first.tabIndex = 0;
+      first.focus({ preventScroll: true });
+    }
+  });
 }

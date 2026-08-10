@@ -289,12 +289,45 @@ function _vttIsTypingTarget(target) {
   );
 }
 
+function _vttSetActionPending(el) {
+  if (!el || el.dataset.actionPending === 'true') return false;
+  el.dataset.actionPending = 'true';
+  el.dataset.pendingWasDisabled = el.disabled ? 'true' : 'false';
+  el.setAttribute('aria-busy', 'true');
+  if ('disabled' in el) el.disabled = true;
+  el.classList.add('is-action-pending');
+  el._pendingTimer = setTimeout(() => {
+    if (el.dataset.actionPending === 'true') el.classList.add('is-action-pending-visible');
+  }, 180);
+  return true;
+}
+
+function _vttClearActionPending(el) {
+  clearTimeout(el?._pendingTimer);
+  if (!el || el.dataset.actionPending !== 'true') return;
+  delete el._pendingTimer;
+  if ('disabled' in el && el.dataset.pendingWasDisabled !== 'true') el.disabled = false;
+  delete el.dataset.pendingWasDisabled;
+  delete el.dataset.actionPending;
+  el.removeAttribute('aria-busy');
+  el.classList.remove('is-action-pending', 'is-action-pending-visible');
+}
+
+function _vttReportActionFailure(action, error) {
+  console.error(`[vtt] action ${action}`, error);
+  showNotif('Action impossible — réessaie dans un instant.', 'error');
+}
+
 function _vttBindDispatch() {
   if (_vttBindDispatch._bound) return;
   _vttBindDispatch._bound = true;
   const dispatch = (e) => {
     const el = e.target.closest('[data-vtt-fn]');
     if (!el) return;
+    if (el.dataset.actionPending === 'true') {
+      if (e.type === 'click' || e.type === 'keydown') e.preventDefault();
+      return;
+    }
     const expectedOn = el.dataset.vttOn || 'click';
     if (expectedOn === 'keydown-enter') {
       if (e.type !== 'keydown' || e.key !== 'Enter') return;
@@ -311,7 +344,20 @@ function _vttBindDispatch() {
     const args = (argsStr === undefined || argsStr === '')
       ? []
       : argsStr.split('|').map(a => a === '$event' ? e : _vttResolveArg(a, el));
-    fn(...args);
+    try {
+      const output = fn(...args);
+      if (output && typeof output.then === 'function') {
+        const showPending = expectedOn === 'click' || expectedOn === 'keydown-enter';
+        if (showPending) _vttSetActionPending(el);
+        Promise.resolve(output)
+          .catch(error => _vttReportActionFailure(el.dataset.vttFn, error))
+          .finally(() => {
+            if (showPending) _vttClearActionPending(el);
+          });
+      }
+    } catch (error) {
+      _vttReportActionFailure(el.dataset.vttFn, error);
+    }
     if (el.dataset.vttBlur !== undefined) el.blur();
   };
   document.addEventListener('click',       dispatch, true);
@@ -4763,9 +4809,9 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   const totalCount = tabs.reduce((s, t) => s + t.count, 0);
   const showTabs = tabs.length > 1;
   const tabsHtml = showTabs ? `
-    <div class="vtt-aopt-tabs" role="tablist">
+    <div class="vtt-aopt-tabs" role="tablist" aria-label="Catégories d'actions">
       <button type="button" class="vtt-aopt-tab is-active" data-tab="__all" style="--tab-col:#f59e0b"
-        data-vtt-fn="_vttAoptFilter" data-vtt-args="__all|$this">
+        data-vtt-fn="_vttAoptFilter" data-vtt-args="__all|$this" role="tab" aria-selected="true">
         <span class="vtt-aopt-tab-ic">⚡</span>
         <span class="vtt-aopt-tab-lbl">Tous</span>
         <span class="vtt-aopt-tab-cnt">${totalCount}</span>
@@ -4773,7 +4819,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       ${tabs.map(t => `
         <button type="button" class="vtt-aopt-tab" data-tab="${t.id}"
           style="--tab-col:${t.color}"
-          data-vtt-fn="_vttAoptFilter" data-vtt-args="${t.id}|$this">
+          data-vtt-fn="_vttAoptFilter" data-vtt-args="${t.id}|$this" role="tab" aria-selected="false">
           <span class="vtt-aopt-tab-ic">${t.icon}</span>
           <span class="vtt-aopt-tab-lbl">${_esc(t.title)}</span>
           <span class="vtt-aopt-tab-cnt">${t.count}</span>
@@ -4900,8 +4946,11 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
 
 /** Filtre les sections du picker d'actions par tab. '__all' = tout afficher. */
 function _vttAoptFilter(tabId, btn) {
-  document.querySelectorAll('.vtt-aopt-tab').forEach(b => b.classList.remove('is-active'));
-  btn?.classList.add('is-active');
+  document.querySelectorAll('.vtt-aopt-tab').forEach((b) => {
+    const active = b === btn;
+    b.classList.toggle('is-active', active);
+    b.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
   document.querySelectorAll('.vtt-aopt-section').forEach(s => {
     s.style.display = (tabId === '__all' || s.dataset.tabId === tabId) ? '' : 'none';
   });
@@ -4950,21 +4999,21 @@ function _vttAttackModeControlsHtml(comment = 'Sélecteur de mode') {
     <div class="vtt-atk-mode">
       <div class="vtt-atk-mode-label">Mode de lancer</div>
       <div class="vtt-atk-mode-toggle" role="group" aria-label="Mode de lancer">
-        <button id="atk-mode-dis" class="vtt-atk-mode-btn is-dis" data-vtt-fn="_vttSetMode" data-vtt-args="dis">
+        <button id="atk-mode-dis" class="vtt-atk-mode-btn is-dis" data-vtt-fn="_vttSetMode" data-vtt-args="dis" aria-pressed="false">
           <span class="vtt-atk-mode-icon">−</span>
           <span class="vtt-atk-mode-copy">
             <strong>Désavantage</strong>
             <small>Garde le plus bas</small>
           </span>
         </button>
-        <button id="atk-mode-normal" class="vtt-atk-mode-btn is-normal is-active" data-vtt-fn="_vttSetMode" data-vtt-args="normal">
+        <button id="atk-mode-normal" class="vtt-atk-mode-btn is-normal is-active" data-vtt-fn="_vttSetMode" data-vtt-args="normal" aria-pressed="true">
           <span class="vtt-atk-mode-icon">•</span>
           <span class="vtt-atk-mode-copy">
             <strong>Normal</strong>
             <small>1d20</small>
           </span>
         </button>
-        <button id="atk-mode-adv" class="vtt-atk-mode-btn is-adv" data-vtt-fn="_vttSetMode" data-vtt-args="adv">
+        <button id="atk-mode-adv" class="vtt-atk-mode-btn is-adv" data-vtt-fn="_vttSetMode" data-vtt-args="adv" aria-pressed="false">
           <span class="vtt-atk-mode-icon">+</span>
           <span class="vtt-atk-mode-copy">
             <strong>Avantage</strong>
@@ -5453,7 +5502,9 @@ function _vttSetMode(mode) {
   ['dis','normal','adv'].forEach(m => {
     const el = document.getElementById(`atk-mode-${m}`);
     if (!el) return;
-    el.classList.toggle('is-active', m === mode);
+    const active = m === mode;
+    el.classList.toggle('is-active', active);
+    el.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
   const inp = document.getElementById('atk-mode');
   if (inp) inp.value = mode;
@@ -7829,8 +7880,43 @@ function _ungroupAnnot(id) {
 // Supprimer la sélection (ou juste `fallbackId` si non sélectionné).
 function _deleteSelectedAnnots(fallbackId) {
   const toDelete = _selectedAnnotIds.has(fallbackId) ? [..._selectedAnnotIds] : [fallbackId];
-  toDelete.forEach(id => deleteDoc(_annotRef(id)).catch(() => {}));
+  void _deleteAnnotsWithUndo(toDelete);
+}
+
+async function _deleteAnnotsWithUndo(ids) {
+  const snapshots = [...new Set(ids)]
+    .map(id => ({ id, data: _annotations[id]?.data }))
+    .filter(entry => entry.data)
+    .map(({ id, data }) => ({ id, data: { ...data } }));
+  if (!snapshots.length) return false;
+
+  const results = await Promise.allSettled(snapshots.map(({ id }) => deleteDoc(_annotRef(id))));
+  const removed = snapshots.filter((_, index) => results[index].status === 'fulfilled');
+  const failures = results.filter(result => result.status === 'rejected');
+  failures.forEach(result => console.error('[vtt] delete annotation:', result.reason));
+  if (!removed.length) {
+    showNotif('Impossible de supprimer la sélection.', 'error');
+    return false;
+  }
+
   _deselectAnnot();
+  const count = removed.length;
+  const suffix = failures.length ? ` · ${failures.length} échec${failures.length > 1 ? 's' : ''}` : '';
+  showNotif(`${count} dessin${count > 1 ? 's' : ''} supprimé${count > 1 ? 's' : ''}${suffix}.`, failures.length ? 'warning' : 'success', {
+    duration: 7000,
+    action: {
+      label: '↶ Annuler',
+      onClick: async () => {
+        await Promise.all(removed.map(({ id, data }) => {
+          const payload = { ...data };
+          delete payload.id;
+          return setDoc(_annotRef(id), payload);
+        }));
+        showNotif('Suppression des dessins annulée.', 'success');
+      },
+    },
+  });
+  return true;
 }
 
 export function _renderAnnotLayer() {
@@ -8585,8 +8671,11 @@ function _vttToggleDrawFill() {
 async function _vttClearAnnots() {
   if (!VS.activePage) return;
   if (!await confirmModal('Effacer toutes les annotations de cette page ?')) return;
-  const toDelete = Object.values(_annotations).filter(e => e.data.pageId === VS.activePage.id);
-  await Promise.all(toDelete.map(e => deleteDoc(_annotRef(e.data.id)).catch(()=>{})));
+  const ids = Object.values(_annotations)
+    .filter(entry => entry.data.pageId === VS.activePage.id)
+    .map(entry => entry.data.id);
+  if (!ids.length) { showNotif('Aucune annotation à effacer.', 'info'); return; }
+  await _deleteAnnotsWithUndo(ids);
 }
 
 // Presets de taille communs aux modales création / édition (préfixe vpf-/vpe-)
@@ -8814,9 +8903,40 @@ async function _vttRetireMyToken(tokenId) {
   const tok = tokenId ? onScene.find(t => t.id === tokenId) : (onScene.length === 1 ? onScene[0] : null);
   if (!tok) { _vttMyTokenPicker(onScene, '_vttRetireMyToken', '📦 Quel personnage ranger ?', '<span style="color:var(--text-muted)">📦 Ranger</span>'); return; }
   if (tokenId) closeModalDirect();
-  await updateDoc(_tokRef(tok.id),{pageId:null,visible:false})
-    .catch(err => { console.error('[vtt] rangement:', err); showNotif('Erreur rangement','error'); });
-  if (VS.selected===tok.id) _deselect();
+  await _vttSendTokensToReserve([tok.id]);
+}
+
+async function _vttSendTokensToReserve(ids) {
+  const uid = STATE.user?.uid;
+  const snapshots = [...new Set(ids)]
+    .map(id => VS.tokens[id]?.data)
+    .filter(token => token && (STATE.isAdmin || token.ownerId === uid))
+    .map(token => ({ id: token.id, pageId: token.pageId ?? null, visible: token.visible !== false }));
+  if (!snapshots.length) return false;
+
+  const results = await Promise.allSettled(snapshots.map(({ id }) => updateDoc(_tokRef(id), { pageId: null, visible: false })));
+  const removed = snapshots.filter((_, index) => results[index].status === 'fulfilled');
+  const failures = results.filter(result => result.status === 'rejected');
+  failures.forEach(result => console.error('[vtt] rangement:', result.reason));
+  if (!removed.length) {
+    showNotif('Impossible de retirer la sélection de la carte.', 'error');
+    return false;
+  }
+
+  _deselect();
+  const count = removed.length;
+  const suffix = failures.length ? ` · ${failures.length} échec${failures.length > 1 ? 's' : ''}` : '';
+  showNotif(`${count} token${count > 1 ? 's' : ''} placé${count > 1 ? 's' : ''} en réserve${suffix}.`, failures.length ? 'warning' : 'success', {
+    duration: 7000,
+    action: {
+      label: '↶ Annuler',
+      onClick: async () => {
+        await Promise.all(removed.map(({ id, pageId, visible }) => updateDoc(_tokRef(id), { pageId, visible })));
+        showNotif('Retrait de la carte annulé.', 'success');
+      },
+    },
+  });
+  return true;
 }
 // Sélecteur générique d'un de mes personnages (invoquer / ranger).
 function _vttMyTokenPicker(toks, fn, title, actionHtml) {
@@ -9767,7 +9887,11 @@ async function _handleUpload(file) {
 // ── Outil + clavier ─────────────────────────────────────────────────
 function _setTool(tool) {
   VS.tool = tool;
-  document.querySelectorAll('.vtt-tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+  document.querySelectorAll('.vtt-tool[data-tool]').forEach((b) => {
+    const active = b.dataset.tool === tool;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
   // Draw bar
   const drawBar = document.getElementById('vtt-draw-bar');
   if (drawBar) drawBar.style.display = tool === 'draw' ? 'flex' : 'none';
@@ -9875,17 +9999,54 @@ async function _vttPasteClipboard() {
 // repos, émotes) ou le HUD d'action. Renvoie true si quelque chose a été fermé.
 function _vttEscapeCloseFloaters() {
   const panels = [
-    ['vtt-dice-panel',  _closeDicePanel],
-    ['vtt-music-panel', _closeMusicPanel],
-    ['vtt-loot-panel',  _closeLootPanel],
-    ['vtt-rest-panel',  _closeShortRest],
+    ['vtt-dice-panel',  'vtt-dice-trigger',  _closeDicePanel],
+    ['vtt-music-panel', 'vtt-music-trigger', _closeMusicPanel],
+    ['vtt-loot-panel',  'vtt-loot-trigger',  _closeLootPanel],
+    ['vtt-rest-panel',  'vtt-rest-trigger',  _closeShortRest],
   ];
-  for (const [id, close] of panels) {
-    if (document.getElementById(id)?.dataset.open === '1') { close(); return true; }
+  for (const [id, triggerId, close] of panels) {
+    if (document.getElementById(id)?.dataset.open === '1') {
+      close();
+      document.getElementById(triggerId)?.focus({ preventScroll: true });
+      return true;
+    }
   }
-  if (document.getElementById('vtt-emote-picker')?.classList.contains('open')) { _closeEmotePicker(); return true; }
+  if (document.getElementById('vtt-emote-picker')?.classList.contains('open')) {
+    _closeEmotePicker();
+    document.querySelector('.vtt-emote-trigger')?.focus({ preventScroll: true });
+    return true;
+  }
   if (document.getElementById('vtt-action-hud')?.classList.contains('show'))    { _hideActBar();      return true; }
   return false;
+}
+
+async function _vttConfirmDeleteMapImage() {
+  const page = VS.activePage;
+  const imageId = VS.selImg;
+  if (!STATE.isAdmin || !page || !imageId || !VS.mapMode) return false;
+  const image = (page.backgroundImages || []).find(entry => entry.id === imageId);
+  if (!image) return false;
+  if (!await confirmModal('Retirer cette image de la carte ?', {
+    title: 'Image de carte',
+    confirmLabel: 'Retirer',
+    cancelLabel: 'Conserver',
+  })) return false;
+
+  try {
+    const images = (page.backgroundImages || []).filter(entry => entry.id !== imageId);
+    await updateDoc(_pgRef(page.id), { backgroundImages: images });
+    VS.selImg = null;
+    VS.imgTr?.nodes([]);
+    VS.imgTrFg?.nodes([]);
+    VS.layers.map?.batchDraw();
+    VS.layers.mapFg?.batchDraw();
+    showNotif('Image retirée de la carte.', 'success');
+    return true;
+  } catch (error) {
+    console.error('[vtt] suppr image carte:', error);
+    showNotif("Échec de la suppression de l'image de carte", 'error');
+    return false;
+  }
 }
 
 function _keyHandler(e) {
@@ -9936,31 +10097,19 @@ function _keyHandler(e) {
     // 1) Annotations sélectionnées
     if (_selectedAnnotIds.size > 0) {
       e.preventDefault();
-      [..._selectedAnnotIds].forEach(id => deleteDoc(_annotRef(id)).catch(()=>{}));
-      _deselectAnnot();
+      void _deleteAnnotsWithUndo([..._selectedAnnotIds]);
     }
     // 2) Image de carte sélectionnée (MJ, mode édition)
     else if (STATE.isAdmin && VS.selImg && VS.mapMode && VS.activePage) {
       e.preventDefault();
-      const imgs = (VS.activePage.backgroundImages ?? []).filter(i => i.id !== VS.selImg);
-      updateDoc(_pgRef(VS.activePage.id), { backgroundImages: imgs }).catch(e=>{ console.error('[vtt] suppr image carte', e); showNotif("Échec de la suppression de l'image de carte", 'error'); });
-      VS.selImg = null;
-      VS.imgTr?.nodes([]); VS.imgTrFg?.nodes([]);
-      VS.layers.map?.batchDraw(); VS.layers.mapFg?.batchDraw();
+      void _vttConfirmDeleteMapImage();
     }
     // 3) Tokens sélectionnés → retrait du canvas (pageId=null)
     else {
       const ids = VS.selectedMulti.size > 0 ? [...VS.selectedMulti] : (VS.selected ? [VS.selected] : []);
       if (ids.length) {
         e.preventDefault();
-        const uid = STATE.user?.uid;
-        for (const id of ids) {
-          const t = VS.tokens[id]?.data; if (!t) continue;
-          if (STATE.isAdmin || t.ownerId === uid) {
-            updateDoc(_tokRef(id), { pageId: null, visible: false }).catch(()=>{});
-          }
-        }
-        _deselect();
+        void _vttSendTokensToReserve(ids);
       }
     }
   }
@@ -10032,25 +10181,25 @@ function _buildHtml() {
     <div class="vtt-mini-panel" id="vtt-mini-panel"></div>
     ${mj?`
     <div class="vtt-tray" id="vtt-tray">
-      <div class="vtt-tray-tabs" role="tablist">
-        <button class="vtt-tray-tab${_trayTab==='scenes'?' active':''}" data-tab="scenes" data-vtt-fn="_vttTrayTab" data-vtt-args="scenes" title="Scènes &amp; pages"><span class="vtt-tt-ic">🗺</span>Scènes</button>
-        <button class="vtt-tray-tab${_trayTab==='reserve'?' active':''}" data-tab="reserve" data-vtt-fn="_vttTrayTab" data-vtt-args="reserve" title="Réserve (joueurs / PNJ)"><span class="vtt-tt-ic">👥</span>Réserve</button>
-        <button class="vtt-tray-tab${_trayTab==='bestiary'?' active':''}" data-tab="bestiary" data-vtt-fn="_vttTrayTab" data-vtt-args="bestiary" title="Bestiaire"><span class="vtt-tt-ic">🐾</span>Bestiaire</button>
-        <button class="vtt-tray-tab${_trayTab==='images'?' active':''}" data-tab="images" data-vtt-fn="_vttTrayTab" data-vtt-args="images" title="Bibliothèque d'images"><span class="vtt-tt-ic">🖼</span>Images</button>
+      <div class="vtt-tray-tabs" role="tablist" aria-label="Panneau du maître de jeu">
+        <button id="vtt-tray-tab-scenes" class="vtt-tray-tab${_trayTab==='scenes'?' active':''}" data-tab="scenes" data-vtt-fn="_vttTrayTab" data-vtt-args="scenes" title="Scènes &amp; pages" role="tab" aria-selected="${_trayTab === 'scenes'}" aria-controls="vtt-tray-view-scenes"><span class="vtt-tt-ic">🗺</span>Scènes</button>
+        <button id="vtt-tray-tab-reserve" class="vtt-tray-tab${_trayTab==='reserve'?' active':''}" data-tab="reserve" data-vtt-fn="_vttTrayTab" data-vtt-args="reserve" title="Réserve (joueurs / PNJ)" role="tab" aria-selected="${_trayTab === 'reserve'}" aria-controls="vtt-tray-view-reserve"><span class="vtt-tt-ic">👥</span>Réserve</button>
+        <button id="vtt-tray-tab-bestiary" class="vtt-tray-tab${_trayTab==='bestiary'?' active':''}" data-tab="bestiary" data-vtt-fn="_vttTrayTab" data-vtt-args="bestiary" title="Bestiaire" role="tab" aria-selected="${_trayTab === 'bestiary'}" aria-controls="vtt-tray-view-bestiary"><span class="vtt-tt-ic">🐾</span>Bestiaire</button>
+        <button id="vtt-tray-tab-images" class="vtt-tray-tab${_trayTab==='images'?' active':''}" data-tab="images" data-vtt-fn="_vttTrayTab" data-vtt-args="images" title="Bibliothèque d'images" role="tab" aria-selected="${_trayTab === 'images'}" aria-controls="vtt-tray-view-images"><span class="vtt-tt-ic">🖼</span>Images</button>
       </div>
       <div class="vtt-tray-views">
-        <div class="vtt-tray-view${_trayTab==='scenes'?' active':''}" data-view="scenes">
+        <div id="vtt-tray-view-scenes" class="vtt-tray-view${_trayTab==='scenes'?' active':''}" data-view="scenes" role="tabpanel" aria-labelledby="vtt-tray-tab-scenes" ${_trayTab === 'scenes' ? '' : 'hidden'}>
           <div class="vtt-tray-section-hd"><span>Pilotage des scènes</span></div>
           <div id="vtt-tray-pages">${loadingHtml('Chargement…', { compact: true })}</div>
           <div class="vtt-tray-section-hd vtt-scene-tok-hd"><span>🗺 Sur la scène</span></div>
           <div id="vtt-scene-tokens"></div>
         </div>
-        <div class="vtt-tray-view${_trayTab==='reserve'?' active':''}" data-view="reserve"><div id="vtt-reserve-body"></div></div>
-        <div class="vtt-tray-view${_trayTab==='bestiary'?' active':''}" data-view="bestiary">
+        <div id="vtt-tray-view-reserve" class="vtt-tray-view${_trayTab==='reserve'?' active':''}" data-view="reserve" role="tabpanel" aria-labelledby="vtt-tray-tab-reserve" ${_trayTab === 'reserve' ? '' : 'hidden'}><div id="vtt-reserve-body"></div></div>
+        <div id="vtt-tray-view-bestiary" class="vtt-tray-view${_trayTab==='bestiary'?' active':''}" data-view="bestiary" role="tabpanel" aria-labelledby="vtt-tray-tab-bestiary" ${_trayTab === 'bestiary' ? '' : 'hidden'}>
           <div class="vtt-tray-section-hd"><span>👹 Bestiaire</span><button class="vtt-tray-add-btn" data-vtt-fn="_vttCreateEnemy" title="Créer un ennemi">＋</button></div>
           <div id="vtt-bestiary-body"></div>
         </div>
-        <div class="vtt-tray-view${_trayTab==='images'?' active':''}" data-view="images">
+        <div id="vtt-tray-view-images" class="vtt-tray-view${_trayTab==='images'?' active':''}" data-view="images" role="tabpanel" aria-labelledby="vtt-tray-tab-images" ${_trayTab === 'images' ? '' : 'hidden'}>
           <div id="vtt-tray-library"></div>
         </div>
       </div>
@@ -10215,13 +10364,14 @@ async function _vttMountTable(content) {
   const _tf = document.createElement('div');
   _tf.className = 'vtt-tool-float';
   _tf.innerHTML = `
-    <div class="vtt-tool-float-tools">
+    <div class="vtt-tool-float-tools" role="toolbar" aria-label="Outils de la table virtuelle">
       <button class="vtt-tool" data-vtt-fn="_vttCenterOnMyToken" title="Recentrer sur mon personnage" aria-label="Recentrer sur mon personnage">⌖</button>
-      <button class="vtt-tool active" data-tool="select" data-vtt-fn="_vttTool" data-vtt-args="select" title="↖ Sélection">↖</button>
-      <button class="vtt-tool" data-tool="ruler"  data-vtt-fn="_vttTool" data-vtt-args="ruler"  title="📏 Règle (R) — clic gauche pour mesurer · clic droit pour annuler">📏</button>
-      <button class="vtt-tool" data-tool="draw"   data-vtt-fn="_vttTool" data-vtt-args="draw"   title="✏️ Dessin">✏️</button>
+      <button class="vtt-tool" data-vtt-fn="_vttOpenKeyboardHelp" title="Raccourcis clavier (?)" aria-label="Afficher les raccourcis clavier">?</button>
+      <button class="vtt-tool active" data-tool="select" data-vtt-fn="_vttTool" data-vtt-args="select" title="↖ Sélection" aria-pressed="true">↖</button>
+      <button class="vtt-tool" data-tool="ruler"  data-vtt-fn="_vttTool" data-vtt-args="ruler"  title="📏 Règle (R) — clic gauche pour mesurer · clic droit pour annuler" aria-pressed="false">📏</button>
+      <button class="vtt-tool" data-tool="draw"   data-vtt-fn="_vttTool" data-vtt-args="draw"   title="✏️ Dessin" aria-pressed="false">✏️</button>
       ${STATE.isAdmin ? (_vttAdvancedPremium()
-        ? `<button class="vtt-tool" data-tool="walls" data-vtt-fn="_vttTool" data-vtt-args="walls" title="🧱 Murs / Éclairage dynamique">🧱</button>`
+        ? `<button class="vtt-tool" data-tool="walls" data-vtt-fn="_vttTool" data-vtt-args="walls" title="🧱 Murs / Éclairage dynamique" aria-pressed="false">🧱</button>`
         : `<button class="vtt-tool vtt-tool-premium" data-vtt-fn="_vttPremiumInfo" title="Premium : murs, brouillard et éclairage dynamique">🧱</button>`) : ''}
     </div>
     <div id="vtt-draw-bar" class="vtt-draw-bar" style="display:none">
@@ -10315,39 +10465,39 @@ async function _vttMountTable(content) {
   _renderCombatTracker();
   const _ef = document.createElement('div');
   _ef.className = 'vtt-emote-float';
-  _ef.innerHTML = `<div class="vtt-emote-picker" id="vtt-emote-picker"></div>
-    <button class="vtt-emote-trigger" data-vtt-fn="_vttToggleEmotePicker" title="Émotes">😄</button>`;
+  _ef.innerHTML = `<div class="vtt-emote-picker" id="vtt-emote-picker" role="dialog" aria-label="Choisir une émote" aria-hidden="true"></div>
+    <button class="vtt-emote-trigger" data-vtt-fn="_vttToggleEmotePicker" title="Émotes" aria-expanded="false" aria-controls="vtt-emote-picker">😄</button>`;
   wrap.appendChild(_ef);
   // Float Butin (bas-gauche du canvas)
   const _lf = document.createElement('div');
   _lf.className = 'vtt-loot-float';
   _lf.innerHTML = `
-    <div class="vtt-loot-panel" id="vtt-loot-panel" data-open="0" style="display:none"></div>
-    <button class="vtt-loot-trigger" id="vtt-loot-trigger" data-vtt-fn="_vttToggleLoot" title="Butin d'aventure">💰</button>`;
+    <div class="vtt-loot-panel" id="vtt-loot-panel" data-open="0" style="display:none" role="dialog" aria-label="Butin d'aventure" aria-hidden="true"></div>
+    <button class="vtt-loot-trigger" id="vtt-loot-trigger" data-vtt-fn="_vttToggleLoot" title="Butin d'aventure" aria-expanded="false" aria-controls="vtt-loot-panel">💰</button>`;
   wrap.appendChild(_lf);
   // Float Lanceur de dés (bas-gauche du canvas, 3e bouton)
   const _drf = document.createElement('div');
   _drf.className = 'vtt-dice-float';
   _drf.innerHTML = `
-    <div class="vtt-dice-panel" id="vtt-dice-panel" data-open="0" style="display:none"></div>
-    <button class="vtt-dice-trigger" id="vtt-dice-trigger" data-vtt-fn="_vttToggleDice" title="Lancer des dés libres">🎲</button>`;
+    <div class="vtt-dice-panel" id="vtt-dice-panel" data-open="0" style="display:none" role="dialog" aria-label="Lancer des dés libres" aria-hidden="true"></div>
+    <button class="vtt-dice-trigger" id="vtt-dice-trigger" data-vtt-fn="_vttToggleDice" title="Lancer des dés libres" aria-expanded="false" aria-controls="vtt-dice-panel">🎲</button>`;
   wrap.appendChild(_drf);
   // Float Musique (bas-gauche du canvas, 4e bouton)
   const _mf = document.createElement('div');
   _mf.className = 'vtt-music-float';
   _mf.innerHTML = `
-    <div class="vtt-music-panel" id="vtt-music-panel" data-open="0" style="display:none"></div>
-    <button class="vtt-music-trigger" id="vtt-music-trigger" data-vtt-fn="_vttToggleMusic" title="Sons &amp; Musique">🎵</button>`;
+    <div class="vtt-music-panel" id="vtt-music-panel" data-open="0" style="display:none" role="dialog" aria-label="Sons et musique" aria-hidden="true"></div>
+    <button class="vtt-music-trigger" id="vtt-music-trigger" data-vtt-fn="_vttToggleMusic" title="Sons &amp; Musique" aria-expanded="false" aria-controls="vtt-music-panel">🎵</button>`;
   wrap.appendChild(_mf);
   // Float Court repos (bas-gauche du canvas, 5e bouton)
   const _rf = document.createElement('div');
   _rf.className = 'vtt-rest-float';
   _rf.innerHTML = `
-    <div class="vtt-rest-panel" id="vtt-rest-panel" data-open="0" style="display:none">
+    <div class="vtt-rest-panel" id="vtt-rest-panel" data-open="0" style="display:none" role="dialog" aria-label="Court repos du groupe" aria-hidden="true">
       <div class="vtt-rest-header">💤 Court repos</div>
       <div class="vtt-rest-body" id="vtt-rest-body"></div>
     </div>
-    <button class="vtt-rest-trigger" id="vtt-rest-trigger" data-vtt-fn="_vttToggleShortRest" title="Court repos du groupe">💤 0/0</button>`;
+    <button class="vtt-rest-trigger" id="vtt-rest-trigger" data-vtt-fn="_vttToggleShortRest" title="Court repos du groupe" aria-expanded="false" aria-controls="vtt-rest-panel">💤 0/0</button>`;
   wrap.appendChild(_rf);
   document.addEventListener('keydown',_keyHandler);
   document.getElementById('vtt-img-input')?.addEventListener('change',e=>{
@@ -10385,6 +10535,7 @@ PAGES.vtt=renderVttPage;
 
 // Registre des actions pour le dispatcher data-vtt-fn
 export const VTT_ACTIONS = {
+  _vttOpenKeyboardHelp: () => document.dispatchEvent(new CustomEvent('app:open-keyboard-help')),
   _vttDismissRotate: () => {
     _vttRotateDismissed = true;
     try { sessionStorage.setItem('vtt-rotate-dismissed', '1'); } catch {}

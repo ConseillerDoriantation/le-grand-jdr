@@ -1716,14 +1716,18 @@ function _achRenderContentPreserveViewport() {
 function _achSetFilter(filter) {
   STORE.filter = filter;
   document.querySelectorAll('.hall-filter-card').forEach(el => {
-    el.classList.toggle('active', el.dataset.filter === filter);
+    const active = el.dataset.filter === filter;
+    el.classList.toggle('active', active);
+    el.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
   _achRenderContentPreserveViewport();
 };
 function _achSetView(view) {
   STORE.view = view;
   document.querySelectorAll('.view-tab').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.val === view);
+    const active = btn.dataset.val === view;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
   });
   _achRenderContentPreserveViewport();
 };

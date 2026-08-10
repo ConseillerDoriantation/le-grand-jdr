@@ -256,7 +256,9 @@ export function _closeEmotePicker() {
   const el  = document.getElementById('vtt-emote-picker');
   const btn = document.querySelector('.vtt-emote-trigger');
   el?.classList.remove('open');
+  el?.setAttribute('aria-hidden', 'true');
   btn?.classList.remove('open');
+  btn?.setAttribute('aria-expanded', 'false');
   if (_emoteCloseOutside) {
     document.removeEventListener('mousedown', _emoteCloseOutside, true);
     _emoteCloseOutside = null;
@@ -269,6 +271,8 @@ export function _vttToggleEmotePicker() {
   if (!el) return;
   const open = el.classList.toggle('open');
   btn?.classList.toggle('open', open);
+  btn?.setAttribute('aria-expanded', open ? 'true' : 'false');
+  el.setAttribute('aria-hidden', open ? 'false' : 'true');
   if (open) {
     _renderEmotePicker();
     _emoteCloseOutside = (e) => {

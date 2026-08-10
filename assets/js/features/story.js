@@ -583,9 +583,16 @@ function _initMissionModalUI(item) {
   shell.querySelectorAll('.mn-tab').forEach(btn => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
-      shell.querySelectorAll('.mn-tab').forEach(t => t.classList.toggle('is-active', t === btn));
-      shell.querySelectorAll('.mn-panel').forEach(p =>
-        p.classList.toggle('is-active', p.dataset.panel === tab));
+      shell.querySelectorAll('.mn-tab').forEach((t) => {
+        const active = t === btn;
+        t.classList.toggle('is-active', active);
+        t.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      shell.querySelectorAll('.mn-panel').forEach((p) => {
+        const active = p.dataset.panel === tab;
+        p.classList.toggle('is-active', active);
+        p.hidden = !active;
+      });
     });
   });
 
@@ -596,7 +603,11 @@ function _initMissionModalUI(item) {
   typeSeg?.querySelectorAll('.mn-seg').forEach(b => {
     b.addEventListener('click', () => {
       const v = b.dataset.type;
-      typeSeg.querySelectorAll('.mn-seg').forEach(x => x.classList.toggle('is-active', x === b));
+      typeSeg.querySelectorAll('.mn-seg').forEach((x) => {
+        const active = x === b;
+        x.classList.toggle('is-active', active);
+        x.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
       if (typeInp) typeInp.value = v;
       if (typeLbl) typeLbl.textContent = v === 'event' ? 'Événement' : 'Mission';
     });
@@ -609,7 +620,11 @@ function _initMissionModalUI(item) {
   statutPills?.querySelectorAll('.mn-statut-pill').forEach(p => {
     p.addEventListener('click', () => {
       const v = p.dataset.statut;
-      statutPills.querySelectorAll('.mn-statut-pill').forEach(x => x.classList.toggle('is-active', x === p));
+      statutPills.querySelectorAll('.mn-statut-pill').forEach((x) => {
+        const active = x === p;
+        x.classList.toggle('is-active', active);
+        x.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
       if (statutInp) statutInp.value = v;
       if (statutPreview) {
         const cfg = stCfg({ statut: v });
@@ -863,18 +878,18 @@ async function renderStory() {
         ${Object.keys(STATUT_CFG).map(s => `<option value="${s}" ${prefs.statut===s?'selected':''}>${STATUT_CFG[s].icon} ${s}</option>`).join('')}
       </select>
       ${!STATE.isAdmin ? `<div class="story-player-scope" role="group" aria-label="Missions affichees">
-        <button type="button" class="story-player-scope-btn ${!personalScope ? 'active' : ''}" data-action="_stSetPlayerScope" data-scope="all">
+        <button type="button" class="story-player-scope-btn ${!personalScope ? 'active' : ''}" data-action="_stSetPlayerScope" data-scope="all" aria-pressed="${!personalScope}">
           <span aria-hidden="true">&#9776;</span><b>Toute la trame</b>
         </button>
-        <button type="button" class="story-player-scope-btn ${personalScope ? 'active' : ''}" data-action="_stSetPlayerScope" data-scope="mine">
+        <button type="button" class="story-player-scope-btn ${personalScope ? 'active' : ''}" data-action="_stSetPlayerScope" data-scope="mine" aria-pressed="${personalScope}">
           <span aria-hidden="true">&#9673;</span><b>Mes missions</b><em>${playerMissionIds.size}</em>
         </button>
       </div>` : ''}
-      <div class="view-toggle" role="tablist">
-        <button class="view-tab ${prefs.view==='carte'?'active':''}" data-action="_stSetView" data-view="carte">🗺️ Carte</button>
-        <button class="view-tab ${prefs.view==='saga'?'active':''}" data-action="_stSetView" data-view="saga">📚 Saga</button>
-        <button class="view-tab ${prefs.view==='chronique'?'active':''}" data-action="_stSetView" data-view="chronique">📖 Chronique</button>
-        <button class="view-tab ${prefs.view==='list'?'active':''}" data-action="_stSetView" data-view="list">📋 Liste</button>
+      <div class="view-toggle" role="tablist" aria-label="Mode d'affichage de la trame">
+        <button class="view-tab ${prefs.view==='carte'?'active':''}" data-action="_stSetView" data-view="carte" role="tab" aria-selected="${prefs.view === 'carte'}">🗺️ Carte</button>
+        <button class="view-tab ${prefs.view==='saga'?'active':''}" data-action="_stSetView" data-view="saga" role="tab" aria-selected="${prefs.view === 'saga'}">📚 Saga</button>
+        <button class="view-tab ${prefs.view==='chronique'?'active':''}" data-action="_stSetView" data-view="chronique" role="tab" aria-selected="${prefs.view === 'chronique'}">📖 Chronique</button>
+        <button class="view-tab ${prefs.view==='list'?'active':''}" data-action="_stSetView" data-view="list" role="tab" aria-selected="${prefs.view === 'list'}">📋 Liste</button>
       </div>
       ${STATE.isAdmin && axes.length >= 2 ? `<button class="btn btn-outline btn-sm" data-action="openAxeOrder" title="Réordonner les axes narratifs (Carte & Saga)">⇅ Axes</button>` : ''}
       ${_legacyGroups ? `<button class="btn btn-gold btn-sm" data-action="_stMigrateGroups" title="Convertir les anciens groupes (membres) en groupes rejoignables">⟳ Migrer anciens groupes</button>` : ''}
@@ -2122,25 +2137,25 @@ async function openStoryModal(item = null) {
     </div>
 
     <!-- ════ TABS ════════════════════════════════════════════════ -->
-    <div class="mn-tabs" role="tablist">
-      <button type="button" class="mn-tab is-active" data-tab="histoire">📜 Histoire</button>
-      <button type="button" class="mn-tab" data-tab="groupes">👥 Groupes <span class="mn-tab-count" id="mn-tab-count-groupes">${_missionQuestGroups(item?.id).length || ''}</span></button>
-      ${autresItems.length ? `<button type="button" class="mn-tab" data-tab="liens">↝ Liens <span class="mn-tab-count" id="mn-tab-count-liens">${(item?.liens||[]).length || ''}</span></button>` : ''}
-      <button type="button" class="mn-tab" data-tab="reglages">⚙️ Réglages</button>
+    <div class="mn-tabs" role="tablist" aria-label="Sections de la mission">
+      <button type="button" id="mn-tab-histoire" class="mn-tab is-active" data-tab="histoire" role="tab" aria-selected="true" aria-controls="mn-panel-histoire">📜 Histoire</button>
+      <button type="button" id="mn-tab-groupes" class="mn-tab" data-tab="groupes" role="tab" aria-selected="false" aria-controls="mn-panel-groupes">👥 Groupes <span class="mn-tab-count" id="mn-tab-count-groupes">${_missionQuestGroups(item?.id).length || ''}</span></button>
+      ${autresItems.length ? `<button type="button" id="mn-tab-liens" class="mn-tab" data-tab="liens" role="tab" aria-selected="false" aria-controls="mn-panel-liens">↝ Liens <span class="mn-tab-count" id="mn-tab-count-liens">${(item?.liens||[]).length || ''}</span></button>` : ''}
+      <button type="button" id="mn-tab-reglages" class="mn-tab" data-tab="reglages" role="tab" aria-selected="false" aria-controls="mn-panel-reglages">⚙️ Réglages</button>
     </div>
 
     <!-- ════ TAB CONTENT ═════════════════════════════════════════ -->
     <div class="mn-body">
 
       <!-- ── ONGLET HISTOIRE ────────────────────────────────────── -->
-      <section class="mn-panel is-active" data-panel="histoire">
+      <section id="mn-panel-histoire" class="mn-panel is-active" data-panel="histoire" role="tabpanel" aria-labelledby="mn-tab-histoire">
 
         <!-- Type segmented control -->
         <div class="mn-row">
           <label class="mn-label">Type</label>
-          <div class="mn-segmented" id="mn-type-seg">
-            <button type="button" class="mn-seg ${(item?.type||'mission')==='mission'?'is-active':''}" data-type="mission">🎯 Mission</button>
-            <button type="button" class="mn-seg ${item?.type==='event'?'is-active':''}" data-type="event">📖 Événement</button>
+          <div class="mn-segmented" id="mn-type-seg" role="group" aria-label="Type de récit">
+            <button type="button" class="mn-seg ${(item?.type||'mission')==='mission'?'is-active':''}" data-type="mission" aria-pressed="${(item?.type || 'mission') === 'mission'}">🎯 Mission</button>
+            <button type="button" class="mn-seg ${item?.type==='event'?'is-active':''}" data-type="event" aria-pressed="${item?.type === 'event'}">📖 Événement</button>
           </div>
           <input type="hidden" id="st-type" value="${item?.type || 'mission'}">
         </div>
@@ -2148,10 +2163,11 @@ async function openStoryModal(item = null) {
         <!-- Statut en pills cliquables -->
         <div class="mn-row">
           <label class="mn-label">Statut</label>
-          <div class="mn-statut-pills" id="mn-statut-pills">
+          <div class="mn-statut-pills" id="mn-statut-pills" role="group" aria-label="Statut de la mission">
             ${STATUTS.map(s => `<button type="button"
               class="mn-statut-pill ${s.v===curStatut?'is-active':''}"
               data-statut="${s.v}"
+              aria-pressed="${s.v === curStatut}"
               style="--c:${s.c}">
               <span class="mn-statut-pill-icon">${s.i}</span>${s.v}
             </button>`).join('')}
@@ -2201,7 +2217,7 @@ async function openStoryModal(item = null) {
       </section>
 
       <!-- ── ONGLET GROUPES ─────────────────────────────────────── -->
-      <section class="mn-panel" data-panel="groupes">
+      <section id="mn-panel-groupes" class="mn-panel" data-panel="groupes" role="tabpanel" aria-labelledby="mn-tab-groupes" hidden>
         <div class="mn-panel-intro">
           Les personnages sont rattachés à un <strong>groupe</strong>. Plusieurs groupes peuvent
           mener la même mission en parallèle, chacun avec sa propre réussite et récompense.
@@ -2218,7 +2234,7 @@ async function openStoryModal(item = null) {
 
     ${autresItems.length?`
       <!-- ── ONGLET LIENS ───────────────────────────────────────── -->
-      <section class="mn-panel" data-panel="liens">
+      <section id="mn-panel-liens" class="mn-panel" data-panel="liens" role="tabpanel" aria-labelledby="mn-tab-liens" hidden>
         <div class="mn-panel-intro">
           Sélectionne les missions qui se déclenchent <strong>après</strong> celle-ci.
           Si elles sont sur un axe différent, un trait pointillé doré les reliera sur la carte.
@@ -2268,7 +2284,7 @@ async function openStoryModal(item = null) {
       </section>`:``}
 
       <!-- ── ONGLET RÉGLAGES ────────────────────────────────────── -->
-      <section class="mn-panel" data-panel="reglages">
+      <section id="mn-panel-reglages" class="mn-panel" data-panel="reglages" role="tabpanel" aria-labelledby="mn-tab-reglages" hidden>
         <div class="mn-grid-2">
           <div class="mn-field">
             <label class="mn-label">Acte <span class="mn-label-hint">— quel chapitre de la trame</span></label>

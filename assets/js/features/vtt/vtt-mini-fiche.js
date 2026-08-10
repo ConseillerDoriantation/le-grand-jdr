@@ -1344,7 +1344,7 @@ function _msTabNotes(c, uid, canEdit) {
       : `<div class="vtt-ms-note-body"><div class="vtt-ms-note-content">${note.contenu || '<em style="opacity:.5">Vide</em>'}</div></div>`)
       : '';
     html += `<div class="vtt-ms-note-card${open ? ' open' : ''}">
-      <div class="vtt-ms-note-hd" data-vtt-fn="_vttMsToggleNote" data-vtt-args="${i}">
+      <div class="vtt-ms-note-hd" data-vtt-fn="_vttMsToggleNote" data-vtt-args="${i}" role="button" tabindex="0" aria-expanded="${open}">
         <span class="vtt-ms-note-title">${_esc(note.titre || 'Note sans titre')}</span>
         <div class="vtt-ms-note-hd-r">
           ${canEdit ? `<button class="vtt-ms-note-ic" data-vtt-fn="_vttMsRenameNote" data-vtt-args="${c.id}|${uid}|${i}" title="Renommer">✏️</button>

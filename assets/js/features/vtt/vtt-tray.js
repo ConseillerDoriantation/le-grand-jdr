@@ -76,8 +76,16 @@ export function _vttBstClearSearch() { _bstSearch = ''; _renderTraySoon(); }
 export function _vttTrayTab(tab) {
   _trayTab = tab;
   try { localStorage.setItem('vtt-tray-tab', tab); } catch (_) {}
-  document.querySelectorAll('#vtt-tray .vtt-tray-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  document.querySelectorAll('#vtt-tray .vtt-tray-view').forEach(v => v.classList.toggle('active', v.dataset.view === tab));
+  document.querySelectorAll('#vtt-tray .vtt-tray-tab').forEach((b) => {
+    const active = b.dataset.tab === tab;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  document.querySelectorAll('#vtt-tray .vtt-tray-view').forEach((v) => {
+    const active = v.dataset.view === tab;
+    v.classList.toggle('active', active);
+    v.hidden = !active;
+  });
 }
 export function _vttToggleOn() { _trayOnOpen  = !_trayOnOpen;  _saveTrayPref('on',  _trayOnOpen);  _renderTraySoon(); }
 export function _vttToggleOff() { _trayOffOpen = !_trayOffOpen; _saveTrayPref('off', _trayOffOpen); _renderTraySoon(); }

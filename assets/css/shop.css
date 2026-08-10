@@ -1456,6 +1456,7 @@ input[type="number"].input-field::-webkit-outer-spin-button {
 .sh-item-card:focus-visible,
 .sh-item-card--detailed:focus-visible,
 .sh-cat-card:focus-visible,
+.sh-list-row:focus-visible,
 .sh-side-link:focus-visible,
 .sh-page-btn:focus-visible,
 .sh-back-btn:focus-visible,
@@ -5721,6 +5722,13 @@ body.shop-cols-5 .sh-page--v2 .sh-item-grid { grid-template-columns: repeat(5, m
     height: 100vh; max-height: 100vh; border-radius: 0 !important;
   }
   .sh-admin-modal { max-height: 100vh; }
+  .sh-tw-seg {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+    width: 100%;
+    border-radius: 12px;
+  }
+  .sh-tw-seg-btn { min-width: 0; padding: 7px 8px; }
 }
 
 /* ════════════════════════════════════════════════════════════════════

@@ -13,6 +13,7 @@ import { isFeatureEnabled } from '../shared/features.js';
 import { getRecentNavigation, recordRecentNavigation } from '../shared/recent-navigation.js';
 import { characterAvatarHtml } from '../shared/portraits.js';
 import { showNotif } from '../shared/notifications.js';
+import { copyText } from '../shared/clipboard.js';
 
 const MAX_RESULTS = 30;
 
@@ -385,8 +386,12 @@ async function _executeEntry(entry) {
           return;
         }
         if (command?.directAction === 'copy-view-link') {
-          await navigator.clipboard.writeText(location.href);
-          showNotif('Lien de cette vue copié.', 'success');
+          try {
+            await copyText(location.href);
+            showNotif('Lien de cette vue copié.', 'success');
+          } catch {
+            showNotif('Copie impossible — sélectionne le lien dans la barre d’adresse.', 'error');
+          }
           return;
         }
         if (command?.directAction === 'create-adventure') {

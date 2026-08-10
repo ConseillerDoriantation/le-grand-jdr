@@ -959,6 +959,7 @@ function cycleRecurringSlot(dayId, slotId, btn) {
 function _renderGroupView() {
   const el = document.getElementById('ag-group-view');
   if (!el) return;
+  el.hidden = !_ag.groupView;
   if (!_ag.groupView) { el.innerHTML = ''; return; }
 
   const today = _today();
@@ -1046,7 +1047,10 @@ function _renderGroupView() {
 function toggleGroupView() {
   _ag.groupView = !_ag.groupView;
   const btn = document.getElementById('ag-group-toggle');
-  if (btn) btn.textContent = _ag.groupView ? 'Masquer' : 'Afficher';
+  if (btn) {
+    btn.textContent = _ag.groupView ? 'Masquer' : 'Afficher';
+    btn.setAttribute('aria-expanded', String(_ag.groupView));
+  }
   _renderGroupView();
 }
 function setGroupFilter(groupId) {
@@ -1057,7 +1061,7 @@ function focusGroupAvailability(groupId) {
   _ag.groupView = true;
   _ag.groupFilter = groupId || null;
   const btn = document.getElementById('ag-group-toggle');
-  if (btn) btn.textContent = 'Masquer';
+  if (btn) { btn.textContent = 'Masquer'; btn.setAttribute('aria-expanded', 'true'); }
   _renderGroupView();
   document.getElementById('ag-group-view')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
@@ -1163,10 +1167,10 @@ async function renderAgendaPage() {
                 <p class="ag-section-sub">Lecture détaillée sur deux semaines, utile pour départager un créneau.</p>
               </div>
               <div class="ag-section-actions">
-                <button class="btn btn-outline btn-sm" id="ag-group-toggle" data-action="_agToggleGroupView">Afficher</button>
+                <button class="btn btn-outline btn-sm" id="ag-group-toggle" data-action="_agToggleGroupView" aria-expanded="false" aria-controls="ag-group-view">Afficher</button>
               </div>
             </div>
-            <div id="ag-group-view" class="ag-group-view"></div>
+            <div id="ag-group-view" class="ag-group-view" hidden></div>
           </section>
         </main>
       </div>

@@ -1321,9 +1321,10 @@ function _npcPanelDefs() {
 
 function _renderNpcPanelTabs() {
   return `
-    <nav class="tabs-v3 npc-tabs-v3" role="tablist">
+    <nav class="tabs-v3 npc-tabs-v3" role="tablist" aria-label="Sections de la fiche PNJ">
       ${_npcPanelDefs().map(tab => `
-        <button type="button" class="${_npcPanel === tab.id ? 'is-active' : ''}" data-action="npcSetPanel" data-panel="${tab.id}">
+        <button type="button" class="${_npcPanel === tab.id ? 'is-active' : ''}" data-action="npcSetPanel" data-panel="${tab.id}"
+          role="tab" aria-selected="${_npcPanel === tab.id}">
           <span>${_esc(tab.label)}</span>
           <small>${_esc(tab.hint)}</small>
         </button>`).join('')}

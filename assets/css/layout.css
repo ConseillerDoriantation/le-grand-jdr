@@ -1790,6 +1790,7 @@ select.input-field, select.input-sm { cursor:pointer; }
   width:92%;
   max-height:88vh;
   overflow-y:auto;
+  overscroll-behavior:contain;
   box-shadow:0 34px 80px rgba(3,8,21,0.58);
   transform:translateY(16px) scale(0.98);
   transition:transform 0.25s ease;
@@ -1813,7 +1814,12 @@ select.input-field, select.input-sm { cursor:pointer; }
   justify-content:space-between;
   align-items:center;
   gap:12px;
+  position:sticky;
+  top:-2rem;
+  z-index:12;
 }
+
+body.is-modal-open { overflow:hidden; }
 .modal-title #modal-title-text,
 .modal-title > span:first-child { flex:1; min-width:0; }
 .modal-title .btn-icon {

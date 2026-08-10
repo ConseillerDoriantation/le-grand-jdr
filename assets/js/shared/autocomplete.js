@@ -54,8 +54,9 @@ export function autocompleteHTML({ id, name, value = '', placeholder = '', class
   return `
     <div id="${id}-wrap" style="position:relative">
       <input type="text" class="${className}" id="${id}"${nameAttr} value="${_esc(value)}"
-        placeholder="${_esc(placeholder)}" autocomplete="off">
-      <div id="${id}-ac" class="ac-list" style="${DROPDOWN_STYLE}"></div>
+        placeholder="${_esc(placeholder)}" autocomplete="off" role="combobox"
+        aria-autocomplete="list" aria-expanded="false" aria-controls="${id}-ac">
+      <div id="${id}-ac" class="ac-list" role="listbox" aria-label="Suggestions" style="${DROPDOWN_STYLE}"></div>
     </div>`;
 }
 
@@ -95,9 +96,10 @@ export function multiAutocompleteHTML({ id, placeholder = '' }) {
       min-height:calc(0.92rem + 1.64rem + 2px);cursor:text;position:relative">
       <span id="${safeId}-chips" style="display:contents"></span>
       <input type="text" id="${safeId}" placeholder="${_esc(placeholder)}" autocomplete="off"
+        role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${safeId}-ac"
         style="flex:1;min-width:140px;background:transparent;border:none;outline:none;
         color:var(--text);font-family:inherit;font-size:.92rem;padding:.1rem 0">
-      <div id="${safeId}-ac" class="ac-list" style="${DROPDOWN_STYLE}"></div>
+      <div id="${safeId}-ac" class="ac-list" role="listbox" aria-label="Suggestions" style="${DROPDOWN_STYLE}"></div>
     </div>`;
 }
 
@@ -190,9 +192,10 @@ export function getMultiAutocompleteValues(id) {
 
 // ── Internes partagés ────────────────────────────────────────────────────────
 
-function _itemHtml(value) {
+function _itemHtml(value, index, listId) {
   const safe = _esc(value);
-  return `<div class="ac-item" data-val="${safe}" style="${ITEM_STYLE}">${safe}</div>`;
+  return `<div id="${listId}-option-${index}" class="ac-item" data-val="${safe}"
+    role="option" aria-selected="false" style="${ITEM_STYLE}">${safe}</div>`;
 }
 
 function _chipHtml(value) {
@@ -205,7 +208,7 @@ function _chipHtml(value) {
     type="button" class="ac-chip-x" data-val="${safe}"
     style="background:none;border:none;color:inherit;cursor:pointer;font-size:1rem;
     line-height:1;padding:0 5px;opacity:.6;transition:opacity .12s"
-    title="Retirer">×</button></span>`;
+    title="Retirer" aria-label="Retirer ${safe}">×</button></span>`;
 }
 
 // Mécanique commune single + multi : rendu du dropdown, navigation clavier,
@@ -215,18 +218,29 @@ function _chipHtml(value) {
 function _attachDropdown({ input, list, getOptions, onPick, onKeydown, freeTextEnter = false }) {
   let active = -1;
 
-  const hide = () => { list.style.display = 'none'; active = -1; };
+  const hide = () => {
+    list.style.display = 'none';
+    active = -1;
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+  };
   const highlight = () => {
     [...list.children].forEach((el, i) => {
-      el.style.background = i === active ? HIGHLIGHT_BG : '';
+      const selected = i === active;
+      el.style.background = selected ? HIGHLIGHT_BG : '';
+      el.setAttribute('aria-selected', String(selected));
     });
+    const current = list.children[active];
+    if (current) input.setAttribute('aria-activedescendant', current.id);
+    else input.removeAttribute('aria-activedescendant');
   };
   const render = () => {
     const filtered = getOptions();
     if (!filtered.length) { hide(); return; }
     active = -1;
-    list.innerHTML = filtered.map(_itemHtml).join('');
+    list.innerHTML = filtered.map((value, index) => _itemHtml(value, index, list.id)).join('');
     list.style.display = 'block';
+    input.setAttribute('aria-expanded', 'true');
   };
 
   input.addEventListener('focus', render);
@@ -237,12 +251,22 @@ function _attachDropdown({ input, list, getOptions, onPick, onKeydown, freeTextE
     const open  = list.style.display !== 'none' && items.length > 0;
     if (e.key === 'ArrowDown' && open) {
       e.preventDefault();
-      active = Math.min(active + 1, items.length - 1);
+      active = (active + 1) % items.length;
       highlight();
       items[active]?.scrollIntoView({ block: 'nearest' });
     } else if (e.key === 'ArrowUp' && open) {
       e.preventDefault();
-      active = Math.max(active - 1, 0);
+      active = active <= 0 ? items.length - 1 : active - 1;
+      highlight();
+      items[active]?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Home' && open) {
+      e.preventDefault();
+      active = 0;
+      highlight();
+      items[active]?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'End' && open) {
+      e.preventDefault();
+      active = items.length - 1;
       highlight();
       items[active]?.scrollIntoView({ block: 'nearest' });
     } else if (e.key === 'Enter') {
@@ -254,6 +278,7 @@ function _attachDropdown({ input, list, getOptions, onPick, onKeydown, freeTextE
         onPick(input.value);
       }
     } else if (e.key === 'Escape') {
+      if (open) e.preventDefault();
       hide();
     }
   });

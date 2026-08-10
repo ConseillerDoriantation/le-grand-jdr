@@ -1,6 +1,6 @@
 import { STATE } from '../core/state.js';
 import { loadCollection, loadChars, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
-import { trySave } from '../shared/crud.js';
+import { confirmDelete, trySave } from '../shared/crud.js';
 import { openModal, closeModalDirect, confirmModal, promptModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete, loadRarities, openRaritiesAdmin } from '../shared/rarity.js';
@@ -50,6 +50,7 @@ import {
 // ══════════════════════════════════════════════════════════════════════════════
 const shHandlers = {};
 bindScopedActions('sh', shHandlers);
+document.addEventListener('keydown', _shopKeyboardQol);
 
 // ══════════════════════════════════════════════════════════════════════════════
 function _inventoryHistoryActor() {
@@ -449,9 +450,11 @@ export async function renderShop() {
 
 /** Popup Tweaks d'affichage — segmented controls × 3. */
 function openTweaksPopup() {
-  const seg = (key, options) => `<div class="sh-tw-seg" data-tw-key="${key}">
+  const labels = { layout: 'Disposition', density: 'Densité', card: 'Présentation des articles', columns: 'Articles par ligne' };
+  const seg = (key, options) => `<div class="sh-tw-seg" data-tw-key="${key}" role="group" aria-label="${labels[key] || 'Préférence'}">
     ${options.map(o => `<button type="button" class="sh-tw-seg-btn ${_shopTweaks[key]===o.v?'on':''}"
-      data-sh-action="setTweak" data-tw-key="${key}" data-tw-val="${o.v}">${o.lbl}</button>`).join('')}
+      data-sh-action="setTweak" data-tw-key="${key}" data-tw-val="${o.v}"
+      aria-pressed="${_shopTweaks[key] === o.v}">${o.lbl}</button>`).join('')}
   </div>`;
   openModal('', `
   <div class="sh-admin-modal is-cat">
@@ -657,12 +660,13 @@ function _renderHome() {
       <div class="sh-hero-row">
         <div class="sh-hero-search">
           <span class="sh-hero-search-ico">🔍</span>
-          <input type="text" id="sh-home-search" class="sh-hero-search-input"
+          <input type="search" id="sh-home-search" class="sh-hero-search-input"
             placeholder="Rechercher une arme, une potion, un effet…"
             value="${_filterSearch||''}"
             data-sh-action="search" data-sh-on="input"
-            autocomplete="off">
-          ${_filterSearch ? `<button class="sh-hero-search-clear" data-sh-action="clearSearch" aria-label="Effacer la recherche">✕</button>` : ''}
+            autocomplete="off" aria-label="Rechercher dans la boutique" aria-controls="sh-home-results">
+          <button type="button" class="sh-hero-search-clear" data-sh-action="clearSearch"
+            aria-label="Effacer la recherche" ${_filterSearch ? '' : 'hidden'}>✕</button>
         </div>
       </div>
       ${_renderSmartBar()}
@@ -688,7 +692,8 @@ function _renderHomeResults() {
   cats.forEach(cat => {
     const count = _items.filter(i => i.categorieId === cat.id).length;
     const tpl   = TEMPLATES[cat.template||'classique'];
-    html += `<div class="sh-cat-card ${edit?'sh-sortable-item':''}" data-cat-id="${cat.id}" data-sh-action="goCat" data-id="${cat.id}"${cat.masquee?' style="opacity:.6"':''}>
+    html += `<div class="sh-cat-card ${edit?'sh-sortable-item':''}" data-cat-id="${cat.id}" data-sh-action="goCat" data-id="${cat.id}"
+      data-sh-key-card="category" tabindex="0" role="button" aria-label="Ouvrir la catégorie ${_esc(cat.nom)}"${cat.masquee?' style="opacity:.6"':''}>
       <div class="sh-cat-img" style="${cat.image?`background-image:url('${cat.image}')`:_catGradient(cat.nom)}">
         <div class="sh-cat-img-overlay"></div>
         ${!cat.image?`<div class="sh-cat-img-emoji">${cat.emoji||_catEmoji(cat.nom)}</div>`:''}
@@ -710,7 +715,8 @@ function _renderHomeResults() {
   // Carte virtuelle "Non classé" pour les articles sans catégorie valide
   if (orphaned.length > 0) {
     const n = orphaned.length;
-    html += `<div class="sh-cat-card" data-sh-action="goCat" data-id="__uncategorized__" style="opacity:.85">
+    html += `<div class="sh-cat-card" data-sh-action="goCat" data-id="__uncategorized__"
+      data-sh-key-card="category" tabindex="0" role="button" aria-label="Ouvrir les articles non classés" style="opacity:.85">
       <div class="sh-cat-img" style="background:linear-gradient(135deg,#2a2a3e,#1a1a2a)">
         <div class="sh-cat-img-overlay"></div>
         <div class="sh-cat-img-emoji">📦</div>
@@ -747,7 +753,7 @@ function _renderHomeSearchResults() {
   const p     = Math.max(1, Math.min(_page, pages));
   const slice = matched.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
 
-  let html = `<div style="margin-bottom:.75rem;color:var(--text-dim);font-size:.85rem">
+  let html = `<div id="sh-home-count" role="status" aria-live="polite" style="margin-bottom:.75rem;color:var(--text-dim);font-size:.85rem">
     ${total} résultat${total>1?'s':''} dans toutes les catégories
   </div>`;
   html += _renderMixedItemGrid(slice);
@@ -958,12 +964,13 @@ function _renderItemsView() {
     <div class="sh-hero-row">
       <div class="sh-hero-search">
         <span class="sh-hero-search-ico">🔍</span>
-        <input type="text" id="sh-search" class="sh-hero-search-input"
+        <input type="search" id="sh-search" class="sh-hero-search-input"
           placeholder="Rechercher dans cette catégorie…"
           value="${_filterSearch||''}"
           data-sh-action="search" data-sh-on="input"
-          autocomplete="off">
-        ${_filterSearch ? `<button class="sh-hero-search-clear" data-sh-action="clearSearch" aria-label="Effacer la recherche">✕</button>` : ''}
+          autocomplete="off" aria-label="Rechercher dans cette catégorie" aria-controls="sh-items-results">
+        <button type="button" class="sh-hero-search-clear" data-sh-action="clearSearch"
+          aria-label="Effacer la recherche" ${_filterSearch ? '' : 'hidden'}>✕</button>
       </div>
     </div>
     ${_renderSmartBar()}
@@ -989,7 +996,7 @@ function _renderItemsView() {
         <option value="rarete"     ${_filterSort==='rarete'?'selected':''}>Rareté</option>
       </select>
       <div class="sh-filter-actions">
-        <span id="sh-count" style="font-size:.78rem;color:var(--text-dim)">${total} article${total!==1?'s':''}</span>
+        <span id="sh-count" role="status" aria-live="polite" style="font-size:.78rem;color:var(--text-dim)">${total} article${total!==1?'s':''}</span>
         <button id="sh-clear-btn" data-sh-action="resetFilters"
           style="font-size:.72rem;background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.25);
           border-radius:8px;padding:3px 10px;cursor:pointer;color:#ff6b6b;
@@ -1489,7 +1496,8 @@ function _renderItemCard(item, tplKey, itemIdx) {
 
   return `
     <article class="sh-item-card sh-item-card--detailed ${epuise ? 'sh-item-epuise' : ''} ${edit ? 'sh-sortable-item' : ''}"
-      data-item-id="${item.id}"
+      data-item-id="${item.id}" data-sh-action="openDetail" data-id="${item.id}"
+      data-sh-key-card="item" tabindex="0" role="button" aria-label="Ouvrir ${_esc(item.nom || 'cet article')}"
       ${rareteColor ? `style="--item-accent:${rareteColor}"` : ''}
     >
       <div class="sh-item-img" style="${imgBg}">
@@ -1650,6 +1658,7 @@ function _renderItemRow(item, tplKey, itemIdx) {
   return `
     <div class="sh-list-row ${epuise ? 'sh-item-epuise' : ''} ${edit ? 'sh-sortable-item' : ''}"
       data-item-id="${item.id}" data-sh-action="openDetail" data-id="${item.id}"
+      data-sh-key-card="item" tabindex="0" role="button" aria-label="Ouvrir ${_esc(item.nom || 'cet article')}"
       ${rareteColor ? `style="--item-accent:${rareteColor}"` : ''}>
       <button class="sh-list-fav ${_isFav(item.id) ? 'is-fav' : ''}" data-sh-action="toggleFav" data-id="${item.id}"
         title="${_isFav(item.id) ? 'Retirer des favoris' : 'Ajouter aux favoris'}" aria-label="Favori">${_isFav(item.id) ? '★' : '☆'}</button>
@@ -2247,6 +2256,42 @@ export function shopFilterSearch(val) {
   _page = 1;
   if (_view === 'items') _updateItemsOnly();
   else _updateHomeOnly();
+  _syncShopSearchChrome();
+}
+
+function _syncShopSearchChrome() {
+  const input = document.getElementById(_view === 'items' ? 'sh-search' : 'sh-home-search');
+  const clear = input?.closest('.sh-hero-search')?.querySelector('.sh-hero-search-clear');
+  if (clear) clear.hidden = !_filterSearch;
+}
+
+function shopClearSearch() {
+  const input = document.getElementById(_view === 'items' ? 'sh-search' : 'sh-home-search');
+  if (input) input.value = '';
+  shopFilterSearch('');
+  requestAnimationFrame(() => input?.focus({ preventScroll: true }));
+}
+
+function _shopKeyboardQol(event) {
+  if (STATE.currentPage !== 'shop' && !document.querySelector('.sh-page--v2')) return;
+  const search = event.target?.closest?.('#sh-home-search, #sh-search');
+  if (search && (event.key === 'Enter' || event.key === 'ArrowDown')) {
+    const scope = document.getElementById(_view === 'items' ? 'sh-items-results' : 'sh-home-results');
+    const first = scope?.querySelector('[data-sh-key-card="item"]');
+    if (!first) return;
+    event.preventDefault();
+    if (event.key === 'Enter') first.click();
+    else {
+      first.focus({ preventScroll: true });
+      first.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+    return;
+  }
+
+  const card = event.target?.closest?.('[data-sh-key-card]');
+  if (!card || event.target !== card || !['Enter', ' '].includes(event.key)) return;
+  event.preventDefault();
+  card.click();
 }
 
 function shopToggleTag(val) {
@@ -2261,7 +2306,7 @@ function shopFilterReset() {
   _filterSearch = '';
   _filterTags.clear();
   _page = 1;
-  const inp = document.getElementById('sh-search');
+  const inp = document.getElementById(_view === 'items' ? 'sh-search' : 'sh-home-search');
   if (inp) inp.value = '';
   if (_view === 'items') _updateItemsOnly();
   else renderShop();
@@ -2527,13 +2572,21 @@ async function saveCat(catId) {
 
 async function deleteCat(catId) {
   try {
-    const n=_items.filter(i=>i.categorieId===catId).length;
-    if (!await confirmModal(n>0?`Cette catégorie contient ${n} article(s). Supprimer quand même ?`:'Supprimer cette catégorie ?', { title: 'Confirmation de suppression' })) return;
-    const toDelete=_items.filter(i=>i.categorieId===catId);
-    await Promise.all(toDelete.map(i=>deleteFromCol('shop',i.id)));
-    await deleteFromCol('shopCategories',catId);
+    const cat = _cats.find(entry => entry.id === catId);
+    if (!cat) return;
+    const n = _items.filter(i => i.categorieId === catId).length;
+    const message = n > 0
+      ? `Supprimer cette catégorie ? Ses ${n} article${n > 1 ? 's' : ''} passeront dans « Non classé » et ne seront pas supprimés.`
+      : 'Supprimer cette catégorie ?';
+    const deleted = await confirmDelete('shopCategories', catId, message, {
+      snapshot: cat,
+      title: 'Confirmation de suppression',
+      successMessage: n > 0 ? `Catégorie supprimée · ${n} article${n > 1 ? 's' : ''} conservé${n > 1 ? 's' : ''}.` : 'Catégorie supprimée.',
+      onRestore: () => renderShop(),
+    });
+    if (!deleted) return;
     if(_activeCat===catId){_view='home';_activeCat=null;}
-    showNotif(`Catégorie et ${toDelete.length} article(s) supprimés.`,'success'); renderShop();
+    renderShop();
   } catch (e) { notifySaveError(e); }
 }
 
@@ -3587,9 +3640,15 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
 
 async function deleteShopItem(itemId) {
   try {
-    if (!await confirmModal('Supprimer cet article ?', { title: 'Confirmation de suppression' })) return;
-    await deleteFromCol('shop',itemId);
-    showNotif('Article supprimé.','success'); renderShop();
+    const item = _items.find(entry => entry.id === itemId);
+    if (!item) return;
+    const deleted = await confirmDelete('shop', itemId, 'Supprimer cet article ?', {
+      snapshot: item,
+      title: 'Confirmation de suppression',
+      successMessage: 'Article supprimé.',
+      onRestore: () => renderShop(),
+    });
+    if (deleted) renderShop();
   } catch (e) { notifySaveError(e); }
 }
 
@@ -4159,7 +4218,9 @@ Object.assign(shHandlers, {
     _shopTweaksSave();
     // Refresh visuel des segmented dans la modale ouverte
     document.querySelectorAll(`[data-tw-key="${k}"] .sh-tw-seg-btn`).forEach(b => {
-      b.classList.toggle('on', b.dataset.twVal === v);
+      const active = b.dataset.twVal === v;
+      b.classList.toggle('on', active);
+      b.setAttribute('aria-pressed', active ? 'true' : 'false');
     });
     // Re-render du shop pour appliquer : layout (tabs/sidebar) et card=liste
     // changent le MARKUP (pas juste du CSS) → re-render obligatoire.
@@ -4202,7 +4263,7 @@ Object.assign(shHandlers, {
   goCat:          (el) => shopGoCat(el.dataset.id),
   setChar:        (el) => shopSetChar(el.value),
   search:         (el) => shopFilterSearch(el.value),
-  clearSearch:    () => shopFilterSearch(''),
+  clearSearch:    () => shopClearSearch(),
   setSort:        (el) => shopSetSort(el.value),
   resetFilters:   () => shopFilterReset(),
   toggleTag:      (el) => shopToggleTag(el.dataset.tag),
