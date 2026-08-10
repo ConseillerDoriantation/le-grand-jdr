@@ -277,6 +277,7 @@ export async function navigate(page, { historyMode = 'push' } = {}) {
   }
 
   setPage(page);
+  document.dispatchEvent(new CustomEvent('app:page-changed', { detail: { page } }));
   _syncHash(page, historyMode);
   _syncNav(page);
   _renderLoading();
@@ -328,6 +329,9 @@ export async function navigate(page, { historyMode = 'push' } = {}) {
     } else if (previousPage !== page) {
       window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
     }
+    document.dispatchEvent(new CustomEvent('app:page-rendered', {
+      detail: { page, changed: previousPage !== page },
+    }));
   } catch (err) {
     console.error(`[nav] page "${page}" a planté :`, err);
     _renderPageError(page, err);

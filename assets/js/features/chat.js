@@ -136,6 +136,13 @@ function _notify() {
   if (n > _prevUnread) { _pulseBubble(); if (_soundReady) { _beep(); _desktopNotify(); } }
   _prevUnread = n; _soundReady = true;   // les non-lus déjà là au chargement ne sonnent pas
 }
+
+document.addEventListener('app:base-title-changed', (event) => {
+  const next = String(event.detail?.title || '').trim();
+  if (!next) return;
+  _baseTitle = next;
+  if (_uid) _notify();
+});
 // Aperçu du message non-lu le plus récent (pour la notif desktop).
 function _lastPreview() {
   let best = null, bestAt = 0;

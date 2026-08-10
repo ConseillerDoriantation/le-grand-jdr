@@ -12,6 +12,7 @@ import { navigate } from '../core/navigation.js';
 import { isFeatureEnabled } from '../shared/features.js';
 import { getRecentNavigation, recordRecentNavigation } from '../shared/recent-navigation.js';
 import { characterAvatarHtml } from '../shared/portraits.js';
+import { showNotif } from '../shared/notifications.js';
 
 const MAX_RESULTS = 30;
 
@@ -27,6 +28,7 @@ let _query       = '';
 let _initialized = false;
 let _bestiaryEntries = null;
 let _bestiaryEntriesPromise = null;
+let _previousFocus = null;
 
 // ── PAGES (raccourcis directs) ────────────────────────────────────────────────
 const PAGE_SHORTCUTS = [
@@ -54,6 +56,10 @@ const QUICK_COMMANDS = [
   {
     id: 'keyboard-help', label: 'Afficher les raccourcis clavier', icon: '⌨️', page: '',
     aliases: 'aide clavier commandes raccourcis touches', directAction: 'keyboard-help',
+  },
+  {
+    id: 'copy-view-link', label: 'Copier le lien de cette vue', icon: '🔗', page: '',
+    aliases: 'partager url adresse lien page onglet', directAction: 'copy-view-link',
   },
   {
     id: 'new-character', label: 'Créer un personnage', icon: '➕', page: 'characters',
@@ -378,6 +384,11 @@ async function _executeEntry(entry) {
           document.dispatchEvent(new CustomEvent('app:open-keyboard-help'));
           return;
         }
+        if (command?.directAction === 'copy-view-link') {
+          await navigator.clipboard.writeText(location.href);
+          showNotif('Lien de cette vue copié.', 'success');
+          return;
+        }
         if (command?.directAction === 'create-adventure') {
           const { openCreateAdventureModal } = await import('../core/init.js');
           await openCreateAdventureModal();
@@ -486,6 +497,7 @@ async function _executeEntry(entry) {
     }
   } catch (e) {
     console.error('[cmd-palette] action failed:', e);
+    showNotif("Impossible d'ouvrir ce résultat.", 'error');
   }
 }
 
@@ -501,6 +513,9 @@ function _renderList() {
       ? `Aucun résultat pour « ${_esc(_query)} »`
       : 'Tapez pour rechercher (PNJ, perso, quête, article…)';
     list.innerHTML = `<div class="cmd-palette-empty">${msg}</div>`;
+    document.getElementById('cmd-palette-input')?.removeAttribute('aria-activedescendant');
+    const status = document.getElementById('cmd-palette-status');
+    if (status) status.textContent = _query.trim() ? 'Aucun résultat' : '';
     return;
   }
 
@@ -515,7 +530,7 @@ function _renderList() {
     }
     const active = i === _activeIndex ? ' is-active' : '';
     html += `
-      <div class="cmd-palette-row${active}" data-cmd-idx="${i}" role="option" aria-selected="${i===_activeIndex}">
+      <div class="cmd-palette-row${active}" id="cmd-palette-option-${i}" data-cmd-idx="${i}" role="option" aria-selected="${i===_activeIndex}">
         ${e.avatarHtml || `<span class="cmd-palette-row-icon">${e.icon || '•'}</span>`}
         <div class="cmd-palette-row-text">
           <div class="cmd-palette-row-title">${_esc(e.title)}</div>
@@ -528,6 +543,10 @@ function _renderList() {
 
   const activeEl = list.querySelector('.cmd-palette-row.is-active');
   if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+  const input = document.getElementById('cmd-palette-input');
+  if (input && activeEl) input.setAttribute('aria-activedescendant', activeEl.id);
+  const status = document.getElementById('cmd-palette-status');
+  if (status) status.textContent = `${_results.length} résultat${_results.length > 1 ? 's' : ''}`;
 }
 
 function _move(delta) {
@@ -550,15 +569,17 @@ function _mountModal() {
   root.className = 'cmd-palette';
   root.innerHTML = `
     <div class="cmd-palette-backdrop" data-cmd-close></div>
-    <div class="cmd-palette-box" role="dialog" aria-label="Recherche globale">
+    <div class="cmd-palette-box" role="dialog" aria-modal="true" aria-label="Recherche globale">
       <div class="cmd-palette-input-wrap">
         <span class="cmd-palette-icon">🔍</span>
         <input id="cmd-palette-input" class="cmd-palette-input" type="text"
           placeholder="Rechercher une page, un PNJ, une quête, un objet…"
-          autocomplete="off" spellcheck="false">
+          autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list"
+          aria-controls="cmd-palette-list" aria-expanded="true">
         <kbd class="cmd-palette-kbd">Esc</kbd>
       </div>
       <div class="cmd-palette-list" id="cmd-palette-list" role="listbox"></div>
+      <div class="cmd-palette-status" id="cmd-palette-status" role="status" aria-live="polite"></div>
       <div class="cmd-palette-foot">
         <span><kbd>↑</kbd><kbd>↓</kbd> Naviguer</span>
         <span><kbd>↵</kbd> Ouvrir</span>
@@ -588,6 +609,7 @@ function _mountModal() {
     else if (e.key === 'ArrowUp') { e.preventDefault(); _move(-1); }
     else if (e.key === 'Enter')   { e.preventDefault(); _activate(); }
     else if (e.key === 'Escape')  { e.preventDefault(); closePalette(); }
+    else if (e.key === 'Tab')     { e.preventDefault(); input.focus(); }
   });
 
   root.addEventListener('click', (e) => {
@@ -599,6 +621,19 @@ function _mountModal() {
     }
   });
 
+  root.addEventListener('mousemove', (e) => {
+    const row = e.target.closest('[data-cmd-idx]');
+    const index = Number(row?.dataset.cmdIdx);
+    if (!row || !Number.isInteger(index) || index === _activeIndex) return;
+    _activeIndex = index;
+    root.querySelectorAll('.cmd-palette-row').forEach((item, i) => {
+      const active = i === index;
+      item.classList.toggle('is-active', active);
+      item.setAttribute('aria-selected', String(active));
+    });
+    input.setAttribute('aria-activedescendant', row.id);
+  });
+
   return input;
 }
 
@@ -606,7 +641,9 @@ function _mountModal() {
 // OPEN / CLOSE
 // ══════════════════════════════════════════════════════════════════════════════
 async function openPalette() {
-  if (_open) return;
+  const app = document.getElementById('app');
+  const appVisible = app && getComputedStyle(app).display !== 'none';
+  if (_open || !appVisible || !STATE.user || !STATE.adventure?.id) return;
   _open = true;
   _query = '';
   _activeIndex = 0;
@@ -614,6 +651,7 @@ async function openPalette() {
   _results = [];
   _bestiaryEntries = null;
   _bestiaryEntriesPromise = null;
+  _previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
   const input = _mountModal();
   const list = document.getElementById('cmd-palette-list');
@@ -639,6 +677,8 @@ function closePalette() {
   const root = document.getElementById('cmd-palette');
   if (root) root.remove();
   _open = false;
+  if (_previousFocus?.isConnected) _previousFocus.focus({ preventScroll: true });
+  _previousFocus = null;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

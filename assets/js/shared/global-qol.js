@@ -11,12 +11,77 @@ import {
   getNotificationHistory,
   getUnreadNotificationCount,
   markNotificationsRead,
+  triggerLatestNotificationAction,
 } from './notifications.js';
 import { STATE } from '../core/state.js';
 import { lsJson } from './local-storage.js';
 
 let _initialized = false;
 let _onlineTimer = null;
+
+const PAGE_TITLES = {
+  dashboard: 'Tableau de bord',
+  vtt: 'Jouer',
+  characters: 'Personnage',
+  shop: 'Boutique',
+  npcs: 'PNJ',
+  story: 'Trame',
+  histoire: 'Histoire',
+  bastion: 'Bastion',
+  world: 'Monde',
+  achievements: 'Hauts-faits',
+  collection: 'Collection',
+  players: 'Joueurs',
+  recettes: 'Recettes',
+  bestiaire: 'Bestiaire',
+  map: 'Carte',
+  quests: 'Quêtes',
+  agenda: 'Agenda',
+  artisan: 'Artisanat',
+  account: 'Compte',
+  aventures: 'Aventures',
+  admin: 'Administration',
+};
+
+function _updateDocumentTitle() {
+  const adventure = STATE.adventure;
+  if (!adventure?.id) return;
+  const page = PAGE_TITLES[STATE.currentPage] || 'Grimorium';
+  const adventureName = String(adventure.nom || adventure.name || 'Aventure').trim();
+  const baseTitle = `${page} · ${adventureName} — Grimorium`;
+  const unreadPrefix = document.title.match(/^\(\d+\)\s*/)?.[0] || '';
+  document.title = `${unreadPrefix}${baseTitle}`;
+  document.dispatchEvent(new CustomEvent('app:base-title-changed', { detail: { title: baseTitle } }));
+}
+
+function _initDocumentTitles() {
+  document.addEventListener('app:page-changed', _updateDocumentTitle);
+  document.addEventListener('app:adventure-changed', _updateDocumentTitle);
+  _updateDocumentTitle();
+}
+
+function _mountPageAnnouncer() {
+  const announcer = document.createElement('div');
+  announcer.className = 'global-page-announcer';
+  announcer.setAttribute('role', 'status');
+  announcer.setAttribute('aria-live', 'polite');
+  announcer.setAttribute('aria-atomic', 'true');
+  document.body.appendChild(announcer);
+
+  document.addEventListener('app:page-rendered', (event) => {
+    const page = event.detail?.page || STATE.currentPage;
+    const label = PAGE_TITLES[page] || 'Page';
+    announcer.textContent = `${label} affichée`;
+    if (!event.detail?.changed) return;
+    requestAnimationFrame(() => {
+      const content = document.getElementById('main-content');
+      const heading = content?.querySelector('h1, [role="heading"][aria-level="1"]');
+      if (!heading) return;
+      if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+      heading.focus({ preventScroll: true });
+    });
+  });
+}
 
 function _mountNetworkStatus() {
   const status = document.createElement('div');
@@ -441,6 +506,7 @@ function _openKeyboardHelp() {
         <h3>Fenêtres et formulaires</h3>
         <div><span>Enregistrer</span><kbd>Ctrl</kbd><kbd>S</kbd></div>
         <div><span>Valider</span><kbd>Ctrl</kbd><kbd>Entrée</kbd></div>
+        <div><span>Annuler l’action temporaire</span><kbd>Ctrl</kbd><kbd>Z</kbd></div>
         <div><span>Fermer ou effacer une recherche</span><kbd>Échap</kbd></div>
         <div><span>Afficher cette aide</span><kbd>?</kbd></div>
       </section>
@@ -596,6 +662,11 @@ function _initContextualShortcuts() {
     const target = event.target;
     const editing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target?.isContentEditable;
     const modalOpen = document.getElementById('modal-overlay')?.classList.contains('show');
+    const temporaryUndo = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z';
+    if (!editing && !modalOpen && !event.defaultPrevented && temporaryUndo && triggerLatestNotificationAction()) {
+      event.preventDefault();
+      return;
+    }
     if (!editing && !modalOpen && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === 'n') {
       const create = _quickCreateTarget();
       if (!create) return;
@@ -667,10 +738,88 @@ function _initFormValidationQol() {
   document.addEventListener('change', clearInvalid, true);
 }
 
+function _initCapsLockHint() {
+  const hint = document.createElement('div');
+  hint.id = 'global-caps-lock-hint';
+  hint.className = 'global-caps-lock-hint';
+  hint.setAttribute('role', 'status');
+  hint.textContent = 'Verr. Maj est activé';
+  hint.hidden = true;
+  document.body.appendChild(hint);
+
+  let activeInput = null;
+  const hide = () => {
+    hint.hidden = true;
+    activeInput?.removeAttribute('aria-describedby');
+    activeInput = null;
+  };
+  const update = (event) => {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement) || input.type !== 'password') return;
+    const enabled = Boolean(event.getModifierState?.('CapsLock'));
+    if (!enabled) { hide(); return; }
+    activeInput = input;
+    input.setAttribute('aria-describedby', hint.id);
+    const rect = input.getBoundingClientRect();
+    hint.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 180))}px`;
+    hint.style.top = `${Math.min(window.innerHeight - 38, rect.bottom + 6)}px`;
+    hint.hidden = false;
+  };
+  document.addEventListener('keydown', update, true);
+  document.addEventListener('keyup', update, true);
+  document.addEventListener('focusout', (event) => {
+    if (event.target === activeInput) hide();
+  }, true);
+  window.addEventListener('blur', hide);
+}
+
+function _initTextareaQol() {
+  const grow = (textarea) => {
+    if (!(textarea instanceof HTMLTextAreaElement) || textarea.dataset.noAutoGrow !== undefined) return;
+    if (textarea.closest('[data-free-page-editor]')) return;
+    const maxHeight = Math.min(320, Math.round(window.innerHeight * .42));
+    if (textarea.scrollHeight <= textarea.clientHeight + 2 || textarea.clientHeight >= maxHeight) return;
+    textarea.style.height = `${Math.min(textarea.scrollHeight + 2, maxHeight)}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  };
+
+  const bind = (root) => {
+    const textareas = [
+      ...(root?.matches?.('textarea') ? [root] : []),
+      ...(root?.querySelectorAll?.('textarea') || []),
+    ];
+    for (const textarea of textareas) {
+      if (textarea.dataset.qolTextarea === 'true') continue;
+      textarea.dataset.qolTextarea = 'true';
+      if (textarea.maxLength > 0) {
+        const counter = document.createElement('small');
+        counter.className = 'global-char-count';
+        counter.id = `global-char-count-${Math.random().toString(36).slice(2, 9)}`;
+        const updateCount = () => {
+          counter.textContent = `${textarea.value.length}/${textarea.maxLength}`;
+          counter.classList.toggle('is-near-limit', textarea.value.length >= textarea.maxLength * .9);
+        };
+        textarea.insertAdjacentElement('afterend', counter);
+        textarea.setAttribute('aria-describedby', [textarea.getAttribute('aria-describedby'), counter.id].filter(Boolean).join(' '));
+        textarea.addEventListener('input', updateCount);
+        updateCount();
+      }
+      textarea.addEventListener('input', () => grow(textarea));
+      grow(textarea);
+    }
+  };
+
+  document.addEventListener('app:modal-opened', () => requestAnimationFrame(() => bind(document.getElementById('modal-body'))));
+  document.addEventListener('app:page-rendered', () => requestAnimationFrame(() => bind(document.getElementById('main-content'))));
+  bind(document);
+}
+
 export function initGlobalQol() {
   if (_initialized) return;
   _initialized = true;
   _mountNetworkStatus();
+  _initDocumentTitles();
+  _mountPageAnnouncer();
   _mountBackToTop();
   _mountNotificationHistory();
   _initModalShortcuts();
@@ -682,5 +831,7 @@ export function initGlobalQol() {
   _initContextualShortcuts();
   _initOverflowNavigation();
   _initFormValidationQol();
+  _initCapsLockHint();
+  _initTextareaQol();
   initPagePreferences();
 }

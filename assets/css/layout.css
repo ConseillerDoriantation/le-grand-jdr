@@ -1921,6 +1921,10 @@ select.input-field, select.input-sm { cursor:pointer; }
   transform:translateY(80px) scale(0.95);
   opacity:0;
   transition:all 0.28s cubic-bezier(0.34,1.56,0.64,1);
+  display:flex;
+  align-items:center;
+  gap:.55rem;
+  max-width:min(520px, calc(100vw - 3rem));
 }
 .notif.show { transform:translateY(0) scale(1); opacity:1; }
 .notif.success { background:rgba(53,211,153,0.16); border:1px solid rgba(53,211,153,0.28); color:#67e7b4; }
@@ -1928,7 +1932,7 @@ select.input-field, select.input-sm { cursor:pointer; }
 .notif.warning { background:rgba(242,200,107,0.16); border:1px solid rgba(242,200,107,0.3); color:#f2c86b; }
 /* Bouton d'action optionnel dans le toast (ex. « ↺ Annuler ») */
 .notif .notif-action {
-  margin-left:0.8rem;
+  margin-left:0.25rem;
   padding:0.3rem 0.7rem;
   border-radius:10px;
   border:1px solid currentColor;
@@ -1939,6 +1943,22 @@ select.input-field, select.input-sm { cursor:pointer; }
   cursor:pointer;
 }
 .notif .notif-action:hover { background:rgba(255,255,255,0.10); }
+.notif .notif-close {
+  display:grid;
+  place-items:center;
+  width:24px;
+  height:24px;
+  padding:0;
+  border:0;
+  border-radius:50%;
+  background:transparent;
+  color:inherit;
+  font:700 1rem/1 var(--font-ui, sans-serif);
+  cursor:pointer;
+  opacity:.72;
+}
+.notif .notif-close:hover,
+.notif .notif-close:focus-visible { background:rgba(255,255,255,.1); opacity:1; }
 
 /* LOADING */
 .loading {
@@ -2779,6 +2799,40 @@ select.input-field, select.input-sm { cursor:pointer; }
   box-shadow: 0 0 0 3px rgba(255, 107, 120, .14) !important;
   scroll-margin-block: 22vh;
 }
+
+.global-caps-lock-hint {
+  position: fixed;
+  z-index: 12010;
+  padding: 6px 9px;
+  border: 1px solid rgba(242, 200, 107, .38);
+  border-radius: 6px;
+  background: rgba(18, 24, 36, .97);
+  color: #f2c86b;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
+  font: 700 .7rem/1.2 var(--font-ui, sans-serif);
+  pointer-events: none;
+}
+
+.global-page-announcer {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.global-char-count {
+  display: block;
+  margin: 4px 2px 0 auto;
+  width: max-content;
+  color: var(--text-dim);
+  font: 600 .66rem/1.2 var(--font-ui, sans-serif);
+}
+.global-char-count.is-near-limit { color: #f2c86b; }
 
 .global-notification-toggle {
   position: relative;
