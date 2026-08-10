@@ -1347,6 +1347,7 @@ function _render() {
 
   const allTypes = [...new Set(STORE.creatures.map(c => c.type || '').filter(Boolean))].sort();
   const filtered = STORE.creatures.filter(c => _beastMatchesFilters(c));
+  const hasFilters = Boolean(STORE.searchVal || STORE.filterType || STORE.filterRang || STORE.filterPrep);
   const hiddenCount = STORE.creatures.filter(c => c.hidden).length;
   const actionCount = STORE.creatures.reduce((n, c) => n + (Array.isArray(c.actions) ? c.actions.length : 0), 0);
   const lootCount = STORE.creatures.reduce((n, c) => n + (Array.isArray(c.butins) ? c.butins.length : 0), 0);
@@ -1419,6 +1420,7 @@ function _render() {
           <input type="text" id="bst-search" placeholder="Nom, type, environnement, trait..."
             value="${_esc(STORE.searchVal)}" data-bst-action="search" data-bst-on="input">
         </div>
+        <button class="bst-tool-btn" data-bst-action="resetFilters" data-bst-reset-filters${hasFilters ? '' : ' hidden'}>Réinitialiser les filtres</button>
       </div>
 
       <div class="bst-summary-strip">
@@ -1468,16 +1470,15 @@ function _render() {
           <div><b data-bst-list-count>${filtered.length}</b> resultat<span data-bst-list-plural>${filtered.length > 1 ? 's' : ''}</span></div>
           ${_isAdminView() ? '<span>Glisse les cartes pour organiser l\'ordre manuel</span>' : '<span>Ouvre une fiche pour renseigner tes estimations</span>'}
         </div>
-        ${filtered.length === 0 ? `
-          <div class="bst-empty bst-empty-v2">
+          <div class="bst-empty bst-empty-v2" data-bst-filter-empty${filtered.length ? ' hidden' : ''}>
             <div class="bst-empty-icon">?</div>
             <div class="bst-empty-title">${STORE.creatures.length === 0 ? 'Bestiaire vide' : 'Aucun resultat'}</div>
             <div class="bst-empty-sub">${STORE.creatures.length === 0 ? 'Ajoute une creature pour commencer.' : 'Modifie la recherche ou retire un filtre.'}</div>
             ${STATE.isAdmin && STORE.creatures.length === 0 ? `<button class="bst-primary-btn" data-bst-action="createDraft">+ Ajouter une creature</button>` : ''}
-          </div>` : `
-          <div class="bst-grid${_isAdminView() ? ' bst-sortable' : ''}">
+          </div>
+          <div class="bst-grid${_isAdminView() ? ' bst-sortable' : ''}"${filtered.length ? '' : ' hidden'}>
             ${filtered.map(c => _renderCard(c)).join('')}
-          </div>`}
+          </div>
       </section>
       <aside class="bst-panel-slot">
         ${STORE.activeId ? _renderPanel(STORE.creatures.find(c => c.id === STORE.activeId)) : ''}
@@ -2125,11 +2126,15 @@ function _renderPanelAdmin(c, rs) {
 export async function deleteBeast(id) {
   const col = STORE.currentCol || 'bestiary';
   const c = STORE.creatures.find(x=>x.id===id);
-  if (!await confirmDelete(col, id, `Supprimer "${c?.nom||'cette creature'}" ?`, {title: 'Supprimer la creature'})) return;
+  if (!await confirmDelete(col, id, `Supprimer "${c?.nom||'cette creature'}" ?`, {
+    title: 'Supprimer la creature',
+    snapshot: c,
+    successMessage: 'Creature supprimee.',
+    onRestore: async () => { await _bstHydrate(); _render(); },
+  })) return;
   if (STORE.activeId === id) STORE.activeId = null;
   await _bstHydrate();
   _render();
-  showNotif('Creature supprimee.','success');
 }
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -2307,11 +2312,24 @@ function _bstSearchInput(val) {
   });
   const plural = document.querySelector('[data-bst-list-plural]');
   if (plural) plural.textContent = visible > 1 ? 's' : '';
+  const empty = document.querySelector('[data-bst-filter-empty]');
+  const grid = document.querySelector('.bst-grid');
+  if (empty) empty.hidden = visible > 0;
+  if (grid) grid.hidden = visible === 0;
+  const reset = document.querySelector('[data-bst-reset-filters]');
+  if (reset) reset.hidden = !(_norm(val) || STORE.filterType || STORE.filterRang || STORE.filterPrep);
 }
 
 function _bstSearch(val) { STORE.searchVal = val; _render(); } // legacy
 function _bstSetType(type) { STORE.filterType = type; _render(); }
 function _bstSetPrep(prep) { STORE.filterPrep = prep || ''; _render(); }
+function _bstResetFilters() {
+  STORE.searchVal = '';
+  STORE.filterType = '';
+  STORE.filterRang = '';
+  STORE.filterPrep = '';
+  _render();
+}
 function _bstClearCompare() { STORE.compareIds = []; _render(); }
 function _bstToggleCompare(id) {
   if (!STATE.isAdmin || !id) return;
@@ -2758,6 +2776,7 @@ Object.assign(bstHandlers, {
   setRang:        (el) => _bstSetRang(el.dataset.rang),
   setType:        (el) => _bstSetType(el.dataset.type),
   setPrep:        (el) => _bstSetPrep(el.dataset.prep),
+  resetFilters:   ()   => _bstResetFilters(),
   search:         (el) => _bstSearchInput(el.value),
   viewAs:         (el) => _bstViewAs(el.dataset.uid || ''),
   toggleCompare:  (el, ev) => { ev?.stopPropagation?.(); _bstToggleCompare(el.dataset.id); },

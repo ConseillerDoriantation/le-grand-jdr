@@ -33,4 +33,13 @@ export const lsJson = {
       return false;
     }
   },
+
+  remove(storageKey) {
+    try {
+      localStorage.removeItem(storageKey);
+      return true;
+    } catch {
+      return false;
+    }
+  },
 };

@@ -3568,9 +3568,14 @@ function _refreshActivePanel() {
 
 
 export async function deleteAffinitePerso(id) {
-  if (!await confirmDelete('npc_affinites', id, 'Supprimer cette affinité ?', { title: 'Confirmation de suppression' })) return;
+  const snapshot = _affiPerso.find(a => a.id === id);
+  if (!await confirmDelete('npc_affinites', id, 'Supprimer cette affinité ?', {
+    title: 'Confirmation de suppression',
+    snapshot,
+    successMessage: 'Affinité supprimée.',
+    onRestore: (restored) => { _affiPerso.push(restored); _refreshActivePanel(); },
+  })) return;
   _affiPerso = _affiPerso.filter(a => a.id !== id);
-  showNotif('Affinité supprimée.', 'success');
   _refreshActivePanel();
 }
 

@@ -132,6 +132,10 @@
   opacity: .9;
 }
 
+.cmd-palette-avatar {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .08);
+}
+
 .cmd-palette-row-text {
   flex: 1;
   min-width: 0;
@@ -171,6 +175,18 @@
   text-align: center;
   color: var(--text-dim);
   font-size: .88rem;
+}
+
+.cmd-palette-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ── Footer ─────────────────────────────────────────────────────────────────── */

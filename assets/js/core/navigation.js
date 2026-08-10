@@ -18,6 +18,11 @@ import {
   restoreViewContextAfterRender,
 } from '../shared/view-context.js';
 import { recordRecentNavigation } from '../shared/recent-navigation.js';
+import { confirmModal } from '../shared/modal.js';
+import {
+  persistPagePreferences,
+  restorePagePreferences,
+} from '../shared/page-preferences.js';
 
 // ── Carte page → module feature chargé en lazy ────────────────────────────
 // Chaque module est importé une seule fois : le navigateur le met en cache
@@ -175,6 +180,42 @@ export function consumeBootPage(fallback = 'dashboard') {
 
 let _hasSyncedRoute = Boolean(parseRoute().page);
 let _handlingPopState = false;
+let _navigationSequence = 0;
+let _leaveGuardPromise = null;
+
+async function _canLeaveCurrentPage(nextPage) {
+  if (!STATE.currentPage || STATE.currentPage === nextPage) return true;
+  const dirtyEditor = document.querySelector('[data-free-page-editor][data-free-page-dirty="true"]');
+  if (!dirtyEditor) return true;
+  if (!_leaveGuardPromise) {
+    _leaveGuardPromise = confirmModal(
+      'Cette composition contient des modifications non enregistrées. Quitter cette page les supprimera.',
+      {
+        title: 'Modifications non enregistrées',
+        confirmLabel: 'Quitter sans enregistrer',
+        cancelLabel: 'Continuer la modification',
+        danger: true,
+        icon: '⚠️',
+      }
+    ).finally(() => { _leaveGuardPromise = null; });
+  }
+  return _leaveGuardPromise;
+}
+
+function _runStandaloneAction(el, task) {
+  if (!el || el.dataset.actionPending === 'true') return;
+  el.dataset.actionPending = 'true';
+  el.setAttribute('aria-busy', 'true');
+  const timer = setTimeout(() => el.classList.add('is-action-pending', 'is-action-pending-visible'), 180);
+  Promise.resolve().then(task).catch(err => {
+    console.error('[nav] action autonome impossible', err);
+  }).finally(() => {
+    clearTimeout(timer);
+    el.classList.remove('is-action-pending', 'is-action-pending-visible');
+    el.removeAttribute('aria-busy');
+    delete el.dataset.actionPending;
+  });
+}
 
 function _syncHash(page, historyMode = 'push') {
   // Même page → on laisse l'URL intacte : sa sous-route (onglet en cours, ou
@@ -192,9 +233,15 @@ function _syncHash(page, historyMode = 'push') {
 
 // ── Naviguer vers une page ─────────────────────
 export async function navigate(page, { historyMode = 'push' } = {}) {
+  if (!await _canLeaveCurrentPage(page)) {
+    if (historyMode === 'none') _syncHash(STATE.currentPage, 'replace');
+    return;
+  }
+  const navigationId = ++_navigationSequence;
   const previousPage = STATE.currentPage;
   const previousContent = document.getElementById('main-content');
   if (previousContent && previousPage) {
+    persistPagePreferences(previousContent, previousPage);
     _pageViewContexts.set(
       _pageViewKey(previousPage),
       captureViewContext(previousContent, { includeWindow: true })
@@ -230,6 +277,7 @@ export async function navigate(page, { historyMode = 'push' } = {}) {
   }
 
   setPage(page);
+  document.dispatchEvent(new CustomEvent('app:page-changed', { detail: { page } }));
   _syncHash(page, historyMode);
   _syncNav(page);
   _renderLoading();
@@ -245,6 +293,7 @@ export async function navigate(page, { historyMode = 'push' } = {}) {
     try {
       await FEATURE_MAP[page]();
       _loaded.add(page);
+      if (navigationId !== _navigationSequence) return;
     } catch (err) {
       console.error(`[nav] chargement feature "${page}" échoué :`, err);
       _renderPageError(page, err);
@@ -252,6 +301,7 @@ export async function navigate(page, { historyMode = 'push' } = {}) {
     }
   }
   await cssReady;
+  if (navigationId !== _navigationSequence) return;
 
   // Vérifier après chargement
   if (!PAGES[page]) {
@@ -263,8 +313,11 @@ export async function navigate(page, { historyMode = 'push' } = {}) {
   // Rendre la page
   try {
     await _ensureCharactersReady(page);
+    if (navigationId !== _navigationSequence) return;
     if (mc) mc.dataset.page = page;
     await PAGES[page]();
+    if (navigationId !== _navigationSequence) return;
+    restorePagePreferences(mc, page);
     recordRecentNavigation({ type: 'page', id: page });
     _finishLoading();
     const context = _pageViewContexts.get(_pageViewKey(page));
@@ -276,6 +329,9 @@ export async function navigate(page, { historyMode = 'push' } = {}) {
     } else if (previousPage !== page) {
       window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
     }
+    document.dispatchEvent(new CustomEvent('app:page-rendered', {
+      detail: { page, changed: previousPage !== page },
+    }));
   } catch (err) {
     console.error(`[nav] page "${page}" a planté :`, err);
     _renderPageError(page, err);
@@ -403,9 +459,9 @@ export function initEventDelegation() {
     // Actions auth déléguées + registry central
     const actionBtn = e.target.closest('[data-action]');
     const action = actionBtn?.dataset.action;
-    if (action === 'logout')            { doLogout();                       return; }
-    if (action === 'login')             { e.preventDefault(); doLogin();    return; }
-    if (action === 'register')          { e.preventDefault(); doRegister(); return; }
+    if (action === 'logout')            { _runStandaloneAction(actionBtn, doLogout); return; }
+    if (action === 'login')             { e.preventDefault(); _runStandaloneAction(actionBtn, doLogin); return; }
+    if (action === 'register')          { e.preventDefault(); _runStandaloneAction(actionBtn, doRegister); return; }
     if (action === 'auth-tab-login')    { switchAuthTab('login');           return; }
     if (action === 'auth-tab-register') { switchAuthTab('register');        return; }
     if (action === 'toggle-pw') {

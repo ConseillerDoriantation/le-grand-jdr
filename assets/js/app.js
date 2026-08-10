@@ -25,6 +25,7 @@ import {
 import { showNotif }              from './shared/notifications.js';
 import { openAdventureSwitcher }  from './core/layout.js';
 import { initTheme, toggleTheme } from './shared/theme.js';
+import { initGlobalQol } from './shared/global-qol.js';
 
 // ── Modules chargés au boot (nécessaires immédiatement) ──────────────────────
 // character-photo : enregistre à l'import un handler de clic délégué pour les
@@ -85,6 +86,12 @@ try {
   initTheme();
 } catch (err) {
   console.error('[app] initTheme:', err);
+}
+
+try {
+  initGlobalQol();
+} catch (err) {
+  console.error('[app] initGlobalQol:', err);
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────

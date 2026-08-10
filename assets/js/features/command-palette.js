@@ -11,6 +11,8 @@ import { charSession } from '../shared/char-session.js';
 import { navigate } from '../core/navigation.js';
 import { isFeatureEnabled } from '../shared/features.js';
 import { getRecentNavigation, recordRecentNavigation } from '../shared/recent-navigation.js';
+import { characterAvatarHtml } from '../shared/portraits.js';
+import { showNotif } from '../shared/notifications.js';
 
 const MAX_RESULTS = 30;
 
@@ -26,6 +28,7 @@ let _query       = '';
 let _initialized = false;
 let _bestiaryEntries = null;
 let _bestiaryEntriesPromise = null;
+let _previousFocus = null;
 
 // ── PAGES (raccourcis directs) ────────────────────────────────────────────────
 const PAGE_SHORTCUTS = [
@@ -47,6 +50,45 @@ const PAGE_SHORTCUTS = [
   { id: 'aventures',    label: 'Aventures',       icon: '🗡️', aliases: 'campagne changer aventure switch sélectionner selectionner' },
   { id: 'account',      label: 'Mon compte',      icon: '👤', aliases: 'compte profil utilisateur préférences preferences' },
   { id: 'admin',        label: 'Console MJ',      icon: '⚙️', adminOnly: true, aliases: 'mj console gestion admin configuration' },
+];
+
+const QUICK_COMMANDS = [
+  {
+    id: 'keyboard-help', label: 'Afficher les raccourcis clavier', icon: '⌨️', page: '',
+    aliases: 'aide clavier commandes raccourcis touches', directAction: 'keyboard-help',
+  },
+  {
+    id: 'copy-view-link', label: 'Copier le lien de cette vue', icon: '🔗', page: '',
+    aliases: 'partager url adresse lien page onglet', directAction: 'copy-view-link',
+  },
+  {
+    id: 'new-character', label: 'Créer un personnage', icon: '➕', page: 'characters',
+    selector: '[data-action="createNewChar"]', aliases: 'nouveau personnage fiche perso pj',
+  },
+  {
+    id: 'new-npc', label: 'Créer un PNJ', icon: '👤', page: 'npcs', adminOnly: true,
+    selector: '[data-action="npcCreate"]', aliases: 'nouveau pnj npc personnage non joueur',
+  },
+  {
+    id: 'new-mission', label: 'Créer une mission', icon: '📖', page: 'story', adminOnly: true,
+    selector: '[data-action="openStoryModal"]', aliases: 'nouvelle mission trame histoire scénario',
+  },
+  {
+    id: 'new-achievement', label: 'Créer un haut-fait', icon: '🏆', page: 'achievements', adminOnly: true,
+    selector: '[data-action="openAchievementModal"]', aliases: 'nouveau haut fait souvenir trophée',
+  },
+  {
+    id: 'new-beast', label: 'Créer une créature', icon: '🐉', page: 'bestiaire', adminOnly: true,
+    selector: '[data-bst-action="createDraft"]', aliases: 'nouvelle créature monstre bestiaire',
+  },
+  {
+    id: 'new-shop-item', label: 'Créer un article', icon: '🛒', page: 'shop', adminOnly: true,
+    selector: '[data-sh-action="openItemModal"]', aliases: 'nouvel objet boutique équipement',
+  },
+  {
+    id: 'new-adventure', label: 'Créer une aventure', icon: '🗡️', page: '',
+    aliases: 'nouvelle aventure campagne', directAction: 'create-adventure',
+  },
 ];
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -87,6 +129,28 @@ async function _loadEntries() {
 
   const entries = [];
 
+  // Already loaded during bootstrap: switching adventure adds no Firestore read.
+  for (const adventure of STATE.adventures || []) {
+    const title = _firstStr(adventure, ['nom', 'name']) || adventure.id;
+    entries.push({
+      type: 'adventure', typeLabel: 'Aventure', id: adventure.id, title,
+      subtitle: adventure.id === STATE.adventure?.id ? 'Aventure active' : "Changer d'aventure",
+      icon: adventure.emoji || '⚔️',
+      search: _norm([title, adventure.id, 'aventure campagne changer switch'].filter(Boolean).join(' ')),
+    });
+  }
+
+  for (const command of QUICK_COMMANDS) {
+    if (command.adminOnly && !STATE.isAdmin) continue;
+    if (command.page && !isFeatureEnabled(command.page)) continue;
+    entries.push({
+      type: 'command', typeLabel: 'Action', id: command.id,
+      title: command.label, subtitle: 'Action rapide', icon: command.icon,
+      search: _norm(`${command.label} ${command.aliases || ''}`),
+      payload: command,
+    });
+  }
+
   // Pages
   for (const p of PAGE_SHORTCUTS) {
     if (p.adminOnly && !STATE.isAdmin) continue;
@@ -106,6 +170,7 @@ async function _loadEntries() {
       type: 'npc', typeLabel: 'PNJ', id: n.id, title,
       subtitle: _firstStr(n, ['fonction', 'role', 'titre', 'description']),
       icon: '👤',
+      avatarHtml: characterAvatarHtml(n, { size: 32, className: 'cmd-palette-avatar' }),
       search: _norm([title, n.fonction, n.role, n.description, n.notes].filter(Boolean).join(' ')),
     });
   }
@@ -118,6 +183,7 @@ async function _loadEntries() {
       type: 'character', typeLabel: 'Personnage', id: c.id, title,
       subtitle: [c.classe, c.race, c.ownerPseudo].filter(Boolean).join(' · '),
       icon: '⚔️',
+      avatarHtml: characterAvatarHtml(c, { size: 32, className: 'cmd-palette-avatar' }),
       search: _norm([title, c.classe, c.race, c.ownerPseudo].filter(Boolean).join(' ')),
       payload: c,
     });
@@ -212,6 +278,10 @@ function _buildBestiaryEntries(bestiary) {
       type: 'beast', typeLabel: 'Bestiaire', id: b.id, title,
       subtitle: _firstStr(b, ['type', 'description', 'famille']),
       icon: '🐉',
+      avatarHtml: characterAvatarHtml({
+        ...b,
+        photo: _firstStr(b, ['photo', 'portrait', 'image', 'illustration', 'imageUrl']),
+      }, { size: 32, className: 'cmd-palette-avatar' }),
       search: _norm([title, b.type, b.famille, b.description].filter(Boolean).join(' ')),
     });
   }
@@ -264,10 +334,17 @@ function _filterAndSort(entries, query) {
         groupLabel: 'Récemment ouverts',
       }));
     const recentKeys = new Set(recent.map(entry => `${entry.type}:${entry.id}`));
+    const adventures = entries
+      .filter(entry => entry.type === 'adventure' && !recentKeys.has(`adventure:${entry.id}`))
+      .sort((a, b) => Number(b.id === STATE.adventure?.id) - Number(a.id === STATE.adventure?.id))
+      .map(entry => ({ ...entry, groupKey: 'adventure', groupLabel: 'Aventures' }));
+    const commands = entries
+      .filter(entry => entry.type === 'command' && !recentKeys.has(`command:${entry.id}`))
+      .map(entry => ({ ...entry, groupKey: 'command', groupLabel: 'Actions rapides' }));
     const pages = entries
       .filter(entry => entry.type === 'page' && !recentKeys.has(`page:${entry.id}`))
       .map(entry => ({ ...entry, groupKey: 'page', groupLabel: 'Pages' }));
-    return [...recent, ...pages].slice(0, MAX_RESULTS);
+    return [...recent, ...commands, ...adventures, ...pages].slice(0, MAX_RESULTS);
   }
   const scored = [];
   for (const e of entries) {
@@ -301,6 +378,41 @@ async function _executeEntry(entry) {
 
   try {
     switch (entry.type) {
+      case 'command': {
+        const command = entry.payload;
+        if (command?.directAction === 'keyboard-help') {
+          document.dispatchEvent(new CustomEvent('app:open-keyboard-help'));
+          return;
+        }
+        if (command?.directAction === 'copy-view-link') {
+          await navigator.clipboard.writeText(location.href);
+          showNotif('Lien de cette vue copié.', 'success');
+          return;
+        }
+        if (command?.directAction === 'create-adventure') {
+          const { openCreateAdventureModal } = await import('../core/init.js');
+          await openCreateAdventureModal();
+          return;
+        }
+        if (!command?.page || !command.selector) return;
+        await go(command.page);
+        await _nextTick();
+        const trigger = document.querySelector(command.selector);
+        if (!trigger) throw new Error(`Action rapide indisponible : ${command.id}`);
+        trigger.click();
+        return;
+      }
+
+      case 'adventure': {
+        if (entry.id === STATE.adventure?.id) {
+          await go('dashboard');
+          return;
+        }
+        const { pickAdventure } = await import('../core/init.js');
+        await pickAdventure(entry.id);
+        return;
+      }
+
       case 'page':
         await go(entry.id);
         return;
@@ -385,6 +497,7 @@ async function _executeEntry(entry) {
     }
   } catch (e) {
     console.error('[cmd-palette] action failed:', e);
+    showNotif("Impossible d'ouvrir ce résultat.", 'error');
   }
 }
 
@@ -400,6 +513,9 @@ function _renderList() {
       ? `Aucun résultat pour « ${_esc(_query)} »`
       : 'Tapez pour rechercher (PNJ, perso, quête, article…)';
     list.innerHTML = `<div class="cmd-palette-empty">${msg}</div>`;
+    document.getElementById('cmd-palette-input')?.removeAttribute('aria-activedescendant');
+    const status = document.getElementById('cmd-palette-status');
+    if (status) status.textContent = _query.trim() ? 'Aucun résultat' : '';
     return;
   }
 
@@ -414,8 +530,8 @@ function _renderList() {
     }
     const active = i === _activeIndex ? ' is-active' : '';
     html += `
-      <div class="cmd-palette-row${active}" data-cmd-idx="${i}" role="option" aria-selected="${i===_activeIndex}">
-        <span class="cmd-palette-row-icon">${e.icon || '•'}</span>
+      <div class="cmd-palette-row${active}" id="cmd-palette-option-${i}" data-cmd-idx="${i}" role="option" aria-selected="${i===_activeIndex}">
+        ${e.avatarHtml || `<span class="cmd-palette-row-icon">${e.icon || '•'}</span>`}
         <div class="cmd-palette-row-text">
           <div class="cmd-palette-row-title">${_esc(e.title)}</div>
           ${e.subtitle ? `<div class="cmd-palette-row-sub">${_esc(e.subtitle)}</div>` : ''}
@@ -427,6 +543,10 @@ function _renderList() {
 
   const activeEl = list.querySelector('.cmd-palette-row.is-active');
   if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+  const input = document.getElementById('cmd-palette-input');
+  if (input && activeEl) input.setAttribute('aria-activedescendant', activeEl.id);
+  const status = document.getElementById('cmd-palette-status');
+  if (status) status.textContent = `${_results.length} résultat${_results.length > 1 ? 's' : ''}`;
 }
 
 function _move(delta) {
@@ -449,15 +569,17 @@ function _mountModal() {
   root.className = 'cmd-palette';
   root.innerHTML = `
     <div class="cmd-palette-backdrop" data-cmd-close></div>
-    <div class="cmd-palette-box" role="dialog" aria-label="Recherche globale">
+    <div class="cmd-palette-box" role="dialog" aria-modal="true" aria-label="Recherche globale">
       <div class="cmd-palette-input-wrap">
         <span class="cmd-palette-icon">🔍</span>
         <input id="cmd-palette-input" class="cmd-palette-input" type="text"
           placeholder="Rechercher une page, un PNJ, une quête, un objet…"
-          autocomplete="off" spellcheck="false">
+          autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list"
+          aria-controls="cmd-palette-list" aria-expanded="true">
         <kbd class="cmd-palette-kbd">Esc</kbd>
       </div>
       <div class="cmd-palette-list" id="cmd-palette-list" role="listbox"></div>
+      <div class="cmd-palette-status" id="cmd-palette-status" role="status" aria-live="polite"></div>
       <div class="cmd-palette-foot">
         <span><kbd>↑</kbd><kbd>↓</kbd> Naviguer</span>
         <span><kbd>↵</kbd> Ouvrir</span>
@@ -487,6 +609,7 @@ function _mountModal() {
     else if (e.key === 'ArrowUp') { e.preventDefault(); _move(-1); }
     else if (e.key === 'Enter')   { e.preventDefault(); _activate(); }
     else if (e.key === 'Escape')  { e.preventDefault(); closePalette(); }
+    else if (e.key === 'Tab')     { e.preventDefault(); input.focus(); }
   });
 
   root.addEventListener('click', (e) => {
@@ -498,6 +621,19 @@ function _mountModal() {
     }
   });
 
+  root.addEventListener('mousemove', (e) => {
+    const row = e.target.closest('[data-cmd-idx]');
+    const index = Number(row?.dataset.cmdIdx);
+    if (!row || !Number.isInteger(index) || index === _activeIndex) return;
+    _activeIndex = index;
+    root.querySelectorAll('.cmd-palette-row').forEach((item, i) => {
+      const active = i === index;
+      item.classList.toggle('is-active', active);
+      item.setAttribute('aria-selected', String(active));
+    });
+    input.setAttribute('aria-activedescendant', row.id);
+  });
+
   return input;
 }
 
@@ -505,7 +641,9 @@ function _mountModal() {
 // OPEN / CLOSE
 // ══════════════════════════════════════════════════════════════════════════════
 async function openPalette() {
-  if (_open) return;
+  const app = document.getElementById('app');
+  const appVisible = app && getComputedStyle(app).display !== 'none';
+  if (_open || !appVisible || !STATE.user || !STATE.adventure?.id) return;
   _open = true;
   _query = '';
   _activeIndex = 0;
@@ -513,6 +651,7 @@ async function openPalette() {
   _results = [];
   _bestiaryEntries = null;
   _bestiaryEntriesPromise = null;
+  _previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
   const input = _mountModal();
   const list = document.getElementById('cmd-palette-list');
@@ -538,6 +677,8 @@ function closePalette() {
   const root = document.getElementById('cmd-palette');
   if (root) root.remove();
   _open = false;
+  if (_previousFocus?.isConnected) _previousFocus.focus({ preventScroll: true });
+  _previousFocus = null;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

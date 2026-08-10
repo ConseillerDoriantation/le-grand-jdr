@@ -3,7 +3,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { confirmModal } from './modal.js';
 import { updateInCol, addToCol, deleteFromCol, saveDoc } from '../data/firestore.js';
-import { notifySaveError } from './notifications.js';
+import { notifySaveError, showNotif } from './notifications.js';
 
 /**
  * Affiche une confirmation puis supprime le document si confirmé.
@@ -11,9 +11,27 @@ import { notifySaveError } from './notifications.js';
  * L'appelant gère showNotif et le re-render.
  */
 export async function confirmDelete(col, id, message, opts = {}) {
-  if (!await confirmModal(message, opts)) return false;
+  const { snapshot = null, onRestore = null, successMessage = 'Élément supprimé.', ...modalOpts } = opts;
+  if (!await confirmModal(message, modalOpts)) return false;
   try {
     await deleteFromCol(col, id);
+    if (snapshot) {
+      const restoreData = typeof structuredClone === 'function'
+        ? structuredClone(snapshot)
+        : JSON.parse(JSON.stringify(snapshot));
+      delete restoreData.id;
+      showNotif(successMessage, 'success', {
+        duration: 7000,
+        action: {
+          label: '↶ Annuler',
+          onClick: async () => {
+            await saveDoc(col, id, restoreData);
+            await onRestore?.({ ...restoreData, id });
+            showNotif('Suppression annulée.', 'success');
+          },
+        },
+      });
+    }
     return true;
   } catch (e) {
     notifySaveError(e);

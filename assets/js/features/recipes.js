@@ -849,9 +849,12 @@ async function deleteShopRecipe(id) {
 async function deleteRecipe(id) {
   try {
     const r = STORE.all.find(x => x.id === id);
-    if (!await confirmDelete('recipes', id, `Supprimer "${r?.nom||'cette recette'}" ?`)) return;
+    if (!await confirmDelete('recipes', id, `Supprimer "${r?.nom||'cette recette'}" ?`, {
+      snapshot: r,
+      successMessage: 'Recette supprimée.',
+      onRestore: (restored) => { STORE.all.push(restored); _render(); },
+    })) return;
     STORE.all = STORE.all.filter(x => x.id !== id);
-    showNotif('Recette supprimée.', 'success');
     _render();
   } catch (e) { notifySaveError(e); }
 }
