@@ -1352,6 +1352,7 @@ async function renderAgendaPage() {
     }
     _scheduleQuestParticipantCleanup();
     _renderCalendar();
+    _renderSessions();
     _renderAgendaOverview();
     _renderSuggestions();
     _renderGroupView();
@@ -1360,6 +1361,7 @@ async function renderAgendaPage() {
   watchPageCollection('agenda-quests', 'quests', 'agenda', data => {
     _ag.quests = data;
     _scheduleQuestParticipantCleanup();
+    _renderSessions();
     _renderAgendaOverview();
     _renderSuggestions();
     _renderGroupView();
