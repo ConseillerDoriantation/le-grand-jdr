@@ -4828,12 +4828,16 @@ html:not([data-theme="light"]) .vtt-root {
   box-shadow: var(--elev-4);   /* surcouche (menu contextuel) */
   padding: .25rem 0; min-width: 210px; font-size: .82rem;
 }
-.vtt-ctx-item {
-  padding: .42rem .85rem; cursor: pointer; color: var(--text);
-  transition: background .1s; white-space: nowrap;
-}
-.vtt-ctx-item:hover { background: var(--bg-elevated); }
-.vtt-ctx-sep { height: 1px; background: var(--border); margin: .2rem 0; }
+  .vtt-ctx-item {
+    display: block; width: 100%; border: 0; background: transparent;
+    font: inherit; text-align: left;
+    padding: .42rem .85rem; cursor: pointer; color: var(--text);
+    transition: background .1s; white-space: nowrap;
+  }
+  .vtt-ctx-item:hover,
+  .vtt-ctx-item:focus { background: var(--bg-elevated); outline: none; }
+  .vtt-ctx-label { padding: .42rem .85rem; white-space: nowrap; }
+  .vtt-ctx-sep { height: 1px; background: var(--border); margin: .2rem 0; }
 
 /* ── Combat tracker ─────────────────────────────────────────────── */
 .vtt-combat-tracker {

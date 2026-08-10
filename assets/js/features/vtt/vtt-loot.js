@@ -224,8 +224,9 @@ function _initLootSortable() {
 function _closeLootPanel() {
   const panel = document.getElementById('vtt-loot-panel');
   const btn   = document.getElementById('vtt-loot-trigger');
-  if (panel) { panel.dataset.open = '0'; panel.style.display = 'none'; }
+  if (panel) { panel.dataset.open = '0'; panel.style.display = 'none'; panel.setAttribute('aria-hidden', 'true'); }
   btn?.classList.remove('active');
+  btn?.setAttribute('aria-expanded', 'false');
   if (_lootCloseOutside) {
     document.removeEventListener('mousedown', _lootCloseOutside, true);
     _lootCloseOutside = null;
@@ -239,7 +240,10 @@ function _vttToggleLoot() {
   if (open) { _closeLootPanel(); return; }
   panel.dataset.open = '1';
   panel.style.display = 'flex';
-  document.getElementById('vtt-loot-trigger')?.classList.add('active');
+  panel.setAttribute('aria-hidden', 'false');
+  const trigger = document.getElementById('vtt-loot-trigger');
+  trigger?.classList.add('active');
+  trigger?.setAttribute('aria-expanded', 'true');
   void _ensureLootListener();
   _renderLootPanel();
   _lootCloseOutside = (e) => {

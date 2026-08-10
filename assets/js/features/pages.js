@@ -10,6 +10,7 @@ import { isFeatureEnabled } from '../shared/features.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { loadStats, resetStats, deleteCharStats, deleteDateStats, deleteMissionStats, setSessionMission } from '../shared/stats.js';
 import { showNotif } from '../shared/notifications.js';
+import { copyText } from '../shared/clipboard.js';
 import { confirmModal, openModal, promptModal, closeModalDirect } from '../shared/modal.js';
 import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
@@ -3175,17 +3176,17 @@ const PAGES = {
           <small>${total} ${total > 1 ? 'hauts-faits archivés' : 'haut-fait archivé'}</small>
         </div>
         <div class="hall-command-tools">
-          <div class="view-toggle">
-            <button class="view-tab${activeView === 'galerie' ? ' active' : ''}" data-action="_achSetView" data-val="galerie">▦ Galerie</button>
-            <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline">⋮ Chronologie</button>
-            <button class="view-tab${activeView === 'missions' ? ' active' : ''}" data-action="_achSetView" data-val="missions">🎯 Missions</button>
+          <div class="view-toggle" role="tablist" aria-label="Mode d'affichage des hauts-faits">
+            <button class="view-tab${activeView === 'galerie' ? ' active' : ''}" data-action="_achSetView" data-val="galerie" role="tab" aria-selected="${activeView === 'galerie'}">▦ Galerie</button>
+            <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline" role="tab" aria-selected="${activeView === 'timeline'}">⋮ Chronologie</button>
+            <button class="view-tab${activeView === 'missions' ? ' active' : ''}" data-action="_achSetView" data-val="missions" role="tab" aria-selected="${activeView === 'missions'}">🎯 Missions</button>
           </div>
           ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="openAchievementCategoriesAdmin">Catégories</button>` : ''}
           ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" data-action="openAchievementModal">+ Ajouter</button>` : ''}
         </div>
       </div>
-      <div class="hall-filter-board">
-        <button type="button" class="hall-filter-card${activeFilter === 'all' ? ' active' : ''}" style="--c:#7eb0ff" data-filter="all" data-action="_achSetFilter" data-val="all">
+      <div class="hall-filter-board" role="group" aria-label="Catégorie de hauts-faits">
+        <button type="button" class="hall-filter-card${activeFilter === 'all' ? ' active' : ''}" style="--c:#7eb0ff" data-filter="all" data-action="_achSetFilter" data-val="all" aria-pressed="${activeFilter === 'all'}">
           <span class="hall-filter-icon">🏆</span>
           <span class="hall-filter-copy">
             <strong>Tous les hauts-faits</strong>
@@ -3196,7 +3197,7 @@ const PAGES = {
         ${CATS.map(c => {
           const count = byCat[c.id] || 0;
           return `
-        <button type="button" class="hall-filter-card${activeFilter === c.id ? ' active' : ''}" style="--c:${c.color}" data-filter="${c.id}" data-action="_achSetFilter" data-val="${c.id}">
+        <button type="button" class="hall-filter-card${activeFilter === c.id ? ' active' : ''}" style="--c:${c.color}" data-filter="${c.id}" data-action="_achSetFilter" data-val="${c.id}" aria-pressed="${activeFilter === c.id}">
           <span class="hall-filter-icon">${c.emoji}</span>
           <span class="hall-filter-copy">
             <strong>${_esc(c.label)}</strong>
@@ -3209,7 +3210,7 @@ const PAGES = {
       <div class="hall-command-search">
         <div class="search-wrap">
           <span style="color:var(--text-dim);font-size:.85rem">⌕</span>
-          <input type="text" placeholder="Rechercher haut-fait, mission, personnage…" id="ach-search-input"
+          <input type="search" placeholder="Rechercher haut-fait, mission, personnage…" id="ach-search-input" aria-label="Rechercher dans les hauts-faits"
             value="${_esc(achState.search || '')}"
             data-input="_achSetSearch">
         </div>
@@ -4100,7 +4101,7 @@ registerActions({
   _statsExport: async () => {
     if (!_statsLastSummary) return;
     try {
-      await navigator.clipboard.writeText(_statsLastSummary);
+      await copyText(_statsLastSummary);
       showNotif('Récap copié dans le presse-papier.', 'success');
     } catch {
       // Fallback si clipboard indisponible (contexte non sécurisé) → affiche dans une modale.

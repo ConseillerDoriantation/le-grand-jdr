@@ -223,8 +223,10 @@ function _renderShortRest() {
 // Ferme le panneau et détache le listener de clic extérieur.
 function _closeShortRest() {
   const panel = document.getElementById('vtt-rest-panel');
-  if (panel) { panel.dataset.open = '0'; panel.style.display = 'none'; }
-  document.getElementById('vtt-rest-trigger')?.classList.remove('active');
+  if (panel) { panel.dataset.open = '0'; panel.style.display = 'none'; panel.setAttribute('aria-hidden', 'true'); }
+  const trigger = document.getElementById('vtt-rest-trigger');
+  trigger?.classList.remove('active');
+  trigger?.setAttribute('aria-expanded', 'false');
   document.removeEventListener('mousedown', _shortRestOutsideClick);
 }
 // Clic en dehors du float (panneau + déclencheur) → fermer.
@@ -238,8 +240,10 @@ function _vttToggleShortRest() {
   if (open) {
     _closeShortRest();
   } else {
-    panel.dataset.open = '1'; panel.style.display = 'flex';
-    document.getElementById('vtt-rest-trigger')?.classList.add('active');
+    panel.dataset.open = '1'; panel.style.display = 'flex'; panel.setAttribute('aria-hidden', 'false');
+    const trigger = document.getElementById('vtt-rest-trigger');
+    trigger?.classList.add('active');
+    trigger?.setAttribute('aria-expanded', 'true');
     _renderShortRest();
     // Défère l'ajout du listener pour que le clic d'ouverture ne le ferme pas aussitôt.
     requestAnimationFrame(() => document.addEventListener('mousedown', _shortRestOutsideClick));

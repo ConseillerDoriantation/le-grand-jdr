@@ -115,8 +115,10 @@ function _loadMusicSoundById(soundId) {
 
 function _closeMusicPanel() {
   const panel = document.getElementById('vtt-music-panel');
-  if (panel) { panel.dataset.open='0'; panel.style.display='none'; }
-  document.getElementById('vtt-music-trigger')?.classList.remove('active');
+  if (panel) { panel.dataset.open='0'; panel.style.display='none'; panel.setAttribute('aria-hidden', 'true'); }
+  const trigger = document.getElementById('vtt-music-trigger');
+  trigger?.classList.remove('active');
+  trigger?.setAttribute('aria-expanded', 'false');
   if (_musicCloseOut) { document.removeEventListener('mousedown', _musicCloseOut, true); _musicCloseOut=null; }
   clearInterval(_musicProgTimer); _musicProgTimer=null;
   _musicSortables.forEach(s => s.destroy()); _musicSortables=[];
@@ -158,6 +160,7 @@ function _vttToggleMusicCat(catId) {
   if (!cat) return;
   const collapsed = cat.dataset.collapsed === '1';
   cat.dataset.collapsed = collapsed ? '0' : '1';
+  cat.querySelector('.vtt-music-cat-hd')?.setAttribute('aria-expanded', collapsed ? 'true' : 'false');
   _setCatCollapsed(catId, !collapsed);
 }
 function _vttToggleAllMusicCats() {
@@ -166,6 +169,7 @@ function _vttToggleAllMusicCats() {
   const collapseAll = [...cats].some(c => c.dataset.collapsed !== '1');
   cats.forEach(c => {
     c.dataset.collapsed = collapseAll ? '1' : '0';
+    c.querySelector('.vtt-music-cat-hd')?.setAttribute('aria-expanded', collapseAll ? 'false' : 'true');
     _setCatCollapsed(c.dataset.catId, collapseAll);
   });
 }
@@ -187,8 +191,10 @@ function _vttPreview(soundId, btn) {
 function _vttToggleMusic() {
   const panel = document.getElementById('vtt-music-panel'); if (!panel) return;
   if (panel.dataset.open==='1') { _closeMusicPanel(); return; }
-  panel.dataset.open='1'; panel.style.display='flex';
-  document.getElementById('vtt-music-trigger')?.classList.add('active');
+  panel.dataset.open='1'; panel.style.display='flex'; panel.setAttribute('aria-hidden', 'false');
+  const trigger = document.getElementById('vtt-music-trigger');
+  trigger?.classList.add('active');
+  trigger?.setAttribute('aria-expanded', 'true');
   if (STATE.isAdmin) void _startMusicCatalogListeners();
   _renderMusicPanel();
   _musicCloseOut = e => {
@@ -355,12 +361,12 @@ function _renderMusicList(mj) {
   if (poolSounds.length) {
     const collapsed = _isCatCollapsed('pool');
     h += `<div class="vtt-music-cat" data-cat-id="pool" data-collapsed="${collapsed?1:0}">
-      <div class="vtt-music-cat-hd" data-vtt-fn="_vttToggleMusicCat" data-vtt-args="pool">
+      <div class="vtt-music-cat-hd" data-vtt-fn="_vttToggleMusicCat" data-vtt-args="pool" role="button" tabindex="0" aria-expanded="${!collapsed}" aria-controls="vtt-music-cat-body-pool">
         <span class="vtt-music-cat-chevron"></span>
         <span class="vtt-music-cat-name">📦 Non classés</span>
         <span class="vtt-music-pl-cnt">${poolSounds.length}</span>
       </div>
-      <div class="vtt-music-cat-body">
+      <div class="vtt-music-cat-body" id="vtt-music-cat-body-pool">
         <div class="vtt-music-pool" id="vtt-music-pool">
           ${poolSounds.map(s => _renderSonRow(s, null, mj)).join('')}
         </div>
@@ -369,12 +375,12 @@ function _renderMusicList(mj) {
   }
 
   if (_playlists.length) {
-    h += `<div class="vtt-music-cats" id="vtt-music-cats">` + _playlists.map(pl => {
+    h += `<div class="vtt-music-cats" id="vtt-music-cats">` + _playlists.map((pl, index) => {
       const active = _musicState.playing && _musicState.currentPlaylistId===pl.id;
       const sounds = (pl.soundIds||[]).map(sid=>_sounds.find(s=>s.id===sid)).filter(Boolean);
       const collapsed = _isCatCollapsed(pl.id);
       return `<div class="vtt-music-cat vtt-music-pl-item${active?' is-playing':''}" data-cat-id="${pl.id}" data-collapsed="${collapsed?1:0}">
-        <div class="vtt-music-cat-hd vtt-music-pl-hd" data-vtt-fn="_vttToggleMusicCat" data-vtt-args="${pl.id}" title="Clic droit : renommer / couleur / supprimer · glisser ⠿ pour réordonner">
+        <div class="vtt-music-cat-hd vtt-music-pl-hd" data-vtt-fn="_vttToggleMusicCat" data-vtt-args="${pl.id}" title="Clic droit : renommer / couleur / supprimer · glisser ⠿ pour réordonner" role="button" tabindex="0" aria-expanded="${!collapsed}" aria-controls="vtt-music-cat-body-${index}" ${mj?'aria-haspopup="menu"':''}>
           ${mj?'<span class="vtt-music-cat-grip" data-vtt-fn="_vttNoop" title="Glisser pour réordonner">⠿</span>':''}
           <span class="vtt-music-cat-chevron"></span>
           <span class="vtt-music-pl-dot" style="background:${pl.color||'#6366f1'}"></span>
@@ -386,7 +392,7 @@ function _renderMusicList(mj) {
             ${mj?`<button class="vtt-mact vtt-mact-del" data-vtt-fn="_vttDeletePlaylist" data-vtt-args="${pl.id}" title="Supprimer">🗑</button>`:''}
           </div>
         </div>
-        <div class="vtt-music-cat-body">
+        <div class="vtt-music-cat-body" id="vtt-music-cat-body-${index}">
           <div class="vtt-music-pl-sounds vtt-pl-drop" id="vtt-pl-drop-${pl.id}" data-pl-id="${pl.id}">
             ${sounds.map(s => _renderSonRow(s, pl.id, mj)).join('')}
             ${!sounds.length?`<div class="vtt-music-pl-empty-drop">Glisser des sons ici</div>`:''}
@@ -413,7 +419,7 @@ function _renderSonRow(s, plId, mj) {
   const rowClass = isPool ? 'vtt-music-pool-item' : 'vtt-music-pl-sound';
   const nameClass = isPool ? 'vtt-music-pool-name' : 'vtt-music-pl-sname';
   const ctx = mj
-    ? `data-vtt-fn="_vttSoundCtxMenu" data-vtt-on="contextmenu" data-vtt-args="$event|${s.id}${isPool?'':`|${plId}`}"`
+    ? `data-vtt-fn="_vttSoundCtxMenu" data-vtt-on="contextmenu" data-vtt-args="$event|${s.id}${isPool?'':`|${plId}`}" tabindex="0" aria-haspopup="menu" aria-label="Actions pour ${_esc(s.name)}"`
     : '';
   const delBtn = mj
     ? (isPool

@@ -11,6 +11,7 @@ import { STATE } from '../core/state.js';
 import { _esc, _norm, loadingHtml } from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { showNotif } from '../shared/notifications.js';
+import { copyText } from '../shared/clipboard.js';
 import { lsJson } from '../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-skills.js';
 import {
@@ -909,7 +910,7 @@ function _ouvrirHandout() {
 function _histHandoutCopy() {
   const body = document.querySelector('.hist-handout-body');
   if (!body) return;
-  navigator.clipboard.writeText(body.innerText)
+  copyText(body.innerText)
     .then(() => showNotif('Texte copié dans le presse-papiers !', 'success'))
     .catch(()  => showNotif('Copie impossible.', 'error'));
 }

@@ -116,22 +116,37 @@ function _mountBackToTop() {
   button.innerHTML = '<span aria-hidden="true">↑</span>';
   document.body.appendChild(button);
 
+  let mainContent = null;
   const update = () => {
-    const y = window.scrollY || document.documentElement.scrollTop || 0;
+    const windowY = window.scrollY || document.documentElement.scrollTop || 0;
+    const y = Math.max(windowY, mainContent?.scrollTop || 0);
     const modalOpen = document.getElementById('modal-overlay')?.classList.contains('show');
     button.classList.toggle('is-visible', y > 700 && !modalOpen);
   };
   let scheduled = false;
-  window.addEventListener('scroll', () => {
+  const scheduleUpdate = () => {
     if (scheduled) return;
     scheduled = true;
     requestAnimationFrame(() => { scheduled = false; update(); });
-  }, { passive: true });
-  document.addEventListener('click', () => requestAnimationFrame(update));
+  };
+  const bindMainContent = () => {
+    const next = document.getElementById('main-content');
+    if (next === mainContent) return;
+    mainContent?.removeEventListener('scroll', scheduleUpdate);
+    mainContent = next;
+    mainContent?.addEventListener('scroll', scheduleUpdate, { passive: true });
+  };
+  window.addEventListener('scroll', scheduleUpdate, { passive: true });
+  document.addEventListener('app:page-rendered', () => {
+    bindMainContent();
+    scheduleUpdate();
+  });
+  document.addEventListener('click', scheduleUpdate);
   button.addEventListener('click', () => {
     window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-    document.getElementById('main-content')?.scrollTo?.({ top: 0, left: 0, behavior: 'smooth' });
+    mainContent?.scrollTo?.({ top: 0, left: 0, behavior: 'smooth' });
   });
+  bindMainContent();
   update();
 }
 
@@ -487,6 +502,19 @@ function _initModalDrafts() {
 }
 
 function _openKeyboardHelp() {
+  const notificationUndoShortcut = STATE.currentPage === 'vtt'
+    ? ''
+    : '<div><span>Annuler l’action temporaire</span><kbd>Ctrl</kbd><kbd>Z</kbd></div>';
+  const contextualShortcuts = STATE.currentPage === 'vtt' ? `
+      <section>
+        <h3>Table virtuelle</h3>
+        <div><span>Outil règle</span><kbd>R</kbd></div>
+        <div><span>Déplacer le token sélectionné</span><kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd></div>
+        <div><span>Copier / coller la sélection</span><kbd>Ctrl</kbd><kbd>C</kbd><kbd>V</kbd></div>
+        <div><span>Annuler / rétablir un tracé</span><kbd>Ctrl</kbd><kbd>Z</kbd><kbd>Y</kbd></div>
+        <div><span>Retirer la sélection</span><kbd>Suppr</kbd></div>
+        <div><span>Fermer un panneau / désélectionner</span><kbd>Échap</kbd></div>
+      </section>` : '';
   openModal('Raccourcis clavier', `
     <div class="global-shortcuts-intro">
       <strong>Aller plus vite, sans quitter ce que vous faites</strong>
@@ -506,10 +534,11 @@ function _openKeyboardHelp() {
         <h3>Fenêtres et formulaires</h3>
         <div><span>Enregistrer</span><kbd>Ctrl</kbd><kbd>S</kbd></div>
         <div><span>Valider</span><kbd>Ctrl</kbd><kbd>Entrée</kbd></div>
-        <div><span>Annuler l’action temporaire</span><kbd>Ctrl</kbd><kbd>Z</kbd></div>
+        ${notificationUndoShortcut}
         <div><span>Fermer ou effacer une recherche</span><kbd>Échap</kbd></div>
         <div><span>Afficher cette aide</span><kbd>?</kbd></div>
       </section>
+      ${contextualShortcuts}
     </div>
     <p class="global-shortcuts-note">Sur macOS, utilisez <kbd>⌘</kbd> à la place de <kbd>Ctrl</kbd>.</p>
   `, {
@@ -555,6 +584,29 @@ function _initModalShortcuts() {
 }
 
 function _initTabKeyboardNavigation() {
+  const syncTabStops = (root = document) => {
+    const candidateTabs = [
+      ...(root?.matches?.('[role="tab"]') ? [root] : []),
+      ...(root?.querySelectorAll?.('[role="tab"]') || []),
+    ];
+    const groups = new Set(candidateTabs.map(tab => tab.closest('[role="tablist"]') || tab.parentElement).filter(Boolean));
+
+    for (const group of groups) {
+      const tabs = [...group.querySelectorAll('[role="tab"]')]
+        .filter(tab => (tab.closest('[role="tablist"]') || tab.parentElement) === group)
+        .filter(_isVisible);
+      if (!tabs.length) continue;
+      const active = tabs.find(tab => tab.classList.contains('active') || tab.classList.contains('is-active') || tab.classList.contains('on'))
+        || tabs.find(tab => tab.getAttribute('aria-selected') === 'true')
+        || tabs[0];
+      tabs.forEach((tab) => {
+        const selected = tab === active;
+        tab.tabIndex = selected ? 0 : -1;
+        tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+      });
+    }
+  };
+
   document.addEventListener('keydown', (event) => {
     const tab = event.target.closest?.('[role="tab"]');
     if (!tab) return;
@@ -573,8 +625,16 @@ function _initTabKeyboardNavigation() {
     event.preventDefault();
     tabs[next].focus({ preventScroll: true });
     tabs[next].click();
+    requestAnimationFrame(() => syncTabStops(tablist));
     tabs[next].scrollIntoView({ block: 'nearest', inline: 'nearest' });
   });
+  document.addEventListener('click', (event) => {
+    const tab = event.target.closest?.('[role="tab"]');
+    if (tab) requestAnimationFrame(() => syncTabStops(tab.closest('[role="tablist"]') || tab.parentElement));
+  });
+  document.addEventListener('app:page-rendered', () => requestAnimationFrame(() => syncTabStops(document.getElementById('main-content'))));
+  document.addEventListener('app:modal-opened', () => requestAnimationFrame(() => syncTabStops(document.getElementById('modal-body'))));
+  syncTabStops();
 }
 
 const LOCAL_SEARCH_SELECTOR = [
@@ -634,6 +694,32 @@ function _quickCreateTarget() {
 }
 
 function _hintContextualShortcuts(root = document) {
+  const searchInputs = [
+    ...(root.matches?.(LOCAL_SEARCH_SELECTOR) ? [root] : []),
+    ...(root.querySelectorAll?.(LOCAL_SEARCH_SELECTOR) || []),
+  ];
+  searchInputs.forEach((input) => {
+    if (!(input instanceof HTMLInputElement)) return;
+    if (!input.hasAttribute('role')) input.setAttribute('role', 'searchbox');
+    if (!input.hasAttribute('enterkeyhint')) input.setAttribute('enterkeyhint', 'search');
+    if (!input.hasAttribute('spellcheck')) input.spellcheck = false;
+    const labelText = [...(input.labels || [])].some(label => label.textContent?.trim());
+    if (!input.hasAttribute('aria-label') && !input.hasAttribute('aria-labelledby') && !labelText && input.placeholder) {
+      input.setAttribute('aria-label', input.placeholder);
+    }
+    if (input.closest('#main-content, #modal-overlay')) input.setAttribute('aria-keyshortcuts', '/');
+  });
+
+  const titledControls = [
+    ...(root.matches?.('button[title]:not([aria-label]), [role="button"][title]:not([aria-label])') ? [root] : []),
+    ...(root.querySelectorAll?.('button[title]:not([aria-label]), [role="button"][title]:not([aria-label])') || []),
+  ];
+  titledControls.forEach((control) => {
+    const text = control.textContent?.trim().replace(/\s+/g, ' ') || '';
+    const explicitIcon = control.matches('.btn-icon, .icon-btn, .vtt-tool, [class*="-icon-btn"], [class*="icon-button"]');
+    if (explicitIcon || [...text].length <= 2) control.setAttribute('aria-label', control.title.trim());
+  });
+
   for (const selector of Object.values(QUICK_CREATE_SELECTORS)) {
     const buttons = [
       ...(root.matches?.(selector) ? [root] : []),
@@ -663,7 +749,8 @@ function _initContextualShortcuts() {
     const editing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target?.isContentEditable;
     const modalOpen = document.getElementById('modal-overlay')?.classList.contains('show');
     const temporaryUndo = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z';
-    if (!editing && !modalOpen && !event.defaultPrevented && temporaryUndo && triggerLatestNotificationAction()) {
+    const vttActive = STATE.currentPage === 'vtt' || Boolean(document.getElementById('vtt-canvas-wrap'));
+    if (!editing && !modalOpen && !vttActive && !event.defaultPrevented && temporaryUndo && triggerLatestNotificationAction()) {
       event.preventDefault();
       return;
     }
@@ -778,8 +865,9 @@ function _initTextareaQol() {
     if (!(textarea instanceof HTMLTextAreaElement) || textarea.dataset.noAutoGrow !== undefined) return;
     if (textarea.closest('[data-free-page-editor]')) return;
     const maxHeight = Math.min(320, Math.round(window.innerHeight * .42));
-    if (textarea.scrollHeight <= textarea.clientHeight + 2 || textarea.clientHeight >= maxHeight) return;
-    textarea.style.height = `${Math.min(textarea.scrollHeight + 2, maxHeight)}px`;
+    const minHeight = Number.parseFloat(getComputedStyle(textarea).minHeight) || 0;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight + 2, minHeight), maxHeight)}px`;
     textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
   };
 

@@ -98,15 +98,43 @@ export function modalSection(title, html) {
 // Le focus revient à l'élément actif AVANT l'ouverture quand la modale se ferme
 // pour de bon ; Tab boucle à l'intérieur de la modale tant qu'elle est visible.
 let _lastFocus = null;
+
+function _isFocusableVisible(el) {
+  if (!el || el.disabled || el.closest?.('[hidden], [aria-hidden="true"], [inert]')) return false;
+  if (typeof el.getClientRects !== 'function') return true;
+  return el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+}
+
+function _focusModalLayer() {
+  const overlay = document.getElementById('modal-overlay');
+  const body = document.getElementById('modal-body');
+  if (!overlay?.classList.contains('show') || typeof body?.querySelector !== 'function') return;
+  const run = () => {
+    if (!overlay.classList.contains('show') || overlay.contains(document.activeElement)) return;
+    const preferred = body.querySelector('[data-modal-initial-focus], [autofocus]');
+    const first = [...body.querySelectorAll(
+      'input:not([type="hidden"]), textarea, select, button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+    )].find(_isFocusableVisible);
+    const close = overlay.querySelector?.('.modal-title .btn-icon');
+    const target = [preferred, first, close].find(_isFocusableVisible);
+    try { target?.focus({ preventScroll: true }); } catch { target?.focus?.(); }
+  };
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+  else setTimeout(run, 0);
+}
+
 function _a11yOnShow() {
   const overlay = document.getElementById('modal-overlay');
   if (!overlay) return;
   if (!overlay.classList.contains('show')) _lastFocus = document.activeElement;
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
-  overlay.setAttribute('aria-labelledby', 'modal-title');
+  overlay.setAttribute('aria-labelledby', 'modal-title-text');
+  document.body?.classList.add('is-modal-open');
 }
 function _a11yOnClose() {
+  document.body?.classList.remove('is-modal-open');
+  document.getElementById('modal-overlay')?.removeAttribute('aria-describedby');
   if (_lastFocus && typeof _lastFocus.focus === 'function' && document.contains(_lastFocus)) {
     try { _lastFocus.focus(); } catch { /* élément non focalisable */ }
   }
@@ -116,8 +144,9 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Tab') return;
   const overlay = document.getElementById('modal-overlay');
   if (!overlay?.classList.contains('show')) return;
-  const foc = overlay.querySelectorAll(
-    'a[href], button:not([disabled]), textarea, input:not([type="hidden"]), select, [tabindex]:not([tabindex="-1"])');
+  const foc = [...overlay.querySelectorAll(
+    'a[href], button:not([disabled]), textarea, input:not([type="hidden"]), select, [tabindex]:not([tabindex="-1"])')]
+    .filter(_isFocusableVisible);
   if (!foc.length) return;
   const first = foc[0], last = foc[foc.length - 1];
   const inside = overlay.contains(document.activeElement);
@@ -136,11 +165,13 @@ export function openModal(title, bodyHtml, opts = {}) {
   _closeGuard = null;   // nouvelle modale de base → aucun garde hérité
   _autoCloseGuard = null;
   _a11yOnShow();
+  overlay?.removeAttribute('aria-describedby');
   _applyModalHeader(title, opts);
   if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
   overlay?.classList.add('show');
   _dispatchModalEvent('app:modal-opened');
   restoreViewContextAfterRender(bodyEl, viewContext, { includeFocus: true });
+  _focusModalLayer();
 }
 
 export function pushModal(title, bodyHtml, restore = null, opts = {}) {
@@ -155,6 +186,7 @@ export function pushModal(title, bodyHtml, restore = null, opts = {}) {
       title: bar?.dataset.title || '',   // titre brut (cf. _applyModalHeader)
       body: bodyEl.innerHTML || '',
       viewContext: captureViewContext(bodyEl, { includeFocus: true }),
+      describedBy: overlay.getAttribute?.('aria-describedby') || '',
       restore,
       dismiss: _activeDismiss,
     });
@@ -171,6 +203,7 @@ export function pushModal(title, bodyHtml, restore = null, opts = {}) {
   _applyModalHeader(title, opts);
   if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
   overlay?.classList.add('show');
+  _focusModalLayer();
 }
 
 export function popModal() {
@@ -182,13 +215,17 @@ export function popModal() {
   const previous = _modalStack.pop();
   _dismissActiveLayer();
   const bodyEl  = document.getElementById('modal-body');
+  const overlay = document.getElementById('modal-overlay');
   _applyModalHeader(previous.title);
   if (bodyEl)  bodyEl.innerHTML    = previous.body;
+  if (previous.describedBy) overlay?.setAttribute('aria-describedby', previous.describedBy);
+  else overlay?.removeAttribute('aria-describedby');
   restoreViewContextAfterRender(bodyEl, previous.viewContext, { includeFocus: true });
   _activeDismiss = previous.dismiss || null;
   if (typeof previous.restore === 'function') {
     previous.restore();
   }
+  _focusModalLayer();
 }
 
 export function updateModalContent(title, bodyHtml, opts = {}) {
@@ -197,6 +234,7 @@ export function updateModalContent(title, bodyHtml, opts = {}) {
   _applyModalHeader(title, opts);
   if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
   restoreViewContextAfterRender(bodyEl, viewContext, { includeFocus: true });
+  _focusModalLayer();
 }
 
 // Ferme seulement si clic sur l'overlay lui-même (pas sur la modal)
@@ -258,7 +296,7 @@ export function confirmModal(message, {
       <div style="display:flex;flex-direction:column;align-items:center;gap:1rem;
         padding:.5rem 0 .25rem;text-align:center">
         <div style="font-size:2rem;line-height:1">${icon}</div>
-        <div style="font-size:.92rem;color:var(--text-soft);line-height:1.55;
+        <div id="cm-message" style="font-size:.92rem;color:var(--text-soft);line-height:1.55;
           max-width:320px">${message}</div>
         <div style="display:flex;gap:.6rem;margin-top:.25rem;width:100%">
           <button id="cm-confirm"
@@ -271,6 +309,7 @@ export function confirmModal(message, {
             ${confirmLabel}
           </button>
           <button id="cm-cancel"
+            data-modal-initial-focus
             style="flex:1;padding:.55rem 1rem;border-radius:10px;cursor:pointer;
               font-size:.87rem;font-weight:600;
               border:1px solid var(--border-strong);
@@ -316,6 +355,7 @@ export function confirmModal(message, {
     };
 
     pushModal(title || '', bodyHtml, null, { onDismiss: () => settle(false) });
+    overlay?.setAttribute('aria-describedby', 'cm-message');
 
     // Boutons
     document.getElementById('cm-confirm')?.addEventListener('click', () => done(true),  { once: true });
@@ -358,14 +398,14 @@ export function promptModal(label, {
       border:1px solid var(--border-strong);background:var(--bg-elevated);color:var(--text);
       font-size:.9rem;font-family:inherit`;
     const field = multiline
-      ? `<textarea id="pm-input" rows="3" placeholder="${_esc(placeholder)}"
+      ? `<textarea id="pm-input" data-modal-initial-focus rows="3" placeholder="${_esc(placeholder)}"
            style="${fieldStyle};resize:vertical;min-height:64px">${_esc(defaultValue)}</textarea>`
-      : `<input id="pm-input" type="text" value="${_esc(defaultValue)}" placeholder="${_esc(placeholder)}"
+      : `<input id="pm-input" data-modal-initial-focus type="text" value="${_esc(defaultValue)}" placeholder="${_esc(placeholder)}"
            autocomplete="off" style="${fieldStyle}">`;
 
     const bodyHtml = `
       <div style="display:flex;flex-direction:column;gap:.8rem;padding:.25rem 0">
-        ${label ? `<label for="pm-input" style="font-size:.9rem;color:var(--text-soft);line-height:1.5">${label}</label>` : ''}
+        ${label ? `<label id="pm-label" for="pm-input" style="font-size:.9rem;color:var(--text-soft);line-height:1.5">${label}</label>` : ''}
         ${field}
         <div style="display:flex;gap:.6rem;margin-top:.1rem">
           <button id="pm-confirm"
@@ -397,6 +437,7 @@ export function promptModal(label, {
       resolve(result);
     };
     pushModal(title || '', bodyHtml, null, { onDismiss: () => settle(null) });
+    if (label) overlay?.setAttribute('aria-describedby', 'pm-label');
 
     const input = document.getElementById('pm-input');
     const confirmBtn = document.getElementById('pm-confirm');

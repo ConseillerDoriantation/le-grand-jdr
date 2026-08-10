@@ -1020,8 +1020,8 @@ function _recipeTypeNav(recipes, scope) {
     return map;
   }, {});
   return `<nav class="rec-context-nav" aria-label="Catégories de recettes">
-    <button class="is-active" data-action="setCharacterRecipeType" data-scope="${scope}" data-type="all"><span>📚</span><b>Toutes</b><em>${recipes.length}</em></button>
-    ${TABS.filter(tab => tab.id !== 'all' && counts[tab.id]).map(tab => `<button data-action="setCharacterRecipeType" data-scope="${scope}" data-type="${tab.id}"><span>${tab.emoji}</span><b>${_esc(tab.label)}</b><em>${counts[tab.id]}</em></button>`).join('')}
+    <button class="is-active" data-action="setCharacterRecipeType" data-scope="${scope}" data-type="all" aria-pressed="true"><span>📚</span><b>Toutes</b><em>${recipes.length}</em></button>
+    ${TABS.filter(tab => tab.id !== 'all' && counts[tab.id]).map(tab => `<button data-action="setCharacterRecipeType" data-scope="${scope}" data-type="${tab.id}" aria-pressed="false"><span>${tab.emoji}</span><b>${_esc(tab.label)}</b><em>${counts[tab.id]}</em></button>`).join('')}
   </nav>`;
 }
 
@@ -1041,11 +1041,11 @@ export async function openCharacterRecipeBook(characterId) {
       <header class="rec-book-head"><div><span>Livre de recettes</span><strong>${recipes.length} recette${recipes.length !== 1 ? 's' : ''} connue${recipes.length !== 1 ? 's' : ''}</strong></div>
         ${_isAdmin() ? `<button class="btn btn-gold btn-sm" data-action="openCharacterRecipeAccess" data-id="${_esc(character.id)}">Gérer les recettes connues</button>` : ''}</header>
       <div class="rec-book-controls">
-        <label class="rec-book-search"><span aria-hidden="true">⌕</span><input data-input="filterCharacterRecipeBook" placeholder="Rechercher une recette ou un ingrédient…"></label>
+        <label class="rec-book-search"><span aria-hidden="true">⌕</span><input type="search" data-input="filterCharacterRecipeBook" aria-label="Rechercher une recette ou un ingrédient" placeholder="Rechercher une recette ou un ingrédient…"></label>
         <div class="rec-ready-filter" role="group" aria-label="Disponibilité des ingrédients">
-          <button class="is-active" data-action="setCharacterRecipeStatus" data-scope="book" data-status="all">Toutes</button>
-          <button data-action="setCharacterRecipeStatus" data-scope="book" data-status="ready">Fabricables</button>
-          <button data-action="setCharacterRecipeStatus" data-scope="book" data-status="missing">À compléter</button>
+          <button class="is-active" data-action="setCharacterRecipeStatus" data-scope="book" data-status="all" aria-pressed="true">Toutes</button>
+          <button data-action="setCharacterRecipeStatus" data-scope="book" data-status="ready" aria-pressed="false">Fabricables</button>
+          <button data-action="setCharacterRecipeStatus" data-scope="book" data-status="missing" aria-pressed="false">À compléter</button>
         </div>
       </div>
       <div class="rec-context-layout">${_recipeTypeNav(recipes, 'book')}<div class="rec-book-grid">${recipes.length ? recipes.map(recipe => _recipeBookCard(recipe, character, canTransfer)).join('') : '<div class="rec-book-empty">Aucune recette connue pour le moment.</div>'}<div class="rec-context-empty" hidden>Aucune recette ne correspond à ces filtres.</div></div></div>
@@ -1141,7 +1141,11 @@ function _setRecipeContextFilter(button, kind) {
   const shell = button.closest('.rec-book-shell, .rec-access-shell');
   if (!shell) return;
   const selector = kind === 'status' ? '.rec-ready-filter button' : '.rec-context-nav button';
-  shell.querySelectorAll(selector).forEach(item => item.classList.toggle('is-active', item === button));
+  shell.querySelectorAll(selector).forEach((item) => {
+    const active = item === button;
+    item.classList.toggle('is-active', active);
+    item.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
   _applyRecipeContextFilters(button.dataset.scope || (shell.classList.contains('rec-access-shell') ? 'access' : 'book'));
 }
 

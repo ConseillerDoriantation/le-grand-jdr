@@ -435,9 +435,11 @@ function _renderHero(items, filtered) {
       ${isFiltered ? `<button class="pp-filter-reset" data-pp-action="resetFilters" title="Réinitialiser tous les filtres">${_ppIcon('reset')} Réinitialiser</button>` : ''}
       <div class="pp-view-toggle" role="tablist" aria-label="Mode d'affichage">
         <button class="pp-view-tab ${STORE.viewMode==='gallery'?'is-active':''}"
-          data-pp-action="setViewMode" data-mode="gallery" title="Galerie de cards" role="tab">${_ppIcon('cards')} Galerie</button>
+          data-pp-action="setViewMode" data-mode="gallery" title="Galerie de cards" role="tab"
+          aria-selected="${STORE.viewMode === 'gallery'}">${_ppIcon('cards')} Galerie</button>
         <button class="pp-view-tab ${STORE.viewMode==='relations'?'is-active':''}"
-          data-pp-action="setViewMode" data-mode="relations" title="Carte des liens d'aventure" role="tab">${_ppIcon('relations')} Relations</button>
+          data-pp-action="setViewMode" data-mode="relations" title="Carte des liens d'aventure" role="tab"
+          aria-selected="${STORE.viewMode === 'relations'}">${_ppIcon('relations')} Relations</button>
       </div>
     </div>
 
@@ -1692,17 +1694,17 @@ async function openPlayerPresentModal(player = null) {
     </div>
 
     <!-- ════ TABS ════════════════════════════════════════════════ -->
-    <div class="pp-mn-tabs" role="tablist">
-      <button type="button" class="pp-mn-tab is-active" data-pp-tab="presentation">📝 Présentation</button>
-      <button type="button" class="pp-mn-tab" data-pp-tab="visibilite">👁 Visibilité <span class="pp-mn-tab-count" id="pp-mn-vis-count">${visEntries.filter(f => (player?.[f.key] !== undefined ? player[f.key] : f.def)).length}</span></button>
-      <button type="button" class="pp-mn-tab" data-pp-tab="galerie">🖼 Galerie <span class="pp-mn-tab-count" id="pp-mn-gal-count">${_ppGallery.length || ''}</span></button>
+    <div class="pp-mn-tabs" role="tablist" aria-label="Sections de la présentation">
+      <button type="button" id="pp-tab-presentation" class="pp-mn-tab is-active" data-pp-tab="presentation" role="tab" aria-selected="true" aria-controls="pp-panel-presentation">📝 Présentation</button>
+      <button type="button" id="pp-tab-visibilite" class="pp-mn-tab" data-pp-tab="visibilite" role="tab" aria-selected="false" aria-controls="pp-panel-visibilite">👁 Visibilité <span class="pp-mn-tab-count" id="pp-mn-vis-count">${visEntries.filter(f => (player?.[f.key] !== undefined ? player[f.key] : f.def)).length}</span></button>
+      <button type="button" id="pp-tab-galerie" class="pp-mn-tab" data-pp-tab="galerie" role="tab" aria-selected="false" aria-controls="pp-panel-galerie">🖼 Galerie <span class="pp-mn-tab-count" id="pp-mn-gal-count">${_ppGallery.length || ''}</span></button>
     </div>
 
     <!-- ════ TAB CONTENT ═════════════════════════════════════════ -->
     <div class="pp-mn-body">
 
       <!-- ── ONGLET PRÉSENTATION ────────────────────────────────── -->
-      <section class="pp-mn-panel is-active" data-pp-panel="presentation">
+      <section id="pp-panel-presentation" class="pp-mn-panel is-active" data-pp-panel="presentation" role="tabpanel" aria-labelledby="pp-tab-presentation">
         <div class="pp-mn-grid-2">
           <div class="pp-mn-field">
             <label class="pp-mn-label">Fiche liée <span class="pp-form-hint">(auto-remplit classe, race, joueur)</span></label>
@@ -1734,7 +1736,7 @@ async function openPlayerPresentModal(player = null) {
       </section>
 
       <!-- ── ONGLET VISIBILITÉ ──────────────────────────────────── -->
-      <section class="pp-mn-panel" data-pp-panel="visibilite">
+      <section id="pp-panel-visibilite" class="pp-mn-panel" data-pp-panel="visibilite" role="tabpanel" aria-labelledby="pp-tab-visibilite" hidden>
         <div class="pp-mn-section-intro">
           🔒 Coche les informations que les joueurs verront sur la fiche.
         </div>
@@ -1753,7 +1755,7 @@ async function openPlayerPresentModal(player = null) {
       </section>
 
       <!-- ── ONGLET GALERIE ────────────────────────────────────── -->
-      <section class="pp-mn-panel" data-pp-panel="galerie">
+      <section id="pp-panel-galerie" class="pp-mn-panel" data-pp-panel="galerie" role="tabpanel" aria-labelledby="pp-tab-galerie" hidden>
         <div class="pp-mn-section-intro">
           🖼️ Galerie photos — la première image sert d'illustration principale.
         </div>
@@ -1801,8 +1803,16 @@ async function openPlayerPresentModal(player = null) {
   document.querySelectorAll('[data-pp-tab]').forEach(btn => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.ppTab;
-      document.querySelectorAll('[data-pp-tab]').forEach(b => b.classList.toggle('is-active', b.dataset.ppTab === tab));
-      document.querySelectorAll('[data-pp-panel]').forEach(p => p.classList.toggle('is-active', p.dataset.ppPanel === tab));
+      document.querySelectorAll('[data-pp-tab]').forEach((b) => {
+        const active = b.dataset.ppTab === tab;
+        b.classList.toggle('is-active', active);
+        b.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      document.querySelectorAll('[data-pp-panel]').forEach((p) => {
+        const active = p.dataset.ppPanel === tab;
+        p.classList.toggle('is-active', active);
+        p.hidden = !active;
+      });
     });
   });
   function _ppUpdateVisiblePill(on) {
