@@ -1,5 +1,7 @@
 import { initPagePreferences } from './page-preferences.js';
 import {
+  allowAutomaticModalCloseOnce,
+  cancelAutomaticModalCloseOnce,
   clearAutomaticModalCloseGuard,
   closeModalDirect,
   confirmModal,
@@ -344,6 +346,7 @@ function _initModalDirtyGuard() {
     const save = _modalSaveTarget(overlay);
     if (!save || !event.target.closest?.('button, input[type="submit"]')?.isSameNode(save)) return;
     pendingSaveElement = save;
+    allowAutomaticModalCloseOnce();
     _setModalEditStatus('saving', 'Enregistrement…');
   }, true);
 
@@ -351,6 +354,7 @@ function _initModalDirtyGuard() {
     if (!pendingSaveElement || event.detail?.element !== pendingSaveElement) return;
     if (!event.detail?.ok) {
       pendingSaveElement = null;
+      cancelAutomaticModalCloseOnce();
       _setModalEditStatus('dirty', 'Échec — à enregistrer');
       return;
     }
