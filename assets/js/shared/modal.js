@@ -27,9 +27,19 @@ function _dispatchModalEvent(name) {
 let _closeGuard = null;
 let _autoCloseGuard = null;
 let _allowAutomaticCloseOnce = false;
-export function setModalCloseGuard(fn) { _closeGuard = typeof fn === 'function' ? fn : null; }
+export function setModalCloseGuard(fn) {
+  _closeGuard = typeof fn === 'function' ? fn : null;
+  // Une garde métier connaît mieux le formulaire que la garde QoL générique.
+  // Elle devient donc l'unique confirmation de fermeture pour cette modale.
+  if (_closeGuard) {
+    _autoCloseGuard = null;
+    _allowAutomaticCloseOnce = false;
+  }
+}
 export function clearModalCloseGuard() { _closeGuard = null; }
-export function setAutomaticModalCloseGuard(fn) { _autoCloseGuard = typeof fn === 'function' ? fn : null; }
+export function setAutomaticModalCloseGuard(fn) {
+  _autoCloseGuard = _closeGuard ? null : (typeof fn === 'function' ? fn : null);
+}
 export function clearAutomaticModalCloseGuard() {
   _autoCloseGuard = null;
   _allowAutomaticCloseOnce = false;

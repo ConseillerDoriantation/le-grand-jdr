@@ -15,6 +15,7 @@ import { makeSortable } from '../../shared/sortable-helper.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
+import { usesSpellMastery } from '../../shared/spell-runes.js';
 import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds } from './spells-calc.js';
 
 let _sortsSearch = '';
@@ -2780,6 +2781,25 @@ async function _openClassicSortModal(idx, s, allTypes) {
   }
 }
 
+function _spellMasteryControlHtml(s, context) {
+  const active = usesSpellMastery(s);
+  const c = _modalChar();
+  const bonus = c ? getSharedMaitriseBonus(c, getMainWeapon(c)) : 0;
+  const contextLabel = context === 'heal' ? 'soins' : 'dégâts';
+  const state = active ? `Actif${bonus ? ` (+${bonus})` : ''}` : 'Désactivé';
+  return `<div id="s-maitrise-${context}" class="cs-spell-mastery-option ${active ? 'is-on' : ''}">
+    <label>
+      <input type="checkbox" class="s-maitrise-active-toggle" ${active ? 'checked' : ''}>
+      <span class="cs-mj-validation-switch" aria-hidden="true"><span class="cs-mj-validation-thumb"></span></span>
+      <span class="cs-spell-mastery-copy">
+        <b>Bonus de maîtrise</b>
+        <small>Autorise la maîtrise de l’arme ou du focus dans les ${contextLabel}. Désactive-le pour un sort indépendant de l’arme.</small>
+      </span>
+      <strong class="cs-spell-mastery-state">${state}</strong>
+    </label>
+  </div>`;
+}
+
 export async function openSortModal(idx, s) {
   _rezPrevLit = new Set();   // réinitialise l'anim d'ignition à chaque ouverture
   // Bandeau avant/après : uniquement quand un JOUEUR édite un sort DÉJÀ validé
@@ -3018,6 +3038,7 @@ export async function openSortModal(idx, s) {
     <section class="cs-spell-effects-panel" aria-label="Effets générés par le sort">
       <div class="cs-spell-effects-title"><span class="cs-step-pill">4</span><div><b>Effets actifs</b><small>Les options apparaissent uniquement quand les runes ou types concernés sont présents.</small></div></div>
       <div id="s-effects-empty" class="cs-spell-effects-empty">Choisis un type ou une rune pour afficher les effets actifs.</div>
+      <input type="hidden" id="s-maitrise-active" value="${usesSpellMastery(s) ? '1' : '0'}">
 
     <!-- Dégâts — visible si type offensif (auto-val avec toggle Custom) ;
          masqué quand Affliction est présente (la Puissance scale le DoT à la place) -->
@@ -3049,6 +3070,7 @@ export async function openSortModal(idx, s) {
             </div>`,
         },
       })}
+      ${_spellMasteryControlHtml(s || {}, 'damage')}
     </div>
 
     <!-- Protection — visible si rune Protection > 0 -->
@@ -3113,6 +3135,7 @@ export async function openSortModal(idx, s) {
             </div>`,
         },
       })}
+      ${_spellMasteryControlHtml(s || {}, 'heal')}
     </div>
 
     <div id="s-regeneration-section" class="cs-spell-slot-box cs-spell-slot-box--def" style="display:none">
@@ -3453,10 +3476,15 @@ export async function openSortModal(idx, s) {
       modal.dataset.previewBound = '1';
       modal.addEventListener('input', (event) => {
         if (event.target?.id === 's-nom') _setSortNameRequiredError(false);
+        if (event.target?.classList?.contains('s-maitrise-active-toggle')) return;
         _updateSortPreview();
       });
-      modal.addEventListener('change', _updateSortPreview);
       modal.addEventListener('change', (event) => {
+        if (event.target?.classList?.contains('s-maitrise-active-toggle')) {
+          _setSpellMastery(event.target);
+        } else {
+          _updateSortPreview();
+        }
         if (event.target?.id === 's-enchant-etat') _refreshEnchantStateTuning();
       });
       // Emoji perso : Entrée dans le champ applique l'emoji saisi.
@@ -3724,6 +3752,15 @@ function _refreshConditionalSections() {
   if (protGroup) protGroup.style.display = (isDrain || isRegen) ? 'none' : '';
   if (caSec)     caSec.style.display     = (!isDrain && !isRegen && protMode === 'ca') ? '' : 'none';
   if (sSec)      sSec.style.display      = (!isDrain && !isRegen && ((hasProt && protMode === 'soin') || isAmpSupportHeal)) ? '' : 'none';
+  // Le réglage est présenté dans le premier effet qui l'utilise. Les sorts
+  // mixtes ne l'affichent donc qu'une fois, tandis qu'un soin pur le conserve
+  // bien dans sa propre section.
+  const damageMastery = document.getElementById('s-maitrise-damage');
+  const healMastery = document.getElementById('s-maitrise-heal');
+  const damageVisible = !!dSec && dSec.style.display !== 'none';
+  const healVisible = !!sSec && sSec.style.display !== 'none';
+  if (damageMastery) damageMastery.style.display = damageVisible ? '' : 'none';
+  if (healMastery) healMastery.style.display = healVisible && !damageVisible ? '' : 'none';
   if (drainEl) {
     drainEl.style.display = isDrain ? '' : 'none';
     if (isDrain) {
@@ -4434,6 +4471,30 @@ function _refreshAutoValChips() {
   apply('s-duree-base', String(_calcSortDuree(s)), _autoSourceDuree(s));
 }
 
+function _readSpellMasteryFromDOM() {
+  return document.getElementById('s-maitrise-active')?.value !== '0';
+}
+
+function _setSpellMastery(el) {
+  const active = !!el?.checked;
+  const hidden = document.getElementById('s-maitrise-active');
+  if (hidden) hidden.value = active ? '1' : '0';
+
+  const c = _modalChar();
+  const bonus = c ? getSharedMaitriseBonus(c, getMainWeapon(c)) : 0;
+  document.querySelectorAll('.s-maitrise-active-toggle').forEach(input => {
+    input.checked = active;
+    const option = input.closest('.cs-spell-mastery-option');
+    option?.classList.toggle('is-on', active);
+    const state = option?.querySelector('.cs-spell-mastery-state');
+    if (state) state.textContent = active ? `Actif${bonus ? ` (+${bonus})` : ''}` : 'Désactivé';
+  });
+
+  // Un seul recalcul après synchronisation. Le listener générique de la modale
+  // délègue ce contrôle ici pour éviter un aperçu calculé plusieurs fois.
+  _updateSortPreview();
+}
+
 /**
  * Met à jour les chips "💡 Suggéré : …" d'Enchantement et Affliction.
  * Lit le noyau + slot du DOM, interroge la matrice MJ.
@@ -4644,6 +4705,7 @@ function _buildSortFromDOM() {
       ? (document.getElementById('s-action-mode')?.value || _actionModeEdit || 'reaction')
       : null,
     degats: document.getElementById('s-degats')?.value || '',
+    maitriseActive: _readSpellMasteryFromDOM(),
     soin:   document.getElementById('s-soin')?.value || '',
     ca:     document.getElementById('s-ca')?.value || '',
     effet:  document.getElementById('s-effet')?.value || '',
@@ -4905,10 +4967,11 @@ export function selectNoyau(el, noyauId, noyauLabel, noyauColor) {
 // changement réel). `typeSoin` brut reste exclu (dérivé, redondant).
 function _sortContentSig(s) {
   if (!s) return '';
-  const SKIP = new Set(['actif','mjValidation','mjValidated','catId','pm','pmOverride','mjNotes','mjAlwaysMax','enchantSlot','types','typeSoin','id']);
+  const SKIP = new Set(['actif','mjValidation','mjValidated','catId','pm','pmOverride','mjNotes','mjAlwaysMax','enchantSlot','types','typeSoin','id','maitriseActive']);
   const o = {};
   Object.keys(s).filter(k => !SKIP.has(k)).sort().forEach(k => { o[k] = s[k]; });
   o.types = [...(_getSortTypes(s) || [])].sort();
+  o.maitriseActive = usesSpellMastery(s);
   return JSON.stringify(o);
 }
 
@@ -5139,6 +5202,7 @@ export async function saveSort(idx, btn = null) {
         : null,
       types,
       degats:   document.getElementById('s-degats')?.value||'',
+      maitriseActive: _readSpellMasteryFromDOM(),
       soin:     document.getElementById('s-soin')?.value||'',
       ca:       document.getElementById('s-ca')?.value||'',
       effet:    document.getElementById('s-effet')?.value||'',
@@ -5292,6 +5356,7 @@ function _buildSortFromForm(idx, prevList = []) {
       : null,
     types,
     degats:   document.getElementById('s-degats')?.value||'',
+    maitriseActive: _readSpellMasteryFromDOM(),
     soin:     document.getElementById('s-soin')?.value||'',
     ca:       document.getElementById('s-ca')?.value||'',
     effet:    document.getElementById('s-effet')?.value||'',
