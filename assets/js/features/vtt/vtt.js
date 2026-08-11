@@ -759,7 +759,41 @@ export async function _vttTriggerConcentrationSave(td, damageAmount, nextHp = nu
 // ═══════════════════════════════════════════════════════════════════
 // NETTOYAGE
 // ═══════════════════════════════════════════════════════════════════
+// ── Abonnements Firestore différés (économie de quota, sans écran bloquant) ──
+// Les listeners temps réel ne démarrent qu'à la 1re interaction (souris, clic,
+// clavier, molette, tactile) OU après un repli de 2,5 s. Un joueur qui ouvre la
+// table et repart sans rien toucher ne déclenche AUCUN read. La table est déjà
+// affichée pendant ce temps : les données (tokens, map…) apparaissent dès
+// l'armement. Annulé par _cleanup si on quitte avant.
+let _vttListenersArmed = false;
+let _vttArmTimer = null;
+let _vttArmDetach = null;
+function _vttArmListeners() {
+  if (_vttListenersArmed) return;
+  _vttListenersArmed = true;
+  if (_vttArmTimer) { clearTimeout(_vttArmTimer); _vttArmTimer = null; }
+  if (_vttArmDetach) { _vttArmDetach(); _vttArmDetach = null; }
+  _initListeners();
+  _startPresence();
+}
+function _vttScheduleListeners(host) {
+  _vttListenersArmed = false;
+  if (_vttArmTimer) clearTimeout(_vttArmTimer);
+  if (_vttArmDetach) _vttArmDetach();
+  const arm = () => _vttArmListeners();
+  const evts = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'];
+  evts.forEach(e => host.addEventListener(e, arm, { once: true, passive: true }));
+  _vttArmDetach = () => evts.forEach(e => host.removeEventListener(e, arm));
+  _vttArmTimer = setTimeout(_vttArmListeners, 2500);
+}
+function _vttCancelListenerSchedule() {
+  if (_vttArmTimer) { clearTimeout(_vttArmTimer); _vttArmTimer = null; }
+  if (_vttArmDetach) { _vttArmDetach(); _vttArmDetach = null; }
+  _vttListenersArmed = false;
+}
+
 function _cleanup() {
+  _vttCancelListenerSchedule();
   VS.unsubs.forEach(u => u?.());
   VS.unsubs = []; VS.stage?.destroy(); VS.stage = null; VS.layers = {};
   _resizeObs?.disconnect(); _resizeObs = null;
@@ -10516,9 +10550,9 @@ async function _vttMountTable(content) {
   _loadConditionsOverrides().catch(() => {});
   // _skillsP : _loadDiceSkills met à jour VS.diceSkills et rerend l'inspector si besoin
   void _skillsP;
-  _initListeners();
-  // Présence : heartbeat espacé, suspendu en arrière-plan
-  _startPresence();
+  // Abonnements + présence différés (cf. _vttScheduleListeners) : armés à la 1re
+  // interaction ou après 2,5 s. `content` = #main-content, hôte des évènements.
+  _vttScheduleListeners(content);
 }
 
 // [PRÉSENCE → vtt-presence.js]
