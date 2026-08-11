@@ -7330,7 +7330,7 @@ async function _vttRollAttack() {
         attackerName: _atkActor.name,
         targetId:     curTgtData.characterId || null,
         targetName:   curTgtData.name || '',
-        hit, crit: isCrit, fumble: isFumble,
+        hit, crit: isCrit, fumble: isFumble, roll: d20,
         dmg: (hit || halfDmg) ? Math.max(0, dmgTotal) : 0,
         ko: (curHp > 0 && newHp <= 0),
       });

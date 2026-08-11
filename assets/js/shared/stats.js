@@ -10,10 +10,13 @@
 //   chars: {
 //     [charId]: {
 //       name,                                   // dénormalisé pour l'affichage
-//       skills: { [skill]: { rolls, crits, fumbles } },
+//       skills: { [skill]: { rolls, crits, fumbles,
+//                   trackedRolls, naturalTotal, resultTotal } },
 //       // (phase 2) attacks, hits, crits, fumbles, dmgDealt, dmgTaken,
 //       //           biggestHit, heal, kosDealt, kosTaken, pmSpent, spellsCast,
 //       //           spells:{}, emotes:{}
+//       // Moyennes non rétroactives : damageEvents/damageTotal et
+//       // attackRolls/attackRollTotal sont incrémentés avec les mêmes actions.
 //     }
 //   }
 // Les stats GLOBALES (table) = somme des chars, calculée à l'affichage.
@@ -151,7 +154,7 @@ export async function deleteMissionStats(missionId) {
 // avec un signe (+1 pose l'action, −1 l'annule). On ne compte que les PJ.
 //
 // `acc` = { chars: { [id]: { name, combat: {…compteurs nombres…} } } }
-export function accAttackDelta(acc, { attackerId, attackerName, targetId, targetName, hit, crit, fumble, dmg = 0, ko = false } = {}) {
+export function accAttackDelta(acc, { attackerId, attackerName, targetId, targetName, hit, crit, fumble, roll = null, dmg = 0, ko = false } = {}) {
   acc.chars ??= {};
   const dk = statsDateKey();
   const add = (id, name, fields) => {
@@ -164,13 +167,19 @@ export function accAttackDelta(acc, { attackerId, attackerName, targetId, target
       dc[k] = (dc[k] || 0) + v;
     }
   };
+  const trackedRoll = roll !== null && roll !== '' && Number.isFinite(Number(roll)) ? Number(roll) : null;
+  const trackedDamage = dmg > 0 ? Number(dmg) : 0;
   add(attackerId, attackerName, {
     attacks: 1, hits: hit ? 1 : 0, crits: crit ? 1 : 0, fumbles: fumble ? 1 : 0,
-    dmgDealt: dmg > 0 ? dmg : 0, kosDealt: ko ? 1 : 0,
+    attackRolls: trackedRoll == null ? 0 : 1,
+    attackRollTotal: trackedRoll || 0,
+    dmgDealt: trackedDamage, damageEvents: trackedDamage > 0 ? 1 : 0,
+    damageTotal: trackedDamage, kosDealt: ko ? 1 : 0,
   });
   if (targetId && targetId !== attackerId) add(targetId, targetName, {
     attacksTaken: 1, attacksAvoided: hit ? 0 : 1,
-    dmgTaken: dmg > 0 ? dmg : 0, kosTaken: ko ? 1 : 0,
+    dmgTaken: trackedDamage, damageTakenEvents: trackedDamage > 0 ? 1 : 0,
+    damageTakenTotal: trackedDamage, kosTaken: ko ? 1 : 0,
   });
   return acc;
 }
@@ -268,12 +277,21 @@ export function bumpEmote(charId, charName, emoteName) {
   } } });
 }
 
-export function bumpSkill(charId, charName, skill, { crit = false, fumble = false } = {}) {
+export function bumpSkill(charId, charName, skill, { crit = false, fumble = false, natural = null, total = null } = {}) {
   if (!charId || !skill) return;
   // Les clés de map (charId, skill) peuvent contenir accents/espaces → on passe
   // par des OBJETS imbriqués (pas des field-paths pointés) pour rester valide.
   const dk = statsDateKey();
-  const sk = () => ({ rolls: increment(1), crits: increment(crit ? 1 : 0), fumbles: increment(fumble ? 1 : 0) });
+  const hasDetail = natural !== null && natural !== '' && total !== null && total !== ''
+    && Number.isFinite(Number(natural)) && Number.isFinite(Number(total));
+  const sk = () => ({
+    rolls: increment(1),
+    crits: increment(crit ? 1 : 0),
+    fumbles: increment(fumble ? 1 : 0),
+    trackedRolls: increment(hasDetail ? 1 : 0),
+    naturalTotal: increment(hasDetail ? Number(natural) : 0),
+    resultTotal: increment(hasDetail ? Number(total) : 0),
+  });
   return bumpStats({ chars: { [charId]: {
     name: charName || '',
     skills: { [skill]: sk() },
