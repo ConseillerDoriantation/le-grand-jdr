@@ -270,11 +270,14 @@ function _modalStatusElement() {
 }
 
 function _setModalEditStatus(state, label) {
+  if (!label) {
+    document.querySelector('#modal-title .global-modal-edit-status')?.remove();
+    return;
+  }
   const status = _modalStatusElement();
   if (!status) return;
   status.className = `global-modal-edit-status${state ? ` is-${state}` : ''}`;
-  status.textContent = label || '';
-  status.hidden = !label;
+  status.textContent = label;
 }
 
 function _initModalDirtyGuard() {
