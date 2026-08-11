@@ -185,7 +185,7 @@ let _leaveGuardPromise = null;
 
 async function _canLeaveCurrentPage(nextPage) {
   if (!STATE.currentPage || STATE.currentPage === nextPage) return true;
-  const dirtyEditor = document.querySelector('[data-free-page-editor][data-free-page-dirty="true"]');
+  const dirtyEditor = document.querySelector('[data-free-page-editor][data-free-page-dirty="true"], [data-quill-dirty="true"]');
   if (!dirtyEditor) return true;
   if (!_leaveGuardPromise) {
     _leaveGuardPromise = confirmModal(
