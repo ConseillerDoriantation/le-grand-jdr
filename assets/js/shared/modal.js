@@ -26,10 +26,20 @@ function _dispatchModalEvent(name) {
 // périmé qui bloquerait une modale sans rapport.
 let _closeGuard = null;
 let _autoCloseGuard = null;
+let _allowAutomaticCloseOnce = false;
 export function setModalCloseGuard(fn) { _closeGuard = typeof fn === 'function' ? fn : null; }
 export function clearModalCloseGuard() { _closeGuard = null; }
 export function setAutomaticModalCloseGuard(fn) { _autoCloseGuard = typeof fn === 'function' ? fn : null; }
-export function clearAutomaticModalCloseGuard() { _autoCloseGuard = null; }
+export function clearAutomaticModalCloseGuard() {
+  _autoCloseGuard = null;
+  _allowAutomaticCloseOnce = false;
+}
+// Un clic explicite sur « Enregistrer » peut fermer la modale avant que la
+// Promise de l'action ne publie `app:action-settled`. On laisse passer cette
+// seule fermeture sans désarmer définitivement la protection ; un échec peut
+// ainsi annuler l'autorisation et conserver la garde active.
+export function allowAutomaticModalCloseOnce() { _allowAutomaticCloseOnce = true; }
+export function cancelAutomaticModalCloseOnce() { _allowAutomaticCloseOnce = false; }
 
 function _dismissActiveLayer() {
   const dismiss = _activeDismiss;
@@ -164,6 +174,7 @@ export function openModal(title, bodyHtml, opts = {}) {
   _dismissAllLayers();
   _closeGuard = null;   // nouvelle modale de base → aucun garde hérité
   _autoCloseGuard = null;
+  _allowAutomaticCloseOnce = false;
   _a11yOnShow();
   overlay?.removeAttribute('aria-describedby');
   _applyModalHeader(title, opts);
@@ -197,6 +208,7 @@ export function pushModal(title, bodyHtml, restore = null, opts = {}) {
     _dismissAllLayers();
     _closeGuard = null;
     _autoCloseGuard = null;
+    _allowAutomaticCloseOnce = false;
   }
   _activeDismiss = typeof opts.onDismiss === 'function' ? opts.onDismiss : null;
 
@@ -257,11 +269,12 @@ export function closeModalDirect() {
     try { blocked = _closeGuard() === true; } catch { blocked = false; }
     if (blocked) return;
   }
-  if (_autoCloseGuard) {
+  if (_autoCloseGuard && !_allowAutomaticCloseOnce) {
     let blocked = false;
     try { blocked = _autoCloseGuard() === true; } catch { blocked = false; }
     if (blocked) return;
   }
+  _allowAutomaticCloseOnce = false;
   _dismissActiveLayer();
   _closeGuard = null;
   _autoCloseGuard = null;

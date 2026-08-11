@@ -50,11 +50,15 @@ global.document = {
 };
 
 const {
+  allowAutomaticModalCloseOnce,
+  cancelAutomaticModalCloseOnce,
+  clearAutomaticModalCloseGuard,
   openModal,
   pushModal,
   confirmModal,
   closeModalDirect,
   setModalCloseGuard,
+  setAutomaticModalCloseGuard,
   clearModalCloseGuard,
 } = await import('../assets/js/shared/modal.js');
 
@@ -121,5 +125,38 @@ test('la croix d’une confirmation vaut annulation et laisse la modale de fond 
   assert.equal(await answer, false);
   assert.equal(body.innerHTML, '<form>sort</form>');
   assert.equal(overlay.classList.contains('show'), true);
+  closeModalDirect();
+});
+
+test('un enregistrement autorise une seule fermeture sans déclencher la garde automatique', () => {
+  openModal('Bastion', '<form>identité modifiée</form>');
+  let guardCalls = 0;
+  setAutomaticModalCloseGuard(() => {
+    guardCalls += 1;
+    return true;
+  });
+
+  allowAutomaticModalCloseOnce();
+  closeModalDirect();
+
+  assert.equal(guardCalls, 0);
+  assert.equal(overlay.classList.contains('show'), false);
+});
+
+test('un échec d’enregistrement annule l’autorisation et conserve la garde', () => {
+  openModal('Bastion', '<form>identité modifiée</form>');
+  let guardCalls = 0;
+  setAutomaticModalCloseGuard(() => {
+    guardCalls += 1;
+    return true;
+  });
+
+  allowAutomaticModalCloseOnce();
+  cancelAutomaticModalCloseOnce();
+  closeModalDirect();
+
+  assert.equal(guardCalls, 1);
+  assert.equal(overlay.classList.contains('show'), true);
+  clearAutomaticModalCloseGuard();
   closeModalDirect();
 });
