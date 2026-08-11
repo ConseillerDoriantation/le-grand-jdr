@@ -10,7 +10,7 @@ import { charSession } from '../../shared/char-session.js';
 import { getMaitriseBonus as getSharedMaitriseBonus, getMod, statShort } from '../../shared/char-stats.js';
 import { getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getMainWeapon } from './data.js';
-import { calcSpellDuration, calcSpellTargets, resolveSpellModifierStat, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 // Cœurs purs extraits (testables à froid). Ré-exportés plus bas pour l'API publique.
 import {
   _calcAfflictionDot, _autoSourceAfflictionDot, _calcEnchantDegats,
@@ -180,7 +180,7 @@ export function _calcSortSoin(s, c) {
 
   // Maîtrise de l'arme : pertinente uniquement pour les sorts magiques (l'arme est le focus)
   const mainP   = getMainWeapon(c);
-  const maitrise = isMagic && usesSpellMastery(s) ? getSharedMaitriseBonus(c, mainP) : 0;
+  const maitrise = usesHealingMastery(s, isMagic, statKey) ? getSharedMaitriseBonus(c, mainP) : 0;
   const maitriseStr = maitrise > 0 ? ` +${maitrise}` : maitrise < 0 ? ` ${maitrise}` : '';
 
   const buildDefault = (diceCount) => {
@@ -269,7 +269,7 @@ function _calcHealDisplayParts(s, c) {
   const statMod = noMod ? 0 : Math.floor((Math.min(22, statVal) - 10) / 2);
   const statLbl = noMod ? '' : (statShort(statKey) || statKey.slice(0, 3));
   const mainP = getMainWeapon(c);
-  const maitrise = (!noMod && _isNoyauMagic(s) && usesSpellMastery(s)) ? getSharedMaitriseBonus(c, mainP) : 0;
+  const maitrise = usesHealingMastery(s, _isNoyauMagic(s), statKey) ? getSharedMaitriseBonus(c, mainP) : 0;
   const diceCountBonus = isDefault || nbProt > 0 ? nbProt : 0;
   const scaled = _scaleDiceFormulaDice(base, diceCountBonus);
   const { dice, tail } = _splitDiceBase(scaled);
@@ -511,7 +511,7 @@ export function _autoSourceSoin(s, c) {
     : s?.degatsStat
     ? `stat sort (${statLbl})`
     : (isMagic ? `magique · stat arme (${statLbl})` : `physique · Constitution (${statLbl})`);
-  const masteryStr = usesSpellMastery(s) ? '' : ' · sans maîtrise';
+  const masteryStr = isMagic && statKey !== 'none' && !usesSpellMastery(s) ? ' · sans maîtrise' : '';
   return nbProt > 0
     ? `auto · base 1d4 +${nbProt}d4 (Protection) · ${natureStr}${masteryStr}`
     : `auto · base 1d4 · ${natureStr}${masteryStr}`;

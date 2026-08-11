@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runeCount, calcSpellTargets, calcSpellDuration, resolveSpellModifierStat, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
+import { runeCount, calcSpellTargets, calcSpellDuration, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
 
 const sort = (runes = [], extra = {}) => ({ runes, ...extra });
 
@@ -20,6 +20,14 @@ test('une statistique explicitement désactivée ne retombe pas sur celle de l�
   assert.equal(resolveSpellModifierStat({}, 'degatsStat', 'intelligence'), 'intelligence');
   assert.equal(resolveSpellModifierStat({ degatsStat: 'force' }, 'degatsStat', 'intelligence'), 'force');
   assert.equal(resolveSpellModifierStat({ degatsStat: 'none' }, 'degatsStat', 'intelligence'), null);
+});
+
+test('la maîtrise de soin exige un noyau magique et une statistique active', () => {
+  assert.equal(usesHealingMastery({}, true, 'intelligence'), true);
+  assert.equal(usesHealingMastery({}, false, 'constitution'), false, 'soin physique');
+  assert.equal(usesHealingMastery({}, true, ''), false, 'statistique absente');
+  assert.equal(usesHealingMastery({}, true, 'none'), false, 'soin sans modificateur');
+  assert.equal(usesHealingMastery({ maitriseActive: false }, true, 'intelligence'), false);
 });
 
 test('calcSpellTargets : Dispersion pilote le nombre de cibles (1 + nbDisp)', () => {
