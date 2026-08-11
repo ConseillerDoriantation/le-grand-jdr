@@ -810,37 +810,181 @@
 [data-theme="light"] .bs-det-bonus-lbl { color: #a16207; }
 
 /* ─── ÉDITEUR DE SALLES (MJ) ─────────────────────────────────────── */
-.bs-edit-list { display: flex; flex-direction: column; gap: 6px; }
-.bs-edit-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 11px 14px;
-  background: var(--bg-card);
+.modal:has(.bs-room-manager),
+.modal:has(.bs-room-editor),
+.modal:has(.bs-room-create) {
+  width: min(94vw, 1040px);
+  max-width: 1040px;
+}
+.bs-room-manager { display: grid; gap: 16px; }
+.bs-room-manager-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.bs-room-manager-summary > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.035);
 }
-.bs-edit-row:hover {
-  background: rgba(79,140,255,0.05);
-  border-color: rgba(79,140,255,0.30);
-}
-.bs-edit-emoji { font-size: 1.5rem; flex-shrink: 0; }
-.bs-edit-info { flex: 1; min-width: 0; }
-.bs-edit-name {
-  font-family: var(--font-display);
-  font-weight: 700; font-size: 0.92rem;
+.bs-room-manager-summary strong {
   color: var(--text);
+  font-family: var(--font-display);
+  font-size: 1.08rem;
 }
-.bs-edit-desc {
-  font-size: 0.74rem;
+.bs-room-manager-summary span {
+  overflow: hidden;
   color: var(--text-muted);
-  margin-top: 2px;
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.bs-edit-arrow {
-  font-size: 1rem; color: var(--text-dim); flex-shrink: 0;
+.bs-room-manager-summary .is-building {
+  border-color: rgba(255,149,68,0.30);
+  background: rgba(255,149,68,0.08);
 }
-
-[data-theme="light"] .bs-edit-row { background: var(--bg-elevated); }
+.bs-room-manager-summary .is-building strong { color: var(--ember, #ff9544); }
+.bs-room-manager-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.bs-room-manager-card {
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: transform 0.15s, border-color 0.15s, background 0.15s;
+}
+.bs-room-manager-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(127,176,255,0.42);
+  background: rgba(79,140,255,0.06);
+}
+.bs-room-manager-card:focus-visible {
+  outline: 2px solid var(--gold-2, #7eb0ff);
+  outline-offset: 2px;
+}
+.bs-room-manager-card.is-fixed { cursor: default; opacity: 0.82; }
+.bs-room-manager-card.is-fixed:hover {
+  transform: none;
+  border-color: var(--border);
+  background: var(--bg-card);
+}
+.bs-room-manager-card-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.bs-room-manager-emoji {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--room-color) 42%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--room-color) 12%, transparent);
+  font-size: 1.28rem;
+}
+.bs-room-manager-title {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+.bs-room-manager-title strong {
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bs-room-manager-status { width: fit-content; color: var(--text-dim); font-size: 0.65rem; }
+.bs-room-manager-status.is-built { color: var(--verdant, #22c38e); }
+.bs-room-manager-status.is-building { color: var(--ember, #ff9544); }
+.bs-room-manager-description {
+  display: block;
+  min-height: 2.7em;
+  color: var(--text-muted);
+  font-size: 0.73rem;
+  line-height: 1.35;
+}
+.bs-room-manager-levels {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+.bs-room-manager-levels > span {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 6px;
+  padding: 6px 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(255,255,255,0.025);
+  font-size: 0.62rem;
+}
+.bs-room-manager-levels b {
+  grid-row: 1 / 3;
+  align-self: center;
+  color: var(--gold, #e8b84b);
+  font-family: var(--font-display);
+  font-size: 0.76rem;
+}
+.bs-room-manager-levels span { color: var(--text-muted); white-space: nowrap; }
+.bs-room-manager-fixed {
+  padding: 9px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  text-align: center;
+}
+.bs-room-manager-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.64rem;
+}
+.bs-room-manager-card-foot strong { color: var(--gold-2, #7eb0ff); white-space: nowrap; }
+.bs-room-manager-actions {
+  position: sticky;
+  bottom: -2rem;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 -2rem -2rem;
+  padding: 13px 2rem;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elevated, #111a28) 94%, transparent);
+  backdrop-filter: blur(12px);
+}
+.bs-room-manager-actions > span { color: var(--text-muted); font-size: 0.7rem; }
+[data-theme="light"] .bs-room-manager-summary > div,
+[data-theme="light"] .bs-room-manager-card { background: var(--bg-elevated); }
 
 .bs-room-create {
   display: grid;
@@ -970,6 +1114,98 @@
 }
 
 .bs-edit-form { display: flex; flex-direction: column; gap: 12px; }
+.bs-room-editor-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.bs-room-editor-nav > span { color: var(--text-dim); font-size: 0.68rem; }
+.bs-room-editor-back {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--gold-2, #7eb0ff);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.bs-room-editor-back:hover { text-decoration: underline; }
+.bs-room-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.72fr) minmax(0, 1.55fr);
+  gap: 14px;
+  align-items: start;
+}
+.bs-room-editor-identity {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 11px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--room-color) 30%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--room-color) 7%, var(--bg-card));
+}
+.bs-room-editor-preview {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--border);
+}
+.bs-room-editor-preview > span {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--room-color) 42%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--room-color) 14%, transparent);
+  font-size: 1.45rem;
+}
+.bs-room-editor-preview div { min-width: 0; display: grid; gap: 2px; }
+.bs-room-editor-preview strong {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-display);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bs-room-editor-preview small { color: var(--text-dim); font-size: 0.64rem; }
+.bs-room-editor-identity .bs-edit-id-row { display: grid; grid-template-columns: 1fr 1fr; }
+.bs-room-editor-identity .bs-edit-id-row input[type="text"] { text-align: center; font-size: 1.05rem; }
+.bs-room-editor-identity .bs-edit-id-row input[type="color"] { width: 100%; min-height: 38px; padding: 3px; }
+.bs-room-editor-note {
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: rgba(127,176,255,0.08);
+  color: var(--text-muted);
+  font-size: 0.67rem;
+  line-height: 1.4;
+}
+.bs-room-editor-levels { min-width: 0; display: grid; gap: 8px; }
+.bs-room-editor-levels-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 2px 4px;
+}
+.bs-room-editor-levels-head div { display: grid; gap: 2px; }
+.bs-room-editor-levels-head strong { color: var(--text); font-family: var(--font-display); font-size: 0.9rem; }
+.bs-room-editor-levels-head div span { color: var(--text-dim); font-size: 0.65rem; }
+.bs-room-editor-levels-head > span {
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  white-space: nowrap;
+}
 .bs-edit-id-row {
   display: flex; gap: 10px; align-items: flex-end;
 }
@@ -992,12 +1228,34 @@
   padding: 10px 12px;
 }
 .bs-edit-niv summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   font-family: var(--font-display);
   font-weight: 700; font-size: 0.92rem;
   color: var(--gold, #e8b84b);
   cursor: pointer;
   letter-spacing: 0.04em;
   padding: 2px 0;
+}
+.bs-edit-niv-title { white-space: nowrap; }
+.bs-edit-niv-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  font-family: var(--font-body, sans-serif);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.bs-edit-niv-summary > span {
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.025);
+  color: var(--text-muted);
+  font-size: 0.62rem;
 }
 .bs-edit-niv[open] summary { margin-bottom: 10px; }
 .bs-edit-niv-grid {
@@ -1155,8 +1413,63 @@
   padding-top: 10px;
   border-top: 1px solid var(--border);
 }
+.bs-room-editor-actions {
+  position: sticky;
+  bottom: -2rem;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 -2rem -2rem;
+  padding: 13px 2rem;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elevated, #111a28) 94%, transparent);
+  backdrop-filter: blur(12px);
+}
+.bs-room-editor-actions > div { display: flex; align-items: center; gap: 8px; }
+.bs-room-editor-danger { color: var(--crimson, #ff5a7e); border-color: rgba(255,90,126,0.40); }
+.bs-room-action-short { display: none; }
 [data-theme="light"] .bs-edit-niv { background: var(--bg-elevated); }
 [data-theme="light"] .bs-edit-niv summary { color: #a16207; }
+
+@media (max-width: 820px) {
+  .bs-room-manager-grid { grid-template-columns: 1fr; }
+  .bs-room-editor-layout { grid-template-columns: 1fr; }
+  .bs-room-editor-identity { position: static; }
+  .bs-room-editor-identity .bs-edit-id-row { grid-template-columns: 90px 110px; }
+  .bs-room-editor-identity .bs-edit-full textarea { min-height: 80px; }
+}
+@media (max-width: 560px) {
+  .modal:has(.bs-room-manager),
+  .modal:has(.bs-room-editor),
+  .modal:has(.bs-room-create) { width: 100%; }
+  .bs-room-manager-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bs-room-manager-description { min-height: 0; }
+  .bs-room-editor-levels { order: 1; }
+  .bs-room-editor-identity { order: 2; }
+  .bs-room-editor-identity .bs-edit-full textarea { height: 88px; min-height: 88px; }
+  .bs-room-manager-actions,
+  .bs-room-editor-actions {
+    bottom: -1.1rem;
+    margin: 0 -1rem -1.1rem;
+    padding: 11px 1rem;
+  }
+  .bs-room-manager-actions > span { display: none; }
+  .bs-room-manager-actions .btn { width: 100%; }
+  .bs-room-editor-actions > .btn { display: none; }
+  .bs-room-editor-actions > div { width: 100%; }
+  .bs-room-editor-actions > div .btn:last-child { flex: 1; }
+  .bs-room-action-full { display: none; }
+  .bs-room-action-short { display: inline; }
+  .bs-room-create-actions { flex-direction: column-reverse; }
+  .bs-room-create-actions .btn { width: 100%; }
+  .bs-edit-niv summary { align-items: flex-start; flex-direction: column; }
+  .bs-edit-niv-summary { justify-content: flex-start; }
+  .bs-pick-filters,
+  .bs-pick-row { align-items: stretch; flex-direction: column; }
+  .bs-pick-row input { max-width: none !important; }
+}
 
 /* ─── Dashboard mini-stats (panel ⚔️ Bastion) ────────────────────── */
 .dv2-bastion-stats {
