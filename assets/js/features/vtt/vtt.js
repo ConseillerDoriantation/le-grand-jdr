@@ -10157,6 +10157,22 @@ function _keyHandler(e) {
 // ═══════════════════════════════════════════════════════════════════
 // HTML
 // ═══════════════════════════════════════════════════════════════════
+// Rail droit : sur écran à faible hauteur, l'inspecteur (Token/Jets) et le chat
+// empilés deviennent inutilisables. On les transforme alors en un panneau à
+// onglets — un seul visible, pleine hauteur — sans ajouter de fenêtre. Choix
+// mémorisé. Sur grand écran, le CSS ignore cet état et garde les deux empilés.
+let _rcolView = 'inspector';
+try { const v = localStorage.getItem('vtt-rcol-view'); if (v === 'chat' || v === 'inspector') _rcolView = v; } catch {}
+function _vttRcolView(view) {
+  if (view !== 'chat' && view !== 'inspector') return;
+  _rcolView = view;
+  try { localStorage.setItem('vtt-rcol-view', view); } catch {}
+  const col = document.getElementById('vtt-right-col');
+  if (col) col.dataset.rcolView = view;
+  document.querySelectorAll('.vtt-rcol-tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.vttArgs === view));
+}
+
 function _buildHtml() {
   const mj=STATE.isAdmin;
   return `
@@ -10205,7 +10221,11 @@ function _buildHtml() {
       </div>
     </div>`:''}
     <div class="vtt-canvas-wrap" id="vtt-canvas-wrap"></div>
-    <div class="vtt-right-col" id="vtt-right-col">
+    <div class="vtt-right-col" id="vtt-right-col" data-rcol-view="${_rcolView}">
+      <div class="vtt-rcol-tabs" role="tablist" aria-label="Panneau latéral">
+        <button class="vtt-rcol-tab${_rcolView==='inspector'?' active':''}" type="button" role="tab" data-vtt-fn="_vttRcolView" data-vtt-args="inspector">🎲 Token / Jets</button>
+        <button class="vtt-rcol-tab${_rcolView==='chat'?' active':''}" type="button" role="tab" data-vtt-fn="_vttRcolView" data-vtt-args="chat">💬 Chat</button>
+      </div>
       <div class="vtt-inspector" id="vtt-inspector">
         <div class="vtt-ins-empty"><div style="font-size:1.8rem">🎲</div>Sélectionne un token</div>
       </div>
@@ -10661,6 +10681,7 @@ export const VTT_ACTIONS = {
   _vttImportGithubRelease,
   _vttInsTab,
   _vttOpenSource,
+  _vttRcolView,
   _vttSkillFilter,
   _vttSkillFilterClear,
   _vttSwitchCharacterBuild,

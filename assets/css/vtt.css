@@ -10981,3 +10981,50 @@ html:not([data-theme="light"]) .vtt-root {
     overscroll-behavior: contain;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RAIL DROIT — bascule onglets Token/Jets ↔ Chat sur écran à faible hauteur.
+   Par défaut (grand écran) : barre masquée, inspecteur + chat empilés (inchangé).
+   ══════════════════════════════════════════════════════════════════════════ */
+.vtt-rcol-tabs { display: none; }
+.vtt-rcol-tab {
+  flex: 1;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .3rem;
+  padding: .3rem .4rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: .74rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.vtt-rcol-tab:hover { color: var(--text); }
+.vtt-rcol-tab.active {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 14%, transparent);
+}
+
+/* Faible hauteur : on n'empile plus. La barre apparaît et un seul panneau est
+   visible, en pleine hauteur → chacun redevient utilisable. */
+@media (min-width: 769px) and (max-height: 820px) {
+  .vtt-rcol-tabs {
+    display: flex;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border-md);
+  }
+  .vtt-right-col[data-rcol-view="inspector"] .vtt-chat { display: none; }
+  .vtt-right-col[data-rcol-view="inspector"] .vtt-inspector {
+    max-height: none;
+    flex: 1 1 auto;
+    border-bottom: none;
+  }
+  .vtt-right-col[data-rcol-view="chat"] .vtt-inspector { display: none; }
+  .vtt-right-col[data-rcol-view="chat"] .vtt-chat { flex: 1 1 auto; }
+}
