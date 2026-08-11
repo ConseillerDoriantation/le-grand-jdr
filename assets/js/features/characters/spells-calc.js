@@ -10,7 +10,7 @@ import { charSession } from '../../shared/char-session.js';
 import { getMaitriseBonus as getSharedMaitriseBonus, getMod, statShort } from '../../shared/char-stats.js';
 import { getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getMainWeapon } from './data.js';
-import { calcSpellDuration, calcSpellTargets, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, resolveSpellModifierStat, usesSpellMastery } from '../../shared/spell-runes.js';
 // Cœurs purs extraits (testables à froid). Ré-exportés plus bas pour l'API publique.
 import {
   _calcAfflictionDot, _autoSourceAfflictionDot, _calcEnchantDegats,
@@ -238,10 +238,10 @@ function _calcImpactDisplayParts(s, c) {
     ? (mainP?.degats || '2d4')
     : baseRaw;
   const nbPuiss = (s?.runes || []).filter(r => r === 'Puissance').length;
-  const statKey = s?.degatsStat || mainP.statAttaque || mainP.toucherStat || 'force';
-  const statVal = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
-  const statMod = Math.floor((Math.min(22, statVal) - 10) / 2);
-  const statLbl = statShort(statKey) || statKey.slice(0, 3);
+  const statKey = resolveSpellModifierStat(s, 'degatsStat', mainP.statAttaque || mainP.toucherStat || 'force');
+  const statVal = statKey ? (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0) : 10;
+  const statMod = statKey ? Math.floor((Math.min(22, statVal) - 10) / 2) : 0;
+  const statLbl = statKey ? (statShort(statKey) || statKey.slice(0, 3)) : '';
   const maitrise = usesSpellMastery(s) ? getSharedMaitriseBonus(c, mainP) : 0;
   const { dice, tail } = _splitDiceBase(_scaleDiceFormulaDice(base, nbPuiss));
   const hasDerivedFlat = statMod !== 0 || maitrise !== 0;
@@ -490,10 +490,10 @@ function _comboResumeLines(activeCombos, comboIds, counts, s) {
 export function _autoSourceDegats(s, c) {
   const mainP   = getMainWeapon(c);
   // Override du sort sur la stat de dégâts (override sort > arme principale)
-  const statKey = s?.degatsStat || mainP.statAttaque || 'force';
-  const statLbl = statShort(statKey) || 'For';
+  const statKey = resolveSpellModifierStat(s, 'degatsStat', mainP.statAttaque || 'force');
+  const statLbl = statKey ? (statShort(statKey) || 'For') : '';
   const nbP     = (s.runes||[]).filter(r => r === 'Puissance').length;
-  const srcLbl  = s?.degatsStat ? `stat sort (${statLbl})` : statLbl;
+  const srcLbl  = statKey ? (s?.degatsStat ? `stat sort (${statLbl})` : statLbl) : 'sans modificateur';
   const parts   = [mainP.isDefault ? `Poings ${mainP.degats}` : (mainP.nom || 'arme'), srcLbl];
   if (nbP > 0) parts.push(`Puissance ×${nbP}`);
   if (!usesSpellMastery(s)) parts.push('sans maîtrise');
@@ -503,9 +503,12 @@ export function _autoSourceSoin(s, c) {
   const nbProt = (s.runes||[]).filter(r => r === 'Protection').length;
   const isMagic = _isNoyauMagic(s);
   const statKey = _getSortSoinStatKey(s, c);
-  const statLbl = statShort(statKey) || statKey.slice(0,3);
+  const noMod = statKey === 'none';
+  const statLbl = noMod ? '' : (statShort(statKey) || statKey.slice(0,3));
   // Le label reflète si la stat vient d'un override de sort ou de l'auto-dérivation arme/noyau
-  const natureStr = s?.degatsStat
+  const natureStr = noMod
+    ? 'sans modificateur'
+    : s?.degatsStat
     ? `stat sort (${statLbl})`
     : (isMagic ? `magique · stat arme (${statLbl})` : `physique · Constitution (${statLbl})`);
   const masteryStr = usesSpellMastery(s) ? '' : ' · sans maîtrise';

@@ -10,6 +10,16 @@ export function usesSpellMastery(spell = {}) {
   return spell?.maitriseActive !== false;
 }
 
+/**
+ * Résout une statistique de sort sans écraser le choix explicite « aucune ».
+ * `null` signifie qu'aucun modificateur ne doit être calculé ni affiché.
+ */
+export function resolveSpellModifierStat(spell = {}, field, fallback = '') {
+  const override = spell?.[field];
+  if (override === 'none') return null;
+  return override || fallback || null;
+}
+
 export function calcSpellTargets(spell = {}) {
   if (spell?.designMode === 'classic') return 1;
   const nbDisp = runeCount(spell, 'Dispersion');
