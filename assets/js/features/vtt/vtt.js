@@ -1559,6 +1559,7 @@ export function _select(id) {
   VS.layers.token.batchDraw();
   const data=VS.tokens[id]?.data;
   _renderInspector(data??null);
+  if (data) _vttFocusInspectorIfTabbed();
   // Clic sur un token allié/propre : portée de déplacement (bleu) + portée d'attaque (rouge)
   if (data && _canControlToken(data)) {
     _showMoveRange(data);    // cases bleues cliquables (déplacement)
@@ -10171,6 +10172,22 @@ function _vttRcolView(view) {
   if (col) col.dataset.rcolView = view;
   document.querySelectorAll('.vtt-rcol-tab').forEach(b =>
     b.classList.toggle('active', b.dataset.vttArgs === view));
+  // Voir le chat = tout est lu → on retire la pastille « non lu ».
+  if (view === 'chat') {
+    document.querySelector('.vtt-rcol-tab[data-vtt-args="chat"]')?.classList.remove('has-unread');
+  }
+}
+
+// Petit écran (rail en onglets) : sélectionner un token amène son panneau
+// Token/Jets devant, comme on s'y attend. Ne fait rien sur grand écran (barre
+// masquée) et n'interrompt jamais une saisie de chat en cours.
+function _vttFocusInspectorIfTabbed() {
+  const col = document.getElementById('vtt-right-col');
+  if (!col || col.dataset.rcolView === 'inspector') return;
+  const tabs = col.querySelector('.vtt-rcol-tabs');
+  if (!tabs || getComputedStyle(tabs).display === 'none') return;
+  if (document.activeElement?.id === 'vtt-chat-input') return;
+  _vttRcolView('inspector');
 }
 
 function _buildHtml() {

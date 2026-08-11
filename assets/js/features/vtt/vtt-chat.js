@@ -780,6 +780,13 @@ export function _renderChatLogImpl(msgs) {
       last.classList.add('vtt-log-enter');
       last.addEventListener('animationend', () => last.classList.remove('vtt-log-enter'), { once: true });
     }
+    // Mode onglets (petit écran) : nouveau message alors qu'on regarde l'autre
+    // panneau → pastille « non lu » sur l'onglet Chat. Invisible si la barre
+    // d'onglets est masquée (grand écran), donc sans effet là-bas.
+    const col = document.getElementById('vtt-right-col');
+    if (col && col.dataset.rcolView !== 'chat') {
+      document.querySelector('.vtt-rcol-tab[data-vtt-args="chat"]')?.classList.add('has-unread');
+    }
   }
   _chatLastNewestId = _newestId;
 
