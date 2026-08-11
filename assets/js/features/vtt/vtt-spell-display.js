@@ -9,7 +9,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { getMainWeapon, DEFAULT_UNARMED } from '../../shared/equipment-utils.js';
 import { getMaitriseBonus, getMod } from '../../shared/char-stats.js';
-import { usesSpellMastery } from '../../shared/spell-runes.js';
+import { usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { VS } from './vtt-state.js';
 
 // Rune virtuelle d'action (Réaction / Action Bonus condensées à l'affichage).
@@ -80,18 +80,21 @@ export function _vttSortDmgFormula(s, c, opts = {}) {
  * Miroir local de _calcSortSoin (spells.js).
  * Inclut : 1d4 base + runes Protection + maîtrise si active + mod de stat.
  * Stat utilisée :
- *  - Noyau magique avec arme magique équipée → stat d'attaque de l'arme
- *  - Noyau magique sans arme magique (Poings) → Intelligence
+ *  - Noyau magique avec arme équipée → stat d'attaque de l'arme
+ *  - Noyau magique sans arme (Poings) → Intelligence
  *  - Noyau physique / pas de noyau → Constitution
  */
 export function _vttSortSoinFormula(s, c) {
   if (s?.designMode === 'classic' && s?.classicFormulaFinal) return (s?.soin || '').trim();
   // Aligne sur le sheet : getMainWeapon retourne Poings par défaut si vide.
   const mainP    = c ? getMainWeapon(c) : null;
-  const maitrise = usesSpellMastery(s) ? getMaitriseBonus(c, mainP || {}) : 0;
   const runes    = s.runes || [];
   const nbProt   = runes.filter(r => r === 'Protection').length;
   const base     = (s.soin || '').trim();
+
+  const dmgTypes = VS.damageTypes;
+  const noyauTypeId = s?.noyauTypeId;
+  const isMagic = !!(dmgTypes && noyauTypeId && dmgTypes.find(x => x.id === noyauTypeId)?.isMagic);
 
   // Détermine la stat de soin :
   //  - Override explicite du sort (s.degatsStat) → priorité absolue
@@ -100,22 +103,20 @@ export function _vttSortSoinFormula(s, c) {
   if (s?.degatsStat) {
     statKey = s.degatsStat;
   } else {
-    const dmgTypes = VS.damageTypes;
-    const noyauTypeId = s?.noyauTypeId;
-    const isMagic = !!(dmgTypes && noyauTypeId && dmgTypes.find(x => x.id === noyauTypeId)?.isMagic);
     statKey = 'constitution';
     if (isMagic) {
-      const fmt = VS.weaponFormats?.find(f => f.label === mainP?.format);
-      // Les Poings par défaut (isDefault) ne sont pas une arme magique
-      const isMagicWeapon = fmt?.isMagic === true && mainP?.nom && !mainP?.isDefault;
-      statKey = isMagicWeapon ? (mainP.statAttaque || mainP.toucherStat || 'intelligence') : 'intelligence';
+      statKey = mainP?.isDefault
+        ? 'intelligence'
+        : (mainP?.statAttaque || 'intelligence');
     }
   }
   // Stat 'none' : aucun modificateur de carac (potion à valeur fixe, etc.)
   // Dans ce cas on n'ajoute NI la stat NI la maîtrise → effet 100% fixe.
   const noStatMod = statKey === 'none';
   const statMod = noStatMod ? 0 : (c ? getMod(c, statKey) : 0);
-  const effectiveMaitrise = noStatMod ? 0 : maitrise;
+  const effectiveMaitrise = usesHealingMastery(s, isMagic, statKey)
+    ? getMaitriseBonus(c, mainP || {})
+    : 0;
 
   const totalFlat = effectiveMaitrise + statMod;
   const flatStr = totalFlat > 0 ? ` +${totalFlat}` : totalFlat < 0 ? ` ${totalFlat}` : '';

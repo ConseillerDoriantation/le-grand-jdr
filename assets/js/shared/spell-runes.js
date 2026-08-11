@@ -10,6 +10,11 @@ export function usesSpellMastery(spell = {}) {
   return spell?.maitriseActive !== false;
 }
 
+/** La maîtrise d'un soin ne s'applique qu'à un noyau magique avec une stat active. */
+export function usesHealingMastery(spell = {}, isMagic = false, statKey = '') {
+  return usesSpellMastery(spell) && isMagic && !!statKey && statKey !== 'none';
+}
+
 /**
  * Résout une statistique de sort sans écraser le choix explicite « aucune ».
  * `null` signifie qu'aucun modificateur ne doit être calculé ni affiché.

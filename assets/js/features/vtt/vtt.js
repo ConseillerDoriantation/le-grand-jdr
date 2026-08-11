@@ -28,7 +28,7 @@ import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../../sh
 import { playSigil, playImpact, playProjectile, playSlash } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
-import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, usesHealingMastery } from '../../shared/spell-runes.js';
 import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
@@ -2291,7 +2291,7 @@ function _diceLogFields(prefix, det) {
 
 function _optionFixedBonus(opt) {
   return (opt?.rawDice !== undefined)
-    ? ((opt.dmgStatMod || 0) + (opt.maitriseBonus || 0))
+    ? ((opt.formulaFixedBonus || 0) + (opt.dmgStatMod || 0) + (opt.maitriseBonus || 0))
     : 0;
 }
 
@@ -3636,32 +3636,41 @@ function _buildSpellOption(s, ctx) {
   const isClassicHeal = s.designMode === 'classic' && s.classicEffect === 'heal' && !!String(s.soin || '').trim();
   if (types.includes('defensif') && (isClassicHeal || protMode === 'soin' || isAmpSupportHeal)) {
     const soinFormula = _vttSortSoinFormula(s, c);
-    const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(soinFormula);
-    // Stat de soin : override > auto (magique → stat arme magique ou Int ; physique → Con)
+    const { rawDice: sRawDice, fixed: soinFormulaFixed } = _splitDiceFormula(soinFormula);
+    const mainP = c ? getMainWeapon(c) : null;
+    const soinIsMagic = !!(VS.damageTypes && s?.noyauTypeId
+      && VS.damageTypes.find(x => x.id === s.noyauTypeId)?.isMagic);
+    // Stat de soin : override > auto (magique → stat arme ou Int ; physique → Con)
     let soinStatKey;
     if (s.degatsStat) {
       soinStatKey = s.degatsStat;
     } else {
-      const mainP = c ? getMainWeapon(c) : null;
-      const isMagic = !!(VS.damageTypes && s?.noyauTypeId
-        && VS.damageTypes.find(x => x.id === s.noyauTypeId)?.isMagic);
-      if (isMagic) {
-        const fmt = VS.weaponFormats?.find(f => f.label === mainP?.format);
-        // Les Poings (isDefault) ne sont jamais une "arme magique" → Int par défaut
-        const isMagicWeapon = fmt?.isMagic === true && mainP?.nom && !mainP?.isDefault;
-        soinStatKey = isMagicWeapon ? (mainP.statAttaque || mainP.toucherStat || 'intelligence') : 'intelligence';
+      if (soinIsMagic) {
+        soinStatKey = mainP?.isDefault
+          ? 'intelligence'
+          : (mainP?.statAttaque || 'intelligence');
       } else {
         soinStatKey = 'constitution';
       }
     }
     const soinNoMod   = soinStatKey === 'none';
     const soinStatMod = soinNoMod ? 0 : (c ? getMod(c, soinStatKey) : 0);
+    const soinMaitrise = !isClassicHeal && usesHealingMastery(s, soinIsMagic, soinStatKey)
+      ? getMaitriseBonus(c, mainP || {})
+      : 0;
+    // La formule calculée contient déjà stat + maîtrise. On conserve séparément
+    // un éventuel bonus écrit dans la formule afin de ne rien compter deux fois.
+    const soinBaseFixed = isClassicHeal
+      ? soinFormulaFixed
+      : soinFormulaFixed - soinStatMod - soinMaitrise;
     const soinTouchStat = s.toucherStat || fallbackTouchStat;
     const soinTouchNoMod = soinTouchStat === 'none';
     const soinTouchMod   = soinTouchNoMod ? 0 : (c ? getMod(c, soinTouchStat) : fallbackTouchMod);
     return { ...common,
       icon: '💚', label, rawDice: sRawDice, dice: soinFormula,
-      isHeal: true, halfOnMiss: false, maitriseBonus: sFixed,
+      isHeal: true, halfOnMiss: false,
+      formulaFixedBonus: soinBaseFixed,
+      maitriseBonus: soinMaitrise,
       mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
       dmgStatMod: soinStatMod,
       dmgStatLabel: soinNoMod ? '' : (statShort(soinStatKey) || soinStatKey),
@@ -5214,6 +5223,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
   let degatsFormula;
   if (opt.rawDice !== undefined) {
     const parts = []; let tot = 0;
+    if (opt.formulaFixedBonus) { tot += opt.formulaFixedBonus; parts.push(`Formule ${sn(opt.formulaFixedBonus)}`); }
     if (opt.dmgStatMod)        { tot += opt.dmgStatMod;     parts.push(`${opt.dmgStatLabel} ${sn(opt.dmgStatMod)}`); }
     if (opt.maitriseBonus>0)   { tot += opt.maitriseBonus;  parts.push(`Maîtrise +${opt.maitriseBonus}`); }
     if (opt.mjAlwaysMax) {
@@ -6830,7 +6840,7 @@ async function _vttRollAttack() {
 
       const diceToRoll   = opt.rawDice || opt.dice;
       const effectiveDice = _effectiveDmgDice(diceToRoll);
-      const healFixed    = (opt.maitriseBonus || 0) + bonusDmg;
+      const healFixed    = _optionFixedBonus(opt) + bonusDmg;
 
       // PM toujours consommé (même sur échec critique) — le mana brûle quand on tente le sort
       await _deductPm();
@@ -6972,6 +6982,8 @@ async function _vttRollAttack() {
           ...hitPayload,
           dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
           dmgEffectiveDice: bonusDmgDice ? effectiveDice : null,
+          dmgFormulaBonus: opt.formulaFixedBonus??0,
+          dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
           dmgMaitriseBonus: opt.maitriseBonus??0,
           dmgRaw: healRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
           dmgRollsDetail: healRollsDetail || null,
@@ -7004,6 +7016,8 @@ async function _vttRollAttack() {
             ...hitPayload,
             dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
             dmgEffectiveDice: bonusDmgDice ? effectiveDice : null,
+            dmgFormulaBonus: opt.formulaFixedBonus??0,
+            dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
             dmgMaitriseBonus: opt.maitriseBonus??0,
             dmgRaw: healRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
             dmgRollsDetail: healRollsDetail || null,
@@ -7105,7 +7119,7 @@ async function _vttRollAttack() {
 
     const diceToRoll    = opt.rawDice || opt.dice;
     const effectiveDice = _effectiveDmgDice(diceToRoll);
-    const dmgFixed      = opt.rawDice !== undefined ? ((opt.dmgStatMod || 0) + (opt.maitriseBonus || 0)) : 0;
+    const dmgFixed      = _optionFixedBonus(opt);
     const totalFixed  = dmgFixed + bonusDmg + typeDmgBon;
 
     // ── Dés tirés UNE SEULE fois, partagés entre toutes les cibles ──────
@@ -7499,6 +7513,7 @@ async function _vttRollAttack() {
         hitToucherStatLabel: opt.toucherStatLabel??null, hitTouchBuff: _touchBuff || 0,
         dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
         dmgEffectiveDice: bonusDmgDice ? effectiveDice : null,
+        dmgFormulaBonus: opt.formulaFixedBonus??0,
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
         dmgMaitriseBonus: opt.maitriseBonus??0,
         dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
@@ -7550,6 +7565,7 @@ async function _vttRollAttack() {
         targetCA: r.targetCA, hit: r.hit,
         dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
         dmgEffectiveDice: bonusDmgDice ? effectiveDice : null,
+        dmgFormulaBonus: opt.formulaFixedBonus??0,
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
         dmgMaitriseBonus: opt.maitriseBonus??0,
         dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,

@@ -415,6 +415,7 @@ export function _renderChatLogImpl(msgs) {
       }
 
       if (m.dmgStatMod) rows.push(_row(`Modificateur ${sub(m.dmgStatLabel || '')}`, `<strong>${_signed(m.dmgStatMod)}</strong>`, { op: '◇', muted: true }));
+      if (m.dmgFormulaBonus) rows.push(_row(`Bonus de formule`, `<strong>${_signed(m.dmgFormulaBonus)}</strong>`, { op: '+', muted: true }));
       if (m.dmgMaitriseBonus > 0) rows.push(_row(`Maîtrise`, `<strong>+${m.dmgMaitriseBonus}</strong>`, { op: '✦', muted: true }));
       if (m.dmgBonus) rows.push(_row(`Bonus contextuel`, `<strong>${_signed(m.dmgBonus)}</strong>`, { op: '＋', muted: true }));
       if (m.dmgBonusDice) rows.push(_row(`Dés ajoutés à la formule`, `<strong>${_signed(m.dmgBonusDice)}</strong>`, { op: '🎲', muted: true }));
