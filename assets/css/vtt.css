@@ -11006,8 +11006,10 @@ html:not([data-theme="light"]) .vtt-root {
 }
 .vtt-rcol-tab { position: relative; }
 .vtt-rcol-tab:hover { color: var(--text); }
-/* Pastille « non lu » : message chat arrivé pendant qu'on regarde Token/Jets. */
-.vtt-rcol-tab.has-unread::after {
+/* Pastilles d'onglet. Chat « non lu » = doré (calme) ; alerte combat (un token
+   qu'on contrôle est touché) = rouge (urgent). Même point, positionné pareil. */
+.vtt-rcol-tab.has-unread::after,
+.vtt-rcol-tab.has-alert::after {
   content: '';
   position: absolute;
   top: 6px;
@@ -11015,10 +11017,12 @@ html:not([data-theme="light"]) .vtt-root {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--crimson, #ff5a7e);
   box-shadow: 0 0 0 2px var(--bg-panel);
 }
-.vtt-rcol-tab.active.has-unread::after { display: none; }
+.vtt-rcol-tab.has-unread::after { background: var(--gold, #e8b84b); }
+.vtt-rcol-tab.has-alert::after  { background: var(--crimson, #ff5a7e); }
+.vtt-rcol-tab.active.has-unread::after,
+.vtt-rcol-tab.active.has-alert::after { display: none; }
 .vtt-rcol-tab.active {
   color: var(--gold);
   border-bottom-color: var(--gold);
