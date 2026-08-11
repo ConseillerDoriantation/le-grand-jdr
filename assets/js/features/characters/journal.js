@@ -19,6 +19,7 @@ import { getCharacterById } from '../../shared/character-state.js';
 import { openModal, closeModalDirect, confirmModal } from '../../shared/modal.js';
 import { makeSortable } from '../../shared/sortable-helper.js';
 import { quillEditorHtml, bindQuillEditors } from '../../shared/rich-text-quill.js';
+import { scheduleNoteAutosave } from './tabs.js';
 import { richTextContentHtml } from '../../shared/rich-text.js';
 
 // État module-local (préservé au re-render, comme dans characters.js)
@@ -58,7 +59,7 @@ function _csV3JournalSub(sub) {
   const area = document.getElementById('char-tab-content');
   if (area) {
     area.innerHTML = renderCharJournal(c, canEdit, sub);
-    if (sub === 'notes') { bindQuillEditors(area); _bindNotesDnd(c, canEdit); }
+    if (sub === 'notes') { bindQuillEditors(area, { onUserEdit: scheduleNoteAutosave }); _bindNotesDnd(c, canEdit); }
     if (sub === 'quetes') _bindQuetesDnd(c, canEdit);
     area.querySelector(`.journal-tab[data-sub="${sub}"]`)?.focus({ preventScroll: true });
   }

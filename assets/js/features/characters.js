@@ -97,6 +97,7 @@ import {
   allocStatPoint, addXpFromInput, adjVitalBase, toggleCompteHist,
   openProfilImageUpload, removeProfilImage,
   STATS_KEYS,
+  scheduleNoteAutosave,
 } from './characters/tabs.js';
 import { bindQuillEditors } from '../shared/rich-text-quill.js';
 import { registerActions } from '../core/actions.js';
@@ -1061,7 +1062,7 @@ function _renderTabV3(tab, c, canEdit) {
   if (tab === 'profil') {
     bindCharProfilV3(area);
   }
-  if (tab === 'journal' && sub === 'notes') { bindQuillEditors(area); _bindNotesDnd(c, canEdit); }
+  if (tab === 'journal' && sub === 'notes') { bindQuillEditors(area, { onUserEdit: scheduleNoteAutosave }); _bindNotesDnd(c, canEdit); }
   if (tab === 'journal' && sub === 'quetes') _bindQuetesDnd(c, canEdit);
   if (tab === 'sorts') { _bindSortsCatDrag(c, canEdit); bindSortCardsDnd(c, canEdit); }
   if (tab === 'inv' && !isInventoryCatalogReady() && !_inventoryCatalogRefreshQueued) {
