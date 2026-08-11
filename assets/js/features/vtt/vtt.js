@@ -370,7 +370,6 @@ _vttBindDispatch();
 
 // ── État module ─────────────────────────────────────────────────────
 let _resizeObs = null;   // VS.stage, VS.layers, VS.unsubs → VS (cœur Konva/teardown partagé)
-let _vttEntered = false;   // le client a-t-il cliqué « Entrer » (listeners actifs) ?
 let _bestiaryLoads = new Map(); // beastId → Promise lecture doc ciblée
 // [VS.bstTracker → VS.bstTracker] (défaut dans vtt-state.js)
 let _attackSrc = null, _moveHL = [];   // VS.selected, VS.tool → VS ; VS.characters/VS.npcs/VS.bestiary → VS
@@ -10272,54 +10271,16 @@ function _buildHtml() {
 // ═══════════════════════════════════════════════════════════════════
 export async function renderVttPage() {
   _cleanup();
-  _vttEntered = false;                 // nouvelle navigation → re-passage par le sas
   const content=document.getElementById('main-content');
   if (!content) return;
   content.style.overflow='hidden';
   content.style.height='100vh';
   content.style.paddingBottom='0';
-  // Le MJ pilote la table → il entre directement. Les JOUEURS passent par un SAS :
-  // ils ne s'abonnent à AUCUN listener Firestore tant qu'ils n'ont pas cliqué
-  // « Entrer » → grosse économie de quota pour ceux qui ouvrent sans jouer.
-  if (STATE.isAdmin) { _vttEntered = true; return _vttMountTable(content); }
-  content.innerHTML = appSplashHtml('Connexion à la table…');
-  let _ses = {};
-  try { const _snap = await getDoc(_sesRef()); _ses = _snap.exists() ? _snap.data() : {}; } catch {}
-  // Si on a quitté la page entre-temps, ne rien afficher.
-  if (document.getElementById('main-content') !== content) return;
-  content.innerHTML = _vttGateHtml(!!_ses.live, _ses);
-}
-
-// Sas d'entrée joueur : aucun listener tant qu'on n'a pas cliqué « Entrer ».
-function _vttGateHtml(live, ses = {}) {
-  const since = live && ses.liveSince ? _vttSessionSince(ses.liveSince) : '';
-  return `<div class="vtt-gate">
-    <div class="vtt-gate-card ${live ? 'is-live' : ''}">
-      <div class="vtt-gate-ico">${live ? '🔴' : '🎲'}</div>
-      <h2 class="vtt-gate-title">${live ? 'Session de jeu en cours' : 'Table virtuelle'}</h2>
-      <p class="vtt-gate-text">${live
-        ? `Le MJ a déclaré une <b>session en cours</b>${since ? ` (démarrée ${since})` : ''}.<br>Tu peux rejoindre la table maintenant — ou revenir plus tard.`
-        : `Aucune session déclarée pour le moment.<br>Tu peux entrer pour explorer la table.`}</p>
-      <div class="vtt-gate-actions">
-        <button class="btn btn-gold" data-vtt-fn="_vttEnterTable">➡ Entrer dans la table</button>
-        <button class="btn btn-outline" data-vtt-fn="_vttGateBack">← Plus tard</button>
-      </div>
-      <p class="vtt-gate-note">💡 Tant que tu n'es pas entré, tu ne consommes aucune ressource temps réel.</p>
-    </div>
-  </div>`;
-}
-function _vttSessionSince(ts) {
-  const ms = ts?.seconds ? ts.seconds * 1000 : (typeof ts === 'number' ? ts : 0);
-  if (!ms) return '';
-  const m = Math.floor((Date.now() - ms) / 60000);
-  if (m < 1) return "à l'instant";
-  if (m < 60) return `il y a ${m} min`;
-  const h = Math.floor(m / 60);
-  return `il y a ${h} h`;
-}
-async function _vttGateBack() {
-  const { navigate } = await import('../../core/navigation.js');
-  navigate('dashboard');
+  // Plus de sas d'entrée : joueurs comme MJ arrivent DIRECTEMENT dans la table.
+  // La navigation vers le VTT est déjà un clic délibéré ; l'écran intermédiaire
+  // « Entrer dans la table » ajoutait une interaction inutile (les listeners sont
+  // libérés à la sortie de page via _cleanup).
+  return _vttMountTable(content);
 }
 async function _vttOpenSource(kind, id = '', tab = '') {
   const { navigate } = await import('../../core/navigation.js');
@@ -10362,12 +10323,6 @@ export function _vttLogSingleTargetFields(targetIds = []) {
   if (!Array.isArray(targetIds) || targetIds.length !== 1) return {};
   return _vttLogTargetFields(VS.tokens[targetIds[0]]?.data);
 }
-async function _vttEnterTable() {
-  _vttEntered = true;
-  const content = document.getElementById('main-content');
-  if (content) await _vttMountTable(content);
-}
-
 // Échappatoire du bandeau « tourne ton téléphone » : une fois rejeté, on ne le
 // ré-affiche plus de la session (persiste aux re-rendus et à la navigation SPA).
 let _vttRotateDismissed = (() => { try { return sessionStorage.getItem('vtt-rotate-dismissed') === '1'; } catch { return false; } })();
@@ -10588,8 +10543,6 @@ export const VTT_ACTIONS = {
   _hideActBar,
   _vttToggleHudCollapse,
   _aimCancel,
-  _vttEnterTable,
-  _vttGateBack,
   _vttToggleSessionLive,
   _vttUndoDraw,
   _vttRedoDraw,
