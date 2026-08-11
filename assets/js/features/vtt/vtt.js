@@ -10176,6 +10176,10 @@ function _vttRcolView(view) {
   if (view === 'chat') {
     document.querySelector('.vtt-rcol-tab[data-vtt-args="chat"]')?.classList.remove('has-unread');
   }
+  // Voir Token/Jets = l'alerte combat est prise en compte → on la retire.
+  if (view === 'inspector') {
+    document.querySelector('.vtt-rcol-tab[data-vtt-args="inspector"]')?.classList.remove('has-alert');
+  }
 }
 
 // Petit écran (rail en onglets) : sélectionner un token amène son panneau
