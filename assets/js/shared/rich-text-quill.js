@@ -100,7 +100,7 @@ export function quillEditorHtml({ id, html = '', placeholder = '', minHeight = 2
 
 /** Monte Quill sur tous les conteneurs `.rtq` non encore initialisés sous `root`.
  *  Async (charge Quill au besoin) ; les sites d'appel n'ont pas à `await`. */
-export async function bindQuillEditors(root = document) {
+export async function bindQuillEditors(root = document, { onUserEdit } = {}) {
   const els = [...(root.querySelectorAll?.('.rtq[data-rtq-id]') || [])]
     .filter(el => !el.classList.contains('rtq-bound') && !el.classList.contains('ql-container'));
   if (!els.length) return;
@@ -135,7 +135,9 @@ export async function bindQuillEditors(root = document) {
     // (nouveau DOM = wrapper neuf).
     const _wrap = el.closest('.rtq-wrap');
     q.on('text-change', (_d, _o, source) => {
-      if (source === 'user') _wrap?.setAttribute('data-quill-dirty', 'true');
+      if (source !== 'user') return;
+      _wrap?.setAttribute('data-quill-dirty', 'true');
+      if (onUserEdit) { try { onUserEdit(id, q); } catch (e) { console.error('[quill] onUserEdit', e); } }
     });
   }
   _ensureQuillUnsavedGuard();

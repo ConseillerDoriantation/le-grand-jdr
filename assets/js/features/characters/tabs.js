@@ -351,15 +351,31 @@ export async function editNoteTitle(idx) {
   });
 }
 
-export async function saveNote(idx) {
+export async function saveNote(idx, { silent = false } = {}) {
   const c = STATE.activeChar; if(!c) return;
   const html = getQuillHtml(`note-area-${idx}`);
   if (!c.notesList?.[idx]) return;
   c.notesList[idx].contenu = html;
   if (await trySave('characters', c.id, {notesList: c.notesList})) {
     markQuillSaved(`note-area-${idx}`);
-    showNotif('Note enregistrée !','success');
+    if (!silent) showNotif('Note enregistrée !','success');
   }
+}
+
+// Autosave des notes : sauvegarde silencieuse debouncée après la dernière frappe.
+// Le bouton « 💾 Enregistrer » reste dispo (sauvegarde immédiate). L'index est
+// dérivé de l'id de l'éditeur (`note-area-N`). Un timer par note (édition
+// simultanée possible).
+const _noteAutosaveTimers = new Map();
+export function scheduleNoteAutosave(id) {
+  const m = /^note-area-(\d+)$/.exec(id || '');
+  if (!m) return;
+  const key = id;
+  clearTimeout(_noteAutosaveTimers.get(key));
+  _noteAutosaveTimers.set(key, setTimeout(() => {
+    _noteAutosaveTimers.delete(key);
+    saveNote(Number(m[1]), { silent: true });
+  }, 1200));
 }
 
 export async function deleteNote(idx) {
