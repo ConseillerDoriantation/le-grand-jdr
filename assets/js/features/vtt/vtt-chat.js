@@ -773,12 +773,32 @@ export function _renderChatLogImpl(msgs) {
 
   // Anime UNIQUEMENT le dernier jet quand un NOUVEAU arrive (pas au 1er rendu,
   // pas sur une simple mise à jour). Donne de la vie à chaque résultat de dé.
-  const _newestId = msgs.length ? msgs[msgs.length - 1].id : null;
+  const _newest = msgs.length ? msgs[msgs.length - 1] : null;
+  const _newestId = _newest ? _newest.id : null;
   if (_newestId && _chatLastNewestId !== null && _newestId !== _chatLastNewestId) {
     const last = el.lastElementChild;
     if (last) {
       last.classList.add('vtt-log-enter');
       last.addEventListener('animationend', () => last.classList.remove('vtt-log-enter'), { once: true });
+    }
+    // Mode onglets (petit écran) : nouveau message alors qu'on regarde l'autre
+    // panneau → pastille « non lu » sur l'onglet Chat. Invisible si la barre
+    // d'onglets est masquée (grand écran), donc sans effet là-bas.
+    const col = document.getElementById('vtt-right-col');
+    if (col && col.dataset.rcolView !== 'chat') {
+      document.querySelector('.vtt-rcol-tab[data-vtt-args="chat"]')?.classList.add('has-unread');
+    }
+    // Alerte combat : un token que LE JOUEUR contrôle vient d'être touché alors
+    // qu'il regarde le chat → pastille rouge sur l'onglet Token/Jets. Réservée au
+    // propriétaire/délégué (pas au MJ, qui pilote le combat) pour éviter le bruit.
+    if (col && col.dataset.rcolView !== 'inspector'
+        && _newest && _newest.type === 'attack' && !_newest.isHeal
+        && Number(_newest.dmgTotal) > 0 && _newest.defenderTokenId) {
+      const uid = STATE.user?.uid;
+      const dt = VS.tokens?.[_newest.defenderTokenId]?.data;
+      const mine = uid && dt && (dt.ownerId === uid
+        || (Array.isArray(dt.controlDelegates) && dt.controlDelegates.includes(uid)));
+      if (mine) document.querySelector('.vtt-rcol-tab[data-vtt-args="inspector"]')?.classList.add('has-alert');
     }
   }
   _chatLastNewestId = _newestId;

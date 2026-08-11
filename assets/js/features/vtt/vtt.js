@@ -370,7 +370,6 @@ _vttBindDispatch();
 
 // ── État module ─────────────────────────────────────────────────────
 let _resizeObs = null;   // VS.stage, VS.layers, VS.unsubs → VS (cœur Konva/teardown partagé)
-let _vttEntered = false;   // le client a-t-il cliqué « Entrer » (listeners actifs) ?
 let _bestiaryLoads = new Map(); // beastId → Promise lecture doc ciblée
 // [VS.bstTracker → VS.bstTracker] (défaut dans vtt-state.js)
 let _attackSrc = null, _moveHL = [];   // VS.selected, VS.tool → VS ; VS.characters/VS.npcs/VS.bestiary → VS
@@ -1559,6 +1558,7 @@ export function _select(id) {
   VS.layers.token.batchDraw();
   const data=VS.tokens[id]?.data;
   _renderInspector(data??null);
+  if (data) _vttFocusInspectorIfTabbed();
   // Clic sur un token allié/propre : portée de déplacement (bleu) + portée d'attaque (rouge)
   if (data && _canControlToken(data)) {
     _showMoveRange(data);    // cases bleues cliquables (déplacement)
@@ -10157,6 +10157,42 @@ function _keyHandler(e) {
 // ═══════════════════════════════════════════════════════════════════
 // HTML
 // ═══════════════════════════════════════════════════════════════════
+// Rail droit : sur écran à faible hauteur, l'inspecteur (Token/Jets) et le chat
+// empilés deviennent inutilisables. On les transforme alors en un panneau à
+// onglets — un seul visible, pleine hauteur — sans ajouter de fenêtre. Choix
+// mémorisé. Sur grand écran, le CSS ignore cet état et garde les deux empilés.
+let _rcolView = 'inspector';
+try { const v = localStorage.getItem('vtt-rcol-view'); if (v === 'chat' || v === 'inspector') _rcolView = v; } catch {}
+function _vttRcolView(view) {
+  if (view !== 'chat' && view !== 'inspector') return;
+  _rcolView = view;
+  try { localStorage.setItem('vtt-rcol-view', view); } catch {}
+  const col = document.getElementById('vtt-right-col');
+  if (col) col.dataset.rcolView = view;
+  document.querySelectorAll('.vtt-rcol-tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.vttArgs === view));
+  // Voir le chat = tout est lu → on retire la pastille « non lu ».
+  if (view === 'chat') {
+    document.querySelector('.vtt-rcol-tab[data-vtt-args="chat"]')?.classList.remove('has-unread');
+  }
+  // Voir Token/Jets = l'alerte combat est prise en compte → on la retire.
+  if (view === 'inspector') {
+    document.querySelector('.vtt-rcol-tab[data-vtt-args="inspector"]')?.classList.remove('has-alert');
+  }
+}
+
+// Petit écran (rail en onglets) : sélectionner un token amène son panneau
+// Token/Jets devant, comme on s'y attend. Ne fait rien sur grand écran (barre
+// masquée) et n'interrompt jamais une saisie de chat en cours.
+function _vttFocusInspectorIfTabbed() {
+  const col = document.getElementById('vtt-right-col');
+  if (!col || col.dataset.rcolView === 'inspector') return;
+  const tabs = col.querySelector('.vtt-rcol-tabs');
+  if (!tabs || getComputedStyle(tabs).display === 'none') return;
+  if (document.activeElement?.id === 'vtt-chat-input') return;
+  _vttRcolView('inspector');
+}
+
 function _buildHtml() {
   const mj=STATE.isAdmin;
   return `
@@ -10205,7 +10241,11 @@ function _buildHtml() {
       </div>
     </div>`:''}
     <div class="vtt-canvas-wrap" id="vtt-canvas-wrap"></div>
-    <div class="vtt-right-col" id="vtt-right-col">
+    <div class="vtt-right-col" id="vtt-right-col" data-rcol-view="${_rcolView}">
+      <div class="vtt-rcol-tabs" role="tablist" aria-label="Panneau latéral">
+        <button class="vtt-rcol-tab${_rcolView==='inspector'?' active':''}" type="button" role="tab" data-vtt-fn="_vttRcolView" data-vtt-args="inspector">🎲 Token / Jets</button>
+        <button class="vtt-rcol-tab${_rcolView==='chat'?' active':''}" type="button" role="tab" data-vtt-fn="_vttRcolView" data-vtt-args="chat">💬 Chat</button>
+      </div>
       <div class="vtt-inspector" id="vtt-inspector">
         <div class="vtt-ins-empty"><div style="font-size:1.8rem">🎲</div>Sélectionne un token</div>
       </div>
@@ -10231,54 +10271,16 @@ function _buildHtml() {
 // ═══════════════════════════════════════════════════════════════════
 export async function renderVttPage() {
   _cleanup();
-  _vttEntered = false;                 // nouvelle navigation → re-passage par le sas
   const content=document.getElementById('main-content');
   if (!content) return;
   content.style.overflow='hidden';
   content.style.height='100vh';
   content.style.paddingBottom='0';
-  // Le MJ pilote la table → il entre directement. Les JOUEURS passent par un SAS :
-  // ils ne s'abonnent à AUCUN listener Firestore tant qu'ils n'ont pas cliqué
-  // « Entrer » → grosse économie de quota pour ceux qui ouvrent sans jouer.
-  if (STATE.isAdmin) { _vttEntered = true; return _vttMountTable(content); }
-  content.innerHTML = appSplashHtml('Connexion à la table…');
-  let _ses = {};
-  try { const _snap = await getDoc(_sesRef()); _ses = _snap.exists() ? _snap.data() : {}; } catch {}
-  // Si on a quitté la page entre-temps, ne rien afficher.
-  if (document.getElementById('main-content') !== content) return;
-  content.innerHTML = _vttGateHtml(!!_ses.live, _ses);
-}
-
-// Sas d'entrée joueur : aucun listener tant qu'on n'a pas cliqué « Entrer ».
-function _vttGateHtml(live, ses = {}) {
-  const since = live && ses.liveSince ? _vttSessionSince(ses.liveSince) : '';
-  return `<div class="vtt-gate">
-    <div class="vtt-gate-card ${live ? 'is-live' : ''}">
-      <div class="vtt-gate-ico">${live ? '🔴' : '🎲'}</div>
-      <h2 class="vtt-gate-title">${live ? 'Session de jeu en cours' : 'Table virtuelle'}</h2>
-      <p class="vtt-gate-text">${live
-        ? `Le MJ a déclaré une <b>session en cours</b>${since ? ` (démarrée ${since})` : ''}.<br>Tu peux rejoindre la table maintenant — ou revenir plus tard.`
-        : `Aucune session déclarée pour le moment.<br>Tu peux entrer pour explorer la table.`}</p>
-      <div class="vtt-gate-actions">
-        <button class="btn btn-gold" data-vtt-fn="_vttEnterTable">➡ Entrer dans la table</button>
-        <button class="btn btn-outline" data-vtt-fn="_vttGateBack">← Plus tard</button>
-      </div>
-      <p class="vtt-gate-note">💡 Tant que tu n'es pas entré, tu ne consommes aucune ressource temps réel.</p>
-    </div>
-  </div>`;
-}
-function _vttSessionSince(ts) {
-  const ms = ts?.seconds ? ts.seconds * 1000 : (typeof ts === 'number' ? ts : 0);
-  if (!ms) return '';
-  const m = Math.floor((Date.now() - ms) / 60000);
-  if (m < 1) return "à l'instant";
-  if (m < 60) return `il y a ${m} min`;
-  const h = Math.floor(m / 60);
-  return `il y a ${h} h`;
-}
-async function _vttGateBack() {
-  const { navigate } = await import('../../core/navigation.js');
-  navigate('dashboard');
+  // Plus de sas d'entrée : joueurs comme MJ arrivent DIRECTEMENT dans la table.
+  // La navigation vers le VTT est déjà un clic délibéré ; l'écran intermédiaire
+  // « Entrer dans la table » ajoutait une interaction inutile (les listeners sont
+  // libérés à la sortie de page via _cleanup).
+  return _vttMountTable(content);
 }
 async function _vttOpenSource(kind, id = '', tab = '') {
   const { navigate } = await import('../../core/navigation.js');
@@ -10321,12 +10323,6 @@ export function _vttLogSingleTargetFields(targetIds = []) {
   if (!Array.isArray(targetIds) || targetIds.length !== 1) return {};
   return _vttLogTargetFields(VS.tokens[targetIds[0]]?.data);
 }
-async function _vttEnterTable() {
-  _vttEntered = true;
-  const content = document.getElementById('main-content');
-  if (content) await _vttMountTable(content);
-}
-
 // Échappatoire du bandeau « tourne ton téléphone » : une fois rejeté, on ne le
 // ré-affiche plus de la session (persiste aux re-rendus et à la navigation SPA).
 let _vttRotateDismissed = (() => { try { return sessionStorage.getItem('vtt-rotate-dismissed') === '1'; } catch { return false; } })();
@@ -10547,8 +10543,6 @@ export const VTT_ACTIONS = {
   _hideActBar,
   _vttToggleHudCollapse,
   _aimCancel,
-  _vttEnterTable,
-  _vttGateBack,
   _vttToggleSessionLive,
   _vttUndoDraw,
   _vttRedoDraw,
@@ -10661,6 +10655,7 @@ export const VTT_ACTIONS = {
   _vttImportGithubRelease,
   _vttInsTab,
   _vttOpenSource,
+  _vttRcolView,
   _vttSkillFilter,
   _vttSkillFilterClear,
   _vttSwitchCharacterBuild,
