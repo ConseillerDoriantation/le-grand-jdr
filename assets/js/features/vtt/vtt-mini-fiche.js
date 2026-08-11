@@ -1268,7 +1268,12 @@ async function _vttMsCraft(charId, uid, recipeId) {
   const d20    = Math.floor(Math.random() * 20) + 1;
   const total  = d20 + mod;
   const passed = d20 !== 1 && (d20 === 20 || total >= _MS_CRAFT_DD);
-  await bumpSkill(c.id, c.nom || '', 'Artisanat', { crit: d20 === 20, fumble: d20 === 1 });
+  await bumpSkill(c.id, c.nom || '', 'Artisanat', {
+    crit: d20 === 20,
+    fumble: d20 === 1,
+    natural: d20,
+    total,
+  });
 
   // 3) Nouvel inventaire (ingrédients retirés) + objet appendé si réussite & objet lié.
   const removedIdx = [...removedSet];

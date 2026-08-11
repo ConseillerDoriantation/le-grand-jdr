@@ -140,7 +140,12 @@ export async function _vttRollSkill(skillName, stat) {
   } catch(e) { showNotif('Erreur jet : ' + e.message, 'error'); }
   // Statistiques : compte le jet de compétence (PJ uniquement) + crit/échec.
   // t.characterId = id fiable (VS.characters[...] ne porte pas forcément .id).
-  if (c && t.characterId) bumpSkill(t.characterId, characterName, skillName, { crit: isCrit, fumble: isFumble });
+  if (c && t.characterId) bumpSkill(t.characterId, characterName, skillName, {
+    crit: isCrit,
+    fumble: isFumble,
+    natural: roll,
+    total,
+  });
 }
 
 export async function _saveEmotes(list) {

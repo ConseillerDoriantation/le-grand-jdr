@@ -22,7 +22,7 @@ import {
   collection, collectionGroup, getDocs,
   addDoc, updateDoc, deleteDoc,
   onSnapshot,
-  query, where,
+  query, where, orderBy, limit,
   writeBatch, Timestamp,
 } from '../config/firebase.js';
 
@@ -74,6 +74,7 @@ const _CACHE_TTL = {
   players:            30 * 60_000,
   collectionSettings: 30 * 60_000,
   achievements_meta:  30 * 60_000,
+  vttLog:             30 * 60_000,  // historique borné utilisé seulement pour le rattrapage des moyennes
   // Aventures — TTL moyen (structure change rarement en session)
   adventures:         60_000,
 };
@@ -716,6 +717,34 @@ export async function loadCollectionWhere(col, field, op, value) {
       return data;
     } catch (e) {
       _handleFirestoreError(e, `loadCollectionWhere(${path})`);
+      return [];
+    } finally {
+      _inflight.delete(key);
+    }
+  })();
+  _inflight.set(key, promise);
+  return promise;
+}
+
+// Charge uniquement les documents les plus récents d'une collection volumineuse.
+// Le résultat passe par le même cache TTL et le même coalescing que les autres
+// lectures afin que revenir sur une page ne refacture pas immédiatement le journal.
+export async function loadRecentCollection(col, { field = 'createdAt', max = 500 } = {}) {
+  const path = _colPath(col);
+  const safeMax = Math.max(1, Math.min(1000, Math.trunc(Number(max) || 500)));
+  const safeField = String(field || 'createdAt');
+  const key = `${path}:recent:${safeField}:${safeMax}`;
+  const cached = _cacheGet(key);
+  if (cached) return cached;
+  if (_inflight.has(key)) return _inflight.get(key);
+  const promise = (async () => {
+    try {
+      const snap = await getDocs(query(collection(db, path), orderBy(safeField, 'desc'), limit(safeMax)));
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      _cacheSet(key, data);
+      return data;
+    } catch (e) {
+      _handleFirestoreError(e, `loadRecentCollection(${path})`);
       return [];
     } finally {
       _inflight.delete(key);
