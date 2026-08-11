@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runeCount, calcSpellTargets, calcSpellDuration } from '../assets/js/shared/spell-runes.js';
+import { runeCount, calcSpellTargets, calcSpellDuration, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
 
 const sort = (runes = [], extra = {}) => ({ runes, ...extra });
 
@@ -8,6 +8,12 @@ test('runeCount compte les occurrences d’une rune', () => {
   assert.equal(runeCount(sort(['Puissance', 'Puissance', 'Durée']), 'Puissance'), 2);
   assert.equal(runeCount(sort([]), 'Puissance'), 0);
   assert.equal(runeCount({}, 'Puissance'), 0);
+});
+
+test('la maîtrise reste active par défaut et se désactive explicitement', () => {
+  assert.equal(usesSpellMastery({}), true, 'rétrocompatibilité des anciens sorts');
+  assert.equal(usesSpellMastery({ maitriseActive: true }), true);
+  assert.equal(usesSpellMastery({ maitriseActive: false }), false);
 });
 
 test('calcSpellTargets : Dispersion pilote le nombre de cibles (1 + nbDisp)', () => {

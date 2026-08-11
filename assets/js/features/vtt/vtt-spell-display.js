@@ -9,6 +9,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { getMainWeapon, DEFAULT_UNARMED } from '../../shared/equipment-utils.js';
 import { getMaitriseBonus, getMod } from '../../shared/char-stats.js';
+import { usesSpellMastery } from '../../shared/spell-runes.js';
 import { VS } from './vtt-state.js';
 
 // Rune virtuelle d'action (Réaction / Action Bonus condensées à l'affichage).
@@ -46,7 +47,7 @@ export function _effectDisplay(opt, formula, fixed = 0) {
 /**
  * Formule de dégâts calculée d'un sort offensif.
  * Miroir local de _calcSortDegats (spells.js) — évite le cross-import.
- * Inclut : dés de base + runes Puissance + maîtrise arme principale.
+ * Inclut : dés de base + runes Puissance + maîtrise arme principale si active.
  */
 export function _vttSortDmgFormula(s, c, opts = {}) {
   if (s?.designMode === 'classic' && s?.classicFormulaFinal) return (s?.degats || '').trim();
@@ -61,7 +62,7 @@ export function _vttSortDmgFormula(s, c, opts = {}) {
   // Seule la Puissance ajoute des dés. La Protection ne sert qu'au drain % — elle
   // NE double PAS les dégâts (bug : le combo Drain affichait 2d10 au lieu de 1d10).
   // Aligne strictement avec _calcSortDegats du sheet.
-  const maitrise = getMaitriseBonus(c, mainP || {});
+  const maitrise = usesSpellMastery(s) ? getMaitriseBonus(c, mainP || {}) : 0;
   const m = base.match(/^(\d+)(d\d+)(.*)$/i);
   if (m) {
     let r = `${parseInt(m[1]) + nbPuiss}${m[2]}${m[3]}`;
@@ -77,7 +78,7 @@ export function _vttSortDmgFormula(s, c, opts = {}) {
 /**
  * Formule de soin calculée d'un sort défensif (mode soin).
  * Miroir local de _calcSortSoin (spells.js).
- * Inclut : 1d4 base + runes Protection + maîtrise + mod de stat.
+ * Inclut : 1d4 base + runes Protection + maîtrise si active + mod de stat.
  * Stat utilisée :
  *  - Noyau magique avec arme magique équipée → stat d'attaque de l'arme
  *  - Noyau magique sans arme magique (Poings) → Intelligence
@@ -87,7 +88,7 @@ export function _vttSortSoinFormula(s, c) {
   if (s?.designMode === 'classic' && s?.classicFormulaFinal) return (s?.soin || '').trim();
   // Aligne sur le sheet : getMainWeapon retourne Poings par défaut si vide.
   const mainP    = c ? getMainWeapon(c) : null;
-  const maitrise = getMaitriseBonus(c, mainP || {});
+  const maitrise = usesSpellMastery(s) ? getMaitriseBonus(c, mainP || {}) : 0;
   const runes    = s.runes || [];
   const nbProt   = runes.filter(r => r === 'Protection').length;
   const base     = (s.soin || '').trim();

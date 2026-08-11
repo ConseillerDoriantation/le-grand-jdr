@@ -2,6 +2,14 @@ export function runeCount(spell = {}, runeName) {
   return (spell?.runes || []).filter(r => r === runeName).length;
 }
 
+/**
+ * Les anciens sorts n'ont pas ce champ : ils conservent donc la maîtrise.
+ * Seule la valeur explicite `false` la désactive.
+ */
+export function usesSpellMastery(spell = {}) {
+  return spell?.maitriseActive !== false;
+}
+
 export function calcSpellTargets(spell = {}) {
   if (spell?.designMode === 'classic') return 1;
   const nbDisp = runeCount(spell, 'Dispersion');

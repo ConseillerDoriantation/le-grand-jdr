@@ -160,3 +160,31 @@ test('un échec d’enregistrement annule l’autorisation et conserve la garde'
   clearAutomaticModalCloseGuard();
   closeModalDirect();
 });
+
+test('une garde métier remplace la garde automatique au lieu de confirmer deux fois', () => {
+  openModal('Forge de sorts', '<form>sort modifié</form>');
+  let automaticCalls = 0;
+  let explicitCalls = 0;
+
+  setAutomaticModalCloseGuard(() => {
+    automaticCalls += 1;
+    return true;
+  });
+  setModalCloseGuard(() => {
+    explicitCalls += 1;
+    return true;
+  });
+  // Une tentative tardive de réarmement QoL doit aussi être ignorée.
+  setAutomaticModalCloseGuard(() => {
+    automaticCalls += 1;
+    return true;
+  });
+
+  closeModalDirect();
+
+  assert.equal(explicitCalls, 1);
+  assert.equal(automaticCalls, 0);
+  assert.equal(overlay.classList.contains('show'), true);
+  clearModalCloseGuard();
+  closeModalDirect();
+});

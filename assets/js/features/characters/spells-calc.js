@@ -10,7 +10,7 @@ import { charSession } from '../../shared/char-session.js';
 import { getMaitriseBonus as getSharedMaitriseBonus, getMod, statShort } from '../../shared/char-stats.js';
 import { getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getMainWeapon } from './data.js';
-import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, usesSpellMastery } from '../../shared/spell-runes.js';
 // Cœurs purs extraits (testables à froid). Ré-exportés plus bas pour l'API publique.
 import {
   _calcAfflictionDot, _autoSourceAfflictionDot, _calcEnchantDegats,
@@ -133,8 +133,8 @@ export function _calcSortDegats(s, c) {
   const runes   = s.runes || [];
   const nbPuiss = runes.filter(r => r === 'Puissance').length;
 
-  // Bonus de maîtrise de l'arme principale (toujours appliqué)
-  const maitrise = getSharedMaitriseBonus(c, mainP);
+  // Bonus de maîtrise de l'arme principale, désactivable sort par sort.
+  const maitrise = usesSpellMastery(s) ? getSharedMaitriseBonus(c, mainP) : 0;
 
   const match = base.match(/^(\d+)(d\d+)(.*)$/i);
   if (match) {
@@ -180,7 +180,7 @@ export function _calcSortSoin(s, c) {
 
   // Maîtrise de l'arme : pertinente uniquement pour les sorts magiques (l'arme est le focus)
   const mainP   = getMainWeapon(c);
-  const maitrise = isMagic ? getSharedMaitriseBonus(c, mainP) : 0;
+  const maitrise = isMagic && usesSpellMastery(s) ? getSharedMaitriseBonus(c, mainP) : 0;
   const maitriseStr = maitrise > 0 ? ` +${maitrise}` : maitrise < 0 ? ` ${maitrise}` : '';
 
   const buildDefault = (diceCount) => {
@@ -242,7 +242,7 @@ function _calcImpactDisplayParts(s, c) {
   const statVal = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
   const statMod = Math.floor((Math.min(22, statVal) - 10) / 2);
   const statLbl = statShort(statKey) || statKey.slice(0, 3);
-  const maitrise = getSharedMaitriseBonus(c, mainP);
+  const maitrise = usesSpellMastery(s) ? getSharedMaitriseBonus(c, mainP) : 0;
   const { dice, tail } = _splitDiceBase(_scaleDiceFormulaDice(base, nbPuiss));
   const hasDerivedFlat = statMod !== 0 || maitrise !== 0;
   const pieces = [dice];
@@ -269,7 +269,7 @@ function _calcHealDisplayParts(s, c) {
   const statMod = noMod ? 0 : Math.floor((Math.min(22, statVal) - 10) / 2);
   const statLbl = noMod ? '' : (statShort(statKey) || statKey.slice(0, 3));
   const mainP = getMainWeapon(c);
-  const maitrise = (!noMod && _isNoyauMagic(s)) ? getSharedMaitriseBonus(c, mainP) : 0;
+  const maitrise = (!noMod && _isNoyauMagic(s) && usesSpellMastery(s)) ? getSharedMaitriseBonus(c, mainP) : 0;
   const diceCountBonus = isDefault || nbProt > 0 ? nbProt : 0;
   const scaled = _scaleDiceFormulaDice(base, diceCountBonus);
   const { dice, tail } = _splitDiceBase(scaled);
@@ -496,6 +496,7 @@ export function _autoSourceDegats(s, c) {
   const srcLbl  = s?.degatsStat ? `stat sort (${statLbl})` : statLbl;
   const parts   = [mainP.isDefault ? `Poings ${mainP.degats}` : (mainP.nom || 'arme'), srcLbl];
   if (nbP > 0) parts.push(`Puissance ×${nbP}`);
+  if (!usesSpellMastery(s)) parts.push('sans maîtrise');
   return `auto · ${parts.join(' + ')}`;
 }
 export function _autoSourceSoin(s, c) {
@@ -507,9 +508,10 @@ export function _autoSourceSoin(s, c) {
   const natureStr = s?.degatsStat
     ? `stat sort (${statLbl})`
     : (isMagic ? `magique · stat arme (${statLbl})` : `physique · Constitution (${statLbl})`);
+  const masteryStr = usesSpellMastery(s) ? '' : ' · sans maîtrise';
   return nbProt > 0
-    ? `auto · base 1d4 +${nbProt}d4 (Protection) · ${natureStr}`
-    : `auto · base 1d4 · ${natureStr}`;
+    ? `auto · base 1d4 +${nbProt}d4 (Protection) · ${natureStr}${masteryStr}`
+    : `auto · base 1d4 · ${natureStr}${masteryStr}`;
 }
 export function _autoSourceCA(s) {
   const nbProt = (s.runes||[]).filter(r => r === 'Protection').length;

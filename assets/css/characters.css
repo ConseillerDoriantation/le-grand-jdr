@@ -2684,6 +2684,75 @@ input[type=number].input-field::-webkit-outer-spin-button {
   font-size: 0.78rem;
   padding: 0.25rem 0.4rem;
 }
+.cs-spell-mastery-option {
+  position: relative;
+  margin-top: .45rem;
+  padding: .5rem .6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,.018);
+  transition: background .18s ease, border-color .18s ease;
+}
+.cs-spell-mastery-option.is-on {
+  border-color: rgba(232,184,75,.28);
+  background: rgba(232,184,75,.055);
+}
+.cs-spell-mastery-option > label {
+  display: flex;
+  align-items: flex-start;
+  gap: .6rem;
+  margin: 0;
+  cursor: pointer;
+}
+.cs-spell-mastery-option input {
+  position: absolute;
+  top: .5rem;
+  left: .6rem;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  opacity: 0;
+  z-index: 1;
+  cursor: pointer;
+}
+.cs-spell-mastery-option input:focus-visible + .cs-mj-validation-switch {
+  outline: 2px solid #e8b84b;
+  outline-offset: 2px;
+}
+.cs-spell-mastery-option .cs-mj-validation-switch { margin-top: 1px; }
+.cs-spell-mastery-option.is-on .cs-mj-validation-switch {
+  border-color: rgba(232,184,75,.55);
+  background: linear-gradient(135deg, #e8b84b, #c98a24);
+}
+.cs-spell-mastery-option.is-on .cs-mj-validation-thumb { left: 18px; }
+.cs-spell-mastery-copy { flex: 1; min-width: 0; }
+.cs-spell-mastery-copy b,
+.cs-spell-mastery-copy small { display: block; }
+.cs-spell-mastery-copy b { color: var(--text); font-size: .72rem; }
+.cs-spell-mastery-copy small {
+  margin-top: 2px;
+  color: var(--text-dim);
+  font-size: .64rem;
+  line-height: 1.35;
+}
+.cs-spell-mastery-state {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: .2rem .42rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,.055);
+  color: var(--text-dim);
+  font-size: .62rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.cs-spell-mastery-option.is-on .cs-spell-mastery-state {
+  background: rgba(232,184,75,.12);
+  color: #e8b84b;
+}
+@media (max-width: 420px) {
+  .cs-spell-mastery-state { display: none; }
+}
 .cs-spell-autoval-label {
   font-size: 0.74rem;
   font-weight: 600;
@@ -2748,6 +2817,12 @@ input[type=number].input-field::-webkit-outer-spin-button {
 [data-theme="light"] .cs-spell-autoval-btn {
   background: #f4f6fa;
   border-color: rgba(0,0,0,0.10);
+}
+[data-theme="light"] .cs-spell-mastery-option {
+  border-color: rgba(180,83,9,.2);
+}
+[data-theme="light"] .cs-spell-mastery-option.is-on {
+  background: rgba(217,119,6,.055);
 }
 [data-theme="light"] .cs-rune-pick-item { background: #f4f6fa; border-color: rgba(0,0,0,0.08); }
 
