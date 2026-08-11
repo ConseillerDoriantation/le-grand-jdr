@@ -7,7 +7,7 @@ import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { modStr, _esc, normalizeImageUrl } from '../../shared/html.js';
 import { getMod, calcPVMax, calcPMMax, calcOr, calcPalier } from '../../shared/char-stats.js';
 import { richTextContentHtml } from '../../shared/rich-text.js';
-import { quillEditorHtml, getQuillHtml } from '../../shared/rich-text-quill.js';
+import { quillEditorHtml, getQuillHtml, markQuillSaved } from '../../shared/rich-text-quill.js';
 import { uploadJpeg } from '../../shared/image-upload.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import { saveBuildPatch } from '../../shared/character-builds.js';
@@ -356,7 +356,10 @@ export async function saveNote(idx) {
   const html = getQuillHtml(`note-area-${idx}`);
   if (!c.notesList?.[idx]) return;
   c.notesList[idx].contenu = html;
-  if (await trySave('characters', c.id, {notesList: c.notesList})) showNotif('Note enregistrée !','success');
+  if (await trySave('characters', c.id, {notesList: c.notesList})) {
+    markQuillSaved(`note-area-${idx}`);
+    showNotif('Note enregistrée !','success');
+  }
 }
 
 export async function deleteNote(idx) {

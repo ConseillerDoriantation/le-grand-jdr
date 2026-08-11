@@ -129,7 +129,33 @@ export async function bindQuillEditors(root = document) {
       ? (range, files) => { [...files].forEach(f => _uploadAndInsertImage(q, f, range)); }
       : () => {};
     if (id) _instances.set(id, q);
+    // Suivi « modifications non enregistrées » : une édition utilisateur marque
+    // le wrapper. La garde de navigation (_canLeaveCurrentPage) et beforeunload
+    // s'y accrochent. Nettoyé à la sauvegarde (markQuillSaved) ou au re-render
+    // (nouveau DOM = wrapper neuf).
+    const _wrap = el.closest('.rtq-wrap');
+    q.on('text-change', (_d, _o, source) => {
+      if (source === 'user') _wrap?.setAttribute('data-quill-dirty', 'true');
+    });
   }
+  _ensureQuillUnsavedGuard();
+}
+
+// Marque un éditeur comme sauvegardé (retire le drapeau « non enregistré »).
+export function markQuillSaved(id) {
+  _instances.get(id)?.root?.closest('.rtq-wrap')?.removeAttribute('data-quill-dirty');
+}
+
+let _quillGuardBound = false;
+function _ensureQuillUnsavedGuard() {
+  if (_quillGuardBound || typeof window === 'undefined') return;
+  _quillGuardBound = true;
+  window.addEventListener('beforeunload', (event) => {
+    if (document.querySelector('[data-quill-dirty="true"]')) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
 }
 
 // Quill 2 sort des listes au format `<ol><li data-list="bullet">` (rendu en
