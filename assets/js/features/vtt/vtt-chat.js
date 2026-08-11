@@ -791,14 +791,22 @@ export function _renderChatLogImpl(msgs) {
     // Alerte combat : un token que LE JOUEUR contrôle vient d'être touché alors
     // qu'il regarde le chat → pastille rouge sur l'onglet Token/Jets. Réservée au
     // propriétaire/délégué (pas au MJ, qui pilote le combat) pour éviter le bruit.
-    if (col && col.dataset.rcolView !== 'inspector'
-        && _newest && _newest.type === 'attack' && !_newest.isHeal
-        && Number(_newest.dmgTotal) > 0 && _newest.defenderTokenId) {
+    // Couvre l'attaque simple ET l'attaque multi-cibles (une cible à moi suffit).
+    if (col && col.dataset.rcolView !== 'inspector' && _newest && !_newest.isHeal) {
       const uid = STATE.user?.uid;
-      const dt = VS.tokens?.[_newest.defenderTokenId]?.data;
-      const mine = uid && dt && (dt.ownerId === uid
-        || (Array.isArray(dt.controlDelegates) && dt.controlDelegates.includes(uid)));
-      if (mine) document.querySelector('.vtt-rcol-tab[data-vtt-args="inspector"]')?.classList.add('has-alert');
+      const _ownsToken = (tid) => {
+        const d = tid && VS.tokens?.[tid]?.data;
+        return uid && d && (d.ownerId === uid
+          || (Array.isArray(d.controlDelegates) && d.controlDelegates.includes(uid)));
+      };
+      let _hitMine = false;
+      if (_newest.type === 'attack') {
+        _hitMine = Number(_newest.dmgTotal) > 0 && _ownsToken(_newest.defenderTokenId);
+      } else if (_newest.type === 'attack-multi' && Array.isArray(_newest.targets)) {
+        _hitMine = _newest.targets.some(t =>
+          t && (t.hit || t.halfDmg) && Number(t.dmgTotal) > 0 && _ownsToken(t.tokenId));
+      }
+      if (_hitMine) document.querySelector('.vtt-rcol-tab[data-vtt-args="inspector"]')?.classList.add('has-alert');
     }
   }
   _chatLastNewestId = _newestId;
