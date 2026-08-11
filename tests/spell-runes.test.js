@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runeCount, calcSpellTargets, calcSpellDuration, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
+import { runeCount, calcSpellTargets, calcSpellDuration, resolveSpellModifierStat, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
 
 const sort = (runes = [], extra = {}) => ({ runes, ...extra });
 
@@ -14,6 +14,12 @@ test('la maîtrise reste active par défaut et se désactive explicitement', () 
   assert.equal(usesSpellMastery({}), true, 'rétrocompatibilité des anciens sorts');
   assert.equal(usesSpellMastery({ maitriseActive: true }), true);
   assert.equal(usesSpellMastery({ maitriseActive: false }), false);
+});
+
+test('une statistique explicitement désactivée ne retombe pas sur celle de l’arme', () => {
+  assert.equal(resolveSpellModifierStat({}, 'degatsStat', 'intelligence'), 'intelligence');
+  assert.equal(resolveSpellModifierStat({ degatsStat: 'force' }, 'degatsStat', 'intelligence'), 'force');
+  assert.equal(resolveSpellModifierStat({ degatsStat: 'none' }, 'degatsStat', 'intelligence'), null);
 });
 
 test('calcSpellTargets : Dispersion pilote le nombre de cibles (1 + nbDisp)', () => {

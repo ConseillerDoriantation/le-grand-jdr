@@ -15,7 +15,7 @@ import { makeSortable } from '../../shared/sortable-helper.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
-import { usesSpellMastery } from '../../shared/spell-runes.js';
+import { resolveSpellModifierStat, usesSpellMastery } from '../../shared/spell-runes.js';
 import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds } from './spells-calc.js';
 
 let _sortsSearch = '';
@@ -1513,14 +1513,15 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   };
   const acfg = ACTION_CFG[action] || ACTION_CFG.action;
 
-  // Modificateur de l'arme principale + maîtrise (Poings 2d4+Force si vide)
+  // Stat de dégâts du sort : override explicite > arme, sauf « aucune ».
   const mainP   = getMainWeapon(c);
-  const statKey = mainP.statAttaque || mainP.toucherStat || 'force';
-  const statVal = (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0);
-  const statMod = Math.floor((Math.min(22, statVal) - 10) / 2);
-  const statLbl = { force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || statKey.slice(0,3);
+  const statKey = resolveSpellModifierStat(s, 'degatsStat', mainP.statAttaque || mainP.toucherStat || 'force');
+  const statVal = statKey ? (c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0) : 10;
+  const statMod = statKey ? Math.floor((Math.min(22, statVal) - 10) / 2) : 0;
+  const statLbl = statKey
+    ? ({ force:'For', dexterite:'Dex', intelligence:'Int', constitution:'Con', sagesse:'Sag', charisme:'Cha' }[statKey] || statKey.slice(0,3))
+    : '';
   const statModS = statMod >= 0 ? `+${statMod}` : `${statMod}`;
-  const maitrise = getSharedMaitriseBonus(c, mainP || {});
 
   // ── Détection des modes "sans dégâts d'impact" ─────────────────────
   const hasEnchant    = runesAll.includes('Enchantement');
