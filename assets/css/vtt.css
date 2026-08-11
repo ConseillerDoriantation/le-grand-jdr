@@ -11004,7 +11004,21 @@ html:not([data-theme="light"]) .vtt-root {
   cursor: pointer;
   white-space: nowrap;
 }
+.vtt-rcol-tab { position: relative; }
 .vtt-rcol-tab:hover { color: var(--text); }
+/* Pastille « non lu » : message chat arrivé pendant qu'on regarde Token/Jets. */
+.vtt-rcol-tab.has-unread::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--crimson, #ff5a7e);
+  box-shadow: 0 0 0 2px var(--bg-panel);
+}
+.vtt-rcol-tab.active.has-unread::after { display: none; }
 .vtt-rcol-tab.active {
   color: var(--gold);
   border-bottom-color: var(--gold);
