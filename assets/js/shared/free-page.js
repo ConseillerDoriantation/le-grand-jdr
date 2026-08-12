@@ -7,8 +7,8 @@ import { lsJson } from './local-storage.js';
 
 const PAGE_WIDTH = 1000;
 const DEFAULT_HEIGHT = 650;
-const MIN_PAGE_HEIGHT = 350;
-const MAX_PAGE_HEIGHT = 1800;
+const MIN_PAGE_HEIGHT = 240;
+const MAX_PAGE_HEIGHT = 5000;
 const SLIDE_FORMATS = [
   { id: 'default', label: 'Classique', width: 1000, height: 650 },
   { id: 'landscape', label: 'Paysage 16:9', width: 1600, height: 900 },
@@ -146,23 +146,26 @@ let sharedFreePageSlideClipboard = null;
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, Number(value) || 0));
 const OFFSTAGE_HANDLE_MARGIN = 24;
-function blockXBounds(width = 1) {
+function blockXBounds(width = 1, pageWidth = PAGE_WIDTH) {
   const w = Math.max(1, Number(width) || 1);
   const margin = Math.min(OFFSTAGE_HANDLE_MARGIN, w);
-  return { min: -w + margin, max: PAGE_WIDTH - margin };
+  return { min: -w + margin, max: pageWidth - margin };
 }
 function blockYBounds(height = 1, pageHeight = DEFAULT_HEIGHT) {
   const h = Math.max(1, Number(height) || 1);
   const margin = Math.min(OFFSTAGE_HANDLE_MARGIN, h);
   return { min: -h + margin, max: pageHeight - margin };
 }
-function clampBlockX(x, width) {
-  const bounds = blockXBounds(width);
+function clampBlockX(x, width, pageWidth = PAGE_WIDTH) {
+  const bounds = blockXBounds(width, pageWidth);
   return clamp(x, bounds.min, bounds.max);
 }
 function clampBlockY(y, height, pageHeight = DEFAULT_HEIGHT) {
   const bounds = blockYBounds(height, pageHeight);
   return clamp(y, bounds.min, bounds.max);
+}
+function editorPageWidth(editor) {
+  return editor?.__freePageState?.width || PAGE_WIDTH;
 }
 const normalizeRotation = (value) => {
   let angle = Number(value) || 0;
@@ -271,7 +274,7 @@ function normalizeAnimation(raw) {
   };
 }
 
-function normalizeSlide(raw, index = 0, { legacyHtml = '', assets = null, targetHeight = null } = {}) {
+function normalizeSlide(raw, index = 0, { legacyHtml = '', assets = null, targetWidth = null, targetHeight = null } = {}) {
   const pageSource = hasSingleFreePage(raw?.page) ? raw.page : hasSingleFreePage(raw) ? raw : raw?.page;
   const password = String(raw?.password || '').slice(0, 80);
   const requirePassword = raw?.requirePassword === undefined ? Boolean(password) : Boolean(raw?.requirePassword);
@@ -283,7 +286,7 @@ function normalizeSlide(raw, index = 0, { legacyHtml = '', assets = null, target
     password,
     passwordMessage: String(raw?.passwordMessage || DEFAULT_PASSWORD_MESSAGE).slice(0, 140),
     passwordPlaceholder: String(raw?.passwordPlaceholder || DEFAULT_PASSWORD_PLACEHOLDER).slice(0, 80),
-    page: normalizeSingleFreePage(pageSource, { legacyHtml: index === 0 ? legacyHtml : '', assets, targetHeight }),
+    page: normalizeSingleFreePage(pageSource, { legacyHtml: index === 0 ? legacyHtml : '', assets, targetWidth, targetHeight }),
   };
 }
 
@@ -297,8 +300,8 @@ function normalizeDeckFormat(raw, fallbackHeight = DEFAULT_HEIGHT) {
   return { preset: preset?.id || 'custom', width, height };
 }
 
-function formatLogicalHeight(format) {
-  return Math.round(clamp(PAGE_WIDTH * format.height / format.width, MIN_PAGE_HEIGHT, MAX_PAGE_HEIGHT));
+function formatEditorWidthScale(format) {
+  return normalizeDeckFormat(format).width / PAGE_WIDTH;
 }
 
 function normalizeFreePageDeck(raw, { legacyHtml = '' } = {}) {
@@ -306,9 +309,10 @@ function normalizeFreePageDeck(raw, { legacyHtml = '' } = {}) {
     const assets = normalizeFreePageAssets(raw.assets);
     const fallbackHeight = raw.slides[0]?.page?.height || DEFAULT_HEIGHT;
     const format = normalizeDeckFormat(raw.format, fallbackHeight);
-    const targetHeight = formatLogicalHeight(format);
-    const slides = raw.slides.slice(0, MAX_SLIDES).map((slide, index) => normalizeSlide(slide, index, { assets, targetHeight })).filter(Boolean);
-    const safeSlides = slides.length ? slides : [normalizeSlide(null, 0, { legacyHtml, assets, targetHeight })];
+    const targetWidth = format.width;
+    const targetHeight = format.height;
+    const slides = raw.slides.slice(0, MAX_SLIDES).map((slide, index) => normalizeSlide(slide, index, { assets, targetWidth, targetHeight })).filter(Boolean);
+    const safeSlides = slides.length ? slides : [normalizeSlide(null, 0, { legacyHtml, assets, targetWidth, targetHeight })];
     safeSlides.forEach((slide) => hydratePageAssets(slide.page, assets));
     const activeSlideId = safeSlides.some((slide) => slide.id === raw.activeSlideId) ? raw.activeSlideId : safeSlides[0].id;
     return {
@@ -362,14 +366,16 @@ function normalizeDeckGrid(raw) {
 
 function normalizeDeckNav(raw, slides = []) {
   const ids = slides.map((slide) => slide.id);
+  const pageWidth = slides[0]?.page?.width || PAGE_WIDTH;
+  const pageHeight = slides[0]?.page?.height || DEFAULT_HEIGHT;
   const style = NAV_STYLES.has(raw?.style) ? raw.style : 'bar';
   const theme = NAV_THEMES.has(raw?.theme) ? raw.theme : 'dark';
   const fallback = style === 'menu'
-    ? { x: 928, y: DEFAULT_HEIGHT - 64, w: 44, h: 44 }
-    : { x: 170, y: DEFAULT_HEIGHT - 58, w: 660, h: 42 };
+    ? { x: pageWidth - 72, y: pageHeight - 64, w: 44, h: 44 }
+    : { x: Math.max(0, Math.round((pageWidth - 660) / 2)), y: pageHeight - 58, w: 660, h: 42 };
   const menuSize = clamp(raw?.size ?? raw?.w ?? raw?.h ?? fallback.w, 44, 96);
-  const w = style === 'menu' ? menuSize : clamp(raw?.w ?? fallback.w, 220, PAGE_WIDTH);
-  const h = style === 'menu' ? menuSize : clamp(raw?.h ?? fallback.h, 34, 180);
+  const w = style === 'menu' ? menuSize : clamp(raw?.w ?? fallback.w, 220, pageWidth);
+  const h = style === 'menu' ? menuSize : clamp(raw?.h ?? fallback.h, 34, Math.min(180, pageHeight));
   const filterIds = (values, fallback) => {
     const source = Array.isArray(values) ? values.map(String) : fallback;
     return source.filter((id, index, list) => ids.includes(id) && list.indexOf(id) === index);
@@ -379,8 +385,8 @@ function normalizeDeckNav(raw, slides = []) {
     style,
     theme,
     label: String(raw?.label || 'Menu').slice(0, 40),
-    x: Math.round(clamp(raw?.x ?? fallback.x, 0, PAGE_WIDTH - w)),
-    y: Math.round(clamp(raw?.y ?? fallback.y, 0, DEFAULT_HEIGHT - h)),
+    x: Math.round(clamp(raw?.x ?? fallback.x, 0, pageWidth - w)),
+    y: Math.round(clamp(raw?.y ?? fallback.y, 0, pageHeight - h)),
     w: Math.round(w),
     h: Math.round(h),
     z: clamp(raw?.z ?? 1200, 0, 1400),
@@ -567,19 +573,19 @@ function popupTable(x, y, w, h) {
   };
 }
 
-function normalizeBlock(raw, index, pageHeight) {
+function normalizeBlock(raw, index, pageWidth, pageHeight) {
   if (!raw || !BLOCK_TYPES.has(raw.type)) return null;
   const type = raw.type;
   // Minimums alignes sur ceux du redimensionnement : sinon un bloc reduit
   // et colle au bord etait re-agrandi de force au rechargement.
   const minW = type === 'image' ? 30 : type === 'chart' ? 260 : type === 'shape' ? 40 : type === 'text' ? 20 : 180;
   const minH = type === 'image' ? 24 : type === 'chart' ? 170 : type === 'shape' ? 20 : type === 'text' ? 12 : 90;
-  const w = clamp(raw.w, minW, PAGE_WIDTH);
-  const h = clamp(raw.h, minH, pageHeight);
+  const w = clamp(raw.w, minW, 4000);
+  const h = clamp(raw.h, minH, MAX_PAGE_HEIGHT);
   const block = {
     id: String(raw.id || uid()),
     type,
-    x: Math.round(clampBlockX(raw.x, w)),
+    x: Math.round(clampBlockX(raw.x, w, pageWidth)),
     y: Math.round(clampBlockY(raw.y, h, pageHeight)),
     w: Math.round(w),
     h: Math.round(h),
@@ -655,19 +661,24 @@ function normalizeFreePageTextHtml(html) {
   );
 }
 
-function normalizeSingleFreePage(raw, { legacyHtml = '', assets = null, targetHeight = null } = {}) {
+function rescaleInlineFontSizes(html, sourceWidth, targetWidth) {
+  if (sourceWidth === targetWidth) return html;
+  return String(html || '').replace(/font-size:\s*(?:calc\()?\s*([0-9.]+)cqw\s*\)?/gi, (_, value) => {
+    const next = Number(value) * sourceWidth / targetWidth;
+    return `font-size: calc(${Number(next.toFixed(5))}cqw)`;
+  });
+}
+
+function normalizeSingleFreePage(raw, { legacyHtml = '', assets = null, targetWidth = null, targetHeight = null } = {}) {
+  const sourceWidth = clamp(raw?.width || targetWidth || PAGE_WIDTH, 320, 4000);
   const sourceHeight = clamp(raw?.height || targetHeight || DEFAULT_HEIGHT, MIN_PAGE_HEIGHT, MAX_PAGE_HEIGHT);
+  const width = clamp(targetWidth || sourceWidth, 320, 4000);
   const height = clamp(targetHeight || sourceHeight, MIN_PAGE_HEIGHT, MAX_PAGE_HEIGHT);
   const background = safeColor(raw?.background, DEFAULT_PAGE_BG);
   let blocks = Array.isArray(raw?.blocks)
     ? raw.blocks.map((block, index) => {
-      const normalized = normalizeBlock(block && assets ? { ...block, __assets: assets } : block, index, sourceHeight);
-      if (!normalized || sourceHeight === height) return normalized;
-      const ratio = height / sourceHeight;
-      normalized.y = Math.round(normalized.y * ratio);
-      normalized.h = Math.round(Math.max(20, normalized.h * ratio));
-      normalized.y = Math.min(normalized.y, Math.max(0, height - normalized.h));
-      normalized.h = Math.min(normalized.h, height);
+      const normalized = normalizeBlock(block && assets ? { ...block, __assets: assets } : block, index, width, height);
+      if (normalized?.type === 'text') normalized.content = rescaleInlineFontSizes(normalized.content, sourceWidth, width);
       return normalized;
     }).filter(Boolean)
     : [];
@@ -678,7 +689,7 @@ function normalizeSingleFreePage(raw, { legacyHtml = '', assets = null, targetHe
       content: sanitizeRichTextHtml(legacyHtml), align: 'left', fontSize: 18, color: 'default', textColor: '#eef2fb', surface: 'none',
     }];
   }
-  return { version: 1, width: PAGE_WIDTH, height, background, blocks };
+  return { version: 1, width, height, background, blocks };
 }
 
 export function normalizeFreePage(raw, { legacyHtml = '' } = {}) {
@@ -735,7 +746,7 @@ function readerStageHtml(deck, slide, previousId = '') {
   const normalized = normalizeSingleFreePage(slide.page);
   const locked = !isSlideUnlocked(deck, slide);
   return `<div class="free-page-stage free-page-stage--reader ${locked ? 'is-locked-slide' : ''}" style="${stageStyle(normalized)}">
-    ${locked ? readerLockedSlideHtml(slide, previousId) : normalized.blocks.map((block) => blockHtml(block, normalized.height, false)).join('')}
+    ${locked ? readerLockedSlideHtml(slide, previousId) : normalized.blocks.map((block) => blockHtml(block, normalized.height, false, { pageWidth: normalized.width })).join('')}
     ${locked ? '' : deckNavHtml(deck, slide.id)}
   </div>`;
 }
@@ -790,7 +801,7 @@ export function freePageEditorHtml({ id = 'free-page-editor', page, legacyHtml =
   const deck = normalizeFreePageDeck(page, { legacyHtml });
   const normalized = deck.slides.find((slide) => slide.id === deck.activeSlideId)?.page || deck.slides[0].page;
   const grid = normalizeDeckGrid(deck.grid);
-  return `<div class="free-page-editor" id="${_esc(id)}" data-free-page-editor tabindex="-1" style="--free-page-ratio:${normalized.width}/${normalized.height};--free-page-editor-zoom:1">
+  return `<div class="free-page-editor" id="${_esc(id)}" data-free-page-editor tabindex="-1" style="--free-page-ratio:${normalized.width}/${normalized.height};--free-page-editor-width-scale:${formatEditorWidthScale(deck.format)};--free-page-editor-zoom:1">
     <textarea data-fpe-initial hidden>${_esc(JSON.stringify(deck))}</textarea>
     <div class="free-page-toolbar" role="toolbar" aria-label="Outils de composition">
       <div class="free-page-toolbar-main">
@@ -1166,7 +1177,7 @@ function handleDocumentPaste(event) {
   if (rawBlocks) {
     try { editor.__freePageClipboard = normalizeBlocksClipboard(JSON.parse(rawBlocks)); } catch { /* ignore */ }
   } else if (rawBlock) {
-    try { editor.__freePageClipboard = createBlocksClipboard([normalizeBlock(JSON.parse(rawBlock), 0, editor.__freePageState.height)]); } catch { /* ignore */ }
+    try { editor.__freePageClipboard = createBlocksClipboard([normalizeBlock(JSON.parse(rawBlock), 0, editorPageWidth(editor), editor.__freePageState.height)]); } catch { /* ignore */ }
   }
   if (editor.__freePageClipboard) sharedFreePageClipboard = structuredClone(editor.__freePageClipboard);
   if (!editor.__freePageClipboard && sharedFreePageClipboard) editor.__freePageClipboard = structuredClone(sharedFreePageClipboard);
@@ -1264,8 +1275,9 @@ function handleDocumentShortcut(event) {
       event.preventDefault();
       const nav = editor.__freePageDeck.nav = normalizeDeckNav(editor.__freePageDeck.nav, editor.__freePageDeck.slides);
       const d = event.shiftKey ? snapUnit(editor) * 4 : snapUnit(editor);
+      const pageWidth = editorPageWidth(editor);
       const pageHeight = editor.__freePageState?.height || DEFAULT_HEIGHT;
-      nav.x = Math.round(clamp(snapValue(editor, nav.x + (event.key === 'ArrowLeft' ? -d : event.key === 'ArrowRight' ? d : 0)), 0, PAGE_WIDTH - nav.w));
+      nav.x = Math.round(clamp(snapValue(editor, nav.x + (event.key === 'ArrowLeft' ? -d : event.key === 'ArrowRight' ? d : 0)), 0, pageWidth - nav.w));
       nav.y = Math.round(clamp(snapValue(editor, nav.y + (event.key === 'ArrowUp' ? -d : event.key === 'ArrowDown' ? d : 0)), 0, pageHeight - nav.h));
       renderBlocks(editor, NAV_BLOCK_ID);
       return;
@@ -1772,10 +1784,11 @@ function runSlideAction(editor, action, slideId) {
   const slide = slides.find((item) => item.id === slideId);
   if (action === 'add') {
     if (slides.length >= MAX_SLIDES) return showNotif('Nombre maximum de diapos atteint.', 'info');
+    const format = normalizeDeckFormat(editor.__freePageDeck.format);
     const next = normalizeSlide(
       { title: `Diapo ${slides.length + 1}`, page: { version: 1, blocks: [] } },
       slides.length,
-      { targetHeight: formatLogicalHeight(normalizeDeckFormat(editor.__freePageDeck.format)) },
+      { targetWidth: format.width, targetHeight: format.height },
     );
     slides.push(next);
     switchSlide(editor, next.id);
@@ -1853,7 +1866,7 @@ function pasteSlideFromClipboard(editor) {
   const payload = normalizeSlideClipboard(sharedFreePageSlideClipboard);
   if (!payload?.slide) return showNotif('Aucune diapo a coller.', 'info');
   const currentIndex = Math.max(0, slides.findIndex((slide) => slide.id === editor.__freePageSlideId));
-  const copy = cloneSlideForPaste(payload.slide, currentIndex + 1);
+  const copy = cloneSlideForPaste(payload.slide, currentIndex + 1, normalizeDeckFormat(editor.__freePageDeck.format));
   slides.splice(currentIndex + 1, 0, copy);
   switchSlide(editor, copy.id);
   showNotif('Diapo collee.', 'success');
@@ -1864,8 +1877,12 @@ function normalizeSlideClipboard(value) {
   return { kind: 'grimorium-slide', version: 1, slide: normalizeSlide(structuredClone(value.slide)) };
 }
 
-function cloneSlideForPaste(slide, index = 0) {
-  const copy = normalizeSlide({ ...structuredClone(slide), id: uid(), title: slide.title || `Diapo ${index + 1}` }, index);
+function cloneSlideForPaste(slide, index = 0, targetFormat = null) {
+  const copy = normalizeSlide(
+    { ...structuredClone(slide), id: uid(), title: slide.title || `Diapo ${index + 1}` },
+    index,
+    targetFormat ? { targetWidth: targetFormat.width, targetHeight: targetFormat.height } : {},
+  );
   copy.page = clonePageForPaste(copy.page);
   return copy;
 }
@@ -1873,12 +1890,12 @@ function cloneSlideForPaste(slide, index = 0) {
 function clonePageForPaste(page) {
   const safePage = normalizeSingleFreePage(page);
   const groupMap = new Map();
-  const blocks = safePage.blocks.map((block, index) => cloneBlockForPaste(block, index, safePage.height, groupMap)).filter(Boolean);
+  const blocks = safePage.blocks.map((block, index) => cloneBlockForPaste(block, index, safePage.width, safePage.height, groupMap)).filter(Boolean);
   return { ...safePage, blocks };
 }
 
-function cloneBlockForPaste(block, index, pageHeight, groupMap) {
-  const copy = normalizeBlock({ ...structuredClone(block), id: uid() }, index, pageHeight);
+function cloneBlockForPaste(block, index, pageWidth, pageHeight, groupMap) {
+  const copy = normalizeBlock({ ...structuredClone(block), id: uid() }, index, pageWidth, pageHeight);
   if (!copy) return null;
   if (copy.groupId) {
     if (!groupMap.has(copy.groupId)) groupMap.set(copy.groupId, `grp-${Date.now().toString(36)}-${groupMap.size}`);
@@ -1949,19 +1966,18 @@ function handleDeckField(editor, target) {
 
 function applyDeckFormat(editor, nextFormat) {
   const format = normalizeDeckFormat(nextFormat);
-  const logicalHeight = formatLogicalHeight(format);
   syncCurrentSlide(editor);
   editor.__freePageDeck.format = format;
   editor.__freePageDeck.slides.forEach((slide) => {
-    const page = normalizeSingleFreePage(slide.page);
-    page.height = logicalHeight;
-    slide.page = page;
+    slide.page = normalizeSingleFreePage(slide.page, { targetWidth: format.width, targetHeight: format.height });
   });
   const slide = currentSlide(editor);
-  editor.__freePageState = slide?.page || normalizeSingleFreePage(null, { targetHeight: logicalHeight });
+  editor.__freePageState = slide?.page || normalizeSingleFreePage(null, { targetWidth: format.width, targetHeight: format.height });
   editor.__freePageDeck.nav = normalizeDeckNav(editor.__freePageDeck.nav, editor.__freePageDeck.slides);
-  editor.__freePageDeck.nav.y = clamp(editor.__freePageDeck.nav.y, 0, Math.max(0, logicalHeight - editor.__freePageDeck.nav.h));
-  editor.style.setProperty('--free-page-ratio', `${PAGE_WIDTH}/${logicalHeight}`);
+  editor.__freePageDeck.nav.x = clamp(editor.__freePageDeck.nav.x, 0, Math.max(0, format.width - editor.__freePageDeck.nav.w));
+  editor.__freePageDeck.nav.y = clamp(editor.__freePageDeck.nav.y, 0, Math.max(0, format.height - editor.__freePageDeck.nav.h));
+  editor.style.setProperty('--free-page-ratio', `${format.width}/${format.height}`);
+  editor.style.setProperty('--free-page-editor-width-scale', String(formatEditorWidthScale(format)));
   const size = editor.querySelector('[data-fpe-slide-size]');
   if (size) size.textContent = `${format.width} × ${format.height}`;
   renderBlocks(editor, null);
@@ -1982,19 +1998,30 @@ function handleGridField(editor, target) {
 function handleEditorField(editor, target) {
   if (target.dataset.fpeEditorField !== 'zoom') return;
   const zoom = EDITOR_ZOOMS.includes(Number(target.value)) ? Number(target.value) : 100;
+  target.querySelector('[data-fpe-fit-option]')?.remove();
   editor.style.setProperty('--free-page-editor-zoom', String(zoom / 100));
 }
 
 function fitEditorZoom(editor) {
   const workspace = editor.querySelector('.free-page-workspace');
-  if (!workspace) return;
+  const stage = editor.querySelector('[data-fpe-stage]');
+  if (!workspace || !stage) return;
   const rect = workspace.getBoundingClientRect();
   const availableW = Math.max(320, rect.width - 22);
-  const rawZoom = Math.min(200, availableW / PAGE_WIDTH * 100);
-  const zoom = EDITOR_ZOOMS.reduce((best, value) => Math.abs(value - rawZoom) < Math.abs(best - rawZoom) ? value : best, 100);
+  const currentZoom = Number.parseFloat(getComputedStyle(editor).getPropertyValue('--free-page-editor-zoom')) || 1;
+  const baseWidth = stage.getBoundingClientRect().width / currentZoom
+    || PAGE_WIDTH * formatEditorWidthScale(editor.__freePageDeck?.format);
+  const rawZoom = Math.min(200, availableW / baseWidth * 100);
+  const zoom = Math.max(10, Math.floor(rawZoom));
   editor.style.setProperty('--free-page-editor-zoom', String(zoom / 100));
   const select = editor.querySelector('[data-fpe-editor-field="zoom"]');
-  if (select) select.value = String(zoom);
+  if (select) {
+    select.querySelector('[data-fpe-fit-option]')?.remove();
+    if (!EDITOR_ZOOMS.includes(zoom)) {
+      select.insertAdjacentHTML('afterbegin', `<option value="${zoom}" data-fpe-fit-option>${zoom}% adapte</option>`);
+    }
+    select.value = String(zoom);
+  }
 }
 
 function handlePageField(editor, target, { live = false } = {}) {
@@ -2053,6 +2080,7 @@ function syncPageBackgroundControls(editor, color, source = null) {
 function handleNavField(editor, target, { live = false } = {}) {
   if (!editor.__freePageDeck) return;
   const deck = editor.__freePageDeck;
+  const pageWidth = editorPageWidth(editor);
   const pageHeight = editor.__freePageState?.height || DEFAULT_HEIGHT;
   deck.nav = normalizeDeckNav(deck.nav, deck.slides);
   const field = target.dataset.fpeNavField;
@@ -2064,16 +2092,16 @@ function handleNavField(editor, target, { live = false } = {}) {
       const size = 44;
       deck.nav.w = size;
       deck.nav.h = size;
-      deck.nav.x = clamp(deck.nav.x, 0, PAGE_WIDTH - size);
+      deck.nav.x = clamp(deck.nav.x, 0, pageWidth - size);
       deck.nav.y = clamp(deck.nav.y, 0, pageHeight - size);
     }
   }
   if (field === 'theme') deck.nav.theme = NAV_THEMES.has(target.value) ? target.value : 'dark';
   if (field === 'label') deck.nav.label = String(target.value || 'Menu').slice(0, 40);
-  if (field === 'x') deck.nav.x = clamp(target.value, 0, PAGE_WIDTH - deck.nav.w);
+  if (field === 'x') deck.nav.x = clamp(target.value, 0, pageWidth - deck.nav.w);
   if (field === 'y') deck.nav.y = clamp(target.value, 0, pageHeight - deck.nav.h);
   if (field === 'w') {
-    deck.nav.w = clamp(target.value, deck.nav.style === 'menu' ? 44 : 220, PAGE_WIDTH - deck.nav.x);
+    deck.nav.w = clamp(target.value, deck.nav.style === 'menu' ? 44 : 220, pageWidth - deck.nav.x);
     if (deck.nav.style === 'menu') deck.nav.h = deck.nav.w;
   }
   if (field === 'h') {
@@ -2217,10 +2245,14 @@ function switchSlide(editor, slideId) {
   renderInspector(editor);
 }
 
+function centeredBlockX(editor, width, offset = 0) {
+  return Math.max(0, Math.round((editorPageWidth(editor) - width) / 2 + offset));
+}
+
 function addTextBlock(editor, { content = '<p>Nouveau texte</p>' } = {}) {
   pushHistory(editor);
   const offset = (editor.__freePageState.blocks.length % 6) * 18;
-  const block = normalizeBlock({ type: 'text', x: 70 + offset, y: 55 + offset, w: 540, h: 180, z: nextZ(editor), content }, 0, editor.__freePageState.height);
+  const block = normalizeBlock({ type: 'text', x: centeredBlockX(editor, 540, offset), y: 55 + offset, w: 540, h: 180, z: nextZ(editor), content }, 0, editorPageWidth(editor), editor.__freePageState.height);
   editor.__freePageState.blocks.push(block);
   renderBlocks(editor, block.id);
 }
@@ -2234,7 +2266,7 @@ function addImageBlock(editor) {
     if (!src) return showNotif("L'image est trop lourde. Essaie une image plus petite.", 'error');
     const aspect = await imageAspectFromDataUrl(src);
     pushHistory(editor);
-    const block = normalizeBlock({ type: 'image', x: 110, y: 90, w: 420, h: 260, z: nextZ(editor), src, imageAspect: aspect }, 0, editor.__freePageState.height);
+    const block = normalizeBlock({ type: 'image', x: centeredBlockX(editor, 420), y: 90, w: 420, h: 260, z: nextZ(editor), src, imageAspect: aspect }, 0, editorPageWidth(editor), editor.__freePageState.height);
     editor.__freePageState.blocks.push(block);
     renderBlocks(editor, block.id);
   }});
@@ -2251,7 +2283,7 @@ async function addImageUrlBlock(editor) {
   if (!src || isDataImageUrl(src)) return showNotif('URL d’image invalide (attendu https://…).', 'error');
   const aspect = await imageAspectFromDataUrl(src);
   pushHistory(editor);
-  const block = normalizeBlock({ type: 'image', x: 110, y: 90, w: 420, h: 260, z: nextZ(editor), src, imageAspect: aspect }, 0, editor.__freePageState.height);
+  const block = normalizeBlock({ type: 'image', x: centeredBlockX(editor, 420), y: 90, w: 420, h: 260, z: nextZ(editor), src, imageAspect: aspect }, 0, editorPageWidth(editor), editor.__freePageState.height);
   editor.__freePageState.blocks.push(block);
   renderBlocks(editor, block.id);
 }
@@ -2281,14 +2313,14 @@ function replaceImageBlock(editor) {
 
 function addTableBlock(editor) {
   pushHistory(editor);
-  const block = normalizeBlock({ type: 'table', x: 95, y: 85, w: 520, h: 210, z: nextZ(editor), rows: normalizeRows(), header: true }, 0, editor.__freePageState.height);
+  const block = normalizeBlock({ type: 'table', x: centeredBlockX(editor, 520), y: 85, w: 520, h: 210, z: nextZ(editor), rows: normalizeRows(), header: true }, 0, editorPageWidth(editor), editor.__freePageState.height);
   editor.__freePageState.blocks.push(block);
   renderBlocks(editor, block.id);
 }
 
 function addChartBlock(editor) {
   pushHistory(editor);
-  const block = normalizeBlock({ type: 'chart', x: 115, y: 100, w: 450, h: 300, z: nextZ(editor), title: 'Graphique' }, 0, editor.__freePageState.height);
+  const block = normalizeBlock({ type: 'chart', x: centeredBlockX(editor, 450), y: 100, w: 450, h: 300, z: nextZ(editor), title: 'Graphique' }, 0, editorPageWidth(editor), editor.__freePageState.height);
   editor.__freePageState.blocks.push(block);
   renderBlocks(editor, block.id);
 }
@@ -2297,10 +2329,10 @@ function addShapeBlock(editor, shape = 'rectangle') {
   pushHistory(editor);
   const safeShape = SHAPE_TYPES.has(shape) ? shape : 'rectangle';
   const block = normalizeBlock({
-    type: 'shape', x: 135, y: 115, w: safeShape === 'line' ? 360 : 240, h: safeShape === 'line' ? 36 : 150,
+    type: 'shape', x: centeredBlockX(editor, safeShape === 'line' ? 360 : 240), y: 115, w: safeShape === 'line' ? 360 : 240, h: safeShape === 'line' ? 36 : 150,
     z: nextZ(editor), shape: safeShape, fill: safeShape === 'line' ? DEFAULT_SHAPE_STROKE : DEFAULT_SHAPE_FILL, stroke: DEFAULT_SHAPE_STROKE,
     strokeWidth: safeShape === 'line' ? 4 : 1, radius: 12, shadow: false, shadowDepth: 28,
-  }, 0, editor.__freePageState.height);
+  }, 0, editorPageWidth(editor), editor.__freePageState.height);
   editor.__freePageState.blocks.push(block);
   renderBlocks(editor, block.id);
 }
@@ -2395,7 +2427,7 @@ function mutateSelection(editor, action) {
     pushHistory(editor);
     const groupMap = new Map();
     // Tri stable par z croissant → la duplication préserve la superposition d'origine.
-    const copies = selection.slice().sort((a, b) => (Number(a.z) || 0) - (Number(b.z) || 0)).map((item, index) => normalizeBlock({ ...structuredClone(item), id: uid(), groupId: mapClipboardGroupId(item.groupId, groupMap), x: item.x + 25, y: item.y + 25, z: nextZ(editor) + index, locked: false }, 0, editor.__freePageState.height)).filter(Boolean);
+    const copies = selection.slice().sort((a, b) => (Number(a.z) || 0) - (Number(b.z) || 0)).map((item, index) => normalizeBlock({ ...structuredClone(item), id: uid(), groupId: mapClipboardGroupId(item.groupId, groupMap), x: item.x + 25, y: item.y + 25, z: nextZ(editor) + index, locked: false }, 0, editorPageWidth(editor), editor.__freePageState.height)).filter(Boolean);
     editor.__freePageState.blocks.push(...copies);
     renderBlocks(editor, copies.at(-1)?.id || null);
     setMultiSelected(editor, copies.map((item) => item.id));
@@ -2544,11 +2576,11 @@ function pasteCopiedBlock(editor) {
     .map((item, index) => normalizeBlock({
       ...structuredClone(item),
       id: uid(),
-      x: clampBlockX(item.x + offset, Math.max(1, item.w)),
+      x: clampBlockX(item.x + offset, Math.max(1, item.w), editorPageWidth(editor)),
       y: clampBlockY(item.y + offset, Math.max(1, item.h), editor.__freePageState.height),
       z: nextZ(editor) + index,
       groupId: mapClipboardGroupId(item.groupId, groupMap),
-    }, 0, editor.__freePageState.height));
+    }, 0, editorPageWidth(editor), editor.__freePageState.height));
   if (!copies.length) return showNotif('Impossible de coller ces blocs ici.', 'info');
   source.pasteCount = (source.pasteCount || 0) + 1;
   editor.__freePageClipboard = source;
@@ -2566,10 +2598,11 @@ function canPasteBlock(editor) {
 }
 
 function createBlocksClipboard(blocks, editor = null) {
+  const pageWidth = Math.max(editorPageWidth(editor), ...(blocks || []).map((block) => (Number(block?.x) || 0) + (Number(block?.w) || 0) + 20));
   const pageHeight = Math.max(DEFAULT_HEIGHT, ...(blocks || []).map((block) => (Number(block?.y) || 0) + (Number(block?.h) || 0) + 20));
   const normalized = (blocks || [])
     .filter((block) => block && BLOCK_TYPES.has(block.type))
-    .map((block) => normalizeBlock(structuredClone(block), 0, pageHeight));
+    .map((block) => normalizeBlock(structuredClone(block), 0, pageWidth, pageHeight));
   const bounds = blocksBounds(normalized);
   return { kind: 'grimorium-blocks', version: 1, blocks: normalized, bounds, sourceDeckId: editor?.__freePageDeck?.id || '', sourceSlideId: editor?.__freePageSlideId || '', pasteCount: 0 };
 }
@@ -2577,10 +2610,11 @@ function createBlocksClipboard(blocks, editor = null) {
 function normalizeBlocksClipboard(value) {
   if (!value) return null;
   if (Array.isArray(value.blocks)) {
+    const pageWidth = Math.max(PAGE_WIDTH, ...value.blocks.map((block) => (Number(block?.x) || 0) + (Number(block?.w) || 0) + 20));
     const pageHeight = Math.max(DEFAULT_HEIGHT, ...value.blocks.map((block) => (Number(block?.y) || 0) + (Number(block?.h) || 0) + 20));
     const blocks = value.blocks
       .filter((block) => block && BLOCK_TYPES.has(block.type))
-      .map((block) => normalizeBlock(structuredClone(block), 0, pageHeight));
+      .map((block) => normalizeBlock(structuredClone(block), 0, pageWidth, pageHeight));
     return blocks.length ? { kind: 'grimorium-blocks', version: 1, blocks, bounds: value.bounds || blocksBounds(blocks), sourceDeckId: String(value.sourceDeckId || ''), sourceSlideId: String(value.sourceSlideId || ''), pasteCount: Number(value.pasteCount) || 0 } : null;
   }
   if (BLOCK_TYPES.has(value.type)) return createBlocksClipboard([value]);
@@ -2669,6 +2703,7 @@ function handlePointerDown(editor, event) {
   handle.setPointerCapture?.(event.pointerId);
   const stage = blockEl.closest('[data-fpe-composition]') || editor.querySelector('[data-fpe-stage]');
   const rect = stage.getBoundingClientRect();
+  const pageWidth = editorPageWidth(editor);
   const pageHeight = editor.__freePageState?.height || DEFAULT_HEIGHT;
   const blockRect = blockEl.getBoundingClientRect();
   let center = { x: blockRect.left + blockRect.width / 2, y: blockRect.top + blockRect.height / 2 };
@@ -2684,7 +2719,7 @@ function handlePointerDown(editor, event) {
   const groupBoundsStart = selectionBounds(groupStart);
   if (moveTargets.length > 1) {
     center = {
-      x: rect.left + (groupBoundsStart.x + groupBoundsStart.w / 2) / PAGE_WIDTH * rect.width,
+      x: rect.left + (groupBoundsStart.x + groupBoundsStart.w / 2) / pageWidth * rect.width,
       y: rect.top + (groupBoundsStart.y + groupBoundsStart.h / 2) / pageHeight * rect.height,
     };
     startAngle = Math.atan2(event.clientY - center.y, event.clientX - center.x) * 180 / Math.PI;
@@ -2698,7 +2733,7 @@ function handlePointerDown(editor, event) {
   }
   const onMove = (moveEvent) => {
     if (!historyCaptured) { pushHistory(editor); historyCaptured = true; }
-    const dx = (moveEvent.clientX - start.clientX) / rect.width * PAGE_WIDTH;
+    const dx = (moveEvent.clientX - start.clientX) / rect.width * pageWidth;
     const dy = (moveEvent.clientY - start.clientY) / rect.height * pageHeight;
     if (rotateHandle) {
       const angle = Math.atan2(moveEvent.clientY - center.y, moveEvent.clientX - center.x) * 180 / Math.PI;
@@ -2710,7 +2745,7 @@ function handlePointerDown(editor, event) {
       groupStart.forEach((item) => {
         const member = editor.__freePageState.blocks.find((candidate) => candidate.id === item.id);
         const memberEl = editor.querySelector(`[data-fpe-block="${cssEscape(item.id)}"]`);
-        if (member && memberEl) memberEl.setAttribute('style', blockStyle(member, editor.__freePageState.height));
+        if (member && memberEl) memberEl.setAttribute('style', blockStyle(member, editor.__freePageState.width, editor.__freePageState.height));
       });
       if (rotationBadge) rotationBadge.textContent = `${block.rotation}\u00B0`;
     } else if (radiusHandle) {
@@ -2722,7 +2757,7 @@ function handlePointerDown(editor, event) {
       groupStart.forEach((item) => {
         const member = editor.__freePageState.blocks.find((candidate) => candidate.id === item.id);
         const memberEl = editor.querySelector(`[data-fpe-block="${cssEscape(item.id)}"]`);
-        if (member && memberEl) memberEl.setAttribute('style', blockStyle(member, editor.__freePageState.height));
+        if (member && memberEl) memberEl.setAttribute('style', blockStyle(member, editor.__freePageState.width, editor.__freePageState.height));
       });
       if (block.type === 'image' && editor.__freePageCropBlockId === block.id) {
         updateSelectedImageStyle(editor, block);
@@ -2733,7 +2768,7 @@ function handlePointerDown(editor, event) {
       groupStart.forEach((item) => {
         const member = editor.__freePageState.blocks.find((candidate) => candidate.id === item.id);
         const memberEl = editor.querySelector(`[data-fpe-block="${cssEscape(item.id)}"]`);
-        if (member && memberEl) memberEl.setAttribute('style', blockStyle(member, editor.__freePageState.height));
+        if (member && memberEl) memberEl.setAttribute('style', blockStyle(member, editor.__freePageState.width, editor.__freePageState.height));
       });
     }
     positionSelectionOverlay(editor); // le cadre visuel suit le bloc pendant le drag
@@ -2891,6 +2926,7 @@ function imageRenderedRect(block) {
 }
 
 function resizeBlockFromStart(editor, block, start, dx, dy, dir, pageHeight) {
+  const pageWidth = editorPageWidth(editor);
   const minW = block.type === 'text' ? 20 : block.type === 'chart' ? 180 : block.type === 'image' ? 30 : 12;
   const minH = block.type === 'text' ? 12 : block.type === 'shape' ? 8 : block.type === 'chart' ? 120 : block.type === 'image' ? 24 : 12;
   if (normalizeRotation(start.rotation || 0) !== 0) {
@@ -2914,7 +2950,7 @@ function resizeBlockFromStart(editor, block, start, dx, dy, dir, pageHeight) {
     let nh = nw / ratio;
     // Bornes de la page selon le coin ancré (le ratio est préservé en réduisant).
     const right = start.x + start.w, bottom = start.y + start.h;
-    const maxW = dir.includes('w') ? right + PAGE_WIDTH : PAGE_WIDTH;
+    const maxW = dir.includes('w') ? right + pageWidth : pageWidth;
     const maxH = dir.includes('n') ? bottom + pageHeight : pageHeight;
     if (nw > maxW) { nw = maxW; nh = nw / ratio; }
     if (nh > maxH) { nh = maxH; nw = nh * ratio; }
@@ -2922,21 +2958,21 @@ function resizeBlockFromStart(editor, block, start, dx, dy, dir, pageHeight) {
     h = Math.max(minH, nh);
     x = dir.includes('w') ? right - w : start.x;
     y = dir.includes('n') ? bottom - h : start.y;
-    block.w = clamp(w, minW, PAGE_WIDTH);
+    block.w = clamp(w, minW, pageWidth);
     block.h = clamp(h, minH, pageHeight);
-    block.x = clampBlockX(x, block.w);
+    block.x = clampBlockX(x, block.w, pageWidth);
     block.y = clampBlockY(y, block.h, pageHeight);
     if (block.type === 'image' && editor.__freePageCropBlockId === block.id) preserveCropImagePixels(block, start);
     return;
   }
 
   // ── Bords : redimensionnement LIBRE (un seul axe) ──
-  if (dir.includes('e')) w = clamp(start.w + dx, minW, PAGE_WIDTH);
+  if (dir.includes('e')) w = clamp(start.w + dx, minW, pageWidth);
   if (dir.includes('s')) h = clamp(start.h + dy, minH, pageHeight);
   if (dir.includes('w')) {
     const right = start.x + start.w;
     const maxX = right - minW;
-    const minX = right - PAGE_WIDTH;
+    const minX = right - pageWidth;
     x = clamp(start.x + dx, minX, maxX);
     w = start.x + start.w - x;
   }
@@ -2947,9 +2983,9 @@ function resizeBlockFromStart(editor, block, start, dx, dy, dir, pageHeight) {
     y = clamp(start.y + dy, minY, maxY);
     h = start.y + start.h - y;
   }
-  block.w = clamp(snap(w), minW, PAGE_WIDTH);
+  block.w = clamp(snap(w), minW, pageWidth);
   block.h = clamp(snap(h), minH, pageHeight);
-  block.x = clampBlockX(snap(x), block.w);
+  block.x = clampBlockX(snap(x), block.w, pageWidth);
   block.y = clampBlockY(snap(y), block.h, pageHeight);
   if (block.type === 'image' && editor.__freePageCropBlockId === block.id) preserveCropImagePixels(block, start);
 }
@@ -2975,6 +3011,7 @@ function unrotatePageVector(x, y, angleDeg) {
 }
 
 function resizeRotatedBlockFromStart(editor, block, start, dx, dy, dir, pageHeight, minW, minH) {
+  const pageWidth = editorPageWidth(editor);
   const snap = (value) => snapValue(editor, value);
   const angle = normalizeRotation(start.rotation || 0);
   const local = unrotatePageVector(dx, dy, angle);
@@ -3042,9 +3079,9 @@ function resizeRotatedBlockFromStart(editor, block, start, dx, dy, dir, pageHeig
     y: startCenter.y + centerDelta.y,
   };
 
-  block.w = clamp(w, minW, PAGE_WIDTH);
+  block.w = clamp(w, minW, pageWidth);
   block.h = clamp(h, minH, pageHeight);
-  block.x = clampBlockX(Math.round(nextCenter.x - block.w / 2), block.w);
+  block.x = clampBlockX(Math.round(nextCenter.x - block.w / 2), block.w, pageWidth);
   block.y = clampBlockY(Math.round(nextCenter.y - block.h / 2), block.h, pageHeight);
   if (block.type === 'image' && editor.__freePageCropBlockId === block.id) preserveCropImagePixels(block, start);
 }
@@ -3072,20 +3109,22 @@ function startNavComponentDrag(editor, event, navEl, resizeHandle) {
   const nav = editor.__freePageDeck.nav = normalizeDeckNav(editor.__freePageDeck.nav, editor.__freePageDeck.slides);
   const stage = navEl.closest('[data-fpe-composition]') || editor.querySelector('[data-fpe-stage]');
   const rect = stage.getBoundingClientRect();
+  const pageWidth = editorPageWidth(editor);
+  const pageHeight = editor.__freePageState?.height || DEFAULT_HEIGHT;
   const start = { clientX: event.clientX, clientY: event.clientY, x: nav.x, y: nav.y, w: nav.w, h: nav.h };
   const resizeDir = resizeHandle?.dataset.fpeResize || '';
   let historyCaptured = false;
   const onMove = (moveEvent) => {
     if (!historyCaptured) { pushHistory(editor); historyCaptured = true; }
-    const dx = (moveEvent.clientX - start.clientX) / rect.width * PAGE_WIDTH;
+    const dx = (moveEvent.clientX - start.clientX) / rect.width * pageWidth;
     const dy = (moveEvent.clientY - start.clientY) / rect.height * editor.__freePageState.height;
     if (resizeDir) {
       resizeNavFromStart(editor, nav, start, dx, dy, resizeDir);
     } else {
-      nav.x = Math.round(clamp(snapValue(editor, start.x + dx), 0, PAGE_WIDTH - nav.w));
+      nav.x = Math.round(clamp(snapValue(editor, start.x + dx), 0, pageWidth - nav.w));
       nav.y = Math.round(clamp(snapValue(editor, start.y + dy), 0, pageHeight - nav.h));
     }
-    navEl.setAttribute('style', navBlockStyle(nav, editor.__freePageState?.height || DEFAULT_HEIGHT));
+    navEl.setAttribute('style', navBlockStyle(nav, pageWidth, pageHeight));
   };
   const onUp = () => {
     window.removeEventListener('pointermove', onMove);
@@ -3099,6 +3138,7 @@ function startNavComponentDrag(editor, event, navEl, resizeHandle) {
 function resizeNavFromStart(editor, nav, start, dx, dy, dir) {
   const minW = nav.style === 'menu' ? 44 : 220;
   const minH = 34;
+  const pageWidth = editorPageWidth(editor);
   const pageHeight = editor.__freePageState?.height || DEFAULT_HEIGHT;
   if (nav.style === 'menu') {
     const delta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
@@ -3108,7 +3148,7 @@ function resizeNavFromStart(editor, nav, start, dx, dy, dir) {
     const bottom = start.y + start.h;
     nav.w = Math.round(size);
     nav.h = Math.round(size);
-    nav.x = Math.round(clamp(snapValue(dir.includes('w') ? right - size : start.x), 0, PAGE_WIDTH - nav.w));
+    nav.x = Math.round(clamp(snapValue(dir.includes('w') ? right - size : start.x), 0, pageWidth - nav.w));
     nav.y = Math.round(clamp(snapValue(dir.includes('n') ? bottom - size : start.y), 0, pageHeight - nav.h));
     return;
   }
@@ -3116,7 +3156,7 @@ function resizeNavFromStart(editor, nav, start, dx, dy, dir) {
   let y = start.y;
   let w = start.w;
   let h = start.h;
-  if (dir.includes('e')) w = clamp(start.w + dx, minW, PAGE_WIDTH - start.x);
+  if (dir.includes('e')) w = clamp(start.w + dx, minW, pageWidth - start.x);
   if (dir.includes('s')) h = clamp(start.h + dy, minH, pageHeight - start.y);
   if (dir.includes('w')) {
     const maxX = start.x + start.w - minW;
@@ -3128,9 +3168,9 @@ function resizeNavFromStart(editor, nav, start, dx, dy, dir) {
     y = clamp(start.y + dy, 0, maxY);
     h = start.y + start.h - y;
   }
-  nav.x = Math.round(clamp(snapValue(editor, x), 0, PAGE_WIDTH - minW));
+  nav.x = Math.round(clamp(snapValue(editor, x), 0, pageWidth - minW));
   nav.y = Math.round(clamp(snapValue(editor, y), 0, pageHeight - minH));
-  nav.w = Math.round(clamp(snapValue(editor, w), minW, PAGE_WIDTH - nav.x));
+  nav.w = Math.round(clamp(snapValue(editor, w), minW, pageWidth - nav.x));
   nav.h = Math.round(clamp(snapValue(editor, h), minH, pageHeight - nav.y));
 }
 
@@ -3387,7 +3427,7 @@ function applyInspectorTextRangeField(editor, block, field, target, toggleValue 
     }
     editor.__freePageInlineTarget = { blockId: block.id, node: span };
   }
-  if (field === 'fontSize') span.style.fontSize = responsiveFontSize(clamp(target.value, 1, 96));
+  if (field === 'fontSize') span.style.fontSize = responsiveFontSize(clamp(target.value, 1, 96), editor.__freePageState?.width || PAGE_WIDTH);
   if (field === 'textColor') span.style.color = safeColor(target.value, '#eef2fb');
   if (field === 'fontFamily') span.style.fontFamily = safeTextFont(target.value);
   if (field === 'textTransform') {
@@ -3621,12 +3661,13 @@ function applyInspectorField(editor, block, field, target) {
   if (['x', 'y', 'w', 'h', 'opacity'].includes(field)) {
     if (field === 'opacity') block.opacity = clamp(value, 15, 100);
     else if (field === 'w') {
-      block.w = Math.round(clamp(value, 1, PAGE_WIDTH));
-      block.x = clampBlockX(block.x, block.w);
+      const pageWidth = editorPageWidth(editor);
+      block.w = Math.round(clamp(value, 1, pageWidth));
+      block.x = clampBlockX(block.x, block.w, pageWidth);
     } else if (field === 'h') {
       block.h = Math.round(clamp(value, 1, 1400));
       block.y = clampBlockY(block.y, block.h, editor.__freePageState?.height || DEFAULT_HEIGHT);
-    } else if (field === 'x') block.x = Math.round(clampBlockX(value, block.w));
+    } else if (field === 'x') block.x = Math.round(clampBlockX(value, block.w, editorPageWidth(editor)));
     else if (field === 'y') block.y = Math.round(clampBlockY(value, block.h, editor.__freePageState?.height || DEFAULT_HEIGHT));
     return;
   }
@@ -3695,14 +3736,14 @@ function renderBlocks(editor, selectedId) {
   const popupEdit = editor.__freePagePopupEdit;
   const stagePage = popupEdit?.rootState || editor.__freePageState;
   const grid = normalizeDeckGrid(editor.__freePageDeck?.grid);
-  stage.setAttribute('style', `${stageStyle(stagePage)};--free-page-grid-step:${grid.size / PAGE_WIDTH * 100}%`);
+  stage.setAttribute('style', `${stageStyle(stagePage)};--free-page-grid-step:${grid.size / stagePage.width * 100}%`);
   stage.classList.toggle('is-grid-visible', !popupEdit && grid.show);
   stage.classList.toggle('is-safe-visible', !popupEdit && grid.safe);
   stage.classList.toggle('is-editing-popup', Boolean(popupEdit));
   stage.classList.toggle('is-crop-active', Boolean(!popupEdit && editor.__freePageCropBlockId));
   stage.innerHTML = popupEdit
-    ? stagePage.blocks.map((block) => backgroundBlockHtml(block, stagePage.height)).join('') + inlinePopupEditorHtml(editor)
-    : editor.__freePageState.blocks.map((block) => blockHtml(block, editor.__freePageState.height, true, { cropping: block.id === editor.__freePageCropBlockId })).join('')
+    ? stagePage.blocks.map((block) => backgroundBlockHtml(block, stagePage.width, stagePage.height)).join('') + inlinePopupEditorHtml(editor)
+    : editor.__freePageState.blocks.map((block) => blockHtml(block, editor.__freePageState.height, true, { pageWidth: editor.__freePageState.width, cropping: block.id === editor.__freePageCropBlockId })).join('')
       + editorDeckNavPreviewHtml(editor, selectedId)
       + `<button type="button" class="free-page-empty-add" data-fpe-action="add-text" ${editor.__freePageState.blocks.length ? 'hidden' : ''}>Ajouter un premier bloc de texte</button>`;
   const canSelectNav = selectedId === NAV_BLOCK_ID && editor.__freePageDeck?.nav?.enabled;
@@ -3731,7 +3772,7 @@ function slideThumbHtml(slide, index, active) {
   const page = normalizeSingleFreePage(slide.page);
   return `<article class="free-page-slide-thumb ${active ? 'is-active' : ''} ${slide.hidden ? 'is-hidden' : ''}" data-fpe-slide-id="${_esc(slide.id)}" draggable="true">
     <button type="button" class="free-page-slide-preview" data-fpe-slide-action="select" style="${stageStyle(page)}" title="Ouvrir cette diapo">
-      ${page.blocks.slice().sort((a, b) => (a.z || 0) - (b.z || 0)).map((block) => slidePreviewBlockHtml(block, page.height)).join('')}
+      ${page.blocks.slice().sort((a, b) => (a.z || 0) - (b.z || 0)).map((block) => slidePreviewBlockHtml(block, page.width, page.height)).join('')}
     </button>
     <div class="free-page-slide-open">
       <span data-fpe-slide-drag title="Déplacer la diapo">${index + 1}</span>
@@ -3748,9 +3789,9 @@ function slideThumbHtml(slide, index, active) {
   </article>`;
 }
 
-function slidePreviewBlockHtml(block, pageHeight) {
+function slidePreviewBlockHtml(block, pageWidth, pageHeight) {
   if (block.type === 'image' && !block.src) return '';
-  const style = previewBlockStyle(block, pageHeight);
+  const style = previewBlockStyle(block, pageWidth, pageHeight);
   if (block.type === 'image') return `<span class="free-page-slide-preview-block free-page-slide-preview-image" style="${style}"><img src="${_esc(block.src)}" alt="" style="${imageInnerStyle(block)}"></span>`;
   if (block.type === 'shape') return `<span class="free-page-slide-preview-block free-page-slide-preview-shape free-page-slide-preview-shape--${_esc(block.shape || 'rectangle')}" style="${style};--shape-fill:${_esc(block.fill || DEFAULT_SHAPE_FILL)};--shape-stroke:${_esc(block.stroke || DEFAULT_SHAPE_STROKE)};--shape-stroke-width:${Number(block.strokeWidth) || 0}px;--shape-radius:${Number(block.radius) || 0}px"></span>`;
   if (block.type === 'chart') return `<span class="free-page-slide-preview-block free-page-slide-preview-chart" style="${style}"></span>`;
@@ -3758,11 +3799,11 @@ function slidePreviewBlockHtml(block, pageHeight) {
   return `<span class="free-page-slide-preview-block free-page-slide-preview-text" style="${style}"></span>`;
 }
 
-function previewBlockStyle(block, pageHeight) {
+function previewBlockStyle(block, pageWidth, pageHeight) {
   if (block.type === 'shape' && block.shape === 'diamond') {
-    return `left:${block.x / 10}%;top:${block.y / pageHeight * 100}%;width:${block.w / 10}%;height:${block.h / pageHeight * 100}%;z-index:${block.z};opacity:${(block.opacity ?? 100) / 100};transform:rotate(${normalizeRotation((block.rotation || 0) + 45)}deg) scale(.78)`;
+    return `left:${block.x / pageWidth * 100}%;top:${block.y / pageHeight * 100}%;width:${block.w / pageWidth * 100}%;height:${block.h / pageHeight * 100}%;z-index:${block.z};opacity:${(block.opacity ?? 100) / 100};transform:rotate(${normalizeRotation((block.rotation || 0) + 45)}deg) scale(.78)`;
   }
-  return blockStyle(block, pageHeight);
+  return blockStyle(block, pageWidth, pageHeight);
 }
 
 function inlinePopupEditorHtml(editor) {
@@ -3781,7 +3822,7 @@ function inlinePopupEditorHtml(editor) {
     <button type="button" class="free-page-popup-frame-lock ${frame.locked ? '' : 'is-unlocked'}" data-fpe-action="toggle-popup-frame-lock">${frame.locked ? 'Deverrouiller la fenetre' : 'Verrouiller la fenetre'}</button>
     <div class="free-page-inline-window ${frame.locked ? 'is-frame-locked' : 'is-frame-unlocked'}" data-fpe-composition aria-label="Fenetre en cours de modification" style="${popupFrameStyle(frame, page.height)}">
       ${!frame.locked ? '<button type="button" class="free-page-popup-frame-move" data-fpe-popup-frame-move title="Deplacer la fenetre">Deplacer</button><span class="free-page-popup-frame-resize" data-fpe-popup-frame-resize title="Redimensionner la fenetre"></span>' : ''}
-      ${page.blocks.map((item) => blockHtml(item, page.height, true, { cropping: item.id === editor.__freePageCropBlockId })).join('')}
+      ${page.blocks.map((item) => blockHtml(item, page.height, true, { pageWidth: page.width, cropping: item.id === editor.__freePageCropBlockId })).join('')}
       <button type="button" class="free-page-empty-add" data-fpe-action="add-text" ${page.blocks.length ? 'hidden' : ''}>Ajouter un premier bloc de texte</button>
     </div>
   </div>`;
@@ -3792,15 +3833,15 @@ function popupFrameStyle(frame, pageHeight = DEFAULT_HEIGHT) {
   return `--free-page-height:${pageHeight};left:${safe.x / 10}%;top:${safe.y / DEFAULT_HEIGHT * 100}%;width:${safe.w / 10}%;height:${safe.h / DEFAULT_HEIGHT * 100}%;right:auto;bottom:auto;transform:none;max-width:none;max-height:none`;
 }
 
-function backgroundBlockHtml(block, pageHeight) {
-  return blockHtml({ ...block, interaction: { type: 'none' } }, pageHeight, false)
+function backgroundBlockHtml(block, pageWidth, pageHeight) {
+  return blockHtml({ ...block, interaction: { type: 'none' } }, pageHeight, false, { pageWidth })
     .replace('class="free-page-block ', 'class="free-page-block free-page-background-block ')
     .replace('data-fpe-block=', 'data-fpe-background-block=')
     .replace(' role="button"', '')
     .replace(' tabindex="0"', '');
 }
 
-function blockHtml(block, pageHeight, editable, { cropping = false } = {}) {
+function blockHtml(block, pageHeight, editable, { pageWidth = PAGE_WIDTH, cropping = false } = {}) {
   if (block.type === 'image' && !block.src) return '';
   if (block.hidden && !editable) return '';
   const interaction = normalizeInteraction(block.interaction);
@@ -3815,12 +3856,12 @@ function blockHtml(block, pageHeight, editable, { cropping = false } = {}) {
     ? `;--fpe-animation-name:${animationCssName(animation)};--fpe-animation-duration:${animation.duration}ms;--fpe-animation-delay:${animation.delay}ms`
     : '';
   const groupAttr = block.groupId ? ` data-fpe-group="${_esc(block.groupId)}"` : '';
-  return `<div class="free-page-block free-page-block--${block.type} ${block.locked ? 'is-locked' : ''} ${block.hidden ? 'is-hidden-block' : ''} ${cropping ? 'is-cropping' : ''}" data-fpe-block="${_esc(block.id)}"${groupAttr}${interactionAttrs}${animationAttrs} style="${blockStyle(block, pageHeight)}${animationStyle}">
+  return `<div class="free-page-block free-page-block--${block.type} ${block.locked ? 'is-locked' : ''} ${block.hidden ? 'is-hidden-block' : ''} ${cropping ? 'is-cropping' : ''}" data-fpe-block="${_esc(block.id)}"${groupAttr}${interactionAttrs}${animationAttrs} style="${blockStyle(block, pageWidth, pageHeight)}${animationStyle}">
     ${editable && !block.locked ? '<button type="button" class="free-page-move" data-fpe-move title="Deplacer le bloc" aria-label="Deplacer le bloc">&#8942;</button>' : ''}
     ${editable ? `<button type="button" class="free-page-interaction-button ${interaction.type !== 'none' ? 'is-active' : ''}" data-fpe-interaction-button data-fpe-action="open-interaction" title="${_esc(interactionButtonLabel(interaction.type))}">${_esc(interactionButtonLabel(interaction.type))}</button>` : ''}
     ${editable ? `<button type="button" class="free-page-animation-button ${animation.effect !== 'none' ? 'is-active' : ''}" data-fpe-animation-button data-fpe-action="open-animation" title="${_esc(animationButtonLabel(animation))}">${_esc(animationButtonLabel(animation))}</button>` : ''}
     ${editable && block.locked ? '<span class="free-page-lock-badge" title="Element verrouille">Verrouille</span>' : ''}
-    ${blockBodyHtml(block, editable, { cropping })}
+    ${blockBodyHtml(block, editable, { pageWidth, cropping })}
     ${editable && !block.locked && cropping ? cropHandlesHtml(block) : ''}
     ${editable && !block.locked && block.type === 'shape' && block.shape === 'rectangle' ? '<span class="free-page-radius" data-fpe-radius title="Arrondir les angles"></span>' : ''}
     ${editable && !block.locked ? '<span class="free-page-rotate" data-fpe-rotate title="Faire tourner"></span>' : ''}
@@ -3836,10 +3877,10 @@ function resizeHandlesHtml() {
     .join('');
 }
 
-function blockBodyHtml(block, editable, { cropping = false } = {}) {
-  if (block.type === 'text') return `<div class="free-page-text free-page-text--${block.surface} free-page-text-color--${block.color}" ${editable ? 'contenteditable="true" data-fpe-content spellcheck="true"' : ''} style="text-align:${block.align};font-size:${responsiveFontSize(block.fontSize)};font-family:${_esc(safeTextFont(block.fontFamily))};text-transform:${block.textTransform === 'uppercase' ? 'uppercase' : 'none'};color:${_esc(block.textColor || legacyTextColor(block.color))}">${block.content || ''}</div>`;
+function blockBodyHtml(block, editable, { pageWidth = PAGE_WIDTH, cropping = false } = {}) {
+  if (block.type === 'text') return `<div class="free-page-text free-page-text--${block.surface} free-page-text-color--${block.color}" ${editable ? 'contenteditable="true" data-fpe-content spellcheck="true"' : ''} style="text-align:${block.align};font-size:${responsiveFontSize(block.fontSize, pageWidth)};font-family:${_esc(safeTextFont(block.fontFamily))};text-transform:${block.textTransform === 'uppercase' ? 'uppercase' : 'none'};color:${_esc(block.textColor || legacyTextColor(block.color))}">${block.content || ''}</div>`;
   if (block.type === 'image') return `<div class="free-page-image-frame"><img class="free-page-image" ${cropping ? 'data-fpe-crop-drag title="Deplacer l image dans son cadre"' : ''} src="${_esc(block.src)}" alt="${_esc(block.alt || '')}" style="${imageInnerStyle(block)}"></div>`;
-  if (block.type === 'table') return tableHtml(block, editable);
+  if (block.type === 'table') return tableHtml(block, editable, pageWidth);
   if (block.type === 'chart') return chartHtml(block, editable);
   if (block.type === 'shape') return shapeHtml(block);
   return '';
@@ -3849,9 +3890,9 @@ function cropHandlesHtml(block) {
   return `<span class="free-page-crop-frame" aria-hidden="true"></span><span class="free-page-crop-image-outline" data-fpe-crop-drag title="Deplacer l image" style="${imageCropOverlayStyle(block)}">${['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map((dir) => `<span class="free-page-crop-zoom free-page-crop-zoom--${dir}" data-fpe-crop-zoom="${dir}" title="Redimensionner l image"></span>`).join('')}</span>`;
 }
 
-function tableHtml(block, editable) {
+function tableHtml(block, editable, pageWidth = PAGE_WIDTH) {
   const rows = normalizeRows(block.rows);
-  const style = `--table-text:${_esc(block.textColor || '#c8d4e8')};--table-header:${_esc(block.headerColor || '#e8c66a')};--table-border:${_esc(block.borderColor || '#263957')};--table-font:${responsiveFontSize(Number(block.fontSize) || 14)}`;
+  const style = `--table-text:${_esc(block.textColor || '#c8d4e8')};--table-header:${_esc(block.headerColor || '#e8c66a')};--table-border:${_esc(block.borderColor || '#263957')};--table-font:${responsiveFontSize(Number(block.fontSize) || 14, pageWidth)}`;
   return `<div class="free-page-table-wrap" style="${style}"><table class="free-page-table"><tbody>${rows.map((row, rowIndex) => `<tr>${row.map((cell, colIndex) => {
     const tag = block.header && rowIndex === 0 ? 'th' : 'td';
     const attrs = editable ? ` contenteditable="true" spellcheck="true" data-fpe-table-cell data-row="${rowIndex}" data-col="${colIndex}"` : '';
@@ -3950,12 +3991,12 @@ function radarHtml(items, max, options, paletteName) {
 
 function stageStyle(page) {
   const normalized = normalizeSingleFreePage(page);
-  return `--free-page-height:${normalized.height};--free-page-bg:${_esc(normalized.background || DEFAULT_PAGE_BG)}`;
+  return `--free-page-width:${normalized.width};--free-page-height:${normalized.height};--free-page-bg:${_esc(normalized.background || DEFAULT_PAGE_BG)}`;
 }
 
-function navBlockStyle(nav, pageHeight = DEFAULT_HEIGHT) {
-  const safe = normalizeDeckNav(nav, []);
-  return `left:${safe.x / 10}%;top:${safe.y / pageHeight * 100}%;width:${safe.w / 10}%;height:${safe.h / pageHeight * 100}%;z-index:${safe.z || 1200}`;
+function navBlockStyle(nav, pageWidth = PAGE_WIDTH, pageHeight = DEFAULT_HEIGHT) {
+  const safe = nav || normalizeDeckNav(null, []);
+  return `left:${safe.x / pageWidth * 100}%;top:${safe.y / pageHeight * 100}%;width:${safe.w / pageWidth * 100}%;height:${safe.h / pageHeight * 100}%;z-index:${safe.z || 1200}`;
 }
 
 function deckNavHtml(deck, currentSlideId, { editor = false, selected = false } = {}) {
@@ -3965,11 +4006,13 @@ function deckNavHtml(deck, currentSlideId, { editor = false, selected = false } 
   const slides = visibleSlides(deck).filter((slide) => !nav.targetSlideIds.length || nav.targetSlideIds.includes(slide.id));
   if (!slides.length) return '';
   const editorAttrs = editor ? ` data-fpe-nav-block="${NAV_BLOCK_ID}"` : '';
-  const pageHeight = deck?.slides?.find(slide => slide.id === currentSlideId)?.page?.height || DEFAULT_HEIGHT;
+  const page = deck?.slides?.find(slide => slide.id === currentSlideId)?.page;
+  const pageWidth = page?.width || PAGE_WIDTH;
+  const pageHeight = page?.height || DEFAULT_HEIGHT;
   const classes = `free-page-stage-nav free-page-stage-nav--${nav.theme} ${editor ? 'free-page-stage-nav--editor ' : ''}${selected ? 'is-selected ' : ''}`;
   const handles = editor && selected ? resizeHandlesHtml() : '';
   if (nav.style === 'menu') {
-    return `<details class="${classes}free-page-stage-nav--menu ${navMenuPlacementClass(nav, pageHeight)}"${editorAttrs} style="${navBlockStyle(nav, pageHeight)}">
+    return `<details class="${classes}free-page-stage-nav--menu ${navMenuPlacementClass(nav, pageWidth, pageHeight)}"${editorAttrs} style="${navBlockStyle(nav, pageWidth, pageHeight)}">
       <summary aria-label="${_esc(nav.label || 'Menu')}" title="${_esc(nav.label || 'Menu')}"><span class="free-page-hamburger" aria-hidden="true"><i></i><i></i><i></i></span></summary>
       <div class="free-page-stage-nav-menu-panel">
         <strong>${_esc(nav.label || 'Menu')}</strong>
@@ -3978,18 +4021,18 @@ function deckNavHtml(deck, currentSlideId, { editor = false, selected = false } 
       ${handles}
     </details>`;
   }
-  return `<nav class="${classes}free-page-stage-nav--bar"${editorAttrs} style="${navBlockStyle(nav, pageHeight)}" aria-label="Navigation du diaporama">
+  return `<nav class="${classes}free-page-stage-nav--bar"${editorAttrs} style="${navBlockStyle(nav, pageWidth, pageHeight)}" aria-label="Navigation du diaporama">
     ${slides.map((slide, index) => `<button type="button" class="${slide.id === currentSlideId ? 'is-active' : ''}" data-fpe-reader-slide="${_esc(slide.id)}">${_esc(slide.title || `Diapo ${index + 1}`)}</button>`).join('')}
     ${handles}
   </nav>`;
 }
 
-function navMenuPlacementClass(nav, pageHeight = DEFAULT_HEIGHT) {
-  const safe = normalizeDeckNav(nav, []);
+function navMenuPlacementClass(nav, pageWidth = PAGE_WIDTH, pageHeight = DEFAULT_HEIGHT) {
+  const safe = nav || normalizeDeckNav(null, []);
   const panelW = 220;
   const panelH = 260;
   const h = safe.x < panelW * .45 ? 'free-page-stage-nav--align-left'
-    : safe.x + safe.w > PAGE_WIDTH - panelW * .45 ? 'free-page-stage-nav--align-right'
+    : safe.x + safe.w > pageWidth - panelW * .45 ? 'free-page-stage-nav--align-right'
       : 'free-page-stage-nav--align-center';
   const v = safe.y + safe.h + panelH > pageHeight ? 'free-page-stage-nav--open-up' : 'free-page-stage-nav--open-down';
   return `${h} ${v}`;
@@ -4001,14 +4044,14 @@ function editorDeckNavPreviewHtml(editor, selectedId = editor.__freePageSelected
   return deckNavHtml(deck, editor.__freePageSlideId, { editor: true, selected: selectedId === NAV_BLOCK_ID || editor.__freePageSelected === NAV_BLOCK_ID });
 }
 
-function blockStyle(block, pageHeight) {
+function blockStyle(block, pageWidth, pageHeight) {
   const rotation = normalizeRotation(block.rotation || 0);
-  return `left:${block.x / 10}%;top:${block.y / pageHeight * 100}%;width:${block.w / 10}%;height:${block.h / pageHeight * 100}%;z-index:${block.z};opacity:${(block.opacity ?? 100) / 100};--block-rotation:${rotation}deg;--block-unrotation:${-rotation}deg;transform:rotate(var(--block-rotation))`;
+  return `left:${block.x / pageWidth * 100}%;top:${block.y / pageHeight * 100}%;width:${block.w / pageWidth * 100}%;height:${block.h / pageHeight * 100}%;z-index:${block.z};opacity:${(block.opacity ?? 100) / 100};--block-rotation:${rotation}deg;--block-unrotation:${-rotation}deg;transform:rotate(var(--block-rotation))`;
 }
 
-function responsiveFontSize(size) {
+function responsiveFontSize(size, pageWidth = PAGE_WIDTH) {
   const px = clamp(size, 1, 96);
-  return `calc(${px / 10}cqw)`;
+  return `calc(${px / pageWidth * 100}cqw)`;
 }
 
 function imageInnerStyle(block) {
@@ -4128,12 +4171,13 @@ function positionSelectionOverlay(editor) {
     editor.classList.remove('has-group-selection');
     return;
   }
+  const pw = editorPageWidth(editor);
   const ph = editor.__freePageState.height || DEFAULT_HEIGHT;
   const bounds = selectionBounds(selection);
   ov.style.display = 'block';
-  ov.style.left = `${bounds.x / 10}%`;
+  ov.style.left = `${bounds.x / pw * 100}%`;
   ov.style.top = `${bounds.y / ph * 100}%`;
-  ov.style.width = `${bounds.w / 10}%`;
+  ov.style.width = `${bounds.w / pw * 100}%`;
   ov.style.height = `${bounds.h / ph * 100}%`;
   ov.style.transform = selection.length === 1 ? `rotate(${normalizeRotation(block.rotation || 0)}deg)` : 'none';
   ov.classList.toggle('is-group-selection', selection.length > 1);
@@ -4395,12 +4439,12 @@ function slideFormatInspectorHtml(deck, editor) {
         <option value="custom" ${format.preset === 'custom' ? 'selected' : ''}>Taille personnalisée</option>
       </select>
     </label>
-    <div class="free-page-format-dimensions">
-      <label>Largeur <input type="number" min="320" max="4000" value="${format.width}" data-fpe-deck-field="formatWidth"></label>
+    <div class="free-page-format-dimensions" aria-label="Dimensions personnalisées">
+      <label><span>Largeur</span><input type="number" inputmode="numeric" min="320" max="4000" step="10" value="${format.width}" data-fpe-deck-field="formatWidth"></label>
       <span aria-hidden="true">×</span>
-      <label>Hauteur <input type="number" min="240" max="5000" value="${format.height}" data-fpe-deck-field="formatHeight"></label>
+      <label><span>Hauteur</span><input type="number" inputmode="numeric" min="240" max="5000" step="10" value="${format.height}" data-fpe-deck-field="formatHeight"></label>
     </div>
-    <p>Le format s'applique à toutes les diapos. Les anciens diaporamas conservent automatiquement leur format classique.</p>
+    <p>À 100 %, les dimensions correspondent à la taille réelle de la toile. Le format s'applique à toutes les diapos.</p>
   </details>`;
 }
 
@@ -4469,6 +4513,7 @@ function layerRowHtml(layer, active) {
 
 function navInspectorHtml(deck, currentSlideId, { selected = false, folded = false, editor = null } = {}) {
   const nav = normalizeDeckNav(deck.nav, deck.slides);
+  const pageWidth = editor?.__freePageState?.width || deck.slides.find(slide => slide.id === currentSlideId)?.page?.width || PAGE_WIDTH;
   const pageHeight = editor?.__freePageState?.height || deck.slides.find(slide => slide.id === currentSlideId)?.page?.height || DEFAULT_HEIGHT;
   const target = new Set(nav.targetSlideIds || []);
   const visible = new Set(nav.visibleSlideIds || []);
@@ -4494,11 +4539,11 @@ function navInspectorHtml(deck, currentSlideId, { selected = false, folded = fal
     </select></label>
     <label>Libelle <input value="${_esc(nav.label || 'Menu')}" data-fpe-nav-field="label" placeholder="Menu"></label>
     <div class="free-page-inspector-grid">
-      <label>X <input type="number" min="0" max="${PAGE_WIDTH}" value="${Math.round(nav.x)}" data-fpe-nav-field="x"></label>
+      <label>X <input type="number" min="0" max="${pageWidth}" value="${Math.round(nav.x)}" data-fpe-nav-field="x"></label>
       <label>Y <input type="number" min="0" max="${pageHeight}" value="${Math.round(nav.y)}" data-fpe-nav-field="y"></label>
       ${nav.style === 'menu'
         ? `<label>Taille <input type="number" min="44" max="96" value="${Math.round(nav.w)}" data-fpe-nav-field="w"></label>`
-        : `<label>Largeur <input type="number" min="220" max="${PAGE_WIDTH}" value="${Math.round(nav.w)}" data-fpe-nav-field="w"></label>
+        : `<label>Largeur <input type="number" min="220" max="${pageWidth}" value="${Math.round(nav.w)}" data-fpe-nav-field="w"></label>
           <label>Hauteur <input type="number" min="34" max="${pageHeight}" value="${Math.round(nav.h)}" data-fpe-nav-field="h"></label>`}
     </div>
     ${selected ? '<p>Place ce composant sur la diapo : les pages cochees l afficheront exactement au meme endroit.</p>' : '<button type="button" class="free-page-resource" data-fpe-action="add-nav">Placer le menu sur la diapo</button>'}
@@ -4530,15 +4575,16 @@ function blockInspectorContent(block) {
 }
 
 function blockInspectorConfig(block, editor) {
+  const pageWidth = editorPageWidth(editor);
   const interaction = normalizeInteraction(block.interaction);
   const interactionPanel = interactionConfigHtml(interaction, editor?.__freePageFocusPanel === 'interaction', editor);
   return `${editor?.__freePageFocusPanel === 'interaction' ? interactionPanel : ''}
   ${typeSpecificConfig(block, editor)}
   <div class="free-page-inspector-section"><h4>Disposition</h4>
     <div class="free-page-inspector-grid">
-      <label>X <input type="number" min="${Math.round(blockXBounds(block.w).min)}" max="${Math.round(blockXBounds(block.w).max)}" value="${Math.round(block.x)}" data-fpe-inspector-field="x"></label>
+      <label>X <input type="number" min="${Math.round(blockXBounds(block.w, pageWidth).min)}" max="${Math.round(blockXBounds(block.w, pageWidth).max)}" value="${Math.round(block.x)}" data-fpe-inspector-field="x"></label>
       <label>Y <input type="number" min="${Math.round(blockYBounds(block.h, editor?.__freePageState?.height || DEFAULT_HEIGHT).min)}" max="${Math.round(blockYBounds(block.h, editor?.__freePageState?.height || DEFAULT_HEIGHT).max)}" value="${Math.round(block.y)}" data-fpe-inspector-field="y"></label>
-      <label>Largeur <input type="number" min="1" max="${PAGE_WIDTH}" value="${Math.round(block.w)}" data-fpe-inspector-field="w"></label>
+      <label>Largeur <input type="number" min="1" max="${pageWidth}" value="${Math.round(block.w)}" data-fpe-inspector-field="w"></label>
       <label>Hauteur <input type="number" min="1" max="1400" value="${Math.round(block.h)}" data-fpe-inspector-field="h"></label>
       <label>Rotation <input type="number" min="-180" max="180" value="${normalizeRotation(block.rotation || 0)}" data-fpe-inspector-field="rotation"></label>
       <label>Opacite <input type="range" min="15" max="100" value="${Math.round(block.opacity ?? 100)}" data-fpe-inspector-field="opacity"></label>
@@ -5092,9 +5138,9 @@ function clearHistoryTimer(editor) {
 function updateSelectedElementStyle(editor, block) {
   const el = selectedElement(editor);
   if (!el || !block) return;
-  block.x = clampBlockX(block.x, block.w);
+  block.x = clampBlockX(block.x, block.w, editorPageWidth(editor));
   block.y = clampBlockY(block.y, block.h, editor.__freePageState.height);
-  el.setAttribute('style', blockStyle(block, editor.__freePageState.height));
+  el.setAttribute('style', blockStyle(block, editor.__freePageState.width, editor.__freePageState.height));
 }
 
 function updateSelectedTextStyle(editor, block) {
@@ -5102,7 +5148,7 @@ function updateSelectedTextStyle(editor, block) {
   const text = selectedElement(editor)?.querySelector('.free-page-text');
   if (!text) return;
   text.style.textAlign = block.align || 'left';
-  text.style.fontSize = responsiveFontSize(Number(block.fontSize) || 18);
+  text.style.fontSize = responsiveFontSize(Number(block.fontSize) || 18, editor.__freePageState?.width || PAGE_WIDTH);
   text.style.fontFamily = safeTextFont(block.fontFamily);
   text.style.textTransform = block.textTransform === 'uppercase' ? 'uppercase' : 'none';
   text.style.color = block.textColor || legacyTextColor(block.color);
@@ -5134,7 +5180,7 @@ function updateSelectedTableStyle(editor, block) {
   wrap.style.setProperty('--table-text', block.textColor || '#c8d4e8');
   wrap.style.setProperty('--table-header', block.headerColor || '#e8c66a');
   wrap.style.setProperty('--table-border', block.borderColor || '#263957');
-  wrap.style.setProperty('--table-font', responsiveFontSize(Number(block.fontSize) || 14));
+  wrap.style.setProperty('--table-font', responsiveFontSize(Number(block.fontSize) || 14, editor.__freePageState?.width || PAGE_WIDTH));
 }
 
 function updateSelectedChartStyle(editor, block) {
@@ -5238,7 +5284,7 @@ function moveBlockGroup(editor, block, dx, dy) {
   const minY = Math.min(...members.map((item) => item.y));
   const maxX = Math.max(...members.map((item) => item.x + item.w));
   const maxY = Math.max(...members.map((item) => item.y + item.h));
-  const safeDx = clamp(dx, -maxX + OFFSTAGE_HANDLE_MARGIN, PAGE_WIDTH - OFFSTAGE_HANDLE_MARGIN - minX);
+  const safeDx = clamp(dx, -maxX + OFFSTAGE_HANDLE_MARGIN, editorPageWidth(editor) - OFFSTAGE_HANDLE_MARGIN - minX);
   const safeDy = clamp(dy, -maxY + OFFSTAGE_HANDLE_MARGIN, editor.__freePageState.height - OFFSTAGE_HANDLE_MARGIN - minY);
   members.forEach((item) => { item.x = Math.round(item.x + safeDx); item.y = Math.round(item.y + safeDy); });
 }
@@ -5257,7 +5303,7 @@ function alignSelectedBlocks(editor, action) {
     if (action === 'align-top') item.y = minY;
     if (action === 'align-middle') item.y = Math.round((minY + maxY - item.h) / 2);
     if (action === 'align-bottom') item.y = maxY - item.h;
-    item.x = clampBlockX(snapValue(editor, item.x), item.w);
+    item.x = clampBlockX(snapValue(editor, item.x), item.w, editorPageWidth(editor));
     item.y = clampBlockY(snapValue(editor, item.y), item.h, editor.__freePageState.height);
   });
 }
@@ -5270,14 +5316,15 @@ function positionSelectionOnPage(editor, anchor) {
   }
   if (!targets.length) return showNotif('Selectionne au moins un bloc a placer.', 'info');
   const bounds = selectionBounds(targets);
+  const pageWidth = editorPageWidth(editor);
   const pageHeight = editor.__freePageState.height;
-  const targetX = anchor.endsWith('l') ? 0 : anchor.endsWith('r') ? PAGE_WIDTH - bounds.w : Math.round((PAGE_WIDTH - bounds.w) / 2);
+  const targetX = anchor.endsWith('l') ? 0 : anchor.endsWith('r') ? pageWidth - bounds.w : Math.round((pageWidth - bounds.w) / 2);
   const targetY = anchor.startsWith('t') ? 0 : anchor.startsWith('b') ? pageHeight - bounds.h : Math.round((pageHeight - bounds.h) / 2);
   const dx = targetX - bounds.x;
   const dy = targetY - bounds.y;
   pushHistory(editor);
   targets.forEach((item) => {
-    item.x = Math.round(clamp(item.x + dx, 0, PAGE_WIDTH - item.w));
+    item.x = Math.round(clamp(item.x + dx, 0, pageWidth - item.w));
     item.y = Math.round(clamp(item.y + dy, 0, pageHeight - item.h));
   });
   editor.querySelector('[data-fpe-position-popover]').hidden = true;
@@ -5316,7 +5363,7 @@ function distributeSelectedBlocks(editor, axis) {
   let cursor = start;
   sorted.forEach((item) => {
     if (isX) {
-      item.x = clampBlockX(snapValue(editor, cursor), item.w);
+      item.x = clampBlockX(snapValue(editor, cursor), item.w, editorPageWidth(editor));
       cursor += item.w + gap;
     } else {
       item.y = clampBlockY(snapValue(editor, cursor), item.h, editor.__freePageState.height);
@@ -5330,7 +5377,7 @@ function moveGroupFromStart(editor, groupStart, dx, dy) {
   const minY = Math.min(...groupStart.map((item) => item.y));
   const maxX = Math.max(...groupStart.map((item) => item.x + item.w));
   const maxY = Math.max(...groupStart.map((item) => item.y + item.h));
-  const safeDx = clamp(dx, -maxX + OFFSTAGE_HANDLE_MARGIN, PAGE_WIDTH - OFFSTAGE_HANDLE_MARGIN - minX);
+  const safeDx = clamp(dx, -maxX + OFFSTAGE_HANDLE_MARGIN, editorPageWidth(editor) - OFFSTAGE_HANDLE_MARGIN - minX);
   const safeDy = clamp(dy, -maxY + OFFSTAGE_HANDLE_MARGIN, editor.__freePageState.height - OFFSTAGE_HANDLE_MARGIN - minY);
   groupStart.forEach((start) => {
     const item = editor.__freePageState.blocks.find((candidate) => candidate.id === start.id);

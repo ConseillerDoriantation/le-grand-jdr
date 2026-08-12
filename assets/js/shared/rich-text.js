@@ -22,6 +22,17 @@ const COLORS = [
   { name: 'Rose',   value: '#f472b6' }
 ];
 
+const HIGHLIGHTS = [
+  { name: 'Jaune',  value: 'rgba(250,204,21,.32)' },
+  { name: 'Orange', value: 'rgba(251,146,60,.30)' },
+  { name: 'Rouge',  value: 'rgba(239,68,68,.28)' },
+  { name: 'Vert',   value: 'rgba(34,195,142,.28)' },
+  { name: 'Bleu',   value: 'rgba(79,140,255,.28)' },
+  { name: 'Violet', value: 'rgba(192,132,252,.28)' },
+  { name: 'Rose',   value: 'rgba(244,114,182,.28)' },
+  { name: 'Gris',   value: 'rgba(148,163,184,.28)' },
+];
+
 const FONTS = [
   { name: 'Défaut',  value: 'inherit' },
   { name: 'Outfit',  value: "'Outfit', sans-serif" },
@@ -46,6 +57,9 @@ const BLOCK_COMMAND_TAGS = {
   h2: 'h2',
   h3: 'h3',
 };
+const RICH_TEXT_TABLE_INLINE_COMMANDS = new Set([
+  'bold', 'italic', 'underline', 'strikeThrough', 'removeFormat',
+]);
 const RICH_TEXT_COMMAND_META = {
   bold: { title: 'Gras', html: '<b>G</b>', stateful: true },
   italic: { title: 'Italique', html: '<i>I</i>', stateful: true },
@@ -56,12 +70,13 @@ const RICH_TEXT_COMMAND_META = {
   blockquote: { title: 'Citation', html: '❝', stateful: true },
   h2: { title: 'Titre H2', html: 'H2', stateful: true },
   h3: { title: 'Titre H3', html: 'H3', stateful: true },
+  insertTable: { title: 'Insérer un tableau', html: '▦', stateful: false },
   insertHorizontalRule: { title: 'Séparateur horizontal', html: '—', stateful: false },
   removeFormat: { title: 'Effacer la mise en forme', html: '⊘', stateful: false },
 };
 const DEFAULT_RICH_TEXT_TOOLBAR_GROUPS = [
   ['bold', 'italic', 'underline', 'strikeThrough'],
-  ['insertUnorderedList', 'insertOrderedList', 'blockquote', 'insertHorizontalRule'],
+  ['insertUnorderedList', 'insertOrderedList', 'blockquote', 'insertTable', 'insertHorizontalRule'],
   ['removeFormat'],
 ];
 export const RICH_TEXT_COMMANDS = new Set([
@@ -74,7 +89,9 @@ export const RICH_TEXT_COMMANDS = new Set([
   'blockquote',
   'h2',
   'h3',
+  'insertTable',
   'insertHorizontalRule',
+  'removeFormat',
 ]);
 export const RICH_TEXT_STATEFUL_COMMANDS = new Set([
   'bold',
@@ -126,7 +143,7 @@ export function richTextColorPickerHtml({
   }).join('');
   return `
     <div class="rte-color">
-      <button type="button" class="${_esc(buttonClass)} rte-color-toggle" title="Couleur du texte">
+      <button type="button" class="${_esc(buttonClass)} rte-color-toggle" title="Couleur du texte" aria-label="Couleur du texte">
         <span class="rte-color-letter">A</span>
         <span class="rte-color-bar"></span>
         <span class="rte-color-caret">▾</span>
@@ -134,6 +151,27 @@ export function richTextColorPickerHtml({
       <div class="rte-color-pop" data-rte-pop="${safeId}">${swatches}</div>
     </div>
   `;
+}
+
+export function richTextHighlightPickerHtml({
+  id,
+  buttonClass = 'rte-btn',
+} = {}) {
+  const swatches = HIGHLIGHTS.map((highlight) =>
+    `<button type="button" class="rte-highlight-swatch" data-rte-highlight="${_esc(highlight.value)}" title="${_esc(highlight.name)}" aria-label="Surligner en ${_esc(highlight.name.toLowerCase())}" style="background:${_esc(highlight.value)}"></button>`
+  ).join('');
+  return `
+    <div class="rte-highlight">
+      <button type="button" class="${_esc(buttonClass)} rte-highlight-toggle" title="Surlignage" aria-label="Surlignage">
+        <span class="rte-highlight-letter">A</span>
+        <span class="rte-highlight-bar"></span>
+        <span class="rte-color-caret">▾</span>
+      </button>
+      <div class="rte-highlight-pop" data-rte-pop="${_esc(id)}">
+        <button type="button" class="rte-highlight-none" data-rte-highlight="initial">× Aucun surlignage</button>
+        <div class="rte-highlight-grid">${swatches}</div>
+      </div>
+    </div>`;
 }
 
 export function richTextEditableHtml({
@@ -183,6 +221,7 @@ export function richTextEditorHtml({ id, html = '', placeholder = '', minHeight 
         ${richTextCommandToolbarHtml({ groups: DEFAULT_RICH_TEXT_TOOLBAR_GROUPS.slice(0, 2) })}
         <span class="rte-sep"></span>
         ${richTextCommandToolbarHtml({ editorId: id, groups: [[{ type: 'color' }]], separatorClass: '' })}
+        ${richTextHighlightPickerHtml({ id })}
         ${richTextFontPickerHtml({ id })}
         ${richTextTextSizePickerHtml({ id })}
         <span class="rte-sep"></span>
@@ -218,6 +257,12 @@ function richTextToolbarEntryHtml(entry, { editorId, commandAttr, buttonClass, m
       buttonClass: spec.buttonClass || buttonClass,
     });
   }
+  if (spec.type === 'highlight') {
+    return richTextHighlightPickerHtml({
+      id: spec.editorId || editorId,
+      buttonClass: spec.buttonClass || buttonClass,
+    });
+  }
   if (spec.type === 'font') {
     return richTextFontPickerHtml({
       id: spec.editorId || editorId,
@@ -232,11 +277,14 @@ function richTextToolbarEntryHtml(entry, { editorId, commandAttr, buttonClass, m
   }
 
   const cfg = { ...(meta[spec.cmd] || {}), ...spec };
+  const isTablePicker = cfg.cmd === 'insertTable';
   const attrs = attrsHtml({
     type: 'button',
     class: [buttonClass, cfg.className].filter(Boolean).join(' '),
-    [commandAttr]: cfg.cmd,
+    [commandAttr]: isTablePicker ? null : cfg.cmd,
+    'data-rte-table-toggle': isTablePicker ? editorId : null,
     title: cfg.title || null,
+    'aria-label': cfg.title || null,
     'aria-pressed': cfg.stateful === false ? null : 'false',
   });
 
@@ -253,7 +301,7 @@ export function richTextFontPickerHtml({
 
   return `
     <div class="rte-font">
-      <button type="button" class="${_esc(buttonClass)} rte-font-toggle" title="Police d'écriture">
+      <button type="button" class="${_esc(buttonClass)} rte-font-toggle" title="Police d'écriture" aria-label="Police d'écriture">
         <span>Aa</span>
         <span class="rte-color-caret">▾</span>
       </button>
@@ -272,7 +320,7 @@ export function richTextTextSizePickerHtml({
 
   return `
     <div class="rte-size">
-      <button type="button" class="${_esc(buttonClass)} rte-size-toggle" title="Taille du texte">
+      <button type="button" class="${_esc(buttonClass)} rte-size-toggle" title="Taille du texte" aria-label="Taille du texte">
         <span>Tt</span>
         <span class="rte-color-caret">▾</span>
       </button>
@@ -306,7 +354,7 @@ function toggleRichTextPopup(pop, anchor) {
 
 function closeRichTextPopups(root, editorId = null, { remove = false } = {}) {
   const popups = [
-    ...Array.from(root?.querySelectorAll?.('.rte-color-pop, .rte-font-pop, .rte-size-pop') || []),
+    ...Array.from(root?.querySelectorAll?.('.rte-color-pop, .rte-highlight-pop, .rte-font-pop, .rte-size-pop') || []),
     ...detachedRichTextPopups(editorId),
   ];
 
@@ -338,6 +386,7 @@ function removeDuplicateDetachedPopups(pop) {
 
 function richTextPopupClass(pop) {
   if (pop.classList.contains('rte-color-pop')) return 'rte-color-pop';
+  if (pop.classList.contains('rte-highlight-pop')) return 'rte-highlight-pop';
   if (pop.classList.contains('rte-font-pop')) return 'rte-font-pop';
   if (pop.classList.contains('rte-size-pop')) return 'rte-size-pop';
   return '';
@@ -346,7 +395,7 @@ function richTextPopupClass(pop) {
 function detachedRichTextPopups(editorId = null) {
   const selector = editorId
     ? `body > [data-rte-pop="${CSS.escape(editorId)}"]`
-    : 'body > .rte-color-pop, body > .rte-font-pop, body > .rte-size-pop';
+    : 'body > .rte-color-pop, body > .rte-highlight-pop, body > .rte-font-pop, body > .rte-size-pop';
   return Array.from(document.querySelectorAll(selector));
 }
 
@@ -357,16 +406,19 @@ function setDefaultParagraphSeparator() {
 }
 
 function applyRichTextFont(editor, font) {
-  if (font === 'inherit') {
-    document.execCommand('fontName', false, DEFAULT_FONT_SENTINEL);
-    clearDefaultFontMarkers(editor);
-  } else {
-    document.execCommand('fontName', false, font);
-  }
+  const apply = () => {
+    if (font === 'inherit') document.execCommand('fontName', false, DEFAULT_FONT_SENTINEL);
+    else document.execCommand('fontName', false, font);
+  };
+  const grouped = applyRichTextToSelectedCells(editor, apply, 'formatFontName');
+  if (!grouped) apply();
+  if (font === 'inherit') clearDefaultFontMarkers(editor);
 }
 
 function applyRichTextTextSize(editor, size) {
-  document.execCommand('fontSize', false, '7');
+  const apply = () => document.execCommand('fontSize', false, '7');
+  const grouped = applyRichTextToSelectedCells(editor, apply, 'formatFontSize');
+  if (!grouped) apply();
   normalizeFontSizeMarkers(editor, size);
 }
 
@@ -438,17 +490,24 @@ export function bindRichTextColorPicker({
     e.preventDefault();
     selectionMemory.restore();
     const color = swatch.dataset.rteColor;
-    if (color === 'initial') {
-      clearRichTextColor(editor);
-    } else {
-      document.execCommand('foreColor', false, color);
+    const applyColor = () => {
+      if (color === 'initial') clearRichTextColor(editor);
+      else document.execCommand('foreColor', false, color);
+    };
+    const grouped = applyRichTextToSelectedCells(editor, applyColor, 'formatForeColor');
+    if (!grouped) {
+      applyColor();
+      colorSelectedLists(editor, color);
     }
-    colorSelectedLists(editor, color);
     if (bar) bar.style.background = color === 'initial' ? '' : color;
-    pop.classList.remove('show');
     selectionMemory.save();
     syncToolbarState?.();
     onAfterColor?.(color);
+  }, { signal });
+  pop.addEventListener('click', (event) => {
+    if (!event.target.closest('[data-rte-color]')) return;
+    event.preventDefault();
+    pop.classList.remove('show');
   }, { signal });
 
   document.addEventListener('mousedown', (e) => {
@@ -458,6 +517,64 @@ export function bindRichTextColorPicker({
       return;
     }
     if (root.contains(e.target) || pop.contains(e.target)) return;
+    pop.classList.remove('show');
+  }, { signal });
+}
+
+export function bindRichTextHighlightPicker({
+  editor,
+  root,
+  signal,
+  selection = null,
+  closePopups = null,
+  syncToolbarState = null,
+  onAfterHighlight = null,
+  isConnected = null,
+  onDisconnect = null,
+} = {}) {
+  if (!editor || !root) return;
+  const pop = detachRichTextPopup(root.querySelector('.rte-highlight-pop'));
+  const bar = root.querySelector('.rte-highlight-bar');
+  if (!pop) return;
+  removeDuplicateDetachedPopups(pop);
+
+  const selectionMemory = selection || createRichTextSelectionMemory(editor);
+  if (!selection) selectionMemory.bind(signal);
+
+  root.addEventListener('mousedown', (event) => {
+    const toggle = event.target.closest('.rte-highlight-toggle');
+    if (!toggle || !root.contains(toggle)) return;
+    selectionMemory.save();
+    event.preventDefault();
+    closePopups?.();
+    toggleRichTextPopup(pop, toggle);
+  }, { signal });
+
+  pop.addEventListener('mousedown', (event) => {
+    const swatch = event.target.closest('[data-rte-highlight]');
+    if (!swatch) return;
+    event.preventDefault();
+    selectionMemory.restore();
+    const color = swatch.dataset.rteHighlight;
+    applyRichTextHighlight(editor, color);
+    if (bar) bar.style.background = color === 'initial' ? '' : color;
+    selectionMemory.save();
+    syncToolbarState?.();
+    onAfterHighlight?.(color);
+  }, { signal });
+  pop.addEventListener('click', (event) => {
+    if (!event.target.closest('[data-rte-highlight]')) return;
+    event.preventDefault();
+    pop.classList.remove('show');
+  }, { signal });
+
+  document.addEventListener('mousedown', (event) => {
+    if (isConnected && !isConnected()) {
+      pop.remove();
+      onDisconnect?.();
+      return;
+    }
+    if (root.contains(event.target) || pop.contains(event.target)) return;
     pop.classList.remove('show');
   }, { signal });
 }
@@ -478,6 +595,7 @@ export function bindRichTextToolbar(id) {
     editorId: id,
     toolbarId: toolbar.id,
     enableColor: true,
+    enableHighlight: true,
     enableFont: true,
     enableSize: true,
   });
@@ -522,10 +640,14 @@ function bindRichTextFontPicker({
     const font = item.dataset.rteFont;
     selection.restore();
     applyRichTextFont(editor, font);
-    fontPop.classList.remove('show');
     selection.save();
     syncToolbarState?.();
     onAfterFont?.(font);
+  }, { signal });
+  fontPop.addEventListener('click', (event) => {
+    if (!event.target.closest('[data-rte-font]')) return;
+    event.preventDefault();
+    fontPop.classList.remove('show');
   }, { signal });
 
   bindRichTextPopupOutsideClose({
@@ -568,10 +690,14 @@ function bindRichTextTextSizePicker({
     const size = item.dataset.rteSize;
     selection.restore();
     applyRichTextTextSize(editor, size);
-    sizePop.classList.remove('show');
     selection.save();
     syncToolbarState?.();
     onAfterSize?.(size);
+  }, { signal });
+  sizePop.addEventListener('click', (event) => {
+    if (!event.target.closest('[data-rte-size]')) return;
+    event.preventDefault();
+    sizePop.classList.remove('show');
   }, { signal });
 
   bindRichTextPopupOutsideClose({
@@ -808,7 +934,9 @@ export function bindRichTextCommandToolbar({
 
     let handled = false;
     if (richTextCommands.has(cmd)) {
-      handled = execRichTextCommand(editor, cmd);
+      handled = RICH_TEXT_TABLE_INLINE_COMMANDS.has(cmd)
+        && applyRichTextToSelectedCells(editor, () => document.execCommand(cmd, false, null));
+      if (!handled) handled = execRichTextCommand(editor, cmd);
     } else {
       handled = onCommand?.({ cmd, editor, button: btn, event: e, syncToolbarState }) === true;
     }
@@ -831,6 +959,7 @@ export function bindRichTextToolbarControls({
   onCommand = null,
   onAfterCommand = null,
   enableColor = true,
+  enableHighlight = true,
   colorRoot = toolbar,
   isConnected = null,
   onDisconnect = null,
@@ -864,6 +993,20 @@ export function bindRichTextToolbarControls({
     });
   }
 
+  if (enableHighlight) {
+    bindRichTextHighlightPicker({
+      editor,
+      root: colorRoot,
+      signal,
+      selection,
+      closePopups,
+      syncToolbarState,
+      onAfterHighlight: onAfterCommand,
+      isConnected,
+      onDisconnect,
+    });
+  }
+
   return syncToolbarState;
 }
 
@@ -877,6 +1020,7 @@ export function bindRichTextEditorControls({
   customCommands = {},
   onAfterCommand = null,
   enableColor = true,
+  enableHighlight = true,
   enableFont = true,
   enableSize = true,
 } = {}) {
@@ -908,6 +1052,7 @@ export function bindRichTextEditorControls({
     onCommand: runCustomCommand,
     onAfterCommand,
     enableColor,
+    enableHighlight,
     selection,
     closePopups: () => closeRichTextPopups(toolbar),
     isConnected: () => toolbar.isConnected && editor.isConnected,
@@ -939,8 +1084,18 @@ export function bindRichTextEditorControls({
       onAfterSize: onAfterCommand,
     });
   }
+  bindRichTextTableControls({
+    editor,
+    toolbar,
+    signal,
+    selection,
+    editorId,
+    onAfterCommand,
+    syncToolbarState,
+  });
+  syncToolbarState();
 
-  if (enableColor || enableFont || enableSize) {
+  if (enableColor || enableHighlight || enableFont || enableSize) {
     bindRichTextPopupCleanup({
       root: toolbar,
       editor,
@@ -966,7 +1121,7 @@ function updateRichTextToolbarState(editor, toolbar, {
   const hasEditorSelection = !!range && nodeBelongsToEditor(editor, range.commonAncestorContainer);
 
   updateRichTextColorButtonState(editor, toolbar, range, hasEditorSelection);
-
+  updateRichTextHighlightButtonState(editor, toolbar, range, hasEditorSelection);
   toolbar.querySelectorAll(`[${commandAttr}]`).forEach((btn) => {
     const cmd = btn.getAttribute(commandAttr);
     if (!statefulCommands.has(cmd)) return;
@@ -975,6 +1130,24 @@ function updateRichTextToolbarState(editor, toolbar, {
     btn.classList.toggle('active', active);
     btn.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
+}
+
+function updateRichTextHighlightButtonState(editor, toolbar, range, hasEditorSelection) {
+  const bar = toolbar.querySelector('.rte-highlight-bar');
+  if (!bar) return;
+  const toggle = bar.closest('.rte-highlight-toggle');
+  const color = hasEditorSelection ? getRichTextSelectionHighlight(editor, range) : '';
+  if (color) {
+    bar.style.background = color;
+    toggle?.style.setProperty('--rte-current-highlight', color);
+    toggle?.classList.add('rte-highlight-toggle--active');
+    toggle?.setAttribute('title', 'Modifier ou retirer le surlignage');
+  } else {
+    bar.style.background = '';
+    toggle?.style.removeProperty('--rte-current-highlight');
+    toggle?.classList.remove('rte-highlight-toggle--active');
+    toggle?.setAttribute('title', 'Surlignage');
+  }
 }
 
 function updateRichTextColorButtonState(editor, toolbar, range, hasEditorSelection) {
@@ -1030,6 +1203,7 @@ function isRichTextCommandActive(cmd, range) {
 
 export function execRichTextCommand(editor, cmd, value = null) {
   if (!editor || !cmd) return false;
+  if (cmd === 'insertTable') return insertRichTextTable(editor);
   if (cmd === 'blockquote') return toggleRichTextBlock(editor, 'blockquote', 'p');
   if (BLOCK_COMMAND_TAGS[cmd]) return wrapRichTextBlock(editor, BLOCK_COMMAND_TAGS[cmd]);
   if (cmd === 'insertUnorderedList' || cmd === 'insertOrderedList') {
@@ -1038,6 +1212,711 @@ export function execRichTextCommand(editor, cmd, value = null) {
   }
   document.execCommand(cmd, false, value);
   return true;
+}
+
+function getRichTextSelectionHighlight(editor, range) {
+  if (!range) return '';
+  const candidates = [range.startContainer, range.endContainer, window.getSelection()?.anchorNode];
+  for (const node of candidates) {
+    let el = elementFromNode(node);
+    while (el && el !== editor) {
+      const color = el.style?.backgroundColor || el.style?.background;
+      if (color === 'transparent' || color === 'initial' || color === 'rgba(0, 0, 0, 0)') return '';
+      if (color) return color;
+      el = el.parentElement;
+    }
+  }
+  return '';
+}
+
+/** Insère un tableau éditable avec une ligne d'en-tête et deux lignes de contenu. */
+export function insertRichTextTable(editor, { columns = 3, bodyRows = 2 } = {}) {
+  if (!editor) return false;
+  const colCount = Math.max(1, Math.min(10, Number(columns) || 3));
+  const requestedRows = Number(bodyRows);
+  const rowCount = Math.max(0, Math.min(19, Number.isFinite(requestedRows) ? requestedRows : 2));
+  const wrap = document.createElement('div');
+  wrap.className = 'rte-table-wrap';
+  const table = document.createElement('table');
+  table.className = 'rte-table';
+  table.style.minWidth = `${Math.max(420, colCount * 110)}px`;
+  const thead = table.createTHead();
+  const headRow = thead.insertRow();
+  for (let col = 0; col < colCount; col++) {
+    const cell = document.createElement('th');
+    cell.scope = 'col';
+    cell.textContent = `Colonne ${col + 1}`;
+    headRow.appendChild(cell);
+  }
+  const tbody = table.createTBody();
+  for (let row = 0; row < rowCount; row++) {
+    const tr = tbody.insertRow();
+    for (let col = 0; col < colCount; col++) tr.insertCell().appendChild(document.createElement('br'));
+  }
+  wrap.appendChild(table);
+
+  const range = getSelectionRange();
+  const selected = range && nodeBelongsToEditor(editor, range.commonAncestorContainer)
+    ? elementFromNode(range.startContainer)
+    : null;
+  let topBlock = selected;
+  while (topBlock?.parentElement && topBlock.parentElement !== editor) topBlock = topBlock.parentElement;
+  if (topBlock && topBlock !== editor) topBlock.after(wrap);
+  else editor.appendChild(wrap);
+
+  const trailing = document.createElement('p');
+  trailing.appendChild(document.createElement('br'));
+  wrap.after(trailing);
+  focusRichTextTableCell(headRow.cells[0]);
+  notifyRichTextChange(editor, 'insertTable');
+  return true;
+}
+
+function createRichTextTablePicker(editorId) {
+  const picker = document.createElement('div');
+  picker.className = 'rte-table-picker';
+  picker.dataset.rteTablePicker = editorId;
+  picker.hidden = true;
+  picker.setAttribute('role', 'dialog');
+  picker.setAttribute('aria-label', 'Choisir la taille du tableau');
+  picker.innerHTML = `
+    <div class="rte-table-picker-title">Insérer un tableau</div>
+    <div class="rte-table-picker-grid" role="grid" aria-label="Dimensions du tableau">
+      ${Array.from({ length: 80 }, (_, index) => {
+        const row = Math.floor(index / 10) + 1;
+        const col = (index % 10) + 1;
+        return `<button type="button" role="gridcell" data-rte-table-size="${col}x${row}" data-col="${col}" data-row="${row}" aria-label="${col} colonnes sur ${row} lignes"></button>`;
+      }).join('')}
+    </div>
+    <div class="rte-table-picker-size" aria-live="polite">1 × 1</div>`;
+  document.body.appendChild(picker);
+  return picker;
+}
+
+function createRichTextTableMenu(editorId) {
+  const menu = document.createElement('div');
+  menu.className = 'rte-table-menu';
+  menu.dataset.rteTableMenu = editorId;
+  menu.hidden = true;
+  menu.setAttribute('role', 'menu');
+  const item = (action, icon, label, className = '') =>
+    `<button type="button" role="menuitem" class="rte-table-menu-item ${className}" data-rte-table-menu-action="${action}"><span aria-hidden="true">${icon}</span>${label}</button>`;
+  menu.innerHTML = `
+    <div class="rte-table-menu-section">
+      ${item('header', '▰', '<span data-rte-table-header-label>Ajouter une ligne d’en-tête</span>')}
+    </div>
+    <div class="rte-table-menu-separator"></div>
+    <div class="rte-table-menu-section">
+      ${item('select-row', '↔', 'Sélectionner la ligne')}
+      ${item('select-column', '↕', 'Sélectionner la colonne')}
+      ${item('select-table', '▦', 'Sélectionner le tableau')}
+    </div>
+    <div class="rte-table-menu-separator"></div>
+    <div class="rte-table-menu-section">
+      ${item('row-add-above', '＋', 'Insérer une ligne au-dessus')}
+      ${item('row-add-below', '＋', 'Insérer une ligne en dessous')}
+      ${item('column-add-left', '＋', 'Insérer une colonne à gauche')}
+      ${item('column-add-right', '＋', 'Insérer une colonne à droite')}
+    </div>
+    <div class="rte-table-menu-separator"></div>
+    <div class="rte-table-menu-section">
+      ${item('distribute-rows', '↕', 'Répartir les lignes')}
+      ${item('distribute-columns', '↔', 'Répartir les colonnes')}
+    </div>
+    <div class="rte-table-menu-hint">Glissez une bordure de cellule pour la redimensionner.</div>
+    <div class="rte-table-menu-separator"></div>
+    <div class="rte-table-menu-section">
+      ${item('row-remove', '⌫', 'Supprimer la ligne', 'is-danger')}
+      ${item('column-remove', '⌫', 'Supprimer la colonne', 'is-danger')}
+      ${item('delete', '⌫', 'Supprimer le tableau', 'is-danger')}
+    </div>
+    <div class="rte-table-menu-separator"></div>
+    <div class="rte-table-menu-align" aria-label="Alignement de la cellule">
+      <span>Aligner la cellule</span>
+      <button type="button" data-rte-table-menu-action="align-left" title="Aligner à gauche" aria-label="Aligner à gauche">≡←</button>
+      <button type="button" data-rte-table-menu-action="align-center" title="Centrer" aria-label="Centrer">≡</button>
+      <button type="button" data-rte-table-menu-action="align-right" title="Aligner à droite" aria-label="Aligner à droite">→≡</button>
+    </div>`;
+  document.body.appendChild(menu);
+  return menu;
+}
+
+function positionRichTextFloatingPanel(panel, left, top) {
+  panel.hidden = false;
+  panel.style.left = `${Math.max(8, left)}px`;
+  panel.style.top = `${Math.max(8, top)}px`;
+  const rect = panel.getBoundingClientRect();
+  panel.style.left = `${Math.max(8, Math.min(left, window.innerWidth - rect.width - 8))}px`;
+  panel.style.top = `${Math.max(8, Math.min(top, window.innerHeight - rect.height - 8))}px`;
+}
+
+function richTextTableCellFromRange(editor, range = getSelectionRange()) {
+  if (!editor || !range || !nodeBelongsToEditor(editor, range.commonAncestorContainer)) return null;
+  let cell = elementFromNode(range.startContainer)?.closest?.('th, td');
+  // Dans une cellule vide, Chromium place parfois l'ancre sur le <tr> avec
+  // un offset d'enfant plutôt que directement dans le <td>/<th>.
+  if (!cell && range.startContainer.nodeType === Node.ELEMENT_NODE) {
+    const children = range.startContainer.childNodes;
+    const child = children[Math.min(range.startOffset, children.length - 1)]
+      || children[Math.max(0, range.startOffset - 1)];
+    cell = elementFromNode(child)?.closest?.('th, td');
+  }
+  return cell && editor.contains(cell) ? cell : null;
+}
+
+function markRichTextTableCell(editor, cell) {
+  editor?.querySelector?.('[data-rte-active-cell]')?.removeAttribute('data-rte-active-cell');
+  if (cell && editor?.contains(cell)) cell.setAttribute('data-rte-active-cell', 'true');
+}
+
+function clearRichTextTableSelection(editor) {
+  editor?.querySelectorAll?.('[data-rte-selected-cell]').forEach((cell) => {
+    cell.removeAttribute('data-rte-selected-cell');
+  });
+}
+
+function selectRichTextTableRectangle(editor, startCell, endCell = startCell) {
+  const table = startCell?.closest('table');
+  if (!table || endCell?.closest('table') !== table) return [];
+  const rowStart = Math.min(startCell.parentElement.rowIndex, endCell.parentElement.rowIndex);
+  const rowEnd = Math.max(startCell.parentElement.rowIndex, endCell.parentElement.rowIndex);
+  const colStart = Math.min(startCell.cellIndex, endCell.cellIndex);
+  const colEnd = Math.max(startCell.cellIndex, endCell.cellIndex);
+  clearRichTextTableSelection(editor);
+  const selected = [];
+  [...table.rows].forEach((row, rowIndex) => {
+    if (rowIndex < rowStart || rowIndex > rowEnd) return;
+    [...row.cells].forEach((cell, colIndex) => {
+      if (colIndex < colStart || colIndex > colEnd) return;
+      cell.setAttribute('data-rte-selected-cell', 'true');
+      selected.push(cell);
+    });
+  });
+  editor.focus({ preventScroll: true });
+  window.getSelection()?.removeAllRanges();
+  return selected;
+}
+
+function richTextTableSelectedCells(editor, table = null) {
+  return [...editor.querySelectorAll('[data-rte-selected-cell]')]
+    .filter((cell) => !table || cell.closest('table') === table);
+}
+
+function applyRichTextToSelectedCells(editor, apply, inputType = 'formatBlock') {
+  const cells = richTextTableSelectedCells(editor);
+  if (!cells.length || typeof apply !== 'function') return false;
+  const selection = window.getSelection();
+  if (!selection) return false;
+
+  cells.forEach((cell) => {
+    if (!cell.isConnected || !editor.contains(cell)) return;
+    const range = document.createRange();
+    range.selectNodeContents(cell);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    apply(cell);
+    cell.setAttribute('data-rte-selected-cell', 'true');
+  });
+
+  selection.removeAllRanges();
+  editor.focus({ preventScroll: true });
+  cells.forEach((cell) => cell.setAttribute('data-rte-selected-cell', 'true'));
+  notifyRichTextChange(editor, inputType);
+  return true;
+}
+
+function ensureRichTextTableColumns(table) {
+  if (!table) return [];
+  const count = Math.max(1, ...[...table.rows].map((row) => row.cells.length));
+  let group = table.querySelector(':scope > colgroup');
+  if (!group) {
+    group = document.createElement('colgroup');
+    table.insertBefore(group, table.firstChild);
+  }
+  while (group.children.length < count) group.appendChild(document.createElement('col'));
+  while (group.children.length > count) group.lastElementChild.remove();
+  const firstRow = table.rows[0];
+  [...group.children].forEach((col, index) => {
+    if (col.style.width) return;
+    const measured = firstRow?.cells[index]?.getBoundingClientRect?.().width;
+    col.style.width = `${Math.max(60, Math.round(measured || 110))}px`;
+  });
+  return [...group.children];
+}
+
+function applyRichTextTableColumnWidths(table, columns = ensureRichTextTableColumns(table)) {
+  const total = columns.reduce((sum, col) => sum + (parseFloat(col.style.width) || 110), 0);
+  table.style.width = `${total}px`;
+  table.style.minWidth = `${total}px`;
+}
+
+function resizeRichTextTableColumn(table, index, width) {
+  const columns = ensureRichTextTableColumns(table);
+  if (!columns[index]) return;
+  columns[index].style.width = `${Math.max(60, Math.round(width))}px`;
+  applyRichTextTableColumnWidths(table, columns);
+}
+
+function resizeRichTextTableRow(row, height) {
+  if (row) row.style.height = `${Math.max(32, Math.round(height))}px`;
+}
+
+function distributeRichTextTableColumns(table) {
+  const columns = ensureRichTextTableColumns(table);
+  const available = table.closest('.rte-table-wrap')?.clientWidth || table.getBoundingClientRect().width;
+  const width = Math.max(80, Math.floor(available / columns.length));
+  columns.forEach((col) => { col.style.width = `${width}px`; });
+  applyRichTextTableColumnWidths(table, columns);
+}
+
+function distributeRichTextTableRows(table) {
+  const rows = [...table.rows];
+  const height = Math.max(32, ...rows.map((row) => Math.ceil(row.getBoundingClientRect().height)));
+  rows.forEach((row) => { row.style.height = `${height}px`; });
+}
+
+function copyRichTextTableSelection(editor, event, cut = false) {
+  const cells = richTextTableSelectedCells(editor);
+  if (!cells.length || !event.clipboardData) return false;
+  const table = cells[0].closest('table');
+  const selected = new Set(cells.filter((cell) => cell.closest('table') === table));
+  const rows = [...table.rows].filter((row) => [...row.cells].some((cell) => selected.has(cell)));
+  const text = rows.map((row) => [...row.cells]
+    .filter((cell) => selected.has(cell))
+    .map((cell) => cell.innerText.trim())
+    .join('\t')).join('\n');
+  const html = `<table>${rows.map((row) => `<tr>${[...row.cells]
+    .filter((cell) => selected.has(cell))
+    .map((cell) => `<td>${cell.innerHTML}</td>`).join('')}</tr>`).join('')}</table>`;
+  event.preventDefault();
+  event.clipboardData.setData('text/plain', text);
+  event.clipboardData.setData('text/html', html);
+  if (cut) {
+    cells.forEach((cell) => { cell.innerHTML = '<br>'; });
+    notifyRichTextChange(editor, 'deleteByCut');
+  }
+  return true;
+}
+
+function focusRichTextTableCell(cell, atEnd = false) {
+  if (!cell) return;
+  const sel = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(cell);
+  range.collapse(!atEnd);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  const editor = cell.closest('[contenteditable="true"]');
+  markRichTextTableCell(editor, cell.matches?.('th, td') ? cell : null);
+  editor?.focus?.({ preventScroll: true });
+}
+
+function notifyRichTextChange(editor, inputType = 'formatBlock') {
+  let event;
+  try { event = new InputEvent('input', { bubbles: true, inputType }); }
+  catch { event = new Event('input', { bubbles: true }); }
+  editor.dispatchEvent(event);
+}
+
+function removeRichTextTable(table, editor) {
+  const wrap = table.closest('.rte-table-wrap');
+  const anchor = wrap || table;
+  let next = anchor.nextElementSibling;
+  if (!next) {
+    next = document.createElement('p');
+    next.appendChild(document.createElement('br'));
+    anchor.after(next);
+  }
+  anchor.remove();
+  focusRichTextTableCell(next);
+  notifyRichTextChange(editor, 'deleteContent');
+}
+
+function toggleRichTextTableHeader(table) {
+  const head = table.tHead;
+  if (head?.rows.length) {
+    const body = table.tBodies[0] || table.createTBody();
+    const rows = [...head.rows];
+    const firstRow = rows[0];
+    rows.reverse().forEach((row) => {
+      [...row.cells].forEach((cell) => {
+        const td = document.createElement('td');
+        td.innerHTML = cell.innerHTML;
+        td.style.cssText = cell.style.cssText;
+        cell.replaceWith(td);
+      });
+      body.insertBefore(row, body.firstChild);
+    });
+    head.remove();
+    return firstRow?.cells[0] || null;
+  }
+  const body = table.tBodies[0];
+  const count = body?.rows[0]?.cells.length || table.rows[0]?.cells.length || 1;
+  const newHead = table.createTHead();
+  const row = newHead.insertRow();
+  for (let index = 0; index < count; index++) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    th.textContent = `Colonne ${index + 1}`;
+    row.appendChild(th);
+  }
+  return row.cells[0];
+}
+
+function syncRichTextTableWidth(table) {
+  const columnsGroup = table?.querySelector(':scope > colgroup');
+  if (columnsGroup?.children.length) {
+    applyRichTextTableColumnWidths(table, ensureRichTextTableColumns(table));
+    return;
+  }
+  const columns = table?.rows[0]?.cells.length || 1;
+  table?.style.setProperty('min-width', `${Math.max(420, columns * 110)}px`);
+}
+
+function runRichTextTableAction(editor, cell, action) {
+  const table = cell?.closest('table');
+  if (!table || !editor.contains(table)) return false;
+  const row = cell.parentElement;
+  const colIndex = cell.cellIndex;
+  let focusCell = cell;
+
+  if (action === 'select-row') {
+    selectRichTextTableRectangle(editor, row.cells[0], row.cells[row.cells.length - 1]);
+    return true;
+  }
+  if (action === 'select-column') {
+    const lastRow = table.rows[table.rows.length - 1];
+    selectRichTextTableRectangle(
+      editor,
+      table.rows[0].cells[Math.min(colIndex, table.rows[0].cells.length - 1)],
+      lastRow.cells[Math.min(colIndex, lastRow.cells.length - 1)],
+    );
+    return true;
+  }
+  if (action === 'select-table') {
+    const lastRow = table.rows[table.rows.length - 1];
+    selectRichTextTableRectangle(editor, table.rows[0].cells[0], lastRow.cells[lastRow.cells.length - 1]);
+    return true;
+  }
+  if (action === 'distribute-columns') {
+    distributeRichTextTableColumns(table);
+  } else if (action === 'distribute-rows') {
+    distributeRichTextTableRows(table);
+  } else if (action === 'row-add' || action === 'row-add-above' || action === 'row-add-below') {
+    const above = action === 'row-add-above';
+    const currentSection = row.parentElement;
+    const body = table.tBodies[0] || table.createTBody();
+    const section = currentSection.tagName === 'THEAD' && above ? currentSection : body;
+    const targetIndex = currentSection === section
+      ? row.sectionRowIndex + (above ? 0 : 1)
+      : 0;
+    const newRow = section.insertRow(targetIndex);
+    const count = table.rows[0]?.cells.length || 1;
+    for (let i = 0; i < count; i++) {
+      const added = document.createElement(section.tagName === 'THEAD' ? 'th' : 'td');
+      if (added.tagName === 'TH') added.scope = 'col';
+      added.appendChild(document.createElement('br'));
+      newRow.appendChild(added);
+    }
+    focusCell = newRow.cells[Math.min(colIndex, count - 1)];
+  } else if (action === 'row-remove') {
+    if (table.rows.length <= 1) return removeRichTextTable(table, editor), true;
+    const rowIndex = row.rowIndex;
+    const nextRow = table.rows[rowIndex + 1] || table.rows[rowIndex - 1];
+    const section = row.parentElement;
+    row.remove();
+    if (!section.rows?.length && section.tagName === 'THEAD') section.remove();
+    focusCell = nextRow?.cells[Math.min(colIndex, (nextRow?.cells.length || 1) - 1)];
+  } else if (action === 'column-add' || action === 'column-add-left' || action === 'column-add-right') {
+    const before = action === 'column-add-left';
+    [...table.rows].forEach((currentRow) => {
+      const source = currentRow.cells[Math.min(colIndex, currentRow.cells.length - 1)];
+      const added = document.createElement(currentRow.parentElement.tagName === 'THEAD' ? 'th' : 'td');
+      if (added.tagName === 'TH') added.scope = 'col';
+      added.appendChild(document.createElement('br'));
+      if (source) source[before ? 'before' : 'after'](added);
+      else currentRow.appendChild(added);
+      if (currentRow === row) focusCell = added;
+    });
+    syncRichTextTableWidth(table);
+  } else if (action === 'column-remove') {
+    if ((table.rows[0]?.cells.length || 1) <= 1) return removeRichTextTable(table, editor), true;
+    [...table.rows].forEach((currentRow) => currentRow.cells[colIndex]?.remove());
+    syncRichTextTableWidth(table);
+    focusCell = row.cells[Math.min(colIndex, row.cells.length - 1)];
+  } else if (action === 'header') {
+    focusCell = toggleRichTextTableHeader(table) || cell;
+  } else if (action.startsWith('align-')) {
+    const selected = richTextTableSelectedCells(editor, table);
+    const targets = selected.includes(cell) ? selected : [cell];
+    targets.forEach((target) => { target.style.textAlign = action.slice(6); });
+  } else if (action === 'delete') {
+    removeRichTextTable(table, editor);
+    return true;
+  } else {
+    return false;
+  }
+
+  focusRichTextTableCell(focusCell);
+  notifyRichTextChange(editor, 'formatBlock');
+  return true;
+}
+
+function bindRichTextTableControls({
+  editor,
+  toolbar,
+  signal,
+  selection,
+  editorId,
+  onAfterCommand,
+  syncToolbarState,
+}) {
+  const toggle = toolbar?.querySelector('[data-rte-table-toggle]');
+  if (!toggle) return;
+  document.querySelectorAll(`[data-rte-table-picker="${CSS.escape(editorId)}"], [data-rte-table-menu="${CSS.escape(editorId)}"]`)
+    .forEach((node) => node.remove());
+  const picker = createRichTextTablePicker(editorId);
+  const menu = createRichTextTableMenu(editorId);
+  const pickerCells = [...picker.querySelectorAll('[data-rte-table-size]')];
+  let activeCell = null;
+  let rangeStartCell = null;
+  let rangeSelecting = false;
+  let suppressClickUntil = 0;
+  let resizeState = null;
+
+  const closePicker = () => { picker.hidden = true; };
+  const closeMenu = () => { menu.hidden = true; };
+  const closeAll = () => { closePicker(); closeMenu(); };
+  const highlightSize = (col = 1, row = 1) => {
+    pickerCells.forEach((button) => {
+      button.classList.toggle('is-selected', Number(button.dataset.col) <= col && Number(button.dataset.row) <= row);
+    });
+    const label = picker.querySelector('.rte-table-picker-size');
+    if (label) label.textContent = `${col} × ${row}`;
+  };
+  const rememberCell = (event) => {
+    const pointedCell = event?.target?.closest?.('th, td');
+    const selectedCell = richTextTableCellFromRange(editor);
+    if (event?.target && editor.contains(event.target)) {
+      activeCell = (pointedCell && editor.contains(pointedCell) ? pointedCell : null) || selectedCell;
+    } else {
+      activeCell = selectedCell || activeCell;
+    }
+    markRichTextTableCell(editor, activeCell);
+  };
+  const openMenu = (cell, x, y) => {
+    activeCell = cell;
+    markRichTextTableCell(editor, cell);
+    closePicker();
+    const hasHeader = !!cell.closest('table')?.tHead;
+    const headerLabel = menu.querySelector('[data-rte-table-header-label]');
+    if (headerLabel) headerLabel.textContent = hasHeader ? 'Retirer la ligne d’en-tête' : 'Ajouter une ligne d’en-tête';
+    positionRichTextFloatingPanel(menu, x, y);
+    menu.querySelector('[role="menuitem"]')?.focus({ preventScroll: true });
+  };
+  const resizeEdge = (event, cell) => {
+    if (!cell) return null;
+    const rect = cell.getBoundingClientRect();
+    const rightDistance = Math.abs(rect.right - event.clientX);
+    const bottomDistance = Math.abs(rect.bottom - event.clientY);
+    if (rightDistance <= 7 && rightDistance <= bottomDistance) return 'column';
+    if (bottomDistance <= 7) return 'row';
+    return null;
+  };
+  const updateResizeCursor = (event) => {
+    if (resizeState) return;
+    const cell = event.target.closest?.('th, td');
+    editor.querySelector('[data-rte-resize-edge]')?.removeAttribute('data-rte-resize-edge');
+    const edge = cell && editor.contains(cell) ? resizeEdge(event, cell) : null;
+    if (edge) cell.setAttribute('data-rte-resize-edge', edge);
+  };
+
+  toggle.addEventListener('mousedown', (event) => {
+    selection?.save?.();
+    event.preventDefault();
+  }, { signal });
+  toggle.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    closeMenu();
+    if (!picker.hidden) return closePicker();
+    highlightSize(1, 1);
+    const rect = toggle.getBoundingClientRect();
+    positionRichTextFloatingPanel(picker, rect.left, rect.bottom + POPUP_OFFSET);
+  }, { signal });
+
+  picker.addEventListener('pointerover', (event) => {
+    const button = event.target.closest('[data-rte-table-size]');
+    if (button) highlightSize(Number(button.dataset.col), Number(button.dataset.row));
+  }, { signal });
+  picker.addEventListener('focusin', (event) => {
+    const button = event.target.closest('[data-rte-table-size]');
+    if (button) highlightSize(Number(button.dataset.col), Number(button.dataset.row));
+  }, { signal });
+  picker.addEventListener('mousedown', (event) => {
+    if (!event.target.closest('[data-rte-table-size]')) return;
+    event.preventDefault();
+  }, { signal });
+  picker.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-rte-table-size]');
+    if (!button) return;
+    selection?.restore?.();
+    const columns = Number(button.dataset.col);
+    const rows = Number(button.dataset.row);
+    insertRichTextTable(editor, { columns, bodyRows: Math.max(0, rows - 1) });
+    closePicker();
+    syncToolbarState?.();
+    onAfterCommand?.({ cmd: 'insertTable', editor, button, event });
+  }, { signal });
+
+  editor.addEventListener('mousemove', updateResizeCursor, { signal });
+  editor.addEventListener('mouseleave', () => {
+    if (!resizeState) editor.querySelector('[data-rte-resize-edge]')?.removeAttribute('data-rte-resize-edge');
+  }, { signal });
+  editor.addEventListener('mousedown', (event) => {
+    const cell = event.target.closest?.('th, td');
+    if (event.button !== 0 || !cell || !editor.contains(cell)) return;
+    const edge = resizeEdge(event, cell);
+    if (edge) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const table = cell.closest('table');
+      const columns = edge === 'column' ? ensureRichTextTableColumns(table) : [];
+      resizeState = {
+        edge,
+        editor,
+        table,
+        cell,
+        row: cell.parentElement,
+        index: cell.cellIndex,
+        startX: event.clientX,
+        startY: event.clientY,
+        startSize: edge === 'column'
+          ? (parseFloat(columns[cell.cellIndex]?.style.width) || cell.getBoundingClientRect().width)
+          : cell.parentElement.getBoundingClientRect().height,
+      };
+      editor.classList.add('rte-table-is-resizing');
+      document.body.classList.add(`rte-table-resize-${edge}`);
+      return;
+    }
+    rangeStartCell = cell;
+    rangeSelecting = false;
+    if (event.shiftKey && activeCell?.closest('table') === cell.closest('table')) {
+      event.preventDefault();
+      selectRichTextTableRectangle(editor, activeCell, cell);
+      rangeSelecting = true;
+    } else if (!cell.hasAttribute('data-rte-selected-cell')) {
+      clearRichTextTableSelection(editor);
+    }
+  }, { signal });
+  document.addEventListener('mousemove', (event) => {
+    if (resizeState) {
+      event.preventDefault();
+      if (resizeState.edge === 'column') {
+        resizeRichTextTableColumn(
+          resizeState.table,
+          resizeState.index,
+          resizeState.startSize + event.clientX - resizeState.startX,
+        );
+      } else {
+        resizeRichTextTableRow(resizeState.row, resizeState.startSize + event.clientY - resizeState.startY);
+      }
+      return;
+    }
+    if (!rangeStartCell || !(event.buttons & 1)) return;
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('th, td');
+    if (!target || target === rangeStartCell || target.closest('table') !== rangeStartCell.closest('table')) return;
+    event.preventDefault();
+    rangeSelecting = true;
+    editor.classList.add('rte-table-is-selecting');
+    selectRichTextTableRectangle(editor, rangeStartCell, target);
+  }, { signal });
+  document.addEventListener('mouseup', () => {
+    if (resizeState) {
+      resizeState.editor.classList.remove('rte-table-is-resizing');
+      document.body.classList.remove(`rte-table-resize-${resizeState.edge}`);
+      resizeState.cell.removeAttribute('data-rte-resize-edge');
+      notifyRichTextChange(editor, 'formatBlock');
+      onAfterCommand?.({ cmd: `table:resize-${resizeState.edge}`, editor });
+      resizeState = null;
+    }
+    if (rangeSelecting) {
+      suppressClickUntil = Date.now() + 120;
+      editor.classList.remove('rte-table-is-selecting');
+    }
+    rangeStartCell = null;
+    rangeSelecting = false;
+  }, { signal });
+  editor.addEventListener('mousedown', rememberCell, { signal });
+  editor.addEventListener('click', (event) => {
+    if (Date.now() < suppressClickUntil) {
+      event.preventDefault();
+      return;
+    }
+    const cell = event.target.closest?.('th, td');
+    if (cell && !event.shiftKey) clearRichTextTableSelection(editor);
+    rememberCell(event);
+  }, { signal });
+  editor.addEventListener('keyup', rememberCell, { signal });
+  editor.addEventListener('copy', (event) => copyRichTextTableSelection(editor, event), { signal });
+  editor.addEventListener('cut', (event) => copyRichTextTableSelection(editor, event, true), { signal });
+  editor.addEventListener('contextmenu', (event) => {
+    const cell = event.target.closest('th, td');
+    if (!cell || !editor.contains(cell)) return;
+    event.preventDefault();
+    openMenu(cell, event.clientX, event.clientY);
+  }, { signal });
+  editor.addEventListener('keydown', (event) => {
+    const cell = editor.querySelector('[data-rte-active-cell]')
+      || richTextTableCellFromRange(editor)
+      || activeCell;
+    if ((event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) && cell) {
+      event.preventDefault();
+      const rect = cell.getBoundingClientRect();
+      openMenu(cell, rect.left + 12, rect.top + 12);
+      return;
+    }
+    const selectedCells = richTextTableSelectedCells(editor);
+    if ((event.key === 'Backspace' || event.key === 'Delete') && selectedCells.length) {
+      event.preventDefault();
+      selectedCells.forEach((selectedCell) => { selectedCell.innerHTML = '<br>'; });
+      notifyRichTextChange(editor, 'deleteContent');
+      return;
+    }
+    if (event.key !== 'Tab' || !cell) return;
+    const cells = [...cell.closest('table').querySelectorAll('th, td')];
+    const index = cells.indexOf(cell);
+    let target = cells[index + (event.shiftKey ? -1 : 1)];
+    if (!target && !event.shiftKey) {
+      runRichTextTableAction(editor, cell, 'row-add-below');
+      target = [...cell.closest('table')?.querySelectorAll('th, td') || []][index + 1] || null;
+    }
+    if (!target) return;
+    event.preventDefault();
+    focusRichTextTableCell(target);
+    activeCell = target;
+  }, { signal });
+
+  menu.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-rte-table-menu-action]');
+    if (!button) return;
+    event.preventDefault();
+    if (!runRichTextTableAction(editor, activeCell, button.dataset.rteTableMenuAction)) return;
+    closeMenu();
+    syncToolbarState?.();
+    onAfterCommand?.({ cmd: `table:${button.dataset.rteTableMenuAction}`, editor, button, event });
+  }, { signal });
+
+  document.addEventListener('mousedown', (event) => {
+    if (picker.contains(event.target) || menu.contains(event.target) || toggle.contains(event.target)) return;
+    closeAll();
+  }, { signal });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeAll();
+  }, { signal });
+  window.addEventListener('resize', closeAll, { signal });
+  window.addEventListener('scroll', closeAll, { signal, capture: true });
+  signal.addEventListener('abort', () => { picker.remove(); menu.remove(); }, { once: true });
 }
 
 function toggleRichTextBlock(editor, tag, fallbackTag = 'p') {
@@ -1356,11 +2235,13 @@ const RICH_TEXT_DROP_CONTENT_TAGS = new Set([
 const RICH_TEXT_ALLOWED_TAGS = new Set([
   'a', 'b', 'blockquote', 'br', 'code', 'div', 'em', 'font', 'h1', 'h2',
   'h3', 'h4', 'hr', 'i', 'img', 'li', 'ol', 'p', 'pre', 's', 'span',
-  'strike', 'strong', 'sub', 'sup', 'u', 'ul',
+  'strike', 'strong', 'sub', 'sup', 'table', 'tbody', 'td', 'tfoot', 'th',
+  'thead', 'tr', 'u', 'ul', 'caption', 'colgroup', 'col',
 ]);
 const RICH_TEXT_ALLOWED_ATTRS = new Set([
   'alt', 'class', 'color', 'contenteditable', 'face', 'height', 'href',
   'rel', 'size', 'src', 'style', 'target', 'title', 'width', 'xlink:href',
+  'colspan', 'rowspan', 'scope',
 ]);
 const RICH_TEXT_ALLOWED_STYLE_PROPS = new Set([
   'background', 'background-color', 'border', 'border-color',
@@ -1374,7 +2255,8 @@ const RICH_TEXT_ALLOWED_STYLE_PROPS = new Set([
   'margin-bottom', 'margin-left', 'margin-right', 'margin-top', 'opacity',
   'padding', 'padding-bottom', 'padding-left', 'padding-right', 'padding-top',
   'text-align', 'text-decoration', 'text-transform', 'user-select', 'vertical-align',
-  'white-space',
+  'white-space', 'border-collapse', 'table-layout', 'width', 'min-width', 'max-width',
+  'height', 'min-height', 'max-height',
 ]);
 
 // Sanitisation : whitelist des tags/attributs utiles au rich-text, retrait des
@@ -1406,7 +2288,78 @@ export function sanitizeRichTextHtml(html) {
   tpl.content.querySelectorAll('blockquote').forEach((bq) => {
     if (_isEmptyBlockquote(bq)) bq.remove();
   });
+  tpl.content.querySelectorAll('[data-rte-active-cell], [data-rte-selected-cell], [data-rte-resize-edge]').forEach((cell) => {
+    cell.removeAttribute('data-rte-active-cell');
+    cell.removeAttribute('data-rte-selected-cell');
+    cell.removeAttribute('data-rte-resize-edge');
+  });
+  // Les tableaux anciens ou collés gagnent le même conteneur responsive que
+  // ceux créés par la barre d'outils, sans doubler les wrappers déjà présents.
+  tpl.content.querySelectorAll('table').forEach((table) => {
+    table.classList.add('rte-table');
+    if (!table.style.minWidth) syncRichTextTableWidth(table);
+    if (table.parentElement?.classList.contains('rte-table-wrap')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'rte-table-wrap';
+    table.before(wrap);
+    wrap.appendChild(table);
+  });
   return tpl.innerHTML;
+}
+
+function applyRichTextHighlight(editor, color) {
+  const selectedCells = richTextTableSelectedCells(editor);
+  if (selectedCells.length) {
+    selectedCells.forEach((cell) => {
+      applyRichTextCellHighlight(cell, color);
+      cell.setAttribute('data-rte-selected-cell', 'true');
+    });
+    notifyRichTextChange(editor, 'formatBackColor');
+    return;
+  }
+
+  const value = color === 'initial' ? 'transparent' : color;
+  let applied = false;
+  try { applied = document.execCommand('hiliteColor', false, value); } catch {}
+  if (!applied) {
+    try { document.execCommand('backColor', false, value); } catch {}
+  }
+}
+
+function applyRichTextCellHighlight(cell, color) {
+  if (color === 'initial') {
+    [cell, ...cell.querySelectorAll('[style*="background"]')].forEach((element) => {
+      element.style.removeProperty('background');
+      element.style.removeProperty('background-color');
+      if (!element.getAttribute('style')) element.removeAttribute('style');
+    });
+    cell.querySelectorAll('span:not([class])').forEach((span) => {
+      if (!span.attributes.length) unwrapElement(span);
+    });
+    return;
+  }
+
+  cell.style.backgroundColor = color;
+  const showText = globalThis.NodeFilter?.SHOW_TEXT || 4;
+  const walker = document.createTreeWalker(cell, showText);
+  const textNodes = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (!node.textContent?.trim()) continue;
+    if (elementFromNode(node)?.closest?.('[contenteditable="false"]')) continue;
+    textNodes.push(node);
+  }
+  textNodes.forEach((node) => {
+    const parent = node.parentElement;
+    if (parent?.tagName === 'SPAN' && parent.childNodes.length === 1 && !parent.className) {
+      parent.style.backgroundColor = color;
+      return;
+    }
+    const span = document.createElement('span');
+    span.style.backgroundColor = color;
+    node.before(span);
+    span.appendChild(node);
+  });
 }
 
 function sanitizeRichTextAttributes(n, tag) {

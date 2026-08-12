@@ -175,10 +175,12 @@ async function renderHistoire() {
             [
               'insertUnorderedList',
               'insertOrderedList',
+              'insertTable',
               'insertHorizontalRule',
             ],
             [
               { type: 'color' },
+              { type: 'highlight' },
               { type: 'font' },
               { type: 'size' },
               { cmd: 'scene', title: 'Ajouter un marqueur de scène', html: '⛳ Scène', className: 'hist-tool--wide', stateful: false },
@@ -236,7 +238,7 @@ async function renderHistoire() {
       <!-- Barre de statut -->
       <div class="hist-statusbar">
         <span id="hist-wordcount">${wordCount} mot${wordCount !== 1 ? 's' : ''}</span>
-        <span class="hist-tip">@ tag · <kbd>[</kbd> jet de dé · ⛳ scène</span>
+        <span class="hist-tip">@ tag · <kbd>[</kbd> jet de dé · ▦ tableau · ⛳ scène</span>
       </div>
 
     </div>

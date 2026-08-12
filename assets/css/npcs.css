@@ -4788,3 +4788,151 @@ input.npc-side-name {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ── Synthèse « Points de caractéristiques » (reprise de la fiche joueur) ──
+   Rendu identique à .cs-v3 .stats-summary de characters.css, re-scopé pour la
+   page PNJ (les classes .stats-summary* n'y étaient pas chargées). */
+.npc-sheet .npc-stats-banner .stats-summary {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; min-width: 0; padding: 8px 10px;
+  background: rgba(79,140,255,.045);
+  border: 1px solid rgba(79,140,255,.16);
+  border-radius: 7px;
+}
+.npc-sheet .npc-stats-banner .stats-summary-title { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.npc-sheet .npc-stats-banner .stats-summary-title span { color: var(--text-muted); font-size: .65rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.npc-sheet .npc-stats-banner .stats-summary-title strong { color: var(--text); font-family: 'Outfit', sans-serif; font-size: 1.25rem; line-height: 1; }
+.npc-sheet .npc-stats-banner .stats-summary-formula { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.npc-sheet .npc-stats-banner .stats-summary-formula > span { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.npc-sheet .npc-stats-banner .stats-summary-formula small { color: var(--text-dim); font-size: .56rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.npc-sheet .npc-stats-banner .stats-summary-formula b { color: var(--text-soft); font-family: 'Outfit', sans-serif; font-size: .78rem; }
+.npc-sheet .npc-stats-banner .stats-summary-formula b.pos { color: var(--emerald); }
+.npc-sheet .npc-stats-banner .stats-summary-formula b.neg { color: var(--crimson-light, #ff8ca7); }
+.npc-sheet .npc-stats-banner .stats-summary-formula i { color: var(--text-dim); font-size: .7rem; font-style: normal; opacity: .65; }
+.npc-sheet .npc-stats-banner .stats-summary-formula .is-total { padding-left: 8px; border-left: 1px solid var(--border); }
+.npc-sheet .npc-stats-banner .stats-summary-formula .is-total b { color: var(--blue-light, #7fb0ff); font-size: .95rem; }
+@media (max-width: 760px) {
+  .npc-sheet .npc-stats-banner .stats-summary { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .npc-sheet .npc-stats-banner .stats-summary-formula { width: 100%; justify-content: space-between; gap: 4px; }
+  .npc-sheet .npc-stats-banner .stats-summary-formula > span { flex-direction: column; gap: 1px; }
+}
+
+/* ── Zone MJ : Stats (info, gauche) + Équipement/Combat (droite) côte à côte ──
+   Comme la fiche perso. N'affecte QUE ce bloc ; le reste de la fiche (profil,
+   chronologie, relations) est inchangé. Empilé sous 1000px. */
+.npc-sheet .npc-mecha-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.npc-sheet .npc-mecha-grid > .npc-character-stats,
+.npc-sheet .npc-mecha-grid > .npc-character-combat { min-width: 0; }
+/* La bannière de stats passe à 3 colonnes dans la demi-largeur (2 rangées de 3). */
+.npc-sheet .npc-mecha-grid .npc-stats-banner { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1000px) {
+  .npc-sheet .npc-mecha-grid { grid-template-columns: minmax(0, 1fr); }
+  .npc-sheet .npc-mecha-grid .npc-stats-banner { grid-template-columns: repeat(6, minmax(110px, 1fr)); }
+}
+
+/* ── Bandeau PNJ façon fiche perso : ajustements des champs éditables MJ ──── */
+.npc-sheet .npc-id-side .npc-lvl-inp {
+  width: 2.4em; background: transparent; border: none; color: inherit;
+  font: inherit; text-align: center; padding: 0; -moz-appearance: textfield;
+}
+.npc-sheet .npc-id-side .npc-id-name-inp {
+  width: 100%; background: transparent; border: none; border-bottom: 1px dashed transparent;
+  color: inherit; font: inherit; text-align: center;
+}
+.npc-sheet .npc-id-side .npc-id-name-inp:hover,
+.npc-sheet .npc-id-side .npc-id-name-inp:focus { border-bottom-color: var(--border-strong); outline: none; }
+.npc-sheet .npc-id-relation {
+  display: block; text-align: center; font-size: .7rem; font-weight: 700;
+  color: var(--tag, var(--gold)); margin: 4px 0 6px;
+}
+.npc-sheet .npc-vital-base { cursor: default; }
+.npc-sheet .npc-vital-base-inp {
+  width: 3.4em; background: rgba(0,0,0,.2); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font: inherit; font-weight: 700;
+  text-align: center; padding: 2px 4px; -moz-appearance: textfield;
+}
+.npc-sheet .npc-dossier-card {
+  border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+  background: rgba(8,13,22,.5); display: flex; flex-direction: column; gap: 10px;
+}
+.npc-sheet .npc-dossier-card .npc-profile-status { display: flex; gap: 6px; flex-wrap: wrap; }
+.npc-sheet .npc-dossier-desc { display: flex; flex-direction: column; gap: 3px; font-size: .72rem; color: var(--text-dim); }
+.npc-sheet .npc-dossier-desc textarea { width: 100%; box-sizing: border-box; }
+
+/* ── Fiche PNJ façon perso : colonne principale (stats + combat) ─────────── */
+.npc-sheet.cs-v3 .npc-main-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.npc-sheet.cs-v3 .npc-character-stats {
+  border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+  background: rgba(0,0,0,.14);
+}
+.npc-sheet.cs-v3 .npc-character-stats .stats-banner { border-bottom: none; }
+/* Écartement du bloc combat/équipement depuis le bord (comme les autres panneaux). */
+.npc-sheet.cs-v3 .npc-character-combat {
+  padding: 16px 18px; border: 1px solid var(--border); border-radius: 14px;
+  background: rgba(0,0,0,.14); display: flex; flex-direction: column; gap: 14px;
+}
+/* Base éditable dans la tuile de stat (input à la place du bouton perso). */
+.npc-sheet.cs-v3 .npc-stat-seg-input {
+  width: 100%; max-width: 3em; background: transparent; border: none;
+  text-align: center; font-family: 'Outfit', system-ui, sans-serif;
+  font-weight: 800; font-size: .95rem; color: var(--amber); padding: 0;
+  -moz-appearance: textfield;
+}
+.npc-sheet.cs-v3 .npc-stat-seg-input:focus { outline: 1px solid var(--amber); border-radius: 4px; }
+/* « / max » dans la barre vitale (valeur actuelle / max). */
+.npc-sheet.cs-v3 .npc-vital-max { color: var(--text-muted); font-weight: 700; margin-left: 2px; }
+/* Champs du dossier (rôle / lieu / organisations) alignés et éditables même vides. */
+.npc-sheet.cs-v3 .npc-profile-fields { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
+.npc-sheet.cs-v3 .npc-profile-fields label { display: flex; flex-direction: column; gap: 3px; font-size: .68rem; color: var(--text-dim); }
+.npc-sheet.cs-v3 .npc-profile-fields input { width: 100%; box-sizing: border-box; }
+@media (max-width: 720px) { .npc-sheet.cs-v3 .npc-profile-fields { grid-template-columns: 1fr; } }
+
+/* ── Identité PNJ : actions à droite + icône portrait propre ─────────────── */
+.npc-sheet .id-actions-mini.npc-id-actions { justify-content: flex-end; gap: 6px; }
+.npc-sheet .id-actions-mini.npc-id-actions .npc-photo-btn svg { display: block; }
+
+/* Statut (Vivant / Mort / Disparu) compact dans l'identité. */
+.npc-sheet.cs-v3 .npc-id-statut { display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; margin-top: 8px; }
+.npc-sheet.cs-v3 .npc-id-statut button {
+  font-size: .6rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+  padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border);
+  background: rgba(255,255,255,.04); color: var(--text-dim); cursor: pointer;
+}
+.npc-sheet.cs-v3 .npc-id-statut button.is-on { background: rgba(79,140,255,.16); border-color: rgba(79,140,255,.4); color: var(--text); }
+
+/* Pills Rôle (bleu) / Lieu (violet) / Organisation (jaune), éditables même vides. */
+.npc-sheet.cs-v3 .npc-id-pills { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 8px; width: 100%; }
+.npc-sheet.cs-v3 .npc-id-pill {
+  border: 1px solid transparent; border-radius: 999px; padding: 3px 11px;
+  font-size: .72rem; font-weight: 700; line-height: 1.3; text-align: center;
+  max-width: 100%; box-sizing: border-box;
+}
+.npc-sheet.cs-v3 input.npc-id-pill { flex: 1 1 30%; min-width: 72px; font-family: inherit; }
+.npc-sheet.cs-v3 input.npc-id-pill:focus { outline: none; filter: brightness(1.18); }
+.npc-sheet.cs-v3 input.npc-id-pill::placeholder { opacity: .68; font-weight: 600; }
+.npc-sheet.cs-v3 .npc-id-pill.pill-role { color: #7fb0ff; background: rgba(79,140,255,.14); border-color: rgba(79,140,255,.34); }
+.npc-sheet.cs-v3 .npc-id-pill.pill-lieu { color: #c9a6ff; background: rgba(160,110,255,.14); border-color: rgba(160,110,255,.34); }
+.npc-sheet.cs-v3 .npc-id-pill.pill-orga { color: #ffd66b; background: rgba(240,190,60,.13); border-color: rgba(240,190,60,.32); }
+.npc-sheet.cs-v3 input.npc-id-pill.pill-role::placeholder { color: #7fb0ff; }
+.npc-sheet.cs-v3 input.npc-id-pill.pill-lieu::placeholder { color: #c9a6ff; }
+.npc-sheet.cs-v3 input.npc-id-pill.pill-orga::placeholder { color: #ffd66b; }
+
+/* Description publique + notes MJ, sous l'identité. */
+.npc-sheet.cs-v3 .npc-id-notes { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.npc-sheet.cs-v3 .npc-id-note {
+  display: flex; flex-direction: column; gap: 3px;
+  font-size: .56rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--text-dim);
+}
+.npc-sheet.cs-v3 .npc-id-note textarea {
+  width: 100%; box-sizing: border-box; font-family: inherit; font-size: .78rem; font-weight: 400;
+  text-transform: none; letter-spacing: normal; color: var(--text);
+  background: rgba(0,0,0,.22); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 8px; resize: vertical; min-height: 46px;
+}
+.npc-sheet.cs-v3 .npc-id-note .npc-note-mj-field { border-color: rgba(240,190,60,.22); }

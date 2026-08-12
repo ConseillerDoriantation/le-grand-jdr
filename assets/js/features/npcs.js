@@ -24,7 +24,7 @@ import { consumeTargetEntity } from '../shared/entity-navigation.js';
 import { recordRecentNavigation } from '../shared/recent-navigation.js';
 import { getItemStatBonus, sortCharactersForDisplay, getMyCharacters, getModFromScore,
   computeEquipStatsBonus, computeEquipDerivedBonus, formatItemBonusText,
-  calcPVMax, calcPMMax, calcCA, calcVitesse } from '../shared/char-stats.js';
+  calcPVMax, calcPMMax, calcCA, calcVitesse, calcDeckMax } from '../shared/char-stats.js';
 import {
   buildEquippedItemFromInventory,
   getArmorSetData,
@@ -1093,23 +1093,122 @@ function _renderFicheV3(n) {
 
 function _renderFiche(n) {
   const af = afx(_affiniteNiveau(n));
+  const adm = STATE.isAdmin;
+  const level = Math.max(1, parseInt(n.niveau, 10) || 1);
+  const { totals } = _npcVitalTotals(n);
+  const pvBase = _npcBaseVital(n, 'pv'), pmBase = _npcBaseVital(n, 'pm');
+  const deckMax = calcDeckMax(n);
+  const deckActifs = Array.isArray(n.actions) ? n.actions.length : 0;
+  const orgs = Array.isArray(n.organisations) ? n.organisations.filter(Boolean) : [];
+  const initial = (n.nom || '?')[0].toUpperCase();
+  const portraitInner = n.imageUrl ? `<img src="${_esc(n.imageUrl)}" alt="">` : `<span>${initial}</span>`;
+  // Clic sur le portrait → voir l'image entière si présente, sinon (MJ) en choisir une.
+  const portraitAct = n.imageUrl
+    ? `data-action="npcViewPhoto" data-id="${_esc(n.id)}" title="Voir l'image complète"`
+    : (adm ? `data-action="npcSetPhoto" data-id="${_esc(n.id)}" title="Ajouter un portrait"` : '');
   const bastion = _renderBastionProfil(n);
   const relations = [_renderNpcRelationDesk(n, af), _renderNpcSpecificRelationsDesk(n)].filter(Boolean).join('');
+
+  // Barre vitale façon fiche perso : valeur actuelle (stepper) / max calculé + PV/PM de base modifiables.
+  const vital = (kind, icon, label, max, base) => {
+    const field = kind === 'pv' ? 'pvActuel' : 'pmActuel';
+    const cur = Number.isFinite(n[field]) ? Math.max(0, Math.min(n[field], max)) : max;
+    const pct = max > 0 ? Math.max(0, Math.min(100, Math.round(cur / max * 100))) : 0;
+    const lbl = kind === 'pv' ? 'PV' : 'PM';
+    const barCls = kind === 'pv' ? `vital-bar-fill${pct < 25 ? ' danger' : ''}` : 'vital-bar-fill';
+    return `
+    <div class="vital ${kind === 'pv' ? 'hp' : 'mp'}${kind === 'pv' && pct < 25 ? ' danger' : ''}">
+      <div class="vital-icon">${icon}</div>
+      <div class="vital-body">
+        <div class="vital-head">
+          <span class="vital-label">${label}</span>
+          <span class="vital-num"><span>${cur}</span><span class="npc-vital-max">/ ${max}</span></span>
+        </div>
+        <div class="vital-bar"><div class="${barCls}" style="width:${pct}%"></div></div>
+        <div class="vital-ctrls">
+          ${adm
+            ? `<div class="vital-current-control">
+                <span class="vital-control-label">Valeur actuelle</span>
+                <span class="vital-stepper">
+                  <button class="vital-btn" data-action="npcAdjustVital" data-field="${field}" data-delta="-1" data-id="${_esc(n.id)}" title="Retirer 1 ${lbl}">−</button>
+                  <button class="vital-btn plus" data-action="npcAdjustVital" data-field="${field}" data-delta="1" data-id="${_esc(n.id)}" title="Ajouter 1 ${lbl}">+</button>
+                </span>
+              </div>
+              <label class="cs-vital-base-btn npc-vital-base" title="Modifier les ${lbl} de base">
+                <span class="cs-vital-base-copy"><span>${lbl} de base</span></span>
+                <input class="npc-inline npc-vital-base-inp" type="number" min="${kind === 'pv' ? 1 : 0}" max="999"
+                  data-input="npcPreviewDerived" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="${kind}Base" value="${base}">
+                <span class="cs-vital-base-edit" aria-hidden="true">✎</span>
+              </label>`
+            : `<div class="cs-vital-base-readonly"><span>${lbl} de base</span><strong>${base}</strong></div>`}
+        </div>
+      </div>
+    </div>`;
+  };
+
+  const sidebar = `<aside class="id-side npc-id-side" data-aura="blue">
+    <div class="id-identity">
+      ${adm ? `<div class="id-actions-mini npc-id-actions" aria-label="Actions du PNJ">
+        <button class="npc-photo-btn" title="Changer le portrait" data-action="npcSetPhoto" data-id="${_esc(n.id)}" aria-label="Changer le portrait"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></button>
+        <button class="id-default-btn${n.embauchable === false ? '' : ' is-on'}" title="${n.embauchable !== false ? 'Visible par les joueurs' : 'Caché des joueurs'}" data-action="npcToggleEmbauchable" data-id="${_esc(n.id)}">👁</button>
+        <button class="id-del-btn" title="Supprimer ce PNJ" data-action="deleteNpc" data-id="${_esc(n.id)}">⌫</button>
+      </div>` : ''}
+      <div class="id-portrait-wrap">
+        <div class="id-portrait" ${portraitAct}>${portraitInner}</div>
+        <div class="id-lvl-badge">${adm
+          ? `<button type="button" class="id-lvl-edit" data-action="npcEditLevel" data-id="${_esc(n.id)}" title="Modifier le niveau" style="background:none;border:none;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer;padding:0">Niv. <strong>${level}</strong></button>`
+          : `Niv. <strong>${level}</strong>`}</div>
+      </div>
+      <div class="id-name-row">${adm
+        ? `<input class="npc-inline id-name npc-id-name-inp" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="nom" value="${_esc(n.nom || '')}" placeholder="Nom du PNJ">`
+        : `<span class="id-name">${_esc(n.nom || '?')}</span>`}</div>
+      <span class="npc-id-relation" style="--tag:${af.couleur}">${af.icon} ${_esc(af.label)}</span>
+      ${adm ? `<div class="npc-id-statut">
+        ${[['', 'Vivant'], ['mort', 'Mort'], ['disparu', 'Disparu']].map(([v, lbl]) =>
+          `<button type="button" class="${(n.statut || '') === v ? 'is-on' : ''}" data-action="npcSetStatut" data-id="${_esc(n.id)}" data-statut="${v}">${lbl}</button>`).join('')}
+      </div>` : ''}
+      <div class="npc-id-pills">${adm
+        ? `<input class="npc-id-pill pill-role" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="role" value="${_esc(n.role || '')}" placeholder="+ Rôle" title="Rôle">
+           <input class="npc-id-pill pill-lieu" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="lieu" value="${_esc(n.lieu || '')}" placeholder="+ Lieu" title="Lieu">
+           <input class="npc-id-pill pill-orga" data-change="npcSaveOrgs" data-npc-id="${_esc(n.id)}" value="${_esc(orgs.join(', '))}" placeholder="+ Organisation" title="Organisation(s)">`
+        : `${n.role ? `<span class="npc-id-pill pill-role">${_esc(n.role)}</span>` : ''}
+           ${n.lieu ? `<span class="npc-id-pill pill-lieu">${_esc(n.lieu)}</span>` : ''}
+           ${orgs.length ? `<span class="npc-id-pill pill-orga">${_esc(orgs.join(', '))}</span>` : ''}`}
+      </div>
+    </div>
+    ${vital('pv', '❤', 'Points de Vie', totals.pv, pvBase)}
+    ${vital('pm', '✦', 'Points de Magie', totals.pm, pmBase)}
+    <div class="cs-mini-grid cs-mini-grid-3">
+      <div class="cs-mini"><span class="cs-mini-icon">🛡️</span><span class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val" data-npc-derived="ca">${totals.ca}</span></span></div>
+      <div class="cs-mini"><span class="cs-mini-icon">🏃</span><span class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val" data-npc-derived="vitesse">${totals.vitesse}m</span></span></div>
+      <div class="cs-mini"><span class="cs-mini-icon">✦</span><span class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}/${deckMax}</span></span></div>
+    </div>
+    ${adm
+      ? `<div class="npc-id-notes">
+          <label class="npc-id-note"><span>Description publique</span><textarea class="npc-inline" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="description" rows="2" placeholder="Ce que les joueurs peuvent savoir…">${_esc(n.description || '')}</textarea></label>
+          <label class="npc-id-note"><span>Notes MJ privées</span><textarea class="npc-inline npc-note-mj-field" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="noteMJ" rows="2" placeholder="Secrets, objectifs…">${_esc(n.noteMJ || '')}</textarea></label>
+        </div>`
+      : (n.description ? `<p class="npc-profile-public-desc">${_esc(n.description)}</p>` : '')}
+  </aside>`;
+
+  const main = `<div class="main-col npc-main-col">
+    ${adm ? `<section class="npc-character-stats">${_renderNpcStatsBanner(n)}</section>` : ''}
+    ${adm ? _renderNpcEquipmentSection(n) : ''}
+    <section class="npc-split-row">
+      ${_renderNpcTimelineDesk(n)}
+      <div class="npc-relations-stack">${relations || _renderNpcEmptyPanel('Aucune relation connue pour ce PNJ.')}</div>
+    </section>
+    ${bastion ? `<section class="npc-bastion-slot">${bastion}</section>` : ''}
+  </div>`;
+
   return `
-  <article class="npc-sheet npc-sheet-scroll cs-v3" style="${_afVars(af)}">
-    ${_renderNpcProfileHeader(n, af)}
-    <div class="npc-scroll-stack">
-      ${STATE.isAdmin ? _renderNpcStatsSection(n) : ''}
-      ${STATE.isAdmin ? _renderNpcEquipmentSection(n) : ''}
-      <section class="npc-split-row">
-        ${_renderNpcTimelineDesk(n)}
-        <div class="npc-relations-stack">${relations || _renderNpcEmptyPanel('Aucune relation connue pour ce PNJ.')}</div>
-      </section>
-      ${bastion ? `<section class="npc-bastion-slot">${bastion}</section>` : ''}
+  <article class="npc-sheet cs-v3" style="${_afVars(af)}">
+    <div class="sheet npc-sheet-grid">
+      ${sidebar}
+      ${main}
     </div>
   </article>`;
 }
-
 function _renderNpcSectionHead(kicker, title, meta = '') {
   return `
     <div class="npc-section-head">
@@ -1258,8 +1357,29 @@ function _renderNpcStatsBanner(n) {
   const level = Math.max(1, parseInt(n?.niveau, 10) || 1);
   const spent = NPC_STATS.reduce((sum, stat) => sum + (parseInt(levelUps[stat.key], 10) || 0), 0);
   const remaining = Math.max(0, level - 1 - spent);
+  // Synthèse « Points de caractéristiques » — identique à la fiche joueur
+  // (_buildStatTilesHtml) : total + détail Base/Niveau/Équipement.
+  const _sum = NPC_STATS.reduce((t, stat) => {
+    const stored = parseInt(stats[stat.key], 10);
+    const val = Number.isFinite(stored) ? stored : 10;
+    const lvl = Math.max(0, parseInt(levelUps[stat.key], 10) || 0);
+    const eq = equipBonus[stat.key] || 0;
+    t.base += val - lvl; t.level += lvl; t.equipment += eq; t.total += val + eq;
+    return t;
+  }, { base: 0, level: 0, equipment: 0, total: 0 });
+  const _signed = v => v > 0 ? `+${v}` : String(v);
+  const summaryHtml = `<div class="stats-summary" title="Somme des six caractéristiques du PNJ">
+    <div class="stats-summary-title"><span>Points de caractéristiques</span><strong>${_sum.total}</strong></div>
+    <div class="stats-summary-formula" aria-label="Base ${_sum.base}, niveau ${_sum.level}, équipement ${_sum.equipment}, total ${_sum.total}">
+      <span><small>Base</small><b>${_sum.base}</b></span><i>+</i>
+      <span><small>Niveau</small><b>${_signed(_sum.level)}</b></span><i>+</i>
+      <span><small>Équipement</small><b class="${_sum.equipment > 0 ? 'pos' : _sum.equipment < 0 ? 'neg' : ''}">${_signed(_sum.equipment)}</b></span><i>=</i>
+      <span class="is-total"><small>Total</small><b>${_sum.total}</b></span>
+    </div>
+  </div>`;
   return `
-    <div class="stats-banner npc-stats-banner">
+    <div class="stats-banner">
+      ${summaryHtml}
       ${NPC_STATS.map(s => {
         const stored = parseInt(stats[s.key], 10);
         const safeStored = Number.isFinite(stored) ? stored : 10;
@@ -1272,7 +1392,7 @@ function _renderNpcStatsBanner(n) {
         const bCls = bonus > 0 ? 'pos' : bonus < 0 ? 'neg' : 'zero';
         const bDisp = bonus > 0 ? `+${bonus}` : bonus < 0 ? String(bonus) : '0';
         return `
-          <div class="stat-tile npc-stat-tile" data-stat="${_esc(s.key)}"
+          <div class="stat-tile" data-stat="${_esc(s.key)}"
             title="${_esc(NPC_STAT_LABELS[s.key] || s.key)} - Base ${safeBase} + Niveau +${levelUp} + Equip. ${bDisp} = ${total}">
             <header class="stat-tile-head">
               <span class="stat-tile-name">${_esc(NPC_STAT_LABELS[s.key] || s.short)}</span>
@@ -3240,6 +3360,37 @@ async function _npcAllocateStat(btn) {
   if (await trySave('npcs', n.id, { stats, statsLevelUps: levelUps })) _refreshActivePanel();
 }
 
+// Stepper « Valeur actuelle » PV/PM du PNJ (comme la fiche perso). Le courant est
+// borné à [0, max calculé] ; par défaut (jamais touché) il vaut le max.
+async function _npcAdjustVital(btn) {
+  if (!STATE.isAdmin) return;
+  const id = btn?.dataset?.id, field = btn?.dataset?.field;
+  const delta = parseInt(btn?.dataset?.delta, 10) || 0;
+  const n = _npcs.find(x => x.id === id);
+  if (!n || !delta || !['pvActuel', 'pmActuel'].includes(field)) return;
+  const { totals } = _npcVitalTotals(n);
+  const max = field === 'pvActuel' ? totals.pv : totals.pm;
+  const cur = Number.isFinite(n[field]) ? Math.max(0, Math.min(n[field], max)) : max;
+  const next = Math.max(0, Math.min(max, cur + delta));
+  if (next === cur) return;
+  n[field] = next;
+  if (await trySave('npcs', id, { [field]: next })) _refreshActivePanel();
+}
+
+// Niveau du PNJ : badge « Niv. N » propre → clic = édition inline (input) qui
+// réutilise le save/preview standard, puis re-render de la fiche.
+function _npcEditLevel(btn) {
+  if (!STATE.isAdmin) return;
+  const badge = btn?.closest('.id-lvl-badge');
+  const n = _npcs.find(x => x.id === btn?.dataset?.id);
+  if (!badge || !n) return;
+  const cur = Math.max(1, parseInt(n.niveau, 10) || 1);
+  badge.innerHTML = `Niv. <input class="npc-inline npc-lvl-inp" type="number" min="1" max="99" value="${cur}"
+    data-input="npcPreviewDerived" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="niveau">`;
+  const inp = badge.querySelector('input');
+  inp?.focus(); inp?.select();
+}
+
 // Clic sur le portrait → choisir une image, compresser, enregistrer (base64).
 // Portrait PNJ : on passe par le cropper pan/zoom (comme les persos) pour
 // pouvoir cadrer l'image au lieu de la stocker brute.
@@ -3589,6 +3740,8 @@ registerActions({
   npcInlineSave:             (el) => _npcInlineSave(el),
   npcPreviewDerived:         (el) => _npcPreviewDerived(el),
   npcAllocateStat:           (btn) => _npcAllocateStat(btn),
+  npcAdjustVital:            (btn) => _npcAdjustVital(btn),
+  npcEditLevel:              (btn) => _npcEditLevel(btn),
   npcSaveOrgs:               (el) => _npcSaveOrgs(el),
   npcSetWeapon:              (el) => _npcSetWeapon(el),
   npcEquipSlot:              (el) => _npcEquipSlot(el),
