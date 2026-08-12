@@ -116,7 +116,7 @@ const FEATURE_CSS = {
   // _adminLazyOpen (pages.js) — inutile de tirer vtt.css/histoire.css avant besoin.
   admin:      ['admin.css'],
   statistiques: ['admin.css', 'stats.css'],
-  npcs:       ['npcs.css'],
+  npcs:       ['npcs.css', 'characters.css'],
   story:      ['histoire.css'],
   histoire:   ['histoire.css'],
   // Composant modal partagé `.mn-*` (hero/champs/footer) défini dans histoire.css

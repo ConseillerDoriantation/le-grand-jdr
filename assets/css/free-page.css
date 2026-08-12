@@ -702,17 +702,42 @@
 
 .free-page-format-dimensions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(108px, 1fr) auto minmax(108px, 1fr);
   align-items: end;
-  gap: 7px;
+  gap: 9px;
 }
 .free-page-format-dimensions > span {
-  padding-bottom: 9px;
+  padding-bottom: 12px;
   color: var(--text-dim);
   font-weight: 800;
 }
-.free-page-format-dimensions label { min-width: 0; }
-.free-page-format-dimensions input { width: 100%; min-width: 0; }
+.free-page-inspector-section .free-page-format-dimensions label {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+.free-page-format-dimensions label > span {
+  color: var(--text-dim, #728197);
+  font-size: .64rem;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.free-page-inspector-section .free-page-format-dimensions input[type="number"] {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0 11px;
+  appearance: textfield;
+  font-size: .84rem;
+  font-variant-numeric: tabular-nums;
+}
+.free-page-format-dimensions input[type="number"]::-webkit-inner-spin-button,
+.free-page-format-dimensions input[type="number"]::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
 
 /* Indicateur de poids du diaporama (alerte à l'approche de la limite Firestore) */
 .free-page-weight {
@@ -2163,7 +2188,7 @@
   position: relative;
   width: min(100%, 1000px);
   max-width: 1000px;
-  aspect-ratio: 1000 / var(--free-page-height, 650);
+  aspect-ratio: var(--free-page-width, 1000) / var(--free-page-height, 650);
   margin: 0 auto;
   overflow: hidden;
   border: 1px solid rgba(126,176,255,.16);
@@ -2176,7 +2201,7 @@
 }
 
 .free-page-editor .free-page-stage {
-  width: calc(1000px * var(--free-page-editor-zoom, 1));
+  width: calc(1000px * var(--free-page-editor-width-scale, 1) * var(--free-page-editor-zoom, 1));
   min-width: 0;
   max-width: none;
   overflow: visible;
@@ -4719,7 +4744,6 @@
   }
   .free-page-slide-size { margin-left: auto; }
   .free-page-workspace { padding: 6px; }
-  .free-page-editor .free-page-stage { width: 760px; }
   .free-page-ruler small { display: none; }
   .free-page-tool { min-height: 36px; }
   .free-page-select { height: 36px; }
