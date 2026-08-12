@@ -1258,8 +1258,29 @@ function _renderNpcStatsBanner(n) {
   const level = Math.max(1, parseInt(n?.niveau, 10) || 1);
   const spent = NPC_STATS.reduce((sum, stat) => sum + (parseInt(levelUps[stat.key], 10) || 0), 0);
   const remaining = Math.max(0, level - 1 - spent);
+  // Synthèse « Points de caractéristiques » — identique à la fiche joueur
+  // (_buildStatTilesHtml) : total + détail Base/Niveau/Équipement.
+  const _sum = NPC_STATS.reduce((t, stat) => {
+    const stored = parseInt(stats[stat.key], 10);
+    const val = Number.isFinite(stored) ? stored : 10;
+    const lvl = Math.max(0, parseInt(levelUps[stat.key], 10) || 0);
+    const eq = equipBonus[stat.key] || 0;
+    t.base += val - lvl; t.level += lvl; t.equipment += eq; t.total += val + eq;
+    return t;
+  }, { base: 0, level: 0, equipment: 0, total: 0 });
+  const _signed = v => v > 0 ? `+${v}` : String(v);
+  const summaryHtml = `<div class="stats-summary" title="Somme des six caractéristiques du PNJ">
+    <div class="stats-summary-title"><span>Points de caractéristiques</span><strong>${_sum.total}</strong></div>
+    <div class="stats-summary-formula" aria-label="Base ${_sum.base}, niveau ${_sum.level}, équipement ${_sum.equipment}, total ${_sum.total}">
+      <span><small>Base</small><b>${_sum.base}</b></span><i>+</i>
+      <span><small>Niveau</small><b>${_signed(_sum.level)}</b></span><i>+</i>
+      <span><small>Équipement</small><b class="${_sum.equipment > 0 ? 'pos' : _sum.equipment < 0 ? 'neg' : ''}">${_signed(_sum.equipment)}</b></span><i>=</i>
+      <span class="is-total"><small>Total</small><b>${_sum.total}</b></span>
+    </div>
+  </div>`;
   return `
     <div class="stats-banner npc-stats-banner">
+      ${summaryHtml}
       ${NPC_STATS.map(s => {
         const stored = parseInt(stats[s.key], 10);
         const safeStored = Number.isFinite(stored) ? stored : 10;

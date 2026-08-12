@@ -4788,3 +4788,32 @@ input.npc-side-name {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ── Synthèse « Points de caractéristiques » (reprise de la fiche joueur) ──
+   Rendu identique à .cs-v3 .stats-summary de characters.css, re-scopé pour la
+   page PNJ (les classes .stats-summary* n'y étaient pas chargées). */
+.npc-sheet .npc-stats-banner .stats-summary {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; min-width: 0; padding: 8px 10px;
+  background: rgba(79,140,255,.045);
+  border: 1px solid rgba(79,140,255,.16);
+  border-radius: 7px;
+}
+.npc-sheet .npc-stats-banner .stats-summary-title { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.npc-sheet .npc-stats-banner .stats-summary-title span { color: var(--text-muted); font-size: .65rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.npc-sheet .npc-stats-banner .stats-summary-title strong { color: var(--text); font-family: 'Outfit', sans-serif; font-size: 1.25rem; line-height: 1; }
+.npc-sheet .npc-stats-banner .stats-summary-formula { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.npc-sheet .npc-stats-banner .stats-summary-formula > span { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.npc-sheet .npc-stats-banner .stats-summary-formula small { color: var(--text-dim); font-size: .56rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.npc-sheet .npc-stats-banner .stats-summary-formula b { color: var(--text-soft); font-family: 'Outfit', sans-serif; font-size: .78rem; }
+.npc-sheet .npc-stats-banner .stats-summary-formula b.pos { color: var(--emerald); }
+.npc-sheet .npc-stats-banner .stats-summary-formula b.neg { color: var(--crimson-light, #ff8ca7); }
+.npc-sheet .npc-stats-banner .stats-summary-formula i { color: var(--text-dim); font-size: .7rem; font-style: normal; opacity: .65; }
+.npc-sheet .npc-stats-banner .stats-summary-formula .is-total { padding-left: 8px; border-left: 1px solid var(--border); }
+.npc-sheet .npc-stats-banner .stats-summary-formula .is-total b { color: var(--blue-light, #7fb0ff); font-size: .95rem; }
+@media (max-width: 760px) {
+  .npc-sheet .npc-stats-banner .stats-summary { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .npc-sheet .npc-stats-banner .stats-summary-formula { width: 100%; justify-content: space-between; gap: 4px; }
+  .npc-sheet .npc-stats-banner .stats-summary-formula > span { flex-direction: column; gap: 1px; }
+}
