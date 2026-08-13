@@ -975,6 +975,34 @@
   font-weight: 600; margin-top: .15rem;
   letter-spacing: .02em;
 }
+.pp-partenaires-toggle {
+  width: 100%;
+  min-height: 38px;
+  margin-top: .65rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .42rem;
+  padding: .5rem .75rem;
+  border: 1px dashed color-mix(in srgb, var(--gold) 34%, var(--border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--gold) 4%, transparent);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: .72rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.pp-partenaires-toggle:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--gold) 58%, var(--border));
+  background: color-mix(in srgb, var(--gold) 8%, transparent);
+}
+.pp-partenaires-toggle .pp-icon {
+  width: .92rem;
+  height: .92rem;
+}
 .pp-partenaires-empty {
   font-size: .8rem; color: var(--text-dim);
   font-style: italic;
