@@ -927,15 +927,50 @@ async function _vttRenamePlaylistConfirm() {
 }
 
 async function _vttAddSoundToPlaylist(plId, soundId) {
-  if (!soundId) return;
-  const pl = _playlists.find(p=>p.id===plId); if (!pl) return;
-  if ((pl.soundIds||[]).includes(soundId)) return;
-  await updateDoc(_playlistRef(plId), { soundIds:[...(pl.soundIds||[]), soundId] }).catch(()=>{});
+  if (!STATE.isAdmin || !soundId) return;
+  const pl = _playlists.find(p=>p.id===plId);
+  const sound = _sounds.find(s=>s.id===soundId);
+  if (!pl || !sound) {
+    showNotif('Playlist ou son introuvable', 'error');
+    return;
+  }
+  const previousIds = [...(pl.soundIds || [])];
+  if (previousIds.includes(soundId)) {
+    showNotif(`« ${sound.name} » est déjà dans ${pl.name}`, 'info');
+    return;
+  }
+
+  // Retour immédiat : "Non classés" est calculé depuis les playlists, le son
+  // doit donc en disparaître dès le choix du menu, sans attendre le snapshot.
+  const nextIds = [...previousIds, soundId];
+  pl.soundIds = nextIds;
+  _renderMusicPanel();
+  try {
+    await updateDoc(_playlistRef(plId), { soundIds: nextIds });
+    showNotif(`✅ « ${sound.name} » ajouté à ${pl.name}`, 'success');
+  } catch (error) {
+    pl.soundIds = previousIds;
+    _renderMusicPanel();
+    console.error('[vtt music] ajout à la playlist:', error);
+    showNotif('Impossible d’ajouter ce son à la playlist', 'error');
+  }
 }
 
 async function _vttRemoveSoundFromPlaylist(plId, soundId) {
+  if (!STATE.isAdmin) return;
   const pl = _playlists.find(p=>p.id===plId); if (!pl) return;
-  await updateDoc(_playlistRef(plId), { soundIds:(pl.soundIds||[]).filter(id=>id!==soundId) }).catch(()=>{});
+  const previousIds = [...(pl.soundIds || [])];
+  const nextIds = previousIds.filter(id=>id!==soundId);
+  pl.soundIds = nextIds;
+  _renderMusicPanel();
+  try {
+    await updateDoc(_playlistRef(plId), { soundIds: nextIds });
+  } catch (error) {
+    pl.soundIds = previousIds;
+    _renderMusicPanel();
+    console.error('[vtt music] retrait de la playlist:', error);
+    showNotif('Impossible de retirer ce son de la playlist', 'error');
+  }
 }
 
 export {
