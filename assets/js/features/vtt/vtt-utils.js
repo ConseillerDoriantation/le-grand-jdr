@@ -32,7 +32,6 @@ export function _vttPanelError(label, e, elId) {
 // Pur DOM, sans état VTT → utilisable par vtt.js et les sous-modules (musique…).
 let _ctxClose = null;
 let _ctxRestoreFocus = null;
-const _CTX_ACTIONS = {};
 
 export function _hideCtxMenu({ restoreFocus = false } = {}) {
   document.getElementById('vtt-ctx-menu')?.remove();
@@ -45,22 +44,47 @@ export function _hideCtxMenu({ restoreFocus = false } = {}) {
 export function _showCtxMenu(x, y, items) {
   _hideCtxMenu();
   _ctxRestoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  Object.keys(_CTX_ACTIONS).forEach(key => delete _CTX_ACTIONS[key]);
   const el=document.createElement('div');
   el.id='vtt-ctx-menu'; el.className='vtt-ctx-menu';
   el.setAttribute('role', 'menu');
   el.setAttribute('aria-label', 'Actions contextuelles');
+  const actions=[];
   let idx=0;
   el.innerHTML=items.map(item=>{
     if (item==='---') return '<div class="vtt-ctx-sep" role="separator"></div>';
-    if (typeof item.fn !== 'function') return `<div class="vtt-ctx-label">${item.label}</div>`;
+    const action = typeof item.action === 'string' ? item.action : '';
+    if (typeof item.fn !== 'function' && !action) return `<div class="vtt-ctx-label">${item.label}</div>`;
+    if (action) {
+      const args = item.args == null ? '' : ` data-vtt-args="${_esc(String(item.args))}"`;
+      return `<button type="button" class="vtt-ctx-item" role="menuitem" tabindex="-1" data-vtt-fn="${_esc(action)}"${args}>${item.label}</button>`;
+    }
     const i=idx++;
-    _CTX_ACTIONS[i]=item.fn;
+    actions[i]=item.fn;
     return `<button type="button" class="vtt-ctx-item" role="menuitem" tabindex="-1" data-i="${i}">${item.label}</button>`;
   }).join('');
   el.addEventListener('click', e=>{
-    const i=e.target.closest('.vtt-ctx-item')?.dataset.i;
-    if (i!=null) { _CTX_ACTIONS[+i]?.(); _hideCtxMenu(); }
+    const item=e.target.closest('.vtt-ctx-item');
+    if (!item) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // Les actions `data-vtt-fn` ont déjà été exécutées par le dispatcher VTT
+    // en phase de capture. Le menu n'a plus qu'à se fermer.
+    if (item.dataset.vttFn) {
+      _hideCtxMenu();
+      return;
+    }
+    const fn=actions[Number(item.dataset.i)];
+    _hideCtxMenu();
+    if (typeof fn !== 'function') return;
+    try {
+      Promise.resolve(fn()).catch(error => {
+        console.error('[vtt] action du menu contextuel:', error);
+        showNotif('Action impossible — réessaie dans un instant.', 'error');
+      });
+    } catch (error) {
+      console.error('[vtt] action du menu contextuel:', error);
+      showNotif('Action impossible — réessaie dans un instant.', 'error');
+    }
   });
   el.addEventListener('keydown', e => {
     const menuItems = [...el.querySelectorAll('.vtt-ctx-item')];

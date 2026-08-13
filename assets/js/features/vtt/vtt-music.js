@@ -788,7 +788,8 @@ function _vttSoundCtxMenu(e, soundId, currentPlId) {
     items.push({ label: `<span style="color:var(--text-dim);font-size:.65rem">Ajouter à…</span>`, fn: null });
     targets.forEach(pl => items.push({
       label: `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${pl.color||'#6366f1'};margin-right:.4rem"></span>${_esc(pl.name)}`,
-      fn: () => _vttAddSoundToPlaylist(pl.id, soundId),
+      action: '_vttAddSoundToPlaylist',
+      args: `${pl.id}|${soundId}`,
     }));
   }
 
@@ -928,14 +929,52 @@ async function _vttRenamePlaylistConfirm() {
 
 async function _vttAddSoundToPlaylist(plId, soundId) {
   if (!soundId) return;
-  const pl = _playlists.find(p=>p.id===plId); if (!pl) return;
-  if ((pl.soundIds||[]).includes(soundId)) return;
-  await updateDoc(_playlistRef(plId), { soundIds:[...(pl.soundIds||[]), soundId] }).catch(()=>{});
+  const pl = _playlists.find(p=>p.id===plId);
+  const sound = _sounds.find(s=>s.id===soundId);
+  if (!pl || !sound) {
+    showNotif('Playlist ou son introuvable', 'error');
+    return;
+  }
+  const previousIds = [...(pl.soundIds || [])];
+  if (previousIds.includes(soundId)) {
+    showNotif(`« ${sound.name} » est déjà dans ${pl.name}`, 'info');
+    return;
+  }
+
+  // Retour immédiat : "Non classés" est calculé depuis les playlists, le son
+  // doit donc en disparaître dès le choix du menu, sans attendre le snapshot.
+  const nextIds = [...previousIds, soundId];
+  pl.soundIds = nextIds;
+  try { _renderMusicPanel(); }
+  catch (error) { console.warn('[vtt music] rafraîchissement optimiste:', error); }
+  try {
+    // setDoc + merge reste valide même si le document affiché vient encore du
+    // cache local et n'existe plus côté serveur ; updateDoc échouait alors.
+    await setDoc(_playlistRef(plId), { soundIds: nextIds }, { merge:true });
+    showNotif(`✅ « ${sound.name} » ajouté à ${pl.name}`, 'success');
+  } catch (error) {
+    pl.soundIds = previousIds;
+    try { _renderMusicPanel(); } catch {}
+    console.error('[vtt music] ajout à la playlist:', error);
+    showNotif('Impossible d’ajouter ce son à la playlist', 'error');
+  }
 }
 
 async function _vttRemoveSoundFromPlaylist(plId, soundId) {
+  if (!STATE.isAdmin) return;
   const pl = _playlists.find(p=>p.id===plId); if (!pl) return;
-  await updateDoc(_playlistRef(plId), { soundIds:(pl.soundIds||[]).filter(id=>id!==soundId) }).catch(()=>{});
+  const previousIds = [...(pl.soundIds || [])];
+  const nextIds = previousIds.filter(id=>id!==soundId);
+  pl.soundIds = nextIds;
+  _renderMusicPanel();
+  try {
+    await updateDoc(_playlistRef(plId), { soundIds: nextIds });
+  } catch (error) {
+    pl.soundIds = previousIds;
+    _renderMusicPanel();
+    console.error('[vtt music] retrait de la playlist:', error);
+    showNotif('Impossible de retirer ce son de la playlist', 'error');
+  }
 }
 
 export {
