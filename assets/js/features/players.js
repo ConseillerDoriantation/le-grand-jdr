@@ -126,6 +126,7 @@ const STORE = {
   relPositions:  {},        // charId → {x,y} (positions custom après drag, en coords SVG)
   relPickerOpen: false,
   chroniqueExpanded: {},
+  partenairesExpanded: {},
   presentations: [],
   characters:    [],
   achievements:  [],
@@ -1382,16 +1383,20 @@ function _renderChroniqueBlock(item) {
 // groupe et affiche les top N PJs.
 function _renderTopAdventurersBlock(item, items) {
   const charId = item.char?.id || item.charId;
-  const top = _computeTopAdventurers(charId, items, 4);
   if (!charId) return '';
+  const visibleLimit = 4;
+  const allPartners = _computeTopAdventurers(charId, items, Infinity);
+  const isExpanded = Boolean(STORE.partenairesExpanded?.[charId]);
+  const partners = isExpanded ? allPartners : allPartners.slice(0, visibleLimit);
+  const remainingCount = Math.max(0, allPartners.length - visibleLimit);
 
   return `
     <section class="pp-fiche-card">
-      <h3 class="pp-fiche-card-title">${_ppIcon('users')} Partenaires d'aventure ${top.length ? `<span class="pp-fiche-card-count">${top.length}</span>` : ''}</h3>
+      <h3 class="pp-fiche-card-title">${_ppIcon('users')} Partenaires d'aventure ${allPartners.length ? `<span class="pp-fiche-card-count">${allPartners.length}</span>` : ''}</h3>
       <p class="pp-fiche-card-sub">Compagnons les plus rencontrés en mission (trame).</p>
-      ${top.length ? `
+      ${partners.length ? `
         <div class="pp-partenaires-grid">
-          ${top.map(({ item: o, count }) => {
+          ${partners.map(({ item: o, count }) => {
             const c = _accentColor(o.nom);
             return `<button class="pp-partenaire" data-pp-action="openFiche" data-id="${_esc(o.id)}" style="--c-accent:${c}">
               <div class="pp-partenaire-portrait">
@@ -1403,7 +1408,12 @@ function _renderTopAdventurersBlock(item, items) {
               </div>
             </button>`;
           }).join('')}
-        </div>`
+        </div>
+        ${remainingCount ? `<button type="button" class="pp-partenaires-toggle" data-pp-action="togglePartenaires" data-char-id="${_esc(charId)}" aria-expanded="${isExpanded}">
+          ${isExpanded
+            ? `${_ppIcon('arrowLeft')} Réduire la liste`
+            : `${_ppIcon('plus')} Voir ${remainingCount} autre${remainingCount>1?'s':''} partenaire${remainingCount>1?'s':''}`}
+        </button>` : ''}`
       : `<div class="pp-partenaires-empty">Aucune aventure partagée enregistrée encore.</div>`}
     </section>`;
 }
@@ -1513,6 +1523,14 @@ Object.assign(ppHandlers, {
     if (!charId) return;
     const y = window.scrollY || 0;
     STORE.chroniqueExpanded[charId] = !STORE.chroniqueExpanded[charId];
+    _refreshView();
+    requestAnimationFrame(() => window.scrollTo({ top: y, left: 0, behavior: 'auto' }));
+  },
+  togglePartenaires: (el) => {
+    const charId = el.dataset.charId;
+    if (!charId) return;
+    const y = window.scrollY || 0;
+    STORE.partenairesExpanded[charId] = !STORE.partenairesExpanded[charId];
     _refreshView();
     requestAnimationFrame(() => window.scrollTo({ top: y, left: 0, behavior: 'auto' }));
   },
