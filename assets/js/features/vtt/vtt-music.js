@@ -345,8 +345,8 @@ function _renderMusicList(mj) {
     </div>
     <div class="vtt-music-son-actions-row">
       <button class="vtt-music-upload-btn${hideOn?' on':''}" data-vtt-fn="_vttMusicToggleHideTitle" style="flex:1"
-        title="${hideOn?'Les joueurs ne voient pas le nom des musiques — clic pour réafficher':'Masquer le nom des musiques aux joueurs'}">
-        ${hideOn?'🙈 Titres masqués aux joueurs':'👁 Titres visibles par les joueurs'}</button>
+        title="${hideOn?'Tous les titres sont masqués aux joueurs — clic pour les réafficher':'Masquer tous les titres aux joueurs'}">
+        ${hideOn?'🙈 Tous les titres masqués':'👁 Masquer tous les titres'}</button>
     </div>`;
   }
 
@@ -418,6 +418,7 @@ function _renderSonRow(s, plId, mj) {
   const loopOn = inSingleMode && !!ms.loop;
   const rowClass = isPool ? 'vtt-music-pool-item' : 'vtt-music-pl-sound';
   const nameClass = isPool ? 'vtt-music-pool-name' : 'vtt-music-pl-sname';
+  const titleHidden = s.hideTitle === true;
   const ctx = mj
     ? `data-vtt-fn="_vttSoundCtxMenu" data-vtt-on="contextmenu" data-vtt-args="$event|${s.id}${isPool?'':`|${plId}`}" tabindex="0" aria-haspopup="menu" aria-label="Actions pour ${_esc(s.name)}"`
     : '';
@@ -429,6 +430,8 @@ function _renderSonRow(s, plId, mj) {
   return `<div class="${rowClass}${rowActive?' is-playing':''}" data-sound-id="${s.id}" title="${_esc(s.name)}" ${ctx}>
     ${mj?'<span class="vtt-music-pool-grip">⠿</span>':''}
     <span class="${nameClass}">${_esc(s.name)}</span>
+    ${mj ? `<button class="vtt-mact vtt-mact-privacy${titleHidden?' on':''}" data-vtt-fn="_vttMusicToggleSoundTitle" data-vtt-args="${s.id}" aria-pressed="${titleHidden}"
+      title="${titleHidden?'Titre masqué aux joueurs — cliquer pour l’afficher':'Masquer ce titre aux joueurs'}">${titleHidden?'🙈':'👁'}</button>` : ''}
     <button class="vtt-mact${playOn?' on':''}" data-vtt-fn="_vttPlaySound" data-vtt-args="${s.id}|false" title="Lire">${playOn && !ms.paused?'⏸':'▶'}</button>
     <button class="vtt-mact${loopOn?' on':''}" data-vtt-fn="_vttPlaySound" data-vtt-args="${s.id}|true" title="Boucle">🔁</button>
     <button class="vtt-mact vtt-mact-preview" data-vtt-fn="_vttPreview" data-vtt-args="${s.id}|$this" title="Aperçu local (MJ)">🎧</button>
@@ -505,13 +508,20 @@ function _initMusicSortable() {
 function _renderNowPlaying(curSound, ms) {
   const mj = STATE.isAdmin;
   const pl = ms.currentPlaylistId ? _playlists.find(p=>p.id===ms.currentPlaylistId) : null;
-  const hidden = !!ms.hideTitle;
+  const hiddenGlobally = !!ms.hideTitle;
+  const hiddenForSound = typeof ms.currentTitleHidden === 'boolean'
+    ? ms.currentTitleHidden
+    : curSound?.hideTitle === true;
+  const hidden = hiddenGlobally || hiddenForSound;
+  const hiddenTitle = hiddenForSound
+    ? 'Titre de cette piste masqué aux joueurs'
+    : 'Tous les titres sont masqués aux joueurs';
   // Titre masqué : les joueurs voient un libellé générique ; le MJ voit toujours
   // le vrai titre, avec un marqueur 🙈 indiquant qu'il est caché côté joueurs.
   const nameHtml = curSound
     ? ((!mj && hidden)
         ? '🎵 <em>Ambiance en cours…</em>'
-        : `🎵 ${_esc(curSound.name)}${pl?` · <em>${_esc(pl.name)}</em>`:''}${ms.loop?' 🔁':''}${ms.shuffle?' 🔀':''}${mj && hidden ? ' <span class="vtt-music-np-hidetag" title="Titre masqué aux joueurs">🙈</span>' : ''}`)
+        : `🎵 ${_esc(curSound.name)}${pl?` · <em>${_esc(pl.name)}</em>`:''}${ms.loop?' 🔁':''}${ms.shuffle?' 🔀':''}${mj && hidden ? ` <span class="vtt-music-np-hidetag" title="${hiddenTitle}">🙈</span>` : ''}`)
     : '<span style="color:var(--text-dim)">— Rien en lecture —</span>';
   return `<div class="vtt-music-np">
     <div class="vtt-music-np-name">${nameHtml}</div>
@@ -526,6 +536,8 @@ function _renderNowPlaying(curSound, ms) {
         <button class="vtt-music-ctrl" data-vtt-fn="_vttToggleMusicPause" title="${ms.paused?'Reprendre':'Pause'}">${ms.paused?'▶':'⏸'}</button>
         ${pl?`<button class="vtt-music-ctrl" data-vtt-fn="_vttMusicNext" title="Suivant">⏭</button>`:''}
         <button class="vtt-music-ctrl" data-vtt-fn="_vttStopMusic" title="Arrêter">⏹</button>
+        <button class="vtt-music-ctrl vtt-music-title-toggle${hiddenForSound?' on':''}" data-vtt-fn="_vttMusicToggleSoundTitle" data-vtt-args="${curSound.id}"
+          aria-pressed="${hiddenForSound}" title="${hiddenForSound?'Afficher ce titre aux joueurs':'Masquer ce titre aux joueurs'}">${hiddenForSound?'🙈':'👁'}</button>
       ` : ''}
       <label class="vtt-music-vol-lbl">🔊<input type="range" id="vtt-music-vol" class="vtt-music-vol-inp" min="0" max="100" step="1"></label>
     </div>
@@ -555,11 +567,13 @@ async function _vttSeek(e, bar) {
 // ── Lecture / contrôles ─────────────────────────────────────────────
 async function _vttPlaySound(soundId, loop) {
   const ms = _musicState;
+  const sound = _sounds.find(s => s.id === soundId);
   // Toggle si même son sans playlist
   if (ms.playing && ms.currentSoundId===soundId && !ms.currentPlaylistId && !!ms.loop===!!loop)
     return _vttStopMusic();
   await _setMusicState({ playing:true, paused:false, currentSoundId:soundId,
     currentPlaylistId:null, loop:!!loop, shuffle:false,
+    currentTitleHidden:sound?.hideTitle === true,
     startedAt:serverTimestamp() });
 }
 
@@ -578,9 +592,12 @@ async function _vttPlayPlaylist(playlistId, shuffle) {
       [order[i],order[j]]=[order[j],order[i]];
     }
   }
+  const soundId = pl.soundIds[order[0]];
+  const sound = _sounds.find(s => s.id === soundId);
   await _setMusicState({ playing:true, paused:false,
-    currentSoundId:pl.soundIds[order[0]], currentPlaylistId:playlistId,
+    currentSoundId:soundId, currentPlaylistId:playlistId,
     loop:false, shuffle:!!shuffle, shuffleOrder:order, playlistIndex:0,
+    currentTitleHidden:sound?.hideTitle === true,
     startedAt:serverTimestamp() });
 }
 
@@ -590,8 +607,11 @@ async function _vttMusicNext() {
   const pl = _playlists.find(p=>p.id===ms.currentPlaylistId); if (!pl) return;
   const order = ms.shuffleOrder || pl.soundIds.map((_,i)=>i);
   const nextIdx = ((ms.playlistIndex||0) + 1) % order.length;
+  const soundId = pl.soundIds[order[nextIdx]];
+  const sound = _sounds.find(s => s.id === soundId);
   await _setMusicState({ ...ms, playlistIndex:nextIdx,
-    currentSoundId:pl.soundIds[order[nextIdx]], startedAt:serverTimestamp() });
+    currentSoundId:soundId, currentTitleHidden:sound?.hideTitle === true,
+    startedAt:serverTimestamp() });
 }
 
 async function _vttToggleMusicPause() {
@@ -605,10 +625,28 @@ async function _vttStopMusic() {
   await _setMusicState({ playing:false, paused:false, currentSoundId:null, currentPlaylistId:null });
 }
 
-// MJ : masque / affiche le titre de la piste en cours côté joueurs.
+// MJ : masque / affiche tous les titres côté joueurs.
 async function _vttMusicToggleHideTitle() {
   if (!STATE.isAdmin) return;
   await _setMusicState({ hideTitle: !_musicState.hideTitle });
+}
+
+// MJ : masque / affiche uniquement le titre de la piste choisie côté joueurs.
+async function _vttMusicToggleSoundTitle(soundId) {
+  if (!STATE.isAdmin) return;
+  const sound = _sounds.find(s => s.id === soundId);
+  if (!sound) return;
+  const hideTitle = sound.hideTitle !== true;
+  try {
+    await updateDoc(_sonRef(soundId), { hideTitle });
+    if (_musicState.currentSoundId === soundId) {
+      await _setMusicState({ currentTitleHidden: hideTitle });
+    }
+    showNotif(hideTitle ? '🙈 Titre masqué aux joueurs' : '👁 Titre visible par les joueurs', 'success');
+  } catch (error) {
+    console.error('[vtt music] title visibility:', error);
+    showNotif('Impossible de modifier la visibilité du titre', 'error');
+  }
 }
 
 function _killAudio() {
@@ -734,16 +772,19 @@ function _syncMusicPlayback(ms) {
 // ── Menu contextuel son ──────────────────────────────────────────────
 // currentPlId : playlist d'où vient le clic (undefined = pool)
 function _vttSoundCtxMenu(e, soundId, currentPlId) {
-  if (!_playlists.length) return;
   const sound = _sounds.find(s=>s.id===soundId); if (!sound) return;
 
-  const items = [];
+  const items = [{
+    label: sound.hideTitle === true ? '👁 Afficher le titre aux joueurs' : '🙈 Masquer le titre aux joueurs',
+    fn: () => _vttMusicToggleSoundTitle(soundId),
+  }];
 
   // Playlists cibles (exclut celle d'où il vient s'il y est déjà)
   const targets = _playlists.filter(pl =>
     pl.id !== currentPlId && !(pl.soundIds||[]).includes(soundId)
   );
   if (targets.length) {
+    items.push('---');
     items.push({ label: `<span style="color:var(--text-dim);font-size:.65rem">Ajouter à…</span>`, fn: null });
     targets.forEach(pl => items.push({
       label: `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${pl.color||'#6366f1'};margin-right:.4rem"></span>${_esc(pl.name)}`,
@@ -930,6 +971,7 @@ export {
   _vttImportGithubRelease,
   _vttMusicNext,
   _vttMusicToggleHideTitle,
+  _vttMusicToggleSoundTitle,
   _vttPlColorSelect,
   _vttRenamePlaylistConfirm,
   _vttPlayPlaylist,

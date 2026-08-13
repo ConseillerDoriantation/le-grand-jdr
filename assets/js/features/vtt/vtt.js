@@ -109,7 +109,7 @@ import {
   _vttSoundCtxMenu, _vttDeleteSound, _vttCreatePlaylist, _vttCreatePlaylistConfirm,
   _vttDeletePlaylist, _vttAddSoundToPlaylist, _vttRemoveSoundFromPlaylist,
   _vttPlColorSelect, _vttPreview, _vttSeek, _vttAddSonUrl, _vttImportGithubRelease,
-  _vttMusicToggleHideTitle, _vttRenamePlaylistConfirm,
+  _vttMusicToggleHideTitle, _vttMusicToggleSoundTitle, _vttRenamePlaylistConfirm,
 } from './vtt-music.js';
 import {
   _vttShortRestVote, _vttShortRestUnvote, _vttShortRestCancel, _vttShortRestForce,
@@ -10879,6 +10879,7 @@ export const VTT_ACTIONS = {
   _vttChatReplyCancel,
   _vttCreatePlaylistConfirm,
   _vttMusicToggleHideTitle,
+  _vttMusicToggleSoundTitle,
   _vttRenamePlaylistConfirm,
   _vttDiceRemoveDie,
   _vttMsAddXp,
