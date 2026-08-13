@@ -3991,23 +3991,12 @@ body.ach-dragging * { cursor:grabbing !important; }
 @keyframes ach-lb-fade { from { opacity:0; } to { opacity:1; } }
 @keyframes ach-lb-scale { from { transform:scale(.92); opacity:0; } to { transform:scale(1); opacity:1; } }
 
-.ach-lightbox-basic {
-  position:fixed; inset:0; z-index:9999;
-  background:rgba(0,0,0,.92);
-  display:flex; align-items:center; justify-content:center;
-  cursor:zoom-out; animation:ach-lb-fade .18s ease;
-}
 .ach-lightbox-rich {
   position:fixed; inset:0; z-index:9999;
   background:rgba(0,0,0,.94); backdrop-filter:blur(14px);
   display:flex; align-items:center; justify-content:center;
   box-sizing:border-box;
   padding:clamp(12px, 3vw, 40px); cursor:zoom-out; animation:ach-lb-fade .22s ease;
-}
-.ach-lb-image-basic {
-  max-width:96vw; max-height:94vh; object-fit:contain; border-radius:12px;
-  box-shadow:0 24px 80px rgba(0,0,0,.8);
-  animation:ach-lb-scale .18s ease; pointer-events:none; display:block;
 }
 .ach-lb-image-rich {
   max-width:90vw; max-height:80vh; object-fit:contain; border-radius:14px;
@@ -4023,7 +4012,6 @@ body.ach-dragging * { cursor:grabbing !important; }
   transition:background .15s;
 }
 .ach-lb-close:hover { background:rgba(255,255,255,.2); }
-.ach-lightbox-basic .ach-lb-close { top:20px; right:24px; font-size:1.2rem; }
 .ach-lb-nav {
   position:absolute;
   top:50%;
@@ -4104,7 +4092,21 @@ body.ach-dragging * { cursor:grabbing !important; }
   display:flex;
   align-items:center;
   justify-content:center;
+  overflow:hidden;
   background:#02050a;
+}
+.ach-lb-media.is-zoomed {
+  align-items:flex-start;
+  justify-content:flex-start;
+  overflow:auto;
+  overscroll-behavior:contain;
+  scrollbar-width:none;
+  -ms-overflow-style:none;
+}
+.ach-lb-media.is-zoomed::-webkit-scrollbar {
+  width:0;
+  height:0;
+  display:none;
 }
 .ach-lb-media.is-empty { width:min(520px, calc(96vw - 340px)); height:min(60vh, 420px); }
 .ach-lb-media.is-empty {
@@ -4123,6 +4125,16 @@ body.ach-dragging * { cursor:grabbing !important; }
   border-radius:0;
   box-shadow:none;
   animation:none;
+  cursor:zoom-in;
+}
+.ach-lb-media.is-zoomed .ach-lb-image-rich {
+  max-width:none;
+  max-height:none;
+  flex:none;
+  margin:auto;
+  object-fit:contain;
+  cursor:zoom-out;
+  touch-action:pan-x pan-y;
 }
 .ach-lb-info {
   position:static;

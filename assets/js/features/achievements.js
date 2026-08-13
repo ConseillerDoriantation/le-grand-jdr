@@ -1013,31 +1013,6 @@ const ACH_LB_SIDE_W = 340;
 const ACH_LB_STACK_BP = 1100;
 const ACH_LB_STACK_W = 760;
 
-function _achOpenImage(url) {
-  // Overlay plein écran avec l'image agrandie, clic ou Escape pour fermer
-  _achClearLightboxKeyHandler();   // coupe les flèches/Échap de la fiche riche si ouverte
-  const existing = document.getElementById('ach-lightbox');
-  if (existing) existing.remove();
-
-  const overlay = document.createElement('div');
-  overlay.id = 'ach-lightbox';
-  overlay.className = 'ach-lightbox-basic';
-
-  overlay.innerHTML = `
-    <img class="ach-lb-image-basic" src="${url}" alt="Image agrandie">
-    <button class="ach-lb-close" type="button">✕</button>
-  `;
-
-  const close = () => { overlay.style.opacity = '0'; setTimeout(() => overlay.remove(), 160); };
-  overlay.addEventListener('click', close);
-  overlay.querySelector('.ach-lb-close').addEventListener('click', close);
-
-  const onKey = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
-  document.addEventListener('keydown', onKey);
-
-  document.body.appendChild(overlay);
-}
-
 // ── JUSTIFIED LAYOUT ENGINE ───────────────────────────────────────────────────
 
 function _achMeasureImageRatio(imageUrl, fallback = 4 / 3) {
@@ -2003,7 +1978,7 @@ function _achOpenLightbox(itemId) {
     <div class="ach-lb-frame" style="--c:${cat.color};--c-glow:${cat.glow};--c-line:${cat.line}">
       <div class="ach-lb-media${item.imageUrl ? '' : ' is-empty'}">
         ${item.imageUrl
-          ? `<img class="ach-lb-image-rich" src="${item.imageUrl}" alt="${_esc(item.nom || item.titre || '')}" data-ach-zoom title="Cliquer pour agrandir en plein écran">`
+          ? `<img class="ach-lb-image-rich" src="${item.imageUrl}" alt="${_esc(item.nom || item.titre || '')}" data-ach-zoom title="Cliquer pour zoomer">`
           : `<div class="ach-lb-empty-rich">${item.emoji || cat.emoji}</div>`}
       </div>
       <aside class="ach-lb-info${item.imageUrl ? '' : ' is-empty'}">
@@ -2028,7 +2003,7 @@ function _achOpenLightbox(itemId) {
 
   let swipeStart = null;
   overlay.addEventListener('touchstart', event => {
-    if (event.touches.length !== 1 || event.target?.closest?.('button, a, input, textarea, select')) {
+    if (event.touches.length !== 1 || event.target?.closest?.('button, a, input, textarea, select, .ach-lb-media.is-zoomed')) {
       swipeStart = null;
       return;
     }
@@ -2066,6 +2041,7 @@ function _achOpenLightbox(itemId) {
   // un format fixe et l'image arrivait rétrécie entre deux bandes noires.
   // Calculé en JS : en CSS, `aspect-ratio` sur une colonne de grille auto crée une
   // dépendance circulaire largeur↔hauteur que le navigateur résout en rognant.
+  const mediaEl = overlay.querySelector('.ach-lb-media');
   const mediaImg = overlay.querySelector('.ach-lb-image-rich');
   if (frameEl && mediaImg) {
     const fitFrameToImage = () => {
@@ -2099,8 +2075,35 @@ function _achOpenLightbox(itemId) {
     window.addEventListener('resize', fitFrameToImage);
     overlay.addEventListener('ach-lb-teardown', () => window.removeEventListener('resize', fitFrameToImage));
   }
-  // Clic sur l'image de la fiche → viewer plein écran à sa vraie taille (hors cadre).
-  overlay.querySelector('[data-ach-zoom]')?.addEventListener('click', e => { e.stopPropagation(); _achOpenImage(item.imageUrl); });
+  mediaImg?.addEventListener('click', event => {
+    event.stopPropagation();
+    if (!mediaEl) return;
+
+    const zoomed = mediaEl.classList.toggle('is-zoomed');
+    mediaImg.title = zoomed ? 'Cliquer pour dézoomer' : 'Cliquer pour zoomer';
+    if (!zoomed) {
+      mediaImg.style.removeProperty('width');
+      mediaImg.style.removeProperty('height');
+      mediaEl.scrollTo({ left: 0, top: 0 });
+      return;
+    }
+
+    const bounds = mediaEl.getBoundingClientRect();
+    const imageRatio = mediaImg.naturalWidth / mediaImg.naturalHeight || 1;
+    const frameRatio = bounds.width / bounds.height || 1;
+    const fittedWidth = imageRatio >= frameRatio ? bounds.width : bounds.height * imageRatio;
+    const fittedHeight = imageRatio >= frameRatio ? bounds.width / imageRatio : bounds.height;
+    const zoomFactor = 2;
+    const focusX = bounds.width ? (event.clientX - bounds.left) / bounds.width : .5;
+    const focusY = bounds.height ? (event.clientY - bounds.top) / bounds.height : .5;
+
+    mediaImg.style.width = `${Math.round(fittedWidth * zoomFactor)}px`;
+    mediaImg.style.height = `${Math.round(fittedHeight * zoomFactor)}px`;
+    requestAnimationFrame(() => {
+      mediaEl.scrollLeft = Math.max(0, focusX * mediaImg.scrollWidth - bounds.width / 2);
+      mediaEl.scrollTop = Math.max(0, focusY * mediaImg.scrollHeight - bounds.height / 2);
+    });
+  });
   overlay.querySelector('.ach-lb-close').addEventListener('click', e => { e.stopPropagation(); close(); });
   overlay.querySelectorAll('.ach-lb-nav').forEach(btn => btn.addEventListener('click', e => {
     e.stopPropagation();
