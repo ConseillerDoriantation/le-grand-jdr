@@ -16,7 +16,7 @@ import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
 import { resolveSpellModifierStat, usesSpellMastery } from '../../shared/spell-runes.js';
-import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds } from './spells-calc.js';
 
 let _sortsSearch = '';
 // Facettes COMBINABLES : type ET rune ET noyau (chacune toggle indépendamment).
@@ -85,7 +85,7 @@ function _ensureSpellRenderCaches() {
       _conditionsLibCache = Array.isArray(conditions) ? conditions : [];
       setConditionsLibCache(_conditionsLibCache);
       _spellRenderCachesReady = true;
-      if (charSession.getCurrentCharTab() === 'sorts') _renderSpellsTab();
+      if (_spellRerenderOverride || charSession.getCurrentCharTab() === 'sorts') _renderSpellsTab();
     })
     .catch(err => {
       console.warn('[sorts] Impossible de charger les noyaux ou les états du grimoire', err);
@@ -93,7 +93,29 @@ function _ensureSpellRenderCaches() {
     });
 }
 
+// Collection Firestore de l'entité qui porte les sorts. Défaut 'characters' →
+// aucun changement pour les joueurs. Les PNJ marquent leur objet (__spellCol='npcs').
+export function spellHostCollection(c) { return c && c.__spellCol ? c.__spellCol : 'characters'; }
+
+// Re-render de l'onglet Sorts. Par défaut : rendu via charSession (fiche perso).
+// Un hôte non-perso (PNJ) peut fournir son propre re-render.
+let _spellRerenderOverride = null;
+// Un hôte non-perso (PNJ) prend la main sur le moteur de sorts : entité + re-render.
+// clearSpellHost() rétablit le comportement joueur (STATE.activeChar + charSession).
+export function setNpcSpellHost(entity, rerender) {
+  setSpellEntity(entity || null);
+  _spellRerenderOverride = entity ? (rerender || null) : null;
+}
+export function clearSpellHost() { setSpellEntity(null); _spellRerenderOverride = null; }
+// Utilisé par forms.js : si un hôte non-perso (PNJ) est actif, re-render via son
+// callback et renvoie true (l'appelant n'exécute pas le re-render perso).
+export function runSpellRerenderIfHosted(c) {
+  if (_spellRerenderOverride) { _spellRerenderOverride(c); return true; }
+  return false;
+}
+
 function _renderSpellsTab(c = _getCurrentSpellChar()) {
+  if (_spellRerenderOverride) { _spellRerenderOverride(c); return; }
   if (!c) return;
   if (charSession.getCurrentCharTab() === 'sorts') {
     charSession.renderTab('sorts', c, charSession.getCanEditChar());
@@ -527,7 +549,7 @@ async function _sortsReplaceWith(outIdx) {
   sorts[outIdx] = { ...sOut, actif: false };
   sorts[inIdx]  = { ...sIn,  actif: true };
   ensureSpellIds(sorts);
-  if (await trySave('characters', c.id, { deck_sorts: sorts })) {
+  if (await trySave(spellHostCollection(c), c.id, { deck_sorts: sorts })) {
     c.deck_sorts = sorts;
     if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
     if (charSession.getCurrentChar()?.id === c.id)
@@ -723,7 +745,7 @@ export function bindSortCardsDnd(c, canEdit) {
         if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
         if (charSession.getCurrentChar()?.id === c.id)
           charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
-        if (await trySave('characters', c.id, { deck_sorts: next })) {
+        if (await trySave(spellHostCollection(c), c.id, { deck_sorts: next })) {
           showNotif('Ordre des sorts mis à jour', 'info', {
             duration: 5000,
             action: {
@@ -733,7 +755,7 @@ export function bindSortCardsDnd(c, canEdit) {
                 if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
                 if (charSession.getCurrentChar()?.id === c.id)
                   charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
-                if (await trySave('characters', c.id, { deck_sorts: prevOrder })) _renderSpellsTab(c);
+                if (await trySave(spellHostCollection(c), c.id, { deck_sorts: prevOrder })) _renderSpellsTab(c);
               },
             },
           });
@@ -1246,7 +1268,7 @@ async function _sortsAdjRuneLimit(delta) {
   if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
   if (charSession.getCurrentChar()?.id === c.id)
     charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
-  if (await trySave('characters', c.id, { maxRunes: next })) {
+  if (await trySave(spellHostCollection(c), c.id, { maxRunes: next })) {
     _renderSpellsTab(c);
     showNotif(`🔮 Runes d'effet : ${next} pour ${_esc(c.nom || 'ce perso')}`, 'success');
   }
@@ -1266,7 +1288,7 @@ async function _sortsSetCardCat(idx, catId) {
   if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
   if (charSession.getCurrentChar()?.id === c.id)
     charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
-  if (await trySave('characters', c.id, { deck_sorts: sorts })) {
+  if (await trySave(spellHostCollection(c), c.id, { deck_sorts: sorts })) {
     _renderSpellsTab(c);
   } else {
     sorts[idx] = { ...sorts[idx], catId: prevCatId };
@@ -1312,7 +1334,7 @@ function _sortsResetFilters() {
 
 async function _sortsCommitBulk(c, sorts, message, type = 'success') {
   ensureSpellIds(sorts);
-  if (!await trySave('characters', c.id, { deck_sorts: sorts })) return false;
+  if (!await trySave(spellHostCollection(c), c.id, { deck_sorts: sorts })) return false;
   c.deck_sorts = sorts;
   if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
   if (charSession.getCurrentChar()?.id === c.id)
@@ -1917,7 +1939,7 @@ async function _addSortCat(couleur) {
   if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
   if (charSession.getCurrentChar()?.id === c.id)
     charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
-  if (await trySave('characters', c.id, { sort_cats: cats })) {
+  if (await trySave(spellHostCollection(c), c.id, { sort_cats: cats })) {
     showNotif('Catégorie créée !', 'success');
     _renderSpellsTab(c);   // _sortsCatPanelOpen reste vrai → le panneau reste ouvert
   } else {
@@ -1936,7 +1958,7 @@ async function _renameSortCat(idx, value) {
   if (!nom || nom === cats[idx].nom) return;
   cats[idx] = { ...cats[idx], nom };
   c.sort_cats = cats;
-  if (await trySave('characters', c.id, { sort_cats: cats })) _renderSpellsTab(c);
+  if (await trySave(spellHostCollection(c), c.id, { sort_cats: cats })) _renderSpellsTab(c);
 }
 
 async function _recolorSortCat(idx, couleur) {
@@ -1945,7 +1967,7 @@ async function _recolorSortCat(idx, couleur) {
   if (!cats[idx] || cats[idx].couleur === couleur) return;
   cats[idx] = { ...cats[idx], couleur };
   c.sort_cats = cats;
-  if (await trySave('characters', c.id, { sort_cats: cats })) _renderSpellsTab(c);
+  if (await trySave(spellHostCollection(c), c.id, { sort_cats: cats })) _renderSpellsTab(c);
 }
 
 async function _delSortCat(idx) {
@@ -1960,7 +1982,7 @@ async function _delSortCat(idx) {
   cats.splice(idx, 1);
   c.sort_cats  = cats;
   c.deck_sorts = sorts;
-  if (await trySave('characters', c.id, { sort_cats: cats, deck_sorts: sorts })) {
+  if (await trySave(spellHostCollection(c), c.id, { sort_cats: cats, deck_sorts: sorts })) {
     showNotif('Catégorie supprimée (sorts conservés).', 'success');
     _renderSpellsTab(c);
   }
@@ -1980,7 +2002,7 @@ export function toggleSortDetail(idx) {
 let _itemEditCtx = null;
 
 export function addSort() { _itemEditCtx = null; openSortModal(-1, {}); }
-export function editSort(idx) { _itemEditCtx = null; openSortModal(idx, (STATE.activeChar?.deck_sorts||[])[idx]); }
+export function editSort(idx) { _itemEditCtx = null; openSortModal(idx, (_getCurrentSpellChar()?.deck_sorts||[])[idx]); }
 
 /** Ouvre la modal de sort pour éditer une action d'objet.
  *  item   : l'objet portant les actions
@@ -3848,7 +3870,7 @@ async function _toggleInvSelect(id) {
   if (ids.includes(id)) ids = ids.filter(x => x !== id);
   else { if (ids.length >= nbInv) return; ids.push(id); }
   s.invocation = { ids };
-  await trySave('characters', c.id, { deck_sorts: c.deck_sorts });
+  await trySave(spellHostCollection(c), c.id, { deck_sorts: c.deck_sorts });
   updateModalContent(_invSelTitle(), _renderInvSelectBody());
   _sortsRerender?.();
 }
@@ -3938,14 +3960,14 @@ async function _invCfgOnActionSave(holder) {
   const c = STATE.activeChar, s = _invCfgSort(); if (!c || !s) return;
   if (!s.invocation) s.invocation = {};
   s.invocation.actions = holder.actions;
-  await trySave('characters', c.id, { deck_sorts: c.deck_sorts });
+  await trySave(spellHostCollection(c), c.id, { deck_sorts: c.deck_sorts });
   _refreshInvocationConfig();       // la modale de config est déjà restaurée (popModal)
 }
 async function _invCfgDeleteAction(aidx) {
   const c = STATE.activeChar, s = _invCfgSort(); if (!c || !s?.invocation?.actions) return;
   if (!await confirmModal('Supprimer cette action ?')) return;
   s.invocation.actions.splice(parseInt(aidx), 1);
-  await trySave('characters', c.id, { deck_sorts: c.deck_sorts });
+  await trySave(spellHostCollection(c), c.id, { deck_sorts: c.deck_sorts });
   _refreshInvocationConfig();
 }
 // Bloc image : aperçu + boutons (mode normal). Le cropper inline remplace ce
@@ -4032,7 +4054,7 @@ function _libInvCurrent() { return _libInvs()[_libInvIdx] || null; }
 function _invUuid() { return 'inv_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 async function _saveLibInvs() {
   const c = STATE.activeChar; if (!c) return;
-  await trySave('characters', c.id, { invocations: c.invocations || [] });
+  await trySave(spellHostCollection(c), c.id, { invocations: c.invocations || [] });
 }
 
 // ── Manager : liste des invocations du perso ──────────────────────────────────
@@ -4359,7 +4381,7 @@ async function _mjAdjRuneLimit(delta) {
   const next = Math.max(0, Math.min(20, base + (parseInt(delta) || 0)));
   if (next === base) return;
   c.maxRunes = next;
-  await trySave('characters', c.id, { maxRunes: next }).catch(() => {});
+  await trySave(spellHostCollection(c), c.id, { maxRunes: next }).catch(() => {});
   _refreshRunesSection();
   showNotif(`🔮 Runes d'effet débloquées : ${next} pour ${_esc(c.nom || 'ce perso')}`, 'success');
 }
@@ -5101,7 +5123,7 @@ async function _saveClassicSort(idx, btn = null) {
     if (idx >= 0) next[idx] = spell;
     else next.push(spell);
     ensureSpellIds(next);
-    if (!(await trySave('characters', character.id, { deck_sorts: next }))) return false;
+    if (!(await trySave(spellHostCollection(character), character.id, { deck_sorts: next }))) return false;
 
     character.deck_sorts = next;
     if (charSession.getCurrentChar()?.id === character.id) {
@@ -5281,7 +5303,7 @@ export async function saveSort(idx, btn = null) {
     const next = [...sorts];
     if (idx >= 0) next[idx] = newSort; else next.push(newSort);
     ensureSpellIds(next);
-    if (!(await trySave('characters', c.id, { deck_sorts: next }))) return;   // échec : modal ouverte, rien perdu
+    if (!(await trySave(spellHostCollection(c), c.id, { deck_sorts: next }))) return;   // échec : modal ouverte, rien perdu
 
     c.deck_sorts = next;
     // Sync les références pour que les filtres / re-render lisent la version fraîche

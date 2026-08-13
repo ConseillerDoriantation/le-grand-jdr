@@ -1354,8 +1354,15 @@ export function _buildSortResume(s, c) {
   return lines;
 }
 
+// Entité « hôte » des sorts. Par défaut null → comportement joueur inchangé
+// (STATE.activeChar). Les PNJ posent un override le temps d'afficher leur onglet
+// Sorts, pour que tout le moteur (rendu + édition) opère sur le PNJ.
+let _spellEntityOverride = null;
+export function setSpellEntity(entity) { _spellEntityOverride = entity || null; }
+export function getSpellEntityOverride() { return _spellEntityOverride; }
+
 export function _getCurrentSpellChar() {
-  return STATE.activeChar || charSession.getCurrentChar() || null;
+  return _spellEntityOverride || STATE.activeChar || charSession.getCurrentChar() || null;
 }
 
 // ── Présentateur partagé : UNE seule vérité d'affichage pour un sort ─────────

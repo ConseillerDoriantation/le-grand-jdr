@@ -25,6 +25,12 @@ import { recordRecentNavigation } from '../shared/recent-navigation.js';
 import { getItemStatBonus, sortCharactersForDisplay, getMyCharacters, getModFromScore,
   computeEquipStatsBonus, computeEquipDerivedBonus, formatItemBonusText,
   calcPVMax, calcPMMax, calcCA, calcVitesse, calcDeckMax } from '../shared/char-stats.js';
+// Réutilisation DU moteur de sorts perso pour l'onglet Sorts des PNJ (rendu
+// identique). Le moteur devient « hôte-agnostique » via setNpcSpellHost/clearSpellHost.
+import { renderCharDeck as _renderSpellDeck, setNpcSpellHost, clearSpellHost } from './characters/spells.js';
+// Actions de gestion du deck (définies dans forms.js) — enregistrées ici pour être
+// disponibles sur la page PNJ même sans avoir ouvert de fiche perso.
+import { toggleSort as _spellToggle, duplicateSort as _spellDuplicate, setSortValidation as _spellSetVal, deleteSort as _spellDelete } from './characters/forms.js';
 import {
   buildEquippedItemFromInventory,
   getArmorSetData,
@@ -264,6 +270,9 @@ let _filterStatus  = '';     // ''=tous | 'mort' | 'disparu' | 'alive' (ni mort 
 let _filterHidden  = false;  // MJ : n'afficher que les PNJ cachés
 let _histEditDelta = 0;
 let _npcPanel      = 'dossier';
+let _npcSheetTab   = 'combat';   // onglet actif de la fiche PNJ : 'combat' | 'sorts'
+let _npcRelSel     = null;       // id du lien d'affinité sélectionné dans le Cercle des relations
+let _npcLink       = { npcId: null, charId: null, charNom: '', typeId: null };  // sélection en cours dans le modal « Lier »
 let _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
 let _equipPickerState = { npcId: '', slot: '', q: '' };
 
@@ -715,55 +724,68 @@ function _renderBastionProfil(n) {
   if (!adm && !hasInfo) return ''; // joueur : rien à montrer
 
   const actSet = new Set(n.activites || []);
-  const mjBadge = !canSee ? `<span class="npc-badge-mj">MJ</span>` : '';
-  const recruitToggle = `<button class="npc-mini-btn ${recrutable ? '' : 'npc-mini-btn--off'}" data-action="npcToggleRecrutable" data-id="${n.id}" title="Autoriser ou non le recrutement de ce PNJ au Bastion">${recrutable ? '✅ Recrutable' : '🚫 Non recrutable'}</button>`;
 
-  // ── Vue MJ : tout éditable inline ──
+  // ── Vue MJ : carte éditable (spécialités, passif, salaire, recrutable) ──
   if (adm) {
+    const mjFoot = niv < 3
+      ? `⚠ Les joueurs ne voient pas encore ce bloc (affinité groupe &lt; Amical).`
+      : (recrutable
+        ? `🛈 Visible par les joueurs dès <b>Amical</b> · recrutable à <b>Allié</b>.`
+        : `🚫 Masqué aux joueurs (marqué « non recrutable »).`);
     return `
-    <div class="npc-card${recrutable ? '' : ' is-not-recrutable'}">
-      <div class="npc-card-hd">
-        <div class="npc-card-title">🏰 Profil Bastion${mjBadge}</div>
-        ${recruitToggle}
+    <section class="npc-bastion${recrutable ? '' : ' is-off'}">
+      <div class="npc-bastion-head">
+        <div class="npc-bastion-title"><span class="npc-bastion-ico">🏰</span><div><h3>Bastion</h3><small>Profil de recrutement</small></div></div>
+        <button type="button" class="npc-bastion-recruit${recrutable ? '' : ' off'}" data-action="npcToggleRecrutable" data-id="${n.id}"
+          title="Autoriser ou non le recrutement de ce PNJ au Bastion">${recrutable ? '✅ Recrutable' : '🚫 Non recrutable'}</button>
       </div>
-      ${recrutable ? '' : '<div class="npc-bastion-note">🚫 Non recrutable — masqué aux joueurs.</div>'}
-      <div class="npc-edit-block" style="margin-bottom:.45rem">
-        <span class="npc-edit-lbl">Activités / spécialités</span>
-        <div class="npc-bastion-pills">
-          ${NPC_ACTIVITES.map(([slug, label]) => `
-            <button class="npc-act-toggle ${actSet.has(slug) ? 'is-on' : ''}" data-action="npcToggleActivite"
-              data-id="${n.id}" data-slug="${slug}">${label}</button>`).join('')}
+      <div class="npc-bastion-body">
+        <div class="npc-bastion-block">
+          <span class="npc-bastion-lbl">Spécialités / activités</span>
+          <div class="npc-bastion-specs">
+            ${NPC_ACTIVITES.map(([slug, label]) => `
+              <button type="button" class="npc-bastion-spec${actSet.has(slug) ? ' is-on' : ''}" data-action="npcToggleActivite" data-id="${n.id}" data-slug="${slug}">${label}</button>`).join('')}
+          </div>
+        </div>
+        <div class="npc-bastion-grid">
+          <div class="npc-bastion-passif">
+            <div class="npc-bastion-passif-row">🎁 Passif employé</div>
+            <textarea class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="passif"
+              rows="2" placeholder="+20% production Forge · −10% achats…">${_esc(n.passif || '')}</textarea>
+          </div>
+          <div class="npc-bastion-salaire">
+            <span class="npc-bastion-sal-k">Salaire</span>
+            <span class="npc-bastion-sal-v"><input type="number" min="0" class="npc-inline" data-change="npcInlineSave"
+              data-npc-id="${n.id}" data-field="salaireSuggere" value="${parseInt(n.salaireSuggere) || ''}" placeholder="0"> <small>or/sem.</small></span>
+          </div>
         </div>
       </div>
-      <div class="npc-edit-block" style="margin-bottom:.45rem">
-        <span class="npc-edit-lbl">Passif / bonus employé</span>
-        <textarea class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="passif"
-          rows="2" placeholder="+20% production Forge · −10% achats…">${_esc(n.passif || '')}</textarea>
-      </div>
-      <div class="npc-edit-block" style="max-width:200px">
-        <span class="npc-edit-lbl">Salaire (or/sem.)</span>
-        <input type="number" min="0" class="npc-inline" data-change="npcInlineSave"
-          data-npc-id="${n.id}" data-field="salaireSuggere" value="${parseInt(n.salaireSuggere) || ''}" placeholder="0">
-      </div>
-    </div>`;
+      <div class="npc-bastion-foot mj">${mjFoot}</div>
+    </section>`;
   }
 
-  // ── Vue joueur (lecture seule) ──
+  // ── Vue joueur (lecture seule) — gatée par l'affinité ──
   const activites = [...actSet].map(_actLabel);
+  const hasEco = n.passif || n.salaireSuggere;
   return `
-  <div class="npc-card">
-    <div class="npc-card-hd">
-      <div class="npc-card-title">🏰 ${canRecruit ? 'Recrutable au Bastion' : 'Profil bastion'}</div>
+  <section class="npc-bastion">
+    <div class="npc-bastion-head">
+      <div class="npc-bastion-title"><span class="npc-bastion-ico">🏰</span><div><h3>${canRecruit ? 'Recrutable au Bastion' : 'Profil bastion'}</h3><small>Bastion</small></div></div>
     </div>
-    ${activites.length ? `<div class="npc-bastion-pills">
-      ${activites.map(a => `<span class="npc-bastion-pill">${_esc(a)}</span>`).join('')}
-    </div>` : ''}
-    ${n.passif ? `<div class="npc-bastion-passif">🎁 ${_esc(n.passif)}</div>` : ''}
-    ${n.salaireSuggere ? `<div class="npc-bastion-sal">💰 ${n.salaireSuggere} or / sem.</div>` : ''}
-    ${canRecruit
-      ? `<div class="npc-bastion-recruit ok">✅ Recrutable — votre affinité est suffisante (Allié).</div>`
-      : `<div class="npc-bastion-recruit lock">🔒 Recrutable une fois l'affinité du groupe au niveau <b>Allié</b>.</div>`}
-  </div>`;
+    <div class="npc-bastion-body">
+      ${activites.length ? `<div class="npc-bastion-block">
+        <span class="npc-bastion-lbl">Spécialités</span>
+        <div class="npc-bastion-specs">${activites.map(a => `<span class="npc-bastion-spec is-on">${_esc(a)}</span>`).join('')}</div>
+      </div>` : ''}
+      ${hasEco ? `<div class="npc-bastion-grid">
+        ${n.passif ? `<div class="npc-bastion-passif"><div class="npc-bastion-passif-row">🎁 Passif</div><p>${_esc(n.passif)}</p></div>` : '<div></div>'}
+        ${n.salaireSuggere ? `<div class="npc-bastion-salaire"><span class="npc-bastion-sal-k">Salaire</span><span class="npc-bastion-sal-v">${n.salaireSuggere} <small>or/sem.</small></span></div>` : ''}
+      </div>` : ''}
+    </div>
+    <div class="npc-bastion-foot ${canRecruit ? 'ok' : 'lock'}">${canRecruit
+      ? `✅ Recrutable — l'affinité du groupe est suffisante (Allié).`
+      : `🔒 Recrutable une fois l'affinité du groupe au niveau <b>Allié</b>.`}</div>
+  </section>`;
 }
 
 // Jauge d'affinité groupe (lecture seule — la modification passe par les événements)
@@ -1107,7 +1129,6 @@ function _renderFiche(n) {
     ? `data-action="npcViewPhoto" data-id="${_esc(n.id)}" title="Voir l'image complète"`
     : (adm ? `data-action="npcSetPhoto" data-id="${_esc(n.id)}" title="Ajouter un portrait"` : '');
   const bastion = _renderBastionProfil(n);
-  const relations = [_renderNpcRelationDesk(n, af), _renderNpcSpecificRelationsDesk(n)].filter(Boolean).join('');
 
   // Barre vitale façon fiche perso : valeur actuelle (stepper) / max calculé + PV/PM de base modifiables.
   const vital = (kind, icon, label, max, base) => {
@@ -1191,14 +1212,35 @@ function _renderFiche(n) {
       : (n.description ? `<p class="npc-profile-public-desc">${_esc(n.description)}</p>` : '')}
   </aside>`;
 
+  const tab = _npcSheetTab === 'sorts' ? 'sorts' : 'combat';
+  const _tico = (id) => `<span class="tab-ico" aria-hidden="true"><svg class="cs-tab-svg"><use href="./assets/img/icons.svg#icon-${id}"/></svg></span>`;
+  const tabsBar = `
+    <nav class="tabs-v3 npc-sheet-tabs" role="tablist" aria-label="Sections du PNJ">
+      <button type="button" class="tab-v3 ${tab === 'combat' ? 'active' : ''}" role="tab" aria-selected="${tab === 'combat'}" data-action="npcSetTab" data-tab="combat">
+        ${_tico('sword')} Combat</button>
+      <button type="button" class="tab-v3 ${tab === 'sorts' ? 'active' : ''}" role="tab" aria-selected="${tab === 'sorts'}" data-action="npcSetTab" data-tab="sorts">
+        ${_tico('sparkles')} Sorts <span class="tab-badge">${deckActifs}/${deckMax}</span></button>
+    </nav>`;
+  // Onglet Sorts actif → le PNJ devient l'hôte du moteur de sorts (édition +
+  // enregistrement sur son doc). Sinon on relâche l'hôte (comportement joueur).
+  if (adm && tab === 'sorts') {
+    n.__spellCol = 'npcs';
+    setNpcSpellHost(n, () => _refreshActivePanel());
+  } else {
+    clearSpellHost();
+  }
+  const tabBody = tab === 'sorts' ? _renderNpcSpellsTab(n) : _renderNpcEquipmentSection(n);
+
+  // Le Cercle des relations reste DANS la colonne, mais dans une zone à part
+  // (fond/matière distincts + retrait) pour ne pas lire comme une énième carte.
+  const social = `<div class="npc-hub-wrap">${_renderNpcRelationHub(n, af)}</div>`;
+
   const main = `<div class="main-col npc-main-col">
     ${adm ? `<section class="npc-character-stats">${_renderNpcStatsBanner(n)}</section>` : ''}
-    ${adm ? _renderNpcEquipmentSection(n) : ''}
-    <section class="npc-split-row">
-      ${_renderNpcTimelineDesk(n)}
-      <div class="npc-relations-stack">${relations || _renderNpcEmptyPanel('Aucune relation connue pour ce PNJ.')}</div>
-    </section>
-    ${bastion ? `<section class="npc-bastion-slot">${bastion}</section>` : ''}
+    ${adm ? tabsBar : ''}
+    ${adm ? `<div class="npc-tab-body">${tabBody}</div>` : ''}
+    ${social}
+    ${bastion}
   </div>`;
 
   return `
@@ -1258,11 +1300,20 @@ function _renderNpcDerivedControls(n) {
 function _renderNpcEquipmentSection(n) {
   const { equip } = _npcVitalTotals(n);
   const weaponInfo = _npcWeaponInfo(n);
+  // Les actions VTT du PNJ vivent désormais dans l'onglet Sorts (deck) → plus de
+  // bloc « Actions PNJ » ici, qui faisait doublon.
   return `
     <section class="npc-character-combat">
       ${_renderNpcEquip(n, equip, { dmg: weaponInfo.damage, range: `${weaponInfo.range}c` })}
-      ${_renderNpcActionsDesk(n)}
     </section>`;
+}
+
+// Onglet Sorts du PNJ = MÊME rendu que la fiche perso (renderCharDeck), mais
+// l'entité hôte est le PNJ : ses sorts vivent sur son doc (npcs/{id}.deck_sorts).
+// L'hôte est posé dans _renderFiche (setNpcSpellHost) → toute édition (ajout,
+// runes, PM, catégories…) opère sur le PNJ et enregistre dans la collection npcs.
+function _renderNpcSpellsTab(n) {
+  return `<section class="npc-character-combat npc-spells-tab">${_renderSpellDeck(n, STATE.isAdmin)}</section>`;
 }
 
 function _renderNpcProfileHeader(n, af) {
@@ -1622,23 +1673,35 @@ function _renderNpcWorkHeader(n, af) {
 }
 
 function _renderNpcRelationDesk(n, af) {
+  const niv    = _affiniteNiveau(n);
   const valeur = Number(n.affinite?.valeur) || 0;
-  const segments = AFFINITE.map((a, i) => `<span class="${i <= _affiniteNiveau(n) ? 'is-on' : ''}" style="--seg:${a.couleur}">${a.label}</span>`).join('');
+  const isValeur = _affiniteMode(n) === 'valeur';
+  const editable = STATE.isAdmin && !isValeur;   // clic = régler le niveau (mode groupe)
+  const segments = AFFINITE.map((a, i) => {
+    const cls = `npc-rel-seg${i <= niv ? ' is-on' : ''}${i === niv ? ' is-current' : ''}`;
+    if (editable) {
+      return `<button type="button" class="${cls}" style="--seg:${a.couleur}"
+        data-action="npcSetAffiniteNiveau" data-id="${n.id}" data-niveau="${i}"
+        title="${a.icon} ${_esc(a.label)} — définir">${a.label}</button>`;
+    }
+    return `<span class="${cls}" style="--seg:${a.couleur}">${a.label}</span>`;
+  }).join('');
   return `
-    <section class="npc-work-card npc-work-card--relation">
+    <section class="npc-work-card npc-work-card--relation" style="${_afVars(af)}">
       <div class="npc-work-card-head">
         <div><small>Relation groupe</small><strong>${af.icon} ${af.label}</strong></div>
-        ${STATE.isAdmin ? `<button class="npc-card-act npc-card-act--ghost" data-action="openAffiniteSeuilsModal">Seuils</button>` : ''}
+        ${STATE.isAdmin ? `<button class="npc-card-act npc-card-act--ghost" data-action="openAffiniteSeuilsModal" title="Seuils d'affinité (mode valeur)">Seuils</button>` : ''}
       </div>
       <div class="npc-relation-scale">${segments}</div>
+      ${editable ? `<div class="npc-relation-hint">Clique un niveau pour définir la posture du PNJ envers le groupe.</div>` : ''}
       <div class="npc-relation-state">
         <p>${_esc(af.desc || '')}</p>
-        ${STATE.isAdmin ? `<b>${valeur > 0 ? '+' + valeur : valeur}</b>` : ''}
+        ${STATE.isAdmin && isValeur ? `<b title="Valeur d'affinité cumulée">${valeur > 0 ? '+' + valeur : valeur}</b>` : ''}
       </div>
       ${STATE.isAdmin ? `
       <div class="npc-relation-edit">
         <textarea class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="affinite.note"
-          rows="2" placeholder="Note de relation...">${_esc(n.affinite?.note || '')}</textarea>
+          rows="2" placeholder="Note de relation (pourquoi cette posture, ce qui pourrait la changer...)">${_esc(n.affinite?.note || '')}</textarea>
       </div>` : (n.affinite?.note ? `<div class="npc-af-note">${_esc(n.affinite.note)}</div>` : '')}
     </section>`;
 }
@@ -1882,6 +1945,142 @@ function _renderNpcRelationCard(a, { publicOnly = false, playerView = false } = 
       </div>
       ${STATE.isAdmin && !publicOnly ? `<button class="npc-icon-btn npc-icon-btn--danger npc-link-delete" data-action="deleteAffinitePerso" data-id="${a.id}">X</button>` : ''}
     </article>`;
+}
+
+// ── Cercle des relations : hub radial (PNJ au centre, liens particuliers en orbite) ──
+// Ne montre QUE les relations spécifiques définies (_affiPerso), pas tous les joueurs.
+// Centre = posture groupe (échelle cliquable) + note groupe. Clic sur un joueur =
+// panneau détail pour éditer son lien. Historique en pied, repliable.
+const _HUB_VB = { w: 1000, h: 560, cx: 500, cy: 262, rx: 330, ry: 182 };
+function _renderNpcRelationHub(n, af) {
+  const adm = STATE.isAdmin;
+  const niv = _affiniteNiveau(n);
+  const editableScale = adm && _affiniteMode(n) !== 'valeur';
+  const links = _affiPerso.filter(a => a.npcId === n.id);
+  const k = links.length;
+  const V = _HUB_VB;
+  const initial = (n.nom || '?')[0].toUpperCase();
+
+  const pos = links.map((_, i) => {
+    const ang = (-90 + i * (360 / Math.max(1, k))) * Math.PI / 180;
+    const x = V.cx + V.rx * Math.cos(ang);
+    const y = V.cy + V.ry * Math.sin(ang);
+    return { x, y, xPct: (x / V.w * 100).toFixed(2), yPct: (y / V.h * 100).toFixed(2) };
+  });
+
+  const spokes = links.map((a, i) => {
+    const { color } = _typeView(a);
+    return `<line x1="${V.cx}" y1="${V.cy}" x2="${pos[i].x.toFixed(0)}" y2="${pos[i].y.toFixed(0)}" stroke="${color}" stroke-width="3" opacity=".5"/>`;
+  }).join('');
+
+  const nodes = links.map((a, i) => {
+    const { emoji, color, label } = _typeView(a);
+    const sel = _npcRelSel === a.id;
+    return `<button type="button" class="npc-hub-node${sel ? ' is-sel' : ''}" style="--x:${pos[i].xPct}%;--y:${pos[i].yPct}%;--rc:${color}"
+      ${adm ? `data-action="npcRelSelect" data-aff-id="${a.id}"` : ''} title="${_esc(a.charNom || '?')} — ${_esc(label)}">
+      <span class="npc-hub-av">${_affiTargetAvatar(a)}</span>
+      <span class="npc-hub-nodelabel">
+        <span class="npc-hub-nm">${_esc(a.charNom || '?')}</span>
+        <span class="npc-hub-rel">${emoji} ${_esc(label)}</span>
+      </span>
+    </button>`;
+  }).join('');
+
+  const scale = AFFINITE.map((a, i) => {
+    const cls = `npc-hub-seg${i <= niv ? ' on' : ''}${i === niv ? ' cur' : ''}`;
+    return editableScale
+      ? `<button type="button" class="${cls}" style="--seg:${a.couleur}" data-action="npcSetAffiniteNiveau" data-id="${n.id}" data-niveau="${i}" title="${a.icon} ${_esc(a.label)}"></button>`
+      : `<span class="${cls}" style="--seg:${a.couleur}" title="${_esc(a.label)}"></span>`;
+  }).join('');
+
+  const center = `
+    <div class="npc-hub-core">
+      <div class="npc-hub-ring">${n.imageUrl ? `<img src="${_esc(n.imageUrl)}" alt="">` : `<span class="npc-hub-ini">${initial}</span>`}</div>
+      <div class="npc-hub-under">
+        <div class="npc-hub-who">${_esc(n.nom || '?')}</div>
+        <div class="npc-hub-scale">${scale}</div>
+        <div class="npc-hub-postxt">${af.icon} ${_esc(af.label)} envers le groupe</div>
+      </div>
+    </div>`;
+
+  // Panneau détail contextuel : lien sélectionné (édition) ou note de posture groupe.
+  const sel = adm ? links.find(a => a.id === _npcRelSel) : null;
+  let detail = '';
+  if (sel) {
+    const { color } = _typeView(sel);
+    const typeOpts = _affiniteTypes.map(t =>
+      `<option value="${t.id}" ${t.id === sel.typeId ? 'selected' : ''}>${t.emoji || '*'} ${_esc(_displayText(t.label))}</option>`).join('');
+    detail = `
+      <div class="npc-hub-detail" style="--rc:${color}">
+        <div class="npc-hub-detail-top">
+          <span class="npc-hub-detail-av">${_affiTargetAvatar(sel)}</span>
+          <div class="npc-hub-detail-who"><strong>${_esc(sel.charNom || '?')}</strong><small>relation particulière avec ${_esc(n.nom || 'ce PNJ')}</small></div>
+          <button class="npc-hub-detail-del" data-action="deleteAffinitePerso" data-id="${sel.id}" title="Supprimer ce lien">🗑</button>
+          <button class="npc-hub-detail-close" data-action="npcRelSelect" data-aff-id="" title="Fermer">✕</button>
+        </div>
+        <div class="npc-hub-detail-grid">
+          <label class="npc-hub-fld"><span>Type de relation</span>
+            <select class="npc-select npc-hub-typesel" data-change="npcAffiField" data-aff-id="${sel.id}" data-field="typeId">${typeOpts}</select></label>
+          <label class="npc-hub-fld"><span>Note publique</span>
+            <input class="npc-inline" data-change="npcAffiField" data-aff-id="${sel.id}" data-field="notePublique" value="${_esc(sel.notePublique || '')}" placeholder="Ce que les joueurs voient…"></label>
+          <label class="npc-hub-fld"><span>Note privée MJ</span>
+            <input class="npc-inline" data-change="npcAffiField" data-aff-id="${sel.id}" data-field="note" value="${_esc(sel.note || '')}" placeholder="Secret du MJ…"></label>
+        </div>
+      </div>`;
+  } else if (adm) {
+    detail = `
+      <div class="npc-hub-detail npc-hub-detail--group">
+        <label class="npc-hub-fld"><span>Posture groupe — note générale (ex. « Apprécie le groupe », ce qui pourrait la changer…)</span>
+          <textarea class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="affinite.note" rows="2" placeholder="Comment le PNJ se comporte avec l'ensemble du groupe…">${_esc(n.affinite?.note || '')}</textarea></label>
+      </div>`;
+  } else if (n.affinite?.note) {
+    detail = `<div class="npc-hub-detail npc-hub-detail--group"><p>${_esc(n.affinite.note)}</p></div>`;
+  }
+
+  const usedTypeIds = [...new Set(links.map(a => a.typeId).filter(Boolean))];
+  const legend = usedTypeIds.length ? `
+    <div class="npc-hub-legend">
+      ${usedTypeIds.map(id => {
+        const t = _getAffiniteType(id); if (!t) return '';
+        return `<span><i style="background:${_getAffiniteTypeColor(id)}"></i>${_getAffiniteTypeEmoji(id)} ${_esc(_displayText(t.label))}</span>`;
+      }).join('')}
+      ${adm ? `<span class="npc-hub-legend-hint">Clique un joueur pour éditer son lien</span>` : ''}
+    </div>` : '';
+
+  const composer = adm
+    ? `<button type="button" class="npc-hub-addbtn" data-action="npcOpenLinkModal" data-npc-id="${n.id}">
+        <span class="npc-hub-addbtn-ico">🔗</span>
+        <span class="npc-hub-addbtn-txt"><b>Lier un joueur à ce PNJ</b><small>Choisis un personnage et sa relation particulière</small></span>
+        <span class="npc-hub-addbtn-plus">＋</span>
+      </button>`
+    : '';
+
+  const histoCount = Array.isArray(n.affinite?.historique) ? n.affinite.historique.length : 0;
+  const chrono = `<details class="npc-hub-chrono"><summary>🕓 Historique d'affinité${histoCount ? ` (${histoCount})` : ''}</summary>${_renderNpcTimelineDesk(n)}</details>`;
+
+  return `
+    <section class="npc-hub" style="${_afVars(af)}">
+      <div class="npc-hub-head">
+        <div class="npc-hub-title"><span class="npc-hub-glyph">◈</span><div><h3>Cercle des relations</h3><small>${_esc(n.nom || 'PNJ')} — liens particuliers</small></div></div>
+        <div class="npc-hub-posture">
+          <span class="npc-hub-posture-lbl">Envers le groupe</span>
+          <span class="npc-hub-pill"><span class="npc-hub-pill-dot"></span>${af.icon} ${_esc(af.label)}</span>
+          ${adm ? `<div class="npc-hub-tools">
+            <button type="button" class="npc-hub-tool" data-action="openAffiniteTypesManager" title="Créer et éditer les types de relation">🏷 Types</button>
+            <button type="button" class="npc-hub-tool" data-action="openAffiniteSeuilsModal" title="Seuils d'affinité (mode valeur)">⚙ Seuils</button>
+          </div>` : ''}
+        </div>
+      </div>
+      <div class="npc-hub-stage${k ? '' : ' is-empty'}">
+        <svg class="npc-hub-svg" viewBox="0 0 ${V.w} ${V.h}" preserveAspectRatio="none">${spokes}</svg>
+        ${center}
+        ${nodes}
+        ${k ? '' : `<div class="npc-hub-empty">Aucune relation particulière.${adm ? ' Lie un joueur ci-dessous pour tracer un lien précis.' : ''}</div>`}
+      </div>
+      ${legend}
+      ${detail}
+      <div class="npc-hub-foot">${composer}${chrono}</div>
+    </section>`;
 }
 
 function _renderEmpty() {
@@ -3377,6 +3576,22 @@ async function _npcAdjustVital(btn) {
   if (await trySave('npcs', id, { [field]: next })) _refreshActivePanel();
 }
 
+// Posture du PNJ envers le groupe : clic sur un segment de l'échelle (mode groupe).
+async function _npcSetAffiniteNiveau(btn) {
+  if (!STATE.isAdmin) return;
+  const id = btn?.dataset?.id;
+  const k = Math.max(0, Math.min(4, parseInt(btn?.dataset?.niveau, 10)));
+  const n = _npcs.find(x => x.id === id);
+  if (!n || !Number.isFinite(k)) return;
+  if (_affiniteMode(n) === 'valeur') return;   // en mode valeur, l'échelle est dérivée (chronologie)
+  const affinite = { ...(n.affinite || {}), mode: 'groupe', niveau: k };
+  n.affinite = affinite;
+  if (await trySave('npcs', id, { affinite })) {
+    _refreshActivePanel();
+    _refreshList({ keepScroll: true });
+  }
+}
+
 // Niveau du PNJ : badge « Niv. N » propre → clic = édition inline (input) qui
 // réutilise le save/preview standard, puis re-render de la fiche.
 function _npcEditLevel(btn) {
@@ -3580,6 +3795,75 @@ async function _npcAddAffiPerso(btn) {
   } catch (e) { notifySaveError(e); }
 }
 
+// ── Flux « Lier un joueur » : modal visuel en 2 étapes (choix joueur + relation) ──
+async function _npcCreateLink(npcId, charId, charNom, typeId) {
+  const char = (STATE.characters || []).find(c => c.id === charId);
+  const type = _getAffiniteType(typeId);
+  const data = {
+    npcId, charId, charNom, charPhoto: _charPortraitSrc(char),
+    typeId, typeLabel: type?.label || '', note: '', notePublique: '',
+  };
+  try {
+    const newId = await addToCol('npc_affinites', data);
+    const entry = { id: newId || `afp_${Date.now()}`, ...data };
+    if (!_affiPerso.find(x => x.id === entry.id)) _affiPerso.push(entry);
+    _refreshActivePanel();
+    return true;
+  } catch (e) { notifySaveError(e); return false; }
+}
+
+function _npcOpenLinkModal(btn) {
+  if (!STATE.isAdmin) return;
+  const npcId = btn?.dataset?.npcId;
+  const n = _npcs.find(x => x.id === npcId); if (!n) return;
+  _npcLink = { npcId, charId: null, charNom: '', typeId: null };
+  const linked = new Set(_affiPerso.filter(a => a.npcId === npcId).map(a => a.charId));
+  const chars = sortCharactersForDisplay(STATE.characters || []).filter(c => !linked.has(c.id));
+  const tiles = chars.length
+    ? chars.map(c => `
+        <button type="button" class="npc-linkmodal-tile" data-action="npcLinkPickChar" data-char-id="${c.id}" data-char-nom="${_esc(c.nom || '?')}">
+          <span class="npc-linkmodal-av">${_charAvatar(c)}</span>
+          <span class="npc-linkmodal-nm">${_esc(c.nom || '?')}</span>
+          <small>${_esc(c.ownerPseudo || '')}</small>
+        </button>`).join('')
+    : `<div class="npc-empty-line">Tous les personnages ont déjà un lien avec ce PNJ.</div>`;
+  const chips = _affiniteTypes.length
+    ? _affiniteTypes.map(t => `
+        <button type="button" class="npc-linkmodal-type" data-action="npcLinkPickType" data-type-id="${t.id}" style="--rc:${t.couleur || '#4f8cff'}">
+          <span class="npc-linkmodal-type-emo">${t.emoji || '✨'}</span> ${_esc(_displayText(t.label))}</button>`).join('')
+    : `<div class="npc-empty-line">Aucun type de relation. Crée-en un via « 🏷 Types ».</div>`;
+  openModal(`🔗 Lier un joueur à ${_esc(n.nom || 'ce PNJ')}`, `
+    <div class="npc-linkmodal">
+      <div class="npc-linkmodal-step">
+        <div class="npc-linkmodal-head"><span class="npc-linkmodal-num">1</span> Quel joueur ?</div>
+        <input type="text" class="npc-linkmodal-search" data-input="npcLinkModalFilter" placeholder="🔍 Rechercher un personnage…" autocomplete="off">
+        <div class="npc-linkmodal-grid">${tiles}</div>
+      </div>
+      <div class="npc-linkmodal-step">
+        <div class="npc-linkmodal-head"><span class="npc-linkmodal-num">2</span> Quelle relation particulière ?</div>
+        <div class="npc-linkmodal-types">${chips}</div>
+      </div>
+      <div class="npc-linkmodal-actions">
+        <button type="button" class="btn btn-outline" data-action="npcCloseModal">Annuler</button>
+        <button type="button" class="btn btn-gold npc-linkmodal-confirm" data-action="npcLinkConfirm" disabled>🔗 Créer le lien</button>
+      </div>
+    </div>`);
+}
+
+function _npcLinkUpdateConfirm() {
+  const btn = document.querySelector('.npc-linkmodal-confirm');
+  if (btn) btn.disabled = !(_npcLink.charId && _npcLink.typeId);
+}
+
+async function _npcLinkConfirm() {
+  if (!_npcLink.npcId || !_npcLink.charId || !_npcLink.typeId) {
+    showNotif('Choisis un joueur et une relation.', 'error');
+    return;
+  }
+  const ok = await _npcCreateLink(_npcLink.npcId, _npcLink.charId, _npcLink.charNom, _npcLink.typeId);
+  if (ok) { closeModal(); showNotif('Lien créé.', 'success'); }
+}
+
 // ── Sélecteur de personnage avec portraits (pour l'ajout d'affinité) ─────────
 const _profilePortraitSrc = (p = {}) => p.portraitUrl || p.photo || p.avatar || p.avatarUrl || '';
 const _playerProfileForChar = (charId = '', charNom = '') => {
@@ -3713,7 +3997,7 @@ function _refreshActivePanel() {
   replaceHtmlPreservingView(
     panel,
     active ? _renderFiche(active) : _renderEmpty(),
-    { includeFocus: true }
+    { includeFocus: true, includeWindow: true }   // préserve aussi le scroll page (plus de saut à chaque interaction)
   );
 }
 
@@ -3742,6 +4026,21 @@ registerActions({
   npcAllocateStat:           (btn) => _npcAllocateStat(btn),
   npcAdjustVital:            (btn) => _npcAdjustVital(btn),
   npcEditLevel:              (btn) => _npcEditLevel(btn),
+  npcSetAffiniteNiveau:      (btn) => _npcSetAffiniteNiveau(btn),
+  npcRelSelect:              (btn) => { const id = btn?.dataset?.affId || null; _npcRelSel = (id && _npcRelSel !== id) ? id : null; _refreshActivePanel(); },
+  npcCharPickFilter:         (el)  => { const q = (el.value || '').trim().toLowerCase(); el.closest('.npc-charpick-panel')?.querySelectorAll('.npc-charpick-opt').forEach(o => { o.style.display = o.textContent.toLowerCase().includes(q) ? '' : 'none'; }); },
+  npcOpenLinkModal:          (btn) => _npcOpenLinkModal(btn),
+  npcCloseModal:             ()    => closeModal(),
+  npcLinkPickChar:           (btn) => { _npcLink.charId = btn.dataset.charId; _npcLink.charNom = btn.dataset.charNom; document.querySelectorAll('.npc-linkmodal-tile').forEach(t => t.classList.toggle('is-sel', t === btn)); _npcLinkUpdateConfirm(); },
+  npcLinkPickType:           (btn) => { _npcLink.typeId = btn.dataset.typeId; document.querySelectorAll('.npc-linkmodal-type').forEach(t => t.classList.toggle('is-sel', t === btn)); _npcLinkUpdateConfirm(); },
+  npcLinkModalFilter:        (el)  => { const q = (el.value || '').trim().toLowerCase(); document.querySelectorAll('.npc-linkmodal-tile').forEach(t => { t.style.display = t.textContent.toLowerCase().includes(q) ? '' : 'none'; }); },
+  npcLinkConfirm:            ()    => _npcLinkConfirm(),
+  npcSetTab:                 (btn) => { const t = btn?.dataset?.tab; if (t === 'combat' || t === 'sorts') { _npcSheetTab = t; _refreshActivePanel(); } },
+  // Deck de sorts PNJ (hôte-aware via forms.js) — dispo sur la page PNJ.
+  toggleSort:                (btn) => _spellToggle(Number(btn.dataset.idx), btn),
+  duplicateSort:             (btn) => _spellDuplicate(Number(btn.dataset.idx)),
+  setSortValidation:         (btn) => _spellSetVal(Number(btn.dataset.idx), btn.dataset.val),
+  deleteSort:                (btn) => _spellDelete(Number(btn.dataset.idx)),
   npcSaveOrgs:               (el) => _npcSaveOrgs(el),
   npcSetWeapon:              (el) => _npcSetWeapon(el),
   npcEquipSlot:              (el) => _npcEquipSlot(el),

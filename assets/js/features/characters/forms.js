@@ -6,7 +6,9 @@ import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal, confirmModal, modalSection } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { calcDeckMax, calcPVMax, calcPMMax, pct } from '../../shared/char-stats.js';
-import { spellUid, ensureSpellIds } from './spells-calc.js';
+import { spellUid, ensureSpellIds, _getCurrentSpellChar } from './spells-calc.js';
+// Hôte des sorts : PNJ ou perso. Défaut = STATE.activeChar / collection 'characters'.
+import { runSpellRerenderIfHosted, spellHostCollection } from './spells.js';
 import { loadAllUsers } from '../../core/adventure.js';
 import { _esc } from '../../shared/html.js';
 import { makeSortable } from '../../shared/sortable-helper.js';
@@ -66,7 +68,7 @@ export async function saveNotes() {
 // SORTS (toggle / delete)
 // ══════════════════════════════════════════════
 export async function toggleSort(idx, btn = null) {
-  const c=STATE.activeChar; if(!c) return;
+  const c=_getCurrentSpellChar(); if(!c) return;
   const sorts=c.deck_sorts||[];
   const s = sorts[idx]; if (!s) return;
   // Un joueur ne peut mettre dans son Deck qu'un sort VALIDÉ par le MJ.
@@ -103,8 +105,8 @@ export async function toggleSort(idx, btn = null) {
     charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
   if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
 
-  if (await trySave('characters',c.id,{deck_sorts:sorts})) {
-    _renderFormsChar(c, 'sorts');
+  if (await trySave(spellHostCollection(c),c.id,{deck_sorts:sorts})) {
+    if (!runSpellRerenderIfHosted(c)) _renderFormsChar(c, 'sorts');
   } else {
     s.actif = prevActif;
     c.deck_sorts = sorts;
@@ -185,19 +187,21 @@ export async function saveQuete(idx = null) {
 // Restaure un tableau deck_sorts précédent (Undo des notifs suppression/duplication).
 async function _restoreDeckSorts(c, prev) {
   c.deck_sorts = prev;
-  if (await trySave('characters', c.id, { deck_sorts: prev })) _renderFormsChar(c, 'sorts');
+  if (await trySave(spellHostCollection(c), c.id, { deck_sorts: prev })) {
+    if (!runSpellRerenderIfHosted(c)) _renderFormsChar(c, 'sorts');
+  }
 }
 
 export async function deleteSort(idx) {
-  const c=STATE.activeChar; if(!c) return;
+  const c=_getCurrentSpellChar(); if(!c) return;
   const nom = (c.deck_sorts||[])[idx]?.nom || 'ce sort';
   if (!await confirmModal(`Supprimer <b>${_esc(nom)}</b> ?`, {
     title: 'Confirmation', confirmLabel: 'Supprimer', icon: '🗑️',
   })) return;
   const prev = [...(c.deck_sorts||[])];
   c.deck_sorts.splice(idx,1);
-  if (await trySave('characters',c.id,{deck_sorts:c.deck_sorts})) {
-    _renderFormsChar(c, 'sorts');
+  if (await trySave(spellHostCollection(c),c.id,{deck_sorts:c.deck_sorts})) {
+    if (!runSpellRerenderIfHosted(c)) _renderFormsChar(c, 'sorts');
     showNotif(`Sort supprimé — ${nom}`, 'info', {
       duration: 6000,
       action: { label: '↺ Annuler', onClick: () => _restoreDeckSorts(c, prev) },
@@ -206,7 +210,7 @@ export async function deleteSort(idx) {
 }
 
 export async function duplicateSort(idx) {
-  const c=STATE.activeChar; if(!c) return;
+  const c=_getCurrentSpellChar(); if(!c) return;
   const prev = [...(c.deck_sorts||[])];
   const sorts = [...prev];
   const src = sorts[idx]; if (!src) return;
@@ -220,18 +224,18 @@ export async function duplicateSort(idx) {
   clone.mjValidated = false;
   sorts.splice(idx + 1, 0, clone);
   c.deck_sorts = sorts;
-  if (await trySave('characters', c.id, {deck_sorts: sorts})) {
+  if (await trySave(spellHostCollection(c), c.id, {deck_sorts: sorts})) {
     showNotif('Sort dupliqué — à valider par le MJ.', 'success', {
       duration: 6000,
       action: { label: '↺ Annuler', onClick: () => _restoreDeckSorts(c, prev) },
     });
-    _renderFormsChar(c, 'sorts');
+    if (!runSpellRerenderIfHosted(c)) _renderFormsChar(c, 'sorts');
   }
 }
 
 export async function setSortValidation(idx, status) {
   if (!STATE.isAdmin) return;
-  const c=STATE.activeChar; if(!c) return;
+  const c=_getCurrentSpellChar(); if(!c) return;
   const sorts = [...(c.deck_sorts||[])];
   const s = sorts[idx]; if (!s) return;
   const nextStatus = ['ok', 'pending', 'no'].includes(status) ? status : 'pending';
@@ -242,10 +246,10 @@ export async function setSortValidation(idx, status) {
   if (charSession.getCurrentChar()?.id === c.id)
     charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
   if (STATE.activeChar?.id === c.id) STATE.activeChar = c;
-  if (await trySave('characters', c.id, {deck_sorts: sorts})) {
+  if (await trySave(spellHostCollection(c), c.id, {deck_sorts: sorts})) {
     const label = nextStatus === 'ok' ? 'validé' : nextStatus === 'no' ? 'refusé' : 'remis à valider';
     showNotif(`Sort ${label}.`, nextStatus === 'no' ? 'info' : 'success');
-    _renderFormsChar(c, 'sorts');
+    if (!runSpellRerenderIfHosted(c)) _renderFormsChar(c, 'sorts');
   }
 }
 
