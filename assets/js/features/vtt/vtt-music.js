@@ -788,8 +788,7 @@ function _vttSoundCtxMenu(e, soundId, currentPlId) {
     items.push({ label: `<span style="color:var(--text-dim);font-size:.65rem">Ajouter à…</span>`, fn: null });
     targets.forEach(pl => items.push({
       label: `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${pl.color||'#6366f1'};margin-right:.4rem"></span>${_esc(pl.name)}`,
-      action: '_vttAddSoundToPlaylist',
-      args: `${pl.id}|${soundId}`,
+      fn: () => _vttAddSoundToPlaylist(pl.id, soundId),
     }));
   }
 
@@ -956,7 +955,9 @@ async function _vttAddSoundToPlaylist(plId, soundId) {
     pl.soundIds = previousIds;
     try { _renderMusicPanel(); } catch {}
     console.error('[vtt music] ajout à la playlist:', error);
-    showNotif('Impossible d’ajouter ce son à la playlist', 'error');
+    // Surface la raison réelle (permission-denied, not-found, hors-ligne…) pour diagnostiquer.
+    const why = error?.code || error?.message || String(error);
+    showNotif(`Ajout impossible : ${why}`, 'error');
   }
 }
 
