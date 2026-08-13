@@ -86,6 +86,14 @@ export function _showCtxMenu(x, y, items) {
       showNotif('Action impossible — réessaie dans un instant.', 'error');
     }
   });
+  // Garde anti-fermeture prématurée : au mousedown sur un item, on empêche le
+  // déplacement de focus (preventDefault). Sinon le `focusout` ci-dessous pouvait
+  // refermer le menu AVANT le `click` → l'action n'était jamais exécutée (ex.
+  // « Ajouter à une playlist » qui ne faisait rien). Le `click` (et le dispatcher
+  // VTT pour les items data-vtt-fn) se déclenchent normalement ensuite.
+  el.addEventListener('mousedown', e => {
+    if (e.target.closest('.vtt-ctx-item')) e.preventDefault();
+  });
   el.addEventListener('keydown', e => {
     const menuItems = [...el.querySelectorAll('.vtt-ctx-item')];
     const current = menuItems.indexOf(document.activeElement);
