@@ -35,7 +35,7 @@ import {
 
 import {
   renderCharDeck, bindSortCardsDnd,
-  addSort, editSort,
+  addSort, editSort, clearSpellHost,
 } from './characters/spells.js';
 
 import { toggleCharElement } from './characters/combat.js';
@@ -963,6 +963,7 @@ async function _removeCharTitle(btn) {
 function renderCharSheet(c, keepTab) {
   const area = document.getElementById('char-sheet-area');
   if (!area) return;
+  clearSpellHost();   // fiche perso affichée → moteur de sorts sur STATE.activeChar (annule un éventuel override PNJ)
   if (c?.id) recordRecentNavigation({ type: 'character', id: c.id, title: c.nom || '' });
   const previousCharId = charSession.getCurrentChar()?.id;
   const sheetViewContext = previousCharId === c?.id
