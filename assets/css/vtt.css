@@ -7146,6 +7146,8 @@ html:not([data-theme="light"]) .vtt-root {
 }
 .vtt-mact:hover { background: var(--bg-elevated); color: var(--text); }
 .vtt-mact.on { background: var(--gold-glow); border-color: oklch(72% 0.14 52 / 0.4); color: var(--gold); }
+.vtt-mact-privacy { min-width: 1.65rem; }
+.vtt-mact-privacy.on { background: rgba(139,92,246,.14); border-color: rgba(167,139,250,.5); color: #c4b5fd; }
 .vtt-mact-del:hover { color: #ef4444; border-color: oklch(58% 0.20 22 / 0.4); }
 .vtt-mact-preview.on { color: var(--emerald); border-color: rgba(34,195,142,.4); background: rgba(34,195,142,.1); }
 
@@ -7277,6 +7279,7 @@ html:not([data-theme="light"]) .vtt-root {
   transition: background .1s, color .1s;
 }
 .vtt-music-ctrl:hover { background: var(--bg-card2); color: var(--text); }
+.vtt-music-title-toggle.on { background: rgba(139,92,246,.14); border-color: rgba(167,139,250,.5); color: #c4b5fd; }
 .vtt-music-vol-lbl {
   display: flex; align-items: center; gap: .25rem;
   margin-left: auto; font-size: .68rem; color: var(--text-dim);
