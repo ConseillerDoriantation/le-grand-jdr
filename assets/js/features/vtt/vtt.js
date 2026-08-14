@@ -7253,6 +7253,7 @@ async function _vttRollAttack() {
     // ── Appliquer les HP + collecter résultats par cible ──────────────
     const targetResults = [];
     const _statsDelta = { chars: {} };   // delta de stats accumulé (réversible à l'annulation)
+    const _atkActor = _statsActor(src);
     let _maxHit = 0;                      // plus gros coup de cette attaque (record, non réversible)
     for (const curTgtId of targetIds) {
       const curTgtData = VS.tokens[curTgtId]?.data;
@@ -7372,15 +7373,15 @@ async function _vttRollAttack() {
 
       // ── Statistiques de combat : accumule (écrit une fois après la boucle,
       //    stocké dans le log pour pouvoir l'annuler avec l'action) ──
-      const _atkActor = _statsActor(src);
       accAttackDelta(_statsDelta, {
         attackerId:   _atkActor.id,
         attackerName: _atkActor.name,
         targetId:     curTgtData.characterId || null,
         targetName:   curTgtData.name || '',
-        hit, crit: isCrit, fumble: isFumble, roll: d20,
+        hit, crit: false, fumble: false,
         dmg: (hit || halfDmg) ? Math.max(0, dmgTotal) : 0,
         ko: (curHp > 0 && newHp <= 0),
+        countAction: false,
       });
       if ((hit || halfDmg) && dmgTotal > _maxHit) _maxHit = dmgTotal;
       // Record du plus gros coup REÇU par la cible (PJ).
@@ -7419,6 +7420,20 @@ async function _vttRollAttack() {
         characterId: curTgtData.characterId || null,
         targetImage: lCurTgt.displayImage || null,
         _data: curTgtData,
+      });
+    }
+
+    // Un seul d20 a été lancé pour toute l'action, même si elle touche plusieurs
+    // cibles. Les impacts ont été comptés séparément dans la boucle ci-dessus.
+    if (targetResults.length) {
+      accAttackDelta(_statsDelta, {
+        attackerId: _atkActor.id,
+        attackerName: _atkActor.name,
+        hit: targetResults.some(r => r.hit),
+        crit: isCrit,
+        fumble: isFumble,
+        roll: d20,
+        result: hitTotal,
       });
     }
 

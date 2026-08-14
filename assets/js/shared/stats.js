@@ -15,8 +15,9 @@
 //       // (phase 2) attacks, hits, crits, fumbles, dmgDealt, dmgTaken,
 //       //           biggestHit, heal, kosDealt, kosTaken, pmSpent, spellsCast,
 //       //           spells:{}, emotes:{}
-//       // Moyennes non rétroactives : damageEvents/damageTotal et
-//       // attackRolls/attackRollTotal sont incrémentés avec les mêmes actions.
+//       // Moyennes non rétroactives : damageEvents/damageTotal,
+//       // attackRolls/attackRollTotal et attackResultRolls/attackResultTotal
+//       // sont incrémentés avec les mêmes actions.
 //     }
 //   }
 // Les stats GLOBALES (table) = somme des chars, calculée à l'affichage.
@@ -154,7 +155,7 @@ export async function deleteMissionStats(missionId) {
 // avec un signe (+1 pose l'action, −1 l'annule). On ne compte que les PJ.
 //
 // `acc` = { chars: { [id]: { name, combat: {…compteurs nombres…} } } }
-export function accAttackDelta(acc, { attackerId, attackerName, targetId, targetName, hit, crit, fumble, roll = null, dmg = 0, ko = false } = {}) {
+export function accAttackDelta(acc, { attackerId, attackerName, targetId, targetName, hit, crit, fumble, roll = null, result = null, dmg = 0, ko = false, countAction = true } = {}) {
   acc.chars ??= {};
   const dk = statsDateKey();
   const add = (id, name, fields) => {
@@ -168,11 +169,17 @@ export function accAttackDelta(acc, { attackerId, attackerName, targetId, target
     }
   };
   const trackedRoll = roll !== null && roll !== '' && Number.isFinite(Number(roll)) ? Number(roll) : null;
+  const trackedResult = result !== null && result !== '' && Number.isFinite(Number(result)) ? Number(result) : null;
   const trackedDamage = dmg > 0 ? Number(dmg) : 0;
   add(attackerId, attackerName, {
-    attacks: 1, hits: hit ? 1 : 0, crits: crit ? 1 : 0, fumbles: fumble ? 1 : 0,
-    attackRolls: trackedRoll == null ? 0 : 1,
-    attackRollTotal: trackedRoll || 0,
+    attacks: countAction ? 1 : 0,
+    hits: countAction && hit ? 1 : 0,
+    crits: countAction && crit ? 1 : 0,
+    fumbles: countAction && fumble ? 1 : 0,
+    attackRolls: countAction && trackedRoll != null ? 1 : 0,
+    attackRollTotal: countAction ? (trackedRoll || 0) : 0,
+    attackResultRolls: countAction && trackedResult != null ? 1 : 0,
+    attackResultTotal: countAction ? (trackedResult || 0) : 0,
     dmgDealt: trackedDamage, damageEvents: trackedDamage > 0 ? 1 : 0,
     damageTotal: trackedDamage, kosDealt: ko ? 1 : 0,
   });
