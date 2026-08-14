@@ -4,7 +4,7 @@ import { confirmDelete, trySave, tryUpsert } from '../shared/crud.js';
 import { registerActions } from '../core/actions.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
-import { _esc, _nl2br, _trunc } from '../shared/html.js';
+import { _esc, _nl2br, _trunc, eyeIcon } from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { uploadJpeg } from '../shared/image-upload.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
@@ -295,7 +295,7 @@ function _cardHtml(c) {
 
   const badges = STATE.isAdmin ? `
     ${c.unlocked ? '' : '<span class="coll-badge coll-badge--locked">🔒</span>'}
-    ${c.descMasquee ? '<span class="coll-badge coll-badge--masked">🙈</span>' : ''}` : '';
+    ${c.descMasquee ? `<span class="coll-badge coll-badge--masked" title="Description masquée aux joueurs">${eyeIcon(true)}</span>` : ''}` : '';
 
   const adminBtns = STATE.isAdmin ? `
     <div class="coll-admin-btns">

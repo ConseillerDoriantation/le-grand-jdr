@@ -25,6 +25,18 @@ export function _nl2br(v = '') {
 }
 
 /**
+ * Icône « visibilité joueurs » : œil (visible) / œil barré (masqué).
+ * SVG monochrome héritant `currentColor` — remplace l'ancien émoji 🙈.
+ * Dimensionnée via la classe globale `.eye-ico` (base.css).
+ */
+export function eyeIcon(off = false) {
+  const p = off
+    ? '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20C5 20 1 12 1 12a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'
+    : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+  return `<svg class="eye-ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+}
+
+/**
  * Normalise une chaîne pour la recherche : minuscules, sans accents.
  */
 export function _norm(v = '') {

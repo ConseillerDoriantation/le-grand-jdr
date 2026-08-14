@@ -1,7 +1,7 @@
 import { getDocData, saveDoc } from '../data/firestore.js';
 
 export const CONDITION_DEFAULT_LIBRARY = [
-  { id:'blinded',       label:'Aveuglé',     icon:'🙈', color:'#6b7280',
+  { id:'blinded',       label:'Aveuglé',     icon:'🌫️', color:'#6b7280',
     desc:'Ne peut pas voir, échec auto aux tests de Vue. Ses attaques : désavantage. Attaques contre lui : avantage.',
     defaultSaveStat:'constitution', defaultDC:11,
     effects:{ attackBy:'dis', attackAgainst:'adv' } },
