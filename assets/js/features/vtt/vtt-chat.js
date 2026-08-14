@@ -221,12 +221,14 @@ export function _renderChatLogImpl(msgs) {
   //  • Joueur : voit son estimation (track.caEstimee du bestiaire) ; sinon "?"
   //  • Pour un PJ allié : on montre la CA réelle (les joueurs connaissent leurs alliés)
   const _viewCA = (target, realCA) => {
+    const techniqueBonus = Math.max(0, parseInt(target?.techniqueDefenseBonus ?? target?.technique?.defenseBonus, 10) || 0);
+    const withTechnique = value => Number.isFinite(Number(value)) ? Number(value) + techniqueBonus : value;
     if (STATE.isAdmin) return realCA ?? '?';
     if (target.characterId) return realCA ?? '?';
     if (target.beastId) {
       const track = VS.bstTracker[target.beastId];
       if (track?.caEstimee !== undefined && track.caEstimee !== '') {
-        return parseInt(track.caEstimee) || '?';
+        return withTechnique(parseInt(track.caEstimee) || '?');
       }
       return '?';
     }
@@ -259,6 +261,7 @@ export function _renderChatLogImpl(msgs) {
 
     const badges = [
       _advBadge(m.advMode),
+      m.technique ? `<span class="vtt-log-badge" style="color:#fcd34d;background:rgba(251,191,36,.14)">${_esc(m.technique.icon || '🎯')} ${_esc(m.technique.label)}</span>` : '',
       isCrit   ? `<span class="vtt-log-badge vtt-log-badge--crit">💥 CRIT</span>` : '',
       isFumble ? `<span class="vtt-log-badge vtt-log-badge--fumble">💀 FUMBLE</span>` : '',
     ].join('');
@@ -339,6 +342,9 @@ export function _renderChatLogImpl(msgs) {
         ${m.dmgReduction > 0 ? `<span class="vtt-log-badge" style="color:#60a5fa;background:rgba(96,165,250,.18)">🛡 Set Lourd −${m.dmgReduction}</span>` : ''}
       </div>` : '';
       bodyHtml = hitRow + dmgRow;
+      if (m.technique?.onHitEffect && isHit) {
+        bodyHtml += `<div class="vtt-log-body vtt-log-technique-effect"><span class="vtt-log-icon">${_esc(m.technique.icon || '🎯')}</span><span class="vtt-log-result-sub"><strong>${_esc(m.technique.label)}</strong> · ${_esc(m.technique.onHitEffect)}</span></div>`;
+      }
     }
 
     // Panneau détail
@@ -385,9 +391,12 @@ export function _renderChatLogImpl(msgs) {
     if (m.extraHitRolls?.length) m.extraHitRolls.forEach(r => touchParts.push(`+${_d20(r, [r])}`));
     const _caShown = isHeal ? null : _viewCA(m, m.targetCA);
     rows.push(_row(touchParts.join(' '), `<strong>${m.hitTotal ?? '?'}</strong>${isHeal ? ` <small>vs DD ${m.healDD ?? 2}</small>` : ` <small>vs CA ${_caShown}</small>`}`, { op: '🎯' }));
+    if (m.technique?.defenseBonus > 0) {
+      rows.push(_row(`${_esc(m.technique.icon || '🎯')} ${_esc(m.technique.label)} ${sub('difficulté')}`, `<strong>CA +${m.technique.defenseBonus}</strong>`, { op: '🎯', muted: true }));
+    }
 
     // ── DÉGÂTS / SOIN ──
-    if (m.hit || m.halfDmg || isHeal) {
+    if (m.hit || m.halfDmg || isHeal || m.targets?.some(t => t.hit || t.halfDmg)) {
       const diceFormula = m.dmgEffectiveDice || m.dmgRawDice || m.dmgFormula || 'dés';
       const baseDetail = m.dmgRollsDetail || _detailFromFlat(m, 'dmg', diceFormula);
       const critDetail = m.critRollsDetail || _detailFromFlat(m, 'crit', diceFormula);
@@ -426,6 +435,13 @@ export function _renderChatLogImpl(msgs) {
         rows.push(_row(`${_esc(bd.sortLabel || 'Enchantement')} ${_dice(bd, bd.formula || bd.total)}`, `<strong>+${bd.total}</strong>`, { op: '✨' }));
       } else if (m.buffDmgBonus) {
         rows.push(_row(`Enchantement`, `<strong>+${m.buffDmgBonus}</strong>`, { op: '✨' }));
+      }
+
+      if (m.technique) {
+        for (const det of (m.technique.damageDetails || [])) {
+          const label = det.kind === 'weapon' ? 'Dé d’arme bonus' : det.kind === 'flat' ? 'Dégâts plats' : 'Dégâts bonus';
+          rows.push(_row(`${label}${det.rolls?.length ? ` ${_dice(det, det.formula || det.total)}` : ''}`, `<strong>+${det.total || 0}</strong>`, { op: m.technique.icon || '🎯' }));
+        }
       }
 
       const targetCondRows = [];
@@ -486,6 +502,7 @@ export function _renderChatLogImpl(msgs) {
     const theme = isCrit ? 'crit' : isFumble ? 'fumble' : (m.targets?.some(r=>r.hit) ? 'hit' : 'miss');
     const badges = [
       _advBadge(m.advMode),
+      m.technique ? `<span class="vtt-log-badge" style="color:#fcd34d;background:rgba(251,191,36,.14)">${_esc(m.technique.icon || '🎯')} ${_esc(m.technique.label)}</span>` : '',
       isCrit   ? `<span class="vtt-log-badge vtt-log-badge--crit">💥 CRIT</span>` : '',
       isFumble ? `<span class="vtt-log-badge vtt-log-badge--fumble">💀 FUMBLE</span>` : '',
     ].join('');
@@ -530,6 +547,7 @@ export function _renderChatLogImpl(msgs) {
       ${head}
       ${body}
       <div class="vtt-log-targets">${targets}</div>
+      ${m.technique?.onHitEffect && m.targets?.some(r => r.hit) ? `<div class="vtt-log-body vtt-log-technique-effect"><span class="vtt-log-icon">${_esc(m.technique.icon || '🎯')}</span><span class="vtt-log-result-sub"><strong>${_esc(m.technique.label)}</strong> · ${_esc(m.technique.onHitEffect)}</span></div>` : ''}
       ${_undoBtn(m)}
       <div class="vtt-log-detail" id="d${i}">${buildAttackDetail(m, false)}</div>
     </div>`;

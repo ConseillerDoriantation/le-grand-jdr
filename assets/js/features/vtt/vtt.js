@@ -24,6 +24,7 @@ import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED, getCharDamageProfile }
 import { getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { buildProjectionPatch, switchBuild } from '../../shared/character-builds.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
+import { weaponTechniqueTargetCA, weaponTechniqueDamageTerms } from '../../shared/weapon-techniques.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../../shared/damage-types.js';
 import { playSigil, playImpact, playProjectile, playSlash } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
@@ -4143,6 +4144,7 @@ function _buildAttackOptions(t) {
     charElements:     wReplace ? [wReplaceTypeId] : ((isMagicW && !isUnarmed) ? (c?.elements || []) : []),
     isInvokedWeapon:  !!wReplace,
     enchantedElement: _enchantBuff?.element || null,
+    weaponTechniques: !wReplace && !isUnarmed && Array.isArray(fmt?.techniques) ? fmt.techniques : [],
   });
 
   // ── Arme secondaire équipée ─────────────────────────────────────────────
@@ -4193,6 +4195,7 @@ function _buildAttackOptions(t) {
       charElements: secondaryMagic ? (c.elements || []) : [],
       traits: Array.isArray(secondaryWeapon.traits) ? secondaryWeapon.traits : [],
       weaponSlot: 'secondary',
+      weaponTechniques: Array.isArray(secondaryFormat?.techniques) ? secondaryFormat.techniques : [],
     });
   }
 
@@ -5154,6 +5157,63 @@ function _vttAtkSetElement(elemId) {
   if (miss) miss.innerHTML = _atkMissNoteHtml(ctx.opt);
 }
 
+function _weaponTechniqueEffectParts(technique) {
+  if (!technique) return [];
+  const parts = [];
+  if (technique.defenseBonus > 0) parts.push(`CA cible +${technique.defenseBonus}`);
+  if (technique.extraWeaponDice > 0) parts.push(`+${technique.extraWeaponDice} dé${technique.extraWeaponDice > 1 ? 's' : ''} d'arme`);
+  if (technique.extraDamageFormula) parts.push(`+${technique.extraDamageFormula}`);
+  if (technique.extraDamageFlat > 0) parts.push(`+${technique.extraDamageFlat} dégâts`);
+  if (technique.onHitEffect) parts.push(technique.onHitEffect);
+  return parts;
+}
+
+function _vttWeaponTechniquesHtml(opt) {
+  const techniques = Array.isArray(opt?.weaponTechniques) ? opt.weaponTechniques.filter(t => t?.label) : [];
+  if (!techniques.length) return '';
+  return `
+    <section class="vtt-atk-techniques">
+      <div class="vtt-atk-technique-heading">
+        <span class="vtt-atk-technique-lead-icon" id="atk-technique-icon">⚔️</span>
+        <span class="vtt-atk-technique-heading-copy">
+          <small>Technique d'arme <b>optionnelle</b></small>
+          <strong id="atk-technique-status">Attaque normale</strong>
+        </span>
+      </div>
+      <div class="vtt-atk-technique-choices" role="group" aria-label="Technique d'arme optionnelle">
+        ${techniques.map(t => {
+          const detail = [t.description, ..._weaponTechniqueEffectParts(t)].filter(Boolean).join(' · ');
+          return `<button type="button" class="vtt-atk-technique-choice" data-technique-id="${_esc(t.id)}"
+            data-vtt-fn="_vttSetWeaponTechnique" data-vtt-args="${_esc(t.id)}" aria-pressed="false"
+            title="${_esc(detail || t.label)}">
+            <span class="vtt-atk-technique-choice-icon">${_esc(t.icon || '🎯')}</span>
+            <span class="vtt-atk-technique-choice-label">${_esc(t.label)}</span>
+            <span class="vtt-atk-technique-choice-check">✓</span>
+          </button>`;
+        }).join('')}
+      </div>
+    </section>`;
+}
+
+function _vttSetWeaponTechnique(techniqueId) {
+  const ctx = _atkCtx;
+  if (!ctx?.opt) return;
+  const id = String(techniqueId || '');
+  const clicked = (ctx.opt.weaponTechniques || []).find(t => t.id === id) || null;
+  ctx.weaponTechnique = clicked && ctx.weaponTechnique?.id !== clicked.id ? clicked : null;
+  const icon = document.getElementById('atk-technique-icon');
+  if (icon) icon.textContent = ctx.weaponTechnique?.icon || '⚔️';
+  const status = document.getElementById('atk-technique-status');
+  if (status) status.textContent = ctx.weaponTechnique?.label || 'Attaque normale';
+  const section = status?.closest('.vtt-atk-techniques');
+  section?.classList.toggle('has-technique', !!ctx.weaponTechnique);
+  document.querySelectorAll('.vtt-atk-technique-choice').forEach(btn => {
+    const active = btn.dataset.techniqueId === ctx.weaponTechnique?.id;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+}
+
 function _vttPickOpt(srcId, tgtId, idx) {
   const opt = _atkOptsCache[`${srcId}__${tgtId}`]?.[+idx];
   if (!opt) return;
@@ -5218,7 +5278,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
   // la résolution. Couleur = élément, géométrie = runes, forme = catégorie.
   const _sigil = _buildCastSigil(src, opt);
 
-  _atkCtx = { srcId, tgtId, opt, lS, lT, allTargets, sigil: _sigil };
+  _atkCtx = { srcId, tgtId, opt, lS, lT, allTargets, sigil: _sigil, weaponTechnique: null };
 
   const dist    = _tokenAttackDistance(src, tgt);
   // Bonus toucher d'enchantement — lu frais sur le lanceur (jamais figé dans l'option)
@@ -5472,6 +5532,8 @@ function _vttPickOpt(srcId, tgtId, idx) {
       </section>
 
       ${elemSelectorHtml}
+
+      ${_vttWeaponTechniquesHtml(opt)}
 
       <section class="vtt-atk-resolve">
         ${centerBlock}
@@ -6343,6 +6405,8 @@ async function _vttRollAttack() {
   _atkCtx = null;
 
   const { srcId, tgtId, opt, lS, lT, allTargets } = ctx;
+  const weaponTechnique = ctx.weaponTechnique || null;
+  const techniqueDefenseBonus = Math.max(0, parseInt(weaponTechnique?.defenseBonus, 10) || 0);
   const src=VS.tokens[srcId]?.data, tgt=VS.tokens[tgtId]?.data;
   if (!src||!tgt) return;
 
@@ -7134,7 +7198,8 @@ async function _vttRollAttack() {
       const curTgtData = VS.tokens[curTgtId]?.data;
       const lCurTgt = _live(curTgtData || {});
       const rawCA = lCurTgt.realDefense ?? lCurTgt.displayDefense ?? 10;
-      return armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
+      const effectiveCA = armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
+      return weaponTechniqueTargetCA(effectiveCA, weaponTechnique);
     });
     const missesEveryTarget = targetCas.length
       ? targetCas.every(targetCA => hitTotal < targetCA)
@@ -7205,6 +7270,25 @@ async function _vttRollAttack() {
       else if (missEffect === 'full') sharedDmgTotalHalf = sharedDmgTotalHit;
     }
 
+    // Technique d'arme : le coût de précision est déjà intégré à la CA ci-dessus.
+    // Les dégâts supplémentaires sont tirés une seule fois pour l'action et ne
+    // s'ajoutent qu'à un coup réussi (jamais au demi-effet d'un sort raté).
+    const techniqueDmgDetails = [];
+    let techniqueDmgBonus = 0;
+    if (weaponTechnique && !isFumble) {
+      for (const term of weaponTechniqueDamageTerms(weaponTechnique, effectiveDice)) {
+        if (term.kind === 'flat') {
+          techniqueDmgBonus += term.flat;
+          techniqueDmgDetails.push({ rolls: [], mod: term.flat, total: term.flat, n: 0, sides: 0, kind: 'flat', formula: String(term.flat) });
+          continue;
+        }
+        const det = _rollDiceDetailed(term.formula);
+        techniqueDmgBonus += Math.max(0, det.total);
+        techniqueDmgDetails.push({ ...det, kind: term.kind, formula: term.formula });
+      }
+      sharedDmgTotalHit += techniqueDmgBonus;
+    }
+
     // ── Bonus dégâts depuis buff d'enchantement arme actif sur le lanceur ──
     // Règles :
     //  • S'applique aux Actions uniquement (attaques d'arme + sorts type 'action').
@@ -7266,7 +7350,8 @@ async function _vttRollAttack() {
       // (track.caEstimee) — ce qui fausserait le hit/miss. On utilise realDefense
       // qui contourne ce filtre d'affichage.
       const rawCA    = lCurTgt.realDefense ?? lCurTgt.displayDefense ?? 10;
-      const targetCA = armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
+      const effectiveCA = armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
+      const targetCA = weaponTechniqueTargetCA(effectiveCA, weaponTechnique);
       // Bouclier réactif : annule complètement l'attaque (pas de touche, pas de demi-dégâts, pas de fumble visuel)
       const isBlocked = blockedTargets.has(curTgtId);
       const hit      = isBlocked ? false : (opt.autoHit ? true : (isCrit ? true : isFumble ? false : hitTotal >= targetCA));
@@ -7414,6 +7499,7 @@ async function _vttRollAttack() {
         dmgTotal, dmgPre, dmgReduction, newHp, hpMax, interaction,
         tokenId: curTgtData.id,   // pour l'annulation manuelle (bouclier réactif)
         shieldBlocked: isBlocked,
+        techniqueDefenseBonus,
         condDmgNotes: _condDmgNotes, condDmgDetails: _condDmgDetails, consumedNotes: _consumedNotes,
         // Métadonnées pour le rendu côté joueur (estimation CA, portrait)
         beastId: curTgtData.beastId || null,
@@ -7554,6 +7640,12 @@ async function _vttRollAttack() {
         characterImage: lS.displayImage||null,
         attackerRank,
         optLabel: opt.label,
+        technique: weaponTechnique ? {
+          id: weaponTechnique.id, icon: weaponTechnique.icon || '🎯', label: weaponTechnique.label,
+          description: weaponTechnique.description || '', defenseBonus: techniqueDefenseBonus,
+          damageBonus: techniqueDmgBonus, damageDetails: techniqueDmgDetails,
+          onHitEffect: weaponTechnique.onHitEffect || '',
+        } : null,
         autoHit: !!opt.autoHit,
         isCrit, isFumble, advMode: effectiveMode, advAuto: effectiveMode !== mode,
         advReasons: effectiveMode !== mode ? condMods.reasons : null,
@@ -7600,6 +7692,12 @@ async function _vttRollAttack() {
         // Bouclier réactif manuel : token cible + rang attaquant (vérif du palier).
         defenderTokenId: r.tokenId || null,
         attackerRank,
+        technique: weaponTechnique ? {
+          id: weaponTechnique.id, icon: weaponTechnique.icon || '🎯', label: weaponTechnique.label,
+          description: weaponTechnique.description || '', defenseBonus: techniqueDefenseBonus,
+          damageBonus: techniqueDmgBonus, damageDetails: techniqueDmgDetails,
+          onHitEffect: weaponTechnique.onHitEffect || '',
+        } : null,
         // Identifiants cible pour rendu côté joueur (estimation CA)
         beastId: r.beastId || null,
         npcId: r.npcId || null,
@@ -7666,6 +7764,14 @@ async function _vttRollAttack() {
     // (pas de pollution sur les ratés)
     const _anyHitForEnchant = cleanResults.some(r => r.hit);
     if (buffDmgNotes.length && _anyHitForEnchant) notifParts.push(...buffDmgNotes);
+    if (weaponTechnique) {
+      const techniqueHit = cleanResults.some(r => r.hit);
+      const techResult = techniqueHit
+        ? `${weaponTechnique.icon || '🎯'} ${weaponTechnique.label}${techniqueDmgBonus > 0 ? ` +${techniqueDmgBonus}` : ''}`
+        : `${weaponTechnique.icon || '🎯'} ${weaponTechnique.label} manqué`;
+      notifParts.unshift(techResult);
+      if (techniqueHit && weaponTechnique.onHitEffect) notifParts.push(`Effet : ${weaponTechnique.onHitEffect}`);
+    }
     if (luckUsed) notifParts.unshift(`🍀 Coup de chance utilisé (d20 → ${d20})`);
     const anyHit = cleanResults.some(r => r.hit || r.halfDmg);
     showNotif(notifParts.join(' · '), anyHit ? 'success' : 'error');
@@ -10825,6 +10931,7 @@ export const VTT_ACTIONS = {
   _vttRetireToken,
   _vttRollAttack,
   _vttAtkSetElement,
+  _vttSetWeaponTechnique,
   _vttRollSkill,
   _vttSaveStats,
   _vttSeek,
