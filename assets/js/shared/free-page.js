@@ -899,6 +899,7 @@ function bindSingleFreePageEditor(editor) {
   editor.__freePageUndo = [];
   editor.__freePageRedo = [];
   editor.__freePageHistoryTimer = null;
+  editor.__freePageDirtyTimer = null;
   editor.__freePageInspectorTab = 'content';
   editor.__freePageFoldState = {};
   editor.__freePageCropBlockId = null;
@@ -929,16 +930,29 @@ function bindSingleFreePageEditor(editor) {
   editor.addEventListener('mousedown', (event) => {
     if (!isOwnEditorEvent(editor, event)) return;
     if (event.target.closest('[data-fpe-inspector], [data-fpe-text-toolbar]')) saveEditorTextSelection(editor, { paint: true });
-    if (event.target.closest('[data-fpe-command], [data-fpe-text-color]')) event.preventDefault();
+    if (event.target.closest([
+      '[data-fpe-command]',
+      '[data-fpe-text-color]',
+      '[data-fpe-action="toggle-text-color-popover"]',
+      'button[data-fpe-inspector-field="textColor"]',
+      '[data-fpe-text-color-popover] [data-fpe-color-tab]',
+    ].join(', '))) event.preventDefault();
   });
   ensureUnsavedGuard();
-  editor.addEventListener('input', () => scheduleWeightUpdate(editor));
-  editor.addEventListener('change', () => scheduleWeightUpdate(editor));
-  editor.addEventListener('pointerup', () => scheduleWeightUpdate(editor));
+  const scheduleEditorChecks = () => {
+    scheduleWeightUpdate(editor);
+    scheduleDirtyCheck(editor);
+  };
+  editor.addEventListener('input', scheduleEditorChecks);
+  editor.addEventListener('change', scheduleEditorChecks);
+  editor.addEventListener('pointerup', scheduleEditorChecks);
   renderBlocks(editor, null);
   editor.style.setProperty('--free-page-editor-zoom', '1');
   const zoomSelect = editor.querySelector('[data-fpe-editor-field="zoom"]');
   if (zoomSelect) zoomSelect.value = '100';
+  editor.__freePageSavedSnapshot = freePageEditorSnapshot(editor);
+  editor.__freePageHasUnsavedChanges = () => freePageEditorHasUnsavedChanges(editor);
+  setEditorDirty(editor, false);
   updateFreePageWeight(editor);
 }
 
@@ -971,10 +985,28 @@ function ensureUnsavedGuard() {
   if (unsavedGuardBound || typeof window === 'undefined') return;
   unsavedGuardBound = true;
   window.addEventListener('beforeunload', (event) => {
-    const dirty = [...document.querySelectorAll('[data-free-page-editor]')]
-      .some((el) => (el.__freePageUndo?.length || 0) > 0);
-    if (dirty) { event.preventDefault(); event.returnValue = ''; }
+    if (hasUnsavedFreePageChanges()) { event.preventDefault(); event.returnValue = ''; }
   });
+}
+
+function freePageEditorSnapshot(editor) {
+  if (!editor?.__freePageState) return null;
+  try { return JSON.stringify(getFreePageData(editor)); }
+  catch { return null; }
+}
+
+function freePageEditorHasUnsavedChanges(editor) {
+  if (!editor?.__freePageState) return false;
+  const current = freePageEditorSnapshot(editor);
+  if (current != null && editor.__freePageSavedSnapshot != null) return current !== editor.__freePageSavedSnapshot;
+  return editor.dataset.freePageDirty === 'true' || (editor.__freePageUndo?.length || 0) > 0;
+}
+
+export function hasUnsavedFreePageChanges(root = document) {
+  const editors = root?.matches?.('[data-free-page-editor]')
+    ? [root]
+    : [...(root?.querySelectorAll?.('[data-free-page-editor]') || [])];
+  return editors.some(freePageEditorHasUnsavedChanges);
 }
 
 function handleEditorDoubleClick(editor, event) {
@@ -2697,7 +2729,10 @@ function handlePointerDown(editor, event) {
   if (block.locked) return;
   event.preventDefault();
   const selectedIds = new Set(editor.__freePageSelectedIds || []);
-  const draggingMultiSelection = selectedIds.size > 1 && selectedIds.has(block.id) && !resizeHandle && !radiusHandle && !rotateHandle && !cropDragHandle && !cropZoomHandle;
+  const selectionOverlayHandle = handle.closest?.('[data-fpe-sel-overlay]');
+  const draggingMultiSelection = selectedIds.size > 1
+    && selectedIds.has(block.id)
+    && (selectionOverlayHandle || (!resizeHandle && !radiusHandle && !rotateHandle && !cropDragHandle && !cropZoomHandle));
   if (!draggingMultiSelection) setSelected(editor, block.id);
   if ((cropDragHandle || cropZoomHandle) && block.type === 'image') return startImageCropDrag(editor, event, blockEl, block, { move: Boolean(cropDragHandle && !cropZoomHandle), zoomHandle: cropZoomHandle?.dataset.fpeCropZoom || '' });
   handle.setPointerCapture?.(event.pointerId);
@@ -2725,7 +2760,9 @@ function handlePointerDown(editor, event) {
     startAngle = Math.atan2(event.clientY - center.y, event.clientX - center.x) * 180 / Math.PI;
   }
   let historyCaptured = false;
-  const rotationBadge = rotateHandle ? blockEl.querySelector('[data-fpe-rotation-badge]') : null;
+  const rotationBadge = rotateHandle
+    ? rotateHandle.querySelector('[data-fpe-rotation-badge]') || blockEl.querySelector('[data-fpe-rotation-badge]')
+    : null;
   if (rotateHandle) {
     blockEl.classList.add('is-rotating');
     blockEl.classList.remove('is-rotation-snapped');
@@ -3371,7 +3408,9 @@ function handleInspectorInput(editor, event, { commit = false } = {}) {
   updateSelectedChartStyle(editor, block);
   updateSelectedShapeStyle(editor, block);
   const isAnimationField = String(field || '').startsWith('animation');
-  const needsRender = (commit && !chartField && !chartOption && !isAnimationField)
+  // Le style partiel est deja applique au contenteditable visible : reconstruire
+  // le bloc ici detruirait son focus et la selection memorisee.
+  const needsRender = (!inlineTextApplied && commit && !chartField && !chartOption && !isAnimationField)
     || ['shape', 'shadow', 'tableHeader', 'chartType', 'chartPalette', 'interactionType'].includes(field);
   if (field === 'animationPhase') {
     renderBlocks(editor, block.id);
@@ -3400,8 +3439,15 @@ function saveEditorTextSelection(editor, { paint = false } = {}) {
   if (block?.type !== 'text') return;
   const saved = serializeTextRange(content, range);
   if (!saved || saved.start === saved.end) return;
+  const previous = editor.__freePageTextRange;
+  const sameSelection = previous?.blockId === block.id
+    && previous.start === saved.start
+    && previous.end === saved.end;
   editor.__freePageTextRange = { blockId: block.id, ...saved };
-  editor.__freePageInlineTarget = null;
+  // Conserver le marqueur si la barre d'outils renvoie la meme selection.
+  // Le recreer a chaque evenement rend la cible instable, notamment avec le
+  // selecteur de couleur natif.
+  if (!sameSelection) editor.__freePageInlineTarget = null;
   if (paint) paintTextSelectionMarker(editor);
 }
 
@@ -5097,6 +5143,14 @@ function setEditorDirty(editor, dirty) {
   }
 }
 
+function scheduleDirtyCheck(editor) {
+  window.clearTimeout(editor.__freePageDirtyTimer);
+  editor.__freePageDirtyTimer = window.setTimeout(() => {
+    editor.__freePageDirtyTimer = null;
+    setEditorDirty(editor, freePageEditorHasUnsavedChanges(editor));
+  }, 120);
+}
+
 function scheduleHistory(editor, options = {}) {
   if (editor.__freePageHistoryTimer) return;
   pushHistory(editor, options);
@@ -5127,6 +5181,7 @@ function afterHistoryRestore(editor) {
   const selected = editor.__freePageSelected;
   const keepSelected = selected && editor.__freePageState.blocks.some((block) => block.id === selected);
   renderBlocks(editor, keepSelected ? selected : null);
+  scheduleDirtyCheck(editor);
 }
 
 function clearHistoryTimer(editor) {

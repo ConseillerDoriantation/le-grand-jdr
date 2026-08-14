@@ -32,7 +32,7 @@ import {
 import { showAppLoading, showAuth, showAdventurePicker, showAdventureLoadError } from "./layout.js";
 // consumeBootPage : page demandée par l'URL (#page, ex. onglet ouvert au clic
 // molette) pour la 1re navigation ; 'dashboard' ensuite.
-import { navigate, consumeBootPage } from "./navigation.js";
+import { navigate, consumeBootPage, confirmDiscardUnsavedChanges } from "./navigation.js";
 import {
   loadUserAdventures, repairCurrentUserAdventureLinks, selectAdventure,
   loadUserInvitations, acceptInvitation, declineInvitation,
@@ -53,12 +53,14 @@ const LAST_ADV_KEY = 'jdr-last-adventure';
 export async function pickAdventure(adventureId) {
   const adv = STATE.adventures.find(a => a.id === adventureId);
   if (!adv) return;
+  if (!await confirmDiscardUnsavedChanges()) return false;
   localStorage.setItem(LAST_ADV_KEY, adventureId);
   await selectAdventure(adv);
   const { hideAdventurePicker } = await import('./layout.js');
   hideAdventurePicker();
   showAppLoading();
   await navigate(consumeBootPage(), { historyMode: 'replace' });
+  return true;
 }
 
 // openCreateAdventureModal est fourni par aventures.js (lazy).
