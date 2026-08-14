@@ -8,7 +8,7 @@
 // ==============================================================================
 import { VS } from './vtt-state.js';
 import { STATE } from '../../core/state.js';
-import { _esc, _searchIncludes } from '../../shared/html.js';
+import { _esc, _searchIncludes, eyeIcon } from '../../shared/html.js';
 import { computeEquipSkillBonus, statShort, calcCA } from '../../shared/char-stats.js';
 import { normalizeCharacterBuilds } from '../../shared/character-builds.js';
 import { hpColor, TYPE_COLOR, _STAT_COLOR, _STAT_KEY, _MS_BONUS_BUFF, _VTT_RUNE_META } from './vtt-constants.js';
@@ -690,7 +690,7 @@ export function _renderInspectorImpl(t) {
         <div class="vtt-ins-section-title">🛠 Outils MJ</div>
         <div class="vtt-ins-actions">
           <button class="vtt-btn-sm" data-vtt-fn="_vttEditToken" data-vtt-args="${t.id}" title="Modifier les stats combat">⚙️ Stats</button>
-          <button class="vtt-btn-sm" data-vtt-fn="_vttToggleVisible" data-vtt-args="${t.id}" title="Visibilité joueurs">${t.visible?'👁 Visible':'🙈 Caché'}</button>
+          <button class="vtt-btn-sm" data-vtt-fn="_vttToggleVisible" data-vtt-args="${t.id}" title="Visibilité joueurs">${t.visible ? `${eyeIcon(false)} Visible` : `${eyeIcon(true)} Caché`}</button>
           ${VS.session?.combat?.active?`<button class="vtt-btn-sm" data-vtt-fn="_vttResetTurn" data-vtt-args="${t.id}" title="Réinitialiser le tour de ce token">↺ Tour</button>`:''}
           ${t.pageId?`<button class="vtt-btn-sm" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="Retirer de la carte">↩ Retirer</button>`:''}
           ${(t.buffs||[]).length?`<button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttClearBuffs" data-vtt-args="${t.id}" title="Supprimer tous les buffs actifs">🗑 Buffs</button>`:''}

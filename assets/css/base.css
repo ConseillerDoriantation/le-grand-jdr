@@ -114,3 +114,8 @@ img {
     scroll-behavior: auto !important;
   }
 }
+
+/* Icône « visibilité joueurs » (œil / œil barré) — helper eyeIcon(), remplace 🙈. */
+.eye-ico {
+  width: 1em; height: 1em; display: inline-block; vertical-align: -0.14em; flex-shrink: 0;
+}

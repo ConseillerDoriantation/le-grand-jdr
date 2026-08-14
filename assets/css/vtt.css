@@ -7288,6 +7288,52 @@ html:not([data-theme="light"]) .vtt-root {
   width: 72px; height: 4px; accent-color: var(--gold); cursor: pointer;
 }
 
+/* ── Canal Ambiance (2ᵉ piste en boucle, jouée en fond de la musique) ────── */
+.vtt-mact-amb.on { background: rgba(56,189,248,.16); border-color: rgba(56,189,248,.5); color: #7dd3fc; }
+.vtt-music-amb-row {
+  display: flex; align-items: center; gap: .3rem; margin-top: .4rem;
+  padding: .32rem .45rem; border-radius: 7px;
+  border: 1px solid rgba(56,189,248,.24); background: rgba(56,189,248,.07);
+}
+.vtt-music-amb-name {
+  flex: 1; min-width: 0; font-size: .72rem; font-weight: 600; color: #7dd3fc;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.vtt-music-amb-vol-lbl { margin-left: .1rem; color: #8fd6f5; }
+.vtt-music-amb-vol-lbl .vtt-music-vol-inp { accent-color: #38bdf8; }
+
+/* ══ Refonte panneau musique : barre d'outils compacte + lignes épurées ════ */
+.vtt-music-hd-acts { display: flex; align-items: center; gap: 6px; }
+.vtt-music-tbtn {
+  display: inline-flex; align-items: center; gap: 3px; padding: .3rem .55rem; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-muted);
+  cursor: pointer; font-size: .82rem; font-weight: 700; flex-shrink: 0;
+}
+.vtt-music-tbtn:hover { color: var(--text); background: var(--bg-card2); }
+.vtt-music-addbtn { border-color: oklch(72% 0.14 52 / 0.4); background: var(--gold-glow); color: var(--gold); }
+.vtt-music-caret { font-size: .58rem; opacity: .8; }
+
+/* Lignes de son : actions secondaires révélées au survol, primaires (Lire/⋯) fixes. */
+.vtt-music-pool-item, .vtt-music-pl-sound { gap: .25rem; }
+.vtt-music-row-quick { display: inline-flex; gap: 2px; opacity: 0; pointer-events: none; transition: opacity .12s; flex-shrink: 0; }
+.vtt-music-pool-item:hover .vtt-music-row-quick,
+.vtt-music-pl-sound:hover  .vtt-music-row-quick,
+.vtt-music-pool-item:focus-within .vtt-music-row-quick,
+.vtt-music-pl-sound:focus-within  .vtt-music-row-quick { opacity: 1; pointer-events: auto; }
+.vtt-music-row-hidden { display: inline-flex; align-items: center; color: var(--text-dim); flex-shrink: 0; }
+/* Icône visibilité joueurs (œil / œil barré) — remplace l'émoji 🙈. */
+.vtt-eye { width: 14px; height: 14px; display: inline-block; vertical-align: -2px; flex-shrink: 0; }
+.vtt-music-row-hidden .vtt-eye { width: 13px; height: 13px; }
+.vtt-ctx-item .vtt-eye { margin-right: .1rem; }
+.vtt-mact-play { font-size: .74rem; padding: .18rem .34rem; flex-shrink: 0; }
+.vtt-mact-more { font-size: .85rem; line-height: 1; letter-spacing: .03em; padding: .05rem .34rem; flex-shrink: 0; }
+/* Grip discret : n'apparaît qu'au survol de la ligne (moins de bruit au repos). */
+.vtt-music-pool-grip { opacity: 0; transition: opacity .12s; }
+.vtt-music-pool-item:hover .vtt-music-pool-grip,
+.vtt-music-pl-sound:hover  .vtt-music-pool-grip { opacity: .5; }
+/* Son utilisé comme ambiance : liseré cyan à gauche. */
+.vtt-music-pool-item.is-amb, .vtt-music-pl-sound.is-amb { box-shadow: inset 2px 0 0 #38bdf8; }
+
 /* ── Zone AoE – hint + kbd ──────────────────────────────────────── */
 .vtt-zone-hint {
   font-size: .68rem;

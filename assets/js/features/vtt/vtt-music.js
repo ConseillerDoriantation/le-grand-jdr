@@ -31,6 +31,7 @@ let _musicCloseOut = null;
 let _musicProgTimer = null;
 let _musicSortables = [];   // instances Sortable actives
 let _previewEl     = null;  // aperçu local MJ (non diffusé)
+let _ambienceEl    = null;  // 2ᵉ canal : ambiance en boucle, jouée EN PLUS de la musique
 let _lastAppliedSeek = 0;   // dernier seekVersion appliqué (évite de re-seeker à chaque resync)
 
 // ── Refs Firestore (sons / playlists / état musique) ────────────────
@@ -143,6 +144,29 @@ function _setUserVolume(v) {
   return clamped;
 }
 
+// Volume du canal Ambiance (par utilisateur, indépendant de la musique). Défaut
+// plus bas : l'ambiance reste en fond sous la musique principale.
+const _AMB_VOL_KEY = 'vtt:ambienceVolume';
+function _getAmbienceVolume() {
+  const v = parseFloat(localStorage.getItem(_AMB_VOL_KEY));
+  return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 0.5;
+}
+function _setAmbienceVolume(v) {
+  const clamped = Math.max(0, Math.min(1, v));
+  try { localStorage.setItem(_AMB_VOL_KEY, String(clamped)); } catch(e){}
+  if (_ambienceEl) _ambienceEl.volume = clamped;
+  return clamped;
+}
+
+// Icône visibilité joueurs : œil (visible) / œil barré (masqué). SVG monochrome
+// (currentColor) — remplace l'ancien émoji 🙈.
+function _eyeSvg(off) {
+  const p = off
+    ? '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20C5 20 1 12 1 12a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'
+    : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+  return `<svg class="vtt-eye" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+}
+
 // État replié/déplié des catégories — persisté localement (par utilisateur)
 const _CAT_COLLAPSE_KEY = 'vtt:musicCollapsed';
 function _loadCollapseMap() {
@@ -228,7 +252,10 @@ function _renderMusicPanel() {
     panel.innerHTML = `
       <div class="vtt-music-hd">
         <span>🎵 Sons &amp; Musique</span>
-        <button class="vtt-ms-close" data-vtt-fn="_vttToggleMusic">✕</button>
+        <div class="vtt-music-hd-acts">
+          <button class="vtt-music-tbtn" data-vtt-fn="_vttMusicToolsMenu" data-vtt-args="$event" title="Outils : masquer les titres, nettoyer les sons manquants…" aria-haspopup="menu">⋯</button>
+          <button class="vtt-ms-close" data-vtt-fn="_vttToggleMusic">✕</button>
+        </div>
       </div>
       <div class="vtt-music-body">${_renderMusicList(mj)}</div>
       ${_renderNowPlaying(curSound, ms)}`;
@@ -253,6 +280,12 @@ function _renderMusicPanel() {
       if (_audioEl)   _audioEl.volume = v;
       if (_previewEl) _previewEl.volume = v;
     };
+  }
+  // Volume du canal Ambiance (par utilisateur).
+  const asl = panel.querySelector('#vtt-music-amb-vol');
+  if (asl) {
+    asl.value = Math.round(_getAmbienceVolume() * 100);
+    asl.oninput = e => { _setAmbienceVolume(+e.target.value / 100); };
   }
   // Barre de progression
   clearInterval(_musicProgTimer);
@@ -333,22 +366,9 @@ function _renderMusicList(mj) {
   let h = `<div class="vtt-music-search-row">
     <input type="search" id="vtt-music-search" class="vtt-music-search"
       placeholder="🔍 Rechercher un son ou une catégorie…" autocomplete="off">
+    ${mj ? `<button class="vtt-music-tbtn vtt-music-addbtn" data-vtt-fn="_vttMusicAddMenu" data-vtt-args="$event" title="Ajouter : URL · GitHub · nouvelle catégorie" aria-haspopup="menu">＋<span class="vtt-music-caret">▾</span></button>` : ''}
     <button class="vtt-music-collapse-all" data-vtt-fn="_vttToggleAllMusicCats" title="Tout replier / déplier">⇕</button>
   </div>`;
-
-  if (mj) {
-    const hideOn = !!_musicState.hideTitle;
-    h += `<div class="vtt-music-son-actions-row">
-      <button class="vtt-music-upload-btn" data-vtt-fn="_vttAddSonUrl" style="flex:1" title="Ajouter un son via URL">＋ URL</button>
-      <button class="vtt-music-upload-btn" data-vtt-fn="_vttImportGithubRelease" style="flex:1.4" title="Importer depuis une release GitHub">📥 GitHub</button>
-      <button class="vtt-music-upload-btn" data-vtt-fn="_vttCreatePlaylist" style="flex:1.2" title="Créer une nouvelle catégorie/playlist">＋ Catégorie</button>
-    </div>
-    <div class="vtt-music-son-actions-row">
-      <button class="vtt-music-upload-btn${hideOn?' on':''}" data-vtt-fn="_vttMusicToggleHideTitle" style="flex:1"
-        title="${hideOn?'Tous les titres sont masqués aux joueurs — clic pour les réafficher':'Masquer tous les titres aux joueurs'}">
-        ${hideOn?'🙈 Tous les titres masqués':'👁 Masquer tous les titres'}</button>
-    </div>`;
-  }
 
   if (!_sounds.length && !_playlists.length) {
     const msg = _musicCatalogLoading ? 'Chargement des sons…' : 'Aucun son — ajoutez une URL ou importez depuis GitHub';
@@ -389,7 +409,7 @@ function _renderMusicList(mj) {
           <div class="vtt-music-son-acts" data-vtt-fn="_vttNoop">
             <button class="vtt-mact${active&&!_musicState.shuffle?' on':''}" data-vtt-fn="_vttPlayPlaylist" data-vtt-args="${pl.id}|false" title="Lire en ordre">▶</button>
             <button class="vtt-mact${active&&_musicState.shuffle?' on':''}" data-vtt-fn="_vttPlayPlaylist" data-vtt-args="${pl.id}|true" title="Aléatoire">🔀</button>
-            ${mj?`<button class="vtt-mact vtt-mact-del" data-vtt-fn="_vttDeletePlaylist" data-vtt-args="${pl.id}" title="Supprimer">🗑</button>`:''}
+            ${mj?`<button class="vtt-mact vtt-mact-more" data-vtt-fn="_vttPlaylistCtxMenu" data-vtt-args="$event|${pl.id}" title="Renommer, couleur, supprimer" aria-haspopup="menu">⋯</button>`:''}
           </div>
         </div>
         <div class="vtt-music-cat-body" id="vtt-music-cat-body-${index}">
@@ -419,23 +439,22 @@ function _renderSonRow(s, plId, mj) {
   const rowClass = isPool ? 'vtt-music-pool-item' : 'vtt-music-pl-sound';
   const nameClass = isPool ? 'vtt-music-pool-name' : 'vtt-music-pl-sname';
   const titleHidden = s.hideTitle === true;
+  const isAmb = ms.ambienceSoundId === s.id;
+  const ctxArgs = `$event|${s.id}${isPool?'':`|${plId}`}`;
   const ctx = mj
-    ? `data-vtt-fn="_vttSoundCtxMenu" data-vtt-on="contextmenu" data-vtt-args="$event|${s.id}${isPool?'':`|${plId}`}" tabindex="0" aria-haspopup="menu" aria-label="Actions pour ${_esc(s.name)}"`
+    ? `data-vtt-fn="_vttSoundCtxMenu" data-vtt-on="contextmenu" data-vtt-args="${ctxArgs}" tabindex="0" aria-haspopup="menu" aria-label="Actions pour ${_esc(s.name)}"`
     : '';
-  const delBtn = mj
-    ? (isPool
-        ? `<button class="vtt-mact vtt-mact-del" data-vtt-fn="_vttDeleteSound" data-vtt-args="${s.id}" title="Supprimer définitivement">🗑</button>`
-        : `<button class="vtt-mact vtt-mact-del" data-vtt-fn="_vttRemoveSoundFromPlaylist" data-vtt-args="${plId}|${s.id}" title="Retirer de la catégorie">✕</button>`)
-    : '';
-  return `<div class="${rowClass}${rowActive?' is-playing':''}" data-sound-id="${s.id}" title="${_esc(s.name)}" ${ctx}>
-    ${mj?'<span class="vtt-music-pool-grip">⠿</span>':''}
+  return `<div class="${rowClass}${rowActive?' is-playing':''}${isAmb?' is-amb':''}" data-sound-id="${s.id}" title="${_esc(s.name)}" ${ctx}>
+    ${mj?'<span class="vtt-music-pool-grip" title="Glisser pour déplacer">⠿</span>':''}
     <span class="${nameClass}">${_esc(s.name)}</span>
-    ${mj ? `<button class="vtt-mact vtt-mact-privacy${titleHidden?' on':''}" data-vtt-fn="_vttMusicToggleSoundTitle" data-vtt-args="${s.id}" aria-pressed="${titleHidden}"
-      title="${titleHidden?'Titre masqué aux joueurs — cliquer pour l’afficher':'Masquer ce titre aux joueurs'}">${titleHidden?'🙈':'👁'}</button>` : ''}
-    <button class="vtt-mact${playOn?' on':''}" data-vtt-fn="_vttPlaySound" data-vtt-args="${s.id}|false" title="Lire">${playOn && !ms.paused?'⏸':'▶'}</button>
-    <button class="vtt-mact${loopOn?' on':''}" data-vtt-fn="_vttPlaySound" data-vtt-args="${s.id}|true" title="Boucle">🔁</button>
-    <button class="vtt-mact vtt-mact-preview" data-vtt-fn="_vttPreview" data-vtt-args="${s.id}|$this" title="Aperçu local (MJ)">🎧</button>
-    ${delBtn}
+    ${mj && titleHidden ? `<span class="vtt-music-row-hidden" title="Titre masqué aux joueurs">${_eyeSvg(true)}</span>` : ''}
+    ${mj ? `<span class="vtt-music-row-quick">
+      <button class="vtt-mact${loopOn?' on':''}" data-vtt-fn="_vttPlaySound" data-vtt-args="${s.id}|true" title="Jouer en boucle">🔁</button>
+      <button class="vtt-mact vtt-mact-amb${isAmb?' on':''}" data-vtt-fn="_vttPlayAmbience" data-vtt-args="${s.id}" title="${isAmb?'Arrêter l’ambiance':'Jouer en ambiance'}">🌫</button>
+      <button class="vtt-mact vtt-mact-preview" data-vtt-fn="_vttPreview" data-vtt-args="${s.id}|$this" title="Aperçu local (MJ)">🎧</button>
+    </span>` : ''}
+    <button class="vtt-mact vtt-mact-play${playOn?' on':''}" data-vtt-fn="_vttPlaySound" data-vtt-args="${s.id}|false" title="${playOn&&!ms.paused?'Pause':'Lire'}">${playOn && !ms.paused?'⏸':'▶'}</button>
+    ${mj ? `<button class="vtt-mact vtt-mact-more" data-vtt-fn="_vttSoundCtxMenu" data-vtt-args="${ctxArgs}" title="Plus d’actions" aria-haspopup="menu">⋯</button>` : ''}
   </div>`;
 }
 
@@ -521,7 +540,7 @@ function _renderNowPlaying(curSound, ms) {
   const nameHtml = curSound
     ? ((!mj && hidden)
         ? '🎵 <em>Ambiance en cours…</em>'
-        : `🎵 ${_esc(curSound.name)}${pl?` · <em>${_esc(pl.name)}</em>`:''}${ms.loop?' 🔁':''}${ms.shuffle?' 🔀':''}${mj && hidden ? ` <span class="vtt-music-np-hidetag" title="${hiddenTitle}">🙈</span>` : ''}`)
+        : `🎵 ${_esc(curSound.name)}${pl?` · <em>${_esc(pl.name)}</em>`:''}${ms.loop?' 🔁':''}${ms.shuffle?' 🔀':''}${mj && hidden ? ` <span class="vtt-music-np-hidetag" title="${hiddenTitle}">${_eyeSvg(true)}</span>` : ''}`)
     : '<span style="color:var(--text-dim)">— Rien en lecture —</span>';
   return `<div class="vtt-music-np">
     <div class="vtt-music-np-name">${nameHtml}</div>
@@ -537,11 +556,27 @@ function _renderNowPlaying(curSound, ms) {
         ${pl?`<button class="vtt-music-ctrl" data-vtt-fn="_vttMusicNext" title="Suivant">⏭</button>`:''}
         <button class="vtt-music-ctrl" data-vtt-fn="_vttStopMusic" title="Arrêter">⏹</button>
         <button class="vtt-music-ctrl vtt-music-title-toggle${hiddenForSound?' on':''}" data-vtt-fn="_vttMusicToggleSoundTitle" data-vtt-args="${curSound.id}"
-          aria-pressed="${hiddenForSound}" title="${hiddenForSound?'Afficher ce titre aux joueurs':'Masquer ce titre aux joueurs'}">${hiddenForSound?'🙈':'👁'}</button>
+          aria-pressed="${hiddenForSound}" title="${hiddenForSound?'Afficher ce titre aux joueurs':'Masquer ce titre aux joueurs'}">${hiddenForSound ? _eyeSvg(true) : _eyeSvg(false)}</button>
       ` : ''}
       <label class="vtt-music-vol-lbl">🔊<input type="range" id="vtt-music-vol" class="vtt-music-vol-inp" min="0" max="100" step="1"></label>
     </div>
+    ${_renderAmbienceBar(ms, mj)}
   </div>`;
+}
+
+// Mini-barre du canal Ambiance : visible dès qu'une ambiance tourne. Le MJ voit
+// le nom + peut l'arrêter ; tout le monde règle son volume d'ambiance.
+function _renderAmbienceBar(ms, mj) {
+  const ambId = ms?.ambienceSoundId || null;
+  if (!ambId) return '';
+  const ambSound = _sounds.find(s => s.id === ambId);
+  const label = (mj && ambSound) ? _esc(ambSound.name) : 'Ambiance';
+  return `
+    <div class="vtt-music-amb-row">
+      <span class="vtt-music-amb-name" title="Ambiance en boucle (en plus de la musique)">🌫 ${label}</span>
+      ${mj ? `<button class="vtt-music-ctrl vtt-music-amb-stop" data-vtt-fn="_vttStopAmbience" title="Arrêter l'ambiance">⏹</button>` : ''}
+      <label class="vtt-music-vol-lbl vtt-music-amb-vol-lbl" title="Volume de l'ambiance">🌫<input type="range" id="vtt-music-amb-vol" class="vtt-music-vol-inp" min="0" max="100" step="1"></label>
+    </div>`;
 }
 
 // ── Seek sur clic barre de progression (MJ) ────────────────────────
@@ -625,6 +660,18 @@ async function _vttStopMusic() {
   await _setMusicState({ playing:false, paused:false, currentSoundId:null, currentPlaylistId:null });
 }
 
+// MJ : lance/arrête un son sur le canal Ambiance (boucle, en plus de la musique).
+// Re-cliquer sur le son d'ambiance courant l'arrête.
+async function _vttPlayAmbience(soundId) {
+  if (!STATE.isAdmin) return;
+  const next = _musicState.ambienceSoundId === soundId ? null : soundId;
+  await _setMusicState({ ambienceSoundId: next });
+}
+async function _vttStopAmbience() {
+  if (!STATE.isAdmin) return;
+  await _setMusicState({ ambienceSoundId: null });
+}
+
 // MJ : masque / affiche tous les titres côté joueurs.
 async function _vttMusicToggleHideTitle() {
   if (!STATE.isAdmin) return;
@@ -642,7 +689,7 @@ async function _vttMusicToggleSoundTitle(soundId) {
     if (_musicState.currentSoundId === soundId) {
       await _setMusicState({ currentTitleHidden: hideTitle });
     }
-    showNotif(hideTitle ? '🙈 Titre masqué aux joueurs' : '👁 Titre visible par les joueurs', 'success');
+    showNotif(hideTitle ? 'Titre masqué aux joueurs' : 'Titre affiché aux joueurs', 'success');
   } catch (error) {
     console.error('[vtt music] title visibility:', error);
     showNotif('Impossible de modifier la visibilité du titre', 'error');
@@ -659,9 +706,50 @@ function _killAudio() {
   clearInterval(_musicProgTimer); _musicProgTimer=null;
 }
 
+function _killAmbience() {
+  if (_ambienceEl) { _ambienceEl.pause(); _ambienceEl.src=''; _ambienceEl=null; }
+}
+
+// Applique l'état ambiance (ms.ambienceSoundId) au 2ᵉ canal audio, indépendamment
+// de la musique principale (elle peut jouer ou non). En boucle, volume dédié.
+function _syncAmbience(ms) {
+  const id = ms?.ambienceSoundId || null;
+  if (!id) { _killAmbience(); return; }
+  // Même ambiance déjà en cours → rien à faire (juste garder le volume à jour).
+  if (_ambienceEl && _ambienceEl.dataset.soundId === id && !_ambienceEl.ended) {
+    _ambienceEl.volume = _getAmbienceVolume();
+    return;
+  }
+  const sound = _sounds.find(s => s.id === id);
+  if (!sound) {
+    // Joueur (ou catalogue pas encore prêt) : charge le son ciblé puis réessaie.
+    const loader = STATE.isAdmin
+      ? _startMusicCatalogListeners().then(() => _sounds.find(s => s.id === id) || null)
+      : _loadMusicSoundById(id);
+    loader.then(found => { if (found && _musicState?.ambienceSoundId === id) _syncAmbience(_musicState); });
+    return;
+  }
+  _killAmbience();
+  const el = new Audio(sound.url);
+  el.dataset.soundId = id;
+  el.loop = true;
+  el.volume = _getAmbienceVolume();
+  el.addEventListener('error', () => {
+    console.error('[vtt music] ambiance audio error:', el.error?.code, sound.url);
+    if (STATE.isAdmin) showNotif(`🔇 Ambiance « ${sound.name} » injouable — vérifier l'URL`, 'error');
+    _killAmbience();
+  }, { once:true });
+  el.play().catch(err => {
+    if (err.name === 'NotAllowedError') showNotif('🔇 Cliquez sur la page pour activer le son', 'info');
+    else console.error('[vtt music] ambiance play():', err.name, err.message);
+  });
+  _ambienceEl = el;
+}
+
 // Reset complet de l'état musique au teardown de la VTT (appelé depuis vtt.js).
 function _resetMusicState() {
   _killAudio();
+  _killAmbience();
   _sounds = []; _playlists = []; _musicState = {};
   _musicCatalogStarted = false; _musicCatalogLoading = false; _musicCatalogReady = null;
   _musicSoundLoads.clear();
@@ -677,6 +765,10 @@ async function _setMusicState(patch) {
 function _syncMusicPlayback(ms) {
   _musicState = ms;
   const panel = document.getElementById('vtt-music-panel');
+
+  // Canal Ambiance : géré à chaque changement d'état, indépendamment de la
+  // musique principale (l'ambiance continue même si la musique est arrêtée).
+  _syncAmbience(ms);
 
   if (!ms.playing || !ms.currentSoundId) {
     _killAudio();
@@ -773,11 +865,20 @@ function _syncMusicPlayback(ms) {
 // currentPlId : playlist d'où vient le clic (undefined = pool)
 function _vttSoundCtxMenu(e, soundId, currentPlId) {
   const sound = _sounds.find(s=>s.id===soundId); if (!sound) return;
+  const ms = _musicState;
+  const inSingle = ms.playing && ms.currentSoundId === soundId && !ms.currentPlaylistId;
+  const isAmb = ms.ambienceSoundId === soundId;
 
-  const items = [{
-    label: sound.hideTitle === true ? '👁 Afficher le titre aux joueurs' : '🙈 Masquer le titre aux joueurs',
-    fn: () => _vttMusicToggleSoundTitle(soundId),
-  }];
+  const items = [
+    { label: inSingle && !ms.loop ? '⏹ Arrêter' : '▶ Lire', fn: () => _vttPlaySound(soundId, false) },
+    { label: inSingle && ms.loop ? '⏹ Arrêter la boucle' : '🔁 Jouer en boucle', fn: () => _vttPlaySound(soundId, true) },
+    { label: isAmb ? '⏹ Arrêter l’ambiance' : '🌫 Jouer en ambiance', fn: () => _vttPlayAmbience(soundId) },
+    '---',
+    {
+      label: sound.hideTitle === true ? `${_eyeSvg(false)} Afficher le titre aux joueurs` : `${_eyeSvg(true)} Masquer le titre aux joueurs`,
+      fn: () => _vttMusicToggleSoundTitle(soundId),
+    },
+  ];
 
   // Playlists cibles (exclut celle d'où il vient s'il y est déjà)
   const targets = _playlists.filter(pl =>
@@ -792,13 +893,13 @@ function _vttSoundCtxMenu(e, soundId, currentPlId) {
     }));
   }
 
-  // Retirer de la playlist courante
+  items.push('---');
   if (currentPlId) {
-    if (items.length) items.push('---');
     items.push({ label: '✕ Retirer de cette playlist', fn: () => _vttRemoveSoundFromPlaylist(currentPlId, soundId) });
   }
+  items.push({ label: '🗑 Supprimer définitivement', fn: () => _vttDeleteSound(soundId) });
 
-  if (items.length) _showCtxMenu(e.clientX, e.clientY, items);
+  _showCtxMenu(e.clientX, e.clientY, items);
 }
 
 // ── Menu contextuel catégorie/playlist (MJ) — clic droit sur l'en-tête ──
@@ -807,6 +908,27 @@ function _vttPlaylistCtxMenu(e, plId) {
   _showCtxMenu(e.clientX, e.clientY, [
     { label: '✏️ Renommer / couleur', fn: () => _vttRenamePlaylist(plId) },
     { label: '🗑 Supprimer', fn: () => _vttDeletePlaylist(plId) },
+  ]);
+}
+
+// Menu déroulant « ＋ » (barre de recherche) : ajouter un son / importer / catégorie.
+function _vttMusicAddMenu(e) {
+  if (!STATE.isAdmin) return;
+  _showCtxMenu(e.clientX, e.clientY, [
+    { label: '🔗 Ajouter un son par URL', fn: () => _vttAddSonUrl() },
+    { label: '📥 Importer depuis GitHub', fn: () => _vttImportGithubRelease() },
+    '---',
+    { label: '📁 Nouvelle catégorie', fn: () => _vttCreatePlaylist() },
+  ]);
+}
+
+// Menu déroulant « ⋯ » (en-tête) : outils MJ (masquage global, nettoyage).
+function _vttMusicToolsMenu(e) {
+  if (!STATE.isAdmin) return;
+  const hideOn = !!_musicState.hideTitle;
+  _showCtxMenu(e.clientX, e.clientY, [
+    { label: hideOn ? `${_eyeSvg(false)} Réafficher tous les titres aux joueurs` : `${_eyeSvg(true)} Masquer tous les titres aux joueurs`, fn: () => _vttMusicToggleHideTitle() },
+    { label: '🧹 Nettoyer les sons manquants', fn: () => _vttCleanMissingSounds() },
   ]);
 }
 
@@ -856,9 +978,65 @@ async function _vttDeleteSound(soundId) {
   const s = _sounds.find(x=>x.id===soundId); if (!s) return;
   if (!await confirmModal(`Supprimer "${s.name}" ?`)) return;
   if (_musicState.currentSoundId===soundId) await _vttStopMusic();
+  if (_musicState.ambienceSoundId===soundId) await _setMusicState({ ambienceSoundId:null });
   for (const pl of _playlists.filter(p=>(p.soundIds||[]).includes(soundId)))
     await updateDoc(_playlistRef(pl.id), { soundIds:(pl.soundIds||[]).filter(id=>id!==soundId) }).catch(()=>{});
   await deleteDoc(_sonRef(soundId)).catch(()=>{});
+}
+
+// Teste si une URL audio est encore joignable via un élément Audio (marche en
+// cross-origin, contrairement à fetch bloqué par CORS sur GitHub Pages/releases).
+// Résout true=OK, false=fichier introuvable/erreur, 'timeout'=non vérifiable.
+function _probeSoundUrl(url, timeoutMs = 10000) {
+  return new Promise(resolve => {
+    if (!url) { resolve(false); return; }
+    const a = new Audio();
+    let done = false;
+    const finish = (v) => {
+      if (done) return; done = true; clearTimeout(t);
+      a.onloadedmetadata = a.oncanplay = a.onerror = null;
+      try { a.src = ''; a.removeAttribute('src'); a.load(); } catch {}
+      resolve(v);
+    };
+    const t = setTimeout(() => finish('timeout'), timeoutMs);
+    a.preload = 'metadata';
+    a.onloadedmetadata = () => finish(true);
+    a.oncanplay       = () => finish(true);
+    a.onerror         = () => finish(false);
+    try { a.src = url; a.load(); } catch { finish(false); }
+  });
+}
+
+// Nettoyage MJ : détecte les sons dont le fichier source n'existe plus (ex.
+// supprimé du dépôt GitHub) et les retire de la bibliothèque + des playlists.
+async function _vttCleanMissingSounds() {
+  if (!STATE.isAdmin) return;
+  if (!_sounds.length) { showNotif('Aucun son à vérifier.', 'info'); return; }
+  showNotif(`Vérification de ${_sounds.length} son(s)…`, 'info');
+  const results = await Promise.all(_sounds.map(async s => ({ s, state: await _probeSoundUrl(s.url) })));
+  const dead = results.filter(r => r.state === false).map(r => r.s);
+  const uncertain = results.filter(r => r.state === 'timeout').length;
+  if (!dead.length) {
+    showNotif(uncertain
+      ? `Aucun son manquant détecté (${uncertain} non vérifiable·s).`
+      : '✅ Tous les sons sont disponibles.', 'success');
+    return;
+  }
+  const list = dead.map(s => `• ${_esc(s.name)}`).join('<br>');
+  const ok = await confirmModal(
+    `<b>${dead.length} son(s) introuvable(s)</b> (fichier supprimé côté source) seront retirés de la bibliothèque et des playlists :<br><br>${list}` +
+    (uncertain ? `<br><br><small>${uncertain} son(s) non vérifiable(s) — conservé(s).</small>` : ''),
+    { title: '🧹 Nettoyer les sons manquants', confirmLabel: 'Supprimer', icon: '🗑️' });
+  if (!ok) return;
+  let removed = 0;
+  for (const s of dead) {
+    if (_musicState.currentSoundId === s.id) await _vttStopMusic();
+    if (_musicState.ambienceSoundId === s.id) await _setMusicState({ ambienceSoundId:null });
+    for (const pl of _playlists.filter(p => (p.soundIds||[]).includes(s.id)))
+      await updateDoc(_playlistRef(pl.id), { soundIds:(pl.soundIds||[]).filter(id=>id!==s.id) }).catch(()=>{});
+    if (await deleteDoc(_sonRef(s.id)).then(() => true).catch(() => false)) removed++;
+  }
+  showNotif(`🧹 ${removed} son(s) supprimé(s).`, 'success');
 }
 
 // ── Playlists ───────────────────────────────────────────────────────
@@ -1003,6 +1181,12 @@ export {
   _syncMusicPlayback,
   _updateMusicProg,
   _vttAddSonUrl,
+  _vttCleanMissingSounds,
+  _vttPlayAmbience,
+  _vttStopAmbience,
+  _vttPlaylistCtxMenu,
+  _vttMusicAddMenu,
+  _vttMusicToolsMenu,
   _vttAddSoundToPlaylist,
   _vttCreatePlaylist,
   _vttCreatePlaylistConfirm,

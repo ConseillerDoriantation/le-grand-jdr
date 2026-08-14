@@ -4,7 +4,7 @@ import { confirmDelete, trySave } from '../shared/crud.js';
 import { openModal, closeModalDirect, confirmModal, promptModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete, loadRarities, openRaritiesAdmin } from '../shared/rarity.js';
-import { _esc, _norm, _searchIncludes, loadingHtml } from '../shared/html.js';
+import { _esc, _norm, _searchIncludes, loadingHtml, eyeIcon } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, calcVitesse, ITEM_STAT_META, statShort as _statShort, getDefaultCharForUser } from '../shared/char-stats.js';
@@ -628,7 +628,7 @@ function _renderSidebar() {
               <button class="sh-side-link ${active ? 'active' : ''}" data-sh-action="goCat" data-id="${cat.id}"${cat.masquee ? ' style="opacity:.6"' : ''}>
                 <span class="sh-side-link-icon" style="--cat-bg:${catBg}">${cat.emoji || _catEmoji(cat.nom)}</span>
                 <span class="sh-side-link-text">
-                  <strong>${cat.nom}${cat.masquee ? ' <span title="Masquée aux joueurs">🙈</span>' : ''}</strong>
+                  <strong>${cat.nom}${cat.masquee ? ` <span title="Masquée aux joueurs">${eyeIcon(true)}</span>` : ''}</strong>
                   <small>${tpl?.label || 'Type'} • ${count} article${count > 1 ? 's' : ''}</small>
                 </span>
               </button>
@@ -701,7 +701,7 @@ function _renderHomeResults() {
       </div>
       <div class="sh-cat-body">
         <div class="sh-cat-name-row">
-          <div class="sh-cat-name">${cat.nom}${cat.masquee?' <span title="Masquée aux joueurs" style="font-size:.85em">🙈</span>':''}</div>
+          <div class="sh-cat-name">${cat.nom}${cat.masquee?` <span title="Masquée aux joueurs">${eyeIcon(true)}</span>`:''}</div>
           ${edit?`<div class="sh-card-admin-inline" data-sh-action="stop">
             <button class="btn-icon" title="Modifier la catégorie" aria-label="Modifier la catégorie" data-sh-action="openCatModal" data-id="${cat.id}">✏️</button>
             <button class="btn-icon" title="Supprimer la catégorie" aria-label="Supprimer la catégorie" data-sh-action="deleteCat" data-id="${cat.id}">🗑️</button>
@@ -981,7 +981,7 @@ function _renderItemsView() {
       <div style="min-width:0;flex:1">
         <div class="sh-main-kicker">${tplCat?.label || 'Catégorie'}</div>
         <div class="sh-main-title">${_esc(cat.nom)}</div>
-        <div class="sh-main-meta">${totalCat} article${totalCat!==1?'s':''}${hasFilters && total !== totalCat ? ` · ${total} filtré${total!==1?'s':''}` : ''}${cat.masquee ? ' · 🙈 Masquée aux joueurs' : ''}</div>
+        <div class="sh-main-meta">${totalCat} article${totalCat!==1?'s':''}${hasFilters && total !== totalCat ? ` · ${total} filtré${total!==1?'s':''}` : ''}${cat.masquee ? ` · ${eyeIcon(true)} Masquée aux joueurs` : ''}</div>
       </div>
     </div>
   </div>
@@ -1512,7 +1512,7 @@ function _renderItemCard(item, tplKey, itemIdx) {
       <div class="sh-item-body" data-sh-action="openDetail" data-id="${item.id}">
         <div class="sh-item-row1">
           <div class="sh-item-name-wrap">
-            <span class="sh-item-name">${edit && item.masque ? '<span title="Masqué aux joueurs">🙈</span> ' : ''}${_esc(item.nom || '?')}</span>
+            <span class="sh-item-name">${edit && item.masque ? `<span title="Masqué aux joueurs">${eyeIcon(true)}</span> ` : ''}${_esc(item.nom || '?')}</span>
             <span class="sh-item-type">${typeLine}</span>
           </div>
           ${rareteNum ? `<span class="sh-item-rare-pill" style="color:${rareteColor};border-color:${rareteColor};background:${rareteColor}1a">${_esc(rareteName)}</span>` : ''}
@@ -1567,7 +1567,7 @@ function _renderItemCard(item, tplKey, itemIdx) {
           ${epuise ? `<button class="btn-icon sh-restock-btn" title="Restocker +1 (MJ)" aria-label="Restocker"
             data-sh-action="restockItem" data-id="${item.id}">📦</button>` : ''}
           <button class="btn-icon" title="${item.masque ? 'Rendre visible aux joueurs' : 'Masquer aux joueurs'}" aria-label="${item.masque ? 'Rendre visible' : 'Masquer'}"
-            data-sh-action="toggleItemVis" data-id="${item.id}">${item.masque ? '🙈' : '👁️'}</button>
+            data-sh-action="toggleItemVis" data-id="${item.id}">${item.masque ? eyeIcon(true) : eyeIcon(false)}</button>
           <button class="btn-icon" title="Modifier l'article" aria-label="Modifier l'article" data-sh-action="openItemModal" data-id="${item.id}">✏️</button>
           <button class="btn-icon" title="Supprimer l'article" aria-label="Supprimer l'article" data-sh-action="deleteItem" data-id="${item.id}">🗑️</button>
         </div>
@@ -1664,7 +1664,7 @@ function _renderItemRow(item, tplKey, itemIdx) {
         title="${_isFav(item.id) ? 'Retirer des favoris' : 'Ajouter aux favoris'}" aria-label="Favori">${_isFav(item.id) ? '★' : '☆'}</button>
       <span class="sh-list-thumb" style="${imgBg}">${item.image ? '' : (cat?.emoji || _catEmoji(cat?.nom || item.type || ''))}</span>
       <div class="sh-list-name">
-        <span class="sh-list-name-txt">${edit && item.masque ? '<span title="Masqué aux joueurs">🙈</span> ' : ''}${_esc(item.nom || '?')}</span>
+        <span class="sh-list-name-txt">${edit && item.masque ? `<span title="Masqué aux joueurs">${eyeIcon(true)}</span> ` : ''}${_esc(item.nom || '?')}</span>
         <span class="sh-list-type">${typeLine}</span>
       </div>
       <div class="sh-list-info">${infoBits.join('')}</div>
@@ -1681,7 +1681,7 @@ function _renderItemRow(item, tplKey, itemIdx) {
         ${buyBtnHtml}
         ${edit ? `
           <button class="btn-icon" title="${item.masque ? 'Rendre visible aux joueurs' : 'Masquer aux joueurs'}" aria-label="${item.masque ? 'Rendre visible' : 'Masquer'}"
-            data-sh-action="toggleItemVis" data-id="${item.id}">${item.masque ? '🙈' : '👁️'}</button>
+            data-sh-action="toggleItemVis" data-id="${item.id}">${item.masque ? eyeIcon(true) : eyeIcon(false)}</button>
           <button class="btn-icon" title="Modifier l'article" aria-label="Modifier l'article" data-sh-action="openItemModal" data-id="${item.id}">✏️</button>
           <button class="btn-icon" title="Supprimer l'article" aria-label="Supprimer l'article" data-sh-action="deleteItem" data-id="${item.id}">🗑️</button>
         ` : ''}
@@ -2958,7 +2958,7 @@ function _siBuildTabContent(tab, tpl, item, tplKey) {
       <label class="si-meta-row">
         <input type="checkbox" id="si-masque" ${item?.masque ? 'checked' : ''}>
         <span>
-          <strong>🙈 Masquer aux joueurs</strong>
+          <strong>${eyeIcon(true)} Masquer aux joueurs</strong>
           <em>L'article n'apparaît plus dans la boutique pour les joueurs (visible du MJ). Reste récupérable en butin.</em>
         </span>
       </label>
@@ -4206,7 +4206,7 @@ Object.assign(shHandlers, {
     if (!STATE.isAdmin) return;
     const itemId = el.dataset.id; if (!itemId) return;
     const masque = await toggleShopItemVisibility(itemId);
-    showNotif(masque ? '🙈 Article masqué aux joueurs' : '👁️ Article visible', masque ? 'info' : 'success');
+    showNotif(masque ? 'Article masqué aux joueurs' : 'Article visible', masque ? 'info' : 'success');
     renderShop();
   },
   // Tweaks d'affichage (lot 7)
