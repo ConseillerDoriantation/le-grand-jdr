@@ -19,7 +19,7 @@ import { showNotif } from '../shared/notifications.js';
 import { confirmModal } from '../shared/modal.js';
 import {
   freePageEditorHtml, bindFreePageEditor, getFreePageData,
-  renderFreePageHtml, hasFreePage, compressFreePageImages,
+  renderFreePageHtml, hasFreePage, hasUnsavedFreePageChanges, compressFreePageImages,
 } from '../shared/free-page.js';
 
 const DOC_ID = 'main';
@@ -105,8 +105,17 @@ function diapoFullscreen() {
 
 async function diapoCancel() {
   const editor = document.getElementById('diapo-editor');
-  if (editor?.dataset.freePageDirty === 'true') {
-    const confirmed = await confirmModal('Des modifications ne sont pas enregistrées. Quitter l’éditeur et les perdre ?');
+  if (hasUnsavedFreePageChanges(editor)) {
+    const confirmed = await confirmModal(
+      'Des modifications ne sont pas enregistrées. Quitter l’éditeur les supprimera.',
+      {
+        title: 'Modifications non enregistrées',
+        confirmLabel: 'Quitter sans enregistrer',
+        cancelLabel: 'Continuer la modification',
+        danger: true,
+        icon: '⚠️',
+      }
+    );
     if (!confirmed) return;
   }
   _editing = false;

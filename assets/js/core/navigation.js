@@ -183,10 +183,19 @@ let _handlingPopState = false;
 let _navigationSequence = 0;
 let _leaveGuardPromise = null;
 
-async function _canLeaveCurrentPage(nextPage) {
-  if (!STATE.currentPage || STATE.currentPage === nextPage) return true;
-  const dirtyEditor = document.querySelector('[data-free-page-editor][data-free-page-dirty="true"], [data-quill-dirty="true"]');
-  if (!dirtyEditor) return true;
+export function hasUnsavedPageChanges(root = document) {
+  const editors = [...(root?.querySelectorAll?.('[data-free-page-editor], [data-quill-dirty="true"]') || [])];
+  return editors.some((editor) => {
+    if (typeof editor.__freePageHasUnsavedChanges === 'function') {
+      try { return editor.__freePageHasUnsavedChanges() === true; }
+      catch { return editor.dataset.freePageDirty === 'true' || (editor.__freePageUndo?.length || 0) > 0; }
+    }
+    return editor.dataset.quillDirty === 'true' || editor.dataset.freePageDirty === 'true';
+  });
+}
+
+export async function confirmDiscardUnsavedChanges() {
+  if (!hasUnsavedPageChanges()) return true;
   if (!_leaveGuardPromise) {
     _leaveGuardPromise = confirmModal(
       'Cette composition contient des modifications non enregistrées. Quitter cette page les supprimera.',
@@ -200,6 +209,11 @@ async function _canLeaveCurrentPage(nextPage) {
     ).finally(() => { _leaveGuardPromise = null; });
   }
   return _leaveGuardPromise;
+}
+
+async function _canLeaveCurrentPage() {
+  if (!STATE.currentPage) return true;
+  return confirmDiscardUnsavedChanges();
 }
 
 function _runStandaloneAction(el, task) {

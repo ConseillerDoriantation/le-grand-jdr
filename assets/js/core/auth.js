@@ -220,7 +220,16 @@ export async function doGoogleLogin() {
   }
 }
 
-export async function doLogout() {
+let _logoutPromise = null;
+export function doLogout() {
+  if (_logoutPromise) return _logoutPromise;
+  _logoutPromise = _doLogout().finally(() => { _logoutPromise = null; });
+  return _logoutPromise;
+}
+
+async function _doLogout() {
+  const { confirmDiscardUnsavedChanges } = await import('./navigation.js');
+  if (!await confirmDiscardUnsavedChanges()) return false;
   try {
     // Stoppe d'abord les abonnements temps réel pour éviter les
     // "Accès refusé" lorsque l'auth est révoquée.
@@ -228,9 +237,11 @@ export async function doLogout() {
     try { teardownChat(); } catch {}
     try { releaseSessionData(); } catch {}
     await signOut(auth);
+    return true;
   } catch (error) {
     console.error('[auth] doLogout error:', error);
     setAuthError(getAuthError(error));
+    return false;
   }
 }
 
