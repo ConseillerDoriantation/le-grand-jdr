@@ -1,8 +1,8 @@
 import { getDocData, saveDoc } from '../../data/firestore.js';
 import { registerActions } from '../../core/actions.js';
-import { openModal, closeModal, confirmModal } from '../../shared/modal.js';
+import { openModal, closeModal, closeModalDirect, confirmModal, setModalCloseGuard } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
-import { loadWeaponFormats, saveWeaponFormats } from '../../shared/weapon-formats.js';
+import { loadWeaponFormats, saveWeaponFormats, normalizeWeaponTechnique } from '../../shared/weapon-formats.js';
 import { loadDamageTypes, saveDamageTypes } from '../../shared/damage-types.js';
 import { loadSpellMatrices, saveSpellMatrices, SPELL_SLOTS, SLOT_LABELS, COMBO_IDS, COMBO_DEFAULTS } from '../../shared/spell-matrices.js';
 import { _esc, modStr } from '../../shared/html.js';
@@ -21,6 +21,9 @@ export { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, g
 export let _combatStyles = null; // cache en mémoire
 export let _weaponFormats = null; // cache en mémoire (partagé avec weapon-formats.js)
 let _damageTypes = null; // cache local types de dégâts
+let _wfTechniqueFormatIndex = -1;
+let _wfTechniqueDrafts = [];
+let _wfTechniqueDirty = false;
 
 export async function loadCombatStyles() {
   if (_combatStyles) return _combatStyles;
@@ -321,7 +324,7 @@ export function _renderWeaponFormatsModal(formats) {
 
     <div class="sh-admin-body">
       <p class="sh-admin-intro">
-        Bascule chaque format en <em>🔮 Magique</em> (le joueur choisit son élément à l'attaque) ou <em>💪 Physique</em> (dégâts physiques fixes).
+        Bascule chaque format en <em>🔮 Magique</em> ou <em>💪 Physique</em>, puis ajoute des <strong>techniques optionnelles</strong> proposées au joueur au moment de l'attaque.
       </p>
 
       <div class="sh-admin-section">
@@ -332,6 +335,10 @@ export function _renderWeaponFormatsModal(formats) {
             : formats.map((f, i) => `
               <div class="sh-admin-list-item">
                 <span class="sh-admin-list-item-label">${_esc(f.label)}</span>
+                <button class="wf-tech-open" data-action="_editWeaponFormatTechniques" data-idx="${i}"
+                  title="Configurer les techniques de ce format">
+                  🎯 ${f.techniques?.length || 0} technique${(f.techniques?.length || 0) > 1 ? 's' : ''}
+                </button>
                 ${magPill(f.isMagic, i)}
                 <button class="sh-admin-del-btn" data-action="_deleteWeaponFormat" data-idx="${i}" title="Supprimer">🗑️</button>
               </div>`).join('')}
@@ -386,6 +393,175 @@ async function _deleteWeaponFormat(i) {
   await saveWeaponFormats(formats);
   _weaponFormats = formats;
   showNotif('Format supprimé.', 'success');
+  _renderWeaponFormatsModal(formats);
+}
+
+const _WF_TECHNIQUE_PRESETS = {
+  blank: {
+    icon: '⚔️', label: 'Nouvelle technique', description: '', defenseBonus: 0,
+    extraWeaponDice: 0, extraDamageFormula: '', extraDamageFlat: 0, onHitEffect: '',
+  },
+  weak_spot: {
+    icon: '🎯', label: 'Point faible',
+    description: 'Vise une zone vulnérable : plus difficile à toucher, mais plus destructeur.',
+    defenseBonus: 4, extraWeaponDice: 1, extraDamageFormula: '', extraDamageFlat: 0, onHitEffect: '',
+  },
+  power: {
+    icon: '💥', label: 'Coup puissant',
+    description: 'Sacrifie la précision pour porter un impact plus lourd.',
+    defenseBonus: 2, extraWeaponDice: 0, extraDamageFormula: '', extraDamageFlat: 2, onHitEffect: '',
+  },
+};
+
+function _wfTechniqueCard(t, i) {
+  return `
+    <article class="wf-tech-card">
+      <div class="wf-tech-card-head">
+        <input class="wf-tech-icon" value="${_esc(t.icon || '🎯')}" maxlength="8"
+          data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="icon" aria-label="Icône">
+        <input class="wf-tech-name" value="${_esc(t.label || '')}" maxlength="60" placeholder="Nom de la technique"
+          data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="label">
+        <button class="sh-admin-del-btn" data-action="_deleteWeaponFormatTechnique" data-idx="${i}" title="Retirer la technique">🗑️</button>
+      </div>
+      <textarea class="wf-tech-desc" rows="2" maxlength="240" placeholder="Explique clairement le choix proposé au joueur…"
+        data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="description">${_esc(t.description || '')}</textarea>
+      <div class="wf-tech-rules">
+        <label title="Valeur ajoutée à la CA de chaque cible pour cette attaque">
+          <span>CA de la cible</span>
+          <div><b>+</b><input type="number" min="0" max="30" value="${t.defenseBonus || 0}"
+            data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="defenseBonus"></div>
+        </label>
+        <label title="Nombre de dés supplémentaires du même type que l'arme">
+          <span>Dés d'arme bonus</span>
+          <input type="number" min="0" max="9" value="${t.extraWeaponDice || 0}"
+            data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="extraWeaponDice">
+        </label>
+        <label title="Formule de dégâts indépendante, par exemple 1d4 ou 2d6+1">
+          <span>Formule bonus</span>
+          <input value="${_esc(t.extraDamageFormula || '')}" maxlength="30" placeholder="ex. 1d6"
+            data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="extraDamageFormula">
+        </label>
+        <label title="Dégâts fixes ajoutés si l'attaque touche">
+          <span>Dégâts plats</span>
+          <div><b>+</b><input type="number" min="0" max="999" value="${t.extraDamageFlat || 0}"
+            data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="extraDamageFlat"></div>
+        </label>
+      </div>
+      <label class="wf-tech-effect">
+        <span>Effet narratif sur une touche <small>(affiché dans le résultat)</small></span>
+        <input value="${_esc(t.onHitEffect || '')}" maxlength="160" placeholder="ex. La cible lâche l'objet qu'elle tient"
+          data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="onHitEffect">
+      </label>
+    </article>`;
+}
+
+function _editWeaponFormatTechniques(i) {
+  const format = _weaponFormats?.[i];
+  if (!format) return;
+  _wfTechniqueFormatIndex = i;
+  _wfTechniqueDrafts = (format.techniques || []).map((t, idx) => normalizeWeaponTechnique({ ...t }, idx));
+  _wfTechniqueDirty = false;
+  _renderWeaponFormatTechniquesEditor();
+}
+
+function _installWeaponTechniqueCloseGuard() {
+  setModalCloseGuard(() => {
+    if (!_wfTechniqueDirty) return false;
+    confirmModal('Quitter sans enregistrer les techniques ?', { title: 'Modifications non enregistrées' })
+      .then(ok => {
+        if (!ok) return;
+        _wfTechniqueDirty = false;
+        closeModalDirect();
+      });
+    return true;
+  });
+}
+
+function _renderWeaponFormatTechniquesEditor() {
+  const format = _weaponFormats?.[_wfTechniqueFormatIndex];
+  if (!format) return _renderWeaponFormatsModal(_weaponFormats || []);
+  openModal('', `
+    <div class="sh-admin-modal is-formats wf-tech-editor">
+      <div class="sh-admin-head">
+        <button class="wf-tech-back" data-action="_backToWeaponFormats" title="Retour aux formats">←</button>
+        <div class="sh-admin-head-ico">🎯</div>
+        <div class="sh-admin-head-title">
+          <h2>Techniques · ${_esc(format.label)}</h2>
+          <small>Le joueur choisit une technique avant le jet. « Attaque normale » reste toujours disponible.</small>
+        </div>
+        <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
+      </div>
+      <div class="sh-admin-body">
+        <p class="sh-admin-intro">
+          La difficulté modifie la <strong>CA de toutes les cibles</strong>. Les dégâts et l'effet ne s'appliquent que si l'attaque touche.
+          Les dés d'arme bonus reprennent automatiquement le type de dé de l'arme équipée.
+        </p>
+        <div class="wf-tech-list">
+          ${_wfTechniqueDrafts.length
+            ? _wfTechniqueDrafts.map(_wfTechniqueCard).join('')
+            : '<div class="wf-tech-empty"><span>🎯</span><strong>Aucune technique</strong><small>Les attaques de ce format restent entièrement normales.</small></div>'}
+        </div>
+        <div class="wf-tech-presets">
+          <span>Ajouter :</span>
+          <button data-action="_addWeaponFormatTechnique" data-preset="blank">＋ Libre</button>
+          <button data-action="_addWeaponFormatTechnique" data-preset="weak_spot">🎯 Point faible</button>
+          <button data-action="_addWeaponFormatTechnique" data-preset="power">💥 Coup puissant</button>
+        </div>
+      </div>
+      <div class="sh-admin-footer">
+        <button class="btn btn-outline btn-sm" data-action="_backToWeaponFormats">Retour</button>
+        <div class="sh-admin-footer-spacer"></div>
+        <button class="btn btn-gold" data-action="_saveWeaponFormatTechniques">Enregistrer les techniques</button>
+      </div>
+    </div>`);
+  _installWeaponTechniqueCloseGuard();
+}
+
+function _wfTechniqueDraftField(el) {
+  const technique = _wfTechniqueDrafts[Number(el.dataset.idx)];
+  if (!technique) return;
+  const field = el.dataset.field;
+  technique[field] = el.type === 'number' ? (parseInt(el.value, 10) || 0) : el.value;
+  _wfTechniqueDirty = true;
+}
+
+function _addWeaponFormatTechnique(preset = 'blank') {
+  const source = _WF_TECHNIQUE_PRESETS[preset] || _WF_TECHNIQUE_PRESETS.blank;
+  _wfTechniqueDrafts.push(normalizeWeaponTechnique({ ...source, id: `tech_${Date.now()}` }, _wfTechniqueDrafts.length));
+  _wfTechniqueDirty = true;
+  _renderWeaponFormatTechniquesEditor();
+}
+
+function _deleteWeaponFormatTechnique(i) {
+  if (!_wfTechniqueDrafts[i]) return;
+  _wfTechniqueDrafts.splice(i, 1);
+  _wfTechniqueDirty = true;
+  _renderWeaponFormatTechniquesEditor();
+}
+
+async function _backToWeaponFormats() {
+  if (_wfTechniqueDirty) {
+    const discard = await confirmModal('Revenir aux formats sans enregistrer les techniques ?', { title: 'Modifications non enregistrées' });
+    if (!discard) return;
+  }
+  _wfTechniqueDirty = false;
+  _renderWeaponFormatsModal(_weaponFormats || []);
+}
+
+async function _saveWeaponFormatTechniques() {
+  const i = _wfTechniqueFormatIndex;
+  if (!_weaponFormats?.[i]) return;
+  const techniques = _wfTechniqueDrafts.map(normalizeWeaponTechnique).filter(t => t.label);
+  const invalidFormula = techniques.find(t => t.extraDamageFormula && !/^\d*d\d+(?:[+-]\d+)?$/i.test(t.extraDamageFormula));
+  if (invalidFormula) {
+    showNotif(`Formule invalide pour « ${invalidFormula.label} » (exemple attendu : 1d6+2).`, 'error');
+    return;
+  }
+  const formats = _weaponFormats.map((format, idx) => idx === i ? { ...format, techniques } : format);
+  await saveWeaponFormats(formats);
+  _weaponFormats = formats;
+  _wfTechniqueDirty = false;
+  showNotif(`${techniques.length} technique${techniques.length > 1 ? 's' : ''} enregistrée${techniques.length > 1 ? 's' : ''}.`, 'success');
   _renderWeaponFormatsModal(formats);
 }
 
@@ -1108,6 +1284,12 @@ registerActions({
   _backToStylesList:        ()    => _backToStylesList(),
   _csAddCond:               (btn) => _csAddCond(btn.dataset.container, btn.dataset.sel),
   _toggleWeaponFormatMagic: (btn) => _toggleWeaponFormatMagic(Number(btn.dataset.idx)),
+  _editWeaponFormatTechniques: (btn) => _editWeaponFormatTechniques(Number(btn.dataset.idx)),
+  _wfTechniqueDraftField:   (el)  => _wfTechniqueDraftField(el),
+  _addWeaponFormatTechnique:(btn) => _addWeaponFormatTechnique(btn.dataset.preset),
+  _deleteWeaponFormatTechnique: (btn) => _deleteWeaponFormatTechnique(Number(btn.dataset.idx)),
+  _saveWeaponFormatTechniques: () => _saveWeaponFormatTechniques(),
+  _backToWeaponFormats:     ()    => _backToWeaponFormats(),
   _addWeaponFormat:         ()    => _addWeaponFormat(),
   _deleteWeaponFormat:      (btn) => _deleteWeaponFormat(Number(btn.dataset.idx)),
   openCombatStylesAdmin:    ()    => openCombatStylesAdmin(),

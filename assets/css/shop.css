@@ -5376,6 +5376,123 @@ body.shop-cols-5 .sh-page--v2 .sh-item-grid { grid-template-columns: repeat(5, m
   border-color: rgba(255,90,126,.50);
 }
 
+/* Techniques liées aux formats d'armes */
+.wf-tech-open,
+.wf-tech-back,
+.wf-tech-presets button {
+  border: 1px solid rgba(251,191,36,.24);
+  background: rgba(251,191,36,.07);
+  color: #fcd34d;
+  border-radius: 8px;
+  font: inherit;
+  font-size: .7rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.wf-tech-open { padding: 5px 9px; white-space: nowrap; }
+.wf-tech-open:hover,
+.wf-tech-back:hover,
+.wf-tech-presets button:hover {
+  border-color: rgba(251,191,36,.52);
+  background: rgba(251,191,36,.14);
+}
+.wf-tech-back {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  font-size: 1rem;
+}
+.wf-tech-list { display: grid; gap: 10px; }
+.wf-tech-card {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid rgba(251,191,36,.16);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(251,191,36,.055), transparent 60%), rgba(0,0,0,.18);
+}
+.wf-tech-card-head {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 7px;
+}
+.wf-tech-card input,
+.wf-tech-card textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-md);
+  border-radius: 8px;
+  background: rgba(0,0,0,.28);
+  color: var(--text);
+  font: inherit;
+  font-size: .78rem;
+  padding: 7px 9px;
+  outline: none;
+}
+.wf-tech-card input:focus,
+.wf-tech-card textarea:focus { border-color: rgba(251,191,36,.5); }
+.wf-tech-card textarea { resize: vertical; line-height: 1.4; }
+.wf-tech-icon { text-align: center; font-size: 1rem !important; padding-inline: 4px !important; }
+.wf-tech-name { font-weight: 800 !important; }
+.wf-tech-rules {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+.wf-tech-rules label,
+.wf-tech-effect {
+  display: grid;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: .66rem;
+  font-weight: 800;
+}
+.wf-tech-rules label > div { position: relative; }
+.wf-tech-rules label > div b {
+  position: absolute;
+  z-index: 1;
+  left: 8px;
+  top: 50%;
+  translate: 0 -50%;
+  color: #fcd34d;
+}
+.wf-tech-rules label > div input { padding-left: 22px; }
+.wf-tech-effect small { color: var(--text-dim); font-weight: 500; }
+.wf-tech-presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding-top: 2px;
+}
+.wf-tech-presets > span {
+  color: var(--text-dim);
+  font-size: .7rem;
+  font-weight: 800;
+}
+.wf-tech-presets button { padding: 6px 10px; }
+.wf-tech-empty {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 22px 12px;
+  border: 1px dashed var(--border-md);
+  border-radius: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.wf-tech-empty > span { font-size: 1.5rem; }
+.wf-tech-empty small { color: var(--text-dim); }
+
+@media (max-width: 640px) {
+  .sh-admin-list-item { flex-wrap: wrap; }
+  .sh-admin-list-item-label { flex-basis: calc(100% - 38px); }
+  .wf-tech-open { order: 3; flex: 1; }
+  .wf-tech-rules { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 /* FOOTER sticky bottom */
 .sh-admin-footer {
   display: flex; align-items: center; gap: 8px;
