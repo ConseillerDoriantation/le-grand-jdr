@@ -618,7 +618,7 @@ export async function openInventoryItemDetail(charId, indicesB64) {
           <div class="inv-detail-status">
             <span>×${quantity}</span>
             ${equippedSlots.length
-              ? `<span class="is-equipped">Équipé · ${_esc(equippedSlots.join(', '))}</span>`
+              ? `<span class="is-equipped">Équipé sur ce build · ${_esc(equippedSlots.join(', '))}</span>`
               : '<span>Non équipé</span>'}
           </div>
         </div>

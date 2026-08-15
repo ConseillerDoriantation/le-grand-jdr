@@ -11695,11 +11695,82 @@ body .modal:has(.cs-build-modal) {
   border: 1px solid rgba(232,184,75,.28);
   color: var(--amber, #e8b84b);
 }
+.cs-v3 .inv-equipped-current {
+  width: fit-content;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  padding: 4px 7px 4px 5px;
+  border: 1px solid rgba(74,222,128,.34);
+  border-radius: 7px;
+  background: rgba(74,222,128,.09);
+  color: #86efac;
+}
+.cs-v3 .inv-equipped-current-check {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: rgba(74,222,128,.18);
+  color: #bbf7d0;
+  font-size: .72rem;
+  font-weight: 900;
+}
+.cs-v3 .inv-equipped-current-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.1;
+}
+.cs-v3 .inv-equipped-current-copy small {
+  color: #86efac;
+  font-size: .51rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .055em;
+}
+.cs-v3 .inv-equipped-current-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: .66rem;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .cs-v3 .inv-card.is-equipped-active {
-  border-color: color-mix(in srgb, #7eb0ff 40%, var(--border));
+  border-color: color-mix(in srgb, #4ade80 46%, var(--border));
+  border-left-color: #4ade80;
   background:
-    linear-gradient(180deg, rgba(79,140,255,.06), rgba(255,255,255,.012)),
+    linear-gradient(180deg, rgba(74,222,128,.075), rgba(255,255,255,.012)),
     rgba(7,15,27,.72);
+  box-shadow: inset 0 0 0 1px rgba(74,222,128,.035);
+}
+.cs-v3 .inv-card.is-equipped-active .inv-card-visual {
+  position: relative;
+  border-color: rgba(74,222,128,.52);
+  box-shadow: 0 0 0 2px rgba(74,222,128,.08);
+}
+.cs-v3 .inv-card.is-equipped-active .inv-card-visual::after {
+  content: "✓";
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.34);
+  border-radius: 5px;
+  background: #22c55e;
+  color: #07120c;
+  font-size: .56rem;
+  font-weight: 950;
+  box-shadow: 0 2px 6px rgba(0,0,0,.38);
 }
 .cs-v3 .inv-card.is-equipped-other:not(.is-equipped-active) {
   border-color: color-mix(in srgb, var(--amber, #e8b84b) 34%, var(--border));
@@ -14947,7 +15018,7 @@ button.cs-sock.is-empty:hover { border-color: rgba(232,184,75,.55); color: var(-
 .cs-v3 .inv-grid.is-cards .inv-card.is-equipped-active,
 .cs-v3 .inv-grid.is-list .inv-card.is-equipped-active {
   background:
-    linear-gradient(180deg, rgba(79,140,255,.07), rgba(255,255,255,.012)),
+    linear-gradient(180deg, rgba(74,222,128,.075), rgba(255,255,255,.012)),
     rgba(7,15,27,.72);
 }
 .cs-v3 .inv-grid.is-cards .inv-card.is-equipped-other:not(.is-equipped-active),
@@ -14956,6 +15027,17 @@ button.cs-sock.is-empty:hover { border-color: rgba(232,184,75,.55); color: var(-
     linear-gradient(180deg, rgba(232,184,75,.055), rgba(255,255,255,.012)),
     rgba(7,15,27,.72);
 }
+[data-theme="light"] .cs-v3 .inv-grid .inv-card.is-equipped-active {
+  border-color: rgba(22,163,74,.42);
+  border-left-color: #16a34a;
+  background: linear-gradient(180deg, rgba(34,197,94,.09), rgba(34,197,94,.025));
+}
+[data-theme="light"] .cs-v3 .inv-equipped-current {
+  border-color: rgba(22,163,74,.32);
+  background: rgba(34,197,94,.09);
+  color: #15803d;
+}
+[data-theme="light"] .cs-v3 .inv-equipped-current-copy small { color: #15803d; }
 
 @media (max-width: 980px) {
   .cs-v3 .inv-grid.is-list .inv-card {
