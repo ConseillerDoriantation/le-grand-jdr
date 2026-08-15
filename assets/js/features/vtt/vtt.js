@@ -61,7 +61,7 @@ import {
   _initChatLogSubs, _vttToggleLogDetail, _vttSendChat, _vttChatReply, _vttChatReplyCancel, _chatMsgs,
 } from './vtt-chat.js';
 import {
-  _loadEmotes, _loadDiceSkills, _vttSetRollMode, _vttAdjBonus, _vttToggleRollHidden, _vttRollSkill,
+  _loadEmotes, _loadDiceSkills, _vttSetRollMode, _vttAdjBonus, _vttSetBonus, _vttToggleRollHidden, _vttRollSkill,
   _vttFilterEmotes, _vttToggleFav, _closeEmotePicker, _vttToggleEmotePicker, _vttPickEmote,
   _ouvrirGestionEmotes, _renderEmotePicker, _emotes,
 } from './vtt-emotes.js';
@@ -10434,7 +10434,6 @@ function _buildHtml() {
       </div>
     </div>
   </div>
-  <div class="vtt-hint">Clic token allié → portée · Clic ennemi → attaque · Ctrl+clic → sélection multiple · Échap désélect. · Molette zoom · Clic-droit pan${mj?' · Clic image → redimensionner':''}</div>
 </div>`;
 }
 
@@ -10755,6 +10754,7 @@ export const VTT_ACTIONS = {
   _vttMusicAddMenu,
   _vttMusicToolsMenu,
   _vttAdjBonus,
+  _vttSetBonus,
   _vttAoptCheckEmpty,
   _vttAoptFilter,
   _vttAoptSearch,

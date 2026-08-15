@@ -501,13 +501,22 @@ function _openKeyboardHelp() {
     : '<div><span>Annuler l’action temporaire</span><kbd>Ctrl</kbd><kbd>Z</kbd></div>';
   const contextualShortcuts = STATE.currentPage === 'vtt' ? `
       <section>
-        <h3>Table virtuelle</h3>
+        <h3>Table virtuelle — clavier</h3>
         <div><span>Outil règle</span><kbd>R</kbd></div>
         <div><span>Déplacer le token sélectionné</span><kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd></div>
         <div><span>Copier / coller la sélection</span><kbd>Ctrl</kbd><kbd>C</kbd><kbd>V</kbd></div>
         <div><span>Annuler / rétablir un tracé</span><kbd>Ctrl</kbd><kbd>Z</kbd><kbd>Y</kbd></div>
         <div><span>Retirer la sélection</span><kbd>Suppr</kbd></div>
         <div><span>Fermer un panneau / désélectionner</span><kbd>Échap</kbd></div>
+      </section>
+      <section>
+        <h3>Table virtuelle — souris</h3>
+        <div><span>Portée d'un allié (déplacement + attaque)</span><kbd>Clic</kbd></div>
+        <div><span>Attaquer un ennemi</span><kbd>Clic</kbd></div>
+        <div><span>Sélection multiple</span><kbd>Ctrl</kbd><kbd>Clic</kbd></div>
+        <div><span>Zoomer</span><kbd>Molette</kbd></div>
+        <div><span>Déplacer la vue (pan)</span><kbd>Clic droit</kbd></div>
+        ${STATE.isAdmin ? `<div><span>Redimensionner l'image de fond</span><kbd>Clic sur l'image</kbd></div>` : ''}
       </section>` : '';
   openModal('Raccourcis clavier', `
     <div class="global-shortcuts-intro">

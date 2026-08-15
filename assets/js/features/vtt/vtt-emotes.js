@@ -63,20 +63,31 @@ export async function _loadDiceSkills() {
 
 export function _vttSetRollMode(mode) {
   VS.rollMode = mode;
-  // Mettre à jour les boutons visuellement sans re-render complet
-  document.querySelectorAll('.vtt-roll-mode-btn').forEach(b =>
-    b.classList.toggle('active', b.dataset.mode === mode));
+  // Mise à jour visuelle sans re-render (segments façon modal d'action).
+  document.querySelectorAll('.vtt-skill-mode .vtt-atk-mode-btn').forEach(b => {
+    const on = b.dataset.mode === mode;
+    b.classList.toggle('is-active', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
 }
 
 export function _vttAdjBonus(delta, reset = false) {
   VS.rollBonus = reset ? 0 : Math.max(-20, Math.min(20, VS.rollBonus + delta));
   const el = document.getElementById('vtt-bonus-val');
   if (el) {
-    el.textContent = VS.rollBonus > 0 ? `+${VS.rollBonus}` : `${VS.rollBonus}`;
-    el.classList.toggle('nonzero', VS.rollBonus !== 0);
+    if (el.tagName === 'INPUT') el.value = VS.rollBonus;
+    else {
+      el.textContent = VS.rollBonus > 0 ? `+${VS.rollBonus}` : `${VS.rollBonus}`;
+      el.classList.toggle('nonzero', VS.rollBonus !== 0);
+    }
   }
-  // Le bouton « réinitialiser » n'apparaît que si un bonus est actif.
   document.querySelector('.vtt-roll-bonus-reset')?.classList.toggle('hide', VS.rollBonus === 0);
+}
+
+// Saisie directe du bonus de jet (champ numérique façon modal d'action).
+export function _vttSetBonus(v) {
+  const n = parseInt(v, 10);
+  VS.rollBonus = Number.isFinite(n) ? Math.max(-20, Math.min(20, n)) : 0;
 }
 
 export function _vttToggleRollHidden() {
