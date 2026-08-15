@@ -1618,33 +1618,49 @@ function _inventoryBuildUsagesForIndices(usageMap, indices = []) {
     || String(a.slot).localeCompare(String(b.slot), 'fr', { sensitivity: 'base' }));
 }
 
+function _inventorySlotLabel(slot = '') {
+  const definition = getEquipmentSlots().find(entry => entry.id === slot);
+  return definition?.label || slot || 'Emplacement';
+}
+
 function _renderInventoryBuildBadges(usages = []) {
-  if (!usages.length) return '';
-  const active = usages.filter(u => u.active);
+  const inactive = usages.filter(u => !u.active);
+  if (!inactive.length) return '';
   const otherByBuild = new Map();
-  usages.filter(u => !u.active).forEach(u => {
+  inactive.forEach(u => {
     if (!otherByBuild.has(u.buildId)) otherByBuild.set(u.buildId, { name: u.buildName, slots: [] });
-    otherByBuild.get(u.buildId).slots.push(u.slot);
+    otherByBuild.get(u.buildId).slots.push(_inventorySlotLabel(u.slot));
   });
 
-  const detail = usages
-    .map(u => `${u.active ? 'Build actif' : u.buildName} - ${u.slot}`)
+  const detail = inactive
+    .map(u => `${u.buildName} — ${_inventorySlotLabel(u.slot)}`)
     .join('\n');
   const title = _esc(detail);
   const badges = [];
 
-  if (active.length) {
-    badges.push(`<span class="inv-equipped-badge inv-build-badge is-active" title="${title}">Actif${active.length > 1 ? ` x${active.length}` : ''}</span>`);
-  }
-
   const others = [...otherByBuild.values()];
   if (others.length === 1) {
-    badges.push(`<span class="inv-equipped-badge inv-build-badge is-other" title="${title}">${_esc(others[0].name)}</span>`);
+    badges.push(`<span class="inv-equipped-badge inv-build-badge is-other" title="${title}">Autre build · ${_esc(others[0].name)}</span>`);
   } else if (others.length > 1) {
-    badges.push(`<span class="inv-equipped-badge inv-build-badge is-other" title="${title}">${others.length} builds</span>`);
+    badges.push(`<span class="inv-equipped-badge inv-build-badge is-other" title="${title}">${others.length} autres builds</span>`);
   }
 
   return `<span class="inv-build-badges">${badges.join('')}</span>`;
+}
+
+function _renderCurrentBuildEquipment(usages = []) {
+  const active = usages.filter(usage => usage.active);
+  if (!active.length) return '';
+  const slots = [...new Set(active.map(usage => _inventorySlotLabel(usage.slot)))];
+  const buildName = active[0].buildName || 'Principal';
+  const detail = `Build actuel : ${buildName}\n${slots.join(', ')}`;
+  return `<div class="inv-equipped-current" title="${_esc(detail)}">
+    <span class="inv-equipped-current-check" aria-hidden="true">✓</span>
+    <span class="inv-equipped-current-copy">
+      <small>Équipé · build actuel</small>
+      <strong>${_esc(slots.join(' · '))}</strong>
+    </span>
+  </div>`;
 }
 
 function renderCharInventaireV3(c, canEdit) {
@@ -1802,6 +1818,7 @@ function renderCharInventaireV3(c, canEdit) {
     const isEquipped = buildUsages.length > 0;
     const hasActiveBuildUsage = buildUsages.some(u => u.active);
     const buildBadgesHtml = _renderInventoryBuildBadges(buildUsages);
+    const currentBuildEquipmentHtml = _renderCurrentBuildEquipment(buildUsages);
 
     return `<div class="inv-card ${isEquipped ? `is-equipped ${hasActiveBuildUsage ? 'is-equipped-active' : 'is-equipped-other'}` : ''}" style="--rare-c:${col}">
       <div class="inv-card-head">
@@ -1818,6 +1835,7 @@ function renderCharInventaireV3(c, canEdit) {
               : ''}
             ${buildBadgesHtml}
           </div>
+          ${currentBuildEquipmentHtml}
         </div>
         <div class="inv-card-head-actions">
           ${qte > 1
