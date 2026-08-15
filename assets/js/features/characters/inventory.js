@@ -25,6 +25,7 @@ import { getArmorTypeMeta, getWeaponDamageStatKeys } from '../../shared/equipmen
 import { characterAvatarHtml, characterPortraitContent } from '../../shared/portraits.js';
 import { calcUpgradeRefund, getUpgradeTotalCost, hasUpgrades, getUpgradeSettings } from '../../shared/upgrade-settings.js';
 import { characterBuildsForStorage, patchBuildLocally } from '../../shared/character-builds.js';
+import { mergeCharacterTransferTargets } from '../../shared/character-transfer-targets.js';
 import {
   _getTraits,
   getEquippedInventoryIndexMap,
@@ -1008,6 +1009,25 @@ function _sendTargetFilter(el) {
   if (empty) empty.style.display = shown ? 'none' : '';
 }
 
+async function _loadTransferTargets(fromCharId) {
+  let sessionCharacters = [];
+  try {
+    // `characters` est alimentée par le cache session-live : cette lecture récupère
+    // toute l'aventure, même si STATE.characters est limité aux personnages du joueur.
+    sessionCharacters = await loadCollection('characters');
+  } catch (error) {
+    console.error('[inventory] load transfer targets:', error);
+  }
+
+  const targets = mergeCharacterTransferTargets(
+    fromCharId,
+    sessionCharacters,
+    STATE.characters || [],
+  );
+  _modalCharTargets = targets;
+  return targets;
+}
+
 export async function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
   const c = getCharacterById(charId);
   if (!c) return;
@@ -1026,14 +1046,7 @@ export async function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
   const maxQte  = indices.length;
   const b64     = btoa(JSON.stringify(indices));
 
-  let otherChars = STATE.characters?.filter(x => x.id !== charId) || [];
-  if (!otherChars.length) {
-    try {
-      const all = await loadCollection('characters');
-      otherChars = all.filter(x => x.id !== charId);
-      _modalCharTargets = all;
-    } catch(e) { console.error('[sendInv] load chars:', e); }
-  }
+  const otherChars = await _loadTransferTargets(charId);
   if (!otherChars.length) { showNotif('Aucun autre personnage disponible.','error'); return; }
 
   const rareteN   = parseInt(item.rarete) || 0;
@@ -1175,15 +1188,7 @@ export async function openSendGoldModal(charId) {
   if (!fromChar) return;
 
   const orDispo = calcOr(fromChar);
-  let targets = (STATE.characters || []).filter(x => x.id !== charId && x.nom);
-
-  if (!targets.length) {
-    try {
-      const all = await loadCollection('characters');
-      targets = all.filter(x => x.id !== charId && x.nom);
-      _modalCharTargets = all;
-    } catch(e) { console.error('[sendGold] load chars:', e); }
-  }
+  const targets = await _loadTransferTargets(charId);
 
   if (!targets.length) {
     showNotif('Aucun autre personnage disponible.', 'info');

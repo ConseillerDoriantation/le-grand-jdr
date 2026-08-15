@@ -26,6 +26,7 @@ import { buildProjectionPatch, switchBuild } from '../../shared/character-builds
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
 import { weaponTechniqueTargetCA, weaponTechniqueDamageTerms } from '../../shared/weapon-techniques.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../../shared/damage-types.js';
+import { getAttackMissEffect } from '../../shared/damage-type-rules.js';
 import { playSigil, playImpact, playProjectile, playSlash } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
@@ -5105,27 +5106,14 @@ function _atkInteractionHtml(opt) {
   </div>`;
 }
 
-// « Dégâts sur un raté » (½ / complets) : PAR DÉFAUT, aucune règle magie/physique
-// n'est supposée — le missEffect du type s'applique à TOUTE attaque (rien =
-// comportement D&D usuel : un raté ne fait rien tant que le MJ ne configure pas).
-// Le MJ PEUT restreindre par type via `missScope` s'il a une distinction dans son
-// système : 'magic' = seulement sort/arme magique, 'physical' = seulement physique.
-// C'est ainsi qu'un même « Combustion » peut se comporter différemment sans doublon
-// — mais c'est un CHOIX du MJ, jamais une règle imposée par l'app.
-function _isMagicDelivery(opt) {
-  return !!(opt && (opt.isMagicWeapon === true || opt.pmCost > 0));
-}
+// « Dégâts sur un raté » (½ / complets) : la résolution commune tient compte de
+// l'arme, du sort ET du type élémentaire. Les attaques du bestiaire suivent donc
+// les mêmes règles que celles des personnages.
 function _effectiveMissEffect(opt) {
-  const rules = opt?.typeRules || {};
-  const me = rules.missEffect || 'none';
-  if (me === 'none') return 'none';
-  const scope = rules.missScope || 'always';
-  if (scope === 'magic')    return _isMagicDelivery(opt) ? me : 'none';
-  if (scope === 'physical') return _isMagicDelivery(opt) ? 'none' : me;
-  return me;   // 'always' (défaut)
+  return getAttackMissEffect(opt, VS.damageTypes);
 }
 
-// Note "½ / dégâts complets même en cas d'échec" — magique uniquement.
+// Note « ½ / dégâts complets même en cas d'échec » selon la règle configurée.
 function _atkMissNoteHtml(opt) {
   const me = _effectiveMissEffect(opt);
   if (me === 'full') {
@@ -7184,10 +7172,9 @@ async function _vttRollAttack() {
     const rules      = opt.typeRules || {};
     const armorPen   = rules.armorPen || 0;
     const typeDmgBon = rules.dmgBonus || 0;
-    // missEffect du type = mécanique MAGIQUE → ne s'applique qu'à une attaque
-    // magique (arme magique / sort). Physique = 'none', même si l'élément définit
-    // 'half'/'full' (cf. _effectiveMissEffect). armorPen/dmgBonus, eux, restent
-    // des propriétés d'élément et s'appliquent quelle que soit la façon de frapper.
+    // missEffect est résolu depuis la règle du type pour tous les attaquants :
+    // personnage, PNJ ou créature du bestiaire. Un type marqué magique suffit à
+    // qualifier une attaque élémentaire, même sans arme de PJ ni coût en mana.
     let   missEffect = _effectiveMissEffect(opt);
     // Règle générale : tout sort / compétence qui consomme du mana fait au moins
     // ½ dégâts (arrondi inf.) en cas d'échec. Si le type de dégâts définit déjà
