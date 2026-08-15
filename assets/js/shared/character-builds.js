@@ -1,5 +1,7 @@
 import { updateInCol } from '../data/firestore.js';
 import { computeEquipStatsBonus } from './char-stats.js';
+import { saveCharacterPage } from './character-pages.js';
+import { compactActiveBuildForStorage } from './character-build-storage.js';
 
 export const BUILD_FIELDS = [
   'photo', 'photoZoom', 'photoX', 'photoY',
@@ -62,6 +64,19 @@ export function getActiveBuild(c = {}) {
   return builds.find(b => b.id === activeBuildId) || builds[0];
 }
 
+/**
+ * Forme persistée des builds. Tous les champs du build actif existent déjà à la
+ * racine du personnage (projection utilisée partout dans l'app) : les conserver
+ * aussi dans le tableau duplique photo, équipement et statistiques.
+ *
+ * Au prochain chargement, normalizeCharacterBuilds les réhydrate depuis la
+ * racine. Les builds inactifs restent intégralement autonomes.
+ */
+export function characterBuildsForStorage(c = {}) {
+  const { builds, activeBuildId } = normalizeCharacterBuilds(c);
+  return compactActiveBuildForStorage(builds, activeBuildId);
+}
+
 export function applyActiveBuild(c = {}) {
   const { builds, activeBuildId } = normalizeCharacterBuilds(c);
   const active = builds.find(b => b.id === activeBuildId) || builds[0];
@@ -94,7 +109,7 @@ export function patchBuildLocally(c = {}, patch = {}) {
 
 export function buildProjectionPatch(c = {}, build = null) {
   const active = build || getActiveBuild(c);
-  const patch = { activeBuildId: active?.id || DEFAULT_BUILD_ID, builds: normalizeCharacterBuilds(c).builds };
+  const patch = { activeBuildId: active?.id || DEFAULT_BUILD_ID, builds: characterBuildsForStorage(c) };
   if (!active) return patch;
   BUILD_FIELDS.forEach(field => {
     if (Object.prototype.hasOwnProperty.call(active, field)) patch[field] = clone(active[field]);
@@ -103,11 +118,26 @@ export function buildProjectionPatch(c = {}, build = null) {
 }
 
 export async function saveBuildPatch(charId, c, patch = {}) {
-  const { builds } = patchBuildLocally(c, patch);
+  patchBuildLocally(c, patch);
   const active = getActiveBuild(c);
   const payload = buildProjectionPatch(c, active);
-  payload.builds = builds;
+
+  // Migration opportuniste des anciennes bios « diapo » encore stockées dans
+  // le document personnage. Elles disposent désormais de leur propre document
+  // characterPages/{charId}. Une action banale (équiper, modifier une stat...)
+  // peut ainsi réparer une fiche proche de la limite Firestore au lieu d'échouer.
+  if (c.bioPage) {
+    try {
+      await saveCharacterPage(charId, c.bioPage);
+      payload.bioPage = null;
+    } catch (error) {
+      // Une règle characterPages non déployée ne doit pas bloquer l'équipement :
+      // la compaction du build actif reste appliquée et l'ancien repli est gardé.
+      console.warn('[character builds] migration bioPage ignorée', error);
+    }
+  }
   await updateInCol('characters', charId, payload);
+  if (payload.bioPage === null) c.bioPage = null;
   return payload;
 }
 

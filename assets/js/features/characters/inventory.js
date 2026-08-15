@@ -24,7 +24,7 @@ import {
 import { getArmorTypeMeta, getWeaponDamageStatKeys } from '../../shared/equipment-utils.js';
 import { characterAvatarHtml, characterPortraitContent } from '../../shared/portraits.js';
 import { calcUpgradeRefund, getUpgradeTotalCost, hasUpgrades, getUpgradeSettings } from '../../shared/upgrade-settings.js';
-import { patchBuildLocally } from '../../shared/character-builds.js';
+import { characterBuildsForStorage, patchBuildLocally } from '../../shared/character-builds.js';
 import {
   _getTraits,
   getEquippedInventoryIndexMap,
@@ -870,7 +870,7 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
       extraPayload.equipement = equipSync.equipement;
       extraPayload.statsBonus = equipSync.statsBonus;
       patchBuildLocally(c, { equipement: equipSync.equipement, statsBonus: equipSync.statsBonus });
-      extraPayload.builds = c.builds;
+      extraPayload.builds = characterBuildsForStorage(c);
       extraPayload.activeBuildId = c.activeBuildId;
     }
 
@@ -968,7 +968,7 @@ export async function deleteInvItemBulk(charId, indicesB64) {
     payload.equipement = equipSync.equipement;
     payload.statsBonus = equipSync.statsBonus;
     patchBuildLocally(c, { equipement: equipSync.equipement, statsBonus: equipSync.statsBonus });
-    payload.builds = c.builds;
+    payload.builds = characterBuildsForStorage(c);
     payload.activeBuildId = c.activeBuildId;
   }
   if (await trySave('characters', charId, payload)) {
@@ -1135,7 +1135,7 @@ export async function sendInvItem(fromCharId, indicesB64) {
     fromPayload.equipement = equipSync.equipement;
     fromPayload.statsBonus = equipSync.statsBonus;
     patchBuildLocally(fromChar, { equipement: equipSync.equipement, statsBonus: equipSync.statsBonus });
-    fromPayload.builds = fromChar.builds;
+    fromPayload.builds = characterBuildsForStorage(fromChar);
     fromPayload.activeBuildId = fromChar.activeBuildId;
   }
 
