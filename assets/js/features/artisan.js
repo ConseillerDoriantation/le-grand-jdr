@@ -27,7 +27,7 @@ import {
 } from '../shared/equipment-utils.js';
 import { loadUpgradeSettings, getUpgradeSettings } from '../shared/upgrade-settings.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
-import { patchBuildLocally } from '../shared/character-builds.js';
+import { characterBuildsForStorage, patchBuildLocally } from '../shared/character-builds.js';
 import { characterAvatarHtml } from '../shared/portraits.js';
 
 // ══════════════════════════════════════════════
@@ -475,7 +475,7 @@ async function _persistChar(c) {
     compte:         c.compte         || { recettes: [], depenses: [] },
     equipement:     c.equipement,
     statsBonus:     c.statsBonus,
-    builds:         c.builds,
+    builds:         characterBuildsForStorage(c),
     activeBuildId:  c.activeBuildId,
     ...(Array.isArray(c.inventoryHistory) ? { inventoryHistory: c.inventoryHistory } : {}),
   });
