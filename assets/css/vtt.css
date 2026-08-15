@@ -3635,6 +3635,27 @@ html:not([data-theme="light"]) .vtt-root {
   font-size: .58rem;
   font-weight: 800;
 }
+/* Réemploi du composant dans l'inspecteur (jets de compétences), plus étroit :
+   pas de marge en tête du bloc réglages, et le sous-libellé peut passer sur 2
+   lignes plutôt que d'être tronqué. */
+.vtt-skill-mode { margin-top: 0; }
+.vtt-skill-mode .vtt-atk-mode-btn { align-items: flex-start; }
+.vtt-skill-mode .vtt-atk-mode-copy small { white-space: normal; line-height: 1.15; }
+
+/* Bonus + Visibilité : côte à côte quand il y a la place, empilés sinon
+   (auto-fit → 1 colonne sous ~300px de large). Même cadre pour un rendu cohérent. */
+.vtt-roll-set-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .5rem;
+}
+.vtt-roll-vis-field .vtt-roll-hide-btn { width: 100%; min-height: 36px; margin: 0; }
+
+/* Petits écrans : mode plus compact et centré, sous-libellés masqués pour
+   garder 3 segments lisibles (Désavantage · Normal · Avantage). */
+@media (max-width: 560px) {
+  .vtt-skill-mode .vtt-atk-mode-btn { min-height: 42px; justify-content: center; text-align: center; padding: .4rem .3rem; gap: .3rem; }
+  .vtt-skill-mode .vtt-atk-mode-copy { align-items: center; }
+  .vtt-skill-mode .vtt-atk-mode-copy small { display: none; }
+}
 .vtt-atk-mode-btn:hover {
   transform: translateY(-1px);
   border-color: color-mix(in srgb, var(--mode-col) 35%, rgba(255,255,255,.10));

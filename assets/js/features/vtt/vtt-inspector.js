@@ -588,32 +588,41 @@ export function _renderInspectorImpl(t) {
     return `<div class="vtt-ins-section">
         <div class="vtt-ins-section-title">🎲 Jets de compétences</div>
         <div class="vtt-roll-settings">
-          <div class="vtt-roll-set-block">
-            <span class="vtt-roll-set-lbl">Mode de jet</span>
-            <div class="vtt-roll-mode-row">
-              <button class="vtt-roll-mode-btn${VS.rollMode==='disadvantage'?' active':''}" data-mode="disadvantage" data-vtt-fn="_vttSetRollMode" data-vtt-args="disadvantage" title="Désavantage — prend le plus bas des 2 dés"><span class="vtt-rm-ic">⬇</span><span class="vtt-rm-lbl">Désav.</span></button>
-              <button class="vtt-roll-mode-btn${VS.rollMode==='normal'?' active':''}" data-mode="normal" data-vtt-fn="_vttSetRollMode" data-vtt-args="normal" title="Jet classique — 1d20"><span class="vtt-rm-ic">●</span><span class="vtt-rm-lbl">Normal</span></button>
-              <button class="vtt-roll-mode-btn${VS.rollMode==='advantage'?' active':''}" data-mode="advantage" data-vtt-fn="_vttSetRollMode" data-vtt-args="advantage" title="Avantage — prend le plus haut des 2 dés"><span class="vtt-rm-ic">⬆</span><span class="vtt-rm-lbl">Avantage</span></button>
+          <div class="vtt-atk-mode vtt-skill-mode">
+            <div class="vtt-atk-mode-label">Mode de lancer</div>
+            <div class="vtt-atk-mode-toggle" role="group" aria-label="Mode de lancer">
+              <button class="vtt-atk-mode-btn is-dis${VS.rollMode==='disadvantage'?' is-active':''}" data-vtt-fn="_vttSetRollMode" data-vtt-args="disadvantage" data-mode="disadvantage" aria-pressed="${VS.rollMode==='disadvantage'}">
+                <span class="vtt-atk-mode-icon">−</span>
+                <span class="vtt-atk-mode-copy"><strong>Désavantage</strong><small>Garde le plus bas</small></span>
+              </button>
+              <button class="vtt-atk-mode-btn is-normal${VS.rollMode==='normal'?' is-active':''}" data-vtt-fn="_vttSetRollMode" data-vtt-args="normal" data-mode="normal" aria-pressed="${VS.rollMode==='normal'}">
+                <span class="vtt-atk-mode-icon">•</span>
+                <span class="vtt-atk-mode-copy"><strong>Normal</strong><small>1d20</small></span>
+              </button>
+              <button class="vtt-atk-mode-btn is-adv${VS.rollMode==='advantage'?' is-active':''}" data-vtt-fn="_vttSetRollMode" data-vtt-args="advantage" data-mode="advantage" aria-pressed="${VS.rollMode==='advantage'}">
+                <span class="vtt-atk-mode-icon">+</span>
+                <span class="vtt-atk-mode-copy"><strong>Avantage</strong><small>Garde le plus haut</small></span>
+              </button>
             </div>
           </div>
-          <div class="vtt-roll-set-block">
-            <span class="vtt-roll-set-lbl">Bonus contextuel</span>
-            <div class="vtt-roll-bonus-stepper">
-              <button class="vtt-roll-bonus-adj" data-vtt-fn="_vttAdjBonus" data-vtt-args="-1" title="−1">−</button>
-              <span class="vtt-roll-bonus-val${VS.rollBonus!==0?' nonzero':''}" id="vtt-bonus-val">${VS.rollBonus>0?'+'+VS.rollBonus:VS.rollBonus}</span>
-              <button class="vtt-roll-bonus-adj" data-vtt-fn="_vttAdjBonus" data-vtt-args="1" title="+1">＋</button>
-              <button class="vtt-roll-bonus-reset${VS.rollBonus!==0?'':' hide'}" data-vtt-fn="_vttAdjBonus" data-vtt-args="0|true" title="Réinitialiser">↺</button>
-            </div>
+          <div class="vtt-roll-set-row">
+            <label class="vtt-atk-bonus-field vtt-skill-bonus" title="Bonus / malus fixe ajouté au jet">
+              <span>Bonus contextuel</span>
+              <span class="vtt-atk-bonus-stepper">
+                <button type="button" data-vtt-fn="_vttAdjBonus" data-vtt-args="-1" data-vtt-blur title="−1">-</button>
+                <input type="number" id="vtt-bonus-val" value="${VS.rollBonus}" min="-20" max="20"
+                  data-vtt-fn="_vttSetBonus" data-vtt-on="input" data-vtt-args="$value">
+                <button type="button" data-vtt-fn="_vttAdjBonus" data-vtt-args="1" data-vtt-blur title="+1">+</button>
+              </span>
+            </label>
+            ${STATE.isAdmin ? `
+            <div class="vtt-atk-bonus-field vtt-roll-vis-field" title="Jet caché : seul le MJ voit le résultat dans le log">
+              <span>Visibilité du jet</span>
+              <button class="vtt-roll-hide-btn${VS.rollHidden?' active':''}" id="vtt-roll-hide-btn" data-vtt-fn="_vttToggleRollHidden">
+                ${VS.rollHidden ? '🕶 Jet caché MJ' : '👁 Visible joueurs'}
+              </button>
+            </div>` : ''}
           </div>
-          ${STATE.isAdmin ? `
-          <div class="vtt-roll-set-block">
-            <span class="vtt-roll-set-lbl">Visibilité du jet</span>
-            <button class="vtt-roll-hide-btn${VS.rollHidden?' active':''}" id="vtt-roll-hide-btn"
-              data-vtt-fn="_vttToggleRollHidden"
-              title="Jet caché : seul le MJ voit le résultat dans le log">
-              ${VS.rollHidden ? '🕶 Jet caché MJ' : '👁 Visible joueurs'}
-            </button>
-          </div>` : ''}
         </div>
         <div class="vtt-skill-filter">
           <span class="vtt-skill-filter-ic">🔍</span>
