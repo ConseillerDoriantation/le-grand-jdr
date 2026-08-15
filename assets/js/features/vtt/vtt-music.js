@@ -154,7 +154,7 @@ function _getAmbienceVolume() {
 function _setAmbienceVolume(v) {
   const clamped = Math.max(0, Math.min(1, v));
   try { localStorage.setItem(_AMB_VOL_KEY, String(clamped)); } catch(e){}
-  if (_ambienceEl) _ambienceEl.volume = clamped;
+  if (_ambienceEl) { if (_ambienceEl._fadeTimer) { clearInterval(_ambienceEl._fadeTimer); _ambienceEl._fadeTimer = null; } _ambienceEl.volume = clamped; }
   return clamped;
 }
 
@@ -277,7 +277,7 @@ function _renderMusicPanel() {
     vsl.value = Math.round(_getUserVolume() * 100);
     vsl.oninput = e => {
       const v = _setUserVolume(+e.target.value / 100);
-      if (_audioEl)   _audioEl.volume = v;
+      if (_audioEl) { if (_audioEl._fadeTimer) { clearInterval(_audioEl._fadeTimer); _audioEl._fadeTimer = null; } _audioEl.volume = v; }
       if (_previewEl) _previewEl.volume = v;
     };
   }
@@ -286,6 +286,17 @@ function _renderMusicPanel() {
   if (asl) {
     asl.value = Math.round(_getAmbienceVolume() * 100);
     asl.oninput = e => { _setAmbienceVolume(+e.target.value / 100); };
+  }
+  // Raccourcis clavier (scopés au panneau pour éviter tout conflit VTT) :
+  // Espace = pause/reprise · ←/→ = piste précédente/suivante (playlist).
+  if (mj) {
+    panel.onkeydown = (e) => {
+      if (e.target.closest('input, textarea, select, [contenteditable]')) return;
+      if (!_musicState.currentSoundId) return;
+      if (e.code === 'Space') { e.preventDefault(); _vttToggleMusicPause(); }
+      else if (e.key === 'ArrowRight' && _musicState.currentPlaylistId) { e.preventDefault(); _vttMusicNext(); }
+      else if (e.key === 'ArrowLeft'  && _musicState.currentPlaylistId) { e.preventDefault(); _vttMusicPrev(); }
+    };
   }
   // Barre de progression
   clearInterval(_musicProgTimer);
@@ -552,8 +563,10 @@ function _renderNowPlaying(curSound, ms) {
     </div>` : ''}
     <div class="vtt-music-ctrl-row">
       ${mj && curSound ? `
+        ${pl?`<button class="vtt-music-ctrl" data-vtt-fn="_vttMusicPrev" title="Précédent">⏮</button>`:''}
         <button class="vtt-music-ctrl" data-vtt-fn="_vttToggleMusicPause" title="${ms.paused?'Reprendre':'Pause'}">${ms.paused?'▶':'⏸'}</button>
         ${pl?`<button class="vtt-music-ctrl" data-vtt-fn="_vttMusicNext" title="Suivant">⏭</button>`:''}
+        ${!pl?`<button class="vtt-music-ctrl${ms.loop?' on':''}" data-vtt-fn="_vttToggleLoop" title="${ms.loop?'Désactiver la boucle':'Boucler ce son'}">🔁</button>`:''}
         <button class="vtt-music-ctrl" data-vtt-fn="_vttStopMusic" title="Arrêter">⏹</button>
         <button class="vtt-music-ctrl vtt-music-title-toggle${hiddenForSound?' on':''}" data-vtt-fn="_vttMusicToggleSoundTitle" data-vtt-args="${curSound.id}"
           aria-pressed="${hiddenForSound}" title="${hiddenForSound?'Afficher ce titre aux joueurs':'Masquer ce titre aux joueurs'}">${hiddenForSound ? _eyeSvg(true) : _eyeSvg(false)}</button>
@@ -649,6 +662,27 @@ async function _vttMusicNext() {
     startedAt:serverTimestamp() });
 }
 
+async function _vttMusicPrev() {
+  const ms = _musicState;
+  if (!ms.currentPlaylistId) return;
+  const pl = _playlists.find(p=>p.id===ms.currentPlaylistId); if (!pl) return;
+  const order = ms.shuffleOrder || pl.soundIds.map((_,i)=>i);
+  const prevIdx = ((ms.playlistIndex||0) - 1 + order.length) % order.length;
+  const soundId = pl.soundIds[order[prevIdx]];
+  const sound = _sounds.find(s => s.id === soundId);
+  await _setMusicState({ ...ms, playlistIndex:prevIdx,
+    currentSoundId:soundId, currentTitleHidden:sound?.hideTitle === true,
+    startedAt:serverTimestamp() });
+}
+
+// Bascule la boucle du son courant (mode single uniquement — appliquée en direct
+// via _syncMusicPlayback sans redémarrer la piste).
+async function _vttToggleLoop() {
+  const ms = _musicState;
+  if (!ms.currentSoundId || ms.currentPlaylistId) return;
+  await _setMusicState({ loop: !ms.loop });
+}
+
 async function _vttToggleMusicPause() {
   const paused = !_musicState.paused;
   if (_audioEl) { paused ? _audioEl.pause() : _audioEl.play().catch(()=>{}); }
@@ -656,7 +690,8 @@ async function _vttToggleMusicPause() {
 }
 
 async function _vttStopMusic() {
-  _killAudio();
+  // Pas de _killAudio() ici : l'arrêt passe par l'état → _syncMusicPlayback applique
+  // un fondu de sortie (identique pour le MJ et les joueurs).
   await _setMusicState({ playing:false, paused:false, currentSoundId:null, currentPlaylistId:null });
 }
 
@@ -707,17 +742,52 @@ function _killAudio() {
 }
 
 function _killAmbience() {
-  if (_ambienceEl) { _ambienceEl.pause(); _ambienceEl.src=''; _ambienceEl=null; }
+  if (_ambienceEl) { if (_ambienceEl._fadeTimer) clearInterval(_ambienceEl._fadeTimer); _ambienceEl.pause(); _ambienceEl.src=''; _ambienceEl=null; }
+}
+
+// ── Fondus (fade in/out + crossfade) ─────────────────────────────────
+const _FADE_MS     = 700;   // musique principale
+const _AMB_FADE_MS = 900;   // ambiance (un peu plus douce)
+
+// Rampe linéaire du volume d'un élément audio vers `target` sur `ms`.
+function _fade(el, target, ms, onDone) {
+  if (!el) { onDone?.(); return; }
+  if (el._fadeTimer) { clearInterval(el._fadeTimer); el._fadeTimer = null; }
+  const start = el.volume;
+  const t0 = performance.now();
+  if (ms <= 0 || start === target) { el.volume = Math.max(0, Math.min(1, target)); onDone?.(); return; }
+  el._fadeTimer = setInterval(() => {
+    const k = Math.min(1, (performance.now() - t0) / ms);
+    el.volume = Math.max(0, Math.min(1, start + (target - start) * k));
+    if (k >= 1) { clearInterval(el._fadeTimer); el._fadeTimer = null; onDone?.(); }
+  }, 40);
+}
+
+// Fait disparaître un élément (fade → 0) puis le libère. Détache ses handlers
+// pour que sa fin/erreur pendant le fondu ne déclenche pas l'auto-avance.
+function _fadeOutAndDispose(el, ms) {
+  if (!el) return;
+  if (el._endedHandler) el.removeEventListener('ended', el._endedHandler);
+  if (el._errorHandler) el.removeEventListener('error', el._errorHandler);
+  _fade(el, 0, ms, () => { try { el.pause(); el.src = ''; } catch {} });
+}
+
+// Fondu de sortie de la piste principale courante, puis nettoyage.
+function _fadeOutCurrent(ms) {
+  const el = _audioEl;
+  clearInterval(_musicProgTimer); _musicProgTimer = null;
+  _audioEl = null;
+  _fadeOutAndDispose(el, ms);
 }
 
 // Applique l'état ambiance (ms.ambienceSoundId) au 2ᵉ canal audio, indépendamment
 // de la musique principale (elle peut jouer ou non). En boucle, volume dédié.
 function _syncAmbience(ms) {
   const id = ms?.ambienceSoundId || null;
-  if (!id) { _killAmbience(); return; }
+  if (!id) { const el = _ambienceEl; _ambienceEl = null; _fadeOutAndDispose(el, _AMB_FADE_MS); return; }
   // Même ambiance déjà en cours → rien à faire (juste garder le volume à jour).
   if (_ambienceEl && _ambienceEl.dataset.soundId === id && !_ambienceEl.ended) {
-    _ambienceEl.volume = _getAmbienceVolume();
+    if (!_ambienceEl._fadeTimer) _ambienceEl.volume = _getAmbienceVolume();
     return;
   }
   const sound = _sounds.find(s => s.id === id);
@@ -729,21 +799,23 @@ function _syncAmbience(ms) {
     loader.then(found => { if (found && _musicState?.ambienceSoundId === id) _syncAmbience(_musicState); });
     return;
   }
-  _killAmbience();
+  const old = _ambienceEl;
   const el = new Audio(sound.url);
   el.dataset.soundId = id;
   el.loop = true;
-  el.volume = _getAmbienceVolume();
+  el.volume = 0;   // fondu d'entrée
   el.addEventListener('error', () => {
     console.error('[vtt music] ambiance audio error:', el.error?.code, sound.url);
     if (STATE.isAdmin) showNotif(`🔇 Ambiance « ${sound.name} » injouable — vérifier l'URL`, 'error');
     _killAmbience();
   }, { once:true });
+  el.addEventListener('playing', () => _fade(el, _getAmbienceVolume(), _AMB_FADE_MS), { once:true });
   el.play().catch(err => {
     if (err.name === 'NotAllowedError') showNotif('🔇 Cliquez sur la page pour activer le son', 'info');
     else console.error('[vtt music] ambiance play():', err.name, err.message);
   });
   _ambienceEl = el;
+  if (old && old !== el) _fadeOutAndDispose(old, _AMB_FADE_MS);   // crossfade
 }
 
 // Reset complet de l'état musique au teardown de la VTT (appelé depuis vtt.js).
@@ -771,7 +843,7 @@ function _syncMusicPlayback(ms) {
   _syncAmbience(ms);
 
   if (!ms.playing || !ms.currentSoundId) {
-    _killAudio();
+    _fadeOutCurrent(_FADE_MS);   // fondu de sortie plutôt qu'une coupure sèche
     if (panel?.dataset.open==='1') _renderMusicPanel();
     return;
   }
@@ -812,11 +884,12 @@ function _syncMusicPlayback(ms) {
     return;
   }
 
-  // Nouveau son
-  _killAudio();
+  // Nouveau son — crossfade avec l'ancien (fondu de sortie) + fondu d'entrée.
+  const _prevEl = _audioEl;
+  clearInterval(_musicProgTimer); _musicProgTimer = null;
   const el = new Audio(sound.url);
   el.dataset.soundId = ms.currentSoundId;
-  el.volume = _getUserVolume();
+  el.volume = 0;                 // montée au démarrage réel (voir 'playing')
   el.loop = ms.loop ?? false;
   _lastAppliedSeek = ms.seekVersion || 0; // la position initiale est déjà gérée via startedAt
 
@@ -851,6 +924,9 @@ function _syncMusicPlayback(ms) {
     if (!_musicProgTimer) _musicProgTimer = setInterval(_updateMusicProg, 500);
   }, {once:true});
 
+  // Fondu d'entrée au démarrage réel de la lecture.
+  el.addEventListener('playing', () => _fade(el, _getUserVolume(), _FADE_MS), { once:true });
+
   el.play().catch(err => {
     if (err.name === 'NotAllowedError')
       showNotif('🔇 Cliquez sur la page pour activer le son', 'info');
@@ -858,6 +934,7 @@ function _syncMusicPlayback(ms) {
       console.error('[vtt music] play() error:', err.name, err.message);
   });
   _audioEl = el;
+  if (_prevEl && _prevEl !== el) _fadeOutAndDispose(_prevEl, _FADE_MS);   // crossfade
   if (panel?.dataset.open==='1') _renderMusicPanel();
 }
 
@@ -1194,6 +1271,8 @@ export {
   _vttDeleteSound,
   _vttImportGithubRelease,
   _vttMusicNext,
+  _vttMusicPrev,
+  _vttToggleLoop,
   _vttMusicToggleHideTitle,
   _vttMusicToggleSoundTitle,
   _vttPlColorSelect,

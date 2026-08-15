@@ -106,7 +106,7 @@ import { _getSortTypes } from '../characters/spells-calc.js';
 import {
   _musicStateRef, _syncMusicPlayback, _resetMusicState, _closeMusicPanel,
   _vttToggleMusicCat, _vttToggleAllMusicCats, _vttToggleMusic, _vttPlaySound,
-  _vttPlayPlaylist, _vttMusicNext, _vttToggleMusicPause, _vttStopMusic,
+  _vttPlayPlaylist, _vttMusicNext, _vttMusicPrev, _vttToggleLoop, _vttToggleMusicPause, _vttStopMusic,
   _vttSoundCtxMenu, _vttDeleteSound, _vttCreatePlaylist, _vttCreatePlaylistConfirm,
   _vttDeletePlaylist, _vttAddSoundToPlaylist, _vttRemoveSoundFromPlaylist, _vttCleanMissingSounds,
   _vttPlayAmbience, _vttStopAmbience, _vttPlaylistCtxMenu, _vttMusicAddMenu, _vttMusicToolsMenu,
@@ -10901,6 +10901,8 @@ export const VTT_ACTIONS = {
   _vttMsUnequip,
   _vttMsUnequipAll,
   _vttMusicNext,
+  _vttMusicPrev,
+  _vttToggleLoop,
   _vttNextRound,
   _vttNoop,
   _vttOpenTokenDelegatesModal,
