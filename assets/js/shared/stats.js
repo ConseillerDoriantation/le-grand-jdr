@@ -25,6 +25,7 @@
 
 import { db, doc, getDoc, setDoc, updateDoc, increment, deleteField } from '../config/firebase.js';
 import { getCurrentAdventureId } from '../data/firestore.js';
+import { buildCombatCorrectionDeltas } from './stats-corrections.js';
 
 function _statsRef() {
   const aid = getCurrentAdventureId();   // id canonique (même source que le VTT)
@@ -134,6 +135,37 @@ export async function deleteDatesStats(dates) {
 
 export const deleteDateStats = (dateKey) => deleteDatesStats(dateKey ? [dateKey] : []);
 
+// Correction MJ ciblée sur une séance et un personnage. Chaque différence est
+// répercutée sur le miroir daté ET sur le total campagne, afin que tous les scopes
+// restent cohérents. Les totaux servant aux moyennes suivent les dégâts corrigés.
+export async function correctDateCombatStats(charId, dateKey, values = {}) {
+  const ref = _statsRef();
+  if (!ref || !charId || !dateKey) return false;
+  const snap = await getDoc(ref).catch(() => null);
+  const data = snap?.exists() ? snap.data() : null;
+  const current = data?.chars?.[charId]?.byDate?.[dateKey]?.combat;
+  if (!current) return false;
+
+  const deltas = buildCombatCorrectionDeltas(current, values);
+  const patch = {};
+  for (const [field, delta] of Object.entries(deltas)) {
+    patch[`chars.${charId}.combat.${field}`] = increment(delta);
+    patch[`chars.${charId}.byDate.${dateKey}.combat.${field}`] = increment(delta);
+  }
+  // Une valeur validée manuellement devient prioritaire sur la reconstruction
+  // du journal pour cette séance, afin d'éviter une double correction au reload.
+  if (Object.hasOwn(values, 'dmgTaken')) patch[`chars.${charId}.byDate.${dateKey}.combat.manualDamageTaken`] = 1;
+  if (Object.hasOwn(values, 'dmgDealt')) patch[`chars.${charId}.byDate.${dateKey}.combat.manualDamageDealt`] = 1;
+  if (!Object.keys(patch).length) return true;
+  try {
+    await updateDoc(ref, patch);
+    _mem = null;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Supprime toutes les stats liées à une mission (toutes ses séances datées).
 export async function deleteMissionStats(missionId) {
   const ref = _statsRef();
@@ -193,7 +225,7 @@ export function accAttackDelta(acc, { attackerId, attackerName, targetId, target
 
 // Cast d'un sort : +1 sort lancé, +PM dépensés, +1 sur la répartition par sort,
 // +soin éventuel. Accumulé dans le même delta réversible que l'attaque.
-export function accCastDelta(acc, { casterId, casterName, spellName, pm = 0, heal = 0, tactical = 0, support = 0, affliction = 0 } = {}) {
+export function accCastDelta(acc, { casterId, casterName, spellName, pm = 0, heal = 0, tactical = 0, support = 0, affliction = 0, control = 0 } = {}) {
   if (!casterId) return acc;
   acc.chars ??= {};
   const dk = statsDateKey();
@@ -210,6 +242,7 @@ export function accCastDelta(acc, { casterId, casterName, spellName, pm = 0, hea
   if (tactical > 0)   bump('combat', 'tacticalSpells', tactical);
   if (support > 0)    bump('combat', 'supportSpells', support);
   if (affliction > 0) bump('combat', 'afflictionSpells', affliction);
+  if (control > 0)    bump('combat', 'controlSpells', control);
   if (spellName) bump('spells', spellName, 1);
   return acc;
 }
