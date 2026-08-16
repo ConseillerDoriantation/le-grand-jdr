@@ -16,6 +16,7 @@ import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
 import { resolveSpellModifierStat, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calculateInvocationDerivedStats, getPreparedInvocationActions, INVOCATION_ABILITIES, INVOCATION_DEFAULT_STATS, invocationStatModifier, normalizeInvocationStats } from '../../shared/invocation-stats.js';
 import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds } from './spells-calc.js';
 
 let _sortsSearch = '';
@@ -3844,12 +3845,16 @@ function _renderInvSelectBody() {
   const sel = s.invocation.ids;
   const selCount = sel.filter(id => lib.some(iv => iv.id === id)).length;
   const cards = lib.map(iv => {
+    const st = normalizeInvocationStats(iv.stats);
+    const derived = calculateInvocationDerivedStats(iv);
+    const touch = st.toucher + invocationStatModifier(st, st.toucherStat);
+    const damageMod = invocationStatModifier(st, st.degatsStat);
     const on = sel.includes(iv.id);
     const full = !on && selCount >= nbInv;
     return `<button class="cs-invsel-card${on?' is-on':''}" data-action="_toggleInvSelect" data-id="${iv.id}" ${full?'disabled':''}>
       <span class="cs-invsel-portrait">${iv.image ? `<img src="${iv.image}" alt="">` : '🐾'}</span>
       <span class="cs-invsel-body"><span class="cs-invsel-name">${_esc(iv.nom || 'Invocation')}</span>
-      <span class="cs-invsel-stats">❤️ ${iv.stats?.pv ?? '?'} · 🛡️ ${iv.stats?.ca ?? 10} · ⚔️ ${_esc(iv.stats?.attaque || '1d4 +2')}</span></span>
+      <span class="cs-invsel-stats">⭐ Niv. ${st.niveau} · ❤️ ${derived.pv} · 💧 ${derived.pmMax} · 🛡️ ${derived.ca} · 🃏 ${getPreparedInvocationActions(iv).length}/${derived.deckMax} · 🎯 ${_invSigned(touch)} · ⚔️ ${_esc(st.attaque)}${damageMod ? ` ${_invSigned(damageMod)}` : ''} · 🏹 ${st.portee}</span></span>
       <span class="cs-invsel-check">${on ? '✓' : '+'}</span>
     </button>`;
   }).join('');
@@ -4052,6 +4057,16 @@ let _libInvIdx = -1; // index de l'invocation de la bibliothèque en cours d'éd
 function _libInvs() { return Array.isArray(STATE.activeChar?.invocations) ? STATE.activeChar.invocations : []; }
 function _libInvCurrent() { return _libInvs()[_libInvIdx] || null; }
 function _invUuid() { return 'inv_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+function _ensureInvActionDeckState(iv) {
+  if (!iv || !Array.isArray(iv.actions)) return;
+  const deckMax = calculateInvocationDerivedStats(iv).deckMax;
+  let prepared = 0;
+  for (const action of iv.actions) {
+    if (action?.invocationPrepared === false) continue;
+    action.invocationPrepared = prepared < deckMax;
+    if (action.invocationPrepared) prepared++;
+  }
+}
 async function _saveLibInvs() {
   const c = STATE.activeChar; if (!c) return;
   await trySave(spellHostCollection(c), c.id, { invocations: c.invocations || [] });
@@ -4068,13 +4083,16 @@ function _refreshInvLibrary() { updateModalContent('🐾 Mes invocations', _rend
 function _renderInvLibraryBody() {
   const invs = _libInvs();
   const cards = invs.map((iv, i) => {
-    const hpTxt = (iv.currentHp != null && iv.stats?.pv != null && iv.currentHp < parseInt(iv.stats.pv))
-      ? `${iv.currentHp}/${iv.stats.pv}` : (iv.stats?.pv ?? '?');
+    const st = normalizeInvocationStats(iv.stats);
+    const derived = calculateInvocationDerivedStats(iv);
+    const touch = st.toucher + invocationStatModifier(st, st.toucherStat);
+    const damageMod = invocationStatModifier(st, st.degatsStat);
+    const hpTxt = (iv.currentHp != null && iv.currentHp < derived.pv) ? `${iv.currentHp}/${derived.pv}` : derived.pv;
     return `<div class="cs-invlib-card">
       <div class="cs-invlib-portrait">${iv.image ? `<img src="${iv.image}" alt="">` : '<span>🐾</span>'}</div>
       <div class="cs-invlib-info">
         <div class="cs-invlib-name">${_esc(iv.nom || 'Invocation')}</div>
-        <div class="cs-invlib-stats">❤️ ${hpTxt} · 🛡️ ${iv.stats?.ca ?? 10} · ⚔️ ${_esc(iv.stats?.attaque || '1d4 +2')}${(iv.actions||[]).length ? ` · 🎬 ${iv.actions.length}` : ''}</div>
+        <div class="cs-invlib-stats">⭐ Niv. ${st.niveau} · ❤️ ${hpTxt} · 💧 ${derived.pmMax} · 🛡️ ${derived.ca} · 🃏 ${getPreparedInvocationActions(iv).length}/${derived.deckMax} · 🎯 ${_invSigned(touch)} · ⚔️ ${_esc(st.attaque)}${damageMod ? ` ${_invSigned(damageMod)}` : ''} · 🏹 ${st.portee}</div>
       </div>
       <div class="cs-invlib-actions">
         <button class="btn-icon" data-action="_editLibInv" data-idx="${i}" title="Modifier">✏️</button>
@@ -4097,94 +4115,216 @@ function _editLibInv(idx) {
   const c = STATE.activeChar; if (!c) return;
   if (!Array.isArray(c.invocations)) c.invocations = [];
   if (idx < 0) {
-    c.invocations.push({ id: _invUuid(), nom: '', image: '', stats: { attaque:'1d4 +2', toucher:2, pv:10, ca:10, deplacement:3, pmMax:0 }, actions: [], currentHp: null, currentPm: null });
+    c.invocations.push({ id: _invUuid(), nom: '', image: '', stats: normalizeInvocationStats(), actions: [], currentHp: null, currentPm: null });
     _libInvIdx = c.invocations.length - 1;
   } else {
     _libInvIdx = idx;
   }
+  _ensureInvActionDeckState(_libInvCurrent());
   _invImageEdit = _libInvCurrent()?.image || '';
   openModal('🐾 Invocation', _renderLibInvEditorBody());
 }
 function _refreshLibInvEditor() { updateModalContent('🐾 Invocation', _renderLibInvEditorBody()); }
+function _invCombatStatOptions(selected = 'force') {
+  return [
+    ['none', 'Aucun modificateur'],
+    ...INVOCATION_ABILITIES.map(stat => [stat.key, `${stat.short} · ${stat.label}`]),
+  ].map(([value, label]) => `<option value="${value}"${selected === value ? ' selected' : ''}>${label}</option>`).join('');
+}
+const _invSigned = value => value > 0 ? `+${value}` : String(value || 0);
 function _renderLibInvEditorBody() {
   const iv = _libInvCurrent(); if (!iv) return '<div style="padding:1rem">Invocation introuvable.</div>';
-  const st = iv.stats || {};
-  const fields = [
-    { id:'attaque',     ic:'⚔️', lbl:'Attaque',     type:'text',   val:_esc(st.attaque ?? '1d4 +2'), ph:'1d4 +2' },
-    { id:'toucher',     ic:'🎯', lbl:'Toucher',     type:'number', val:(st.toucher ?? 2),  ph:'2' },
-    { id:'pv',          ic:'❤️', lbl:'PV',          type:'number', val:(st.pv ?? 10),      ph:'10' },
-    { id:'ca',          ic:'🛡️', lbl:'CA',          type:'number', val:(st.ca ?? 10),      ph:'10' },
-    { id:'deplacement', ic:'👢', lbl:'Déplacement', type:'number', val:(st.deplacement ?? 3), ph:'3' },
-    { id:'pmMax',       ic:'✦',  lbl:'PM',          type:'number', val:(st.pmMax ?? 0),    ph:'0' },
-  ];
+  const st = normalizeInvocationStats(iv.stats);
+  const derived = calculateInvocationDerivedStats(iv);
+  const touchMod = invocationStatModifier(st, st.toucherStat);
+  const dmgMod = invocationStatModifier(st, st.degatsStat);
   const acts = Array.isArray(iv.actions) ? iv.actions : [];
+  const preparedActions = getPreparedInvocationActions(iv);
+  const preparedSet = new Set(preparedActions);
   const calcChar = _libInvCalcChar(iv);
-  return `<div class="cs-invedit">
-    <div class="cs-spell-section">
-      <div class="cs-spell-section-title">🐾 Identité &amp; statistiques <span class="cs-spell-section-hint">stats de base de la créature</span></div>
-      <div class="cs-inv-body">
-        <div class="cs-inv-imgcol">
-          <div id="s-inv-img-block" class="cs-inv-img-block">${_renderInvImageBlock()}</div>
-          <input type="hidden" id="s-inv-image" value="${_invImageEdit||''}">
+  const numberField = (id, icon, label, value, { min = 0, suffix = '', hint = '' } = {}) => `<label class="cs-invedit-field">
+    <span>${icon} ${label}${hint ? `<small>${hint}</small>` : ''}</span>
+    <div class="cs-invedit-input-unit"><input id="s-inv-${id}" type="text" inputmode="numeric" pattern="-?[0-9]*" value="${value}" data-input="_refreshLibInvPreview" data-min="${min}">${suffix ? `<em>${suffix}</em>` : ''}</div>
+  </label>`;
+  return `<div class="cs-invedit cs-invedit-v2">
+    <header class="cs-invedit-hero">
+      <div><span class="cs-invedit-kicker">CRÉATURE LIÉE</span><h3>Configurer l’invocation</h3><p>Définis ses valeurs de base. Les bonus des runes du sort seront ajoutés au moment de l’invocation.</p></div>
+      <button type="button" class="btn btn-outline btn-sm" data-action="_resetLibInvDefaults">↺ Valeurs par défaut</button>
+    </header>
+    <div class="cs-invedit-layout">
+      <aside class="cs-invedit-profile">
+        <div id="s-inv-img-block" class="cs-inv-img-block">${_renderInvImageBlock()}</div>
+        <input type="hidden" id="s-inv-image" value="${_invImageEdit||''}">
+        <label class="cs-invedit-field cs-invedit-name"><span>Nom de l’invocation</span><input id="s-inv-nom" type="text" value="${_esc(iv.nom||'')}" placeholder="Ex. Familier des braises" data-input="_refreshLibInvPreview"></label>
+        <div class="cs-invedit-summary" aria-live="polite">
+          <div class="cs-invedit-summary-head">
+            <div><small>FICHE CALCULÉE</small><strong id="s-inv-preview-name">${_esc(iv.nom || 'Invocation sans nom')}</strong></div>
+            <span>⭐ Niv. <b id="s-inv-preview-level">${st.niveau}</b></span>
+          </div>
+          <div class="cs-invedit-summary-resources">
+            <div class="is-hp"><span>❤️</span><p><small>PV MAX</small><b id="s-inv-preview-pv">${derived.pv}</b></p></div>
+            <div class="is-pm"><span>💧</span><p><small>PM MAX</small><b id="s-inv-preview-pm">${derived.pmMax}</b></p></div>
+          </div>
+          <div class="cs-invedit-summary-metrics">
+            <div><small>🛡️ CA</small><b id="s-inv-preview-ca">${derived.ca}</b></div>
+            <div><small>👢 Mouv.</small><b><span id="s-inv-preview-move">${derived.deplacement}</span><em>c</em></b></div>
+            <div><small>🏹 Portée</small><b><span id="s-inv-preview-range">${derived.portee}</span><em>c</em></b></div>
+            <div><small>🃏 Deck</small><b id="s-inv-preview-deck">${preparedActions.length}/${derived.deckMax}</b></div>
+          </div>
+          <div class="cs-invedit-summary-attack">
+            <div><small>ATTAQUE</small><span>⚔️ <b id="s-inv-preview-attack">${_esc(st.attaque)}${dmgMod ? ` ${_invSigned(dmgMod)}` : ''}</b></span></div>
+            <div><small>TOUCHER</small><b id="s-inv-preview-touch">${_invSigned(st.toucher + touchMod)}</b></div>
+          </div>
+          <div class="cs-invedit-summary-foot"><span>🧙 Réserve des sorts</span><b id="s-inv-preview-mana-source">${st.usesOwnMana ? 'Invocation' : 'Invocateur'}</b></div>
         </div>
-        <div class="cs-inv-grid">
-          <label class="cs-inv-stat" style="grid-column:1/-1">
-            <span class="cs-inv-stat-lbl">🐾 Nom</span>
-            <input class="cs-inv-stat-in" id="s-inv-nom" type="text" value="${_esc(iv.nom||'')}" placeholder="Nom de la créature">
-          </label>
-          ${fields.map(f => `<label class="cs-inv-stat">
-            <span class="cs-inv-stat-lbl">${f.ic} ${f.lbl}</span>
-            <input class="cs-inv-stat-in" id="s-inv-${f.id}" type="${f.type}" value="${f.val}" placeholder="${f.ph}">
-          </label>`).join('')}
-        </div>
-      </div>
-    </div>
-    <div class="cs-spell-section">
-      <div class="cs-spell-section-title">🎬 Actions de la créature <span class="cs-spell-section-hint">mini-sorts joués par l'invocation</span>
-        <button class="btn btn-gold btn-sm" style="margin-left:auto" data-action="_libInvAddAction">＋ Action</button>
-      </div>
-      <div class="inv-cfg-list">
+        <div class="cs-invedit-persist"><span>↻</span><p><b>État conservé</b><small>Les PV et PM actuels restent mémorisés entre deux apparitions.</small></p></div>
+      </aside>
+      <main class="cs-invedit-main">
+        <section class="cs-invedit-section">
+          <div class="cs-invedit-section-head"><span>1</span><div><b>Niveau et valeurs de base</b><small>Les statistiques affichées sous le portrait sont calculées avec le niveau et les caractéristiques.</small></div></div>
+          <div class="cs-invedit-fields cs-invedit-fields--vitals">
+            ${numberField('niveau', '⭐', 'Niveau', st.niveau, { min:1 })}
+            ${numberField('pv', '❤️', 'PV base', st.pv, { min:1 })}
+            ${numberField('pmMax', '💧', 'PM base', st.pmMax)}
+            ${numberField('ca', '🛡️', 'CA base', st.ca)}
+            ${numberField('deplacement', '👢', 'Dépl. base', st.deplacement, { suffix:'cases' })}
+            ${numberField('portee', '🏹', 'Portée base', st.portee, { min:1, suffix:'cases' })}
+            <label class="cs-invedit-mana-source">
+              <input id="s-inv-usesOwnMana" type="checkbox"${st.usesOwnMana ? ' checked' : ''} data-change="_refreshLibInvPreview">
+              <span class="cs-invedit-toggle" aria-hidden="true"><i></i></span>
+              <span class="cs-invedit-mana-copy"><b>Les actions utilisent les PM de l’invocation</b><small>Désactivé : les PM sont retirés à l’invocateur. Activé : ils sont retirés à cette réserve de PM.</small></span>
+              <strong id="s-inv-mana-source-label">${st.usesOwnMana ? 'Invocation' : 'Invocateur'}</strong>
+            </label>
+          </div>
+        </section>
+        <section class="cs-invedit-section">
+          <div class="cs-invedit-section-head"><span>2</span><div><b>Caractéristiques</b><small>Le modificateur est calculé avec les mêmes règles que les personnages et PNJ.</small></div></div>
+          <div class="cs-invedit-abilities">
+            ${INVOCATION_ABILITIES.map(stat => `<label class="cs-invedit-ability" style="--stat-color:${stat.key === 'force' ? '#ff6b6b' : stat.key === 'dexterite' ? '#22c38e' : stat.key === 'constitution' ? '#f59e0b' : stat.key === 'intelligence' ? '#4f8cff' : stat.key === 'sagesse' ? '#b47fff' : '#fd6c9e'}">
+              <span>${stat.short}<small>${stat.label}</small></span>
+              <input id="s-inv-${stat.key}" type="text" inputmode="numeric" pattern="[0-9]*" value="${st[stat.key]}" data-input="_refreshLibInvPreview">
+              <b class="cs-invedit-stat-mod" data-inv-stat-mod="${stat.key}">${_invSigned(invocationStatModifier(st, stat.key))}</b>
+            </label>`).join('')}
+          </div>
+        </section>
+        <section class="cs-invedit-section">
+          <div class="cs-invedit-section-head"><span>3</span><div><b>Attaque de base</b><small>La formule et les caractéristiques choisies seront utilisées directement dans le VTT.</small></div></div>
+          <div class="cs-invedit-combat-grid">
+            <label class="cs-invedit-field cs-invedit-formula"><span>⚔️ Formule de dégâts<small>Valeur fixe autorisée dans la formule</small></span><input id="s-inv-attaque" type="text" value="${_esc(st.attaque)}" placeholder="1d4 +2" data-input="_refreshLibInvPreview"></label>
+            ${numberField('toucher', '🎯', 'Bonus fixe au toucher', st.toucher, { min:-99, hint:'ajouté au modificateur' })}
+            <label class="cs-invedit-field"><span>🎯 Caractéristique de toucher</span><select id="s-inv-toucherStat" data-change="_refreshLibInvPreview">${_invCombatStatOptions(st.toucherStat)}</select></label>
+            <label class="cs-invedit-field"><span>⚔️ Caractéristique de dégâts</span><select id="s-inv-degatsStat" data-change="_refreshLibInvPreview">${_invCombatStatOptions(st.degatsStat)}</select></label>
+          </div>
+          <div class="cs-invedit-combat-note">Exemple : avec FOR 14, une attaque <b>1d4 +2</b> utilisant la Force infligera <b>1d4 +2 + FOR(+2)</b>. Le toucher recevra également FOR(+2), en plus du bonus fixe.</div>
+        </section>
+        <section class="cs-invedit-section cs-invedit-section--actions">
+          <div class="cs-invedit-section-head"><span>4</span><div><b>Sorts et capacités</b><small>Prépare les sorts utilisables dans le VTT. La capacité du Deck dépend du niveau et de l’INT.</small></div><strong id="s-inv-deck-count" class="cs-invedit-deck-count">🃏 ${preparedActions.length}/${derived.deckMax}</strong><button class="btn btn-gold btn-sm" data-action="_libInvAddAction">＋ Nouveau sort</button></div>
+          <div class="inv-cfg-list">
         ${acts.length ? acts.map((a, ai) => {
           const _off = _getSortTypes(a).includes('offensif') || _hasLaceration(a);
           const _dmg = _off ? _calcSortDegats(a, calcChar) : '';
-          const _meta = [_dmg ? `🎲 ${_esc(_dmg)}` : '', (a.runes||[]).length ? `${a.runes.length} rune${a.runes.length>1?'s':''}` : 'sans rune', a.pm ? `${a.pm} PM` : ''].filter(Boolean).join(' · ');
-          return `<div class="inv-cfg-act">
+          const _inDeck = preparedSet.has(a);
+          const _meta = [_inDeck ? '🃏 Préparé' : 'Hors Deck', _dmg ? `🎲 ${_esc(_dmg)}` : '', (a.runes||[]).length ? `${a.runes.length} rune${a.runes.length>1?'s':''}` : 'sans rune', a.pm ? `💧 ${a.pm} PM` : ''].filter(Boolean).join(' · ');
+          return `<div class="inv-cfg-act${_inDeck ? ' is-prepared' : ''}">
             <div class="inv-cfg-act-main" data-action="_libInvEditAction" data-aidx="${ai}">
               <span class="inv-cfg-act-name">🎬 ${_esc(a.nom || 'Action')}</span>
               <span class="inv-cfg-act-meta">${_meta}</span>
             </div>
+            <button class="cs-invedit-deck-toggle${_inDeck ? ' is-on' : ''}" data-action="_libInvToggleActionPrepared" data-aidx="${ai}" title="${_inDeck ? 'Retirer du Deck' : 'Préparer dans le Deck'}">${_inDeck ? '✓ Deck' : '＋ Deck'}</button>
             <button class="btn-icon" data-action="_libInvEditAction" data-aidx="${ai}" title="Modifier">✏️</button>
             <button class="btn-icon" data-action="_libInvDeleteAction" data-aidx="${ai}" title="Supprimer">🗑️</button>
           </div>`;
-        }).join('') : '<div class="inv-cfg-empty">Aucune action — la créature attaquera avec son attaque de base.</div>'}
-      </div>
+        }).join('') : '<div class="inv-cfg-empty"><span>🪄</span><b>Aucun sort connu</b><small>L’invocation pourra toujours utiliser son attaque de base.</small></div>'}
+          </div>
+        </section>
+      </main>
     </div>
     <div class="cs-invedit-foot">
       <button class="btn btn-outline" data-action="_libInvBack">← Bibliothèque</button>
-      <button class="btn btn-gold" data-action="_saveLibInv">💾 Enregistrer</button>
+      <span>Les bonus de runes ne modifient jamais ces valeurs enregistrées.</span>
+      <button class="btn btn-gold" data-action="_saveLibInv">💾 Enregistrer l’invocation</button>
     </div>
   </div>`;
 }
 function _libInvCalcChar(iv) {
+  const st = normalizeInvocationStats(iv?.stats);
   return {
     id: '__invocationCalc', nom: iv?.nom ? `Créature (${iv.nom})` : 'Créature invoquée',
-    stats: { force:10, dexterite:10, constitution:10, intelligence:10, sagesse:10, charisme:10 },
+    niveau: st.niveau, pvBase: st.pv, pmBase: st.pmMax,
+    stats: Object.fromEntries(INVOCATION_ABILITIES.map(({ key }) => [key, st[key]])),
     statsBonus: {},
-    equipement: { 'Main principale': { nom: 'Attaque de la créature', degats: iv?.stats?.attaque || '1d4 +2', statAttaque:'force', toucherStat:'force', degatsStat:'force', portee:1, isDefault:true } },
-    maitrises: {}, sort_cats: [], deck_sorts: [], inventaire: [], elements: [],
+    equipement: { 'Main principale': { nom: 'Attaque de la créature', degats: st.attaque, statAttaque:st.toucherStat, toucherStat:st.toucherStat, degatsStat:st.degatsStat, portee:st.portee, isDefault:true } },
+    maitrises: {}, sort_cats: [], deck_sorts: Array.isArray(iv?.actions) ? iv.actions : [], inventaire: [], elements: [],
   };
 }
 // Lit les champs DOM → stats de l'invocation courante (sans toucher aux actions).
 function _readLibInvStatsFromDOM() {
   const iv = _libInvCurrent(); if (!iv) return;
   const v = id => (document.getElementById(id)?.value ?? '').trim();
-  const num = id => { const n = parseInt(v(id)); return Number.isFinite(n) ? n : 0; };
+  const num = (id, fallback) => { const n = parseInt(v(id)); return Number.isFinite(n) ? n : fallback; };
   iv.nom = v('s-inv-nom');
   iv.image = _invImageEdit || document.getElementById('s-inv-image')?.value || '';
-  iv.stats = {
-    attaque: v('s-inv-attaque') || '1d4 +2', toucher: num('s-inv-toucher'), pv: num('s-inv-pv'),
-    ca: num('s-inv-ca') || 10, deplacement: num('s-inv-deplacement'), pmMax: num('s-inv-pmMax'),
+  iv.stats = normalizeInvocationStats({
+    niveau: num('s-inv-niveau', INVOCATION_DEFAULT_STATS.niveau),
+    attaque: v('s-inv-attaque'), toucher: num('s-inv-toucher', INVOCATION_DEFAULT_STATS.toucher),
+    toucherStat: v('s-inv-toucherStat'), degatsStat: v('s-inv-degatsStat'),
+    portee: num('s-inv-portee', INVOCATION_DEFAULT_STATS.portee),
+    pv: num('s-inv-pv', INVOCATION_DEFAULT_STATS.pv), ca: num('s-inv-ca', INVOCATION_DEFAULT_STATS.ca),
+    deplacement: num('s-inv-deplacement', INVOCATION_DEFAULT_STATS.deplacement), pmMax: num('s-inv-pmMax', INVOCATION_DEFAULT_STATS.pmMax),
+    usesOwnMana: !!document.getElementById('s-inv-usesOwnMana')?.checked,
+    ...Object.fromEntries(INVOCATION_ABILITIES.map(({ key }) => [key, num(`s-inv-${key}`, INVOCATION_DEFAULT_STATS[key])])),
+  });
+  _ensureInvActionDeckState(iv);
+  const derived = calculateInvocationDerivedStats(iv);
+  if (iv.currentHp != null) iv.currentHp = Math.min(derived.pv, Math.max(0, parseInt(iv.currentHp) || 0));
+  if (iv.currentPm != null) iv.currentPm = Math.min(derived.pmMax, Math.max(0, parseInt(iv.currentPm) || 0));
+}
+
+function _refreshLibInvPreview() {
+  const read = (id, fallback = 0) => {
+    const value = document.getElementById(id)?.value;
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
   };
+  const stats = normalizeInvocationStats({
+    niveau: read('s-inv-niveau', INVOCATION_DEFAULT_STATS.niveau),
+    attaque: document.getElementById('s-inv-attaque')?.value,
+    toucher: read('s-inv-toucher', INVOCATION_DEFAULT_STATS.toucher),
+    toucherStat: document.getElementById('s-inv-toucherStat')?.value,
+    degatsStat: document.getElementById('s-inv-degatsStat')?.value,
+    portee: read('s-inv-portee', 1), pv: read('s-inv-pv', 10), ca: read('s-inv-ca', 10),
+    deplacement: read('s-inv-deplacement', 3), pmMax: read('s-inv-pmMax', 0),
+    usesOwnMana: !!document.getElementById('s-inv-usesOwnMana')?.checked,
+    ...Object.fromEntries(INVOCATION_ABILITIES.map(({ key }) => [key, read(`s-inv-${key}`, 10)])),
+  });
+  const previewInvocation = { stats, actions: _libInvCurrent()?.actions || [] };
+  const derived = calculateInvocationDerivedStats(previewInvocation);
+  const preparedCount = getPreparedInvocationActions(previewInvocation).length;
+  const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+  set('s-inv-preview-name', document.getElementById('s-inv-nom')?.value?.trim() || 'Invocation sans nom');
+  set('s-inv-preview-level', stats.niveau); set('s-inv-preview-deck', `${preparedCount}/${derived.deckMax}`);
+  set('s-inv-deck-count', `🃏 ${preparedCount}/${derived.deckMax}`);
+  set('s-inv-preview-pv', derived.pv); set('s-inv-preview-pm', derived.pmMax); set('s-inv-preview-ca', derived.ca);
+  set('s-inv-preview-move', derived.deplacement); set('s-inv-preview-range', derived.portee);
+  set('s-inv-preview-mana-source', stats.usesOwnMana ? 'Invocation' : 'Invocateur');
+  set('s-inv-mana-source-label', stats.usesOwnMana ? 'Invocation' : 'Invocateur');
+  const dmgMod = invocationStatModifier(stats, stats.degatsStat);
+  set('s-inv-preview-attack', `${stats.attaque}${dmgMod ? ` ${_invSigned(dmgMod)}` : ''}`);
+  set('s-inv-preview-touch', _invSigned(stats.toucher + invocationStatModifier(stats, stats.toucherStat)));
+  document.querySelectorAll('[data-inv-stat-mod]').forEach(el => {
+    el.textContent = _invSigned(invocationStatModifier(stats, el.dataset.invStatMod));
+  });
+}
+
+function _resetLibInvDefaults() {
+  const defaults = INVOCATION_DEFAULT_STATS;
+  for (const [key, value] of Object.entries(defaults)) {
+    const el = document.getElementById(`s-inv-${key}`);
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!value;
+    else el.value = value;
+  }
+  _refreshLibInvPreview();
 }
 async function _saveLibInv() {
   const iv = _libInvCurrent(); if (!iv) return;
@@ -4220,6 +4360,23 @@ function _libInvEditAction(aidx) {
 async function _libInvOnActionSave(holder) {
   const iv = _libInvCurrent(); if (!iv) return;
   iv.actions = holder.actions;
+  _ensureInvActionDeckState(iv);
+  await _saveLibInvs();
+  _refreshLibInvEditor();
+}
+async function _libInvToggleActionPrepared(aidx) {
+  _readLibInvStatsFromDOM();
+  const iv = _libInvCurrent();
+  const action = iv?.actions?.[parseInt(aidx)];
+  if (!action) return;
+  const prepared = getPreparedInvocationActions(iv);
+  const isPrepared = prepared.includes(action);
+  const deckMax = calculateInvocationDerivedStats(iv).deckMax;
+  if (!isPrepared && prepared.length >= deckMax) {
+    showNotif(`Deck plein (${prepared.length}/${deckMax}) — retire d’abord un sort.`, 'error');
+    return;
+  }
+  action.invocationPrepared = !isPrepared;
   await _saveLibInvs();
   _refreshLibInvEditor();
 }
@@ -5544,8 +5701,11 @@ registerActions({
   _deleteLibInv:          (btn) => _deleteLibInv(Number(btn.dataset.idx)),
   _saveLibInv:            ()    => _saveLibInv(),
   _libInvBack:            ()    => _libInvBack(),
+  _refreshLibInvPreview:  ()    => _refreshLibInvPreview(),
+  _resetLibInvDefaults:   ()    => _resetLibInvDefaults(),
   _libInvAddAction:       ()    => _libInvAddAction(),
   _libInvEditAction:      (btn) => _libInvEditAction(btn.dataset.aidx),
+  _libInvToggleActionPrepared: (btn) => _libInvToggleActionPrepared(btn.dataset.aidx),
   _libInvDeleteAction:    (btn) => _libInvDeleteAction(btn.dataset.aidx),
   _toggleInvSelect:       (btn) => _toggleInvSelect(btn.dataset.id),
 });
