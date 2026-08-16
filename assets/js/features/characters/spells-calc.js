@@ -11,6 +11,7 @@ import { getMaitriseBonus as getSharedMaitriseBonus, getMod, statShort } from '.
 import { getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getMainWeapon } from './data.js';
 import { calcSpellDuration, calcSpellTargets, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calculateSummonStats, normalizeInvocationStats } from '../../shared/invocation-stats.js';
 // Cœurs purs extraits (testables à froid). Ré-exportés plus bas pour l'API publique.
 import {
   _calcAfflictionDot, _autoSourceAfflictionDot, _calcEnchantDegats,
@@ -906,22 +907,23 @@ function _calcInvokedArmStats(s) {
  *   - CA          : 10 par défaut
  */
 export function _calcInvocationStats(s) {
-  const ov    = s?.invocation?.stats || {};
+  const ovRaw = s?.invocation?.stats || {};
+  const ov    = normalizeInvocationStats(ovRaw);
   const runes = s?.runes || [];
   const n = name => runes.filter(r => r === name).length;
   const nbP = n('Puissance'), nbCh = n('Chance'), nbProt = n('Protection'),
         nbAmp = n('Amplification'), nbDur = n('Durée');
   const concentration = n('Concentration') > 0;
 
-  const _has = v => v !== undefined && v !== null && v !== '';
+  const _has = key => ovRaw[key] !== undefined && ovRaw[key] !== null && ovRaw[key] !== '';
   const nbDice  = 1 + nbP;
-  const attaque = _has(ov.attaque) ? String(ov.attaque) : `${nbDice}d4 +2`;
-  const toucher = _has(ov.toucher) ? parseInt(ov.toucher) : (2 + 2 * nbCh);
-  const pv      = _has(ov.pv)      ? parseInt(ov.pv)      : (10 + 5 * nbProt);
-  const deplacement = _has(ov.deplacement) ? parseInt(ov.deplacement) : (3 + 3 * nbAmp);
-  const duree   = _has(ov.duree)   ? parseInt(ov.duree)   : (2 + 2 * nbDur);
-  const ca      = _has(ov.ca)      ? parseInt(ov.ca)      : 10;
-  return { attaque, toucher, pv, deplacement, duree, ca, concentration };
+  const attaque = _has('attaque') ? ov.attaque : `${nbDice}d4 +2`;
+  const toucher = _has('toucher') ? ov.toucher : (2 + 2 * nbCh);
+  const pv      = _has('pv')      ? ov.pv      : (10 + 5 * nbProt);
+  const deplacement = _has('deplacement') ? ov.deplacement : (3 + 3 * nbAmp);
+  const duree   = _has('duree')   ? parseInt(ovRaw.duree) : (2 + 2 * nbDur);
+  const ca      = _has('ca')      ? ov.ca      : 10;
+  return { ...ov, attaque, toucher, pv, deplacement, duree, ca, concentration };
 }
 
 /**
@@ -933,28 +935,7 @@ export function _calcInvocationStats(s) {
  * CA reste la valeur de base (pas de bonus de rune).
  */
 export function _calcSummonStats(invDef, runes = []) {
-  const base = invDef?.stats || {};
-  const n = nom => (runes || []).filter(r => r === nom).length;
-  const nbP = n('Puissance'), nbCh = n('Chance'), nbProt = n('Protection'),
-        nbAmp = n('Amplification'), nbDur = n('Durée');
-  const concentration = n('Concentration') > 0;
-
-  const baseAtk = String(base.attaque || '1d4 +2');
-  let attaque = baseAtk;
-  if (nbP > 0) {
-    const m = baseAtk.match(/^(\d+)(d\d+)(.*)$/i);
-    attaque = m ? `${parseInt(m[1]) + nbP}${m[2]}${m[3]}` : `${baseAtk} +${nbP}d6`;
-  }
-  return {
-    attaque,
-    toucher:     (parseInt(base.toucher) || 0) + 2 * nbCh,
-    pv:          (parseInt(base.pv) || 10) + 5 * nbProt,
-    ca:          parseInt(base.ca) || 10,
-    deplacement: (parseInt(base.deplacement) || 0) + 3 * nbAmp,
-    pmMax:       parseInt(base.pmMax) || 0,
-    duree:       2 + 2 * nbDur,
-    concentration,
-  };
+  return calculateSummonStats(invDef, runes);
 }
 
 /**

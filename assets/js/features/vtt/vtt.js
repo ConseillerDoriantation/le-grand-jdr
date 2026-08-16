@@ -31,6 +31,7 @@ import { playSigil, playImpact, playProjectile, playSlash } from './vtt-rune-sig
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
 import { calcSpellDuration, calcSpellTargets, usesHealingMastery } from '../../shared/spell-runes.js';
+import { calculateSummonStats, getPreparedInvocationActions, INVOCATION_ABILITIES, invocationStatModifier, invocationStatShort, normalizeInvocationStats } from '../../shared/invocation-stats.js';
 import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
@@ -2740,14 +2741,22 @@ function _vttSpellMods(s) {
           // defaultIds = pré-sélection éventuelle du sort (carte 🐾), pré-cochée.
           const defaultIds = Array.isArray(s.invocation?.ids) ? s.invocation.ids.filter(Boolean) : [];
           const ov  = s.invocation?.stats || {};
+          const normalizedOv = normalizeInvocationStats(ov);
           const has = v => v !== undefined && v !== null && v !== '';
           // Legacy : ancien sort sans bibliothèque (stats inline ou défaut dérivé).
           const legacy = {
+            niveau:      normalizedOv.niveau,
             attaque:     has(ov.attaque)     ? String(ov.attaque)     : `${1 + nbP}d4 +2`,
             toucher:     has(ov.toucher)     ? parseInt(ov.toucher)     : (2 + 2 * nbCh),
             pv:          has(ov.pv)          ? parseInt(ov.pv)          : (10 + 5 * nbProt),
             ca:          has(ov.ca)          ? parseInt(ov.ca)          : (10 + 2 * nbProt),
             deplacement: has(ov.deplacement) ? parseInt(ov.deplacement) : (3 + 3 * nbAmp),
+            pmMax:       normalizedOv.pmMax,
+            usesOwnMana: normalizedOv.usesOwnMana,
+            portee:      normalizedOv.portee,
+            toucherStat: normalizedOv.toucherStat,
+            degatsStat:  normalizedOv.degatsStat,
+            ...Object.fromEntries(INVOCATION_ABILITIES.map(({ key }) => [key, normalizedOv[key]])),
             image:       s.invocation?.image || null,
             actions:     Array.isArray(s.invocation?.actions) ? s.invocation.actions : [],
             name:        s.nom || 'Invocation',
@@ -2842,15 +2851,37 @@ async function _vttApplyDeplacement(src, tgtData, mode, distance) {
 
 // ══ Sorts de déplacement (rune Amplification mode Déplacement) ════════════════
 
-// Déduit le coût PM du lanceur (réplique la logique de _deductPm de l'attaque).
+// Déduit le coût PM des actions utilitaires. Une invocation peut utiliser sa
+// propre réserve ; sinon elle conserve le comportement historique (invocateur).
 async function _vttSpendSpellPm(src, opt) {
-  const c = _characterForToken(src);
-  if (opt.pmCost > 0 && c?.id) {
+  const cost = Math.max(0, parseInt(opt?.pmCost) || 0);
+  if (cost <= 0) return true;
+  if (src.summonKind === 'invocation' && src.summonUsesOwnMana) {
+    const current = Math.max(0, _numOr(src.pm, _numOr(src.pmMax, 0)));
+    if (current < cost) {
+      showNotif(`⚠ PM insuffisants de l’invocation (${current}/${cost} requis)`, 'error');
+      return false;
+    }
+    await updateDoc(_tokRef(src.id), {
+      pm: current - cost,
+      pmCombat: Math.max(0, _numOr(src.pmCombat, current) - cost),
+    });
+    return true;
+  }
+  const c = src.summonOwnerCharId ? VS.characters[src.summonOwnerCharId] : _characterForToken(src);
+  if (c?.id) {
+    const current = _charPmCur(c);
+    if (current < cost) {
+      const who = src.summonKind === 'invocation' ? ' de l’invocateur' : '';
+      showNotif(`⚠ PM insuffisants${who} (${current}/${cost} requis)`, 'error');
+      return false;
+    }
     await updateDoc(_chrRef(c.id), {
-      ..._charPmPatch(Math.max(0, _charPmCur(c) - opt.pmCost)),
+      ..._charPmPatch(current - cost),
       vttControlTokenId: src.id,
     });
   }
+  return true;
 }
 
 function _vttCooldownRemaining(token, opt) {
@@ -2900,7 +2931,7 @@ async function _vttCastPushPull(srcId, tgtId, opt, d) {
     showNotif(`Cible hors de portée (${opt.portee || 1}c)`, 'error');
     return;
   }
-  await _vttSpendSpellPm(src, opt);
+  if (!(await _vttSpendSpellPm(src, opt))) return;
   const moved = await _vttApplyDeplacement(src, tgt, d.mode, d.cells);
   const verb = d.mode === 'pull' ? '↙ attirée' : '↗ poussée';
   const tgtName = _live(tgt).displayName ?? tgt.name;
@@ -2957,7 +2988,7 @@ async function _selfMoveTo(col, row) {
   const dist = Math.abs(col - src.col) + Math.abs(row - src.row);
   const name = _live(src).displayName ?? src.name;
   _selfClear();
-  await _vttSpendSpellPm(src, opt);
+  if (!(await _vttSpendSpellPm(src, opt))) return;
   try {
     await updateDoc(_tokRef(srcId), { col, row });
   } catch (err) {
@@ -3186,7 +3217,9 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
     const idx = _zoneCtx?.invocationsDone || 0;   // quelle invocation on pose (0-based)
     const selIds = opt._invSelIds || null;        // créatures choisies au lancement
     let name = 'Invocation', image = null, actions = [], summonInvId = null;
-    let attaque = '1d4', toucher = 0, pvMax = 10, ca = 10, deplacement = 0, pmMax = 0;
+    let attaque = '1d4', toucher = 0, toucherFlat = 0, pvMax = 10, ca = 10, deplacement = 0, portee = 1, pmMax = 0;
+    let toucherStat = 'force', degatsStat = 'force', usesOwnMana = false, summonLevel = 1, summonDeckMax = 0;
+    let summonAbilities = Object.fromEntries(INVOCATION_ABILITIES.map(({ key }) => [key, 10]));
     let baseAttackUnscaled = '1d4';   // attaque de base NON scalée → sert aux ACTIONS (runes du sort n'y touchent pas)
     let restoreHp = null, restorePm = null;
 
@@ -3195,30 +3228,53 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
       const invDef = (c?.invocations || []).find(iv => iv.id === selIds[idx])
                   || (c?.invocations || []).find(iv => selIds.includes(iv.id));
       if (!invDef) return null;   // invocation supprimée de la bibliothèque
-      const base = invDef.stats || {};
+      const base = normalizeInvocationStats(invDef.stats);
       const b = mod.bonuses || {};
-      // Base + bonus (miroir de _calcSummonStats) — UNIQUEMENT sur les stats de base.
+      const bonusRunes = [
+        ...Array(Math.max(0, b.nbP || 0)).fill('Puissance'),
+        ...Array(Math.max(0, b.nbCh || 0)).fill('Chance'),
+        ...Array(Math.max(0, b.nbProt || 0)).fill('Protection'),
+        ...Array(Math.max(0, b.nbAmp || 0)).fill('Amplification'),
+      ];
+      const finalStats = calculateSummonStats(invDef, bonusRunes);
+      // Base + bonus de runes — uniquement sur les valeurs de base, jamais sur
+      // les caractéristiques ou la portée définies dans la fiche.
       baseAttackUnscaled = String(base.attaque || '1d4 +2');   // les ACTIONS calculent à partir de ÇA (non scalé)
-      attaque = baseAttackUnscaled;
-      if (b.nbP > 0) { const m = attaque.match(/^(\d+)(d\d+)(.*)$/i); attaque = m ? `${parseInt(m[1]) + b.nbP}${m[2]}${m[3]}` : `${attaque} +${b.nbP}d6`; }
-      toucher     = (parseInt(base.toucher) || 0) + 2 * (b.nbCh || 0);
-      pvMax       = (parseInt(base.pv) || 10) + 5 * (b.nbProt || 0);
-      ca          = (parseInt(base.ca) || 10) + 2 * (b.nbProt || 0);   // Protection → +2 CA / rune
-      deplacement = (parseInt(base.deplacement) || 0) + 3 * (b.nbAmp || 0);
-      pmMax       = parseInt(base.pmMax) || 0;
+      attaque = finalStats.attaque;
+      toucherFlat = finalStats.toucher;
+      toucherStat = base.toucherStat;
+      degatsStat  = base.degatsStat;
+      summonAbilities = Object.fromEntries(INVOCATION_ABILITIES.map(({ key }) => [key, base[key]]));
+      toucher     = toucherFlat + invocationStatModifier(base, toucherStat);
+      pvMax       = finalStats.pv;
+      ca          = finalStats.ca + 2 * (b.nbProt || 0);   // Protection → +2 CA / rune
+      deplacement = finalStats.deplacement;
+      portee      = finalStats.portee;
+      pmMax       = finalStats.pmMax;
+      usesOwnMana = finalStats.usesOwnMana;
+      summonLevel = finalStats.niveau;
+      summonDeckMax = finalStats.deckMax;
       name        = invDef.nom || 'Invocation';
       image       = invDef.image || null;
-      actions     = Array.isArray(invDef.actions) ? invDef.actions : [];
+      actions     = getPreparedInvocationActions(invDef);
       summonInvId = invDef.id;
       restoreHp   = (invDef.currentHp != null) ? parseInt(invDef.currentHp) : null;
       restorePm   = (invDef.currentPm != null) ? parseInt(invDef.currentPm) : null;
     } else {
-      const iv = mod.legacy || {};
-      attaque = iv.attaque || '1d4'; baseAttackUnscaled = attaque; toucher = parseInt(iv.toucher) || 0;
-      pvMax = parseInt(iv.pv) || 10; ca = parseInt(iv.ca) || 10;
-      deplacement = parseInt(iv.deplacement) || 0;
-      name = iv.name || 'Invocation'; image = iv.image || null;
-      actions = Array.isArray(iv.actions) ? iv.actions : [];
+      const legacy = mod.legacy || {};
+      const iv = normalizeInvocationStats(legacy);
+      attaque = iv.attaque; baseAttackUnscaled = attaque;
+      toucherFlat = iv.toucher; toucherStat = iv.toucherStat; degatsStat = iv.degatsStat;
+      summonAbilities = Object.fromEntries(INVOCATION_ABILITIES.map(({ key }) => [key, iv[key]]));
+      toucher = toucherFlat + invocationStatModifier(iv, toucherStat);
+      const legacyFinal = calculateSummonStats({ stats: iv, actions: legacy.actions }, []);
+      pvMax = legacyFinal.pv; ca = legacyFinal.ca;
+      deplacement = legacyFinal.deplacement; portee = legacyFinal.portee; pmMax = legacyFinal.pmMax;
+      usesOwnMana = legacyFinal.usesOwnMana;
+      summonLevel = legacyFinal.niveau;
+      summonDeckMax = legacyFinal.deckMax;
+      name = legacy.name || 'Invocation'; image = legacy.image || null;
+      actions = getPreparedInvocationActions({ stats: iv, actions: legacy.actions });
     }
 
     const hp = (restoreHp != null) ? Math.max(0, Math.min(restoreHp, pvMax)) : pvMax;
@@ -3239,6 +3295,13 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
       summonConcentrationDD: opt?.mods?.concentration?.dd || null,
       summonChanceRc: opt?.mods?.chance?.rc ?? 20,
       summonActions: actions,
+      summonLevel,
+      summonDeckMax,
+      summonAbilities,
+      summonToucherStat: toucherStat,
+      summonDegatsStat: degatsStat,
+      summonToucherFlat: toucherFlat,
+      summonUsesOwnMana: usesOwnMana,
       summonElementId: mod.elementId || null,   // attaque de base = élément du sort d'invocation
       pageId: VS.activePage.id,
       col: targetCol, row: targetRow,
@@ -3246,7 +3309,7 @@ async function _vttSpawnSummon({ kind, srcId, col, row, opt, durationTurns = 2 }
       hp, hpMax: pvMax, pm, pmMax,
       defense: ca,
       movement: deplacement,
-      range: 1,
+      range: portee,
       attackDice: attaque,
       summonBaseAttack: baseAttackUnscaled,   // base NON scalée pour le calcul des actions
       attack: toucher,
@@ -3757,6 +3820,18 @@ function _buildAttackOptions(t) {
   //    Les combos Chance/Puissance hérités du sort sont propagés via summon*.
   if (t.summonKind === 'sentinelle' || t.summonKind === 'invocation') {
     const _isInvoc = t.summonKind === 'invocation';
+    const summonAbilities = t.summonAbilities || Object.fromEntries(INVOCATION_ABILITIES.map(({ key }) => [key, 10]));
+    const summonTouchStat = t.summonToucherStat || 'force';
+    const summonDmgStat = t.summonDegatsStat || 'force';
+    const hasSummonStatProfile = !!t.summonAbilities || !!t.summonToucherStat || !!t.summonDegatsStat;
+    const summonTouchStatMod = _isInvoc && summonTouchStat !== 'none'
+      ? getModFromScore(summonAbilities[summonTouchStat] ?? 10)
+      : 0;
+    const summonDmgStatMod = _isInvoc && summonDmgStat !== 'none'
+      ? getModFromScore(summonAbilities[summonDmgStat] ?? 10)
+      : 0;
+    const summonTouchFlat = Number.isFinite(parseInt(t.summonToucherFlat)) ? parseInt(t.summonToucherFlat) : 0;
+    const summonTouchTotal = hasSummonStatProfile ? summonTouchFlat + summonTouchStatMod : (t.attack ?? 5);
     const sentinelMods = {
       // Réinjecte le combo Chance hérité pour que _vttRollAttack utilise le bon RC
       chance: (t.summonChanceRc && t.summonChanceRc < 20) ? { rc: t.summonChanceRc } : null,
@@ -3769,9 +3844,13 @@ function _buildAttackOptions(t) {
       dice:    t.attackDice || '1d4',
       portee:  t.range ?? 1,
       pmCost:  0,
-      toucher: t.attack ?? 5,           // bonus toucher hérité du lanceur
-      dmgStatMod: 0,
-      dmgStatLabel: '—',
+      toucher: summonTouchTotal,
+      toucherMod: _isInvoc ? summonTouchStatMod : undefined,
+      toucherSetBonus: _isInvoc ? summonTouchFlat : undefined,
+      toucherSetBonusLabel: 'Base',
+      toucherStatLabel: invocationStatShort(summonTouchStat),
+      dmgStatMod: summonDmgStatMod,
+      dmgStatLabel: invocationStatShort(summonDmgStat),
       maitriseBonus: 0,
       halfOnMiss: false,
       // Invocation : attaque de base de l'élément du sort, mais AUCUN dégât sur un
@@ -3791,14 +3870,17 @@ function _buildAttackOptions(t) {
       const _cChar = {
         id: `__summon_${t.id || 'token'}`,
         nom: t.name || 'Invocation',
-        stats: { force:10, dexterite:10, constitution:10, intelligence:10, sagesse:10, charisme:10 },
+        niveau: Math.max(1, parseInt(t.summonLevel) || 1),
+        pvBase: t.hpMax || 10,
+        pmBase: t.pmMax || 0,
+        stats: summonAbilities,
         statsBonus: {}, maitrises: {},
         equipement: { 'Main principale': {
           nom: 'Attaque',
           degats: t.summonBaseAttack || t.attackDice || '1d4',
-          statAttaque: 'force',
-          toucherStat: 'force',
-          degatsStat: 'force',
+          statAttaque: summonTouchStat,
+          toucherStat: summonTouchStat,
+          degatsStat: summonDmgStat,
           portee: t.range || 1,
           isDefault: true,
         } },
@@ -3806,12 +3888,12 @@ function _buildAttackOptions(t) {
         elements: [],
       };
       let _ownerSetPmDelta = 0;
-      if (t.summonOwnerId) {
+      if (!t.summonUsesOwnMana && t.summonOwnerId) {
         const _ownerData = VS.tokens[t.summonOwnerId]?.data;
         const _ownerChar = _ownerData?.characterId ? VS.characters[_ownerData.characterId] : null;
         if (_ownerChar) _ownerSetPmDelta = getArmorSetData(_ownerChar).modifiers?.spellPmDelta || 0;
       }
-      const summonTouchBonus = Number.isFinite(parseInt(t.attack)) ? parseInt(t.attack) : 0;
+      const summonTouchBonus = summonTouchTotal;
       t.summonActions.forEach((a, ai) => {
         const baseRange = (a.portee != null && Number.isFinite(parseInt(a.portee)))
           ? parseInt(a.portee)
@@ -3831,19 +3913,21 @@ function _buildAttackOptions(t) {
           basePm: Math.max(0, pmRaw),
           pmRaw,
           pmSetDelta: _ownerSetPmDelta,
-          fallbackTouchStat: 'force',
-          fallbackDmgStat: 'force',
+          fallbackTouchStat: summonTouchStat,
+          fallbackDmgStat: summonDmgStat,
           fallbackTouchMod: summonTouchBonus,
-          fallbackDmgMod: 0,
-          touchSetBonus: 0,
+          fallbackDmgMod: summonDmgStatMod,
+          touchSetBonus: summonTouchFlat,
           enchantOnlyAlsoEtat: true,
-          extras: { _summonAction: true },
+          extras: {
+            _summonAction: true,
+            toucherSetBonusLabel: 'Base',
+            summonManaSource: t.summonUsesOwnMana ? 'invocation' : 'invocateur',
+          },
         });
         if (!opt) return;
-        if (!opt.autoHit && opt.toucher === undefined) {
-          opt.toucherMod = summonTouchBonus;
-          opt.toucherSetBonus = 0;
-          opt.toucherStatLabel = 'Invoc.';
+        if (!opt.autoHit && opt.toucher === undefined && opt.toucherMod !== undefined) {
+          opt.toucher = (opt.toucherMod || 0) + (opt.toucherSetBonus || 0);
         }
         options.push(_withSpellCooldown(t, opt));
       });
@@ -4673,8 +4757,9 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
     const _setExtra = _setDelta
       ? `<span class="vtt-aopt-pm-set" title="Set d'armure : ${_setDelta > 0 ? '+' : '−'}${Math.abs(_setDelta)} PM (coût brut ${o.pmRaw})">${_setDelta > 0 ? '⬆' : '🍃'} ${_setDelta > 0 ? '+' : '−'}${Math.abs(_setDelta)}</span>`
       : '';
+    const _manaSource = o.summonManaSource ? ` · ${o.summonManaSource}` : '';
     if (o.pmCost > 0) {
-      pmBadge = `<span class="vtt-aopt-pm ${_setReduc?'vtt-aopt-pm--reduced':''}">🔮 ${o.pmCost} PM${_setExtra}</span>`;
+      pmBadge = `<span class="vtt-aopt-pm ${_setReduc?'vtt-aopt-pm--reduced':''}"${_manaSource ? ` title="Réserve utilisée : ${_esc(o.summonManaSource)}"` : ''}>🔮 ${o.pmCost} PM${_manaSource}${_setExtra}</span>`;
     } else if (o.pmCost === 0 && o.basePm > 0) {
       pmBadge = `<span class="vtt-aopt-pm vtt-aopt-pm--free" title="Cast offert (multi-cibles ou sort suspendu déclenché)">🎁 Gratuit</span>`;
     } else if (o.basePm > 0) {
@@ -5307,7 +5392,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
   if (opt.toucherMod !== undefined) {
     const parts = []; let tot = 0;
     if (opt.toucherMod)        { tot += opt.toucherMod;      parts.push(`${opt.toucherStatLabel} ${sn(opt.toucherMod)}`); }
-    if (opt.toucherSetBonus)   { tot += opt.toucherSetBonus; parts.push(`Set ${sn(opt.toucherSetBonus)}`); }
+    if (opt.toucherSetBonus)   { tot += opt.toucherSetBonus; parts.push(`${opt.toucherSetBonusLabel || 'Set'} ${sn(opt.toucherSetBonus)}`); }
     if (_touchBuff>0)          { tot += _touchBuff;          parts.push(`🎯 Ench +${_touchBuff}`); }
     toucherFormula = _mkCell(`<code style="font-size:.88rem;color:var(--gold)">1d20</code>`, tot, parts, 'var(--gold)');
   } else {
@@ -6098,7 +6183,15 @@ async function _zoneValidate() {
     const srcD = VS.tokens[srcId]?.data;
     const _snap = _captureUndoSnapshot(srcId, []);
     if (_zid) _snap.createdAnnots = [_zid];
-    if (srcD) await _vttSpendSpellPm(srcD, opt);
+    if (srcD && !(await _vttSpendSpellPm(srcD, opt))) {
+      if (_zid) {
+        _annotations[_zid]?.shape?.destroy?.();
+        delete _annotations[_zid];
+        await deleteDoc(_annotRef(_zid)).catch(() => {});
+      }
+      _zoneClear();
+      return;
+    }
     if (srcD) await _vttStartSpellCooldown(srcD, opt);
     await _vttApplyCasterConcentration(srcId, opt);
     const _statsDelta = srcD ? _applyCastStatsDelta(srcD, opt) : null;
@@ -6143,7 +6236,15 @@ async function _zoneValidate() {
     // Snapshot AVANT déduction PM/concentration + tokens créés → annulable par le MJ.
     const _snap = _captureUndoSnapshot(srcId, []);
     _snap.createdTokens = [..._summonSpawnIds];
-    if (srcD) await _vttSpendSpellPm(srcD, opt);
+    if (srcD && !(await _vttSpendSpellPm(srcD, opt))) {
+      for (const tokenId of _summonSpawnIds) {
+        VS.tokens[tokenId]?.shape?.destroy?.();
+        delete VS.tokens[tokenId];
+        await deleteDoc(_tokRef(tokenId)).catch(() => {});
+      }
+      _zoneClear();
+      return;
+    }
     await _vttApplyCasterConcentration(srcId, opt);
     const _statsDelta = srcD ? _applyCastStatsDelta(srcD, opt) : null;
     await addDoc(_logCol(), {
@@ -6448,14 +6549,26 @@ async function _vttRollAttack() {
 
   const authorName = STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'MJ';
   let _preAppliedCastStatsDelta = null;
-  // Payeur du mana : un token convoqué (invocation) n'a pas de PM propre — ses
-  // sorts/actions sont payés sur le personnage du LANCEUR (summonOwnerId).
+  // Payeur du mana : selon la configuration de l'invocation, ses actions débitent
+  // soit le token lui-même, soit le personnage qui l'a invoquée.
   const _srcChar = _characterForToken(src);
   const _ownerTok = src.summonOwnerId ? VS.tokens[src.summonOwnerId]?.data : null;
-  const _pmPayerCharId = src.summonOwnerCharId || _srcChar?.id || (_ownerTok ? _characterForToken(_ownerTok)?.id : null);
+  const _pmPayerToken = src.summonKind === 'invocation' && src.summonUsesOwnMana ? src : null;
+  const _pmPayerCharId = !_pmPayerToken
+    ? (src.summonOwnerCharId || _srcChar?.id || (_ownerTok ? _characterForToken(_ownerTok)?.id : null))
+    : null;
   const _pmPayerNpcId = !_pmPayerCharId && src.npcId ? src.npcId : null;
   const _deductPm  = async () => {
     if (opt.pmCost <= 0) return;
+    if (_pmPayerToken) {
+      const curPm = Math.max(0, _numOr(_pmPayerToken.pm, _numOr(_pmPayerToken.pmMax, 0)));
+      const curCmb = Math.max(0, _numOr(_pmPayerToken.pmCombat, curPm));
+      await updateDoc(_tokRef(srcId), {
+        pm: Math.max(0, curPm - opt.pmCost),
+        pmCombat: Math.max(0, curCmb - opt.pmCost),
+      }).catch(() => {});
+      return;
+    }
     if (_pmPayerCharId) {
       const c = VS.characters[_pmPayerCharId];
       if (c) await updateDoc(_chrRef(_pmPayerCharId), {
@@ -6553,7 +6666,14 @@ async function _vttRollAttack() {
 
   try {
 
-    // ── Vérification PM (payés par le lanceur si c'est une invocation) ──
+    // ── Vérification PM sur la réserve choisie pour l'invocation ──
+    if (opt.pmCost > 0 && _pmPayerToken) {
+      const actualPm = Math.max(0, _numOr(_pmPayerToken.pm, _numOr(_pmPayerToken.pmMax, 0)));
+      if (actualPm < opt.pmCost) {
+        showNotif(`⚠ PM insuffisants de l’invocation (${actualPm}/${opt.pmCost} requis)`, 'error');
+        return;
+      }
+    }
     if (opt.pmCost > 0 && _pmPayerCharId) {
       const cPm = VS.characters[_pmPayerCharId];
       if (cPm) {

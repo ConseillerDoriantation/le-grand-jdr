@@ -128,7 +128,10 @@ export function _characterForToken(t) {
 
 export function _live(t) {
   if (!t) return null;
-  const c = _characterForToken(t);
+  // Une invocation possède désormais ses propres PV/PM/caractéristiques. Elle ne
+  // doit jamais hériter implicitement de la fiche quand son propriétaire ne joue
+  // qu'un seul personnage.
+  const c = t.summonKind === 'invocation' ? null : _characterForToken(t);
   const n = t.npcId       ? VS.npcs[t.npcId]             : null;
   const b = t.beastId     ? VS.bestiary[t.beastId]       : null;
   const e = c || n || b;
@@ -143,12 +146,16 @@ export function _live(t) {
     const _sum = (ty) => (t.buffs || []).filter(bf => _act(bf, ty)).reduce((s, bf) => s + (bf.bonus || 0), 0);
     const _ca  = (t.defense ?? 0) + _sum('ca');
     const _mv  = (t.buffs || []).filter(bf => _act(bf, 'move_bonus') || _act(bf, 'move_debuff')).reduce((s, bf) => s + (bf.bonus || 0), 0);
+    const _pmMax = Math.max(0, _numOr(t.pmMax, 0));
     return {
       ...t,
       displayName:     t.name,
       displayImage:    t.imageUrl ?? null,
       displayHp:       t.hp    ?? 20,
       displayHpMax:    t.hpMax ?? 20,
+      displayPm:       _pmMax > 0 ? Math.max(0, _numOr(t.pm, _pmMax)) : null,
+      displayPmMax:    _pmMax,
+      hasMana:         _pmMax > 0,
       displayMovement: Math.max(0, (t.movement ?? 6) + _mv + _conditionMoveBonusOf(t)),
       displayAttack:   t.attack   ?? 5,
       displayAttackDice: t.attackDice || '1d6',
