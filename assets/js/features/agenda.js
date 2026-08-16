@@ -42,7 +42,6 @@ const DAYS = [
 const STATES = ['', 'ok', 'maybe', 'no'];
 const STATE_LABELS = { '': 'Non renseigné', ok: 'Disponible', maybe: 'Peut-être', no: 'Indisponible' };
 const STATE_EMOJI  = { '': '⚪', ok: '✅', maybe: '❓', no: '❌' };
-const WEEKS_AHEAD = 4;
 
 // ── State global module ───────────────────────────────────────────────────
 let _ag = {
@@ -54,6 +53,7 @@ let _ag = {
   groupFilter:null,             // null = tous · sinon id de quête (= groupe de joueurs)
   saveTimer:  null,             // debounce sauvegarde
   nextSession:null,             // séance validée par le MJ (doc agenda_session/next)
+  calMonthOffset: 0,            // mois affiché (0 = mois courant) — calendrier perso + vue groupe
 };
 
 // ── Helpers date ──────────────────────────────────────────────────────────
@@ -72,6 +72,10 @@ function _formatDateFr(d) {
 }
 function _formatDateShort(d) {
   return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+}
+function _formatDatePill(d) {
+  // « sam. 12 sept. » compact pour les pastilles de créneaux
+  return d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 function _dateFromISO(iso) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return null;
@@ -346,15 +350,15 @@ function _computeQuestSuggestions(quest, daysAhead = 28) {
 
   const today = _today();
   const slots = [];
+  // Résout la dispo de chaque participant UNE seule fois (résolution d'alias =
+  // coûteuse) au lieu de la refaire pour chaque créneau (28 jours × 3 moments).
+  const avails = parts.map(p => ({ p, av: _availabilityForUid(p.uid) }));
 
   for (let i = 0; i < daysAhead; i++) {
     const date = _addDays(today, i);
     const iso = _toISO(date);
     for (const slot of SLOTS) {
-      const detail = parts.map(p => {
-        const av = _availabilityForUid(p.uid);
-        return { uid: p.uid, nom: p.nom, state: _slotState(av, date, slot.id) };
-      });
+      const detail = avails.map(({ p, av }) => ({ uid: p.uid, nom: p.nom, state: _slotState(av, date, slot.id) }));
       const okCount    = detail.filter(d => d.state === 'ok').length;
       const maybeCount = detail.filter(d => d.state === 'maybe').length;
       const noCount    = detail.filter(d => d.state === 'no').length;
@@ -392,64 +396,86 @@ function _renderSuggestions() {
     return;
   }
 
-  el.innerHTML = myQuests.map(q => {
-    const sugs = _computeQuestSuggestions(q);
+  const MX_SYM = { ok: '✓', maybe: '?', no: '✕', '': '' };
+  if (!_ag._sugPick) _ag._sugPick = {};
+  const legend = `<div class="ag-sg-legend">
+    <span class="ag-sg-lg ag-sg-lg--ok">Dispo</span>
+    <span class="ag-sg-lg ag-sg-lg--maybe">Peut-être</span>
+    <span class="ag-sg-lg ag-sg-lg--no">Non</span>
+    <span class="ag-sg-lg ag-sg-lg--none">Pas répondu</span>
+  </div>`;
+
+  // 3 états d'un créneau : validé · complet (tout le monde ok) · partiel
+  // (majorité ok, mais certains « peut-être » ou sans réponse).
+  const STATUS_LABEL = { val: '✓ Validé', full: '✓ Tout le monde', partial: 'Majorité' };
+  const slotStatus = (s, isVal) => isVal ? 'val' : (s.okCount === s.total ? 'full' : 'partial');
+
+  const computed = {}; // réutilisé pour _ag._lastSugs → pas de double calcul
+  const cards = myQuests.map(q => {
+    const sugs = computed[q.id] = _computeQuestSuggestions(q);
     const parts = _questParticipants(q);
     const manualBtn = STATE.isAdmin
       ? `<button type="button" class="ag-quest-manual" data-action="_agOpenManualSession" data-quest-id="${_esc(q.id)}" title="Fixer une séance sans attendre les disponibilités">+ Date libre</button>`
       : '';
-    const renderSuggestion = (s, idx) => {
-      const isFull = s.okCount === s.total;
-      const isValidated = _isSlotValidated(q.id, s.iso, s.slot.id);
-      const cls = (isValidated ? 'ag-sug--validated ' : '') + (isFull ? 'ag-sug--full' : 'ag-sug--partial');
-      const dateStr = _formatDateFr(s.date);
-      return `<div class="ag-sug ${cls}" data-sug-idx="${idx}" data-quest-id="${q.id}"
-        data-action="_agShowSugDetail" data-id="${q.id}" data-idx="${idx}">
-        <div class="ag-sug-rank">${isValidated ? '✓' : (idx + 1)}</div>
-        <div class="ag-sug-body">
-          <div class="ag-sug-date">${_esc(dateStr)} <span class="ag-sug-slot">${s.slot.emoji} ${s.slot.label}</span>${isValidated ? ' <span class="ag-sug-badge">Validée</span>' : ''}</div>
-          <div class="ag-sug-people">
-            ${s.detail.map(d => `<span class="ag-sug-chip ag-sug-chip--${d.state||'none'}" title="${_esc(d.nom||'?')} : ${STATE_LABELS[d.state]||'?'}">${STATE_EMOJI[d.state]||'⚪'} ${_esc((d.nom||'?').slice(0,8))}</span>`).join('')}
-          </div>
-        </div>
-        <div class="ag-sug-score">
-          <span class="ag-sug-score-val">${s.okCount}/${s.total}</span>
-          ${s.maybeCount ? `<span class="ag-sug-score-maybe">+${s.maybeCount}?</span>` : ''}
-        </div>
-      </div>`;
-    };
+    const head = `<div class="ag-quest-hd">
+      <div class="ag-quest-main">
+        <span class="ag-quest-title">${_esc(q.titre || q.nom || 'Quête')}</span>
+        <span class="ag-quest-count">${parts.length} participant${parts.length>1?'s':''}</span>
+      </div>
+      ${manualBtn}
+    </div>`;
     if (!sugs.length) {
-      return `<div class="ag-quest-card">
-        <div class="ag-quest-hd">
-          <div class="ag-quest-main">
-            <span class="ag-quest-title">${_esc(q.titre || q.nom || 'Quête')}</span>
-            <span class="ag-quest-count">${parts.length} participant${parts.length>1?'s':''}</span>
-          </div>
-          ${manualBtn}
-        </div>
-        <div class="ag-quest-empty">Pas encore de créneau compatible. Le MJ peut fixer une date libre sans attendre les dispos.</div>
+      return `<div class="ag-quest-card">${head}
+        <div class="ag-quest-empty">Pas encore de créneau compatible.${STATE.isAdmin ? ' Fixe une date libre sans attendre les dispos.' : ''}</div>
       </div>`;
     }
-    return `<div class="ag-quest-card">
-      <div class="ag-quest-hd">
-        <div class="ag-quest-main">
-          <span class="ag-quest-title">${_esc(q.titre || q.nom || 'Quête')}</span>
-          <span class="ag-quest-count">${parts.length} participant${parts.length>1?'s':''}</span>
+    // ── Dates candidates cliquables + créneau vedette avec portraits ──
+    const cols = sugs.slice(0, 6);
+    const sel = Math.min(Math.max(_ag._sugPick[q.id] || 0, 0), cols.length - 1);
+    const chips = cols.map((s, idx) => {
+      const status = slotStatus(s, _isSlotValidated(q.id, s.iso, s.slot.id));
+      const cls = (idx === sel ? 'is-sel ' : '') + `st-${status}`;
+      return `<button type="button" class="ag-sg-chip ${cls}" data-action="_agPickSug" data-id="${q.id}" data-idx="${idx}"
+        title="${_esc(_formatDateFr(s.date))} — ${s.slot.label} · ${s.okCount}/${s.total} dispo${status === 'val' ? ' · validé' : ''}">
+        <span class="ag-sg-chip-d">${_esc(_formatDatePill(s.date))}</span>
+        <span class="ag-sg-chip-s">${s.slot.emoji}</span>
+        <span class="ag-sg-chip-n">${s.okCount}/${s.total}${status === 'val' ? ' ✓' : ''}</span>
+      </button>`;
+    }).join('');
+
+    const s = cols[sel];
+    const isVal = _isSlotValidated(q.id, s.iso, s.slot.id);
+    const status = slotStatus(s, isVal);
+    const roster = parts.map((p, j) => {
+      const st = s.detail[j]?.state || '';
+      return `<div class="ag-sg-av ag-sg-av--${st || 'none'}" title="${_esc(p.nom || '?')} — ${STATE_LABELS[st] || 'Pas répondu'}">
+        <div class="ag-sg-avwrap">${_participantAvatar(p, 38)}${MX_SYM[st] ? `<span class="ag-sg-badge">${MX_SYM[st]}</span>` : ''}</div>
+        <span class="ag-sg-avname">${_esc(p.nom || '?')}</span>
+      </div>`;
+    }).join('');
+    const mjBtn = STATE.isAdmin
+      ? (isVal
+          ? `<button type="button" class="ag-sg-act ag-sg-act--off" data-action="_agUnvalidateSlot" data-quest-id="${q.id}" data-iso="${s.iso}" data-slot-id="${s.slot.id}">✕ Retirer</button>`
+          : `<button type="button" class="ag-sg-act" data-action="_agValidateSlot" data-quest-id="${q.id}" data-iso="${s.iso}" data-slot-id="${s.slot.id}">✓ Valider ce créneau</button>`)
+      : '';
+
+    return `<div class="ag-quest-card ag-sg-card">${head}
+      <div class="ag-sg-dates">${chips}</div>
+      <div class="ag-sg-hero st-${status}">
+        <div class="ag-sg-heroline">
+          <span class="ag-sg-herodate">${_esc(_formatDateFr(s.date))}</span>
+          <span class="ag-sg-heroslot">${s.slot.emoji} ${s.slot.label}</span>
+          <span class="ag-sg-heroscore">${s.okCount}/${s.total}${s.maybeCount ? ` <i>+${s.maybeCount} ?</i>` : ''}</span>
+          <span class="ag-sg-status st-${status}">${STATUS_LABEL[status]}</span>
         </div>
-        ${manualBtn}
-      </div>
-      <div class="ag-sug-list">
-        ${renderSuggestion(sugs[0], 0)}
-        ${sugs.length > 1 ? `<details class="ag-sug-more">
-          <summary>Autres créneaux <span>${sugs.length - 1}</span></summary>
-          <div class="ag-sug-more-list">${sugs.slice(1).map((s, i) => renderSuggestion(s, i + 1)).join('')}</div>
-        </details>` : ''}
+        <div class="ag-sg-roster">${roster}</div>
+        ${mjBtn}
       </div>
     </div>`;
   }).join('');
+  el.innerHTML = legend + cards;
 
-  // Garder en mémoire la dernière computation pour le détail modal
-  _ag._lastSugs = Object.fromEntries(myQuests.map(q => [q.id, _computeQuestSuggestions(q)]));
+  _ag._lastSugs = computed; // détail modal réutilise le calcul déjà fait
 }
 
 function _renderAgendaOverview() {
@@ -1015,20 +1041,49 @@ function _renderSessionHistory() {
 
 
 // ── Rendu : calendrier personnel ──────────────────────────────────────────
+// ── Navigation par mois (partagée calendrier perso + vue groupe) ──────────
+function _displayedMonth() {
+  const t = _today();
+  const base = new Date(t.getFullYear(), t.getMonth() + (_ag.calMonthOffset || 0), 1);
+  base.setHours(0, 0, 0, 0);
+  return base;
+}
+function _monthLabel(base) {
+  const s = base.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+function _agMonthNav() {
+  const isNow = (_ag.calMonthOffset || 0) === 0;
+  // Bouton « Aujourd'hui » toujours présent (désactivé sur le mois courant) :
+  // sinon son apparition décalerait la flèche « › » et provoquerait des clics ratés.
+  return `<div class="ag-monthnav">
+    <button type="button" class="ag-monthnav-btn" data-action="_agCalNav" data-delta="-1" title="Mois précédent" aria-label="Mois précédent">‹</button>
+    <div class="ag-monthnav-title">${_monthLabel(_displayedMonth())}</div>
+    <button type="button" class="ag-monthnav-btn" data-action="_agCalNav" data-delta="1" title="Mois suivant" aria-label="Mois suivant">›</button>
+    <button type="button" class="ag-monthnav-today" data-action="_agCalNav" data-today="1" ${isNow ? 'disabled aria-disabled="true"' : ''}>Aujourd'hui</button>
+  </div>`;
+}
+
 function _renderCalendar() {
   const el = document.getElementById('ag-calendar');
   if (!el) return;
   const today = _today();
-  // Démarre au lundi de la semaine courante
-  const firstDay = _addDays(today, -((today.getDay() + 6) % 7));
+  const base = _displayedMonth();
+  const month = base.getMonth();
+  const monthEnd = new Date(base.getFullYear(), month + 1, 0); monthEnd.setHours(0, 0, 0, 0);
+  // Grille = semaines (lundi→dimanche) couvrant le mois affiché
+  const gridStart = _addDays(base, -((base.getDay() + 6) % 7));
+  const lastMonday = _addDays(monthEnd, -((monthEnd.getDay() + 6) % 7));
+  const weekCount = Math.round((lastMonday - gridStart) / (7 * 86400000)) + 1;
   const weeks = [];
-  for (let w = 0; w < WEEKS_AHEAD; w++) {
+  for (let w = 0; w < weekCount; w++) {
     const week = [];
-    for (let d = 0; d < 7; d++) week.push(_addDays(firstDay, w * 7 + d));
+    for (let d = 0; d < 7; d++) week.push(_addDays(gridStart, w * 7 + d));
     weeks.push(week);
   }
 
   el.innerHTML = `
+    ${_agMonthNav()}
     <div class="ag-cal-header">
       <div class="ag-cal-corner"></div>
       ${DAYS.map(d => `<div class="ag-cal-dayhdr">${d.label}</div>`).join('')}
@@ -1040,7 +1095,8 @@ function _renderCalendar() {
           const iso = _toISO(d);
           const isToday = iso === _toISO(today);
           const isPast = d < today;
-          return `<div class="ag-cal-cell${isToday ? ' ag-cal-cell--today' : ''}${isPast ? ' ag-cal-cell--past' : ''}">
+          const outMonth = d.getMonth() !== month;
+          return `<div class="ag-cal-cell${isToday ? ' ag-cal-cell--today' : ''}${isPast ? ' ag-cal-cell--past' : ''}${outMonth ? ' ag-cal-cell--out' : ''}">
             <div class="ag-cal-date">${d.getDate()}</div>
             <div class="ag-cal-slots">
               ${SLOTS.map(s => {
@@ -1120,9 +1176,11 @@ function _renderGroupView() {
   if (!_ag.groupView) { el.innerHTML = ''; return; }
 
   const today = _today();
-  const firstDay = _addDays(today, -((today.getDay() + 6) % 7));
+  const todayIso = _toISO(today);
+  const base = _displayedMonth();
+  const monthEnd = new Date(base.getFullYear(), base.getMonth() + 1, 0); monthEnd.setHours(0, 0, 0, 0);
   const days = [];
-  for (let i = 0; i < 14; i++) days.push(_addDays(firstDay, i));
+  for (let d = new Date(base); d <= monthEnd; d = _addDays(d, 1)) days.push(new Date(d));
 
   const playersByIdentity = new Map();
   [...(_ag.users || []), ...(_ag.allAvails || [])].forEach(raw => {
@@ -1163,19 +1221,29 @@ function _renderGroupView() {
         data-action="_agSetGroupFilter" data-group="${_esc(q.id)}">${_esc(q.titre||q.nom||'Quête')}
         <span class="ag-grp-filter-count">${_questParticipants(q).length}</span></button>`).join('')}
     </div>` : '';
+  const header = _agMonthNav() + filtersHtml;
 
   if (!players.length) {
-    el.innerHTML = filtersHtml + `<div class="ag-quest-empty" style="margin-top:.6rem">Aucun joueur dans ce groupe (hors toi).</div>`;
+    el.innerHTML = header + `<div class="ag-quest-empty" style="margin-top:.6rem">Aucun joueur dans ce groupe (hors toi).</div>`;
     return;
   }
 
-  el.innerHTML = filtersHtml + `
+  const dayCls = d => {
+    const iso = _toISO(d);
+    let c = 'ag-grp-daycell';
+    if (iso === todayIso) c += ' ag-grp-daycell--today';
+    else if (d < today) c += ' ag-grp-daycell--past';
+    if ((d.getDay() + 6) % 7 === 0) c += ' ag-grp-daycell--wk'; // lundi = début de semaine
+    return c;
+  };
+
+  el.innerHTML = header + `
     <div class="ag-grp-scroll">
       <table class="ag-grp-table">
         <thead>
           <tr>
             <th class="ag-grp-namecell">Joueur</th>
-            ${days.map(d => `<th class="ag-grp-daycell">
+            ${days.map(d => `<th class="${dayCls(d)}">
               <div class="ag-grp-dlabel">${DAYS[(d.getDay()+6)%7].label}</div>
               <div class="ag-grp-dnum">${d.getDate()}/${d.getMonth()+1}</div>
             </th>`).join('')}
@@ -1192,7 +1260,7 @@ function _renderGroupView() {
                   const st = _slotState(av, d, s.id);
                   return `<span class="ag-grp-slot ag-slot--${st||'none'}" title="${s.label} : ${STATE_LABELS[st]||'?'}"></span>`;
                 }).join('');
-                return `<td class="ag-grp-daycell"><div class="ag-grp-slots">${cells}</div></td>`;
+                return `<td class="${dayCls(d)}"><div class="ag-grp-slots">${cells}</div></td>`;
               }).join('')}
             </tr>`;
           }).join('')}
@@ -1389,6 +1457,7 @@ PAGES.agenda = renderAgendaPage;
 
 registerActions({
   _agShowSugDetail:         (btn) => showSuggestionDetail(btn.dataset.id, Number(btn.dataset.idx)),
+  _agPickSug:               (btn) => { if (!_ag._sugPick) _ag._sugPick = {}; _ag._sugPick[btn.dataset.id] = Number(btn.dataset.idx || 0); _renderSuggestions(); },
   _agOpenManualSession:     (btn) => openManualSessionModal(btn.dataset.questId),
   _agValidateManualSlot:    (btn) => validateManualSlot(btn.dataset.questId),
   _agCloseModal:            ()    => closeModal(),
@@ -1402,6 +1471,7 @@ registerActions({
   _agOpenMission:           (btn) => _openAgendaMission(btn.dataset.missionId),
   _agOpenStats:             (btn) => _openAgendaStats(btn.dataset.date),
   _agCycle:                 (btn) => cycleAgendaSlot(btn.dataset.iso, btn.dataset.slot),
+  _agCalNav:                (btn) => { _ag.calMonthOffset = btn.dataset.today ? 0 : (_ag.calMonthOffset || 0) + Number(btn.dataset.delta || 0); _renderCalendar(); _renderGroupView(); },
   _agRecCycle:              (btn) => cycleRecurringSlot(btn.dataset.day, btn.dataset.slot, btn),
   _agSetRecurringPattern:   (btn) => setRecurringPattern(btn.dataset.pattern),
   _agOpenRecurringEditor:   ()    => openRecurringEditor(),
