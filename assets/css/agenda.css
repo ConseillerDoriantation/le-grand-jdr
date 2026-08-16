@@ -297,6 +297,177 @@
   font-style: italic;
   text-align: center;
 }
+/* Créneaux recommandés — créneau vedette + portraits joueurs */
+.ag-sg-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 10px;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.ag-sg-lg { display: inline-flex; align-items: center; gap: 5px; color: var(--text-dim); }
+.ag-sg-lg::before {
+  content: "";
+  width: 10px; height: 10px; border-radius: 50%;
+  border: 2px solid currentColor;
+}
+.ag-sg-lg--ok    { color: #34c38e; }
+.ag-sg-lg--maybe { color: #e8b84b; }
+.ag-sg-lg--no    { color: #ff5a7e; }
+.ag-sg-lg--none  { color: var(--text-muted); }
+
+.ag-sg-card { gap: 10px; }
+/* Barre de dates candidates */
+.ag-sg-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ag-sg-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 52px;
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color .15s, background .15s, transform .12s;
+}
+.ag-sg-chip:hover { transform: translateY(-1px); border-color: var(--gold); }
+.ag-sg-chip-d { font-size: 0.62rem; font-weight: 700; text-transform: capitalize; line-height: 1.1; }
+.ag-sg-chip-s { font-size: 0.9rem; line-height: 1.2; }
+.ag-sg-chip-n { font-size: 0.62rem; font-weight: 800; color: var(--text-dim); }
+/* 3 états — accent haut + couleur du score */
+.ag-sg-chip { border-top-width: 2px; }
+.ag-sg-chip.st-full    { border-top-color: #34c38e; }
+.ag-sg-chip.st-full .ag-sg-chip-n    { color: #5fe5b1; }
+.ag-sg-chip.st-partial { border-top-color: #e8b84b; }
+.ag-sg-chip.st-partial .ag-sg-chip-n { color: #f4d076; }
+.ag-sg-chip.st-val     { border-top-color: var(--gold); background: var(--gold-glow, rgba(212,175,55,.1)); }
+.ag-sg-chip.st-val .ag-sg-chip-n     { color: var(--gold); }
+.ag-sg-chip.is-sel {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold-glow, rgba(212,175,55,.35)) inset;
+}
+
+/* Créneau vedette */
+.ag-sg-hero {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--r-md, 10px);
+  background: var(--bg-elevated);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ag-sg-hero.st-full    { border-left-color: #34c38e; }
+.ag-sg-hero.st-partial { border-left-color: #e8b84b; }
+.ag-sg-hero.st-val     { border-left-color: var(--gold); background: var(--gold-glow, rgba(212,175,55,.08)); }
+.ag-sg-heroline {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+.ag-sg-herodate {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--text);
+  text-transform: capitalize;
+}
+.ag-sg-heroslot { font-size: 0.8rem; color: var(--text-dim); font-weight: 600; }
+.ag-sg-heroscore { font-size: 0.8rem; font-weight: 800; color: var(--text-dim); }
+.ag-sg-heroscore i { font-style: normal; color: #f4d076; font-weight: 700; }
+/* Pastille de statut (3 états, couleurs distinctes) */
+.ag-sg-status {
+  margin-left: auto;
+  font-size: 0.66rem;
+  font-weight: 800;
+  border-radius: 999px;
+  padding: 2px 10px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.ag-sg-status.st-full    { color: #34c38e; background: rgba(34,195,142,.14);  border-color: rgba(34,195,142,.4); }
+.ag-sg-status.st-partial { color: #d99e18; background: rgba(232,184,75,.14);  border-color: rgba(232,184,75,.42); }
+.ag-sg-status.st-val     { color: #1a1205; background: var(--gold); border-color: var(--gold); }
+[data-theme="light"] .ag-sg-status.st-full    { color: #047857; }
+[data-theme="light"] .ag-sg-status.st-partial { color: #a16207; }
+[data-theme="light"] .ag-sg-chip.st-full .ag-sg-chip-n    { color: #047857; }
+[data-theme="light"] .ag-sg-chip.st-partial .ag-sg-chip-n { color: #a16207; }
+
+/* Roster : portraits + statut */
+.ag-sg-roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.ag-sg-av {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 52px;
+}
+.ag-sg-avwrap { position: relative; line-height: 0; }
+.ag-sg-avwrap .ag-avatar { box-shadow: 0 0 0 2px var(--ring, var(--border)); }
+.ag-sg-av--ok    { --ring: #34c38e; }
+.ag-sg-av--maybe { --ring: #e8b84b; }
+.ag-sg-av--no    { --ring: #ff5a7e; }
+.ag-sg-av--none  { --ring: var(--border); }
+.ag-sg-av--no .ag-avatar,
+.ag-sg-av--none .ag-avatar { filter: grayscale(0.7) opacity(0.65); }
+.ag-sg-badge {
+  position: absolute;
+  right: -3px; bottom: -3px;
+  min-width: 15px; height: 15px;
+  padding: 0 2px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--ring);
+  border: 1.5px solid var(--ring);
+  font-size: 0.6rem;
+  font-weight: 900;
+  line-height: 12px;
+  text-align: center;
+}
+.ag-sg-avname {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  max-width: 52px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+.ag-sg-av--ok .ag-sg-avname { color: var(--text); }
+
+/* Action MJ */
+.ag-sg-act {
+  align-self: flex-start;
+  border: 1px solid var(--gold);
+  background: var(--gold-glow, rgba(212,175,55,.12));
+  color: var(--gold);
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background .15s, transform .12s;
+}
+.ag-sg-act:hover { transform: translateY(-1px); background: var(--gold-glow, rgba(212,175,55,.2)); }
+.ag-sg-act--off { border-color: rgba(255,90,126,.5); background: rgba(255,90,126,.1); color: #ff8ca7; }
+
+[data-theme="light"] .ag-sg-heroscore i { color: #a16207; }
+
 .ag-sug-list {
   display: flex; flex-direction: column; gap: 6px;
 }
@@ -527,6 +698,50 @@
   border-radius: var(--r-lg);
   padding: 12px;
 }
+/* Navigation par mois (partagée calendrier perso + vue groupe) */
+.ag-monthnav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.ag-monthnav-btn {
+  width: 30px; height: 30px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.2rem; line-height: 1;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.ag-monthnav-btn:hover { background: var(--bg-hover, var(--bg-card)); border-color: var(--gold); }
+.ag-monthnav-title {
+  min-width: 160px;
+  text-align: center;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.98rem;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+.ag-monthnav-today {
+  margin-left: 6px;
+  padding: 5px 10px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.ag-monthnav-today:hover:not(:disabled) { color: var(--gold); border-color: var(--gold); }
+.ag-monthnav-today:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
 .ag-cal-header {
   display: grid;
   grid-template-columns: 70px repeat(7, 1fr);
@@ -574,6 +789,12 @@
   opacity: 0.55;
   pointer-events: none;
 }
+.ag-cal-cell--out {
+  opacity: 0.4;
+  background: transparent;
+  border-style: dashed;
+}
+.ag-cal-cell--out .ag-cal-date { color: var(--text-dim); }
 .ag-cal-date {
   font-family: var(--font-display);
   font-size: 0.82rem;
@@ -729,6 +950,13 @@
   min-width: 110px;
 }
 .ag-grp-daycell { min-width: 56px; }
+.ag-grp-daycell--past { opacity: 0.5; }
+.ag-grp-daycell--today {
+  background: var(--gold-glow, rgba(212,175,55,.12));
+  border-radius: var(--r-sm);
+}
+.ag-grp-daycell--today .ag-grp-dnum { color: var(--gold); font-weight: 700; }
+.ag-grp-daycell--wk { border-left: 2px solid var(--border); }
 .ag-grp-dlabel {
   font-size: 0.6rem;
   color: var(--text-dim);
