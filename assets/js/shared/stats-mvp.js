@@ -4,11 +4,18 @@ const AXES = {
   // des performances d'un coéquipier ou d'un autre groupe de la mission.
   offense:    { label: 'Offense',             icon: '🗡️', reference: 100 },
   support:    { label: 'Soutien & contrôle',  icon: '✨', reference: 60 },
-  protection: { label: 'Protection',          icon: '🛡️', reference: 50 },
+  protection: { label: 'Protection',          icon: '🛡️', reference: 48 },
   skill:      { label: 'Compétences & RP',    icon: '🎲', reference: 30 },
 };
 
 const AXIS_WEIGHTS = [1, 0.20, 0.05, 0];
+const AXIS_SOFT_CAPS = [
+  { upTo: 100, multiplier: 1 },
+  { upTo: 150, multiplier: 0.50 },
+  { upTo: 250, multiplier: 0.25 },
+  { upTo: 500, multiplier: 0.10 },
+  { upTo: Infinity, multiplier: 0.05 },
+];
 const num = value => Math.max(0, Number(value) || 0);
 const rounded = value => Math.round((Number(value) || 0) * 10) / 10;
 
@@ -21,6 +28,24 @@ function median(values = []) {
 
 function part(label, count, coef, icon) {
   return { label, count, coef, points: count * coef, icon };
+}
+
+/**
+ * Rendements décroissants d'un axe, sans plafond dur : 100 % jusqu'au repère,
+ * puis 50 %, 25 %, 10 % et enfin 5 %. Une spécialisation exceptionnelle reste
+ * récompensée, mais un volume extrême ne redevient pas dominant linéairement.
+ */
+export function scoreMvpAxis(baseIndex = 0) {
+  let previous = 0;
+  let score = 0;
+  const value = num(baseIndex);
+  for (const tier of AXIS_SOFT_CAPS) {
+    if (value <= previous) break;
+    const width = Math.min(value, tier.upTo) - previous;
+    score += width * tier.multiplier;
+    previous = tier.upTo;
+  }
+  return rounded(score);
 }
 
 /**
@@ -98,11 +123,15 @@ export function scoreMvpSession(rows = []) {
   const profiles = rows.map(buildMvpRawProfile);
 
   return profiles.map(profile => {
-    const entries = weightEntries(Object.values(profile.axes).map(axis => ({
-      ...axis,
-      children: axis.parts,
-      normalized: rounded(Math.min(100, axis.raw / axis.reference * 100)),
-    })));
+    const entries = weightEntries(Object.values(profile.axes).map(axis => {
+      const baseNormalized = rounded(axis.raw / axis.reference * 100);
+      return {
+        ...axis,
+        children: axis.parts,
+        baseNormalized,
+        normalized: scoreMvpAxis(baseNormalized),
+      };
+    }));
     const score = Math.round(entries.reduce((sum, entry) => sum + entry.points, 0));
     return {
       id: profile.id,
@@ -166,6 +195,7 @@ export function scoreMvpCampaign(sessionRows = []) {
         ...AXES[key],
         raw: rounded(median(axisEntries.map(entry => entry.raw))),
         reference: rounded(median(axisEntries.map(entry => entry.reference))),
+        baseNormalized: rounded(median(axisEntries.map(entry => entry.baseNormalized))),
         normalized: rounded(median(axisEntries.map(entry => entry.normalized))),
         evidence: axisEntries.reduce((sum, entry) => sum + num(entry.evidence), 0),
         children: mergeCampaignChildren(axisEntries),
