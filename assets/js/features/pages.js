@@ -1409,8 +1409,8 @@ function _statsRender(scope) {
     </details>`;
   };
   const contextItems = [];
-  if (mvpSessionRows.length) contextItems.push(`MVP V2 : médiane de ${mvpSessionRows.length} séance${mvpSessionRows.length > 1 ? 's' : ''} sur des repères fixes, indépendante des autres personnages.`);
-  else contextItems.push('MVP V2 : score sur des repères fixes, indépendant des autres personnages.');
+  if (mvpSessionRows.length) contextItems.push(`MVP V2 : médiane de ${mvpSessionRows.length} séance${mvpSessionRows.length > 1 ? 's' : ''} sur des repères fixes, avec rendements décroissants sans plafond dur.`);
+  else contextItems.push('MVP V2 : repères fixes et rendements décroissants sans plafond dur, indépendants des autres personnages.');
   if (groupCompare.length > 1) contextItems.push('Comparaison des groupes normalisée par séance.');
   if (isAct && selectedAct) contextItems.push(`${selectedAct.missions.length} mission${selectedAct.missions.length > 1 ? 's' : ''} agrégée${selectedAct.missions.length > 1 ? 's' : ''} dans cet acte.`);
   if (!selectedMissionId && !isAct && unlinkedDates.length) contextItems.push(`${unlinkedDates.length} séance${unlinkedDates.length > 1 ? 's' : ''} non reliée${unlinkedDates.length > 1 ? 's' : ''} à une mission.`);
@@ -1482,10 +1482,10 @@ function _statsRender(scope) {
         const formula = e.count === 1 ? fmtPts(e.points) : `${e.points < 0 ? '-' : '+'}${e.count} × ${fmtNum(unit)}`;
         const axisMeta = Number.isFinite(Number(e.normalized))
           ? `<span class="stats-mvp-axis-meta">
-              <small>${details.mode === 'campaign' ? 'Médiane' : 'Indice'} <b>${fmtNum(e.normalized)}/100</b></small>
+              <small>${details.mode === 'campaign' ? 'Indice médian' : 'Indice après rendements'} <b>${fmtNum(e.normalized)}</b></small>
               ${details.mode === 'campaign'
-                ? `<small>Historique <b>${details.sessionCount || 1} séance${(details.sessionCount || 1) > 1 ? 's' : ''}</b></small>`
-                : `<small>Impact brut <b>${fmtNum(e.raw)}</b></small><small>Repère fixe <b>${fmtNum(e.reference)}</b></small>`}
+                ? `<small>Niveau médian <b>${fmtNum(e.baseNormalized)}%</b></small><small>Historique <b>${details.sessionCount || 1} séance${(details.sessionCount || 1) > 1 ? 's' : ''}</b></small>`
+                : `<small>Niveau du repère <b>${fmtNum(e.baseNormalized)}%</b></small><small>Repère fixe <b>${fmtNum(e.reference)}</b></small>`}
               <small>Axe #${e.axisRank || 1} <b>${Math.round((e.dampener ?? 1) * 100)}%</b></small>
             </span>`
           : `<span class="stats-mvp-calc-formula">${e.formula || formula}</span>`;

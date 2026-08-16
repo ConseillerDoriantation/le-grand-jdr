@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildMvpRawProfile, scoreMvpCampaign, scoreMvpSession, scoreMvpView } from '../assets/js/shared/stats-mvp.js';
+import { buildMvpRawProfile, scoreMvpAxis, scoreMvpCampaign, scoreMvpSession, scoreMvpView } from '../assets/js/shared/stats-mvp.js';
 
 const row = (id, combat = {}, sRolls = 0) => ({ id, name: id, combat, sRolls });
 
@@ -18,7 +18,7 @@ test('le MVP V2 ne recompte ni critiques, ni KO, ni plus gros coup', () => {
 test('un tank et un DPS atteignant leur repère fixe obtiennent le même axe normalisé', () => {
   const scores = scoreMvpSession([
     row('dps', { dmgDealt: 100, attacks: 4 }),
-    row('tank', { attacksTaken: 4, attacksAvoided: 3, dmgTaken: 92 }),
+    row('tank', { attacksTaken: 4, attacksAvoided: 3, dmgTaken: 75 }),
   ]);
   const dps = scores.find(result => result.id === 'dps');
   const tank = scores.find(result => result.id === 'tank');
@@ -48,7 +48,7 @@ test('le second axe ne vaut plus que 20 pour cent et le troisième 5 pour cent',
   const [hybrid] = scoreMvpSession([
     row('hybrid', {
       dmgDealt: 100, attacks: 4, heal: 36, supportSpells: 2,
-      attacksTaken: 4, attacksAvoided: 3, dmgTaken: 92,
+      attacksTaken: 4, attacksAvoided: 3, dmgTaken: 75,
     }),
   ]);
 
@@ -56,6 +56,29 @@ test('le second axe ne vaut plus que 20 pour cent et le troisième 5 pour cent',
   assert.equal(hybrid.details.entries[1].points, 20);
   assert.equal(hybrid.details.entries[2].points, 5);
   assert.equal(hybrid.score, 125);
+});
+
+test('les axes ont des rendements décroissants successifs sans plafond dur', () => {
+  assert.equal(scoreMvpAxis(100), 100);
+  assert.equal(scoreMvpAxis(150), 125);
+  assert.equal(scoreMvpAxis(250), 150);
+  assert.equal(scoreMvpAxis(500), 175);
+  assert.equal(scoreMvpAxis(750), 187.5);
+});
+
+test('un spécialiste exceptionnel peut égaler puis dépasser un hybride standard', () => {
+  const scores = scoreMvpSession([
+    row('specialiste-125', { dmgDealt: 150, attacks: 4 }),
+    row('specialiste-250', { dmgDealt: 250, attacks: 5 }),
+    row('hybride', {
+      dmgDealt: 100, attacks: 4, heal: 36, supportSpells: 2,
+      attacksTaken: 4, attacksAvoided: 3, dmgTaken: 75,
+    }),
+  ]);
+
+  assert.equal(scores.find(result => result.id === 'specialiste-125').score, 125);
+  assert.equal(scores.find(result => result.id === 'hybride').score, 125);
+  assert.equal(scores.find(result => result.id === 'specialiste-250').score, 150);
 });
 
 test('les KO subis et les échecs critiques ne retirent plus de points au tank', () => {
