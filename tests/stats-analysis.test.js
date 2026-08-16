@@ -5,12 +5,21 @@ import {
   aggregateActionAverages,
   aggregateSkillAverages,
   aggregateVttRollDetails,
+  appliedDamageAmount,
   combatAverages,
   mergeTrackedCombatStats,
   mergeTrackedSkillStats,
   normalizeSkillStats,
   statsAverage,
 } from '../assets/js/shared/stats-analysis.js';
+
+test('les dégâts appliqués sont bornés aux PV réellement perdus', () => {
+  assert.equal(appliedDamageAmount({ beforeHp: 42, afterHp: 0, rolledDamage: 2107 }), 42);
+  assert.equal(appliedDamageAmount({ beforeHp: 42, afterHp: 30, rolledDamage: 12 }), 12);
+  assert.equal(appliedDamageAmount({ rolledDamage: 8 }), 8);
+  assert.equal(appliedDamageAmount({ beforeHp: 10, afterHp: 14, rolledDamage: -4 }), 0);
+  assert.equal(appliedDamageAmount({ beforeHp: 42, afterHp: 0, rolledDamage: 2107, cancelled: true }), 0);
+});
 
 test('statsAverage renvoie null sans échantillon et arrondit à un décimal', () => {
   assert.equal(statsAverage(42, 0), null);
@@ -166,6 +175,54 @@ test('aggregateVttRollDetails reconstruit les moyennes depuis les logs VTT', () 
     damageTotal: 17,
   });
   assert.equal(result.relevantLogs, 6);
+});
+
+test('les dégâts subis retirent l’overkill prouvé par les PV du journal VTT', () => {
+  const result = aggregateVttRollDetails([{
+    type: 'attack',
+    sourceBeastId: 'ancient-dragon',
+    characterId: 'kadoc',
+    defenderTokenId: 'token-kadoc',
+    hitD20: 18,
+    hitTotal: 27,
+    hit: true,
+    dmgTotal: 2107,
+    newHp: 0,
+    undo: { tokens: { 'token-kadoc': { hp: 42 } } },
+    statsDelta: { chars: {
+      kadoc: { combat: { attacksTaken: 1, dmgTaken: 2107, damageTakenEvents: 1, damageTakenTotal: 2107 } },
+    } },
+    createdAt: new Date(2026, 7, 11, 12),
+  }]);
+
+  assert.deepEqual(result.byCharacter.kadoc.combat.receivedOvercounts, {
+    dmgTaken: 2065,
+    damageTakenTotal: 2065,
+  });
+  const corrected = mergeTrackedCombatStats({
+    attacksTaken: 1,
+    dmgTaken: 2107,
+    damageTakenEvents: 1,
+    damageTakenTotal: 2107,
+  }, result.byCharacter.kadoc.combat);
+  assert.equal(corrected.dmgTaken, 42);
+  assert.equal(corrected.damageTakenTotal, 42);
+  assert.equal(corrected.damageTakenEvents, 1);
+  assert.equal(corrected.damageTakenCorrection, 2065);
+});
+
+test('une correction MJ datée reste prioritaire sur la reconstruction du journal', () => {
+  const result = aggregateVttRollDetails([{
+    type: 'attack', sourceBeastId: 'dragon', characterId: 'kadoc', defenderTokenId: 'tk',
+    hitD20: 18, hit: true, dmgTotal: 2017, newHp: 30,
+    undo: { tokens: { tk: { hp: 42 } } },
+    statsDelta: { chars: { kadoc: { combat: { dmgTaken: 2017, damageTakenTotal: 2017, damageTakenEvents: 1 } } } },
+    createdAt: new Date(2026, 7, 11, 12),
+  }], {
+    hasManualCombatCorrection: (charId, date, kind) => charId === 'kadoc' && date === '2026-08-11' && kind === 'taken',
+  });
+
+  assert.equal(result.byCharacter.kadoc, undefined);
 });
 
 test('une attaque multicible ne compte que comme un seul jet critique ou échec', () => {

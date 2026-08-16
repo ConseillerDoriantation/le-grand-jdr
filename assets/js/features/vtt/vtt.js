@@ -35,6 +35,7 @@ import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
 import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit, bumpBiggestTaken, bumpDamageTaken } from '../../shared/stats.js';
+import { appliedDamageAmount } from '../../shared/stats-analysis.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
@@ -3108,6 +3109,18 @@ function _castStatKinds(opt = {}) {
     || opt.afflictionMode
     || opt.afflictionEtatId
   );
+  // Contrôle réel : déplacement imposé, invocation/sentinelle ou zone purement
+  // utilitaire. Une simple AoE offensive ne rapporte pas de soutien au MVP.
+  const control = affliction || !!(
+    opt.isInvocation
+    || mods.invocation
+    || mods.sentinelle
+    || mods.move
+    || mods.push
+    || mods.pull
+    || opt.isDeplacement
+    || (opt.isUtil && (mods.zone || opt.zoneW > 0 || opt.zoneH > 0))
+  );
   const tactical = support || affliction || !!(
     opt.isInvocation
     || mods.invocation
@@ -3119,7 +3132,7 @@ function _castStatKinds(opt = {}) {
     || opt.zoneW > 0
     || opt.zoneH > 0
   );
-  return { tactical, support, affliction };
+  return { tactical, support, affliction, control };
 }
 
 function _buildCastStatsDelta(src, opt) {
@@ -3136,6 +3149,7 @@ function _buildCastStatsDelta(src, opt) {
     tactical: kinds.tactical ? 1 : 0,
     support: kinds.support ? 1 : 0,
     affliction: kinds.affliction ? 1 : 0,
+    control: kinds.control ? 1 : 0,
   });
   return delta;
 }
@@ -7400,6 +7414,7 @@ async function _vttRollAttack() {
 
       const curHp = lCurTgt.displayHp ?? 20, hpMax = lCurTgt.displayHpMax ?? 20;
       let newHp = curHp;
+      let hpBeforeApplied = curHp;
       // Valeur AVANT interaction du profil de la créature (pour log "10 → 5").
       let dmgPre = dmgTotal;
       let dmgReduction = 0;
@@ -7412,6 +7427,7 @@ async function _vttRollAttack() {
 
           const realMax = _numOr(bEnt?.pvMax, 20);
           const realCur = curTgtData.hp !== null ? _numOr(curTgtData.hp, realMax) : realMax;
+          hpBeforeApplied = realCur;
           // Plafonner par realMax pour éviter qu'une absorption (dmgTotal négatif)
           // ne soigne au-dessus du PV max de la créature.
           newHp = Math.max(0, Math.min(realMax, realCur - dmgTotal));
@@ -7444,6 +7460,11 @@ async function _vttRollAttack() {
         }
       }
 
+      // Les statistiques mesurent les PV réellement retirés, pas la valeur
+      // théorique du jet au-delà de 0 PV (overkill). Le détail du jet reste
+      // conservé séparément dans `dmgTotal` pour le journal de combat.
+      const dmgApplied = appliedDamageAmount({ beforeHp: hpBeforeApplied, afterHp: newHp, rolledDamage: dmgTotal });
+
       // ── Statistiques de combat : accumule (écrit une fois après la boucle,
       //    stocké dans le log pour pouvoir l'annuler avec l'action) ──
       accAttackDelta(_statsDelta, {
@@ -7452,14 +7473,14 @@ async function _vttRollAttack() {
         targetId:     curTgtData.characterId || null,
         targetName:   curTgtData.name || '',
         hit, crit: false, fumble: false,
-        dmg: (hit || halfDmg) ? Math.max(0, dmgTotal) : 0,
-        ko: (curHp > 0 && newHp <= 0),
+        dmg: (hit || halfDmg) ? dmgApplied : 0,
+        ko: (hpBeforeApplied > 0 && newHp <= 0),
         countAction: false,
       });
-      if ((hit || halfDmg) && dmgTotal > _maxHit) _maxHit = dmgTotal;
+      if ((hit || halfDmg) && dmgApplied > _maxHit) _maxHit = dmgApplied;
       // Record du plus gros coup REÇU par la cible (PJ).
-      if ((hit || halfDmg) && dmgTotal > 0 && curTgtData.characterId)
-        bumpBiggestTaken(curTgtData.characterId, curTgtData.name || '', dmgTotal);
+      if ((hit || halfDmg) && dmgApplied > 0 && curTgtData.characterId)
+        bumpBiggestTaken(curTgtData.characterId, curTgtData.name || '', dmgApplied);
 
       // ── États consommés au 1er coup (Marqué, etc.) : retire ceux dont
       //    l'effet `consumedByAttackAgainst` est activé après que les bonus
@@ -7483,7 +7504,7 @@ async function _vttRollAttack() {
 
       targetResults.push({
         name: lCurTgt.displayName ?? curTgtData.name, targetCA, hit, halfDmg,
-        dmgTotal, dmgPre, dmgReduction, newHp, hpMax, interaction,
+        dmgTotal, dmgApplied, dmgPre, dmgReduction, newHp, hpMax, interaction,
         tokenId: curTgtData.id,   // pour l'annulation manuelle (bouclier réactif)
         shieldBlocked: isBlocked,
         techniqueDefenseBonus,
@@ -7607,6 +7628,7 @@ async function _vttRollAttack() {
         tactical: _castKinds.tactical ? 1 : 0,
         support: _castKinds.support ? 1 : 0,
         affliction: _castKinds.affliction ? 1 : 0,
+        control: _castKinds.control ? 1 : 0,
       });
     }
     applyStatsDelta(_statsDelta, +1);
@@ -7704,7 +7726,7 @@ async function _vttRollAttack() {
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
         dmgMaitriseBonus: opt.maitriseBonus??0,
         dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
-        dmgTotal: r.dmgTotal, dmgFull: sharedDmgTotalHit, dmgPre: r.dmgPre ?? r.dmgTotal, dmgReduction: r.dmgReduction || 0,
+        dmgTotal: r.dmgTotal, dmgApplied: r.dmgApplied, dmgFull: sharedDmgTotalHit, dmgPre: r.dmgPre ?? r.dmgTotal, dmgReduction: r.dmgReduction || 0,
         bonusHitDice: bonusHitDice||null, extraHitRolls: extraHitRolls.length ? extraHitRolls : null,
         critNormalMax: sharedCritNormalMax, critRaw2: sharedCritRaw2, critFixed2: sharedCritFixed2,
         critFormula: criticalEffectFormulaLabel(),

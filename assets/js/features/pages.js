@@ -8,8 +8,9 @@ import { _esc, _norm, appSplashHtml, pageHeaderHtml, loadingHtml} from '../share
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { isFeatureEnabled } from '../shared/features.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
-import { loadStats, resetStats, deleteCharStats, deleteDateStats, deleteMissionStats, setSessionMission } from '../shared/stats.js';
+import { loadStats, resetStats, deleteCharStats, deleteDateStats, deleteMissionStats, correctDateCombatStats, setSessionMission } from '../shared/stats.js';
 import { aggregateActionAverages, aggregateSkillAverages, aggregateVttRollDetails, combatAverages, mergeTrackedCombatStats, mergeTrackedSkillStats, normalizeSkillStats } from '../shared/stats-analysis.js';
+import { scoreMvpView } from '../shared/stats-mvp.js';
 import { showNotif } from '../shared/notifications.js';
 import { copyText } from '../shared/clipboard.js';
 import { confirmModal, openModal, promptModal, closeModalDirect } from '../shared/modal.js';
@@ -505,6 +506,7 @@ const _STATS_METRICS = {
   tacticalSpells: { lbl: 'Sorts tactiques', color: '#d8c7ff' },
   supportSpells: { lbl: 'Soutien',          color: '#4fd3a6' },
   afflictionSpells: { lbl: 'Afflictions',   color: '#c084fc' },
+  controlSpells: { lbl: 'Contrôles',        color: '#7fb0ff' },
   kosDealt:   { lbl: 'KO infligés',         color: '#ef4444' },
   dmgTaken:   { lbl: 'Dégâts subis',        color: '#9aa0aa' },
   attacksTaken: { lbl: 'Attaques subies',   color: '#a7b4c4' },
@@ -747,8 +749,9 @@ function _statsNormCombat(cm = {}) {
     dmgDealt: n(cm.dmgDealt), dmgTaken: n(cm.dmgTaken), kosDealt: n(cm.kosDealt), kosTaken: n(cm.kosTaken),
     damageEvents: n(cm.damageEvents), damageTotal: n(cm.damageTotal),
     damageTakenEvents: n(cm.damageTakenEvents), damageTakenTotal: n(cm.damageTakenTotal),
+    damageTakenCorrection: n(cm.damageTakenCorrection), damageDealtCorrection: n(cm.damageDealtCorrection),
     attacksTaken: n(cm.attacksTaken), attacksAvoided: n(cm.attacksAvoided),
-    spellsCast: n(cm.spellsCast), tacticalSpells: n(cm.tacticalSpells), supportSpells: n(cm.supportSpells), afflictionSpells: n(cm.afflictionSpells),
+    spellsCast: n(cm.spellsCast), tacticalSpells: n(cm.tacticalSpells), supportSpells: n(cm.supportSpells), afflictionSpells: n(cm.afflictionSpells), controlSpells: n(cm.controlSpells),
     pmSpent: n(cm.pmSpent), heal: n(cm.heal),
     biggestHit: n(cm.biggestHit), biggestTaken: n(cm.biggestTaken),
   };
@@ -887,7 +890,11 @@ function _statsRowsFor(dateKeys) {
         : (log?.characterName || log?.charName);
       return names.get(_norm(name || '')) || '';
     };
-    vttDetails = aggregateVttRollDetails(_statsVttLogs, { dateKeys, resolveCharacterId });
+    const hasManualCombatCorrection = (charId, date, kind) => {
+      const combat = _statsData?.chars?.[charId]?.byDate?.[date]?.combat || {};
+      return _statsNum(kind === 'taken' ? combat.manualDamageTaken : combat.manualDamageDealt) > 0;
+    };
+    vttDetails = aggregateVttRollDetails(_statsVttLogs, { dateKeys, resolveCharacterId, hasManualCombatCorrection });
     _statsVttDetailCache.set(detailKey, vttDetails);
   }
   return Object.entries(_statsData?.chars || {}).map(([id, c]) => {
@@ -931,7 +938,10 @@ function _statsNeedsVttBackfill(data) {
     const damageEvents = _statsNum(combat.damageEvents);
     const missingDamageDetail = damageEvents < _statsNum(combat.hits)
       || (!damageEvents && _statsNum(combat.dmgDealt) > 0);
-    return missingSkillDetail || needsCanonicalCombatActions || missingAttackDetail || missingDamageDetail;
+    // Le journal permet également de retirer l'overkill des anciens compteurs
+    // de dégâts subis (valeur du jet au lieu des PV réellement perdus).
+    const needsDamageTakenReconciliation = _statsNum(combat.dmgTaken) > 0;
+    return missingSkillDetail || needsCanonicalCombatActions || missingAttackDetail || missingDamageDetail || needsDamageTakenReconciliation;
   });
 }
 
@@ -944,8 +954,9 @@ function _statsAggregateRows(rows = []) {
     attackRolls: 0, attackRollTotal: 0, attackResultRolls: 0, attackResultTotal: 0,
     dmgDealt: 0, dmgTaken: 0, kosDealt: 0, kosTaken: 0,
     damageEvents: 0, damageTotal: 0, damageTakenEvents: 0, damageTakenTotal: 0,
+    damageTakenCorrection: 0, damageDealtCorrection: 0,
     attacksTaken: 0, attacksAvoided: 0,
-    spellsCast: 0, tacticalSpells: 0, supportSpells: 0, afflictionSpells: 0,
+    spellsCast: 0, tacticalSpells: 0, supportSpells: 0, afflictionSpells: 0, controlSpells: 0,
     pmSpent: 0, heal: 0, biggestHit: 0, biggestTaken: 0
   });
   combat.biggestHit = Math.max(0, ...rows.map(r => r.combat.biggestHit || 0));
@@ -1207,121 +1218,36 @@ function _statsRender(scope) {
   const topFumble = [...rows].map(r => ({ ...r, tf: r.actionAverages?.fumbles || 0 })).filter(r => r.tf > 0).sort((a, b) => b.tf - a.tf)[0];
   const topEmoter = [...rows].filter(r => r.emoteTotal > 0).sort((a, b) => b.emoteTotal - a.emoteTotal)[0];
   const topRoller = [...rows].filter(r => r.sRolls > 0).sort((a, b) => b.sRolls - a.sRolls)[0];
-  const impactProfile = (r) => {
-    const cm = r.combat || {};
-    const skillSummary = r.skillAverages || aggregateSkillAverages([r]);
-    const actionSummary = r.actionAverages || aggregateActionAverages(skillSummary, cm);
-    const combatFumbles = Math.max(0, actionSummary.fumbles - (skillSummary.fumbles || 0));
-    const tactical = cm.tacticalSpells || 0;
-    const plainCasts = Math.max(0, (cm.spellsCast || 0) - tactical);
-    const axes = {
-      offense: { label: 'Offense', icon: '🗡️', cap: 100, soft: 70, raw: 0, parts: [] },
-      support: { label: 'Soutien & contrôle', icon: '✨', cap: 120, soft: 72, raw: 0, parts: [] },
-      protection: { label: 'Protection', icon: '🛡️', cap: 90, soft: 55, raw: 0, parts: [] },
-      skill: { label: 'Compétences & RP', icon: '🎲', cap: 60, soft: 40, raw: 0, parts: [] },
-    };
-    const penalties = [];
-    const add = (axisKey, label, value, coef, icon) => {
-      const count = Number(value) || 0;
-      const points = count * coef;
-      if (!count || !points) return;
-      const axis = axes[axisKey];
-      axis.raw += points;
-      axis.parts.push({ label, count, coef, points, icon });
-    };
-    const malus = (label, value, coef, icon) => {
-      const count = Number(value) || 0;
-      const points = count * coef;
-      if (!count || !points) return;
-      penalties.push({ label, count, coef, points: -points, icon });
-    };
-    add('offense', 'Dégâts infligés', cm.dmgDealt, 0.55, '🗡️');
-    add('offense', 'KO infligés', cm.kosDealt, 2.5, '☠️');
-    add('offense', 'Critiques d’attaque', cm.crits, 4, '💥');
-    add('offense', 'Plus gros coup', cm.biggestHit, 0.12, '💢');
-    add('support', 'Soin produit', cm.heal, 0.85, '💚');
-    add('support', 'Sorts tactiques', tactical, 9, '✨');
-    add('support', 'Soutiens appliqués', cm.supportSpells, 12, '🛡️');
-    add('support', 'Afflictions appliquées', cm.afflictionSpells, 12, '💀');
-    add('support', 'Sorts classiques', plainCasts, 1, '🔮');
-    add('protection', 'Ciblages encaissés', cm.attacksTaken, 1.2, '🧱');
-    add('protection', 'Attaques évitées', cm.attacksAvoided, 5, '🛡️');
-    add('protection', 'Dégâts encaissés', cm.dmgTaken, 0.16, '🩸');
-    add('skill', 'Jets de compétence', r.sRolls, 1.2, '🎲');
-    add('skill', 'Critiques de compétence', skillSummary.crits, 4, '💥');
-    malus('KO subis', cm.kosTaken, 10, '💀');
-    malus('Échecs critiques · compétences', skillSummary.fumbles, 4, '💔');
-    malus('Échecs critiques · combat', combatFumbles, 4, '💔');
-    return { axes, penalties };
-  };
-  const impactBreakdown = (r) => {
-    // Toujours calculer depuis la ligne effectivement affichée. Le MVP ne doit
-    // conserver aucune copie parallèle des compteurs par personnage.
-    const profile = impactProfile(r);
-    const _fmtAxis = (v) => {
-      const n = Number(v) || 0;
-      return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, '');
-    };
-    const _axisScore = (axis) => {
-      const raw = axis.raw || 0;
-      const soft = axis.soft || axis.cap * 0.7;
-      if (raw <= soft) return raw;
-      const tail = Math.max(1, axis.cap - soft);
-      return soft + tail * (1 - Math.exp(-(raw - soft) / tail));
-    };
-    const _impactEntries = [];
-    const _addAxis = (key) => {
-      const axis = profile.axes[key];
-      const raw = axis.raw || 0;
-      if (raw <= 0) return;
-      const scored = _axisScore(axis);
-      const reduced = Math.max(0, raw - scored);
-      _impactEntries.push({
-        label: axis.label,
-        count: 1,
-        icon: axis.icon,
-        points: scored,
-        raw,
-        soft: axis.soft,
-        cap: axis.cap,
-        reduced,
-        children: axis.parts,
-      });
-    };
-    _addAxis('offense');
-    _addAxis('support');
-    _addAxis('protection');
-    _addAxis('skill');
-    _impactEntries.sort((a, b) => b.points - a.points);
-    const _dampeners = [1, 0.58, 0.34, 0.18];
-    _impactEntries.forEach((e, i) => {
-      const dampener = _dampeners[i] ?? 0.08;
-      e.axisRank = i + 1;
-      e.dampener = dampener;
-      e.points *= dampener;
-    });
-    const penaltyTotal = profile.penalties.reduce((sum, e) => sum + Math.abs(e.points), 0);
-    if (penaltyTotal > 0) {
-      _impactEntries.push({ label: 'Malus', count: 1, icon: '💀', points: -penaltyTotal, formula: `${_fmtAxis(penaltyTotal)} points perdus`, children: profile.penalties });
-    }
-    const _impactRawScore = _impactEntries.reduce((sum, e) => sum + e.points, 0);
+  // MVP V2 : chaque personnage est mesuré sur des repères absolus. Le filtre
+  // « joueurs » intervient seulement après le calcul et la composition des
+  // groupes n'a aucune influence sur les scores individuels.
+  const mvpDates = dateKey ? [] : [...new Set(scopeDates || allDates)];
+  const mvpSessionRows = mvpDates.map(date => {
+    const dateRows = _statsRowsFor([date]);
     return {
-      entries: _impactEntries,
-      gained: _impactEntries.filter(e => e.points > 0).reduce((sum, e) => sum + e.points, 0),
-      lost: Math.abs(_impactEntries.filter(e => e.points < 0).reduce((sum, e) => sum + e.points, 0)),
-      rawScore: _impactRawScore,
-      score: Math.round(_impactRawScore),
+      date,
+      rows: dateRows,
     };
-  };
-  const impactRows = [...rows]
-    .map(r => {
-      const impactDetails = impactBreakdown(r);
-      return { ...r, impact: impactDetails.score, impactDetails };
-    })
-    .filter(r => r.impact > 0)
-    .sort((a, b) => (b.impact - a.impact) || String(a.name || '').localeCompare(String(b.name || ''), 'fr'));
-  const topImpact = impactRows[0]?.impact || 0;
-  const mvps = topImpact > 0 ? impactRows.filter(r => r.impact === topImpact) : [];
+  }).filter(session => session.rows.length > 0);
+  const mvpScores = scoreMvpView({
+    rows: allRows,
+    sessionRows: mvpSessionRows,
+    visibleIds: sel,
+  });
+  const rowsById = new Map(rows.map(row => [row.id, row]));
+  const impactRows = mvpScores.map(result => {
+    const source = rowsById.get(result.id);
+    return source ? {
+      ...source,
+      impact: result.score,
+      impactEligible: result.eligible,
+      impactDetails: result.details,
+    } : null;
+  }).filter(Boolean);
+  const eligibleImpactRows = impactRows.filter(row => row.impactEligible !== false);
+  const mvpPool = eligibleImpactRows.length ? eligibleImpactRows : impactRows;
+  const topImpact = mvpPool[0]?.impact || 0;
+  const mvps = topImpact > 0 ? mvpPool.filter(row => row.impact === topImpact) : [];
   // Award : renvoie { html, txt } pour mutualiser affichage et export.
   const awards = [];
   let awardTotal = 0;
@@ -1398,6 +1324,9 @@ function _statsRender(scope) {
               ${fact('Critiques', cm.crits)}
               ${fact('Échecs critiques', cm.fumbles)}
               ${fact('Plus gros coup', cm.biggestHit)}
+              ${fact('Dégâts subis', cm.dmgTaken)}
+              ${fact('Surplus reçu ignoré', cm.damageTakenCorrection)}
+              ${fact('Surplus infligé ignoré', cm.damageDealtCorrection)}
               ${fact('KO infligés', cm.kosDealt)}
               ${fact('Fois mis KO', cm.kosTaken)}
               ${fact('Attaques subies', cm.attacksTaken)}
@@ -1411,6 +1340,7 @@ function _statsRender(scope) {
               ${fact('Sorts tactiques', cm.tacticalSpells)}
               ${fact('Soutiens appliqués', cm.supportSpells)}
               ${fact('Afflictions', cm.afflictionSpells)}
+              ${fact('Contrôles', cm.controlSpells)}
               ${fact('Soin produit', cm.heal, '#4fd3a6')}
               ${fact('Sorts lancés', cm.spellsCast, '#bca0ff')}
             </div>
@@ -1479,6 +1409,8 @@ function _statsRender(scope) {
     </details>`;
   };
   const contextItems = [];
+  if (mvpSessionRows.length) contextItems.push(`MVP V2 : médiane de ${mvpSessionRows.length} séance${mvpSessionRows.length > 1 ? 's' : ''} sur des repères fixes, indépendante des autres personnages.`);
+  else contextItems.push('MVP V2 : score sur des repères fixes, indépendant des autres personnages.');
   if (groupCompare.length > 1) contextItems.push('Comparaison des groupes normalisée par séance.');
   if (isAct && selectedAct) contextItems.push(`${selectedAct.missions.length} mission${selectedAct.missions.length > 1 ? 's' : ''} agrégée${selectedAct.missions.length > 1 ? 's' : ''} dans cet acte.`);
   if (!selectedMissionId && !isAct && unlinkedDates.length) contextItems.push(`${unlinkedDates.length} séance${unlinkedDates.length > 1 ? 's' : ''} non reliée${unlinkedDates.length > 1 ? 's' : ''} à une mission.`);
@@ -1494,13 +1426,15 @@ function _statsRender(scope) {
   let mvpDetailSec = '';
   const mvpSec = mvps.length ? (() => {
     const mvpParts = (leader) => {
-      const parts = [];
+      const details = leader.impactDetails || {};
+      const parts = [`📊 ${details.confidence?.label || 'Calcul provisoire'}`];
       if (leader.combat.dmgDealt) parts.push(`🗡️ ${leader.combat.dmgDealt} dégâts`);
       if (leader.combat.heal) parts.push(`💚 ${leader.combat.heal} soin`);
       if (leader.combat.spellsCast) parts.push(`🔮 ${leader.combat.spellsCast} sorts`);
       if (leader.combat.tacticalSpells) parts.push(`✨ ${leader.combat.tacticalSpells} tactique`);
       if (leader.combat.supportSpells) parts.push(`🛡️ ${leader.combat.supportSpells} soutien`);
       if (leader.combat.afflictionSpells) parts.push(`💀 ${leader.combat.afflictionSpells} affliction`);
+      if (leader.combat.controlSpells) parts.push(`🌀 ${leader.combat.controlSpells} contrôle`);
       if (leader.combat.attacksTaken) parts.push(`🧱 ${leader.combat.attacksTaken} ciblages`);
       if (leader.combat.attacksAvoided) parts.push(`🛡️ ${leader.combat.attacksAvoided} évitées`);
       if (leader.combat.dmgTaken) parts.push(`🩸 ${leader.combat.dmgTaken} subis`);
@@ -1512,7 +1446,8 @@ function _statsRender(scope) {
     const parts = [];
     if (mvps.length === 1) parts.push(...mvpParts(mvps[0]));
     else mvps.forEach(leader => parts.push(`${_esc(leader.name)} · ${mvpParts(leader).slice(0, 3).join(' · ') || 'impact équilibré'}`));
-    const title = mvps.length > 1 ? "MVP d'impact ex æquo" : "MVP d'impact";
+    const campaignMvp = mvps.some(leader => leader.impactDetails?.mode === 'campaign');
+    const title = mvps.length > 1 ? "MVP d'impact V2 ex æquo" : "MVP d'impact V2";
     const leadersHtml = mvps.map(leader => `<div class="stats-mvp-leader">
       ${_statsAvatar(leader.id, leader.name, 42)}
       <div><span class="stats-mvp-eyebrow">${title}</span><b>${_esc(leader.name)}</b></div>
@@ -1532,7 +1467,7 @@ function _statsRender(scope) {
         const details = leader.impactDetails || { score: leader.impact || 0 };
         return `<button type="button" class="${leader.id === activeDetailLeader?.id ? 'active' : ''}" data-action="_statsMvpDetailPick" data-id="${_esc(leader.id)}">
           ${_statsAvatar(leader.id, leader.name, 22)}
-          <span>${_esc(leader.name)}<small>${index === 0 ? 'MVP' : `#${index + 1}`}</small></span>
+          <span>${_esc(leader.name)}<small>${leader.impactEligible === false ? 'Provisoire' : index === 0 ? 'MVP' : `#${index + 1}`}</small></span>
           <b>${details.score}</b>
         </button>`;
       }).join('')}
@@ -1545,12 +1480,12 @@ function _statsRender(scope) {
       const calcRow = (e) => {
         const unit = Math.abs(e.points / Math.max(1, e.count));
         const formula = e.count === 1 ? fmtPts(e.points) : `${e.points < 0 ? '-' : '+'}${e.count} × ${fmtNum(unit)}`;
-        const axisMeta = Number.isFinite(Number(e.raw))
+        const axisMeta = Number.isFinite(Number(e.normalized))
           ? `<span class="stats-mvp-axis-meta">
-              <small>Brut <b>${fmtNum(e.raw)}</b></small>
-              <small>Plein <b>${fmtNum(e.soft)}</b></small>
-              <small>Plafond <b>${fmtNum(e.cap)}</b></small>
-              ${e.reduced ? `<small>Réduit <b>${fmtNum(e.reduced)}</b></small>` : ''}
+              <small>${details.mode === 'campaign' ? 'Médiane' : 'Indice'} <b>${fmtNum(e.normalized)}/100</b></small>
+              ${details.mode === 'campaign'
+                ? `<small>Historique <b>${details.sessionCount || 1} séance${(details.sessionCount || 1) > 1 ? 's' : ''}</b></small>`
+                : `<small>Impact brut <b>${fmtNum(e.raw)}</b></small><small>Repère fixe <b>${fmtNum(e.reference)}</b></small>`}
               <small>Axe #${e.axisRank || 1} <b>${Math.round((e.dampener ?? 1) * 100)}%</b></small>
             </span>`
           : `<span class="stats-mvp-calc-formula">${e.formula || formula}</span>`;
@@ -1573,18 +1508,21 @@ function _statsRender(scope) {
       </div>`;
       const gainedEntries = details.entries.filter(e => e.points > 0);
       const lostEntries = details.entries.filter(e => e.points < 0);
+      const confidence = details.confidence || { label: 'Provisoire', reason: 'couverture inconnue' };
       return `<div class="stats-mvp-calc">
         <div class="stats-mvp-calc-head">
           <div class="stats-mvp-calc-name">${_esc(leader.name)}${index === 0 ? ' · MVP' : ` · candidat #${index + 1}`}</div>
           <div class="stats-mvp-calc-net">${details.score}<span>net</span></div>
         </div>
         <div class="stats-mvp-calc-total">
-          <span>Gains <b>${fmtPts(details.gained)}</b></span>
-          <span>Pertes <b>${details.lost ? fmtPts(-details.lost) : '0'}</b></span>
+          <span>Axes retenus <b>${fmtPts(details.gained)}</b></span>
+          <span>Confiance <b>${_esc(confidence.label)}</b> · ${_esc(confidence.reason || '')}</span>
         </div>
         <div class="stats-mvp-calc-columns">
-          ${calcGroup('Ce qui rapporte', gainedEntries, 'is-gain')}
-          ${calcGroup('Ce qui pénalise', lostEntries, 'is-loss')}
+          ${calcGroup('Impact comparable', gainedEntries, 'is-gain')}
+          ${lostEntries.length
+            ? calcGroup('Ajustements', lostEntries, 'is-loss')
+            : `<div class="stats-mvp-calc-group"><div class="stats-mvp-calc-group-title">Règle V2</div><div class="stats-mvp-calc-empty">Critiques, KO, records et malchance ne sont plus recomptés ni retranchés.</div></div>`}
         </div>
       </div>`;
     })() : '';
@@ -1595,7 +1533,7 @@ function _statsRender(scope) {
     return `<section class="stats-sec stats-mvp-sec">
       <div class="stats-mvp-card">
         <div class="stats-mvp-id stats-mvp-id--multi">${leadersHtml}</div>
-        <div class="stats-mvp-score">${topImpact}<span>score</span></div>
+        <div class="stats-mvp-score">${topImpact}<span>${campaignMvp ? 'médiane' : 'score'}</span></div>
         <div class="stats-mvp-breakdown">${parts.slice(0, 5).map(p => `<span>${p}</span>`).join('')}</div>
       </div>
     </section>`;
@@ -1754,6 +1692,7 @@ function _statsRender(scope) {
     ['✨', 'Sorts tactiques', 'tacticalSpells', '#d8c7ff', true],
     ['🛡️', 'Soutiens appliqués', 'supportSpells', '#4fd3a6', true],
     ['💀', 'Afflictions', 'afflictionSpells', '#c084fc', true],
+    ['🌀', 'Contrôles', 'controlSpells', '#7fb0ff', true],
     ['🎲', 'Jets de compétence', 'rolls', '#7fb0ff', true],
     ['🧱', 'Dégâts subis', 'dmgTaken', '#a7b4c4', true],
     ['☠️', 'KO infligés', 'kosDealt', '#ef4444', true],
@@ -1818,6 +1757,7 @@ function _statsRender(scope) {
     detailRow('💥', 'Réussites critiques', GC.crits),
     detailRow('💔', 'Échecs critiques', GC.fumbles),
     detailRow('🛡️', 'Dégâts subis', GC.dmgTaken),
+    detailRow('🧾', 'Surplus ignoré', GC.damageTakenCorrection, 'dégâts théoriques au-delà des PV réellement perdus'),
     detailRow('🧱', 'Attaques subies', GC.attacksTaken, 'nouvelles stats'),
     detailRow('🛡️', 'Attaques évitées', GC.attacksAvoided, 'nouvelles stats'),
     detailRow('☠️', 'KO infligés', GC.kosDealt),
@@ -1828,6 +1768,7 @@ function _statsRender(scope) {
     detailRow('✨', 'Sorts tactiques', GC.tacticalSpells),
     detailRow('🛡️', 'Soutien appliqué', GC.supportSpells),
     detailRow('💀', 'Afflictions appliquées', GC.afflictionSpells),
+    detailRow('🌀', 'Contrôles appliqués', GC.controlSpells, 'nouvelle statistique'),
     detailRow('🔋', 'PM dépensés', GC.pmSpent),
     detailRow('💚', 'Soin prodigué', GC.heal),
     detailRow('🧙', 'Lanceur le + actif', topMage ? _esc(topMage.name) : '—'),
@@ -4019,6 +3960,7 @@ registerActions({
           <span class="stats-date-chevron">⌄</span>
         </summary>
         <div class="stats-date-body">
+          ${STATE.isAdmin ? `<div class="stats-date-admin"><button type="button" data-action="_statsCorrectDateCombat" data-id="${_esc(id)}" data-date="${_esc(d)}">✎ Corriger les compteurs de combat</button></div>` : ''}
           <div class="stats-date-detail-grid">
             <section class="stats-char-detail">
               <h4>⚔️ Combat</h4>
@@ -4032,6 +3974,8 @@ registerActions({
                 ${fact('Échecs critiques', cm.fumbles)}
                 ${fact('Plus gros coup', cm.biggestHit)}
                 ${fact('Dégâts subis', cm.dmgTaken)}
+                ${fact('Surplus reçu ignoré', cm.damageTakenCorrection)}
+                ${fact('Surplus infligé ignoré', cm.damageDealtCorrection)}
                 ${fact('KO infligés', cm.kosDealt)}
                 ${fact('Fois mis KO', cm.kosTaken)}
               </div>
@@ -4043,6 +3987,7 @@ registerActions({
                 ${fact('Sorts tactiques', cm.tacticalSpells)}
                 ${fact('Soutiens', cm.supportSpells)}
                 ${fact('Afflictions', cm.afflictionSpells)}
+                ${fact('Contrôles', cm.controlSpells)}
                 ${fact('Soin produit', cm.heal, '#4fd3a6')}
                 ${fact('Sorts lancés', cm.spellsCast, '#bca0ff')}
               </div>
@@ -4057,6 +4002,61 @@ registerActions({
       subtitle: `${dates.length} séance${dates.length > 1 ? 's' : ''} enregistrée${dates.length > 1 ? 's' : ''}`,
       accent: '#7fb0ff',
     });
+  },
+  _statsCorrectDateCombat: (btn) => {
+    if (!STATE.isAdmin) return;
+    const id = btn.dataset.id, date = btn.dataset.date;
+    const c = _statsData?.chars?.[id];
+    const combat = c?.byDate?.[date]?.combat;
+    if (!id || !date || !combat) { showNotif('Compteurs de séance introuvables.', 'error'); return; }
+    const input = (field, label, hint = '') => `<label class="stats-correction-field">
+      <span>${label}${hint ? `<small>${hint}</small>` : ''}</span>
+      <input type="text" inputmode="numeric" pattern="[0-9]*" data-stats-field="${field}" value="${Math.max(0, Math.trunc(Number(combat[field]) || 0))}">
+    </label>`;
+    openModal(`🧾 Corriger ${_esc(c.name || 'Personnage')}`, `
+      <div class="stats-correction">
+        <div class="stats-correction-note"><b>Séance du ${_statsFmtDate(date)}</b><span>Modifie les valeurs réellement observées. Les totaux de campagne seront ajustés automatiquement.</span></div>
+        <section><h4>⚔️ Actions offensives</h4><div class="stats-correction-grid">
+          ${input('attacks', 'Attaques')}${input('hits', 'Réussites')}${input('crits', 'Critiques')}${input('fumbles', 'Échecs critiques')}
+          ${input('dmgDealt', 'Dégâts infligés', 'PV réellement retirés')}${input('damageEvents', 'Impacts avec dégâts')}${input('kosDealt', 'KO infligés')}
+        </div></section>
+        <section><h4>🛡️ Défense</h4><div class="stats-correction-grid">
+          ${input('attacksTaken', 'Attaques subies')}${input('attacksAvoided', 'Attaques évitées')}
+          ${input('dmgTaken', 'Dégâts subis', 'PV réellement perdus')}${input('damageTakenEvents', 'Impacts reçus')}${input('kosTaken', 'Fois mis KO')}
+        </div></section>
+        <section><h4>✨ Ressources</h4><div class="stats-correction-grid">
+          ${input('heal', 'Soin produit')}${input('spellsCast', 'Sorts lancés')}${input('pmSpent', 'PM dépensés')}
+        </div></section>
+        <footer class="stats-correction-actions">
+          <button type="button" class="btn btn-outline" data-action="close-modal">Annuler</button>
+          <button type="button" class="btn btn-primary" data-action="_statsSaveDateCombat" data-id="${_esc(id)}" data-date="${_esc(date)}">Enregistrer les corrections</button>
+        </footer>
+      </div>`, {
+        subtitle: 'Correction manuelle et cohérente de la séance',
+        accent: '#f4c430',
+      });
+  },
+  _statsSaveDateCombat: async (btn) => {
+    if (!STATE.isAdmin) return;
+    const id = btn.dataset.id, date = btn.dataset.date;
+    const values = {};
+    for (const input of document.querySelectorAll('#modal-body [data-stats-field]')) {
+      const raw = String(input.value || '').trim();
+      if (!/^\d+$/.test(raw)) {
+        input.focus();
+        showNotif('Chaque compteur doit être un entier positif ou nul.', 'error');
+        return;
+      }
+      values[input.dataset.statsField] = Number(raw);
+    }
+    btn.disabled = true;
+    const done = await correctDateCombatStats(id, date, values);
+    btn.disabled = false;
+    if (!done) { showNotif('Échec de la correction des statistiques.', 'error'); return; }
+    showNotif('Statistiques de la séance corrigées.', 'success');
+    closeModalDirect();
+    closeModalDirect();
+    await PAGES.statistiques();
   },
   // Changement de scope (campagne entière ↔ une séance) — re-rend sans relecture.
   _statsScope: (el) => { _statsRender(el.value || null); },
