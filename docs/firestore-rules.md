@@ -282,6 +282,16 @@ function isAdvAdmin(adventureId) {
       get(/databases/$(database)/documents/adventures/$(adventureId))
         .data.admins.hasAny([request.auth.uid]));
 }
+function canControlVttToken(adventureId, tokenId) {
+  let tokenPath = /databases/$(database)/documents/adventures/$(adventureId)/vttTokens/$(tokenId);
+  let token = get(tokenPath).data;
+  return isAdvAdmin(adventureId) ||
+    (inAdventure(adventureId) &&
+      tokenId is string &&
+      exists(tokenPath) &&
+      (token.ownerId == request.auth.uid ||
+       token.get("controlDelegates", []).hasAny([request.auth.uid])));
+}
 function ownsAdventureCharacter(adventureId, charId) {
   return isLoggedIn() &&
          charId is string &&
@@ -701,10 +711,15 @@ match /adventures/{adventureId} {
     allow read:  if inAdventure(adventureId);
     allow write: if inAdventure(adventureId) && uid == request.auth.uid;
   }
-  // Réactions émotes : 1 doc par joueur (setDoc écrase)
-  // isAdvAdmin inclus car l'admin peut ne pas être dans accessList
-  match /vttEmoteReactions/{id} {
-    allow read, write: if inAdventure(adventureId) || isAdvAdmin(adventureId);
+  // Réactions émotes : 1 doc par joueur (setDoc écrase). Le token affiché doit
+  // appartenir à l'émetteur ou lui avoir été explicitement délégué : masquer le
+  // bouton côté client ne suffirait pas à empêcher un tokenId forgé.
+  match /vttEmoteReactions/{uid} {
+    allow read: if inAdventure(adventureId) || isAdvAdmin(adventureId);
+    allow create, update: if uid == request.auth.uid
+      && canControlVttToken(adventureId, request.resource.data.tokenId);
+    allow delete: if isAdvAdmin(adventureId) ||
+      (inAdventure(adventureId) && uid == request.auth.uid);
   }
 
   // Sons & playlists (musique) : lecture membres, écriture MJ
