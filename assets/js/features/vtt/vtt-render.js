@@ -13,15 +13,17 @@ import { CELL, TYPE_COLOR, hpColor } from './vtt-constants.js';
 import { STATE } from '../../core/state.js';
 import { updateDoc } from '../../config/firebase.js';
 import { normalizeImageUrl } from '../../shared/html.js';
-import { githubRawUrl } from '../../shared/github-folder.js';
+import { githubPagesUrl } from '../../shared/github-folder.js';
 import { _pgRef } from './vtt-refs.js';
 import { _showCtxMenu } from './vtt-utils.js';
 import { showNotif } from '../../shared/notifications.js';
 
-function _resolveMapImageUrl(url) {
-  const raw = String(url || '').trim();
-  if (/^\.?\/?images\/maps\//i.test(raw)) return githubRawUrl(raw);
-  return normalizeImageUrl(raw);
+function _resolveMapImageUrl(url, sourcePath = '') {
+  const raw = String(sourcePath || url || '').trim();
+  if (/^\.?\/?images\/maps\//i.test(raw) || /(?:raw\.githubusercontent\.com|github\.com\/[^/]+\/[^/]+\/(?:blob|tree))\//i.test(raw)) {
+    return githubPagesUrl(raw);
+  }
+  return normalizeImageUrl(String(url || raw).trim());
 }
 
 /** Charge Konva (vendored) sur window.Konva si pas déjà présent. */
@@ -314,8 +316,9 @@ export function _renderMapImages(deps = {}) {
       if (tr?.getParent()) tr.moveToTop();
       tgtLyr.batchDraw();
     };
-    // Auto-répare les URLs GitHub/anciennes entrées `images/maps/...`.
-    el.src = _resolveMapImageUrl(img.url);
+    // Auto-répare les URLs GitHub/anciennes entrées `images/maps/...` sans
+    // dépendre de raw.githubusercontent.com (limité en rafale sur localhost).
+    el.src = _resolveMapImageUrl(img.url, img.sourcePath);
   }
 }
 

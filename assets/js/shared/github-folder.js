@@ -5,9 +5,9 @@
 // sans doublon.
 //
 // Par défaut on stocke le CHEMIN RELATIF (`images/…`) : cohérent avec les
-// catalogues d'avatars/émotes. Les cartes VTT peuvent demander `urlMode: 'raw'`
+// catalogues d'avatars/émotes. Les cartes VTT demandent `urlMode: 'pages'`
 // pour rester affichables en local même si le fichier n'existe pas dans le
-// dossier servi par localhost. `api.github.com` est autorisé par la CSP.
+// worktree, sans subir les limitations en rafale du domaine GitHub Raw.
 // ══════════════════════════════════════════════
 export const GH_DEFAULT_REPO = 'ConseillerDoriantation/le-grand-jdr';
 export const GH_DEFAULT_BRANCH = 'main';
@@ -28,6 +28,29 @@ export function githubRawUrl(path, { repo = GH_DEFAULT_REPO, branch = GH_DEFAULT
   return `https://raw.githubusercontent.com/${repo}/${branch}/${clean}`;
 }
 
+// URL publique GitHub Pages d'un fichier du dépôt. Plus stable pour les images
+// affichées dans le navigateur que raw.githubusercontent.com, qui peut répondre
+// 429 lorsque beaucoup de miniatures sont chargées en même temps sur localhost.
+// Convertit aussi les anciennes URL raw déjà stockées dans Firestore.
+export function githubPagesUrl(path, { repo = GH_DEFAULT_REPO } = {}) {
+  const raw = String(path || '').trim();
+  if (!raw) return raw;
+  if (/^data:/i.test(raw)) return raw;
+
+  const rawMatch = raw.match(/^https?:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/[^/]+\/(.+)$/i);
+  const blobMatch = raw.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:blob|tree)\/[^/]+\/(.+)$/i);
+  const match = rawMatch || blobMatch;
+  if (match) {
+    const [, owner, repoName, assetPath] = match;
+    return `https://${owner.toLowerCase()}.github.io/${repoName}/${encodePath(assetPath)}`;
+  }
+  if (/^https?:\/\//i.test(raw)) return raw;
+
+  const [owner, repoName] = String(repo || '').split('/');
+  if (!owner || !repoName) return raw;
+  return `https://${owner.toLowerCase()}.github.io/${repoName}/${encodePath(raw)}`;
+}
+
 // Liste les fichiers d'un dossier du repo. `path` = chemin repo (ex: 'images/avatar').
 // Retourne [{ name, path, url }] trié par nom (url === path = chemin relatif).
 // Lève une erreur lisible si le dossier est introuvable / le chemin n'en est pas un.
@@ -43,7 +66,9 @@ export async function listGithubFolder(path, { repo = GH_DEFAULT_REPO, exts = nu
     .filter(e => e.type === 'file' && (!exts || exts.test(e.name)))
     .map(e => {
       const rawUrl = e.download_url || githubRawUrl(e.path, { repo });
-      return { name: e.name, path: e.path, rawUrl, url: urlMode === 'raw' ? rawUrl : e.path };
+      const pagesUrl = githubPagesUrl(e.path, { repo });
+      const url = urlMode === 'raw' ? rawUrl : urlMode === 'pages' ? pagesUrl : e.path;
+      return { name: e.name, path: e.path, rawUrl, pagesUrl, url };
     })
     .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 }

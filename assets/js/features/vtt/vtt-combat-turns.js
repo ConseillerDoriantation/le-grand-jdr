@@ -25,9 +25,22 @@ import {
 
 export async function _vttResetTurn(id) {
   if (!STATE.isAdmin) return;
-  await updateDoc(_tokRef(id), { movedThisTurn: false, movedCells: 0, bonusMvt: 0, moveOrigin: deleteField(), attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false })
-    .catch(() => showNotif('Erreur reset tour', 'error'));
-  showNotif('Tour réinitialisé', 'success');
+  try {
+    await updateDoc(_tokRef(id), { movedThisTurn: false, movedCells: 0, bonusMvt: 0, moveOrigin: deleteField(), attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false });
+    const token = VS.tokens[id]?.data;
+    if (token) {
+      token.movedThisTurn = false;
+      token.movedCells = 0;
+      token.bonusMvt = 0;
+      token.attackedThisTurn = false;
+      token.bonusActionThisTurn = false;
+      token.reactionThisTurn = false;
+      delete token.moveOrigin;
+    }
+    showNotif('Tour réinitialisé', 'success');
+  } catch {
+    showNotif('Erreur reset tour', 'error');
+  }
 }
 
 export async function _vttToggleTurnFlag(id, field) {

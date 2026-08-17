@@ -15,7 +15,7 @@ import Sortable from '../../vendor/sortable.esm.js';
 import { db, setDoc, writeBatch } from '../../config/firebase.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _esc, _searchIncludes, normalizeImageUrl } from '../../shared/html.js';
-import { githubRawUrl } from '../../shared/github-folder.js';
+import { githubPagesUrl } from '../../shared/github-folder.js';
 import { _sesRef, _pgRef } from './vtt-refs.js';
 import { TYPE_COLOR, hpColor } from './vtt-constants.js';
 import { _live } from './vtt-effective.js';
@@ -377,10 +377,12 @@ function _pageSmartSort(a, b) {
 function _pageThumbUrl(p) {
   const imgs = Array.isArray(p?.backgroundImages) ? p.backgroundImages : [];
   const img = imgs.find(x => x?.url) || imgs[0];
-  const raw = String(img?.url || '').trim();
+  const raw = String(img?.sourcePath || img?.url || '').trim();
   if (!raw) return '';
-  if (/^\.?\/?images\/maps\//i.test(raw)) return githubRawUrl(raw);
-  return normalizeImageUrl(raw);
+  if (/^\.?\/?images\/maps\//i.test(raw) || /(?:raw\.githubusercontent\.com|github\.com\/[^/]+\/[^/]+\/(?:blob|tree))\//i.test(raw)) {
+    return githubPagesUrl(raw);
+  }
+  return normalizeImageUrl(String(img?.url || raw).trim());
 }
 
 function _pageCard(p, broadcastId, { compact = false } = {}) {
@@ -536,7 +538,7 @@ export function _renderPageList() {
           <strong>Scènes</strong>
           <span>${filtered.length}/${all.length} pages</span>
         </div>
-        <button class="vtt-page-command-add" data-vtt-fn="_vttAddPage" title="Nouvelle page">＋</button>
+        <button class="vtt-page-command-add" data-vtt-fn="_vttAddPage" title="Nouvelle scène" aria-label="Créer une nouvelle scène">＋</button>
       </div>
       <div class="vtt-page-search-row">
         <input type="text" id="vtt-page-search" class="vtt-page-search" placeholder="Rechercher nom, dossier…"

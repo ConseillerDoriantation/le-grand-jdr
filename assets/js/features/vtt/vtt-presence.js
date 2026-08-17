@@ -79,7 +79,10 @@ function _renderSessionBtn() {
   if (!btn) return;
   const live = !!VS.session?.live;
   btn.classList.toggle('is-live', live);
-  btn.innerHTML = live ? '🔴 Session en cours' : '⚪ Démarrer la session';
+  btn.innerHTML = live
+    ? '<span class="vtt-canvas-ctl-icon" aria-hidden="true">●</span><span class="vtt-canvas-ctl-copy"><strong>Session</strong><small>En cours</small></span>'
+    : '<span class="vtt-canvas-ctl-icon" aria-hidden="true">▶</span><span class="vtt-canvas-ctl-copy"><strong>Session</strong><small>Démarrer</small></span>';
+  btn.setAttribute('aria-label', live ? 'Terminer la session en cours' : 'Démarrer la session');
   btn.title = live
     ? 'Session déclarée en cours — clique pour la terminer'
     : 'Démarrer la session (prévient les joueurs qui rejoignent)';

@@ -45,6 +45,7 @@ import {
 import { openModal, closeModalDirect, confirmModal, updateModalContent, promptModal, setModalCloseGuard } from '../../shared/modal.js';
 import { _esc, _norm, _searchIncludes, appSplashHtml, loadingHtml, normalizeImageUrl } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
+import { githubPagesUrl } from '../../shared/github-folder.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
 import { hasAdventurePremiumAccess } from '../../shared/premium.js';
 import PAGES from '../pages.js';
@@ -257,7 +258,7 @@ function _vttAiderClose(srcId, tgtId) {
 }
 function _vttClearAoptSearch(btn) {
   const inp = btn.previousElementSibling;
-  if (inp) { inp.value = ''; _vttAoptSearch(''); inp.focus(); }
+  if (inp) { inp.value = ''; _vttAoptSearch('', inp); inp.focus(); }
 }
 function _vttMoveTokenAndReset(sel, tid) {
   if (!sel.value) return;
@@ -1337,8 +1338,16 @@ function _buildShape(t) {
       }
       const pg=VS.activePage; if (!pg) return;
       if (_multiDragOrigin && VS.selectedMulti.has(t.id) && VS.selectedMulti.size>1) {
-        // Batch : sauver tous les tokens du groupe
-        const batch=writeBatch(db);
+        // Batch : valider tout le groupe avant d'écrire. Un déplacement groupé
+        // est atomique : si un token dépasse son mouvement ou traverse un mur,
+        // aucun token ne bouge et les shapes reviennent à leur point de départ.
+        const restoreGroup = () => {
+          for (const [id, orig] of Object.entries(_multiDragOrigin || {})) {
+            VS.tokens[id]?.shape?.position({ x: orig.x, y: orig.y });
+          }
+          VS.layers.token?.batchDraw();
+        };
+        const moves=[];
         for (const id of VS.selectedMulti) {
           const s=VS.tokens[id]?.shape; if (!s) continue;
           const tokenData=VS.tokens[id].data;
@@ -1347,15 +1356,48 @@ function _buildShape(t) {
           const nc=_clampTokenCell(Math.round((s.x()-d2.w*CELL/2)/CELL), d2.w, pg.cols);
           const nr=_clampTokenCell(Math.round((s.y()-d2.h*CELL/2)/CELL), d2.h, pg.rows);
           s.position({x:nc*CELL+d2.w*CELL/2,y:nr*CELL+d2.h*CELL/2});
-          const movePatch={col:nc,row:nr};
-          if (VS.session?.combat?.active && (nc !== tokenData.col || nr !== tokenData.row)) {
-            const origin = _combatMoveOrigin(tokenData);
-            if (STATE.isAdmin) movePatch.moveOrigin = origin;
+          const distance=Math.abs(nc-tokenData.col)+Math.abs(nr-tokenData.row);
+          if (!STATE.isAdmin && VS.session?.combat?.active) {
+            const maxMvt=(_live(tokenData).displayMovement??6)+(tokenData.bonusMvt||0);
+            const rem=maxMvt-(tokenData.movedCells||0);
+            if (distance>rem) {
+              restoreGroup();
+              showNotif(rem<=0 ? 'Plus de mouvement ce tour !' : `Déplacement groupé trop loin (${rem} case${rem!==1?'s':''} restante${rem!==1?'s':''}).`, 'error');
+              _multiDragOrigin=null; return;
+            }
           }
-          batch.update(_tokRef(id),movePatch);
+          if (!STATE.isAdmin && distance && (VS.activePage?.walls||[]).length
+              && fogWallBlocksPath(tokenData.col, tokenData.row, nc, nr, VS.activePage.walls)) {
+            restoreGroup();
+            showNotif('🧱 Un token du groupe est bloqué par un obstacle.', 'error');
+            _multiDragOrigin=null; return;
+          }
+          const movePatch={col:nc,row:nr};
+          if (VS.session?.combat?.active && distance) {
+            movePatch.moveOrigin = _combatMoveOrigin(tokenData);
+            if (!STATE.isAdmin) {
+              movePatch.movedCells=(tokenData.movedCells||0)+distance;
+              movePatch.movedThisTurn=true;
+            }
+          }
+          moves.push({id, tokenData, patch:movePatch});
         }
+        const batch=writeBatch(db);
+        moves.forEach(({id,patch})=>batch.update(_tokRef(id),patch));
         VS.layers.token.batchDraw();
-        await batch.commit().catch(()=>showNotif('Erreur déplacement groupe','error'));
+        try {
+          await batch.commit();
+          moves.forEach(({id,tokenData,patch})=>{
+            Object.assign(tokenData, patch);
+          });
+          const selectedMove=moves.find(move=>move.id===VS.selected);
+          if (selectedMove) _refreshRanges(selectedMove.id, selectedMove.tokenData);
+          fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
+        } catch (error) {
+          console.error('[vtt] déplacement groupé', error);
+          restoreGroup();
+          showNotif('Erreur déplacement groupe', 'error');
+        }
         _multiDragOrigin=null; return;
       }
       // Token seul
@@ -1385,16 +1427,23 @@ function _buildShape(t) {
       const patch={col:c,row:r};
       const moveCur=VS.tokens[t.id]?.data;
       if (VS.session?.combat?.active && moveCur && (c !== moveCur.col || r !== moveCur.row)) {
-        const origin = _combatMoveOrigin(moveCur);
-        if (STATE.isAdmin) patch.moveOrigin = origin;
+        patch.moveOrigin = _combatMoveOrigin(moveCur);
       }
-      if (!STATE.isAdmin&&VS.session?.combat?.active) {
+      if (!STATE.isAdmin&&VS.session?.combat?.active && moveCur && (c !== moveCur.col || r !== moveCur.row)) {
         const cur=VS.tokens[t.id]?.data;
         const d=Math.abs(c-(cur?.col??c))+Math.abs(r-(cur?.row??r));
         patch.movedCells=(cur?.movedCells||0)+d;
         patch.movedThisTurn=true;
       }
-      await updateDoc(_tokRef(t.id),patch).catch(()=>showNotif('Erreur déplacement','error'));
+      try {
+        await updateDoc(_tokRef(t.id),patch);
+      } catch (error) {
+        console.error('[vtt] déplacement token', error);
+        g.position({x:(moveCur?.col??c)*CELL+sw*CELL/2,y:(moveCur?.row??r)*CELL+sh*CELL/2});
+        VS.layers.token?.batchDraw();
+        showNotif('Erreur déplacement', 'error');
+        return;
+      }
       // Mise à jour optimiste + refresh des zones (déplacement et attaque)
       const _entry=VS.tokens[t.id];
       if (_entry?.data) {
@@ -2188,10 +2237,9 @@ async function _moveTo(id, col, row) {
   const patch = {col, row};
   const moved = !!cur && (col !== cur.col || row !== cur.row);
   if (moved && VS.session?.combat?.active) {
-    const origin = _combatMoveOrigin(cur);
-    if (STATE.isAdmin) patch.moveOrigin = origin;
+    patch.moveOrigin = _combatMoveOrigin(cur);
   }
-  if (!STATE.isAdmin && VS.session?.combat?.active && cur) {
+  if (!STATE.isAdmin && VS.session?.combat?.active && moved) {
     const d = Math.abs(col - cur.col) + Math.abs(row - cur.row);
     patch.movedCells = (cur.movedCells || 0) + d;
     patch.movedThisTurn = true;
@@ -2216,10 +2264,8 @@ async function _moveTo(id, col, row) {
   return true;
 }
 
-const _combatMoveOrigins = new Map();
-
 export function _getCombatMoveOrigin(token = {}) {
-  return _combatMoveOrigins.get(token.id) || token.moveOrigin || null;
+  return token.moveOrigin || null;
 }
 
 function _combatMoveOrigin(token = {}) {
@@ -2235,7 +2281,6 @@ function _combatMoveOrigin(token = {}) {
     round,
     pageId,
   };
-  if (token.id) _combatMoveOrigins.set(token.id, origin);
   return origin;
 }
 
@@ -2256,7 +2301,7 @@ async function _vttUndoMove(id) {
     movedCells: Number(origin.movedCells) || 0,
     movedThisTurn: !!origin.movedThisTurn,
   };
-  if (STATE.isAdmin) patch.moveOrigin = deleteField();
+  patch.moveOrigin = deleteField();
   try {
     await updateDoc(_tokRef(id), patch);
     token.col = patch.col;
@@ -2264,7 +2309,6 @@ async function _vttUndoMove(id) {
     token.movedCells = patch.movedCells;
     token.movedThisTurn = patch.movedThisTurn;
     delete token.moveOrigin;
-    _combatMoveOrigins.delete(id);
     const dims = _tokenDims(token);
     entry.shape?.position({
       x: patch.col * CELL + dims.w * CELL / 2,
@@ -4298,7 +4342,10 @@ function _buildAttackOptions(t) {
     });
   }
 
-  // ── Tous les sorts actifs du deck ──
+  // ── Sorts connus du personnage ──
+  // Le picker affiche le Deck par défaut, mais conserve aussi les sorts validés
+  // hors Deck afin que le joueur puisse exceptionnellement les lancer depuis
+  // l'onglet « Tous les sorts ». Un sort en attente/refusé reste inutilisable.
   // Silence : si le porteur a un état avec cantCastSpells, on saute toute la
   // génération des options de sort. Les attaques d'arme restent disponibles.
   const _silenced = _hasConditionEffect(t, 'cantCastSpells');
@@ -4311,7 +4358,9 @@ function _buildAttackOptions(t) {
     const spellPmDelta = c ? (getArmorSetData(c).modifiers.spellPmDelta || 0) : 0;
 
     c.deck_sorts.forEach((s, idx) => {
-      if (!s.actif) return;
+      const validation = s?.mjValidation
+        || (typeof s?.mjValidated === 'boolean' ? (s.mjValidated ? 'ok' : 'pending') : 'ok');
+      if (!s.actif && validation !== 'ok') return;
       // Portée du sort : préserve EXPLICITEMENT 0 (sur soi uniquement).
       const baseRange = (s.portee != null && Number.isFinite(parseInt(s.portee)))
         ? parseInt(s.portee)
@@ -4348,7 +4397,7 @@ function _buildAttackOptions(t) {
         fallbackTouchMod:  wTchMod,     fallbackDmgMod:  sStatMod,
         touchSetBonus: wSetBonus,
         enchantOnlyAlsoEtat: true,
-        extras: catMeta,
+        extras: { ...catMeta, _isDeckSpell: !!s.actif },
       })));
     });
   }
@@ -4688,6 +4737,11 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   const itemActOpts = inRange.filter(o => o._itemAction);
   const weaponOpts  = inRange.filter(o => !o._itemAction && o.sortIdx === undefined);
   const spellOpts   = inRange.filter(o => !o._itemAction && o.sortIdx !== undefined);
+  const characterSpellOpts = spellOpts.filter(o => typeof o._isDeckSpell === 'boolean');
+  const deckSpellCount = characterSpellOpts.filter(o => o._isDeckSpell).length;
+  const allSpellCount = characterSpellOpts.length;
+  const hasOutOfDeckSpells = allSpellCount > deckSpellCount;
+  const showSpellScope = hasOutOfDeckSpells && (!only || only === 'spells');
 
   // Grouper les sorts par catégorie (ordre des sort_cats du personnage)
   const srcChar   = _characterForToken(src);
@@ -4748,6 +4802,9 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
     // (dispatcher en capture), ce qui envoyait le MJ sur la page Bestiaire.
     const sourceChip = source?.label
       ? `<span class="vtt-aopt-source" title="${_esc(source?.title || 'Source')}">${_esc(source.label)}</span>`
+      : '';
+    const deckChip = o._isDeckSpell === false
+      ? '<span class="vtt-aopt-source vtt-aopt-source--outdeck" title="Ce sort est connu mais n’est pas préparé">Hors Deck</span>'
       : '';
 
     // ── Coût en PM : badge dédié à DROITE du titre (pas en pill) ──────
@@ -4816,7 +4873,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
         <span class="vtt-action-choice-body">
           <span class="vtt-action-choice-head">
             <strong title="${_esc(o.label)}">${_esc(o.label)}</strong>
-            <span class="vtt-action-choice-kinds">${actChip}${sourceChip}${elemPastille}${stack}</span>
+            <span class="vtt-action-choice-kinds">${actChip}${sourceChip}${deckChip}${elemPastille}${stack}</span>
           </span>
           ${pills.length ? `<span class="vtt-action-choice-tags">${pills.join('')}</span>` : ''}
           ${runeChipsHtml}
@@ -4836,7 +4893,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
           <span class="cs-spellcard-icon">${o.icon}</span>
           <div class="cs-spellcard-id">
             <div class="cs-spellcard-name" title="${_esc(o.label)}">${_esc(o.label)}</div>
-            <div class="cs-spellcard-sub">${actChip}${sourceChip}${elemPastille}${stack}</div>
+            <div class="cs-spellcard-sub">${actChip}${sourceChip}${deckChip}${elemPastille}${stack}</div>
           </div>
           ${pmBadge}
           <span class="vtt-castcard-cta">${cardHint}</span>
@@ -4863,7 +4920,9 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   const _optBtnWithName = (o, i) => {
     const html = _optBtn(o, i);
     const name = _norm(o.label || '').replace(/"/g, '');
-    return html.replace('<button ', `<button data-name="${name}" `);
+    const deckState = o._isDeckSpell === false ? 'out' : o._isDeckSpell === true ? 'deck' : '';
+    const deckAttrs = deckState ? ` data-deck-state="${deckState}"${deckState === 'out' ? ' hidden' : ''}` : '';
+    return html.replace('<button ', `<button data-name="${name}"${deckAttrs} `);
   };
 
   // ── 🛡 Arsenal : armes + actions d'objets (équipement physique) ──
@@ -4892,13 +4951,15 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
         const color = cat.couleur || '#818cf8';
         const tabId = `cat_${cat.id}`;
         const body  = catOpts.map(o => _optBtnWithName(o, inRange.indexOf(o))).join('');
-        optsHtml += _section(tabId, '✨', title, color, catOpts.length, body);
-        tabs.push({ id:tabId, icon:'✨', title, color, count:catOpts.length });
+        const deckCount = catOpts.filter(o => o._isDeckSpell !== false).length;
+        optsHtml += _section(tabId, '✨', title, color, deckCount, body);
+        tabs.push({ id:tabId, icon:'✨', title, color, count:deckCount, allCount:catOpts.length });
       });
     } else {
       const body = spellOpts.map(o => _optBtnWithName(o, inRange.indexOf(o))).join('');
-      optsHtml += _section('spells', '✨', 'Sorts', '#818cf8', spellOpts.length, body);
-      tabs.push({ id:'spells', icon:'✨', title:'Sorts', color:'#818cf8', count:spellOpts.length });
+      const deckCount = spellOpts.filter(o => o._isDeckSpell !== false).length;
+      optsHtml += _section('spells', '✨', 'Sorts', '#818cf8', deckCount, body);
+      tabs.push({ id:'spells', icon:'✨', title:'Sorts', color:'#818cf8', count:deckCount, allCount:spellOpts.length });
     }
   }
 
@@ -4954,6 +5015,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
 
   // Tabs HTML : "Tous" en premier, puis une tab par catégorie (si plus d'une catégorie)
   const totalCount = tabs.reduce((s, t) => s + t.count, 0);
+  const allActionsCount = tabs.reduce((s, t) => s + (t.allCount ?? t.count), 0);
   const showTabs = tabs.length > 1;
   const tabsHtml = showTabs ? `
     <div class="vtt-aopt-tabs" role="tablist" aria-label="Catégories d'actions">
@@ -4973,11 +5035,24 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
         </button>`).join('')}
     </div>` : '';
 
-  const searchHtml = totalCount >= 6 ? `
+  const spellScopeHtml = showSpellScope ? `
+    <div class="vtt-aopt-spell-scope" role="group" aria-label="Sorts affichés">
+      <span class="vtt-aopt-spell-scope-label">Sorts affichés</span>
+      <button type="button" class="vtt-aopt-spell-scope-btn is-active" data-spell-scope="deck"
+        data-vtt-fn="_vttAoptSpellScope" data-vtt-args="deck|$this" aria-pressed="true">
+        <span>⚡ Deck</span><b>${deckSpellCount}</b>
+      </button>
+      <button type="button" class="vtt-aopt-spell-scope-btn" data-spell-scope="all"
+        data-vtt-fn="_vttAoptSpellScope" data-vtt-args="all|$this" aria-pressed="false">
+        <span>✨ Tous les sorts</span><b>${allSpellCount}</b>
+      </button>
+    </div>` : '';
+
+  const searchHtml = allActionsCount >= 6 ? `
     <div class="vtt-aopt-search">
       <span class="vtt-aopt-search-ic">🔍</span>
       <input type="text" class="vtt-aopt-search-input" placeholder="Filtrer par nom…"
-        data-vtt-fn="_vttAoptSearch" data-vtt-on="input" data-vtt-args="$value" autofocus>
+        data-vtt-fn="_vttAoptSearch" data-vtt-on="input" data-vtt-args="$value|$this" autofocus>
       <button type="button" class="vtt-aopt-search-clr" title="Effacer"
         data-vtt-fn="_vttClearAoptSearch" data-vtt-args="$this">✕</button>
     </div>` : '';
@@ -5016,10 +5091,11 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
           : `<span class="vtt-aopt-modal-dist" title="Distance source → cible">📏 ${dist}c</span>`}
       </div>
       ${pmBar}
+      ${spellScopeHtml}
       ${tabsHtml}
       ${noTgt ? searchHtml.replace(' autofocus', '') : searchHtml}
       <div class="vtt-aopt-list cs-v3">${optsHtml}${basicHtml}
-        <div class="vtt-aopt-empty" style="display:none"><span style="opacity:.5">Aucune action ne correspond.</span></div>
+        <div class="vtt-aopt-empty" hidden><span style="opacity:.5">Aucune action ne correspond.</span></div>
       </div>`;
 
   const modalInnerHtml = `
@@ -5046,11 +5122,12 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
             </div>
             <span class="vtt-action-count">${totalCount} choix</span>
           </div>
+          ${spellScopeHtml}
           ${showTabs ? `<div class="vtt-action-filterbar">${tabsHtml}</div>` : ''}
           ${searchHtml ? `<div class="vtt-action-searchbar">${searchHtml}</div>` : ''}
         </div>
         <div class="vtt-aopt-list vtt-action-list cs-v3">${optsHtml}${basicHtml}
-          <div class="vtt-aopt-empty" style="display:none"><span style="opacity:.5">Aucune action ne correspond.</span></div>
+          <div class="vtt-aopt-empty" hidden><span style="opacity:.5">Aucune action ne correspond.</span></div>
         </div>
       </section>
     </div>`;
@@ -5062,6 +5139,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       <button type="button" class="vtt-aopt-hud-toggle" title="Replier / déplier les actions" data-vtt-fn="_vttToggleHudCollapse">▾</button>
       <button type="button" class="vtt-aopt-hud-close" title="Fermer" data-vtt-fn="_hideActBar">✕</button>
       ${innerHtml}</div>`);
+    _vttAoptApplyFilters(document.querySelector('#vtt-action-hud .vtt-aopt-modal'));
     return;
   }
 
@@ -5089,55 +5167,86 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       overlay._aoptObs = obs;
     }
   }
+  _vttAoptApplyFilters(document.querySelector('#modal-box .vtt-aopt-modal'));
 }
 
 /** Filtre les sections du picker d'actions par tab. '__all' = tout afficher. */
 function _vttAoptFilter(tabId, btn) {
-  document.querySelectorAll('.vtt-aopt-tab').forEach((b) => {
+  const root = btn?.closest('.vtt-aopt-modal') || document.querySelector('.vtt-aopt-modal');
+  if (!root) return;
+  root.querySelectorAll('.vtt-aopt-tab').forEach((b) => {
     const active = b === btn;
     b.classList.toggle('is-active', active);
     b.setAttribute('aria-selected', active ? 'true' : 'false');
   });
-  document.querySelectorAll('.vtt-aopt-section').forEach(s => {
-    s.style.display = (tabId === '__all' || s.dataset.tabId === tabId) ? '' : 'none';
-  });
-  // Re-applique le filtre de recherche (au cas où)
-  const q = document.querySelector('.vtt-aopt-search-input')?.value || '';
-  if (q) _vttAoptSearch(q);
-  else _vttAoptCheckEmpty();
+  _vttAoptApplyFilters(root);
 }
 
 /** Filtre les options du picker par texte (cherche dans data-name). */
-function _vttAoptSearch(raw) {
-  const q = _norm(raw || '');   // minuscules + sans accents (data-name est normalisé)
-  const activeTab = document.querySelector('.vtt-aopt-tab.is-active')?.dataset.tab || '__all';
-  document.querySelectorAll('.vtt-aopt-section').forEach(s => {
-    const inTab = activeTab === '__all' || s.dataset.tabId === activeTab;
-    if (!inTab) { s.style.display = 'none'; return; }
-    let visibleCount = 0;
-    s.querySelectorAll('.vtt-aopt').forEach(btn => {
-      const name = btn.dataset.name || '';
-      const match = !q || name.includes(q);
-      btn.style.display = match ? '' : 'none';
-      if (match) visibleCount++;
-    });
-    s.style.display = visibleCount > 0 ? '' : 'none';
-    // Met à jour le compteur affiché — mémorise la valeur d'origine pour pouvoir restaurer
-    const cnt = s.querySelector('.vtt-aopt-section-count');
-    if (cnt) {
-      if (cnt.dataset.origCount == null) cnt.dataset.origCount = cnt.textContent;
-      cnt.textContent = q ? visibleCount : cnt.dataset.origCount;
-    }
-  });
-  _vttAoptCheckEmpty();
+function _vttAoptSearch(raw, input) {
+  const root = input?.closest('.vtt-aopt-modal') || document.querySelector('.vtt-aopt-modal');
+  if (root) _vttAoptApplyFilters(root, raw);
 }
 
-function _vttAoptCheckEmpty() {
-  const list = document.querySelector('.vtt-aopt-list');
-  const empty = document.querySelector('.vtt-aopt-empty');
+/** Bascule entre les seuls sorts préparés et tout le grimoire validé. */
+function _vttAoptSpellScope(scope, btn) {
+  const root = btn?.closest('.vtt-aopt-modal') || document.querySelector('.vtt-aopt-modal');
+  if (!root) return;
+  root.querySelectorAll('.vtt-aopt-spell-scope-btn').forEach((b) => {
+    const active = b.dataset.spellScope === scope;
+    b.classList.toggle('is-active', active);
+    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  _vttAoptApplyFilters(root);
+}
+
+/** Applique ensemble catégorie, recherche et portée Deck/Tous les sorts. */
+function _vttAoptApplyFilters(root, searchValue) {
+  if (!root) return;
+  const activeTab = root.querySelector('.vtt-aopt-tab.is-active')?.dataset.tab || '__all';
+  const spellScope = root.querySelector('.vtt-aopt-spell-scope-btn.is-active')?.dataset.spellScope || 'deck';
+  const rawSearch = searchValue ?? root.querySelector('.vtt-aopt-search-input')?.value ?? '';
+  const q = _norm(rawSearch);
+  let totalVisible = 0;
+
+  root.querySelectorAll('.vtt-aopt-section').forEach((section) => {
+    let sectionVisible = 0;
+    section.querySelectorAll('.vtt-aopt').forEach((action) => {
+      const matchesDeck = spellScope === 'all' || action.dataset.deckState !== 'out';
+      const matchesSearch = !q || (action.dataset.name || '').includes(q);
+      const visible = matchesDeck && matchesSearch;
+      action.hidden = !visible;
+      if (visible) sectionVisible++;
+    });
+
+    const inTab = activeTab === '__all' || section.dataset.tabId === activeTab;
+    section.hidden = !inTab || sectionVisible === 0;
+    if (inTab) totalVisible += sectionVisible;
+
+    const count = section.querySelector('.vtt-aopt-section-count');
+    if (count) count.textContent = sectionVisible;
+    const sectionTab = [...root.querySelectorAll('.vtt-aopt-tab')]
+      .find(tab => tab.dataset.tab === section.dataset.tabId);
+    const tabCount = sectionTab?.querySelector('.vtt-aopt-tab-cnt');
+    if (tabCount) tabCount.textContent = sectionVisible;
+  });
+
+  const allTabCount = root.querySelector('.vtt-aopt-tab[data-tab="__all"] .vtt-aopt-tab-cnt');
+  if (allTabCount) {
+    allTabCount.textContent = [...root.querySelectorAll('.vtt-aopt-section')]
+      .reduce((sum, section) => sum + [...section.querySelectorAll('.vtt-aopt')].filter(action => !action.hidden).length, 0);
+  }
+  const actionCount = root.querySelector('.vtt-action-count');
+  if (actionCount) actionCount.textContent = `${totalVisible} choix`;
+  _vttAoptCheckEmpty(root);
+}
+
+function _vttAoptCheckEmpty(root = document) {
+  const list = root.querySelector('.vtt-aopt-list');
+  const empty = root.querySelector('.vtt-aopt-empty');
   if (!list || !empty) return;
-  const anyVisible = !!list.querySelector('.vtt-aopt-section:not([style*="display: none"])');
-  empty.style.display = anyVisible ? 'none' : '';
+  const anyVisible = !![...list.querySelectorAll('.vtt-aopt-section')].find(section => !section.hidden);
+  empty.hidden = anyVisible;
 }
 
 function _vttAttackModeControlsHtml(comment = 'Sélecteur de mode') {
@@ -8792,7 +8901,8 @@ function _initListeners() {
 
 // ── Mode édition carte ───────────────────────────────────────────
 function _setMapMode(on) {
-  VS.mapMode=on;
+  if (!STATE.isAdmin) return;
+  VS.mapMode=!!on;
   VS.layers.map?.listening(on);
   VS.layers.mapFg?.listening(on);
   // Mettre à jour le draggable de toutes les images existantes
@@ -8804,9 +8914,28 @@ function _setMapMode(on) {
     _hideCtxMenu();
   }
   const btn=document.getElementById('vtt-map-mode-btn');
-  if (btn) { btn.classList.toggle('active',on); btn.textContent=on?'🗺 Carte ✏':'🗺 Carte 🔒'; }
+  if (btn) {
+    btn.classList.toggle('active', on);
+    btn.classList.toggle('is-unlocked', on);
+    btn.setAttribute('aria-pressed', String(on));
+    btn.setAttribute('aria-label', on ? 'Verrouiller les images' : 'Déverrouiller les images');
+    btn.dataset.locked = String(!on);
+    btn.innerHTML = on
+      ? '<span class="vtt-canvas-ctl-icon" aria-hidden="true">🔓</span><span class="vtt-canvas-ctl-copy"><strong>Images</strong><small>Placement actif</small></span>'
+      : '<span class="vtt-canvas-ctl-icon" aria-hidden="true">🔒</span><span class="vtt-canvas-ctl-copy"><strong>Images</strong><small>Verrouillées</small></span>';
+    btn.title = on
+      ? 'Images déverrouillées — elles peuvent être déplacées et redimensionnées'
+      : 'Images verrouillées — cliquer pour modifier leur placement';
+  }
 }
-function _vttToggleMapMode() { return _setMapMode(!VS.mapMode); }
+function _vttToggleMapMode() {
+  const unlock = !VS.mapMode;
+  _setMapMode(unlock);
+  showNotif(
+    unlock ? '🔓 Images déverrouillées : mode édition actif' : '🔒 Images verrouillées pour jouer',
+    'info'
+  );
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // CHAT & LOG DE DÉS
@@ -8979,67 +9108,222 @@ async function _vttClearAnnots() {
   await _deleteAnnotsWithUndo(ids);
 }
 
-// Presets de taille communs aux modales création / édition (préfixe vpf-/vpe-)
+// Formats pensés pour des battlemaps. Les valeurs restent des cases de grille :
+// l'image est ajustée séparément et n'impose jamais ses dimensions en pixels.
 const _PG_PRESETS = [
-  { lb:'Petite',  c:16, r:12 },
-  { lb:'Moyenne', c:24, r:18 },
-  { lb:'Grande',  c:32, r:24 },
-  { lb:'Vaste',   c:48, r:36 },
+  { icon:'⚔️', lb:'Escarmouche', c:20, r:15, desc:'Combat rapide' },
+  { icon:'🗺️', lb:'Rencontre',   c:30, r:20, desc:'Format standard', recommended:true },
+  { icon:'🏰', lb:'Donjon',       c:40, r:30, desc:'Plusieurs salles' },
+  { icon:'🌍', lb:'Grande carte', c:60, r:40, desc:'Exploration vaste' },
 ];
-function _pgModalBody(pfx, { name='', folder='', cols=24, rows=18, fog=null } = {}) {
+function _pgPreviewImageUrl(image) {
+  const source = String(image?.sourcePath || image?.url || '').trim();
+  if (!source) return '';
+  if (/^\.?\/?images\/maps\//i.test(source) || /(?:raw\.githubusercontent\.com|github\.com\/[^/]+\/[^/]+\/(?:blob|tree))\//i.test(source)) {
+    return githubPagesUrl(source);
+  }
+  return normalizeImageUrl(String(image?.url || source).trim());
+}
+function _pgModalBody(pfx, { name='', folder='', cols=30, rows=20, fog=null, mapImages=[] } = {}) {
   const canUseAdvancedVtt = _vttAdvancedPremium();
+  const placedImages = (Array.isArray(mapImages) ? mapImages : []).filter(image => _pgPreviewImageUrl(image));
+  const primaryImage = placedImages.find(image => image.layer !== 'fg') || placedImages[0] || null;
+  const previewLayers = placedImages.map((image, index) => {
+    const x = Number(image.x) || 0, y = Number(image.y) || 0;
+    const w = Math.max(1, Number(image.w) || cols), h = Math.max(1, Number(image.h) || rows);
+    const isPrimary = image === primaryImage;
+    return `<img class="vtt-pgm-map-layer${image.layer==='fg'?' is-foreground':''}" src="${_esc(_pgPreviewImageUrl(image))}" alt="" data-pg-map-layer data-pg-primary="${isPrimary}" data-x="${x}" data-y="${y}" data-w="${w}" data-h="${h}" ${isPrimary?'id="'+pfx+'preview-primary"':''}>`;
+  }).join('');
   const presets = _PG_PRESETS.map(p =>
-    `<button type="button" class="vtt-pgm-preset" data-vtt-fn="_vttPgPreset" data-vtt-args="${pfx}|${p.c}|${p.r}">${p.lb}<small>${p.c}×${p.r}</small></button>`
+    `<button type="button" class="vtt-pgm-preset${p.c===cols&&p.r===rows?' active':''}" data-vtt-fn="_vttPgPreset" data-vtt-args="${pfx}|${p.c}|${p.r}" aria-pressed="${p.c===cols&&p.r===rows}">
+      ${p.recommended ? '<span class="vtt-pgm-recommended">Conseillé</span>' : ''}
+      <span class="vtt-pgm-preset-icon" aria-hidden="true">${p.icon}</span>
+      <span class="vtt-pgm-preset-copy"><strong>${p.lb}</strong><small>${p.c} × ${p.r} cases</small><em>${p.desc}</em></span>
+    </button>`
   ).join('');
   return `
-    <div class="vtt-pgm">
-      <label class="vtt-pgm-field">
-        <span class="vtt-pgm-lbl">Nom de la page</span>
-        <input id="${pfx}name" type="text" value="${_esc(name)}" placeholder="ex : Forêt Sombre" autofocus>
-      </label>
-      <label class="vtt-pgm-field">
-        <span class="vtt-pgm-lbl">📁 Dossier <em>(optionnel)</em></span>
-        <input id="${pfx}folder" type="text" value="${_esc(folder)}" placeholder="ex : Chapitre 1, Donjons…" list="${pfx}folders" autocomplete="off">
-        ${_pageFolderDatalist(pfx+'folders')}
-        <span class="vtt-pgm-hint">Tape un nom existant ou nouveau — ou range la page par glisser-déposer.</span>
-      </label>
-      <div class="vtt-pgm-field">
-        <span class="vtt-pgm-lbl">Dimensions de la grille</span>
-        <div class="vtt-pgm-presets">${presets}</div>
-        <div class="vtt-pgm-dims">
-          <div><input id="${pfx}cols" type="number" value="${cols}" min="8" max="200"><span>colonnes</span></div>
-          <span class="vtt-pgm-x">×</span>
-          <div><input id="${pfx}rows" type="number" value="${rows}" min="8" max="200"><span>lignes</span></div>
-        </div>
+    <div class="vtt-pgm-shell">
+      <div class="vtt-pgm">
+        <section class="vtt-pgm-section vtt-pgm-identity">
+          <div class="vtt-pgm-section-head">
+            <span class="vtt-pgm-step">1</span>
+            <div><strong>Identifier la scène</strong><small>Retrouve-la rapidement pendant la partie.</small></div>
+          </div>
+          <div class="vtt-pgm-identity-grid">
+            <label class="vtt-pgm-field">
+              <span class="vtt-pgm-lbl">Nom de la scène</span>
+              <input id="${pfx}name" type="text" value="${_esc(name)}" placeholder="ex : Embuscade dans la forêt" autofocus>
+            </label>
+            <label class="vtt-pgm-field">
+              <span class="vtt-pgm-lbl">Dossier <em>(optionnel)</em></span>
+              <input id="${pfx}folder" type="text" value="${_esc(folder)}" placeholder="ex : Chapitre 1" list="${pfx}folders" autocomplete="off">
+              ${_pageFolderDatalist(pfx+'folders')}
+            </label>
+          </div>
+        </section>
+
+        <section class="vtt-pgm-section">
+          <div class="vtt-pgm-section-head">
+            <span class="vtt-pgm-step">2</span>
+            <div><strong>Choisir le format de battlemap</strong><small>Les dimensions représentent les cases jouables, pas les pixels de l’image.</small></div>
+          </div>
+          <div class="vtt-pgm-presets">${presets}</div>
+          <div class="vtt-pgm-size-editor">
+            <div class="vtt-pgm-custom">
+              <span class="vtt-pgm-lbl">Dimensions personnalisées</span>
+              <div class="vtt-pgm-dims">
+                <label><span>Largeur</span><input id="${pfx}cols" type="number" value="${cols}" min="8" max="200" inputmode="numeric" data-vtt-fn="_vttPgDimensions" data-vtt-on="input" data-vtt-args="${pfx}|cols"><small>cases</small></label>
+                <button type="button" class="vtt-pgm-swap" data-vtt-fn="_vttPgSwap" data-vtt-args="${pfx}" title="Permuter largeur et hauteur" aria-label="Permuter largeur et hauteur">⇄</button>
+                <label><span>Hauteur</span><input id="${pfx}rows" type="number" value="${rows}" min="8" max="200" inputmode="numeric" data-vtt-fn="_vttPgDimensions" data-vtt-on="input" data-vtt-args="${pfx}|rows"><small>cases</small></label>
+              </div>
+              <span class="vtt-pgm-hint">De 8 à 200 cases par côté. Utilise ⇄ pour passer en portrait.</span>
+              ${primaryImage ? `<button type="button" class="vtt-pgm-fit-map" id="${pfx}fit-map" data-vtt-fn="_vttPgToggleFit" data-vtt-args="${pfx}" aria-pressed="false" disabled>
+                <span class="vtt-pgm-fit-icon" aria-hidden="true">⌗</span>
+                <span><strong>Adapter la grille à la carte</strong><small>Calcule les deux dimensions depuis l’image, sans la déformer.</small></span>
+                <span class="vtt-pgm-fit-state">Auto</span>
+              </button>` : ''}
+            </div>
+            <div class="vtt-pgm-preview" aria-live="polite">
+              <div class="vtt-pgm-preview-stage"><div class="vtt-pgm-preview-map ${previewLayers?'has-map':'is-empty'}" id="${pfx}preview-map">${previewLayers || '<span class="vtt-pgm-map-empty"><b>🗺️</b>Aucune carte placée</span>'}</div></div>
+              <div class="vtt-pgm-preview-meta" id="${pfx}preview-meta"></div>
+            </div>
+          </div>
+        </section>
+
+        ${fog !== null ? `<section class="vtt-pgm-section vtt-pgm-options">
+          <div class="vtt-pgm-section-head">
+            <span class="vtt-pgm-step">3</span>
+            <div><strong>Options de jeu</strong><small>Tu pourras encore les modifier plus tard.</small></div>
+          </div>
+          ${canUseAdvancedVtt ? `
+          <label class="vtt-pgm-switch-row">
+            <input type="checkbox" id="${pfx}fog" ${fog?'checked':''}>
+            <span class="vtt-pgm-switch" aria-hidden="true"><span></span></span>
+            <span class="vtt-pgm-switch-copy"><strong>Éclairage dynamique</strong><small>Brouillard de guerre, murs et lignes de vue.</small></span>
+            <span class="vtt-pgm-switch-status"><span class="is-off">Désactivé</span><span class="is-on">Activé</span></span>
+          </label>` : `
+          <div class="vtt-pgm-switch-row is-locked">
+            <span class="vtt-pgm-switch" aria-hidden="true"><span></span></span>
+            <span class="vtt-pgm-switch-copy"><strong>Éclairage dynamique</strong><small>Brouillard de guerre, murs et lignes de vue.</small></span>
+            <em>Premium</em>
+          </div>`}
+        </section>` : ''}
       </div>
-      ${fog !== null && canUseAdvancedVtt ? `
-      <label class="vtt-pgm-check">
-        <input type="checkbox" id="${pfx}fog" ${fog?'checked':''}>
-        <span>👁 Éclairage dynamique (brouillard de guerre)</span>
-      </label>` : (fog !== null ? `
-      <div class="vtt-pgm-check is-premium-locked">
-        <span>👁 Éclairage dynamique</span>
-        <small>Premium requis</small>
-      </div>` : '')}
     </div>`;
 }
 function _vttPgPreset(pfx, c, r) {
   const cEl = document.getElementById(pfx+'cols'), rEl = document.getElementById(pfx+'rows');
   if (cEl) cEl.value = c;
   if (rEl) rEl.value = r;
+  _vttPgDimensions(pfx, 'cols');
+}
+function _vttPgSwap(pfx) {
+  const cEl = document.getElementById(pfx+'cols'), rEl = document.getElementById(pfx+'rows');
+  if (!cEl || !rEl) return;
+  _vttPgSetFit(pfx, false);
+  [cEl.value, rEl.value] = [rEl.value, cEl.value];
+  _vttPgDimensions(pfx);
+}
+function _vttPgSetFit(pfx, active) {
+  const btn = document.getElementById(pfx+'fit-map');
+  if (!btn) return;
+  btn.classList.toggle('active', !!active);
+  btn.setAttribute('aria-pressed', String(!!active));
+}
+function _vttPgToggleFit(pfx) {
+  const btn = document.getElementById(pfx+'fit-map');
+  if (!btn || btn.disabled) return;
+  const active = btn.getAttribute('aria-pressed') !== 'true';
+  _vttPgSetFit(pfx, active);
+  _vttPgDimensions(pfx, active ? 'fit' : '');
+}
+function _vttPgInit(pfx) {
+  const image = document.getElementById(pfx+'preview-primary');
+  const map = document.getElementById(pfx+'preview-map');
+  const fitBtn = document.getElementById(pfx+'fit-map');
+  if (!image || !map || !fitBtn) return _vttPgDimensions(pfx);
+  const ready = () => {
+    if (!image.naturalWidth || !image.naturalHeight) return;
+    map.dataset.mapWidth = image.naturalWidth;
+    map.dataset.mapHeight = image.naturalHeight;
+    map.dataset.mapRatio = image.naturalWidth / image.naturalHeight;
+    fitBtn.disabled = false;
+    _vttPgDimensions(pfx);
+  };
+  if (image.complete) ready();
+  else image.addEventListener('load', ready, { once:true });
+  image.addEventListener('error', () => {
+    fitBtn.disabled = true;
+    fitBtn.title = 'Impossible de lire les dimensions de cette carte';
+  }, { once:true });
+  _vttPgDimensions(pfx);
+}
+function _vttPgDimensions(pfx, changedAxis = '') {
+  const cEl = document.getElementById(pfx+'cols'), rEl = document.getElementById(pfx+'rows');
+  let c = Math.max(8, Math.min(200, parseInt(cEl?.value) || 8));
+  let r = Math.max(8, Math.min(200, parseInt(rEl?.value) || 8));
+  const map = document.getElementById(pfx+'preview-map');
+  const meta = document.getElementById(pfx+'preview-meta');
+  const fit = document.getElementById(pfx+'fit-map')?.getAttribute('aria-pressed') === 'true';
+  const mapRatio = Number(map?.dataset.mapRatio) || 0;
+  if (fit && mapRatio > 0) {
+    if (changedAxis === 'fit' && Number(map?.dataset.mapWidth) && Number(map?.dataset.mapHeight)) {
+      const nativeCols = Number(map.dataset.mapWidth) / CELL;
+      const nativeRows = Number(map.dataset.mapHeight) / CELL;
+      const downscale = Math.min(1, 200 / nativeCols, 200 / nativeRows);
+      c = Math.max(8, Math.min(200, Math.round(nativeCols * downscale)));
+      r = Math.max(8, Math.min(200, Math.round(nativeRows * downscale)));
+      if (cEl) cEl.value = c;
+      if (rEl) rEl.value = r;
+    } else if (changedAxis === 'rows') {
+      c = Math.max(8, Math.min(200, Math.round(r * mapRatio)));
+      if (cEl) cEl.value = c;
+    } else {
+      r = Math.max(8, Math.min(200, Math.round(c / mapRatio)));
+      if (rEl) rEl.value = r;
+    }
+  }
+  const scale = Math.min(226 / c, 126 / r);
+  if (map) {
+    map.style.width = `${Math.max(38, Math.round(c * scale))}px`;
+    map.style.height = `${Math.max(38, Math.round(r * scale))}px`;
+    map.style.setProperty('--pg-cols', c);
+    map.style.setProperty('--pg-rows', r);
+    map.querySelectorAll('[data-pg-map-layer]').forEach(layer => {
+      const primaryFit = fit && layer.dataset.pgPrimary === 'true';
+      const x = Number(layer.dataset.x) || 0, y = Number(layer.dataset.y) || 0;
+      const w = Math.max(1, Number(layer.dataset.w) || c), h = Math.max(1, Number(layer.dataset.h) || r);
+      layer.style.left = primaryFit ? '0' : `${x / c * 100}%`;
+      layer.style.top = primaryFit ? '0' : `${y / r * 100}%`;
+      layer.style.width = primaryFit ? '100%' : `${w / c * 100}%`;
+      layer.style.height = primaryFit ? '100%' : `${h / r * 100}%`;
+    });
+  }
+  if (meta) {
+    const orientation = c === r ? 'Carrée' : c > r ? 'Paysage' : 'Portrait';
+    const widthM = Math.round(c * CELL_M * 10) / 10;
+    const heightM = Math.round(r * CELL_M * 10) / 10;
+    const sourceSize = Number(map?.dataset.mapWidth) && Number(map?.dataset.mapHeight)
+      ? `Carte source : ${map.dataset.mapWidth} × ${map.dataset.mapHeight} px`
+      : `Repère image : ${c * CELL} × ${r * CELL} px à ${CELL} px/case`;
+    meta.innerHTML = `<strong>${c} × ${r} cases</strong><span>${orientation} · ${widthM} × ${heightM} m</span><small>${sourceSize}</small>`;
+  }
   document.querySelectorAll('.vtt-pgm-preset').forEach(b => {
     const [bp, bc, br] = (b.dataset.vttArgs||'').split('|');
-    b.classList.toggle('active', bp===pfx && +bc===+c && +br===+r);
+    const active = bp===pfx && +bc===c && +br===r;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', String(active));
   });
 }
 
 function _vttAddPage() {
-  openModal('🗺️ Nouvelle page', `
-    ${_pgModalBody('vpf-')}
+  openModal('🗺️ Nouvelle scène', `
+    ${_pgModalBody('vpf-', { fog:false })}
     <div class="vtt-pgm-actions">
       <button class="btn-secondary" data-action="close-modal">Annuler</button>
-      <button class="btn-primary" data-vtt-fn="_vttConfirmAddPage">Créer la page</button>
-    </div>`);
+      <button class="btn-primary" data-vtt-fn="_vttConfirmAddPage">Créer la scène</button>
+    </div>`, { subtitle:'Une grille prête pour tes cartes et tes combats', accent:'#7eb0ff' });
+  _vttPgInit('vpf-');
 }
 // Datalist des dossiers de pages existants (suggestions de saisie)
 function _pageFolderDatalist(id) {
@@ -9051,22 +9335,26 @@ function _pageFolderDatalist(id) {
 async function _vttConfirmAddPage() {
   const name=(document.getElementById('vpf-name')?.value||'').trim();
   const folder=(document.getElementById('vpf-folder')?.value||'').trim();
-  const cols=Math.max(8,Math.min(200,parseInt(document.getElementById('vpf-cols')?.value)||24));
-  const rows=Math.max(8,Math.min(200,parseInt(document.getElementById('vpf-rows')?.value)||18));
+  const cols=Math.max(8,Math.min(200,parseInt(document.getElementById('vpf-cols')?.value)||30));
+  const rows=Math.max(8,Math.min(200,parseInt(document.getElementById('vpf-rows')?.value)||20));
   if (!name) { showNotif('Nom requis','error'); return; }
+  const fogEnabled = _vttAdvancedPremium()
+    ? (document.getElementById('vpf-fog')?.checked ?? false)
+    : false;
   closeModalDirect();
-  await addDoc(_pgsCol(),{name,folder,cols,rows,backgroundImages:[],order:Object.keys(VS.pages).length,createdAt:serverTimestamp()})
-    .catch(()=>showNotif('Erreur création page','error'));
+  await addDoc(_pgsCol(),{name,folder,cols,rows,fogEnabled,backgroundImages:[],order:Object.keys(VS.pages).length,createdAt:serverTimestamp()})
+    .catch(()=>showNotif('Erreur création de la scène','error'));
 }
 
 function _vttEditPage(id) {
   const p=VS.pages[id]; if (!p) return;
-  openModal('✏️ Modifier la page', `
-    ${_pgModalBody('vpe-', { name:p.name, folder:p.folder||'', cols:p.cols||24, rows:p.rows||18, fog:!!p.fogEnabled })}
+  openModal('✏️ Modifier la scène', `
+    ${_pgModalBody('vpe-', { name:p.name, folder:p.folder||'', cols:p.cols||24, rows:p.rows||18, fog:!!p.fogEnabled, mapImages:p.backgroundImages||[] })}
     <div class="vtt-pgm-actions">
       <button class="btn-secondary" data-action="close-modal">Annuler</button>
       <button class="btn-primary" data-vtt-fn="_vttConfirmEditPage" data-vtt-args="${id}">Enregistrer</button>
-    </div>`);
+    </div>`, { subtitle:'Dimensions, rangement et options de jeu', accent:'#7eb0ff' });
+  _vttPgInit('vpe-');
 }
 async function _vttConfirmEditPage(id) {
   const name=(document.getElementById('vpe-name')?.value||'').trim();
@@ -9077,9 +9365,22 @@ async function _vttConfirmEditPage(id) {
   const fogEnabled = _vttAdvancedPremium()
     ? (document.getElementById('vpe-fog')?.checked ?? false)
     : !!VS.pages[id]?.fogEnabled;
+  const fitMap = document.getElementById('vpe-fit-map')?.getAttribute('aria-pressed') === 'true';
+  let backgroundImages = VS.pages[id]?.backgroundImages || [];
+  if (fitMap && backgroundImages.length) {
+    const primaryIndex = Math.max(0, backgroundImages.findIndex(image => image.layer !== 'fg'));
+    backgroundImages = backgroundImages.map((image, index) => index === primaryIndex
+      ? { ...image, x:0, y:0, w:cols, h:rows }
+      : image);
+  }
   closeModalDirect();
-  await updateDoc(_pgRef(id),{name,folder,cols,rows,fogEnabled}).catch(()=>showNotif('Erreur','error'));
-  if (VS.activePage?.id===id) { VS.activePage={...VS.activePage,name,folder,cols,rows,fogEnabled}; _drawGrid(); }
+  const patch = {name,folder,cols,rows,fogEnabled, ...(fitMap ? {backgroundImages} : {})};
+  await updateDoc(_pgRef(id),patch).catch(()=>showNotif('Erreur','error'));
+  if (VS.activePage?.id===id) {
+    VS.activePage={...VS.activePage,...patch};
+    _drawGrid();
+    if (fitMap) _renderMapImages(_MAP_IMG_DEPS);
+  }
 }
 
 async function _vttDeletePage(id) {
@@ -10498,17 +10799,8 @@ function _buildHtml() {
   const mj=STATE.isAdmin;
   return `
 <div class="vtt-root" id="vtt-root">
-  <div class="vtt-toolbar">
-    ${mj?'':`<div id="vtt-page-tabs" class="vtt-page-tabs"></div>`}
-    <div class="vtt-tool-group vtt-right">
-      ${mj?`
-        <button class="vtt-btn-sm vtt-session-btn" id="vtt-session-btn" data-vtt-fn="_vttToggleSessionLive" title="Démarrer / terminer la session — prévient les joueurs qui rejoignent">⚪ Session</button>
-        <button class="vtt-btn-sm" id="vtt-map-mode-btn" data-vtt-fn="_vttToggleMapMode" title="Verrouille / déverrouille le calque des cartes en arrière-plan">🗺 Carte</button>
-        <button class="vtt-btn-sm" data-vtt-fn="_vttAddImageUrl" title="Ajouter une carte par URL (ex. image hébergée dans un dossier GitHub) — gratuit, sauvegardée dans la bibliothèque">🔗 URL</button>
-        ${CLOUDINARY_ENABLED?`<label  class="vtt-btn-sm vtt-upload-lbl" title="Upload une image via Cloudinary — sauvegardée dans la bibliothèque">⬆ Upload<input type="file" id="vtt-img-input" accept="image/*" hidden></label>
-        <button class="vtt-btn-sm" data-vtt-fn="_vttSetImgbbKey" title="Configurer Cloudinary (cloud name + upload preset)">🔑</button>`:''}`:''}
-    </div>
-  </div>
+  ${mj ? '' : `<div class="vtt-toolbar"><div id="vtt-page-tabs" class="vtt-page-tabs"></div></div>`}
+  ${mj && CLOUDINARY_ENABLED ? '<input type="file" id="vtt-img-input" accept="image/*" hidden>' : ''}
 
   <div class="vtt-body">
     <div class="vtt-presence-col" id="vtt-presence-col">
@@ -10660,6 +10952,14 @@ async function _vttMountTable(content) {
   const _tf = document.createElement('div');
   _tf.className = 'vtt-tool-float';
   _tf.innerHTML = `
+    ${STATE.isAdmin ? `<div class="vtt-canvas-quickbar" role="toolbar" aria-label="Commandes de la session">
+      <button class="vtt-canvas-control vtt-session-btn" id="vtt-session-btn" data-vtt-fn="_vttToggleSessionLive" title="Démarrer la session et prévenir les joueurs qui rejoignent">
+        <span class="vtt-canvas-ctl-icon" aria-hidden="true">▶</span><span class="vtt-canvas-ctl-copy"><strong>Session</strong><small>Démarrer</small></span>
+      </button>
+      <button class="vtt-canvas-control vtt-map-lock" id="vtt-map-mode-btn" data-vtt-fn="_vttToggleMapMode" title="Images verrouillées — cliquer pour modifier leur placement" aria-label="Déverrouiller les images" aria-pressed="false" data-locked="true">
+        <span class="vtt-canvas-ctl-icon" aria-hidden="true">🔒</span><span class="vtt-canvas-ctl-copy"><strong>Images</strong><small>Verrouillées</small></span>
+      </button>
+    </div>` : ''}
     <div class="vtt-tool-float-tools" role="toolbar" aria-label="Outils de la table virtuelle">
       <button class="vtt-tool" data-vtt-fn="_vttCenterOnMyToken" title="Recentrer sur mon personnage" aria-label="Recentrer sur mon personnage">⌖</button>
       <button class="vtt-tool" data-vtt-fn="_vttOpenKeyboardHelp" title="Raccourcis clavier (?)" aria-label="Afficher les raccourcis clavier">?</button>
@@ -10711,11 +11011,17 @@ async function _vttMountTable(content) {
     ${STATE.isAdmin?`
     <div id="vtt-walls-bar" class="vtt-walls-bar" style="display:none">
       <div class="vtt-walls-row">
-        <div class="vtt-walls-grp">
+        <div class="vtt-walls-grp vtt-walls-grp--structures">
           <span class="vtt-walls-grp-lbl">Structures</span>
-          <button class="vtt-btn-sm active" data-fog-tool="wall"   data-vtt-fn="_vttFogTool" data-vtt-args="wall"   title="Tracer un mur (bloque vision + déplacement)">🧱 Mur</button>
-          <button class="vtt-btn-sm"        data-fog-tool="door"   data-vtt-fn="_vttFogTool" data-vtt-args="door"   title="Tracer une porte (ouvrable)">🚪 Porte</button>
-          <button class="vtt-btn-sm"        data-fog-tool="window" data-vtt-fn="_vttFogTool" data-vtt-args="window" title="Tracer une fenêtre (laisse passer la vision, bloque le passage)">🪟 Fenêtre</button>
+          <button class="vtt-btn-sm vtt-wall-kind active" data-fog-tool="wall" data-vtt-fn="_vttFogTool" data-vtt-args="wall" title="Tracer un mur : bloque la vision et le déplacement">
+            <span class="vtt-wall-kind-icon">🧱</span><span><strong>Mur</strong><small>Bloque vision + passage</small></span>
+          </button>
+          <button class="vtt-btn-sm vtt-wall-kind" data-fog-tool="door" data-vtt-fn="_vttFogTool" data-vtt-args="door" title="Tracer une porte fermée, ouvrable ensuite sur la carte">
+            <span class="vtt-wall-kind-icon">🚪</span><span><strong>Porte</strong><small>Créée fermée · ouvrable</small></span>
+          </button>
+          <button class="vtt-btn-sm vtt-wall-kind" data-fog-tool="window" data-vtt-fn="_vttFogTool" data-vtt-args="window" title="Tracer une vitre fermée : laisse voir mais bloque le passage">
+            <span class="vtt-wall-kind-icon">◇</span><span><strong>Vitre</strong><small>Laisse voir · bloque le passage</small></span>
+          </button>
         </div>
         <div class="vtt-walls-grp">
           <span class="vtt-walls-grp-lbl">Lumière</span>
@@ -10736,13 +11042,24 @@ async function _vttMountTable(content) {
         </div>
       </div>
       <div class="vtt-walls-bar-hint">
-        Murs : grille · Brouillard : demi-case · <kbd>Alt</kbd> = précision ×2 · <kbd>Shift</kbd> = libre · <kbd>Ctrl</kbd>+<kbd>Z</kbd> = annuler la pose · Clic segment/zone = menu<br>
+        <div class="vtt-obstacle-legend">
+          <span><i class="is-wall"></i><b>Mur</b> : toujours bloquant</span>
+          <span><i class="is-closed"></i><b>Fermée</b> : passage bloqué</span>
+          <span><i class="is-open"></i><b>Ouverte</b> : passage libre</span>
+          <span><i class="is-window"></i><b>Vitre</b> : la vision passe toujours</span>
+        </div>
+        Hors édition, clique une porte ou une vitre pour l’ouvrir ou la fermer. En édition, un clic affiche directement ses réglages.<br>
+        Grille · Brouillard : demi-case · <kbd>Alt</kbd> = précision ×2 · <kbd>Shift</kbd> = libre · <kbd>Ctrl</kbd>+<kbd>Z</kbd> = annuler la pose<br>
         <span class="vtt-fog-legend"><span class="vtt-fog-dot vtt-fog-dot--ok"></span>sommet raccordé ·
         <span class="vtt-fog-dot vtt-fog-dot--bad"></span>sommet isolé (fuite possible) ·
         <span class="vtt-fog-dot vtt-fog-dot--snap"></span>aimantation pendant tracé</span>
       </div>
     </div>`:''}`;
   wrap.appendChild(_tf);
+  if (STATE.isAdmin) {
+    _renderSessionBtn();
+    _setMapMode(false);
+  }
 
   // ─── Overlay haut-gauche : Timer + Combat tracker ──────────────────
   const _ovTL = document.createElement('div');
@@ -10887,6 +11204,7 @@ export const VTT_ACTIONS = {
   _vttAoptCheckEmpty,
   _vttAoptFilter,
   _vttAoptSearch,
+  _vttAoptSpellScope,
   _vttAtkBonusReset,
   _vttAtkBonusStep,
   _vttApplyAfflictions,
@@ -11042,7 +11360,10 @@ export const VTT_ACTIONS = {
   _vttPageFavToggle,
   _vttPageSearch,
   _vttPageSearchClear,
+  _vttPgDimensions,
   _vttPgPreset,
+  _vttPgSwap,
+  _vttPgToggleFit,
   _vttPickOpt,
   _vttPlColorSelect,
   _vttPlace,

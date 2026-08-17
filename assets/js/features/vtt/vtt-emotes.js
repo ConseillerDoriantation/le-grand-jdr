@@ -24,6 +24,7 @@ import { _logCol, _logGmCol, _reactionRef } from './vtt-refs.js';
 import { _STAT_KEY } from './vtt-constants.js';
 import { openModal, closeModalDirect, confirmModal, promptModal } from '../../shared/modal.js';
 import { listGithubFolder, GH_IMAGE_EXTS, slugFromFile, fileKey } from '../../shared/github-folder.js';
+import { resolveControlledTokenId } from './vtt-token-control.js';
 import { VTT_ACTIONS, _showEmoteBubble, _canControlToken, _tokenStatMod, _vttLogTargetFields } from './vtt.js'; // circ. (runtime)
 import { _renderInspector } from './vtt-inspector.js'; // re-render après changement de mode de jet
 
@@ -306,14 +307,22 @@ export async function _vttPickEmote(name) {
   const em = _emotes.find(e => e.name === name); if (!em) return;
   // Le picker reste ouvert — l'utilisateur ferme manuellement
 
-  _pushRecent(name);
-
-  // Token émetteur : sélection courante, sinon le token possédé par le joueur
-  let tokenId = VS.selected;
-  if (!tokenId) {
-    const own = Object.values(VS.tokens).find(e => e.data.ownerId === uid);
-    tokenId = own?.data?.id ?? null;
+  // Une sélection peut viser un token adverse pour l'inspecter ou l'attaquer.
+  // Elle ne donne jamais le droit de l'utiliser comme source d'une interaction.
+  // On retombe sur un token contrôlé de la scène (propriétaire ou délégation).
+  const tokenId = resolveControlledTokenId(
+    VS.selected,
+    VS.tokens,
+    VS.activePage?.id || null,
+    token => _canControlToken(token, uid),
+  );
+  const token = tokenId ? VS.tokens[tokenId]?.data : null;
+  if (!token || !_canControlToken(token, uid)) {
+    showNotif('Sélectionne un token que tu contrôles pour envoyer une émote.', 'info');
+    return;
   }
+
+  _pushRecent(name);
 
   // Clé partagée locale + Firestore : même timestamp → _renderedReactions évite le double affichage
   const ts = Date.now();
@@ -332,8 +341,7 @@ export async function _vttPickEmote(name) {
   });
 
   // Statistiques : compte l'émote (attribuée au personnage du token émetteur).
-  const _et = tokenId ? VS.tokens[tokenId]?.data : null;
-  if (_et?.characterId) bumpEmote(_et.characterId, VS.characters[_et.characterId]?.nom || _et.name, name);
+  if (token.characterId) bumpEmote(token.characterId, VS.characters[token.characterId]?.nom || token.name, name);
 }
 
 export async function _ouvrirGestionEmotes() {

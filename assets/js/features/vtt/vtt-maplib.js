@@ -10,9 +10,10 @@ import { STATE } from '../../core/state.js';
 import { _esc, normalizeImageUrl } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { promptModal } from '../../shared/modal.js';
+import { CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import { db, doc, setDoc, updateDoc } from '../../config/firebase.js';
 import { _pgRef } from './vtt-refs.js';
-import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile, fileKey, githubRawUrl } from '../../shared/github-folder.js';
+import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile, fileKey, githubPagesUrl } from '../../shared/github-folder.js';
 
 export let _libFolder = null;   // null = racine, string = folderId ouvert
 let _libOpen   = true;   // section collapsible dans le tray
@@ -20,10 +21,12 @@ let _libSearch = '';
 export const _mapLibRef = () => doc(db, `adventures/${aid()}/vtt/mapLibrary`);
 const _libCanWrite = () => !!STATE.isAdmin;
 
-function _resolveMapImageUrl(url) {
-  const raw = String(url || '').trim();
-  if (/^\.?\/?images\/maps\//i.test(raw)) return githubRawUrl(raw);
-  return normalizeImageUrl(raw);
+function _resolveMapImageUrl(url, sourcePath = '') {
+  const raw = String(sourcePath || url || '').trim();
+  if (/^\.?\/?images\/maps\//i.test(raw) || /(?:raw\.githubusercontent\.com|github\.com\/[^/]+\/[^/]+\/(?:blob|tree))\//i.test(raw)) {
+    return githubPagesUrl(raw);
+  }
+  return normalizeImageUrl(String(url || raw).trim());
 }
 
 // Reset au teardown / changement d'aventure (appelé par vtt.js).
@@ -68,7 +71,7 @@ export function _renderLibSection() {
     ? `<div class="vtt-lib-grid">${visible.map(img => `
         <div class="vtt-lib-card" role="button" tabindex="0" draggable="true" data-vtt-drag="image:${img.id}" data-vtt-fn="_vttLibPlace" data-vtt-args="${img.id}" title="${_esc(img.name||'Image')} · clic = pleine carte · glisser = placement précis">
           <div class="vtt-lib-card-thumb">
-            <img src="${_esc(_resolveMapImageUrl(img.url))}" alt="${_esc(img.name||'')}" loading="lazy" data-img-err="mark-parent" data-img-err-class="vtt-lib-card--err">
+            <img src="${_esc(_resolveMapImageUrl(img.url, img.sourcePath))}" alt="${_esc(img.name||'')}" loading="lazy" data-img-err="mark-parent" data-img-err-class="vtt-lib-card--err">
           </div>
           <div class="vtt-lib-card-meta">
             <div class="vtt-lib-card-name">${_esc(img.name||'image')}</div>
@@ -91,8 +94,11 @@ export function _renderLibSection() {
           <span>${visible.length}/${folderImages.length} images · ${images.length} au total</span>
         </div>
         <div class="vtt-lib-actions">
-          <button class="vtt-lib-action" data-vtt-fn="_vttLibImportGithub" title="Importer un dossier GitHub">📥</button>
-          <button class="vtt-lib-action" data-vtt-fn="_vttLibNewFolder" title="Nouveau dossier">📁</button>
+          <button class="vtt-lib-action" data-vtt-fn="_vttAddImageUrl" title="Ajouter une image par URL" aria-label="Ajouter une image par URL">🔗</button>
+          ${CLOUDINARY_ENABLED ? `<button class="vtt-lib-action" data-vtt-fn="_vttUploadClick" title="Importer une image" aria-label="Importer une image">⬆</button>
+          <button class="vtt-lib-action" data-vtt-fn="_vttSetImgbbKey" title="Configurer l'hébergement d'images" aria-label="Configurer l'hébergement d'images">🔑</button>` : ''}
+          <button class="vtt-lib-action" data-vtt-fn="_vttLibImportGithub" title="Importer un dossier GitHub" aria-label="Importer un dossier GitHub">📥</button>
+          <button class="vtt-lib-action" data-vtt-fn="_vttLibNewFolder" title="Nouveau dossier" aria-label="Nouveau dossier">📁</button>
         </div>
       </div>
       <div class="vtt-tray-search">
@@ -141,7 +147,7 @@ export async function _vttLibImportGithub() {
   localStorage.setItem(KEY, path);
   showNotif('Lecture du dossier…', 'info');
   let files;
-  try { files = await listGithubFolder(path, { exts: GH_IMAGE_EXTS, urlMode: 'raw' }); }
+  try { files = await listGithubFolder(path, { exts: GH_IMAGE_EXTS, urlMode: 'pages' }); }
   catch (e) { showNotif(e.message, 'error'); return; }
   if (!files.length) { showNotif('Aucune image dans ce dossier', 'info'); return; }
   const seen = new Set((VS.mapLib.images || []).map(i => fileKey(i.url)));
@@ -219,7 +225,7 @@ export function _vttLibPlace(imgId, cell = null) {
   const x = isDrop ? Math.max(0, Math.min(VS.activePage.cols - w, cell.col - Math.floor(w / 2))) : 0;
   const y = isDrop ? Math.max(0, Math.min(VS.activePage.rows - h, cell.row - Math.floor(h / 2))) : 0;
   const imgs = [...(VS.activePage.backgroundImages??[]), {
-    id: Date.now().toString(), url: _resolveMapImageUrl(img.url), sourcePath: img.sourcePath || null, x, y, w, h,
+    id: Date.now().toString(), url: _resolveMapImageUrl(img.url, img.sourcePath), sourcePath: img.sourcePath || null, x, y, w, h,
   }];
   updateDoc(_pgRef(VS.activePage.id), { backgroundImages: imgs })
     .then(() => showNotif('Image placée sur la carte', 'success'))
