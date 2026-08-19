@@ -459,6 +459,10 @@ function _addToCoffre(b, item, source) {
 // ══════════════════════════════════════════════════════════════════════════════
 const _save = (b) => tryDoc('bastion', 'main', b);
 
+// Mur des annonces : collection dédiée `bastionAnnonces` (écrivable par les
+// membres, contrairement au doc bastion/main réservé au MJ). Chargée en direct.
+let _annonces = [];
+
 function _attachListener() {
   // watchDoc gère lui-même le re-subscribe (kill listener précédent du même nom).
   watchDoc('bastion', 'bastion', 'main', (data) => {
@@ -471,6 +475,12 @@ function _attachListener() {
     if (!isFirst && prevWeek != null && STORE.bastion.semaine > prevWeek && !STATE.isAdmin) {
       showNotif(`🕰 Période ${STORE.bastion.semaine} : votre bastion a changé !`, 'success');
     }
+    if (STATE.currentPage === 'bastion') _renderPage();
+  });
+  // Annonces : doc unique membre-écrivable `bastionAnnonces/main` (lecture GET,
+  // comme bastion/main). Évite les subtilités de règle sur les requêtes `list`.
+  watchDoc('bastionAnnonces', 'bastionAnnonces', 'main', (data) => {
+    _annonces = (Array.isArray(data?.items) ? data.items : []).sort((a, b) => (b.ts || 0) - (a.ts || 0));
     if (STATE.currentPage === 'bastion') _renderPage();
   });
 }
@@ -2769,7 +2779,7 @@ function _annonceTimeAgo(ts) {
 function _renderAnnonces(b) {
   const myUid = STATE.user?.uid;
   const isMj = STATE.isAdmin;
-  const annonces = b.annonces || [];
+  const annonces = _annonces;
   const typeBtns = Object.entries(_ANNONCE_TYPES).map(([id, t], i) =>
     `<button class="bs-annonce-type${i === 0 ? ' active' : ''}" style="--ac:${t.color}" data-action="_bastionSetAnnonceType" data-type="${id}">${t.icon} ${t.label}</button>`
   ).join('');
@@ -2821,32 +2831,34 @@ async function _bastionPostAnnonce() {
   const ta = document.getElementById('bs-annonce-text');
   const text = (ta?.value || '').trim();
   if (!text) { showNotif('Écris quelque chose avant de publier.', 'error'); ta?.focus(); return; }
+  const uid = STATE.user?.uid;
+  if (!uid) { showNotif('Connexion requise pour publier.', 'error'); return; }
   const type = document.getElementById('bs-annonce-type')?.value;
-  const b = JSON.parse(JSON.stringify(STORE.bastion || _defaultBastion()));
+  const id = `a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   const entry = {
-    id: `a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-    uid: STATE.user?.uid || null,
+    id,
+    uid,                                   // requis par la règle : l'auteur doit être soi
     author: _annonceAuthor(),
     type: _ANNONCE_TYPES[type] ? type : 'message',
     text: text.slice(0, 500),
     ts: Date.now(),
   };
-  b.annonces = [entry, ...(b.annonces || [])].slice(0, 40);   // mur borné : 40 dernières
-  await _save(b);
+  // Doc unique membre-écrivable (le doc bastion/main reste MJ-only).
+  const items = [entry, ..._annonces].slice(0, 40);   // mur borné : 40 dernières
+  const ok = await tryDoc('bastionAnnonces', 'main', { items });
+  if (!ok) return;
+  if (ta) ta.value = '';
   showNotif('📌 Annonce publiée.', 'success');
 }
 
 async function _bastionDeleteAnnonce(id) {
-  const b = JSON.parse(JSON.stringify(STORE.bastion || {}));
-  const a = (b.annonces || []).find(x => x.id === id);
-  if (!a) return;
+  const a = _annonces.find(x => x.id === id);
   // Seul l'auteur (ou le MJ) peut supprimer son annonce.
-  if (!(a.uid && a.uid === STATE.user?.uid) && !STATE.isAdmin) {
+  if (a && !(a.uid && a.uid === STATE.user?.uid) && !STATE.isAdmin) {
     showNotif('Tu ne peux supprimer que tes propres annonces.', 'error');
     return;
   }
-  b.annonces = (b.annonces || []).filter(x => x.id !== id);
-  await _save(b);
+  await tryDoc('bastionAnnonces', 'main', { items: _annonces.filter(x => x.id !== id) });
 }
 
 function _renderPage() {
