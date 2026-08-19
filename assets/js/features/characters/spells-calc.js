@@ -11,6 +11,7 @@ import { getMaitriseBonus as getSharedMaitriseBonus, getMod, statShort } from '.
 import { getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getMainWeapon } from './data.js';
 import { calcSpellDuration, calcSpellTargets, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { spellSetCostDelta } from '../../shared/spell-system.js';
 import { calculateSummonStats, normalizeInvocationStats } from '../../shared/invocation-stats.js';
 // Cœurs purs extraits (testables à froid). Ré-exportés plus bas pour l'API publique.
 import {
@@ -31,6 +32,28 @@ let _damageTypesCache   = [];
 let _conditionsLibCache = [];
 
 const ACTION_RUNE = 'Déclenchement';
+
+// ── Ressources de coût d'un sort ──────────────────────────────────────────────
+// Le coût d'un sort se paie par défaut en PM. Le concepteur peut choisir une
+// autre ressource : PV, Or, ou aucune (sort gratuit). `mult` = coût par unité de
+// composition (noyau + chaque rune) : PM/PV = 2 par unité, Or = 5 par unité.
+// `id` reste stocké dans s.costResource ; absent ⇒ 'pm' (rétro-compat totale).
+export const SPELL_COST_RESOURCES = [
+  { id: 'pm',   label: 'PM', full: 'Points de magie', icon: '✦',  mult: 2, color: '#4f8cff' },
+  { id: 'pv',   label: 'PV', full: 'Points de vie',   icon: '❤️', mult: 2, color: '#e0556f' },
+  { id: 'or',   label: 'Or', full: 'Pièces d’or',     icon: '🪙', mult: 10, color: '#d9a441' },
+  { id: 'none', label: '—',  full: 'Gratuit',         icon: '🆓', mult: 0, color: '#7c8aa5' },
+];
+const _COST_RES_BY_ID = Object.fromEntries(SPELL_COST_RESOURCES.map(r => [r.id, r]));
+
+/** Métadonnées de la ressource de coût d'un sort (défaut PM). */
+export function spellCostRes(s) {
+  return _COST_RES_BY_ID[s?.costResource || 'pm'] || _COST_RES_BY_ID.pm;
+}
+/** Coût par unité de composition (noyau/rune) selon la ressource choisie. */
+export function spellCostMult(s) {
+  return spellCostRes(s).mult;
+}
 
 function _spellActionMode(s) {
   if (s?.designMode === 'classic'
@@ -202,6 +225,25 @@ export function _calcSortSoin(s, c) {
   }
   if (maitriseStr || statStr) return `${base}${statStr}${maitriseStr}`;
   return base;
+}
+
+/**
+ * Régénération de PM (rune Protection en mode « mana »).
+ * Contrairement au soin, la formule saisie est prise TELLE QUELLE : on ne scale
+ * PAS automatiquement avec les runes Protection et on n'ajoute PAS de stat auto.
+ * - Formule vide / « = base » → défaut (nb Protection)d4 (min 1d4).
+ * - Modificateur de stat uniquement si une stat est explicitement choisie
+ *   (le sélecteur « Auto » et « Aucune » ne rajoutent rien).
+ */
+export function _calcSortMana(s, c) {
+  const runes  = s?.runes || [];
+  const nbProt = runes.filter(r => r === 'Protection').length;
+  const base   = (s?.soin || '').trim();
+  const statKey = (s?.degatsStat && s.degatsStat !== 'none') ? s.degatsStat : null;
+  const statMod = statKey ? getMod(c, statKey) : 0;
+  const statStr = statMod > 0 ? ` +${statMod}` : statMod < 0 ? ` ${statMod}` : '';
+  const dice = (!base || base.toLowerCase() === '= base') ? `${Math.max(1, nbProt)}d4` : base;
+  return `${dice}${statStr}`;
 }
 
 function _fmtSigned(n) {
@@ -1090,10 +1132,13 @@ export function _buildSortResume(s, c) {
     } else if (comboIds.has('drain')) {
       const pct = Math.round(_calcDrainPct(s) * 100);
       lines.push({ icon:'🩸', label:`Drain ${pct}% des dégâts`, detail:`Soigne le lanceur · cap frappe de base hors Puissance · ${nbProt} Protection` });
+    } else if (mode === 'mana') {
+      // Régén PM : formule littérale (pas de scaling Protection ni de stat auto).
+      lines.push({ icon:'💙', label:`${_calcSortMana(s, c)} PM`, detail:`Régénère des PM à la cible${monoStr}` });
     } else if (mode === 'soin') {
       {
         const soin = _calcHealDisplayParts(s, c);
-        const detailParts = [`Soin`, `+${nbProt}d4 Prot`];
+        const detailParts = ['Soin', `+${nbProt}d4 Prot`];
         if (soin.statMod) detailParts.push(`${soin.statLbl} ${_fmtSigned(soin.statMod)}`);
         if (soin.maitrise) detailParts.push(`Maîtrise ${_fmtSigned(soin.maitrise)}`);
         lines.push({ icon:'💚', label:soin.label, detail:`${detailParts.join(' · ')}${monoStr}` });
@@ -1355,11 +1400,18 @@ export function spellVM(s, pmDelta = 0) {
     : Number.isFinite(parseInt(s?.pm)) ? parseInt(s.pm)
       : Number.isFinite(parseInt(s?.cout)) ? parseInt(s.cout)
         : null;
+  const res = spellCostRes(s);
+  // Le delta de coût du set d'armure (configuré en PM) est mis à l'échelle vers
+  // la ressource du sort : PM −2 → PV −2, Or −10 (proportionnel au coût du noyau).
+  const delta = spellSetCostDelta(pmDelta, res.id);
   return {
     icon:  s?.icon || s?.icone || '✨',
     nom:   s?.nom || 'Sort sans nom',
-    pm:    base == null ? null : Math.max(0, base + (parseInt(pmDelta) || 0)),
+    pm:    base == null ? null : Math.max(0, base + delta),
     pmBase: base,
+    resource: res.id,          // 'pm' | 'pv' | 'or' | 'none'
+    resLabel: res.label,       // 'PM' | 'PV' | 'Or' | '—'
+    resIcon:  res.icon,
     effet: s?.effet || s?.description || '',
   };
 }

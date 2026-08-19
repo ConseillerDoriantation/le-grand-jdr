@@ -108,7 +108,7 @@ function _spellsBlock(c) {
     <div class="qv-spells">
       ${actives.map(s => {
         const vm = spellVM(s, pmDelta);
-        return `<span class="qv-spell" title="${_esc(vm.effet)}">${_esc(vm.icon)} ${_esc(s.nom || '?')}${vm.pm != null ? ` <span class="qv-spell-cost">${vm.pm}PM</span>` : ''}</span>`;
+        return `<span class="qv-spell" title="${_esc(vm.effet)}">${_esc(vm.icon)} ${_esc(s.nom || '?')}${vm.pm != null && vm.resource !== 'none' ? ` <span class="qv-spell-cost">${vm.pm}${_esc(vm.resLabel)}</span>` : ''}</span>`;
       }).join('')}
     </div>
   </div>`;

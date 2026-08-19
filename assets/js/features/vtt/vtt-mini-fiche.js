@@ -30,6 +30,7 @@ import { _vttPanelError } from './vtt-utils.js'; // frontière d'erreur (leaf)
 import { _effectDisplay, _vttSortDmgFormula,
          _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode, _vttDisplayRunes,
          } from './vtt-spell-display.js'; // formules de sorts (leaf — mini-fiche découplée de vtt.js)
+import { spellCostRes, _calcSortMana } from '../characters/spells-calc.js'; // ressource de coût + régén PM
 import { _renderPresenceCol } from './vtt-presence.js'; // circ. (toggle mini → refresh colonne)
 import {
   equipmentSlotAcceptsItem, getEquipmentSlot, getEquipmentSlots,
@@ -720,6 +721,9 @@ function _vttSpellChips(s, c) {
     }
     if (soin) chips.push({ icon:'💚', val: _effectDisplay(s, soin), color:'#22c38e', lbl:'Soin' });
   }
+  if (runes.includes('Protection') && s.protectionMode === 'mana' && types.includes('defensif')) {
+    chips.push({ icon:'💙', val:`${_calcSortMana(s, c)} PM`, color:'#8b5cf6', lbl:'Régénération de PM' });
+  }
   if (isClassic && s.classicEffect === 'utility' && s.effet) {
     chips.push({ icon:'✨', val:s.effet, color:'#b47fff', lbl:'Effet utilitaire' });
   }
@@ -821,7 +825,7 @@ function _vttSpellCardHtml(s, i, c, uid, canEdit, deckCount = 0, deckMax = Infin
           ${noyauPills}
         </div>
       </div>
-      <span class="cs-spellcard-pm" title="Coût en PM (ajustement MJ inclus)">${Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : (parseInt(s.pm) || 0)}<small>PM</small></span>
+      <span class="cs-spellcard-pm" title="Coût du sort (ajustement MJ inclus)">${Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : (parseInt(s.pm) || 0)}<small>${_esc(spellCostRes(s).label)}</small></span>
     </header>
     <div class="cs-spellcard-tags">${valBadge}${chips.map(ch => `<span class="cs-sort-sstat${ch.dim?' cs-sort-sstat--dim':''}" style="--c:${ch.color}"${ch.lbl?` title="${_esc(ch.lbl)}"`:''}>${ch.icon} ${_esc(ch.val)}</span>`).join('')}</div>
     ${s.effet ? `<p class="cs-spellcard-desc">${_esc(s.effet)}</p>` : ''}
@@ -837,7 +841,9 @@ function _msTabSorts(c, uid, canEdit) {
   const deckMax = calcDeckMax(c);
   const over = deckCount > deckMax;
   const validCount = sorts.filter(s => (s.mjValidation || (s.mjValidated ? 'ok' : 'pending')) === 'ok').length;
+  // Σ PM du deck : ne totalise que les sorts payés en PM (même réserve).
   const pmTotal = sorts.filter(s => s.actif).reduce((sum, s) => {
+    if (spellCostRes(s).id !== 'pm') return sum;
     const pm = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : (parseInt(s.pm) || 0);
     return sum + Math.max(0, pm);
   }, 0);

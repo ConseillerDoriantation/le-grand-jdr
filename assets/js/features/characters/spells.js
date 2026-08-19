@@ -10,14 +10,17 @@ import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, getMatrixSuggestions, getComboConfig } from '../../shared/spell-matrices.js';
 import { getArmorSetData, getMainWeapon } from './data.js';
-import { getSpellSystemMode, loadSpellSystem } from '../../shared/spell-system.js';
+import { getSpellSystemMode, loadSpellSystem, spellRuneCost, spellSetCostDelta } from '../../shared/spell-system.js';
 import { makeSortable } from '../../shared/sortable-helper.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
 import { resolveSpellModifierStat, usesSpellMastery } from '../../shared/spell-runes.js';
 import { calculateInvocationDerivedStats, getPreparedInvocationActions, INVOCATION_ABILITIES, INVOCATION_DEFAULT_STATS, invocationStatModifier, normalizeInvocationStats } from '../../shared/invocation-stats.js';
-import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortZone, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortMana, _calcSortZone, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds, SPELL_COST_RESOURCES, spellCostRes, spellCostMult } from './spells-calc.js';
+
+// Ressource de coût lisible d'un sort (label court : PM / PV / Or / —).
+const _sortResLabel = (s) => spellCostRes(s).label;
 
 let _sortsSearch = '';
 // Facettes COMBINABLES : type ET rune ET noyau (chacune toggle indépendamment).
@@ -260,12 +263,13 @@ function _conditionSelectSnapshot(selectId) {
 function _spellMjLimitChips(s = {}, pmAuto = 0, pmOverride = null) {
   const chips = [];
   if (pmOverride != null) {
+    const rl = spellCostRes(s).label;
     chips.push({
       icon: '⚙',
-      label: `PM MJ ${pmOverride}`,
+      label: `${rl} MJ ${pmOverride}`,
       title: pmOverride === pmAuto
-        ? `Coût verrouillé par le MJ à ${pmOverride} PM`
-        : `Coût automatique ${pmAuto} PM, forcé à ${pmOverride} PM par le MJ`,
+        ? `Coût verrouillé par le MJ à ${pmOverride} ${rl}`
+        : `Coût automatique ${pmAuto} ${rl}, forcé à ${pmOverride} ${rl} par le MJ`,
     });
   }
   if (s.mjAlwaysMax) {
@@ -303,7 +307,7 @@ function _renderSpellInspector(allSorts, pmDelta, c, canEdit) {
       <button class="cs-spellinspector-close" data-action="_sortsCloseInspector" title="Fermer">✕</button>
       <span class="cs-spellinspector-icon">${s.icon || '✦'}</span>
       <div><span>RANG ${rank.roman} · ${rank.label.toUpperCase()}</span><h3>${_esc(s.nom || 'Sort sans nom')}</h3></div>
-      <strong>${_effectiveSortPm(s, pmDelta)}<small>PM</small></strong>
+      <strong>${_effectiveSortPm(s, pmDelta)}<small>${_esc(_sortResLabel(s))}</small></strong>
     </header>
     <div class="cs-spellinspector-recipe">
       <span>${s.designMode === 'classic' ? 'SYSTÈME' : 'COMPOSITION'}</span>
@@ -361,7 +365,7 @@ function _renderSpellComparePanel(allSorts, pmDelta, c) {
     const noyaux = noyauTypesFor(s).map(t => t.label || t.nom).filter(Boolean).join(' + ') || 'À définir';
     const types = _getSortTypes(s).map(type => ({ offensif:'Offensif', defensif:'Soutien', utilitaire:'Utilitaire' }[type] || type)).join(' + ');
     return {
-      pm: { label: 'Coût', value: `${_effectiveSortPm(s, pmDelta)} PM` },
+      pm: { label: 'Coût', value: `${_effectiveSortPm(s, pmDelta)} ${_sortResLabel(s)}` },
       noyau: { label: 'Noyau', value: noyaux },
       runes: { label: 'Runes', value: _spellCompareRuneText(s) },
       role: { label: 'Rôle', value: types || 'Non défini' },
@@ -443,7 +447,12 @@ function _renderDeckStats(activeSorts = [], deckMax = Infinity, pmDelta = 0) {
   const noyauCounts = new Map();
   activeSorts.forEach(s => {
     const pm = _effectiveSortPm(s, pmDelta);
-    pmCounts.set(pm, (pmCounts.get(pm) || 0) + 1);
+    const res = spellCostRes(s);
+    // Regroupe par ressource + valeur : un deck peut mêler PM, PV, Or.
+    const key = `${res.id}|${pm}`;
+    const cur = pmCounts.get(key) || { pm, res, count: 0 };
+    cur.count += 1;
+    pmCounts.set(key, cur);
     const types = _getSortTypes(s);
     if (types.includes('offensif')) typeCounts.offensif += 1;
     if (types.includes('defensif')) typeCounts.defensif += 1;
@@ -456,9 +465,9 @@ function _renderDeckStats(activeSorts = [], deckMax = Infinity, pmDelta = 0) {
       noyauCounts.set(k, cur);
     });
   });
-  const pmChips = [...pmCounts.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([pm, count]) => `<span>${pm} PM <b>×${count}</b></span>`)
+  const pmChips = [...pmCounts.values()]
+    .sort((a, b) => a.res.id.localeCompare(b.res.id) || a.pm - b.pm)
+    .map(({ pm, res, count }) => `<span>${pm} ${_esc(res.label)} <b>×${count}</b></span>`)
     .join('');
   const typeChips = [
     typeCounts.offensif ? `<span class="off">⚔️ Off <b>${typeCounts.offensif}</b></span>` : '',
@@ -488,9 +497,10 @@ function _renderDeckSockets(entries, deckMax, pmDelta, canEdit, pmCur = null, pm
     ? (replacing
       ? `<button class="cs-prepared-spell is-swap" data-action="_sortsReplaceWith" data-idx="${i}" title="Remplacer ${_esc(s.nom || 'ce sort')} par le sort choisi">`
       : `<button class="cs-prepared-spell" data-action="toggleSort" data-idx="${i}" title="Retirer ${_esc(s.nom || 'ce sort')} du deck">`)
-      + `<span class="cs-prepared-spell-icon">${s.icon ? _esc(s.icon) : '✦'}</span><span class="cs-prepared-spell-name">${_esc(s.nom || 'Sort')}</span><b>${_effectiveSortPm(s, pmDelta)} PM</b><i>${replacing?'⇄':'✕'}</i></button>`
-    : `<span class="cs-prepared-spell"><span class="cs-prepared-spell-icon">${s.icon ? _esc(s.icon) : '✦'}</span><span class="cs-prepared-spell-name">${_esc(s.nom || 'Sort')}</span><b>${_effectiveSortPm(s, pmDelta)} PM</b></span>`);
-  const pmSum = entries.reduce((a, { s }) => a + _effectiveSortPm(s, pmDelta), 0);
+      + `<span class="cs-prepared-spell-icon">${s.icon ? _esc(s.icon) : '✦'}</span><span class="cs-prepared-spell-name">${_esc(s.nom || 'Sort')}</span><b>${_effectiveSortPm(s, pmDelta)} ${_esc(_sortResLabel(s))}</b><i>${replacing?'⇄':'✕'}</i></button>`
+    : `<span class="cs-prepared-spell"><span class="cs-prepared-spell-icon">${s.icon ? _esc(s.icon) : '✦'}</span><span class="cs-prepared-spell-name">${_esc(s.nom || 'Sort')}</span><b>${_effectiveSortPm(s, pmDelta)} ${_esc(_sortResLabel(s))}</b></span>`);
+  // Σ ne totalise que les sorts payés en PM : ils partagent la même réserve.
+  const pmSum = entries.reduce((a, { s }) => a + (spellCostRes(s).id === 'pm' ? _effectiveSortPm(s, pmDelta) : 0), 0);
   const freeSlots = Number.isFinite(deckMax) ? Math.max(0, deckMax - entries.length) : null;
   const pmRes = pmMax != null
     ? `<span class="cs-sorts-pmres ${pmCur <= Math.floor(pmMax / 4) ? 'is-low' : ''}" title="Tes points de magie actuels / maximum">💧 <b>${pmCur}</b><small>/${pmMax} PM</small></span>`
@@ -1670,6 +1680,8 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
         const soinBase = _calcSortSoin(s, c);
         chips.push({ icon:'💚', val: soinBase, color:'#22c38e', lbl:'Soin' });
       }
+    } else if (mode === 'mana') {
+      chips.push({ icon:'💙', val: `${_calcSortMana(s, c)} PM`, color:'#8b5cf6', lbl:'Régénération de PM' });
     } else {
       if (activeIds.has('bouclier_reactif')) {
         chips.push({ icon:'🛡️', val:'Bloque 1', color:'#22c38e', lbl:'Bloque 1 attaque entrante (Bouclier réactif)' });
@@ -1716,7 +1728,8 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   }
 
   // ── Mode Préparer : sort trop cher pour les PM actuels — informatif, pas bloquant ──
-  const pmShort = isTiles && pmCur != null
+  //     (uniquement pour les sorts payés en PM ; pmCur = réserve de PM du perso). ──
+  const pmShort = isTiles && pmCur != null && spellCostRes(s).id === 'pm'
     ? Math.max(0, _effectiveSortPm(s, pmDelta) - pmCur)
     : 0;
   if (pmShort > 0) {
@@ -1736,10 +1749,14 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   const pmOvr   = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : null;
   const pmBase  = pmOvr ?? pmAuto;
   const pmFinal = _effectiveSortPm(s, pmDelta);
-  const pmTitle = (pmOvr != null && pmOvr !== pmAuto) || pmDelta !== 0
-    ? `Coût : base ${pmAuto} PM${pmOvr != null && pmOvr !== pmAuto ? ` · ajusté MJ ${pmOvr}` : ''}${pmDelta !== 0 ? ` · Set d'armure ${pmDelta > 0 ? '+' : '−'}${Math.abs(pmDelta)}` : ''} → ${pmFinal} PM`
-    : 'Coût en points de magie';
-  const pmVal = pmDelta !== 0
+  const costRes = spellCostRes(s);
+  const resLbl  = costRes.label;
+  // Le delta du set d'armure, mis à l'échelle vers la ressource du sort.
+  const effDelta = spellSetCostDelta(pmDelta, costRes.id);
+  const pmTitle = (pmOvr != null && pmOvr !== pmAuto) || effDelta !== 0
+    ? `Coût : base ${pmAuto} ${resLbl}${pmOvr != null && pmOvr !== pmAuto ? ` · ajusté MJ ${pmOvr}` : ''}${effDelta !== 0 ? ` · Set d'armure ${effDelta > 0 ? '+' : '−'}${Math.abs(effDelta)}` : ''} → ${pmFinal} ${resLbl}`
+    : `Coût en ${costRes.full}`;
+  const pmVal = effDelta !== 0
     ? `<span class="cs-sort-pm-old">${pmBase}</span><span class="cs-sort-pm-new">${pmFinal}</span>`
     : `${pmFinal}`;
   const mjLimitChips = _spellMjLimitChips(s, pmAuto, pmOvr);
@@ -1835,7 +1852,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
           ${noyauPills}
         </div>
       </div>
-      <span class="cs-spellcard-pm" title="${_esc(pmTitle)}">${pmVal}<small>PM</small></span>
+      <span class="cs-spellcard-pm" title="${_esc(pmTitle)}">${pmVal}<small>${_esc(resLbl)}</small></span>
       ${canEdit
         ? `<button type="button" class="toggle cs-spellcard-equip ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" data-label="${s.actif?'✓ Préparé':(!canActivate?'🔒 Bloqué':'＋ Préparer')}" aria-pressed="${s.actif?'true':'false'}" aria-label="${s.actif?'Retirer':'Ajouter'} ${_esc(s.nom||'ce sort')} ${s.actif?'du':'au'} deck" data-action="toggleSort" data-idx="${i}" data-stop-propagation title="${lockTitle}"></button>`
         : `<span class="toggle cs-spellcard-equip ${s.actif?'on':''}" data-label="${s.actif?'✓ Préparé':'Non préparé'}"></span>`}
@@ -2426,17 +2443,20 @@ function _renderResonance() {
   return `${lit.length ? `<div class="cs-rez-grid cs-rez-grid--lit">${litHtml}</div>` : ''}${nearShown.length ? `<div class="cs-rez-grid cs-rez-grid--near">${nearHtml}</div>` : ''}`;
 }
 
-/** Décompose le coût PM en chips lisibles (Noyau + chaque rune ×2). */
+/** Décompose le coût en chips lisibles (Noyau + chaque rune × mult ressource). */
 function _renderPmBreakdown() {
   const noyau  = document.getElementById('s-noyau')?.value || '';
   const counts = _runeCountsEdit || {};
+  const resId  = _editCostResId();
+  const res    = spellCostRes({ costResource: resId });
+  if (resId === 'none') return `<span class="cs-pmbd-min">Sort gratuit · aucune ressource dépensée</span>`;
   const parts  = [];
-  if (noyau) parts.push({ lbl:'Noyau', pm:2, cnt:1 });
+  if (noyau) parts.push({ lbl:'Noyau', pm: spellRuneCost('__noyau', resId), cnt:1 });
   RUNE_META.forEach(rm => {
     const cnt = counts[rm.nom] || 0;
-    if (cnt > 0) parts.push({ lbl: rm.icon, pm: cnt * 2, cnt });
+    if (cnt > 0) parts.push({ lbl: rm.icon, pm: cnt * spellRuneCost(rm.nom, resId), cnt });
   });
-  if (!parts.length) return `<span class="cs-pmbd-min">Minimum 2 PM · choisis un noyau</span>`;
+  if (!parts.length) return `<span class="cs-pmbd-min">Choisis un noyau · coût en ${res.label}</span>`;
   return parts
     .map(p => `<span class="cs-pmbd-chip">${_esc(p.lbl)}${p.cnt > 1 ? ` ×${p.cnt}` : ''}<b>${p.pm}</b></span>`)
     .join('<span class="cs-pmbd-plus">+</span>');
@@ -2512,6 +2532,7 @@ function _buildClassicSortFromDOM(idx = -1, prevList = []) {
     actionMode: document.getElementById('s-classic-action')?.value || 'action',
     pm,
     pmOverride: null,
+    costResource: (() => { const v = document.getElementById('s-classic-cost-resource')?.value || 'pm'; return SPELL_COST_RESOURCES.some(r => r.id === v) ? v : 'pm'; })(),
     portee: target === 'self' ? 0 : _classicInt('s-classic-range', 1, 0, 99),
     zoneW: zoneEnabled ? _classicInt('s-classic-zone-w', 1, 1, 50) : null,
     zoneH: zoneEnabled ? _classicInt('s-classic-zone-h', 1, 1, 50) : null,
@@ -2588,6 +2609,10 @@ function _refreshClassicSpellForm() {
   });
   const range = document.getElementById('s-classic-range');
   if (range) range.disabled = target === 'self' && !isSummon;
+
+  const costResId = document.getElementById('s-classic-cost-resource')?.value || 'pm';
+  const pmUnit = document.getElementById('s-classic-pm-unit');
+  if (pmUnit) pmUnit.textContent = spellCostRes({ costResource: costResId }).label;
 
   const preview = document.getElementById('s-classic-preview');
   if (preview) {
@@ -2770,7 +2795,8 @@ async function _openClassicSortModal(idx, s, allTypes) {
             <section class="classic-spell-section">
               <div class="classic-spell-section-head"><span>5</span><div><b>Coût et rythme</b><small>Valeurs directement utilisées dans le VTT.</small></div></div>
               <div class="classic-spell-grid is-compact">
-                <label><span>Coût</span><div class="classic-spell-unit"><input type="number" id="s-classic-pm" class="input-field" min="0" max="99" value="${s?.pmOverride ?? s?.pm ?? 0}"><span>PM</span></div></label>
+                <label><span>Coût</span><div class="classic-spell-unit"><input type="number" id="s-classic-pm" class="input-field" min="0" max="99" value="${s?.pmOverride ?? s?.pm ?? 0}"><span id="s-classic-pm-unit">${_esc(spellCostRes(s).label)}</span></div></label>
+                <label><span>Ressource</span><select id="s-classic-cost-resource" class="input-field">${SPELL_COST_RESOURCES.map(r => `<option value="${r.id}" ${(s?.costResource||'pm')===r.id?'selected':''}>${r.icon} ${r.full}</option>`).join('')}</select></label>
                 <label><span>Action</span><select id="s-classic-action" class="input-field">${_classicSelectOptions([['action','Action'],['action_bonus','Action Bonus'],['reaction','Réaction']], s?.actionMode || 'action')}</select></label>
                 <label><span>Durée</span><div class="classic-spell-unit"><input type="number" id="s-classic-duration" class="input-field" min="0" max="99" value="${s?.classicDuration ?? s?.dureeBase ?? 0}"><span>tours</span></div></label>
                 <label><span>Recharge</span><div class="classic-spell-unit"><input type="number" id="s-classic-cooldown" class="input-field" min="0" max="99" value="${s?.cooldownTurns ?? 0}"><span>tours</span></div></label>
@@ -3110,7 +3136,8 @@ export async function openSortModal(idx, s) {
         <div style="display:flex;gap:.4rem">
           ${[
             { v:'ca',   label:'🛡️ Augmente la CA', color:'#22c38e', detail:'+2 CA · 2 tours' },
-            { v:'soin', label:'💚 Soigne',           color:'#4f8cff', detail:'+1d4 par rune'  },
+            { v:'soin', label:'💚 Soigne',           color:'#4f8cff', detail:'+1d4 PV par rune'  },
+            { v:'mana', label:'💙 Régénère PM',       color:'#8b5cf6', detail:'+1d4 PM par rune'  },
           ].map(opt => {
             const sel = (s?.protectionMode || 'ca') === opt.v;
             return `<button type="button" id="s-prot-${opt.v}" data-action="_selectProtMode" data-val="${opt.v}"
@@ -3138,12 +3165,12 @@ export async function openSortModal(idx, s) {
 
     <!-- Soin — visible si Protection en mode soin, ou Soutien + Amplification.
          Si le sort est aussi Offensif, on n'expose PAS le sélecteur de stat ici (déjà dans Dégâts). -->
-    <div id="s-soin-section" style="${((hasProt && (s?.protectionMode||'ca')==='soin') || (typesInit.includes('defensif') && hasAmp && ampMode !== 'deplacement'))?'':'display:none'}">
+    <div id="s-soin-section" style="${((hasProt && ((s?.protectionMode||'ca')==='soin' || (s?.protectionMode)==='mana')) || (typesInit.includes('defensif') && hasAmp && ampMode !== 'deplacement'))?'':'display:none'}">
       ${_autoValHtml({
         fieldId: 's-soin',
-        label: '💚 Soin',
-        autoValue:  _calcSortSoin(s || {}, _modalChar()),
-        autoSource: _autoSourceSoin(s || {}, _modalChar()),
+        label: (s?.protectionMode === 'mana') ? '💙 Régénération de PM' : '💚 Soin',
+        autoValue:  (s?.protectionMode === 'mana') ? _calcSortMana(s || {}, _modalChar()) : _calcSortSoin(s || {}, _modalChar()),
+        autoSource: (s?.protectionMode === 'mana') ? 'régén PM · formule libre · défaut (nb Protection)d4' : _autoSourceSoin(s || {}, _modalChar()),
         currentValue: s?.soin,
         placeholder: 'ex : 3d6 +2, moitié des dégâts… (vide = formule auto)',
         extraEdit: typesInit.includes('offensif') ? null : {
@@ -3369,7 +3396,24 @@ export async function openSortModal(idx, s) {
     <aside class="cs-spell-side" aria-label="Résumé et réglages du sort">
       <div class="cs-spell-side-card cs-spell-side-card--preview">
         <div class="cs-spell-preview cs-spell-preview--sticky">
-          <div class="cs-spell-preview-title">Résumé jouable <span class="cs-spell-preview-pm">Coût : <strong id="s-pm-display">0</strong> PM</span></div>
+          <div class="cs-spell-preview-title">Résumé jouable
+            <span class="cs-spell-preview-pm">Coût : <strong id="s-pm-display">0</strong> <span id="s-pm-unit">${_esc(spellCostRes(s).label)}</span></span>
+          </div>
+          <div class="cs-spell-cost-res">
+            <span class="cs-spell-cost-res-lbl">💰 Ressource de coût</span>
+            <div class="cs-spell-cost-res-seg" role="group" aria-label="Ressource dépensée par le lanceur">
+              ${SPELL_COST_RESOURCES.map(r => {
+                const on = (s?.costResource || 'pm') === r.id;
+                const tip = r.mult ? `${r.full} · ×${r.mult} par rune` : r.full;
+                return `<button type="button" class="cs-spell-cost-res-btn ${on ? 'is-on' : ''}" style="--rc:${r.color}"
+                  data-action="_selectCostRes" data-res="${r.id}" aria-pressed="${on ? 'true' : 'false'}" title="${_esc(tip)}">
+                  <span class="cs-spell-cost-res-ic">${r.icon}</span>
+                  <span class="cs-spell-cost-res-tx">${r.id === 'none' ? 'Gratuit' : _esc(r.label)}</span>
+                </button>`;
+              }).join('')}
+            </div>
+            <input type="hidden" id="s-cost-resource" value="${s?.costResource || 'pm'}">
+          </div>
           <div id="s-pm-breakdown" class="cs-pmbd"></div>
           <div id="s-preview-body" class="cs-spell-preview-body"></div>
           <input type="hidden" id="s-pm" value="${s?.pm||2}">
@@ -3442,7 +3486,7 @@ export async function openSortModal(idx, s) {
 
       ${STATE.isAdmin ? `
       <div class="form-group" style="margin-bottom:.5rem">
-        <label style="font-size:.72rem">Coût PM personnalisé <span style="color:var(--text-dim);font-weight:400;font-size:.68rem">(MJ — vide = auto selon runes ; set d'armure appliqué par-dessus, jamais en dessous de 0)</span></label>
+        <label style="font-size:.72rem">Coût personnalisé <span style="color:var(--text-dim);font-weight:400;font-size:.68rem">(MJ — dans la ressource choisie ci-dessus ; vide = auto selon runes ; set d'armure appliqué par-dessus pour les sorts en PM, jamais en dessous de 0)</span></label>
         <input type="number" class="input-field" id="s-pm-override" min="0" max="50"
           value="${s?.pmOverride ?? ''}" placeholder="auto"
           style="max-width:120px">
@@ -3775,7 +3819,12 @@ function _refreshConditionalSections() {
   if (affModes)  affModes.style.display  = isRegen ? 'none' : '';
   if (protGroup) protGroup.style.display = (isDrain || isRegen) ? 'none' : '';
   if (caSec)     caSec.style.display     = (!isDrain && !isRegen && protMode === 'ca') ? '' : 'none';
-  if (sSec)      sSec.style.display      = (!isDrain && !isRegen && ((hasProt && protMode === 'soin') || isAmpSupportHeal)) ? '' : 'none';
+  if (sSec) {
+    // Section « montant » partagée par Soin (PV) et Régénération de PM (Mana).
+    sSec.style.display = (!isDrain && !isRegen && ((hasProt && (protMode === 'soin' || protMode === 'mana')) || isAmpSupportHeal)) ? '' : 'none';
+    const sLbl = sSec.querySelector('.cs-spell-autoval-label');
+    if (sLbl) sLbl.textContent = (hasProt && protMode === 'mana') ? '💙 Régénération de PM' : '💚 Soin';
+  }
   // Le réglage est présenté dans le premier effet qui l'utilise. Les sorts
   // mixtes ne l'affichent donc qu'une fois, tandis qu'un soin pur le conserve
   // bien dans sa propre section.
@@ -4469,10 +4518,10 @@ function _selectProtMode(mode) {
   if (caSec)   caSec.style.display   = mode === 'ca'   ? '' : 'none';
   // La section Soin a maintenant sa propre logique (type Soutien OU Protection mode soin)
   _refreshConditionalSections();
-  ['ca','soin'].forEach(v => {
+  ['ca','soin','mana'].forEach(v => {
     const btn = document.getElementById(`s-prot-${v}`);
     if (!btn) return;
-    const colors = { ca:'#22c38e', soin:'#4f8cff' };
+    const colors = { ca:'#22c38e', soin:'#4f8cff', mana:'#8b5cf6' };
     const col = colors[v];
     const active = v === mode;
     btn.style.borderColor = active ? col : 'var(--border)';
@@ -4641,7 +4690,9 @@ function _refreshAutoValChips() {
     if (r && source !== undefined) r.textContent = source || '';
   };
   apply('s-degats',         _calcSortDegats(s, c),  _autoSourceDegats(s, c));
-  apply('s-soin',           _calcSortSoin(s, c),    _autoSourceSoin(s, c));
+  apply('s-soin',
+    s.protectionMode === 'mana' ? _calcSortMana(s, c) : _calcSortSoin(s, c),
+    s.protectionMode === 'mana' ? 'régén PM · formule libre · défaut (nb Protection)d4' : _autoSourceSoin(s, c));
   apply('s-ca',             _getSortCA(s),          _autoSourceCA(s));
   apply('s-enchant-degats', _calcEnchantDegats(s),  _autoSourceEnchantDeg(s));
   apply('s-enchant-state-move-bonus', _calcEnchantStateMoveAuto(s), 'État + Amplification');
@@ -4852,15 +4903,48 @@ function _selectAfflictionMode(mode) {
   _updateSortPreview();
 }
 
+// Ressource de coût sélectionnée dans la modale (défaut PM).
+function _editCostResId() {
+  const v = document.getElementById('s-cost-resource')?.value || 'pm';
+  return SPELL_COST_RESOURCES.some(r => r.id === v) ? v : 'pm';
+}
+
+// Contrôle segmenté « Ressource de coût » : met à jour l'input caché + l'état
+// visuel des boutons, puis recalcule coût/unité/détail.
+function _selectCostRes(btn) {
+  const res = SPELL_COST_RESOURCES.some(r => r.id === btn?.dataset?.res) ? btn.dataset.res : 'pm';
+  const hidden = document.getElementById('s-cost-resource');
+  if (hidden) hidden.value = res;
+  document.querySelectorAll('.cs-spell-cost-res-btn').forEach(b => {
+    const on = b.dataset.res === res;
+    b.classList.toggle('is-on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  updateSortPM();
+}
+
+// Coût total d'un sort dans une ressource : somme du noyau et de ses runes,
+// chaque brique ayant son coût propre configuré par le MJ (world/spell_system.costTable).
+function _sortCostTotal(hasNoyau, runeCounts, resId) {
+  if (resId === 'none') return 0;
+  let total = hasNoyau ? spellRuneCost('__noyau', resId) : 0;
+  for (const [rune, cnt] of Object.entries(runeCounts || {})) {
+    total += spellRuneCost(rune, resId) * (cnt || 0);
+  }
+  return total;
+}
+
 export function updateSortPM() {
   const noyau = document.getElementById('s-noyau')?.value||'';
-  const total = (noyau ? 1 : 0) +
-    Object.values(_runeCountsEdit||{}).reduce((s,v)=>s+v, 0);
-  const pm = total * 2 || 2;
+  const resId = _editCostResId();
+  const res  = spellCostRes({ costResource: resId });
+  const pm = _sortCostTotal(!!noyau, _runeCountsEdit, resId);
   const pmEl = document.getElementById('s-pm');
   const dispEl = document.getElementById('s-pm-display');
+  const unitEl = document.getElementById('s-pm-unit');
   if (pmEl)   pmEl.value = pm;
   if (dispEl) dispEl.textContent = pm;
+  if (unitEl) unitEl.textContent = res.label;
   const bd = document.getElementById('s-pm-breakdown');
   if (bd) bd.innerHTML = _renderPmBreakdown();
   _updateSortPreview();
@@ -5336,8 +5420,8 @@ export async function saveSort(idx, btn = null) {
     // Runes depuis _runeCountsEdit
     const runes = _buildRunesFromCounts();
 
-    const totalRunes = (noyau ? 1 : 0) + runes.length;
-    const autoPm     = totalRunes * 2 || 2;
+    const costResource = _editCostResId();
+    const autoPm     = _sortCostTotal(!!noyau, _runeCountsEdit, costResource);
 
     // Types (multi)
     const types = [...(_sortTypesEdit || new Set(['utilitaire']))];
@@ -5373,6 +5457,7 @@ export async function saveSort(idx, btn = null) {
       nom:      document.getElementById('s-nom')?.value?.trim() || '',
       pm:       autoPm,
       pmOverride,
+      costResource,
       noyau,
       noyauTypeId,
       noyauTypeIds: [..._noyauIdsEdit],
@@ -5502,8 +5587,8 @@ function _buildSortFromForm(idx, prevList = []) {
   const noyau       = document.getElementById('s-noyau')?.value||'';
   const noyauTypeId = document.getElementById('s-noyau-id')?.value||'';
   const runes = _buildRunesFromCounts();
-  const totalRunes = (noyau ? 1 : 0) + runes.length;
-  const autoPm     = totalRunes * 2 || 2;
+  const costResource = _editCostResId();
+  const autoPm     = _sortCostTotal(!!noyau, _runeCountsEdit, costResource);
   const types = [...(_sortTypesEdit || new Set(['utilitaire']))];
   const dureeBaseRaw = parseInt(document.getElementById('s-duree-base')?.value) || 0;
   const deplMode = _deplModeEdit || null;
@@ -5524,6 +5609,7 @@ function _buildSortFromForm(idx, prevList = []) {
     nom:      document.getElementById('s-nom')?.value?.trim() || '',
     pm:       autoPm,
     pmOverride,
+    costResource,
     mjAlwaysMax: STATE.isAdmin
       ? !!document.getElementById('s-mj-always-max')?.checked
       : (idx >= 0 ? !!prevList[idx]?.mjAlwaysMax : false),
@@ -5680,6 +5766,7 @@ registerActions({
   _selectActionMode:      (btn) => _selectActionMode(btn.dataset.val),
   _selectProtMode:        (btn) => _selectProtMode(btn.dataset.val),
   _selectAmpMode:         (btn) => _selectAmpMode(btn.dataset.val),
+  _selectCostRes:         (btn) => _selectCostRes(btn),
   _selectZoneShape:       (btn) => _selectZoneShape(btn.dataset.val),
   _selectEnchantMode:     (btn) => _selectEnchantMode(btn.dataset.val),
   _selectAfflictionMode:  (btn) => _selectAfflictionMode(btn.dataset.val),

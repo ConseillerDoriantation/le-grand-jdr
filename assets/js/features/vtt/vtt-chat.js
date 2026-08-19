@@ -286,9 +286,9 @@ export function _renderChatLogImpl(msgs) {
         </div>`;
       } else {
         bodyHtml = `<div class="vtt-log-body">
-          <span class="vtt-log-icon">💚</span>
+          <span class="vtt-log-icon">${m.isMana ? '💙' : '💚'}</span>
           <strong class="vtt-log-result">+${m.dmgTotal}</strong>
-          <span class="vtt-log-result-sub">PV soignés</span>
+          <span class="vtt-log-result-sub">${m.isMana ? 'PM régénérés' : 'PV soignés'}</span>
           ${isCrit ? `<span class="vtt-log-result-sub" style="color:#f59e0b">(critique)</span>` : ''}
           ${_toggle(`d${i}`)}
         </div>`;
@@ -381,6 +381,9 @@ export function _renderChatLogImpl(msgs) {
   /** Détail d'une attaque : toucher détaillé + dégâts détaillés (chaque dé visible) */
   const buildAttackDetail = (m, isHeal) => {
     const rows = [];
+    const isMana = isHeal && m.isMana;               // régénération de PM (même moteur que le soin)
+    const healIco = isMana ? '💙' : '💚';
+    const healTotalLbl = isMana ? 'PM régénérés' : 'Soin total';
     // ── TOUCHER ──
     const d20 = _d20(m.hitD20, m.hitD20rolls);
     const touchParts = [d20];
@@ -411,7 +414,7 @@ export function _renderChatLogImpl(msgs) {
 
       if (m.isCrit) {
         if (baseDetail) {
-          rows.push(_row(`Jet de base ${baseRoll}`, `<strong>${baseRaw ?? m.dmgRaw ?? '?'}</strong>`, { op: isHeal ? '💚' : '🎲' }));
+          rows.push(_row(`Jet de base ${baseRoll}`, `<strong>${baseRaw ?? m.dmgRaw ?? '?'}</strong>`, { op: isHeal ? healIco : '🎲' }));
         } else if (m.critNormalMax) {
           rows.push(_row(`Base critique max ${sub(baseLabel)}`, `<strong>${m.critNormalMax}</strong>`, { op: '💥' }));
         }
@@ -420,7 +423,7 @@ export function _renderChatLogImpl(msgs) {
           rows.push(_row(`Formule critique ${sub(m.critFormula)}`, `<strong>${finalEffectValue ?? '?'}</strong>`, { op: '∑', muted: true }));
         }
       } else {
-        rows.push(_row(`Dés de base ${baseRoll}`, `<strong>${baseRaw ?? m.dmgRaw ?? '?'}</strong>`, { op: isHeal ? '💚' : '🎲' }));
+        rows.push(_row(`Dés de base ${baseRoll}`, `<strong>${baseRaw ?? m.dmgRaw ?? '?'}</strong>`, { op: isHeal ? healIco : '🎲' }));
       }
 
       if (m.dmgStatMod) rows.push(_row(`Modificateur ${sub(m.dmgStatLabel || '')}`, `<strong>${_signed(m.dmgStatMod)}</strong>`, { op: '◇', muted: true }));
@@ -478,7 +481,7 @@ export function _renderChatLogImpl(msgs) {
       const hasInter = m.interaction && m.dmgTotal !== (halfVal ?? fullVal);
 
       const isFinalBrut = !halfVal && !hasInter && !hasReduction;
-      rows.push(_row(isHeal ? 'Soin total' : 'Dégâts avant mitigation', `<strong>${fullVal}</strong>`, { op: isHeal ? '💚' : '⚔️', isFinal: isFinalBrut }));
+      rows.push(_row(isHeal ? healTotalLbl : 'Dégâts avant mitigation', `<strong>${fullVal}</strong>`, { op: isHeal ? healIco : '⚔️', isFinal: isFinalBrut }));
 
       if (halfVal != null && halfVal !== fullVal) {
         rows.push(_row(`Échec : demi-effet`, `<strong>${halfVal}</strong>`, { op: '✦', isFinal: !hasInter && !hasReduction }));

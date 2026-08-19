@@ -228,7 +228,7 @@ function _buildSpells(c) {
             <div class="ps-spell-hd">
               <span class="ps-spell-ico">${vm.icon}</span>
               <span class="ps-spell-name">${_esc(s.nom || 'Sort sans nom')}</span>
-              ${vm.pm != null ? `<span class="ps-spell-cost">${vm.pm} PM</span>` : ''}
+              ${vm.pm != null && vm.resource !== 'none' ? `<span class="ps-spell-cost">${vm.pm} ${vm.resLabel}</span>` : ''}
             </div>
             ${noyau ? `<div class="ps-spell-noyau">${_esc(noyau)}</div>` : ''}
             ${vm.effet ? `<div class="ps-spell-desc">${_esc(vm.effet)}</div>` : ''}
