@@ -4338,6 +4338,15 @@ html:not([data-theme="light"]) .vtt-root {
   background: #c7d2fe;
   color: #111827;
 }
+/* Verrouillé en combat : accès au « Tous les sorts » désactivé (Deck imposé). */
+.vtt-aopt-spell-scope-btn.is-locked {
+  opacity: .5;
+  cursor: not-allowed;
+}
+.vtt-aopt-spell-scope-btn.is-locked:hover {
+  color: var(--text-soft);
+  background: transparent;
+}
 @media (max-width: 560px) {
   .vtt-aopt-spell-scope-label { display: none; }
   .vtt-aopt-spell-scope-btn { flex: 1; padding-inline: .4rem; }
@@ -5317,6 +5326,10 @@ html:not([data-theme="light"]) .vtt-root {
 }
 
 /* ── Option / card individuelle ───────────────────────────────────── */
+/* L'attribut `hidden` (filtres Deck/portée/recherche + onglets) doit l'emporter
+   sur les `display:` de carte/section, sinon les sorts hors Deck restent visibles. */
+.vtt-aopt[hidden],
+.vtt-aopt-section[hidden] { display: none !important; }
 .vtt-aopt {
   display: grid;
   grid-template-columns: 34px 1fr;

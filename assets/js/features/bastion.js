@@ -2588,15 +2588,34 @@ function _bastionOpenQuestEditor(questId) {
     <div class="form-group"><label>Récompense</label>
       <input class="input-field" id="bq-recompense" value="${_esc(q?.recompense || '')}" placeholder="ex: +200 or, débloque le Niv. III Forge, +10 renommée"></div>
     <div class="form-group"><label>Statut</label>
-      <select class="input-field" id="bq-statut">
-        ${Object.entries(BQ_STATUTS).map(([k, v]) => `<option value="${k}"${(q?.statut || 'ouverte') === k ? ' selected' : ''}>${v.emoji} ${v.lbl}</option>`).join('')}
-      </select>
+      <div class="bs-quest-statut-seg" role="group" aria-label="Statut de la quête">
+        ${Object.entries(BQ_STATUTS).map(([k, v]) => {
+          const on = (q?.statut || 'ouverte') === k;
+          return `<button type="button" class="bs-quest-statut-opt${on ? ' is-on' : ''}" style="--c:${v.color}"
+            data-action="_bastionSetQuestStatut" data-statut="${k}" aria-pressed="${on ? 'true' : 'false'}">
+            <span class="bs-quest-statut-emoji">${v.emoji}</span><span>${v.lbl}</span>
+          </button>`;
+        }).join('')}
+      </div>
+      <input type="hidden" id="bq-statut" value="${q?.statut || 'ouverte'}">
     </div>
     <div style="display:flex;gap:.5rem">
       <button class="btn btn-gold" style="flex:1" data-action="_bastionSaveQuest" data-id="${q?.id || ''}">${q ? 'Enregistrer' : 'Créer'}</button>
       ${q ? `<button class="btn btn-outline btn-sm" style="color:var(--crimson);border-color:rgba(255,90,126,0.40)" data-action="_bastionDeleteQuest" data-id="${q.id}">🗑 Supprimer</button>` : ''}
     </div>
   `);
+}
+
+// Sélecteur segmenté de statut (sans re-render → conserve la saisie du formulaire).
+function _bastionSetQuestStatut(btn) {
+  const statut = btn?.dataset?.statut || 'ouverte';
+  const hidden = document.getElementById('bq-statut');
+  if (hidden) hidden.value = statut;
+  document.querySelectorAll('.bs-quest-statut-opt').forEach(el => {
+    const on = el.dataset.statut === statut;
+    el.classList.toggle('is-on', on);
+    el.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
 }
 
 async function _bastionSaveQuest(id) {
@@ -2609,8 +2628,9 @@ async function _bastionSaveQuest(id) {
     description: document.getElementById('bq-desc')?.value?.trim() || '',
     recompense:  document.getElementById('bq-recompense')?.value?.trim() || '',
     statut:      document.getElementById('bq-statut')?.value || 'ouverte',
-    createdAt:   id ? undefined : Date.now(),
   };
+  // À la création uniquement : Firestore refuse `undefined` (l'édition conserve createdAt).
+  if (!id) data.createdAt = Date.now();
   const b = { ...STORE.bastion };
   b.bastionQuests = [...(b.bastionQuests || [])];
   if (id) {
@@ -2954,6 +2974,7 @@ registerActions({
   _bastionSetCoffreFilter:  (btn) => _bastionSetCoffreFilter(btn.dataset.filter),
   _bastionOpenWithdrawItem: (btn) => _bastionOpenWithdrawItem(btn.dataset.id),
   _bastionSaveQuest:        (btn) => _bastionSaveQuest(btn.dataset.id || ''),
+  _bastionSetQuestStatut:   (btn) => _bastionSetQuestStatut(btn),
   _bastionDeleteQuest:      (btn) => _bastionDeleteQuest(btn.dataset.id),
   _bastionOpenQuestEditor:  (btn) => _bastionOpenQuestEditor(btn.dataset.id || undefined),
   _bastionToggleHisto:      () => _bastionToggleHisto(),

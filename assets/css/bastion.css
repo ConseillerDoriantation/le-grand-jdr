@@ -1881,6 +1881,38 @@
   white-space: nowrap;
   flex-shrink: 0;
 }
+/* Sélecteur de statut segmenté (éditeur de quête). */
+.bs-quest-statut-seg {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+.bs-quest-statut-opt {
+  --c: #7eb0ff;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated, rgba(255,255,255,.03));
+  color: var(--text-soft, #c8d4e8);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.bs-quest-statut-opt:hover {
+  border-color: color-mix(in oklab, var(--c) 45%, transparent);
+  color: var(--text);
+}
+.bs-quest-statut-opt.is-on {
+  border-color: var(--c);
+  background: color-mix(in oklab, var(--c) 16%, transparent);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--c) 42%, transparent);
+}
+.bs-quest-statut-emoji { font-size: 1.05rem; line-height: 1; }
 .bs-quest-desc {
   font-size: 0.8rem;
   color: var(--text-muted);
