@@ -4161,9 +4161,10 @@ body.ach-dragging * { cursor:grabbing !important; }
   flex:none;
   margin:auto;
   object-fit:contain;
-  cursor:zoom-out;
+  cursor:grab;
   touch-action:pan-x pan-y;
 }
+.ach-lb-media.is-panning .ach-lb-image-rich { cursor:grabbing; }
 .ach-lb-info {
   position:static;
   overflow-y:auto;

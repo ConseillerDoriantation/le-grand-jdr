@@ -1254,13 +1254,18 @@ function _statsRender(scope) {
   // Carte-trophée : icône + intitulé + gagnant · valeur, liseré coloré (--tc).
   const award = (id, ic, lbl, row, val, col) => { if (!row?.name) return ''; awardTotal += 1; if (_statsHiddenAwards.has(id)) return ''; awards.push(`${ic} ${lbl} : ${row.name} (${val})`);
     const char = STATE.characters?.find(x => x.id === row.id) || { nom: row.name };
+    // Valeur = nombre mis en avant + unité discrète (ex. « 23 dmg »).
+    const vm = String(val ?? '').trim().match(/^([\d.,]+\s*%?)\s*(.*)$/);
+    const vNum = vm ? vm[1] : String(val ?? '');
+    const vUnit = vm ? vm[2] : '';
     return `<div class="stats-trophy" style="--tc:${col}">
-      <span class="stats-trophy-ic">${ic}</span>
-      ${characterAvatarHtml(char, { size: 30, className: 'stats-trophy-av', title: row.name, border: '1px solid rgba(255,255,255,.12)', background: `${col}20`, color: col })}
-      <div class="stats-trophy-tx">
+      <span class="stats-trophy-medal">${ic}</span>
+      <div class="stats-trophy-body">
         <span class="stats-trophy-lbl">${lbl}</span>
-        <span class="stats-trophy-line"><span class="stats-trophy-who">${_esc(row.name)}</span><b>${val}</b></span>
-      </div></div>`; };
+        <span class="stats-trophy-who">${characterAvatarHtml(char, { size: 22, className: 'stats-trophy-av', title: row.name, border: '1px solid rgba(255,255,255,.14)', background: `${col}22`, color: col })}<span>${_esc(row.name)}</span></span>
+      </div>
+      <span class="stats-trophy-val"><b>${_esc(vNum)}</b>${vUnit ? `<small>${_esc(vUnit)}</small>` : ''}</span>
+    </div>`; };
 
   const charBlock = (r) => {
     const cm = r.combat;
@@ -1346,7 +1351,7 @@ function _statsRender(scope) {
               ${fact('Sorts lancés', cm.spellsCast, '#bca0ff')}
             </div>
           </section>
-          ${skillHtml ? `<section class="stats-char-detail stats-char-detail--skills"><h4>🎲 Compétences · moyenne finale ${statsAvg(skillMean.resultAvg)} · d20 naturel ${statsAvg(skillMean.naturalAvg)}</h4>${skillHtml}</section>` : ''}
+          ${skillHtml ? `<section class="stats-char-detail stats-char-detail--skills"><h4>🎲 Compétences · résultat moyen ${statsAvg(skillMean.resultAvg)} · chance au dé ${statsAvg(skillMean.naturalAvg)}/20</h4>${skillHtml}</section>` : ''}
         </div>
         ${favsHtml}
         ${(dateBtn || delBtn) ? `<div class="stats-char-actions">${dateBtn}${delBtn}</div>` : ''}
@@ -1357,16 +1362,16 @@ function _statsRender(scope) {
   const combatTitle = dateKey ? `⚔️ Combat — séance du ${_statsFmtDate(dateKey)}`
     : isMission ? `⚔️ Combat — ${_esc(missionName)}` : '⚔️ Combat (table)';
   const awardCards = [
-    award('dmg', '🏆', 'Plus gros frappeur', topDmg, `${topDmg?.combat.dmgDealt} dmg`, '#f4c430'),
-    award('bigHit', '💢', 'Plus gros coup', topBig, `${topBig?.combat.biggestHit}`, '#ff8b6b'),
-    award('hitRate', '🎯', 'Meilleur taux', topHit, topHit ? `${topHit.hr}%` : '', '#22c38e'),
-    award('ko', '☠️', 'Bourreau', topKo, `${topKo?.combat.kosDealt} KO`, '#ef4444'),
-    award('heal', '💚', 'Plus grand soigneur', topHeal, `${topHeal?.combat.heal} PV`, '#4fd3a6'),
-    award('mage', '🧙', 'Lanceur le + actif', topMage, `${topMage?.combat.spellsCast} sorts`, '#bca0ff'),
-    award('tank', '🪨', "L'Increvable", topTank, `${topTank?.combat.dmgTaken} dmg subis`, '#9aa0aa'),
-    award('emotes', '💬', 'Le Bavard', topEmoter, `${topEmoter?.emoteTotal} émotes`, '#4f8cff'),
-    award('rolls', '🎲', 'Le Joueur', topRoller, `${topRoller?.sRolls} jets`, '#7fb0ff'),
-    award('fumble', '🤡', 'Le plus malchanceux', topFumble, `${topFumble?.tf} échec${topFumble?.tf > 1 ? 's' : ''}`, '#ff6b6b'),
+    award('dmg', '🗡️', 'Dégâts totaux', topDmg, `${topDmg?.combat.dmgDealt} dmg`, '#f4c430'),
+    award('bigHit', '💥', 'Plus gros coup', topBig, `${topBig?.combat.biggestHit} dmg`, '#ff8b6b'),
+    award('hitRate', '🎯', 'Meilleur taux de touche', topHit, topHit ? `${topHit.hr} %` : '', '#22c38e'),
+    award('ko', '☠️', 'Mises à terre', topKo, `${topKo?.combat.kosDealt} KO`, '#ef4444'),
+    award('heal', '💚', 'Soin prodigué', topHeal, `${topHeal?.combat.heal} PV`, '#4fd3a6'),
+    award('mage', '🧙', 'Sorts lancés', topMage, `${topMage?.combat.spellsCast} sorts`, '#bca0ff'),
+    award('tank', '🪨', 'Dégâts encaissés', topTank, `${topTank?.combat.dmgTaken} dmg`, '#9aa0aa'),
+    award('emotes', '💬', 'Émotes envoyées', topEmoter, `${topEmoter?.emoteTotal} émotes`, '#4f8cff'),
+    award('rolls', '🎲', 'Jets de dés', topRoller, `${topRoller?.sRolls} jets`, '#7fb0ff'),
+    award('fumble', '🤡', 'Échecs critiques', topFumble, `${topFumble?.tf} échec${topFumble?.tf > 1 ? 's' : ''}`, '#ff6b6b'),
   ].filter(Boolean);
   const awardsHtml = awardCards.join('');
 
@@ -1496,7 +1501,7 @@ function _statsRender(scope) {
               return `<span><i>${part.icon || ''}</i><b>${_esc(part.label)}</b><em>${fmtNum(part.count)} × ${fmtNum(Math.abs(part.coef || 0))}</em><strong>${sign}${fmtNum(Math.abs(part.points || 0))}</strong></span>`;
             }).join('')}</div>`
           : '';
-        return `<div class="stats-mvp-calc-row${e.points < 0 ? ' is-loss' : ''}">
+        return `<div class="stats-mvp-calc-row">
           <span class="stats-mvp-calc-main"><b>${e.icon}</b><span>${_esc(e.label)}</span></span>
           ${axisMeta}
           <strong>${fmtPts(e.points)}</strong>
@@ -1508,23 +1513,16 @@ function _statsRender(scope) {
         <div class="stats-mvp-calc-rows">${entries.length ? entries.map(calcRow).join('') : '<div class="stats-mvp-calc-empty">Aucun</div>'}</div>
       </div>`;
       const gainedEntries = details.entries.filter(e => e.points > 0);
-      const lostEntries = details.entries.filter(e => e.points < 0);
       const confidence = details.confidence || { label: 'Provisoire', reason: 'couverture inconnue' };
       return `<div class="stats-mvp-calc">
         <div class="stats-mvp-calc-head">
           <div class="stats-mvp-calc-name">${_esc(leader.name)}${index === 0 ? ' · MVP' : ` · candidat #${index + 1}`}</div>
-          <div class="stats-mvp-calc-net">${details.score}<span>net</span></div>
+          <div class="stats-mvp-calc-net">${details.score}<span>impact</span></div>
         </div>
         <div class="stats-mvp-calc-total">
-          <span>Axes retenus <b>${fmtPts(details.gained)}</b></span>
           <span>Confiance <b>${_esc(confidence.label)}</b> · ${_esc(confidence.reason || '')}</span>
         </div>
-        <div class="stats-mvp-calc-columns">
-          ${calcGroup('Impact comparable', gainedEntries, 'is-gain')}
-          ${lostEntries.length
-            ? calcGroup('Ajustements', lostEntries, 'is-loss')
-            : `<div class="stats-mvp-calc-group"><div class="stats-mvp-calc-group-title">Règle V2</div><div class="stats-mvp-calc-empty">Critiques, KO, records et malchance ne sont plus recomptés ni retranchés.</div></div>`}
-        </div>
+        ${calcGroup('Axes d\'impact', gainedEntries, 'is-gain')}
       </div>`;
     })() : '';
     mvpDetailSec = drawer('Détail du calcul MVP', `${detailTabsHtml}<div class="stats-mvp-calcs">${calcHtml}</div>`, {
@@ -1828,10 +1826,21 @@ function _statsRender(scope) {
   const fumbleSample = actionMean.rolls
     ? `${actionMean.fumbles} sur ${actionMean.rolls} actions · ${GS.fumbles} en compétence + ${GC.fumbles} en combat`
     : 'Aucune action au d20';
+  // Cellule « chance au dé » : valeur brute du d20 colorée selon la moyenne
+  // attendue d'un dé équitable (10,5). Au-dessus = chanceux, en dessous = malchanceux.
+  const luckCell = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return `<td data-label="Chance au dé">—</td>`;
+    const cls = n > 10.5 ? 'is-lucky' : n < 10.5 ? 'is-unlucky' : 'is-even';
+    const tip = n > 10.5 ? 'Au-dessus de 10,5 attendu : dés favorables'
+              : n < 10.5 ? 'En dessous de 10,5 attendu : dés défavorables'
+              : 'Pile dans la moyenne (10,5)';
+    return `<td data-label="Chance au dé"><span class="stats-luck ${cls}" title="${tip}">${statsAvg(n)}<small>/20</small></span></td>`;
+  };
   const averageSkillRows = (GS.perSkill || []).map(skill => `<tr>
     <th scope="row"><span>${_esc(skill.sk)}</span><small>${skill.trackedRolls ? `${skill.trackedRolls}/${skill.rolls} détaillés` : `${skill.rolls} jet${skill.rolls > 1 ? 's' : ''} historique${skill.rolls > 1 ? 's' : ''}`}</small></th>
-    <td data-label="Moy. finale"><b>${statsAvg(skill.resultAvg)}</b></td>
-    <td data-label="D20 naturel">${statsAvg(skill.naturalAvg)}</td>
+    <td data-label="Résultat moyen"><b>${statsAvg(skill.resultAvg)}</b></td>
+    ${luckCell(skill.naturalAvg)}
     <td data-label="Jets">${skill.rolls}</td>
     <td data-label="Crit. / échecs"><span class="stats-average-extremes"><i title="Critiques">💥 ${skill.crits} <small>${skill.critRate}%</small></i><i title="Échecs critiques">💔 ${skill.fumbles} <small>${skill.fumbleRate}%</small></i></span></td>
   </tr>`).join('');
@@ -1846,14 +1855,14 @@ function _statsRender(scope) {
       ${averageCard('⚔️', combatMean.damageAverage, combatMean.damageAverageEstimated ? 'Dégâts moyens par touche' : 'Dégâts moyens par impact', combatMean.damageAverageEstimated ? `${GC.dmgDealt} dégâts ÷ ${GC.hits} touches` : `${combatMean.damageEvents} impact${combatMean.damageEvents > 1 ? 's' : ''} suivi${combatMean.damageEvents > 1 ? 's' : ''}`, '#c9b6ff')}
       ${averageCard('∑', actionMean.rolls, 'Actions au d20 analysées', actionBreakdown, '#ff9d7a')}
       ${averageCard('🎲', actionMean.resultAvg, 'Résultat final moyen', trackedResultLabel, '#7fb0ff')}
-      ${averageCard('D20', actionMean.naturalAvg, 'D20 naturel moyen', trackedNaturalLabel, '#4fd3a6')}
+      ${averageCard('🎯', actionMean.naturalAvg, 'Chance au dé (moy. /20)', trackedNaturalLabel, '#4fd3a6')}
       ${averageCard('💥', actionMean.critRate, 'Critiques · toutes actions', critSample, '#f4c430', '%')}
       ${averageCard('💔', actionMean.fumbleRate, 'Échecs critiques · toutes actions', fumbleSample, '#ff6b6b', '%')}
     </div>
     <div class="stats-average-formulas">
       <span><b>Dégâts</b> = total infligé ÷ impacts${combatMean.damageAverageEstimated ? ' (touches pour l’historique)' : ''}</span>
       <span><b>Jet final</b> = résultats avec bonus des compétences + attaques ÷ actions détaillées</span>
-      <span><b>D20 naturel</b> = dés conservés des compétences + attaques ÷ actions détaillées</span>
+      <span><b>Chance au dé</b> = valeur brute du d20 (sur 20), sans les bonus — moyenne attendue 10,5</span>
       <span><b>Critiques</b> = critiques de compétence + critiques de combat ÷ toutes les actions au d20</span>
     </div>
     ${(!actionMean.trackedRolls || actionMean.coverage < 100 || actionMean.resultCoverage < 100 || combatMean.damageAverageEstimated) ? `<p class="stats-average-note"><span>ℹ️</span> Les moyennes exactes regroupent les compétences et les attaques retrouvées dans les compteurs et le journal VTT${_statsVttLogLimited ? ' (500 dernières entrées)' : ''}. Les tirets ou couvertures partielles correspondent à des actions historiques dont le détail n’est plus disponible${combatMean.damageAverageEstimated ? ' ; la moyenne de dégâts historique reste alors une estimation par touche' : ''}.</p>` : ''}
@@ -1861,8 +1870,18 @@ function _statsRender(scope) {
     <div class="stats-average-panels">
       <section class="stats-average-panel">
         <header><span>Détail par compétence</span><small>Le filtre Joueurs permet de cibler un personnage</small></header>
+        <p class="stats-average-legend">
+          <span><b>Résultat moyen</b> = dé + modificateurs (la valeur comparée à la difficulté).</span>
+          <span><b>Chance au dé</b> = valeur brute du d20, sur 20. Un dé équitable fait <b>10,5</b> en moyenne : <em class="stats-luck is-lucky">au-dessus</em> = chanceux, <em class="stats-luck is-unlucky">en dessous</em> = malchanceux.</span>
+        </p>
         <div class="stats-average-table-wrap"><table class="stats-average-table">
-          <thead><tr><th>Compétence</th><th>Moy. finale</th><th>D20 naturel</th><th>Jets</th><th>Crit. / échecs</th></tr></thead>
+          <thead><tr>
+            <th>Compétence</th>
+            <th title="Dé + modificateurs : la valeur réellement comparée à la difficulté">Résultat moyen</th>
+            <th title="Valeur brute du d20 (sur 20), sans les bonus. Moyenne attendue d'un dé équitable : 10,5">Chance au dé <small>/20</small></th>
+            <th>Jets</th>
+            <th>Crit. / échecs</th>
+          </tr></thead>
           <tbody>${averageSkillRows || '<tr><td colspan="5" class="stats-average-empty">Aucun jet de compétence sur ce périmètre.</td></tr>'}</tbody>
         </table></div>
       </section>

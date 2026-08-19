@@ -227,10 +227,21 @@ async function _patchImg(imgId, patch) {
  * combat/inspecteur (vtt.js câble les callbacks).
  * @param {{hideActBar?:Function, clearHL?:Function, renderInspector?:Function}} deps
  */
+let _lastMapImgSig = null;   // signature des images de fond réellement rendues
+const _mapImgElCache = new Map(); // src résolue → HTMLImageElement déjà chargé (rebuild synchrone)
+
 export function _renderMapImages(deps = {}) {
   const { hideActBar = () => {}, clearHL = () => {}, renderInspector = () => {} } = deps;
   if (!VS.activePage) return;
   const K = window.Konva;
+  // Idempotent : si les images de fond sont inchangées ET déjà rendues, ne rien
+  // détruire. Le destroy + rechargement asynchrone (new Image().onload) laissait
+  // une frame « carte absente » → clignotement à chaque écriture de page (portes…).
+  const bgImgs = VS.activePage.backgroundImages || [];
+  const sig = `${VS.activePage.id}|${JSON.stringify(bgImgs)}`;
+  const renderedCount = VS.layers.map.find('Image').length + (VS.layers.mapFg?.find('Image').length || 0);
+  if (sig === _lastMapImgSig && renderedCount === bgImgs.length) return;
+  _lastMapImgSig = sig;
   // Nettoyer les images des deux couches (sans détruire les transformers)
   VS.layers.map.find('Image').forEach(n=>n.destroy());
   VS.layers.mapFg?.find('Image').forEach(n=>n.destroy());
@@ -243,8 +254,8 @@ export function _renderMapImages(deps = {}) {
     const tgtLyr = isFg ? VS.layers.mapFg : VS.layers.map;
     const tr     = isFg ? VS.imgTrFg      : VS.imgTr;
 
-    const el = new Image(); el.crossOrigin='anonymous';
-    el.onload = () => {
+    const src = _resolveMapImageUrl(img.url, img.sourcePath);
+    const build = (el) => {
       if (!VS.activePage) return; // page changée entre temps
       const ki = new K.Image({
         image:el, x:img.x*CELL, y:img.y*CELL,
@@ -316,9 +327,19 @@ export function _renderMapImages(deps = {}) {
       if (tr?.getParent()) tr.moveToTop();
       tgtLyr.batchDraw();
     };
-    // Auto-répare les URLs GitHub/anciennes entrées `images/maps/...` sans
-    // dépendre de raw.githubusercontent.com (limité en rafale sur localhost).
-    el.src = _resolveMapImageUrl(img.url, img.sourcePath);
+    // Élément déjà chargé (cache) → reconstruction SYNCHRONE : aucune frame
+    // « carte absente », donc plus de clignotement quand la page est réécrite
+    // (ouvrir/fermer une porte, etc.). Sinon chargement asynchrone, mis en cache.
+    // (URL auto-réparée pour les anciennes entrées GitHub/`images/maps/...`.)
+    const cached = _mapImgElCache.get(src);
+    if (cached && cached.complete && cached.naturalWidth) {
+      build(cached);
+    } else {
+      const el = new Image();
+      el.crossOrigin = 'anonymous';
+      el.onload = () => { _mapImgElCache.set(src, el); build(el); };
+      el.src = src;
+    }
   }
 }
 

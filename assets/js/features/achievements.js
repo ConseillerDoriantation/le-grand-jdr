@@ -2075,9 +2075,44 @@ function _achOpenLightbox(itemId) {
     window.addEventListener('resize', fitFrameToImage);
     overlay.addEventListener('ach-lb-teardown', () => window.removeEventListener('resize', fitFrameToImage));
   }
+  // ── Déplacement (pan) à la souris quand l'image est zoomée ──
+  // Maintenir le clic gauche et glisser fait défiler la zone visible ; un clic
+  // simple (sans glisser) dézoome. Le tactile garde le scroll natif + swipe.
+  const PAN_THRESHOLD = 4; // px avant de considérer que c'est un glissement, pas un clic
+  let _panActive = false, _panMoved = false, _panX = 0, _panY = 0, _panL = 0, _panT = 0;
+  if (mediaImg && mediaEl) {
+    mediaImg.addEventListener('pointerdown', event => {
+      if (event.pointerType === 'touch') return;          // tactile : scroll natif
+      if (event.button !== 0) return;                      // clic gauche uniquement
+      if (!mediaEl.classList.contains('is-zoomed')) return; // pan seulement en zoomé
+      _panActive = true; _panMoved = false;
+      _panX = event.clientX; _panY = event.clientY;
+      _panL = mediaEl.scrollLeft; _panT = mediaEl.scrollTop;
+      mediaImg.setPointerCapture?.(event.pointerId);
+      mediaEl.classList.add('is-panning');
+      event.preventDefault();
+    });
+    mediaImg.addEventListener('pointermove', event => {
+      if (!_panActive) return;
+      const dx = event.clientX - _panX, dy = event.clientY - _panY;
+      if (Math.abs(dx) > PAN_THRESHOLD || Math.abs(dy) > PAN_THRESHOLD) _panMoved = true;
+      mediaEl.scrollLeft = _panL - dx;
+      mediaEl.scrollTop  = _panT - dy;
+    });
+    const _endPan = event => {
+      if (!_panActive) return;
+      _panActive = false;
+      mediaEl.classList.remove('is-panning');
+      mediaImg.releasePointerCapture?.(event.pointerId);
+    };
+    mediaImg.addEventListener('pointerup', _endPan);
+    mediaImg.addEventListener('pointercancel', _endPan);
+  }
   mediaImg?.addEventListener('click', event => {
     event.stopPropagation();
     if (!mediaEl) return;
+    // Un glissement (pan) vient de se terminer → ne pas dézoomer.
+    if (_panMoved) { _panMoved = false; return; }
 
     const zoomed = mediaEl.classList.toggle('is-zoomed');
     mediaImg.title = zoomed ? 'Cliquer pour dézoomer' : 'Cliquer pour zoomer';

@@ -8705,9 +8705,15 @@ function _initListeners() {
       else {
         VS.pages[ch.doc.id]={id:ch.doc.id,...ch.doc.data()};
         if (VS.activePage?.id===ch.doc.id) {
+          // Ne re-rendre les images de fond QUE si elles ont changé : sinon chaque
+          // écriture de page (ouvrir/fermer une porte, etc.) détruit+recharge la
+          // carte de fond de façon asynchrone → flash visible.
+          const _prevBgImgs = JSON.stringify(VS.activePage.backgroundImages || []);
           VS.activePage=VS.pages[ch.doc.id];
           _syncPlayerAnnotClip();
-          _renderMapImages(_MAP_IMG_DEPS);
+          if (JSON.stringify(VS.activePage.backgroundImages || []) !== _prevBgImgs) {
+            _renderMapImages(_MAP_IMG_DEPS);
+          }
           fogRenderWalls(VS.activePage, STATE.isAdmin);
           fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
         }
