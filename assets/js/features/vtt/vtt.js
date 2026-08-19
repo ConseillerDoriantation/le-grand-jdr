@@ -5110,6 +5110,9 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
         </button>`).join('')}
     </div>` : '';
 
+  // En combat, les joueurs sont limités à leur Deck préparé : l'onglet « Tous les
+  // sorts » est verrouillé (le MJ garde l'accès complet).
+  const scopeLocked = inCombat && !STATE.isAdmin;
   const spellScopeHtml = showSpellScope ? `
     <div class="vtt-aopt-spell-scope" role="group" aria-label="Sorts affichés">
       <span class="vtt-aopt-spell-scope-label">Sorts affichés</span>
@@ -5117,9 +5120,11 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
         data-vtt-fn="_vttAoptSpellScope" data-vtt-args="deck|$this" aria-pressed="true">
         <span>⚡ Deck</span><b>${deckSpellCount}</b>
       </button>
-      <button type="button" class="vtt-aopt-spell-scope-btn" data-spell-scope="all"
-        data-vtt-fn="_vttAoptSpellScope" data-vtt-args="all|$this" aria-pressed="false">
-        <span>✨ Tous les sorts</span><b>${allSpellCount}</b>
+      <button type="button" class="vtt-aopt-spell-scope-btn${scopeLocked ? ' is-locked' : ''}" data-spell-scope="all"
+        ${scopeLocked
+          ? 'disabled title="En combat, tu es limité aux sorts préparés dans ton Deck"'
+          : 'data-vtt-fn="_vttAoptSpellScope" data-vtt-args="all|$this"'} aria-pressed="false">
+        <span>${scopeLocked ? '🔒' : '✨'} Tous les sorts</span><b>${allSpellCount}</b>
       </button>
     </div>` : '';
 

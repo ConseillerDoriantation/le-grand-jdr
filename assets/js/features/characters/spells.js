@@ -60,7 +60,7 @@ let _noyauIdsEdit = [];   // noyaux élémentaires sélectionnés (multi). [0] =
 let _sortTypesEdit = new Set(['utilitaire']);
 let _deplModeEdit = null;
 let _actionModeEdit = 'reaction';
-let _protModeEdit = 'ca';   // mode rune Protection en cours d'édition ('ca'|'soin') — source fiable (≠ DOM périmé)
+let _protModeEdit = 'ca';   // mode rune Protection en cours d'édition ('ca'|'soin'|'mana') — source fiable (≠ DOM périmé)
 let _zoneShapeEdit = 'rect'; // forme de zone combo Amp+Disp en cours d'édition ('rect'|'cross')
 let _enchantExtraSavedEdit = [];   // états d'enchantement supplémentaires sauvegardés (slots 2..n)
 let _invImageEdit = '';      // image (dataUrl) de l'invocation en cours d'édition
@@ -2136,6 +2136,12 @@ function _runeLiveContribution(nom, counts) {
       if (protMode === 'ca') {
         return {
           main:  `+${cnt*2} CA · sur 1 cible (2 tours)`,
+        };
+      }
+      // Mode régénération de PM
+      if (protMode === 'mana') {
+        return {
+          main:  `+${cnt}d4 PM · régénération · sur 1 cible`,
         };
       }
       // Mode soin
