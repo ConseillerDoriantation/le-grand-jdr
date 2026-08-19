@@ -506,6 +506,13 @@ match /adventures/{adventureId} {
   match /combat_styles/{id}     { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /order/{id}             { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /bastion/{id}           { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+  // Mur des annonces du Bastion : doc unique `bastionAnnonces/main` (champ `items`).
+  // Lecture + écriture par tout membre de l'aventure (modération douce côté client :
+  // on ne supprime que ses propres annonces). Lecture = GET (pas de requête `list`).
+  match /bastionAnnonces/{id} {
+    allow read:  if inAdventure(adventureId);
+    allow write: if inAdventure(adventureId);
+  }
   match /story_histories/{id}   { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /agenda_session/{id}    { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /availabilities/{uid} {
