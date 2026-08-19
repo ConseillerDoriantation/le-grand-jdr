@@ -752,7 +752,7 @@ function _statsNormCombat(cm = {}) {
     damageTakenCorrection: n(cm.damageTakenCorrection), damageDealtCorrection: n(cm.damageDealtCorrection),
     attacksTaken: n(cm.attacksTaken), attacksAvoided: n(cm.attacksAvoided),
     spellsCast: n(cm.spellsCast), tacticalSpells: n(cm.tacticalSpells), supportSpells: n(cm.supportSpells), afflictionSpells: n(cm.afflictionSpells), controlSpells: n(cm.controlSpells),
-    pmSpent: n(cm.pmSpent), heal: n(cm.heal),
+    pmSpent: n(cm.pmSpent), heal: n(cm.heal), manaHealed: n(cm.manaHealed),
     biggestHit: n(cm.biggestHit), biggestTaken: n(cm.biggestTaken),
   };
 }
@@ -1342,6 +1342,7 @@ function _statsRender(scope) {
               ${fact('Afflictions', cm.afflictionSpells)}
               ${fact('Contrôles', cm.controlSpells)}
               ${fact('Soin produit', cm.heal, '#4fd3a6')}
+              ${fact('PM régénérés', cm.manaHealed, '#8b5cf6')}
               ${fact('Sorts lancés', cm.spellsCast, '#bca0ff')}
             </div>
           </section>
@@ -3989,6 +3990,7 @@ registerActions({
                 ${fact('Afflictions', cm.afflictionSpells)}
                 ${fact('Contrôles', cm.controlSpells)}
                 ${fact('Soin produit', cm.heal, '#4fd3a6')}
+              ${fact('PM régénérés', cm.manaHealed, '#8b5cf6')}
                 ${fact('Sorts lancés', cm.spellsCast, '#bca0ff')}
               </div>
             </section>

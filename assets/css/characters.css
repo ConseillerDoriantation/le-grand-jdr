@@ -4149,6 +4149,57 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   background: rgba(79,140,255,.10);
   border: 1px solid rgba(79,140,255,.18);
 }
+/* Sélecteur de ressource de coût (PM / PV / Or / gratuit) — contrôle segmenté. */
+.cs-spell-cost-res {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  margin: .55rem 0 .1rem;
+}
+.cs-spell-cost-res-lbl {
+  font-size: .64rem;
+  font-weight: 850;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.cs-spell-cost-res-seg {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: .3rem;
+}
+.cs-spell-cost-res-btn {
+  --rc: #4f8cff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .12rem;
+  padding: .4rem .2rem .34rem;
+  border: 1px solid var(--border, rgba(128,128,128,.25));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--rc) 6%, transparent);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color .12s, background .12s, color .12s, transform .06s;
+}
+.cs-spell-cost-res-btn:hover {
+  border-color: color-mix(in srgb, var(--rc) 55%, transparent);
+  color: var(--text);
+}
+.cs-spell-cost-res-btn:active { transform: translateY(1px); }
+.cs-spell-cost-res-btn.is-on {
+  border-color: var(--rc);
+  background: color-mix(in srgb, var(--rc) 18%, transparent);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rc) 45%, transparent);
+}
+.cs-spell-cost-res-ic { font-size: 1.05rem; line-height: 1; }
+.cs-spell-cost-res-tx {
+  font-size: .66rem;
+  font-weight: 800;
+  letter-spacing: .02em;
+}
+.cs-spell-cost-res-btn.is-on .cs-spell-cost-res-tx { color: var(--rc); }
 .cs-spell-side-label {
   margin: .15rem 0 -.25rem;
   color: var(--text-dim);
@@ -20166,6 +20217,81 @@ body .modal:has(.sh-admin-modal.is-armor-sets) {
   line-height: 1.45;
 }
 .spell-system-note strong { color: #f3d27d; }
+
+/* Coût des runes (config MJ) --------------------------------------------- */
+.spell-cost-config { margin-top: 14px; }
+.spell-cost-config-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.spell-cost-config-head strong { font-size: .82rem; }
+.spell-cost-config-head small { color: var(--text-soft); font-size: .7rem; line-height: 1.4; }
+.spell-cost-config[hidden] { display: none; }
+.spell-cost-table {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--border, rgba(128,128,128,.2));
+  border-radius: 10px;
+  padding: 6px;
+  background: color-mix(in srgb, var(--text, #888) 3%, transparent);
+}
+.spell-cost-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) repeat(3, 66px);
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  border-radius: 8px;
+}
+.spell-cost-row:not(.spell-cost-row--head):nth-child(even) {
+  background: color-mix(in srgb, var(--text, #888) 4%, transparent);
+}
+.spell-cost-row.is-noyau {
+  background: color-mix(in srgb, #4f8cff 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #4f8cff 30%, transparent);
+}
+.spell-cost-row--head {
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--border, rgba(128,128,128,.18));
+}
+.spell-cost-row--head .spell-cost-cell-lbl {
+  font-size: .62rem; font-weight: 850; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+.spell-cost-cell-col {
+  text-align: center;
+  font-size: .68rem;
+  font-weight: 850;
+  letter-spacing: .03em;
+  color: var(--rc);
+  display: flex; align-items: center; justify-content: center; gap: .22rem;
+}
+.spell-cost-col-ic, .spell-cost-row-ic { font-size: .95rem; line-height: 1; }
+.spell-cost-cell-lbl { display: flex; align-items: center; gap: .4rem; font-size: .78rem; font-weight: 600; }
+.spell-cost-cell {
+  display: block;
+  border: 1px solid color-mix(in srgb, var(--rc) 28%, var(--border, rgba(128,128,128,.25)));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--rc) 7%, transparent);
+  transition: border-color .12s, background .12s;
+}
+.spell-cost-cell:focus-within {
+  border-color: var(--rc);
+  background: color-mix(in srgb, var(--rc) 15%, transparent);
+}
+.spell-cost-cell-input {
+  width: 100%;
+  text-align: center;
+  padding: .3rem .2rem;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-weight: 700;
+  font-size: .82rem;
+  -moz-appearance: textfield;
+}
+.spell-cost-cell-input::-webkit-outer-spin-button,
+.spell-cost-cell-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.spell-cost-cell-input:focus { outline: none; }
 
 /* Classic spell editor --------------------------------------------------- */
 .sh-admin-modal.is-classic-spell {

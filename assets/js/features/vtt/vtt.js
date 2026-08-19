@@ -15,7 +15,8 @@ import {
   setDoc, onSnapshot, serverTimestamp, writeBatch, deleteField,
   query, orderBy, limit,
 } from '../../config/firebase.js';
-import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcPalier, calcDeckMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay } from '../../shared/char-stats.js';
+import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcPalier, calcDeckMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay, calcOr } from '../../shared/char-stats.js';
+import { useGold } from '../../shared/economy.js';
 import { calcCriticalEffectTotal, criticalEffectFormulaLabel } from '../../shared/character-rules.js';
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
@@ -77,8 +78,9 @@ import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttSkillFilter, _v
 import {
   _renderLibSection, _resetMapLib, _libFolder, _vttLibToggle, _vttLibOpenFolder, _vttLibNewFolder,
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,
-  _vttLibMoveToAndClose, _mapLibRef, _vttLibImportGithub, _vttLibSearch, _vttLibSearchClear,
+  _vttLibMoveToAndClose, _mapLibRef, _saveMapLib, _vttLibImportGithub, _vttLibCleanDuplicates, _vttLibSearch, _vttLibSearchClear,
 } from './vtt-maplib.js';
+import { dedupeMapLibraryImages } from './vtt-map-library-utils.js';
 import { _markCharsReady, _markNpcsReady, _markToksReady, _resetAutoSync, _charsReady, _cleanupReserveDuplicates } from './vtt-autosync.js';
 import { _vttPanelError, _showCtxMenu, _hideCtxMenu, _tokenEntityKey } from './vtt-utils.js';
 import {
@@ -106,7 +108,8 @@ import {
   _vttSortDmgFormula, _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode,
   _vttDisplayRunes,
 } from './vtt-spell-display.js';
-import { _getSortTypes } from '../characters/spells-calc.js';
+import { _getSortTypes, spellCostRes, _calcSortMana } from '../characters/spells-calc.js';
+import { spellSetCostDelta } from '../../shared/spell-system.js';
 import {
   _musicStateRef, _syncMusicPlayback, _resetMusicState, _closeMusicPanel,
   _vttToggleMusicCat, _vttToggleAllMusicCats, _vttToggleMusic, _vttPlaySound,
@@ -407,6 +410,7 @@ let _spellMatrices = null;   // cache matrices MJ (armes invoquées, combos conf
 // ── Bibliothèque de cartes ─────────────────────────────────────────
 // (images BG/FG, mapMode, mapLib, mapLibUnsub → migrés dans VS / vtt-state.js)
 // [_libFolder/_libOpen/_mapLibRef → vtt-maplib.js]
+let _mapLibCleanupWrite = null;
 
 // ── Butin ─────────────────────────────────────────────────────────
 // [état butin → vtt-loot.js]
@@ -590,6 +594,34 @@ export function _resolveUidName(uid) {
 export function _charPmCur(c) { return c?.pmActuel ?? c?.pm ?? calcPMMax(c); }
 export function _charPmPatch(v) { return { pm: v, pmActuel: v }; }
 
+// ── Ressource de coût d'un sort (PM par défaut, sinon PV / Or / aucune) ──────────
+// Un sort peut se payer en PM, PV ou Or (choisi sur la fiche). On route la
+// lecture du solde et la dépense vers la bonne ressource du LANCEUR. NPC/monstres
+// n'ont pas de costResource → 'pm', comportement inchangé.
+function _optCostRes(opt) { return opt?.costRes || 'pm'; }
+/** Solde courant d'un perso pour une ressource de coût. */
+function _charResCur(c, res) {
+  if (res === 'pv') return c?.hp ?? calcPVMax(c);
+  if (res === 'or') return calcOr(c);
+  return _charPmCur(c);
+}
+const _RES_LABEL = { pm: 'PM', pv: 'PV', or: 'Or', none: '' };
+/** Dépense `cost` de la ressource `res` sur le perso `cid`. */
+async function _spendCharSpellCost(cid, res, cost, tokenId, label) {
+  const c = VS.characters[cid];
+  if (!c || !(cost > 0) || res === 'none') return;
+  if (res === 'or') {
+    await useGold(cid, -cost, `Sort : ${label || ''}`.trim(), { charObj: c, allowOverdraft: true, refreshUI: false }).catch(() => {});
+    return;
+  }
+  if (res === 'pv') {
+    const cur = c.hp ?? calcPVMax(c);
+    await updateDoc(_chrRef(cid), { hp: Math.max(0, cur - cost), vttControlTokenId: tokenId }).catch(() => {});
+    return;
+  }
+  await updateDoc(_chrRef(cid), { ..._charPmPatch(Math.max(0, _charPmCur(c) - cost)), vttControlTokenId: tokenId }).catch(() => {});
+}
+
 // HP écrit sur la fiche source (bidirectionnel)
 export async function _setHp(t, newHp) {
   const v = Math.max(0, newHp);
@@ -607,6 +639,34 @@ export async function _setHp(t, newHp) {
  * franchissement du seuil → coût Firestore négligeable, et n'impacte pas la MAJ
  * des PV si les règles la refusent (.catch).
  */
+/** Restaure `amount` PM sur un token (perso / PNJ / créature bestiaire), capé au
+ *  max. Retourne { applied, cur, max } (PM réellement rendus + nouvel état). */
+async function _restoreTokenPm(td, amount) {
+  const add = Math.max(0, parseInt(amount) || 0);
+  if (td?.characterId) {
+    const c = VS.characters[td.characterId];
+    if (!c) return { applied: 0, cur: 0, max: 0 };
+    const max = calcPMMax(c), cur = Math.max(0, _charPmCur(c));
+    const nv = Math.min(max, cur + add);
+    if (add > 0) await updateDoc(_chrRef(td.characterId), _charPmPatch(nv)).catch(() => {});
+    return { applied: Math.max(0, nv - cur), cur: nv, max };
+  }
+  if (td?.npcId) {
+    const n = VS.npcs[td.npcId];
+    const max = _numOr(n?.pmMax, _numOr(n?.pm, 0));
+    const cur = Math.max(0, _numOr(n?.pmCurrent, max));
+    const nv = Math.min(max, cur + add);
+    if (add > 0) await updateDoc(_npcRef(td.npcId), { pmCurrent: nv }).catch(() => {});
+    return { applied: Math.max(0, nv - cur), cur: nv, max };
+  }
+  const max = _numOr(VS.bestiary[td?.beastId]?.pmMax, 0);
+  if (max <= 0) return { applied: 0, cur: 0, max: 0 };
+  const cur = Math.max(0, td?.pm != null ? td.pm : max);
+  const nv = Math.min(max, cur + add);
+  if (add > 0) await updateDoc(_tokRef(td.id), { pm: nv, pmCombat: nv }).catch(() => {});
+  return { applied: Math.max(0, nv - cur), cur: nv, max };
+}
+
 async function _syncDownedCondition(t, hp) {
   if (!t || t.type === 'player') return;
   const conds = t.conditions || [];
@@ -808,6 +868,7 @@ function _cleanup() {
   _closeEmotePicker();  // retire le listener mousedown du picker (état dans vtt-emotes.js)
   if (VS.mapLibUnsub) { VS.mapLibUnsub(); VS.mapLibUnsub = null; }
   VS.mapLib = { folders: [], images: [] }; _resetMapLib();
+  _mapLibCleanupWrite = null;
   _resetLootState();
   _resetMusicState();
   _mtClear(true);
@@ -2914,16 +2975,16 @@ async function _vttSpendSpellPm(src, opt) {
   }
   const c = src.summonOwnerCharId ? VS.characters[src.summonOwnerCharId] : _characterForToken(src);
   if (c?.id) {
-    const current = _charPmCur(c);
+    // Route vers la ressource choisie (PM/PV/Or) du lanceur.
+    const res = _optCostRes(opt);
+    const current = _charResCur(c, res);
     if (current < cost) {
       const who = src.summonKind === 'invocation' ? ' de l’invocateur' : '';
-      showNotif(`⚠ PM insuffisants${who} (${current}/${cost} requis)`, 'error');
+      const lbl = _RES_LABEL[res] || 'PM';
+      showNotif(`⚠ ${lbl} insuffisant${lbl === 'PM' || lbl === 'PV' ? 's' : ''}${who} (${current}/${cost} requis)`, 'error');
       return false;
     }
-    await updateDoc(_chrRef(c.id), {
-      ..._charPmPatch(current - cost),
-      vttControlTokenId: src.id,
-    });
+    await _spendCharSpellCost(c.id, res, cost, src.id, opt.label);
   }
   return true;
 }
@@ -3220,7 +3281,7 @@ function _buildCastStatsDelta(src, opt) {
     casterId: actor.id,
     casterName: actor.name,
     spellName: isSpellLike ? (opt.label || 'Sort') : null,
-    pm: opt.pmCost || 0,
+    pm: ((opt.costRes||'pm')==='pm' ? (opt.pmCost||0) : 0),
     tactical: kinds.tactical ? 1 : 0,
     support: kinds.support ? 1 : 0,
     affliction: kinds.affliction ? 1 : 0,
@@ -3656,6 +3717,7 @@ function _buildSpellOption(s, ctx) {
   const common = {
     id, sortIdx, spellId, portee,
     pmCost, basePm, pmRaw, pmSetDelta,
+    costRes: s.costResource || 'pm',   // ressource dépensée : 'pm' | 'pv' | 'or' | 'none'
     nbCibles, zoneW, zoneH, zoneShape, mods, actionType,
     sortDuree: _sortDureeVtt(s),
     classicDuration: s.designMode === 'classic' ? _sortDureeVtt(s) : null,
@@ -3792,15 +3854,21 @@ function _buildSpellOption(s, ctx) {
     && s.ampMode !== 'deplacement'
     && !(s.runes || []).includes('Protection');
   const isClassicHeal = s.designMode === 'classic' && s.classicEffect === 'heal' && !!String(s.soin || '').trim();
-  if (types.includes('defensif') && (isClassicHeal || protMode === 'soin' || isAmpSupportHeal)) {
-    const soinFormula = _vttSortSoinFormula(s, c);
+  // Mode Mana : même mécanique que le Soin mais restaure des PM (drapeau isMana).
+  const isManaRegen = protMode === 'mana' && (s.runes || []).includes('Protection');
+  if (types.includes('defensif') && (isClassicHeal || protMode === 'soin' || isManaRegen || isAmpSupportHeal)) {
+    // Régén PM : formule littérale (pas de scaling Protection ni de stat auto) ;
+    // la stat explicite éventuelle est déjà intégrée dans la formule.
+    const soinFormula = isManaRegen ? _calcSortMana(s, c) : _vttSortSoinFormula(s, c);
     const { rawDice: sRawDice, fixed: soinFormulaFixed } = _splitDiceFormula(soinFormula);
     const mainP = c ? getMainWeapon(c) : null;
     const soinIsMagic = !!(VS.damageTypes && s?.noyauTypeId
       && VS.damageTypes.find(x => x.id === s.noyauTypeId)?.isMagic);
     // Stat de soin : override > auto (magique → stat arme ou Int ; physique → Con)
     let soinStatKey;
-    if (s.degatsStat) {
+    if (isManaRegen) {
+      soinStatKey = 'none';          // régén PM : aucun modificateur auto
+    } else if (s.degatsStat) {
       soinStatKey = s.degatsStat;
     } else {
       if (soinIsMagic) {
@@ -3813,20 +3881,20 @@ function _buildSpellOption(s, ctx) {
     }
     const soinNoMod   = soinStatKey === 'none';
     const soinStatMod = soinNoMod ? 0 : (c ? getMod(c, soinStatKey) : 0);
-    const soinMaitrise = !isClassicHeal && usesHealingMastery(s, soinIsMagic, soinStatKey)
+    const soinMaitrise = !isClassicHeal && !isManaRegen && usesHealingMastery(s, soinIsMagic, soinStatKey)
       ? getMaitriseBonus(c, mainP || {})
       : 0;
     // La formule calculée contient déjà stat + maîtrise. On conserve séparément
     // un éventuel bonus écrit dans la formule afin de ne rien compter deux fois.
-    const soinBaseFixed = isClassicHeal
+    const soinBaseFixed = (isClassicHeal || isManaRegen)
       ? soinFormulaFixed
       : soinFormulaFixed - soinStatMod - soinMaitrise;
     const soinTouchStat = s.toucherStat || fallbackTouchStat;
     const soinTouchNoMod = soinTouchStat === 'none';
     const soinTouchMod   = soinTouchNoMod ? 0 : (c ? getMod(c, soinTouchStat) : fallbackTouchMod);
     return { ...common,
-      icon: '💚', label, rawDice: sRawDice, dice: soinFormula,
-      isHeal: true, halfOnMiss: false,
+      icon: isManaRegen ? '💙' : '💚', label, rawDice: sRawDice, dice: soinFormula,
+      isHeal: true, isMana: isManaRegen, halfOnMiss: false,
       formulaFixedBonus: soinBaseFixed,
       maitriseBonus: soinMaitrise,
       mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
@@ -4369,7 +4437,9 @@ function _buildAttackOptions(t) {
       // puis vérification si cible gratuite (multi-cibles ou sort suspendu).
       const pmRaw     = (Number.isFinite(s.pmOverride) && s.pmOverride >= 0)
                         ? s.pmOverride : (parseInt(s.pm) || 0);
-      const basePm    = Math.max(0, pmRaw + spellPmDelta);
+      // Le delta du set d'armure ne réduit que les coûts en PM.
+      const setDelta  = spellSetCostDelta(spellPmDelta, s.costResource || 'pm');
+      const basePm    = Math.max(0, pmRaw + setDelta);
       const freeKey   = `${t.id}_${idx}`;
       const freeCasts = _multiCastFree.get(freeKey) || 0;
       // Sort suspendu actif pour CE sort (buff non expiré) → une version GRATUITE
@@ -4392,7 +4462,7 @@ function _buildAttackOptions(t) {
         id: `sort_${idx}`, sortIdx: idx, spellId: s.id || null, label: s.nom || `Sort ${idx+1}`,
         c,
         portee: baseRange,
-        pmCost: cout, basePm, pmRaw, pmSetDelta: spellPmDelta,
+        pmCost: cout, basePm, pmRaw, pmSetDelta: setDelta,
         fallbackTouchStat: wTchStat,    fallbackDmgStat: sStatKey,
         fallbackTouchMod:  wTchMod,     fallbackDmgMod:  sStatMod,
         touchSetBonus: wSetBonus,
@@ -4437,7 +4507,8 @@ function _buildAttackOptions(t) {
           ? parseInt(s.portee) : (ld.displayRange || 1);
         const pmRaw  = (Number.isFinite(s.pmOverride) && s.pmOverride >= 0)
                        ? s.pmOverride : (parseInt(s.pm) || 0);
-        const basePm = Math.max(0, pmRaw + spellPmDeltaI);
+        const setDeltaI = spellSetCostDelta(spellPmDeltaI, s.costResource || 'pm');
+        const basePm = Math.max(0, pmRaw + setDeltaI);
         const cout   = basePm;
 
         // Méta objet (consommation à l'usage, identification)
@@ -4458,7 +4529,7 @@ function _buildAttackOptions(t) {
           label: fullLabel,
           c,
           portee: baseRange,
-          pmCost: cout, basePm, pmRaw, pmSetDelta: spellPmDeltaI,
+          pmCost: cout, basePm, pmRaw, pmSetDelta: setDeltaI,
           fallbackTouchStat: sStatKeyI, fallbackDmgStat: sStatKeyI,
           touchSetBonus: 0,
           // Différence historique : items ne déclenchent isEnchantOnly que pour enchantArmeDmg
@@ -4664,7 +4735,9 @@ function _vttSpellPills(o) {
     const statNote = o.dmgStatLabel && (o.dmgStatMod !== undefined && o.dmgStatMod !== null)
       ? ` (${_esc(o.dmgStatLabel)})`
       : '';
-    pills.push(_vttAoptPill(isHeal ? 'heal' : 'dmg', `${isHeal ? '🩹' : '🎲'} ${isHeal ? '+' : ''}${_esc(displayFormula)}${statNote}${isHeal ? ' PV' : ''}`));
+    const _healIco = o.isMana ? '💙' : '🩹';
+    const _healUnit = o.isMana ? ' PM' : ' PV';
+    pills.push(_vttAoptPill(isHeal ? 'heal' : 'dmg', `${isHeal ? _healIco : '🎲'} ${isHeal ? '+' : ''}${_esc(displayFormula)}${statNote}${isHeal ? _healUnit : ''}`));
   }
   if (o.traits?.length) {
     pills.push(`<span class="vtt-aopt-pill traits">${o.traits.slice(0,2).map(_esc).join(' · ')}</span>`);
@@ -4807,20 +4880,22 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       ? '<span class="vtt-aopt-source vtt-aopt-source--outdeck" title="Ce sort est connu mais n’est pas préparé">Hors Deck</span>'
       : '';
 
-    // ── Coût en PM : badge dédié à DROITE du titre (pas en pill) ──────
+    // ── Coût : badge dédié à DROITE du titre (PM par défaut, sinon PV / Or) ──
     let pmBadge = '';
+    const _res = spellCostRes({ costResource: o.costRes || 'pm' });
+    const _resIco = _res.id === 'pm' ? '🔮' : _res.icon;   // 🔮 conservé pour les PM
     const _setDelta = o.pmSetDelta || 0;
     const _setReduc = _setDelta < 0;
     const _setExtra = _setDelta
-      ? `<span class="vtt-aopt-pm-set" title="Set d'armure : ${_setDelta > 0 ? '+' : '−'}${Math.abs(_setDelta)} PM (coût brut ${o.pmRaw})">${_setDelta > 0 ? '⬆' : '🍃'} ${_setDelta > 0 ? '+' : '−'}${Math.abs(_setDelta)}</span>`
+      ? `<span class="vtt-aopt-pm-set" title="Set d'armure : ${_setDelta > 0 ? '+' : '−'}${Math.abs(_setDelta)} ${_res.label} (coût brut ${o.pmRaw})">${_setDelta > 0 ? '⬆' : '🍃'} ${_setDelta > 0 ? '+' : '−'}${Math.abs(_setDelta)}</span>`
       : '';
     const _manaSource = o.summonManaSource ? ` · ${o.summonManaSource}` : '';
     if (o.pmCost > 0) {
-      pmBadge = `<span class="vtt-aopt-pm ${_setReduc?'vtt-aopt-pm--reduced':''}"${_manaSource ? ` title="Réserve utilisée : ${_esc(o.summonManaSource)}"` : ''}>🔮 ${o.pmCost} PM${_manaSource}${_setExtra}</span>`;
+      pmBadge = `<span class="vtt-aopt-pm ${_setReduc?'vtt-aopt-pm--reduced':''}"${_manaSource ? ` title="Réserve utilisée : ${_esc(o.summonManaSource)}"` : ''}>${_resIco} ${o.pmCost} ${_res.label}${_manaSource}${_setExtra}</span>`;
     } else if (o.pmCost === 0 && o.basePm > 0) {
       pmBadge = `<span class="vtt-aopt-pm vtt-aopt-pm--free" title="Cast offert (multi-cibles ou sort suspendu déclenché)">🎁 Gratuit</span>`;
     } else if (o.basePm > 0) {
-      pmBadge = `<span class="vtt-aopt-pm ${_setReduc?'vtt-aopt-pm--reduced':''}">🔮 ${o.basePm} PM${_setExtra}</span>`;
+      pmBadge = `<span class="vtt-aopt-pm ${_setReduc?'vtt-aopt-pm--reduced':''}">${_resIco} ${o.basePm} ${_res.label}${_setExtra}</span>`;
     }
 
     // Pills (portée, zone/cibles, effet, JS, stat, traits) — source unique partagée.
@@ -5533,7 +5608,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
   const isCastOnly = opt.isCaSort || opt.isUtil;
   const btnColor   = opt.isHeal ? '#22c38e' : isCastOnly ? '#b47fff' : 'var(--gold,#f59e0b)';
   const btnFg      = opt.isHeal || isCastOnly ? '#fff' : '#1a1a1a';
-  const btnLabel   = opt.isHeal ? '💚 Soigner !' : isCastOnly ? '✨ Activer !' : '🎲 Lancer !';
+  const btnLabel   = opt.isMana ? '💙 Régénérer !' : opt.isHeal ? '💚 Soigner !' : isCastOnly ? '✨ Activer !' : '🎲 Lancer !';
   const _bonusInput = (id, label, title, extra = '') => `
     <label class="vtt-atk-bonus-field" title="${_esc(title)}">
       <span>${_esc(label)}</span>
@@ -5633,13 +5708,13 @@ function _vttPickOpt(srcId, tgtId, idx) {
     ${_formulaPanel('util', opt.icon, 'Effet', degatsFormula, '')}
   ` : opt.isHeal ? `
     <div class="vtt-atk-formula-stack">
-      ${_formulaPanel('hit', '🎯', 'Jet de soin', toucherFormula, `
+      ${_formulaPanel('hit', '🎯', opt.isMana ? 'Jet de régénération' : 'Jet de soin', toucherFormula, `
         ${_bonusInput('atk-bonus-hit', 'Bonus au jet', 'Bonus / malus fixe ajouté au d20')}
-        ${_bonusInput('atk-bonus-hit-dice', 'd20 bonus', 'd20 supplémentaires au jet de soin, sommés au résultat', 'min="-9" max="20"')}
+        ${_bonusInput('atk-bonus-hit-dice', 'd20 bonus', 'd20 supplémentaires au jet, sommés au résultat', 'min="-9" max="20"')}
       `, 'DD 2 : sert surtout à gérer critique et échec critique.')}
-      ${_formulaPanel('heal', '💚', 'Soin produit', degatsFormula, `
-        ${_bonusInput('atk-bonus-dmg', 'Bonus au soin', 'Bonus / malus fixe au soin')}
-        ${_bonusInput('atk-bonus-dmg-dice', 'Dés de soin', 'Dés supplémentaires au soin, même type de dé', 'min="-9" max="20"')}
+      ${_formulaPanel('heal', opt.isMana ? '💙' : '💚', opt.isMana ? 'PM régénérés' : 'Soin produit', degatsFormula, `
+        ${_bonusInput('atk-bonus-dmg', opt.isMana ? 'Bonus aux PM' : 'Bonus au soin', 'Bonus / malus fixe')}
+        ${_bonusInput('atk-bonus-dmg-dice', opt.isMana ? 'Dés de PM' : 'Dés de soin', 'Dés supplémentaires, même type de dé', 'min="-9" max="20"')}
       `)}
     </div>
     ${_vttAttackModeControlsHtml('Sélecteur de mode (Avantage / Normal / Désavantage) — partagé avec les attaques')}
@@ -5697,7 +5772,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
   } else if ((opt.nbCibles || 1) > 1) {
     infoChips.push(`🎯 ${opt.nbCibles} cibles`);
   }
-  if (opt.pmCost > 0) infoChips.push(`✨ ${opt.pmCost} PM`);
+  if (opt.pmCost > 0) infoChips.push(`✨ ${opt.pmCost} ${_RES_LABEL[_optCostRes(opt)] || 'PM'}`);
   else if (opt.pmCost === 0 && opt.basePm > 0) infoChips.push('✨ Gratuit');
 
   openModal('⚔️ Résoudre l’action', `
@@ -6667,6 +6742,7 @@ async function _vttRollAttack() {
     ? (src.summonOwnerCharId || _srcChar?.id || (_ownerTok ? _characterForToken(_ownerTok)?.id : null))
     : null;
   const _pmPayerNpcId = !_pmPayerCharId && src.npcId ? src.npcId : null;
+  const _costRes = _optCostRes(opt);
   const _deductPm  = async () => {
     if (opt.pmCost <= 0) return;
     if (_pmPayerToken) {
@@ -6679,11 +6755,8 @@ async function _vttRollAttack() {
       return;
     }
     if (_pmPayerCharId) {
-      const c = VS.characters[_pmPayerCharId];
-      if (c) await updateDoc(_chrRef(_pmPayerCharId), {
-        ..._charPmPatch(Math.max(0, _charPmCur(c) - opt.pmCost)),
-        vttControlTokenId: src.id,
-      });
+      // Route vers la ressource choisie (PM/PV/Or) du lanceur.
+      await _spendCharSpellCost(_pmPayerCharId, _costRes, opt.pmCost, src.id, opt.label);
       return;
     }
     if (_pmPayerNpcId) {
@@ -6786,10 +6859,11 @@ async function _vttRollAttack() {
     if (opt.pmCost > 0 && _pmPayerCharId) {
       const cPm = VS.characters[_pmPayerCharId];
       if (cPm) {
-        const actualPm = _charPmCur(cPm);
+        const actualPm = _charResCur(cPm, _costRes);
         if (actualPm < opt.pmCost) {
           const _who = src.summonOwnerId ? ' du lanceur' : '';
-          showNotif(`⚠ PM insuffisants${_who} (${actualPm}/${opt.pmCost} requis)`, 'error');
+          const _lbl = _RES_LABEL[_costRes] || 'PM';
+          showNotif(`⚠ ${_lbl} insuffisant${_lbl === 'PM' || _lbl === 'PV' ? 's' : ''}${_who} (${actualPm}/${opt.pmCost} requis)`, 'error');
           return;
         }
       }
@@ -6963,10 +7037,10 @@ async function _vttRollAttack() {
           targetName: ecTgt,
           optLabel: opt.label, pmCost: opt.pmCost,
           castEC: true,
-          castEffect: `💔 Échec critique (d20 = 1) — sort raté${opt.pmCost>0?`, ${opt.pmCost} PM perdus`:''}`,
+          castEffect: `💔 Échec critique (d20 = 1) — sort raté${opt.pmCost>0?`, ${opt.pmCost} ${_RES_LABEL[_costRes]||'PM'} perdus`:''}`,
           createdAt: serverTimestamp(),
         }).catch(()=>{});
-        showNotif(`💔 Échec critique ! ${opt.label} raté${opt.pmCost>0?` — ${opt.pmCost} PM perdus`:''}`, 'error');
+        showNotif(`💔 Échec critique ! ${opt.label} raté${opt.pmCost>0?` — ${opt.pmCost} ${_RES_LABEL[_costRes]||'PM'} perdus`:''}`, 'error');
         _cleanup();
         return;
       }
@@ -7184,7 +7258,7 @@ async function _vttRollAttack() {
         const _healDelta = { chars: {} };
         const _healActor = _statsActor(src);
         if (_healActor.id) {
-          accCastDelta(_healDelta, { casterId: _healActor.id, casterName: _healActor.name, spellName: opt.label || 'Soin', pm: opt.pmCost || 0, heal: 0 });
+          accCastDelta(_healDelta, { casterId: _healActor.id, casterName: _healActor.name, spellName: opt.label || 'Soin', pm: ((opt.costRes||'pm')==='pm' ? (opt.pmCost||0) : 0), heal: 0 });
           applyStatsDelta(_healDelta, +1);
         }
         await addDoc(_logCol(), {
@@ -7209,7 +7283,7 @@ async function _vttRollAttack() {
           dmgFormula: opt.dice, pmCost: opt.pmCost || 0,
           createdAt: serverTimestamp(),
         }).catch(()=>{});
-        showNotif(`💔 Échec critique (${hD20}) — sort raté, ${opt.pmCost||0} PM consommés`, 'error');
+        showNotif(`💔 Échec critique (${hD20}) — sort raté, ${opt.pmCost||0} ${_RES_LABEL[_costRes]||'PM'} consommés`, 'error');
         return;
       }
 
@@ -7262,6 +7336,20 @@ async function _vttRollAttack() {
       for (const curTgtId of targetIds) {
         const curTgtData = VS.tokens[curTgtId]?.data; if (!curTgtData) continue;
         const lCur = _live(curTgtData);
+        if (opt.isMana) {
+          // Régénération de PM : même montant, appliqué sur la réserve de PM.
+          const { applied, cur, max } = await _restoreTokenPm(curTgtData, healTotal);
+          _healActual += applied;
+          healResults.push({
+            name: lCur.displayName ?? curTgtData.name,
+            isMana: true, newPm: cur, pmMax: max,
+            characterId: curTgtData.characterId || null,
+            npcId: curTgtData.npcId || null,
+            beastId: curTgtData.beastId || null,
+            targetImage: lCur.displayImage || null,
+          });
+          continue;
+        }
         const curHp = lCur.displayHp ?? 20, hpMax = lCur.displayHpMax ?? 20;
         const newHp = Math.min(hpMax, curHp + healTotal);
         _healActual += Math.max(0, newHp - curHp);
@@ -7279,11 +7367,13 @@ async function _vttRollAttack() {
       const _healDelta = { chars: {} };
       const _healActor = _statsActor(src);
       if (_healActor.id) {
-        accCastDelta(_healDelta, { casterId: _healActor.id, casterName: _healActor.name, spellName: opt.label || 'Soin', pm: opt.pmCost || 0, heal: _healActual });
+        accCastDelta(_healDelta, { casterId: _healActor.id, casterName: _healActor.name, spellName: opt.label || 'Soin', pm: ((opt.costRes||'pm')==='pm' ? (opt.pmCost||0) : 0), heal: opt.isMana ? 0 : _healActual, mana: opt.isMana ? _healActual : 0 });
         applyStatsDelta(_healDelta, +1);
       }
 
       const isMultiHeal = healResults.length > 1;
+      const _healIco = opt.isMana ? '💙' : '💚';
+      const _healUnit = opt.isMana ? 'PM régénérés' : 'PV soignés';
       const critTag = hIsCrit ? ' 💥 CRITIQUE' : '';
       const luckTag = hLuck ? ` 🍀 Relance ${hLuck.reroll}→${hD20}` : '';
       // Payload commun pour le log (jet de toucher détaillé)
@@ -7301,7 +7391,7 @@ async function _vttRollAttack() {
 
       if (isMultiHeal) {
         await addDoc(_logCol(), {
-          type: 'attack-multi', isHeal: true,
+          type: 'attack-multi', isHeal: true, isMana: !!opt.isMana,
           undo: _undoSnap,
           statsDelta: _healDelta,
           ..._vttLogSourceFields(src),
@@ -7325,12 +7415,12 @@ async function _vttRollAttack() {
           targets: healResults.map(r => ({ ...r, hit: true, halfDmg: false, dmgTotal: healTotal, targetCA: HEAL_DD })),
           createdAt: serverTimestamp(),
         }).catch(()=>{});
-        showNotif(`💚${critTag}${luckTag} ${healTotal} PV soignés → ${healResults.map(r=>r.name).join(', ')}`, 'success');
+        showNotif(`${_healIco}${critTag}${luckTag} ${healTotal} ${_healUnit} → ${healResults.map(r=>r.name).join(', ')}`, 'success');
       } else {
         const r = healResults[0];
         if (r) {
           await addDoc(_logCol(), {
-            type:'attack', isHeal:true,
+            type:'attack', isHeal:true, isMana: !!opt.isMana,
             undo: _undoSnap,
             statsDelta: _healDelta,
             ..._vttLogSourceFields(src),
@@ -7356,10 +7446,11 @@ async function _vttRollAttack() {
             ..._diceLogFields('dmg', healRollsDetail),
             ..._diceLogFields('crit', healCritRollsDetail),
             critNormalMax: healCritNormalMax || 0,
-            dmgTotal: healTotal, newHp: r.newHp, hpMax: r.hpMax,
+            dmgTotal: healTotal, newHp: r.newHp ?? null, hpMax: r.hpMax ?? null,
+            newPm: r.newPm ?? null, pmMax: r.pmMax ?? null,
             createdAt: serverTimestamp(),
           }).catch(()=>{});
-          showNotif(`💚${critTag}${luckTag} ${healTotal} PV soignés → ${r.name}`, 'success');
+          showNotif(`${_healIco}${critTag}${luckTag} ${healTotal} ${_healUnit} → ${r.name}`, 'success');
         }
       }
       return;
@@ -7853,7 +7944,7 @@ async function _vttRollAttack() {
       accCastDelta(_statsDelta, {
         casterId: _castActor.id, casterName: _castActor.name,
         spellName: opt.sortIdx !== undefined ? (opt.label || 'Sort') : null,
-        pm: opt.pmCost || 0,
+        pm: ((opt.costRes||'pm')==='pm' ? (opt.pmCost||0) : 0),
         tactical: _castKinds.tactical ? 1 : 0,
         support: _castKinds.support ? 1 : 0,
         affliction: _castKinds.affliction ? 1 : 0,
@@ -8878,7 +8969,18 @@ function _initListeners() {
       VS.mapLib = snap.exists() ? snap.data() : {};
       if (!Array.isArray(VS.mapLib.folders)) VS.mapLib.folders = [];
       if (!Array.isArray(VS.mapLib.images))  VS.mapLib.images  = [];
+      const cleaned = dedupeMapLibraryImages(VS.mapLib.images);
+      VS.mapLib.images = cleaned.images;
       _renderLibSection();
+      // Le premier snapshot peut provenir du cache local et être ancien. On ne
+      // réécrit qu'après confirmation serveur afin de ne jamais écraser un ajout
+      // récent fait depuis un autre onglet.
+      if (cleaned.removed && !snap.metadata.fromCache && !_mapLibCleanupWrite) {
+        _mapLibCleanupWrite = _saveMapLib()
+          .then(() => showNotif(`🧹 Bibliothèque nettoyée : ${cleaned.removed} doublon${cleaned.removed > 1 ? 's' : ''} supprimé${cleaned.removed > 1 ? 's' : ''}.`, 'success'))
+          .catch(error => console.error('[vtt] nettoyage automatique bibliothèque', error))
+          .finally(() => { _mapLibCleanupWrite = null; });
+      }
     }, () => {});
   }
 
@@ -9682,15 +9784,15 @@ async function _vttRemoveBuff(tokenId, idx) {
 export function _findUsableReactiveShield(dtok, rank) {
   const char = _characterForToken(dtok);
   if (!char) return null;
-  const curPm = _charPmCur(char);
   let chosen = null;
   for (const s of (char.deck_sorts || [])) {
     if (!s?.actif) continue;
     const br = _vttSpellMods(s)?.bouclierReactif;
     if (!br || !_shieldBlocks(br.tier, rank || 'classique')) continue;
     const cost = (Number.isFinite(s.pmOverride) && s.pmOverride >= 0) ? s.pmOverride : (parseInt(s.pm) || 0);
-    if (cost > curPm) continue;
-    if (!chosen || cost < chosen.cost) chosen = { char, spell: s, cost };
+    const res = spellCostRes(s).id;
+    if (cost > _charResCur(char, res)) continue;   // solde dans la ressource du sort
+    if (!chosen || cost < chosen.cost) chosen = { char, spell: s, cost, res };
   }
   return chosen;
 }
@@ -9706,28 +9808,28 @@ async function _vttShieldCancelAttack(logId) {
   if (!STATE.isAdmin && !_canControlToken(dtok)) { showNotif('Ce n\'est pas ta cible', 'info'); return; }
 
   const pick = _findUsableReactiveShield(dtok, m.attackerRank || 'classique');
-  if (!pick) { showNotif('Aucun bouclier réactif utilisable (palier d\'attaquant ou PM insuffisants)', 'info'); return; }
+  if (!pick) { showNotif('Aucun bouclier réactif utilisable (palier d\'attaquant ou ressource insuffisante)', 'info'); return; }
 
   // Restaure les PV infligés (cap au max) via _setHp (sync fiche perso incluse).
   const restore = Math.max(0, m.dmgTotal || 0);
   const lt = _live(dtok);
   const hpMax = m.hpMax ?? lt.displayHpMax ?? 20;
   const curHp = lt.displayHp ?? dtok.hp ?? 0;
-  const newHp = Math.min(hpMax, curHp + restore);
-  const curPm = _charPmCur(pick.char);
+  // Coût en PV : on l'intègre à l'écriture PV unique (le sort rend des PV puis en
+  // consomme). PM / Or : dépense séparée dans la bonne ressource.
+  const isPvCost = pick.res === 'pv';
+  const newHp = Math.max(0, Math.min(hpMax, curHp + restore) - (isPvCost ? pick.cost : 0));
+  const costLbl = _RES_LABEL[pick.res] || 'PM';
 
   try {
     await _setHp(dtok, newHp);
     await _syncDownedCondition(dtok, newHp);
-    await updateDoc(_chrRef(pick.char.id), {
-      ..._charPmPatch(Math.max(0, curPm - pick.cost)),
-      vttControlTokenId: dtok.id,
-    });
+    if (!isPvCost) await _spendCharSpellCost(pick.char.id, pick.res, pick.cost, dtok.id, pick.spell.nom);
     await updateDoc(doc(_logCol(), logId), {
       shieldCancelled: true, shieldCancelledBy: STATE.user?.uid || null,
       shieldSpell: pick.spell.nom || 'Bouclier réactif',
     });
-    showNotif(`🛡 ${pick.spell.nom || 'Bouclier réactif'} — coup annulé · +${restore} PV (−${pick.cost} PM)`, 'success');
+    showNotif(`🛡 ${pick.spell.nom || 'Bouclier réactif'} — coup annulé · +${restore} PV (−${pick.cost} ${costLbl})`, 'success');
   } catch (e) {
     console.error('[vtt] shield cancel', e);
     showNotif('Annulation refusée (permissions ?)', 'error');
@@ -10239,7 +10341,8 @@ async function _vttAddImageUrl() {
     await updateDoc(_pgRef(VS.activePage.id),{backgroundImages:imgs});
     // Sauver dans la bibliothèque pour réutilisation (même flux que l'upload).
     const entry = { id: crypto.randomUUID(), url, name: (url.split('/').pop()||'Carte').split('?')[0], folderId: _libFolder || null };
-    setDoc(_mapLibRef(), { folders: VS.mapLib.folders||[], images: [...(VS.mapLib.images||[]), entry] }).catch(()=>{});
+    VS.mapLib.images = [...(VS.mapLib.images||[]), entry];
+    _saveMapLib().catch(()=>{});
     showNotif('Carte ajoutée par URL !', 'success');
   } catch (e) { console.error('[vtt] ajout image fond', e); showNotif("Échec de l'ajout de l'image de fond", 'error'); }
 }
@@ -10480,8 +10583,8 @@ async function _handleUpload(file) {
     await updateDoc(_pgRef(VS.activePage.id),{backgroundImages:imgs});
     // Sauver dans la bibliothèque
     const entry = { id: crypto.randomUUID(), url, name: file.name, folderId: _libFolder || null };
-    const updLib = { folders: VS.mapLib.folders||[], images: [...(VS.mapLib.images||[]), entry] };
-    setDoc(_mapLibRef(), updLib).catch(()=>{});
+    VS.mapLib.images = [...(VS.mapLib.images||[]), entry];
+    _saveMapLib().catch(()=>{});
     showNotif('Image ajoutée !','success');
   } catch(e) { console.error(e); showNotif('Erreur upload : '+e.message,'error'); }
 }
@@ -11289,6 +11392,7 @@ export const VTT_ACTIONS = {
   _vttLibDelFolder,
   _vttLibDelImg,
   _vttLibImportGithub,
+  _vttLibCleanDuplicates,
   _vttLibMoveMenu,
   _vttLibMoveRoot,
   _vttLibMoveTo,

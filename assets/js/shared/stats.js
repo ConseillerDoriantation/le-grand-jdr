@@ -225,7 +225,7 @@ export function accAttackDelta(acc, { attackerId, attackerName, targetId, target
 
 // Cast d'un sort : +1 sort lancé, +PM dépensés, +1 sur la répartition par sort,
 // +soin éventuel. Accumulé dans le même delta réversible que l'attaque.
-export function accCastDelta(acc, { casterId, casterName, spellName, pm = 0, heal = 0, tactical = 0, support = 0, affliction = 0, control = 0 } = {}) {
+export function accCastDelta(acc, { casterId, casterName, spellName, pm = 0, heal = 0, mana = 0, tactical = 0, support = 0, affliction = 0, control = 0 } = {}) {
   if (!casterId) return acc;
   acc.chars ??= {};
   const dk = statsDateKey();
@@ -239,6 +239,7 @@ export function accCastDelta(acc, { casterId, casterName, spellName, pm = 0, hea
   bump('combat', 'spellsCast', 1);
   if (pm > 0)    bump('combat', 'pmSpent', pm);
   if (heal > 0)  bump('combat', 'heal', heal);
+  if (mana > 0)  bump('combat', 'manaHealed', mana);
   if (tactical > 0)   bump('combat', 'tacticalSpells', tactical);
   if (support > 0)    bump('combat', 'supportSpells', support);
   if (affliction > 0) bump('combat', 'afflictionSpells', affliction);

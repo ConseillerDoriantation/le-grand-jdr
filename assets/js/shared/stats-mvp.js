@@ -57,6 +57,7 @@ export function buildMvpRawProfile(row = {}) {
   const combat = row.combat || {};
   const damage = num(combat.dmgDealt);
   const heal = num(combat.heal);
+  const mana = num(combat.manaHealed);
   // `tacticalSpells` historique inclut aussi les zones offensives. Le MVP ne
   // retient que les catégories qui représentent réellement une aide/entrave.
   const tacticalActions = Math.max(
@@ -87,8 +88,9 @@ export function buildMvpRawProfile(row = {}) {
       ], num(combat.attacks)),
       support: axis('support', [
         part('Soin réel produit', heal, 1, '💚'),
+        part('PM régénérés', mana, 1, '💙'),
         part('Actions tactiques uniques', tacticalActions, 12, '✨'),
-      ], tacticalActions + (heal > 0 ? 1 : 0)),
+      ], tacticalActions + (heal > 0 ? 1 : 0) + (mana > 0 ? 1 : 0)),
       protection: axis('protection', [
         part('Attaques évitées', attacksAvoided, 12, '🛡️'),
         part('Ciblages tenus', attacksHeld, 3, '🧱'),
