@@ -1088,6 +1088,21 @@
 }
 .stats-average-panel > header span { color: var(--text); font-size: .72rem; font-weight: 850; }
 .stats-average-panel > header small { color: var(--text-dim); font-size: .57rem; }
+/* Légende « résultat moyen » vs « chance au dé » sous l'en-tête du panneau. */
+.stats-average-legend {
+  margin: .1rem 0 .55rem; padding: .5rem .6rem; border-radius: 9px;
+  display: flex; flex-direction: column; gap: .25rem;
+  background: rgba(255,255,255,.03); border: 1px solid var(--border);
+  color: var(--text-soft, #c8d4e8); font-size: .68rem; line-height: 1.45;
+}
+.stats-average-legend b { color: var(--text); }
+.stats-average-legend em { font-style: normal; font-weight: 800; }
+/* Chance au dé : couleur selon la moyenne attendue (10,5). */
+.stats-luck { font-variant-numeric: tabular-nums; font-weight: 800; }
+.stats-luck small { margin-left: .1rem; color: var(--text-dim); font-size: .82em; font-weight: 700; }
+.stats-luck.is-lucky   { color: #4fd3a6; }
+.stats-luck.is-unlucky { color: #ff8b8b; }
+.stats-luck.is-even    { color: var(--text-soft, #c8d4e8); }
 .stats-average-table-wrap { max-height: 330px; overflow: auto; }
 .stats-average-table { width: 100%; border-collapse: collapse; font-size: .67rem; }
 .stats-average-table th,
@@ -1630,22 +1645,47 @@
   gap: .45rem;
 }
 .stats-trophy {
-  display: flex; align-items: center; gap: .55rem;
-  min-width: 0; overflow: hidden; padding: .48rem .55rem; border-radius: 9px;
-  background: linear-gradient(90deg, rgba(255,255,255,.04), rgba(255,255,255,.018)); border: 1px solid var(--border);
-  border-left: 2px solid var(--tc, var(--gold));
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; gap: .6rem;
+  min-width: 0; padding: .55rem .65rem; border-radius: 12px;
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--tc, var(--gold)) 14%, transparent), transparent 60%),
+    var(--bg-card, rgba(255,255,255,.03));
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--tc, var(--gold));
+  transition: transform .12s, box-shadow .12s;
 }
-.stats-trophy-ic { font-size: 1rem; flex-shrink: 0; line-height: 1; }
+.stats-trophy:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,.18); }
+.stats-trophy-medal {
+  flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 1.1rem; line-height: 1;
+  background: color-mix(in srgb, var(--tc, var(--gold)) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tc, var(--gold)) 40%, transparent);
+}
+.stats-trophy-body { min-width: 0; display: flex; flex-direction: column; gap: .18rem; }
+.stats-trophy-lbl {
+  font-size: .66rem; font-weight: 800; letter-spacing: .03em;
+  color: var(--text-soft, #c8d4e8); text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.stats-trophy-who {
+  display: flex; align-items: center; gap: .35rem; min-width: 0;
+  color: var(--text); font-size: .82rem; font-weight: 600;
+}
+.stats-trophy-who > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stats-trophy-av { flex-shrink: 0; }
-.stats-trophy-tx { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.stats-trophy-lbl { font-size: .58rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: .05em; }
-.stats-trophy-line { display: flex; align-items: baseline; gap: .45rem; min-width: 0; }
-.stats-trophy-who { flex: 1; min-width: 0; color: var(--text); font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stats-trophy-line b {
-  flex-shrink: 1; min-width: 0; max-width: 48%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--tc, var(--gold)); font-weight: 700; font-variant-numeric: tabular-nums;
-  padding: .06rem .34rem; border-radius: 999px; background: color-mix(in srgb, var(--tc, var(--gold)) 12%, transparent);
-  font-size: .76rem;
+.stats-trophy-val {
+  flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; line-height: 1;
+  text-align: right;
+}
+.stats-trophy-val b {
+  color: var(--tc, var(--gold)); font-family: 'Cinzel', serif;
+  font-size: 1.28rem; font-weight: 900; font-variant-numeric: tabular-nums;
+}
+.stats-trophy-val small {
+  margin-top: .12rem; color: var(--text-dim);
+  font-size: .58rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
 }
 @media (max-width: 1350px) {
   .stats-trophies { grid-template-columns: repeat(3, minmax(0, 1fr)); }

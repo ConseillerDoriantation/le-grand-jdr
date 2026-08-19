@@ -37,6 +37,7 @@ let _page       = null;   // référence TOUJOURS à jour vers la page active (�
 let _fogPending = false;  // debounce requestAnimationFrame
 let _snapDot    = null;   // indicateur d'aimantation pendant l'édition
 let _playerFogCanvas = null; // masque courant pour les interactions et tokens hors LOS
+let _fogImageNode = null;    // nœud Konva.Image persistant du fog (réutilisé → pas de clignotement)
 
 let _pgRefFn = null;      // (pageId) → Firestore DocumentReference
 
@@ -306,6 +307,10 @@ export function fogInit(stage, layers, CELL) {
   _fogLayer   = layers.fog;
   _wallsLayer = layers.walls;
   _tokenLayer = layers.token;
+  _fogImageNode = null;   // nouveau layer → oublier l'ancien nœud fog
+  // Suppr/Delete supprime l'élément sélectionné (une seule liaison, ré-entrante).
+  document.removeEventListener('keydown', _fogKeydown);
+  document.addEventListener('keydown', _fogKeydown);
 }
 
 export function fogSetPgRef(fn) { _pgRefFn = fn; }
@@ -350,11 +355,11 @@ function _applyTokenVisibility(page, tokens, isAdmin) {
 /** Recalcule et affiche le fog immédiatement. */
 export function fogUpdate(page, tokens, isAdmin) {
   if (!_fogLayer || !page) return;
-  _fogLayer.destroyChildren();
 
-  // Rien à dessiner si ni LOS ni ops manuelles
+  // Rien à dessiner si ni LOS ni ops manuelles → retire le fog persistant.
   const hasFogOps = (page.fogOps || []).length > 0;
   if (!page.fogEnabled && !hasFogOps) {
+    if (_fogImageNode) { _fogImageNode.destroy(); _fogImageNode = null; }
     _playerFogCanvas = null;
     _applyTokenVisibility(page, tokens, !!isAdmin);
     _fogLayer.batchDraw();
@@ -365,8 +370,16 @@ export function fogUpdate(page, tokens, isAdmin) {
   if (!K) return;
   const canvas = _buildFogCanvas(page, tokens, !!isAdmin);
   _playerFogCanvas = isAdmin ? null : canvas;
-  const img = new K.Image({ image: canvas, x: 0, y: 0, listening: false });
-  _fogLayer.add(img);
+  // Réutilise un unique nœud image : on remplace juste son canvas au lieu de
+  // détruire/recréer (destroyChildren laissait une frame « sans fog » = clignotement).
+  if (_fogImageNode && _fogImageNode.getLayer() === _fogLayer) {
+    _fogImageNode.image(canvas);
+  } else {
+    if (_fogImageNode) _fogImageNode.destroy();
+    _fogImageNode = new K.Image({ image: canvas, x: 0, y: 0, listening: false });
+    _fogLayer.add(_fogImageNode);
+  }
+  _fogImageNode.moveToBottom();   // le fog reste sous d'éventuels ajouts futurs
   _applyTokenVisibility(page, tokens, !!isAdmin);
   if (!isAdmin) fogRenderWalls(page, false);
   _fogLayer.batchDraw();
@@ -402,8 +415,10 @@ function _bindObstacleNode(node, wall, isAdmin) {
 
 function _addObstacleStateBadge(K, wall, state, mx, my, canInteract, isAdmin) {
   if (!state.canOpen) return;
-  const text = `${state.stateShort}${state.locked ? '  🔒' : ''}`;
-  const width = Math.max(58, state.stateShort.length * 5.2 + (state.locked ? 40 : 24));
+  // Verrouillé : libellé explicite « 🔒 VERROUILLÉE » sur fond rouge, pour ne pas
+  // le confondre avec une simple porte/vitre fermée.
+  const text = state.locked ? `🔒 VERROUILLÉE` : state.stateShort;
+  const width = Math.max(58, text.length * 5.2 + 20);
   const color = state.locked ? '#ef4444' : state.open ? '#22c55e' : state.color;
   const badge = new K.Group({
     x: mx - width / 2, y: my - 9, width, height: 18,
@@ -411,7 +426,8 @@ function _addObstacleStateBadge(K, wall, state, mx, my, canInteract, isAdmin) {
   });
   badge.add(new K.Rect({
     width, height: 18, cornerRadius: 9,
-    fill: 'rgba(5,10,19,.92)', stroke: color, strokeWidth: 1.5,
+    fill: state.locked ? 'rgba(69,10,10,.94)' : 'rgba(5,10,19,.92)',
+    stroke: color, strokeWidth: state.locked ? 2 : 1.5,
     shadowColor: '#000', shadowBlur: 5, shadowOpacity: .45,
   }));
   badge.add(new K.Circle({ x: 8, y: 9, radius: 3, fill: state.open ? '#22c55e' : color }));
@@ -498,7 +514,11 @@ export function fogRenderWalls(page, isAdmin) {
   // ── Murs / portes / fenêtres ──────────────────────────────────────────────
   for (const w of walls) {
     const state   = vttWallState(w);
-    const drawCol = (_editMode && isAdmin) ? state.editColor : state.color;
+    const drawColBase = (_editMode && isAdmin) ? state.editColor : state.color;
+    // Verrouillé (et fermé) : trait rouge pour être lisible d'un coup d'œil,
+    // au-delà du seul badge de la mi-porte.
+    const lockedClosed = state.locked && !state.open;
+    const drawCol = lockedClosed ? '#ef4444' : drawColBase;
     const width   = state.width;
     const pts     = [w.x1*C, w.y1*C, w.x2*C, w.y2*C];
     const mx = (w.x1 + w.x2) * 0.5 * C;
@@ -517,7 +537,7 @@ export function fogRenderWalls(page, isAdmin) {
       }));
       _wallsLayer.add(new K.Line({
         points: pts, stroke: drawCol,
-        strokeWidth: _selectedId === w.id ? width + 1 : width,
+        strokeWidth: (_selectedId === w.id ? width + 1 : width) + (lockedClosed ? 1 : 0),
         lineCap: 'round', listening: false,
       }));
     }
@@ -987,6 +1007,37 @@ function _selectItem(id) {
   _removeCtxMenu();
   fogRenderWalls(_page, true);
   _showCtxMenu(id);
+}
+
+/** Supprime l'élément sélectionné (mur/porte/vitre, lumière ou zone de brouillard). */
+function _deleteSelected() {
+  const id = _selectedId;
+  if (!id || !_page) return false;
+  const walls  = _page.walls        || [];
+  const lights = _page.lightSources || [];
+  const ops    = _page.fogOps       || [];
+  let patch = null;
+  if      (walls.some(w => w.id === id))  patch = { walls:        walls.filter(w => w.id !== id) };
+  else if (lights.some(l => l.id === id)) patch = { lightSources: lights.filter(l => l.id !== id) };
+  else if (ops.some(o => o.id === id))    patch = { fogOps:       ops.filter(o => o.id !== id) };
+  if (!patch) return false;
+  updateDoc(_pgRef(_page.id), patch).catch(() => {});
+  _selectedId = null;
+  _removeCtxMenu();
+  fogRenderWalls(_page, true);
+  return true;
+}
+
+// Touche Suppr/Delete : supprime l'élément sélectionné en mode édition (admin).
+// Ignore la frappe si l'utilisateur tape dans un champ de saisie.
+function _fogKeydown(e) {
+  if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+  if (!_editMode || !_selectedId) return;
+  const t = e.target;
+  const tag = t?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) return;
+  e.preventDefault();
+  _deleteSelected();
 }
 
 // ── Menu contextuel ────────────────────────────────────────────────────────────
