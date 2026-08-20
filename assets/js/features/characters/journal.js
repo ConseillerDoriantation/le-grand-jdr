@@ -251,8 +251,21 @@ async function _csV3SaveNoteTitle(idx, value) {
   if (note.titre === trimmed) return;
   note.titre = trimmed;
   c.notesList[idx] = note;
+  _syncCharNotes(c);
   try { await updateInCol('characters', c.id, { notesList: c.notesList }); }
   catch (e) { console.warn('[note title]', e); }
+}
+
+// Aligne la liste de notes sur la référence de perso que le rendu relit
+// (getCurrentChar) + l'entrée du cache STATE.characters. Sans ça, un re-render
+// (ouvrir/replier une note) relisait un ancien objet et le titre/contenu
+// « revenait » tant qu'on n'avait pas rechargé la page.
+function _syncCharNotes(c) {
+  if (!c?.id) return;
+  const cur = charSession.getCurrentChar();
+  if (cur && cur !== c && cur.id === c.id) cur.notesList = c.notesList;
+  const inList = (STATE.characters || []).find(x => x.id === c.id);
+  if (inList && inList !== c) inList.notesList = c.notesList;
 }
 
 const _RELATION_PALETTE = {

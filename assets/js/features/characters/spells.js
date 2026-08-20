@@ -2652,7 +2652,8 @@ async function _populateClassicStateSelect(savedId = '', { preserveUnsupported =
     : conditions.filter(condition => _conditionSupportsSpellUsage(condition, usage)
       || (preserveUnsupported && condition.id === savedId));
   select.innerHTML = '<option value="">— Choisir un état —</option>'
-    + filtered.map(condition => `<option value="${_esc(condition.id)}" ${condition.id === savedId ? 'selected' : ''}>${_esc(`${condition.icon || ''} ${condition.label}`)}</option>`).join('');
+    + filtered.map(condition => `<option value="${_esc(condition.id)}" title="${_esc(condition.desc || '')}" ${condition.id === savedId ? 'selected' : ''}>${_esc(`${condition.icon || ''} ${condition.label}`)}</option>`).join('');
+  _updateEtatDesc(select);
   _refreshClassicSpellForm();
 }
 
@@ -2664,6 +2665,7 @@ async function _classicTargetChanged() {
 
 function _classicStateChanged() {
   const id = document.getElementById('s-classic-state')?.value || '';
+  _updateEtatDesc(document.getElementById('s-classic-state'));
   const condition = id ? _conditionsLibCache?.find(item => item.id === id) : null;
   if (condition && document.getElementById('s-classic-target')?.value === 'enemy') {
     const stat = document.getElementById('s-classic-state-stat');
@@ -3634,7 +3636,31 @@ async function _populateConditionSelect(selectId, savedHiddenId, usage) {
     return;
   }
   sel.innerHTML = `<option value="">— Aucun —</option>`
-    + filtered.map(c => `<option value="${c.id}" ${c.id===savedVal?'selected':''}>${c.icon||''} ${c.label}</option>`).join('');
+    + filtered.map(c => `<option value="${c.id}" title="${_esc(c.desc||'')}" ${c.id===savedVal?'selected':''}>${c.icon||''} ${c.label}</option>`).join('');
+  _updateEtatDesc(sel);
+  sel.onchange = () => _updateEtatDesc(sel);
+}
+
+// Affiche sous un <select> d'état la description de l'état choisi → on comprend
+// l'effet sans le deviner depuis le seul intitulé. Boîte créée à la volée après
+// le select, réutilisée aux re-populations, masquée si « — Aucun — ».
+function _updateEtatDesc(sel) {
+  if (!sel) return;
+  let box = sel.nextElementSibling;
+  if (!box || !box.classList?.contains('cs-etat-desc')) {
+    box = document.createElement('div');
+    box.className = 'cs-etat-desc';
+    sel.insertAdjacentElement('afterend', box);
+  }
+  const lib = Array.isArray(_conditionsLibCache) ? _conditionsLibCache : [];
+  const cond = sel.value ? lib.find(c => c.id === sel.value) : null;
+  if (cond?.desc) {
+    box.innerHTML = `<span class="cs-etat-desc-ic">${cond.icon || '✨'}</span><span>${_esc(cond.desc)}</span>`;
+    box.hidden = false;
+  } else {
+    box.hidden = true;
+    box.textContent = '';
+  }
 }
 
 function _populateEnchantEtatSelect()    { return _populateConditionSelect('s-enchant-etat', 's-enchant-etat-saved', 'enchantment'); }

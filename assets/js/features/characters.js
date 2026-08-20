@@ -94,7 +94,7 @@ import {
   renderCharMaitrises,
   addMaitrise, editMaitrise, saveMaitrise, deleteMaitrise,
   previewXpBar, saveXpDirect, addXpDelta,
-  allocStatPoint, addXpFromInput, adjVitalBase, toggleCompteHist,
+  allocStatPoint, addXpFromInput, levelUpChar, adjVitalBase, toggleCompteHist,
   openProfilImageUpload, removeProfilImage,
   STATS_KEYS,
   scheduleNoteAutosave,
@@ -707,6 +707,7 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
           : xpCur.toLocaleString('fr-FR').replace(/ /g,' ')} / ${xpPalier.toLocaleString('fr-FR').replace(/ /g,' ')} XP</span>
         <span>Prochain : Niv. ${(c.niveau||1)+1}</span>
       </div>
+      ${canEdit && xpPalier > 0 && xpCur >= xpPalier ? `<button class="cs-xp-levelup-btn" data-action="_csLevelUp" data-id="${c.id}">⬆️ Niveau ${(c.niveau||1)+1}<span class="cs-xp-levelup-keep">garde ${xpCur - xpPalier} XP</span></button>` : ''}
       ${canEdit?`<div class="xp-add">
         <label for="xp-add-input-${c.id}">Gain d'XP</label>
         <div class="xp-add-control">
@@ -2309,6 +2310,7 @@ registerActions({
   saveCompteField:          (el)    => saveCompteField(el.dataset.compteType, Number(el.dataset.idx), el.dataset.field, el.value),
   _toggleCompteHist:        (btn)   => toggleCompteHist(btn.dataset.compteType, Number(btn.dataset.count)),
   _csAddXp:                 (btn)   => addXpFromInput(btn.dataset.id),
+  _csLevelUp:               (btn)   => levelUpChar(btn.dataset.id),
   _allocStatPoint:          (btn)   => allocStatPoint(btn.dataset.id, btn.dataset.key, Number(btn.dataset.delta)),
   _adjVitalBase:            (btn)   => adjVitalBase(btn.dataset.id, btn.dataset.field, Number(btn.dataset.delta)),
   saveMaitrise:             (btn)   => saveMaitrise(Number(btn.dataset.idx)),

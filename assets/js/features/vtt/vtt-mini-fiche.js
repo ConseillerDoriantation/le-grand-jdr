@@ -631,6 +631,7 @@ function _msXpSection(c, uid, canEdit) {
           title="XP à ajouter — Entrée pour valider">
       </div>
       <div class="vtt-ms-bar-track"><div class="vtt-ms-bar-fill" style="width:${pct}%;background:#f59e0b"></div></div>
+      ${palier > 0 && xp >= palier ? `<button class="vtt-ms-levelup-btn" data-vtt-fn="_vttMsLevelUp" data-vtt-args="${c.id}|${uid}">⬆️ Passer niveau ${niv + 1} · garde ${xp - palier} XP</button>` : ''}
     </div>`;
   }
   return `
