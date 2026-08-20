@@ -241,7 +241,15 @@ export function _vttReadConditionConfigEntry(c, idx) {
   const get = (k) => document.getElementById(`cc-${idx}-${k}`);
   const triVal = (id) => document.querySelector(`[data-cc-tri-id="${id}"]`)?.dataset.ccTriValue || '';
   const flagOn = (id) => document.querySelector(`[data-cc-flag-id="${id}"]`)?.classList.contains('is-on');
-  const eff = {};
+  // Repartir des effets existants pour préserver les clés NON exposées dans ce
+  // formulaire (movementBonus, rangeBonus, critRangeBonus, dmgDealtBonus →
+  // Accéléré / Allonge / Chanceux / Renforcé / Ralenti). Les clés pilotées par
+  // le formulaire ci-dessous sont effacées puis recalculées.
+  const eff = { ...(c.effects || {}) };
+  ['attackBy', 'attackAgainst', 'attackAgainstMelee', 'attackAgainstRanged',
+   'movementMod', 'cantAct', 'cantCastSpells', 'failsStrSaves', 'failsDexSaves',
+   'meleeCritOnHit', 'consumedByAttackAgainst', 'dmgTakenBonus', 'dmgReductionPct']
+    .forEach(k => { delete eff[k]; });
   const atkBy  = triVal(`cc-${idx}-atkBy`);  if (atkBy)  eff.attackBy = atkBy;
   const atkAg  = triVal(`cc-${idx}-atkAg`);  if (atkAg)  eff.attackAgainst = atkAg;
   const atkAgM = triVal(`cc-${idx}-atkAgM`); if (atkAgM) eff.attackAgainstMelee  = atkAgM;

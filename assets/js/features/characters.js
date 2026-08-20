@@ -974,6 +974,10 @@ function renderCharSheet(c, keepTab) {
   const canEdit = STATE.isAdmin || c.uid === STATE.user?.uid;
 
   const v3Tab = _resolveV3Tab(keepTab || charSession.getCurrentCharTab() || 'combat');
+  // Source unique : le perso rendu EST le perso actif et celui que relit
+  // charSession.getCurrentChar(). Sans ça, une édition qui mute STATE.activeChar
+  // et un re-render qui relit getCurrentChar() divergeaient → « faut refresh ».
+  STATE.activeChar = c;
   charSession.set(c, canEdit, v3Tab);
   _currentTopTab = v3Tab;
   setRouteSub('characters', `${c.id}/${v3Tab}`);
@@ -1987,7 +1991,9 @@ async function _persistCharacterBuildState(c) {
   await updateInCol('characters', c.id, payload);
   const idx = (STATE.characters || []).findIndex(x => x.id === c.id);
   if (idx >= 0) STATE.characters[idx] = { ...STATE.characters[idx], ...payload };
-  if (STATE.activeChar?.id === c.id) STATE.activeChar = { ...STATE.activeChar, ...payload };
+  // Muter en place (ne pas remplacer l'objet) pour préserver l'identité de
+  // STATE.activeChar === charSession.getCurrentChar() (cf. renderCharSheet).
+  if (STATE.activeChar?.id === c.id) Object.assign(STATE.activeChar, payload);
 }
 
 function _renderBuildsModalBody(c) {
