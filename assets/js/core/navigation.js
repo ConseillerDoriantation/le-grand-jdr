@@ -136,6 +136,21 @@ const FEATURE_CSS = {
   recettes:   ['recipes.css'],
   account:    ['account.css'],
 };
+// Version des assets pour le CSS lazy. On la lit en priorité sur un <link>
+// eager d'index.html (re-téléchargé à chaque reload → toujours à jour), et NON
+// sur le module version.js : ce module, importé sans cache-buster, peut rester
+// en cache navigateur et faire pointer le CSS lazy vers une ancienne variante
+// ?v=… → le CSS n'était jamais rafraîchi sans vidage manuel du cache. Repli sur
+// ASSET_VERSION si aucun lien eager n'est trouvé.
+let _assetVerCache = null;
+function _assetVersion() {
+  if (_assetVerCache) return _assetVerCache;
+  const link = document.querySelector('link[rel="stylesheet"][href*="/assets/css/"][href*="v="]');
+  const m = link && link.href.match(/[?&]v=([^&]+)/);
+  _assetVerCache = (m && m[1]) || ASSET_VERSION;
+  return _assetVerCache;
+}
+
 const _cssLoaded = new Set();
 function _loadCss(file) {
   if (_cssLoaded.has(file)) return Promise.resolve();
@@ -145,7 +160,7 @@ function _loadCss(file) {
     link.rel = 'stylesheet';
     // Même version que les liens eager d'index.html (cf. core/version.js) :
     // bumper la version invalide TOUT le CSS d'un coup, eager comme lazy.
-    link.href = `./assets/css/${file}?v=${ASSET_VERSION}`;
+    link.href = `./assets/css/${file}?v=${_assetVersion()}`;
     link.onload = () => resolve();
     link.onerror = () => { console.warn('[nav] CSS feature non chargée :', file); resolve(); };
     document.head.appendChild(link);
