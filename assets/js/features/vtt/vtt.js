@@ -10109,6 +10109,22 @@ async function _vttMsSetNiveau(charId, uid, niveau) {
   _renderMiniSheet(uid);
 }
 
+// Level up : consomme un palier d'XP, monte d'un niveau, conserve l'excédent.
+async function _vttMsLevelUp(charId, uid) {
+  if (!_msCanEdit(uid)) return;
+  const c = VS.characters[charId]; if (!c) return;
+  const niv    = parseInt(c.niveau) || 1;
+  const palier = calcPalier(niv);
+  const xp     = parseInt(c.exp) || 0;
+  if (palier <= 0 || xp < palier) return;
+  const newNiv = niv + 1;
+  const newXp  = xp - palier;                 // excédent reporté sur le niveau suivant
+  await updateDoc(_chrRef(charId), { niveau: newNiv, exp: newXp }).catch(() => {});
+  c.niveau = newNiv;
+  c.exp    = newXp;
+  _renderMiniSheet(uid);
+}
+
 async function _vttMsSetHp(charId, uid, hp) {
   if (!_msCanEdit(uid)) return;
   const c = VS.characters[charId]; if (!c) return;
@@ -11452,6 +11468,7 @@ export const VTT_ACTIONS = {
   _vttMsSaveNote,
   _vttMsSendPicker,
   _vttMsSetNiveau,
+  _vttMsLevelUp,
   _vttMsSetHp,
   _vttMsSetPm,
   _vttMsSlotChange,

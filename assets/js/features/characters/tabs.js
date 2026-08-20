@@ -356,6 +356,12 @@ export async function saveNote(idx, { silent = false } = {}) {
   const html = getQuillHtml(`note-area-${idx}`);
   if (!c.notesList?.[idx]) return;
   c.notesList[idx].contenu = html;
+  // Aligne la référence relue par le rendu (getCurrentChar) + le cache, sinon un
+  // re-render (replier la note) relit un ancien objet et le contenu « revient ».
+  const cur = charSession.getCurrentChar();
+  if (cur && cur !== c && cur.id === c.id) cur.notesList = c.notesList;
+  const inList = (STATE.characters || []).find(x => x.id === c.id);
+  if (inList && inList !== c) inList.notesList = c.notesList;
   if (await trySave('characters', c.id, {notesList: c.notesList})) {
     markQuillSaved(`note-area-${idx}`);
     if (!silent) showNotif('Note enregistrée !','success');
@@ -779,6 +785,24 @@ export async function allocStatPoint(charId, key, delta) {
   charSession.renderSheet(c, charSession.getCurrentCharTab());
 }
 
+
+// Passe au niveau supérieur en consommant un palier d'XP ; l'excédent est
+// conservé pour le niveau d'après. Répétable si l'excédent dépasse encore.
+export async function levelUpChar(charId) {
+  const c = getCharacterById(charId);
+  if (!c) return;
+  const niv    = parseInt(c.niveau) || 1;
+  const palier = calcPalier(niv);
+  const xp     = parseInt(c.exp) || 0;
+  if (palier <= 0 || xp < palier) return;
+  const newNiv = niv + 1;
+  const newXp  = xp - palier;                 // excédent reporté sur le niveau suivant
+  await updateInCol('characters', charId, { niveau: newNiv, exp: newXp });
+  c.niveau = newNiv;
+  c.exp    = newXp;
+  showNotif(`🎉 Niveau ${newNiv} atteint !`, 'success');
+  charSession.renderSheet(c, charSession.getCurrentCharTab());
+}
 
 export async function addXpFromInput(charId) {
   const input = document.getElementById(`cs-xp-delta-${charId}`);
