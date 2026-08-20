@@ -508,11 +508,13 @@ export function subscribeDoc(col, id, callback) {
 }
 
 // ── Gestionnaire d'erreur centralisé ───────────
-function _handleFirestoreError(e, ctx) {
+// silent=true : lecture optionnelle → log seulement, pas de notif « Accès refusé »
+// (ex. contenu MJ chargé au mieux dont l'échec ne casse rien).
+function _handleFirestoreError(e, ctx, { silent = false } = {}) {
   console.error(`[firestore] ${ctx}`, e);
 
   const notify = window.showNotif;
-  if (!notify) return;
+  if (!notify || silent) return;
 
   const code = e?.code || '';
 
@@ -528,7 +530,7 @@ function _handleFirestoreError(e, ctx) {
 }
 
 // ── Lectures ───────────────────────────────────
-export async function loadCollection(col) {
+export async function loadCollection(col, { silent = false } = {}) {
   const path = _colPath(col);
 
   // 1. Live session — 0 lecture facturée
@@ -558,7 +560,7 @@ export async function loadCollection(col) {
       _cacheSet(key, data);
       return data;
     } catch (e) {
-      _handleFirestoreError(e, `loadCollection(${path})`);
+      _handleFirestoreError(e, `loadCollection(${path})`, { silent });
       return [];
     } finally {
       _inflight.delete(key);

@@ -230,42 +230,50 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 14px;
   padding: 18px;
-  border: 2px dashed rgba(127,176,255,0.34);
+  color: #7fb0ff;
+  border: 2px dashed rgba(127,176,255,0.32);
   border-radius: var(--r-lg);
   background:
-    linear-gradient(rgba(127,176,255,0.07) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(127,176,255,0.07) 1px, transparent 1px),
-    radial-gradient(circle at 50% 40%, rgba(79,140,255,0.14), transparent 42%),
+    radial-gradient(circle at 50% 38%, rgba(79,140,255,0.12), transparent 55%),
     rgba(8,14,24,0.38);
-  background-size: 28px 28px, 28px 28px, auto, auto;
-  color: #9cc3ff;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s, color 0.15s, transform 0.15s;
 }
 .bs-room-add-card:hover {
-  transform: translateY(-1px);
+  transform: translateY(-2px);
   border-color: rgba(127,176,255,0.72);
-  color: var(--text);
+  color: #cfe1ff;
   background:
-    linear-gradient(rgba(127,176,255,0.11) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(127,176,255,0.11) 1px, transparent 1px),
-    radial-gradient(circle at 50% 40%, rgba(79,140,255,0.24), transparent 45%),
-    rgba(8,14,24,0.58);
+    radial-gradient(circle at 50% 38%, rgba(79,140,255,0.22), transparent 58%),
+    rgba(8,14,24,0.54);
 }
+/* Le « + » est dessiné en CSS (deux barres) → parfaitement centré, net à toute taille. */
 .bs-room-add-plus {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 74px;
-  height: 74px;
-  border-radius: 24px;
-  background: rgba(79,140,255,0.12);
-  border: 1px solid rgba(127,176,255,0.26);
-  font-size: 4.2rem;
-  font-weight: 300;
-  line-height: 1;
+  position: relative;
+  width: 66px;
+  height: 66px;
+  border-radius: 50%;
+  background: color-mix(in oklab, currentColor 12%, transparent);
+  border: 1px solid color-mix(in oklab, currentColor 30%, transparent);
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+.bs-room-add-plus::before,
+.bs-room-add-plus::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  background: currentColor;
+  border-radius: 2px;
+}
+.bs-room-add-plus::before { width: 28px; height: 3px; transform: translate(-50%, -50%); }
+.bs-room-add-plus::after  { width: 3px; height: 28px; transform: translate(-50%, -50%); }
+.bs-room-add-card:hover .bs-room-add-plus {
+  background: color-mix(in oklab, currentColor 20%, transparent);
+  border-color: color-mix(in oklab, currentColor 55%, transparent);
+  transform: scale(1.06);
 }
 .bs-room-add-label {
   color: var(--text-soft);
@@ -456,9 +464,7 @@
 [data-theme="light"] .bs-room { background: var(--bg-elevated); box-shadow: var(--shadow-card); }
 [data-theme="light"] .bs-room-add-card {
   background:
-    linear-gradient(rgba(37,99,235,0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(37,99,235,0.08) 1px, transparent 1px),
-    radial-gradient(circle at 50% 40%, rgba(37,99,235,0.12), transparent 42%),
+    radial-gradient(circle at 50% 38%, rgba(37,99,235,0.10), transparent 55%),
     var(--bg-elevated);
   border-color: rgba(37,99,235,0.28);
   color: #2563eb;
@@ -466,6 +472,10 @@
 }
 [data-theme="light"] .bs-room-add-card:hover {
   border-color: rgba(37,99,235,0.58);
+  color: #1d4ed8;
+  background:
+    radial-gradient(circle at 50% 38%, rgba(37,99,235,0.18), transparent 58%),
+    var(--bg-elevated);
 }
 [data-theme="light"] .bs-room-prod { background: var(--bg-card); }
 [data-theme="light"] .bs-room-building { background: var(--bg-card); }
@@ -2173,7 +2183,8 @@
 
 /* ─── Rework 2026 : console de pilotage ───────────────────────────── */
 .bs-root-v2 {
-  max-width: min(1760px, calc(100vw - 32px));
+  /* Pleine largeur comme le reste de l'app (cadre global responsive.css). */
+  max-width: none;
   gap: 14px;
   padding-top: 14px;
 }
@@ -2214,14 +2225,174 @@
 
 .bs-root-v2 .bs-hero-actions {
   justify-content: flex-end;
-  max-width: 620px;
+  gap: 7px;
+  max-width: 640px;
 }
 
+/* Boutons d'en-tête — pills nettes, hover qui se soulève, or mis en avant */
 .bs-root-v2 .bs-hero-actions .btn {
-  min-height: 32px;
-  border-radius: 8px;
-  font-size: .74rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 7px 13px;
+  border-radius: 9px;
+  border: 1px solid rgba(124,160,220,.22);
+  background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.015));
+  color: var(--text, #e8ecf4);
+  font-size: .76rem;
+  font-weight: 600;
   white-space: nowrap;
+  box-shadow: 0 1px 0 rgba(255,255,255,.04) inset;
+  transition: transform .12s ease, border-color .12s ease, background .12s ease, box-shadow .12s ease;
+}
+.bs-root-v2 .bs-hero-actions .btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(126,176,255,.55);
+  background: linear-gradient(180deg, rgba(126,176,255,.16), rgba(126,176,255,.05));
+  box-shadow: 0 5px 16px rgba(0,0,0,.35);
+}
+.bs-root-v2 .bs-hero-actions .btn-gold {
+  border: none;
+  padding: 7px 16px;
+  background: linear-gradient(135deg, #f2c65a, #c9922b);
+  color: #2a1e00;
+  font-weight: 800;
+  box-shadow: 0 4px 16px rgba(232,184,75,.28);
+}
+.bs-root-v2 .bs-hero-actions .btn-gold:hover {
+  transform: translateY(-1px);
+  border: none;
+  background: linear-gradient(135deg, #f8d066, #d69c30);
+  box-shadow: 0 7px 22px rgba(232,184,75,.44);
+}
+
+/* ─── QUICK-NAV (barre d'ancres collée) ──────────────────────────── */
+.bs-quicknav {
+  position: sticky;
+  top: 8px;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(126,176,255,.24);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(24,36,56,.96), rgba(15,23,38,.96));
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+}
+.bs-qn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 13px;
+  border-radius: 8px;
+  border: 1px solid rgba(126,176,255,.16);
+  background: rgba(255,255,255,.035);
+  color: #c2d2ec;
+  font-size: .78rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background .12s ease, color .12s ease, border-color .12s ease, transform .12s ease;
+}
+.bs-qn:hover {
+  background: rgba(126,176,255,.12);
+  border-color: rgba(126,176,255,.4);
+  color: #fff;
+  transform: translateY(-1px);
+}
+.bs-qn.on {
+  color: #08111f;
+  background: linear-gradient(135deg, #9cc4ff, #6ea2f5);
+  border-color: transparent;
+  box-shadow: 0 3px 10px rgba(110,162,245,.35);
+}
+
+/* Ancre : compense la hauteur de la quick-nav collée */
+.bs-zone { scroll-margin-top: 66px; }
+
+/* ─── ZONE ÉTAT — tuiles auto-fit qui remplissent toute la largeur ─── */
+.bs-etat { gap: 12px; }
+
+/* KPI + trésor : une seule grille qui se remplit à toute largeur d'écran. */
+.bs-etat-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+.bs-etat-stats .bs-gauges { display: contents; }      /* le gauge devient une tuile */
+.bs-etat-stats .bs-gauge { height: 100%; grid-column: span 2; }
+@media (max-width: 540px) {
+  .bs-etat-stats .bs-gauge { grid-column: auto; }
+}
+
+/* Prochaine période : bandeau pleine largeur dont le contenu se répartit
+   en tuiles auto-fit → jamais de grand vide sur les écrans larges. */
+.bs-etat-next { margin-top: 2px; }
+.bs-ops-flow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  align-items: stretch;
+  margin-top: 10px;
+}
+.bs-ops-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(124,160,220,.12);
+  border-radius: 10px;
+  background: rgba(8,14,24,.5);
+}
+.bs-ops-stat span {
+  font-size: .64rem;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text-dim, #9db3d6);
+}
+.bs-ops-stat strong { font-size: 1.35rem; line-height: 1; color: #fff; }
+.bs-ops-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 10px 12px;
+  border: 1px solid rgba(124,160,220,.12);
+  border-radius: 10px;
+  background: rgba(8,14,24,.5);
+  min-width: 0;
+}
+.bs-ops-cell .bs-mini-list,
+.bs-ops-cell .bs-build-list,
+.bs-ops-cell .bs-side-empty { margin: 0; }
+[data-theme="light"] .bs-ops-stat,
+[data-theme="light"] .bs-ops-cell {
+  background: var(--bg-card);
+  border-color: rgba(37,99,235,.14);
+}
+[data-theme="light"] .bs-ops-stat strong { color: #0f172a; }
+
+/* ─── MUR DES ANNONCES (pleine largeur : compositeur + grille) ────── */
+.bs-annonce-wall {
+  display: grid;
+  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.bs-annonce-wall .bs-annonce-compose {
+  position: sticky;
+  top: 64px;
+  margin: 0;
+}
+.bs-annonce-wall .bs-annonce-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  margin-top: 0;
 }
 
 .bs-overview {
@@ -2511,6 +2682,46 @@
 .bs-side-stack .bs-annonce-type {
   padding: 3px 8px;
   font-size: .68rem;
+}
+
+/* Thème clair — quick-nav & boutons d'en-tête */
+[data-theme="light"] .bs-quicknav {
+  background: var(--bg-elevated);
+  border-color: rgba(37,99,235,.16);
+  box-shadow: var(--shadow-card);
+}
+[data-theme="light"] .bs-qn { color: #475569; }
+[data-theme="light"] .bs-qn:hover { background: rgba(37,99,235,.06); color: #1e293b; }
+[data-theme="light"] .bs-qn.on { color: #1d4ed8; background: rgba(37,99,235,.12); border-color: rgba(37,99,235,.4); }
+[data-theme="light"] .bs-root-v2 .bs-hero-actions .btn {
+  color: #334155;
+  border-color: rgba(37,99,235,.22);
+  background: #fff;
+  box-shadow: var(--shadow-card);
+}
+[data-theme="light"] .bs-root-v2 .bs-hero-actions .btn:hover {
+  border-color: rgba(37,99,235,.5);
+  background: rgba(37,99,235,.06);
+}
+[data-theme="light"] .bs-root-v2 .bs-hero-actions .btn-gold {
+  color: #2a1e00;
+  background: linear-gradient(135deg, #f2c65a, #c9922b);
+}
+
+/* Zones fluides : passage en 1 colonne quand c'est trop serré */
+@media (max-width: 900px) {
+  .bs-etat-row { grid-template-columns: 1fr; }
+  .bs-annonce-wall { grid-template-columns: 1fr; }
+  .bs-annonce-wall .bs-annonce-compose { position: static; }
+}
+@media (max-width: 640px) {
+  .bs-quicknav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .bs-quicknav::-webkit-scrollbar { display: none; }
+  .bs-qn { flex: 0 0 auto; }
 }
 
 @media (max-width: 1320px) {

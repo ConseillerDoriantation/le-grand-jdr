@@ -8,9 +8,13 @@
 import { loadCollection } from '../../../data/firestore.js';
 
 export async function listMissionsWithPlaces() {
+  // Lectures optionnelles (contenu MJ, best-effort) : en cas de refus de
+  // permission, on log seulement — pas de notif « Accès refusé », la carte
+  // reste fonctionnelle sans les liens mission→lieu. Cf. règle Firestore
+  // story_histories : `allow read` (list inclus), pas seulement `get`.
   const [missions, histories] = await Promise.all([
-    loadCollection('story').catch(() => []),
-    loadCollection('story_histories').catch(() => []),
+    loadCollection('story', { silent: true }).catch(() => []),
+    loadCollection('story_histories', { silent: true }).catch(() => []),
   ]);
   const contentById = new Map((histories || []).map(h => [h.id, h.content || '']));
   return (missions || [])

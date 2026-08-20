@@ -2227,18 +2227,16 @@ function _renderBastionOverview(b) {
     { icon: '👥', label: 'Personnel', value: `${personnel.length}`, unit: `${salaries} or/période`, tone: '#22c38e' },
     { icon: '🪙', label: 'Production', value: `+${prod.or}`, unit: `${prod.items.length} objet${prod.items.length > 1 ? 's' : ''}`, tone: '#b47fff' },
   ];
-  return `
-    <section class="bs-overview" aria-label="Résumé du Bastion">
-      ${cards.map(c => `
-        <div class="bs-overview-card" style="--tone:${c.tone}">
-          <span class="bs-overview-icon">${_esc(c.icon)}</span>
-          <div>
-            <span>${_esc(c.label)}</span>
-            <strong>${_esc(c.value)}</strong>
-            <small>${_esc(c.unit)}</small>
-          </div>
-        </div>`).join('')}
-    </section>`;
+  // Cartes seules (sans wrapper) : placées comme tuiles directes de .bs-etat-stats.
+  return cards.map(c => `
+    <div class="bs-overview-card" style="--tone:${c.tone}">
+      <span class="bs-overview-icon">${_esc(c.icon)}</span>
+      <div>
+        <span>${_esc(c.label)}</span>
+        <strong>${_esc(c.value)}</strong>
+        <small>${_esc(c.unit)}</small>
+      </div>
+    </div>`).join('');
 }
 
 function _renderOperationsPanel(b) {
@@ -2250,7 +2248,7 @@ function _renderOperationsPanel(b) {
   const itemPreview = prod.items.slice(0, 4);
 
   return `
-    <section class="bs-side-panel bs-side-panel--ops">
+    <section class="bs-side-panel bs-side-panel--ops bs-etat-next">
       <div class="bs-side-panel-hd">
         <span>🧭</span>
         <div>
@@ -2258,24 +2256,28 @@ function _renderOperationsPanel(b) {
           <strong>Prochaine période</strong>
         </div>
       </div>
-      <div class="bs-next-ledger">
-        <div><span>Or produit</span><strong>+${prod.or}</strong></div>
-        <div><span>Objets produits</span><strong>${prod.items.length}</strong></div>
-        <div><span>Chantiers</span><strong>${building.length}</strong></div>
+      <div class="bs-ops-flow">
+        <div class="bs-ops-stat"><span>Or produit</span><strong>+${prod.or}</strong></div>
+        <div class="bs-ops-stat"><span>Objets produits</span><strong>${prod.items.length}</strong></div>
+        <div class="bs-ops-stat"><span>Chantiers</span><strong>${building.length}</strong></div>
+        <div class="bs-ops-cell">
+          ${itemPreview.length ? `
+            <div class="bs-mini-list">
+              ${itemPreview.map(item => `<div><b>${_esc(item.emoji || '📦')}</b><span>${_esc(item.nom)}${item.q > 1 ? ` ×${item.q}` : ''}</span><small>${_esc(item.room)}</small></div>`).join('')}
+              ${prod.items.length > itemPreview.length ? `<em>+${prod.items.length - itemPreview.length} autre${prod.items.length - itemPreview.length > 1 ? 's' : ''}</em>` : ''}
+            </div>` : `<p class="bs-side-empty">Aucune production d'objet active.</p>`}
+        </div>
+        <div class="bs-ops-cell">
+          ${building.length ? `
+            <div class="bs-build-list">
+              ${building.map(({ def, state }) => `
+                <div class="bs-build-line" style="--c:${def.color}">
+                  <span>${_esc(def.emoji)}</span>
+                  <div><strong>${_esc(def.nom)}</strong><small>Niv. ${state.targetNiveau || '?'} · ${state.weeksLeftToBuild || 0} période(s)</small></div>
+                </div>`).join('')}
+            </div>` : `<p class="bs-side-empty">Aucun chantier en cours.</p>`}
+        </div>
       </div>
-      ${itemPreview.length ? `
-        <div class="bs-mini-list">
-          ${itemPreview.map(item => `<div><b>${_esc(item.emoji || '📦')}</b><span>${_esc(item.nom)}${item.q > 1 ? ` ×${item.q}` : ''}</span><small>${_esc(item.room)}</small></div>`).join('')}
-          ${prod.items.length > itemPreview.length ? `<em>+${prod.items.length - itemPreview.length} autre${prod.items.length - itemPreview.length > 1 ? 's' : ''}</em>` : ''}
-        </div>` : `<p class="bs-side-empty">Aucune production d'objet active.</p>`}
-      ${building.length ? `
-        <div class="bs-build-list">
-          ${building.map(({ def, state }) => `
-            <div class="bs-build-line" style="--c:${def.color}">
-              <span>${_esc(def.emoji)}</span>
-              <div><strong>${_esc(def.nom)}</strong><small>Niv. ${state.targetNiveau || '?'} · ${state.weeksLeftToBuild || 0} période(s)</small></div>
-            </div>`).join('')}
-        </div>` : `<p class="bs-side-empty">Aucun chantier en cours.</p>`}
     </section>`;
 }
 
@@ -2401,7 +2403,7 @@ function _renderRoomCard(def, b) {
 function _renderAddRoomCard() {
   return `
     <button type="button" class="bs-room-add-card" data-action="_bastionAddCustomRoom" title="Ajouter une salle / activité" aria-label="Ajouter une salle ou activité au Bastion">
-      <span class="bs-room-add-plus">+</span>
+      <span class="bs-room-add-plus" aria-hidden="true"></span>
       <span class="bs-room-add-label">Nouvelle salle</span>
     </button>`;
 }
@@ -2804,18 +2806,20 @@ function _renderAnnonces(b) {
         <h2 class="bs-section-title">📌 Mur des annonces <span class="bs-section-count">${annonces.length}</span></h2>
       </div>
       <p class="bs-section-sub">Laisse un message, une quête, une offre ou une demande aux autres membres du Bastion.</p>
-      <div class="bs-annonce-compose">
-        <div class="bs-annonce-types">${typeBtns}</div>
-        <input type="hidden" id="bs-annonce-type" value="message">
-        <textarea id="bs-annonce-text" class="bs-annonce-input" rows="2" maxlength="500"
-          placeholder="Écris ton annonce…"></textarea>
-        <div class="bs-annonce-compose-foot">
-          <span class="bs-annonce-as">Publié en tant que <strong>${_esc(_annonceAuthor())}</strong></span>
-          <button class="btn btn-gold btn-sm" data-action="_bastionPostAnnonce">📌 Publier</button>
+      <div class="bs-annonce-wall">
+        <div class="bs-annonce-compose">
+          <div class="bs-annonce-types">${typeBtns}</div>
+          <input type="hidden" id="bs-annonce-type" value="message">
+          <textarea id="bs-annonce-text" class="bs-annonce-input" rows="3" maxlength="500"
+            placeholder="Écris ton annonce…"></textarea>
+          <div class="bs-annonce-compose-foot">
+            <span class="bs-annonce-as">en tant que <strong>${_esc(_annonceAuthor())}</strong></span>
+            <button class="btn btn-gold btn-sm" data-action="_bastionPostAnnonce">📌 Publier</button>
+          </div>
         </div>
-      </div>
-      <div class="bs-annonce-list">
-        ${cards || '<div class="bs-annonce-empty">Aucune annonce pour l\'instant. Sois le premier à écrire sur le mur !</div>'}
+        <div class="bs-annonce-list">
+          ${cards || '<div class="bs-annonce-empty">Aucune annonce pour l\'instant. Sois le premier à écrire sur le mur !</div>'}
+        </div>
       </div>
     </section>`;
 }
@@ -2861,6 +2865,68 @@ async function _bastionDeleteAnnonce(id) {
   await tryDoc('bastionAnnonces', 'main', { items: _annonces.filter(x => x.id !== id) });
 }
 
+// ── Navigation rapide (ancres collées) + scroll-spy ──────────────────────────
+const _BS_NAV = [
+  ['bs-z-etat',      '🏛', 'État'],
+  ['bs-z-salles',    '🧱', 'Salles'],
+  ['bs-z-coffre',    '📦', 'Coffre'],
+  ['bs-z-quetes',    '📋', 'Quêtes'],
+  ['bs-z-annonces',  '📌', 'Annonces'],
+  ['bs-z-chronique', '📜', 'Chronique'],
+];
+
+function _renderQuickNav() {
+  return `<nav class="bs-quicknav" aria-label="Sections du Bastion">
+    ${_BS_NAV.map(([id, ic, lbl]) =>
+      `<a href="#${id}" class="bs-qn" data-target="${id}">${ic} <span>${lbl}</span></a>`).join('')}
+  </nav>`;
+}
+
+// Enveloppe une section rendue dans une ancre nommée (rien si la section est vide).
+function _wrapZone(id, html) {
+  return html ? `<div id="${id}" class="bs-zone">${html}</div>` : '';
+}
+
+// Met en surbrillance le lien de la section actuellement en haut du viewport.
+function _bsNavSpy() {
+  const links = document.querySelectorAll('.bs-qn');
+  if (!links.length) return;
+  let cur = null;
+  links.forEach(a => {
+    const el = document.getElementById(a.dataset.target);
+    if (el && el.getBoundingClientRect().top - 90 <= 1) cur = a.dataset.target;
+  });
+  links.forEach(a => a.classList.toggle('on', a.dataset.target === cur));
+}
+
+let _bsNavWired = false;
+function _initQuickNav() {
+  // Masque les liens dont la section est absente (quêtes/chronique vides…).
+  document.querySelectorAll('.bs-qn').forEach(a => {
+    a.style.display = document.getElementById(a.dataset.target) ? '' : 'none';
+  });
+  if (!_bsNavWired) {
+    _bsNavWired = true;               // 1 seul listener pour toute la session
+    const sc = document.getElementById('main-content');
+    (sc || window).addEventListener('scroll', _bsNavSpy, { passive: true });
+    if (sc) window.addEventListener('scroll', _bsNavSpy, { passive: true });
+  }
+  _bsNavSpy();
+}
+
+// Bloc « État » : KPI + trésor commun + prochaine période réunis.
+function _renderEtatZone(b) {
+  return `
+    <section class="bs-section bs-etat">
+      <div class="bs-section-hd"><h2 class="bs-section-title">🏛 État du Bastion</h2></div>
+      <div class="bs-etat-stats">
+        ${_renderBastionOverview(b)}
+        ${_renderGauges(b)}
+      </div>
+      ${_renderOperationsPanel(b)}
+    </section>`;
+}
+
 function _renderPage() {
   const content = document.getElementById('main-content');
   if (!content) return;
@@ -2868,21 +2934,15 @@ function _renderPage() {
   content.innerHTML = `
     <div class="bs-root bs-root-v2">
       ${_renderHeader(b)}
-      ${_renderBastionOverview(b)}
-      <div class="bs-layout">
-        <main class="bs-main-stack">
-          ${_renderRooms(b)}
-          ${_renderCoffre(b)}
-        </main>
-        <aside class="bs-side-stack">
-          ${_renderGauges(b)}
-          ${_renderOperationsPanel(b)}
-          ${_renderBastionQuests(b)}
-          ${_renderAnnonces(b)}
-          ${_renderHistorique(b)}
-        </aside>
-      </div>
+      ${_renderQuickNav()}
+      ${_wrapZone('bs-z-etat',      _renderEtatZone(b))}
+      ${_wrapZone('bs-z-salles',    _renderRooms(b))}
+      ${_wrapZone('bs-z-coffre',    _renderCoffre(b))}
+      ${_wrapZone('bs-z-quetes',    _renderBastionQuests(b))}
+      ${_wrapZone('bs-z-annonces',  _renderAnnonces(b))}
+      ${_wrapZone('bs-z-chronique', _renderHistorique(b))}
     </div>`;
+  _initQuickNav();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
