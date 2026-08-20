@@ -962,7 +962,7 @@
 }
 .stats-spotlight-awards .stats-trophies--all {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(225px, 1fr));
   gap: .42rem;
 }
 .stats-content-grid {
@@ -1667,13 +1667,15 @@
 .stats-trophy-lbl {
   font-size: .66rem; font-weight: 800; letter-spacing: .03em;
   color: var(--text-soft, #c8d4e8); text-transform: uppercase;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  /* Intitulé complet, sur 2 lignes si besoin — jamais tronqué en « … ». */
+  line-height: 1.18;
 }
 .stats-trophy-who {
   display: flex; align-items: center; gap: .35rem; min-width: 0;
   color: var(--text); font-size: .82rem; font-weight: 600;
 }
-.stats-trophy-who > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Nom du personnage affiché en entier (retour à la ligne plutôt que « … »). */
+.stats-trophy-who > span { min-width: 0; overflow-wrap: anywhere; }
 .stats-trophy-av { flex-shrink: 0; }
 .stats-trophy-val {
   flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; line-height: 1;
