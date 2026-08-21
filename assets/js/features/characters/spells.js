@@ -4205,7 +4205,15 @@ function _editLibInv(idx) {
   _invImageEdit = _libInvCurrent()?.image || '';
   openModal('🐾 Invocation', _renderLibInvEditorBody());
 }
-function _refreshLibInvEditor() { updateModalContent('🐾 Invocation', _renderLibInvEditorBody()); }
+function _refreshLibInvEditor() {
+  // Re-synchronise l'image depuis l'invocation persistée avant de re-render.
+  // L'éditeur de sort (actions d'invocation) partage la variable _invImageEdit
+  // et la remet à '' à son ouverture → sans ce resync, l'image « saute » au
+  // retour et une sauvegarde ultérieure l'effacerait. iv.image est déjà à jour
+  // (capturée par _libInvAddAction/_libInvEditAction avant d'ouvrir le sort).
+  _invImageEdit = _libInvCurrent()?.image || '';
+  updateModalContent('🐾 Invocation', _renderLibInvEditorBody());
+}
 function _invCombatStatOptions(selected = 'force') {
   return [
     ['none', 'Aucun modificateur'],
