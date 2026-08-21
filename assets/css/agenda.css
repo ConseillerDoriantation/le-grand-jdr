@@ -60,6 +60,36 @@
   flex-wrap: wrap;
 }
 .ag-section-actions { display: flex; gap: 6px; }
+.ag-calendar-actions {
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.ag-calendar-actions .ag-primary-action {
+  min-height: 34px;
+  padding: 6px 11px;
+  font-size: .76rem;
+}
+.ag-calendar-actions #ag-legacy-cleanup:empty {
+  display: none;
+}
+.ag-save-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  color: var(--text-dim);
+  font-size: .68rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.ag-save-status:empty { display: none; }
+.ag-save-status span { display: inline-block; }
+.ag-save-status.is-pending { color: var(--gold, #e8b84b); }
+.ag-save-status.is-saving span { animation: ag-save-spin .8s linear infinite; }
+.ag-save-status.is-saved { color: #5fe5b1; }
+.ag-save-status.is-error { color: var(--crimson, #ff5a7e); }
+@keyframes ag-save-spin { to { transform: rotate(360deg); } }
 .ag-section-title {
   margin: 0;
   font-family: var(--font-display);
@@ -81,6 +111,13 @@
   font-size: 0.7rem;
   vertical-align: middle;
   margin: 0 1px;
+}
+.ag-source-legend i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--gold, #e8b84b);
+  box-shadow: 0 0 0 2px rgba(232,184,75,.16);
 }
 
 /* ─── Couleurs d'état (réutilisées partout) ───────────────────────── */
@@ -299,14 +336,21 @@
 }
 /* Créneaux recommandés — créneau vedette + portraits joueurs */
 .ag-sg-legend {
+  grid-column: 1 / -1;
   display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  width: fit-content;
   margin-bottom: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(255,255,255,.025);
   font-size: 0.68rem;
   font-weight: 700;
 }
-.ag-sg-lg { display: inline-flex; align-items: center; gap: 5px; color: var(--text-dim); }
+.ag-sg-lg { display: inline-flex; align-items: center; gap: 6px; min-width: 92px; color: var(--text-dim); }
 .ag-sg-lg::before {
   content: "";
   width: 10px; height: 10px; border-radius: 50%;
@@ -385,6 +429,7 @@
 .ag-sg-heroslot { font-size: 0.8rem; color: var(--text-dim); font-weight: 600; }
 .ag-sg-heroscore { font-size: 0.8rem; font-weight: 800; color: var(--text-dim); }
 .ag-sg-heroscore i { font-style: normal; color: #f4d076; font-weight: 700; }
+.ag-sg-heroscore small { font-size: .68rem; font-weight: 650; color: var(--text-dim); }
 /* Pastille de statut (3 états, couleurs distinctes) */
 .ag-sg-status {
   margin-left: auto;
@@ -698,6 +743,7 @@
   border-radius: var(--r-lg);
   padding: 12px;
 }
+.ag-cal-mobile { display: none; }
 /* Navigation par mois (partagée calendrier perso + vue groupe) */
 .ag-monthnav {
   display: flex;
@@ -822,6 +868,11 @@
 }
 .ag-cal-slot:hover { filter: brightness(1.15); transform: scale(1.04); }
 .ag-cal-slot:active { transform: scale(0.98); }
+.ag-cal-slot:disabled {
+  cursor: default;
+  filter: none;
+  transform: none;
+}
 .ag-slot--explicit::after {
   content: '';
   position: absolute;
@@ -889,6 +940,11 @@
   font-size: 0.78rem; font-weight: 600;
   color: var(--text-muted);
   margin-right: 4px;
+}
+.ag-rec-reset {
+  margin-left: auto;
+  color: var(--crimson, #ff5a7e) !important;
+  border-color: rgba(255,90,126,.28) !important;
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1581,6 +1637,10 @@
   .ag-section-hd {
     align-items: flex-start;
   }
+  .ag-calendar-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
   .ag-cal-header,
   .ag-cal-week {
     grid-template-columns: 38px repeat(7, minmax(34px, 1fr));
@@ -1606,6 +1666,124 @@
   .ag-session-actions,
   .ag-session-readiness {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .ag-calendar-panel {
+    padding-inline: 10px;
+  }
+  .ag-state-strip {
+    margin-top: 8px;
+  }
+  .ag-source-legend {
+    flex-basis: 100%;
+  }
+  .ag-calendar {
+    padding: 8px;
+  }
+  .ag-cal-desktop {
+    display: none;
+  }
+  .ag-cal-mobile {
+    display: block;
+  }
+  .ag-weeknav {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) 30px auto;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 9px;
+  }
+  .ag-weeknav-title {
+    color: var(--text);
+    font-family: var(--font-display);
+    font-size: .86rem;
+    font-weight: 750;
+    text-align: center;
+    text-transform: capitalize;
+  }
+  .ag-weeknav .ag-monthnav-today {
+    margin-left: 2px;
+    padding-inline: 7px;
+    white-space: nowrap;
+  }
+  .ag-cal-mobile-days {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .ag-cal-mobile-day {
+    display: grid;
+    grid-template-columns: minmax(84px, .8fr) minmax(0, 2.2fr);
+    align-items: stretch;
+    gap: 7px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--bg-elevated);
+  }
+  .ag-cal-mobile-day.is-today {
+    border-color: var(--gold, #e8b84b);
+    box-shadow: 0 0 0 1px var(--gold-glow, rgba(232,184,75,.12)) inset;
+  }
+  .ag-cal-mobile-day.is-past {
+    opacity: .5;
+  }
+  .ag-cal-mobile-date {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding-left: 3px;
+    text-transform: capitalize;
+  }
+  .ag-cal-mobile-date strong {
+    overflow: hidden;
+    color: var(--text);
+    font-size: .72rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ag-cal-mobile-date span {
+    color: var(--text-dim);
+    font-size: .61rem;
+  }
+  .ag-cal-mobile-day.is-today .ag-cal-mobile-date strong,
+  .ag-cal-mobile-day.is-today .ag-cal-mobile-date span {
+    color: var(--gold, #e8b84b);
+  }
+  .ag-cal-mobile-slots {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+  }
+  .ag-cal-mobile-slot {
+    min-width: 0;
+    min-height: 42px;
+    flex-direction: column;
+    gap: 1px;
+    padding: 3px;
+  }
+  .ag-cal-mobile-slot-name {
+    max-width: 100%;
+    overflow: hidden;
+    font-size: .58rem;
+    font-weight: 750;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ag-cal-mobile-slot-state {
+    font-size: .76rem;
+    line-height: 1;
+  }
+  .ag-calendar-actions .ag-save-status:not(:empty) {
+    flex-basis: 100%;
+  }
+  .ag-rec-reset {
+    margin-left: 0;
   }
 }
 

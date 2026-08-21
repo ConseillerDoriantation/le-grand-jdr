@@ -23,6 +23,7 @@ import { navigate } from '../core/navigation.js';
 import PAGES, { requestStatsScope } from './pages.js';
 import { registerActions } from '../core/actions.js';
 import { characterAvatarHtml } from '../shared/portraits.js';
+import { mergeRecurringPreset, suggestionPresentation, weekDatesFrom } from './agenda-utils.js';
 
 // ── Constantes ────────────────────────────────────────────────────────────
 const SLOTS = [
@@ -52,8 +53,11 @@ let _ag = {
   groupView:  false,            // toggle vue groupe
   groupFilter:null,             // null = tous · sinon id de quête (= groupe de joueurs)
   saveTimer:  null,             // debounce sauvegarde
+  saveStatusTimer: null,        // masque le statut après une sauvegarde réussie
+  saveRevision: 0,              // évite qu'une ancienne écriture masque une édition plus récente
   nextSession:null,             // séance validée par le MJ (doc agenda_session/next)
   calMonthOffset: 0,            // mois affiché (0 = mois courant) — calendrier perso + vue groupe
+  calWeekOffset: 0,             // semaine affichée sur petit écran (0 = semaine courante)
 };
 
 // ── Helpers date ──────────────────────────────────────────────────────────
@@ -267,25 +271,65 @@ function _slotState(avail, date, slotId) {
   return avail.recurring?.[wd]?.[slotId] || '';
 }
 
+function _slotSource(avail, date, slotId) {
+  const iso = _toISO(date);
+  if (avail?.slots?.[iso]?.[slotId]) return 'explicit';
+  if (avail?.recurring?.[_weekdayKey(date)]?.[slotId]) return 'recurring';
+  return 'none';
+}
+
 // ── Sauvegarde (debouncée) ────────────────────────────────────────────────
+function _setSaveStatus(state = '') {
+  const el = document.getElementById('ag-save-status');
+  if (!el) return;
+  clearTimeout(_ag.saveStatusTimer);
+  const config = {
+    pending: { text: 'Modifications…', icon: '●' },
+    saving:  { text: 'Enregistrement…', icon: '↻' },
+    saved:   { text: 'Enregistré', icon: '✓' },
+    error:   { text: 'Échec de sauvegarde', icon: '!' },
+  }[state];
+  el.className = `ag-save-status${state ? ` is-${state}` : ''}`;
+  el.innerHTML = config ? `<span aria-hidden="true">${config.icon}</span> ${config.text}` : '';
+  if (state === 'error') el.title = 'La sauvegarde a échoué. Modifie un créneau pour réessayer.';
+  else el.removeAttribute('title');
+  if (state === 'saved') {
+    const revision = _ag.saveRevision;
+    _ag.saveStatusTimer = setTimeout(() => {
+      if (revision === _ag.saveRevision) _setSaveStatus('');
+    }, 1800);
+  }
+}
+
+function _cloneAvailabilityMap(map = {}) {
+  return Object.fromEntries(Object.entries(map || {}).map(([key, value]) => [key, { ...(value || {}) }]));
+}
+
 function _scheduleSave() {
   clearTimeout(_ag.saveTimer);
-  _ag.saveTimer = setTimeout(_saveAvail, 600);
+  const revision = ++_ag.saveRevision;
+  _setSaveStatus('pending');
+  _ag.saveTimer = setTimeout(() => _saveAvail(revision), 600);
 }
-async function _saveAvail() {
+async function _saveAvail(revision = _ag.saveRevision) {
   if (!_ag.myAvail || !STATE.user) return;
+  if (revision === _ag.saveRevision) _setSaveStatus('saving');
   const payload = {
     uid:        STATE.user.uid,
     pseudo:     STATE.profile?.pseudo || STATE.user.email || '?',
-    recurring:  _ag.myAvail.recurring || {},
-    slots:      _ag.myAvail.slots     || {},
+    recurring:  _cloneAvailabilityMap(_ag.myAvail.recurring),
+    slots:      _cloneAvailabilityMap(_ag.myAvail.slots),
     updatedAt:  Date.now(),
   };
-  if (!await tryDoc('availabilities', STATE.user.uid, payload)) return;
+  if (!await tryDoc('availabilities', STATE.user.uid, payload)) {
+    if (revision === _ag.saveRevision) _setSaveStatus('error');
+    return;
+  }
   // Reflète localement dans allAvails pour le matching live
   const idx = _ag.allAvails.findIndex(a => a.uid === STATE.user.uid);
   if (idx >= 0) _ag.allAvails[idx] = { id: STATE.user.uid, ...payload };
   else _ag.allAvails.push({ id: STATE.user.uid, ...payload });
+  if (revision === _ag.saveRevision) _setSaveStatus('saved');
   _renderAgendaOverview();
   _renderSuggestions();
   _renderGroupView();
@@ -317,30 +361,38 @@ function _cycleRecurring(dayId, slotId) {
 }
 
 // ── Actions rapides ───────────────────────────────────────────────────────
-function setRecurringPattern(preset) {
+async function setRecurringPattern(preset) {
   if (!_ag.myAvail) _ag.myAvail = { slots: {}, recurring: {} };
-  _ag.myAvail.recurring = {};
-  const apply = (days, slots) => days.forEach(d => {
-    _ag.myAvail.recurring[d] = _ag.myAvail.recurring[d] || {};
-    slots.forEach(s => { _ag.myAvail.recurring[d][s] = 'ok'; });
-  });
-  if (preset === 'evenings')  apply(DAYS.map(d => d.id), ['s']);
-  if (preset === 'weekends')  apply(['sat', 'sun'], ['m', 'a', 's']);
-  if (preset === 'fri-eve')   apply(['fri'], ['s']);
-  if (preset === 'reset')     _ag.myAvail.recurring = {};
+  if (preset === 'reset') {
+    const hasRecurring = Object.keys(_ag.myAvail.recurring || {}).length > 0;
+    if (!hasRecurring) return;
+    if (!await confirmModal('Réinitialiser toute ta semaine type ? Tes exceptions ponctuelles seront conservées.', {
+      title: 'Planning récurrent',
+      confirmLabel: 'Réinitialiser',
+    })) return;
+    _ag.myAvail.recurring = {};
+  } else {
+    _ag.myAvail.recurring = mergeRecurringPreset(_ag.myAvail.recurring, preset);
+  }
   _scheduleSave();
   _renderCalendar();
   _renderAgendaOverview();
-  showNotif('Pattern récurrent appliqué', 'success');
+  _renderSuggestions();
+  _syncRecurringEditor();
+  showNotif(preset === 'reset' ? 'Semaine type réinitialisée' : 'Disponibilités ajoutées à la semaine type', 'success');
 }
 async function clearOverrides() {
   if (!_ag.myAvail) return;
-  if (!await confirmModal('Effacer toutes tes dispos ponctuelles (les patterns récurrents sont conservés) ?', { title: 'Disponibilités', confirmLabel: 'Effacer' })) return;
+  if (!Object.keys(_ag.myAvail.slots || {}).length) {
+    showNotif('Aucune exception ponctuelle à effacer', 'info');
+    return;
+  }
+  if (!await confirmModal('Effacer toutes tes exceptions ponctuelles ? Ton planning récurrent sera conservé.', { title: 'Disponibilités', confirmLabel: 'Effacer' })) return;
   _ag.myAvail.slots = {};
   _scheduleSave();
   _renderCalendar();
   _renderAgendaOverview();
-  showNotif('Dispos ponctuelles effacées', 'success');
+  showNotif('Exceptions ponctuelles effacées', 'success');
 }
 
 // ── Calcul des suggestions par quête ──────────────────────────────────────
@@ -362,20 +414,22 @@ function _computeQuestSuggestions(quest, daysAhead = 28) {
       const okCount    = detail.filter(d => d.state === 'ok').length;
       const maybeCount = detail.filter(d => d.state === 'maybe').length;
       const noCount    = detail.filter(d => d.state === 'no').length;
+      const missingCount = Math.max(0, parts.length - okCount - maybeCount - noCount);
       // un slot avec au moins un "no" est exclu
       if (noCount > 0) continue;
-      // on garde seulement les slots où la majorité est ok
+      // On conserve les pistes où quelqu'un est au moins disponible ou hésitant ;
+      // le score et le libellé distinguent ensuite majorité réelle et réponses manquantes.
       if (okCount === 0 && maybeCount === 0) continue;
       slots.push({
         date, iso, slot, detail,
-        okCount, maybeCount, total: parts.length,
-        score: okCount * 10 - maybeCount * 1 - i * 0.1, // privilégie # ok, puis proximité, pénalise maybe
+        okCount, maybeCount, noCount, missingCount, total: parts.length,
+        score: okCount * 10 + maybeCount * 2 - missingCount * 3 - i * 0.1,
       });
     }
   }
 
   slots.sort((a, b) => b.score - a.score);
-  return slots.slice(0, 5);
+  return slots.slice(0, 6);
 }
 
 // ── Rendu : suggestions ──────────────────────────────────────────────────
@@ -405,11 +459,6 @@ function _renderSuggestions() {
     <span class="ag-sg-lg ag-sg-lg--none">Pas répondu</span>
   </div>`;
 
-  // 3 états d'un créneau : validé · complet (tout le monde ok) · partiel
-  // (majorité ok, mais certains « peut-être » ou sans réponse).
-  const STATUS_LABEL = { val: '✓ Validé', full: '✓ Tout le monde', partial: 'Majorité' };
-  const slotStatus = (s, isVal) => isVal ? 'val' : (s.okCount === s.total ? 'full' : 'partial');
-
   const computed = {}; // réutilisé pour _ag._lastSugs → pas de double calcul
   const cards = myQuests.map(q => {
     const sugs = computed[q.id] = _computeQuestSuggestions(q);
@@ -433,19 +482,19 @@ function _renderSuggestions() {
     const cols = sugs.slice(0, 6);
     const sel = Math.min(Math.max(_ag._sugPick[q.id] || 0, 0), cols.length - 1);
     const chips = cols.map((s, idx) => {
-      const status = slotStatus(s, _isSlotValidated(q.id, s.iso, s.slot.id));
-      const cls = (idx === sel ? 'is-sel ' : '') + `st-${status}`;
+      const status = suggestionPresentation(s, _isSlotValidated(q.id, s.iso, s.slot.id));
+      const cls = (idx === sel ? 'is-sel ' : '') + `st-${status.key}`;
       return `<button type="button" class="ag-sg-chip ${cls}" data-action="_agPickSug" data-id="${q.id}" data-idx="${idx}"
-        title="${_esc(_formatDateFr(s.date))} — ${s.slot.label} · ${s.okCount}/${s.total} dispo${status === 'val' ? ' · validé' : ''}">
+        title="${_esc(_formatDateFr(s.date))} — ${s.slot.label} · ${s.okCount}/${s.total} disponibles · ${status.label}">
         <span class="ag-sg-chip-d">${_esc(_formatDatePill(s.date))}</span>
         <span class="ag-sg-chip-s">${s.slot.emoji}</span>
-        <span class="ag-sg-chip-n">${s.okCount}/${s.total}${status === 'val' ? ' ✓' : ''}</span>
+        <span class="ag-sg-chip-n">${s.okCount}/${s.total}${status.key === 'val' ? ' ✓' : ''}</span>
       </button>`;
     }).join('');
 
     const s = cols[sel];
     const isVal = _isSlotValidated(q.id, s.iso, s.slot.id);
-    const status = slotStatus(s, isVal);
+    const status = suggestionPresentation(s, isVal);
     const roster = parts.map((p, j) => {
       const st = s.detail[j]?.state || '';
       return `<div class="ag-sg-av ag-sg-av--${st || 'none'}" title="${_esc(p.nom || '?')} — ${STATE_LABELS[st] || 'Pas répondu'}">
@@ -461,12 +510,12 @@ function _renderSuggestions() {
 
     return `<div class="ag-quest-card ag-sg-card">${head}
       <div class="ag-sg-dates">${chips}</div>
-      <div class="ag-sg-hero st-${status}">
+      <div class="ag-sg-hero st-${status.key}">
         <div class="ag-sg-heroline">
           <span class="ag-sg-herodate">${_esc(_formatDateFr(s.date))}</span>
           <span class="ag-sg-heroslot">${s.slot.emoji} ${s.slot.label}</span>
-          <span class="ag-sg-heroscore">${s.okCount}/${s.total}${s.maybeCount ? ` <i>+${s.maybeCount} ?</i>` : ''}</span>
-          <span class="ag-sg-status st-${status}">${STATUS_LABEL[status]}</span>
+          <span class="ag-sg-heroscore">${s.okCount}/${s.total}${s.maybeCount ? ` <i>+${s.maybeCount} peut-être</i>` : ''}${s.missingCount ? ` <small>· ${s.missingCount} sans réponse</small>` : ''}</span>
+          <span class="ag-sg-status st-${status.key}">${status.label}</span>
         </div>
         <div class="ag-sg-roster">${roster}</div>
         ${mjBtn}
@@ -574,6 +623,7 @@ function showSuggestionDetail(questId, idx) {
       <div class="ag-detail-stats">
         <span class="ag-detail-stat ag-detail-stat--ok"><strong>${sug.okCount}</strong> dispo${sug.okCount>1?'s':''}</span>
         ${sug.maybeCount ? `<span class="ag-detail-stat ag-detail-stat--maybe"><strong>${sug.maybeCount}</strong> peut-être</span>` : ''}
+        ${sug.missingCount ? `<span class="ag-detail-stat"><strong>${sug.missingCount}</strong> sans réponse</span>` : ''}
         <span class="ag-detail-stat ag-detail-stat--total">sur <strong>${sug.total}</strong></span>
       </div>
       <div class="ag-detail-list">
@@ -1064,6 +1114,49 @@ function _agMonthNav() {
   </div>`;
 }
 
+function _mobileWeekLabel(days = []) {
+  const first = days[0];
+  const last = days[days.length - 1];
+  if (!first || !last) return '';
+  const firstMonth = first.toLocaleDateString('fr-FR', { month: 'short' });
+  const lastMonth = last.toLocaleDateString('fr-FR', { month: 'short' });
+  if (first.getMonth() === last.getMonth()) return `${first.getDate()}–${last.getDate()} ${lastMonth}`;
+  return `${first.getDate()} ${firstMonth} – ${last.getDate()} ${lastMonth}`;
+}
+
+function _agWeekNav(days) {
+  const isNow = (_ag.calWeekOffset || 0) === 0;
+  return `<div class="ag-weeknav">
+    <button type="button" class="ag-monthnav-btn" data-action="_agCalWeekNav" data-delta="-1" aria-label="Semaine précédente">‹</button>
+    <div class="ag-weeknav-title">${_esc(_mobileWeekLabel(days))}</div>
+    <button type="button" class="ag-monthnav-btn" data-action="_agCalWeekNav" data-delta="1" aria-label="Semaine suivante">›</button>
+    <button type="button" class="ag-monthnav-today" data-action="_agCalWeekNav" data-today="1" ${isNow ? 'disabled aria-disabled="true"' : ''}>Cette semaine</button>
+  </div>`;
+}
+
+function _calendarSlotButton(date, slot, { mobile = false } = {}) {
+  const state = _slotState(_ag.myAvail, date, slot.id);
+  const source = _slotSource(_ag.myAvail, date, slot.id);
+  const isPast = date < _today();
+  const sourceLabel = source === 'explicit'
+    ? 'Exception ponctuelle'
+    : source === 'recurring' ? 'Planning récurrent' : 'Aucune valeur par défaut';
+  const label = `${_formatDateFr(date)}, ${slot.label} : ${STATE_LABELS[state] || 'Non renseigné'} — ${sourceLabel}`;
+  const classes = [
+    'ag-cal-slot',
+    `ag-slot--${state || 'none'}`,
+    source === 'explicit' ? 'ag-slot--explicit' : '',
+    source === 'recurring' ? 'ag-slot--recurring' : '',
+    mobile ? 'ag-cal-mobile-slot' : '',
+  ].filter(Boolean).join(' ');
+  const content = mobile
+    ? `<span class="ag-cal-mobile-slot-name"><span aria-hidden="true">${slot.emoji}</span> ${slot.label}</span><span class="ag-cal-mobile-slot-state" aria-hidden="true">${STATE_EMOJI[state] || '⚪'}</span>`
+    : `<span class="ag-cal-slot-ico" aria-hidden="true">${slot.emoji}</span>`;
+  return `<button type="button" class="${classes}"
+    data-action="_agCycle" data-iso="${_toISO(date)}" data-slot="${slot.id}"
+    title="${_esc(label)}" aria-label="${_esc(label)}" ${isPast ? 'disabled' : ''}>${content}</button>`;
+}
+
 function _renderCalendar() {
   const el = document.getElementById('ag-calendar');
   if (!el) return;
@@ -1082,38 +1175,48 @@ function _renderCalendar() {
     weeks.push(week);
   }
 
+  const mobileDays = weekDatesFrom(today, _ag.calWeekOffset || 0);
+
   el.innerHTML = `
-    ${_agMonthNav()}
-    <div class="ag-cal-header">
-      <div class="ag-cal-corner"></div>
-      ${DAYS.map(d => `<div class="ag-cal-dayhdr">${d.label}</div>`).join('')}
+    <div class="ag-cal-desktop">
+      ${_agMonthNav()}
+      <div class="ag-cal-header">
+        <div class="ag-cal-corner"></div>
+        ${DAYS.map(d => `<div class="ag-cal-dayhdr">${d.label}</div>`).join('')}
+      </div>
+      ${weeks.map(week => `
+        <div class="ag-cal-week">
+          <div class="ag-cal-weeklbl">${_formatDateShort(week[0])}<br>—<br>${_formatDateShort(week[6])}</div>
+          ${week.map(d => {
+            const iso = _toISO(d);
+            const isToday = iso === _toISO(today);
+            const isPast = d < today;
+            const outMonth = d.getMonth() !== month;
+            return `<div class="ag-cal-cell${isToday ? ' ag-cal-cell--today' : ''}${isPast ? ' ag-cal-cell--past' : ''}${outMonth ? ' ag-cal-cell--out' : ''}">
+              <div class="ag-cal-date">${d.getDate()}</div>
+              <div class="ag-cal-slots">${SLOTS.map(s => _calendarSlotButton(d, s)).join('')}</div>
+            </div>`;
+          }).join('')}
+        </div>
+      `).join('')}
     </div>
-    ${weeks.map(week => `
-      <div class="ag-cal-week">
-        <div class="ag-cal-weeklbl">${_formatDateShort(week[0])}<br>—<br>${_formatDateShort(week[6])}</div>
-        ${week.map(d => {
+    <div class="ag-cal-mobile">
+      ${_agWeekNav(mobileDays)}
+      <div class="ag-cal-mobile-days">
+        ${mobileDays.map(d => {
           const iso = _toISO(d);
           const isToday = iso === _toISO(today);
           const isPast = d < today;
-          const outMonth = d.getMonth() !== month;
-          return `<div class="ag-cal-cell${isToday ? ' ag-cal-cell--today' : ''}${isPast ? ' ag-cal-cell--past' : ''}${outMonth ? ' ag-cal-cell--out' : ''}">
-            <div class="ag-cal-date">${d.getDate()}</div>
-            <div class="ag-cal-slots">
-              ${SLOTS.map(s => {
-                const state = _slotState(_ag.myAvail, d, s.id);
-                const isExplicit = !!_ag.myAvail?.slots?.[iso]?.[s.id];
-                return `<button class="ag-cal-slot ag-slot--${state||'none'}${isExplicit ? ' ag-slot--explicit' : ''}"
-                  data-iso="${iso}" data-slot="${s.id}"
-                  data-action="_agCycle" data-iso="${iso}" data-slot="${s.id}"
-                  title="${s.emoji} ${s.label} (${s.hours}) — ${STATE_LABELS[state]||'Non renseigné'}${isExplicit?'':' (récurrent)'}">
-                  <span class="ag-cal-slot-ico">${s.emoji}</span>
-                </button>`;
-              }).join('')}
+          return `<div class="ag-cal-mobile-day${isToday ? ' is-today' : ''}${isPast ? ' is-past' : ''}">
+            <div class="ag-cal-mobile-date">
+              <strong>${d.toLocaleDateString('fr-FR', { weekday: 'long' })}</strong>
+              <span>${d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}${isToday ? ' · Aujourd’hui' : ''}</span>
             </div>
+            <div class="ag-cal-mobile-slots">${SLOTS.map(s => _calendarSlotButton(d, s, { mobile: true })).join('')}</div>
           </div>`;
         }).join('')}
       </div>
-    `).join('')}
+    </div>
   `;
 }
 
@@ -1124,12 +1227,29 @@ function cycleAgendaSlot(iso, slotId) {
 }
 
 // ── Modal pattern récurrent ───────────────────────────────────────────────
+function _syncRecurringButton(btn, dayId, slotId) {
+  if (!btn) return;
+  const state = _ag.myAvail?.recurring?.[dayId]?.[slotId] || '';
+  const day = DAYS.find(item => item.id === dayId);
+  const slot = SLOTS.find(item => item.id === slotId);
+  btn.className = `ag-rec-cell ag-slot--${state || 'none'}`;
+  btn.textContent = STATE_EMOJI[state] || '⚪';
+  btn.title = STATE_LABELS[state] || 'Non renseigné';
+  btn.setAttribute('aria-label', `${day?.long || dayId}, ${slot?.label || slotId} : ${STATE_LABELS[state] || 'Non renseigné'}`);
+}
+
+function _syncRecurringEditor() {
+  document.querySelectorAll('.ag-rec-cell[data-day][data-slot]').forEach(btn => {
+    _syncRecurringButton(btn, btn.dataset.day, btn.dataset.slot);
+  });
+}
+
 function openRecurringEditor() {
   const rec = _ag.myAvail?.recurring || {};
   openModal('📆 Mon planning récurrent', `
     <div class="ag-rec-intro">
       Définis tes dispos par défaut pour chaque jour de la semaine.<br>
-      <span style="color:var(--text-dim);font-size:.8rem">Tu pourras toujours surcharger une date précise dans le calendrier.</span>
+      <span style="color:var(--text-dim);font-size:.8rem">Tu pourras toujours modifier une date précise dans le calendrier. Les changements sont enregistrés automatiquement.</span>
     </div>
     <div class="ag-rec-table">
       <div class="ag-rec-hd">
@@ -1142,27 +1262,24 @@ function openRecurringEditor() {
           ${SLOTS.map(s => {
             const state = rec[d.id]?.[s.id] || '';
             return `<button class="ag-rec-cell ag-slot--${state||'none'}"
-              data-day="${d.id}" data-slot="${s.id}"
               data-action="_agRecCycle" data-day="${d.id}" data-slot="${s.id}"
-              title="${STATE_LABELS[state]||'Non renseigné'}">${STATE_EMOJI[state]||'⚪'}</button>`;
+              title="${STATE_LABELS[state]||'Non renseigné'}"
+              aria-label="${d.long}, ${s.label} : ${STATE_LABELS[state]||'Non renseigné'}">${STATE_EMOJI[state]||'⚪'}</button>`;
           }).join('')}
         </div>`).join('')}
     </div>
     <div class="ag-rec-presets">
-      <div class="ag-rec-presets-lbl">Raccourcis :</div>
+      <div class="ag-rec-presets-lbl">Ajouter à ma semaine :</div>
       <button class="btn btn-outline btn-sm" data-action="_agSetRecurringPattern" data-pattern="evenings">🌙 Toutes mes soirées</button>
-      <button class="btn btn-outline btn-sm" data-action="_agSetRecurringPattern" data-pattern="weekends">📅 Tous mes weekends</button>
+      <button class="btn btn-outline btn-sm" data-action="_agSetRecurringPattern" data-pattern="weekends">📅 Tous mes week-ends</button>
       <button class="btn btn-outline btn-sm" data-action="_agSetRecurringPattern" data-pattern="fri-eve">🎲 Vendredi soir</button>
-      <button class="btn btn-outline btn-sm" data-action="_agSetRecurringPattern" data-pattern="reset">🚫 Reset</button>
+      <button class="btn btn-outline btn-sm ag-rec-reset" data-action="_agSetRecurringPattern" data-pattern="reset">Réinitialiser la semaine</button>
     </div>
   `, { subtitle: 'Tes disponibilités par défaut, semaine type', accent: '#22c38e' });
 }
 function cycleRecurringSlot(dayId, slotId, btn) {
   _cycleRecurring(dayId, slotId);
-  const state = _ag.myAvail?.recurring?.[dayId]?.[slotId] || '';
-  btn.className = `ag-rec-cell ag-slot--${state||'none'}`;
-  btn.textContent = STATE_EMOJI[state] || '⚪';
-  btn.title = STATE_LABELS[state] || 'Non renseigné';
+  _syncRecurringButton(btn, dayId, slotId);
   _renderCalendar();
   _renderAgendaOverview();
   _renderSuggestions();
@@ -1297,7 +1414,7 @@ function _renderLegacyCleanup() {
   if (!el) return;
   const n = STATE.isAdmin ? _legacyQuests().length : 0;
   el.innerHTML = n
-    ? `<button class="btn btn-outline" data-action="_agDeleteLegacyQuests" title="Supprimer les anciennes quêtes (on planifie désormais via les groupes de la Trame)">🧹 Supprimer ${n} ancienne${n > 1 ? 's' : ''} quête${n > 1 ? 's' : ''}</button>`
+    ? `<button class="btn btn-outline btn-sm" data-action="_agDeleteLegacyQuests" title="Supprimer les anciennes quêtes (on planifie désormais via les groupes de la Trame)">🧹 Supprimer ${n} ancienne${n > 1 ? 's' : ''} quête${n > 1 ? 's' : ''}</button>`
     : '';
 }
 
@@ -1336,19 +1453,6 @@ async function renderAgendaPage() {
 
   content.innerHTML = `
     <div class="ag-root">
-
-      <header class="ag-hero">
-        <div class="ag-hero-text">
-          <div class="ag-eyebrow">Planification</div>
-          <h1 class="ag-hero-title">Agenda</h1>
-          <p class="ag-hero-sub">Disponibilités, groupes de trame et validation des prochaines séances.</p>
-        </div>
-        <div class="ag-hero-actions">
-          <button class="ag-primary-action" data-action="_agOpenRecurringEditor">📆 Planning récurrent</button>
-          <span id="ag-legacy-cleanup"></span>
-        </div>
-      </header>
-
       <div class="ag-layout">
         <aside class="ag-rail">
           <div id="ag-session-banner"></div>
@@ -1363,8 +1467,13 @@ async function renderAgendaPage() {
                 <h2 class="ag-section-title">Mon calendrier</h2>
                 <p class="ag-section-sub">Clique un créneau pour passer de libre à peut-être, indisponible, puis non renseigné.</p>
               </div>
-              <div class="ag-section-actions">
-                <button class="btn btn-outline btn-sm" data-action="_agClearOverrides" title="Efface les dispos ponctuelles (les patterns récurrents restent)">Effacer ponctuelles</button>
+              <div class="ag-section-actions ag-calendar-actions">
+                <span id="ag-save-status" class="ag-save-status" role="status" aria-live="polite"></span>
+                <button class="ag-primary-action" data-action="_agOpenRecurringEditor">
+                  <span aria-hidden="true">📆</span> Planning récurrent
+                </button>
+                <button class="btn btn-outline btn-sm" data-action="_agClearOverrides" title="Efface les exceptions ponctuelles sans modifier le planning récurrent">Effacer les exceptions</button>
+                <span id="ag-legacy-cleanup"></span>
               </div>
             </div>
             <div class="ag-state-strip" aria-hidden="true">
@@ -1372,6 +1481,7 @@ async function renderAgendaPage() {
               <span><i class="ag-legend ag-slot--maybe">?</i> Peut-être</span>
               <span><i class="ag-legend ag-slot--no">×</i> Indisponible</span>
               <span><i class="ag-legend ag-slot--none"></i> Non renseigné</span>
+              <span class="ag-source-legend"><i aria-hidden="true"></i> Point doré : exception à la semaine type</span>
             </div>
             <div id="ag-calendar" class="ag-calendar"></div>
           </section>
@@ -1472,6 +1582,7 @@ registerActions({
   _agOpenStats:             (btn) => _openAgendaStats(btn.dataset.date),
   _agCycle:                 (btn) => cycleAgendaSlot(btn.dataset.iso, btn.dataset.slot),
   _agCalNav:                (btn) => { _ag.calMonthOffset = btn.dataset.today ? 0 : (_ag.calMonthOffset || 0) + Number(btn.dataset.delta || 0); _renderCalendar(); _renderGroupView(); },
+  _agCalWeekNav:            (btn) => { _ag.calWeekOffset = btn.dataset.today ? 0 : (_ag.calWeekOffset || 0) + Number(btn.dataset.delta || 0); _renderCalendar(); },
   _agRecCycle:              (btn) => cycleRecurringSlot(btn.dataset.day, btn.dataset.slot, btn),
   _agSetRecurringPattern:   (btn) => setRecurringPattern(btn.dataset.pattern),
   _agOpenRecurringEditor:   ()    => openRecurringEditor(),
