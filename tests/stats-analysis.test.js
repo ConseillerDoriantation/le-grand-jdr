@@ -177,6 +177,22 @@ test('aggregateVttRollDetails reconstruit les moyennes depuis les logs VTT', () 
   assert.equal(result.relevantLogs, 6);
 });
 
+test('une séance supprimée pour un personnage ne réapparaît pas depuis le journal VTT', () => {
+  const deletedAt = new Date(2026, 7, 11, 14).getTime();
+  const result = aggregateVttRollDetails([
+    { type: 'roll', characterId: 'c1', rollSkill: 'Perception', rollRaw: 12, rollResult: 16, createdAt: new Date(2026, 7, 11, 12) },
+    { type: 'roll', characterId: 'c2', rollSkill: 'Discrétion', rollRaw: 15, rollResult: 19, createdAt: new Date(2026, 7, 11, 12) },
+    { type: 'roll', characterId: 'c1', rollSkill: 'Perception', rollRaw: 18, rollResult: 22, createdAt: new Date(2026, 7, 11, 15) },
+  ], {
+    dateKeys: ['2026-08-11'],
+    isCharacterLogExcluded: (charId, _date, log) => charId === 'c1' && log.createdAt.getTime() <= deletedAt,
+  });
+
+  assert.equal(result.byCharacter.c1.skills.Perception.trackedRolls, 1);
+  assert.equal(result.byCharacter.c1.skills.Perception.resultTotal, 22);
+  assert.equal(result.byCharacter.c2.skills.Discrétion.trackedRolls, 1);
+});
+
 test('les dégâts subis retirent l’overkill prouvé par les PV du journal VTT', () => {
   const result = aggregateVttRollDetails([{
     type: 'attack',

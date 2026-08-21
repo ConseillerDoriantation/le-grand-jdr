@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildEquippedItemFromInventory,
+  getEquippedSourceItem,
+  getItemTraits,
   syncEquipmentAfterInventoryMutation,
 } from '../assets/js/shared/equipment-utils.js';
 
@@ -49,4 +51,22 @@ test('syncEquipmentAfterInventoryMutation : rafraichit un bijou equipe apres ame
   assert.equal(sync.changed, true);
   assert.equal(sync.equipement.Amulette.sa, 2);
   assert.equal(sync.statsBonus.sagesse, 2);
+});
+
+test('la source équipée récupère les traits vivants depuis l inventaire', () => {
+  const character = {
+    inventaire: [
+      { itemId: 'material-1', nom: 'Lingot' },
+      { itemId: 'rapiere-1', nom: 'Lame du duelliste', traits: ['Finesse', 'Riposte'] },
+    ],
+    equipement: {
+      'Main principale': {
+        itemId: 'rapiere-1', nom: 'Lame du duelliste', sourceInvIndex: 0, traits: [],
+      },
+    },
+  };
+
+  const source = getEquippedSourceItem(character, 'Main principale');
+  assert.equal(source, character.inventaire[1]);
+  assert.deepEqual(getItemTraits(source), ['Finesse', 'Riposte']);
 });

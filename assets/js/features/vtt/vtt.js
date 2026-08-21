@@ -21,7 +21,7 @@ import { calcCriticalEffectTotal, criticalEffectFormulaLabel } from '../../share
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
 import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
-import { getArmorSetData, getMainWeapon, DEFAULT_UNARMED, getCharDamageProfile } from '../../shared/equipment-utils.js';
+import { getArmorSetData, getMainWeapon, getItemTraits, getEquippedSourceItem, DEFAULT_UNARMED, getCharDamageProfile } from '../../shared/equipment-utils.js';
 import { getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { buildProjectionPatch, switchBuild } from '../../shared/character-builds.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
@@ -4220,7 +4220,7 @@ function _buildAttackOptions(t) {
       dmgStatLabel: statShort(dmgStat) || dmgStat,
       maitriseBonus: 0,
       halfOnMiss: false,
-      traits: Array.isArray(weapon.traits) ? weapon.traits : [],
+      traits: getItemTraits(weapon),
       damageTypeId: 'physique',
       damageTypeIcon: '💪',
       damageTypeColor: '#9ca3af',
@@ -4283,6 +4283,8 @@ function _buildAttackOptions(t) {
 
   // ── Arme principale du personnage (ou attaque générique) ──
   const weapon       = c ? _vttPrimaryWeapon(c) : null;
+  const weaponSlot   = c ? Object.entries(c.equipement || {}).find(([, item]) => item === weapon)?.[0] : '';
+  const weaponSource = weaponSlot ? getEquippedSourceItem(c, weaponSlot, weapon) : weapon;
   const isUnarmed    = !wReplace && !weapon?.nom;
   // Stats actives : buff weapon_replace > équipement > poings
   const wDmgStats    = wReplace ? [wReplace.statDegats || 'force']
@@ -4355,6 +4357,7 @@ function _buildAttackOptions(t) {
     charElements:     wReplace ? [wReplaceTypeId] : ((isMagicW && !isUnarmed) ? (c?.elements || []) : []),
     isInvokedWeapon:  !!wReplace,
     enchantedElement: _enchantBuff?.element || null,
+    traits:           !wReplace && !isUnarmed ? getItemTraits(weaponSource) : [],
     weaponTechniques: !wReplace && !isUnarmed && Array.isArray(fmt?.techniques) ? fmt.techniques : [],
   });
 
@@ -4404,7 +4407,7 @@ function _buildAttackOptions(t) {
       damageTypeColor: secondaryType?.color || '',
       isMagicWeapon: secondaryMagic,
       charElements: secondaryMagic ? (c.elements || []) : [],
-      traits: Array.isArray(secondaryWeapon.traits) ? secondaryWeapon.traits : [],
+      traits: getItemTraits(getEquippedSourceItem(c, getSecondaryWeaponSlotId(), secondaryWeapon)),
       weaponSlot: 'secondary',
       weaponTechniques: Array.isArray(secondaryFormat?.techniques) ? secondaryFormat.techniques : [],
     });
@@ -4665,7 +4668,7 @@ let _summonSpawnIds = [];
 // Partagé par les cartes du picker (_optBtn) ET la modale de confirmation, pour
 // que les deux affichent EXACTEMENT la même info (portée, zone/cibles, effet, JS…).
 const _vttAoptPill = (cls, html) => `<span class="vtt-aopt-pill ${cls}">${html}</span>`;
-function _vttSpellPills(o) {
+function _vttSpellPills(o, { includeTraits = true } = {}) {
   const pills = [];
   const targetSelf = !!o.targetSelf;
   const isHeal = !!o.isHeal;
@@ -4739,10 +4742,25 @@ function _vttSpellPills(o) {
     const _healUnit = o.isMana ? ' PM' : ' PV';
     pills.push(_vttAoptPill(isHeal ? 'heal' : 'dmg', `${isHeal ? _healIco : '🎲'} ${isHeal ? '+' : ''}${_esc(displayFormula)}${statNote}${isHeal ? _healUnit : ''}`));
   }
-  if (o.traits?.length) {
-    pills.push(`<span class="vtt-aopt-pill traits">${o.traits.slice(0,2).map(_esc).join(' · ')}</span>`);
+  if (includeTraits) {
+    _vttActionTraits(o).forEach(trait => pills.push(_vttAoptPill('traits', `🔖 ${_esc(trait)}`)));
   }
   return pills;
+}
+
+function _vttActionTraits(o) {
+  return [...new Set((Array.isArray(o?.traits) ? o.traits : (o?.traits ? [o.traits] : []))
+    .map(trait => typeof trait === 'string' ? trait.trim() : String(trait?.nom || trait?.label || '').trim())
+    .filter(Boolean))];
+}
+
+function _vttWeaponTraitsHtml(o) {
+  const traits = _vttActionTraits(o);
+  if (!traits.length) return '';
+  return `<span class="vtt-action-weapon-traits">
+    <span class="vtt-action-weapon-traits-label">🔖 Traits de l’arme</span>
+    <span class="vtt-action-weapon-traits-list">${traits.map(trait => `<span>${_esc(trait)}</span>`).join('')}</span>
+  </span>`;
 }
 // Chips de runes du sort (lecture seule), comme sur la carte de la fiche perso.
 function _vttSpellRuneChips(o, srcChar) {
@@ -4898,8 +4916,14 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       pmBadge = `<span class="vtt-aopt-pm ${_setReduc?'vtt-aopt-pm--reduced':''}">${_resIco} ${o.basePm} ${_res.label}${_setExtra}</span>`;
     }
 
-    // Pills (portée, zone/cibles, effet, JS, stat, traits) — source unique partagée.
-    const pills = _vttSpellPills(o);
+    const cardKind = o._itemAction ? 'is-item'
+      : o.sortIdx !== undefined ? 'is-spell'
+      : o.isDeplacement ? 'is-move'
+      : 'is-weapon';
+
+    // Dans la modale ciblée, les traits d'arme ont leur propre ligne lisible.
+    // Le HUD compact conserve ses pills afin de ne pas agrandir ses cartes.
+    const pills = _vttSpellPills(o, { includeTraits: noTgt || cardKind !== 'is-weapon' });
 
     // ── Couleur d'accent + pastille d'élément (langage visuel des cartes de sort) ──
     const accentCol = o.isHeal ? '#22c55e'
@@ -4926,10 +4950,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
     // Runes du sort (chips lecture seule) — comme sur la carte de la fiche perso.
     const runeChipsHtml = _vttSpellRuneChips(o, srcChar);
 
-    const cardKind = o._itemAction ? 'is-item'
-      : o.sortIdx !== undefined ? 'is-spell'
-      : o.isDeplacement ? 'is-move'
-      : 'is-weapon';
+    const weaponTraitsHtml = cardKind === 'is-weapon' ? _vttWeaponTraitsHtml(o) : '';
     const isPrimaryWeapon = cardKind === 'is-weapon' && weaponOpts[0] === o;
     const cardState = onCooldown ? 'is-cooldown' : noTgt ? 'is-aim' : canHit ? 'is-ready' : 'is-oor';
     const cardHint = onCooldown ? `Recharge ${o.cooldownRemaining}t`
@@ -4951,6 +4972,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
             <span class="vtt-action-choice-kinds">${actChip}${sourceChip}${deckChip}${elemPastille}${stack}</span>
           </span>
           ${pills.length ? `<span class="vtt-action-choice-tags">${pills.join('')}</span>` : ''}
+          ${weaponTraitsHtml}
           ${runeChipsHtml}
           ${desc ? `<span class="vtt-action-choice-desc">${_esc(desc)}</span>` : ''}
         </span>
