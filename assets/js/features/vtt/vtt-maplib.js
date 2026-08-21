@@ -13,7 +13,8 @@ import { promptModal } from '../../shared/modal.js';
 import { CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import { db, doc, setDoc, updateDoc } from '../../config/firebase.js';
 import { _pgRef } from './vtt-refs.js';
-import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile, fileKey, githubPagesUrl } from '../../shared/github-folder.js';
+import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile, githubPagesUrl } from '../../shared/github-folder.js';
+import { dedupeMapLibraryImages, mapLibraryImageKey } from './vtt-map-library-utils.js';
 
 export let _libFolder = null;   // null = racine, string = folderId ouvert
 let _libOpen   = true;   // section collapsible dans le tray
@@ -34,7 +35,10 @@ export function _resetMapLib() { _libFolder = null; }
 
 export async function _saveMapLib() {
   if (!_libCanWrite()) return;
+  const cleaned = dedupeMapLibraryImages(VS.mapLib.images);
+  VS.mapLib.images = cleaned.images;
   await setDoc(_mapLibRef(), { folders: VS.mapLib.folders, images: VS.mapLib.images });
+  return cleaned.removed;
 }
 
 export function _renderLibSection() {
@@ -98,6 +102,7 @@ export function _renderLibSection() {
           ${CLOUDINARY_ENABLED ? `<button class="vtt-lib-action" data-vtt-fn="_vttUploadClick" title="Importer une image" aria-label="Importer une image">⬆</button>
           <button class="vtt-lib-action" data-vtt-fn="_vttSetImgbbKey" title="Configurer l'hébergement d'images" aria-label="Configurer l'hébergement d'images">🔑</button>` : ''}
           <button class="vtt-lib-action" data-vtt-fn="_vttLibImportGithub" title="Importer un dossier GitHub" aria-label="Importer un dossier GitHub">📥</button>
+          <button class="vtt-lib-action" data-vtt-fn="_vttLibCleanDuplicates" title="Nettoyer les doublons" aria-label="Nettoyer les doublons">🧹</button>
           <button class="vtt-lib-action" data-vtt-fn="_vttLibNewFolder" title="Nouveau dossier" aria-label="Nouveau dossier">📁</button>
         </div>
       </div>
@@ -126,6 +131,24 @@ export function _vttLibToggle() { _libOpen = !_libOpen; _renderLibSection();
 export function _vttLibSearch(v) { _libSearch = String(v || ''); _renderLibSection(); }
 export function _vttLibSearchClear() { _libSearch = ''; _renderLibSection(); }
 
+export async function _vttLibCleanDuplicates() {
+  if (!_libCanWrite()) return;
+  const cleaned = dedupeMapLibraryImages(VS.mapLib.images);
+  if (!cleaned.removed) {
+    showNotif('Aucun doublon dans la bibliothèque.', 'info');
+    return;
+  }
+  VS.mapLib.images = cleaned.images;
+  try {
+    await _saveMapLib();
+    _renderLibSection();
+    showNotif(`🧹 ${cleaned.removed} doublon${cleaned.removed > 1 ? 's' : ''} supprimé${cleaned.removed > 1 ? 's' : ''}.`, 'success');
+  } catch (error) {
+    console.error('[vtt] nettoyage bibliothèque', error);
+    showNotif('Impossible de nettoyer la bibliothèque.', 'error');
+  }
+}
+
 export async function _vttLibNewFolder() {
   if (!_libCanWrite()) return;
   const name = (await promptModal('Nom du dossier :', { title: 'Bibliothèque de cartes', required: true }))?.trim();
@@ -135,7 +158,8 @@ export async function _vttLibNewFolder() {
 }
 
 // Importe toutes les images d'un dossier du repo GitHub dans la bibliothèque
-// (dédup par URL). Ajoutées dans le dossier courant (_libFolder) ou en racine.
+// (dédup par dépôt + chemin canonique). Ajoutées dans le dossier courant
+// (_libFolder) ou en racine.
 // Chemin mémorisé en localStorage.
 export async function _vttLibImportGithub() {
   if (!_libCanWrite()) return;
@@ -150,19 +174,31 @@ export async function _vttLibImportGithub() {
   try { files = await listGithubFolder(path, { exts: GH_IMAGE_EXTS, urlMode: 'pages' }); }
   catch (e) { showNotif(e.message, 'error'); return; }
   if (!files.length) { showNotif('Aucune image dans ce dossier', 'info'); return; }
-  const seen = new Set((VS.mapLib.images || []).map(i => fileKey(i.url)));
+  const cleaned = dedupeMapLibraryImages(VS.mapLib.images);
+  VS.mapLib.images = cleaned.images;
+  const seen = new Set(VS.mapLib.images.map(mapLibraryImageKey).filter(Boolean));
   const added = [];
   for (const f of files) {
-    const k = fileKey(f.url);
+    const entry = { id: `${Date.now()}${Math.random().toString(36).slice(2, 6)}`, url: f.url, sourcePath: f.path, name: prettyNameFromFile(f.name), folderId: _libFolder || null };
+    const k = mapLibraryImageKey(entry);
     if (seen.has(k)) continue;
     seen.add(k);
-    added.push({ id: `${Date.now()}${Math.random().toString(36).slice(2, 6)}`, url: f.url, sourcePath: f.path, name: prettyNameFromFile(f.name), folderId: _libFolder || null });
+    added.push(entry);
   }
-  if (!added.length) { showNotif('Toutes ces images sont déjà présentes', 'info'); return; }
+  if (!added.length && !cleaned.removed) { showNotif('Toutes ces images sont déjà présentes', 'info'); return; }
   VS.mapLib.images = [...(VS.mapLib.images || []), ...added];
-  await _saveMapLib();
-  _renderLibSection();
-  showNotif(`✅ ${added.length} image(s) importée(s)`, 'success');
+  try {
+    await _saveMapLib();
+    _renderLibSection();
+    const details = [
+      added.length ? `${added.length} image${added.length > 1 ? 's' : ''} importée${added.length > 1 ? 's' : ''}` : '',
+      cleaned.removed ? `${cleaned.removed} doublon${cleaned.removed > 1 ? 's' : ''} supprimé${cleaned.removed > 1 ? 's' : ''}` : '',
+    ].filter(Boolean).join(' · ');
+    showNotif(`✅ ${details}`, 'success');
+  } catch (error) {
+    console.error('[vtt] import bibliothèque GitHub', error);
+    showNotif('Impossible d’enregistrer les images importées.', 'error');
+  }
 }
 
 export function _vttLibDelFolder(id) {
