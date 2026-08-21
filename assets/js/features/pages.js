@@ -8,8 +8,8 @@ import { _esc, _norm, appSplashHtml, pageHeaderHtml, loadingHtml} from '../share
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { isFeatureEnabled } from '../shared/features.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
-import { loadStats, resetStats, deleteCharStats, deleteDateStats, deleteMissionStats, correctDateCombatStats, setSessionMission } from '../shared/stats.js';
-import { aggregateActionAverages, aggregateSkillAverages, aggregateVttRollDetails, combatAverages, mergeTrackedCombatStats, mergeTrackedSkillStats, normalizeSkillStats } from '../shared/stats-analysis.js';
+import { loadStats, resetStats, deleteCharStats, deleteCharDateStats, deleteDateStats, deleteMissionStats, correctDateCombatStats, setSessionMission } from '../shared/stats.js';
+import { aggregateActionAverages, aggregateSkillAverages, aggregateVttRollDetails, combatAverages, mergeTrackedCombatStats, mergeTrackedSkillStats, normalizeSkillStats, vttLogTimeMs } from '../shared/stats-analysis.js';
 import { scoreMvpView } from '../shared/stats-mvp.js';
 import { showNotif } from '../shared/notifications.js';
 import { copyText } from '../shared/clipboard.js';
@@ -894,7 +894,17 @@ function _statsRowsFor(dateKeys) {
       const combat = _statsData?.chars?.[charId]?.byDate?.[date]?.combat || {};
       return _statsNum(kind === 'taken' ? combat.manualDamageTaken : combat.manualDamageDealt) > 0;
     };
-    vttDetails = aggregateVttRollDetails(_statsVttLogs, { dateKeys, resolveCharacterId, hasManualCombatCorrection });
+    const isCharacterLogExcluded = (charId, date, log) => {
+      const cutoff = _statsNum(_statsData?.chars?.[charId]?.vttLogCutoffs?.[date]);
+      const logTime = vttLogTimeMs(log?.createdAt);
+      return cutoff > 0 && logTime != null && logTime <= cutoff;
+    };
+    vttDetails = aggregateVttRollDetails(_statsVttLogs, {
+      dateKeys,
+      resolveCharacterId,
+      hasManualCombatCorrection,
+      isCharacterLogExcluded,
+    });
     _statsVttDetailCache.set(detailKey, vttDetails);
   }
   return Object.entries(_statsData?.chars || {}).map(([id, c]) => {
@@ -1123,7 +1133,7 @@ function _statsRender(scope) {
   const activeView = `<div class="stats-active-view">
     <span class="stats-active-label">P&eacute;rim&egrave;tre</span>
     <span class="stats-active-pills">${viewPills.map(p => `<span>${p}</span>`).join('')}</span>
-    ${filtersActive ? '<button class="stats-active-reset" data-action="_statsResetFilters">Réinitialiser</button>' : ''}
+    ${filtersActive ? '<button class="stats-active-reset" data-action="_statsResetFilters" title="Retire uniquement les filtres affichés — aucune statistique ne sera supprimée" aria-label="Retirer les filtres statistiques et afficher toute la campagne">✕ Retirer les filtres</button>' : ''}
   </div>`;
 
   const exportBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExport" title="Copier un récapitulatif texte pour Discord"><span>📋</span> Copier</button>` : '';
@@ -1295,7 +1305,9 @@ function _statsRender(scope) {
       ? `<button class="stats-char-btn" data-action="_statsCharDates" data-id="${r.id}" title="Voir les statistiques séance par séance">📅 Séances</button>`
       : '';
     const delBtn = STATE.isAdmin
-      ? `<button class="stats-char-btn stats-char-del" data-action="_statsDelChar" data-id="${r.id}" title="Supprimer les stats de ce personnage (jets de test…)">🗑 Supprimer</button>`
+      ? (dateKey
+          ? `<button class="stats-char-btn stats-char-del" data-action="_statsDelChar" data-id="${r.id}" data-date="${_esc(dateKey)}" data-name="${_esc(r.name)}" title="Supprimer uniquement les statistiques de ce personnage pour la séance du ${_statsFmtDate(dateKey)}">🗑 Cette séance</button>`
+          : `<button class="stats-char-btn stats-char-del" data-action="_statsDelChar" data-id="${r.id}" data-name="${_esc(r.name)}" title="Supprimer toutes les statistiques de ce personnage, sur toute la campagne">🗑 Toutes ses stats</button>`)
       : '';
     const char = STATE.characters?.find(x => x.id === r.id) || { nom: r.name };
     const avatar = characterAvatarHtml(char, { size: 38, className: 'stats-char-av', title: r.name });
@@ -3862,6 +3874,9 @@ registerActions({
     if (!STATE.isAdmin) return;
     const dates = [...new Set(Object.values(_statsData?.chars || {}).flatMap(c => Object.keys(c.byDate || {})))].sort().reverse();
     const missions = _statsMissionList();
+    const trackedChars = Object.keys(_statsData?.chars || {}).length;
+    const linkedGroups = new Set(Object.values(_statsData?.sessions || {}).map(s => s?.groupId || s?.group).filter(Boolean)).size;
+    const adventureName = _esc(STATE.adventure?.nom || 'Aventure courante');
     const missRow = (m) => `<div class="stats-mng-row"><span class="stats-mng-lbl">🎯 ${_esc(m.name)}</span><button class="stats-mng-del" data-action="_statsDelMission" data-scope="${m.id}" data-name="${_esc(m.name)}">🗑 Supprimer</button></div>`;
     const dateRow = (d) => {
       const mi = _statsMissionOf(d), gr = _statsGroupOf(d);
@@ -3870,19 +3885,24 @@ registerActions({
         <span class="stats-mng-lbl">📅 ${_statsFmtDate(d)} — ${label}</span>
         <span class="stats-mng-acts">
           <button class="stats-mng-link" data-action="_statsEditMission" data-scope="${d}">🔗 ${mi ? 'Modifier' : 'Relier'}</button>
-          <button class="stats-mng-del" data-action="_statsDelDate" data-scope="${d}">🗑</button>
+          <button class="stats-mng-del" data-action="_statsDelDate" data-scope="${d}" title="Supprimer uniquement les statistiques de cette séance" aria-label="Supprimer les statistiques de la séance du ${_statsFmtDate(d)}">🗑 Supprimer</button>
         </span>
       </div>`;
     };
     openModal('⚙ Gérer les statistiques', `
       <div class="stats-mng">
+        <div class="stats-mng-info">
+          <strong>Les filtres de la page ne suppriment jamais de données.</strong>
+          <span>Ici, chaque suppression indique précisément son périmètre avant confirmation.</span>
+        </div>
         ${dates.length ? `<div class="stats-mng-sec"><div class="stats-mng-hd">Relier une séance à une mission / un groupe · ou la supprimer</div>${dates.map(dateRow).join('')}</div>` : ''}
         ${missions.length ? `<div class="stats-mng-sec"><div class="stats-mng-hd">Supprimer toutes les stats d'une mission</div>${missions.map(missRow).join('')}</div>` : ''}
         ${(!missions.length && !dates.length) ? '<div class="stats-mng-sec" style="color:var(--text-dim);font-size:.85rem">Aucune donnée datée pour le moment.</div>' : ''}
         <div class="stats-mng-danger">
-          <div class="stats-mng-hd">⚠ Zone dangereuse</div>
-          <p>Efface <b>toutes</b> les statistiques de l'aventure. Irréversible.</p>
-          <button class="stats-mng-reset" data-action="_statsResetAsk">↺ Tout réinitialiser…</button>
+          <div class="stats-mng-hd">⚠ Suppression globale</div>
+          <strong class="stats-mng-danger-title">${adventureName}</strong>
+          <p>Efface les statistiques de <b>${trackedChars} personnage${trackedChars > 1 ? 's' : ''}</b>, <b>${dates.length} séance${dates.length > 1 ? 's' : ''}</b>${missions.length ? ` et <b>${missions.length} mission${missions.length > 1 ? 's' : ''}</b>` : ''}${linkedGroups ? `, pour <b>${linkedGroups} groupe${linkedGroups > 1 ? 's' : ''}</b>` : ''}. Les personnages, missions, groupes, inventaires et scènes VTT sont conservés.</p>
+          <button class="stats-mng-reset" data-action="_statsResetAsk">🗑 Effacer toutes les statistiques de l'aventure…</button>
         </div>
       </div>`, { subtitle: 'Relier les séances aux missions · supprimer des données ciblées', accent: '#4f8cff' });
   },
@@ -3912,30 +3932,50 @@ registerActions({
     closeModalDirect();
     if (done) { _statsScope = null; _statsGroupSel = null; _statsGroupMissionId = ''; PAGES.statistiques(); }
   },
-  // Réinitialisation TOTALE — confirmation par saisie (« RESET »).
+  // Suppression TOTALE — confirmation explicite par saisie (« EFFACER »).
   _statsResetAsk: async () => {
     if (!STATE.isAdmin) return;
-    const val = await promptModal('Tape RESET pour confirmer la remise à zéro TOTALE (irréversible).', {
-      title: '↺ Tout réinitialiser', placeholder: 'RESET', confirmLabel: 'Confirmer', required: true,
+    const dates = [...new Set(Object.values(_statsData?.chars || {}).flatMap(c => Object.keys(c.byDate || {})))];
+    const missions = _statsMissionList();
+    const trackedChars = Object.keys(_statsData?.chars || {}).length;
+    const adventureName = _esc(STATE.adventure?.nom || 'Aventure courante');
+    const val = await promptModal(`
+      <span class="stats-reset-warning">Cette action ignore les filtres actuellement affichés.</span>
+      Elle effacera définitivement les compteurs de jets, combats, dégâts, soins, sorts, PM, émotes et les liens séance–mission de <strong>${adventureName}</strong>.
+      <span class="stats-reset-scope">Périmètre : ${trackedChars} personnage${trackedChars > 1 ? 's' : ''} · ${dates.length} séance${dates.length > 1 ? 's' : ''} · ${missions.length} mission${missions.length > 1 ? 's' : ''}</span>
+      <span class="stats-reset-kept">Les personnages, missions, groupes, inventaires et scènes VTT ne seront pas supprimés.</span>
+      Tape <strong>EFFACER</strong> pour confirmer.`, {
+      title: '🗑 Effacer toutes les statistiques', placeholder: 'EFFACER', confirmLabel: 'Effacer définitivement', required: true, danger: true,
     }).catch(() => null);
     if (val === null) return;
-    if ((val || '').trim().toUpperCase() !== 'RESET') { showNotif('Confirmation incorrecte — rien n\'a été supprimé.', 'info'); return; }
+    if ((val || '').trim().toUpperCase() !== 'EFFACER') { showNotif('Tape exactement « EFFACER » — aucune donnée n’a été supprimée.', 'info'); return; }
     const done = await resetStats();
-    showNotif(done ? 'Toutes les statistiques ont été réinitialisées.' : 'Échec de la réinitialisation.', done ? 'success' : 'error');
+    showNotif(done ? `Toutes les statistiques de ${STATE.adventure?.nom || 'l’aventure'} ont été effacées.` : 'Échec de la suppression des statistiques.', done ? 'success' : 'error');
     closeModalDirect();
     if (done) { _statsScope = null; _statsPlayerSel = null; _statsGroupSel = null; _statsGroupMissionId = ''; PAGES.statistiques(); }
   },
   _statsDelChar: async (btn) => {
     if (!STATE.isAdmin) return;
     const id = btn.dataset.id; if (!id) return;
-    const name = btn.closest('.stats-char')?.querySelector('.stats-char-name')?.textContent || 'ce personnage';
-    const ok = await confirmModal(`Supprimer les statistiques de <b>${_esc(name)}</b> ? (utile pour des jets de test)`, {
-      title: '✕ Supprimer les stats du personnage', confirmLabel: 'Supprimer', cancelLabel: 'Annuler', danger: true,
+    const date = btn.dataset.date || '';
+    const name = btn.dataset.name || btn.closest('.stats-char')?.querySelector('.stats-char-name')?.textContent || _statsData?.chars?.[id]?.name || 'ce personnage';
+    const singleSession = !!date;
+    const message = singleSession
+      ? `<span class="stats-delete-scope">Une seule séance</span>Supprimer uniquement les statistiques de <b>${_esc(name)}</b> pour le <b>${_statsFmtDate(date)}</b> ?<br><small>Ses autres séances sont conservées. La séance, son lien mission/groupe et les données des autres personnages ne changent pas.</small>`
+      : `<span class="stats-delete-scope stats-delete-scope--all">Toute la campagne</span>Supprimer toutes les statistiques de <b>${_esc(name)}</b>, pour toutes ses séances ?<br><small>Cette action ignore les filtres affichés. Les autres personnages ne changent pas.</small>`;
+    const ok = await confirmModal(message, {
+      title: singleSession ? '🗑 Supprimer cette séance du personnage' : '🗑 Supprimer toutes les stats du personnage',
+      confirmLabel: singleSession ? 'Supprimer cette séance' : 'Tout supprimer', cancelLabel: 'Annuler', danger: true,
     }).catch(() => false);
     if (!ok) return;
-    const done = await deleteCharStats(id);
-    showNotif(done ? 'Statistiques du personnage supprimées.' : 'Échec de la suppression.', done ? 'success' : 'error');
-    if (done) PAGES.statistiques();
+    const done = singleSession ? await deleteCharDateStats(id, date) : await deleteCharStats(id);
+    showNotif(done
+      ? (singleSession ? `Séance du ${_statsFmtDate(date)} supprimée pour ${name}.` : `Toutes les statistiques de ${name} ont été supprimées.`)
+      : 'Échec de la suppression.', done ? 'success' : 'error');
+    if (!done) return;
+    if (btn.dataset.origin === 'dates-modal') closeModalDirect();
+    if (singleSession && _statsScope === date) requestStatsScope(date);
+    await PAGES.statistiques();
   },
   // Stats d'un personnage séance par séance (date) — lit le doc déjà chargé.
   _statsCharDates: (btn) => {
@@ -3980,7 +4020,10 @@ registerActions({
           <span class="stats-date-chevron">⌄</span>
         </summary>
         <div class="stats-date-body">
-          ${STATE.isAdmin ? `<div class="stats-date-admin"><button type="button" data-action="_statsCorrectDateCombat" data-id="${_esc(id)}" data-date="${_esc(d)}">✎ Corriger les compteurs de combat</button></div>` : ''}
+          ${STATE.isAdmin ? `<div class="stats-date-admin">
+            <button type="button" data-action="_statsCorrectDateCombat" data-id="${_esc(id)}" data-date="${_esc(d)}">✎ Corriger les compteurs</button>
+            <button type="button" class="stats-date-delete" data-action="_statsDelChar" data-id="${_esc(id)}" data-date="${_esc(d)}" data-name="${_esc(c.name || 'Personnage')}" data-origin="dates-modal" title="Supprimer uniquement cette séance pour ce personnage">🗑 Supprimer cette séance</button>
+          </div>` : ''}
           <div class="stats-date-detail-grid">
             <section class="stats-char-detail">
               <h4>⚔️ Combat</h4>

@@ -48,6 +48,7 @@ global.document = {
     return selector === '#modal-title span' ? titleText : null;
   },
 };
+global.requestAnimationFrame = (callback) => callback();
 
 const {
   allowAutomaticModalCloseOnce,
@@ -56,6 +57,7 @@ const {
   openModal,
   pushModal,
   confirmModal,
+  promptModal,
   closeModalDirect,
   setModalCloseGuard,
   setAutomaticModalCloseGuard,
@@ -125,6 +127,48 @@ test('la croix d’une confirmation vaut annulation et laisse la modale de fond 
   assert.equal(await answer, false);
   assert.equal(body.innerHTML, '<form>sort</form>');
   assert.equal(overlay.classList.contains('show'), true);
+  closeModalDirect();
+});
+
+test('un prompt destructif rend son action principale explicitement dangereuse', async () => {
+  openModal('Statistiques', '<div>Données</div>');
+  const answer = promptModal('Tape EFFACER', {
+    confirmLabel: 'Effacer définitivement',
+    danger: true,
+  });
+
+  assert.match(body.innerHTML, /Effacer définitivement/);
+  assert.match(body.innerHTML, /rgba\(255,107,107,.12\)/);
+
+  closeModalDirect();
+  assert.equal(await answer, null);
+  assert.equal(body.innerHTML, '<div>Données</div>');
+  closeModalDirect();
+});
+
+test('une sous-modale restaure les valeurs saisies dans le formulaire de fond', async () => {
+  const field = {
+    id: 'si-nom',
+    dataset: {},
+    tagName: 'INPUT',
+    type: 'text',
+    value: 'Épée enregistrée',
+    isContentEditable: false,
+    getAttribute() { return null; },
+  };
+  const originalQuerySelectorAll = body.querySelectorAll;
+  body.querySelectorAll = (selector) => selector === 'input, textarea, select, [contenteditable="true"]' ? [field] : [];
+
+  openModal('Article', '<input id="si-nom" value="Épée enregistrée">');
+  field.value = 'Épée du brouillon';
+  pushModal('Action', '<input id="s-nom">');
+  field.value = 'Valeur de la sous-modale';
+
+  closeModalDirect();
+  await new Promise(resolve => queueMicrotask(() => queueMicrotask(resolve)));
+
+  assert.equal(field.value, 'Épée du brouillon');
+  body.querySelectorAll = originalQuerySelectorAll;
   closeModalDirect();
 });
 

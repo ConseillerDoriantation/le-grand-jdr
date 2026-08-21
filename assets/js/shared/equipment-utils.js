@@ -376,6 +376,17 @@ export function resolveEquippedInventoryIndices(c) {
   return result;
 }
 
+/**
+ * Retourne l'objet d'inventaire vivant correspondant à un slot équipé.
+ * La projection `equipement` peut être ancienne et ne pas encore contenir les
+ * traits/améliorations récents ; l'inventaire reste alors la source complète.
+ */
+export function getEquippedSourceItem(c, slot, fallback = null) {
+  const equipped = fallback || c?.equipement?.[slot] || null;
+  const index = resolveEquippedInventoryIndices(c).get(slot);
+  return Number.isInteger(index) ? (c?.inventaire?.[index] || equipped) : equipped;
+}
+
 // ── Synchronisation équipement après mutation inventaire ─────────────────────
 
 export function syncEquipmentAfterInventoryMutation(c, removedIndices = []) {

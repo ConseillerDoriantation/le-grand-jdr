@@ -13,6 +13,53 @@ const FOCUSABLE_SELECTOR = [
   '[contenteditable="true"]',
 ].join(',');
 
+const FIELD_STATE_SELECTOR = 'input, textarea, select, [contenteditable="true"]';
+
+function _fieldStateKey(el, index) {
+  const explicit = el.dataset?.viewStateKey || el.id;
+  if (explicit) return `field:${explicit}`;
+  const name = el.getAttribute?.('name');
+  return name ? `field-name:${name}:${index}` : `field-index:${index}`;
+}
+
+function _captureFieldStates(root) {
+  return [...root.querySelectorAll(FIELD_STATE_SELECTOR)].flatMap((el, index) => {
+    const type = String(el.type || '').toLowerCase();
+    if (type === 'file') return [];
+    const state = {
+      key: _fieldStateKey(el, index),
+      kind: el.isContentEditable ? 'html'
+        : (String(el.tagName || '').toUpperCase() === 'SELECT' && el.multiple) ? 'multiple'
+          : ['checkbox', 'radio'].includes(type) ? 'checked' : 'value',
+    };
+    if (state.kind === 'html') state.value = el.innerHTML || '';
+    else if (state.kind === 'multiple') state.value = [...(el.options || [])].filter(opt => opt.selected).map(opt => opt.value);
+    else if (state.kind === 'checked') {
+      state.value = Boolean(el.checked);
+      state.indeterminate = Boolean(el.indeterminate);
+    } else state.value = el.value ?? '';
+    return [state];
+  });
+}
+
+function _restoreFieldStates(root, states = []) {
+  if (!states?.length) return;
+  const fields = [...root.querySelectorAll(FIELD_STATE_SELECTOR)];
+  const byKey = new Map(fields.map((el, index) => [_fieldStateKey(el, index), el]));
+  states.forEach(state => {
+    const el = byKey.get(state.key);
+    if (!el || String(el.type || '').toLowerCase() === 'file') return;
+    if (state.kind === 'html' && el.isContentEditable) el.innerHTML = state.value || '';
+    else if (state.kind === 'multiple') {
+      const selected = new Set(Array.isArray(state.value) ? state.value : []);
+      [...(el.options || [])].forEach(opt => { opt.selected = selected.has(opt.value); });
+    } else if (state.kind === 'checked') {
+      el.checked = Boolean(state.value);
+      if ('indeterminate' in el) el.indeterminate = Boolean(state.indeterminate);
+    } else if ('value' in el) el.value = state.value ?? '';
+  });
+}
+
 function _focusKey(el, root) {
   const explicit = el.dataset?.viewStateKey || el.id || el.getAttribute?.('name');
   if (explicit) return `focus:${explicit}`;
@@ -21,13 +68,14 @@ function _focusKey(el, root) {
   return index >= 0 ? `focus-index:${index}` : '';
 }
 
-export function captureViewContext(root, { includeWindow = false, includeFocus = false } = {}) {
+export function captureViewContext(root, { includeWindow = false, includeFocus = false, includeFields = false } = {}) {
   if (!root) return null;
   const context = {
     window: includeWindow ? { x: window.scrollX, y: window.scrollY } : null,
     scrolls: [],
     details: [],
     focus: null,
+    fields: includeFields ? _captureFieldStates(root) : [],
   };
 
   root.querySelectorAll('[data-view-state-key], [data-scroll-key], [id]').forEach((el) => {
@@ -56,7 +104,7 @@ export function captureViewContext(root, { includeWindow = false, includeFocus =
   return context;
 }
 
-export function restoreViewContext(root, context, { includeWindow = false, includeFocus = false } = {}) {
+export function restoreViewContext(root, context, { includeWindow = false, includeFocus = false, includeFields = false } = {}) {
   if (!root || !context) return;
   const keyed = new Map();
   root.querySelectorAll('[data-view-state-key], [data-scroll-key], [id]').forEach((el) => {
@@ -77,6 +125,8 @@ export function restoreViewContext(root, context, { includeWindow = false, inclu
     const el = indexMatch ? details[Number(indexMatch[1])] : keyed.get(key);
     if (el) el.open = Boolean(open);
   });
+
+  if (includeFields) _restoreFieldStates(root, context.fields);
 
   if (includeFocus && context.focus?.key) {
     const focusables = [...root.querySelectorAll(FOCUSABLE_SELECTOR)];

@@ -79,6 +79,30 @@ export async function deleteCharStats(charId) {
   } catch { return false; }
 }
 
+// Supprime les statistiques d'UN personnage pour UNE séance uniquement.
+// Les compteurs datés sont soustraits de ses totaux de campagne, mais la séance,
+// son lien mission/groupe et les statistiques des autres personnages restent.
+// Le cutoff empêche le journal VTT historique de reconstruire les moyennes que
+// le MJ vient volontairement de retirer ; les nouvelles actions restent suivies.
+export async function deleteCharDateStats(charId, dateKey) {
+  const ref = _statsRef();
+  if (!ref || !charId || !dateKey) return false;
+  const snap = await getDoc(ref).catch(() => null);
+  const data = snap?.exists() ? snap.data() : null;
+  const char = data?.chars?.[charId];
+  if (!char?.byDate?.[dateKey]) return false;
+  const sum = _sumByDatesRaw(char, [dateKey]);
+  try {
+    await setDoc(ref, { chars: { [charId]: {
+      ..._incTree(sum, -1),
+      byDate: { [dateKey]: deleteField() },
+      vttLogCutoffs: { [dateKey]: Date.now() },
+    } } }, { merge: true });
+    _mem = null;
+    return true;
+  } catch { return false; }
+}
+
 // Lien d'une séance (date) → mission de la Trame + groupe de cette mission,
 // édité par le MJ. Stocké dans le même doc stats (sessions.{date}) — 0 lecture.
 export async function setSessionMission(dateKey, { mission = '', missionId = '', groupId = '', group = '' } = {}) {

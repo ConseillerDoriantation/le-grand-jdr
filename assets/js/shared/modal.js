@@ -206,7 +206,9 @@ export function pushModal(title, bodyHtml, restore = null, opts = {}) {
     _modalStack.push({
       title: bar?.dataset.title || '',   // titre brut (cf. _applyModalHeader)
       body: bodyEl.innerHTML || '',
-      viewContext: captureViewContext(bodyEl, { includeFocus: true }),
+      // innerHTML ne reflète pas les valeurs saisies dans les inputs/textarea.
+      // On capture donc explicitement l'état vivant du formulaire de fond.
+      viewContext: captureViewContext(bodyEl, { includeFocus: true, includeFields: true }),
       describedBy: overlay.getAttribute?.('aria-describedby') || '',
       restore,
       dismiss: _activeDismiss,
@@ -242,7 +244,7 @@ export function popModal() {
   if (bodyEl)  bodyEl.innerHTML    = previous.body;
   if (previous.describedBy) overlay?.setAttribute('aria-describedby', previous.describedBy);
   else overlay?.removeAttribute('aria-describedby');
-  restoreViewContextAfterRender(bodyEl, previous.viewContext, { includeFocus: true });
+  restoreViewContextAfterRender(bodyEl, previous.viewContext, { includeFocus: true, includeFields: true });
   _activeDismiss = previous.dismiss || null;
   if (typeof previous.restore === 'function') {
     previous.restore();
@@ -406,6 +408,7 @@ export function confirmModal(message, {
 //   cancelLabel  — bouton d'annulation  (défaut : 'Annuler')
 //   multiline    — true = textarea (Entrée = saut de ligne, pas validation)
 //   required     — true = bouton désactivé tant que le champ est vide
+//   danger       — true = bouton rouge pour une action destructive
 
 export function promptModal(label, {
   title        = '',
@@ -415,8 +418,12 @@ export function promptModal(label, {
   cancelLabel  = 'Annuler',
   multiline    = false,
   required     = false,
+  danger       = false,
 } = {}) {
   return new Promise((resolve) => {
+    const btnColor  = danger ? '#ff6b6b' : 'var(--gold)';
+    const btnBg     = danger ? 'rgba(255,107,107,.12)' : 'rgba(79,140,255,.12)';
+    const btnBorder = danger ? 'rgba(255,107,107,.35)' : 'rgba(79,140,255,.35)';
     const fieldStyle = `width:100%;box-sizing:border-box;padding:.55rem .7rem;border-radius:10px;
       border:1px solid var(--border-strong);background:var(--bg-elevated);color:var(--text);
       font-size:.9rem;font-family:inherit`;
@@ -433,9 +440,9 @@ export function promptModal(label, {
         <div style="display:flex;gap:.6rem;margin-top:.1rem">
           <button id="pm-confirm"
             style="flex:1;padding:.55rem 1rem;border-radius:10px;cursor:pointer;font-size:.87rem;
-              font-weight:700;border:1px solid rgba(79,140,255,.35);
-              background:rgba(79,140,255,.12);color:var(--gold);transition:background .12s,opacity .12s"
-            data-hov-bg="rgba(79,140,255,.22)">${confirmLabel}</button>
+              font-weight:700;border:1px solid ${btnBorder};
+              background:${btnBg};color:${btnColor};transition:background .12s,opacity .12s"
+            data-hov-bg="${danger ? 'rgba(255,107,107,.22)' : 'rgba(79,140,255,.22)'}">${confirmLabel}</button>
           <button id="pm-cancel"
             style="flex:1;padding:.55rem 1rem;border-radius:10px;cursor:pointer;font-size:.87rem;
               font-weight:600;border:1px solid var(--border-strong);

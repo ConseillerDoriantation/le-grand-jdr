@@ -4868,6 +4868,38 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-action-choice-tags .vtt-aopt-pill {
   white-space: normal;
 }
+.vtt-action-weapon-traits {
+  display: flex;
+  align-items: flex-start;
+  gap: .45rem;
+  width: 100%;
+  min-width: 0;
+}
+.vtt-action-weapon-traits-label {
+  flex-shrink: 0;
+  padding-top: 2px;
+  color: #a78bfa;
+  font-size: .62rem;
+  font-weight: 850;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+.vtt-action-weapon-traits-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem;
+  min-width: 0;
+}
+.vtt-action-weapon-traits-list > span {
+  padding: 2px .48rem;
+  border: 1px solid rgba(167,139,250,.38);
+  border-radius: 999px;
+  background: rgba(167,139,250,.1);
+  color: #d8ccff;
+  font-size: .68rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
 .vtt-action-choice .cs-spellcard-runes {
   margin-top: 0;
 }
@@ -5460,7 +5492,13 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-aopt-head { flex-wrap: nowrap; }
 .vtt-aopt-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .vtt-aopt-pill.type   { font-size: .8rem; padding: 0 .4rem; }
-.vtt-aopt-pill.traits { color: var(--text-dim); font-style: italic; font-weight: 500; }
+.vtt-aopt-pill.traits {
+  color: #c4b5fd;
+  border-color: rgba(167,139,250,.36);
+  background: rgba(167,139,250,.08);
+  font-style: normal;
+  font-weight: 650;
+}
 
 .vtt-aopt-desc {
   font-size: .75rem; color: var(--text-muted);

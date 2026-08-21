@@ -11,13 +11,19 @@ export function appliedDamageAmount({ beforeHp = null, afterHp = null, rolledDam
   return Math.max(0, num(rolledDamage));
 }
 
-export function vttLogDateKey(value) {
+export function vttLogTimeMs(value) {
   let date = null;
   if (value?.toDate instanceof Function) date = value.toDate();
   else if (finite(value?.seconds)) date = new Date(Number(value.seconds) * 1000);
   else if (value instanceof Date) date = value;
   else if (finite(value)) date = new Date(Number(value));
   else if (typeof value === 'string') date = new Date(value);
+  return (!date || Number.isNaN(date.getTime())) ? null : date.getTime();
+}
+
+export function vttLogDateKey(value) {
+  const time = vttLogTimeMs(value);
+  const date = time == null ? null : new Date(time);
   if (!date || Number.isNaN(date.getTime())) return '';
   const pad = n => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -26,7 +32,12 @@ export function vttLogDateKey(value) {
 // Reconstruit les sommes absentes de l'ancien document `stats/main` à partir du
 // journal VTT. Le journal reste la source détaillée ; les compteurs stats restent
 // la source du nombre total de jets, critiques et échecs.
-export function aggregateVttRollDetails(logs = [], { dateKeys = null, resolveCharacterId = null, hasManualCombatCorrection = null } = {}) {
+export function aggregateVttRollDetails(logs = [], {
+  dateKeys = null,
+  resolveCharacterId = null,
+  hasManualCombatCorrection = null,
+  isCharacterLogExcluded = null,
+} = {}) {
   const dates = dateKeys ? new Set(dateKeys) : null;
   const byCharacter = {};
   let relevantLogs = 0;
@@ -50,6 +61,7 @@ export function aggregateVttRollDetails(logs = [], { dateKeys = null, resolveCha
 
     if (log.type === 'roll' || log.type === 'craft') {
       const id = resolve(log, 'skill');
+      if (id && isCharacterLogExcluded?.(id, logDate, log)) continue;
       const natural = log.type === 'craft' ? log.d20 : log.rollRaw;
       const total = log.type === 'craft' ? log.total : log.rollResult;
       const skill = String(log.type === 'craft' ? 'Artisanat' : (log.rollSkill || '')).trim();
@@ -75,7 +87,7 @@ export function aggregateVttRollDetails(logs = [], { dateKeys = null, resolveCha
       const actionHit = !log.shieldCancelled && targets.some(target => target?.hit) ? 1 : 0;
       const actionCrit = log.isCrit ? 1 : 0;
       const actionFumble = log.isFumble ? 1 : 0;
-      const combat = id ? entryFor(id).combat : null;
+      const combat = id && !isCharacterLogExcluded?.(id, logDate, log) ? entryFor(id).combat : null;
       if (combat) {
         combat.attackActions += 1;
         combat.hits += actionHit;
@@ -132,6 +144,7 @@ export function aggregateVttRollDetails(logs = [], { dateKeys = null, resolveCha
         actionDamage += appliedDamage;
         actionDamageEvents += appliedDamage > 0 ? 1 : 0;
         if (!targetId) continue;
+        if (isCharacterLogExcluded?.(targetId, logDate, log)) continue;
         const current = actualTakenByCharacter.get(targetId) || { damage: 0, events: 0 };
         current.damage += appliedDamage;
         current.events += appliedDamage > 0 ? 1 : 0;
