@@ -1299,14 +1299,41 @@ function _clearTargetRings() {
   Object.values(VS.tokens || {}).forEach(entry => _configureTargetRings(entry?.shape, 'hostile', false));
 }
 
+function _syncTokenResourceLabels(shape, scale=VS.stage?.scaleX?.() ?? 1) {
+  if (!shape) return;
+  // Sous 90 %, afficher seulement la valeur restante et agrandir légèrement le
+  // panneau complet. Son texte conserve ainsi une taille visuelle exploitable.
+  const compact=scale<.9;
+  const fontSize=compact?10:8;
+  const panelScale=Math.min(1.45,Math.max(1,.86/Math.max(.25,scale)));
+  const hp=shape.getAttr('displayHpSnapshot');
+  const hpMax=shape.getAttr('displayHpMaxSnapshot');
+  const pm=shape.getAttr('displayPmSnapshot');
+  const pmMax=shape.getAttr('displayPmMaxSnapshot');
+  const hpText=shape.findOne('.hp-val');
+  const pmText=shape.findOne('.pm-val');
+  if (hpText) {
+    hpText.text(hp==null?'♥?':(compact?`♥${hp}`:`♥${hp}/${hpMax ?? '?'}`));
+    hpText.fontSize(fontSize);
+  }
+  if (pmText) {
+    pmText.text(pm==null?'✦?':(compact?`✦${pm}`:`✦${pmMax>0?`${pm}/${pmMax}`:pm}`));
+    pmText.fontSize(fontSize);
+  }
+  shape.findOne('.resource-panel')?.scale({x:panelScale,y:panelScale});
+}
+
 function _applyTokenDetailToShape(shape, scale=VS.stage?.scaleX?.() ?? 1) {
   if (!shape) return;
   const level=tokenDetailLevel(scale);
   const showIdentity=level!=='compact';
   const showEffects=level==='detailed';
   shape.find('.token-name').forEach(node=>node.visible(showIdentity));
-  shape.find('.resource-value').forEach(node=>node.visible(showIdentity));
+  // Les valeurs PV/PM sont essentielles au jeu : elles restent visibles même
+  // au zoom compact, contrairement au nom et aux détails d'effets.
+  shape.find('.resource-value').forEach(node=>node.visible(true));
   shape.find('.effect-detail').forEach(node=>node.visible(showEffects));
+  _syncTokenResourceLabels(shape, scale);
   shape.setAttr('detailLevel', level);
 }
 
@@ -1819,7 +1846,7 @@ function _patchShapeImpl(id) {
   }
   g.to({ x:e.data.col*CELL+sw*CELL/2, y:e.data.row*CELL+sh*CELL/2, duration:0.12 });
   const health = tokenHealthMeta(ld.displayHp, ld.displayHpMax);
-  const bW=Math.max(56, Math.min(CELL*sw*0.9, 150));
+  const bW=Math.max(62, Math.min(CELL*sw*0.98, 150));
   const hasMana=ld.displayPm!=null || ld.hasMana;
   const hpW=hasMana?(bW-1)/2:bW;
   const fill=g.findOne('.hp-fill');
@@ -1836,6 +1863,7 @@ function _patchShapeImpl(id) {
   }
   g.setAttr('healthTone', health.tone);
   g.setAttr('displayHpSnapshot', health.known ? health.current : null);
+  g.setAttr('displayHpMaxSnapshot', health.known ? health.maximum : null);
   // PM (créatures avec mana ; "✨?" si pas d'estimation côté joueur)
   const _pm=ld.displayPm;
   if (_pm!=null || ld.hasMana) {
@@ -1845,10 +1873,12 @@ function _patchShapeImpl(id) {
     const pmRat=_pmK&&pmMaxKnown?Math.min(1,Math.max(0,_pm/pmMax)):(_pmK?1:0);
     const pmW=bW-hpW-1;
     g.findOne('.pm-fill')?.width(Math.max(2,(pmW-2)*pmRat));
-    g.findOne('.pm-fill')?.fill(_pmK?'#8b5cf6':'#475569');
+    g.findOne('.pm-fill')?.fill(_pmK?'#a78bfa':'#475569');
     g.findOne('.pm-val')?.text(_pmK?(pmMaxKnown?`✦${_pm}/${pmMax}`:`✦${_pm}`):'✦?');
   }
   g.setAttr('displayPmSnapshot', _pm == null ? null : Number(_pm));
+  g.setAttr('displayPmMaxSnapshot', Number.isFinite(Number(ld.displayPmMax)) ? Number(ld.displayPmMax) : null);
+  _syncTokenResourceLabels(g);
   // CA + buff
   const _buff   = ld._activeCaBuff;
   const _buffed = !!_buff;
