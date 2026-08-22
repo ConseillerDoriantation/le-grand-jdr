@@ -1,7 +1,7 @@
 import { STATE } from '../core/state.js';
 import { loadCollection, loadChars, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
-import { openModal, closeModalDirect, confirmModal, promptModal } from '../shared/modal.js';
+import { openModal, pushModal, updateModalContent, closeModalDirect, confirmModal, promptModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete, loadRarities, openRaritiesAdmin } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes, loadingHtml, eyeIcon } from '../shared/html.js';
@@ -13,7 +13,7 @@ import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
 import { DAMAGE_RELATIONS } from '../shared/damage-profile.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
-import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../shared/inventory-history.js';
+import { inventoryHistoryPayload, makeInventoryHistoryEntry, inventoryHistoryEntries } from '../shared/inventory-history.js';
 import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
 import { getArmorTypeOptions } from '../shared/armor-set-settings.js';
 import { openArtisanModal } from './artisan.js';
@@ -32,7 +32,7 @@ import { syncEquipmentAfterInventoryMutation, normalizeStatKey as _normalizeStat
 import { autocompleteHTML, initAutocomplete } from '../shared/autocomplete.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import { getShopCharId, setShopCharId } from '../shared/shop-session.js';
-import { characterPortraitContent } from '../shared/portraits.js';
+import { characterPortraitContent, characterAvatarHtml } from '../shared/portraits.js';
 import { loadConditionLibrary } from '../shared/conditions.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { spellActionCardHtml } from '../shared/spell-action-card.js';
@@ -379,6 +379,7 @@ export async function renderShop() {
 
       <div class="sh-topbar-tools">
         <div class="sh-topbar-character">${charStripHtml}</div>
+        <button class="btn btn-outline btn-sm" data-sh-action="openShopHistory" title="Historique des objets achetés et vendus">🧾 Historique</button>
         <button class="btn btn-outline btn-sm sh-tweaks-btn" data-sh-action="openTweaks" title="Affichage : layout, densité, colonnes">⚙️</button>`;
 
   if (STATE.isAdmin) {
@@ -1937,7 +1938,10 @@ function openShopItemDetail(itemId) {
     actionBtn = `<button class="btn btn-gold btn-sm" data-sh-action="buyFromDetail" data-id="${item.id}">🛒 Acheter pour ${prix} or</button>`;
   }
 
-  openModal('', `
+  // pushModal (et non openModal) : si une modale est déjà ouverte (ex. historique),
+  // la fiche s'EMPILE au lieu de la remplacer → ✕ / Échap / clic overlay reviennent
+  // à la modale précédente. Sans modale de fond, se comporte comme une modale de base.
+  pushModal('', `
   <div class="sh-detail">
     <!-- HERO image avec étoiles + stock -->
     <div class="sh-detail-hero" style="${imgBg}">
@@ -2155,6 +2159,152 @@ async function confirmBuyItem(itemId, directQty) {
     });
   } catch (e) { notifySaveError(e); }
   finally { _buyInProgress = false; }
+}
+
+// ── Historique boutique : achats & ventes du personnage courant ──────────────
+// Source : c.inventoryHistory (déjà alimenté par l'achat `add` et la vente
+// `sell`). Chaque ligne rouvre la fiche de l'objet si l'article existe encore.
+function _shHistoryTimeAgo(ts) {
+  const s = Math.floor((Date.now() - (Number(ts) || 0)) / 1000);
+  if (s < 60) return "à l'instant";
+  const m = Math.floor(s / 60); if (m < 60) return `il y a ${m} min`;
+  const h = Math.floor(m / 60); if (h < 24) return `il y a ${h} h`;
+  const d = Math.floor(h / 24); if (d < 30) return `il y a ${d} j`;
+  return new Date(Number(ts)).toLocaleDateString('fr-FR');
+}
+
+const _SH_HIST_KINDS = {
+  buy:  { ic: '🛒', lbl: 'Acheté' },
+  sell: { ic: '💰', lbl: 'Vendu'  },
+  add:  { ic: '＋', lbl: 'Ajouté' },
+};
+// buy = achat boutique · sell = vente · add = ajout hors boutique (MJ/craft…).
+function _shHistKind(e) {
+  if (e.type === 'sell') return 'sell';
+  return e.source === 'Boutique' ? 'buy' : 'add';
+}
+
+// Construit { title, html } pour un filtre donné : un charId (perso précis) ou
+// '__all' (toute la campagne, MJ). Renvoie null si le perso est introuvable.
+function _shHistoryBuild(filter) {
+  const isMj  = STATE.isAdmin;
+  const chars = STATE.characters || [];
+  if (!isMj) filter = getShopCharId();          // joueur : uniquement son perso
+  else if (!filter) filter = '__all';
+  const isAll = filter === '__all';
+
+  let entries = [];
+  if (isAll) {
+    chars.forEach(ch => {
+      inventoryHistoryEntries(ch.inventoryHistory)
+        .filter(e => e.type === 'add' || e.type === 'sell')
+        .forEach(e => entries.push({ ...e, _ownerChar: ch }));
+    });
+    entries.sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
+    entries = entries.slice(0, 300);
+  } else {
+    const c = chars.find(x => x.id === filter);
+    if (!c) return null;
+    entries = inventoryHistoryEntries(c.inventoryHistory)
+      .filter(e => e.type === 'add' || e.type === 'sell')
+      .map(e => ({ ...e, _ownerChar: c }));
+  }
+
+  const activeChar = isAll ? null : chars.find(x => x.id === filter);
+  const title   = isAll ? '🧾 Historique — toute la campagne' : `🧾 Historique — ${activeChar?.nom || 'Personnage'}`;
+  const subject = isAll ? 'la campagne' : (activeChar?.nom || 'ce personnage');
+  const buys  = entries.filter(e => e.type === 'add').reduce((s, e) => s + (parseInt(e.qty) || 1), 0);
+  const sells = entries.filter(e => e.type === 'sell').reduce((s, e) => s + (parseInt(e.qty) || 1), 0);
+
+  // Filtre par personnage (MJ) : menu déroulant compact (comme les Hauts-faits),
+  // adapté à un grand nombre de joueurs. Recherche si beaucoup de persos.
+  const pickAv = isAll
+    ? '<span class="sh-hist-pick-av sh-hist-pick-av--all">🌍</span>'
+    : characterAvatarHtml(activeChar || {}, { size: 26, className: 'sh-hist-pick-av', title: false });
+  const filterBar = isMj && chars.length ? `
+    <details class="sh-hist-picker">
+      <summary class="sh-hist-pick-summary">
+        ${pickAv}
+        <span class="sh-hist-pick-label"><small>Filtrer par joueur</small><b>${_esc(isAll ? 'Tous les joueurs' : (activeChar?.nom || 'Personnage'))}</b></span>
+        <span class="sh-hist-pick-count">${entries.length}</span>
+        <span class="sh-hist-pick-chevron" aria-hidden="true">⌄</span>
+      </summary>
+      <div class="sh-hist-pick-menu">
+        ${chars.length > 6 ? `<label class="sh-hist-pick-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="Rechercher un joueur…" data-sh-action="histPickSearch" data-sh-on="input" autocomplete="off"></label>` : ''}
+        <button type="button" class="sh-hist-pick-opt${isAll ? ' is-on' : ''}" data-sh-action="historyScope" data-scope="__all">
+          <span class="sh-hist-pick-av sh-hist-pick-av--all">🌍</span>
+          <span class="sh-hist-pick-opt-main"><strong>Tous les joueurs</strong><small>${chars.length} perso${chars.length > 1 ? 's' : ''}</small></span>
+          <span class="sh-hist-pick-opt-check">${isAll ? '✓' : ''}</span>
+        </button>
+        ${chars.map(ch => `
+          <button type="button" class="sh-hist-pick-opt${filter === ch.id ? ' is-on' : ''}" data-sh-action="historyScope" data-scope="${_esc(ch.id)}" data-name="${_esc((ch.nom || '').toLowerCase())}">
+            ${characterAvatarHtml(ch, { size: 26, className: 'sh-hist-pick-av', title: false })}
+            <span class="sh-hist-pick-opt-main"><strong>${_esc(ch.nom || '?')}</strong><small>${calcOr(ch)} or</small></span>
+            <span class="sh-hist-pick-opt-check">${filter === ch.id ? '✓' : ''}</span>
+          </button>`).join('')}
+      </div>
+    </details>` : '';
+
+  const rows = entries.length ? entries.map(e => {
+    const kind      = _shHistKind(e);
+    const meta      = _SH_HIST_KINDS[kind];
+    const item      = e.itemId ? _items.find(i => i.id === e.itemId) : null;
+    const clickable = !!item;
+    const qty       = Math.max(1, parseInt(e.qty) || 1);
+    const media     = e.image
+      ? `<img src="${_esc(e.image)}" alt="">`
+      : `<span>${_esc(e.icon || meta.ic)}</span>`;
+    const ownerCh   = e._ownerChar;
+    const owner     = (isAll && ownerCh)
+      ? `<span class="sh-hist-owner">${characterAvatarHtml(ownerCh, { size: 18, className: 'sh-hist-owner-av', title: false })}<b>${_esc(ownerCh.nom || '?')}</b></span> · `
+      : '';
+    return `<button type="button" class="sh-hist-row sh-hist-row--${kind}${clickable ? '' : ' is-disabled'}"
+        ${clickable ? `data-sh-action="historyOpenItem" data-id="${_esc(e.itemId)}"` : 'disabled'}
+        title="${clickable ? "Ouvrir la fiche de l'objet" : 'Article retiré de la boutique'}">
+      <span class="sh-hist-badge sh-hist-badge--${kind}">${meta.ic} ${meta.lbl}</span>
+      <span class="sh-hist-media">${media}</span>
+      <span class="sh-hist-main">
+        <span class="sh-hist-name">${_esc(e.name || 'Objet')}${qty > 1 ? ` <b>×${qty}</b>` : ''}</span>
+        <span class="sh-hist-meta">${owner}${_esc(_shHistoryTimeAgo(e.at))}${e.note ? ` · ${_esc(e.note)}` : ''}${clickable ? '' : ' · <i>retiré</i>'}</span>
+      </span>
+      ${clickable ? '<span class="sh-hist-arrow" aria-hidden="true">→</span>' : ''}
+    </button>`;
+  }).join('') : `<div class="sh-hist-empty">Aucun achat ni vente pour <strong>${_esc(subject)}</strong>.<br><small>Les objets achetés et vendus apparaîtront ici.</small></div>`;
+
+  const html = `
+    <div class="sh-hist-modal">
+      ${filterBar}
+      <div class="sh-hist-summary">
+        <span class="sh-hist-stat sh-hist-stat--buy"><b>🛒 ${buys}</b> acheté${buys > 1 ? 's' : ''}</span>
+        <span class="sh-hist-stat sh-hist-stat--sell"><b>💰 ${sells}</b> vendu${sells > 1 ? 's' : ''}</span>
+      </div>
+      <div class="sh-hist-list">${rows}</div>
+      <p class="sh-hist-hint">Clique une ligne pour ouvrir la fiche de l'objet.</p>
+    </div>`;
+  return { title, html };
+}
+
+export function openShopHistory(scope) {
+  if (!scope) {
+    const id = getShopCharId();
+    const hasChar = !!STATE.characters?.find(x => x.id === id);
+    scope = hasChar ? id : (STATE.isAdmin ? '__all' : id);
+  }
+  const built = _shHistoryBuild(scope);
+  if (!built) { showNotif('Sélectionne un personnage pour voir son historique.', 'error'); return; }
+  openModal(built.title, built.html);
+}
+
+function _shHistorySetScope(scope) {
+  const built = _shHistoryBuild(scope);
+  if (!built) { showNotif('Sélectionne un personnage pour voir son historique.', 'error'); return; }
+  updateModalContent(built.title, built.html);
+}
+
+function _shHistoryOpenItem(itemId) {
+  // Ouvre la fiche PAR-DESSUS l'historique (pile de modales) : « Échap » ou
+  // fermeture de la fiche ramène à l'historique au lieu de tout fermer.
+  openShopItemDetail(itemId);
 }
 
 export async function restockShopItem(itemId) {
@@ -4273,6 +4423,14 @@ Object.assign(shHandlers, {
   buyItem:        (el, ev) => { ev?.stopPropagation?.(); buyItem(el.dataset.id); },
   confirmBuy:     (el) => confirmBuyItem(el.dataset.id),
   openDetail:     (el) => openShopItemDetail(el.dataset.id),
+  openShopHistory:(el, ev) => { ev?.stopPropagation?.(); openShopHistory(); },
+  historyScope:   (el) => _shHistorySetScope(el.dataset.scope),
+  histPickSearch: (el) => {
+    const q = (el.value || '').trim().toLowerCase();
+    el.closest('.sh-hist-pick-menu')?.querySelectorAll('.sh-hist-pick-opt[data-name]')
+      .forEach(o => { o.hidden = !!q && !(o.dataset.name || '').includes(q); });
+  },
+  historyOpenItem:(el) => _shHistoryOpenItem(el.dataset.id),
   deleteItem:     (el) => deleteShopItem(el.dataset.id),
   editFromDetail: (el) => { closeModalDirect(); openItemModal(el.dataset.id); },
   buyFromDetail:  (el) => { closeModalDirect(); buyItem(el.dataset.id); },
