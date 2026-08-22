@@ -26,6 +26,7 @@ import { _renderCombatTracker } from './vtt-combat-tracker.js';
 import { _renderMjRulerRemote } from './vtt-ruler.js';
 import { _renderLibSection } from './vtt-maplib.js';
 import { _MAP_IMG_DEPS, _renderAllTokens, _renderAnnotLayer, _clearHL, _deselect } from './vtt.js';
+import { isTemporarySummonToken, reserveSummonTokens } from './vtt-summon-utils.js';
 
 let _trayFilter       = 'all'; // filtre actif : 'all'|'player'|'npc'|'enemy'
 let _traySearch       = '';    // filtre texte appliqué à la réserve
@@ -119,12 +120,13 @@ export function _renderTrayImpl() {
 
   const all     = Object.values(VS.tokens).map(e => e.data);
   const onPage  = all.filter(t => t.pageId === VS.activePage?.id);
+  const blockedSummons = reserveSummonTokens(all);
   const reserveSeen = new Set();
   const reserve = all.filter(t => {
     // Réserve = persos/PNJ qui ne sont PAS sur la scène courante (sur une autre
     // page ou non placés) → le MJ peut les (ré)invoquer ici. Les ennemis sont
     // propres à chaque scène (jamais en réserve).
-    if (t.type === 'enemy' || t.pageId === VS.activePage?.id) return false;
+    if (t.type === 'enemy' || isTemporarySummonToken(t) || t.pageId === VS.activePage?.id) return false;
     const key = _tokenEntityKey(t);
     if (!key) return true;
     if (reserveSeen.has(key)) return false;
@@ -161,7 +163,8 @@ export function _renderTrayImpl() {
       ? `<button class="vtt-tray-btn" data-vtt-fn="_vttDuplicateToken" data-vtt-args="${t.id}" title="Dupliquer">＋</button>` : '';
     const delBtn = t.type === 'enemy'
       ? `<button class="vtt-tray-btn vtt-tray-btn-del" data-vtt-fn="_vttDeleteToken" data-vtt-args="${t.id}" title="Supprimer">×</button>` : '';
-    const actionBtn = `<button class="vtt-tray-btn" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="Retirer de la scène">↩</button>`;
+    const isSummon = isTemporarySummonToken(t);
+    const actionBtn = `<button class="vtt-tray-btn" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="${isSummon ? 'Dissiper cette invocation' : 'Retirer de la scène'}">${isSummon ? '✕' : '↩'}</button>`;
     const hpFrac = inCombat && t.type === 'enemy' && hpKnownL
       ? `<span class="vtt-tray-hp-frac" style="color:${hpColor(rat)}">${hp}/${hpm}</span>` : '';
     return `<div class="vtt-tray-item ${VS.selected === t.id ? 'active' : ''}" data-vtt-fn="_vttSelectFromTray" data-vtt-args="${t.id}">
@@ -280,6 +283,7 @@ export function _renderTrayImpl() {
           <strong>Réserve</strong>
           <span>${searched.length}/${reserve.length} disponibles</span>
         </div>
+        ${blockedSummons.length ? `<button type="button" class="vtt-res-clean-summons" data-vtt-fn="_vttClearReserveSummons" title="Supprimer uniquement les invocations temporaires bloquées dans la réserve">🐾 Nettoyer ${blockedSummons.length}</button>` : ''}
       </div>
       <div class="vtt-tray-search">
         <span class="vtt-tray-search-ic">🔍</span>

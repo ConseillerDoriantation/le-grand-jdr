@@ -59,6 +59,7 @@ import {
 import { CELL, CELL_M, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
 import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual } from './vtt-render.js';
 import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenHealthMeta, tokenMovementMeta, tokenRelationTone } from './vtt-token-visual.js';
+import { isTemporarySummonToken, reserveSummonTokens } from './vtt-summon-utils.js';
 import {
   _startRuler, _updateRuler, _endRuler, _clearRuler, _showRulerHover, _hideRulerHover,
   _renderMjRulerRemote, _resetRuler, rulerActive, rulerBusy,
@@ -8974,6 +8975,7 @@ function _initListeners() {
     }
     _renderTraySoon();
     _markCharsReady();
+    void _cleanupReserveSummons();
     // Signale immédiatement au destinataire les objets reçus pendant qu’il est
     // sur le VTT. Le premier snapshot est ignoré pour ne pas annoncer tout
     // l’inventaire existant à l’ouverture de la table.
@@ -9076,6 +9078,7 @@ function _initListeners() {
     _renderTraySoon();
     _renderCombatTrackerSoon();
     void _cleanupReserveDuplicates();
+    void _cleanupReserveSummons();
     _markToksReady();
     _ensureBestiaryForTokens();
     // Joueur : le bouton « Invoquer mon token » dépend de l'état de SON token
@@ -9790,7 +9793,9 @@ async function _vttRetireToken(tokenId) {
   }
   await _persistInvocationState(t);   // sauvegarde PV/PM si c'est une invocation
   try {
-    if (isDuplicate) {
+    // Un summon est temporaire : « retirer » signifie le dissiper. Le mettre
+    // en réserve le rendait impossible à rappeler ou à faire expirer.
+    if (isDuplicate || isTemporarySummonToken(t)) {
       await deleteDoc(_tokRef(tokenId));
       VS.tokens[tokenId]?.shape?.destroy();
       delete VS.tokens[tokenId];
@@ -9846,33 +9851,99 @@ async function _vttSendTokensToReserve(ids) {
   const snapshots = [...new Set(ids)]
     .map(id => VS.tokens[id]?.data)
     .filter(token => token && (STATE.isAdmin || token.ownerId === uid))
-    .map(token => ({ id: token.id, pageId: token.pageId ?? null, visible: token.visible !== false }));
+    .map(token => ({ token, id: token.id, pageId: token.pageId ?? null, visible: token.visible !== false }));
   if (!snapshots.length) return false;
 
-  const results = await Promise.allSettled(snapshots.map(({ id }) => updateDoc(_tokRef(id), { pageId: null, visible: false })));
-  const removed = snapshots.filter((_, index) => results[index].status === 'fulfilled');
+  const results = await Promise.allSettled(snapshots.map(async ({ token, id }) => {
+    if (isTemporarySummonToken(token)) {
+      await _persistInvocationState(token);
+      await deleteDoc(_tokRef(id));
+      return 'dismissed';
+    }
+    await updateDoc(_tokRef(id), { pageId: null, visible: false });
+    return 'reserved';
+  }));
+  const succeeded = snapshots
+    .map((snapshot, index) => ({ ...snapshot, outcome:results[index] }))
+    .filter(entry => entry.outcome.status === 'fulfilled');
+  const reserved = succeeded.filter(entry => entry.outcome.value === 'reserved');
+  const dismissed = succeeded.filter(entry => entry.outcome.value === 'dismissed');
   const failures = results.filter(result => result.status === 'rejected');
   failures.forEach(result => console.error('[vtt] rangement:', result.reason));
-  if (!removed.length) {
+  if (!succeeded.length) {
     showNotif('Impossible de retirer la sélection de la carte.', 'error');
     return false;
   }
 
   _deselect();
-  const count = removed.length;
   const suffix = failures.length ? ` · ${failures.length} échec${failures.length > 1 ? 's' : ''}` : '';
-  showNotif(`${count} token${count > 1 ? 's' : ''} placé${count > 1 ? 's' : ''} en réserve${suffix}.`, failures.length ? 'warning' : 'success', {
+  const parts = [];
+  if (reserved.length) parts.push(`${reserved.length} token${reserved.length > 1 ? 's' : ''} placé${reserved.length > 1 ? 's' : ''} en réserve`);
+  if (dismissed.length) parts.push(`${dismissed.length} invocation${dismissed.length > 1 ? 's' : ''} dissipée${dismissed.length > 1 ? 's' : ''}`);
+  showNotif(`${parts.join(' · ')}${suffix}.`, failures.length ? 'warning' : 'success', reserved.length ? {
     duration: 7000,
     action: {
       label: '↶ Annuler',
       onClick: async () => {
-        await Promise.all(removed.map(({ id, pageId, visible }) => updateDoc(_tokRef(id), { pageId, visible })));
+        await Promise.all(reserved.map(({ id, pageId, visible }) => updateDoc(_tokRef(id), { pageId, visible })));
         showNotif('Retrait de la carte annulé.', 'success');
       },
     },
-  });
+  } : undefined);
   return true;
 }
+
+let _reserveSummonCleanupRunning = false;
+
+async function _cleanupReserveSummons({ notify = false } = {}) {
+  // Attendre les fiches personnages permet de sauvegarder correctement les
+  // PV/PM persistants avant de supprimer les invocations historiques.
+  if (!STATE.isAdmin || !_charsReady || _reserveSummonCleanupRunning) return 0;
+  const blocked = reserveSummonTokens(Object.values(VS.tokens).map(entry => entry?.data).filter(Boolean));
+  if (!blocked.length) {
+    if (notify) showNotif('Aucune invocation bloquée dans la réserve.', 'info');
+    return 0;
+  }
+  _reserveSummonCleanupRunning = true;
+  try {
+    // Sauvegarde les PV/PM persistants avant de retirer les documents temporaires.
+    await Promise.allSettled(blocked.map(token => _persistInvocationState(token)));
+    for (let offset = 0; offset < blocked.length; offset += 400) {
+      const batch = writeBatch(db);
+      blocked.slice(offset, offset + 400).forEach(token => batch.delete(_tokRef(token.id)));
+      await batch.commit();
+    }
+    blocked.forEach(token => {
+      VS.tokens[token.id]?.shape?.destroy();
+      delete VS.tokens[token.id];
+    });
+    if (blocked.some(token => token.id === VS.selected)) _deselect();
+    _renderTraySoon();
+    if (notify) {
+      showNotif(`🧹 ${blocked.length} invocation${blocked.length > 1 ? 's' : ''} bloquée${blocked.length > 1 ? 's' : ''} supprimée${blocked.length > 1 ? 's' : ''}.`, 'success');
+    }
+    return blocked.length;
+  } catch (error) {
+    console.error('[vtt] cleanup reserve summons:', error);
+    if (notify) showNotif('Impossible de nettoyer les invocations bloquées.', 'error');
+    return 0;
+  } finally {
+    _reserveSummonCleanupRunning = false;
+  }
+}
+
+async function _vttClearReserveSummons() {
+  if (!STATE.isAdmin) return;
+  const blocked = reserveSummonTokens(Object.values(VS.tokens).map(entry => entry?.data).filter(Boolean));
+  if (!blocked.length) return showNotif('Aucune invocation bloquée dans la réserve.', 'info');
+  const count = blocked.length;
+  const confirmed = await confirmModal(
+    `Dissiper ${count} invocation${count > 1 ? 's' : ''} bloquée${count > 1 ? 's' : ''} dans la réserve ?<br><br><span style="opacity:.75;font-size:.86em">Les personnages et PNJ permanents ne seront pas touchés.</span>`,
+    { title:'Nettoyer la réserve', confirmLabel:'Dissiper', danger:true },
+  );
+  if (confirmed) await _cleanupReserveSummons({ notify:true });
+}
+
 // Sélecteur générique d'un de mes personnages (invoquer / ranger).
 function _vttMyTokenPicker(toks, fn, title, actionHtml) {
   const cards = toks.map(t => {
@@ -11572,6 +11643,7 @@ export const VTT_ACTIONS = {
   _vttClearAnnots,
   _vttClearAoptSearch,
   _vttClearBuffs,
+  _vttClearReserveSummons,
   _vttCloseAnd,
   _vttCombatTab,
   _vttConditionAdd,
