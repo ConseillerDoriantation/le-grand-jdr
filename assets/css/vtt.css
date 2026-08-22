@@ -9011,21 +9011,6 @@ html:not([data-theme="light"]) .vtt-root {
   background: var(--bg-panel, #1a1a22);
 }
 
-/* Infobulle de token au survol (nom + états/buffs en clair) */
-#vtt-token-tip {
-  position: fixed; z-index: 10000; display: none; pointer-events: none;
-  max-width: 280px; padding: 6px 10px;
-  background: rgba(14,18,28,.97); border: 1px solid var(--border, #2a3350);
-  border-radius: 8px; box-shadow: var(--elev-4);   /* surcouche (infobulle token) */
-  font-size: .74rem; line-height: 1.45; color: var(--text, #e6ebf5);
-}
-#vtt-token-tip .vtt-tip-name { font-weight: 800; margin-bottom: 2px; }
-#vtt-token-tip .vtt-tip-row { color: var(--text-soft, #c8d4e8); }
-#vtt-token-tip .vtt-tip-lbl {
-  color: var(--text-dim, #8a93a8); font-size: .6rem; font-weight: 700;
-  text-transform: uppercase; letter-spacing: .05em; margin-right: 3px;
-}
-
 /* ── Drag & drop tray → carte : surbrillance de la zone de dépôt + curseur ── */
 .vtt-drop-active { outline: 2px dashed var(--gold, #e2b96f); outline-offset: -4px; }
 .vtt-bst-tile[draggable="true"], .vtt-res-line[draggable="true"] { cursor: grab; }
@@ -11797,4 +11782,110 @@ html:not([data-theme="light"]) .vtt-root {
   }
   .vtt-right-col[data-rcol-view="chat"] .vtt-inspector { display: none; }
   .vtt-right-col[data-rcol-view="chat"] .vtt-chat { flex: 1 1 auto; }
+}
+
+/* Tour actif : contraste doré commun au tracker et à l’anneau du canvas. */
+.vct-row.vct-row--active {
+  border-color: rgba(250, 204, 21, .48);
+  border-left-color: #facc15;
+  background: linear-gradient(90deg, rgba(250, 204, 21, .16), rgba(255,255,255,.04));
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, .08);
+  opacity: 1;
+}
+.vct-name { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.vct-order-rank {
+  flex: 0 0 auto;
+  min-width: 15px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: #bae6fd;
+  background: rgba(14,165,233,.12);
+  border: 1px solid rgba(56,189,248,.25);
+  font-size: .56rem;
+  font-variant-numeric: tabular-nums;
+}
+.vct-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vct-active-label {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 999px;
+  color: #fde68a;
+  background: rgba(250, 204, 21, .14);
+  border: 1px solid rgba(250, 204, 21, .3);
+  font-size: .54rem;
+  line-height: 1.25;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.vct-turn-btn {
+  width: 25px;
+  height: 25px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.045);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.vct-turn-btn:hover { color: #fde68a; border-color: rgba(250,204,21,.45); }
+.vct-turn-btn.is-active {
+  color: #facc15;
+  border-color: rgba(250,204,21,.55);
+  background: rgba(250,204,21,.15);
+  box-shadow: 0 0 10px rgba(245,158,11,.18);
+}
+
+/* Ordre de passage : trois commandes compactes qui restent lisibles dans le
+   tracker étroit sans écraser le nom ni les indicateurs d'action. */
+.vct-order-controls {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 18px 25px 18px;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+}
+.vct-order-btn {
+  width: 18px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 6px;
+  background: rgba(255,255,255,.035);
+  color: var(--text-dim);
+  font-size: .7rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.vct-order-btn:hover:not(:disabled) {
+  color: #e0f2fe;
+  border-color: rgba(56,189,248,.4);
+  background: rgba(56,189,248,.1);
+}
+.vct-order-btn:disabled { opacity: .22; cursor: default; }
+.vct-mj-btn--next {
+  color: #fde68a;
+  border-color: rgba(250,204,21,.32);
+  background: rgba(250,204,21,.1);
+}
+.vct-mj-btn--next:hover {
+  border-color: rgba(250,204,21,.55);
+  background: rgba(250,204,21,.17);
+}
+
+@media (max-width: 1050px), (max-height: 720px) {
+  .vct-order-controls { grid-template-columns: 16px 23px 16px; gap: 2px; }
+  .vct-order-btn { width: 16px; }
+  .vct-turn-btn { width: 23px; height: 23px; }
+  .vct-active-label { display: none; }
 }

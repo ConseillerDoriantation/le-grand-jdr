@@ -16,12 +16,33 @@ import { db, updateDoc, setDoc, addDoc, serverTimestamp, writeBatch, deleteField
 import { showNotif } from '../../shared/notifications.js';
 import { _sesRef, _tokRef, _logCol } from './vtt-refs.js';
 import { _live } from './vtt-effective.js';
+import { normalizeTokenTurnOrder } from './vtt-token-visual.js';
 import { bumpHeal } from '../../shared/stats.js';
 import {
   CONDITION_BY_ID, _rollDiceDetailed, _setHp, _persistInvocationState,
   _vttTriggerConcentrationSave, _vttBreakConcentrationEffects, _vttExpireSpellZones,
   _vttLogTargetFields,
 } from './vtt.js';
+
+function _turnOrderForActivePage() {
+  const pageId=VS.activePage?.id;
+  if (!pageId) return [];
+  const tokens=Object.values(VS.tokens || {}).map(entry=>entry?.data)
+    .filter(token=>token && token.pageId===pageId);
+  return normalizeTokenTurnOrder(
+    VS.session?.combat?.turnOrders?.[pageId] || [],
+    tokens,
+    token=>_live(token).displayName||token.name||token.id,
+  );
+}
+
+async function _saveTurnOrder(order, activeTokenId=VS.session?.combat?.activeTokenId ?? null) {
+  const pageId=VS.activePage?.id;
+  if (!pageId) return;
+  const turnOrders={...(VS.session?.combat?.turnOrders||{}),[pageId]:order};
+  await setDoc(_sesRef(),{combat:{...VS.session?.combat,turnOrders,activeTokenId}},{merge:true})
+    .catch(()=>showNotif("Impossible d’enregistrer l’ordre de passage",'error'));
+}
 
 export async function _vttResetTurn(id) {
   if (!STATE.isAdmin) return;
@@ -51,10 +72,42 @@ export async function _vttToggleTurnFlag(id, field) {
     .catch(() => showNotif("Erreur de suivi du tour", "error"));
 }
 
+export async function _vttSetActiveTurn(id) {
+  if (!STATE.isAdmin || !VS.session?.combat?.active) return;
+  const token=VS.tokens[id]?.data;
+  if (!token) return;
+  const current=VS.session.combat.activeTokenId || null;
+  const activeTokenId=current===id ? null : id;
+  await _saveTurnOrder(_turnOrderForActivePage(),activeTokenId);
+}
+
+export async function _vttMoveTurnOrder(id, delta) {
+  if (!STATE.isAdmin || !VS.session?.combat?.active) return;
+  const order=_turnOrderForActivePage();
+  const token=VS.tokens[id]?.data;
+  if (!token) return;
+  const enemyGroup=token.type==='enemy';
+  const peers=order.filter(tokenId=>(VS.tokens[tokenId]?.data?.type==='enemy')===enemyGroup);
+  const peerFrom=peers.indexOf(id), peerTo=Math.max(0,Math.min(peers.length-1,peerFrom+(parseInt(delta)||0)));
+  if (peerFrom<0 || peerFrom===peerTo) return;
+  const otherId=peers[peerTo], from=order.indexOf(id), to=order.indexOf(otherId);
+  [order[from],order[to]]=[order[to],order[from]];
+  await _saveTurnOrder(order);
+}
+
+export async function _vttNextActiveTurn() {
+  if (!STATE.isAdmin || !VS.session?.combat?.active) return;
+  const order=_turnOrderForActivePage();
+  if (!order.length) return showNotif('Aucun token sur cette scène','info');
+  const current=order.indexOf(VS.session.combat.activeTokenId);
+  const activeTokenId=order[(current+1)%order.length];
+  await _saveTurnOrder(order,activeTokenId);
+}
+
 export async function _vttToggleCombat() {
   if (!STATE.isAdmin) return;
   const active=!VS.session?.combat?.active;
-  await setDoc(_sesRef(),{combat:{active,round:active?1:0}},{merge:true});
+  await setDoc(_sesRef(),{combat:{...VS.session?.combat,active,round:active?1:0,activeTokenId:null}},{merge:true});
   if (active) {
     const b=writeBatch(db);
     // Au démarrage du combat (round 1), on convertit les conditions à durée
@@ -91,7 +144,7 @@ export async function _vttNextRound() {
   // l'entrée en combat (on préserve l'état actif courant). En combat : inchangé.
   const wasActive = !!VS.session?.combat?.active;
   const round=(VS.session?.combat?.round ?? 0)+1;
-  await setDoc(_sesRef(),{combat:{active:wasActive,round}},{merge:true});
+  await setDoc(_sesRef(),{combat:{...VS.session?.combat,active:wasActive,round,activeTokenId:null}},{merge:true});
 
   // ── Application des effets périodiques en début de round (avant cleanup) ──
   // DoT : dégâts/tour · Regen : soin/tour
