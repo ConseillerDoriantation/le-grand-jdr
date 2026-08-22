@@ -56,8 +56,8 @@ export function _buildTokenVisual(t, ld, condById) {
   // un vrai pied de 17 px au nom et aux ressources, sans aucun débordement.
   // Un ratio identique évite l'effet de portrait aplati sur les tokens 1×1.
   // Le léger décalage vers le haut conserve le pied d'informations dans la case.
-  const rx = CELL*sw*0.37, ry = CELL*sh*0.37, portraitY = -8;
-  const bW = Math.max(56, Math.min(CELL*sw*0.9, 150));
+  const rx = CELL*sw*0.37, ry = CELL*sh*0.37, portraitY = -9;
+  const bW = Math.max(62, Math.min(CELL*sw*0.98, 150));
   const nameW = bW;
   const typeColor = TYPE_COLOR[t.type] ?? '#94a3b8';
   const health = tokenHealthMeta(ld.displayHp, ld.displayHpMax);
@@ -71,7 +71,9 @@ export function _buildTokenVisual(t, ld, condById) {
   g.setAttr('activeEffectsSnapshot', effects.map(({kind,key,icon,label})=>({kind,key,icon,label})));
   g.setAttr('healthTone', health.tone);
   g.setAttr('displayHpSnapshot', health.known ? health.current : null);
+  g.setAttr('displayHpMaxSnapshot', health.known ? health.maximum : null);
   g.setAttr('displayPmSnapshot', ld.displayPm == null ? null : Number(ld.displayPm));
+  g.setAttr('displayPmMaxSnapshot', Number.isFinite(Number(ld.displayPmMax)) ? Number(ld.displayPmMax) : null);
 
   // Ombre au sol + fond : le token se détache même sur une battlemap chargée.
   g.add(new K.Ellipse({ x:0, y:portraitY+4, radiusX:rx+4, radiusY:ry+4, fill:'rgba(0,0,0,.48)',
@@ -210,7 +212,7 @@ export function _buildTokenVisual(t, ld, condById) {
   // Le nom dispose de sa propre ligne SOUS le portrait. Il ne recouvre donc ni
   // le visage, ni le token de la ligne suivante.
   const portraitBottom=portraitY+ry;
-  const nameH=8, nameY=portraitBottom+1;
+  const nameH=8, nameY=portraitBottom;
   g.add(new K.Rect({ x:-nameW/2, y:nameY, width:nameW, height:nameH, fill:'rgba(5,8,14,.94)',
     stroke:typeColor, strokeWidth:1, cornerRadius:4, shadowColor:'#000', shadowBlur:4, shadowOpacity:.6,
     listening:false, name:'name-bg token-name' }));
@@ -224,31 +226,43 @@ export function _buildTokenVisual(t, ld, condById) {
   // toujours lisibles ; sans mana, les PV récupèrent toute la largeur.
   const _pm0=ld.displayPm;
   const hasMana=_pm0!=null || ld.hasMana;
-  const RESH=7, resourceY=nameY+nameH+1;
+  const RESH=12, resourceY=nameY+nameH-1;
   const hpW=hasMana?(bW-1)/2:bW;
-  g.add(new K.Rect({ x:-bW/2, y:resourceY, width:bW, height:RESH, fill:'rgba(5,8,14,.96)',
-    stroke:'rgba(255,255,255,.22)', strokeWidth:1, cornerRadius:3.5, listening:false, name:'resource-bg' }));
-  g.add(new K.Rect({ x:-bW/2+1, y:resourceY+1, width:Math.max(2,(hpW-2)*health.ratio), height:RESH-2,
-    fill:health.color, cornerRadius:2.5, listening:false, name:'hp-fill' }));
-  g.add(new K.Text({ x:-bW/2, y:resourceY, width:hpW, height:RESH, align:'center', verticalAlign:'middle',
-    text:health.known?`♥${health.current}/${health.maximum}`:'♥?', fontSize:5.8, fontStyle:'bold', fill:'#fff',
-    shadowColor:'#000', shadowBlur:2, shadowOpacity:1,
-    fontFamily:'Inter,sans-serif', listening:false, name:'hp-val resource-value' }));
+  const resources=new K.Group({ x:0, y:resourceY+RESH/2, offsetY:RESH/2,
+    listening:false, name:'resource-panel' });
+  resources.add(new K.Rect({ x:-bW/2, y:0, width:bW, height:RESH, fill:'rgba(5,8,14,.98)',
+    stroke:'rgba(255,255,255,.4)', strokeWidth:1, cornerRadius:5,
+    shadowColor:'#000', shadowBlur:4, shadowOpacity:.72, listening:false, name:'resource-bg' }));
+  resources.add(new K.Rect({ x:-bW/2+1, y:1, width:Math.max(2,(hpW-2)*health.ratio), height:RESH-2,
+    fill:health.color, cornerRadius:4, listening:false, name:'hp-fill' }));
   if (hasMana) {
     const _pmKnown=_pm0!=null;
     const pmMax0=Number(ld.displayPmMax);
     const pmMaxKnown=Number.isFinite(pmMax0)&&pmMax0>0;
     const pmRat0=_pmKnown&&pmMaxKnown?Math.min(1,Math.max(0,_pm0/pmMax0)):(_pmKnown?1:0);
     const pmX=-bW/2+hpW+1, pmW=bW-hpW-1;
-    g.add(new K.Rect({ x:pmX, y:resourceY+1, width:Math.max(2,(pmW-2)*pmRat0), height:RESH-2,
-      fill:_pmKnown?'#8b5cf6':'#475569', cornerRadius:2.5, listening:false, name:'pm-fill' }));
-    g.add(new K.Line({ points:[pmX-.5,resourceY+1,pmX-.5,resourceY+RESH-1],
-      stroke:'rgba(255,255,255,.3)', strokeWidth:1, listening:false }));
-    g.add(new K.Text({ x:pmX, y:resourceY, width:pmW, height:RESH, align:'center', verticalAlign:'middle',
-      text:_pmKnown?(pmMaxKnown?`✦${_pm0}/${pmMax0}`:`✦${_pm0}`):'✦?', fontSize:5.8, fontStyle:'bold', fill:'#fff',
-      shadowColor:'#000', shadowBlur:2, shadowOpacity:1,
+    resources.add(new K.Rect({ x:pmX, y:1, width:Math.max(2,(pmW-2)*pmRat0), height:RESH-2,
+      fill:_pmKnown?'#a78bfa':'#475569', cornerRadius:4, listening:false, name:'pm-fill' }));
+    resources.add(new K.Line({ points:[pmX-.5,1,pmX-.5,RESH-1],
+      stroke:'rgba(255,255,255,.55)', strokeWidth:1, listening:false }));
+  }
+  // Voile sombre uniforme : les chiffres restent nets sur toutes les couleurs
+  // de remplissage sans nécessiter de contour autour des caractères.
+  resources.add(new K.Rect({ x:-bW/2+1, y:1, width:bW-2, height:RESH-2,
+    fill:'rgba(0,0,0,.27)', cornerRadius:4, listening:false, name:'resource-contrast' }));
+  resources.add(new K.Text({ x:-bW/2, y:0, width:hpW, height:RESH, align:'center', verticalAlign:'middle',
+    text:health.known?`♥${health.current}/${health.maximum}`:'♥?', fontSize:8, fontStyle:'bold', fill:'#fff',
+    fontFamily:'Inter,sans-serif', listening:false, name:'hp-val resource-value' }));
+  if (hasMana) {
+    const _pmKnown=_pm0!=null;
+    const pmMax0=Number(ld.displayPmMax);
+    const pmMaxKnown=Number.isFinite(pmMax0)&&pmMax0>0;
+    const pmX=-bW/2+hpW+1, pmW=bW-hpW-1;
+    resources.add(new K.Text({ x:pmX, y:0, width:pmW, height:RESH, align:'center', verticalAlign:'middle',
+      text:_pmKnown?(pmMaxKnown?`✦${_pm0}/${pmMax0}`:`✦${_pm0}`):'✦?', fontSize:8, fontStyle:'bold', fill:'#fff',
       fontFamily:'Inter,sans-serif', listening:false, name:'pm-val resource-value' }));
   }
+  g.add(resources);
 
   // Badges contextuels masqués par défaut : la couche interactive les active
   // seulement quand le token est empilé ou sélectionné en combat.
