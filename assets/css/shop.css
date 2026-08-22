@@ -5866,6 +5866,113 @@ body.shop-cols-5 .sh-page--v2 .sh-item-grid { grid-template-columns: repeat(5, m
   background: var(--bg-card, rgba(13,21,32,.96));
 }
 
+/* ─── Historique boutique (achats & ventes) ──────────────────────────── */
+.sh-hist-modal { display: flex; flex-direction: column; gap: .6rem; min-width: min(440px, 86vw); max-width: 520px; }
+/* Filtre par personnage (MJ) : menu déroulant compact (façon Hauts-faits) */
+.sh-hist-picker { position: relative; }
+.sh-hist-pick-summary {
+  display: flex; align-items: center; gap: .5rem; cursor: pointer; list-style: none;
+  padding: .4rem .6rem; border-radius: 10px;
+  border: 1px solid rgba(124,160,220,.16); background: rgba(8,14,24,.5);
+}
+.sh-hist-pick-summary::-webkit-details-marker { display: none; }
+.sh-hist-pick-summary:hover { border-color: rgba(126,176,255,.4); }
+.sh-hist-pick-av { flex-shrink: 0; }
+.sh-hist-pick-av--all {
+  width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(126,176,255,.15); border: 1px solid rgba(126,176,255,.35); font-size: .9rem;
+}
+.sh-hist-pick-label { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.1; }
+.sh-hist-pick-label small { font-size: .6rem; color: var(--text-muted, #6c7d97); text-transform: uppercase; letter-spacing: .04em; }
+.sh-hist-pick-label b { font-size: .82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sh-hist-pick-count { flex-shrink: 0; font-size: .68rem; font-weight: 700; color: var(--text-soft, #c8d4e8); background: rgba(255,255,255,.06); padding: .1rem .5rem; border-radius: 99px; }
+.sh-hist-pick-chevron { flex-shrink: 0; color: var(--text-muted, #6c7d97); transition: transform .15s ease; }
+.sh-hist-picker[open] .sh-hist-pick-chevron { transform: rotate(180deg); }
+.sh-hist-pick-menu {
+  display: flex; flex-direction: column; gap: .15rem; margin-top: .35rem;
+  max-height: min(46vh, 340px); overflow-y: auto; scrollbar-width: thin;
+  padding: .3rem; border-radius: 10px;
+  border: 1px solid rgba(124,160,220,.16); background: rgba(8,14,24,.7);
+}
+.sh-hist-pick-search { display: flex; align-items: center; gap: .4rem; padding: .35rem .5rem; margin-bottom: .2rem; border-radius: 8px; background: rgba(255,255,255,.04); color: var(--text-muted, #6c7d97); }
+.sh-hist-pick-search input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--text, #e8ecf4); font-size: .78rem; }
+.sh-hist-pick-opt {
+  display: flex; align-items: center; gap: .5rem; width: 100%; text-align: left;
+  padding: .35rem .45rem; border-radius: 8px; cursor: pointer;
+  border: 1px solid transparent; background: transparent; color: var(--text, #e8ecf4);
+}
+.sh-hist-pick-opt:hover { background: rgba(255,255,255,.05); }
+.sh-hist-pick-opt.is-on { background: color-mix(in oklab, #7eb0ff 14%, transparent); border-color: color-mix(in oklab, #7eb0ff 34%, transparent); }
+.sh-hist-pick-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.1; }
+.sh-hist-pick-opt-main strong { font-size: .8rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sh-hist-pick-opt-main small { font-size: .64rem; color: var(--text-muted, #6c7d97); }
+.sh-hist-pick-opt-check { flex-shrink: 0; color: #7eb0ff; font-weight: 800; width: 1rem; text-align: center; }
+[data-theme="light"] .sh-hist-pick-summary,
+[data-theme="light"] .sh-hist-pick-menu { background: var(--bg-card); }
+[data-theme="light"] .sh-hist-pick-opt.is-on { background: rgba(37,99,235,.1); border-color: #2563eb; }
+
+/* Badge de type (achat / vente / ajout) */
+.sh-hist-badge {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: .2rem;
+  padding: .18rem .45rem; border-radius: 6px; font-size: .64rem; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .02em; white-space: nowrap;
+  border: 1px solid var(--sh-hist-c, #4f8cff);
+  color: var(--sh-hist-c, #4f8cff);
+  background: color-mix(in oklab, var(--sh-hist-c, #4f8cff) 14%, transparent);
+}
+/* Portrait du propriétaire (vue campagne) devant son nom */
+.sh-hist-owner { display: inline-flex; align-items: center; gap: .3rem; }
+.sh-hist-owner-av { display: inline-flex; }
+.sh-hist-owner b { color: var(--text-soft, #c8d4e8); font-weight: 700; }
+[data-theme="light"] .sh-hist-chip { background: var(--bg-card); }
+[data-theme="light"] .sh-hist-chip.is-on { background: rgba(37,99,235,.1); border-color: #2563eb; }
+.sh-hist-summary { display: flex; gap: .5rem; flex-wrap: wrap; }
+.sh-hist-stat {
+  flex: 1 1 auto; display: flex; align-items: baseline; gap: .35rem;
+  padding: .45rem .65rem; border-radius: 10px; font-size: .78rem;
+  color: var(--text-soft, #c8d4e8);
+  border: 1px solid rgba(124,160,220,.16); background: rgba(124,160,220,.06);
+}
+.sh-hist-stat b { font-size: .95rem; color: var(--text, #e8ecf4); }
+.sh-hist-stat--buy  b { color: #7eb0ff; }
+.sh-hist-stat--sell b { color: #e8b84b; }
+.sh-hist-list {
+  display: flex; flex-direction: column; gap: .3rem;
+  max-height: min(56vh, 460px); overflow-y: auto; scrollbar-width: thin;
+  padding-right: 2px;
+}
+.sh-hist-row {
+  display: flex; align-items: center; gap: .6rem; width: 100%;
+  padding: .45rem .55rem; border-radius: 10px; cursor: pointer; text-align: left;
+  border: 1px solid rgba(124,160,220,.14);
+  border-left: 3px solid var(--sh-hist-c, #4f8cff);
+  background: rgba(8,14,24,.5); color: var(--text, #e8ecf4);
+  transition: transform .1s ease, border-color .1s ease, background .1s ease;
+}
+.sh-hist-row--buy  { --sh-hist-c: #4f8cff; }
+.sh-hist-row--sell { --sh-hist-c: #e8b84b; }
+.sh-hist-row--add  { --sh-hist-c: #22c38e; }
+.sh-hist-row:hover:not(.is-disabled) { transform: translateX(2px); background: rgba(124,160,220,.1); border-color: rgba(126,176,255,.4); }
+.sh-hist-row.is-disabled { cursor: default; opacity: .6; }
+.sh-hist-media {
+  flex-shrink: 0; width: 34px; height: 34px; border-radius: 8px;
+  display: grid; place-items: center; overflow: hidden; font-size: 1.1rem;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(124,160,220,.14);
+}
+.sh-hist-media img { width: 100%; height: 100%; object-fit: cover; }
+.sh-hist-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .1rem; }
+.sh-hist-name { font-size: .84rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sh-hist-name b { color: var(--text-dim, #9db3d6); font-weight: 600; }
+.sh-hist-meta { font-size: .68rem; color: var(--text-muted, #6c7d97); }
+.sh-hist-meta b { color: var(--text-soft, #c8d4e8); font-weight: 700; }
+.sh-hist-meta i { font-style: italic; opacity: .8; }
+.sh-hist-arrow { flex-shrink: 0; color: var(--text-muted, #6c7d97); font-size: 1rem; }
+.sh-hist-empty { text-align: center; padding: 1.4rem 1rem; color: var(--text-muted, #6c7d97); font-size: .82rem; line-height: 1.6; }
+.sh-hist-hint { margin: 0; text-align: center; font-size: .68rem; color: var(--text-muted, #6c7d97); }
+[data-theme="light"] .sh-hist-row { background: var(--bg-card); }
+[data-theme="light"] .sh-hist-stat,
+[data-theme="light"] .sh-hist-media { background: rgba(37,99,235,.05); border-color: rgba(37,99,235,.14); }
+
 /* HERO image */
 .sh-detail-hero {
   position: relative;
