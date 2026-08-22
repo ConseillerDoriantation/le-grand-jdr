@@ -9594,6 +9594,26 @@ html:not([data-theme="light"]) .vtt-root {
   font-weight: 750;
 }
 
+.vtt-res-clean-summons {
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 3px 8px;
+  border: 1px solid rgba(251,146,60,.35);
+  border-radius: 8px;
+  background: rgba(124,45,18,.18);
+  color: #fed7aa;
+  font: inherit;
+  font-size: .64rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.vtt-res-clean-summons:hover {
+  border-color: rgba(251,146,60,.58);
+  background: rgba(154,52,18,.28);
+  color: #fff7ed;
+}
+
 #vtt-reserve-body .vtt-tray-search {
   padding: 0 .45rem .3rem;
 }
