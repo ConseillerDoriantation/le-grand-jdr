@@ -58,6 +58,7 @@ import {
 } from './vtt-refs.js';
 import { CELL, CELL_M, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
 import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual } from './vtt-render.js';
+import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenHealthMeta, tokenMovementMeta, tokenRelationTone } from './vtt-token-visual.js';
 import {
   _startRuler, _updateRuler, _endRuler, _clearRuler, _showRulerHover, _hideRulerHover,
   _renderMjRulerRemote, _resetRuler, rulerActive, rulerBusy,
@@ -92,7 +93,8 @@ import {
   _vttConditionEdit, _vttConditionEditSave, _vttEnsureConditionsLoaded, _vttConditionGlossary,
 } from './vtt-conditions.js';
 import {
-  _vttResetTurn, _vttToggleTurnFlag, _vttToggleCombat, _vttNextRound,
+  _vttMoveTurnOrder, _vttNextActiveTurn, _vttResetTurn, _vttSetActiveTurn,
+  _vttToggleTurnFlag, _vttToggleCombat, _vttNextRound,
 } from './vtt-combat-turns.js';
 import {
   _vttApplyEnchantBuffs, _vttApplyAfflictions, _vttApplyRegeneration,
@@ -220,10 +222,13 @@ function _vttCourirAndClose(srcId) {
   _closeActionModal();
 }
 
-// ── Actions de base : Esquiver / Se cacher / Se désengager (état sur soi) ──
+// ── Actions de base : Esquiver / Se désengager (état sur soi) ──
 async function _vttSelfAction(srcId, condId) {
   const t = VS.tokens[srcId]?.data; if (!t) return;
   if (!_canControlToken(t)) return;
+  // L'action libre de furtivité est volontairement désactivée. Cette liste
+  // blanche bloque aussi un ancien onglet resté ouvert ou un appel direct.
+  if (!['dodge', 'disengaged'].includes(condId)) return;
   const lib = CONDITION_BY_ID[condId]; if (!lib) return;
   const round = VS.session?.combat?.round ?? 0;
   const dur = (Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0) ? lib.defaultDuration : 1;
@@ -955,6 +960,7 @@ function _initCanvas(container) {
   VS.stage = new K.Stage({ container, width: container.clientWidth, height: container.clientHeight });
   // Le calque d'effets DOM (sceaux/impacts) suit pan + zoom du stage.
   VS.stage.on('xChange yChange scaleXChange scaleYChange', _syncSigilLayer);
+  VS.stage.on('scaleXChange', _applyTokenDetailLevel);
   // Drag & drop : poser une créature du bestiaire / un token de la réserve à la case voulue.
   _wireTrayDrop(container);
   // Konva recommande max 3-5 layers. On consolide bg+map dans `backLayer` et
@@ -1244,55 +1250,127 @@ function _initCanvas(container) {
 //  cross-domaine du clic de sélection sont injectés via _MAP_IMG_DEPS.]
 export const _MAP_IMG_DEPS = { hideActBar: _hideActBar, clearHL: _clearHL, renderInspector: _renderInspector };
 
-// ── Infobulle de token au survol (nom + états/buffs en clair) ──────────────
-// Les badges d'états/buffs sur les tokens sont des icônes canvas non survolables.
-// Ce tooltip DOM explique ce qu'ils signifient sans avoir à sélectionner le token.
-const _BUFF_LABEL = {
-  dot: 'Dégâts par tour', dmg_bonus: 'Bonus de dégâts (arme)', move_bonus: 'Déplacement +',
-  move_debuff: 'Déplacement −', range_bonus: 'Portée +', toucher_bonus: 'Bonus au toucher',
-  ca: 'Bonus de CA', shield_reactive: 'Bouclier réactif', enchantment: 'Enchantement',
-  affliction: 'Affliction', weapon_replace: 'Arme invoquée', suspended_spell: 'Sort suspendu',
-  lucky_reroll: 'Relance chanceuse', regen: 'Régénération',
-};
-let _tokenTipEl = null;
-function _tokenTipEnsure() {
-  if (_tokenTipEl) return _tokenTipEl;
-  _tokenTipEl = document.createElement('div');
-  _tokenTipEl.id = 'vtt-token-tip';
-  document.body.appendChild(_tokenTipEl);
-  return _tokenTipEl;
-}
-function _hideTokenTip() { if (_tokenTipEl) _tokenTipEl.style.display = 'none'; }
-function _moveTokenTip(e) {
-  if (!_tokenTipEl || _tokenTipEl.style.display === 'none' || !e?.evt) return;
-  const pad = 14;
-  let x = e.evt.clientX + pad, y = e.evt.clientY + pad;
-  const w = _tokenTipEl.offsetWidth, h = _tokenTipEl.offsetHeight;
-  if (x + w > window.innerWidth - 8)  x = e.evt.clientX - w - pad;
-  if (y + h > window.innerHeight - 8) y = e.evt.clientY - h - pad;
-  _tokenTipEl.style.left = `${Math.max(4, x)}px`;
-  _tokenTipEl.style.top  = `${Math.max(4, y)}px`;
-}
-function _showTokenTip(id, e) {
-  const td = VS.tokens[id]?.data; if (!td) return;
-  const round = VS.session?.combat?.round ?? 0;
-  const active = (arr) => (arr || []).filter(x => x.expiresAtRound == null || round === 0 || round <= x.expiresAtRound);
-  const conds = active(td.conditions), buffs = active(td.buffs);
-  if (!conds.length && !buffs.length) { _hideTokenTip(); return; }   // rien à expliquer
-  const ld = _live(td);
-  const tl = (x) => (x.expiresAtRound != null && round > 0) ? ` (${x.expiresAtRound - round + 1}t)` : '';
-  let html = `<div class="vtt-tip-name">${_esc(ld.displayName ?? td.name ?? '?')}</div>`;
-  if (conds.length) html += `<div class="vtt-tip-row"><span class="vtt-tip-lbl">États</span>${conds.map(c => { const l = CONDITION_BY_ID[c.id]; return ` ${l?.icon || '⛓'} ${_esc(l?.label || c.id)}${tl(c)}`; }).join(' ·')}</div>`;
-  if (buffs.length) html += `<div class="vtt-tip-row"><span class="vtt-tip-lbl">Effets</span>${buffs.map(b => { const lbl = _BUFF_LABEL[b.type] || b.sortLabel || 'Effet'; const src = (b.sortLabel && _BUFF_LABEL[b.type]) ? ` (${_esc(b.sortLabel)})` : ''; return ` ${_esc(lbl)}${src}${tl(b)}`; }).join(' ·')}</div>`;
-  const el = _tokenTipEnsure();
-  el.innerHTML = html;
-  el.style.display = 'block';
-  _moveTokenTip(e);
-}
-
 // ═══════════════════════════════════════════════════════════════════
 // TOKENS — shapes Konva
 // ═══════════════════════════════════════════════════════════════════
+const _TOKEN_RING_TONES = {
+  selected: { stroke:'#60a5fa', shadow:'#2563eb' },
+  friendly: { stroke:'#4ade80', shadow:'#16a34a' },
+  hostile:  { stroke:'#fb7185', shadow:'#dc2626' },
+};
+
+function _setRingTone(ring, tone='selected') {
+  if (!ring) return;
+  const colors=_TOKEN_RING_TONES[tone] || _TOKEN_RING_TONES.selected;
+  ring.stroke(colors.stroke);
+  ring.shadowColor(colors.shadow);
+}
+
+function _setSelectionRing(id, visible=true) {
+  const ring=VS.tokens[id]?.shape?.findOne('.sel');
+  if (!ring) return;
+  _setRingTone(ring, 'selected');
+  ring.visible(visible);
+}
+
+function _targetTone(srcId, tgtId, friendlyAction=false) {
+  return tokenRelationTone(VS.tokens[srcId]?.data, VS.tokens[tgtId]?.data, friendlyAction);
+}
+
+function _configureTargetRings(shape, tone='hostile', visible=true) {
+  const ring=shape?.findOne('.target');
+  const inner=shape?.findOne('.target-inner');
+  if (!ring) return;
+  _setRingTone(ring, tone);
+  ring.dash(tone==='hostile'?[6,3]:[]);
+  ring.visible(visible);
+  if (inner) {
+    _setRingTone(inner, tone);
+    inner.visible(visible && tone==='friendly');
+  }
+}
+
+function _setTargetRing(id, tone='hostile', visible=true) {
+  _configureTargetRings(VS.tokens[id]?.shape, tone, visible);
+}
+
+function _clearTargetRings() {
+  Object.values(VS.tokens || {}).forEach(entry => _configureTargetRings(entry?.shape, 'hostile', false));
+}
+
+function _applyTokenDetailToShape(shape, scale=VS.stage?.scaleX?.() ?? 1) {
+  if (!shape) return;
+  const level=tokenDetailLevel(scale);
+  const showIdentity=level!=='compact';
+  const showEffects=level==='detailed';
+  shape.find('.token-name').forEach(node=>node.visible(showIdentity));
+  shape.find('.resource-value').forEach(node=>node.visible(showIdentity));
+  shape.find('.effect-detail').forEach(node=>node.visible(showEffects));
+  shape.setAttr('detailLevel', level);
+}
+
+function _applyTokenDetailLevel() {
+  const scale=VS.stage?.scaleX?.() ?? 1;
+  Object.values(VS.tokens || {}).forEach(entry=>_applyTokenDetailToShape(entry?.shape, scale));
+  VS.layers.token?.batchDraw();
+}
+
+function _stackPeers(token) {
+  if (!token) return [];
+  const typeRank={player:0,npc:1,enemy:2};
+  return Object.values(VS.tokens || {})
+    .filter(entry=>{
+      const other=entry?.data;
+      return other && entry.shape?.visible() && other.pageId===token.pageId
+        && other.col===token.col && other.row===token.row;
+    })
+    .map(entry=>entry.data)
+    .sort((a,b)=>{
+      const controlled=Number(_canControlToken(b))-Number(_canControlToken(a));
+      if (controlled) return controlled;
+      const type=(typeRank[a.type]??9)-(typeRank[b.type]??9);
+      if (type) return type;
+      return String(_live(a).displayName||a.name||a.id).localeCompare(String(_live(b).displayName||b.name||b.id));
+    });
+}
+
+function _syncTokenStackVisuals() {
+  Object.values(VS.tokens || {}).forEach(entry=>{
+    const count=_stackPeers(entry?.data).length;
+    const visible=count>1;
+    entry?.shape?.findOne('.stack-badge')?.visible(visible);
+    const label=entry?.shape?.findOne('.stack-count');
+    if (label) { label.text(`×${count}`); label.visible(visible); }
+  });
+  VS.layers.token?.batchDraw();
+}
+
+function _nextStackToken(token) {
+  const peers=_stackPeers(token);
+  if (peers.length<2) return token?.id || null;
+  const current=peers.findIndex(peer=>peer.id===VS.selected);
+  return peers[(current>=0?current+1:peers.findIndex(peer=>peer.id===token.id))%peers.length]?.id || token.id;
+}
+
+function _syncTokenMovementVisual() {
+  Object.entries(VS.tokens || {}).forEach(([id,entry])=>{
+    const token=entry?.data;
+    const visible=id===VS.selected && !!VS.session?.combat?.active && _canControlToken(token);
+    const bg=entry?.shape?.findOne('.move-badge');
+    const value=entry?.shape?.findOne('.move-value');
+    bg?.visible(visible);
+    value?.visible(visible);
+    if (visible && value) {
+      const movement=tokenMovementMeta(_live(token).displayMovement??6,token.bonusMvt,token.movedCells);
+      value.text(`🏃 ${movement.remaining}/${movement.maximum}`);
+      bg.stroke(movement.exhausted?'#f97316':'#38bdf8');
+      bg.fill(movement.exhausted?'rgba(67,20,7,.94)':'rgba(8,47,73,.94)');
+      value.fill(movement.exhausted?'#ffedd5':'#e0f2fe');
+    }
+  });
+  VS.layers.token?.batchDraw();
+}
+
 function _buildShape(t) {
   // Visuel pur (forme, barres, badges, nom, portrait) → vtt-render.js.
   // `ld` = données effectives (via _live) ; les handlers d'interaction ci-dessous
@@ -1300,11 +1378,7 @@ function _buildShape(t) {
   const ld = _live(t);
   const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
   const g = _buildTokenVisual(t, ld, CONDITION_BY_ID);
-
-  // Survol : infobulle nom + états/buffs EN CLAIR (comprendre les badges des tokens).
-  g.on('mouseenter', e => _showTokenTip(t.id, e));
-  g.on('mousemove',  e => _moveTokenTip(e));
-  g.on('mouseleave', () => _hideTokenTip());
+  _applyTokenDetailToShape(g);
 
   const canDrag = _canControlToken(t);
   g.setAttr('vttCanDragToken', canDrag);
@@ -1325,7 +1399,6 @@ function _buildShape(t) {
         return;
       }
       if (rightDown) rightDown.dragged = true;
-      _hideTokenTip();
       // En mode Règle (mesure) ou Dessin : le token ne doit pas se déplacer — la
       // mesure/le tracé (pilotés par le stage) restent prioritaires.
       if (VS.tool === 'ruler' || VS.tool === 'draw') {
@@ -1535,11 +1608,13 @@ function _buildShape(t) {
     if (VS.tool === 'ruler' || VS.tool === 'draw') return; // outils de dessin ignorent les tokens
     // Si le token du joueur est masqué sous un autre token, prioriser son propre token
     // lors d'une sélection simple (sauf attaque/zone/cible multi/shift).
+    const stack=_stackPeers(t);
     if (!STATE.isAdmin && !_attackSrc && !_zoneCtx && !_mtCtx
         && !e.evt.shiftKey && !e.evt.ctrlKey && !e.evt.metaKey
         && t.ownerId !== STATE.user?.uid) {
       const ownId = _findOwnTokenAtPointer();
-      if (ownId && ownId !== t.id) {
+      const alreadyBrowsing=stack.some(peer=>peer.id===VS.selected);
+      if (ownId && ownId !== t.id && !alreadyBrowsing) {
         _clearMultiSelect();
         _select(ownId);
         return;
@@ -1550,6 +1625,14 @@ function _buildShape(t) {
       _toggleMultiSelect(t.id); return;
     }
     _clearMultiSelect();
+
+    // Plusieurs tokens exactement sur la même case : le premier clic sélectionne
+    // le token visible, les suivants parcourent la pile et amènent le choix au-dessus.
+    if (!opts.deselectOutOfRange && !_attackSrc && !_zoneCtx && !_mtCtx && !_aimOpt
+        && stack.length>1 && stack.some(peer=>peer.id===VS.selected)) {
+      const nextId=_nextStackToken(t);
+      if (nextId) { _select(nextId); return; }
+    }
 
     // Mode zone AoE actif → le clic verrouille / déverrouille le placement.
     // Aucun token n'est sélectionnable ici, lanceur compris : sinon cliquer sur
@@ -1584,8 +1667,9 @@ function _buildShape(t) {
         return;
       }
       VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
+      _clearTargetRings();
       VS.selected = t.id;
-      VS.tokens[t.id]?.shape?.findOne('.sel')?.visible(true);
+      _setTargetRing(t.id, _targetTone(srcId, t.id));
       _renderInspector(t);
       VS.layers.token?.batchDraw();
       _execAttack(srcId, t.id);
@@ -1614,6 +1698,60 @@ function _buildShape(t) {
   return g;
 }
 
+function _showTokenDelta(token, delta, resource='hp') {
+  const meta=tokenDeltaMeta(delta, resource);
+  if (!token || !meta || token.pageId!==VS.activePage?.id
+      || !VS.layers.ping || !window.Konva) return;
+  const shape=VS.tokens[token.id]?.shape;
+  if (!shape?.visible()) return;
+  const K=window.Konva;
+  const scale=Math.max(.2, VS.stage?.scaleX?.() || 1);
+  const { color, label }=meta;
+  const width=Math.max(44, label.length*6.2);
+  const group=new K.Group({
+    x:shape.x(), y:shape.y()-CELL*.42+(meta.resource==='pm'?9/scale:0),
+    scaleX:1/scale, scaleY:1/scale, listening:false, opacity:1,
+  });
+  group.add(new K.Rect({ x:-width/2, y:-9, width, height:18, cornerRadius:9,
+    fill:'rgba(5,8,14,.9)', stroke:color, strokeWidth:1.5,
+    shadowColor:'#000', shadowBlur:7, shadowOpacity:.65, listening:false }));
+  group.add(new K.Text({ x:-width/2, y:-5.5, width, height:12, text:label,
+    align:'center', fontSize:10, fontStyle:'bold', fill:color,
+    fontFamily:'Inter,sans-serif', listening:false }));
+  VS.layers.ping.add(group);
+  VS.layers.ping.batchDraw();
+  const reduced=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+  // Temps de lecture fixe, puis montée/fondu. Auparavant le texte disparaissait
+  // dès son apparition, ce qui le rendait facile à manquer en plein combat.
+  group._holdTimer=setTimeout(()=>{
+    if (group.getStage()===null) return;
+    group.to({
+      y:group.y()-(reduced?8:30)/scale, opacity:0, duration:reduced ? .35 : 1.2,
+      easing:K.Easings.EaseOut,
+      onFinish:()=>{group.destroy();VS.layers.ping?.batchDraw();},
+    });
+  }, reduced ? 1000 : 900);
+}
+
+function _showTokenNotice(token, label, color='#fbbf24') {
+  if (!token || !label || token.pageId!==VS.activePage?.id || !VS.layers.ping || !window.Konva) return;
+  const shape=VS.tokens[token.id]?.shape;
+  if (!shape?.visible()) return;
+  const K=window.Konva, scale=Math.max(.2,VS.stage?.scaleX?.()||1);
+  const width=Math.max(58,Math.min(132,label.length*5.8));
+  const group=new K.Group({x:shape.x(),y:shape.y()-CELL*.56,scaleX:1/scale,scaleY:1/scale,listening:false});
+  group.add(new K.Rect({x:-width/2,y:-9,width,height:18,cornerRadius:9,
+    fill:'rgba(5,8,14,.92)',stroke:color,strokeWidth:1.3,shadowColor:'#000',shadowBlur:7,shadowOpacity:.65,listening:false}));
+  group.add(new K.Text({x:-width/2+4,y:-5.5,width:width-8,height:12,text:label,
+    align:'center',fontSize:9,fontStyle:'bold',fill:color,ellipsis:true,wrap:'none',fontFamily:'Inter,sans-serif',listening:false}));
+  VS.layers.ping.add(group);VS.layers.ping.batchDraw();
+  group._holdTimer=setTimeout(()=>{
+    if(group.getStage()===null)return;
+    group.to({y:group.y()-24/scale,opacity:0,duration:1.1,easing:K.Easings.EaseOut,
+      onFinish:()=>{group.destroy();VS.layers.ping?.batchDraw();}});
+  },900);
+}
+
 function _patchShape(id) {
   // Frontière d'erreur par token : un token corrompu ne casse pas le rendu des
   // autres (la boucle onSnapshot continue). Le token garde son état précédent.
@@ -1628,7 +1766,13 @@ function _patchShapeImpl(id) {
   // référencé — au calque actif → des tokens d'une autre page « apparaissent ».
   if (e.data.pageId !== VS.activePage?.id) return;
   const ld=_live(e.data); const g=e.shape;
-  const hasPmBar   = !!g.findOne('.pm-val');
+  const previousHp=g.getAttr('displayHpSnapshot');
+  const previousPm=g.getAttr('displayPmSnapshot');
+  const currentHp=ld.displayHp==null?null:Number(ld.displayHp);
+  const currentPm=ld.displayPm==null?null:Number(ld.displayPm);
+  const hpDelta=Number.isFinite(previousHp)&&Number.isFinite(currentHp)?currentHp-previousHp:0;
+  const pmDelta=Number.isFinite(previousPm)&&Number.isFinite(currentPm)?currentPm-previousPm:0;
+  const hasPmBar   = !!g.findOne('.pm-fill');
   const hasCaBuff  = !!g.findOne('.ca-buff-turns');
   const needsCaBuff = !!ld._activeCaBuff;
   const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
@@ -1638,45 +1782,72 @@ function _patchShapeImpl(id) {
   // PNJ, personnage). Quand son image effective arrive ensuite, il faut rebâtir
   // la forme Konva ; un simple patch des textes/barres laisse le cercle coloré.
   const imageMismatch = (g.getAttr('displayImage') || null) !== (ld.displayImage || null);
-  // Conditions : si le nombre d'états actifs change, reconstruire (badges canvas)
+  // Les icônes, leur ordre et leur durée comptent aussi : remplacer Paralysé par
+  // Brûlé sans changer le nombre d'états doit bien reconstruire le rail.
   const _condRoundP = VS.session?.combat?.round ?? 0;
-  const _activeCondCount = (e.data.conditions || []).filter(c =>
-    c.expiresAtRound == null || _condRoundP === 0 || _condRoundP <= c.expiresAtRound
-  ).length;
-  const _renderedCondCount = g.find('.cond-ic').length;
-  const condMismatch = _activeCondCount !== _renderedCondCount;
-  // Buffs : pareil que les conditions, on regarde le compteur affiché vs actif
-  const _activeBuffCount = (e.data.buffs || []).filter(b =>
-    b.expiresAtRound == null || _condRoundP === 0 || _condRoundP <= b.expiresAtRound
-  ).length;
-  const _renderedBuffCount = g.find('.buff-ic').length;
-  const buffMismatch = _activeBuffCount !== _renderedBuffCount;
-  if ((ld.displayPm != null || ld.hasMana) !== hasPmBar || hasCaBuff !== needsCaBuff || sizeMismatch || imageMismatch || condMismatch || buffMismatch) {
+  const currentEffects=tokenActiveEffects(e.data, CONDITION_BY_ID, _condRoundP);
+  const effectSignature = tokenEffectsSignature(currentEffects);
+  const effectsMismatch = effectSignature !== (g.getAttr('effectSignature') || '');
+  const currentEffectKeys=new Set(currentEffects.map(effect=>`${effect.kind}:${effect.key}`));
+  const expiredEffects=(g.getAttr('activeEffectsSnapshot')||[])
+    .filter(effect=>!currentEffectKeys.has(`${effect.kind}:${effect.key}`));
+  if ((ld.displayPm != null || ld.hasMana) !== hasPmBar || hasCaBuff !== needsCaBuff
+      || sizeMismatch || imageMismatch || effectsMismatch) {
     const shape = _buildShape(e.data);
     g.destroy();
     VS.tokens[id] = { ...e, shape };
     VS.layers.token?.add(shape);
-    if (VS.selected === id) shape.findOne('.sel')?.visible(true);
+    if (VS.selected === id && _attackSrc!==id) {
+      if (_attackSrc) {
+        _configureTargetRings(shape, _targetTone(_attackSrc, id), true);
+      } else {
+        _setRingTone(shape.findOne('.sel'), 'selected');
+        shape.findOne('.sel')?.visible(true);
+      }
+    }
     if (_attackSrc === id) shape.findOne('.atk')?.visible(true);
+    if (hpDelta) _showTokenDelta(e.data, hpDelta, 'hp');
+    if (pmDelta) _showTokenDelta(e.data, pmDelta, 'pm');
+    if (expiredEffects.length) {
+      const labels=expiredEffects.slice(0,2).map(effect=>`${effect.icon||'✨'} ${effect.label||'Effet'}`);
+      _showTokenNotice(e.data, `${labels.join(', ')} terminé${expiredEffects.length>1?'s':''}`);
+    }
+    if (VS.selected===id) _syncTokenMovementVisual();
     VS.layers.token?.batchDraw();
     return;
   }
   g.to({ x:e.data.col*CELL+sw*CELL/2, y:e.data.row*CELL+sh*CELL/2, duration:0.12 });
-  const hpKnownU = ld.displayHp !== null && ld.displayHpMax !== null;
-  const hp=hpKnownU?ld.displayHp:0, hpm=hpKnownU?ld.displayHpMax:1;
-  const rat=hpKnownU?(hpm>0?Math.min(1,Math.max(0,hp/hpm)):1):0.5, bW=CELL*sw*0.9;
+  const health = tokenHealthMeta(ld.displayHp, ld.displayHpMax);
+  const bW=Math.max(56, Math.min(CELL*sw*0.9, 150));
+  const hasMana=ld.displayPm!=null || ld.hasMana;
+  const hpW=hasMana?(bW-1)/2:bW;
   const fill=g.findOne('.hp-fill');
-  if (fill){fill.width(bW*rat);fill.fill(hpKnownU?hpColor(rat):'#555');}
-  g.findOne('.hp-val')?.text(hpKnownU?`${hp}/${hpm}`:'?/?');
+  if (fill){fill.width(Math.max(2,(hpW-2)*health.ratio));fill.fill(health.color);}
+  g.findOne('.hp-val')?.text(health.known?`♥${health.current}/${health.maximum}`:'♥?');
+  g.findOne('.portrait')?.opacity(health.isDown ? .46 : 1);
+  g.findOne('.down-overlay')?.visible(health.isDown);
+  g.findOne('.down-icon')?.visible(health.isDown);
+  const tokenRing=g.findOne('.token-ring');
+  if (tokenRing) {
+    tokenRing.stroke(health.isDown ? '#ef4444' : (TYPE_COLOR[e.data.type] ?? '#94a3b8'));
+    tokenRing.shadowColor(health.isDown ? '#ef4444' : '#000');
+    tokenRing.shadowBlur(health.isDown ? 10 : 5);
+  }
+  g.setAttr('healthTone', health.tone);
+  g.setAttr('displayHpSnapshot', health.known ? health.current : null);
   // PM (créatures avec mana ; "✨?" si pas d'estimation côté joueur)
   const _pm=ld.displayPm;
   if (_pm!=null || ld.hasMana) {
     const _pmK=_pm!=null;
-    const pmMax=ld.displayPmMax??1, pmRat=_pmK&&pmMax>0?Math.min(1,Math.max(0,_pm/pmMax)):(_pmK?1:0);
-    g.findOne('.pm-fill')?.width(bW*pmRat);
-    g.findOne('.pm-fill')?.fill(_pmK?'#9b6dff':'#555');
-    g.findOne('.pm-val')?.text(_pmK?`✨${_pm}/${pmMax}`:'✨?');
+    const pmMax=Number(ld.displayPmMax);
+    const pmMaxKnown=Number.isFinite(pmMax)&&pmMax>0;
+    const pmRat=_pmK&&pmMaxKnown?Math.min(1,Math.max(0,_pm/pmMax)):(_pmK?1:0);
+    const pmW=bW-hpW-1;
+    g.findOne('.pm-fill')?.width(Math.max(2,(pmW-2)*pmRat));
+    g.findOne('.pm-fill')?.fill(_pmK?'#8b5cf6':'#475569');
+    g.findOne('.pm-val')?.text(_pmK?(pmMaxKnown?`✦${_pm}/${pmMax}`:`✦${_pm}`):'✦?');
   }
+  g.setAttr('displayPmSnapshot', _pm == null ? null : Number(_pm));
   // CA + buff
   const _buff   = ld._activeCaBuff;
   const _buffed = !!_buff;
@@ -1684,14 +1855,18 @@ function _patchShapeImpl(id) {
   g.findOne('.ca-lbl')?.text(`🛡${ld.caBadge ?? (ld.displayDefense??0)}`);
   g.findOne('.ca-lbl')?.fill(_buffed ? '#c4b5fd' : '#e2e8f0');
   g.findOne('.ca-bg')?.stroke(_buffed ? '#818cf8' : '#64748b');
-  g.findOne('.ca-bg')?.strokeWidth(_buffed ? 2.5 : 1.5);
+  g.findOne('.ca-bg')?.strokeWidth(_buffed ? 1.5 : 1);
   g.findOne('.ca-bg')?.fill(_buffed ? 'rgba(30,27,80,0.95)' : 'rgba(15,15,25,0.9)');
   if (_buff) {
     const tl = _buff.expiresAtRound != null && _round > 0 ? _buff.expiresAtRound - _round + 1 : _buff.totalDuration ?? '∞';
-    g.findOne('.ca-buff-turns')?.text(`${tl}↺`);
+    g.findOne('.ca-buff-turns')?.text(String(tl));
   }
   g.findOne('.lbl')?.text(ld.displayName??e.data.name);
+  g.findOne('.turn-active')?.visible(!!VS.session?.combat?.active && VS.session?.combat?.activeTokenId===id);
+  if (hpDelta) _showTokenDelta(e.data, hpDelta, 'hp');
+  if (pmDelta) _showTokenDelta(e.data, pmDelta, 'pm');
   g.visible(STATE.isAdmin || (!!e.data.visible && !_tokenOffGrid(e.data)));
+  if (VS.selected===id) _syncTokenMovementVisual();
   VS.layers.token?.batchDraw();
 }
 
@@ -1700,10 +1875,13 @@ export function _select(id) {
   _clearAim(); // changer de sélection annule une visée action-first en cours
   if (VS.imgTr&&VS.selImg) { VS.imgTr.nodes([]); VS.selImg=null; VS.layers.map?.batchDraw(); }
   VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
+  _clearTargetRings();
   VS.tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
   _attackSrc=null; _clearHL();
   VS.selected=id;
-  VS.tokens[id]?.shape?.findOne('.sel')?.visible(true);
+  _setSelectionRing(id, true);
+  if (_stackPeers(VS.tokens[id]?.data).length>1) VS.tokens[id]?.shape?.moveToTop();
+  _syncTokenMovementVisual();
   VS.layers.token.batchDraw();
   const data=VS.tokens[id]?.data;
   _renderInspector(data??null);
@@ -1735,9 +1913,11 @@ function _updateTokenDraggable() {
 
 export function _deselect() {
   VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
+  _clearTargetRings();
   VS.tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
   _clearAim(); _hideActBar();
   VS.selected=null; _attackSrc=null; _clearHL(); _clearMultiSelect(); _renderInspector(null);
+  _syncTokenMovementVisual();
   if (VS.imgTr)   { VS.imgTr.nodes([]); VS.layers.map?.batchDraw(); }
   if (VS.imgTrFg) { VS.imgTrFg.nodes([]); VS.layers.mapFg?.batchDraw(); }
   VS.selImg=null;
@@ -1759,6 +1939,7 @@ export function _deselect() {
 export function _showActBar(srcId) {
   const t = VS.tokens[srcId]?.data;
   if (!t || !_canControlToken(t)) { _hideActBar(); return; }
+  _clearTargetRings();
   VS.tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
   _attackSrc = srcId;
   VS.tokens[srcId]?.shape?.findOne('.atk')?.visible(true);
@@ -1903,6 +2084,8 @@ function _isAimTargetInRange(srcId, tgtId, opt) {
 function _resolveAim(srcId, tgtId, opt) {
   _atkOptsCache[`${srcId}__${tgtId}`] = [opt];
   _clearAim();
+  _clearTargetRings();
+  _setTargetRing(tgtId, _targetTone(srcId, tgtId, !!(opt.isHeal || opt.isEnchant || opt.isRegen)));
   _vttPickOpt(srcId, tgtId, 0);
 }
 
@@ -2007,6 +2190,7 @@ function _refreshRanges(id, overrideData) {
   _showMoveRange(data);   // _clearHL() est appelé en tête de _showMoveRange
   _showAttackRange(data);
   _renderInspector(data); // actualise les compteurs (mouvement restant, etc.)
+  _syncTokenMovementVisual();
 }
 
 // ── Pings ────────────────────────────────────────────────────────────
@@ -2206,14 +2390,14 @@ function _toggleMultiSelect(id) {
   if (VS.selected && _canControlToken(VS.tokens[VS.selected]?.data)
       && !VS.selectedMulti.has(VS.selected)) {
     VS.selectedMulti.add(VS.selected);
-    VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(true);
+    _setSelectionRing(VS.selected, true);
   }
   if (VS.selectedMulti.has(id)) {
     VS.selectedMulti.delete(id);
     VS.tokens[id]?.shape?.findOne('.sel')?.visible(false);
   } else {
     VS.selectedMulti.add(id);
-    VS.tokens[id]?.shape?.findOne('.sel')?.visible(true);
+    _setSelectionRing(id, true);
     VS.selected = id;
     _renderInspector(VS.tokens[id]?.data??null);
   }
@@ -5060,7 +5244,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
     }
   }
 
-  // ── Section Actions de base (Courir / Esquiver / Se cacher / Se désengager / Aider) ──
+  // ── Section Actions de base (Courir / Esquiver / Se désengager / Aider) ──
   // Disponibles dès que tu contrôles le token source (pas seulement en combat
   // formel : un allié peut tomber à 0 PV hors tracker d'initiative).
   const inCombat = !!VS.session?.combat?.active;
@@ -5099,7 +5283,6 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       bCount++;
     }
     bBody += selfBtn('dodge', '🤸', 'Esquiver', 'Désavantage aux attaques contre toi', '#38bdf8'); bCount++;
-    bBody += selfBtn('hidden', '🫥', 'Se cacher', 'Avantage à tes attaques · désav. contre toi', '#94a3b8'); bCount++;
     bBody += selfBtn('disengaged', '💨', 'Se désengager', 'Pas d\'attaque d\'opportunité ce tour', '#a3e635'); bCount++;
     // Aider : visible seulement si la cible est un allié à 0 PV.
     if (tgt && tgt.id !== srcId && (lT?.displayHp ?? null) === 0) {
@@ -6042,6 +6225,7 @@ async function _mtBroadcast() {
 /** Supprime lignes, HUD, contexte et broadcast. */
 function _mtClear(broadcast = true) {
   _zoneClear();
+  _clearTargetRings();
   const hud = document.getElementById('vtt-mt-hud');
   if (hud?._removeKey) hud._removeKey();
   hud?.remove();
@@ -6061,6 +6245,7 @@ function _startMultiTarget(srcId, firstTgtId, opt, optIdx) {
 
   const srcData = VS.tokens[srcId]?.data, tgtData = VS.tokens[firstTgtId]?.data;
   if (srcData && tgtData) {
+    _setTargetRing(firstTgtId, _targetTone(srcId, firstTgtId, !!(opt.isHeal || opt.isEnchant || opt.isRegen)));
     const line = _mtDrawLine(srcData, tgtData);
     if (line) _mtCtx.lines.set(firstTgtId, line);
   }
@@ -6077,6 +6262,7 @@ function _mtToggleTarget(tgtId) {
 
   if (idx !== -1) {
     targets.splice(idx, 1);
+    _setTargetRing(tgtId, 'hostile', false);
     lines.get(tgtId)?.destroy();
     lines.delete(tgtId);
     VS.layers.token?.batchDraw();
@@ -6095,6 +6281,7 @@ function _mtToggleTarget(tgtId) {
       }
     }
     targets.push(tgtId);
+    _setTargetRing(tgtId, _targetTone(srcId, tgtId, !!(_mtCtx.opt.isHeal || _mtCtx.opt.isEnchant || _mtCtx.opt.isRegen)));
     if (srcData && tgtData) {
       const line = _mtDrawLine(srcData, tgtData);
       if (line) lines.set(tgtId, line);
@@ -8170,6 +8357,7 @@ export function _renderAllTokens() {
     const shape=_buildShape(t);
     VS.tokens[t.id]={...e,shape}; VS.layers.token.add(shape);
   }
+  _syncTokenStackVisuals();
   VS.layers.token?.batchDraw();
 }
 
@@ -8331,7 +8519,7 @@ function _selectByRect(r) {
     const { x: cx, y: cy } = _tokenCenter(t);
     if (_inRect(cx, cy, r)) {
       VS.selectedMulti.add(id);
-      VS.tokens[id]?.shape?.findOne('.sel')?.visible(true);
+      _setSelectionRing(id, true);
     }
   }
 
@@ -8708,7 +8896,16 @@ function _initListeners() {
 
   // 1. Session
   VS.unsubs.push(onSnapshot(_sesRef(), snap => {
+    const previousCombatActive = !!VS.session?.combat?.active;
+    const previousRound = VS.session?.combat?.round ?? 0;
+    const previousActiveTokenId = VS.session?.combat?.activeTokenId ?? null;
     VS.session=snap.exists()?snap.data():{};
+    const combatVisualChanged = previousCombatActive !== !!VS.session?.combat?.active
+      || previousRound !== (VS.session?.combat?.round ?? 0)
+      || previousActiveTokenId !== (VS.session?.combat?.activeTokenId ?? null);
+    if (combatVisualChanged) {
+      Object.keys(VS.tokens || {}).forEach(_patchShape);
+    }
     _renderSessionBtn();
     _renderPageTabs();
     if (!STATE.isAdmin) {
@@ -8875,6 +9072,7 @@ function _initListeners() {
       }
      } catch (e) { _vttPanelError('Token', e, null); }
     });
+    _syncTokenStackVisuals();
     _renderTraySoon();
     _renderCombatTrackerSoon();
     void _cleanupReserveDuplicates();
@@ -11503,6 +11701,8 @@ export const VTT_ACTIONS = {
   _vttMsUnequipAll,
   _vttMusicNext,
   _vttMusicPrev,
+  _vttMoveTurnOrder,
+  _vttNextActiveTurn,
   _vttToggleLoop,
   _vttNextRound,
   _vttNoop,
@@ -11548,6 +11748,7 @@ export const VTT_ACTIONS = {
   _vttSetHp,
   _vttSetImgbbKey,
   _vttSetMode,
+  _vttSetActiveTurn,
   _vttSetPm,
   _vttSetRollMode,
   _vttShortRestCancel,

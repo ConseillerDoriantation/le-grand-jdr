@@ -12,6 +12,7 @@ import { VS } from './vtt-state.js';
 import { _esc } from '../../shared/html.js';
 import { _live } from './vtt-effective.js';   // données effectives (leaf)
 import { _select } from './vtt.js';           // sélection token (transverse)
+import { normalizeTokenTurnOrder } from './vtt-token-visual.js';
 
 let _combatTab = 'allies'; // 'allies' (joueurs + PNJ) | 'enemies' (MJ only)
 // Suit l'état "combat actif affiché" pour ne déclencher l'animation de
@@ -27,8 +28,9 @@ function _trackerPortrait(ld, t) {
   const init = ((ld.displayName || t.name || '?').trim()[0] || '?').toUpperCase();
   return `<div class="vct-photo vct-photo-init">${init}</div>`;
 }
-function _trackerRow(t) {
+function _trackerRow(t, index=0, total=1, turnPosition=index+1) {
   const ld = _live(t);
+  const isActive=VS.session?.combat?.activeTokenId===t.id;
   const moved = !!t.movedThisTurn || (t.movedCells || 0) > 0;
   const acted = !!t.attackedThisTurn;
   const bonusActed = !!t.bonusActionThisTurn;
@@ -41,10 +43,10 @@ function _trackerRow(t) {
     ? `<button type="button" class="vct-pill vct-pill--toggle ${active ? "vct-pill--on" : ""}" data-vtt-fn="_vttToggleTurnFlag" data-vtt-args="${t.id}|${field}" title="${title} — cliquer pour modifier">${icon} ${active ? "✓" : "·"}</button>`
     : `<span class="vct-pill ${active ? "vct-pill--on" : ""}" title="${title}">${icon} ${active ? "✓" : "·"}</span>`;
   return `
-    <div class="vct-row ${cls}" data-tok="${t.id}" data-vtt-fn="_vttTrackerFocus" data-vtt-args="${t.id}" title="Cliquer pour centrer sur ce token">
+    <div class="vct-row ${cls} ${isActive?'vct-row--active':''}" data-tok="${t.id}" data-vtt-fn="_vttTrackerFocus" data-vtt-args="${t.id}" title="Cliquer pour centrer sur ce token">
       ${_trackerPortrait(ld, t)}
       <div class="vct-info">
-        <div class="vct-name">${name}</div>
+        <div class="vct-name"><span class="vct-order-rank" title="Position dans l’ordre de passage">${turnPosition}</span><span class="vct-name-text">${name}</span>${isActive?'<span class="vct-active-label">Tour actif</span>':''}</div>
         <div class="vct-status">
           <span class="vct-pill ${moved ? "vct-pill--on" : ""}" title="Déplacement effectué">🏃 ${moved ? "✓" : "·"}</span>
           <span class="vct-pill ${acted ? "vct-pill--on" : ""}" title="Action effectuée">⚔ ${acted ? "✓" : "·"}</span>
@@ -52,6 +54,11 @@ function _trackerRow(t) {
           ${turnPill("reactionThisTurn", reacted, "⚡", "Réaction effectuée")}
         </div>
       </div>
+      ${STATE.isAdmin?`<div class="vct-order-controls">
+        <button type="button" class="vct-order-btn" data-vtt-fn="_vttMoveTurnOrder" data-vtt-args="${t.id}|-1" title="Monter dans l’ordre" ${index===0?'disabled':''}>↑</button>
+        <button type="button" class="vct-turn-btn ${isActive?'is-active':''}" data-vtt-fn="_vttSetActiveTurn" data-vtt-args="${t.id}" title="${isActive?'Retirer le tour actif':'Donner le tour à ce token'}" aria-pressed="${isActive?'true':'false'}">${isActive?'●':'▶'}</button>
+        <button type="button" class="vct-order-btn" data-vtt-fn="_vttMoveTurnOrder" data-vtt-args="${t.id}|1" title="Descendre dans l’ordre" ${index===total-1?'disabled':''}>↓</button>
+      </div>`:''}
     </div>`;
 }
 function _renderCombatTracker() {
@@ -98,24 +105,27 @@ function _renderCombatTracker() {
   const onPage = Object.values(VS.tokens).map(x => x?.data || x).filter(t => t && t.pageId === pageId);
   const allies = onPage.filter(t => t.type === 'player' || t.type === 'npc');
   const enemies = onPage.filter(t => t.type === 'enemy');
+  const storedOrder=VS.session?.combat?.turnOrders?.[pageId] || [];
+  const completeOrder=normalizeTokenTurnOrder(storedOrder,onPage,token=>_live(token).displayName||token.name||token.id);
+  const orderIndex=new Map(completeOrder.map((id,index)=>[id,index]));
 
   // tab par défaut "allies" — joueurs non-MJ ne voient pas l'onglet ennemis
   const tab = (!mj && _combatTab === 'enemies') ? 'allies' : _combatTab;
   const list = tab === 'enemies' ? enemies : allies;
 
   // tri : joueurs d'abord, puis PNJ ; ennemis par HP% croissant
-  if (tab === 'allies') {
-    list.sort((a, b) => {
-      const r = (a.type === 'player' ? 0 : 1) - (b.type === 'player' ? 0 : 1);
-      if (r !== 0) return r;
-      const na = _live(a).displayName || a.name || '';
-      const nb = _live(b).displayName || b.name || '';
-      return na.localeCompare(nb);
-    });
-  }
+  list.sort((a,b)=>{
+    const ai=orderIndex.has(a.id)?orderIndex.get(a.id):Number.MAX_SAFE_INTEGER;
+    const bi=orderIndex.has(b.id)?orderIndex.get(b.id):Number.MAX_SAFE_INTEGER;
+    if(ai!==bi)return ai-bi;
+    const rank={player:0,npc:1,enemy:2};
+    const type=(rank[a.type]??9)-(rank[b.type]??9);
+    if(type)return type;
+    return String(_live(a).displayName||a.name||'').localeCompare(String(_live(b).displayName||b.name||''));
+  });
 
   const rows = list.length
-    ? list.map(_trackerRow).join('')
+    ? list.map((token,index)=>_trackerRow(token,index,list.length,(orderIndex.get(token.id)??index)+1)).join('')
     : `<div class="vct-empty">${tab === 'enemies' ? 'Aucun ennemi sur la page' : 'Aucun token allié sur la page'}</div>`;
 
   el.innerHTML = `
@@ -127,7 +137,8 @@ function _renderCombatTracker() {
       </div>
       ${mj ? `
         <div class="vct-mj-ctrls">
-          <button class="vct-mj-btn" data-vtt-fn="_vttNextRound" title="Tour suivant — reset déplacement et actions">▶ Tour</button>
+          <button class="vct-mj-btn vct-mj-btn--next" data-vtt-fn="_vttNextActiveTurn" title="Mettre en lumière le participant suivant — ne bloque personne">⏭ Suivant</button>
+          <button class="vct-mj-btn" data-vtt-fn="_vttNextRound" title="Round suivant — reset déplacement et actions">↻ Round</button>
           <button class="vct-mj-btn vct-mj-btn--danger" data-vtt-fn="_vttToggleCombat" title="Terminer le combat">⏹</button>
         </div>` : ''}
     </div>
