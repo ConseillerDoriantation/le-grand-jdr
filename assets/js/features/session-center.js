@@ -496,6 +496,13 @@ function _renderSelectedSession() {
   const journalLead = _journalLead(session);
   const journalActions = _journalActions(session);
   const decisionPanel = _sessionDecisionHtml(session, participants, availCounts, issues);
+  const closure = _sessionClosureState(session);
+  const conclusionHtml = session.hasStats && closure.hasOutcome ? `
+    <div class="sc-context-conclusion" title="${_esc(closure.notes || closure.statusLabel)}">
+      <span>Conclusion</span>
+      <strong>${_esc(closure.statusLabel)}</strong>
+      ${closure.notes ? `<small>${_esc(closure.notes)}</small>` : ''}
+    </div>` : '';
 
   root.innerHTML = `
     ${_sessionSelectorHtml()}
@@ -514,6 +521,7 @@ function _renderSelectedSession() {
           <span class="sc-avatar-stack">${participants.slice(0, 6).map(p => _avatarHtml(p, 30)).join('')}</span>
           <span>${participants.length} participant${participants.length > 1 ? 's' : ''}</span>
         </div>
+        ${conclusionHtml}
       </div>
       <div class="sc-primary-actions">
         ${feature('vtt') ? `<button class="sc-enter-table" data-action="_scNavigate" data-page="vtt">
@@ -527,19 +535,13 @@ function _renderSelectedSession() {
       </div>
     </section>
 
-    <nav class="sc-flow" aria-label="Cycle de la séance">
-      <button data-action="_scNavigate" data-page="agenda" ${feature('agenda') ? '' : 'disabled'}>
-        <span class="sc-flow-num">1</span><span><b>Préparer</b><small>Agenda et groupe</small></span>
-      </button>
-      <button data-action="_scNavigate" data-page="vtt" ${feature('vtt') ? '' : 'disabled'}>
-        <span class="sc-flow-num">2</span><span><b>Jouer</b><small>Table virtuelle</small></span>
-      </button>
-      <button data-action="_scOpenStats" data-date="${_esc(session.date)}" ${feature('statistiques') ? '' : 'disabled'}>
-        <span class="sc-flow-num">3</span><span><b>Conclure</b><small>Statistiques et récap</small></span>
-      </button>
-    </nav>
-
-    <div class="sc-workspace">
+    <details class="sc-details">
+      <summary>
+        <span class="sc-details-copy"><strong>Détails de la séance</strong><small>${participants.length} participant${participants.length > 1 ? 's' : ''} · ${session.hasStats ? 'récap disponible' : 'préparation en cours'}</small></span>
+        <span class="sc-details-state ${issues.length ? 'warn' : 'ready'}">${issues.length ? `${issues.length} point${issues.length > 1 ? 's' : ''} à vérifier` : 'Tout est relié'}</span>
+        <span class="sc-details-chevron" aria-hidden="true">⌄</span>
+      </summary>
+      <div class="sc-workspace">
       <section class="sc-pane sc-pane-prep">
         <header><span>Préparation</span><small>Avant la séance</small></header>
         <div class="sc-checks">
@@ -572,16 +574,17 @@ function _renderSelectedSession() {
           ${journalActions.length ? journalActions.map(_journalActionHtml).join('') : '<div class="sc-pane-empty">Aucune action disponible pour les modules actifs.</div>'}
         </div>
       </section>
-    </div>
+      </div>
 
-    <section class="sc-health ${issues.length ? 'has-issues' : 'is-ready'}">
+      <section class="sc-health ${issues.length ? 'has-issues' : 'is-ready'}">
       <header><span>${issues.length ? 'Points à vérifier' : 'Séance correctement reliée'}</span><small>${issues.length ? `${issues.length} action${issues.length > 1 ? 's' : ''}` : 'Aucune incohérence détectée'}</small></header>
       ${issues.length ? `<div class="sc-issues">${issues.map(issue => `
         <button data-action="${issue.action === 'stats' ? '_scOpenStats' : issue.action === 'story' ? '_scOpenMission' : '_scNavigate'}"
           ${issue.action === 'stats' ? `data-date="${_esc(session.date)}"` : issue.action === 'story' ? `data-id="${_esc(session.missionId)}"` : `data-page="${issue.action}"`}>
           <span>!</span>${_esc(issue.text)}<b>Corriger →</b>
         </button>`).join('')}</div>` : ''}
-    </section>`;
+      </section>
+    </details>`;
 }
 
 let _mountSeq = 0;

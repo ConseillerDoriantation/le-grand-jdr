@@ -2169,3 +2169,74 @@
 [data-theme="light"] .dv2-root .dv2-bastion-card::before {
   display: none !important;
 }
+
+/* ── Aperçu du mur du Bastion ─────────────────────────────────────── */
+.dv2-wall-panel { min-width: 0; }
+.dv2-wall-unread {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid rgba(79,140,255,.28);
+  border-radius: 999px;
+  color: #9dc1ff;
+  background: rgba(79,140,255,.11);
+  font-size: .6rem;
+  font-weight: 800;
+}
+.dv2-wall-list {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card);
+}
+.dv2-wall-post {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 36px minmax(0,1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 11px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.dv2-wall-post:last-child { border-bottom: 0; }
+.dv2-wall-post:hover { background: rgba(79,140,255,.055); }
+.dv2-wall-post.is-unread { background: linear-gradient(90deg, rgba(79,140,255,.1), rgba(79,140,255,.025)); }
+.dv2-wall-post.is-unread::before { content: ''; position: absolute; inset: 7px auto 7px 0; width: 3px; border-radius: 0 3px 3px 0; background: #5b9bff; }
+.dv2-wall-avatar { border: 1px solid rgba(126,176,255,.28); }
+.dv2-wall-post-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dv2-wall-post-meta { min-width: 0; display: flex; align-items: center; gap: 6px; }
+.dv2-wall-post-meta strong { overflow: hidden; color: var(--text); font-size: .75rem; text-overflow: ellipsis; white-space: nowrap; }
+.dv2-wall-type {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border: 1px solid color-mix(in oklab, var(--wall-type, #4f8cff) 34%, transparent);
+  border-radius: 999px;
+  color: var(--wall-type, #7fb0ff);
+  background: color-mix(in oklab, var(--wall-type, #4f8cff) 10%, transparent);
+  font-size: .53rem;
+  font-weight: 850;
+}
+.dv2-wall-post-meta small { flex: 0 0 auto; color: var(--text-dim); font-size: .58rem; }
+.dv2-wall-post-meta i { flex: 0 0 auto; color: #82b4ff; font-size: .54rem; font-style: normal; font-weight: 850; text-transform: uppercase; }
+.dv2-wall-post-text { overflow: hidden; color: var(--text-muted); font-size: .7rem; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.dv2-wall-post-stats { color: var(--text-dim); font-size: .57rem; }
+.dv2-wall-thumb { width: 52px; height: 44px; border: 1px solid var(--border); border-radius: 7px; object-fit: cover; }
+.dv2-wall-arrow { color: var(--text-dim); font-size: .85rem; }
+.dv2-wall-empty { width: 100%; display: grid; grid-template-columns: 34px minmax(0,1fr); gap: 2px 9px; padding: 13px; border: 0; color: var(--text-muted); background: transparent; text-align: left; cursor: pointer; }
+.dv2-wall-empty > span { grid-row: span 2; align-self: center; font-size: 1.2rem; }
+.dv2-wall-empty strong { color: var(--text); font-size: .76rem; }
+.dv2-wall-empty small { color: var(--text-dim); font-size: .65rem; }
+[data-theme="light"] .dv2-wall-list { background: var(--bg-elevated); }
+
+@media (max-width: 520px) {
+  .dv2-wall-post { grid-template-columns: 34px minmax(0,1fr) auto; padding-inline: 8px; }
+  .dv2-wall-thumb { width: 42px; height: 38px; }
+  .dv2-wall-post-stats { display: none; }
+  .dv2-wall-post-meta small { display: none; }
+}

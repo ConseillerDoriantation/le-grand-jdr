@@ -506,12 +506,35 @@ match /adventures/{adventureId} {
   match /combat_styles/{id}     { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /order/{id}             { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /bastion/{id}           { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
-  // Mur des annonces du Bastion : doc unique `bastionAnnonces/main` (champ `items`).
-  // Lecture + écriture par tout membre de l'aventure (modération douce côté client :
-  // on ne supprime que ses propres annonces). Lecture = GET (pas de requête `list`).
+  // Mur social du Bastion : 1 document par publication. `main.items` est conservé
+  // uniquement pour les annonces historiques. Un membre peut interagir, mais pas
+  // réécrire le texte ou les images d'un autre auteur ; suppression = auteur/MJ.
   match /bastionAnnonces/{id} {
-    allow read:  if inAdventure(adventureId);
-    allow write: if inAdventure(adventureId);
+    allow read: if inAdventure(adventureId);
+    allow create: if inAdventure(adventureId) && (
+      (id == 'main' && isAdvAdmin(adventureId)) || (
+        request.resource.data.get('uid', '') == request.auth.uid &&
+        (
+          isAdvAdmin(adventureId) || (
+            request.resource.data.get('charId', '') != '' &&
+            exists(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(request.resource.data.charId)) &&
+            get(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(request.resource.data.charId)).data.uid == request.auth.uid
+          )
+        ) &&
+        request.resource.data.get('text', '').size() <= 4000 &&
+        request.resource.data.get('images', []).size() <= 3
+      )
+    );
+    allow update: if inAdventure(adventureId) && (
+      id == 'main' ||
+      isAdvAdmin(adventureId) ||
+      resource.data.get('uid', '') == request.auth.uid ||
+      request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['reactions', 'comments', 'updatedAt'])
+    );
+    allow delete: if inAdventure(adventureId) && (
+      isAdvAdmin(adventureId) || resource.data.get('uid', '') == request.auth.uid
+    );
   }
   match /story_histories/{id}   { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /agenda_session/{id}    { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }

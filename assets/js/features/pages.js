@@ -14,13 +14,14 @@ import { scoreMvpView } from '../shared/stats-mvp.js';
 import { showNotif } from '../shared/notifications.js';
 import { copyText } from '../shared/clipboard.js';
 import { confirmModal, openModal, promptModal, closeModalDirect } from '../shared/modal.js';
-import { watch, watchDoc } from '../shared/realtime.js';
+import { watch, watchDoc, watchRecent } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
 import { getRouteSub } from '../shared/route.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
 import { dedupeQuestParticipants, questParticipantFromChar, toggleQuestParticipant } from '../shared/participants.js';
 import { avatarSrcOf } from '../shared/avatar.js';
+import { BASTION_WALL_TYPES, bastionWallReactionCounts, bastionWallSeenKey, bastionWallUnreadCount, sortBastionWallPosts } from '../shared/bastion-wall.js';
 
 import { charSession } from '../shared/char-session.js';
 import { openAdventureSwitcher } from '../core/layout.js';
@@ -2028,6 +2029,8 @@ const PAGES = {
     let achievementsRaw = getCachedCollection('achievements') || [];
     let quests          = getCachedCollection('quests')       || [];
     let collectionItems = getCachedCollection('collection')   || [];
+    let wallDocs        = [];
+    let wallLegacy      = [];
     let bastionDoc      = null;
     let nextSession     = null;
 
@@ -2886,6 +2889,44 @@ const PAGES = {
         <div id="dashboard-session-center" class="sc-root">${appSplashHtml('Chargement des séances…')}</div>
       </section>`;
 
+    function _dashboardWallPanel() {
+      if (!isFeatureEnabled('bastion')) return '';
+      const posts = sortBastionWallPosts([
+        ...wallDocs.filter(doc => doc.id !== 'main' && (doc.kind === 'post' || doc.text)),
+        ...wallLegacy.map((post, index) => ({ ...post, id: post.id || `legacy_${index}`, legacy: true })),
+      ]);
+      let seenAt = 0;
+      try { seenAt = Number(localStorage.getItem(bastionWallSeenKey(STATE.adventure?.id, STATE.user?.uid)) || 0); } catch { /* stockage privé indisponible */ }
+      const unread = bastionWallUnreadCount(posts, seenAt, STATE.user?.uid);
+      const highlighted = posts.filter(post => post.ts > seenAt && post.uid !== STATE.user?.uid);
+      const shown = [...highlighted, ...posts.filter(post => !highlighted.includes(post))].slice(0, 4);
+      const timeAgo = ts => {
+        const minutes = Math.max(0, Math.floor((Date.now() - Number(ts || 0)) / 60000));
+        if (minutes < 1) return "à l'instant";
+        if (minutes < 60) return `il y a ${minutes} min`;
+        if (minutes < 1440) return `il y a ${Math.floor(minutes / 60)} h`;
+        return `il y a ${Math.floor(minutes / 1440)} j`;
+      };
+      const card = post => {
+        const char = allChars.find(item => item.id === post.charId) || { nom: post.charName || post.author || 'Personnage', photo: post.charImage || '' };
+        const type = BASTION_WALL_TYPES[post.type] || BASTION_WALL_TYPES.message;
+        const counts = bastionWallReactionCounts(post);
+        const reactionCount = Object.values(counts).reduce((sum, count) => sum + count, 0);
+        const plain = String(post.text || '').replace(/\s+/g, ' ').trim();
+        const snippet = plain.length > 150 ? `${plain.slice(0, 147)}…` : plain;
+        const isUnread = post.ts > seenAt && post.uid !== STATE.user?.uid;
+        return `<button type="button" class="dv2-wall-post${isUnread ? ' is-unread' : ''}" data-navigate="bastion">
+          ${characterAvatarHtml(char, { size: 36, className: 'dv2-wall-avatar' })}
+          <span class="dv2-wall-post-copy"><span class="dv2-wall-post-meta"><strong>${_esc(post.charName || post.author || char.nom || 'Personnage')}</strong><b class="dv2-wall-type" style="--wall-type:${type.color}">${type.icon} ${type.label}</b><small>${timeAgo(post.ts)}</small>${isUnread ? '<i>Nouveau</i>' : ''}</span><span class="dv2-wall-post-text">${_esc(snippet || (post.images?.length ? `A partagé ${post.images.length} image${post.images.length > 1 ? 's' : ''}` : 'Nouvelle publication'))}</span><span class="dv2-wall-post-stats">${reactionCount ? `${reactionCount} réaction${reactionCount > 1 ? 's' : ''}` : 'Aucune réaction'} · ${(post.comments || []).length} réponse${(post.comments || []).length > 1 ? 's' : ''}</span></span>
+          ${post.images?.[0] ? `<img class="dv2-wall-thumb" src="${post.images[0]}" alt="">` : '<span class="dv2-wall-arrow">→</span>'}
+        </button>`;
+      };
+      return `<section class="dv2-dash-panel dv2-wall-panel">
+        <div class="dv2-section-label"><span class="dv2-section-label-text">Mur du Bastion</span>${unread ? `<span class="dv2-wall-unread">${unread} non ${unread > 1 ? 'lus' : 'lu'}</span>` : ''}<div class="dv2-section-label-line"></div><button class="dv2-section-action" data-navigate="bastion">Ouvrir →</button></div>
+        <div class="dv2-wall-list">${shown.length ? shown.map(card).join('') : '<button class="dv2-wall-empty" data-navigate="bastion"><span>📌</span><strong>Le mur est prêt</strong><small>Publie la première nouvelle du Bastion.</small></button>'}</div>
+      </section>`;
+    }
+
     if (STATE.isAdmin) {
 
       // ── VUE MJ v2 ─────────────────────────────────────────────────────
@@ -2921,6 +2962,7 @@ const PAGES = {
           </section>` : ''}
         </aside>
         <div class="dv2-dashboard-main">
+          ${_dashboardWallPanel()}
           <section class="dv2-dash-panel">
             <div class="dv2-section-label">
               <span class="dv2-section-label-text">Personnages</span>
@@ -3059,6 +3101,7 @@ const PAGES = {
           </div>` : ''}
         </aside>
         <div class="dv2-dashboard-main">
+          ${_dashboardWallPanel()}
           <div class="dv2-player-hero">
             <div class="dv2-section-label">
               <span class="dv2-section-label-text">Mon personnage</span>
@@ -3131,6 +3174,8 @@ const PAGES = {
     watch('dash-story',        'story',        d => { storyItems      = d || []; schedulePaint(); });
     watch('dash-achievements', 'achievements', d => { achievementsRaw = d || []; schedulePaint(); });
     watch('dash-collection',   'collection',   d => { collectionItems = d || []; schedulePaint(); });
+    watchRecent('dash-bastion-wall', 'bastionAnnonces', d => { wallDocs = d || []; schedulePaint(); }, { field: 'ts', max: 80 });
+    watchDoc('dash-bastion-wall-legacy', 'bastionAnnonces', 'main', d => { wallLegacy = Array.isArray(d?.items) ? d.items : []; schedulePaint(); });
     watchDoc('dash-bastion',   'bastion',        'main', d => { bastionDoc  = d; schedulePaint(); });
     watchDoc('dash-agenda',    'agenda_session', 'next', d => { nextSession = d; schedulePaint(); });
   },
