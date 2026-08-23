@@ -3,7 +3,7 @@ import { charSession } from '../../shared/char-session.js';
 import { updateInCol } from '../../data/firestore.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _esc } from '../../shared/html.js';
-import { formatItemBonusText, getItemStatBonus } from '../../shared/char-stats.js';
+import { ITEM_STAT_META, getItemStatBonus } from '../../shared/char-stats.js';
 import { loadDamageTypes, getMagicTypes } from '../../shared/damage-types.js';
 import { criticalEffectFormulaLabel } from '../../shared/character-rules.js';
 import {
@@ -15,6 +15,14 @@ import {
 import { getEquipmentSlots, getPrimaryWeaponSlotId, getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 
 // ── renderCharEquip ───────────────────────────────────────────────────────────
+
+const _characterEquipStatChips = item => ITEM_STAT_META.flatMap(stat => {
+  const value = getItemStatBonus(item, stat.full);
+  return value ? [{ ...stat, value }] : [];
+});
+
+const _characterEquipStatBadge = ({ full, short, value }) =>
+  `<span class="cs-cbadge stat-tone stat-${full}">${short.toUpperCase()} ${value > 0 ? '+' : ''}${value}</span>`;
 
 function _renderElementAccessHtml(c, magicTypes, canManageElements) {
   const charElems = c.elements || [];
@@ -71,7 +79,7 @@ export function renderCharEquip(c, canEdit) {
     const statKey = item.statAttaque==='dexterite' ? 'dexterite'
                   : item.statAttaque==='intelligence' ? 'intelligence' : 'force';
     const traits       = item.nom ? _getTraits(item) : [];
-    const bonusDisplay = item.nom ? formatItemBonusText(item) : null;
+    const statBonuses  = item.nom ? _characterEquipStatChips(item) : [];
 
     html += `<div class="cs-weap-card${item.isDefault ? ' cs-weap-card--default' : ''}">
       <div class="cs-weap-card-hdr">
@@ -115,10 +123,10 @@ export function renderCharEquip(c, canEdit) {
           ${degatsSub ? `<span class="cs-weap-roll-sub">${degatsSub}</span>` : ''}
         </div>
       </div>
-      ${item.portee || bonusDisplay ? `<div class="cs-weap-meta">
+      ${item.portee || statBonuses.length ? `<div class="cs-weap-meta">
         ${item.portee ? `<button class="cs-weap-portee cs-calc-link" data-action="openCharCalculation"
           data-calc="weapon-range" data-slot="${slot}" data-id="${c.id}" title="Voir l’origine de la portée">↗ ${item.portee}</button>` : ''}
-        ${bonusDisplay ? `<span class="cs-cbadge cs-cbadge--blue">${bonusDisplay}</span>` : ''}
+        ${statBonuses.map(_characterEquipStatBadge).join('')}
       </div>` : ''}
       ${traits.length ? `<div class="cs-weap-traits">${traits.map(t=>`<span class="cs-trait">${t}</span>`).join('')}</div>` : ''}`;
     } else {
@@ -177,12 +185,13 @@ export function renderCharEquip(c, canEdit) {
   // ── 2. Armures & Accessoires + Set d'armure ──────────────────────────────
   const totals = {fo:0,dex:0,in:0,sa:0,co:0,ch:0,ca:0};
   const statByStore = { fo:'force', dex:'dexterite', in:'intelligence', sa:'sagesse', co:'constitution', ch:'charisme' };
-  const statDisplay = { fo:'FOR', dex:'DEX', in:'IN', sa:'SA', co:'CO', ch:'CH', ca:'CA' };
+  const statDisplay = { fo:'FOR', dex:'DEX', in:'INT', sa:'SAG', co:'CON', ch:'CHA', ca:'CA' };
+  const statFull = { fo:'force', dex:'dexterite', in:'intelligence', sa:'sagesse', co:'constitution', ch:'charisme' };
   Object.values(equip).forEach(it => {
     Object.entries(statByStore).forEach(([store, full]) => { totals[store] += getItemStatBonus(it, full); });
     totals.ca += (parseInt(it?.ca) || 0) + (parseInt(it?.caBonus) || 0);
   });
-  const totalStr = Object.entries(totals).filter(([,v])=>v!==0).map(([k,v])=>`${statDisplay[k] || k.toUpperCase()} ${v>0?'+'+v:v}`).join(' · ');
+  const totalBadges = Object.entries(totals).filter(([, value]) => value !== 0).map(([key, value]) => ({ key, value }));
 
   const _armorCard = (slotDef) => {
     const slot = slotDef.id;
@@ -201,8 +210,8 @@ export function renderCharEquip(c, canEdit) {
       <span class="cs-armor-card-nom">${item.nom||'—'}</span>
       ${armorTypeMeta.label||statBonuses.length||caBonus?`<div class="cs-armor-card-badges">
         ${armorTypeMeta.label?`<span class="cs-cbadge cs-cbadge--${armorTypeMeta.tone||'dim'}" ${armorTypeMeta.color ? `style="--armor-type-color:${armorTypeMeta.color}"` : ''}>${armorTypeMeta.label}</span>`:''}
-        ${statBonuses.map(([k, v])=>`<span class="cs-cbadge cs-cbadge--gold">${statDisplay[k] || k.toUpperCase()} ${v>0?'+'+v:v}</span>`).join('')}
-        ${caBonus ? `<span class="cs-cbadge cs-cbadge--gold">CA ${caBonus>0?'+'+caBonus:caBonus}</span>` : ''}
+        ${statBonuses.map(([k, v])=>`<span class="cs-cbadge stat-tone stat-${statFull[k]}">${statDisplay[k] || k.toUpperCase()} ${v>0?'+'+v:v}</span>`).join('')}
+        ${caBonus ? `<span class="cs-cbadge derived-tone derived-ca">CA ${caBonus>0?'+'+caBonus:caBonus}</span>` : ''}
       </div>`:''}
       ${traits.length?`<div class="cs-armor-card-traits">${traits.map(t=>`<span class="cs-trait">${t}</span>`).join('')}</div>`:''}
     </div>`;
@@ -241,7 +250,9 @@ export function renderCharEquip(c, canEdit) {
     <div class="cs-section-hdr">
       <span class="cs-section-title">🛡️ Armures & Accessoires</span>
       ${STATE.isAdmin ? '<button class="btn btn-outline btn-sm" data-action="openArmorSetsAdmin">🧩 Sets</button>' : ''}
-      ${totalStr?`<span class="cs-hint">${totalStr}</span>`:''}
+      ${totalBadges.length ? `<span class="cs-equip-total" title="Bonus cumulés de l’équipement">
+        ${totalBadges.map(({ key, value }) => `<span class="cs-cbadge ${key === 'ca' ? 'derived-tone derived-ca' : `stat-tone stat-${statFull[key]}`}">${statDisplay[key] || key.toUpperCase()} ${value > 0 ? '+' : ''}${value}</span>`).join('')}
+      </span>` : ''}
     </div>
     <div class="cs-armor-grid3">
       ${armorSlots.map(_armorCard).join('')}

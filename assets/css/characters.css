@@ -5885,6 +5885,60 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   background: color-mix(in srgb, var(--armor-type-color) 12%, transparent);
 }
 
+/* Couleurs partagées avec les équipements des PNJ. Une caractéristique garde
+   la même identité visuelle dans le combat, l'inventaire et les détails. */
+.stat-force { --equip-stat: #ff737e; --equip-stat-rgb: 255, 115, 126; }
+.stat-dexterite { --equip-stat: #41d6a3; --equip-stat-rgb: 65, 214, 163; }
+.stat-constitution { --equip-stat: #f5bd4f; --equip-stat-rgb: 245, 189, 79; }
+.stat-intelligence { --equip-stat: #68a9ff; --equip-stat-rgb: 104, 169, 255; }
+.stat-sagesse { --equip-stat: #ad8cff; --equip-stat-rgb: 173, 140, 255; }
+.stat-charisme { --equip-stat: #f582c5; --equip-stat-rgb: 245, 130, 197; }
+.derived-pv { --equip-stat: #ff737e; --equip-stat-rgb: 255, 115, 126; }
+.derived-pm { --equip-stat: #ad8cff; --equip-stat-rgb: 173, 140, 255; }
+.derived-speed { --equip-stat: #41d6a3; --equip-stat-rgb: 65, 214, 163; }
+.derived-init { --equip-stat: #f5bd4f; --equip-stat-rgb: 245, 189, 79; }
+.derived-ca { --equip-stat: #68a9ff; --equip-stat-rgb: 104, 169, 255; }
+
+.cs-v3 .stat-tone,
+.cs-v3 .derived-tone { color: var(--equip-stat); }
+
+.cs-v3 .cs-cbadge.stat-tone,
+.cs-v3 .cs-cbadge.derived-tone,
+.cs-v3 .badge-chip.stat-tone,
+.cs-v3 .badge-chip.derived-tone,
+.cs-v3 .inv-row-chip.stat-tone {
+  border-color: rgba(var(--equip-stat-rgb), .42);
+  background: rgba(var(--equip-stat-rgb), .13);
+  color: var(--equip-stat);
+  font-weight: 800;
+}
+
+.inv-detail .badge-chip.stat-tone {
+  display: inline-block;
+  padding: 3px 8px;
+  border: 1px solid rgba(var(--equip-stat-rgb), .42);
+  border-radius: 999px;
+  background: rgba(var(--equip-stat-rgb), .13);
+  color: var(--equip-stat);
+  font-size: .68rem;
+  font-weight: 800;
+}
+
+.cs-v3 .cs-equip-total {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.cs-v3 .inv-detail-stat-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
 /* ══════════════════════════════════════════════
    WEAPON CARDS — grille 2 colonnes
    Chaque carte : slot/edit / nom+format / stats / traits

@@ -25,6 +25,7 @@ import { getArmorSetData, getMainWeapon, getItemTraits, getEquippedSourceItem, D
 import { getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { buildProjectionPatch, switchBuild } from '../../shared/character-builds.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
+import { resolveWeaponDamageContext } from '../../shared/weapon-damage-context.js';
 import { weaponTechniqueTargetCA, weaponTechniqueDamageTerms } from '../../shared/weapon-techniques.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../../shared/damage-types.js';
 import { getAttackMissEffect } from '../../shared/damage-type-rules.js';
@@ -4409,6 +4410,15 @@ function _buildAttackOptions(t) {
   if (!c && t.npcId) {
     const n = VS.npcs[t.npcId] || {};
     const weapon = getMainWeapon({ equipement: n.equipement || {} });
+    const weaponDamage = resolveWeaponDamageContext(
+      VS.weaponFormats,
+      VS.damageTypes,
+      weapon,
+      Array.isArray(n.elements) ? n.elements : [],
+    );
+    const damageType = weaponDamage.damageTypeId
+      ? getDamageTypeById(VS.damageTypes, weaponDamage.damageTypeId)
+      : null;
     const setData = getArmorSetData({ equipement: n.equipement || {} });
     const dmgStat = (Array.isArray(weapon.degatsStats) && weapon.degatsStats.length
       ? weapon.degatsStats[0]
@@ -4417,7 +4427,10 @@ function _buildAttackOptions(t) {
     const dmgMod = _npcStatMod(n, dmgStat);
     const touchMod = _npcStatMod(n, touchStat);
     const setTouch = setData.modifiers?.toucherBonus || 0;
-    const rawDice = t.attackDice || weapon.degats || '2d4';
+    // La fiche et l'arme équipée priment sur les anciennes valeurs copiées dans
+    // le token à sa création. Changer l'arme du PNJ prend donc effet sans recréer
+    // le token ni la scène.
+    const rawDice = weapon.degats || t.attackDice || '2d4';
     const dice = `${rawDice}${dmgMod ? (dmgMod > 0 ? '+' : '') + dmgMod : ''}`;
     options.push({
       id: 'npc_attack',
@@ -4434,13 +4447,19 @@ function _buildAttackOptions(t) {
       dmgStatMod: dmgMod,
       dmgStatLabel: statShort(dmgStat) || dmgStat,
       maitriseBonus: 0,
-      halfOnMiss: false,
       traits: getItemTraits(weapon),
-      damageTypeId: 'physique',
-      damageTypeIcon: '💪',
-      damageTypeColor: '#9ca3af',
+      typeRules: getDamageTypeRules(VS.damageTypes, weaponDamage.damageTypeId || 'physique'),
+      damageTypeId: weaponDamage.damageTypeId,
+      damageTypeIcon: damageType?.icon || (weaponDamage.isMagic ? '✨' : '💪'),
+      damageTypeColor: damageType?.color || (weaponDamage.isMagic ? '#c084fc' : '#9ca3af'),
+      isMagicWeapon: weaponDamage.isMagic,
+      charElements: weaponDamage.elementIds,
+      weaponTechniques: Array.isArray(weaponDamage.format?.techniques) ? weaponDamage.format.techniques : [],
     });
-    if (Array.isArray(n.actions) && n.actions.length) {
+    const npcSpells = Array.isArray(n.deck_sorts)
+      ? n.deck_sorts
+      : (Array.isArray(n.actions) ? n.actions : []);
+    if (npcSpells.length) {
       const nChar = {
         id: n.id || `npc_${t.npcId}`,
         nom: n.nom || 'PNJ',
@@ -4454,12 +4473,12 @@ function _buildAttackOptions(t) {
         },
         statsBonus: computeEquipStatsBonus(n.equipement || {}),
         equipement: n.equipement || {},
-        deck_sorts: n.actions,
+        deck_sorts: npcSpells,
         sort_cats: [],
         elements: [],
       };
       const pmSetDelta = setData.modifiers?.spellPmDelta || 0;
-      n.actions.forEach((s, actIdx) => {
+      npcSpells.forEach((s, actIdx) => {
         if (s.actif === false) return;
         const baseRange = (s.portee != null && Number.isFinite(parseInt(s.portee)))
           ? parseInt(s.portee)
@@ -5660,7 +5679,9 @@ function _vttAtkSetElement(elemId) {
   ctx.opt.typeRules       = getDamageTypeRules(VS.damageTypes, elemId);
   ctx.opt.damageTypeIcon  = t?.icon || '';
   ctx.opt.damageTypeColor = t?.color || '';
-  document.querySelectorAll('.vtt-atk-elem').forEach(b => b.classList.toggle('is-active', b.dataset.elem === elemId));
+  document.querySelectorAll('.vtt-atk-elem').forEach(b => {
+    b.classList.toggle('is-active', b.dataset.vttArgs === elemId);
+  });
   const ic = document.getElementById('atk-dmgtype-ic');
   if (ic) { ic.textContent = t?.icon || ''; ic.style.color = t?.color || '#9ca3af'; }
   const inter = document.getElementById('atk-interaction');

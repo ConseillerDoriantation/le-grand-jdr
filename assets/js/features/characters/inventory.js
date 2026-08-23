@@ -8,7 +8,7 @@ import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _norm } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { RARETE_NAMES, _rareteColor, _rareteLabel } from '../../shared/rarity.js';
-import { statShort, formatItemBonusText, calcOr, getItemEffectText } from '../../shared/char-stats.js';
+import { ITEM_STAT_META, statShort, getItemStatBonus, calcOr, getItemEffectText } from '../../shared/char-stats.js';
 import { useGoldMulti } from '../../shared/economy.js';
 import {
   shopItemToInvEntry,
@@ -48,6 +48,15 @@ let _lootFilter = () => {};
 let _lootSelect = () => {};
 let _lootSaveRecent = null;
 let _lootRenderGrid = null;
+
+const _inventoryStatChips = item => ITEM_STAT_META.flatMap(stat => {
+  const value = getItemStatBonus(item, stat.full);
+  return value ? [{ ...stat, value, cls: `stat-tone stat-${stat.full}` }] : [];
+});
+
+const _inventoryStatBadgesHtml = item => _inventoryStatChips(item)
+  .map(stat => `<span class="badge-chip ${stat.cls}">${stat.short.toUpperCase()} ${stat.value > 0 ? '+' : ''}${stat.value}</span>`)
+  .join('');
 
 function _invLooksMechanicalEffect(text = '') {
   const raw = String(text || '').trim();
@@ -240,7 +249,7 @@ export function _renderInventaireBoutique(char) {
     const prixVente = parseFloat(item.prixVente) || Math.round(prixAchat * 0.6);
 
     const infos = [];
-    const bonusText = formatItemBonusText(item);
+    const statBonuses = _inventoryStatChips(item);
     if (item.format)      infos.push({ label: 'Format',    val: item.format });
     if (item.slotArmure)  infos.push({ label: 'Slot',      val: item.slotArmure });
     if (item.slotBijou)   infos.push({ label: 'Slot',      val: item.slotBijou });
@@ -259,7 +268,11 @@ export function _renderInventaireBoutique(char) {
     if (item.type)        infos.push({ label: 'Type',       val: item.type });
     { const eff = getItemEffectText(item); if (eff) infos.push({ label: 'Effet', val: eff }); }
     if (item.description) infos.push({ label: 'Desc.',      val: item.description, muted: true });
-    if (bonusText)        infos.push({ label: 'Stats',      val: bonusText,   color: '#4f8cff' });
+    statBonuses.forEach(stat => infos.push({
+      label: 'Stat',
+      val: `${stat.short.toUpperCase()} ${stat.value > 0 ? '+' : ''}${stat.value}`,
+      cls: stat.cls,
+    }));
 
     return `
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;
@@ -281,7 +294,7 @@ export function _renderInventaireBoutique(char) {
         ${infos.map(info => `
           <div style="display:flex;align-items:baseline;gap:.3rem;font-size:.78rem">
             <span style="color:var(--text-dim);font-size:.68rem;text-transform:uppercase;letter-spacing:.5px">${info.label}</span>
-            <span style="color:${info.color||'var(--text-muted)'};${info.italic?'font-style:italic':''};font-weight:${info.color?'600':'400'}">${info.val}</span>
+            <span class="${info.cls || ''}" style="${info.color ? `color:${info.color};` : ''}${info.italic?'font-style:italic;':''}font-weight:${info.color || info.cls ?'700':'400'}">${info.val}</span>
           </div>`).join('')}
       </div>` : ''}
 
@@ -365,7 +378,10 @@ function _typeIcon(type) {
 // ── Chips compactes pour une ligne (max 3) ────
 function _invRowChips(item) {
   const chips = [];
-  const bonus = formatItemBonusText(item);
+  const statChips = _inventoryStatChips(item).map(stat => ({
+    val: `${stat.short.toUpperCase()} ${stat.value > 0 ? '+' : ''}${stat.value}`,
+    cls: stat.cls,
+  }));
   if (item.degats) {
     const shs = _itemDegatsStatsShorts(item);
     chips.push({ val: shs.length ? `${item.degats}+${shs.join('+')}` : item.degats, color: '#ff6b6b' });
@@ -389,8 +405,8 @@ function _invRowChips(item) {
     chips.push({ val: item.effet.length > 42 ? item.effet.slice(0,42)+'…' : item.effet, color: 'var(--text-muted)' });
   if (chips.length === 0 && item.type)
     chips.push({ val: item.type, color: 'var(--text-dim)' });
-  if (!bonus) return chips.slice(0, 3);
-  return [...chips.slice(0, 2), { val: bonus, color: '#4f8cff' }];
+  if (!statChips.length) return chips.slice(0, 3);
+  return [...chips.slice(0, 2), ...statChips.slice(0, 3)];
 }
 
 export function renderCharInventaire(c, canEdit) {
@@ -449,7 +465,7 @@ export function renderCharInventaire(c, canEdit) {
       <div class="inv-row-body">
         <span class="inv-row-nom">${nomEsc}</span>
         ${isEquipped ? `<span class="inv-row-eq" title="${equippedSlots.join(', ')}">✓ Équipé</span>` : ''}
-        ${chips.length ? `<div class="inv-row-chips">${chips.map(ch => `<span class="inv-row-chip" style="color:${ch.color}">${_esc(ch.val)}</span>`).join('')}</div>` : ''}
+        ${chips.length ? `<div class="inv-row-chips">${chips.map(ch => `<span class="inv-row-chip ${ch.cls || ''}"${ch.color ? ` style="color:${ch.color}"` : ''}>${_esc(ch.val)}</span>`).join('')}</div>` : ''}
         ${renderInvPersonalLine(c, g.indices, indicesB64, 'row', canEdit)}
       </div>
       <div class="inv-row-aside">
@@ -566,7 +582,7 @@ export async function openInventoryItemDetail(charId, indicesB64) {
   const equippedMap = getEquippedInventoryIndexMap(c);
   const equippedSlots = [...new Set(indices.flatMap(idx => equippedMap.get(idx) || []))];
   const traits = _getTraits(item);
-  const bonusText = formatItemBonusText(item);
+  const statBonusHtml = _inventoryStatBadgesHtml(item);
   const rawEffectText = String(getItemEffectText(item) || '').trim();
   const descriptionText = String(item.description || '').trim();
   const effectCandidateText = rawEffectText && _norm(rawEffectText) !== _norm(descriptionText)
@@ -627,9 +643,9 @@ export async function openInventoryItemDetail(charId, indicesB64) {
 
       <div class="inv-detail-facts">${factHtml}</div>
 
-      ${bonusText || effectText ? `<section class="inv-detail-section">
+      ${statBonusHtml || effectText ? `<section class="inv-detail-section">
         <h4>Effets</h4>
-        ${bonusText ? `<p class="inv-detail-bonus">${_esc(bonusText)}</p>` : ''}
+        ${statBonusHtml ? `<div class="inv-detail-stat-badges">${statBonusHtml}</div>` : ''}
         ${effectText ? `<p>${_esc(effectText)}</p>` : ''}
       </section>` : ''}
 

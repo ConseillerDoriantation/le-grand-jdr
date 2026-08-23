@@ -217,10 +217,12 @@ export function _live(t) {
   const npcDmgMod = n ? npcDmgStats.reduce((sum, stat) => sum + _npcStatMod(e, stat), 0) : 0;
   const npcDiceRaw = n ? (npcMainWeapon?.degats || '2d4') : null;
   const npcDice   = n ? `${npcDiceRaw}${npcDmgMod ? (npcDmgMod > 0 ? '+' : '') + npcDmgMod : ''}` : (npcWeapon.degats || npcCombat.damage || e.attackDice || null);
-  const atkDice   = t.attackDice || weapDice || beastDice || npcDice
-    || (c ? `1d6${weapMod>=0?'+':''}${weapMod}` : null)
-    || (typeof t.attack==='string' ? t.attack : null)
-    || '1d6';
+  const atkDice   = n
+    ? (npcDice || t.attackDice || '1d6')
+    : (t.attackDice || weapDice || beastDice
+      || (c ? `1d6${weapMod>=0?'+':''}${weapMod}` : null)
+      || (typeof t.attack==='string' ? t.attack : null)
+      || '1d6');
 
   // Valeurs dérivées calculées une seule fois pour éviter les recalculs dans result
   const _round   = VS.session?.combat?.round ?? 0;
@@ -231,10 +233,13 @@ export function _live(t) {
   // Attaque de base (stat). Le bonus toucher d'enchantement N'est PAS inclus ici :
   // il est appliqué frais au moment du jet (_vttRollAttack) pour ne pas dépendre
   // d'une option figée à l'ouverture du panneau (le buff peut être posé après).
-  const _baseAtk = t.attack   ?? (c ? toucherMod+setBonus : (b ? (_numOr(b.attaques?.[0]?.toucher, 5)) : (() => {
+  const npcAttack = n ? (() => {
     const stat = npcMainWeapon?.toucherStats?.[0] || npcMainWeapon?.toucherStat || npcMainWeapon?.statAttaque || npcDmgStats[0] || 'force';
     return _numOr(e.bonusAttaque, _numOr(e.attack, _numOr(npcWeapon.toucher, _npcStatMod(e, stat) + (npcSetData?.modifiers?.toucherBonus || 0))));
-  })()));
+  })() : null;
+  const _baseAtk = n
+    ? npcAttack
+    : (t.attack ?? (c ? toucherMod + setBonus : (b ? _numOr(b.attaques?.[0]?.toucher, 5) : 5)));
 
   const result = {
     ...t,

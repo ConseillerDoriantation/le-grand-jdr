@@ -13,7 +13,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol, saveDoc } from '../data/firestore.js';
 import { watchPageCollection } from '../shared/realtime.js';
-import { openModal, closeModal, pushModal, updateModalContent, confirmModal } from '../shared/modal.js';
+import { openModal, closeModal, pushModal, popModal, updateModalContent, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
@@ -37,7 +37,12 @@ import {
   getArmorSetChipText,
   getArmorTypeMeta,
   getMainWeapon,
+  normalizeStatKey,
 } from '../shared/equipment-utils.js';
+import { getArmorTypeOptions } from '../shared/armor-set-settings.js';
+import { loadWeaponFormats } from '../shared/weapon-formats.js';
+import { loadDamageTypes } from '../shared/damage-types.js';
+import { loadRarities, getRarities, RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
 import { _getTraits } from './characters/data.js';
 import { listPlaces } from './map/data/places.repo.js';
 import { listOrganizations } from './map/data/organizations.repo.js';
@@ -76,6 +81,12 @@ const NPC_STAT_LABELS = {
 const NPC_BASE_STATS = Object.fromEntries(NPC_STATS.map(s => [s.key, 10]));
 const NPC_BASE_VITALS = { pv: 20, pm: 0, ca: 10, vitesse: 6 };
 const NPC_COMBAT_DEFAULT = { weaponName: '', damage: '', range: null };
+// `actions` est l'ancien stockage des capacités PNJ. Le nouvel onglet Sorts
+// utilise `deck_sorts`, tout en gardant les anciennes actions lisibles tant
+// qu'un PNJ n'a pas encore enregistré son deck au nouveau format.
+const _npcSpellList = (n = {}) => Array.isArray(n.deck_sorts)
+  ? n.deck_sorts
+  : (Array.isArray(n.actions) ? n.actions : []);
 // Emplacements d'équipement PNJ — identiques aux persos joueurs. `kind` pilote
 // le filtrage des objets boutique éligibles au slot.
 const NPC_EQUIP_SLOTS = [
@@ -199,6 +210,9 @@ const _serializeShopWeapon = (item = {}) => ({
   portee: item.portee || '',
   traits: _getTraits(item),
   format: item.format || '',
+  formatId: item.formatId || '',
+  damageTypeId: item.damageTypeId || '',
+  elementId: item.elementId || '',
   toucher: item.toucher || '',
   particularite: item.particularite || item.effet || '',
   stats: item.stats || '',
@@ -259,6 +273,9 @@ let _organisations = [];   // [{ id, name }] — alimente la sélection Organisa
 let _orgIcons      = {};   // { [orgName]: emoji } — émoji personnalisé par catégorie (MJ)
 let _shopWeapons   = [];   // armes issues de la boutique pour l'espace combat PNJ
 let _shopItems     = [];   // tous les objets boutique (armes/armures/bijoux) — équipement PNJ
+let _weaponFormats = [];
+let _damageTypes   = [];
+let _rarities      = [];
 let _relationCharacters = []; // cache characters pour retrouver les portraits côté joueur
 let _playerProfiles = [];  // profils publics de la page Joueurs, utiles pour les portraits visibles côté joueur
 let _activeId      = null;
@@ -274,7 +291,10 @@ let _npcSheetTab   = 'combat';   // onglet actif de la fiche PNJ : 'combat' | 's
 let _npcRelSel     = null;       // id du lien d'affinité sélectionné dans le Cercle des relations
 let _npcLink       = { npcId: null, charId: null, charNom: '', typeId: null };  // sélection en cours dans le modal « Lier »
 let _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
-let _equipPickerState = { npcId: '', slot: '', q: '' };
+let _equipPickerState = {
+  npcId: '', slot: '', q: '', sort: 'name', filtersOpen: true,
+  filters: { type: '', rarity: '', stat: '', damage: '', trait: '', feature: '', availability: '' },
+};
 
 // ── Chargement ────────────────────────────────────────────────────────────────
 // `npcs` et `shop` sont session-live → 0 lecture facturée. `npc_affinites` est
@@ -282,13 +302,16 @@ let _equipPickerState = { npcId: '', slot: '', q: '' };
 // types/seuils + relations PJ↔PNJ). `places` et `organizations` restent un fetch
 // page-scoped (1 lecture initiale, servi du cache IndexedDB sur cache chaud).
 async function _load() {
-  const [npcs, places, orgs, shopItems, relationCharacters, playerProfiles] = await Promise.all([
+  const [npcs, places, orgs, shopItems, relationCharacters, playerProfiles, weaponFormats, damageTypes, rarities] = await Promise.all([
     loadCollection('npcs'),
     listPlaces().catch(() => []),
     listOrganizations().catch(() => []),
     loadCollection('shop').catch(() => []),
     loadCollection('characters').catch(() => []),
     loadCollection('players').catch(() => []),
+    loadWeaponFormats().catch(() => []),
+    loadDamageTypes().catch(() => []),
+    loadRarities().catch(() => []),
   ]);
   _npcs           = npcs || [];
   _places        = (places || []).filter(p => p?.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
@@ -297,6 +320,9 @@ async function _load() {
   _shopWeapons   = _shopItems.filter(_isShopWeapon);
   _relationCharacters = relationCharacters || [];
   _playerProfiles = playerProfiles || [];
+  _weaponFormats = weaponFormats || [];
+  _damageTypes = damageTypes || [];
+  _rarities = rarities?.length ? rarities : getRarities();
 }
 
 // ── Helpers types ─────────────────────────────────────────────────────────────
@@ -1120,7 +1146,7 @@ function _renderFiche(n) {
   const { totals } = _npcVitalTotals(n);
   const pvBase = _npcBaseVital(n, 'pv'), pmBase = _npcBaseVital(n, 'pm');
   const deckMax = calcDeckMax(n);
-  const deckActifs = Array.isArray(n.actions) ? n.actions.length : 0;
+  const deckActifs = _npcSpellList(n).filter(s => s?.actif !== false).length;
   const orgs = Array.isArray(n.organisations) ? n.organisations.filter(Boolean) : [];
   const initial = (n.nom || '?')[0].toUpperCase();
   const portraitInner = n.imageUrl ? `<img src="${_esc(n.imageUrl)}" alt="">` : `<span>${initial}</span>`;
@@ -1224,6 +1250,15 @@ function _renderFiche(n) {
   // Onglet Sorts actif → le PNJ devient l'hôte du moteur de sorts (édition +
   // enregistrement sur son doc). Sinon on relâche l'hôte (comportement joueur).
   if (adm && tab === 'sorts') {
+    // Le moteur partagé attend `deck_sorts`. Cette normalisation en mémoire
+    // rend aussi les anciennes actions PNJ éditables sans écriture automatique.
+    // Avant l'existence du Deck, `actif` n'était pas stocké : ces sorts étaient
+    // disponibles en combat et doivent donc apparaître préparés dans l'interface.
+    n.deck_sorts = _npcSpellList(n).map(spell => (
+      spell && typeof spell === 'object' && typeof spell.actif !== 'boolean'
+        ? { ...spell, actif: true }
+        : spell
+    ));
     n.__spellCol = 'npcs';
     setNpcSpellHost(n, () => _refreshActivePanel());
   } else {
@@ -2453,7 +2488,199 @@ function _npcEquipSearchText(item = {}) {
     item.particularite,
     item.description,
     formatItemBonusText(item),
+    item.traits,
+    item.skillBonuses,
+    item.damageProfile,
+    item.actions,
+    item.pvMaxBonus,
+    item.pmMaxBonus,
+    item.vitesseBonus,
+    item.initiativeBonus,
+    item.caBonus,
+    item.prix,
+    item.dispo,
   ].map(_searchPart).join(' '));
+}
+
+const _npcEquipFeatureLabels = {
+  ca: 'Classe d’armure', pv: 'PV max', pm: 'PM max', speed: 'Vitesse', initiative: 'Initiative',
+  skill: 'Compétences', resistance: 'Résistance', immunity: 'Immunité', absorption: 'Absorption',
+  weakness: 'Faiblesse', action: 'Actions', effect: 'Effet spécial', magic: 'Magique',
+};
+const _npcUnique = values => [...new Set((values || []).map(v => String(v || '').trim()).filter(Boolean))]
+  .sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base', numeric: true }));
+const _npcRarityValue = (item = {}) => {
+  const direct = parseInt(item.rarete, 10);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const wanted = _norm(item.rarete || '');
+  return _rarities.find(r => _norm(r.name) === wanted)?.value || 0;
+};
+const _npcRarityMeta = (item = {}) => {
+  const value = _npcRarityValue(item);
+  const configured = _rarities.find(r => r.value === value);
+  const name = configured?.name || RARETE_NAMES[value] || (item.rarete ? String(item.rarete) : '');
+  return { value, name, color: configured?.color || (name ? _rareteColor(name) : '') };
+};
+const _npcEquipTypes = (item = {}, def = {}) => _npcUnique(def.kind === 'weapon'
+  ? [item.format, item.sousType, item.typeArme, item.type]
+  : def.kind === 'armor'
+    ? [item.typeArmure]
+    : [item.slotBijou, item.type]);
+const _npcEquipStats = (item = {}) => _npcUnique([
+  normalizeStatKey(item.toucherStat),
+  ...(Array.isArray(item.degatsStats) ? item.degatsStats : [item.degatsStat, item.statAttaque]).map(normalizeStatKey),
+  ...NPC_STATS.filter(stat => getItemStatBonus(item, stat.key)).map(stat => stat.key),
+]);
+const _npcEquipFeatures = (item = {}, def = {}) => {
+  const values = [];
+  if ((parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0)) values.push('ca');
+  if (parseInt(item.pvMaxBonus) || 0) values.push('pv');
+  if (parseInt(item.pmMaxBonus) || 0) values.push('pm');
+  if (parseInt(item.vitesseBonus) || 0) values.push('speed');
+  if (parseInt(item.initiativeBonus) || 0) values.push('initiative');
+  if (Object.values(item.skillBonuses || {}).some(v => parseInt(v) || 0)) values.push('skill');
+  if (item.damageProfile?.resistances?.length) values.push('resistance');
+  if (item.damageProfile?.immunites?.length) values.push('immunity');
+  if (item.damageProfile?.absorptions?.length) values.push('absorption');
+  if (item.damageProfile?.faiblesses?.length) values.push('weakness');
+  if (Array.isArray(item.actions) && item.actions.length) values.push('action');
+  if (item.effet || item.particularite || item.description) values.push('effect');
+  const fmt = _weaponFormats.find(f => f.id === item.formatId || f.label === item.format);
+  const dmgType = _damageTypes.find(t => t.id === (item.damageTypeId || item.elementId));
+  if (def.kind === 'weapon' && (fmt?.isMagic || dmgType?.isMagic)) values.push('magic');
+  return _npcUnique(values);
+};
+
+function _npcEquipFacetData(items, def) {
+  return {
+    types: _npcUnique(items.flatMap(item => _npcEquipTypes(item, def))),
+    rarities: [...new Set(items.map(_npcRarityValue).filter(Boolean))].sort((a, b) => a - b),
+    stats: _npcUnique(items.flatMap(_npcEquipStats)),
+    damages: _npcUnique(items.map(item => item.degats)),
+    traits: _npcUnique(items.flatMap(item => _getTraits(item) || [])),
+    features: _npcUnique(items.flatMap(item => _npcEquipFeatures(item, def))),
+    availabilities: _npcUnique(items.map(item => item.dispo)),
+  };
+}
+
+function _npcEquipMatchesFilters(item, def, state) {
+  const f = state.filters || {};
+  const query = _norm(state.q || '');
+  if (query && !_searchIncludes(_npcEquipSearchText(item), query)) return false;
+  if (f.type && !_npcEquipTypes(item, def).includes(f.type)) return false;
+  if (f.rarity && String(_npcRarityValue(item)) !== String(f.rarity)) return false;
+  if (f.stat && !_npcEquipStats(item).includes(f.stat)) return false;
+  if (f.damage && String(item.degats || '') !== f.damage) return false;
+  if (f.trait && !(_getTraits(item) || []).includes(f.trait)) return false;
+  if (f.feature && !_npcEquipFeatures(item, def).includes(f.feature)) return false;
+  if (f.availability && String(item.dispo || '') !== f.availability) return false;
+  return true;
+}
+
+function _npcDamageAverage(formula = '') {
+  const match = String(formula).toLowerCase().match(/(\d*)d(\d+)(?:\s*([+-])\s*(\d+))?/);
+  if (!match) return parseFloat(formula) || 0;
+  const count = parseInt(match[1], 10) || 1;
+  const faces = parseInt(match[2], 10) || 0;
+  const flat = (parseInt(match[4], 10) || 0) * (match[3] === '-' ? -1 : 1);
+  return count * (faces + 1) / 2 + flat;
+}
+
+function _npcSortEquipItems(items, sort) {
+  const list = [...items];
+  const byName = (a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' });
+  if (sort === 'rarity') return list.sort((a, b) => _npcRarityValue(b) - _npcRarityValue(a) || byName(a, b));
+  if (sort === 'damage') return list.sort((a, b) => _npcDamageAverage(b.degats) - _npcDamageAverage(a.degats) || byName(a, b));
+  if (sort === 'ca') return list.sort((a, b) => ((parseInt(b.ca) || 0) + (parseInt(b.caBonus) || 0)) - ((parseInt(a.ca) || 0) + (parseInt(a.caBonus) || 0)) || byName(a, b));
+  if (sort === 'price_asc') return list.sort((a, b) => (parseFloat(a.prix) || 0) - (parseFloat(b.prix) || 0) || byName(a, b));
+  if (sort === 'price_desc') return list.sort((a, b) => (parseFloat(b.prix) || 0) - (parseFloat(a.prix) || 0) || byName(a, b));
+  return list.sort(byName);
+}
+
+const _npcFacetOptions = (values, current, label, valueLabel = value => value) => `
+  <option value="">${_esc(label)}</option>
+  ${values.map(value => `<option value="${_esc(value)}" ${String(value) === String(current) ? 'selected' : ''}>${_esc(valueLabel(value))}</option>`).join('')}`;
+const _npcStatLabel = key => NPC_STAT_LABELS[key] || key;
+const _npcStatTone = key => {
+  const normalized = normalizeStatKey(key);
+  return NPC_STATS.some(stat => stat.key === normalized) ? `stat-tone stat-${normalized}` : '';
+};
+const _npcDerivedTone = key => ({
+  pvMaxBonus: 'derived-tone derived-pv',
+  pmMaxBonus: 'derived-tone derived-pm',
+  vitesseBonus: 'derived-tone derived-speed',
+  initiativeBonus: 'derived-tone derived-init',
+  caBonus: 'derived-tone derived-ca',
+}[key] || '');
+
+function _npcEquipCardHtml(item, def, current, npcId, slot) {
+  const built = buildEquippedItemFromInventory(def.slot, item, null) || { ...item };
+  const preview = { ...item, ...built };
+  const rarity = _npcRarityMeta(item);
+  const image = item.image || item.imageUrl || '';
+  const selected = current?.itemId === item.id;
+  const types = _npcEquipTypes(item, def);
+  const stats = _npcEquipStats(item);
+  const traits = _getTraits(item) || [];
+  const derived = [
+    ['pvMaxBonus', 'PV'], ['pmMaxBonus', 'PM'], ['vitesseBonus', 'Vit.'],
+    ['initiativeBonus', 'Init.'], ['caBonus', 'CA'],
+  ].flatMap(([key, label]) => {
+    const value = parseInt(item[key]) || 0;
+    return value ? [{ label: `${label} ${value > 0 ? '+' : ''}${value}`, cls: _npcDerivedTone(key) }] : [];
+  });
+  const statBonuses = NPC_STATS.flatMap(stat => {
+    const value = getItemStatBonus(item, stat.key);
+    return value ? [{ label: `${stat.short} ${value > 0 ? '+' : ''}${value}`, cls: _npcStatTone(stat.key) }] : [];
+  });
+  const skillCount = Object.values(item.skillBonuses || {}).filter(v => parseInt(v) || 0).length;
+  const profileCount = Object.values(item.damageProfile || {}).reduce((sum, list) => sum + (Array.isArray(list) ? list.length : 0), 0);
+  const facts = def.kind === 'weapon'
+    ? [
+      item.degats && { label: `🎲 ${item.degats}`, cls: 'is-damage' },
+      item.toucherStat && { label: `Toucher ${_npcStatLabel(normalizeStatKey(item.toucherStat))}`, cls: _npcStatTone(item.toucherStat) },
+      item.portee && { label: `Portée ${item.portee}`, cls: 'is-range' },
+    ]
+    : def.kind === 'armor'
+      ? [((parseInt(preview.ca) || 0) + (parseInt(preview.caBonus) || 0)) && {
+        label: `🛡️ CA +${(parseInt(preview.ca) || 0) + (parseInt(preview.caBonus) || 0)}`,
+        cls: 'derived-tone derived-ca',
+      }]
+      : [];
+  const extra = [
+    ...statBonuses,
+    ...derived,
+    skillCount ? { label: `${skillCount} compétence${skillCount > 1 ? 's' : ''}`, cls: 'is-skill' } : null,
+    profileCount ? { label: `${profileCount} protection${profileCount > 1 ? 's' : ''}`, cls: 'is-protection' } : null,
+  ].filter(Boolean);
+  const effect = item.particularite || item.effet || item.description || '';
+  const commerce = [item.dispo, item.prix != null && item.prix !== '' ? `${item.prix} 🪙` : ''].filter(Boolean).join(' · ');
+  return `
+    <button type="button" class="npc-equip-result${selected ? ' is-selected' : ''}"
+      style="--equip-accent:${_esc(rarity.color || '#4f8cff')}"
+      data-action="npcPickEquipItem" data-npc-id="${_esc(npcId)}" data-slot="${_esc(slot)}" data-item-id="${_esc(item.id)}">
+      <span class="npc-equip-result-visual ${image ? 'has-image' : ''}">
+        ${image ? `<img src="${_esc(image)}" alt="">` : `<span>${def.icon}</span>`}
+      </span>
+      <span class="npc-equip-result-body">
+        <span class="npc-equip-result-top">
+          <span class="npc-equip-result-main">
+            <strong>${_esc(item.nom || 'Objet sans nom')}</strong>
+            <small>${_esc([types.slice(0, 2).join(' · ') || 'Équipement compatible', commerce].filter(Boolean).join(' · '))}</small>
+          </span>
+          ${rarity.name ? `<span class="npc-equip-rarity" style="--rarity:${_esc(rarity.color || '#9ca3af')}">${_esc(rarity.name)}</span>` : ''}
+        </span>
+        ${facts.filter(Boolean).length ? `<span class="npc-equip-result-facts">${facts.filter(Boolean).map(fact => `<b class="${fact.cls || ''}">${_esc(fact.label)}</b>`).join('')}</span>` : ''}
+        ${extra.length ? `<span class="npc-eq-badges">${extra.slice(0, 9).map(entry => `<span class="npc-eq-badge ${entry.cls || ''}">${_esc(entry.label)}</span>`).join('')}</span>` : '<span class="npc-equip-no-bonus">Aucun bonus direct</span>'}
+        ${(stats.length || traits.length) ? `<span class="npc-equip-result-tags">
+          ${stats.slice(0, 4).map(stat => `<i class="${_npcStatTone(stat)}">${_esc(_npcStatLabel(stat))}</i>`).join('')}
+          ${traits.slice(0, 3).map(trait => `<i>${_esc(trait)}</i>`).join('')}
+          ${stats.length + traits.length > 7 ? `<i>+${stats.length + traits.length - 7}</i>` : ''}
+        </span>` : ''}
+        ${effect ? `<span class="npc-equip-result-effect">${_esc(effect)}</span>` : ''}
+      </span>
+      <span class="npc-equip-result-cta">${selected ? '✓ Équipé' : 'Équiper'}</span>
+    </button>`;
 }
 
 function _npcEquipPreviewBadges(item, def) {
@@ -2469,7 +2696,7 @@ function _npcEquipPickerTitle() {
 }
 
 function _renderEquipPickerHtml() {
-  const { npcId, slot, q } = _equipPickerState;
+  const { npcId, slot, q, filters, sort, filtersOpen } = _equipPickerState;
   const n = _npcs.find(x => x.id === npcId);
   const def = NPC_EQUIP_SLOTS.find(s => s.slot === slot);
   if (!n || !def) return '<div class="npc-equip-picker-empty">Emplacement introuvable.</div>';
@@ -2477,10 +2704,11 @@ function _renderEquipPickerHtml() {
   const equip = n.equipement || {};
   const current = equip[slot] || null;
   const all = _shopItemsForSlot(def);
-  const query = _norm(q || '');
-  const filtered = query ? all.filter(i => _searchIncludes(_npcEquipSearchText(i), query)) : all;
+  const facets = _npcEquipFacetData(all, def);
+  const filtered = _npcSortEquipItems(all.filter(item => _npcEquipMatchesFilters(item, def, _equipPickerState)), sort);
   const shown = filtered.slice(0, 80);
   const more = Math.max(0, filtered.length - shown.length);
+  const activeFilters = Object.entries(filters || {}).filter(([, value]) => value);
 
   return `
     <div class="npc-equip-picker">
@@ -2489,62 +2717,350 @@ function _renderEquipPickerHtml() {
           <div class="npc-equip-picker-slot">${def.icon} ${_esc(def.slot)}</div>
           <div class="npc-equip-picker-current">${current ? `Actuel : <b>${_esc(current.nom || 'Objet équipé')}</b>` : 'Aucun objet équipé'}</div>
         </div>
-        ${current ? `
-          <button class="btn btn-outline btn-sm" data-action="npcClearEquipSlot"
-            data-npc-id="${_esc(npcId)}" data-slot="${_esc(slot)}">
-            Retirer
-          </button>` : ''}
+        <div class="npc-equip-picker-head-actions">
+          <button class="btn btn-outline btn-sm" data-action="npcOpenManualEquip"
+            data-npc-id="${_esc(npcId)}" data-slot="${_esc(slot)}">${current ? 'Personnaliser' : 'Créer manuellement'}</button>
+          ${current ? `<button class="btn btn-outline btn-sm is-danger" data-action="npcClearEquipSlot"
+            data-npc-id="${_esc(npcId)}" data-slot="${_esc(slot)}">Retirer</button>` : ''}
+        </div>
       </div>
 
-      <input class="input-field npc-equip-search" data-input="npcEquipPickerSearch"
-        value="${_esc(q || '')}" placeholder="Rechercher par nom, type, dégâts, bonus..." autocomplete="off">
+      <div class="npc-equip-picker-searchrow">
+        <span aria-hidden="true">🔎</span>
+        <input class="input-field npc-equip-search" data-input="npcEquipPickerSearch"
+          value="${_esc(q || '')}" placeholder="Nom, effet, compétence, trait…" autocomplete="off">
+        ${q ? `<button type="button" data-action="npcEquipPickerClearSearch" title="Effacer la recherche">✕</button>` : ''}
+      </div>
+
+      <div class="npc-equip-filter-panel${filtersOpen ? '' : ' is-collapsed'}">
+        <div class="npc-equip-filter-head">
+          <button type="button" class="npc-equip-filter-toggle" data-action="npcEquipPickerToggleFilters" aria-expanded="${filtersOpen ? 'true' : 'false'}">
+            <span>${filtersOpen ? '▾' : '▸'}</span><strong>Filtres${activeFilters.length ? ` · ${activeFilters.length} actif${activeFilters.length > 1 ? 's' : ''}` : ''}</strong>
+          </button>
+          ${filtersOpen ? (activeFilters.length ? `<button type="button" data-action="npcEquipPickerReset">Tout réinitialiser</button>` : '<span>Combine plusieurs critères</span>') : '<span>Type, rareté, stats, dégâts…</span>'}
+        </div>
+        ${filtersOpen ? `<div class="npc-equip-filter-grid">
+          <label><span>Type</span><select data-change="npcEquipPickerFilter" data-filter="type">${_npcFacetOptions(facets.types, filters.type, 'Tous les types')}</select></label>
+          <label><span>Rareté</span><select data-change="npcEquipPickerFilter" data-filter="rarity">
+            <option value="">Toutes les raretés</option>
+            ${facets.rarities.map(value => { const rarity = _rarities.find(r => r.value === value); return `<option value="${value}" ${String(value) === String(filters.rarity) ? 'selected' : ''}>${_esc(rarity?.name || RARETE_NAMES[value] || `Rareté ${value}`)}</option>`; }).join('')}
+          </select></label>
+          <label><span>Caractéristique</span><select data-change="npcEquipPickerFilter" data-filter="stat">${_npcFacetOptions(facets.stats, filters.stat, 'Toutes les caractéristiques', _npcStatLabel)}</select></label>
+          ${def.kind === 'weapon' ? `<label><span>Dégâts</span><select data-change="npcEquipPickerFilter" data-filter="damage">${_npcFacetOptions(facets.damages, filters.damage, 'Toutes les formules')}</select></label>` : ''}
+          <label><span>Trait</span><select data-change="npcEquipPickerFilter" data-filter="trait">${_npcFacetOptions(facets.traits, filters.trait, 'Tous les traits')}</select></label>
+          <label><span>Atout</span><select data-change="npcEquipPickerFilter" data-filter="feature">
+            <option value="">Tous les atouts</option>
+            ${facets.features.map(value => `<option value="${_esc(value)}" ${value === filters.feature ? 'selected' : ''}>${_esc(_npcEquipFeatureLabels[value] || value)}</option>`).join('')}
+          </select></label>
+          ${facets.availabilities.length ? `<label><span>Disponibilité</span><select data-change="npcEquipPickerFilter" data-filter="availability">${_npcFacetOptions(facets.availabilities, filters.availability, 'Toutes les disponibilités')}</select></label>` : ''}
+          <label><span>Trier</span><select data-change="npcEquipPickerSort">
+            <option value="name" ${sort === 'name' ? 'selected' : ''}>Nom A → Z</option>
+            <option value="rarity" ${sort === 'rarity' ? 'selected' : ''}>Rareté décroissante</option>
+            ${def.kind === 'weapon' ? `<option value="damage" ${sort === 'damage' ? 'selected' : ''}>Dégâts moyens</option>` : ''}
+            ${def.kind === 'armor' ? `<option value="ca" ${sort === 'ca' ? 'selected' : ''}>CA décroissante</option>` : ''}
+            <option value="price_asc" ${sort === 'price_asc' ? 'selected' : ''}>Prix croissant</option>
+            <option value="price_desc" ${sort === 'price_desc' ? 'selected' : ''}>Prix décroissant</option>
+          </select></label>
+        </div>` : ''}
+      </div>
       <div class="npc-equip-picker-meta">
-        ${filtered.length} / ${all.length} objets compatibles
+        <strong>${filtered.length}</strong> objet${filtered.length !== 1 ? 's' : ''} trouvé${filtered.length !== 1 ? 's' : ''} sur ${all.length}
         ${more ? `<span>${more} autres disponibles en affinant la recherche</span>` : ''}
       </div>
 
       <div class="npc-equip-results">
-        ${shown.length ? shown.map(item => {
-          const badges = _npcEquipPreviewBadges(item, def);
-          const selected = current?.itemId === item.id;
-          const objectType = def.kind === 'armor'
-            ? (item.typeArmure || item.slotArmure || item.type)
-            : def.kind === 'weapon'
-              ? (item.format || item.typeArme || item.sousType || item.type)
-              : (item.slotBijou || item.type || item.template);
-          const sub = [objectType, item.slotArmure || item.slotBijou, item.rarete].filter(Boolean).join(' - ');
-          return `
-            <button type="button" class="npc-equip-result${selected ? ' is-selected' : ''}"
-              data-action="npcPickEquipItem" data-npc-id="${_esc(npcId)}" data-slot="${_esc(slot)}" data-item-id="${_esc(item.id)}">
-              <span class="npc-equip-result-main">
-                <strong>${_esc(item.nom || 'Objet sans nom')}</strong>
-                ${sub ? `<small>${_esc(sub)}</small>` : ''}
-              </span>
-              ${badges ? `<span class="npc-eq-badges">${badges}</span>` : '<span class="npc-equip-no-bonus">Aucun bonus direct</span>'}
-            </button>`;
-        }).join('') : '<div class="npc-equip-picker-empty">Aucun objet compatible avec cette recherche.</div>'}
+        ${shown.length ? shown.map(item => _npcEquipCardHtml(item, def, current, npcId, slot)).join('') : `
+          <div class="npc-equip-picker-empty">
+            <b>Aucun objet ne correspond à tous ces critères.</b>
+            <span>Retire un filtre, change la recherche ou crée cet équipement manuellement.</span>
+            <button type="button" class="btn btn-outline btn-sm" data-action="npcEquipPickerReset">Réinitialiser les filtres</button>
+          </div>`}
       </div>
     </div>`;
 }
 
 function _npcOpenEquipPicker(btn) {
   if (!STATE.isAdmin || !btn) return;
-  _equipPickerState = { npcId: btn.dataset.npcId || '', slot: btn.dataset.slot || '', q: '' };
-  openModal(_npcEquipPickerTitle(), _renderEquipPickerHtml(), { subtitle: 'Objets compatibles de la boutique' });
+  _equipPickerState = {
+    npcId: btn.dataset.npcId || '', slot: btn.dataset.slot || '', q: '', sort: 'name',
+    filtersOpen: !window.matchMedia?.('(max-width: 560px)').matches,
+    filters: { type: '', rarity: '', stat: '', damage: '', trait: '', feature: '', availability: '' },
+  };
+  openModal(_npcEquipPickerTitle(), _renderEquipPickerHtml(), { subtitle: 'Catalogue compatible et équipement personnalisé' });
   requestAnimationFrame(() => document.querySelector('.npc-equip-search')?.focus());
+}
+
+function _npcRerenderEquipPicker({ focusSearch = false, caret = null } = {}) {
+  updateModalContent(_npcEquipPickerTitle(), _renderEquipPickerHtml(), { subtitle: 'Catalogue compatible et équipement personnalisé' });
+  if (!focusSearch) return;
+  requestAnimationFrame(() => {
+    const next = document.querySelector('.npc-equip-search');
+    if (!next) return;
+    next.focus();
+    if (caret != null) try { next.setSelectionRange(caret, caret); } catch {}
+  });
 }
 
 function _npcEquipPickerSearch(el) {
   if (!el) return;
   const caret = el.selectionStart || 0;
   _equipPickerState.q = el.value || '';
-  updateModalContent(_npcEquipPickerTitle(), _renderEquipPickerHtml(), { subtitle: 'Objets compatibles de la boutique' });
-  requestAnimationFrame(() => {
-    const next = document.querySelector('.npc-equip-search');
-    if (!next) return;
-    next.focus();
-    try { next.setSelectionRange(caret, caret); } catch {}
+  _npcRerenderEquipPicker({ focusSearch: true, caret });
+}
+
+function _npcEquipPickerFilter(el) {
+  const key = el?.dataset?.filter;
+  if (!key || !(key in (_equipPickerState.filters || {}))) return;
+  _equipPickerState.filters[key] = el.value || '';
+  _npcRerenderEquipPicker();
+}
+
+function _npcEquipPickerSort(el) {
+  _equipPickerState.sort = el?.value || 'name';
+  _npcRerenderEquipPicker();
+}
+
+function _npcEquipPickerToggleFilters() {
+  _equipPickerState.filtersOpen = !_equipPickerState.filtersOpen;
+  _npcRerenderEquipPicker();
+}
+
+function _npcEquipPickerReset({ keepSearch = false } = {}) {
+  if (!keepSearch) _equipPickerState.q = '';
+  _equipPickerState.filters = { type: '', rarity: '', stat: '', damage: '', trait: '', feature: '', availability: '' };
+  _equipPickerState.sort = 'name';
+  _npcRerenderEquipPicker({ focusSearch: keepSearch });
+}
+
+function _npcEquipPickerClearSearch() {
+  _equipPickerState.q = '';
+  _npcRerenderEquipPicker({ focusSearch: true, caret: 0 });
+}
+
+const _npcManualInput = (id, label, value = '', opts = '', cls = '') => `
+  <label class="npc-manual-field ${cls}"><span>${_esc(label)}</span><input id="${id}" value="${_esc(value ?? '')}" ${opts}></label>`;
+const _npcManualNumber = (id, label, value = 0, cls = '') => _npcManualInput(id, label, value || '', 'type="number" step="1"', cls);
+const _npcManualStatOptions = (selected = '', emptyLabel = 'Aucune') => `
+  <option value="">${_esc(emptyLabel)}</option>
+  ${NPC_STATS.map(stat => `<option value="${stat.key}" ${stat.key === selected ? 'selected' : ''}>${stat.short} · ${_esc(NPC_STAT_LABELS[stat.key])}</option>`).join('')}`;
+const _npcManualCheckedValues = name => [...document.querySelectorAll(`input[name="${name}"]:checked`)].map(input => input.value).filter(Boolean);
+
+function _npcManualInitialItem(n, slot) {
+  const equipped = n?.equipement?.[slot] || {};
+  const source = equipped.itemId ? _shopItems.find(item => item.id === equipped.itemId) : null;
+  return { ...(source || {}), ...equipped };
+}
+
+function _npcManualProfileField(key, label, current = []) {
+  const selected = new Set(Array.isArray(current) ? current : []);
+  return `
+    <fieldset class="npc-manual-profile-field">
+      <legend>${_esc(label)}</legend>
+      <div class="npc-manual-profile-options">
+        ${_damageTypes.map(type => `<label><input type="checkbox" name="npc-manual-profile-${key}" value="${_esc(type.id)}" ${selected.has(type.id) ? 'checked' : ''}><span>${type.icon || ''} ${_esc(type.label || type.id)}</span></label>`).join('')}
+      </div>
+    </fieldset>`;
+}
+
+function _renderManualEquipHtml(n, def, item) {
+  const rarityValue = _npcRarityValue(item);
+  const damageStats = new Set(Array.isArray(item.degatsStats) && item.degatsStats.length
+    ? item.degatsStats.map(normalizeStatKey) : [normalizeStatKey(item.degatsStat || item.statAttaque)].filter(Boolean));
+  const traits = (_getTraits(item) || []).join('\n');
+  const skills = Object.entries(item.skillBonuses || {}).map(([name, value]) => `${name}: ${value}`).join('\n');
+  const armorTypes = _npcUnique([...getArmorTypeOptions({ includeDisabled: false }), item.typeArmure]);
+  const formats = _npcUnique([..._weaponFormats.map(format => format.label), item.format]);
+  const rarityChoices = _rarities.length ? _rarities : [1, 2, 3, 4, 5].map(value => ({ value, name: RARETE_NAMES[value] || `Rareté ${value}` }));
+  const bonusStep = def.kind === 'bijou' ? 2 : 3;
+  const traitsStep = bonusStep + 1;
+  const profileStep = traitsStep + 1;
+  const weaponFields = def.kind === 'weapon' ? `
+    <section class="npc-manual-section is-slot-specific">
+      <div class="npc-manual-section-head"><span>2</span><div><b>Attaque de l’arme</b><small>Ces valeurs alimentent directement le VTT.</small></div></div>
+      <div class="npc-manual-grid npc-manual-grid--weapon">
+        <label class="npc-manual-field"><span>Format</span><select id="npc-manual-format">
+          <option value="">Format libre / non défini</option>
+          ${formats.map(value => `<option value="${_esc(value)}" ${value === item.format ? 'selected' : ''}>${_esc(value)}</option>`).join('')}
+        </select></label>
+        ${_npcManualInput('npc-manual-subtype', 'Type d’arme', item.sousType || item.typeArme || '', 'placeholder="Épée, arc, bâton…"')}
+        ${_npcManualInput('npc-manual-damage', 'Formule de dégâts', item.degats || '', 'placeholder="1d8+2"')}
+        ${_npcManualNumber('npc-manual-range', 'Portée (cases)', parseInt(item.portee, 10) || 1)}
+        <label class="npc-manual-field"><span>Caractéristique de toucher</span><select id="npc-manual-touch-stat">${_npcManualStatOptions(item.toucherStat || item.statAttaque || '')}</select></label>
+        <label class="npc-manual-field"><span>Type de dégâts imposé</span><select id="npc-manual-damage-type">
+          <option value="">Automatique selon le format</option>
+          ${_damageTypes.map(type => `<option value="${_esc(type.id)}" ${type.id === (item.damageTypeId || item.elementId) ? 'selected' : ''}>${type.icon || ''} ${_esc(type.label || type.id)}</option>`).join('')}
+        </select></label>
+      </div>
+      <fieldset class="npc-manual-stat-picks"><legend>Caractéristiques ajoutées aux dégâts</legend>
+        ${NPC_STATS.map(stat => `<label class="${_npcStatTone(stat.key)}"><input type="checkbox" name="npc-manual-damage-stat" value="${stat.key}" ${damageStats.has(stat.key) ? 'checked' : ''}><span><b>${stat.short}</b><small>${_esc(NPC_STAT_LABELS[stat.key])}</small></span></label>`).join('')}
+      </fieldset>
+    </section>` : '';
+  const armorFields = def.kind === 'armor' ? `
+    <section class="npc-manual-section is-slot-specific">
+      <div class="npc-manual-section-head"><span>2</span><div><b>Protection de l’armure</b><small>Le type participe aux bonus de set de l’aventure.</small></div></div>
+      <div class="npc-manual-grid">
+        <label class="npc-manual-field"><span>Type d’armure</span><select id="npc-manual-armor-type">
+          <option value="">Sans type de set</option>
+          ${armorTypes.map(value => `<option value="${_esc(value)}" ${value === item.typeArmure ? 'selected' : ''}>${_esc(value)}</option>`).join('')}
+        </select></label>
+        ${_npcManualNumber('npc-manual-ca', 'CA de l’armure', parseInt(item.ca, 10) || 0)}
+      </div>
+    </section>` : '';
+  return `
+    <form class="npc-equip-manual" data-npc-id="${_esc(n.id)}" data-slot="${_esc(def.slot)}" onsubmit="return false">
+      <div class="npc-manual-intro">
+        <span class="npc-manual-intro-icon">${def.icon}</span>
+        <div><b>${_esc(def.slot)}</b><span>Équipement propre à ${_esc(n.nom || 'ce PNJ')} · aucun article boutique ne sera créé.</span></div>
+      </div>
+
+      <section class="npc-manual-section">
+        <div class="npc-manual-section-head"><span>1</span><div><b>Identité</b><small>Ce que tu retrouveras immédiatement sur la fiche.</small></div></div>
+        <div class="npc-manual-grid">
+          ${_npcManualInput('npc-manual-name', 'Nom de l’équipement', item.nom || '', 'required placeholder="Nom obligatoire"')}
+          <label class="npc-manual-field"><span>Rareté</span><select id="npc-manual-rarity">
+            <option value="">Non définie</option>
+            ${rarityChoices.map(rarity => `<option value="${rarity.value}" ${rarity.value === rarityValue ? 'selected' : ''}>${_esc(rarity.name)}</option>`).join('')}
+          </select></label>
+        </div>
+      </section>
+
+      ${weaponFields}${armorFields}
+
+      <section class="npc-manual-section">
+        <div class="npc-manual-section-head"><span>${bonusStep}</span><div><b>Bonus</b><small>Valeurs ajoutées tant que l’objet reste équipé.</small></div></div>
+        <div class="npc-manual-subtitle">Caractéristiques</div>
+        <div class="npc-manual-bonus-grid">
+          ${NPC_STATS.map(stat => _npcManualNumber(`npc-manual-stat-${stat.key}`, `${stat.short} · ${NPC_STAT_LABELS[stat.key]}`, getItemStatBonus(item, stat.key), _npcStatTone(stat.key))).join('')}
+        </div>
+        <div class="npc-manual-subtitle">Valeurs dérivées</div>
+        <div class="npc-manual-bonus-grid">
+          ${_npcManualNumber('npc-manual-pv', 'PV max', parseInt(item.pvMaxBonus) || 0, 'derived-tone derived-pv')}
+          ${_npcManualNumber('npc-manual-pm', 'PM max', parseInt(item.pmMaxBonus) || 0, 'derived-tone derived-pm')}
+          ${_npcManualNumber('npc-manual-speed', 'Vitesse', parseInt(item.vitesseBonus) || 0, 'derived-tone derived-speed')}
+          ${_npcManualNumber('npc-manual-init', 'Initiative', parseInt(item.initiativeBonus) || 0, 'derived-tone derived-init')}
+          ${_npcManualNumber('npc-manual-ca-bonus', 'CA supplémentaire', parseInt(item.caBonus) || 0, 'derived-tone derived-ca')}
+        </div>
+        <label class="npc-manual-field is-wide"><span>Bonus de compétences</span><textarea id="npc-manual-skills" rows="3" placeholder="Perception: 2&#10;Intimidation: 1">${_esc(skills)}</textarea><small>Une compétence par ligne, sous la forme Nom: bonus.</small></label>
+      </section>
+
+      <section class="npc-manual-section">
+        <div class="npc-manual-section-head"><span>${traitsStep}</span><div><b>Traits et effet</b><small>Informations visibles sur la carte équipée.</small></div></div>
+        <div class="npc-manual-grid">
+          <label class="npc-manual-field"><span>Traits</span><textarea id="npc-manual-traits" rows="4" placeholder="Un trait par ligne">${_esc(traits)}</textarea></label>
+          <label class="npc-manual-field"><span>Effet / particularité</span><textarea id="npc-manual-effect" rows="4" placeholder="Réaction, passif, condition…">${_esc(item.particularite || item.effet || item.description || '')}</textarea></label>
+        </div>
+      </section>
+
+      <details class="npc-manual-section npc-manual-profiles" ${item.damageProfile ? 'open' : ''}>
+        <summary><span>${profileStep}</span><div><b>Interactions de dégâts</b><small>Optionnel · résistances, immunités, absorptions et faiblesses.</small></div></summary>
+        <div class="npc-manual-profile-grid">
+          ${_npcManualProfileField('resistances', 'Résistances', item.damageProfile?.resistances)}
+          ${_npcManualProfileField('immunites', 'Immunités', item.damageProfile?.immunites)}
+          ${_npcManualProfileField('absorptions', 'Absorptions', item.damageProfile?.absorptions)}
+          ${_npcManualProfileField('faiblesses', 'Faiblesses', item.damageProfile?.faiblesses)}
+        </div>
+      </details>
+
+      <div class="npc-manual-footer">
+        <button type="button" class="btn btn-outline" data-action="npcManualEquipCancel">Retour au catalogue</button>
+        <button type="button" class="btn btn-gold" data-action="npcSaveManualEquip" data-npc-id="${_esc(n.id)}" data-slot="${_esc(def.slot)}">Enregistrer et équiper</button>
+      </div>
+    </form>`;
+}
+
+function _npcOpenManualEquip(btn) {
+  if (!STATE.isAdmin || !btn) return;
+  const n = _npcs.find(entry => entry.id === btn.dataset.npcId);
+  const def = NPC_EQUIP_SLOTS.find(entry => entry.slot === btn.dataset.slot);
+  if (!n || !def) return;
+  const item = _npcManualInitialItem(n, def.slot);
+  pushModal(`Créer · ${def.slot}`, _renderManualEquipHtml(n, def, item), () => _npcRerenderEquipPicker(), {
+    subtitle: 'Équipement personnalisé du PNJ',
   });
+  requestAnimationFrame(() => document.getElementById('npc-manual-name')?.focus());
+}
+
+function _npcParseSkillBonuses(value = '') {
+  const result = {};
+  String(value).split(/\r?\n|;/).forEach(line => {
+    const match = line.trim().match(/^(.+?)\s*[:=]\s*([+-]?\d+)$/);
+    if (!match) return;
+    const amount = parseInt(match[2], 10) || 0;
+    if (amount) result[match[1].trim()] = amount;
+  });
+  return result;
+}
+
+const _npcManualNum = id => parseInt(document.getElementById(id)?.value, 10) || 0;
+
+async function _npcSaveManualEquip(btn) {
+  if (!STATE.isAdmin || !btn) return;
+  const n = _npcs.find(entry => entry.id === btn.dataset.npcId);
+  const def = NPC_EQUIP_SLOTS.find(entry => entry.slot === btn.dataset.slot);
+  const nameInput = document.getElementById('npc-manual-name');
+  const name = nameInput?.value?.trim() || '';
+  if (!n || !def) return;
+  if (!name) {
+    showNotif('Donne un nom à cet équipement.', 'warning');
+    nameInput?.focus();
+    return;
+  }
+
+  const previous = _npcManualInitialItem(n, def.slot);
+  const statAliases = { force: 'fo', dexterite: 'dex', constitution: 'co', intelligence: 'in', sagesse: 'sa', charisme: 'ch' };
+  const item = {
+    nom: name,
+    itemId: '',
+    manual: true,
+    rarete: _npcManualNum('npc-manual-rarity') || '',
+    traits: String(document.getElementById('npc-manual-traits')?.value || '').split(/\r?\n/).map(v => v.trim()).filter(Boolean),
+    particularite: document.getElementById('npc-manual-effect')?.value?.trim() || '',
+    skillBonuses: _npcParseSkillBonuses(document.getElementById('npc-manual-skills')?.value || ''),
+    pvMaxBonus: _npcManualNum('npc-manual-pv'),
+    pmMaxBonus: _npcManualNum('npc-manual-pm'),
+    vitesseBonus: _npcManualNum('npc-manual-speed'),
+    initiativeBonus: _npcManualNum('npc-manual-init'),
+    caBonus: _npcManualNum('npc-manual-ca-bonus'),
+    image: previous.image || '',
+    actions: Array.isArray(previous.actions) ? previous.actions.map(action => ({ ...action })) : [],
+  };
+  NPC_STATS.forEach(stat => { item[statAliases[stat.key]] = _npcManualNum(`npc-manual-stat-${stat.key}`); });
+  const damageProfile = {};
+  ['resistances', 'immunites', 'absorptions', 'faiblesses'].forEach(key => {
+    const values = _npcManualCheckedValues(`npc-manual-profile-${key}`);
+    if (values.length) damageProfile[key] = values;
+  });
+  if (Object.keys(damageProfile).length) item.damageProfile = damageProfile;
+
+  if (def.kind === 'weapon') {
+    item.format = document.getElementById('npc-manual-format')?.value || '';
+    item.formatId = _weaponFormats.find(format => format.label === item.format)?.id || '';
+    item.sousType = document.getElementById('npc-manual-subtype')?.value?.trim() || '';
+    item.typeArme = item.sousType;
+    item.degats = document.getElementById('npc-manual-damage')?.value?.trim() || '';
+    item.portee = Math.max(0, _npcManualNum('npc-manual-range'));
+    item.toucherStat = document.getElementById('npc-manual-touch-stat')?.value || '';
+    item.damageTypeId = document.getElementById('npc-manual-damage-type')?.value || '';
+    item.degatsStats = [...document.querySelectorAll('input[name="npc-manual-damage-stat"]:checked')].map(input => input.value);
+    item.degatsStat = item.degatsStats[0] || '';
+    item.statAttaque = item.toucherStat || item.degatsStat || '';
+  } else if (def.kind === 'armor') {
+    item.typeArmure = document.getElementById('npc-manual-armor-type')?.value || '';
+    item.slotArmure = def.armVal || def.slot;
+    item.ca = _npcManualNum('npc-manual-ca');
+  } else {
+    item.slotBijou = def.slot;
+  }
+
+  const equip = { ...(n.equipement || {}), [def.slot]: item };
+  const statsBonus = computeEquipStatsBonus(equip);
+  if (!(await trySave('npcs', n.id, { equipement: equip, statsBonus }))) return;
+  n.equipement = equip;
+  n.statsBonus = statsBonus;
+  showNotif(`${name} équipé sur ${def.slot}.`, 'success');
+  popModal();
+  closeModal();
+  _refreshActivePanel();
 }
 
 const _npcSlotLabel = (def = {}) => ({
@@ -2567,22 +3083,34 @@ const _npcSlotIcon = (def = {}) => {
 function _npcBonusChips(item = {}, def = {}) {
   const chips = [];
   if (def.kind === 'weapon' && item.format) chips.push({ lbl: item.format, cls: '' });
-  if (def.kind === 'armor' && item.typeArmure) {
-    const meta = getArmorTypeMeta(item.typeArmure);
-    chips.push({ lbl: meta?.label || item.typeArmure, cls: 'green', style: meta?.color ? ` style="--armor-type-color:${_esc(meta.color)}"` : '' });
-  }
+  const rarity = _npcRarityMeta(item);
+  if (rarity.name) chips.push({ lbl: rarity.name, cls: 'rarity' });
+  if (item.manual) chips.push({ lbl: 'Personnalisé', cls: 'manual' });
+  // Le type d'armure est déjà affiché dans l'en-tête de la carte : ne pas le
+  // répéter dans les bonus juste en dessous.
   const caTotal = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0);
-  if (caTotal) chips.push({ lbl: `CA ${caTotal > 0 ? '+' : ''}${caTotal}`, cls: 'gold' });
+  if (caTotal) chips.push({ lbl: `CA ${caTotal > 0 ? '+' : ''}${caTotal}`, cls: 'derived-tone derived-ca' });
   NPC_STATS.forEach(s => {
     let v = 0;
     try { v = getItemStatBonus(item, s.key); } catch {}
-    if (v) chips.push({ lbl: `${s.short} ${v > 0 ? '+' : ''}${v}`, cls: v > 0 ? 'pos' : 'neg' });
+    if (v) chips.push({ lbl: `${s.short} ${v > 0 ? '+' : ''}${v}`, cls: `${v > 0 ? 'pos' : 'neg'} ${_npcStatTone(s.key)}` });
   });
   [['pvMaxBonus', 'PV'], ['pmMaxBonus', 'PM'], ['vitesseBonus', 'Vit.'], ['initiativeBonus', 'Init.']].forEach(([key, label]) => {
     const v = parseInt(item[key]) || 0;
-    if (v) chips.push({ lbl: `${label} ${v > 0 ? '+' : ''}${v}`, cls: 'gold' });
+    if (v) chips.push({ lbl: `${label} ${v > 0 ? '+' : ''}${v}`, cls: _npcDerivedTone(key) });
   });
   return chips.map(chip => `<span class="badge-chip ${chip.cls || ''}"${chip.style || ''}>${_esc(chip.lbl)}</span>`).join('');
+}
+
+function _npcDisplayTraits(item = {}) {
+  return (_getTraits?.(item) || [])
+    .map(trait => String(trait || '').trim())
+    .filter(trait => trait && !['-', '--', '—'].includes(trait));
+}
+
+function _npcTraitHtml(trait) {
+  const long = trait.length > 42 ? ' is-long' : '';
+  return `<span class="trait${long}">${_esc(trait)}</span>`;
 }
 
 function _npcWeaponParts(n, item = {}) {
@@ -2625,7 +3153,7 @@ function _renderNpcEquipLikeCharacter(n, equip = {}) {
       </div>`;
     }
     const parts = _npcWeaponParts(n, item);
-    const traits = item.nom ? (_getTraits?.(item) || []) : [];
+    const traits = item.nom ? _npcDisplayTraits(item) : [];
     const badges = _npcBonusChips(item, def);
     return `<div class="weap-card npc-weap-card ${def.slot === primarySlot ? 'main' : ''}">
       <div class="weap-head">
@@ -2656,7 +3184,7 @@ function _renderNpcEquipLikeCharacter(n, equip = {}) {
       ${(parts.range || traits.length || item.particularite) ? `<div class="weap-meta">
         <span>Portee ${_esc(parts.range)}c</span>
         ${item.particularite ? `<div class="weap-particularite">${_esc(item.particularite)}</div>` : ''}
-        ${traits.length ? `<div class="weap-traits">${traits.map(t => `<span class="trait">${_esc(t)}</span>`).join('')}</div>` : ''}
+        ${traits.length ? `<div class="weap-traits">${traits.map(_npcTraitHtml).join('')}</div>` : ''}
       </div>` : ''}
     </div>`;
   };
@@ -2676,7 +3204,7 @@ function _renderNpcEquipLikeCharacter(n, equip = {}) {
       ? `<span class="armor-type-pill ${typeMeta?.tone || 'neutral'}" ${typeMeta?.color ? `style="--armor-type-color:${_esc(typeMeta.color)}"` : ''}>${_esc(typeMeta?.label || item.typeArmure)}</span>`
       : '';
     const badges = _npcBonusChips(item, def);
-    const traits = _getTraits?.(item) || [];
+    const traits = _npcDisplayTraits(item);
     return `<div class="armor-card equipped npc-armor-card">
       <div class="armor-slot">
         <span class="armor-slot-name">${_npcSlotIcon(def)} ${_esc(_npcSlotLabel(def))}</span>
@@ -2688,7 +3216,7 @@ function _renderNpcEquipLikeCharacter(n, equip = {}) {
       </div>
       <div class="armor-name">${_esc(item.nom)}</div>
       ${badges ? `<div class="armor-badges">${badges}</div>` : ''}
-      ${traits.length ? `<div class="armor-traits">${traits.map(t => `<span class="trait">${_esc(t)}</span>`).join('')}</div>` : ''}
+      ${traits.length ? `<div class="armor-traits">${traits.map(_npcTraitHtml).join('')}</div>` : ''}
     </div>`;
   };
   const setBadge = setText ? `<span class="set-badge ${setData.isActive ? 'active' : ''}" title="${_esc(setText)}">
@@ -2882,6 +3410,13 @@ async function _npcApplyEquipSlot(id, slot, itemId, { closePicker = false } = {}
     const built = buildEquippedItemFromInventory(slot, item, null);
     if (!built) return;
     built.itemId = item.id; // identité boutique (buildEquipped… lit item.itemId, absent ici)
+    // Les PNJ n'ont pas d'inventaire source à relire plus tard : conserver ici
+    // les métadonnées utiles au catalogue, au VTT et aux actions d'équipement.
+    built.rarete = item.rarete || '';
+    built.image = item.image || item.imageUrl || '';
+    built.formatId = item.formatId || '';
+    built.damageTypeId = item.damageTypeId || item.elementId || '';
+    built.actions = Array.isArray(item.actions) ? item.actions.map(action => ({ ...action })) : [];
     equip[slot] = built;
   }
   const statsBonus = computeEquipStatsBonus(equip);
@@ -3967,6 +4502,7 @@ async function _npcCreate() {
       equipement: {},
       statsBonus: {},
       actions: [],
+      deck_sorts: [],
     };
     const newId = await addToCol('npcs', data);
     const entry = { id: newId || `npc_${Date.now()}`, ...data };
@@ -4046,8 +4582,16 @@ registerActions({
   npcEquipSlot:              (el) => _npcEquipSlot(el),
   npcOpenEquipPicker:        (btn) => _npcOpenEquipPicker(btn),
   npcEquipPickerSearch:      (el) => _npcEquipPickerSearch(el),
+  npcEquipPickerFilter:      (el) => _npcEquipPickerFilter(el),
+  npcEquipPickerSort:        (el) => _npcEquipPickerSort(el),
+  npcEquipPickerToggleFilters: () => _npcEquipPickerToggleFilters(),
+  npcEquipPickerReset:       () => _npcEquipPickerReset(),
+  npcEquipPickerClearSearch: () => _npcEquipPickerClearSearch(),
   npcPickEquipItem:          (btn) => _npcPickEquipItem(btn),
   npcClearEquipSlot:         (btn) => _npcClearEquipSlot(btn),
+  npcOpenManualEquip:        (btn) => _npcOpenManualEquip(btn),
+  npcSaveManualEquip:        (btn) => _npcSaveManualEquip(btn),
+  npcManualEquipCancel:      () => popModal(),
   npcEditAction:             (btn) => _npcEditAction(btn),
   npcDeleteAction:           (btn) => _npcDeleteAction(btn),
   npcSetPanel:               (btn) => _npcSetPanel(btn),
