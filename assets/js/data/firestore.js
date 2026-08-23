@@ -23,7 +23,7 @@ import {
   addDoc, updateDoc, deleteDoc,
   onSnapshot,
   query, where, orderBy, limit,
-  writeBatch, Timestamp,
+  writeBatch, runTransaction, Timestamp,
 } from '../config/firebase.js';
 
 // ── Scope aventure ─────────────────────────────
@@ -479,6 +479,22 @@ export function subscribeCollection(col, callback) {
   );
 }
 
+// Listener temps réel borné pour les flux chronologiques (mur, journal…).
+// Il évite de maintenir une collection sociale entière en mémoire au fil des ans.
+export function subscribeRecentCollection(col, callback, { field = 'ts', max = 80 } = {}) {
+  const path = _colPath(col);
+  const safeField = String(field || 'ts');
+  const safeMax = Math.max(1, Math.min(200, Math.trunc(Number(max) || 80)));
+  return onSnapshot(
+    query(collection(db, path), orderBy(safeField, 'desc'), limit(safeMax)),
+    snap => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+    err => {
+      _handleFirestoreError(err, `subscribeRecentCollection(${path})`);
+      try { callback([]); } catch (e) { console.error('[firestore] callback error', e); }
+    },
+  );
+}
+
 export function subscribeDoc(col, id, callback) {
   const path = _colPath(col);
   const liveKey = `${path}:${id}`;
@@ -872,6 +888,30 @@ export async function updateInCol(col, id, data) {
     _cachePatchUpdate(path, id, data);
   } catch (e) {
     _handleFirestoreError(e, `updateInCol(${path}/${id})`);
+    throw e;
+  }
+}
+
+// Mutation atomique d'un document à partir de sa valeur courante. Utile pour
+// les interactions concurrentes (réactions, réponses…) qui ne doivent pas
+// s'écraser mutuellement avec un simple read → update côté feature.
+// `mutator` retourne le document complet suivant, ou null pour annuler.
+export async function mutateInCol(col, id, mutator) {
+  const path = _colPath(col);
+  const ref = doc(db, path, id);
+  try {
+    const next = await runTransaction(db, async transaction => {
+      const snapshot = await transaction.get(ref);
+      const current = snapshot.exists() ? snapshot.data() : null;
+      const value = await mutator(current);
+      if (value == null) return null;
+      transaction.set(ref, value);
+      return value;
+    });
+    if (next != null) _cachePatchReplace(path, id, next);
+    return next;
+  } catch (e) {
+    _handleFirestoreError(e, `mutateInCol(${path}/${id})`);
     throw e;
   }
 }

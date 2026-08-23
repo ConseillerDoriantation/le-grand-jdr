@@ -11,7 +11,7 @@
 // dans le listener existant — aucun nouveau listener Firestore créé,
 // aucune lecture facturée. Le callback reçoit les données du cache live.
 // ══════════════════════════════════════════════════════════════════════════════
-import { subscribeCollection, subscribeDoc } from '../data/firestore.js';
+import { subscribeCollection, subscribeDoc, subscribeRecentCollection } from '../data/firestore.js';
 import { STATE } from '../core/state.js';
 
 // Map nom → fonction de désabonnement
@@ -21,6 +21,12 @@ const _subs = new Map();
 export function watch(name, col, callback) {
   _subs.get(name)?.();          // désabonner l'éventuel listener précédent
   const unsub = subscribeCollection(col, callback);
+  _subs.set(name, unsub);
+}
+
+export function watchRecent(name, col, callback, options = {}) {
+  _subs.get(name)?.();
+  const unsub = subscribeRecentCollection(col, callback, options);
   _subs.set(name, unsub);
 }
 

@@ -35,18 +35,10 @@ import {
   linkify, applyEmotes, applyMentions, mentionsToTokens, dayLabel, rollDice, rollCardHtml,
 } from './chat/chat-format.js';
 import { _esc } from '../shared/html.js';
+import { CHAT_REACTIONS as REACTIONS, EMOJI_CATEGORIES as EMOJI_CATS } from '../shared/emoji-catalog.js';
 
 const ADV = 'adventure';   // id de la conversation d'aventure
 const HISTORY = 40;
-const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🎉'];   // palette de réactions
-// Emoji insérables (bouton 😊), classés par catégorie pour un picker navigable.
-const EMOJI_CATS = [
-  { label: 'Visages', emojis: ['😀','😁','😂','🤣','😅','😊','😇','🙂','😉','😍','😘','😗','😎','🤩','🥳','😜','😝','🤪','🤔','🤨','😐','😑','😶','🙄','😴','😪','😵','🤯','😳','🥺','😢','😭','😤','😡','🤬','😱','😨','😰','😬','🤗'] },
-  { label: 'Gestes', emojis: ['👍','👎','👏','🙌','🙏','💪','🤝','👀','✌️','🤞','👌','🤙','✋','👋','🤛','🤜','👊','☝️','👇','🫡'] },
-  { label: 'Cœurs & symboles', emojis: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','💔','💯','✨','🔥','⭐','🎉','💫','⚡','💥','❓','❗','✅'] },
-  { label: 'JDR & objets', emojis: ['🎲','⚔️','🛡️','🏹','🗡️','🪓','🏰','🐉','🧙','🧝','🧟','💀','☠️','👻','😈','🗝️','💰','🍺','🧪','📜','🔮','🕯️','🗺️','💎'] },
-];
-
 let _uid = null, _open = false, _view = 'list';   // 'list' | 'convo' | 'new' | 'manage'
 let _openId = null;                                // conv ouverte (ADV | convoId)
 let _editingId = null;                             // message en cours d'édition (id) | null

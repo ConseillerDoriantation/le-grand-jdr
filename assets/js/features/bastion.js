@@ -16,14 +16,28 @@
 
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
-import { getDocData, updateInCol, loadCollection, replaceDoc } from '../data/firestore.js';
+import { getDocData, updateInCol, loadCollection, replaceDoc, addToCol, deleteFromCol, mutateInCol } from '../data/firestore.js';
 import { tryDoc } from '../shared/crud.js';
-import { watchDoc } from '../shared/realtime.js';
+import { watchRecent, watchDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { openModal, closeModal, confirmModal, modalSection } from '../shared/modal.js';
 import { _esc, _norm, appSplashHtml, skeletonHtml } from '../shared/html.js';
 import { calcOr, getDefaultCharForUser } from '../shared/char-stats.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
+import { characterAvatarHtml } from '../shared/portraits.js';
+import { pickImageFile, compressDataUrl } from '../shared/image-upload.js';
+import { applyEmotes, linkify } from './chat/chat-format.js';
+import { ALL_EMOJIS, EMOJI_CATEGORIES } from '../shared/emoji-catalog.js';
+import {
+  BASTION_WALL_TYPES,
+  appendBastionWallComment,
+  bastionWallReactionCounts,
+  bastionWallSeenKey,
+  normalizeBastionWallPost,
+  removeBastionWallComment,
+  sortBastionWallPosts,
+  toggleBastionWallReaction,
+} from '../shared/bastion-wall.js';
 import { useGold } from '../shared/economy.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../shared/inventory-history.js';
 import { shouldRestoreLegacyBastionCatalog } from '../shared/bastion-catalog.js';
@@ -462,6 +476,21 @@ const _save = (b) => tryDoc('bastion', 'main', b);
 // Mur des annonces : collection dédiée `bastionAnnonces` (écrivable par les
 // membres, contrairement au doc bastion/main réservé au MJ). Chargée en direct.
 let _annonces = [];
+let _legacyAnnonces = [];
+let _wallEmotes = [];
+let _wallAdventureId = '';
+const _wallUi = {
+  draftText: '',
+  type: 'message',
+  charId: '',
+  images: [],
+  visible: 12,
+  pickerOpen: false,
+  filter: 'all',
+  reactionPostId: '',
+  replyOpen: new Set(),
+  replyDrafts: new Map(),
+};
 
 function _attachListener() {
   // watchDoc gère lui-même le re-subscribe (kill listener précédent du même nom).
@@ -477,12 +506,22 @@ function _attachListener() {
     }
     if (STATE.currentPage === 'bastion') _renderPage();
   });
-  // Annonces : doc unique membre-écrivable `bastionAnnonces/main` (lecture GET,
-  // comme bastion/main). Évite les subtilités de règle sur les requêtes `list`.
-  watchDoc('bastionAnnonces', 'bastionAnnonces', 'main', (data) => {
-    _annonces = (Array.isArray(data?.items) ? data.items : []).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  // Mur social : les nouvelles publications vivent chacune dans leur document.
+  // `main.items` reste lu pour afficher les anciennes annonces sans migration
+  // destructive ni duplication.
+  watchDoc('bastionAnnoncesLegacy', 'bastionAnnonces', 'main', main => {
+    _legacyAnnonces = (Array.isArray(main?.items) ? main.items : []).map((item, index) => ({
+      ...item,
+      id: item.id || `legacy_${index}`,
+      legacy: true,
+      legacyIndex: index,
+    }));
     if (STATE.currentPage === 'bastion') _renderPage();
   });
+  watchRecent('bastionAnnonces', 'bastionAnnonces', docs => {
+    _annonces = sortBastionWallPosts((docs || []).filter(entry => entry.id !== 'main' && (entry.kind === 'post' || entry.text)));
+    if (STATE.currentPage === 'bastion') _renderPage();
+  }, { field: 'ts', max: 80 });
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2716,33 +2755,26 @@ function _renderHistorique(b) {
     .map((e, idx) => ({ e, idx }))
     .filter(({ e }) => !_ADMIN_HISTO_TYPES.has(e.type));
   if (!all.length) return '';
-  const COLLAPSED = 5;
-  const expanded = STORE.histoExpanded;
-  const visible = expanded ? all : all.slice(0, COLLAPSED);
-  const hidden = all.length - visible.length;
-
-  return `
-    <section class="bs-section">
-      <div class="bs-section-hd">
-        <h2 class="bs-section-title">📜 Chronique <span class="bs-section-count">${all.length}</span></h2>
-        ${all.length > COLLAPSED ? `<button class="btn btn-outline btn-sm" data-action="_bastionToggleHisto">
-          ${expanded ? '⤴ Replier' : `⤵ Tout afficher (+${hidden})`}
-        </button>` : ''}
-      </div>
-      <div class="bs-histo${expanded ? ' bs-histo--scroll' : ''}">
-        ${visible.map(({ e, idx }) => `
+  return `<div class="bs-history-modal">
+      <p>Historique automatique des constructions, dépôts et périodes du Bastion.</p>
+      <div class="bs-histo bs-histo--scroll">
+        ${all.map(({ e, idx }) => `
           <div class="bs-histo-row bs-histo-row--${e.type}">
             <span class="bs-histo-week">P${e.week}</span>
             <span class="bs-histo-msg">${_esc(_repairBastionText(e.msg))}</span>
             ${isMj ? `<button class="bs-histo-del" data-action="_bastionDeleteHisto" data-idx="${idx}" title="Supprimer cette ligne">🗑</button>` : ''}
           </div>`).join('')}
       </div>
-    </section>`;
+    </div>`;
 }
 
-function _bastionToggleHisto() {
-  STORE.histoExpanded = !STORE.histoExpanded;
-  _renderPage();
+function _bastionOpenHistory() {
+  const html = _renderHistorique(STORE.bastion || _defaultBastion());
+  if (!html) { showNotif('La chronique du Bastion est encore vide.', 'info'); return; }
+  openModal('📜 Chronique du Bastion', html, {
+    subtitle: 'Historique administratif · consultable à la demande',
+    accent: '#8aa4c8',
+  });
 }
 
 // Supprime une ligne de la chronique (MJ). idx = index dans b.historique complet.
@@ -2752,22 +2784,13 @@ async function _bastionDeleteHisto(idx) {
   if (!Array.isArray(b.historique) || idx < 0 || idx >= b.historique.length) return;
   b.historique.splice(idx, 1);
   await _save(b);
+  if ((b.historique || []).some(entry => !_ADMIN_HISTO_TYPES.has(entry.type))) _bastionOpenHistory();
+  else closeModal();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // MUR DES ANNONCES — communication entre joueurs (messages, quêtes, offres, demandes)
 // ══════════════════════════════════════════════════════════════════════════════
-const _ANNONCE_TYPES = {
-  message: { icon: '💬', label: 'Message', color: '#4f8cff' },
-  quete:   { icon: '📜', label: 'Quête',   color: '#e8b84b' },
-  offre:   { icon: '🪙', label: 'Offre',   color: '#22c38e' },
-  demande: { icon: '🙏', label: 'Demande', color: '#b47fff' },
-};
-
-function _annonceAuthor() {
-  return STATE.profile?.pseudo || STATE.user?.email?.split('@')[0] || 'Anonyme';
-}
-
 function _annonceTimeAgo(ts) {
   if (!ts) return '';
   const s = Math.floor((Date.now() - ts) / 1000);
@@ -2778,91 +2801,329 @@ function _annonceTimeAgo(ts) {
   return new Date(ts).toLocaleDateString('fr-FR');
 }
 
-function _renderAnnonces(b) {
-  const myUid = STATE.user?.uid;
-  const isMj = STATE.isAdmin;
-  const annonces = _annonces;
-  const typeBtns = Object.entries(_ANNONCE_TYPES).map(([id, t], i) =>
-    `<button class="bs-annonce-type${i === 0 ? ' active' : ''}" style="--ac:${t.color}" data-action="_bastionSetAnnonceType" data-type="${id}">${t.icon} ${t.label}</button>`
-  ).join('');
-
-  const cards = annonces.map(a => {
-    const t = _ANNONCE_TYPES[a.type] || _ANNONCE_TYPES.message;
-    const canDel = (a.uid && a.uid === myUid) || isMj;
-    return `<article class="bs-annonce" style="--ac:${t.color}">
-      <div class="bs-annonce-hd">
-        <span class="bs-annonce-badge">${t.icon} ${t.label}</span>
-        <span class="bs-annonce-author">${_esc(a.author || 'Anonyme')}</span>
-        <span class="bs-annonce-time">${_annonceTimeAgo(a.ts)}</span>
-        ${canDel ? `<button class="bs-annonce-del" data-action="_bastionDeleteAnnonce" data-id="${a.id}" title="Supprimer cette annonce">✕</button>` : ''}
-      </div>
-      <div class="bs-annonce-text">${_esc(a.text || '')}</div>
-    </article>`;
-  }).join('');
-
-  return `
-    <section class="bs-section">
-      <div class="bs-section-hd">
-        <h2 class="bs-section-title">📌 Mur des annonces <span class="bs-section-count">${annonces.length}</span></h2>
-      </div>
-      <p class="bs-section-sub">Laisse un message, une quête, une offre ou une demande aux autres membres du Bastion.</p>
-      <div class="bs-annonce-wall">
-        <div class="bs-annonce-compose">
-          <div class="bs-annonce-types">${typeBtns}</div>
-          <input type="hidden" id="bs-annonce-type" value="message">
-          <textarea id="bs-annonce-text" class="bs-annonce-input" rows="3" maxlength="500"
-            placeholder="Écris ton annonce…"></textarea>
-          <div class="bs-annonce-compose-foot">
-            <span class="bs-annonce-as">en tant que <strong>${_esc(_annonceAuthor())}</strong></span>
-            <button class="btn btn-gold btn-sm" data-action="_bastionPostAnnonce">📌 Publier</button>
-          </div>
-        </div>
-        <div class="bs-annonce-list">
-          ${cards || '<div class="bs-annonce-empty">Aucune annonce pour l\'instant. Sois le premier à écrire sur le mur !</div>'}
-        </div>
-      </div>
-    </section>`;
+function _wallCharacters() {
+  const uid = STATE.user?.uid;
+  return (STATE.characters || getVisibleCharacters() || [])
+    .filter(char => char?.uid === uid)
+    .sort((a, b) => String(a.nom || '').localeCompare(String(b.nom || ''), 'fr'));
 }
 
-// Sélection du type d'annonce dans le compositeur (sans re-render → préserve la saisie).
+function _wallEnsureCharacter() {
+  const chars = _wallCharacters();
+  if (!chars.some(char => char.id === _wallUi.charId)) {
+    _wallUi.charId = getDefaultCharForUser(chars, STATE.user?.uid)?.id || chars[0]?.id || '';
+  }
+  return chars;
+}
+
+function _wallIdentity(charId = _wallUi.charId) {
+  const uid = STATE.user?.uid || '';
+  const char = _wallCharacters().find(item => item.id === charId);
+  if (char) return {
+    uid,
+    charId: char.id,
+    charName: char.nom || 'Personnage',
+    charImage: /^https?:/i.test(char.photo || char.image || '') ? (char.photo || char.image) : '',
+  };
+  // Le MJ peut modérer et publier sans devoir créer un personnage factice.
+  if (STATE.isAdmin && uid) return {
+    uid,
+    charId: `user:${uid}`,
+    charName: STATE.profile?.pseudo || 'Maître du jeu',
+    charImage: '',
+  };
+  return null;
+}
+
+function _wallAvatar(identity, size = 38) {
+  const char = (STATE.characters || []).find(item => item.id === identity?.charId);
+  return characterAvatarHtml(char || {
+    nom: identity?.charName || 'Personnage',
+    photo: identity?.charImage || '',
+  }, { size, className: 'bs-wall-avatar' });
+}
+
+function _wallText(text) {
+  return applyEmotes(linkify(_esc(text || '')), _wallEmotes).replace(/\n/g, '<br>');
+}
+
+function _wallAllPosts() {
+  return sortBastionWallPosts([..._annonces, ..._legacyAnnonces]);
+}
+
+function _wallPostById(id) {
+  return _wallAllPosts().find(post => post.id === id) || null;
+}
+
+function _wallMarkSeen() {
+  const key = bastionWallSeenKey(STATE.adventure?.id, STATE.user?.uid);
+  try { localStorage.setItem(key, String(Date.now())); } catch { /* stockage privé indisponible */ }
+}
+
+function _wallComposerMedia() {
+  if (!_wallUi.images.length) return '';
+  return `<div class="bs-wall-compose-media">
+    ${_wallUi.images.map((src, index) => `<figure><img src="${src}" alt="Image ${index + 1}"><button type="button" data-action="_bastionWallRemoveImage" data-index="${index}" aria-label="Retirer l'image ${index + 1}">×</button></figure>`).join('')}
+  </div>`;
+}
+
+function _wallPicker() {
+  if (!_wallUi.pickerOpen) return '';
+  return `<div class="bs-wall-picker" id="bs-wall-picker" aria-label="Émojis et émotes">
+    ${_wallEmotes.length ? `<section><strong>Émotes de l’aventure</strong><div class="bs-wall-picker-row bs-wall-picker-emotes">${_wallEmotes.map(emote => `<button type="button" data-action="_bastionWallInsert" data-token=":${_esc(emote.name)}:" title=":${_esc(emote.name)}:"><img src="${_esc(emote.url)}" alt=":${_esc(emote.name)}:" loading="lazy"></button>`).join('')}</div></section>` : ''}
+    ${EMOJI_CATEGORIES.map(category => `<section><strong>${_esc(category.label)}</strong><div class="bs-wall-picker-row">${category.emojis.map(token => `<button type="button" data-action="_bastionWallInsert" data-token="${token}" title="${token}">${token}</button>`).join('')}</div></section>`).join('')}
+  </div>`;
+}
+
+function _wallReactionVisual(token) {
+  const emote = _wallEmotes.find(item => `:${item.name}:` === token);
+  return emote
+    ? `<img class="bs-wall-reaction-emote" src="${_esc(emote.url)}" alt="${_esc(token)}" loading="lazy">`
+    : _esc(token);
+}
+
+function _wallReactionPicker(postId) {
+  if (_wallUi.reactionPostId !== postId) return '';
+  const emotes = _wallEmotes.length ? `<section><strong>Émotes de l’aventure</strong><div class="bs-wall-reaction-grid bs-wall-reaction-grid-emotes">${_wallEmotes.map(emote => {
+    const token = `:${emote.name}:`;
+    return `<button type="button" data-action="_bastionWallReact" data-id="${_esc(postId)}" data-reaction="${_esc(token)}" title="${_esc(token)}"><img src="${_esc(emote.url)}" alt="${_esc(token)}" loading="lazy"></button>`;
+  }).join('')}</div></section>` : '';
+  const emojis = EMOJI_CATEGORIES.map(category => `<section><strong>${_esc(category.label)}</strong><div class="bs-wall-reaction-grid">${category.emojis.map(token => `<button type="button" data-action="_bastionWallReact" data-id="${_esc(postId)}" data-reaction="${token}" title="${token}">${token}</button>`).join('')}</div></section>`).join('');
+  return `<div class="bs-wall-reaction-picker" aria-label="Choisir une réaction">${emotes}${emojis}</div>`;
+}
+
+function _wallComposer() {
+  const chars = _wallEnsureCharacter();
+  const identity = _wallIdentity();
+  const typeBtns = Object.entries(BASTION_WALL_TYPES).map(([id, type]) =>
+    `<button type="button" class="bs-annonce-type${_wallUi.type === id ? ' active' : ''}" style="--ac:${type.color}" data-action="_bastionSetAnnonceType" data-type="${id}" aria-pressed="${_wallUi.type === id}"><span class="bs-annonce-type-icon">${type.icon}</span><span><strong>${type.label}</strong><small>${type.description}</small></span></button>`
+  ).join('');
+  const authorChoice = chars.length > 1
+    ? `<label class="bs-wall-author-select"><span>Publier avec</span><select data-change="_bastionWallSetChar">${chars.map(char => `<option value="${_esc(char.id)}" ${char.id === _wallUi.charId ? 'selected' : ''}>${_esc(char.nom || 'Personnage')}</option>`).join('')}</select></label>`
+    : `<div class="bs-wall-author-copy"><small>Publier avec</small><strong>${_esc(identity?.charName || 'Aucun personnage')}</strong></div>`;
+
+  return `<aside class="bs-annonce-compose bs-wall-compose">
+    <div class="bs-wall-compose-head">
+      ${identity ? _wallAvatar(identity, 42) : '<span class="bs-wall-avatar bs-wall-avatar-empty">?</span>'}
+      ${authorChoice}
+    </div>
+    ${identity ? `
+      <div class="bs-wall-type-label">Quel type de publication&nbsp;?</div>
+      <div class="bs-annonce-types">${typeBtns}</div>
+      <div id="bs-annonce-text" class="bs-annonce-input bs-wall-editor" contenteditable="true" role="textbox" aria-multiline="true" data-input="_bastionWallDraft" data-placeholder="Que se passe-t-il au Bastion ?">${applyEmotes(_esc(_wallUi.draftText), _wallEmotes)}</div>
+      <div id="bs-wall-media-preview">${_wallComposerMedia()}</div>
+      ${_wallPicker()}
+      <div class="bs-annonce-compose-foot">
+        <div class="bs-wall-compose-tools">
+          <button type="button" data-action="_bastionWallTogglePicker" aria-expanded="${_wallUi.pickerOpen}">☺ <span>Émojis</span></button>
+          <button type="button" data-action="_bastionWallAddImage" ${_wallUi.images.length >= 3 ? 'disabled' : ''}>▧ <span>Image${_wallUi.images.length ? ` ${_wallUi.images.length}/3` : ''}</span></button>
+        </div>
+        <button type="button" class="btn btn-gold bs-wall-publish" data-action="_bastionPostAnnonce" ${_wallUi.draftText.trim() || _wallUi.images.length ? '' : 'disabled'}>Publier</button>
+      </div>` : `<div class="bs-wall-no-character"><strong>Choisis ton identité</strong><p>Il faut un personnage de cette aventure pour écrire, réagir ou répondre sur le mur.</p><button class="btn btn-outline" data-navigate="characters">Voir mes personnages</button></div>`}
+  </aside>`;
+}
+
+function _wallCommentHtml(comment, post) {
+  const canDelete = STATE.isAdmin || comment.uid === STATE.user?.uid;
+  return `<div class="bs-wall-comment">
+    ${_wallAvatar(comment, 30)}
+    <div class="bs-wall-comment-body"><strong>${_esc(comment.charName || 'Personnage')}</strong><div>${_wallText(comment.text)}</div><small>${_annonceTimeAgo(comment.ts)}</small></div>
+    ${canDelete && !post.legacy ? `<button type="button" class="bs-wall-comment-delete" data-action="_bastionWallDeleteComment" data-id="${_esc(post.id)}" data-comment="${_esc(comment.id)}" title="Supprimer cette réponse">×</button>` : ''}
+  </div>`;
+}
+
+function _wallCard(post) {
+  const type = BASTION_WALL_TYPES[post.type] || BASTION_WALL_TYPES.message;
+  const identity = _wallIdentity();
+  const canDelete = STATE.isAdmin || (post.uid && post.uid === STATE.user?.uid);
+  const counts = bastionWallReactionCounts(post);
+  const mine = identity ? post.reactions?.[identity.charId]?.emoji : '';
+  const comments = post.comments || [];
+  const replyOpen = _wallUi.replyOpen.has(post.id);
+  const author = { charId: post.charId, charName: post.charName || post.author || 'Personnage', charImage: post.charImage || '' };
+  const media = post.images?.length ? `<div class="bs-wall-media bs-wall-media-${post.images.length}">${post.images.map((_src, index) => `<button type="button" data-action="_bastionOpenPostImage" data-id="${_esc(post.id)}" data-index="${index}" aria-label="Agrandir l'image ${index + 1}"><img src="${post.images[index]}" alt="Image jointe à la publication"></button>`).join('')}</div>` : '';
+  const countedReactions = Object.entries(counts).map(([reaction, count]) => !post.legacy && identity
+    ? `<button type="button" class="${mine === reaction ? 'active' : ''}" data-action="_bastionWallReact" data-id="${_esc(post.id)}" data-reaction="${_esc(reaction)}" title="Réagir avec ${_esc(reaction)}">${_wallReactionVisual(reaction)}<span>${count}</span></button>`
+    : `<span>${_wallReactionVisual(reaction)} ${count}</span>`).join('');
+  const reactionButtons = `${countedReactions}${!post.legacy && identity ? `<button type="button" class="bs-wall-react-open${_wallUi.reactionPostId === post.id ? ' active' : ''}" data-action="_bastionWallToggleReactions" data-id="${_esc(post.id)}">☺ <span>Réagir</span></button>` : ''}`;
+
+  return `<article class="bs-annonce bs-wall-card" style="--ac:${type.color}">
+    <header class="bs-wall-card-head">
+      ${_wallAvatar(author, 40)}
+      <div><strong>${_esc(author.charName)}</strong><span class="bs-wall-card-meta"><b style="--ac:${type.color}">${type.icon} ${type.label}</b><small>${_annonceTimeAgo(post.ts)}${post.legacy ? ' · archive' : ''}</small></span></div>
+      ${canDelete ? `<button type="button" class="bs-annonce-del" data-action="_bastionDeleteAnnonce" data-id="${_esc(post.id)}" title="Supprimer cette publication">•••</button>` : ''}
+    </header>
+    ${post.text ? `<div class="bs-annonce-text bs-wall-card-text">${_wallText(post.text)}</div>` : ''}
+    ${media}
+    <div class="bs-wall-social-summary"><span>${Object.keys(post.reactions || {}).length ? `${Object.keys(post.reactions || {}).length} réaction${Object.keys(post.reactions || {}).length > 1 ? 's' : ''}` : ''}</span><span>${comments.length ? `${comments.length} réponse${comments.length > 1 ? 's' : ''}` : ''}</span></div>
+    <div class="bs-wall-actions"><div class="bs-wall-reactions">${reactionButtons}</div>${!post.legacy && identity ? `<button type="button" data-action="_bastionWallToggleReply" data-id="${_esc(post.id)}">↩ Répondre</button>` : ''}</div>
+    ${_wallReactionPicker(post.id)}
+    ${comments.length ? `<div class="bs-wall-comments">${comments.slice(replyOpen ? 0 : -3).map(comment => _wallCommentHtml(comment, post)).join('')}${comments.length > 3 && !replyOpen ? `<button class="bs-wall-more-comments" data-action="_bastionWallToggleReply" data-id="${_esc(post.id)}">Voir les ${comments.length} réponses</button>` : ''}</div>` : ''}
+    ${replyOpen && identity && !post.legacy ? `<div class="bs-wall-reply">${_wallAvatar(identity, 30)}<textarea rows="2" maxlength="1200" data-input="_bastionWallReplyDraft" data-id="${_esc(post.id)}" placeholder="Répondre avec ${_esc(identity.charName)}…">${_esc(_wallUi.replyDrafts.get(post.id) || '')}</textarea><button type="button" data-action="_bastionWallReply" data-id="${_esc(post.id)}">Envoyer</button></div>` : ''}
+  </article>`;
+}
+
+function _renderAnnonces() {
+  const posts = _wallAllPosts();
+  const filtered = _wallUi.filter === 'all' ? posts : posts.filter(post => post.type === _wallUi.filter);
+  const visible = filtered.slice(0, _wallUi.visible);
+  const filters = [['all', { icon: '◉', label: 'Tout' }], ...Object.entries(BASTION_WALL_TYPES)]
+    .map(([id, type]) => `<button type="button" class="${_wallUi.filter === id ? 'active' : ''}" data-action="_bastionWallSetFilter" data-filter="${id}">${type.icon} ${type.label}<span>${id === 'all' ? posts.length : posts.filter(post => post.type === id).length}</span></button>`).join('');
+  if (posts.length) queueMicrotask(_wallMarkSeen);
+  return `<section class="bs-section bs-social-wall">
+    <div class="bs-section-hd"><div><h2 class="bs-section-title">📌 Le mur du Bastion <span class="bs-section-count">${posts.length}</span></h2><p class="bs-section-sub">Nouvelles, souvenirs et discussions publiés par les personnages.</p></div></div>
+    <div class="bs-annonce-wall">${_wallComposer()}<nav class="bs-wall-feed-filters" aria-label="Filtrer les publications">${filters}</nav><div class="bs-annonce-list">${visible.map(_wallCard).join('') || `<div class="bs-annonce-empty">${posts.length ? 'Aucune publication de ce type.' : 'Le mur est encore silencieux. Publie le premier message du Bastion.'}</div>`}${filtered.length > visible.length ? `<button class="bs-wall-load-more" data-action="_bastionWallMore">Afficher ${Math.min(12, filtered.length - visible.length)} publications de plus</button>` : ''}</div></div>
+  </section>`;
+}
+
 function _bastionSetAnnonceType(btn) {
-  const inp = document.getElementById('bs-annonce-type');
-  if (inp) inp.value = btn.dataset.type || 'message';
-  document.querySelectorAll('.bs-annonce-type').forEach(el => el.classList.toggle('active', el === btn));
+  _wallUi.type = BASTION_WALL_TYPES[btn.dataset.type] ? btn.dataset.type : 'message';
+  document.querySelectorAll('.bs-annonce-type').forEach(el => {
+    const active = el === btn;
+    el.classList.toggle('active', active);
+    el.setAttribute('aria-pressed', String(active));
+  });
+}
+
+function _bastionWallDraft(el) {
+  let text = '';
+  const walk = node => node.childNodes.forEach(child => {
+    if (child.nodeType === 3) text += child.nodeValue;
+    else if (child.nodeName === 'IMG') text += child.dataset.emote || '';
+    else if (child.nodeName === 'BR') text += '\n';
+    else {
+      const before = text.length;
+      walk(child);
+      if (child.nodeName === 'DIV' && text.length > before && !text.endsWith('\n')) text += '\n';
+    }
+  });
+  walk(el);
+  _wallUi.draftText = text.trim().slice(0, 4000);
+  document.querySelector('.bs-wall-publish')?.toggleAttribute('disabled', !_wallUi.draftText.trim() && !_wallUi.images.length);
+}
+
+function _bastionWallInsert(btn) {
+  const editor = document.getElementById('bs-annonce-text');
+  if (!editor) return;
+  const token = btn.dataset.token || '';
+  const emote = _wallEmotes.find(item => `:${item.name}:` === token);
+  const node = emote ? Object.assign(document.createElement('img'), {
+    className: 'chat-emote-inline', src: emote.url, alt: token, title: token,
+  }) : document.createTextNode(token);
+  if (emote) node.dataset.emote = token;
+  editor.focus();
+  const selection = window.getSelection();
+  if (selection?.rangeCount && editor.contains(selection.anchorNode)) {
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  } else editor.appendChild(node);
+  _bastionWallDraft(editor);
+}
+
+function _bastionWallTogglePicker() {
+  _wallUi.pickerOpen = !_wallUi.pickerOpen;
+  _renderPage();
+  document.getElementById('bs-annonce-text')?.focus();
+}
+
+function _bastionWallRefreshMedia() {
+  const slot = document.getElementById('bs-wall-media-preview');
+  if (slot) slot.innerHTML = _wallComposerMedia();
+  document.querySelector('.bs-wall-publish')?.toggleAttribute('disabled', !_wallUi.draftText.trim() && !_wallUi.images.length);
+}
+
+function _bastionWallAddImage() {
+  if (_wallUi.images.length >= 3) return;
+  pickImageFile({ onImage: async ({ dataUrl }) => {
+    const compressed = await compressDataUrl(dataUrl, { max: 960, quality: .72 });
+    if (_wallUi.images.reduce((sum, image) => sum + image.length, 0) + compressed.length > 680000) {
+      showNotif('Ces images sont trop lourdes ensemble. Retire-en une ou choisis une image plus légère.', 'error');
+      return;
+    }
+    _wallUi.images.push(compressed);
+    _bastionWallRefreshMedia();
+  }});
 }
 
 async function _bastionPostAnnonce() {
-  const ta = document.getElementById('bs-annonce-text');
-  const text = (ta?.value || '').trim();
-  if (!text) { showNotif('Écris quelque chose avant de publier.', 'error'); ta?.focus(); return; }
-  const uid = STATE.user?.uid;
-  if (!uid) { showNotif('Connexion requise pour publier.', 'error'); return; }
-  const type = document.getElementById('bs-annonce-type')?.value;
-  const id = `a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-  const entry = {
-    id,
-    uid,                                   // requis par la règle : l'auteur doit être soi
-    author: _annonceAuthor(),
-    type: _ANNONCE_TYPES[type] ? type : 'message',
-    text: text.slice(0, 500),
-    ts: Date.now(),
-  };
-  // Doc unique membre-écrivable (le doc bastion/main reste MJ-only).
-  const items = [entry, ..._annonces].slice(0, 40);   // mur borné : 40 dernières
-  const ok = await tryDoc('bastionAnnonces', 'main', { items });
-  if (!ok) return;
-  if (ta) ta.value = '';
-  showNotif('📌 Annonce publiée.', 'success');
+  const identity = _wallIdentity();
+  const text = _wallUi.draftText.trim().slice(0, 4000);
+  if (!identity) { showNotif('Choisis un personnage pour publier.', 'error'); return; }
+  if (!text && !_wallUi.images.length) { showNotif('Ajoute un message ou une image avant de publier.', 'error'); return; }
+  const button = document.querySelector('.bs-wall-publish');
+  if (button) button.disabled = true;
+  try {
+    await addToCol('bastionAnnonces', {
+      kind: 'post', ...identity, type: _wallUi.type, text,
+      images: [..._wallUi.images], reactions: {}, comments: [], ts: Date.now(),
+    });
+    _wallUi.draftText = ''; _wallUi.images = []; _wallUi.pickerOpen = false;
+    showNotif('Publication ajoutée au mur.', 'success');
+  } catch (error) {
+    notifySaveError(error, 'Impossible de publier sur le mur.');
+    if (button) button.disabled = false;
+  }
 }
 
 async function _bastionDeleteAnnonce(id) {
-  const a = _annonces.find(x => x.id === id);
-  // Seul l'auteur (ou le MJ) peut supprimer son annonce.
-  if (a && !(a.uid && a.uid === STATE.user?.uid) && !STATE.isAdmin) {
-    showNotif('Tu ne peux supprimer que tes propres annonces.', 'error');
-    return;
-  }
-  await tryDoc('bastionAnnonces', 'main', { items: _annonces.filter(x => x.id !== id) });
+  const post = _wallPostById(id);
+  if (!post || (!STATE.isAdmin && post.uid !== STATE.user?.uid)) { showNotif('Tu ne peux supprimer que tes publications.', 'error'); return; }
+  const confirmed = await confirmModal('Supprimer définitivement cette publication et toutes ses réponses ?', { title: 'Supprimer la publication', confirmLabel: 'Supprimer', danger: true }).catch(() => false);
+  if (!confirmed) return;
+  if (post.legacy) {
+    const items = _legacyAnnonces.filter(item => item.id !== id).map(({ legacy, legacyIndex, ...item }) => item);
+    await tryDoc('bastionAnnonces', 'main', { items });
+  } else await deleteFromCol('bastionAnnonces', id);
+}
+
+async function _bastionWallMutate(id, mutator) {
+  await mutateInCol('bastionAnnonces', id, current => {
+    if (!current) return null;
+    const next = mutator(current);
+    const { id: _ignored, ...stored } = next;
+    return stored;
+  });
+}
+
+async function _bastionWallReact(btn) {
+  const identity = _wallIdentity(); if (!identity) return;
+  const allowed = [...ALL_EMOJIS, ..._wallEmotes.map(emote => `:${emote.name}:`)];
+  await _bastionWallMutate(btn.dataset.id, post => toggleBastionWallReaction(post, identity, btn.dataset.reaction, allowed));
+  _wallUi.reactionPostId = '';
+}
+
+function _bastionWallToggleReply(id) {
+  _wallUi.reactionPostId = '';
+  if (_wallUi.replyOpen.has(id)) _wallUi.replyOpen.delete(id); else _wallUi.replyOpen.add(id);
+  _renderPage();
+  document.querySelector(`.bs-wall-reply textarea[data-id="${CSS.escape(id)}"]`)?.focus();
+}
+
+async function _bastionWallReply(id) {
+  const identity = _wallIdentity();
+  const text = String(_wallUi.replyDrafts.get(id) || '').trim();
+  if (!identity || !text) return;
+  await _bastionWallMutate(id, post => appendBastionWallComment(post, { ...identity, id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, text, ts: Date.now() }));
+  _wallUi.replyDrafts.delete(id);
+}
+
+async function _bastionWallDeleteComment(btn) {
+  await _bastionWallMutate(btn.dataset.id, post => removeBastionWallComment(post, btn.dataset.comment, { uid: STATE.user?.uid, isAdmin: STATE.isAdmin }));
+}
+
+function _bastionOpenPostImage(btn) {
+  const image = _wallPostById(btn.dataset.id)?.images?.[Number(btn.dataset.index)];
+  if (image) openModal('Image de la publication', `<div class="bs-wall-image-modal"><img src="${image}" alt="Image de la publication"></div>`, { size: 'wide' });
+}
+
+async function _loadWallEmotes() {
+  const data = await getDocData('world', 'vtt_emotes').catch(() => null);
+  _wallEmotes = Array.isArray(data?.emotes) ? data.emotes.filter(emote => emote?.name && emote?.url) : [];
 }
 
 // ── Navigation rapide (ancres collées) + scroll-spy ──────────────────────────
@@ -2872,13 +3133,14 @@ const _BS_NAV = [
   ['bs-z-coffre',    '📦', 'Coffre'],
   ['bs-z-quetes',    '📋', 'Quêtes'],
   ['bs-z-annonces',  '📌', 'Annonces'],
-  ['bs-z-chronique', '📜', 'Chronique'],
 ];
 
 function _renderQuickNav() {
+  const historyCount = (STORE.bastion?.historique || []).filter(entry => !_ADMIN_HISTO_TYPES.has(entry.type)).length;
   return `<nav class="bs-quicknav" aria-label="Sections du Bastion">
     ${_BS_NAV.map(([id, ic, lbl]) =>
       `<a href="#${id}" class="bs-qn" data-target="${id}">${ic} <span>${lbl}</span></a>`).join('')}
+    ${historyCount ? `<button type="button" class="bs-qn bs-qn-history" data-action="_bastionOpenHistory">📜 <span>Historique</span><small>${historyCount}</small></button>` : ''}
   </nav>`;
 }
 
@@ -2889,7 +3151,7 @@ function _wrapZone(id, html) {
 
 // Met en surbrillance le lien de la section actuellement en haut du viewport.
 function _bsNavSpy() {
-  const links = document.querySelectorAll('.bs-qn');
+  const links = document.querySelectorAll('.bs-qn[data-target]');
   if (!links.length) return;
   let cur = null;
   links.forEach(a => {
@@ -2902,7 +3164,7 @@ function _bsNavSpy() {
 let _bsNavWired = false;
 function _initQuickNav() {
   // Masque les liens dont la section est absente (quêtes/chronique vides…).
-  document.querySelectorAll('.bs-qn').forEach(a => {
+  document.querySelectorAll('.bs-qn[data-target]').forEach(a => {
     a.style.display = document.getElementById(a.dataset.target) ? '' : 'none';
   });
   if (!_bsNavWired) {
@@ -2940,7 +3202,6 @@ function _renderPage() {
       ${_wrapZone('bs-z-coffre',    _renderCoffre(b))}
       ${_wrapZone('bs-z-quetes',    _renderBastionQuests(b))}
       ${_wrapZone('bs-z-annonces',  _renderAnnonces(b))}
-      ${_wrapZone('bs-z-chronique', _renderHistorique(b))}
     </div>`;
   _initQuickNav();
 }
@@ -2952,6 +3213,24 @@ async function renderBastionPage() {
   const content = document.getElementById('main-content');
   if (!content) return;
   content.innerHTML = appSplashHtml('Chargement du Bastion…');
+
+  const adventureId = STATE.adventure?.id || 'default';
+  if (_wallAdventureId !== adventureId) {
+    _wallAdventureId = adventureId;
+    _annonces = [];
+    _legacyAnnonces = [];
+    _wallEmotes = [];
+    _wallUi.draftText = '';
+    _wallUi.type = 'message';
+    _wallUi.charId = '';
+    _wallUi.images = [];
+    _wallUi.visible = 12;
+    _wallUi.pickerOpen = false;
+    _wallUi.filter = 'all';
+    _wallUi.reactionPostId = '';
+    _wallUi.replyOpen.clear();
+    _wallUi.replyDrafts.clear();
+  }
 
   STORE.shopItemsCache = null; STORE.npcsCache = null; // reset au cas où on aurait changé d'aventure
 
@@ -2993,7 +3272,7 @@ async function renderBastionPage() {
 
   // Secondaire : noms d'objets du coffre + portraits du personnel. Non bloquant —
   // re-render une fois prêt si on est toujours sur la page.
-  Promise.all([_loadShopItems(), _loadNpcs()])
+  Promise.all([_loadShopItems(), _loadNpcs(), _loadWallEmotes()])
     .then(() => { if (STATE.currentPage === 'bastion') _renderPage(); })
     .catch(e => console.error('[bastion] chargement shop/npcs', e));
 }
@@ -3049,11 +3328,26 @@ registerActions({
   _bastionSetQuestStatut:   (btn) => _bastionSetQuestStatut(btn),
   _bastionDeleteQuest:      (btn) => _bastionDeleteQuest(btn.dataset.id),
   _bastionOpenQuestEditor:  (btn) => _bastionOpenQuestEditor(btn.dataset.id || undefined),
-  _bastionToggleHisto:      () => _bastionToggleHisto(),
+  _bastionOpenHistory:      () => _bastionOpenHistory(),
   _bastionDeleteHisto:      (btn) => _bastionDeleteHisto(Number(btn.dataset.idx)),
   _bastionSetAnnonceType:   (btn) => _bastionSetAnnonceType(btn),
+  _bastionWallDraft:        (el) => _bastionWallDraft(el),
+  _bastionWallSetChar:      (el) => { _wallUi.charId = el.value || ''; _renderPage(); },
+  _bastionWallTogglePicker: () => _bastionWallTogglePicker(),
+  _bastionWallInsert:       (btn) => _bastionWallInsert(btn),
+  _bastionWallAddImage:     () => _bastionWallAddImage(),
+  _bastionWallRemoveImage:  (btn) => { _wallUi.images.splice(Number(btn.dataset.index), 1); _bastionWallRefreshMedia(); },
   _bastionPostAnnonce:      () => _bastionPostAnnonce(),
   _bastionDeleteAnnonce:    (btn) => _bastionDeleteAnnonce(btn.dataset.id),
+  _bastionWallReact:        (btn) => _bastionWallReact(btn),
+  _bastionWallToggleReactions: (btn) => { _wallUi.reactionPostId = _wallUi.reactionPostId === btn.dataset.id ? '' : btn.dataset.id; _renderPage(); },
+  _bastionWallToggleReply:  (btn) => _bastionWallToggleReply(btn.dataset.id),
+  _bastionWallReplyDraft:   (el) => _wallUi.replyDrafts.set(el.dataset.id, el.value || ''),
+  _bastionWallReply:        (btn) => _bastionWallReply(btn.dataset.id),
+  _bastionWallDeleteComment:(btn) => _bastionWallDeleteComment(btn),
+  _bastionOpenPostImage:    (btn) => _bastionOpenPostImage(btn),
+  _bastionWallMore:         () => { _wallUi.visible += 12; _renderPage(); },
+  _bastionWallSetFilter:    (btn) => { _wallUi.filter = btn.dataset.filter || 'all'; _wallUi.visible = 12; _renderPage(); },
 });
 
 // ── Exports legacy (pour ne pas casser pages.js ailleurs) ──────────────────

@@ -146,6 +146,35 @@
 .sc-context-group > span:first-child { color: var(--text-soft); font-weight: 750; }
 .sc-avatar-stack { display: inline-flex; padding-left: 4px; }
 .sc-avatar-stack .sc-avatar { margin-left: -6px; }
+.sc-context-conclusion {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 9px;
+  color: var(--text-muted);
+  font-size: .68rem;
+}
+.sc-context-conclusion > span {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #4fd3a6;
+  background: rgba(34,195,142,.12);
+  font-size: .55rem;
+  font-weight: 850;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.sc-context-conclusion strong { flex: 0 0 auto; color: var(--text-soft); }
+.sc-context-conclusion small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: .64rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .sc-primary-actions {
   display: flex;
   align-items: stretch;
@@ -227,49 +256,28 @@
   white-space: nowrap;
 }
 
-.sc-flow {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-.sc-flow button {
-  min-width: 0;
+.sc-details { border: 0; }
+.sc-details > summary {
+  min-height: 38px;
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 10px 14px;
-  border: 0;
-  border-right: 1px solid var(--border);
-  background: transparent;
+  gap: 10px;
+  padding: 7px 13px;
   color: var(--text-muted);
-  text-align: left;
+  background: rgba(255,255,255,.012);
   cursor: pointer;
+  list-style: none;
 }
-.sc-flow button:last-child { border-right: 0; }
-.sc-flow button:hover:not(:disabled) { background: rgba(79,140,255,.055); color: var(--text); }
-.sc-flow button:disabled { cursor: default; opacity: .4; }
-.sc-flow-num {
-  flex: 0 0 25px;
-  width: 25px;
-  height: 25px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(79,140,255,.35);
-  border-radius: 50%;
-  color: #7fb0ff;
-  font-size: .65rem;
-  font-weight: 800;
-}
-.sc-flow button > span:last-child { min-width: 0; display: flex; flex-direction: column; }
-.sc-flow b { color: var(--text-soft); font-size: .76rem; }
-.sc-flow small {
-  overflow: hidden;
-  color: var(--text-dim);
-  font-size: .62rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.sc-details > summary::-webkit-details-marker { display: none; }
+.sc-details > summary:hover { background: rgba(79,140,255,.045); }
+.sc-details-copy { min-width: 0; display: flex; align-items: baseline; gap: 7px; }
+.sc-details-copy strong { color: var(--text-soft); font-size: .7rem; }
+.sc-details-copy small { overflow: hidden; color: var(--text-dim); font-size: .61rem; text-overflow: ellipsis; white-space: nowrap; }
+.sc-details-state { margin-left: auto; padding: 3px 7px; border-radius: 999px; font-size: .57rem; font-weight: 750; white-space: nowrap; }
+.sc-details-state.ready { color: #4fd3a6; background: rgba(34,195,142,.1); }
+.sc-details-state.warn { color: #f7c85c; background: rgba(232,184,75,.11); }
+.sc-details-chevron { color: var(--text-dim); transition: transform .15s ease; }
+.sc-details[open] .sc-details-chevron { transform: rotate(180deg); }
 
 .sc-workspace {
   display: grid;
@@ -761,9 +769,8 @@
   .sc-enter-table-copy small { font-size: .52rem; }
   .sc-enter-table-copy strong { font-size: .74rem; }
   .sc-primary-actions .btn { min-width: 0; padding-inline: 8px; font-size: .68rem; }
-  .sc-flow button { justify-content: center; padding: 9px 5px; }
-  .sc-flow-num { flex-basis: 22px; width: 22px; height: 22px; }
-  .sc-flow small { display: none; }
+  .sc-details-copy small { display: none; }
+  .sc-details > summary { padding-inline: 10px; }
   .sc-workspace { grid-template-columns: 1fr; }
   .sc-pane { border-right: 0; border-bottom: 1px solid var(--border); }
   .sc-pane:last-child { border-bottom: 0; }
@@ -827,4 +834,3 @@
 [data-theme="light"] .sc-enter-table-copy small { color: #64748b; }
 [data-theme="light"] .sc-enter-table-copy strong { color: #0f172a; }
 [data-theme="light"] .sc-metrics > div { background: #fff; }
-[data-theme="light"] .sc-flow button:hover:not(:disabled) { background: rgba(37,99,235,.055); }
