@@ -1145,6 +1145,12 @@ const _ITEM_DERIVED_LABELS = {
   pvMaxBonus: 'PV', pmMaxBonus: 'PM',
   vitesseBonus: 'Vit.', initiativeBonus: 'Init.',
 };
+const _ITEM_DERIVED_TONES = {
+  pvMaxBonus: 'derived-tone derived-pv',
+  pmMaxBonus: 'derived-tone derived-pm',
+  vitesseBonus: 'derived-tone derived-speed',
+  initiativeBonus: 'derived-tone derived-init',
+};
 // Bump une valeur de bonus dérivé par le palier d'amélioration Artisan
 // (cohérent avec _bumpBonus de char-stats.js : ne bump que les valeurs positives).
 function _bumpDerived(val, item) {
@@ -1160,13 +1166,13 @@ function _itemBonusBadges(it = {}) {
   Object.entries(_ITEM_STAT_LABELS).forEach(([fullKey, lbl]) => {
     let b = 0;
     try { b = getItemStatBonus(it, fullKey); } catch {}
-    if (b) out.push({ lbl: `${lbl} ${b>0?'+':''}${b}`, cls: b > 0 ? 'pos' : 'neg' });
+    if (b) out.push({ lbl: `${lbl} ${b>0?'+':''}${b}`, cls: `stat-tone stat-${fullKey}` });
   });
   // Dérivés : applique le palier Artisan (upgrades.effectBonus) sur les positifs.
   Object.entries(_ITEM_DERIVED_LABELS).forEach(([k, lbl]) => {
     const v = _bumpDerived(parseInt(it[k]) || 0, it);
     if (!v) return;
-    out.push({ lbl: `${lbl} ${v>0?'+':''}${v}`, cls: 'gold' });
+    out.push({ lbl: `${lbl} ${v>0?'+':''}${v}`, cls: _ITEM_DERIVED_TONES[k] });
   });
   return out;
 }
@@ -1255,10 +1261,6 @@ function renderCharCombatV3(c, canEdit) {
 
   // ── ARMURES (2 rangées fixes de 3 : Tête/Torse/Bottes + Anneau/Amulette/Obj magique)
   // Affiche les traits + tous les bonus offerts (stats / CA / dérivés)
-  const STAT_LABELS = {
-    force: 'FOR', dexterite: 'DEX', intelligence: 'INT',
-    constitution: 'CON', sagesse: 'SAG', charisme: 'CHA',
-  };
   const renderArmor = slotDef => {
     const slot = slotDef.id;
     const it = equip[slot] || {};
@@ -1279,21 +1281,8 @@ function renderCharCombatV3(c, canEdit) {
     // Bonus : stats + CA + caBonus + dérivés
     const badges = [];
     const caTotal = (parseInt(it.ca) || 0) + (parseInt(it.caBonus) || 0);
-    if (caTotal) badges.push({ lbl: `CA +${caTotal}`, cls: 'gold' });
-    // Stats : items stockent sous codes courts (fo/dex/in/sa/co/ch + alias 'for').
-    // getItemStatBonus gère tous les alias + les upgrades.
-    Object.entries(STAT_LABELS).forEach(([fullKey, lbl]) => {
-      let b = 0;
-      try { b = getItemStatBonus(it, fullKey); } catch {}
-      if (b) badges.push({ lbl: `${lbl} ${b>0?'+':''}${b}`, cls: b > 0 ? 'pos' : 'neg' });
-    });
-    ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus'].forEach(k => {
-      // Applique le palier Artisan (upgrades.effectBonus) sur les bonus positifs
-      const v = _bumpDerived(parseInt(it[k]) || 0, it);
-      if (!v) return;
-      const shortLbl = { pvMaxBonus:'PV', pmMaxBonus:'PM', vitesseBonus:'Vit.', initiativeBonus:'Init.' }[k];
-      badges.push({ lbl: `${shortLbl} ${v>0?'+':''}${v}`, cls: 'gold' });
-    });
+    if (caTotal) badges.push({ lbl: `CA +${caTotal}`, cls: 'derived-tone derived-ca' });
+    badges.push(..._itemBonusBadges(it));
     // Traits via _getTraits (importé de data.js)
     const traits = (_getTraits?.(getEquippedInventoryItem(slot, it)) || []);
     return `<div class="armor-card equipped">

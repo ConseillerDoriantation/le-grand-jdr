@@ -100,6 +100,7 @@ function _ensureSpellRenderCaches() {
 // Collection Firestore de l'entité qui porte les sorts. Défaut 'characters' →
 // aucun changement pour les joueurs. Les PNJ marquent leur objet (__spellCol='npcs').
 export function spellHostCollection(c) { return c && c.__spellCol ? c.__spellCol : 'characters'; }
+const _isNpcSpellHost = c => spellHostCollection(c) === 'npcs';
 
 // Re-render de l'onglet Sorts. Par défaut : rendu via charSession (fiche perso).
 // Un hôte non-perso (PNJ) peut fournir son propre re-render.
@@ -811,6 +812,7 @@ export function renderCharDeck(c, canEdit) {
   const activeSorts = allSorts.filter(s => s.actif);
   const deckCount = activeSorts.length;
   const deckMax   = calcDeckMax(c);
+  const npcSpellHost = _isNpcSpellHost(c);
   // PM du perso (mode Préparer) : ressource courante pour signaler les sorts
   // trop chers — même source que la fiche (pmActuel, défaut = max).
   const pmMax = calcPMMax(c);
@@ -956,7 +958,7 @@ export function renderCharDeck(c, canEdit) {
           <span class="cs-sorts-seg-copy"><strong>Grimoire</strong></span>
           <b>${allSorts.length}</b>
         </button>
-        <button class="cs-sorts-seg cs-sorts-seg--deck ${mode==='prepare'?'on':''} ${deckOver?'is-over':''}" role="tab" aria-selected="${mode==='prepare'}" data-action="_sortsSetMode" data-mode="prepare" title="Préparer ton Deck : clique une tuile pour ajouter ou retirer un sort (capacité INT)">
+        <button class="cs-sorts-seg cs-sorts-seg--deck ${mode==='prepare'?'on':''} ${deckOver?'is-over':''}" role="tab" aria-selected="${mode==='prepare'}" data-action="_sortsSetMode" data-mode="prepare" title="${npcSpellHost ? 'Les nouveaux sorts sont ajoutés automatiquement. Clique une tuile pour les ajouter ou les retirer du Deck.' : 'Préparer ton Deck : clique une tuile pour ajouter ou retirer un sort (capacité INT)'}">
           <span class="cs-sorts-seg-ico">⚡</span>
           <span class="cs-sorts-seg-copy"><strong>Deck</strong></span>
           <b>${deckCount}<small>/${deckMax}</small></b>
@@ -2014,7 +2016,7 @@ export function toggleSortDetail(idx) {
 
 
 // ── Éditeur de sorts ──────────────────────────────────────────────────────────
-// Contexte d'édition : null = sort de perso (STATE.activeChar.deck_sorts)
+// Contexte d'édition : null = sort de l'entité hôte (perso ou PNJ)
 // sinon { item, idx, onSave } = sort embarqué dans un item de boutique.
 // saveSort() lit ce contexte pour aiguiller la sauvegarde.
 let _itemEditCtx = null;
@@ -2036,13 +2038,13 @@ export function editItemSpell(item, idx, onSave, charForCalc = null) {
 }
 
 /** Perso contextuel de la modale de sort en cours d'édition.
- *  - Édition d'un sort de perso : le perso actif global.
+ *  - Édition d'un sort de perso/PNJ : l'entité hôte du moteur de sorts.
  *  - Édition d'une action d'item (boutique) : le perso de calcul passé à
- *    editItemSpell, sinon le perso actif en repli.
+ *    editItemSpell, sinon l'entité hôte en repli.
  *  Source unique pour tous les calculs/preview de la modale — supprime la
  *  substitution fragile de STATE.activeChar. */
 function _modalChar() {
-  return _itemEditCtx?.charForCalc ?? STATE.activeChar ?? null;
+  return _itemEditCtx?.charForCalc ?? _getCurrentSpellChar() ?? null;
 }
 export function addItemSpell(item, onSave, charForCalc = null) {
   return editItemSpell(item, -1, onSave, charForCalc);
@@ -2217,10 +2219,10 @@ function _runeLiveContribution(nom, counts) {
  *   ② "Ajouter une rune" — picker compact par famille
  * Re-appelée après chaque incrément/décrément pour rester synchro.
  */
-// Nombre max de runes d'effet débloquées pour le perso courant (défaut 1).
-// Le MJ peut le débloquer par personnage (champ characters.maxRunes).
+// Nombre max de runes d'effet débloquées pour l'hôte courant (défaut 1).
+// Le MJ peut le régler sur un personnage comme sur un PNJ (champ maxRunes).
 function _spellRuneLimit() {
-  const n = parseInt(STATE.activeChar?.maxRunes);
+  const n = parseInt(_getCurrentSpellChar()?.maxRunes);
   return Number.isFinite(n) && n >= 0 ? n : 1;
 }
 
@@ -4618,10 +4620,10 @@ export function runeDecrement(nom) {
   _refreshRunesSection(nom);
 }
 
-// MJ : débloque / retire des runes d'effet pour le perso courant (characters.maxRunes).
+// MJ : débloque / retire des runes d'effet pour l'hôte courant (perso ou PNJ).
 async function _mjAdjRuneLimit(delta) {
   if (!STATE.isAdmin) return;
-  const c = STATE.activeChar; if (!c) return;
+  const c = _getCurrentSpellChar(); if (!c) return;
   const cur  = parseInt(c.maxRunes);
   const base = Number.isFinite(cur) ? cur : 1;
   const next = Math.max(0, Math.min(20, base + (parseInt(delta) || 0)));
@@ -5380,13 +5382,16 @@ async function _saveClassicSort(idx, btn = null) {
       return true;
     }
 
-    const character = STATE.activeChar;
+    const character = _getCurrentSpellChar();
     if (!character) return false;
     const spells = Array.isArray(character.deck_sorts) ? character.deck_sorts : [];
     const previous = idx >= 0 ? spells[idx] : null;
     const previousValidation = _sortValidationState(previous);
     const spell = _buildClassicSortFromDOM(idx, spells);
     spell.id = spell.id || spellUid();
+    // Un sort créé pour un PNJ est immédiatement utilisable dans le VTT. Le MJ
+    // peut toujours l'en retirer individuellement depuis la vue Deck partagée.
+    if (idx < 0 && _isNpcSpellHost(character)) spell.actif = true;
 
     if (!STATE.isAdmin && previous
         && (previousValidation === 'ok' || previousValidation === 'no')
@@ -5414,7 +5419,7 @@ async function _saveClassicSort(idx, btn = null) {
     _sortModalBaseline = null;
     clearModalCloseGuard();
     closeModal();
-    showNotif(`Sort enregistré · ${spell.pm} PM`, 'success');
+    showNotif(`Sort enregistré · ${spell.pm} PM${isNew && _isNpcSpellHost(character) ? ' · ajouté au Deck' : ''}`, 'success');
 
     if (isNew) {
       _sortsSearch = '';
@@ -5447,7 +5452,7 @@ export async function saveSort(idx, btn = null) {
   const hasName = _requireSortName();
   const hasNoyau = _requireNoyauSelection();
   if (!hasName || !hasNoyau) return;
-    const c = STATE.activeChar; if(!c) return;
+    const c = _getCurrentSpellChar(); if(!c) return;
     const sorts = c.deck_sorts||[];
   _sortSaving = true;
   const saveBtn = btn || document.querySelector('[data-action="saveSort"]');
@@ -5515,7 +5520,7 @@ export async function saveSort(idx, btn = null) {
       // Legacy compat : typeSoin si defensif sans offensif + mode soin
       typeSoin: types.includes('defensif') && !types.includes('offensif') && (document.getElementById('s-prot-mode')?.value === 'soin'),
       catId:         document.getElementById('s-catid')?.value || '',
-      actif:         idx>=0 ? sorts[idx].actif : false,
+      actif:         idx >= 0 ? !!sorts[idx].actif : _isNpcSpellHost(c),
       enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
       enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
     enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
@@ -5594,7 +5599,7 @@ export async function saveSort(idx, btn = null) {
     _sortModalBaseline = null; clearModalCloseGuard();   // désarme la garde avant la fermeture
     closeModal();
     const _setDelta = getArmorSetData(c)?.modifiers?.spellPmDelta || 0;
-    showNotif(`Sort enregistré — ${_effectiveSortPm(newSort, _setDelta)} PM`, 'success');
+    showNotif(`Sort enregistré — ${_effectiveSortPm(newSort, _setDelta)} PM${isNew && _isNpcSpellHost(c) ? ' · ajouté au Deck' : ''}`, 'success');
 
     // ── Sur ajout : s'assure que le nouveau sort soit visible ────────
     if (isNew) {

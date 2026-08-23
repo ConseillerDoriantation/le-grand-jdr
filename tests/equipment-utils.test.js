@@ -4,8 +4,10 @@ import {
   buildEquippedItemFromInventory,
   getEquippedSourceItem,
   getItemTraits,
+  getMainWeapon,
   syncEquipmentAfterInventoryMutation,
 } from '../assets/js/shared/equipment-utils.js';
+import { LEGACY_EQUIPMENT_SLOTS, setEquipmentSlotsForTests } from '../assets/js/shared/equipment-slots.js';
 
 test('buildEquippedItemFromInventory : applique les stats ameliorees des amulettes', () => {
   const item = {
@@ -70,3 +72,14 @@ test('la source équipée récupère les traits vivants depuis l inventaire', ()
   assert.equal(source, character.inventaire[1]);
   assert.deepEqual(getItemTraits(source), ['Finesse', 'Riposte']);
 });
+
+test('getMainWeapon conserve le slot historique des PNJ si le slot principal a été renommé', () => {
+  setEquipmentSlotsForTests([
+    { id: 'Arme active', label: 'Arme active', kind: 'weapon', role: 'primaryWeapon' },
+  ]);
+  const weapon = { nom: 'Bâton du thaumaturge', degats: '2d8' };
+  assert.equal(getMainWeapon({ equipement: { 'Main principale': weapon } }), weapon);
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
+});
+
+test.after(() => setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS));

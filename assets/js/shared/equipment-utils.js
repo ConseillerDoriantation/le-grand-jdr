@@ -26,7 +26,13 @@ export const DEFAULT_UNARMED = Object.freeze({
 
 /** Retourne l'arme principale équipée, ou un objet "Poings" virtuel si vide. */
 export function getMainWeapon(c) {
-  const mainP = c?.equipement?.[getPrimaryWeaponSlotId()];
+  const equip = c?.equipement || {};
+  const configuredSlot = getPrimaryWeaponSlotId();
+  // Les PNJ et les anciennes fiches stockent historiquement leur arme sous
+  // « Main principale ». On conserve ce repli si l'aventure a depuis renommé
+  // le slot principal, afin que les sorts et le VTT utilisent bien l'arme tenue.
+  const configuredWeapon = equip[configuredSlot];
+  const mainP = configuredWeapon?.nom ? configuredWeapon : equip['Main principale'];
   if (mainP && mainP.nom) return mainP;
   return { ...DEFAULT_UNARMED };
 }

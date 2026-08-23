@@ -5301,3 +5301,328 @@ input.npc-side-name {
 /* Onglets de la fiche PNJ (Combat / Sorts) façon fiche perso. */
 .npc-sheet.cs-v3 .npc-sheet-tabs { margin: 2px 0; }
 .npc-sheet.cs-v3 .npc-tab-body { min-width: 0; }
+
+/* ── Combat PNJ : grille d'équipement actuelle ─────────────────────────────
+   L'ancien rendu utilisait `.npc-sheet-scroll`, absent de la fiche actuelle.
+   Ces règles sont donc volontairement scopées sur la structure réellement
+   rendue afin que les cartes d'une même rangée restent alignées. */
+.npc-page-v3 .npc-sheet.cs-v3 .npc-equipment-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* PNJ — catalogue d'équipement filtrable + création manuelle */
+.npc-equip-picker {
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  gap: .75rem;
+}
+
+.npc-equip-picker-head-actions,
+.npc-equip-picker-searchrow,
+.npc-equip-filter-head,
+.npc-equip-result-top,
+.npc-equip-result-facts,
+.npc-equip-result-tags {
+  display: flex;
+  align-items: center;
+}
+
+.npc-equip-picker-head-actions { flex-wrap: wrap; justify-content: flex-end; gap: .4rem; }
+.npc-equip-picker-head-actions .btn { border-color: rgba(79,140,255,.32); background: rgba(79,140,255,.1); color: #b8d3ff; }
+.npc-equip-picker-head-actions .is-danger { border-color: rgba(255,106,136,.4); color: #ff9daf; }
+
+.npc-equip-picker-searchrow {
+  gap: .55rem;
+  min-height: 44px;
+  padding: 0 .65rem;
+  border: 1px solid rgba(79,140,255,.28);
+  border-radius: 11px;
+  background: rgba(7,12,21,.82);
+}
+.npc-equip-picker-searchrow:focus-within { border-color: rgba(79,140,255,.72); box-shadow: 0 0 0 3px rgba(79,140,255,.1); }
+.npc-equip-picker-searchrow .npc-equip-search { min-height: 42px; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.npc-equip-picker-searchrow > button { border: 0; background: transparent; color: var(--text-muted); cursor: pointer; }
+
+.npc-equip-filter-panel {
+  display: grid;
+  gap: .55rem;
+  padding: .65rem .75rem .75rem;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  background: rgba(18,28,44,.72);
+}
+.npc-equip-filter-head { justify-content: space-between; gap: .75rem; }
+.npc-equip-filter-head strong { color: var(--text); font-size: .78rem; }
+.npc-equip-filter-head span { color: var(--text-dim); font-size: .68rem; }
+.npc-equip-filter-head button { padding: 0; border: 0; background: none; color: #9fc2ff; font-size: .7rem; font-weight: 800; cursor: pointer; }
+.npc-equip-filter-head .npc-equip-filter-toggle { display: inline-flex; align-items: center; gap: .35rem; color: var(--text); }
+.npc-equip-filter-panel.is-collapsed { padding-block: .58rem; }
+.npc-equip-filter-grid { display: grid; grid-template-columns: repeat(4, minmax(135px, 1fr)); gap: .5rem; }
+.npc-equip-filter-grid label { display: grid; min-width: 0; gap: .2rem; }
+.npc-equip-filter-grid label > span { padding-left: .1rem; color: var(--text-dim); font-size: .61rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.npc-equip-filter-grid select {
+  width: 100%; min-width: 0; height: 35px; padding: 0 1.7rem 0 .55rem;
+  border: 1px solid rgba(255,255,255,.1); border-radius: 8px;
+  background: #0a1220; color: var(--text); font-size: .72rem;
+}
+
+.npc-equip-picker-meta strong { color: #d8e6ff; font-size: .82rem; }
+.npc-equip-results { grid-template-columns: repeat(auto-fill, minmax(430px, 1fr)); gap: .65rem; }
+.npc-equip-result {
+  position: relative;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: start;
+  gap: .7rem;
+  min-height: 142px;
+  padding: .75rem;
+  border-left: 3px solid var(--equip-accent, rgba(79,140,255,.5));
+  overflow: hidden;
+}
+.npc-equip-result:hover { transform: translateY(-1px); box-shadow: 0 8px 22px rgba(0,0,0,.18); }
+.npc-equip-result.is-selected { box-shadow: inset 0 0 0 1px var(--equip-accent, #e8b84b); }
+.npc-equip-result-visual {
+  display: grid; place-items: center; width: 58px; height: 58px;
+  border: 1px solid rgba(255,255,255,.1); border-radius: 11px;
+  background: rgba(255,255,255,.045); font-size: 1.55rem; overflow: hidden;
+}
+.npc-equip-result-visual img { width: 100%; height: 100%; object-fit: cover; }
+.npc-equip-result-body { display: grid; min-width: 0; gap: .42rem; }
+.npc-equip-result .npc-equip-result-main strong { display: -webkit-box; white-space: normal; line-height: 1.25; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.npc-equip-result .npc-equip-result-main small { white-space: normal; line-height: 1.3; }
+.npc-equip-result-top { align-items: flex-start; justify-content: space-between; gap: .55rem; }
+.npc-equip-rarity {
+  flex: 0 0 auto; max-width: 110px; padding: .15rem .42rem;
+  border: 1px solid color-mix(in srgb, var(--rarity) 50%, transparent);
+  border-radius: 999px; background: color-mix(in srgb, var(--rarity) 12%, transparent);
+  color: var(--rarity); font-size: .6rem; font-weight: 900; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.npc-equip-result-facts { flex-wrap: wrap; gap: .3rem; }
+.npc-equip-result-facts b { padding: .16rem .38rem; border-radius: 6px; background: rgba(79,140,255,.11); color: #b8d3ff; font-size: .66rem; }
+.npc-equip-result-tags { flex-wrap: wrap; gap: .25rem; }
+.npc-equip-result-tags i { padding: .13rem .34rem; border: 1px solid rgba(255,255,255,.08); border-radius: 999px; color: var(--text-muted); font-size: .61rem; font-style: normal; }
+.npc-equip-result-effect { display: -webkit-box; overflow: hidden; color: var(--text-muted); font-size: .66rem; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.npc-equip-result-cta { grid-column: 2; justify-self: end; padding: .3rem .48rem; border: 1px solid rgba(79,140,255,.28); border-radius: 7px; color: #9fc2ff; font-size: .65rem; font-weight: 900; white-space: nowrap; }
+.npc-equip-result.is-selected .npc-equip-result-cta { border-color: rgba(34,195,142,.4); background: rgba(34,195,142,.1); color: #82e8c3; }
+.npc-equip-picker-empty { display: grid; grid-column: 1 / -1; justify-items: center; gap: .45rem; }
+.npc-equip-picker-empty b { color: var(--text); }
+.npc-equip-picker-empty span { font-size: .75rem; }
+.npc-sheet.cs-v3 .badge-chip.rarity { border-color: rgba(192,132,252,.3); background: rgba(192,132,252,.1); color: #d8b4fe; }
+.npc-sheet.cs-v3 .badge-chip.manual { border-style: dashed; color: #9fc2ff; }
+
+/* Une teinte stable par caractéristique : les bonus se repèrent d'un coup
+   d'œil dans le catalogue, sur la fiche équipée et dans le formulaire. */
+.stat-force { --npc-stat: #ff737e; --npc-stat-rgb: 255, 115, 126; }
+.stat-dexterite { --npc-stat: #41d6a3; --npc-stat-rgb: 65, 214, 163; }
+.stat-constitution { --npc-stat: #f5bd4f; --npc-stat-rgb: 245, 189, 79; }
+.stat-intelligence { --npc-stat: #68a9ff; --npc-stat-rgb: 104, 169, 255; }
+.stat-sagesse { --npc-stat: #ad8cff; --npc-stat-rgb: 173, 140, 255; }
+.stat-charisme { --npc-stat: #f582c5; --npc-stat-rgb: 245, 130, 197; }
+
+.derived-pv { --npc-stat: #ff737e; --npc-stat-rgb: 255, 115, 126; }
+.derived-pm { --npc-stat: #ad8cff; --npc-stat-rgb: 173, 140, 255; }
+.derived-speed { --npc-stat: #41d6a3; --npc-stat-rgb: 65, 214, 163; }
+.derived-init { --npc-stat: #f5bd4f; --npc-stat-rgb: 245, 189, 79; }
+.derived-ca { --npc-stat: #68a9ff; --npc-stat-rgb: 104, 169, 255; }
+
+.npc-eq-badge.stat-tone,
+.npc-eq-badge.derived-tone,
+.npc-equip-result-facts .stat-tone,
+.npc-equip-result-facts .derived-tone,
+.npc-equip-result-tags i.stat-tone,
+.npc-sheet.cs-v3 .badge-chip.stat-tone,
+.npc-sheet.cs-v3 .badge-chip.derived-tone {
+  border-color: rgba(var(--npc-stat-rgb), .42);
+  background: rgba(var(--npc-stat-rgb), .13);
+  color: var(--npc-stat);
+}
+
+.npc-eq-badge.stat-tone,
+.npc-eq-badge.derived-tone,
+.npc-sheet.cs-v3 .badge-chip.stat-tone,
+.npc-sheet.cs-v3 .badge-chip.derived-tone { font-weight: 850; }
+
+.modal:has(.npc-equip-manual) {
+  display: flex; flex-direction: column; width: min(96vw, 980px); max-width: 980px;
+  max-height: 94vh; padding: 0; overflow: hidden;
+}
+.modal:has(.npc-equip-manual) .modal-title { flex: 0 0 auto; margin: 0; padding: .95rem 1.1rem; }
+.modal:has(.npc-equip-manual) #modal-body { min-height: 0; padding: 0; overflow: auto; }
+.npc-equip-manual { display: grid; gap: .8rem; padding: 1rem; }
+.npc-manual-intro {
+  display: flex; align-items: center; gap: .7rem; padding: .75rem .85rem;
+  border: 1px solid rgba(79,140,255,.22); border-radius: 12px;
+  background: linear-gradient(100deg, rgba(79,140,255,.11), rgba(79,140,255,.025));
+}
+.npc-manual-intro-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 10px; background: rgba(79,140,255,.15); font-size: 1.3rem; }
+.npc-manual-intro > div { display: grid; gap: .15rem; }
+.npc-manual-intro b { color: var(--text); font-size: .9rem; }
+.npc-manual-intro span:not(.npc-manual-intro-icon) { color: var(--text-muted); font-size: .7rem; }
+.npc-manual-section {
+  display: grid; gap: .75rem; margin: 0; padding: .8rem;
+  border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: rgba(13,21,34,.72);
+}
+.npc-manual-section.is-slot-specific { border-color: rgba(232,184,75,.22); }
+.npc-manual-section-head, .npc-manual-profiles > summary { display: flex; align-items: center; gap: .55rem; }
+.npc-manual-section-head > span, .npc-manual-profiles > summary > span {
+  display: grid; place-items: center; flex: 0 0 25px; width: 25px; height: 25px;
+  border-radius: 7px; background: rgba(232,184,75,.14); color: #e8b84b; font-size: .7rem; font-weight: 900;
+}
+.npc-manual-section-head > div, .npc-manual-profiles > summary > div { display: grid; gap: .08rem; }
+.npc-manual-section-head b, .npc-manual-profiles > summary b { color: var(--text); font-size: .8rem; }
+.npc-manual-section-head small, .npc-manual-profiles > summary small { color: var(--text-dim); font-size: .64rem; }
+.npc-manual-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
+.npc-manual-grid--weapon { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.npc-manual-field { display: grid; min-width: 0; gap: .24rem; color: var(--text-muted); font-size: .68rem; font-weight: 750; }
+.npc-manual-field.is-wide { grid-column: 1 / -1; }
+.npc-manual-field input, .npc-manual-field select, .npc-manual-field textarea {
+  width: 100%; min-width: 0; padding: .52rem .58rem; border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px; background: #09111e; color: var(--text); font: inherit; font-weight: 500;
+}
+.npc-manual-field input, .npc-manual-field select { min-height: 38px; }
+.npc-manual-field textarea { resize: vertical; line-height: 1.4; }
+.npc-manual-field small { color: var(--text-dim); font-size: .6rem; font-weight: 500; }
+.npc-manual-field.stat-tone > span,
+.npc-manual-field.derived-tone > span { color: var(--npc-stat); }
+.npc-manual-field.stat-tone input,
+.npc-manual-field.derived-tone input {
+  border-color: rgba(var(--npc-stat-rgb), .32);
+  background: linear-gradient(120deg, rgba(var(--npc-stat-rgb), .1), #09111e 60%);
+}
+.npc-manual-field.stat-tone input:focus,
+.npc-manual-field.derived-tone input:focus {
+  border-color: rgba(var(--npc-stat-rgb), .72);
+  box-shadow: 0 0 0 3px rgba(var(--npc-stat-rgb), .1);
+  outline: none;
+}
+.npc-manual-subtitle { color: var(--text-dim); font-size: .62rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.npc-manual-bonus-grid { display: grid; grid-template-columns: repeat(6, minmax(82px, 1fr)); gap: .45rem; }
+.npc-manual-stat-picks { display: grid; grid-template-columns: repeat(6, minmax(85px, 1fr)); gap: .4rem; margin: 0; padding: .6rem; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; }
+.npc-manual-stat-picks legend { padding: 0 .3rem; color: var(--text-muted); font-size: .65rem; }
+.npc-manual-stat-picks label { position: relative; cursor: pointer; }
+.npc-manual-stat-picks input { position: absolute; opacity: 0; pointer-events: none; }
+.npc-manual-stat-picks label > span { display: grid; gap: .05rem; padding: .42rem; border: 1px solid rgba(255,255,255,.09); border-radius: 8px; text-align: center; }
+.npc-manual-stat-picks b { color: var(--text-muted); font-size: .7rem; }
+.npc-manual-stat-picks small { color: var(--text-dim); font-size: .55rem; }
+.npc-manual-stat-picks label.stat-tone > span { border-color: rgba(var(--npc-stat-rgb), .18); }
+.npc-manual-stat-picks label.stat-tone b { color: var(--npc-stat); }
+.npc-manual-stat-picks label.stat-tone input:checked + span {
+  border-color: rgba(var(--npc-stat-rgb), .72);
+  background: rgba(var(--npc-stat-rgb), .15);
+  box-shadow: inset 0 0 0 1px rgba(var(--npc-stat-rgb), .16);
+}
+.npc-manual-stat-picks label.stat-tone input:checked + span b { color: var(--npc-stat); }
+.npc-manual-profiles > summary { cursor: pointer; list-style: none; }
+.npc-manual-profiles > summary::-webkit-details-marker { display: none; }
+.npc-manual-profile-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .55rem; padding-top: .2rem; }
+.npc-manual-profile-field { min-width: 0; margin: 0; padding: .5rem; border: 1px solid rgba(255,255,255,.08); border-radius: 9px; }
+.npc-manual-profile-field legend { padding: 0 .25rem; color: var(--text-muted); font-size: .66rem; font-weight: 850; }
+.npc-manual-profile-options { display: grid; gap: .22rem; max-height: 150px; overflow: auto; }
+.npc-manual-profile-options label { position: relative; cursor: pointer; }
+.npc-manual-profile-options input { position: absolute; opacity: 0; pointer-events: none; }
+.npc-manual-profile-options span { display: block; padding: .28rem .38rem; border-radius: 6px; color: var(--text-muted); font-size: .62rem; }
+.npc-manual-profile-options input:checked + span { background: rgba(79,140,255,.15); color: #b8d3ff; font-weight: 800; }
+.npc-manual-footer { position: sticky; bottom: -1rem; z-index: 2; display: flex; justify-content: flex-end; gap: .5rem; padding: .75rem 0 0; background: linear-gradient(transparent, #09111e 28%); }
+
+@media (max-width: 820px) {
+  .npc-equip-filter-grid { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
+  .npc-equip-results { grid-template-columns: 1fr; }
+  .npc-manual-grid--weapon { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .npc-manual-bonus-grid, .npc-manual-stat-picks { grid-template-columns: repeat(3, minmax(80px, 1fr)); }
+  .npc-manual-profile-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .npc-equip-picker-head-actions { justify-content: stretch; }
+  .npc-equip-picker-head-actions .btn { flex: 1; }
+  .npc-equip-filter-grid, .npc-manual-grid, .npc-manual-grid--weapon, .npc-manual-profile-grid { grid-template-columns: 1fr; }
+  .npc-equip-result { grid-template-columns: 46px minmax(0, 1fr); min-height: 0; padding: .65rem; }
+  .npc-equip-result-visual { width: 46px; height: 46px; }
+  .npc-equip-result-cta { grid-column: 2; justify-self: start; }
+  .npc-equip-rarity { max-width: 82px; }
+  .npc-manual-bonus-grid, .npc-manual-stat-picks { grid-template-columns: repeat(2, minmax(80px, 1fr)); }
+  .npc-equip-manual { padding: .75rem; }
+  .npc-manual-footer { flex-direction: column-reverse; }
+  .npc-manual-footer .btn { width: 100%; }
+}
+
+.npc-page-v3 .npc-sheet.cs-v3 .npc-equipment-section .section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.npc-page-v3 .npc-sheet.cs-v3 .armor-grid--equipment {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: auto;
+  align-items: stretch;
+  align-content: start;
+  gap: 10px;
+}
+
+.npc-page-v3 .npc-sheet.cs-v3 .npc-armor-card {
+  box-sizing: border-box;
+  height: 100%;
+  min-width: 0;
+  min-height: 112px;
+  padding: 11px 12px;
+}
+
+.npc-page-v3 .npc-sheet.cs-v3 .npc-armor-card .armor-slot {
+  min-width: 0;
+  gap: 8px;
+}
+
+.npc-page-v3 .npc-sheet.cs-v3 .npc-armor-card .armor-slot-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.npc-page-v3 .npc-sheet.cs-v3 .npc-armor-card .armor-name {
+  min-width: 0;
+  min-height: 2.25em;
+  overflow-wrap: anywhere;
+}
+
+.npc-page-v3 .npc-sheet.cs-v3 .npc-armor-card .armor-traits {
+  margin-top: auto;
+}
+
+.npc-page-v3 .npc-sheet.cs-v3 .npc-armor-card .trait.is-long,
+.npc-page-v3 .npc-sheet.cs-v3 .npc-weap-card .trait.is-long {
+  flex: 1 1 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  border-radius: 7px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.npc-page-v3 .npc-sheet.cs-v3 .npc-armor-card.empty {
+  justify-content: flex-start;
+}
+
+@media (max-width: 1100px) {
+  .npc-page-v3 .npc-sheet.cs-v3 .armor-grid--equipment {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .npc-page-v3 .npc-sheet.cs-v3 .armor-grid--equipment {
+    /* characters.css force encore deux colonnes sous 768 px : surcharge
+       explicite pour que les cartes PNJ restent lisibles sur téléphone. */
+    grid-template-columns: 1fr !important;
+  }
+
+  .npc-page-v3 .npc-sheet.cs-v3 .npc-armor-card {
+    min-height: 0;
+  }
+}
