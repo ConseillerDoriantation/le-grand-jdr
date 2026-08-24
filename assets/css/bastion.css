@@ -2882,6 +2882,10 @@
 }
 .bs-wall-editor:empty::before { content: attr(data-placeholder); color: var(--text-dim); pointer-events: none; }
 .bs-wall-editor .chat-emote-inline { display: inline-block; width: 1.65em; height: 1.65em; margin: 0 2px; border-radius: 50%; object-fit: cover; vertical-align: -.42em; }
+.bs-wall-mention-suggestions { display: flex; align-items: center; gap: 5px; overflow-x: auto; padding: 2px 1px; scrollbar-width: none; }
+.bs-wall-mention-suggestions small { flex: 0 0 auto; margin-right: 2px; color: var(--text-dim); font-size: .61rem; font-weight: 750; text-transform: uppercase; }
+.bs-wall-mention-suggestions button { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 3px 8px 3px 3px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-soft); background: rgba(126,176,255,.06); font: inherit; font-size: .68rem; cursor: pointer; }
+.bs-wall-mention-suggestions button:hover { border-color: rgba(126,176,255,.35); background: rgba(126,176,255,.13); }
 .bs-wall-compose-tools { display: flex; align-items: center; gap: 5px; }
 .bs-wall-compose-tools button,
 .bs-wall-actions > button,
@@ -2934,7 +2938,11 @@
 .bs-wall-no-character { padding: 12px; border: 1px dashed rgba(232,184,75,.32); border-radius: 9px; color: var(--text-muted); }
 .bs-wall-no-character p { margin: 4px 0 11px; font-size: .76rem; line-height: 1.45; }
 
-.bs-wall-card { overflow: hidden; padding: 0; border-left-width: 3px; }
+.bs-wall-card { position: relative; overflow: hidden; padding: 0; border-left-width: 3px; transition: border-color .2s, box-shadow .2s, opacity .2s; }
+.bs-wall-card.is-resolved,
+.bs-wall-card.is-cancelled { opacity: .78; }
+.bs-wall-card.is-pinned { border-top-color: rgba(232,184,75,.42); box-shadow: inset 0 1px 0 rgba(232,184,75,.12); }
+.bs-wall-card.is-targeted { opacity: 1; border-color: rgba(91,155,255,.75); box-shadow: 0 0 0 3px rgba(79,140,255,.18), 0 14px 38px rgba(0,0,0,.24); }
 .bs-wall-card-head { display: grid; grid-template-columns: 40px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 12px 13px 8px; }
 .bs-wall-card-head > div { min-width: 0; display: flex; flex-direction: column; }
 .bs-wall-card-head strong { overflow: hidden; color: var(--text); font-size: .85rem; text-overflow: ellipsis; white-space: nowrap; }
@@ -2949,8 +2957,22 @@
   font-size: .58rem;
   font-weight: 800;
 }
+.bs-wall-card-meta .bs-wall-status { --ac: var(--status); border-color: color-mix(in oklab, var(--status) 35%, transparent); color: var(--status); background: color-mix(in oklab, var(--status) 10%, transparent); }
+.bs-wall-card-meta .bs-wall-pinned { --ac: #e8b84b; }
 .bs-wall-card-meta small { color: var(--text-dim); font-size: .61rem; }
 .bs-wall-card .bs-annonce-del { align-self: start; min-width: 30px; min-height: 28px; font-weight: 800; }
+.bs-wall-post-menu { position: absolute; z-index: 8; top: 43px; right: 10px; display: grid; min-width: 185px; padding: 5px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elevated); box-shadow: 0 14px 38px rgba(0,0,0,.36); }
+.bs-wall-post-menu button { min-height: 32px; padding: 6px 9px; border: 0; border-radius: 7px; color: var(--text-muted); background: transparent; font: inherit; font-size: .7rem; text-align: left; cursor: pointer; }
+.bs-wall-post-menu button:hover { color: var(--text); background: rgba(126,176,255,.09); }
+.bs-wall-post-menu button.is-danger { color: #ff8ca0; }
+.bs-wall-post-edit { display: grid; gap: 8px; padding: 5px 13px 13px; }
+.bs-wall-post-edit textarea,
+.bs-wall-comment-body textarea { width: 100%; resize: vertical; padding: 8px 9px; border: 1px solid rgba(126,176,255,.3); border-radius: 8px; color: var(--text); background: var(--bg-input, #0b1320); font: inherit; line-height: 1.45; }
+.bs-wall-post-edit > div { display: grid; grid-template-columns: minmax(130px,auto) 1fr auto auto; align-items: center; gap: 6px; }
+.bs-wall-post-edit select { min-height: 32px; padding: 4px 28px 4px 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg-elevated); }
+.bs-wall-post-edit button,
+.bs-wall-edit-actions button { min-height: 30px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-muted); background: transparent; cursor: pointer; }
+.bs-wall-media-loading { display: grid; min-height: 110px; place-items: center; color: var(--text-dim); background: rgba(0,0,0,.28); font-size: .7rem; }
 .bs-wall-card-text { padding: 5px 14px 13px; color: var(--text-soft); font-size: .9rem; line-height: 1.55; white-space: normal; }
 .bs-wall-card-text a { color: #82b4ff; overflow-wrap: anywhere; }
 .bs-wall-card-text .chat-emote-inline { width: 28px; height: 28px; border-radius: 50%; vertical-align: middle; object-fit: cover; }
@@ -3003,6 +3025,10 @@
 .bs-wall-comment-body { min-width: 0; padding: 7px 9px; border-radius: 4px 11px 11px 11px; background: rgba(126,176,255,.075); color: var(--text-muted); font-size: .76rem; line-height: 1.42; }
 .bs-wall-comment-body strong { display: block; margin-bottom: 2px; color: var(--text); font-size: .72rem; }
 .bs-wall-comment-body small { display: block; margin-top: 3px; color: var(--text-dim); font-size: .58rem; }
+.bs-wall-comment-tools { display: flex; gap: 1px; }
+.bs-wall-comment-tools button { width: 24px; height: 24px; border: 0; border-radius: 6px; color: var(--text-dim); background: transparent; cursor: pointer; }
+.bs-wall-comment-tools button:hover { color: var(--text); background: rgba(126,176,255,.1); }
+.bs-wall-edit-actions { display: flex; justify-content: flex-end; gap: 5px; margin-top: 6px; }
 .bs-wall-comment-delete { width: 24px; height: 24px; border: 0; border-radius: 6px; color: var(--text-dim); background: transparent; cursor: pointer; }
 .bs-wall-comment-delete:hover { color: #ff7d82; background: rgba(255,90,126,.1); }
 .bs-wall-more-comments { align-self: flex-start; border: 0; color: #82b4ff; background: transparent; font-size: .68rem; cursor: pointer; }
@@ -3039,5 +3065,8 @@
   .bs-wall-reactions button { padding-inline: 5px; }
   .bs-wall-reply { grid-template-columns: 28px minmax(0,1fr); }
   .bs-wall-reply > button { grid-column: 2; justify-self: end; }
+  .bs-wall-card-meta { flex-wrap: wrap; }
+  .bs-wall-post-edit > div { grid-template-columns: 1fr 1fr; }
+  .bs-wall-post-edit > div > span { display: none; }
   .bs-qn-history { margin-left: 0; }
 }

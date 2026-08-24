@@ -2906,6 +2906,9 @@ body.is-modal-open { overflow:hidden; }
   border-bottom: 1px solid var(--border);
 }
 .global-notification-item:last-child { border-bottom: 0; }
+.global-notification-item.is-actionable { border-radius: 8px; cursor: pointer; }
+.global-notification-item.is-actionable:hover,
+.global-notification-item.is-actionable:focus-visible { background: rgba(110,165,255,.08); outline: 1px solid rgba(110,165,255,.22); }
 .global-notification-marker {
   width: 24px;
   height: 24px;

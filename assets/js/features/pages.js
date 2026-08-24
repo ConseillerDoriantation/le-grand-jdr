@@ -2031,6 +2031,7 @@ const PAGES = {
     let collectionItems = getCachedCollection('collection')   || [];
     let wallDocs        = [];
     let wallLegacy      = [];
+    let wallRead        = null;
     let bastionDoc      = null;
     let nextSession     = null;
 
@@ -2897,6 +2898,7 @@ const PAGES = {
       ]);
       let seenAt = 0;
       try { seenAt = Number(localStorage.getItem(bastionWallSeenKey(STATE.adventure?.id, STATE.user?.uid)) || 0); } catch { /* stockage privé indisponible */ }
+      seenAt = Math.max(seenAt, Number(wallRead?.seenAt) || 0);
       const unread = bastionWallUnreadCount(posts, seenAt, STATE.user?.uid);
       const highlighted = posts.filter(post => post.ts > seenAt && post.uid !== STATE.user?.uid);
       const shown = [...highlighted, ...posts.filter(post => !highlighted.includes(post))].slice(0, 4);
@@ -2915,10 +2917,12 @@ const PAGES = {
         const plain = String(post.text || '').replace(/\s+/g, ' ').trim();
         const snippet = plain.length > 150 ? `${plain.slice(0, 147)}…` : plain;
         const isUnread = post.ts > seenAt && post.uid !== STATE.user?.uid;
-        return `<button type="button" class="dv2-wall-post${isUnread ? ' is-unread' : ''}" data-navigate="bastion">
+        const status = post.status && post.status !== 'active' ? (post.status === 'resolved' ? ' · Résolue' : ' · Annulée') : '';
+        const commentCount = Math.max(Number(post.commentCount) || 0, (post.comments || []).length);
+        return `<button type="button" class="dv2-wall-post${isUnread ? ' is-unread' : ''}" data-navigate="bastion" data-nav-sub="post:${_esc(post.id)}">
           ${characterAvatarHtml(char, { size: 36, className: 'dv2-wall-avatar' })}
-          <span class="dv2-wall-post-copy"><span class="dv2-wall-post-meta"><strong>${_esc(post.charName || post.author || char.nom || 'Personnage')}</strong><b class="dv2-wall-type" style="--wall-type:${type.color}">${type.icon} ${type.label}</b><small>${timeAgo(post.ts)}</small>${isUnread ? '<i>Nouveau</i>' : ''}</span><span class="dv2-wall-post-text">${_esc(snippet || (post.images?.length ? `A partagé ${post.images.length} image${post.images.length > 1 ? 's' : ''}` : 'Nouvelle publication'))}</span><span class="dv2-wall-post-stats">${reactionCount ? `${reactionCount} réaction${reactionCount > 1 ? 's' : ''}` : 'Aucune réaction'} · ${(post.comments || []).length} réponse${(post.comments || []).length > 1 ? 's' : ''}</span></span>
-          ${post.images?.[0] ? `<img class="dv2-wall-thumb" src="${post.images[0]}" alt="">` : '<span class="dv2-wall-arrow">→</span>'}
+          <span class="dv2-wall-post-copy"><span class="dv2-wall-post-meta"><strong>${_esc(post.charName || post.author || char.nom || 'Personnage')}</strong><b class="dv2-wall-type" style="--wall-type:${type.color}">${type.icon} ${type.label}${status}</b><small>${timeAgo(post.ts)}</small>${isUnread ? '<i>Nouveau</i>' : ''}</span><span class="dv2-wall-post-text">${_esc(snippet || ((post.imageCount || post.images?.length) ? `A partagé ${post.imageCount || post.images.length} image${(post.imageCount || post.images.length) > 1 ? 's' : ''}` : 'Nouvelle publication'))}</span><span class="dv2-wall-post-stats">${reactionCount ? `${reactionCount} réaction${reactionCount > 1 ? 's' : ''}` : 'Aucune réaction'} · ${commentCount} réponse${commentCount > 1 ? 's' : ''}</span></span>
+          ${post.imagePreview || post.images?.[0] ? `<img class="dv2-wall-thumb" src="${_esc(post.imagePreview || post.images[0])}" alt="">` : '<span class="dv2-wall-arrow">→</span>'}
         </button>`;
       };
       return `<section class="dv2-dash-panel dv2-wall-panel">
@@ -3174,8 +3178,12 @@ const PAGES = {
     watch('dash-story',        'story',        d => { storyItems      = d || []; schedulePaint(); });
     watch('dash-achievements', 'achievements', d => { achievementsRaw = d || []; schedulePaint(); });
     watch('dash-collection',   'collection',   d => { collectionItems = d || []; schedulePaint(); });
+    void loadRecentCollection('bastionAnnonces', { field: 'ts', max: 80 }).then(d => {
+      if (!wallDocs.length) { wallDocs = d || []; schedulePaint(); }
+    }).catch(() => {});
     watchRecent('dash-bastion-wall', 'bastionAnnonces', d => { wallDocs = d || []; schedulePaint(); }, { field: 'ts', max: 80 });
     watchDoc('dash-bastion-wall-legacy', 'bastionAnnonces', 'main', d => { wallLegacy = Array.isArray(d?.items) ? d.items : []; schedulePaint(); });
+    if (STATE.user?.uid) watchDoc('dash-bastion-wall-read', 'bastionWallReads', STATE.user.uid, d => { wallRead = d; schedulePaint(); }, { silent: true });
     watchDoc('dash-bastion',   'bastion',        'main', d => { bastionDoc  = d; schedulePaint(); });
     watchDoc('dash-agenda',    'agenda_session', 'next', d => { nextSession = d; schedulePaint(); });
   },

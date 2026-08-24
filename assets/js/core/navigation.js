@@ -246,22 +246,23 @@ function _runStandaloneAction(el, task) {
   });
 }
 
-function _syncHash(page, historyMode = 'push') {
+function _syncHash(page, historyMode = 'push', sub = null) {
   // Même page → on laisse l'URL intacte : sa sous-route (onglet en cours, ou
   // deep-link pas encore consommé par la feature) doit survivre au rendu.
   // Page différente → l'ancienne sous-route n'a plus de sens, on repart propre.
   // replaceState : pas d'entrée d'historique (le bouton Retour ne change pas de
   // comportement) et pas de `hashchange`.
-  if (parseRoute().page === page) return;
+  const route = parseRoute();
+  if (route.page === page && (sub == null || route.sub === sub)) return;
   const method = historyMode === 'none'
     ? null
     : (!_hasSyncedRoute || historyMode === 'replace' ? 'replaceState' : 'pushState');
-  if (method) history[method](null, '', routeUrl(page));
+  if (method) history[method](null, '', routeUrl(page, sub == null ? '' : sub));
   _hasSyncedRoute = true;
 }
 
 // ── Naviguer vers une page ─────────────────────
-export async function navigate(page, { historyMode = 'push' } = {}) {
+export async function navigate(page, { historyMode = 'push', sub = null } = {}) {
   if (!await _canLeaveCurrentPage(page)) {
     if (historyMode === 'none') _syncHash(STATE.currentPage, 'replace');
     return;
@@ -291,6 +292,7 @@ export async function navigate(page, { historyMode = 'push' } = {}) {
       'info'
     );
     page = 'dashboard';
+    sub = null;
   }
 
   unwatchAll(); // stopper tous les listeners temps réel de la page précédente
@@ -307,7 +309,7 @@ export async function navigate(page, { historyMode = 'push' } = {}) {
 
   setPage(page);
   document.dispatchEvent(new CustomEvent('app:page-changed', { detail: { page } }));
-  _syncHash(page, historyMode);
+  _syncHash(page, historyMode, sub);
   _syncNav(page);
   _renderLoading();
 
@@ -468,7 +470,7 @@ export function initEventDelegation() {
     // Navigation via data-navigate
     const navEl = e.target.closest('[data-navigate]');
     if (navEl) {
-      navigate(navEl.dataset.navigate);
+      navigate(navEl.dataset.navigate, { sub: navEl.dataset.navSub || null });
       closeMoreMenu();
       return;
     }

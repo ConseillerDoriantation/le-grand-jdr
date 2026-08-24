@@ -13,10 +13,13 @@ import {
   getNotificationHistory,
   getUnreadNotificationCount,
   markNotificationsRead,
+  recordNotification,
+  showNotif,
   triggerLatestNotificationAction,
 } from './notifications.js';
 import { STATE } from '../core/state.js';
 import { lsJson } from './local-storage.js';
+import { getDocDataSilent, subscribeRecentCollection } from '../data/firestore.js';
 
 let _initialized = false;
 let _onlineTimer = null;
@@ -215,6 +218,17 @@ function _mountNotificationHistory() {
         time.textContent = _notificationTime(item.at);
         content.append(message, time);
         row.append(marker, content);
+        if (item.page) {
+          row.classList.add('is-actionable');
+          row.tabIndex = 0;
+          row.setAttribute('role', 'button');
+          row.title = 'Ouvrir';
+          const open = () => import('../core/navigation.js').then(({ navigate }) => navigate(item.page, { sub: item.sub || null }));
+          row.addEventListener('click', () => { close(); void open(); });
+          row.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); close(); void open(); }
+          });
+        }
         list.appendChild(row);
       }
     }
@@ -243,6 +257,56 @@ function _mountNotificationHistory() {
     render();
   });
   render();
+}
+
+let _wallNotificationUnsubs = [];
+
+function _mountBastionWallNotifications() {
+  const stop = () => {
+    _wallNotificationUnsubs.forEach(unsub => unsub?.());
+    _wallNotificationUnsubs = [];
+  };
+  const start = () => {
+    stop();
+    const uid = STATE.user?.uid;
+    const adventureId = STATE.adventure?.id;
+    if (!uid || !adventureId) return;
+    let events = null;
+    let readReady = false;
+    let seenAt = 0;
+    const deliveredKey = `bastion-wall-notifications:${adventureId}:${uid}`;
+    const process = () => {
+      if (!readReady || !events) return;
+      const delivered = new Set(lsJson.get(deliveredKey, []) || []);
+      const unseen = events
+        .filter(event => event.targetUid === uid && event.actorUid !== uid && Number(event.ts) > seenAt && !delivered.has(event.id))
+        .sort((a, b) => Number(a.ts) - Number(b.ts));
+      unseen.forEach(event => delivered.add(event.id));
+      const pending = unseen.slice(-10);
+      pending.forEach(event => {
+        const label = event.kind === 'mention' ? 'vous mentionne' : 'a répondu sur le mur';
+        const message = `${event.actorName || 'Un personnage'} ${label}${event.text ? ` : ${event.text}` : ''}`;
+        recordNotification(message, 'info', { id: `wall:${event.id}`, at: event.ts, page: 'bastion', sub: `post:${event.postId}` });
+      });
+      if (pending.length) showNotif(
+        pending.length === 1 ? 'Nouveau message pour vous sur le mur du Bastion.' : `${pending.length} nouveaux messages pour vous sur le mur du Bastion.`,
+        'info',
+        { history: false, duration: 5000 },
+      );
+      lsJson.set(deliveredKey, [...delivered].slice(-120));
+    };
+    void getDocDataSilent('bastionWallReads', uid).then(read => {
+      seenAt = Number(read?.seenAt) || 0;
+      readReady = true;
+      process();
+    }).catch(() => { readReady = true; process(); });
+    _wallNotificationUnsubs.push(subscribeRecentCollection('bastionWallNotifications', docs => {
+      events = docs || [];
+      process();
+    }, { field: 'ts', max: 100, silent: true }));
+  };
+  document.addEventListener('app:adventure-changed', () => setTimeout(start, 0));
+  start();
 }
 
 function _isVisible(el) {
@@ -913,6 +977,7 @@ export function initGlobalQol() {
   _mountPageAnnouncer();
   _mountBackToTop();
   _mountNotificationHistory();
+  _mountBastionWallNotifications();
   _initModalShortcuts();
   _initModalDirtyGuard();
   _initModalDrafts();

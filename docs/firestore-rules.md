@@ -522,19 +522,82 @@ match /adventures/{adventureId} {
           )
         ) &&
         request.resource.data.get('text', '').size() <= 4000 &&
-        request.resource.data.get('images', []).size() <= 3
+        request.resource.data.get('type', 'message') in ['message', 'quete', 'offre', 'demande'] &&
+        request.resource.data.get('status', 'active') in ['active', 'resolved', 'cancelled'] &&
+        request.resource.data.get('images', []).size() <= 3 &&
+        request.resource.data.get('imageCount', 0) <= 3 &&
+        request.resource.data.get('imagePreview', '').size() <= 80000 &&
+        request.resource.data.get('pinned', false) == false
       )
     );
     allow update: if inAdventure(adventureId) && (
-      id == 'main' ||
+      (id == 'main' && isAdvAdmin(adventureId)) ||
       isAdvAdmin(adventureId) ||
-      resource.data.get('uid', '') == request.auth.uid ||
+      (resource.data.get('uid', '') == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'text', 'type', 'status', 'editedAt', 'updatedAt', 'reactions', 'commentCount'
+        ]) && request.resource.data.get('text', '').size() <= 4000
+           && request.resource.data.get('type', 'message') in ['message', 'quete', 'offre', 'demande']
+           && request.resource.data.get('status', 'active') in ['active', 'resolved', 'cancelled']) ||
       request.resource.data.diff(resource.data).affectedKeys()
-        .hasOnly(['reactions', 'comments', 'updatedAt'])
+        .hasOnly(['reactions', 'commentCount', 'updatedAt'])
     );
     allow delete: if inAdventure(adventureId) && (
       isAdvAdmin(adventureId) || resource.data.get('uid', '') == request.auth.uid
     );
+  }
+  // Médias séparés : un post reste léger même avec plusieurs images. Les anciens
+  // posts qui portent encore `images` directement restent lisibles.
+  match /bastionWallMedia/{id} {
+    allow read: if inAdventure(adventureId);
+    allow create: if inAdventure(adventureId)
+      && request.resource.data.get('uid', '') == request.auth.uid
+      && request.resource.data.get('images', []).size() <= 3;
+    allow update, delete: if inAdventure(adventureId)
+      && (isAdvAdmin(adventureId) || resource.data.get('uid', '') == request.auth.uid);
+  }
+  // Une réponse = un document : un fil actif ne peut plus faire dépasser au post
+  // principal la limite Firestore de 1 Mio.
+  match /bastionWallComments/{id} {
+    allow read: if inAdventure(adventureId);
+    allow create: if inAdventure(adventureId)
+      && request.resource.data.get('uid', '') == request.auth.uid
+      && request.resource.data.get('postId', '') != ''
+      && exists(/databases/$(database)/documents/adventures/$(adventureId)/bastionAnnonces/$(request.resource.data.postId))
+      && request.resource.data.get('text', '').size() <= 1200
+      && request.resource.data.get('charId', '') != ''
+      && (
+        isAdvAdmin(adventureId) || (
+          exists(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(request.resource.data.charId)) &&
+          get(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(request.resource.data.charId)).data.uid == request.auth.uid
+        )
+      );
+    allow update: if inAdventure(adventureId)
+      && (isAdvAdmin(adventureId) || resource.data.get('uid', '') == request.auth.uid)
+      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'editedAt'])
+      && request.resource.data.get('text', '').size() <= 1200;
+    allow delete: if inAdventure(adventureId)
+      && (isAdvAdmin(adventureId) || resource.data.get('uid', '') == request.auth.uid ||
+        get(/databases/$(database)/documents/adventures/$(adventureId)/bastionAnnonces/$(resource.data.postId)).data.uid == request.auth.uid);
+  }
+  // Lecture synchronisée entre les appareils : chacun ne peut écrire que son doc.
+  match /bastionWallReads/{uid} {
+    allow read: if inAdventure(adventureId) && uid == request.auth.uid;
+    allow write: if inAdventure(adventureId) && uid == request.auth.uid
+      && request.resource.data.get('uid', '') == request.auth.uid;
+  }
+  // Événements ciblés utilisés par la cloche. Ils ne contiennent qu'un extrait
+  // d'un post déjà visible par tous les membres de l'aventure.
+  match /bastionWallNotifications/{id} {
+    allow read: if inAdventure(adventureId);
+    allow create: if inAdventure(adventureId)
+      && request.resource.data.get('actorUid', '') == request.auth.uid
+      && request.resource.data.get('targetUid', '') != ''
+      && request.resource.data.get('text', '').size() <= 180;
+    allow delete: if inAdventure(adventureId)
+      && (isAdvAdmin(adventureId) || resource.data.get('targetUid', '') == request.auth.uid ||
+        resource.data.get('actorUid', '') == request.auth.uid ||
+        get(/databases/$(database)/documents/adventures/$(adventureId)/bastionAnnonces/$(resource.data.postId)).data.uid == request.auth.uid);
   }
   match /story_histories/{id}   { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /agenda_session/{id}    { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
