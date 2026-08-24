@@ -31,9 +31,9 @@ export function watchRecent(name, col, callback, options = {}) {
 }
 
 // Abonner à un document unique
-export function watchDoc(name, col, id, callback) {
+export function watchDoc(name, col, id, callback, options = {}) {
   _subs.get(name)?.();
-  const unsub = subscribeDoc(col, id, callback);
+  const unsub = subscribeDoc(col, id, callback, options);
   _subs.set(name, unsub);
 }
 

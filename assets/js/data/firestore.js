@@ -481,7 +481,7 @@ export function subscribeCollection(col, callback) {
 
 // Listener temps réel borné pour les flux chronologiques (mur, journal…).
 // Il évite de maintenir une collection sociale entière en mémoire au fil des ans.
-export function subscribeRecentCollection(col, callback, { field = 'ts', max = 80 } = {}) {
+export function subscribeRecentCollection(col, callback, { field = 'ts', max = 80, silent = false } = {}) {
   const path = _colPath(col);
   const safeField = String(field || 'ts');
   const safeMax = Math.max(1, Math.min(200, Math.trunc(Number(max) || 80)));
@@ -489,13 +489,14 @@ export function subscribeRecentCollection(col, callback, { field = 'ts', max = 8
     query(collection(db, path), orderBy(safeField, 'desc'), limit(safeMax)),
     snap => callback(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
     err => {
-      _handleFirestoreError(err, `subscribeRecentCollection(${path})`);
+      if (silent) console.debug(`[firestore] optional subscription unavailable: ${path}`, err?.code || err);
+      else _handleFirestoreError(err, `subscribeRecentCollection(${path})`);
       try { callback([]); } catch (e) { console.error('[firestore] callback error', e); }
     },
   );
 }
 
-export function subscribeDoc(col, id, callback) {
+export function subscribeDoc(col, id, callback, { silent = false } = {}) {
   const path = _colPath(col);
   const liveKey = `${path}:${id}`;
   let live = _liveDocs.get(liveKey);
@@ -517,7 +518,7 @@ export function subscribeDoc(col, id, callback) {
       callback(data);
     },
     err => {
-      _handleFirestoreError(err, `subscribeDoc(${path}/${id})`);
+      _handleFirestoreError(err, `subscribeDoc(${path}/${id})`, { silent });
       try { callback(null); } catch (e) { console.error('[firestore] callback error', e); }
     }
   );
@@ -527,7 +528,8 @@ export function subscribeDoc(col, id, callback) {
 // silent=true : lecture optionnelle → log seulement, pas de notif « Accès refusé »
 // (ex. contenu MJ chargé au mieux dont l'échec ne casse rien).
 function _handleFirestoreError(e, ctx, { silent = false } = {}) {
-  console.error(`[firestore] ${ctx}`, e);
+  if (silent) console.debug(`[firestore] optional operation unavailable: ${ctx}`, e?.code || e);
+  else console.error(`[firestore] ${ctx}`, e);
 
   const notify = window.showNotif;
   if (!notify || silent) return;
@@ -846,13 +848,13 @@ export const getDocDataSilent = (col, id) => _readDoc(col, id, { silent: true })
 // l'écriture localement via latency-compensation : les observers sont
 // notifiés instantanément. Pour le cache TTL (non-live), on patche
 // chirurgicalement pour éviter une invalidation totale.
-export async function saveDoc(col, id, data) {
+export async function saveDoc(col, id, data, { silent = false } = {}) {
   const path = _colPath(col);
   try {
     await setDoc(doc(db, path, id), data, { merge: true });
     _cachePatchSave(path, id, data);
   } catch (e) {
-    _handleFirestoreError(e, `saveDoc(${path}/${id})`);
+    _handleFirestoreError(e, `saveDoc(${path}/${id})`, { silent });
     throw e;
   }
 }
@@ -868,7 +870,7 @@ export async function replaceDoc(col, id, data) {
   }
 }
 
-export async function addToCol(col, data) {
+export async function addToCol(col, data, { silent = false } = {}) {
   const path = _colPath(col);
   try {
     const enriched = { ...data, createdAt: new Date().toISOString() };
@@ -876,7 +878,7 @@ export async function addToCol(col, data) {
     _cachePatchAdd(path, { id: ref.id, ...enriched });
     return ref.id;
   } catch (e) {
-    _handleFirestoreError(e, `addToCol(${path})`);
+    _handleFirestoreError(e, `addToCol(${path})`, { silent });
     throw e;
   }
 }

@@ -101,15 +101,23 @@ export function clearNotificationHistory() {
   _dispatchHistoryChanged();
 }
 
-function _recordNotification(msg, type) {
+export function recordNotification(msg, type = 'info', opts = {}) {
   const message = String(msg || '').trim();
   if (!message) return;
   const history = getNotificationHistory();
+  if (opts.id && history.some(item => item.id === opts.id)) return;
   const previous = history[0];
-  const now = Date.now();
+  const now = Number(opts.at) || Date.now();
   if (previous?.message === message && previous?.type === type && now - previous.at < 2000) return;
   const normalizedType = ['success', 'error', 'warning', 'info'].includes(type) ? type : 'info';
-  history.unshift({ id: `${now}-${Math.random().toString(36).slice(2, 7)}`, message, type: normalizedType, at: now });
+  history.unshift({
+    id: opts.id || `${now}-${Math.random().toString(36).slice(2, 7)}`,
+    message,
+    type: normalizedType,
+    at: now,
+    page: opts.page || '',
+    sub: opts.sub || '',
+  });
   lsJson.set(_historyKey(), history.slice(0, HISTORY_LIMIT));
   _dispatchHistoryChanged();
 }
@@ -123,7 +131,7 @@ export function showNotif(msg, type = 'success', opts = {}) {
   const el = document.getElementById('notif');
   if (!el) return;
   _bindToastQol(el);
-  if (opts.history !== false) _recordNotification(msg, type);
+  if (opts.history !== false) recordNotification(msg, type, opts.historyMeta || {});
   el.textContent = msg;
   _activeToastAction = typeof opts.action?.onClick === 'function' ? opts.action.onClick : null;
   if (opts.action?.label && typeof opts.action.onClick === 'function') {
