@@ -4,6 +4,7 @@ import {
   BASTION_WALL_TYPES,
   appendBastionWallComment,
   bastionWallCommentsForPost,
+  bastionWallFilterForTarget,
   bastionWallMentionedCharacters,
   bastionWallNotificationTargets,
   bastionWallReactionCounts,
@@ -21,6 +22,13 @@ test('les catégories du mur sont explicites et les anciennes annonces restent d
   assert.match(BASTION_WALL_TYPES.demande.description, /aide/i);
   assert.equal(normalizeBastionWallPost({ id: 'legacy' }).type, 'message');
   assert.equal(normalizeBastionWallPost({ id: 'q1', type: 'quete' }).type, 'quete');
+});
+
+test('le mur reste sur les publications actives quand aucun lien ne cible une archive', () => {
+  assert.equal(bastionWallFilterForTarget('all'), 'all');
+  assert.equal(bastionWallFilterForTarget('archive'), 'archive');
+  assert.equal(bastionWallFilterForTarget('archive', { status: 'active' }), 'all');
+  assert.equal(bastionWallFilterForTarget('all', { status: 'resolved' }), 'archive');
 });
 
 test('un personnage ne conserve qu une réaction par publication', () => {

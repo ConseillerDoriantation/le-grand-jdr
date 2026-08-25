@@ -105,7 +105,7 @@ import {
   _renderTraySoon, _renderPageTabs, _switchPage, _trayTab, _resetTraySearch,
   _vttTrayFilter, _vttTraySearch, _vttTrayClearSearch, _vttBstSearch, _vttBstClearSearch, _vttTrayTab,
   _vttToggleOn, _vttToggleOff, _vttToggleNpc, _vttReserveFilter, _vttPageSearch, _vttPageSearchClear, _vttPageFolderToggle,
-  _vttPageFolderFilter, _vttPageFavToggle,
+  _vttPageFolderFilter, _vttPageMenu, _vttPageFoldersMenu, _vttPageFolderRename,
 } from './vtt-tray.js';
 import {
   VTT_ACTION_RUNE, _parseDice, _maxDice, _maxEffectDisplay, _effectDisplay,
@@ -9703,13 +9703,15 @@ function _vttPgDimensions(pfx, changedAxis = '') {
   });
 }
 
-function _vttAddPage() {
+function _vttAddPage(encodedFolder = '') {
+  const folder = encodedFolder ? decodeURIComponent(encodedFolder) : '';
   openModal('🗺️ Nouvelle scène', `
-    ${_pgModalBody('vpf-', { fog:false })}
+    ${_pgModalBody('vpf-', { folder, fog:false })}
     <div class="vtt-pgm-actions">
       <button class="btn-secondary" data-action="close-modal">Annuler</button>
-      <button class="btn-primary" data-vtt-fn="_vttConfirmAddPage">Créer la scène</button>
-    </div>`, { subtitle:'Une grille prête pour tes cartes et tes combats', accent:'#7eb0ff' });
+      <button class="btn-secondary" data-vtt-fn="_vttConfirmAddPage" data-vtt-args="false">Créer seulement</button>
+      <button class="btn-primary" data-vtt-fn="_vttConfirmAddPage" data-vtt-args="true">Créer et ouvrir</button>
+    </div>`, { subtitle:folder ? `Nouvelle scène dans « ${folder} »` : 'Une grille prête pour tes cartes et tes combats', accent:'#7eb0ff' });
   _vttPgInit('vpf-');
 }
 // Datalist des dossiers de pages existants (suggestions de saisie)
@@ -9719,7 +9721,7 @@ function _pageFolderDatalist(id) {
   return `<datalist id="${id}">${folders.map(f=>`<option value="${_esc(f)}">`).join('')}</datalist>`;
 }
 
-async function _vttConfirmAddPage() {
+async function _vttConfirmAddPage(openAfter = true) {
   const name=(document.getElementById('vpf-name')?.value||'').trim();
   const folder=(document.getElementById('vpf-folder')?.value||'').trim();
   const cols=Math.max(8,Math.min(200,parseInt(document.getElementById('vpf-cols')?.value)||30));
@@ -9728,9 +9730,22 @@ async function _vttConfirmAddPage() {
   const fogEnabled = _vttAdvancedPremium()
     ? (document.getElementById('vpf-fog')?.checked ?? false)
     : false;
-  closeModalDirect();
-  await addDoc(_pgsCol(),{name,folder,cols,rows,fogEnabled,backgroundImages:[],order:Object.keys(VS.pages).length,createdAt:serverTimestamp()})
-    .catch(()=>showNotif('Erreur création de la scène','error'));
+  const order = Object.keys(VS.pages).length;
+  try {
+    const pageRef = await addDoc(_pgsCol(),{
+      name,folder,cols,rows,fogEnabled,backgroundImages:[],order,createdAt:serverTimestamp(),
+    });
+    VS.pages[pageRef.id] = {
+      id:pageRef.id,name,folder,cols,rows,fogEnabled,backgroundImages:[],order,createdAt:new Date(),
+    };
+    closeModalDirect();
+    if (openAfter !== 'false' && openAfter !== false) await _switchPage(pageRef.id);
+    else _renderPageTabs();
+    showNotif(openAfter !== 'false' && openAfter !== false ? 'Scène créée et ouverte.' : 'Scène créée.', 'success');
+  } catch (error) {
+    console.error('[vtt] création scène', error);
+    showNotif('Erreur création de la scène','error');
+  }
 }
 
 function _vttEditPage(id) {
@@ -9773,6 +9788,41 @@ async function _vttConfirmEditPage(id) {
 async function _vttDeletePage(id) {
   if (!await confirmModal('Supprimer cette page ?',{title:'Supprimer ?',danger:true})) return;
   await deleteDoc(_pgRef(id)).catch(()=>{});
+}
+
+async function _vttDuplicatePage(id) {
+  if (!STATE.isAdmin) return;
+  const source = VS.pages[id];
+  if (!source) return;
+  const existingNames = new Set(Object.values(VS.pages).map(page => String(page.name || '').trim().toLocaleLowerCase('fr')));
+  const baseName = `${source.name || 'Scène'} — copie`;
+  let name = baseName;
+  let suffix = 2;
+  while (existingNames.has(name.toLocaleLowerCase('fr'))) name = `${baseName} ${suffix++}`;
+  const { id:_id, createdAt:_createdAt, updatedAt:_updatedAt, order:_order, ...scene } = source;
+  const order = Object.keys(VS.pages).length;
+  try {
+    const pageRef = await addDoc(_pgsCol(), {
+      ...scene,
+      name,
+      folder:(source.folder || '').trim(),
+      order,
+      createdAt:serverTimestamp(),
+    });
+    VS.pages[pageRef.id] = {
+      ...scene,
+      id:pageRef.id,
+      name,
+      folder:(source.folder || '').trim(),
+      order,
+      createdAt:new Date(),
+    };
+    await _switchPage(pageRef.id);
+    showNotif('Scène dupliquée sans ses tokens.', 'success');
+  } catch (error) {
+    console.error('[vtt] duplication scène', error);
+    showNotif('Impossible de dupliquer cette scène.', 'error');
+  }
 }
 
 // Envoyer tous les joueurs vers une page spécifique (depuis la liste)
@@ -11290,7 +11340,6 @@ function _buildHtml() {
       </div>
       <div class="vtt-tray-views">
         <div id="vtt-tray-view-scenes" class="vtt-tray-view${_trayTab==='scenes'?' active':''}" data-view="scenes" role="tabpanel" aria-labelledby="vtt-tray-tab-scenes" ${_trayTab === 'scenes' ? '' : 'hidden'}>
-          <div class="vtt-tray-section-hd"><span>Pilotage des scènes</span></div>
           <div id="vtt-tray-pages">${loadingHtml('Chargement…', { compact: true })}</div>
           <div class="vtt-tray-section-hd vtt-scene-tok-hd"><span>🗺 Sur la scène</span></div>
           <div id="vtt-scene-tokens"></div>
@@ -11740,6 +11789,7 @@ export const VTT_ACTIONS = {
   _vttDrawShape,
   _vttDrawWidth,
   _vttDuplicateOnPage,
+  _vttDuplicatePage,
   _vttDuplicateToken,
   _vttEditPage,
   _vttEditToken,
@@ -11834,7 +11884,9 @@ export const VTT_ACTIONS = {
   _vttPickEmote,
   _vttPageFolderToggle,
   _vttPageFolderFilter,
-  _vttPageFavToggle,
+  _vttPageFoldersMenu,
+  _vttPageFolderRename,
+  _vttPageMenu,
   _vttPageSearch,
   _vttPageSearchClear,
   _vttPgDimensions,

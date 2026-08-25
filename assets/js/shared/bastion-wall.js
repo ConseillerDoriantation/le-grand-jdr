@@ -61,6 +61,13 @@ export function sortBastionWallPosts(posts = []) {
   });
 }
 
+// Un lien direct peut ouvrir temporairement l'historique, mais l'absence de
+// cible ne doit jamais être confondue avec une publication terminée.
+export function bastionWallFilterForTarget(currentFilter = 'all', targetPost = null) {
+  if (!targetPost) return currentFilter || 'all';
+  return targetPost.status === 'active' ? 'all' : 'archive';
+}
+
 export function normalizeBastionWallComment(raw = {}) {
   return {
     ...raw,
