@@ -2057,23 +2057,57 @@ html:not([data-theme="light"]) .vtt-root {
   font-weight: 700;
 }
 
-.vtt-page-command-add {
-  width: 26px;
-  height: 26px;
-  display: inline-grid;
-  place-items: center;
+.vtt-page-command-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
   flex-shrink: 0;
+}
+
+.vtt-page-command-add {
+  width: auto;
+  min-width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .25rem;
+  flex-shrink: 0;
+  padding: 0 .5rem;
   border: 1px solid color-mix(in srgb, var(--gold) 32%, var(--border));
   border-radius: 10px;
   background: color-mix(in srgb, var(--gold) 10%, transparent);
   color: var(--gold);
   cursor: pointer;
-  font-size: 1rem;
+  font-size: .62rem;
   font-weight: 900;
 }
 
 .vtt-page-command-add:hover {
   background: color-mix(in srgb, var(--gold) 18%, transparent);
+}
+
+.vtt-page-command-menu {
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 26px;
+  padding: 0;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 9px;
+  background: rgba(255,255,255,.035);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: .58rem;
+  letter-spacing: -.08em;
+}
+
+.vtt-page-command-menu:hover,
+.vtt-page-command-menu:focus-visible {
+  color: var(--text);
+  background: rgba(255,255,255,.08);
+  outline: none;
 }
 
 .vtt-page-command .vtt-page-search-row {
@@ -2130,34 +2164,98 @@ html:not([data-theme="light"]) .vtt-root {
   color: var(--gold);
 }
 
-.vtt-page-quick {
-  margin: 0 .45rem .38rem;
-  padding: .34rem;
-  border: 1px solid rgba(126,176,255,.13);
-  border-radius: 14px;
-  background: rgba(126,176,255,.035);
+.vtt-page-live-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: .28rem;
+  margin-top: .38rem;
+  padding-top: .38rem;
+  border-top: 1px solid rgba(255,255,255,.065);
 }
 
-.vtt-page-quick-title {
-  margin: 0 .06rem .26rem;
+.vtt-page-live-card {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 13px minmax(0, 1fr);
+  align-items: center;
+  gap: .28rem;
+  padding: .3rem .36rem;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 9px;
+  background: rgba(0,0,0,.16);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.vtt-page-live-card > span:last-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .04rem;
+}
+
+.vtt-page-live-card small,
+.vtt-page-live-card strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vtt-page-live-card small {
   color: var(--text-muted);
-  font-size: .58rem;
-  font-weight: 900;
-  letter-spacing: .1em;
+  font-size: .48rem;
+  font-weight: 850;
+  letter-spacing: .04em;
   text-transform: uppercase;
 }
 
+.vtt-page-live-card strong {
+  color: inherit;
+  font-size: .59rem;
+  line-height: 1.2;
+}
+
+.vtt-page-live-icon {
+  font-size: .55rem;
+  text-align: center;
+}
+
+.vtt-page-live-card.is-mj {
+  border-color: color-mix(in srgb, var(--gold) 24%, var(--border));
+  color: var(--gold);
+}
+
+.vtt-page-live-card.is-players {
+  border-color: color-mix(in srgb, var(--teal) 24%, var(--border));
+  color: var(--teal);
+}
+
+.vtt-page-live-card:not(:disabled):hover {
+  background: rgba(255,255,255,.065);
+}
+
+.vtt-page-live-card:disabled {
+  opacity: .52;
+  cursor: default;
+}
+
+.vtt-page-live-summary.is-synced .vtt-page-live-card {
+  background: color-mix(in srgb, var(--teal) 5%, rgba(0,0,0,.16));
+}
+
 .vtt-page-list {
-  max-height: 45vh;
+  max-height: none;
+  overflow: visible;
 }
 
 .vtt-page-item {
   display: grid;
-  grid-template-columns: 10px 52px minmax(0, 1fr) auto;
+  grid-template-columns: 8px 46px minmax(0, 1fr) auto;
   align-items: center;
   gap: .34rem;
-  min-height: 48px;
-  padding: .25rem .32rem;
+  min-height: 46px;
+  padding: .24rem .3rem;
   margin: 0 .35rem .18rem;
   border: 1px solid rgba(255,255,255,.07);
   border-left: 3px solid transparent;
@@ -2191,13 +2289,6 @@ html:not([data-theme="light"]) .vtt-root {
   box-shadow: inset 3px 0 0 var(--gold);
 }
 
-.vtt-page-item.is-compact {
-  grid-template-columns: 40px minmax(0, 1fr);
-  min-height: 38px;
-  margin: 0 0 .22rem;
-  padding: .22rem;
-}
-
 .vtt-page-item-grip {
   align-self: center;
   opacity: .35;
@@ -2210,8 +2301,8 @@ html:not([data-theme="light"]) .vtt-root {
 }
 
 .vtt-page-thumb {
-  width: 52px;
-  height: 36px;
+  width: 46px;
+  height: 32px;
   border: 1px solid rgba(255,255,255,.12);
   border-radius: 8px;
   overflow: hidden;
@@ -2266,26 +2357,6 @@ html:not([data-theme="light"]) .vtt-root {
   color: var(--text);
 }
 
-.vtt-page-fav-btn {
-  width: 22px;
-  height: 22px;
-  display: inline-grid;
-  place-items: center;
-  flex-shrink: 0;
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: 8px;
-  background: rgba(255,255,255,.035);
-  color: var(--text-dim);
-  cursor: pointer;
-  font-size: .66rem;
-}
-
-.vtt-page-fav-btn.active {
-  border-color: color-mix(in srgb, var(--gold) 34%, var(--border));
-  background: color-mix(in srgb, var(--gold) 12%, transparent);
-  color: var(--gold);
-}
-
 .vtt-page-item-meta {
   display: flex;
   align-items: center;
@@ -2298,16 +2369,21 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-page-item-meta span {
   min-width: 0;
   max-width: 100%;
-  padding: .04rem .26rem;
-  border-radius: 999px;
-  background: rgba(255,255,255,.045);
+  padding: 0;
+  background: none;
   color: var(--text-muted);
   font-size: .53rem;
-  font-weight: 750;
+  font-weight: 700;
   white-space: nowrap;
 }
 
-.vtt-page-item-meta span:first-child {
+.vtt-page-item-meta span + span::before {
+  content: '·';
+  margin-right: .18rem;
+  color: var(--text-dim);
+}
+
+.vtt-page-item-meta .is-folder {
   max-width: 72px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2317,19 +2393,13 @@ html:not([data-theme="light"]) .vtt-root {
   color: var(--text-soft);
 }
 
-.vtt-page-item-meta .muted {
-  color: var(--text-dim);
-  border: 1px dashed rgba(255,255,255,.08);
-  background: transparent;
-}
-
 .vtt-page-item-side {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: auto 24px;
   align-items: flex-end;
-  justify-content: center;
+  justify-content: end;
   gap: .2rem;
-  min-width: 54px;
+  min-width: 28px;
 }
 
 .vtt-page-item-status {
@@ -2370,41 +2440,25 @@ html:not([data-theme="light"]) .vtt-root {
   color: #a78bfa;
 }
 
-.vtt-page-item-acts {
-  display: flex;
-  gap: .16rem;
-  flex-shrink: 0;
-}
-
-.vtt-page-item:hover .vtt-page-item-acts {
-  display: flex;
-}
-
-.vtt-page-item-btn {
-  width: 22px;
-  height: 22px;
+.vtt-page-item-menu {
+  width: 24px;
+  height: 24px;
   display: inline-grid;
   place-items: center;
   border: 1px solid rgba(255,255,255,.08);
   border-radius: 8px;
   background: rgba(255,255,255,.035);
   color: var(--text-muted);
-  font-size: .65rem;
+  cursor: pointer;
+  font-size: .58rem;
+  letter-spacing: -.08em;
 }
 
-.vtt-page-item-btn.primary {
-  border-color: color-mix(in srgb, var(--teal) 28%, var(--border));
-  background: color-mix(in srgb, var(--teal) 10%, transparent);
-  color: var(--teal);
-}
-
-.vtt-page-item-btn:hover {
+.vtt-page-item-menu:hover,
+.vtt-page-item-menu:focus-visible {
   color: var(--text);
   background: rgba(255,255,255,.08);
-}
-
-.vtt-page-item-del:hover {
-  color: var(--crimson);
+  outline: none;
 }
 
 .vtt-page-folder-hd {
@@ -2419,31 +2473,33 @@ html:not([data-theme="light"]) .vtt-root {
   font-size: .62rem;
 }
 
-.vtt-page-folder-mini {
-  color: var(--text-dim);
-  font-size: .56rem;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
 .vtt-page-folder-count {
-  min-width: 22px;
-  text-align: center;
+  min-width: max-content;
+  padding: 0;
+  background: none;
+  font-size: .54rem;
+  text-align: right;
 }
 
-.vtt-page-item.is-compact .vtt-page-item-grip,
-.vtt-page-item.is-compact .vtt-page-item-side {
-  display: none;
-}
-
-.vtt-page-item.is-compact .vtt-page-thumb {
-  width: 40px;
-  height: 28px;
+.vtt-page-folder-add {
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--gold) 24%, var(--border));
   border-radius: 7px;
+  background: color-mix(in srgb, var(--gold) 7%, transparent);
+  color: var(--gold);
+  cursor: pointer;
+  font-size: .78rem;
+  opacity: .7;
 }
 
-.vtt-page-item.is-compact .vtt-page-item-meta {
-  display: none;
+.vtt-page-folder-hd:hover .vtt-page-folder-add,
+.vtt-page-folder-add:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, var(--gold) 14%, transparent);
 }
 
 /* ── Modale scène (création / édition) ─────────────────────────────── */

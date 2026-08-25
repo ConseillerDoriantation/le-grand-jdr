@@ -15,11 +15,12 @@ import Sortable from '../../vendor/sortable.esm.js';
 import { db, setDoc, writeBatch } from '../../config/firebase.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _esc, _searchIncludes, normalizeImageUrl } from '../../shared/html.js';
+import { promptModal } from '../../shared/modal.js';
 import { githubPagesUrl } from '../../shared/github-folder.js';
 import { _sesRef, _pgRef } from './vtt-refs.js';
 import { TYPE_COLOR, hpColor } from './vtt-constants.js';
 import { _live } from './vtt-effective.js';
-import { _tokenEntityKey, _vttPanelError } from './vtt-utils.js';
+import { _showCtxMenu, _tokenEntityKey, _vttPanelError } from './vtt-utils.js';
 import { _drawGrid, _renderMapImages } from './vtt-render.js';
 import { fogRenderWalls, fogUpdateSoon } from './vtt-fog.js';
 import { _renderCombatTracker } from './vtt-combat-tracker.js';
@@ -35,14 +36,6 @@ let _bstSearch        = '';    // filtre texte appliqué au bestiaire
 export let _trayTab          = (() => { try { return localStorage.getItem('vtt-tray-tab') || 'scenes'; } catch { return 'scenes'; } })(); // onglet actif du panneau MJ
 let _pageSearch       = '';    // filtre texte appliqué à la liste des pages
 let _pageFolderFilter = (() => { try { return localStorage.getItem('vtt-page-folder-filter') || 'all'; } catch { return 'all'; } })();
-const _pageFavs = (() => {
-  try { return new Set(JSON.parse(localStorage.getItem('vtt-page-favs') || '[]')); } catch { return new Set(); }
-})();
-const _loadPageRecents = () => {
-  try { return JSON.parse(localStorage.getItem('vtt-page-recents') || '[]').filter(Boolean); } catch { return []; }
-};
-const _savePageFavs = () => { try { localStorage.setItem('vtt-page-favs', JSON.stringify([..._pageFavs])); } catch {} };
-const _savePageRecents = ids => { try { localStorage.setItem('vtt-page-recents', JSON.stringify(ids.slice(0, 8))); } catch {} };
 const _savePageFolderFilter = () => { try { localStorage.setItem('vtt-page-folder-filter', _pageFolderFilter); } catch {} };
 const _pageFoldClosed = (() => { // dossiers de pages repliés (persistés)
   try { return new Set(JSON.parse(localStorage.getItem('vtt-page-folds') || '[]')); } catch { return new Set(); }
@@ -373,8 +366,6 @@ function _pageFolderLabel(folder) {
 }
 
 function _pageSmartSort(a, b) {
-  const aFav = _pageFavs.has(a.id), bFav = _pageFavs.has(b.id);
-  if (aFav !== bFav) return aFav ? -1 : 1;
   return (a.order ?? 0) - (b.order ?? 0);
 }
 
@@ -389,10 +380,9 @@ function _pageThumbUrl(p) {
   return normalizeImageUrl(String(img?.url || raw).trim());
 }
 
-function _pageCard(p, broadcastId, { compact = false } = {}) {
+function _pageCard(p, broadcastId, { showFolder = false } = {}) {
   const isPlayers = p.id === broadcastId;
   const isMj = p.id === VS.activePage?.id;
-  const fav = _pageFavs.has(p.id);
   const stats = _pageTokens(p.id);
   const bgCount = Array.isArray(p.backgroundImages) ? p.backgroundImages.length : 0;
   const thumb = _pageThumbUrl(p);
@@ -400,9 +390,12 @@ function _pageCard(p, broadcastId, { compact = false } = {}) {
   const status = [
     isMj ? '<span class="vtt-page-status is-mj" title="Votre vue">MJ</span>' : '',
     isPlayers ? '<span class="vtt-page-status is-live" title="Scène envoyée aux joueurs">Live</span>' : '',
-    p.fogEnabled ? '<span class="vtt-page-status is-fog" title="Éclairage dynamique actif">Fog</span>' : '',
+    p.fogEnabled ? '<span class="vtt-page-status is-fog" title="Éclairage dynamique actif">◐</span>' : '',
   ].join('');
-  return `<div class="vtt-page-item ${cls} ${compact ? 'is-compact' : ''}" data-page-id="${p.id}" data-vtt-fn="_vttSwitchPage" data-vtt-args="${p.id}" title="${_esc(p.name)} · ${p.cols||24}×${p.rows||18} cases">
+  const tokenSummary = stats.total
+    ? `<span title="${stats.players} joueur(s), ${stats.npcs} PNJ, ${stats.enemies} ennemi(s)">♟ ${stats.total}</span>`
+    : '';
+  return `<div class="vtt-page-item ${cls}" data-page-id="${p.id}" data-vtt-fn="_vttSwitchPage" data-vtt-args="${p.id}" title="Ouvrir ${_esc(p.name)}">
     <span class="vtt-page-item-grip" title="Glisser pour déplacer">⠿</span>
     <div class="vtt-page-thumb ${thumb ? '' : 'is-empty'}">
       ${thumb ? `<img src="${_esc(thumb)}" alt="" loading="lazy">` : '<span>∅</span>'}
@@ -410,27 +403,61 @@ function _pageCard(p, broadcastId, { compact = false } = {}) {
     <div class="vtt-page-item-main">
       <div class="vtt-page-item-top">
         <span class="vtt-page-item-name">${_esc(p.name)}</span>
-        <button class="vtt-page-fav-btn ${fav ? 'active' : ''}" data-vtt-fn="_vttPageFavToggle" data-vtt-args="${p.id}" title="${fav ? 'Retirer des favoris' : 'Ajouter aux favoris'}">★</button>
       </div>
       <div class="vtt-page-item-meta">
-        <span>${_esc(_pageFolderLabel(p.folder))}</span>
-        <span>${p.cols||24}×${p.rows||18}</span>
-        ${bgCount ? `<span>${bgCount} img</span>` : ''}
-        ${stats.players ? `<span title="Joueurs sur cette scène">🧑 ${stats.players}</span>` : ''}
-        ${stats.npcs ? `<span title="PNJ sur cette scène">👤 ${stats.npcs}</span>` : ''}
-        ${stats.enemies ? `<span title="Ennemis sur cette scène">👹 ${stats.enemies}</span>` : ''}
-        ${!stats.total ? '<span class="muted">vide</span>' : ''}
+        ${showFolder ? `<span class="is-folder">${_esc(_pageFolderLabel(p.folder))}</span>` : ''}
+        <span>${p.cols||24} × ${p.rows||18}</span>
+        <span>${bgCount ? `▧ ${bgCount}` : 'Sans carte'}</span>
+        ${tokenSummary}
       </div>
     </div>
     <div class="vtt-page-item-side">
       <div class="vtt-page-item-status">${status}</div>
-      <div class="vtt-page-item-acts">
-        <button class="vtt-page-item-btn primary" data-vtt-fn="_vttSendToPage" data-vtt-args="${p.id}" title="Envoyer tous les joueurs ici">📡</button>
-        <button class="vtt-page-item-btn" data-vtt-fn="_vttEditPage" data-vtt-args="${p.id}" title="Renommer / dossier / taille">✏</button>
-        <button class="vtt-page-item-btn vtt-page-item-del" data-vtt-fn="_vttDeletePage" data-vtt-args="${p.id}" title="Supprimer">×</button>
-      </div>
+      <button class="vtt-page-item-menu" data-vtt-fn="_vttPageMenu" data-vtt-args="$event|${p.id}" title="Actions de la scène" aria-label="Actions pour ${_esc(p.name)}" aria-haspopup="menu">•••</button>
     </div>
   </div>`;
+}
+
+function _pageMenuItems(pageId) {
+  const page = VS.pages[pageId];
+  if (!page) return [];
+  return [
+    { label:'📡 Envoyer aux joueurs', action:'_vttSendToPage', args:pageId },
+    { label:'✏️ Modifier la scène', action:'_vttEditPage', args:pageId },
+    { label:'⧉ Dupliquer sans les tokens', action:'_vttDuplicatePage', args:pageId },
+    '---',
+    { label:'🗑️ Supprimer la scène', action:'_vttDeletePage', args:pageId },
+  ];
+}
+
+export function _vttPageMenu(e, pageId) {
+  e?.preventDefault?.();
+  e?.stopPropagation?.();
+  const anchor = e?.target?.closest?.('.vtt-page-item-menu, .vtt-page-item') || e?.currentTarget;
+  const rect = anchor?.getBoundingClientRect?.();
+  _showCtxMenu(e?.clientX || rect?.left || 0, e?.clientY || rect?.bottom || 0, _pageMenuItems(pageId));
+}
+
+function _bindPageContextMenus(el) {
+  el.querySelectorAll('.vtt-page-item').forEach(card => {
+    card.oncontextmenu = e => _vttPageMenu(e, card.dataset.pageId);
+  });
+  el.querySelectorAll('[data-page-folder-context]').forEach(header => {
+    header.oncontextmenu = e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const encoded = header.dataset.pageFolderContext || '';
+      const folder = encoded ? decodeURIComponent(encoded) : '';
+      const closed = _pageFoldClosed.has(folder);
+      _showCtxMenu(e.clientX, e.clientY, [
+        { label:`Dossier · ${_esc(_pageFolderLabel(folder))}` },
+        { label:'＋ Nouvelle scène ici', action:'_vttAddPage', args:encoded },
+        { label:folder ? '✏️ Renommer le dossier' : '📁 Ranger dans un dossier', action:'_vttPageFolderRename', args:encoded },
+        '---',
+        { label:closed ? '▾ Déplier le dossier' : '▸ Replier le dossier', action:'_vttPageFolderToggle', args:encoded },
+      ]);
+    };
+  });
 }
 
 // ─ Navigateur de scènes dans le tray (MJ) ──────────────────────────
@@ -445,7 +472,7 @@ export function _renderPageList() {
   const _listTop = el.querySelector('.vtt-page-list')?.scrollTop ?? 0;
 
   if (!all.length) {
-    el.innerHTML=`<div class="vtt-tray-empty">Aucune page<br><small>Clique ＋ pour créer</small></div>`;
+    el.innerHTML=`<div class="vtt-tray-empty">Aucune scène<br><small>Crée ta première scène avec ＋ Nouvelle</small></div>`;
     return;
   }
 
@@ -471,25 +498,26 @@ export function _renderPageList() {
   };
 
   const filtered = all.filter(matches);
-  const current = VS.activePage?.id ? VS.pages[VS.activePage.id] : null;
-  const broadcast = broadcastId ? VS.pages[broadcastId] : null;
-  const recentIds = _loadPageRecents();
-  const recents = recentIds.map(id => VS.pages[id]).filter(Boolean).filter(p => p.id !== current?.id && p.id !== broadcast?.id).slice(0, 3);
-  const favs = [..._pageFavs].map(id => VS.pages[id]).filter(Boolean).filter(p => p.id !== current?.id && p.id !== broadcast?.id).sort(_pageSmartSort).slice(0, 3);
-  const quick = [current, broadcast, ...favs, ...recents].filter(Boolean);
-  const seenQuick = new Set();
-  const quickUnique = quick.filter(p => {
-    if (seenQuick.has(p.id)) return false;
-    seenQuick.add(p.id);
-    return true;
-  });
-
+  const mjPage = VS.activePage;
+  const playersPage = VS.pages[broadcastId];
+  const sameLivePage = !!(mjPage?.id && mjPage.id === broadcastId);
+  const liveSummary = `
+    <div class="vtt-page-live-summary${sameLivePage ? ' is-synced' : ''}">
+      <button type="button" class="vtt-page-live-card is-mj" ${mjPage ? `data-vtt-fn="_vttSwitchPage" data-vtt-args="${mjPage.id}" title="Ouvrir votre scène"` : 'disabled'}>
+        <span class="vtt-page-live-icon">◆</span>
+        <span><small>Votre scène</small><strong>${_esc(mjPage?.name || 'Aucune scène')}</strong></span>
+      </button>
+      <button type="button" class="vtt-page-live-card is-players" ${playersPage ? `data-vtt-fn="_vttSwitchPage" data-vtt-args="${playersPage.id}" title="Ouvrir la scène des joueurs"` : 'disabled'}>
+        <span class="vtt-page-live-icon">●</span>
+        <span><small>Joueurs</small><strong>${_esc(playersPage?.name || 'Aucune scène envoyée')}</strong></span>
+      </button>
+    </div>`;
   const folderChips = [
     `<button class="vtt-page-folder-chip ${_pageFolderFilter === 'all' ? 'active' : ''}" data-vtt-fn="_vttPageFolderFilter" data-vtt-args="all">Toutes <b>${all.length}</b></button>`,
     ...orderedFolders.map(f => {
       const count = all.filter(p => (p.folder||'').trim() === f).length;
       const arg = encodeURIComponent(f);
-      return `<button class="vtt-page-folder-chip ${_pageFolderFilter === f ? 'active' : ''}" data-vtt-fn="_vttPageFolderFilter" data-vtt-args="${arg}" title="${_esc(_pageFolderLabel(f))}">${_esc(_pageFolderLabel(f))} <b>${count}</b></button>`;
+      return `<button class="vtt-page-folder-chip ${_pageFolderFilter === f ? 'active' : ''}" data-vtt-fn="_vttPageFolderFilter" data-vtt-args="${arg}" data-page-folder-context="${arg}" title="Filtrer · clic droit pour ajouter une scène">${_esc(_pageFolderLabel(f))} <b>${count}</b></button>`;
     })
   ].join('');
 
@@ -509,26 +537,21 @@ export function _renderPageList() {
   const flatFiltered = q || _pageFolderFilter !== 'all';
   let listHtml;
   if (!groups.size) {
-    listHtml = `<div class="vtt-tray-empty">Aucune page ne correspond</div>`;
+    listHtml = `<div class="vtt-tray-empty">Aucune scène ne correspond</div>`;
   } else if (flatFiltered || onlyUngrouped) {
-    listHtml = `<div class="vtt-page-folder-body" data-folder="${_pageFolderFilter === 'all' ? '' : encodeURIComponent(_pageFolderFilter)}">${filtered.sort(_pageSmartSort).map(p => _pageCard(p, broadcastId)).join('')}</div>`;
+    listHtml = `<div class="vtt-page-folder-body" data-folder="${_pageFolderFilter === 'all' ? '' : encodeURIComponent(_pageFolderFilter)}">${filtered.sort(_pageSmartSort).map(p => _pageCard(p, broadcastId, { showFolder:q && _pageFolderFilter === 'all' })).join('')}</div>`;
   } else {
     listHtml = folders.map(f => {
       const rows = groups.get(f).sort((a,b)=>(a.order??0)-(b.order??0));
       const label = _pageFolderLabel(f);
       const closed = !q && _pageFoldClosed.has(f);
-      const stats = rows.reduce((acc, p) => {
-        const s = _pageTokens(p.id);
-        acc.tokens += s.total; acc.players += s.players; acc.enemies += s.enemies;
-        return acc;
-      }, { tokens:0, players:0, enemies:0 });
       return `<div class="vtt-page-folder${closed?' closed':''}" data-folder="${encodeURIComponent(f)}">
-        <div class="vtt-page-folder-hd" data-vtt-fn="_vttPageFolderToggle" data-vtt-args="${encodeURIComponent(f)}">
+        <div class="vtt-page-folder-hd" data-vtt-fn="_vttPageFolderToggle" data-vtt-args="${encodeURIComponent(f)}" data-page-folder-context="${encodeURIComponent(f)}" title="Ouvrir ou fermer · clic droit pour les actions">
           <span class="vtt-page-folder-grip" title="Glisser pour réordonner">⠿</span>
           <span class="vtt-page-folder-chev">▸</span>
           <span class="vtt-page-folder-name">${_esc(label)}</span>
-          <span class="vtt-page-folder-mini">${stats.tokens ? `${stats.tokens} tok.` : 'vide'}</span>
-          <span class="vtt-page-folder-count">${rows.length}</span>
+          <span class="vtt-page-folder-count">${rows.length} scène${rows.length > 1 ? 's' : ''}</span>
+          <button class="vtt-page-folder-add" data-vtt-fn="_vttAddPage" data-vtt-args="${encodeURIComponent(f)}" title="Ajouter une scène dans ${_esc(label)}" aria-label="Ajouter une scène dans ${_esc(label)}">＋</button>
         </div>
         <div class="vtt-page-folder-body" data-folder="${encodeURIComponent(f)}">${rows.map(p => _pageCard(p, broadcastId)).join('')}</div>
       </div>`;
@@ -540,9 +563,12 @@ export function _renderPageList() {
       <div class="vtt-page-command-top">
         <div>
           <strong>Scènes</strong>
-          <span>${filtered.length}/${all.length} pages</span>
+          <span>${filtered.length === all.length ? `${all.length} scène${all.length > 1 ? 's' : ''}` : `${filtered.length} affichée${filtered.length > 1 ? 's' : ''} sur ${all.length}`}</span>
         </div>
-        <button class="vtt-page-command-add" data-vtt-fn="_vttAddPage" title="Nouvelle scène" aria-label="Créer une nouvelle scène">＋</button>
+        <div class="vtt-page-command-actions">
+          <button class="vtt-page-command-add" data-vtt-fn="_vttAddPage" ${_pageFolderFilter === 'all' ? '' : `data-vtt-args="${encodeURIComponent(_pageFolderFilter)}"`} title="Nouvelle scène${_pageFolderFilter === 'all' ? '' : ` dans ${_esc(_pageFolderLabel(_pageFolderFilter))}`}" aria-label="Créer une nouvelle scène">＋ Nouvelle</button>
+          <button class="vtt-page-command-menu" data-vtt-fn="_vttPageFoldersMenu" data-vtt-args="$event" title="Gérer les dossiers" aria-label="Gérer les dossiers" aria-haspopup="menu">•••</button>
+        </div>
       </div>
       <div class="vtt-page-search-row">
         <input type="text" id="vtt-page-search" class="vtt-page-search" placeholder="Rechercher nom, dossier…"
@@ -551,11 +577,8 @@ export function _renderPageList() {
         ${_pageSearch?`<button class="vtt-page-search-x" data-vtt-fn="_vttPageSearchClear" title="Effacer">✕</button>`:''}
       </div>
       <div class="vtt-page-folder-chips">${folderChips}</div>
+      ${liveSummary}
     </div>
-    ${quickUnique.length ? `<div class="vtt-page-quick">
-      <div class="vtt-page-quick-title">Accès rapide</div>
-      ${quickUnique.map(p => _pageCard(p, broadcastId, { compact:true })).join('')}
-    </div>` : ''}
     <div class="vtt-page-list">${listHtml}</div>`;
 
   if (searchFocused) {
@@ -564,6 +587,7 @@ export function _renderPageList() {
   }
   const _newList = el.querySelector('.vtt-page-list');
   if (_newList) _newList.scrollTop = _listTop;
+  _bindPageContextMenus(el);
   _initPageSortables(el, { pages: !q && _pageFolderFilter === 'all', folders: !q && _pageFolderFilter === 'all' && !onlyUngrouped });
 }
 
@@ -627,13 +651,66 @@ export function _vttPageFolderFilter(f) {
   _savePageFolderFilter();
   _renderPageList();
 }
-export function _vttPageFavToggle(pageId) {
-  if (!pageId) return;
-  if (_pageFavs.has(pageId)) _pageFavs.delete(pageId);
-  else _pageFavs.add(pageId);
-  _savePageFavs();
-  _renderPageList();
+
+export function _vttPageFoldersMenu(e) {
+  e?.preventDefault?.();
+  e?.stopPropagation?.();
+  const anchor = e?.target?.closest?.('.vtt-page-command-menu') || e?.currentTarget;
+  const rect = anchor?.getBoundingClientRect?.();
+  _showCtxMenu(e?.clientX || rect?.left || 0, e?.clientY || rect?.bottom || 0, [
+    { label:'Gestion des dossiers' },
+    { label:'▾ Tout déplier', fn:() => {
+      _pageFoldClosed.clear();
+      _savePageFolds();
+      _renderPageList();
+    } },
+    { label:'▸ Tout replier', fn:() => {
+      Object.values(VS.pages).forEach(page => _pageFoldClosed.add((page.folder || '').trim()));
+      _savePageFolds();
+      _renderPageList();
+    } },
+  ]);
 }
+
+export async function _vttPageFolderRename(encodedFolder = '') {
+  const folder = encodedFolder ? decodeURIComponent(encodedFolder) : '';
+  const pages = Object.values(VS.pages).filter(page => (page.folder || '').trim() === folder);
+  if (!pages.length) return;
+  const nextValue = await promptModal(
+    folder
+      ? `Nouveau nom pour « ${_esc(folder)} ». Si ce dossier existe déjà, les scènes seront regroupées.`
+      : 'Choisis le dossier dans lequel ranger ces scènes.',
+    {
+      title:folder ? '📁 Renommer le dossier' : '📁 Ranger les scènes',
+      default:folder,
+      placeholder:'Nom du dossier',
+      confirmLabel:folder ? 'Renommer' : 'Ranger',
+      required:true,
+    },
+  );
+  if (nextValue == null) return;
+  const next = String(nextValue).trim();
+  if (!next || next === folder) return;
+  const batch = writeBatch(db);
+  pages.forEach(page => batch.update(_pgRef(page.id), { folder:next }));
+  const order = [...new Set((VS.session.pageFolderOrder || [])
+    .map(item => item === folder ? next : item)
+    .filter(Boolean))];
+  if (!order.includes(next)) order.push(next);
+  batch.set(_sesRef(), { pageFolderOrder:order }, { merge:true });
+  try {
+    await batch.commit();
+    _pageFoldClosed.delete(folder);
+    _pageFolderFilter = _pageFolderFilter === folder ? next : _pageFolderFilter;
+    _savePageFolds();
+    _savePageFolderFilter();
+    showNotif(`${pages.length} scène${pages.length > 1 ? 's' : ''} rangée${pages.length > 1 ? 's' : ''} dans « ${next} ».`, 'success');
+  } catch (error) {
+    console.error('[vtt] renommage dossier de scènes', error);
+    showNotif('Impossible de renommer ce dossier.', 'error');
+  }
+}
+
 export function _vttPageFolderToggle(f) {
   // Dossier vide ('') : le dispatcher ne passe aucun arg (data-vtt-args="") → f undefined.
   const key = f ? decodeURIComponent(f) : '';
@@ -666,10 +743,6 @@ export function _renderPageTabs() {
 
 export async function _switchPage(pageId) {
   const page=VS.pages[pageId]; if (!page) return;
-  if (STATE.isAdmin) {
-    const recents = [pageId, ..._loadPageRecents().filter(id => id !== pageId && VS.pages[id])];
-    _savePageRecents(recents);
-  }
   VS.activePage=page;
   // Ne pas détruire VS.layers.map entièrement : VS.imgTr (Transformer) y vit.
   // _renderMapImages() et _renderAllTokens() gèrent leur propre nettoyage.

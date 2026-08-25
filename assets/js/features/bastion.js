@@ -34,6 +34,7 @@ import {
   BASTION_WALL_TYPES,
   appendBastionWallComment,
   bastionWallCommentsForPost,
+  bastionWallFilterForTarget,
   bastionWallLastActivity,
   bastionWallMentionedCharacters,
   bastionWallNotificationTargets,
@@ -576,7 +577,10 @@ function _wallReceivePosts(docs = []) {
     entry.id !== 'main' && (entry.kind === 'post' || entry.text)
   ));
   const targetPost = _annonces.find(post => post.id === _wallTargetFromRoute());
-  if (targetPost?.status !== 'active') _wallUi.filter = 'archive';
+  // Sans cible dans l'URL, `targetPost` vaut undefined : il ne faut surtout pas
+  // interpréter cette absence comme une publication terminée. Un lien direct
+  // choisit uniquement la vue nécessaire pour rendre sa publication visible.
+  _wallUi.filter = bastionWallFilterForTarget(_wallUi.filter, targetPost);
   const targetIndex = _annonces.findIndex(post => post.id === targetPost?.id);
   if (targetIndex >= _wallUi.visible) _wallUi.visible = targetIndex + 1;
   void _wallHydrateMedia(_annonces.slice(0, _wallUi.visible));
@@ -3118,7 +3122,7 @@ function _wallCard(post) {
     <div class="bs-wall-social-summary"><span>${Object.keys(post.reactions || {}).length ? `${Object.keys(post.reactions || {}).length} réaction${Object.keys(post.reactions || {}).length > 1 ? 's' : ''}` : ''}</span><span>${comments.length ? `${comments.length} réponse${comments.length > 1 ? 's' : ''}` : ''}</span></div>
     <div class="bs-wall-actions"><div class="bs-wall-reactions">${reactionButtons}</div>${!post.legacy && identity ? `<button type="button" data-action="_bastionWallToggleReply" data-id="${_esc(post.id)}">↩ Répondre</button>` : ''}</div>
     ${_wallReactionPicker(post.id)}
-    ${comments.length ? `<div class="bs-wall-comments">${comments.slice(replyOpen ? 0 : -3).map(comment => _wallCommentHtml(comment, post)).join('')}${comments.length > 3 && !replyOpen ? `<button class="bs-wall-more-comments" data-action="_bastionWallToggleReply" data-id="${_esc(post.id)}">Voir les ${comments.length} réponses</button>` : ''}</div>` : ''}
+    ${comments.length ? `<div class="bs-wall-comments">${comments.slice(replyOpen ? 0 : -1).map(comment => _wallCommentHtml(comment, post)).join('')}${comments.length > 1 && !replyOpen ? `<button class="bs-wall-more-comments" data-action="_bastionWallToggleReply" data-id="${_esc(post.id)}">Voir les ${comments.length} réponses</button>` : ''}</div>` : ''}
     ${replyOpen && identity && !post.legacy ? `<div class="bs-wall-reply">${_wallAvatar(identity, 30)}<textarea rows="2" maxlength="1200" data-input="_bastionWallReplyDraft" data-id="${_esc(post.id)}" placeholder="Répondre avec ${_esc(identity.charName)}…">${_esc(_wallUi.replyDrafts.get(post.id) || '')}</textarea><button type="button" data-action="_bastionWallReply" data-id="${_esc(post.id)}">Envoyer</button></div>` : ''}
   </article>`;
 }
@@ -3131,17 +3135,24 @@ function _renderAnnonces() {
       ? posts.filter(post => post.status !== 'active')
       : posts.filter(post => post.type === _wallUi.filter && post.status === 'active');
   const visible = filtered.slice(0, _wallUi.visible);
-  const filters = [['all', { icon: '◉', label: 'Actifs' }], ...Object.entries(BASTION_WALL_TYPES), ['archive', { icon: '✓', label: 'Terminés' }]]
+  const filters = [['all', { icon: '●', label: 'Actifs' }], ...Object.entries(BASTION_WALL_TYPES), ['archive', { icon: '◷', label: 'Historique' }]]
     .map(([id, type]) => {
       const count = id === 'all' ? posts.filter(post => post.status === 'active').length
         : id === 'archive' ? posts.filter(post => post.status !== 'active').length
         : posts.filter(post => post.type === id && post.status === 'active').length;
-      return `<button type="button" class="${_wallUi.filter === id ? 'active' : ''}" data-action="_bastionWallSetFilter" data-filter="${id}">${type.icon} ${type.label}<span>${count}</span></button>`;
+      return `<button type="button" class="${_wallUi.filter === id ? 'active' : ''}" data-action="_bastionWallSetFilter" data-filter="${id}" aria-pressed="${_wallUi.filter === id}">${type.icon} ${type.label}<span>${count}</span></button>`;
     }).join('');
+  const emptyState = !posts.length
+    ? 'Le mur est encore silencieux. Publie le premier message du Bastion.'
+    : _wallUi.filter === 'archive'
+      ? `Aucune publication dans l’historique.<button type="button" data-action="_bastionWallSetFilter" data-filter="all">Voir les actifs</button>`
+      : _wallUi.filter === 'all'
+        ? `Aucune publication active.<button type="button" data-action="_bastionWallSetFilter" data-filter="archive">Voir l’historique</button>`
+        : `Aucune publication active de ce type.<button type="button" data-action="_bastionWallSetFilter" data-filter="all">Voir tous les actifs</button>`;
   if (posts.length) queueMicrotask(_wallMarkSeen);
   return `<section class="bs-section bs-social-wall">
     <div class="bs-section-hd"><div><h2 class="bs-section-title">📌 Le mur du Bastion <span class="bs-section-count">${posts.length}</span></h2><p class="bs-section-sub">Nouvelles, souvenirs et discussions publiés par les personnages.</p></div></div>
-    <div class="bs-annonce-wall">${_wallComposer()}<nav class="bs-wall-feed-filters" aria-label="Filtrer les publications">${filters}</nav><div class="bs-annonce-list">${visible.map(_wallCard).join('') || `<div class="bs-annonce-empty">${posts.length ? 'Aucune publication de ce type.' : 'Le mur est encore silencieux. Publie le premier message du Bastion.'}</div>`}${filtered.length > visible.length ? `<button class="bs-wall-load-more" data-action="_bastionWallMore">Afficher ${Math.min(12, filtered.length - visible.length)} publications de plus</button>` : ''}</div></div>
+    <div class="bs-annonce-wall"><nav class="bs-wall-feed-filters" aria-label="Filtrer les publications">${filters}</nav><div class="bs-annonce-list">${_wallComposer()}${visible.map(_wallCard).join('') || `<div class="bs-annonce-empty">${emptyState}</div>`}${filtered.length > visible.length ? `<button class="bs-wall-load-more" data-action="_bastionWallMore">Afficher ${Math.min(12, filtered.length - visible.length)} publications de plus</button>` : ''}</div></div>
   </section>`;
 }
 
@@ -3300,6 +3311,8 @@ async function _bastionPostAnnonce() {
       postId, actor: identity, kind: 'mention', text,
     });
     _wallUi.draftText = ''; _wallUi.images = []; _wallUi.pickerOpen = false;
+    _wallUi.filter = 'all';
+    _wallUi.visible = 12;
     _wallClearDraft();
     if (STATE.currentPage === 'bastion') _renderPage();
     showNotif('Publication ajoutée au mur.', 'success');
