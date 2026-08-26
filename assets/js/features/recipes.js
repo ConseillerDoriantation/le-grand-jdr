@@ -568,6 +568,13 @@ function openRecipeModal(type, id = '') {
         <label>Nom</label>
         <input class="input-field" id="rec-nom" value="${r?.nom||''}" placeholder="Nom de la recette...">
       </div>
+      ${!isCraft ? `
+      <div class="form-group">
+        <label>Type de recette</label>
+        <select class="input-field" id="rec-type">
+          ${CREATE_RECIPES.map(t => `<option value="${t.id}" ${t.id === rType ? 'selected' : ''}>${t.emoji} ${t.label}</option>`).join('')}
+        </select>
+      </div>` : ''}
       ${(rType === 'potion' || rType === 'cuisine') ? `
       <div class="form-group">
         <label>Famille</label>
@@ -608,6 +615,7 @@ function openRecipeModal(type, id = '') {
       <div id="rec-ingr-list" style="display:flex;flex-direction:column;gap:.35rem">
         ${ingrs.map((ig, i) => _ingrRow(ig, i)).join('')}
       </div>
+      ${_ingrDatalistHtml()}
     </div>
 
     <div class="form-group">
@@ -666,16 +674,33 @@ function openCharacterRecipeCreatePicker(characterId) {
 }
 
 function _ingrRow(ig = {}, i) {
+  const linked = !!(ig.nom && STORE.shopItems.some(it => _norm(it.nom) === _norm(ig.nom)));
   return `<div class="rec-ingr-dyn" id="rec-ig-${i}"
     style="display:flex;align-items:center;gap:.4rem;background:var(--bg-elevated);
     border-radius:8px;padding:.4rem .6rem;border:1px solid var(--border)">
-    <input class="input-field" id="rec-ig-qty-${i}" value="${ig.quantite||''}"
+    <input class="input-field" id="rec-ig-qty-${i}" value="${_esc(ig.quantite||'')}"
       placeholder="Qté" style="width:70px;flex-shrink:0;font-size:.78rem;padding:4px 6px">
-    <input class="input-field" id="rec-ig-nom-${i}" value="${ig.nom||''}"
-      placeholder="Nom..." style="flex:1;font-size:.78rem;padding:4px 6px">
+    <input class="input-field" id="rec-ig-nom-${i}" value="${_esc(ig.nom||'')}"
+      placeholder="Nom (choisis un objet de la boutique)…" list="rec-ingr-items"
+      data-input="_recIngrCheckLink" data-idx="${i}" style="flex:1;font-size:.78rem;padding:4px 6px">
+    <span class="rec-ig-link ${linked ? 'is-on' : ''}" id="rec-ig-link-${i}"
+      title="Objet boutique reconnu — le « fabricable » se basera dessus">🔗</span>
     <button type="button" data-action="_recRemIngr" data-idx="${i}"
       style="color:#ff6b6b;background:none;border:none;cursor:pointer;font-size:.9rem;padding:0 4px;flex-shrink:0">✕</button>
   </div>`;
+}
+
+// Indique en direct si le nom d'un ingrédient correspond à un objet boutique.
+function _recIngrCheckLink(el) {
+  const idx = el.dataset.idx;
+  const linked = !!STORE.shopItems.find(it => _norm(it.nom) === _norm(el.value || ''));
+  document.getElementById(`rec-ig-link-${idx}`)?.classList.toggle('is-on', linked);
+}
+
+// Liste d'autocomplétion des noms d'objets boutique pour lier les ingrédients.
+function _ingrDatalistHtml() {
+  const names = [...new Set((STORE.shopItems || []).map(it => it?.nom).filter(Boolean))];
+  return `<datalist id="rec-ingr-items">${names.map(n => `<option value="${_esc(n)}"></option>`).join('')}</datalist>`;
 }
 
 function addIngredientRow() {
@@ -690,10 +715,16 @@ function addIngredientRow() {
 function removeIngredientRow(i) { document.getElementById(`rec-ig-${i}`)?.remove(); }
 
 function _readIngrs() {
-  return [...document.querySelectorAll('#rec-ingr-list .rec-ingr-dyn')].map((_, i) => ({
-    quantite: document.getElementById(`rec-ig-qty-${i}`)?.value?.trim() || '',
-    nom:      document.getElementById(`rec-ig-nom-${i}`)?.value?.trim() || '',
-  })).filter(ig => ig.nom);
+  // Lecture par LIGNE (pas par index global) → robuste après suppression d'une
+  // ligne. Résout un lien explicite vers l'objet boutique (shopItemId) quand le
+  // nom correspond à un article : le « fabricable » se base alors sur l'id exact
+  // de l'objet en inventaire, plus sur une simple comparaison de texte.
+  return [...document.querySelectorAll('#rec-ingr-list .rec-ingr-dyn')].map(row => {
+    const nom = row.querySelector('input[id^="rec-ig-nom-"]')?.value?.trim() || '';
+    const qty = row.querySelector('input[id^="rec-ig-qty-"]')?.value?.trim() || '';
+    const match = nom ? STORE.shopItems.find(it => _norm(it.nom) === _norm(nom)) : null;
+    return { quantite: qty, nom, shopItemId: match?.id || '' };
+  }).filter(ig => ig.nom);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -705,7 +736,11 @@ async function saveRecipe(id, fallbackType) {
     if (!nom) { showNotif('Le nom est requis.', 'error'); return; }
 
     const existing = id ? STORE.all.find(r => r.id === id) : null;
-    const type     = existing?.type || fallbackType || 'cuisine';
+    // Type éditable pour les recettes non-craft (cuisine ↔ potion) via le sélecteur.
+    const pickedType = document.getElementById('rec-type')?.value;
+    const type = (pickedType && CREATE_RECIPES.some(t => t.id === pickedType))
+      ? pickedType
+      : (existing?.type || fallbackType || 'cuisine');
 
     const returnCharacter = _recipeReturnCharacterId
       ? (STATE.characters || []).find(character => character.id === _recipeReturnCharacterId)
@@ -793,6 +828,7 @@ function openShopRecipeModal(id) {
       <div id="rec-ingr-list" style="display:flex;flex-direction:column;gap:.35rem">
         ${ingrs.map((ig, i) => _ingrRow(ig, i)).join('')}
       </div>
+      ${_ingrDatalistHtml()}
     </div>
 
     <div class="form-group">
@@ -985,18 +1021,27 @@ function _allRecipeEntries() {
 }
 
 function _inventoryCounts(character) {
-  const counts = new Map();
+  // Deux index : par nom normalisé (compat) ET par id d'objet boutique
+  // (les objets d'inventaire issus de la boutique portent `itemId`).
+  const byName = new Map();
+  const byId = new Map();
   (character?.inventaire || []).forEach(item => {
+    const q = Math.max(1, parseInt(item.quantite || item.qte || 1) || 1);
     const key = _norm(item?.nom || '');
-    if (key) counts.set(key, (counts.get(key) || 0) + Math.max(1, parseInt(item.quantite || item.qte || 1) || 1));
+    if (key) byName.set(key, (byName.get(key) || 0) + q);
+    const iid = item?.itemId || '';
+    if (iid) byId.set(iid, (byId.get(iid) || 0) + q);
   });
-  return counts;
+  return { byName, byId };
 }
 
 function _ingredientState(recipe, counts) {
   return (Array.isArray(recipe.ingredients) ? recipe.ingredients : []).map(ingredient => {
     const required = Math.max(1, parseInt(ingredient.quantite) || 1);
-    const owned = counts.get(_norm(ingredient.nom || '')) || 0;
+    // Lien explicite d'abord (id exact), sinon repli sur le nom (anciennes recettes).
+    const owned = ingredient.shopItemId
+      ? (counts.byId.get(ingredient.shopItemId) || 0)
+      : (counts.byName.get(_norm(ingredient.nom || '')) || 0);
     return { ...ingredient, required, owned, ready: owned >= required };
   });
 }
@@ -1200,6 +1245,7 @@ registerActions({
   _recDeleteShop: (btn) => deleteShopRecipe(btn.dataset.id),
   _recSave: (btn) => saveRecipe(btn.dataset.id, btn.dataset.type),
   _recAddIngr: () => addIngredientRow(),
+  _recIngrCheckLink: (el) => _recIngrCheckLink(el),
   _recRemIngr: (btn) => removeIngredientRow(Number(btn.dataset.idx)),
   _recSelectLinkedShop: (btn) => selectLinkedShopItem(btn.dataset.id),
   _recShopFilter: (el) => _recFilterShopOptions(el.value),
