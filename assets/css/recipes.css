@@ -554,7 +554,10 @@
   flex-direction: column;
   width: min(960px, 96vw);
   max-width: 960px;
-  max-height: min(88vh, 820px);
+  /* Hauteur STABLE (et non max-height) : filtrer/changer de catégorie masque des
+     lignes → sans hauteur fixe, la modale centrée se redimensionnait et « sautait ».
+     La liste interne scrolle déjà (.rec-access-list / .rec-book-grid overflow:auto). */
+  height: min(88vh, 820px);
   padding: 0;
   overflow: hidden;
 }
@@ -841,7 +844,7 @@
 }
 .rec-access-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(112px, .65fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(100px, .6fr) auto;
   align-items: center;
   gap: .55rem;
   min-width: 0;
@@ -882,6 +885,16 @@
 .rec-access-output:hover { background: rgba(250, 204, 21, .12); border-color: rgba(250, 204, 21, .42); }
 .rec-access-output.is-linked { color: #6ee7b7; background: rgba(52, 211, 153, .06); border-color: rgba(52, 211, 153, .24); }
 .rec-access-output.is-native { cursor: default; color: var(--text-muted); background: var(--bg-card); border-color: var(--border); }
+.rec-access-edit {
+  flex-shrink: 0; align-self: stretch;
+  display: grid; place-items: center;
+  width: 34px; padding: 0;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-card); color: var(--text-dim);
+  cursor: pointer; font-size: .9rem;
+  transition: background .1s, border-color .1s, color .1s;
+}
+.rec-access-edit:hover { background: rgba(250,204,21,.1); border-color: rgba(250,204,21,.4); color: #facc15; }
 .rec-output-modal { display: grid; gap: .7rem; }
 .rec-output-modal > header { display: grid; gap: .2rem; }
 .rec-output-modal > header > span { color: var(--gold); font-size: .65rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
@@ -964,7 +977,7 @@
   .modal:has(.rec-access-shell) {
     width: 100%;
     max-width: none;
-    max-height: 92vh;
+    height: 92vh;   /* hauteur stable : pas de « saut » au filtrage (cf. desktop) */
     border-radius: 20px 20px 0 0;
   }
   .modal:has(.rec-book-shell) > .modal-title,
