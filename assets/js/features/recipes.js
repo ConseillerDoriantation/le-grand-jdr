@@ -821,11 +821,14 @@ async function saveShopRecipe(id) {
     description: document.getElementById('srec-desc')?.value?.trim()       || '',
   };
 
+  const returnCharacterId = _recipeReturnCharacterId;
+  _recipeReturnCharacterId = '';
   if (await trySave('shop', id, { recipeMeta })) {
     const idx = STORE.shopItems.findIndex(i => i.id === id);
     if (idx >= 0) STORE.shopItems[idx].recipeMeta = recipeMeta;
     closeModal();
     showNotif('Recette mise à jour !', 'success');
+    if (returnCharacterId) { await openCharacterRecipeAccess(returnCharacterId); return; }
   }
   _render();
 }
@@ -1069,6 +1072,7 @@ export async function openCharacterRecipeAccess(characterId) {
         return `<div class="rec-access-row" data-rec-access-row data-type="${_esc(recipe.type || '')}" data-search="${_esc(_recipeSearchText(recipe))}">
           <label class="rec-access-toggle"><input type="checkbox" data-change="updateCharacterRecipeAccessCount" data-recipe-id="${_esc(recipe.id)}" data-source="${recipe._source}" ${(recipe.acces || []).includes(character.uid) ? 'checked' : ''}><span class="rec-access-check"></span><span class="rec-book-icon">${type.emoji}</span><span class="rec-access-name"><strong title="${_esc(recipe.nom || 'Recette')}">${_esc(recipe.nom || 'Recette')}</strong><small>${_esc(type.label || recipe.type || '')}</small></span></label>
           ${recipe._source === 'recipes' ? `<button type="button" class="rec-access-output ${output ? 'is-linked' : ''}" data-action="openCharacterRecipeOutput" data-character-id="${_esc(character.id)}" data-recipe-id="${_esc(recipe.id)}"><span>${output ? 'Objet produit' : 'Résultat du craft'}</span><strong>${_esc(output?.nom || 'Lier un objet')}</strong><i aria-hidden="true">›</i></button>` : `<span class="rec-access-output is-native"><span>Objet produit</span><strong>${_esc(recipe.nom || 'Objet boutique')}</strong></span>`}
+          ${recipe._source === 'recipes' ? `<button type="button" class="rec-access-edit" data-action="editRecipeFromAccess" data-character-id="${_esc(character.id)}" data-recipe-id="${_esc(recipe.id)}" title="Modifier cette recette">✏️</button>` : `<button type="button" class="rec-access-edit" data-action="editShopRecipeFromAccess" data-character-id="${_esc(character.id)}" data-recipe-id="${_esc(recipe.id)}" title="Modifier cette recette">✏️</button>`}
         </div>`;
       }).join('') || '<div class="rec-book-empty">Le catalogue est vide.</div>'}<div class="rec-context-empty" hidden>Aucune recette ne correspond à ces filtres.</div></div></div>
       <footer><button class="btn btn-outline" data-action="close-modal">Annuler</button><button class="btn btn-primary" data-action="saveCharacterRecipeAccess" data-id="${_esc(character.id)}">Enregistrer</button></footer>
@@ -1208,6 +1212,15 @@ registerActions({
   sendRecipe: (btn) => sendRecipe(btn.dataset.id),
   openCharacterRecipeAccess: (btn) => openCharacterRecipeAccess(btn.dataset.id),
   openCharacterRecipeOutput: (btn) => openCharacterRecipeOutput(btn.dataset.characterId, btn.dataset.recipeId),
+  editRecipeFromAccess: (btn) => {
+    const rec = STORE.all.find(x => x.id === btn.dataset.recipeId);
+    _recipeReturnCharacterId = btn.dataset.characterId || '';
+    openRecipeModal(rec?.type || 'cuisine', btn.dataset.recipeId);
+  },
+  editShopRecipeFromAccess: (btn) => {
+    _recipeReturnCharacterId = btn.dataset.characterId || '';
+    openShopRecipeModal(btn.dataset.recipeId);
+  },
   saveCharacterRecipeOutput: (btn) => saveCharacterRecipeOutput(btn.dataset.characterId, btn.dataset.recipeId),
   openCharacterRecipeCreatePicker: (btn) => openCharacterRecipeCreatePicker(btn.dataset.id),
   createCharacterRecipe: (btn) => { _recipeReturnCharacterId = btn.dataset.id || ''; openRecipeModal(btn.dataset.type); },
