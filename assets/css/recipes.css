@@ -59,6 +59,14 @@
   flex-direction: column;
   gap: .15rem;
 }
+/* Indicateur « ingrédient lié à un objet boutique » (éditeur de recette) */
+.rec-ig-link {
+  flex-shrink: 0; font-size: .85rem; line-height: 1;
+  opacity: .25; filter: grayscale(1);
+  transition: opacity .12s ease, filter .12s ease;
+  cursor: help;
+}
+.rec-ig-link.is-on { opacity: 1; filter: none; }
 
 .rec-ingr-row {
   display: flex;
