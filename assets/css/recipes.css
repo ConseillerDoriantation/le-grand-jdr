@@ -68,6 +68,19 @@
 }
 .rec-ig-link.is-on { opacity: 1; filter: none; }
 
+/* Bouton « choisir un objet de la boutique » sur une ligne d'ingrédient */
+.rec-ig-pick {
+  flex-shrink: 0; border: 1px solid var(--border);
+  background: var(--bg-elevated); color: var(--text-dim);
+  border-radius: 6px; padding: 3px 7px; font-size: .82rem; line-height: 1;
+  cursor: pointer; transition: border-color .12s ease, color .12s ease;
+}
+.rec-ig-pick:hover { border-color: rgba(34, 195, 142, .5); color: #22c38e; }
+
+/* Conteneur du sélecteur d'ingrédient empilé */
+.rec-ingr-picker { display: flex; flex-direction: column; gap: .5rem; }
+.rec-ingr-picker #rec-ingr-pick-filter { position: sticky; top: 0; }
+
 .rec-ingr-row {
   display: flex;
   align-items: baseline;
@@ -579,6 +592,11 @@
 .modal:has(.rec-book-shell) > #modal-body,
 .modal:has(.rec-access-shell) > #modal-body {
   display: flex;
+  /* Remplir la carte à hauteur fixe : sans flex:1, le corps garde la hauteur de
+     son contenu → avec peu de lignes le footer flottait au milieu et un grand
+     vide apparaissait dessous (le flex-shrink ne masquait le bug qu'avec
+     beaucoup de lignes). */
+  flex: 1 1 auto;
   min-height: 0;
   padding: 0;
   overflow: hidden;
@@ -726,6 +744,7 @@
   overflow: auto;
   padding: .05rem .3rem .1rem .05rem;
   scrollbar-gutter: stable;
+  align-content: start; /* peu de lignes → hauteur naturelle, pas de cartes ballonnées */
 }
 .rec-book-card {
   display: flex;
@@ -849,6 +868,7 @@
   overflow: auto;
   padding: .05rem .3rem .1rem .05rem;
   scrollbar-gutter: stable;
+  align-content: start; /* peu de lignes → hauteur naturelle, pas de lignes ballonnées */
 }
 .rec-access-row {
   display: grid;

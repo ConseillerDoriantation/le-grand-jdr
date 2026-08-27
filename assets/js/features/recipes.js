@@ -8,7 +8,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
-import { openModal, closeModal, confirmModal } from "../shared/modal.js";
+import { openModal, closeModal, closeModalDirect, pushModal, confirmModal } from "../shared/modal.js";
 import { registerActions } from '../core/actions.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
@@ -21,16 +21,29 @@ import { formatWeaponDamageText, isWeaponLikeItem } from '../shared/equipment-ut
 
 // ── Config des onglets ────────────────────────────────────────────────────────
 const TABS = [
-  { id:'all',     emoji:'📚', label:'Tout' },
-  { id:'cuisine', emoji:'🍳', label:'Cuisine' },
-  { id:'potion',  emoji:'🧪', label:'Potions' },
-  { id:'arme',    emoji:'⚔️', label:'Armes' },
-  { id:'armure',  emoji:'🛡️', label:'Armures' },
-  { id:'bijou',   emoji:'💍', label:'Bijoux' },
+  { id:'all',        emoji:'📚', label:'Tout' },
+  { id:'cuisine',    emoji:'🍳', label:'Cuisine' },
+  { id:'potion',     emoji:'🧪', label:'Potions' },
+  { id:'forge',      emoji:'⚒️', label:'Forge' },
+  { id:'orfevre',    emoji:'💎', label:'Orfèvre' },
+  { id:'confection', emoji:'🧵', label:'Confection' },
+  { id:'arme',       emoji:'⚔️', label:'Armes' },
+  { id:'armure',     emoji:'🛡️', label:'Armures' },
+  { id:'bijou',      emoji:'💍', label:'Bijoux' },
 ];
-// Onglets qui proposent une création directe (les crafts arme/armure/bijou se
-// créent depuis la boutique, et "Tout" n'est pas un type).
-const CREATE_RECIPES = TABS.filter(t => t.id === 'cuisine' || t.id === 'potion');
+// Types « craft » liés à un objet boutique : créés depuis la Boutique, pas
+// directement (l'objet produit existe déjà comme article).
+const CRAFT_TYPES = ['arme', 'armure', 'bijou'];
+// Onglets qui proposent une création directe (tout sauf "Tout" et les crafts).
+const CREATE_RECIPES = TABS.filter(t => t.id !== 'all' && !CRAFT_TYPES.includes(t.id));
+// Sous-titre du sélecteur de type dans le picker de création MJ.
+const CREATE_DESC = {
+  cuisine:    'Préparation, durée, ingrédients et effet de groupe.',
+  potion:     'Ingrédients, préparation et effet individuel.',
+  forge:      'Matériaux, préparation et objet forgé.',
+  orfevre:    'Matériaux précieux, préparation et bijou ouvragé.',
+  confection: 'Étoffes, préparation et pièce confectionnée.',
+};
 
 const MATERIALS = {
   'matMyst': 'Matériaux mystiques',
@@ -334,7 +347,7 @@ function _renderCard(r, accent) {
   const joueurs     = _getJoueurs();
   const accesUids   = r.acces || [];
   const nbAcces     = accesUids.length;
-  const isCraftType = r.type === 'arme' || r.type === 'armure' || r.type === 'bijou';
+  const isCraftType = CRAFT_TYPES.includes(r.type);
   const linkedItem  = !r._fromShop ? _linkedShopItem(r) : null;
   const hasMissingLinkedItem = !r._fromShop && r.shopItemId && !linkedItem;
   const hasDetail   = isCraftType || !!linkedItem;
@@ -551,7 +564,7 @@ function openRecipeModal(type, id = '') {
     ? r.ingredients
     : [{ nom:'', quantite:'' }, { nom:'', quantite:'' }];
 
-  const isCraft = ['arme','armure','bijou'].includes(rType);
+  const isCraft = CRAFT_TYPES.includes(rType);
   const linkedItemId = r?.shopItemId || "";
   if (isCraft && !id) return;
 
@@ -575,10 +588,10 @@ function openRecipeModal(type, id = '') {
           ${CREATE_RECIPES.map(t => `<option value="${t.id}" ${t.id === rType ? 'selected' : ''}>${t.emoji} ${t.label}</option>`).join('')}
         </select>
       </div>` : ''}
-      ${(rType === 'potion' || rType === 'cuisine') ? `
+      ${!isCraft ? `
       <div class="form-group">
         <label>Famille</label>
-        <input class="input-field" id="rec-famille" value="${r?.famille||''}" placeholder="${rType === 'cuisine' ? 'Soupe, Rôti, Pâtisserie...' : 'Soin, Élixir, Alchimie...'}">
+        <input class="input-field" id="rec-famille" value="${r?.famille||''}" placeholder="${rType === 'cuisine' ? 'Soupe, Rôti, Pâtisserie...' : rType === 'potion' ? 'Soin, Élixir, Alchimie...' : 'Famille, catégorie...'}">
       </div>` : ''}
       ${!isCraft ? `
       <div class="form-group">
@@ -615,7 +628,6 @@ function openRecipeModal(type, id = '') {
       <div id="rec-ingr-list" style="display:flex;flex-direction:column;gap:.35rem">
         ${ingrs.map((ig, i) => _ingrRow(ig, i)).join('')}
       </div>
-      ${_ingrDatalistHtml()}
     </div>
 
     <div class="form-group">
@@ -660,29 +672,29 @@ function openCharacterRecipeCreatePicker(characterId) {
         <p>La recette sera ajoutée au catalogue${character?.nom ? ` et connue automatiquement par ${_esc(character.nom)}` : ''}.</p>
       </header>
       <div class="rec-create-options">
-        <button type="button" data-action="createCharacterRecipe" data-type="cuisine" data-id="${_esc(characterId)}">
-          <span aria-hidden="true">🍳</span><strong>Recette de cuisine</strong>
-          <small>Préparation, durée, ingrédients et effet de groupe.</small>
-        </button>
-        <button type="button" data-action="createCharacterRecipe" data-type="potion" data-id="${_esc(characterId)}">
-          <span aria-hidden="true">🧪</span><strong>Potion</strong>
-          <small>Ingrédients, préparation et effet individuel.</small>
-        </button>
+        ${CREATE_RECIPES.map(t => `
+        <button type="button" data-action="createCharacterRecipe" data-type="${t.id}" data-id="${_esc(characterId)}">
+          <span aria-hidden="true">${t.emoji}</span><strong>${_esc(t.label)}</strong>
+          <small>${_esc(CREATE_DESC[t.id] || 'Ingrédients, préparation et effet.')}</small>
+        </button>`).join('')}
       </div>
       <p class="rec-create-hint">Les recettes d'armes, d'armures et de bijoux sont créées depuis les objets correspondants de la Boutique.</p>
     </div>`, { icon: '＋', subtitle: 'Ajouter une recette au catalogue', accent: '#e8b84b' });
 }
 
 function _ingrRow(ig = {}, i) {
-  const linked = !!(ig.nom && STORE.shopItems.some(it => _norm(it.nom) === _norm(ig.nom)));
-  return `<div class="rec-ingr-dyn" id="rec-ig-${i}"
+  const linked = !!((ig.shopItemId && _findShopItem(ig.shopItemId))
+    || (ig.nom && STORE.shopItems.some(it => _norm(it.nom) === _norm(ig.nom))));
+  return `<div class="rec-ingr-dyn" id="rec-ig-${i}" data-shop-id="${_esc(ig.shopItemId||'')}"
     style="display:flex;align-items:center;gap:.4rem;background:var(--bg-elevated);
     border-radius:8px;padding:.4rem .6rem;border:1px solid var(--border)">
     <input class="input-field" id="rec-ig-qty-${i}" value="${_esc(ig.quantite||'')}"
       placeholder="Qté" style="width:70px;flex-shrink:0;font-size:.78rem;padding:4px 6px">
     <input class="input-field" id="rec-ig-nom-${i}" value="${_esc(ig.nom||'')}"
-      placeholder="Nom (choisis un objet de la boutique)…" list="rec-ingr-items"
+      placeholder="Nom de l’ingrédient…"
       data-input="_recIngrCheckLink" data-idx="${i}" style="flex:1;font-size:.78rem;padding:4px 6px">
+    <button type="button" class="rec-ig-pick" data-action="_recIngrPick" data-idx="${i}"
+      title="Choisir un objet de la boutique">🔍</button>
     <span class="rec-ig-link ${linked ? 'is-on' : ''}" id="rec-ig-link-${i}"
       title="Objet boutique reconnu — le « fabricable » se basera dessus">🔗</span>
     <button type="button" data-action="_recRemIngr" data-idx="${i}"
@@ -690,17 +702,68 @@ function _ingrRow(ig = {}, i) {
   </div>`;
 }
 
-// Indique en direct si le nom d'un ingrédient correspond à un objet boutique.
+// Édition manuelle du nom → on repart de la correspondance par nom (on efface le
+// lien explicite éventuel pour éviter un id périmé qui ne collerait plus au texte).
 function _recIngrCheckLink(el) {
   const idx = el.dataset.idx;
+  document.getElementById(`rec-ig-${idx}`)?.removeAttribute('data-shop-id');
   const linked = !!STORE.shopItems.find(it => _norm(it.nom) === _norm(el.value || ''));
   document.getElementById(`rec-ig-link-${idx}`)?.classList.toggle('is-on', linked);
 }
 
-// Liste d'autocomplétion des noms d'objets boutique pour lier les ingrédients.
-function _ingrDatalistHtml() {
-  const names = [...new Set((STORE.shopItems || []).map(it => it?.nom).filter(Boolean))];
-  return `<datalist id="rec-ingr-items">${names.map(n => `<option value="${_esc(n)}"></option>`).join('')}</datalist>`;
+// ── Sélecteur d'ingrédient (objet boutique) — recherche, scale à 200+ objets ──
+let _ingrPickIdx = null;   // ligne ciblée pendant que le picker est ouvert
+let _ingrPick    = null;   // { idx, itemId } choisi, appliqué après restauration
+
+function _ingrPickOptionsHtml(query = '') {
+  const q = (query || '').trim();
+  const items = STORE.shopItems.filter(it => !q || _searchIncludes(`${it.nom || ''} ${_shopItemKind(it)}`, q));
+  if (!items.length) return `<div class="rec-shop-picker-empty">Aucun objet ne correspond à cette recherche.</div>`;
+  return items.map(it => `<button type="button" class="rec-shop-picker-option"
+      data-action="_recIngrPickChoose" data-id="${_esc(it.id)}">
+      ${it.image ? `<img src="${_esc(it.image)}" alt="">` : `<span class="rec-shop-picker-fallback">📦</span>`}
+      <span><strong>${_esc(it.nom || 'Objet sans nom')}</strong><small>${_esc(_shopItemKind(it))}</small></span>
+    </button>`).join('');
+}
+
+function openIngredientPicker(idx) {
+  _ingrPickIdx = idx;
+  _ingrPick = null;
+  // Empilé au-dessus de l'éditeur : à la fermeture, popModal restaure le
+  // formulaire de fond puis appelle notre callback qui applique le choix.
+  pushModal('Choisir un ingrédient', `
+    <div class="rec-ingr-picker">
+      <input type="text" class="input-field" id="rec-ingr-pick-filter" autocomplete="off"
+        placeholder="🔍 Rechercher un objet de la boutique…" data-input="_recIngrPickFilter">
+      <div class="rec-shop-picker rec-shop-picker--modal" id="rec-ingr-pick-options">${_ingrPickOptionsHtml('')}</div>
+    </div>`, () => _applyPendingIngredientPick(),
+    { icon: '🌿', subtitle: 'Lie l’ingrédient à un objet de la boutique', accent: '#22c38e' });
+  requestAnimationFrame(() => document.getElementById('rec-ingr-pick-filter')?.focus({ preventScroll: true }));
+}
+
+function _recIngrPickFilter(query) {
+  const list = document.getElementById('rec-ingr-pick-options');
+  if (list) list.innerHTML = _ingrPickOptionsHtml(query);
+}
+
+function chooseIngredientFromPicker(itemId) {
+  if (_findShopItem(itemId) && _ingrPickIdx != null) _ingrPick = { idx: _ingrPickIdx, itemId };
+  _ingrPickIdx = null;
+  closeModalDirect(); // ferme le picker → restaure l'éditeur → _applyPendingIngredientPick
+}
+
+function _applyPendingIngredientPick() {
+  const pick = _ingrPick; _ingrPick = null;
+  if (!pick) return; // annulation (Escape/✕) : rien à appliquer
+  const item = _findShopItem(pick.itemId);
+  const row  = document.getElementById(`rec-ig-${pick.idx}`);
+  if (!item || !row) return;
+  row.dataset.shopId = pick.itemId;
+  const nom = row.querySelector('input[id^="rec-ig-nom-"]');
+  if (nom) nom.value = item.nom || '';
+  const qty = row.querySelector('input[id^="rec-ig-qty-"]');
+  if (qty && !qty.value.trim()) qty.value = '1';
+  row.querySelector('.rec-ig-link')?.classList.add('is-on');
 }
 
 function addIngredientRow() {
@@ -722,7 +785,12 @@ function _readIngrs() {
   return [...document.querySelectorAll('#rec-ingr-list .rec-ingr-dyn')].map(row => {
     const nom = row.querySelector('input[id^="rec-ig-nom-"]')?.value?.trim() || '';
     const qty = row.querySelector('input[id^="rec-ig-qty-"]')?.value?.trim() || '';
-    const match = nom ? STORE.shopItems.find(it => _norm(it.nom) === _norm(nom)) : null;
+    // Lien explicite (choisi via le sélecteur) prioritaire ; sinon repli sur la
+    // correspondance par nom pour les anciennes recettes / saisies libres.
+    const explicit = row.dataset.shopId || '';
+    const match = explicit
+      ? _findShopItem(explicit)
+      : (nom ? STORE.shopItems.find(it => _norm(it.nom) === _norm(nom)) : null);
     return { quantite: qty, nom, shopItemId: match?.id || '' };
   }).filter(ig => ig.nom);
 }
@@ -828,7 +896,6 @@ function openShopRecipeModal(id) {
       <div id="rec-ingr-list" style="display:flex;flex-direction:column;gap:.35rem">
         ${ingrs.map((ig, i) => _ingrRow(ig, i)).join('')}
       </div>
-      ${_ingrDatalistHtml()}
     </div>
 
     <div class="form-group">
@@ -1246,6 +1313,9 @@ registerActions({
   _recSave: (btn) => saveRecipe(btn.dataset.id, btn.dataset.type),
   _recAddIngr: () => addIngredientRow(),
   _recIngrCheckLink: (el) => _recIngrCheckLink(el),
+  _recIngrPick: (btn) => openIngredientPicker(Number(btn.dataset.idx)),
+  _recIngrPickFilter: (el) => _recIngrPickFilter(el.value),
+  _recIngrPickChoose: (btn) => chooseIngredientFromPicker(btn.dataset.id),
   _recRemIngr: (btn) => removeIngredientRow(Number(btn.dataset.idx)),
   _recSelectLinkedShop: (btn) => selectLinkedShopItem(btn.dataset.id),
   _recShopFilter: (el) => _recFilterShopOptions(el.value),
