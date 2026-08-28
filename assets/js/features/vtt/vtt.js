@@ -60,7 +60,7 @@ import {
 import { CELL, CELL_M, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
 import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual } from './vtt-render.js';
 import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenHealthMeta, tokenMovementMeta, tokenRelationTone } from './vtt-token-visual.js';
-import { isTemporarySummonToken, reserveSummonTokens } from './vtt-summon-utils.js';
+import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
 import {
   _startRuler, _updateRuler, _endRuler, _clearRuler, _showRulerHover, _hideRulerHover,
   _renderMjRulerRemote, _resetRuler, rulerActive, rulerBusy,
@@ -646,10 +646,39 @@ export async function _setHp(t, newHp) {
  * franchissement du seuil → coût Firestore négligeable, et n'impacte pas la MAJ
  * des PV si les règles la refusent (.catch).
  */
-/** Restaure `amount` PM sur un token (perso / PNJ / créature bestiaire), capé au
+/** Écrit les PM propres d'une invocation sur son token, puis mémorise la valeur
+ * dans sa fiche de bibliothèque afin qu'une réinvocation conserve cet état. */
+async function _setInvocationPm(td, requestedPm) {
+  const next = resolveInvocationManaChange(td, requestedPm);
+  if (!next) return null;
+  const patch = { pm: next.value, pmCombat: next.value };
+  await updateDoc(_tokRef(td.id), patch);
+  const live = VS.tokens?.[td.id]?.data;
+  if (live) Object.assign(live, patch);
+  else Object.assign(td, patch);
+  await _persistInvocationState(live || td);
+  return next;
+}
+
+/** Restaure `amount` PM sur un token (perso / PNJ / créature bestiaire / invocation), capé au
  *  max. Retourne { applied, cur, max } (PM réellement rendus + nouvel état). */
 async function _restoreTokenPm(td, amount) {
   const add = Math.max(0, parseInt(amount) || 0);
+  if (td?.summonKind === 'invocation') {
+    const state = resolveInvocationManaChange(td, td.pm ?? td.pmMax);
+    if (!state) return { applied: 0, cur: 0, max: 0 };
+    const cur = state.value;
+    const nv = Math.min(state.max, cur + add);
+    if (nv !== cur) {
+      try {
+        await _setInvocationPm(td, nv);
+      } catch (err) {
+        console.error('[vtt] régénération des PM de l’invocation refusée', err);
+        return { applied: 0, cur, max: state.max };
+      }
+    }
+    return { applied: Math.max(0, nv - cur), cur: nv, max: state.max };
+  }
   if (td?.characterId) {
     const c = VS.characters[td.characterId];
     if (!c) return { applied: 0, cur: 0, max: 0 };
@@ -3400,8 +3429,9 @@ function _invPickConfirm() {
 }
 function _invPickCancel() { _invPickState = null; closeModalDirect(); }
 
-// Avant de désinvoquer un token d'invocation : sauvegarde ses PV/PM courants sur
-// l'entrée de bibliothèque du lanceur (instance unique → réapparaît avec son état).
+// Sauvegarde les PV/PM courants d'un token d'invocation sur l'entrée de
+// bibliothèque du lanceur (pendant une restauration ou avant la désinvocation).
+// L'instance unique réapparaît ainsi avec son dernier état connu.
 // Best-effort (écriture autorisée surtout pour le propriétaire / le MJ).
 export async function _persistInvocationState(tokData) {
   try {
@@ -10396,6 +10426,19 @@ async function _vttSetHp(tokenId,hp) {
 }
 async function _vttSetPm(tokenId,pm) {
   const t=VS.tokens[tokenId]?.data; if (!t) return;
+  if (!_canControlToken(t)) return;
+  if (t.summonKind === 'invocation') {
+    try {
+      const next = await _setInvocationPm(t, pm);
+      if (!next) return;
+      _renderInspector(VS.tokens[tokenId]?.data || t);
+      _patchShape(tokenId);
+    } catch (err) {
+      console.error('[vtt] modification des PM de l’invocation refusée', err);
+      showNotif('Impossible de modifier les PM de cette invocation', 'error');
+    }
+    return;
+  }
   const v=Math.max(0,pm);
   if (t.characterId) await updateDoc(_chrRef(t.characterId), { ..._charPmPatch(v), vttControlTokenId:tokenId }).catch(()=>{});
   else if (t.npcId)  await updateDoc(_npcRef(t.npcId),{pmCurrent:v}).catch(()=>{});
