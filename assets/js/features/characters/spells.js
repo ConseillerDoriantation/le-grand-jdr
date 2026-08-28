@@ -2046,6 +2046,12 @@ export function editItemSpell(item, idx, onSave, charForCalc = null) {
 function _modalChar() {
   return _itemEditCtx?.charForCalc ?? _getCurrentSpellChar() ?? null;
 }
+
+// Les invocations utilisent un profil de calcul virtuel : leurs sorts ne sont
+// pas soumis aux noyaux débloqués sur le personnage qui les possède.
+function _canUseAllNoyaux(charForAccess) {
+  return STATE.isAdmin || !charForAccess || charForAccess.allNoyaux === true;
+}
 export function addItemSpell(item, onSave, charForCalc = null) {
   return editItemSpell(item, -1, onSave, charForCalc);
 }
@@ -2719,7 +2725,7 @@ async function _openClassicSortModal(idx, s, allTypes) {
   const selectedElement = s?.noyauTypeId || '';
   const charForAccess = _modalChar();
   const charElements = new Set(charForAccess?.elements || []);
-  let elements = STATE.isAdmin || !charForAccess
+  let elements = _canUseAllNoyaux(charForAccess)
     ? [...allTypes]
     : allTypes.filter(type => !type.isMagic || charElements.has(type.id));
   const legacyElement = selectedElement ? allTypes.find(type => type.id === selectedElement) : null;
@@ -2906,7 +2912,7 @@ export async function openSortModal(idx, s) {
   }
   const charForAccess = _modalChar();
   const charElements  = new Set(charForAccess?.elements || []);
-  const canUseAllNoyaux = STATE.isAdmin || !charForAccess;
+  const canUseAllNoyaux = _canUseAllNoyaux(charForAccess);
   const allowedNoyaux = canUseAllNoyaux
     ? [...allTypes]
     : allTypes.filter(n => !n.isMagic || charElements.has(n.id));
@@ -4032,6 +4038,7 @@ function _invocationCalcChar(invSort) {
       portee: 1, isDefault: true,
     } },
     maitrises: {}, sort_cats: [], deck_sorts: [], inventaire: [], elements: [],
+    allNoyaux: true,
   };
 }
 function _invCfgAddAction() {
@@ -4346,6 +4353,7 @@ function _libInvCalcChar(iv) {
     statsBonus: {},
     equipement: { 'Main principale': { nom: 'Attaque de la créature', degats: st.attaque, statAttaque:st.toucherStat, toucherStat:st.toucherStat, degatsStat:st.degatsStat, portee:st.portee, isDefault:true } },
     maitrises: {}, sort_cats: [], deck_sorts: Array.isArray(iv?.actions) ? iv.actions : [], inventaire: [], elements: [],
+    allNoyaux: true,
   };
 }
 // Lit les champs DOM → stats de l'invocation courante (sans toucher aux actions).
