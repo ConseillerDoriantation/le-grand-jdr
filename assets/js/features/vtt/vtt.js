@@ -61,6 +61,7 @@ import { CELL, CELL_M, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _
 import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual } from './vtt-render.js';
 import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenHealthMeta, tokenMovementMeta, tokenRelationTone } from './vtt-token-visual.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
+import { receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
 import {
   _startRuler, _updateRuler, _endRuler, _clearRuler, _showRulerHover, _hideRulerHover,
   _renderMjRulerRemote, _resetRuler, rulerActive, rulerBusy,
@@ -4200,7 +4201,8 @@ function _buildAttackOptions(t) {
       label: _isInvoc ? "Attaque de l'invocation" : 'Attaque sentinelle',
       rawDice: t.attackDice || '1d4',
       dice:    t.attackDice || '1d4',
-      portee:  t.range ?? 1,
+      // Portée effective du token : inclut notamment l'état « Allonge ».
+      portee:  ld.displayRange ?? t.range ?? 1,
       pmCost:  0,
       toucher: summonTouchTotal,
       toucherMod: _isInvoc ? summonTouchStatMod : undefined,
@@ -5006,6 +5008,10 @@ function _vttSpellPills(o, { includeTraits = true } = {}) {
     const _healUnit = o.isMana ? ' PM' : ' PV';
     pills.push(_vttAoptPill(isHeal ? 'heal' : 'dmg', `${isHeal ? _healIco : '🎲'} ${isHeal ? '+' : ''}${_esc(displayFormula)}${statNote}${isHeal ? _healUnit : ''}`));
   }
+  if (o.activeDmgCondition?.formula) {
+    const cond = o.activeDmgCondition;
+    pills.push(_vttAoptPill('enchant', `${_esc(cond.icon || '✨')} ${_esc(cond.label || 'État')} : +${_esc(cond.formula)}`));
+  }
   if (includeTraits) {
     _vttActionTraits(o).forEach(trait => pills.push(_vttAoptPill('traits', `🔖 ${_esc(trait)}`)));
   }
@@ -5051,6 +5057,20 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   const selfTarget = !!exOpts.selfTarget || (!noTgt && srcId === tgtId);
 
   const options = _buildAttackOptions(src);
+  // Les bonus d'état sont lus sur le TOKEN, y compris pour une invocation qui
+  // n'a volontairement aucune fiche personnage liée. On les rend visibles dès
+  // le sélecteur d'action ; le jet les relira ensuite à frais avant application.
+  const activeDmgCondition = _conditionDmgBonusOf(src);
+  if (activeDmgCondition) {
+    options.forEach(option => {
+      if (!receivesOffensiveDamageBonus(option)) return;
+      option.activeDmgCondition = {
+        formula: activeDmgCondition.formula,
+        icon: activeDmgCondition.lib?.icon || '✨',
+        label: activeDmgCondition.lib?.label || 'État offensif',
+      };
+    });
+  }
   // Cible d'abord : filtre par portee, en gardant les actions "sur soi".
   // Action d'abord : pas de cible, on garde tout et la portee sera verifiee a la visee.
   const inRange = noTgt
@@ -7913,9 +7933,7 @@ async function _vttRollAttack() {
     //  • Bonus appliqué UNIQUEMENT sur un coup réussi (pas sur les demi-dégâts).
     //  • Non cumulable : un seul buff dmg_bonus actif (le dernier appliqué wins,
     //    déjà garanti par _vttApplyEnchantBuffs qui retire les anciens).
-    const _isWeaponAttack = opt.id === 'weapon' || opt.id === 'weapon_secondary' || opt.id === 'npc_attack' || opt.id?.startsWith?.('beast_');
-    const _isActionType   = !opt.actionType || opt.actionType === 'action';
-    const _eligibleForEnchant = (_isWeaponAttack || opt.sortIdx !== undefined) && _isActionType;
+    const _eligibleForEnchant = receivesOffensiveDamageBonus(opt);
     let buffDmgBonus = 0;
     const buffDmgNotes = [];
     let buffDmgDetail = null; // { formula, rolls, mod, total, sortLabel, element }
