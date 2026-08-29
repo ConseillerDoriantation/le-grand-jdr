@@ -3756,6 +3756,9 @@ function _calcEnchantStateDmgAuto(s) {
   const id = s?.enchantEtatId || '';
   const condition = id ? _conditionsLibCache?.find(c => c.id === id) : null;
   if (!condition?.effects?.dmgDealtBonus) return '';
+  if (condition.effects.dmgDealtBonusScalesWithPower === false) {
+    return String(condition.effects.dmgDealtBonus);
+  }
   const nbP = (s?.runes || []).filter(r => r === 'Puissance').length;
   return `${1 + nbP}d4 +2`;
 }

@@ -19,7 +19,8 @@ import { _live, _scaledEnchantConditionFields } from './vtt-effective.js';
 import { bumpHeal } from '../../shared/stats.js';
 import {
   CONDITION_BY_ID, _STAT_SHORT, _buffShared, _consumeLuckyReroll,
-  _rollDiceDetailed, _setHp, _tokenStatMod, _vttLogSourceFields, _vttLogTargetFields, _vttLogSingleTargetFields,
+  _conditionStatRollMode, _rollDiceDetailed, _setHp, _tokenStatMod,
+  _vttConditionsBeforeStateApplication, _vttLogSourceFields, _vttLogTargetFields, _vttLogSingleTargetFields,
 } from './vtt.js';
 
 /** Applique les buffs d'enchantement (mode Dégâts arme OU mode État sur allié). */
@@ -69,13 +70,23 @@ export async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
       const td = VS.tokens[tid]?.data; if (!td) continue;
       let conds = (td.conditions || []).filter(c => c.source !== opt.label);
       const applied = [];
-      etatIds.forEach((etatId, idx) => {
-        if (conds.some(c => c.id === etatId)) return;   // pas de doublon d'état
+      for (const [idx, etatId] of etatIds.entries()) {
+        if (conds.some(c => c.id === etatId)) continue;   // pas de doublon d'état
+        const lib = CONDITION_BY_ID[etatId];
+        conds = await _vttConditionsBeforeStateApplication({ ...td, id: tid, conditions: conds }, lib);
         conds = [...conds, buildCond(etatId, idx)];
         applied.push(CONDITION_BY_ID[etatId]);
-      });
+      }
       if (!applied.length) continue;
-      await updateDoc(_tokRef(tid), { conditions: conds }).catch(() => {});
+      const saved = await updateDoc(_tokRef(tid), { conditions: conds })
+        .then(() => true)
+        .catch(error => {
+          console.error('[VTT] Enchantement non appliqué :', error);
+          showNotif(`Impossible d'appliquer l'enchantement : ${error?.message || error}`, 'error');
+          return false;
+        });
+      if (!saved) continue;
+      if (VS.tokens[tid]?.data) VS.tokens[tid].data.conditions = conds;
       const name = _live(td).displayName ?? td.name;
       showNotif(`${applied.map(l => l.icon).join('')} ${name} : ${applied.map(l => l.label).join(', ')}`, 'success');
     }
@@ -157,7 +168,14 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
   for (const tid of targetIds) {
     const td = VS.tokens[tid]?.data; if (!td) continue;
     const saveMod = _tokenStatMod(td, aff.saveStat);
-    const initialRoll = Math.floor(Math.random() * 20) + 1;
+    const conditionMode = _conditionStatRollMode(td, aff.saveStat, 'save');
+    const firstRoll = Math.floor(Math.random() * 20) + 1;
+    const secondRoll = conditionMode === 'advantage' || conditionMode === 'disadvantage'
+      ? Math.floor(Math.random() * 20) + 1 : null;
+    const initialRoll = conditionMode === 'advantage' ? Math.max(firstRoll, secondRoll)
+      : conditionMode === 'disadvantage' ? Math.min(firstRoll, secondRoll)
+      : firstRoll;
+    const conditionRolls = secondRoll == null ? [firstRoll] : [firstRoll, secondRoll];
     let roll = initialRoll;
     let tot = roll + saveMod;
     const luck = await _consumeLuckyReroll(tid, td, roll, roll === 1 || tot < aff.dd);
@@ -167,7 +185,9 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
     }
     const success = roll === 20 || (roll !== 1 && tot >= aff.dd);
     const tgtName = _live(td).displayName ?? td.name;
-    const rollStr = `JS ${statShortStr} ${roll}${saveMod>=0?'+':''}${saveMod}=${tot} vs DD${aff.dd}`;
+    const modeTxt = conditionMode === 'advantage' ? ' (avantage)'
+      : conditionMode === 'disadvantage' ? ' (désavantage)' : '';
+    const rollStr = `JS ${statShortStr}${modeTxt} ${roll}${saveMod>=0?'+':''}${saveMod}=${tot} vs DD${aff.dd}`;
 
     // ── Log du JS dans le chat ──────────────────────────────────────────
     // Permet au MJ et aux joueurs de voir le résultat du jet, le mod utilisé
@@ -188,7 +208,9 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       ..._vttLogTargetFields(td),
       conditionLabel: _effectLbl,
       sortLabel: opt.label || '',
-      statLabel: statShortStr, mod: saveMod, d20: roll, d20rolls: luck ? [initialRoll, luck.reroll] : null, total: tot, dd: aff.dd,
+      statLabel: statShortStr, mod: saveMod, d20: roll,
+      d20rolls: luck ? [...conditionRolls, luck.reroll] : (conditionRolls.length > 1 ? conditionRolls : null),
+      rollMode: conditionMode || 'normal', total: tot, dd: aff.dd,
       passed: success,
       createdAt: serverTimestamp(),
     }).catch(() => {});
@@ -222,7 +244,7 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       //   le calcul au démarrage du combat (sinon l'état durerait à l'infini)
       const expiresAtRound = (round > 0 && !isConsumed && dur > 0) ? round + dur - 1 : null;
       const pendingDuration = (round === 0 && !isConsumed && dur > 0) ? dur : null;
-      const existingConds = td.conditions || [];
+      const existingConds = await _vttConditionsBeforeStateApplication({ ...td, id: tid }, lib);
       if (existingConds.some(c => c.id === aff.etatId)) {
         showNotif(`${lib.icon} ${tgtName} portait déjà ${lib.label}`, 'info');
         continue;
@@ -239,7 +261,9 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       };
       // Surface l'erreur si l'update Firestore échoue (permissions, etc.)
       try {
-        await updateDoc(_tokRef(tid), { conditions: [...existingConds, newCond] });
+        const newConds = [...existingConds, newCond];
+        await updateDoc(_tokRef(tid), { conditions: newConds });
+        if (VS.tokens[tid]?.data) VS.tokens[tid].data.conditions = newConds;
         showNotif(`${lib.icon} ${tgtName} subit ${lib.label} · ${rollStr} (échec)`, 'success');
       } catch (err) {
         console.error('[VTT] État non appliqué :', err);

@@ -25,7 +25,10 @@ import { _STAT_KEY } from './vtt-constants.js';
 import { openModal, closeModalDirect, confirmModal, promptModal } from '../../shared/modal.js';
 import { listGithubFolder, GH_IMAGE_EXTS, slugFromFile, fileKey } from '../../shared/github-folder.js';
 import { resolveControlledTokenId } from './vtt-token-control.js';
-import { VTT_ACTIONS, _showEmoteBubble, _canControlToken, _tokenStatMod, _vttLogTargetFields } from './vtt.js'; // circ. (runtime)
+import {
+  VTT_ACTIONS, _showEmoteBubble, _canControlToken, _conditionStatRollMode,
+  _tokenStatMod, _vttLogTargetFields,
+} from './vtt.js'; // circ. (runtime)
 import { _renderInspector } from './vtt-inspector.js'; // re-render après changement de mode de jet
 
 // État émotes (déplacé de vtt.js). _emotes exporté : préchargé au montage côté vtt.js.
@@ -115,7 +118,11 @@ export async function _vttRollSkill(skillName, stat) {
   const armorRollMode = c
     ? getArmorSetRollModeFor(getArmorSetData(c), { stat: statKey, skill: skillName })
     : '';
-  const effectiveRollMode = combineArmorRollMode(VS.rollMode || 'normal', armorRollMode);
+  const conditionRollMode = _conditionStatRollMode(t, statKey, 'check');
+  const effectiveRollMode = combineArmorRollMode(
+    combineArmorRollMode(VS.rollMode || 'normal', armorRollMode),
+    conditionRollMode,
+  );
   const d20 = () => Math.floor(Math.random() * 20) + 1;
 
   let d1 = d20(), d2, roll;
@@ -139,6 +146,7 @@ export async function _vttRollSkill(skillName, stat) {
       rollMode: effectiveRollMode,
       rollModeRequested: VS.rollMode || 'normal',
       rollArmorMode: armorRollMode || null,
+      rollConditionMode: conditionRollMode || null,
       rollDice: d2 !== undefined ? [d1, d2] : [d1],
       rollRaw: roll, rollMod: mod, rollBonus: VS.rollBonus || 0,
       rollResult: total,

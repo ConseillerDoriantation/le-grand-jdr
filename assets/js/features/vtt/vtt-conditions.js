@@ -18,7 +18,10 @@ import { CONDITION_DEFAULT_LIBRARY } from '../../shared/conditions.js';
 import { _tokRef, _logCol } from './vtt-refs.js';
 import { _live } from './vtt-effective.js';
 import { _renderInspectorSoon } from './vtt-inspector.js';
-import { CONDITION_LIBRARY, CONDITION_BY_ID, _loadConditionsOverrides, _consumeLuckyReroll, _vttLogTargetFields } from './vtt.js';
+import {
+  CONDITION_LIBRARY, CONDITION_BY_ID, _loadConditionsOverrides, _consumeLuckyReroll,
+  _conditionStatRollMode, _vttConditionsBeforeStateApplication, _vttLogTargetFields,
+} from './vtt.js';
 
 function getVttConditionLibrary() {
   return CONDITION_LIBRARY.map(c => ({
@@ -159,8 +162,15 @@ export async function _vttConditionApply(tokenId, condId) {
     expiresAtRound,
     ...(pendingDuration != null ? { pendingDuration } : {}),
   };
-  const newConds = [...(t.conditions || []), cond];
-  await updateDoc(_tokRef(tokenId), { conditions: newConds }).catch(() => {});
+  const baseConds = await _vttConditionsBeforeStateApplication({ ...t, id: tokenId }, lib);
+  const newConds = [...baseConds, cond];
+  try {
+    await updateDoc(_tokRef(tokenId), { conditions: newConds });
+  } catch (error) {
+    showNotif(`Impossible d'appliquer ${lib.label} : ${error?.message || error}`, 'error');
+    return;
+  }
+  if (VS.tokens[tokenId]?.data) VS.tokens[tokenId].data.conditions = newConds;
   closeModalDirect();
   const durLbl = isConsumed ? ' (1 coup)'
     : (expiresAtRound != null || pendingDuration != null) ? ` (${dur} tour${dur>1?'s':''})` : '';
@@ -193,7 +203,14 @@ export async function _vttConditionSave(tokenId, idx) {
   const np = t.npcId ? VS.npcs[t.npcId] : null;
   const statSrc = ch || np || { stats: {} };
   const modVal = ch || np ? mod(statSrc) : 0;
-  const initialD20 = Math.floor(Math.random()*20)+1;
+  const conditionMode = _conditionStatRollMode(t, statKey, 'save');
+  const firstD20 = Math.floor(Math.random()*20)+1;
+  const secondD20 = conditionMode === 'advantage' || conditionMode === 'disadvantage'
+    ? Math.floor(Math.random()*20)+1 : null;
+  const initialD20 = conditionMode === 'advantage' ? Math.max(firstD20, secondD20)
+    : conditionMode === 'disadvantage' ? Math.min(firstD20, secondD20)
+    : firstD20;
+  const conditionRolls = secondD20 == null ? [firstD20] : [firstD20, secondD20];
   let d20 = initialD20;
   let total = d20 + modVal;
   const luck = await _consumeLuckyReroll(tokenId, t, d20, d20 === 1 || total < DD);
@@ -204,7 +221,9 @@ export async function _vttConditionSave(tokenId, idx) {
   const passed = d20 !== 1 && (d20 === 20 || total >= DD);
   const statLbl = statShort(statKey) || statKey;
   const luckTxt = luck ? ` 🍀 relance ${luck.reroll}→${d20}` : '';
-  showNotif(`🎲 JS ${statLbl} : d20[${d20}]${modVal>=0?'+':''}${modVal} = ${total} vs DD ${DD}${luckTxt} → ${passed?'✅ Réussi — état retiré':'❌ Échec'}`, passed?'success':'error');
+  const modeTxt = conditionMode === 'advantage' ? ' · avantage'
+    : conditionMode === 'disadvantage' ? ' · désavantage' : '';
+  showNotif(`🎲 JS ${statLbl}${modeTxt} : d20[${d20}]${modVal>=0?'+':''}${modVal} = ${total} vs DD ${DD}${luckTxt} → ${passed?'✅ Réussi — état retiré':'❌ Échec'}`, passed?'success':'error');
   // Log
   await addDoc(_logCol(), {
     type: 'save', authorId: STATE.user?.uid||null,
@@ -213,7 +232,9 @@ export async function _vttConditionSave(tokenId, idx) {
     characterImage: _live(t).displayImage || null,
     ..._vttLogTargetFields(t),
     conditionId: cond.id, conditionLabel: lib?.label || cond.id,
-    statLabel: statLbl, mod: modVal, d20, d20rolls: luck ? [initialD20, luck.reroll] : null, total, dd: DD, passed,
+    statLabel: statLbl, mod: modVal, d20,
+    d20rolls: luck ? [...conditionRolls, luck.reroll] : (conditionRolls.length > 1 ? conditionRolls : null),
+    rollMode: conditionMode || 'normal', total, dd: DD, passed,
     createdAt: serverTimestamp(),
   }).catch(()=>{});
   if (passed) {

@@ -903,6 +903,7 @@ export function bindRichTextCommandToolbar({
   editor,
   toolbar,
   signal,
+  selection = null,
   commandAttr = DEFAULT_COMMAND_ATTR,
   commands = RICH_TEXT_COMMANDS,
   statefulCommands = RICH_TEXT_STATEFUL_COMMANDS,
@@ -924,13 +925,24 @@ export function bindRichTextCommandToolbar({
 
   if (!editor || !toolbar) return syncToolbarState;
 
+  // Conserve la sélection avant que le bouton ne prenne le focus. Sans cela,
+  // certaines commandes natives (notamment Italique) s'appliquent au curseur
+  // replacé dans l'éditeur au lieu du texte qui venait d'être sélectionné.
+  toolbar.addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest(`[${commandAttr}]`);
+    if (!btn || !toolbar.contains(btn)) return;
+    selection?.save();
+    e.preventDefault();
+  }, { signal });
+
   toolbar.addEventListener('click', (e) => {
     const btn = e.target.closest(`[${commandAttr}]`);
     if (!btn || !toolbar.contains(btn)) return;
     e.preventDefault();
 
     const cmd = btn.getAttribute(commandAttr);
-    editor.focus();
+    if (selection) selection.restore();
+    else editor.focus({ preventScroll: true });
 
     let handled = false;
     if (richTextCommands.has(cmd)) {
@@ -942,6 +954,7 @@ export function bindRichTextCommandToolbar({
     }
 
     if (!handled) return;
+    selection?.save();
     syncToolbarState();
     onAfterCommand?.({ cmd, editor, button: btn, event: e });
   }, { signal });
@@ -975,6 +988,7 @@ export function bindRichTextToolbarControls({
     statefulCommands,
     onCommand,
     onAfterCommand,
+    selection,
     isConnected,
     onDisconnect,
   });
