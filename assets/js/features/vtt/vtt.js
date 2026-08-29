@@ -62,6 +62,7 @@ import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisu
 import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenHealthMeta, tokenMovementMeta, tokenRelationTone } from './vtt-token-visual.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
 import { receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
+import { conditionDamageReductionApplies, conditionStatRollMode } from './vtt-condition-rules.js';
 import {
   _startRuler, _updateRuler, _endRuler, _clearRuler, _showRulerHover, _hideRulerHover,
   _renderMjRulerRemote, _resetRuler, rulerActive, rulerBusy,
@@ -3780,6 +3781,9 @@ async function _vttApplyCasterConcentration(srcId, opt) {
   if (!srcId || !opt?.mods?.concentration) return;
   const src = VS.tokens[srcId]?.data;
   if (!src) return;
+  // Rage et états équivalents interdisent de démarrer ou maintenir une
+  // concentration, y compris si l'état vient d'être appliqué par ce sort.
+  if (_hasConditionEffect(src, 'cantCastSpells')) return;
   const label = opt.label || 'Sort concentré';
   const dd = opt.mods.concentration.dd ?? 11;
   const existing = (src.conditions || []).filter(c =>
@@ -4203,12 +4207,14 @@ function _buildAttackOptions(t) {
       dice:    t.attackDice || '1d4',
       // Portée effective du token : inclut notamment l'état « Allonge ».
       portee:  ld.displayRange ?? t.range ?? 1,
+      isMeleeAttack: (parseInt(t.range) || 1) <= 1,
       pmCost:  0,
       toucher: summonTouchTotal,
       toucherMod: _isInvoc ? summonTouchStatMod : undefined,
       toucherSetBonus: _isInvoc ? summonTouchFlat : undefined,
       toucherSetBonusLabel: 'Base',
       toucherStatLabel: invocationStatShort(summonTouchStat),
+      dmgStatKey: summonDmgStat,
       dmgStatMod: summonDmgStatMod,
       dmgStatLabel: invocationStatShort(summonDmgStat),
       maitriseBonus: 0,
@@ -4226,7 +4232,7 @@ function _buildAttackOptions(t) {
     });
 
     // ── Invocation : ses actions (sorts connus) deviennent des attaques ──
-    if (_isInvoc && Array.isArray(t.summonActions) && t.summonActions.length) {
+    if (_isInvoc && !_hasConditionEffect(t, 'cantCastSpells') && Array.isArray(t.summonActions) && t.summonActions.length) {
       const _cChar = {
         id: `__summon_${t.id || 'token'}`,
         nom: t.name || 'Invocation',
@@ -4326,6 +4332,7 @@ function _buildAttackOptions(t) {
         rawDice: w.degats || '1d4',
         dice:    w.degats || '1d4',
         portee:  parseInt(w.portee) || 1,
+        isMeleeAttack: (parseInt(w.portee) || 1) <= 1,
         actionDescription: w.info || '',   // effet complémentaire (ex : « Si touche, applique Poison »)
         pmCost:  0,
         autoHit: !!w.toucherAuto,          // touche auto : pas de jet de toucher
@@ -4335,6 +4342,7 @@ function _buildAttackOptions(t) {
         toucherStatLabel: tStat === 'none'
           ? (flatT ? 'fixe' : '')
           : (statShort(tStat) || tStat) + (flatT ? ` +${flatT}` : ''),
+        dmgStatKey: dStat,
         dmgStatMod:   dStat === 'none' ? flatD : dMod + flatD,
         dmgStatLabel: dStat === 'none'
           ? (flatD ? 'fixe' : '—')
@@ -4366,6 +4374,8 @@ function _buildAttackOptions(t) {
         dice:    atk.degats,
         toucher: atk.toucher !== undefined && atk.toucher !== '' ? parseInt(atk.toucher)||0 : null,
         portee:  parseInt(atk.portee)||1,
+        isMeleeAttack: (parseInt(atk.portee) || 1) <= 1,
+        dmgStatKey: atk.degatsStat || 'force',
         pmCost:  0,
         typeRules: atkTypeRules,
         damageTypeId: atkTypeId,
@@ -4378,7 +4388,7 @@ function _buildAttackOptions(t) {
   // ── Créature : actions/sorts unifiés (sorts du bestiaire) ───────────────
   // Construit un char synthétique depuis la créature et utilise les helpers
   // existants pour les formules de dégâts/soin/affliction/enchant.
-  if (b && Array.isArray(b.actions) && b.actions.length) {
+  if (b && !_hasConditionEffect(t, 'cantCastSpells') && Array.isArray(b.actions) && b.actions.length) {
     const armesN = Array.isArray(b.armesNaturelles) ? b.armesNaturelles : [];
     const arme0  = armesN[0] || null;
     const bChar = {
@@ -4471,11 +4481,13 @@ function _buildAttackOptions(t) {
       rawDice,
       dice,
       portee: ld.displayRange ?? 1,
+      isMeleeAttack: (parseInt(weapon.portee) || 1) <= 1,
       pmCost: 0,
       toucher: ld.displayAttack ?? (touchMod + setTouch),
       toucherMod: touchMod,
       toucherSetBonus: setTouch,
       toucherStatLabel: statShort(touchStat) || touchStat,
+      dmgStatKey: dmgStat,
       dmgStatMod: dmgMod,
       dmgStatLabel: statShort(dmgStat) || dmgStat,
       maitriseBonus: 0,
@@ -4491,7 +4503,7 @@ function _buildAttackOptions(t) {
     const npcSpells = Array.isArray(n.deck_sorts)
       ? n.deck_sorts
       : (Array.isArray(n.actions) ? n.actions : []);
-    if (npcSpells.length) {
+    if (!_hasConditionEffect(t, 'cantCastSpells') && npcSpells.length) {
       const nChar = {
         id: n.id || `npc_${t.npcId}`,
         nom: n.nom || 'PNJ',
@@ -4594,7 +4606,12 @@ function _buildAttackOptions(t) {
     b.type === 'dmg_bonus' && b.slot === 'arme'
     && (b.expiresAtRound == null || _round_eff === 0 || _round_eff <= b.expiresAtRound)
   );
-  const _enchantDmgCondition = _conditionDmgBonusOf(t);
+  const _weaponIsMelee = wReplace
+    ? Math.max(1, parseInt(wReplace.weaponRange) || 1) <= 1
+    : (isUnarmed || _vttBestWeaponRange(c) <= 1);
+  const _enchantDmgCondition = _conditionDmgBonusOf(t, {
+    id: 'weapon', portee: wPortee, isMeleeAttack: _weaponIsMelee, dmgStatKeys: wDmgStats,
+  });
   // NB : le bonus toucher d'enchantement (toucher_bonus) n'est PAS baked ici —
   // il est ajouté frais au jet (_vttRollAttack) et au HUD pour rester à jour si
   // le buff est posé après la construction du panneau.
@@ -4608,10 +4625,12 @@ function _buildAttackOptions(t) {
     rawDice:          wDmgDiceRaw,
     dice:             wDmgDiceFinal,
     portee:           wPortee,
+    isMeleeAttack:    _weaponIsMelee,
     pmCost:           0,
     toucherMod:       wTchMod,
     toucherSetBonus:  wSetBonus,
     toucherStatLabel: statShort(wTchStat) || wTchStat,
+    dmgStatKeys:       wDmgStats,
     dmgStatMod:       wDmgMod,
     dmgStatLabel:     wDmgStatLabel,
     maitriseBonus:    wMaitrise,
@@ -4657,11 +4676,13 @@ function _buildAttackOptions(t) {
       rawDice: secondaryWeapon.degats,
       dice: secondaryWeapon.degats,
       portee: secondaryBaseRange + secondaryRangeBonus,
+      isMeleeAttack: secondaryBaseRange <= 1,
       pmCost: 0,
       actionType: 'action',
       toucherMod: secondaryTouchMod,
       toucherSetBonus: wSetBonus,
       toucherStatLabel: statShort(secondaryTouchStat) || secondaryTouchStat,
+      dmgStatKeys: secondaryDmgStats,
       dmgStatMod: secondaryDmgMod,
       dmgStatLabel: secondaryDmgStats.map(stat => statShort(stat) || stat).join('+'),
       maitriseBonus: secondaryMastery,
@@ -5060,17 +5081,17 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   // Les bonus d'état sont lus sur le TOKEN, y compris pour une invocation qui
   // n'a volontairement aucune fiche personnage liée. On les rend visibles dès
   // le sélecteur d'action ; le jet les relira ensuite à frais avant application.
-  const activeDmgCondition = _conditionDmgBonusOf(src);
-  if (activeDmgCondition) {
-    options.forEach(option => {
-      if (!receivesOffensiveDamageBonus(option)) return;
+  options.forEach(option => {
+    if (!receivesOffensiveDamageBonus(option)) return;
+    const activeDmgCondition = _conditionDmgBonusOf(src, option);
+    if (activeDmgCondition) {
       option.activeDmgCondition = {
         formula: activeDmgCondition.formula,
         icon: activeDmgCondition.lib?.icon || '✨',
         label: activeDmgCondition.lib?.label || 'État offensif',
       };
-    });
-  }
+    }
+  });
   // Cible d'abord : filtre par portee, en gardant les actions "sur soi".
   // Action d'abord : pas de cible, on garde tout et la portee sera verifiee a la visee.
   const inRange = noTgt
@@ -6999,6 +7020,17 @@ function _renderRemoteCastings(docs, prime = false) {
 
 async function _vttRollAttack() {
   const ctx = _atkCtx; if (!ctx) return;
+  const { srcId, tgtId, opt, lS, lT, allTargets } = ctx;
+  const src=VS.tokens[srcId]?.data, tgt=VS.tokens[tgtId]?.data;
+  if (!src || !tgt) return;
+  // Le panneau peut être resté ouvert pendant qu'un état a été appliqué :
+  // revérifier l'interdiction au clic empêche de contourner Rage via une UI obsolète.
+  if (opt?.sortIdx !== undefined && _hasConditionEffect(src, 'cantCastSpells')) {
+    showNotif('🔥 Rage : impossible de lancer un sort.', 'error');
+    _atkCtx = null;
+    closeModalDirect();
+    return;
+  }
   const mode     = document.getElementById('atk-mode')?.value || 'normal';
   const bonusHit     = parseInt(document.getElementById('atk-bonus-hit')?.value)||0;
   const bonusDmg     = parseInt(document.getElementById('atk-bonus-dmg')?.value)||0;
@@ -7007,11 +7039,8 @@ async function _vttRollAttack() {
   closeModalDirect();
   _atkCtx = null;
 
-  const { srcId, tgtId, opt, lS, lT, allTargets } = ctx;
   const weaponTechnique = ctx.weaponTechnique || null;
   const techniqueDefenseBonus = Math.max(0, parseInt(weaponTechnique?.defenseBonus, 10) || 0);
-  const src=VS.tokens[srcId]?.data, tgt=VS.tokens[tgtId]?.data;
-  if (!src||!tgt) return;
 
   // Liste des cibles : multi si allTargets, sinon cible unique
   const targetIds = allTargets && allTargets.length > 0 ? allTargets : [tgtId];
@@ -7939,7 +7968,7 @@ async function _vttRollAttack() {
     let buffDmgDetail = null; // { formula, rolls, mod, total, sortLabel, element }
     if (_eligibleForEnchant && !isFumble) {
       const round_eff = VS.session?.combat?.round ?? 0;
-      const srcDmgCondition = _conditionDmgBonusOf(src);
+      const srcDmgCondition = _conditionDmgBonusOf(src, opt);
       const srcDmgBuff = (src.buffs || []).find(b =>
         b.type === 'dmg_bonus' && b.slot === 'arme'
         && (b.expiresAtRound == null || round_eff === 0 || round_eff <= b.expiresAtRound)
@@ -8025,6 +8054,7 @@ async function _vttRollAttack() {
       if ((hit || halfDmg) && dmgTotal > 0) {
         let bestPct = 0; let bestLib = null;
         for (const { lib } of _activeConditionsOf(curTgtData)) {
+          if (!conditionDamageReductionApplies(lib?.effects, opt.damageTypeId || 'physique')) continue;
           const p = lib?.effects?.dmgReductionPct || 0;
           if (p > bestPct) { bestPct = p; bestLib = lib; }
         }
@@ -9796,6 +9826,19 @@ async function _vttConfirmAddPage(openAfter = true) {
   }
 }
 
+/** Prépare la liste d'états avant l'application d'un état qui rompt la
+ * concentration (Rage). Les effets liés sont nettoyés avant l'écriture unique
+ * de la nouvelle liste sur le token. */
+export async function _vttConditionsBeforeStateApplication(token, conditionLib) {
+  const conditions = Array.isArray(token?.conditions) ? token.conditions : [];
+  if (!conditionLib?.effects?.breakConcentration) return conditions;
+  const concentrating = conditions.filter(c => c?.concentrationSpell);
+  for (const cond of concentrating) {
+    await _vttBreakConcentrationEffects(token.id, cond);
+  }
+  return conditions.filter(c => !c?.concentrationSpell);
+}
+
 function _vttEditPage(id) {
   const p=VS.pages[id]; if (!p) return;
   openModal('✏️ Modifier la scène', `
@@ -10179,6 +10222,11 @@ export function _activeConditionsOf(token) {
     out.push({ cond: c, lib });
   }
   return out;
+}
+
+/** Mode de jet apporté par les états pour une caractéristique donnée. */
+export function _conditionStatRollMode(token, statKey, kind = 'check') {
+  return conditionStatRollMode(_activeConditionsOf(token), statKey, kind);
 }
 
 /** Helper : retourne les modificateurs avantage/désavantage d'un attaquant et d'une cible

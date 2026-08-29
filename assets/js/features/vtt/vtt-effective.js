@@ -13,6 +13,7 @@ import { _norm } from '../../shared/html.js';
 import { getMod, calcPVMax, calcPMMax, calcCA, calcVitesse, computeEquipStatsBonus, computeEquipDerivedBonus } from '../../shared/char-stats.js';
 import { getMainWeapon, getArmorSetData } from '../../shared/equipment-utils.js';
 import { getEquipmentSlots, getPrimaryWeaponSlotId } from '../../shared/equipment-slots.js';
+import { conditionDamageBonusApplies, conditionDamageFormula } from './vtt-condition-rules.js';
 import { _numOr, _activeConditionsOf, _npcStatMod, _npcCombat } from './vtt.js'; // circ. (runtime)
 
 /** Somme des bonus de toucher actifs (enchantement mode Toucher) sur un token.
@@ -54,14 +55,23 @@ export function _conditionCritRangeBonusOf(tok) {
     }, 0);
 }
 
-export function _conditionDmgBonusOf(tok) {
+function _conditionTokenLevel(tok) {
+  if (tok?.summonKind === 'invocation') return Math.max(1, parseInt(tok.summonLevel) || 1);
+  const c = _characterForToken(tok);
+  const n = tok?.npcId ? VS.npcs[tok.npcId] : null;
+  const b = tok?.beastId ? VS.bestiary[tok.beastId] : null;
+  return Math.max(1, parseInt(c?.niveau ?? n?.niveau ?? b?.niveau) || 1);
+}
+
+export function _conditionDmgBonusOf(tok, option = null) {
+  const level = _conditionTokenLevel(tok);
   const active = _activeConditionsOf(tok)
     .map(({ cond, lib }) => ({
       cond,
       lib,
-      formula: (cond.dmgDealtBonusFormula || lib.effects?.dmgDealtBonus || '').trim(),
+      formula: conditionDamageFormula(lib.effects, level, cond.dmgDealtBonusFormula),
     }))
-    .filter(x => !!x.formula);
+    .filter(x => !!x.formula && (!option || conditionDamageBonusApplies(x.lib.effects, option)));
   return active[0] || null;
 }
 
@@ -87,7 +97,11 @@ export function _scaledEnchantConditionFields(lib, power = 0, amplification = 0,
     fields.rangeBonus = base + amp;
   }
   if (eff.dmgDealtBonus) {
-    fields.dmgDealtBonusFormula = (overrides.dmgFormula || '').trim() || `${1 + fields.enchantPower}d4 +2`;
+    const customFormula = (overrides.dmgFormula || '').trim();
+    if (customFormula) fields.dmgDealtBonusFormula = customFormula;
+    else if (eff.dmgDealtBonusScalesWithPower !== false) {
+      fields.dmgDealtBonusFormula = `${1 + fields.enchantPower}d4 +2`;
+    }
   }
   return fields;
 }

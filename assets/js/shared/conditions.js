@@ -97,6 +97,24 @@ export const CONDITION_DEFAULT_LIBRARY = [
     desc:'À chaque dégât reçu, le porteur lance un JS Sagesse contre le DD de l\'état. Sur échec, l\'état prend fin.',
     defaultSaveStat:'sagesse',      defaultDC:11, defaultDuration:2,
     effects:{ concentrationCheck:true } },
+  { id:'rage',          label:'Rage',        icon:'🔥', color:'#ef4444',
+    desc:'Rage D&D : avantage aux tests et JS de Force, bonus de dégâts aux attaques de mêlée utilisant la Force (+2, puis +3 niv. 9 et +4 niv. 16), résistance aux dégâts contondants, perforants et tranchants. Impossible de lancer des sorts ou de maintenir une concentration.',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:10,
+    effects:{
+      checkAdvantageStats:['force'], saveAdvantageStats:['force'],
+      dmgDealtBonus:'2',
+      dmgDealtBonusByLevel:[
+        { minLevel:9, formula:'3' },
+        { minLevel:16, formula:'4' },
+      ],
+      dmgDealtBonusScalesWithPower:false,
+      dmgDealtWeaponOnly:true, dmgDealtMeleeOnly:true, dmgDealtRequiredStat:'force',
+      dmgReductionPct:50,
+      // `physique` garde la compatibilité avec les aventures utilisant encore
+      // le type agrégé historique au lieu des trois types D&D détaillés.
+      dmgReductionTypes:['physique', 'contondant', 'perforant', 'tranchant'],
+      cantCastSpells:true, breakConcentration:true,
+    } },
   { id:'empowered',     label:'Renforcé',    icon:'✨', color:'#e8b84b',
     desc:'L\'allié gagne un bonus de dégâts d\'attaque, renforcé par les runes Puissance du sort.',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
@@ -118,7 +136,7 @@ export const CONDITION_DEFAULT_LIBRARY = [
 
 export const CONDITION_DEFAULT_IDS = new Set(CONDITION_DEFAULT_LIBRARY.map(c => c.id));
 const CONDITION_REMOVED_IDS = new Set(['poisoned', 'warded']);
-const CONDITION_ENCHANTMENT_DEFAULT_IDS = new Set(['swift', 'allonge', 'chanceux', 'guided', 'distant_ward', 'melee_ward', 'focused', 'empowered']);
+const CONDITION_ENCHANTMENT_DEFAULT_IDS = new Set(['swift', 'allonge', 'chanceux', 'guided', 'distant_ward', 'melee_ward', 'focused', 'rage', 'empowered']);
 const CONDITION_NON_SPELL_DEFAULT_IDS = new Set(['dodge', 'hidden', 'disengaged']);
 
 function normalizeSpellUsage(entry = {}, fallback = null) {

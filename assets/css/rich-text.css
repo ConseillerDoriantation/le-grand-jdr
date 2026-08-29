@@ -70,6 +70,15 @@
   word-break: break-word;
 }
 
+/* Le balisage italique sauvegardé (<i>/<em>) doit rester visible même dans
+   les vues dont les pictogrammes utilisent aussi ces tags avec un reset CSS. */
+.rte-editor i,
+.rte-editor em,
+.rte-content i,
+.rte-content em {
+  font-style: italic;
+}
+
 /* ── Tableaux ───────────────────────────────── */
 .rte-table-picker,
 .rte-table-menu {
