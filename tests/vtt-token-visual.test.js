@@ -7,10 +7,21 @@ import {
   tokenDetailLevel,
   tokenEffectsSignature,
   tokenHealthMeta,
+  tokenFootprintMeta,
   tokenMovementMeta,
   tokenRelationTone,
   normalizeTokenTurnOrder,
 } from '../assets/js/features/vtt/vtt-token-visual.js';
+
+test('l’empreinte tactique distingue un portrait rond d’un token 3×3', () => {
+  assert.deepEqual(tokenFootprintMeta(3, 3), {
+    width: 3, height: 3, isLarge: true, label: '3×3',
+  });
+  assert.equal(tokenFootprintMeta(1, 1).isLarge, false);
+  assert.deepEqual(tokenFootprintMeta(99, 0), {
+    width: 5, height: 1, isLarge: true, label: '5×1',
+  });
+});
 
 test('la santé d’un token distingue état inconnu, blessure et mise à terre', () => {
   assert.equal(tokenHealthMeta(null, null).tone, 'unknown');

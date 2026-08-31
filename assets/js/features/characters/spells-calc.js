@@ -16,11 +16,11 @@ import { calculateSummonStats, normalizeInvocationStats } from '../../shared/inv
 // Cœurs purs extraits (testables à froid). Ré-exportés plus bas pour l'API publique.
 import {
   _calcAfflictionDot, _autoSourceAfflictionDot, _calcEnchantDegats,
-  _hasLaceration, _calcLaceration, _calcChance, _calcDrainPct, _calcConcentrationDD, scaleSpellDiceFormula,
+  _hasLaceration, _calcLaceration, _calcChance, _calcDrainPct, _calcConcentrationDD, _calcAfflictionDD, scaleSpellDiceFormula,
 } from '../../shared/spell-math.js';
 export {
   _calcAfflictionDot, _autoSourceAfflictionDot, _calcEnchantDegats,
-  _hasLaceration, _calcLaceration, _calcDrainPct,
+  _hasLaceration, _calcLaceration, _calcDrainPct, _calcAfflictionDD,
 };
 
 // ── Caches chargés depuis openSortModal ───────────────────────────────────────
@@ -1311,9 +1311,7 @@ export function _buildSortResume(s, c) {
       if (etat?.defaultSaveStat) saveStat = etat.defaultSaveStat;
     }
     if (s.afflictionSaveStat && !(mode === 'etat' && etat?.defaultSaveStat)) saveStat = s.afflictionSaveStat;
-    const dd = mode === 'etat'
-      ? (Number.isFinite(parseInt(etat?.defaultDC)) ? parseInt(etat.defaultDC) : 11)
-      : 11 + 2 * (nbAff - 1);
+    const dd = _calcAfflictionDD(s) ?? 11;
     const statLbl = statShort(saveStat) || saveStat;
     // Cibles pilotées par Dispersion (le nb de runes Affliction scale le DD, pas les cibles).
     const nbCib   = _calcSortCibles(s);
