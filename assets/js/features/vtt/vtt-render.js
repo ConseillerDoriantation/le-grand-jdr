@@ -17,7 +17,7 @@ import { githubPagesUrl } from '../../shared/github-folder.js';
 import { _pgRef } from './vtt-refs.js';
 import { _showCtxMenu } from './vtt-utils.js';
 import { showNotif } from '../../shared/notifications.js';
-import { tokenActiveEffects, tokenEffectsSignature, tokenHealthMeta } from './vtt-token-visual.js';
+import { tokenActiveEffects, tokenEffectsSignature, tokenFootprintMeta, tokenHealthMeta } from './vtt-token-visual.js';
 
 function _resolveMapImageUrl(url, sourcePath = '') {
   const raw = String(sourcePath || url || '').trim();
@@ -60,6 +60,13 @@ export function _buildTokenVisual(t, ld, condById) {
   const bW = Math.max(62, Math.min(CELL*sw*0.98, 150));
   const nameW = bW;
   const typeColor = TYPE_COLOR[t.type] ?? '#94a3b8';
+  const footprint = tokenFootprintMeta(sw, sh);
+  const footprintW = CELL * footprint.width;
+  const footprintH = CELL * footprint.height;
+  const footprintX = -footprintW / 2 + 2;
+  const footprintY = -footprintH / 2 + 2;
+  const footprintInnerW = footprintW - 4;
+  const footprintInnerH = footprintH - 4;
   const health = tokenHealthMeta(ld.displayHp, ld.displayHpMax);
   const round = VS.session?.combat?.round ?? 0;
   const effects = tokenActiveEffects(t, condById, round);
@@ -74,6 +81,38 @@ export function _buildTokenVisual(t, ld, condById) {
   g.setAttr('displayHpMaxSnapshot', health.known ? health.maximum : null);
   g.setAttr('displayPmSnapshot', ld.displayPm == null ? null : Number(ld.displayPm));
   g.setAttr('displayPmMaxSnapshot', Number.isFinite(Number(ld.displayPmMax)) ? Number(ld.displayPmMax) : null);
+
+  // Empreinte tactique alignée sur la grille. Le portrait reste rond, mais un
+  // grand token montre désormais clairement toutes les cases qu'il occupe.
+  // Le rectangle sert aussi de hitbox : ses angles sont réellement cliquables.
+  if (footprint.isLarge) {
+    g.add(new K.Rect({
+      x:footprintX, y:footprintY, width:footprintInnerW, height:footprintInnerH,
+      cornerRadius:5, fill:'rgba(15,23,42,.13)', stroke:'rgba(226,232,240,.74)',
+      strokeWidth:1.35, dash:[7,4], listening:true, name:'token-hit token-footprint',
+    }));
+    const corner = Math.min(13, CELL * .28);
+    const left=footprintX, top=footprintY, right=footprintX+footprintInnerW, bottom=footprintY+footprintInnerH;
+    [
+      [left+corner,top,left,top,left,top+corner],
+      [right-corner,top,right,top,right,top+corner],
+      [left,bottom-corner,left,bottom,left+corner,bottom],
+      [right-corner,bottom,right,bottom,right,bottom-corner],
+    ].forEach(points => g.add(new K.Line({
+      points, stroke:typeColor, strokeWidth:2.5, lineCap:'round', lineJoin:'round',
+      listening:false, name:'token-footprint-corner',
+    })));
+    g.add(new K.Rect({
+      x:left+5, y:top+5, width:27, height:13, cornerRadius:6.5,
+      fill:'rgba(5,8,14,.92)', stroke:typeColor, strokeWidth:1,
+      listening:false, name:'token-footprint-size',
+    }));
+    g.add(new K.Text({
+      x:left+5, y:top+7, width:27, height:9, text:footprint.label,
+      align:'center', fontSize:7.5, fontStyle:'bold', fill:'#f8fafc',
+      fontFamily:'Inter,sans-serif', listening:false, name:'token-footprint-size',
+    }));
+  }
 
   // Ombre au sol + fond : le token se détache même sur une battlemap chargée.
   g.add(new K.Ellipse({ x:0, y:portraitY+4, radiusX:rx+4, radiusY:ry+4, fill:'rgba(0,0,0,.48)',
@@ -143,6 +182,30 @@ export function _buildTokenVisual(t, ld, condById) {
   g.add(new K.Ellipse({
     x:0, y:portraitY, radiusX:rx+2.5, radiusY:ry+2.5, stroke:'#4ade80', strokeWidth:1.5,
     fill:'transparent', visible:false, listening:false, name:'target-inner',
+  }));
+  // Les états tactiques reprennent aussi la forme carrée de l'emprise. Ainsi,
+  // sélectionner un 3×3 met en évidence ses neuf cases, pas seulement l'image.
+  g.add(new K.Rect({
+    x:footprintX, y:footprintY, width:footprintInnerW, height:footprintInnerH,
+    cornerRadius:5, stroke:'#60a5fa', strokeWidth:2.5,
+    fill:'rgba(37,99,235,.06)', visible:false, listening:false, name:'sel-footprint',
+  }));
+  g.add(new K.Rect({
+    x:footprintX, y:footprintY, width:footprintInnerW, height:footprintInnerH,
+    cornerRadius:5, stroke:'#fbbf24', strokeWidth:2.5, dash:[8,4],
+    fill:'rgba(245,158,11,.06)', visible:false, listening:false, name:'atk-footprint',
+  }));
+  g.add(new K.Rect({
+    x:footprintX, y:footprintY, width:footprintInnerW, height:footprintInnerH,
+    cornerRadius:5, stroke:'#fb7185', strokeWidth:2.5,
+    fill:'rgba(239,68,68,.08)', shadowColor:'#ef4444', shadowBlur:7, shadowOpacity:.45,
+    visible:false, listening:false, name:'reachable-footprint',
+  }));
+  g.add(new K.Rect({
+    x:footprintX, y:footprintY, width:footprintInnerW, height:footprintInnerH,
+    cornerRadius:5, stroke:'#ef4444', strokeWidth:3.5, dash:[8,4],
+    fill:'rgba(239,68,68,.08)', shadowColor:'#ef4444', shadowBlur:10, shadowOpacity:.65,
+    visible:false, listening:false, name:'target-footprint',
   }));
 
   // À 0 PV, l'état est explicite sans devoir lire la jauge.

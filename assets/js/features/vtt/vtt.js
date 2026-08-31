@@ -63,6 +63,8 @@ import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSigna
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
 import { receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
 import { conditionDamageReductionApplies, conditionStatRollMode } from './vtt-condition-rules.js';
+import { naturalWeaponCombatContext } from '../../shared/bestiary-combat.js';
+import { _calcAfflictionDD, splitSpellDiceFormula } from '../../shared/spell-math.js';
 import {
   _startRuler, _updateRuler, _endRuler, _clearRuler, _showRulerHover, _hideRulerHover,
   _renderMjRulerRemote, _resetRuler, rulerActive, rulerBusy,
@@ -1300,10 +1302,14 @@ function _setRingTone(ring, tone='selected') {
 }
 
 function _setSelectionRing(id, visible=true) {
-  const ring=VS.tokens[id]?.shape?.findOne('.sel');
+  const shape=VS.tokens[id]?.shape;
+  const ring=shape?.findOne('.sel');
   if (!ring) return;
   _setRingTone(ring, 'selected');
   ring.visible(visible);
+  const footprint=shape.findOne('.sel-footprint');
+  _setRingTone(footprint, 'selected');
+  footprint?.visible(visible);
 }
 
 function _targetTone(srcId, tgtId, friendlyAction=false) {
@@ -1313,6 +1319,7 @@ function _targetTone(srcId, tgtId, friendlyAction=false) {
 function _configureTargetRings(shape, tone='hostile', visible=true) {
   const ring=shape?.findOne('.target');
   const inner=shape?.findOne('.target-inner');
+  const footprint=shape?.findOne('.target-footprint');
   if (!ring) return;
   _setRingTone(ring, tone);
   ring.dash(tone==='hostile'?[6,3]:[]);
@@ -1321,6 +1328,35 @@ function _configureTargetRings(shape, tone='hostile', visible=true) {
     _setRingTone(inner, tone);
     inner.visible(visible && tone==='friendly');
   }
+  if (footprint) {
+    _setRingTone(footprint, tone);
+    footprint.dash(tone==='hostile'?[8,4]:[]);
+    footprint.fill(tone==='friendly'?'rgba(34,197,94,.08)':'rgba(239,68,68,.08)');
+    footprint.visible(visible);
+  }
+}
+
+function _setAttackRing(id, visible=true) {
+  const shape=VS.tokens[id]?.shape;
+  shape?.findOne('.atk')?.visible(visible);
+  shape?.findOne('.atk-footprint')?.visible(visible);
+}
+
+function _setReachableFootprint(id, mode='weapon', visible=true) {
+  const footprint=VS.tokens[id]?.shape?.findOne('.reachable-footprint');
+  if (!footprint) return;
+  const extended=mode==='extended';
+  const friendly=mode==='friendly';
+  const stroke=friendly?'#4ade80':extended?'#a78bfa':'#fb7185';
+  footprint.stroke(stroke);
+  footprint.shadowColor(stroke);
+  footprint.fill(friendly?'rgba(34,197,94,.08)':extended?'rgba(167,139,250,.08)':'rgba(239,68,68,.08)');
+  footprint.dash(extended?[7,4]:[]);
+  footprint.visible(visible);
+}
+
+function _clearReachableFootprints() {
+  Object.values(VS.tokens || {}).forEach(entry => entry?.shape?.findOne('.reachable-footprint')?.visible(false));
 }
 
 function _setTargetRing(id, tone='hostile', visible=true) {
@@ -1726,7 +1762,7 @@ function _buildShape(t) {
         _select(t.id);
         return;
       }
-      VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
+      _setSelectionRing(VS.selected, false);
       _clearTargetRings();
       VS.selected = t.id;
       _setTargetRing(t.id, _targetTone(srcId, t.id));
@@ -1861,11 +1897,10 @@ function _patchShapeImpl(id) {
       if (_attackSrc) {
         _configureTargetRings(shape, _targetTone(_attackSrc, id), true);
       } else {
-        _setRingTone(shape.findOne('.sel'), 'selected');
-        shape.findOne('.sel')?.visible(true);
+        _setSelectionRing(id, true);
       }
     }
-    if (_attackSrc === id) shape.findOne('.atk')?.visible(true);
+    if (_attackSrc === id) _setAttackRing(id, true);
     if (hpDelta) _showTokenDelta(e.data, hpDelta, 'hp');
     if (pmDelta) _showTokenDelta(e.data, pmDelta, 'pm');
     if (expiredEffects.length) {
@@ -1937,9 +1972,9 @@ function _patchShapeImpl(id) {
 export function _select(id) {
   _clearAim(); // changer de sélection annule une visée action-first en cours
   if (VS.imgTr&&VS.selImg) { VS.imgTr.nodes([]); VS.selImg=null; VS.layers.map?.batchDraw(); }
-  VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
+  _setSelectionRing(VS.selected, false);
   _clearTargetRings();
-  VS.tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
+  _setAttackRing(_attackSrc, false);
   _attackSrc=null; _clearHL();
   VS.selected=id;
   _setSelectionRing(id, true);
@@ -1953,7 +1988,7 @@ export function _select(id) {
   if (data && _canControlToken(data)) {
     _showMoveRange(data);    // cases bleues cliquables (déplacement)
     _attackSrc = id;
-    VS.tokens[id]?.shape?.findOne('.atk')?.visible(true);
+    _setAttackRing(id, true);
     VS.layers.token.batchDraw();
     _showAttackRange(data);
     _hideActBar();
@@ -1975,9 +2010,9 @@ function _updateTokenDraggable() {
 }
 
 export function _deselect() {
-  VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
+  _setSelectionRing(VS.selected, false);
   _clearTargetRings();
-  VS.tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
+  _setAttackRing(_attackSrc, false);
   _clearAim(); _hideActBar();
   VS.selected=null; _attackSrc=null; _clearHL(); _clearMultiSelect(); _renderInspector(null);
   _syncTokenMovementVisual();
@@ -2003,9 +2038,9 @@ export function _showActBar(srcId) {
   const t = VS.tokens[srcId]?.data;
   if (!t || !_canControlToken(t)) { _hideActBar(); return; }
   _clearTargetRings();
-  VS.tokens[_attackSrc]?.shape?.findOne('.atk')?.visible(false);
+  _setAttackRing(_attackSrc, false);
   _attackSrc = srcId;
-  VS.tokens[srcId]?.shape?.findOne('.atk')?.visible(true);
+  _setAttackRing(srcId, true);
   VS.layers.token?.batchDraw();
   _execAttack(srcId, null).catch(e => console.error('[vtt] HUD action:', e));   // rend le picker dans le HUD (cf. fin de _execAttack)
 }
@@ -2082,7 +2117,7 @@ function _startAim(srcId, opt) {
   _mtClear(false); _zoneClear(); _selfClear();
   _aimSrcId = srcId; _aimOpt = opt;
   _attackSrc = srcId;   // garde l'anneau d'attaque + court-circuite la redirection vers son propre token
-  VS.tokens[srcId]?.shape?.findOne('.atk')?.visible(true);
+  _setAttackRing(srcId, true);
   VS.layers.token?.batchDraw();
   _showAimRange(srcId, opt);
   _showAimHud(opt);
@@ -2108,7 +2143,15 @@ function _showAimRange(srcId, opt) {
       fill:`rgba(${c3},0.16)`, stroke:`rgba(${c3},0.62)`, strokeWidth:1.4, listening:false });
     VS.layers.grid.add(rect); _moveHL.push(rect);
   }
+  Object.values(VS.tokens || {}).forEach(entry => {
+    const target=entry?.data;
+    if (!target || target.id===srcId || target.pageId!==VS.activePage?.id) return;
+    if (_tokenAttackDistance(t, target, portee) <= portee) {
+      _setReachableFootprint(target.id, friendly?'friendly':'weapon', true);
+    }
+  });
   VS.layers.grid.batchDraw();
+  VS.layers.token?.batchDraw();
 }
 
 function _showAimHud(opt) {
@@ -2168,7 +2211,7 @@ function _aimCancel() {
   if (d && _canControlToken(d)) {
     _showMoveRange(d);
     _showAttackRange(d);
-    VS.tokens[sid]?.shape?.findOne('.atk')?.visible(true);
+    _setAttackRing(sid, true);
     VS.layers.token?.batchDraw();
   }
   showNotif('Visée annulée', 'info');
@@ -2237,7 +2280,13 @@ function _showMoveRange(t) {
   }
   VS.layers.grid.batchDraw();
 }
-export function _clearHL() { _moveHL.forEach(r=>r.destroy()); _moveHL=[]; VS.layers.grid?.batchDraw(); }
+export function _clearHL() {
+  _moveHL.forEach(r=>r.destroy());
+  _moveHL=[];
+  _clearReachableFootprints();
+  VS.layers.grid?.batchDraw();
+  VS.layers.token?.batchDraw();
+}
 
 /**
  * Refresh immédiat des zones de déplacement + attaque du token sélectionné.
@@ -2440,7 +2489,7 @@ function _spawnCornerEmote(emoteUrl, emoteName) {
 // ── Multi-sélection ─────────────────────────────────────────────
 function _clearMultiSelect() {
   for (const id of VS.selectedMulti) {
-    if (id!==VS.selected) VS.tokens[id]?.shape?.findOne('.sel')?.visible(false);
+    if (id!==VS.selected) _setSelectionRing(id, false);
   }
   VS.selectedMulti.clear();
   VS.layers.token?.batchDraw();
@@ -2457,7 +2506,7 @@ function _toggleMultiSelect(id) {
   }
   if (VS.selectedMulti.has(id)) {
     VS.selectedMulti.delete(id);
-    VS.tokens[id]?.shape?.findOne('.sel')?.visible(false);
+    _setSelectionRing(id, false);
   } else {
     VS.selectedMulti.add(id);
     _setSelectionRing(id, true);
@@ -2517,7 +2566,18 @@ function _showAttackRange(t) {
           strokeWidth:1.2, dash:[6,4], listening:false });
     VS.layers.grid.add(rect); _moveHL.push(rect);
   }
+  // La cible atteignable est encadrée sur toute son empreinte. Le calcul reste
+  // bord à bord entre rectangles, donc les angles d'un 3×3 comptent réellement.
+  Object.values(VS.tokens || {}).forEach(entry => {
+    const target=entry?.data;
+    if (!target || target.id===t.id || target.pageId!==VS.activePage?.id) return;
+    const weaponReach = !!weaponOpt && _tokenAttackDistance(t, target, weaponPortee) <= weaponPortee;
+    const extendedReach = !weaponReach && options.some(o => _tokenAttackDistance(t, target, o.portee) <= o.portee);
+    if (weaponReach) _setReachableFootprint(target.id, 'weapon', true);
+    else if (extendedReach) _setReachableFootprint(target.id, 'extended', true);
+  });
   VS.layers.grid.batchDraw();
+  VS.layers.token?.batchDraw();
 }
 async function _moveTo(id, col, row) {
   const cur = VS.tokens[id]?.data;
@@ -2707,21 +2767,6 @@ function _parseCaBonus(caStr) {
 
 const _sortDureeVtt = calcSpellDuration;
 const _vttSortCibles = calcSpellTargets;
-
-/** Sépare "NdM +K +L" en { rawDice:"NdM", fixed:K+L }. */
-function _splitDiceFormula(str) {
-  const s = String(str || '').replace(/\s+/g, '');
-  const dm = s.match(/^(\d+d\d+)/i);
-  if (!dm) return { rawDice: str, fixed: 0 };
-  const rawDice = dm[1];
-  let fixed = 0;
-  const re = /([+-])(\d+)/g;
-  let m;
-  while ((m = re.exec(s.slice(rawDice.length))) !== null) {
-    fixed += m[1] === '+' ? parseInt(m[2]) : -parseInt(m[2]);
-  }
-  return { rawDice, fixed };
-}
 
 // Métadonnées d'affichage des interactions de dégâts (icône, couleur, label).
 // Palette neutre côté attaquant : aucune couleur ne sous-entend "bon / mauvais"
@@ -3023,9 +3068,9 @@ function _vttSpellMods(s) {
           }
           // Legacy : si un ancien sort a explicitement afflictionSaveStat, on respecte
           if (s.afflictionSaveStat && !(mode === 'etat' && conditionLib?.defaultSaveStat)) saveStat = s.afflictionSaveStat;
-          const dd = mode === 'etat'
-            ? (Number.isFinite(parseInt(conditionLib?.defaultDC)) ? parseInt(conditionLib.defaultDC) : 11)
-            : 11 + 2 * (nbAff - 1);
+          // Le DD appartient à la composition du sort, pas à l'état choisi.
+          // Les modes DoT et État progressent donc pareil avec les runes.
+          const dd = _calcAfflictionDD(s) ?? 11;
           return {
             slot:     s.afflictionSlot || 'torse',
             mode,
@@ -3908,8 +3953,8 @@ function _buildSpellOption(s, ctx) {
     pmCost, basePm, pmRaw, pmSetDelta = 0,
     fallbackTouchStat,              // stat toucher par défaut si s.toucherStat absent
     fallbackDmgStat,                // stat dégâts par défaut si s.degatsStat absent
-    fallbackTouchMod = 0,           // mod toucher si c absent / 'none'
-    fallbackDmgMod   = 0,           // mod dégâts si c absent / 'none'
+    fallbackTouchMod = null,        // mod toucher pré-calculé si fourni
+    fallbackDmgMod   = null,        // mod dégâts pré-calculé si fourni
     touchSetBonus    = 0,           // bonus set armure (perso uniquement)
     enchantOnlyAlsoEtat = true,     // false = item branch (que enchantArmeDmg compte)
     extras = {},                    // _itemAction / _catMeta / etc.
@@ -4065,7 +4110,7 @@ function _buildSpellOption(s, ctx) {
   // (branche Lacération d'Affliction → mods.laceration ; ou ancienne rune legacy)
   if (types.includes('offensif') || runes.includes('Lacération') || !!mods?.laceration) {
     const fullFormula    = _vttSortDmgFormula(s, c);
-    const { rawDice: sRawDice, fixed: sFixed } = _splitDiceFormula(fullFormula);
+    const { rawDice: sRawDice, fixed: sFixed } = splitSpellDiceFormula(fullFormula);
     const spellTypeId    = s.noyauTypeId || null;
     const spellTypeRules = spellTypeId
       ? getDamageTypeRules(VS.damageTypes, spellTypeId)
@@ -4075,8 +4120,10 @@ function _buildSpellOption(s, ctx) {
     const ovrDmgStat     = resolveSpellModifierStat(s, 'degatsStat', fallbackDmgStat);
     const ovrTouchNoMod  = !ovrTouchStat;
     const ovrDmgNoMod    = !ovrDmgStat;
-    const ovrTouchMod    = ovrTouchNoMod ? 0 : (c ? getMod(c, ovrTouchStat) : fallbackTouchMod);
-    const ovrDmgMod      = ovrDmgNoMod   ? 0 : (c ? getMod(c, ovrDmgStat)   : fallbackDmgMod);
+    const touchAutoMod   = !s.toucherStat && Number.isFinite(fallbackTouchMod) ? fallbackTouchMod : null;
+    const dmgAutoMod     = !s.degatsStat && Number.isFinite(fallbackDmgMod) ? fallbackDmgMod : null;
+    const ovrTouchMod    = ovrTouchNoMod ? 0 : (touchAutoMod ?? (c ? getMod(c, ovrTouchStat) : 0));
+    const ovrDmgMod      = ovrDmgNoMod   ? 0 : (dmgAutoMod ?? (c ? getMod(c, ovrDmgStat) : 0));
     const mainP          = c ? getMainWeapon(c) : null;
     const spellMaitrise  = s.designMode !== 'classic' && usesSpellMastery(s)
       ? getMaitriseBonus(c, mainP || {})
@@ -4096,6 +4143,9 @@ function _buildSpellOption(s, ctx) {
       damageTypeIcon: spellTypeObj?.icon || '',
       damageTypeColor: spellTypeObj?.color || '',
       spellElementChoices,
+      // Valeur réellement utilisée par le jet. Sans cette copie, le VTT
+      // retombait sur displayAttack (souvent +5), malgré un toucher auto à +10.
+      toucher: ovrTouchMod + (parseInt(touchSetBonus) || 0),
       toucherMod: ovrTouchMod, toucherSetBonus: touchSetBonus,
       toucherStatLabel: ovrTouchNoMod ? '' : (statShort(ovrTouchStat) || ovrTouchStat),
       dmgStatMod: ovrDmgMod,
@@ -4117,7 +4167,7 @@ function _buildSpellOption(s, ctx) {
     // Régén PM : formule littérale (pas de scaling Protection ni de stat auto) ;
     // la stat explicite éventuelle est déjà intégrée dans la formule.
     const soinFormula = isManaRegen ? _calcSortMana(s, c) : _vttSortSoinFormula(s, c);
-    const { rawDice: sRawDice, fixed: soinFormulaFixed } = _splitDiceFormula(soinFormula);
+    const { rawDice: sRawDice, fixed: soinFormulaFixed } = splitSpellDiceFormula(soinFormula);
     const mainP = c ? getMainWeapon(c) : null;
     const soinIsMagic = !!(VS.damageTypes && s?.noyauTypeId
       && VS.damageTypes.find(x => x.id === s.noyauTypeId)?.isMagic);
@@ -4397,6 +4447,7 @@ function _buildAttackOptions(t) {
   if (b && !_hasConditionEffect(t, 'cantCastSpells') && Array.isArray(b.actions) && b.actions.length) {
     const armesN = Array.isArray(b.armesNaturelles) ? b.armesNaturelles : [];
     const arme0  = armesN[0] || null;
+    const bWeapon = naturalWeaponCombatContext(arme0 || {}, _bMod);
     const bChar = {
       id:   b.id || `beast_${t.beastId}`,
       nom:  b.nom || 'Créature',
@@ -4412,11 +4463,12 @@ function _buildAttackOptions(t) {
       equipement: arme0 ? {
         'Main principale': {
           nom:         arme0.nom || 'Arme naturelle',
-          degats:      arme0.degats || '1d4',
-          degatsStat:  arme0.degatsStat  || 'force',
-          degatsStats: [arme0.degatsStat || 'force'],
-          toucherStat: arme0.toucherStat || arme0.degatsStat || 'force',
-          statAttaque: arme0.toucherStat || arme0.degatsStat || 'force',
+          degats:      bWeapon.damageFormula,
+          degatsStat:  bWeapon.damageStat,
+          degatsStats: [bWeapon.damageStat],
+          toucherStat: bWeapon.touchStat,
+          statAttaque: bWeapon.touchStat,
+          toucherFlat: bWeapon.touchFlat,
           portee:      arme0.portee || '',
           typeArme:    'CaC',
           format:      'Arme naturelle',
@@ -4426,8 +4478,6 @@ function _buildAttackOptions(t) {
       } : {},
       deck_sorts: b.actions, sort_cats: [], elements: [],
     };
-    const bMainP   = bChar.equipement['Main principale'];
-    const bStatKey = bMainP?.statAttaque || bMainP?.toucherStat || 'force';
 
     b.actions.forEach((s, actIdx) => {
       const baseRange = (s.portee != null && Number.isFinite(parseInt(s.portee)))
@@ -4443,9 +4493,13 @@ function _buildAttackOptions(t) {
         c:     bChar,
         portee: baseRange,
         pmCost: cout, basePm: cout, pmRaw, pmSetDelta: 0,
-        fallbackTouchStat: bStatKey, fallbackDmgStat: bStatKey,
-        touchSetBonus: 0,
+        fallbackTouchStat: bWeapon.touchStat,
+        fallbackDmgStat: bWeapon.damageStat,
+        fallbackTouchMod: bWeapon.touchStatMod,
+        fallbackDmgMod: bWeapon.damageStatMod,
+        touchSetBonus: bWeapon.touchFlat,
         enchantOnlyAlsoEtat: true,
+        extras: { toucherSetBonusLabel: 'Arme naturelle' },
       })));
     });
   }
@@ -7172,8 +7226,8 @@ async function _vttRollAttack() {
     await updateDoc(_tokRef(src.id), patch).catch(()=>{});
   };
   const _cleanup = () => {
-    VS.tokens[srcId]?.shape?.findOne('.atk')?.visible(false);
-    VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
+    _setAttackRing(srcId, false);
+    _setSelectionRing(VS.selected, false);
     _hideActBar(); _clearAim();
     VS.selected=null; _attackSrc=null; _clearHL(); _renderInspector(null);
     VS.layers.token?.batchDraw();
@@ -8986,6 +9040,17 @@ function _applyBestiaryCatalog(list) {
   _renderTraySoon();
 }
 
+// Les actions du Bestiaire sont éditées dans une autre feature de la SPA. Leur
+// écriture explicite publie ce signal afin que le VTT déjà ouvert ne conserve
+// jamais une ancienne formule (sans listener Firestore supplémentaire).
+document.addEventListener('bestiary:creature-updated', event => {
+  const id = event?.detail?.id;
+  const patch = event?.detail?.patch;
+  if (!id || !patch || !VS.bestiary[id]) return;
+  VS.bestiary[id] = { ...VS.bestiary[id], ...patch };
+  _patchBestiaryTokenShapes(new Set([id]));
+});
+
 async function _loadBestiaryCatalog() {
   try {
     _applyBestiaryCatalog(await loadCollection('bestiary'));
@@ -9798,6 +9863,7 @@ function _vttAddPage(encodedFolder = '') {
     </div>`, { subtitle:folder ? `Nouvelle scène dans « ${folder} »` : 'Une grille prête pour tes cartes et tes combats', accent:'#7eb0ff' });
   _vttPgInit('vpf-');
 }
+
 // Datalist des dossiers de pages existants (suggestions de saisie)
 function _pageFolderDatalist(id) {
   const folders = [...new Set(Object.values(VS.pages).map(p => (p.folder||'').trim()).filter(Boolean))]

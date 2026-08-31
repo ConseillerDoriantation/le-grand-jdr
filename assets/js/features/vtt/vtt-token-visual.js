@@ -55,6 +55,18 @@ export function tokenRelationTone(source, target, friendlyAction = false) {
   return sourceFriendly === targetFriendly ? 'friendly' : 'hostile';
 }
 
+/** Métadonnées d'empreinte tactique, indépendantes du portrait rond. */
+export function tokenFootprintMeta(width = 1, height = 1) {
+  const w = Math.max(1, Math.min(5, parseInt(width) || 1));
+  const h = Math.max(1, Math.min(5, parseInt(height) || 1));
+  return {
+    width: w,
+    height: h,
+    isLarge: w > 1 || h > 1,
+    label: `${w}×${h}`,
+  };
+}
+
 export function tokenDeltaMeta(delta, resource = 'hp') {
   const value=Number(delta);
   if (!Number.isFinite(value) || value===0) return null;

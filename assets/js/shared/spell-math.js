@@ -14,6 +14,22 @@ export function scaleSpellDiceFormula(formula, extraDice = 0) {
   return `${parseInt(match[1]) + (parseInt(extraDice) || 0)}${match[2]}${match[3] || ''}`;
 }
 
+/** Sépare les dés des bonus fixes (2d6+4-1 → dés 2d6, fixe +3). */
+export function splitSpellDiceFormula(formula) {
+  const compact = String(formula || '').replace(/\s+/g, '');
+  const diceMatch = compact.match(/^(\d+d\d+)/i);
+  if (!diceMatch) return { rawDice: formula, fixed: 0 };
+
+  const rawDice = diceMatch[1];
+  let fixed = 0;
+  const termPattern = /([+-])(\d+)/g;
+  let term;
+  while ((term = termPattern.exec(compact.slice(rawDice.length))) !== null) {
+    fixed += term[1] === '+' ? parseInt(term[2]) : -parseInt(term[2]);
+  }
+  return { rawDice, fixed };
+}
+
 /** DoT d'affliction effectif (mode DoT). Manuel si fourni, sinon (1+nbPuiss)d4 +2. */
 export function _calcAfflictionDot(s) {
   const manual = (s?.afflictionDotFormula || '').trim();
@@ -78,4 +94,10 @@ export function _calcConcentrationDD(s) {
   const nb = (s?.runes || []).filter(r => r === 'Concentration').length;
   if (!nb) return null;
   return Math.max(5, 11 - 2 * (nb - 1));
+}
+
+/** DD d'Affliction : base 11, +2 par rune supplémentaire. */
+export function _calcAfflictionDD(s) {
+  const count = (s?.runes || []).filter(r => r === 'Affliction').length;
+  return count > 0 ? 11 + 2 * (count - 1) : null;
 }

@@ -23,6 +23,7 @@ import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { spellActionCardHtml } from '../shared/spell-action-card.js';
 import { DAMAGE_RELATIONS } from '../shared/damage-profile.js';
+import { naturalWeaponDamageFormula } from '../shared/bestiary-combat.js';
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // DÃ‰LÃ‰GATION D'Ã‰VÃ‰NEMENTS â€” remplace les onclick/oninput/onchange inline
@@ -213,17 +214,9 @@ function _bstCreatureToChar(c, armeId) {
   };
   const equipement = {};
   if (arme) {
-    // Bonus fixes : on les place dans la formule de dÃ©gÃ¢ts s'ils existent et
-    // qu'aucun bonus n'est dÃ©jÃ  collÃ© Ã  la fin de la formule. Ã‡a permet Ã 
-    // _calcSortDegats de les "ramasser" comme un bonus de maÃ®trise.
-    let degats = arme.degats || '';
-    const flatD = parseInt(arme.degatsFlat) || 0;
-    if (flatD && !/[+\-]\s*\d+\s*$/.test(degats)) {
-      degats = `${degats}${flatD > 0 ? ' +' : ' '}${flatD}`.trim();
-    }
     equipement['Main principale'] = {
       nom:         arme.nom || 'Arme naturelle',
-      degats,
+      degats:      naturalWeaponDamageFormula(arme),
       degatsStat:  arme.degatsStat  || 'force',
       degatsStats: [arme.degatsStat || 'force'],
       toucherStat: arme.toucherStat || arme.degatsStat || 'force',
@@ -268,13 +261,28 @@ async function _bstEnsureSpellsModule() {
   return mod;
 }
 
-function _bstActionsPersist() {
+async function _bstActionsPersist() {
   if (!_bstActionsCreatureId) return;
-  _bstQueueSave(_bstActionsCreatureId, { actions: _bstActionsCache, attaques: [] });
+  const creatureId = _bstActionsCreatureId;
+  const patch = { actions: _bstActionsCache.map(a => ({ ...a })), attaques: [] };
   const c = STORE.creatures.find(x => x.id === _bstActionsCreatureId);
-  if (c) { c.actions = _bstActionsCache.map(a => ({...a})); c.attaques = []; }
+  if (c) Object.assign(c, patch);
   const count = document.querySelector(`[data-bst-count="${_bstActionsCreatureId}-actions"]`);
   if (count) count.textContent = _bstActionsCache.length;
+
+  // Une action est un enregistrement explicite depuis une modale : elle doit être
+  // disponible immédiatement dans le VTT. Le debounce des champs inline créait
+  // une course : le VTT pouvait recharger l'ancienne formule avant l'écriture,
+  // puis la conserver jusqu'à la prochaine ouverture de la table.
+  document.dispatchEvent(new CustomEvent('bestiary:creature-updated', {
+    detail: { id: creatureId, patch },
+  }));
+  await updateInCol(STORE.currentCol || 'bestiary', creatureId, patch);
+  // Si le module VTT a été chargé pendant l'écriture, ce second signal lui donne
+  // aussi la valeur confirmée sans ajouter de listener Firestore permanent.
+  document.dispatchEvent(new CustomEvent('bestiary:creature-updated', {
+    detail: { id: creatureId, patch },
+  }));
 }
 
 function _bstRefreshActionsHost() {
@@ -306,7 +314,7 @@ async function _bstAddAction() {
   const fakeItem = { actions: _bstActionsCache, nom: c.nom || 'Creature' };
   mod.addItemSpell(fakeItem, async (updatedItem) => {
     _bstActionsCache = Array.isArray(updatedItem?.actions) ? updatedItem.actions.map(a => ({...a})) : [];
-    _bstActionsPersist();
+    await _bstActionsPersist();
     _bstRefreshActionsHost();
   }, charForCalc);
 }
@@ -320,7 +328,7 @@ async function _bstEditAction(idx) {
   const fakeItem = { actions: _bstActionsCache, nom: c.nom || 'Creature' };
   mod.editItemSpell(fakeItem, idx, async (updatedItem) => {
     _bstActionsCache = Array.isArray(updatedItem?.actions) ? updatedItem.actions.map(a => ({...a})) : [];
-    _bstActionsPersist();
+    await _bstActionsPersist();
     _bstRefreshActionsHost();
   }, charForCalc);
 }
@@ -329,7 +337,7 @@ async function _bstRemoveAction(idx) {
   if (!Number.isFinite(idx) || !_bstActionsCache[idx]) return;
   if (!await confirmModal('Supprimer cette action ?', { title: 'Action', confirmLabel: 'Supprimer' })) return;
   _bstActionsCache.splice(idx, 1);
-  _bstActionsPersist();
+  await _bstActionsPersist();
   _bstRefreshActionsHost();
 }
 

@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   _calcAfflictionDot, _autoSourceAfflictionDot, _calcEnchantDegats,
-  _hasLaceration, _calcLaceration, _calcChance, _calcDrainPct, _calcConcentrationDD, scaleSpellDiceFormula,
+  _hasLaceration, _calcLaceration, _calcChance, _calcDrainPct, _calcConcentrationDD, _calcAfflictionDD, scaleSpellDiceFormula,
+  splitSpellDiceFormula,
 } from '../assets/js/shared/spell-math.js';
 
 const rep = (rune, n) => Array.from({ length: n }, () => rune);
@@ -11,6 +12,11 @@ test('le redimensionnement des dés conserve le bonus fixe de la formule', () =>
   assert.equal(scaleSpellDiceFormula('2d6+4', 0), '2d6+4');
   assert.equal(scaleSpellDiceFormula('2d6 +4', 1), '3d6 +4');
   assert.equal(scaleSpellDiceFormula('7 dégâts', 2), '7 dégâts');
+});
+
+test('le VTT sépare et conserve le +4 de 2d6+4', () => {
+  assert.deepEqual(splitSpellDiceFormula('2d6+4'), { rawDice: '2d6', fixed: 4 });
+  assert.deepEqual(splitSpellDiceFormula('2d6 + 4 - 1'), { rawDice: '2d6', fixed: 3 });
 });
 
 test('_calcAfflictionDot : auto (1+Puiss)d4 +2, manuel prioritaire', () => {
@@ -72,4 +78,11 @@ test('_calcConcentrationDD : 11 - 2×(n-1), minimum 5', () => {
   assert.equal(_calcConcentrationDD({ runes: rep('Concentration', 3) }), 7);
   assert.equal(_calcConcentrationDD({ runes: rep('Concentration', 6) }), 5, 'plancher 5');
   assert.equal(_calcConcentrationDD({ runes: [] }), null);
+});
+
+test('_calcAfflictionDD : le DD progresse pour le DoT comme pour un état', () => {
+  assert.equal(_calcAfflictionDD({ runes: ['Affliction'] }), 11);
+  assert.equal(_calcAfflictionDD({ runes: rep('Affliction', 2) }), 13);
+  assert.equal(_calcAfflictionDD({ runes: rep('Affliction', 4), afflictionMode: 'etat' }), 17);
+  assert.equal(_calcAfflictionDD({ runes: [] }), null);
 });
