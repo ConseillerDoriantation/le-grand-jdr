@@ -3076,7 +3076,14 @@ function _wallCommentHtml(comment, post) {
 }
 
 function _wallPostMenu(post) {
-  if (_wallUi.menuPostId !== post.id || post.legacy) return '';
+  if (_wallUi.menuPostId !== post.id) return '';
+  // Les publications antérieures à la refonte sont stockées ensemble dans
+  // bastionAnnonces/main. Seul le MJ peut réécrire ce document historique : on
+  // lui expose donc la suppression, sans proposer les actions incompatibles
+  // avec ce format (édition, statut, épinglage).
+  if (post.legacy) return STATE.isAdmin ? `<div class="bs-wall-post-menu" role="menu">
+    <button type="button" class="is-danger" data-action="_bastionDeleteAnnonce" data-id="${_esc(post.id)}">🗑 Supprimer cette ancienne publication</button>
+  </div>` : '';
   const mine = post.uid === STATE.user?.uid;
   const statusActions = post.type === 'message' ? '' : Object.entries(BASTION_WALL_STATUSES)
     .filter(([id]) => id !== post.status)
@@ -3099,7 +3106,7 @@ function _wallCard(post) {
   const type = BASTION_WALL_TYPES[post.type] || BASTION_WALL_TYPES.message;
   const status = BASTION_WALL_STATUSES[post.status] || BASTION_WALL_STATUSES.active;
   const identity = _wallIdentity();
-  const canDelete = STATE.isAdmin || (post.uid && post.uid === STATE.user?.uid);
+  const canDelete = STATE.isAdmin || (!post.legacy && post.uid && post.uid === STATE.user?.uid);
   const counts = bastionWallReactionCounts(post);
   const mine = identity ? post.reactions?.[identity.charId]?.emoji : '';
   const comments = bastionWallCommentsForPost(post, _wallComments);
@@ -3325,12 +3332,19 @@ async function _bastionPostAnnonce() {
 
 async function _bastionDeleteAnnonce(id) {
   const post = _wallPostById(id);
-  if (!post || (!STATE.isAdmin && post.uid !== STATE.user?.uid)) { showNotif('Tu ne peux supprimer que tes publications.', 'error'); return; }
+  const canDelete = post && (STATE.isAdmin || (!post.legacy && post.uid === STATE.user?.uid));
+  if (!canDelete) { showNotif('Tu ne peux supprimer que tes publications.', 'error'); return; }
   const confirmed = await confirmModal('Supprimer définitivement cette publication et toutes ses réponses ?', { title: 'Supprimer la publication', confirmLabel: 'Supprimer', danger: true }).catch(() => false);
   if (!confirmed) return;
   if (post.legacy) {
-    const items = _legacyAnnonces.filter(item => item.id !== id).map(({ legacy, legacyIndex, ...item }) => item);
-    await tryDoc('bastionAnnonces', 'main', { items });
+    const items = _legacyAnnonces.filter(item => item.id !== id).map(({ legacy, legacyIndex, ...item }) => {
+      // Ne pas transformer les identifiants d'affichage générés par la refonte
+      // en données persistées sur toutes les annonces historiques restantes.
+      if (item.id === `legacy_${legacyIndex}`) delete item.id;
+      return item;
+    });
+    if (!await tryDoc('bastionAnnonces', 'main', { items })) return;
+    _legacyAnnonces = _legacyAnnonces.filter(item => item.id !== id);
   } else {
     const [comments, notifications] = await Promise.all([
       loadCollectionWhere('bastionWallComments', 'postId', '==', id).catch(() => []),
@@ -3342,7 +3356,12 @@ async function _bastionDeleteAnnonce(id) {
     ]);
     if (post.mediaId) await deleteFromCol('bastionWallMedia', post.mediaId).catch(() => {});
     await deleteFromCol('bastionAnnonces', id);
+    _annonces = _annonces.filter(item => item.id !== id);
+    _wallComments = _wallComments.filter(comment => comment.postId !== id);
   }
+  _wallUi.menuPostId = '';
+  if (STATE.currentPage === 'bastion') _renderPage();
+  showNotif(post.legacy ? 'Ancienne publication supprimée.' : 'Publication supprimée.', 'success');
 }
 
 async function _bastionWallMutate(id, mutator) {

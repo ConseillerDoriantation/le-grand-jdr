@@ -2034,9 +2034,14 @@ function _achOpenLightbox(itemId) {
     overlay.style.opacity = '0';
     setTimeout(() => overlay.remove(), 160);
   };
-  overlay.addEventListener('click', close);
+  // Les actions de la fiche sont déléguées au document via `data-action`.
+  // Ne jamais bloquer leur propagation : seule la zone noire de fond ferme la
+  // visionneuse. L'ancien stopPropagation posé sur tout le cadre rendait les
+  // boutons Modifier, Supprimer et les raccourcis de mission inopérants.
+  overlay.addEventListener('click', event => {
+    if (event.target === overlay) close();
+  });
   const frameEl = overlay.querySelector('.ach-lb-frame');
-  frameEl?.addEventListener('click', e => e.stopPropagation());
   // Le cadre s'adapte au ratio RÉEL de l'image : sans ça la colonne média gardait
   // un format fixe et l'image arrivait rétrécie entre deux bandes noires.
   // Calculé en JS : en CSS, `aspect-ratio` sur une colonne de grille auto crée une

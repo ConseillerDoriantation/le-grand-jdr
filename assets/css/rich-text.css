@@ -68,6 +68,9 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
+  /* La police choisie ne fournit pas toujours de vraie variante italique.
+     Le body interdit sa synthèse ; on la réactive seulement pour le contenu riche. */
+  font-synthesis: style;
 }
 
 /* Le balisage italique sauvegardé (<i>/<em>) doit rester visible même dans

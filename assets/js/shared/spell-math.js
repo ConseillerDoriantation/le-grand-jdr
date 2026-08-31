@@ -6,6 +6,14 @@
 // spells-calc.js les importe et les ré-exporte → API publique inchangée.
 // ══════════════════════════════════════════════════════════════════════════════
 
+/** Ajoute des dés à une formule sans perdre son bonus fixe (2d6+4 → 3d6+4). */
+export function scaleSpellDiceFormula(formula, extraDice = 0) {
+  const raw = String(formula || '').trim();
+  const match = raw.match(/^(\d+)(d\d+)(.*)$/i);
+  if (!match) return raw;
+  return `${parseInt(match[1]) + (parseInt(extraDice) || 0)}${match[2]}${match[3] || ''}`;
+}
+
 /** DoT d'affliction effectif (mode DoT). Manuel si fourni, sinon (1+nbPuiss)d4 +2. */
 export function _calcAfflictionDot(s) {
   const manual = (s?.afflictionDotFormula || '').trim();

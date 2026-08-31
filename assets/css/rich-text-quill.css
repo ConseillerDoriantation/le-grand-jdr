@@ -29,6 +29,7 @@
   min-height: var(--rtq-min-h, 200px);
   color: var(--text);
   line-height: 1.6;
+  font-synthesis: style;
 }
 .ql-editor.ql-blank::before {
   color: var(--text-muted);

@@ -15,14 +15,23 @@ export function usesHealingMastery(spell = {}, isMagic = false, statKey = '') {
   return usesSpellMastery(spell) && isMagic && !!statKey && statKey !== 'none';
 }
 
+const SPELL_MODIFIER_STATS = new Set([
+  'force', 'dexterite', 'intelligence', 'sagesse', 'constitution', 'charisme',
+]);
+const SPELL_NO_MODIFIER_ALIASES = new Set(['none', 'non', 'aucun', 'aucune', 'sans']);
+
 /**
  * Résout une statistique de sort sans écraser le choix explicite « aucune ».
  * `null` signifie qu'aucun modificateur ne doit être calculé ni affiché.
  */
 export function resolveSpellModifierStat(spell = {}, field, fallback = '') {
-  const override = spell?.[field];
-  if (override === 'none') return null;
-  return override || fallback || null;
+  const override = String(spell?.[field] || '').trim().toLowerCase();
+  if (SPELL_NO_MODIFIER_ALIASES.has(override)) return null;
+  if (SPELL_MODIFIER_STATS.has(override)) return override;
+
+  const fallbackKey = String(fallback || '').trim().toLowerCase();
+  if (SPELL_NO_MODIFIER_ALIASES.has(fallbackKey)) return null;
+  return SPELL_MODIFIER_STATS.has(fallbackKey) ? fallbackKey : null;
 }
 
 export function calcSpellTargets(spell = {}) {

@@ -16,7 +16,7 @@ import { calculateSummonStats, normalizeInvocationStats } from '../../shared/inv
 // Cœurs purs extraits (testables à froid). Ré-exportés plus bas pour l'API publique.
 import {
   _calcAfflictionDot, _autoSourceAfflictionDot, _calcEnchantDegats,
-  _hasLaceration, _calcLaceration, _calcChance, _calcDrainPct, _calcConcentrationDD,
+  _hasLaceration, _calcLaceration, _calcChance, _calcDrainPct, _calcConcentrationDD, scaleSpellDiceFormula,
 } from '../../shared/spell-math.js';
 export {
   _calcAfflictionDot, _autoSourceAfflictionDot, _calcEnchantDegats,
@@ -140,7 +140,8 @@ export function _getSortAction(s) {
 export function _calcSortDegats(s, c) {
   if (s?.designMode === 'classic' && s?.classicFormulaFinal) {
     const base = (s?.degats || '').trim();
-    const mod = s?.degatsStat && s.degatsStat !== 'none' ? getMod(c, s.degatsStat) : 0;
+    const statKey = resolveSpellModifierStat(s, 'degatsStat');
+    const mod = statKey ? getMod(c, statKey) : 0;
     return mod ? `${base}${mod > 0 ? ' +' : ' '}${mod}` : base;
   }
   // Un sort en mode déplacement (rune Amplification → Déplacement) n'inflige jamais de dégâts.
@@ -187,7 +188,8 @@ export function _calcSortDegats(s, c) {
 export function _calcSortSoin(s, c) {
   if (s?.designMode === 'classic' && s?.classicFormulaFinal) {
     const base = (s?.soin || '').trim();
-    const mod = s?.degatsStat && s.degatsStat !== 'none' ? getMod(c, s.degatsStat) : 0;
+    const statKey = resolveSpellModifierStat(s, 'degatsStat');
+    const mod = statKey ? getMod(c, statKey) : 0;
     return mod ? `${base}${mod > 0 ? ' +' : ' '}${mod}` : base;
   }
   const runes  = s.runes || [];
@@ -197,7 +199,7 @@ export function _calcSortSoin(s, c) {
   // Stat de soin : 'none' = aucun modificateur (potion flat, etc.)
   const isMagic = _isNoyauMagic(s);
   const statKey = _getSortSoinStatKey(s, c);
-  const noMod   = statKey === 'none';
+  const noMod   = !statKey;
   const statVal = noMod ? 10 : ((c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0));
   const statMod = noMod ? 0 : Math.floor((Math.min(22, statVal) - 10) / 2);
   const statStr = statMod > 0 ? ` +${statMod}` : statMod < 0 ? ` ${statMod}` : '';
@@ -239,7 +241,7 @@ export function _calcSortMana(s, c) {
   const runes  = s?.runes || [];
   const nbProt = runes.filter(r => r === 'Protection').length;
   const base   = (s?.soin || '').trim();
-  const statKey = (s?.degatsStat && s.degatsStat !== 'none') ? s.degatsStat : null;
+  const statKey = resolveSpellModifierStat(s, 'degatsStat');
   const statMod = statKey ? getMod(c, statKey) : 0;
   const statStr = statMod > 0 ? ` +${statMod}` : statMod < 0 ? ` ${statMod}` : '';
   const dice = (!base || base.toLowerCase() === '= base') ? `${Math.max(1, nbProt)}d4` : base;
@@ -258,22 +260,11 @@ function _splitDiceBase(formula = '') {
   return { dice: m[1], tail: (m[2] || '').trim() };
 }
 
-function _isFlatTail(tail = '') {
-  return /^[+-]\s*\d+(?:\s*[+-]\s*\d+)*$/.test(String(tail || '').trim());
-}
-
-function _scaleDiceFormulaDice(formula, extraDice = 0) {
-  const raw = String(formula || '').trim();
-  const m = raw.match(/^(\d+)(d\d+)(.*)$/i);
-  if (!m) return raw;
-  return `${parseInt(m[1]) + (parseInt(extraDice) || 0)}${m[2]}`;
-}
-
 function _calcImpactDisplayParts(s, c) {
   if (s?.designMode === 'classic' && s?.classicFormulaFinal) {
-    const statKey = s?.degatsStat || 'none';
-    const statMod = statKey !== 'none' ? getMod(c, statKey) : 0;
-    return { label: _calcSortDegats(s, c), statLbl: statKey !== 'none' ? statShort(statKey) : '', statMod, maitrise: 0 };
+    const statKey = resolveSpellModifierStat(s, 'degatsStat');
+    const statMod = statKey ? getMod(c, statKey) : 0;
+    return { label: _calcSortDegats(s, c), statLbl: statKey ? statShort(statKey) : '', statMod, maitrise: 0 };
   }
   const mainP = getMainWeapon(c);
   const baseRaw = (s?.degats || '').trim();
@@ -286,10 +277,8 @@ function _calcImpactDisplayParts(s, c) {
   const statMod = statKey ? Math.floor((Math.min(22, statVal) - 10) / 2) : 0;
   const statLbl = statKey ? (statShort(statKey) || statKey.slice(0, 3)) : '';
   const maitrise = usesSpellMastery(s) ? getSharedMaitriseBonus(c, mainP) : 0;
-  const { dice, tail } = _splitDiceBase(_scaleDiceFormulaDice(base, nbPuiss));
-  const hasDerivedFlat = statMod !== 0 || maitrise !== 0;
-  const pieces = [dice];
-  if (tail && !(hasDerivedFlat && _isFlatTail(tail))) pieces.push(tail);
+  const { dice, tail } = _splitDiceBase(scaleSpellDiceFormula(base, nbPuiss));
+  const pieces = [`${dice}${tail || ''}`];
   if (statMod) pieces.push(`${statLbl}(${_fmtSigned(statMod)})`);
   if (maitrise) pieces.push(`Maîtrise(${_fmtSigned(maitrise)})`);
   return { label: pieces.join(' + '), statLbl, statMod, maitrise };
@@ -297,9 +286,9 @@ function _calcImpactDisplayParts(s, c) {
 
 function _calcHealDisplayParts(s, c) {
   if (s?.designMode === 'classic' && s?.classicFormulaFinal) {
-    const statKey = s?.degatsStat || 'none';
-    const statMod = statKey !== 'none' ? getMod(c, statKey) : 0;
-    return { label: _calcSortSoin(s, c), statLbl: statKey !== 'none' ? statShort(statKey) : '', statMod, maitrise: 0 };
+    const statKey = resolveSpellModifierStat(s, 'degatsStat');
+    const statMod = statKey ? getMod(c, statKey) : 0;
+    return { label: _calcSortSoin(s, c), statLbl: statKey ? statShort(statKey) : '', statMod, maitrise: 0 };
   }
   const runes = s?.runes || [];
   const nbProt = runes.filter(r => r === 'Protection').length;
@@ -307,19 +296,17 @@ function _calcHealDisplayParts(s, c) {
   const isDefault = !baseRaw || baseRaw.toLowerCase() === '= base';
   const base = isDefault ? '1d4' : baseRaw;
   const statKey = _getSortSoinStatKey(s, c);
-  const noMod = statKey === 'none';
+  const noMod = !statKey;
   const statVal = noMod ? 10 : ((c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0));
   const statMod = noMod ? 0 : Math.floor((Math.min(22, statVal) - 10) / 2);
   const statLbl = noMod ? '' : (statShort(statKey) || statKey.slice(0, 3));
   const mainP = getMainWeapon(c);
   const maitrise = usesHealingMastery(s, _isNoyauMagic(s), statKey) ? getSharedMaitriseBonus(c, mainP) : 0;
   const diceCountBonus = isDefault || nbProt > 0 ? nbProt : 0;
-  const scaled = _scaleDiceFormulaDice(base, diceCountBonus);
+  const scaled = scaleSpellDiceFormula(base, diceCountBonus);
   const { dice, tail } = _splitDiceBase(scaled);
   if (!dice || !/^\d+d\d+$/i.test(dice)) return { label: _calcSortSoin(s, c), statLbl, statMod, maitrise };
-  const hasDerivedFlat = statMod !== 0 || maitrise !== 0;
-  const pieces = [dice];
-  if (tail && !(hasDerivedFlat && _isFlatTail(tail))) pieces.push(tail);
+  const pieces = [`${dice}${tail || ''}`];
   if (statMod) pieces.push(`${statLbl}(${_fmtSigned(statMod)})`);
   if (maitrise) pieces.push(`Maîtrise(${_fmtSigned(maitrise)})`);
   return { label: pieces.join(' + '), statLbl, statMod, maitrise };
@@ -546,7 +533,7 @@ export function _autoSourceSoin(s, c) {
   const nbProt = (s.runes||[]).filter(r => r === 'Protection').length;
   const isMagic = _isNoyauMagic(s);
   const statKey = _getSortSoinStatKey(s, c);
-  const noMod = statKey === 'none';
+  const noMod = !statKey;
   const statLbl = noMod ? '' : (statShort(statKey) || statKey.slice(0,3));
   // Le label reflète si la stat vient d'un override de sort ou de l'auto-dérivation arme/noyau
   const natureStr = noMod
@@ -554,7 +541,7 @@ export function _autoSourceSoin(s, c) {
     : s?.degatsStat
     ? `stat sort (${statLbl})`
     : (isMagic ? `magique · stat arme (${statLbl})` : `physique · Constitution (${statLbl})`);
-  const masteryStr = isMagic && statKey !== 'none' && !usesSpellMastery(s) ? ' · sans maîtrise' : '';
+  const masteryStr = isMagic && statKey && !usesSpellMastery(s) ? ' · sans maîtrise' : '';
   return nbProt > 0
     ? `auto · base 1d4 +${nbProt}d4 (Protection) · ${natureStr}${masteryStr}`
     : `auto · base 1d4 · ${natureStr}${masteryStr}`;
@@ -754,7 +741,7 @@ export function _isNoyauMagic(s) {
  */
 function _getSortSoinStatKey(s, c) {
   // Override explicite du sort > déduction auto selon noyau
-  if (s?.degatsStat) return s.degatsStat;
+  if (s?.degatsStat) return resolveSpellModifierStat(s, 'degatsStat');
   if (_isNoyauMagic(s)) {
     const mainP = getMainWeapon(c);
     if (mainP.isDefault) return 'intelligence';

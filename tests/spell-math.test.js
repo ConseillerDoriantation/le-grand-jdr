@@ -2,10 +2,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   _calcAfflictionDot, _autoSourceAfflictionDot, _calcEnchantDegats,
-  _hasLaceration, _calcLaceration, _calcChance, _calcDrainPct, _calcConcentrationDD,
+  _hasLaceration, _calcLaceration, _calcChance, _calcDrainPct, _calcConcentrationDD, scaleSpellDiceFormula,
 } from '../assets/js/shared/spell-math.js';
 
 const rep = (rune, n) => Array.from({ length: n }, () => rune);
+
+test('le redimensionnement des dés conserve le bonus fixe de la formule', () => {
+  assert.equal(scaleSpellDiceFormula('2d6+4', 0), '2d6+4');
+  assert.equal(scaleSpellDiceFormula('2d6 +4', 1), '3d6 +4');
+  assert.equal(scaleSpellDiceFormula('7 dégâts', 2), '7 dégâts');
+});
 
 test('_calcAfflictionDot : auto (1+Puiss)d4 +2, manuel prioritaire', () => {
   assert.equal(_calcAfflictionDot({}), '1d4 +2');

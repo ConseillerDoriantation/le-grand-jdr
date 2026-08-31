@@ -3118,6 +3118,8 @@
   box-sizing: border-box;
   overflow: hidden;
   padding: .12em .18em;
+  /* Autorise un italique visuel même avec une police sans fichier italic. */
+  font-synthesis: style;
   color: var(--text-soft, #c8d4e8);
   font-family: 'Cormorant Garamond', 'Palatino Linotype', serif;
   line-height: 1.28;
