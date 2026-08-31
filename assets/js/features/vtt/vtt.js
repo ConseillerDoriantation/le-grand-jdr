@@ -63,6 +63,7 @@ import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSigna
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
 import { receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
 import { conditionDamageReductionApplies, conditionStatRollMode } from './vtt-condition-rules.js';
+import { planGroupGridStep } from './vtt-group-movement.js';
 import { naturalWeaponCombatContext } from '../../shared/bestiary-combat.js';
 import { _calcAfflictionDD, splitSpellDiceFormula } from '../../shared/spell-math.js';
 import {
@@ -900,6 +901,7 @@ function _vttCancelListenerSchedule() {
 
 function _cleanup() {
   _vttCancelListenerSchedule();
+  _resetKeyboardMovement({ persist:true });
   VS.unsubs.forEach(u => u?.());
   VS.unsubs = []; VS.stage?.destroy(); VS.stage = null; VS.layers = {};
   _resizeObs?.disconnect(); _resizeObs = null;
@@ -9242,12 +9244,20 @@ function _initListeners() {
   VS.unsubs.push(onSnapshot(_toksCol(), snap => {
     snap.docChanges().forEach(ch => {
      try {
-      const id=ch.doc.id, data={id,...ch.doc.data()};
+      const id=ch.doc.id;
+      let data={id,...ch.doc.data()};
       if (ch.type==='removed') {
+        _keyboardOptimisticMoves.delete(id);
         VS.tokens[id]?.shape?.destroy(); delete VS.tokens[id];
         if (VS.selected===id) _deselect();
         VS.layers.token?.batchDraw(); return;
       }
+      // Une écriture Firestore plus ancienne peut revenir pendant que le joueur
+      // maintient une flèche. On conserve alors la dernière position affichée
+      // localement, jusqu'à ce que le batch confirme cette position.
+      const optimistic=_keyboardOptimisticMoves.get(id);
+      if (optimistic && !_keyboardPatchMatches(data, optimistic.patch))
+        data={...data,...optimistic.patch};
       const prev=VS.tokens[id];
       if (prev) {
         const changedPage=prev.data.pageId!==data.pageId;
@@ -9508,17 +9518,208 @@ async function _vttCourir(id) {
 }
 
 // ── Déplacement clavier (flèches + pavé numérique) ──────────────────
-async function _moveSelectedBy(dc, dr) {
-  if (!VS.selected || !VS.activePage || VS.tool !== 'select') return;
-  const tok = VS.tokens[VS.selected]?.data;
-  if (!tok || tok.pageId !== VS.activePage.id || !_canControlToken(tok)) return;
-  const ld  = _live(tok);
-  const sw  = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
-  const nc  = _clampTokenCell(tok.col + dc, sw, VS.activePage.cols);
-  const nr  = _clampTokenCell(tok.row + dr, sh, VS.activePage.rows);
-  if (nc === tok.col && nr === tok.row) return;
-  await _moveTo(VS.selected, nc, nr);
-  fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
+// Le canvas bouge immédiatement. Les répétitions clavier sont ensuite regroupées
+// dans une seule écriture Firestore (avec un envoi intermédiaire lors d'un appui
+// prolongé), ce qui évite que la latence réseau ralentisse les déplacements.
+const _keyboardOptimisticMoves = new Map();
+let _keyboardFlushTimer = null;
+let _keyboardRangeTimer = null;
+let _keyboardFogTimer = null;
+let _keyboardBurstStartedAt = 0;
+let _keyboardFlushRunning = false;
+let _keyboardRevision = 0;
+
+function _keyboardPatchMatches(data, patch) {
+  if ((Number(data?.col)||0)!==(Number(patch?.col)||0)) return false;
+  if ((Number(data?.row)||0)!==(Number(patch?.row)||0)) return false;
+  if (Object.hasOwn(patch||{}, 'movedCells')
+      && (Number(data?.movedCells)||0)!==(Number(patch.movedCells)||0)) return false;
+  return true;
+}
+
+function _resetKeyboardMovement({ persist=false } = {}) {
+  if (_keyboardFlushTimer) clearTimeout(_keyboardFlushTimer);
+  if (_keyboardRangeTimer) clearTimeout(_keyboardRangeTimer);
+  if (_keyboardFogTimer) clearTimeout(_keyboardFogTimer);
+  // Une navigation dans les 85 ms suivant un appui ne doit pas perdre le
+  // dernier pas. Les écritures Firestore du client restent ordonnées, y compris
+  // si un précédent batch est encore en transit.
+  if (persist && _keyboardOptimisticMoves.size) {
+    const batch=writeBatch(db);
+    _keyboardOptimisticMoves.forEach((entry,id)=>batch.update(_tokRef(id), entry.patch));
+    void batch.commit().catch(error=>console.error('[vtt] sauvegarde finale déplacement clavier', error));
+  }
+  _keyboardFlushTimer=null;
+  _keyboardRangeTimer=null;
+  _keyboardFogTimer=null;
+  _keyboardBurstStartedAt=0;
+  _keyboardFlushRunning=false;
+  _keyboardOptimisticMoves.clear();
+}
+
+function _scheduleKeyboardRangeRefresh(ids) {
+  if (_keyboardRangeTimer) clearTimeout(_keyboardRangeTimer);
+  _keyboardRangeTimer=setTimeout(()=>{
+    _keyboardRangeTimer=null;
+    const id=VS.selected && ids.includes(VS.selected) ? VS.selected : null;
+    if (id) _refreshRanges(id, VS.tokens[id]?.data);
+  }, 70);
+}
+
+function _scheduleKeyboardFogRefresh() {
+  if (_keyboardFogTimer) return;
+  // Le recalcul du masque de vision est bien plus coûteux que le mouvement du
+  // token. 20 images/s suffisent pour le brouillard sans ralentir le canvas.
+  _keyboardFogTimer=setTimeout(()=>{
+    _keyboardFogTimer=null;
+    if (VS.activePage) fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
+  }, 50);
+}
+
+function _scheduleKeyboardFlush() {
+  const now=Date.now();
+  if (!_keyboardBurstStartedAt) _keyboardBurstStartedAt=now;
+  const heldFor=now-_keyboardBurstStartedAt;
+  if (_keyboardFlushTimer) clearTimeout(_keyboardFlushTimer);
+  // 85 ms après le dernier pas, ou au moins toutes les 220 ms si la touche
+  // reste maintenue : les autres participants voient un déplacement continu.
+  _keyboardFlushTimer=setTimeout(_flushKeyboardMoves, heldFor>=220 ? 0 : 85);
+}
+
+async function _flushKeyboardMoves() {
+  _keyboardFlushTimer=null;
+  if (_keyboardFlushRunning) {
+    _keyboardFlushTimer=setTimeout(_flushKeyboardMoves, 45);
+    return;
+  }
+  const pending=[..._keyboardOptimisticMoves.entries()];
+  if (!pending.length) { _keyboardBurstStartedAt=0; return; }
+
+  _keyboardFlushRunning=true;
+  _keyboardBurstStartedAt=0;
+  const batch=writeBatch(db);
+  pending.forEach(([id, entry])=>batch.update(_tokRef(id), entry.patch));
+  try {
+    await batch.commit();
+    pending.forEach(([id,entry])=>{
+      const current=_keyboardOptimisticMoves.get(id);
+      if (!current) return;
+      if (current.revision===entry.revision) {
+        _keyboardOptimisticMoves.delete(id);
+      } else if (current.revision>entry.revision) {
+        // Si le joueur a continué à bouger pendant l'écriture, cette position
+        // devient le nouveau point de repli confirmé.
+        current.confirmed={...current.confirmed,...entry.patch};
+      }
+    });
+  } catch (error) {
+    console.error('[vtt] synchronisation déplacement clavier', error);
+    // Le batch est atomique : en cas de refus, tous les tokens reviennent à
+    // leur dernière position confirmée plutôt que de rester désynchronisés.
+    _keyboardOptimisticMoves.forEach((entry,id)=>{
+      const token=VS.tokens[id]?.data;
+      if (!token) return;
+      Object.assign(token, entry.confirmed);
+      const dims=_tokenDims(token);
+      VS.tokens[id]?.shape?.to({
+        x:token.col*CELL+dims.w*CELL/2,
+        y:token.row*CELL+dims.h*CELL/2,
+        duration:.08,
+      });
+    });
+    _keyboardOptimisticMoves.clear();
+    VS.layers.token?.batchDraw();
+    showNotif('Déplacement non synchronisé : position rétablie.', 'error');
+  } finally {
+    _keyboardFlushRunning=false;
+    // Des appuis ont pu être ajoutés pendant l'écriture précédente.
+    const hasNewer=pending.some(([id,entry])=>{
+      const current=_keyboardOptimisticMoves.get(id);
+      return current && current.revision>entry.revision;
+    });
+    if (hasNewer) _scheduleKeyboardFlush();
+  }
+}
+
+function _queueSelectedMove(dc, dr) {
+  const ids = VS.selectedMulti.size > 0
+    ? [...VS.selectedMulti]
+    : (VS.selected ? [VS.selected] : []);
+  if (!ids.length) return;
+  _moveSelectedBy(dc, dr, ids);
+}
+
+function _moveSelectedBy(dc, dr, selectionIds = null) {
+  if (!VS.activePage || VS.tool !== 'select') return;
+  const ids = [...new Set((selectionIds || []).filter(Boolean))];
+  if (!ids.length) return;
+  const page=VS.activePage;
+  const tokens=ids.map(id=>VS.tokens[id]?.data).filter(Boolean);
+  if (tokens.length!==ids.length || tokens.some(token=>token.pageId!==page.id || !_canControlToken(token))) {
+    if (ids.length>1) showNotif('Un token du groupe ne peut pas être déplacé.', 'info');
+    return;
+  }
+
+  const plan=planGroupGridStep(tokens, {
+    dc, dr, cols:page.cols, rows:page.rows, getDimensions:_tokenDims,
+  });
+  if (!plan.ok) {
+    if (plan.reason==='bounds' && ids.length>1) showNotif('Le groupe a atteint le bord de la carte.', 'info');
+    return;
+  }
+
+  for (const move of plan.moves) {
+    if (!STATE.isAdmin && (page.walls || []).length
+        && fogWallBlocksPath(move.token.col, move.token.row, move.col, move.row, page.walls)) {
+      showNotif(ids.length>1 ? '🧱 Un token du groupe est bloqué par un obstacle.' : '🧱 Passage bloqué par un obstacle.', 'error');
+      return;
+    }
+    if (!STATE.isAdmin && VS.session?.combat?.active) {
+      const maximum=(_live(move.token).displayMovement??6)+(move.token.bonusMvt||0);
+      const remaining=maximum-(move.token.movedCells||0);
+      if (move.distance>remaining) {
+        const suffix=`${remaining} case${remaining!==1?'s':''} restante${remaining!==1?'s':''}`;
+        showNotif(ids.length>1
+          ? (remaining<=0 ? 'Un token du groupe n’a plus de mouvement ce tour.' : `Déplacement groupé impossible : ${suffix} pour un token.`)
+          : (remaining<=0 ? 'Plus de mouvement ce tour !' : `Trop loin ! (${suffix})`), 'error');
+        return;
+      }
+    }
+  }
+
+  const revision=++_keyboardRevision;
+  const prepared=plan.moves.map(move=>{
+    const patch={ col:move.col, row:move.row };
+    if (VS.session?.combat?.active) patch.moveOrigin=_combatMoveOrigin(move.token);
+    if (!STATE.isAdmin && VS.session?.combat?.active) {
+      patch.movedCells=(move.token.movedCells||0)+move.distance;
+      patch.movedThisTurn=true;
+    }
+    return { ...move, patch };
+  });
+
+  prepared.forEach(({token,col,row,patch})=>{
+    const previous=_keyboardOptimisticMoves.get(token.id);
+    const confirmed=previous?.confirmed || {
+      col:token.col,
+      row:token.row,
+      movedCells:token.movedCells||0,
+      movedThisTurn:!!token.movedThisTurn,
+      moveOrigin:token.moveOrigin||null,
+    };
+    Object.assign(token, patch);
+    _keyboardOptimisticMoves.set(token.id,{patch,confirmed,revision});
+    const dims=_tokenDims(token);
+    VS.tokens[token.id]?.shape?.to({
+      x:col*CELL+dims.w*CELL/2,
+      y:row*CELL+dims.h*CELL/2,
+      duration:.065,
+    });
+  });
+  VS.layers.token?.batchDraw();
+  _scheduleKeyboardRangeRefresh(ids);
+  _scheduleKeyboardFogRefresh();
+  _scheduleKeyboardFlush();
 }
 
 function _vttFogTool(t) { if (!_vttAdvancedPremium()) return _vttPremiumInfo(); return fogSetEditTool(t, VS.activePage); }
@@ -11431,12 +11632,12 @@ function _keyHandler(e) {
     if (fogIsEditMode()) { if (!fogRedo()) showNotif('Rien à rétablir', 'info'); }
     else _vttRedoDraw();
   }
-  // Flèches / pavé numérique : déplacer le token sélectionné
-  if (!e.ctrlKey && !e.metaKey && !e.altKey && VS.selected) {
+  // Flèches / pavé numérique : déplacer le ou les tokens sélectionnés.
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && (VS.selected || VS.selectedMulti.size)) {
     const dir = _MOVE_KEYS[e.key] ?? _NUMPAD_KEYS[e.code];
     if (dir) {
       e.preventDefault(); // empêche le scroll de la page
-      _moveSelectedBy(dir.dc, dir.dr);
+      _queueSelectedMove(dir.dc, dir.dr);
     }
   }
 }
