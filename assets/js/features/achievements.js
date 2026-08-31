@@ -115,6 +115,12 @@ let _achUploader = null;
 let _achLightboxKeyHandler = null;
 let _achPreferencesKey = '';
 const _achRatioCache = new Map();
+let _achGalleryResizeObserver = null;
+let _achGalleryResizeTimer = null;
+let _achObservedGalleryWidth = 0;
+let _achRenderedContentEl = null;
+let _achLastRenderSignature = '';
+let _achLocalMutationDepth = 0;
 
 let _achSelectCat = () => {};
 let _achToggleContrib = () => {};
@@ -637,6 +643,8 @@ export function openAchievementModal(id = null, preset = {}) {
 
 // ── SAUVEGARDER ───────────────────────────────────────────────────────────────
 async function saveAchievement(id = '') {
+  let mutationStarted=false;
+  let mutationFailed=false;
   try {
     const titleInput = document.getElementById('ach-titre');
     const titre = titleInput?.value?.trim();
@@ -653,6 +661,8 @@ async function saveAchievement(id = '') {
 
     const uploaded = _achUploader?.getResult();
     const ex = id ? (STORE.items || []).find(a => a.id === id) : null;
+    const previousVisibleIds=_achFilteredItemsForCurrentState({ ordered:true }).map(item=>item.id);
+    const previousRatio=Number(ex?.aspectRatio)||0;
     const imageUrl = uploaded === null ? '' : (typeof uploaded === 'string' ? uploaded : (ex?.imageUrl || ''));
     const existingRatio = Number(ex?.aspectRatio);
     const previewImg = document.querySelector('#ach-drop-preview img, #ach-head-img');
@@ -695,12 +705,15 @@ async function saveAchievement(id = '') {
     const newCol = payload.secret ? 'achievements_secret' : 'achievements';
 
     let docId = id;
+    _achLocalMutationDepth += 1;
+    mutationStarted=true;
     if (!id) {
       docId = `ach_${Date.now()}`;
       await saveDoc(newCol, docId, payload);
       const order = await _loadOrder();
       order.push(docId);
       await _saveOrder(order);
+      STORE.order=order;
     } else {
       const oldCol = (ex && ex.secret) ? 'achievements_secret' : 'achievements';
       await saveDoc(newCol, docId, payload);
@@ -716,8 +729,13 @@ async function saveAchievement(id = '') {
     _achUploader?.destroy(); _achUploader = null;
     closeModal();
     showNotif(id ? 'Haut-Fait mis à jour.' : `"${titre}" ajouté !`, 'success');
-    await PAGES.achievements();
-  } catch (e) { notifySaveError(e); return false; }
+    if (!id || !_achPatchVisibleCard(docId,previousVisibleIds,previousRatio))
+      await _achRenderContentPreserveViewport();
+  } catch (e) { mutationFailed=mutationStarted; notifySaveError(e); return false; }
+  finally {
+    if (mutationStarted && _achLocalMutationDepth>0) _achLocalMutationDepth -= 1;
+    if (mutationFailed) void _achRenderContentPreserveViewport({ force:true });
+  }
 }
 
 // ── ÉDITER ────────────────────────────────────────────────────────────────────
@@ -732,17 +750,26 @@ async function editAchievement(id) {
 
 // ── SUPPRIMER ─────────────────────────────────────────────────────────────────
 async function deleteAchievement(id) {
+  let mutationStarted=false;
+  let mutationFailed=false;
   try {
     const col = (STORE.secretItems || []).some(a => a.id === id) ? 'achievements_secret' : 'achievements';
+    _achLocalMutationDepth += 1;
+    mutationStarted=true;
     if (!await confirmDelete(col, id, 'Supprimer ce haut-fait définitivement ?')) return;
     STORE.publicItems = (STORE.publicItems || []).filter(a => a.id !== id);
     STORE.secretItems = (STORE.secretItems || []).filter(a => a.id !== id);
     if (STORE.items) STORE.items = STORE.items.filter(a => a.id !== id);
     const order = (await _loadOrder()).filter(oid => oid !== id);
     await _saveOrder(order);
+    STORE.order = order;
     showNotif('Haut-Fait supprimé.', 'success');
-    await PAGES.achievements();
-  } catch (e) { notifySaveError(e); }
+    await _achRenderContentPreserveViewport();
+  } catch (e) { mutationFailed=mutationStarted; notifySaveError(e); }
+  finally {
+    if (mutationStarted && _achLocalMutationDepth>0) _achLocalMutationDepth -= 1;
+    if (mutationFailed) void _achRenderContentPreserveViewport({ force:true });
+  }
 }
 
 // ── ORDRE ─────────────────────────────────────────────────────────────────────
@@ -819,6 +846,61 @@ function _achFilteredItemsForCurrentState({ ordered = false } = {}) {
   if ((STORE.view || 'galerie') === 'timeline') return _sortAchievementsByDate(filtered, !!STORE.timelineDesc);
   if ((STORE.view || 'galerie') === 'missions') return _sortAchievementsByDate(filtered, true);
   return filter === 'all' ? _sortAchievementsByDate(filtered) : filtered;
+}
+
+function _achCompactImageSignature(url = '') {
+  const value=String(url || '');
+  return `${value.length}:${value.slice(0,24)}:${value.slice(-24)}`;
+}
+
+function _achRenderSignature() {
+  const items=(STORE.items || []).map(item=>[
+    item.id, item.titre, item.categorie, item.description, item.date, item.missionId,
+    item.emoji, item.secret === true, Number(item.aspectRatio)||0,
+    (item.contributeurs || []).join(','), _achCompactImageSignature(item.imageUrl),
+  ]);
+  const missions=(STORE.missions || []).map(item=>[
+    item.id, item.titre, item.acte, item.date, item.type, _achCompactImageSignature(item.imageUrl),
+  ]);
+  return JSON.stringify([
+    STORE.filter, STORE.missionFilter, STORE.view, STORE.search,
+    STORE.timelineDesc, STORE.charMatchMode, _achSelectedCharIds(), STORE.order,
+    ACH_CATS.map(cat=>[cat.id,cat.label,cat.emoji,cat.color]), items, missions,
+  ]);
+}
+
+function _achCaptureViewportAnchor() {
+  const candidates=[...document.querySelectorAll('#ach-content [data-ach-id]')];
+  const visible=candidates.find(element=>element.getBoundingClientRect().bottom>8);
+  if (visible) {
+    return {
+      id:visible.dataset.achId,
+      top:visible.getBoundingClientRect().top,
+      fallbackIds:candidates.map(element=>element.dataset.achId),
+      scrollY:window.scrollY,
+    };
+  }
+  return { id:null, top:null, fallbackIds:[], scrollY:window.scrollY };
+}
+
+function _achRestoreViewportAnchor(anchor) {
+  if (!anchor || typeof window === 'undefined') return;
+  const ids=[anchor.id, ...(anchor.fallbackIds || [])].filter(Boolean);
+  const element=ids.map(id=>document.querySelector(`#ach-content [data-ach-id="${CSS.escape(id)}"]`)).find(Boolean);
+  if (element && typeof anchor.top === 'number') {
+    const delta=element.getBoundingClientRect().top-anchor.top;
+    if (Math.abs(delta)>1) window.scrollBy(0,delta);
+  } else if (Number.isFinite(anchor.scrollY)) {
+    window.scrollTo({ top:anchor.scrollY });
+  }
+}
+
+function _achDisconnectGalleryResize() {
+  _achGalleryResizeObserver?.disconnect();
+  _achGalleryResizeObserver=null;
+  if (_achGalleryResizeTimer) clearTimeout(_achGalleryResizeTimer);
+  _achGalleryResizeTimer=null;
+  _achObservedGalleryWidth=0;
 }
 
 function _achGalleryOverviewHtml(items) {
@@ -938,6 +1020,7 @@ function _mergeCategoryOrder(catId, catOrder, globalOrder) {
 async function _persistCategoryOrder(catId, orderedIds) {
   const merged = _mergeCategoryOrder(catId, orderedIds, await _loadOrder());
   await _saveOrder(merged);
+  STORE.order = merged;
   STORE.items = _applyOrder(STORE.items || [], merged);
   return merged;
 }
@@ -1121,6 +1204,71 @@ async function _achRenderJustified(catId, items, container) {
         </div>`;
       }).join('')}
     </div>`).join('');
+}
+
+function _achCanManualSortCurrentGallery() {
+  return (STORE.filter || 'all') !== 'all'
+    && (STORE.missionFilter || 'all') === 'all'
+    && !_achSelectedCharIds().length
+    && !_normalize(STORE.search || '');
+}
+
+function _achPatchVisibleCard(id, previousIds = [], previousRatio = 0) {
+  if ((STORE.view || 'galerie') !== 'galerie') return false;
+  const gallery=document.getElementById('ach-gallery');
+  const card=gallery?.querySelector(`[data-ach-id="${CSS.escape(id)}"]`);
+  const item=(STORE.items || []).find(entry=>entry.id===id);
+  if (!gallery || !card || !item) return false;
+
+  const nextItems=_achFilteredItemsForCurrentState({ ordered:true });
+  const nextIds=nextItems.map(entry=>entry.id);
+  const sameOrder=previousIds.length===nextIds.length && previousIds.every((entry,index)=>entry===nextIds[index]);
+  const nextRatio=Number(item.aspectRatio)||0;
+  if (!sameOrder || Math.abs(nextRatio-(Number(previousRatio)||0))>.001) return false;
+
+  const cat=_achCategoryFor(item);
+  card.classList.toggle('no-desc', !item.description);
+  card.style.setProperty('--c',cat.color);
+  card.style.setProperty('--c-glow',cat.glow);
+  card.style.setProperty('--c-line',cat.line);
+  card.innerHTML=_achCardHTML(item,STATE.isAdmin);
+  STORE.lightboxItems=Object.fromEntries((STATE.isAdmin ? STORE.items : STORE.items.filter(entry=>!entry.secret)).map(entry=>[entry.id,entry]));
+  _refreshAchievementCounters();
+  _achRenderControlsExtras();
+  _achRenderedContentEl=document.getElementById('ach-content');
+  _achLastRenderSignature=_achRenderSignature();
+  return true;
+}
+
+async function _achRelayoutGallery() {
+  const gallery=document.getElementById('ach-gallery');
+  if (!gallery?.isConnected || (STORE.view || 'galerie') !== 'galerie') return;
+  const width=Math.round(gallery.clientWidth || 0);
+  if (!width || Math.abs(width-_achObservedGalleryWidth)<2) return;
+  _achObservedGalleryWidth=width;
+  const anchor=_achCaptureViewportAnchor();
+  _destroyAchievementSortables();
+  gallery.classList.add('is-relayout');
+  await _achRenderJustified(STORE.filter || 'all', _achFilteredItemsForCurrentState({ ordered:true }), gallery);
+  setupAchievementsDnd(_achCanManualSortCurrentGallery() ? STORE.filter : null);
+  requestAnimationFrame(()=>_achRestoreViewportAnchor(anchor));
+}
+
+function _achObserveGalleryResize(gallery) {
+  _achDisconnectGalleryResize();
+  if (!gallery || typeof ResizeObserver === 'undefined') return;
+  _achObservedGalleryWidth=Math.round(gallery.clientWidth || 0);
+  _achGalleryResizeObserver=new ResizeObserver(entries=>{
+    if (!gallery.isConnected) { _achDisconnectGalleryResize(); return; }
+    const width=Math.round(entries[0]?.contentRect?.width || gallery.clientWidth || 0);
+    if (!width || Math.abs(width-_achObservedGalleryWidth)<2) return;
+    if (_achGalleryResizeTimer) clearTimeout(_achGalleryResizeTimer);
+    _achGalleryResizeTimer=setTimeout(()=>{
+      _achGalleryResizeTimer=null;
+      void _achRelayoutGallery();
+    },80);
+  });
+  _achGalleryResizeObserver.observe(gallery);
 }
 
 // ── Rebuild galerie après DnD ─────────────────────────────────────────────────
@@ -1681,9 +1829,14 @@ function _achRenderControlsExtras() {
 }
 
 // ── Rendu du contenu (filtre + vue) ──────────────────────────────────────────
-async function _achRenderContent() {
+async function _achRenderContent({ force=false } = {}) {
   const contentEl = document.getElementById('ach-content');
   if (!contentEl) return;
+  const signature=_achRenderSignature();
+  if (!force && _achRenderedContentEl===contentEl && _achLastRenderSignature===signature) return;
+  _achRenderedContentEl=contentEl;
+  _achLastRenderSignature=signature;
+  _achDisconnectGalleryResize();
   _refreshAchievementCounters();
   _achRenderControlsExtras();
 
@@ -1779,22 +1932,17 @@ async function _achRenderContent() {
   await _achRenderJustified(filter, filtered, galleryEl);
   const canManualSort = filter !== 'all' && missionFilter === 'all' && !selectedCharIds.length && !search;
   setupAchievementsDnd(canManualSort ? filter : null);
+  _achObserveGalleryResize(galleryEl);
+  _achLastRenderSignature=_achRenderSignature();
 }
 
 // ── Actions état (appelées depuis les boutons HTML) ───────────────────────────
-function _achRenderContentPreserveViewport() {
-  const anchor = document.getElementById('ach-content') || document.querySelector('.hall-content');
-  const beforeTop = anchor?.getBoundingClientRect?.().top;
-  const rendered = _achRenderContent();
+function _achRenderContentPreserveViewport(options = {}) {
+  const anchor=_achCaptureViewportAnchor();
+  const rendered = _achRenderContent(options);
   Promise.resolve(rendered).finally(() => {
-    if (typeof beforeTop !== 'number') return;
     const schedule = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb) => setTimeout(cb, 0);
-    schedule(() => {
-      if (!anchor?.isConnected) return;
-      const afterTop = anchor.getBoundingClientRect().top;
-      const delta = afterTop - beforeTop;
-      if (Math.abs(delta) > 1 && typeof window !== 'undefined') window.scrollBy(0, delta);
-    });
+    schedule(() => _achRestoreViewportAnchor(anchor));
   });
   return rendered;
 }
@@ -2254,6 +2402,9 @@ export async function openAchievementLightbox(id) {
 // ── OVERRIDE PAGES.ACHIEVEMENTS ───────────────────────────────────────────────
 const _origPage = PAGES.achievements.bind(PAGES);
 PAGES.achievements = async function() {
+  _achDisconnectGalleryResize();
+  _achRenderedContentEl=null;
+  _achLastRenderSignature='';
   _achRestorePreferences();
   let [items, order, story] = await Promise.all([
     loadCollection('achievements'),
@@ -2305,25 +2456,25 @@ PAGES.achievements = async function() {
     if (document.body.classList.contains('ach-dragging')) return;
     STORE.publicItems = items || [];
     STORE.items = _composeItems();
-    _achRenderContent();
+    if (!_achLocalMutationDepth) _achRenderContentPreserveViewport();
   });
 
   watchPageCollection('ach-story', 'story', 'achievements', items => {
     STORE.missions = (items || []).filter(item => item.type === 'mission' || item.type === 'event');
-    _achRenderContent();
+    if (!_achLocalMutationDepth) _achRenderContentPreserveViewport();
   });
 
   watchPageDoc('ach-order', 'achievements_meta', 'order', 'achievements', doc => {
     if (document.body.classList.contains('ach-dragging')) return;
     STORE.order = Array.isArray(doc?.order) ? doc.order : [];
     STORE.items = _composeItems();
-    _achRenderContent();
+    if (!_achLocalMutationDepth) _achRenderContentPreserveViewport();
   });
 
   watchPageDoc('ach-categories', 'achievements_meta', 'categories', 'achievements', doc => {
     _setAchievementCategories(doc?.categories);
     PAGES._achievementsShellState = { ...getAchievementsShellState(), categories: ACH_CATS };
-    _achRenderContent();
+    if (!_achLocalMutationDepth) _achRenderContentPreserveViewport();
   });
 };
 
@@ -2401,7 +2552,7 @@ registerActions({
       await _saveAchievementCategories(_achCatDraft);
       showNotif('Catégories de hauts-faits enregistrées.', 'success');
       closeModal();
-      _achRenderContent();
+      _achRenderContentPreserveViewport();
     } catch (error) {
       notifySaveError(error);
     }

@@ -2415,6 +2415,7 @@ body .modal:has(.sh-admin-modal.is-ach-categories) {
 /* ── Justified Gallery ─────────────────────────────────────── */
 .ach-justified { display:flex; flex-direction:column; gap:10px; }
 .ach-row       { display:flex; gap:10px; }
+.ach-justified.is-relayout .ach-item { animation:none; }
 
 @keyframes gal-in { from { opacity:0; transform:scale(.96) } to { opacity:1; transform:scale(1) } }
 
