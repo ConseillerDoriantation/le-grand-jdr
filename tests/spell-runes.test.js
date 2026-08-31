@@ -22,6 +22,12 @@ test('une statistique explicitement désactivée ne retombe pas sur celle de l�
   assert.equal(resolveSpellModifierStat({ degatsStat: 'none' }, 'degatsStat', 'intelligence'), null);
 });
 
+test('les anciennes valeurs « aucun modificateur » ne deviennent pas une fausse statistique', () => {
+  assert.equal(resolveSpellModifierStat({ degatsStat: 'non' }, 'degatsStat', 'intelligence'), null);
+  assert.equal(resolveSpellModifierStat({ degatsStat: 'aucune' }, 'degatsStat', 'force'), null);
+  assert.equal(resolveSpellModifierStat({ degatsStat: 'inconnue' }, 'degatsStat', 'dexterite'), 'dexterite');
+});
+
 test('la maîtrise de soin exige un noyau magique et une statistique active', () => {
   assert.equal(usesHealingMastery({}, true, 'intelligence'), true);
   assert.equal(usesHealingMastery({}, false, 'constitution'), false, 'soin physique');

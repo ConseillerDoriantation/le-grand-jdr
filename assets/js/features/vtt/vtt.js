@@ -32,7 +32,7 @@ import { getAttackMissEffect } from '../../shared/damage-type-rules.js';
 import { playSigil, playImpact, playProjectile, playSlash } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
-import { calcSpellDuration, calcSpellTargets, usesHealingMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { calculateSummonStats, getPreparedInvocationActions, INVOCATION_ABILITIES, invocationStatModifier, invocationStatShort, normalizeInvocationStats } from '../../shared/invocation-stats.js';
 import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
@@ -4071,12 +4071,17 @@ function _buildSpellOption(s, ctx) {
       ? getDamageTypeRules(VS.damageTypes, spellTypeId)
       : { missEffect: 'half', armorPen: 0, dmgBonus: 0 };
     const spellTypeObj   = spellTypeId ? getDamageTypeById(VS.damageTypes, spellTypeId) : null;
-    const ovrTouchStat   = s.toucherStat || fallbackTouchStat;
-    const ovrDmgStat     = s.degatsStat  || fallbackDmgStat;
-    const ovrTouchNoMod  = ovrTouchStat === 'none';
-    const ovrDmgNoMod    = ovrDmgStat   === 'none';
+    const ovrTouchStat   = resolveSpellModifierStat(s, 'toucherStat', fallbackTouchStat);
+    const ovrDmgStat     = resolveSpellModifierStat(s, 'degatsStat', fallbackDmgStat);
+    const ovrTouchNoMod  = !ovrTouchStat;
+    const ovrDmgNoMod    = !ovrDmgStat;
     const ovrTouchMod    = ovrTouchNoMod ? 0 : (c ? getMod(c, ovrTouchStat) : fallbackTouchMod);
     const ovrDmgMod      = ovrDmgNoMod   ? 0 : (c ? getMod(c, ovrDmgStat)   : fallbackDmgMod);
+    const mainP          = c ? getMainWeapon(c) : null;
+    const spellMaitrise  = s.designMode !== 'classic' && usesSpellMastery(s)
+      ? getMaitriseBonus(c, mainP || {})
+      : 0;
+    const formulaFixedBonus = sFixed - spellMaitrise;
     // Multi-noyau : si le sort a plusieurs éléments, on laisse le joueur choisir
     // au lancement (cf. _vttPickOpt → _showSpellElementPicker). L'élément primaire
     // (spellTypeId) sert d'affichage par défaut.
@@ -4095,7 +4100,8 @@ function _buildSpellOption(s, ctx) {
       toucherStatLabel: ovrTouchNoMod ? '' : (statShort(ovrTouchStat) || ovrTouchStat),
       dmgStatMod: ovrDmgMod,
       dmgStatLabel: ovrDmgNoMod ? '' : (statShort(ovrDmgStat) || ovrDmgStat),
-      maitriseBonus: sFixed,
+      formulaFixedBonus,
+      maitriseBonus: spellMaitrise,
       drainBaseFormula: mods?.drain ? _vttSortDmgFormula(s, c, { includePower: false }) : null,
       mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
     };

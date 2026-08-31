@@ -9,7 +9,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { getMainWeapon, DEFAULT_UNARMED } from '../../shared/equipment-utils.js';
 import { getMaitriseBonus, getMod } from '../../shared/char-stats.js';
-import { usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { VS } from './vtt-state.js';
 
 // Rune virtuelle d'action (Réaction / Action Bonus condensées à l'affichage).
@@ -101,7 +101,7 @@ export function _vttSortSoinFormula(s, c) {
   //  - Sinon auto selon la nature du noyau (magique vs physique)
   let statKey;
   if (s?.degatsStat) {
-    statKey = s.degatsStat;
+    statKey = resolveSpellModifierStat(s, 'degatsStat');
   } else {
     statKey = 'constitution';
     if (isMagic) {
@@ -112,7 +112,7 @@ export function _vttSortSoinFormula(s, c) {
   }
   // Stat 'none' : aucun modificateur de carac (potion à valeur fixe, etc.)
   // Dans ce cas on n'ajoute NI la stat NI la maîtrise → effet 100% fixe.
-  const noStatMod = statKey === 'none';
+  const noStatMod = !statKey;
   const statMod = noStatMod ? 0 : (c ? getMod(c, statKey) : 0);
   const effectiveMaitrise = usesHealingMastery(s, isMagic, statKey)
     ? getMaitriseBonus(c, mainP || {})
