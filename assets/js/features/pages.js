@@ -69,6 +69,11 @@ let _statsCmpMetric = 'dmgDealt';      // métrique du graphique comparatif (par
 let _statsCmpType   = 'bars';          // type du comparatif : 'bars' | 'pie'
 let _statsEvoMetric = 'dmgDealt';      // métrique du comparatif missions/groupes
 let _statsAnalysisMode = 'overview';   // 'overview' | 'compare'
+let _statsTab = 'overview';            // onglet actif : overview|ranking|players|rolls|audit
+let _statsPopOpen = false;             // popover « joueurs ciblés » ouvert (persisté entre rendus)
+let _statsMissionPopOpen = false;      // popover « Mission » (avec images) ouvert
+let _statsRankSort = { key: 'dmg', dir: -1 }; // tri du tableau de classement (dir : -1 desc, 1 asc)
+let _statsRythmeView = 'timeline';     // vue du rythme : 'timeline' (barres) | 'pie' (camembert répartition)
 let _statsCompareKind = 'players';     // 'players' | 'groups'
 const _statsCompareSelection = { players: [], groups: [] };
 let _statsMissionPickerSearch = '';
@@ -77,6 +82,7 @@ let _statsStory     = [];              // missions de la Trame pour ordre/titres
 let _statsDrawerState = new Map();     // key → état ouvert/fermé des onglets stats durant la session
 let _statsRequestedScope = null;       // navigation ciblée depuis le Centre de session
 
+let _statsPopCloserBound = false;      // listener global de fermeture du popover joueurs (une fois)
 let _statsMvpDetailId = '';            // candidat actuellement affiche dans le detail MVP
 let _statsMvpOutsideClose = null;      // listeners temporaires du panneau detail MVP
 let _statsNavSpyCleanup = null;        // nettoyage du suivi de section active
@@ -126,6 +132,20 @@ function _statsUnbindNavSpy() {
   if (!_statsNavSpyCleanup) return;
   _statsNavSpyCleanup();
   _statsNavSpyCleanup = null;
+}
+
+// Ferme le popover « joueurs ciblés » sur un clic hors du popover (installé une fois).
+function _statsBindPopCloser() {
+  if (_statsPopCloserBound) return;
+  _statsPopCloserBound = true;
+  document.addEventListener('click', (e) => {
+    const root = document.getElementById('stats-root');
+    if (!root?.querySelector('.stats-pop.open')) return;
+    if (!e.target.closest('.stats-pop')) {
+      root.querySelectorAll('.stats-pop.open').forEach(p => p.classList.remove('open'));
+      _statsPopOpen = false; _statsMissionPopOpen = false;
+    }
+  }, true);
 }
 
 function _statsBindNavSpy(root) {
@@ -776,6 +796,19 @@ function _statsGauge(pct, color = '#22c38e', size = 92, stroke = 9, sub = '') {
   </svg>`;
 }
 
+// Sparkline SVG inline (série d'une métrique sur les séances du scope). Aucune
+// dépendance graphique : polyline étirée + point terminal.
+function _statsSpark(vals, color) {
+  if (!Array.isArray(vals) || vals.length < 2) return '<div class="stats-spark"></div>';
+  const max = Math.max(...vals, 1), min = Math.min(...vals);
+  const w = 100, h = 26, span = Math.max(1, max - min);
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1) * w).toFixed(1)},${(h - 3 - (v - min) / span * (h - 7)).toFixed(1)}`);
+  const [lx, ly] = pts[pts.length - 1].split(',');
+  return `<svg class="stats-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" vector-effect="non-scaling-stroke" opacity=".8"/>
+    <circle cx="${lx}" cy="${ly}" r="2" fill="${color}"/></svg>`;
+}
+
 // Sélecteur de métrique (comparatif / évolution) — data-change → re-render.
 function _statsMetricSelect(cur, action) {
   return `<select class="stats-chart-sel" data-change="${action}">
@@ -1141,10 +1174,64 @@ function _statsRender(scope) {
   const visualBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExportImage" title="Télécharger le récapitulatif visuel en PNG"><span>🖼️</span> Visuel</button>` : '';
   const manageBtn = STATE.isAdmin ? `<button class="stats-tool-btn stats-tool-btn--manage" data-action="_statsManage" title="Relier les séances aux missions et gérer les données"><span>⚙</span> Données</button>` : '';
   const actionBar = (exportBtn || visualBtn || manageBtn) ? `<div class="stats-toolbar-actions"><span class="stats-toolbar-label">Actions</span>${exportBtn}${visualBtn}${manageBtn}</div>` : '';
-  const controls = `<div class="stats-controls">
-    <div class="stats-controls-top">${sessionsBar}${actionBar}</div>
-    ${playersBar}
-  </div>${activeView}`;
+  // ── Barre sticky (refonte) : périmètre 3 selects + popover joueurs + onglets ──
+  const scopeKicker = dateKey ? `Séance du ${_statsFmtDate(dateKey)}`
+    : isMission ? (selectedMission?.name || 'Mission')
+    : isAct ? (selectedAct?.label || 'Acte')
+    : 'Toute la campagne';
+  const _scOpt = (v, l, cur) => `<option value="${_esc(v)}"${v === cur ? ' selected' : ''}>${_esc(l)}</option>`;
+  const missionOpts = (isAct && selectedAct ? selectedAct.missions : missions);
+  const sessionOpts = selectedMissionId ? selectedMissionDates
+    : (isAct && selectedAct ? selectedActDates : allDates);
+  const scopeBar = `<div class="stats-scope">
+    <label class="stats-sc${isAct ? ' on' : ''}"><small>Acte</small>
+      <select data-change="_statsSetScopeSel" data-level="act">
+        ${_scOpt('', 'Toute la campagne', isAct ? actKey : '')}
+        ${acts.map(a => _scOpt(a.key, a.label, isAct ? actKey : '')).join('')}
+      </select></label>
+    <div class="stats-pop stats-msn${_statsMissionPopOpen ? ' open' : ''}">
+      <button type="button" class="stats-sc stats-sc--btn${selectedMissionId ? ' on' : ''}" data-action="_statsMissionPop">
+        <small>Mission</small>
+        <span class="stats-msn-cur">${selectedMission ? `${_statsMissionArtHtml(selectedMission, 22)}<span>${_esc(selectedMission.name)}</span>` : `<span>${missionOpts.length} mission${missionOpts.length > 1 ? 's' : ''}</span>`}<i class="stats-msn-caret">▾</i></span>
+      </button>
+      <div class="stats-pop-menu stats-msn-menu">
+        <button type="button" class="stats-msn-item${!selectedMissionId ? ' on' : ''}" data-action="_statsScopeMission" data-id=""><span class="stats-msn-item-ic">🌍</span><span>Toutes les missions</span></button>
+        ${acts.map(a => `<div class="stats-msn-act">${_esc(a.label)}</div>${a.missions.map(m => `<button type="button" class="stats-msn-item${m.id === selectedMissionId ? ' on' : ''}" data-action="_statsScopeMission" data-id="${_esc(m.id)}">${_statsMissionArtHtml(m, 30)}<span>${_esc(m.name)}</span></button>`).join('')}`).join('')}
+      </div>
+    </div>
+    <label class="stats-sc${dateKey ? ' on' : ''}"><small>Séance</small>
+      <select data-change="_statsSetScopeSel" data-level="session" data-mission="${_esc(selectedMissionId || '')}" data-act="${isAct ? _esc(actKey) : ''}">
+        ${_scOpt('', `${sessionOpts.length} séance${sessionOpts.length > 1 ? 's' : ''}`, dateKey || '')}
+        ${sessionOpts.map(d => _scOpt(d, `${_statsFmtDate(d).slice(0, 5)}${_statsGroupOf(d) ? ' · ' + _statsGroupOf(d) : ''}`, dateKey || '')).join('')}
+      </select></label>
+  </div>`;
+  const popRows = allRows;
+  const playersPop = popRows.length ? `<div class="stats-pop${_statsPopOpen ? ' open' : ''}">
+    <button class="stats-pill${sel && sel.size ? ' on' : ''}" data-action="_statsPlayersPop">
+      <span class="stats-avstack">${popRows.slice(0, 4).map(r => _statsAvatar(r.id, r.name, 20)).join('')}</span>
+      ${sel && sel.size ? `${rows.length} joueur${rows.length > 1 ? 's' : ''} ciblé${rows.length > 1 ? 's' : ''}` : `Tous les joueurs · ${popRows.length}`} ▾
+    </button>
+    <div class="stats-pop-menu">
+      <div class="stats-pop-hd"><span>Joueurs ciblés</span><button data-action="_statsTogglePlayer" data-id="__all">Tout sélectionner</button></div>
+      <div class="stats-pop-list">${popRows.map(r => `<button class="stats-pop-item${sel && sel.has(r.id) ? ' on' : ''}" data-action="_statsTogglePlayer" data-id="${r.id}">${_statsAvatar(r.id, r.name, 20)}<span>${_esc(r.name)}</span></button>`).join('')}</div>
+    </div>
+  </div>` : '';
+  const tabDefs = [['overview', 'Vue d’ensemble'], ['ranking', 'Classement'], ['players', 'Joueurs'], ['rolls', 'Jets & moyennes'], ['audit', 'Audit']];
+  const tabCounts = { ranking: rows.length, players: rows.length };
+  const tabsBar = `<div class="stats-tabs">${tabDefs.map(([k, l]) => `<button class="stats-tab${_statsTab === k ? ' on' : ''}" data-action="_statsSetTab" data-tab="${k}">${l}${tabCounts[k] ? `<span class="stats-tab-cnt">${tabCounts[k]}</span>` : ''}</button>`).join('')}</div>`;
+  const controls = `<div class="stats-topbar"><div class="stats-topbar-in">
+    <div class="stats-topbar-row">
+      <div class="stats-brand"><h1>Statistiques</h1><small>${_esc(scopeKicker)}</small></div>
+      <div class="stats-spacer"></div>
+      <div class="stats-tools">${exportBtn}${visualBtn}${manageBtn}</div>
+    </div>
+    <div class="stats-topbar-scope">
+      <span class="stats-scope-art" title="${_esc(selectedMission?.name || scopeKicker)}">${selectedMission ? _statsMissionArtHtml(selectedMission, 56) : `<span class="stats-scope-art-ph">${isAct ? '📖' : '🌍'}</span>`}</span>
+      ${scopeBar}
+    </div>
+    ${playersPop ? `<div class="stats-topbar-players"><span class="stats-scope-art stats-scope-art--ghost" aria-hidden="true"></span>${playersPop}</div>` : ''}
+    ${tabsBar}
+  </div></div>`;
 
   // Bannière : séance (mission + groupe, éditable MJ) OU mission (agrégée).
   const partsHtml = allRows.map(r => `<span class="stats-sb-part" title="${_esc(r.name)}">${_statsAvatar(r.id, r.name, 30)}</span>`).join('');
@@ -1284,8 +1371,7 @@ function _statsRender(scope) {
     const skillMean = r.skillAverages || aggregateSkillAverages([r]);
     const rhr = cm.attacks ? Math.round(cm.hits / cm.attacks * 100) : null;
     const quickMetric = (icon, value, label, color) => `<span class="stats-char-kpi">
-      <span class="stats-char-kpi-icon">${icon}</span>
-      <span><b${color ? ` style="color:${color}"` : ''}>${value}</b><small>${label}</small></span>
+      <b${color ? ` style="color:${color}"` : ''}>${Number(value || 0).toLocaleString('fr-FR')}</b><small>${icon} ${label}</small>
     </span>`;
     const fact = (label, value, color = '') => `<span class="stats-char-fact">
       <small>${label}</small><b${color ? ` style="color:${color}"` : ''}>${value}</b>
@@ -1313,8 +1399,8 @@ function _statsRender(scope) {
     const char = STATE.characters?.find(x => x.id === r.id) || { nom: r.name };
     const avatar = characterAvatarHtml(char, { size: 38, className: 'stats-char-av', title: r.name });
     const ring = rhr != null
-      ? `<span class="stats-char-ring" title="${cm.hits} attaque${cm.hits > 1 ? 's' : ''} réussie${cm.hits > 1 ? 's' : ''} sur ${cm.attacks}">${_statsGauge(rhr, '#22c38e', 42, 5)}</span>`
-      : `<span class="stats-char-no-rate">—<small>réussite</small></span>`;
+      ? `<span class="stats-char-ring" title="${cm.hits} attaque${cm.hits > 1 ? 's' : ''} réussie${cm.hits > 1 ? 's' : ''} sur ${cm.attacks}">${_statsGauge(rhr, '#22c38e', 42, 5)}<span class="stats-char-rate-txt">${cm.hits}/${cm.attacks}<br>touches</span></span>`
+      : `<span class="stats-char-ring stats-char-no-rate">—<small>aucune<br>attaque</small></span>`;
     const charKey = `character:${r.id}`;
     const isOpen = _statsDrawerState.get(charKey) || false;
     return `<details class="stats-char" data-drawer-key="${_esc(charKey)}"${isOpen ? ' open' : ''}>
@@ -1336,37 +1422,24 @@ function _statsRender(scope) {
             <h4>⚔️ Combat</h4>
             <div class="stats-char-facts">
               ${fact('Attaques réussies', `${cm.hits}/${cm.attacks}`, '#22c38e')}
-              ${fact(combatMean.damageAverageEstimated ? 'Dégâts / touche (hist.)' : 'Dégâts moyens', statsAvg(combatMean.damageAverage), '#c9b6ff')}
-              ${fact(combatMean.damageTakenAverageEstimated ? 'Subis / touche (hist.)' : 'Dégâts moyens subis', statsAvg(combatMean.damageTakenAverage), '#a7b4c4')}
-              ${fact('D20 attaque moyen', statsAvg(combatMean.attackNaturalAverage), '#7fb0ff')}
-              ${fact('Critiques', cm.crits)}
-              ${fact('Échecs critiques', cm.fumbles)}
+              ${fact(combatMean.damageAverageEstimated ? 'Dégâts / touche' : 'Dégâts moyens', statsAvg(combatMean.damageAverage), '#c9b6ff')}
               ${fact('Plus gros coup', cm.biggestHit)}
               ${fact('Dégâts subis', cm.dmgTaken)}
-              ${fact('Surplus reçu ignoré', cm.damageTakenCorrection)}
-              ${fact('Surplus infligé ignoré', cm.damageDealtCorrection)}
-              ${fact('KO infligés', cm.kosDealt)}
+              ${fact('KO infligés', cm.kosDealt, '#ef4444')}
               ${fact('Fois mis KO', cm.kosTaken)}
-              ${fact('Attaques subies', cm.attacksTaken)}
-              ${fact('Attaques évitées', cm.attacksAvoided)}
             </div>
           </section>
           <section class="stats-char-detail">
-            <h4>🔮 Magie & soutien</h4>
+            <h4>🔮 Magie &amp; soutien</h4>
             <div class="stats-char-facts">
-              ${fact('PM dépensés', cm.pmSpent)}
-              ${fact('Sorts tactiques', cm.tacticalSpells)}
-              ${fact('Soutiens appliqués', cm.supportSpells)}
-              ${fact('Afflictions', cm.afflictionSpells)}
-              ${fact('Contrôles', cm.controlSpells)}
-              ${fact('Soin produit', cm.heal, '#4fd3a6')}
-              ${fact('PM régénérés', cm.manaHealed, '#8b5cf6')}
               ${fact('Sorts lancés', cm.spellsCast, '#bca0ff')}
+              ${fact('PM dépensés', cm.pmSpent)}
+              ${fact('Soin produit', cm.heal, '#4fd3a6')}
+              ${fact('Émotes', r.emoteTotal)}
             </div>
           </section>
-          ${skillHtml ? `<section class="stats-char-detail stats-char-detail--skills"><h4>🎲 Compétences · résultat moyen ${statsAvg(skillMean.resultAvg)} · chance au dé ${statsAvg(skillMean.naturalAvg)}/20</h4>${skillHtml}</section>` : ''}
+          ${skillHtml ? `<section class="stats-char-detail stats-char-detail--skills"><h4>🎲 Compétences</h4>${skillHtml}</section>` : ''}
         </div>
-        ${favsHtml}
         ${(dateBtn || delBtn) ? `<div class="stats-char-actions">${dateBtn}${delBtn}</div>` : ''}
       </div>
     </details>`;
@@ -1476,7 +1549,7 @@ function _statsRender(scope) {
       const txt = Number.isInteger(abs) ? String(abs) : abs.toFixed(1).replace(/\.0$/, '');
       return `${v >= 0 ? '+' : '-'}${txt}`;
     };
-    const detailLeaders = impactRows.slice(0, Math.max(3, mvps.length));
+    const detailLeaders = impactRows.slice(0, Math.max(4, mvps.length));
     if (!_statsMvpDetailId || !detailLeaders.some(leader => leader.id === _statsMvpDetailId)) {
       _statsMvpDetailId = detailLeaders[0]?.id || '';
     }
@@ -1538,17 +1611,33 @@ function _statsRender(scope) {
         ${calcGroup('Axes d\'impact', gainedEntries, 'is-gain')}
       </div>`;
     })() : '';
-    mvpDetailSec = drawer('Détail du calcul MVP', `${detailTabsHtml}<div class="stats-mvp-calcs">${calcHtml}</div>`, {
-      key: 'mvp-detail',
-      count: `${detailLeaders.length} fiche${detailLeaders.length > 1 ? 's' : ''}`,
-    });
-    return `<section class="stats-sec stats-mvp-sec">
-      <div class="stats-mvp-card">
-        <div class="stats-mvp-id stats-mvp-id--multi">${leadersHtml}</div>
-        <div class="stats-mvp-score">${topImpact}<span>${campaignMvp ? 'médiane' : 'score'}</span></div>
-        <div class="stats-mvp-breakdown">${parts.slice(0, 5).map(p => `<span>${p}</span>`).join('')}</div>
+    // Refonte (étape 5) : le drawer verbeux est remplacé par les axes affichés
+    // directement dans la carte + le bandeau des candidats (bascule la fiche).
+    mvpDetailSec = '';
+    const lead = activeDetailLeader || mvps[0];
+    const leadDetails = lead?.impactDetails || { entries: [], score: lead?.impact || 0 };
+    const isTopLead = detailLeaders[0]?.id === lead?.id;
+    const axes = (leadDetails.entries || []).filter(e => (e.points || 0) > 0).sort((a, b) => b.points - a.points).slice(0, 6);
+    const axesMax = Math.max(...axes.map(a => a.points), 1);
+    const axesHtml = axes.map(a => `<div class="stats-axe">
+      <i>${a.icon || '•'}</i><span class="stats-axe-lbl">${_esc(a.label)}</span>
+      <span class="stats-axe-cnt">${a.count != null ? Number(a.count).toLocaleString('fr-FR') : ''}</span>
+      <span class="stats-axe-bar"><i style="width:${Math.round(a.points / axesMax * 100)}%"></i></span>
+      <span class="stats-axe-pts">${fmtPts(a.points)}</span>
+    </div>`).join('');
+    const runnersHtml = detailLeaders.length > 1 ? `<div class="stats-mvp-runners">
+      ${detailLeaders.slice(0, 4).map((p, i) => `<button type="button" class="stats-runner${p.id === lead?.id ? ' on' : ''}" data-action="_statsMvpDetailPick" data-id="${_esc(p.id)}">
+        ${_statsAvatar(p.id, p.name, 24)}<span>${_esc(p.name)}<em>${i === 0 ? 'MVP' : '#' + (i + 1)}</em></span><b>${p.impactDetails?.score ?? p.impact}</b>
+      </button>`).join('')}</div>` : '';
+    return `<div class="stats-mvp">
+      <div class="stats-mvp-top">
+        ${_statsAvatar(lead.id, lead.name, 52)}
+        <div class="stats-mvp-name"><span class="stats-mvp-k">MVP d'impact${isTopLead ? '' : ' · candidat'}</span><b>${_esc(lead.name)}</b></div>
+        <div class="stats-mvp-sc"><b>${leadDetails.score ?? lead.impact}</b><small>${campaignMvp ? 'médiane' : 'score'}</small></div>
       </div>
-    </section>`;
+      <div class="stats-axes">${axesHtml || '<div class="stats-empty-inline">Aucun axe positif sur ce périmètre.</div>'}</div>
+      ${runnersHtml}
+    </div>`;
   })() : '';
   const groupMax = {
     dmg: Math.max(1, ...groupCompare.map(g => (g.combat.dmgDealt || 0) / Math.max(1, g.count))),
@@ -1850,74 +1939,132 @@ function _statsRender(scope) {
               : 'Pile dans la moyenne (10,5)';
     return `<td data-label="Chance au dé"><span class="stats-luck ${cls}" title="${tip}">${statsAvg(n)}<small>/20</small></span></td>`;
   };
-  const averageSkillRows = (GS.perSkill || []).map(skill => `<tr>
-    <th scope="row"><span>${_esc(skill.sk)}</span><small>${skill.trackedRolls ? `${skill.trackedRolls}/${skill.rolls} détaillés` : `${skill.rolls} jet${skill.rolls > 1 ? 's' : ''} historique${skill.rolls > 1 ? 's' : ''}`}</small></th>
-    <td data-label="Résultat moyen"><b>${statsAvg(skill.resultAvg)}</b></td>
-    ${luckCell(skill.naturalAvg)}
-    <td data-label="Jets">${skill.rolls}</td>
-    <td data-label="Crit. / échecs"><span class="stats-average-extremes"><i title="Critiques">💥 ${skill.crits} <small>${skill.critRate}%</small></i><i title="Échecs critiques">💔 ${skill.fumbles} <small>${skill.fumbleRate}%</small></i></span></td>
+  // ── Jets & moyennes (refonte fidèle à la maquette) : 6 cartes .avg + légende
+  // + note + tableau par compétence (volume en barre + chance au dé colorée) ──
+  const _avgCard = (ic, v, l, sample, col, sfx = '') => `<div class="stats-avg" style="--ac:${col}"><small>${ic} ${l}</small><b>${statsAvg(v)}${v == null ? '' : sfx}</b><em>${sample}</em></div>`;
+  const _luckInline = (v) => { const n = Number(v); if (!Number.isFinite(n)) return '<span class="stats-tbl-z">—</span>'; const cls = n > 10.5 ? 'is-lucky' : n < 10.5 ? 'is-unlucky' : 'is-even'; return `<span class="stats-luck ${cls}">${statsAvg(n)}<small>/20</small></span>`; };
+  const _skillsSorted = [...(GS.perSkill || [])].sort((a, b) => b.rolls - a.rolls);
+  const _skMax = Math.max(..._skillsSorted.map(s => s.rolls), 1);
+  const averageSkillRows = _skillsSorted.map(s => `<tr>
+    <td class="stats-td-who"><span class="stats-who-in"><b>${_esc(s.sk)}</b></span></td>
+    <td><span class="stats-cellbar" style="--mc:#7fb0ff"><i style="width:${Math.round(s.rolls / _skMax * 100)}%"></i><b>${s.rolls}</b></span></td>
+    <td class="on">${statsAvg(s.resultAvg)}</td>
+    <td>${_luckInline(s.naturalAvg)}</td>
+    <td class="stats-tbl-z">${s.trackedRolls}/${s.rolls} détaillés</td>
+    <td><span style="color:var(--amber)">💥 ${s.crits}</span> <span class="stats-dim">${s.critRate || 0}%</span> &nbsp; <span style="color:var(--crimson)">💔 ${s.fumbles}</span> <span class="stats-dim">${s.fumbleRate || 0}%</span></td>
   </tr>`).join('');
-  const averagesHtml = `<section class="stats-surface stats-averages" id="moyennes">
-    <div class="stats-surface-head">
-      <div><span>Valeur typique des actions</span><h3>Moyennes des jets</h3></div>
-      <small>${actionMean.resultTrackedRolls ? `${actionMean.resultCoverage}% des actions avec résultat final détaillé` : 'Détail indisponible'}</small>
+  const _avgNote = (!actionMean.trackedRolls || actionMean.coverage < 100 || actionMean.resultCoverage < 100 || combatMean.damageAverageEstimated)
+    ? `<div class="stats-note"><span>ℹ️</span><span>Les moyennes exactes regroupent compétences et attaques retrouvées dans les compteurs et le journal VTT${_statsVttLogLimited ? ' (500 dernières entrées)' : ''}. Les tirets correspondent à des actions historiques dont le détail n’est plus disponible.</span></div>` : '';
+  const averagesHtml = `<section class="stats-surface" id="moyennes">
+    <div class="stats-surface-head"><div><span>Valeur typique des actions</span><h3>Moyennes des jets</h3></div><small>${actionMean.resultTrackedRolls ? `${actionMean.resultCoverage}% des actions avec résultat final détaillé` : 'Détail indisponible'}</small></div>
+    <div class="stats-avg-grid">
+      ${_avgCard('⚔️', combatMean.damageAverage, combatMean.damageAverageEstimated ? 'Dégâts moyens par touche' : 'Dégâts moyens par impact', combatMean.damageAverageEstimated ? `${GC.dmgDealt} ÷ ${GC.hits} touches` : `${combatMean.damageEvents} impact${combatMean.damageEvents > 1 ? 's' : ''} suivi${combatMean.damageEvents > 1 ? 's' : ''}`, '#c9b6ff')}
+      ${_avgCard('∑', actionMean.rolls, 'Actions au d20 analysées', `${GS.rolls} compétence${GS.rolls > 1 ? 's' : ''} + ${GC.attacks} attaque${GC.attacks > 1 ? 's' : ''}`, '#ff9d7a')}
+      ${_avgCard('🎲', actionMean.resultAvg, 'Résultat final moyen', `${actionMean.resultTrackedRolls}/${actionMean.rolls} actions détaillées`, '#7fb0ff')}
+      ${_avgCard('🎯', actionMean.naturalAvg, 'Chance au dé (moy. /20)', 'Dé équitable attendu : 10,5', '#4fd3a6')}
+      ${_avgCard('💥', actionMean.critRate, 'Critiques · toutes actions', `${actionMean.crits} sur ${actionMean.rolls} actions`, '#f4c430', '%')}
+      ${_avgCard('💔', actionMean.fumbleRate, 'Échecs critiques', `${actionMean.fumbles} sur ${actionMean.rolls} actions`, '#ff6b6b', '%')}
     </div>
-    <div class="stats-average-layout">
-      <div class="stats-average-summary">
-    <div class="stats-average-cards">
-      ${averageCard('⚔️', combatMean.damageAverage, combatMean.damageAverageEstimated ? 'Dégâts moyens par touche' : 'Dégâts moyens par impact', combatMean.damageAverageEstimated ? `${GC.dmgDealt} dégâts ÷ ${GC.hits} touches` : `${combatMean.damageEvents} impact${combatMean.damageEvents > 1 ? 's' : ''} suivi${combatMean.damageEvents > 1 ? 's' : ''}`, '#c9b6ff')}
-      ${averageCard('∑', actionMean.rolls, 'Actions au d20 analysées', actionBreakdown, '#ff9d7a')}
-      ${averageCard('🎲', actionMean.resultAvg, 'Résultat final moyen', trackedResultLabel, '#7fb0ff')}
-      ${averageCard('🎯', actionMean.naturalAvg, 'Chance au dé (moy. /20)', trackedNaturalLabel, '#4fd3a6')}
-      ${averageCard('💥', actionMean.critRate, 'Critiques · toutes actions', critSample, '#f4c430', '%')}
-      ${averageCard('💔', actionMean.fumbleRate, 'Échecs critiques · toutes actions', fumbleSample, '#ff6b6b', '%')}
+    <div class="stats-legend">
+      <span><b>Résultat final</b> = dé + modificateurs</span>
+      <span><b>Chance au dé</b> = valeur brute du d20, hors bonus</span>
+      <span><b>Dégâts</b> = total infligé ÷ impacts</span>
+      <span><b>Critiques</b> = compétences + combat ÷ actions au d20</span>
     </div>
-    <div class="stats-average-formulas">
-      <span><b>Dégâts</b> = total infligé ÷ impacts${combatMean.damageAverageEstimated ? ' (touches pour l’historique)' : ''}</span>
-      <span><b>Jet final</b> = résultats avec bonus des compétences + attaques ÷ actions détaillées</span>
-      <span><b>Chance au dé</b> = valeur brute du d20 (sur 20), sans les bonus — moyenne attendue 10,5</span>
-      <span><b>Critiques</b> = critiques de compétence + critiques de combat ÷ toutes les actions au d20</span>
-    </div>
-    ${(!actionMean.trackedRolls || actionMean.coverage < 100 || actionMean.resultCoverage < 100 || combatMean.damageAverageEstimated) ? `<p class="stats-average-note"><span>ℹ️</span> Les moyennes exactes regroupent les compétences et les attaques retrouvées dans les compteurs et le journal VTT${_statsVttLogLimited ? ' (500 dernières entrées)' : ''}. Les tirets ou couvertures partielles correspondent à des actions historiques dont le détail n’est plus disponible${combatMean.damageAverageEstimated ? ' ; la moyenne de dégâts historique reste alors une estimation par touche' : ''}.</p>` : ''}
-      </div>
-    <div class="stats-average-panels">
-      <section class="stats-average-panel">
-        <header><span>Détail par compétence</span><small>Le filtre Joueurs permet de cibler un personnage</small></header>
-        <p class="stats-average-legend">
-          <span><b>Résultat moyen</b> = dé + modificateurs (la valeur comparée à la difficulté).</span>
-          <span><b>Chance au dé</b> = valeur brute du d20, sur 20. Un dé équitable fait <b>10,5</b> en moyenne : <em class="stats-luck is-lucky">au-dessus</em> = chanceux, <em class="stats-luck is-unlucky">en dessous</em> = malchanceux.</span>
-        </p>
-        <div class="stats-average-table-wrap"><table class="stats-average-table">
-          <thead><tr>
-            <th>Compétence</th>
-            <th title="Dé + modificateurs : la valeur réellement comparée à la difficulté">Résultat moyen</th>
-            <th title="Valeur brute du d20 (sur 20), sans les bonus. Moyenne attendue d'un dé équitable : 10,5">Chance au dé <small>/20</small></th>
-            <th>Jets</th>
-            <th>Crit. / échecs</th>
-          </tr></thead>
-          <tbody>${averageSkillRows || '<tr><td colspan="5" class="stats-average-empty">Aucun jet de compétence sur ce périmètre.</td></tr>'}</tbody>
-        </table></div>
-      </section>
-    </div>
-    </div>
+    ${_avgNote}
+    <div class="stats-surface-head stats-surface-head--sub"><div><span>Où la table est bonne, où elle bloque</span><h3>Détail par compétence</h3></div><small>Trié par volume de jets</small></div>
+    <div class="stats-tbl-wrap"><table class="stats-tbl">
+      <thead><tr><th class="stats-th-who">Compétence</th><th>Volume</th><th>Résultat moyen</th><th>Chance au dé</th><th>Jets</th><th>Crit. / échecs</th></tr></thead>
+      <tbody>${averageSkillRows || '<tr><td colspan="6" class="stats-tbl-z" style="text-align:center;padding:16px">Aucun jet de compétence sur ce périmètre.</td></tr>'}</tbody>
+    </table></div>
   </section>`;
-  const heroSec = `<section class="stats-scoreboard">
-    <div class="stats-scoreboard-main">
-      <div class="stats-scoreboard-gauge">${_statsGauge(hitRate, '#22c38e', 118, 11, 'r&eacute;ussite')}</div>
-      <div class="stats-scoreboard-copy">
-        <span class="stats-scoreboard-kicker">P&eacute;rim&egrave;tre analys&eacute;</span>
+  // Scoreboard (refonte) : jauge + périmètre, puis 5 KPI avec delta vs séance
+  // précédente + sparkline. Les séries réutilisent les rows par séance déjà
+  // calculées pour le MVP (aucune lecture Firestore supplémentaire) ; on les
+  // remet en ordre chronologique et on applique le filtre « joueurs ».
+  const chronoSessions = [...mvpSessionRows]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(s => ({
+      date: s.date,
+      agg: _statsAggregateRows((sel && sel.size) ? s.rows.filter(r => sel.has(r.id)) : s.rows),
+      mission: _statsMissionOf(s.date),
+    }));
+  const kpiSeries = chronoSessions.map(s => s.agg);
+  const _statsSessMetric = (agg, key) => key === 'rolls' ? (agg?.skills?.rolls || 0) : (agg?.combat?.[key] || 0);
+  const _kpiNum = (v) => Number(v || 0).toLocaleString('fr-FR');
+  const KPI_DEFS = [
+    ['DMG', GC.dmgDealt, '🗡️', 'D&eacute;g&acirc;ts inflig&eacute;s', '#c9b6ff', a => a.combat.dmgDealt],
+    ['PV', GC.heal, '💚', 'Soin produit', '#4fd3a6', a => a.combat.heal],
+    ['MAG', GC.spellsCast, '🔮', 'Sorts lanc&eacute;s', '#bca0ff', a => a.combat.spellsCast],
+    ['D20', GS.rolls, '🎲', 'Jets de d&eacute;s', '#7fb0ff', a => a.skills.rolls],
+    ['KO', GC.kosDealt, '☠️', 'KO inflig&eacute;s', '#ef4444', a => a.combat.kosDealt],
+  ];
+  const _statsKpi = (short, value, icon, label, color, pick) => {
+    const vals = kpiSeries.map(pick);
+    const n = vals.length;
+    const d = n > 1 ? vals[n - 1] - vals[n - 2] : null;
+    const prev = n > 1 ? vals[n - 2] : 0;
+    const pct = (d != null && prev) ? Math.round(d / prev * 100) : null;
+    const hasDelta = d != null && d !== 0;
+    return `<div class="stats-kpi">
+      <div class="stats-kpi-t"><span>${short}</span>${hasDelta ? `<span class="stats-kpi-d ${d >= 0 ? 'up' : 'down'}">${d >= 0 ? '▲' : '▼'} ${pct != null ? Math.abs(pct) + '%' : Math.abs(d)}</span>` : ''}</div>
+      <div class="stats-kpi-v" style="color:${color}">${_kpiNum(value)}</div>
+      <div class="stats-kpi-l">${icon} ${label}</div>
+      ${_statsSpark(vals, color)}
+      ${hasDelta ? '<div class="stats-kpi-l stats-kpi-sub">vs s&eacute;ance pr&eacute;c&eacute;dente</div>' : ''}
+    </div>`;
+  };
+  const heroSec = `<section class="stats-board">
+    <div class="stats-bd-id">
+      ${_statsGauge(hitRate, '#22c38e', 104, 10, 'r&eacute;ussite')}
+      <div class="stats-bd-copy">
+        <span class="stats-bd-k">P&eacute;rim&egrave;tre analys&eacute;</span>
         <h2>${_esc(scopeLabel)}</h2>
-        <p>${rows.length} personnage${rows.length > 1 ? 's' : ''} suivi${rows.length > 1 ? 's' : ''} &middot; ${scopeDateCount} s&eacute;ance${scopeDateCount > 1 ? 's' : ''} &middot; ${GC.attacks} attaque${GC.attacks > 1 ? 's' : ''}</p>
+        <p>${rows.length} personnage${rows.length > 1 ? 's' : ''} &middot; ${scopeDateCount} s&eacute;ance${scopeDateCount > 1 ? 's' : ''} &middot; ${_kpiNum(GC.attacks)} attaque${GC.attacks > 1 ? 's' : ''}</p>
       </div>
     </div>
-    <div class="stats-score-grid">
-      ${statChip('DMG', GC.dmgDealt, 'D&eacute;g&acirc;ts', '#c9b6ff')}
-      ${statChip('PV', GC.heal, 'Soin', '#4fd3a6')}
-      ${statChip('MAG', GC.spellsCast, 'Sorts', '#bca0ff')}
-      ${statChip('D20', GS.rolls, 'Jets', '#7fb0ff')}
-      ${statChip('KO', GC.kosDealt, 'KO', '#ef4444')}
-    </div>
+    <div class="stats-kpis">${KPI_DEFS.map(d => _statsKpi(...d)).join('')}</div>
   </section>`;
+
+  // ── Rythme de campagne (refonte, étape 6) : évolution par séance + missions ──
+  const evoKey = _STATS_METRICS[_statsEvoMetric] ? _statsEvoMetric : 'dmgDealt';
+  const evoM = _STATS_METRICS[evoKey];
+  const evoVals = chronoSessions.map(s => _statsSessMetric(s.agg, evoKey));
+  const evoMax = Math.max(...evoVals, 1);
+  const evoAvg = evoVals.length ? Math.round(evoVals.reduce((a, b) => a + b, 0) / evoVals.length) : 0;
+  const evoStep = chronoSessions.length > 12 ? 2 : 1;
+  const _canTimeline = chronoSessions.length > 1;
+  const _rythmeView = (_statsRythmeView === 'pie' || !_canTimeline) ? 'pie' : 'timeline';
+  const rythmeToggle = `<div class="stats-segm">
+    <button class="${_rythmeView === 'timeline' ? 'on' : ''}"${_canTimeline ? '' : ' disabled'} data-action="_statsRythmeView" data-view="timeline">📈 Évolution</button>
+    <button class="${_rythmeView === 'pie' ? 'on' : ''}" data-action="_statsRythmeView" data-view="pie">◔ Répartition</button>
+  </div>`;
+  const rythmeBody = _rythmeView === 'pie'
+    ? _statsPieChart(rows, evoKey)
+    : `<div class="stats-tl">${chronoSessions.map((s, i) => `<button type="button" class="stats-tl-col${s.date === dateKey ? ' on' : ''}" data-action="_statsSetScope" data-scope="${s.date === dateKey ? '' : s.date}" style="--mc:${evoM.color}">
+        <span class="stats-tl-tip">${_statsFmtDate(s.date)} · <b>${_kpiNum(evoVals[i])}</b> ${evoM.lbl.toLowerCase()}${s.mission ? `<br><span class="stats-dim">${_esc(s.mission)}</span>` : ''}</span>
+        <span class="stats-tl-bar" style="height:${Math.max(3, Math.round(evoVals[i] / evoMax * 100))}%"></span>
+        <span class="stats-tl-x">${i % evoStep === 0 ? _statsFmtDate(s.date).slice(0, 5) : ''}</span></button>`).join('')}</div>
+      <div class="stats-tl-legend"><span>Pic : ${_kpiNum(evoMax)} · moyenne : ${_kpiNum(evoAvg)} / séance</span><span>${evoM.lbl}</span></div>`;
+  const timelineSec = (_canTimeline || rows.length) ? `<div class="stats-surface stats-chart">
+    <div class="stats-chart-hd"><div><b>${_rythmeView === 'pie' ? 'Répartition par personnage' : 'Évolution par séance'}</b><small>${_rythmeView === 'pie' ? `Part de chaque personnage · ${evoM.lbl.toLowerCase()}` : chronoSessions.length + ' séances · cliquer pour cadrer la vue'}</small></div><div class="stats-chart-ctrl">${rythmeToggle}${_statsMetricSelect(evoKey, '_statsEvoMetric')}</div></div>
+    ${rythmeBody}
+  </div>` : '';
+  const missionRythme = missionCompare
+    .map(m => ({ label: m.label, key: m.key, n: m.count, avg: m.count ? Math.round(_statsSessMetric(m, evoKey) / m.count) : 0 }))
+    .filter(m => m.n).sort((a, b) => b.avg - a.avg);
+  const mRythmeMax = Math.max(...missionRythme.map(m => m.avg), 1);
+  const missionsSec = missionRythme.length ? `<div class="stats-surface stats-chart">
+    <div class="stats-chart-hd"><div><b>Rendement par mission</b><small>Moyenne par séance suivie</small></div></div>
+    <div class="stats-mbars">${missionRythme.map(m => `<button type="button" class="stats-mbar" data-action="_statsSetScope" data-scope="mission:${_esc(m.key)}" style="--mc:${evoM.color}">
+      <div class="stats-mb-l"><b>${_esc(m.label)}</b><small>${m.n} séance${m.n > 1 ? 's' : ''}</small><span class="stats-mb-track"><i style="width:${Math.round(m.avg / mRythmeMax * 100)}%"></i></span></div>
+      <div class="stats-mb-v"><b>${_kpiNum(m.avg)}</b><small>/ séance</small></div></button>`).join('')}</div>
+  </div>` : '';
+  const rythmeSec = (timelineSec || missionsSec) ? `<section class="stats-sec stats-rythme">
+    <div class="stats-surface-head"><div><span>Tendance</span><h3>Rythme de campagne</h3></div></div>
+    <div class="stats-rythme-grid${missionsSec && timelineSec ? '' : ' stats-rythme-grid--solo'}">${timelineSec}${missionsSec}</div>
+  </section>` : '';
+
   const navItems = [
     ['temps-forts', 'TOP', 'Temps forts'],
     groupCompare.length ? ['groupes', 'GRP', 'Groupes'] : null,
@@ -1956,31 +2103,112 @@ function _statsRender(scope) {
     <div class="stats-surface-head"><div><span>D&eacute;tail des contributions</span><h3>Joueurs</h3></div><small>${rows.length} fiche${rows.length > 1 ? 's' : ''}</small></div>
     ${charsHtml}
   </section>`;
-  const detailsHtml = `<section class="stats-surface stats-surface--compact" id="donnees">
-    <div class="stats-surface-head"><div><span>Audit</span><h3>Donn&eacute;es source</h3></div></div>
+  const detailsHtml = `<section class="stats-sec" id="donnees">
+    <div class="stats-surface-head"><div><span>Donn&eacute;es source</span><h3>Audit des compteurs</h3></div><small>${_esc(scopeLabel)}</small></div>
     ${detailedKpisHtml}
   </section>`;
   const groupsHtml = missionGroupsSec ? `<div id="groupes">${missionGroupsSec}</div>` : '';
 
+  // ── Tableau de classement triable (refonte, étape 3) ──
+  // Colonnes : accès à la donnée + couleur de métrique. La colonne triée reçoit
+  // une barre-dans-cellule proportionnelle au max de la colonne.
+  const RANK_COLS = [
+    ['attacks', 'Att.', '#ff9d7a', r => r.combat.attacks],
+    ['hitRate', 'Touche', '#22c38e', r => (r.combat.attacks ? Math.round(r.combat.hits / r.combat.attacks * 100) : null)],
+    ['dmg', 'Dégâts', '#c9b6ff', r => r.combat.dmgDealt],
+    ['heal', 'Soin', '#4fd3a6', r => r.combat.heal],
+    ['spells', 'Sorts', '#bca0ff', r => r.combat.spellsCast],
+    ['rolls', 'Jets', '#7fb0ff', r => r.sRolls],
+    ['taken', 'Subis', '#a7b4c4', r => r.combat.dmgTaken],
+    ['ko', 'KO', '#ef4444', r => r.combat.kosDealt],
+    ['impact', 'Impact', '#f4c430', r => r.impact],
+  ];
+  const rankGet = Object.fromEntries(RANK_COLS.map(([k, , , get]) => [k, get]));
+  const rankColor = Object.fromEntries(RANK_COLS.map(([k, , col]) => [k, col]));
+  const rankSortKey = rankGet[_statsRankSort.key] ? _statsRankSort.key : 'dmg';
+  const rankDir = _statsRankSort.dir === 1 ? 1 : -1;
+  const rankRows = [...impactRows].sort((a, b) => (((rankGet[rankSortKey](b) || 0) - (rankGet[rankSortKey](a) || 0)) * (rankDir === -1 ? 1 : -1)));
+  const rankMax = Math.max(...impactRows.map(r => rankGet[rankSortKey](r) || 0), 1);
+  const rankNum = (v) => Number(v || 0).toLocaleString('fr-FR');
+  const rankCell = (r, key) => {
+    const v = rankGet[key](r);
+    if (key === 'hitRate') return v == null
+      ? '<td><span class="stats-tbl-z">—</span></td>'
+      : `<td><span class="stats-hr-pill" style="color:${v >= 65 ? 'var(--emerald)' : v >= 45 ? 'var(--text)' : 'var(--crimson)'}">${v}%</span></td>`;
+    if (key === rankSortKey) return `<td class="on"><span class="stats-cellbar" style="--mc:${rankColor[key]}"><i style="width:${Math.max(2, (v || 0) / rankMax * 100)}%"></i><b>${rankNum(v)}</b></span></td>`;
+    return v ? `<td>${rankNum(v)}</td>` : '<td class="stats-tbl-z">—</td>';
+  };
+  const rankTh = (key, label) => `<th class="stats-th-sort${key === rankSortKey ? ' on' : ''}" data-action="_statsSortRank" data-key="${key}">${label}${key === rankSortKey ? `<span class="stats-th-arw">${rankDir === -1 ? '▼' : '▲'}</span>` : ''}</th>`;
+  const rankingSec = `<section class="stats-surface" id="classement">
+    <div class="stats-surface-head"><div><span>Qui a fait quoi</span><h3>Classement</h3></div><small>Clique une colonne pour trier · ${rankRows.length} personnage${rankRows.length > 1 ? 's' : ''}</small></div>
+    <div class="stats-tbl-wrap"><table class="stats-tbl">
+      <thead><tr><th class="stats-th-rk"></th><th class="stats-th-who">Personnage</th>${RANK_COLS.map(([k, l]) => rankTh(k, l)).join('')}</tr></thead>
+      <tbody>${rankRows.map((r, i) => `<tr>
+        <td class="stats-td-rk${i === 0 ? ' stats-rk1' : ''}">${i + 1}</td>
+        <td class="stats-td-who"><span class="stats-who-in">${_statsAvatar(r.id, r.name, 26)}<b>${_esc(r.name)}</b></span></td>
+        ${RANK_COLS.map(([k]) => rankCell(r, k)).join('')}
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </section>`;
+
+  // ── Face-à-face : 2 personnages, 9 métriques en barres miroir (étape 8) ──
+  const DUEL_ICONS = { attacks: '⚔️', hitRate: '🎯', dmg: '🗡️', heal: '💚', spells: '🔮', rolls: '🎲', taken: '🛡️', ko: '☠️', impact: '⭐' };
+  let duelSec = '';
+  if (impactRows.length >= 2) {
+    let pair = (_statsCompareSelection.players || []).filter(id => impactRows.some(r => r.id === id));
+    if (pair.length < 2 || pair[0] === pair[1]) pair = rankRows.slice(0, 2).map(r => r.id);
+    const A = impactRows.find(r => r.id === pair[0]) || rankRows[0];
+    const B = impactRows.find(r => r.id === pair[1] && r.id !== A.id) || rankRows.find(r => r.id !== A.id) || rankRows[1];
+    const duelOpts = (cur, other) => impactRows.map(r => `<option value="${_esc(r.id)}"${r.id === cur ? ' selected' : ''}${r.id === other ? ' disabled' : ''}>${_esc(r.name)}</option>`).join('');
+    const duelRows = RANK_COLS.map(([k, l, col]) => {
+      const a = rankGet[k](A) || 0, b = rankGet[k](B) || 0, mx = Math.max(a, b, 1), sfx = k === 'hitRate' ? '%' : '';
+      return `<div class="stats-duel-row" style="--dc:${col}">
+        <span class="stats-duel-v stats-duel-v--l${a > b ? ' win' : ''}"><b>${rankNum(a)}${sfx}</b><span class="stats-duel-tk"><i style="width:${Math.round(a / mx * 100)}%"></i></span></span>
+        <span class="stats-duel-m">${DUEL_ICONS[k] || '•'} ${l}</span>
+        <span class="stats-duel-v${b > a ? ' win' : ''}"><span class="stats-duel-tk"><i style="width:${Math.round(b / mx * 100)}%"></i></span><b>${rankNum(b)}${sfx}</b></span>
+      </div>`;
+    }).join('');
+    duelSec = `<section class="stats-surface stats-duel-sec">
+      <div class="stats-surface-head"><div><span>Face-à-face</span><h3>Comparer deux personnages</h3></div></div>
+      <div class="stats-duel">
+        <div class="stats-duel-hd">
+          <div class="stats-duel-p">${_statsAvatar(A.id, A.name, 36)}<select class="stats-duel-sel" data-change="_statsDuelPick" data-slot="0">${duelOpts(A.id, B.id)}</select></div>
+          <span class="stats-duel-vs">VS</span>
+          <div class="stats-duel-p stats-duel-p--r"><select class="stats-duel-sel" data-change="_statsDuelPick" data-slot="1">${duelOpts(B.id, A.id)}</select>${_statsAvatar(B.id, B.name, 36)}</div>
+        </div>
+        ${duelRows}
+      </div>
+    </section>`;
+  }
+
   root.innerHTML = `
     ${controls}
+    <div class="stats-wrap">
     ${sessionBanner}
-    <div class="stats-board">
-      ${heroSec}
-      ${statsNav}
+    ${groupsBar}
+    <div class="stats-views">
+      <div class="stats-view${_statsTab === 'overview' ? ' on' : ''}" data-view="overview">
+        ${heroSec}
+        ${spotlightHtml}
+        ${rythmeSec}
+        ${contextSec}
+      </div>
+      <div class="stats-view${_statsTab === 'ranking' ? ' on' : ''}" data-view="ranking">
+        ${rankingSec}
+        ${duelSec}
+        ${groupsHtml}
+        <div class="stats-content-grid stats-content-grid--solo">
+          ${palmaresHtml}
+        </div>
+      </div>
+      <div class="stats-view${_statsTab === 'players' ? ' on' : ''}" data-view="players">${rosterHtml}</div>
+      <div class="stats-view${_statsTab === 'rolls' ? ' on' : ''}" data-view="rolls">${averagesHtml}</div>
+      <div class="stats-view${_statsTab === 'audit' ? ' on' : ''}" data-view="audit">${detailsHtml}</div>
     </div>
-    ${contextSec}
-    ${spotlightHtml}
-    ${groupsHtml}
-    <div class="stats-content-grid${palmaresSec ? '' : ' stats-content-grid--solo'}">
-      ${analysisHtml}
-      ${palmaresHtml}
-    </div>
-    ${averagesHtml}
-    ${rosterHtml}
-    ${detailsHtml}`;
+    </div>`;
   _statsBindMvpOutsideClose(root);
   _statsBindNavSpy(root);
+  _statsBindPopCloser();
 
   let hasOpenCharacter = false;
   root.querySelectorAll('.stats-char[open]').forEach(charDetails => {
@@ -3780,8 +4008,7 @@ const PAGES = {
   // ─── STATISTIQUES ─────────────────────────────────────────────────────────────
   async statistiques() {
     const content = document.getElementById('main-content');
-    content.innerHTML = `${pageHeaderHtml('📊 Statistiques', 'Jets, réussites et exploits de la table')}
-      <div id="stats-root" class="stats-root">${loadingHtml('Chargement des statistiques…')}</div>`;
+    content.innerHTML = `<div id="stats-root" class="stats-root">${loadingHtml('Chargement des statistiques…')}</div>`;
     const [data, emoteDoc, chars, quests, story] = await Promise.all([
       loadStats(),
       getDocData('world', 'vtt_emotes').catch(() => null),
@@ -4222,6 +4449,56 @@ registerActions({
   },
   // Frise de séances : clic sur une chip → change la vue (sans relecture réseau).
   _statsSetScope: (btn) => { _statsRender(btn.dataset.scope || null); },
+  // Barre de périmètre (3 selects) : Acte → Mission → Séance ; chaque niveau
+  // réinitialise les niveaux inférieurs (retombe sur le parent quand on vide).
+  _statsSetScopeSel: (el) => {
+    const level = el.dataset.level, val = el.value;
+    if (level === 'act') return _statsRender(val ? `act:${val}` : null);
+    if (level === 'mission') return _statsRender(val ? `mission:${val}` : (el.dataset.act ? `act:${el.dataset.act}` : null));
+    // séance
+    if (val) return _statsRender(val);
+    return _statsRender(el.dataset.mission ? `mission:${el.dataset.mission}` : (el.dataset.act ? `act:${el.dataset.act}` : null));
+  },
+  // Onglets : bascule client (tout est déjà dans le DOM, pas de recalcul réseau).
+  _statsSetTab: (btn) => {
+    const tab = btn.dataset.tab;
+    if (!tab || tab === _statsTab) return;
+    _statsTab = tab;
+    const root = document.getElementById('stats-root');
+    root?.querySelectorAll('.stats-view').forEach(v => v.classList.toggle('on', v.dataset.view === tab));
+    root?.querySelectorAll('.stats-tab').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+    root?.scrollIntoView({ block: 'start' });
+  },
+  // Rythme : bascule barres d'évolution ↔ camembert de répartition.
+  _statsRythmeView: (btn) => { _statsRythmeView = btn.dataset.view === 'pie' ? 'pie' : 'timeline'; _statsRender(_statsScope); },
+  // Tri du tableau de classement : re-clic sur la même colonne inverse le sens.
+  _statsSortRank: (btn) => {
+    const key = btn.dataset.key;
+    if (!key) return;
+    _statsRankSort = { key, dir: _statsRankSort.key === key ? -_statsRankSort.dir : -1 };
+    _statsRender(_statsScope);
+  },
+  // Popover « joueurs ciblés » : ouverture/fermeture (état persisté entre rendus).
+  _statsPlayersPop: (btn) => {
+    _statsPopOpen = !_statsPopOpen;
+    _statsMissionPopOpen = false;
+    const root = btn.closest('.stats-root') || document.getElementById('stats-root');
+    root?.querySelectorAll('.stats-pop.open').forEach(p => p.classList.remove('open'));
+    if (_statsPopOpen) btn.closest('.stats-pop')?.classList.add('open');
+  },
+  // Popover « Mission » (avec images) : ouverture/fermeture.
+  _statsMissionPop: (btn) => {
+    _statsMissionPopOpen = !_statsMissionPopOpen;
+    _statsPopOpen = false;
+    const root = btn.closest('.stats-root') || document.getElementById('stats-root');
+    root?.querySelectorAll('.stats-pop.open').forEach(p => p.classList.remove('open'));
+    if (_statsMissionPopOpen) btn.closest('.stats-pop')?.classList.add('open');
+  },
+  // Sélection d'une mission depuis le popover imagé (vide = toutes les missions).
+  _statsScopeMission: (btn) => {
+    _statsMissionPopOpen = false;
+    _statsRender(btn.dataset.id ? `mission:${btn.dataset.id}` : null);
+  },
   _statsResetFilters: () => {
     _statsScope = null;
     _statsPlayerSel = null;
@@ -4264,6 +4541,15 @@ registerActions({
   },
   _statsCompareKind: (btn) => {
     _statsCompareKind = btn.dataset.kind === 'groups' ? 'groups' : 'players';
+    _statsRender(_statsScope);
+  },
+  // Face-à-face (refonte) : choix d'un des deux personnages comparés.
+  _statsDuelPick: (el) => {
+    const slot = Number(el.dataset.slot);
+    if (slot !== 0 && slot !== 1) return;
+    const pair = [...(_statsCompareSelection.players || [])];
+    pair[slot] = el.value || '';
+    _statsCompareSelection.players = pair;
     _statsRender(_statsScope);
   },
   _statsComparePick: (el) => {
