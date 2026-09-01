@@ -654,7 +654,8 @@
 
 #main-content[data-page="map"],
 #main-content[data-page="vtt"],
-#main-content[data-page="histoire"] {
+#main-content[data-page="histoire"],
+#main-content[data-page="agenda"] {
   padding: 0 !important;
 }
 
