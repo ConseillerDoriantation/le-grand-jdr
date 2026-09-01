@@ -2070,3 +2070,449 @@
 @media (max-width: 420px) {
   .stats-correction-grid { grid-template-columns: 1fr; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   REFONTE — Barre sticky (périmètre 3 selects + popover joueurs) + onglets
+   Classes préfixées, tokens de tokens.css uniquement. (Étape 1)
+   ══════════════════════════════════════════════════════════════════════════ */
+.stats-topbar { position: sticky; top: 0; z-index: 40; margin-bottom: 4px;
+  background: color-mix(in srgb, var(--surface-page) 90%, transparent);
+  backdrop-filter: blur(14px); border-bottom: 1px solid var(--border); }
+.stats-topbar-in { display: flex; flex-direction: column; gap: 12px; padding: 12px 2px 0; }
+.stats-topbar-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.stats-brand { display: flex; align-items: baseline; gap: 10px; }
+.stats-brand h1 { font-family: var(--font-display); font-size: 21px; font-weight: 600; letter-spacing: .02em; margin: 0; }
+.stats-brand small { color: var(--text-dim); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; }
+.stats-spacer { flex: 1; }
+
+/* Périmètre : 3 selects habillés */
+.stats-scope { display: flex; align-items: stretch; gap: 2px; background: var(--surface-sunken);
+  border: 1px solid var(--border); border-radius: var(--r-md); padding: 3px; }
+.stats-sc { display: flex; flex-direction: column; gap: 1px; padding: 6px 13px; border-radius: 9px;
+  transition: background .18s; cursor: pointer; max-width: 230px; }
+.stats-sc:hover { background: var(--surface-2); }
+.stats-sc small { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); }
+.stats-sc select { background: none; border: 0; padding: 0; font: inherit; font-size: 13px; font-weight: 500;
+  color: var(--text-soft); cursor: pointer; max-width: 210px; text-overflow: ellipsis; appearance: none; }
+.stats-sc.on { background: var(--surface-3); }
+.stats-sc.on small { color: var(--gold-2); }
+.stats-sc.on select { color: var(--text); }
+.stats-sc select option { background: var(--surface-3); color: var(--text); }
+
+/* Boutons pilule (popover joueurs + outils MJ dans la barre) */
+.stats-pill, .stats-topbar-row .stats-tool-btn {
+  display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 13px;
+  border: 1px solid var(--border-md); border-radius: var(--r-full); background: var(--surface-1);
+  color: var(--text-soft); font-size: 12.5px; font-weight: 500; transition: all .18s; cursor: pointer; }
+.stats-pill:hover, .stats-topbar-row .stats-tool-btn:hover { border-color: var(--border-strong); color: var(--text); }
+.stats-pill.on { background: var(--gold-glow); border-color: color-mix(in srgb, var(--gold) 40%, transparent); color: var(--gold-2); }
+.stats-avstack { display: flex; }
+.stats-avstack > * { margin-left: -7px; border: 2px solid var(--surface-1); border-radius: 50%; }
+.stats-avstack > :first-child { margin-left: 0; }
+
+/* Popover « joueurs ciblés » */
+.stats-pop { position: relative; }
+.stats-pop-menu { position: absolute; top: calc(100% + 8px); right: 0; width: 340px; max-height: 60vh;
+  overflow: auto; background: var(--surface-1); border: 1px solid var(--border-md); border-radius: var(--r-md);
+  box-shadow: var(--elev-2); padding: 8px; display: none; z-index: 60; }
+.stats-pop.open .stats-pop-menu { display: block; }
+.stats-pop-hd { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px 8px;
+  font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); }
+.stats-pop-hd button { font-size: 11.5px; color: var(--gold-2); background: none; border: 0; cursor: pointer; }
+.stats-pop-list { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.stats-pop-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px;
+  font-size: 12.5px; color: var(--text-soft); background: none; border: 0; cursor: pointer; transition: background .15s; min-width: 0; text-align: left; }
+.stats-pop-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-pop-item:hover { background: var(--surface-2); }
+.stats-pop-item.on { background: var(--gold-glow); color: var(--gold-2); }
+
+/* Onglets */
+.stats-tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.stats-tabs::-webkit-scrollbar { display: none; }
+.stats-tab { position: relative; padding: 11px 16px 13px; font-size: 13.5px; font-weight: 500;
+  color: var(--text-muted); white-space: nowrap; display: flex; align-items: center; gap: 8px;
+  background: none; border: 0; cursor: pointer; transition: color .18s; }
+.stats-tab:hover { color: var(--text-soft); }
+.stats-tab.on { color: var(--text); }
+.stats-tab.on::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: 0; height: 2px;
+  border-radius: 2px 2px 0 0; background: var(--gold); }
+.stats-tab-cnt { font-size: 10.5px; padding: 1px 6px; border-radius: var(--r-full); background: var(--surface-2);
+  color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.stats-tab.on .stats-tab-cnt { background: var(--gold-glow); color: var(--gold-2); }
+
+/* Vues (onglets) */
+.stats-views { margin-top: 18px; }
+.stats-view { display: none; }
+.stats-view.on { display: block; }
+
+@media (max-width: 900px) {
+  .stats-topbar-row { gap: 8px; }
+  .stats-scope { flex: 1 1 100%; order: 3; }
+  .stats-sc { flex: 1; max-width: none; }
+}
+
+/* ── REFONTE — Scoreboard : jauge + 5 KPI (delta + sparkline) (Étape 2) ── */
+.stats-board { display: grid; grid-template-columns: minmax(300px, 1fr) 3fr; gap: 1px;
+  background: var(--border); border: 1px solid var(--border); border-radius: var(--r-lg);
+  overflow: hidden; box-shadow: var(--elev-1); }
+.stats-board > * { background: var(--surface-1); }
+.stats-bd-id { display: flex; align-items: center; gap: 20px; padding: 22px 24px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 8%, var(--surface-1)), var(--surface-1) 65%); }
+.stats-bd-copy { min-width: 0; }
+.stats-bd-k { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--gold-2); opacity: .85; }
+.stats-bd-copy h2 { font-family: var(--font-display); font-size: 22px; font-weight: 600; line-height: 1.2; margin: 5px 0 6px; text-wrap: balance; }
+.stats-bd-copy p { font-size: 12px; color: var(--text-muted); }
+.stats-kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: var(--border); }
+.stats-kpi { padding: 16px 18px 14px; background: var(--surface-1); display: flex; flex-direction: column; gap: 9px; transition: background .2s; }
+.stats-kpi:hover { background: var(--surface-2); }
+.stats-kpi-t { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.stats-kpi-t > span { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-dim); }
+.stats-kpi-v { font-size: 29px; font-weight: 600; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.stats-kpi-l { font-size: 11.5px; color: var(--text-muted); }
+.stats-kpi-sub { font-size: 10px; color: var(--text-dim); }
+.stats-kpi-d { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stats-kpi-d.up { color: var(--emerald); }
+.stats-kpi-d.down { color: var(--crimson); }
+.stats-spark { width: 100%; height: 26px; display: block; overflow: visible; }
+@media (max-width: 1240px) { .stats-board { grid-template-columns: 1fr; } .stats-kpis { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 760px) { .stats-kpis { grid-template-columns: repeat(2, 1fr); } .stats-bd-id { padding: 16px 18px; } }
+
+/* ── REFONTE — Tableau de classement triable (Étape 3) ── */
+.stats-tbl-wrap { overflow-x: auto; border-radius: var(--r-lg); border: 1px solid var(--border); background: var(--surface-1); }
+table.stats-tbl { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.stats-tbl th { background: var(--surface-2); font-size: 10px; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--text-dim); font-weight: 600; padding: 9px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border-md); }
+.stats-tbl th.stats-th-rk, .stats-tbl th.stats-th-who { text-align: left; }
+.stats-th-sort { cursor: pointer; transition: color .15s; }
+.stats-th-sort:hover { color: var(--text-soft); }
+.stats-th-sort.on { color: var(--gold-2); }
+.stats-th-arw { opacity: .6; font-size: 9px; margin-left: 3px; }
+.stats-tbl td { padding: 0 12px; height: 44px; text-align: right; font-size: 13px; border-bottom: 1px solid var(--border); color: var(--text-soft); }
+.stats-tbl tr:last-child td { border-bottom: 0; }
+.stats-tbl tbody tr { transition: background .15s; }
+.stats-tbl tbody tr:hover { background: var(--surface-2); }
+.stats-td-rk { width: 44px; text-align: left; color: var(--text-dim); font-size: 12px; }
+.stats-td-who { text-align: left; min-width: 190px; }
+.stats-tbl td.on { color: var(--text); font-weight: 600; }
+.stats-tbl td.stats-tbl-z, .stats-tbl-z { color: var(--text-dim); }
+.stats-who-in { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.stats-who-in b { font-size: 13.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stats-cellbar { position: relative; height: 100%; display: flex; align-items: center; justify-content: flex-end; }
+.stats-cellbar i { position: absolute; right: 0; top: 50%; transform: translateY(-50%); height: 20px; border-radius: 3px;
+  background: color-mix(in srgb, var(--mc, var(--gold)) 26%, transparent); z-index: 0; }
+.stats-cellbar b { position: relative; z-index: 1; font-weight: 600; color: var(--text); }
+.stats-td-rk.stats-rk1 { color: var(--amber); font-weight: 700; }
+.stats-hr-pill { display: inline-block; min-width: 46px; padding: 2px 7px; border-radius: var(--r-full); font-size: 12px; font-weight: 600; background: var(--surface-3); }
+
+/* ── REFONTE — Fiches joueurs en accordéon (Étape 4) — surcharge du roster ── */
+.stats-chars { display: flex; flex-direction: column; gap: 8px; grid-template-columns: none; }
+.stats-char { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-1); overflow: hidden; }
+.stats-char[open] { border-color: var(--border-strong); box-shadow: var(--elev-1); background: var(--surface-1); }
+.stats-char-summary { grid-template-columns: minmax(170px, 1.4fr) repeat(5, minmax(56px, .7fr)) 100px 20px;
+  align-items: center; gap: 14px; min-height: 0; padding: 12px 18px; }
+.stats-char-summary:hover { background: var(--surface-2); }
+.stats-char-id .stats-char-av { width: 34px; height: 34px; }
+.stats-char-name { font-size: 14.5px; }
+.stats-char-id small { font-size: 11px; }
+/* Les 5 KPI deviennent des colonnes directes de la grille du résumé */
+.stats-char-kpis { display: contents; }
+.stats-char-kpi { display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+  gap: 2px; padding: 0; min-width: 0; }
+.stats-char-kpi-icon { display: none; }
+.stats-char-kpi b { font-size: 15px; font-weight: 600; line-height: 1; }
+.stats-char-kpi small { font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-dim); white-space: nowrap; }
+.stats-char-ring { display: flex; align-items: center; gap: 9px; justify-content: flex-end; }
+.stats-char-rate-txt { font-size: 10px; color: var(--text-dim); text-align: right; line-height: 1.25; }
+.stats-char-no-rate { flex-direction: row; }
+/* Corps déplié : inline sous le résumé (plus d'overlay absolu, on est en colonne) */
+.stats-char-body { position: static; max-height: none; overflow: visible; margin: 0;
+  padding: 4px 18px 18px; border: 0; border-top: 1px solid var(--border); border-radius: 0;
+  background: none; box-shadow: none; }
+.stats-char-detail-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; padding-top: 14px; }
+.stats-char-detail { padding: 0; }
+.stats-char-detail + .stats-char-detail:not(.stats-char-detail--skills),
+.stats-char-detail--skills { border-top: 0; }
+.stats-char-detail h4 { font-size: 11px; letter-spacing: .1em; }
+@media (max-width: 900px) {
+  .stats-char-summary { grid-template-columns: 1fr auto auto; }
+  .stats-char-kpi { display: none; }
+}
+
+/* ── REFONTE — Temps forts : MVP à axes + distinctions en liste 2 col. (Étape 5) ── */
+.stats-mvp { display: flex; flex-direction: column; gap: 16px; padding: 20px 22px;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--elev-1); }
+.stats-mvp-top { display: flex; align-items: center; gap: 14px; }
+.stats-mvp-name { flex: 1; min-width: 0; }
+.stats-mvp-k { font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--amber); }
+.stats-mvp-name b { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 600; line-height: 1.15; overflow-wrap: normal; word-break: keep-all; }
+.stats-mvp-sc { text-align: right; flex: none; }
+.stats-mvp-sc b { display: block; font-size: 32px; font-weight: 600; line-height: 1; color: var(--amber); font-variant-numeric: tabular-nums; }
+.stats-mvp-sc small { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); }
+.stats-axes { display: flex; flex-direction: column; gap: 9px; }
+.stats-axe { display: grid; grid-template-columns: 18px minmax(0, 1fr) 46px 70px 44px; align-items: center; gap: 10px; font-size: 12px; }
+.stats-axe > i { font-style: normal; font-size: 13px; text-align: center; }
+.stats-axe-lbl { color: var(--text-soft); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-axe-cnt { text-align: right; color: var(--text-dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+.stats-axe-bar { height: 5px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.stats-axe-bar i { display: block; height: 100%; border-radius: 3px; background: var(--amber); opacity: .85; }
+.stats-axe-pts { text-align: right; font-weight: 600; color: var(--amber); font-variant-numeric: tabular-nums; }
+.stats-mvp-runners { display: flex; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border); }
+.stats-runner { flex: 1; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--r-sm);
+  background: var(--surface-2); min-width: 0; border: 0; cursor: pointer; transition: background .18s; }
+.stats-runner:hover { background: var(--surface-3); }
+.stats-runner.on { background: var(--gold-glow); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 28%, transparent); }
+.stats-runner span { flex: 1; min-width: 0; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.stats-runner b { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text); }
+.stats-runner em { font-style: normal; font-size: 9.5px; color: var(--text-dim); display: block; }
+
+/* Distinctions : grille 2 colonnes, séparateur 1px, liseré gauche --tc */
+.stats-trophies, .stats-trophies--all,
+.stats-spotlight-awards .stats-trophies--all { display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+  background: var(--border); border-radius: var(--r-lg); overflow: hidden; }
+.stats-trophy { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 11px;
+  padding: 12px 16px; background: var(--surface-1); border: 0; border-left: 2px solid var(--tc, var(--gold)); border-radius: 0; }
+.stats-trophy:hover { background: var(--surface-2); }
+.stats-trophy-medal { font-size: 15px; text-align: center; }
+.stats-trophy-body { min-width: 0; }
+.stats-trophy-lbl { display: block; font-size: 10px; letter-spacing: .09em; text-transform: uppercase; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stats-trophy-who { display: flex; align-items: center; gap: 6px; margin-top: 3px; min-width: 0; }
+.stats-trophy-who span { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-trophy-val { text-align: right; }
+.stats-trophy-val b { font-size: 17px; font-weight: 600; color: var(--tc); font-variant-numeric: tabular-nums; }
+.stats-trophy-val small { display: block; font-size: 9.5px; color: var(--text-dim); }
+@media (max-width: 1240px) { .stats-trophies, .stats-trophies--all, .stats-spotlight-awards .stats-trophies--all { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .stats-mvp-runners { flex-wrap: wrap; } .stats-axe { grid-template-columns: 18px minmax(0, 1fr) 40px 44px; } .stats-axe-bar { display: none; } }
+
+/* ── REFONTE — Rythme : évolution par séance + rendement par mission (Étape 6) ── */
+.stats-rythme-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; }
+.stats-rythme-grid--solo { grid-template-columns: 1fr; }
+.stats-chart.stats-surface { padding: 18px 20px 12px; }
+.stats-chart-hd { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
+.stats-chart-hd b { font-size: 13.5px; font-weight: 600; }
+.stats-chart-hd small { display: block; font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.stats-tl { display: flex; align-items: flex-end; gap: 5px; height: 132px; }
+.stats-tl-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
+  gap: 6px; height: 100%; border-radius: 6px 6px 0 0; transition: background .18s; padding-top: 4px;
+  position: relative; border: 0; cursor: pointer; background: none; }
+.stats-tl-col:hover { background: var(--surface-2); }
+.stats-tl-bar { width: 100%; max-width: 26px; border-radius: 4px 4px 2px 2px;
+  background: linear-gradient(180deg, var(--mc, var(--gold)), color-mix(in srgb, var(--mc, var(--gold)) 35%, transparent));
+  min-height: 3px; transition: height .4s var(--ease-spring); }
+.stats-tl-col.on .stats-tl-bar { box-shadow: 0 0 0 1px var(--text), 0 0 16px var(--mc, var(--gold)); }
+.stats-tl-x { font-size: 9.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stats-tl-tip { position: absolute; bottom: calc(100% - 2px); left: 50%; transform: translateX(-50%);
+  background: var(--surface-3); border: 1px solid var(--border-md); border-radius: 8px; padding: 6px 9px;
+  font-size: 11px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .15s; box-shadow: var(--elev-1); z-index: 5; }
+.stats-tl-col:hover .stats-tl-tip { opacity: 1; }
+.stats-tl-tip b { color: var(--mc, var(--gold)); }
+.stats-dim { color: var(--text-dim); }
+.stats-tl-legend { display: flex; justify-content: space-between; align-items: center; margin-top: 10px;
+  padding-top: 10px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); }
+.stats-mbars { display: flex; flex-direction: column; gap: 3px; }
+.stats-mbar { display: grid; grid-template-columns: 1fr 92px; align-items: center; gap: 12px; padding: 8px 10px;
+  border-radius: var(--r-sm); transition: background .18s; text-align: left; width: 100%; border: 0; background: none; cursor: pointer; }
+.stats-mbar:hover { background: var(--surface-2); }
+.stats-mb-l { min-width: 0; }
+.stats-mb-l b { display: block; font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-mb-l small { font-size: 10.5px; color: var(--text-dim); }
+.stats-mb-track { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; margin-top: 6px; }
+.stats-mb-track i { display: block; height: 100%; border-radius: 3px; background: var(--mc, var(--gold)); transition: width .4s var(--ease-spring); }
+.stats-mb-v { text-align: right; }
+.stats-mb-v b { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stats-mb-v small { display: block; font-size: 9.5px; color: var(--text-dim); }
+@media (max-width: 1000px) { .stats-rythme-grid { grid-template-columns: 1fr; } }
+
+/* ── REFONTE — Face-à-face (duel) 2 personnages, barres miroir (Étape 8) ── */
+.stats-duel { padding: 18px 22px 22px; }
+.stats-duel-hd { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; margin-bottom: 18px; }
+.stats-duel-p { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.stats-duel-p--r { justify-content: flex-end; }
+.stats-duel-vs { font-family: var(--font-display); font-size: 12px; color: var(--text-dim); letter-spacing: .14em; }
+.stats-duel-sel { height: 34px; min-width: 0; max-width: 210px; padding: 0 26px 0 10px; border-radius: 8px;
+  background: var(--surface-2); border: 1px solid var(--border-md); color: var(--text); font-size: 15px; font-weight: 600;
+  appearance: none; cursor: pointer; text-overflow: ellipsis; }
+.stats-duel-sel option { background: var(--surface-3); color: var(--text); font-weight: 500; }
+.stats-duel-row { display: grid; grid-template-columns: 1fr 190px 1fr; align-items: center; gap: 14px; padding: 7px 0; }
+.stats-duel-m { text-align: center; font-size: 11.5px; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 7px; }
+.stats-duel-v { display: flex; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; }
+.stats-duel-v--l { justify-content: flex-end; }
+.stats-duel-tk { flex: 1; height: 7px; border-radius: 4px; background: var(--surface-2); overflow: hidden; display: flex; }
+.stats-duel-v--l .stats-duel-tk { justify-content: flex-end; }
+.stats-duel-tk i { display: block; height: 100%; border-radius: 4px; background: color-mix(in srgb, var(--dc, var(--gold)) 45%, transparent); transition: width .4s var(--ease-spring); }
+.stats-duel-v b { font-size: 14px; min-width: 44px; color: var(--text-muted); }
+.stats-duel-v--l b { text-align: right; }
+.stats-duel-v.win b { color: var(--dc, var(--gold)); }
+.stats-duel-v.win .stats-duel-tk i { background: var(--dc, var(--gold)); }
+@media (max-width: 640px) { .stats-duel-row { grid-template-columns: 1fr 120px 1fr; gap: 8px; } }
+
+/* ── REFONTE — Bandeau collé à la barre de navigation (pleine largeur, sans écart) ── */
+#stats-root, .main-content > .stats-root { max-width: none; margin: 0; width: 100%; }
+/* Le bandeau (fond + bordure) va bord à bord ; le contenu reste borné mais
+   aligné à gauche → plus d'écart entre la nav et le bandeau. */
+.stats-topbar-in { max-width: var(--content-max, 1680px); margin: 0; padding: 16px 28px 0; }
+.stats-wrap { max-width: var(--content-max, 1680px); margin: 0; padding: 0 28px; }
+.stats-brand h1 { font-size: 26px; }
+.stats-brand small { font-size: 12.5px; }
+
+/* ── REFONTE — Jets & moyennes (cartes .avg + légende + note) (retours Claude Design) ── */
+.stats-avg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1px;
+  background: var(--border); border-radius: var(--r-lg); overflow: hidden; }
+.stats-avg { background: var(--surface-1); padding: 16px 18px; display: flex; flex-direction: column; gap: 5px;
+  border-top: 2px solid var(--ac, var(--gold)); }
+.stats-avg small { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-dim); }
+.stats-avg > b { font-size: 27px; font-weight: 600; line-height: 1; color: var(--ac, var(--gold)); font-variant-numeric: tabular-nums; }
+.stats-avg em { font-style: normal; font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+.stats-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.stats-legend > span { font-size: 11px; color: var(--text-muted); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-full); padding: 4px 11px; }
+.stats-note { display: flex; gap: 9px; align-items: flex-start; margin-top: 12px; padding: 11px 14px; border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--gold) 7%, var(--surface-1)); border: 1px solid color-mix(in srgb, var(--gold) 16%, transparent);
+  font-size: 11.5px; color: var(--text-muted); line-height: 1.55; }
+.stats-surface-head--sub { margin-top: 20px; }
+.stats-luck { font-weight: 600; font-variant-numeric: tabular-nums; }
+.stats-luck small { font-size: 9.5px; color: var(--text-dim); }
+.stats-luck.is-lucky { color: var(--emerald); }
+.stats-luck.is-unlucky { color: var(--crimson); }
+.stats-luck.is-even { color: var(--text-soft); }
+
+/* ── REFONTE — Audit : 3 panneaux label→valeur (retours Claude Design) ── */
+.stats-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.stats-detail-panel { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 16px 18px; }
+.stats-detail-title { font-size: 12.5px; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; color: var(--text); }
+.stats-detail-rows { display: flex; flex-direction: column; gap: 0; }
+.stats-detail-row { display: flex; grid-template-columns: none; align-items: center; justify-content: space-between;
+  gap: 14px; padding: 9px 0; border-top: 1px solid var(--border); font-size: 12.5px; }
+.stats-detail-row:first-child { border-top: 0; }
+.stats-detail-row > span { color: var(--text-muted); display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.stats-detail-row > span small { margin-left: 0; font-size: 10.5px; color: var(--text-dim); font-weight: 400; text-transform: none; letter-spacing: 0; }
+.stats-detail-row > b { font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 600; flex: none; color: var(--text); }
+
+/* ── REFONTE — Fiche joueur : favoris intégrés en 4e colonne + compacité ── */
+.stats-char-detail--favs .stats-favorite-groups { display: flex; flex-direction: column; gap: 14px; }
+.stats-char-detail--favs .stats-favorite-group h4 { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); margin: 0 0 9px; font-weight: 600; }
+.stats-char-detail--favs .stats-favorite-list { display: flex; flex-direction: column; gap: 2px; }
+.stats-char-detail--favs .stats-favorite-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 8px; font-size: 12px; padding: 3px 0; }
+.stats-char-detail--favs .stats-favorite-rank { color: var(--text-dim); font-size: 10.5px; font-weight: 700; text-align: center; }
+.stats-char-detail--favs .stats-favorite-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-soft); }
+.stats-char-detail--favs .stats-favorite-row b { color: var(--text); font-variant-numeric: tabular-nums; font-size: 12px; }
+.stats-char-actions { margin-top: 14px; }
+
+/* ── REFONTE v2 — Barre : périmètre sur sa ligne (lisible) + boutons intégrés ── */
+.stats-topbar-scope { display: flex; align-items: center; gap: 12px; padding: 2px 0 6px; flex-wrap: wrap; }
+.stats-scope-art { flex: none; display: flex; }
+.stats-scope-art .stats-mission-art, .stats-scope-art img { width: 42px; height: 42px; border-radius: 10px; object-fit: cover; display: block; }
+.stats-scope { flex: 1 1 auto; display: flex; gap: 5px; background: var(--surface-sunken); border: 1px solid var(--border-md);
+  border-radius: var(--r-md); padding: 4px; max-width: 760px; }
+.stats-sc { flex: 1; display: flex; flex-direction: column; gap: 1px; padding: 7px 30px 7px 14px; border-radius: 10px;
+  cursor: pointer; max-width: none; transition: background .15s; position: relative; }
+.stats-sc::after { content: '▾'; position: absolute; right: 12px; top: 50%; transform: translateY(-20%); font-size: 10px; color: var(--text-dim); pointer-events: none; }
+.stats-sc small { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); }
+.stats-sc select { background: none; border: 0; padding: 0; margin: 0; font: inherit; font-size: 14px; font-weight: 600;
+  color: var(--text-soft); cursor: pointer; width: 100%; max-width: none; text-overflow: ellipsis; appearance: none; }
+.stats-sc:hover { background: var(--surface-2); }
+.stats-sc.on { background: var(--surface-3); }
+.stats-sc.on small { color: var(--gold-2); }
+.stats-sc.on select { color: var(--text); }
+.stats-sc select option { background: var(--surface-3); color: var(--text); }
+
+/* Boutons outils : rectangles arrondis discrets, cohérents avec le périmètre */
+.stats-tools { display: flex; gap: 6px; }
+.stats-topbar-row .stats-tool-btn, .stats-pill { height: 36px; border-radius: 10px; }
+.stats-topbar-row .stats-tool-btn { padding: 0 13px; background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text-soft); font-size: 12.5px; font-weight: 500; gap: 7px; display: inline-flex; align-items: center; }
+.stats-topbar-row .stats-tool-btn:hover { background: var(--surface-3); border-color: var(--border-strong); color: var(--text); }
+.stats-topbar-row .stats-tool-btn--manage { background: color-mix(in srgb, var(--gold) 13%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--gold) 30%, transparent); color: var(--gold-2); }
+.stats-pill { background: var(--surface-2); border: 1px solid var(--border); }
+.stats-pill:hover { background: var(--surface-3); border-color: var(--border-strong); }
+
+/* Segmenté (Évolution / Répartition) + groupe de contrôles de graphique */
+.stats-chart-ctrl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.stats-segm { display: inline-flex; background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--r-full); padding: 2px; }
+.stats-segm button { padding: 5px 12px; border-radius: var(--r-full); font-size: 12px; font-weight: 500; color: var(--text-muted); background: none; border: 0; cursor: pointer; transition: all .18s; }
+.stats-segm button.on { background: var(--surface-3); color: var(--text); }
+.stats-segm button:disabled { opacity: .4; cursor: not-allowed; }
+@media (max-width: 760px) { .stats-scope { max-width: none; } .stats-topbar-scope { flex-direction: column; align-items: stretch; } }
+
+/* ══ REFONTE v3 — retours : pleine largeur, roster multi-colonnes, barre affinée ══ */
+/* Contenu VRAIMENT pleine largeur → bandeau collé à la sidebar + plus d'écart à droite */
+#stats-root, .main-content > .stats-root { max-width: none !important; width: 100% !important; margin: 0 !important; }
+.stats-topbar-in { max-width: none; margin: 0; padding: 16px 24px 0; }
+.stats-wrap { max-width: none; margin: 0; padding: 0 24px 40px; }
+
+/* Boutons outils empilés en colonne */
+.stats-tools { flex-direction: column; gap: 6px; align-items: stretch; }
+.stats-topbar-row .stats-tool-btn { justify-content: flex-start; height: 32px; }
+
+/* Vignette mission : grande et reconnaissable, slot d'ancrage constant (56px) */
+.stats-scope-art { width: 56px; height: 56px; flex: none; display: flex; align-items: center; justify-content: center; }
+.stats-scope-art .stats-mission-art, .stats-scope-art img { width: 56px; height: 56px; border-radius: 12px; object-fit: cover; box-shadow: var(--elev-1); }
+.stats-scope-art-ph { width: 56px; height: 56px; border-radius: 12px; display: grid; place-items: center; font-size: 24px; background: var(--surface-2); border: 1px solid var(--border); }
+.stats-scope-art--ghost { visibility: hidden; }
+
+/* Sélecteur Joueurs : sa propre ligne, aligné sous le périmètre, même largeur */
+.stats-topbar-scope, .stats-topbar-players { display: flex; align-items: center; gap: 12px; }
+.stats-topbar-players { margin-top: -2px; }
+.stats-topbar-players .stats-pop { flex: 1 1 auto; max-width: 760px; }
+.stats-topbar-players .stats-pill { width: 100%; justify-content: flex-start; height: 40px; }
+.stats-topbar-players .stats-pop-menu { width: 100%; max-width: 760px; left: 0; right: auto; }
+
+/* Roster : plusieurs fiches par ligne quand l'écran est large */
+.stats-chars { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 680px), 1fr)); align-items: start; gap: 8px; }
+
+/* Camembert amélioré : donut plus grand, légende en grille lisible */
+.stats-chart .stats-pie { gap: 22px; padding: 6px 2px 2px; align-items: center; }
+.stats-chart .stats-pie-svg { width: 168px; height: 168px; }
+.stats-pie-total { font-size: 24px; }
+.stats-chart .stats-pie-legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 5px 14px; align-content: start; }
+.stats-pie-li { padding: 5px 9px; border-radius: 8px; background: var(--surface-2); font-size: 12px; }
+.stats-pie-li:hover { background: var(--surface-3); }
+.stats-pie-nm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-soft); }
+.stats-pie-vl { margin-left: auto; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (max-width: 620px) { .stats-chart .stats-pie { flex-direction: column; } }
+
+/* ── Bandeau bord-à-bord : neutralise la gouttière globale #main-content[data-page] ── */
+#main-content[data-page="statistiques"] { padding: 0 !important; }
+/* Le contenu garde sa respiration via .stats-topbar-in / .stats-wrap (padding interne),
+   mais le fond du bandeau et le haut sont désormais collés (sidebar + top). */
+.stats-topbar-in { padding: 14px 24px 0; }
+
+/* Fiche joueur : faits en cellules (look Claude Design) */
+.stats-char-facts { grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); border-radius: var(--r-sm); overflow: hidden; }
+.stats-char-fact { background: var(--surface-2); padding: 7px 10px; gap: 1px; }
+.stats-char-fact small { font-size: 10px; color: var(--text-dim); }
+.stats-char-fact b { font-size: 14px; }
+
+/* ── Sélecteur Mission avec images (menu custom) ── */
+.stats-msn { position: relative; flex: 1; display: flex; }
+.stats-sc--btn { flex: 1; width: 100%; text-align: left; background: none; border: 0; font: inherit; cursor: pointer; }
+.stats-sc--btn::after { display: none; }
+.stats-sc--btn.on { background: var(--surface-3); }
+.stats-sc--btn.on small { color: var(--gold-2); }
+.stats-msn-cur { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; color: var(--text-soft); min-width: 0; }
+.stats-sc--btn.on .stats-msn-cur { color: var(--text); }
+.stats-msn-cur > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-msn-cur .stats-mission-art { width: 22px; height: 22px; border-radius: 6px; flex: none; }
+.stats-msn-cur .stats-mission-art--ph { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 13px; background: var(--surface-2); flex: none; }
+.stats-msn-caret { margin-left: auto; font-size: 10px; color: var(--text-dim); font-style: normal; }
+.stats-msn-menu { position: absolute; top: calc(100% + 6px); left: 0; width: 360px; max-width: 90vw; max-height: 62vh; overflow: auto;
+  background: var(--surface-1); border: 1px solid var(--border-md); border-radius: var(--r-md); box-shadow: var(--elev-2); padding: 6px; display: none; z-index: 60; }
+.stats-msn.open .stats-msn-menu { display: block; }
+.stats-msn-act { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); padding: 9px 8px 4px; }
+.stats-msn-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border-radius: 8px; background: none; border: 0; cursor: pointer; color: var(--text-soft); font-size: 13px; text-align: left; }
+.stats-msn-item:hover { background: var(--surface-2); }
+.stats-msn-item.on { background: var(--gold-glow); color: var(--gold-2); }
+.stats-msn-item .stats-mission-art { width: 30px; height: 30px; border-radius: 7px; flex: none; object-fit: cover; }
+.stats-msn-item .stats-mission-art--ph, .stats-msn-item-ic { width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; background: var(--surface-2); flex: none; font-size: 15px; }
+.stats-msn-item > span:not(.stats-msn-item-ic) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Temps forts : anti-chevauchement + organisation des distinctions ── */
+.stats-spotlight-grid { grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 16px; align-items: start; }
+@media (max-width: 1120px) { .stats-spotlight-grid { grid-template-columns: 1fr; } }
+.stats-mvp-stack, .stats-spotlight-awards { min-width: 0; }
+/* Distinctions : 2 colonnes qui ne débordent jamais, cartes plus lisibles */
+.stats-spotlight-awards .stats-trophies--all { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 560px) { .stats-spotlight-awards .stats-trophies--all { grid-template-columns: 1fr; } }
+.stats-trophy { padding: 11px 14px; gap: 12px; min-width: 0; }
+.stats-trophy-body { min-width: 0; overflow: hidden; }
+.stats-trophy-who span { max-width: 100%; }
+.stats-trophy-val { flex: none; white-space: nowrap; }
