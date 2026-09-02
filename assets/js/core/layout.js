@@ -8,6 +8,8 @@ import { appSplashHtml, _esc } from '../shared/html.js';
 import { CLOUDINARY_ENABLED } from '../shared/upload-cloudinary.js';
 import { isToggleable, isFeatureEnabled } from '../shared/features.js';
 import { avatarSrcOf } from '../shared/avatar.js';
+import { routeUrl } from '../shared/route.js';
+import { subscribeCollection } from '../data/firestore.js';
 
 // Masque le splash de boot dès qu'un écran principal est prêt à s'afficher.
 function _hideBootSplash() {
@@ -75,6 +77,9 @@ export function showApp() {
   _initCollapsibleSections();
   _initSidebarExpansion();
 
+  // ── Sidebar : rail persistant, épinglés, menus, CTA de séance ─
+  _initSidebar();
+
   // ── Items admin-only ────────────────────────────
   document.querySelectorAll('.admin-only').forEach((el) => {
     el.style.display = STATE.isAdmin ? 'flex' : 'none';
@@ -110,6 +115,8 @@ export function applyFeatureVisibility() {
     if (!items.length) return;
     sec.style.display = [...items].every(i => i.style.display === 'none') ? 'none' : '';
   });
+  // Les épinglés peuvent référencer une feature (dés)activée → re-rendre le bloc.
+  if (document.getElementById('sidebar-pins')) _renderSidebarPins();
 }
 
 function _initSidebarExpansion() {
@@ -266,9 +273,7 @@ function _updateSidebarProfile() {
     // Toujours une image : icône choisie sinon image de base (silhouette).
     avatarEl.innerHTML = `<img src="${_esc(avatarSrcOf(STATE.profile))}" alt="" class="sidebar-avatar-img">`;
     avatarEl.classList.add('has-avatar-img');
-    // Rendre l'avatar cliquable → page compte
-    avatarEl.style.cursor = 'pointer';
-    avatarEl.onclick = () => navigate('account');
+    // Le clic sur le profil ouvre le menu (dont « Mon compte ») — pas de nav directe.
   }
   if (pseudoEl) pseudoEl.textContent = pseudo;
   if (roleEl) {
@@ -408,4 +413,340 @@ function _renderWaiting(pseudo) {
       <button class="btn btn-outline btn-sm" data-action="logout">Se déconnecter</button>
     </div>
   `;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// SIDEBAR — rail persistant, épinglés, menus, info-bulle, CTA de séance.
+// Le markup de nav est en dur dans index.html ; ce module ne pilote que l'état.
+// ══════════════════════════════════════════════════════════════════════════
+const LS_RAIL = 'jdr-sidebar-rail';
+const LS_PINS = 'jdr-sidebar-pins';
+// Le tableau de bord a désormais un lien permanent (nav-item--home) → hors défaut.
+const PINS_DEFAULT = ['agenda', 'npcs', 'map'];
+// Pages adressables absentes des groupes de nav (sigil / CTA) : libellé + icône.
+const PIN_EXTRA = {
+  dashboard: { label: 'Tableau de bord', icon: 'home' },
+  vtt:       { label: 'Table virtuelle', icon: 'dice' },
+};
+const ICONS = './assets/img/icons.svg';
+
+function _readPins() {
+  try {
+    const a = JSON.parse(localStorage.getItem(LS_PINS));
+    return Array.isArray(a) ? a.filter(x => typeof x === 'string') : PINS_DEFAULT.slice();
+  } catch { return PINS_DEFAULT.slice(); }
+}
+function _writePins(a) { try { localStorage.setItem(LS_PINS, JSON.stringify(a)); } catch {} }
+
+// Registre id → { label, iconHref, section } construit depuis le markup réel
+// (source unique de vérité) + les deux pages spéciales (sigil / CTA).
+function _navRegistry() {
+  const reg = {};
+  document.querySelectorAll('#sidebar .sidebar-nav-group > .nav-item[data-navigate]').forEach((it) => {
+    const id = it.dataset.navigate;
+    reg[id] = {
+      id,
+      label: it.querySelector('.nav-label')?.textContent.trim() || id,
+      iconHref: it.querySelector('.nav-icon use')?.getAttribute('href') || `${ICONS}#icon-scroll`,
+      section: it.closest('.sidebar-section')?.querySelector('.sl-text')?.textContent.trim() || '',
+    };
+  });
+  for (const [id, v] of Object.entries(PIN_EXTRA)) {
+    if (!reg[id]) reg[id] = { id, label: v.label, iconHref: `${ICONS}#icon-${v.icon}`, section: '' };
+  }
+  return reg;
+}
+
+// Étoile d'épinglage injectée à droite de chaque item de section (idempotent).
+function _injectStars() {
+  document.querySelectorAll('#sidebar .sidebar-nav-group > .nav-item[data-navigate]').forEach((it) => {
+    if (it.querySelector('.pin')) return;
+    const star = document.createElement('span');
+    star.className = 'pin';
+    star.dataset.pin = it.dataset.navigate;
+    star.setAttribute('role', 'button');
+    star.tabIndex = 0;
+    star.innerHTML = `<svg class="nav-icon" aria-hidden="true"><use href="${ICONS}#icon-star"/></svg>`;
+    it.appendChild(star);
+  });
+}
+
+// Synchronise l'apparence de toutes les étoiles avec l'état épinglé.
+function _refreshStars(pins) {
+  const set = new Set(pins || _readPins());
+  document.querySelectorAll('#sidebar .pin[data-pin]').forEach((st) => {
+    const on = set.has(st.dataset.pin);
+    st.classList.toggle('is-pinned', on);
+    st.querySelector('use')?.setAttribute('href', `${ICONS}#icon-${on ? 'star-fill' : 'star'}`);
+    st.title = on ? 'Détacher des épinglés' : 'Épingler en haut';
+  });
+}
+
+// Marque l'item épinglé actif (le bloc est re-rendu hors du cycle de navigate).
+function _markPinsActive() {
+  const host = document.getElementById('sidebar-pins');
+  if (!host) return;
+  const cur = STATE.currentPage;
+  host.querySelectorAll('.nav-item[data-navigate]').forEach((el) => {
+    const on = el.dataset.navigate === cur;
+    el.classList.toggle('active', on);
+    if (on) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
+  });
+}
+
+function _renderSidebarPins() {
+  const host = document.getElementById('sidebar-pins');
+  if (!host) return;
+  const reg = _navRegistry();
+  const pins = _readPins().filter(id => reg[id] && (!isToggleable(id) || isFeatureEnabled(id)));
+  const head = `<div class="sidebar-pinhead"><svg class="nav-icon" aria-hidden="true"><use href="${ICONS}#icon-star"/></svg><span>Épinglés</span><em>glisser pour ranger</em></div>`;
+  const body = pins.length
+    ? pins.map((id) => {
+        const r = reg[id];
+        return `<button class="nav-item" type="button" data-navigate="${r.id}" draggable="true" title="${_esc(r.label)}" data-sec="${_esc(r.section)}">
+          <svg class="nav-icon" aria-hidden="true"><use href="${r.iconHref}"/></svg>
+          <span class="nav-label">${_esc(r.label)}</span>
+          <span class="pin is-pinned" role="button" tabindex="0" data-pin="${r.id}" title="Détacher des épinglés"><svg class="nav-icon" aria-hidden="true"><use href="${ICONS}#icon-star-fill"/></svg></span>
+        </button>`;
+      }).join('')
+    : `<div class="sidebar-pins-empty">Clic droit sur une page → « Épingler » pour la garder à portée.</div>`;
+  host.innerHTML = head + body;
+  _markPinsActive();
+}
+
+function _togglePin(id) {
+  const reg = _navRegistry();
+  if (!reg[id]) return;
+  let pins = _readPins();
+  pins = pins.includes(id) ? pins.filter(x => x !== id) : [...pins, id];
+  _writePins(pins);
+  _renderSidebarPins();
+  _refreshStars(pins);
+}
+
+// ── Rail (toggle explicite persisté) ──────────────────────────────────────
+function _applyRail(on) {
+  const sb = document.getElementById('sidebar');
+  if (!sb) return;
+  sb.classList.toggle('rail', !!on);
+  const btn = document.getElementById('sidebar-railbtn');
+  if (btn) {
+    btn.setAttribute('aria-pressed', String(!!on));
+    btn.title = on ? 'Déplier la navigation — [' : 'Replier la navigation — [';
+  }
+}
+function _toggleRail() {
+  const sb = document.getElementById('sidebar');
+  if (!sb) return;
+  const on = !sb.classList.contains('rail');
+  _applyRail(on);
+  try { localStorage.setItem(LS_RAIL, on ? '1' : '0'); } catch {}
+}
+
+// ── Menu de profil (s'ouvre vers le haut, accessible en rail) ─────────────
+function _closeProfileMenu() {
+  const m = document.getElementById('sidebar-profile-menu');
+  const b = document.getElementById('sidebar-profile');
+  if (m) m.hidden = true;
+  if (b) b.setAttribute('aria-expanded', 'false');
+}
+function _toggleProfileMenu() {
+  const m = document.getElementById('sidebar-profile-menu');
+  const b = document.getElementById('sidebar-profile');
+  if (!m) return;
+  const willOpen = m.hidden;
+  m.hidden = !willOpen;
+  if (b) b.setAttribute('aria-expanded', String(willOpen));
+}
+
+// ── Info-bulle flottante en mode rail ─────────────────────────────────────
+function _tipEl() {
+  let t = document.getElementById('sidebar-tip');
+  if (!t) { t = document.createElement('div'); t.id = 'sidebar-tip'; t.className = 'sidebar-tip'; document.body.appendChild(t); }
+  return t;
+}
+function _tipOff() { document.getElementById('sidebar-tip')?.classList.remove('on'); }
+
+// ── Menu contextuel (clic droit) ──────────────────────────────────────────
+function _ctxEl() {
+  let c = document.getElementById('sidebar-ctx');
+  if (!c) { c = document.createElement('div'); c.id = 'sidebar-ctx'; c.className = 'sidebar-ctx'; document.body.appendChild(c); }
+  return c;
+}
+function _closeCtx() { document.getElementById('sidebar-ctx')?.classList.remove('open'); }
+
+// ── CTA « Jouer maintenant » : état de séance via présence temps réel ─────
+let _presenceUnsub = null;
+let _presenceList = [];
+function _renderPlayCTA() {
+  const sub = document.getElementById('sidebar-play-sub');
+  const dot = document.getElementById('sidebar-play-dot');
+  if (!sub) return;
+  const me = STATE.user?.uid;
+  const now = Date.now();
+  const online = (_presenceList || []).filter((p) => {
+    if (!p || !p.uid || p.uid === me) return false;
+    const ts = p.lastSeen?.toMillis?.() ?? 0;
+    return ts > 0 && (now - ts) < 120_000;
+  }).length;
+  if (online > 0) {
+    sub.textContent = `Séance en cours · ${online} en ligne`;
+    if (dot) dot.hidden = false;
+  } else {
+    sub.textContent = 'Table virtuelle';
+    if (dot) dot.hidden = true;
+  }
+}
+function _startPresenceWatch() {
+  if (_presenceUnsub || !STATE.adventure) return;
+  try {
+    _presenceUnsub = subscribeCollection('presence', (list) => {
+      _presenceList = list || [];
+      _renderPlayCTA();
+    });
+  } catch {}
+}
+
+// ── Init (rendu idempotent ; écouteurs attachés une seule fois) ────────────
+function _initSidebar() {
+  const sb = document.getElementById('sidebar');
+  if (!sb) return;
+
+  _injectStars();
+  _renderSidebarPins();
+  _refreshStars();
+  let rail = false;
+  try { rail = localStorage.getItem(LS_RAIL) === '1'; } catch {}
+  _applyRail(rail);
+  _startPresenceWatch();
+  _renderPlayCTA();
+
+  if (sb.dataset.sbBound) return;
+  sb.dataset.sbBound = '1';
+
+  // Clics dans la sidebar : étoile / rail / profil (le reste laisse naviguer).
+  sb.addEventListener('click', (e) => {
+    const pin = e.target.closest('.pin[data-pin]');
+    if (pin) { e.preventDefault(); e.stopPropagation(); _togglePin(pin.dataset.pin); return; }
+    if (e.target.closest('#sidebar-railbtn')) { e.preventDefault(); _toggleRail(); _tipOff(); return; }
+    if (e.target.closest('#sidebar-profile')) { e.preventDefault(); _toggleProfileMenu(); return; }
+    if (e.target.closest('#sidebar-profile-menu button')) _closeProfileMenu();
+    if (e.target.closest('[data-navigate]')) { _closeProfileMenu(); _closeCtx(); _tipOff(); }
+  });
+
+  // Clavier : Entrée/Espace sur une étoile (span role=button).
+  sb.addEventListener('keydown', (e) => {
+    const pin = e.target.closest('.pin[data-pin]');
+    if (pin && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.stopPropagation(); _togglePin(pin.dataset.pin); }
+  });
+
+  // Info-bulle en rail (nom + section d'origine), à droite de l'icône.
+  sb.addEventListener('mouseover', (e) => {
+    if (!sb.classList.contains('rail')) return;
+    const t = e.target.closest('.nav-item,.sidebar-section-label,.sidebar-search,.sidebar-play,.sidebar-adv-chip,.sidebar-profile');
+    if (!t || !sb.contains(t)) { _tipOff(); return; }
+    let name = '', sec = '';
+    if (t.classList.contains('nav-item')) {
+      name = t.querySelector('.nav-label')?.textContent.trim() || t.title || '';
+      sec = t.dataset.sec || t.closest('.sidebar-section')?.querySelector('.sl-text')?.textContent.trim() || '';
+    } else if (t.classList.contains('sidebar-section-label')) {
+      name = t.querySelector('.sl-text')?.textContent.trim() || '';
+    } else if (t.classList.contains('sidebar-search')) { name = 'Rechercher'; }
+    else if (t.classList.contains('sidebar-play')) { name = 'Jouer maintenant'; }
+    else if (t.classList.contains('sidebar-adv-chip')) { name = document.getElementById('sidebar-adv-name')?.textContent.trim() || 'Aventure'; sec = 'Aventure'; }
+    else if (t.classList.contains('sidebar-profile')) { name = document.getElementById('sidebar-pseudo')?.textContent.trim() || 'Profil'; }
+    if (!name) { _tipOff(); return; }
+    const tip = _tipEl();
+    tip.innerHTML = (sec ? `<small>${_esc(sec)}</small>` : '') + _esc(name);
+    const r = t.getBoundingClientRect();
+    tip.classList.add('on');
+    tip.style.left = (r.right + 10) + 'px';
+    tip.style.top = (r.top + r.height / 2 - tip.offsetHeight / 2) + 'px';
+  });
+  sb.addEventListener('mouseout', _tipOff);
+  sb.addEventListener('mouseleave', _tipOff);
+
+  // Clic droit → menu contextuel (Ouvrir · Épingler/Détacher · Nouvel onglet).
+  sb.addEventListener('contextmenu', (e) => {
+    const t = e.target.closest('.nav-item[data-navigate],.sidebar-play[data-navigate],.sidebar-sigil[data-navigate]');
+    if (!t) return;
+    const id = t.dataset.navigate;
+    const reg = _navRegistry();
+    const r = reg[id];
+    if (!r) return;
+    e.preventDefault();
+    const pinned = _readPins().includes(id);
+    const c = _ctxEl();
+    c.innerHTML = `<div class="sidebar-ctx-head">${_esc(r.label)}</div>
+      <button type="button" data-ctx="open"><svg class="nav-icon" aria-hidden="true"><use href="${ICONS}#icon-chevron"/></svg>Ouvrir</button>
+      <button type="button" data-ctx="pin"><svg class="nav-icon" aria-hidden="true"><use href="${ICONS}#icon-${pinned ? 'star-fill' : 'star'}"/></svg>${pinned ? 'Détacher des épinglés' : 'Épingler en haut'}</button>
+      <button type="button" data-ctx="newtab"><svg class="nav-icon" aria-hidden="true"><use href="${ICONS}#icon-layers"/></svg>Ouvrir dans un nouvel onglet</button>`;
+    c.classList.add('open');
+    c.style.left = Math.min(e.clientX, window.innerWidth - 215) + 'px';
+    c.style.top = Math.min(e.clientY, window.innerHeight - 150) + 'px';
+    c.onclick = (ev) => {
+      const b = ev.target.closest('[data-ctx]');
+      if (!b) return;
+      const a = b.dataset.ctx;
+      if (a === 'open') navigate(id);
+      else if (a === 'pin') _togglePin(id);
+      else if (a === 'newtab' && isFeatureEnabled(id)) window.open(routeUrl(id, ''), '_blank', 'noopener');
+      _closeCtx();
+    };
+  });
+
+  // Réordonner les épinglés au glisser-déposer.
+  let dragId = null;
+  sb.addEventListener('dragstart', (e) => {
+    const t = e.target.closest('.sidebar-pins .nav-item[draggable="true"]');
+    if (!t) return;
+    dragId = t.dataset.navigate;
+    t.classList.add('dragging');
+  });
+  sb.addEventListener('dragend', () => {
+    dragId = null;
+    sb.querySelectorAll('.dragging,.drag-over').forEach(x => x.classList.remove('dragging', 'drag-over'));
+  });
+  sb.addEventListener('dragover', (e) => {
+    const t = e.target.closest('.sidebar-pins .nav-item[draggable="true"]');
+    if (!t || !dragId) return;
+    e.preventDefault();
+    sb.querySelectorAll('.drag-over').forEach(x => x.classList.remove('drag-over'));
+    t.classList.add('drag-over');
+  });
+  sb.addEventListener('drop', (e) => {
+    const t = e.target.closest('.sidebar-pins .nav-item[draggable="true"]');
+    if (!t || !dragId) return;
+    e.preventDefault();
+    const pins = _readPins();
+    const to = pins.indexOf(t.dataset.navigate);
+    const from = pins.indexOf(dragId);
+    if (to < 0 || from < 0 || to === from) return;
+    pins.splice(to, 0, pins.splice(from, 1)[0]);
+    _writePins(pins);
+    _renderSidebarPins();
+    _refreshStars(pins);
+  });
+
+  // Raccourci « [ » : replie / déplie (hors saisie).
+  document.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.target?.matches?.('input,textarea,select,[contenteditable=""],[contenteditable="true"]')) return;
+    if (e.key === '[') {
+      const el = document.getElementById('sidebar');
+      if (!el || getComputedStyle(el).display === 'none') return;
+      _toggleRail(); _tipOff();
+    } else if (e.key === 'Escape') {
+      _closeProfileMenu(); _closeCtx();
+    }
+  });
+
+  // Fermer les menus au clic extérieur.
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#sidebar-profile') && !e.target.closest('#sidebar-profile-menu')) _closeProfileMenu();
+    if (!e.target.closest('#sidebar-ctx')) _closeCtx();
+  });
+
+  // Rafraîchit l'état de séance malgré l'absence de snapshot (présence qui périme).
+  setInterval(() => { if (!document.hidden) _renderPlayCTA(); }, 60_000);
 }
