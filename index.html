@@ -65,20 +65,20 @@
        Les feuilles spécifiques aux pages sont chargées en lazy à la navigation
        via FEATURE_CSS dans assets/js/core/navigation.js. Garder ici uniquement
        le global et les petits composants transverses déclenchables hors route. -->
-  <link rel="stylesheet" href="./assets/css/tokens.css?v=20260902d">
-  <link rel="stylesheet" href="./assets/css/base.css?v=20260902d">
-  <link rel="stylesheet" href="./assets/css/auth.css?v=20260902d">
-  <link rel="stylesheet" href="./assets/css/adventure.css?v=20260902d">
-  <link rel="stylesheet" href="./assets/css/layout.css?v=20260902d">
-  <link rel="stylesheet" href="./assets/css/responsive.css?v=20260902d">
-  <link rel="stylesheet" href="./assets/css/features.css?v=20260902d">
-  <link rel="stylesheet" href="./assets/css/rich-text.css?v=20260902d">
-  <link rel="stylesheet" href="./assets/css/free-page.css?v=20260902d">
-  <link rel="stylesheet" href="./assets/css/quick-view.css?v=20260902d">
-  <link rel="stylesheet" href="./assets/css/command-palette.css?v=20260902d">
-  <link rel="stylesheet" href="./assets/css/session-center.css?v=20260902d">
-  <link rel="stylesheet" href="./assets/css/chat.css?v=20260902d">
-  <link rel="stylesheet" href="./assets/css/print.css?v=20260902d">
+  <link rel="stylesheet" href="./assets/css/tokens.css?v=20260902h">
+  <link rel="stylesheet" href="./assets/css/base.css?v=20260902h">
+  <link rel="stylesheet" href="./assets/css/auth.css?v=20260902h">
+  <link rel="stylesheet" href="./assets/css/adventure.css?v=20260902h">
+  <link rel="stylesheet" href="./assets/css/layout.css?v=20260902h">
+  <link rel="stylesheet" href="./assets/css/responsive.css?v=20260902h">
+  <link rel="stylesheet" href="./assets/css/features.css?v=20260902h">
+  <link rel="stylesheet" href="./assets/css/rich-text.css?v=20260902h">
+  <link rel="stylesheet" href="./assets/css/free-page.css?v=20260902h">
+  <link rel="stylesheet" href="./assets/css/quick-view.css?v=20260902h">
+  <link rel="stylesheet" href="./assets/css/command-palette.css?v=20260902h">
+  <link rel="stylesheet" href="./assets/css/session-center.css?v=20260902h">
+  <link rel="stylesheet" href="./assets/css/chat.css?v=20260902h">
+  <link rel="stylesheet" href="./assets/css/print.css?v=20260902h">
 </head>
 <body>
 <a href="#main-content" class="skip-link">Aller au contenu</a>
@@ -210,55 +210,68 @@
     <!-- Sidebar navigation -->
     <nav class="sidebar" id="sidebar" aria-label="Navigation principale">
 
-      <!-- Top : brand + aventure -->
-      <div class="sidebar-top">
-        <div class="sidebar-brand-row" data-navigate="dashboard" title="Tableau de bord — Grimorium">
-          <div class="sidebar-brand-icon" aria-hidden="true"><img class="brand-logo" src="./assets/img/grimorium-logo.png" alt=""></div>
-          <div class="sidebar-brand-id">
-            <span class="sidebar-brand-text">Grimorium</span>
-            <span class="sidebar-brand-sub">Codex de campagne</span>
-          </div>
-        </div>
-        <div class="sidebar-adv-chip" id="sidebar-adv-chip" style="display:none"
-          title="Aventure active" aria-label="Aventure active">
-          <span class="sidebar-adv-emoji" id="sidebar-adv-emoji"></span>
-          <span class="sidebar-adv-body">
-            <span class="sidebar-adv-kicker">Aventure active</span>
-            <span class="sidebar-adv-text" id="sidebar-adv-name"></span>
-          </span>
-          <svg class="sidebar-adv-chevron" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
-        </div>
+      <!-- En-tête : sigil + wordmark + bouton rail -->
+      <div class="sidebar-head">
+        <button class="sidebar-sigil" type="button" data-navigate="dashboard" title="Tableau de bord — Grimorium" aria-label="Tableau de bord">
+          <img class="brand-logo" src="./assets/img/grimorium-logo.png" alt="">
+        </button>
+        <span class="sidebar-wordmark">
+          <b>Grimorium</b>
+          <small>Codex de campagne</small>
+        </span>
+        <button class="sidebar-railbtn" id="sidebar-railbtn" type="button" title="Replier la navigation — [" aria-label="Replier la navigation" aria-pressed="false">
+          <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
+        </button>
       </div>
+
+      <!-- Contexte : carte d'aventure (peuplée par layout.js) -->
+      <div class="sidebar-adv-chip" id="sidebar-adv-chip" style="display:none"
+        title="Aventure active" aria-label="Aventure active">
+        <span class="sidebar-adv-emoji" id="sidebar-adv-emoji"></span>
+        <span class="sidebar-adv-body">
+          <span class="sidebar-adv-kicker">Aventure</span>
+          <span class="sidebar-adv-text" id="sidebar-adv-name"></span>
+        </span>
+        <svg class="sidebar-adv-chevron" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
+      </div>
+
+      <!-- Accès rapide : ouvre la command palette (Ctrl K) -->
+      <button type="button" class="sidebar-search" data-command-palette
+        aria-label="Rechercher une page, un PNJ, une quête ou un objet — raccourci Ctrl K"
+        title="Rechercher — Ctrl K">
+        <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-search"/></svg>
+        <span class="sidebar-search-text">Rechercher…</span>
+        <kbd class="sidebar-search-kbd">Ctrl K</kbd>
+      </button>
+
+      <!-- CTA de jeu : sous-titre + point d'état peuplés par layout.js (présence) -->
+      <button class="sidebar-play" type="button" data-navigate="vtt" title="Table virtuelle — jouer maintenant">
+        <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-dice"/></svg>
+        <span class="sidebar-play-body">
+          <b>Jouer maintenant</b>
+          <em id="sidebar-play-sub">Table virtuelle</em>
+        </span>
+        <span class="sidebar-play-dot" id="sidebar-play-dot" aria-hidden="true" hidden></span>
+      </button>
 
       <!-- Middle : nav scrollable -->
       <div class="sidebar-scroll">
 
-        <!-- Accès rapide : ouvre la command palette (Ctrl K) -->
-        <button type="button" class="sidebar-search" data-command-palette
-          aria-label="Rechercher une page, un PNJ, une quête ou un objet — raccourci Ctrl K"
-          title="Rechercher — Ctrl K">
-          <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-search"/></svg>
-          <span class="sidebar-search-text">Rechercher…</span>
-          <kbd class="sidebar-search-kbd">Ctrl K</kbd>
+        <!-- Lien permanent vers l'accueil (indépendant des épinglés) -->
+        <button class="nav-item nav-item--home" type="button" data-navigate="dashboard" title="Tableau de bord">
+          <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-home"/></svg>
+          <span class="nav-label">Tableau de bord</span>
         </button>
 
-        <div class="sidebar-priority" aria-label="Accès direct">
-          <button class="nav-item nav-item--primary" type="button" data-navigate="vtt" title="Jouer maintenant — Table virtuelle">
-            <span class="nav-glyph" aria-hidden="true">
-              <svg class="nav-icon"><use href="./assets/img/icons.svg#icon-dice"/></svg>
-            </span>
-            <span class="nav-label">Jouer maintenant</span>
-          </button>
-          <button class="nav-item nav-item--dashboard active" type="button" data-navigate="dashboard" title="Tableau de bord" aria-current="page">
-            <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-home"/></svg>
-            <span class="nav-label">Tableau de bord</span>
-          </button>
-        </div>
+        <!-- Épinglés (rendu par layout.js depuis localStorage jdr-sidebar-pins) -->
+        <div class="sidebar-pins" id="sidebar-pins"></div>
 
-        <section class="sidebar-section" data-section="personnage">
-          <h2 class="sidebar-section-label">
+        <details class="sidebar-section" data-section="personnage" open>
+          <summary class="sidebar-section-label" data-tip="Personnage">
             <span class="sl-text">Personnage</span>
-          </h2>
+            <span class="sl-n" aria-hidden="true">•</span>
+            <svg class="nav-icon sl-c" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
+          </summary>
           <div class="sidebar-nav-group">
             <button class="nav-item" type="button" data-navigate="characters" title="Personnage — fiche, stats, inventaire et sorts">
               <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-scroll"/></svg>
@@ -273,12 +286,14 @@
               <span class="nav-label">Collection</span>
             </button>
           </div>
-        </section>
+        </details>
 
-        <section class="sidebar-section" data-section="campagne">
-          <h2 class="sidebar-section-label">
+        <details class="sidebar-section" data-section="campagne" open>
+          <summary class="sidebar-section-label" data-tip="Campagne">
             <span class="sl-text">Campagne</span>
-          </h2>
+            <span class="sl-n" aria-hidden="true">•</span>
+            <svg class="nav-icon sl-c" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
+          </summary>
           <div class="sidebar-nav-group">
             <button class="nav-item" type="button" data-navigate="story" title="Trame">
               <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-book"/></svg>
@@ -297,12 +312,14 @@
               <span class="nav-label">Statistiques</span>
             </button>
           </div>
-        </section>
+        </details>
 
-        <section class="sidebar-section" data-section="monde">
-          <h2 class="sidebar-section-label">
+        <details class="sidebar-section" data-section="monde" open>
+          <summary class="sidebar-section-label" data-tip="Monde">
             <span class="sl-text">Monde</span>
-          </h2>
+            <span class="sl-n" aria-hidden="true">•</span>
+            <svg class="nav-icon sl-c" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
+          </summary>
           <div class="sidebar-nav-group">
             <button class="nav-item" type="button" data-navigate="map" title="Carte">
               <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-map"/></svg>
@@ -325,12 +342,14 @@
               <span class="nav-label">Bestiaire</span>
             </button>
           </div>
-        </section>
+        </details>
 
-        <section class="sidebar-section" data-section="groupe">
-          <h2 class="sidebar-section-label">
+        <details class="sidebar-section" data-section="groupe" open>
+          <summary class="sidebar-section-label" data-tip="Groupe">
             <span class="sl-text">Groupe</span>
-          </h2>
+            <span class="sl-n" aria-hidden="true">•</span>
+            <svg class="nav-icon sl-c" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
+          </summary>
           <div class="sidebar-nav-group">
             <button class="nav-item" type="button" data-navigate="players" title="Joueurs">
               <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-swords"/></svg>
@@ -341,12 +360,14 @@
               <span class="nav-label">Bastion</span>
             </button>
           </div>
-        </section>
+        </details>
 
-        <section class="sidebar-section" data-section="gestion">
-          <h2 class="sidebar-section-label">
+        <details class="sidebar-section" data-section="gestion" open>
+          <summary class="sidebar-section-label" data-tip="Gestion">
             <span class="sl-text">Gestion</span>
-          </h2>
+            <span class="sl-n" aria-hidden="true">•</span>
+            <svg class="nav-icon sl-c" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
+          </summary>
           <div class="sidebar-nav-group">
             <button class="nav-item" type="button" data-navigate="aventures" title="Aventures — changer de campagne">
               <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-compass"/></svg>
@@ -361,27 +382,37 @@
               <span class="nav-label">Console MJ</span>
             </button>
           </div>
-        </section>
+        </details>
 
       </div><!-- /sidebar-scroll -->
 
-      <!-- Bottom : profil et actions globales -->
+      <!-- Bottom : profil (ouvre un menu vers le haut) -->
       <div class="sidebar-bottom">
-        <div class="sidebar-profile" id="sidebar-profile">
-          <div class="sidebar-profile-avatar" id="sidebar-avatar" data-navigate="account" title="Mon compte">?</div>
-          <div class="sidebar-profile-meta">
-            <span class="sidebar-profile-name" id="sidebar-pseudo">—</span>
-            <span class="sidebar-profile-role admin-only" id="sidebar-role" style="display:none">MJ</span>
-          </div>
-          <button class="sidebar-profile-logout" data-action="logout" title="Déconnexion" aria-label="Déconnexion">
-            <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-power"/></svg>
+        <div class="sidebar-profile-menu" id="sidebar-profile-menu" hidden role="menu" aria-label="Menu du profil">
+          <button type="button" role="menuitem" data-navigate="account">
+            <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-user-circle"/></svg>Mon compte
           </button>
-          <button class="btn-theme sidebar-theme-btn admin-only" type="button" data-action="cloudinaryConfig"
-            title="Configurer Cloudinary (hébergement images)" aria-label="Configurer Cloudinary" style="display:none">🖼️</button>
-          <button class="btn-theme sidebar-theme-btn" id="btn-theme" type="button" data-action="toggle-theme" title="Mode jour / nuit" aria-label="Changer de thème">
-            <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-sun"/></svg>
+          <button type="button" role="menuitem" data-action="toggle-theme">
+            <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-sun"/></svg>Mode jour / nuit<span class="kb">T</span>
+          </button>
+          <button type="button" role="menuitem" class="admin-only" data-action="cloudinaryConfig"
+            title="Configurer Cloudinary (hébergement images)" style="display:none">
+            <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-cog"/></svg>Hébergement d'images
+          </button>
+          <hr>
+          <button type="button" role="menuitem" class="sidebar-menu-danger" data-action="logout">
+            <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-power"/></svg>Déconnexion
           </button>
         </div>
+        <button class="sidebar-profile" id="sidebar-profile" type="button"
+          aria-haspopup="true" aria-expanded="false" aria-controls="sidebar-profile-menu" title="Profil et réglages">
+          <span class="sidebar-profile-avatar" id="sidebar-avatar">?</span>
+          <span class="sidebar-profile-meta">
+            <span class="sidebar-profile-name" id="sidebar-pseudo">—</span>
+            <span class="sidebar-profile-role admin-only" id="sidebar-role" style="display:none">MJ</span>
+          </span>
+          <svg class="nav-icon sidebar-profile-caret" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
+        </button>
       </div>
 
     </nav>
