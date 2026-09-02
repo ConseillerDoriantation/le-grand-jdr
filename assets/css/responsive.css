@@ -655,7 +655,8 @@
 #main-content[data-page="map"],
 #main-content[data-page="vtt"],
 #main-content[data-page="histoire"],
-#main-content[data-page="agenda"] {
+#main-content[data-page="agenda"],
+#main-content[data-page="bestiaire"] {
   padding: 0 !important;
 }
 

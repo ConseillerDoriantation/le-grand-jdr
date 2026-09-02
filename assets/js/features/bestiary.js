@@ -15,7 +15,8 @@ import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { consumeTargetEntity } from '../shared/entity-navigation.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
 import { sortCharactersForDisplay, modStr } from '../shared/char-stats.js';
-import { attachDropAndCrop } from '../shared/image-crop.js';
+import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
+import { pickImageFile } from '../shared/image-upload.js';
 import { openShopPicker, getRareteColor } from '../shared/shop-picker.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import { registerActions } from '../core/actions.js';
@@ -44,12 +45,12 @@ const STORE = {
   filterType:    '',      // filtre par type de crÃ©ature
   filterRang:    '',      // filtre par rang (classique, elite, boss)
   filterPrep:    '',      // filtre de preparation MJ (pret, incomplet, cache, etc.)
-  compareIds:    [],      // comparaison rapide MJ
   activeId:      null,    // crÃ©ature ouverte dans le panneau
   bestiaireId:   'main',  // id du bestiaire actif
   currentCol:    'bestiary',
   bestiaireList: [{ id: 'main', label: 'Bestiaire principal' }],
   viewAsUid:     null,    // admin : voir le bestiaire d'un joueur
+  role:          'mj',    // admin : 'mj' | 'player' (aperçu fiche à trous)
   _authUid:      null,    // uid de la session courante â€” dÃ©tecte un changement de compte
   playersList:   [],      // [{ uid, pseudo }] peuplÃ© cÃ´tÃ© admin
 };
@@ -64,11 +65,15 @@ let _pendingTargetBeastId = null;
 // Vue "MJ" effective : admin ET pas en train de consulter un joueur.
 // Quand l'admin bascule sur un joueur, on rend exactement comme cÃ´tÃ© joueur
 // pour pouvoir voir/modifier ses estimations.
+// Vue joueur d'un AUTRE joueur (bannière + cible de sauvegarde) : admin en rôle
+// joueur ayant sélectionné le carnet d'un tiers.
 function _isViewingPlayer() {
-  return STATE.isAdmin && STORE.viewAsUid && STORE.viewAsUid !== STATE.user?.uid;
+  return STATE.isAdmin && STORE.role === 'player' && STORE.viewAsUid && STORE.viewAsUid !== STATE.user?.uid;
 }
+// Vue MJ effective = admin ET rôle 'mj'. Sinon (non-admin, ou admin en aperçu
+// joueur) on rend la fiche à trous.
 function _isAdminView() {
-  return STATE.isAdmin && !_isViewingPlayer();
+  return STATE.isAdmin && STORE.role !== 'player';
 }
 
 function _bstOrderValue(c) {
@@ -507,6 +512,7 @@ function _beastIsReady(c) {
 function _beastMatchesPrep(c, prep = STORE.filterPrep) {
   switch (prep) {
     case 'ready': return _beastIsReady(c);
+    case 'todo': return _beastHardAlerts(c).length > 0;   // injouable (blocage dur)
     case 'incomplete': return _beastAlerts(c).length > 0;
     case 'hidden': return !!c.hidden;
     case 'visible': return !c.hidden;
@@ -524,6 +530,67 @@ function _beastMatchesFilters(c, { search = STORE.searchVal, type = STORE.filter
   const matchType = !fType || _norm(c.type) === fType;
   const matchRang = !fRang || _norm(c.rang || _defaultRankId()) === fRang;
   return matchSearch && matchType && matchRang && _beastMatchesPrep(c, prep);
+}
+
+// ── Carnet joueur : complétion (calcul pur, aucune écriture) ────────────────
+// Le total de trous est dérivé de la créature réelle. Les clés = exactement
+// celles écrites par la fiche à trous (mêmes que le modèle actuel).
+const BST_STAT_CARNET = ['pvActuel', 'pmActuel', 'caEstimee', 'vitEstimee', 'xpEstimee'];
+// Une estimation de stat n'existe que si le MJ a renseigné la valeur réelle
+// (>0). PM vide / « - » → pas de trou, pas comptée. (Idem relations : seulement
+// celles que la créature possède réellement.)
+const BST_STAT_FIELD = { pvActuel: 'pvMax', pmActuel: 'pmMax', caEstimee: 'ca', vitEstimee: 'vitesse', xpEstimee: 'dangerositeXp' };
+function _bstStatDefined(c, statKey) { return parseInt(c[BST_STAT_FIELD[statKey]]) > 0; }
+function _bstRelDefined(c, r) { return Array.isArray(c[r.key]) && c[r.key].length > 0; }
+function _bstGetSlot(cid, key, scope) {
+  const t = STORE.tracker[cid];
+  if (!t) return '';
+  if (scope === 'stat') return t[key] ?? '';
+  return t.deductions?.[key] ?? '';
+}
+function _bstCarnetKeys(c) {
+  const ks = BST_STAT_CARNET.filter(k => _bstStatDefined(c, k)).map(k => ({ key: k, scope: 'stat' }));
+  (c.armesNaturelles || []).forEach((a, i) => ['nom', 'toucher', 'degats', 'portee', 'effet']
+    .forEach(f => ks.push({ key: `arme_${f}_${a.id || `idx_${i}`}`, scope: 'ded' })));
+  (c.actions || []).forEach((a, i) => ['nom', 'toucher', 'degats', 'portee', 'effet']
+    .forEach(f => ks.push({ key: `act_${f}_${a.id || `idx_${i}`}`, scope: 'ded' })));
+  (c.traits || []).forEach((_, i) => ['nom', 'desc'].forEach(f => ks.push({ key: `tr_${f}_${i}`, scope: 'ded' })));
+  (c.butins || []).forEach((_, i) => ['nom', 'qte'].forEach(f => ks.push({ key: `but_${f}_${i}`, scope: 'ded' })));
+  if (String(c.or || '').trim()) ['nom', 'qte'].forEach(f => ks.push({ key: `but_${f}_or`, scope: 'ded' }));
+  DAMAGE_RELATIONS.filter(r => _bstRelDefined(c, r)).forEach(r => ks.push({ key: `rel_${r.key}`, scope: 'ded' }));
+  return ks;
+}
+function _bstCarnetPct(c) {
+  const ks = _bstCarnetKeys(c);
+  const filled = ks.filter(k => String(_bstGetSlot(c.id, k.key, k.scope)).trim()).length;
+  return { pct: ks.length ? Math.round(filled / ks.length * 100) : 0, filled, total: ks.length };
+}
+function _bstCarnetColor(p) {
+  return p >= 80 ? 'var(--emerald)' : p >= 35 ? 'var(--amber)' : p > 0 ? 'var(--ember)' : 'var(--text-dim)';
+}
+function _bstRing(pct, size = 30, sw = 3) {
+  const r = (size - sw) / 2, C = 2 * Math.PI * r;
+  return `<span class="bst-ring" style="--kc:${_bstCarnetColor(pct)};width:${size}px;height:${size}px">
+    <svg width="${size}" height="${size}"><circle class="bg" cx="${size / 2}" cy="${size / 2}" r="${r}"/>
+    <circle class="fg" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct / 100)}"/></svg>
+    <b>${pct}</b></span>`;
+}
+function _bstHighlight(nom) {
+  const q = _norm(STORE.searchVal).trim();
+  const safe = _esc(nom || '');
+  if (!q) return safe;
+  const i = _norm(nom).indexOf(q);
+  if (i < 0) return safe;
+  return _esc(nom.slice(0, i)) + '<mark>' + _esc(nom.slice(i, i + q.length)) + '</mark>' + _esc(nom.slice(i + q.length));
+}
+// Portrait d'un joueur (perso favori) pour le picker de carnet. p=null → moi.
+function _bstPlayerAvatar(p, size = 22) {
+  const s = `width:${size}px;height:${size}px`;
+  if (p && p.portraitUrl) return `<span class="bst-asp-av" style="${s};background-image:url('${_esc(p.portraitUrl)}')"></span>`;
+  if (p) return `<span class="bst-asp-av is-i" style="${s}">${_esc(p.initial || '?')}</span>`;
+  const meP = STATE.profile?.photoURL || STATE.profile?.photo || '';
+  if (meP) return `<span class="bst-asp-av" style="${s};background-image:url('${_esc(meP)}')"></span>`;
+  return `<span class="bst-asp-av is-i" style="${s}">${_esc((STATE.profile?.pseudo || 'M').charAt(0).toUpperCase())}</span>`;
 }
 
 function _damageTypeBadge(typeId, types, color) {
@@ -598,6 +665,14 @@ function _bstOptimisticPatch(id, patch = {}) {
   _bstRenderSig = _bstSig();
 }
 
+// Re-render d'UNE seule vignette en place (nom, rang, niveau, drapeaux, cachée)
+// sans _render global → pas de saut de scroll ni de perte de focus panneau.
+function _bstReplaceCard(id) {
+  const c = STORE.creatures.find(x => x.id === id);
+  const el = document.querySelector(`.bst-bc[data-beast-id="${id}"]`);
+  if (c && el) el.outerHTML = _renderCard(c);
+}
+
 function _bstFlushSaves() {
   const col = STORE.currentCol || 'bestiary';
   const ids = Object.keys(_bstPending);
@@ -639,64 +714,19 @@ function _bstToggleHidden(id) {
   _bstPatchHiddenUi(id, next);
 }
 
-function _bstPatchHiddenUi(id, hidden) {
-  document.querySelectorAll(`.bst-card[data-beast-id="${id}"]`).forEach(card => {
-    const media = card.querySelector('.bst-card-media');
-    const existing = card.querySelector('.bst-card-hidden');
-    if (hidden && media && !existing) {
-      media.insertAdjacentHTML('beforeend', '<span class="bst-card-hidden" title="Cache aux joueurs">Cachee</span>');
-    } else if (!hidden) {
-      existing?.remove();
-    }
-    const quick = card.querySelector('[data-bst-action="quickToggleHidden"]');
-    if (quick) {
-      quick.title = hidden ? 'Rendre visible' : 'Cacher aux joueurs';
-      quick.setAttribute('aria-label', quick.title);
-      quick.innerHTML = _bstIcon(hidden ? 'visible' : 'hidden');
-    }
-  });
-
-  const panelBtn = document.querySelector(`.bst-hidden-toggle[data-id="${id}"]`);
-  if (panelBtn) {
-    panelBtn.classList.toggle('active', hidden);
-    panelBtn.title = hidden
-      ? 'Visible : actuellement cachee aux joueurs - clic pour afficher'
-      : 'Cacher cette creature aux joueurs (boss spoiler, contenu surprise)';
-    panelBtn.textContent = hidden ? 'Cachee' : 'Visible';
-    panelBtn.style.color = hidden ? '#b47fff' : '';
-    panelBtn.style.borderColor = hidden ? '#b47fff' : '';
-    panelBtn.style.background = hidden ? 'rgba(180,127,255,0.10)' : '';
-  }
+function _bstPatchHiddenUi(id) {
+  _bstReplaceCard(id);
+  if (STORE.activeId === id) _syncActivePanel();   // chip du héros + '· cachée'
 }
 
 // Nom : sync visuel des cartes et du hero
 function _bstUpdateNom(id, val) {
   _bstQueueSave(id, { nom: val });
-  document.querySelectorAll(`.bst-card[data-beast-id="${id}"] .bst-card-name`)
-    .forEach(el => el.textContent = val || '?');
+  _bstReplaceCard(id);
 }
 
 function _bstPatchCardBasics(id) {
-  const c = STORE.creatures.find(x => x.id === id);
-  if (!c) return;
-  document.querySelectorAll(`.bst-card[data-beast-id="${id}"]`).forEach(card => {
-    const meta = card.querySelector('.bst-card-meta');
-    if (meta) meta.textContent = [c.type, c.environnement].filter(Boolean).join(' - ') || 'Sans classification';
-
-    const level = card.querySelector('.bst-card-level');
-    const media = card.querySelector('.bst-card-media');
-    if (c.niveau && media && !level) media.insertAdjacentHTML('beforeend', `<span class="bst-card-level">Niv. ${_esc(c.niveau)}</span>`);
-    else if (level && c.niveau) level.textContent = `Niv. ${c.niveau}`;
-    else level?.remove();
-
-    const pvMax = parseInt(c.pvMax) || 0;
-    const track = STORE.tracker[id] || {};
-    const pvActuel = track.pvActuel !== undefined ? parseInt(track.pvActuel) : pvMax;
-    const fill = card.querySelector('.bst-card-pv-fill');
-    if (fill && pvMax) fill.style.width = `${Math.max(0, Math.min(100, Math.round(pvActuel / pvMax * 100)))}%`;
-    const lbl = card.querySelector('.bst-card-pv-lbl');
-    if (lbl && pvMax) lbl.innerHTML = `<span>${pvActuel} PV</span><span>${pvMax}</span>`;
-  });
+  _bstReplaceCard(id);
 }
 
 // Caracs : sauve + recalcule le modificateur affichÃ©
@@ -716,27 +746,8 @@ function _bstUpdateCarac(id, key, val) {
 // Changement de rang : sauve + met Ã  jour cartes + panneau (couleurs + label)
 function _bstSelectRangPanel(id, rang) {
   _bstQueueSave(id, { rang });
-  const rs = _rankStyle(rang);
-  document.querySelectorAll(`.bst-card[data-beast-id="${id}"]`).forEach(card => {
-    card.style.setProperty('--rang-c', rs.color);
-    card.style.setProperty('--rang-glow', rs.glow);
-    const rangEl = card.querySelector('.bst-card-rang');
-    if (rangEl) rangEl.textContent = rs.label;
-  });
-  const panel = document.querySelector('.bst-panel');
-  if (panel) {
-    panel.style.setProperty('--rang-c', rs.color);
-    panel.style.setProperty('--rang-glow', rs.glow);
-  }
-  document.querySelectorAll('[data-bst-rang-btn]').forEach(btn => {
-    const r = btn.dataset.bstRangBtn;
-    const rst = _rankStyle(r);
-    const active = r === rang;
-    btn.classList.toggle('active', active);
-    btn.style.color       = active ? rst.color : '';
-    btn.style.borderColor = active ? rst.color : '';
-    btn.style.background  = active ? `${rst.color}1a` : '';
-  });
+  _bstReplaceCard(id);
+  if (STORE.activeId === id) _syncActivePanel();
 }
 
 // Toggle relation aux dÃ©gÃ¢ts
@@ -1011,56 +1022,6 @@ function _readDamageTypeSelections(name) {
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // BANDEAU AVATARS â€” sÃ©lecteur de vue (MJ â†” joueur)
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-function _avatarTile({ active, ringColor, uid, imageUrl, fallback, pseudo, charNom }) {
-  const ring = active ? ringColor : 'var(--border)';
-  const shadow = active ? `0 0 0 2px ${ringColor}33` : 'none';
-  const labelColor = active ? ringColor : 'var(--text-dim)';
-  return `<button data-bst-action="viewAs" data-uid="${uid || ''}" title="${_esc(pseudo)}${charNom?` - ${_esc(charNom)}`:''}"
-    style="display:flex;flex-direction:column;align-items:center;gap:.25rem;padding:.25rem;
-    border:none;background:none;cursor:pointer;border-radius:8px;min-width:54px;
-    transition:background .12s"
-    data-hov-bg="rgba(255,255,255,.04)">
-    <div style="width:44px;height:44px;border-radius:50%;overflow:hidden;
-      border:2px solid ${ring};box-shadow:${shadow};
-      background:var(--bg-elevated);display:flex;align-items:center;justify-content:center;
-      font-weight:700;color:var(--text);font-size:1rem;flex-shrink:0">
-      ${imageUrl
-        ? `<img src="${imageUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`
-        : _esc(fallback)}
-    </div>
-    <div style="font-size:.62rem;color:${labelColor};max-width:72px;white-space:nowrap;
-      overflow:hidden;text-overflow:ellipsis;font-weight:${active?'700':'400'}">${_esc(pseudo)}</div>
-  </button>`;
-}
-
-function _renderPlayerAvatars() {
-  return `<div style="display:flex;gap:.3rem;flex-wrap:wrap;align-items:flex-start;margin-top:.5rem;
-    padding:.4rem .5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px">
-    ${_avatarTile({
-      active:    !STORE.viewAsUid,
-      ringColor: 'var(--gold)',
-      uid:       '',
-      imageUrl:  '',
-      fallback:  'MJ',
-      pseudo:    'MJ',
-      charNom:   '',
-    })}
-    <div style="width:1px;align-self:stretch;background:var(--border);margin:0 .15rem"></div>
-    ${STORE.playersList.map(p => _avatarTile({
-      active:    STORE.viewAsUid === p.uid,
-      ringColor: '#4f8cff',
-      uid:       p.uid,
-      imageUrl:  p.portraitUrl,
-      fallback:  p.initial,
-      pseudo:    p.pseudo,
-      charNom:   p.charNom,
-    })).join('')}
-  </div>`;
-}
-
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// RENDU PRINCIPAL
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 export async function renderBestiary() {
   const content = document.getElementById('main-content');
   content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)"><div style="font-size:2rem">...</div></div>`;
@@ -1204,7 +1165,7 @@ function _destroyBestiarySortable() {
 }
 
 function _visibleBestiaryCardIds(grid) {
-  return [...(grid || document).querySelectorAll('.bst-card[data-beast-id]')]
+  return [...(grid || document).querySelectorAll('.bst-bc[data-beast-id]')]
     .filter(el => el.offsetParent !== null && el.style.display !== 'none')
     .map(el => el.dataset.beastId)
     .filter(Boolean);
@@ -1344,160 +1305,299 @@ async function _bstCreateDraft() {
 
 let _bstRenderedActiveId = null;
 
+// ══════════════════════════════════════════════════════════════════════════
+// INTERACTION REFONTE — fiche à trous, menu contextuel, clavier, scroll-spy
+// ══════════════════════════════════════════════════════════════════════════
+let _bstInputBound = false;
+let _bstEditingSlot = null;
+let _bstFocusIdx = -1;
+let _bstToastT = null;
+
+function _bstToast(msg) {
+  const t = document.getElementById('bst-toast'); if (!t) return;
+  t.textContent = msg; t.classList.add('on');
+  clearTimeout(_bstToastT); _bstToastT = setTimeout(() => t.classList.remove('on'), 2100);
+}
+
+// Un trou du carnet : imprimé si rempli, pointillé cliquable sinon.
+function _bstSlot(cid, key, scope, opts = {}) {
+  const v = _bstGetSlot(cid, key, scope);
+  const cls = ['bst-slot', v ? 'full' : '', opts.wide ? 'wide' : '', opts.strong ? 'strong' : ''].filter(Boolean).join(' ');
+  return `<span class="${cls}" role="button" tabindex="0" data-slot-key="${_esc(key)}" data-scope="${scope}" data-cid="${_esc(cid)}" data-val="${_esc(v)}" data-ph="${_esc(opts.ph || '')}">${v ? _esc(v) : _esc(opts.hole || '?')}</span>`;
+}
+// Transforme un trou en input, valide/annule, saute au suivant.
+function _bstSlotOpen(el) {
+  if (_bstEditingSlot || !el) return;
+  const { cid, slotKey, scope, val, ph } = el.dataset;
+  _bstEditingSlot = el;
+  el.innerHTML = `<input class="bst-slotin" value="${_esc(val || '')}" placeholder="${_esc(ph || '')}">`;
+  const inp = el.firstElementChild; inp.focus(); inp.select();
+  let done = false;
+  const panelSlot = () => document.querySelector('.bst-panel-slot');
+  // Préserve le scroll du corps du panneau : _syncActivePanel réécrit l'innerHTML
+  // et remettrait la fiche en haut à chaque validation.
+  const scrollTop = () => document.querySelector('.bst-pn-b')?.scrollTop || 0;
+  const restoreScroll = (top) => { const b = document.querySelector('.bst-pn-b'); if (b) b.scrollTop = top; };
+  const finish = (next) => {
+    if (done) return; done = true; _bstEditingSlot = null;
+    const v = inp.value;
+    const top = scrollTop();
+    if (scope === 'stat') _bstSetStat(cid, slotKey, v);
+    else _bstSetDeduction(cid, slotKey, v);
+    const slots = panelSlot() ? [...panelSlot().querySelectorAll('.bst-slot')] : [];
+    const idx = slots.indexOf(el);
+    _syncActivePanel();          // reflète valeur + ligne .done + anneau + compteur
+    _bstReplaceCard(cid);        // anneau de carnet sur la vignette
+    restoreScroll(top);
+    if (next) {
+      const l2 = panelSlot() ? [...panelSlot().querySelectorAll('.bst-slot')] : [];
+      const nx = l2[idx + 1] || l2[0];
+      if (nx) _bstSlotOpen(nx);
+    }
+  };
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); const top = scrollTop(); done = true; _bstEditingSlot = null; _syncActivePanel(); restoreScroll(top); }
+  });
+  inp.addEventListener('blur', () => setTimeout(() => finish(false), 0));
+}
+
+// ── Menu contextuel ─────────────────────────────────────────────────────────
+function _bstOpenCtx(x, y, c) {
+  const m = document.getElementById('bst-ctx'); if (!m) return;
+  const admin = _isAdminView();
+  m.innerHTML = `<div class="bst-ctx-h"><b>${_esc(c.nom || '?')}</b>${_esc(_rankStyle(c.rang || _defaultRankId()).label)}</div>
+    <button data-bst-action="open" data-id="${_esc(c.id)}"><i>›</i>Ouvrir la fiche</button>
+    ${admin ? `
+      <button data-bst-action="openImage" data-id="${_esc(c.id)}"><i>▣</i>${c.imageUrl ? 'Changer' : 'Ajouter'} l'illustration</button>
+      ${c.imageUrl ? `<button data-bst-action="removeImage" data-id="${_esc(c.id)}"><i>▢</i>Retirer l'illustration</button>` : ''}
+      <button data-bst-action="duplicateBeast" data-id="${_esc(c.id)}"><i>⧉</i>Dupliquer</button>
+      <button data-bst-action="quickToggleHidden" data-id="${_esc(c.id)}"><i>${c.hidden ? '◉' : '◒'}</i>${c.hidden ? 'Rendre visible' : 'Cacher aux joueurs'}</button>
+      <hr><button class="dngr" data-bst-action="deleteBeast" data-id="${_esc(c.id)}"><i>⌫</i>Supprimer</button>`
+    : `<button data-bst-action="clearCarnet" data-id="${_esc(c.id)}"><i>⌫</i>Effacer mes notes</button>`}`;
+  m.classList.add('on');
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.min(x, window.innerWidth - r.width - 10) + 'px';
+  m.style.top = Math.min(y, window.innerHeight - r.height - 10) + 'px';
+}
+function _bstCloseCtx() { document.getElementById('bst-ctx')?.classList.remove('on'); }
+function _bstClearCarnet(id) {
+  delete STORE.tracker[id];
+  _saveTracker();
+  _bstToast('Notes effacées');
+  _syncActivePanel(); _bstReplaceCard(id);
+}
+
+// ── Sommaire collant (scroll-spy) ────────────────────────────────────────────
+function _bstSpy() {
+  const body = document.querySelector('.bst-pn-b'); if (!body) return;
+  const secs = [...body.querySelectorAll('.bst-sc')];
+  let cur = secs[0];
+  secs.forEach(s => { if (s.offsetTop - body.scrollTop <= 56) cur = s; });
+  document.querySelectorAll('.bst-pnav button').forEach(b => b.classList.toggle('on', b.dataset.bstSec === cur?.id));
+}
+function _bstBindPanelSpy() {
+  const body = document.querySelector('.bst-pn-b');
+  if (!body || body._spyBound) return;
+  body._spyBound = true;
+  body.addEventListener('scroll', _bstSpy, { passive: true });
+  _bstSpy();
+}
+function _bstScrollToSection(id) {
+  const t = document.getElementById(id), body = document.querySelector('.bst-pn-b');
+  if (t && body) body.scrollTo({ top: t.offsetTop - 6, behavior: 'smooth' });
+}
+
+// ── Listeners globaux (installés une fois) ───────────────────────────────────
+function _bstInstallInput() {
+  if (_bstInputBound) return;
+  _bstInputBound = true;
+  const inPage = () => !!document.getElementById('bst-root');
+
+  document.addEventListener('click', (e) => {
+    if (!inPage()) return;
+    const ctx = document.getElementById('bst-ctx');
+    if (ctx?.classList.contains('on')) {
+      if (!e.target.closest('#bst-ctx')) _bstCloseCtx();
+      else setTimeout(_bstCloseCtx, 0);   // laisse l'action data-bst-action s'exécuter
+    }
+    document.querySelectorAll('.bst-asp[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; });
+    const slot = e.target.closest?.('.bst-slot');
+    if (slot && !_isAdminView()) { _bstSlotOpen(slot); return; }
+    const sec = e.target.closest?.('[data-bst-sec]');
+    if (sec) { _bstScrollToSection(sec.dataset.bstSec); return; }
+    const bc = e.target.closest?.('.bst-bc');
+    if (bc) { _bstFocusIdx = [...document.querySelectorAll('.bst-bc')].indexOf(bc); }
+  });
+
+  document.addEventListener('contextmenu', (e) => {
+    if (!inPage()) return;
+    const bc = e.target.closest?.('.bst-bc'); if (!bc) return;
+    e.preventDefault();
+    const c = STORE.creatures.find(x => x.id === bc.dataset.id);
+    if (c) _bstOpenCtx(e.clientX, e.clientY, c);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (!inPage() || _bstEditingSlot) return;
+    const slot = e.target.closest?.('.bst-slot');
+    if (slot && !_isAdminView()) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _bstSlotOpen(slot); }
+      else if (e.key === 'Escape') slot.blur();
+      return;
+    }
+    const inField = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+    const search = document.getElementById('bst-search');
+    if (e.key === '/' && !inField) { e.preventDefault(); search?.focus(); search?.select(); return; }
+    if (e.key === 'Escape') {
+      if (inField) { e.target.blur(); return; }
+      if (document.getElementById('bst-ctx')?.classList.contains('on')) { _bstCloseCtx(); return; }
+      if (STORE.activeId) _bstClose();
+      return;
+    }
+    if (inField && e.target.id !== 'bst-search') return;
+    const cards = [...document.querySelectorAll('.bst-bc')];
+    if (!cards.length) return;
+    if (_bstFocusIdx < 0) _bstFocusIdx = Math.max(0, cards.findIndex(x => x.dataset.id === STORE.activeId));
+    const grid = document.querySelector('.bst-grid');
+    const cols = grid ? Math.max(1, getComputedStyle(grid).gridTemplateColumns.split(' ').length) : 1;
+    const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols }[e.key];
+    if (step) {
+      e.preventDefault();
+      _bstFocusIdx = Math.max(0, Math.min(cards.length - 1, _bstFocusIdx + step));
+      const t = cards[_bstFocusIdx];
+      STORE.activeId = t.dataset.id; _syncActivePanel();
+      document.querySelectorAll('.bst-bc')[_bstFocusIdx]?.focus({ preventScroll: false });
+      return;
+    }
+    if (e.key === 'Enter' && _bstFocusIdx >= 0 && !inField) {
+      e.preventDefault();
+      STORE.activeId = cards[_bstFocusIdx].dataset.id; _syncActivePanel();
+    }
+  });
+}
+
 function _render() {
   const content = document.getElementById('main-content');
 
   const sameActive = STORE.activeId && STORE.activeId === _bstRenderedActiveId;
-  const prevSlotTop = sameActive ? (content.querySelector('.bst-panel-slot')?.scrollTop || 0) : 0;
+  const prevSlotTop = sameActive ? (content.querySelector('.bst-pn-b')?.scrollTop || 0) : 0;
   const prevContentTop = sameActive ? (content.scrollTop || 0) : 0;
   const prevWinTop = sameActive ? (window.scrollY || 0) : 0;
   const focusState = _bstCaptureFocusState(content);
 
-  const allTypes = [...new Set(STORE.creatures.map(c => c.type || '').filter(Boolean))].sort();
+  const admin = _isAdminView();
+  const pool = STORE.creatures.filter(c => admin || !c.hidden);
+  const allTypes = [...new Set(pool.map(c => c.type || '').filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
   const filtered = STORE.creatures.filter(c => _beastMatchesFilters(c));
   const hasFilters = Boolean(STORE.searchVal || STORE.filterType || STORE.filterRang || STORE.filterPrep);
-  const hiddenCount = STORE.creatures.filter(c => c.hidden).length;
-  const actionCount = STORE.creatures.reduce((n, c) => n + (Array.isArray(c.actions) ? c.actions.length : 0), 0);
-  const lootCount = STORE.creatures.reduce((n, c) => n + (Array.isArray(c.butins) ? c.butins.length : 0), 0);
   const byRang = Object.fromEntries(BESTIARY_RANKS.map(r => [r.id, 0]));
-  STORE.creatures.forEach(c => {
-    const r = RANG_STYLE[c.rang] ? c.rang : _defaultRankId();
-    byRang[r] = (byRang[r] || 0) + 1;
-  });
+  pool.forEach(c => { const r = RANG_STYLE[c.rang] ? c.rang : _defaultRankId(); byRang[r] = (byRang[r] || 0) + 1; });
 
-  const activeBest = (STORE.bestiaireList || []).find(b => b.id === STORE.bestiaireId);
-  const playerLabel = _isViewingPlayer()
-    ? (STORE.playersList.find(p => p.uid === STORE.viewAsUid)?.pseudo || 'joueur')
-    : '';
-  const typeOptions = allTypes.map(t => `
-    <button class="bst-filter-pill${_norm(STORE.filterType) === _norm(t) ? ' active' : ''}"
-      data-bst-action="setType" data-type="${_esc(t)}">${_esc(t)}</button>`).join('');
-  const rangPills = [
-    { key: '', label: 'Tous', count: STORE.creatures.length, tone: '#7eb0ff' },
-    ...BESTIARY_RANKS.map(r => ({ key: r.id, label: r.plural || r.label, count: byRang[r.id] || 0, tone: r.color })),
-  ];
-  const prepPills = _isAdminView() ? [
-    { key:'', label:'Tous', count: STORE.creatures.length },
-    { key:'ready', label:'Prets', count: STORE.creatures.filter(c => _beastMatchesPrep(c, 'ready')).length },
-    { key:'incomplete', label:'A completer', count: STORE.creatures.filter(c => _beastMatchesPrep(c, 'incomplete')).length },
-    { key:'hidden', label:'Caches', count: STORE.creatures.filter(c => _beastMatchesPrep(c, 'hidden')).length },
-    { key:'noAction', label:'Sans action', count: STORE.creatures.filter(c => _beastMatchesPrep(c, 'noAction')).length },
-    { key:'loot', label:'Avec butin', count: STORE.creatures.filter(c => _beastMatchesPrep(c, 'loot')).length },
-  ] : [];
-  const bestiaireTabs = STATE.isAdmin ? `
-    <div class="bst-library-tabs" aria-label="Bestiaires">
-      ${(STORE.bestiaireList || [{ id: 'main', label: 'Bestiaire principal' }]).map(b => `
-        <button class="bst-library-tab${b.id === STORE.bestiaireId ? ' active' : ''}"
-          data-bst-action="switchBest" data-id="${_esc(b.id)}">${_esc(b.label)}</button>`).join('')}
-      <button class="bst-library-tab is-add" data-bst-action="createBest">+ Nouveau</button>
-    </div>` : '';
+  const kicker = admin ? 'Cartulaire des bêtes' : 'Mon carnet de terrain';
+  const scopeSel = STATE.isAdmin ? `<div class="bst-scope"><small>Recueil</small>
+    <select data-bst-action="selectBest" data-bst-on="change" aria-label="Recueil">
+      ${(STORE.bestiaireList || [{ id: 'main', label: 'Bestiaire principal' }]).map(b => `<option value="${_esc(b.id)}"${b.id === STORE.bestiaireId ? ' selected' : ''}>${_esc(b.label)}</option>`).join('')}
+      <option value="__new__">+ Nouveau recueil…</option>
+    </select></div>` : '';
+  const roleSeg = STATE.isAdmin ? `<div class="bst-segm">
+    <button data-bst-action="setRole" data-role="mj" class="${STORE.role !== 'player' ? 'on' : ''}">Vue MJ</button>
+    <button data-bst-action="setRole" data-role="player" class="${STORE.role === 'player' ? 'on' : ''}">Vue joueur</button>
+  </div>` : '';
+  const cur = STORE.playersList.find(p => p.uid === STORE.viewAsUid) || null;
+  const asPlayerSel = (STATE.isAdmin && STORE.role === 'player' && STORE.playersList.length) ? `
+    <details class="bst-asp">
+      <summary class="bst-asp-btn">${_bstPlayerAvatar(cur)}<span>${cur ? `Carnet de ${_esc(cur.pseudo)}` : 'Mon propre carnet'}</span><i>▾</i></summary>
+      <div class="bst-asp-pop">
+        <button data-bst-action="pickPlayer" data-uid=""${!cur ? ' class="on"' : ''}>${_bstPlayerAvatar(null)}<span>Mon propre carnet</span></button>
+        ${STORE.playersList.map(p => `<button data-bst-action="pickPlayer" data-uid="${_esc(p.uid)}"${p.uid === STORE.viewAsUid ? ' class="on"' : ''}>${_bstPlayerAvatar(p)}<span>Carnet de ${_esc(p.pseudo)}</span></button>`).join('')}
+      </div>
+    </details>` : '';
+  const headActs = admin ? `
+    <button class="bst-pill" data-action="openBestiaryRanksAdmin">Rangs</button>
+    <button class="bst-pill" data-bst-action="exportBeasts">Exporter</button>
+    <button class="bst-pill go" data-bst-action="createDraft">+ Créature</button>` : '';
+
+  const rangSeg = `<div class="bst-fseg">
+    <button data-bst-action="setRang" data-rang="" class="${STORE.filterRang === '' ? 'on' : ''}">Tous rangs <em>${pool.length}</em></button>
+    ${BESTIARY_RANKS.map(r => `<button data-bst-action="setRang" data-rang="${_esc(r.id)}" class="${STORE.filterRang === r.id ? 'on' : ''}" style="--tone:${r.color}"><i></i>${_esc(r.plural || r.label)} <em>${byRang[r.id] || 0}</em></button>`).join('')}
+  </div>`;
+  const typeSel = `<select class="bst-fsel${STORE.filterType ? ' on' : ''}" data-bst-action="setType" data-bst-on="change" aria-label="Type">
+    <option value="">Tous les types</option>
+    ${allTypes.map(t => `<option value="${_esc(t)}"${_norm(t) === _norm(STORE.filterType) ? ' selected' : ''}>${_esc(t)}</option>`).join('')}
+  </select>`;
+
+  let counterBar;
+  if (admin) {
+    const nReady = pool.filter(c => _beastMatchesPrep(c, 'ready')).length;
+    const nTodo = pool.filter(c => _beastMatchesPrep(c, 'todo')).length;
+    const nHidden = pool.filter(c => _beastMatchesPrep(c, 'hidden')).length;
+    counterBar = `<div class="bst-prep">
+      <button data-bst-action="setPrep" data-prep="" class="${STORE.filterPrep === '' ? 'on' : ''}" style="--pc:var(--text-soft)"><b>${pool.length}</b> fiches</button>
+      <button data-bst-action="setPrep" data-prep="ready" class="${STORE.filterPrep === 'ready' ? 'on' : ''}" style="--pc:var(--emerald)"><i></i><b>${nReady}</b> prêtes</button>
+      <button data-bst-action="setPrep" data-prep="todo" class="${STORE.filterPrep === 'todo' ? 'on' : ''}" style="--pc:var(--crimson)"><i></i><b>${nTodo}</b> injouables</button>
+      <button data-bst-action="setPrep" data-prep="hidden" class="${STORE.filterPrep === 'hidden' ? 'on' : ''}" style="--pc:var(--arcane)"><i></i><b>${nHidden}</b> cachées</button>
+    </div>`;
+  } else {
+    const tot = pool.reduce((a, c) => { const k = _bstCarnetPct(c); return { f: a.f + k.filled, t: a.t + k.total }; }, { f: 0, t: 0 });
+    const p = tot.t ? Math.round(tot.f / tot.t * 100) : 0;
+    const seen = pool.filter(c => _bstCarnetPct(c).filled > 0).length;
+    counterBar = `<div class="bst-prep">
+      <button class="on" style="--pc:var(--text-soft)"><b>${pool.length}</b> créatures</button>
+      <button style="--pc:${_bstCarnetColor(p)}"><i></i><b>${seen}</b> rencontrées</button>
+      <button style="--pc:${_bstCarnetColor(p)}"><b>${p}%</b> de carnet</button>
+    </div>`;
+  }
+
+  const searchField = `<div class="bst-srch">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>
+    <input type="text" id="bst-search" placeholder="Nom, type, environnement, trait, butin…" value="${_esc(STORE.searchVal)}" autocomplete="off" data-bst-action="search" data-bst-on="input">
+    ${STORE.searchVal ? `<button class="clr" data-bst-action="clearSearch" title="Effacer">×</button>` : `<kbd>/</kbd>`}
+  </div>`;
+
+  const gridnote = admin
+    ? `<span class="kb">/</span> chercher · <span class="kb">↑↓←→</span> parcourir · <span class="kb">↵</span> ouvrir · <b>clic droit</b> sur une vignette pour cacher, dupliquer ou supprimer`
+    : `<span class="kb">/</span> chercher · <span class="kb">↵</span> ouvrir · dans la fiche, <b>chaque « ? » se remplit au clic</b> et <span class="kb">↵</span> saute au trou suivant`;
 
   content.innerHTML = `
-  <div class="bst-page bst-page-v2 ${STORE.activeId ? 'has-panel' : 'no-panel'}">
-    <header class="bst-shell-head">
-      <div class="bst-title-cluster">
-        <span class="bst-kicker">Bestiaire</span>
-        <h1>${_esc(activeBest?.label || 'Bestiaire principal')}</h1>
-        <p>${_isViewingPlayer()
-          ? `Vue joueur de ${_esc(playerLabel)} - estimations personnelles`
-          : 'Catalogue des creatures, rencontres et informations tactiques'}</p>
-      </div>
-      <div class="bst-head-actions">
-        ${STATE.isAdmin ? `<button class="bst-tool-btn" data-action="openBestiaryRanksAdmin">Rangs</button>` : ''}
-        ${STATE.isAdmin ? `<button class="bst-tool-btn" data-bst-action="exportBeasts">Exporter</button>` : ''}
-        ${STATE.isAdmin ? `<button class="bst-primary-btn" data-bst-action="createDraft">+ Creature</button>` : ''}
-      </div>
-    </header>
-
-    ${bestiaireTabs}
-
-    ${_isViewingPlayer() ? `
-      <div class="bst-view-banner">
-        <span>Vue joueur active</span>
-        <b>${_esc(playerLabel)}</b>
-        <button data-bst-action="viewAs" data-uid="">Revenir a la vue MJ</button>
-      </div>` : ''}
-
-    ${STATE.isAdmin && STORE.playersList.length ? `<section class="bst-player-strip">${_renderPlayerAvatars()}</section>` : ''}
-
-    <section class="bst-command-board">
-      <div class="bst-search-card">
-        <label for="bst-search">Recherche</label>
-        <div class="bst-search-field">
-          <span>?</span>
-          <input type="text" id="bst-search" placeholder="Nom, type, environnement, trait..."
-            value="${_esc(STORE.searchVal)}" data-bst-action="search" data-bst-on="input">
+  <div class="bst-root" id="bst-root">
+    <div class="bst-top">
+      <div class="bst-top-in">
+        <div class="bst-top-row">
+          <div class="bst-brand"><h1>Bestiaire</h1><small>${kicker}</small></div>
+          <span class="bst-spacer"></span>
+          ${scopeSel}${roleSeg}${asPlayerSel}
+          <div class="bst-headacts">${headActs}</div>
         </div>
-        <button class="bst-tool-btn" data-bst-action="resetFilters" data-bst-reset-filters${hasFilters ? '' : ' hidden'}>Réinitialiser les filtres</button>
-      </div>
-
-      <div class="bst-summary-strip">
-        <div class="bst-summary-card"><b>${STORE.creatures.length}</b><span>creatures</span></div>
-        <div class="bst-summary-card"><b data-bst-visible-count>${filtered.length}</b><span>affichees</span></div>
-        <div class="bst-summary-card"><b>${actionCount}</b><span>actions</span></div>
-        <div class="bst-summary-card"><b>${lootCount}</b><span>butins</span></div>
-        ${STATE.isAdmin ? `<div class="bst-summary-card"><b>${hiddenCount}</b><span>cachees</span></div>` : ''}
-      </div>
-
-      <div class="bst-filter-panel">
-        <div class="bst-filter-group">
-          <span class="bst-filter-label">Rang</span>
-          <div class="bst-filter-row">
-            ${rangPills.map(r => `
-              <button class="bst-filter-pill${STORE.filterRang === r.key ? ' active' : ''}" style="--tone:${r.tone}"
-                data-bst-action="setRang" data-rang="${r.key}">
-                <span>${_esc(r.label)}</span><b>${r.count}</b>
-              </button>`).join('')}
-          </div>
+        <div class="bst-fbar">
+          ${searchField}${rangSeg}${typeSel}${counterBar}
+          <span class="bst-fcnt"><b>${filtered.length}</b> affichée${filtered.length > 1 ? 's' : ''}</span>
+          ${hasFilters ? `<button class="bst-freset" data-bst-action="resetFilters">Tout réinitialiser</button>` : ''}
         </div>
-        <div class="bst-filter-group">
-          <span class="bst-filter-label">Type</span>
-          <div class="bst-filter-row">
-            <button class="bst-filter-pill${!STORE.filterType ? ' active' : ''}" data-bst-action="setType" data-type="">Tous</button>
-            ${typeOptions || '<span class="bst-muted-mini">Aucun type renseigne</span>'}
-          </div>
-        </div>
-        ${_isAdminView() ? `
-          <div class="bst-filter-group bst-filter-group-wide">
-            <span class="bst-filter-label">Preparation</span>
-            <div class="bst-filter-row">
-              ${prepPills.map(p => `
-                <button class="bst-filter-pill${STORE.filterPrep === p.key ? ' active' : ''}" data-bst-action="setPrep" data-prep="${p.key}">
-                  <span>${p.label}</span><b>${p.count}</b>
-                </button>`).join('')}
-            </div>
-          </div>` : ''}
       </div>
-    </section>
-
-    ${_isAdminView() ? _renderCompareTray() : ''}
-
-    <main class="bst-layout ${STORE.activeId ? 'has-panel' : 'no-panel'}">
-      <section class="bst-grid-wrap">
-        <div class="bst-list-head">
-          <div><b data-bst-list-count>${filtered.length}</b> resultat<span data-bst-list-plural>${filtered.length > 1 ? 's' : ''}</span></div>
-          ${_isAdminView() ? '<span>Glisse les cartes pour organiser l\'ordre manuel</span>' : '<span>Ouvre une fiche pour renseigner tes estimations</span>'}
-        </div>
-          <div class="bst-empty bst-empty-v2" data-bst-filter-empty${filtered.length ? ' hidden' : ''}>
-            <div class="bst-empty-icon">?</div>
-            <div class="bst-empty-title">${STORE.creatures.length === 0 ? 'Bestiaire vide' : 'Aucun resultat'}</div>
-            <div class="bst-empty-sub">${STORE.creatures.length === 0 ? 'Ajoute une creature pour commencer.' : 'Modifie la recherche ou retire un filtre.'}</div>
-            ${STATE.isAdmin && STORE.creatures.length === 0 ? `<button class="bst-primary-btn" data-bst-action="createDraft">+ Ajouter une creature</button>` : ''}
+    </div>
+    <div class="bst-wrap">
+      ${_isViewingPlayer() ? `<div class="bst-view-banner"><span>Vue joueur</span><b>${_esc(STORE.playersList.find(p => p.uid === STORE.viewAsUid)?.pseudo || 'joueur')}</b><button data-bst-action="viewAs" data-uid="">Revenir à mon carnet</button></div>` : ''}
+      <div class="bst-gridnote">${gridnote}</div>
+      <div class="bst-main ${STORE.activeId ? '' : 'solo'}" id="bst-main">
+        <section>
+          <div class="bst-grid${admin ? ' bst-sortable' : ''}">
+            ${filtered.length ? filtered.map(c => _renderCard(c)).join('') : `<div class="bst-emptyg"><b>${STORE.creatures.length ? 'Aucun résultat' : 'Recueil vide'}</b>${STORE.searchVal ? `Rien ne correspond à « ${_esc(STORE.searchVal)} ».` : (admin ? 'Ajoute une créature pour commencer.' : 'Reviens quand tu auras rencontré des créatures.')}</div>`}
           </div>
-          <div class="bst-grid${_isAdminView() ? ' bst-sortable' : ''}"${filtered.length ? '' : ' hidden'}>
-            ${filtered.map(c => _renderCard(c)).join('')}
-          </div>
-      </section>
-      <aside class="bst-panel-slot">
-        ${STORE.activeId ? _renderPanel(STORE.creatures.find(c => c.id === STORE.activeId)) : ''}
-      </aside>
-    </main>
+        </section>
+        <aside class="bst-panel-slot" id="bst-panel-slot">${STORE.activeId ? _renderPanel(STORE.creatures.find(c => c.id === STORE.activeId)) : ''}</aside>
+      </div>
+    </div>
+    <div class="bst-ctx" id="bst-ctx"></div>
+    <div class="bst-toast" id="bst-toast"></div>
   </div>`;
 
   _mountBestiarySortable();
+  _bstInstallInput();
+  _bstBindPanelSpy();
 
   if (sameActive) {
-    const slot = content.querySelector('.bst-panel-slot');
+    const slot = content.querySelector('.bst-pn-b');
     if (slot && prevSlotTop) slot.scrollTop = prevSlotTop;
     if (prevContentTop) content.scrollTop = prevContentTop;
     if (prevWinTop) window.scrollTo(0, prevWinTop);
@@ -1546,587 +1646,232 @@ function _bstRestoreFocusState(root, state) {
 }
 
 // â”€â”€ Card crÃ©ature â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function _renderCompareTray() {
-  const beasts = STORE.compareIds
-    .map(id => STORE.creatures.find(c => c.id === id))
-    .filter(Boolean)
-    .slice(0, 4);
-  if (!beasts.length) return '';
-  const rows = [
-    ['PV', c => parseInt(c.pvMax) || 0],
-    ['CA', c => parseInt(c.ca) || 0],
-    ['Vit.', c => parseInt(c.vitesse) || 0],
-    ['Actions', c => Array.isArray(c.actions) ? c.actions.length : 0],
-    ['Traits', c => Array.isArray(c.traits) ? c.traits.length : 0],
-    ['Butins', c => Array.isArray(c.butins) ? c.butins.length : 0],
-    ['Etat', c => _beastIsReady(c) ? 'Pret' : `${_beastHardAlerts(c).length} blocage(s)`],
-  ];
-  return `<section class="bst-compare-tray">
-    <div class="bst-compare-head">
-      <div>
-        <span class="bst-filter-label">Comparaison rapide</span>
-        <b>${beasts.length}/4 creatures</b>
+function _renderCard(c) {
+  const rs = _rankStyle(c.rang || _defaultRankId());
+  const admin = _isAdminView();
+  const hard = admin ? _beastHardAlerts(c) : [];
+  const pct = admin ? 0 : _bstCarnetPct(c).pct;
+  const sub = [c.type, c.environnement].filter(Boolean).join(' · ') || 'Sans classification';
+  const isActive = c.id === STORE.activeId;
+  return `<button class="bst-bc${isActive ? ' on' : ''}${c.hidden && admin ? ' hid' : ''}${admin ? ' bst-sortable-item' : ''}"
+    style="--rc:${rs.color}" data-beast-id="${_esc(c.id)}" data-bst-action="open" data-id="${_esc(c.id)}">
+    <span class="bst-bc-r"></span>
+    <span class="bst-bc-m">
+      ${c.imageUrl ? `<img src="${_esc(c.imageUrl)}" alt="" loading="lazy">` : `<span class="bst-bc-e">${_esc(c.emoji || '❓')}</span>`}
+      <span class="bst-bc-flags">
+        ${hard.length ? `<span class="bst-bc-flag warn" title="${_esc(hard.map(a => a.label).join(' · '))}">!</span>` : ''}
+        ${c.hidden && admin ? `<span class="bst-bc-flag eye" title="Cachée aux joueurs">◒</span>` : ''}
+      </span>
+      ${c.niveau ? `<span class="bst-bc-lv">Niv. ${_esc(c.niveau)}</span>` : ''}
+      ${!admin ? _bstRing(pct) : ''}
+    </span>
+    <span class="bst-bc-b">
+      <span class="bst-bc-n"><i></i><span>${_bstHighlight(c.nom || '?')}</span></span>
+      <span class="bst-bc-t">${_esc(sub)}</span>
+    </span>
+  </button>`;
+}
+function _bstPanelShell(c, rs, SEC, bodyHtml, isMJ) {
+  return `<div class="bst-pn" style="--rc:${rs.color}">
+    <div class="bst-pn-hero">
+      ${c.imageUrl ? `<img src="${_esc(c.imageUrl)}" alt="">` : `<span class="bst-pn-e">${_esc(c.emoji || '❓')}</span>`}
+      ${isMJ ? `<span class="bst-pn-badge">MJ</span>` : ''}
+      <button class="bst-pn-x" data-bst-action="close" title="Fermer">×</button>
+      <div class="bst-pn-id">
+        <span class="bst-pn-rk"><i></i>${_esc(rs.label)}${c.hidden && isMJ ? ' · cachée' : ''}</span>
+        <span class="bst-pn-nm">${_esc(c.nom || '?')}</span>
+        <span class="bst-pn-mt">${_esc([c.type, c.environnement].filter(Boolean).join(' · ') || 'Sans classification')}${c.niveau ? ` · niveau ${_esc(c.niveau)}` : ''}</span>
       </div>
-      <button class="bst-tool-btn" data-bst-action="clearCompare">Vider</button>
     </div>
-    <div class="bst-compare-table" style="--compare-cols:${beasts.length}">
-      <div class="bst-compare-cell is-label">Critere</div>
-      ${beasts.map(c => `<div class="bst-compare-cell is-head">
-        <button data-bst-action="toggleCompare" data-id="${_esc(c.id)}" title="Retirer">x</button>
-        <strong>${_esc(c.nom || 'Creature')}</strong>
-        <span>${_esc(_rankStyle(c.rang).label)}</span>
-      </div>`).join('')}
-      ${rows.map(([label, getter]) => `
-        <div class="bst-compare-cell is-label">${label}</div>
-        ${beasts.map(c => `<div class="bst-compare-cell">${_esc(getter(c))}</div>`).join('')}
-      `).join('')}
-    </div>
-  </section>`;
-}
-
-function _bstIcon(name) {
-  const icons = {
-    compare: '<path d="M8 7h10"/><path d="m15 4 3 3-3 3"/><path d="M16 17H6"/><path d="m9 14-3 3 3 3"/>',
-    visible: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
-    hidden: '<path d="m2 2 20 20"/><path d="M10.6 10.6A3 3 0 0 0 13.4 13.4"/><path d="M7.1 7.1C3.8 8.8 2 12 2 12s3.5 6 10 6c1.5 0 2.9-.3 4.1-.8"/><path d="M14.1 5.3C18.8 6.2 22 12 22 12s-.9 1.6-2.6 3.1"/>',
-    copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
-    image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 15-5-5L5 21"/>',
-  };
-  return `<svg class="bst-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${icons[name] || ''}</svg>`;
-}
-
-function _renderTacticalSummary(c) {
-  if (!_isAdminView()) return '';
-  const alerts = _beastAlerts(c);
-  if (!alerts.length) return '';
-  return `<div class="bst-section bst-tactical-summary">
-    <div class="bst-section-title">Points a verifier</div>
-    <div class="bst-tactical-alerts">
-      ${alerts.map(a => `<span class="${a.level === 'hard' ? 'hard' : ''}">${_esc(a.label)}</span>`).join('')}
-    </div>
+    <nav class="bst-pnav">${SEC.map(([id, lbl]) => `<button data-bst-sec="${id}">${_esc(lbl)}</button>`).join('')}</nav>
+    <div class="bst-pn-b">${bodyHtml}</div>
   </div>`;
 }
 
-function _renderCard(c) {
-  const isActive = c.id === STORE.activeId;
-  const rang = c.rang || _defaultRankId();
-  const rs = _rankStyle(rang);
-  const track = STORE.tracker[c.id] || {};
-  const pvMax = _isAdminView() ? (parseInt(c.pvMax) || 0) : 0;
-  const pvActuel = track.pvActuel !== undefined ? parseInt(track.pvActuel) : pvMax;
-  const pvPct = pvMax > 0 ? Math.max(0, Math.min(100, Math.round(pvActuel / pvMax * 100))) : 0;
-  const actions = Array.isArray(c.actions) ? c.actions.length : 0;
-  const traits = Array.isArray(c.traits) ? c.traits.length : 0;
-  const loot = Array.isArray(c.butins) ? c.butins.length : 0;
-  const subtitle = [c.type, c.environnement].filter(Boolean).join(' - ');
-  const alerts = _isAdminView() ? _beastAlerts(c) : [];
-  const hardAlerts = alerts.filter(a => a.level === 'hard');
-  const isCompared = STORE.compareIds.includes(c.id);
-
-  return `<article class="bst-card bst-card-v2${isActive ? ' active' : ''}${isCompared ? ' is-compared' : ''}${_isAdminView() ? ' bst-sortable-item' : ''}"
-    style="--rang-c:${rs.color};--rang-glow:${rs.glow};--rang-border:${rs.border}"
-    data-beast-id="${_esc(c.id)}" data-bst-action="open" data-id="${_esc(c.id)}">
-    <div class="bst-card-media">
-      ${c.imageUrl
-        ? `<img class="bst-card-img" src="${_esc(c.imageUrl)}" alt="${_esc(c.nom || '')}" loading="lazy">`
-        : `<div class="bst-card-empty"><span>${_esc(c.emoji || '?')}</span></div>`}
-      <span class="bst-card-rang">${_esc(rs.label)}</span>
-      ${c.niveau ? `<span class="bst-card-level">Niv. ${_esc(c.niveau)}</span>` : ''}
-      ${STATE.isAdmin && c.hidden ? `<span class="bst-card-hidden" title="Cache aux joueurs">Cachee</span>` : ''}
-    </div>
-    <div class="bst-card-body">
-      <div class="bst-card-mainline">
-        <div>
-          <h3 class="bst-card-name">${_esc(c.nom || '?')}</h3>
-          ${subtitle ? `<p class="bst-card-meta">${_esc(subtitle)}</p>` : '<p class="bst-card-meta">Sans classification</p>'}
-        </div>
-      </div>
-      <div class="bst-card-stats bst-card-stats--public">
-        ${actions ? `<span class="bst-card-stat"><b>${actions}</b> act.</span>` : ''}
-      </div>
-      <div class="bst-card-tags">
-        ${traits ? `<span>${traits} trait${traits > 1 ? 's' : ''}</span>` : ''}
-        ${loot ? `<span>${loot} butin${loot > 1 ? 's' : ''}</span>` : ''}
-        ${!traits && !loot ? '<span>Fiche a completer</span>' : ''}
-      </div>
-      ${_isAdminView() ? `
-        <div class="bst-card-alerts ${hardAlerts.length ? 'has-hard' : ''}${alerts.length ? '' : ' is-empty'}" ${alerts.length ? '' : 'aria-hidden="true"'}>
-          ${alerts.slice(0, 3).map(a => `<span class="${a.level === 'hard' ? 'hard' : ''}">${_esc(a.label)}</span>`).join('') + (alerts.length > 3 ? `<span>+${alerts.length - 3}</span>` : '')}
-        </div>` : ''}
-      ${_isAdminView() && pvMax > 0 ? `
-        <div class="bst-card-pv"><div class="bst-card-pv-fill" style="width:${pvPct}%"></div></div>
-        <div class="bst-card-pv-lbl"><span>${pvActuel} PV</span><span>${pvMax}</span></div>` : ''}
-    </div>
-    ${_isAdminView() ? `
-      <div class="bst-card-actions bst-card-actions-v2">
-        <button class="bst-card-icon-btn${isCompared ? ' active' : ''}" data-bst-action="toggleCompare" data-id="${_esc(c.id)}" title="Comparer" aria-label="Comparer">${_bstIcon('compare')}</button>
-        <button class="bst-card-icon-btn" data-bst-action="quickToggleHidden" data-id="${_esc(c.id)}" title="${c.hidden ? 'Rendre visible' : 'Cacher aux joueurs'}" aria-label="${c.hidden ? 'Rendre visible' : 'Cacher aux joueurs'}">${_bstIcon(c.hidden ? 'visible' : 'hidden')}</button>
-        <button class="bst-card-icon-btn" data-bst-action="duplicateBeast" data-id="${_esc(c.id)}" title="Dupliquer" aria-label="Dupliquer">${_bstIcon('copy')}</button>
-        <button class="bst-card-danger" data-bst-action="deleteBeast" data-id="${_esc(c.id)}" title="Supprimer">Supprimer</button>
-      </div>` : ''}
-  </article>`;
-}
-function _bstDeductArea(val, placeholder, attrs, style = '') {
-  return `<textarea class="bst-deduct-input" rows="1"${style ? ` style="${style}"` : ''} placeholder="${_esc(placeholder)}" ${attrs}>${_esc(val || '')}</textarea>`;
-}
-
-// â”€â”€ Panneau dÃ©tail â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _renderPanel(c) {
   if (!c) return '';
-  const rang  = c.rang || _defaultRankId();
-  const rs    = _rankStyle(rang);
+  const rs = _rankStyle(c.rang || _defaultRankId());
 
-  // MJ : panneau entiÃ¨rement Ã©ditable (auto-save Firestore)
+  // MJ : panneau entièrement éditable (auto-save Firestore)
   if (_isAdminView()) return _renderPanelAdmin(c, rs);
 
-  const track = STORE.tracker[c.id] || {};
-  const ded   = track.deductions || {};
+  // ── Vue joueur : fiche à trous ──────────────────────────────────────────
+  const cid = c.id;
+  const k = _bstCarnetPct(c);
+  const kc = _bstCarnetColor(k.pct);
+  const C = 2 * Math.PI * 17.25;
+  const armes = Array.isArray(c.armesNaturelles) ? c.armesNaturelles : [];
+  const acts = Array.isArray(c.actions) ? c.actions : [];
+  const traits = Array.isArray(c.traits) ? c.traits : [];
+  const butins = Array.isArray(c.butins) ? c.butins : [];
+  const hasOr = String(c.or || '').trim().length > 0;
+  const STAT = [['pv', 'PV', 'pvActuel'], ['pm', 'PM', 'pmActuel'], ['ca', 'CA', 'caEstimee'], ['vt', 'Vit.', 'vitEstimee'], ['xp', 'XP', 'xpEstimee']];
+  const statDefs = STAT.filter(([, , key]) => _bstStatDefined(c, key));   // seules les stats réellement renseignées par le MJ
+  const statFilled = statDefs.filter(([, , key]) => _bstGetSlot(cid, key, 'stat')).length;
+  const relDefs = DAMAGE_RELATIONS.filter(r => _bstRelDefined(c, r));
 
-  const pvMax     = parseInt(c.pvMax)    || 0;
-  const pmMax     = parseInt(c.pmMax)    || 0;
-  const pvActuel  = track.pvActuel  !== undefined ? parseInt(track.pvActuel)  : null;
-  const pmActuel  = track.pmActuel  !== undefined ? parseInt(track.pmActuel)  : null;
-  const caEstimee = track.caEstimee !== undefined ? parseInt(track.caEstimee) : null;
-  const vitEstimee= track.vitEstimee!== undefined ? parseInt(track.vitEstimee): null;
-  const xpEstimee = track.xpEstimee !== undefined ? parseInt(track.xpEstimee) : null;
-  const pvPct     = pvMax > 0 && pvActuel !== null ? Math.round(pvActuel / pvMax * 100) : 0;
-  const pmPct     = pmMax > 0 && pmActuel !== null ? Math.round(pmActuel / pmMax * 100) : 0;
-
-  const traits    = Array.isArray(c.traits) ? c.traits : [];
-  const description = c.description == null ? '' : String(c.description);
-  const knownStats = [pvActuel, pmActuel, caEstimee, vitEstimee, xpEstimee].filter(v => v !== null && v !== '').length;
-
-  const mod = (val) => {
-    const n = parseInt(val);
-    if (!val || isNaN(n)) return null;
-    return modStr(Math.floor((n - 10) / 2));
-  };
-
-  // â”€â”€ Hero du panneau â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const heroHtml = `
-    <div class="bst-panel-hero">
-      ${c.imageUrl
-        ? `<img class="bst-panel-img" src="${_esc(c.imageUrl)}" alt="${_esc(c.nom||'')}">`
-        : `<div class="bst-panel-empty">${c.emoji||'?'}</div>`}
-      ${_isAdminView() ? `<div class="bst-panel-mj-badge">MJ</div>` : ''}
-      <button class="bst-panel-close" data-bst-action="close">x</button>
-      <div class="bst-panel-hero-info">
-        <div class="bst-panel-rang">${_esc(rs.label)}</div>
-        <div class="bst-panel-name">${_esc(c.nom||'?')}</div>
-        ${c.type||c.environnement
-          ? `<div class="bst-panel-meta">${_esc([c.type,c.environnement].filter(Boolean).join(' - '))}</div>`
-          : ''}
+  const obsRow = (prefix, key, i, label) => {
+    const ks = ['nom', 'toucher', 'degats', 'portee', 'effet'].map(f => `${prefix}_${f}_${key}`);
+    const done = ks.every(kk => _bstGetSlot(cid, kk, 'ded'));
+    return `<div class="bst-jrow${done ? ' done' : ''}">
+      <div class="bst-jrow-t"><span class="ix">${label} ${i + 1}</span>${_bstSlot(cid, ks[0], 'ded', { wide: true, strong: true, ph: 'Nom observé', hole: 'nom inconnu' })}</div>
+      <div class="bst-jg3">
+        <label><em>Toucher</em>${_bstSlot(cid, ks[1], 'ded', { wide: true, ph: '+5' })}</label>
+        <label><em>Dégâts</em>${_bstSlot(cid, ks[2], 'ded', { wide: true, ph: '2d6' })}</label>
+        <label><em>Portée</em>${_bstSlot(cid, ks[3], 'ded', { wide: true, ph: 'contact' })}</label>
       </div>
-    </div>`;
-
-  // â”€â”€ Vitaux (5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // MJ : valeurs rÃ©elles (lecture seule, depuis c.pvMax / c.pmMax / c.ca / â€¦)
-  // Joueur : estimations modifiables (track.pvActuel, etc.) â€” synchronisÃ©es
-  //          avec le VTT en temps rÃ©el (saisie ici â†’ "?" disparaÃ®t cÃ´tÃ© VTT).
-  const _estCell = (cls, lbl, trackKey, trackVal) => `
-    <div class="bst-stat-cell bst-est-cell ${cls}" data-bst-action="focusInput">
-      <div class="bst-stat-lbl">${lbl}</div>
-      <input type="number" id="bst-${cls}-${c.id}"
-        value="${trackVal || ''}" placeholder="?" min="0"
-        class="bst-stat-track-input"
-        data-bst-action="setStat" data-bst-on="change" data-id="${c.id}" data-key="${trackKey}">
-    </div>`;
-
-  const vitalsHtml = `
-    <div class="bst-section bst-intel-card">
-      <div class="bst-section-title">Estimations joueur <span class="bst-section-count">${knownStats}/5 renseignees</span></div>
-      <div class="bst-section-hint">Note ce que ton personnage pense avoir compris. Ces valeurs restent separees de la fiche MJ.</div>
-      <div class="bst-stats-base">
-        ${_estCell('pv',  'PV',   'pvActuel',   pvActuel)}
-        ${_estCell('pm',  'PM',   'pmActuel',   pmActuel)}
-        ${_estCell('ca',  'CA',   'caEstimee',  caEstimee)}
-        ${_estCell('vit', 'Vit.', 'vitEstimee', vitEstimee)}
-        ${_estCell('init','XP',  'xpEstimee',  xpEstimee)}
-      </div>
-    </div>`;
-
-  // â”€â”€ Caracs (6) : MJ seulement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const caracsHtml = _isAdminView() ? `
-    <div class="bst-section">
-      <div class="bst-section-title">Caracteristiques</div>
-      <div class="bst-caracs">
-        ${[
-          ['FOR', c.force],['DEX', c.dexterite],['CON', c.constitution],
-          ['INT', c.intelligence],['SAG', c.sagesse],['CHA', c.charisme],
-        ].map(([lbl, val]) => {
-          const m = mod(val);
-          const posNeg = !m ? 'zero' : parseInt(m) > 0 ? 'pos' : 'neg';
-          return `<div class="bst-carac">
-            <div class="bst-carac-val">${val||'-'}</div>
-            ${m ? `<div class="bst-carac-mod ${posNeg}">${m}</div>` : ''}
-            <div class="bst-carac-lbl">${lbl}</div>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>` : '';
-
-  // â”€â”€ Description â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const descHtml = description ? `
-    <div class="bst-section">
-      <div class="bst-section-title">Description</div>
-      <div class="bst-desc">${_esc(description).replace(/\n/g,'<br>')}</div>
-    </div>` : '';
-
-  // â”€â”€ Relations aux dÃ©gÃ¢ts : MJ SEULEMENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const dmgHtml = _isAdminView() ? _renderDamageProfile(c, STORE.damageTypes) : '';
-
-
-  // â”€â”€ Attaques observÃ©es (Joueur) : armes naturelles + actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Le joueur note juste ce qu'il observe au VTT (nom, toucher, dÃ©gÃ¢ts, portÃ©e,
-  // effet) â€” aucun accÃ¨s au gestionnaire de runes. IndexÃ© par id stable (fallback
-  // idx). Les clÃ©s `act_*` restent rÃ©tro-compatibles ; `*_effet_*` et `arme_*` sont
-  // de nouvelles clÃ©s (sans impact sur les estimations existantes).
-  const _obsRow = (prefix, k) => {
-    const a = (suffix) => `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="${prefix}_${suffix}_${k}"`;
-    return `<div class="bst-atk">
-      ${_bstDeductArea(ded[`${prefix}_nom_${k}`], "Nom de l'attaque...", a('nom'), 'margin-bottom:6px;font-weight:600')}
-      <div class="bst-observed-grid">
-        <input class="bst-deduct-input" placeholder="Toucher" value="${_esc(ded[`${prefix}_toucher_${k}`]||'')}" ${a('toucher')}>
-        <input class="bst-deduct-input" placeholder="Degats"  value="${_esc(ded[`${prefix}_degats_${k}`]||'')}"  ${a('degats')}>
-        <input class="bst-deduct-input" placeholder="Portee"  value="${_esc(ded[`${prefix}_portee_${k}`]||'')}"  ${a('portee')}>
-      </div>
-      ${_bstDeductArea(ded[`${prefix}_effet_${k}`], 'Effet observe...', a('effet'), 'margin-top:5px')}
+      <div class="bst-jrow-e"><em>Effet observé</em>${_bstSlot(cid, ks[4], 'ded', { wide: true, ph: 'ce que ça fait…', hole: 'rien noté' })}</div>
     </div>`;
   };
 
-  const armesJ = Array.isArray(c.armesNaturelles) ? c.armesNaturelles : [];
-  const armesJoueurHtml = !_isAdminView() && armesJ.length ? `
-    <div class="bst-section">
-      <div class="bst-section-title">Armes naturelles
-        <span class="bst-section-count">${armesJ.length} observee${armesJ.length>1?'s':''}</span>
-      </div>
-      ${armesJ.map((arme, i) => _obsRow('arme', arme.id || `idx_${i}`)).join('')}
-    </div>` : '';
+  const SEC = [['s-stats', 'Estimations'], ['s-desc', 'Apparence'], ['s-atk', 'Attaques'], ['s-traits', 'Traits'], ['s-loot', 'Butin'], ['s-dmg', 'Dégâts']];
 
-  const actsJ = Array.isArray(c.actions) ? c.actions : [];
-  const attaquesJoueurHtml = !_isAdminView() && actsJ.length ? `
-    <div class="bst-section">
-      <div class="bst-section-title">Actions
-        <span class="bst-section-count">${actsJ.length} observee${actsJ.length>1?'s':''}</span>
-      </div>
-      ${actsJ.map((act, i) => _obsRow('act', act.id || `idx_${i}`)).join('')}
-    </div>` : '';
-
-  // â”€â”€ Traits Joueur : lignes vides Ã  complÃ©ter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const traitsJoueurHtml = !_isAdminView() && traits.length ? `
-    <div class="bst-section">
-      <div class="bst-section-title">Traits & Capacites
-        <span class="bst-section-count">${traits.length} trait${traits.length>1?'s':''}</span>
-      </div>
-      ${traits.map((_, i) => {
-        const dedAttr = (suffix) => `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="tr_${suffix}_${i}"`;
-        return `<div class="bst-trait">
-          ${_bstDeductArea(ded['tr_nom_'+i], 'Nom du trait...', dedAttr('nom'), 'margin-bottom:5px;font-weight:600')}
-          ${_bstDeductArea(ded['tr_desc_'+i], 'Description...', dedAttr('desc'))}
-        </div>`;
-      }).join('')}
-    </div>` : '';
-
-  // â”€â”€ Butin estimÃ© (Joueur) : objets supposÃ©s + nombre â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Le joueur ne voit pas le CONTENU des butins rÃ©els (MJ uniquement), mais on lui
-  // donne autant de lignes que la crÃ©ature a de butins â†’ il sait combien d'objets
-  // estimer et remplit son hypothÃ¨se pour chacun. Estimations stockÃ©es dans SON
-  // tracker perso : aucun effet sur le VTT (qui ne lit que la crÃ©ature).
-  const _lootRows = Array.isArray(c.butins) ? c.butins.length : 0;
-  const _hasGoldLoot = String(c.or || '').trim().length > 0;
-  const _lootEstimateCount = _lootRows + (_hasGoldLoot ? 1 : 0);
-  const butinJoueurHtml = !_isAdminView() && _lootEstimateCount ? `
-    <div class="bst-section">
-      <div class="bst-section-title">Butin estime
-        <span class="bst-section-count">${_lootRows ? `${_lootRows} objet${_lootRows>1?'s':''}` : ''}${_lootRows && _hasGoldLoot ? ' + ' : ''}${_hasGoldLoot ? 'or' : ''} a deviner</span>
-      </div>
-      ${Array.from({ length: _lootRows }, (_, i) => {
-        const a = (suffix) => `data-bst-action="setLoot" data-bst-on="change" data-id="${c.id}" data-idx="${i}" data-key="but_${suffix}_${i}"`;
-        const filled = ded[`but_nom_${i}`] || ded[`but_qte_${i}`];
-        return `<div class="bst-loot-est" data-loot-cid="${c.id}" data-loot-idx="${i}">
-          ${_bstDeductArea(ded[`but_nom_${i}`], 'Objet suppose...', a('nom'))}
-          <input class="bst-deduct-input bst-loot-qte" placeholder="Nb" value="${_esc(ded[`but_qte_${i}`]||'')}" ${a('qte')}>
-          ${filled
-            ? `<button type="button" class="bst-loot-del" data-bst-action="clearLoot" data-id="${c.id}" data-idx="${i}" title="Effacer cette ligne">x</button>`
-            : `<span class="bst-loot-del-spacer"></span>`}
-        </div>`;
-      }).join('')}
-      ${_hasGoldLoot ? (() => {
-        const a = (suffix) => `data-bst-action="setLoot" data-bst-on="change" data-id="${c.id}" data-idx="or" data-key="but_${suffix}_or"`;
-        const filled = ded.but_nom_or || ded.but_qte_or;
-        return `<div class="bst-loot-est bst-loot-est-gold" data-loot-cid="${c.id}" data-loot-idx="or">
-          ${_bstDeductArea(ded.but_nom_or, 'Or suppose...', a('nom'))}
-          <input class="bst-deduct-input bst-loot-qte" placeholder="Montant" value="${_esc(ded.but_qte_or||'')}" ${a('qte')}>
-          ${filled
-            ? `<button type="button" class="bst-loot-del" data-bst-action="clearLoot" data-id="${c.id}" data-idx="or" title="Effacer cette ligne">x</button>`
-            : `<span class="bst-loot-del-spacer"></span>`}
-        </div>`;
-      })() : ''}
-    </div>` : '';
-
-  // â”€â”€ Relations aux dÃ©gÃ¢ts supposÃ©es (Joueur) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Le joueur estime faiblesses / rÃ©sistances / immunitÃ©s / absorptions Ã  partir
-  // de ce qu'il observe en combat. Profil rÃ©el = MJ uniquement (dmgHtml plus haut).
-  const relJoueurHtml = !_isAdminView() ? `
-    <div class="bst-section">
-      <div class="bst-section-title">Relations aux degats
-        <span class="bst-section-count">supposees</span>
-      </div>
-      ${DAMAGE_RELATIONS.map(r => {
-        const a = `data-bst-action="setDeduction" data-bst-on="change" data-id="${c.id}" data-key="rel_${r.key}"`;
-        return `<div class="bst-rel-est" style="--rel-c:${r.color}">
-          <span class="bst-rel-est-lbl">${r.label}</span>
-          ${_bstDeductArea(ded[`rel_${r.key}`], 'Types de degats supposes...', a)}
-        </div>`;
-      }).join('')}
-    </div>` : '';
-
-  return `
-  <div class="bst-panel" style="--rang-c:${rs.color};--rang-glow:${rs.glow}">
-    ${heroHtml}
-    <div class="bst-panel-body">
-      ${vitalsHtml}
-      ${_renderTacticalSummary(c)}
-      ${descHtml}
-      ${armesJoueurHtml}
-      ${attaquesJoueurHtml}
-      ${traitsJoueurHtml}
-      ${butinJoueurHtml}
-      ${relJoueurHtml}
+  const body = `
+    <div class="bst-carnet" style="--kc:${kc}">
+      <span class="cring"><svg width="38" height="38"><circle class="bg" cx="19" cy="19" r="17.25"/>
+        <circle class="fg" cx="19" cy="19" r="17.25" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - k.pct / 100)}"/></svg><b>${k.pct}</b></span>
+      <span class="txt"><b>${k.filled} / ${k.total} informations notées</b>
+        <small>Ce qui est en pointillés est un trou de ton carnet. Clique pour le remplir, <kbd>↵</kbd> saute au suivant.</small></span>
     </div>
-  </div>`;
+    <section class="bst-sc" id="s-stats"><div class="bst-sc-h"><b>Ce que tu estimes</b><em>${statFilled}/${statDefs.length}</em></div>
+      <div class="bst-hint">Ces chiffres sont les tiens : ils apparaissent aussi sur le token, au VTT, à la place des « ? ». Une case « — » ne s'applique pas à cette créature.</div>
+      <div class="bst-stats5">${STAT.map(([cls, lbl, key]) => {
+        if (!_bstStatDefined(c, key)) return `<div class="bst-st ${cls} na" title="Non applicable à cette créature"><small>${lbl}</small><span class="bst-na">—</span></div>`;
+        const v = _bstGetSlot(cid, key, 'stat');
+        return `<div class="bst-st ${cls}${v ? '' : ' void'}"><small>${lbl}</small>${_bstSlot(cid, key, 'stat', { wide: true, strong: true, ph: '?' })}</div>`;
+      }).join('')}</div>
+    </section>
+    <section class="bst-sc" id="s-desc"><div class="bst-sc-h"><b>Ce que tu vois</b></div>
+      ${c.description ? `<div class="bst-pn-desc">${_esc(c.description).replace(/\n/g, '<br>')}</div>` : `<div class="bst-blind">Rien de notable dans son apparence.</div>`}
+    </section>
+    <section class="bst-sc" id="s-atk"><div class="bst-sc-h"><b>Attaques observées</b><em>${armes.length + acts.length} en combat</em></div>
+      <div class="bst-hint">Le MJ te dit combien d'attaques la créature possède ; à toi de noter lesquelles.</div>
+      ${armes.map((a, i) => obsRow('arme', a.id || `idx_${i}`, i, 'Arme')).join('')}
+      ${acts.map((a, i) => obsRow('act', a.id || `idx_${i}`, i, 'Action')).join('')}
+      ${!armes.length && !acts.length ? `<div class="bst-blind">Elle n'a jamais attaqué devant toi.</div>` : ''}
+    </section>
+    <section class="bst-sc" id="s-traits"><div class="bst-sc-h"><b>Traits devinés</b><em>${traits.length} soupçonné${traits.length > 1 ? 's' : ''}</em></div>
+      ${traits.length ? traits.map((_, i) => { const done = _bstGetSlot(cid, `tr_nom_${i}`, 'ded') && _bstGetSlot(cid, `tr_desc_${i}`, 'ded'); return `<div class="bst-jrow${done ? ' done' : ''}"><div class="bst-jrow-t"><span class="ix">Trait ${i + 1}</span>${_bstSlot(cid, `tr_nom_${i}`, 'ded', { wide: true, strong: true, ph: 'Nom du trait', hole: 'non identifié' })}</div><div class="bst-jrow-e"><em>Ce que ça fait</em>${_bstSlot(cid, `tr_desc_${i}`, 'ded', { wide: true, ph: 'description…', hole: 'rien noté' })}</div></div>`; }).join('') : `<div class="bst-blind">Aucun trait particulier remarqué.</div>`}
+    </section>
+    <section class="bst-sc" id="s-loot"><div class="bst-sc-h"><b>Butin supposé</b><em>${butins.length}${hasOr ? ' + or' : ''} à deviner</em></div>
+      ${butins.map((_, i) => { const done = _bstGetSlot(cid, `but_nom_${i}`, 'ded'); return `<div class="bst-jrow${done ? ' done' : ''}"><div class="bst-jrow-t"><span class="ix">Objet ${i + 1}</span>${_bstSlot(cid, `but_nom_${i}`, 'ded', { wide: true, strong: true, ph: 'Objet supposé', hole: 'inconnu' })}</div><div class="bst-jrow-e"><em>Quantité</em>${_bstSlot(cid, `but_qte_${i}`, 'ded', { wide: true, ph: '1' })}</div></div>`; }).join('')}
+      ${hasOr ? `<div class="bst-jrow${_bstGetSlot(cid, 'but_nom_or', 'ded') ? ' done' : ''}"><div class="bst-jrow-t"><span class="ix">Or</span>${_bstSlot(cid, 'but_nom_or', 'ded', { wide: true, strong: true, ph: 'Bourse, gemmes…', hole: 'inconnu' })}</div><div class="bst-jrow-e"><em>Montant estimé</em>${_bstSlot(cid, 'but_qte_or', 'ded', { wide: true, ph: '~20 po' })}</div></div>` : ''}
+      ${!butins.length && !hasOr ? `<div class="bst-blind">Elle ne porte rien qui vaille la peine.</div>` : ''}
+    </section>
+    <section class="bst-sc" id="s-dmg"><div class="bst-sc-h"><b>Relations aux dégâts</b>${relDefs.length ? '<em>supposées</em>' : ''}</div>
+      ${relDefs.length
+        ? relDefs.map(r => `<div class="bst-jrel" style="--relc:${r.color}"><span>${_esc(r.label)}</span>${_bstSlot(cid, `rel_${r.key}`, 'ded', { wide: true, ph: 'types de dégâts…', hole: 'rien observé' })}</div>`).join('')
+        : `<div class="bst-blind">Rien de particulier observé dans ses réactions aux dégâts.</div>`}
+    </section>`;
+
+  return _bstPanelShell(c, rs, SEC, body, false);
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// PANNEAU MJ â€” entiÃ¨rement Ã©ditable, auto-save
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function _renderPanelAdmin(c, rs) {
-  const types     = STORE.damageTypes || [];
-  const traits    = Array.isArray(c.traits) ? c.traits : [];
-  const butins    = Array.isArray(c.butins) ? c.butins : [];
-
+  const types = STORE.damageTypes || [];
+  const traits = Array.isArray(c.traits) ? c.traits : [];
+  const butins = Array.isArray(c.butins) ? c.butins : [];
+  const armes = Array.isArray(c.armesNaturelles) ? c.armesNaturelles : [];
+  const acts = Array.isArray(c.actions) ? c.actions : [];
+  const al = _beastAlerts(c);
   const modOf = (val) => {
     const n = parseInt(val);
     if (!val || isNaN(n)) return { txt: '', cls: 'zero' };
     const m = Math.floor((n - 10) / 2);
     return { txt: modStr(m), cls: m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero' };
   };
-
-  // â”€â”€ Hero Ã©ditable : image cliquable, rang selector, nom, type, env â”€â”€â”€â”€â”€â”€
-  const heroHtml = `
-    <div class="bst-panel-hero">
-      ${c.imageUrl
-        ? `<img class="bst-panel-img" src="${_esc(c.imageUrl)}" alt="${_esc(c.nom||'')}"
-             style="cursor:pointer" data-bst-action="openImage" data-id="${c.id}">`
-        : `<div class="bst-panel-empty" style="cursor:pointer" data-bst-action="openImage" data-id="${c.id}">${c.emoji||'?'}</div>`}
-      <button class="bst-panel-img-edit" data-bst-action="openImage" data-id="${c.id}" title="Changer l'image" aria-label="Changer l'image">${_bstIcon('image')}</button>
-      <div class="bst-panel-mj-badge">MJ</div>
-      <button class="bst-panel-close" data-bst-action="close">x</button>
-      <div class="bst-panel-hero-info">
-        <div class="bst-panel-rang-selector">
-          ${BESTIARY_RANKS.map(rst => {
-            const r = rst.id;
-            const active = (c.rang || _defaultRankId()) === r;
-            return `<button type="button" data-bst-rang-btn="${r}"
-              class="bst-rang-btn${active?' active':''}"
-              style="${active?`color:${rst.color};border-color:${rst.color};background:${rst.color}1a`:''}"
-              data-bst-action="selectRang" data-id="${c.id}" data-rang="${r}">${rst.label}</button>`;
-          }).join('')}
-          <button type="button" class="bst-rang-btn bst-hidden-toggle${c.hidden?' active':''}"
-            data-bst-action="toggleHidden" data-id="${c.id}"
-            title="${c.hidden ? 'Visible : actuellement cachee aux joueurs - clic pour afficher' : 'Cacher cette creature aux joueurs (boss spoiler, contenu surprise)'}"
-            style="${c.hidden ? 'color:#b47fff;border-color:#b47fff;background:rgba(180,127,255,0.10)' : ''}">
-            ${c.hidden ? 'Cachee' : 'Visible'}
-          </button>
-        </div>
-        <input class="bst-panel-name-input" value="${_esc(c.nom||'')}" placeholder="Nom de la creature..."
-          data-bst-action="updateNom" data-bst-on="input" data-id="${c.id}">
-        <div class="bst-panel-meta-edit">
-          <input class="bst-panel-edit-inline" placeholder="Type" value="${_esc(c.type||'')}"
-            data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="type">
-          <span class="bst-panel-meta-dot">-</span>
-          <input class="bst-panel-edit-inline" placeholder="Environnement" value="${_esc(c.environnement||'')}"
-            data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="environnement">
-        </div>
-      </div>
-    </div>`;
-
-  // â”€â”€ Statistiques (5 cellules : PV PM CA Vit XP) + niveau + initiative â”€â”€â”€
-  const vitalsHtml = `
-    <div class="bst-section bst-admin-identity">
-      <div class="bst-section-title">Fiche technique</div>
-      <div class="bst-section-hint">Base de combat utilisee par le VTT et par les cartes du bestiaire.</div>
-      <div class="bst-stats-base">
-        ${[
-          ['pv',  'PV',     'pvMax',         c.pvMax],
-          ['pm',  'PM',     'pmMax',         c.pmMax],
-          ['ca',  'CA',     'ca',            c.ca],
-          ['vit', 'Vit. (m)','vitesse',      c.vitesse],
-          ['init','XP',     'dangerositeXp', c.dangerositeXp],
-        ].map(([cls, lbl, field, val]) => `
-          <div class="bst-stat-cell ${cls}" data-bst-action="focusInput">
-            <div class="bst-stat-lbl">${lbl}</div>
-            <input type="number" min="0" value="${val||''}" placeholder="0" class="bst-stat-track-input"
-              data-bst-action="updateNum" data-bst-on="input" data-id="${c.id}" data-field="${field}">
-          </div>`).join('')}
-      </div>
-      <div class="bst-niv-row bst-admin-mini-grid">
-        <span class="bst-niv-lbl">Niveau / FP</span>
-        <input type="number" min="0" value="${c.niveau||''}" placeholder="-"
-          class="bst-p-input bst-p-input-sm"
-          data-bst-action="updateNum" data-bst-on="input" data-id="${c.id}" data-field="niveau">
-        <span class="bst-niv-lbl">Initiative</span>
-        <input type="number" value="${c.initiative||''}" placeholder="-"
-          class="bst-p-input bst-p-input-sm"
-          data-bst-action="updateNum" data-bst-on="input" data-id="${c.id}" data-field="initiative">
-        <span class="bst-niv-lbl">Emoji</span>
-        <input value="${_esc(c.emoji||'?')}" placeholder="?"
-          class="bst-p-input bst-p-input-sm" style="width:40px"
-          data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="emoji">
-      </div>
-    </div>`;
-
-  // â”€â”€ Caracs (6, avec auto-modificateur) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const caracsHtml = `
-    <div class="bst-section bst-admin-caracs">
-      <div class="bst-section-title">Caracteristiques</div>
-      <div class="bst-caracs">
-        ${[
-          ['FOR','force'],['DEX','dexterite'],['CON','constitution'],
-          ['INT','intelligence'],['SAG','sagesse'],['CHA','charisme'],
-        ].map(([lbl, key]) => {
-          const { txt, cls } = modOf(c[key]);
-          return `<div class="bst-carac">
-            <input type="number" min="0" value="${c[key]||''}" placeholder="-"
-              class="bst-carac-input"
-              data-bst-action="updateCarac" data-bst-on="input" data-id="${c.id}" data-key="${key}">
-            <div class="bst-carac-mod ${cls}" data-bst-mod="${c.id}-${key}">${txt}</div>
-            <div class="bst-carac-lbl">${lbl}</div>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>`;
-
-  // â”€â”€ Token VTT (taille en cases) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const tokenHtml = `
-    <div class="bst-section">
-      <div class="bst-section-title">Token VTT (cases)</div>
-      <div class="bst-token-row">
-        <span class="bst-niv-lbl">Largeur</span>
-        <select class="bst-p-input bst-p-input-sm" data-bst-action="updateNum" data-bst-on="change" data-id="${c.id}" data-field="tokenW">
-          ${[1,2,3,4,5].map(n => `<option value="${n}"${(c.tokenW||c.tokenSize||1)===n?' selected':''}>${n}</option>`).join('')}
-        </select>
-        <span class="bst-niv-lbl">x</span>
-        <span class="bst-niv-lbl">Hauteur</span>
-        <select class="bst-p-input bst-p-input-sm" data-bst-action="updateNum" data-bst-on="change" data-id="${c.id}" data-field="tokenH">
-          ${[1,2,3,4,5].map(n => `<option value="${n}"${(c.tokenH||c.tokenSize||1)===n?' selected':''}>${n}</option>`).join('')}
-        </select>
-      </div>
-    </div>`;
-
-  // â”€â”€ Description (textarea) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const descHtml = `
-    <div class="bst-section">
-      <div class="bst-section-title">Description</div>
-      <textarea class="bst-panel-textarea" placeholder="Apparence, comportement, lore..." rows="3"
-        data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="description">${_esc(c.description||'')}</textarea>
-    </div>`;
-
-  // â”€â”€ Relations aux dÃ©gÃ¢ts (matrice chips compacte) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const dmgHtml = _renderDamageMatrixPanel(c, types);
-
-  // â”€â”€ Armes naturelles + Actions (sortilÃ¨ges-style) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // 1) Armes naturelles : sources de dÃ©gÃ¢ts de base (comme une arme Ã©quipÃ©e).
-  //    Chaque action peut s'y rÃ©fÃ©rer via la modal de sort (preview = dÃ©gÃ¢ts arme).
-  // 2) Actions : sorts au format unifiÃ©, Ã©ditÃ©es via la mÃªme modal que les
-  //    sorts de personnage et les actions d'objet.
-  const armes = Array.isArray(c.armesNaturelles) ? c.armesNaturelles : [];
-  const acts  = Array.isArray(c.actions)         ? c.actions         : [];
-
-  // Charge le cache d'actions de CETTE crÃ©ature pour les handlers _bstAddAction/_bstEditAction
+  // Cache actions + contexte arme, et lazy-load boutique (butins) — inchangés.
   _bstActionsCacheLoad(c.id, acts);
   _bstActionsArmeIdCtx = armes[0]?.id || null;
+  if (!_bstShopItemsCache) _bstEnsureShopItems().then(() => _bstRefreshButinSelects(c.id));
 
-  const armesHtml = `
-    <div class="bst-section">
-      <div class="bst-section-title">
-        Armes naturelles
-        <span class="bst-section-count" data-bst-count="${c.id}-armes">${armes.length}</span>
-        <button class="bst-add-row-btn" data-bst-action="addArme" data-id="${c.id}">+ Ajouter</button>
-      </div>
-      <div class="bst-section-hint">Comme une arme equipee pour les sorts derives. La premiere sert de reference par defaut aux actions.</div>
-      <div id="bst-p-armes-${c.id}" class="bst-p-rows">
-        ${armes.map((a, i) => _bstRenderArmeRow(a, c.id, i)).join('')}
+  // ── Héros MJ éditable ─────────────────────────────────────────────────────
+  const heroHtml = `
+    <div class="bst-pn-hero">
+      ${c.imageUrl
+        ? `<img src="${_esc(c.imageUrl)}" alt="" style="cursor:pointer" data-bst-action="openImage" data-id="${c.id}">`
+        : `<span class="bst-pn-e" style="cursor:pointer" data-bst-action="openImage" data-id="${c.id}">${_esc(c.emoji || '❓')}</span>`}
+      <span class="bst-pn-badge">MJ</span>
+      <button class="bst-pn-imgedit" data-bst-action="openImage" data-id="${c.id}" title="Changer l'illustration">▣ Illustration</button>
+      <button class="bst-pn-x" data-bst-action="close" title="Fermer">×</button>
+      <div class="bst-pn-id">
+        <div class="bst-pn-rangrow">
+          ${BESTIARY_RANKS.map(rst => { const active = (c.rang || _defaultRankId()) === rst.id;
+            return `<button type="button" data-bst-rang-btn="${rst.id}" class="bst-rangchip${active ? ' on' : ''}" style="--rc:${rst.color}" data-bst-action="selectRang" data-id="${c.id}" data-rang="${rst.id}">${_esc(rst.label)}</button>`; }).join('')}
+          <button type="button" class="bst-rangchip bst-hidden-toggle${c.hidden ? ' on' : ''}" style="--rc:var(--arcane)" data-bst-action="toggleHidden" data-id="${c.id}" title="${c.hidden ? 'Cachée aux joueurs — clic pour afficher' : 'Cacher aux joueurs'}">${c.hidden ? '◒ Cachée' : '◉ Visible'}</button>
+        </div>
+        <input class="bst-pn-nm-input" value="${_esc(c.nom || '')}" placeholder="Nom de la créature…" data-bst-action="updateNom" data-bst-on="input" data-id="${c.id}">
+        <div class="bst-pn-meta-input">
+          <input placeholder="Type" value="${_esc(c.type || '')}" data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="type">
+          <span>·</span>
+          <input placeholder="Environnement" value="${_esc(c.environnement || '')}" data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="environnement">
+        </div>
       </div>
     </div>`;
 
-  const actionsHtml = `
-    <div class="bst-section">
-      <div class="bst-section-title">
-        Actions
-        <span class="bst-section-count" data-bst-count="${c.id}-actions">${acts.length}</span>
-        <button class="bst-add-row-btn" data-bst-action="addAction">+ Ajouter</button>
-      </div>
-      <div class="bst-section-hint">Sorts unifies - meme editeur que les sorts de personnage et les actions d'objet.</div>
-      <div id="bst-p-actions-${c.id}" class="bst-p-rows bst-actions-host">
-        ${_bstRenderActionsList()}
-      </div>
-    </div>`;
+  const statField = (cls, lbl, field, val) => `<div class="bst-st ${cls}${val ? '' : ' void'}"><small>${lbl}</small><input type="number" min="0" value="${val || ''}" placeholder="0" data-bst-action="updateNum" data-bst-on="input" data-id="${c.id}" data-field="${field}"></div>`;
+  const caracField = (lbl, key) => { const { txt, cls } = modOf(c[key]); return `<div class="bst-ca6"><input type="number" min="0" value="${c[key] || ''}" placeholder="–" data-bst-action="updateCarac" data-bst-on="input" data-id="${c.id}" data-key="${key}"><em class="${cls}" data-bst-mod="${c.id}-${key}">${txt}</em><small>${lbl}</small></div>`; };
 
-  const attaquesHtml = armesHtml + actionsHtml;
-
-  // Lazy-load des objets boutique pour peupler les selects de butins
-  if (!_bstShopItemsCache) {
-    _bstEnsureShopItems().then(() => _bstRefreshButinSelects(c.id));
-  }
-
-  const traitsHtml = `
-    <div class="bst-section">
-      <div class="bst-section-title">
-        Traits & Capacites
-        <span class="bst-section-count" data-bst-count="${c.id}-traits">${traits.length}</span>
-        <button class="bst-add-row-btn" data-bst-action="addRow" data-id="${c.id}" data-type="traits">+ Ajouter</button>
+  // ── Sections (ordre MJ) ──────────────────────────────────────────────────
+  const statsSec = `
+    <section class="bst-sc" id="s-stats"><div class="bst-sc-h"><b>Fiche technique</b><em>utilisée par le VTT</em></div>
+      <div class="bst-stats5">${statField('pv', 'PV', 'pvMax', c.pvMax)}${statField('pm', 'PM', 'pmMax', c.pmMax)}${statField('ca', 'CA', 'ca', c.ca)}${statField('vt', 'Vit.', 'vitesse', c.vitesse)}${statField('xp', 'XP', 'dangerositeXp', c.dangerositeXp)}</div>
+      <div class="bst-mini2">
+        <span>Niveau / FP</span><input type="number" value="${c.niveau || ''}" placeholder="–" data-bst-action="updateNum" data-bst-on="input" data-id="${c.id}" data-field="niveau">
+        <span>Init.</span><input type="number" value="${c.initiative || ''}" placeholder="–" data-bst-action="updateNum" data-bst-on="input" data-id="${c.id}" data-field="initiative">
+        <span>Emoji</span><input value="${_esc(c.emoji || '❓')}" style="width:44px" data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="emoji">
+        <span>Token</span><select data-bst-action="updateNum" data-bst-on="change" data-id="${c.id}" data-field="tokenW">${[1, 2, 3, 4, 5].map(n => `<option value="${n}"${(c.tokenW || c.tokenSize || 1) === n ? ' selected' : ''}>${n}</option>`).join('')}</select>
+        <span>×</span><select data-bst-action="updateNum" data-bst-on="change" data-id="${c.id}" data-field="tokenH">${[1, 2, 3, 4, 5].map(n => `<option value="${n}"${(c.tokenH || c.tokenSize || 1) === n ? ' selected' : ''}>${n}</option>`).join('')}</select>
       </div>
-      <div id="bst-p-traits-${c.id}" class="bst-p-rows">
-        ${traits.map((t, i) => _panelTraitRow(t, c.id, i)).join('')}
-      </div>
-    </div>`;
+      <div class="bst-ca6row">${caracField('FOR', 'force')}${caracField('DEX', 'dexterite')}${caracField('CON', 'constitution')}${caracField('INT', 'intelligence')}${caracField('SAG', 'sagesse')}${caracField('CHA', 'charisme')}</div>
+      ${al.length ? `<div class="bst-sc-h" style="margin-top:13px"><b>À vérifier</b><em>${al.length}</em></div><div class="bst-warns">${al.map(a => `<span class="${a.level === 'hard' ? 'hard' : ''}">${_esc(a.label)}</span>`).join('')}</div>` : ''}
+    </section>`;
 
-  const butinsHtml = `
-    <div class="bst-section">
-      <div class="bst-section-title">
-        Butins
-        <span class="bst-section-count" data-bst-count="${c.id}-butins">${butins.length}</span>
-        <button class="bst-add-row-btn" data-bst-action="pickerOpen" data-id="${c.id}">+ Ajouter</button>
-      </div>
+  const descSec = `
+    <section class="bst-sc" id="s-desc"><div class="bst-sc-h"><b>Description</b></div>
+      <textarea class="bst-panel-textarea" placeholder="Apparence, comportement, lore…" rows="3" data-bst-action="update" data-bst-on="input" data-id="${c.id}" data-field="description">${_esc(c.description || '')}</textarea>
+    </section>`;
+
+  const dmgSec = `
+    <section class="bst-sc" id="s-dmg"><div class="bst-sc-h"><b>Relations aux dégâts</b></div>
+      ${_renderDamageMatrixPanel(c, types)}
+    </section>`;
+
+  const atkSec = `
+    <section class="bst-sc" id="s-atk"><div class="bst-sc-h"><b>Armes naturelles</b><em>${armes.length}</em><button class="add" data-bst-action="addArme" data-id="${c.id}">+ Ajouter</button></div>
+      <div id="bst-p-armes-${c.id}" class="bst-p-rows">${armes.map((a, i) => _bstRenderArmeRow(a, c.id, i)).join('')}</div>
+      <div class="bst-sc-h" style="margin-top:13px"><b>Actions</b><em>${acts.length}</em><button class="add" data-bst-action="addAction">+ Ajouter</button></div>
+      <div id="bst-p-actions-${c.id}" class="bst-p-rows bst-actions-host">${_bstRenderActionsList()}</div>
+    </section>`;
+
+  const traitsSec = `
+    <section class="bst-sc" id="s-traits"><div class="bst-sc-h"><b>Traits &amp; capacités</b><em>${traits.length}</em><button class="add" data-bst-action="addRow" data-id="${c.id}" data-type="traits">+ Ajouter</button></div>
+      <div id="bst-p-traits-${c.id}" class="bst-p-rows">${traits.map((t, i) => _panelTraitRow(t, c.id, i)).join('')}</div>
+    </section>`;
+
+  const lootSec = `
+    <section class="bst-sc" id="s-loot"><div class="bst-sc-h"><b>Butin</b><em>${butins.length}</em><button class="add" data-bst-action="pickerOpen" data-id="${c.id}">+ Ajouter</button></div>
       <div class="bst-butin-or-row">
         <span class="bst-butin-or-ic">Or</span>
-        <input class="bst-p-input bst-butin-or-input" type="text" placeholder="Or lache - ex : 5d4 ou 20"
-          value="${_esc(c.or || '')}" title="Or lache a la mort : nombre brut (20) ou formule de des (5d4, 2d6+3). Le jet est fait dans le VTT."
-          data-bst-action="saveOr" data-bst-on="input" data-id="${c.id}">
+        <input class="bst-p-input bst-butin-or-input" type="text" placeholder="Or lâché — ex : 5d4 ou 20" value="${_esc(c.or || '')}" title="Or lâché à la mort : nombre brut (20) ou formule (5d4). Le jet est fait dans le VTT." data-bst-action="saveOr" data-bst-on="input" data-id="${c.id}">
         <span class="bst-butin-or-hint">brut ou XdY</span>
       </div>
-      <div id="bst-p-butins-${c.id}" class="bst-p-rows">
-        ${butins.map((b, i) => _panelButinRow(b, c.id, i)).join('')}
-      </div>
-    </div>`;
+      <div id="bst-p-butins-${c.id}" class="bst-p-rows">${butins.map((b, i) => _panelButinRow(b, c.id, i)).join('')}</div>
+      <div class="bst-admin-actions"><button class="bst-btn-delete" style="flex:1" data-bst-action="deleteBeast" data-id="${c.id}">Supprimer cette créature</button></div>
+    </section>`;
 
-  return `
-  <div class="bst-panel" style="--rang-c:${rs.color};--rang-glow:${rs.glow}">
+  return `<div class="bst-pn" style="--rc:${rs.color}">
     ${heroHtml}
-    <div class="bst-panel-body">
-      ${vitalsHtml}
-      ${_renderTacticalSummary(c)}
-      ${caracsHtml}
-      ${tokenHtml}
-      ${descHtml}
-      ${dmgHtml}
-      ${attaquesHtml}
-      ${traitsHtml}
-      ${butinsHtml}
-      <div class="bst-admin-actions">
-        <button class="bst-btn-delete" style="flex:1" data-bst-action="deleteBeast" data-id="${c.id}">Supprimer cette creature</button>
-      </div>
+    <nav class="bst-pnav">
+      <button data-bst-sec="s-stats">Stats</button>
+      <button data-bst-sec="s-desc">Description</button>
+      <button data-bst-sec="s-dmg">Dégâts</button>
+      <button data-bst-sec="s-atk">Attaques</button>
+      <button data-bst-sec="s-traits">Traits</button>
+      <button data-bst-sec="s-loot">Butin</button>
+    </nav>
+    <div class="bst-pn-b">
+      ${statsSec}${descSec}${dmgSec}${atkSec}${traitsSec}${lootSec}
     </div>
   </div>`;
 }
@@ -2162,18 +1907,14 @@ async function _saveTracker() {
 }
 
 function _syncActivePanel() {
-  const page = document.querySelector('.bst-page');
-  const layout = document.querySelector('.bst-layout');
+  const main = document.querySelector('.bst-main');
   const panelSlot = document.querySelector('.bst-panel-slot');
   const activeCreature = STORE.creatures.find(c => c.id === STORE.activeId);
 
-  page?.classList.toggle('has-panel', !!activeCreature);
-  page?.classList.toggle('no-panel', !activeCreature);
-  layout?.classList.toggle('has-panel', !!activeCreature);
-  layout?.classList.toggle('no-panel', !activeCreature);
+  main?.classList.toggle('solo', !activeCreature);
 
-  document.querySelectorAll('.bst-card').forEach(card => {
-    card.classList.toggle('active', card.dataset.beastId === STORE.activeId);
+  document.querySelectorAll('.bst-bc').forEach(card => {
+    card.classList.toggle('on', card.dataset.beastId === STORE.activeId);
   });
 
   if (panelSlot) {
@@ -2182,14 +1923,13 @@ function _syncActivePanel() {
     } catch (err) {
       console.error('[bestiary] render panel failed:', err, activeCreature);
       panelSlot.innerHTML = activeCreature ? `
-        <div class="bst-panel">
-          <div class="bst-section">
-            <div class="bst-section-title">Fiche creature</div>
-            <div style="font-family:'Cinzel',serif;font-size:1.1rem;color:var(--text);font-weight:700">${_esc(activeCreature.nom || 'Creature')}</div>
-            <div style="font-size:.78rem;color:var(--text-dim);margin-top:.35rem">Impossible d'afficher toutes les informations de cette creature.</div>
-          </div>
-        </div>` : '';
+        <div class="bst-pn"><div class="bst-pn-b"><div class="bst-sc">
+          <div class="bst-sc-h"><b>Fiche créature</b></div>
+          <div class="bst-pn-nm">${_esc(activeCreature.nom || 'Créature')}</div>
+          <div class="bst-hint">Impossible d'afficher toutes les informations de cette créature.</div>
+        </div></div></div>` : '';
     }
+    _bstBindPanelSpy();
   }
   _bstRenderedActiveId = STORE.activeId;
   _bstRenderSig = _bstSig();
@@ -2329,8 +2069,16 @@ function _bstSearchInput(val) {
 }
 
 function _bstSearch(val) { STORE.searchVal = val; _render(); } // legacy
-function _bstSetType(type) { STORE.filterType = type; _render(); }
+function _bstSetType(type) { STORE.filterType = type || ''; _render(); }
 function _bstSetPrep(prep) { STORE.filterPrep = prep || ''; _render(); }
+// Segmenté Vue MJ / Vue joueur (admin). MJ → carnet propre, reset du filtre prépa.
+function _bstSetRole(role) {
+  STORE.role = role === 'player' ? 'player' : 'mj';
+  if (STORE.role === 'mj') STORE.viewAsUid = null;
+  STORE.filterPrep = '';
+  STORE.activeId = null;
+  _render();
+}
 function _bstResetFilters() {
   STORE.searchVal = '';
   STORE.filterType = '';
@@ -2338,19 +2086,6 @@ function _bstResetFilters() {
   STORE.filterPrep = '';
   _render();
 }
-function _bstClearCompare() { STORE.compareIds = []; _render(); }
-function _bstToggleCompare(id) {
-  if (!STATE.isAdmin || !id) return;
-  const set = new Set(STORE.compareIds);
-  if (set.has(id)) set.delete(id);
-  else {
-    if (set.size >= 4) showNotif('Comparaison limitee a 4 creatures.', 'info');
-    else set.add(id);
-  }
-  STORE.compareIds = [...set];
-  _render();
-}
-
 async function _bstDuplicateBeast(id) {
   if (!STATE.isAdmin || !id) return;
   const source = STORE.creatures.find(c => c.id === id);
@@ -2380,7 +2115,6 @@ async function _bstSwitchBestiaire(id) {
   STORE.filterType  = '';
   STORE.filterRang  = '';
   STORE.filterPrep  = '';
-  STORE.compareIds  = [];
   await renderBestiary();
 }
 
@@ -2405,7 +2139,6 @@ async function _bstCreateBestiaire() {
   STORE.activeId    = null;
   STORE.filterRang  = '';
   STORE.filterPrep  = '';
-  STORE.compareIds  = [];
   await renderBestiary();
 }
 
@@ -2519,48 +2252,35 @@ PAGES.bestiaire = renderBestiary;
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // MODAL IMAGE â€” Ã©diteur d'image dÃ©diÃ© de la crÃ©ature (depuis le panneau)
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-export async function openBeastImageModal(id) {
+// Même expérience que les portraits de personnages (character-photo.js) :
+// choix du fichier → recadrage pan/zoom (shared/image-crop.js) → base64.
+export function openBeastImageModal(id) {
   const c = STORE.creatures.find(x => x.id === id);
   if (!c) return;
-  _bstCropper?.destroy(); _bstCropper = null;
+  pickImageFile({ onImage: ({ dataUrl }) => _bstShowCropModal(dataUrl, id) });
+}
 
-  openModal(`Image - ${_esc(c.nom || 'Creature')}`, `
-    <div class="form-group">
-      <label>Image (ratio 4:3)</label>
-      <div id="bst-img-drop" style="border:2px dashed var(--border-strong);border-radius:12px;
-        padding:1rem;text-align:center;cursor:pointer;background:var(--bg-elevated)">
-        <div id="bst-img-preview"></div>
-      </div>
-      <div id="bst-img-crop-wrap" style="display:none;margin-top:.75rem">
-        <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem">Recadrez l'image</div>
-        <canvas id="bst-img-canvas" style="display:block;width:100%;border-radius:8px;cursor:crosshair;touch-action:none"></canvas>
-        <button type="button" class="btn btn-gold btn-sm" id="bst-img-confirm" style="margin-top:.5rem;width:100%">Confirmer le recadrage</button>
-        <div id="bst-img-ok" style="display:none;font-size:.75rem;text-align:center;margin-top:4px"></div>
-      </div>
+function _bstShowCropModal(dataUrl, id) {
+  _bstCropper?.destroy?.(); _bstCropper = null;
+  openModal('🖼 Cadrer l’illustration', `
+    ${panZoomCropHTML({ idPrefix: 'bst-crop', viewW: 320, viewH: 240 })}
+    <div style="display:flex;gap:.6rem;justify-content:flex-end;width:320px;max-width:100%;margin:.8rem auto 0">
+      <button class="btn btn-outline" id="bst-crop-cancel">Annuler</button>
+      <button class="btn btn-gold" id="bst-crop-save">✅ Enregistrer</button>
     </div>
-    <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" data-bst-action="saveImage" data-id="${id}">Enregistrer</button>
-      ${c.imageUrl ? `<button class="btn btn-outline" data-bst-action="removeImage" data-id="${id}">Retirer</button>` : ''}
-    </div>
-  `);
-
-  _bstCropper = attachDropAndCrop({
-    dropEl:        document.getElementById('bst-img-drop'),
-    previewEl:     document.getElementById('bst-img-preview'),
-    cropWrapEl:    document.getElementById('bst-img-crop-wrap'),
-    canvasId:      'bst-img-canvas',
-    statusEl:      document.getElementById('bst-img-ok'),
-    confirmBtnEl:  document.getElementById('bst-img-confirm'),
-    initialUrl:    c?.imageUrl || '',
-    ratio:         { w: 4, h: 3 },
-    output:        { maxW: 1800, target: 700_000 },
+  `, { subtitle: 'Zoome et déplace pour cadrer (ratio 4:3)', accent: '#4f8cff' });
+  requestAnimationFrame(() => {
+    _bstCropper?.destroy?.(); _bstCropper = null;
+    _bstCropper = attachPanZoomCrop({ idPrefix: 'bst-crop', dataUrl, viewW: 320, viewH: 240, outputW: 800, outputH: 600 });
+    document.getElementById('bst-crop-cancel')?.addEventListener('click', () => { _bstCropper?.destroy?.(); _bstCropper = null; closeModal(); }, { once: true });
+    document.getElementById('bst-crop-save')?.addEventListener('click', () => _bstSaveImage(id));
   });
 }
 
 async function _bstSaveImage(id) {
-  const cropResult = _bstCropper?.getResult();
+  const cropResult = _bstCropper?.getBase64?.();
   const current = STORE.creatures.find(c => c.id === id)?.imageUrl || '';
-  const imageUrl = typeof cropResult === 'string' ? cropResult : current;
+  const imageUrl = typeof cropResult === 'string' && cropResult ? cropResult : current;
   if (imageUrl && imageUrl.length > 900_000) {
     showNotif('Image trop grande, recadrez plus petit.', 'error');
     return;
@@ -2572,21 +2292,8 @@ async function _bstSaveImage(id) {
     _bstCropper?.destroy(); _bstCropper = null;
     closeModal();
     _syncActivePanel();
-    const card = document.querySelector(`.bst-card[data-beast-id="${id}"]`);
-    if (card && imageUrl) {
-      let img = card.querySelector('.bst-card-img');
-      if (!img) {
-        const empty = card.querySelector('.bst-card-empty');
-        if (empty) {
-          img = document.createElement('img');
-          img.className = 'bst-card-img';
-          img.loading = 'lazy';
-          empty.replaceWith(img);
-        }
-      }
-      if (img) img.src = imageUrl;
-    }
-    showNotif('Image mise a jour.', 'success');
+    _bstReplaceCard(id);
+    showNotif('Image mise à jour.', 'success');
   }
 }
 
@@ -2598,7 +2305,8 @@ async function _bstRemoveImage(id) {
     _bstCropper?.destroy(); _bstCropper = null;
     closeModal();
     _syncActivePanel();
-    showNotif('Image retiree.', 'success');
+    _bstReplaceCard(id);
+    showNotif('Image retirée.', 'success');
   }
 }
 
@@ -2780,15 +2488,18 @@ Object.assign(bstHandlers, {
   close:          ()   => _bstClose(),
   createDraft:    ()   => _bstCreateDraft(),
   switchBest:     (el) => _bstSwitchBestiaire(el.dataset.id),
+  selectBest:     (el) => { if (el.value === '__new__') _bstCreateBestiaire(); else _bstSwitchBestiaire(el.value); },
   createBest:     ()   => _bstCreateBestiaire(),
+  setRole:        (el) => _bstSetRole(el.dataset.role),
   setRang:        (el) => _bstSetRang(el.dataset.rang),
-  setType:        (el) => _bstSetType(el.dataset.type),
+  setType:        (el) => _bstSetType(el.dataset.type ?? el.value),
   setPrep:        (el) => _bstSetPrep(el.dataset.prep),
   resetFilters:   ()   => _bstResetFilters(),
   search:         (el) => _bstSearchInput(el.value),
-  viewAs:         (el) => _bstViewAs(el.dataset.uid || ''),
-  toggleCompare:  (el, ev) => { ev?.stopPropagation?.(); _bstToggleCompare(el.dataset.id); },
-  clearCompare:   (el, ev) => { ev?.stopPropagation?.(); _bstClearCompare(); },
+  clearSearch:    ()   => { STORE.searchVal = ''; _render(); document.getElementById('bst-search')?.focus(); },
+  viewAs:         (el) => _bstViewAs(el.dataset.uid !== undefined ? el.dataset.uid : (el.value || '')),
+  pickPlayer:     (el) => _bstViewAs(el.dataset.uid || ''),
+  clearCarnet:    (el) => _bstClearCarnet(el.dataset.id),
   quickToggleHidden: (el, ev) => { ev?.stopPropagation?.(); _bstToggleHidden(el.dataset.id); },
   duplicateBeast: (el, ev) => { ev?.stopPropagation?.(); _bstDuplicateBeast(el.dataset.id); },
 
