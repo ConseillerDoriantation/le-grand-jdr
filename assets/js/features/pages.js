@@ -57,6 +57,7 @@ let _statsData = null;                 // dernier doc stats chargé (pour la mod
 let _statsVttLogs = [];                // journal récent : sommes absentes des anciennes stats
 let _statsVttLogLimited = false;       // vrai si la fenêtre bornée est entièrement remplie
 let _statsVttDetailCache = new Map();  // scope de dates → agrégat du journal
+let _statsRowsCache = new Map();       // scope de dates → lignes calculées (réutilisées entre onglets)
 let _statsEmoteUrl = new Map();        // name → url (affichage de l'émote réelle)
 let _statsScope = null;                // null = toute la campagne ; sinon clé date YYYY-MM-DD
 let _statsLastSummary = '';            // récap texte du scope courant (export Discord)
@@ -65,6 +66,7 @@ let _statsGroupSel = null;             // Set de groupes ciblés pour une missio
 let _statsGroupMissionId = '';         // mission associée au filtre groupes
 let _statsHiddenAwards = new Set();    // distinctions masquées localement par l'utilisateur
 let _statsVisualSummary = null;        // données du dernier rendu pour export image
+let _statsVisualSummaryEnricher = null;// compléments lourds calculés uniquement lors de l'export
 let _statsCmpMetric = 'dmgDealt';      // métrique du graphique comparatif (par perso)
 let _statsCmpType   = 'bars';          // type du comparatif : 'bars' | 'pie'
 let _statsEvoMetric = 'dmgDealt';      // métrique du comparatif missions/groupes
@@ -86,6 +88,8 @@ let _statsPopCloserBound = false;      // listener global de fermeture du popove
 let _statsMvpDetailId = '';            // candidat actuellement affiche dans le detail MVP
 let _statsMvpOutsideClose = null;      // listeners temporaires du panneau detail MVP
 let _statsNavSpyCleanup = null;        // nettoyage du suivi de section active
+let _statsLoadRevision = 0;            // ignore les compléments async d'une ancienne ouverture
+let _statsAdventureId = '';            // évite de réutiliser le journal d'une autre aventure
 
 export function requestStatsScope(scope = null) {
   _statsRequestedScope = scope || null;
@@ -908,6 +912,7 @@ function _statsSumByDates(c, dates) {
 function _statsRowsFor(dateKeys) {
   const num = _statsNum;
   const detailKey = dateKeys ? [...dateKeys].sort().join('|') : '*';
+  if (_statsRowsCache.has(detailKey)) return _statsRowsCache.get(detailKey);
   let vttDetails = _statsVttDetailCache.get(detailKey);
   if (!vttDetails) {
     const names = new Map();
@@ -941,7 +946,7 @@ function _statsRowsFor(dateKeys) {
     });
     _statsVttDetailCache.set(detailKey, vttDetails);
   }
-  return Object.entries(_statsData?.chars || {}).map(([id, c]) => {
+  const rows = Object.entries(_statsData?.chars || {}).map(([id, c]) => {
     const src = dateKeys ? _statsSumByDates(c, dateKeys) : c;   // même forme : combat/skills/spells/emotes
     const skills = src.skills || {};
     const logDetails = vttDetails.byCharacter[id] || {};
@@ -967,6 +972,8 @@ function _statsRowsFor(dateKeys) {
       perSkill, skillAverages, actionAverages, combat, spells, emotes, emoteTotal, hasDates,
     };
   }).filter(r => r.sRolls > 0 || r.combat.attacks > 0 || r.combat.dmgTaken > 0 || r.combat.spellsCast > 0 || r.emotes.length);
+  _statsRowsCache.set(detailKey, rows);
+  return rows;
 }
 
 function _statsNeedsVttBackfill(data) {
@@ -1035,14 +1042,43 @@ function _statsPodium(title, entries, render, opts = {}) {
   </section>`;
 }
 
-// Rendu complet de la page pour un scope (réutilisé au changement de séance).
-function _statsRender(scope) {
-  _statsScope = scope || null;
-  const root = document.getElementById('stats-root');
-  if (!root) return;
-  _statsCaptureDrawerState(root);
+function _statsBindRenderedInteractions(root) {
   _statsUnbindMvpOutsideClose();
   _statsUnbindNavSpy();
+  _statsBindMvpOutsideClose(root);
+  _statsBindNavSpy(root);
+  _statsBindPopCloser();
+
+  let hasOpenCharacter = false;
+  root.querySelectorAll('.stats-char[open]').forEach(charDetails => {
+    if (!hasOpenCharacter) {
+      hasOpenCharacter = true;
+      return;
+    }
+    charDetails.open = false;
+    if (charDetails.dataset.drawerKey) _statsDrawerState.set(charDetails.dataset.drawerKey, false);
+  });
+
+  root.querySelectorAll('.stats-char').forEach(charDetails => {
+    if (charDetails.dataset.statsToggleBound === 'true') return;
+    charDetails.dataset.statsToggleBound = 'true';
+    charDetails.addEventListener('toggle', () => {
+      if (!charDetails.open) return;
+      root.querySelectorAll('.stats-char[open]').forEach(otherDetails => {
+        if (otherDetails === charDetails) return;
+        otherDetails.open = false;
+        if (otherDetails.dataset.drawerKey) _statsDrawerState.set(otherDetails.dataset.drawerKey, false);
+      });
+      if (charDetails.dataset.drawerKey) _statsDrawerState.set(charDetails.dataset.drawerKey, true);
+    });
+  });
+}
+
+// Rendu complet de la page pour un scope (réutilisé au changement de séance).
+function _statsRender(scope, { root = document.getElementById('stats-root'), bind = true } = {}) {
+  _statsScope = scope || null;
+  if (!root) return;
+  if (bind) _statsCaptureDrawerState(root);
   // Scope : null (campagne) · 'YYYY-MM-DD' (une séance) · 'mission:{id}' (mission entière).
   const isAct = typeof scope === 'string' && scope.startsWith('act:');
   const isMission = typeof scope === 'string' && scope.startsWith('mission:');
@@ -1075,13 +1111,17 @@ function _statsRender(scope) {
   const filteredMissionDates = (_statsGroupSel && _statsGroupSel.size)
     ? selectedMissionDates.filter(d => _statsGroupSel.has(_statsGroupKeyOf(d)))
     : selectedMissionDates;
-  const displayedMissionDates = (_statsGroupSel && _statsGroupSel.size) ? filteredMissionDates : selectedMissionDates;
   const scopeDates = isAct ? selectedActDates : (isMission ? filteredMissionDates : (dateKey ? [dateKey] : null));
 
   const allRows = _statsRowsFor(scopeDates);   // participants du scope courant
   // Filtre « joueurs ciblés » : recalcule toute la page sur le sous-ensemble choisi.
   const sel = _statsPlayerSel;
   const rows = (sel && sel.size) ? allRows.filter(r => sel.has(r.id)) : allRows;
+  const renderOverview = _statsTab === 'overview';
+  const renderRanking = _statsTab === 'ranking';
+  const renderPlayers = _statsTab === 'players';
+  const renderRolls = _statsTab === 'rolls';
+  const renderAudit = _statsTab === 'audit';
   const comparableAggregate = (entry) => {
     const trackedDates = entry.dates.filter(d => {
       const dateRows = _statsRowsFor([d]);
@@ -1104,9 +1144,11 @@ function _statsRender(scope) {
   const groupCompareOptions = isMission && missionGroupOptions.length > 1
     ? missionGroupOptions.filter(g => !_statsGroupSel || !_statsGroupSel.size || _statsGroupSel.has(g.key))
     : [];
-  const groupCompare = groupCompareOptions.map(comparableAggregate).filter(g => g.active);
+  const groupCompare = (renderOverview || renderRanking)
+    ? groupCompareOptions.map(comparableAggregate).filter(g => g.active)
+    : [];
   const missionCompareSource = isAct && selectedAct ? selectedAct.missions : missions;
-  const missionCompare = !selectedMissionId && !dateKey
+  const missionCompare = renderOverview && !selectedMissionId && !dateKey
     ? missionCompareSource.map(m => comparableAggregate({
         key: m.id,
         label: m.name,
@@ -1115,20 +1157,6 @@ function _statsRender(scope) {
     : [];
 
   const unlinkedDates = allDates.filter(d => !_statsData?.sessions?.[d]?.missionId);
-  const showUnlinkedDates = !selectedMissionId && !isAct && unlinkedDates.length > 0;
-  const scopeChip = (val, label, active, sub = '', cls = '') =>
-    `<button class="stats-chip ${cls}${active ? ' active' : ''}" data-action="_statsSetScope" data-scope="${val}"${sub ? ` title="${_esc(sub)}"` : ''}>
-      <span class="stats-chip-date">${label}</span>${sub ? `<span class="stats-chip-mission">${_esc(sub)}</span>` : ''}
-    </button>`;
-  const missionDatesBar = selectedMissionId ? `<div class="stats-chips stats-sessions stats-sessions--dates">
-    <span class="stats-chips-lbl">Séances</span>
-    ${scopeChip('mission:' + selectedMissionId, 'Toute la mission', isMission && missionId === selectedMissionId, selectedMission?.name || '', 'stats-chip-session')}
-    ${displayedMissionDates.map(d => scopeChip(d, `📅 ${_statsFmtDate(d).slice(0, 5)}`, d === dateKey, _statsGroupOf(d), 'stats-chip-session')).join('')}
-  </div>` : showUnlinkedDates ? `<div class="stats-chips stats-sessions stats-sessions--dates">
-    <span class="stats-chips-lbl">Sans mission</span>
-    ${scopeChip('', 'Toute la campagne', !scope, '', 'stats-chip-session')}
-    ${unlinkedDates.map(d => scopeChip(d, `📅 ${_statsFmtDate(d).slice(0, 5)}`, d === dateKey, 'Non reliée', 'stats-chip-session')).join('')}
-  </div>` : '';
   const groupsBar = selectedMissionId && groupOptions.length && (dateKey || groupOptions.length > 1) ? `<div class="stats-chips stats-groups">
     <span class="stats-chips-lbl">Groupes</span>
     ${!dateKey && groupOptions.length > 1 ? `<button class="stats-chip${!_statsGroupSel || !_statsGroupSel.size ? ' active' : ''}" data-action="_statsToggleGroup" data-group-key="__all">Tous</button>` : ''}
@@ -1137,43 +1165,14 @@ function _statsRender(scope) {
       ${g.quest ? `<span class="stats-chip-group-members">${_statsGroupMembersMiniHtml(g.quest)}</span>` : ''}
     </button>`).join('')}
   </div>` : '';
-  const missionSelect = _statsMissionPickerHtml(missions, selectedMissionId, selectedMission, scope, acts, selectedAct);
-  const sessionsBar = `<div class="stats-scope-panel">
-    ${missionSelect}
-    ${groupsBar}
-    ${missionDatesBar}
-  </div>`;
   const activeGroupNames = (_statsGroupSel && _statsGroupSel.size)
     ? groupOptions.filter(g => _statsGroupSel.has(g.key)).map(g => g.label)
     : [];
   const groupScopeText = activeGroupNames.length ? activeGroupNames.join(', ') : '';
 
-  // Chips « joueurs ciblés » : uniquement les participants du scope (portrait + nom).
-  const playersBar = allRows.length ? `<div class="stats-chips stats-players">
-    <span class="stats-chips-lbl">Joueurs</span>
-    <button class="stats-chip${!sel || !sel.size ? ' active' : ''}" data-action="_statsTogglePlayer" data-id="__all">Tous</button>
-    ${allRows.map(r => `<button class="stats-chip stats-chip-player${sel && sel.has(r.id) ? ' active' : ''}" data-action="_statsTogglePlayer" data-id="${r.id}">${_statsAvatar(r.id, r.name, 18)}<span>${_esc(r.name)}</span></button>`).join('')}
-  </div>` : '';
-
-  const viewPills = [];
-  if (isAct && selectedAct) viewPills.push(`📖 ${_esc(selectedAct.label)}`);
-  else if (selectedMissionId) viewPills.push(`🎯 ${_esc(selectedMission?.name || missionName || 'Mission')}`);
-  else viewPills.push('🌍 Toute la campagne');
-  if (dateKey) viewPills.push(`📅 ${_statsFmtDate(dateKey)}`);
-  else if (isAct || isMission) viewPills.push(`📅 ${scopeDates.length} séance${scopeDates.length > 1 ? 's' : ''}`);
-  if (groupScopeText) viewPills.push(`👥 ${_esc(groupScopeText)}`);
-  if (sel && sel.size) viewPills.push(`🧑 ${rows.length}/${allRows.length} joueur${rows.length > 1 ? 's' : ''}`);
-  const filtersActive = !!scope || !!(sel && sel.size) || !!(_statsGroupSel && _statsGroupSel.size);
-  const activeView = `<div class="stats-active-view">
-    <span class="stats-active-label">P&eacute;rim&egrave;tre</span>
-    <span class="stats-active-pills">${viewPills.map(p => `<span>${p}</span>`).join('')}</span>
-    ${filtersActive ? '<button class="stats-active-reset" data-action="_statsResetFilters" title="Retire uniquement les filtres affichés — aucune statistique ne sera supprimée" aria-label="Retirer les filtres statistiques et afficher toute la campagne">✕ Retirer les filtres</button>' : ''}
-  </div>`;
-
   const exportBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExport" title="Copier un récapitulatif texte pour Discord"><span>📋</span> Copier</button>` : '';
   const visualBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExportImage" title="Télécharger le récapitulatif visuel en PNG"><span>🖼️</span> Visuel</button>` : '';
   const manageBtn = STATE.isAdmin ? `<button class="stats-tool-btn stats-tool-btn--manage" data-action="_statsManage" title="Relier les séances aux missions et gérer les données"><span>⚙</span> Données</button>` : '';
-  const actionBar = (exportBtn || visualBtn || manageBtn) ? `<div class="stats-toolbar-actions"><span class="stats-toolbar-label">Actions</span>${exportBtn}${visualBtn}${manageBtn}</div>` : '';
   // ── Barre sticky (refonte) : périmètre 3 selects + popover joueurs + onglets ──
   const scopeKicker = dateKey ? `Séance du ${_statsFmtDate(dateKey)}`
     : isMission ? (selectedMission?.name || 'Mission')
@@ -1270,11 +1269,13 @@ function _statsRender(scope) {
   if (!rows.length) {
     _statsLastSummary = '';
     _statsVisualSummary = null;
+    _statsVisualSummaryEnricher = null;
     const why = (sel && sel.size) ? 'les joueurs ciblés'
       : dateKey ? `la séance du ${_statsFmtDate(dateKey)}`
       : isMission ? `la mission « ${missionName} »` : 'le moment';
     root.innerHTML = `${controls}<div class="stats-empty">Aucune statistique pour ${why}.<br>
       <span>Ajuste la vue ou les joueurs ciblés ci-dessus.</span></div>`;
+    if (bind) _statsBindRenderedInteractions(root);
     return;
   }
 
@@ -1319,7 +1320,8 @@ function _statsRender(scope) {
   // MVP V2 : chaque personnage est mesuré sur des repères absolus. Le filtre
   // « joueurs » intervient seulement après le calcul et la composition des
   // groupes n'a aucune influence sur les scores individuels.
-  const mvpDates = dateKey ? [] : [...new Set(scopeDates || allDates)];
+  const needsImpact = renderOverview || renderRanking;
+  const mvpDates = needsImpact && !dateKey ? [...new Set(scopeDates || allDates)] : [];
   const mvpSessionRows = mvpDates.map(date => {
     const dateRows = _statsRowsFor([date]);
     return {
@@ -1327,11 +1329,11 @@ function _statsRender(scope) {
       rows: dateRows,
     };
   }).filter(session => session.rows.length > 0);
-  const mvpScores = scoreMvpView({
+  const mvpScores = needsImpact ? scoreMvpView({
     rows: allRows,
     sessionRows: mvpSessionRows,
     visibleIds: sel,
-  });
+  }) : [];
   const rowsById = new Map(rows.map(row => [row.id, row]));
   const impactRows = mvpScores.map(result => {
     const source = rowsById.get(result.id);
@@ -1511,12 +1513,12 @@ function _statsRender(scope) {
   if (actionMean.rolls && (actionMean.coverage < 100 || actionMean.resultCoverage < 100)) {
     contextItems.push(`Moyennes : ${actionMean.resultTrackedRolls}/${actionMean.rolls} actions disposent de leur résultat final détaillé.`);
   }
-  const contextSec = contextItems.length ? `
+  const contextSec = renderOverview && contextItems.length ? `
     <section class="stats-context">
       ${contextItems.slice(0, 4).map(x => `<span>${_esc(x)}</span>`).join('')}
     </section>` : '';
   let mvpDetailSec = '';
-  const mvpSec = mvps.length ? (() => {
+  const mvpSec = renderOverview && mvps.length ? (() => {
     const mvpParts = (leader) => {
       const details = leader.impactDetails || {};
       const parts = [`📊 ${details.confidence?.label || 'Calcul provisoire'}`];
@@ -1667,7 +1669,7 @@ function _statsRender(scope) {
       <span>🎲 ${x.skills.rolls}</span>
     </div>
   </div>`;
-  const missionGroupsSec = groupCompare.length ? `
+  const missionGroupsSec = renderRanking && groupCompare.length ? `
     <section class="stats-sec">
       <div class="stats-sec-hd">👥 Groupes & séances</div>
       <div class="stats-mission-groups">
@@ -1720,125 +1722,34 @@ function _statsRender(scope) {
       dmgAvg: Math.round((g.combat.dmgDealt || 0) / Math.max(1, g.count)),
     })),
   };
-
-  // ── Graphiques (SVG/HTML, sans dépendance) ──
-  const cmpChart = _statsCmpType === 'pie' ? _statsPieChart(rows, _statsCmpMetric) : _statsBarChart(rows, _statsCmpMetric);
-  const typeToggle = `<div class="stats-type-toggle">
-    <button class="stats-tt${_statsCmpType === 'bars' ? ' active' : ''}" data-action="_statsCmpType" data-type="bars" title="Barres">📊</button>
-    <button class="stats-tt${_statsCmpType === 'pie' ? ' active' : ''}" data-action="_statsCmpType" data-type="pie" title="Camembert">🥧</button>
-  </div>`;
-  const contextCompare = isMission ? groupCompare : missionCompare;
-  const contextCompareLabel = isMission ? 'Comparatif — groupes' : (isAct ? 'Comparatif — missions de l’acte' : 'Comparatif — missions');
-  const secondaryChartHtml = contextCompare.length > 1
-    ? `<div class="stats-chart-card">
-        <div class="stats-chart-hd"><span>${contextCompareLabel}<small>Moyenne par séance suivie</small></span>${_statsMetricSelect(_statsEvoMetric, '_statsEvoMetric')}</div>
-        ${_statsGroupMetricChart(contextCompare, _statsEvoMetric)}
-      </div>`
-    : '';
-  const overviewChartsHtml = `<div class="stats-charts">
-    <div class="stats-chart-card">
-      <div class="stats-chart-hd"><span>Comparatif — personnages</span><div class="stats-chart-ctrls">${typeToggle}${_statsMetricSelect(_statsCmpMetric, '_statsCmpMetric')}</div></div>
-      ${cmpChart}
-    </div>
-    ${secondaryChartHtml}
-  </div>`;
-  const playerCompareOptions = rows.map(r => ({
-    id: r.id,
-    label: r.name,
-    avatar: _statsAvatar(r.id, r.name, 24),
-    combat: r.combat,
-    rolls: r.sRolls,
-    hitRate: r.combat.attacks ? Math.round(r.combat.hits / r.combat.attacks * 100) : 0,
-    divisor: 1,
-  }));
-  const groupCompareOptionsForDuel = groupCompare.map(g => ({
-    id: g.key,
-    label: g.label,
-    avatar: g.quest ? _statsGroupMembersMiniHtml(g.quest) : g.rows.slice(0, 4).map(r => _statsAvatar(r.id, r.name, 18)).join(''),
-    combat: g.combat,
-    rolls: g.skills.rolls,
-    hitRate: g.hitRate,
-    divisor: Math.max(1, g.count),
-  }));
-  if (_statsCompareKind === 'groups' && groupCompareOptionsForDuel.length < 2) _statsCompareKind = 'players';
-  if (_statsCompareKind === 'players' && playerCompareOptions.length < 2 && groupCompareOptionsForDuel.length >= 2) _statsCompareKind = 'groups';
-  const duelOptions = _statsCompareKind === 'groups' ? groupCompareOptionsForDuel : playerCompareOptions;
-  const validDuelIds = new Set(duelOptions.map(x => x.id));
-  const duelSelection = [...new Set((_statsCompareSelection[_statsCompareKind] || []).filter(id => validDuelIds.has(id)))];
-  duelOptions.forEach(x => { if (duelSelection.length < 2 && !duelSelection.includes(x.id)) duelSelection.push(x.id); });
-  _statsCompareSelection[_statsCompareKind] = duelSelection.slice(0, 2);
-  const duelEntities = _statsCompareSelection[_statsCompareKind].map(id => duelOptions.find(x => x.id === id)).filter(Boolean);
-  const duelSelect = (slot) => {
-    const selected = duelEntities[slot]?.id || '';
-    const other = duelEntities[slot === 0 ? 1 : 0]?.id || '';
-    const current = duelOptions.find(x => x.id === selected) || duelOptions[0];
-    return `<details class="stats-duel-picker">
-      <summary>
-        <span>${slot === 0 ? 'R&eacute;f&eacute;rence' : 'Compar&eacute; &agrave;'}</span>
-        <b>${current ? `${current.avatar}<em>${_esc(current.label)}</em>` : 'Aucun'}</b>
-      </summary>
-      <div class="stats-duel-picker-menu">
-        ${duelOptions.map(x => `<button type="button" class="${x.id === selected ? 'active' : ''}" data-action="_statsComparePick" data-slot="${slot}" data-value="${_esc(x.id)}"${x.id === other ? ' disabled' : ''}>
-          ${x.avatar}<span>${_esc(x.label)}</span>
-        </button>`).join('')}
-      </div>
-    </details>`;
+  _statsVisualSummaryEnricher = needsImpact ? null : () => {
+    const exportDates = dateKey ? [] : [...new Set(scopeDates || allDates)];
+    const exportSessions = exportDates
+      .map(date => ({ date, rows: _statsRowsFor([date]) }))
+      .filter(session => session.rows.length > 0);
+    const exportScores = scoreMvpView({ rows: allRows, sessionRows: exportSessions, visibleIds: sel });
+    const exportRowsById = new Map(rows.map(row => [row.id, row]));
+    const exportImpactRows = exportScores.map(result => {
+      const source = exportRowsById.get(result.id);
+      return source ? { ...source, impact: result.score, impactEligible: result.eligible } : null;
+    }).filter(Boolean);
+    const eligibleRows = exportImpactRows.filter(row => row.impactEligible !== false);
+    const exportPool = eligibleRows.length ? eligibleRows : exportImpactRows;
+    const exportTop = exportPool[0]?.impact || 0;
+    const exportMvps = exportTop > 0 ? exportPool.filter(row => row.impact === exportTop) : [];
+    const exportGroups = groupCompareOptions.map(comparableAggregate).filter(g => g.active);
+    return {
+      mvp: exportMvps.length ? { name: exportMvps.map(x => x.name).join(' & '), score: exportTop } : null,
+      groups: exportGroups.slice(0, 4).map(g => ({
+        label: g.label,
+        dmg: g.combat.dmgDealt,
+        heal: g.combat.heal,
+        rolls: g.skills.rolls,
+        sessions: g.count,
+        dmgAvg: Math.round((g.combat.dmgDealt || 0) / Math.max(1, g.count)),
+      })),
+    };
   };
-  const duelMetrics = [
-    ['⚔️', 'Attaques', 'attacks', '#ff9d7a', true],
-    ['🎯', 'Taux de réussite', 'hitRate', '#22c38e', false],
-    ['🗡️', 'Dégâts infligés', 'dmgDealt', '#c9b6ff', true],
-    ['💚', 'Soin produit', 'heal', '#4fd3a6', true],
-    ['🔮', 'Sorts lancés', 'spellsCast', '#bca0ff', true],
-    ['✨', 'Sorts tactiques', 'tacticalSpells', '#d8c7ff', true],
-    ['🛡️', 'Soutiens appliqués', 'supportSpells', '#4fd3a6', true],
-    ['💀', 'Afflictions', 'afflictionSpells', '#c084fc', true],
-    ['🌀', 'Contrôles', 'controlSpells', '#7fb0ff', true],
-    ['🎲', 'Jets de compétence', 'rolls', '#7fb0ff', true],
-    ['🧱', 'Dégâts subis', 'dmgTaken', '#a7b4c4', true],
-    ['☠️', 'KO infligés', 'kosDealt', '#ef4444', true],
-  ];
-  const duelValue = (entity, key, normalize) => {
-    const raw = key === 'rolls' ? entity.rolls : key === 'hitRate' ? entity.hitRate : (entity.combat[key] || 0);
-    return _statsCompareKind === 'groups' && normalize ? Math.round(raw / entity.divisor) : raw;
-  };
-  const duelRows = duelEntities.length === 2 ? duelMetrics.map(([icon, label, key, color, normalize]) => {
-    const a = duelValue(duelEntities[0], key, normalize);
-    const b = duelValue(duelEntities[1], key, normalize);
-    if (!a && !b && !['attacks', 'hitRate', 'dmgDealt', 'heal', 'spellsCast', 'rolls'].includes(key)) return '';
-    const max = Math.max(1, a, b);
-    const suffix = key === 'hitRate' ? '%' : '';
-    return `<div class="stats-duel-row">
-      <span class="stats-duel-value stats-duel-value--left${a > b ? ' is-leading' : ''}" style="--duel-color:${color};--duel-pct:${Math.round(a / max * 100)}%"><b>${a}${suffix}</b></span>
-      <span class="stats-duel-metric"><i>${icon}</i><span>${label}</span></span>
-      <span class="stats-duel-value stats-duel-value--right${b > a ? ' is-leading' : ''}" style="--duel-color:${color};--duel-pct:${Math.round(b / max * 100)}%"><b>${b}${suffix}</b></span>
-    </div>`;
-  }).join('') : '';
-  const groupsAvailable = groupCompareOptionsForDuel.length >= 2;
-  const compareHtml = duelEntities.length === 2 ? `<div class="stats-duel">
-    <div class="stats-duel-kind">
-      <button class="${_statsCompareKind === 'players' ? 'active' : ''}" data-action="_statsCompareKind" data-kind="players">Personnages</button>
-      ${groupsAvailable ? `<button class="${_statsCompareKind === 'groups' ? 'active' : ''}" data-action="_statsCompareKind" data-kind="groups">Groupes</button>` : ''}
-    </div>
-    <div class="stats-duel-pickers">${duelSelect(0)}<span class="stats-duel-vs">VS</span>${duelSelect(1)}</div>
-    <div class="stats-duel-head">
-      <span>${duelEntities[0].avatar}<b>${_esc(duelEntities[0].label)}</b></span>
-      <small>${_statsCompareKind === 'groups' ? 'Moyenne par séance suivie' : 'Totaux dans la vue actuelle'}</small>
-      <span>${duelEntities[1].avatar}<b>${_esc(duelEntities[1].label)}</b></span>
-    </div>
-    <div class="stats-duel-rows">${duelRows}</div>
-  </div>` : `<div class="stats-chart-empty">Il faut au moins deux ${_statsCompareKind === 'groups' ? 'groupes' : 'personnages'} dans la vue actuelle pour les comparer.</div>`;
-  const analysisToggle = `<div class="stats-analysis-toggle">
-    <button class="${_statsAnalysisMode === 'overview' ? 'active' : ''}" data-action="_statsAnalysisMode" data-mode="overview">Vue globale</button>
-    <button class="${_statsAnalysisMode === 'compare' ? 'active' : ''}" data-action="_statsAnalysisMode" data-mode="compare">Comparer</button>
-  </div>`;
-  const chartsHtml = `<section class="stats-sec stats-analysis">
-    <div class="stats-analysis-head">
-      <span>${_statsAnalysisMode === 'compare' ? 'Face-à-face sur la vue actuelle' : 'Répartition des performances'}</span>
-      ${analysisToggle}
-    </div>
-    ${_statsAnalysisMode === 'compare' ? compareHtml : overviewChartsHtml}
-  </section>`;
 
   // ── Sections (recomposées en colonnes plus bas) ──
   const emoteTotal = rows.reduce((s, r) => s + r.emoteTotal, 0);
@@ -1849,7 +1760,7 @@ function _statsRender(scope) {
     <div class="stats-detail-title">${title}</div>
     <div class="stats-detail-rows">${rowsHtml}</div>
   </section>`;
-  const combatSec = detailPanel(combatTitle, [
+  const combatSec = renderAudit ? detailPanel(combatTitle, [
     detailRow('⚔️', 'Attaques', GC.attacks),
     detailRow('🎯', 'Taux de réussite', `${hitRate}%`),
     detailRow('D20', 'Jet naturel moyen', statsAvg(combatMean.attackNaturalAverage)),
@@ -1863,8 +1774,8 @@ function _statsRender(scope) {
     detailRow('🛡️', 'Attaques évitées', GC.attacksAvoided, 'nouvelles stats'),
     detailRow('☠️', 'KO infligés', GC.kosDealt),
     detailRow('💀', 'Fois mis KO', GC.kosTaken),
-  ].join(''));
-  const magicSec = detailPanel('🔮 Magie & soutien', [
+  ].join('')) : '';
+  const magicSec = renderAudit ? detailPanel('🔮 Magie & soutien', [
     detailRow('🔮', 'Sorts lancés', GC.spellsCast),
     detailRow('✨', 'Sorts tactiques', GC.tacticalSpells),
     detailRow('🛡️', 'Soutien appliqué', GC.supportSpells),
@@ -1873,24 +1784,19 @@ function _statsRender(scope) {
     detailRow('🔋', 'PM dépensés', GC.pmSpent),
     detailRow('💚', 'Soin prodigué', GC.heal),
     detailRow('🧙', 'Lanceur le + actif', topMage ? _esc(topMage.name) : '—'),
-  ].join(''));
-  const competencesSec = detailPanel('🎲 Compétences & RP', [
+  ].join('')) : '';
+  const competencesSec = renderAudit ? detailPanel('🎲 Compétences & RP', [
     detailRow('🎲', 'Jets de compétence', GS.rolls),
     detailRow('💥', 'Réussites critiques', GS.crits),
     detailRow('💔', 'Échecs critiques', GS.fumbles),
     detailRow('💬', 'Émotes utilisées', emoteTotal),
     detailRow('🏅', 'Compétence la + jouée', topSkill ? _esc(topSkill.n) : '—'),
-  ].join(''));
-  const distinctionsSec = awardTotal ? `
-    <section class="stats-sec">
-      <div class="stats-sec-hd stats-sec-hd-tools"><span>🏆 Distinctions</span><button class="stats-sec-tool" data-action="_statsAwardsConfig" title="Choisir les distinctions affichées">⚙</button></div>
-      ${awardsHtml ? `<div class="stats-trophies stats-trophies--all">${awardsHtml}</div>` : '<div class="stats-empty-inline">Toutes les distinctions disponibles sont masquées.</div>'}
-    </section>` : '';
+  ].join('')) : '';
   const podiumMeta = (e) => e.contributor ? `<span class="stats-pod-caster" title="${_esc((e.contributors || []).map(c => `${c.name} ×${c.count}`).join(' · '))}">
     <span class="stats-pod-caster-avatars">${(e.contributors || []).slice(0, 4).map(c => _statsAvatar(c.id, c.name, 18)).join('')}${(e.contributors || []).length > 4 ? `<span class="stats-pod-more">+${(e.contributors || []).length - 4}</span>` : ''}</span>
     <span>${_esc(e.contributor.name)}${(e.contributors || []).length > 1 ? ` +${(e.contributors || []).length - 1}` : ''}</span>${e.contributor.count !== e.c ? `<small>×${e.contributor.count}</small>` : ''}
   </span>` : '';
-  const palmaresSec = (spellTally.length || emoteTally.length || skillTally.length) ? `
+  const palmaresSec = _statsTab === 'ranking' && (spellTally.length || emoteTally.length || skillTally.length) ? `
     <section class="stats-sec">
       <div class="stats-podiums">
         ${_statsPodium('Sorts lancés', spellTally, null, { icon: '🔮', accent: '#bca0ff', meta: podiumMeta })}
@@ -1899,11 +1805,15 @@ function _statsRender(scope) {
       </div>
     </section>` : '';
 
-  const detailedKpisHtml = `<div class="stats-detail-grid">${combatSec}${magicSec}${competencesSec}</div>`;
-  const sortedRows = [...rows].sort((a, b) => (b.combat.attacks + b.sRolls) - (a.combat.attacks + a.sRolls));
-  const charsHtml = `<section class="stats-sec stats-roster-sec">
+  const detailedKpisHtml = renderAudit
+    ? `<div class="stats-detail-grid">${combatSec}${magicSec}${competencesSec}</div>`
+    : '';
+  const sortedRows = renderPlayers
+    ? [...rows].sort((a, b) => (b.combat.attacks + b.sRolls) - (a.combat.attacks + a.sRolls))
+    : [];
+  const charsHtml = renderPlayers ? `<section class="stats-sec stats-roster-sec">
     <div class="stats-chars">${sortedRows.map(charBlock).join('')}</div>
-  </section>`;
+  </section>` : '';
   const statChip = (ic, value, label, color) => `<div class="stats-score-chip" style="--sc:${color}">
     <span>${ic}</span><b>${value}</b><small>${label}</small>
   </div>`;
@@ -1945,17 +1855,17 @@ function _statsRender(scope) {
   const _luckInline = (v) => { const n = Number(v); if (!Number.isFinite(n)) return '<span class="stats-tbl-z">—</span>'; const cls = n > 10.5 ? 'is-lucky' : n < 10.5 ? 'is-unlucky' : 'is-even'; return `<span class="stats-luck ${cls}">${statsAvg(n)}<small>/20</small></span>`; };
   const _skillsSorted = [...(GS.perSkill || [])].sort((a, b) => b.rolls - a.rolls);
   const _skMax = Math.max(..._skillsSorted.map(s => s.rolls), 1);
-  const averageSkillRows = _skillsSorted.map(s => `<tr>
+  const averageSkillRows = renderRolls ? _skillsSorted.map(s => `<tr>
     <td class="stats-td-who"><span class="stats-who-in"><b>${_esc(s.sk)}</b></span></td>
     <td><span class="stats-cellbar" style="--mc:#7fb0ff"><i style="width:${Math.round(s.rolls / _skMax * 100)}%"></i><b>${s.rolls}</b></span></td>
     <td class="on">${statsAvg(s.resultAvg)}</td>
     <td>${_luckInline(s.naturalAvg)}</td>
     <td class="stats-tbl-z">${s.trackedRolls}/${s.rolls} détaillés</td>
     <td><span style="color:var(--amber)">💥 ${s.crits}</span> <span class="stats-dim">${s.critRate || 0}%</span> &nbsp; <span style="color:var(--crimson)">💔 ${s.fumbles}</span> <span class="stats-dim">${s.fumbleRate || 0}%</span></td>
-  </tr>`).join('');
+  </tr>`).join('') : '';
   const _avgNote = (!actionMean.trackedRolls || actionMean.coverage < 100 || actionMean.resultCoverage < 100 || combatMean.damageAverageEstimated)
     ? `<div class="stats-note"><span>ℹ️</span><span>Les moyennes exactes regroupent compétences et attaques retrouvées dans les compteurs et le journal VTT${_statsVttLogLimited ? ' (500 dernières entrées)' : ''}. Les tirets correspondent à des actions historiques dont le détail n’est plus disponible.</span></div>` : '';
-  const averagesHtml = `<section class="stats-surface" id="moyennes">
+  const averagesHtml = renderRolls ? `<section class="stats-surface" id="moyennes">
     <div class="stats-surface-head"><div><span>Valeur typique des actions</span><h3>Moyennes des jets</h3></div><small>${actionMean.resultTrackedRolls ? `${actionMean.resultCoverage}% des actions avec résultat final détaillé` : 'Détail indisponible'}</small></div>
     <div class="stats-avg-grid">
       ${_avgCard('⚔️', combatMean.damageAverage, combatMean.damageAverageEstimated ? 'Dégâts moyens par touche' : 'Dégâts moyens par impact', combatMean.damageAverageEstimated ? `${GC.dmgDealt} ÷ ${GC.hits} touches` : `${combatMean.damageEvents} impact${combatMean.damageEvents > 1 ? 's' : ''} suivi${combatMean.damageEvents > 1 ? 's' : ''}`, '#c9b6ff')}
@@ -1977,18 +1887,18 @@ function _statsRender(scope) {
       <thead><tr><th class="stats-th-who">Compétence</th><th>Volume</th><th>Résultat moyen</th><th>Chance au dé</th><th>Jets</th><th>Crit. / échecs</th></tr></thead>
       <tbody>${averageSkillRows || '<tr><td colspan="6" class="stats-tbl-z" style="text-align:center;padding:16px">Aucun jet de compétence sur ce périmètre.</td></tr>'}</tbody>
     </table></div>
-  </section>`;
+  </section>` : '';
   // Scoreboard (refonte) : jauge + périmètre, puis 5 KPI avec delta vs séance
   // précédente + sparkline. Les séries réutilisent les rows par séance déjà
   // calculées pour le MVP (aucune lecture Firestore supplémentaire) ; on les
   // remet en ordre chronologique et on applique le filtre « joueurs ».
-  const chronoSessions = [...mvpSessionRows]
+  const chronoSessions = renderOverview ? [...mvpSessionRows]
     .sort((a, b) => a.date.localeCompare(b.date))
     .map(s => ({
       date: s.date,
       agg: _statsAggregateRows((sel && sel.size) ? s.rows.filter(r => sel.has(r.id)) : s.rows),
       mission: _statsMissionOf(s.date),
-    }));
+    })) : [];
   const kpiSeries = chronoSessions.map(s => s.agg);
   const _statsSessMetric = (agg, key) => key === 'rolls' ? (agg?.skills?.rolls || 0) : (agg?.combat?.[key] || 0);
   const _kpiNum = (v) => Number(v || 0).toLocaleString('fr-FR');
@@ -2014,7 +1924,7 @@ function _statsRender(scope) {
       ${hasDelta ? '<div class="stats-kpi-l stats-kpi-sub">vs s&eacute;ance pr&eacute;c&eacute;dente</div>' : ''}
     </div>`;
   };
-  const heroSec = `<section class="stats-board">
+  const heroSec = renderOverview ? `<section class="stats-board">
     <div class="stats-bd-id">
       ${_statsGauge(hitRate, '#22c38e', 104, 10, 'r&eacute;ussite')}
       <div class="stats-bd-copy">
@@ -2024,7 +1934,7 @@ function _statsRender(scope) {
       </div>
     </div>
     <div class="stats-kpis">${KPI_DEFS.map(d => _statsKpi(...d)).join('')}</div>
-  </section>`;
+  </section>` : '';
 
   // ── Rythme de campagne (refonte, étape 6) : évolution par séance + missions ──
   const evoKey = _STATS_METRICS[_statsEvoMetric] ? _statsEvoMetric : 'dmgDealt';
@@ -2046,13 +1956,13 @@ function _statsRender(scope) {
         <span class="stats-tl-bar" style="height:${Math.max(3, Math.round(evoVals[i] / evoMax * 100))}%"></span>
         <span class="stats-tl-x">${i % evoStep === 0 ? _statsFmtDate(s.date).slice(0, 5) : ''}</span></button>`).join('')}</div>
       <div class="stats-tl-legend"><span>Pic : ${_kpiNum(evoMax)} · moyenne : ${_kpiNum(evoAvg)} / séance</span><span>${evoM.lbl}</span></div>`;
-  const timelineSec = (_canTimeline || rows.length) ? `<div class="stats-surface stats-chart">
+  const timelineSec = renderOverview && (_canTimeline || rows.length) ? `<div class="stats-surface stats-chart">
     <div class="stats-chart-hd"><div><b>${_rythmeView === 'pie' ? 'Répartition par personnage' : 'Évolution par séance'}</b><small>${_rythmeView === 'pie' ? `Part de chaque personnage · ${evoM.lbl.toLowerCase()}` : chronoSessions.length + ' séances · cliquer pour cadrer la vue'}</small></div><div class="stats-chart-ctrl">${rythmeToggle}${_statsMetricSelect(evoKey, '_statsEvoMetric')}</div></div>
     ${rythmeBody}
   </div>` : '';
-  const missionRythme = missionCompare
+  const missionRythme = renderOverview ? missionCompare
     .map(m => ({ label: m.label, key: m.key, n: m.count, avg: m.count ? Math.round(_statsSessMetric(m, evoKey) / m.count) : 0 }))
-    .filter(m => m.n).sort((a, b) => b.avg - a.avg);
+    .filter(m => m.n).sort((a, b) => b.avg - a.avg) : [];
   const mRythmeMax = Math.max(...missionRythme.map(m => m.avg), 1);
   const missionsSec = missionRythme.length ? `<div class="stats-surface stats-chart">
     <div class="stats-chart-hd"><div><b>Rendement par mission</b><small>Moyenne par séance suivie</small></div></div>
@@ -2060,23 +1970,12 @@ function _statsRender(scope) {
       <div class="stats-mb-l"><b>${_esc(m.label)}</b><small>${m.n} séance${m.n > 1 ? 's' : ''}</small><span class="stats-mb-track"><i style="width:${Math.round(m.avg / mRythmeMax * 100)}%"></i></span></div>
       <div class="stats-mb-v"><b>${_kpiNum(m.avg)}</b><small>/ séance</small></div></button>`).join('')}</div>
   </div>` : '';
-  const rythmeSec = (timelineSec || missionsSec) ? `<section class="stats-sec stats-rythme">
+  const rythmeSec = renderOverview && (timelineSec || missionsSec) ? `<section class="stats-sec stats-rythme">
     <div class="stats-surface-head"><div><span>Tendance</span><h3>Rythme de campagne</h3></div></div>
     <div class="stats-rythme-grid${missionsSec && timelineSec ? '' : ' stats-rythme-grid--solo'}">${timelineSec}${missionsSec}</div>
   </section>` : '';
 
-  const navItems = [
-    ['temps-forts', 'TOP', 'Temps forts'],
-    groupCompare.length ? ['groupes', 'GRP', 'Groupes'] : null,
-    ['analyse', 'CMP', 'Comparer'],
-    ['moyennes', 'AVG', 'Moyennes'],
-    ['personnages', 'PJ', 'Personnages'],
-    ['donnees', 'AUD', 'Audit'],
-  ].filter(Boolean);
-  const statsNav = `<nav class="stats-section-nav" aria-label="Sections des statistiques">
-    ${navItems.map(([id, ic, label]) => `<button type="button" data-action="_statsJumpSection" data-target="${id}"><span>${ic}</span>${label}</button>`).join('')}
-  </nav>`;
-  const spotlightHtml = `<section class="stats-surface" id="temps-forts">
+  const spotlightHtml = renderOverview ? `<section class="stats-surface" id="temps-forts">
     <div class="stats-surface-head">
       <div><span>R&eacute;sum&eacute; de performance</span><h3>Temps forts</h3></div>
       ${awardTotal ? `<button class="stats-sec-tool" data-action="_statsAwardsConfig" title="Choisir les distinctions affich&eacute;es">&#9881;</button>` : ''}
@@ -2090,23 +1989,19 @@ function _statsRender(scope) {
         ${awardsHtml ? `<div class="stats-trophies stats-trophies--all">${awardsHtml}</div>` : '<div class="stats-empty-inline">Aucune distinction visible pour cette vue.</div>'}
       </div>
     </div>
-  </section>`;
-  const analysisHtml = `<section class="stats-surface" id="analyse">
-    <div class="stats-surface-head"><div><span>Comparer sans perdre le contexte</span><h3>Analyse</h3></div></div>
-    ${chartsHtml}
-  </section>`;
+  </section>` : '';
   const palmaresHtml = palmaresSec ? `<section class="stats-surface stats-surface--compact">
     <div class="stats-surface-head"><div><span>Classements</span><h3>Palmar&egrave;s</h3></div></div>
     ${palmaresSec}
   </section>` : '';
-  const rosterHtml = `<section class="stats-surface" id="personnages">
+  const rosterHtml = renderPlayers ? `<section class="stats-surface" id="personnages">
     <div class="stats-surface-head"><div><span>D&eacute;tail des contributions</span><h3>Joueurs</h3></div><small>${rows.length} fiche${rows.length > 1 ? 's' : ''}</small></div>
     ${charsHtml}
-  </section>`;
-  const detailsHtml = `<section class="stats-sec" id="donnees">
+  </section>` : '';
+  const detailsHtml = renderAudit ? `<section class="stats-sec" id="donnees">
     <div class="stats-surface-head"><div><span>Donn&eacute;es source</span><h3>Audit des compteurs</h3></div><small>${_esc(scopeLabel)}</small></div>
     ${detailedKpisHtml}
-  </section>`;
+  </section>` : '';
   const groupsHtml = missionGroupsSec ? `<div id="groupes">${missionGroupsSec}</div>` : '';
 
   // ── Tableau de classement triable (refonte, étape 3) ──
@@ -2127,8 +2022,10 @@ function _statsRender(scope) {
   const rankColor = Object.fromEntries(RANK_COLS.map(([k, , col]) => [k, col]));
   const rankSortKey = rankGet[_statsRankSort.key] ? _statsRankSort.key : 'dmg';
   const rankDir = _statsRankSort.dir === 1 ? 1 : -1;
-  const rankRows = [...impactRows].sort((a, b) => (((rankGet[rankSortKey](b) || 0) - (rankGet[rankSortKey](a) || 0)) * (rankDir === -1 ? 1 : -1)));
-  const rankMax = Math.max(...impactRows.map(r => rankGet[rankSortKey](r) || 0), 1);
+  const rankRows = renderRanking
+    ? [...impactRows].sort((a, b) => (((rankGet[rankSortKey](b) || 0) - (rankGet[rankSortKey](a) || 0)) * (rankDir === -1 ? 1 : -1)))
+    : [];
+  const rankMax = renderRanking ? Math.max(...impactRows.map(r => rankGet[rankSortKey](r) || 0), 1) : 1;
   const rankNum = (v) => Number(v || 0).toLocaleString('fr-FR');
   const rankCell = (r, key) => {
     const v = rankGet[key](r);
@@ -2139,7 +2036,7 @@ function _statsRender(scope) {
     return v ? `<td>${rankNum(v)}</td>` : '<td class="stats-tbl-z">—</td>';
   };
   const rankTh = (key, label) => `<th class="stats-th-sort${key === rankSortKey ? ' on' : ''}" data-action="_statsSortRank" data-key="${key}">${label}${key === rankSortKey ? `<span class="stats-th-arw">${rankDir === -1 ? '▼' : '▲'}</span>` : ''}</th>`;
-  const rankingSec = `<section class="stats-surface" id="classement">
+  const rankingSec = renderRanking ? `<section class="stats-surface" id="classement">
     <div class="stats-surface-head"><div><span>Qui a fait quoi</span><h3>Classement</h3></div><small>Clique une colonne pour trier · ${rankRows.length} personnage${rankRows.length > 1 ? 's' : ''}</small></div>
     <div class="stats-tbl-wrap"><table class="stats-tbl">
       <thead><tr><th class="stats-th-rk"></th><th class="stats-th-who">Personnage</th>${RANK_COLS.map(([k, l]) => rankTh(k, l)).join('')}</tr></thead>
@@ -2149,12 +2046,12 @@ function _statsRender(scope) {
         ${RANK_COLS.map(([k]) => rankCell(r, k)).join('')}
       </tr>`).join('')}</tbody>
     </table></div>
-  </section>`;
+  </section>` : '';
 
   // ── Face-à-face : 2 personnages, 9 métriques en barres miroir (étape 8) ──
   const DUEL_ICONS = { attacks: '⚔️', hitRate: '🎯', dmg: '🗡️', heal: '💚', spells: '🔮', rolls: '🎲', taken: '🛡️', ko: '☠️', impact: '⭐' };
   let duelSec = '';
-  if (impactRows.length >= 2) {
+  if (renderRanking && impactRows.length >= 2) {
     let pair = (_statsCompareSelection.players || []).filter(id => impactRows.some(r => r.id === id));
     if (pair.length < 2 || pair[0] === pair[1]) pair = rankRows.slice(0, 2).map(r => r.id);
     const A = impactRows.find(r => r.id === pair[0]) || rankRows[0];
@@ -2181,56 +2078,87 @@ function _statsRender(scope) {
     </section>`;
   }
 
+  const activeTabHtml = {
+    overview: `${heroSec}${spotlightHtml}${rythmeSec}${contextSec}`,
+    ranking: `${rankingSec}${duelSec}${groupsHtml}<div class="stats-content-grid stats-content-grid--solo">${palmaresHtml}</div>`,
+    players: rosterHtml,
+    rolls: averagesHtml,
+    audit: detailsHtml,
+  }[_statsTab] || `${heroSec}${spotlightHtml}${rythmeSec}${contextSec}`;
+
   root.innerHTML = `
     ${controls}
     <div class="stats-wrap">
     ${sessionBanner}
     ${groupsBar}
     <div class="stats-views">
-      <div class="stats-view${_statsTab === 'overview' ? ' on' : ''}" data-view="overview">
-        ${heroSec}
-        ${spotlightHtml}
-        ${rythmeSec}
-        ${contextSec}
-      </div>
-      <div class="stats-view${_statsTab === 'ranking' ? ' on' : ''}" data-view="ranking">
-        ${rankingSec}
-        ${duelSec}
-        ${groupsHtml}
-        <div class="stats-content-grid stats-content-grid--solo">
-          ${palmaresHtml}
-        </div>
-      </div>
-      <div class="stats-view${_statsTab === 'players' ? ' on' : ''}" data-view="players">${rosterHtml}</div>
-      <div class="stats-view${_statsTab === 'rolls' ? ' on' : ''}" data-view="rolls">${averagesHtml}</div>
-      <div class="stats-view${_statsTab === 'audit' ? ' on' : ''}" data-view="audit">${detailsHtml}</div>
+      <div class="stats-view on" data-view="${_esc(_statsTab)}">${activeTabHtml}</div>
     </div>
     </div>`;
-  _statsBindMvpOutsideClose(root);
-  _statsBindNavSpy(root);
-  _statsBindPopCloser();
+  if (bind) _statsBindRenderedInteractions(root);
+}
 
-  let hasOpenCharacter = false;
-  root.querySelectorAll('.stats-char[open]').forEach(charDetails => {
-    if (!hasOpenCharacter) {
-      hasOpenCharacter = true;
-      return;
+// Les journaux VTT et métadonnées arrivent après le premier rendu. On prépare
+// leur HTML hors écran puis on ne remplace que les zones susceptibles d'avoir
+// changé : le conteneur racine, le scroll et les autres onglets restent intacts.
+function _statsRefreshEnrichedView(scope) {
+  const root = document.getElementById('stats-root');
+  if (!root) return;
+  const renderedTab = _statsTab;
+  const pageScroll = window.scrollY;
+  const tabsScroll = root.querySelector('.stats-tabs')?.scrollLeft || 0;
+  const focused = root.contains(document.activeElement) ? document.activeElement : null;
+  const focusTag = focused?.tagName || '';
+  const focusData = focused ? { ...focused.dataset } : null;
+
+  const nextRoot = document.createElement('div');
+  nextRoot.className = root.className;
+  _statsRender(scope, { root: nextRoot, bind: false });
+  if (!root.isConnected || renderedTab !== _statsTab) return;
+
+  const currentTopbar = root.querySelector(':scope > .stats-topbar');
+  const nextTopbar = nextRoot.querySelector(':scope > .stats-topbar');
+  if (currentTopbar && nextTopbar && currentTopbar.innerHTML !== nextTopbar.innerHTML) {
+    currentTopbar.replaceWith(nextTopbar);
+  }
+
+  const currentWrap = root.querySelector(':scope > .stats-wrap');
+  const nextWrap = nextRoot.querySelector(':scope > .stats-wrap');
+  if (!currentWrap || !nextWrap) {
+    root.innerHTML = nextRoot.innerHTML;
+  } else {
+    const currentViews = currentWrap.querySelector(':scope > .stats-views');
+    const syncOptionalRegion = (selector) => {
+      const current = currentWrap.querySelector(`:scope > ${selector}`);
+      const next = nextWrap.querySelector(`:scope > ${selector}`);
+      if (current && next) {
+        if (current.innerHTML !== next.innerHTML) current.replaceWith(next);
+      } else if (current) {
+        current.remove();
+      } else if (next) {
+        currentWrap.insertBefore(next, currentViews);
+      }
+    };
+    syncOptionalRegion('.stats-session-banner');
+    syncOptionalRegion('.stats-groups');
+
+    const currentView = currentViews?.querySelector(':scope > .stats-view');
+    const nextView = nextWrap.querySelector(':scope > .stats-views > .stats-view');
+    if (currentView && nextView && currentView.innerHTML !== nextView.innerHTML) {
+      currentView.replaceWith(nextView);
     }
-    charDetails.open = false;
-    if (charDetails.dataset.drawerKey) _statsDrawerState.set(charDetails.dataset.drawerKey, false);
-  });
+  }
 
-  root.querySelectorAll('.stats-char').forEach(charDetails => {
-    charDetails.addEventListener('toggle', () => {
-      if (!charDetails.open) return;
-      root.querySelectorAll('.stats-char[open]').forEach(otherDetails => {
-        if (otherDetails === charDetails) return;
-        otherDetails.open = false;
-        if (otherDetails.dataset.drawerKey) _statsDrawerState.set(otherDetails.dataset.drawerKey, false);
-      });
-      if (charDetails.dataset.drawerKey) _statsDrawerState.set(charDetails.dataset.drawerKey, true);
-    });
-  });
+  _statsBindRenderedInteractions(root);
+  const tabs = root.querySelector('.stats-tabs');
+  if (tabs) tabs.scrollLeft = tabsScroll;
+  if (focusData) {
+    const focusTarget = [...root.querySelectorAll(focusTag.toLowerCase())].find(el =>
+      Object.entries(focusData).every(([key, value]) => el.dataset[key] === value)
+    );
+    focusTarget?.focus({ preventScroll: true });
+  }
+  if (Math.abs(window.scrollY - pageScroll) > 1) window.scrollTo({ top: pageScroll, behavior: 'auto' });
 }
 
 
@@ -4009,34 +3937,75 @@ const PAGES = {
   async statistiques() {
     const content = document.getElementById('main-content');
     content.innerHTML = `<div id="stats-root" class="stats-root">${loadingHtml('Chargement des statistiques…')}</div>`;
-    const [data, emoteDoc, chars, quests, story] = await Promise.all([
-      loadStats(),
-      getDocData('world', 'vtt_emotes').catch(() => null),
-      // Charge les persos (avec leur portrait) pour les afficher à côté du nom.
-      loadChars().catch(() => null),
-      loadCollection('quests').catch(() => []),
-      Promise.resolve(getCachedCollection('story') || loadCollection('story')).catch(() => []),
-    ]);
-    const vttLogs = _statsNeedsVttBackfill(data)
-      ? await loadRecentCollection('vttLog', { max: 500 }).catch(() => [])
-      : [];
-    if (Array.isArray(chars) && chars.length) STATE.characters = chars;
-    _statsQuests = Array.isArray(quests) ? quests : [];
-    _statsStory = Array.isArray(story) ? story : [];
-    _statsLoadAwardPrefs();
-    _statsData = data;
-    _statsVttLogs = Array.isArray(vttLogs) ? vttLogs : [];
-    _statsVttLogLimited = _statsVttLogs.length >= 500;
+    const revision = ++_statsLoadRevision;
+    const adventureId = STATE.adventure?.id || '';
+    if (_statsAdventureId !== adventureId) {
+      _statsAdventureId = adventureId;
+      _statsVttLogs = [];
+      _statsVttLogLimited = false;
+      _statsVttDetailCache = new Map();
+      _statsRowsCache = new Map();
+      _statsEmoteUrl = new Map();
+    }
+
+    // Les données décoratives démarrent en parallèle mais ne bloquent plus le
+    // premier écran. Les collections déjà session-live sont reprises du cache.
+    const cachedChars = (Array.isArray(STATE.characters) && STATE.characters.length)
+      ? STATE.characters
+      : getCachedCollection('characters');
+    const cachedQuests = getCachedCollection('quests');
+    const cachedStory = getCachedCollection('story');
+    const emotePromise = getDocData('world', 'vtt_emotes').catch(() => null);
+    const charsPromise = cachedChars ? Promise.resolve(cachedChars) : loadChars().catch(() => []);
+    const questsPromise = cachedQuests ? Promise.resolve(cachedQuests) : loadCollection('quests').catch(() => []);
+    const storyPromise = cachedStory ? Promise.resolve(cachedStory) : loadCollection('story').catch(() => []);
+
+    const data = await loadStats();
+    if (revision !== _statsLoadRevision || !document.getElementById('stats-root')) return;
+    _statsData = data || {};
+    _statsQuests = Array.isArray(cachedQuests) ? cachedQuests : [];
+    _statsStory = Array.isArray(cachedStory) ? cachedStory : [];
     _statsVttDetailCache = new Map();
-    _statsEmoteUrl = new Map((emoteDoc?.emotes || []).filter(e => e?.name && e?.url).map(e => [e.name, e.url]));
+    _statsRowsCache = new Map();
+    _statsLoadAwardPrefs();
     const requestedScope = _statsRequestedScope;
     _statsRequestedScope = null;
-    const availableDates = new Set(Object.values(data?.chars || {}).flatMap(c => Object.keys(c?.byDate || {})));
+    const availableDates = new Set(Object.values(_statsData?.chars || {}).flatMap(c => Object.keys(c?.byDate || {})));
     _statsScope = requestedScope && availableDates.has(requestedScope) ? requestedScope : null;
     _statsPlayerSel = null;
     _statsGroupSel = null;
     _statsGroupMissionId = '';
+    // Premier rendu dès que l'unique document de stats est disponible. Le
+    // journal historique et les illustrations affinent ensuite cette vue.
     _statsRender(_statsScope);
+
+    const vttLogsPromise = _statsNeedsVttBackfill(_statsData)
+      ? loadRecentCollection('vttLog', { max: 500 }).catch(() => [])
+      : Promise.resolve([]);
+    // Ne pas attendre ces compléments ici : `navigate()` maintient toute la
+    // page en `pointer-events:none` tant que cette fonction n'est pas terminée.
+    // Le premier rendu est complet et interactif ; l'enrichissement remplace
+    // seulement les données secondaires lorsqu'elles arrivent.
+    void Promise.all([
+      emotePromise,
+      charsPromise,
+      questsPromise,
+      storyPromise,
+      vttLogsPromise,
+    ]).then(([emoteDoc, chars, quests, story, vttLogs]) => {
+      if (revision !== _statsLoadRevision || !document.getElementById('stats-root')) return;
+      if (Array.isArray(chars) && chars.length) STATE.characters = chars;
+      _statsQuests = Array.isArray(quests) ? quests : [];
+      _statsStory = Array.isArray(story) ? story : [];
+      _statsVttLogs = Array.isArray(vttLogs) ? vttLogs : [];
+      _statsVttLogLimited = _statsVttLogs.length >= 500;
+      _statsVttDetailCache = new Map();
+      _statsRowsCache = new Map();
+      _statsEmoteUrl = new Map((emoteDoc?.emotes || []).filter(e => e?.name && e?.url).map(e => [e.name, e.url]));
+      _statsRefreshEnrichedView(_statsScope);
+    }).catch(err => {
+      console.warn('[stats] enrichissement secondaire indisponible', err);
+    });
   },
 
 };
@@ -4459,15 +4428,14 @@ registerActions({
     if (val) return _statsRender(val);
     return _statsRender(el.dataset.mission ? `mission:${el.dataset.mission}` : (el.dataset.act ? `act:${el.dataset.act}` : null));
   },
-  // Onglets : bascule client (tout est déjà dans le DOM, pas de recalcul réseau).
+  // Onglets : le contenu lourd est monté à la demande. Les données et agrégats
+  // restent en mémoire, donc aucun nouvel accès réseau n'est déclenché.
   _statsSetTab: (btn) => {
     const tab = btn.dataset.tab;
     if (!tab || tab === _statsTab) return;
     _statsTab = tab;
-    const root = document.getElementById('stats-root');
-    root?.querySelectorAll('.stats-view').forEach(v => v.classList.toggle('on', v.dataset.view === tab));
-    root?.querySelectorAll('.stats-tab').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-    root?.scrollIntoView({ block: 'start' });
+    _statsRender(_statsScope);
+    document.getElementById('stats-root')?.scrollIntoView({ block: 'start' });
   },
   // Rythme : bascule barres d'évolution ↔ camembert de répartition.
   _statsRythmeView: (btn) => { _statsRythmeView = btn.dataset.view === 'pie' ? 'pie' : 'timeline'; _statsRender(_statsScope); },
@@ -4667,6 +4635,10 @@ registerActions({
   _statsExportImage: () => {
     const s = _statsVisualSummary;
     if (!s) { showNotif('Aucun récap visuel à exporter.', 'info'); return; }
+    if (_statsVisualSummaryEnricher) {
+      Object.assign(s, _statsVisualSummaryEnricher());
+      _statsVisualSummaryEnricher = null;
+    }
     const W = 1200, H = 760, dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
     const canvas = document.createElement('canvas');
     canvas.width = W * dpr; canvas.height = H * dpr;
