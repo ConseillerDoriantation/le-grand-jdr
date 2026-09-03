@@ -12,14 +12,16 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
-import { updateDoc, addDoc, serverTimestamp } from '../../config/firebase.js';
+import { updateDoc, serverTimestamp } from '../../config/firebase.js';
 import { showNotif } from '../../shared/notifications.js';
-import { _tokRef, _logCol } from './vtt-refs.js';
+import { _tokRef } from './vtt-refs.js';
 import { _live, _scaledEnchantConditionFields } from './vtt-effective.js';
+import { _vttPublishOptimisticLog } from './vtt-chat.js';
 import { bumpHeal } from '../../shared/stats.js';
 import {
   CONDITION_BY_ID, _STAT_SHORT, _buffShared, _consumeLuckyReroll,
   _conditionStatRollMode, _rollDiceDetailed, _setHp, _tokenStatMod,
+  _vttPatchTokenOptimistically,
   _vttConditionsBeforeStateApplication, _vttLogSourceFields, _vttLogTargetFields, _vttLogSingleTargetFields,
 } from './vtt.js';
 
@@ -66,8 +68,8 @@ export async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
         ...scaledFields,
       };
     };
-    for (const tid of targetIds) {
-      const td = VS.tokens[tid]?.data; if (!td) continue;
+    await Promise.all(targetIds.map(async tid => {
+      const td = VS.tokens[tid]?.data; if (!td) return;
       let conds = (td.conditions || []).filter(c => c.source !== opt.label);
       const applied = [];
       for (const [idx, etatId] of etatIds.entries()) {
@@ -77,19 +79,21 @@ export async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
         conds = [...conds, buildCond(etatId, idx)];
         applied.push(CONDITION_BY_ID[etatId]);
       }
-      if (!applied.length) continue;
+      if (!applied.length) return;
+      const previous = td.conditions || [];
+      _vttPatchTokenOptimistically(tid, { conditions: conds });
       const saved = await updateDoc(_tokRef(tid), { conditions: conds })
         .then(() => true)
         .catch(error => {
+          _vttPatchTokenOptimistically(tid, { conditions: previous });
           console.error('[VTT] Enchantement non appliqué :', error);
           showNotif(`Impossible d'appliquer l'enchantement : ${error?.message || error}`, 'error');
           return false;
         });
-      if (!saved) continue;
-      if (VS.tokens[tid]?.data) VS.tokens[tid].data.conditions = conds;
+      if (!saved) return;
       const name = _live(td).displayName ?? td.name;
       showNotif(`${applied.map(l => l.icon).join('')} ${name} : ${applied.map(l => l.label).join(', ')}`, 'success');
-    }
+    }));
     return;
   }
 
@@ -119,16 +123,22 @@ export async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
   // ── Anti-stack global : un buff dmg_bonus arme remplace TOUS les anciens dmg_bonus arme.
   // Les autres types (move_bonus, range_bonus, enchantment) se filtrent par sort label
   // pour permettre des effets différents de sources différentes.
-  for (const tid of targetIds) {
-    const td = VS.tokens[tid]?.data; if (!td) continue;
+  void Promise.all(targetIds.map(async tid => {
+    const td = VS.tokens[tid]?.data; if (!td) return;
     const existing = (td.buffs || []).filter(b => {
       // Retire tout buff dmg_bonus arme : non cumulable, le dernier en vigueur l'emporte
       if (b.type === 'dmg_bonus' && b.slot === 'arme') return false;
       // Autres types : retire seulement les buffs du même sort (par label)
       return !(b.type !== 'dmg_bonus' && b.sortLabel === opt.label);
     });
-    await updateDoc(_tokRef(tid), { buffs: [...existing, ...buffs] }).catch(() => {});
-  }
+    const previous = td.buffs || [];
+    const next = [...existing, ...buffs];
+    _vttPatchTokenOptimistically(tid, { buffs: next });
+    await updateDoc(_tokRef(tid), { buffs: next }).catch(error => {
+      _vttPatchTokenOptimistically(tid, { buffs: previous });
+      console.error('[VTT] Enchantement non appliqué :', error);
+    });
+  }));
 }
 
 /** Applique une affliction : JS Sa de la cible, buff selon slot si échec. */
@@ -147,7 +157,7 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
     const td = VS.tokens[tid]?.data;
     return td ? (_live(td).displayName ?? td.name) : '?';
   }).join(', ');
-  await addDoc(_logCol(), {
+  const castLogWrite = _vttPublishOptimisticLog({
     type: 'affliction-cast',
     ...(undo ? { undo } : {}),
     ...(statsDelta ? { statsDelta } : {}),
@@ -165,8 +175,8 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
     createdAt: serverTimestamp(),
   }).catch(() => {});
 
-  for (const tid of targetIds) {
-    const td = VS.tokens[tid]?.data; if (!td) continue;
+  const targetWrites = Promise.all(targetIds.map(async tid => {
+    const td = VS.tokens[tid]?.data; if (!td) return;
     const saveMod = _tokenStatMod(td, aff.saveStat);
     const conditionMode = _conditionStatRollMode(td, aff.saveStat, 'save');
     const firstRoll = Math.floor(Math.random() * 20) + 1;
@@ -199,7 +209,7 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       }
       return `🩸 DoT ${dotFormula}/tour`;
     })();
-    await addDoc(_logCol(), {
+    void _vttPublishOptimisticLog({
       type: 'save',
       authorId: STATE.user?.uid || null,
       authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
@@ -217,7 +227,7 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
 
     if (success) {
       showNotif(`🛡️ ${tgtName} résiste${luck ? ` · 🍀 relance ${luck.reroll}` : ''} · ${rollStr}`, 'info');
-      continue;
+      return;
     }
 
     // ── Mode "État" : applique l'état choisi avec sa durée par défaut ──
@@ -225,12 +235,12 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       // Diagnostic clair si l'état est mal configuré
       if (!aff.etatId) {
         showNotif(`⚠️ Sort "${opt.label}" en mode État sans état choisi — rien n'est appliqué`, 'warning');
-        continue;
+        return;
       }
       const lib = CONDITION_BY_ID[aff.etatId];
       if (!lib) {
         showNotif(`⚠️ État "${aff.etatId}" introuvable en BDD — vérifier les réglages`, 'error');
-        continue;
+        return;
       }
       const round = VS.session?.combat?.round ?? 0;
       const isConsumed = !!lib.effects?.consumedByAttackAgainst;
@@ -247,7 +257,7 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       const existingConds = await _vttConditionsBeforeStateApplication({ ...td, id: tid }, lib);
       if (existingConds.some(c => c.id === aff.etatId)) {
         showNotif(`${lib.icon} ${tgtName} portait déjà ${lib.label}`, 'info');
-        continue;
+        return;
       }
       const newCond = {
         id: aff.etatId,
@@ -260,16 +270,18 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
         ...(pendingDuration != null ? { pendingDuration } : {}),
       };
       // Surface l'erreur si l'update Firestore échoue (permissions, etc.)
+      const previous = td.conditions || [];
       try {
         const newConds = [...existingConds, newCond];
+        _vttPatchTokenOptimistically(tid, { conditions: newConds });
         await updateDoc(_tokRef(tid), { conditions: newConds });
-        if (VS.tokens[tid]?.data) VS.tokens[tid].data.conditions = newConds;
         showNotif(`${lib.icon} ${tgtName} subit ${lib.label} · ${rollStr} (échec)`, 'success');
       } catch (err) {
+        _vttPatchTokenOptimistically(tid, { conditions: previous });
         console.error('[VTT] État non appliqué :', err);
         showNotif(`⚠️ ${tgtName} : échec d'application de ${lib.label} (${err?.message || err})`, 'error');
       }
-      continue;
+      return;
     }
 
     // ── Mode "DoT" (par défaut) : applique un buff de type 'dot' avec la formule ──
@@ -282,12 +294,16 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       formula: dotFormula, element: aff.element, effect: aff.effect,
     };
     const existing = (td.buffs || []).filter(b => b.type !== 'dot');
+    const previousBuffs = td.buffs || [];
+    const nextBuffs = [...existing, newBuff];
+    _vttPatchTokenOptimistically(tid, { buffs: nextBuffs });
     try {
-      await updateDoc(_tokRef(tid), { buffs: [...existing, newBuff] });
+      await updateDoc(_tokRef(tid), { buffs: nextBuffs });
     } catch (err) {
+      _vttPatchTokenOptimistically(tid, { buffs: previousBuffs });
       console.error('[VTT] DoT non appliqué :', err);
       showNotif(`⚠️ ${tgtName} : échec d'application du DoT (${err?.message || err})`, 'error');
-      continue;
+      return;
     }
 
     // Roll du tick immédiat avec détail des dés
@@ -302,9 +318,9 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
         console.error('[VTT] DoT tick immédiat : HP non appliqués', err);
         showNotif(`⚠️ ${tgtName} : tick de DoT non appliqué (${err?.code || err?.message || 'permissions ?'})`, 'error');
       });
-      if (!hpApplied) continue;
+      if (!hpApplied) return;
       // Log du tick immédiat (cohérent avec le tick de round suivant)
-      await addDoc(_logCol(), {
+      await _vttPublishOptimisticLog({
         type: 'dot-tick',
         authorId: STATE.user?.uid || null,
         authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
@@ -320,7 +336,8 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
     } else {
       showNotif(`🩸 ${tgtName} : DoT ${dotFormula}/tour · ${rollStr} (échec)`, 'success');
     }
-  }
+  }));
+  await Promise.all([castLogWrite, targetWrites]);
 }
 
 export async function _vttApplyRegeneration(srcId, targetIds, opt) {
@@ -335,32 +352,38 @@ export async function _vttApplyRegeneration(srcId, targetIds, opt) {
     formula: regen.formula || '2d4',
     effect: 'Régénération',
   };
-  for (const tid of targetIds) {
-    const td = VS.tokens[tid]?.data; if (!td) continue;
+  await Promise.all(targetIds.map(async tid => {
+    const td = VS.tokens[tid]?.data; if (!td) return;
     const existing = (td.buffs || []).filter(b => !(b.type === 'regen' && b.sortLabel === opt.label));
-    await updateDoc(_tokRef(tid), { buffs: [...existing, newBuff] }).catch(() => {});
+    const previousBuffs = td.buffs || [];
+    const nextBuffs = [...existing, newBuff];
+    _vttPatchTokenOptimistically(tid, { buffs: nextBuffs });
+    await updateDoc(_tokRef(tid), { buffs: nextBuffs }).catch(error => {
+      _vttPatchTokenOptimistically(tid, { buffs: previousBuffs });
+      console.error('[VTT] Régénération non appliquée :', error);
+    });
     const lT = _live(td);
     const name = lT.displayName ?? td.name;
     showNotif(`💚 ${name} : Régénération ${newBuff.formula}/tour`, 'success');
 
     const det = _rollDiceDetailed(newBuff.formula);
-    if (det.total <= 0) continue;
+    if (det.total <= 0) return;
     const curHp = lT.displayHp ?? td.hp ?? 20;
     const hpMax = lT.displayHpMax ?? 20;
     const newHp = Math.min(hpMax, curHp + det.total);
     const effectiveHeal = Math.max(0, newHp - curHp);
-    if (effectiveHeal <= 0) continue;
+    if (effectiveHeal <= 0) return;
     let hpApplied = true;
     await _setHp(td, newHp).catch(err => {
       hpApplied = false;
       console.error('[VTT] Régénération tick immédiat : HP non appliqués', err);
       showNotif(`⚠️ ${name} : tick de Régénération non appliqué (${err?.code || err?.message || 'permissions ?'})`, 'error');
     });
-    if (!hpApplied) continue;
+    if (!hpApplied) return;
     // Statistiques : soin réel attribué au soigneur (proc immédiat de Régénération).
     const _healCharId = _caster?.characterId || _caster?.summonOwnerCharId || null;
     if (_healCharId) bumpHeal(_healCharId, _caster.name, effectiveHeal);
-    await addDoc(_logCol(), {
+    await _vttPublishOptimisticLog({
       type: 'dot-tick',
       isHeal: true,
       authorId: STATE.user?.uid || null,
@@ -374,5 +397,5 @@ export async function _vttApplyRegeneration(srcId, targetIds, opt) {
       createdAt: serverTimestamp(),
     }).catch(() => {});
     showNotif(`💚 ${name} : Régénération ${newBuff.formula} → +${effectiveHeal} PV (proc cast)`, 'success');
-  }
+  }));
 }

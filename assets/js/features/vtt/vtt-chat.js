@@ -11,7 +11,7 @@ import { STATE } from '../../core/state.js';
 import { _esc } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { DAMAGE_INTERACTIONS } from '../../shared/damage-profile.js';
-import { onSnapshot, query, orderBy, limit, addDoc, serverTimestamp } from '../../config/firebase.js';
+import { onSnapshot, query, orderBy, limit, doc, setDoc, serverTimestamp } from '../../config/firebase.js';
 import { _logCol, _logGmCol } from './vtt-refs.js';
 import { _vttPanelError } from './vtt-utils.js';
 import { _findUsableReactiveShield, _canControlToken } from './vtt.js'; // circ. (combat)
@@ -56,6 +56,22 @@ export function _vttDiscardOptimisticCombatLog(id) {
   if (!_optimisticLogs.has(id)) return;
   _clearOptimisticLog(id);
   _rebuildChatLog();
+}
+
+/** Publie n'importe quel résultat d'action VTT sans faire attendre son rendu.
+ * Le listener remplace ensuite l'entrée locale grâce au même id Firestore. */
+export async function _vttPublishOptimisticLog(payload, { errorMessage = 'L’action a été appliquée, mais son message n’a pas pu être enregistré.' } = {}) {
+  const logRef = doc(_logCol());
+  _vttShowOptimisticCombatLog(logRef.id, payload);
+  try {
+    await setDoc(logRef, payload);
+    return true;
+  } catch (error) {
+    _vttDiscardOptimisticCombatLog(logRef.id);
+    console.error('[vtt] résultat absent du journal', error);
+    showNotif(errorMessage, 'error');
+    return false;
+  }
 }
 
 // Souscriptions Firestore au log (publiques + jets cachés MJ). Appelé par vtt.js
@@ -915,14 +931,12 @@ export async function _vttSendChat() {
     };
   }
   try {
-    await addDoc(_logCol(), payload);
-  } catch(e) {
+    const saved = await _vttPublishOptimisticLog(payload, { errorMessage: 'Le message n’a pas pu être envoyé.' });
+    if (saved) return;
     if (input) input.value=text; // restaurer le texte si échec
+  } catch(e) {
+    if (input) input.value=text;
     console.error('[vtt] chat send:', e);
-    const reason=e.code==='permission-denied'
-      ? 'Règles Firestore : ajouter vttLog (voir docs/firestore-rules.md)'
-      : e.message;
-    showNotif(`Erreur chat : ${reason}`,'error');
   }
 }
 

@@ -20,11 +20,12 @@ import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUD
 import { uploadPng } from '../../shared/image-upload.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
 import { bumpSkill, bumpEmote } from '../../shared/stats.js';
-import { _logCol, _logGmCol, _reactionRef } from './vtt-refs.js';
+import { _logGmCol, _reactionRef } from './vtt-refs.js';
 import { _STAT_KEY } from './vtt-constants.js';
 import { openModal, closeModalDirect, confirmModal, promptModal } from '../../shared/modal.js';
 import { listGithubFolder, GH_IMAGE_EXTS, slugFromFile, fileKey } from '../../shared/github-folder.js';
 import { resolveControlledTokenId } from './vtt-token-control.js';
+import { _vttPublishOptimisticLog } from './vtt-chat.js';
 import {
   VTT_ACTIONS, _showEmoteBubble, _canControlToken, _conditionStatRollMode,
   _tokenStatMod, _vttLogTargetFields,
@@ -138,7 +139,7 @@ export async function _vttRollSkill(skillName, stat) {
   const gmOnly = STATE.isAdmin && VS.rollHidden;
   try {
     // Jet caché → sous-collection MJ (secret serveur) ; sinon log public.
-    await addDoc(gmOnly ? _logGmCol() : _logCol(), {
+    const payload = {
       type: 'roll',
       authorId: STATE.user?.uid || null,
       authorName, characterName, characterImage,
@@ -155,7 +156,9 @@ export async function _vttRollSkill(skillName, stat) {
       isCrit, isFumble,
       gmOnly,
       createdAt: serverTimestamp(),
-    });
+    };
+    if (gmOnly) await addDoc(_logGmCol(), payload);
+    else await _vttPublishOptimisticLog(payload);
     if (gmOnly) showNotif('Jet caché — visible uniquement par le MJ', 'success');
   } catch(e) { showNotif('Erreur jet : ' + e.message, 'error'); }
   // Statistiques : compte le jet de compétence (PJ uniquement) + crit/échec.

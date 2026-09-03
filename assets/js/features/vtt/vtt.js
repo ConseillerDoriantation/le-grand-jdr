@@ -72,7 +72,7 @@ import {
 } from './vtt-ruler.js';
 import {
   _initChatLogSubs, _vttToggleLogDetail, _vttSendChat, _vttChatReply, _vttChatReplyCancel, _chatMsgs,
-  _vttShowOptimisticCombatLog, _vttDiscardOptimisticCombatLog,
+  _vttPublishOptimisticLog,
 } from './vtt-chat.js';
 import {
   _loadEmotes, _loadDiceSkills, _vttSetRollMode, _vttAdjBonus, _vttSetBonus, _vttToggleRollHidden, _vttRollSkill,
@@ -249,7 +249,13 @@ async function _vttSelfAction(srcId, condId) {
     id: condId, appliedAt: Date.now(), appliedBy: srcId,
     source: lib.label, saveDC: null, saveStat: null, expiresAtRound,
   };
-  await updateDoc(_tokRef(srcId), { conditions: [...existing, newCond] }).catch(() => {});
+  const previous = t.conditions || [];
+  const conditions = [...existing, newCond];
+  _vttPatchTokenOptimistically(srcId, { conditions });
+  await updateDoc(_tokRef(srcId), { conditions }).catch(error => {
+    _vttPatchTokenOptimistically(srcId, { conditions: previous });
+    console.error('[vtt] action défensive non appliquée', error);
+  });
   const name = _live(t).displayName ?? t.name;
   showNotif(`${lib.icon} ${name} : ${lib.label}`, 'success');
 }
@@ -263,8 +269,16 @@ async function _vttAider(srcId, tgtId) {
   const s = VS.tokens[srcId]?.data; if (!s) return;
   if (!_canControlToken(s)) return;
   const t = VS.tokens[tgtId]?.data; if (!t) return;
-  await _setHp(t, 1).catch(() => {});
-  await updateDoc(_tokRef(tgtId), { conditions: [] }).catch(() => {});
+  const previousConditions = t.conditions || [];
+  _vttPatchTokenOptimistically(tgtId, { conditions: [] });
+  const hpWrite = _setHp(t, 1).catch(error => {
+    console.error('[vtt] PV non restaurés après Aider', error);
+  });
+  const conditionsWrite = updateDoc(_tokRef(tgtId), { conditions: [] }).catch(error => {
+    _vttPatchTokenOptimistically(tgtId, { conditions: previousConditions });
+    console.error('[vtt] états non retirés après Aider', error);
+  });
+  await Promise.all([hpWrite, conditionsWrite]);
   const name = _live(t).displayName ?? t.name;
   showNotif(`🤝 ${name} relevé à 1 PV — états retirés`, 'success');
 }
@@ -629,18 +643,44 @@ async function _spendCharSpellCost(cid, res, cost, tokenId, label) {
   }
   if (res === 'pv') {
     const cur = c.hp ?? calcPVMax(c);
-    await updateDoc(_chrRef(cid), { hp: Math.max(0, cur - cost), vttControlTokenId: tokenId }).catch(() => {});
+    const next = Math.max(0, cur - cost);
+    c.hp = next;
+    _patchEntityTokenShapes('characterId', cid);
+    await updateDoc(_chrRef(cid), { hp: next, vttControlTokenId: tokenId }).catch(error => {
+      c.hp = cur;
+      _patchEntityTokenShapes('characterId', cid);
+      throw error;
+    });
     return;
   }
-  await updateDoc(_chrRef(cid), { ..._charPmPatch(Math.max(0, _charPmCur(c) - cost)), vttControlTokenId: tokenId }).catch(() => {});
+  const cur = _charPmCur(c);
+  const next = Math.max(0, cur - cost);
+  Object.assign(c, _charPmPatch(next));
+  _patchEntityTokenShapes('characterId', cid);
+  await updateDoc(_chrRef(cid), { ..._charPmPatch(next), vttControlTokenId: tokenId }).catch(error => {
+    Object.assign(c, _charPmPatch(cur));
+    _patchEntityTokenShapes('characterId', cid);
+    throw error;
+  });
 }
 
 // HP écrit sur la fiche source (bidirectionnel)
 export async function _setHp(t, newHp) {
   const v = Math.max(0, newHp);
-  if (t.characterId) await updateDoc(_chrRef(t.characterId), { hp: v });
-  else if (t.npcId)  await updateDoc(_npcRef(t.npcId),       { hp: v });
-  else               await updateDoc(_tokRef(t.id),          { hp: v });
+  const live = _live(t);
+  const previous = (t.characterId ? VS.characters[t.characterId]?.hp
+    : t.npcId ? VS.npcs[t.npcId]?.hp
+    : t.hp) ?? live.displayHp;
+  _showAppliedHpDelta(t, live.displayHp ?? previous, v);
+  _patchHpOptimistically(t, v);
+  try {
+    if (t.characterId) await updateDoc(_chrRef(t.characterId), { hp: v });
+    else if (t.npcId)  await updateDoc(_npcRef(t.npcId),       { hp: v });
+    else               await updateDoc(_tokRef(t.id),          { hp: v });
+  } catch (error) {
+    if (previous != null) _patchHpOptimistically(t, previous);
+    throw error;
+  }
   await _syncDownedCondition(t, v);
 }
 
@@ -658,17 +698,25 @@ async function _setInvocationPm(td, requestedPm) {
   const next = resolveInvocationManaChange(td, requestedPm);
   if (!next) return null;
   const patch = { pm: next.value, pmCombat: next.value };
-  await updateDoc(_tokRef(td.id), patch);
   const live = VS.tokens?.[td.id]?.data;
-  if (live) Object.assign(live, patch);
-  else Object.assign(td, patch);
-  await _persistInvocationState(live || td);
+  const target = live || td;
+  const previous = { pm: target.pm, pmCombat: target.pmCombat };
+  Object.assign(target, patch);
+  _patchShape(td.id);
+  try {
+    await updateDoc(_tokRef(td.id), patch);
+    void _persistInvocationState(target);
+  } catch (error) {
+    Object.assign(target, previous);
+    _patchShape(td.id);
+    throw error;
+  }
   return next;
 }
 
 /** Restaure `amount` PM sur un token (perso / PNJ / créature bestiaire / invocation), capé au
  *  max. Retourne { applied, cur, max } (PM réellement rendus + nouvel état). */
-async function _restoreTokenPm(td, amount) {
+async function _restoreTokenPm(td, amount, { deferWrite = false } = {}) {
   const add = Math.max(0, parseInt(amount) || 0);
   if (td?.summonKind === 'invocation') {
     const state = resolveInvocationManaChange(td, td.pm ?? td.pmMax);
@@ -676,8 +724,10 @@ async function _restoreTokenPm(td, amount) {
     const cur = state.value;
     const nv = Math.min(state.max, cur + add);
     if (nv !== cur) {
+      const write = _setInvocationPm(td, nv);
+      if (deferWrite) return { applied: Math.max(0, nv - cur), cur: nv, max: state.max, write };
       try {
-        await _setInvocationPm(td, nv);
+        await write;
       } catch (err) {
         console.error('[vtt] régénération des PM de l’invocation refusée', err);
         return { applied: 0, cur, max: state.max };
@@ -690,7 +740,17 @@ async function _restoreTokenPm(td, amount) {
     if (!c) return { applied: 0, cur: 0, max: 0 };
     const max = calcPMMax(c), cur = Math.max(0, _charPmCur(c));
     const nv = Math.min(max, cur + add);
-    if (add > 0) await updateDoc(_chrRef(td.characterId), _charPmPatch(nv)).catch(() => {});
+    if (nv !== cur) {
+      Object.assign(c, _charPmPatch(nv));
+      _patchEntityTokenShapes('characterId', td.characterId);
+      const write = updateDoc(_chrRef(td.characterId), _charPmPatch(nv)).catch(error => {
+        Object.assign(c, _charPmPatch(cur));
+        _patchEntityTokenShapes('characterId', td.characterId);
+        console.error('[vtt] régénération PM personnage', error);
+      });
+      if (deferWrite) return { applied: Math.max(0, nv - cur), cur: nv, max, write };
+      await write;
+    }
     return { applied: Math.max(0, nv - cur), cur: nv, max };
   }
   if (td?.npcId) {
@@ -698,14 +758,35 @@ async function _restoreTokenPm(td, amount) {
     const max = _numOr(n?.pmMax, _numOr(n?.pm, 0));
     const cur = Math.max(0, _numOr(n?.pmCurrent, max));
     const nv = Math.min(max, cur + add);
-    if (add > 0) await updateDoc(_npcRef(td.npcId), { pmCurrent: nv }).catch(() => {});
+    if (nv !== cur) {
+      n.pmCurrent = nv;
+      _patchEntityTokenShapes('npcId', td.npcId);
+      const write = updateDoc(_npcRef(td.npcId), { pmCurrent: nv }).catch(error => {
+        n.pmCurrent = cur;
+        _patchEntityTokenShapes('npcId', td.npcId);
+        console.error('[vtt] régénération PM PNJ', error);
+      });
+      if (deferWrite) return { applied: Math.max(0, nv - cur), cur: nv, max, write };
+      await write;
+    }
     return { applied: Math.max(0, nv - cur), cur: nv, max };
   }
   const max = _numOr(VS.bestiary[td?.beastId]?.pmMax, 0);
   if (max <= 0) return { applied: 0, cur: 0, max: 0 };
   const cur = Math.max(0, td?.pm != null ? td.pm : max);
   const nv = Math.min(max, cur + add);
-  if (add > 0) await updateDoc(_tokRef(td.id), { pm: nv, pmCombat: nv }).catch(() => {});
+  if (nv !== cur) {
+    const previousCombat = td.pmCombat;
+    Object.assign(td, { pm: nv, pmCombat: nv });
+    _patchShape(td.id);
+    const write = updateDoc(_tokRef(td.id), { pm: nv, pmCombat: nv }).catch(error => {
+      Object.assign(td, { pm: cur, pmCombat: previousCombat });
+      _patchShape(td.id);
+      console.error('[vtt] régénération PM créature', error);
+    });
+    if (deferWrite) return { applied: Math.max(0, nv - cur), cur: nv, max, write };
+    await write;
+  }
   return { applied: Math.max(0, nv - cur), cur: nv, max };
 }
 
@@ -792,7 +873,7 @@ export async function _vttTriggerConcentrationSave(td, damageAmount, nextHp = nu
       createdAt: serverTimestamp(),
     };
     if (opts.deferLog) deferredLogs.push(payload);
-    else await addDoc(_logCol(), payload).catch(() => {});
+    else await _publishCombatLog(payload);
   };
   for (const cb of buffs) {
     const dd = cb.concentrationDD;
@@ -1629,18 +1710,20 @@ function _buildShape(t) {
           moves.push({id, tokenData, patch:movePatch});
         }
         const batch=writeBatch(db);
-        moves.forEach(({id,patch})=>batch.update(_tokRef(id),patch));
+        moves.forEach(move=>{
+          move.previous=Object.fromEntries(Object.keys(move.patch).map(key=>[key,move.tokenData[key]]));
+          Object.assign(move.tokenData,move.patch);
+          batch.update(_tokRef(move.id),move.patch);
+        });
         VS.layers.token.batchDraw();
+        const selectedMove=moves.find(move=>move.id===VS.selected);
+        if (selectedMove) _refreshRanges(selectedMove.id, selectedMove.tokenData);
+        fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
         try {
           await batch.commit();
-          moves.forEach(({id,tokenData,patch})=>{
-            Object.assign(tokenData, patch);
-          });
-          const selectedMove=moves.find(move=>move.id===VS.selected);
-          if (selectedMove) _refreshRanges(selectedMove.id, selectedMove.tokenData);
-          fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
         } catch (error) {
           console.error('[vtt] déplacement groupé', error);
+          moves.forEach(move=>Object.assign(move.tokenData,move.previous));
           restoreGroup();
           showNotif('Erreur déplacement groupe', 'error');
         }
@@ -1681,25 +1764,22 @@ function _buildShape(t) {
         patch.movedCells=(cur?.movedCells||0)+d;
         patch.movedThisTurn=true;
       }
+      const previous=moveCur
+        ? Object.fromEntries(Object.keys(patch).map(key=>[key,moveCur[key]]))
+        : null;
+      if (moveCur) Object.assign(moveCur,patch);
+      _refreshRanges(t.id, moveCur);
+      fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
       try {
         await updateDoc(_tokRef(t.id),patch);
       } catch (error) {
         console.error('[vtt] déplacement token', error);
+        if (moveCur && previous) Object.assign(moveCur,previous);
         g.position({x:(moveCur?.col??c)*CELL+sw*CELL/2,y:(moveCur?.row??r)*CELL+sh*CELL/2});
         VS.layers.token?.batchDraw();
         showNotif('Erreur déplacement', 'error');
         return;
       }
-      // Mise à jour optimiste + refresh des zones (déplacement et attaque)
-      const _entry=VS.tokens[t.id];
-      if (_entry?.data) {
-        _entry.data.col=c; _entry.data.row=r;
-        if (patch.movedCells!==undefined)   _entry.data.movedCells=patch.movedCells;
-        if (patch.movedThisTurn!==undefined) _entry.data.movedThisTurn=patch.movedThisTurn;
-        if (patch.moveOrigin!==undefined) _entry.data.moveOrigin=patch.moveOrigin;
-      }
-      _refreshRanges(t.id, _entry?.data);
-      fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
     });
   }
 
@@ -1855,6 +1935,21 @@ function _showAppliedHpDelta(token, beforeHp, afterHp, nextDisplayedHp = afterHp
   const displayed = Number(nextDisplayedHp);
   if (Number.isFinite(displayed)) VS.tokens[token.id]?.shape?.setAttr('displayHpSnapshot', displayed);
   _showTokenDelta(token, after - before, 'hp');
+}
+
+function _patchEntityTokenShapes(linkField, entityId) {
+  if (!entityId) return;
+  Object.values(VS.tokens || {}).forEach(entry => {
+    if (entry?.data?.[linkField] === entityId) _patchShape(entry.data.id);
+  });
+}
+
+export function _vttPatchTokenOptimistically(id, patch) {
+  const token = VS.tokens?.[id]?.data;
+  if (!token || !patch) return;
+  Object.assign(token, patch);
+  _patchShape(id);
+  if (VS.selected === id) _renderInspectorSoon();
 }
 
 // Répercute immédiatement les PV dans le cache vivant et sur la jauge Konva.
@@ -2655,23 +2750,29 @@ async function _moveTo(id, col, row) {
     patch.movedCells = (cur.movedCells || 0) + d;
     patch.movedThisTurn = true;
   }
+  const previous = Object.fromEntries(Object.keys(patch).map(key => [key, cur[key]]));
+  Object.assign(cur, patch);
+  const dims = _tokenDims(cur);
+  VS.tokens[id]?.shape?.position({
+    x: col * CELL + dims.w * CELL / 2,
+    y: row * CELL + dims.h * CELL / 2,
+  });
+  VS.layers.token?.batchDraw();
+  _refreshRanges(id, cur);
+  fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
   try {
     await updateDoc(_tokRef(id), patch);
   } catch (e) {
+    Object.assign(cur, previous);
+    VS.tokens[id]?.shape?.position({
+      x: cur.col * CELL + dims.w * CELL / 2,
+      y: cur.row * CELL + dims.h * CELL / 2,
+    });
+    VS.layers.token?.batchDraw();
+    _refreshRanges(id, cur);
     showNotif('Déplacement refusé', 'error');
     return false;
   }
-
-  // Mise à jour optimiste : ne pas attendre le snapshot Firestore pour rafraîchir les zones
-  const entry = VS.tokens[id];
-  if (entry?.data) {
-    entry.data.col = col;
-    entry.data.row = row;
-    if (patch.movedCells  !== undefined) entry.data.movedCells  = patch.movedCells;
-    if (patch.movedThisTurn !== undefined) entry.data.movedThisTurn = patch.movedThisTurn;
-    if (patch.moveOrigin !== undefined) entry.data.moveOrigin = patch.moveOrigin;
-  }
-  _refreshRanges(id, entry?.data);
   return true;
 }
 
@@ -2713,23 +2814,38 @@ async function _vttUndoMove(id) {
     movedThisTurn: !!origin.movedThisTurn,
   };
   patch.moveOrigin = deleteField();
+  const previous = {
+    col: token.col,
+    row: token.row,
+    movedCells: token.movedCells,
+    movedThisTurn: token.movedThisTurn,
+    moveOrigin: token.moveOrigin,
+  };
+  token.col = patch.col;
+  token.row = patch.row;
+  token.movedCells = patch.movedCells;
+  token.movedThisTurn = patch.movedThisTurn;
+  delete token.moveOrigin;
+  const dims = _tokenDims(token);
+  entry.shape?.to({
+    x: patch.col * CELL + dims.w * CELL / 2,
+    y: patch.row * CELL + dims.h * CELL / 2,
+    duration: .08,
+  });
+  VS.layers.token?.batchDraw();
+  _refreshRanges(id, token);
+  fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
   try {
     await updateDoc(_tokRef(id), patch);
-    token.col = patch.col;
-    token.row = patch.row;
-    token.movedCells = patch.movedCells;
-    token.movedThisTurn = patch.movedThisTurn;
-    delete token.moveOrigin;
-    const dims = _tokenDims(token);
-    entry.shape?.position({
-      x: patch.col * CELL + dims.w * CELL / 2,
-      y: patch.row * CELL + dims.h * CELL / 2,
-    });
-    VS.layers.token?.batchDraw();
-    _refreshRanges(id, token);
-    fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
     showNotif('Déplacement annulé : position et mouvement restaurés.', 'success');
   } catch (error) {
+    Object.assign(token, previous);
+    entry.shape?.to({
+      x: previous.col * CELL + dims.w * CELL / 2,
+      y: previous.row * CELL + dims.h * CELL / 2,
+      duration: .08,
+    });
+    VS.layers.token?.batchDraw();
     console.error('[vtt] undo move', error);
     showNotif('Impossible d’annuler le déplacement.', 'error');
   }
@@ -2791,17 +2907,7 @@ function _combatLogImage(value) {
 }
 
 async function _publishCombatLog(payload) {
-  const logRef = doc(_logCol());
-  _vttShowOptimisticCombatLog(logRef.id, payload);
-  try {
-    await setDoc(logRef, payload);
-    return true;
-  } catch (error) {
-    _vttDiscardOptimisticCombatLog(logRef.id);
-    console.error('[vtt] résultat absent du journal', error);
-    showNotif('L’action a été appliquée, mais son message de combat n’a pas pu être enregistré.', 'error');
-    return false;
-  }
+  return _vttPublishOptimisticLog(payload);
 }
 
 // [_maxDice / _maxEffectDisplay / _effectDisplay → vtt-spell-display.js (importés en haut)]
@@ -3301,9 +3407,25 @@ async function _vttApplyDeplacement(src, tgtData, mode, distance) {
     nc = tryC; nr = tryR; moved++;
   }
   if (moved > 0) {
+    const previous = { col: tgtData.col, row: tgtData.row };
+    Object.assign(tgtData, { col: nc, row: nr });
+    const dims = _tokenDims(tgtData);
+    VS.tokens[tgtData.id]?.shape?.to({
+      x: nc * CELL + dims.w * CELL / 2,
+      y: nr * CELL + dims.h * CELL / 2,
+      duration: .08,
+    });
+    VS.layers.token?.batchDraw();
+    fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
     try {
       await updateDoc(_tokRef(tgtData.id), { col: nc, row: nr });
     } catch (err) {
+      Object.assign(tgtData, previous);
+      VS.tokens[tgtData.id]?.shape?.to({
+        x: previous.col * CELL + dims.w * CELL / 2,
+        y: previous.row * CELL + dims.h * CELL / 2,
+        duration: .08,
+      });
       console.error('[VTT] Déplacement de sort refusé', err);
       showNotif('Déplacement refusé par Firestore', 'error');
       return 0;
@@ -3325,10 +3447,20 @@ async function _vttSpendSpellPm(src, opt) {
       showNotif(`⚠ PM insuffisants de l’invocation (${current}/${cost} requis)`, 'error');
       return false;
     }
-    await updateDoc(_tokRef(src.id), {
+    const patch = {
       pm: current - cost,
       pmCombat: Math.max(0, _numOr(src.pmCombat, current) - cost),
-    });
+    };
+    const previousCombat = src.pmCombat;
+    Object.assign(src, patch);
+    _patchShape(src.id);
+    try {
+      await updateDoc(_tokRef(src.id), patch);
+    } catch (error) {
+      Object.assign(src, { pm: current, pmCombat: previousCombat });
+      _patchShape(src.id);
+      throw error;
+    }
     return true;
   }
   const c = src.summonOwnerCharId ? VS.characters[src.summonOwnerCharId] : _characterForToken(src);
@@ -3911,7 +4043,15 @@ async function _vttApplyCasterConcentration(srcId, opt) {
     concentrationSpell: true,
     ..._vttConcentrationDurationFields(opt),
   };
-  await updateDoc(_tokRef(srcId), { conditions: [...existing, cond] }).catch(() => {});
+  const previous = src.conditions || [];
+  const conditions = [...existing, cond];
+  _vttPatchTokenOptimistically(srcId, { conditions });
+  // L'effet est déjà visible localement ; la confirmation Firestore ne doit pas
+  // retarder le résultat principal du sort ni son message dans le journal.
+  void updateDoc(_tokRef(srcId), { conditions }).catch(error => {
+    _vttPatchTokenOptimistically(srcId, { conditions: previous });
+    console.error('[vtt] concentration non appliquée', error);
+  });
 }
 
 export async function _vttBreakConcentrationEffects(casterId, cond) {
@@ -3989,7 +4129,12 @@ export async function _consumeLuckyReroll(tokenId, tokenData, currentD20, should
   const newBuffs = remaining > 0
     ? (tokenData.buffs || []).map(b => b === lucky ? { ...b, charges: remaining } : b)
     : (tokenData.buffs || []).filter(b => b !== lucky);
-  await updateDoc(_tokRef(tokenId), { buffs: newBuffs }).catch(() => {});
+  const previous = tokenData.buffs || [];
+  _vttPatchTokenOptimistically(tokenId, { buffs: newBuffs });
+  void updateDoc(_tokRef(tokenId), { buffs: newBuffs }).catch(error => {
+    _vttPatchTokenOptimistically(tokenId, { buffs: previous });
+    console.error('[vtt] relance chanceuse non consommée', error);
+  });
   return { d20: finalD20, reroll, label: lucky.sortLabel || 'Coup de chance' };
 }
 
@@ -6836,7 +6981,7 @@ async function _zoneValidate() {
     if (srcD) await _vttStartSpellCooldown(srcD, opt);
     await _vttApplyCasterConcentration(srcId, opt);
     const _statsDelta = srcD ? _applyCastStatsDelta(srcD, opt) : null;
-    await addDoc(_logCol(), {
+    await _publishCombatLog({
       type: 'cast', undo: _snap,
       ...(_hasStatsDelta(_statsDelta) ? { statsDelta: _statsDelta } : {}),
       ..._vttLogSourceFields(srcD),
@@ -6888,7 +7033,7 @@ async function _zoneValidate() {
     }
     await _vttApplyCasterConcentration(srcId, opt);
     const _statsDelta = srcD ? _applyCastStatsDelta(srcD, opt) : null;
-    await addDoc(_logCol(), {
+    await _publishCombatLog({
       type: 'cast', undo: _snap,
       ...(_hasStatsDelta(_statsDelta) ? { statsDelta: _statsDelta } : {}),
       ..._vttLogSourceFields(srcD),
@@ -6938,7 +7083,7 @@ async function _zoneValidate() {
     const _snap = _captureUndoSnapshot(srcId, []);
     _snap.createdTokens = [..._summonSpawnIds];
     const _statsDelta = !targets.length && _srcD ? _applyCastStatsDelta(_srcD, opt) : null;
-    await addDoc(_logCol(), {
+    await _publishCombatLog({
       type: 'cast', undo: _snap,
       ...(_hasStatsDelta(_statsDelta) ? { statsDelta: _statsDelta } : {}),
       ..._vttLogSourceFields(_srcD),
@@ -7213,10 +7358,17 @@ async function _vttRollAttack() {
     if (_pmPayerToken) {
       const curPm = Math.max(0, _numOr(_pmPayerToken.pm, _numOr(_pmPayerToken.pmMax, 0)));
       const curCmb = Math.max(0, _numOr(_pmPayerToken.pmCombat, curPm));
-      await updateDoc(_tokRef(srcId), {
+      const patch = {
         pm: Math.max(0, curPm - opt.pmCost),
         pmCombat: Math.max(0, curCmb - opt.pmCost),
-      }).catch(() => {});
+      };
+      Object.assign(_pmPayerToken, patch);
+      _patchShape(srcId);
+      await updateDoc(_tokRef(srcId), patch).catch(error => {
+        Object.assign(_pmPayerToken, { pm: curPm, pmCombat: curCmb });
+        _patchShape(srcId);
+        throw error;
+      });
       return;
     }
     if (_pmPayerCharId) {
@@ -7229,7 +7381,14 @@ async function _vttRollAttack() {
       if (n) {
         const maxPm = _numOr(n.pmMax, _numOr(n.pm, 0));
         const curPm = _numOr(n.pmCurrent, maxPm);
-        await updateDoc(_npcRef(_pmPayerNpcId), { pmCurrent: Math.max(0, curPm - opt.pmCost) }).catch(() => {});
+        const nextPm = Math.max(0, curPm - opt.pmCost);
+        n.pmCurrent = nextPm;
+        _patchEntityTokenShapes('npcId', _pmPayerNpcId);
+        await updateDoc(_npcRef(_pmPayerNpcId), { pmCurrent: nextPm }).catch(error => {
+          n.pmCurrent = curPm;
+          _patchEntityTokenShapes('npcId', _pmPayerNpcId);
+          throw error;
+        });
       }
       return;
     }
@@ -7239,10 +7398,17 @@ async function _vttRollAttack() {
     if (src.beastId && _beastPmMax > 0) {
       const curPm  = src.pm != null ? src.pm : _beastPmMax;
       const curCmb = src.pmCombat != null ? src.pmCombat : _beastPmMax;
-      await updateDoc(_tokRef(srcId), {
+      const patch = {
         pm: Math.max(0, curPm - opt.pmCost),
         pmCombat: Math.max(0, curCmb - opt.pmCost),
-      }).catch(() => {});
+      };
+      Object.assign(src, patch);
+      _patchShape(srcId);
+      await updateDoc(_tokRef(srcId), patch).catch(error => {
+        Object.assign(src, { pm: curPm, pmCombat: curCmb });
+        _patchShape(srcId);
+        throw error;
+      });
     }
   };
   // Consomme 1 exemplaire de l'objet si l'option vient d'un item-action marqué `consommable`.
@@ -7265,9 +7431,15 @@ async function _vttRollAttack() {
       note: opt.nom || opt.label || '',
     }));
     inv.splice(idx, 1);
-    await updateDoc(_chrRef(_srcChar.id), { inventaire: inv, ...historyPatch }).catch(() => {});
+    const previousInventory = c.inventaire;
+    const previousHistory = c.inventoryHistory;
     c.inventaire = inv;
     c.inventoryHistory = historyPatch.inventoryHistory;
+    await updateDoc(_chrRef(_srcChar.id), { inventaire: inv, ...historyPatch }).catch(error => {
+      c.inventaire = previousInventory;
+      c.inventoryHistory = previousHistory;
+      throw error;
+    });
     showNotif(`🧪 ${meta.itemNom || 'Objet'} consommé`, 'info');
   };
   const _markActionUsed = async () => {
@@ -7281,9 +7453,15 @@ async function _vttRollAttack() {
     const spellCooldowns = _vttCooldownPatch(src, opt);
     if (spellCooldowns) {
       patch.spellCooldowns = spellCooldowns;
-      src.spellCooldowns = spellCooldowns;
     }
-    await updateDoc(_tokRef(src.id), patch).catch(()=>{});
+    const previous = Object.fromEntries(Object.keys(patch).map(key => [key, src[key]]));
+    Object.assign(src, patch);
+    if (VS.selected === src.id) _renderInspectorSoon();
+    await updateDoc(_tokRef(src.id), patch).catch(error => {
+      Object.assign(src, previous);
+      if (VS.selected === src.id) _renderInspectorSoon();
+      throw error;
+    });
   };
   const _cleanup = () => {
     _setAttackRing(srcId, false);
@@ -7373,7 +7551,13 @@ async function _vttRollAttack() {
           expiresAtRound: baseRound + graceTurns - 1,
         };
         const existing = (src.buffs || []).filter(b => !(b.type === 'suspended_spell' && b.sortLabel === opt.label));
-        await updateDoc(_tokRef(srcId), { buffs: [...existing, suspBuff] }).catch(() => {});
+        const previous = src.buffs || [];
+        const buffs = [...existing, suspBuff];
+        _vttPatchTokenOptimistically(srcId, { buffs });
+        void updateDoc(_tokRef(srcId), { buffs }).catch(error => {
+          _vttPatchTokenOptimistically(srcId, { buffs: previous });
+          console.error('[vtt] sort suspendu non appliqué', error);
+        });
         showNotif(`🔮 ${opt.label} suspendu — version gratuite dispo dans tes sorts (${graceTurns} tours)`, 'success');
         _cleanup();
         return;
@@ -7381,14 +7565,17 @@ async function _vttRollAttack() {
       // Version gratuite : retire le buff (consommé), puis l'effet onHit s'exécute
       // normalement (coût déjà 0). Pas de return → on continue le flux d'attaque.
       const remaining = (src.buffs || []).filter(b => !_suspMatch(b));
-      await updateDoc(_tokRef(srcId), { buffs: remaining }).catch(() => {});
+      const previous = src.buffs || [];
+      _vttPatchTokenOptimistically(srcId, { buffs: remaining });
+      void updateDoc(_tokRef(srcId), { buffs: remaining }).catch(error => {
+        _vttPatchTokenOptimistically(srcId, { buffs: previous });
+        console.error('[vtt] sort suspendu non consommé', error);
+      });
     }
 
     // ── Combo Coup de chance : applique le buff lucky_reroll à l'allié ciblé ──
     if (opt.mods?.coupChance) {
-      await _deductPm();
-      await _consumeItem();
-      await _markActionUsed();
+      const sourceWrites = Promise.all([_deductPm(), _consumeItem(), _markActionUsed()]);
       const sharedLuck = _buffShared(opt, srcId);
       const luckBuff = {
         ...sharedLuck,
@@ -7399,21 +7586,31 @@ async function _vttRollAttack() {
         expiresAtRound: null,
       };
       const appliedTargets = [];
+      const buffWrites = [];
       for (const tid of targetIds) {
         const td = VS.tokens[tid]?.data;
         if (!td || td.type === 'enemy') continue;
         const existing = (td.buffs || []).filter(b => !(b.type === 'lucky_reroll' && b.sortLabel === opt.label));
-        await updateDoc(_tokRef(tid), { buffs: [...existing, luckBuff] }).catch(() => {});
+        const previous = td.buffs || [];
+        const buffs = [...existing, luckBuff];
+        td.buffs = buffs;
+        _patchShape(tid);
+        buffWrites.push(updateDoc(_tokRef(tid), { buffs }).catch(error => {
+          td.buffs = previous;
+          _patchShape(tid);
+          console.error('[vtt] Coup de chance non appliqué', error);
+        }));
         appliedTargets.push(_live(td).displayName ?? td.name);
       }
       if (!appliedTargets.length) {
+        await sourceWrites;
         showNotif('Choisis un allié pour Coup de chance.', 'error');
         _cleanup();
         return;
       }
       await _vttApplyCasterConcentration(srcId, opt);
       const targetsLabel = appliedTargets.join(', ');
-      await addDoc(_logCol(), {
+      const logWrite = _publishCombatLog({
         type: 'cast',
         undo: _undoSnap,
         ..._vttLogSourceFields(src),
@@ -7426,6 +7623,7 @@ async function _vttRollAttack() {
         castEffect: '🍀 1 relance automatique sur le prochain jet échoué',
         createdAt: serverTimestamp(),
       }).catch(()=>{});
+      await Promise.all([sourceWrites, ...buffWrites, logWrite]);
       showNotif(`🍀 ${opt.label} → ${targetsLabel} — prochaine relance automatique prête`, 'success');
       _cleanup();
       return;
@@ -7458,7 +7656,13 @@ async function _vttRollAttack() {
         note:        arm?.note || '',
       };
       const existing = (src.buffs || []).filter(b => !(b.type === 'weapon_replace' && b.sortLabel === opt.label));
-      await updateDoc(_tokRef(srcId), { buffs: [...existing, wrBuff] }).catch(() => {});
+      const previous = src.buffs || [];
+      const buffs = [...existing, wrBuff];
+      _vttPatchTokenOptimistically(srcId, { buffs });
+      void updateDoc(_tokRef(srcId), { buffs }).catch(error => {
+        _vttPatchTokenOptimistically(srcId, { buffs: previous });
+        console.error('[vtt] arme invoquée non appliquée', error);
+      });
       await _vttApplyCasterConcentration(srcId, opt);
       showNotif(`⚔️ ${wrBuff.weaponName} équipée (${armDice})`, 'success');
     }
@@ -7487,12 +7691,10 @@ async function _vttRollAttack() {
 
       if (_enchD20 === 1) {
         // Échec critique : le sort ne se lance pas, mais le mana est perdu.
-        await _deductPm();
-        await _consumeItem();
-        await _markActionUsed();
+        const sourceWrites = Promise.all([_deductPm(), _consumeItem(), _markActionUsed()]);
         const ecTgt = targetIds.map(id => { const td = VS.tokens[id]?.data; return td ? (_live(td).displayName ?? td.name) : null; })
           .filter(Boolean).join(', ') || (lT?.displayName ?? tgt?.name ?? '');
-        await addDoc(_logCol(), {
+        const logWrite = _publishCombatLog({
           type: 'cast', undo: _undoSnap,
           ..._vttLogSourceFields(src),
           ..._vttLogSingleTargetFields(targetIds),
@@ -7505,6 +7707,7 @@ async function _vttRollAttack() {
           castEffect: `💔 Échec critique (d20 = 1) — sort raté${opt.pmCost>0?`, ${opt.pmCost} ${_RES_LABEL[_costRes]||'PM'} perdus`:''}`,
           createdAt: serverTimestamp(),
         }).catch(()=>{});
+        await Promise.all([sourceWrites, logWrite]);
         showNotif(`💔 Échec critique ! ${opt.label} raté${opt.pmCost>0?` — ${opt.pmCost} ${_RES_LABEL[_costRes]||'PM'} perdus`:''}`, 'error');
         _cleanup();
         return;
@@ -7538,15 +7741,14 @@ async function _vttRollAttack() {
         _cleanup();
         return;
       }
-      await _deductPm();
-      await _consumeItem();
-      await _markActionUsed();
+      const sourceWrites = Promise.all([_deductPm(), _consumeItem(), _markActionUsed()]);
       const rCa = _handleMultiCast();
       const _utilStatsDelta = _preAppliedCastStatsDelta || _applyCastStatsDelta(src, opt);
 
 
       // Appliquer le buff CA sur chaque cible
       const buffResults = [];
+      const effectWrites = [];
       if (opt.isCaSort) {
         const round = VS.session?.combat?.round ?? 0;
         const dur   = opt.mods?.concentration ? 10 : (opt.sortDuree ?? null);
@@ -7571,7 +7773,15 @@ async function _vttRollAttack() {
           const curTgtData = VS.tokens[curTgtId]?.data; if (!curTgtData) continue;
           // Filtre les buffs existants du même sort (anti-stack)
           const existingBuffs = (curTgtData.buffs || []).filter(b => !(b.type === buffType && b.sortLabel === opt.label));
-          await updateDoc(_tokRef(curTgtId), { buffs: [...existingBuffs, newBuff] }).catch(()=>{});
+          const previous = curTgtData.buffs || [];
+          const buffs = [...existingBuffs, newBuff];
+          curTgtData.buffs = buffs;
+          _patchShape(curTgtId);
+          effectWrites.push(updateDoc(_tokRef(curTgtId), { buffs }).catch(error => {
+            curTgtData.buffs = previous;
+            _patchShape(curTgtId);
+            console.error('[vtt] bonus de CA non appliqué', error);
+          }));
           buffResults.push(_live(curTgtData).displayName ?? curTgtData.name);
         }
         if (buffResults.length) await _vttApplyCasterConcentration(srcId, opt);
@@ -7618,7 +7828,7 @@ async function _vttRollAttack() {
       // Évite le doublon trompeur "Brulure activé!" qui suggère un succès
       // alors que le JS pourrait avoir réussi.
       if (!opt.isAffliction) {
-        await addDoc(_logCol(), {
+        await Promise.all([sourceWrites, ...effectWrites, _publishCombatLog({
           type: 'cast',
           undo: _undoSnap,
           ...(_hasStatsDelta(_utilStatsDelta) ? { statsDelta: _utilStatsDelta } : {}),
@@ -7631,7 +7841,9 @@ async function _vttRollAttack() {
           optLabel: opt.label, pmCost: opt.pmCost,
           castEffect,
           createdAt: serverTimestamp(),
-        }).catch(()=>{});
+        }).catch(()=>{})]);
+      } else {
+        await Promise.all([sourceWrites, ...effectWrites]);
       }
 
       // Le proc immédiat de Régénération doit apparaître après l'annonce du sort
@@ -7712,9 +7924,7 @@ async function _vttRollAttack() {
       const healFixed    = _optionFixedBonus(opt) + bonusDmg;
 
       // PM toujours consommé (même sur échec critique) — le mana brûle quand on tente le sort
-      await _deductPm();
-      await _consumeItem();
-      await _markActionUsed();
+      const healSourceWrites = Promise.all([_deductPm(), _consumeItem(), _markActionUsed()]);
 
       // ── Échec critique : sort raté, aucun soin appliqué ─────────────
       if (hIsFumble) {
@@ -7726,7 +7936,7 @@ async function _vttRollAttack() {
           accCastDelta(_healDelta, { casterId: _healActor.id, casterName: _healActor.name, spellName: opt.label || 'Soin', pm: ((opt.costRes||'pm')==='pm' ? (opt.pmCost||0) : 0), heal: 0 });
           applyStatsDelta(_healDelta, +1);
         }
-        await addDoc(_logCol(), {
+        const logWrite = _publishCombatLog({
           type: 'attack', isHeal: true, isFumble: true, advMode: hMode, advAuto: hMode !== mode,
           advReasons: hMode !== mode ? hCondMods.reasons : null,
           undo: _undoSnap,
@@ -7748,6 +7958,7 @@ async function _vttRollAttack() {
           dmgFormula: opt.dice, pmCost: opt.pmCost || 0,
           createdAt: serverTimestamp(),
         }).catch(()=>{});
+        await Promise.all([healSourceWrites, logWrite]);
         showNotif(`💔 Échec critique (${hD20}) — sort raté, ${opt.pmCost||0} ${_RES_LABEL[_costRes]||'PM'} consommés`, 'error');
         return;
       }
@@ -7796,38 +8007,41 @@ async function _vttRollAttack() {
       }
 
       // Appliquer à chaque cible
-      const healResults = [];
-      let _healActual = 0;   // soin RÉEL cumulé (hors surplus au-delà du max) pour les stats
-      for (const curTgtId of targetIds) {
-        const curTgtData = VS.tokens[curTgtId]?.data; if (!curTgtData) continue;
+      const healResults = (await Promise.all(targetIds.map(async curTgtId => {
+        const curTgtData = VS.tokens[curTgtId]?.data; if (!curTgtData) return null;
         const lCur = _live(curTgtData);
         if (opt.isMana) {
           // Régénération de PM : même montant, appliqué sur la réserve de PM.
-          const { applied, cur, max } = await _restoreTokenPm(curTgtData, healTotal);
-          _healActual += applied;
-          healResults.push({
+          const { applied, cur, max, write: _write } = await _restoreTokenPm(curTgtData, healTotal, { deferWrite: true });
+          return {
             name: lCur.displayName ?? curTgtData.name,
+            applied,
+            _write,
             isMana: true, newPm: cur, pmMax: max,
             characterId: curTgtData.characterId || null,
             npcId: curTgtData.npcId || null,
             beastId: curTgtData.beastId || null,
             targetImage: lCur.displayImage || null,
-          });
-          continue;
+          };
         }
         const curHp = lCur.displayHp ?? 20, hpMax = lCur.displayHpMax ?? 20;
         const newHp = Math.min(hpMax, curHp + healTotal);
-        _healActual += Math.max(0, newHp - curHp);
-        await _setHp(curTgtData, newHp);
-        healResults.push({
+        const _write = _setHp(curTgtData, newHp);
+        return {
           name: lCur.displayName ?? curTgtData.name,
+          applied: Math.max(0, newHp - curHp),
+          _write,
           newHp, hpMax,
           characterId: curTgtData.characterId || null,
           npcId: curTgtData.npcId || null,
           beastId: curTgtData.beastId || null,
           targetImage: lCur.displayImage || null,
-        });
-      }
+        };
+      }))).filter(Boolean);
+      const healTargetWrites = healResults.map(result => result._write).filter(Boolean);
+      const cleanHealResults = healResults.map(({ _write, ...result }) => result);
+      // soin RÉEL cumulé (hors surplus au-delà du max) pour les stats
+      const _healActual = cleanHealResults.reduce((total, result) => total + (result.applied || 0), 0);
       // Statistiques (soin) : 1 sort lancé + PM + soin réel, réversible à l'annulation.
       const _healDelta = { chars: {} };
       const _healActor = _statsActor(src);
@@ -7836,7 +8050,7 @@ async function _vttRollAttack() {
         applyStatsDelta(_healDelta, +1);
       }
 
-      const isMultiHeal = healResults.length > 1;
+      const isMultiHeal = cleanHealResults.length > 1;
       const _healIco = opt.isMana ? '💙' : '💚';
       const _healUnit = opt.isMana ? 'PM régénérés' : 'PV soignés';
       const critTag = hIsCrit ? ' 💥 CRITIQUE' : '';
@@ -7853,9 +8067,10 @@ async function _vttRollAttack() {
         extraHitRolls: hExtraHitRolls.length ? hExtraHitRolls : null,
         hitTotal: hHitTotal, healDD: HEAL_DD,
       };
+      let healLogWrite = Promise.resolve();
 
       if (isMultiHeal) {
-        await addDoc(_logCol(), {
+        healLogWrite = _publishCombatLog({
           type: 'attack-multi', isHeal: true, isMana: !!opt.isMana,
           undo: _undoSnap,
           statsDelta: _healDelta,
@@ -7877,14 +8092,14 @@ async function _vttRollAttack() {
           ..._diceLogFields('dmg', healRollsDetail),
           ..._diceLogFields('crit', healCritRollsDetail),
           critNormalMax: healCritNormalMax || 0,
-          targets: healResults.map(r => ({ ...r, hit: true, halfDmg: false, dmgTotal: healTotal, targetCA: HEAL_DD })),
+          targets: cleanHealResults.map(r => ({ ...r, hit: true, halfDmg: false, dmgTotal: healTotal, targetCA: HEAL_DD })),
           createdAt: serverTimestamp(),
         }).catch(()=>{});
-        showNotif(`${_healIco}${critTag}${luckTag} ${healTotal} ${_healUnit} → ${healResults.map(r=>r.name).join(', ')}`, 'success');
+        showNotif(`${_healIco}${critTag}${luckTag} ${healTotal} ${_healUnit} → ${cleanHealResults.map(r=>r.name).join(', ')}`, 'success');
       } else {
-        const r = healResults[0];
+        const r = cleanHealResults[0];
         if (r) {
-          await addDoc(_logCol(), {
+          healLogWrite = _publishCombatLog({
             type:'attack', isHeal:true, isMana: !!opt.isMana,
             undo: _undoSnap,
             statsDelta: _healDelta,
@@ -7918,6 +8133,7 @@ async function _vttRollAttack() {
           showNotif(`${_healIco}${critTag}${luckTag} ${healTotal} ${_healUnit} → ${r.name}`, 'success');
         }
       }
+      await Promise.all([healSourceWrites, ...healTargetWrites, healLogWrite]);
       return;
     }
 
@@ -8243,8 +8459,6 @@ async function _vttRollAttack() {
           }
           // Borne haute = hpMax pour qu'une absorption ne soigne pas au-delà du max.
           newHp = Math.max(0, Math.min(hpMax, curHp - dmgTotal));
-          _showAppliedHpDelta(curTgtData, curHp, newHp);
-          _patchHpOptimistically(curTgtData, newHp);
           targetWrite = _setHp(curTgtData, newHp);
         }
       }
@@ -8553,9 +8767,7 @@ async function _vttRollAttack() {
       });
     }
 
-    for (const payload of concentrationLogs) {
-      await addDoc(_logCol(), payload).catch(() => {});
-    }
+    await Promise.all(concentrationLogs.map(payload => _publishCombatLog(payload)));
 
     const [sourceWriteError, targetWriteError] = await Promise.all([sourceWritesDone, targetWritesDone]);
     if (sourceWriteError) throw sourceWriteError;
@@ -9596,7 +9808,15 @@ async function _vttCourir(id) {
   if (!tok || !VS.session?.combat?.active) return;
   if (tok.bonusMvt > 0) { showNotif('Course déjà utilisée ce tour', 'error'); return; }
   const bonus = _live(tok).displayMovement ?? 6;
-  await updateDoc(_tokRef(id), { bonusMvt: bonus }).catch(() => showNotif('Erreur', 'error'));
+  _vttPatchTokenOptimistically(id, { bonusMvt: bonus });
+  try {
+    await updateDoc(_tokRef(id), { bonusMvt: bonus });
+  } catch (error) {
+    _vttPatchTokenOptimistically(id, { bonusMvt: 0 });
+    console.error('[vtt] course non appliquée', error);
+    showNotif('Erreur', 'error');
+    return;
+  }
   showNotif(`🏃 Course ! +${bonus} cases de mouvement`, 'success');
 }
 
@@ -10521,12 +10741,26 @@ function _vttSelectFromTray(id) {
 }
 async function _vttToggleVisible(id) {
   const t=VS.tokens[id]?.data; if (!t) return;
-  await updateDoc(_tokRef(id),{visible:!t.visible}).catch(()=>{});
+  const previous = t.visible !== false;
+  _vttPatchTokenOptimistically(id, { visible: !previous });
+  await updateDoc(_tokRef(id),{visible:!previous}).catch(error => {
+    _vttPatchTokenOptimistically(id, { visible: previous });
+    console.error('[vtt] visibilité non modifiée', error);
+  });
 }
 async function _vttClearBuffs(id) {
   if (!STATE.isAdmin) return;
   const t=VS.tokens[id]?.data; if (!t) return;
-  await updateDoc(_tokRef(id),{buffs:[]}).catch(()=>{});
+  const previous = t.buffs || [];
+  _vttPatchTokenOptimistically(id, { buffs: [] });
+  try {
+    await updateDoc(_tokRef(id),{buffs:[]});
+  } catch (error) {
+    _vttPatchTokenOptimistically(id, { buffs: previous });
+    console.error('[vtt] effets non supprimés', error);
+    showNotif('Impossible de supprimer les effets.', 'error');
+    return;
+  }
   showNotif('Buffs supprimés.','success');
 }
 
@@ -10821,8 +11055,13 @@ async function _vttConfirmAddBuff(tokenId) {
   if (type === 'dmg_bonus')                       newBuff.slot = 'arme';
   if (type === 'move_bonus' || type === 'move_debuff') newBuff.slot = 'pieds';
   const existing = (t.buffs || []);
-  await updateDoc(_tokRef(tokenId), { buffs: [...existing, newBuff] }).catch(() => {});
+  const buffs = [...existing, newBuff];
+  _vttPatchTokenOptimistically(tokenId, { buffs });
   closeModalDirect();
+  await updateDoc(_tokRef(tokenId), { buffs }).catch(error => {
+    _vttPatchTokenOptimistically(tokenId, { buffs: existing });
+    console.error('[vtt] effet manuel non appliqué', error);
+  });
   showNotif(`${newBuff.icon} ${label} appliqué`, 'success');
 }
 
@@ -10862,8 +11101,27 @@ async function _vttSetPm(tokenId,pm) {
     return;
   }
   const v=Math.max(0,pm);
-  if (t.characterId) await updateDoc(_chrRef(t.characterId), { ..._charPmPatch(v), vttControlTokenId:tokenId }).catch(()=>{});
-  else if (t.npcId)  await updateDoc(_npcRef(t.npcId),{pmCurrent:v}).catch(()=>{});
+  if (t.characterId) {
+    const c = VS.characters[t.characterId]; if (!c) return;
+    const previous = _charPmCur(c);
+    Object.assign(c, _charPmPatch(v));
+    _patchEntityTokenShapes('characterId', t.characterId);
+    await updateDoc(_chrRef(t.characterId), { ..._charPmPatch(v), vttControlTokenId:tokenId }).catch(error => {
+      Object.assign(c, _charPmPatch(previous));
+      _patchEntityTokenShapes('characterId', t.characterId);
+      console.error('[vtt] PM personnage non modifiés', error);
+    });
+  } else if (t.npcId) {
+    const n = VS.npcs[t.npcId]; if (!n) return;
+    const previous = n.pmCurrent;
+    n.pmCurrent = v;
+    _patchEntityTokenShapes('npcId', t.npcId);
+    await updateDoc(_npcRef(t.npcId),{pmCurrent:v}).catch(error => {
+      n.pmCurrent = previous;
+      _patchEntityTokenShapes('npcId', t.npcId);
+      console.error('[vtt] PM PNJ non modifiés', error);
+    });
+  }
 }
 
 async function _vttSwitchCharacterBuild(charId, buildId) {
@@ -10912,7 +11170,8 @@ async function _vttTokenBonus(tokenId, key, delta) {
   if (!_canControlToken(t)) return;
   const cfg = _MS_BONUS_BUFF[key]; if (!cfg) return;
   const d = parseInt(delta) || 0;
-  const buffs = (t.buffs || []).map(b => ({ ...b }));
+  const previous = t.buffs || [];
+  const buffs = previous.map(b => ({ ...b }));
   const idx = buffs.findIndex(b => b && b.type === cfg.type && b.manual);
   const cur = idx >= 0 ? (parseInt(buffs[idx].bonus) || 0) : 0;
   const next = Math.max(-50, Math.min(50, cur + d));
@@ -10923,18 +11182,25 @@ async function _vttTokenBonus(tokenId, key, delta) {
     buffs.push({ type: cfg.type, bonus: next, manual: true, icon: cfg.icon, label: 'Bonus du tour', expiresAtRound: null });
   }
   if (VS.tokens[tokenId]) VS.tokens[tokenId].data = { ...t, buffs }; // optimiste
-  await updateDoc(_tokRef(tokenId), { buffs }).catch(() => {});
   _renderInspector(VS.tokens[tokenId]?.data || t);
   _patchShape(tokenId);
+  await updateDoc(_tokRef(tokenId), { buffs }).catch(error => {
+    _vttPatchTokenOptimistically(tokenId, { buffs: previous });
+    console.error('[vtt] bonus temporaire non modifié', error);
+  });
 }
 async function _vttTokenResetBonus(tokenId) {
   const t = VS.tokens[tokenId]?.data; if (!t) return;
   if (!_canControlToken(t)) return;
-  const buffs = (t.buffs || []).filter(b => !(b && b.manual));
+  const previous = t.buffs || [];
+  const buffs = previous.filter(b => !(b && b.manual));
   if (VS.tokens[tokenId]) VS.tokens[tokenId].data = { ...t, buffs };
-  await updateDoc(_tokRef(tokenId), { buffs }).catch(() => {});
   _renderInspector(VS.tokens[tokenId]?.data || t);
   _patchShape(tokenId);
+  await updateDoc(_tokRef(tokenId), { buffs }).catch(error => {
+    _vttPatchTokenOptimistically(tokenId, { buffs: previous });
+    console.error('[vtt] bonus temporaires non réinitialisés', error);
+  });
 }
 
 async function _vttMsSetXp(charId, uid, xp) {
