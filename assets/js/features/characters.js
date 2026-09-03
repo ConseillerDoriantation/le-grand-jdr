@@ -7,6 +7,7 @@ import { updateInCol } from '../data/firestore.js';
 import { _esc, _norm, loadingHtml } from '../shared/html.js';
 import { charSession } from '../shared/char-session.js';
 import { characterPortraitContent } from '../shared/portraits.js';
+import { avatarSrcOf } from '../shared/avatar.js';
 import {
   applyActiveBuild, buildProjectionPatch, createBuild, deleteBuild,
   getActiveBuild, normalizeCharacterBuilds, renameBuild, saveBuildPatch, switchBuild,
@@ -257,9 +258,9 @@ function _weaponForSlot(c, slot = getPrimaryWeaponSlotId()) {
   return slot === getPrimaryWeaponSlotId() && !raw.nom ? getMainWeapon(c) : raw;
 }
 
-function openCharCalculation(btn) {
+function _computeCharCalculation(btn) {
   const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
-  if (!c) return;
+  if (!c) return null;
 
   const type = btn.dataset.calc;
   const level = c.niveau || 1;
@@ -336,7 +337,7 @@ function openCharCalculation(btn) {
     const fallback = item.statAttaque === 'dexterite'
       ? 'dexterite'
       : item.statAttaque === 'intelligence' ? 'intelligence' : 'force';
-    if (!item?.nom) return;
+    if (!item?.nom) return null;
 
     if (type === 'weapon-touch') {
       const parts = getWeaponToucherParts(c, item, fallback);
@@ -373,10 +374,36 @@ function openCharCalculation(btn) {
       note = 'Les sorts utilisant la portée de l’arme reprennent cette valeur, sauf réglage propre au sort.';
     }
   } else {
-    return;
+    return null;
   }
 
-  _showCharCalculationPopover(btn, { title, result, rows, note });
+  return { title, result, rows, note };
+}
+
+function openCharCalculation(btn) {
+  const data = _computeCharCalculation(btn);
+  if (data) _showCharCalculationPopover(btn, data);
+}
+
+// Dérivées inline : clic sur une tuile CA/Vit/Deck → détail déplié sous la grille
+// (un seul panneau ouvert ; re-clic referme). PV/PM gardent le popover ancré.
+function toggleCharDerivative(btn) {
+  const panel = document.getElementById('cs-brk-panel');
+  if (!panel) { openCharCalculation(btn); return; }
+  const key = btn.dataset.calc || '';
+  const isSame = panel.classList.contains('on') && panel.dataset.calc === key;
+  btn.closest('.cs-mini-grid')?.querySelectorAll('.cs-mini.on').forEach(b => b.classList.remove('on'));
+  if (isSame) { panel.classList.remove('on'); panel.dataset.calc = ''; panel.innerHTML = ''; return; }
+  const d = _computeCharCalculation(btn);
+  if (!d) { panel.classList.remove('on'); panel.dataset.calc = ''; panel.innerHTML = ''; return; }
+  btn.classList.add('on');
+  panel.dataset.calc = key;
+  panel.innerHTML = `
+    <div class="cs-brk-hd"><b>${_esc(d.title)}</b><i>Calcul</i></div>
+    <div class="cs-calc-rows">${d.rows}</div>
+    <div class="cs-brk-total"><span>Total</span><b>${_esc(String(d.result))}</b></div>
+    ${d.note ? `<p class="cs-brk-note">${_esc(d.note)}</p>` : ''}`;
+  panel.classList.add('on');
 }
 
 function registerCharBlurActions(map) { Object.assign(_charBlurActions, map); }
@@ -391,6 +418,7 @@ document.addEventListener('focusout', (event) => {
 // SÉLECTION
 // ══════════════════════════════════════════════
 function selectChar(id, el) {
+  _closeCharPicker();
   document.querySelectorAll('#char-pills .char-pill').forEach(p=>p.classList.toggle('active', p.dataset.charid === id));
   if (el) el.classList.add('active');
   const c = STATE.characters.find(x=>x.id===id);
@@ -493,27 +521,148 @@ function _applyAuraVars(c) {
 }
 
 // Pastilles de sélection de personnage (char-switch)
-function _buildCharSwitchHtml(activeCharId, canEdit) {
-  let switchable = getVisibleCharacters();
-  if (STATE.isAdmin && _charAdminFilter)
-    switchable = switchable.filter(_adminFilterMatches);
-  switchable = sortCharactersForDisplay(switchable);
+function _charPillHtml(ch, activeCharId) {
+  const col = _auraColor(ch.aura);
+  const titleSuffix = ch.isDefault ? ' · ★ Favori' : '';
+  return `<button class="char-pill${ch.id===activeCharId?' active':''}${ch.isDefault?' is-default':''}"
+    data-charid="${ch.id}" data-action="selectChar" data-id="${ch.id}"
+    style="--av-c:${col}" title="${_esc(ch.nom || 'Sans nom')} — Niv.${ch.niveau||1}${ch.classe?' · '+_esc(ch.classe):''}${titleSuffix}">
+    <span class="char-pill-av">${characterPortraitContent(ch)}${ch.isDefault?'<span class="char-pill-star" title="Personnage favori">★</span>':''}</span>
+    <span class="char-pill-name">${_esc(ch.nom || 'Sans nom')}</span>
+  </button>`;
+}
 
-  const pillsHtml = switchable.map(ch => {
-    const col = _auraColor(ch.aura);
-    const titleSuffix = ch.isDefault ? ' · ★ Favori' : '';
-    return `<button class="char-pill${ch.id===activeCharId?' active':''}${ch.isDefault?' is-default':''}"
-      data-charid="${ch.id}" data-action="selectChar" data-id="${ch.id}"
-      style="--av-c:${col}" title="${_esc(ch.nom || 'Sans nom')} — Niv.${ch.niveau||1}${ch.classe?' · '+_esc(ch.classe):''}${titleSuffix}">
-      <span class="char-pill-av">${characterPortraitContent(ch)}${ch.isDefault?'<span class="char-pill-star" title="Personnage favori">★</span>':''}</span>
-      <span class="char-pill-name">${_esc(ch.nom || 'Sans nom')}</span>
+// Comptes propriétaires (pour le filtre du sélecteur en vue MJ), avec le profil
+// du joueur (image + pseudo) et ses persos triés.
+function _charOwners(chars) {
+  const profiles = STATE.adventure?.memberProfiles || {};
+  const map = new Map();
+  chars.forEach(c => {
+    const key = _adminOwnerKey(c);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(c);
+  });
+  return [...map.entries()].map(([key, list]) => {
+    const uid = key.startsWith('uid:') ? key.slice(4) : '';
+    const profile = uid ? (profiles[uid] || {}) : {};
+    const sorted = sortCharactersForDisplay(list);
+    return {
+      key, profile, chars: sorted, count: sorted.length,
+      label: profile.pseudo || sorted[0]?.ownerPseudo || profile.email || (uid ? 'Compte lié' : 'Sans compte'),
+    };
+  }).sort((a, b) => a.label.localeCompare(b.label, 'fr'));
+}
+
+// Chips de filtre par compte : image de profil du joueur + 1-2 portraits de ses
+// persos + compteur. Cliquer filtre la liste ; « Tous » réinitialise.
+function _charPickAccountsHtml(owners, total) {
+  if (owners.length <= 1) return '';
+  const chips = owners.map(o => {
+    const previews = o.chars.slice(0, 2).map(ch =>
+      `<span class="cs-charpick-acct-char" title="${_esc(ch.nom || 'Personnage')}">${characterPortraitContent(ch, { fallbackTag: 'span' })}</span>`
+    ).join('');
+    return `<button type="button" class="cs-charpick-acct" data-acct="${_esc(o.key)}" data-action="charPickAccountChip" title="${_esc(o.label)} · ${o.count} perso${o.count>1?'s':''}">
+      <img class="cs-charpick-acct-av" src="${_esc(avatarSrcOf(o.profile))}" alt="" loading="lazy" decoding="async">
+      <span class="cs-charpick-acct-body"><b>${_esc(o.label)}</b><span class="cs-charpick-acct-chars">${previews}${o.count>2?`<span class="cs-charpick-acct-more">+${o.count-2}</span>`:''}</span></span>
     </button>`;
   }).join('');
-
-  return `<div class="char-switch">
-    ${pillsHtml}
-    ${canEdit ? `<button class="char-pill char-pill-new" data-action="createNewChar">➕ Nouveau</button>` : ''}
+  return `<div class="cs-charpick-accts">
+    <button type="button" class="cs-charpick-acct cs-charpick-acct-all active" data-acct="" data-action="charPickAccountChip" title="Tous les comptes">
+      <span class="cs-charpick-acct-body"><b>Tous</b><small>${total}</small></span>
+    </button>
+    ${chips}
   </div>`;
+}
+
+// Une ligne du menu du sélecteur (recherche/filtre par data-attributs).
+function _charPickRowHtml(ch, activeCharId) {
+  const owner = ch.ownerPseudo || (ch.uid ? '' : 'Sans compte');
+  const meta = `Niv.${ch.niveau||1}${ch.classe ? ' · ' + _esc(ch.classe) : ''}`;
+  return `<button type="button" role="option" class="cs-charpick-row${ch.id===activeCharId?' active':''}"
+    data-action="selectChar" data-id="${ch.id}" data-charid="${ch.id}"
+    data-name="${_esc((ch.nom || '').toLowerCase())}" data-owner="${_esc(_adminOwnerKey(ch))}"
+    aria-selected="${ch.id===activeCharId?'true':'false'}">
+    <span class="char-pill-av" style="--av-c:${_auraColor(ch.aura)}">${characterPortraitContent(ch)}${ch.isDefault?'<span class="char-pill-star">★</span>':''}</span>
+    <span class="cs-charpick-row-body"><b>${_esc(ch.nom || 'Sans nom')}</b><small>${meta}</small></span>
+    ${STATE.isAdmin && owner ? `<span class="cs-charpick-row-owner">${_esc(owner)}</span>` : ''}
+  </button>`;
+}
+
+function _buildCharSwitchHtml(activeCharId, canEdit) {
+  const switchable = sortCharactersForDisplay(getVisibleCharacters());
+
+  // Peu de persos → pastilles (identique aux autres pages).
+  if (switchable.length <= 6) {
+    return `<div class="char-switch">
+      ${switchable.map(ch => _charPillHtml(ch, activeCharId)).join('')}
+      ${canEdit ? `<button class="char-pill char-pill-new" data-action="createNewChar">➕ Nouveau</button>` : ''}
+    </div>`;
+  }
+
+  // Beaucoup de persos (vue MJ) → sélecteur compact : bouton courant + menu
+  // (recherche + filtre par compte + liste). Tient dans le bandeau collant.
+  const cur = switchable.find(c => c.id === activeCharId) || switchable[0];
+  const owners = STATE.isAdmin ? _charOwners(switchable) : [];
+  const accountsHtml = _charPickAccountsHtml(owners, switchable.length);
+  return `<div class="cs-charpick" data-charpick>
+    <button type="button" class="cs-charpick-btn" data-action="toggleCharPicker" aria-haspopup="listbox" aria-expanded="false">
+      <span class="char-pill-av" style="--av-c:${_auraColor(cur?.aura)}">${cur ? characterPortraitContent(cur) : ''}</span>
+      <span class="cs-charpick-cur"><b>${_esc(cur?.nom || '—')}</b><small>Niv.${cur?.niveau||1}${cur?.classe?' · '+_esc(cur.classe):''}${STATE.isAdmin && cur?.ownerPseudo ? ' · '+_esc(cur.ownerPseudo) : ''}</small></span>
+      <svg class="nav-icon cs-charpick-chev" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
+    </button>
+    <div class="cs-charpick-menu" hidden role="listbox" aria-label="Choisir un personnage">
+      <div class="cs-charpick-tools">
+        <input type="search" class="cs-charpick-search" placeholder="Rechercher un personnage…" data-input="charPickSearch" aria-label="Rechercher un personnage">
+      </div>
+      ${accountsHtml}
+      <div class="cs-charpick-list">
+        ${switchable.map(ch => _charPickRowHtml(ch, activeCharId)).join('')}
+      </div>
+      ${canEdit ? `<button type="button" class="cs-charpick-new" data-action="createNewChar">➕ Nouveau personnage</button>` : ''}
+    </div>
+  </div>`;
+}
+
+// ── Sélecteur de personnage (menu recherche + filtre compte) ─────────────────
+function _closeCharPicker() {
+  const btn = document.querySelector('.cs-charpick-btn[aria-expanded="true"]');
+  const menu = document.querySelector('.cs-charpick-menu:not([hidden])');
+  if (menu) menu.hidden = true;
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('pointerdown', _onCharPickOutside, true);
+}
+function _onCharPickOutside(e) {
+  if (!e.target.closest('.cs-charpick')) _closeCharPicker();
+}
+function toggleCharPicker(btn) {
+  const menu = btn.parentElement?.querySelector('.cs-charpick-menu');
+  if (!menu) return;
+  const willOpen = menu.hidden;
+  menu.hidden = !willOpen;
+  btn.setAttribute('aria-expanded', String(willOpen));
+  document.removeEventListener('pointerdown', _onCharPickOutside, true);
+  if (willOpen) {
+    setTimeout(() => {
+      document.addEventListener('pointerdown', _onCharPickOutside, true);
+      menu.querySelector('.cs-charpick-search')?.focus();
+    }, 0);
+  }
+}
+function _charPickFilter() {
+  const menu = document.querySelector('.cs-charpick-menu');
+  if (!menu) return;
+  const q = (menu.querySelector('.cs-charpick-search')?.value || '').toLowerCase().trim();
+  const acct = menu.querySelector('.cs-charpick-acct.active')?.dataset.acct || '';
+  menu.querySelectorAll('.cs-charpick-row').forEach(row => {
+    const okName = !q || (row.dataset.name || '').includes(q);
+    const okAcct = !acct || row.dataset.owner === acct;
+    row.hidden = !(okName && okAcct);
+  });
+}
+function charPickAccountChip(btn) {
+  btn.closest('.cs-charpick-menu')?.querySelectorAll('.cs-charpick-acct')
+    .forEach(c => c.classList.toggle('active', c === btn));
+  _charPickFilter();
 }
 
 // 6 tuiles de statistiques avec segmentation base/niveau/équipement
@@ -534,27 +683,30 @@ function _buildStatTilesHtml(c, canEdit, lvlPointsRemaining) {
     {key:'sagesse',      abbr:'SAG'},
     {key:'charisme',     abbr:'CHA'},
   ];
-  const summary = stats.reduce((totals, st) => {
+  // Résumé au-dessus des tuiles : Base + Niveau + Équipement = total.
+  const summary = stats.reduce((t, st) => {
     const value = Number(s[st.key]) || 8;
     const level = Number.parseInt(sLvl[st.key], 10) || 0;
     const equipment = Number(sb[st.key]) || 0;
-    totals.base += value - level;
-    totals.level += level;
-    totals.equipment += equipment;
-    totals.total += value + equipment;
-    return totals;
+    t.base += value - level; t.level += level; t.equipment += equipment;
+    t.total += value + equipment;
+    return t;
   }, { base: 0, level: 0, equipment: 0, total: 0 });
-  const signed = value => value > 0 ? `+${value}` : String(value);
-  const summaryHtml = `<div class="stats-summary" title="Somme des six caractéristiques du personnage">
+  const signed = v => v > 0 ? `+${v}` : String(v);
+  const summaryHtml = `<div class="stats-summary" title="Somme des six caractéristiques">
     <div class="stats-summary-title"><span>Points de caractéristiques</span><strong>${summary.total}</strong></div>
     <div class="stats-summary-formula" aria-label="Base ${summary.base}, niveau ${summary.level}, équipement ${summary.equipment}, total ${summary.total}">
       <span><small>Base</small><b>${summary.base}</b></span><i>+</i>
       <span><small>Niveau</small><b>${signed(summary.level)}</b></span><i>+</i>
-      <span><small>Équipement</small><b class="${summary.equipment > 0 ? 'pos' : summary.equipment < 0 ? 'neg' : ''}">${signed(summary.equipment)}</b></span><i>=</i>
+      <span><small>Équip.</small><b class="${summary.equipment > 0 ? 'pos' : summary.equipment < 0 ? 'neg' : ''}">${signed(summary.equipment)}</b></span><i>=</i>
       <span class="is-total"><small>Total</small><b>${summary.total}</b></span>
     </div>
   </div>`;
 
+  // Tuile façon maquette : abréviation · total · pastille de mod · détail
+  // « base X · (niv +N) · eq Y ». Allocation : clic sur la tuile = +1 (badge
+  // ambre = points restants) ; la portion « niv +N » cliquable = −1 ; base
+  // éditable par le MJ.
   return summaryHtml + stats.map(st => {
     const totalBase = Number(s[st.key]) || 8;
     const lvlUp     = Number.parseInt(sLvl[st.key], 10) || 0;
@@ -565,54 +717,34 @@ function _buildStatTilesHtml(c, canEdit, lvlPointsRemaining) {
     const mStr      = m >= 0 ? `+${m}` : String(m);
     const mCls      = m > 0 ? 'pos' : m < 0 ? 'neg' : 'zero';
     const eqCls     = bonus > 0 ? 'pos' : bonus < 0 ? 'neg' : 'zero';
-    const eqDisp    = bonus > 0 ? `+${bonus}` : bonus < 0 ? String(bonus) : '0';
+    const eqDisp    = bonus > 0 ? `+${bonus}` : bonus < 0 ? String(bonus) : '+0';
     const canPlus   = canEdit && lvlPointsRemaining > 0;
     const canMinus  = canEdit && lvlUp > 0;
+    const full      = _esc(STAT_FULL[st.key] || st.key);
 
-    const baseSegment = (canEdit && isAdmin)
-      ? `<button class="stat-seg stat-seg-base editable" title="MJ — Modifier la base"
-            data-action="inlineEditStat" data-id="${c.id}" data-key="${st.key}" data-stop-propagation>
-          <span class="stat-seg-val js-stat-base">${pureBase}</span>
-          <span class="stat-seg-lbl">Base <small>✎</small></span>
-        </button>`
-      : `<div class="stat-seg stat-seg-base">
-          <span class="stat-seg-val js-stat-base">${pureBase}</span>
-          <span class="stat-seg-lbl">Base</span>
-        </div>`;
+    const baseDetail = (canEdit && isAdmin)
+      ? `<button class="stat-detail-edit" data-action="inlineEditStat" data-id="${c.id}" data-key="${st.key}" title="MJ — modifier la base">base <b class="js-stat-base">${pureBase}</b> ✎</button>`
+      : `<span>base <b class="js-stat-base">${pureBase}</b></span>`;
+    // Niveau : afficher +N pour les non-éditeurs ; les éditeurs ont le stepper.
+    const nivInline = (!canEdit && lvlUp > 0) ? `<span>niv <b>+${lvlUp}</b></span>` : '';
+    // Stepper explicite − / + (toujours visible pour l'éditeur ; boutons grisés
+    // aux bornes). Remplace l'ancien « clic sur la tuile » peu découvrable.
+    const nivStepper = canEdit
+      ? `<div class="stat-lvl-ctrls" role="group" aria-label="Points de niveau — ${full}">
+          <button class="stat-lvl-btn minus" data-action="allocateStat" data-id="${c.id}" data-key="${st.key}" data-delta="-1"${canMinus ? '' : ' disabled'} title="Retirer 1 point de niveau" aria-label="Retirer 1 point de niveau sur ${full}">−</button>
+          <span class="stat-lvl-val" title="Points de niveau alloués"><small>niv</small> <b>${lvlUp > 0 ? '+' : ''}${lvlUp}</b></span>
+          <button class="stat-lvl-btn plus" data-action="allocateStat" data-id="${c.id}" data-key="${st.key}" data-delta="1"${canPlus ? '' : ' disabled'} title="Dépenser 1 point de niveau" aria-label="Ajouter 1 point de niveau sur ${full}">+</button>
+        </div>`
+      : '';
 
-    const nivSegment = `<div class="stat-seg stat-seg-niv ${lvlUp>0?'has':'zero'}">
-        <span class="stat-seg-val">+${lvlUp}</span>
-        <span class="stat-seg-lbl">Niveau</span>
-        ${canEdit ? `<span class="stat-seg-ctrls">
-          <button class="stat-lvl-btn" ${canMinus?'':'disabled'}
-            data-action="allocateStat" data-id="${c.id}" data-key="${st.key}" data-delta="-1" data-stop-propagation title="Retirer 1 point">−</button>
-          <button class="stat-lvl-btn plus" ${canPlus?'':'disabled'}
-            data-action="allocateStat" data-id="${c.id}" data-key="${st.key}" data-delta="1" data-stop-propagation title="Ajouter 1 point">+</button>
-        </span>` : ''}
-      </div>`;
-
-    const eqSegment = `<div class="stat-seg stat-seg-eq ${eqCls}">
-        <span class="stat-seg-val">${eqDisp}</span>
-        <span class="stat-seg-lbl">Équip.</span>
-      </div>`;
-
-    return `<div class="stat-tile" data-stat="${st.key}"
-      title="${_esc(STAT_FULL[st.key]||st.key)} — Base ${pureBase} + Niveau +${lvlUp} + Équip. ${eqDisp} = ${total}">
-      <header class="stat-tile-head">
-        <span class="stat-tile-name">${_esc(STAT_FULL[st.key]||st.abbr)}</span>
-        <span class="stat-tile-mod ${mCls}">${mStr}</span>
-      </header>
-      <div class="stat-tile-total-row">
-        <span class="stat-tile-total">${total}</span>
-        <span class="stat-tile-total-lbl">Total</span>
-      </div>
-      <div class="stat-tile-formula">
-        ${baseSegment}
-        <span class="stat-formula-op">+</span>
-        ${nivSegment}
-        <span class="stat-formula-op">+</span>
-        ${eqSegment}
-      </div>
+    return `<div class="stat-tile${canPlus ? ' is-alloc' : ''}" data-stat="${st.key}"
+      title="${full} — base ${pureBase} + niveau +${lvlUp} + équip. ${eqDisp} = ${total}">
+      ${canPlus ? `<span class="stat-alloc" title="${lvlPointsRemaining} point(s) de niveau à dépenser">${lvlPointsRemaining}</span>` : ''}
+      <span class="stat-tile-abbr">${st.abbr}</span>
+      <span class="stat-tile-total">${total}</span>
+      <span class="stat-tile-mod ${mCls}">${mStr}</span>
+      <span class="stat-tile-detail">${baseDetail}${nivInline}<span>eq <b class="${eqCls}">${eqDisp}</b></span></span>
+      ${nivStepper}
     </div>`;
   }).join('');
 }
@@ -771,10 +903,11 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
 
     <!-- Mini stats : CA · Vit. · Deck (3 colonnes) -->
     <div class="cs-mini-grid cs-mini-grid-3">
-      <button class="cs-mini cs-calc-trigger" data-action="openCharCalculation" data-calc="ca" data-id="${c.id}" title="Voir le calcul de la CA"><span class="cs-mini-icon">🛡️</span><span class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val">${calcCA(c)}</span></span></button>
-      <button class="cs-mini cs-calc-trigger" data-action="openCharCalculation" data-calc="speed" data-id="${c.id}" title="Voir le calcul de la vitesse"><span class="cs-mini-icon">🏃</span><span class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val">${calcVitesse(c)}m</span></span></button>
-      <button class="cs-mini cs-calc-trigger" data-action="openCharCalculation" data-calc="deck" data-id="${c.id}" title="Voir le calcul de la capacité du deck"><span class="cs-mini-icon">✦</span><span class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}<small style="font-size:.62rem;color:var(--text-dim);font-weight:600;margin-left:1px">/${deckMax}</small></span></span></button>
+      <button class="cs-mini cs-calc-trigger" data-action="toggleCharDerivative" data-calc="ca" data-id="${c.id}" title="Voir le calcul de la CA"><span class="cs-mini-icon">🛡️</span><span class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val">${calcCA(c)}</span></span><span class="cs-mini-arrow" aria-hidden="true">›</span></button>
+      <button class="cs-mini cs-calc-trigger" data-action="toggleCharDerivative" data-calc="speed" data-id="${c.id}" title="Voir le calcul de la vitesse"><span class="cs-mini-icon">🏃</span><span class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val">${calcVitesse(c)}m</span></span><span class="cs-mini-arrow" aria-hidden="true">›</span></button>
+      <button class="cs-mini cs-calc-trigger" data-action="toggleCharDerivative" data-calc="deck" data-id="${c.id}" title="Voir le calcul de la capacité du deck"><span class="cs-mini-icon">✦</span><span class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}<small style="font-size:.62rem;color:var(--text-dim);font-weight:600;margin-left:1px">/${deckMax}</small></span></span><span class="cs-mini-arrow" aria-hidden="true">›</span></button>
     </div>
+    <div class="brk cs-brk" id="cs-brk-panel"></div>
 
     <!-- Or -->
     <div class="or-card">
@@ -831,14 +964,9 @@ function _buildMainColHtml(canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, v
 
     ${lvlPointsRemaining > 0 && canEdit ? `
     <div class="alloc-banner">
-      <span>🎯 <b>${lvlPointsRemaining}</b> point${lvlPointsRemaining>1?'s':''} de niveau à dépenser — cliquez sur le badge <b>+1</b> d'une caractéristique</span>
+      <span>🎯 <b>${lvlPointsRemaining}</b> point${lvlPointsRemaining>1?'s':''} de niveau à dépenser — cliquez sur une caractéristique</span>
       <span class="alloc-banner-hint">Modificateur recalculé instantanément</span>
     </div>` : ''}
-
-    <!-- Tabs v3 -->
-    <nav class="tabs-v3" id="char-tabs-v3" role="tablist" aria-label="Sections de la fiche personnage">
-      ${tabsHtml}
-    </nav>
 
     <div id="char-tab-content" class="tab-body-v3" role="tabpanel" tabindex="0" aria-labelledby="cs-tab-${v3Tab}"></div>
 
@@ -1009,8 +1137,19 @@ function renderCharSheet(c, keepTab) {
   const mainColHtml = _buildMainColHtml(canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, v3Tab });
 
   area.innerHTML = `<div class="cs-v3" style="${_auraStyleVars(c)}">
+  <div class="cs-top">
+    <div class="cs-top-in">
+      <div class="cs-top-row">
+        <div class="cs-brand"><h1>Personnage</h1>${STATE.adventure?.nom ? `<small>${_esc(STATE.adventure.nom)}</small>` : ''}</div>
+        <span class="cs-top-spacer"></span>
+        ${charSwitchHtml}
+      </div>
+      <nav class="tabs-v3" id="char-tabs-v3" role="tablist" aria-label="Sections de la fiche personnage">
+        ${tabsHtml}
+      </nav>
+    </div>
+  </div>
   <div class="app-shell">
-    <div class="char-switch-row">${charSwitchHtml}</div>
     <div class="sheet">
       ${sidebarHtml}
       ${mainColHtml}
@@ -2182,6 +2321,9 @@ registerActions({
   selectChar:              (btn)    => selectChar(btn.dataset.id, btn),
   createNewChar:           ()       => createNewChar(),
   filterAdminChars:        (btn)    => filterAdminChars(btn.dataset.ownerKey || btn.dataset.pseudo, btn),
+  toggleCharPicker:        (btn)    => toggleCharPicker(btn),
+  charPickSearch:          ()       => _charPickFilter(),
+  charPickAccountChip:     (btn)    => charPickAccountChip(btn),
   _setDefaultCharacter:    (btn)    => _setDefaultCharacter(btn.dataset.id),
   openCharacterBuildsModal: (btn)    => openCharacterBuildsModal(btn.dataset.id),
   switchCharacterBuild:    (el)     => switchCharacterBuild(el.dataset.id, el.dataset.buildId || el.value),
@@ -2257,6 +2399,7 @@ registerActions({
 
   // Équipement & combat
   openCharCalculation:       (btn)   => openCharCalculation(btn),
+  toggleCharDerivative:      (btn)   => toggleCharDerivative(btn),
   editEquipSlot:            (btn)   => editEquipSlot(btn.dataset.slot),
   openCombatStylesAdmin:    ()      => openCombatStylesAdmin(),
   openDamageTypesAdmin:     ()      => openDamageTypesAdmin(),
