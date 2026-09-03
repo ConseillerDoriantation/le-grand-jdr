@@ -2,7 +2,7 @@ import { STATE } from '../core/state.js';
 import { navigate } from '../core/navigation.js';
 import { registerActions } from '../core/actions.js';
 import {
-  loadChars, loadCollection, getCachedCollection, getDocData,
+  loadChars, loadCollection, getCachedCollection, getDocData, saveDoc, deleteFromCol,
 } from '../data/firestore.js';
 import { loadStats } from '../shared/stats.js';
 import { _esc, appSplashHtml } from '../shared/html.js';
@@ -10,6 +10,9 @@ import { characterAvatarHtml } from '../shared/portraits.js';
 import { dedupeQuestParticipants } from '../shared/participants.js';
 import { isFeatureEnabled } from '../shared/features.js';
 import { lsJson } from '../shared/local-storage.js';
+import { confirmModal } from '../shared/modal.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
+import { removeAgendaSession } from '../shared/agenda-sessions.js';
 import PAGES, { requestStatsScope } from './pages.js';
 
 const SLOT_META = {
@@ -36,6 +39,7 @@ let STORE = {
   chars: [],
   avails: [],
   stats: null,
+  agendaDoc: null,
 };
 
 function _todayKey() {
@@ -110,6 +114,7 @@ function _normalizeSessions({ agendaDoc, stats, quests, story }) {
       missionLabel: _missionName(mission, raw.missionTitle),
       groupId,
       group,
+      orphanedGroup: Boolean(raw.questId && !group),
       groupLabel: group ? _groupName(group) : (raw.questTitle || 'Groupe non relié'),
       raw,
       hasStats: _sessionHasStats(stats, raw.date),
@@ -236,7 +241,8 @@ function _avatarHtml(participant, size = 38) {
 function _issuesFor(session, participants, availCounts) {
   const issues = [];
   if (!session.missionId) issues.push({ text: 'Mission non reliée', action: 'story' });
-  if (!session.groupId) issues.push({ text: 'Groupe non relié', action: 'story' });
+  if (session.orphanedGroup) issues.push({ text: 'Groupe supprimé · séance à retirer', action: 'agenda' });
+  else if (!session.groupId) issues.push({ text: 'Groupe non relié', action: 'story' });
   if (!participants.length) issues.push({ text: 'Aucun participant', action: 'story' });
   if (session.status === 'planned' && participants.length && availCounts.missing) {
     issues.push({ text: `${availCounts.missing} disponibilité${availCounts.missing > 1 ? 's' : ''} manquante${availCounts.missing > 1 ? 's' : ''}`, action: 'agenda' });
@@ -418,7 +424,7 @@ function _sessionDecisionHtml(session, participants, availCounts, issues) {
   const hasAvailTarget = session.status === 'planned' || session.status === 'today';
   const rows = [
     _decisionStatus('Mission', session.missionId ? session.missionLabel : 'Non reliée', !!session.missionId),
-    _decisionStatus('Groupe', session.groupId ? session.groupLabel : 'Non relié', !!session.groupId),
+    _decisionStatus('Groupe', session.orphanedGroup ? 'Groupe supprimé' : session.groupId ? session.groupLabel : 'Non relié', !!session.groupId && !session.orphanedGroup, session.orphanedGroup ? 'warn' : ''),
     _decisionStatus('Participants', participants.length ? `${participants.length} personnage${participants.length > 1 ? 's' : ''}` : 'Aucun personnage', !!participants.length),
     hasAvailTarget
       ? _decisionStatus('Disponibilités', `${availCounts.ok} ok · ${availCounts.maybe} incertain · ${availCounts.missing} absent`, !availCounts.missing && !availCounts.no, availCounts.no ? 'warn' : '')
@@ -517,7 +523,7 @@ function _renderSelectedSession() {
         </div>
         <h1>${_esc(session.missionLabel)}</h1>
         <div class="sc-context-group">
-          <span>${_esc(session.groupLabel)}</span>
+          <span>${_esc(session.groupLabel)}${session.orphanedGroup ? ' · supprimé' : ''}</span>
           <span class="sc-avatar-stack">${participants.slice(0, 6).map(p => _avatarHtml(p, 30)).join('')}</span>
           <span>${participants.length} participant${participants.length > 1 ? 's' : ''}</span>
         </div>
@@ -532,6 +538,10 @@ function _renderSelectedSession() {
           </span>
         </button>` : ''}
         ${session.missionId && feature('story') ? `<button class="btn btn-outline" data-action="_scOpenMission" data-id="${_esc(session.missionId)}">Voir la mission</button>` : ''}
+        ${STATE.isAdmin && session.source === 'agenda' ? `<button class="btn btn-outline sc-remove-session" data-action="_scRemoveSession"
+          data-quest-id="${_esc(session.raw?.questId || '')}" data-date="${_esc(session.raw?.date || '')}" data-slot="${_esc(session.raw?.slot || '')}">
+          Retirer la programmation
+        </button>` : ''}
       </div>
     </section>
 
@@ -634,10 +644,40 @@ export async function renderSessionCenterInto(rootId, context = {}) {
     chars: chars || STATE.characters || [],
     avails: avails || [],
     stats,
+    agendaDoc,
   };
   const saved = lsJson.get(`session-center:${adventureId}`, '');
   STORE.selectedKey = STORE.sessions.some(s => s.key === saved) ? saved : (STORE.sessions[0]?.key || '');
   _renderSelectedSession();
+}
+
+async function _removeScheduledSession({ questId='', date='', slot='' } = {}) {
+  if (!STATE.isAdmin) return;
+  const target=STORE.sessions.find(session=>session.source==='agenda'
+    && String(session.raw?.questId || '')===String(questId)
+    && String(session.raw?.date || '')===String(date)
+    && String(session.raw?.slot || '')===String(slot));
+  if (!target) { showNotif('Cette programmation a déjà été retirée.', 'info'); return; }
+  const label=[_dateLabel(date),target.groupLabel].filter(Boolean).join(' · ');
+  const confirmed=await confirmModal(
+    `Retirer la séance « ${_esc(label)} » du planning ?<br><small>Les éventuelles statistiques déjà enregistrées ne seront pas supprimées.</small>`,
+    { title:'Retirer une séance planifiée', confirmLabel:'Retirer', danger:true },
+  );
+  if (!confirmed) return;
+
+  const result=removeAgendaSession(STORE.agendaDoc,{ questId,date,slot });
+  if (!result.removed) { showNotif('Cette programmation a déjà été retirée.', 'info'); return; }
+  try {
+    if (result.sessions.length) await saveDoc('agenda_session','next',{ sessions:result.sessions });
+    else await deleteFromCol('agenda_session','next');
+    STORE.agendaDoc=result.sessions.length ? { sessions:result.sessions } : null;
+    STORE.sessions=_normalizeSessions({ agendaDoc:STORE.agendaDoc,stats:STORE.stats,quests:STORE.quests,story:STORE.story });
+    STORE.selectedKey=STORE.sessions[0]?.key || '';
+    _renderSelectedSession();
+    showNotif('Séance retirée du planning.', 'success');
+  } catch (error) {
+    notifySaveError(error);
+  }
 }
 
 registerActions({
@@ -662,6 +702,11 @@ registerActions({
     requestStatsScope(date);
     navigate('statistiques');
   },
+  _scRemoveSession: btn => _removeScheduledSession({
+    questId:btn.dataset.questId,
+    date:btn.dataset.date,
+    slot:btn.dataset.slot,
+  }),
 });
 
 // Ancien lien conservé uniquement pour rediriger les favoris et onglets déjà ouverts.

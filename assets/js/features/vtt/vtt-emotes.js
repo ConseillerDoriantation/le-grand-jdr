@@ -120,9 +120,17 @@ export async function _vttRollSkill(skillName, stat) {
     ? getArmorSetRollModeFor(getArmorSetData(c), { stat: statKey, skill: skillName })
     : '';
   const conditionRollMode = _conditionStatRollMode(t, statKey, 'check');
+  // Niveau de compétence de la fiche (onglet Capacités, c.competences[skill]) :
+  // formée = +2 · expertise = +2 & avantage. Non formée (absent) = jet normal.
+  const _skillLvl = (c?.competences && !Array.isArray(c.competences)) ? c.competences[skillName] : null;
+  const skillProfBonus = (_skillLvl === 'forme' || _skillLvl === 'expert') ? 2 : 0;
+  const skillRollMode = _skillLvl === 'expert' ? 'advantage' : '';
   const effectiveRollMode = combineArmorRollMode(
-    combineArmorRollMode(VS.rollMode || 'normal', armorRollMode),
-    conditionRollMode,
+    combineArmorRollMode(
+      combineArmorRollMode(VS.rollMode || 'normal', armorRollMode),
+      conditionRollMode,
+    ),
+    skillRollMode,
   );
   const d20 = () => Math.floor(Math.random() * 20) + 1;
 
@@ -131,7 +139,7 @@ export async function _vttRollSkill(skillName, stat) {
   else if (effectiveRollMode === 'disadvantage') { d2 = d20(); roll = Math.min(d1, d2); }
   else                              { roll = d1; }
 
-  const total   = roll + mod + VS.rollBonus + equipSkillBonus;
+  const total   = roll + mod + VS.rollBonus + equipSkillBonus + skillProfBonus;
   const isCrit  = roll === 20, isFumble = roll === 1;
   const authorName    = STATE.profile?.pseudo || STATE.profile?.prenom || 'Joueur';
   const characterName = c?.nom || n?.nom || t?.name || null;
@@ -153,6 +161,8 @@ export async function _vttRollSkill(skillName, stat) {
       rollResult: total,
       rollSkill: skillName, rollStat: stat,
       rollEquipBonus: equipSkillBonus || 0,
+      rollSkillBonus: skillProfBonus || 0,
+      rollSkillLevel: _skillLvl || null,
       isCrit, isFumble,
       gmOnly,
       createdAt: serverTimestamp(),

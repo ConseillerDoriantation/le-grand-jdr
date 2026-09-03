@@ -9123,6 +9123,90 @@ body .modal:has(.cs-build-modal) {
 .cs-v3 .vital-val-btn { background: none; border: 0; padding: 0 1px; margin: 0; font: inherit; color: inherit; cursor: pointer; border-radius: 5px; }
 .cs-v3 .vital-val-btn:hover { text-decoration: underline; text-underline-offset: 3px; }
 .cs-v3 .vital-inline-input { width: 2.8em; font: inherit; color: inherit; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 6px; text-align: center; padding: 1px 3px; -moz-appearance: textfield; }
+
+/* ══════════════════════════════════════════════
+   ONGLET CAPACITÉS (résistances · capacités · compétences · langues)
+══════════════════════════════════════════════ */
+.cs-v3 .cs-caps { display: flex; flex-direction: column; }
+.cs-v3 .cs-caps-empty { font-size: .78rem; color: var(--text-dim); font-style: italic; }
+.cs-v3 .cs-caps .cs-section-hdr .cs-inv-action-btn { margin-left: auto; }
+
+/* Résistances */
+.cs-v3 .resist-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 9px 12px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--border); margin-bottom: 8px; }
+.cs-v3 .resist-lbl { font-size: .55rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--text-dim); margin-right: 4px; }
+.cs-v3 .resist-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: var(--r-full); font-size: .72rem; font-weight: 600; border: 1px solid; }
+.cs-v3 .resist-chip b { font-weight: 600; margin-left: 2px; font-size: .68rem; opacity: .85; }
+.cs-v3 .resist-chip.res { background: rgba(34,195,142,.10); border-color: rgba(34,195,142,.30); color: var(--emerald); }
+.cs-v3 .resist-chip.vul { background: rgba(255,90,126,.10); border-color: rgba(255,90,126,.30); color: var(--crimson-light, #ff8ca7); }
+.cs-v3 .resist-chip.imm { background: rgba(244,196,48,.10); border-color: rgba(244,196,48,.30); color: var(--amber); }
+.cs-v3 .resist-src { font-style: normal; opacity: .7; margin-left: 2px; }
+.cs-v3 .resist-x, .cs-v3 .capa-x { background: none; border: 0; color: inherit; opacity: .55; cursor: pointer; font-size: .72rem; padding: 0 2px; line-height: 1; }
+.cs-v3 .resist-x:hover, .cs-v3 .capa-x:hover { opacity: 1; }
+
+/* Sélecteur de résistances (modale, grille cliquable) */
+.res-picker { display: flex; flex-direction: column; gap: 12px; }
+.res-pick-hint { font-size: .72rem; color: var(--text-muted); margin: 0; line-height: 1.5; }
+.res-pick-hint b { font-weight: 600; }
+.res-pick-hint b.res { color: var(--emerald); }
+.res-pick-hint b.imm { color: var(--amber); }
+.res-pick-hint b.vul { color: var(--crimson-light, #ff8ca7); }
+.res-pick-grp { display: flex; flex-direction: column; gap: 6px; }
+.res-pick-grp .cs-spellnav-label { color: var(--text-dim); font-size: .58rem; font-weight: 600; letter-spacing: .1em; }
+.res-pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; max-height: 30vh; overflow-y: auto; }
+.res-pick { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-soft); font: inherit; font-size: .74rem; cursor: pointer; text-align: left; }
+.res-pick:hover { border-color: var(--border-strong); }
+.res-pick > b { font-size: .62rem; font-weight: 600; opacity: .9; white-space: nowrap; }
+.res-pick.res { background: rgba(34,195,142,.10); border-color: rgba(34,195,142,.30); color: var(--emerald); }
+.res-pick.imm { background: rgba(244,196,48,.10); border-color: rgba(244,196,48,.30); color: var(--amber); }
+.res-pick.vul { background: rgba(255,90,126,.10); border-color: rgba(255,90,126,.30); color: var(--crimson-light, #ff8ca7); }
+.res-pick.is-locked { opacity: .6; cursor: default; }
+.res-pick-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Capacités & Traits */
+.cs-v3 .capa-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.cs-v3 .capa-card { position: relative; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; overflow: hidden; }
+.cs-v3 .capa-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--cap-c, #4f8cff); }
+.cs-v3 .capa-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cs-v3 .capa-kind { font-size: .58rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--cap-c, var(--text-muted)); }
+.cs-v3 .capa-usage { font-size: .62rem; font-weight: 600; padding: 2px 8px; border-radius: var(--r-full); background: var(--surface-3); color: var(--text-soft); }
+.cs-v3 .capa-acts { display: inline-flex; gap: 2px; margin-left: auto; }
+.cs-v3 .capa-name { font-family: var(--font-display); font-size: .95rem; font-weight: 600; color: var(--text); line-height: 1.2; }
+.cs-v3 .capa-desc { font-size: .78rem; color: var(--text-soft); line-height: 1.5; }
+.cs-v3 .capa-cost { font-size: .7rem; color: var(--text-muted); padding-top: 6px; border-top: 1px dashed var(--border); margin-top: 2px; }
+.cs-v3 .capa-cost b { color: var(--amber); font-weight: 600; }
+
+/* Compétences */
+.cs-v3 .comp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 2px 16px; }
+.cs-v3 .comp-line { display: grid; grid-template-columns: auto 1fr auto auto; gap: 9px; align-items: center; padding: 6px 4px; border-bottom: 1px solid var(--border); font-size: .8rem; }
+.cs-v3 .comp-line[data-action] { cursor: pointer; }
+.cs-v3 .comp-line[data-action]:hover { background: rgba(79,140,255,.05); }
+.cs-v3 .comp-dot { width: 11px; height: 11px; border-radius: 50%; background: transparent; border: 1.5px solid var(--text-dim); position: relative; flex-shrink: 0; }
+.cs-v3 .comp-dot.forme { background: radial-gradient(circle at 30% 30%, var(--gold-2, #7eb0ff), var(--gold, #4f8cff)); border-color: var(--gold-2, #7eb0ff); box-shadow: 0 0 6px rgba(79,140,255,.4); }
+.cs-v3 .comp-dot.expert { background: var(--amber); border-color: var(--amber); box-shadow: 0 0 8px rgba(244,196,48,.6); }
+.cs-v3 .comp-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-v3 .comp-line.aucun .comp-name, .cs-v3 .comp-line.aucun .comp-mod { color: var(--text-muted); }
+.cs-v3 .comp-line.expert .comp-name, .cs-v3 .comp-line.expert .comp-mod { color: var(--amber); font-weight: 600; }
+.cs-v3 .comp-stat { font-size: .56rem; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); padding: 1px 7px; border-radius: var(--r-full); background: var(--surface-2); }
+.cs-v3 .comp-mod { font-weight: 600; font-size: .72rem; color: var(--text); text-align: right; }
+.cs-v3 .comp-acts { display: inline-flex; gap: 2px; }
+
+/* Langues */
+.cs-v3 .lang-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.cs-v3 .lang-chip { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 12px; border-radius: var(--r-full); background: var(--surface-2); border: 1px solid var(--border); font-size: .74rem; }
+.cs-v3 .lang-chip b { font-family: var(--font-display); font-weight: 600; color: var(--text); font-size: .78rem; }
+.cs-v3 .lang-chip span { font-size: .62rem; color: var(--text-dim); letter-spacing: .04em; text-transform: lowercase; }
+.cs-v3 .lang-chip.lvl-natif { background: rgba(79,140,255,.08); border-color: rgba(79,140,255,.28); }
+.cs-v3 .lang-chip.lvl-natif b { color: var(--gold-2, #7eb0ff); }
+.cs-v3 .lang-chip.lvl-fluent { background: rgba(34,195,142,.07); border-color: rgba(34,195,142,.24); }
+.cs-v3 .lang-chip.lvl-fluent b { color: var(--emerald); }
+.cs-v3 .lang-chip.lvl-lit { background: rgba(244,196,48,.06); border-color: rgba(244,196,48,.22); }
+.cs-v3 .lang-chip.lvl-lit b { color: var(--amber); }
+
+/* Formulaire modal (ajout/édition) */
+.cap-form-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; font-size: .78rem; }
+.cap-form-row > span { font-size: .68rem; font-weight: 600; letter-spacing: .04em; color: var(--text-dim); text-transform: uppercase; }
+.cap-form-row input, .cap-form-row select, .cap-form-row textarea { width: 100%; padding: 7px 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); font: inherit; }
+.cap-form-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .cs-v3 .vital-bar { height: 5px; background: var(--surface-3); border-radius: 999px; overflow: hidden; }
 .cs-v3 .vital-bar-fill { height: 100%; border-radius: 999px; transition: width .8s var(--ease-spring, cubic-bezier(.22,1,.36,1)); }
 .cs-v3 .vital.hp .vital-bar-fill { background: linear-gradient(90deg, #ff5a7e, #ff8ca7); }
@@ -9759,7 +9843,7 @@ body .modal:has(.cs-build-modal) {
 
 /* Journal v3 */
 .cs-v3 .journal-tabs { display: flex; gap: 4px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
-.cs-v3 .journal-tab { min-height: 34px; padding: 7px 12px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted); font-family: inherit; font-size: .76rem; font-weight: 600; line-height: 1; cursor: pointer; }
+.cs-v3 .journal-tab { min-height: 34px; padding: 7px 14px; border-radius: var(--r-full); background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted); font-family: inherit; font-size: .76rem; font-weight: 600; line-height: 1; cursor: pointer; }
 .cs-v3 .journal-tab.on { background: rgba(79,140,255,.14); border-color: rgba(79,140,255,.4); color: var(--gold-2, #7eb0ff); }
 
 .cs-v3 .quest-section-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
@@ -13321,6 +13405,35 @@ body .modal:has(.cs-build-modal) {
   text-decoration: line-through;
   color: var(--text-muted);
 }
+/* Quête façon maquette : état · corps (nom + contexte) · puce de récompense */
+.cs-v3 .quest-state {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 8px; font-size: .9rem; flex-shrink: 0;
+  background: rgba(79,140,255,.16); color: var(--gold-2, #7eb0ff);
+}
+.cs-v3 .quest-state.done { background: rgba(34,195,142,.16); color: var(--emerald); }
+.cs-v3 .quest-state.urgent { background: rgba(255,149,68,.16); color: #ffb070; }
+.cs-v3 .quest-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cs-v3 .quest-meta { font-size: .7rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
+.cs-v3 .quest-head-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: auto; }
+.cs-v3 .quest-reward {
+  font-size: .66rem; color: var(--amber); background: rgba(244,196,48,.10);
+  padding: 3px 10px; border-radius: 999px; border: 1px solid rgba(244,196,48,.28);
+  font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.cs-v3 .quest.is-urgent { border-color: rgba(255,149,68,.3); }
+/* Puce de catégorie de note (PNJ / LORE / NOTES…) — cliquable pour cycler */
+.cs-v3 .note-v3-tag {
+  font-size: .56rem; letter-spacing: .06em; text-transform: uppercase; font-weight: 600;
+  padding: 2px 8px; border-radius: 999px; cursor: pointer; font-family: var(--font-body); line-height: 1.4;
+  background: rgba(79,140,255,.10); border: 1px solid rgba(79,140,255,.25); color: var(--gold-2, #7eb0ff);
+}
+.cs-v3 .note-v3-tag.lore  { background: rgba(244,196,48,.10); border-color: rgba(244,196,48,.25); color: var(--amber); }
+.cs-v3 .note-v3-tag.pnj   { background: rgba(157,111,255,.10); border-color: rgba(157,111,255,.25); color: var(--arcane, #9d6fff); }
+.cs-v3 .note-v3-tag.lieu  { background: rgba(34,195,142,.10); border-color: rgba(34,195,142,.25); color: var(--emerald); }
+.cs-v3 .note-v3-tag.objet { background: rgba(255,107,74,.10); border-color: rgba(255,107,74,.25); color: #ff8a6a; }
+.cs-v3 .note-v3-tag.is-empty { background: none; border-style: dashed; color: var(--text-dim); opacity: .65; }
+.cs-v3 .note-v3-tag.is-empty:hover { opacity: 1; }
 .cs-v3 .quest-type {
   font-size: .6rem;
   letter-spacing: .08em; text-transform: uppercase;

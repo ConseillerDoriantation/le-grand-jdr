@@ -21,7 +21,7 @@ import { calcCriticalEffectTotal, criticalEffectFormulaLabel } from '../../share
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
 import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
-import { getArmorSetData, getMainWeapon, getItemTraits, getEquippedSourceItem, DEFAULT_UNARMED, getCharDamageProfile } from '../../shared/equipment-utils.js';
+import { getArmorSetData, getMainWeapon, getItemTraits, getEquippedSourceItem, DEFAULT_UNARMED, getCharDamageProfile, getCharFullDamageProfile } from '../../shared/equipment-utils.js';
 import { getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { buildProjectionPatch, switchBuild } from '../../shared/character-builds.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
@@ -5969,7 +5969,7 @@ function _atkInteractionHtml(opt) {
     // Profil de la cible : créature (bestiaire) OU personnage (via son équipement).
     let prof = null;
     if (td.type === 'enemy' && td.beastId) prof = VS.bestiary[td.beastId];
-    else if (td.characterId) prof = getCharDamageProfile(STATE.characters.find(x => x.id === td.characterId));
+    else if (td.characterId) prof = getCharFullDamageProfile(STATE.characters.find(x => x.id === td.characterId));
     if (!prof) continue;
     const inter = previewDamageInteraction(opt.damageTypeId, prof);
     if (inter) buckets[inter] = (buckets[inter] || 0) + 1;
@@ -8444,7 +8444,7 @@ async function _vttRollAttack() {
           // Résistances / immunités / absorptions / faiblesses accordées par
           // l'équipement du personnage (non cumulable — cf. getCharDamageProfile).
           if (tgtChar) {
-            const prof = getCharDamageProfile(tgtChar);
+            const prof = getCharFullDamageProfile(tgtChar);
             if (prof) {
               const result = applyDamageTypeInteraction(dmgTotal, opt.damageTypeId, prof);
               dmgTotal    = result.dmgTotal;

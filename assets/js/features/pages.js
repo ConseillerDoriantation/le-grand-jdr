@@ -1110,9 +1110,12 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     : [];
   const groupScopeText = activeGroupNames.length ? activeGroupNames.join(', ') : '';
 
-  const exportBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExport" title="Copier un récapitulatif texte pour Discord"><span>📋</span> Copier</button>` : '';
-  const visualBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExportImage" title="Télécharger le récapitulatif visuel en PNG"><span>🖼️</span> Visuel</button>` : '';
-  const manageBtn = STATE.isAdmin ? `<button class="stats-tool-btn stats-tool-btn--manage" data-action="_statsManage" title="Relier les séances aux missions et gérer les données"><span>⚙</span> Données</button>` : '';
+  const exportBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExport" title="Copier un récapitulatif texte pour Discord" aria-label="Copier le récapitulatif"><span class="stats-tool-icon" aria-hidden="true">📋</span><span class="stats-tool-label">Copier</span></button>` : '';
+  const visualBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExportImage" title="Télécharger le récapitulatif visuel en PNG" aria-label="Télécharger le récapitulatif visuel"><span class="stats-tool-icon" aria-hidden="true">🖼️</span><span class="stats-tool-label">Visuel</span></button>` : '';
+  const manageBtn = STATE.isAdmin ? `<button class="stats-tool-btn stats-tool-btn--manage" data-action="_statsManage" title="Relier les séances aux missions et gérer les données" aria-label="Gérer les données statistiques"><span class="stats-tool-icon" aria-hidden="true">⚙</span><span class="stats-tool-label">Données</span></button>` : '';
+  const toolsBar = exportBtn || visualBtn || manageBtn ? `<div class="stats-tools" role="group" aria-label="Actions sur les statistiques">
+    ${rows.length ? '<span class="stats-tools-caption">Exporter</span>' : ''}${exportBtn}${visualBtn}${manageBtn}
+  </div>` : '';
   // ── Barre sticky (refonte) : périmètre 3 selects + popover joueurs + onglets ──
   const scopeKicker = dateKey ? `Séance du ${_statsFmtDate(dateKey)}`
     : isMission ? (selectedMission?.name || 'Mission')
@@ -1162,7 +1165,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     <div class="stats-topbar-row">
       <div class="stats-brand"><h1>Statistiques</h1><small>${_esc(scopeKicker)}</small></div>
       <div class="stats-spacer"></div>
-      <div class="stats-tools">${exportBtn}${visualBtn}${manageBtn}</div>
+      ${toolsBar}
     </div>
     <div class="stats-topbar-scope">
       <span class="stats-scope-art" title="${_esc(selectedMission?.name || scopeKicker)}">${selectedMission ? _statsMissionArtHtml(selectedMission, 56) : `<span class="stats-scope-art-ph">${isAct ? '📖' : '🌍'}</span>`}</span>
@@ -3489,31 +3492,33 @@ const PAGES = {
     const activeView   = achState.view   ?? 'galerie';
 
     content.innerHTML = `<div class="hall-root">
-    <section class="hall-command" aria-label="Filtres des hauts-faits">
-      <div class="hall-command-head">
-        <div class="hall-command-title">
-          <span class="hall-kicker">Hauts-Faits</span>
-          <strong>Galerie de campagne</strong>
-          <small>${total} ${total > 1 ? 'hauts-faits archivés' : 'haut-fait archivé'}</small>
-        </div>
-        <div class="hall-command-tools">
-          <div class="view-toggle" role="tablist" aria-label="Mode d'affichage des hauts-faits">
-            <button class="view-tab${activeView === 'galerie' ? ' active' : ''}" data-action="_achSetView" data-val="galerie" role="tab" aria-selected="${activeView === 'galerie'}">▦ Galerie</button>
-            <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline" role="tab" aria-selected="${activeView === 'timeline'}">⋮ Chronologie</button>
-            <button class="view-tab${activeView === 'missions' ? ' active' : ''}" data-action="_achSetView" data-val="missions" role="tab" aria-selected="${activeView === 'missions'}">🎯 Missions</button>
+    <section class="hall-command" aria-label="Navigation des hauts-faits">
+      <div class="hall-command-in">
+        <div class="hall-command-head">
+          <div class="hall-command-title">
+            <h1>Hauts-Faits</h1>
+            <small>Galerie de campagne · ${total} ${total > 1 ? 'souvenirs' : 'souvenir'}</small>
           </div>
-          ${STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="openAchievementCategoriesAdmin">Catégories</button>` : ''}
-          ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" data-action="openAchievementModal">+ Ajouter</button>` : ''}
+          <span class="hall-command-spacer"></span>
+          ${STATE.isAdmin ? `<div class="hall-command-tools">
+            <button class="hall-tool-btn" data-action="openAchievementCategoriesAdmin" title="Gérer les catégories" aria-label="Gérer les catégories de hauts-faits">
+              <svg aria-hidden="true"><use href="./assets/img/icons.svg#icon-cog"/></svg>
+              <span>Catégories</span>
+            </button>
+            <button class="hall-tool-btn hall-tool-btn--primary" data-action="openAchievementModal" title="Ajouter un haut-fait" aria-label="Ajouter un haut-fait">
+              <span class="hall-tool-plus" aria-hidden="true">+</span>
+              <span>Nouveau</span>
+            </button>
+          </div>` : ''}
         </div>
-      </div>
-      <div class="hall-filter-board" role="group" aria-label="Catégorie de hauts-faits">
+        <div class="hall-command-controls">
+          <div class="hall-filter-board" role="group" aria-label="Catégorie de hauts-faits">
         <button type="button" class="hall-filter-card${activeFilter === 'all' ? ' active' : ''}" style="--c:#7eb0ff" data-filter="all" data-action="_achSetFilter" data-val="all" aria-pressed="${activeFilter === 'all'}">
           <span class="hall-filter-icon">🏆</span>
           <span class="hall-filter-copy">
-            <strong>Tous les hauts-faits</strong>
-            <small><span class="hall-filter-num">${total}</span> ${total > 1 ? 'archives' : 'archive'}</small>
+            <strong>Tous</strong>
+            <small class="hall-filter-num">${total}</small>
           </span>
-          <span class="hall-filter-cta">Filtrer</span>
         </button>
         ${CATS.map(c => {
           const count = byCat[c.id] || 0;
@@ -3522,18 +3527,24 @@ const PAGES = {
           <span class="hall-filter-icon">${c.emoji}</span>
           <span class="hall-filter-copy">
             <strong>${_esc(c.label)}</strong>
-            <small><span class="hall-filter-num">${count}</span> ${count > 1 ? 'hauts-faits' : 'haut-fait'}</small>
+            <small class="hall-filter-num">${count}</small>
           </span>
-          <span class="hall-filter-cta">Filtrer</span>
         </button>`;
         }).join('')}
-      </div>
-      <div class="hall-command-search">
-        <div class="search-wrap">
-          <span style="color:var(--text-dim);font-size:.85rem">⌕</span>
-          <input type="search" placeholder="Rechercher haut-fait, mission, personnage…" id="ach-search-input" aria-label="Rechercher dans les hauts-faits"
-            value="${_esc(achState.search || '')}"
-            data-input="_achSetSearch">
+          </div>
+          <div class="hall-command-search">
+            <label class="search-wrap" for="ach-search-input">
+              <svg aria-hidden="true"><use href="./assets/img/icons.svg#icon-search"/></svg>
+              <input type="search" placeholder="Rechercher un souvenir…" id="ach-search-input" aria-label="Rechercher dans les hauts-faits"
+                value="${_esc(achState.search || '')}"
+                data-input="_achSetSearch">
+            </label>
+          </div>
+        </div>
+        <div class="view-toggle" role="tablist" aria-label="Mode d'affichage des hauts-faits">
+          <button class="view-tab${activeView === 'galerie' ? ' active' : ''}" data-action="_achSetView" data-val="galerie" role="tab" aria-selected="${activeView === 'galerie'}">▦ Galerie</button>
+          <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline" role="tab" aria-selected="${activeView === 'timeline'}">⋮ Chronologie</button>
+          <button class="view-tab${activeView === 'missions' ? ' active' : ''}" data-action="_achSetView" data-val="missions" role="tab" aria-selected="${activeView === 'missions'}">🎯 Missions</button>
         </div>
       </div>
     </section>

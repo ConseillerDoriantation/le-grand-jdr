@@ -29,6 +29,29 @@ let _openNote = null;
 // Sous-onglet Journal courant — lu par le routeur d'onglets de characters.js.
 export function getCurrentJournalSub() { return _currentJournalSub; }
 
+// Catégories de note (puce colorée façon maquette). Cycle au clic.
+const _NOTE_CATS = {
+  notes: { lbl: 'NOTES', cls: '' },
+  lore:  { lbl: 'LORE',  cls: 'lore' },
+  pnj:   { lbl: 'PNJ',   cls: 'pnj' },
+  lieu:  { lbl: 'LIEU',  cls: 'lieu' },
+  objet: { lbl: 'OBJET', cls: 'objet' },
+};
+const _NOTE_CAT_CYCLE = ['', 'notes', 'lore', 'pnj', 'lieu', 'objet'];
+
+async function _csV3CycleNoteCat(idx) {
+  const c = charSession.getCurrentChar(); if (!c) return;
+  const notes = Array.isArray(c.notesList) ? [...c.notesList] : [];
+  const n = notes[idx]; if (!n) return;
+  const cur = n.categorie || '';
+  notes[idx] = { ...n, categorie: _NOTE_CAT_CYCLE[(_NOTE_CAT_CYCLE.indexOf(cur) + 1) % _NOTE_CAT_CYCLE.length] };
+  c.notesList = notes;
+  _currentJournalSub = 'notes';
+  charSession.renderTab('journal', c, charSession.getCanEditChar());
+  try { await updateInCol('characters', c.id, { notesList: notes }); }
+  catch (e) { console.error('[note cat]', e); showNotif('Erreur d\'enregistrement.', 'error'); }
+}
+
 function renderCharJournal(c, canEdit, sub = 'notes') {
   const subTab = ['notes','quetes','relations'].includes(sub) ? sub : 'notes';
   const counts = {
@@ -44,9 +67,9 @@ function renderCharJournal(c, canEdit, sub = 'notes') {
     <button type="button" class="journal-tab ${subTab==='notes'?'on':''}" ${subTab==='notes'?'aria-current="page"':''} data-action="csV3JournalSub" data-sub="notes">📝 Notes (${counts.notes})</button>
     <button type="button" class="journal-tab ${subTab==='quetes'?'on':''}" ${subTab==='quetes'?'aria-current="page"':''} data-action="csV3JournalSub" data-sub="quetes">📜 Quêtes (${counts.quetes})</button>
     <button type="button" class="journal-tab ${subTab==='relations'?'on':''}" ${subTab==='relations'?'aria-current="page"':''} data-action="csV3JournalSub" data-sub="relations">👥 Relations (${counts.relations})</button>
-    ${canEdit && subTab==='notes' ? `<button type="button" class="section-action" style="margin-left:auto" data-action="addNote">＋ Note</button>` : ''}
-    ${canEdit && subTab==='quetes' ? `<button type="button" class="section-action" style="margin-left:auto" data-action="addQuete">＋ Quête</button>` : ''}
-    ${canEdit && subTab==='relations' ? `<button type="button" class="section-action" style="margin-left:auto" data-action="csV3AddRelation" data-id="${c.id}">＋ Relation</button>` : ''}
+    ${canEdit && subTab==='notes' ? `<button type="button" class="section-action" style="margin-left:auto" data-action="addNote">＋ Nouvelle entrée</button>` : ''}
+    ${canEdit && subTab==='quetes' ? `<button type="button" class="section-action" style="margin-left:auto" data-action="addQuete">＋ Nouvelle entrée</button>` : ''}
+    ${canEdit && subTab==='relations' ? `<button type="button" class="section-action" style="margin-left:auto" data-action="csV3AddRelation" data-id="${c.id}">＋ Nouvelle entrée</button>` : ''}
   </nav>
   <div id="journal-body">${bodyHtml}</div>`;
 }
@@ -76,21 +99,30 @@ function renderJournalQuetes(c, canEdit) {
   const card = (q) => {
     const idx = quetes.indexOf(q);
     const validee = !!q.valide;
-    const typeLbl = q.type ? `<span class="quest-type">${_esc(q.type)}</span>` : '';
-    return `<article class="quest ${validee?'done':''}${canEdit?' is-draggable':''}" data-quest-idx="${idx}">
+    const urgent = !!q.urgent && !validee;
+    const metaBits = [q.type, q.contexte].filter(Boolean).map(_esc).join(' · ');
+    const stateIco = validee
+      ? `<span class="quest-state done" title="Validée">✓</span>`
+      : urgent
+        ? `<span class="quest-state urgent" title="Urgente">⚠</span>`
+        : `<span class="quest-state open" title="En cours">⚔</span>`;
+    return `<article class="quest ${validee?'done':''}${urgent?' is-urgent':''}${canEdit?' is-draggable':''}" data-quest-idx="${idx}">
       <header class="quest-head">
         <div class="quest-name-wrap">
-          ${validee
-            ? `<span class="quest-state-ico" title="Validée">✓</span>`
-            : `<span class="quest-state-ico open" title="En cours">⚔</span>`}
-          <h4 class="quest-name">${_esc(q.nom || 'Quête sans nom')}</h4>
-          ${typeLbl}
+          ${stateIco}
+          <div class="quest-body">
+            <h4 class="quest-name">${_esc(q.nom || 'Quête sans nom')}</h4>
+            ${metaBits ? `<span class="quest-meta">${metaBits}</span>` : ''}
+          </div>
         </div>
-        ${canEdit ? `<div class="quest-actions">
-          <button class="btn-icon" data-action="toggleQuete" data-idx="${idx}" title="${validee?'Rouvrir':'Marquer comme validée'}">${validee?'↺':'✔️'}</button>
-          <button class="btn-icon" data-action="editQuete" data-idx="${idx}" title="Modifier">✏️</button>
-          <button class="btn-icon" data-action="deleteQuete" data-idx="${idx}" title="Supprimer" style="color:#ff8ca7">🗑️</button>
-        </div>` : ''}
+        <div class="quest-head-right">
+          ${q.recompense ? `<span class="quest-reward">${_esc(q.recompense)}</span>` : ''}
+          ${canEdit ? `<div class="quest-actions">
+            <button class="btn-icon" data-action="toggleQuete" data-idx="${idx}" title="${validee?'Rouvrir':'Marquer comme validée'}">${validee?'↺':'✔️'}</button>
+            <button class="btn-icon" data-action="editQuete" data-idx="${idx}" title="Modifier">✏️</button>
+            <button class="btn-icon" data-action="deleteQuete" data-idx="${idx}" title="Supprimer" style="color:#ff8ca7">🗑️</button>
+          </div>` : ''}
+        </div>
       </header>
       ${q.description ? `<p class="quest-desc">${_esc(q.description)}</p>` : ''}
     </article>`;
@@ -171,6 +203,10 @@ function renderCharNotesV3(c, canEdit) {
     const isOpen = _openNote === i;
     const titre = n.titre || 'Note sans titre';
     const date  = n.date  || '';
+    const catM  = _NOTE_CATS[n.categorie];
+    const tagChip = canEdit
+      ? `<button class="note-v3-tag ${catM ? catM.cls : 'is-empty'}" data-action="csV3CycleNoteCat" data-idx="${i}" data-stop-propagation title="Catégorie — cliquer pour changer">${catM ? catM.lbl : '＋ tag'}</button>`
+      : (catM ? `<span class="note-v3-tag ${catM.cls}">${catM.lbl}</span>` : '');
     return `<article class="note-v3 ${isOpen?'is-open':''}${canEdit?' is-draggable':''}" data-note-idx="${i}">
       <header class="note-v3-head">
         ${canEdit ? `<span class="note-v3-drag" title="Glisser pour réordonner">⠿</span>` : ''}
@@ -183,6 +219,7 @@ function renderCharNotesV3(c, canEdit) {
               data-enter="blur" data-esc="revert-blur"
               placeholder="Titre de la note">`
           : `<span class="note-v3-titre note-v3-titre-ro">${_esc(titre)}</span>`}
+        ${tagChip}
         ${date ? `<span class="note-v3-date">${_esc(date)}</span>` : ''}
         ${canEdit ? `<button class="note-v3-del" data-action="deleteNote" data-idx="${i}" data-stop-propagation title="Supprimer">🗑️</button>` : ''}
       </header>
@@ -445,4 +482,5 @@ export {
   _csV3JournalSub, _csV3ToggleNote, _csV3SaveNoteTitle,
   _csV3AddRelation, _csV3EditRelation,
   _csV3RelSent, _csV3RelPickNpc, _csV3SaveRelation, _csV3DeleteRelation,
+  _csV3CycleNoteCat,
 };

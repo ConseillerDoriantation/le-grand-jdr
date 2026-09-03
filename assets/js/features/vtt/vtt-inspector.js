@@ -562,13 +562,23 @@ export function _renderInspectorImpl(t) {
       const statKey = _STAT_KEY[s.stat] || '';
       const statMod = _tokenStatMod(t, statKey);
       const eqBonus = cForBonus ? computeEquipSkillBonus(cForBonus.equipement || {}, s.name) : 0;
-      const mod = statMod + eqBonus;
+      // Maîtrise de compétence (fiche → onglet Capacités) : formée/expertise = +2,
+      // expertise = avantage (appliqué au lancer). Affichée dans le mod du bouton.
+      const skillLvl = (cForBonus?.competences && !Array.isArray(cForBonus.competences)) ? cForBonus.competences[s.name] : null;
+      const profBonus = (skillLvl === 'forme' || skillLvl === 'expert') ? 2 : 0;
+      const mod = statMod + eqBonus + profBonus;
       const modStr = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '±0';
       const col  = _STAT_COLOR[s.stat] || 'var(--text-dim)';
-      const eqTitle = eqBonus !== 0 ? ` title="Inclut ${eqBonus>0?'+':''}${eqBonus} équip."` : '';
+      const parts = [`base ${statMod>=0?'+':''}${statMod}`];
+      if (eqBonus) parts.push(`équip. ${eqBonus>0?'+':''}${eqBonus}`);
+      if (profBonus) parts.push(`${skillLvl==='expert'?'expertise':'maîtrise'} +${profBonus}`);
+      if (skillLvl==='expert') parts.push('avantage');
+      const eqTitle = ` title="${_esc(parts.join(' · '))}"`;
+      const profDot = skillLvl==='expert' ? ' <span style="color:#f4c430;font-size:.72em" title="Expertise — +2 & avantage">◉</span>'
+                    : skillLvl==='forme'  ? ' <span style="color:#7eb0ff;font-size:.72em" title="Maîtrisée — +2">◐</span>' : '';
       const hide = _searchIncludes(s.name, _skillFilter) ? '' : ' style="display:none"';
       return `<button class="vtt-skill-btn" data-skill="${_esc(s.name)}" data-vtt-fn="_vttRollSkill" data-vtt-args="${_esc(s.name)}|${s.stat}"${eqTitle}${hide}>
-          <span class="vtt-sk-name">${s.name}${eqBonus!==0?' <span style="color:#22c38e;font-size:.7em">●</span>':''}</span>
+          <span class="vtt-sk-name">${s.name}${eqBonus!==0?' <span style="color:#22c38e;font-size:.7em" title="Bonus d\'équipement">●</span>':''}${profDot}</span>
           <span class="vtt-sk-mod" style="color:${col}">${s.stat ? s.stat+' '+modStr : '—'}</span>
         </button>`;
     };

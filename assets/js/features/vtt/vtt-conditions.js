@@ -135,6 +135,13 @@ export function _vttConditionAdd(tokenId) {
 export async function _vttConditionApply(tokenId, condId) {
   const lib = CONDITION_BY_ID[condId]; if (!lib) return;
   const t = VS.tokens[tokenId]?.data; if (!t) return;
+  // Immunité (fiche → onglet Capacités) : la cible ne subit pas l'état du tout.
+  const _chApply = _resChar(t);
+  if (Array.isArray(_chApply?.resistances) && _chApply.resistances.some(r => r.k === 'imm' && _etatResMatch(r, condId, lib))) {
+    showNotif(`🛡 Cible immunisée à ${lib.icon} ${lib.label} — état non appliqué`, 'info');
+    closeModalDirect();
+    return;
+  }
   // Évite les doublons (même état déjà appliqué)
   const existing = (t.conditions || []).some(c => c.id === condId);
   if (existing) {
@@ -198,6 +205,34 @@ export async function _vttConditionRemove(tokenId, idx) {
   if (lib) showNotif(`${lib.icon} ${lib.label} retiré`, 'info');
 }
 
+// Une résistance d'état de la fiche correspond-elle à cet état posé ?
+// Match par id OU par libellé (robuste aux librairies d'états différentes).
+function _cNorm(s) { return String(s || '').trim().toLowerCase(); }
+function _etatResMatch(r, condId, lib) {
+  if (!r || r.cat !== 'etat') return false;
+  if (r.t === condId) return true;
+  const lbl = _cNorm(lib?.label);
+  if (!lbl) return false;
+  return _cNorm(r.label) === lbl || _cNorm(CONDITION_BY_ID[r.t]?.label) === lbl;
+}
+
+// Doc perso frais pour lire les résistances (VS.characters → repli STATE.characters).
+function _resChar(t) {
+  if (!t?.characterId) return null;
+  return VS.characters?.[t.characterId]
+    || (Array.isArray(STATE.characters) ? STATE.characters.find(x => x.id === t.characterId) : null);
+}
+
+// Combine deux modes de lancer (avantage/désavantage) — opposés = annulés.
+function _combineSaveMode(a, b) {
+  const na = a && a !== 'normal' ? a : '';
+  const nb = b && b !== 'normal' ? b : '';
+  if (!na) return nb || 'normal';
+  if (!nb) return na;
+  if (na === nb) return na;
+  return 'normal';
+}
+
 /** Lance un jet de sauvegarde pour tenter de finir l'état. */
 export async function _vttConditionSave(tokenId, idx) {
   const t = VS.tokens[tokenId]?.data; if (!t) return;
@@ -212,11 +247,39 @@ export async function _vttConditionSave(tokenId, idx) {
   const statSrc = ch || np || { stats: {} };
   const modVal = ch || np ? mod(statSrc) : 0;
   const conditionMode = _conditionStatRollMode(t, statKey, 'save');
+  // Maîtrise d'état de la fiche (onglet Capacités, c.resistances cat 'etat') :
+  // immunité = réussite garantie (aucun jet) · résistance = avantage · vulnérabilité = désavantage.
+  const _resCh = _resChar(t);
+  const _etatRes = Array.isArray(_resCh?.resistances) ? _resCh.resistances.find(r => _etatResMatch(r, cond.id, lib)) : null;
+  if (_etatRes?.k === 'imm') {
+    const statLbl0 = statShort(statKey) || statKey;
+    showNotif(`🛡 Immunisé contre « ${lib?.label || cond.id} » — réussite automatique, état retiré`, 'success');
+    _vttPublishOptimisticLog({
+      type: 'save', authorId: STATE.user?.uid || null,
+      authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
+      tokenName: _live(t).displayName || t.name,
+      characterImage: _live(t).displayImage || null,
+      ..._vttLogTargetFields(t),
+      conditionId: cond.id, conditionLabel: lib?.label || cond.id,
+      statLabel: statLbl0, immune: true, passed: true, dd: DD,
+      createdAt: serverTimestamp(),
+    });
+    const condsI = [...(t.conditions || [])]; condsI.splice(idx, 1);
+    const prevI = t.conditions || [];
+    _vttPatchTokenOptimistically(tokenId, { conditions: condsI });
+    updateDoc(_tokRef(tokenId), { conditions: condsI }).catch(error => {
+      _vttPatchTokenOptimistically(tokenId, { conditions: prevI });
+      console.error('[VTT] État non retiré (immunité) :', error);
+    });
+    return;
+  }
+  const _etatMode = _etatRes?.k === 'res' ? 'advantage' : _etatRes?.k === 'vul' ? 'disadvantage' : '';
+  const effMode = _combineSaveMode(conditionMode, _etatMode);
   const firstD20 = Math.floor(Math.random()*20)+1;
-  const secondD20 = conditionMode === 'advantage' || conditionMode === 'disadvantage'
+  const secondD20 = effMode === 'advantage' || effMode === 'disadvantage'
     ? Math.floor(Math.random()*20)+1 : null;
-  const initialD20 = conditionMode === 'advantage' ? Math.max(firstD20, secondD20)
-    : conditionMode === 'disadvantage' ? Math.min(firstD20, secondD20)
+  const initialD20 = effMode === 'advantage' ? Math.max(firstD20, secondD20)
+    : effMode === 'disadvantage' ? Math.min(firstD20, secondD20)
     : firstD20;
   const conditionRolls = secondD20 == null ? [firstD20] : [firstD20, secondD20];
   let d20 = initialD20;
@@ -229,8 +292,8 @@ export async function _vttConditionSave(tokenId, idx) {
   const passed = d20 !== 1 && (d20 === 20 || total >= DD);
   const statLbl = statShort(statKey) || statKey;
   const luckTxt = luck ? ` 🍀 relance ${luck.reroll}→${d20}` : '';
-  const modeTxt = conditionMode === 'advantage' ? ' · avantage'
-    : conditionMode === 'disadvantage' ? ' · désavantage' : '';
+  const modeTxt = effMode === 'advantage' ? ' · avantage'
+    : effMode === 'disadvantage' ? ' · désavantage' : '';
   showNotif(`🎲 JS ${statLbl}${modeTxt} : d20[${d20}]${modVal>=0?'+':''}${modVal} = ${total} vs DD ${DD}${luckTxt} → ${passed?'✅ Réussi — état retiré':'❌ Échec'}`, passed?'success':'error');
   // Log
   const logWrite = _vttPublishOptimisticLog({
@@ -242,7 +305,7 @@ export async function _vttConditionSave(tokenId, idx) {
     conditionId: cond.id, conditionLabel: lib?.label || cond.id,
     statLabel: statLbl, mod: modVal, d20,
     d20rolls: luck ? [...conditionRolls, luck.reroll] : (conditionRolls.length > 1 ? conditionRolls : null),
-    rollMode: conditionMode || 'normal', total, dd: DD, passed,
+    rollMode: effMode || 'normal', total, dd: DD, passed,
     createdAt: serverTimestamp(),
   });
   let conditionWrite = Promise.resolve();

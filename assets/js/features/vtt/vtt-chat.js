@@ -672,19 +672,33 @@ export function _renderChatLogImpl(msgs) {
     const passed = !!m.passed;
     const theme = passed ? 'saveok' : 'savefail';
     const modStr = (m.mod >= 0 ? '+' : '') + m.mod;
-    const badge = passed
-      ? `<span class="vtt-log-badge vtt-log-badge--ok">✅ RÉUSSI</span>`
-      : `<span class="vtt-log-badge vtt-log-badge--fail">❌ ÉCHEC</span>`;
+    const advBadge = _advBadge(m.rollMode === 'advantage' ? 'adv' : m.rollMode === 'disadvantage' ? 'dis' : null);
+    const badge = m.immune
+      ? `<span class="vtt-log-badge vtt-log-badge--ok">🛡 IMMUNISÉ</span>`
+      : passed
+        ? `<span class="vtt-log-badge vtt-log-badge--ok">✅ RÉUSSI</span>`
+        : `<span class="vtt-log-badge vtt-log-badge--fail">❌ ÉCHEC</span>`;
     const head = _header({
       srcImg: m.characterImage || null, srcName: m.tokenName || '?',
       label: m.sortLabel ? `JS vs ${m.sortLabel}` : `JS ${m.statLabel||''}`,
-      badges: badge, ts, sourceArgs: _targetArgs(m, 'combat'),
+      badges: badge + advBadge, ts, sourceArgs: _targetArgs(m, 'combat'),
     });
+    if (m.immune) {
+      const bodyI = `<div class="vtt-log-body">
+        <span class="vtt-log-icon">🛡</span>
+        <strong class="vtt-log-result" style="font-size:1.05rem;color:#86efac">Immunisé</strong>
+        ${m.conditionLabel ? `<span class="vtt-log-result-sub" style="color:#86efac;font-weight:700">→ ${_esc(m.conditionLabel)} sans effet</span>` : ''}
+      </div>`;
+      return `<div class="vtt-log vtt-log--saveok">${head}${bodyI}</div>`;
+    }
+    const diceStr = Array.isArray(m.d20rolls) && m.d20rolls.length === 2
+      ? _d20(m.d20, m.d20rolls)
+      : `d20[<strong>${m.d20}</strong>]`;
     const body = `<div class="vtt-log-body">
       <span class="vtt-log-icon">🛡</span>
       <strong class="vtt-log-result" style="font-size:1.15rem">${m.total}</strong>
       <span class="vtt-log-vs">vs DD ${m.dd}</span>
-      <span class="vtt-log-result-sub">d20[<strong>${m.d20}</strong>] ${modStr}${sub(m.statLabel||'')}</span>
+      <span class="vtt-log-result-sub">${diceStr} ${modStr}${sub(m.statLabel||'')}</span>
       ${!passed && m.conditionLabel
         ? `<span class="vtt-log-result-sub" style="color:#fca5a5;font-weight:700">→ subit ${_esc(m.conditionLabel)}</span>`
         : passed
@@ -765,6 +779,8 @@ export function _renderChatLogImpl(msgs) {
     const modStr   = m.rollMod > 0 ? `+${m.rollMod}` : m.rollMod < 0 ? `${m.rollMod}` : '';
     const bonusStr = m.rollBonus > 0 ? `+${m.rollBonus}` : m.rollBonus < 0 ? `${m.rollBonus}` : '';
     const equipStr = m.rollEquipBonus > 0 ? `+${m.rollEquipBonus}` : m.rollEquipBonus < 0 ? `${m.rollEquipBonus}` : '';
+    const skillStr = m.rollSkillBonus > 0 ? `+${m.rollSkillBonus}` : m.rollSkillBonus < 0 ? `${m.rollSkillBonus}` : '';
+    const skillLbl = m.rollSkillLevel === 'expert' ? 'expertise' : 'maîtrise';
     const badges = [
       m.gmOnly ? `<span class="vtt-log-badge vtt-log-badge--hidden" title="Jet caché — invisible des joueurs">🕶 Caché</span>` : '',
       m.isCrit ? `<span class="vtt-log-badge vtt-log-badge--crit">✨ CRIT</span>` : '',
@@ -782,7 +798,7 @@ export function _renderChatLogImpl(msgs) {
     const body = `<div class="vtt-log-body">
       <span class="vtt-log-icon">🎲</span>
       <strong class="vtt-log-result" style="color:${resultCol};font-size:1.3rem">${m.rollResult ?? '?'}</strong>
-      <span class="vtt-log-result-sub">${diceStr} ${modStr ? `${modStr}${sub(m.rollStat||'')}` : ''} ${equipStr ? `${equipStr}${sub('équip.')}` : ''} ${bonusStr ? `${bonusStr}${sub('bonus')}` : ''}</span>
+      <span class="vtt-log-result-sub">${diceStr} ${modStr ? `${modStr}${sub(m.rollStat||'')}` : ''} ${skillStr ? `${skillStr}${sub(skillLbl)}` : ''} ${equipStr ? `${equipStr}${sub('équip.')}` : ''} ${bonusStr ? `${bonusStr}${sub('bonus')}` : ''}</span>
     </div>`;
     return `<div class="vtt-log vtt-log--roll">${head}${body}</div>`;
   };

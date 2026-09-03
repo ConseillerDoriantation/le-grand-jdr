@@ -46,10 +46,11 @@ import {
   _csV3LedgerSetSearch, _csV3LedgerSetKind, _csV3LedgerSetAddKind,
   _csV3AddLedger, _csV3DeleteLedger, _csV3LedgerMore,
 } from './characters/ledger.js';
+import { renderCharCapacites } from './characters/capacites.js';
 import {
   renderCharJournal, getCurrentJournalSub,
   _bindNotesDnd, _bindQuetesDnd,
-  _csV3JournalSub, _csV3ToggleNote, _csV3SaveNoteTitle,
+  _csV3JournalSub, _csV3ToggleNote, _csV3SaveNoteTitle, _csV3CycleNoteCat,
   _csV3AddRelation, _csV3EditRelation,
   _csV3RelSent, _csV3RelPickNpc, _csV3SaveRelation, _csV3DeleteRelation,
 } from './characters/journal.js';
@@ -436,7 +437,7 @@ function _adminOwnerKey(c = {}) {
 //   combat · sorts · inv · compte · journal · profil
 // On garde le legacy resolveTab pour la rétro-compat des liens entrants.
 // ══════════════════════════════════════════════════════════════════════════════
-const V3_TABS = ['combat', 'sorts', 'inv', 'compte', 'journal', 'profil'];
+const V3_TABS = ['combat', 'capacites', 'sorts', 'inv', 'compte', 'journal', 'profil'];
 const V3_TAB_REMAP = {
   // anciens → nouveaux
   equipement: 'combat',
@@ -772,8 +773,9 @@ function _buildTabsHtml(c, v3Tab) {
   // Icône SVG du jeu maison (rendu homogène cross-OS vs émoji ; hérite currentColor).
   const _ico = (id) => `<svg class="cs-tab-svg" aria-hidden="true"><use href="./assets/img/icons.svg#icon-${id}"/></svg>`;
   return [
-    { k: 'combat',  ico: 'sword',       lbl: 'Combat' },
-    { k: 'sorts',   ico: 'sparkles',    lbl: 'Sorts',      badge: `${(c.deck_sorts||[]).filter(x=>x.actif).length}/${calcDeckMax(c)}` },
+    { k: 'combat',    ico: 'sword',       lbl: 'Combat' },
+    { k: 'capacites', ico: 'star',        lbl: 'Capacités' },
+    { k: 'sorts',     ico: 'sparkles',    lbl: 'Sorts',      badge: `${(c.deck_sorts||[]).filter(x=>x.actif).length}/${calcDeckMax(c)}` },
     { k: 'inv',     ico: 'bag',         lbl: 'Inventaire', badge: `${(c.inventaire||[]).length||''}` },
     { k: 'compte',  ico: 'coin',        lbl: 'Bourse' },
     { k: 'journal', ico: 'book',        lbl: 'Journal' },
@@ -1215,8 +1217,9 @@ function _renderTabV3(tab, c, canEdit) {
   if (samePanel && savedScroll > 0 && c?.id) _scrollByTab.set(_scrollKey(c.id, tab), savedScroll);
   const sub = getCurrentJournalSub() || 'notes';
   const renders = {
-    combat:  () => renderCharCombatV3(c, canEdit),
-    sorts:   () => renderCharDeck(c, canEdit),
+    combat:    () => renderCharCombatV3(c, canEdit),
+    capacites: () => renderCharCapacites(c, canEdit),
+    sorts:     () => renderCharDeck(c, canEdit),
     inv:     () => renderCharInventaireV3(c, canEdit),
     compte:  () => renderCharLedger(c, canEdit),
     journal: () => renderCharJournal(c, canEdit, sub),
@@ -2399,6 +2402,7 @@ registerActions({
   toggleQuete:             (btn)    => toggleQuete(Number(btn.dataset.idx)),
   deleteQuete:             (btn)    => deleteQuete(Number(btn.dataset.idx)),
   csV3ToggleNote:          (btn)    => _csV3ToggleNote(Number(btn.dataset.idx)),
+  csV3CycleNoteCat:        (btn)    => _csV3CycleNoteCat(Number(btn.dataset.idx)),
   deleteNote:              (btn)    => deleteNote(Number(btn.dataset.idx)),
   saveNote:                (btn)    => saveNote(Number(btn.dataset.idx)),
   csV3EditRelation:        (btn)    => _csV3EditRelation(btn.dataset.id, Number(btn.dataset.idx)),
