@@ -2439,9 +2439,73 @@ table.stats-tbl { width: 100%; border-collapse: collapse; font-variant-numeric: 
 .stats-topbar-in { max-width: none; margin: 0; padding: 16px 24px 0; }
 .stats-wrap { max-width: none; margin: 0; padding: 0 24px 40px; }
 
-/* Boutons outils empilés en colonne */
-.stats-tools { flex-direction: column; gap: 6px; align-items: stretch; }
-.stats-topbar-row .stats-tool-btn { justify-content: flex-start; height: 32px; }
+/* Outils regroupés horizontalement : ils ne dictent plus la hauteur du bandeau. */
+.stats-tools {
+  flex-direction: row;
+  align-items: center;
+  align-self: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-sunken);
+}
+.stats-tools-caption {
+  padding: 0 7px;
+  color: var(--text-dim);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.stats-topbar-row .stats-tool-btn {
+  position: relative;
+  justify-content: center;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  gap: 6px;
+}
+.stats-topbar-row .stats-tool-btn:hover {
+  border-color: transparent;
+  background: var(--surface-2);
+}
+.stats-tool-icon { width: 16px; display: inline-grid; place-items: center; line-height: 1; }
+.stats-tool-label { line-height: 1; }
+.stats-topbar-row .stats-tool-btn--manage {
+  margin-left: 5px;
+  border: 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--gold) 11%, transparent);
+}
+.stats-topbar-row .stats-tool-btn--manage::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 5px;
+  bottom: 5px;
+  width: 1px;
+  background: var(--border);
+}
+.stats-tools > .stats-tool-btn--manage:first-child { margin-left: 0; }
+.stats-tools > .stats-tool-btn--manage:first-child::before { display: none; }
+
+@media (max-width: 520px) {
+  .stats-topbar-in { gap: 8px; padding-top: 10px; }
+  .stats-topbar-row { flex-wrap: nowrap; }
+  .stats-brand { min-width: 0; flex-direction: column; align-items: flex-start; gap: 1px; }
+  .stats-brand h1 { font-size: 21px; }
+  .stats-brand small { max-width: 145px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stats-spacer { display: none; }
+  .stats-tools { margin-left: auto; flex: none; }
+  .stats-tools-caption, .stats-tool-label { display: none; }
+  .stats-topbar-row .stats-tool-btn { width: 31px; padding: 0; }
+  .stats-topbar-row .stats-tool-btn--manage { margin-left: 4px; }
+}
 
 /* Vignette mission : grande et reconnaissable, slot d'ancrage constant (56px) */
 .stats-scope-art { width: 56px; height: 56px; flex: none; display: flex; align-items: center; justify-content: center; }

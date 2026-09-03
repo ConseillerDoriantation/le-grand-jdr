@@ -202,6 +202,9 @@ function openQueteModal(idx = null) {
     ${modalSection('📜 Détails de la quête', `
       <div class="form-group" style="margin:0 0 .6rem"><label>Nom</label><input class="input-field" id="q-nom" value="${_esc(q?.nom || '')}" placeholder="La Crypte Maudite..."></div>
       <div class="form-group" style="margin:0 0 .6rem"><label>Type</label><input class="input-field" id="q-type" value="${_esc(q?.type || '')}" placeholder="Principale, Secondaire..."></div>
+      <div class="form-group" style="margin:0 0 .6rem"><label>Contexte <span style="opacity:.6">(qui · où · quand)</span></label><input class="input-field" id="q-meta" value="${_esc(q?.contexte || '')}" placeholder="Sylvanaras · Bosquet des Echos · pleine lune"></div>
+      <div class="form-group" style="margin:0 0 .6rem"><label>Récompense</label><input class="input-field" id="q-reward" value="${_esc(q?.recompense || '')}" placeholder="+500 XP · 80 or"></div>
+      <label class="form-group" style="margin:0 0 .6rem;display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="q-urgent" ${q?.urgent ? 'checked' : ''} style="width:auto"><span>⚠️ Urgente (mise en avant)</span></label>
       <div class="form-group" style="margin:0"><label>Description</label><textarea class="input-field" id="q-desc" rows="3" placeholder="Objectif...">${_esc(q?.description || '')}</textarea></div>`)}
     <button class="btn btn-gold" style="width:100%;margin-top:1rem" data-action="saveQuete" data-idx="${editIdx ?? ''}">${q ? 'Enregistrer' : 'Ajouter'}</button>
   `, { subtitle: q ? 'Mise à jour de l’objectif' : 'Nouvel objectif pour le personnage' });
@@ -219,6 +222,9 @@ export async function saveQuete(idx = null) {
   const next = {
     nom: document.getElementById('q-nom')?.value||'?',
     type: document.getElementById('q-type')?.value||'',
+    contexte: document.getElementById('q-meta')?.value||'',
+    recompense: document.getElementById('q-reward')?.value||'',
+    urgent: !!document.getElementById('q-urgent')?.checked,
     description: document.getElementById('q-desc')?.value||'',
     valide: !!prev?.valide,
   };

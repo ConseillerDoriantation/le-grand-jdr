@@ -141,6 +141,13 @@ export async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
   }));
 }
 
+// Maîtrise d'état de la fiche : matching robuste (id ou libellé) + combinaison de modes.
+const _seNorm = s => String(s || '').trim().toLowerCase();
+function _seCombineMode(a, b) {
+  const na = a && a !== 'normal' ? a : ''; const nb = b && b !== 'normal' ? b : '';
+  if (!na) return nb || 'normal'; if (!nb) return na; if (na === nb) return na; return 'normal';
+}
+
 /** Applique une affliction : JS Sa de la cible, buff selon slot si échec. */
 export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null, statsDelta = null } = {}) {
   const aff = opt.mods?.affliction; if (!aff) return;
@@ -179,11 +186,21 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
     const td = VS.tokens[tid]?.data; if (!td) return;
     const saveMod = _tokenStatMod(td, aff.saveStat);
     const conditionMode = _conditionStatRollMode(td, aff.saveStat, 'save');
+    // Maîtrise d'état de la CIBLE (fiche → onglet Capacités) : immunité = résiste
+    // d'office, résistance = avantage, vulnérabilité = désavantage au JS.
+    const _resTd = td.characterId ? (VS.characters?.[td.characterId] || (Array.isArray(STATE.characters) ? STATE.characters.find(x => x.id === td.characterId) : null)) : null;
+    const _etatLib = (mode === 'etat' && aff.etatId) ? CONDITION_BY_ID[aff.etatId] : null;
+    const _etatRes = (mode === 'etat' && Array.isArray(_resTd?.resistances))
+      ? _resTd.resistances.find(r => r.cat === 'etat' && (r.t === aff.etatId
+          || (_etatLib?.label && (_seNorm(r.label) === _seNorm(_etatLib.label) || _seNorm(CONDITION_BY_ID[r.t]?.label) === _seNorm(_etatLib.label)))))
+      : null;
+    const _immune = _etatRes?.k === 'imm';
+    const effMode = _seCombineMode(conditionMode, _etatRes?.k === 'res' ? 'advantage' : _etatRes?.k === 'vul' ? 'disadvantage' : '');
     const firstRoll = Math.floor(Math.random() * 20) + 1;
-    const secondRoll = conditionMode === 'advantage' || conditionMode === 'disadvantage'
+    const secondRoll = effMode === 'advantage' || effMode === 'disadvantage'
       ? Math.floor(Math.random() * 20) + 1 : null;
-    const initialRoll = conditionMode === 'advantage' ? Math.max(firstRoll, secondRoll)
-      : conditionMode === 'disadvantage' ? Math.min(firstRoll, secondRoll)
+    const initialRoll = effMode === 'advantage' ? Math.max(firstRoll, secondRoll)
+      : effMode === 'disadvantage' ? Math.min(firstRoll, secondRoll)
       : firstRoll;
     const conditionRolls = secondRoll == null ? [firstRoll] : [firstRoll, secondRoll];
     let roll = initialRoll;
@@ -193,10 +210,11 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       roll = luck.d20;
       tot = roll + saveMod;
     }
-    const success = roll === 20 || (roll !== 1 && tot >= aff.dd);
+    const success = _immune || roll === 20 || (roll !== 1 && tot >= aff.dd);
     const tgtName = _live(td).displayName ?? td.name;
-    const modeTxt = conditionMode === 'advantage' ? ' (avantage)'
-      : conditionMode === 'disadvantage' ? ' (désavantage)' : '';
+    const modeTxt = _immune ? ' (immunisé)'
+      : effMode === 'advantage' ? ' (avantage)'
+      : effMode === 'disadvantage' ? ' (désavantage)' : '';
     const rollStr = `JS ${statShortStr}${modeTxt} ${roll}${saveMod>=0?'+':''}${saveMod}=${tot} vs DD${aff.dd}`;
 
     // ── Log du JS dans le chat ──────────────────────────────────────────
@@ -220,13 +238,15 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       sortLabel: opt.label || '',
       statLabel: statShortStr, mod: saveMod, d20: roll,
       d20rolls: luck ? [...conditionRolls, luck.reroll] : (conditionRolls.length > 1 ? conditionRolls : null),
-      rollMode: conditionMode || 'normal', total: tot, dd: aff.dd,
-      passed: success,
+      rollMode: effMode || 'normal', total: tot, dd: aff.dd,
+      passed: success, immune: _immune,
       createdAt: serverTimestamp(),
     }).catch(() => {});
 
     if (success) {
-      showNotif(`🛡️ ${tgtName} résiste${luck ? ` · 🍀 relance ${luck.reroll}` : ''} · ${rollStr}`, 'info');
+      showNotif(_immune
+        ? `🛡 ${tgtName} est immunisé à ${_effectLbl} — aucun effet`
+        : `🛡️ ${tgtName} résiste${luck ? ` · 🍀 relance ${luck.reroll}` : ''} · ${rollStr}`, 'info');
       return;
     }
 

@@ -199,6 +199,27 @@ export function getCharDamageProfile(c) {
   return any ? out : null;
 }
 
+// Profil de dégâts COMPLET = équipement (getCharDamageProfile) + résistances
+// INNÉES de la fiche (c.resistances, catégorie « degat »), dédupliqué par type.
+// Non cumulable : un type présent des deux côtés n'est compté qu'une fois.
+// Forme identique à getCharDamageProfile → utilisable avec applyDamageTypeInteraction.
+const _RES_KIND_TO_PROFILE = { res: 'resistances', imm: 'immunites', vul: 'faiblesses', abs: 'absorptions' };
+export function getCharFullDamageProfile(c) {
+  const out = { resistances: [], immunites: [], absorptions: [], faiblesses: [] };
+  let any = false;
+  const eq = getCharDamageProfile(c);
+  if (eq) for (const k of _DMG_PROFILE_KEYS) for (const id of (eq[k] || [])) {
+    if (id && !out[k].includes(id)) { out[k].push(id); any = true; }
+  }
+  const innate = Array.isArray(c?.resistances) ? c.resistances : [];
+  for (const r of innate) {
+    if (r?.cat !== 'degat') continue;
+    const key = _RES_KIND_TO_PROFILE[r.k];
+    if (key && r.t && !out[key].includes(r.t)) { out[key].push(r.t); any = true; }
+  }
+  return any ? out : null;
+}
+
 function copyStatBonuses(item = {}) {
   return {
     fo:  getItemStatBonus(item, 'force'),

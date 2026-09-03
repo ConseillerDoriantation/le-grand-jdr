@@ -183,6 +183,16 @@
   min-width: 150px;
 }
 .sc-primary-actions .btn { justify-content: center; min-height: 35px; white-space: nowrap; }
+.sc-primary-actions .sc-remove-session {
+  color: #ff9a9f;
+  border-color: rgba(255,90,126,.32);
+  background: rgba(255,90,126,.07);
+}
+.sc-primary-actions .sc-remove-session:hover {
+  color: #ffc0c4;
+  border-color: rgba(255,90,126,.58);
+  background: rgba(255,90,126,.14);
+}
 .sc-enter-table {
   position: relative;
   min-width: 190px;

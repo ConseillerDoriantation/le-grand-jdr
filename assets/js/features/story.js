@@ -19,6 +19,7 @@ import { setHistoireCtx } from '../shared/histoire-ctx.js';
 import { characterAvatarHtml } from '../shared/portraits.js';
 import { storyParticipantsFromGroups, toggleQuestParticipant, dedupeQuestParticipants, questParticipantFromChar } from '../shared/participants.js';
 import { makeSortable } from '../shared/sortable-helper.js';
+import { removeQuestAgendaSessions } from '../shared/agenda-sessions.js';
 
 // ── Palettes ──────────────────────────────────────────────────────────────────
 const AXE_COLORS = [
@@ -364,7 +365,24 @@ async function _stGroupDelete(questId, missionId) {
   if (!await confirmModal(`Supprimer le groupe « ${q?.titre || 'Groupe'} » ?`)) return;
   try {
     await deleteFromCol('quests', questId);
-    showNotif('Groupe supprimé.', 'info');
+    let removedSessions=0;
+    let cleanupFailed=false;
+    try {
+      const agendaDoc=await getDocData('agenda_session','next').catch(()=>null);
+      const cleaned=removeQuestAgendaSessions(agendaDoc,questId);
+      removedSessions=cleaned.removed;
+      if (removedSessions) {
+        if (cleaned.sessions.length) await saveDoc('agenda_session','next',{ sessions:cleaned.sessions });
+        else await deleteFromCol('agenda_session','next');
+      }
+    } catch (cleanupError) {
+      cleanupFailed=true;
+      console.warn('[story] nettoyage séances du groupe',questId,cleanupError);
+      showNotif('Groupe supprimé, mais une date planifiée devra être retirée depuis le tableau de bord.', 'error');
+    }
+    if (!cleanupFailed) showNotif(removedSessions
+      ? `Groupe supprimé · ${removedSessions} séance${removedSessions>1?'s':''} planifiée${removedSessions>1?'s':''} retirée${removedSessions>1?'s':''}.`
+      : 'Groupe supprimé.', 'info');
     _stRefreshGroups(missionId);
   } catch (e) { notifySaveError(e); }
 }

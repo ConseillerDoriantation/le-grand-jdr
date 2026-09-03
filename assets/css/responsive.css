@@ -656,6 +656,7 @@
 #main-content[data-page="vtt"],
 #main-content[data-page="histoire"],
 #main-content[data-page="agenda"],
+#main-content[data-page="achievements"],
 #main-content[data-page="bestiaire"] {
   padding: 0 !important;
 }
@@ -678,11 +679,6 @@
 #main-content[data-page="collection"] .coll-title-line { justify-content: flex-start; }
 #main-content[data-page="collection"] .coll-head-counter { margin-left: 0; }
 #main-content[data-page="collection"] .coll-page-header:not(:has(.coll-head-counter)) { display: none; }
-
-#main-content[data-page="achievements"] .hall-content {
-  padding-left: 0 !important;
-  padding-right: 0 !important;
-}
 
 /* En-têtes métiers : même géométrie, sans effet de "hero" disparate. */
 #main-content[data-page="world"] .world-hero-panel,
