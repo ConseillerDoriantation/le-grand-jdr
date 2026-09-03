@@ -2,7 +2,7 @@
 // Permet d'ajouter des types via la DB sans redéployer.
 import { loadCollection } from '../../../data/firestore.js';
 
-const FALLBACK = [
+export const DEFAULT_PLACE_TYPES = [
   { id: 'region',   label: 'Région',            icon: '🗺️', color: '#8a7cbf', order: 5  },
   { id: 'ville',    label: 'Ville',             icon: '🏙️', color: '#4f8cff', order: 10 },
   { id: 'village',  label: 'Village',           icon: '🏘️', color: '#22c38e', order: 12 },
@@ -22,5 +22,5 @@ export async function listPlaceTypes() {
       return [...remote].sort((a, b) => (a.order || 0) - (b.order || 0));
     }
   } catch (_) { /* fallback silencieux */ }
-  return FALLBACK;
+  return DEFAULT_PLACE_TYPES;
 }

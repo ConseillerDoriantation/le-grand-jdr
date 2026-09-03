@@ -26,6 +26,8 @@ export function bindSidepanel(el) {
   on('selection:changed', render);
   on('places:changed', render);
   on('organizations:changed', render);
+  on('types:changed', render);
+  on('details:changed', render);
 
   panelEl.addEventListener('click', onClick);
   panelEl.addEventListener('input', onInput);

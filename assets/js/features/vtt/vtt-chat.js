@@ -186,6 +186,20 @@ export function _renderChatLogImpl(msgs) {
     if (m.beastId) return `bestiary|${m.beastId}`;
     return '';
   };
+  // Le portrait conservé dans un ancien journal peut être vide (ou avoir été
+  // volontairement omis lorsqu'il s'agissait d'une image data:/blob: trop
+  // lourde). Le token et les catalogues déjà chargés restent la source fiable.
+  const _sourceImage = m => {
+    const token = m?.sourceTokenId ? VS.tokens?.[m.sourceTokenId]?.data : null;
+    const liveImage = token ? _live(token)?.displayImage : null;
+    if (liveImage) return liveImage;
+    const entity = (m?.sourceCharacterId && VS.characters?.[m.sourceCharacterId])
+      || (m?.sourceNpcId && VS.npcs?.[m.sourceNpcId])
+      || (m?.sourceBeastId && VS.bestiary?.[m.sourceBeastId])
+      || null;
+    return entity?.photoURL || entity?.photo || entity?.avatar || entity?.imageUrl || entity?.image
+      || m?.characterImage || null;
+  };
   const _sourceLink = (args, title = 'Ouvrir la source') => args
     ? `<button class="vtt-log-source-btn" data-vtt-fn="_vttOpenSource" data-vtt-args="${_esc(args)}" title="${_esc(title)}">↗</button>`
     : '';
@@ -328,7 +342,7 @@ export function _renderChatLogImpl(msgs) {
     const defenderToken = m.defenderTokenId ? VS.tokens?.[m.defenderTokenId]?.data : null;
     const defenderImage = m.defenderImage || (defenderToken ? _live(defenderToken)?.displayImage : null);
     const head = _header({
-      srcImg: m.characterImage, srcName: m.attackerName || m.authorName || '?',
+      srcImg: _sourceImage(m), srcName: m.attackerName || m.authorName || '?',
       tgtImg: defenderImage, tgtName: m.defenderName,
       label:  m.optLabel, badges, ts,
       sourceArgs: _sourceArgs(m, m.isHeal ? 'sorts' : 'combat'),
@@ -572,7 +586,7 @@ export function _renderChatLogImpl(msgs) {
     ].join('');
 
     const head = _header({
-      srcImg: m.characterImage, srcName: m.attackerName || m.authorName || '?',
+      srcImg: _sourceImage(m), srcName: m.attackerName || m.authorName || '?',
       tgtName: `${(m.targets||[]).length} cibles`,
       label:   m.optLabel, badges, ts, sourceArgs: _sourceArgs(m, m.isHeal ? 'sorts' : 'combat'),
     });
@@ -627,7 +641,7 @@ export function _renderChatLogImpl(msgs) {
     const pmBadge = m.pmCost > 0
       ? `<span class="vtt-log-badge vtt-log-badge--pm">−${m.pmCost} PM</span>` : '';
     const head = _header({
-      srcImg: m.characterImage, srcName: m.casterName || m.authorName || '?',
+      srcImg: _sourceImage(m), srcName: m.casterName || m.authorName || '?',
       tgtName: m.targetName, label: m.optLabel,
       badges: pmBadge, ts, sourceArgs: _sourceArgs(m, 'sorts'), targetArgs: _targetArgs(m, 'combat'),
     });
@@ -641,7 +655,7 @@ export function _renderChatLogImpl(msgs) {
   /** Annonce d'affliction : "A lance Silence sur B" */
   const renderAfflictionCast = (m, i, ts) => {
     const head = _header({
-      srcImg: m.characterImage, srcName: m.casterName || m.authorName || '?',
+      srcImg: _sourceImage(m), srcName: m.casterName || m.authorName || '?',
       tgtName: m.targetName, label: m.optLabel,
       badges: `<span class="vtt-log-badge" style="color:#c4b5fd;background:rgba(180,127,255,.18)">🛡 JS ${_esc(m.statLabel||'?')} DD ${m.dd}</span>`,
       ts, sourceArgs: _sourceArgs(m, 'sorts'), targetArgs: _targetArgs(m, 'combat'),
