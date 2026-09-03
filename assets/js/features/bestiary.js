@@ -20,7 +20,6 @@ import { pickImageFile } from '../shared/image-upload.js';
 import { openShopPicker, getRareteColor } from '../shared/shop-picker.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import { registerActions } from '../core/actions.js';
-import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { spellActionCardHtml } from '../shared/spell-action-card.js';
 import { DAMAGE_RELATIONS } from '../shared/damage-profile.js';
@@ -74,6 +73,19 @@ function _isViewingPlayer() {
 // joueur) on rend la fiche à trous.
 function _isAdminView() {
   return STATE.isAdmin && STORE.role !== 'player';
+}
+
+// L'ordre manuel ne concerne que le recueil principal complet. Désactiver le
+// drag pendant une recherche/filtration évite d'enregistrer un ordre partiel
+// difficile à comprendre (et de déplacer involontairement les fiches masquées).
+function _canReorderBestiary() {
+  return _isAdminView()
+    && STORE.bestiaireId === 'main'
+    && STORE.currentCol === 'bestiary'
+    && !STORE.searchVal
+    && !STORE.filterType
+    && !STORE.filterRang
+    && !STORE.filterPrep;
 }
 
 function _bstOrderValue(c) {
@@ -1179,7 +1191,7 @@ function _mergeBestiaryVisibleOrder(visibleOrder) {
 }
 
 async function _persistBestiaryManualOrder(visibleOrder) {
-  if (!_isAdminView() || !visibleOrder.length) return false;
+  if (!_canReorderBestiary() || visibleOrder.length !== STORE.creatures.length) return false;
   const col = STORE.currentCol || 'bestiary';
   const fullOrder = _mergeBestiaryVisibleOrder(visibleOrder);
   const orderById = new Map(fullOrder.map((id, idx) => [id, idx]));
@@ -1199,7 +1211,7 @@ async function _persistBestiaryManualOrder(visibleOrder) {
 
 function _mountBestiarySortable() {
   _destroyBestiarySortable();
-  if (!_isAdminView()) return;
+  if (!_canReorderBestiary()) return;
 
   const grid = document.querySelector('.bst-grid.bst-sortable');
   if (!grid) return;
@@ -1209,6 +1221,10 @@ function _mountBestiarySortable() {
     prefix: 'bst',
     animation: 120,
     draggable: '.bst-sortable-item',
+    handle: '.bst-bc-drag',
+    // Le filtre partagé contient `button`. Or une carte du bestiaire est elle-même
+    // un bouton : Sortable remontait jusqu'à sa racine et annulait tout drag.
+    filter: 'a, input, select, textarea, .btn, .btn-icon, [data-no-drag]',
     onStart: () => {
       document.body.classList.add('bst-dragging');
       _bstDragBlockClick = true;
@@ -1491,6 +1507,7 @@ function _render() {
   const allTypes = [...new Set(pool.map(c => c.type || '').filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
   const filtered = STORE.creatures.filter(c => _beastMatchesFilters(c));
   const hasFilters = Boolean(STORE.searchVal || STORE.filterType || STORE.filterRang || STORE.filterPrep);
+  const canReorder = _canReorderBestiary();
   const byRang = Object.fromEntries(BESTIARY_RANKS.map(r => [r.id, 0]));
   pool.forEach(c => { const r = RANG_STYLE[c.rang] ? c.rang : _defaultRankId(); byRang[r] = (byRang[r] || 0) + 1; });
 
@@ -1555,8 +1572,13 @@ function _render() {
     ${STORE.searchVal ? `<button class="clr" data-bst-action="clearSearch" title="Effacer">×</button>` : `<kbd>/</kbd>`}
   </div>`;
 
+  const reorderHint = canReorder
+    ? ` · <span class="bst-drag-key">⠿</span> <b>glisser pour réordonner</b>`
+    : (admin && STORE.bestiaireId === 'main' && hasFilters
+      ? ` · <b>réinitialiser les filtres pour réordonner</b>`
+      : '');
   const gridnote = admin
-    ? `<span class="kb">/</span> chercher · <span class="kb">↑↓←→</span> parcourir · <span class="kb">↵</span> ouvrir · <b>clic droit</b> sur une vignette pour cacher, dupliquer ou supprimer`
+    ? `<span class="kb">/</span> chercher · <span class="kb">↑↓←→</span> parcourir · <span class="kb">↵</span> ouvrir${reorderHint} · <b>clic droit</b> pour gérer une fiche`
     : `<span class="kb">/</span> chercher · <span class="kb">↵</span> ouvrir · dans la fiche, <b>chaque « ? » se remplit au clic</b> et <span class="kb">↵</span> saute au trou suivant`;
 
   content.innerHTML = `
@@ -1581,8 +1603,8 @@ function _render() {
       <div class="bst-gridnote">${gridnote}</div>
       <div class="bst-main ${STORE.activeId ? '' : 'solo'}" id="bst-main">
         <section>
-          <div class="bst-grid${admin ? ' bst-sortable' : ''}">
-            ${filtered.length ? filtered.map(c => _renderCard(c)).join('') : `<div class="bst-emptyg"><b>${STORE.creatures.length ? 'Aucun résultat' : 'Recueil vide'}</b>${STORE.searchVal ? `Rien ne correspond à « ${_esc(STORE.searchVal)} ».` : (admin ? 'Ajoute une créature pour commencer.' : 'Reviens quand tu auras rencontré des créatures.')}</div>`}
+          <div class="bst-grid${canReorder ? ' bst-sortable' : ''}">
+            ${filtered.length ? filtered.map(c => _renderCard(c, canReorder)).join('') : `<div class="bst-emptyg"><b>${STORE.creatures.length ? 'Aucun résultat' : 'Recueil vide'}</b>${STORE.searchVal ? `Rien ne correspond à « ${_esc(STORE.searchVal)} ».` : (admin ? 'Ajoute une créature pour commencer.' : 'Reviens quand tu auras rencontré des créatures.')}</div>`}
           </div>
         </section>
         <aside class="bst-panel-slot" id="bst-panel-slot">${STORE.activeId ? _renderPanel(STORE.creatures.find(c => c.id === STORE.activeId)) : ''}</aside>
@@ -1646,14 +1668,14 @@ function _bstRestoreFocusState(root, state) {
 }
 
 // â”€â”€ Card crÃ©ature â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function _renderCard(c) {
+function _renderCard(c, sortable = _canReorderBestiary()) {
   const rs = _rankStyle(c.rang || _defaultRankId());
   const admin = _isAdminView();
   const hard = admin ? _beastHardAlerts(c) : [];
   const pct = admin ? 0 : _bstCarnetPct(c).pct;
   const sub = [c.type, c.environnement].filter(Boolean).join(' · ') || 'Sans classification';
   const isActive = c.id === STORE.activeId;
-  return `<button class="bst-bc${isActive ? ' on' : ''}${c.hidden && admin ? ' hid' : ''}${admin ? ' bst-sortable-item' : ''}"
+  return `<button class="bst-bc${isActive ? ' on' : ''}${c.hidden && admin ? ' hid' : ''}${sortable ? ' bst-sortable-item' : ''}"
     style="--rc:${rs.color}" data-beast-id="${_esc(c.id)}" data-bst-action="open" data-id="${_esc(c.id)}">
     <span class="bst-bc-r"></span>
     <span class="bst-bc-m">
@@ -1666,7 +1688,7 @@ function _renderCard(c) {
       ${!admin ? _bstRing(pct) : ''}
     </span>
     <span class="bst-bc-b">
-      <span class="bst-bc-n"><i></i><span>${_bstHighlight(c.nom || '?')}</span></span>
+      <span class="bst-bc-n"><i></i><span class="bst-bc-name">${_bstHighlight(c.nom || '?')}</span>${sortable ? `<span class="bst-bc-drag" title="Glisser pour déplacer" aria-hidden="true">⠿</span>` : ''}</span>
       <span class="bst-bc-t">${_esc(sub)}</span>
     </span>
   </button>`;
