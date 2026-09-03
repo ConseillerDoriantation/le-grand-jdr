@@ -11070,9 +11070,7 @@ body .modal:has(.cs-build-modal) {
   position: relative;
 }
 .cs-v3 .weap-card.main {
-  border-color: rgba(79,140,255,.30);
-  border-left: 3px solid var(--gold-2, #7eb0ff);
-  box-shadow: 0 0 0 1px rgba(79,140,255,.08) inset;
+  border-color: color-mix(in srgb, var(--gold) 34%, var(--border));
 }
 .cs-v3 .weap-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .cs-v3 .weap-slot {
@@ -11155,8 +11153,7 @@ body .modal:has(.cs-build-modal) {
   min-height: 78px;
 }
 .cs-v3 .armor-card.equipped {
-  border-color: rgba(244,196,48,.30);
-  background: rgba(244,196,48,.04);
+  border-color: var(--border-strong);
 }
 .cs-v3 .armor-card.empty {
   border-style: dashed; opacity: .65;
