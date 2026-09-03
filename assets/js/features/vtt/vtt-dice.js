@@ -3,13 +3,13 @@
 // ══════════════════════════════════════════════════════════════════════════════
 // Extrait de vtt.js (Phase 1 du découpage, voir docs/vtt-decomposition.md).
 // État local (formule en cours, bonus, mode). Le jet est diffusé dans le log VTT
-// (collection vttLog via _logCol importé de vtt.js).
+// (collection vttLog, avec rendu local immédiat puis confirmation Firestore).
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { addDoc, serverTimestamp } from '../../config/firebase.js';
+import { serverTimestamp } from '../../config/firebase.js';
 import { STATE } from '../../core/state.js';
 import { showNotif } from '../../shared/notifications.js';
-import { _logCol } from './vtt-refs.js';   // ref Firestore du log VTT (leaf)
+import { _vttPublishOptimisticLog } from './vtt-chat.js';
 
 // ── État local (lanceur libre) ──────────────────────────────────────
 let _diceFormula   = {};        // { faces→count } ex: { 20:2, 6:1 }
@@ -170,7 +170,7 @@ function _vttDiceRoll(keepPanel) {
   else if (_diceFreeBonus<0) fmtParts.push(String(_diceFreeBonus));
   const formula = fmtParts.join('+');
 
-  addDoc(_logCol(), {
+  _vttPublishOptimisticLog({
     type:'dice-free', authorId:STATE.user?.uid||null, authorName,
     formula, groups, bonus:_diceFreeBonus||0, mode:_diceFreeMode, total,
     createdAt:serverTimestamp(),

@@ -9,18 +9,19 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
-import { updateDoc, addDoc, serverTimestamp } from '../../config/firebase.js';
+import { updateDoc, serverTimestamp } from '../../config/firebase.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _esc } from '../../shared/html.js';
 import { getMod, statShort } from '../../shared/char-stats.js';
 import { openModal, closeModalDirect } from '../../shared/modal.js';
 import { CONDITION_DEFAULT_LIBRARY } from '../../shared/conditions.js';
-import { _tokRef, _logCol } from './vtt-refs.js';
+import { _tokRef } from './vtt-refs.js';
 import { _live } from './vtt-effective.js';
 import { _renderInspectorSoon } from './vtt-inspector.js';
+import { _vttPublishOptimisticLog } from './vtt-chat.js';
 import {
   CONDITION_LIBRARY, CONDITION_BY_ID, _loadConditionsOverrides, _consumeLuckyReroll,
-  _conditionStatRollMode, _vttConditionsBeforeStateApplication, _vttLogTargetFields,
+  _conditionStatRollMode, _vttConditionsBeforeStateApplication, _vttLogTargetFields, _vttPatchTokenOptimistically,
 } from './vtt.js';
 
 function getVttConditionLibrary() {
@@ -164,14 +165,16 @@ export async function _vttConditionApply(tokenId, condId) {
   };
   const baseConds = await _vttConditionsBeforeStateApplication({ ...t, id: tokenId }, lib);
   const newConds = [...baseConds, cond];
+  const previous = t.conditions || [];
+  _vttPatchTokenOptimistically(tokenId, { conditions: newConds });
+  closeModalDirect();
   try {
     await updateDoc(_tokRef(tokenId), { conditions: newConds });
   } catch (error) {
+    _vttPatchTokenOptimistically(tokenId, { conditions: previous });
     showNotif(`Impossible d'appliquer ${lib.label} : ${error?.message || error}`, 'error');
     return;
   }
-  if (VS.tokens[tokenId]?.data) VS.tokens[tokenId].data.conditions = newConds;
-  closeModalDirect();
   const durLbl = isConsumed ? ' (1 coup)'
     : (expiresAtRound != null || pendingDuration != null) ? ` (${dur} tour${dur>1?'s':''})` : '';
   showNotif(`${lib.icon} ${lib.label} appliqué${durLbl}`, 'success');
@@ -185,7 +188,12 @@ export async function _vttConditionRemove(tokenId, idx) {
   const conds = [...(t.conditions || [])];
   const removed = conds[idx]; if (!removed) return;
   conds.splice(idx, 1);
-  await updateDoc(_tokRef(tokenId), { conditions: conds }).catch(() => {});
+  const previous = t.conditions || [];
+  _vttPatchTokenOptimistically(tokenId, { conditions: conds });
+  await updateDoc(_tokRef(tokenId), { conditions: conds }).catch(error => {
+    _vttPatchTokenOptimistically(tokenId, { conditions: previous });
+    console.error('[VTT] État non retiré :', error);
+  });
   const lib = CONDITION_BY_ID[removed.id];
   if (lib) showNotif(`${lib.icon} ${lib.label} retiré`, 'info');
 }
@@ -225,7 +233,7 @@ export async function _vttConditionSave(tokenId, idx) {
     : conditionMode === 'disadvantage' ? ' · désavantage' : '';
   showNotif(`🎲 JS ${statLbl}${modeTxt} : d20[${d20}]${modVal>=0?'+':''}${modVal} = ${total} vs DD ${DD}${luckTxt} → ${passed?'✅ Réussi — état retiré':'❌ Échec'}`, passed?'success':'error');
   // Log
-  await addDoc(_logCol(), {
+  const logWrite = _vttPublishOptimisticLog({
     type: 'save', authorId: STATE.user?.uid||null,
     authorName: STATE.profile?.pseudo||STATE.profile?.prenom||'?',
     tokenName: _live(t).displayName || t.name,
@@ -236,11 +244,18 @@ export async function _vttConditionSave(tokenId, idx) {
     d20rolls: luck ? [...conditionRolls, luck.reroll] : (conditionRolls.length > 1 ? conditionRolls : null),
     rollMode: conditionMode || 'normal', total, dd: DD, passed,
     createdAt: serverTimestamp(),
-  }).catch(()=>{});
+  });
+  let conditionWrite = Promise.resolve();
   if (passed) {
     const conds = [...(t.conditions || [])]; conds.splice(idx, 1);
-    await updateDoc(_tokRef(tokenId), { conditions: conds }).catch(() => {});
+    const previous = t.conditions || [];
+    _vttPatchTokenOptimistically(tokenId, { conditions: conds });
+    conditionWrite = updateDoc(_tokRef(tokenId), { conditions: conds }).catch(error => {
+      _vttPatchTokenOptimistically(tokenId, { conditions: previous });
+      console.error('[VTT] État non retiré après sauvegarde :', error);
+    });
   }
+  await Promise.all([logWrite, conditionWrite]);
 }
 
 /** Modal d'édition d'un état (source / DD / stat / durée). */
@@ -298,7 +313,12 @@ export async function _vttConditionEditSave(tokenId, idx) {
   const expiresAtRound = turns > 0 && round > 0 ? round + turns - 1 : null;
   const conds = [...(t.conditions || [])];
   conds[idx] = { ...cond, source, saveDC, saveStat: saveDC ? saveStat : null, expiresAtRound };
-  await updateDoc(_tokRef(tokenId), { conditions: conds }).catch(() => {});
+  const previous = t.conditions || [];
+  _vttPatchTokenOptimistically(tokenId, { conditions: conds });
   closeModalDirect();
+  await updateDoc(_tokRef(tokenId), { conditions: conds }).catch(error => {
+    _vttPatchTokenOptimistically(tokenId, { conditions: previous });
+    console.error('[VTT] État non mis à jour :', error);
+  });
   showNotif('État mis à jour', 'success');
 }

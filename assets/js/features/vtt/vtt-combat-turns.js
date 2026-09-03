@@ -12,12 +12,14 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
-import { db, updateDoc, setDoc, addDoc, serverTimestamp, writeBatch, deleteField } from '../../config/firebase.js';
+import { db, updateDoc, setDoc, serverTimestamp, writeBatch, deleteField } from '../../config/firebase.js';
 import { showNotif } from '../../shared/notifications.js';
-import { _sesRef, _tokRef, _logCol } from './vtt-refs.js';
+import { _sesRef, _tokRef } from './vtt-refs.js';
 import { _live } from './vtt-effective.js';
 import { normalizeTokenTurnOrder } from './vtt-token-visual.js';
 import { bumpHeal } from '../../shared/stats.js';
+import { _vttPublishOptimisticLog } from './vtt-chat.js';
+import { _renderCombatTrackerSoon } from './vtt-combat-tracker.js';
 import {
   CONDITION_BY_ID, _rollDiceDetailed, _setHp, _persistInvocationState,
   _vttTriggerConcentrationSave, _vttBreakConcentrationEffects, _vttExpireSpellZones,
@@ -39,27 +41,41 @@ function _turnOrderForActivePage() {
 async function _saveTurnOrder(order, activeTokenId=VS.session?.combat?.activeTokenId ?? null) {
   const pageId=VS.activePage?.id;
   if (!pageId) return;
+  VS.session ||= {};
   const turnOrders={...(VS.session?.combat?.turnOrders||{}),[pageId]:order};
-  await setDoc(_sesRef(),{combat:{...VS.session?.combat,turnOrders,activeTokenId}},{merge:true})
-    .catch(()=>showNotif("Impossible d’enregistrer l’ordre de passage",'error'));
+  const previous = VS.session?.combat || {};
+  VS.session.combat = { ...previous, turnOrders, activeTokenId };
+  _renderCombatTrackerSoon();
+  await setDoc(_sesRef(),{combat:VS.session.combat},{merge:true}).catch(error => {
+    VS.session.combat = previous;
+    _renderCombatTrackerSoon();
+    showNotif("Impossible d’enregistrer l’ordre de passage",'error');
+    throw error;
+  });
 }
 
 export async function _vttResetTurn(id) {
   if (!STATE.isAdmin) return;
+  const token = VS.tokens[id]?.data;
+  if (!token) return;
+  const previous = {
+    movedThisTurn: token.movedThisTurn,
+    movedCells: token.movedCells,
+    bonusMvt: token.bonusMvt,
+    moveOrigin: token.moveOrigin,
+    attackedThisTurn: token.attackedThisTurn,
+    bonusActionThisTurn: token.bonusActionThisTurn,
+    reactionThisTurn: token.reactionThisTurn,
+  };
+  Object.assign(token, { movedThisTurn: false, movedCells: 0, bonusMvt: 0, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false });
+  delete token.moveOrigin;
+  _renderCombatTrackerSoon();
   try {
     await updateDoc(_tokRef(id), { movedThisTurn: false, movedCells: 0, bonusMvt: 0, moveOrigin: deleteField(), attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false });
-    const token = VS.tokens[id]?.data;
-    if (token) {
-      token.movedThisTurn = false;
-      token.movedCells = 0;
-      token.bonusMvt = 0;
-      token.attackedThisTurn = false;
-      token.bonusActionThisTurn = false;
-      token.reactionThisTurn = false;
-      delete token.moveOrigin;
-    }
     showNotif('Tour réinitialisé', 'success');
   } catch {
+    Object.assign(token, previous);
+    _renderCombatTrackerSoon();
     showNotif('Erreur reset tour', 'error');
   }
 }
@@ -68,8 +84,14 @@ export async function _vttToggleTurnFlag(id, field) {
   if (!STATE.isAdmin || !["bonusActionThisTurn", "reactionThisTurn"].includes(field)) return;
   const token = VS.tokens[id]?.data;
   if (!token) return;
-  await updateDoc(_tokRef(id), { [field]: !token[field] })
-    .catch(() => showNotif("Erreur de suivi du tour", "error"));
+  const previous = !!token[field];
+  token[field] = !previous;
+  _renderCombatTrackerSoon();
+  await updateDoc(_tokRef(id), { [field]: token[field] }).catch(() => {
+    token[field] = previous;
+    _renderCombatTrackerSoon();
+    showNotif("Erreur de suivi du tour", "error");
+  });
 }
 
 export async function _vttSetActiveTurn(id) {
@@ -106,8 +128,20 @@ export async function _vttNextActiveTurn() {
 
 export async function _vttToggleCombat() {
   if (!STATE.isAdmin) return;
+  VS.session ||= {};
   const active=!VS.session?.combat?.active;
-  await setDoc(_sesRef(),{combat:{...VS.session?.combat,active,round:active?1:0,activeTokenId:null}},{merge:true});
+  const previous = VS.session?.combat || {};
+  const next = { ...previous, active, round:active?1:0, activeTokenId:null };
+  VS.session.combat = next;
+  _renderCombatTrackerSoon();
+  try {
+    await setDoc(_sesRef(),{combat:next},{merge:true});
+  } catch (error) {
+    VS.session.combat = previous;
+    _renderCombatTrackerSoon();
+    showNotif('Impossible de modifier le combat.', 'error');
+    return;
+  }
   if (active) {
     const b=writeBatch(db);
     // Au démarrage du combat (round 1), on convertit les conditions à durée
@@ -139,21 +173,33 @@ export async function _vttToggleCombat() {
 }
 export async function _vttNextRound() {
   if (!STATE.isAdmin) return;
+  VS.session ||= {};
   // Fonctionne AUSSI hors combat : « passer un tour » égrène les durées (états,
   // buffs, invocations à durée) et applique les ticks DoT/Régén, SANS forcer
   // l'entrée en combat (on préserve l'état actif courant). En combat : inchangé.
   const wasActive = !!VS.session?.combat?.active;
   const round=(VS.session?.combat?.round ?? 0)+1;
-  await setDoc(_sesRef(),{combat:{...VS.session?.combat,active:wasActive,round,activeTokenId:null}},{merge:true});
+  const previousCombat = VS.session?.combat || {};
+  const nextCombat = { ...previousCombat, active:wasActive, round, activeTokenId:null };
+  VS.session.combat = nextCombat;
+  _renderCombatTrackerSoon();
+  try {
+    await setDoc(_sesRef(),{combat:nextCombat},{merge:true});
+  } catch (error) {
+    VS.session.combat = previousCombat;
+    _renderCombatTrackerSoon();
+    showNotif('Impossible de passer au round suivant.', 'error');
+    return;
+  }
 
   // ── Application des effets périodiques en début de round (avant cleanup) ──
   // DoT : dégâts/tour · Regen : soin/tour
   const dotNotifs = [];
-  for (const id of Object.keys(VS.tokens)) {
+  await Promise.all(Object.keys(VS.tokens).map(async id => {
     const td = VS.tokens[id]?.data;
     const dots = (td?.buffs || []).filter(b => (b.type === 'dot' || b.type === 'regen')
       && (b.expiresAtRound == null || round <= b.expiresAtRound));
-    if (!dots.length) continue;
+    if (!dots.length) return;
     let totalDmg = 0;
     let totalHeal = 0;
     const dmgRolls = [];
@@ -181,7 +227,7 @@ export async function _vttNextRound() {
       const newHp = Math.max(0, curHp - totalDmg);
       await _setHp(td, newHp).catch(() => {});
       dotNotifs.push(`🩸 ${totalDmg} dégâts DoT → ${tgtName}`);
-      await addDoc(_logCol(), {
+      await _vttPublishOptimisticLog({
         type: 'dot-tick',
         authorId: STATE.user?.uid || null,
         authorName: STATE.profile?.pseudo || STATE.profile?.prenom || 'MJ',
@@ -198,7 +244,7 @@ export async function _vttNextRound() {
       const afterDmg = Math.max(0, curHp - totalDmg);
       const newHp = Math.min(hpMax, afterDmg + totalHeal);
       const effectiveHeal = Math.max(0, newHp - afterDmg);
-      if (effectiveHeal <= 0) continue;
+      if (effectiveHeal <= 0) return;
       await _setHp(td, newHp).catch(() => {});
       // Statistiques : soin effectif attribué aux soigneurs (au prorata du tick).
       const _regenBuffs = dots.filter(d => d.type === 'regen');
@@ -209,7 +255,7 @@ export async function _vttNextRound() {
         if (_hcId && share > 0) bumpHeal(_hcId, hc.name, share);
       });
       dotNotifs.push(`💚 ${effectiveHeal} PV Régénération → ${tgtName}`);
-      await addDoc(_logCol(), {
+      await _vttPublishOptimisticLog({
         type: 'dot-tick',
         isHeal: true,
         authorId: STATE.user?.uid || null,
@@ -221,7 +267,7 @@ export async function _vttNextRound() {
         createdAt: serverTimestamp(),
       }).catch(() => {});
     }
-  }
+  }));
 
   const b=writeBatch(db);
   const expiredNotifs = [];
