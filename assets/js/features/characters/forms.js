@@ -33,25 +33,76 @@ function flashEl(el) {
   el.classList.add('cs-save-flash');
 }
 
+// MAJ du DOM des barres vitales sans re-render complet. Utilise EXACTEMENT les
+// mêmes classes que le rendu (`vital-bar-fill low/mid` + `.vital.hp.danger`) afin
+// que le clignotement « PV bas » s'active/se désactive dynamiquement (et pas
+// seulement au rechargement).
+function _paintVital(stat, newVal, maxVal) {
+  const p = pct(newVal, maxVal);
+  if (stat === 'pvActuel') {
+    const valEl = document.getElementById('pv-val');
+    const barEl = document.getElementById('pv-bar');
+    const boxEl = document.getElementById('vital-hp');
+    if (valEl) { valEl.textContent = newVal; flashEl(valEl); }
+    if (barEl) { barEl.style.width = p + '%'; barEl.className = 'vital-bar-fill ' + (p < 25 ? 'low' : p < 50 ? 'mid' : ''); }
+    if (boxEl) boxEl.classList.toggle('danger', p < 25);
+  } else {
+    const valEl = document.getElementById('pm-val');
+    const barEl = document.getElementById('pm-bar');
+    if (valEl) { valEl.textContent = newVal; flashEl(valEl); }
+    if (barEl) barEl.style.width = p + '%';
+  }
+}
+
+// Applique une valeur ABSOLUE de PV/PM courant : clamp, sauvegarde + MAJ DOM.
+// PV : le VTT lit le champ `hp` → on l'écrit aussi pour connecter fiche ↔ VTT
+// (comme le PM écrit déjà `pm`/`pmActuel`).
+export async function setVitalCurrent(stat, newValRaw, charId) {
+  const c = getCharacterById(charId);
+  if (!c) return;
+  const maxVal = stat === 'pvActuel' ? calcPVMax(c) : calcPMMax(c);
+  const newVal = Math.max(0, Math.min(maxVal, parseInt(newValRaw, 10) || 0));
+  c[stat] = newVal;
+  if (stat === 'pvActuel') { c.hp = newVal; await trySave('characters', c.id, { pvActuel: newVal, hp: newVal }); }
+  else                     { c.pm = newVal; await trySave('characters', c.id, { pmActuel: newVal, pm: newVal }); }
+  _paintVital(stat, newVal, maxVal);
+}
+
 export async function adjustStat(stat, delta, charId) {
   const c = getCharacterById(charId);
   if (!c) return;
-  const maxVal = stat==='pvActuel' ? calcPVMax(c) : calcPMMax(c);
-  const cur = c[stat]??maxVal;
-  const newVal = Math.max(0, Math.min(maxVal, cur+delta));
-  c[stat] = newVal;
-  await trySave('characters', c.id, {[stat]: newVal});
+  const maxVal = stat === 'pvActuel' ? calcPVMax(c) : calcPMMax(c);
+  const cur = c[stat] ?? maxVal;
+  await setVitalCurrent(stat, cur + delta, charId);
+}
 
-  const p = pct(newVal, maxVal);
-  if (stat==='pvActuel') {
-    const valEl=document.getElementById('pv-val'), barEl=document.getElementById('pv-bar');
-    if(valEl){valEl.textContent=newVal;valEl.style.color=p<25?'var(--crimson-light)':p<50?'#f59e0b':'var(--green)';flashEl(valEl);}
-    if(barEl){barEl.style.width=p+'%';barEl.className='cs-bar-fill cs-bar-hp-fill '+(p>50?'high':p>25?'mid':'');}
-  } else {
-    const valEl=document.getElementById('pm-val'), barEl=document.getElementById('pm-bar');
-    if(valEl){valEl.textContent=newVal;flashEl(valEl);}
-    if(barEl) barEl.style.width=p+'%';
-  }
+// Saisie directe de la valeur courante (clic sur le nombre) : évite d'appuyer
+// 30 fois sur +/− pour un gros écart.
+export function editVitalCurrent(stat, el, charId) {
+  if (!el) return;
+  const c = getCharacterById(charId);
+  if (!c) return;
+  const maxVal = stat === 'pvActuel' ? calcPVMax(c) : calcPMMax(c);
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.value = c[stat] ?? maxVal;
+  input.min = 0; input.max = maxVal;
+  input.className = 'cs-inline-input cs-inline-num vital-inline-input';
+  let done = false;
+  const commit = async (save) => {
+    if (done) return; done = true;
+    const raw = input.value;
+    input.replaceWith(el);                    // restaure le <span id> AVANT le repaint
+    if (save) await setVitalCurrent(stat, raw, charId);
+  };
+  input.addEventListener('blur', () => commit(true));
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') input.blur();
+    else if (e.key === 'Escape') commit(false);
+  });
+  el.replaceWith(input);
+  input.focus();
+  input.select();
 }
 
 // ══════════════════════════════════════════════

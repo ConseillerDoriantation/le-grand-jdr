@@ -908,6 +908,19 @@ export function renderCharDeck(c, canEdit) {
 
   // L'en-tête reste volontairement limité à la recherche et aux deux modes.
   const deckOver = deckCount > deckMax;
+  // Coût total pour lancer tout le Deck préparé (PM effectifs, set inclus).
+  const deckPmSum = activeSorts.reduce((sum, s) => sum + (_effectiveSortPm(s, pmDelta) || 0), 0);
+  // Stats de coût du grimoire (tous les sorts) : moyenne + répartition par palier.
+  const _grimPms = allSorts.map(s => _effectiveSortPm(s, pmDelta) || 0);
+  const _grimAvgPm = _grimPms.length ? Math.round(_grimPms.reduce((a, b) => a + b, 0) / _grimPms.length) : 0;
+  const _pmSpread = allSorts.reduce((acc, s) => {
+    acc[_sortPmBucket(_effectiveSortPm(s, pmDelta))] += 1;
+    return acc;
+  }, { low: 0, mid: 0, high: 0 });
+  const deckDotsHtml = Number.isFinite(deckMax) && deckMax > 0
+    ? `<div class="cs-sorts-deckdots" aria-hidden="true">${Array.from({ length: Math.max(deckMax, deckCount) }, (_, i) => `<span class="cs-sorts-deckdot${i < deckCount ? ' on' : ''}${i >= deckMax ? ' over' : ''}"></span>`).join('')}</div>`
+    : '';
+  const setLightHtml = pmDelta ? `<span class="cs-sorts-setlight" title="Le set d'armure équipé modifie le coût de tous les sorts">🧙 Set d'armure <b>${pmDelta > 0 ? '+' : ''}${pmDelta} PM</b></span>` : '';
   const filtersActive = !!(typeFlt || runeFlt || noyFlt || pmFlt || validationFlt || _sortsDuplicateOnly || _sortsRecipeKeyFilter || order !== 'manual');
   const filterSummary = [];
   if (typeFlt) filterSummary.push(TYPE_META[typeFlt]?.lbl || typeFlt);
@@ -924,9 +937,17 @@ export function renderCharDeck(c, canEdit) {
   let html = `<div class="cs-section cs-section--compact cs-sorts-v3 is-${mode} ${mode==='grimoire' && _sortsCompareKeys.length===1?'is-compare-picking':''}">
 
     <div class="cs-section-hdr cs-sorts-section-hdr">
-      <span class="cs-section-title">🔮 Sorts</span>
-      <span class="cs-hint">${allSorts.length} sort${allSorts.length !== 1 ? 's' : ''} · ${deckCount}/${deckMax} préparé${deckCount !== 1 ? 's' : ''}</span>
+      <div class="cs-sorts-deckhdr">
+        <span class="cs-sorts-deck-ico">🔮</span>
+        <div class="cs-sorts-deck-copy">
+          <b>${deckCount}/${deckMax} sort${deckCount !== 1 ? 's' : ''} préparé${deckCount !== 1 ? 's' : ''}</b>
+          <small>${deckPmSum} PM pour lancer tout le deck</small>
+        </div>
+      </div>
+      ${deckDotsHtml}
+      ${setLightHtml}
       <div class="cs-sorts-section-actions">
+        ${canEdit ? `<button class="cs-inv-action-btn cs-sorts-invoc-btn" data-action="openInvocationLibrary" title="Gérer mes invocations">🐾 Invocations</button>` : ''}
         ${canEdit ? `<button class="cs-inv-action-btn cs-sorts-add-btn" data-action="addSort">＋ Nouveau sort</button>` : ''}
       </div>
     </div>
@@ -972,7 +993,6 @@ export function renderCharDeck(c, canEdit) {
 
     <!-- ②bis Menu « Plus d'outils » (repliable) -->
     ${_sortsMenuOpen ? `<div class="cs-sorts-menu">
-      ${canEdit ? `<button class="cs-sorts-menu-item" data-action="openInvocationLibrary">🐾 Mes invocations</button>` : ''}
       ${cats.length ? `<button class="cs-sorts-menu-item" data-action="_sortsToggleAllCats">⇕ Plier / déplier tout</button>` : ''}
       ${canEdit && visibleCount ? `<button class="cs-sorts-menu-item" data-action="_sortsPrepareVisible">⚡ Préparer les sorts affichés</button>
       <button class="cs-sorts-menu-item" data-action="_sortsUnprepareVisible">− Retirer les sorts affichés</button>` : ''}
@@ -1109,9 +1129,6 @@ export function renderCharDeck(c, canEdit) {
           <span class="cs-spellnav-label">CATÉGORIES</span>
           <div class="cs-spellnav-cats">${sidebarCats}</div>
         </div>
-        <button class="cs-spellnav-analysis-toggle ${_sortsAnalysisOpen?'on':''}" data-action="_sortsToggleAnalysis">
-          <span>⌁</span><b>Analyse du grimoire</b><i>${_sortsAnalysisOpen?'−':'＋'}</i>
-        </button>
         ${usedRuneMetas.length ? `<div class="cs-spellnav-section cs-spellnav-rune-section cs-spellnav-advanced">
           <span class="cs-spellnav-label">RUNES UTILISÉES</span>
           <div class="cs-spellnav-runes">
@@ -1123,8 +1140,10 @@ export function renderCharDeck(c, canEdit) {
           </div>
         </div>` : ''}
         <div class="cs-spellnav-section cs-spellnav-insight-section cs-spellnav-advanced">
-          <span class="cs-spellnav-label">DIVERSITÉ DU GRIMOIRE</span>
+          <span class="cs-spellnav-label">ANALYSE DU GRIMOIRE</span>
           <div class="cs-spellnav-insights">
+            <div title="Coût moyen d'un sort du grimoire (set inclus)"><span class="is-pm">⌀</span><p><b>${_grimAvgPm} PM</b><small>coût moyen · ${allSorts.length} sort${allSorts.length !== 1 ? 's' : ''}</small></p></div>
+            <div title="Répartition des sorts par palier de coût"><span class="is-pm">📊</span><p><b>${_pmSpread.low} · ${_pmSpread.mid} · ${_pmSpread.high}</b><small>≤4 · 5–8 · ≥9 PM</small></p></div>
             <div><span class="is-unique">✦</span><p><b>${recipeCounts.size}</b><small>compositions distinctes</small></p></div>
             ${repeatedRecipeGroups ? `<button class="has-warning ${_sortsDuplicateOnly?'on':''}" data-action="_sortsToggleDuplicateRecipes" title="Afficher uniquement les compositions répétées"><span>≈</span><p><b>${repeatedRecipeExtras}</b><small>sort${repeatedRecipeExtras > 1 ? 's' : ''} à composition répétée</small></p></button>` : `<div><span class="is-ok">✓</span><p><b>Unique</b><small>aucune composition répétée</small></p></div>`}
             ${dominantRune && dominantRuneMeta ? `<div style="--rune-col:${dominantRuneMeta.color}"><span class="is-rune">${dominantRuneMeta.icon}</span><p><b>${_esc(dominantRune[0])}</b><small>rune dominante · ×${dominantRune[1]}</small></p></div>` : ''}

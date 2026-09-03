@@ -116,7 +116,7 @@ import {
 } from './characters/inline-edit.js';
 
 import {
-  adjustStat,
+  adjustStat, editVitalCurrent,
   toggleSort, toggleQuete, deleteQuete,
   duplicateSort, setSortValidation,
   deleteSort, deleteChar, createNewChar,
@@ -873,7 +873,9 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
       <div class="vital-body">
         <div class="vital-head">
           <span class="vital-label">Points de Vie</span>
-          <span class="vital-num"><span id="pv-val">${pvCur}</span><button class="cs-calc-inline" data-action="openCharCalculation" data-calc="pv" data-id="${c.id}" title="Voir le calcul des PV maximum">/ ${pvMax} ⓘ</button></span>
+          <span class="vital-num">${canEdit
+            ? `<button class="vital-val-btn" id="pv-val" data-action="editVital" data-field="pvActuel" data-id="${c.id}" title="Cliquer pour saisir la valeur exacte">${pvCur}</button>`
+            : `<span id="pv-val">${pvCur}</span>`}<button class="cs-calc-inline" data-action="openCharCalculation" data-calc="pv" data-id="${c.id}" title="Voir le calcul des PV maximum">/ ${pvMax} ⓘ</button></span>
         </div>
         <div class="vital-bar"><div class="${hpBarCls}" id="pv-bar" style="width:${pvPct}%"></div></div>
         <div class="vital-ctrls">
@@ -899,7 +901,9 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
       <div class="vital-body">
         <div class="vital-head">
           <span class="vital-label">Points de Magie</span>
-          <span class="vital-num"><span id="pm-val">${pmCur}</span><button class="cs-calc-inline" data-action="openCharCalculation" data-calc="pm" data-id="${c.id}" title="Voir le calcul des PM maximum">/ ${pmMax} ⓘ</button></span>
+          <span class="vital-num">${canEdit
+            ? `<button class="vital-val-btn" id="pm-val" data-action="editVital" data-field="pmActuel" data-id="${c.id}" title="Cliquer pour saisir la valeur exacte">${pmCur}</button>`
+            : `<span id="pm-val">${pmCur}</span>`}<button class="cs-calc-inline" data-action="openCharCalculation" data-calc="pm" data-id="${c.id}" title="Voir le calcul des PM maximum">/ ${pmMax} ⓘ</button></span>
         </div>
         <div class="vital-bar"><div class="vital-bar-fill" id="pm-bar" style="width:${pmPct}%"></div></div>
         <div class="vital-ctrls">
@@ -1130,7 +1134,9 @@ function renderCharSheet(c, keepTab) {
 
   // ── Valeurs dérivées ──────────────────────────
   const pvMax  = calcPVMax(c), pmMax = calcPMMax(c);
-  const pvCur  = c.pvActuel ?? pvMax, pmCur = c.pmActuel ?? pmMax;
+  // PV/PM courants connectés au VTT : le VTT écrit `hp` (PV) et `pm` (PM) sur le
+  // doc perso → on les lit en priorité pour refléter les dégâts/soins du VTT.
+  const pvCur  = c.hp ?? c.pvActuel ?? pvMax, pmCur = c.pmActuel ?? c.pm ?? pmMax;
   const pvPct  = pct(pvCur, pvMax), pmPct = pct(pmCur, pmMax);
   const xpCur  = c.exp || 0, xpPalier = calcPalier(c.niveau || 1), xpPct = pct(xpCur, xpPalier);
   const deckActifs = (c.deck_sorts || []).filter(s => s.actif).length;
@@ -2365,6 +2371,7 @@ registerActions({
 
   // Stats vitales
   adjustStat:              (btn)    => adjustStat(btn.dataset.field, Number(btn.dataset.delta), btn.dataset.id),
+  editVital:               (btn)    => editVitalCurrent(btn.dataset.field, btn, btn.dataset.id),
   addXpDelta:              (btn)    => addXpDelta(btn.dataset.id),
 
   // Actions identité
