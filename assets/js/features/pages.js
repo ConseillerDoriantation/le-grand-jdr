@@ -2130,26 +2130,59 @@ const PAGES = {
     let wallRead        = null;
     let bastionDoc      = null;
     let nextSession     = null;
+    let nextSessionReady = false;
+    let sessionStats     = null;
+    let sessionAvails    = [];
 
     let _presenceWatched = false;  // abonnement présence MJ : 1 seule fois
     let _paintQueued     = false;
     let _sessionCenterModulePromise = null;
+    let _sessionCenterRenderPromise = null;
+    let _sessionCenterDirty = false;
+    let _sessionCenterNeedsMount = true;
 
     const mountSessionCenter = () => {
+      _sessionCenterDirty = true;
+      if (_sessionCenterRenderPromise) return;
       _sessionCenterModulePromise ||= import('./session-center.js');
-      _sessionCenterModulePromise
-        .then(({ renderSessionCenterInto }) => renderSessionCenterInto('dashboard-session-center', {
-          agendaDoc: nextSession,
-          quests,
-          story: storyItems,
-          chars: allChars,
-        }))
-        .catch(err => console.error('[dashboard] centre de session indisponible', err));
+      _sessionCenterRenderPromise = _sessionCenterModulePromise
+        .then(async ({ renderSessionCenterInto }) => {
+          // Une seule hydratation à la fois. Les sources arrivées pendant le
+          // chargement sont reprises au tour suivant au lieu d'annuler sans
+          // cesse le rendu en cours.
+          do {
+            _sessionCenterDirty = false;
+            const context = {
+              quests,
+              story: storyItems,
+              chars: allChars,
+              // Stats et disponibilités enrichissent la séance, mais ne doivent
+              // jamais retarder l'affichage de sa date et de son groupe.
+              stats: sessionStats,
+              avails: sessionAvails,
+            };
+            // Tant que le listener agenda n'a pas répondu, laisser le centre
+            // utiliser directement le doc session-live déjà amorcé.
+            if (nextSessionReady) context.agendaDoc = nextSession;
+            await renderSessionCenterInto('dashboard-session-center', context);
+          } while (_sessionCenterDirty
+            && STATE.currentPage === 'dashboard'
+            && document.getElementById('dashboard-session-center'));
+        })
+        .catch(err => console.error('[dashboard] centre de session indisponible', err))
+        .finally(() => {
+          _sessionCenterRenderPromise = null;
+          if (_sessionCenterDirty && STATE.currentPage === 'dashboard') mountSessionCenter();
+        });
     };
 
     const paint = () => {
       _paintQueued = false;
       if (STATE.currentPage !== 'dashboard' || !document.getElementById('dash-root')) return;
+      // Les autres blocs du dashboard se reconstruisent lorsque leurs données
+      // arrivent. Conserver le centre de session évite de réafficher son loader
+      // et de perdre son état à chacun de ces rafraîchissements indépendants.
+      const preservedSessionCenter = document.getElementById('dashboard-session-center');
 
       // chars = mes persos ; allPartyChars = les autres (bloc groupe côté joueur)
       const chars         = uid ? allChars.filter(c => c.uid === uid) : allChars;
@@ -3223,7 +3256,14 @@ const PAGES = {
     }
 
     // ── Fonctionnalités désactivées : masquer les blocs + sections orphelines ──
-    mountSessionCenter();
+    const sessionPlaceholder = document.getElementById('dashboard-session-center');
+    if (preservedSessionCenter && sessionPlaceholder && preservedSessionCenter !== sessionPlaceholder) {
+      sessionPlaceholder.replaceWith(preservedSessionCenter);
+    }
+    if (_sessionCenterNeedsMount) {
+      _sessionCenterNeedsMount = false;
+      mountSessionCenter();
+    }
     _hideDisabledDashboardBlocks(dash);
 
     // ── Navigation personnage ──────────────────────────────────────────
@@ -3269,9 +3309,9 @@ const PAGES = {
     // par unwatchAll() à la navigation. Le 1er snapshot cache vide est ignoré
     // côté firestore (gate trustworthy) → pas de flash "0" figé.
     paint();
-    watch('dash-characters',   'characters',   d => { allChars        = sortCharactersForDisplay(d || []); schedulePaint(); });
-    watch('dash-quests',       'quests',       d => { quests          = d || []; schedulePaint(); });
-    watch('dash-story',        'story',        d => { storyItems      = d || []; schedulePaint(); });
+    watch('dash-characters',   'characters',   d => { allChars = sortCharactersForDisplay(d || []); _sessionCenterNeedsMount = true; schedulePaint(); });
+    watch('dash-quests',       'quests',       d => { quests = d || []; _sessionCenterNeedsMount = true; schedulePaint(); });
+    watch('dash-story',        'story',        d => { storyItems = d || []; _sessionCenterNeedsMount = true; schedulePaint(); });
     watch('dash-achievements', 'achievements', d => { achievementsRaw = d || []; schedulePaint(); });
     watch('dash-collection',   'collection',   d => { collectionItems = d || []; schedulePaint(); });
     void loadRecentCollection('bastionAnnonces', { field: 'ts', max: 80 }).then(d => {
@@ -3281,7 +3321,23 @@ const PAGES = {
     watchDoc('dash-bastion-wall-legacy', 'bastionAnnonces', 'main', d => { wallLegacy = Array.isArray(d?.items) ? d.items : []; schedulePaint(); });
     if (STATE.user?.uid) watchDoc('dash-bastion-wall-read', 'bastionWallReads', STATE.user.uid, d => { wallRead = d; schedulePaint(); }, { silent: true });
     watchDoc('dash-bastion',   'bastion',        'main', d => { bastionDoc  = d; schedulePaint(); });
-    watchDoc('dash-agenda',    'agenda_session', 'next', d => { nextSession = d; schedulePaint(); });
+    watchDoc('dash-agenda',    'agenda_session', 'next', d => {
+      nextSession = d;
+      nextSessionReady = true;
+      _sessionCenterNeedsMount = true;
+      schedulePaint();
+    });
+    // Ces deux sources peuvent être nettement plus lourdes que le planning.
+    // Elles complètent le centre en arrière-plan sans bloquer son premier rendu.
+    void Promise.all([
+      loadStats().catch(() => null),
+      loadCollection('availabilities').catch(() => []),
+    ]).then(([stats, avails]) => {
+      if (STATE.currentPage !== 'dashboard') return;
+      sessionStats = stats;
+      sessionAvails = avails || [];
+      mountSessionCenter();
+    });
   },
 
   // ─── CHARACTERS ─────────────────────────────────────────────────────────────
@@ -3359,7 +3415,6 @@ const PAGES = {
 
   // ─── MAP ────────────────────────────────────────────────────────────────────
   async map() {
-    const doc     = await getDocData('world', 'map');
     const content = document.getElementById('main-content');
 
     // La page map prend toute la hauteur dispo ; navigation.js nettoie ces styles inline en quittant la page.
@@ -3376,8 +3431,8 @@ const PAGES = {
         flex-shrink:0;gap:1rem;
       ">
         <div style="display:flex;align-items:center;gap:0.75rem">
-          <span style="font-family:'Cinzel',serif;font-size:0.9rem;color:var(--gold)">
-            🗺️ ${doc?.regionName || 'Carte de la Région'}
+          <span id="map-page-region" style="font-family:'Cinzel',serif;font-size:0.9rem;color:var(--gold)">
+            🗺️ Carte de la Région
           </span>
           <span style="font-size:0.72rem;color:var(--text-dim)">Molette pour zoomer · Cliquer-glisser pour naviguer</span>
         </div>
@@ -3389,7 +3444,9 @@ const PAGES = {
 
     // Import et init carte interactive
     const { initMap, LIEU_TYPES } = await import('./map.js');
-    await initMap(document.getElementById('map-container'));
+    const map = await initMap(document.getElementById('map-container'));
+    const region = document.getElementById('map-page-region');
+    if (region && map?.regionName) region.textContent = `🗺️ ${map.regionName}`;
 
     // Légende
     const legend = document.getElementById('map-legend');

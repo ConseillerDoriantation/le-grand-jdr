@@ -7,7 +7,7 @@
 import { state, emit, on, resetListeners, getPlaceById, getOrgById, placeMatchesSearch } from './map.state.js';
 
 // Data
-import { listPlaceTypes } from './data/types.repo.js';
+import { DEFAULT_PLACE_TYPES, listPlaceTypes } from './data/types.repo.js';
 import { listPlaces, savePlace, removePlace } from './data/places.repo.js';
 import { listOrganizations, saveOrganization, removeOrganization } from './data/organizations.repo.js';
 import { loadMap, loadFogZones } from './data/maps.repo.js';
@@ -33,32 +33,31 @@ import { _esc } from '../../shared/html.js';
 
 let rootContainer = null;
 let stylesInjected = false;
+let initSequence = 0;
 
 // ── Entrée publique ──────────────────────────────────────────────────────────
 
 export async function initMap(containerEl) {
+  const sequence = ++initSequence;
   rootContainer = containerEl;
+  if (!rootContainer) return null;
   resetListeners();
   injectStyles();
 
-  // 1. Charger les données en parallèle
-  const [map, types, places, organizations, fogZones, npcs, missions] = await Promise.all([
-    loadMap(),
-    listPlaceTypes(),
-    listPlaces(),
-    listOrganizations(),
-    loadFogZones(),
-    listLinkedNpcs(),
-    // Missions = contenu MJ privé : on ne le charge que pour l'admin.
-    STATE.isAdmin ? listMissionsWithPlaces() : Promise.resolve([]),
-  ]);
+  // Priorité absolue au fond de carte et au fog : les collections parfois
+  // lourdes (notamment missions et PNJ) ne partagent pas leur bande passante
+  // avant que l'image puisse commencer à charger.
+  const mapPromise = loadMap();
+  const fogPromise = loadFogZones();
+  const [map, fogZones] = await Promise.all([mapPromise, fogPromise]);
+  if (!isCurrentInit(sequence, containerEl)) return null;
 
   state.map = map;
-  state.types = types;
-  state.places = places;
-  state.organizations = organizations;
-  state.npcs = npcs;
-  state.missions = missions;
+  state.types = DEFAULT_PLACE_TYPES;
+  state.places = [];
+  state.organizations = [];
+  state.npcs = [];
+  state.missions = [];
   state.fogZones = fogZones;
   state.selection = null;
   state.mode = 'navigate';
@@ -81,7 +80,8 @@ export async function initMap(containerEl) {
   //    de façon synchrone si l'image est déjà en cache du navigateur).
   on('viewport:ready',     onViewportReady);
   on('viewport:changed',   onViewportChanged);
-  on('places:changed',     () => { renderMarkers(); });
+  on('places:changed',     () => { renderMarkers(); renderFilters(containerEl); });
+  on('types:changed',      () => { renderMarkers(); renderFilters(containerEl); });
   on('organizations:changed', () => { renderMarkers(); });
   on('selection:changed',  () => { renderMarkers(); });
   on('filters:changed',    () => { renderMarkers(); });
@@ -102,6 +102,35 @@ export async function initMap(containerEl) {
   wireFilters(containerEl);
 
   applyTransform();
+
+  // Fire-and-forget : la navigation est rendue interactive sans attendre les
+  // collections secondaires. Le garde-fou empêche une ancienne visite de
+  // repeindre la page après une navigation ou un remontage des paramètres.
+  const deferredLoads = [
+    ['types', listPlaceTypes(), 'types:changed'],
+    ['places', listPlaces(), 'places:changed'],
+    ['organizations', listOrganizations(), 'organizations:changed'],
+    ['npcs', listLinkedNpcs(), 'details:changed'],
+    // Missions = contenu MJ privé : on ne le charge que pour l'admin.
+    ['missions', STATE.isAdmin ? listMissionsWithPlaces() : Promise.resolve([]), 'details:changed'],
+  ];
+  deferredLoads.forEach(([key, promise, eventName]) => {
+    Promise.resolve(promise).then(value => {
+      if (!isCurrentInit(sequence, containerEl)) return;
+      state[key] = Array.isArray(value) ? value : [];
+      emit(eventName);
+    }).catch(error => {
+      console.warn(`[map] chargement différé indisponible (${key})`, error?.code || error);
+    });
+  });
+
+  return map;
+}
+
+function isCurrentInit(sequence, containerEl) {
+  return sequence === initSequence
+    && rootContainer === containerEl
+    && containerEl?.isConnected;
 }
 
 // ── Shell HTML ───────────────────────────────────────────────────────────────
@@ -129,7 +158,7 @@ function shellHTML() {
           <div class="map-loader" aria-hidden="true"><span class="map-loader__text">Chargement de la carte</span></div>
           <div id="map-transform" class="map-transform">
             ${hasImage
-              ? `<img id="map-img" src="${_esc(state.map.imageUrl)}" draggable="false" alt="">`
+              ? `<img id="map-img" src="${_esc(state.map.imageUrl)}" draggable="false" alt="" decoding="async" fetchpriority="high">`
               : `<div class="map-placeholder">
                    ${isAdmin
                      ? 'Aucune image. Ouvre ⚙️ Paramètres pour en ajouter une.'
@@ -167,10 +196,7 @@ function shellHTML() {
 function wireFilters(container) {
   const wrap = container.querySelector('#map-filters');
   if (!wrap) return;
-  wrap.innerHTML = state.types
-    .filter(t => state.places.some(p => p.type === t.id))
-    .map(t => `<button class="map-chip map-chip--filter" data-filter-type="${t.id}" style="--chip:${t.color}">${t.icon} ${_esc(t.label)}</button>`)
-    .join('');
+  renderFilters(container);
 
   wrap.addEventListener('click', e => {
     const btn = e.target.closest('[data-filter-type]');
@@ -181,6 +207,15 @@ function wireFilters(container) {
     btn.classList.toggle('is-active', state.filters.types.has(id));
     emit('filters:changed');
   });
+}
+
+function renderFilters(container) {
+  const wrap = container?.querySelector('#map-filters');
+  if (!wrap) return;
+  wrap.innerHTML = state.types
+    .filter(t => state.places.some(p => p.type === t.id))
+    .map(t => `<button class="map-chip map-chip--filter${state.filters.types.has(t.id) ? ' is-active' : ''}" data-filter-type="${t.id}" style="--chip:${t.color}">${t.icon} ${_esc(t.label)}</button>`)
+    .join('');
 }
 
 function wireSearch(container) {
