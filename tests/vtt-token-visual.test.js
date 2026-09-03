@@ -8,6 +8,7 @@ import {
   tokenEffectsSignature,
   tokenHealthMeta,
   tokenFootprintMeta,
+  tokenFootprintIntersectsZone,
   tokenMovementMeta,
   tokenRelationTone,
   normalizeTokenTurnOrder,
@@ -75,6 +76,22 @@ test('les variations de ressources produisent un libellé court et cohérent', (
   );
   assert.equal(tokenDeltaMeta(3, 'pm').label, '+3 PM');
   assert.equal(tokenDeltaMeta(0, 'hp'), null);
+});
+
+test('une AoE utilise toute l’empreinte des tokens, y compris sur ses bords', () => {
+  const zone = { x:2.5, y:2.5, width:3, height:3, shape:'rect', cellSize:1 };
+  assert.equal(tokenFootprintIntersectsZone({ col:1, row:1, width:1, height:1 }, zone), true);
+  assert.equal(tokenFootprintIntersectsZone({ col:3, row:2, width:2, height:2 }, zone), true);
+  assert.equal(tokenFootprintIntersectsZone({ col:0, row:2, width:1, height:1 }, zone), false);
+  assert.equal(tokenFootprintIntersectsZone({ col:5, row:2, width:1, height:1 }, zone), false);
+});
+
+test('une AoE 3×3 détecte bien neuf tokens occupant ses neuf cases', () => {
+  const zone = { x:1.5, y:1.5, width:3, height:3, shape:'rect', cellSize:1 };
+  const targets = Array.from({ length:9 }, (_, index) => ({
+    col:index % 3, row:Math.floor(index / 3), width:1, height:1,
+  }));
+  assert.equal(targets.filter(token => tokenFootprintIntersectsZone(token, zone)).length, 9);
 });
 
 test('le mouvement restant tient compte de la course et ne devient jamais négatif', () => {

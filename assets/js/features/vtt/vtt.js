@@ -59,7 +59,7 @@ import {
 } from './vtt-refs.js';
 import { CELL, CELL_M, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
 import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual } from './vtt-render.js';
-import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenHealthMeta, tokenMovementMeta, tokenRelationTone } from './vtt-token-visual.js';
+import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenHealthMeta, tokenMovementMeta, tokenRelationTone } from './vtt-token-visual.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
 import { receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
 import { conditionDamageReductionApplies, conditionStatRollMode } from './vtt-condition-rules.js';
@@ -72,6 +72,7 @@ import {
 } from './vtt-ruler.js';
 import {
   _initChatLogSubs, _vttToggleLogDetail, _vttSendChat, _vttChatReply, _vttChatReplyCancel, _chatMsgs,
+  _vttShowOptimisticCombatLog, _vttDiscardOptimisticCombatLog,
 } from './vtt-chat.js';
 import {
   _loadEmotes, _loadDiceSkills, _vttSetRollMode, _vttAdjBonus, _vttSetBonus, _vttToggleRollHidden, _vttRollSkill,
@@ -734,19 +735,32 @@ async function _syncDownedCondition(t, hp) {
  * hors `_vttRollAttack` (édition manuelle, DoT, environnement…).
  * Retourne un tableau de notes pour log/notif.
  */
+function _hasActiveConcentration(td, round = VS.session?.combat?.round ?? 0) {
+  if (!td) return false;
+  if ((td.buffs || []).some(b => b?.canalisePersistant && b?.concentrationDD != null)) return true;
+  return (td.conditions || []).some(c => {
+    if (c.expiresAtRound != null && round > 0 && round > c.expiresAtRound) return false;
+    return !!c.concentrationSpell || !!CONDITION_BY_ID[c.id]?.effects?.concentrationCheck;
+  });
+}
+
 export async function _vttTriggerConcentrationSave(td, damageAmount, nextHp = null, opts = {}) {
   if (!td || damageAmount <= 0) return [];
   let liveTd = VS.tokens?.[td.id]?.data || td;
+  const round = VS.session?.combat?.round ?? 0;
+  const isActiveConcentrationCondition = c => {
+    if (c.expiresAtRound != null && round > 0 && round > c.expiresAtRound) return false;
+    return !!c.concentrationSpell || !!CONDITION_BY_ID[c.id]?.effects?.concentrationCheck;
+  };
+  // Cas ultra-majoritaire : aucune concentration. Éviter une lecture Firestore
+  // par cible, particulièrement coûteuse et visible sur les AoE 3×3.
+  if (!_hasActiveConcentration(liveTd, round)) return [];
   const freshSnap = td.id ? await getDoc(_tokRef(td.id)).catch(() => null) : null;
   if (freshSnap?.exists?.()) {
     liveTd = { ...liveTd, ...freshSnap.data(), id: td.id };
   }
   const buffs = (liveTd.buffs || []).filter(b => b?.canalisePersistant && b?.concentrationDD != null);
-  const round = VS.session?.combat?.round ?? 0;
-  const activeConditions = (liveTd.conditions || []).filter(c => {
-    if (c.expiresAtRound != null && round > 0 && round > c.expiresAtRound) return false;
-    return !!c.concentrationSpell || !!CONDITION_BY_ID[c.id]?.effects?.concentrationCheck;
-  });
+  const activeConditions = (liveTd.conditions || []).filter(isActiveConcentrationCondition);
   if (!buffs.length && !activeConditions.length) return [];
   const sagMod = _tokenStatMod(liveTd, 'sagesse');
   const tgtName = _live(liveTd).displayName ?? liveTd.name;
@@ -1831,6 +1845,33 @@ function _showTokenDelta(token, delta, resource='hp') {
   }, reduced ? 1000 : 900);
 }
 
+/** Affiche immédiatement la variation calculée avant que Firestore ne renvoie
+ * son snapshot local. Le snapshot mémorisé est avancé à la nouvelle valeur :
+ * le patch temps réel mettra les jauges à jour sans rejouer une seconde bulle. */
+function _showAppliedHpDelta(token, beforeHp, afterHp, nextDisplayedHp = afterHp) {
+  const before = Number(beforeHp);
+  const after = Number(afterHp);
+  if (!token || !Number.isFinite(before) || !Number.isFinite(after) || before === after) return;
+  const displayed = Number(nextDisplayedHp);
+  if (Number.isFinite(displayed)) VS.tokens[token.id]?.shape?.setAttr('displayHpSnapshot', displayed);
+  _showTokenDelta(token, after - before, 'hp');
+}
+
+// Répercute immédiatement les PV dans le cache vivant et sur la jauge Konva.
+// Le snapshot Firestore confirmera ensuite la même valeur sans saut visuel.
+function _patchHpOptimistically(token, hp, pvCombatHp = undefined) {
+  if (!token) return;
+  if (token.characterId && VS.characters[token.characterId]) {
+    VS.characters[token.characterId].hp = hp;
+  } else if (token.npcId && VS.npcs[token.npcId]) {
+    VS.npcs[token.npcId].hp = hp;
+  } else {
+    token.hp = hp;
+  }
+  if (pvCombatHp !== undefined) token.pvCombatHp = pvCombatHp;
+  _patchShape(token.id);
+}
+
 function _showTokenNotice(token, label, color='#fbbf24') {
   if (!token || !label || token.pageId!==VS.activePage?.id || !VS.layers.ping || !window.Konva) return;
   const shape=VS.tokens[token.id]?.shape;
@@ -2738,6 +2779,29 @@ function _diceLogFields(prefix, det) {
     [`${prefix}Count`]: det.n || det.rolls.length,
     [`${prefix}FormulaDetail`]: det.formula || '',
   };
+}
+
+// Ne jamais recopier une image encodée (data:/blob:) dans un journal de combat.
+// En AoE, elle serait dupliquée une fois par cible et peut faire dépasser la
+// limite Firestore de 1 Mio, ce qui annule entièrement le message du chat.
+function _combatLogImage(value) {
+  const src = String(value || '').trim();
+  if (!src || src.startsWith('data:') || src.startsWith('blob:')) return null;
+  return src.length <= 8192 ? src : null;
+}
+
+async function _publishCombatLog(payload) {
+  const logRef = doc(_logCol());
+  _vttShowOptimisticCombatLog(logRef.id, payload);
+  try {
+    await setDoc(logRef, payload);
+    return true;
+  } catch (error) {
+    _vttDiscardOptimisticCombatLog(logRef.id);
+    console.error('[vtt] résultat absent du journal', error);
+    showNotif('L’action a été appliquée, mais son message de combat n’a pas pu être enregistré.', 'error');
+    return false;
+  }
 }
 
 // [_maxDice / _maxEffectDisplay / _effectDisplay → vtt-spell-display.js (importés en haut)]
@@ -6701,29 +6765,23 @@ async function _zoneValidate() {
     }
   }
 
-  // Détection des tokens dans la zone (centrée sur x, y). Croix = colonne + rangée centrales.
-  const x1 = x - wPx / 2, x2 = x + wPx / 2;
-  const y1 = y - hPx / 2, y2 = y + hPx / 2;
-  const _isCross = opt.zoneShape === 'cross';
-  const _isDiamond = opt.zoneShape === 'diamond';
-  const targets = Object.values(VS.tokens)
-    .filter(e => {
+  // Détection sur l'empreinte complète du token, pas uniquement sur le centre
+  // de son portrait. La clé du dictionnaire est conservée comme id canonique
+  // pour que toutes les cibles détectées soient ensuite résolues sans perte.
+  const targets = Object.entries(VS.tokens)
+    .filter(([, e]) => {
       if (!e.data || e.data.pageId !== VS.activePage?.id) return false;
       if (e.data.id === srcId) return false;   // le lanceur ne subit JAMAIS sa propre zone
       if (!e.data.visible && !STATE.isAdmin) return false;
       if (opt.friendlyOnly && e.data.type === 'enemy') return false;
       if (opt.hostileOnly && e.data.type !== 'enemy') return false;
-      const tc = _tokenCenter(e.data);
-      if (tc.x < x1 || tc.x > x2 || tc.y < y1 || tc.y > y2) return false;
-      if (_isDiamond) {
-        const rx = Math.max(1, wPx / 2);
-        const ry = Math.max(1, hPx / 2);
-        return Math.abs(tc.x - x) / rx + Math.abs(tc.y - y) / ry <= 1;
-      }
-      if (!_isCross) return true;
-      return Math.abs(tc.x - x) <= CELL / 2 || Math.abs(tc.y - y) <= CELL / 2;
+      const dims = _tokenDims(e.data);
+      return tokenFootprintIntersectsZone(
+        { col: e.data.col, row: e.data.row, width: dims.w, height: dims.h },
+        { x, y, width: wPx, height: hPx, shape: opt.zoneShape || 'rect', cellSize: CELL },
+      );
     })
-    .map(e => e.data.id);
+    .map(([id]) => id);
 
   // ── Sceau runique + effet de zone (projectile → centre, onde, impacts) ──
   const _zoneSigil = _buildCastSigil(srcData, opt);
@@ -8057,12 +8115,12 @@ async function _vttRollAttack() {
       }
     }
 
-    await _deductPm();
-    await _consumeItem();
-    await _markActionUsed();
+    const sourceWritesDone = Promise.all([_deductPm(), _consumeItem(), _markActionUsed()])
+      .then(() => null, error => error);
 
     // ── Appliquer les HP + collecter résultats par cible ──────────────
     const targetResults = [];
+    const targetWritePromises = [];
     const _statsDelta = { chars: {} };   // delta de stats accumulé (réversible à l'annulation)
     const _atkActor = _statsActor(src);
     let _maxHit = 0;                      // plus gros coup de cette attaque (record, non réversible)
@@ -8141,6 +8199,7 @@ async function _vttRollAttack() {
       const curHp = lCurTgt.displayHp ?? 20, hpMax = lCurTgt.displayHpMax ?? 20;
       let newHp = curHp;
       let hpBeforeApplied = curHp;
+      let targetWrite = Promise.resolve();
       // Valeur AVANT interaction du profil de la créature (pour log "10 → 5").
       let dmgPre = dmgTotal;
       let dmgReduction = 0;
@@ -8159,8 +8218,10 @@ async function _vttRollAttack() {
           newHp = Math.max(0, Math.min(realMax, realCur - dmgTotal));
           const prevEst = curTgtData.pvCombatHp != null ? Math.max(0, parseInt(curTgtData.pvCombatHp)||0) : (lCurTgt.displayHpMax??realMax);
           const newEst  = Math.max(0, Math.min(realMax, prevEst - dmgTotal));
-          await updateDoc(_tokRef(curTgtData.id), { hp: newHp, pvCombatHp: newEst });
-          await _syncDownedCondition(curTgtData, newHp);
+          _showAppliedHpDelta(curTgtData, realCur, newHp, STATE.isAdmin ? newHp : newEst);
+          _patchHpOptimistically(curTgtData, newHp, newEst);
+          targetWrite = updateDoc(_tokRef(curTgtData.id), { hp: newHp, pvCombatHp: newEst })
+            .then(() => _syncDownedCondition(curTgtData, newHp));
         } else {
           const tgtChar = curTgtData.characterId
             ? STATE.characters.find(x => x.id === curTgtData.characterId) : null;
@@ -8182,7 +8243,9 @@ async function _vttRollAttack() {
           }
           // Borne haute = hpMax pour qu'une absorption ne soigne pas au-delà du max.
           newHp = Math.max(0, Math.min(hpMax, curHp - dmgTotal));
-          await _setHp(curTgtData, newHp);
+          _showAppliedHpDelta(curTgtData, curHp, newHp);
+          _patchHpOptimistically(curTgtData, newHp);
+          targetWrite = _setHp(curTgtData, newHp);
         }
       }
 
@@ -8224,12 +8287,19 @@ async function _vttRollAttack() {
           }
         }
         if (remaining.length !== curConds.length) {
-          await updateDoc(_tokRef(curTgtData.id), { conditions: remaining }).catch(() => {});
+          targetWrite = targetWrite.then(async () => {
+            // _syncDownedCondition peut avoir ajouté Inconscient entre-temps :
+            // repartir de l'état le plus récent et ne retirer que les effets consommés.
+            const currentConditions = curTgtData.conditions || [];
+            const nextConditions = currentConditions.filter(c => !CONDITION_BY_ID[c.id]?.effects?.consumedByAttackAgainst);
+            await updateDoc(_tokRef(curTgtData.id), { conditions: nextConditions }).catch(() => {});
+          });
         }
       }
+      targetWritePromises.push(targetWrite);
 
       targetResults.push({
-        name: lCurTgt.displayName ?? curTgtData.name, targetCA, hit, halfDmg,
+        name: lCurTgt.displayName ?? curTgtData.name ?? 'Cible', targetCA, hit, halfDmg,
         dmgTotal, dmgApplied, dmgPre, dmgReduction, newHp, hpMax, interaction,
         tokenId: curTgtData.id,   // pour l'annulation manuelle (bouclier réactif)
         shieldBlocked: isBlocked,
@@ -8239,10 +8309,16 @@ async function _vttRollAttack() {
         beastId: curTgtData.beastId || null,
         npcId:   curTgtData.npcId   || null,
         characterId: curTgtData.characterId || null,
-        targetImage: lCurTgt.displayImage || null,
+        targetImage: _combatLogImage(lCurTgt.displayImage),
         _data: curTgtData,
       });
     }
+
+    // Les cibles sont indépendantes : leurs mises à jour partent ensemble. On
+    // garde immédiatement un gestionnaire d'erreur, puis le journal peut être
+    // créé pendant que Firestore termine les jauges.
+    const targetWritesDone = Promise.all(targetWritePromises)
+      .then(() => null, error => error);
 
     // Un seul d20 a été lancé pour toute l'action, même si elle touche plusieurs
     // cibles. Les impacts ont été comptés séparément dans la boucle ci-dessus.
@@ -8275,10 +8351,13 @@ async function _vttRollAttack() {
     }
 
     // ── JS Concentration auto : buffs canalisés + états de type Concentré.
-    for (const r of targetResults) {
-      if (!(r.hit || r.halfDmg) || r.dmgTotal <= 0) continue;
-      const td = r._data; if (!td) continue;
-      const concNotes = await _vttTriggerConcentrationSave(td, r.dmgTotal, r.newHp, { deferLog: true });
+    const concentrationResults = await Promise.all(targetResults.map(async (r, index) => {
+      if (!(r.hit || r.halfDmg) || r.dmgTotal <= 0 || !r._data) return [];
+      if (!_hasActiveConcentration(r._data)) return [];
+      await targetWritePromises[index];
+      return _vttTriggerConcentrationSave(r._data, r.dmgTotal, r.newHp, { deferLog: true });
+    }));
+    for (const concNotes of concentrationResults) {
       modNotes.push(...concNotes);
       if (concNotes.concentrationLogs?.length) concentrationLogs.push(...concNotes.concentrationLogs);
     }
@@ -8365,14 +8444,14 @@ async function _vttRollAttack() {
     const cleanResults = targetResults.map(({ _data, ...rest }) => rest);
     const isMulti = cleanResults.length > 1;
     if (isMulti) {
-      await addDoc(_logCol(), {
+      await _publishCombatLog({
         type: 'attack-multi',
         undo: _undoSnap,
         statsDelta: _statsDelta,
         ..._vttLogSourceFields(src),
         authorId: STATE.user?.uid||null, authorName,
         attackerName: lS.displayName??src.name,
-        characterImage: lS.displayImage||null,
+        characterImage: _combatLogImage(lS.displayImage),
         attackerRank,
         optLabel: opt.label,
         technique: weaponTechnique ? {
@@ -8409,19 +8488,19 @@ async function _vttRollAttack() {
         ..._diceLogFields('crit', sharedCritRollsDetail),
         targets: cleanResults,
         createdAt: serverTimestamp(),
-      }).catch(()=>{});
+      });
     } else {
       const r = cleanResults[0];
       // Image de la cible pour affichage dans le chat (single target)
-      const _defImg = _live(tgt)?.displayImage || r?.targetImage || null;
-      if (r) await addDoc(_logCol(), {
+      const _defImg = _combatLogImage(_live(tgt)?.displayImage || r?.targetImage);
+      if (r) await _publishCombatLog({
         type: 'attack',
         undo: _undoSnap,
         statsDelta: _statsDelta,
         ..._vttLogSourceFields(src),
         authorId: STATE.user?.uid||null, authorName,
         attackerName: lS.displayName??src.name,
-        characterImage: lS.displayImage||null,
+        characterImage: _combatLogImage(lS.displayImage),
         defenderName: r.name,
         defenderImage: _defImg,
         // Bouclier réactif manuel : token cible + rang attaquant (vérif du palier).
@@ -8471,12 +8550,16 @@ async function _vttRollAttack() {
         ..._diceLogFields('crit', sharedCritRollsDetail),
         interaction: r.interaction || null,
         createdAt: serverTimestamp(),
-      }).catch(()=>{});
+      });
     }
 
     for (const payload of concentrationLogs) {
       await addDoc(_logCol(), payload).catch(() => {});
     }
+
+    const [sourceWriteError, targetWriteError] = await Promise.all([sourceWritesDone, targetWritesDone]);
+    if (sourceWriteError) throw sourceWriteError;
+    if (targetWriteError) throw targetWriteError;
 
     // Notif consolidée
     const notifParts = cleanResults.map(r => {

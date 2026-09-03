@@ -80,6 +80,53 @@ export function tokenDeltaMeta(delta, resource = 'hp') {
   };
 }
 
+/** Une zone touche un token dès qu'une partie de son empreinte occupe une case
+ * couverte. Les anciens calculs ne testaient que le centre du portrait, ce qui
+ * excluait les grands tokens placés sur le bord d'une AoE. */
+export function tokenFootprintIntersectsZone(token = {}, zone = {}) {
+  const cellSize = Math.max(1, Number(zone.cellSize) || 1);
+  const col = Number(token.col);
+  const row = Number(token.row);
+  const width = Math.max(1, Math.min(5, Number(token.width) || 1));
+  const height = Math.max(1, Math.min(5, Number(token.height) || 1));
+  const zoneX = Number(zone.x);
+  const zoneY = Number(zone.y);
+  const zoneW = Math.max(0, Number(zone.width) || 0);
+  const zoneH = Math.max(0, Number(zone.height) || 0);
+  if (![col, row, zoneX, zoneY].every(Number.isFinite) || zoneW <= 0 || zoneH <= 0) return false;
+
+  const x1 = zoneX - zoneW / 2;
+  const x2 = zoneX + zoneW / 2;
+  const y1 = zoneY - zoneH / 2;
+  const y2 = zoneY + zoneH / 2;
+  const tokenX1 = col * cellSize;
+  const tokenX2 = (col + width) * cellSize;
+  const tokenY1 = row * cellSize;
+  const tokenY2 = (row + height) * cellSize;
+  if (tokenX1 >= x2 || tokenX2 <= x1 || tokenY1 >= y2 || tokenY2 <= y1) return false;
+
+  const shape = zone.shape || 'rect';
+  if (shape === 'rect') return true;
+
+  // Pour les formes non rectangulaires, tester le centre de chaque case occupée
+  // par le token plutôt que le seul centre global de son portrait.
+  for (let dx = 0; dx < width; dx += 1) {
+    for (let dy = 0; dy < height; dy += 1) {
+      const cx = (col + dx + 0.5) * cellSize;
+      const cy = (row + dy + 0.5) * cellSize;
+      if (cx < x1 || cx > x2 || cy < y1 || cy > y2) continue;
+      if (shape === 'cross') {
+        if (Math.abs(cx - zoneX) <= cellSize / 2 || Math.abs(cy - zoneY) <= cellSize / 2) return true;
+      } else if (shape === 'diamond') {
+        const rx = Math.max(1, zoneW / 2);
+        const ry = Math.max(1, zoneH / 2);
+        if (Math.abs(cx - zoneX) / rx + Math.abs(cy - zoneY) / ry <= 1) return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function tokenMovementMeta(baseMovement = 6, bonusMovement = 0, movedCells = 0) {
   const finiteOrZero = value => Number.isFinite(Number(value)) ? Number(value) : 0;
   const maximum = Math.max(0, finiteOrZero(baseMovement) + finiteOrZero(bonusMovement));

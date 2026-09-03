@@ -16,19 +16,58 @@ import { _logCol, _logGmCol } from './vtt-refs.js';
 import { _vttPanelError } from './vtt-utils.js';
 import { _findUsableReactiveShield, _canControlToken } from './vtt.js'; // circ. (combat)
 import { _applyEmotes } from './vtt-emotes.js'; // leaf émotes
+import { _live } from './vtt-effective.js';
 
 // État chat (déplacé de vtt.js)
 export let _chatMsgs = [];   // derniers messages rendus (lookup "répondre" + bouclier/undo côté vtt.js)
 let _chatReplyTo= null; // message auquel on répond { id, authorName, text }
 let _logMain    = [];   // log public (vttLog) — dernier snapshot
 let _logGm      = [];   // jets cachés (vttLogGm) — uniquement abonné côté MJ
+const _optimisticLogs = new Map();
+const _optimisticTimers = new Map();
+
+function _clearOptimisticLog(id) {
+  _optimisticLogs.delete(id);
+  const timer = _optimisticTimers.get(id);
+  if (timer) clearTimeout(timer);
+  _optimisticTimers.delete(id);
+}
+
+/** Affiche un résultat calculé sans attendre le round-trip Firestore. Le même
+ * id de document remplacera automatiquement cette entrée au prochain snapshot. */
+export function _vttShowOptimisticCombatLog(id, payload) {
+  if (!id || !payload) return;
+  const localMs = Date.now();
+  _optimisticLogs.set(id, {
+    ...payload,
+    id,
+    _optimistic: true,
+    createdAt: { toMillis: () => localMs },
+  });
+  _rebuildChatLog();
+  _optimisticTimers.set(id, setTimeout(() => {
+    if (!_optimisticLogs.has(id)) return;
+    _clearOptimisticLog(id);
+    _rebuildChatLog();
+  }, 15_000));
+}
+
+export function _vttDiscardOptimisticCombatLog(id) {
+  if (!_optimisticLogs.has(id)) return;
+  _clearOptimisticLog(id);
+  _rebuildChatLog();
+}
 
 // Souscriptions Firestore au log (publiques + jets cachés MJ). Appelé par vtt.js
 // dans la séquence de montage. Les unsubs sont poussés dans VS.unsubs.
 export function _initChatLogSubs() {
   VS.unsubs.push(onSnapshot(
     query(_logCol(), orderBy('createdAt', 'desc'), limit(80)),
-    snap => { _logMain = snap.docs.map(d => ({ id: d.id, ...d.data() })); _rebuildChatLog(); },
+    snap => {
+      _logMain = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      _logMain.forEach(message => _clearOptimisticLog(message.id));
+      _rebuildChatLog();
+    },
     e => {
       console.error('[vtt] chat listener:', e);
       const el = document.getElementById('vtt-chat-log');
@@ -58,7 +97,10 @@ export function _vttToggleLogDetail(detailId) {
 }
 
 export function _rebuildChatLog() {
-  const merged = _logGm.length ? _logMain.concat(_logGm) : _logMain;
+  const publicLogs = _optimisticLogs.size
+    ? _logMain.concat([..._optimisticLogs.values()])
+    : _logMain;
+  const merged = _logGm.length ? publicLogs.concat(_logGm) : publicLogs;
   const msgs = merged
     .slice()
     .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0))
@@ -94,6 +136,7 @@ export function _renderChatLogImpl(msgs) {
   // MJ : bouton « ↩ Annuler l'action » sur les logs portant un snapshot d'undo.
   const _undoBtn = (m) => {
     if (!STATE.isAdmin) return '';
+    if (m._optimistic) return '';
     if (m.actionUndone) return `<div class="vtt-log-undone">↩ Action annulée par le MJ</div>`;
     if (!m.undo) return '';
     return `<button class="vtt-log-undo-btn" data-vtt-fn="_vttUndoAction" data-vtt-args="${m.id}"
@@ -266,9 +309,11 @@ export function _renderChatLogImpl(msgs) {
       isFumble ? `<span class="vtt-log-badge vtt-log-badge--fumble">💀 FUMBLE</span>` : '',
     ].join('');
 
+    const defenderToken = m.defenderTokenId ? VS.tokens?.[m.defenderTokenId]?.data : null;
+    const defenderImage = m.defenderImage || (defenderToken ? _live(defenderToken)?.displayImage : null);
     const head = _header({
       srcImg: m.characterImage, srcName: m.attackerName || m.authorName || '?',
-      tgtImg: m.defenderImage, tgtName: m.defenderName,
+      tgtImg: defenderImage, tgtName: m.defenderName,
       label:  m.optLabel, badges, ts,
       sourceArgs: _sourceArgs(m, m.isHeal ? 'sorts' : 'combat'),
       targetArgs: _targetArgs(m, 'combat'),
@@ -534,8 +579,13 @@ export function _renderChatLogImpl(msgs) {
       const shownCA = _viewCA(r, r.targetCA);
       // Portrait de la cible : son image si disponible (ex. invocation), sinon
       // l'icône de résolution. La pastille de couleur reste le statut hit/miss.
-      const portraitInner = r.targetImage
-        ? `<img src="${_esc(r.targetImage)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" data-img-err="text" data-img-err-text="${_esc(icon)}">`
+      // Une image data:/blob: n'est volontairement pas recopiée dans Firestore
+      // (une AoE la dupliquerait jusqu'à dépasser 1 Mio). Le chat la retrouve
+      // directement depuis le token et sa fiche bestiaire déjà chargés.
+      const targetToken = r.tokenId ? VS.tokens?.[r.tokenId]?.data : null;
+      const targetImage = r.targetImage || (targetToken ? _live(targetToken)?.displayImage : null);
+      const portraitInner = targetImage
+        ? `<img src="${_esc(targetImage)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" data-img-err="text" data-img-err-text="${_esc(icon)}">`
         : icon;
       const targetSourceLink = _sourceLink(_targetArgs(r, 'combat'), 'Ouvrir la cible');
       return `<div class="vtt-log-target" style="--row-c:${baseCol}">
