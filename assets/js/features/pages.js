@@ -20,7 +20,6 @@ import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-
 import { getRouteSub } from '../shared/route.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
 import { dedupeQuestParticipants, questParticipantFromChar, toggleQuestParticipant } from '../shared/participants.js';
-import { avatarSrcOf } from '../shared/avatar.js';
 import { BASTION_WALL_TYPES, bastionWallReactionCounts, bastionWallSeenKey, bastionWallUnreadCount, sortBastionWallPosts } from '../shared/bastion-wall.js';
 
 import { charSession } from '../shared/char-session.js';
@@ -199,65 +198,6 @@ function _statsBindNavSpy(root) {
 const _statsAvatar = (id, name, size = 18) =>
   characterAvatarHtml(STATE.characters?.find(x => x.id === id) || { nom: name }, { size, className: 'stats-av-xs', title: name });
 
-function _characterOwnerKey(c = {}) {
-  return c.uid ? `uid:${c.uid}` : `owner:${c.ownerPseudo || 'unknown'}`;
-}
-
-function _renderCharacterAdminFilter(chars = []) {
-  const profiles = STATE.adventure?.memberProfiles || {};
-  const byOwner = new Map();
-  chars.forEach(c => {
-    const key = _characterOwnerKey(c);
-    if (!byOwner.has(key)) byOwner.set(key, []);
-    byOwner.get(key).push(c);
-  });
-
-  const owners = [...byOwner.entries()].map(([key, list]) => {
-    const uid = key.startsWith('uid:') ? key.slice(4) : '';
-    const profile = uid ? (profiles[uid] || {}) : {};
-    const sorted = sortCharactersForDisplay(list);
-    const main = sorted[0] || {};
-    const name = profile.pseudo || main.ownerPseudo || profile.email || 'Compte sans nom';
-    const email = profile.email || (uid ? '' : 'Ancien rattachement');
-    return { key, uid, profile, chars: sorted, name, email };
-  }).sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
-
-  const ownerButtons = owners.map(owner => {
-    const previews = owner.chars.slice(0, 2).map(ch => `
-      <span class="cs-admin-filter-char" title="${_esc(ch.nom || 'Personnage')}">
-        ${characterPortraitContent(ch, { fallbackTag: 'span' })}
-      </span>`).join('');
-    const more = Math.max(0, owner.chars.length - 2);
-    return `<button type="button" class="cs-admin-filter cs-admin-filter-card"
-      data-owner-key="${_esc(owner.key)}" data-action="filterAdminChars"
-      title="${_esc(owner.name)}${owner.email ? ' - ' + _esc(owner.email) : ''}">
-      <span class="cs-admin-filter-avatar"><img src="${_esc(avatarSrcOf(owner.profile))}" alt="" loading="lazy" decoding="async"></span>
-      <span class="cs-admin-filter-body">
-        <strong>${_esc(owner.name)}</strong>
-        ${owner.email ? `<small>${_esc(owner.email)}</small>` : '<small>Compte sans email</small>'}
-      </span>
-      <span class="cs-admin-filter-preview">
-        ${previews}
-        ${more ? `<span class="cs-admin-filter-more">+${more}</span>` : ''}
-      </span>
-      <span class="cs-admin-filter-count">${owner.chars.length}</span>
-    </button>`;
-  }).join('');
-
-  return `<div class="admin-section cs-admin-filter-section">
-    <div class="cs-admin-filter-head">
-      <span>Filtrer par compte</span>
-      <small>${owners.length} compte${owners.length > 1 ? 's' : ''} · ${chars.length} personnage${chars.length > 1 ? 's' : ''}</small>
-    </div>
-    <div class="char-select-bar cs-admin-filter-grid" id="admin-player-filter">
-      <button type="button" class="cs-admin-filter cs-admin-filter-all active" data-owner-key="" data-action="filterAdminChars">
-        <span>Tous les comptes</span>
-        <strong>${chars.length}</strong>
-      </button>
-      ${ownerButtons}
-    </div>
-  </div>`;
-}
 function _statsCaptureDrawerState(root = document.getElementById('stats-root')) {
   if (!root) return;
   root.querySelectorAll('details[data-drawer-key]').forEach(d => {
@@ -3351,16 +3291,17 @@ const PAGES = {
     STATE.characters = allChars;
     const chars = STATE.isAdmin ? allChars : allChars.filter(c => c.uid === uid);
     const content = document.getElementById('main-content');
-    // V3 : page-header standard (titre comme les autres pages) + shell de la fiche.
-    let html = `${pageHeaderHtml(STATE.isAdmin ? '📜 Tous les Personnages' : '📜 Mes Personnages', 'Gérez vos fiches de personnage')}`;
-    if (STATE.isAdmin && chars.length > 0) {
-      html += _renderCharacterAdminFilter(chars);
-    }
+    // V3 : le bandeau collant de la fiche (characters.js → .cs-top) porte le
+    // titre, le sélecteur de personnage et le filtre par compte. Ici, quand des
+    // persos existent, on ne pose que le conteneur ; l'en-tête plein n'apparaît
+    // que sur l'état vide.
+    let html = '';
     if (chars.length === 0) {
-      html += emptyStateHtml('📜', 'Aucun personnage. Crée ton premier héros !')
+      html = `${pageHeaderHtml(STATE.isAdmin ? '📜 Tous les Personnages' : '📜 Mes Personnages', 'Gérez vos fiches de personnage')}`
+        + emptyStateHtml('📜', 'Aucun personnage. Crée ton premier héros !')
         + `<div style="margin-bottom:1.5rem"><button class="char-pill-new" data-action="createNewChar">+ Nouveau personnage</button></div>`;
     } else {
-      html += `<div id="char-sheet-area"></div>`;
+      html = `<div id="char-sheet-area"></div>`;
     }
     content.innerHTML = html;
     if (chars.length > 0) {

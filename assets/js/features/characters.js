@@ -135,7 +135,6 @@ import { lsJson } from '../shared/local-storage.js';
 
 // Caches partagés Phase 2 — chargés à la demande au 1er affichage Combat
 let _combatTabCache = { styles: null, dmgTypes: null };
-let _charAdminFilter = null;
 let _currentTopTab   = 'combat';
 let _csV3InvFilter = { cat: 'all', search: '' };
 let _csV3InvDensity = lsJson.get('cs-inventory-density') === 'list' ? 'list' : 'cards';
@@ -429,26 +428,6 @@ function _adminOwnerKey(c = {}) {
   return c.uid ? `uid:${c.uid}` : `owner:${c.ownerPseudo || 'unknown'}`;
 }
 
-function _adminFilterMatches(c) {
-  if (!_charAdminFilter) return true;
-  return _adminOwnerKey(c) === _charAdminFilter;
-}
-
-function filterAdminChars(ownerKey, el) {
-  // Met à jour la carte active du filtre admin
-  document.querySelectorAll('#admin-player-filter .cs-admin-filter').forEach(p=>p.classList.remove('active'));
-  if (el) el.classList.add('active');
-  // Mémorise le filtre actif pour que renderCharSheet le réutilise au prochain rendu
-  _charAdminFilter = ownerKey || null;
-  // Sélectionne le 1er perso du filtre et rerendre
-  const filtered = _charAdminFilter ? STATE.characters.filter(_adminFilterMatches) : STATE.characters;
-  // Sélectionne le ★ par défaut du joueur filtré si possible, sinon le premier (alpha)
-  const chars = sortCharactersForDisplay(filtered);
-  // Affichage alphabétique, mais on sélectionne le ★ par défaut du joueur si présent.
-  const pick = chars.find(c => c.isDefault) || chars[0];
-  if (pick) { STATE.activeChar = pick; renderCharSheet(pick); }
-}
-
 // ══════════════════════════════════════════════
 // RENDER PRINCIPAL
 // ══════════════════════════════════════════════
@@ -553,34 +532,43 @@ function _charOwners(chars) {
   }).sort((a, b) => a.label.localeCompare(b.label, 'fr'));
 }
 
-// Chips de filtre par compte : image de profil du joueur + 1-2 portraits de ses
-// persos + compteur. Cliquer filtre la liste ; « Tous » réinitialise.
+// Filtre visuel par compte : liste verticale avec avatar, nom et nombre de
+// personnages. Elle reste lisible même avec beaucoup de joueurs.
 function _charPickAccountsHtml(owners, total) {
   if (owners.length <= 1) return '';
-  const chips = owners.map(o => {
-    const previews = o.chars.slice(0, 2).map(ch =>
-      `<span class="cs-charpick-acct-char" title="${_esc(ch.nom || 'Personnage')}">${characterPortraitContent(ch, { fallbackTag: 'span' })}</span>`
-    ).join('');
-    return `<button type="button" class="cs-charpick-acct" data-acct="${_esc(o.key)}" data-action="charPickAccountChip" title="${_esc(o.label)} · ${o.count} perso${o.count>1?'s':''}">
-      <img class="cs-charpick-acct-av" src="${_esc(avatarSrcOf(o.profile))}" alt="" loading="lazy" decoding="async">
-      <span class="cs-charpick-acct-body"><b>${_esc(o.label)}</b><span class="cs-charpick-acct-chars">${previews}${o.count>2?`<span class="cs-charpick-acct-more">+${o.count-2}</span>`:''}</span></span>
-    </button>`;
-  }).join('');
-  return `<div class="cs-charpick-accts">
-    <button type="button" class="cs-charpick-acct cs-charpick-acct-all active" data-acct="" data-action="charPickAccountChip" title="Tous les comptes">
-      <span class="cs-charpick-acct-body"><b>Tous</b><small>${total}</small></span>
-    </button>
-    ${chips}
-  </div>`;
+  const buttons = owners.map(o =>
+    `<button type="button" class="cs-charpick-account" data-acct="${_esc(o.key)}" data-action="charPickAccount" aria-pressed="false">
+      <img class="cs-charpick-account-avatar" src="${_esc(avatarSrcOf(o.profile))}" alt="" loading="lazy" decoding="async">
+      <span class="cs-charpick-account-body"><b>${_esc(o.label)}</b><small>${o.count} personnage${o.count > 1 ? 's' : ''}</small></span>
+      <span class="cs-charpick-account-count" aria-hidden="true">${o.count}</span>
+    </button>`
+  ).join('');
+  return `<details class="cs-charpick-account-filter">
+    <summary class="cs-charpick-account-summary">
+      <span class="cs-charpick-account-summary-avatar" aria-hidden="true"><span>👥</span><img alt="" hidden></span>
+      <span class="cs-charpick-account-summary-body"><small>Compte affiché</small><b>Tous les comptes</b></span>
+      <span class="cs-charpick-account-summary-count">${total}</span>
+      <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-chevron"/></svg>
+    </summary>
+    <header class="cs-charpick-account-head"><span>Choisir un compte</span><small>${owners.length} disponibles</small></header>
+    <div class="cs-charpick-account-list">
+      <button type="button" class="cs-charpick-account cs-charpick-account-all active" data-acct="" data-action="charPickAccount" aria-pressed="true">
+        <span class="cs-charpick-account-avatar" aria-hidden="true">👥</span>
+        <span class="cs-charpick-account-body"><b>Tous les comptes</b><small>${total} personnages</small></span>
+        <span class="cs-charpick-account-count" aria-hidden="true">${total}</span>
+      </button>
+      ${buttons}
+    </div>
+  </details>`;
 }
 
 // Une ligne du menu du sélecteur (recherche/filtre par data-attributs).
-function _charPickRowHtml(ch, activeCharId) {
-  const owner = ch.ownerPseudo || (ch.uid ? '' : 'Sans compte');
+function _charPickRowHtml(ch, activeCharId, ownerLabels = new Map()) {
+  const owner = ownerLabels.get(_adminOwnerKey(ch)) || ch.ownerPseudo || (ch.uid ? '' : 'Sans compte');
   const meta = `Niv.${ch.niveau||1}${ch.classe ? ' · ' + _esc(ch.classe) : ''}`;
   return `<button type="button" role="option" class="cs-charpick-row${ch.id===activeCharId?' active':''}"
     data-action="selectChar" data-id="${ch.id}" data-charid="${ch.id}"
-    data-name="${_esc((ch.nom || '').toLowerCase())}" data-owner="${_esc(_adminOwnerKey(ch))}"
+    data-search="${_esc(`${ch.nom || ''} ${owner}`.toLowerCase())}" data-owner="${_esc(_adminOwnerKey(ch))}"
     aria-selected="${ch.id===activeCharId?'true':'false'}">
     <span class="char-pill-av" style="--av-c:${_auraColor(ch.aura)}">${characterPortraitContent(ch)}${ch.isDefault?'<span class="char-pill-star">★</span>':''}</span>
     <span class="cs-charpick-row-body"><b>${_esc(ch.nom || 'Sans nom')}</b><small>${meta}</small></span>
@@ -603,6 +591,7 @@ function _buildCharSwitchHtml(activeCharId, canEdit) {
   // (recherche + filtre par compte + liste). Tient dans le bandeau collant.
   const cur = switchable.find(c => c.id === activeCharId) || switchable[0];
   const owners = STATE.isAdmin ? _charOwners(switchable) : [];
+  const ownerLabels = new Map(owners.map(o => [o.key, o.label]));
   const accountsHtml = _charPickAccountsHtml(owners, switchable.length);
   return `<div class="cs-charpick" data-charpick>
     <button type="button" class="cs-charpick-btn" data-action="toggleCharPicker" aria-haspopup="listbox" aria-expanded="false">
@@ -612,12 +601,14 @@ function _buildCharSwitchHtml(activeCharId, canEdit) {
     </button>
     <div class="cs-charpick-menu" hidden role="listbox" aria-label="Choisir un personnage">
       <div class="cs-charpick-tools">
-        <input type="search" class="cs-charpick-search" placeholder="Rechercher un personnage…" data-input="charPickSearch" aria-label="Rechercher un personnage">
+        <input type="search" class="cs-charpick-search" placeholder="Personnage ou compte…" data-input="charPickSearch" aria-label="Rechercher un personnage ou un compte">
       </div>
       ${accountsHtml}
+      <header class="cs-charpick-character-head"><span>Personnages</span><small><span class="cs-charpick-result-count">${switchable.length}</span> affichés</small></header>
       <div class="cs-charpick-list">
-        ${switchable.map(ch => _charPickRowHtml(ch, activeCharId)).join('')}
+        ${switchable.map(ch => _charPickRowHtml(ch, activeCharId, ownerLabels)).join('')}
       </div>
+      <div class="cs-charpick-empty" hidden>Aucun personnage trouvé.</div>
       ${canEdit ? `<button type="button" class="cs-charpick-new" data-action="createNewChar">➕ Nouveau personnage</button>` : ''}
     </div>
   </div>`;
@@ -652,16 +643,43 @@ function _charPickFilter() {
   const menu = document.querySelector('.cs-charpick-menu');
   if (!menu) return;
   const q = (menu.querySelector('.cs-charpick-search')?.value || '').toLowerCase().trim();
-  const acct = menu.querySelector('.cs-charpick-acct.active')?.dataset.acct || '';
+  const acct = menu.querySelector('.cs-charpick-account.active')?.dataset.acct || '';
+  let visibleCount = 0;
   menu.querySelectorAll('.cs-charpick-row').forEach(row => {
-    const okName = !q || (row.dataset.name || '').includes(q);
+    const okName = !q || (row.dataset.search || '').includes(q);
     const okAcct = !acct || row.dataset.owner === acct;
     row.hidden = !(okName && okAcct);
+    if (!row.hidden) visibleCount += 1;
   });
+  const empty = menu.querySelector('.cs-charpick-empty');
+  const resultCount = menu.querySelector('.cs-charpick-result-count');
+  if (empty) empty.hidden = visibleCount > 0;
+  if (resultCount) resultCount.textContent = String(visibleCount);
 }
-function charPickAccountChip(btn) {
-  btn.closest('.cs-charpick-menu')?.querySelectorAll('.cs-charpick-acct')
-    .forEach(c => c.classList.toggle('active', c === btn));
+function charPickAccount(btn) {
+  const filter = btn.closest('.cs-charpick-account-filter');
+  filter?.querySelectorAll('.cs-charpick-account').forEach(account => {
+    const active = account === btn;
+    account.classList.toggle('active', active);
+    account.setAttribute('aria-pressed', String(active));
+  });
+  const summary = filter?.querySelector('.cs-charpick-account-summary');
+  const sourceImg = btn.querySelector('img');
+  const summaryImg = summary?.querySelector('img');
+  const summaryIcon = summary?.querySelector('.cs-charpick-account-summary-avatar > span');
+  const label = btn.querySelector('.cs-charpick-account-body b')?.textContent || 'Tous les comptes';
+  const count = btn.querySelector('.cs-charpick-account-count')?.textContent || '';
+  if (summaryImg) {
+    summaryImg.hidden = !sourceImg;
+    if (sourceImg) summaryImg.src = sourceImg.currentSrc || sourceImg.src;
+    else summaryImg.removeAttribute('src');
+  }
+  if (summaryIcon) summaryIcon.hidden = !!sourceImg;
+  const summaryLabel = summary?.querySelector('.cs-charpick-account-summary-body b');
+  const summaryCount = summary?.querySelector('.cs-charpick-account-summary-count');
+  if (summaryLabel) summaryLabel.textContent = label;
+  if (summaryCount) summaryCount.textContent = count;
+  if (filter) filter.open = false;
   _charPickFilter();
 }
 
@@ -2320,10 +2338,9 @@ registerActions({
   // Sélection
   selectChar:              (btn)    => selectChar(btn.dataset.id, btn),
   createNewChar:           ()       => createNewChar(),
-  filterAdminChars:        (btn)    => filterAdminChars(btn.dataset.ownerKey || btn.dataset.pseudo, btn),
   toggleCharPicker:        (btn)    => toggleCharPicker(btn),
   charPickSearch:          ()       => _charPickFilter(),
-  charPickAccountChip:     (btn)    => charPickAccountChip(btn),
+  charPickAccount:         (btn)    => charPickAccount(btn),
   _setDefaultCharacter:    (btn)    => _setDefaultCharacter(btn.dataset.id),
   openCharacterBuildsModal: (btn)    => openCharacterBuildsModal(btn.dataset.id),
   switchCharacterBuild:    (el)     => switchCharacterBuild(el.dataset.id, el.dataset.buildId || el.value),
