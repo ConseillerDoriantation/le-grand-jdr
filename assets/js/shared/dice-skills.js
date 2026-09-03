@@ -10,3 +10,27 @@ export const DICE_SKILLS_DEFAULT = [
   {name:'Persuasion',stat:'CHA'},{name:'Religion',stat:'INT'},{name:'Représentation',stat:'CHA'},
   {name:'Sagesse',stat:'SAG'},{name:'Survie',stat:'SAG'},{name:'Tromperie',stat:'CHA'},
 ];
+
+/**
+ * Normalise le catalogue de jets sans en retirer : la Console MJ peut créer
+ * aussi bien des compétences que des jets généraux (Combat, Force, etc.).
+ * L'ordre défini par le MJ est conservé et les doublons exacts sont ignorés.
+ */
+export function normalizeDiceSkills(skills, fallback = DICE_SKILLS_DEFAULT) {
+  const source = Array.isArray(skills) ? skills : fallback;
+  const seen = new Set();
+  const out = [];
+  for (const skill of source || []) {
+    const name = String(skill?.name || skill?.nom || '').trim();
+    if (!name) continue;
+    const key = name.toLocaleLowerCase('fr');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      ...skill,
+      name,
+      stat: String(skill?.stat || '').trim().toUpperCase(),
+    });
+  }
+  return out;
+}

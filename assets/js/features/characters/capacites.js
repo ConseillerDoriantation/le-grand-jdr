@@ -19,14 +19,11 @@ import { getCharDamageProfile } from '../../shared/equipment-utils.js';
 import { DEFAULT_DAMAGE_TYPES, loadDamageTypes, getDamageTypeById } from '../../shared/damage-types.js';
 import { CONDITION_DEFAULT_LIBRARY, loadConditionLibrary } from '../../shared/conditions.js';
 import { getCharacterById } from '../../shared/character-state.js';
-import { DICE_SKILLS_DEFAULT } from '../../shared/dice-skills.js';
+import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY, normalizeDiceSkills } from '../../shared/dice-skills.js';
+import { lsJson } from '../../shared/local-storage.js';
+import { watchPageDoc } from '../../shared/realtime.js';
 import { getMod, computeEquipSkillBonus } from '../../shared/char-stats.js';
 
-// Compétences : liste FIXE (compétence → caractéristique) alignée sur la modale
-// de jets « Compétences et caractéristiques ». On exclut les entrées « brutes »
-// (les caractéristiques elles-mêmes + Combat) pour ne garder que les compétences.
-const _RAW_SKILL_NAMES = new Set(['Force', 'Dextérité', 'Constitution', 'Intelligence', 'Sagesse', 'Charisme', 'Combat']);
-const SKILL_LIST = DICE_SKILLS_DEFAULT.filter(s => s.stat && !_RAW_SKILL_NAMES.has(s.name));
 const _STAT_ABBR_TO_KEY = { FOR: 'force', DEX: 'dexterite', CON: 'constitution', INT: 'intelligence', SAG: 'sagesse', CHA: 'charisme' };
 // Niveau → bonus fixe appliqué au jet (le VTT applique aussi l'avantage en expertise).
 const SKILL_BONUS = { forme: 2, expert: 2 };
@@ -34,6 +31,8 @@ const SKILL_BONUS = { forme: 2, expert: 2 };
 // Caches (chargés à froid, puis re-render du tab) : types de dégâts + états de l'aventure.
 let _capDmgTypes = null;
 let _capConditions = null;
+let _capDiceSkills = normalizeDiceSkills(lsJson.get(DICE_SKILLS_STORAGE_KEY, DICE_SKILLS_DEFAULT));
+let _capDiceSkillsSignature = JSON.stringify(_capDiceSkills);
 
 const RES_KINDS = {
   res: { lbl: 'Résistance',    cls: 'res' },
@@ -90,6 +89,7 @@ function _mergedDmgResist(c) {
 // ══════════════════════════════════════════════════════════════════════════
 export function renderCharCapacites(c, canEdit) {
   _bootstrapCaches(c);
+  _watchAdventureDiceSkills(c);
   return `<div class="cs-caps">
     ${_sectionResist(c, canEdit)}
     ${_sectionCapacites(c, canEdit)}
@@ -167,13 +167,14 @@ function _sectionCompetences(c, canEdit) {
     return `<div class="comp-line ${lvl}" title="${_esc(title)}"${canEdit ? ` data-action="capCycleSkill" data-skill="${_esc(sk.name)}" data-id="${c.id}" role="button" tabindex="0"` : ''}>
       <span class="comp-dot ${COMP_NIV[lvl].dot}"></span>
       <span class="comp-name">${_esc(sk.name)}</span>
-      <span class="comp-stat">${_esc(sk.stat)}</span>
+      <span class="comp-stat">${_esc(sk.stat || 'Libre')}</span>
       <span class="comp-mod">${modStr}</span>
     </div>`;
   };
+  const skillList = _capDiceSkills;
   return `<section class="cs-section cs-section--compact">
-    ${_hdr('🎓', 'Compétences', '○ non formée · ◐ formée (+2) · ◉ expertise (+2 &amp; avantage)', '')}
-    <div class="comp-grid">${SKILL_LIST.map(line).join('')}</div>
+    ${_hdr('🎓', 'Jets & Compétences', `${skillList.length} jets d’aventure · ○ non formée · ◐ formée (+2) · ◉ expertise (+2 &amp; avantage)`, '')}
+    <div class="comp-grid">${skillList.length ? skillList.map(line).join('') : '<span class="cs-caps-empty">Aucun jet configuré dans la Console MJ.</span>'}</div>
   </section>`;
 }
 
@@ -212,6 +213,27 @@ function _bootstrapCaches(c) {
       charSession.renderTab?.('capacites', cur, charSession.getCanEditChar?.());
     }
   }).catch(() => { _bootstrapping = false; });
+}
+
+// Même document et même ordre que « Console MJ > Compétences de dés ».
+// world/dice_skills est un doc session-live : ce watch réutilise le cache
+// Firestore existant et ne crée pas de lecture supplémentaire à chaque rendu.
+function _watchAdventureDiceSkills(c) {
+  watchPageDoc('character-cap-dice-skills', 'world', 'dice_skills', 'characters', doc => {
+    const source = Array.isArray(doc?.skills)
+      ? doc.skills
+      : lsJson.get(DICE_SKILLS_STORAGE_KEY, DICE_SKILLS_DEFAULT);
+    const next = normalizeDiceSkills(source);
+    const signature = JSON.stringify(next);
+    if (signature === _capDiceSkillsSignature) return;
+    _capDiceSkills = next;
+    _capDiceSkillsSignature = signature;
+
+    const cur = charSession.getCurrentChar?.();
+    if (cur?.id === c.id && charSession.getCurrentCharTab?.() === 'capacites') {
+      charSession.renderTab?.('capacites', cur, charSession.getCanEditChar?.());
+    }
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════════════
