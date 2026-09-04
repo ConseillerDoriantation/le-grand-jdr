@@ -3119,3 +3119,125 @@
   .bs-wall-post-edit > div > span { display: none; }
   .bs-qn-history { margin-left: 0; }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   BASTION — bandeau de page unifié
+   ════════════════════════════════════════════════════════════════════ */
+.bs-root-v2 {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0 0 48px;
+  gap: 0;
+}
+
+.bs-page-top {
+  position: relative;
+  z-index: 40;
+  width: 100%;
+  border-bottom: 1px solid var(--border-strong);
+  background: color-mix(in srgb, var(--bg-panel) 94%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+.bs-page-top-in {
+  width: 100%;
+  padding: 14px clamp(14px, 2vw, 28px) 12px;
+  box-sizing: border-box;
+}
+
+.bs-page-top-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bs-page-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid rgba(232,184,75,.25);
+  border-radius: 9px;
+  background: rgba(232,184,75,.08);
+  font-size: 1.1rem;
+}
+
+.bs-page-brand {
+  display: flex;
+  align-items: baseline;
+  gap: .65rem;
+  min-width: 0;
+}
+
+.bs-page-brand h1 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: .02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bs-page-brand small {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.bs-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin-left: auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.bs-page-actions::-webkit-scrollbar { display: none; }
+.bs-page-actions .btn {
+  flex: 0 0 auto;
+  min-height: 34px;
+  white-space: nowrap;
+}
+
+.bs-page-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  padding: 12px clamp(14px, 2vw, 28px) 0;
+  box-sizing: border-box;
+}
+
+@media (max-width: 760px) {
+  .bs-root-v2 { padding: 0 0 40px; }
+  .bs-page-top-in { padding: 10px 12px 9px; }
+  .bs-page-top-row { align-items: flex-start; flex-wrap: wrap; }
+  .bs-page-brand {
+    align-items: flex-start;
+    flex: 1 1 calc(100% - 46px);
+    flex-direction: column;
+    gap: 1px;
+  }
+  .bs-page-brand h1 { max-width: 100%; font-size: 19px; }
+  .bs-page-brand small { max-width: 100%; font-size: 10px; }
+  .bs-page-actions {
+    width: 100%;
+    margin-left: 0;
+    padding-bottom: 2px;
+  }
+  .bs-page-body { padding: 10px 10px 0; }
+}

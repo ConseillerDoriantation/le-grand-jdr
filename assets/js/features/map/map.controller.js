@@ -143,14 +143,26 @@ function shellHTML() {
   return `
     <div class="map-layout">
 
-      <header class="map-topbar">
-        <div class="map-topbar__title">
-          <span class="map-topbar__region">${_esc(regionName)}</span>
+      <header class="map-page-top">
+        <div class="map-page-top__inner">
+          <div class="map-page-top__row">
+            <div class="map-page-brand">
+              <h1>Carte</h1>
+              <small>${_esc(regionName)}</small>
+            </div>
+            <div class="map-page-help" aria-label="Aide à la navigation sur la carte">
+              <span aria-hidden="true">⌖</span>
+              <span>Molette : zoom · Glisser : naviguer</span>
+            </div>
+          </div>
+          <div class="map-topbar">
+            <div class="map-topbar__search">
+              <span class="map-topbar__search-icon" aria-hidden="true">⌕</span>
+              <input type="search" id="map-search" aria-label="Rechercher sur la carte" placeholder="Rechercher un lieu, une organisation…" autocomplete="off" value="${_esc(state.filters.query)}">
+            </div>
+            <div class="map-topbar__filters" id="map-filters" aria-label="Filtrer les lieux"></div>
+          </div>
         </div>
-        <div class="map-topbar__search">
-          <input type="search" id="map-search" placeholder="Rechercher un lieu, une organisation…" autocomplete="off" value="${_esc(state.filters.query)}">
-        </div>
-        <div class="map-topbar__filters" id="map-filters"></div>
       </header>
 
       <div class="map-workspace">

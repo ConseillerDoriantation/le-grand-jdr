@@ -655,9 +655,13 @@
 #main-content[data-page="map"],
 #main-content[data-page="vtt"],
 #main-content[data-page="histoire"],
+#main-content[data-page="story"],
 #main-content[data-page="agenda"],
 #main-content[data-page="achievements"],
-#main-content[data-page="bestiaire"] {
+#main-content[data-page="bestiaire"],
+#main-content[data-page="world"],
+#main-content[data-page="bastion"],
+#main-content[data-page="players"] {
   padding: 0 !important;
 }
 
@@ -738,7 +742,7 @@
 #main-content[data-page="agenda"] .ag-root,
 #main-content[data-page="bastion"] .bs-root,
 #main-content[data-page="players"] .pp-page {
-  gap: 12px;
+  gap: 0;
 }
 
 #main-content[data-page="world"] .world-hero-copy p,
