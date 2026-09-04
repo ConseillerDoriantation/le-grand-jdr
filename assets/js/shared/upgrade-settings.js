@@ -29,7 +29,7 @@ export const DEFAULT_UPGRADE_SETTINGS = {
     '2H': { 1: 250, 2: 500, 3: 800, 4: 1200 },   // 1ᵉʳ, 2ᵉ, 3ᵉ, 4ᵉ point
   },
   amulet: { 1: 200, 2: 400, 3: 800 },            // 1ʳᵉ, 2ᵉ, 3ᵉ stat distincte
-  ring:   { 1: 250 },                            // 1 palier max — stat et effet améliorables séparément (chacun +1 max)
+  ring:   { 1: 250 },                            // 1 palier max par stat proposée + effet, améliorés séparément
   caps: {
     weapon1H: 2,
     weapon2H: 4,
@@ -65,7 +65,7 @@ function _mergeDefaults(stored = {}) {
     caps: {
       ...d.caps,
       ...(stored.caps || {}),
-      // ring ne peut jamais dépasser 1 (1 upgrade stat + 1 upgrade effet, chacun indépendant)
+      // ring ne peut jamais dépasser 1 (chaque stat proposée + l'effet ont leur propre upgrade)
       ring: Math.min(stored.caps?.ring ?? d.caps.ring, 1),
       traitsPerItem: { ...d.caps.traitsPerItem, ...(stored.caps?.traitsPerItem || {}) },
     },
@@ -225,7 +225,7 @@ function _renderUpgradeSettingsModal() {
       <!-- ── Anneaux ───────────────────────────────────────── -->
       <div class="sh-admin-section">
         <div class="sh-admin-section-title">💍 Anneaux</div>
-        <p class="sh-admin-section-hint">Stat et effet améliorables séparément, +1 max chacun.</p>
+        <p class="sh-admin-section-hint">Chaque stat proposée par l'anneau et son effet s'améliorent séparément, +1 max chacun.</p>
         ${tierRow("Coût d'amélioration (+1)", s.ring[1], 'ring.1')}
       </div>
 

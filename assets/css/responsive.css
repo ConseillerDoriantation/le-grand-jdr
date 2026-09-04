@@ -661,7 +661,8 @@
 #main-content[data-page="bestiaire"],
 #main-content[data-page="world"],
 #main-content[data-page="bastion"],
-#main-content[data-page="players"] {
+#main-content[data-page="players"],
+#main-content[data-page="shop"] {
   padding: 0 !important;
 }
 

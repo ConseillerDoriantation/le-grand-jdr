@@ -16,7 +16,7 @@ import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry, inventoryHistoryEntries } from '../shared/inventory-history.js';
 import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
 import { getArmorTypeOptions } from '../shared/armor-set-settings.js';
-import { openArtisanModal } from './artisan.js';
+import { mountArtisanPage, unmountArtisanPage } from './artisan.js';
 import {
   openShopExport, switchShopExportTab, selectAllShopExport,
   doShopExport, previewShopImport, doShopImport,
@@ -148,6 +148,8 @@ function _setShopCharId(id = '') {
 }
 let _weaponFormats = [];
 let _view  = 'home';   // 'home' | 'items'
+let _shopSection = 'shop'; // shop | atelier | artisan
+let _artisanNeedsReset = false;
 let _activeCat = null;
 let _page = 1;
 let _pendingTargetShopItemId = null;
@@ -159,7 +161,7 @@ let _filterSearch = '';
 let _filterTags   = new Set(); // valeurs de tags actifs
 let _filterSort   = localStorage.getItem('shop_sort') || 'ordre'; // ordre | nom | prix_asc | prix_desc | rarete
 // ── Smart filters (refonte boutique — lot 3) ────────────────────────────────
-// Ensemble de chips actives parmi : payable | boost | upgrade | stock | new.
+// Ensemble de chips actives parmi : fav | payable | boost | upgrade | new.
 // Les filtres se cumulent en AND ; les compteurs sont recalculés à chaque render.
 let _smartFilters = new Set();
 
@@ -180,7 +182,7 @@ function toggleFav(id) {
   if (document.getElementById('atelier-items-col')) _renderAtelier();
   else renderShop();
 }
-const SMART_KINDS = ['fav', 'payable', 'boost', 'upgrade', 'stock', 'new'];
+const SMART_KINDS = ['fav', 'payable', 'boost', 'upgrade', 'new'];
 const CHAR_SMART_KINDS = new Set(['payable', 'boost', 'upgrade']);
 
 // ── Tweaks utilisateur (lot 7) : préférences d'affichage persistées en LS ──
@@ -307,6 +309,19 @@ function _animateCount(el, from, to, duration = 400) {
 // ══════════════════════════════════════════════════════════════════════════════
 // RENDER PRINCIPAL
 // ══════════════════════════════════════════════════════════════════════════════
+function _renderShopAdminToolbar() {
+  if (!STATE.isAdmin) return '';
+  return `<div class="sh-catalog-admin" role="toolbar" aria-label="Gestion de la Boutique">
+    <span class="sh-catalog-admin-label">Gestion</span>
+    <button class="btn btn-outline btn-sm" data-sh-action="openCatModal" title="Créer une catégorie">📁 Catégorie</button>
+    <button class="btn btn-outline btn-sm" data-sh-action="openItemModal" title="Créer un article">＋ Article</button>
+    <button class="btn btn-outline btn-sm" data-sh-action="openWeaponFmts" title="Gérer les formats d'armes">⚙️ Formats</button>
+    <button class="btn btn-outline btn-sm" data-sh-action="openRarities" title="Gérer les raretés">★ Raretés</button>
+    <button class="btn btn-outline btn-sm" data-sh-action="openUpgradeStg" title="Tarifs et plafonds des améliorations">⚙️ Améliorations</button>
+    <button class="btn btn-outline btn-sm" data-sh-action="openExport" title="Exporter / Importer la boutique">⬆️ Export</button>
+  </div>`;
+}
+
 export async function renderShop() {
   await Promise.all([loadShopData(), loadShopCharacters()]);
   const target = consumeTargetEntity('shop');
@@ -316,6 +331,7 @@ export async function renderShop() {
   if (targetItemId) {
     const item = _items.find(i => i.id === targetItemId);
     if (item) {
+      _shopSection = 'shop';
       _view = 'items';
       _activeCat = item.categorieId || '__uncategorized__';
       _filterSearch = '';
@@ -340,6 +356,18 @@ export async function renderShop() {
   if (!content) return;
 
   let html = `<div class="sh-page sh-page--v2">`;
+  const visibleShopItems = _visibleItems();
+  const visibleShopCats = _visibleCats();
+  const activeCategory = _activeCat === '__uncategorized__'
+    ? { nom: 'Articles non classés' }
+    : _cats.find(cat => cat.id === _activeCat);
+  const pageContext = _shopSection === 'atelier'
+    ? 'Composer et comparer un équipement avant achat'
+    : _shopSection === 'artisan'
+      ? 'Améliorer, sertir et recycler son équipement'
+      : _view === 'items' && activeCategory
+        ? activeCategory.nom
+        : `${visibleShopItems.length} article${visibleShopItems.length !== 1 ? 's' : ''} · ${visibleShopCats.length} catégorie${visibleShopCats.length !== 1 ? 's' : ''}`;
 
   // ── Char-strip riche (avatar + select + or proéminent) ──
   const activeChar = _getActiveShopChar();
@@ -366,79 +394,76 @@ export async function renderShop() {
   })() : '';
 
   html += `
-    <div class="sh-topbar sh-topbar--v2">
-      <div class="sh-topbar-title-wrap">
-        <div class="sh-topbar-title-row">
-          <span class="sh-topbar-icon">🛒</span>
-          <div>
-            <div class="sh-topbar-title">Boutique</div>
-            <div class="sh-topbar-subtitle">Équipements, consommables et merveilles</div>
+    <header class="sh-page-top sh-topbar sh-topbar--v2">
+      <div class="sh-page-top-in">
+        <div class="sh-page-top-row">
+          <div class="sh-page-brand sh-topbar-title-wrap">
+            <h1 class="sh-topbar-title">Boutique</h1>
+            <small class="sh-topbar-subtitle">${_esc(pageContext)}</small>
+          </div>
+
+          <div class="sh-topbar-tools">
+            <div class="sh-topbar-character">${charStripHtml}</div>
+            ${_shopSection === 'shop' ? `
+              <button class="btn btn-outline btn-sm" data-sh-action="openShopHistory" title="Historique des objets achetés et vendus">🧾 Historique</button>
+              <button class="btn btn-outline btn-sm sh-tweaks-btn" data-sh-action="openTweaks" title="Affichage : disposition, densité et colonnes" aria-label="Options d’affichage">⚙️</button>
+            ` : ''}
           </div>
         </div>
-      </div>
-
-      <div class="sh-topbar-tools">
-        <div class="sh-topbar-character">${charStripHtml}</div>
-        <button class="btn btn-outline btn-sm" data-sh-action="openShopHistory" title="Historique des objets achetés et vendus">🧾 Historique</button>
-        <button class="btn btn-outline btn-sm sh-tweaks-btn" data-sh-action="openTweaks" title="Affichage : layout, densité, colonnes">⚙️</button>`;
-
-  if (STATE.isAdmin) {
-    html += `
-      <span class="sh-topbar-admin">
-        <button class="btn btn-outline btn-sm" data-sh-action="openCatModal" title="Créer une catégorie">📁 Catégorie</button>
-        <button class="btn btn-outline btn-sm" data-sh-action="openItemModal" title="Créer un article">＋ Article</button>
-        <button class="btn btn-outline btn-sm" data-sh-action="openWeaponFmts" title="Gérer les formats d'armes">⚙️ Formats</button>
-        <button class="btn btn-outline btn-sm" data-sh-action="openRarities" title="Gérer les raretés">★ Raretés</button>
-        <button class="btn btn-outline btn-sm" data-sh-action="openUpgradeStg" title="Tarifs et plafonds des améliorations">⚙️ Améliorations</button>
-        <button class="btn btn-outline btn-sm" data-sh-action="openExport" title="Exporter / Importer la boutique">⬆️ Export</button>
-      </span>`;
-  }
+  `;
 
   html += `
+      <nav class="sh-page-tabs" role="tablist" aria-label="Sections de la boutique">
+        <button type="button" class="sh-page-tab ${_shopSection === 'shop' ? 'active' : ''}"
+          data-sh-action="setSection" data-section="shop" role="tab" aria-selected="${_shopSection === 'shop'}">
+          <span aria-hidden="true">🛍️</span> Boutique
+        </button>
+        <button type="button" class="sh-page-tab ${_shopSection === 'atelier' ? 'active' : ''}"
+          data-sh-action="setSection" data-section="atelier" role="tab" aria-selected="${_shopSection === 'atelier'}">
+          <span aria-hidden="true">🪄</span> Atelier
+        </button>
+        <button type="button" class="sh-page-tab ${_shopSection === 'artisan' ? 'active' : ''}"
+          data-sh-action="setSection" data-section="artisan" role="tab" aria-selected="${_shopSection === 'artisan'}">
+          <span aria-hidden="true">🔨</span> Artisan
+        </button>
+      </nav>
       </div>
-    </div>
+    </header>
 
-    <section class="sh-workshop-launchers" aria-label="Atelier et artisan">
-      <button type="button" class="sh-workshop-card sh-workshop-card--atelier"
-        data-sh-action="openAtelier" title="Essayer et construire un équipement">
-        <span class="sh-workshop-card-icon" aria-hidden="true">🪄</span>
-        <span class="sh-workshop-card-copy">
-          <span class="sh-workshop-card-kicker">Préparer son équipement</span>
-          <strong>Atelier</strong>
-          <span class="sh-workshop-card-desc">Composer un build et comparer ses statistiques avant achat</span>
-        </span>
-        <span class="sh-workshop-card-arrow" aria-hidden="true">→</span>
-      </button>
-      <button type="button" class="sh-workshop-card sh-workshop-card--artisan"
-        data-sh-action="openArtisan" title="Améliorer son équipement">
-        <span class="sh-workshop-card-icon" aria-hidden="true">🔨</span>
-        <span class="sh-workshop-card-copy">
-          <span class="sh-workshop-card-kicker">Faire évoluer son équipement</span>
-          <strong>Artisan</strong>
-          <span class="sh-workshop-card-desc">Améliorer, sertir et recycler les objets du personnage</span>
-        </span>
-        <span class="sh-workshop-card-arrow" aria-hidden="true">→</span>
-      </button>
-    </section>
-
-    ${_shopTweaks.layout === 'tabs' ? _renderCatTabsBar() : ''}
-
-    <div class="sh-layout">
-      <div class="sh-sidebar-col">
-        ${_renderSidebarTop()}
-        ${_renderSidebar()}
-      </div>
-
-      <div class="sh-main">
-        ${_renderNoCharBanner()}
-        ${_view === 'home' ? _renderHome() : _renderItemsView()}
-      </div>
+    <div class="sh-page-body">
+      ${_shopSection === 'atelier'
+        ? _renderAtelierPage()
+        : _shopSection === 'artisan'
+          ? `<div class="sh-artisan-page" id="sh-artisan-page" aria-live="polite">${loadingHtml('Préparation de l\'artisan…')}</div>`
+          : `
+            ${_renderShopAdminToolbar()}
+            ${_shopTweaks.layout === 'tabs' ? _renderCatTabsBar() : ''}
+            <div class="sh-layout">
+              <div class="sh-sidebar-col">
+                ${_renderSidebarTop()}
+                ${_renderSidebar()}
+              </div>
+              <div class="sh-main">
+                ${_renderNoCharBanner()}
+                ${_view === 'home' ? _renderHome() : _renderItemsView()}
+              </div>
+            </div>
+          `}
     </div>
   </div>`;
 
   content.innerHTML = html;
   _shopTweaksApply();
-  _mountSortables();
+  if (_shopSection === 'shop') {
+    unmountArtisanPage();
+    _mountSortables();
+  } else if (_shopSection === 'atelier') {
+    unmountArtisanPage();
+    _renderAtelier();
+  } else {
+    await mountArtisanPage('sh-artisan-page', { reset: _artisanNeedsReset });
+    _artisanNeedsReset = false;
+  }
   if (targetItemToOpen) {
     requestAnimationFrame(() => {
       const card = [...document.querySelectorAll('[data-item-id]')]
@@ -566,17 +591,16 @@ function _renderCatTabsBar() {
   </div>`;
 }
 
-// ── Hero : Smart filters ───────────────────────────────────────────────────
-// Rangée de chips contextuelles (payable / boost / upgrade / stock / new),
-// avec compteurs live. S'insère au-dessus de la grille d'articles.
-function _renderSmartBar() {
-  const base = _getCachedVisibleItems();
+// ── Hero : suggestions personnalisées ──────────────────────────────────────
+// Ces raccourcis parlent au joueur ; les critères propres aux objets restent
+// dans le bloc « Affiner l'équipement » de la catégorie.
+function _renderSmartBar(baseItems = _getCachedVisibleItems()) {
+  const base = Array.isArray(baseItems) ? baseItems : _getCachedVisibleItems();
   const SMART_META = [
     { k:'fav',     ico:'⭐', lbl:'Mes favoris',                cls:'fav'     },
     { k:'payable', ico:'💰', lbl:'Je peux me payer',         cls:'payable' },
     { k:'boost',   ico:'⚡', lbl:'Booste ma stat principale', cls:'boost'   },
     { k:'upgrade', ico:'⬆️', lbl:'Mieux que mon équipement',  cls:'upgrade' },
-    { k:'stock',   ico:'📦', lbl:'En stock',                   cls:'stock'   },
     { k:'new',     ico:'✨', lbl:'Nouveautés',                 cls:'new'     },
   ];
   const activeChar = _getActiveShopChar();
@@ -592,10 +616,14 @@ function _renderSmartBar() {
       <span class="sh-smart-count">${n}</span>
     </button>`;
   }).join('');
+  const context = activeChar?.nom ? `Pour ${_esc(activeChar.nom)}` : 'Suggestions rapides';
   return `<div class="sh-smart-bar">
-    <span class="sh-smart-bar-lbl">Trouver :</span>
-    ${chips}
-    ${_smartFilters.size ? `<button class="sh-smart-reset" data-sh-action="resetSmart" title="Retirer tous les filtres rapides">✕ Reset</button>` : ''}
+    <div class="sh-smart-bar-heading">
+      <span class="sh-smart-bar-lbl">${context}</span>
+      <small>Favoris, budget et progression</small>
+    </div>
+    <div class="sh-smart-chips">${chips}</div>
+    ${_smartFilters.size ? `<button class="sh-smart-reset" data-sh-action="resetSmart" title="Retirer toutes les suggestions actives">✕ Effacer</button>` : ''}
   </div>`;
 }
 
@@ -655,9 +683,9 @@ function _renderSidebar() {
 // VUE HOME
 // ══════════════════════════════════════════════════════════════════════════════
 function _renderHome() {
-  // Hero search global (full-width) + smart filters chips
+  // Recherche globale et suggestions réunies dans un même panneau.
   const searchBar = `
-    <div class="sh-hero">
+    <div class="sh-hero sh-discovery sh-discovery--home">
       <div class="sh-hero-row">
         <div class="sh-hero-search">
           <span class="sh-hero-search-ico">🔍</span>
@@ -670,7 +698,7 @@ function _renderHome() {
             aria-label="Effacer la recherche" ${_filterSearch ? '' : 'hidden'}>✕</button>
         </div>
       </div>
-      ${_renderSmartBar()}
+      ${_renderSmartBar(_getCachedVisibleItems())}
     </div>
     <div id="sh-home-results">`;
 
@@ -957,63 +985,59 @@ function _renderItemsView() {
   const slice = items.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
   const allItems  = _getBaseItems(_activeCat);
   const tagGroups = _buildTagGroups(allItems);
-  const hasFilters = search || _filterTags.size > 0;
+  const hasFilters = Boolean(search || _filterTags.size > 0 || _smartFilters.size > 0);
 
   const totalCat = allItems.length;
   let html = `
-  <div class="sh-hero">
-    <div class="sh-hero-row">
-      <div class="sh-hero-search">
-        <span class="sh-hero-search-ico">🔍</span>
-        <input type="search" id="sh-search" class="sh-hero-search-input"
-          placeholder="Rechercher dans cette catégorie…"
-          value="${_filterSearch||''}"
-          data-sh-action="search" data-sh-on="input"
-          autocomplete="off" aria-label="Rechercher dans cette catégorie" aria-controls="sh-items-results">
-        <button type="button" class="sh-hero-search-clear" data-sh-action="clearSearch"
-          aria-label="Effacer la recherche" ${_filterSearch ? '' : 'hidden'}>✕</button>
-      </div>
-    </div>
-    ${_renderSmartBar()}
-  </div>
   <div class="sh-main-head sh-main-head--category">
     <div class="sh-main-head-body">
       <div class="sh-main-head-icon">${cat.emoji || _catEmoji(cat.nom)}</div>
       <div style="min-width:0;flex:1">
         <div class="sh-main-kicker">${tplCat?.label || 'Catégorie'}</div>
         <div class="sh-main-title">${_esc(cat.nom)}</div>
-        <div class="sh-main-meta">${totalCat} article${totalCat!==1?'s':''}${hasFilters && total !== totalCat ? ` · ${total} filtré${total!==1?'s':''}` : ''}${cat.masquee ? ` · ${eyeIcon(true)} Masquée aux joueurs` : ''}</div>
+        <div class="sh-main-meta" id="sh-category-meta" data-total="${totalCat}" data-hidden="${cat.masquee ? '1' : '0'}">${totalCat} article${totalCat!==1?'s':''}${hasFilters && total !== totalCat ? ` · ${total} filtré${total!==1?'s':''}` : ''}${cat.masquee ? ` · ${eyeIcon(true)} Masquée aux joueurs` : ''}</div>
       </div>
     </div>
   </div>
-  <div class="sh-filter-panel">
-    <div class="sh-filter-toolbar">
-      <select class="input-field sh-sort-select" data-sh-action="setSort" data-sh-on="change" aria-label="Trier par" title="Trier les articles">
-        <option value="ordre"      ${_filterSort==='ordre'?'selected':''}>Ordre manuel</option>
-        <option value="recommande" ${_filterSort==='recommande'?'selected':''}>⭐ Recommandé pour moi</option>
-        <option value="nom"        ${_filterSort==='nom'?'selected':''}>Nom (A→Z)</option>
-        <option value="prix_asc"   ${_filterSort==='prix_asc'?'selected':''}>Prix ↑</option>
-        <option value="prix_desc"  ${_filterSort==='prix_desc'?'selected':''}>Prix ↓</option>
-        <option value="rarete"     ${_filterSort==='rarete'?'selected':''}>Rareté</option>
-      </select>
+  <div class="sh-hero sh-discovery sh-discovery--category">
+    <div class="sh-discovery-toolbar">
+      <div class="sh-hero-search">
+        <span class="sh-hero-search-ico">🔍</span>
+        <input type="search" id="sh-search" class="sh-hero-search-input"
+          placeholder="Rechercher dans ${_esc(cat.nom)}…"
+          value="${_filterSearch||''}"
+          data-sh-action="search" data-sh-on="input"
+          autocomplete="off" aria-label="Rechercher dans cette catégorie" aria-controls="sh-items-results">
+        <button type="button" class="sh-hero-search-clear" data-sh-action="clearSearch"
+          aria-label="Effacer la recherche" ${_filterSearch ? '' : 'hidden'}>✕</button>
+      </div>
+      <label class="sh-discovery-sort">
+        <span>Trier</span>
+        <select class="input-field sh-sort-select" data-sh-action="setSort" data-sh-on="change" aria-label="Trier les articles">
+          <option value="ordre"      ${_filterSort==='ordre'?'selected':''}>Ordre manuel</option>
+          <option value="recommande" ${_filterSort==='recommande'?'selected':''}>⭐ Recommandé pour moi</option>
+          <option value="nom"        ${_filterSort==='nom'?'selected':''}>Nom (A→Z)</option>
+          <option value="prix_asc"   ${_filterSort==='prix_asc'?'selected':''}>Prix ↑</option>
+          <option value="prix_desc"  ${_filterSort==='prix_desc'?'selected':''}>Prix ↓</option>
+          <option value="rarete"     ${_filterSort==='rarete'?'selected':''}>Rareté</option>
+        </select>
+      </label>
       <div class="sh-filter-actions">
-        <span id="sh-count" role="status" aria-live="polite" style="font-size:.78rem;color:var(--text-dim)">${total} article${total!==1?'s':''}</span>
-        <button id="sh-clear-btn" data-sh-action="resetFilters"
-          style="font-size:.72rem;background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.25);
-          border-radius:8px;padding:3px 10px;cursor:pointer;color:#ff6b6b;
-          display:${hasFilters?'':'none'}">✕ Tout effacer</button>
+        <span id="sh-count" role="status" aria-live="polite">${total} article${total!==1?'s':''}</span>
+        <button id="sh-clear-btn" class="sh-filter-clear" data-sh-action="resetFilters"
+          ${hasFilters ? '' : 'hidden'}>✕ Tout effacer</button>
         ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" data-sh-action="openItemModal">+ Article</button>` : ''}
       </div>
     </div>
+    ${_renderSmartBar(allItems)}
     ${tagGroups.length > 0 ? `
-    <div class="sh-filter-groups">
+    <div class="sh-filter-groups sh-filter-groups--always">
       ${tagGroups.map(group => `
       <div class="sh-filter-group sh-filter-group--${group.key}">
         <span class="sh-filter-label">${group.label}</span>
         <div class="sh-filter-tags">
         ${group.tags.map(tag => {
           const active = _filterTags.has(tag.value);
-          const sv = tag.value.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
           return `<button class="sh-filter-chip"
             data-tag-value="${tag.value.replace(/"/g,'&quot;')}"
             data-tag-color="${tag.color}"
@@ -2011,6 +2035,11 @@ function openShopItemDetail(itemId) {
 // ══════════════════════════════════════════════════════════════════════════════
 function shopSetChar(charId) {
   _setShopCharId(charId);
+  if (_shopSection === 'atelier') {
+    _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: _atelier.sort || 'rarity' };
+  } else if (_shopSection === 'artisan') {
+    _artisanNeedsReset = true;
+  }
   const c  = STATE.characters?.find(x => x.id === charId);
   const or = calcOr(c);
   const valEl = document.getElementById('sh-char-or-value');
@@ -2455,10 +2484,11 @@ function shopToggleTag(val) {
 function shopFilterReset() {
   _filterSearch = '';
   _filterTags.clear();
+  _smartFilters.clear();
   _page = 1;
   const inp = document.getElementById(_view === 'items' ? 'sh-search' : 'sh-home-search');
   if (inp) inp.value = '';
-  if (_view === 'items') _updateItemsOnly();
+  if (_view === 'items') _refreshSmartFiltersFromCache();
   else renderShop();
 }
 
@@ -2477,13 +2507,20 @@ function _updateItemsOnly() {
   const pages  = Math.ceil(total / PAGE_SIZE);
   const p      = Math.max(1, Math.min(_page, pages));
   const slice  = items.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
-  const hasF   = search || _filterTags.size > 0;
+  const hasF   = Boolean(search || _filterTags.size > 0 || _smartFilters.size > 0);
 
   const counter = document.getElementById('sh-count');
   if (counter) counter.textContent = `${total} article${total!==1?'s':''}`;
 
   const clearBtn = document.getElementById('sh-clear-btn');
-  if (clearBtn) clearBtn.style.display = hasF ? '' : 'none';
+  if (clearBtn) clearBtn.hidden = !hasF;
+
+  const categoryMeta = document.getElementById('sh-category-meta');
+  if (categoryMeta) {
+    const totalCat = parseInt(categoryMeta.dataset.total) || _getBaseItems(_activeCat).length;
+    const hidden = categoryMeta.dataset.hidden === '1';
+    categoryMeta.innerHTML = `${totalCat} article${totalCat!==1?'s':''}${hasF && total !== totalCat ? ` · ${total} filtré${total!==1?'s':''}` : ''}${hidden ? ` · ${eyeIcon(true)} Masquée aux joueurs` : ''}`;
+  }
 
   document.querySelectorAll('[data-tag-value]').forEach(btn => {
     const v     = btn.dataset.tagValue;
@@ -2530,7 +2567,8 @@ function _updateHomeOnly() {
 
 function _refreshSmartFiltersFromCache() {
   const smartBar = document.querySelector('.sh-hero .sh-smart-bar');
-  if (smartBar) smartBar.outerHTML = _renderSmartBar();
+  const baseItems = _view === 'items' ? _getBaseItems(_activeCat) : _getCachedVisibleItems();
+  if (smartBar) smartBar.outerHTML = _renderSmartBar(baseItems);
   if (_view === 'home') _updateHomeOnly();
   else _updateItemsOnly();
 }
@@ -4252,11 +4290,9 @@ async function _atelierDeleteBuild(buildId) {
   _renderAtelier();
 }
 
-/** Ouvre la modale Atelier ; si `prefillItemId` fourni → essai pré-rempli. */
-function openAtelierModal(prefillItemId) {
+function _prepareAtelier(prefillItemId = '') {
   const char = _getActiveShopChar();
-  if (!char) { showNotif('Sélectionne d\'abord un personnage.', 'error'); return; }
-  // Reset état
+  if (!char) return false;
   _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: 'rarity' };
   if (prefillItemId) {
     const item = _items.find(i => i.id === prefillItemId);
@@ -4266,7 +4302,11 @@ function openAtelierModal(prefillItemId) {
       _atelier.simulated[slot] = item;
     }
   }
-  openModal('', `
+  return true;
+}
+
+function _renderAtelierShell({ embedded = false } = {}) {
+  return `
     <div class="atelier-shell">
       <div class="atelier-head">
         <div class="atelier-head-ico">🪄</div>
@@ -4274,7 +4314,7 @@ function openAtelierModal(prefillItemId) {
           <h2>Atelier d'essayage</h2>
           <small>Construis et compare des configurations avant d'acheter</small>
         </div>
-        <button class="atelier-close" data-sh-action="closeModal" title="Fermer">✕</button>
+        ${embedded ? '' : '<button class="atelier-close" data-sh-action="closeModal" title="Fermer">✕</button>'}
       </div>
       <div class="atelier-body">
         <div class="atelier-col atelier-col-doll" id="atelier-doll-col"></div>
@@ -4295,8 +4335,35 @@ function openAtelierModal(prefillItemId) {
           <div class="atelier-items-list" id="atelier-items-col"></div>
         </div>
       </div>
-    </div>`);
-  _renderAtelier();
+    </div>`;
+}
+
+function _renderAtelierPage() {
+  if (!_getActiveShopChar()) {
+    return `<div class="sh-atelier-page">${_renderNoCharBanner()}</div>`;
+  }
+  return `<div class="sh-atelier-page" role="tabpanel">${_renderAtelierShell({ embedded: true })}</div>`;
+}
+
+function shopOpenAtelier(prefillItemId = '') {
+  if (!_prepareAtelier(prefillItemId)) {
+    showNotif('Sélectionne d\'abord un personnage.', 'error');
+    return;
+  }
+  _shopSection = 'atelier';
+  renderShop();
+}
+
+function shopSetSection(section) {
+  if (!['shop', 'atelier', 'artisan'].includes(section) || section === _shopSection) return;
+  if (section === 'atelier' && !_prepareAtelier()) {
+    showNotif('Sélectionne d\'abord un personnage.', 'error');
+    return;
+  }
+  if (section === 'artisan') _artisanNeedsReset = true;
+  else unmountArtisanPage();
+  _shopSection = section;
+  renderShop();
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -4304,8 +4371,9 @@ function openAtelierModal(prefillItemId) {
 // ──────────────────────────────────────────────────────────────────────────────
 Object.assign(shHandlers, {
   // Header / navigation principale
-  openArtisan:    () => openArtisanModal(),
-  openAtelier:    (el) => openAtelierModal(el?.dataset?.id || ''),
+  setSection:     (el) => shopSetSection(el?.dataset?.section || 'shop'),
+  openArtisan:    () => shopSetSection('artisan'),
+  openAtelier:    (el) => shopOpenAtelier(el?.dataset?.id || ''),
   // Atelier (slot + items + reset)
   atelierSelectSlot: (el) => {
     const s = el.dataset.slot || '';
