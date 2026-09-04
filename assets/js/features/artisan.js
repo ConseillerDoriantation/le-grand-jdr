@@ -1,7 +1,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 // ARTISAN — Améliorations d'équipement
 //
-// Modale complète accessible depuis la boutique. Gère :
+// Outil accessible comme onglet de la boutique (et encore compatible modale). Gère :
 //   - Sac de fragments de traits (catégorisé par slot d'origine)
 //   - Liste des items améliorables de l'inventaire du joueur
 //   - Actions : détruire, ajouter, écraser, améliorer stats
@@ -15,7 +15,7 @@ import { getShopCharId } from '../shared/shop-session.js';
 import { trySave } from '../shared/crud.js';
 import { openModal, pushModal, closeModalDirect, confirmModal, modalSection } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
-import { _esc } from '../shared/html.js';
+import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import {
   calcOr, getItemStatBonus, getItemBaseStatBonus, getItemUpgradeStatBonus,
   ITEM_STAT_META, ITEM_STAT_BY_FULL, computeEquipStatsBonus, getDefaultCharForUser,
@@ -54,6 +54,9 @@ const STORE = {
   activeCharId: null,
   activeItemIndex: null,   // objet sélectionné dans l'établi (index inventaire)
   mjFreeMode: false,
+  inlineRootId: null,
+  itemSearch: '',
+  itemCategory: 'all',
 };
 
 export function getItemFragmentCategory(item = {}) {
@@ -142,13 +145,36 @@ function _getActiveArtisanChar() {
 
 export async function openArtisanModal() {
   await loadUpgradeSettings();
+  STORE.inlineRootId = null;
   STORE.activeCharId = null; // reset à chaque ouverture
   STORE.activeItemIndex = null;
   STORE.mjFreeMode = false;          // sécurité : MJ doit ré-activer le mode gratuit à chaque session
+  STORE.itemSearch = '';
+  STORE.itemCategory = 'all';
   _renderArtisanModal();
 }
 
+export async function mountArtisanPage(rootId = 'sh-artisan-page', { reset = false } = {}) {
+  await loadUpgradeSettings();
+  STORE.inlineRootId = rootId;
+  if (reset) {
+    STORE.activeCharId = null;
+    STORE.activeItemIndex = null;
+    STORE.mjFreeMode = false;
+    STORE.itemSearch = '';
+    STORE.itemCategory = 'all';
+  }
+  _renderArtisanModal();
+}
+
+export function unmountArtisanPage() {
+  STORE.inlineRootId = null;
+}
+
 function _renderArtisanModal() {
+  const inlineRoot = STORE.inlineRootId
+    ? document.getElementById(STORE.inlineRootId)
+    : null;
   const previousModal = document.getElementById('modal-box');
   const previousScrollTop = previousModal?.classList.contains('modal--artisan')
     ? previousModal.scrollTop
@@ -157,6 +183,14 @@ function _renderArtisanModal() {
   const c = _getActiveArtisanChar();
 
   if (!chars.length) {
+    if (inlineRoot) {
+      inlineRoot.innerHTML = `<div class="sh-tool-empty">
+        <span aria-hidden="true">🔨</span>
+        <strong>Aucun personnage disponible</strong>
+        <small>${STATE.isAdmin ? 'Aucun personnage n\'existe.' : 'Crée un personnage pour utiliser l\'artisan.'}</small>
+      </div>`;
+      return;
+    }
     openModal('🔨 Artisan', `
       <div style="padding:1rem;text-align:center;color:var(--text-dim);font-size:.9rem">
         Aucun personnage disponible.<br>
@@ -165,8 +199,13 @@ function _renderArtisanModal() {
     return;
   }
 
-  const charSelect = chars.length > 1 || STATE.isAdmin
-    ? `<details class="art-char-picker">
+  const charSelect = inlineRoot
+    ? `<div class="art-char-static art-char-static--inline">
+        ${characterAvatarHtml(c, { size: 32, className: 'art-char-avatar', border: '1px solid rgba(255,255,255,.14)' })}
+        <span><small>Personnage actif</small><strong>${_esc(c?.nom || '?')}</strong></span>
+      </div>`
+    : chars.length > 1 || STATE.isAdmin
+      ? `<details class="art-char-picker">
         <summary class="art-char-picker-trigger">
           ${characterAvatarHtml(c, { size: 32, className: 'art-char-avatar', border: '1px solid rgba(255,255,255,.14)' })}
           <span class="art-char-picker-copy"><small>Personnage</small><strong>${_esc(c?.nom || '?')}</strong></span>
@@ -184,7 +223,7 @@ function _renderArtisanModal() {
           </button>`).join('')}
         </div>
       </details>`
-    : `<div class="art-char-static">
+      : `<div class="art-char-static">
         ${characterAvatarHtml(c, { size: 32, className: 'art-char-avatar', border: '1px solid rgba(255,255,255,.14)' })}
         <span><small>Personnage</small><strong>${_esc(c?.nom || '?')}</strong></span>
       </div>`;
@@ -202,12 +241,14 @@ function _renderArtisanModal() {
       <span class="art-mj-toggle-state">${STORE.mjFreeMode ? 'Actif' : 'Inactif'}</span>
     </label>` : '';
 
-  openModal('🔨 Artisan — Améliorations d\'équipement', `
+  const toolbar = `
     <div class="art-toolbar">
       <div class="art-toolbar-character">${charSelect}</div>
       ${mjToggle}
       <div class="art-wallet"><small>Solde</small><strong>💰 ${or} PO</strong></div>
-    </div>
+    </div>`;
+
+  const modalBody = `${toolbar}
 
     <div class="art-layout">
       <div class="art-left">
@@ -219,15 +260,83 @@ function _renderArtisanModal() {
         ${_renderWorkbench(c)}
       </div>
     </div>
-  `, { subtitle: 'Choisis un objet à gauche pour l\'améliorer', accent: '#f4c430' });
+  `;
+
+  const inlineBody = `${toolbar}
+    <div class="art-page-grid">
+      <section class="art-page-pane art-equipment-pane">
+        <div class="art-pane-head">
+          <span><small>Inventaire</small><strong>Équipement améliorable</strong></span>
+          <span class="art-pane-count">${_getEligibleItems(c).length}</span>
+        </div>
+        ${_renderItemFilters(c)}
+        <div id="art-inline-item-list">${_renderItemList(c)}</div>
+      </section>
+      <main class="art-page-pane art-workbench-pane">
+        <div class="art-pane-head art-pane-head--workbench">
+          <span><small>Objet sélectionné</small><strong>Établi</strong></span>
+        </div>
+        <div id="art-inline-workbench">${_renderWorkbench(c)}</div>
+      </main>
+      <aside class="art-page-pane art-resources-pane">
+        ${_renderFragmentBag(c, { page: true })}
+      </aside>
+    </div>`;
+
+  if (inlineRoot) {
+    inlineRoot.innerHTML = `
+      <div class="sh-tool-heading sh-tool-heading--artisan">
+        <span class="sh-tool-heading-icon" aria-hidden="true">🔨</span>
+        <span>
+          <strong>Établi d'amélioration</strong>
+          <small>Choisis un objet pour le renforcer, le sertir ou le recycler.</small>
+        </span>
+      </div>
+      ${inlineBody}`;
+    return;
+  }
+
+  openModal('🔨 Artisan — Améliorations d\'équipement', modalBody,
+    { subtitle: 'Choisis un objet à gauche pour l\'améliorer', accent: '#f4c430' });
   const modal = document.getElementById('modal-box');
   modal?.classList.add('modal--artisan');
   if (modal && previousScrollTop > 0) modal.scrollTop = previousScrollTop;
 }
 
 // ── Sac de fragments ────────────────────────────────────────────────
-function _renderFragmentBag(c) {
+function _getEligibleItems(c) {
+  const inv = Array.isArray(c?.inventaire) ? c.inventaire : [];
+  return inv
+    .map((it, idx) => ({ it, idx, cat: getItemFragmentCategory(it) }))
+    .filter(({ cat }) => cat !== null);
+}
+
+function _renderItemFilters(c) {
+  const eligible = _getEligibleItems(c);
+  const counts = eligible.reduce((acc, { cat }) => {
+    acc[cat] = (acc[cat] || 0) + 1;
+    return acc;
+  }, {});
+  const categories = FRAGMENT_CATEGORIES.filter(cat => counts[cat.id]);
+  return `<div class="art-item-tools">
+    <div class="art-item-search">
+      <span aria-hidden="true">🔎</span>
+      <input type="search" value="${_esc(STORE.itemSearch)}" placeholder="Rechercher un équipement…"
+        data-input="_artisanFilterItems" aria-label="Rechercher un équipement améliorable">
+    </div>
+    <div class="art-item-categories" aria-label="Filtrer par type d'équipement">
+      <button type="button" class="art-item-category${STORE.itemCategory === 'all' ? ' is-active' : ''}"
+        data-action="_artisanFilterCategory" data-category="all">Tous <span>${eligible.length}</span></button>
+      ${categories.map(cat => `<button type="button" class="art-item-category${STORE.itemCategory === cat.id ? ' is-active' : ''}"
+        data-action="_artisanFilterCategory" data-category="${_esc(cat.id)}">${cat.icon} ${_esc(cat.label)} <span>${counts[cat.id]}</span></button>`).join('')}
+    </div>
+  </div>`;
+}
+
+function _renderFragmentBag(c, { page = false } = {}) {
   const bag = getCharacterFragments(c);
+  const selected = (c?.inventaire || [])[STORE.activeItemIndex];
+  const selectedCategory = selected ? getItemFragmentCategory(selected) : null;
   const totalCount = Object.values(bag).reduce(
     (s, frags) => s + Object.values(frags || {}).reduce((s2, n) => s2 + (parseInt(n) || 0), 0),
     0,
@@ -244,7 +353,7 @@ function _renderFragmentBag(c) {
         <span class="art-frag-chip-n">×${n}</span>
       </div>`
     ).join('');
-    return `<details class="art-frag-cat" open>
+    return `<details class="art-frag-cat" ${!page || selectedCategory === cat.id ? 'open' : ''}>
       <summary class="art-frag-cat-hd">
         <span>${cat.icon} ${_esc(cat.label)}</span>
         <span class="art-frag-cat-count">${categoryCount}</span>
@@ -254,7 +363,7 @@ function _renderFragmentBag(c) {
   }).filter(Boolean).join('');
 
   return `
-    <div class="art-frag-bag">
+    <div class="art-frag-bag${page ? ' art-frag-bag--page' : ''}">
       <div class="art-frag-bag-hd">
         <span class="art-frag-bag-title">🎒 Sac de fragments</span>
         <span class="art-frag-total">${totalCount}</span>
@@ -281,14 +390,33 @@ function _itemSummary(item) {
 // ── Liste des objets améliorables (colonne gauche, sélectionnable) ──────
 function _renderItemList(c) {
   if (!c) return `<div class="art-empty">Sélectionne un personnage.</div>`;
-  const inv = Array.isArray(c.inventaire) ? c.inventaire : [];
-  const eligible = inv
-    .map((it, idx) => ({ it, idx, cat: getItemFragmentCategory(it) }))
-    .filter(({ cat }) => cat !== null);
+  const allEligible = _getEligibleItems(c);
+  const q = _norm(STORE.itemSearch);
+  const eligible = allEligible.filter(({ it, cat }) => {
+    if (STORE.itemCategory !== 'all' && cat !== STORE.itemCategory) return false;
+    if (!q) return true;
+    const meta = FRAGMENT_CAT_BY_ID[cat];
+    const haystack = [
+      it.nom,
+      it.format,
+      it.type,
+      it.sousType,
+      it.slotArmure,
+      it.slotBijou,
+      meta?.label,
+      ..._getTraits(it),
+      _itemSummary(it),
+    ].filter(Boolean).join(' ');
+    return _searchIncludes(haystack, q);
+  });
 
-  if (!eligible.length) {
+  if (!allEligible.length) {
     return `<div class="art-empty">Aucun équipement améliorable dans l'inventaire.<br>
       <span style="font-size:.9em">Achète une arme, une armure ou un bijou dans la boutique.</span></div>`;
+  }
+
+  if (!eligible.length) {
+    return `<div class="art-empty">Aucun équipement ne correspond à ces filtres.</div>`;
   }
 
   return `<div class="art-item-list">
@@ -794,6 +922,8 @@ async function _artisanOverwriteConfirm(invIndex, oldTraitName, newFragmentName)
 function _artisanSelectChar(id) {
   STORE.activeCharId = id;
   STORE.activeItemIndex = null;   // repart sans objet sélectionné
+  STORE.itemSearch = '';
+  STORE.itemCategory = 'all';
   _renderArtisanModal();
 };
 
@@ -801,6 +931,25 @@ function _artisanSelectChar(id) {
 function _artisanSelectItem(invIndex) {
   STORE.activeItemIndex = (STORE.activeItemIndex === invIndex) ? null : invIndex;
   _renderArtisanModal();
+}
+
+function _refreshInlineItemList() {
+  const list = document.getElementById('art-inline-item-list');
+  if (!list) return;
+  list.innerHTML = _renderItemList(_getActiveArtisanChar());
+}
+
+function _artisanFilterItems(value) {
+  STORE.itemSearch = value || '';
+  _refreshInlineItemList();
+}
+
+function _artisanFilterCategory(category) {
+  STORE.itemCategory = FRAGMENT_CAT_BY_ID[category] ? category : 'all';
+  document.querySelectorAll('.art-item-category').forEach(btn => {
+    btn.classList.toggle('is-active', btn.dataset.category === STORE.itemCategory);
+  });
+  _refreshInlineItemList();
 }
 
 // Section « Stats » de l'établi — dispatch inline selon la catégorie.
@@ -816,12 +965,12 @@ function _renderStatsSection(item, invIndex, c, cat) {
 
 // ── Helpers communs ──────────────────────────────────────────────────
 
-// Retourne la 1ʳᵉ stat non nulle d'un item (utile pour anneaux).
-function _detectPrimaryStat(item) {
-  for (const meta of ITEM_STAT_META) {
-    if (getItemBaseStatBonus(item, meta.full) !== 0) return meta;
-  }
-  return null;
+// Stats réellement proposées par l'objet. Un anneau peut en porter plusieurs :
+// chacune garde son propre palier d'amélioration.
+function _getBaseStatEntries(item) {
+  return ITEM_STAT_META
+    .map(meta => ({ meta, base: getItemBaseStatBonus(item, meta.full) }))
+    .filter(({ base }) => base !== 0);
 }
 
 // Somme totale des points de stats déjà ajoutés via upgrades.
@@ -839,40 +988,44 @@ function _getUpgradedStatEntries(item) {
 }
 
 // ══════════════════════════════════════════════
-// ANNEAU — DEUX TRACKS INDÉPENDANTS
-//   • Stat de base (auto-détectée) — paliers 1..cap
+// ANNEAU — TRACKS INDÉPENDANTS
+//   • Chaque stat proposée par l'objet — paliers 1..cap
 //   • Effet flat (effectBonus)     — paliers 1..cap
-// Tarif `s.ring[N]` partagé pour les deux tracks.
+// Tarif `s.ring[N]` partagé par tous les tracks.
 // ══════════════════════════════════════════════
 function _renderRingStats(item, invIndex, c) {
   const s = getUpgradeSettings();
   const cap = s.caps?.ring ?? 1;
-  const primary = _detectPrimaryStat(item);
-  const statLevel   = primary ? (parseInt(item.upgrades?.statBonus?.[primary.store]) || 0) : 0;
+  const stats = _getBaseStatEntries(item).map(entry => ({
+    ...entry,
+    level: getItemUpgradeStatBonus(item, entry.meta.full),
+  }));
   const effectLevel = parseInt(item.upgrades?.effectBonus) || 0;
 
-  const acts = [];
-  if (primary) {
-    const nextStatLvl = statLevel + 1;
-    if (nextStatLvl <= cap) {
-      const cost = s.ring?.[nextStatLvl] || 0;
-      acts.push(`<button class="art-act art-act--emerald" data-action="_artisanRingUpgradeStat" data-i="${invIndex}">📈 +1 ${primary.short} <span class="art-act-cost">${cost} PO</span></button>`);
-    }
-  }
+  const statActs = stats.flatMap(({ meta, level }) => {
+    const nextLevel = level + 1;
+    if (nextLevel > cap) return [];
+    const cost = s.ring?.[nextLevel] || 0;
+    return [`<button class="art-act art-act--emerald" data-action="_artisanRingUpgradeStat" data-i="${invIndex}" data-stat="${_esc(meta.full)}">📈 +1 ${meta.short} <span class="art-act-cost">${cost} PO</span></button>`];
+  });
+  const acts = [...statActs];
   const nextEff = effectLevel + 1;
   if (nextEff <= cap) {
     const cost = s.ring?.[nextEff] || 0;
     acts.push(`<button class="art-act art-act--gold" data-action="_artisanRingUpgradeEffect" data-i="${invIndex}">✨ Renforcer l'effet <span class="art-act-cost">${cost} PO</span></button>`);
   }
 
-  const totalStat = primary ? getItemBaseStatBonus(item, primary.full) + statLevel : 0;
-  const cur = [];
-  if (primary) cur.push(`<span class="art-up-chip">+${totalStat} ${primary.short}</span>`);
+  const cur = stats.map(({ meta, base, level }) => {
+    const total = base + level;
+    return `<span class="art-up-chip stat-tone stat-${meta.full}" title="${_esc(meta.label)} : ${base > 0 ? '+' : ''}${base} de base${level ? `, +${level} par l'Artisan` : ''}">${total > 0 ? '+' : ''}${total} ${meta.short}</span>`;
+  });
   cur.push(`<span class="art-up-chip">Effet +${effectLevel}</span>`);
+  const maxedStats = stats.filter(({ level }) => level >= cap).length;
+  const statProgress = stats.length ? `${maxedStats}/${stats.length} stats au maximum` : 'aucune stat proposée';
   const baseEffect = item.effet ? `<div class="art-muted" style="font-size:.7rem;margin-top:.35rem">Effet : <em>${_esc(item.effet)}</em></div>` : '';
 
   return `<div class="art-wb-sec">
-    <div class="art-wb-sec-hd">📈 Stats d'anneau <span class="art-wb-sec-sub">stat ${statLevel}/${cap} · effet ${effectLevel}/${cap}</span></div>
+    <div class="art-wb-sec-hd">📈 Stats d'anneau <span class="art-wb-sec-sub">${statProgress} · effet ${effectLevel}/${cap}</span></div>
     <div class="art-trait-current">${cur.join('')}</div>
     ${acts.length ? `<div class="art-act-row">${acts.join('')}</div>` : `<div class="art-muted" style="font-size:.72rem">Tout est au palier maximum.</div>`}
     ${baseEffect}
@@ -925,26 +1078,27 @@ function _renderWeaponStats(item, invIndex, c) {
   </div>`;
 }
 
-// — Action : améliorer la stat de l'anneau seule
-async function _artisanRingUpgradeStat(invIndex) {
+// — Action : améliorer une seule des stats proposées par l'anneau
+async function _artisanRingUpgradeStat(invIndex, statFullKey) {
   const c = _getActiveArtisanChar();
   if (!c) return;
   const item = c.inventaire[invIndex];
   if (!item) return;
 
-  const primary = _detectPrimaryStat(item);
-  if (!primary) { showNotif('Aucune stat de base sur cet anneau.', 'error'); return; }
+  const meta = ITEM_STAT_BY_FULL[statFullKey];
+  const isOffered = meta && getItemBaseStatBonus(item, meta.full) !== 0;
+  if (!isOffered) { showNotif('Cette stat n’est pas proposée par cet anneau.', 'error'); return; }
 
   const s = getUpgradeSettings();
   const cap = s.caps?.ring ?? 1;
-  const level = parseInt(item.upgrades?.statBonus?.[primary.store]) || 0;
+  const level = getItemUpgradeStatBonus(item, meta.full);
   const nextLevel = level + 1;
   if (nextLevel > cap) { showNotif(`Stat au palier max (${cap}).`, 'error'); return; }
 
   const cost = s.ring?.[nextLevel] || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
 
-  if (!await confirmModal(`Améliorer ${primary.label} au palier ${nextLevel} ?<br><span style="color:var(--gold)">${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`}</span>`,
+  if (!await confirmModal(`Améliorer ${meta.label} au palier ${nextLevel} ?<br><span style="color:var(--gold)">${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`}</span>`,
     { title: '📈 Améliorer la stat', confirmLabel: 'Améliorer', danger: false, icon: '📈' })) return;
 
   const inv = [...c.inventaire];
@@ -952,16 +1106,16 @@ async function _artisanRingUpgradeStat(invIndex) {
   const up = newItem.upgrades || {};
   newItem.upgrades = {
     ...up,
-    statBonus: { ...(up.statBonus || {}), [primary.store]: nextLevel },
+    statBonus: { ...(up.statBonus || {}), [meta.store]: nextLevel },
   };
-  _logUpgradeHistory(newItem, { op: 'ring_upgrade_stat', level: nextLevel, stat: primary.full, cost });
+  _logUpgradeHistory(newItem, { op: 'ring_upgrade_stat', level: nextLevel, stat: meta.full, cost });
   inv[invIndex] = newItem;
   c.inventaire = inv;
 
-  if (cost > 0) _logExpense(c, `Artisan : anneau ${item.nom || ''} stat ${primary.short} +${nextLevel}`, cost);
+  if (cost > 0) _logExpense(c, `Artisan : anneau ${item.nom || ''} stat ${meta.short} +${nextLevel}`, cost);
 
   await _persistChar(c);
-  showNotif(`Stat ${primary.label} améliorée au palier ${nextLevel}.`, 'success');
+  showNotif(`Stat ${meta.label} améliorée au palier ${nextLevel}.`, 'success');
 }
 
 // — Action : améliorer l'effet de l'anneau seul
@@ -1094,6 +1248,8 @@ async function _artisanWeaponAddPoint(invIndex, statFullKey) {
 registerActions({
   _artisanSelectChar: (el) => _artisanSelectChar(el.dataset.id),
   _artisanSelectItem: (btn) => _artisanSelectItem(Number(btn.dataset.i)),
+  _artisanFilterItems: (el) => _artisanFilterItems(el.value),
+  _artisanFilterCategory: (btn) => _artisanFilterCategory(btn.dataset.category),
   _artisanToggleMjFree: (el) => _artisanToggleMjFree(el.checked),
   _artisanOpenHistory: (btn) => _artisanOpenHistory(Number(btn.dataset.i)),
   _artisanDestroyStart: (btn) => _artisanDestroyStart(Number(btn.dataset.i)),
@@ -1101,7 +1257,7 @@ registerActions({
   _artisanAddTrait: (btn) => _artisanAddTrait(Number(btn.dataset.i), btn.dataset.frag),
   _artisanOverwriteStart: (btn) => _artisanOverwriteStart(Number(btn.dataset.i), btn.dataset.trait),
   _artisanOverwriteConfirm: (btn) => _artisanOverwriteConfirm(Number(btn.dataset.i), btn.dataset.old, btn.dataset.frag),
-  _artisanRingUpgradeStat: (btn) => _artisanRingUpgradeStat(Number(btn.dataset.i)),
+  _artisanRingUpgradeStat: (btn) => _artisanRingUpgradeStat(Number(btn.dataset.i), btn.dataset.stat),
   _artisanRingUpgradeEffect: (btn) => _artisanRingUpgradeEffect(Number(btn.dataset.i)),
   _artisanAmuletAddStat: (btn) => _artisanAmuletAddStat(Number(btn.dataset.i), btn.dataset.stat),
   _artisanWeaponAddPoint: (btn) => _artisanWeaponAddPoint(Number(btn.dataset.i), btn.dataset.stat),
