@@ -22,9 +22,10 @@ import { makeSortable } from '../shared/sortable-helper.js';
 import { removeQuestAgendaSessions } from '../shared/agenda-sessions.js';
 
 // ── Palettes ──────────────────────────────────────────────────────────────────
+// Palette d'axes distincte des couleurs de statut (En cours / Terminée / Échouée)
+// pour ne pas confondre la teinte d'une ligne d'axe et celle d'un nœud. Handoff §4.2.
 const AXE_COLORS = [
-  '#4f8cff','#e8b84b','#22c38e','#ff6b6b',
-  '#b47fff','#ff9f43','#54a0ff','#ff6b9d',
+  '#9d6fff','#f4c430','#ff9544','#38bdf8','#ff6b9d','#a3e635',
 ];
 
 const STATUT_CFG = {
@@ -817,144 +818,101 @@ async function renderStory() {
   const ringFill = (progPct / 100) * ringC;
 
   content.innerHTML = `
-  <div class="trame-shell">
+  <div class="trame-root">
 
-    ${_renderBanner(heroMission, activeActe)}
-
-    <!-- ── COCKPIT ──────────────────────────────────────────── -->
-    <div class="cockpit">
-      <div class="cockpit-progress">
-        <div class="progress-ring" title="${counts.term}/${counts.total} terminées">
-          <svg viewBox="0 0 60 60">
-            <defs>
-              <linearGradient id="trame-ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="var(--amber)"/>
-                <stop offset="100%" stop-color="var(--ember)"/>
-              </linearGradient>
-            </defs>
-            <circle class="progress-ring-bg" cx="30" cy="30" r="26"/>
-            <circle class="progress-ring-fill" cx="30" cy="30" r="26"
-              stroke-dasharray="${ringFill.toFixed(2)} ${ringC.toFixed(2)}"
-              stroke-dashoffset="0"/>
-          </svg>
-          <div class="progress-ring-val">${progPct}%</div>
-        </div>
-        <div class="cockpit-counts">
-          <div class="cockpit-counts-num">${counts.term}<small>/</small><span style="color:var(--text-muted)">${counts.total}</span></div>
-          <div class="cockpit-counts-lbl">Missions accomplies</div>
-        </div>
+    <!-- ── EN-TÊTE COLLANT : marque · scope · actions · actes en onglets ── -->
+    <div class="top"><div class="top-in">
+      <div class="top-row">
+        <div class="brand"><h1>La Trame</h1><small>${_esc(activeActe)}</small></div>
+        <div class="spacer"></div>
+        ${!STATE.isAdmin ? `<div class="scope" role="group" aria-label="Missions affichées">
+          <button class="${!personalScope ? 'on' : ''}" data-action="_stSetPlayerScope" data-scope="all" aria-pressed="${!personalScope}"><span aria-hidden="true">&#9776;</span> Toute la trame</button>
+          <button class="${personalScope ? 'on' : ''}" data-action="_stSetPlayerScope" data-scope="mine" aria-pressed="${personalScope}"><span aria-hidden="true">&#9673;</span> Mes missions <em>${playerMissionIds.size}</em></button>
+        </div>` : ''}
+        ${STATE.isAdmin && axes.length >= 2 ? `<button class="pill" data-action="openAxeOrder" title="Réordonner les axes narratifs (Carte & Saga)">⇅ Axes</button>` : ''}
+        ${_legacyGroups ? `<button class="pill" data-action="_stMigrateGroups" title="Convertir les anciens groupes (membres) en groupes rejoignables">⟳ Migrer</button>` : ''}
+        ${STATE.isAdmin ? `<button class="pill primary" data-action="openStoryModal">＋ Nouvelle mission</button>` : ''}
       </div>
-
-      <div class="cockpit-divider"></div>
-
-      <div class="cockpit-minis">
-        <div class="cockpit-mini"><span class="cockpit-mini-dot" style="background:var(--st-cours);color:var(--st-cours)"></span><span class="cockpit-mini-num" style="color:var(--st-cours)">${counts.cours}</span><span class="cockpit-mini-lbl">En cours</span></div>
-        <div class="cockpit-mini"><span class="cockpit-mini-dot" style="background:var(--st-attente);color:var(--st-attente)"></span><span class="cockpit-mini-num" style="color:var(--text)">${counts.attente}</span><span class="cockpit-mini-lbl">À venir</span></div>
-        <div class="cockpit-mini"><span class="cockpit-mini-dot" style="background:var(--st-terminee);color:var(--st-terminee)"></span><span class="cockpit-mini-num" style="color:var(--st-terminee)">${counts.term}</span><span class="cockpit-mini-lbl">Réussies</span></div>
-        ${counts.echec ? `<div class="cockpit-mini"><span class="cockpit-mini-dot" style="background:var(--st-echec);color:var(--st-echec)"></span><span class="cockpit-mini-num" style="color:var(--st-echec)">${counts.echec}</span><span class="cockpit-mini-lbl">Échouées</span></div>` : ''}
-      </div>
-
-      ${nextMission ? `
-      <div class="cockpit-next" data-action="openStoryDetail" data-id="${nextMission.id}">
-        <div class="cockpit-next-icon">⇒</div>
-        <div>
-          <div class="cockpit-next-lbl">Prochaine étape</div>
-          <div class="cockpit-next-title">${_esc(nextMission.titre || 'Sans titre')}</div>
-          ${nextMission.axe ? `<div class="cockpit-next-axe" style="color:${STORE.axeMap[nextMission.axe] || 'var(--text-muted)'}">● ${_esc(nextMission.axe)}</div>` : ''}
-        </div>
-      </div>` : ''}
-    </div>
-
-    <!-- ── ACTS BAR ─────────────────────────────────────────── -->
-    <div class="acts-bar">
-      <div class="acts">
+      <div class="tabs" role="tablist" aria-label="Actes">
         ${allActes.map(acte => {
           const active = acte === activeActe;
           const n = scopedItems.filter(i => (i.acte || 'Acte I') === acte).length;
           // data-acte + délégation : robuste aux apostrophes / guillemets dans le nom
-          return `<button class="act ${active ? 'active' : ''}"
-            data-acte="${_esc(acte)}"
-            data-action="_stSwitchActe">
-            ${_esc(acte)}<span class="act-count">${n}</span>
-          </button>`;
+          return `<button class="tab ${active ? 'active' : ''}" role="tab" aria-selected="${active}"
+            data-acte="${_esc(acte)}" data-action="_stSwitchActe">${_esc(acte)}<span class="tab-badge">${n}</span></button>`;
         }).join('')}
-        ${STATE.isAdmin ? `<button class="act-new" data-action="openNewActeModal">+ Nouvel acte</button>` : ''}
+        ${STATE.isAdmin ? `<button class="tab-new" data-action="openNewActeModal">＋ Acte</button>` : ''}
       </div>
-      ${STATE.isAdmin ? `<button class="btn-add" data-action="openStoryModal">+ Nouvelle mission</button>` : ''}
-    </div>
+    </div></div>
 
-    <!-- ── CONTROLS (recherche + statut + view toggle) ─────── -->
-    <div class="controls">
-      <div class="search-wrap">
-        <span style="color:var(--text-dim);font-size:.85rem">🔍</span>
-        <input type="text" id="st-search" placeholder="Rechercher un titre, un axe, un lieu… (sans accents OK)"
-          value="${_esc(prefs.search)}" data-input="_stOnSearch">
-        ${prefs.search ? `<button data-action="_stSetFilter" data-key="search" data-val="" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:.75rem">✕</button>` : ''}
-      </div>
-      <select class="statut-select" data-change="_stSetStatut">
-        <option value="">Tous les statuts</option>
-        ${Object.keys(STATUT_CFG).map(s => `<option value="${s}" ${prefs.statut===s?'selected':''}>${STATUT_CFG[s].icon} ${s}</option>`).join('')}
-      </select>
-      ${!STATE.isAdmin ? `<div class="story-player-scope" role="group" aria-label="Missions affichees">
-        <button type="button" class="story-player-scope-btn ${!personalScope ? 'active' : ''}" data-action="_stSetPlayerScope" data-scope="all" aria-pressed="${!personalScope}">
-          <span aria-hidden="true">&#9776;</span><b>Toute la trame</b>
-        </button>
-        <button type="button" class="story-player-scope-btn ${personalScope ? 'active' : ''}" data-action="_stSetPlayerScope" data-scope="mine" aria-pressed="${personalScope}">
-          <span aria-hidden="true">&#9673;</span><b>Mes missions</b><em>${playerMissionIds.size}</em>
-        </button>
-      </div>` : ''}
-      <div class="view-toggle" role="tablist" aria-label="Mode d'affichage de la trame">
-        <button class="view-tab ${prefs.view==='carte'?'active':''}" data-action="_stSetView" data-view="carte" role="tab" aria-selected="${prefs.view === 'carte'}">🗺️ Carte</button>
-        <button class="view-tab ${prefs.view==='saga'?'active':''}" data-action="_stSetView" data-view="saga" role="tab" aria-selected="${prefs.view === 'saga'}">📚 Saga</button>
-        <button class="view-tab ${prefs.view==='chronique'?'active':''}" data-action="_stSetView" data-view="chronique" role="tab" aria-selected="${prefs.view === 'chronique'}">📖 Chronique</button>
-        <button class="view-tab ${prefs.view==='list'?'active':''}" data-action="_stSetView" data-view="list" role="tab" aria-selected="${prefs.view === 'list'}">📋 Liste</button>
-      </div>
-      ${STATE.isAdmin && axes.length >= 2 ? `<button class="btn btn-outline btn-sm" data-action="openAxeOrder" title="Réordonner les axes narratifs (Carte & Saga)">⇅ Axes</button>` : ''}
-      ${_legacyGroups ? `<button class="btn btn-gold btn-sm" data-action="_stMigrateGroups" title="Convertir les anciens groupes (membres) en groupes rejoignables">⟳ Migrer anciens groupes</button>` : ''}
-    </div>
+    <div class="wrap">
 
-    <!-- ── CONTENU ──────────────────────────────────────────── -->
-    <div class="content-scroll">
-      ${filteredItems.length === 0 ? `
-        <div style="text-align:center;padding:5rem 2rem;color:var(--text-dim)">
-          <div style="font-size:3rem;margin-bottom:1rem;opacity:.3">📜</div>
-          <p style="font-style:italic">${qNorm || prefs.statut
-            ? 'Aucune mission ne correspond aux filtres.'
-            : personalScope
-              ? "Tu n'as participé à aucune mission de cet acte."
-              : `Aucune mission pour ${_esc(activeActe)}.`}</p>
-          ${qNorm || prefs.statut
-            ? `<button class="btn btn-outline btn-sm" data-action="_stResetFilters">↺ Réinitialiser</button>`
-            : (STATE.isAdmin ? `<button class="btn btn-outline btn-sm" data-action="openStoryModal">+ Ajouter la première</button>` : '')}
-        </div>` :
-        (() => {
-          // Wrap chaque vue : si UNE mission corrompue plante le renderer, on
-          // affiche un message clair plutôt qu'une "Erreur de chargement" globale.
-          const view = prefs.view || 'carte';
-          const fn = view === 'saga'      ? _renderSagaView
-                   : view === 'chronique' ? _renderChroniqueView
-                   : view === 'list'      ? _renderListView
-                   : _renderMapView;
-          try {
-            return fn(filteredItems);
-          } catch (err) {
-            console.error('[story] vue', view, 'a planté :', err, filteredItems);
-            return `<div style="text-align:center;padding:3rem 2rem;color:var(--text-soft, #c8d4e8)">
-              <div style="font-size:2.5rem;margin-bottom:1rem">⚠️</div>
-              <p style="font-weight:700;margin-bottom:.5rem">Impossible d'afficher cette vue</p>
-              <p style="font-size:.82rem;color:var(--text-dim);max-width:380px;margin:0 auto;line-height:1.5">
-                Une mission de <b>${_esc(activeActe)}</b> contient des données invalides.
-                Essaie une autre vue ou contacte le MJ.
-              </p>
-              <p style="font-size:.7rem;color:var(--text-dim);opacity:.6;margin-top:.75rem;font-family:monospace">${_esc(err?.message || String(err))}</p>
-              <div style="display:flex;gap:.4rem;justify-content:center;margin-top:1rem;flex-wrap:wrap">
-                <button class="btn btn-outline btn-sm" data-action="_stSetView" data-view="list">📋 Vue Liste</button>
-                <button class="btn btn-outline btn-sm" data-action="_stResetFilters">↺ Réinitialiser filtres</button>
-              </div>
-            </div>`;
-          }
-        })()
-      }
+      <!-- ── BANDEAU HÉROS + COCKPIT (fusionnés) ── -->
+      ${_renderHero(heroMission, activeActe, counts, progPct, ringFill, ringC, nextMission)}
+
+      <!-- ── CONTRÔLES : recherche · statut · vues ── -->
+      <div class="controls">
+        <label class="search">
+          <input type="text" id="st-search" placeholder="Rechercher un titre, un axe, un lieu… (sans accents OK)"
+            value="${_esc(prefs.search)}" data-input="_stOnSearch" aria-label="Rechercher une mission">
+          ${prefs.search ? `<span class="search-clear" data-action="_stSetFilter" data-key="search" data-val="" title="Effacer">✕</span>` : ''}
+        </label>
+        <select class="statut-select" data-change="_stSetStatut" aria-label="Filtrer par statut">
+          <option value="">Tous les statuts</option>
+          ${Object.keys(STATUT_CFG).map(s => `<option value="${s}" ${prefs.statut===s?'selected':''}>${STATUT_CFG[s].icon} ${s}</option>`).join('')}
+        </select>
+        <span class="count">${filteredItems.length} mission${filteredItems.length>1?'s':''}</span>
+        <div class="views" role="tablist" aria-label="Mode d'affichage de la trame">
+          <button class="${prefs.view==='carte'?'on':''}" data-action="_stSetView" data-view="carte" role="tab" aria-selected="${prefs.view === 'carte'}">🗺️ Carte</button>
+          <button class="${prefs.view==='saga'?'on':''}" data-action="_stSetView" data-view="saga" role="tab" aria-selected="${prefs.view === 'saga'}">📚 Saga</button>
+          <button class="${prefs.view==='chronique'?'on':''}" data-action="_stSetView" data-view="chronique" role="tab" aria-selected="${prefs.view === 'chronique'}">📖 Chronique</button>
+          <button class="${prefs.view==='list'?'on':''}" data-action="_stSetView" data-view="list" role="tab" aria-selected="${prefs.view === 'list'}">📋 Liste</button>
+        </div>
+      </div>
+
+      <!-- ── CONTENU ── -->
+      <div id="st-body">
+        ${filteredItems.length === 0 ? `
+          <div class="empty">
+            <div class="empty-ico">📜</div>
+            <b>${qNorm || prefs.statut
+              ? 'Aucune mission ne correspond aux filtres.'
+              : personalScope
+                ? "Tu n'as participé à aucune mission de cet acte."
+                : `Aucune mission pour ${_esc(activeActe)}.`}</b>
+            ${qNorm || prefs.statut
+              ? `<button class="pill" data-action="_stResetFilters">↺ Réinitialiser</button>`
+              : (STATE.isAdmin ? `<button class="pill primary" data-action="openStoryModal">＋ Ajouter la première</button>` : '')}
+          </div>` :
+          (() => {
+            // Wrap chaque vue : si UNE mission corrompue plante le renderer, on
+            // affiche un message clair plutôt qu'une "Erreur de chargement" globale.
+            const view = prefs.view || 'carte';
+            const fn = view === 'saga'      ? _renderSagaView
+                     : view === 'chronique' ? _renderChroniqueView
+                     : view === 'list'      ? _renderListView
+                     : _renderMapView;
+            try {
+              return fn(filteredItems);
+            } catch (err) {
+              console.error('[story] vue', view, 'a planté :', err, filteredItems);
+              return `<div class="empty">
+                <div class="empty-ico">⚠️</div>
+                <b>Impossible d'afficher cette vue</b>
+                <p style="font-size:.82rem;color:var(--text-dim);max-width:380px;margin:0 auto;line-height:1.5">
+                  Une mission de <b>${_esc(activeActe)}</b> contient des données invalides.
+                  Essaie une autre vue ou contacte le MJ.
+                </p>
+                <p style="font-size:.7rem;color:var(--text-dim);opacity:.6;margin-top:.25rem;font-family:monospace">${_esc(err?.message || String(err))}</p>
+                <div style="display:flex;gap:.4rem;justify-content:center;margin-top:.5rem;flex-wrap:wrap">
+                  <button class="pill" data-action="_stSetView" data-view="list">📋 Vue Liste</button>
+                  <button class="pill" data-action="_stResetFilters">↺ Réinitialiser filtres</button>
+                </div>
+              </div>`;
+            }
+          })()
+        }
+      </div>
     </div>
   </div>
   `;
@@ -991,32 +949,58 @@ function _stOnSearch(el) {
   });
 }
 
-// ── Bannière cinématique ──────────────────────────────────────────────────────
-function _renderBanner(hero, activeActe) {
-  if (!hero) {
-    return `<div class="trame-banner trame-banner--empty">
-      <div class="trame-banner-content">
-        <div class="trame-banner-eyebrow">Chroniques de la Compagnie</div>
-        <h1 class="trame-banner-title">La Trame</h1>
-      </div>
-    </div>`;
-  }
-  const st = stCfg(hero);
-  const eyebrow = hero.statut === 'En cours' ? `${activeActe} · Mission en cours`
+// ── Bandeau héros + cockpit fusionnés (handoff §4.1) ───────────────────────────
+function _renderHero(hero, activeActe, counts, progPct, ringFill, ringC, nextMission) {
+  const cfg = STATUT_CFG;
+  const artColor = hero && hero.axe ? (STORE.axeMap[hero.axe] || cfg['En cours'].color)
+    : (hero ? cfg['En cours'].color : 'var(--gold)');
+  const glyph = hero ? (hero.type === 'mission' ? '🎯' : '📖') : '📜';
+  const eyebrow = !hero ? 'Chroniques de la Compagnie'
+    : hero.statut === 'En cours' ? `${activeActe} · Mission en cours`
     : hero.statut === 'Terminée' ? `${activeActe} · Dernière victoire`
     : `${activeActe} · ${hero.statut || ''}`;
-  const bgUrl = (hero.imageUrl || '').replace(/"/g, '%22');
-  return `<div class="trame-banner" data-action="openStoryDetail" data-id="${hero.id}">
-    ${hero.imageUrl ? `<div class="trame-banner-bg" style='background-image:url("${bgUrl}")'></div>` : ''}
-    <div class="trame-banner-fade"></div>
-    <div class="trame-banner-content">
-      <div class="trame-banner-eyebrow">${_esc(eyebrow)}</div>
-      <h1 class="trame-banner-title">${_esc(hero.titre || 'Sans titre')}</h1>
-      ${hero.lieu || hero.date ? `<div class="trame-banner-meta">
+  const st = hero ? stCfg(hero) : null;
+  const heroClick = hero ? `data-action="openStoryDetail" data-id="${hero.id}"` : '';
+  return `<div class="hero">
+    <div class="hero-art" style="--art:${artColor}" ${heroClick}>
+      ${hero && hero.imageUrl
+        ? `<img src="${_esc(hero.imageUrl)}" alt="" loading="lazy">`
+        : `<span>${glyph}</span>`}
+    </div>
+    <div class="hero-copy">
+      <div class="hero-eyebrow">${_esc(eyebrow)}</div>
+      <h1 class="hero-title">${_esc(hero ? (hero.titre || 'Sans titre') : 'La Trame')}</h1>
+      ${hero ? `<div class="hero-meta">
         ${hero.date ? `<span>📅 ${_esc(hero.date)}</span>` : ''}
         ${hero.lieu ? `<span>📍 ${_esc(hero.lieu)}</span>` : ''}
         <span style="color:${st.color}">${st.icon} ${_esc(hero.statut || 'En attente')}</span>
-      </div>` : ''}
+      </div>
+      <button class="hero-open" data-action="openStoryDetail" data-id="${hero.id}">Ouvrir la mission →</button>` : ''}
+    </div>
+    <div class="cockpit">
+      <div class="ring-wrap" title="${counts.term}/${counts.total} terminées">
+        <svg class="ring" viewBox="0 0 60 60">
+          <circle class="ring-bg" cx="30" cy="30" r="26"/>
+          <circle class="ring-fill" cx="30" cy="30" r="26"
+            stroke-dasharray="${ringFill.toFixed(2)} ${ringC.toFixed(2)}"/>
+        </svg>
+        <div class="ring-val">${progPct}%</div>
+      </div>
+      <div class="cockpit-counts"><b>${counts.term}<i>/</i>${counts.total}</b><span>Accomplies</span></div>
+      <div class="cockpit-minis">
+        <div class="mini"><i style="background:${cfg['En cours'].color}"></i>${counts.cours} En cours</div>
+        <div class="mini"><i style="background:${cfg['En attente'].color}"></i>${counts.attente} À venir</div>
+        <div class="mini"><i style="background:${cfg['Terminée'].color}"></i>${counts.term} Réussies</div>
+        ${counts.echec ? `<div class="mini"><i style="background:${cfg['Échouée'].color}"></i>${counts.echec} Échouées</div>` : ''}
+      </div>
+      ${nextMission ? `<button class="cockpit-next" data-action="openStoryDetail" data-id="${nextMission.id}">
+        <div class="cockpit-next-ico">⇒</div>
+        <div class="cockpit-next-copy">
+          <em>Prochaine étape</em>
+          <b>${_esc(nextMission.titre || 'Sans titre')}</b>
+          ${nextMission.axe ? `<i style="color:${STORE.axeMap[nextMission.axe] || 'var(--text-muted)'}">● ${_esc(nextMission.axe)}</i>` : ''}
+        </div>
+      </button>` : ''}
     </div>
   </div>`;
 }
@@ -1123,7 +1107,7 @@ function _renderMapView(missions) {
   const defs = `<defs>
     <marker id="trame-arrow" viewBox="0 0 10 10" refX="9" refY="5"
       markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M0 0 L10 5 L0 10 z" fill="rgba(244,196,48,0.75)"/>
+      <path d="M0 0 L10 5 L0 10 z" fill="var(--amber)" fill-opacity="0.75"/>
     </marker>
     ${clipDefs}${laneGrads}
   </defs>`;
@@ -1131,8 +1115,7 @@ function _renderMapView(missions) {
   // ── GRILLE CHRONOLOGIQUE (lignes verticales très subtiles) ──
   const gridLines = Array.from({ length: maxCols }, (_, i) => {
     const x = MAP_HEADER_W + i * MAP_COL_W + MAP_COL_W/2;
-    return `<line x1="${x}" y1="${MAP_TOP_PAD - 10}" x2="${x}" y2="${MAP_H - 20}"
-      stroke="rgba(255,255,255,0.025)" stroke-width="1" stroke-dasharray="2 6"/>`;
+    return `<line class="map-grid" x1="${x}" y1="${MAP_TOP_PAD - 10}" x2="${x}" y2="${MAP_H - 20}"/>`;
   }).join('');
 
   // ── COULOIRS (bande + en-tête + ligne de métro + CH.NN) ──
@@ -1156,20 +1139,15 @@ function _renderMapView(missions) {
         width="${MAP_W - MAP_HEADER_W}" height="${l.height - 36}"
         fill="url(#lane-grad-${idx})" rx="20"/>
       <!-- Carte d'en-tête à gauche -->
-      <rect x="16" y="${headerY}"
+      <rect class="map-lane-card" x="16" y="${headerY}"
         width="${MAP_HEADER_W - 38}" height="${headerH}"
-        fill="var(--bg-card)" stroke="${l.color}" stroke-opacity="0.4" stroke-width="1.5" rx="14"/>
+        stroke="${l.color}" rx="14"/>
       <rect x="16" y="${headerY}" width="4" height="${headerH}" fill="${l.color}" rx="2"/>
-      <text x="32" y="${headerLabelY}" fill="${l.color}"
-        font-family="Cinzel, serif" font-size="16" font-weight="700">${_esc(headerLabel)}</text>
-      <text x="32" y="${l.y + 2}" fill="var(--text-dim)" font-size="10" letter-spacing="0.14em"
-        font-family="JetBrains Mono, monospace">
-        ${l.list.length} CHAPITRE${l.list.length > 1 ? 'S' : ''}
-      </text>
-      <rect x="32" y="${l.y + 16}" width="130" height="5" fill="rgba(255,255,255,0.08)" rx="2.5"/>
+      <text class="map-lane-title" x="32" y="${headerLabelY}" fill="${l.color}">${_esc(headerLabel)}</text>
+      <text class="map-lane-sub" x="32" y="${l.y + 2}">${l.list.length} CHAPITRE${l.list.length > 1 ? 'S' : ''}</text>
+      <rect class="map-lane-track" x="32" y="${l.y + 16}" width="130" height="5" rx="2.5"/>
       <rect x="32" y="${l.y + 16}" width="${fillW.toFixed(1)}" height="5" fill="${l.color}" rx="2.5"/>
-      <text x="170" y="${l.y + 21}" fill="${l.color}" font-size="11" font-weight="700"
-        font-family="JetBrains Mono, monospace">${pct}%</text>
+      <text class="map-lane-pct" x="170" y="${l.y + 21}" fill="${l.color}">${pct}%</text>
       <!-- Ligne de métro (glow + solide) — uniquement entre première et dernière colonne -->
       ${l.list.length > 0 && firstCol !== lastCol ? `
         <line x1="${firstX}" y1="${l.y}" x2="${lastX}" y2="${l.y}"
@@ -1191,10 +1169,8 @@ function _renderMapView(missions) {
       ${l.list.map(m => {
         const p = positions[m.id]; if (!p) return '';
         const colIdx = ordreToCol.get(m.ordre || 0) ?? 0;
-        return `<text x="${p.x}" y="${p.y - MAP_NODE_R - 22}"
-          text-anchor="middle" fill="var(--text-dim)" font-size="9"
-          letter-spacing="0.18em" font-weight="700"
-          font-family="JetBrains Mono, monospace">CH.${String(colIdx + 1).padStart(2,'0')}</text>`;
+        return `<text class="map-ch" x="${p.x}" y="${p.y - MAP_NODE_R - 22}"
+          text-anchor="middle">CH.${String(colIdx + 1).padStart(2,'0')}</text>`;
       }).join('')}
     </g>`;
   }).join('');
@@ -1211,9 +1187,8 @@ function _renderMapView(missions) {
     const midY = (fp.y + tp.y) / 2;
     const d = `M${fp.x} ${fp.y} C${fp.x} ${midY} ${tp.x} ${midY} ${tp.x} ${tp.y}`;
     return `<g>
-      <path d="${d}" stroke="rgba(244,196,48,0.10)" stroke-width="8" fill="none" stroke-linecap="round"/>
-      <path d="${d}" stroke="rgba(244,196,48,0.65)" stroke-width="2.2" stroke-dasharray="7 5"
-        fill="none" marker-end="url(#trame-arrow)" class="map-edge"/>
+      <path class="map-edge-glow" d="${d}"/>
+      <path class="map-edge" d="${d}" marker-end="url(#trame-arrow)"/>
     </g>`;
   }).join('');
 
@@ -1236,30 +1211,26 @@ function _renderMapView(missions) {
         style="--node-color:${st.color};--axe-color:${axeCol}"
         tabindex="0" role="button" aria-label="${_esc(m.titre||'')}">
       <circle cx="${p.x}" cy="${p.y}" r="${MAP_NODE_R + 18}" fill="${axeCol}" opacity="0.10"/>
-      <circle cx="${p.x}" cy="${p.y}" r="${MAP_NODE_R + 3}" fill="var(--bg-void)"/>
+      <circle class="map-node-plate" cx="${p.x}" cy="${p.y}" r="${MAP_NODE_R + 3}"/>
       <circle class="map-node-ring" cx="${p.x}" cy="${p.y}" r="${MAP_NODE_R + 2}"
-        fill="var(--bg-card)" stroke="${st.color}" stroke-width="3"/>
+        stroke="${st.color}"/>
       ${progPath ? `<path d="${progPath}" stroke="${st.color}" stroke-width="3.5"
         fill="none" stroke-linecap="round" opacity="0.9"/>` : ''}
       ${m.imageUrl
         ? `<image href="${_esc(m.imageUrl)}" x="${p.x - MAP_NODE_R}" y="${p.y - MAP_NODE_R}"
             width="${MAP_NODE_R*2}" height="${MAP_NODE_R*2}"
             clip-path="url(#st-clip-${_esc(m.id)})" preserveAspectRatio="xMidYMid slice"/>`
-        : `<text x="${p.x}" y="${p.y}" text-anchor="middle" dy=".35em"
-            font-family="Cinzel, serif" font-weight="700" font-size="22"
+        : `<text class="map-node-glyph" x="${p.x}" y="${p.y}" text-anchor="middle" dy=".35em"
             fill="${st.color}">${_esc(init)}</text>`}
-      <circle cx="${p.x + MAP_NODE_R - 4}" cy="${p.y - MAP_NODE_R + 4}"
-        r="9" fill="${st.color}" stroke="var(--bg-card)" stroke-width="2"/>
-      <text x="${p.x + MAP_NODE_R - 4}" y="${p.y - MAP_NODE_R + 4}"
-        text-anchor="middle" dy=".34em" font-size="10" font-weight="700"
-        fill="#0b0814">${st.icon}</text>
+      <circle class="map-node-badge" cx="${p.x + MAP_NODE_R - 4}" cy="${p.y - MAP_NODE_R + 4}"
+        r="9" fill="${st.color}"/>
+      <text class="map-node-badge-t" x="${p.x + MAP_NODE_R - 4}" y="${p.y - MAP_NODE_R + 4}"
+        text-anchor="middle" dy=".34em">${st.icon}</text>
       <text class="map-node-label" x="${p.x}" y="${p.y + MAP_NODE_R + 22}"
-        text-anchor="middle" font-size="13" font-weight="600" fill="var(--text)">
+        text-anchor="middle">
         ${_esc((m.titre || '').slice(0, 22))}${(m.titre||'').length > 22 ? '…' : ''}
       </text>
-      ${m.date ? `<text x="${p.x}" y="${p.y + MAP_NODE_R + 38}" text-anchor="middle"
-        font-size="9" fill="var(--text-dim)" font-family="JetBrains Mono, monospace">
-        ${_esc(m.date)}</text>` : ''}
+      ${m.date ? `<text class="map-node-date" x="${p.x}" y="${p.y + MAP_NODE_R + 38}" text-anchor="middle">${_esc(m.date)}</text>` : ''}
     </g>`;
   }).join('');
 
@@ -1433,19 +1404,19 @@ function _renderPoster(m, idx) {
     <div class="poster-art">
       ${m.imageUrl
         ? `<img src="${_esc(m.imageUrl)}" alt="" loading="lazy">`
-        : `<div class="poster-fallback">${m.type === 'mission' ? '🎯' : '📖'}</div>`}
+        : `<span class="poster-glyph">${m.type === 'mission' ? '🎯' : '📖'}</span>`}
       <div class="poster-num">CH.${String(idx + 1).padStart(2,'0')}</div>
       <div class="poster-statut">${st.icon} ${_esc(m.statut || 'En attente')}</div>
-      <div class="poster-prog"><div class="poster-prog-fill" style="width:${prog}%"></div></div>
+      <div class="poster-prog"><i style="width:${prog}%"></i></div>
     </div>
     <div class="poster-body">
       <h3 class="poster-title">${_esc(m.titre || 'Sans titre')}</h3>
       ${m.date ? `<div class="poster-date">${_esc(m.date)}</div>` : ''}
       ${parts.length ? `<div class="poster-parts">
         ${parts.slice(0, 4).map(p => {
-          return characterAvatarHtml(p, { tag: 'span', className: 'poster-part', border: 'none', background: 'transparent' });
+          return characterAvatarHtml(p, { tag: 'span', className: 'av', border: 'none', background: 'transparent' });
         }).join('')}
-        ${parts.length > 4 ? `<span class="poster-part-more">+${parts.length-4}</span>` : ''}
+        ${parts.length > 4 ? `<span class="av more">+${parts.length-4}</span>` : ''}
       </div>` : ''}
     </div>
   </article>`;
@@ -1468,7 +1439,9 @@ function _renderChroniqueView(missions) {
           ${i < sorted.length-1 ? '<div class="chap-thread"></div>' : ''}
         </div>
         <div class="chap-body" data-action="openStoryDetail" data-id="${m.id}">
-          ${m.imageUrl ? `<div class="chap-banner"><img src="${_esc(m.imageUrl)}" alt=""></div>` : ''}
+          <div class="chap-banner">
+            ${m.imageUrl ? `<img src="${_esc(m.imageUrl)}" alt="" loading="lazy">` : `<span>${m.type === 'mission' ? '🎯' : '📖'}</span>`}
+          </div>
           <div class="chap-meta-top">
             ${m.axe ? `<span class="chap-axe">${_esc(m.axe)}</span>` : ''}
             <span class="chap-statut">${st.icon} ${_esc(m.statut || 'En attente')}</span>
@@ -1478,16 +1451,16 @@ function _renderChroniqueView(missions) {
           <h2 class="chap-title">${_esc(m.titre || 'Sans titre')}</h2>
           ${m.description
             ? `<p class="chap-desc">${_nl2br(m.description)}</p>`
-            : `<p class="chap-desc-empty">— La chronique ne dit rien de cette mission —</p>`}
+            : `<p class="chap-desc empty">— La chronique ne dit rien de cette mission —</p>`}
           <div class="chap-foot">
             ${parts.length ? `<div class="chap-parts">
               ${parts.slice(0, 10).map(p => {
-                return characterAvatarHtml(p, { tag: 'span', className: 'chap-part', border: 'none', background: 'transparent' });
+                return characterAvatarHtml(p, { tag: 'span', className: 'av lg', border: 'none', background: 'transparent' });
               }).join('')}
             </div>` : '<div></div>'}
             <div class="chap-prog">
-              <span class="chap-prog-val">${prog}%</span>
-              <div class="chap-prog-bar"><div style="width:${prog}%;background:${st.color}"></div></div>
+              <span>${prog}%</span>
+              <div class="bar"><i style="width:${prog}%;background:${st.color}"></i></div>
             </div>
           </div>
         </div>
@@ -1500,7 +1473,7 @@ function _renderChroniqueView(missions) {
 // VUE LISTE — Tableau compact (handoff §9)
 // ══════════════════════════════════════════════════════════════════════════════
 function _renderListView(missions) {
-  return `<div class="list"><div class="list-table">
+  return `<div class="list-table">
     <div class="list-head">
       <div>#</div>
       <div>Mission</div>
@@ -1517,16 +1490,16 @@ function _renderListView(missions) {
         data-action="openStoryDetail" data-id="${m.id}">
         <div class="list-num">${String(i+1).padStart(2,'0')}</div>
         <div class="list-titre">${_esc(m.titre || 'Sans titre')}${m.lieu ? `<span class="list-lieu"> · ${_esc(m.lieu)}</span>` : ''}</div>
-        <div class="list-axe">${m.axe ? `<span class="list-axe-dot"></span><span>${_esc(m.axe)}</span>` : '<span style="color:var(--text-dim)">—</span>'}</div>
+        <div class="list-axe">${m.axe ? `<span class="dot"></span><span>${_esc(m.axe)}</span>` : '<span class="dim">—</span>'}</div>
         <div class="list-statut">${st.icon} ${_esc(m.statut || 'En attente')}${_groupsDotsHtml(m)}</div>
         <div class="list-prog">
-          <div class="list-prog-bar"><div class="list-prog-fill" style="width:${prog}%"></div></div>
-          <span class="list-prog-val">${prog}%</span>
+          <div class="bar"><i style="width:${prog}%"></i></div>
+          <span>${prog}%</span>
         </div>
         <div class="list-date">${m.date ? _esc(m.date) : '—'}</div>
       </div>`;
     }).join('')}
-  </div></div>`;
+  </div>`;
 }
 
 // ── RENDU TIMELINE ────────────────────────────────────────────────────────────
