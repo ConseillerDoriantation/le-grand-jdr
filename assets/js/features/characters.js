@@ -50,7 +50,8 @@ import { renderCharCapacites } from './characters/capacites.js';
 import {
   renderCharJournal, getCurrentJournalSub,
   _bindNotesDnd, _bindQuetesDnd,
-  _csV3JournalSub, _csV3ToggleNote, _csV3SaveNoteTitle, _csV3CycleNoteCat,
+  _csV3JournalSub, _csV3ToggleNote, _csV3AddNote, _csV3DeleteNote, _csV3SaveNoteTitle, _csV3CycleNoteCat,
+  _csV3SaveOpenNote, _csV3CloseNote,
   _csV3AddRelation, _csV3EditRelation,
   _csV3RelSent, _csV3RelPickNpc, _csV3SaveRelation, _csV3DeleteRelation,
 } from './characters/journal.js';
@@ -2396,6 +2397,8 @@ registerActions({
 
   // Journal
   csV3JournalSub:          (btn)    => _csV3JournalSub(btn.dataset.sub),
+  csV3AddNote:             ()       => _csV3AddNote(),
+  csV3DeleteNote:          (btn)    => _csV3DeleteNote(Number(btn.dataset.idx)),
   addNote:                 ()       => addNote(),
   addQuete:                ()       => addQuete(),
   csV3AddRelation:         (btn)    => _csV3AddRelation(btn.dataset.id),
@@ -2403,6 +2406,8 @@ registerActions({
   deleteQuete:             (btn)    => deleteQuete(Number(btn.dataset.idx)),
   csV3ToggleNote:          (btn)    => _csV3ToggleNote(Number(btn.dataset.idx)),
   csV3CycleNoteCat:        (btn)    => _csV3CycleNoteCat(Number(btn.dataset.idx)),
+  csV3SaveOpenNote:        ()       => _csV3SaveOpenNote(),
+  csV3CloseNote:           ()       => _csV3CloseNote(),
   deleteNote:              (btn)    => deleteNote(Number(btn.dataset.idx)),
   saveNote:                (btn)    => saveNote(Number(btn.dataset.idx)),
   csV3EditRelation:        (btn)    => _csV3EditRelation(btn.dataset.id, Number(btn.dataset.idx)),
