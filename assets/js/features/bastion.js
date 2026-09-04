@@ -2303,23 +2303,26 @@ async function _bastionDoTransfer(direction) {
 function _renderHeader(b) {
   const isMj = STATE.isAdmin;
   return `
-    <div class="bs-hero">
-      <div class="bs-hero-emoji">${_esc(b.emoji || '🏰')}</div>
-      <div class="bs-hero-body">
-        <div class="bs-hero-eyebrow">Période ${b.semaine || 1}${b.lieu ? ` · ${_esc(b.lieu)}` : ''}</div>
-        <strong class="bs-hero-title">${_esc(b.nom || 'Le Bastion')}</strong>
-        ${b.description ? `<p class="bs-hero-desc">${_esc(b.description)}</p>` : ''}
+    <header class="bs-page-top">
+      <div class="bs-page-top-in">
+        <div class="bs-page-top-row">
+          <span class="bs-page-mark" aria-hidden="true">${_esc(b.emoji || '🏰')}</span>
+          <div class="bs-page-brand">
+            <h1>${_esc(b.nom || 'Le Bastion')}</h1>
+            <small>Période ${b.semaine || 1}${b.lieu ? ` · ${_esc(b.lieu)}` : ''}</small>
+          </div>
+          <div class="bs-page-actions">
+            <button class="btn btn-outline btn-sm" data-action="_bastionOpenPersonnel">👥 Personnel${b.personnel?.length ? ` <span style="opacity:.7">(${b.personnel.length})</span>` : ''}</button>
+            ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionEditIdentite">✏️ Identité</button>` : ''}
+            ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionOpenCatalogEditor">🏛 Éditer salles</button>` : ''}
+            ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionOpenPreview">🔮 Prévisualiser</button>` : ''}
+            ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionExportJSON" title="Backup JSON du bastion" aria-label="Exporter le Bastion">💾</button>` : ''}
+            ${isMj && b._undoSnapshot ? `<button class="btn btn-outline btn-sm" data-action="_bastionUndoWeek" title="Annuler le dernier passage de période">↩ Annuler la période</button>` : ''}
+            ${isMj ? `<button class="btn btn-gold" data-action="_bastionAdvanceWeek">▶ Passer la période</button>` : ''}
+          </div>
+        </div>
       </div>
-      <div class="bs-hero-actions">
-        <button class="btn btn-outline btn-sm" data-action="_bastionOpenPersonnel">👥 Personnel${b.personnel?.length ? ` <span style="opacity:.7">(${b.personnel.length})</span>` : ''}</button>
-        ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionEditIdentite">✏️ Identité</button>` : ''}
-        ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionOpenCatalogEditor">🏛 Éditer salles</button>` : ''}
-        ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionOpenPreview">🔮 Prévisualiser</button>` : ''}
-        ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionExportJSON" title="Backup JSON du bastion">💾</button>` : ''}
-        ${isMj && b._undoSnapshot ? `<button class="btn btn-outline btn-sm" data-action="_bastionUndoWeek" title="Annuler le dernier passage de période">↩ Annuler la période</button>` : ''}
-        ${isMj ? `<button class="btn btn-gold" data-action="_bastionAdvanceWeek">▶ Passer la période</button>` : ''}
-      </div>
-    </div>`;
+    </header>`;
 }
 
 function _renderGauges(b) {
@@ -3597,12 +3600,14 @@ function _renderPage() {
   content.innerHTML = `
     <div class="bs-root bs-root-v2">
       ${_renderHeader(b)}
-      ${_renderQuickNav()}
-      ${_wrapZone('bs-z-etat',      _renderEtatZone(b))}
-      ${_wrapZone('bs-z-salles',    _renderRooms(b))}
-      ${_wrapZone('bs-z-coffre',    _renderCoffre(b))}
-      ${_wrapZone('bs-z-quetes',    _renderBastionQuests(b))}
-      ${_wrapZone('bs-z-annonces',  _renderAnnonces(b))}
+      <div class="bs-page-body">
+        ${_renderQuickNav()}
+        ${_wrapZone('bs-z-etat',      _renderEtatZone(b))}
+        ${_wrapZone('bs-z-salles',    _renderRooms(b))}
+        ${_wrapZone('bs-z-coffre',    _renderCoffre(b))}
+        ${_wrapZone('bs-z-quetes',    _renderBastionQuests(b))}
+        ${_wrapZone('bs-z-annonces',  _renderAnnonces(b))}
+      </div>
     </div>`;
   _initQuickNav();
   requestAnimationFrame(_wallFocusTarget);

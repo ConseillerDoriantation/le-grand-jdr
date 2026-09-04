@@ -3425,41 +3425,13 @@ const PAGES = {
     content.style.height  = 'calc(100vh - var(--header-height))';
 
     content.innerHTML = `
-    <div style="display:flex;flex-direction:column;height:100%">
-      <!-- Barre titre -->
-      <div style="
-        display:flex;align-items:center;justify-content:space-between;
-        padding:0.6rem 1.2rem;
-        background:var(--bg-panel);border-bottom:1px solid var(--border-strong);
-        flex-shrink:0;gap:1rem;
-      ">
-        <div style="display:flex;align-items:center;gap:0.75rem">
-          <span id="map-page-region" style="font-family:'Cinzel',serif;font-size:0.9rem;color:var(--gold)">
-            🗺️ Carte de la Région
-          </span>
-          <span style="font-size:0.72rem;color:var(--text-dim)">Molette pour zoomer · Cliquer-glisser pour naviguer</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:0.5rem" id="map-legend"></div>
-      </div>
-      <!-- Conteneur carte -->
-      <div id="map-container" style="flex:1;position:relative;overflow:hidden;min-height:0"></div>
+    <div class="map-page-shell">
+      <div id="map-container" class="map-page-container"></div>
     </div>`;
 
     // Import et init carte interactive
-    const { initMap, LIEU_TYPES } = await import('./map.js');
-    const map = await initMap(document.getElementById('map-container'));
-    const region = document.getElementById('map-page-region');
-    if (region && map?.regionName) region.textContent = `🗺️ ${map.regionName}`;
-
-    // Légende
-    const legend = document.getElementById('map-legend');
-    if (legend) {
-      legend.innerHTML = LIEU_TYPES.map(t => `
-        <span style="display:flex;align-items:center;gap:4px;font-size:0.72rem;color:var(--text-dim)">
-          <span style="width:8px;height:8px;border-radius:50%;background:${t.color};display:inline-block;flex-shrink:0"></span>
-          ${t.label}
-        </span>`).join('');
-    }
+    const { initMap } = await import('./map.js');
+    await initMap(document.getElementById('map-container'));
   },
 
 // ─── BASTION ────────────────────────────────────────────────────────────────

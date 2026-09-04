@@ -205,49 +205,52 @@ async function renderWorld() {
 
   content.innerHTML = `
   <div class="world-shell world-atlas">
-    <section class="world-hero-panel">
-      <div class="world-hero-copy">
-        <span class="world-kicker">${_esc(activeCat?.nom || 'Atlas')}</span>
-        <h1>Guide</h1>
-        <p>Tout ce que le MJ met à disposition de la table : règles maison, univers, repères.</p>
+    <header class="world-page-top">
+      <div class="world-page-top-in">
+        <div class="world-page-top-row">
+          <div class="world-page-brand">
+            <h1>Guide</h1>
+            <small>${_esc(activeCat?.nom || 'Atlas de l’aventure')}</small>
+          </div>
+          <div class="world-page-stats" aria-label="Résumé du Guide">
+            ${stats.map(stat => `
+              <span class="world-page-stat" title="${_esc(stat.label)}">
+                <b>${stat.value}</b> ${_esc(stat.label)}
+              </span>`).join('')}
+          </div>
+          ${STATE.isAdmin ? `
+            <div class="world-page-actions">
+              <button data-action="openWorldSectionModal" class="btn btn-gold btn-sm">+ Section</button>
+              <button data-action="openWorldCategoryModal" class="btn btn-outline btn-sm">+ Catégorie</button>
+            </div>` : ''}
+        </div>
       </div>
-      <div class="world-stat-grid">
-        ${stats.map(stat => `
-          <div class="world-stat">
-            <span>${_esc(stat.icon)}</span>
-            <strong>${stat.value}</strong>
-            <small>${_esc(stat.label)}</small>
-          </div>`).join('')}
-      </div>
-      ${STATE.isAdmin ? `
-        <div class="world-hero-actions">
-          <button data-action="openWorldSectionModal" class="btn btn-gold btn-sm">+ Section</button>
-          <button data-action="openWorldCategoryModal" class="btn btn-outline btn-sm">+ Catégorie</button>
-        </div>` : ''}
-    </section>
+    </header>
 
-    <div class="world-layout">
-      <aside class="world-sidebar">
-        <div class="world-nav-card">
-          <div class="world-nav-head">
-            <div>
-              <strong>Sommaire</strong>
-              <span>${visibleSections.length} entrée${visibleSections.length > 1 ? 's' : ''}</span>
+    <div class="world-page-body">
+      <div class="world-layout">
+        <aside class="world-sidebar">
+          <div class="world-nav-card">
+            <div class="world-nav-head">
+              <div>
+                <strong>Sommaire</strong>
+                <span>${visibleSections.length} entrée${visibleSections.length > 1 ? 's' : ''}</span>
+              </div>
+              ${STATE.isAdmin ? `<button data-action="openWorldCategoryModal" class="world-icon-btn" title="Nouvelle catégorie">+</button>` : ''}
             </div>
-            ${STATE.isAdmin ? `<button data-action="openWorldCategoryModal" class="world-icon-btn" title="Nouvelle catégorie">+</button>` : ''}
+            <div id="world-nav-list" class="world-nav-list">
+              ${visibleCats.map(cat => _renderCategoryGroup(cat)).join('')}
+              ${visibleCats.length === 0 ? `<div class="world-empty-note">Aucune catégorie</div>` : ''}
+            </div>
           </div>
-          <div id="world-nav-list" class="world-nav-list">
-            ${visibleCats.map(cat => _renderCategoryGroup(cat)).join('')}
-            ${visibleCats.length === 0 ? `<div class="world-empty-note">Aucune catégorie</div>` : ''}
-          </div>
-        </div>
-      </aside>
+        </aside>
 
-      <main class="world-reader">
-        <div id="world-main-content">
-          ${activeSection ? _renderSection(activeSection, visibleSections) : _renderEmpty()}
-        </div>
-      </main>
+        <main class="world-reader">
+          <div id="world-main-content">
+            ${activeSection ? _renderSection(activeSection, visibleSections) : _renderEmpty()}
+          </div>
+        </main>
+      </div>
     </div>
   </div>`;
 
@@ -431,6 +434,9 @@ function selectWorldSection(id) {
     el.classList.toggle('is-active', el.dataset.navId === id);
   });
   const section = STORE.sections.find(s => s.id === id);
+  const category = _worldCategoryFor(section);
+  const pageContext = document.querySelector('.world-page-brand small');
+  if (pageContext && category) pageContext.textContent = category.nom || 'Atlas de l’aventure';
   const main = document.getElementById('world-main-content');
   if (main && section) { main.innerHTML = _renderSection(section); _bindWorldContentEditor(); }
 }

@@ -369,9 +369,8 @@ function _computeTopAdventurers(currentCharId, items, limit = 4) {
 // ══════════════════════════════════════════════════════════════════════════════
 // RENDU — HERO HEADER (compteurs + filtres)
 // ══════════════════════════════════════════════════════════════════════════════
-function _renderHero(items, filtered) {
+function _renderHero(items, filtered, activeItem = null) {
   const joueurs = new Set(items.map(i => i.joueur).filter(Boolean));
-  const classes = new Set(items.map(i => i.classe).filter(Boolean));
   const joueursList = [...joueurs].sort((a, b) => a.localeCompare(b, 'fr'));
   const isFiltered = !!(STORE.filterSearch || STORE.filterJoueur);
   const visibleCount = items.filter(i => i.visible !== false).length;
@@ -382,37 +381,25 @@ function _renderHero(items, filtered) {
     : 0;
 
   return `
-  <div class="pp-hero">
-    <div class="pp-hero-band">
-      <div class="pp-hero-title-block">
-        <div class="pp-hero-eyebrow">Compagnons d'aventure</div>
-        <h1 class="pp-hero-title">Joueurs de la campagne</h1>
-        <p class="pp-hero-subtitle">Une vue claire des personnages, des comptes liés et des informations publiées.</p>
+  <header class="pp-page-top">
+    <div class="pp-page-top-in">
+      <div class="pp-page-top-row">
+        <div class="pp-page-brand">
+          <h1>Joueurs</h1>
+          <small>${activeItem
+            ? `Profil · ${_esc(activeItem.nom)}`
+            : `${items.length} personnage${items.length !== 1 ? 's' : ''} · ${joueurs.size} compte${joueurs.size !== 1 ? 's' : ''}`}</small>
+        </div>
+        ${activeItem ? '' : `
+          <div class="pp-page-stats" aria-label="Résumé des joueurs">
+            <span><b>${visibleCount}</b> publié${visibleCount !== 1 ? 's' : ''}</span>
+            <span><b>${avgLevel}</b> niveau moyen</span>
+            <span><b>${linkedCount}/${items.length}</b> fiche${items.length !== 1 ? 's' : ''} liée${items.length !== 1 ? 's' : ''}</span>
+            ${STATE.isAdmin && hiddenCount ? `<span><b>${hiddenCount}</b> masquée${hiddenCount !== 1 ? 's' : ''}</span>` : ''}
+          </div>
+          ${STATE.isAdmin ? `<button class="pp-action-primary" data-pp-action="newPlayer">${_ppIcon('plus')} Présentation</button>` : ''}`}
       </div>
-      <div class="pp-hero-stats">
-        <div class="pp-hero-stat"><div class="pp-hero-stat-num">${items.length}</div><div class="pp-hero-stat-lbl">Personnage${items.length>1?'s':''}</div></div>
-        <div class="pp-hero-stat"><div class="pp-hero-stat-num">${joueurs.size}</div><div class="pp-hero-stat-lbl">Compte${joueurs.size>1?'s':''}</div></div>
-        <div class="pp-hero-stat"><div class="pp-hero-stat-num">${visibleCount}</div><div class="pp-hero-stat-lbl">Publié${visibleCount>1?'s':''}</div></div>
-        <div class="pp-hero-stat"><div class="pp-hero-stat-num">${avgLevel}</div><div class="pp-hero-stat-lbl">Niv. moyen</div></div>
-      </div>
-    </div>
-
-    <div class="pp-roster-summary">
-      <div class="pp-roster-summary-card">
-        <span class="pp-roster-summary-icon">${_ppIcon('users')}</span>
-        <div><strong>${linkedCount}/${items.length}</strong><small>fiches personnage liées</small></div>
-      </div>
-      <div class="pp-roster-summary-card">
-        <span class="pp-roster-summary-icon">${_ppIcon('cards')}</span>
-        <div><strong>${classes.size}</strong><small>classe${classes.size>1?'s':''} représentée${classes.size>1?'s':''}</small></div>
-      </div>
-      <div class="pp-roster-summary-card">
-        <span class="pp-roster-summary-icon">${_ppIcon(hiddenCount ? 'eyeOff' : 'eye')}</span>
-        <div><strong>${hiddenCount}</strong><small>présentation${hiddenCount>1?'s':''} masquée${hiddenCount>1?'s':''}</small></div>
-      </div>
-    </div>
-
-    <div class="pp-filters">
+      ${activeItem ? '' : `<div class="pp-filters">
       <div class="pp-filter-search">
         <span class="pp-filter-icon">${_ppIcon('search')}</span>
         <input type="text" placeholder="Rechercher un nom, une classe, un trait…"
@@ -432,7 +419,6 @@ function _renderHero(items, filtered) {
         <option value="joueur" ${STORE.sortBy==='joueur'?'selected':''}>Joueur</option>
         <option value="classe" ${STORE.sortBy==='classe'?'selected':''}>Classe</option>
       </select>
-      ${STATE.isAdmin ? `<button class="pp-action-primary" data-pp-action="newPlayer">${_ppIcon('plus')} Présentation</button>` : ''}
       ${isFiltered ? `<button class="pp-filter-reset" data-pp-action="resetFilters" title="Réinitialiser tous les filtres">${_ppIcon('reset')} Réinitialiser</button>` : ''}
       <div class="pp-view-toggle" role="tablist" aria-label="Mode d'affichage">
         <button class="pp-view-tab ${STORE.viewMode==='gallery'?'is-active':''}"
@@ -442,13 +428,14 @@ function _renderHero(items, filtered) {
           data-pp-action="setViewMode" data-mode="relations" title="Carte des liens d'aventure" role="tab"
           aria-selected="${STORE.viewMode === 'relations'}">${_ppIcon('relations')} Relations</button>
       </div>
-    </div>
+    </div>`}
 
-    ${isFiltered ? `
+    ${!activeItem && isFiltered ? `
       <div class="pp-filter-meta">
         ${filtered.length} résultat${filtered.length>1?'s':''} sur ${items.length}
       </div>` : ''}
-  </div>`;
+    </div>
+  </header>`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -531,10 +518,9 @@ function _renderCard(item, idx) {
 // ══════════════════════════════════════════════════════════════════════════════
 function _renderSommaire(items) {
   const filtered = _applyFilters(items);
-  const heroHtml = _renderHero(items, filtered);
 
   if (!filtered.length) {
-    return heroHtml + `
+    return `
       <div class="pp-empty">
         <div class="pp-empty-icon">${_ppIcon('search')}</div>
         <p class="pp-empty-title">Aucun personnage ne correspond à ta recherche.</p>
@@ -543,10 +529,10 @@ function _renderSommaire(items) {
   }
 
   if (STORE.viewMode === 'relations') {
-    return heroHtml + _renderRelationsView(filtered);
+    return _renderRelationsView(filtered);
   }
 
-  return heroHtml + `
+  return `
     <div id="pp-gallery" class="pp-gallery">
       ${filtered.map((it, idx) => _renderCard(it, idx)).join('')}
     </div>`;
@@ -1442,24 +1428,20 @@ export async function renderPlayersPage() {
 
   if (!STORE.items.length) {
     content.innerHTML = `
-      <div class="pp-hero">
-        <div class="pp-hero-band">
-          <div class="pp-hero-title-block">
-            <h1 class="pp-hero-title">Joueurs de la campagne</h1>
-            <p class="pp-hero-subtitle">Aucun personnage ne s'est encore présenté.</p>
-          </div>
-        </div>
-      </div>
-      ${STATE.isAdmin
-        ? `<div class="pp-empty">
+      <div class="pp-page">
+        ${_renderHero([], [])}
+        <div class="pp-page-body">
+          ${STATE.isAdmin
+            ? `<div class="pp-empty">
             <div class="pp-empty-icon">${_ppIcon('cards')}</div>
             <p class="pp-empty-title">Aucun personnage dans le roster.</p>
-            <button class="pp-action-primary" data-pp-action="newPlayer" style="margin-top:.8rem">${_ppIcon('plus')} Ajouter le premier</button>
           </div>`
-        : `<div class="pp-empty">
+            : `<div class="pp-empty">
             <div class="pp-empty-icon">${_ppIcon('eyeOff')}</div>
             <p class="pp-empty-title">Aucune présentation publiée.</p>
-          </div>`}`;
+          </div>`}
+        </div>
+      </div>`;
     return;
   }
 
@@ -1469,9 +1451,11 @@ export async function renderPlayersPage() {
 
 function _renderView(content) {
   const activeItem = STORE.activeId ? STORE.items.find(i => i.id === STORE.activeId) : null;
+  const filtered = _applyFilters(STORE.items);
   content.innerHTML = `
     <div class="pp-page">
-      <div id="pp-view-area">
+      ${_renderHero(STORE.items, filtered, activeItem)}
+      <div id="pp-view-area" class="pp-page-body">
         ${activeItem ? _renderFiche(activeItem, STORE.items) : _renderSommaire(STORE.items)}
       </div>
     </div>`;

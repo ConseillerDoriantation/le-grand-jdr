@@ -7703,6 +7703,214 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   GUIDE + JOUEURS — bandeaux de page unifiés
+   ══════════════════════════════════════════════════════════════════════════════ */
+.world-atlas,
+.pp-page {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0 0 40px;
+  gap: 0;
+}
+
+.world-page-top,
+.pp-page-top {
+  position: relative;
+  z-index: 40;
+  width: 100%;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border-strong);
+  background: color-mix(in srgb, var(--bg-panel) 94%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+.world-page-top-in,
+.pp-page-top-in {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  padding: 14px clamp(14px, 2vw, 28px) 12px;
+  box-sizing: border-box;
+}
+
+.world-page-top-row,
+.pp-page-top-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.world-page-brand,
+.pp-page-brand {
+  display: flex;
+  align-items: baseline;
+  gap: .65rem;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.world-page-brand h1,
+.pp-page-brand h1 {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: .02em;
+}
+
+.world-page-brand small,
+.pp-page-brand small {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.world-page-stats,
+.pp-page-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-left: auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.world-page-stats::-webkit-scrollbar,
+.pp-page-stats::-webkit-scrollbar { display: none; }
+
+.world-page-stat,
+.pp-page-stats > span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-card2) 76%, transparent);
+  color: var(--text-dim);
+  font-size: .66rem;
+  white-space: nowrap;
+}
+
+.world-page-stat b,
+.pp-page-stats b {
+  color: var(--text-soft);
+  font-family: var(--font-display);
+  font-size: .88rem;
+}
+
+.world-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+
+.world-page-body,
+.pp-page-body {
+  width: 100%;
+  padding: 14px clamp(14px, 2vw, 28px) 0;
+  box-sizing: border-box;
+}
+
+.pp-page-top .pp-action-primary { flex: 0 0 auto; }
+.pp-page-top .pp-filters {
+  flex-wrap: nowrap;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.pp-page-top .pp-filter-search { flex: 1 1 300px; }
+.pp-page-top .pp-filter-select,
+.pp-page-top .pp-filter-reset,
+.pp-page-top .pp-view-toggle { flex: 0 0 auto; }
+.pp-page-top .pp-filter-meta { margin: -2px 0 0; }
+
+@media (max-width: 900px) {
+  .world-page-top-row,
+  .pp-page-top-row { flex-wrap: wrap; }
+  .world-page-stats,
+  .pp-page-stats {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+  }
+  .world-page-actions,
+  .pp-page-top .pp-action-primary { margin-left: auto; }
+  .pp-page-top .pp-filters {
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+  .pp-page-top .pp-filters::-webkit-scrollbar { display: none; }
+  .pp-page-top .pp-filter-search { min-width: min(310px, 72vw); }
+}
+
+@media (max-width: 600px) {
+  .world-page-top-in,
+  .pp-page-top-in {
+    gap: 8px;
+    padding: 10px 12px 9px;
+  }
+  .world-page-brand,
+  .pp-page-brand {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .world-page-brand h1,
+  .pp-page-brand h1 { font-size: 19px; }
+  .world-page-brand small,
+  .pp-page-brand small {
+    max-width: 62vw;
+    font-size: 10px;
+  }
+  .world-page-stats,
+  .pp-page-stats { gap: 5px; }
+  .world-page-stat,
+  .pp-page-stats > span {
+    min-height: 28px;
+    padding: 5px 8px;
+  }
+  .world-page-body,
+  .pp-page-body { padding: 10px 10px 0; }
+  .world-page-actions .btn { padding-inline: 9px; }
+
+  /* Sur téléphone les filtres restent sur une seule ligne défilable, sans
+     transformer le bandeau en longue colonne de contrôles. */
+  .pp-page-top .pp-filters {
+    align-items: center;
+    width: 100%;
+  }
+  .pp-page-top .pp-filter-search,
+  .pp-page-top .pp-filter-select,
+  .pp-page-top .pp-filter-reset,
+  .pp-page-top .pp-view-toggle {
+    width: auto;
+  }
+  .pp-page-top .pp-filter-search {
+    flex: 0 0 min(280px, 76vw);
+    min-width: min(280px, 76vw);
+  }
+}
+
 /* Players - nouveau profil de stats */
 .pp-stat-profile {
   display: flex;
