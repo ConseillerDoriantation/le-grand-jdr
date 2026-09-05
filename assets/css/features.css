@@ -7359,21 +7359,120 @@ textarea.input-field { resize:vertical; min-height:80px; font-size:0.88rem; line
   .pp-mn-footer { padding: 12px 14px; }
 }
 
-/* ── Trame : modale d'ordre des axes (MJ, drag & drop) ── */
+/* ── Trame : personnalisation des axes (MJ, couleur + drag & drop) ── */
+.axe-order-help {
+  margin: 0 0 .8rem;
+  color: var(--text-dim);
+  font-size: .8rem;
+  line-height: 1.5;
+}
 .axe-order-list { display: flex; flex-direction: column; gap: 6px; }
 .axe-order-row {
   display: flex; align-items: center; gap: 10px;
   padding: 9px 11px; border-radius: 9px;
   background: var(--bg-elevated, rgba(255,255,255,.03));
   border: 1px solid var(--border);
+  border-left-color: color-mix(in srgb, var(--axe-color) 70%, var(--border));
 }
 .axe-order-grip {
   cursor: grab; color: var(--text-dim); font-size: 1rem; line-height: 1;
   user-select: none; flex-shrink: 0;
 }
 .axe-order-grip:active { cursor: grabbing; }
-.axe-order-dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
+.axe-order-dot {
+  width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0;
+  background: var(--axe-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--axe-color) 16%, transparent);
+}
 .axe-order-name { font-size: .86rem; font-weight: 600; color: var(--text); flex: 1; min-width: 0; }
+.axe-order-colors {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.axe-order-palette {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(0,0,0,.12);
+}
+.axe-order-swatch {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: var(--swatch);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.16);
+  cursor: pointer;
+  transition: transform .12s, border-color .12s, box-shadow .12s;
+}
+.axe-order-swatch:hover { transform: scale(1.12); }
+.axe-order-swatch.is-active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--swatch) 45%, transparent);
+}
+.axe-order-swatch.is-active::after {
+  content: '✓';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #10151f;
+  font-size: 12px;
+  font-weight: 1000;
+  text-shadow: 0 1px rgba(255,255,255,.35);
+}
+.axe-order-custom-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 3px 9px 3px 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,.025);
+  color: var(--text-muted);
+  font-size: .72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.axe-order-custom-wrap:hover,
+.axe-order-custom-wrap.is-active {
+  border-color: color-mix(in srgb, var(--axe-color) 58%, var(--border));
+  background: color-mix(in srgb, var(--axe-color) 10%, transparent);
+  color: var(--text);
+}
+.axe-order-color {
+  width: 26px;
+  height: 24px;
+  padding: 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.axe-order-color::-webkit-color-swatch-wrapper { padding: 0; }
+.axe-order-color::-webkit-color-swatch { border: 0; border-radius: 5px; }
+.axe-order-color::-moz-color-swatch { border: 0; border-radius: 5px; }
+.axe-order-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: .5rem;
+  margin-top: 1rem;
+}
+@media (max-width: 520px) {
+  .axe-order-row { gap: 8px; padding: 8px; flex-wrap: wrap; }
+  .axe-order-colors { width: 100%; padding-left: 27px; }
+  .axe-order-palette { flex: 1; justify-content: space-between; }
+  .axe-order-custom-wrap { padding-right: 4px; }
+  .axe-order-custom-wrap span { display: none; }
+}
 
 /* ── Boutons partagés (extraits de vtt.css/shop.css pour rester EAGER) ──────
    Ces variantes sont rendues par plusieurs pages (quests, characters…) alors que

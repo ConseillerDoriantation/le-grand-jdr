@@ -27,6 +27,7 @@ import { removeQuestAgendaSessions } from '../shared/agenda-sessions.js';
 const AXE_COLORS = [
   '#9d6fff','#f4c430','#ff9544','#38bdf8','#ff6b9d','#a3e635',
 ];
+const AXE_COLOR_NAMES = ['Violet', 'Or', 'Orange', 'Bleu', 'Rose', 'Vert'];
 
 const STATUT_CFG = {
   'Terminée':   { color:'#22c38e', border:'rgba(34,195,142,0.35)',  icon:'✓' },
@@ -62,7 +63,8 @@ function _groupsDotsHtml(item){
 
 
 const STORE = {
-  axeMap:         {},   // { [axeId]: { id, label, color } }
+  axeMap:         {},   // couleurs réellement utilisées dans l'acte affiché
+  axeColors:      {},   // couleurs personnalisées persistées par nom d'axe
   modalGroupes:   [],   // groupes du modal ouvert (mission courante)
   modalStoryId:   '',   // id de la mission en édition ('' = nouvelle)
   editingGroupId: null, // id du groupe en cours de modification (null = création)
@@ -182,9 +184,31 @@ function _storyOpenMissionStats(missionId) {
   navigate('statistiques');
 }
 
+function _normalizeAxeColor(value) {
+  const color = String(value || '').trim();
+  return /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : '';
+}
+function _previewAxeColor(row, color) {
+  const safeColor = _normalizeAxeColor(color);
+  if (!row || !safeColor) return;
+  row.style.setProperty('--axe-color', safeColor);
+  const customInput = row.querySelector('[data-axe-color]');
+  if (customInput && customInput.value.toLowerCase() !== safeColor) customInput.value = safeColor;
+  let presetSelected = false;
+  row.querySelectorAll('[data-axe-preset]').forEach(button => {
+    const selected = _normalizeAxeColor(button.dataset.color) === safeColor;
+    button.classList.toggle('is-active', selected);
+    button.setAttribute('aria-pressed', String(selected));
+    presetSelected ||= selected;
+  });
+  row.querySelector('.axe-order-custom-wrap')?.classList.toggle('is-active', !presetSelected);
+}
 function axeColor(axe){
   if(!axe) return '#555';
-  if(!STORE.axeMap[axe]){ STORE.axeMap[axe] = AXE_COLORS[Object.keys(STORE.axeMap).length % AXE_COLORS.length]; }
+  if(!Object.prototype.hasOwnProperty.call(STORE.axeMap, axe)){
+    STORE.axeMap[axe] = _normalizeAxeColor(STORE.axeColors?.[axe])
+      || AXE_COLORS[Object.keys(STORE.axeMap).length % AXE_COLORS.length];
+  }
   return STORE.axeMap[axe];
 }
 // Rang d'un axe pour l'ordre d'affichage (défini par le MJ via story_meta/axes).
@@ -753,6 +777,9 @@ async function renderStory() {
   // Ordre des axes défini par le MJ (story_meta/axes.order). Les axes absents de
   // la liste sont placés après, dans leur ordre d'apparition.
   STORE.axeOrder = Array.isArray(axesDoc?.order) ? axesDoc.order : [];
+  STORE.axeColors = Object.fromEntries(Object.entries(axesDoc?.colors || {})
+    .map(([axe, color]) => [axe, _normalizeAxeColor(color)])
+    .filter(([, color]) => color));
 
   const prefs = getStoryPrefs();
   const visibleItems = items.filter(i => STATE.isAdmin || i.visibleJoueurs !== false);
@@ -829,7 +856,7 @@ async function renderStory() {
           <button class="${!personalScope ? 'on' : ''}" data-action="_stSetPlayerScope" data-scope="all" aria-pressed="${!personalScope}"><span aria-hidden="true">&#9776;</span> Toute la trame</button>
           <button class="${personalScope ? 'on' : ''}" data-action="_stSetPlayerScope" data-scope="mine" aria-pressed="${personalScope}"><span aria-hidden="true">&#9673;</span> Mes missions <em>${playerMissionIds.size}</em></button>
         </div>` : ''}
-        ${STATE.isAdmin && axes.length >= 2 ? `<button class="pill" data-action="openAxeOrder" title="Réordonner les axes narratifs (Carte & Saga)">⇅ Axes</button>` : ''}
+        ${STATE.isAdmin && axes.length ? `<button class="pill" data-action="openAxeOrder" title="Personnaliser les couleurs et l'ordre des axes narratifs">◉ Axes</button>` : ''}
         ${_legacyGroups ? `<button class="pill" data-action="_stMigrateGroups" title="Convertir les anciens groupes (membres) en groupes rejoignables">⟳ Migrer</button>` : ''}
         ${STATE.isAdmin ? `<button class="pill primary" data-action="openStoryModal">＋ Nouvelle mission</button>` : ''}
       </div>
@@ -2366,27 +2393,36 @@ function _toggleLien(id) {
   tick.textContent       = on ? '✓' : '';
 }
 
-// ── ORDRE DES AXES (MJ) ───────────────────────────────────────────────────────
+// ── PERSONNALISATION DES AXES (MJ) ────────────────────────────────────────────
 let _axeOrderSortable = null;
 function openAxeOrder() {
   if (!STATE.isAdmin) return;
   const axes = Object.keys(STORE.axeMap).sort((a, b) => _axeRank(a) - _axeRank(b));
-  if (!axes.length) { showNotif('Aucun axe à réordonner.', 'info'); return; }
-  openModal('⇅ Ordre des axes', `
-    <p style="font-size:.8rem;color:var(--text-dim);margin:0 0 .8rem">
-      Glisse les axes pour définir leur ordre d'affichage (vues Carte &amp; Saga).
+  if (!axes.length) { showNotif('Aucun axe à personnaliser.', 'info'); return; }
+  openModal('◉ Gérer les axes', `
+    <p class="axe-order-help">
+      Choisis leur couleur. Glisse-les pour définir leur ordre dans les vues Carte et Saga.
     </p>
     <div id="axe-order-list" class="axe-order-list">
       ${axes.map(a => `
-        <div class="axe-order-row" data-axe="${_esc(a)}">
+        <div class="axe-order-row" data-axe="${_esc(a)}" style="--axe-color:${axeColor(a)}">
           <span class="axe-order-grip" title="Glisser pour réordonner">⠿</span>
-          <span class="axe-order-dot" style="background:${STORE.axeMap[a] || '#7a8fa8'}"></span>
+          <span class="axe-order-dot"></span>
           <span class="axe-order-name">${_esc(a)}</span>
+          <div class="axe-order-colors" role="group" aria-label="Couleur de l'axe ${_esc(a)}">
+            <div class="axe-order-palette">
+              ${AXE_COLORS.map((color, index) => `<button type="button" class="axe-order-swatch${axeColor(a) === color ? ' is-active' : ''}" style="--swatch:${color}" data-action="_stPickAxeColor" data-color="${color}" data-axe-preset title="${AXE_COLOR_NAMES[index]}" aria-label="${AXE_COLOR_NAMES[index]}" aria-pressed="${axeColor(a) === color}"></button>`).join('')}
+            </div>
+            <label class="axe-order-custom-wrap${AXE_COLORS.includes(axeColor(a)) ? '' : ' is-active'}" title="Choisir une couleur personnalisée">
+              <input class="axe-order-color" type="color" value="${axeColor(a)}" data-axe-color data-axe="${_esc(a)}" aria-label="Couleur personnalisée de l'axe ${_esc(a)}">
+              <span>Libre</span>
+            </label>
+          </div>
         </div>`).join('')}
     </div>
-    <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
+    <div class="axe-order-actions">
       <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
-      <button class="btn btn-gold btn-sm" data-action="saveAxeOrder">💾 Enregistrer l'ordre</button>
+      <button class="btn btn-gold btn-sm" data-action="saveAxeOrder">💾 Enregistrer les axes</button>
     </div>
   `);
   const list = document.getElementById('axe-order-list');
@@ -2395,16 +2431,31 @@ function openAxeOrder() {
     _axeOrderSortable = makeSortable(list, {
       prefix: 'cs', draggable: '.axe-order-row', handle: '.axe-order-grip', delay: 60,
     });
+    list.querySelectorAll('[data-axe-color]').forEach(input => {
+      input.addEventListener('input', () => {
+        _previewAxeColor(input.closest('.axe-order-row'), input.value);
+      });
+    });
   }
 }
 async function saveAxeOrder() {
   if (!STATE.isAdmin) return;
-  const order = [...document.querySelectorAll('#axe-order-list .axe-order-row')]
+  const shownOrder = [...document.querySelectorAll('#axe-order-list .axe-order-row')]
     .map(r => r.dataset.axe).filter(Boolean);
+  const shownAxes = new Set(shownOrder);
+  const order = [...shownOrder, ...(STORE.axeOrder || []).filter(axe => !shownAxes.has(axe))];
+  const colors = { ...STORE.axeColors };
+  document.querySelectorAll('#axe-order-list [data-axe-color]').forEach(input => {
+    const axe = input.dataset.axe;
+    const color = _normalizeAxeColor(input.value);
+    if (axe && color) colors[axe] = color;
+  });
   STORE.axeOrder = order;
-  if (await tryDoc('story_meta', 'axes', { order })) {
+  if (await tryDoc('story_meta', 'axes', { order, colors })) {
+    STORE.axeColors = colors;
+    shownOrder.forEach(axe => { STORE.axeMap[axe] = colors[axe] || STORE.axeMap[axe]; });
     closeModalDirect();
-    showNotif('Ordre des axes enregistré.', 'success');
+    showNotif('Axes mis à jour.', 'success');
     renderStory();
   }
 }
@@ -2570,6 +2621,7 @@ registerActions({
   _stMapZoom:              (btn) => _stMapZoom(Number(btn.dataset.factor)),
   _stMapReset:             ()    => _stMapReset(),
   _toggleLien:             (btn) => _toggleLien(btn.dataset.id),
+  _stPickAxeColor:         (btn) => _previewAxeColor(btn.closest('.axe-order-row'), btn.dataset.color),
   openAxeOrder:            () => openAxeOrder(),
   saveAxeOrder:            () => saveAxeOrder(),
   _ouvrirHistoire:         (btn) => _ouvrirHistoire(btn.dataset.id, btn.dataset.titre, btn.dataset.acte),
