@@ -206,6 +206,8 @@ function _statsCaptureDrawerState(root = document.getElementById('stats-root')) 
 }
 // Mission d'une séance (libellé MJ), ou '' si non renseignée.
 const _statsMissionOf = (dateKey) => (dateKey && _statsData?.sessions?.[dateKey]?.mission) || '';
+const _statsSessionIsLinked = (dateKey) => !!(dateKey && _statsData?.sessions?.[dateKey]?.missionId);
+const _statsUnlinkedDates = (dates = []) => dates.filter(dateKey => !_statsSessionIsLinked(dateKey));
 const _statsGroupOf   = (dateKey) => {
   const session = dateKey ? _statsData?.sessions?.[dateKey] : null;
   if (!session) return '';
@@ -1096,7 +1098,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
       })).filter(m => m.active)
     : [];
 
-  const unlinkedDates = allDates.filter(d => !_statsData?.sessions?.[d]?.missionId);
+  const unlinkedDates = _statsUnlinkedDates(allDates);
   const groupsBar = selectedMissionId && groupOptions.length && (dateKey || groupOptions.length > 1) ? `<div class="stats-chips stats-groups">
     <span class="stats-chips-lbl">Groupes</span>
     ${!dateKey && groupOptions.length > 1 ? `<button class="stats-chip${!_statsGroupSel || !_statsGroupSel.size ? ' active' : ''}" data-action="_statsToggleGroup" data-group-key="__all">Tous</button>` : ''}
@@ -1112,7 +1114,18 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
 
   const exportBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExport" title="Copier un récapitulatif texte pour Discord" aria-label="Copier le récapitulatif"><span class="stats-tool-icon" aria-hidden="true">📋</span><span class="stats-tool-label">Copier</span></button>` : '';
   const visualBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExportImage" title="Télécharger le récapitulatif visuel en PNG" aria-label="Télécharger le récapitulatif visuel"><span class="stats-tool-icon" aria-hidden="true">🖼️</span><span class="stats-tool-label">Visuel</span></button>` : '';
-  const manageBtn = STATE.isAdmin ? `<button class="stats-tool-btn stats-tool-btn--manage" data-action="_statsManage" title="Relier les séances aux missions et gérer les données" aria-label="Gérer les données statistiques"><span class="stats-tool-icon" aria-hidden="true">⚙</span><span class="stats-tool-label">Données</span></button>` : '';
+  const manageStatus = unlinkedDates.length
+    ? `<span class="stats-tool-state is-pending" aria-hidden="true">${unlinkedDates.length}</span>`
+    : allDates.length
+      ? '<span class="stats-tool-state is-ok" aria-hidden="true">✓</span>'
+      : '<span class="stats-tool-state is-empty" aria-hidden="true">0</span>';
+  const manageTitle = unlinkedDates.length
+    ? `${unlinkedDates.length} séance${unlinkedDates.length > 1 ? 's' : ''} à relier à une mission`
+    : allDates.length
+      ? 'Toutes les séances datées sont reliées à une mission'
+      : 'Aucune séance datée à relier pour le moment';
+  const manageStateClass = unlinkedDates.length ? ' has-pending' : (allDates.length ? ' is-complete' : ' is-empty');
+  const manageBtn = STATE.isAdmin ? `<button class="stats-tool-btn stats-tool-btn--manage${manageStateClass}" data-action="_statsManage" title="${manageTitle}" aria-label="Données statistiques : ${manageTitle}"><span class="stats-tool-icon" aria-hidden="true">⚙</span><span class="stats-tool-label">Données</span>${manageStatus}</button>` : '';
   const toolsBar = exportBtn || visualBtn || manageBtn ? `<div class="stats-tools" role="group" aria-label="Actions sur les statistiques">
     ${rows.length ? '<span class="stats-tools-caption">Exporter</span>' : ''}${exportBtn}${visualBtn}${manageBtn}
   </div>` : '';
@@ -4103,29 +4116,43 @@ registerActions({
   _statsManage: () => {
     if (!STATE.isAdmin) return;
     const dates = [...new Set(Object.values(_statsData?.chars || {}).flatMap(c => Object.keys(c.byDate || {})))].sort().reverse();
+    const pendingDates = _statsUnlinkedDates(dates);
+    const linkedDates = dates.filter(d => _statsSessionIsLinked(d));
     const missions = _statsMissionList();
     const trackedChars = Object.keys(_statsData?.chars || {}).length;
     const linkedGroups = new Set(Object.values(_statsData?.sessions || {}).map(s => s?.groupId || s?.group).filter(Boolean)).size;
     const adventureName = _esc(STATE.adventure?.nom || 'Aventure courante');
     const missRow = (m) => `<div class="stats-mng-row"><span class="stats-mng-lbl">🎯 ${_esc(m.name)}</span><button class="stats-mng-del" data-action="_statsDelMission" data-scope="${m.id}" data-name="${_esc(m.name)}">🗑 Supprimer</button></div>`;
     const dateRow = (d) => {
-      const mi = _statsMissionOf(d), gr = _statsGroupOf(d);
-      const label = mi ? `🎯 ${_esc(mi)}${gr ? ` · 👥 ${_esc(gr)}` : ''}` : '<span class="stats-sb-none">Non reliée</span>';
-      return `<div class="stats-mng-row">
+      const mi = _statsMissionOf(d), gr = _statsGroupOf(d), linked = _statsSessionIsLinked(d);
+      const label = linked
+        ? `🎯 ${_esc(mi || 'Mission liée')}${gr ? ` · 👥 ${_esc(gr)}` : ''}`
+        : (mi ? `<span class="stats-mng-incomplete">⚠ Ancien lien incomplet · ${_esc(mi)}</span>` : '<span class="stats-sb-none">Aucune mission associée</span>');
+      return `<div class="stats-mng-row${linked ? ' is-linked' : ' is-pending'}">
         <span class="stats-mng-lbl">📅 ${_statsFmtDate(d)} — ${label}</span>
         <span class="stats-mng-acts">
-          <button class="stats-mng-link" data-action="_statsEditMission" data-scope="${d}">🔗 ${mi ? 'Modifier' : 'Relier'}</button>
+          <button class="stats-mng-link" data-action="_statsEditMission" data-scope="${d}">🔗 ${linked ? 'Modifier' : 'Relier'}</button>
           <button class="stats-mng-del" data-action="_statsDelDate" data-scope="${d}" title="Supprimer uniquement les statistiques de cette séance" aria-label="Supprimer les statistiques de la séance du ${_statsFmtDate(d)}">🗑 Supprimer</button>
         </span>
       </div>`;
     };
+    const healthHtml = pendingDates.length
+      ? `<div class="stats-mng-health is-pending"><span class="stats-mng-health-icon">🔗</span><span><strong>${pendingDates.length} séance${pendingDates.length > 1 ? 's' : ''} à relier</strong><small>Ces statistiques existent, mais ne sont rattachées à aucune mission de la Trame.</small></span></div>`
+      : dates.length
+        ? `<div class="stats-mng-health is-ok"><span class="stats-mng-health-icon">✓</span><span><strong>Associations à jour</strong><small>Toutes les séances contenant des statistiques sont reliées à une mission.</small></span></div>`
+        : `<div class="stats-mng-health is-empty"><span class="stats-mng-health-icon">0</span><span><strong>Aucune séance datée</strong><small>Les séances à relier apparaîtront ici dès que des statistiques auront été enregistrées.</small></span></div>`;
     openModal('⚙ Gérer les statistiques', `
       <div class="stats-mng">
+        ${healthHtml}
         <div class="stats-mng-info">
           <strong>Les filtres de la page ne suppriment jamais de données.</strong>
           <span>Ici, chaque suppression indique précisément son périmètre avant confirmation.</span>
         </div>
-        ${dates.length ? `<div class="stats-mng-sec"><div class="stats-mng-hd">Relier une séance à une mission / un groupe · ou la supprimer</div>${dates.map(dateRow).join('')}</div>` : ''}
+        ${pendingDates.length ? `<div class="stats-mng-sec stats-mng-sec--pending"><div class="stats-mng-hd"><span>À relier en priorité</span><b>${pendingDates.length}</b></div>${pendingDates.map(dateRow).join('')}</div>` : ''}
+        ${linkedDates.length ? `<details class="stats-mng-linked"${pendingDates.length ? '' : ' open'}>
+          <summary><span>Séances déjà reliées</span><b>${linkedDates.length}</b><span class="stats-mng-linked-caret">⌄</span></summary>
+          <div class="stats-mng-sec">${linkedDates.map(dateRow).join('')}</div>
+        </details>` : ''}
         ${missions.length ? `<div class="stats-mng-sec"><div class="stats-mng-hd">Supprimer toutes les stats d'une mission</div>${missions.map(missRow).join('')}</div>` : ''}
         ${(!missions.length && !dates.length) ? '<div class="stats-mng-sec" style="color:var(--text-dim);font-size:.85rem">Aucune donnée datée pour le moment.</div>' : ''}
         <div class="stats-mng-danger">
