@@ -13895,6 +13895,34 @@ body .modal:has(.cs-build-modal) {
   }
 }
 @media (max-width: 620px) {
+  .cs-v3 .cs-top-in { padding-inline: 10px; }
+  .cs-v3 .cs-top-row {
+    width: 100%;
+    gap: 8px;
+  }
+  .cs-v3 .cs-brand { min-width: 0; }
+  .cs-v3 .cs-brand small,
+  .cs-v3 .cs-top-spacer { display: none; }
+  .cs-v3 .cs-charpick {
+    min-width: 0;
+    flex: 1 1 0;
+  }
+  .cs-v3 .cs-charpick-btn {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+  .cs-v3 .cs-charpick-cur { flex: 1 1 auto; }
+  .cs-v3 .cs-charpick-menu {
+    right: 0;
+    width: min(340px, calc(100vw - 20px));
+    max-width: calc(100vw - 20px);
+  }
+  .cs-v3 .cs-top-row > .char-switch {
+    min-width: 0;
+    flex: 1 1 0;
+  }
   .cs-v3 .id-side {
     position: static;
     display: grid;
@@ -13915,6 +13943,13 @@ body .modal:has(.cs-build-modal) {
   .cs-v3 .id-name-row { grid-column: 2; grid-row: 1; justify-content: flex-start; margin: 0; }
   .cs-v3 .id-titres { grid-column: 2; grid-row: 2; justify-content: flex-start; }
   .cs-v3 .id-chips { grid-column: 2; grid-row: 3; justify-content: flex-start; }
+  .cs-v3 .id-identity .cs-build-box {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+  .cs-v3 .cs-build-select,
+  .cs-v3 .cs-build-manage { height: 32px; }
+  .cs-v3 .cs-build-manage { width: 38px; }
   .cs-v3 .id-name { text-align: left; }
   .cs-v3 .xp-block,
   .cs-v3 .cs-mini-grid,
@@ -13950,6 +13985,10 @@ body .modal:has(.cs-build-modal) {
   .cs-v3 .id-name-row { grid-column: 2; grid-row: 1; justify-content: flex-start; margin: 0; }
   .cs-v3 .id-titres { grid-column: 2; grid-row: 2; justify-content: flex-start; }
   .cs-v3 .id-chips { grid-column: 2; grid-row: 3; justify-content: flex-start; }
+  .cs-v3 .id-identity .cs-build-box {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
   .cs-v3 .id-name { text-align: left; }
   .cs-v3 .xp-block {
     grid-column: 1 / -1;
