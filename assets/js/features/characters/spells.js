@@ -16,7 +16,7 @@ import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
 import { resolveSpellModifierStat, usesSpellMastery } from '../../shared/spell-runes.js';
-import { calculateInvocationDerivedStats, getPreparedInvocationActions, INVOCATION_ABILITIES, INVOCATION_DEFAULT_STATS, invocationStatModifier, normalizeInvocationStats } from '../../shared/invocation-stats.js';
+import { calculateInvocationDerivedStats, getPreparedInvocationActions, INVOCATION_ABILITIES, INVOCATION_DEFAULT_STATS, invocationStatModifier, normalizeInvocationSelection, normalizeInvocationStats } from '../../shared/invocation-stats.js';
 import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDD, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortMana, _calcSortZone, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds, SPELL_COST_RESOURCES, spellCostRes, spellCostMult } from './spells-calc.js';
 
 // Ressource de coût lisible d'un sort (label court : PM / PV / Or / —).
@@ -302,6 +302,7 @@ function _renderSpellInspector(allSorts, pmDelta, c, canEdit) {
     return `<span style="--c:${meta?.color || '#7c8aa5'}"><i>${meta?.icon || '✦'}</i><b>${_esc(name)}</b>${count > 1 ? `<em>×${count}</em>` : ''}</span>`;
   }).join('');
   const effects = _buildSortResume(s, c);
+  const invocationScope = normalizeInvocationSelection(s.invocation);
 
   return `<aside class="cs-spellinspector" style="--rank-col:${rank.color}" aria-label="Détails de ${_esc(s.nom || 'ce sort')}">
     <header class="cs-spellinspector-hero">
@@ -337,7 +338,7 @@ function _renderSpellInspector(allSorts, pmDelta, c, canEdit) {
     <footer>
       <button class="is-compare ${isCompared?'on':''}" data-action="_sortsToggleCompare" data-idx="${index}">${isCompared?'✓ Sélectionné':'◫ Comparer'}</button>
       ${canEdit ? `<button data-action="duplicateSort" data-idx="${index}">⧉ Dupliquer</button>
-      ${(s.runes || []).includes('Invocation') ? `<button data-action="_openInvocationConfig" data-idx="${index}">🐾 Invocation</button>` : ''}
+      ${(s.runes || []).includes('Invocation') ? `<button data-action="_openInvocationConfig" data-idx="${index}" title="Modifier les invocations autorisées">🐾 ${invocationScope.mode === 'all' ? 'Toutes' : `${invocationScope.ids.length} autorisée${invocationScope.ids.length > 1 ? 's' : ''}`}</button>` : ''}
       <button data-action="toggleSort" data-idx="${index}">${s.actif?'− Retirer':'⚡ Préparer'}</button>
       <button class="is-primary" data-action="editSort" data-idx="${index}">✏ Modifier</button>
       <button class="is-danger" data-action="deleteSort" data-idx="${index}">🗑 Supprimer</button>` : ''}
@@ -2507,11 +2508,27 @@ function _classicSelectOptions(options, selected) {
   return options.map(([value, label]) => `<option value="${_esc(value)}" ${value === selected ? 'selected' : ''}>${_esc(label)}</option>`).join('');
 }
 
-function _classicInvocationIdsFromDOM(max = 1) {
-  return [...document.querySelectorAll('input[name="s-classic-invocation-id"]:checked')]
+function _invocationIdsFromDOM(classic = false) {
+  const name = classic ? 's-classic-invocation-id' : 's-invocation-id';
+  return [...document.querySelectorAll(`input[name="${name}"]:checked`)]
     .map(input => input.value)
-    .filter(Boolean)
-    .slice(0, Math.max(1, parseInt(max) || 1));
+    .filter(Boolean);
+}
+
+function _invocationModeFromDOM(classic = false, fallback = 'all') {
+  const id = classic ? 's-classic-invocation-mode' : 's-invocation-mode';
+  const mode = document.getElementById(id)?.value;
+  return mode === 'selected' ? 'selected' : (mode === 'all' ? 'all' : fallback);
+}
+
+function _validateInvocationAssignment(classic = false) {
+  const section = document.getElementById(classic ? 's-classic-invocation-section' : 's-invocation-section');
+  if (!section || section.style.display === 'none') return true;
+  if (_invocationModeFromDOM(classic) !== 'selected' || _invocationIdsFromDOM(classic).length) return true;
+  showNotif('Sélectionne au moins une invocation autorisée, ou choisis « Toutes ».', 'warning');
+  section?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  section?.querySelector('.spell-inv-mode-btn[data-mode="selected"]')?.focus();
+  return false;
 }
 
 function _buildClassicSortFromDOM(idx = -1, prevList = []) {
@@ -2531,7 +2548,9 @@ function _buildClassicSortFromDOM(idx = -1, prevList = []) {
   const types = effectKind === 'damage' ? ['offensif']
     : effectKind === 'heal' ? ['defensif'] : ['utilitaire'];
   const invCount = _classicInt('s-classic-invocation-count', 1, 1, 12);
-  const invIds = effectKind === 'summon' ? _classicInvocationIdsFromDOM(invCount) : [];
+  const previousSelection = normalizeInvocationSelection(prev.invocation);
+  const invMode = effectKind === 'summon' ? _invocationModeFromDOM(true, previousSelection.mode) : 'all';
+  const invIds = effectKind === 'summon' ? _invocationIdsFromDOM(true) : [];
   const hostileState = stateId && target === 'enemy';
   const friendlyState = stateId && (target === 'ally' || target === 'self');
   const previousValidation = _sortValidationState(prev);
@@ -2585,6 +2604,8 @@ function _buildClassicSortFromDOM(idx = -1, prevList = []) {
     afflictionSaveStat: hostileState ? (document.getElementById('s-classic-state-stat')?.value || 'sagesse') : '',
     invocation: effectKind === 'summon'
       ? {
+          ...(prev.invocation || {}),
+          mode: invMode,
           ids: invIds,
           max: invCount,
           stats: prev.invocation?.stats || null,
@@ -2636,9 +2657,7 @@ function _refreshClassicSpellForm() {
   if (targetGroup) targetGroup.style.display = isSummon ? 'none' : '';
   const invocationSection = document.getElementById('s-classic-invocation-section');
   if (invocationSection) invocationSection.style.display = isSummon ? '' : 'none';
-  document.querySelectorAll('.classic-inv-card').forEach(card => {
-    card.classList.toggle('is-on', !!card.querySelector('input[name="s-classic-invocation-id"]')?.checked);
-  });
+  document.querySelectorAll('.classic-inv-card').forEach(card => card.classList.toggle('is-on', !!card.querySelector('input[type="checkbox"]')?.checked));
   const range = document.getElementById('s-classic-range');
   if (range) range.disabled = target === 'self' && !isSummon;
 
@@ -2662,7 +2681,7 @@ function _refreshClassicSpellForm() {
       <p>${_esc(effectText)}</p>
       <small>Portée ${spell.portee} case${spell.portee > 1 ? 's' : ''}${_esc(zoneText)}${spell.classicDuration ? ` · ${spell.classicDuration} tour${spell.classicDuration > 1 ? 's' : ''}` : ' · instantané'}</small>
       ${condition ? `<small>${_esc(`${condition.icon || ''} ${condition.label}`)}${spell.classicStateDC ? ` · JS ${_esc(spell.classicStateSaveStat)} DD ${spell.classicStateDC}` : ''}</small>` : ''}
-      ${spell.classicEffect === 'summon' && spell.invocation?.ids?.length ? `<small>${spell.invocation.ids.length} invocation${spell.invocation.ids.length > 1 ? 's' : ''} présélectionnée${spell.invocation.ids.length > 1 ? 's' : ''}</small>` : ''}
+      ${spell.classicEffect === 'summon' ? `<small>${spell.invocation?.mode === 'selected' ? `${spell.invocation.ids.length} invocation${spell.invocation.ids.length > 1 ? 's' : ''} autorisée${spell.invocation.ids.length > 1 ? 's' : ''}` : 'Toutes les invocations autorisées'}</small>` : ''}
       ${spell.cooldownTurns ? `<small>Recharge : ${spell.cooldownTurns} tour${spell.cooldownTurns > 1 ? 's' : ''}</small>` : ''}`;
   }
 }
@@ -2702,35 +2721,79 @@ function _classicStateChanged() {
   _refreshClassicSpellForm();
 }
 
-function _renderClassicInvocationPicker(selectedIds = [], max = 1) {
+function _renderInvocationAssignment(invocation = {}, { classic = false } = {}) {
   const invs = _libInvs();
-  const selected = new Set((selectedIds || []).filter(Boolean));
-  const limit = Math.max(1, parseInt(max) || 1);
-  if (!invs.length) {
-    return `<div class="classic-inv-empty">
-      <strong>Aucune invocation enregistrée.</strong>
-      <span>Crée d'abord des invocations depuis le menu “Mes invocations” du grimoire.</span>
-    </div>`;
-  }
-  return `<div class="classic-inv-grid">
-    ${invs.map(iv => {
-      const checked = selected.has(iv.id);
+  const selection = normalizeInvocationSelection(invocation);
+  const selected = new Set(selection.ids);
+  const prefix = classic ? 's-classic-invocation' : 's-invocation';
+  const target = classic ? 'classic' : 'rune';
+  const validCount = selection.ids.filter(id => invs.some(iv => String(iv.id) === id)).length;
+  const cards = invs.map(iv => {
+      const checked = selected.has(String(iv.id));
       const hpTxt = (iv.currentHp != null && iv.stats?.pv != null && parseInt(iv.currentHp) < parseInt(iv.stats.pv))
         ? `${iv.currentHp}/${iv.stats.pv}` : (iv.stats?.pv ?? '?');
       return `<label class="classic-inv-card ${checked ? 'is-on' : ''}">
-        <input type="checkbox" name="s-classic-invocation-id" value="${_esc(iv.id)}" ${checked ? 'checked' : ''}>
+        <input type="checkbox" name="${prefix}-id" value="${_esc(iv.id)}" data-change="_refreshInvocationAssignment" ${checked ? 'checked' : ''}>
         <span class="classic-inv-portrait">${iv.image ? `<img src="${iv.image}" alt="">` : '🐾'}</span>
         <span class="classic-inv-body">
           <b>${_esc(iv.nom || 'Invocation')}</b>
           <small>❤️ ${hpTxt} · 🛡️ ${iv.stats?.ca ?? 10} · ⚔️ ${_esc(iv.stats?.attaque || '1d4 +2')}</small>
         </span>
       </label>`;
-    }).join('')}
-  </div>
-  <div class="classic-inv-foot">
-    <span>Le VTT proposera ces créatures en priorité. Limite : ${limit} invocation${limit > 1 ? 's' : ''}.</span>
-    <span>Bibliothèque : menu “Mes invocations”.</span>
+    }).join('');
+  return `<div class="spell-inv-assignment" data-inv-assignment="${target}">
+    <input type="hidden" id="${prefix}-mode" data-inv-mode value="${selection.mode}">
+    <div class="spell-inv-scope" role="group" aria-label="Invocations autorisées">
+      <button type="button" class="spell-inv-mode-btn ${selection.mode === 'all' ? 'is-on' : ''}" data-action="_setInvocationAssignmentMode" data-mode="all" data-target="${target}" aria-pressed="${selection.mode === 'all'}">
+        <b>🌐 Toutes</b><small>Toute la bibliothèque, y compris les futures créatures.</small>
+      </button>
+      <button type="button" class="spell-inv-mode-btn ${selection.mode === 'selected' ? 'is-on' : ''}" data-action="_setInvocationAssignmentMode" data-mode="selected" data-target="${target}" aria-pressed="${selection.mode === 'selected'}">
+        <b>🐾 Sélection</b><small>Uniquement les créatures choisies ci-dessous.</small>
+      </button>
+    </div>
+    <div class="spell-inv-selected" data-inv-selected ${selection.mode === 'all' ? 'hidden' : ''}>
+      ${invs.length ? `<div class="classic-inv-grid">${cards}</div>` : `<div class="classic-inv-empty">
+        <strong>Aucune invocation enregistrée.</strong>
+        <span>Crée d'abord une créature dans la bibliothèque.</span>
+      </div>`}
+    </div>
+    <div class="classic-inv-foot">
+      <span data-inv-summary>${selection.mode === 'all' ? 'Toutes les invocations sont autorisées.' : `${validCount} invocation${validCount > 1 ? 's' : ''} autorisée${validCount > 1 ? 's' : ''}.`}</span>
+      <button type="button" class="btn btn-outline btn-sm" data-action="openInvocationLibrary">Gérer la bibliothèque</button>
+    </div>
   </div>`;
+}
+
+function _setInvocationAssignmentMode(btn) {
+  const root = btn.closest('[data-inv-assignment]');
+  if (!root) return;
+  const mode = btn.dataset.mode === 'selected' ? 'selected' : 'all';
+  const input = root.querySelector('[data-inv-mode]');
+  if (input) input.value = mode;
+  root.querySelectorAll('.spell-inv-mode-btn').forEach(option => {
+    const on = option.dataset.mode === mode;
+    option.classList.toggle('is-on', on);
+    option.setAttribute('aria-pressed', String(on));
+  });
+  const selected = root.querySelector('[data-inv-selected]');
+  if (selected) selected.hidden = mode === 'all';
+  _refreshInvocationAssignment(root);
+}
+
+function _refreshInvocationAssignment(el) {
+  const root = el?.closest?.('[data-inv-assignment]') || el;
+  if (!root) return;
+  root.querySelectorAll('.classic-inv-card').forEach(card => {
+    card.classList.toggle('is-on', !!card.querySelector('input[type="checkbox"]')?.checked);
+  });
+  const mode = root.querySelector('[data-inv-mode]')?.value === 'selected' ? 'selected' : 'all';
+  const count = root.querySelectorAll('input[type="checkbox"]:checked').length;
+  const summary = root.querySelector('[data-inv-summary]');
+  if (summary) summary.textContent = mode === 'all'
+    ? 'Toutes les invocations sont autorisées.'
+    : `${count} invocation${count > 1 ? 's' : ''} autorisée${count > 1 ? 's' : ''}.`;
+  if (root.dataset.invAssignment === 'classic') _refreshClassicSpellForm();
+  else _updateSortPreview();
 }
 
 async function _openClassicSortModal(idx, s, allTypes) {
@@ -2750,7 +2813,7 @@ async function _openClassicSortModal(idx, s, allTypes) {
   if (legacyElement && !elements.some(type => type.id === selectedElement)) elements = [...elements, legacyElement];
   const formula = effect === 'heal' ? (s?.soin || '') : (s?.degats || '');
   const invocationMax = Math.max(1, parseInt(s?.invocation?.max ?? s?.classicInvocationCount) || 1);
-  const invocationIds = Array.isArray(s?.invocation?.ids) ? s.invocation.ids : [];
+  const invocationSelection = normalizeInvocationSelection(s?.invocation);
   const validation = _sortValidationState(s);
   const _modalOpen = _itemEditCtx ? pushModal : openModal;
   _modalOpen('', `
@@ -2803,12 +2866,12 @@ async function _openClassicSortModal(idx, s, allTypes) {
             </section>
 
             <section class="classic-spell-section" id="s-classic-invocation-section">
-              <div class="classic-spell-section-head"><span>4</span><div><b>Invocation</b><small>Choisis combien de créatures le sort peut placer, et lesquelles proposer par défaut.</small></div></div>
+              <div class="classic-spell-section-head"><span>4</span><div><b>Invocation</b><small>Choisis combien de créatures le sort peut placer et lesquelles il autorise.</small></div></div>
               <div class="classic-spell-grid">
                 <label><span>Nombre maximum</span><div class="classic-spell-unit"><input type="number" id="s-classic-invocation-count" class="input-field" min="1" max="12" value="${invocationMax}"><span>invoc.</span></div></label>
-                <div class="classic-spell-note"><b>Placement VTT</b><span>Au lancement, le joueur pose les invocations une par une dans la portée du sort.</span></div>
+                <div class="classic-spell-note"><b>Placement VTT</b><span>Cette limite est indépendante de la liste autorisée : le joueur choisira parmi elle au lancement.</span></div>
               </div>
-              ${_renderClassicInvocationPicker(invocationIds, invocationMax)}
+              ${_renderInvocationAssignment(invocationSelection, { classic: true })}
             </section>
 
             <section class="classic-spell-section" id="s-classic-state-section">
@@ -3415,13 +3478,10 @@ export async function openSortModal(idx, s) {
         <span class="cs-inv-head-icon">🐾</span>
         <div class="cs-inv-head-text">
           <div class="cs-inv-head-title">Invocations</div>
-          <div class="cs-inv-head-sub">Crée tes créatures dans la bibliothèque, puis choisis lesquelles ce sort invoque (1 par rune Invocation) via le bouton 🐾 sur la carte du sort.</div>
+          <div class="cs-inv-head-sub">Détermine les créatures que ce sort peut invoquer. Chaque rune Invocation permet toujours d'en placer une.</div>
         </div>
       </div>
-      <div class="cs-inv-pick-row">
-        <button type="button" class="btn btn-outline btn-sm" data-action="openInvocationLibrary">🐾 Mes invocations</button>
-        <span class="cs-inv-pick-note">${(_invOriginal?.ids?.length) ? `${_invOriginal.ids.length} sélectionnée(s)` : (_invOriginal?.stats ? 'Invocation héritée (legacy) — re-sélectionne via 🐾' : 'Aucune sélectionnée')}</span>
-      </div>
+      ${_renderInvocationAssignment(_invOriginal || {})}
     </div>
 
     </section><!-- /cs-spell-effects-panel -->
@@ -3949,19 +4009,16 @@ function _renderInvSelectBody() {
   const s = _invCfgSort(); if (!s) return '<div style="padding:1rem">Sort introuvable.</div>';
   const nbInv = (s.runes || []).filter(r => r === 'Invocation').length || 1;
   const lib = _libInvs();
-  if (!s.invocation || typeof s.invocation !== 'object' || !Array.isArray(s.invocation.ids)) {
-    s.invocation = { ids: Array.isArray(s.invocation?.ids) ? s.invocation.ids : [] };
-  }
-  const sel = s.invocation.ids;
-  const selCount = sel.filter(id => lib.some(iv => iv.id === id)).length;
+  const selection = normalizeInvocationSelection(s.invocation);
+  const sel = selection.ids;
+  const selCount = sel.filter(id => lib.some(iv => String(iv.id) === id)).length;
   const cards = lib.map(iv => {
     const st = normalizeInvocationStats(iv.stats);
     const derived = calculateInvocationDerivedStats(iv);
     const touch = st.toucher + invocationStatModifier(st, st.toucherStat);
     const damageMod = invocationStatModifier(st, st.degatsStat);
-    const on = sel.includes(iv.id);
-    const full = !on && selCount >= nbInv;
-    return `<button class="cs-invsel-card${on?' is-on':''}" data-action="_toggleInvSelect" data-id="${iv.id}" ${full?'disabled':''}>
+    const on = sel.includes(String(iv.id));
+    return `<button class="cs-invsel-card${on?' is-on':''}" data-action="_toggleInvSelect" data-id="${_esc(iv.id)}">
       <span class="cs-invsel-portrait">${iv.image ? `<img src="${iv.image}" alt="">` : '🐾'}</span>
       <span class="cs-invsel-body"><span class="cs-invsel-name">${_esc(iv.nom || 'Invocation')}</span>
       <span class="cs-invsel-stats">⭐ Niv. ${st.niveau} · ❤️ ${derived.pv} · 💧 ${derived.pmMax} · 🛡️ ${derived.ca} · 🃏 ${getPreparedInvocationActions(iv).length}/${derived.deckMax} · 🎯 ${_invSigned(touch)} · ⚔️ ${_esc(st.attaque)}${damageMod ? ` ${_invSigned(damageMod)}` : ''} · 🏹 ${st.portee}</span></span>
@@ -3969,9 +4026,15 @@ function _renderInvSelectBody() {
     </button>`;
   }).join('');
   return `<div class="cs-invsel">
-    <div class="cs-invsel-hd">Choisis jusqu'à <b>${nbInv}</b> invocation${nbInv>1?'s':''} (1 par rune Invocation) — <b>${selCount}/${nbInv}</b> sélectionnée(s)</div>
-    ${lib.length ? `<div class="cs-invsel-list">${cards}</div>`
-      : `<div class="cs-invsel-empty">Aucune invocation en bibliothèque.<br><button class="btn btn-gold btn-sm" data-action="openInvocationLibrary" style="margin-top:.5rem">🐾 Créer une invocation</button></div>`}
+    <div class="cs-invsel-hd">Ce sort peut placer jusqu'à <b>${nbInv}</b> invocation${nbInv>1?'s':''} par lancement. Choisis les créatures auxquelles il donne accès.</div>
+    <div class="cs-invsel-scope" role="group" aria-label="Invocations autorisées">
+      <button type="button" class="cs-invsel-scope-btn${selection.mode === 'all' ? ' is-on' : ''}" data-action="_setInvSelectMode" data-mode="all" aria-pressed="${selection.mode === 'all'}"><b>🌐 Toutes</b><small>Toute la bibliothèque</small></button>
+      <button type="button" class="cs-invsel-scope-btn${selection.mode === 'selected' ? ' is-on' : ''}" data-action="_setInvSelectMode" data-mode="selected" aria-pressed="${selection.mode === 'selected'}"><b>🐾 Sélection</b><small>${selCount} autorisée${selCount > 1 ? 's' : ''}</small></button>
+    </div>
+    ${selection.mode === 'selected'
+      ? (lib.length ? `<div class="cs-invsel-list">${cards}</div>`
+        : `<div class="cs-invsel-empty">Aucune invocation en bibliothèque.<br><button class="btn btn-gold btn-sm" data-action="openInvocationLibrary" style="margin-top:.5rem">🐾 Créer une invocation</button></div>`)
+      : `<div class="cs-invsel-all">Le sort utilisera automatiquement toute la bibliothèque actuelle et future.</div>`}
     <div class="cs-invsel-foot">
       <button class="btn btn-outline btn-sm" data-action="openInvocationLibrary">🐾 Gérer la bibliothèque</button>
       <button class="btn btn-gold" data-action="closeModalDirect">Terminé</button>
@@ -3980,12 +4043,27 @@ function _renderInvSelectBody() {
 }
 async function _toggleInvSelect(id) {
   const c = STATE.activeChar; const s = _invCfgSort(); if (!s) return;
-  const nbInv = (s.runes || []).filter(r => r === 'Invocation').length || 1;
-  let ids = Array.isArray(s.invocation?.ids) ? [...s.invocation.ids] : [];
+  const previous = s.invocation;
+  let ids = [...normalizeInvocationSelection(previous).ids];
   if (ids.includes(id)) ids = ids.filter(x => x !== id);
-  else { if (ids.length >= nbInv) return; ids.push(id); }
-  s.invocation = { ids };
-  await trySave(spellHostCollection(c), c.id, { deck_sorts: c.deck_sorts });
+  else ids.push(id);
+  s.invocation = { ...(previous || {}), mode: 'selected', ids };
+  if (!(await trySave(spellHostCollection(c), c.id, { deck_sorts: c.deck_sorts }))) {
+    s.invocation = previous;
+    return;
+  }
+  updateModalContent(_invSelTitle(), _renderInvSelectBody());
+  _sortsRerender?.();
+}
+async function _setInvSelectMode(mode) {
+  const c = STATE.activeChar; const s = _invCfgSort(); if (!c || !s) return;
+  const previous = s.invocation;
+  const selection = normalizeInvocationSelection(previous);
+  s.invocation = { ...(previous || {}), mode: mode === 'selected' ? 'selected' : 'all', ids: selection.ids };
+  if (!(await trySave(spellHostCollection(c), c.id, { deck_sorts: c.deck_sorts }))) {
+    s.invocation = previous;
+    return;
+  }
   updateModalContent(_invSelTitle(), _renderInvSelectBody());
   _sortsRerender?.();
 }
@@ -4145,22 +4223,23 @@ function _refreshInvocationDerived() {
   set('s-inv-attaque', d.attaque); set('s-inv-toucher', d.toucher); set('s-inv-pv', d.pv);
   set('s-inv-ca', d.ca); set('s-inv-deplacement', d.deplacement); set('s-inv-duree', d.duree);
 }
-// Invocation du sort = SÉLECTION d'invocations de la bibliothèque (édit via 🐾 sur
-// la carte). L'éditeur de sort ne fait que PRÉSERVER la sélection/legacy existante
-// (null si pas de rune Invocation).
+// Portée d'un sort d'invocation : toute la bibliothèque ou une liste autorisée.
+// Cette portée ne limite pas le nombre placé (toujours 1 par rune Invocation).
 function _buildInvocationFromDOM() {
   if (!((_runeCountsEdit?.Invocation || 0) > 0)) return null;
-  if (_invOriginal && Array.isArray(_invOriginal.ids)) return { ids: [..._invOriginal.ids] };
-  // Rétro-compat : ancien sort avec invocation "inline" (stats/actions) → préservée telle quelle.
-  if (_invOriginal && _invOriginal.stats) return _invOriginal;
-  return { ids: [] };
+  const previous = normalizeInvocationSelection(_invOriginal);
+  const mode = _invocationModeFromDOM(false, previous.mode);
+  const inputs = document.querySelectorAll('input[name="s-invocation-id"]');
+  const ids = inputs.length ? _invocationIdsFromDOM(false) : previous.ids;
+  // Conserve les éventuelles stats/actions inline des très anciens sorts.
+  return { ...(_invOriginal || {}), mode, ids };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // BIBLIOTHÈQUE D'INVOCATIONS (par personnage : c.invocations[])
 // Chaque invocation = instance unique { id, nom, image, stats:{attaque,toucher,pv,
 // ca,deplacement,pmMax}, actions:[], currentHp, currentPm }. La rune Invocation
-// d'un sort en SÉLECTIONNE (≤ nbInv). Stats finales au lancement = base + bonus de
+// d'un sort peut en autoriser une sélection ou toute la bibliothèque. Stats finales au lancement = base + bonus de
 // runes (_calcSummonStats, côté VTT). Les PV/PM courants persistent entre apparitions.
 // ══════════════════════════════════════════════════════════════════════════════
 let _libInvIdx = -1; // index de l'invocation de la bibliothèque en cours d'édition
@@ -4212,7 +4291,7 @@ function _renderInvLibraryBody() {
     </div>`;
   }).join('');
   return `<div class="cs-invlib">
-    <div class="cs-invlib-hint">Crée tes créatures à l'avance (stats, image, actions). Un sort à rune <b>Invocation</b> choisira ensuite laquelle/lesquelles invoquer (1 par rune). Chaque invocation garde ses PV/PM entre deux apparitions.</div>
+    <div class="cs-invlib-hint">Crée tes créatures à l'avance (stats, image, actions). Chaque sort à rune <b>Invocation</b> peut ensuite autoriser toute la bibliothèque ou seulement certaines créatures (1 placée par rune). Chaque invocation garde ses PV/PM entre deux apparitions.</div>
     <div class="cs-invlib-list">${cards || '<div class="cs-invlib-empty">Aucune invocation. Crée ta première créature.</div>'}</div>
     <div class="cs-invlib-foot">
       <button class="btn btn-gold" data-action="_editLibInv" data-idx="-1">＋ Nouvelle invocation</button>
@@ -5388,6 +5467,7 @@ async function _saveClassicSort(idx, btn = null) {
     document.getElementById('s-classic-target')?.focus();
     return false;
   }
+  if (effect === 'summon' && !_validateInvocationAssignment(true)) return false;
 
   _sortSaving = true;
   const saveBtn = btn || document.querySelector('[data-action="saveSort"]');
@@ -5481,6 +5561,7 @@ export async function saveSort(idx, btn = null) {
   const hasName = _requireSortName();
   const hasNoyau = _requireNoyauSelection();
   if (!hasName || !hasNoyau) return;
+  if (!_validateInvocationAssignment(false)) return;
     const c = _getCurrentSpellChar(); if(!c) return;
     const sorts = c.deck_sorts||[];
   _sortSaving = true;
@@ -5856,6 +5937,8 @@ registerActions({
   _invCfgAddAction:       ()    => _invCfgAddAction(),
   _invCfgEditAction:      (btn) => _invCfgEditAction(btn.dataset.aidx),
   _invCfgDeleteAction:    (btn) => _invCfgDeleteAction(btn.dataset.aidx),
+  _setInvocationAssignmentMode: (btn) => _setInvocationAssignmentMode(btn),
+  _refreshInvocationAssignment: (el) => _refreshInvocationAssignment(el),
   // Bibliothèque d'invocations + sélecteur
   openInvocationLibrary:  ()    => openInvocationLibrary(),
   _editLibInv:            (btn) => _editLibInv(Number(btn.dataset.idx)),
@@ -5869,4 +5952,5 @@ registerActions({
   _libInvToggleActionPrepared: (btn) => _libInvToggleActionPrepared(btn.dataset.aidx),
   _libInvDeleteAction:    (btn) => _libInvDeleteAction(btn.dataset.aidx),
   _toggleInvSelect:       (btn) => _toggleInvSelect(btn.dataset.id),
+  _setInvSelectMode:      (btn) => _setInvSelectMode(btn.dataset.mode),
 });

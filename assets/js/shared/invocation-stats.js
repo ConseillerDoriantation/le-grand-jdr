@@ -111,6 +111,48 @@ export function invocationStatShort(statKey = '') {
   return INVOCATION_ABILITIES.find(stat => stat.key === statKey)?.short || '';
 }
 
+/**
+ * Portée d'un sort d'invocation.
+ * - ancien sort avec des ids : ces ids deviennent sa sélection autorisée ;
+ * - ancien sort sans ids : conserve le comportement historique « toutes ».
+ */
+export function normalizeInvocationSelection(invocation = {}) {
+  const ids = [...new Set((Array.isArray(invocation?.ids) ? invocation.ids : [])
+    .map(id => String(id || '').trim())
+    .filter(Boolean))];
+  const mode = invocation?.mode === 'all'
+    ? 'all'
+    : (invocation?.mode === 'selected' || ids.length ? 'selected' : 'all');
+  return { mode, ids };
+}
+
+/** Bibliothèque réellement autorisée pour un sort, sans modifier son ordre. */
+export function invocationsAllowedForSpell(library = [], invocation = {}) {
+  const list = Array.isArray(library) ? library : [];
+  const selection = normalizeInvocationSelection(invocation);
+  if (selection.mode === 'all') return list;
+  const allowed = new Set(selection.ids);
+  return list.filter(item => item?.id && allowed.has(String(item.id)));
+}
+
+/**
+ * Met à jour le choix fait au lancement du sort.
+ * Avec une seule place, cliquer une autre créature remplace directement le choix.
+ * Avec plusieurs places, les choix s'ajoutent jusqu'à la limite et restent retirables.
+ */
+export function toggleInvocationChoice(currentIds = [], invocationId = '', max = 1) {
+  const id = String(invocationId || '').trim();
+  const limit = Math.max(1, parseInt(max) || 1);
+  const ids = [...new Set((Array.isArray(currentIds) ? currentIds : [])
+    .map(value => String(value || '').trim())
+    .filter(Boolean))];
+  if (!id) return ids.slice(0, limit);
+  if (ids.includes(id)) return ids.filter(value => value !== id);
+  if (limit === 1) return [id];
+  if (ids.length >= limit) return ids.slice(0, limit);
+  return [...ids, id];
+}
+
 /** Valeurs finales au lancement : base enregistrée + bonus des runes du sort. */
 export function calculateSummonStats(invocation = {}, runes = []) {
   const base = calculateInvocationDerivedStats(invocation);

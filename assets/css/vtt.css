@@ -64,8 +64,19 @@
 
 /* ── Layout racine ──────────────────────────────────────────────── */
 .vtt-root {
-  display: flex;
-  flex-direction: column;
+  /* Coquille « Le Pupitre » : grille 4 rangées bandeau / ruban / toile / pupitre.
+     Phase 1 : bandeau + toile ; ruban (phase 2) et pupitre (phase 3) collapsés à 0.
+     minmax(0,1fr) en colonne : sans lui la piste implicite auto=max-content
+     laisse le contenu pousser la grille hors du viewport. */
+  --vtt-band: 44px;
+  --vtt-ribbon: 88px;
+  --vtt-desk: 232px;
+  /* Rangées composables : le combat pilote --row-ribbon, le pupitre --row-desk. */
+  --row-ribbon: 0;
+  --row-desk: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: var(--vtt-band) var(--row-ribbon) minmax(0, 1fr) var(--row-desk);
   height: 100%;
   background: var(--bg-dark);
   overflow: hidden;
@@ -859,8 +870,267 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-body {
   display: flex;
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   BANDEAU — refonte « Le Pupitre » (phase 1)
+   État ambiant : scènes · session · minuteur · météo · présence · thème.
+   Absorbe .vtt-toolbar / #vtt-page-tabs, timer, météo, session et la
+   colonne de présence verticale. Tokens uniquement → thème clair gratuit.
+   ════════════════════════════════════════════════════════════════════ */
+.vtt-band {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 12px; min-width: 0; overflow: hidden;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+  z-index: 30;
+}
+.vtt-band-brand { display: flex; align-items: baseline; gap: 8px; flex: none; }
+.vtt-band-brand b { font-family: var(--font-display); font-size: 14px; font-weight: 600; white-space: nowrap; color: var(--text); }
+.vtt-band-sep { width: 1px; height: 18px; background: var(--border-md); flex: none; }
+.vtt-band-grow { flex: 1; min-width: 8px; }
+.vtt-band .vtt-scenes {
+  display: flex; gap: 6px; align-items: center;
+  min-width: 0; overflow-x: auto; scrollbar-width: none; flex: 0 1 auto;
+}
+.vtt-band .vtt-scenes::-webkit-scrollbar { display: none; }
+.vtt-band .vtt-scenes > * { flex: none; }
+/* Pastille générique du bandeau (thème, etc.) */
+.vtt-band .vtt-chip {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  padding: 5px 11px; border-radius: var(--r-full);
+  border: 1px solid var(--border-md); background: var(--surface-2);
+  font-size: 12px; font-weight: 500; color: var(--text-soft); white-space: nowrap;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.vtt-band .vtt-chip:hover { border-color: var(--border-strong); color: var(--text); }
+.vtt-band .vtt-chip-ico { padding: 5px 8px; }
+/* Le minuteur, la météo et le bouton session gardent leur markup existant :
+   ce sont déjà des pastilles inline-flex, elles se posent telles quelles. */
+.vtt-band .vtt-timer, .vtt-band .vtt-weather { flex: none; }
+/* Le minuteur avait un fond sombre en dur (contexte float) : on le remet sur
+   les tokens pour qu'il suive le thème clair dans le bandeau. */
+.vtt-band .vtt-timer { background: var(--surface-2); border-color: var(--border-md); color: var(--text-soft); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.vtt-band .vtt-session-btn { flex: none; min-width: 0; min-height: 30px; }
+/* Présence : la colonne verticale devient des pastilles empilées horizontales. */
+.vtt-band .vtt-pres { display: flex; align-items: center; flex: none; padding-left: 2px; }
+.vtt-band .vtt-pres .vtt-pres-entry {
+  flex-direction: row; width: auto; padding: 0; gap: 0;
+  margin-left: -7px; cursor: pointer;
+}
+.vtt-band .vtt-pres .vtt-pres-entry:first-child { margin-left: 0; }
+.vtt-band .vtt-pres .vtt-pres-avatar { width: 26px; height: 26px; border: 2px solid var(--surface-1); }
+.vtt-band .vtt-pres .vtt-pres-name { display: none; }
+.vtt-band .vtt-pres .vtt-pres-empty { color: var(--text-dim); font-size: 12px; padding: 0 4px; }
+
+/* ════════════════════════════════════════════════════════════════════
+   RUBAN D'INITIATIVE — refonte « Le Pupitre » (phase 2)
+   Le tracker vertical devient une bande horizontale de 74 px dans la
+   rangée 2 de la coquille. data-combat : on (74) · idle (44, MJ) · off (0).
+   ════════════════════════════════════════════════════════════════════ */
+.vtt-root[data-combat="on"]   { --row-ribbon: var(--vtt-ribbon); }
+.vtt-root[data-combat="idle"] { --row-ribbon: 44px; }
+.vtt-root[data-combat="off"]  { --row-ribbon: 0; }
+.vtt-root[data-desk="on"]     { --row-desk: var(--vtt-desk); }
+
+/* Pastille générique (ruban + idle) */
+.vtt-chip {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  padding: 5px 11px; border-radius: var(--r-full);
+  border: 1px solid var(--border-md); background: var(--surface-2);
+  font-size: 12px; font-weight: 500; color: var(--text-soft); white-space: nowrap; cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.vtt-chip:hover { border-color: var(--border-strong); color: var(--text); }
+.vtt-chip--go { background: var(--gold-glow); border-color: var(--border-bright); color: var(--gold-2); }
+.vtt-chip--go:hover { background: color-mix(in srgb, var(--gold) 24%, transparent); }
+.vtt-chip--danger:hover { border-color: var(--crimson-light); color: var(--crimson-light); }
+
+.vtt-ribbon {
+  position: relative; display: flex; align-items: stretch; gap: 10px;
+  padding: 6px 12px; min-width: 0; overflow: hidden;
+  background: linear-gradient(180deg, var(--surface-sunken), var(--surface-page));
+  border-bottom: 1px solid var(--border); z-index: 25;
+}
+.vtt-ribbon-round {
+  flex: none; display: flex; flex-direction: column; justify-content: center; gap: 1px;
+  padding: 0 12px 0 0; border: 0; border-right: 1px solid var(--border-md);
+  background: none; cursor: pointer; text-align: left;
+}
+.vtt-ribbon-round span { font-size: 9px; letter-spacing: .18em; text-transform: uppercase; color: var(--text-dim); font-weight: 500; }
+.vtt-ribbon-round b { font-family: var(--font-display); font-size: 18px; font-weight: 600; line-height: 1; color: var(--amber); }
+.vtt-ribbon-round.idle b { color: var(--text-muted); }
+.vtt-ribbon-track { flex: 1; display: flex; align-items: center; gap: 5px; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.vtt-ribbon-track::-webkit-scrollbar { display: none; }
+.vtt-ribbon-track--idle { color: var(--text-dim); font-size: 12px; font-style: italic; }
+.vtt-ribbon-empty { color: var(--text-dim); font-size: 12px; font-style: italic; padding: 0 8px; }
+.vtt-ribbon-acts { flex: none; display: flex; align-items: center; gap: 5px; padding-left: 10px; border-left: 1px solid var(--border-md); }
+.vtt-ribbon-mineglow { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, var(--gold-glow), transparent 22%, transparent 78%, var(--gold-glow)); }
+@keyframes vttRibbonEnter { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.vtt-ribbon--enter { animation: vttRibbonEnter .28s cubic-bezier(.22, 1, .36, 1); }
+
+/* Entrée d'initiative */
+.vtt-ini {
+  position: relative; flex: none; width: 88px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 4px; border-radius: var(--r-sm); border: 1px solid transparent; background: none;
+  cursor: pointer; opacity: .62; transition: opacity .2s, background .2s, border-color .2s;
+}
+.vtt-ini:hover { opacity: 1; background: var(--surface-2); }
+.vtt-ini.done { opacity: .34; }
+.vtt-ini.active {
+  opacity: 1; background: color-mix(in srgb, var(--c) 12%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--c) 45%, transparent);
+}
+.vtt-ini-av {
+  position: relative; width: 36px; height: 36px; border-radius: 50%;
+  display: grid; place-items: center; font-family: var(--font-display); font-size: 15px; font-weight: 600; color: var(--text);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--c) 26%, var(--surface-3)), var(--surface-2));
+  border: 2px solid color-mix(in srgb, var(--c) 55%, transparent);
+}
+.vtt-ini.active .vtt-ini-av { width: 42px; height: 42px; }
+.vtt-ini-av img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.vtt-ini-ini {
+  position: absolute; top: -3px; left: -5px; min-width: 16px; height: 16px; padding: 0 3px;
+  border-radius: var(--r-full); background: var(--surface-page); border: 1px solid var(--border-md);
+  color: var(--text-soft); font-size: 9px; font-weight: 600; font-family: var(--font-body); display: grid; place-items: center;
+}
+.vtt-ini-hp { position: absolute; left: 2px; right: 2px; bottom: -2px; height: 3px; border-radius: 2px; background: rgba(0,0,0,.45); overflow: hidden; }
+.vtt-ini-hp b { display: block; height: 100%; border-radius: 2px; background: var(--hpc, var(--emerald)); }
+.vtt-ini-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; font-weight: 500; color: var(--text-soft); }
+.vtt-ini.active .vtt-ini-name { color: var(--text); font-weight: 600; }
+.vtt-ini-eco { display: flex; gap: 3px; }
+.vtt-eco { width: 12px; height: 4px; border-radius: 2px; background: var(--surface-3); }
+.vtt-eco.mv { width: 18px; }
+.vtt-eco.spent { background: color-mix(in srgb, var(--c) 65%, transparent); }
+.vtt-ini-turn { position: absolute; top: 1px; right: 3px; font-size: 8px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; color: var(--c); }
+
+/* Popover « ordre détaillé » : réutilise .vct-list / .vct-row existants */
+.vtt-ribbon-order {
+  position: absolute; left: 12px; top: 100%; z-index: 60; margin-top: 6px;
+  width: min(380px, 92vw); max-height: 60vh; overflow-y: auto;
+  padding: 8px; border-radius: var(--r-md); background: var(--surface-1);
+  border: 1px solid var(--border-md); box-shadow: var(--elev-2);
+}
+.vtt-ribbon-order-hd { font-size: 9px; letter-spacing: .16em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; padding: 2px 4px 6px; }
+
+/* ════════════════════════════════════════════════════════════════════
+   PUPITRE — refonte « Le Pupitre » (phase 3 : colonne « porteur »)
+   Rangée 4 de la coquille, allumée par [data-desk="on"]. 3 colonnes :
+   porteur (peuplée) · hotbar (phase 4) · échange (phase 4).
+   ════════════════════════════════════════════════════════════════════ */
+.vtt-desk {
+  display: grid; grid-template-columns: 288px minmax(0, 1fr) 296px;
+  min-width: 0; min-height: 0; background: var(--surface-1);
+  border-top: 1px solid var(--border-md); box-shadow: 0 -14px 40px rgba(0,0,0,.32); z-index: 28;
+}
+[data-theme="light"] .vtt-desk { box-shadow: 0 -14px 40px rgba(15,23,42,.10); }
+.vtt-desk-col { padding: 10px 12px; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 7px; }
+.vtt-desk-col + .vtt-desk-col { border-left: 1px solid var(--border); }
+.vtt-desk-lbl { font-size: 9px; letter-spacing: .17em; text-transform: uppercase; font-weight: 600; color: var(--text-dim); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vtt-desk-lbl em { font-style: normal; letter-spacing: 0; text-transform: none; font-size: 10.5px; color: var(--text-dim); }
+.vtt-desk-ph { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--text-dim); font-size: 12px; font-style: italic; }
+/* colonne porteur */
+.vtt-who { display: flex; gap: 9px; align-items: center; min-width: 0; cursor: pointer; }
+.vtt-who-av { position: relative; width: 44px; height: 44px; flex: none; border-radius: 12px; display: grid; place-items: center; overflow: hidden; font-family: var(--font-display); font-size: 20px; font-weight: 600; color: var(--text); background: linear-gradient(160deg, color-mix(in srgb, var(--c) 28%, var(--surface-3)), var(--surface-2)); border: 1.5px solid color-mix(in srgb, var(--c) 55%, transparent); }
+.vtt-who-av img { width: 100%; height: 100%; object-fit: cover; }
+.vtt-who-b { min-width: 0; flex: 1; }
+.vtt-who-name { display: block; font-family: var(--font-display); font-size: 14.5px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.vtt-who-sub { display: block; font-size: 10.5px; color: var(--c, var(--text-muted)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vtt-bars { display: flex; flex-direction: column; gap: 4px; }
+.vtt-dbar { display: grid; grid-template-columns: 26px 1fr auto; gap: 7px; align-items: center; }
+.vtt-dbar-k { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; font-weight: 600; color: var(--text-dim); }
+.vtt-dbar-t { height: 7px; border-radius: 4px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--border); overflow: hidden; }
+.vtt-dbar-f { display: block; height: 100%; border-radius: 4px; transition: width .32s cubic-bezier(.22, 1, .36, 1); }
+.vtt-dbar-v { font-size: 11.5px; font-weight: 600; color: var(--text-soft); min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+.vtt-dbar-v i { font-style: normal; color: var(--text-dim); font-weight: 400; }
+.vtt-vitals { display: flex; flex-wrap: wrap; gap: 4px; }
+.vtt-vit { display: inline-flex; align-items: baseline; gap: 4px; padding: 3px 9px; border-radius: var(--r-full); background: var(--surface-2); border: 1px solid var(--border); font-size: 11px; color: var(--text-soft); }
+.vtt-vit span { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
+.vtt-vit b { font-weight: 600; font-size: 12px; }
+.vtt-vit.cond { border-color: color-mix(in srgb, var(--cc) 40%, transparent); background: color-mix(in srgb, var(--cc) 13%, transparent); color: var(--cc); }
+.vtt-vit-empty { color: var(--text-dim); font-style: italic; background: none; border-color: transparent; }
+.vtt-eco-row { display: flex; align-items: center; gap: 5px; margin-top: auto; }
+.vtt-eco-lbl { font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
+.vtt-eco-pip { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 2px; border-radius: var(--r-xs); background: var(--surface-2); border: 1px solid var(--border); font-size: 9.5px; color: var(--text-muted); }
+.vtt-eco-pip b { font-size: 12px; line-height: 1; }
+.vtt-eco-pip.spent { opacity: .45; text-decoration: line-through; }
+@media (max-width: 1100px) {
+  .vtt-desk { grid-template-columns: 1fr; overflow-y: auto; }
+  .vtt-desk-col + .vtt-desk-col { border-left: 0; border-top: 1px solid var(--border); }
+}
+
+/* ── Colonne 2 : hotbar dans le pupitre (phase 4a) ──────────────────────
+   Réutilise le picker d'actions existant (_execAttack noTgt), relogé ici et
+   aplati en strip horizontal (les sections/ en-têtes s'effacent). */
+.vtt-desk-col--hotbar { min-width: 0; }
+.vtt-hotbar-wrap { flex: 1; min-height: 0; min-width: 0; display: flex; overflow: hidden; }
+.vtt-hotbar-empty { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--text-dim); font-size: 12px; font-style: italic; padding: 0 8px; }
+.vtt-aopt-in-desk { flex: 1; min-width: 0; min-height: 0; width: 100%; height: 100%; display: flex; flex-direction: column; gap: 5px; padding: 0; background: none; border: 0; box-shadow: none; position: static; }
+.vtt-aopt-in-desk .vtt-aopt-modal-hd { display: none; }
+.vtt-aopt-in-desk .vtt-atk-pm-bar,
+.vtt-aopt-in-desk .vtt-aopt-tabs,
+.vtt-aopt-in-desk .vtt-aopt-spell-scope,
+.vtt-aopt-in-desk .vtt-aopt-search { flex: none; min-width: 0; }
+.vtt-aopt-in-desk .vtt-aopt-tabs,
+.vtt-aopt-in-desk .vtt-aopt-spell-scope { overflow-x: auto; scrollbar-width: none; }
+.vtt-aopt-in-desk .vtt-aopt-tabs::-webkit-scrollbar,
+.vtt-aopt-in-desk .vtt-aopt-spell-scope::-webkit-scrollbar { display: none; }
+/* Liste → strip horizontal : sections et corps deviennent transparents au flux.
+   !important : on écrase le layout vertical du panneau d'origine dans ce contexte. */
+.vtt-aopt-in-desk .vtt-aopt-list { flex: 1; min-height: 0; min-width: 0; display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; align-items: stretch; gap: 6px; overflow-x: auto !important; overflow-y: hidden !important; max-height: none; padding-bottom: 2px; }
+.vtt-aopt-in-desk .vtt-aopt-section { display: contents !important; }
+.vtt-aopt-in-desk .vtt-aopt-section-hd { display: none !important; }
+.vtt-aopt-in-desk .vtt-aopt-section-body { display: contents !important; }
+.vtt-aopt-in-desk .vtt-aopt { flex: none !important; width: 176px; align-self: stretch; }
+.vtt-aopt-in-desk .vtt-aopt-empty { flex: 1; align-self: center; }
+
+/* ════════════════════════════════════════════════════════════════════
+   PANNEAU GLISSANT — refonte « Le Pupitre » (phase 5)
+   Le tray MJ et la colonne inspecteur/chat ne sont plus des colonnes
+   permanentes : ils glissent depuis la droite au-dessus de la carte, qui
+   récupère ~540 px. Ouverture par .vtt-mj-quick, réutilise _vttRcolView.
+   ════════════════════════════════════════════════════════════════════ */
+.vtt-body { position: relative; }
+/* Les outils (sélection/règle/dessin/murs + verrou) passent à GAUCHE (rail),
+   libérant le haut-droite pour les boutons du panneau glissant (plus de chevauchement). */
+.vtt-tool-float { left: 10px; right: auto; }
+.vtt-mj-quick { position: absolute; right: 10px; top: 10px; z-index: 22; display: flex; gap: 5px; }
+.vtt-mj-quick .vtt-chip { background: color-mix(in srgb, var(--surface-1) 90%, transparent); backdrop-filter: blur(10px); box-shadow: var(--elev-1); }
+.vtt-slide { position: absolute; right: 0; top: 0; bottom: 0; width: min(352px, 86vw); z-index: 45; background: var(--surface-1); border-left: 1px solid var(--border-md); box-shadow: var(--elev-3); display: flex; flex-direction: column; transform: translateX(100%); transition: transform .26s cubic-bezier(.22, 1, .36, 1); }
+.vtt-slide.open { transform: none; }
+.vtt-slide-hd { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); flex: none; }
+.vtt-slide-modes { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.vtt-slide-modes::-webkit-scrollbar { display: none; }
+.vtt-slide-mode { padding: 6px 12px; border-radius: var(--r-full); font-size: 12px; font-weight: 500; color: var(--text-muted); background: none; border: 0; cursor: pointer; white-space: nowrap; flex: none; }
+.vtt-slide-mode:hover { color: var(--text-soft); }
+.vtt-slide[data-slide="sheet"] .vtt-slide-mode[data-slide-mode="sheet"],
+.vtt-slide[data-slide="reserve"] .vtt-slide-mode[data-slide-mode="reserve"] { background: var(--surface-3); color: var(--text); }
+.vtt-slide-x { width: 26px; height: 26px; flex: none; border-radius: 50%; display: grid; place-items: center; color: var(--text-muted); border: 1px solid var(--border-md); background: none; cursor: pointer; }
+.vtt-slide-x:hover { color: var(--crimson-light); }
+.vtt-slide-body { flex: 1; min-height: 0; min-width: 0; display: flex; overflow: hidden; }
+.vtt-slide-body > .vtt-tray,
+.vtt-slide-body > .vtt-right-col { width: 100% !important; flex: 1 1 auto !important; min-height: 0; border: 0; }
+.vtt-slide[data-slide="sheet"] #vtt-tray { display: none; }
+.vtt-slide[data-slide="reserve"] #vtt-right-col { display: none; }
+@media (max-width: 760px) { .vtt-slide { width: 100%; } }
+
+/* ════════════════════════════════════════════════════════════════════
+   PUPITRE = FICHE PERMANENTE (inspecteur relocalisé en bas)
+   Résumé (portrait + PV/PM éditables + Max) à gauche · tiroir d'onglets
+   (Stats/Jets/Effets/Gérer, avec +/- mouvement/CA/portée) déroulé à droite.
+   ════════════════════════════════════════════════════════════════════ */
+.vtt-desk.vtt-desk--sheet { display: flex; padding: 0; overflow: hidden; }
+.vtt-desk--sheet .vtt-inspector { flex: 1; min-width: 0; min-height: 0; max-height: none; display: flex; flex-direction: row; gap: 0; overflow: hidden; }
+.vtt-desk--sheet .vtt-ins-summary { flex: none; width: 300px; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-right: 1px solid var(--border); overflow-y: auto; }
+.vtt-desk--sheet .vtt-ins-drawer { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.vtt-desk--sheet .vtt-ins-tabbar { flex: none; display: flex; flex-direction: row; gap: 2px; padding: 8px 10px 6px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--border); }
+.vtt-desk--sheet .vtt-ins-tabbar::-webkit-scrollbar { display: none; }
+.vtt-desk--sheet .vtt-ins-tabbody { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px 12px; }
+.vtt-desk--sheet .vtt-ins-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 100%; color: var(--text-dim); }
 
 /* ── Canvas ─────────────────────────────────────────────────────── */
 .vtt-canvas-wrap {
@@ -5093,8 +5363,18 @@ html:not([data-theme="light"]) .vtt-root {
 /* ── Sélecteur d'invocations (depuis la carte de sort) ── */
 .cs-invsel { display: flex; flex-direction: column; gap: .7rem; }
 .cs-invsel-hd { font-size: .8rem; color: var(--text-muted); }
+.cs-invsel-scope { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem; }
+.cs-invsel-scope-btn {
+  min-width: 0; padding: .55rem .65rem; border: 1px solid var(--border); border-radius: 9px;
+  background: var(--surface-2); color: var(--text-muted); cursor: pointer; text-align: left;
+  display: flex; flex-direction: column; gap: .12rem;
+}
+.cs-invsel-scope-btn b { font-size: .78rem; }
+.cs-invsel-scope-btn small { color: var(--text-dim); font-size: .66rem; }
+.cs-invsel-scope-btn.is-on { border-color: #a16207; background: rgba(161,98,7,.12); color: #f3d27d; }
 .cs-invsel-list { display: flex; flex-direction: column; gap: .4rem; max-height: 50vh; overflow-y: auto; }
 .cs-invsel-empty { font-size: .82rem; color: var(--text-dim); text-align: center; padding: 1.2rem 0; }
+.cs-invsel-all { padding: .8rem; border: 1px dashed rgba(161,98,7,.35); border-radius: 9px; color: var(--text-dim); font-size: .76rem; text-align: center; }
 .cs-invsel-card {
   display: flex; align-items: center; gap: .6rem; padding: .45rem .55rem; width: 100%;
   border-radius: 10px; background: var(--bg-elevated); border: 2px solid var(--border);

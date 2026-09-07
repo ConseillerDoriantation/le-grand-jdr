@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { getModFromScore } from '../assets/js/shared/char-stats.js';
-import { calculateInvocationDerivedStats, calculateSummonStats, getPreparedInvocationActions, invocationStatModifier, normalizeInvocationStats } from '../assets/js/shared/invocation-stats.js';
+import { calculateInvocationDerivedStats, calculateSummonStats, getPreparedInvocationActions, invocationStatModifier, invocationsAllowedForSpell, normalizeInvocationSelection, normalizeInvocationStats, toggleInvocationChoice } from '../assets/js/shared/invocation-stats.js';
 
 test('une ancienne invocation reçoit les nouvelles valeurs par défaut', () => {
   const stats = normalizeInvocationStats({ attaque: '2d6', toucher: 3, pv: 18, ca: 12 });
@@ -100,4 +100,33 @@ test('les bornes empêchent des valeurs par défaut injouables', () => {
   assert.equal(stats.pmMax, 0);
   assert.equal(stats.usesOwnMana, false);
   assert.equal(stats.force, 1);
+});
+
+test('un ancien sort sans sélection conserve toutes les invocations', () => {
+  assert.deepEqual(normalizeInvocationSelection({}), { mode: 'all', ids: [] });
+  assert.deepEqual(invocationsAllowedForSpell([{ id: 'a' }, { id: 'b' }], {}).map(item => item.id), ['a', 'b']);
+});
+
+test('les anciens ids deviennent une vraie sélection autorisée', () => {
+  assert.deepEqual(normalizeInvocationSelection({ ids: ['b', 'b', ''] }), { mode: 'selected', ids: ['b'] });
+  assert.deepEqual(invocationsAllowedForSpell([{ id: 'a' }, { id: 'b' }], { ids: ['b'] }).map(item => item.id), ['b']);
+  assert.deepEqual(invocationsAllowedForSpell([{ id: 'a' }], { ids: ['supprimee'] }), []);
+});
+
+test('le mode toutes reste prioritaire même si une ancienne sélection est conservée', () => {
+  const selection = { mode: 'all', ids: ['b'] };
+  assert.deepEqual(invocationsAllowedForSpell([{ id: 'a' }, { id: 'b' }], selection).map(item => item.id), ['a', 'b']);
+});
+
+test('un sort à une place remplace directement l invocation choisie', () => {
+  assert.deepEqual(toggleInvocationChoice([], 'a', 1), ['a']);
+  assert.deepEqual(toggleInvocationChoice(['a'], 'b', 1), ['b']);
+  assert.deepEqual(toggleInvocationChoice(['b'], 'b', 1), []);
+});
+
+test('un sort multi invocation conserve plusieurs choix sans dépasser sa limite', () => {
+  assert.deepEqual(toggleInvocationChoice([], 'a', 2), ['a']);
+  assert.deepEqual(toggleInvocationChoice(['a'], 'b', 2), ['a', 'b']);
+  assert.deepEqual(toggleInvocationChoice(['a', 'b'], 'c', 2), ['a', 'b']);
+  assert.deepEqual(toggleInvocationChoice(['a', 'b'], 'a', 2), ['b']);
 });

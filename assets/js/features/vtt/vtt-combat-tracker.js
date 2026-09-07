@@ -12,9 +12,13 @@ import { VS } from './vtt-state.js';
 import { _esc } from '../../shared/html.js';
 import { _live } from './vtt-effective.js';   // données effectives (leaf)
 import { _select } from './vtt.js';           // sélection token (transverse)
-import { normalizeTokenTurnOrder } from './vtt-token-visual.js';
+import { normalizeTokenTurnOrder, tokenHealthMeta } from './vtt-token-visual.js';
 
 let _combatTab = 'allies'; // 'allies' (joueurs + PNJ) | 'enemies' (MJ only)
+// Popover « ordre détaillé » du ruban : réutilise _trackerRow (réordonner / tour
+// actif / flags). Ouvert au clic sur le Round. Sera replié dans le panneau
+// glissant en phase 5.
+let _showOrder = false;
 // Suit l'état "combat actif affiché" pour ne déclencher l'animation de
 // déploiement du tracker QU'à l'ouverture (pas à chaque re-render de tour).
 let _trackerWasActive = false;
@@ -61,43 +65,76 @@ function _trackerRow(t, index=0, total=1, turnPosition=index+1) {
       </div>`:''}
     </div>`;
 }
+// Entrée compacte du ruban horizontal (lecture) : portrait + init + filet PV +
+// nom + 4 tirets d'économie d'action + « TOUR » sur l'actif. Clic = centrer.
+function _iniEntry(t, turnPosition) {
+  const ld = _live(t);
+  const isActive = VS.session?.combat?.activeTokenId === t.id;
+  const moved = !!t.movedThisTurn || (t.movedCells || 0) > 0;
+  const acted = !!t.attackedThisTurn;
+  const bonusActed = !!t.bonusActionThisTurn;
+  const reacted = !!t.reactionThisTurn;
+  const done = moved && acted;
+  const camp = t.type === 'enemy' ? 'var(--c-enemy)' : t.type === 'npc' ? 'var(--c-npc)' : 'var(--c-player)';
+  const name = _esc(ld.displayName || t.name || '—');
+  const init = ((ld.displayName || t.name || '?').trim()[0] || '?').toUpperCase();
+  const health = tokenHealthMeta(ld.displayHp, ld.displayHpMax);
+  const hpPct = Math.round((health.ratio || 0) * 100);
+  const style = `--c:${camp}${health.known ? `;--hpc:${health.color}` : ''}`;
+  const av = ld.displayImage ? `<img src="${ld.displayImage}" alt="">` : `<span>${init}</span>`;
+  return `
+    <div class="vtt-ini ${isActive ? 'active' : ''} ${done ? 'done' : ''}" style="${style}"
+         data-vtt-fn="_vttTrackerFocus" data-vtt-args="${t.id}" role="button" tabindex="0"
+         title="${name} — cliquer pour centrer">
+      <div class="vtt-ini-av">
+        ${av}
+        <span class="vtt-ini-ini" title="Position dans l’ordre de passage">${turnPosition}</span>
+        ${health.known ? `<span class="vtt-ini-hp"><b style="width:${hpPct}%"></b></span>` : ''}
+      </div>
+      <div class="vtt-ini-name">${name}</div>
+      <div class="vtt-ini-eco" aria-hidden="true">
+        <span class="vtt-eco mv ${moved ? 'spent' : ''}" title="Déplacement"></span>
+        <span class="vtt-eco ${acted ? 'spent' : ''}" title="Action"></span>
+        <span class="vtt-eco ${bonusActed ? 'spent' : ''}" title="Action bonus"></span>
+        <span class="vtt-eco ${reacted ? 'spent' : ''}" title="Réaction"></span>
+      </div>
+      ${isActive ? '<span class="vtt-ini-turn">TOUR</span>' : ''}
+    </div>`;
+}
+
 function _renderCombatTracker() {
-  const el = document.getElementById('vtt-combat-tracker');
+  const el = document.getElementById('vtt-ribbon');
+  const root = document.getElementById('vtt-root');
   if (!el) return;
   const active = !!VS.session?.combat?.active;
   const mj = STATE.isAdmin;
 
-  // Combat inactif :
-  //   - MJ → carte compacte avec bouton "Démarrer le combat"
-  //   - Joueur → masqué
+  // Combat inactif : MJ → ruban « idle » (démarrer) ; joueur → ruban collapsé.
   if (!active) {
     _trackerWasActive = false;
-    if (!mj) { el.style.display = 'none'; el.innerHTML = ''; return; }
-    el.style.display = 'block';
+    _showOrder = false;
+    if (root) root.dataset.combat = mj ? 'idle' : 'off';
+    if (!mj) { el.innerHTML = ''; return; }
     const idleRound = VS.session?.combat?.round ?? 0;
     el.innerHTML = `
-      <div class="vct-header vct-header--idle">
-        <div class="vct-title">
-          <span class="vct-title-ico">⚔️</span>
-          <span class="vct-title-txt vct-title-txt--idle">Combat</span>
-          ${idleRound > 0 ? `<span class="vct-round">Tour ${idleRound}</span>` : ''}
-        </div>
-        <div class="vct-mj-ctrls">
-          <button class="vct-mj-btn" data-vtt-fn="_vttNextRound" title="Passer un tour — fait expirer les états, buffs et invocations à durée, sans lancer le combat">⏭ Tour</button>
-          <button class="vct-mj-btn vct-mj-btn--start" data-vtt-fn="_vttToggleCombat" title="Démarrer le combat — reset déplacement et actions de tous les tokens">▶ Démarrer</button>
-        </div>
+      <div class="vtt-ribbon-round idle"><span>Combat</span><b>${idleRound > 0 ? idleRound : '—'}</b></div>
+      <div class="vtt-ribbon-track vtt-ribbon-track--idle">Aucun combat en cours.</div>
+      <div class="vtt-ribbon-acts">
+        <button class="vtt-chip" data-vtt-fn="_vttNextRound" title="Passer un tour — fait expirer les états, buffs et invocations à durée, sans lancer le combat">⏭ Tour</button>
+        <button class="vtt-chip vtt-chip--go" data-vtt-fn="_vttToggleCombat" title="Démarrer le combat — reset déplacement et actions de tous les tokens">▶ Démarrer</button>
       </div>`;
     return;
   }
+
   // Déploiement : joue UNIQUEMENT à la transition inactif → combat actif.
   const justOpened = !_trackerWasActive;
   _trackerWasActive = true;
-  el.style.display = 'block';
+  if (root) root.dataset.combat = 'on';
   if (justOpened) {
-    el.classList.remove('vct-enter');
+    el.classList.remove('vtt-ribbon--enter');
     void el.offsetWidth;                 // reflow → permet de (re)jouer l'anim
-    el.classList.add('vct-enter');
-    el.addEventListener('animationend', () => el.classList.remove('vct-enter'), { once: true });
+    el.classList.add('vtt-ribbon--enter');
+    el.addEventListener('animationend', () => el.classList.remove('vtt-ribbon--enter'), { once: true });
   }
 
   const round = VS.session?.combat?.round ?? 1;
@@ -105,50 +142,54 @@ function _renderCombatTracker() {
   const onPage = Object.values(VS.tokens).map(x => x?.data || x).filter(t => t && t.pageId === pageId);
   const allies = onPage.filter(t => t.type === 'player' || t.type === 'npc');
   const enemies = onPage.filter(t => t.type === 'enemy');
-  const storedOrder=VS.session?.combat?.turnOrders?.[pageId] || [];
-  const completeOrder=normalizeTokenTurnOrder(storedOrder,onPage,token=>_live(token).displayName||token.name||token.id);
-  const orderIndex=new Map(completeOrder.map((id,index)=>[id,index]));
+  const storedOrder = VS.session?.combat?.turnOrders?.[pageId] || [];
+  const completeOrder = normalizeTokenTurnOrder(storedOrder, onPage, token => _live(token).displayName || token.name || token.id);
+  const orderIndex = new Map(completeOrder.map((id, index) => [id, index]));
 
-  // tab par défaut "allies" — joueurs non-MJ ne voient pas l'onglet ennemis
-  const tab = (!mj && _combatTab === 'enemies') ? 'allies' : _combatTab;
-  const list = tab === 'enemies' ? enemies : allies;
-
-  // tri : joueurs d'abord, puis PNJ ; ennemis par HP% croissant
-  list.sort((a,b)=>{
-    const ai=orderIndex.has(a.id)?orderIndex.get(a.id):Number.MAX_SAFE_INTEGER;
-    const bi=orderIndex.has(b.id)?orderIndex.get(b.id):Number.MAX_SAFE_INTEGER;
-    if(ai!==bi)return ai-bi;
-    const rank={player:0,npc:1,enemy:2};
-    const type=(rank[a.type]??9)-(rank[b.type]??9);
-    if(type)return type;
-    return String(_live(a).displayName||a.name||'').localeCompare(String(_live(b).displayName||b.name||''));
+  // Ruban unifié : le MJ voit tout le monde dans l'ordre ; le joueur ne voit
+  // que les alliés (invariant : pas d'ennemis dans le ruban côté joueur).
+  const list = mj ? [...allies, ...enemies] : allies;
+  list.sort((a, b) => {
+    const ai = orderIndex.has(a.id) ? orderIndex.get(a.id) : Number.MAX_SAFE_INTEGER;
+    const bi = orderIndex.has(b.id) ? orderIndex.get(b.id) : Number.MAX_SAFE_INTEGER;
+    if (ai !== bi) return ai - bi;
+    const rank = { player: 0, npc: 1, enemy: 2 };
+    const type = (rank[a.type] ?? 9) - (rank[b.type] ?? 9);
+    if (type) return type;
+    return String(_live(a).displayName || a.name || '').localeCompare(String(_live(b).displayName || b.name || ''));
   });
 
-  const rows = list.length
-    ? list.map((token,index)=>_trackerRow(token,index,list.length,(orderIndex.get(token.id)??index)+1)).join('')
-    : `<div class="vct-empty">${tab === 'enemies' ? 'Aucun ennemi sur la page' : 'Aucun token allié sur la page'}</div>`;
+  const pos = t => (orderIndex.get(t.id) ?? 0) + 1;
+  const entries = list.length
+    ? list.map(t => _iniEntry(t, pos(t))).join('')
+    : `<div class="vtt-ribbon-empty">Aucun token sur la page</div>`;
+
+  // Est-ce mon tour ? → halo doré sur le ruban.
+  const activeTok = VS.tokens[VS.session?.combat?.activeTokenId]?.data;
+  const mine = !!activeTok && !!activeTok.ownerId && activeTok.ownerId === STATE.user?.uid;
+
+  // Popover « ordre détaillé » : réutilise _trackerRow verbatim (réordonner /
+  // donner le tour / flags). Replié dans le panneau glissant en phase 5.
+  const orderRows = list.length
+    ? list.map((t, i) => _trackerRow(t, i, list.length, pos(t))).join('')
+    : `<div class="vct-empty">Aucun token sur la page</div>`;
 
   el.innerHTML = `
-    <div class="vct-header">
-      <div class="vct-title">
-        <span class="vct-title-ico">⚔️</span>
-        <span class="vct-title-txt">Combat</span>
-        <span class="vct-round">Tour ${round}</span>
-      </div>
-      ${mj ? `
-        <div class="vct-mj-ctrls">
-          <button class="vct-mj-btn vct-mj-btn--next" data-vtt-fn="_vttNextActiveTurn" title="Mettre en lumière le participant suivant — ne bloque personne">⏭ Suivant</button>
-          <button class="vct-mj-btn" data-vtt-fn="_vttNextRound" title="Round suivant — reset déplacement et actions">↻ Round</button>
-          <button class="vct-mj-btn vct-mj-btn--danger" data-vtt-fn="_vttToggleCombat" title="Terminer le combat">⏹</button>
-        </div>` : ''}
-    </div>
+    ${mine ? '<div class="vtt-ribbon-mineglow"></div>' : ''}
+    <button class="vtt-ribbon-round" data-vtt-fn="_vttToggleOrderPanel" title="Ordre de passage détaillé — réordonner, donner le tour, marquer les actions" aria-expanded="${_showOrder ? 'true' : 'false'}">
+      <span>Round</span><b>${round}</b>
+    </button>
+    <div class="vtt-ribbon-track">${entries}</div>
     ${mj ? `
-      <div class="vct-tabs">
-        <button class="vct-tab ${tab==='allies' ? 'active' : ''}" data-vtt-fn="_vttCombatTab" data-vtt-args="allies">👥 Joueurs &amp; PNJ <span class="vct-tab-count">${allies.length}</span></button>
-        <button class="vct-tab ${tab==='enemies' ? 'active' : ''}" data-vtt-fn="_vttCombatTab" data-vtt-args="enemies">👹 Ennemis <span class="vct-tab-count">${enemies.length}</span></button>
+      <div class="vtt-ribbon-acts">
+        <button class="vtt-chip" data-vtt-fn="_vttNextActiveTurn" title="Mettre en lumière le participant suivant — ne bloque personne">⏭ Suivant</button>
+        <button class="vtt-chip" data-vtt-fn="_vttNextRound" title="Round suivant — reset déplacement et actions">↻ Round</button>
+        <button class="vtt-chip vtt-chip--danger" data-vtt-fn="_vttToggleCombat" title="Terminer le combat">⏹</button>
       </div>` : ''}
-    <div class="vct-list">${rows}</div>
-  `;
+    <div class="vtt-ribbon-order" ${_showOrder ? '' : 'hidden'}>
+      <div class="vtt-ribbon-order-hd">Ordre de passage détaillé</div>
+      <div class="vct-list">${orderRows}</div>
+    </div>`;
 }
 // Re-render groupé via microtask (évite les multi-rerender lors d'un batch reset)
 let _trackerDirty = false;
@@ -158,6 +199,10 @@ function _renderCombatTrackerSoon() {
   queueMicrotask(() => { _trackerDirty = false; _renderCombatTracker(); });
 }
 
+function _vttToggleOrderPanel() {
+  _showOrder = !_showOrder;
+  _renderCombatTracker();
+}
 function _vttCombatTab(tab) {
   if (tab !== 'allies' && tab !== 'enemies') return;
   if (tab === 'enemies' && !STATE.isAdmin) return;
@@ -178,6 +223,8 @@ export {
   _renderCombatTrackerSoon,
   _trackerPortrait,
   _trackerRow,
+  _iniEntry,
   _vttCombatTab,
+  _vttToggleOrderPanel,
   _vttTrackerFocus,
 };
