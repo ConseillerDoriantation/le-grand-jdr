@@ -28,6 +28,10 @@
   --ember:       #ff9544;
   --ember-dim:   rgba(255,149,68,0.15);
   --emerald:     #22c38e;
+  /* Couleurs de camp VTT (ruban, tokens, pupitre) */
+  --c-player:    #4f8cff;
+  --c-npc:       #22c38e;
+  --c-enemy:     #ff5a7e;
   --emerald-dim: rgba(34,195,142,0.18);
   --amber:       #f4c430;
   --amber-dim:   rgba(244,196,48,0.18);
@@ -199,6 +203,9 @@
   --gold-glow:   rgba(37, 99, 235, 0.10);
   --crimson:       #dc2626;
   --crimson-light: #ef4444;
+  --c-player:    #2563eb;
+  --c-npc:       #16a34a;
+  --c-enemy:     #dc2626;
   /* Palette douce sans blanc pur : tons gris bleutés type Notion/Apple.
      Page : gris ardoise très clair, surfaces : off-white légèrement teinté. */
   --bg-void:    #d6dae2;

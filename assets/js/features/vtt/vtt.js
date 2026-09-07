@@ -33,10 +33,11 @@ import { playSigil, playImpact, playProjectile, playSlash } from './vtt-rune-sig
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
 import { calcSpellDuration, calcSpellTargets, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
-import { calculateSummonStats, getPreparedInvocationActions, INVOCATION_ABILITIES, invocationStatModifier, invocationStatShort, normalizeInvocationStats } from '../../shared/invocation-stats.js';
+import { calculateSummonStats, getPreparedInvocationActions, INVOCATION_ABILITIES, invocationStatModifier, invocationStatShort, invocationsAllowedForSpell, normalizeInvocationSelection, normalizeInvocationStats, toggleInvocationChoice } from '../../shared/invocation-stats.js';
 import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
+import { toggleTheme } from '../../shared/theme.js';
 import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit, bumpBiggestTaken, bumpDamageTaken } from '../../shared/stats.js';
 import { appliedDamageAmount } from '../../shared/stats-analysis.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
@@ -155,7 +156,7 @@ import {
 } from './vtt-timer.js';
 import { _renderWeatherBtn, _applyWeather, _vttWeatherToggle, _vttSetWeather } from './vtt-weather.js';
 import {
-  _renderCombatTracker, _renderCombatTrackerSoon, _vttCombatTab, _vttTrackerFocus,
+  _renderCombatTracker, _renderCombatTrackerSoon, _vttCombatTab, _vttTrackerFocus, _vttToggleOrderPanel,
 } from './vtt-combat-tracker.js';
 import {
   _startPresence, _resetPresence, _renderSessionBtn, _vttToggleSessionLive,
@@ -3054,7 +3055,8 @@ function _vttSpellMods(s) {
     if (s.classicEffect === 'summon') {
       const inv = (s.invocation && typeof s.invocation === 'object') ? s.invocation : {};
       const maxInvocations = Math.max(1, parseInt(inv.max ?? s.classicInvocationCount) || 1);
-      const defaultIds = Array.isArray(inv.ids) ? inv.ids.filter(Boolean).slice(0, maxInvocations) : [];
+      const selection = normalizeInvocationSelection(inv);
+      const hasInlineLegacy = !!(inv.stats || inv.image || (Array.isArray(inv.actions) && inv.actions.length));
       const legacyStats = inv.stats || {};
       const legacy = {
         attaque: legacyStats.attaque || '1d4 +2',
@@ -3070,13 +3072,14 @@ function _vttSpellMods(s) {
         concentration: null,
         invocation: {
           maxInvocations,
-          defaultIds,
+          selection,
+          allowLegacy: !Object.hasOwn(inv, 'mode') || hasInlineLegacy,
           elementId: s.noyauTypeId || null,
           legacy,
           bonuses: { nbP: 0, nbCh: 0, nbProt: 0, nbAmp: 0 },
           concentration: false,
           duree: Math.max(1, parseInt(s.classicDuration ?? s.dureeBase) || 2),
-          nbInvocations: defaultIds.length || maxInvocations,
+          nbInvocations: maxInvocations,
         },
       };
     }
@@ -3298,18 +3301,19 @@ function _vttSpellMods(s) {
     // Sort suspendu) → durée liée à la concentration.
     canalisePersistant: (nbDur > 0 && nbConc > 0 && nbReac === 0)
       ? { graceTurns: nbDur + 1, dd: Math.max(5, 11 - 2 * (nbConc - 1)) } : null,
-    // Invocation (hors combos Sentinelle/Arme invoquée). NOUVEAU modèle : la rune
-    // Invocation SÉLECTIONNE des invocations de la bibliothèque du lanceur
-    // (s.invocation.ids), 1 par rune. Stats finales = base (lib) + bonus de runes,
+    // Invocation (hors combos Sentinelle/Arme invoquée). La portée enregistrée sur
+    // le sort autorise toute la bibliothèque ou une sélection. Une rune permet
+    // toujours d'en placer une. Stats finales = base (lib) + bonus de runes,
     // résolues au SPAWN (_vttSpawnSummon, qui a le perso lanceur). Le nombre n'est
     // plus piloté par Dispersion. Rétro-compat : s.invocation.stats sans ids =
     // ancienne invocation "inline" (ou défaut dérivé si rien).
     invocation: (nbInv > 0 && nbAff === 0 && nbEnch === 0)
       ? (() => {
-          // Les créatures sont CHOISIES au lancement dans le VTT (versatilité).
-          // defaultIds = pré-sélection éventuelle du sort (carte 🐾), pré-cochée.
-          const defaultIds = Array.isArray(s.invocation?.ids) ? s.invocation.ids.filter(Boolean) : [];
+          // Les créatures autorisées sont choisies au lancement dans le VTT.
+          const selection = normalizeInvocationSelection(s.invocation);
           const ov  = s.invocation?.stats || {};
+          const hasInlineLegacy = !!(s.invocation?.stats || s.invocation?.image
+            || (Array.isArray(s.invocation?.actions) && s.invocation.actions.length));
           const normalizedOv = normalizeInvocationStats(ov);
           const has = v => v !== undefined && v !== null && v !== '';
           // Legacy : ancien sort sans bibliothèque (stats inline ou défaut dérivé).
@@ -3332,7 +3336,8 @@ function _vttSpellMods(s) {
           };
           return {
             maxInvocations: nbInv,                          // 1 par rune Invocation
-            defaultIds,
+            selection,
+            allowLegacy: !Object.hasOwn(s.invocation || {}, 'mode') || hasInlineLegacy,
             elementId: s.noyauTypeId || null,               // élément du noyau → attaque de base de l'invocation
             legacy,
             bonuses:      { nbP, nbCh, nbProt, nbAmp },     // base + bonus appliqué au spawn (stats de base UNIQUEMENT, pas les actions)
@@ -3622,26 +3627,38 @@ let _invPickState = null;  // { srcId, tgtId, opt, optIdx, lib, max, ids:Set }
 function _vttPickInvocations(srcId, tgtId, opt, optIdx) {
   const src = VS.tokens[srcId]?.data;
   const c = src?.characterId ? VS.characters[src.characterId] : null;
-  const lib = Array.isArray(c?.invocations) ? c.invocations : [];
+  const fullLibrary = Array.isArray(c?.invocations) ? c.invocations : [];
   const max = opt?.mods?.invocation?.maxInvocations || 1;
-  if (!lib.length) {
-    // Pas de bibliothèque → invocation générique (legacy) 1×, sans sélecteur.
+  const selection = normalizeInvocationSelection(opt?.mods?.invocation?.selection);
+  if (!fullLibrary.length) {
+    if (selection.mode === 'selected' || opt?.mods?.invocation?.allowLegacy === false) {
+      showNotif('Aucune invocation n’est disponible dans la bibliothèque de ce personnage.', 'warning');
+      return;
+    }
+    // Ancien sort sans bibliothèque → invocation générique, sans sélecteur.
     opt._invSelIds = null; opt._invSelDone = true;
     _startZonePlacement(srcId, tgtId, opt, optIdx);
     return;
   }
-  const defaults = (opt?.mods?.invocation?.defaultIds || []).filter(id => lib.some(iv => iv.id === id)).slice(0, max);
-  _invPickState = { srcId, tgtId, opt, optIdx, lib, max, ids: new Set(defaults) };
+  const lib = invocationsAllowedForSpell(fullLibrary, selection);
+  if (!lib.length) {
+    showNotif('Ce sort ne possède aucune invocation autorisée disponible.', 'warning');
+    return;
+  }
+  // Les ids du sort définissent la liste AUTORISÉE, pas une pré-sélection.
+  // Le joueur choisit donc explicitement à chaque lancement.
+  _invPickState = { srcId, tgtId, opt, optIdx, lib, max, ids: new Set() };
   openModal('🐾 Invoquer', _renderInvPickBody());
 }
 function _renderInvPickBody() {
   const st = _invPickState; if (!st) return '';
   const sel = st.ids;
   const cards = st.lib.map(iv => {
-    const on = sel.has(iv.id);
-    const full = !on && sel.size >= st.max;
+    const id = String(iv.id);
+    const on = sel.has(id);
+    const full = st.max > 1 && !on && sel.size >= st.max;
     const hp = (iv.currentHp != null && iv.stats?.pv != null && parseInt(iv.currentHp) < parseInt(iv.stats.pv)) ? `${iv.currentHp}/${iv.stats.pv}` : (iv.stats?.pv ?? '?');
-    return `<button class="cs-invsel-card${on?' is-on':''}" data-vtt-fn="_invPickToggle" data-vtt-args="${iv.id}" ${full?'disabled':''}>
+    return `<button class="cs-invsel-card${on?' is-on':''}" data-vtt-fn="_invPickToggle" data-vtt-args="${_esc(id)}" aria-pressed="${on}" ${full?'disabled':''}>
       <span class="cs-invsel-portrait">${iv.image ? `<img src="${iv.image}" alt="">` : '🐾'}</span>
       <span class="cs-invsel-body"><span class="cs-invsel-name">${_esc(iv.nom||'Invocation')}</span>
       <span class="cs-invsel-stats">❤️ ${hp} · 🛡️ ${iv.stats?.ca ?? 10} · ⚔️ ${_esc(iv.stats?.attaque||'1d4 +2')}</span></span>
@@ -3659,8 +3676,7 @@ function _renderInvPickBody() {
 }
 function _invPickToggle(id) {
   const st = _invPickState; if (!st) return;
-  if (st.ids.has(id)) st.ids.delete(id);
-  else if (st.ids.size < st.max) st.ids.add(id);
+  st.ids = new Set(toggleInvocationChoice([...st.ids], id, st.max));
   updateModalContent('🐾 Invoquer', _renderInvPickBody());
 }
 function _invPickConfirm() {
@@ -8846,6 +8862,9 @@ export function _renderAllTokens() {
   }
   _syncTokenStackVisuals();
   VS.layers.token?.batchDraw();
+  // Pupitre : la fiche (inspecteur) reflète le token sélectionné (MJ) ou, à
+  // défaut, le perso du joueur — tenue à jour à chaque re-rendu large des tokens.
+  try { _renderInspectorSoon(); } catch {}
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -12036,6 +12055,39 @@ function _vttRcolView(view) {
   }
 }
 
+// ── Panneau glissant (phase 5) : fiche/chat (right-col) + réserve (tray MJ) ──
+// Fermé par défaut → la carte occupe toute la largeur. Ouvert par les boutons
+// .vtt-mj-quick. Réutilise _vttRcolView et l'onglet courant du tray.
+let _slideOpen = false;
+function _vttSlide(arg) {
+  const slide = document.getElementById('vtt-slide');
+  if (!slide) return;
+  const wantReserve = arg === 'reserve';
+  if (wantReserve && !STATE.isAdmin) return;   // réserve = MJ uniquement
+  const nextMode = wantReserve ? 'reserve' : 'sheet';   // sheet = Chat
+  // Toggle : re-cliquer le panneau déjà affiché le ferme.
+  const already = _slideOpen && slide.dataset.slide === nextMode;
+  if (already) { _vttSlideClose(); return; }
+  slide.dataset.slide = nextMode;
+  _slideOpen = true;
+  slide.classList.add('open');
+  slide.setAttribute('aria-hidden', 'false');
+}
+function _vttSlideClose() {
+  const slide = document.getElementById('vtt-slide');
+  if (!slide) return;
+  _slideOpen = false;
+  slide.classList.remove('open');
+  slide.setAttribute('aria-hidden', 'true');
+}
+// Échap ferme le panneau (sauf saisie en cours ou visée active — elles priment).
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !_slideOpen) return;
+  if (_aimOpt) return;
+  try { if (_vttIsTypingTarget(e.target)) return; } catch {}
+  _vttSlideClose();
+});
+
 // Petit écran (rail en onglets) : sélectionner un token amène son panneau
 // Token/Jets devant, comme on s'y attend. Ne fait rien sur grand écran (barre
 // masquée) et n'interrompt jamais une saisie de chat en cours.
@@ -12051,16 +12103,49 @@ function _vttFocusInspectorIfTabbed() {
 function _buildHtml() {
   const mj=STATE.isAdmin;
   return `
-<div class="vtt-root" id="vtt-root">
-  ${mj ? '' : `<div class="vtt-toolbar"><div id="vtt-page-tabs" class="vtt-page-tabs"></div></div>`}
+<div class="vtt-root" id="vtt-root" data-combat="off" data-desk="on">
   ${mj && CLOUDINARY_ENABLED ? '<input type="file" id="vtt-img-input" accept="image/*" hidden>' : ''}
 
+  <!-- ── BANDEAU : état ambiant (scènes · session · minuteur · météo · présence · thème) ── -->
+  <header class="vtt-band" id="vtt-band">
+    <div class="vtt-band-brand"><b>Table</b></div>
+    <span class="vtt-band-sep"></span>
+    <nav id="vtt-page-tabs" class="vtt-scenes vtt-page-tabs" aria-label="Scènes"></nav>
+    <span class="vtt-band-grow"></span>
+    ${mj ? `<button class="vtt-canvas-control vtt-session-btn" id="vtt-session-btn" data-vtt-fn="_vttToggleSessionLive" title="Démarrer la session et prévenir les joueurs qui rejoignent">
+      <span class="vtt-canvas-ctl-icon" aria-hidden="true">▶</span><span class="vtt-canvas-ctl-copy"><strong>Session</strong><small>Démarrer</small></span>
+    </button>` : ''}
+    <div id="vtt-timer" class="vtt-timer" aria-live="polite"></div>
+    <div id="vtt-weather" class="vtt-weather"></div>
+    <span class="vtt-band-sep"></span>
+    <div id="vtt-pres-list" class="vtt-pres" aria-label="Joueurs en ligne"></div>
+    <span class="vtt-band-sep"></span>
+    <button class="vtt-chip vtt-chip-ico" data-vtt-fn="_vttToggleTheme" title="Thème clair / sombre" aria-label="Basculer le thème">◐</button>
+  </header>
+
+  <!-- ── RUBAN D'INITIATIVE (rempli en phase 2 ; collapsé hors combat) ── -->
+  <div class="vtt-ribbon" id="vtt-ribbon" aria-hidden="true"></div>
+
   <div class="vtt-body">
-    <div class="vtt-presence-col" id="vtt-presence-col">
-      <div class="vtt-pres-hd" title="Joueurs en ligne">👥</div>
-      <div id="vtt-pres-list" class="vtt-pres-list"></div>
-    </div>
     <div class="vtt-mini-panel" id="vtt-mini-panel"></div>
+    <div class="vtt-canvas-wrap" id="vtt-canvas-wrap"></div>
+
+    <!-- ── Ouverture du panneau glissant (sur la toile) ── -->
+    <div class="vtt-mj-quick" role="toolbar" aria-label="Panneaux">
+      <button class="vtt-chip" data-vtt-fn="_vttSlide" data-vtt-args="chat" title="Chat & dés">💬 Chat</button>
+      ${mj ? `<button class="vtt-chip" data-vtt-fn="_vttSlide" data-vtt-args="reserve" title="Réserve · scènes · bestiaire · images">🗺 Réserve</button>` : ''}
+    </div>
+
+    <!-- ── PANNEAU GLISSANT (phase 5) : fiche/chat + réserve MJ ── -->
+    <aside class="vtt-slide" id="vtt-slide" data-slide="sheet" aria-hidden="true">
+      <div class="vtt-slide-hd">
+        <div class="vtt-slide-modes">
+          <button class="vtt-slide-mode" data-slide-mode="sheet" data-vtt-fn="_vttSlide" data-vtt-args="chat">Chat</button>
+          ${mj ? `<button class="vtt-slide-mode" data-slide-mode="reserve" data-vtt-fn="_vttSlide" data-vtt-args="reserve">Réserve</button>` : ''}
+        </div>
+        <button class="vtt-slide-x" data-vtt-fn="_vttSlideClose" title="Fermer (Échap)" aria-label="Fermer le panneau">✕</button>
+      </div>
+      <div class="vtt-slide-body">
     ${mj?`
     <div class="vtt-tray" id="vtt-tray">
       <div class="vtt-tray-tabs" role="tablist" aria-label="Panneau du maître de jeu">
@@ -12085,15 +12170,7 @@ function _buildHtml() {
         </div>
       </div>
     </div>`:''}
-    <div class="vtt-canvas-wrap" id="vtt-canvas-wrap"></div>
-    <div class="vtt-right-col" id="vtt-right-col" data-rcol-view="${_rcolView}">
-      <div class="vtt-rcol-tabs" role="tablist" aria-label="Panneau latéral">
-        <button class="vtt-rcol-tab${_rcolView==='inspector'?' active':''}" type="button" role="tab" data-vtt-fn="_vttRcolView" data-vtt-args="inspector">🎲 Token / Jets</button>
-        <button class="vtt-rcol-tab${_rcolView==='chat'?' active':''}" type="button" role="tab" data-vtt-fn="_vttRcolView" data-vtt-args="chat">💬 Chat</button>
-      </div>
-      <div class="vtt-inspector" id="vtt-inspector">
-        <div class="vtt-ins-empty"><div style="font-size:1.8rem">🎲</div>Sélectionne un token</div>
-      </div>
+    <div class="vtt-right-col vtt-right-col--chatonly" id="vtt-right-col">
       <div class="vtt-chat">
         <div class="vtt-chat-hd">💬 Chat &amp; Dés</div>
         <div class="vtt-chat-log" id="vtt-chat-log"></div>
@@ -12105,6 +12182,17 @@ function _buildHtml() {
           <button class="vtt-chat-send" data-vtt-fn="_vttSendChat" title="Envoyer">↵</button>
         </div>
       </div>
+    </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ── PUPITRE : fiche permanente du porteur (inspecteur relocalisé en bas).
+       Toujours visible : perso actif du joueur (ou token sélectionné côté MJ).
+       PV/PM + Max, +/- mouvement/CA/portée, onglets Stats/Jets/Effets/Gérer. ── -->
+  <div class="vtt-desk vtt-desk--sheet" id="vtt-desk" data-desk="on">
+    <div class="vtt-inspector" id="vtt-inspector">
+      <div class="vtt-ins-empty"><div style="font-size:1.8rem">🎲</div>Sélectionne un token ou invoque ton personnage</div>
     </div>
   </div>
 </div>`;
@@ -12205,9 +12293,6 @@ async function _vttMountTable(content) {
   _tf.className = 'vtt-tool-float';
   _tf.innerHTML = `
     ${STATE.isAdmin ? `<div class="vtt-canvas-quickbar" role="toolbar" aria-label="Commandes de la session">
-      <button class="vtt-canvas-control vtt-session-btn" id="vtt-session-btn" data-vtt-fn="_vttToggleSessionLive" title="Démarrer la session et prévenir les joueurs qui rejoignent">
-        <span class="vtt-canvas-ctl-icon" aria-hidden="true">▶</span><span class="vtt-canvas-ctl-copy"><strong>Session</strong><small>Démarrer</small></span>
-      </button>
       <button class="vtt-canvas-control vtt-map-lock" id="vtt-map-mode-btn" data-vtt-fn="_vttToggleMapMode" title="Images verrouillées — cliquer pour modifier leur placement" aria-label="Déverrouiller les images" aria-pressed="false" data-locked="true">
         <span class="vtt-canvas-ctl-icon" aria-hidden="true">🔒</span><span class="vtt-canvas-ctl-copy"><strong>Images</strong><small>Verrouillées</small></span>
       </button>
@@ -12313,17 +12398,8 @@ async function _vttMountTable(content) {
     _setMapMode(false);
   }
 
-  // ─── Overlay haut-gauche : Timer + Combat tracker ──────────────────
-  const _ovTL = document.createElement('div');
-  _ovTL.className = 'vtt-overlay-tl';
-  _ovTL.innerHTML = `
-    <div class="vtt-tl-toprow">
-      <div id="vtt-timer" class="vtt-timer" aria-live="polite"></div>
-      <div id="vtt-weather" class="vtt-weather"></div>
-    </div>
-    <div id="vtt-combat-tracker" class="vtt-combat-tracker" style="display:none"></div>
-  `;
-  wrap.appendChild(_ovTL);
+  // ─── Ruban d'initiative (phase 2) : rendu dans #vtt-ribbon de la coquille.
+  // (Le minuteur/météo vivent désormais dans le bandeau ; plus d'overlay TL.)
   _renderTimer();
   _renderWeatherBtn();
   _applyWeather();
@@ -12413,6 +12489,10 @@ export const VTT_ACTIONS = {
   _vttToggleHudCollapse,
   _aimCancel,
   _vttToggleSessionLive,
+  _vttToggleTheme: () => toggleTheme(),
+  _vttToggleOrderPanel,
+  _vttSlide,
+  _vttSlideClose,
   _vttUndoDraw,
   _vttRedoDraw,
   _invPickToggle,
