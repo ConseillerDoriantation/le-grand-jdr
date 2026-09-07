@@ -93,6 +93,7 @@ import {
 import { dedupeMapLibraryImages } from './vtt-map-library-utils.js';
 import { _markCharsReady, _markNpcsReady, _markToksReady, _resetAutoSync, _charsReady, _cleanupReserveDuplicates } from './vtt-autosync.js';
 import { _vttPanelError, _showCtxMenu, _hideCtxMenu, _tokenEntityKey } from './vtt-utils.js';
+import { sceneGridSizeForImages } from './vtt-scene-utils.js';
 import {
   _vttConditionConfig, _vttConditionConfigSelect, _vttConditionConfigSave, _vttConditionConfigReset,
   _vttConditionConfigAddNew, _vttConditionConfigDelete, _vttCcTriSet, _vttCcFlagToggle,
@@ -10186,12 +10187,10 @@ function _pgPreviewImageUrl(image) {
 function _pgModalBody(pfx, { name='', folder='', cols=30, rows=20, fog=null, mapImages=[] } = {}) {
   const canUseAdvancedVtt = _vttAdvancedPremium();
   const placedImages = (Array.isArray(mapImages) ? mapImages : []).filter(image => _pgPreviewImageUrl(image));
-  const primaryImage = placedImages.find(image => image.layer !== 'fg') || placedImages[0] || null;
-  const previewLayers = placedImages.map((image, index) => {
+  const previewLayers = placedImages.map(image => {
     const x = Number(image.x) || 0, y = Number(image.y) || 0;
     const w = Math.max(1, Number(image.w) || cols), h = Math.max(1, Number(image.h) || rows);
-    const isPrimary = image === primaryImage;
-    return `<img class="vtt-pgm-map-layer${image.layer==='fg'?' is-foreground':''}" src="${_esc(_pgPreviewImageUrl(image))}" alt="" data-pg-map-layer data-pg-primary="${isPrimary}" data-x="${x}" data-y="${y}" data-w="${w}" data-h="${h}" ${isPrimary?'id="'+pfx+'preview-primary"':''}>`;
+    return `<img class="vtt-pgm-map-layer${image.layer==='fg'?' is-foreground':''}" src="${_esc(_pgPreviewImageUrl(image))}" alt="" data-pg-map-layer data-x="${x}" data-y="${y}" data-w="${w}" data-h="${h}">`;
   }).join('');
   const presets = _PG_PRESETS.map(p =>
     `<button type="button" class="vtt-pgm-preset${p.c===cols&&p.r===rows?' active':''}" data-vtt-fn="_vttPgPreset" data-vtt-args="${pfx}|${p.c}|${p.r}" aria-pressed="${p.c===cols&&p.r===rows}">
@@ -10236,10 +10235,10 @@ function _pgModalBody(pfx, { name='', folder='', cols=30, rows=20, fog=null, map
                 <label><span>Hauteur</span><input id="${pfx}rows" type="number" value="${rows}" min="8" max="200" inputmode="numeric" data-vtt-fn="_vttPgDimensions" data-vtt-on="input" data-vtt-args="${pfx}|rows"><small>cases</small></label>
               </div>
               <span class="vtt-pgm-hint">De 8 à 200 cases par côté. Utilise ⇄ pour passer en portrait.</span>
-              ${primaryImage ? `<button type="button" class="vtt-pgm-fit-map" id="${pfx}fit-map" data-vtt-fn="_vttPgToggleFit" data-vtt-args="${pfx}" aria-pressed="false" disabled>
+              ${placedImages.length ? `<button type="button" class="vtt-pgm-fit-map" id="${pfx}fit-map" data-vtt-fn="_vttPgToggleFit" data-vtt-args="${pfx}" aria-pressed="false">
                 <span class="vtt-pgm-fit-icon" aria-hidden="true">⌗</span>
-                <span><strong>Adapter la grille à la carte</strong><small>Calcule les deux dimensions depuis l’image, sans la déformer.</small></span>
-                <span class="vtt-pgm-fit-state">Auto</span>
+                <span><strong>Adapter la grille aux images</strong><small>Ajuste la scène à leur emprise, sans les déplacer ni les redimensionner.</small></span>
+                <span class="vtt-pgm-fit-state">Calculer</span>
               </button>` : ''}
             </div>
             <div class="vtt-pgm-preview" aria-live="polite">
@@ -10274,6 +10273,7 @@ function _vttPgPreset(pfx, c, r) {
   const cEl = document.getElementById(pfx+'cols'), rEl = document.getElementById(pfx+'rows');
   if (cEl) cEl.value = c;
   if (rEl) rEl.value = r;
+  _vttPgSetFit(pfx, false);
   _vttPgDimensions(pfx, 'cols');
 }
 function _vttPgSwap(pfx) {
@@ -10288,33 +10288,32 @@ function _vttPgSetFit(pfx, active) {
   if (!btn) return;
   btn.classList.toggle('active', !!active);
   btn.setAttribute('aria-pressed', String(!!active));
+  const state = btn.querySelector('.vtt-pgm-fit-state');
+  if (state) state.textContent = active ? 'Ajustée' : 'Calculer';
+}
+function _vttPgImageBounds(pfx) {
+  const layers = [...document.querySelectorAll(`#${pfx}preview-map [data-pg-map-layer]`)].map(layer => ({
+    x: Number(layer.dataset.x) || 0,
+    y: Number(layer.dataset.y) || 0,
+    w: Math.max(1, Number(layer.dataset.w) || 1),
+    h: Math.max(1, Number(layer.dataset.h) || 1),
+  }));
+  return sceneGridSizeForImages(layers);
 }
 function _vttPgToggleFit(pfx) {
   const btn = document.getElementById(pfx+'fit-map');
   if (!btn || btn.disabled) return;
-  const active = btn.getAttribute('aria-pressed') !== 'true';
-  _vttPgSetFit(pfx, active);
-  _vttPgDimensions(pfx, active ? 'fit' : '');
+  const bounds = _vttPgImageBounds(pfx);
+  if (!bounds) return;
+  const cEl = document.getElementById(pfx+'cols'), rEl = document.getElementById(pfx+'rows');
+  if (cEl) cEl.value = bounds.cols;
+  if (rEl) rEl.value = bounds.rows;
+  _vttPgSetFit(pfx, true);
+  _vttPgDimensions(pfx, 'fit');
+  if (bounds.clippedByLimit) showNotif('La grille est limitée à 200 cases : certaines images dépassent encore.', 'warning');
+  else if (bounds.hasNegativeOrigin) showNotif('Une image dépasse à gauche ou en haut de l’origine de la scène.', 'warning');
 }
 function _vttPgInit(pfx) {
-  const image = document.getElementById(pfx+'preview-primary');
-  const map = document.getElementById(pfx+'preview-map');
-  const fitBtn = document.getElementById(pfx+'fit-map');
-  if (!image || !map || !fitBtn) return _vttPgDimensions(pfx);
-  const ready = () => {
-    if (!image.naturalWidth || !image.naturalHeight) return;
-    map.dataset.mapWidth = image.naturalWidth;
-    map.dataset.mapHeight = image.naturalHeight;
-    map.dataset.mapRatio = image.naturalWidth / image.naturalHeight;
-    fitBtn.disabled = false;
-    _vttPgDimensions(pfx);
-  };
-  if (image.complete) ready();
-  else image.addEventListener('load', ready, { once:true });
-  image.addEventListener('error', () => {
-    fitBtn.disabled = true;
-    fitBtn.title = 'Impossible de lire les dimensions de cette carte';
-  }, { once:true });
   _vttPgDimensions(pfx);
 }
 function _vttPgDimensions(pfx, changedAxis = '') {
@@ -10323,25 +10322,7 @@ function _vttPgDimensions(pfx, changedAxis = '') {
   let r = Math.max(8, Math.min(200, parseInt(rEl?.value) || 8));
   const map = document.getElementById(pfx+'preview-map');
   const meta = document.getElementById(pfx+'preview-meta');
-  const fit = document.getElementById(pfx+'fit-map')?.getAttribute('aria-pressed') === 'true';
-  const mapRatio = Number(map?.dataset.mapRatio) || 0;
-  if (fit && mapRatio > 0) {
-    if (changedAxis === 'fit' && Number(map?.dataset.mapWidth) && Number(map?.dataset.mapHeight)) {
-      const nativeCols = Number(map.dataset.mapWidth) / CELL;
-      const nativeRows = Number(map.dataset.mapHeight) / CELL;
-      const downscale = Math.min(1, 200 / nativeCols, 200 / nativeRows);
-      c = Math.max(8, Math.min(200, Math.round(nativeCols * downscale)));
-      r = Math.max(8, Math.min(200, Math.round(nativeRows * downscale)));
-      if (cEl) cEl.value = c;
-      if (rEl) rEl.value = r;
-    } else if (changedAxis === 'rows') {
-      c = Math.max(8, Math.min(200, Math.round(r * mapRatio)));
-      if (cEl) cEl.value = c;
-    } else {
-      r = Math.max(8, Math.min(200, Math.round(c / mapRatio)));
-      if (rEl) rEl.value = r;
-    }
-  }
+  if (changedAxis && changedAxis !== 'fit') _vttPgSetFit(pfx, false);
   const scale = Math.min(226 / c, 126 / r);
   if (map) {
     map.style.width = `${Math.max(38, Math.round(c * scale))}px`;
@@ -10349,21 +10330,21 @@ function _vttPgDimensions(pfx, changedAxis = '') {
     map.style.setProperty('--pg-cols', c);
     map.style.setProperty('--pg-rows', r);
     map.querySelectorAll('[data-pg-map-layer]').forEach(layer => {
-      const primaryFit = fit && layer.dataset.pgPrimary === 'true';
       const x = Number(layer.dataset.x) || 0, y = Number(layer.dataset.y) || 0;
       const w = Math.max(1, Number(layer.dataset.w) || c), h = Math.max(1, Number(layer.dataset.h) || r);
-      layer.style.left = primaryFit ? '0' : `${x / c * 100}%`;
-      layer.style.top = primaryFit ? '0' : `${y / r * 100}%`;
-      layer.style.width = primaryFit ? '100%' : `${w / c * 100}%`;
-      layer.style.height = primaryFit ? '100%' : `${h / r * 100}%`;
+      layer.style.left = `${x / c * 100}%`;
+      layer.style.top = `${y / r * 100}%`;
+      layer.style.width = `${w / c * 100}%`;
+      layer.style.height = `${h / r * 100}%`;
     });
   }
   if (meta) {
     const orientation = c === r ? 'Carrée' : c > r ? 'Paysage' : 'Portrait';
     const widthM = Math.round(c * CELL_M * 10) / 10;
     const heightM = Math.round(r * CELL_M * 10) / 10;
-    const sourceSize = Number(map?.dataset.mapWidth) && Number(map?.dataset.mapHeight)
-      ? `Carte source : ${map.dataset.mapWidth} × ${map.dataset.mapHeight} px`
+    const bounds = _vttPgImageBounds(pfx);
+    const sourceSize = bounds
+      ? `${bounds.imageCount} image${bounds.imageCount > 1 ? 's' : ''} · emprise jusqu’à ${Math.ceil(bounds.maxRight)} × ${Math.ceil(bounds.maxBottom)} cases`
       : `Repère image : ${c * CELL} × ${r * CELL} px à ${CELL} px/case`;
     meta.innerHTML = `<strong>${c} × ${r} cases</strong><span>${orientation} · ${widthM} × ${heightM} m</span><small>${sourceSize}</small>`;
   }
@@ -10453,21 +10434,12 @@ async function _vttConfirmEditPage(id) {
   const fogEnabled = _vttAdvancedPremium()
     ? (document.getElementById('vpe-fog')?.checked ?? false)
     : !!VS.pages[id]?.fogEnabled;
-  const fitMap = document.getElementById('vpe-fit-map')?.getAttribute('aria-pressed') === 'true';
-  let backgroundImages = VS.pages[id]?.backgroundImages || [];
-  if (fitMap && backgroundImages.length) {
-    const primaryIndex = Math.max(0, backgroundImages.findIndex(image => image.layer !== 'fg'));
-    backgroundImages = backgroundImages.map((image, index) => index === primaryIndex
-      ? { ...image, x:0, y:0, w:cols, h:rows }
-      : image);
-  }
   closeModalDirect();
-  const patch = {name,folder,cols,rows,fogEnabled, ...(fitMap ? {backgroundImages} : {})};
+  const patch = {name,folder,cols,rows,fogEnabled};
   await updateDoc(_pgRef(id),patch).catch(()=>showNotif('Erreur','error'));
   if (VS.activePage?.id===id) {
     VS.activePage={...VS.activePage,...patch};
     _drawGrid();
-    if (fitMap) _renderMapImages(_MAP_IMG_DEPS);
   }
 }
 
