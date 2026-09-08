@@ -68,9 +68,9 @@ export function _renderInspectorSoon() {
       setTimeout(_renderInspectorSoon, 400);
       return;
     }
-    // Rien de sélectionné → repli sur le perso du joueur : la fiche du pupitre
-    // reste toujours affichée avec son personnage actif.
-    const t = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : _deskPorteurToken(null);
+    // Pour un joueur, le panneau peut présenter son personnage même avant une
+    // sélection explicite. Le MJ reste piloté uniquement par la sélection.
+    const t = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : _defaultInspectorToken(null);
     _renderInspector(t);
     // L'ouverture du HUD d'actions est volontairement explicite via le bouton Actions.
   });
@@ -82,15 +82,9 @@ export function _renderInspectorSoon() {
 // changement de token (pas à chaque re-render dû à un +/- de PV, un tour, etc.).
 let _insLastSelKey = null;
 
-// ══════════════════════════════════════════════════════════════════════════════
-// PUPITRE · colonne « porteur » (phase 3 de la refonte « Le Pupitre »)
-// Vue compacte et permanente du token porteur : portrait, PV/PM/déplacement,
-// CA, états, économie d'action. Reprend le modèle de vitals de l'inspecteur.
-// Pour un joueur sans sélection, retombe sur son propre token.
-// ══════════════════════════════════════════════════════════════════════════════
-function _deskPorteurToken(t) {
+function _defaultInspectorToken(t) {
   if (t) return t;
-  if (STATE.isAdmin) return null;              // MJ : pupitre piloté par la sélection
+  if (STATE.isAdmin) return null;              // MJ : panneau piloté par la sélection
   const uid = STATE.user?.uid; if (!uid) return null;
   const pageId = VS.activePage?.id;
   const mine = Object.values(VS.tokens).map(e => e?.data || e)
@@ -98,7 +92,7 @@ function _deskPorteurToken(t) {
   return mine[0] || null;
 }
 export function _renderInspector(t) {
-  try { _renderInspectorImpl(t); }
+  try { return _renderInspectorImpl(t); }
   catch (e) { _vttPanelError('Inspecteur', e, 'vtt-inspector'); }
 }
 export function _renderInspectorImpl(t) {
@@ -773,32 +767,25 @@ export function _renderInspectorImpl(t) {
     : '';
   const _tabBody = _tabs.find(s => s.k === _active)?.html || '';
 
-  // Pupitre « Le Pupitre » : résumé (portrait + vitals éditables) à gauche,
-  // tiroir d'onglets (Stats/Jets/Effets/Gérer) déroulé à droite.
   el.innerHTML=`
-    <div class="vtt-ins-summary">
-      <div class="vtt-ins-header">
-        ${img?`<img src="${img}" class="vtt-ins-avatar" alt="">`
-             :`<div class="vtt-ins-avatar-icon" style="background:${TYPE_COLOR[t.type]??'#888'}">${icon}</div>`}
-        <div class="vtt-ins-title">
-          <div class="vtt-ins-name">${ld.displayName??t.name}</div>
-          <div class="vtt-ins-type">${icon} ${lbl}${linked?' · 🔗':''}</div>
-        </div>
-        ${_quickActionHtml}
+    <div class="vtt-ins-header">
+      ${img?`<img src="${img}" class="vtt-ins-avatar" alt="">`
+           :`<div class="vtt-ins-avatar-icon" style="background:${TYPE_COLOR[t.type]??'#888'}">${icon}</div>`}
+      <div class="vtt-ins-title">
+        <div class="vtt-ins-name">${ld.displayName??t.name}</div>
+        <div class="vtt-ins-type">${icon} ${lbl}${linked?' · 🔗':''}</div>
       </div>
-      ${buildSwitcherHtml}
-      ${vitalsHtml}
+      ${_quickActionHtml}
     </div>
-    <div class="vtt-ins-drawer">
-      ${_tabBar}
-      <div class="vtt-ins-tabbody">${_tabBody}</div>
-    </div>`;
+    ${buildSwitcherHtml}
+    ${vitalsHtml}
+    ${_tabBar}
+    <div class="vtt-ins-tabbody">${_tabBody}</div>`;
 }
 
 export function _vttInsTab(tab) {
   _insTab = tab;
-  // Repli sur le perso du joueur si rien n'est sélectionné (fiche permanente).
-  const t = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : _deskPorteurToken(null);
+  const t = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : _defaultInspectorToken(null);
   if (t) _renderInspector(t);
 }
 

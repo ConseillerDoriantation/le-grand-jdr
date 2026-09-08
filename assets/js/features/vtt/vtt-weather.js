@@ -12,6 +12,7 @@ import { setDoc } from '../../config/firebase.js';
 import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
 import { _sesRef } from './vtt-refs.js';
+import { vttShouldReduceEffects } from './vtt-fog-performance.js';
 
 let _weatherOpen = false;   // popover inline d'icônes ouvert (MJ)
 
@@ -70,7 +71,9 @@ function _applyWeather() {
   let layer = wrap.querySelector('.vtt-weather-fx');
   const id = _curWeather();
   if (id === 'clear') { layer?.remove(); return; }
-  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const constrainedDevice = vttShouldReduceEffects(navigator.deviceMemory, navigator.hardwareConcurrency);
+  if (reducedMotion || constrainedDevice) {
     // Effet réduit : juste un léger voile coloré, pas de particules animées.
     if (!layer) { layer = document.createElement('div'); layer.className = 'vtt-weather-fx'; wrap.appendChild(layer); }
     layer.dataset.w = id; layer.dataset.built = `static-${id}`; layer.innerHTML = '';
@@ -87,7 +90,7 @@ function _applyWeather() {
 function _weatherInner(id) {
   const rnd = (a, b) => (a + Math.random() * (b - a));
   if (id === 'rain' || id === 'storm') {
-    const n = id === 'storm' ? 95 : 60;
+    const n = id === 'storm' ? 44 : 30;
     let s = '';
     for (let i = 0; i < n; i++) {
       s += `<span class="wd" style="left:${rnd(0, 100).toFixed(2)}%;animation-duration:${rnd(0.4, 0.9).toFixed(2)}s;animation-delay:-${rnd(0, 2).toFixed(2)}s;opacity:${rnd(.4, .85).toFixed(2)}"></span>`;
@@ -96,7 +99,7 @@ function _weatherInner(id) {
   }
   if (id === 'snow') {
     let s = '';
-    for (let i = 0; i < 70; i++) {
+    for (let i = 0; i < 36; i++) {
       const sz = rnd(2, 6).toFixed(1);
       s += `<span class="ws" style="left:${rnd(0, 100).toFixed(2)}%;width:${sz}px;height:${sz}px;animation-duration:${rnd(5, 11).toFixed(2)}s;animation-delay:-${rnd(0, 8).toFixed(2)}s;opacity:${rnd(.5, .9).toFixed(2)}"></span>`;
     }
