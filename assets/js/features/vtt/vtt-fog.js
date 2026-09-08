@@ -15,6 +15,7 @@
 import { updateDoc } from '../../config/firebase.js';
 import { showNotif }  from '../../shared/notifications.js';
 import { VTT_WALL_TYPES, vttWallState } from './vtt-wall-utils.js';
+import { fogGeometrySignature, fogRasterCellSize } from './vtt-fog-performance.js';
 
 // ── État module ───────────────────────────────────────────────────────────────
 let _CELL       = 70;
@@ -35,9 +36,12 @@ let _stageEvts  = {};     // {event: fn} — listeners de l'éditeur, pour netto
 let _page       = null;   // référence TOUJOURS à jour vers la page active (évite closures stales)
 
 let _fogPending = false;  // debounce requestAnimationFrame
+let _fogPendingArgs = null; // le dernier état demandé gagne pendant la frame
 let _snapDot    = null;   // indicateur d'aimantation pendant l'édition
 let _playerFogCanvas = null; // masque courant pour les interactions et tokens hors LOS
+let _playerFogContext = null; // contexte mis en cache (évite getContext par token)
 let _fogImageNode = null;    // nœud Konva.Image persistant du fog (réutilisé → pas de clignotement)
+let _fogGeometryKey = '';    // évite de recalculer la LOS pour un simple changement de PV/PM
 
 let _pgRefFn = null;      // (pageId) → Firestore DocumentReference
 
@@ -104,13 +108,13 @@ function _weldBlockers(blockers, tol) {
   });
 }
 
-function _visPoly(ox, oy, blockers, W, H) {
+function _visPoly(ox, oy, blockers, W, H, weldTolerance = _CELL / 20) {
   // EPS angulaire augmenté : 0.0005 rad ≈ 0.029°, latéral ≈ 0.5px à 1000px.
   // Assez grand pour que les rayons "+/-EPS" passent réellement de part et d'autre d'un coin,
   // assez petit pour ne pas fusionner deux coins voisins.
   const EPS = 5e-4;
   // Soude les bouts de murs voisins (tolérance = 1/20 de case) pour éliminer les "fentes" sub-pixel
-  blockers = _weldBlockers(blockers, _CELL / 20);
+  blockers = _weldBlockers(blockers, weldTolerance);
 
   const boundary = [
     { x1:0, y1:0, x2:W, y2:0 },
@@ -156,9 +160,12 @@ function _visPoly(ox, oy, blockers, W, H) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function _buildFogCanvas(page, tokens, isAdmin = false) {
-  const C = _CELL;
-  const W = (page.cols || 24) * C;
-  const H = (page.rows || 18) * C;
+  // Le masque n'a pas besoin de la résolution complète de la battlemap. Konva
+  // l'affiche ensuite aux dimensions monde. Sur une scène 200 x 200, on passe
+  // d'un canvas 14 000 x 14 000 à ~2 000 x 2 000, sans modifier la grille.
+  const C = fogRasterCellSize(page.cols || 24, page.rows || 18, _CELL);
+  const W = Math.ceil((page.cols || 24) * C);
+  const H = Math.ceil((page.rows || 18) * C);
   const fogEnabled = !!page.fogEnabled;
 
   const canvas = document.createElement('canvas');
@@ -208,7 +215,7 @@ function _buildFogCanvas(page, tokens, isAdmin = false) {
       for (const ls of lights) {
         const lx = ls.x * C, ly = ls.y * C;
         const r  = (ls.radius ?? LIGHT_DEF_R) * C;
-        fillPolyClipped(_visPoly(lx, ly, blockers, W, H), lx, ly, r);
+        fillPolyClipped(_visPoly(lx, ly, blockers, W, H, C / 20), lx, ly, r);
       }
     }
 
@@ -221,7 +228,7 @@ function _buildFogCanvas(page, tokens, isAdmin = false) {
       const th = tok.tokenH ?? tok.tokenSize ?? 1;
       const ox = (tok.col + tw * 0.5) * C;
       const oy = (tok.row + th * 0.5) * C;
-      const poly = _visPoly(ox, oy, blockers, W, H);
+      const poly = _visPoly(ox, oy, blockers, W, H, C / 20);
       if (lights.length === 0) {
         fillPoly(poly);
         continue;
@@ -308,6 +315,9 @@ export function fogInit(stage, layers, CELL) {
   _wallsLayer = layers.walls;
   _tokenLayer = layers.token;
   _fogImageNode = null;   // nouveau layer → oublier l'ancien nœud fog
+  _fogGeometryKey = '';
+  _playerFogCanvas = null;
+  _playerFogContext = null;
   // Suppr/Delete supprime l'élément sélectionné (une seule liaison, ré-entrante).
   document.removeEventListener('keydown', _fogKeydown);
   document.addEventListener('keydown', _fogKeydown);
@@ -318,7 +328,11 @@ export function fogSetPgRef(fn) { _pgRefFn = fn; }
 /** Mise à jour de la référence page courante (appelée depuis vtt.js à chaque changement). */
 export function fogSetPage(page) {
   if (page?.id !== _page?.id) { _placeHistory = []; _redoHistory = []; } // nouvelle scène → piles vierges
-  if (page?.id !== _page?.id) _playerFogCanvas = null;
+  if (page?.id !== _page?.id) {
+    _playerFogCanvas = null;
+    _playerFogContext = null;
+    _fogGeometryKey = '';
+  }
   _page = page;
 }
 
@@ -327,12 +341,16 @@ function _pgRef(id) { return _pgRefFn ? _pgRefFn(id) : null; }
 function _playerPointIsVisible(x, y, page = _page) {
   if (!page?.fogEnabled && !(page?.fogOps || []).length) return true;
   if (!_playerFogCanvas) return false;
-  const px = Math.max(0, Math.min(_playerFogCanvas.width - 1, Math.round(x)));
-  const py = Math.max(0, Math.min(_playerFogCanvas.height - 1, Math.round(y)));
-  return _playerFogCanvas.getContext('2d').getImageData(px, py, 1, 1).data[3] < 250;
+  const worldW = Math.max(1, (page.cols || 24) * _CELL);
+  const worldH = Math.max(1, (page.rows || 18) * _CELL);
+  const px = Math.max(0, Math.min(_playerFogCanvas.width - 1, Math.round(x * _playerFogCanvas.width / worldW)));
+  const py = Math.max(0, Math.min(_playerFogCanvas.height - 1, Math.round(y * _playerFogCanvas.height / worldH)));
+  _playerFogContext ||= _playerFogCanvas.getContext('2d', { willReadFrequently: true });
+  return _playerFogContext.getImageData(px, py, 1, 1).data[3] < 250;
 }
 
 function _applyTokenVisibility(page, tokens, isAdmin) {
+  let changed = false;
   for (const entry of Object.values(tokens || {})) {
     const t = entry?.data;
     const shape = entry?.shape;
@@ -347,49 +365,79 @@ function _applyTokenVisibility(page, tokens, isAdmin) {
     // MJ : un token hors de la grille de jeu (backstage) est caché aux joueurs.
     const offGrid = (t.col ?? 0) < 0 || (t.row ?? 0) < 0
                  || (t.col ?? 0) + tw > page.cols || (t.row ?? 0) + th > page.rows;
-    shape.visible(!!(t.visible || isAdmin) && inSight && (isAdmin || !offGrid));
+    const visible = !!(t.visible || isAdmin) && inSight && (isAdmin || !offGrid);
+    if (shape.visible() !== visible) {
+      shape.visible(visible);
+      changed = true;
+    }
   }
-  _tokenLayer?.batchDraw();
+  if (changed) _tokenLayer?.batchDraw();
+  return changed;
 }
 
 /** Recalcule et affiche le fog immédiatement. */
 export function fogUpdate(page, tokens, isAdmin) {
   if (!_fogLayer || !page) return;
+  const geometryKey = fogGeometrySignature(page, tokens, !!isAdmin);
 
   // Rien à dessiner si ni LOS ni ops manuelles → retire le fog persistant.
   const hasFogOps = (page.fogOps || []).length > 0;
   if (!page.fogEnabled && !hasFogOps) {
+    const removedFog = !!_fogImageNode;
     if (_fogImageNode) { _fogImageNode.destroy(); _fogImageNode = null; }
     _playerFogCanvas = null;
+    _playerFogContext = null;
+    _fogGeometryKey = geometryKey;
     _applyTokenVisibility(page, tokens, !!isAdmin);
-    _fogLayer.batchDraw();
+    if (removedFog) _fogLayer.batchDraw();
     return;
   }
 
   const K = window.Konva;
   if (!K) return;
+  // Une perte de PV, un état ou un jet met bien à jour le token, mais ne change
+  // ni les murs ni les positions des personnages. On ne reconstruit donc pas le
+  // masque — opération de loin la plus coûteuse côté joueur.
+  if (_fogGeometryKey === geometryKey && _fogImageNode) {
+    _applyTokenVisibility(page, tokens, !!isAdmin);
+    return;
+  }
   const canvas = _buildFogCanvas(page, tokens, !!isAdmin);
   _playerFogCanvas = isAdmin ? null : canvas;
+  _playerFogContext = isAdmin ? null : canvas.getContext('2d', { willReadFrequently: true });
+  _fogGeometryKey = geometryKey;
+  const worldWidth = (page.cols || 24) * _CELL;
+  const worldHeight = (page.rows || 18) * _CELL;
   // Réutilise un unique nœud image : on remplace juste son canvas au lieu de
   // détruire/recréer (destroyChildren laissait une frame « sans fog » = clignotement).
   if (_fogImageNode && _fogImageNode.getLayer() === _fogLayer) {
     _fogImageNode.image(canvas);
+    _fogImageNode.size({ width: worldWidth, height: worldHeight });
   } else {
     if (_fogImageNode) _fogImageNode.destroy();
-    _fogImageNode = new K.Image({ image: canvas, x: 0, y: 0, listening: false });
+    _fogImageNode = new K.Image({
+      image: canvas, x: 0, y: 0,
+      width: worldWidth, height: worldHeight,
+      listening: false,
+    });
     _fogLayer.add(_fogImageNode);
   }
   _fogImageNode.moveToBottom();   // le fog reste sous d'éventuels ajouts futurs
   _applyTokenVisibility(page, tokens, !!isAdmin);
-  if (!isAdmin) fogRenderWalls(page, false);
   _fogLayer.batchDraw();
 }
 
 /** Version debounced (requestAnimationFrame) — appel sûr depuis n'importe où. */
 export function fogUpdateSoon(page, tokens, isAdmin) {
+  _fogPendingArgs = { page, tokens, isAdmin };
   if (_fogPending) return;
   _fogPending = true;
-  requestAnimationFrame(() => { _fogPending = false; fogUpdate(page, tokens, isAdmin); });
+  requestAnimationFrame(() => {
+    _fogPending = false;
+    const latest = _fogPendingArgs;
+    _fogPendingArgs = null;
+    if (latest) fogUpdate(latest.page, latest.tokens, latest.isAdmin);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

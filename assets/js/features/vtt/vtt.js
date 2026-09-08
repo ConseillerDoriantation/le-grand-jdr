@@ -8863,8 +8863,8 @@ export function _renderAllTokens() {
   }
   _syncTokenStackVisuals();
   VS.layers.token?.batchDraw();
-  // Pupitre : la fiche (inspecteur) reflète le token sélectionné (MJ) ou, à
-  // défaut, le perso du joueur — tenue à jour à chaque re-rendu large des tokens.
+  // La fiche reflète le token sélectionné (MJ) ou, à défaut, le personnage du
+  // joueur — tenue à jour à chaque re-rendu large des tokens.
   try { _renderInspectorSoon(); } catch {}
 }
 
@@ -9409,6 +9409,28 @@ function _ensureBestiaryForTokens() {
 
 // SYNC FIRESTORE — listeners temps réel
 // ═══════════════════════════════════════════════════════════════════
+function _entityTokenVisualKey(entity) {
+  if (!entity) return '';
+  // Une fiche peut approcher 1 Mio (journal, inventaire, sorts…). Le token n'en
+  // dépend que par cette projection compacte. On évite ainsi de recalculer tous
+  // les tokens lorsqu'une note ou un sort sans rapport avec le canvas change.
+  return JSON.stringify({
+    nom:entity.nom, photoURL:entity.photoURL, photo:entity.photo,
+    avatar:entity.avatar, imageUrl:entity.imageUrl,
+    hp:entity.hp, pv:entity.pv, pvBase:entity.pvBase,
+    pm:entity.pm, pmCurrent:entity.pmCurrent, pmBase:entity.pmBase,
+    niveau:entity.niveau, stats:entity.stats, statsBonus:entity.statsBonus,
+    equipement:entity.equipement,
+    bonusAttaque:entity.bonusAttaque, attack:entity.attack,
+    ca:entity.ca, vitesse:entity.vitesse,
+  });
+}
+
+function _changedEntityIds(previous, next) {
+  const ids = new Set([...Object.keys(previous || {}), ...Object.keys(next || {})]);
+  return new Set([...ids].filter(id => _entityTokenVisualKey(previous?.[id]) !== _entityTokenVisualKey(next?.[id])));
+}
+
 function _initListeners() {
   if (!aid()) return;
 
@@ -9477,7 +9499,7 @@ function _initListeners() {
     for (const c of data || []) next[c.id] = c;
     const wasReady = _charsReady;
 
-    const changed = new Set([...Object.keys(prev), ...Object.keys(next)]);
+    const changed = _changedEntityIds(prev, next);
     for (const id of Object.keys(prev)) {
       if (next[id]) continue;
       const tok = Object.values(VS.tokens).find(e => e.data.characterId === id);
@@ -9490,7 +9512,7 @@ function _initListeners() {
         _patchShape(id); if (VS.selected === id) _renderInspectorSoon();
       }
     }
-    _renderTraySoon();
+    if (changed.size) _renderTraySoon();
     _markCharsReady();
     void _cleanupReserveSummons();
     // Signale immédiatement au destinataire les objets reçus pendant qu’il est
@@ -9520,14 +9542,14 @@ function _initListeners() {
     const next = {};
     for (const n of data || []) next[n.id] = n;
 
-    const changed = new Set([...Object.keys(prev), ...Object.keys(next)]);
+    const changed = _changedEntityIds(prev, next);
     VS.npcs = next;
     for (const [id, e] of Object.entries(VS.tokens)) {
       if (e.data.npcId && changed.has(e.data.npcId)) {
         _patchShape(id); if (VS.selected === id) _renderInspectorSoon();
       }
     }
-    _renderTraySoon();
+    if (changed.size) _renderTraySoon();
     _markNpcsReady();
   }));
 
@@ -12027,7 +12049,7 @@ function _vttRcolView(view) {
   }
 }
 
-// ── Panneau glissant (phase 5) : fiche/chat (right-col) + réserve (tray MJ) ──
+// ── Panneau glissant : fiche/chat (right-col) + réserve (tray MJ) ──────────
 // Fermé par défaut → la carte occupe toute la largeur. Ouvert par les boutons
 // .vtt-mj-quick. Réutilise _vttRcolView et l'onglet courant du tray.
 let _slideOpen = false;
@@ -12075,7 +12097,7 @@ function _vttFocusInspectorIfTabbed() {
 function _buildHtml() {
   const mj=STATE.isAdmin;
   return `
-<div class="vtt-root" id="vtt-root" data-combat="off" data-desk="on">
+<div class="vtt-root" id="vtt-root" data-combat="off">
   ${mj && CLOUDINARY_ENABLED ? '<input type="file" id="vtt-img-input" accept="image/*" hidden>' : ''}
 
   <!-- ── BANDEAU : état ambiant (scènes · session · minuteur · météo · présence · thème) ── -->
@@ -12095,7 +12117,7 @@ function _buildHtml() {
     <button class="vtt-chip vtt-chip-ico" data-vtt-fn="_vttToggleTheme" title="Thème clair / sombre" aria-label="Basculer le thème">◐</button>
   </header>
 
-  <!-- ── RUBAN D'INITIATIVE (rempli en phase 2 ; collapsé hors combat) ── -->
+  <!-- ── RUBAN D'INITIATIVE (collapsé hors combat) ── -->
   <div class="vtt-ribbon" id="vtt-ribbon" aria-hidden="true"></div>
 
   <div class="vtt-body">
@@ -12104,15 +12126,15 @@ function _buildHtml() {
 
     <!-- ── Ouverture du panneau glissant (sur la toile) ── -->
     <div class="vtt-mj-quick" role="toolbar" aria-label="Panneaux">
-      <button class="vtt-chip" data-vtt-fn="_vttSlide" data-vtt-args="chat" title="Chat & dés">💬 Chat</button>
+      <button class="vtt-chip" data-vtt-fn="_vttSlide" data-vtt-args="chat" title="Fiche du token, jets et chat">🎲 Fiche &amp; Chat</button>
       ${mj ? `<button class="vtt-chip" data-vtt-fn="_vttSlide" data-vtt-args="reserve" title="Réserve · scènes · bestiaire · images">🗺 Réserve</button>` : ''}
     </div>
 
-    <!-- ── PANNEAU GLISSANT (phase 5) : fiche/chat + réserve MJ ── -->
+    <!-- ── PANNEAU GLISSANT : fiche/chat + réserve MJ ── -->
     <aside class="vtt-slide" id="vtt-slide" data-slide="sheet" aria-hidden="true">
       <div class="vtt-slide-hd">
         <div class="vtt-slide-modes">
-          <button class="vtt-slide-mode" data-slide-mode="sheet" data-vtt-fn="_vttSlide" data-vtt-args="chat">Chat</button>
+          <button class="vtt-slide-mode" data-slide-mode="sheet" data-vtt-fn="_vttSlide" data-vtt-args="chat">Fiche &amp; Chat</button>
           ${mj ? `<button class="vtt-slide-mode" data-slide-mode="reserve" data-vtt-fn="_vttSlide" data-vtt-args="reserve">Réserve</button>` : ''}
         </div>
         <button class="vtt-slide-x" data-vtt-fn="_vttSlideClose" title="Fermer (Échap)" aria-label="Fermer le panneau">✕</button>
@@ -12142,7 +12164,14 @@ function _buildHtml() {
         </div>
       </div>
     </div>`:''}
-    <div class="vtt-right-col vtt-right-col--chatonly" id="vtt-right-col">
+    <div class="vtt-right-col" id="vtt-right-col" data-rcol-view="${_rcolView}">
+      <div class="vtt-rcol-tabs" role="tablist" aria-label="Panneau latéral">
+        <button class="vtt-rcol-tab${_rcolView==='inspector'?' active':''}" type="button" role="tab" data-vtt-fn="_vttRcolView" data-vtt-args="inspector">🎲 Token / Jets</button>
+        <button class="vtt-rcol-tab${_rcolView==='chat'?' active':''}" type="button" role="tab" data-vtt-fn="_vttRcolView" data-vtt-args="chat">💬 Chat</button>
+      </div>
+      <div class="vtt-inspector" id="vtt-inspector">
+        <div class="vtt-ins-empty"><div style="font-size:1.8rem">🎲</div>Sélectionne un token ou invoque ton personnage</div>
+      </div>
       <div class="vtt-chat">
         <div class="vtt-chat-hd">💬 Chat &amp; Dés</div>
         <div class="vtt-chat-log" id="vtt-chat-log"></div>
@@ -12159,14 +12188,6 @@ function _buildHtml() {
     </aside>
   </div>
 
-  <!-- ── PUPITRE : fiche permanente du porteur (inspecteur relocalisé en bas).
-       Toujours visible : perso actif du joueur (ou token sélectionné côté MJ).
-       PV/PM + Max, +/- mouvement/CA/portée, onglets Stats/Jets/Effets/Gérer. ── -->
-  <div class="vtt-desk vtt-desk--sheet" id="vtt-desk" data-desk="on">
-    <div class="vtt-inspector" id="vtt-inspector">
-      <div class="vtt-ins-empty"><div style="font-size:1.8rem">🎲</div>Sélectionne un token ou invoque ton personnage</div>
-    </div>
-  </div>
 </div>`;
 }
 
@@ -12370,7 +12391,7 @@ async function _vttMountTable(content) {
     _setMapMode(false);
   }
 
-  // ─── Ruban d'initiative (phase 2) : rendu dans #vtt-ribbon de la coquille.
+  // ─── Ruban d'initiative : rendu dans #vtt-ribbon de la coquille.
   // (Le minuteur/météo vivent désormais dans le bandeau ; plus d'overlay TL.)
   _renderTimer();
   _renderWeatherBtn();

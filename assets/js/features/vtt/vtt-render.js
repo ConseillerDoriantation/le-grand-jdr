@@ -18,6 +18,32 @@ import { _pgRef } from './vtt-refs.js';
 import { _showCtxMenu } from './vtt-utils.js';
 import { showNotif } from '../../shared/notifications.js';
 import { tokenActiveEffects, tokenEffectsSignature, tokenFootprintMeta, tokenHealthMeta } from './vtt-token-visual.js';
+import { vttCanvasPixelRatio } from './vtt-fog-performance.js';
+
+const _tokenImageCache = new Map();
+
+function _addTokenPortrait(portrait, fallback, src, rx, ry) {
+  const attach = image => {
+    // Le token a pu être reconstruit/supprimé pendant le chargement.
+    if (!portrait.getParent()) return;
+    portrait.add(new window.Konva.Image({ image, x:-rx, y:-ry, width:rx*2, height:ry*2, listening:false }));
+    fallback.visible(false);
+    VS.layers.token?.batchDraw();
+  };
+  const cached = _tokenImageCache.get(src);
+  if (cached?.complete && cached.naturalWidth) {
+    attach(cached);
+    return;
+  }
+  const image = cached || new Image();
+  image.addEventListener('load', () => attach(image), { once:true });
+  if (!cached) {
+    image.crossOrigin = 'anonymous';
+    image.addEventListener('error', () => _tokenImageCache.delete(src), { once:true });
+    _tokenImageCache.set(src, image);
+    image.src = src;
+  }
+}
 
 function _resolveMapImageUrl(url, sourcePath = '') {
   const raw = String(sourcePath || url || '').trim();
@@ -29,13 +55,22 @@ function _resolveMapImageUrl(url, sourcePath = '') {
 
 /** Charge Konva (vendored) sur window.Konva si pas déjà présent. */
 export async function _loadKonva() {
-  if (window.Konva) return;
-  await new Promise((res, rej) => {
-    const s = document.createElement('script');
-    s.src = './assets/js/vendor/konva-10.3.0.min.js';
-    s.onload = res; s.onerror = () => rej(new Error('Konva.js introuvable'));
-    document.head.appendChild(s);
-  });
+  if (!window.Konva) {
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = './assets/js/vendor/konva-10.3.0.min.js';
+      s.onload = res; s.onerror = () => rej(new Error('Konva.js introuvable'));
+      document.head.appendChild(s);
+    });
+  }
+  // Konva multiplie sinon chaque canvas par le DPR natif (jusqu'à 3× sur
+  // certains portables). Le coût GPU/mémoire est quadratique et n'apporte rien
+  // de perceptible sur une battlemap. Les machines modestes restent à 1×.
+  window.Konva.pixelRatio = vttCanvasPixelRatio(
+    window.devicePixelRatio,
+    navigator.deviceMemory,
+    navigator.hardwareConcurrency,
+  );
 }
 
 /** Convertit une position écran (pointeur) en coordonnées monde (avant grille). */
@@ -140,18 +175,11 @@ export function _buildTokenVisual(t, ld, condById) {
     name:'portrait-fallback',
   });
   portrait.add(fallback);
+  g.add(portrait);
   const imgSrc = ld.displayImage;
   if (imgSrc) {
-    const el=new Image(); el.crossOrigin='anonymous';
-    el.onload = () => {
-      portrait.add(new K.Image({ image:el, x:-rx, y:-ry, width:rx*2, height:ry*2, listening:false }));
-      fallback.visible(false);
-      VS.layers.token?.batchDraw();
-    };
-    el.src = imgSrc;
+    _addTokenPortrait(portrait, fallback, imgSrc, rx, ry);
   }
-  g.add(portrait);
-
   g.add(new K.Ellipse({
     x:0, y:portraitY, radiusX:rx, radiusY:ry, fill:'transparent',
     stroke:health.isDown?'#ef4444':typeColor, strokeWidth:3,
