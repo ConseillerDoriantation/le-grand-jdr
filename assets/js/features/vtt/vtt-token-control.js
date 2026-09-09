@@ -15,3 +15,14 @@ export function resolveControlledTokenId(selectedId, entries, activePageId, canC
     .find(eligible);
   return fallback?.id || null;
 }
+
+/** Retourne le token personnage qui prouve un contrôle direct ou délégué. */
+export function resolveCharacterControlToken(charId, entries, uid) {
+  if (!charId || !uid) return null;
+  return Object.values(entries || {})
+    .map(entry => entry?.data)
+    .find(token => token?.characterId === charId
+      && (token.ownerId === uid
+        || (Array.isArray(token.controlDelegates) && token.controlDelegates.includes(uid))))
+    || null;
+}

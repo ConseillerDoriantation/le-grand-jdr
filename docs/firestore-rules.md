@@ -315,7 +315,11 @@ function canUpdateAdventurePlayer(adventureId) {
           !request.resource.data.diff(resource.data)
             .affectedKeys().hasAny(["imageUrl"]));
 }
-function canSpendCharacterPmViaToken(adventureId, charId, tokenId) {
+// Autorise une mise à jour très limitée des ressources d'un personnage depuis
+// un token que l'utilisateur possède ou contrôle par délégation. Le lien entre
+// le token et la fiche est vérifié côté serveur : connaître un tokenId ne suffit
+// donc jamais à modifier une autre fiche.
+function canUseCharacterResourceViaToken(adventureId, charId, tokenId) {
   let tokenPath = /databases/$(database)/documents/adventures/$(adventureId)/vttTokens/$(tokenId);
   let token = get(tokenPath).data;
   return isLoggedIn() &&
@@ -618,12 +622,24 @@ match /adventures/{adventureId} {
       // l'historique au sein du meme batch atomique.
       request.resource.data.diff(resource.data).affectedKeys()
         .hasOnly(['inventaire', 'inventoryHistory', 'compte']) ||
-      // Dépense de PM par le propriétaire ou le délégué du token lanceur.
+      // PM dépensés, rendus ou saisis depuis le VTT par le propriétaire ou un
+      // délégué du token. Les deux champs sont canoniquement synchronisés.
       // `vttControlTokenId` fournit à la règle le token précis à vérifier.
       (
         request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['pm', 'vttControlTokenId']) &&
-        canSpendCharacterPmViaToken(
+          .hasOnly(['pm', 'pmActuel', 'vttControlTokenId']) &&
+        canUseCharacterResourceViaToken(
+          adventureId,
+          id,
+          request.resource.data.vttControlTokenId
+        )
+      ) ||
+      // Certains sorts utilisent les PV du lanceur comme ressource. Un délégué
+      // peut les dépenser, sans obtenir de droit sur les autres champs du perso.
+      (
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['hp', 'vttControlTokenId']) &&
+        canUseCharacterResourceViaToken(
           adventureId,
           id,
           request.resource.data.vttControlTokenId
@@ -755,7 +771,7 @@ match /adventures/{adventureId} {
              'col', 'row', 'movedThisTurn', 'movedCells', 'bonusMvt', 'moveOrigin',
              'pageId', 'visible',
              'attackedThisTurn', 'bonusActionThisTurn', 'reactionThisTurn',
-             'pm', 'pmCombat'
+             'pm', 'pmCombat', 'spellCooldowns'
            ]);
     // Sorts de déplacement : un joueur peut pousser/attirer une cible
     // sans pouvoir modifier sa page, sa visibilité ou ses compteurs de tour.

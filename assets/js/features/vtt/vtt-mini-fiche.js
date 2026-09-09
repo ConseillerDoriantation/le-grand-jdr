@@ -27,6 +27,7 @@ import { bumpSkill } from '../../shared/stats.js';
 import { _chrRef, _logCol } from './vtt-refs.js'; // refs Firestore perso + log VTT (leaf)
 import { _STAT_COLOR, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js'; // constantes pures (leaf)
 import { _vttPanelError } from './vtt-utils.js'; // frontière d'erreur (leaf)
+import { resolveCharacterControlToken } from './vtt-token-control.js';
 import { _effectDisplay, _vttSortDmgFormula,
          _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode, _vttDisplayRunes,
          } from './vtt-spell-display.js'; // formules de sorts (leaf — mini-fiche découplée de vtt.js)
@@ -137,6 +138,15 @@ function _msBuildEquipItem(slot, item, invIndex) {
 }
 
 function _msCanEdit(uid) { return STATE.isAdmin || STATE.user?.uid === uid; }
+
+// La délégation VTT donne accès aux ressources de combat, pas au contenu privé
+// de la fiche (équipement, inventaire, notes…). On garde donc _msCanEdit pour
+// les onglets complets et on ouvre uniquement les jauges PV/PM si un token lié
+// au personnage est réellement contrôlé par le joueur courant.
+function _msCanEditVitals(charId, uid) {
+  if (_msCanEdit(uid)) return true;
+  return !!resolveCharacterControlToken(charId, VS.tokens, STATE.user?.uid);
+}
 
 // Reproduit STRICTEMENT la logique de characters/equipment.js (editEquipSlot)
 // pour que les items équipables dans la vraie fiche le soient aussi ici.
@@ -1464,6 +1474,7 @@ function _renderMiniSheetImpl(uid) {
   VS.miniCharId = validId;
   const c = chars.find(c => c.id === validId);
   const canEdit = _msCanEdit(uid);
+  const canEditVitals = _msCanEditVitals(c?.id, uid);
 
   const img      = c?.photoURL || c?.photo || c?.avatar || null;
   const init     = (c?.nom || '?')[0].toUpperCase();
@@ -1514,7 +1525,7 @@ function _renderMiniSheetImpl(uid) {
       <button class="vtt-ms-close" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${uid}" title="Fermer">✕</button>
     </div>
     ${selectorHtml}
-    ${_msQuickSummary(c, uid, canEdit)}
+    ${_msQuickSummary(c, uid, canEditVitals)}
     ${tabBarHtml}
     <div class="vtt-ms-tab-content">${tabHtml}</div>`;
 
@@ -1559,6 +1570,7 @@ export {
   _msApplySortFilter,
   _msBuildEquipItem,
   _msCanEdit,
+  _msCanEditVitals,
   _msCatItem,
   _msFilterBar,
   _msItemFitsSlot,
