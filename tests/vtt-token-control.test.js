@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveControlledTokenId } from '../assets/js/features/vtt/vtt-token-control.js';
+import {
+  resolveCharacterControlToken,
+  resolveControlledTokenId,
+} from '../assets/js/features/vtt/vtt-token-control.js';
 
 const entries = {
   enemy: { data: { id: 'enemy', pageId: 'page-a', ownerId: 'gm' } },
@@ -19,4 +22,25 @@ test('un token contrôlé sélectionné reste prioritaire', () => {
 
 test('aucun token hors de la scène active ne sert de solution de repli', () => {
   assert.equal(resolveControlledTokenId('enemy', { enemy: entries.enemy, elsewhere: entries.elsewhere }, 'page-a', canControl), null);
+});
+
+test('un délégué retrouve le token qui autorise les ressources du personnage', () => {
+  const delegated = {
+    data: {
+      id: 'delegated', characterId: 'char-owner', ownerId: 'owner',
+      controlDelegates: ['player'],
+    },
+  };
+  assert.equal(resolveCharacterControlToken('char-owner', { delegated }, 'player')?.id, 'delegated');
+});
+
+test('la délégation ne donne aucun accès aux ressources d’un autre personnage', () => {
+  const delegated = {
+    data: {
+      id: 'delegated', characterId: 'char-owner', ownerId: 'owner',
+      controlDelegates: ['player'],
+    },
+  };
+  assert.equal(resolveCharacterControlToken('char-other', { delegated }, 'player'), null);
+  assert.equal(resolveCharacterControlToken('char-owner', { delegated }, 'stranger'), null);
 });

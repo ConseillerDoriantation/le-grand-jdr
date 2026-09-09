@@ -65,6 +65,7 @@ import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChang
 import { receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
 import { conditionDamageReductionApplies, conditionStatRollMode } from './vtt-condition-rules.js';
 import { planGroupGridStep } from './vtt-group-movement.js';
+import { resolveCharacterControlToken } from './vtt-token-control.js';
 import { naturalWeaponCombatContext } from '../../shared/bestiary-combat.js';
 import { _calcAfflictionDD, splitSpellDiceFormula } from '../../shared/spell-math.js';
 import {
@@ -164,7 +165,7 @@ import {
   _vttKickPresence, _renderPresenceCol,
 } from './vtt-presence.js';
 import {
-  _renderMiniSheet, _vttToggleMiniSheet, _vttSelectMiniChar, _msCanEdit,
+  _renderMiniSheet, _vttToggleMiniSheet, _vttSelectMiniChar, _msCanEdit, _msCanEditVitals,
   _vttMsTab, _vttMsAddNote, _vttMsToggleNote, _vttMsRenameNote, _vttMsSaveNote,
   _vttMsDeleteNote, _vttMsEquip, _vttMsUnequip, _vttMsUnequipAll, _vttMsEquipPicker,
   _vttMsSlotChange, _vttMsDeleteItem, _vttMsSendPicker, _vttMsConfirmSend,
@@ -747,10 +748,17 @@ async function _restoreTokenPm(td, amount, { deferWrite = false } = {}) {
     if (nv !== cur) {
       Object.assign(c, _charPmPatch(nv));
       _patchEntityTokenShapes('characterId', td.characterId);
-      const write = updateDoc(_chrRef(td.characterId), _charPmPatch(nv)).catch(error => {
+      // La fiche n'appartient pas nécessairement au joueur qui agit : un token
+      // peut lui avoir été délégué. Le token cible sert de preuve bornée aux
+      // règles Firestore, comme lors d'une dépense ou d'une saisie manuelle.
+      const write = updateDoc(_chrRef(td.characterId), {
+        ..._charPmPatch(nv),
+        vttControlTokenId: td.id,
+      }).catch(error => {
         Object.assign(c, _charPmPatch(cur));
         _patchEntityTokenShapes('characterId', td.characterId);
         console.error('[vtt] régénération PM personnage', error);
+        throw error;
       });
       if (deferWrite) return { applied: Math.max(0, nv - cur), cur: nv, max, write };
       await write;
@@ -11319,23 +11327,42 @@ async function _vttMsLevelUp(charId, uid) {
 }
 
 async function _vttMsSetHp(charId, uid, hp) {
-  if (!_msCanEdit(uid)) return;
+  if (!_msCanEditVitals(charId, uid)) return;
   const c = VS.characters[charId]; if (!c) return;
-  if (!STATE.isAdmin && c.uid !== STATE.user?.uid) return;
+  const controlledToken = resolveCharacterControlToken(charId, VS.tokens, STATE.user?.uid);
+  if (!STATE.isAdmin && c.uid !== STATE.user?.uid && !controlledToken) return;
   const max = calcPVMax(c);
   const val = Math.max(0, Math.min(max, Math.round(hp)));
-  await updateDoc(_chrRef(charId), { hp: val }).catch(() => {});
+  const patch = controlledToken
+    ? { hp: val, vttControlTokenId: controlledToken.id }
+    : { hp: val };
+  const saved = await updateDoc(_chrRef(charId), patch).then(() => true).catch(error => {
+    console.error('[vtt] PV personnage non modifiés depuis la mini-fiche', error);
+    showNotif('Impossible de modifier les PV de ce personnage', 'error');
+    return false;
+  });
+  if (!saved) return;
   c.hp = val;
   _renderMiniSheet(uid);
 }
 
 async function _vttMsSetPm(charId, uid, pm) {
-  if (!_msCanEdit(uid)) return;
+  if (!_msCanEditVitals(charId, uid)) return;
   const c = VS.characters[charId]; if (!c) return;
-  if (!STATE.isAdmin && c.uid !== STATE.user?.uid) return;
+  const controlledToken = resolveCharacterControlToken(charId, VS.tokens, STATE.user?.uid);
+  if (!STATE.isAdmin && c.uid !== STATE.user?.uid && !controlledToken) return;
   const max = calcPMMax(c);
   const val = Math.max(0, Math.min(max, Math.round(pm)));
-  await updateDoc(_chrRef(charId), _charPmPatch(val)).catch(() => {});
+  const patch = {
+    ..._charPmPatch(val),
+    ...(controlledToken ? { vttControlTokenId: controlledToken.id } : {}),
+  };
+  const saved = await updateDoc(_chrRef(charId), patch).then(() => true).catch(error => {
+    console.error('[vtt] PM personnage non modifiés depuis la mini-fiche', error);
+    showNotif('Impossible de modifier les PM de ce personnage', 'error');
+    return false;
+  });
+  if (!saved) return;
   c.pm = val;
   c.pmActuel = val;
   _renderMiniSheet(uid);
