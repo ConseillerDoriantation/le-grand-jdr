@@ -879,7 +879,8 @@ html:not([data-theme="light"]) .vtt-root {
    ════════════════════════════════════════════════════════════════════ */
 .vtt-band {
   display: flex; align-items: center; gap: 8px;
-  padding: 0 12px; min-width: 0; overflow: hidden;
+  position: relative;
+  padding: 0 12px; min-width: 0; overflow: visible;
   background: var(--surface-1);
   border-bottom: 1px solid var(--border);
   z-index: 30;
@@ -921,6 +922,20 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-band .vtt-pres .vtt-pres-avatar { width: 26px; height: 26px; border: 2px solid var(--surface-1); }
 .vtt-band .vtt-pres .vtt-pres-name { display: none; }
 .vtt-band .vtt-pres .vtt-pres-empty { color: var(--text-dim); font-size: 12px; padding: 0 4px; }
+
+/* Repos, musique, butin et émotes sont des outils de session : le bandeau les
+   garde ensemble et libère entièrement les coins de la carte. */
+.vtt-session-tools {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-sunken);
+}
 
 /* ════════════════════════════════════════════════════════════════════
    RUBAN D'INITIATIVE
@@ -979,6 +994,32 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-who-b { min-width: 0; flex: 1; }
 .vtt-who-name { display: block; font-family: var(--font-display); font-size: 14.5px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .vtt-who-sub { display: block; font-size: 10.5px; color: var(--c, var(--text-muted)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vtt-who-sheet {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-md);
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 15px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s, transform .15s;
+}
+.vtt-who-sheet:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--c) 58%, var(--border-strong));
+  background: color-mix(in srgb, var(--c) 12%, var(--surface-2));
+  transform: translateY(-1px);
+}
+.vtt-who-sheet.active {
+  color: var(--c);
+  border-color: color-mix(in srgb, var(--c) 62%, transparent);
+  background: color-mix(in srgb, var(--c) 18%, var(--surface-2));
+}
 .vtt-bars { display: flex; flex-direction: column; gap: 5px; }
 .vtt-dbar { display: flex; align-items: center; gap: 7px; }
 .vtt-dbar-k { flex: none; width: 30px; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; font-weight: 600; color: var(--text-dim); }
@@ -11552,21 +11593,36 @@ html:not([data-theme="light"]) .vtt-root {
   background: rgba(255,255,255,.095);
 }
 
-/* Puces flottantes déplacées en BAS-DROITE (le pupitre/carré d'identité occupe
-   le bas-gauche). Ancrées à droite, panneaux ouverts vers le haut/gauche. */
-.vtt-emote-float,
-.vtt-loot-float,
-.vtt-music-float,
-.vtt-rest-float {
-  bottom: 16px;
-  left: auto;
+/* Dans le bandeau, les anciens floats deviennent de simples ancres. Chaque
+   panneau se déploie sous son bouton et reste contenu dans le viewport. */
+.vtt-session-tools > :is(
+  .vtt-emote-float,
+  .vtt-loot-float,
+  .vtt-music-float,
+  .vtt-rest-float
+) {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  display: flex;
+  flex-direction: column;
   align-items: flex-end;
-  gap: 7px;
+  gap: 0;
 }
-.vtt-emote-float { right: 14px; }
-.vtt-loot-float  { right: 58px; }
-.vtt-music-float { right: 102px; }
-.vtt-rest-float  { right: 146px; }
+
+.vtt-session-tools :is(
+  .vtt-emote-picker,
+  .vtt-loot-panel,
+  .vtt-music-panel,
+  .vtt-rest-panel
+) {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  bottom: auto;
+  left: auto;
+  z-index: 70;
+}
 
 .vtt-emote-trigger,
 .vtt-loot-trigger,
@@ -11583,7 +11639,29 @@ html:not([data-theme="light"]) .vtt-root {
 }
 
 .vtt-rest-trigger {
-  padding-inline: .78rem;
+  padding-inline: .62rem;
+}
+
+.vtt-session-tools :is(
+  .vtt-emote-trigger,
+  .vtt-loot-trigger,
+  .vtt-music-trigger
+) {
+  width: 30px;
+  min-width: 30px;
+}
+
+.vtt-session-tools :is(
+  .vtt-emote-trigger,
+  .vtt-loot-trigger,
+  .vtt-music-trigger,
+  .vtt-rest-trigger
+) {
+  height: 30px;
+  border-radius: 8px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
 .vtt-emote-trigger:hover,

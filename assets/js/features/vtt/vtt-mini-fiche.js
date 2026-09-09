@@ -1446,14 +1446,17 @@ function _renderMiniSheetImpl(uid) {
   const panel = document.getElementById('vtt-mini-panel');
   if (!panel) return;
 
+  if (!uid) { panel.classList.remove('open'); panel.innerHTML = ''; return; }
   const pres = VS.presence[uid];
-  if (!uid || !pres) { panel.classList.remove('open'); panel.innerHTML = ''; return; }
+  const playerLabel = pres?.pseudo
+    || (uid === STATE.user?.uid ? (STATE.user?.displayName || STATE.user?.email?.split('@')[0]) : '')
+    || 'Joueur hors ligne';
 
   // Favori en tête → sélection d'office du perso favori si aucun choix explicite.
   const chars = favoriteFirst(Object.values(VS.characters).filter(c => c.uid === uid));
   if (!chars.length) {
     panel.classList.add('open');
-    panel.innerHTML = `<div class="vtt-ms-empty">Aucun personnage lié pour ${_esc(pres.pseudo)}.</div>`;
+    panel.innerHTML = `<div class="vtt-ms-empty">Aucun personnage lié pour ${_esc(playerLabel)}.</div>`;
     return;
   }
 
@@ -1506,7 +1509,7 @@ function _renderMiniSheetImpl(uid) {
       <div class="vtt-ms-info">
         <div class="vtt-ms-name">${c?.nom||'Personnage'}</div>
         ${subtitle ? `<div class="vtt-ms-sub">${subtitle}</div>` : ''}
-        <div class="vtt-ms-player">👤 ${pres.pseudo}</div>
+        <div class="vtt-ms-player">👤 ${_esc(playerLabel)}</div>
       </div>
       <button class="vtt-ms-close" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${uid}" title="Fermer">✕</button>
     </div>
@@ -1520,15 +1523,26 @@ function _renderMiniSheetImpl(uid) {
   else if (_miniTab === 'sorts') _msApplySortFilter();
 }
 
-function _vttToggleMiniSheet(uid) {
-  if (VS.miniUid === uid) {
+function _syncMiniSheetLaunchers() {
+  document.querySelectorAll('.vtt-who-sheet').forEach(button => {
+    const active = VS.miniUid === button.dataset.miniUid
+      && VS.miniCharId === button.dataset.miniChar;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
+function _vttToggleMiniSheet(uid, charId = null) {
+  const sameCharacter = VS.miniUid === uid && (!charId || VS.miniCharId === charId);
+  if (sameCharacter) {
     VS.miniUid = null; VS.miniCharId = null;
     const panel = document.getElementById('vtt-mini-panel');
     if (panel) { panel.classList.remove('open'); panel.innerHTML = ''; }
   } else {
-    VS.miniUid = uid; VS.miniCharId = null;
+    VS.miniUid = uid; VS.miniCharId = charId || null;
     _renderMiniSheet(uid);
   }
+  _syncMiniSheetLaunchers();
   _renderPresenceCol();
 }
 
@@ -1537,6 +1551,7 @@ function _vttSelectMiniChar(uid, charId) {
   // Reset des filtres : l'inventaire/les sorts diffèrent d'un perso à l'autre.
   _msInvQuery = ''; _msInvCat = 'all'; _msSortQuery = ''; _msSortCat = 'all'; _msCraftQuery = '';
   _renderMiniSheet(uid);
+  _syncMiniSheetLaunchers();
 }
 
 export {
