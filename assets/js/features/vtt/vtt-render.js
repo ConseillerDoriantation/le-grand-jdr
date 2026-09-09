@@ -18,9 +18,28 @@ import { _pgRef } from './vtt-refs.js';
 import { _showCtxMenu } from './vtt-utils.js';
 import { showNotif } from '../../shared/notifications.js';
 import { tokenActiveEffects, tokenEffectsSignature, tokenFootprintMeta, tokenHealthMeta } from './vtt-token-visual.js';
-import { vttCanvasPixelRatio } from './vtt-fog-performance.js';
+import { vttCanvasPixelRatio, vttShouldReduceEffects } from './vtt-fog-performance.js';
 
 const _tokenImageCache = new Map();
+
+// ── Mode Performance (fluidité joueurs) ─────────────────────────────────────
+// Les ombres Konva (shadowBlur) et un DPR élevé sont les coûts de rendu
+// dominants sur les machines modestes (recalculés à CHAQUE redraw : déplacement,
+// PV, ping, pan/zoom). Ce mode les coupe. Défaut : auto-activé sur les appareils
+// détectés comme contraints ; surchargeable manuellement (persisté par client).
+let _vttLowFxCache = null;
+export function vttLowFx() {
+  if (_vttLowFxCache !== null) return _vttLowFxCache;
+  let v = null;
+  try { const s = localStorage.getItem('vtt.lowFx'); if (s === '1') v = true; else if (s === '0') v = false; } catch {}
+  if (v === null) v = vttShouldReduceEffects(navigator.deviceMemory, navigator.hardwareConcurrency);
+  _vttLowFxCache = !!v;
+  return _vttLowFxCache;
+}
+export function setVttLowFx(on) {
+  _vttLowFxCache = !!on;
+  try { localStorage.setItem('vtt.lowFx', on ? '1' : '0'); } catch {}
+}
 
 function _addTokenPortrait(portrait, fallback, src, rx, ry) {
   const attach = image => {
@@ -66,7 +85,7 @@ export async function _loadKonva() {
   // Konva multiplie sinon chaque canvas par le DPR natif (jusqu'à 3× sur
   // certains portables). Le coût GPU/mémoire est quadratique et n'apporte rien
   // de perceptible sur une battlemap. Les machines modestes restent à 1×.
-  window.Konva.pixelRatio = vttCanvasPixelRatio(
+  window.Konva.pixelRatio = vttLowFx() ? 1 : vttCanvasPixelRatio(
     window.devicePixelRatio,
     navigator.deviceMemory,
     navigator.hardwareConcurrency,
@@ -197,14 +216,11 @@ export function _buildTokenVisual(t, ld, condById) {
     shadowColor:'#2563eb', shadowBlur:12, shadowOpacity:.9,
     fill:'transparent', visible:false, listening:false, name:'sel',
   }));
-  // Anneau rotatif de sélection (effet Claude Design .tok.sel::after) : deux arcs
-  // opposés dans la couleur du camp, mis en rotation par _syncFxAnim quand le
-  // token est sélectionné. Masqué et immobile sinon.
-  const _selSpinC = 2 * Math.PI * (rx + 7);
+  // Anneau de sélection dans la couleur du camp (double anneau avec le halo bleu).
+  // STATIQUE : pas d'animation continue (voir _syncFxAnim, retirée pour la perf).
   g.add(new K.Ellipse({
     x:0, y:portraitY, radiusX:rx+7, radiusY:ry+7, stroke:typeColor, strokeWidth:1.5,
-    dash:[_selSpinC*0.30, _selSpinC*0.20], fill:'transparent',
-    shadowColor:typeColor, shadowBlur:6, shadowOpacity:.5,
+    fill:'transparent', shadowColor:typeColor, shadowBlur:5, shadowOpacity:.45,
     visible:false, listening:false, name:'sel-spin',
   }));
   g.add(new K.Ellipse({
@@ -388,6 +404,9 @@ export function _buildTokenVisual(t, ld, condById) {
   g.add(new K.Text({ x:-moveW/2, y:moveY+1.5, width:moveW, height:7, text:'🏃 0/0',
     align:'center', fontSize:6.2, fontStyle:'bold', fill:'#e0f2fe',
     fontFamily:'Inter,sans-serif', visible:false, listening:false, name:'move-value' }));
+  // Mode Performance : couper toutes les ombres du token (coût de redraw majeur
+  // en canvas 2D sur machines modestes). Le reste du visuel est conservé.
+  if (vttLowFx()) { try { g.find('Shape').forEach(n => n.shadowEnabled && n.shadowEnabled(false)); } catch {} }
   return g;
 }
 
