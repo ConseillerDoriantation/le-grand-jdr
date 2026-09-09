@@ -32,7 +32,10 @@ export function vttLowFx() {
   if (_vttLowFxCache !== null) return _vttLowFxCache;
   let v = null;
   try { const s = localStorage.getItem('vtt.lowFx'); if (s === '1') v = true; else if (s === '0') v = false; } catch {}
-  if (v === null) v = vttShouldReduceEffects(navigator.deviceMemory, navigator.hardwareConcurrency);
+  // Défaut (aucun choix explicite stocké) : les JOUEURS démarrent en Mode
+  // performance (le lag les concerne) ; le MJ garde le rendu complet, sauf
+  // machine détectée comme faible. Le bouton ⚡ surcharge dans les deux sens.
+  if (v === null) v = !STATE.isAdmin || vttShouldReduceEffects(navigator.deviceMemory, navigator.hardwareConcurrency);
   _vttLowFxCache = !!v;
   return _vttLowFxCache;
 }
