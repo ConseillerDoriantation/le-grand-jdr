@@ -67,8 +67,7 @@ function _renderDicePanel() {
 
   el.innerHTML = `
     <div class="vtt-dice-hd">
-      <span>🎲 Lancer des dés</span>
-      <button class="vtt-icon-btn" data-vtt-fn="_vttToggleDice" title="Fermer">✕</button>
+      <span>🎲 Lanceur libre</span>
     </div>
     <div class="vtt-dice-grid">
       ${_ALL_DICE.map(f => {
@@ -97,7 +96,7 @@ function _renderDicePanel() {
       <button class="vtt-roll-mode-btn${_diceFreeMode==='normal'?' active':''}" data-mode="normal" data-vtt-fn="_vttDiceMode" data-vtt-args="normal">⚪ Normal</button>
       <button class="vtt-roll-mode-btn${_diceFreeMode==='advantage'?' active':''}" data-mode="advantage" data-vtt-fn="_vttDiceMode" data-vtt-args="advantage">⬆ Avantage</button>
     </div>` : ''}
-    <button class="vtt-dice-roll-btn" data-vtt-fn="_vttDiceRoll"
+    <button class="vtt-dice-roll-btn" data-vtt-fn="_vttDiceRoll" data-vtt-args="keep"
       ${!hasDice&&!_diceFreeBonus?'disabled':''}>
       🎲 Lancer !
     </button>

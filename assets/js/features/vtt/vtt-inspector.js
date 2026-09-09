@@ -16,13 +16,16 @@ import { DAMAGE_INTERACTIONS } from '../../shared/damage-profile.js';
 import { getDamageTypeById } from '../../shared/damage-types.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
 import { _live } from './vtt-effective.js';
+import { _renderDicePanel } from './vtt-dice.js';
 import { _vttPanelError } from './vtt-utils.js';
 import {
   _canControlToken, _npcCombat, _tokenStatMod, _manualBuffVal, _signed,
   CONDITION_BY_ID, _resolveUidName, _getCombatMoveOrigin,
 } from './vtt.js'; // circ. (runtime)
 
-let _insTab = 'stats';          // onglet actif de l'inspecteur token
+let _insTab = null;             // onglet DÉPLOYÉ (null = fiche compacte, rien de déployé)
+let _ficheJetsOpen = false;     // panneau « Jets » (au-dessus du bloc d'identité)
+let _jetsMode = 'skills';       // sous-mode du panneau Jets : 'skills' | 'dice'
 let _inspectorDirty = false;    // coalescing des rafales de snapshots → 1 render/tick
 let _skillFilter = '';          // filtre live du panneau « Jets de compétences »
 // Regroupement des compétences par caractéristique (scan plus rapide pour le joueur).
@@ -224,40 +227,42 @@ export function _renderInspectorImpl(t) {
         _bar('PV', hp, hpm, hpColor(rat), pvEditHtml, pvMaxHtml) +
         (pm !== null && pmMax !== null ? _bar('PM', pm, pmMax, '#b47fff', pmEditHtml, pmMaxHtml) : '') +
       '</div>';
-    coreStatsHtml =
-      '<div class="vtt-ins-stats">' +
-        (() => {
-          const baseMvt = ld.displayMovement ?? 6;   // inclut déjà le buff move_bonus manuel
-          const maxMvt  = baseMvt + (t.bonusMvt||0);
-          const rem     = _inCombat ? Math.max(0, maxMvt - (t.movedCells||0)) : null;
-          const mvLabel = _inCombat ? `${rem} / ${maxMvt} cases` : `${baseMvt} cases`;
-          const remColor = _inCombat ? (rem===0?'#f87171':rem<=2?'#f59e0b':'#4ade80') : 'inherit';
-          const origin = _getCombatMoveOrigin(t);
-          const canUndo = _inCombat && _canEditToken && origin
-            && origin.round === (VS.session?.combat?.round ?? 0)
-            && origin.pageId === (t.pageId || VS.activePage?.id || null);
-          return `<div class="vtt-ins-stat"><span class="vtt-ins-stat-icon">🏃</span>`+
-            `<span class="vtt-ins-stat-lbl">Mouvement</span>`+
-            `<span class="vtt-ins-stat-val" style="color:${remColor}">${mvLabel}${_badge('vitesse')}</span>`+
-            `${canUndo ? `<button class="vtt-ins-undo-move" data-vtt-fn="_vttUndoMove" data-vtt-args="${_esc(t.id)}" title="Revenir à la position de début de tour et récupérer le mouvement">↶ Annuler</button>` : ''}`+
-            `${_steps('vitesse')}</div>`;
-        })() +
-        _stat('⚔️', 'Attaque', atkLabel) +
-        `<div class="vtt-ins-stat"><span class="vtt-ins-stat-label">🛡 CA</span>`+
-          `<span class="vtt-ins-stat-val">${ld.caBadge ?? (ld.displayDefense??0)}${ld.caBadge === '?' ? '' : _badge('ca')}</span>${_steps('ca')}</div>` +
-        `<div class="vtt-ins-stat"><span class="vtt-ins-stat-label">🎯 Portée</span>`+
-          `<span class="vtt-ins-stat-val">${ld.displayRange??1} case(s)${_badge('portee')}</span>${_steps('portee')}</div>` +
-        _stat('📍', 'Position', pos, true) +
+    coreStatsHtml = (() => {
+      const baseMvt = ld.displayMovement ?? 6;   // inclut déjà le buff move_bonus manuel
+      const maxMvt  = baseMvt + (t.bonusMvt||0);
+      const rem     = _inCombat ? Math.max(0, maxMvt - (t.movedCells||0)) : null;
+      const mvVal   = _inCombat ? `${rem}<i class="vtt-stat-den">/${maxMvt}</i>` : `${baseMvt}`;
+      const mvCol   = _inCombat ? (rem===0?'#f87171':rem<=2?'#f59e0b':'#4ade80') : 'var(--text)';
+      const origin  = _getCombatMoveOrigin(t);
+      const canUndo = _inCombat && _canEditToken && origin
+        && origin.round === (VS.session?.combat?.round ?? 0)
+        && origin.pageId === (t.pageId || VS.activePage?.id || null);
+      const caVal = ld.caBadge ?? (ld.displayDefense ?? 0);
+      // Carte d'une stat ajustable : valeur + steppers −/+ (mouvement, CA, portée).
+      const _card = (icon, lbl, valHtml, key, col) =>
+        `<div class="vtt-stat-card">`+
+          `<div class="vtt-stat-card-hd"><span class="vtt-stat-card-ic">${icon}</span>${lbl}</div>`+
+          `<div class="vtt-stat-card-v"${col?` style="color:${col}"`:''}>${valHtml}${key?_badge(key):''}</div>`+
+          `${_steps(key)}`+
+        `</div>`;
+      // Ligne d'info en lecture seule (attaque, position).
+      const _info = (icon, lbl, val) =>
+        `<div class="vtt-stat-info-row"><span class="vtt-stat-info-k">${icon} ${lbl}</span><span class="vtt-stat-info-v">${val}</span></div>`;
+      return `<div class="vtt-stat-grid">`+
+          _card('🏃', 'Déplac.', mvVal, 'vitesse', mvCol)+
+          _card('🛡', 'Défense', `${caVal}`, caVal === '?' ? '' : 'ca')+
+          _card('🎯', 'Portée', `${ld.displayRange??1}<i class="vtt-stat-den"> c.</i>`, 'portee')+
+        `</div>`+
+        (canUndo ? `<button class="vtt-ins-undo-move" data-vtt-fn="_vttUndoMove" data-vtt-args="${_esc(t.id)}" title="Revenir à la position de début de tour et récupérer le mouvement">↶ Annuler le déplacement</button>` : '')+
+        `<div class="vtt-stat-info">`+
+          _info('⚔️', 'Attaque', atkLabel)+
+          _info('📍', 'Position', pos)+
+        `</div>`+
         ((_canEditToken && _anyBonus)
-          ? `<div class="vtt-ins-stat full" style="justify-content:flex-end">`+
-              `<button class="vtt-ins-bonus-reset" data-vtt-fn="_vttTokenResetBonus" data-vtt-args="${t.id}" title="Réinitialiser les bonus manuels">↺ Reset bonus</button>`+
-            `</div>` : '') +
+          ? `<button class="vtt-ins-bonus-reset" data-vtt-fn="_vttTokenResetBonus" data-vtt-args="${t.id}" title="Réinitialiser les bonus manuels">↺ Réinitialiser les bonus</button>` : '')+
         (t.attackedThisTurn
-          ? '<div class="vtt-ins-stat full" style="gap:.4rem;flex-wrap:wrap">'+
-              '<span class="vtt-ins-badge vtt-ins-badge-atk">✓ A attaqué</span>'+
-            '</div>'
-          : '') +
-      '</div>';
+          ? `<div class="vtt-stat-note"><span class="vtt-ins-badge vtt-ins-badge-atk">✓ A attaqué ce tour</span></div>` : '');
+    })();
   }
 
   // ── Infos créature (bestiaire) ─────────────────────────────────────────
@@ -749,44 +754,132 @@ export function _renderInspectorImpl(t) {
       </div>`
     : '';
 
+  // ── Onglets du tiroir droit (dépliables) : Stats · États · Gérer ──
+  //   Stats = caractéristiques + CA/portée/déplacement + build (+ bestiaire MJ).
+  //   États = conditions + buffs. Gérer = sources/délégation/envoi de page.
   const _tabs = [
-    { k:'stats',    ic:'📊', lb:'Stats',     html: coreStatsHtml },
-    { k:'combat',   ic:'🎲', lb:'Jets',      html: _combatActionsHtml + _skillsHtml },
-    { k:'invoc',    ic:'🐾', lb:'Actions',   html: _summonActionsHtml },
-    { k:'effets',   ic:'✨', lb:'Effets',    html: _condsHtml + _buffsHtml },
-    { k:'creature', ic:'📜', lb:'Bestiaire', html: _creatureHtml },
-    { k:'gerer',    ic:'⚙️', lb:'Gérer',     html: _sourceLinksHtml + _delegateHtml + _sendPageHtml + _footerHtml },
+    { k:'stats',  ic:'📊', lb:'Stats',  html: buildSwitcherHtml + coreStatsHtml + _creatureHtml },
+    { k:'effets', ic:'✨', lb:'États',  html: _condsHtml + _buffsHtml },
+    { k:'gerer',  ic:'⚙️', lb:'Gérer',  html: _sourceLinksHtml + _delegateHtml + _sendPageHtml + _footerHtml },
   ].filter(s => s.html && s.html.trim());
-
-  const _active = _tabs.some(s => s.k === _insTab) ? _insTab : (_tabs[0]?.k || 'stats');
-  const _tabBar = _tabs.length > 1
-    ? `<div class="vtt-ins-tabbar">${_tabs.map(s =>
-        `<button class="vtt-ins-tab${s.k===_active?' active':''}" data-vtt-fn="_vttInsTab" data-vtt-args="${s.k}" title="${s.lb}">
-          <span class="vtt-ins-tab-ic">${s.ic}</span><span class="vtt-ins-tab-lbl">${s.lb}</span>
-        </button>`).join('')}</div>`
+  // Icônes sur le côté du carré d'identité ; chaque icône déploie/replie son
+  // onglet en popover au-dessus de la fiche (rien de déployé par défaut).
+  const _deployed = _tabs.find(s => s.k === _insTab) || null;
+  // Onglet « Fiche » : ouvre la feuille de personnage complète (tiroir latéral
+  // #vtt-mini-panel) sans surcharger le carré. Uniquement si un perso lié + son
+  // joueur est présent en séance.
+  const _sheetUid = (t.characterId && t.ownerId && VS.presence?.[t.ownerId]) ? t.ownerId : null;
+  const _sheetBtn = _sheetUid
+    ? `<button class="vtt-fiche-tab vtt-fiche-tab--sheet${VS.miniUid === _sheetUid ? ' active' : ''}" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${_esc(_sheetUid)}" title="Feuille de personnage" aria-pressed="${VS.miniUid === _sheetUid}"><span class="vtt-fiche-tab-ic">📜</span><span class="vtt-fiche-tab-lbl">Fiche</span></button>`
     : '';
-  const _tabBody = _tabs.find(s => s.k === _active)?.html || '';
+  const _tabBar = (_tabs.length || _sheetBtn)
+    ? `<div class="vtt-fiche-tabs">${_tabs.map(s =>
+        `<button class="vtt-fiche-tab${s.k === _insTab ? ' active' : ''}" data-vtt-fn="_vttInsTab" data-vtt-args="${s.k}" title="${s.lb}" aria-expanded="${s.k === _insTab}"><span class="vtt-fiche-tab-ic">${s.ic}</span><span class="vtt-fiche-tab-lbl">${s.lb}</span></button>`).join('')}${_sheetBtn}</div>`
+    : '';
+  const _panelHtml = _deployed
+    ? `<div class="vtt-fiche-panel" role="region" aria-label="${_deployed.lb}">
+         <div class="vtt-fiche-panel-hd"><span>${_deployed.ic} ${_deployed.lb}</span><button class="vtt-fiche-panel-x" data-vtt-fn="_vttInsTab" data-vtt-args="${_deployed.k}" title="Replier" aria-label="Replier">✕</button></div>
+         <div class="vtt-fiche-panel-body">${_deployed.html}</div>
+       </div>`
+    : '';
 
-  el.innerHTML=`
-    <div class="vtt-ins-header">
-      ${img?`<img src="${img}" class="vtt-ins-avatar" alt="">`
-           :`<div class="vtt-ins-avatar-icon" style="background:${TYPE_COLOR[t.type]??'#888'}">${icon}</div>`}
-      <div class="vtt-ins-title">
-        <div class="vtt-ins-name">${ld.displayName??t.name}</div>
-        <div class="vtt-ins-type">${icon} ${lbl}${linked?' · 🔗':''}</div>
+  // ── Panneau « Jets » (au-dessus du bloc d'identité) ────────────────────
+  //   Deux interfaces DISTINCTES, jamais mélangées, via un sélecteur segmenté :
+  //   • Compétences : jets de compétences + actions de combat + invocation.
+  //   • Dés : lanceur de dés libre (#vtt-dice-panel rempli après rendu).
+  const _skillsBody = (_combatActionsHtml + _skillsHtml + _summonActionsHtml).trim();
+  const _hasSkills = !!_skillsBody;
+  const _mode = (!_hasSkills || _jetsMode === 'dice') ? 'dice' : 'skills';
+  const _jetsSeg = _hasSkills
+    ? `<div class="vtt-jets-seg" role="tablist">
+         <button class="vtt-jets-seg-btn${_mode==='skills'?' active':''}" role="tab" aria-selected="${_mode==='skills'}" data-vtt-fn="_vttJetsMode" data-vtt-args="skills">🎯 Compétences</button>
+         <button class="vtt-jets-seg-btn${_mode==='dice'?' active':''}" role="tab" aria-selected="${_mode==='dice'}" data-vtt-fn="_vttJetsMode" data-vtt-args="dice">🎲 Dés libres</button>
+       </div>`
+    : '';
+  const _jetsInner = _mode === 'dice'
+    ? `<div class="vtt-dice-panel" id="vtt-dice-panel" data-open="1" style="display:flex"></div>`
+    : _skillsBody;
+  const _jetsHtml = `<div class="vtt-fiche-jets">
+         <button class="vtt-fiche-jets-btn${_ficheJetsOpen ? ' is-open' : ''}" data-vtt-fn="_vttFicheJets" aria-expanded="${_ficheJetsOpen}">🎲 Jets</button>
+         <div class="vtt-fiche-jets-panel"${_ficheJetsOpen ? '' : ' hidden'}>${_jetsSeg}<div class="vtt-jets-body">${_jetsInner}</div></div>
+       </div>`;
+
+  // ── Bloc d'identité (présentation Claude Design) + boutons Max ──
+  const _char = t.characterId ? VS.characters[t.characterId] : null;
+  const _lvl  = _char?.niveau ?? (t.beastId ? VS.bstTracker?.[t.beastId]?.niveau : null);
+  const _cls  = _char?.classe || '';
+  const _sub  = [_cls, _lvl ? `Niv. ${_lvl}` : ''].filter(Boolean).join(' · ') || lbl;
+  const _camp = t.type === 'enemy' ? 'var(--c-enemy)' : t.type === 'npc' ? 'var(--c-npc)' : 'var(--c-player)';
+  const _pm = ld.displayPm ?? null, _pmMax = ld.displayPmMax ?? null;
+  const _inCombat = !!VS.session?.combat?.active;
+  const _baseMv = ld.displayMovement ?? 6, _maxMv = _baseMv + (t.bonusMvt || 0);
+  const _remMv = _inCombat ? Math.max(0, _maxMv - (t.movedCells || 0)) : _maxMv;
+  const _mvCol = _remMv === 0 ? '#f87171' : _remMv <= 2 ? '#f59e0b' : '#4ade80';
+  const _ca = ld.caBadge ?? (ld.displayDefense ?? '?');
+  const _rr = VS.session?.combat?.round ?? 0;
+  const _condPills = (Array.isArray(t.conditions) ? t.conditions : [])
+    .filter(c => c.expiresAtRound == null || _rr === 0 || _rr <= c.expiresAtRound)
+    .map(c => { const l = CONDITION_BY_ID[c.id] || { label: c.id, icon: '⚡', color: '#888' };
+      return `<span class="vtt-vit cond" style="--cc:${l.color}" title="${_esc(l.label)}">${l.icon} ${_esc(l.label)}</span>`; }).join('');
+  const _ed = _canControlToken(t);
+  const _pvVal = _ed ? `<input class="vtt-ins-input" type="number" value="${hp}" min="0" max="${hpm}" data-vtt-fn="_vttSetHp" data-vtt-on="change" data-vtt-args="${t.id}|$value">` : `<b>${hp}</b>`;
+  const _pvMaxBtn = _ed ? `<button class="vtt-ins-max-btn" data-vtt-fn="_vttSetHp" data-vtt-args="${t.id}|${hpm}" title="PV au max">Max</button>` : '';
+  const _pmVal = _ed ? `<input class="vtt-ins-input" type="number" value="${_pm}" min="0" max="${_pmMax}" data-vtt-fn="_vttSetPm" data-vtt-on="change" data-vtt-args="${t.id}|$value">` : `<b>${_pm}</b>`;
+  const _pmMaxBtn = _ed ? `<button class="vtt-ins-max-btn" data-vtt-fn="_vttSetPm" data-vtt-args="${t.id}|${_pmMax}" title="PM au max">Max</button>` : '';
+  const _dbar = (k, valHtml, pct, col, maxBtn = '') =>
+    `<div class="vtt-dbar"><span class="vtt-dbar-k">${k}</span>` +
+    `<div class="vtt-dbar-t"><b class="vtt-dbar-f" style="width:${pct}%;background:${col}"></b></div>` +
+    `<span class="vtt-dbar-v">${valHtml}</span>${maxBtn}</div>`;
+  const _summary = `<div class="vtt-fiche-id" style="--c:${_camp}">
+      <div class="vtt-who">
+        <div class="vtt-who-av">${img ? `<img src="${img}" alt="">` : `<span>${icon}</span>`}</div>
+        <div class="vtt-who-b"><span class="vtt-who-name">${_esc(ld.displayName ?? t.name)}</span><span class="vtt-who-sub">${_esc(_sub)}${linked ? ' · 🔗' : ''}</span></div>
       </div>
-      ${_quickActionHtml}
-    </div>
-    ${buildSwitcherHtml}
-    ${vitalsHtml}
-    ${_tabBar}
-    <div class="vtt-ins-tabbody">${_tabBody}</div>`;
+      <div class="vtt-bars">
+        ${_dbar('PV', `${_pvVal}<i> / ${hpm}</i>`, Math.round(rat * 100), hpColor(rat), _pvMaxBtn)}
+        ${(_pm !== null && _pmMax !== null) ? _dbar('PM', `${_pmVal}<i> / ${_pmMax}</i>`, _pmMax > 0 ? Math.round(Math.max(0, _pm) / _pmMax * 100) : 0, '#b47fff', _pmMaxBtn) : ''}
+        ${_dbar('Dép', `<b>${_remMv}</b><i> / ${_maxMv}</i>`, _maxMv > 0 ? Math.round(_remMv / _maxMv * 100) : 0, _mvCol)}
+      </div>
+      <div class="vtt-vitals"><span class="vtt-vit"><span>CA</span><b>${_ca}</b></span>${_condPills || '<span class="vtt-vit vtt-vit-empty">Aucun état</span>'}</div>
+      <div class="vtt-eco-row"><span class="vtt-eco-lbl">Éco</span>
+        <div class="vtt-eco-pip ${t.attackedThisTurn ? 'spent' : ''}"><b>${t.attackedThisTurn ? '✓' : '○'}</b>Action</div>
+        <div class="vtt-eco-pip ${t.bonusActionThisTurn ? 'spent' : ''}"><b>${t.bonusActionThisTurn ? '✓' : '○'}</b>Bonus</div>
+        <div class="vtt-eco-pip ${t.reactionThisTurn ? 'spent' : ''}"><b>${t.reactionThisTurn ? '✓' : '○'}</b>Réaction</div>
+      </div>
+    </div>`;
+
+  el.innerHTML = `
+    ${_jetsHtml}
+    ${_panelHtml}
+    <div class="vtt-fiche">
+      ${_summary}
+      ${_tabBar}
+    </div>`;
+
+  // Le lanceur de dés libre est rendu par son module (état de formule conservé).
+  if (_ficheJetsOpen) { try { _renderDicePanel(); } catch {} }
 }
 
 export function _vttInsTab(tab) {
-  _insTab = tab;
+  _insTab = (_insTab === tab) ? null : tab;   // re-clic sur l'icône = replie
+  if (_insTab) _ficheJetsOpen = false;        // exclusif avec le panneau Jets
   const t = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : _defaultInspectorToken(null);
-  if (t) _renderInspector(t);
+  _renderInspector(t);
+}
+
+// Bascule le panneau « Jets » au-dessus du bloc d'identité.
+export function _vttFicheJets() {
+  _ficheJetsOpen = !_ficheJetsOpen;
+  if (_ficheJetsOpen) _insTab = null;         // exclusif avec un onglet déployé
+  const t = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : _defaultInspectorToken(null);
+  _renderInspector(t);
+}
+
+// Bascule entre les deux interfaces du panneau Jets : compétences ↔ dés libres.
+export function _vttJetsMode(mode) {
+  _jetsMode = (mode === 'dice') ? 'dice' : 'skills';
+  const t = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : _defaultInspectorToken(null);
+  _renderInspector(t);
 }
 
 // Filtre live du panneau « Jets de compétences » : masque/affiche les boutons et

@@ -84,7 +84,7 @@ import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
   _scaledEnchantConditionFields, _vttPrimaryWeapon, _vttBestWeaponRange, _conditionCritRangeBonusOf,
 } from './vtt-effective.js';
-import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js';
+import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttFicheJets, _vttJetsMode, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js';
 import {
   _renderLibSection, _resetMapLib, _libFolder, _vttLibToggle, _vttLibOpenFolder, _vttLibNewFolder,
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,
@@ -12124,9 +12124,16 @@ function _buildHtml() {
     <div class="vtt-mini-panel" id="vtt-mini-panel"></div>
     <div class="vtt-canvas-wrap" id="vtt-canvas-wrap"></div>
 
+    <!-- ── FICHE : dock flottant compact en bas à gauche (identité + onglets déployables + Jets) ── -->
+    <div class="vtt-fiche-dock" id="vtt-fiche-dock">
+      <div class="vtt-inspector" id="vtt-inspector">
+        <div class="vtt-ins-empty"><div style="font-size:1.2rem">🎲</div>Sélectionne ton token</div>
+      </div>
+    </div>
+
     <!-- ── Ouverture du panneau glissant (sur la toile) ── -->
     <div class="vtt-mj-quick" role="toolbar" aria-label="Panneaux">
-      <button class="vtt-chip" data-vtt-fn="_vttSlide" data-vtt-args="chat" title="Fiche du token, jets et chat">🎲 Fiche &amp; Chat</button>
+      <button class="vtt-chip" data-vtt-fn="_vttSlide" data-vtt-args="chat" title="Chat &amp; dés">💬 Chat</button>
       ${mj ? `<button class="vtt-chip" data-vtt-fn="_vttSlide" data-vtt-args="reserve" title="Réserve · scènes · bestiaire · images">🗺 Réserve</button>` : ''}
     </div>
 
@@ -12134,7 +12141,7 @@ function _buildHtml() {
     <aside class="vtt-slide" id="vtt-slide" data-slide="sheet" aria-hidden="true">
       <div class="vtt-slide-hd">
         <div class="vtt-slide-modes">
-          <button class="vtt-slide-mode" data-slide-mode="sheet" data-vtt-fn="_vttSlide" data-vtt-args="chat">Fiche &amp; Chat</button>
+          <button class="vtt-slide-mode" data-slide-mode="sheet" data-vtt-fn="_vttSlide" data-vtt-args="chat">Chat</button>
           ${mj ? `<button class="vtt-slide-mode" data-slide-mode="reserve" data-vtt-fn="_vttSlide" data-vtt-args="reserve">Réserve</button>` : ''}
         </div>
         <button class="vtt-slide-x" data-vtt-fn="_vttSlideClose" title="Fermer (Échap)" aria-label="Fermer le panneau">✕</button>
@@ -12164,14 +12171,7 @@ function _buildHtml() {
         </div>
       </div>
     </div>`:''}
-    <div class="vtt-right-col" id="vtt-right-col" data-rcol-view="${_rcolView}">
-      <div class="vtt-rcol-tabs" role="tablist" aria-label="Panneau latéral">
-        <button class="vtt-rcol-tab${_rcolView==='inspector'?' active':''}" type="button" role="tab" data-vtt-fn="_vttRcolView" data-vtt-args="inspector">🎲 Token / Jets</button>
-        <button class="vtt-rcol-tab${_rcolView==='chat'?' active':''}" type="button" role="tab" data-vtt-fn="_vttRcolView" data-vtt-args="chat">💬 Chat</button>
-      </div>
-      <div class="vtt-inspector" id="vtt-inspector">
-        <div class="vtt-ins-empty"><div style="font-size:1.8rem">🎲</div>Sélectionne un token ou invoque ton personnage</div>
-      </div>
+    <div class="vtt-right-col vtt-right-col--chatonly" id="vtt-right-col">
       <div class="vtt-chat">
         <div class="vtt-chat-hd">💬 Chat &amp; Dés</div>
         <div class="vtt-chat-log" id="vtt-chat-log"></div>
@@ -12187,7 +12187,6 @@ function _buildHtml() {
       </div>
     </aside>
   </div>
-
 </div>`;
 }
 
@@ -12409,14 +12408,9 @@ async function _vttMountTable(content) {
     <div class="vtt-loot-panel" id="vtt-loot-panel" data-open="0" style="display:none" role="dialog" aria-label="Butin d'aventure" aria-hidden="true"></div>
     <button class="vtt-loot-trigger" id="vtt-loot-trigger" data-vtt-fn="_vttToggleLoot" title="Butin d'aventure" aria-expanded="false" aria-controls="vtt-loot-panel">💰</button>`;
   wrap.appendChild(_lf);
-  // Float Lanceur de dés (bas-gauche du canvas, 3e bouton)
-  const _drf = document.createElement('div');
-  _drf.className = 'vtt-dice-float';
-  _drf.innerHTML = `
-    <div class="vtt-dice-panel" id="vtt-dice-panel" data-open="0" style="display:none" role="dialog" aria-label="Lancer des dés libres" aria-hidden="true"></div>
-    <button class="vtt-dice-trigger" id="vtt-dice-trigger" data-vtt-fn="_vttToggleDice" title="Lancer des dés libres" aria-expanded="false" aria-controls="vtt-dice-panel">🎲</button>`;
-  wrap.appendChild(_drf);
-  // Float Musique (bas-gauche du canvas, 4e bouton)
+  // NB : le lanceur de dés libre vit désormais dans le panneau « Jets » du
+  // pupitre (vtt-inspector.js) — plus de puce flottante dédiée ici.
+  // Float Musique (bas-gauche du canvas)
   const _mf = document.createElement('div');
   _mf.className = 'vtt-music-float';
   _mf.innerHTML = `
@@ -12606,6 +12600,8 @@ export const VTT_ACTIONS = {
   _vttFogRedo,
   _vttImportGithubRelease,
   _vttInsTab,
+  _vttFicheJets,
+  _vttJetsMode,
   _vttOpenSource,
   _vttRcolView,
   _vttSkillFilter,
