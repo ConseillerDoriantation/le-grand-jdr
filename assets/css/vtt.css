@@ -10246,6 +10246,17 @@ html:not([data-theme="light"]) .vtt-root {
 }
 .vtt-tool-sep { height: 1px; margin: 2px 4px; background: var(--border-md); }
 
+/* ── Mode Performance (data-vtt-lowfx) ──────────────────────────────────────
+   Le backdrop-filter: blur est recalculé par le GPU à chaque repaint du fond
+   (canvas) : 33 surfaces floutées écroulent le FPS sur les machines modestes.
+   En mode perf on les coupe toutes d'un coup (les fonds restent lisibles :
+   ils sont déjà quasi opaques via color-mix). Ombres canvas et DPR sont gérés
+   côté JS (vtt-render.js). */
+.vtt-root[data-vtt-lowfx] * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 .vtt-tool-float-tools,
 .vtt-tool-float .vtt-draw-bar,
 .vtt-timer,

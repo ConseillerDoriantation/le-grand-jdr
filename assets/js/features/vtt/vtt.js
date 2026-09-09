@@ -59,7 +59,8 @@ import {
   _reactionsCol, _reactionRef, _annotCol, _annotRef,
 } from './vtt-refs.js';
 import { CELL, CELL_M, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
-import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual } from './vtt-render.js';
+import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual, vttLowFx, setVttLowFx } from './vtt-render.js';
+import { vttCanvasPixelRatio } from './vtt-fog-performance.js';
 import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenHealthMeta, tokenMovementMeta, tokenRelationTone } from './vtt-token-visual.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
 import { receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
@@ -1009,7 +1010,6 @@ function _vttCancelListenerSchedule() {
 function _cleanup() {
   _vttCancelListenerSchedule();
   _resetKeyboardMovement({ persist:true });
-  if (_fxAnim) { _fxAnim.stop(); _fxAnim = null; }
   VS.unsubs.forEach(u => u?.());
   VS.unsubs = []; VS.stage?.destroy(); VS.stage = null; VS.layers = {};
   _resizeObs?.disconnect(); _resizeObs = null;
@@ -1425,36 +1425,13 @@ function _setSelectionRing(id, visible=true) {
   _syncFxAnim();
 }
 
-// Animations « interface vivante » des tokens, réunies dans UNE boucle (un seul
-// redraw/frame) : rotation de l'anneau de sélection (effet Claude Design) +
-// fourmis qui marchent sur l'anneau doré du token actif en combat. Bornée : ne
-// tourne que s'il y a un token sélectionné ou actif, s'auto-arrête sinon, et est
-// stoppée dans _cleanup pour ne pas fuir entre les sessions.
-let _fxAnim = null;
-function _fxTargets() {
-  const combat = VS.session?.combat;
-  const activeId = combat?.active ? (combat?.activeTokenId ?? null) : null;
-  const turnNode = activeId ? VS.tokens[activeId]?.shape?.findOne('.turn-active') : null;
-  const selNode  = VS.selected ? VS.tokens[VS.selected]?.shape?.findOne('.sel-spin') : null;
-  return {
-    turn: (turnNode && turnNode.visible()) ? turnNode : null,
-    sel:  (selNode  && selNode.visible())  ? selNode  : null,
-  };
-}
-function _syncFxAnim() {
-  const K = window.Konva;
-  if (!K || !VS.layers?.token) { if (_fxAnim) { _fxAnim.stop(); _fxAnim = null; } return; }
-  const { turn, sel } = _fxTargets();
-  if (!turn && !sel) { if (_fxAnim) { _fxAnim.stop(); _fxAnim = null; } return; }
-  if (_fxAnim) return;   // déjà en cours ; la boucle relit les cibles à chaque frame
-  _fxAnim = new K.Animation(frame => {
-    const cur = _fxTargets();
-    if (!cur.turn && !cur.sel) { _fxAnim?.stop(); _fxAnim = null; return; }
-    if (cur.turn) cur.turn.dashOffset(-(frame.time / 55) % 12);   // fourmis qui marchent
-    if (cur.sel)  cur.sel.rotation((frame.time / 25) % 360);      // ~9 s / tour (comme la maquette)
-  }, VS.layers.token);
-  _fxAnim.start();
-}
+// Effets animés des tokens : RETIRÉS pour cause de perf. Une Konva.Animation
+// redessinait TOUT le calque des tokens (ombres comprises) à 60 fps EN CONTINU
+// dès qu'un token était sélectionné ou actif → FPS effondré sur les machines
+// modestes des joueurs (la machine du MJ absorbait le coût, d'où l'asymétrie).
+// Les anneaux de sélection / de tour restent STATIQUES (aucun redraw permanent).
+// no-op conservé pour ne pas toucher aux points d'appel existants.
+function _syncFxAnim() { /* volontairement vide : plus d'animation continue (perf joueurs) */ }
 
 function _targetTone(srcId, tgtId, friendlyAction=false) {
   return tokenRelationTone(VS.tokens[srcId]?.data, VS.tokens[tgtId]?.data, friendlyAction);
@@ -12181,7 +12158,7 @@ function _vttFocusInspectorIfTabbed() {
 function _buildHtml() {
   const mj=STATE.isAdmin;
   return `
-<div class="vtt-root" id="vtt-root" data-combat="off">
+<div class="vtt-root" id="vtt-root" data-combat="off"${vttLowFx() ? ' data-vtt-lowfx="1"' : ''}>
   ${mj && CLOUDINARY_ENABLED ? '<input type="file" id="vtt-img-input" accept="image/*" hidden>' : ''}
 
   <!-- ── BANDEAU : état ambiant (scènes · session · minuteur · météo · présence · thème) ── -->
@@ -12384,6 +12361,7 @@ async function _vttMountTable(content) {
       <span class="vtt-tool-sep" aria-hidden="true"></span>
       <button class="vtt-tool" data-vtt-fn="_vttCenterOnMyToken" title="Recentrer sur mon personnage (⌖)" aria-label="Recentrer sur mon personnage">⌖</button>
       <button class="vtt-tool" data-vtt-fn="_vttOpenKeyboardHelp" title="Raccourcis clavier (?)" aria-label="Afficher les raccourcis clavier">?</button>
+      <button class="vtt-tool${vttLowFx() ? ' active' : ''}" data-vtt-fn="_vttToggleLowFx" title="Mode performance — coupe les ombres et bride la résolution pour fluidifier le jeu sur les machines lentes" aria-pressed="${vttLowFx()}">⚡</button>
     </div>
     <div id="vtt-draw-bar" class="vtt-draw-bar" style="display:none">
       <div class="vtt-draw-row">
@@ -12567,6 +12545,22 @@ export const VTT_ACTIONS = {
   _aimCancel,
   _vttToggleSessionLive,
   _vttToggleTheme: () => toggleTheme(),
+  // Mode performance : bascule live (coupe les ombres des tokens + bride le DPR).
+  // Persisté par client ; le joueur qui lag l'active et retrouve du FPS.
+  _vttToggleLowFx: () => {
+    setVttLowFx(!vttLowFx());
+    const on = vttLowFx();
+    try {
+      window.Konva.pixelRatio = on ? 1 : vttCanvasPixelRatio(window.devicePixelRatio, navigator.deviceMemory, navigator.hardwareConcurrency);
+      VS.stage?.getLayers?.().forEach(l => { try { l.getCanvas().setPixelRatio(window.Konva.pixelRatio); l.getHitCanvas?.()?.setPixelRatio(window.Konva.pixelRatio); } catch {} });
+    } catch {}
+    try { _renderAllTokens(); } catch {}
+    VS.stage?.batchDraw?.();
+    document.getElementById('vtt-root')?.toggleAttribute('data-vtt-lowfx', on);  // coupe les backdrop-filter (CSS)
+    const b = document.querySelector('.vtt-tool-float-tools [data-vtt-fn="_vttToggleLowFx"]');
+    if (b) { b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); }
+    showNotif(on ? '⚡ Mode performance activé (ombres coupées, résolution bridée)' : 'Mode performance désactivé', 'success');
+  },
   _vttToggleOrderPanel,
   _vttSlide,
   _vttSlideClose,
