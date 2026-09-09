@@ -705,12 +705,14 @@ async function _setInvocationPm(td, requestedPm) {
   const previous = { pm: target.pm, pmCombat: target.pmCombat };
   Object.assign(target, patch);
   _patchShape(td.id);
+  _refreshDisplayedIdentitySoon(td.id);
   try {
     await updateDoc(_tokRef(td.id), patch);
     void _persistInvocationState(target);
   } catch (error) {
     Object.assign(target, previous);
     _patchShape(td.id);
+    _refreshDisplayedIdentitySoon(td.id);
     throw error;
   }
   return next;
@@ -1939,10 +1941,23 @@ function _showAppliedHpDelta(token, beforeHp, afterHp, nextDisplayedHp = afterHp
   _showTokenDelta(token, after - before, 'hp');
 }
 
+/** Rafraîchit sans attendre Firestore uniquement si le carré d'identité montre
+ * ce token. Couvre aussi le personnage affiché par défaut côté joueur, même
+ * lorsqu'aucun token n'a été sélectionné explicitement. */
+function _refreshDisplayedIdentitySoon(tokenId) {
+  if (!tokenId) return;
+  const inspector = document.getElementById('vtt-inspector');
+  if (VS.selected === tokenId || inspector?.dataset.tokenId === tokenId) {
+    _renderInspectorSoon();
+  }
+}
+
 function _patchEntityTokenShapes(linkField, entityId) {
   if (!entityId) return;
   Object.values(VS.tokens || {}).forEach(entry => {
-    if (entry?.data?.[linkField] === entityId) _patchShape(entry.data.id);
+    if (entry?.data?.[linkField] !== entityId) return;
+    _patchShape(entry.data.id);
+    _refreshDisplayedIdentitySoon(entry.data.id);
   });
 }
 
@@ -1951,7 +1966,7 @@ export function _vttPatchTokenOptimistically(id, patch) {
   if (!token || !patch) return;
   Object.assign(token, patch);
   _patchShape(id);
-  if (VS.selected === id) _renderInspectorSoon();
+  _refreshDisplayedIdentitySoon(id);
 }
 
 // Répercute immédiatement les PV dans le cache vivant et sur la jauge Konva.
@@ -1967,6 +1982,7 @@ function _patchHpOptimistically(token, hp, pvCombatHp = undefined) {
   }
   if (pvCombatHp !== undefined) token.pvCombatHp = pvCombatHp;
   _patchShape(token.id);
+  _refreshDisplayedIdentitySoon(token.id);
 }
 
 function _showTokenNotice(token, label, color='#fbbf24') {
@@ -12106,6 +12122,7 @@ function _buildHtml() {
     <span class="vtt-band-sep"></span>
     <nav id="vtt-page-tabs" class="vtt-scenes vtt-page-tabs" aria-label="Scènes"></nav>
     <span class="vtt-band-grow"></span>
+    <div class="vtt-session-tools" id="vtt-session-tools" role="toolbar" aria-label="Outils de session"></div>
     ${mj ? `<button class="vtt-canvas-control vtt-session-btn" id="vtt-session-btn" data-vtt-fn="_vttToggleSessionLive" title="Démarrer la session et prévenir les joueurs qui rejoignent">
       <span class="vtt-canvas-ctl-icon" aria-hidden="true">▶</span><span class="vtt-canvas-ctl-copy"><strong>Session</strong><small>Démarrer</small></span>
     </button>` : ''}
@@ -12396,28 +12413,10 @@ async function _vttMountTable(content) {
   _renderWeatherBtn();
   _applyWeather();
   _renderCombatTracker();
-  const _ef = document.createElement('div');
-  _ef.className = 'vtt-emote-float';
-  _ef.innerHTML = `<div class="vtt-emote-picker" id="vtt-emote-picker" role="dialog" aria-label="Choisir une émote" aria-hidden="true"></div>
-    <button class="vtt-emote-trigger" data-vtt-fn="_vttToggleEmotePicker" title="Émotes" aria-expanded="false" aria-controls="vtt-emote-picker">😄</button>`;
-  wrap.appendChild(_ef);
-  // Float Butin (bas-gauche du canvas)
-  const _lf = document.createElement('div');
-  _lf.className = 'vtt-loot-float';
-  _lf.innerHTML = `
-    <div class="vtt-loot-panel" id="vtt-loot-panel" data-open="0" style="display:none" role="dialog" aria-label="Butin d'aventure" aria-hidden="true"></div>
-    <button class="vtt-loot-trigger" id="vtt-loot-trigger" data-vtt-fn="_vttToggleLoot" title="Butin d'aventure" aria-expanded="false" aria-controls="vtt-loot-panel">💰</button>`;
-  wrap.appendChild(_lf);
-  // NB : le lanceur de dés libre vit désormais dans le panneau « Jets » du
-  // pupitre (vtt-inspector.js) — plus de puce flottante dédiée ici.
-  // Float Musique (bas-gauche du canvas)
-  const _mf = document.createElement('div');
-  _mf.className = 'vtt-music-float';
-  _mf.innerHTML = `
-    <div class="vtt-music-panel" id="vtt-music-panel" data-open="0" style="display:none" role="dialog" aria-label="Sons et musique" aria-hidden="true"></div>
-    <button class="vtt-music-trigger" id="vtt-music-trigger" data-vtt-fn="_vttToggleMusic" title="Sons &amp; Musique" aria-expanded="false" aria-controls="vtt-music-panel">🎵</button>`;
-  wrap.appendChild(_mf);
-  // Float Court repos (bas-gauche du canvas, 5e bouton)
+  const sessionTools = document.getElementById('vtt-session-tools') || wrap;
+
+  // Outils de session regroupés dans le bandeau : ils restent accessibles sans
+  // recouvrir la carte, le pupitre des tokens ou la bulle de chat globale.
   const _rf = document.createElement('div');
   _rf.className = 'vtt-rest-float';
   _rf.innerHTML = `
@@ -12425,8 +12424,30 @@ async function _vttMountTable(content) {
       <div class="vtt-rest-header">💤 Court repos</div>
       <div class="vtt-rest-body" id="vtt-rest-body"></div>
     </div>
-    <button class="vtt-rest-trigger" id="vtt-rest-trigger" data-vtt-fn="_vttToggleShortRest" title="Court repos du groupe" aria-expanded="false" aria-controls="vtt-rest-panel">💤 0/0</button>`;
-  wrap.appendChild(_rf);
+    <button class="vtt-rest-trigger" id="vtt-rest-trigger" data-vtt-fn="_vttToggleShortRest" title="Court repos du groupe" aria-label="Court repos du groupe" aria-expanded="false" aria-controls="vtt-rest-panel">💤 0/0</button>`;
+  sessionTools.appendChild(_rf);
+
+  const _mf = document.createElement('div');
+  _mf.className = 'vtt-music-float';
+  _mf.innerHTML = `
+    <div class="vtt-music-panel" id="vtt-music-panel" data-open="0" style="display:none" role="dialog" aria-label="Sons et musique" aria-hidden="true"></div>
+    <button class="vtt-music-trigger" id="vtt-music-trigger" data-vtt-fn="_vttToggleMusic" title="Sons &amp; Musique" aria-label="Sons et musique" aria-expanded="false" aria-controls="vtt-music-panel">🎵</button>`;
+  sessionTools.appendChild(_mf);
+
+  const _lf = document.createElement('div');
+  _lf.className = 'vtt-loot-float';
+  _lf.innerHTML = `
+    <div class="vtt-loot-panel" id="vtt-loot-panel" data-open="0" style="display:none" role="dialog" aria-label="Butin d'aventure" aria-hidden="true"></div>
+    <button class="vtt-loot-trigger" id="vtt-loot-trigger" data-vtt-fn="_vttToggleLoot" title="Butin d'aventure" aria-label="Butin d'aventure" aria-expanded="false" aria-controls="vtt-loot-panel">💰</button>`;
+  sessionTools.appendChild(_lf);
+
+  const _ef = document.createElement('div');
+  _ef.className = 'vtt-emote-float';
+  _ef.innerHTML = `<div class="vtt-emote-picker" id="vtt-emote-picker" role="dialog" aria-label="Choisir une émote" aria-hidden="true"></div>
+    <button class="vtt-emote-trigger" data-vtt-fn="_vttToggleEmotePicker" title="Émotes" aria-label="Émotes" aria-expanded="false" aria-controls="vtt-emote-picker">😄</button>`;
+  sessionTools.appendChild(_ef);
+  // NB : le lanceur de dés libre vit désormais dans le panneau « Jets » du
+  // pupitre (vtt-inspector.js) — plus de puce flottante dédiée ici.
   document.addEventListener('keydown',_keyHandler);
   document.getElementById('vtt-img-input')?.addEventListener('change',e=>{
     const f=e.target.files?.[0]; if (f) _handleUpload(f); e.target.value='';

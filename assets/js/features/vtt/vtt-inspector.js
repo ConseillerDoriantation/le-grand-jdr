@@ -111,6 +111,7 @@ export function _renderInspectorImpl(t) {
   _insLastSelKey = _selKey;
   // Multi-sélection active
   if (VS.selectedMulti.size>1) {
+    delete el.dataset.tokenId;
     const types=[...VS.selectedMulti].map(id=>VS.tokens[id]?.data?.type).filter(Boolean);
     const uniq=t=>({player:'🧑 Joueurs',enemy:'👹 Ennemis',npc:'👤 PNJ'})[t]||t;
     const typeStr=[...new Set(types)].map(uniq).join(' · ');
@@ -125,12 +126,14 @@ export function _renderInspectorImpl(t) {
     return;
   }
   if (!t) {
+    delete el.dataset.tokenId;
     const invokeBtn = !STATE.isAdmin
       ? `<button type="button" class="vtt-ins-action-main" data-vtt-fn="_vttInvokeMyToken" title="Placer ton personnage sur la carte"><span>🧑</span><b>Invoquer mon token</b></button>`
       : '';
     el.innerHTML = `<div class="vtt-ins-empty"><div style="font-size:1.8rem">🎲</div><div>Sélectionne un token${!STATE.isAdmin ? ' ou invoque ton personnage' : ''}</div>${invokeBtn}</div>`;
     return;
   }
+  el.dataset.tokenId = t.id || '';
   const ld=_live(t);
   const hp=ld.displayHp??20, hpm=ld.displayHpMax??20;
   const rat=hpm>0?Math.max(0,hp/hpm):1;
@@ -765,16 +768,19 @@ export function _renderInspectorImpl(t) {
   // Icônes sur le côté du carré d'identité ; chaque icône déploie/replie son
   // onglet en popover au-dessus de la fiche (rien de déployé par défaut).
   const _deployed = _tabs.find(s => s.k === _insTab) || null;
-  // Onglet « Fiche » : ouvre la feuille de personnage complète (tiroir latéral
-  // #vtt-mini-panel) sans surcharger le carré. Uniquement si un perso lié + son
-  // joueur est présent en séance.
-  const _sheetUid = (t.characterId && t.ownerId && VS.presence?.[t.ownerId]) ? t.ownerId : null;
-  const _sheetBtn = _sheetUid
-    ? `<button class="vtt-fiche-tab vtt-fiche-tab--sheet${VS.miniUid === _sheetUid ? ' active' : ''}" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${_esc(_sheetUid)}" title="Feuille de personnage" aria-pressed="${VS.miniUid === _sheetUid}"><span class="vtt-fiche-tab-ic">📜</span><span class="vtt-fiche-tab-lbl">Fiche</span></button>`
+  // Mini-feuille disponible depuis l'identité dès que le token est lié à un
+  // personnage, y compris si son joueur est momentanément hors ligne. L'id du
+  // personnage est transmis pour les comptes qui en possèdent plusieurs.
+  const _sheetUid = t.characterId
+    ? (t.ownerId || VS.characters[t.characterId]?.uid || null)
+    : null;
+  const _sheetOpen = !!(_sheetUid && VS.miniUid === _sheetUid && VS.miniCharId === t.characterId);
+  const _identitySheetBtn = _sheetUid
+    ? `<button type="button" class="vtt-who-sheet${_sheetOpen ? ' active' : ''}" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${_esc(_sheetUid)}|${_esc(t.characterId)}" data-mini-uid="${_esc(_sheetUid)}" data-mini-char="${_esc(t.characterId)}" title="Ouvrir la mini-feuille de ${_esc(ld.displayName ?? t.name)}" aria-label="Ouvrir la mini-feuille du personnage" aria-pressed="${_sheetOpen}">📜</button>`
     : '';
-  const _tabBar = (_tabs.length || _sheetBtn)
+  const _tabBar = _tabs.length
     ? `<div class="vtt-fiche-tabs">${_tabs.map(s =>
-        `<button class="vtt-fiche-tab${s.k === _insTab ? ' active' : ''}" data-vtt-fn="_vttInsTab" data-vtt-args="${s.k}" title="${s.lb}" aria-expanded="${s.k === _insTab}"><span class="vtt-fiche-tab-ic">${s.ic}</span><span class="vtt-fiche-tab-lbl">${s.lb}</span></button>`).join('')}${_sheetBtn}</div>`
+        `<button class="vtt-fiche-tab${s.k === _insTab ? ' active' : ''}" data-vtt-fn="_vttInsTab" data-vtt-args="${s.k}" title="${s.lb}" aria-expanded="${s.k === _insTab}"><span class="vtt-fiche-tab-ic">${s.ic}</span><span class="vtt-fiche-tab-lbl">${s.lb}</span></button>`).join('')}</div>`
     : '';
   const _panelHtml = _deployed
     ? `<div class="vtt-fiche-panel" role="region" aria-label="${_deployed.lb}">
@@ -834,6 +840,7 @@ export function _renderInspectorImpl(t) {
       <div class="vtt-who">
         <div class="vtt-who-av">${img ? `<img src="${img}" alt="">` : `<span>${icon}</span>`}</div>
         <div class="vtt-who-b"><span class="vtt-who-name">${_esc(ld.displayName ?? t.name)}</span><span class="vtt-who-sub">${_esc(_sub)}${linked ? ' · 🔗' : ''}</span></div>
+        ${_identitySheetBtn}
       </div>
       <div class="vtt-bars">
         ${_dbar('PV', `${_pvVal}<i> / ${hpm}</i>`, Math.round(rat * 100), hpColor(rat), _pvMaxBtn)}
