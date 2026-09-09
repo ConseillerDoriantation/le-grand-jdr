@@ -1001,6 +1001,7 @@ function _vttCancelListenerSchedule() {
 function _cleanup() {
   _vttCancelListenerSchedule();
   _resetKeyboardMovement({ persist:true });
+  if (_fxAnim) { _fxAnim.stop(); _fxAnim = null; }
   VS.unsubs.forEach(u => u?.());
   VS.unsubs = []; VS.stage?.destroy(); VS.stage = null; VS.layers = {};
   _resizeObs?.disconnect(); _resizeObs = null;
@@ -1411,6 +1412,40 @@ function _setSelectionRing(id, visible=true) {
   const footprint=shape.findOne('.sel-footprint');
   _setRingTone(footprint, 'selected');
   footprint?.visible(visible);
+  const spin=shape.findOne('.sel-spin');
+  if (spin) { spin.visible(visible); if (!visible) spin.rotation(0); }
+  _syncFxAnim();
+}
+
+// Animations « interface vivante » des tokens, réunies dans UNE boucle (un seul
+// redraw/frame) : rotation de l'anneau de sélection (effet Claude Design) +
+// fourmis qui marchent sur l'anneau doré du token actif en combat. Bornée : ne
+// tourne que s'il y a un token sélectionné ou actif, s'auto-arrête sinon, et est
+// stoppée dans _cleanup pour ne pas fuir entre les sessions.
+let _fxAnim = null;
+function _fxTargets() {
+  const combat = VS.session?.combat;
+  const activeId = combat?.active ? (combat?.activeTokenId ?? null) : null;
+  const turnNode = activeId ? VS.tokens[activeId]?.shape?.findOne('.turn-active') : null;
+  const selNode  = VS.selected ? VS.tokens[VS.selected]?.shape?.findOne('.sel-spin') : null;
+  return {
+    turn: (turnNode && turnNode.visible()) ? turnNode : null,
+    sel:  (selNode  && selNode.visible())  ? selNode  : null,
+  };
+}
+function _syncFxAnim() {
+  const K = window.Konva;
+  if (!K || !VS.layers?.token) { if (_fxAnim) { _fxAnim.stop(); _fxAnim = null; } return; }
+  const { turn, sel } = _fxTargets();
+  if (!turn && !sel) { if (_fxAnim) { _fxAnim.stop(); _fxAnim = null; } return; }
+  if (_fxAnim) return;   // déjà en cours ; la boucle relit les cibles à chaque frame
+  _fxAnim = new K.Animation(frame => {
+    const cur = _fxTargets();
+    if (!cur.turn && !cur.sel) { _fxAnim?.stop(); _fxAnim = null; return; }
+    if (cur.turn) cur.turn.dashOffset(-(frame.time / 55) % 12);   // fourmis qui marchent
+    if (cur.sel)  cur.sel.rotation((frame.time / 25) % 360);      // ~9 s / tour (comme la maquette)
+  }, VS.layers.token);
+  _fxAnim.start();
 }
 
 function _targetTone(srcId, tgtId, friendlyAction=false) {
@@ -2064,10 +2099,11 @@ function _patchShapeImpl(id) {
       _showTokenNotice(e.data, `${labels.join(', ')} terminé${expiredEffects.length>1?'s':''}`);
     }
     if (VS.selected===id) _syncTokenMovementVisual();
+    _syncFxAnim();
     VS.layers.token?.batchDraw();
     return;
   }
-  g.to({ x:e.data.col*CELL+sw*CELL/2, y:e.data.row*CELL+sh*CELL/2, duration:0.12 });
+  g.to({ x:e.data.col*CELL+sw*CELL/2, y:e.data.row*CELL+sh*CELL/2, duration:0.22, easing:window.Konva?.Easings?.EaseInOut });
   const health = tokenHealthMeta(ld.displayHp, ld.displayHpMax);
   const bW=Math.max(62, Math.min(CELL*sw*0.98, 150));
   const hasMana=ld.displayPm!=null || ld.hasMana;
@@ -2117,6 +2153,7 @@ function _patchShapeImpl(id) {
   }
   g.findOne('.lbl')?.text(ld.displayName??e.data.name);
   g.findOne('.turn-active')?.visible(!!VS.session?.combat?.active && VS.session?.combat?.activeTokenId===id);
+  _syncFxAnim();
   if (hpDelta) _showTokenDelta(e.data, hpDelta, 'hp');
   if (pmDelta) _showTokenDelta(e.data, pmDelta, 'pm');
   g.visible(STATE.isAdmin || (!!e.data.visible && !_tokenOffGrid(e.data)));
@@ -2295,8 +2332,8 @@ function _showAimRange(srcId, opt) {
     const dx = Math.max(0, Math.max(c, t.col) - Math.min(c, t.col + sd.w - 1));
     const dy = Math.max(0, Math.max(r, t.row) - Math.min(r, t.row + sd.h - 1));
     if (!reach(dx, dy)) continue;
-    const rect = new K.Rect({ x:c*CELL, y:r*CELL, width:CELL, height:CELL,
-      fill:`rgba(${c3},0.16)`, stroke:`rgba(${c3},0.62)`, strokeWidth:1.4, listening:false });
+    const rect = new K.Rect({ x:c*CELL+1.5, y:r*CELL+1.5, width:CELL-3, height:CELL-3, cornerRadius:5,
+      fill:`rgba(${c3},0.16)`, stroke:`rgba(${c3},0.60)`, strokeWidth:1.4, listening:false });
     VS.layers.grid.add(rect); _moveHL.push(rect);
   }
   Object.values(VS.tokens || {}).forEach(entry => {
@@ -2405,8 +2442,11 @@ function _showMoveRange(t) {
   // Pas de check collision : le drag & drop laisse passer, l'affichage doit faire pareil.
   for (const [key,dest] of cellMap) {
     const [cc,cr]=key.split(',').map(Number);
-    const rect=new K.Rect({ x:cc*CELL,y:cr*CELL,width:CELL,height:CELL,
-      fill:'rgba(79,140,255,0.28)', stroke:'rgba(79,140,255,0.70)', strokeWidth:1.5, listening:true });
+    const rect=new K.Rect({ x:cc*CELL+1.5,y:cr*CELL+1.5,width:CELL-3,height:CELL-3, cornerRadius:5,
+      fill:'rgba(79,140,255,0.20)', stroke:'rgba(79,140,255,0.55)', strokeWidth:1.4, listening:true });
+    // Survol : la case s'éclaire (retour tactile facon maquette).
+    rect.on('mouseenter', () => { rect.fill('rgba(79,140,255,0.42)'); rect.stroke('rgba(126,176,255,0.9)'); VS.layers.grid.batchDraw(); VS.stage && (VS.stage.container().style.cursor='pointer'); });
+    rect.on('mouseleave', () => { rect.fill('rgba(79,140,255,0.20)'); rect.stroke('rgba(79,140,255,0.55)'); VS.layers.grid.batchDraw(); VS.stage && (VS.stage.container().style.cursor=''); });
     const tc=dest.aC, tr=dest.aR;
     const moveSelectedHere = async e => {
       // En mode placement de zone ou de ciblage multi-cibles : le sort est prioritaire
@@ -2440,6 +2480,7 @@ export function _clearHL() {
   _moveHL.forEach(r=>r.destroy());
   _moveHL=[];
   _clearReachableFootprints();
+  if (VS.stage) VS.stage.container().style.cursor='';   // le survol des cases de déplacement le passait à 'pointer'
   VS.layers.grid?.batchDraw();
   VS.layers.token?.batchDraw();
 }
@@ -2713,13 +2754,13 @@ function _showAttackRange(t) {
     const isPrimary = reachedByWeapon;
     const rect = isPrimary
       // Portée principale (arme / attaque immédiate) — rouge plein
-      ? new K.Rect({ x:c*CELL, y:r*CELL, width:CELL, height:CELL,
-          fill:'rgba(239,68,68,0.22)', stroke:'rgba(239,68,68,0.65)',
-          strokeWidth:1.5, listening:false })
+      ? new K.Rect({ x:c*CELL+1.5, y:r*CELL+1.5, width:CELL-3, height:CELL-3, cornerRadius:5,
+          fill:'rgba(239,68,68,0.18)', stroke:'rgba(239,68,68,0.58)',
+          strokeWidth:1.4, listening:false })
       // Portée étendue (sorts / actions longue distance uniquement) — violet pointillé
-      : new K.Rect({ x:c*CELL, y:r*CELL, width:CELL, height:CELL,
-          fill:'rgba(167,139,250,0.10)', stroke:'rgba(167,139,250,0.55)',
-          strokeWidth:1.2, dash:[6,4], listening:false });
+      : new K.Rect({ x:c*CELL+1.5, y:r*CELL+1.5, width:CELL-3, height:CELL-3, cornerRadius:5,
+          fill:'rgba(167,139,250,0.10)', stroke:'rgba(167,139,250,0.5)',
+          strokeWidth:1.1, dash:[6,4], listening:false });
     VS.layers.grid.add(rect); _moveHL.push(rect);
   }
   // La cible atteignable est encadrée sur toute son empreinte. Le calcul reste
@@ -12307,14 +12348,15 @@ async function _vttMountTable(content) {
       </button>
     </div>` : ''}
     <div class="vtt-tool-float-tools" role="toolbar" aria-label="Outils de la table virtuelle">
-      <button class="vtt-tool" data-vtt-fn="_vttCenterOnMyToken" title="Recentrer sur mon personnage" aria-label="Recentrer sur mon personnage">⌖</button>
-      <button class="vtt-tool" data-vtt-fn="_vttOpenKeyboardHelp" title="Raccourcis clavier (?)" aria-label="Afficher les raccourcis clavier">?</button>
-      <button class="vtt-tool active" data-tool="select" data-vtt-fn="_vttTool" data-vtt-args="select" title="↖ Sélection" aria-pressed="true">↖</button>
+      <button class="vtt-tool active" data-tool="select" data-vtt-fn="_vttTool" data-vtt-args="select" title="↖ Sélection (V)" aria-pressed="true">↖</button>
       <button class="vtt-tool" data-tool="ruler"  data-vtt-fn="_vttTool" data-vtt-args="ruler"  title="📏 Règle (R) — clic gauche pour mesurer · clic droit pour annuler" aria-pressed="false">📏</button>
-      <button class="vtt-tool" data-tool="draw"   data-vtt-fn="_vttTool" data-vtt-args="draw"   title="✏️ Dessin" aria-pressed="false">✏️</button>
+      <button class="vtt-tool" data-tool="draw"   data-vtt-fn="_vttTool" data-vtt-args="draw"   title="✏️ Dessin (D)" aria-pressed="false">✏️</button>
       ${STATE.isAdmin ? (_vttAdvancedPremium()
-        ? `<button class="vtt-tool" data-tool="walls" data-vtt-fn="_vttTool" data-vtt-args="walls" title="🧱 Murs / Éclairage dynamique" aria-pressed="false">🧱</button>`
+        ? `<button class="vtt-tool" data-tool="walls" data-vtt-fn="_vttTool" data-vtt-args="walls" title="🧱 Murs / Éclairage dynamique (M)" aria-pressed="false">🧱</button>`
         : `<button class="vtt-tool vtt-tool-premium" data-vtt-fn="_vttPremiumInfo" title="Premium : murs, brouillard et éclairage dynamique">🧱</button>`) : ''}
+      <span class="vtt-tool-sep" aria-hidden="true"></span>
+      <button class="vtt-tool" data-vtt-fn="_vttCenterOnMyToken" title="Recentrer sur mon personnage (⌖)" aria-label="Recentrer sur mon personnage">⌖</button>
+      <button class="vtt-tool" data-vtt-fn="_vttOpenKeyboardHelp" title="Raccourcis clavier (?)" aria-label="Afficher les raccourcis clavier">?</button>
     </div>
     <div id="vtt-draw-bar" class="vtt-draw-bar" style="display:none">
       <div class="vtt-draw-row">

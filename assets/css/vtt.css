@@ -10225,9 +10225,26 @@ html:not([data-theme="light"]) .vtt-root {
 
 .vtt-tool-float {
   top: 14px;
-  right: 14px;
+  left: 14px;
+  right: auto;
+  align-items: flex-start;
   gap: 8px;
 }
+/* Rail d'outils VERTICAL en pilule (rendu Claude Design .toolrail) :
+   le look pilule (radius/fond/bordure) est posé plus bas sur .vtt-tool-float-tools
+   pour gagner la cascade. Ici : boutons ronds + état actif doré (.tool / .tool.on). */
+.vtt-tool-float-tools .vtt-tool {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 14px;
+  border: 0; background: none; color: var(--text-muted);
+  transition: background .15s, color .15s, box-shadow .15s;
+}
+.vtt-tool-float-tools .vtt-tool:hover { background: var(--surface-3); color: var(--text); }
+.vtt-tool-float-tools .vtt-tool.active {
+  background: var(--gold-glow); color: var(--gold-2);
+  box-shadow: inset 0 0 0 1px var(--border-bright);
+}
+.vtt-tool-sep { height: 1px; margin: 2px 4px; background: var(--border-md); }
 
 .vtt-tool-float-tools,
 .vtt-tool-float .vtt-draw-bar,
@@ -10245,8 +10262,13 @@ html:not([data-theme="light"]) .vtt-root {
 }
 
 .vtt-tool-float-tools {
-  padding: 5px;
-  gap: 5px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--surface-1) 90%, transparent);
+  border: 1px solid var(--border-md);
+  box-shadow: var(--elev-1);
 }
 
 .vtt-draw-btn,

@@ -197,6 +197,16 @@ export function _buildTokenVisual(t, ld, condById) {
     shadowColor:'#2563eb', shadowBlur:12, shadowOpacity:.9,
     fill:'transparent', visible:false, listening:false, name:'sel',
   }));
+  // Anneau rotatif de sélection (effet Claude Design .tok.sel::after) : deux arcs
+  // opposés dans la couleur du camp, mis en rotation par _syncFxAnim quand le
+  // token est sélectionné. Masqué et immobile sinon.
+  const _selSpinC = 2 * Math.PI * (rx + 7);
+  g.add(new K.Ellipse({
+    x:0, y:portraitY, radiusX:rx+7, radiusY:ry+7, stroke:typeColor, strokeWidth:1.5,
+    dash:[_selSpinC*0.30, _selSpinC*0.20], fill:'transparent',
+    shadowColor:typeColor, shadowBlur:6, shadowOpacity:.5,
+    visible:false, listening:false, name:'sel-spin',
+  }));
   g.add(new K.Ellipse({
     x:0, y:portraitY, radiusX:rx+7, radiusY:ry+7, stroke:'#fbbf24', strokeWidth:2.5, dash:[7,4],
     shadowColor:'#f59e0b', shadowBlur:10, shadowOpacity:.75,
@@ -266,18 +276,24 @@ export function _buildTokenVisual(t, ld, condById) {
       fontFamily:'Inter,sans-serif', align:'center', listening:false, name:'ca-buff-turns' }));
   }
 
-  // États/effets ancrés DANS le bord gauche du portrait. Rien ne dépasse vers
-  // la case du dessus, même lorsque deux tokens sont parfaitement adjacents.
+  // États/effets en rangée AU-DESSUS du portrait : emoji lisibles de loin
+  // (comme la maquette Claude Design). Centrés horizontalement ; ils peuvent
+  // déborder légèrement au-dessus de la case, c'est assumé — l'information
+  // d'état prime sur l'étanchéité de la grille.
   if (effects.length) {
-    const slots = sw >= 2 || sh >= 2 ? 4 : 3;
+    const slots = (sw >= 2 || sh >= 2) ? 6 : 4;
     const overflow = Math.max(0, effects.length - slots);
     const shown = effects.slice(0, overflow > 0 ? slots-1 : slots);
-    const x=-rx+5, startY=portraitY-ry+8, gap=14;
+    const count = shown.length + (overflow > 0 ? 1 : 0);
+    const gap = 15;
+    const startX = -((count - 1) * gap) / 2;
+    const y = portraitY - ry - 10;   // juste au-dessus du portrait
     shown.forEach((effect, i) => {
-      const y=startY+i*gap;
+      const x = startX + i*gap;
       const effectStroke=effect.tone==='negative'?'#fecaca':effect.tone==='positive'?'#bbf7d0':'#bfdbfe';
       g.add(new K.Circle({ x, y, radius:7, fill:effect.color,
         stroke:effectStroke, strokeWidth:effect.tone==='neutral'?1:1.7,
+        shadowColor:'#000', shadowBlur:3, shadowOpacity:.55,
         listening:false, name:`${effect.kind==='condition'?'cond-bg':'buff-bg'} effect-detail` }));
       g.add(new K.Text({ x:x-7, y:y-5.5, width:14, height:11, text:effect.icon,
         fontSize:8.5, align:'center', verticalAlign:'middle', fontFamily:'Inter,sans-serif',
@@ -293,7 +309,7 @@ export function _buildTokenVisual(t, ld, condById) {
       }
     });
     if (overflow > 0) {
-      const y=startY+shown.length*gap;
+      const x=startX+shown.length*gap;
       g.add(new K.Circle({ x, y, radius:7, fill:'#334155', stroke:'#94a3b8', strokeWidth:1, listening:false, name:'effect-detail' }));
       g.add(new K.Text({ x:x-7, y:y-5, width:14, height:10, text:`+${overflow}`,
         fontSize:7, fontStyle:'bold', align:'center', fill:'#fff', fontFamily:'Inter,sans-serif', listening:false, name:'effect-detail' }));
