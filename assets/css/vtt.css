@@ -1079,18 +1079,38 @@ html:not([data-theme="light"]) .vtt-root {
   border-bottom: 1px solid var(--border); z-index: 25;
 }
 .vtt-ribbon-round {
-  flex: none; display: flex; flex-direction: column; justify-content: center; gap: 1px;
-  padding: 0 12px 0 0; border: 0; border-right: 1px solid var(--border-md);
-  background: none; cursor: pointer; text-align: left;
+  flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  padding: 2px 14px 2px 4px; margin-right: 2px; border: 0; border-right: 1px solid var(--border-md);
+  background: none; cursor: pointer; text-align: center; min-width: 54px;
 }
-.vtt-ribbon-round span { font-size: 9px; letter-spacing: .18em; text-transform: uppercase; color: var(--text-dim); font-weight: 500; }
-.vtt-ribbon-round b { font-family: var(--font-display); font-size: 18px; font-weight: 600; line-height: 1; color: var(--amber); }
-.vtt-ribbon-round.idle b { color: var(--text-muted); }
+.vtt-ribbon-round span { font-size: 8.5px; letter-spacing: .22em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
+.vtt-ribbon-round b {
+  font-family: var(--font-display); font-size: 26px; font-weight: 700; line-height: 1;
+  color: var(--amber); text-shadow: 0 0 12px color-mix(in srgb, var(--amber) 45%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.vtt-ribbon-round:hover b { color: var(--gold-2); }
+.vtt-ribbon-round.idle b { color: var(--text-muted); text-shadow: none; font-size: 22px; }
+
+/* Barre d'estimation de durée du tour (bas du ruban) — se remplit sur 2 min.
+   100 % CSS ; le temps écoulé est repris via animation-delay négatif inline. */
+.vtt-ribbon-timer { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,.05); z-index: 26; pointer-events: none; }
+.vtt-ribbon-timer > b {
+  display: block; height: 100%; width: 100%; transform-origin: left center; transform: scaleX(0);
+  border-radius: 0 2px 2px 0;
+  background: linear-gradient(90deg, var(--ember, #f59e0b), var(--crimson, #ef4444));
+  box-shadow: 0 0 6px rgba(239, 68, 68, .55);
+  animation: vttTurnTimer 120s linear forwards;   /* scaleX = composité GPU, aucun layout/paint */
+}
+@keyframes vttTurnTimer { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .vtt-ribbon-track { flex: 1; display: flex; align-items: center; gap: 5px; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .vtt-ribbon-track::-webkit-scrollbar { display: none; }
 .vtt-ribbon-track--idle { color: var(--text-dim); font-size: 12px; font-style: italic; }
 .vtt-ribbon-empty { color: var(--text-dim); font-size: 12px; font-style: italic; padding: 0 8px; }
 .vtt-ribbon-acts { flex: none; display: flex; align-items: center; gap: 5px; padding-left: 10px; border-left: 1px solid var(--border-md); }
+.vtt-ribbon-timerset { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--text-dim); }
+.vtt-ribbon-timerset select { background: var(--surface-2); color: var(--text-soft); border: 1px solid var(--border-md); border-radius: var(--r-sm); padding: 3px 6px; font: inherit; font-size: 11.5px; cursor: pointer; }
+.vtt-ribbon-timerset select:hover { border-color: var(--border-strong); color: var(--text); }
 .vtt-ribbon-mineglow { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, var(--gold-glow), transparent 22%, transparent 78%, var(--gold-glow)); }
 @keyframes vttRibbonEnter { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 .vtt-ribbon--enter { animation: vttRibbonEnter .28s cubic-bezier(.22, 1, .36, 1); }
@@ -10562,9 +10582,17 @@ html:not([data-theme="light"]) .vtt-root {
     linear-gradient(180deg, rgba(240,191,87,.12), rgba(8,14,25,.92));
 }
 
-/* Mini-feuille personnage : cockpit latéral permanent */
-.vtt-mini-panel.open {
-  width: 318px;
+/* Mini-feuille personnage : cockpit latéral permanent.
+   Largeur pilotée par --vtt-mini-w, partagée avec le décalage du dock ci-dessous
+   pour qu'ils restent TOUJOURS synchro (fini le chevauchement / le trou). */
+.vtt-root { --vtt-mini-w: 340px; }
+@media (max-width: 1366px) { .vtt-root { --vtt-mini-w: 300px; } }
+.vtt-mini-panel.open { width: var(--vtt-mini-w) !important; }
+/* Le dock d'identité (bas-gauche, absolu dans .vtt-body) passait SOUS le tiroir.
+   Ouvert, le dock se cale juste à droite du tiroir (desktop). Sélecteur frère :
+   le dock suit la mini-feuille dans .vtt-body. */
+@media (min-width: 901px) {
+  .vtt-mini-panel.open ~ .vtt-fiche-dock { left: calc(var(--vtt-mini-w) + 18px); }
 }
 
 .vtt-ms-header {
@@ -10804,8 +10832,9 @@ html:not([data-theme="light"]) .vtt-root {
 
 .vtt-ms-tab.active {
   border-bottom-color: transparent;
-  background: linear-gradient(180deg, rgba(240,191,87,.18), rgba(240,191,87,.07));
-  box-shadow: inset 0 0 0 1px rgba(240,191,87,.18);
+  background: var(--gold-glow);
+  color: var(--gold-2);
+  box-shadow: inset 0 0 0 1px var(--border-bright);
 }
 
 .vtt-ms-tab-content {
@@ -10827,10 +10856,10 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-ms-combat-touch {
   min-width: 0;
   padding: .58rem .62rem;
-  border: 1px solid rgba(240,191,87,.22);
+  border: 1px solid color-mix(in srgb, var(--gold) 26%, transparent);
   border-radius: 12px;
   background:
-    radial-gradient(circle at 16% 0%, rgba(240,191,87,.16), transparent 62%),
+    radial-gradient(circle at 16% 0%, var(--gold-glow), transparent 62%),
     rgba(255,255,255,.028);
 }
 
@@ -10980,9 +11009,9 @@ html:not([data-theme="light"]) .vtt-root {
 }
 
 .vtt-ms-equip-chip.is-trait {
-  border-color: rgba(240,191,87,.24);
-  background: rgba(240,191,87,.08);
-  color: var(--gold, #e8b84b);
+  border-color: color-mix(in srgb, var(--gold) 30%, transparent);
+  background: var(--gold-glow);
+  color: var(--gold-2);
 }
 
 .vtt-ms-equip-chip.is-more {
@@ -10995,9 +11024,9 @@ html:not([data-theme="light"]) .vtt-root {
   grid-column: 1 / -1;
   margin-top: .02rem;
   padding: .38rem .46rem;
-  border: 1px solid rgba(240,191,87,.14);
+  border: 1px solid color-mix(in srgb, var(--gold) 16%, transparent);
   border-radius: 10px;
-  background: rgba(240,191,87,.045);
+  background: color-mix(in srgb, var(--gold) 6%, transparent);
 }
 
 .vtt-ms-xp {
@@ -11031,6 +11060,19 @@ html:not([data-theme="light"]) .vtt-root {
   border: 1px solid rgba(126,176,255,.16);
   background: rgba(126,176,255,.08);
 }
+/* Icônes SVG monochromes (remplacent les emojis) */
+.vtt-ms-ic { width: 1em; height: 1em; display: inline-block; vertical-align: -.14em; }
+.vtt-ms-tab-ic svg { width: 17px; height: 17px; }
+.vtt-ms-tab-intro-icon svg { width: 17px; height: 17px; color: var(--gold-2); }
+.vtt-ms-setbonus svg { width: 14px; height: 14px; vertical-align: -.12em; }
+.vtt-ms-inv-btn svg { width: 15px; height: 15px; }
+.vtt-ms-slot-icon svg { width: 16px; height: 16px; color: var(--gold-2); }
+.vtt-ms-craft-type svg { width: 16px; height: 16px; }
+.vtt-ms-craft-btn svg { width: 15px; height: 15px; vertical-align: -.16em; }
+.vtt-ms-craft-out svg { width: 14px; height: 14px; color: var(--gold-2); }
+.vtt-ms-craft-effet svg { width: 13px; height: 13px; color: var(--gold-2); vertical-align: -.1em; }
+/* Intertitre de section dans un onglet */
+.vtt-ms-sect-label { margin: .55rem 0 .32rem; font-size: .58rem; font-weight: 850; letter-spacing: .11em; text-transform: uppercase; color: var(--text-dim); }
 
 .vtt-ms-tab-intro-main {
   min-width: 0;
@@ -11159,9 +11201,9 @@ html:not([data-theme="light"]) .vtt-root {
 
 .vtt-ms-deckbar {
   border-radius: 11px;
-  border-color: rgba(240,191,87,.18);
+  border-color: color-mix(in srgb, var(--gold) 20%, transparent);
   background:
-    linear-gradient(90deg, rgba(240,191,87,.1), rgba(126,176,255,.045));
+    linear-gradient(90deg, var(--gold-glow), color-mix(in srgb, var(--gold) 5%, transparent));
 }
 
 .vtt-ms-deck-lbl {

@@ -106,7 +106,7 @@ import {
 } from './vtt-conditions.js';
 import {
   _vttMoveTurnOrder, _vttNextActiveTurn, _vttResetTurn, _vttSetActiveTurn,
-  _vttToggleTurnFlag, _vttToggleCombat, _vttNextRound,
+  _vttToggleTurnFlag, _vttToggleCombat, _vttNextRound, _vttSetTurnTimer,
 } from './vtt-combat-turns.js';
 import {
   _vttApplyEnchantBuffs, _vttApplyAfflictions, _vttApplyRegeneration,
@@ -12762,6 +12762,7 @@ export const VTT_ACTIONS = {
   _vttNextActiveTurn,
   _vttToggleLoop,
   _vttNextRound,
+  _vttSetTurnTimer,
   _vttNoop,
   _vttOpenTokenDelegatesModal,
   _vttPickElement,
