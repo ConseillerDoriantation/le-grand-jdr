@@ -19,6 +19,15 @@ let _combatTab = 'allies'; // 'allies' (joueurs + PNJ) | 'enemies' (MJ only)
 // actif / flags). Ouvert au clic sur le Round. Sera replié dans le panneau
 // glissant en phase 5.
 let _showOrder = false;
+// Barre d'estimation de durée du tour (visuelle uniquement) : se remplit en 2 min
+// et se réinitialise à chaque changement de tour. Ne passe JAMAIS le tour — le MJ
+// le fait à la main. 100 % CSS (largeur animée + animation-delay négatif pour
+// reprendre après un re-render) → aucun coût de rendu continu.
+const TURN_TIMER_SEC = 120;
+let _turnTimerKey = null;    // `${round}:${activeTokenId}` du tour affiché
+let _turnTimerStartMs = 0;   // horodatage LOCAL du début de ce tour
+const _fmtDur = s => { const m = Math.floor(s / 60), r = s % 60; return m && r ? `${m} min ${r}` : m ? `${m} min` : `${r} s`; };
+const TURN_TIMER_PRESETS = [30, 60, 90, 120, 180, 300];
 // Suit l'état "combat actif affiché" pour ne déclencher l'animation de
 // déploiement du tracker QU'à l'ouverture (pas à chaque re-render de tour).
 let _trackerWasActive = false;
@@ -112,6 +121,7 @@ function _renderCombatTracker() {
   // Combat inactif : MJ → ruban « idle » (démarrer) ; joueur → ruban collapsé.
   if (!active) {
     _trackerWasActive = false;
+    _turnTimerKey = null;   // le prochain combat repart d'un tour neuf
     _showOrder = false;
     if (root) root.dataset.combat = mj ? 'idle' : 'off';
     if (!mj) { el.innerHTML = ''; return; }
@@ -168,6 +178,14 @@ function _renderCombatTracker() {
   const activeTok = VS.tokens[VS.session?.combat?.activeTokenId]?.data;
   const mine = !!activeTok && !!activeTok.ownerId && activeTok.ownerId === STATE.user?.uid;
 
+  // Barre de durée du tour : la clé change dès que le round OU le token actif
+  // change → on remet le chrono à zéro. Sinon on reprend là où on en est (le
+  // temps écoulé est passé en animation-delay négatif à la barre CSS).
+  const _turnSec = Math.max(15, Math.min(600, VS.session?.combat?.turnSeconds ?? TURN_TIMER_SEC));
+  const _turnKey = `${round}:${VS.session?.combat?.activeTokenId ?? ''}`;
+  if (_turnKey !== _turnTimerKey) { _turnTimerKey = _turnKey; _turnTimerStartMs = Date.now(); }
+  const _turnElapsed = Math.min(_turnSec, Math.max(0, (Date.now() - _turnTimerStartMs) / 1000));
+
   // Popover « ordre détaillé » : réutilise _trackerRow verbatim (réordonner /
   // donner le tour / flags). Replié dans le panneau glissant en phase 5.
   const orderRows = list.length
@@ -182,6 +200,11 @@ function _renderCombatTracker() {
     <div class="vtt-ribbon-track">${entries}</div>
     ${mj ? `
       <div class="vtt-ribbon-acts">
+        <label class="vtt-ribbon-timerset" title="Durée estimée d’un tour (barre rouge). Le tour ne se passe pas tout seul.">⏱
+          <select data-vtt-fn="_vttSetTurnTimer" data-vtt-on="change" data-vtt-args="$value">
+            ${TURN_TIMER_PRESETS.map(s => `<option value="${s}"${s === _turnSec ? ' selected' : ''}>${_fmtDur(s)}</option>`).join('')}
+          </select>
+        </label>
         <button class="vtt-chip" data-vtt-fn="_vttNextActiveTurn" title="Mettre en lumière le participant suivant — ne bloque personne">⏭ Suivant</button>
         <button class="vtt-chip" data-vtt-fn="_vttNextRound" title="Round suivant — reset déplacement et actions">↻ Round</button>
         <button class="vtt-chip vtt-chip--danger" data-vtt-fn="_vttToggleCombat" title="Terminer le combat">⏹</button>
@@ -189,7 +212,8 @@ function _renderCombatTracker() {
     <div class="vtt-ribbon-order" ${_showOrder ? '' : 'hidden'}>
       <div class="vtt-ribbon-order-hd">Ordre de passage détaillé</div>
       <div class="vct-list">${orderRows}</div>
-    </div>`;
+    </div>
+    <div class="vtt-ribbon-timer" aria-hidden="true" title="Durée du tour (estimation ~${_fmtDur(_turnSec)})"><b style="animation-duration:${_turnSec}s;animation-delay:-${_turnElapsed.toFixed(1)}s"></b></div>`;
 }
 // Re-render groupé via microtask (évite les multi-rerender lors d'un batch reset)
 let _trackerDirty = false;

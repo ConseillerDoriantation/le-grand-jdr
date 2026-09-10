@@ -126,6 +126,23 @@ export async function _vttNextActiveTurn() {
   await _saveTurnOrder(order,activeTokenId);
 }
 
+// Durée estimée d'un tour (barre rouge du ruban), choisie par le MJ et partagée
+// à tous via la session. Une écriture par changement (rare) → quota négligeable.
+export async function _vttSetTurnTimer(seconds) {
+  if (!STATE.isAdmin || !VS.session?.combat) return;
+  const sec=Math.max(15,Math.min(600,parseInt(seconds)||120));
+  const previous=VS.session.combat;
+  if ((previous.turnSeconds ?? 120)===sec) return;
+  VS.session.combat={...previous,turnSeconds:sec};
+  _renderCombatTrackerSoon();
+  await setDoc(_sesRef(),{combat:VS.session.combat},{merge:true}).catch(error => {
+    VS.session.combat=previous;
+    _renderCombatTrackerSoon();
+    console.error('[vtt] durée de tour', error);
+    showNotif('Erreur : durée du tour non enregistrée','error');
+  });
+}
+
 export async function _vttToggleCombat() {
   if (!STATE.isAdmin) return;
   VS.session ||= {};
