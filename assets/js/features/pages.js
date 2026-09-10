@@ -1278,6 +1278,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   // groupes n'a aucune influence sur les scores individuels.
   const needsImpact = renderOverview || renderRanking;
   const mvpDates = needsImpact && !dateKey ? [...new Set(scopeDates || allDates)] : [];
+  // Séries par DATE : servent au chronogramme des temps forts (ordre temporel).
   const mvpSessionRows = mvpDates.map(date => {
     const dateRows = _statsRowsFor([date]);
     return {
@@ -1285,10 +1286,25 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
       rows: dateRows,
     };
   }).filter(session => session.rows.length > 0);
+  // Unité comparable du MVP = une MISSION (pas une date) : une mission jouée en
+  // 1 ou plusieurs séances compte pour UNE seule unité, donc son nombre de
+  // séances ne gonfle ni ne pénalise le classement (les dates non liées à une
+  // mission forment chacune leur propre unité). Avec une seule unité (mission ou
+  // date isolée), on reste en mode « séance » — aucune barrière de nb de séances.
+  const mvpUnitsMap = new Map();
+  for (const { date } of mvpSessionRows) {
+    const unitKey = _statsData?.sessions?.[date]?.missionId || `date:${date}`;
+    const bucket = mvpUnitsMap.get(unitKey);
+    if (bucket) bucket.push(date); else mvpUnitsMap.set(unitKey, [date]);
+  }
+  const mvpUnitRows = [...mvpUnitsMap.values()]
+    .map(dates => ({ date: dates.slice().sort()[0] || '', rows: _statsRowsFor(dates) }))
+    .filter(unit => unit.rows.length > 0);
   const mvpScores = needsImpact ? scoreMvpView({
     rows: allRows,
-    sessionRows: mvpSessionRows,
+    sessionRows: mvpUnitRows.length > 1 ? mvpUnitRows : [],
     visibleIds: sel,
+    autoCalibrate: true,
   }) : [];
   const rowsById = new Map(rows.map(row => [row.id, row]));
   const impactRows = mvpScores.map(result => {
@@ -1459,8 +1475,8 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     </details>`;
   };
   const contextItems = [];
-  if (mvpSessionRows.length) contextItems.push(`MVP V2 : médiane de ${mvpSessionRows.length} séance${mvpSessionRows.length > 1 ? 's' : ''} sur des repères fixes, avec rendements décroissants sans plafond dur.`);
-  else contextItems.push('MVP V2 : repères fixes et rendements décroissants sans plafond dur, indépendants des autres personnages.');
+  if (mvpUnitRows.length > 1) contextItems.push(`MVP V2 : médiane de ${mvpUnitRows.length} mission${mvpUnitRows.length > 1 ? 's' : ''} (le nombre de séances d'une mission n'influe pas), repères calibrés et rendements décroissants sans plafond dur.`);
+  else contextItems.push('MVP V2 : mission scorée comme une unité (indépendante du nombre de séances), repères calibrés et rendements décroissants sans plafond dur.');
   if (groupCompare.length > 1) contextItems.push('Comparaison des groupes normalisée par séance.');
   if (isAct && selectedAct) contextItems.push(`${selectedAct.missions.length} mission${selectedAct.missions.length > 1 ? 's' : ''} agrégée${selectedAct.missions.length > 1 ? 's' : ''} dans cet acte.`);
   if (!selectedMissionId && !isAct && unlinkedDates.length) contextItems.push(`${unlinkedDates.length} séance${unlinkedDates.length > 1 ? 's' : ''} non reliée${unlinkedDates.length > 1 ? 's' : ''} à une mission.`);
@@ -1575,14 +1591,22 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     const lead = activeDetailLeader || mvps[0];
     const leadDetails = lead?.impactDetails || { entries: [], score: lead?.impact || 0 };
     const isTopLead = detailLeaders[0]?.id === lead?.id;
-    const axes = (leadDetails.entries || []).filter(e => (e.points || 0) > 0).sort((a, b) => b.points - a.points).slice(0, 6);
-    const axesMax = Math.max(...axes.map(a => a.points), 1);
-    const axesHtml = axes.map(a => `<div class="stats-axe">
+    // On affiche l'INDICE de performance par axe (repère = 100), pas les points
+    // pondérés par le rang : sinon l'axe signature d'un perso (l'offense d'un DPS
+    // classé 2e/3e) apparaît écrasé à ~5 % de sa valeur et devient illisible.
+    const axisPerf = e => Number.isFinite(Number(e.normalized)) ? Number(e.normalized) : (e.points || 0);
+    const axes = (leadDetails.entries || []).filter(e => axisPerf(e) > 0).sort((a, b) => axisPerf(b) - axisPerf(a)).slice(0, 6);
+    const axesMax = Math.max(...axes.map(axisPerf), 1);
+    const axesHtml = axes.map(a => {
+      const perf = axisPerf(a);
+      const contrib = `Indice ${Math.round(perf)} (repère 100) · pèse ${fmtPts(a.points)} au score après rang #${a.axisRank || 1}`;
+      return `<div class="stats-axe" title="${_esc(contrib)}">
       <i>${a.icon || '•'}</i><span class="stats-axe-lbl">${_esc(a.label)}</span>
       <span class="stats-axe-cnt">${a.count != null ? Number(a.count).toLocaleString('fr-FR') : ''}</span>
-      <span class="stats-axe-bar"><i style="width:${Math.round(a.points / axesMax * 100)}%"></i></span>
-      <span class="stats-axe-pts">${fmtPts(a.points)}</span>
-    </div>`).join('');
+      <span class="stats-axe-bar"><i style="width:${Math.round(perf / axesMax * 100)}%"></i></span>
+      <span class="stats-axe-pts">${Math.round(perf)}</span>
+    </div>`;
+    }).join('');
     const runnersHtml = detailLeaders.length > 1 ? `<div class="stats-mvp-runners">
       ${detailLeaders.slice(0, 4).map((p, i) => `<button type="button" class="stats-runner${p.id === lead?.id ? ' on' : ''}" data-action="_statsMvpDetailPick" data-id="${_esc(p.id)}">
         ${_statsAvatar(p.id, p.name, 24)}<span>${_esc(p.name)}<em>${i === 0 ? 'MVP' : '#' + (i + 1)}</em></span><b>${p.impactDetails?.score ?? p.impact}</b>
@@ -1683,7 +1707,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     const exportSessions = exportDates
       .map(date => ({ date, rows: _statsRowsFor([date]) }))
       .filter(session => session.rows.length > 0);
-    const exportScores = scoreMvpView({ rows: allRows, sessionRows: exportSessions, visibleIds: sel });
+    const exportScores = scoreMvpView({ rows: allRows, sessionRows: exportSessions, visibleIds: sel, autoCalibrate: true });
     const exportRowsById = new Map(rows.map(row => [row.id, row]));
     const exportImpactRows = exportScores.map(result => {
       const source = exportRowsById.get(result.id);

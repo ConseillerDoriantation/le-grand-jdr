@@ -8,6 +8,15 @@ const AXES = {
   skill:      { label: 'Compétences & RP',    icon: '🎲', reference: 30 },
 };
 
+// Repères par défaut de chaque axe (valeurs historiques codées en dur). Servent
+// de repli quand le calibrage automatique manque de données comparables.
+export const DEFAULT_REFERENCES = Object.fromEntries(
+  Object.entries(AXES).map(([key, meta]) => [key, meta.reference]),
+);
+// En dessous de ce nombre d'échantillons positifs sur un axe, on garde le repère
+// par défaut : une médiane sur 1-2 valeurs serait trop instable pour recalibrer.
+const MIN_CALIBRATION_SAMPLES = 3;
+
 const AXIS_WEIGHTS = [1, 0.20, 0.05, 0];
 const AXIS_SOFT_CAPS = [
   { upTo: 100, multiplier: 1 },
@@ -103,6 +112,29 @@ export function buildMvpRawProfile(row = {}) {
   };
 }
 
+/**
+ * Repères adaptatifs : pour chaque axe, la médiane des contributions brutes
+ * RÉELLEMENT produites (échantillons positifs uniquement) sur le périmètre
+ * fourni. Un axe « facile à remplir » (p.ex. quelques jets de compétence) voit
+ * ainsi son repère monter et cesse d'écraser mécaniquement les autres axes ;
+ * l'offense se recale sur l'échelle de dégâts réelle du groupe. Le repère par
+ * défaut sert de repli tant qu'il n'y a pas assez d'échantillons comparables.
+ *
+ * NB : ce calibrage est global au périmètre calculé (il fixe une échelle commune
+ * partagée par tous), pas une comparaison entre coéquipiers d'une même séance.
+ */
+export function calibrateReferences(rows = []) {
+  const profiles = rows.map(buildMvpRawProfile);
+  const refs = {};
+  for (const key of Object.keys(AXES)) {
+    const positives = profiles.map(profile => profile.axes[key].raw).filter(value => value > 0);
+    refs[key] = positives.length >= MIN_CALIBRATION_SAMPLES
+      ? Math.max(1, rounded(median(positives)))
+      : DEFAULT_REFERENCES[key];
+  }
+  return refs;
+}
+
 function confidenceForSession(entries) {
   const primaryEvidence = entries[0]?.evidence || 0;
   if (primaryEvidence >= 3) return { level: 'high', label: 'Fiable', reason: 'activité suffisante sur l’axe principal' };
@@ -121,14 +153,16 @@ function weightEntries(entries) {
 }
 
 /** Score V2 absolu d'une séance, indépendant des autres participants. */
-export function scoreMvpSession(rows = []) {
+export function scoreMvpSession(rows = [], references = DEFAULT_REFERENCES) {
   const profiles = rows.map(buildMvpRawProfile);
 
   return profiles.map(profile => {
     const entries = weightEntries(Object.values(profile.axes).map(axis => {
-      const baseNormalized = rounded(axis.raw / axis.reference * 100);
+      const reference = num(references[axis.key]) || axis.reference;
+      const baseNormalized = rounded(axis.raw / reference * 100);
       return {
         ...axis,
+        reference,
         children: axis.parts,
         baseNormalized,
         normalized: scoreMvpAxis(baseNormalized),
@@ -171,9 +205,9 @@ function mergeCampaignChildren(entries = []) {
  * Classement multi-séances : médiane de chaque axe normalisé. Le nombre de
  * séances jouées ne gonfle donc plus le score de campagne.
  */
-export function scoreMvpCampaign(sessionRows = []) {
+export function scoreMvpCampaign(sessionRows = [], references = DEFAULT_REFERENCES) {
   const sessions = sessionRows
-    .map(session => ({ ...session, scores: scoreMvpSession(session.rows || []) }))
+    .map(session => ({ ...session, scores: scoreMvpSession(session.rows || [], references) }))
     .filter(session => session.scores.length > 0);
   const byCharacter = new Map();
 
@@ -240,8 +274,18 @@ export function scoreMvpCampaign(sessionRows = []) {
  * résultats affichés. Les scores absolus resteraient identiques avec un autre
  * groupe, mais conserver cette séparation évite aussi tout futur effet de filtre.
  */
-export function scoreMvpView({ rows = [], sessionRows = [], visibleIds = null } = {}) {
-  const scores = sessionRows.length ? scoreMvpCampaign(sessionRows) : scoreMvpSession(rows);
+export function scoreMvpView({ rows = [], sessionRows = [], visibleIds = null, autoCalibrate = false } = {}) {
+  const useCampaign = sessionRows.length > 0;
+  // Calibrage optionnel : échelle commune dérivée de tout le périmètre calculé
+  // (avant tout filtre `visibleIds`, donc masquer un perso ne la déplace pas).
+  let references = DEFAULT_REFERENCES;
+  if (autoCalibrate) {
+    const calibrationRows = useCampaign
+      ? sessionRows.flatMap(session => session.rows || [])
+      : rows;
+    references = calibrateReferences(calibrationRows);
+  }
+  const scores = useCampaign ? scoreMvpCampaign(sessionRows, references) : scoreMvpSession(rows, references);
   if (!visibleIds?.size) return scores;
   return scores.filter(result => visibleIds.has(result.id));
 }

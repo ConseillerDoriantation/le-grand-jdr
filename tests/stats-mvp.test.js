@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildMvpRawProfile, scoreMvpAxis, scoreMvpCampaign, scoreMvpSession, scoreMvpView } from '../assets/js/shared/stats-mvp.js';
+import { buildMvpRawProfile, calibrateReferences, DEFAULT_REFERENCES, scoreMvpAxis, scoreMvpCampaign, scoreMvpSession, scoreMvpView } from '../assets/js/shared/stats-mvp.js';
 
 const row = (id, combat = {}, sRolls = 0) => ({ id, name: id, combat, sRolls });
 
@@ -158,6 +158,35 @@ test('masquer des personnages ne modifie pas les scores MVP de la mission', () =
     rows: session.rows.filter(character => character.id !== 'kadoc'),
   })));
   assert.equal(scoreOf(otherTeamComposition, 'liselotte'), scoreOf(allScores, 'liselotte'));
+});
+
+test('calibrateReferences prend la médiane des contributions réelles, repli défaut si trop peu', () => {
+  const refs = calibrateReferences([
+    row('a', { dmgDealt: 40 }),
+    row('b', { dmgDealt: 60 }),
+    row('c', { dmgDealt: 80 }),
+  ]);
+  assert.equal(refs.offense, 60); // médiane de 40 / 60 / 80
+  assert.equal(refs.skill, DEFAULT_REFERENCES.skill); // aucun jet → repère par défaut
+});
+
+test('le calibrage rend l’axe signature au meilleur DPS malgré ses jets de compétence', () => {
+  // Groupe bas niveau : dégâts modestes, mais plusieurs jets de compétence chacun.
+  const rows = [
+    row('skeak', { dmgDealt: 60, attacks: 5 }, 8), // meilleur DPS de la mission
+    row('a', { dmgDealt: 40, attacks: 4 }, 6),
+    row('b', { dmgDealt: 30, attacks: 3 }, 5),
+    row('c', { dmgDealt: 25, attacks: 3 }, 7),
+    row('d', { dmgDealt: 20, attacks: 2 }, 6),
+  ];
+  const withoutCalib = scoreMvpView({ rows }).find(result => result.id === 'skeak');
+  const withCalib = scoreMvpView({ rows, autoCalibrate: true }).find(result => result.id === 'skeak');
+
+  // Repères fixes : le repère compétence (30) est si bas que quelques jets
+  // coiffent l’offense → l’axe signature du DPS est relégué.
+  assert.equal(withoutCalib.details.entries[0].key, 'skill');
+  // Calibré sur les contributions réelles : l’offense redevient l’axe #1.
+  assert.equal(withCalib.details.entries[0].key, 'offense');
 });
 
 test('un personnage garde son score face à des coéquipiers beaucoup plus performants', () => {
