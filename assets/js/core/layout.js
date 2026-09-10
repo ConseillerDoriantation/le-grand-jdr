@@ -9,7 +9,7 @@ import { CLOUDINARY_ENABLED } from '../shared/upload-cloudinary.js';
 import { isToggleable, isFeatureEnabled } from '../shared/features.js';
 import { avatarSrcOf } from '../shared/avatar.js';
 import { routeUrl } from '../shared/route.js';
-import { subscribeCollection } from '../data/firestore.js';
+import { subscribeCollection, subscribeDoc } from '../data/firestore.js';
 
 // Masque le splash de boot dès qu'un écran principal est prêt à s'afficher.
 function _hideBootSplash() {
@@ -577,7 +577,9 @@ function _closeCtx() { document.getElementById('sidebar-ctx')?.classList.remove(
 
 // ── CTA « Jouer maintenant » : état de séance via présence temps réel ─────
 let _presenceUnsub = null;
+let _sessionUnsub = null;
 let _presenceList = [];
+let _sessionLive = false;   // flag posé par le MJ (vtt/session.live)
 function _renderPlayCTA() {
   const sub = document.getElementById('sidebar-play-sub');
   const dot = document.getElementById('sidebar-play-dot');
@@ -589,22 +591,35 @@ function _renderPlayCTA() {
     const ts = p.lastSeen?.toMillis?.() ?? 0;
     return ts > 0 && (now - ts) < 120_000;
   }).length;
-  if (online > 0) {
+  // Priorité au flag « session déclarée en cours » du MJ ; sinon repli sur la
+  // présence temps réel (des joueurs sont en ligne).
+  if (_sessionLive) {
+    sub.textContent = online > 0 ? `En direct · ${online} en ligne` : 'Séance en direct';
+  } else if (online > 0) {
     sub.textContent = `Séance en cours · ${online} en ligne`;
-    if (dot) dot.hidden = false;
   } else {
     sub.textContent = 'Table virtuelle';
-    if (dot) dot.hidden = true;
   }
+  if (dot) dot.hidden = !(_sessionLive || online > 0);
 }
 function _startPresenceWatch() {
-  if (_presenceUnsub || !STATE.adventure) return;
-  try {
-    _presenceUnsub = subscribeCollection('presence', (list) => {
-      _presenceList = list || [];
-      _renderPlayCTA();
-    });
-  } catch {}
+  if (!STATE.adventure) return;
+  if (!_presenceUnsub) {
+    try {
+      _presenceUnsub = subscribeCollection('presence', (list) => {
+        _presenceList = list || [];
+        _renderPlayCTA();
+      });
+    } catch {}
+  }
+  if (!_sessionUnsub) {
+    try {
+      _sessionUnsub = subscribeDoc('vtt', 'session', (d) => {
+        _sessionLive = !!(d && d.live);
+        _renderPlayCTA();
+      });
+    } catch {}
+  }
 }
 
 // ── Init (rendu idempotent ; écouteurs attachés une seule fois) ────────────

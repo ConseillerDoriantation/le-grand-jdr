@@ -413,7 +413,8 @@ function _pageCard(p, broadcastId, { showFolder = false } = {}) {
     </div>
     <div class="vtt-page-item-side">
       <div class="vtt-page-item-status">${status}</div>
-      <button class="vtt-page-item-menu" data-vtt-fn="_vttPageMenu" data-vtt-args="$event|${p.id}" title="Actions de la scène" aria-label="Actions pour ${_esc(p.name)}" aria-haspopup="menu">•••</button>
+      <button class="vtt-page-item-menu vtt-page-item-send" data-vtt-fn="_vttSendToPage" data-vtt-args="${p.id}" title="Envoyer les joueurs sur cette scène" aria-label="Envoyer les joueurs sur ${_esc(p.name)}">📡</button>
+      <button class="vtt-page-item-menu" data-vtt-fn="_vttPageMenu" data-vtt-args="$event|${p.id}" title="Autres actions de la scène" aria-label="Actions pour ${_esc(p.name)}" aria-haspopup="menu">•••</button>
     </div>
   </div>`;
 }

@@ -53,9 +53,10 @@ export function _renderLibSection() {
   const folderImages = _libFolder
     ? images.filter(i => i.folderId === _libFolder)
     : images.filter(i => !i.folderId);
-  const query = _libSearch.trim().toLowerCase();
-  const visible = folderImages
-    .filter(i => !query || [i.name, i.sourcePath, i.url].some(v => String(v || '').toLowerCase().includes(query)))
+  // Rendu SANS filtrer : on affiche toutes les images du dossier, puis
+  // _applyLibSearch masque en place selon la recherche → l'input garde le focus
+  // (fini la désélection à chaque caractère).
+  const sorted = folderImages.slice()
     .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' }));
 
   const folderChips = folders.map(f => {
@@ -69,11 +70,11 @@ export function _renderLibSection() {
   }).join('');
   const rootCount = images.filter(i => !i.folderId).length;
   const curLabel = _libFolder ? (curFolder?.name || 'Dossier') : 'Racine';
-  const clearBtn = _libSearch ? `<button class="vtt-tray-search-clr" data-vtt-fn="_vttLibSearchClear" title="Effacer">✕</button>` : '';
+  const clearBtn = `<button class="vtt-tray-search-clr" data-vtt-fn="_vttLibSearchClear" title="Effacer"${_libSearch ? '' : ' hidden'}>✕</button>`;
 
-  const imgGrid = visible.length
-    ? `<div class="vtt-lib-grid">${visible.map(img => `
-        <div class="vtt-lib-card" role="button" tabindex="0" draggable="true" data-vtt-drag="image:${img.id}" data-vtt-fn="_vttLibPlace" data-vtt-args="${img.id}" title="${_esc(img.name||'Image')} · clic = pleine carte · glisser = placement précis">
+  const imgGrid = folderImages.length
+    ? `<div class="vtt-lib-grid">${sorted.map(img => `
+        <div class="vtt-lib-card" role="button" tabindex="0" draggable="true" data-vtt-drag="image:${img.id}" data-vtt-fn="_vttLibPlace" data-vtt-args="${img.id}" data-lib-search="${_esc([img.name, img.sourcePath, img.url].map(v => String(v || '')).join(' ').toLowerCase())}" title="${_esc(img.name||'Image')} · clic = pleine carte · glisser = placement précis">
           <div class="vtt-lib-card-thumb">
             <img src="${_esc(_resolveMapImageUrl(img.url, img.sourcePath))}" alt="${_esc(img.name||'')}" loading="lazy" data-img-err="mark-parent" data-img-err-class="vtt-lib-card--err">
           </div>
@@ -87,15 +88,16 @@ export function _renderLibSection() {
             ${_libFolder ? `<button class="vtt-lib-card-action" data-vtt-fn="_vttLibMoveRoot" data-vtt-args="${img.id}" title="Retirer du dossier">↩</button>` : ''}
             <button class="vtt-lib-card-action danger" data-vtt-fn="_vttLibDelImg" data-vtt-args="${img.id}" title="Supprimer">🗑</button>
           </div>
-        </div>`).join('')}</div>`
-    : `<div class="vtt-tray-empty">${query ? 'Aucune image ne correspond' : `Aucune image${_libFolder ? ' dans ce dossier' : ''}`}</div>`;
+        </div>`).join('')}</div>
+        <div class="vtt-tray-empty" data-lib-empty hidden>Aucune image ne correspond</div>`
+    : `<div class="vtt-tray-empty">Aucune image${_libFolder ? ' dans ce dossier' : ''}</div>`;
 
   el.innerHTML = `
     <div class="vtt-lib-command">
       <div class="vtt-lib-head">
         <div>
           <strong>${_esc(curLabel)}</strong>
-          <span>${visible.length}/${folderImages.length} images · ${images.length} au total</span>
+          <span><span data-lib-count>${folderImages.length}</span>/${folderImages.length} images · ${images.length} au total</span>
         </div>
         <div class="vtt-lib-actions">
           <button class="vtt-lib-action" data-vtt-fn="_vttAddImageUrl" title="Ajouter une image par URL" aria-label="Ajouter une image par URL">🔗</button>
@@ -120,6 +122,23 @@ export function _renderLibSection() {
       </div>
     </div>
     ${imgGrid}`;
+  _applyLibSearch();
+}
+
+// Filtre EN PLACE (sans re-render) : masque les cartes non correspondantes et
+// met à jour le compteur / l'état vide. Préserve le focus de l'input de recherche.
+function _applyLibSearch() {
+  const root = document.getElementById('vtt-tray-library'); if (!root) return;
+  const q = _libSearch.trim().toLowerCase();
+  let n = 0;
+  root.querySelectorAll('.vtt-lib-card').forEach(card => {
+    const ok = !q || (card.dataset.libSearch || '').includes(q);
+    card.style.display = ok ? '' : 'none';
+    if (ok) n++;
+  });
+  const cnt = root.querySelector('[data-lib-count]'); if (cnt) cnt.textContent = String(n);
+  const empty = root.querySelector('[data-lib-empty]'); if (empty) empty.hidden = n > 0;
+  const clr = root.querySelector('.vtt-tray-search-clr'); if (clr) clr.hidden = !q;
 }
 
 export function _vttLibOpenFolder(id) {
@@ -128,8 +147,14 @@ export function _vttLibOpenFolder(id) {
 }
 export function _vttLibToggle() { _libOpen = !_libOpen; _renderLibSection();
   document.getElementById('vtt-lib-toggle')?.classList.toggle('open', _libOpen); }
-export function _vttLibSearch(v) { _libSearch = String(v || ''); _renderLibSection(); }
-export function _vttLibSearchClear() { _libSearch = ''; _renderLibSection(); }
+export function _vttLibSearch(v) { _libSearch = String(v || ''); _applyLibSearch(); }
+export function _vttLibSearchClear() {
+  _libSearch = '';
+  const inp = document.querySelector('#vtt-tray-library .vtt-tray-search-input[data-search="maplib"]');
+  if (inp) inp.value = '';
+  _applyLibSearch();
+  inp?.focus();
+}
 
 export async function _vttLibCleanDuplicates() {
   if (!_libCanWrite()) return;

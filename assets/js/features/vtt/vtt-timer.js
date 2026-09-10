@@ -48,8 +48,9 @@ function _renderTimer() {
 
   el.classList.toggle('vtt-timer--on', running);
   el.classList.toggle('vtt-timer--paused', !running && ms > 0);
+  const clockSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 1.8"/></svg>';
   el.innerHTML = `
-    <span class="vtt-timer-ico" title="${running ? 'En cours' : (ms > 0 ? 'En pause' : 'Arrêté')}">${running ? '⏱️' : (ms > 0 ? '⏸️' : '⏱️')}</span>
+    <span class="vtt-timer-ico" title="${running ? 'En cours' : (ms > 0 ? 'En pause' : 'Arrêté')}">${clockSvg}</span>
     <span class="vtt-timer-val">${_timerFmt(ms)}</span>
     ${label ? `<span class="vtt-timer-label" title="${_esc(label)}">${_esc(label)}</span>` : ''}
     ${mj ? `
