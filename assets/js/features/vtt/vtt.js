@@ -12114,6 +12114,9 @@ function _vttRcolView(view) {
 // Fermé par défaut → la carte occupe toute la largeur. Ouvert par les boutons
 // .vtt-mj-quick. Réutilise _vttRcolView et l'onglet courant du tray.
 let _slideOpen = false;
+// Épinglage : quand actif, le panneau reste ouvert et se range À CÔTÉ de la
+// toile (la toile rétrécit au lieu d'être recouverte). Préférence persistée.
+let _slidePinned = lsJson.get('vtt-slide-pinned', false);
 function _vttSlide(arg) {
   const slide = document.getElementById('vtt-slide');
   if (!slide) return;
@@ -12135,9 +12138,29 @@ function _vttSlideClose() {
   slide.classList.remove('open');
   slide.setAttribute('aria-hidden', 'true');
 }
+// Reflète l'état épinglé sur la coquille (.vtt-root) + le bouton épingle. La
+// toile rétrécit via le flux flex (la ResizeObserver de Konva suit tout seul).
+function _vttApplySlidePin() {
+  const root = document.getElementById('vtt-root');
+  if (root) root.dataset.slidePinned = _slidePinned ? '1' : '';
+  const btn = document.getElementById('vtt-slide-pin');
+  if (btn) {
+    btn.classList.toggle('is-on', _slidePinned);
+    btn.setAttribute('aria-pressed', _slidePinned ? 'true' : 'false');
+    btn.title = _slidePinned ? 'Détacher le panneau (retour en superposition)' : 'Épingler le panneau à droite de la table';
+  }
+}
+function _vttSlidePin() {
+  _slidePinned = !_slidePinned;
+  lsJson.set('vtt-slide-pinned', _slidePinned);
+  // Épingler alors que rien n'est ouvert → ouvre le Chat par défaut.
+  if (_slidePinned && !_slideOpen) _vttSlide('chat');
+  _vttApplySlidePin();
+}
 // Échap ferme le panneau (sauf saisie en cours ou visée active — elles priment).
+// Épinglé : le panneau est volontairement permanent → Échap ne le ferme pas.
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || !_slideOpen) return;
+  if (e.key !== 'Escape' || !_slideOpen || _slidePinned) return;
   if (_aimOpt) return;
   try { if (_vttIsTypingTarget(e.target)) return; } catch {}
   _vttSlideClose();
@@ -12167,7 +12190,6 @@ function _buildHtml() {
     <span class="vtt-band-sep"></span>
     <nav id="vtt-page-tabs" class="vtt-scenes vtt-page-tabs" aria-label="Scènes"></nav>
     <span class="vtt-band-grow"></span>
-    <div class="vtt-session-tools" id="vtt-session-tools" role="toolbar" aria-label="Outils de session"></div>
     ${mj ? `<button class="vtt-canvas-control vtt-session-btn" id="vtt-session-btn" data-vtt-fn="_vttToggleSessionLive" title="Démarrer la session et prévenir les joueurs qui rejoignent">
       <span class="vtt-canvas-ctl-icon" aria-hidden="true">▶</span><span class="vtt-canvas-ctl-copy"><strong>Session</strong><small>Démarrer</small></span>
     </button>` : ''}
@@ -12175,8 +12197,6 @@ function _buildHtml() {
     <div id="vtt-weather" class="vtt-weather"></div>
     <span class="vtt-band-sep"></span>
     <div id="vtt-pres-list" class="vtt-pres" aria-label="Joueurs en ligne"></div>
-    <span class="vtt-band-sep"></span>
-    <button class="vtt-chip vtt-chip-ico" data-vtt-fn="_vttToggleTheme" title="Thème clair / sombre" aria-label="Basculer le thème">◐</button>
   </header>
 
   <!-- ── RUBAN D'INITIATIVE (collapsé hors combat) ── -->
@@ -12193,6 +12213,9 @@ function _buildHtml() {
       </div>
     </div>
 
+    <!-- ── OUTILS DE SESSION : barre dédiée bas-centre (Repos · Musique · Butin · Émotes) ── -->
+    <div class="vtt-session-tools" id="vtt-session-tools" role="toolbar" aria-label="Outils de session"></div>
+
     <!-- ── Ouverture du panneau glissant (sur la toile) ── -->
     <div class="vtt-mj-quick" role="toolbar" aria-label="Panneaux">
       <button class="vtt-chip" data-vtt-fn="_vttSlide" data-vtt-args="chat" title="Chat &amp; dés">💬 Chat</button>
@@ -12206,6 +12229,7 @@ function _buildHtml() {
           <button class="vtt-slide-mode" data-slide-mode="sheet" data-vtt-fn="_vttSlide" data-vtt-args="chat">Chat</button>
           ${mj ? `<button class="vtt-slide-mode" data-slide-mode="reserve" data-vtt-fn="_vttSlide" data-vtt-args="reserve">Réserve</button>` : ''}
         </div>
+        <button class="vtt-slide-pin" id="vtt-slide-pin" data-vtt-fn="_vttSlidePin" title="Épingler le panneau à droite de la table" aria-label="Épingler le panneau" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6M10 4v5l-2 4h8l-2-4V4M12 17v3"/></svg></button>
         <button class="vtt-slide-x" data-vtt-fn="_vttSlideClose" title="Fermer (Échap)" aria-label="Fermer le panneau">✕</button>
       </div>
       <div class="vtt-slide-body">
@@ -12493,6 +12517,9 @@ async function _vttMountTable(content) {
   _ef.innerHTML = `<div class="vtt-emote-picker" id="vtt-emote-picker" role="dialog" aria-label="Choisir une émote" aria-hidden="true"></div>
     <button class="vtt-emote-trigger" data-vtt-fn="_vttToggleEmotePicker" title="Émotes" aria-label="Émotes" aria-expanded="false" aria-controls="vtt-emote-picker">😄</button>`;
   sessionTools.appendChild(_ef);
+  // Épinglage du panneau : restaure la préférence (toile rétrécie + panneau docké).
+  if (_slidePinned && !_slideOpen) _vttSlide('chat');
+  _vttApplySlidePin();
   // NB : le lanceur de dés libre vit désormais dans le panneau « Jets » du
   // pupitre (vtt-inspector.js) — plus de puce flottante dédiée ici.
   document.addEventListener('keydown',_keyHandler);
@@ -12564,6 +12591,7 @@ export const VTT_ACTIONS = {
   _vttToggleOrderPanel,
   _vttSlide,
   _vttSlideClose,
+  _vttSlidePin,
   _vttUndoDraw,
   _vttRedoDraw,
   _invPickToggle,

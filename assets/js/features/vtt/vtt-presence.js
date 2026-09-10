@@ -80,7 +80,7 @@ function _renderSessionBtn() {
   const live = !!VS.session?.live;
   btn.classList.toggle('is-live', live);
   btn.innerHTML = live
-    ? '<span class="vtt-canvas-ctl-icon" aria-hidden="true">●</span><span class="vtt-canvas-ctl-copy"><strong>Session</strong><small>En cours</small></span>'
+    ? '<span class="vtt-canvas-ctl-icon vtt-live-dot" aria-hidden="true"></span><span class="vtt-canvas-ctl-copy"><strong>En direct</strong><small>Terminer la session</small></span>'
     : '<span class="vtt-canvas-ctl-icon" aria-hidden="true">▶</span><span class="vtt-canvas-ctl-copy"><strong>Session</strong><small>Démarrer</small></span>';
   btn.setAttribute('aria-label', live ? 'Terminer la session en cours' : 'Démarrer la session');
   btn.title = live
