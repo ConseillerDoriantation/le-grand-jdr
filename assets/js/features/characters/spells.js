@@ -2998,16 +2998,25 @@ export async function openSortModal(idx, s) {
     ? [...allTypes]
     : allTypes.filter(n => !n.isMagic || charElements.has(n.id));
   const selectedNoyau = noyauTypeIdSel ? allTypes.find(n => n.id === noyauTypeIdSel) : null;
-  const selectedLocked = selectedNoyau && !allowedNoyaux.some(n => n.id === selectedNoyau.id);
-  const NOYAUX = selectedLocked
-    ? [...allowedNoyaux, { ...selectedNoyau, locked: true }]
-    : allowedNoyaux;
   _sortAllowedNoyauIds = new Set(allowedNoyaux.map(n => n.id));
   // Multi-noyau : liste ordonnée des éléments sélectionnés ([0] = primaire).
   // Migration : noyauTypeIds (nouveau) → sinon le noyau unique migré ci-dessus.
   _noyauIdsEdit = Array.isArray(s?.noyauTypeIds) && s.noyauTypeIds.length
     ? s.noyauTypeIds.filter(Boolean)
     : (noyauTypeIdSel ? [noyauTypeIdSel] : []);
+  // Éléments encore sélectionnés mais NON accessibles (ancien élément retiré de
+  // la fiche par le MJ, voire supprimé du monde) : on les garde VISIBLES et
+  // RETIRABLES — sinon le joueur ne peut ni les voir ni enregistrer (la
+  // validation exige que TOUS les éléments soient accessibles). On ajoute chaque
+  // id sélectionné hors accès (pas seulement le primaire) ; un type introuvable
+  // retombe sur un libellé neutre.
+  const staleNoyaux = _noyauIdsEdit
+    .filter(id => id && !_sortAllowedNoyauIds.has(id))
+    .map(id => {
+      const t = allTypes.find(n => n.id === id);
+      return t ? { ...t, locked: true } : { id, label: id, icon: '❔', color: '#9aa0a6', locked: true };
+    });
+  const NOYAUX = [...allowedNoyaux, ...staleNoyaux];
 
   const noyauSel      = noyauTypeIdSel
     ? (selectedNoyau?.label || s?.noyau || '')
@@ -3155,11 +3164,14 @@ export async function openSortModal(idx, s) {
         ${NOYAUX.length ? NOYAUX.map(n => {
           const selected = _noyauIdsEdit.includes(n.id);
           const locked = !!n.locked;
+          // Verrouillé mais DÉJÀ sélectionné → cliquable pour le RETIRER du sort.
+          // Verrouillé et non sélectionné → non ajoutable (désactivé).
+          const disabled = locked && !selected;
           const selectedStyle = selected ? `border-color:${n.color};background:${n.color}20;color:${n.color}` : '';
-          const attrs = locked
+          const attrs = disabled
             ? `disabled aria-disabled="true" title="Ce noyau n'est plus accessible à ce personnage"`
-            : `data-action="selectNoyau" data-noyau-label="${_esc(n.label+' '+n.icon)}" data-noyau-color="${n.color}" title="Choisir ${n.label}"`;
-          const lockedBadge = locked ? '<span class="cs-noyau-lock">non accessible</span>' : '';
+            : `data-action="selectNoyau" data-noyau-label="${_esc(n.label+' '+n.icon)}" data-noyau-color="${n.color}" title="${locked ? 'Élément retiré de ta fiche — clique pour le retirer du sort' : 'Choisir ' + _esc(n.label)}"`;
+          const lockedBadge = locked ? `<span class="cs-noyau-lock">${selected ? 'à retirer' : 'non accessible'}</span>` : '';
           return `<button type="button" class="cs-noyau-btn ${selected?'selected':''}${locked?' cs-noyau-btn--locked':''}" style="${selectedStyle}" ${attrs} data-noyau-id="${n.id}" aria-pressed="${selected?'true':'false'}">${n.icon} ${n.label}${lockedBadge}</button>`;
         }).join('') : '<div class="cs-noyau-empty">Aucun noyau accessible. Demande au MJ de débloquer un élément sur ta fiche.</div>'}
       </div>
@@ -5355,6 +5367,16 @@ export function selectNoyau(el, noyauId, noyauLabel, noyauColor) {
     el.style.background  = '';
     el.style.color       = '';
   }
+  // Élément non accessible qu'on vient de RETIRER → on le désactive pour qu'il
+  // ne puisse pas être re-sélectionné (il n'est plus débloqué sur la fiche).
+  if (!on && _sortAllowedNoyauIds && !_sortAllowedNoyauIds.has(noyauId)) {
+    el.disabled = true;
+    el.setAttribute('aria-disabled', 'true');
+    el.removeAttribute('data-action');
+    el.title = "Ce noyau n'est plus accessible à ce personnage";
+    const badge = el.querySelector('.cs-noyau-lock');
+    if (badge) badge.textContent = 'non accessible';
+  }
   // Primaire = premier sélectionné → conserve s-noyau / s-noyau-id pour la compat
   // (calcul des soins, suggestions matrice, élément par défaut côté VTT).
   const primId  = _noyauIdsEdit[0] || '';
@@ -5381,7 +5403,9 @@ export function selectNoyau(el, noyauId, noyauLabel, noyauColor) {
 // changement réel). `typeSoin` brut reste exclu (dérivé, redondant).
 function _sortContentSig(s) {
   if (!s) return '';
-  const SKIP = new Set(['actif','mjValidation','mjValidated','catId','pm','pmOverride','mjNotes','mjAlwaysMax','enchantSlot','types','typeSoin','id','maitriseActive']);
+  // `nom` exclu : renommer un sort est purement cosmétique et ne doit PAS
+  // redéclencher la validation MJ (seul le contenu jouable compte).
+  const SKIP = new Set(['nom','actif','mjValidation','mjValidated','catId','pm','pmOverride','mjNotes','mjAlwaysMax','enchantSlot','types','typeSoin','id','maitriseActive']);
   const o = {};
   Object.keys(s).filter(k => !SKIP.has(k)).sort().forEach(k => { o[k] = s[k]; });
   o.types = [...(_getSortTypes(s) || [])].sort();
