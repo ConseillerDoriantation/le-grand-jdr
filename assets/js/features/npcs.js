@@ -65,8 +65,8 @@ const NPC_VITALS = [
 const NPC_STATS = [
   { key: 'force',        short: 'FOR' },
   { key: 'dexterite',    short: 'DEX' },
-  { key: 'constitution', short: 'CON' },
   { key: 'intelligence', short: 'INT' },
+  { key: 'constitution', short: 'CON' },
   { key: 'sagesse',      short: 'SAG' },
   { key: 'charisme',     short: 'CHA' },
 ];
@@ -1443,8 +1443,8 @@ function _renderNpcStatsBanner(n) {
   const level = Math.max(1, parseInt(n?.niveau, 10) || 1);
   const spent = NPC_STATS.reduce((sum, stat) => sum + (parseInt(levelUps[stat.key], 10) || 0), 0);
   const remaining = Math.max(0, level - 1 - spent);
-  // Synthèse « Points de caractéristiques » — identique à la fiche joueur
-  // (_buildStatTilesHtml) : total + détail Base/Niveau/Équipement.
+  // Synthèse et tuiles calquées sur la fiche personnage. Le PNJ conserve
+  // toutefois son champ « base » éditable directement par le MJ.
   const _sum = NPC_STATS.reduce((t, stat) => {
     const stored = parseInt(stats[stat.key], 10);
     const val = Number.isFinite(stored) ? stored : 10;
@@ -1459,7 +1459,7 @@ function _renderNpcStatsBanner(n) {
     <div class="stats-summary-formula" aria-label="Base ${_sum.base}, niveau ${_sum.level}, équipement ${_sum.equipment}, total ${_sum.total}">
       <span><small>Base</small><b>${_sum.base}</b></span><i>+</i>
       <span><small>Niveau</small><b>${_signed(_sum.level)}</b></span><i>+</i>
-      <span><small>Équipement</small><b class="${_sum.equipment > 0 ? 'pos' : _sum.equipment < 0 ? 'neg' : ''}">${_signed(_sum.equipment)}</b></span><i>=</i>
+      <span><small>Équip.</small><b class="${_sum.equipment > 0 ? 'pos' : _sum.equipment < 0 ? 'neg' : ''}">${_signed(_sum.equipment)}</b></span><i>=</i>
       <span class="is-total"><small>Total</small><b>${_sum.total}</b></span>
     </div>
   </div>`;
@@ -1476,38 +1476,28 @@ function _renderNpcStatsBanner(n) {
         const mod = _npcEffectiveMod(n, s.key);
         const mCls = mod > 0 ? 'pos' : mod < 0 ? 'neg' : 'zero';
         const bCls = bonus > 0 ? 'pos' : bonus < 0 ? 'neg' : 'zero';
-        const bDisp = bonus > 0 ? `+${bonus}` : bonus < 0 ? String(bonus) : '0';
+        const bDisp = bonus > 0 ? `+${bonus}` : bonus < 0 ? String(bonus) : '+0';
+        const canPlus = remaining > 0;
+        const canMinus = levelUp > 0;
+        const full = _esc(NPC_STAT_LABELS[s.key] || s.key);
         return `
-          <div class="stat-tile" data-stat="${_esc(s.key)}"
-            title="${_esc(NPC_STAT_LABELS[s.key] || s.key)} - Base ${safeBase} + Niveau +${levelUp} + Equip. ${bDisp} = ${total}">
-            <header class="stat-tile-head">
-              <span class="stat-tile-name">${_esc(NPC_STAT_LABELS[s.key] || s.short)}</span>
-              <span class="stat-tile-mod ${mCls}">${mod >= 0 ? '+' + mod : mod}</span>
-            </header>
-            <div class="stat-tile-total-row">
-              <span class="stat-tile-total">${total}</span>
-              <span class="stat-tile-total-lbl">Total</span>
-            </div>
-            <div class="stat-tile-formula">
-              <label class="stat-seg stat-seg-base editable" title="Modifier la base PNJ">
-                <input type="number" class="npc-inline npc-stat-seg-input" data-change="npcInlineSave"
-                  data-npc-id="${_esc(n.id)}" data-field="statBase:${_esc(s.key)}" value="${safeBase}" placeholder="${safeBase}">
-                <span class="stat-seg-lbl">Base</span>
+          <div class="stat-tile${canPlus ? ' is-alloc' : ''}" data-stat="${_esc(s.key)}"
+            title="${full} — base ${safeBase} + niveau +${levelUp} + équip. ${bDisp} = ${total}">
+            ${canPlus ? `<span class="stat-alloc" title="${remaining} point(s) de niveau à dépenser">${remaining}</span>` : ''}
+            <span class="stat-tile-abbr">${_esc(s.short)}</span>
+            <span class="stat-tile-total">${total}</span>
+            <span class="stat-tile-mod ${mCls}">${mod >= 0 ? '+' + mod : mod}</span>
+            <span class="stat-tile-detail">
+              <label class="npc-stat-base-detail" title="MJ — modifier la base de ${full}">base
+                <input type="number" class="npc-inline npc-stat-base-input" data-change="npcInlineSave"
+                  data-npc-id="${_esc(n.id)}" data-field="statBase:${_esc(s.key)}" value="${safeBase}" aria-label="Valeur de base — ${full}">
               </label>
-              <span class="stat-formula-op">+</span>
-              <div class="stat-seg stat-seg-niv ${levelUp ? 'has' : 'zero'}">
-                <span class="stat-seg-val">+${levelUp}</span>
-                <span class="stat-seg-lbl">Niveau</span>
-                <span class="stat-seg-ctrls">
-                  <button class="stat-lvl-btn" type="button" ${levelUp ? '' : 'disabled'} data-action="npcAllocateStat" data-npc-id="${_esc(n.id)}" data-stat="${_esc(s.key)}" data-delta="-1" title="Retirer un point">−</button>
-                  <button class="stat-lvl-btn plus" type="button" ${remaining ? '' : 'disabled'} data-action="npcAllocateStat" data-npc-id="${_esc(n.id)}" data-stat="${_esc(s.key)}" data-delta="1" title="Ajouter un point">+</button>
-                </span>
-              </div>
-              <span class="stat-formula-op">+</span>
-              <div class="stat-seg stat-seg-eq ${bCls}">
-                <span class="stat-seg-val">${bDisp}</span>
-                <span class="stat-seg-lbl">Equip.</span>
-              </div>
+              <span>eq <b class="${bCls}">${bDisp}</b></span>
+            </span>
+            <div class="stat-lvl-ctrls" role="group" aria-label="Points de niveau — ${full}">
+              <button class="stat-lvl-btn minus" type="button" ${canMinus ? '' : 'disabled'} data-action="npcAllocateStat" data-npc-id="${_esc(n.id)}" data-stat="${_esc(s.key)}" data-delta="-1" title="Retirer 1 point de niveau" aria-label="Retirer 1 point de niveau sur ${full}">−</button>
+              <span class="stat-lvl-val" title="Points de niveau alloués"><small>niv</small> <b>${levelUp > 0 ? '+' : ''}${levelUp}</b></span>
+              <button class="stat-lvl-btn plus" type="button" ${canPlus ? '' : 'disabled'} data-action="npcAllocateStat" data-npc-id="${_esc(n.id)}" data-stat="${_esc(s.key)}" data-delta="1" title="Dépenser 1 point de niveau" aria-label="Ajouter 1 point de niveau sur ${full}">+</button>
             </div>
           </div>`;
       }).join('')}
