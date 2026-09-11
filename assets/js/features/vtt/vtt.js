@@ -1020,7 +1020,9 @@ function _cleanup() {
   VS.mapLib = { folders: [], images: [] }; _resetMapLib();
   _mapLibCleanupWrite = null;
   _resetLootState();
-  _resetMusicState();
+  // Remontage de la table (retour d'onglet) : on garde la lecture musicale en
+  // cours pour éviter la coupure — _syncMusicPlayback la reconnaît sans restart.
+  _resetMusicState(true);
   _mtClear(true);
   _mtBroadcasting = false;
   VS.presence = {}; VS.miniUid = null; VS.miniCharId = null;

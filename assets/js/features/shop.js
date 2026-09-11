@@ -373,23 +373,45 @@ export async function renderShop() {
   const activeChar = _getActiveShopChar();
   const chars      = _getShopChars();
   const charStripHtml = chars.length ? (() => {
-    const col = _shopCharAvatarColor(activeChar);
-    const init = (activeChar?.nom || '?')[0].toUpperCase();
     const or = calcOr(activeChar);
-    const photo = activeChar?.photo
-      ? `<img src="${activeChar.photo}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`
-      : init;
-    return `
-      <div class="sh-char-strip" title="Personnage actif">
-        <span class="sh-char-strip-av" style="--av-c:${col}">${photo}</span>
-        <select class="sh-char-strip-sel" id="sh-char-sel"
-          data-sh-action="setChar" data-sh-on="change" aria-label="Personnage actif">
-          ${chars.map(c => `<option value="${c.id}" ${activeChar?.id===c.id?'selected':''}>${_esc(c.nom||'?')}${c.niveau?` · Niv.${c.niveau}`:''}${c.classe?` ${_esc(c.classe)}`:''}</option>`).join('')}
-        </select>
-        <span class="sh-char-strip-or" title="Solde du personnage">
+    // Portrait résolu proprement (photoURL/photo/avatar…) via le helper partagé,
+    // plus grand → on voit d'un coup d'œil pour qui on achète.
+    const avatar = (c, size) => characterAvatarHtml(c, { size, border: '1px solid rgba(255,255,255,.16)' });
+    const subOf = (c) => [c?.niveau ? `Niv.${c.niveau}` : '', c?.classe ? _esc(c.classe) : ''].filter(Boolean).join(' · ');
+    const orPill = `<span class="sh-char-strip-or" title="Solde du personnage">
           <span class="sh-char-strip-or-val">${or}</span>
           <small>or</small>
-        </span>
+        </span>`;
+    const triggerInner = `${avatar(activeChar, 36)}
+        <span class="sh-char-picker-copy"><strong>${_esc(activeChar?.nom || '?')}</strong>${subOf(activeChar) ? `<small>${subOf(activeChar)}</small>` : ''}</span>`;
+
+    // Un seul personnage : pas de menu, juste la carte identité.
+    if (chars.length === 1) {
+      return `<div class="sh-char-strip" title="Personnage actif">
+        <div class="sh-char-picker-trigger sh-char-picker-trigger--solo">${triggerInner}</div>
+        ${orPill}
+      </div>`;
+    }
+
+    // Plusieurs : menu déroulant à portraits.
+    return `<div class="sh-char-strip">
+        <details class="sh-char-picker">
+          <summary class="sh-char-picker-trigger" aria-label="Changer de personnage">
+            ${triggerInner}
+            <span class="sh-char-picker-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="sh-char-picker-menu">
+            ${chars.map(c => {
+              const sub = [subOf(c), (STATE.isAdmin && c.ownerPseudo) ? _esc(c.ownerPseudo) : ''].filter(Boolean).join(' — ');
+              return `<button type="button" class="sh-char-picker-option${c.id === activeChar?.id ? ' is-active' : ''}" data-sh-action="setChar" data-id="${_esc(c.id)}">
+              ${avatar(c, 34)}
+              <span class="sh-char-picker-option-copy"><strong>${_esc(c.nom || '?')}</strong>${sub ? `<small>${sub}</small>` : ''}</span>
+              ${c.id === activeChar?.id ? '<span class="sh-char-picker-check" aria-hidden="true">✓</span>' : ''}
+            </button>`;
+            }).join('')}
+          </div>
+        </details>
+        ${orPill}
       </div>`;
   })() : '';
 
@@ -4479,7 +4501,7 @@ Object.assign(shHandlers, {
   // Sidebar / catégories
   goHome:         () => shopGoHome(),
   goCat:          (el) => shopGoCat(el.dataset.id),
-  setChar:        (el) => shopSetChar(el.value),
+  setChar:        (el) => shopSetChar(el.dataset.id || el.value),
   search:         (el) => shopFilterSearch(el.value),
   clearSearch:    () => shopClearSearch(),
   setSort:        (el) => shopSetSort(el.value),

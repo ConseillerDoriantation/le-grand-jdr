@@ -199,22 +199,22 @@ function _renderArtisanModal() {
     return;
   }
 
-  const charSelect = inlineRoot
-    ? `<div class="art-char-static art-char-static--inline">
-        ${characterAvatarHtml(c, { size: 32, className: 'art-char-avatar', border: '1px solid rgba(255,255,255,.14)' })}
-        <span><small>Personnage actif</small><strong>${_esc(c?.nom || '?')}</strong></span>
-      </div>`
-    : chars.length > 1 || STATE.isAdmin
-      ? `<details class="art-char-picker">
+  // Portrait plus grand + sous-titre qui identifie le personnage (et son joueur
+  // pour le MJ) → on voit d'un coup d'œil qui on améliore. Le sélecteur déroulant
+  // est utilisé aussi bien en page (onglet boutique) qu'en modale.
+  const _charAvatar = (ch, size) => characterAvatarHtml(ch, { size, className: 'art-char-avatar', border: '1px solid rgba(255,255,255,.14)' });
+  const _charSub = (ch) => (STATE.isAdmin && ch?.ownerPseudo) ? `Joueur · ${_esc(ch.ownerPseudo)}` : 'Personnage à améliorer';
+  const charSelect = (chars.length > 1 || STATE.isAdmin)
+    ? `<details class="art-char-picker">
         <summary class="art-char-picker-trigger">
-          ${characterAvatarHtml(c, { size: 32, className: 'art-char-avatar', border: '1px solid rgba(255,255,255,.14)' })}
-          <span class="art-char-picker-copy"><small>Personnage</small><strong>${_esc(c?.nom || '?')}</strong></span>
+          ${_charAvatar(c, 44)}
+          <span class="art-char-picker-copy"><small>${_charSub(c)}</small><strong>${_esc(c?.nom || '?')}</strong></span>
           <span class="art-char-picker-chevron" aria-hidden="true">⌄</span>
         </summary>
         <div class="art-char-picker-menu">
           ${chars.map(ch => `<button type="button" class="art-char-picker-option${ch.id === c?.id ? ' is-active' : ''}"
             data-action="_artisanSelectChar" data-id="${_esc(ch.id)}">
-            ${characterAvatarHtml(ch, { size: 34, className: 'art-char-avatar', border: '1px solid rgba(255,255,255,.14)' })}
+            ${_charAvatar(ch, 40)}
             <span class="art-char-picker-option-copy">
               <strong>${_esc(ch.nom || '?')}</strong>
               ${STATE.isAdmin && ch.ownerPseudo ? `<small>${_esc(ch.ownerPseudo)}</small>` : ''}
@@ -223,9 +223,9 @@ function _renderArtisanModal() {
           </button>`).join('')}
         </div>
       </details>`
-      : `<div class="art-char-static">
-        ${characterAvatarHtml(c, { size: 32, className: 'art-char-avatar', border: '1px solid rgba(255,255,255,.14)' })}
-        <span><small>Personnage</small><strong>${_esc(c?.nom || '?')}</strong></span>
+    : `<div class="art-char-static">
+        ${_charAvatar(c, 44)}
+        <span><small>Personnage à améliorer</small><strong>${_esc(c?.nom || '?')}</strong></span>
       </div>`;
 
   const or = c ? Math.floor(calcOr(c)) : 0;
@@ -495,7 +495,7 @@ function _artisanOpenHistory(invIndex) {
   if (!item) return;
   const hist = Array.isArray(item.upgrades?.history) ? item.upgrades.history : [];
 
-  const fmt = (e) => {
+  const fmt = (e, idx) => {
     const d = new Date(e.at || 0);
     const date = isNaN(d) ? '?' : d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
     const op = e.op || 'upgrade';
@@ -503,19 +503,30 @@ function _artisanOpenHistory(invIndex) {
       e.stat   ? `stat ${e.stat}` : null,
       e.level  ? `palier ${e.level}` : null,
       e.trait  ? `trait « ${e.trait} »` : null,
+      e.value  ? `trait « ${e.value} »` : null,
+      (e.from || e.to) ? `${e.from || '?'} → ${e.to || '?'}` : null,
     ].filter(Boolean).join(' · ');
     const cost = parseInt(e.cost) || 0;
     const mj   = e.mjOverride ? ' <span style="color:#ff6b6b;font-weight:700">MJ</span>' : '';
-    return `<div style="display:flex;justify-content:space-between;gap:.5rem;
+    // MJ : bouton de suppression/correction par entrée (annule l'effet + rembourse).
+    const del = STATE.isAdmin
+      ? `<button class="btn btn-outline btn-sm" style="padding:.15rem .4rem;font-size:.72rem;border-color:var(--danger,#e5484d);color:var(--danger,#e5484d)"
+          data-action="_artisanRevertUpgrade" data-i="${invIndex}" data-h="${idx}"
+          title="Supprimer cette amélioration (annule l'effet et rembourse l'or)">🗑 Supprimer</button>`
+      : '';
+    return `<div style="display:flex;justify-content:space-between;gap:.5rem;align-items:center;
       padding:.4rem .55rem;border-radius:6px;background:var(--bg-elevated);
       border:1px solid var(--border);font-size:.78rem">
-      <div>
+      <div style="min-width:0">
         <div style="font-weight:600;color:var(--text)">${_esc(op)}${mj}</div>
         <div style="color:var(--text-dim);font-size:.72rem">${_esc(detail || '—')}</div>
       </div>
-      <div style="text-align:right;white-space:nowrap">
-        <div style="color:var(--gold);font-weight:700">${cost} PO</div>
-        <div style="color:var(--text-dim);font-size:.7rem">${date}</div>
+      <div style="display:flex;align-items:center;gap:.5rem;white-space:nowrap">
+        <div style="text-align:right">
+          <div style="color:var(--gold);font-weight:700">${cost} PO</div>
+          <div style="color:var(--text-dim);font-size:.7rem">${date}</div>
+        </div>
+        ${del}
       </div>
     </div>`;
   };
@@ -589,6 +600,136 @@ function _logUpgradeHistory(item, entry) {
     mjOverride: !!STORE.mjFreeMode,
   });
   item.upgrades = { ...up, history };
+}
+
+// Recrédite l'or dépensé pour une amélioration annulée. Symétrique de
+// `_logExpense` : on ajoute une recette au compte (calcOr = recettes − dépenses).
+// Repli sur l'ancien champ `or` direct si le perso n'a pas de ledger.
+function _refundGold(c, amount, label) {
+  const gain = parseInt(amount) || 0;
+  if (gain <= 0) return;
+  const compte = c.compte || { recettes: [], depenses: [] };
+  const hasLedger = (compte.recettes?.length || compte.depenses?.length);
+  if (hasLedger) {
+    const recettes = Array.isArray(compte.recettes) ? [...compte.recettes] : [];
+    recettes.push({ date: new Date().toISOString().slice(0, 10), libelle: label, montant: gain });
+    c.compte = { ...compte, recettes };
+  } else {
+    c.or = (parseInt(c.or) || 0) + gain;
+  }
+}
+
+// Libellé lisible d'une entrée d'historique (pour la confirmation de suppression).
+const _UPGRADE_OP_LABEL = {
+  ring_upgrade_stat:   'Anneau — stat',
+  amulet_add_stat:     'Amulette — stat',
+  weapon_add_point:    'Arme — point',
+  ring_upgrade_effect: "Anneau — effet",
+  add_trait:           'Trait ajouté',
+  overwrite_trait:     'Trait remplacé',
+};
+function _upgradeEntryLabel(e = {}) {
+  const meta = e.stat ? ITEM_STAT_BY_FULL[e.stat] : null;
+  const bits = [_UPGRADE_OP_LABEL[e.op] || e.op || 'amélioration'];
+  if (meta) bits.push(`${meta.short}${e.level ? ` (palier ${e.level})` : ''}`);
+  if (e.op === 'ring_upgrade_effect' && e.level) bits.push(`palier ${e.level}`);
+  if (e.op === 'add_trait' && e.value) bits.push(`« ${e.value} »`);
+  if (e.op === 'overwrite_trait') bits.push(`${e.from || '?'} → ${e.to || '?'}`);
+  return bits.join(' · ');
+}
+
+// MJ : supprime UNE amélioration de l'historique et annule son effet sur l'objet
+// (stat/effet/trait), recrédite l'or dépensé et restitue le fragment consommé
+// pour les opérations de traits. Réservé aux admins. Le recyclage (destruction
+// de l'objet) n'est pas concerné : l'objet n'existe plus, il n'a plus d'historique.
+async function _artisanRevertUpgrade(invIndex, histIndex) {
+  if (!STATE.isAdmin) { showNotif('Réservé au MJ.', 'error'); return; }
+  const c = _getActiveArtisanChar();
+  if (!c) return;
+  const item = (c.inventaire || [])[invIndex];
+  if (!item) return;
+  const hist = Array.isArray(item.upgrades?.history) ? item.upgrades.history : [];
+  const entry = hist[histIndex];
+  if (!entry) return;
+
+  const cat = getItemFragmentCategory(item);
+  const label = _upgradeEntryLabel(entry);
+  const refund = parseInt(entry.cost) || 0;
+  const fragOps = entry.op === 'add_trait' || entry.op === 'overwrite_trait';
+  const fragName = entry.op === 'add_trait' ? entry.value : (entry.op === 'overwrite_trait' ? entry.to : null);
+
+  const notes = [
+    "L'objet perd cet effet.",
+    refund > 0 ? `<span style="color:var(--gold)">${refund} PO</span> recrédités.` : null,
+    (fragOps && fragName && cat) ? `Fragment « ${_esc(fragName)} » restitué.` : null,
+  ].filter(Boolean).join(' ');
+
+  if (!await confirmModal(
+    `Supprimer cette amélioration ?<br><b>${_esc(label)}</b><br><span style="opacity:.8;font-size:.9em">${notes}</span>`,
+    { title: '🗑 Corriger — supprimer l\'amélioration', confirmLabel: 'Supprimer', danger: true, icon: '🗑' })) return;
+
+  const inv = [...(c.inventaire || [])];
+  const newItem = { ...item };
+  const up = { ...(newItem.upgrades || {}) };
+  const sb = { ...(up.statBonus || {}) };
+  const decStat = (fullKey) => {
+    const meta = ITEM_STAT_BY_FULL[fullKey];
+    if (!meta) return;
+    const v = (parseInt(sb[meta.store]) || 0) - 1;
+    if (v > 0) sb[meta.store] = v; else delete sb[meta.store];
+  };
+  const fragmentsToRestore = [];
+
+  switch (entry.op) {
+    case 'ring_upgrade_stat':
+    case 'amulet_add_stat':
+    case 'weapon_add_point':
+      decStat(entry.stat);
+      break;
+    case 'ring_upgrade_effect': {
+      const v = (parseInt(up.effectBonus) || 0) - 1;
+      up.effectBonus = v > 0 ? v : 0;
+      break;
+    }
+    case 'add_trait': {
+      const added = Array.isArray(up.addedTraits) ? [...up.addedTraits] : [];
+      const idx = added.indexOf(entry.value);
+      if (idx >= 0) added.splice(idx, 1);
+      up.addedTraits = added;
+      if (cat && entry.value) fragmentsToRestore.push(entry.value);
+      break;
+    }
+    case 'overwrite_trait': {
+      const added = Array.isArray(up.addedTraits) ? [...up.addedTraits] : [];
+      const removedBase = Array.isArray(up.removedBaseTraits) ? [...up.removedBaseTraits] : [];
+      const ti = added.indexOf(entry.to);            // retire le trait posé
+      if (ti >= 0) added.splice(ti, 1);
+      const rb = removedBase.indexOf(entry.from);
+      if (rb >= 0) removedBase.splice(rb, 1);          // l'ancien était un trait de base masqué → on le ré-affiche
+      else if (entry.from) added.push(entry.from);     // sinon c'était un trait ajouté → on le remet
+      up.addedTraits = added;
+      up.removedBaseTraits = removedBase;
+      if (cat && entry.to) fragmentsToRestore.push(entry.to);
+      break;
+    }
+    default: break; // op inconnu → on retire seulement la ligne d'historique
+  }
+
+  up.statBonus = sb;
+  up.history = [...hist.slice(0, histIndex), ...hist.slice(histIndex + 1)];
+  newItem.upgrades = up;
+  inv[invIndex] = newItem;
+  c.inventaire = inv;
+
+  if (fragmentsToRestore.length && cat) {
+    let frags = c.traitFragments || {};
+    fragmentsToRestore.forEach(name => { frags = _addFragment(frags, cat, name, +1); });
+    c.traitFragments = frags;
+  }
+  _refundGold(c, refund, `Artisan : correction — ${label}`);
+
+  await _persistChar(c);
+  showNotif('Amélioration supprimée.', 'success');
 }
 
 // Persiste le perso (inventaire + traitFragments + compte + equipement + statsBonus)
@@ -1252,6 +1393,7 @@ registerActions({
   _artisanFilterCategory: (btn) => _artisanFilterCategory(btn.dataset.category),
   _artisanToggleMjFree: (el) => _artisanToggleMjFree(el.checked),
   _artisanOpenHistory: (btn) => _artisanOpenHistory(Number(btn.dataset.i)),
+  _artisanRevertUpgrade: (btn) => _artisanRevertUpgrade(Number(btn.dataset.i), Number(btn.dataset.h)),
   _artisanDestroyStart: (btn) => _artisanDestroyStart(Number(btn.dataset.i)),
   _artisanDestroyConfirm: (btn) => _artisanDestroyConfirm(Number(btn.dataset.i), btn.dataset.trait),
   _artisanAddTrait: (btn) => _artisanAddTrait(Number(btn.dataset.i), btn.dataset.frag),
