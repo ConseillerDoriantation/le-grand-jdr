@@ -42,3 +42,16 @@ export function weekDatesFrom(date = new Date(), offset = 0) {
     return day;
   });
 }
+
+/**
+ * Écart entre deux jours civils, sans tenir compte de l'heure ni des passages
+ * heure d'été / heure d'hiver. Une date du jour à midi reste donc à J+0 face à
+ * une référence prise à minuit.
+ */
+export function calendarDayDiff(date, reference = new Date()) {
+  const target = date instanceof Date ? date : new Date(date);
+  const origin = reference instanceof Date ? reference : new Date(reference);
+  if (Number.isNaN(target.getTime()) || Number.isNaN(origin.getTime())) return 0;
+  const utcDay = value => Date.UTC(value.getFullYear(), value.getMonth(), value.getDate());
+  return Math.round((utcDay(target) - utcDay(origin)) / 86400000);
+}

@@ -5238,14 +5238,37 @@ input.npc-side-name {
   padding: 16px 18px; border: 1px solid var(--border); border-radius: 14px;
   background: rgba(0,0,0,.14); display: flex; flex-direction: column; gap: 14px;
 }
-/* Base éditable dans la tuile de stat (input à la place du bouton perso). */
-.npc-sheet.cs-v3 .npc-stat-seg-input {
-  width: 100%; max-width: 3em; background: transparent; border: none;
-  text-align: center; font-family: 'Outfit', system-ui, sans-serif;
-  font-weight: 800; font-size: .95rem; color: var(--amber); padding: 0;
+/* Base éditable dans la tuile de stat (variante MJ du bouton de la fiche perso). */
+.npc-sheet.cs-v3 .npc-stat-base-detail {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  color: var(--text-dim);
+  cursor: text;
+}
+.npc-sheet.cs-v3 .npc-stat-base-input {
+  width: 2.2em;
+  min-width: 0;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1px dashed color-mix(in srgb, var(--amber) 45%, transparent);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-soft);
+  font: inherit;
+  font-weight: 600;
+  line-height: inherit;
+  text-align: center;
   -moz-appearance: textfield;
 }
-.npc-sheet.cs-v3 .npc-stat-seg-input:focus { outline: 1px solid var(--amber); border-radius: 4px; }
+.npc-sheet.cs-v3 .npc-stat-base-input:hover,
+.npc-sheet.cs-v3 .npc-stat-base-input:focus {
+  border-bottom-color: var(--amber);
+  color: var(--amber);
+  outline: none;
+}
+.npc-sheet.cs-v3 .npc-stat-base-input::-webkit-inner-spin-button,
+.npc-sheet.cs-v3 .npc-stat-base-input::-webkit-outer-spin-button { margin: 0; appearance: none; }
 /* « / max » dans la barre vitale (valeur actuelle / max). */
 .npc-sheet.cs-v3 .npc-vital-max { color: var(--text-muted); font-weight: 700; margin-left: 2px; }
 /* Champs du dossier (rôle / lieu / organisations) alignés et éditables même vides. */

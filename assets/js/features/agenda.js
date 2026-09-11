@@ -22,7 +22,7 @@ import { navigate } from '../core/navigation.js';
 import PAGES, { requestStatsScope } from './pages.js';
 import { registerActions } from '../core/actions.js';
 import { characterAvatarHtml } from '../shared/portraits.js';
-import { mergeRecurringPreset, suggestionPresentation, weekDatesFrom } from './agenda-utils.js';
+import { calendarDayDiff, mergeRecurringPreset, suggestionPresentation, weekDatesFrom } from './agenda-utils.js';
 import { agendaSessionsFromDoc, isAgendaSessionUpcoming, moveAgendaSession } from '../shared/agenda-sessions.js';
 
 // ── Constantes ────────────────────────────────────────────────────────────
@@ -1863,7 +1863,7 @@ function _agSessCard(s, first) {
   const quest = _sessionQuest(s) || {}, d = _dateFromISO(s.date), sl = SLOTS.find(x => x.id === s.slot) || SLOTS[0];
   const members = _questParticipants(quest);
   const c = _agConv(members, d, s.slot);
-  const days = d ? Math.round((d - _today()) / 86400000) : 0;
+  const days = d ? calendarDayDiff(d, _today()) : 0;
   const admin = _agMJ();
   const dq = `data-quest-id="${_esc(s.questId || '')}" data-iso="${_esc(s.date || '')}" data-slot-id="${_esc(s.slot || '')}"`;
   const when = days === 0 ? 'Aujourd’hui' : days === 1 ? 'Demain' : days > 1 ? `Dans ${days} jours` : 'Bientôt';
