@@ -2897,6 +2897,49 @@ body.sh-dragging * { cursor: grabbing !important; }
 .sh-char-strip-or-val { color: var(--amber, var(--amber)); }
 .sh-char-strip-or small { font-size: .6rem; color: var(--text-dim); font-weight: 600; letter-spacing: .04em; }
 
+/* Sélecteur de personnage à portraits (remplace le <select> natif) */
+.sh-char-picker { position: relative; min-width: 0; }
+.sh-char-picker > summary { list-style: none; }
+.sh-char-picker > summary::-webkit-details-marker { display: none; }
+.sh-char-picker-trigger {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 240px;
+  cursor: pointer; border-radius: 999px;
+}
+.sh-char-picker-trigger--solo { cursor: default; }
+.sh-char-picker-copy, .sh-char-picker-option-copy {
+  display: flex; flex-direction: column; gap: 1px; min-width: 0;
+}
+.sh-char-picker-copy strong, .sh-char-picker-option-copy strong {
+  font-size: .82rem; font-weight: 700; color: var(--text); line-height: 1.15;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 168px;
+}
+.sh-char-picker-copy small, .sh-char-picker-option-copy small {
+  font-size: .62rem; color: var(--text-dim); line-height: 1.1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 168px;
+}
+.sh-char-picker-chevron { color: var(--text-muted); font-size: .9rem; transition: transform .15s; margin-left: 1px; }
+.sh-char-picker[open] .sh-char-picker-chevron { transform: rotate(180deg); }
+.sh-char-picker-menu {
+  position: absolute; z-index: 40; top: calc(100% + 8px); left: 0;
+  width: min(300px, 84vw); max-height: 320px; overflow-y: auto;
+  display: grid; gap: 2px; padding: 5px;
+  border: 1px solid var(--border-md, rgba(255,255,255,.12));
+  border-radius: 12px; background: var(--bg-card, #101824);
+  box-shadow: 0 18px 42px rgba(0,0,0,.5);
+}
+.sh-char-picker-option {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 6px 8px; border: 1px solid transparent; border-radius: 9px;
+  background: transparent; color: var(--text); cursor: pointer; font: inherit; text-align: left;
+}
+.sh-char-picker-option:hover { background: rgba(255,255,255,.05); border-color: var(--border); }
+.sh-char-picker-option.is-active { background: rgba(244,196,48,.10); border-color: rgba(244,196,48,.34); }
+.sh-char-picker-option-copy { flex: 1; }
+.sh-char-picker-check { color: var(--amber); font-weight: 800; }
+/* La barre d'outils défile horizontalement (overflow-x:auto) → elle rognerait
+   le menu déroulant. On lève le clip uniquement quand le sélecteur est ouvert. */
+.sh-page--v2 .sh-page-top .sh-topbar-tools:has(.sh-char-picker[open]) { overflow: visible; }
+
 /* Topbar v2 : align tools en colonne, nouveau bouton Atelier arcane */
 .sh-topbar--v2 .sh-topbar-tools { flex-wrap: wrap; align-items: center; gap: 6px; }
 /* .btn.btn-arcane déplacé vers features.css (eager) : rendu hors shop alors que

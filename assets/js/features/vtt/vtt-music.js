@@ -33,6 +33,7 @@ let _musicSortables = [];   // instances Sortable actives
 let _previewEl     = null;  // aperçu local MJ (non diffusé)
 let _ambienceEl    = null;  // 2ᵉ canal : ambiance en boucle, jouée EN PLUS de la musique
 let _lastAppliedSeek = 0;   // dernier seekVersion appliqué (évite de re-seeker à chaque resync)
+let _autoplayArmed = false; // reprise auto au 1er geste si l'autoplay est bloqué (refresh)
 
 // ── Refs Firestore (sons / playlists / état musique) ────────────────
 const _sonsCol       = ()  => collection(db, `adventures/${aid()}/vttSons`);
@@ -745,6 +746,25 @@ function _killAmbience() {
   if (_ambienceEl) { if (_ambienceEl._fadeTimer) clearInterval(_ambienceEl._fadeTimer); _ambienceEl.pause(); _ambienceEl.src=''; _ambienceEl=null; }
 }
 
+// Autoplay bloqué (ex. après un rafraîchissement de page : le navigateur exige
+// un geste utilisateur avant de jouer du son). On arme une reprise unique au
+// premier geste (clic/touche/toucher) qui relance la piste + l'ambiance en
+// attente — plus besoin de relancer la musique à la main.
+function _armAutoplayResume() {
+  if (_autoplayArmed) return;
+  _autoplayArmed = true;
+  const events = ['pointerdown', 'keydown', 'touchstart'];
+  const resume = () => {
+    _autoplayArmed = false;
+    events.forEach(ev => document.removeEventListener(ev, resume, true));
+    // Les éléments existent déjà (créés mais bloqués) : un simple play() suffit,
+    // le fondu d'entrée se déclenche sur l'évènement 'playing'.
+    if (_audioEl && _audioEl.paused && _musicState?.playing && !_musicState?.paused) _audioEl.play().catch(() => {});
+    if (_ambienceEl && _ambienceEl.paused) _ambienceEl.play().catch(() => {});
+  };
+  events.forEach(ev => document.addEventListener(ev, resume, true));
+}
+
 // ── Fondus (fade in/out + crossfade) ─────────────────────────────────
 const _FADE_MS     = 700;   // musique principale
 const _AMB_FADE_MS = 900;   // ambiance (un peu plus douce)
@@ -811,21 +831,29 @@ function _syncAmbience(ms) {
   }, { once:true });
   el.addEventListener('playing', () => _fade(el, _getAmbienceVolume(), _AMB_FADE_MS), { once:true });
   el.play().catch(err => {
-    if (err.name === 'NotAllowedError') showNotif('🔇 Cliquez sur la page pour activer le son', 'info');
+    if (err.name === 'NotAllowedError') _armAutoplayResume();   // reprise auto silencieuse
     else console.error('[vtt music] ambiance play():', err.name, err.message);
   });
   _ambienceEl = el;
   if (old && old !== el) _fadeOutAndDispose(old, _AMB_FADE_MS);   // crossfade
 }
 
-// Reset complet de l'état musique au teardown de la VTT (appelé depuis vtt.js).
-function _resetMusicState() {
-  _killAudio();
-  _killAmbience();
+// Reset de l'état musique au (re)montage de la VTT (appelé depuis vtt.js).
+// `keepAudio` : conserve la lecture en cours à travers un remontage de la table
+// (retour sur l'onglet). La musique ne se coupe donc pas : les éléments audio
+// survivent, et _syncMusicPlayback les reconnaît (dataset.soundId) sans les
+// recréer. On préserve aussi _lastAppliedSeek pour éviter un re-seek parasite.
+// Le catalogue/état est quand même réinitialisé → les listeners se ré-abonnent
+// proprement, puis la lecture est reconciliée sans redémarrage.
+function _resetMusicState(keepAudio = false) {
+  if (!keepAudio) {
+    _killAudio();
+    _killAmbience();
+    _lastAppliedSeek = 0;
+  }
   _sounds = []; _playlists = []; _musicState = {};
   _musicCatalogStarted = false; _musicCatalogLoading = false; _musicCatalogReady = null;
   _musicSoundLoads.clear();
-  _lastAppliedSeek = 0;
 }
 
 async function _setMusicState(patch) {
@@ -929,7 +957,7 @@ function _syncMusicPlayback(ms) {
 
   el.play().catch(err => {
     if (err.name === 'NotAllowedError')
-      showNotif('🔇 Cliquez sur la page pour activer le son', 'info');
+      _armAutoplayResume();   // reprise auto SILENCIEUSE au 1er geste (aucun message)
     else
       console.error('[vtt music] play() error:', err.name, err.message);
   });
