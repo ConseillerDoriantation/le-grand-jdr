@@ -2,10 +2,25 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  calendarDayDiff,
   mergeRecurringPreset,
   suggestionPresentation,
   weekDatesFrom,
 } from '../assets/js/features/agenda-utils.js';
+
+test('les libellés relatifs comparent les jours et non les heures', () => {
+  const today = new Date(2026, 8, 11, 0, 0, 0);
+  assert.equal(calendarDayDiff(new Date(2026, 8, 11, 12, 0, 0), today), 0);
+  assert.equal(calendarDayDiff(new Date(2026, 8, 12, 12, 0, 0), today), 1);
+  assert.equal(calendarDayDiff(new Date(2026, 8, 13, 23, 59, 0), today), 2);
+});
+
+test('le calcul reste exact autour d’un changement d’heure', () => {
+  assert.equal(
+    calendarDayDiff(new Date(2026, 2, 30, 12, 0, 0), new Date(2026, 2, 29, 0, 0, 0)),
+    1,
+  );
+});
 
 test('un raccourci récurrent complète la semaine sans effacer les choix existants', () => {
   const source = { mon: { m: 'no' }, tue: { a: 'maybe' } };
