@@ -20,6 +20,13 @@ let _diceCloseOut  = null;
 // Chaque entrée : { formula:{faces→count}, bonus, mode, formulaStr, total }
 let _diceHistory   = [];
 const _DICE_HIST_MAX = 6;
+// Fusion « Jets » : le lanceur affiche aussi les COMPÉTENCES du token courant
+// (via un builder injecté depuis vtt.js), avec un sélecteur Compétences ↔ Dés.
+let _diceJetsMode  = 'dice';    // 'skills' | 'dice'
+let _jetsBuilder   = null;      // () => { hasSkills, body } pour la sélection courante
+export function setJetsBuilder(fn) { _jetsBuilder = fn; }
+// Bascule Compétences ↔ Dés libres (remplace l'ancien _vttJetsMode de l'inspector).
+function _vttJetsMode(mode) { _diceJetsMode = (mode === 'dice') ? 'dice' : 'skills'; _renderDicePanel(); }
 
 // LANCEUR DE DÉS LIBRE
 // ═══════════════════════════════════════════════════════════════════
@@ -65,7 +72,7 @@ function _renderDicePanel() {
   else if (_diceFreeBonus<0) fmtParts.push(String(_diceFreeBonus));
   const formulaStr = fmtParts.join(' + ') || '—';
 
-  el.innerHTML = `
+  const freeDiceHtml = `
     <div class="vtt-dice-hd">
       <span>🎲 Lanceur libre</span>
     </div>
@@ -115,6 +122,19 @@ function _renderDicePanel() {
             </button>`).join('')}
         </div>
       </div>` : ''}`;
+
+  // Compétences du token courant (le cas échéant) : on affiche un sélecteur
+  // segmenté Compétences ↔ Dés libres. Sans compétences (ex. MJ sans token) →
+  // uniquement les dés libres (comportement identique à avant).
+  const jets = _jetsBuilder ? (_jetsBuilder() || {}) : {};
+  const hasSkills = !!jets.hasSkills;
+  if (!hasSkills) { el.innerHTML = freeDiceHtml; return; }
+  const mode = _diceJetsMode === 'dice' ? 'dice' : 'skills';
+  const seg = `<div class="vtt-jets-seg" role="tablist">
+       <button class="vtt-jets-seg-btn${mode==='skills'?' active':''}" role="tab" aria-selected="${mode==='skills'}" data-vtt-fn="_vttJetsMode" data-vtt-args="skills">🎯 Compétences</button>
+       <button class="vtt-jets-seg-btn${mode==='dice'?' active':''}" role="tab" aria-selected="${mode==='dice'}" data-vtt-fn="_vttJetsMode" data-vtt-args="dice">🎲 Dés libres</button>
+     </div>`;
+  el.innerHTML = seg + `<div class="vtt-jets-body">${mode==='skills' ? jets.body : freeDiceHtml}</div>`;
 }
 
 // Relance le dernier jet (même formule/bonus/mode, nouveaux dés). Garde le
@@ -197,4 +217,5 @@ export {
   _vttDiceRerollLast,
   _vttDiceUseHistory,
   _vttToggleDice,
+  _vttJetsMode,
 };

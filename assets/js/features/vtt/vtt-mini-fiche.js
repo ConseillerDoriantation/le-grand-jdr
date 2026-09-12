@@ -139,6 +139,16 @@ function _msBuildEquipItem(slot, item, invIndex) {
 
 function _msCanEdit(uid) { return STATE.isAdmin || STATE.user?.uid === uid; }
 
+// Sécurité — droit d'OUVRIR/VOIR une mini-feuille (contenu privé : équipement,
+// sac, or, notes…). Un joueur ne peut voir que la sienne, ou celle d'un
+// personnage qu'il contrôle réellement via un token possédé/délégué. Le MJ, tout.
+// Empêche de consulter la fiche d'un autre joueur depuis la présence ou un token.
+function _msCanView(uid, charId = null) {
+  if (STATE.isAdmin || STATE.user?.uid === uid) return true;
+  if (charId) return !!resolveCharacterControlToken(charId, VS.tokens, STATE.user?.uid);
+  return false;
+}
+
 // La délégation VTT donne accès aux ressources de combat, pas au contenu privé
 // de la fiche (équipement, inventaire, notes…). On garde donc _msCanEdit pour
 // les onglets complets et on ouvre uniquement les jauges PV/PM si un token lié
@@ -1467,6 +1477,15 @@ function _renderMiniSheetImpl(uid) {
   const validId = chars.find(c => c.id === VS.miniCharId) ? VS.miniCharId : chars[0].id;
   VS.miniCharId = validId;
   const c = chars.find(c => c.id === validId);
+  // Sécurité (défense en profondeur) : ne jamais rendre la fiche d'un tiers, même
+  // si l'ouverture est déclenchée par ailleurs. Seuls MJ / propriétaire / contrôleur
+  // réel (délégation sur CE personnage) sont autorisés.
+  if (!_msCanView(uid, c?.id)) {
+    VS.miniUid = null; VS.miniCharId = null;
+    panel.classList.remove('open'); panel.innerHTML = '';
+    _syncMiniSheetLaunchers();
+    return;
+  }
   const canEdit = _msCanEdit(uid);
   const canEditVitals = _msCanEditVitals(c?.id, uid);
 
@@ -1544,6 +1563,8 @@ function _vttToggleMiniSheet(uid, charId = null) {
     const panel = document.getElementById('vtt-mini-panel');
     if (panel) { panel.classList.remove('open'); panel.innerHTML = ''; }
   } else {
+    // Sécurité : refuser l'ouverture de la fiche d'un autre joueur (contenu privé).
+    if (!_msCanView(uid, charId)) { showNotif('Fiche réservée à son propriétaire.', 'info'); return; }
     VS.miniUid = uid; VS.miniCharId = charId || null;
     _renderMiniSheet(uid);
   }
@@ -1552,6 +1573,7 @@ function _vttToggleMiniSheet(uid, charId = null) {
 }
 
 function _vttSelectMiniChar(uid, charId) {
+  if (!_msCanView(uid, charId)) { showNotif('Fiche réservée à son propriétaire.', 'info'); return; }
   VS.miniCharId = charId;
   // Reset des filtres : l'inventaire/les sorts diffèrent d'un perso à l'autre.
   _msInvQuery = ''; _msInvCat = 'all'; _msSortQuery = ''; _msSortCat = 'all'; _msCraftQuery = '';

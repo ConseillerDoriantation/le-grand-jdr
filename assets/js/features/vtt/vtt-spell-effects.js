@@ -29,6 +29,28 @@ import {
 export async function _vttApplyEnchantBuffs(srcId, targetIds, opt) {
   const shared = _buffShared(opt, srcId);
 
+  // Lacération PORTÉE : l'enchantement confère aux ATTAQUES de l'allié la réduction
+  // de CA (Lacération), au lieu de frapper l'allié lui-même. On pose un buff
+  // `laceration_grant` lu lors des attaques de l'allié (cf. _vttRollAttack).
+  const lacGrant = opt.mods?.enchantLaceration || opt.enchantLaceration || null;
+  if (lacGrant) {
+    const grantBuff = {
+      ...shared, type: 'laceration_grant', icon: '🩸',
+      reduction: lacGrant.reduction, max: lacGrant.max, maxElite: lacGrant.maxElite,
+    };
+    await Promise.all(targetIds.map(async tid => {
+      const td = VS.tokens[tid]?.data; if (!td) return;
+      const existing = (td.buffs || []).filter(b => !(b.type === 'laceration_grant' && b.sortLabel === opt.label));
+      const previous = td.buffs || [];
+      const next = [...existing, grantBuff];
+      _vttPatchTokenOptimistically(tid, { buffs: next });
+      await updateDoc(_tokRef(tid), { buffs: next }).catch(error => {
+        _vttPatchTokenOptimistically(tid, { buffs: previous });
+        console.error('[VTT] Lacération portée non appliquée :', error);
+      });
+    }));
+  }
+
   // Mode "État" : applique 1..N états choisis (1 par rune Enchantement) à chaque
   // allié ciblé. Pas de JS (effet bénéfique consenti). Le 1er état garde ses
   // réglages fins ; tous sont modulés par Puissance/Amplification (global).
