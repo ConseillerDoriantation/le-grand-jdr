@@ -10721,11 +10721,19 @@ async function _vttRetireToken(tokenId) {
 async function _vttInvokeMyToken(tokenId) {
   if (!VS.activePage) { showNotif('Aucune carte active','error'); return; }
   const uid = STATE.user?.uid; if (!uid) return;
-  // Persos du joueur PAS sur la scène courante → invocables.
+  // Personnages DÉJÀ présents sur la scène courante (placés par le MJ ou soi-même) :
+  // on ne les ré-invoque pas, sinon un 2ᵉ token du même perso resté en réserve
+  // crée un doublon sur la carte.
+  const onPageChars = new Set(Object.values(VS.tokens)
+    .filter(e => e.data?.pageId === VS.activePage.id && e.data?.characterId)
+    .map(e => e.data.characterId));
+  // Persos du joueur PAS sur la scène courante ET pas déjà présents → invocables.
   const reserve = Object.values(VS.tokens)
-    .filter(e => e.data?.ownerId === uid && e.data.pageId !== VS.activePage.id)
+    .filter(e => e.data?.ownerId === uid
+      && e.data.pageId !== VS.activePage.id
+      && !(e.data.characterId && onPageChars.has(e.data.characterId)))
     .map(e => e.data);
-  if (!reserve.length) { showNotif('Aucun personnage à invoquer','info'); return; }
+  if (!reserve.length) { showNotif('Ton personnage est déjà sur la carte.','info'); return; }
   const tok = tokenId ? reserve.find(t => t.id === tokenId) : (reserve.length === 1 ? reserve[0] : null);
   if (!tok) { _vttMyTokenPicker(reserve, '_vttInvokeMyToken', '🧑 Quel personnage invoquer ?', '<span style="color:var(--gold-2,#7eb0ff)">🧑 Invoquer</span>'); return; }
   if (tokenId) closeModalDirect();
