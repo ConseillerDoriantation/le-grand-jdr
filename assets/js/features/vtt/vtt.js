@@ -86,7 +86,7 @@ import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
   _scaledEnchantConditionFields, _vttPrimaryWeapon, _vttBestWeaponRange, _conditionCritRangeBonusOf,
 } from './vtt-effective.js';
-import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttFicheJets, _vttJetsMode, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js';
+import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttBuildJetsBody, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js';
 import {
   _renderLibSection, _resetMapLib, _libFolder, _vttLibToggle, _vttLibOpenFolder, _vttLibNewFolder,
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,
@@ -152,7 +152,7 @@ import {
 import {
   _vttToggleDice, _vttDiceAddDie, _vttDiceRemoveDie, _vttDiceClear, _vttDiceBonusStep,
   _vttDiceBonusSet, _vttDiceMode, _vttDiceRoll, _closeDicePanel,
-  _vttDiceRerollLast, _vttDiceUseHistory,
+  _vttDiceRerollLast, _vttDiceUseHistory, _vttJetsMode, setJetsBuilder,
 } from './vtt-dice.js';
 import {
   _renderTimer, _timerStartTick, _timerStopTick, _vttTimerToggle, _vttTimerReset, _vttTimerLabel,
@@ -2149,7 +2149,7 @@ function _patchShapeImpl(id) {
 }
 
 // ── Sélection ───────────────────────────────────────────────────────
-export function _select(id) {
+export function _select(id, { quiet = false } = {}) {
   _clearAim(); // changer de sélection annule une visée action-first en cours
   if (VS.imgTr&&VS.selImg) { VS.imgTr.nodes([]); VS.selImg=null; VS.layers.map?.batchDraw(); }
   _setSelectionRing(VS.selected, false);
@@ -2163,9 +2163,12 @@ export function _select(id) {
   VS.layers.token.batchDraw();
   const data=VS.tokens[id]?.data;
   _renderInspector(data??null);
-  if (data) _vttFocusInspectorIfTabbed();
-  // Clic sur un token allié/propre : portée de déplacement (bleu) + portée d'attaque (rouge)
-  if (data && _canControlToken(data)) {
+  if (!quiet && data) _vttFocusInspectorIfTabbed();
+  // Clic sur un token allié/propre : portée de déplacement (bleu) + portée d'attaque (rouge).
+  // `quiet` (auto-sélection à l'arrivée sur la carte) : on N'ARME PAS les portées ni
+  // la visée — juste la fiche + l'anneau — pour ne pas noyer la carte de surbrillances
+  // que le joueur n'a pas demandées. Un vrai clic (non quiet) les activera.
+  if (!quiet && data && _canControlToken(data)) {
     _showMoveRange(data);    // cases bleues cliquables (déplacement)
     _attackSrc = id;
     _setAttackRing(id, true);
@@ -2175,6 +2178,38 @@ export function _select(id) {
   } else {
     _hideActBar();
   }
+}
+
+// Joueur : auto-sélection « discrète » de son propre token (favori ★ en priorité)
+// dès qu'il est présent et visible sur la carte active, tant qu'il n'a rien
+// sélectionné lui-même → sa fiche s'affiche dans le dock en bas à gauche sans clic
+// (y compris après invocation ou envoi sur une nouvelle scène). Mode quiet : pas
+// de surbrillances de déplacement/attaque tant qu'il n'a pas cliqué son token.
+function _vttAutoSelectOwnToken() {
+  if (STATE.isAdmin || VS.selected || !VS.activePage) return;
+  const uid = STATE.user?.uid; if (!uid) return;
+  const mine = Object.values(VS.tokens).map(e => e.data).filter(t =>
+    t?.ownerId === uid && t.pageId === VS.activePage.id && t.visible !== false);
+  if (!mine.length) return;
+  const pick = mine.find(t => t.characterId && VS.characters[t.characterId]?.isDefault) || mine[0];
+  if (pick && VS.tokens[pick.id]) _select(pick.id, { quiet: true });
+}
+
+// Replie / déplie le dock de fiche (bas-gauche). Certains joueurs préfèrent le
+// masquer : on ne garde alors qu'une petite pastille pour le rouvrir. Persisté.
+function _vttToggleFicheDock() {
+  const dock = document.getElementById('vtt-fiche-dock');
+  if (!dock) return;
+  const collapsed = !dock.classList.contains('is-collapsed');
+  dock.classList.toggle('is-collapsed', collapsed);
+  lsJson.set('vtt-fiche-dock-hidden', collapsed);
+  const btn = document.getElementById('vtt-fiche-dock-toggle');
+  if (btn) { btn.title = collapsed ? 'Afficher la fiche' : 'Masquer la fiche'; btn.setAttribute('aria-pressed', collapsed ? 'true' : 'false'); }
+}
+// Applique la préférence « fiche masquée » (appelé au montage de la table).
+function _vttApplyFicheDockPref() {
+  const dock = document.getElementById('vtt-fiche-dock');
+  if (dock && lsJson.get('vtt-fiche-dock-hidden', false)) dock.classList.add('is-collapsed');
 }
 
 function _updateTokenDraggable() {
@@ -3180,6 +3215,10 @@ function _vttSpellMods(s) {
   const isSentinelle = nbAff > 0 && nbInv > 0;
   const isZoneElargie = nbAmp > 0 && nbDisp > 0;
   const isArmeInvoquee = nbEnch > 0 && nbInv > 0;
+  // Enchantement mode État sur un allié : une Lacération éventuelle n'est PAS une
+  // frappe directe (qui baisserait la CA de l'allié) — elle est PORTÉE par l'allié
+  // et s'applique aux ennemis qu'il touche (cf. mods.enchantLaceration).
+  const isEnchantEtat = nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat';
   const isRegeneration = nbProt > 0 && nbAff > 0 && nbInv === 0 && !isLacMode;
   const isCoupChance = nbCh > 0 && nbReac > 0;
   // Bonus chiffré d'un enchantement non-dégâts (toucher/déplacement/CA) :
@@ -3203,8 +3242,12 @@ function _vttSpellMods(s) {
     // Lacération (branche d'Affliction) : -CA brut sur la cible, -1 par rune
     // Affliction (plafonné en jeu : 2 joueur · 4 élite/boss).
     // Neutralisée si combo Sentinelle (Affliction + Invocation) : portée par la sentinelle.
-    laceration: (lacCount > 0 && !isSentinelle)
+    laceration: (lacCount > 0 && !isSentinelle && !isEnchantEtat)
       ? { runes: lacCount, reduction: lacCount, max: 2, maxElite: 4 } : null,
+    // Lacération PORTÉE par un Enchantement d'État : conférée à l'allié enchanté,
+    // appliquée à la CA des ennemis qu'il touche — jamais à l'allié lui-même.
+    enchantLaceration: (lacCount > 0 && isEnchantEtat)
+      ? { reduction: lacCount, max: 2, maxElite: 4 } : null,
     // Chance : étend la plage critique (RC = 20 - nb runes Chance), sans plafond.
     // Plancher à 2 pour garder le 1 naturel en échec critique.
     chance: nbCh > 0 && !isCoupChance
@@ -8637,6 +8680,35 @@ async function _vttRollAttack() {
       if (concNotes.concentrationLogs?.length) concentrationLogs.push(...concNotes.concentrationLogs);
     }
 
+    // ── Lacération PORTÉE : si l'attaquant a un buff `laceration_grant` (posé par
+    //    un Enchantement d'État), chaque coup réussi réduit aussi la CA de la cible
+    //    ennemie — l'allié enchanté, lui, n'a JAMAIS perdu de CA. Sauté si l'attaque
+    //    courante applique déjà une Lacération directe (pas de double −CA). ──
+    {
+      const roundLg = VS.session?.combat?.round ?? 0;
+      const grant = (src.buffs || []).find(b => b.type === 'laceration_grant'
+        && (b.expiresAtRound == null || roundLg === 0 || roundLg <= b.expiresAtRound));
+      if (grant && !_mods?.laceration) {
+        const baseRoundLg = Math.max(1, roundLg);
+        for (const r of targetResults) {
+          if (!(r.hit || r.halfDmg) || !r._data) continue;
+          const curTgtData = r._data;
+          const beast = curTgtData.beastId ? VS.bestiary[curTgtData.beastId] : null;
+          const rang = (beast?.rang || 'classique').toLowerCase();
+          const cap = (rang === 'elite' || rang === 'élite' || rang === 'boss') ? grant.maxElite : grant.max;
+          const reduction = Math.min(grant.reduction, cap);
+          const sortLabel = `Lacération · ${grant.sortLabel || 'Enchantement'}`;
+          const newBuff = {
+            type: 'ca', bonus: -reduction, totalDuration: 2, startRound: roundLg,
+            expiresAtRound: baseRoundLg + 2 - 1, sortLabel, icon: '🩸',
+          };
+          const existingBuffs = (curTgtData.buffs || []).filter(b => !(b.type === 'ca' && b.sortLabel === sortLabel));
+          await updateDoc(_tokRef(curTgtData.id), { buffs: [...existingBuffs, newBuff] }).catch(() => {});
+          modNotes.push(`🩸 CA −${reduction} → ${r.name}`);
+        }
+      }
+    }
+
     if (_mods) {
       const round = VS.session?.combat?.round ?? 0;
       const baseRound = Math.max(1, round);
@@ -9495,7 +9567,7 @@ function _initListeners() {
     if (!STATE.isAdmin) {
       const uid=STATE.user?.uid;
       const target=VS.session.playerPages?.[uid]??VS.session.activePageId;
-      if (target&&VS.pages[target]&&VS.activePage?.id!==target) _switchPage(target);
+      if (target&&VS.pages[target]&&VS.activePage?.id!==target) { _switchPage(target); _vttAutoSelectOwnToken(); }
     }
     _renderTimer();
     _renderWeatherBtn();
@@ -9532,7 +9604,7 @@ function _initListeners() {
       const uid=STATE.user?.uid;
       const target=(VS.session.playerPages?.[uid]??VS.session.activePageId)
         ||Object.values(VS.pages).sort((a,b)=>(a.order??0)-(b.order??0))[0]?.id;
-      if (target&&VS.pages[target]) _switchPage(target);
+      if (target&&VS.pages[target]) { _switchPage(target); _vttAutoSelectOwnToken(); }
     }
   },()=>{}));
 
@@ -9666,6 +9738,9 @@ function _initListeners() {
      } catch (e) { _vttPanelError('Token', e, null); }
     });
     _syncTokenStackVisuals();
+    // Joueur : dès que son token apparaît/arrive sur la carte active, on affiche sa
+    // fiche sans clic (gardé : seulement si rien n'est sélectionné).
+    if (!STATE.isAdmin) _vttAutoSelectOwnToken();
     _renderTraySoon();
     _renderCombatTrackerSoon();
     void _cleanupReserveDuplicates();
@@ -12210,6 +12285,9 @@ function _buildHtml() {
 
     <!-- ── FICHE : dock flottant compact en bas à gauche (identité + onglets déployables + Jets) ── -->
     <div class="vtt-fiche-dock" id="vtt-fiche-dock">
+      <button class="vtt-fiche-dock-toggle" id="vtt-fiche-dock-toggle" data-vtt-fn="_vttToggleFicheDock" title="Masquer la fiche" aria-label="Masquer ou afficher la fiche">
+        <span class="vtt-fdt-chev" aria-hidden="true">▾</span><span>🎴 Ma fiche</span>
+      </button>
       <div class="vtt-inspector" id="vtt-inspector">
         <div class="vtt-ins-empty"><div style="font-size:1.2rem">🎲</div>Sélectionne ton token</div>
       </div>
@@ -12519,9 +12597,26 @@ async function _vttMountTable(content) {
   _ef.innerHTML = `<div class="vtt-emote-picker" id="vtt-emote-picker" role="dialog" aria-label="Choisir une émote" aria-hidden="true"></div>
     <button class="vtt-emote-trigger" data-vtt-fn="_vttToggleEmotePicker" title="Émotes" aria-label="Émotes" aria-expanded="false" aria-controls="vtt-emote-picker">😄</button>`;
   sessionTools.appendChild(_ef);
-  // Épinglage du panneau : restaure la préférence (toile rétrécie + panneau docké).
-  if (_slidePinned && !_slideOpen) _vttSlide('chat');
+
+  // Lanceur de dés LIBRE dans le dock d'outils : accessible sans sélectionner de
+  // token (le MJ notamment n'a pas de token). Réutilise _vttToggleDice/_renderDicePanel.
+  const _df = document.createElement('div');
+  _df.className = 'vtt-dice-float';
+  _df.innerHTML = `
+    <div class="vtt-dice-panel" id="vtt-dice-panel" data-open="0" style="display:none" role="dialog" aria-label="Lanceur de dés" aria-hidden="true"></div>
+    <button class="vtt-dice-trigger" id="vtt-dice-trigger" data-vtt-fn="_vttToggleDice" title="Lanceur de dés & compétences" aria-label="Lanceur de dés et compétences" aria-expanded="false" aria-controls="vtt-dice-panel">🎲</button>`;
+  sessionTools.appendChild(_df);
+  // Le lanceur affiche aussi les compétences du token courant (fusion « Jets »).
+  setJetsBuilder(_vttBuildJetsBody);
+
+  // Épinglage du panneau : la table vient d'être reconstruite → le panneau DOM est
+  // fermé. On remet _slideOpen à zéro (sinon un état périmé après re-navigation
+  // empêche la ré-ouverture) puis on ré-ouvre docké si la préférence est active.
+  // Fiable sur rechargement complet ET sur simple re-navigation vers la table.
+  _slideOpen = false;
+  if (_slidePinned) _vttSlide('chat');
   _vttApplySlidePin();
+  _vttApplyFicheDockPref();   // restaure « fiche masquée » si le joueur l'avait choisi
   // NB : le lanceur de dés libre vit désormais dans le panneau « Jets » du
   // pupitre (vtt-inspector.js) — plus de puce flottante dédiée ici.
   document.addEventListener('keydown',_keyHandler);
@@ -12594,6 +12689,7 @@ export const VTT_ACTIONS = {
   _vttSlide,
   _vttSlideClose,
   _vttSlidePin,
+  _vttToggleFicheDock,
   _vttUndoDraw,
   _vttRedoDraw,
   _invPickToggle,
@@ -12714,7 +12810,6 @@ export const VTT_ACTIONS = {
   _vttFogRedo,
   _vttImportGithubRelease,
   _vttInsTab,
-  _vttFicheJets,
   _vttJetsMode,
   _vttOpenSource,
   _vttRcolView,

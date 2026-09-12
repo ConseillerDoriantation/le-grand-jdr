@@ -1586,6 +1586,10 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   // Branche Lacération d'Affliction : frappe l'attaque de base + réduit la CA,
   // donc PAS de suppression d'impact ni de chip DoT/État.
   const isLaceration  = _hasLaceration(s);
+  // Lacération PORTÉE : combinée à un Enchantement d'État (buff allié), la
+  // Lacération n'attaque pas l'allié — elle est conférée à SES attaques (réduit
+  // la CA des ennemis qu'il touche). Miroir de la logique VTT (isEnchantEtat).
+  const isPortedLaceration = isLaceration && hasEnchant && enchantMode === 'etat' && !runesAll.includes('Invocation');
   const hasAfflictionDebuff = hasAffliction && afflictionMode !== 'laceration';
   // Enchantement-only : pas de dégâts d'impact si pas de degats explicite
   const isEnchantOnly = hasEnchant && !((s.degats || '').trim());
@@ -1636,7 +1640,14 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
     // rien : l'affliction est portée par la sentinelle (chip Invocation géré ailleurs)
   } else if (isLaceration) {
     const lac = _calcLaceration(s);
-    if (lac) chips.push({ icon:'🩸', val:`CA −${Math.min(lac.reduction, lac.maxElite)}`, color:'#dc2626', lbl:'Réduction de CA de la cible (Lacération)' });
+    if (lac) chips.push({
+      icon:'🩸',
+      val:`CA −${Math.min(lac.reduction, lac.maxElite)}${isPortedLaceration ? ' (porté)' : ''}`,
+      color:'#dc2626',
+      lbl: isPortedLaceration
+        ? 'Lacération portée : réduit la CA des ennemis touchés par l’allié enchanté (l’allié ne perd pas de CA)'
+        : 'Réduction de CA de la cible (Lacération)',
+    });
   } else if (hasAfflictionDebuff && !activeIds.has('regeneration')) {
     if (afflictionMode === 'etat') {
       // Mode État : on affiche TOUJOURS un chip état, jamais DoT

@@ -964,7 +964,13 @@ html:not([data-theme="light"]) .vtt-root {
    états, éco) + icônes latérales qui DÉPLOIENT les onglets Stats/États/Gérer
    en popover au-dessus · lanceur « Jets » au-dessus. La carte reste utilisable.
    ════════════════════════════════════════════════════════════════════ */
-.vtt-fiche-dock { position: absolute; left: 10px; bottom: 10px; z-index: 20; max-width: calc(100% - 20px); }
+.vtt-fiche-dock { position: absolute; left: 10px; bottom: 10px; z-index: 20; max-width: calc(100% - 20px); display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+/* Poignée « masquer / afficher la fiche » (le joueur peut replier le dock). */
+.vtt-fiche-dock-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: var(--r-full); background: color-mix(in srgb, var(--surface-1) 92%, transparent); backdrop-filter: blur(10px); border: 1px solid var(--border-md); box-shadow: var(--elev-1); color: var(--text-muted); font-size: 11px; font-weight: 600; cursor: pointer; transition: color .15s; }
+.vtt-fiche-dock-toggle:hover { color: var(--text); }
+.vtt-fiche-dock-toggle .vtt-fdt-chev { font-size: 9px; transition: transform .15s; }
+.vtt-fiche-dock.is-collapsed .vtt-fiche-dock-toggle .vtt-fdt-chev { transform: rotate(-90deg); }
+.vtt-fiche-dock.is-collapsed .vtt-inspector { display: none; }
 .vtt-fiche-dock .vtt-inspector { position: static; display: block; max-height: none; background: none; border: 0; box-shadow: none; padding: 0; overflow: visible; }
 .vtt-fiche-dock .vtt-ins-empty { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: var(--r-md); background: color-mix(in srgb, var(--surface-1) 92%, transparent); backdrop-filter: blur(10px); border: 1px solid var(--border-md); box-shadow: var(--elev-1); color: var(--text-dim); font-size: 12px; }
 
@@ -979,6 +985,10 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-jets-seg-btn:hover { color: var(--text); }
 .vtt-jets-seg-btn.active { background: var(--gold-glow); border-color: var(--border-bright); color: var(--gold-2); }
 .vtt-jets-body > * + * { margin-top: 10px; }
+/* Le lanceur de dés du dock affiche aussi les compétences : quand le sélecteur
+   segmenté est présent, on élargit le panneau (le contenu compétences le demande)
+   et on borne sa hauteur pour rester dans le viewport. */
+.vtt-dice-panel:has(.vtt-jets-seg) { width: min(440px, 88vw); max-height: 60vh; overflow-y: auto; }
 /* Lanceur de dés libre : occupe toute la largeur du panneau Jets */
 .vtt-jets-body .vtt-dice-panel { width: 100%; box-sizing: border-box; }
 /* Onglet « Fiche » (ouvre le tiroir mini-fiche) */
@@ -11711,7 +11721,8 @@ html:not([data-theme="light"]) .vtt-root {
   .vtt-emote-float,
   .vtt-loot-float,
   .vtt-music-float,
-  .vtt-rest-float
+  .vtt-rest-float,
+  .vtt-dice-float
 ) {
   position: relative;
   inset: auto;
@@ -11726,7 +11737,8 @@ html:not([data-theme="light"]) .vtt-root {
   .vtt-emote-picker,
   .vtt-loot-panel,
   .vtt-music-panel,
-  .vtt-rest-panel
+  .vtt-rest-panel,
+  .vtt-dice-panel
 ) {
   position: absolute;
   bottom: calc(100% + 9px);
@@ -11758,7 +11770,8 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-session-tools :is(
   .vtt-emote-trigger,
   .vtt-loot-trigger,
-  .vtt-music-trigger
+  .vtt-music-trigger,
+  .vtt-dice-trigger
 ) {
   width: 30px;
   min-width: 30px;
@@ -11768,7 +11781,8 @@ html:not([data-theme="light"]) .vtt-root {
   .vtt-emote-trigger,
   .vtt-loot-trigger,
   .vtt-music-trigger,
-  .vtt-rest-trigger
+  .vtt-rest-trigger,
+  .vtt-dice-trigger
 ) {
   height: 30px;
   border-radius: 8px;
