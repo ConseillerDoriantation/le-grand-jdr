@@ -3420,6 +3420,11 @@ export async function openSortModal(idx, s) {
       <div id="s-affliction-laceration-block" style="${s?.afflictionMode==='laceration'?'':'display:none'};font-size:.78rem;line-height:1.5;color:var(--text-muted);background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.22);border-radius:8px;padding:.55rem .7rem;margin-top:.4rem">
         🩸 <strong style="color:#f87171">Lacération</strong> — le sort inflige <strong>l'attaque de base</strong> et réduit la <strong>CA de la cible de −1 par rune Affliction</strong>, plafonné à <strong>−2</strong> (joueur) / <strong>−4</strong> (Élite-Boss), pendant 2 tours. Pas de DoT ni d'état.
       </div>
+
+      <!-- Combo Enchantement (État) + Lacération : effet spécial « Lacération portée » -->
+      <div id="s-affliction-ported-note" style="${(runesSrc.includes('Enchantement') && (s?.enchantMode||'etat')==='etat' && s?.afflictionMode==='laceration' && !runesSrc.includes('Invocation'))?'':'display:none'};font-size:.78rem;line-height:1.5;color:var(--text-muted);background:rgba(232,184,75,.1);border:1px solid rgba(232,184,75,.32);border-radius:8px;padding:.55rem .7rem;margin-top:.4rem">
+        🔗 <strong style="color:#e8b84b">Enchantement + Lacération</strong> — effet spécial : la Lacération <strong>n'attaque pas l'allié enchanté</strong>. Elle est <strong>portée</strong> par lui — ses attaques réduisent la CA des ennemis qu'il touche, et <strong>l'allié ne perd jamais de CA</strong>.
+      </div>
       </div><!-- /s-affliction-modes -->
     </div><!-- /s-affliction-section -->
 
@@ -3961,6 +3966,14 @@ function _refreshConditionalSections() {
     if (ampHidden && ampHidden.value !== 'zone') ampHidden.value = 'zone';
   }
   if (affModes)  affModes.style.display  = isRegen ? 'none' : '';
+  // Note de combo « Lacération portée » : Enchantement (État) + Affliction Lacération
+  // (hors Sentinelle). Prévient le joueur que la Lacération est conférée à l'allié.
+  const portedNote = document.getElementById('s-affliction-ported-note');
+  if (portedNote) {
+    const afflMode = document.getElementById('s-affliction-mode')?.value || 'dot';
+    const enchMode = document.getElementById('s-enchant-mode')?.value || 'etat';
+    portedNote.style.display = (hasEnchant && enchMode === 'etat' && afflMode === 'laceration' && !anyInvoc) ? '' : 'none';
+  }
   if (protGroup) protGroup.style.display = (isDrain || isRegen) ? 'none' : '';
   if (caSec)     caSec.style.display     = (!isDrain && !isRegen && protMode === 'ca') ? '' : 'none';
   if (sSec) {
