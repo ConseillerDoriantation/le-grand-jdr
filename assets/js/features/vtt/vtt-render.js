@@ -125,6 +125,9 @@ export function _buildTokenVisual(t, ld, condById) {
   const footprintInnerW = footprintW - 4;
   const footprintInnerH = footprintH - 4;
   const health = tokenHealthMeta(ld.displayHp, ld.displayHpMax);
+  // KO visible par TOUS (crâne + token grisé + anneau rouge), même quand les PV de
+  // l'ennemi sont masqués : ld.isDown vient des PV réels, sans révéler le nombre.
+  const isDown = health.isDown || !!ld.isDown;
   const round = VS.session?.combat?.round ?? 0;
   const effects = tokenActiveEffects(t, condById, round);
   const g = new K.Group({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2, id:`tok-${t.id}` });
@@ -183,7 +186,7 @@ export function _buildTokenVisual(t, ld, condById) {
   // asynchrone ne repasse devant les anneaux, jauges ou badges.
   const portrait = new K.Group({
     clipFunc: ctx => { ctx.ellipse(0,0,rx,ry,0,0,Math.PI*2,false); },
-    x:0, y:portraitY, listening:false, name:'portrait', opacity:health.isDown ? .46 : 1,
+    x:0, y:portraitY, listening:false, name:'portrait', opacity:isDown ? .46 : 1,
   });
   const summonIcon = t.summonKind === 'invocation' ? '🐾'
     : t.summonKind === 'sentinelle' ? '🪤'
@@ -204,8 +207,8 @@ export function _buildTokenVisual(t, ld, condById) {
   }
   g.add(new K.Ellipse({
     x:0, y:portraitY, radiusX:rx, radiusY:ry, fill:'transparent',
-    stroke:health.isDown?'#ef4444':typeColor, strokeWidth:3,
-    shadowColor:health.isDown?'#ef4444':'#000', shadowBlur:health.isDown?10:5,
+    stroke:isDown?'#ef4444':typeColor, strokeWidth:3,
+    shadowColor:isDown?'#ef4444':'#000', shadowBlur:isDown?10:5,
     shadowOpacity:.72, listening:false, name:'token-ring',
   }));
   g.add(new K.Ellipse({
@@ -266,10 +269,10 @@ export function _buildTokenVisual(t, ld, condById) {
   }));
 
   // À 0 PV, l'état est explicite sans devoir lire la jauge.
-  g.add(new K.Ellipse({ x:0, y:portraitY, radiusX:rx, radiusY:ry, fill:'rgba(5,8,14,.58)', visible:health.isDown, listening:false, name:'down-overlay' }));
+  g.add(new K.Ellipse({ x:0, y:portraitY, radiusX:rx, radiusY:ry, fill:'rgba(5,8,14,.58)', visible:isDown, listening:false, name:'down-overlay' }));
   g.add(new K.Text({ x:-rx, y:portraitY-13, width:rx*2, height:26, text:'☠', fontSize:23,
     align:'center', fill:'#fecaca', shadowColor:'#000', shadowBlur:6, shadowOpacity:1,
-    visible:health.isDown, listening:false, name:'down-icon' }));
+    visible:isDown, listening:false, name:'down-icon' }));
 
   // Badge CA minimal dans l'angle : la valeur reste immédiate sans occuper tout
   // le haut du portrait.

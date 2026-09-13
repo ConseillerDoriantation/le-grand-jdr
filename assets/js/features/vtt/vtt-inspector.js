@@ -18,6 +18,7 @@ import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
 import { _live } from './vtt-effective.js';
 import { _renderDicePanel } from './vtt-dice.js';
 import { _vttPanelError } from './vtt-utils.js';
+import { resolveControlledTokenId } from './vtt-token-control.js';
 import {
   _canControlToken, _npcCombat, _tokenStatMod, _manualBuffVal, _signed,
   CONDITION_BY_ID, _resolveUidName, _getCombatMoveOrigin,
@@ -637,9 +638,14 @@ export function _renderInspectorImpl(t) {
     { k:'effets', ic:'✨', lb:'États',  html: _condsHtml + _buffsHtml },
     { k:'gerer',  ic:'⚙️', lb:'Gérer',  html: _sourceLinksHtml + _delegateHtml + _sendPageHtml + _footerHtml },
   ].filter(s => s.html && s.html.trim());
+  // Contrôle du token : onglets détaillés (Stats/États/Gérer), mini-feuille et
+  // édition ne sont accessibles qu'au propriétaire, aux délégués et au MJ. Un
+  // joueur qui clique un token qu'il ne contrôle pas ne voit que la fiche compacte
+  // en lecture seule (nom, jauges, CA, états) — pas les onglets ni la mini-feuille.
+  const _ctrl = _canControlToken(t);
   // Icônes sur le côté du carré d'identité ; chaque icône déploie/replie son
   // onglet en popover au-dessus de la fiche (rien de déployé par défaut).
-  const _deployed = _tabs.find(s => s.k === _insTab) || null;
+  const _deployed = _ctrl ? (_tabs.find(s => s.k === _insTab) || null) : null;
   // Mini-feuille disponible depuis l'identité dès que le token est lié à un
   // personnage, y compris si son joueur est momentanément hors ligne. L'id du
   // personnage est transmis pour les comptes qui en possèdent plusieurs.
@@ -647,10 +653,10 @@ export function _renderInspectorImpl(t) {
     ? (t.ownerId || VS.characters[t.characterId]?.uid || null)
     : null;
   const _sheetOpen = !!(_sheetUid && VS.miniUid === _sheetUid && VS.miniCharId === t.characterId);
-  const _identitySheetBtn = _sheetUid
+  const _identitySheetBtn = (_sheetUid && _ctrl)
     ? `<button type="button" class="vtt-who-sheet${_sheetOpen ? ' active' : ''}" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${_esc(_sheetUid)}|${_esc(t.characterId)}" data-mini-uid="${_esc(_sheetUid)}" data-mini-char="${_esc(t.characterId)}" title="Ouvrir la mini-feuille de ${_esc(ld.displayName ?? t.name)}" aria-label="Ouvrir la mini-feuille du personnage" aria-pressed="${_sheetOpen}">📜</button>`
     : '';
-  const _tabBar = _tabs.length
+  const _tabBar = (_tabs.length && _ctrl)
     ? `<div class="vtt-fiche-tabs">${_tabs.map(s =>
         `<button class="vtt-fiche-tab${s.k === _insTab ? ' active' : ''}" data-vtt-fn="_vttInsTab" data-vtt-args="${s.k}" title="${s.lb}" aria-expanded="${s.k === _insTab}"><span class="vtt-fiche-tab-ic">${s.ic}</span><span class="vtt-fiche-tab-lbl">${s.lb}</span></button>`).join('')}</div>`
     : '';
@@ -758,7 +764,18 @@ export function _vttSkillFilterClear() {
 // { hasSkills, body } pour le token courant (ou celui passé). Sans token
 // contrôlable → { hasSkills:false }.
 export function _vttBuildJetsBody(tArg) {
-  const t = tArg ?? (VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : null);
+  // Sans token explicite : on prend le token contrôlé de la scène (propriétaire ou
+  // délégation), pas seulement la sélection — le joueur lance ses compétences sans
+  // avoir à cliquer son pion.
+  let t = tArg;
+  if (!t) {
+    const uid = STATE.user?.uid;
+    const id = resolveControlledTokenId(
+      VS.selected, VS.tokens, VS.activePage?.id || null,
+      tok => _canControlToken(tok, uid),
+    );
+    t = id ? (VS.tokens[id]?.data ?? null) : null;
+  }
   if (!t) return { hasSkills: false, body: '' };
 
   const _combatActionsHtml = (() => {

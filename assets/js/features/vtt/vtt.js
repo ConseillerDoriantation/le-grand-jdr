@@ -2092,20 +2092,22 @@ function _patchShapeImpl(id) {
   }
   g.to({ x:e.data.col*CELL+sw*CELL/2, y:e.data.row*CELL+sh*CELL/2, duration:0.22, easing:window.Konva?.Easings?.EaseInOut });
   const health = tokenHealthMeta(ld.displayHp, ld.displayHpMax);
+  // KO visible par tous, même PV masqués (ld.isDown = PV réels, sans le nombre).
+  const isDown = health.isDown || !!ld.isDown;
   const bW=Math.max(62, Math.min(CELL*sw*0.98, 150));
   const hasMana=ld.displayPm!=null || ld.hasMana;
   const hpW=hasMana?(bW-1)/2:bW;
   const fill=g.findOne('.hp-fill');
   if (fill){fill.width(Math.max(2,(hpW-2)*health.ratio));fill.fill(health.color);}
   g.findOne('.hp-val')?.text(health.known?`♥${health.current}/${health.maximum}`:'♥?');
-  g.findOne('.portrait')?.opacity(health.isDown ? .46 : 1);
-  g.findOne('.down-overlay')?.visible(health.isDown);
-  g.findOne('.down-icon')?.visible(health.isDown);
+  g.findOne('.portrait')?.opacity(isDown ? .46 : 1);
+  g.findOne('.down-overlay')?.visible(isDown);
+  g.findOne('.down-icon')?.visible(isDown);
   const tokenRing=g.findOne('.token-ring');
   if (tokenRing) {
-    tokenRing.stroke(health.isDown ? '#ef4444' : (TYPE_COLOR[e.data.type] ?? '#94a3b8'));
-    tokenRing.shadowColor(health.isDown ? '#ef4444' : '#000');
-    tokenRing.shadowBlur(health.isDown ? 10 : 5);
+    tokenRing.stroke(isDown ? '#ef4444' : (TYPE_COLOR[e.data.type] ?? '#94a3b8'));
+    tokenRing.shadowColor(isDown ? '#ef4444' : '#000');
+    tokenRing.shadowBlur(isDown ? 10 : 5);
   }
   g.setAttr('healthTone', health.tone);
   g.setAttr('displayHpSnapshot', health.known ? health.current : null);
@@ -5601,12 +5603,20 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       : o.isDeplacement ? 'is-move'
       : 'is-weapon';
 
+    // Arme principale (1re) et secondaire (2e) : mises en avant en JAUNE pour rester
+    // repérables d'un coup d'œil, comme dans l'ancienne modale.
+    const isPrimaryWeapon   = cardKind === 'is-weapon' && weaponOpts[0] === o;
+    const isSecondaryWeapon = cardKind === 'is-weapon' && weaponOpts[1] === o;
+    const isMainWeapon      = isPrimaryWeapon || isSecondaryWeapon;
+
     // Dans la modale ciblée, les traits d'arme ont leur propre ligne lisible.
     // Le HUD compact conserve ses pills afin de ne pas agrandir ses cartes.
     const pills = _vttSpellPills(o, { includeTraits: noTgt || cardKind !== 'is-weapon' });
 
     // ── Couleur d'accent + pastille d'élément (langage visuel des cartes de sort) ──
-    const accentCol = o.isHeal ? '#22c55e'
+    // Armes principale/secondaire → accent AMBRE (jaune) pour les distinguer.
+    const accentCol = isMainWeapon ? 'var(--amber)'
+      : o.isHeal ? '#22c55e'
       : o.isEnchant ? (o.enchantElementColor || '#a78bfa')
       : o.isAffliction ? (o.afflictionElementColor || '#ef4444')
       : (o.isCaSort || o.isUtil) ? '#b47fff'
@@ -5631,7 +5641,6 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
     const runeChipsHtml = _vttSpellRuneChips(o, srcChar);
 
     const weaponTraitsHtml = cardKind === 'is-weapon' ? _vttWeaponTraitsHtml(o) : '';
-    const isPrimaryWeapon = cardKind === 'is-weapon' && weaponOpts[0] === o;
     const cardState = onCooldown ? 'is-cooldown' : noTgt ? 'is-aim' : canHit ? 'is-ready' : 'is-oor';
     const cardHint = onCooldown ? `Recharge ${o.cooldownRemaining}t`
       : noTgt ? 'Choisir puis viser'
@@ -5643,23 +5652,49 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
     const buttonAttrs = `type="button" style="--type-col:${accentCol}" data-vtt-fn="${launchFn}" data-vtt-args="${launchArgs}" ${onCooldown ? 'disabled aria-disabled="true"' : ''}`;
 
     if (!noTgt) {
+      // Coût rapporté à la réserve (fantôme + alerte « mana insuffisant »). On ne
+      // prévisualise sur la jauge MANA que pour un coût EN PM sans réserve alternative
+      // (summonManaSource / coût PV·Or → badge sans fantôme). Aucune logique de cast
+      // touchée : purement visuel.
+      const _isPmCost = (o.costRes || 'pm') === 'pm' && !o.summonManaSource;
+      const _ghostCost = (_isPmCost && o.pmCost > 0) ? o.pmCost : 0;
+      const _insuff = _isPmCost && o.pmCost > 0 && pm != null && o.pmCost > pm;
+      let costHtml;
+      if (o.pmCost > 0) {
+        costHtml = `<span class="vtt-aopt-cost ${_insuff ? 'vtt-aopt-cost--warn' : 'vtt-aopt-cost--pm'}"${_manaSource ? ` title="Réserve utilisée : ${_esc(o.summonManaSource)}"` : ''}>${_resIco} ${o.pmCost} ${_res.label}${_manaSource}${_setExtra}</span>`;
+      } else if (o.pmCost === 0 && o.basePm > 0) {
+        costHtml = `<span class="vtt-aopt-cost vtt-aopt-cost--free" title="Cast offert (multi-cibles ou sort suspendu déclenché)">🎁 Gratuit</span>`;
+      } else if (o.basePm > 0) {
+        costHtml = `<span class="vtt-aopt-cost vtt-aopt-cost--pm">${_resIco} ${o.basePm} ${_res.label}${_setExtra}</span>`;
+      } else {
+        costHtml = `<span class="vtt-aopt-cost vtt-aopt-cost--none">Sans PM</span>`;
+      }
+      // Chip de type d'action : petit libellé texte coloré (Action/Bonus/Réaction),
+      // couleur par rôle depuis les tokens (amber / ember / arcane) → --k.
+      const _kind = actionKind === 'bonus' ? ['Bonus', 'var(--ember)']
+        : actionKind === 'reaction' ? ['Réaction', 'var(--arcane)']
+        : ['Action', 'var(--amber)'];
+      const kindChip = `<span class="vtt-action-choice-kind" style="--k:${_kind[1]}">${_kind[0]}</span>`;
+      // Badge « arme principale / secondaire » en jaune pour les repérer vite.
+      const weaponTag = isPrimaryWeapon
+        ? `<span class="vtt-action-choice-wtag" title="Arme principale">★ Principale</span>`
+        : isSecondaryWeapon
+          ? `<span class="vtt-action-choice-wtag" title="Arme secondaire">Secondaire</span>` : '';
+      const metaExtra = `${sourceChip}${deckChip}${stack}`;
+      const _detail = `${weaponTraitsHtml}${runeChipsHtml}${desc ? `<span class="vtt-action-choice-desc">${_esc(desc)}</span>` : ''}`;
       return `
-      <button ${buttonAttrs} class="vtt-aopt vtt-castcard vtt-action-choice ${cardKind} ${cardState} ${isPrimaryWeapon ? 'is-primary-weapon' : ''}">
+      <button ${buttonAttrs} class="vtt-aopt vtt-action-choice ${cardKind} ${cardState} ${isPrimaryWeapon ? 'is-primary-weapon' : ''} ${isSecondaryWeapon ? 'is-secondary-weapon' : ''}" data-cost="${_ghostCost}">
         <span class="vtt-action-choice-icon">${o.icon}</span>
         <span class="vtt-action-choice-body">
           <span class="vtt-action-choice-head">
-            <strong title="${_esc(o.label)}">${_esc(o.label)}</strong>
-            <span class="vtt-action-choice-kinds">${actChip}${sourceChip}${deckChip}${elemPastille}${stack}</span>
+            <span class="vtt-action-choice-name" title="${_esc(o.label)}">${_esc(o.label)}</span>
+            ${kindChip}${weaponTag}
           </span>
-          ${pills.length ? `<span class="vtt-action-choice-tags">${pills.join('')}</span>` : ''}
-          ${weaponTraitsHtml}
-          ${runeChipsHtml}
-          ${desc ? `<span class="vtt-action-choice-desc">${_esc(desc)}</span>` : ''}
+          ${(pills.length || metaExtra) ? `<span class="vtt-action-choice-tags">${pills.join('')}${metaExtra}</span>` : ''}
+          ${_detail ? `<span class="vtt-action-choice-detail">${_detail}</span>` : ''}
         </span>
-        <span class="vtt-action-choice-end">
-          ${pmBadge || '<span class="vtt-aopt-pm vtt-aopt-pm--free">Sans PM</span>'}
-          <span class="vtt-castcard-cta">${cardHint}</span>
-        </span>
+        <span class="vtt-action-choice-end">${costHtml}<span class="vtt-action-choice-hint">${cardHint}</span></span>
+        <span class="vtt-action-choice-key" aria-hidden="true"></span>
       </button>`;
     }
 
@@ -5879,38 +5914,53 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
         <div class="vtt-aopt-empty" hidden><span style="opacity:.5">Aucune action ne correspond.</span></div>
       </div>`;
 
+  // Jauge de mana étiquetée (label + valeur au-dessus d'une barre), avec fantôme +
+  // lecture chiffrée du coût (« −X ») pilotés par _vttAoptBindControls au survol / à la
+  // sélection. Même réserve que pmBar. Affichée dès qu'un pool de mana existe (pmMax>0)
+  // même à 0 PM, pour que la barre — et donc le coût — soit toujours visible.
+  const _hasMana = pm != null && pmMax != null && pmMax > 0;
+  const manaGauge = _hasMana ? `
+    <div class="vtt-aopt-mana">
+      <div class="vtt-aopt-mana-top">
+        <span>✨ Mana</span>
+        <b><u class="vtt-aopt-mana-now">${pm}</u><i>/${pmMax}</i><em class="vtt-aopt-mana-cost" hidden></em></b>
+      </div>
+      <div class="vtt-aopt-mana-track" data-aopt-mana data-pm="${pm}" data-pmmax="${pmMax}">
+        <i class="vtt-aopt-mana-fill" style="width:${Math.round(Math.max(0,pm)/pmMax*100)}%"></i>
+        <u class="vtt-aopt-mana-ghost"></u>
+      </div>
+    </div>` : '';
+
+  // Pips d'économie d'action — UNIQUEMENT en combat, où l'état est réellement suivi
+  // sur le token (attackedThisTurn / bonusActionThisTurn / reactionThisTurn, remis à
+  // zéro à chaque tour par vtt-combat-turns.js). Hors combat : pas de pips (ornement).
+  // « on » = ressource dispo (barre colorée), « used » = dépensée (atténuée).
+  const _ecoPip = (spent, label, col) =>
+    `<span class="vtt-aopt-econ-pip ${spent ? 'is-used' : 'is-on'}" style="--c:${col}"><s>${label}</s><em></em></span>`;
+  const econPips = inCombat ? `
+    <div class="vtt-aopt-econ" role="group" aria-label="Économie d'action">
+      ${_ecoPip(src.attackedThisTurn, 'Action', 'var(--amber)')}
+      ${_ecoPip(src.bonusActionThisTurn, 'Bonus', 'var(--ember)')}
+      ${_ecoPip(src.reactionThisTurn, 'Réaction', 'var(--arcane)')}
+    </div>` : '';
+
+  const ctrlHtml = (tabsHtml || searchHtml || spellScopeHtml)
+    ? `<div class="vtt-aopt-ctrl">${tabsHtml}${searchHtml}${spellScopeHtml}</div>`
+    : '';
+
   const modalInnerHtml = `
-    <div class="vtt-action-picker">
-      <aside class="vtt-action-command">
-        <div class="vtt-action-command-label">Action tactique</div>
-        <div class="vtt-action-duel">
-          ${sourceFace}
-          <span class="vtt-action-duel-arrow">&darr;</span>
-          ${targetFace}
-        </div>
-        <div class="vtt-action-command-meta">
-          <span>${selfTarget ? 'Cible personnelle' : `Distance ${dist} case${dist > 1 ? 's' : ''}`}</span>
-          <span>${selfTarget ? 'Sur soi' : 'À portée'}</span>
-        </div>
-        ${pmBar ? `<div class="vtt-action-command-pm">${pmBar}</div>` : ''}
-      </aside>
-      <section class="vtt-action-workspace">
-        <div class="vtt-action-workspace-head">
-          <div class="vtt-action-workspace-title">
-            <div>
-              <span>Actions disponibles</span>
-              <strong>${selfTarget ? 'Sur soi' : _esc(lT?.displayName ?? tgt?.name ?? 'Cible')}</strong>
-            </div>
-            <span class="vtt-action-count">${totalCount} choix</span>
-          </div>
-          ${spellScopeHtml}
-          ${showTabs ? `<div class="vtt-action-filterbar">${tabsHtml}</div>` : ''}
-          ${searchHtml ? `<div class="vtt-action-searchbar">${searchHtml}</div>` : ''}
-        </div>
-        <div class="vtt-aopt-list vtt-action-list cs-v3">${optsHtml}${basicHtml}
-          <div class="vtt-aopt-empty" hidden><span style="opacity:.5">Aucune action ne correspond.</span></div>
-        </div>
-      </section>
+    <div class="vtt-aopt-banner">
+      <div class="vtt-aopt-banner-duel">
+        ${sourceFace}
+        <span class="vtt-aopt-banner-arrow">→</span>
+        ${targetFace}
+        <span class="vtt-aopt-banner-dist" title="${selfTarget ? 'Action sur soi' : 'Distance source → cible'}">${selfTarget ? '◉ Sur soi' : `📏 ${dist} case${dist > 1 ? 's' : ''} · à portée`}</span>
+      </div>
+      ${(manaGauge || econPips) ? `<div class="vtt-aopt-banner-res">${manaGauge}${econPips}</div>` : ''}
+    </div>
+    ${ctrlHtml}
+    <div class="vtt-aopt-list vtt-action-list cs-v3">${optsHtml}${basicHtml}
+      <div class="vtt-aopt-empty" hidden><span style="opacity:.5">Aucune action ne correspond.</span></div>
     </div>`;
 
   // Flux « action d'abord » (sans cible) → HUD docké en bas du canvas.
@@ -5927,7 +5977,10 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   openModal('⚔️ Action tactique', `
     <div class="vtt-form vtt-aopt-modal vtt-action-modal">${modalInnerHtml}
       <div class="vtt-aopt-footer">
+        <span class="vtt-aopt-footer-recap" data-aopt-recap>Choisis une action — survole pour prévisualiser son coût.</span>
+        <span class="vtt-aopt-footer-keys" aria-hidden="true"><span><kbd>1</kbd>–<kbd>9</kbd> choisir</span><span><kbd>↑↓</kbd> naviguer</span><span><kbd>⏎</kbd> lancer</span></span>
         <button class="btn-secondary" data-vtt-fn="_closeActionModal">Annuler</button>
+        <button type="button" class="btn-primary vtt-aopt-launch" data-aopt-launch disabled>Lancer</button>
       </div>
     </div>`);
   setModalCloseGuard(() => { _restoreAttackSourceSelection(); return false; });
@@ -5948,7 +6001,170 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       overlay._aoptObs = obs;
     }
   }
-  _vttAoptApplyFilters(document.querySelector('#modal-box .vtt-aopt-modal'));
+  const _aoptRoot = document.querySelector('#modal-box .vtt-aopt-modal');
+  _vttAoptApplyFilters(_aoptRoot);
+  _vttAoptBindControls(_aoptRoot);
+}
+
+/**
+ * Clavier + sélection + prévisualisation du coût pour la modale ciblée.
+ * Interaction hybride : clic sur une carte = lancement direct (via son
+ * data-vtt-fn, inchangé) ; clavier = sélection puis ⏎ pour lancer.
+ *   1–9 : sélectionne la n-ième carte visible · ↑↓ : navigue la sélection ·
+ *   / : focus recherche · ⏎ : lance la carte sélectionnée · Échap : désélectionne
+ *   puis ferme. Survol d'une carte → fantôme du coût sur la jauge de mana.
+ * Écoute au niveau document seulement tant que la modale est montée ; le handler
+ * s'auto-retire dès que la racine quitte le DOM (fermeture, réouverture).
+ */
+function _vttAoptBindControls(root) {
+  if (!root || root._aoptCtrlBound) return;
+  root._aoptCtrlBound = true;
+
+  const launchBtn = root.querySelector('[data-aopt-launch]');
+  const recap = root.querySelector('[data-aopt-recap]');
+  const manaTrack = root.querySelector('[data-aopt-mana]');
+  const ghost = manaTrack?.querySelector('.vtt-aopt-mana-ghost');
+  const costOut = root.querySelector('.vtt-aopt-mana-cost');
+  const manaNow = root.querySelector('.vtt-aopt-mana-now');
+  const searchInput = root.querySelector('.vtt-aopt-search-input');
+
+  // Cartes sélectionnables/lançables = cartes d'action visibles et non en recharge.
+  const cards = () => Array.from(root.querySelectorAll('.vtt-action-choice'))
+    .filter(c => !c.hidden && c.offsetParent !== null && !c.disabled && !c.classList.contains('is-cooldown'));
+
+  // Numérote les 9 premières cartes visibles (badge de raccourci 1–9) ; vide les
+  // autres. À rejouer après chaque filtre car l'ordre visible change.
+  const renumber = () => {
+    const vis = cards();
+    root.querySelectorAll('.vtt-action-choice-key').forEach(k => { k.textContent = ''; });
+    vis.slice(0, 9).forEach((c, n) => {
+      const k = c.querySelector('.vtt-action-choice-key');
+      if (k) k.textContent = String(n + 1);
+    });
+  };
+
+  // Fantôme (segment ancré à droite) + lecture chiffrée « −X » figurant le coût en PM
+  // qui serait débité, et aperçu du reliquat sur la valeur courante.
+  const setGhost = (cost) => {
+    if (!manaTrack) return;
+    const pm = +manaTrack.dataset.pm || 0;
+    const pmMax = +manaTrack.dataset.pmmax || 0;
+    const active = cost > 0 && pmMax > 0;
+    if (ghost) {
+      ghost.style.width = active ? `${(Math.min(pm, cost) / pmMax) * 100}%` : '0';
+      ghost.classList.toggle('is-over', cost > pm);
+    }
+    if (costOut) {
+      costOut.textContent = active ? `−${cost}` : '';
+      costOut.hidden = !active;
+      costOut.classList.toggle('is-over', active && cost > pm);
+    }
+    if (manaNow) {
+      manaNow.textContent = active ? String(Math.max(0, pm - cost)) : String(pm);
+      manaNow.classList.toggle('is-preview', active);
+    }
+  };
+
+  // Nom de la cible (pour le récap) lu depuis le bandeau.
+  const targetName = root.querySelector('.vtt-aopt-actor--target .vtt-aopt-actor-copy strong')?.textContent?.trim();
+
+  const selected = () => root.querySelector('.vtt-action-choice.sel');
+  const select = (card) => {
+    if (!card) return;
+    cards().forEach(c => { if (c !== card) c.classList.remove('sel'); });
+    card.classList.add('sel');
+    card.scrollIntoView({ block: 'nearest' });
+    setGhost(+card.dataset.cost || 0);
+    const name = card.querySelector('.vtt-action-choice-name')?.textContent?.trim() || 'Action';
+    const kind = card.querySelector('.vtt-action-choice-kind')?.textContent?.trim() || '';
+    const cost = card.querySelector('.vtt-aopt-cost')?.textContent?.trim() || '';
+    const oor = card.classList.contains('is-oor');
+    if (launchBtn) {
+      launchBtn.disabled = false;
+      launchBtn.classList.toggle('is-oor', oor);
+      launchBtn.textContent = `Lancer ${name}`;
+    }
+    if (recap) {
+      const bits = [`<strong>${_esc(name)}</strong>`];
+      if (kind) bits.push(_esc(kind));
+      if (cost) bits.push(_esc(cost));
+      if (targetName) bits.push(`sur ${_esc(targetName)}`);
+      recap.innerHTML = bits.join('<span class="vtt-aopt-footer-dot"></span>') +
+        (oor ? ' <em class="vtt-aopt-footer-warn">hors portée</em>' : '');
+    }
+  };
+  const clearSel = () => {
+    const c = selected();
+    if (c) c.classList.remove('sel');
+    setGhost(0);
+    if (launchBtn) { launchBtn.disabled = true; launchBtn.classList.remove('is-oor'); launchBtn.textContent = 'Lancer'; }
+    if (recap) recap.textContent = 'Choisis une action — survole pour prévisualiser son coût.';
+  };
+  const launch = (card) => { if (card && !card.disabled && !card.hidden && card.offsetParent !== null) card.click(); };
+
+  // Survol : prévisualise le coût de la carte survolée ; au départ, on restaure le
+  // fantôme de la carte sélectionnée (ou on masque).
+  root.addEventListener('mouseover', (e) => {
+    const card = e.target.closest?.('.vtt-action-choice');
+    if (card && root.contains(card)) setGhost(+card.dataset.cost || 0);
+  });
+  root.addEventListener('mouseout', (e) => {
+    if (e.target.closest?.('.vtt-action-choice')) {
+      const sel = selected();
+      setGhost(sel ? (+sel.dataset.cost || 0) : 0);
+    }
+  });
+
+  if (launchBtn) launchBtn.addEventListener('click', () => launch(selected()));
+
+  // Re-numéroter après un filtre (clic onglet / portée) ou une recherche. On
+  // laisse d'abord le filtre s'appliquer (dispatch VTT synchrone → rAF suffit).
+  const reflow = () => requestAnimationFrame(() => {
+    renumber();
+    const sel = selected();
+    if (sel && (sel.hidden || sel.offsetParent === null)) clearSel();
+  });
+  root.querySelector('.vtt-aopt-ctrl')?.addEventListener('click', (e) => {
+    if (e.target.closest('.vtt-aopt-tab, .vtt-aopt-spell-scope-btn')) reflow();
+  });
+  searchInput?.addEventListener('input', reflow);
+  renumber();
+
+  const onKey = (e) => {
+    // Auto-nettoyage : la modale a été fermée/réouverte.
+    if (!document.body.contains(root)) { document.removeEventListener('keydown', onKey, true); return; }
+    // Ne rien intercepter hors de cette modale (une autre modale pourrait être au-dessus).
+    if (document.querySelector('#modal-box .vtt-aopt-modal') !== root) return;
+    const typing = document.activeElement === searchInput;
+
+    if (e.key === '/' && !typing) { e.preventDefault(); searchInput?.focus(); return; }
+    if (e.key === 'Escape') {
+      if (selected()) { e.preventDefault(); e.stopPropagation(); clearSel(); return; }
+      return; // sinon : laisse la modale se fermer normalement
+    }
+    if (typing && e.key !== 'Enter' && !e.key.startsWith('Arrow')) return;
+
+    const list = cards();
+    if (!list.length) return;
+    const cur = selected();
+    const idx = cur ? list.indexOf(cur) : -1;
+
+    if (/^[1-9]$/.test(e.key) && !typing) {
+      const n = +e.key - 1;
+      if (n < list.length) { e.preventDefault(); select(list[n]); }
+      return;
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+      e.preventDefault(); select(list[Math.min(list.length - 1, idx < 0 ? 0 : idx + 1)]); return;
+    }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+      e.preventDefault(); select(list[Math.max(0, idx < 0 ? 0 : idx - 1)]); return;
+    }
+    if (e.key === 'Enter') {
+      if (cur) { e.preventDefault(); launch(cur); }
+    }
+  };
+  document.addEventListener('keydown', onKey, true);
 }
 
 /** Filtre les sections du picker d'actions par tab. '__all' = tout afficher. */
@@ -6486,29 +6702,28 @@ function _vttPickOpt(srcId, tgtId, idx) {
   openModal('⚔️ Résoudre l’action', `
     <div class="vtt-form vtt-atk-confirm" style="--atk-accent:${btnColor};--atk-fg:${btnFg}">
       <section class="vtt-atk-hero">
-        <button type="button" class="vtt-atk-back" data-vtt-fn="_vttBackToAtk">← Retour</button>
-        <div class="vtt-atk-action-title">
-          <span class="vtt-atk-action-icon">${opt.icon}</span>
-          <div>
-            <small>Action choisie</small>
-            <strong title="${_esc(opt.label)}">${_esc(opt.label)}</strong>
+        <button type="button" class="vtt-atk-back" data-vtt-fn="_vttBackToAtk" title="Retour au choix d'action">←</button>
+        <span class="vtt-atk-action-icon">${opt.icon}</span>
+        <div class="vtt-atk-head-main">
+          <div class="vtt-atk-head-line">
+            <strong class="vtt-atk-head-name" title="${_esc(opt.label)}">${_esc(opt.label)}</strong>
+            <span class="vtt-atk-dist">${dist} case${dist > 1 ? 's' : ''}</span>
+          </div>
+          <div class="vtt-atk-head-route">
+            <span class="vtt-atk-head-src">${_esc(lS?.displayName ?? src?.name ?? 'Lanceur')}</span>
+            <span class="vtt-atk-head-arrow">→</span>
+            <span class="vtt-atk-head-tgt ${targetTone}">${_esc((allTargets && allTargets.length > 1) ? `${allTargets.length} cibles` : (lT?.displayName ?? tgt?.name ?? 'Cible'))}</span>
           </div>
         </div>
-        <span class="vtt-atk-dist">${dist} case${dist > 1 ? 's' : ''}</span>
-      </section>
-
-      <section class="vtt-atk-route">
-        ${_atkFace(src, lS, 'Lanceur')}
-        <span class="vtt-atk-route-arrow">→</span>
-        ${targetFace}
       </section>
       ${targetChips}
 
-      <section class="cs-v3 vtt-atk-summary">
-        ${(() => { const p = _vttSpellPills(opt); return p.length ? `<div class="cs-spellcard-tags">${p.join('')}</div>` : ''; })()}
-        ${_vttSpellRuneChips(opt, srcChar)}
-        ${infoChips.length ? `<div class="vtt-atk-infochips">${infoChips.map(x => `<span>${_esc(x)}</span>`).join('')}</div>` : ''}
-      </section>
+      ${(() => {
+        const p = _vttSpellPills(opt);
+        const runes = _vttSpellRuneChips(opt, srcChar);
+        const info = infoChips.length ? `<div class="vtt-atk-infochips">${infoChips.map(x => `<span>${_esc(x)}</span>`).join('')}</div>` : '';
+        return (p.length || runes || info) ? `<section class="cs-v3 vtt-atk-summary">${p.length ? `<div class="cs-spellcard-tags">${p.join('')}</div>` : ''}${runes}${info}</section>` : '';
+      })()}
 
       ${elemSelectorHtml}
 
@@ -7778,7 +7993,9 @@ async function _vttRollAttack() {
     //  • Réussite critique (20 nat, ou seuil abaissé par la rune Chance) → signalée.
     // (avantage/désavantage du lanceur pris en compte, relance chanceuse sur un 1.)
     let _enchD20 = null, _enchRC = false;
-    if (opt.isEnchant) {
+    // Réussite automatique (mjAutoHit) : pas de d20 → ni échec critique (buff raté,
+    // objet consommé pour rien) ni réussite critique. L'enchantement s'applique.
+    if (opt.isEnchant && !opt.autoHit) {
       let eMode = mode;
       const eCondMods = _conditionsAttackMods(src, null, opt);
       if (eMode === 'normal') {
@@ -8020,8 +8237,10 @@ async function _vttRollAttack() {
       }
       // Combo Chance : élargit la plage critique (RC abaissé sur le sort)
       const hCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
-      const hIsCrit   = hD20 >= hCritThreshold;
-      const hIsFumble = hD20 === 1;
+      // Réussite automatique (mjAutoHit) : le soin réussit toujours — ni échec
+      // critique (potion consommée pour rien) ni réussite critique.
+      const hIsCrit   = !opt.autoHit && hD20 >= hCritThreshold;
+      const hIsFumble = !opt.autoHit && hD20 === 1;
 
       const diceToRoll   = opt.rawDice || opt.dice;
       const effectiveDice = _effectiveDmgDice(diceToRoll);

@@ -107,9 +107,16 @@ export function _vttToggleRollHidden() {
 }
 
 export async function _vttRollSkill(skillName, stat) {
-  const t = VS.tokens[VS.selected]?.data;
-  if (!t) return;
-  if (!_canControlToken(t)) return; // joueur ne peut lancer que son propre token (ou ceux délégués)
+  // Pas besoin de cliquer son pion : on retombe sur le token contrôlé de la scène
+  // (propriétaire ou délégation), comme pour les émotes. La sélection ne prime que
+  // si elle vise un token qu'on contrôle réellement.
+  const uid = STATE.user?.uid;
+  const tokenId = resolveControlledTokenId(
+    VS.selected, VS.tokens, VS.activePage?.id || null,
+    token => _canControlToken(token, uid),
+  );
+  const t = tokenId ? VS.tokens[tokenId]?.data : null;
+  if (!t || !_canControlToken(t)) return; // joueur ne peut lancer que son propre token (ou ceux délégués)
   const c = t?.characterId ? VS.characters[t.characterId] : null;
   const n = t?.npcId ? VS.npcs[t.npcId] : null;
   const statKey = _STAT_KEY[stat] || '';
