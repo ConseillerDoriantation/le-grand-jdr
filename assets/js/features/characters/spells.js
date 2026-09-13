@@ -2653,7 +2653,9 @@ function _refreshClassicSpellForm() {
   const touch = document.getElementById('s-classic-touch-group');
   if (touch) touch.style.display = effect === 'damage' ? '' : 'none';
   const autoHit = document.getElementById('s-classic-auto-hit-group');
-  if (autoHit) autoHit.style.display = effect === 'damage' ? '' : 'none';
+  // Réussite automatique pertinente pour Dégâts (pas de jet de toucher) ET Soin
+  // (évite l'échec critique qui gaspille une potion). Inutile pour utilitaire/invocation.
+  if (autoHit) autoHit.style.display = (effect === 'damage' || effect === 'heal') ? '' : 'none';
   const state = document.getElementById('s-classic-state-fields');
   if (state) state.style.display = stateOn ? '' : 'none';
   const save = document.getElementById('s-classic-save-fields');
@@ -2858,7 +2860,7 @@ async function _openClassicSortModal(idx, s, allTypes) {
                 <label id="s-classic-formula-group" class="classic-spell-span-2"><span id="s-classic-formula-label">Formule</span><input id="s-classic-formula" class="input-field" value="${_esc(formula)}" placeholder="Ex. 2d8+3 ou 12"></label>
                 <label id="s-classic-effect-stat-group"><span>Bonus de caractéristique</span><select id="s-classic-effect-stat" class="input-field">${_SPELL_STAT_OPTIONS(s?.degatsStat || 'none')}</select></label>
                 <label id="s-classic-touch-group"><span>Jet d’attaque</span><select id="s-classic-touch-stat" class="input-field">${_SPELL_STAT_OPTIONS(s?.toucherStat)}</select></label>
-                <label id="s-classic-auto-hit-group" class="classic-spell-check"><input type="checkbox" id="s-classic-auto-hit" ${s?.mjAutoHit ? 'checked' : ''}><span><b>Réussite automatique</b><small>Le sort ne demande aucun jet de toucher.</small></span></label>
+                <label id="s-classic-auto-hit-group" class="classic-spell-check"><input type="checkbox" id="s-classic-auto-hit" ${s?.mjAutoHit ? 'checked' : ''}><span><b>Réussite automatique</b><small>Réussit toujours : aucun échec ni réussite critique (potions, soins garantis).</small></span></label>
               </div>
             </section>
 

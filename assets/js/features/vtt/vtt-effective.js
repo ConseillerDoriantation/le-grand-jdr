@@ -167,6 +167,8 @@ export function _live(t) {
       displayImage:    t.imageUrl ?? null,
       displayHp:       t.hp    ?? 20,
       displayHpMax:    t.hpMax ?? 20,
+      // KO dérivé des PV réels du token (avant masquage joueur) → crâne pour tous.
+      isDown:          t.hp != null && Number(t.hp) <= 0,
       displayPm:       _pmMax > 0 ? Math.max(0, _numOr(t.pm, _pmMax)) : null,
       displayPmMax:    _pmMax,
       hasMana:         _pmMax > 0,
@@ -263,6 +265,9 @@ export function _live(t) {
     displayImage:      e.photoURL || e.photo || e.avatar || e.imageUrl || t.imageUrl || null,
     displayHp:         hpCurrent,
     displayHpMax:      hpMax,
+    // État « à terre » (KO) dérivé des PV RÉELS, avant tout masquage joueur : permet
+    // d'afficher le crâne/token grisé à tout le monde sans révéler les PV de l'ennemi.
+    isDown:            hpCurrent != null && Number(hpCurrent) <= 0,
     displayPm:         c ? (c.pm ?? _pmMax) : n ? npcPmCur : (b && _pmMax > 0 ? (t.pm ?? _pmMax) : null),
     displayPmMax:      _pmMax,
     // Créature avec mana (perso, PNJ ou bestiaire pmMax>0) → jauge PM affichée.
