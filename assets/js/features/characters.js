@@ -430,6 +430,14 @@ function _adminOwnerKey(c = {}) {
   return c.uid ? `uid:${c.uid}` : `owner:${c.ownerPseudo || 'unknown'}`;
 }
 
+function _characterOwnerMeta(c = {}) {
+  const profile = c.uid ? (STATE.adventure?.memberProfiles?.[c.uid] || {}) : {};
+  return {
+    label: profile.pseudo || c.ownerPseudo || profile.email || (c.uid ? 'Compte lié' : 'Sans compte'),
+    avatar: avatarSrcOf(profile),
+  };
+}
+
 // ══════════════════════════════════════════════
 // RENDER PRINCIPAL
 // ══════════════════════════════════════════════
@@ -805,22 +813,26 @@ function _buildTabsHtml(c, v3Tab) {
 
 function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckMax, titresChips }) {
   const buildSwitcher = _buildBuildSwitcherHtml(c, canEdit);
+  const owner = _characterOwnerMeta(c);
   return `<aside class="id-side" id="cs-sidebar" data-aura="${c.auraColor?'custom':(c.aura||'blue')}">
 
     <div class="id-identity">
-      ${(canEdit || STATE.isAdmin)?`<div class="id-actions-mini" aria-label="Actions du personnage">
+      <div class="id-actions-mini" aria-label="Propriétaire et actions du personnage">
         ${STATE.isAdmin
           ? `<button class="id-owner-btn" data-action="reassignCharOwner" data-id="${c.id}" title="Réassigner à un autre compte joueur">
-              <span class="id-owner-ico">👤</span>
-              <span class="id-owner-label">${_esc(c.ownerPseudo || (c.uid ? 'Compte lié' : 'Sans compte'))}</span>
+              <img class="id-owner-avatar" src="${_esc(owner.avatar)}" alt="">
+              <span class="id-owner-label">${_esc(owner.label)}</span>
             </button>`
-          : ''}
+          : `<span class="id-owner-readonly" title="Propriétaire : ${_esc(owner.label)}">
+              <img class="id-owner-avatar" src="${_esc(owner.avatar)}" alt="">
+              <span class="id-owner-label">${_esc(owner.label)}</span>
+            </span>`}
         ${canEdit ? `<button class="id-default-btn${c.isDefault?' is-on':''}"
           title="${c.isDefault?"Personnage favori — sélectionné d'office dans les sélecteurs et le VTT":'Mettre ce personnage en favori'}"
           data-action="_setDefaultCharacter" data-id="${c.id}">${c.isDefault?'★':'☆'}</button>
         <button title="Exporter" data-action="openCharExportMenu" data-id="${c.id}">⇩</button>
         <button class="id-del-btn" title="Supprimer ce personnage" data-action="deleteChar" data-id="${c.id}">⌫</button>` : ''}
-      </div>`:''}
+      </div>
       <div class="id-portrait-wrap">
         <div class="id-portrait"
              ${canEdit ? `data-action="open-character-photo" data-charid="${c.id}"` : ''}>
