@@ -21,7 +21,7 @@ import { calcCriticalEffectTotal, criticalEffectFormulaLabel } from '../../share
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
 import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
-import { getArmorSetData, getMainWeapon, getItemTraits, getEquippedSourceItem, DEFAULT_UNARMED, getCharDamageProfile, getCharFullDamageProfile } from '../../shared/equipment-utils.js';
+import { getArmorSetData, getMainWeapon, getItemTraits, getEquippedSourceItem, resolveEquippedInventoryIndices, DEFAULT_UNARMED, getCharDamageProfile, getCharFullDamageProfile } from '../../shared/equipment-utils.js';
 import { getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { buildProjectionPatch, switchBuild } from '../../shared/character-builds.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
@@ -5150,14 +5150,14 @@ function _buildAttackOptions(t) {
     const sStatKeyI  = mainP2I?.statAttaque || mainP2I?.toucherStat || 'force';
     const spellPmDeltaI = getArmorSetData(c).modifiers.spellPmDelta || 0;
 
-    // Indices d'inventaire actuellement équipés (un slot pointe vers l'objet
-    // via sourceInvIndex). Les actions d'armes/armures ne sont accessibles que
-    // si l'objet est équipé ; les consommables restent utilisables depuis l'inventaire.
-    const equippedInvIdx = new Set(
-      Object.values(c.equipement || {})
-        .filter(e => e && Number.isInteger(e.sourceInvIndex))
-        .map(e => e.sourceInvIndex)
-    );
+    // Indices d'inventaire actuellement équipés. Les actions d'armes/armures ne
+    // sont accessibles que si l'objet est équipé ; les consommables restent
+    // utilisables depuis l'inventaire.
+    // IMPORTANT : on résout par IDENTITÉ (itemId/nom) et non via le sourceInvIndex
+    // stocké — celui-ci devient périmé dès que l'inventaire est réordonné en séance
+    // (ajout d'objet, normalisation « 1 entrée = 1 unité »…). Sinon l'action d'un
+    // objet équipé (ex. « Lancer de dagues ») disparaît brutalement en cours de partie.
+    const equippedInvIdx = new Set(resolveEquippedInventoryIndices(c).values());
 
     c.inventaire.forEach((item, invIdx) => {
       const acts = Array.isArray(item?.actions) ? item.actions : [];

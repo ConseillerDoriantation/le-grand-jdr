@@ -173,15 +173,52 @@ export function modStr(m) {
 }
 
 /**
+ * Résout, pour chaque slot équipé, l'entrée d'inventaire VIVANTE (par identité
+ * itemId puis nom, en validant le sourceInvIndex mémorisé et sinon en la
+ * retrouvant), avec repli sur l'instantané `equipement[slot]`. Sans inventaire on
+ * renvoie l'instantané tel quel (comportement historique). Évite d'appliquer des
+ * stats périmées quand un objet a été édité / l'inventaire réordonné après équipement.
+ */
+function _liveEquip(c) {
+  const equip = c?.equipement || {};
+  const inv = Array.isArray(c?.inventaire) ? c.inventaire : [];
+  if (!inv.length) return equip;
+  const same = (entry, snap) => {
+    if (!entry || !snap) return false;
+    if (snap.itemId && entry.itemId) return entry.itemId === snap.itemId;
+    return (entry.nom || '') === (snap.nom || '');
+  };
+  const claimed = new Set();
+  const out = {};
+  for (const [slot, snap] of Object.entries(equip)) {
+    if (!snap) { out[slot] = snap; continue; }
+    const raw = snap.sourceInvIndex;
+    let idx = Number.isInteger(raw) ? raw : parseInt(raw, 10);
+    if (!(Number.isInteger(idx) && idx >= 0 && !claimed.has(idx) && same(inv[idx], snap))) {
+      idx = inv.findIndex((e, i) => !claimed.has(i) && same(e, snap));
+    }
+    if (Number.isInteger(idx) && idx >= 0) { claimed.add(idx); out[slot] = inv[idx]; }
+    else out[slot] = snap;
+  }
+  return out;
+}
+
+/**
  * Classe d'Armure effective du personnage.
  * Base unique + Dex + bonus explicites d'equipements + bouclier.
  */
 export function calcCA(c) {
-  const equip = c?.equipement || {};
+  // La projection `equipement` est un instantané figé à l'équipement. Si on édite la
+  // CA d'un objet APRÈS l'avoir équipé (ou que l'inventaire est réordonné), cet
+  // instantané devient périmé. On relit donc l'entrée d'inventaire VIVANTE de chaque
+  // slot (par identité itemId/nom, avec repli sur l'instantané) — même robustesse que
+  // le VTT côté actions d'objet. `parseInt` : une CA stockée en chaîne ("4") ne casse
+  // plus le calcul (l'ancien `s + (it.ca || 0)` concaténait).
+  const equip = _liveEquip(c);
   const rules = getCharacterRules();
   const caBase = rules.armorBases?.none ?? 10;
 
-  const caEquip = Object.values(equip).reduce((s, it) => s + (it?.ca || 0), 0);
+  const caEquip = Object.values(equip).reduce((s, it) => s + (parseInt(it?.ca) || 0), 0);
   // Bonus dérivé "caBonus" configurable par item (boucliers, amulettes, etc.)
   const caBonusDerived = computeEquipDerivedBonus(equip).caBonus;
   // Fallback rétrocompat : un bouclier sans caBonus défini garde +2

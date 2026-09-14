@@ -5418,10 +5418,12 @@ html:not([data-theme="light"]) .vtt-root {
   font-family: 'Cinzel', serif;
 }
 .vtt-chat-log {
-  flex: 1; overflow-y: auto; padding: .35rem .45rem;
+  flex: 1; overflow-y: auto; overflow-x: hidden; padding: .35rem .45rem;
   display: flex; flex-direction: column; gap: 3px;
   scrollbar-width: thin; scrollbar-color: var(--bg-elevated) transparent;
 }
+/* Chaque entrée reste dans la largeur du chat (jamais de débordement horizontal). */
+.vtt-chat-log > * { min-width: 0; max-width: 100%; }
 .vtt-chat-input-row {
   display: flex; align-items: center; gap: .25rem;
   padding: .3rem .4rem; border-top: 1px solid var(--border); flex-shrink: 0;
@@ -6026,7 +6028,9 @@ html:not([data-theme="light"]) .vtt-root {
   color: var(--log-c);
   background: color-mix(in oklab, var(--log-c) 14%, transparent);
   padding: .15rem .5rem; border-radius: 999px;
-  white-space: nowrap;
+  /* Les noms d'action longs doivent s'enrouler, pas élargir le chat (scroll horizontal). */
+  min-width: 0; max-width: 100%;
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
   border: 1px solid color-mix(in oklab, var(--log-c) 35%, transparent);
 }
 .vtt-log-meta {
