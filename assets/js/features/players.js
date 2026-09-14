@@ -2106,7 +2106,9 @@ function _openLightbox(presId, startIdx = 0) {
   overlay.id = 'pp-lightbox';
   overlay.className = 'pp-lightbox';
   overlay.innerHTML = `
-    <img class="pp-lightbox-img" alt="">
+    <div class="pp-lightbox-media">
+      <img class="pp-lightbox-img" alt="" title="Cliquer pour zoomer">
+    </div>
     <div class="pp-lightbox-counter"></div>
     ${photos.length > 1 ? `
       <button type="button" class="pp-lightbox-nav pp-lightbox-prev" aria-label="Précédente">‹</button>
@@ -2116,10 +2118,20 @@ function _openLightbox(presId, startIdx = 0) {
   `;
   document.body.appendChild(overlay);
 
+  const mediaEl = overlay.querySelector('.pp-lightbox-media');
   const imgEl   = overlay.querySelector('.pp-lightbox-img');
   const countEl = overlay.querySelector('.pp-lightbox-counter');
+
+  const resetZoom = () => {
+    mediaEl.classList.remove('is-zoomed', 'is-panning');
+    imgEl.style.removeProperty('width');
+    imgEl.style.removeProperty('height');
+    imgEl.title = 'Cliquer pour zoomer';
+    mediaEl.scrollTo({ left: 0, top: 0 });
+  };
   const render = () => {
     const g = photos[idx];
+    resetZoom();
     imgEl.src = g.url;
     imgEl.alt = `Photo ${idx + 1} de ${item.nom}`;
     countEl.textContent = `${idx + 1} / ${photos.length}`;
@@ -2138,14 +2150,83 @@ function _openLightbox(presId, startIdx = 0) {
   };
   document.addEventListener('keydown', onKey);
 
-  // Clic sur l'overlay (mais pas sur l'image ni les contrôles) → fermer
+  // Clic sur le fond (mais pas sur l'image ni les contrôles) → fermer.
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) close();
+    if (e.target === overlay || (e.target === mediaEl && !mediaEl.classList.contains('is-zoomed'))) close();
   });
   overlay.querySelector('.pp-lightbox-close').addEventListener('click', close);
   overlay.querySelector('.pp-lightbox-prev')?.addEventListener('click', (e) => { e.stopPropagation(); prev(); });
   overlay.querySelector('.pp-lightbox-next')?.addEventListener('click', (e) => { e.stopPropagation(); next(); });
-  imgEl.addEventListener('click', (e) => e.stopPropagation());
+
+  // Même interaction que dans les Hauts-Faits : clic pour zoomer dans la
+  // visionneuse, puis glisser pour explorer l'image sans ouvrir une autre vue.
+  const PAN_THRESHOLD = 4;
+  let panActive = false;
+  let panMoved = false;
+  let panX = 0;
+  let panY = 0;
+  let panLeft = 0;
+  let panTop = 0;
+
+  imgEl.addEventListener('pointerdown', (event) => {
+    if (event.pointerType === 'touch' || event.button !== 0 || !mediaEl.classList.contains('is-zoomed')) return;
+    panActive = true;
+    panMoved = false;
+    panX = event.clientX;
+    panY = event.clientY;
+    panLeft = mediaEl.scrollLeft;
+    panTop = mediaEl.scrollTop;
+    imgEl.setPointerCapture?.(event.pointerId);
+    mediaEl.classList.add('is-panning');
+    event.preventDefault();
+  });
+  imgEl.addEventListener('pointermove', (event) => {
+    if (!panActive) return;
+    const dx = event.clientX - panX;
+    const dy = event.clientY - panY;
+    if (Math.abs(dx) > PAN_THRESHOLD || Math.abs(dy) > PAN_THRESHOLD) panMoved = true;
+    mediaEl.scrollLeft = panLeft - dx;
+    mediaEl.scrollTop = panTop - dy;
+  });
+  const endPan = (event) => {
+    if (!panActive) return;
+    panActive = false;
+    mediaEl.classList.remove('is-panning');
+    imgEl.releasePointerCapture?.(event.pointerId);
+  };
+  imgEl.addEventListener('pointerup', endPan);
+  imgEl.addEventListener('pointercancel', endPan);
+
+  imgEl.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (panMoved) {
+      panMoved = false;
+      return;
+    }
+
+    if (mediaEl.classList.contains('is-zoomed')) {
+      resetZoom();
+      return;
+    }
+
+    const bounds = mediaEl.getBoundingClientRect();
+    const imageRatio = imgEl.naturalWidth / imgEl.naturalHeight;
+    if (!Number.isFinite(imageRatio) || imageRatio <= 0 || !bounds.width || !bounds.height) return;
+    const frameRatio = bounds.width / bounds.height;
+    const fittedWidth = imageRatio >= frameRatio ? bounds.width : bounds.height * imageRatio;
+    const fittedHeight = imageRatio >= frameRatio ? bounds.width / imageRatio : bounds.height;
+    const focusX = (event.clientX - bounds.left) / bounds.width;
+    const focusY = (event.clientY - bounds.top) / bounds.height;
+
+    mediaEl.classList.add('is-zoomed');
+    imgEl.title = 'Cliquer pour dézoomer';
+    imgEl.style.width = `${Math.round(fittedWidth * 2)}px`;
+    imgEl.style.height = `${Math.round(fittedHeight * 2)}px`;
+    requestAnimationFrame(() => {
+      mediaEl.scrollLeft = Math.max(0, focusX * imgEl.scrollWidth - bounds.width / 2);
+      mediaEl.scrollTop = Math.max(0, focusY * imgEl.scrollHeight - bounds.height / 2);
+    });
+  });
 
   render();
 }

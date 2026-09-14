@@ -4,7 +4,13 @@
 // vtt.js, artisan.js, shop.js peuvent importer ici sans couplage cross-features.
 // ══════════════════════════════════════════════════════════════════════════════
 import { computeEquipStatsBonus, getItemEffectText, getItemStatBonus } from './char-stats.js';
-import { getEquipmentSlotsByKind, getPrimaryWeaponSlotId } from './equipment-slots.js';
+import {
+  equipmentSlotAcceptsItem,
+  getEquipmentSlot,
+  getEquipmentSlotsByKind,
+  getPrimaryWeaponSlotId,
+  resolveEquipmentSlotForItem,
+} from './equipment-slots.js';
 import {
   formatArmorSetEffect,
   getArmorSetDefinition,
@@ -233,7 +239,7 @@ function copyStatBonuses(item = {}) {
 
 export function buildEquippedItemFromInventory(slot, item, invIndex) {
   if (!item) return null;
-  const isWeapon = slot.startsWith('Main');
+  const isWeapon = getEquipmentSlot(slot)?.kind === 'weapon' || slot.startsWith('Main');
   const rawTraits = [...getBaseTraits(item), ...getAddedTraits(item)];
   const effectBonus = parseInt(item.upgrades?.effectBonus) || 0;
   const equipUpgrades = effectBonus > 0 ? { effectBonus } : undefined;
@@ -274,6 +280,44 @@ export function buildEquippedItemFromInventory(slot, item, invIndex) {
     typeArmure: item.typeArmure || '',
     slotArmure: item.slotArmure ? inferArmorSlotValue(slot, item) : '',
     slotBijou: item.slotBijou ? inferAccessorySlotValue(slot, item) : '',
+  };
+}
+
+/**
+ * Prépare l'unique patch nécessaire pour équiper un objet de l'inventaire.
+ * L'ancien contenu du slot est remplacé, sans toucher à l'inventaire : il y
+ * reste donc disponible comme objet déséquipé. La fonction ne mute pas la fiche.
+ */
+export function buildInventoryEquipPatch(character, invIndex, requestedSlot = '') {
+  const index = Number.isInteger(invIndex) ? invIndex : parseInt(invIndex, 10);
+  const item = Number.isInteger(index) ? character?.inventaire?.[index] : null;
+  if (!item) return null;
+
+  const slot = requestedSlot || resolveEquipmentSlotForItem(item);
+  const slotDef = getEquipmentSlot(slot);
+  if (!slotDef || !equipmentSlotAcceptsItem(slotDef, item)) return null;
+
+  const equipement = { ...(character?.equipement || {}) };
+  const replacedItem = equipement[slot]?.nom ? equipement[slot] : null;
+
+  // Une même unité d'inventaire ne peut occuper qu'un slot dans le build actif.
+  Object.keys(equipement).forEach(otherSlot => {
+    if (otherSlot !== slot && equipement[otherSlot]?.sourceInvIndex === index) {
+      delete equipement[otherSlot];
+    }
+  });
+
+  const equippedItem = buildEquippedItemFromInventory(slot, item, index);
+  if (!equippedItem) return null;
+  equipement[slot] = equippedItem;
+
+  return {
+    item,
+    slot,
+    slotDef,
+    replacedItem,
+    equipement,
+    statsBonus: computeEquipStatsBonus(equipement),
   };
 }
 

@@ -83,8 +83,8 @@ import {
 } from '../shared/inventory-utils.js';
 import { RARETE_NAMES, _rareteColor, _rareteLabel } from '../shared/rarity.js';
 import {
-  getArmorTorsoSlotId, getEquipmentSlots, getPrimaryWeaponSlotId,
-  getSecondaryWeaponSlotId,
+  getArmorTorsoSlotId, getEquipmentSlot, getEquipmentSlots, getPrimaryWeaponSlotId,
+  getSecondaryWeaponSlotId, resolveEquipmentSlotForItem,
 } from '../shared/equipment-slots.js';
 
 import { editEquipSlot } from './characters/equipment.js';
@@ -501,14 +501,22 @@ function _applyAuraVars(c) {
   document.querySelector('.aura-dot--custom')?.classList.toggle('active', isCustom);
 }
 
-// Pastilles de sélection de personnage (char-switch)
-function _charPillHtml(ch, activeCharId) {
-  const col = _auraColor(ch.aura);
-  const titleSuffix = ch.isDefault ? ' · ★ Favori' : '';
-  return `<button class="char-pill${ch.id===activeCharId?' active':''}${ch.isDefault?' is-default':''}"
-    data-charid="${ch.id}" data-action="selectChar" data-id="${ch.id}"
-    style="--av-c:${col}" title="${_esc(ch.nom || 'Sans nom')} — Niv.${ch.niveau||1}${ch.classe?' · '+_esc(ch.classe):''}${titleSuffix}">
-    <span class="char-pill-av">${characterPortraitContent(ch)}${ch.isDefault?'<span class="char-pill-star" title="Personnage favori">★</span>':''}</span>
+const PLAYER_PORTRAIT_SWITCH_MAX = 5;
+
+// Pour les joueurs qui ont peu de personnages : tous les choix restent visibles
+// sans ouvrir de menu. Le portrait porte l'action, le nom sert de légende.
+function _playerCharPortraitHtml(ch, activeCharId) {
+  const active = ch.id === activeCharId;
+  const col = _auraHex(ch);
+  const meta = `Niv.${ch.niveau || 1}${ch.classe ? ` · ${ch.classe}` : ''}${ch.isDefault ? ' · ★ Favori' : ''}`;
+  return `<button type="button" class="cs-player-char${active ? ' active' : ''}${ch.isDefault ? ' is-default' : ''}"
+    data-charid="${_esc(ch.id)}" data-action="selectChar" data-id="${_esc(ch.id)}"
+    style="--av-c:${col}" title="${_esc(`${ch.nom || 'Sans nom'} — ${meta}`)}"
+    aria-label="Afficher ${_esc(ch.nom || 'ce personnage')}" aria-current="${active ? 'true' : 'false'}">
+    <span class="cs-player-char-avatar">
+      <span class="char-pill-av">${characterPortraitContent(ch)}</span>
+      ${ch.isDefault ? '<span class="char-pill-star" title="Personnage favori">★</span>' : ''}
+    </span>
     <span class="char-pill-name">${_esc(ch.nom || 'Sans nom')}</span>
   </button>`;
 }
@@ -581,15 +589,19 @@ function _charPickRowHtml(ch, activeCharId, ownerLabels = new Map()) {
 function _buildCharSwitchHtml(activeCharId, canEdit) {
   const switchable = sortCharactersForDisplay(getVisibleCharacters());
 
-  // Peu de persos → pastilles (identique aux autres pages).
-  if (switchable.length <= 6) {
-    return `<div class="char-switch">
-      ${switchable.map(ch => _charPillHtml(ch, activeCharId)).join('')}
-      ${canEdit ? `<button class="char-pill char-pill-new" data-action="createNewChar">➕ Nouveau</button>` : ''}
+  // Un joueur avec une petite collection voit immédiatement tous ses portraits.
+  // Le MJ conserve le sélecteur avancé, même sur une aventure encore peu remplie.
+  if (!STATE.isAdmin && switchable.length <= PLAYER_PORTRAIT_SWITCH_MAX) {
+    return `<div class="cs-player-switch" role="navigation" aria-label="Mes personnages">
+      ${switchable.map(ch => _playerCharPortraitHtml(ch, activeCharId)).join('')}
+      ${canEdit ? `<button type="button" class="cs-player-char cs-player-char-new" data-action="createNewChar" title="Créer un personnage" aria-label="Créer un personnage">
+        <span class="cs-player-char-new-icon" aria-hidden="true">＋</span>
+        <span class="char-pill-name">Nouveau</span>
+      </button>` : ''}
     </div>`;
   }
 
-  // Beaucoup de persos (vue MJ) → sélecteur compact : bouton courant + menu
+  // Vue MJ ou collection joueur importante → bouton courant + menu
   // (recherche + filtre par compte + liste). Tient dans le bandeau collant.
   const cur = switchable.find(c => c.id === activeCharId) || switchable[0];
   const owners = STATE.isAdmin ? _charOwners(switchable) : [];
@@ -1829,9 +1841,10 @@ function renderCharInventaireV3(c, canEdit) {
   const totalItems = inv.reduce((sum, item) =>
     sum + (parseInt(item.quantite || item.qte || 1) || 1), 0);
   let equipped = 0;
+  let currentEquippedMap = new Map();
   try {
-    const equipMap = getEquippedInventoryIndexMap?.(c) || new Map();
-    equipped = equipMap.size;
+    currentEquippedMap = getEquippedInventoryIndexMap?.(c) || new Map();
+    equipped = currentEquippedMap.size;
   } catch {}
   const totals = inv.reduce((sum, it) => {
     const catalogItem = getInventoryCatalogItem(it.itemId);
@@ -1980,6 +1993,15 @@ function renderCharInventaireV3(c, canEdit) {
     const hasActiveBuildUsage = buildUsages.some(u => u.active);
     const buildBadgesHtml = _renderInventoryBuildBadges(buildUsages);
     const currentBuildEquipmentHtml = _renderCurrentBuildEquipment(buildUsages);
+    const equipSlotId = resolveEquipmentSlotForItem(it);
+    const equipSlot = equipSlotId ? getEquipmentSlot(equipSlotId) : null;
+    const equipIndex = allIdx.find(index => !(currentEquippedMap.get(index) || []).length) ?? idx;
+    const equippedInTarget = !!equipSlotId && allIdx.some(index =>
+      (currentEquippedMap.get(index) || []).includes(equipSlotId));
+    const replacedName = equipSlotId && !equippedInTarget ? c.equipement?.[equipSlotId]?.nom : '';
+    const equipTitle = equippedInTarget
+      ? `Déjà équipé dans ${equipSlot?.label || equipSlotId}`
+      : `Équiper dans ${equipSlot?.label || equipSlotId}${replacedName ? ` · remplace ${replacedName}` : ''}`;
 
     return `<div class="inv-card ${isEquipped ? `is-equipped ${hasActiveBuildUsage ? 'is-equipped-active' : 'is-equipped-other'}` : ''}" style="--rare-c:${col}">
       <div class="inv-card-head">
@@ -2033,6 +2055,11 @@ function renderCharInventaireV3(c, canEdit) {
           ${prixVente ? `<span class="resale" title="Revente unitaire"><small>Revente</small>${prixVente}</span>` : ''}
         </div>
         ${canEdit?`<div class="inv-card-actions">
+          ${equipSlot ? `<button class="inv-act eq${equippedInTarget ? ' is-on' : ''}" data-action="equipInventoryItem"
+            data-index="${equipIndex}" data-slot="${_esc(equipSlotId)}" data-render-tab="inv"
+            title="${_esc(equipTitle)}" aria-label="${_esc(equipTitle)}" ${equippedInTarget ? 'disabled' : ''}>
+            <span aria-hidden="true">${equippedInTarget ? '✓' : '⚔'}</span><span class="inv-equip-label">${equippedInTarget ? 'Équipé' : 'Équiper'}</span>
+          </button>` : ''}
           <button class="inv-act sell" data-action="openSellInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-prix="${prixVente}" data-name="${_esc(it.nom||'')}" title="Vendre ${prixVente} or/u" aria-label="Vendre"><svg aria-hidden="true"><use href="./assets/img/icons.svg#icon-coin"/></svg></button>
           <button class="inv-act send" data-action="openSendInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-name="${_esc(it.nom||'')}" title="Envoyer" aria-label="Envoyer">↗</button>
           <button class="inv-act del" data-action="openDeleteInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-name="${_esc(it.nom||'')}" title="Supprimer" aria-label="Supprimer">×</button>
