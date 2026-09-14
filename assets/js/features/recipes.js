@@ -16,6 +16,7 @@ import PAGES from './pages.js';
 import { _rareteTag } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes, _trunc } from "../shared/html.js";
 import { formatWeaponDamageText, isWeaponLikeItem } from '../shared/equipment-utils.js';
+import { canControlCharacter } from '../shared/character-state.js';
 
 // ── État local ─────────────────────────────────────────────────────────────────
 
@@ -1150,7 +1151,7 @@ export async function openCharacterRecipeBook(characterId) {
   if (!character) return;
   const uid = character.uid || (character.id === STATE.activeChar?.id ? _myUid() : '');
   const recipes = _allRecipeEntries().filter(recipe => uid && (recipe.acces || []).includes(uid));
-  const canTransfer = !_isAdmin() && uid === _myUid();
+  const canTransfer = !_isAdmin() && canControlCharacter(character);
   openModal(`Recettes de ${character.nom || 'ce personnage'}`, `
     <div class="rec-book-shell">
       <header class="rec-book-head"><div><span>Livre de recettes</span><strong>${recipes.length} recette${recipes.length !== 1 ? 's' : ''} connue${recipes.length !== 1 ? 's' : ''}</strong></div>

@@ -282,6 +282,23 @@ function isAdvAdmin(adventureId) {
       get(/databases/$(database)/documents/adventures/$(adventureId))
         .data.admins.hasAny([request.auth.uid]));
 }
+function ownsAdventureCharacter(adventureId, charId) {
+  return isLoggedIn() &&
+         charId is string &&
+         exists(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(charId)) &&
+         get(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(charId)).data.uid == request.auth.uid;
+}
+function canControlAdventureCharacter(adventureId, charId) {
+  return isAdvAdmin(adventureId) ||
+         (inAdventure(adventureId) &&
+          charId is string &&
+          exists(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(charId)) &&
+          (
+            get(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(charId)).data.uid == request.auth.uid ||
+            get(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(charId)).data
+              .get("controlDelegates", []).hasAny([request.auth.uid])
+          ));
+}
 function canControlVttToken(adventureId, tokenId) {
   let tokenPath = /databases/$(database)/documents/adventures/$(adventureId)/vttTokens/$(tokenId);
   let token = get(tokenPath).data;
@@ -290,19 +307,15 @@ function canControlVttToken(adventureId, tokenId) {
       tokenId is string &&
       exists(tokenPath) &&
       (token.ownerId == request.auth.uid ||
-       token.get("controlDelegates", []).hasAny([request.auth.uid])));
-}
-function ownsAdventureCharacter(adventureId, charId) {
-  return isLoggedIn() &&
-         charId is string &&
-         exists(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(charId)) &&
-         get(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(charId)).data.uid == request.auth.uid;
+       token.get("controlDelegates", []).hasAny([request.auth.uid]) ||
+       (token.characterId is string &&
+        canControlAdventureCharacter(adventureId, token.characterId))));
 }
 function canCreateAdventurePlayer(adventureId) {
   return isAdvAdmin(adventureId) ||
          (inAdventure(adventureId) &&
           request.resource.data.keys().hasAny(["charId"]) &&
-          ownsAdventureCharacter(adventureId, request.resource.data.charId) &&
+          canControlAdventureCharacter(adventureId, request.resource.data.charId) &&
           (!request.resource.data.keys().hasAny(["imageUrl"]) ||
            request.resource.data.imageUrl == ""));
 }
@@ -310,7 +323,7 @@ function canUpdateAdventurePlayer(adventureId) {
   return isAdvAdmin(adventureId) ||
          (inAdventure(adventureId) &&
           resource.data.keys().hasAny(["charId"]) &&
-          ownsAdventureCharacter(adventureId, resource.data.charId) &&
+          canControlAdventureCharacter(adventureId, resource.data.charId) &&
           request.resource.data.charId == resource.data.charId &&
           !request.resource.data.diff(resource.data)
             .affectedKeys().hasAny(["imageUrl"]));
@@ -522,7 +535,7 @@ match /adventures/{adventureId} {
           isAdvAdmin(adventureId) || (
             request.resource.data.get('charId', '') != '' &&
             exists(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(request.resource.data.charId)) &&
-            get(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(request.resource.data.charId)).data.uid == request.auth.uid
+            canControlAdventureCharacter(adventureId, request.resource.data.charId)
           )
         ) &&
         request.resource.data.get('text', '').size() <= 4000 &&
@@ -573,7 +586,7 @@ match /adventures/{adventureId} {
       && (
         isAdvAdmin(adventureId) || (
           exists(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(request.resource.data.charId)) &&
-          get(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(request.resource.data.charId)).data.uid == request.auth.uid
+          canControlAdventureCharacter(adventureId, request.resource.data.charId)
         )
       );
     allow update: if inAdventure(adventureId)
@@ -616,6 +629,13 @@ match /adventures/{adventureId} {
     allow update: if inAdventure(adventureId) && (
       resource.data.uid == request.auth.uid ||
       isAdvAdmin(adventureId) ||
+      // Le délégué édite toute la fiche, sans pouvoir changer son propriétaire
+      // ni s'accorder/révoquer lui-même la délégation.
+      (
+        resource.data.get('controlDelegates', []).hasAny([request.auth.uid]) &&
+        !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['uid', 'controlDelegates'])
+      ) ||
       isCharacterUidSelfRepair(resource.data, request.resource.data) ||
       isCharacterUidSameEmailRelink(adventureId, resource.data, request.resource.data) ||
       // Don entre membres : le destinataire recoit l'objet et sa trace dans
@@ -653,7 +673,7 @@ match /adventures/{adventureId} {
         .affectedKeys().hasOnly(['hp', 'pvCombatHp', 'buffs', 'conditions'])
     );
     allow delete: if inAdventure(adventureId) &&
-      (resource.data.uid == request.auth.uid || isAdvAdmin(adventureId));
+      canControlAdventureCharacter(adventureId, id);
   }
   // Bio « diapo » déportée hors du doc perso (budget 1 Mo propre). Doc id = charId.
   // Lecture : membre de l'aventure. Écriture : le MJ toujours ; le propriétaire du
@@ -663,7 +683,7 @@ match /adventures/{adventureId} {
     allow read:  if inAdventure(adventureId);
     allow write: if inAdventure(adventureId) && (
       isAdvAdmin(adventureId) ||
-      (ownsAdventureCharacter(adventureId, charId) &&
+      (canControlAdventureCharacter(adventureId, charId) &&
        get(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(charId)).data.get('bioLocked', false) != true)
     );
   }
@@ -750,14 +770,16 @@ match /adventures/{adventureId} {
     // (son perso). Sans ça, seuls les sorts d'invocation du MJ fonctionnent
     // (la création de token est refusée côté joueur → l'invocation échoue).
     // Bornage : c'est forcément un summon (pas de characterId/npcId/beastId),
-    // et le token source pointé doit lui appartenir → pas de forge de token.
+    // et le token source doit être possédé ou délégué. Le nouveau token conserve
+    // le propriétaire du lanceur : un délégué ne peut pas détourner l'invocation.
     allow create: if inAdventure(adventureId)
-      && request.resource.data.ownerId == request.auth.uid
       && request.resource.data.characterId == null
       && request.resource.data.npcId == null
       && request.resource.data.beastId == null
       && request.resource.data.summonOwnerId is string
-      && get(/databases/$(database)/documents/adventures/$(adventureId)/vttTokens/$(request.resource.data.summonOwnerId)).data.ownerId == request.auth.uid;
+      && canControlVttToken(adventureId, request.resource.data.summonOwnerId)
+      && request.resource.data.ownerId ==
+        get(/databases/$(database)/documents/adventures/$(adventureId)/vttTokens/$(request.resource.data.summonOwnerId)).data.ownerId;
     // Contrôle du token : propriétaire OU délégué de contrôle.
     // `pageId`/`visible` permettent au joueur d'« Invoquer mon token » (le poser
     // sur la carte active). Les compteurs d'action et PM sont écrits lors d'une
@@ -765,7 +787,9 @@ match /adventures/{adventureId} {
     allow update: if inAdventure(adventureId)
       && (request.auth.uid == resource.data.ownerId
           || (resource.data.controlDelegates is list
-              && request.auth.uid in resource.data.controlDelegates))
+              && request.auth.uid in resource.data.controlDelegates)
+          || (resource.data.characterId is string
+              && canControlAdventureCharacter(adventureId, resource.data.characterId)))
       && request.resource.data.diff(resource.data)
            .affectedKeys().hasOnly([
              'col', 'row', 'movedThisTurn', 'movedCells', 'bonusMvt', 'moveOrigin',

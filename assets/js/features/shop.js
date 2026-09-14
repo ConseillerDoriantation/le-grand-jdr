@@ -234,7 +234,9 @@ async function loadShopCharacters() {
   if (_shopCharactersScope === scope) return;
   if (_shopCharactersLoad?.scope === scope) return _shopCharactersLoad.promise;
 
-  const promise = loadChars(STATE.isAdmin ? null : STATE.user?.uid)
+  // La délégation est portée par chaque fiche : il faut donc charger la
+  // collection live complète avant de filtrer propriétaire + délégués.
+  const promise = loadChars()
     .then(chars => {
       STATE.characters = chars;
       _shopCharactersScope = scope;

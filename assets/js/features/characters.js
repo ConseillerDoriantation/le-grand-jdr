@@ -24,7 +24,7 @@ import {
   recipeBookButton, openCharacterRecipeBook,
 } from './recipes.js';
 
-import { getCharacterById, getVisibleCharacters } from '../shared/character-state.js';
+import { canControlCharacter, getCharacterById, getVisibleCharacters } from '../shared/character-state.js';
 // ── Sous-modules ─────────────────────────────────────────────────────────────
 import {
   loadCombatStyles, detectCombatStyle,
@@ -1136,7 +1136,7 @@ function renderCharSheet(c, keepTab) {
     ? captureViewContext(area, { includeWindow: true, includeFocus: true })
     : null;
   applyActiveBuild(c);
-  const canEdit = STATE.isAdmin || c.uid === STATE.user?.uid;
+  const canEdit = canControlCharacter(c);
 
   const v3Tab = _resolveV3Tab(keepTab || charSession.getCurrentCharTab() || 'combat');
   // Source unique : le perso rendu EST le perso actif et celui que relit

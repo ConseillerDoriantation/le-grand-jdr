@@ -66,8 +66,9 @@ import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChang
 import { receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
 import { conditionDamageReductionApplies, conditionStatRollMode } from './vtt-condition-rules.js';
 import { planGroupGridStep } from './vtt-group-movement.js';
-import { resolveCharacterControlToken } from './vtt-token-control.js';
+import { invocableCharacterTokens, resolveCharacterControlToken } from './vtt-token-control.js';
 import { naturalWeaponCombatContext } from '../../shared/bestiary-combat.js';
+import { canControlCharacter, getCharacterDelegates } from '../../shared/character-state.js';
 import { _calcAfflictionDD, splitSpellDiceFormula } from '../../shared/spell-math.js';
 import {
   _startRuler, _updateRuler, _endRuler, _clearRuler, _showRulerHover, _hideRulerHover,
@@ -601,7 +602,8 @@ export function _canControlToken(t, uid = STATE.user?.uid) {
   if (STATE.isAdmin) return true;
   if (t.ownerId === uid) return true;
   const delegates = Array.isArray(t.controlDelegates) ? t.controlDelegates : [];
-  return delegates.includes(uid);
+  if (delegates.includes(uid)) return true;
+  return !!t.characterId && canControlCharacter(VS.characters[t.characterId], uid);
 }
 
 /**
@@ -1042,6 +1044,7 @@ function _cleanup() {
   _pingTimer = null; _pingOrigin = null;
   _resetRuler();  // réinitialise aussi l'état de diffusion MJ (cf. vtt-ruler.js)
   _resetAutoSync();
+  _delegationSyncAttempts.clear();
   _resetTraySearch();
   VS.imgTr = null; VS.imgTrFg = null; VS.selImg = null; VS.mapMode = false;
   _hideCtxMenu();
@@ -1830,7 +1833,7 @@ function _buildShape(t) {
     const stack=_stackPeers(t);
     if (!STATE.isAdmin && !_attackSrc && !_zoneCtx && !_mtCtx
         && !e.evt.shiftKey && !e.evt.ctrlKey && !e.evt.metaKey
-        && t.ownerId !== STATE.user?.uid) {
+        && !_canControlToken(t)) {
       const ownId = _findOwnTokenAtPointer();
       const alreadyBrowsing=stack.some(peer=>peer.id===VS.selected);
       if (ownId && ownId !== t.id && !alreadyBrowsing) {
@@ -2183,19 +2186,11 @@ export function _select(id, { quiet = false } = {}) {
   }
 }
 
-// Joueur : auto-sélection « discrète » de son propre token (favori ★ en priorité)
-// dès qu'il est présent et visible sur la carte active, tant qu'il n'a rien
-// sélectionné lui-même → sa fiche s'affiche dans le dock en bas à gauche sans clic
-// (y compris après invocation ou envoi sur une nouvelle scène). Mode quiet : pas
-// de surbrillances de déplacement/attaque tant qu'il n'a pas cliqué son token.
+// Joueur : affiche sa fiche par défaut dans le pupitre sans sélectionner le token
+// sur le canvas. Sélection tactique et identité persistante restent indépendantes.
 function _vttAutoSelectOwnToken() {
-  if (STATE.isAdmin || VS.selected || !VS.activePage) return;
-  const uid = STATE.user?.uid; if (!uid) return;
-  const mine = Object.values(VS.tokens).map(e => e.data).filter(t =>
-    t?.ownerId === uid && t.pageId === VS.activePage.id && t.visible !== false);
-  if (!mine.length) return;
-  const pick = mine.find(t => t.characterId && VS.characters[t.characterId]?.isDefault) || mine[0];
-  if (pick && VS.tokens[pick.id]) _select(pick.id, { quiet: true });
+  if (STATE.isAdmin || VS.selected) return;
+  _renderInspectorSoon();
 }
 
 // Replie / déplie le dock de fiche (bas-gauche). Certains joueurs préfèrent le
@@ -3061,7 +3056,7 @@ function _findOwnTokenAtPointer() {
   const w = _stageToWorld(pos);
   const cx = Math.floor(w.x / CELL), cy = Math.floor(w.y / CELL);
   for (const [id, entry] of Object.entries(VS.tokens)) {
-    const d = entry?.data; if (!d || d.ownerId !== uid) continue;
+    const d = entry?.data; if (!d || !_canControlToken(d, uid)) continue;
     const dim = _tokenDims(d);
     if (cx >= d.col && cx < d.col + dim.w && cy >= d.row && cy < d.row + dim.h) return id;
   }
@@ -3075,7 +3070,7 @@ function _vttCenterOnMyToken() {
   const owned = Object.entries(VS.tokens)
     .filter(([, entry]) => {
       const t = entry?.data;
-      return t?.ownerId === uid
+      return _canControlToken(t, uid)
         && t.pageId === VS.activePage.id
         && t.visible !== false;
     });
@@ -3085,7 +3080,7 @@ function _vttCenterOnMyToken() {
   const selected = selectedData
     && selectedData.pageId === VS.activePage.id
     && selectedData.visible !== false
-    && (selectedData.ownerId === uid || STATE.isAdmin)
+    && _canControlToken(selectedData, uid)
       ? [VS.selected, selectedEntry]
       : null;
 
@@ -9818,13 +9813,15 @@ function _initListeners() {
     }
     if (changed.size) _renderTraySoon();
     _markCharsReady();
+    if (!STATE.isAdmin && !VS.selected) _renderInspectorSoon();
+    void _syncOwnedCharacterDelegations();
     void _cleanupReserveSummons();
     // Signale immédiatement au destinataire les objets reçus pendant qu’il est
     // sur le VTT. Le premier snapshot est ignoré pour ne pas annoncer tout
     // l’inventaire existant à l’ouverture de la table.
     if (wasReady) {
       for (const c of Object.values(next)) {
-        if (c.uid !== STATE.user?.uid) continue;
+        if (!canControlCharacter(c)) continue;
         const previousInv = prev[c.id]?.inventaire || [];
         const currentInv = c.inventaire || [];
         if (currentInv.length <= previousInv.length) continue;
@@ -9934,6 +9931,7 @@ function _initListeners() {
     void _cleanupReserveDuplicates();
     void _cleanupReserveSummons();
     _markToksReady();
+    void _syncOwnedCharacterDelegations();
     _ensureBestiaryForTokens();
     // Joueur : le bouton « Invoquer mon token » dépend de l'état de SON token
     // (créé / assigné / déplacé par le MJ). Sans ce refresh, le bouton n'apparaît
@@ -10909,18 +10907,11 @@ async function _vttRetireToken(tokenId) {
 async function _vttInvokeMyToken(tokenId) {
   if (!VS.activePage) { showNotif('Aucune carte active','error'); return; }
   const uid = STATE.user?.uid; if (!uid) return;
-  // Personnages DÉJÀ présents sur la scène courante (placés par le MJ ou soi-même) :
-  // on ne les ré-invoque pas, sinon un 2ᵉ token du même perso resté en réserve
-  // crée un doublon sur la carte.
-  const onPageChars = new Set(Object.values(VS.tokens)
-    .filter(e => e.data?.pageId === VS.activePage.id && e.data?.characterId)
-    .map(e => e.data.characterId));
-  // Persos du joueur PAS sur la scène courante ET pas déjà présents → invocables.
-  const reserve = Object.values(VS.tokens)
-    .filter(e => e.data?.ownerId === uid
-      && e.data.pageId !== VS.activePage.id
-      && !(e.data.characterId && onPageChars.has(e.data.characterId)))
-    .map(e => e.data);
+  const reserve = invocableCharacterTokens(
+    VS.tokens,
+    VS.activePage.id,
+    token => _canControlToken(token, uid),
+  );
   if (!reserve.length) { showNotif('Ton personnage est déjà sur la carte.','info'); return; }
   const tok = tokenId ? reserve.find(t => t.id === tokenId) : (reserve.length === 1 ? reserve[0] : null);
   if (!tok) { _vttMyTokenPicker(reserve, '_vttInvokeMyToken', '🧑 Quel personnage invoquer ?', '<span style="color:var(--gold-2,#7eb0ff)">🧑 Invoquer</span>'); return; }
@@ -10933,7 +10924,7 @@ async function _vttInvokeMyToken(tokenId) {
 async function _vttRetireMyToken(tokenId) {
   const uid = STATE.user?.uid; if (!uid) return;
   const onScene = Object.values(VS.tokens)
-    .filter(e => e.data?.ownerId === uid && e.data.pageId && e.data.pageId === VS.activePage?.id)
+    .filter(e => _canControlToken(e.data, uid) && e.data.pageId && e.data.pageId === VS.activePage?.id)
     .map(e => e.data);
   if (!onScene.length) { showNotif('Aucun personnage à ranger','info'); return; }
   const tok = tokenId ? onScene.find(t => t.id === tokenId) : (onScene.length === 1 ? onScene[0] : null);
@@ -10946,7 +10937,7 @@ async function _vttSendTokensToReserve(ids) {
   const uid = STATE.user?.uid;
   const snapshots = [...new Set(ids)]
     .map(id => VS.tokens[id]?.data)
-    .filter(token => token && (STATE.isAdmin || token.ownerId === uid))
+    .filter(token => token && _canControlToken(token, uid))
     .map(token => ({ token, id: token.id, pageId: token.pageId ?? null, visible: token.visible !== false }));
   if (!snapshots.length) return false;
 
@@ -11579,7 +11570,7 @@ async function _vttMsLevelUp(charId, uid) {
 async function _vttMsSetHp(charId, uid, hp) {
   if (!_msCanEditVitals(charId, uid)) return;
   const c = VS.characters[charId]; if (!c) return;
-  const controlledToken = resolveCharacterControlToken(charId, VS.tokens, STATE.user?.uid);
+  const controlledToken = resolveCharacterControlToken(charId, VS.tokens, STATE.user?.uid, VS.characters);
   if (!STATE.isAdmin && c.uid !== STATE.user?.uid && !controlledToken) return;
   const max = calcPVMax(c);
   const val = Math.max(0, Math.min(max, Math.round(hp)));
@@ -11599,7 +11590,7 @@ async function _vttMsSetHp(charId, uid, hp) {
 async function _vttMsSetPm(charId, uid, pm) {
   if (!_msCanEditVitals(charId, uid)) return;
   const c = VS.characters[charId]; if (!c) return;
-  const controlledToken = resolveCharacterControlToken(charId, VS.tokens, STATE.user?.uid);
+  const controlledToken = resolveCharacterControlToken(charId, VS.tokens, STATE.user?.uid, VS.characters);
   if (!STATE.isAdmin && c.uid !== STATE.user?.uid && !controlledToken) return;
   const max = calcPMMax(c);
   const val = Math.max(0, Math.min(max, Math.round(pm)));
@@ -11622,6 +11613,47 @@ function _vttEditToken(id) { return _openStatsModal(VS.tokens[id]?.data??null); 
 // ═══════════════════════════════════════════════════════════════════
 // DÉLÉGATION DE CONTRÔLE — autoriser d'autres joueurs sur son token
 // ═══════════════════════════════════════════════════════════════════
+const _delegationSyncAttempts = new Set();
+
+function _delegatesForCharacterToken(t) {
+  const character = t?.characterId ? VS.characters[t.characterId] : null;
+  return character ? getCharacterDelegates(character)
+    : getCharacterDelegates(t);
+}
+
+// Migration idempotente des délégations historiques, autrefois stockées sur un
+// seul token. La fiche devient la source canonique et tous ses tokens suivent.
+async function _syncOwnedCharacterDelegations() {
+  const uid = STATE.user?.uid;
+  if (!uid || !Object.keys(VS.characters || {}).length || !Object.keys(VS.tokens || {}).length) return;
+  for (const character of Object.values(VS.characters)) {
+    if (!STATE.isAdmin && character.uid !== uid) continue;
+    const linked = Object.values(VS.tokens).map(e => e?.data).filter(t => t?.characterId === character.id);
+    if (!linked.length) continue;
+    const merged = [...new Set([
+      ...getCharacterDelegates(character),
+      ...linked.flatMap(t => getCharacterDelegates(t)),
+    ])].sort();
+    const needsCharacter = JSON.stringify(getCharacterDelegates(character).sort()) !== JSON.stringify(merged);
+    const tokensToFix = linked.filter(t => (STATE.isAdmin || t.ownerId === uid)
+      && JSON.stringify(getCharacterDelegates(t).sort()) !== JSON.stringify(merged));
+    if (!needsCharacter && !tokensToFix.length) continue;
+    const signature = `${character.id}:${merged.join(',')}`;
+    if (_delegationSyncAttempts.has(signature)) continue;
+    _delegationSyncAttempts.add(signature);
+    try {
+      const batch = writeBatch(db);
+      if (needsCharacter) batch.update(_chrRef(character.id), { controlDelegates: merged });
+      tokensToFix.forEach(t => batch.update(_tokRef(t.id), { controlDelegates: merged }));
+      await batch.commit();
+      character.controlDelegates = merged;
+      linked.forEach(t => { t.controlDelegates = merged; });
+    } catch (error) {
+      console.warn('[VTT] migration délégation personnage', character.id, error);
+    }
+  }
+}
+
 // Construit un descripteur enrichi d'un membre {uid, pseudo, charName, photo, aura, isAdmin, isGhost}
 // isGhost = compte présent dans adventure.players mais sans aucun personnage rattaché
 //           ET qui n'est pas admin → résidu de base de données, à ne pas proposer.
@@ -11645,7 +11677,7 @@ function _vttRenderDelegateModalBody(tokenId, search = '') {
   const t = VS.tokens[tokenId]?.data; if (!t) return '';
   const uid = STATE.user?.uid;
   const adv = STATE.adventure || {};
-  const dels = new Set(Array.isArray(t.controlDelegates) ? t.controlDelegates : []);
+  const dels = new Set(_delegatesForCharacterToken(t));
   // Liste membres = players + admins, sauf soi-même + propriétaire
   const memberUidsRaw = [...new Set([...(adv.players || []), ...(adv.admins || [])])]
     .filter(u => u && u !== uid && u !== t.ownerId);
@@ -11677,7 +11709,7 @@ function _vttRenderDelegateModalBody(tokenId, search = '') {
     return `<div class="vtt-deleg-empty-state">
       <div class="vtt-deleg-empty-ico">👥</div>
       <div><b>Aucun autre joueur dans l'aventure</b></div>
-      <div class="vtt-deleg-empty-hint">Invite d'autres joueurs depuis le menu d'aventure pour pouvoir leur déléguer un token.</div>
+      <div class="vtt-deleg-empty-hint">Invite d'autres joueurs depuis le menu d'aventure pour pouvoir leur déléguer ce personnage.</div>
     </div>`;
   }
 
@@ -11711,7 +11743,7 @@ function _vttRenderDelegateModalBody(tokenId, search = '') {
     <div class="vtt-deleg-summary">
       <span class="vtt-deleg-summary-ico">🤝</span>
       <span><b>${activeCount}</b> joueur${activeCount>1?'s':''} autorisé${activeCount>1?'s':''}
-        ${activeCount === 0 ? '· vous seul contrôlez ce token' : ''}</span>
+        ${activeCount === 0 ? `· vous seul contrôlez ce ${t.characterId ? 'personnage' : 'token'}` : ''}</span>
     </div>
     <div class="vtt-deleg-search-wrap">
       <span class="vtt-deleg-search-ico">🔍</span>
@@ -11744,7 +11776,7 @@ function _vttOpenTokenDelegatesModal(tokenId) {
   }
   const tgtName = (typeof _live === 'function' ? _live(t).displayName : t.name) || t.name || 'Token';
   _vttDelegSearch = '';
-  openModal(`🤝 Déléguer le contrôle — ${_esc(tgtName)}`,
+  openModal(`🤝 Déléguer ${t.characterId ? 'le personnage' : 'le contrôle'} — ${_esc(tgtName)}`,
     `<div id="vtt-deleg-modal" class="vtt-deleg-modal">${_vttRenderDelegateModalBody(tokenId, '')}</div>`);
 }
 
@@ -11768,19 +11800,38 @@ async function _vttToggleTokenDelegate(tokenId, targetUid) {
   const uid = STATE.user?.uid;
   const isOwner = uid && t.ownerId === uid;
   if (!isOwner && !STATE.isAdmin) return;
-  const cur = Array.isArray(t.controlDelegates) ? t.controlDelegates : [];
+  const cur = _delegatesForCharacterToken(t);
   const wasOn = cur.includes(targetUid);
   const next = wasOn ? cur.filter(u => u !== targetUid) : [...cur, targetUid];
+  let rollback = null;
   try {
-    await updateDoc(_tokRef(tokenId), { controlDelegates: next });
-    // Mise à jour optimiste du cache local pour rafraîchir immédiatement la modal
-    if (VS.tokens[tokenId]?.data) VS.tokens[tokenId].data.controlDelegates = next;
+    const linkedTokens = (t.characterId
+      ? Object.values(VS.tokens).map(e => e?.data).filter(token => token?.characterId === t.characterId)
+      : [t]).filter(token => STATE.isAdmin || token.ownerId === uid);
+    const batch = writeBatch(db);
+    rollback = {
+      tokens: new Map(linkedTokens.map(token => [token, token.controlDelegates])),
+      character: t.characterId ? VS.characters[t.characterId] : null,
+      characterDelegates: t.characterId ? VS.characters[t.characterId]?.controlDelegates : undefined,
+    };
+    linkedTokens.forEach(token => batch.update(_tokRef(token.id), { controlDelegates: next }));
+    if (t.characterId && VS.characters[t.characterId]) {
+      batch.update(_chrRef(t.characterId), { controlDelegates: next });
+    }
+    // Mettre le cache à jour AVANT le commit empêche les snapshots locaux du
+    // batch de croiser un ancien token avec la nouvelle fiche et de ressusciter
+    // involontairement une délégation que le propriétaire vient de retirer.
+    linkedTokens.forEach(token => { token.controlDelegates = next; });
+    if (t.characterId && VS.characters[t.characterId]) VS.characters[t.characterId].controlDelegates = next;
+    await batch.commit();
     const host = document.getElementById('vtt-deleg-modal');
     if (host) host.innerHTML = _vttRenderDelegateModalBody(tokenId, _vttDelegSearch || '');
     const name = _resolveUidName(targetUid);
-    showNotif(wasOn ? `Contrôle retiré à ${name}` : `${name} peut maintenant contrôler ce token`,
+    showNotif(wasOn ? `Contrôle retiré à ${name}` : `${name} peut maintenant contrôler ce personnage`,
       wasOn ? 'info' : 'success');
   } catch (err) {
+    rollback?.tokens.forEach((delegates, token) => { token.controlDelegates = delegates; });
+    if (rollback?.character) rollback.character.controlDelegates = rollback.characterDelegates;
     console.error('[VTT] toggle delegate', err);
     showNotif(`Erreur : ${err?.message || err}`, 'error');
   }

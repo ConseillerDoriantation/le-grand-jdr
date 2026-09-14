@@ -33,7 +33,7 @@ import {
 } from './data.js';
 import { getEquipmentSlot, resolveEquipmentSlotForItem } from '../../shared/equipment-slots.js';
 
-import { getCharacterById } from '../../shared/character-state.js';
+import { canControlCharacter, getCharacterById } from '../../shared/character-state.js';
 let _charInvSearch = '';
 let _invCatOpen = {};
 let _sellRefundsCum = [];
@@ -586,7 +586,7 @@ export async function openInventoryItemDetail(charId, indicesB64) {
   const equipSlot = equipSlotId ? getEquipmentSlot(equipSlotId) : null;
   const equipIndex = indices.find(idx => !(equippedMap.get(idx) || []).length) ?? indices[0];
   const equippedInTarget = !!equipSlotId && indices.some(idx => (equippedMap.get(idx) || []).includes(equipSlotId));
-  const canEquip = !!equipSlot && (STATE.isAdmin || c.uid === STATE.user?.uid);
+  const canEquip = !!equipSlot && canControlCharacter(c);
   const replacedName = equipSlotId && !equippedInTarget ? c.equipement?.[equipSlotId]?.nom : '';
   const traits = _getTraits(item);
   const statBonusHtml = _inventoryStatBadgesHtml(item);
@@ -604,7 +604,7 @@ export async function openInventoryItemDetail(charId, indicesB64) {
   // Seuls les objets FORGES sont modifiables : ceux issus de la boutique/du
   // catalogue sont partages, les retoucher ici serait trompeur.
   const canEditItem = item.source === 'custom'
-    && (STATE.isAdmin || c.uid === STATE.user?.uid);
+    && canControlCharacter(c);
 
   const facts = [
     ['Catégorie', item.type || item.categorie],

@@ -117,11 +117,14 @@ test('getItemStatBonus : accepte le store canonique et les alias boutique', () =
   assert.equal(getItemStatBonus({}, 'force'), 0);
 });
 
-test('getMyCharacters : filtre par uid, trié', () => {
-  const chars = [{ id: 'a', uid: 'u1', nom: 'A' }, { id: 'b', uid: 'u2', nom: 'B' }];
+test('getMyCharacters : inclut les personnages possédés ou délégués, triés', () => {
+  const chars = [
+    { id: 'a', uid: 'u1', nom: 'Zed' },
+    { id: 'b', uid: 'u2', nom: 'Béa', controlDelegates: ['u1'] },
+    { id: 'c', uid: 'u3', nom: 'Ciel' },
+  ];
   const mine = getMyCharacters(chars, 'u1');
-  assert.equal(mine.length, 1);
-  assert.equal(mine[0].id, 'a');
+  assert.deepEqual(mine.map(c => c.id), ['b', 'a']);
   assert.deepEqual(getMyCharacters(chars, ''), [], 'pas d’uid → vide');
 });
 

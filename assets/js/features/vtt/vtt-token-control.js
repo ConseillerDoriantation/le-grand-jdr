@@ -17,12 +17,35 @@ export function resolveControlledTokenId(selectedId, entries, activePageId, canC
 }
 
 /** Retourne le token personnage qui prouve un contrôle direct ou délégué. */
-export function resolveCharacterControlToken(charId, entries, uid) {
+export function resolveCharacterControlToken(charId, entries, uid, characters = null) {
   if (!charId || !uid) return null;
+  const character = characters?.[charId];
+  const delegatedByCharacter = Array.isArray(character?.controlDelegates)
+    && character.controlDelegates.includes(uid);
   return Object.values(entries || {})
     .map(entry => entry?.data)
     .find(token => token?.characterId === charId
       && (token.ownerId === uid
+        || delegatedByCharacter
         || (Array.isArray(token.controlDelegates) && token.controlDelegates.includes(uid))))
     || null;
+}
+
+/** Tokens de personnages contrôlés, sans inclure PNJ, ennemis ou invocations. */
+export function controlledCharacterTokens(entries, canControl) {
+  if (typeof canControl !== 'function') return [];
+  return Object.values(entries || {})
+    .map(entry => entry?.data || entry)
+    .filter(token => token?.characterId && canControl(token));
+}
+
+/** Personnages réellement absents de la scène et donc invocables. */
+export function invocableCharacterTokens(entries, activePageId, canControl) {
+  if (!activePageId) return [];
+  const tokens = Object.values(entries || {}).map(entry => entry?.data || entry).filter(Boolean);
+  const onPageCharacters = new Set(tokens
+    .filter(token => token.characterId && token.pageId === activePageId)
+    .map(token => token.characterId));
+  return controlledCharacterTokens(entries, canControl).filter(token =>
+    token.pageId !== activePageId && !onPageCharacters.has(token.characterId));
 }

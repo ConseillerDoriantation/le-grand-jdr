@@ -13,6 +13,7 @@ import { _esc } from '../../shared/html.js';
 import { _live } from './vtt-effective.js';   // données effectives (leaf)
 import { _select } from './vtt.js';           // sélection token (transverse)
 import { normalizeTokenTurnOrder, tokenHealthMeta } from './vtt-token-visual.js';
+import { canControlCharacter } from '../../shared/character-state.js';
 
 let _combatTab = 'allies'; // 'allies' (joueurs + PNJ) | 'enemies' (MJ only)
 // Popover « ordre détaillé » du ruban : réutilise _trackerRow (réordonner / tour
@@ -176,7 +177,11 @@ function _renderCombatTracker() {
 
   // Est-ce mon tour ? → halo doré sur le ruban.
   const activeTok = VS.tokens[VS.session?.combat?.activeTokenId]?.data;
-  const mine = !!activeTok && !!activeTok.ownerId && activeTok.ownerId === STATE.user?.uid;
+  const mine = !!activeTok && (
+    activeTok.ownerId === STATE.user?.uid
+    || (Array.isArray(activeTok.controlDelegates) && activeTok.controlDelegates.includes(STATE.user?.uid))
+    || (activeTok.characterId && canControlCharacter(VS.characters[activeTok.characterId]))
+  );
 
   // Barre de durée du tour : la clé change dès que le round OU le token actif
   // change → on remet le chrono à zéro. Sinon on reprend là où on en est (le

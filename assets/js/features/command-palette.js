@@ -14,6 +14,7 @@ import { getRecentNavigation, recordRecentNavigation } from '../shared/recent-na
 import { characterAvatarHtml } from '../shared/portraits.js';
 import { showNotif } from '../shared/notifications.js';
 import { copyText } from '../shared/clipboard.js';
+import { getControlledCharacters } from '../shared/character-state.js';
 
 const MAX_RESULTS = 30;
 
@@ -107,7 +108,7 @@ async function _loadEntries() {
   const [npcs, chars, quests, shop, shopCats, achievements, collection, story, recipes] =
     await Promise.all([
       loadCollection('npcs').catch(() => []),
-      loadChars(STATE.isAdmin ? null : STATE.user?.uid).catch(() => []),
+      loadChars().then(chars => getControlledCharacters(chars)).catch(() => []),
       loadCollection('quests').catch(() => []),
       loadCollection('shop').catch(() => []),
       loadCollection('shopCategories').catch(() => []),

@@ -18,7 +18,7 @@ import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
 import { _live } from './vtt-effective.js';
 import { _renderDicePanel } from './vtt-dice.js';
 import { _vttPanelError } from './vtt-utils.js';
-import { resolveControlledTokenId } from './vtt-token-control.js';
+import { controlledCharacterTokens, invocableCharacterTokens, resolveControlledTokenId } from './vtt-token-control.js';
 import {
   _canControlToken, _npcCombat, _tokenStatMod, _manualBuffVal, _signed,
   CONDITION_BY_ID, _resolveUidName, _getCombatMoveOrigin,
@@ -90,12 +90,19 @@ function _defaultInspectorToken(t) {
   if (STATE.isAdmin) return null;              // MJ : panneau piloté par la sélection
   const uid = STATE.user?.uid; if (!uid) return null;
   const pageId = VS.activePage?.id;
-  const mine = Object.values(VS.tokens).map(e => e?.data || e)
-    .filter(x => x && x.ownerId === uid && (!pageId || x.pageId === pageId));
-  return mine[0] || null;
+  const controlled = controlledCharacterTokens(VS.tokens, token => _canControlToken(token, uid));
+  const onPage = pageId ? controlled.filter(token => token.pageId === pageId) : [];
+  const candidates = onPage.length ? onPage : controlled;
+  return candidates.find(token => {
+    const character = VS.characters[token.characterId];
+    return character?.uid === uid && character?.isDefault;
+  }) || candidates.find(token => VS.characters[token.characterId]?.uid === uid)
+    || candidates.find(token => VS.characters[token.characterId]?.isDefault)
+    || candidates[0] || null;
 }
 export function _renderInspector(t) {
-  try { return _renderInspectorImpl(t); }
+  const resolved = t ?? (!STATE.isAdmin && !VS.selected ? _defaultInspectorToken(null) : t);
+  try { return _renderInspectorImpl(resolved); }
   catch (e) { _vttPanelError('Inspecteur', e, 'vtt-inspector'); }
 }
 export function _renderInspectorImpl(t) {
@@ -127,7 +134,12 @@ export function _renderInspectorImpl(t) {
   }
   if (!t) {
     delete el.dataset.tokenId;
-    const invokeBtn = !STATE.isAdmin
+    const canInvoke = !STATE.isAdmin && invocableCharacterTokens(
+      VS.tokens,
+      VS.activePage?.id,
+      token => _canControlToken(token),
+    ).length > 0;
+    const invokeBtn = canInvoke
       ? `<button type="button" class="vtt-ins-action-main" data-vtt-fn="_vttInvokeMyToken" title="Placer ton personnage sur la carte"><span>🧑</span><b>Invoquer mon token</b></button>`
       : '';
     el.innerHTML = `<div class="vtt-ins-empty"><div style="font-size:1.8rem">🎲</div><div>Sélectionne un token${!STATE.isAdmin ? ' ou invoque ton personnage' : ''}</div>${invokeBtn}</div>`;

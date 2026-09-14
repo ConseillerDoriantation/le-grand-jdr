@@ -16,6 +16,7 @@ import { promptModal } from '../../shared/modal.js';
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
 import { favoriteFirst } from '../../shared/char-stats.js';
+import { canControlCharacter } from '../../shared/character-state.js';
 import { useGold } from '../../shared/economy.js';
 import { _chrRef } from './vtt-refs.js';   // ref Firestore perso (leaf)
 import { _shortRestPresentUids, _shortRestPresentNames } from './vtt-rest.js'; // quorum présence (réutilisé)
@@ -101,7 +102,7 @@ function _renderLootPanel() {
   }
 
   const uid = STATE.user?.uid;
-  const myChars = favoriteFirst(Object.values(VS.characters).filter(c => c.uid === uid));
+  const myChars = favoriteFirst(Object.values(VS.characters).filter(c => canControlCharacter(c, uid)));
   const _itemRow = (item, zone) => {
     const isGold = item.kind === 'gold';
     const rarColor = { commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff', tres_rare:'#b47fff', legendaire:'#f59e0b' }[item.rarete] || '#9ca3af';
@@ -387,7 +388,7 @@ function _vttLootToggleTake(id) {
   const item = _loot.loot.find(i => i.id === id);
   if (!item) return;
   const uid = STATE.user?.uid;
-  const myChars = favoriteFirst(Object.values(VS.characters).filter(c => c.uid === uid));
+  const myChars = favoriteFirst(Object.values(VS.characters).filter(c => canControlCharacter(c, uid)));
   if (!myChars.length) { showNotif('Aucun personnage trouvé', 'error'); return; }
 
   _lootTakeState[id] = { qty: _lootCount(item), charId: myChars[0].id };
@@ -401,7 +402,7 @@ function _renderLootTake(id) {
   const st = _lootTakeState[id];
   if (!el || !item || !st) return;
   const uid = STATE.user?.uid;
-  const myChars = favoriteFirst(Object.values(VS.characters).filter(c => c.uid === uid));
+  const myChars = favoriteFirst(Object.values(VS.characters).filter(c => canControlCharacter(c, uid)));
   const isGold = item.kind === 'gold';
   const max = _lootCount(item);
   st.qty = Math.max(1, Math.min(max, st.qty || 1));
@@ -535,7 +536,7 @@ function _clearItemClaims(itemId) {
 function _myLootChars() {
   const uid = STATE.user?.uid;
   // Favori en tête → présélectionné d'office dans les demandes de butin.
-  return favoriteFirst(Object.values(VS.characters).filter(c => c.uid === uid));
+  return favoriteFirst(Object.values(VS.characters).filter(c => canControlCharacter(c, uid)));
 }
 
 // ── MJ : ouvrir / fermer une répartition ────────────────────────────

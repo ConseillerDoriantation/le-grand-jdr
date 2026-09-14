@@ -526,12 +526,12 @@ export function getDefaultCharForUser(chars = [], uid = '') {
 }
 
 /**
- * Filtre et trie les personnages appartenant à un joueur donné.
- * Remplace le pattern répété : sortCharactersForDisplay(chars.filter(c => c.uid === uid))
+ * Filtre et trie les personnages qu'un joueur possède ou contrôle par délégation.
  */
 export function getMyCharacters(chars = [], uid = '') {
   if (!uid) return [];
-  return sortCharactersForDisplay((chars || []).filter(c => c?.uid === uid));
+  return sortCharactersForDisplay((chars || []).filter(c => c?.uid === uid
+    || (Array.isArray(c?.controlDelegates) && c.controlDelegates.includes(uid))));
 }
 
 /**

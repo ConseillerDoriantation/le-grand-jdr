@@ -26,8 +26,9 @@ import { fogRenderWalls, fogUpdateSoon } from './vtt-fog.js';
 import { _renderCombatTracker } from './vtt-combat-tracker.js';
 import { _renderMjRulerRemote } from './vtt-ruler.js';
 import { _renderLibSection } from './vtt-maplib.js';
-import { _MAP_IMG_DEPS, _renderAllTokens, _renderAnnotLayer, _clearHL, _deselect } from './vtt.js';
+import { _MAP_IMG_DEPS, _renderAllTokens, _renderAnnotLayer, _clearHL, _deselect, _canControlToken } from './vtt.js';
 import { isTemporarySummonToken, reserveSummonTokens } from './vtt-summon-utils.js';
+import { controlledCharacterTokens, invocableCharacterTokens } from './vtt-token-control.js';
 
 let _trayFilter       = 'all'; // filtre actif : 'all'|'player'|'npc'|'enemy'
 let _traySearch       = '';    // filtre texte appliqué à la réserve
@@ -730,15 +731,15 @@ export function _renderPageTabs() {
   // Tous les persos du joueur (un token par personnage) → on raisonne sur
   // l'ensemble, pas le premier : un joueur multi-persos peut avoir un perso sur
   // la carte ET un autre en réserve → les deux boutons coexistent.
-  const myToks = uid ? Object.values(VS.tokens).filter(e => e.data?.ownerId === uid).map(e => e.data) : [];
+  const myToks = uid ? controlledCharacterTokens(VS.tokens, token => _canControlToken(token, uid)) : [];
   const multi = myToks.length > 1;
   // Personnages déjà présents sur la scène (placés par le MJ ou soi) : on n'offre
   // pas de les ré-invoquer, sinon un doublon si un 2ᵉ token du perso traîne en réserve.
-  const onPageChars = new Set(Object.values(VS.tokens)
-    .filter(e => e.data?.pageId === VS.activePage?.id && e.data?.characterId)
-    .map(e => e.data.characterId));
-  const canInvoke = !!(VS.activePage && myToks.some(t =>
-    t.pageId !== VS.activePage.id && !(t.characterId && onPageChars.has(t.characterId))));
+  const canInvoke = !!(VS.activePage && invocableCharacterTokens(
+    VS.tokens,
+    VS.activePage.id,
+    token => _canControlToken(token, uid),
+  ).length);
   const canRetire = !!(VS.activePage && myToks.some(t => t.pageId === VS.activePage.id));
   const invokeLbl = multi ? '🧑 Invoquer un perso' : '🧑 Invoquer mon token';
   const retireLbl = multi ? '📦 Ranger un perso'   : '📦 Ranger mon token';

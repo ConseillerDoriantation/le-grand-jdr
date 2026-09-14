@@ -19,6 +19,7 @@ import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
 import { getRouteSub } from '../shared/route.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
+import { canControlCharacter, getControlledCharacters } from '../shared/character-state.js';
 import { dedupeQuestParticipants, questParticipantFromChar, toggleQuestParticipant } from '../shared/participants.js';
 import { BASTION_WALL_TYPES, bastionWallReactionCounts, bastionWallSeenKey, bastionWallUnreadCount, sortBastionWallPosts } from '../shared/bastion-wall.js';
 
@@ -2224,9 +2225,11 @@ const PAGES = {
       // et de perdre son état à chacun de ces rafraîchissements indépendants.
       const preservedSessionCenter = document.getElementById('dashboard-session-center');
 
-      // chars = mes persos ; allPartyChars = les autres (bloc groupe côté joueur)
-      const chars         = uid ? allChars.filter(c => c.uid === uid) : allChars;
-      const allPartyChars = uid ? allChars.filter(c => c.uid !== uid) : [];
+      // Les personnages délégués sont utilisables comme les personnages du
+      // compte et ne doivent pas réapparaître dans le bloc « autres membres ».
+      const chars = uid ? getControlledCharacters(allChars, uid) : allChars;
+      const controlledIds = new Set(chars.map(c => c.id));
+      const allPartyChars = uid ? allChars.filter(c => !controlledIds.has(c.id)) : [];
       // Les hauts-faits secrets restent invisibles aux joueurs partout
       const achievements = STATE.isAdmin ? achievementsRaw : achievementsRaw.filter(a => !a.secret);
       // STATE.characters est le cache global de l'aventure. Les vues filtrent
@@ -2639,7 +2642,7 @@ const PAGES = {
         </div>
         ${members.length > 0 ? members.map(c => {
           const av = characterPortraitContent(c, { fallbackTag: 'span' });
-          const isOwn = STATE.isAdmin || c.uid === STATE.user?.uid;
+          const isOwn = canControlCharacter(c);
           return `
           <div class="dv2-party-member" data-action="_openQuickView" data-id="${c.id}"
             title="Cliquer pour aperçu rapide">
@@ -3385,7 +3388,7 @@ const PAGES = {
     const uid      = STATE.user.uid;
     const allChars = sortCharactersForDisplay(await loadChars());
     STATE.characters = allChars;
-    const chars = STATE.isAdmin ? allChars : allChars.filter(c => c.uid === uid);
+    const chars = getControlledCharacters(allChars, uid);
     const content = document.getElementById('main-content');
     // V3 : le bandeau collant de la fiche (characters.js → .cs-top) porte le
     // titre, le sélecteur de personnage et le filtre par compte. Ici, quand des
@@ -3424,13 +3427,13 @@ const PAGES = {
     let previousChars = chars;
     watch("characters-live", "characters", data => {
       if (STATE.currentPage !== "characters") return;
-      const nextChars = sortCharactersForDisplay(STATE.isAdmin ? (data || []) : (data || []).filter(c => c.uid === STATE.user.uid));
+      const allNextChars = sortCharactersForDisplay(data || []);
+      const nextChars = getControlledCharacters(allNextChars, STATE.user.uid);
       const activeId = charSession.getCurrentChar()?.id || STATE.activeChar?.id;
       const previousActive = previousChars.find(c => c.id === activeId);
       const nextActive = nextChars.find(c => c.id === activeId);
-      STATE.characters = nextChars;
+      STATE.characters = allNextChars;
       for (const c of nextChars) {
-        if (c.uid !== STATE.user?.uid) continue;
         const previousInv = previousChars.find(old => old.id === c.id)?.inventaire || [];
         const currentInv = c.inventaire || [];
         if (currentInv.length <= previousInv.length) continue;
@@ -3438,7 +3441,16 @@ const PAGES = {
         showNotif("📦 Inventaire de " + (c.nom || "votre personnage") + " mis à jour : " + labels, "success");
       }
       previousChars = nextChars;
-      if (!nextActive) return;
+      if (!nextActive) {
+        const fallback = getDefaultCharForUser(nextChars, STATE.user?.uid) || nextChars[0];
+        if (fallback) {
+          STATE.activeChar = fallback;
+          renderCharSheet(fallback);
+        } else {
+          void PAGES.characters();
+        }
+        return;
+      }
       STATE.activeChar = nextActive;
       const inventoryChanged = JSON.stringify(previousActive?.inventaire || []) !== JSON.stringify(nextActive.inventaire || []);
       if (inventoryChanged && charSession.getCurrentCharTab() === "inv") {

@@ -16,7 +16,7 @@ import { openModal, closeModal } from '../../shared/modal.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _esc } from '../../shared/html.js';
 import { buildRaretePicker, loadRarities } from '../../shared/rarity.js';
-import { getCharacterById } from '../../shared/character-state.js';
+import { canControlCharacter, getCharacterById } from '../../shared/character-state.js';
 import { loadEquipmentSlots, getEquipmentItemOptions } from '../../shared/equipment-slots.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
 import { loadArmorSetSettings, getArmorTypeOptions } from '../../shared/armor-set-settings.js';
@@ -403,7 +403,7 @@ export async function openCreateItemModal(charId, options = {}) {
   // la dernière fiche rendue et vaut `false` tant qu'aucune fiche n'a été rendue
   // par le chemin habituel (démarrage direct sur la page, mini-fiche VTT, fiche
   // supprimée…) → le bouton s'affichait mais la forge refusait, sans rien ouvrir.
-  const canEdit = STATE.isAdmin || c.uid === STATE.user?.uid;
+  const canEdit = canControlCharacter(c);
   if (!canEdit) { showNotif('Tu ne peux pas modifier ce personnage.', 'error'); return; }
 
   _ensureForgeActions();

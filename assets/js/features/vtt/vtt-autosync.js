@@ -113,6 +113,7 @@ export async function _syncAutoTokens() {
       detId: `auto_c_${c.id}`,
       name: c.nom || 'Personnage', type: 'player',
       characterId: c.id, npcId: null, beastId: null, ownerId: c.uid || null,
+      controlDelegates: Array.isArray(c.controlDelegates) ? c.controlDelegates : [],
     });
   }
   for (const n of Object.values(VS.npcs)) {
