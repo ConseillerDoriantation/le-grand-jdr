@@ -2646,7 +2646,7 @@ function _renderCoffre(b) {
 
   // Comptes par catégorie (utiles pour les pills)
   const counts = { all: coffre.length, armes:0, armures:0, potions:0, scrolls:0, bijoux:0, ressources:0, autre:0, mine:0 };
-  const myCharNoms = new Set((STATE.characters || []).filter(c => c.uid === STATE.user?.uid).map(c => c.nom));
+  const myCharNoms = new Set(getVisibleCharacters().map(c => c.nom));
   coffre.forEach(it => {
     counts[_coffreItemCategory(it)]++;
     if (it.source && myCharNoms.size && [...myCharNoms].some(n => (it.source || '').includes(n))) counts.mine++;
@@ -2916,10 +2916,7 @@ function _annonceTimeAgo(ts) {
 }
 
 function _wallCharacters() {
-  const uid = STATE.user?.uid;
-  return (STATE.characters || getVisibleCharacters() || [])
-    .filter(char => char?.uid === uid)
-    .sort((a, b) => String(a.nom || '').localeCompare(String(b.nom || ''), 'fr'));
+  return getVisibleCharacters({ sorted: true });
 }
 
 function _wallEnsureCharacter() {

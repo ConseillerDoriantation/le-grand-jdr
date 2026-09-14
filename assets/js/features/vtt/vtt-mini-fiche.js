@@ -37,6 +37,7 @@ import {
   equipmentSlotAcceptsItem, getEquipmentSlot, getEquipmentSlots,
   getPrimaryWeaponSlotId,
 } from '../../shared/equipment-slots.js';
+import { canControlCharacter } from '../../shared/character-state.js';
 
 let _miniTab = 'combat'; // onglet actif de la mini-fiche (état local)
 
@@ -137,25 +138,26 @@ function _msBuildEquipItem(slot, item, invIndex) {
     slotArmure: item.slotArmure||'', slotBijou: item.slotBijou||'' };
 }
 
-function _msCanEdit(uid) { return STATE.isAdmin || STATE.user?.uid === uid; }
+function _msCanEdit(uid, charId = VS.miniCharId) {
+  if (STATE.isAdmin || STATE.user?.uid === uid) return true;
+  return !!charId && canControlCharacter(VS.characters[charId], STATE.user?.uid);
+}
 
 // Sécurité — droit d'OUVRIR/VOIR une mini-feuille (contenu privé : équipement,
 // sac, or, notes…). Un joueur ne peut voir que la sienne, ou celle d'un
 // personnage qu'il contrôle réellement via un token possédé/délégué. Le MJ, tout.
 // Empêche de consulter la fiche d'un autre joueur depuis la présence ou un token.
 function _msCanView(uid, charId = null) {
-  if (STATE.isAdmin || STATE.user?.uid === uid) return true;
-  if (charId) return !!resolveCharacterControlToken(charId, VS.tokens, STATE.user?.uid);
+  if (_msCanEdit(uid, charId)) return true;
+  if (charId) return !!resolveCharacterControlToken(charId, VS.tokens, STATE.user?.uid, VS.characters);
   return false;
 }
 
-// La délégation VTT donne accès aux ressources de combat, pas au contenu privé
-// de la fiche (équipement, inventaire, notes…). On garde donc _msCanEdit pour
-// les onglets complets et on ouvre uniquement les jauges PV/PM si un token lié
-// au personnage est réellement contrôlé par le joueur courant.
+// La délégation donne accès à la fiche complète. Le fallback token conserve la
+// compatibilité avec une ancienne délégation pas encore migrée sur le personnage.
 function _msCanEditVitals(charId, uid) {
-  if (_msCanEdit(uid)) return true;
-  return !!resolveCharacterControlToken(charId, VS.tokens, STATE.user?.uid);
+  if (_msCanEdit(uid, charId)) return true;
+  return !!resolveCharacterControlToken(charId, VS.tokens, STATE.user?.uid, VS.characters);
 }
 
 // Reproduit STRICTEMENT la logique de characters/equipment.js (editEquipSlot)
@@ -1467,7 +1469,8 @@ function _renderMiniSheetImpl(uid) {
     || 'Joueur hors ligne';
 
   // Favori en tête → sélection d'office du perso favori si aucun choix explicite.
-  const chars = favoriteFirst(Object.values(VS.characters).filter(c => c.uid === uid));
+  const chars = favoriteFirst(Object.values(VS.characters).filter(c => c.uid === uid
+    && (STATE.isAdmin || uid === STATE.user?.uid || canControlCharacter(c))));
   if (!chars.length) {
     panel.classList.add('open');
     panel.innerHTML = `<div class="vtt-ms-empty">Aucun personnage lié pour ${_esc(playerLabel)}.</div>`;
@@ -1486,7 +1489,7 @@ function _renderMiniSheetImpl(uid) {
     _syncMiniSheetLaunchers();
     return;
   }
-  const canEdit = _msCanEdit(uid);
+  const canEdit = _msCanEdit(uid, c?.id);
   const canEditVitals = _msCanEditVitals(c?.id, uid);
 
   const img      = c?.photoURL || c?.photo || c?.avatar || null;

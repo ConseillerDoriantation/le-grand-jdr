@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  controlledCharacterTokens,
+  invocableCharacterTokens,
   resolveCharacterControlToken,
   resolveControlledTokenId,
 } from '../assets/js/features/vtt/vtt-token-control.js';
@@ -43,4 +45,31 @@ test('la délégation ne donne aucun accès aux ressources d’un autre personna
   };
   assert.equal(resolveCharacterControlToken('char-other', { delegated }, 'player'), null);
   assert.equal(resolveCharacterControlToken('char-owner', { delegated }, 'stranger'), null);
+});
+
+test('la délégation canonique du personnage contrôle aussi un ancien token non migré', () => {
+  const token = { data: { id: 'legacy', characterId: 'char-owner', ownerId: 'owner' } };
+  const characters = { 'char-owner': { id: 'char-owner', controlDelegates: ['player'] } };
+  assert.equal(resolveCharacterControlToken('char-owner', { token }, 'player', characters)?.id, 'legacy');
+});
+
+test('le personnage reste identifiable même lorsque son token est en réserve', () => {
+  const tokens = {
+    reserve: { data: { id: 'reserve', characterId: 'char-a', ownerId: 'player', pageId: null } },
+    summon: { data: { id: 'summon', summonOwnerId: 'reserve', ownerId: 'player', pageId: null } },
+  };
+  const controlled = controlledCharacterTokens(tokens, token => token.ownerId === 'player');
+  assert.deepEqual(controlled.map(token => token.id), ['reserve']);
+});
+
+test('invoquer est proposé seulement si le personnage est absent de la scène', () => {
+  const canControl = token => token.ownerId === 'player';
+  const absent = { reserve: { data: { id: 'reserve', characterId: 'char-a', ownerId: 'player', pageId: null } } };
+  assert.deepEqual(invocableCharacterTokens(absent, 'page-a', canControl).map(token => token.id), ['reserve']);
+
+  const duplicate = {
+    onPage: { data: { id: 'on-page', characterId: 'char-a', ownerId: 'player', pageId: 'page-a' } },
+    reserve: absent.reserve,
+  };
+  assert.deepEqual(invocableCharacterTokens(duplicate, 'page-a', canControl), []);
 });

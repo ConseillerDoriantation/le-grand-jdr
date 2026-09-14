@@ -16,6 +16,7 @@ import { spellVM } from './spells-calc.js';
 import { getDashboardPartyChars } from '../../shared/dashboard-session.js';
 import { setTargetCharacter } from '../../shared/character-navigation.js';
 import { getEquipmentSlots, getPrimaryWeaponSlotId } from '../../shared/equipment-slots.js';
+import { canControlCharacter } from '../../shared/character-state.js';
 
 // Cherche le perso dans plusieurs sources : ses propres persos, le cache du
 // groupe (rempli par le dashboard) — permet de quick-view les autres joueurs
@@ -129,7 +130,7 @@ function _maitrisesBlock(c) {
 export function quickViewChar(id) {
   const c = _findChar(id);
   if (!c) return;
-  const isOwn = STATE.isAdmin || c.uid === STATE.user?.uid;
+  const isOwn = canControlCharacter(c);
   const pvMax = calcPVMax(c), pmMax = calcPMMax(c);
   const pv = c.pvActuel ?? pvMax;
   const pm = c.pmActuel ?? pmMax;
