@@ -299,6 +299,17 @@
   color: #cfa8ff;
   font-weight: 700;
 }
+.qv-spell.is-always { border-color: rgba(167,139,250,.5); }
+.qv-spell-free {
+  display: inline-grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: rgba(167,139,250,.2);
+  color: #ddd3ff;
+  font-weight: 800;
+}
 [data-theme="light"] .qv-spell {
   background: rgba(124,58,237,0.08);
   border-color: rgba(124,58,237,0.30);
