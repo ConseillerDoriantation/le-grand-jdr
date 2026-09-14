@@ -117,6 +117,7 @@ export async function _vttRollSkill(skillName, stat) {
   if (!t || !_canControlToken(t)) return; // joueur ne peut lancer que son propre token (ou ceux délégués)
   const c = t?.characterId ? VS.characters[t.characterId] : null;
   const n = t?.npcId ? VS.npcs[t.npcId] : null;
+  const b = t?.beastId ? VS.bestiary[t.beastId] : null; // créature du bestiaire
   const statKey = _STAT_KEY[stat] || '';
   const mod = _tokenStatMod(t, statKey);
   // Bonus de compétence depuis les items équipés (pour les PJ)
@@ -147,8 +148,11 @@ export async function _vttRollSkill(skillName, stat) {
   const total   = roll + mod + VS.rollBonus + equipSkillBonus + skillProfBonus;
   const isCrit  = roll === 20, isFumble = roll === 1;
   const authorName    = STATE.profile?.pseudo || STATE.profile?.prenom || 'Joueur';
-  const characterName = c?.nom || n?.nom || t?.name || null;
-  const characterImage = c?.photoURL || c?.photo || c?.avatar || n?.photoURL || n?.photo || n?.avatar || n?.imageUrl || null;
+  const characterName = c?.nom || n?.nom || b?.nom || t?.name || null;
+  const characterImage = c?.photoURL || c?.photo || c?.avatar
+    || n?.photoURL || n?.photo || n?.avatar || n?.imageUrl
+    || b?.photoURL || b?.photo || b?.avatar || b?.imageUrl
+    || t?.imageUrl || null;
   const gmOnly = STATE.isAdmin && VS.rollHidden;
   try {
     // Jet caché → sous-collection MJ (secret serveur) ; sinon log public.

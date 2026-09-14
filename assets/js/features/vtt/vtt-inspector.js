@@ -768,28 +768,42 @@ export function _vttSkillFilterClear() {
 // dés libres seuls). Les « Actions de combat » (Courir) et « Actions de la créature »
 // NE sont plus ici : elles vivent dans la modale « Action tactique ».
 export function _vttBuildJetsBody(tArg) {
-  // Sans token explicite : on prend le token contrôlé de la scène (propriétaire ou
-  // délégation), pas seulement la sélection — le joueur lance ses compétences sans
-  // avoir à cliquer son pion.
   let t = tArg;
   if (!t) {
     const uid = STATE.user?.uid;
-    const id = resolveControlledTokenId(
-      VS.selected, VS.tokens, VS.activePage?.id || null,
-      tok => _canControlToken(tok, uid),
-    );
-    t = id ? (VS.tokens[id]?.data ?? null) : null;
+    if (STATE.isAdmin) {
+      // MJ : on ne s'accroche PAS à un token arbitraire (il les contrôle tous).
+      // Seul un token EXPLICITEMENT sélectionné porte ses compétences ; sinon →
+      // dés libres seuls (le MJ peut lancer sans pion sélectionné).
+      const sel = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : null;
+      const onPage = sel && (!VS.activePage?.id || sel.pageId === VS.activePage.id);
+      t = (onPage && _canControlToken(sel, uid)) ? sel : null;
+    } else {
+      // Joueur : token contrôlé de la scène (propriétaire ou délégation) sans avoir
+      // à cliquer son pion — il n'en possède qu'un.
+      const id = resolveControlledTokenId(
+        VS.selected, VS.tokens, VS.activePage?.id || null,
+        tok => _canControlToken(tok, uid),
+      );
+      t = id ? (VS.tokens[id]?.data ?? null) : null;
+    }
   }
   if (!t) return { hasSkills: false };
 
-  const canRoll = (t.type === 'player' || t.type === 'npc') && VS.diceSkills.length && _canControlToken(t);
+  // Jets ouverts à tout token porteur de stats (joueur, PNJ, créature du bestiaire)
+  // dès qu'on le contrôle. _tokenStatMod sait lire characterId/npcId/beastId ; le
+  // contrôle (_canControlToken) empêche un joueur de lancer pour un ennemi, le MJ
+  // les contrôle tous. Les dessins/zones (sans source de stats) restent exclus.
+  const hasStatSource = !!(t.characterId || t.npcId || t.beastId);
+  const canRoll = hasStatSource && VS.diceSkills.length && _canControlToken(t);
   if (!canRoll) return { hasSkills: false };
 
   const ld = _live(t);
   const name = ld?.displayName ?? t.name ?? 'Token';
   const cForBonus = t?.characterId ? VS.characters[t.characterId] : null;
-  // Portrait : image du token si posée (override), sinon photo de la fiche de perso.
-  const avatar = t.imageUrl || cForBonus?.photoURL || cForBonus?.photo || cForBonus?.avatar || null;
+  // Portrait : _live(t).displayImage résout déjà la photo pour joueurs, PNJ ET
+  // créatures (fiche liée puis image du token) ; repli sur l'image posée du token.
+  const avatar = ld?.displayImage || t.imageUrl || null;
   const who = { name, initial: String(name || '?').trim().slice(0, 1).toUpperCase() || '?', avatar };
 
   // Tri : par caractéristique associée (FOR, DEX, CON, INT, SAG, CHA) puis alphabétique.
