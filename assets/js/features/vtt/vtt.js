@@ -21,7 +21,7 @@ import { calcCriticalEffectTotal, criticalEffectFormulaLabel } from '../../share
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
 import { openShopPicker, getShopItemById } from '../../shared/shop-picker.js';
-import { getArmorSetData, getMainWeapon, getItemTraits, getEquippedSourceItem, DEFAULT_UNARMED, getCharDamageProfile, getCharFullDamageProfile } from '../../shared/equipment-utils.js';
+import { getArmorSetData, getMainWeapon, getItemTraits, getEquippedSourceItem, resolveEquippedInventoryIndices, DEFAULT_UNARMED, getCharDamageProfile, getCharFullDamageProfile } from '../../shared/equipment-utils.js';
 import { getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { buildProjectionPatch, switchBuild } from '../../shared/character-builds.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
@@ -5150,14 +5150,14 @@ function _buildAttackOptions(t) {
     const sStatKeyI  = mainP2I?.statAttaque || mainP2I?.toucherStat || 'force';
     const spellPmDeltaI = getArmorSetData(c).modifiers.spellPmDelta || 0;
 
-    // Indices d'inventaire actuellement équipés (un slot pointe vers l'objet
-    // via sourceInvIndex). Les actions d'armes/armures ne sont accessibles que
-    // si l'objet est équipé ; les consommables restent utilisables depuis l'inventaire.
-    const equippedInvIdx = new Set(
-      Object.values(c.equipement || {})
-        .filter(e => e && Number.isInteger(e.sourceInvIndex))
-        .map(e => e.sourceInvIndex)
-    );
+    // Indices d'inventaire actuellement équipés. Les actions d'armes/armures ne
+    // sont accessibles que si l'objet est équipé ; les consommables restent
+    // utilisables depuis l'inventaire.
+    // IMPORTANT : on résout par IDENTITÉ (itemId/nom) et non via le sourceInvIndex
+    // stocké — celui-ci devient périmé dès que l'inventaire est réordonné en séance
+    // (ajout d'objet, normalisation « 1 entrée = 1 unité »…). Sinon l'action d'un
+    // objet équipé (ex. « Lancer de dagues ») disparaît brutalement en cours de partie.
+    const equippedInvIdx = new Set(resolveEquippedInventoryIndices(c).values());
 
     c.inventaire.forEach((item, invIdx) => {
       const acts = Array.isArray(item?.actions) ? item.actions : [];
@@ -6246,36 +6246,12 @@ function _vttAoptCheckEmpty(root = document) {
   empty.hidden = anyVisible;
 }
 
-function _vttAttackModeControlsHtml(comment = 'Sélecteur de mode') {
-  return `
-    <!-- ${comment} -->
-    <div class="vtt-atk-mode">
-      <div class="vtt-atk-mode-label">Mode de lancer</div>
-      <div class="vtt-atk-mode-toggle" role="group" aria-label="Mode de lancer">
-        <button id="atk-mode-dis" class="vtt-atk-mode-btn is-dis" data-vtt-fn="_vttSetMode" data-vtt-args="dis" aria-pressed="false">
-          <span class="vtt-atk-mode-icon">−</span>
-          <span class="vtt-atk-mode-copy">
-            <strong>Désavantage</strong>
-            <small>Garde le plus bas</small>
-          </span>
-        </button>
-        <button id="atk-mode-normal" class="vtt-atk-mode-btn is-normal is-active" data-vtt-fn="_vttSetMode" data-vtt-args="normal" aria-pressed="true">
-          <span class="vtt-atk-mode-icon">•</span>
-          <span class="vtt-atk-mode-copy">
-            <strong>Normal</strong>
-            <small>1d20</small>
-          </span>
-        </button>
-        <button id="atk-mode-adv" class="vtt-atk-mode-btn is-adv" data-vtt-fn="_vttSetMode" data-vtt-args="adv" aria-pressed="false">
-          <span class="vtt-atk-mode-icon">+</span>
-          <span class="vtt-atk-mode-copy">
-            <strong>Avantage</strong>
-            <small>Garde le plus haut</small>
-          </span>
-        </button>
-      </div>
-    </div>
-  `;
+// Mode de lancer : 3 pastilles inline (− • +) posées sur la ligne de toucher.
+// Ids atk-mode-dis/-normal/-adv conservés (bascule is-active/aria-pressed par _vttSetMode).
+function _vttAttackModeControlsHtml() {
+  const b = (m, sym, title) =>
+    `<button type="button" id="atk-mode-${m}" class="vtt-atk-mode-btn${m === 'normal' ? ' is-active' : ''}" data-m="${m}" data-vtt-fn="_vttSetMode" data-vtt-args="${m}" aria-pressed="${m === 'normal'}" title="${title}">${sym}</button>`;
+  return `<span class="vtt-atk-mode" role="group" aria-label="Mode de lancer">${b('dis', '−', 'Désavantage — garde le plus bas')}${b('normal', '•', 'Normal — 1d20')}${b('adv', '+', 'Avantage — garde le plus haut')}</span>`;
 }
 // Aperçu d'interaction élémentaire (immunité/résistance/faiblesse) — recalculable
 // quand on change l'élément directement dans la modale d'attaque.
@@ -6297,18 +6273,12 @@ function _atkInteractionHtml(opt) {
   const entries = Object.entries(buckets);
   if (!entries.length) return '';
   const isMulti = tids.length > 1;
-  const badges = entries.map(([label, n]) => {
-    const meta = DAMAGE_INTERACTIONS[label] || { icon: 'ℹ️', color: 'var(--text-dim)', short: '' };
-    return `<span style="display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;font-weight:700;
-              color:${meta.color};background:${meta.color}1a;border:1px solid ${meta.color}55;
-              padding:.18rem .45rem;border-radius:999px">
-              ${meta.icon} ${_esc(label)}${isMulti ? ` ×${n}` : ''}
-              <span style="font-size:.6rem;font-weight:400;opacity:.8">${meta.short}</span>
-            </span>`;
-  }).join(' ');
-  return `<div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;font-size:.65rem;color:var(--text-dim);padding:.3rem .1rem 0">
-    <span>🎯 Cible :</span>${badges}
-  </div>`;
+  // Puces d'interaction (couleur = type d'interaction, pilotée par les données —
+  // pas une couleur inventée) intégrées à la bande de notes.
+  return entries.map(([label, n]) => {
+    const meta = DAMAGE_INTERACTIONS[label] || { icon: 'ℹ️', color: 'var(--text-muted)', short: '' };
+    return `<span class="vtt-atk-note" style="color:${meta.color};border-color:color-mix(in srgb,${meta.color} 45%,transparent);background:color-mix(in srgb,${meta.color} 12%,transparent)">🎯 ${meta.icon} ${_esc(label)}${isMulti ? ` ×${n}` : ''}${meta.short ? ` · ${meta.short}` : ''}</span>`;
+  }).join('');
 }
 
 // « Dégâts sur un raté » (½ / complets) : la résolution commune tient compte de
@@ -6322,12 +6292,10 @@ function _effectiveMissEffect(opt) {
 function _atkMissNoteHtml(opt) {
   const me = _effectiveMissEffect(opt);
   if (me === 'full') {
-    return `<div style="display:flex;align-items:center;gap:.3rem;font-size:.65rem;color:#f97316;padding:.25rem .1rem 0">
-      <span>✦</span><span>Dégâts complets même en cas d'échec</span></div>`;
+    return `<span class="vtt-atk-note weak">✦ Dégâts complets même en cas d'échec</span>`;
   }
   if (me === 'half' || opt?.pmCost > 0) {
-    return `<div style="display:flex;align-items:center;gap:.3rem;font-size:.65rem;color:#b47fff;padding:.25rem .1rem 0">
-      <span>✦</span><span>½ dégâts garantis même en cas d'échec${me !== 'half' && opt?.pmCost > 0 ? ' (mana consommé)' : ''}</span></div>`;
+    return `<span class="vtt-atk-note free">✦ ½ dégâts garantis même en cas d'échec${me !== 'half' && opt?.pmCost > 0 ? ' (mana consommé)' : ''}</span>`;
   }
   return '';
 }
@@ -6366,28 +6334,21 @@ function _weaponTechniqueEffectParts(technique) {
 function _vttWeaponTechniquesHtml(opt) {
   const techniques = Array.isArray(opt?.weaponTechniques) ? opt.weaponTechniques.filter(t => t?.label) : [];
   if (!techniques.length) return '';
+  // Rangée de pastilles (statut lu sur la pastille active). Les ids atk-technique-icon
+  // / atk-technique-status restent dans le DOM (cachés) : _vttSetWeaponTechnique les
+  // écrit toujours, et il bascule .vtt-atk-technique-choice.is-active (classe conservée).
   return `
-    <section class="vtt-atk-techniques">
-      <div class="vtt-atk-technique-heading">
-        <span class="vtt-atk-technique-lead-icon" id="atk-technique-icon">⚔️</span>
-        <span class="vtt-atk-technique-heading-copy">
-          <small>Technique d'arme <b>optionnelle</b></small>
-          <strong id="atk-technique-status">Attaque normale</strong>
-        </span>
-      </div>
-      <div class="vtt-atk-technique-choices" role="group" aria-label="Technique d'arme optionnelle">
-        ${techniques.map(t => {
-          const detail = [t.description, ..._weaponTechniqueEffectParts(t)].filter(Boolean).join(' · ');
-          return `<button type="button" class="vtt-atk-technique-choice" data-technique-id="${_esc(t.id)}"
-            data-vtt-fn="_vttSetWeaponTechnique" data-vtt-args="${_esc(t.id)}" aria-pressed="false"
-            title="${_esc(detail || t.label)}">
-            <span class="vtt-atk-technique-choice-icon">${_esc(t.icon || '🎯')}</span>
-            <span class="vtt-atk-technique-choice-label">${_esc(t.label)}</span>
-            <span class="vtt-atk-technique-choice-check">✓</span>
-          </button>`;
-        }).join('')}
-      </div>
-    </section>`;
+    <div class="vtt-atk-optrow vtt-atk-techniques" role="group" aria-label="Technique d'arme optionnelle">
+      <b>Technique</b>
+      ${techniques.map(t => {
+        const detail = [t.description, ..._weaponTechniqueEffectParts(t)].filter(Boolean).join(' · ');
+        return `<button type="button" class="vtt-atk-pick vtt-atk-technique-choice" style="--ec:var(--amber)" data-technique-id="${_esc(t.id)}"
+          data-vtt-fn="_vttSetWeaponTechnique" data-vtt-args="${_esc(t.id)}" aria-pressed="false"
+          title="${_esc(detail || t.label)}">${_esc(t.icon || '🎯')} ${_esc(t.label)}</button>`;
+      }).join('')}
+      <em>optionnelle</em>
+      <span id="atk-technique-icon" hidden>⚔️</span><span id="atk-technique-status" hidden>Attaque normale</span>
+    </div>`;
 }
 
 function _vttSetWeaponTechnique(techniqueId) {
@@ -6486,13 +6447,16 @@ function _vttPickOpt(srcId, tgtId, idx) {
   // ── Cellule formule : ligne principale "dés +TOTAL" + petite légende du détail ──
   // Évite les longues lignes "1d6 +6 (Int) +2 (Maîtrise)" qui cassaient la mise en
   // forme : le total est regroupé, la provenance passe en sous-ligne discrète.
+  // Rendu façon maquette « table de jet » : formule (dés mono) sur une ligne, la
+  // provenance passe en sous-ligne LISIBLE (--text-muted, pas --text-dim minuscule).
+  // Le calcul (leadHtml, total, parts) reste inchangé — seule la présentation change.
   const _mkCell = (leadHtml, total, parts, totalCol) => {
-    const totStr = total ? ` <span style="font-size:.85rem;font-weight:700;color:${totalCol}">${sn(total)}</span>` : '';
+    const totStr = total ? ` <span class="vtt-atk-mod" style="color:${totalCol}">${sn(total)}</span>` : '';
     const bd = parts.filter(Boolean).join(' · ');
-    return `<div style="display:flex;flex-direction:column;gap:1px;min-width:0">
-      <div style="display:flex;align-items:baseline;gap:.25rem;flex-wrap:wrap">${leadHtml}${totStr}</div>
-      ${bd ? `<div style="font-size:.58rem;color:var(--text-dim);line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${bd}</div>` : ''}
-    </div>`;
+    return `<span class="vtt-atk-cell">
+      <span class="vtt-atk-formula">${leadHtml}${totStr}</span>
+      ${bd ? `<span class="vtt-atk-src">${bd}</span>` : ''}
+    </span>`;
   };
 
   // ── Formule toucher ────────────────────────────────────────────────
@@ -6533,26 +6497,30 @@ function _vttPickOpt(srcId, tgtId, idx) {
   const btnColor   = opt.isHeal ? '#22c38e' : isCastOnly ? '#b47fff' : 'var(--gold,#f59e0b)';
   const btnFg      = opt.isHeal || isCastOnly ? '#fff' : '#1a1a1a';
   const btnLabel   = opt.isMana ? '💙 Régénérer !' : opt.isHeal ? '💚 Soigner !' : isCastOnly ? '✨ Activer !' : '🎲 Lancer !';
+  // Champ de tiroir « Ajuster » (label + stepper). Ids INCHANGÉS : _vttRollAttack les
+  // relit par getElementById ; le tiroir reste dans le DOM (masqué en CSS) une fois replié.
   const _bonusInput = (id, label, title, extra = '') => `
-    <label class="vtt-atk-bonus-field" title="${_esc(title)}">
+    <label class="vtt-atk-fld" title="${_esc(title)}">
       <span>${_esc(label)}</span>
-      <span class="vtt-atk-bonus-stepper">
-        <button type="button" data-vtt-fn="_vttAtkBonusStep" data-vtt-args="${id}|-1" data-vtt-blur title="Retirer 1">-</button>
+      <span class="vtt-atk-step">
+        <button type="button" data-vtt-fn="_vttAtkBonusStep" data-vtt-args="${id}|-1" data-vtt-blur title="Retirer 1">−</button>
         <input type="number" id="${id}" value="0" ${extra} data-vtt-fn="_vttRollAttack" data-vtt-on="keydown-enter">
         <button type="button" data-vtt-fn="_vttAtkBonusStep" data-vtt-args="${id}|1" data-vtt-blur title="Ajouter 1">+</button>
       </span>
     </label>`;
-  const _formulaPanel = (tone, icon, title, formulaHtml, controlsHtml, hint = '') => `
-    <div class="vtt-atk-formula-panel ${tone}">
-      <div class="vtt-atk-formula-main">
-        <span class="vtt-atk-formula-icon">${icon}</span>
-        <div class="vtt-atk-formula-copy">
-          <small>${_esc(title)}</small>
-          ${formulaHtml}
-        </div>
-      </div>
-      ${controlsHtml ? `<div class="vtt-atk-bonus-grid">${controlsHtml}</div>` : ''}
-      ${hint ? `<div class="vtt-atk-formula-hint">${hint}</div>` : ''}
+  // Ligne de jet compacte (maquette « table de jet ») : icône · libellé + formule +
+  // provenance · (mode + Ajuster) ; tiroir de steppers replié dessous. `fields` présent
+  // ⇒ ligne ajustable (bouton Ajuster + tiroir). `mode` = pastilles inline (ligne toucher).
+  const _atkRow = ({ c, icon, label, formulaHtml, hint = '', mode = '', fields = '' }) => `
+    <div class="vtt-atk-row" style="--c:${c}" data-atk-row>
+      <span class="vtt-atk-rico">${icon}</span>
+      <span class="vtt-atk-rbody">
+        <span class="vtt-atk-rlbl">${_esc(label)}</span>
+        ${formulaHtml}
+        ${hint ? `<span class="vtt-atk-hint">${hint}</span>` : ''}
+      </span>
+      ${(mode || fields) ? `<span class="vtt-atk-rend">${mode}${fields ? `<button type="button" class="vtt-atk-adjbtn" data-atk-adj aria-expanded="false">Ajuster <s>▾</s></button>` : ''}</span>` : ''}
+      ${fields ? `<div class="vtt-atk-drawer">${fields}<button type="button" class="vtt-atk-reset" data-vtt-fn="_vttAtkBonusReset" data-vtt-blur hidden>Réinitialiser</button></div>` : ''}
     </div>`;
 
   // ── Preview d'interaction (immunité / résistance / faiblesse / absorption) ──
@@ -6567,118 +6535,70 @@ function _vttPickOpt(srcId, tgtId, idx) {
     _elemChoices = (opt.charElements || []).map(id => getDamageTypeById(VS.damageTypes, id)).filter(Boolean);
   }
   const elemSelectorHtml = _elemChoices.length > 1 ? `
-    <div class="vtt-atk-elemrow">
-      <span class="vtt-atk-elemrow-lbl">🔮 Élément</span>
-      <div class="vtt-atk-elems">
-        ${_elemChoices.map(t => `<button type="button" class="vtt-atk-elem ${t.id===opt.damageTypeId?'is-active':''}" style="--ec:${t.color||'#9ca3af'}" data-vtt-fn="_vttAtkSetElement" data-vtt-args="${t.id}" title="${_esc(t.label)}">${t.icon||''} ${_esc(t.label)}</button>`).join('')}
-      </div>
+    <div class="vtt-atk-optrow" role="group" aria-label="Élément">
+      <b>Élément</b>
+      ${_elemChoices.map(t => `<button type="button" class="vtt-atk-pick vtt-atk-elem ${t.id===opt.damageTypeId?'is-active':''}" style="--ec:${t.color||'#9ca3af'}" data-vtt-fn="_vttAtkSetElement" data-vtt-args="${t.id}" title="${_esc(t.label)}">${t.icon||''} ${_esc(t.label)}</button>`).join('')}
     </div>` : '';
 
-  // ── Bloc spécifique Affliction (JS de la cible) ────────────────────
+  // ── Branches sans jet (Affliction / Enchantement) : une ligne d'effet + puces ──
   const _STAT_SH = { force:'For', dexterite:'Dex', constitution:'Con', intelligence:'Int', sagesse:'Sag', charisme:'Cha' };
   const isAffCast = !!opt.isAffliction;
   const isEnchCast = !!opt.isEnchant;
   let utilBlock = '';
+  const utilNotes = [];   // puces fusionnées dans la bande de notes (JS, effet…)
   if (isAffCast) {
     const statLbl = (_STAT_SH[opt.afflictionSaveStat] || opt.afflictionSaveStat || 'Con').toUpperCase();
     const dd = opt.afflictionDD;
-    const effectLbl = opt.afflictionMode === 'etat' && opt.afflictionEtatId
-      ? (() => { const l = CONDITION_BY_ID[opt.afflictionEtatId]; return l ? `${l.icon} ${l.label}` : 'État'; })()
-      : `🩸 DoT ${opt.afflictionDotFormula}/tour`;
-    utilBlock = `
-      <div style="background:var(--bg-elevated);border-radius:10px;padding:.7rem .85rem;margin-bottom:.85rem;
-                  border-left:3px solid #ef4444">
-        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.45rem">
-          <span style="font-size:1.4rem">${opt.icon}</span>
-          <div style="flex:1">
-            <div style="font-size:.85rem;color:var(--text);font-weight:700">Affliction</div>
-            <div style="font-size:.7rem;color:var(--text-dim)">Sur échec du JS : applique l'effet</div>
-          </div>
-        </div>
-        <div style="display:flex;gap:.4rem;flex-wrap:wrap;font-size:.75rem">
-          <span style="background:rgba(239,68,68,.14);color:#fca5a5;padding:.2rem .55rem;border-radius:999px;border:1px solid rgba(239,68,68,.35);font-weight:700">
-            🛡 JS ${statLbl} DD ${dd}
-          </span>
-          <span style="background:rgba(139,92,246,.14);color:#c4b5fd;padding:.2rem .55rem;border-radius:999px;border:1px solid rgba(139,92,246,.35);font-weight:700">
-            ${effectLbl}
-          </span>
-        </div>
-      </div>`;
+    const isEtat = opt.afflictionMode === 'etat' && opt.afflictionEtatId;
+    const etat = isEtat ? CONDITION_BY_ID[opt.afflictionEtatId] : null;
+    const lead = isEtat
+      ? `<code>${etat ? `${etat.icon} ${_esc(etat.label)}` : 'État'}</code>`
+      : `<code>🩸 ${_esc(opt.afflictionDotFormula || '')}</code>`;
+    utilBlock = _atkRow({ c:'var(--crimson)', icon:opt.icon, label:'Sur échec du JS',
+      formulaHtml:_mkCell(lead, 0, isEtat ? [] : ['par tour'], 'var(--crimson)') });
+    utilNotes.push(['save', `🛡 JS ${statLbl} DD ${dd}`]);
+    if (!isEtat) utilNotes.push(['weak', `🩸 DoT ${_esc(opt.afflictionDotFormula || '')}/tour`]);
   } else if (isEnchCast) {
-    const effectLbl = opt.enchantMode === 'etat' && opt.enchantEtatId
-      ? (() => { const l = CONDITION_BY_ID[opt.enchantEtatId]; return l ? `${l.icon} ${l.label}` : 'État'; })()
-      : opt.enchantMode === 'toucher'     ? `🎯 +${opt.mods?.enchantToucher?.bonus ?? '?'} au toucher`
-      : opt.enchantMode === 'deplacement' ? `👢 +${opt.mods?.enchantMove?.bonusCells ?? '?'} déplacement`
-      : `⚔️ +${opt.enchantFormula || '1d4+2'} / arme alliée`;
-    utilBlock = `
-      <div style="background:var(--bg-elevated);border-radius:10px;padding:.7rem .85rem;margin-bottom:.85rem;
-                  border-left:3px solid #e8b84b">
-        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.45rem">
-          <span style="font-size:1.4rem">${opt.icon}</span>
-          <div style="flex:1">
-            <div style="font-size:.85rem;color:var(--text);font-weight:700">Enchantement</div>
-            <div style="font-size:.7rem;color:var(--text-dim)">Buff direct sur l'allié — pas de JS</div>
-          </div>
-        </div>
-        <div style="display:flex;gap:.4rem;flex-wrap:wrap;font-size:.75rem">
-          <span style="background:rgba(232,184,75,.14);color:#fbbf24;padding:.2rem .55rem;border-radius:999px;border:1px solid rgba(232,184,75,.35);font-weight:700">
-            ${effectLbl}
-          </span>
-        </div>
-      </div>`;
+    const isEtat = opt.enchantMode === 'etat' && opt.enchantEtatId;
+    const etat = isEtat ? CONDITION_BY_ID[opt.enchantEtatId] : null;
+    const effectLbl = isEtat ? (etat ? `${etat.icon} ${_esc(etat.label)}` : 'État')
+      : opt.enchantMode === 'toucher'     ? `🎯 +${_esc(String(opt.mods?.enchantToucher?.bonus ?? '?'))} au toucher`
+      : opt.enchantMode === 'deplacement' ? `👢 +${_esc(String(opt.mods?.enchantMove?.bonusCells ?? '?'))} déplacement`
+      : `⚔️ +${_esc(opt.enchantFormula || '1d4+2')} / arme alliée`;
+    utilBlock = _atkRow({ c:'var(--amber)', icon:opt.icon, label:"Buff sur l'allié — pas de JS",
+      formulaHtml:_mkCell(`<code>${effectLbl}</code>`, 0, [], 'var(--amber)') });
   }
 
-  const centerBlock = (isAffCast || isEnchCast) ? utilBlock : isCastOnly ? `
-    ${_formulaPanel('util', opt.icon, 'Effet', degatsFormula, '')}
-  ` : opt.isHeal ? `
-    <div class="vtt-atk-formula-stack">
-      ${_formulaPanel('hit', '🎯', opt.isMana ? 'Jet de régénération' : 'Jet de soin', toucherFormula, `
-        ${_bonusInput('atk-bonus-hit', 'Bonus au jet', 'Bonus / malus fixe ajouté au d20')}
-        ${_bonusInput('atk-bonus-hit-dice', 'd20 bonus', 'd20 supplémentaires au jet, sommés au résultat', 'min="-9" max="20"')}
-      `, 'DD 2 : sert surtout à gérer critique et échec critique.')}
-      ${_formulaPanel('heal', opt.isMana ? '💙' : '💚', opt.isMana ? 'PM régénérés' : 'Soin produit', degatsFormula, `
-        ${_bonusInput('atk-bonus-dmg', opt.isMana ? 'Bonus aux PM' : 'Bonus au soin', 'Bonus / malus fixe')}
-        ${_bonusInput('atk-bonus-dmg-dice', opt.isMana ? 'Dés de PM' : 'Dés de soin', 'Dés supplémentaires, même type de dé', 'min="-9" max="20"')}
-      `)}
-    </div>
-    ${_vttAttackModeControlsHtml('Sélecteur de mode (Avantage / Normal / Désavantage) — partagé avec les attaques')}
-  ` : `
-    <div class="vtt-atk-formula-stack">
-      ${_formulaPanel('hit', '🎯', 'Jet pour toucher', toucherFormula, `
-        ${_bonusInput('atk-bonus-hit', 'Bonus au jet', 'Bonus / malus fixe ajouté au d20')}
-        ${_bonusInput('atk-bonus-hit-dice', 'd20 bonus', 'd20 supplémentaires au toucher, sommés au résultat', 'min="-9" max="20"')}
-      `)}
-      ${_formulaPanel('damage', '⚔️', 'Dégâts infligés', degatsFormula, `
-        ${_bonusInput('atk-bonus-dmg', 'Bonus dégâts', 'Bonus / malus fixe aux dégâts')}
-        ${_bonusInput('atk-bonus-dmg-dice', 'Dés dégâts', 'Dés supplémentaires aux dégâts, même type de dé', 'min="-9" max="20"')}
-      `)}
-      <div class="vtt-atk-extra-info">
-        <div id="atk-miss-note" style="grid-column:1/-1">${_atkMissNoteHtml(opt)}</div>
-        <div id="atk-interaction" style="grid-column:1/-1">${_atkInteractionHtml(opt)}</div>
-      </div>
-    </div>
-    ${_vttAttackModeControlsHtml()}
-  `;
+  // Champs de tiroir « Ajuster » par ligne de jet (ids inchangés).
+  const _hitFields = `
+    ${_bonusInput('atk-bonus-hit', 'Bonus au jet', 'Bonus / malus fixe ajouté au d20')}
+    ${_bonusInput('atk-bonus-hit-dice', 'd20 en plus', 'd20 supplémentaires, sommés au résultat', 'min="-9" max="20"')}`;
+  const _dmgFields = opt.isHeal ? `
+    ${_bonusInput('atk-bonus-dmg', opt.isMana ? 'Bonus aux PM' : 'Bonus au soin', 'Bonus / malus fixe')}
+    ${_bonusInput('atk-bonus-dmg-dice', opt.isMana ? 'Dés de PM' : 'Dés de soin', 'Dés supplémentaires, même type de dé', 'min="-9" max="20"')}`
+    : `
+    ${_bonusInput('atk-bonus-dmg', 'Bonus dégâts', 'Bonus / malus fixe aux dégâts')}
+    ${_bonusInput('atk-bonus-dmg-dice', 'Dés en plus', 'Dés supplémentaires aux dégâts, même type de dé', 'min="-9" max="20"')}`;
 
-  const _atkFace = (token, live, role, tone = '') => {
-    const name = live?.displayName ?? token?.name ?? 'Token';
-    const img = live?.displayImage || token?.imageUrl || '';
-    const initial = String(name || '?').trim().slice(0, 1).toUpperCase() || '?';
-    return `<span class="vtt-atk-actor ${tone}">
-      <span class="vtt-atk-actor-avatar">${img ? `<img src="${_esc(img)}" alt="">` : `<b>${_esc(initial)}</b>`}</span>
-      <span class="vtt-atk-actor-copy">
-        <small>${_esc(role)}</small>
-        <strong title="${_esc(name)}">${_esc(name)}</strong>
-      </span>
-    </span>`;
-  };
+  const centerBlock = (isAffCast || isEnchCast) ? utilBlock
+    : isCastOnly ? _atkRow({ c:'var(--arcane)', icon:opt.icon, label:'Effet', formulaHtml:degatsFormula })
+    : opt.isHeal ? `
+      ${_atkRow({ c:'var(--gold)', icon:'🎯', label:opt.isMana ? 'Jet de régénération' : 'Jet de soin', formulaHtml:toucherFormula, hint:'DD 2 — sert surtout au critique / échec critique', mode:_vttAttackModeControlsHtml(), fields:_hitFields })}
+      ${_atkRow({ c:'var(--emerald)', icon:opt.isMana ? '💙' : '💚', label:opt.isMana ? 'PM régénérés' : 'Soin produit', formulaHtml:degatsFormula, fields:_dmgFields })}
+    ` : `
+      ${_atkRow({ c:'var(--gold)', icon:'🎯', label:'Jet pour toucher', formulaHtml:toucherFormula, mode:_vttAttackModeControlsHtml(), fields:_hitFields })}
+      ${_atkRow({ c:'var(--crimson)', icon:'⚔️', label:'Dégâts infligés', formulaHtml:degatsFormula, fields:_dmgFields })}
+    `;
+
   const targetTone = opt.isHeal ? 'is-heal' : 'is-target';
-  const targetFace = allTargets && allTargets.length > 1
-    ? `<span class="vtt-atk-actor is-multi">
-        <span class="vtt-atk-actor-avatar">🎯</span>
-        <span class="vtt-atk-actor-copy"><small>Cibles</small><strong>${allTargets.length} cibles</strong></span>
-      </span>`
-    : _atkFace(tgt, lT, opt.isHeal ? 'Allié' : 'Cible', targetTone);
+  const _selfCast = tgtId === srcId;
+  const _srcName = _esc(lS?.displayName ?? src?.name ?? 'Lanceur');
+  const _tgtName = _esc((allTargets && allTargets.length > 1) ? `${allTargets.length} cibles` : (lT?.displayName ?? tgt?.name ?? 'Cible'));
+  const _distTxt = _selfCast ? 'sur soi' : `${dist} case${dist > 1 ? 's' : ''}`;
+  const _kindRaw = String(opt.actionType || opt.actionMode || opt.modeAction || opt._itemAction?.actionType || '').toLowerCase();
+  const _typeTag = _kindRaw.includes('bonus') ? 'Action bonus' : (_kindRaw.includes('reac') || _kindRaw.includes('réac')) ? 'Réaction' : 'Action';
+
+  // Cible(s) supplémentaires en multi-cibles (liste sous la ligne de contexte).
   const targetChips = allTargets && allTargets.length > 1 ? `
     <div class="vtt-atk-targets">
       ${allTargets.map(id => {
@@ -6689,67 +6609,60 @@ function _vttPickOpt(srcId, tgtId, idx) {
         return `<span class="vtt-atk-target-chip">${img ? `<img src="${_esc(img)}" alt="">` : ''}${_esc(nm)}</span>`;
       }).join('')}
     </div>` : '';
-  const infoChips = [];
+
+  // Chips de la ligne de contexte : coût + portée + (zone / multi-cibles éventuels).
+  let _costChip = '';
+  if (opt.pmCost > 0) _costChip = `<span class="vtt-atk-chip pm">🔮 ${opt.pmCost} ${_esc(_RES_LABEL[_optCostRes(opt)] || 'PM')}</span>`;
+  else if (opt.pmCost === 0 && opt.basePm > 0) _costChip = `<span class="vtt-atk-chip pm">🔮 Gratuit</span>`;
+  let _extraChip = '';
   if (opt.zoneW > 0 || opt.zoneH > 0) {
     const zoneIcon = opt.zoneShape === 'cross' ? '✚' : opt.zoneShape === 'diamond' ? '◇' : '📐';
-    infoChips.push(`${zoneIcon} Zone ${opt.zoneShape === 'cross' ? 'croix ' : opt.zoneShape === 'diamond' ? 'cercle ' : ''}${opt.zoneW}×${opt.zoneH}`);
+    _extraChip = `<span class="vtt-atk-chip">${zoneIcon} ${opt.zoneW}×${opt.zoneH}</span>`;
   } else if ((opt.nbCibles || 1) > 1) {
-    infoChips.push(`🎯 ${opt.nbCibles} cibles`);
+    _extraChip = `<span class="vtt-atk-chip">🎯 ${opt.nbCibles} cibles</span>`;
   }
-  if (opt.pmCost > 0) infoChips.push(`✨ ${opt.pmCost} ${_RES_LABEL[_optCostRes(opt)] || 'PM'}`);
-  else if (opt.pmCost === 0 && opt.basePm > 0) infoChips.push('✨ Gratuit');
+
+  // Bande de notes : pills + runes + effet(s) Affliction/Enchantement + note de raté +
+  // interaction élémentaire + description (dépliable). Les conteneurs à id restent
+  // présents (mis à jour par _vttAtkSetElement au changement d'élément).
+  const _pills = _vttSpellPills(opt);
+  const _runes = _vttSpellRuneChips(opt, srcChar);
+  const _utilNotesHtml = utilNotes.map(([cls, txt]) => `<span class="vtt-atk-note ${cls}">${txt}</span>`).join('');
+  const _notesHtml = `
+    ${_pills.length ? `<span class="cs-spellcard-tags">${_pills.join('')}</span>` : ''}
+    ${_runes}
+    ${_utilNotesHtml}
+    <span id="atk-miss-note">${_atkMissNoteHtml(opt)}</span>
+    <span id="atk-interaction">${_atkInteractionHtml(opt)}</span>
+    ${opt.actionDescription ? `<details class="vtt-atk-desc"><summary>ℹ️ Description</summary><p>${_esc(opt.actionDescription)}</p></details>` : ''}`;
 
   openModal('⚔️ Résoudre l’action', `
     <div class="vtt-form vtt-atk-confirm" style="--atk-accent:${btnColor};--atk-fg:${btnFg}">
-      <section class="vtt-atk-hero">
+      <header class="vtt-atk-ctx">
         <button type="button" class="vtt-atk-back" data-vtt-fn="_vttBackToAtk" title="Retour au choix d'action">←</button>
-        <span class="vtt-atk-action-icon">${opt.icon}</span>
-        <div class="vtt-atk-head-main">
-          <div class="vtt-atk-head-line">
-            <strong class="vtt-atk-head-name" title="${_esc(opt.label)}">${_esc(opt.label)}</strong>
-            <span class="vtt-atk-dist">${dist} case${dist > 1 ? 's' : ''}</span>
-          </div>
-          <div class="vtt-atk-head-route">
-            <span class="vtt-atk-head-src">${_esc(lS?.displayName ?? src?.name ?? 'Lanceur')}</span>
-            <span class="vtt-atk-head-arrow">→</span>
-            <span class="vtt-atk-head-tgt ${targetTone}">${_esc((allTargets && allTargets.length > 1) ? `${allTargets.length} cibles` : (lT?.displayName ?? tgt?.name ?? 'Cible'))}</span>
-          </div>
-        </div>
-      </section>
+        <span class="vtt-atk-aico">${opt.icon}</span>
+        <span class="vtt-atk-ctxmain">
+          <span class="vtt-atk-ctxname"><b title="${_esc(opt.label)}">${_esc(opt.label)}</b><span class="vtt-atk-tag">${_typeTag}</span></span>
+          <span class="vtt-atk-route">${_srcName}<i>→</i><span class="vtt-atk-tgt ${targetTone}">${_tgtName}</span><i>·</i>${_distTxt}</span>
+        </span>
+        <span class="vtt-atk-ctxres">${_costChip}${_extraChip}<span class="vtt-atk-chip ok">à portée</span></span>
+      </header>
       ${targetChips}
 
-      ${(() => {
-        const p = _vttSpellPills(opt);
-        const runes = _vttSpellRuneChips(opt, srcChar);
-        const info = infoChips.length ? `<div class="vtt-atk-infochips">${infoChips.map(x => `<span>${_esc(x)}</span>`).join('')}</div>` : '';
-        return (p.length || runes || info) ? `<section class="cs-v3 vtt-atk-summary">${p.length ? `<div class="cs-spellcard-tags">${p.join('')}</div>` : ''}${runes}${info}</section>` : '';
-      })()}
+      <div class="vtt-atk-rows" data-atk-rows>${centerBlock}</div>
 
-      ${elemSelectorHtml}
+      ${(elemSelectorHtml || _vttWeaponTechniquesHtml(opt)) ? `<div class="vtt-atk-opts">${elemSelectorHtml}${_vttWeaponTechniquesHtml(opt)}</div>` : ''}
 
-      ${_vttWeaponTechniquesHtml(opt)}
-
-      <section class="vtt-atk-resolve">
-        ${centerBlock}
-      </section>
-
-      ${!isCastOnly && !isAffCast && !isEnchCast ? `
-      <div class="vtt-atk-reset-row">
-        <button type="button" data-vtt-fn="_vttAtkBonusReset" data-vtt-blur>Réinitialiser les bonus</button>
-        <span>Entrée valide le jet depuis un champ.</span>
-      </div>` : ''}
-
-      ${opt.actionDescription ? `
-      <section class="vtt-atk-note">
-        <span>ℹ️</span><p>${_esc(opt.actionDescription)}</p>
-      </section>` : ''}
+      <div class="vtt-atk-notes">${_notesHtml}</div>
 
       <input type="hidden" id="atk-mode" value="normal">
       <footer class="vtt-atk-footer">
+        <span class="vtt-atk-ftk"><kbd>⏎</kbd> lancer <kbd>Échap</kbd> retour</span>
         <button type="button" class="btn-secondary" data-vtt-fn="_vttBackToAtk">Retour</button>
         <button type="button" class="vtt-atk-launch" data-vtt-fn="_vttRollAttack">${btnLabel}</button>
       </footer>
     </div>`);
+  _vttAtkBindResolve(document.querySelector('#modal-box .vtt-atk-confirm'));
   // Toute fermeture du sélecteur (bouton, croix, Échap ou clic sur l'overlay)
   // rend la sélection au lanceur. La cible n'est qu'un contexte temporaire.
   setModalCloseGuard(() => { _restoreAttackSourceSelection(); return false; });
@@ -6821,8 +6734,63 @@ function _vttAtkBonusStep(id, delta = 0) {
   input.classList.toggle('has-value', next !== 0);
 }
 
+/**
+ * Contrôleur local de la modale de jet : dépliage du tiroir « Ajuster » et pastille
+ * ambre d'ajustement affichée DANS la formule quand un bonus ≠ 0 (replié ≠ caché).
+ * Les steppers passent par _vttAtkBonusStep (dispatch global) ; on ne duplique pas sa
+ * logique — on relit les 4 champs après coup et on synchronise l'affichage.
+ */
+function _vttAtkBindResolve(root) {
+  if (!root || root._atkBound) return;
+  root._atkBound = true;
+
+  const syncRow = (row) => {
+    if (!row) return;
+    let fixed = 0, dice = 0, hasHit = false;
+    row.querySelectorAll('.vtt-atk-drawer input').forEach(inp => {
+      const v = parseInt(inp.value, 10) || 0;
+      if (/hit/.test(inp.id)) hasHit = true;
+      if (/-dice$/.test(inp.id)) dice = v; else fixed = v;
+    });
+    const active = fixed !== 0 || dice !== 0;
+    const formula = row.querySelector('.vtt-atk-formula');
+    let pill = formula?.querySelector('.vtt-atk-adj');
+    if (active && formula) {
+      if (!pill) { pill = document.createElement('span'); pill.className = 'vtt-atk-adj'; formula.appendChild(pill); }
+      const dtxt = dice ? `${dice > 0 ? '+' : ''}${dice}d${hasHit ? '20' : 'é'}` : '';
+      const ftxt = fixed ? `${fixed > 0 ? '+' : ''}${fixed}` : '';
+      pill.textContent = [dtxt, ftxt].filter(Boolean).join(' ');
+    } else if (pill) { pill.remove(); }
+    const adjBtn = row.querySelector('[data-atk-adj]');
+    if (adjBtn) adjBtn.classList.toggle('is-on', active || row.classList.contains('open'));
+    const reset = row.querySelector('.vtt-atk-reset');
+    if (reset) reset.hidden = !active;
+  };
+  const syncAll = () => root.querySelectorAll('.vtt-atk-row').forEach(syncRow);
+
+  root.addEventListener('click', (e) => {
+    const adj = e.target.closest('[data-atk-adj]');
+    if (adj) {
+      const row = adj.closest('.vtt-atk-row');
+      const open = row.classList.toggle('open');
+      adj.setAttribute('aria-expanded', open ? 'true' : 'false');
+      syncRow(row);
+      return;
+    }
+    // Stepper ou « Réinitialiser » : re-synchroniser après le handler global.
+    if (e.target.closest('.vtt-atk-reset')) { requestAnimationFrame(syncAll); return; }
+    if (e.target.closest('.vtt-atk-step button')) {
+      const row = e.target.closest('.vtt-atk-row');
+      requestAnimationFrame(() => syncRow(row));
+    }
+  });
+  root.addEventListener('input', (e) => {
+    if (e.target.matches?.('.vtt-atk-drawer input')) syncRow(e.target.closest('.vtt-atk-row'));
+  });
+}
+
 function _vttAtkBonusReset() {
-  document.querySelectorAll('.vtt-atk-bonus-field input').forEach(input => {
+  document.querySelectorAll('.vtt-atk-drawer input').forEach(input => {
     input.value = '0';
     input.classList.remove('has-value');
   });
