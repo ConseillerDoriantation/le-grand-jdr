@@ -1,168 +1,298 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// VTT-DICE.JS — Lanceur de dés libre (Table de Jeu Virtuelle)
+// VTT-DICE.JS — Lanceur de dés & compétences (popover du dock 🎲)
 // ══════════════════════════════════════════════════════════════════════════════
-// Extrait de vtt.js (Phase 1 du découpage, voir docs/vtt-decomposition.md).
-// État local (formule en cours, bonus, mode). Le jet est diffusé dans le log VTT
-// (collection vttLog, avec rendu local immédiat puis confirmation Firestore).
+// Refonte « une seule barre » : plus d'onglet Compétences ↔ Dés. Une barre de
+// commande (filtre une compétence OU détecte une formule), un corps unique
+// (compétences + dés + historique), une barre de jet PARTAGÉE (mode + bonus +
+// visibilité MJ + Lancer). Mode/bonus fusionnés dans VS.rollMode / VS.rollBonus
+// (source unique, lus par _vttRollSkill). Historique unifié dans VS.rollHistory
+// (alimenté ici ET par _vttRollSkill via un évènement DOM — pas d'import croisé).
+//
+// Le jet est diffusé dans le log VTT (rendu local immédiat puis Firestore).
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { serverTimestamp } from '../../config/firebase.js';
 import { STATE } from '../../core/state.js';
 import { showNotif } from '../../shared/notifications.js';
+import { _esc } from '../../shared/html.js';
+import { VS } from './vtt-state.js';
 import { _vttPublishOptimisticLog } from './vtt-chat.js';
 
-// ── État local (lanceur libre) ──────────────────────────────────────
-let _diceFormula   = {};        // { faces→count } ex: { 20:2, 6:1 }
-let _diceFreeBonus = 0;
-let _diceFreeMode  = 'normal';  // 'advantage'|'normal'|'disadvantage'
-let _diceCloseOut  = null;
-// Historique des derniers jets libres (mémoire de session, le plus récent en fin).
-// Chaque entrée : { formula:{faces→count}, bonus, mode, formulaStr, total }
-let _diceHistory   = [];
-const _DICE_HIST_MAX = 6;
-// Fusion « Jets » : le lanceur affiche aussi les COMPÉTENCES du token courant
-// (via un builder injecté depuis vtt.js), avec un sélecteur Compétences ↔ Dés.
-let _diceJetsMode  = 'dice';    // 'skills' | 'dice'
-let _jetsBuilder   = null;      // () => { hasSkills, body } pour la sélection courante
+// ── État local (partie « dés libres » + sélection) ──────────────────
+let _diceFormula = {};          // { faces→count } ex: { 20:2, 6:1 }
+let _diceQuery   = '';          // texte de la barre de commande (filtre OU formule)
+let _diceSel     = null;        // { name, stat } compétence sélectionnée
+let _diceCloseOut = null;
+let _histWired   = false;       // écouteur d'évènement d'historique posé une fois
+const _ROLL_HIST_MAX = 6;
+// Mode/bonus PARTAGÉS : VS.rollMode / VS.rollBonus (lus aussi par _vttRollSkill).
+
+// Builder de compétences injecté depuis vtt.js (contrat setJetsBuilder conservé).
+let _jetsBuilder = null;
 export function setJetsBuilder(fn) { _jetsBuilder = fn; }
-// Bascule Compétences ↔ Dés libres (remplace l'ancien _vttJetsMode de l'inspector).
-function _vttJetsMode(mode) { _diceJetsMode = (mode === 'dice') ? 'dice' : 'skills'; _renderDicePanel(); }
 
-// LANCEUR DE DÉS LIBRE
-// ═══════════════════════════════════════════════════════════════════
 const _ALL_DICE = [4, 6, 8, 10, 12, 20, 100];
+const _clampBonus = (n) => Math.max(-20, Math.min(20, n | 0));
+const _sn = (n) => (n > 0 ? `+${n}` : n < 0 ? `${n}` : '±0');
+const _hasDice = (formula = _diceFormula) => Object.values(formula).some(v => v > 0);
 
+// Formule lisible d'un objet {faces→count} : "2d6 + 1d4".
+function _facesStr(formula) {
+  return Object.keys(formula).map(Number).sort((a, b) => b - a)
+    .filter(f => formula[f] > 0).map(f => `${formula[f]}d${f === 100 ? '%' : f}`).join(' + ');
+}
+
+// Parseur de formule aligné sur _diceFormula ({faces→count} + bonus entier).
+// Accepte 2d6+3, 1d20+5, 2d6+1d4+2, d100/d%. Refuse SILENCIEUSEMENT le reste
+// (→ le texte reste un filtre de compétence). Dés en `+` uniquement, un seul
+// bonus plat final (positif ou négatif).
+function _parseFormula(raw) {
+  const s = String(raw || '').toLowerCase().replace(/\s+/g, '').replace(/d%/g, 'd100');
+  if (!s || !/^\d*d\d+(\+\d*d\d+)*([+-]\d+)?$/.test(s)) return null;
+  let dicePart = s, bonus = 0;
+  const tail = s.match(/[+-]\d+$/);
+  if (tail) { bonus = parseInt(tail[0], 10) || 0; dicePart = s.slice(0, -tail[0].length); }
+  const faces = {};
+  for (const term of dicePart.split('+')) {
+    if (!term) continue;
+    const m = term.match(/^(\d*)d(\d+)$/);
+    if (!m) return null;
+    const count = m[1] ? parseInt(m[1], 10) : 1;
+    const f = parseInt(m[2], 10);
+    if (!count || count > 99 || f < 2 || f > 1000) return null;   // bornes de sécurité
+    faces[f] = (faces[f] || 0) + count;
+  }
+  if (!Object.keys(faces).length) return null;
+  return { faces, bonus };
+}
+
+// ── Ouverture / fermeture du popover ────────────────────────────────
 function _closeDicePanel() {
   const panel = document.getElementById('vtt-dice-panel');
   const btn   = document.getElementById('vtt-dice-trigger');
-  if (panel) { panel.dataset.open='0'; panel.style.display='none'; panel.setAttribute('aria-hidden', 'true'); }
+  if (panel) { panel.dataset.open = '0'; panel.style.display = 'none'; panel.setAttribute('aria-hidden', 'true'); }
   btn?.classList.remove('active');
   btn?.setAttribute('aria-expanded', 'false');
-  if (_diceCloseOut) { document.removeEventListener('mousedown', _diceCloseOut, true); _diceCloseOut=null; }
+  if (_diceCloseOut) { document.removeEventListener('mousedown', _diceCloseOut, true); _diceCloseOut = null; }
 }
 
 function _vttToggleDice() {
   const panel = document.getElementById('vtt-dice-panel'); if (!panel) return;
-  if (panel.dataset.open==='1') { _closeDicePanel(); return; }
-  panel.dataset.open='1'; panel.style.display='flex'; panel.setAttribute('aria-hidden', 'false');
+  // Rafraîchit le panneau quand l'état de jet partagé change (jet de compétence
+  // poussé dans l'historique, bascule visibilité MJ) — via évènement DOM émis par
+  // vtt-emotes.js, sans import croisé (évite la dépendance circulaire).
+  if (!_histWired) {
+    _histWired = true;
+    document.addEventListener('vtt-roll-history', () => {
+      const p = document.getElementById('vtt-dice-panel');
+      if (p?.dataset.open === '1') _renderDicePanel();
+    });
+    // ⏎ dans la barre de commande = lancer le jet courant. Écouteur au niveau
+    // document (survit à un remontage du dock ; le dispatcher VTT ignore keydown
+    // sur ce champ car il est en data-vtt-on="input").
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target?.id === 'vtt-dice-cmd') { e.preventDefault(); _vttDiceCmdEnter(); }
+    });
+    // Dés libres : clic gauche = +1 (data-vtt-fn), clic droit = −1 (ici, sans menu).
+    document.addEventListener('contextmenu', (e) => {
+      const die = e.target?.closest?.('#vtt-dice-panel .vtt-dice-die-btn[data-die]');
+      if (die) { e.preventDefault(); _vttDiceRemoveDie(+die.dataset.die); }
+    });
+  }
+  if (panel.dataset.open === '1') { _closeDicePanel(); return; }
+  panel.dataset.open = '1'; panel.style.display = 'flex'; panel.setAttribute('aria-hidden', 'false');
   const trigger = document.getElementById('vtt-dice-trigger');
   trigger?.classList.add('active');
   trigger?.setAttribute('aria-expanded', 'true');
   _renderDicePanel();
-  _diceCloseOut = e => { const f=document.querySelector('.vtt-dice-float'); if(f&&!f.contains(e.target)) _closeDicePanel(); };
+  _diceCloseOut = e => { const f = document.querySelector('.vtt-dice-float'); if (f && !f.contains(e.target)) _closeDicePanel(); };
   document.addEventListener('mousedown', _diceCloseOut, true);
 }
 
-function _vttDiceAddDie(f) { _diceFormula[f]=(_diceFormula[f]||0)+1; _renderDicePanel(); }
-function _vttDiceRemoveDie(f) { if(_diceFormula[f]>1) _diceFormula[f]--; else delete _diceFormula[f]; _renderDicePanel(); }
-function _vttDiceClear() { _diceFormula={}; _diceFreeBonus=0; _renderDicePanel(); }
-function _vttDiceBonusStep(d) { _diceFreeBonus=(_diceFreeBonus||0)+d; _renderDicePanel(); }
-function _vttDiceBonusSet(v) { _diceFreeBonus=isNaN(v)?0:+v; }
-function _vttDiceMode(m) { _diceFreeMode=m; _renderDicePanel(); }
+// ── Handlers ────────────────────────────────────────────────────────
+function _vttDiceCmdInput(v) { _diceQuery = String(v || ''); if (_diceQuery) _diceSel = null; _renderDicePanel(); }
+function _vttDiceCmdEnter() { document.querySelector('#vtt-dice-panel .vtt-dice-go:not([disabled])')?.click(); }
+function _vttDiceSelectSkill(name, stat) {
+  _diceSel = (_diceSel && _diceSel.name === name) ? null : { name, stat };
+  _diceFormula = {}; _diceQuery = '';
+  _renderDicePanel();
+}
+function _vttDiceAddDie(f) { _diceFormula[f] = (_diceFormula[f] || 0) + 1; _diceSel = null; _renderDicePanel(); }
+function _vttDiceRemoveDie(f) { if (_diceFormula[f] > 1) _diceFormula[f]--; else delete _diceFormula[f]; _renderDicePanel(); }
+function _vttDiceClear() { _diceFormula = {}; _renderDicePanel(); }
+function _vttDiceMode(m) { VS.rollMode = m; _renderDicePanel(); }               // PARTAGÉ
+function _vttDiceBonusStep(d) { VS.rollBonus = _clampBonus((VS.rollBonus || 0) + (+d)); _renderDicePanel(); }
+function _vttDiceBonusSet(v) { VS.rollBonus = _clampBonus(parseInt(v, 10) || 0); _renderDicePanel(); }
+
+// Cible du jet courant (ce que « Lancer » va lancer) : formule tapée > compétence
+// sélectionnée > dés du plateau. `go` porte le data-vtt-fn délégué du bouton.
+function _currentRoll(skills) {
+  const p = _parseFormula(_diceQuery);
+  if (p) {
+    const fstr = _facesStr(p.faces) + (p.bonus ? ` ${p.bonus > 0 ? '+' : ''}${p.bonus}` : '');
+    return { kind: 'free', source: 'Dés libres', label: fstr, ico: '🧮', color: 'var(--arcane)',
+             formula: fstr, d20: p.faces[20] === 1, go: { fn: '_vttDiceRollTyped', args: '' } };
+  }
+  if (_diceSel) {
+    const sk = (skills || []).find(s => s.name === _diceSel.name);
+    return { kind: 'skill', source: 'Compétence', label: _diceSel.name, ico: '🎯',
+             color: sk ? sk.statColor : 'var(--gold)', formula: `1d20 ${sk ? sk.modStr : ''}`.trim(),
+             d20: true, go: { fn: '_vttRollSkill', args: `${_diceSel.name}|${_diceSel.stat}` } };
+  }
+  if (_hasDice()) {
+    return { kind: 'free', source: 'Dés libres', label: 'Jet libre', ico: '🎲', color: 'var(--arcane)',
+             formula: _facesStr(_diceFormula) || '—', d20: _diceFormula[20] === 1, go: { fn: '_vttDiceRoll', args: 'keep' } };
+  }
+  return null;
+}
 
 function _renderDicePanel() {
   const el = document.getElementById('vtt-dice-panel'); if (!el) return;
-  const faces = Object.keys(_diceFormula).map(Number).sort((a,b)=>b-a);
-  const hasDice = faces.some(f => _diceFormula[f]>0);
-  const hasD20single = _diceFormula[20]===1;
 
-  // Formule lisible
-  const fmtParts = faces.map(f=>`${_diceFormula[f]}d${f===100?'%':f}`);
-  if (_diceFreeBonus>0) fmtParts.push(`+${_diceFreeBonus}`);
-  else if (_diceFreeBonus<0) fmtParts.push(String(_diceFreeBonus));
-  const formulaStr = fmtParts.join(' + ') || '—';
-
-  const freeDiceHtml = `
-    <div class="vtt-dice-hd">
-      <span>🎲 Lanceur libre</span>
-    </div>
-    <div class="vtt-dice-grid">
-      ${_ALL_DICE.map(f => {
-        const cnt = _diceFormula[f]||0;
-        const lbl = f===100?'%':f;
-        return `<button class="vtt-dice-die-btn${cnt?' active':''}"
-          data-vtt-fn="_vttDiceAddDie" data-vtt-args="${f}"
-          title="Clic : +1 d${lbl}${cnt?` · clic sur ×${cnt} : −1`:''}">
-          d${lbl}${cnt?`<span class="vtt-dice-die-cnt" data-vtt-fn="_vttDiceRemoveDie" data-vtt-args="${f}" title="Retirer un d${lbl}">×${cnt}</span>`:''}
-        </button>`;
-      }).join('')}
-    </div>
-    <div class="vtt-dice-formula-row">
-      <code class="vtt-dice-formula-str">${formulaStr}</code>
-      ${hasDice?`<button class="vtt-dice-clear-btn" data-vtt-fn="_vttDiceClear">✕</button>`:''}
-    </div>
-    <div class="vtt-dice-bonus-row">
-      <span class="vtt-dice-bonus-lbl">Bonus</span>
-      <button class="vtt-icon-btn" data-vtt-fn="_vttDiceBonusStep" data-vtt-args="-1">−</button>
-      <input id="vtt-dice-bonus-inp" type="number" class="vtt-dice-bonus-inp" value="${_diceFreeBonus}"
-        data-vtt-fn="_vttDiceBonusSet" data-vtt-on="input" data-vtt-args="$value">
-      <button class="vtt-icon-btn" data-vtt-fn="_vttDiceBonusStep" data-vtt-args="+1">＋</button>
-    </div>
-    ${hasD20single ? `<div class="vtt-dice-mode-row">
-      <button class="vtt-roll-mode-btn${_diceFreeMode==='disadvantage'?' active':''}" data-mode="disadvantage" data-vtt-fn="_vttDiceMode" data-vtt-args="disadvantage">⬇ Désav.</button>
-      <button class="vtt-roll-mode-btn${_diceFreeMode==='normal'?' active':''}" data-mode="normal" data-vtt-fn="_vttDiceMode" data-vtt-args="normal">⚪ Normal</button>
-      <button class="vtt-roll-mode-btn${_diceFreeMode==='advantage'?' active':''}" data-mode="advantage" data-vtt-fn="_vttDiceMode" data-vtt-args="advantage">⬆ Avantage</button>
-    </div>` : ''}
-    <button class="vtt-dice-roll-btn" data-vtt-fn="_vttDiceRoll" data-vtt-args="keep"
-      ${!hasDice&&!_diceFreeBonus?'disabled':''}>
-      🎲 Lancer !
-    </button>
-    ${_diceHistory.length ? `
-      <div class="vtt-dice-hist">
-        <div class="vtt-dice-hist-hd">
-          <span>Derniers jets</span>
-          <button class="vtt-dice-reroll-btn" data-vtt-fn="_vttDiceRerollLast" title="Relancer le dernier jet (mêmes dés)">🔁 Relancer</button>
-        </div>
-        <div class="vtt-dice-hist-list">
-          ${_diceHistory.map((h, i) => ({ h, i })).reverse().map(({ h, i }) => `
-            <button class="vtt-dice-hist-item" data-vtt-fn="_vttDiceUseHistory" data-vtt-args="${i}" title="Réutiliser ${h.formulaStr}">
-              <span class="vtt-dice-hist-formula">${h.formulaStr}</span>
-              <span class="vtt-dice-hist-eq">=</span>
-              <span class="vtt-dice-hist-total">${h.total}</span>
-            </button>`).join('')}
-        </div>
-      </div>` : ''}`;
-
-  // Compétences du token courant (le cas échéant) : on affiche un sélecteur
-  // segmenté Compétences ↔ Dés libres. Sans compétences (ex. MJ sans token) →
-  // uniquement les dés libres (comportement identique à avant).
   const jets = _jetsBuilder ? (_jetsBuilder() || {}) : {};
   const hasSkills = !!jets.hasSkills;
-  if (!hasSkills) { el.innerHTML = freeDiceHtml; return; }
-  const mode = _diceJetsMode === 'dice' ? 'dice' : 'skills';
-  const seg = `<div class="vtt-jets-seg" role="tablist">
-       <button class="vtt-jets-seg-btn${mode==='skills'?' active':''}" role="tab" aria-selected="${mode==='skills'}" data-vtt-fn="_vttJetsMode" data-vtt-args="skills">🎯 Compétences</button>
-       <button class="vtt-jets-seg-btn${mode==='dice'?' active':''}" role="tab" aria-selected="${mode==='dice'}" data-vtt-fn="_vttJetsMode" data-vtt-args="dice">🎲 Dés libres</button>
-     </div>`;
-  el.innerHTML = seg + `<div class="vtt-jets-body">${mode==='skills' ? jets.body : freeDiceHtml}</div>`;
+  const skills = Array.isArray(jets.skills) ? jets.skills : [];
+  const who = jets.who || null;
+  const detected = _parseFormula(_diceQuery);
+  const query = _diceQuery.trim();
+
+  // Compétences filtrées par la barre de commande (sauf si une formule est détectée).
+  const _fold = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const nq = _fold(query);
+  const visSkills = (hasSkills && !detected)
+    ? skills.filter(s => !nq || _fold(s.name).includes(nq))
+    : [];
+
+  const cur = _currentRoll(skills);
+  const isMj = !!STATE.isAdmin;
+
+  // ── Barre de commande ──
+  const whoAv = who
+    ? (who.avatar
+        ? `<img class="vtt-dice-who-av vtt-dice-who-img" src="${_esc(who.avatar)}" alt="">`
+        : `<span class="vtt-dice-who-av">${_esc(who.initial)}</span>`)
+    : `<span class="vtt-dice-who-av vtt-dice-who-mj">MJ</span>`;
+  const whoHtml = who
+    ? `<span class="vtt-dice-who">${whoAv}<b title="${_esc(who.name)}">${_esc(who.name)}</b></span>`
+    : `<span class="vtt-dice-who">${whoAv}</span>`;
+  const placeholder = hasSkills ? 'Compétence ou formule…' : 'Formule : 2d6+3…';
+  const cmdHtml = `<div class="vtt-dice-cmd">
+      ${whoHtml}
+      <label class="vtt-dice-bar">${detected ? '🧮' : '🔍'}
+        <input id="vtt-dice-cmd" type="text" value="${_esc(_diceQuery)}" placeholder="${placeholder}" autocomplete="off"
+          data-vtt-fn="_vttDiceCmdInput" data-vtt-on="input" data-vtt-args="$value">
+        ${query ? `<button type="button" title="Effacer" data-vtt-fn="_vttDiceCmdInput" data-vtt-args="">✕</button>` : ''}
+      </label>
+    </div>`;
+
+  // ── Corps ──
+  const detectHtml = detected ? `<div class="vtt-dice-detect">🧮<b>${_esc(_facesStr(detected.faces))}${detected.bonus ? ` ${detected.bonus > 0 ? '+' : ''}${detected.bonus}` : ''}</b><em>jet libre — ⏎ pour lancer</em></div>` : '';
+
+  const skillsSec = (hasSkills && !detected) ? `<section class="vtt-dice-sec">
+      <div class="vtt-dice-sec-hd"><span>Compétences</span>${_diceSel ? `<button type="button" class="vtt-dice-sec-btn" data-vtt-fn="_vttDiceSelectSkill" data-vtt-args="${_esc(_diceSel.name)}|${_esc(_diceSel.stat)}">Désélectionner</button>` : ''}</div>
+      ${visSkills.length ? `<div class="vtt-dice-skills">${visSkills.map(s => {
+        const dot = s.level === 'expert' ? ' <i style="color:var(--amber)" title="Expertise — +2 & avantage">◉</i>'
+                  : s.level === 'forme'  ? ' <i style="color:var(--gold-2)" title="Maîtrisée — +2">◐</i>' : '';
+        const eqDot = s.eqBonus ? ' <i style="color:var(--emerald)" title="Bonus d\'équipement">●</i>' : '';
+        return `<button type="button" class="vtt-skill-btn${_diceSel && _diceSel.name === s.name ? ' on' : ''}" style="--c:${s.statColor}"
+            data-vtt-fn="_vttDiceSelectSkill" data-vtt-args="${_esc(s.name)}|${_esc(s.stat)}" title="${_esc(s.title)}">
+            <span class="vtt-sk-name">${_esc(s.name)}${eqDot}${dot}</span>
+            <span class="vtt-sk-mod" style="color:${s.statColor}">${_esc(s.stat)} ${s.modStr}</span>
+          </button>`;
+      }).join('')}</div>` : `<div class="vtt-dice-empty">Aucune compétence ne correspond.</div>`}
+    </section>` : '';
+
+  const diceSec = !detected ? `<section class="vtt-dice-sec">
+      <div class="vtt-dice-sec-hd"><span>Dés libres</span>${_hasDice() ? `<button type="button" class="vtt-dice-sec-btn vtt-dice-sec-btn--danger" data-vtt-fn="_vttDiceClear">Vider</button>` : ''}</div>
+      <div class="vtt-dice-grid">${_ALL_DICE.map(f => {
+        const cnt = _diceFormula[f] || 0; const lbl = f === 100 ? '%' : f;
+        return `<button type="button" class="vtt-dice-die-btn${cnt ? ' active' : ''}" data-die="${f}" data-vtt-fn="_vttDiceAddDie" data-vtt-args="${f}" title="Clic gauche : +1 d${lbl} · clic droit : −1">d${lbl}${cnt ? `<span class="vtt-dice-die-cnt">${cnt}</span>` : ''}</button>`;
+      }).join('')}</div>
+    </section>` : '';
+
+  const histSec = VS.rollHistory.length ? `<section class="vtt-dice-sec">
+      <div class="vtt-dice-sec-hd"><span>Derniers jets</span></div>
+      <div class="vtt-dice-hist">${VS.rollHistory.slice(0, _ROLL_HIST_MAX).map((h, i) => `
+        <button type="button" class="vtt-dice-hist-item" data-vtt-fn="_vttDiceUseHistory" data-vtt-args="${i}" title="Recharger ce jet">
+          <i class="vtt-hi-ico">${h.kind === 'skill' ? '🎯' : '🎲'}</i>
+          <span class="vtt-hi-f">${h.kind === 'skill' ? _esc(h.label || 'Compétence') : 'Jet libre'}<b>${_esc(h.formulaStr || '')}</b></span>
+          <span class="vtt-hi-t${h.crit ? ' crit' : h.fail ? ' fail' : ''}">${h.total}</span>
+          <span class="vtt-hi-re" data-vtt-fn="_vttDiceRerollHistory" data-vtt-args="${i}" title="Relancer directement">🔁</span>
+        </button>`).join('')}</div>
+    </section>` : '';
+
+  // ── Barre de jet partagée ──
+  const modeLocked = !(cur && cur.d20);
+  const bonus = VS.rollBonus || 0;
+  const rollHtml = `<div class="vtt-dice-roll" style="--sc:${cur ? cur.color : 'var(--text-muted)'}">
+      <div class="vtt-dice-sel${cur ? '' : ' none'}">
+        <span class="vtt-dice-sel-ic">${cur ? cur.ico : '·'}</span>
+        <span class="vtt-dice-sel-b"><s>${cur ? cur.source : 'Rien de sélectionné'}</s><b>${cur ? _esc(cur.label) : 'Choisis une compétence ou des dés'}</b></span>
+        ${cur ? `<span class="vtt-dice-sel-f">${_esc(cur.formula)}${bonus ? ` <em>${_sn(bonus)}</em>` : ''}</span>` : ''}
+      </div>
+      <div class="vtt-dice-knobs">
+        <div class="vtt-dice-mode${modeLocked ? ' locked' : ''}" role="group" aria-label="Mode de lancer" title="${modeLocked ? 'Disponible sur un jet à 1d20' : 'Avantage / normal / désavantage'}">
+          ${[['disadvantage', '−', 'Désavantage — garde le plus bas'], ['normal', '•', 'Normal'], ['advantage', '+', 'Avantage — garde le plus haut']].map(([m, s, t]) =>
+            `<button type="button" data-m="${m}" class="${VS.rollMode === m ? 'on' : ''}" data-vtt-fn="_vttDiceMode" data-vtt-args="${m}" title="${t}" aria-pressed="${VS.rollMode === m}">${s}</button>`).join('')}
+        </div>
+        <div class="vtt-dice-bonus${bonus ? ' set' : ''}" title="Bonus contextuel">
+          <button type="button" data-vtt-fn="_vttDiceBonusStep" data-vtt-args="-1">−</button>
+          <input id="vtt-bonus-val" type="number" value="${bonus}" min="-20" max="20" data-vtt-fn="_vttDiceBonusSet" data-vtt-on="input" data-vtt-args="$value">
+          <button type="button" data-vtt-fn="_vttDiceBonusStep" data-vtt-args="1">＋</button>
+        </div>
+        ${isMj ? `<button type="button" class="vtt-dice-hide${VS.rollHidden ? ' on' : ''}" id="vtt-roll-hide-btn" data-vtt-fn="_vttToggleRollHidden" title="Jet caché : seul le MJ voit le résultat">${VS.rollHidden ? '🕶' : '👁'}</button>` : ''}
+        <button type="button" class="vtt-dice-go${cur && cur.kind !== 'skill' ? ' free' : ''}" ${cur ? `data-vtt-fn="${cur.go.fn}" data-vtt-args="${_esc(cur.go.args)}"` : 'disabled'}>${cur ? (cur.kind === 'skill' ? `Lancer ${_esc(cur.label)}` : `Lancer ${_esc(cur.formula)}`) : 'Lancer'}</button>
+      </div>
+    </div>`;
+
+  // Préserve focus + curseur des champs texte ET la position de défilement du
+  // corps à travers le re-rendu (l'innerHTML est remplacé → scrollTop repart à 0).
+  const act = document.activeElement;
+  const keepId = act && (act.id === 'vtt-dice-cmd' || act.id === 'vtt-bonus-val') ? act.id : null;
+  const caret = keepId && typeof act.selectionStart === 'number' ? [act.selectionStart, act.selectionEnd] : null;
+  const prevScroll = el.querySelector('.vtt-dice-body')?.scrollTop || 0;
+
+  el.innerHTML = `${cmdHtml}<div class="vtt-dice-body">${detectHtml}${skillsSec}${diceSec}${histSec}</div>${rollHtml}`;
+
+  const newBody = el.querySelector('.vtt-dice-body');
+  if (newBody && prevScroll) newBody.scrollTop = prevScroll;
+
+  if (keepId) {
+    const n = document.getElementById(keepId);
+    if (n) { n.focus({ preventScroll: true }); if (caret) { try { n.setSelectionRange(caret[0], caret[1]); } catch { /* noop */ } } }
+  }
 }
 
-// Relance le dernier jet (même formule/bonus/mode, nouveaux dés). Garde le
-// panneau ouvert pour enchaîner les relances en séance.
-function _vttDiceRerollLast() {
-  const last = _diceHistory[_diceHistory.length - 1];
-  if (!last) return;
-  _diceFormula   = { ...last.formula };
-  _diceFreeBonus = last.bonus || 0;
-  _diceFreeMode  = last.mode || 'normal';
+// ── Historique : recharger / relancer ───────────────────────────────
+function _vttDiceUseHistory(idx) {
+  const h = VS.rollHistory[+idx]; if (!h) return;
+  if (h.kind === 'skill') { _diceSel = { name: h.skillName || h.label, stat: h.stat || '' }; _diceFormula = {}; _diceQuery = ''; }
+  else { _diceQuery = (h.formulaStr || '').replace(/\s/g, ''); _diceSel = null; }
+  if (h.mode) VS.rollMode = h.mode;
+  _renderDicePanel();
+}
+function _vttDiceRerollHistory(idx) {
+  _vttDiceUseHistory(idx);
+  document.querySelector('#vtt-dice-panel .vtt-dice-go:not([disabled])')?.click();
+}
+
+// Formule tapée dans la barre → on remplit le plateau + bonus puis on lance,
+// sans toucher à la logique de _vttDiceRoll.
+function _vttDiceRollTyped() {
+  const p = _parseFormula(_diceQuery); if (!p) return;
+  _diceFormula = { ...p.faces };
+  VS.rollBonus = _clampBonus(p.bonus);
+  _diceQuery = ''; _diceSel = null;
   _vttDiceRoll(true);
 }
 
-// Réutilise une formule de l'historique : la recharge dans le constructeur
-// (sans lancer) pour pouvoir l'ajuster puis relancer.
-function _vttDiceUseHistory(idx) {
-  const h = _diceHistory[+idx];
-  if (!h) return;
-  _diceFormula   = { ...h.formula };
-  _diceFreeBonus = h.bonus || 0;
-  _diceFreeMode  = h.mode || 'normal';
-  _renderDicePanel();
-}
-
+// ── Jet de dés libre (logique INCHANGÉE ; source d'état = VS.rollMode/rollBonus) ──
 function _vttDiceRoll(keepPanel) {
-  const faces = Object.keys(_diceFormula).map(Number).sort((a,b)=>b-a);
-  if (!faces.length && !_diceFreeBonus) return;
-  const authorName = STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'Joueur';
+  const faces = Object.keys(_diceFormula).map(Number).sort((a, b) => b - a);
+  if (!faces.length && !VS.rollBonus) return;
+  const authorName = STATE.profile?.pseudo || STATE.profile?.prenom || STATE.user?.displayName || 'Joueur';
+  const mode = VS.rollMode || 'normal';
+  const bonus = VS.rollBonus || 0;
 
   const groups = [];
   let total = 0;
@@ -170,35 +300,35 @@ function _vttDiceRoll(keepPanel) {
     const count = _diceFormula[f]; if (!count) continue;
     const rolls = []; let subtotal = 0;
     let kept;
-    if (f===20 && count===1 && _diceFreeMode!=='normal') {
-      const r1=Math.floor(Math.random()*20)+1, r2=Math.floor(Math.random()*20)+1;
-      kept = _diceFreeMode==='advantage' ? Math.max(r1,r2) : Math.min(r1,r2);
-      rolls.push(r1,r2); subtotal=kept;
+    if (f === 20 && count === 1 && mode !== 'normal') {
+      const r1 = Math.floor(Math.random() * 20) + 1, r2 = Math.floor(Math.random() * 20) + 1;
+      kept = mode === 'advantage' ? Math.max(r1, r2) : Math.min(r1, r2);
+      rolls.push(r1, r2); subtotal = kept;
     } else {
-      for(let i=0;i<count;i++){ const r=Math.floor(Math.random()*f)+1; rolls.push(r); subtotal+=r; }
+      for (let i = 0; i < count; i++) { const r = Math.floor(Math.random() * f) + 1; rolls.push(r); subtotal += r; }
     }
-    const g = { faces:f, count, rolls, subtotal };
+    const g = { faces: f, count, rolls, subtotal };
     if (kept !== undefined) g.kept = kept;
     groups.push(g);
     total += subtotal;
   }
-  total += (_diceFreeBonus||0);
+  total += bonus;
 
-  const fmtParts = faces.map(f=>`${_diceFormula[f]}d${f===100?'%':f}`);
-  if (_diceFreeBonus>0) fmtParts.push(`+${_diceFreeBonus}`);
-  else if (_diceFreeBonus<0) fmtParts.push(String(_diceFreeBonus));
+  const fmtParts = faces.map(f => `${_diceFormula[f]}d${f === 100 ? '%' : f}`);
+  if (bonus > 0) fmtParts.push(`+${bonus}`);
+  else if (bonus < 0) fmtParts.push(String(bonus));
   const formula = fmtParts.join('+');
 
   _vttPublishOptimisticLog({
-    type:'dice-free', authorId:STATE.user?.uid||null, authorName,
-    formula, groups, bonus:_diceFreeBonus||0, mode:_diceFreeMode, total,
-    createdAt:serverTimestamp(),
-  }).catch(()=>{});
+    type: 'dice-free', authorId: STATE.user?.uid || null, authorName,
+    formula, groups, bonus, mode, total,
+    createdAt: serverTimestamp(),
+  }).catch(() => {});
   showNotif(`🎲 ${formula} = ${total}`, 'success');
 
-  // Mémorise le jet (pour « relancer » / rappel des derniers).
-  _diceHistory.push({ formula:{ ..._diceFormula }, bonus:_diceFreeBonus||0, mode:_diceFreeMode, formulaStr:formula, total });
-  if (_diceHistory.length > _DICE_HIST_MAX) _diceHistory.shift();
+  // Historique UNIFIÉ (le plus récent en tête).
+  VS.rollHistory.unshift({ kind: 'free', label: 'Jet libre', formula: { ..._diceFormula }, bonus, mode, formulaStr: formula, total });
+  if (VS.rollHistory.length > _ROLL_HIST_MAX) VS.rollHistory.length = _ROLL_HIST_MAX;
 
   if (keepPanel) _renderDicePanel();
   else _closeDicePanel();
@@ -211,11 +341,14 @@ export {
   _vttDiceBonusSet,
   _vttDiceBonusStep,
   _vttDiceClear,
+  _vttDiceCmdEnter,
+  _vttDiceCmdInput,
   _vttDiceMode,
   _vttDiceRemoveDie,
+  _vttDiceRerollHistory,
   _vttDiceRoll,
-  _vttDiceRerollLast,
+  _vttDiceRollTyped,
+  _vttDiceSelectSkill,
   _vttDiceUseHistory,
   _vttToggleDice,
-  _vttJetsMode,
 };

@@ -979,18 +979,6 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-fiche-jets-btn { padding: 5px 12px; border-radius: var(--r-full); border: 1px solid var(--border-md); background: color-mix(in srgb, var(--surface-1) 92%, transparent); backdrop-filter: blur(10px); box-shadow: var(--elev-1); color: var(--text-soft); font-size: 12px; font-weight: 600; cursor: pointer; }
 .vtt-fiche-jets-btn.is-open { background: var(--gold-glow); border-color: var(--border-bright); color: var(--gold-2); }
 .vtt-fiche-jets-panel { position: absolute; left: 0; bottom: calc(100% + 6px); width: min(460px, 78vw); max-height: 56vh; overflow-y: auto; padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-1); border: 1px solid var(--border-md); box-shadow: var(--elev-3); z-index: 21; }
-/* Sélecteur segmenté Compétences ↔ Dés (deux interfaces distinctes) */
-.vtt-jets-seg { display: flex; gap: 4px; margin-bottom: 10px; padding: 3px; border-radius: var(--r-md); background: var(--surface-sunken); border: 1px solid var(--border); }
-.vtt-jets-seg-btn { flex: 1; padding: 6px 8px; border-radius: var(--r-sm); border: 1px solid transparent; background: none; color: var(--text-muted); font-size: 11.5px; font-weight: 600; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
-.vtt-jets-seg-btn:hover { color: var(--text); }
-.vtt-jets-seg-btn.active { background: var(--gold-glow); border-color: var(--border-bright); color: var(--gold-2); }
-.vtt-jets-body > * + * { margin-top: 10px; }
-/* Le lanceur de dés du dock affiche aussi les compétences : quand le sélecteur
-   segmenté est présent, on élargit le panneau (le contenu compétences le demande)
-   et on borne sa hauteur pour rester dans le viewport. */
-.vtt-dice-panel:has(.vtt-jets-seg) { width: min(440px, 88vw); max-height: 60vh; overflow-y: auto; }
-/* Lanceur de dés libre : occupe toute la largeur du panneau Jets */
-.vtt-jets-body .vtt-dice-panel { width: 100%; box-sizing: border-box; }
 /* Onglet « Fiche » (ouvre le tiroir mini-fiche) */
 .vtt-fiche-tab--sheet.active { background: color-mix(in srgb, var(--c-player) 22%, transparent); border-color: color-mix(in srgb, var(--c-player) 55%, transparent); color: var(--c-player); }
 
@@ -2056,126 +2044,9 @@ html:not([data-theme="light"]) .vtt-root {
   border-top: 1px solid var(--border);
 }
 
-/* ── Réglages du jet (mode / bonus / visibilité) ──────────────────── */
-.vtt-roll-settings {
-  display: flex; flex-direction: column; gap: .5rem;
-  padding: .55rem; margin-bottom: .5rem;
-  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 9px;
-}
-.vtt-roll-set-block { display: flex; flex-direction: column; gap: .28rem; }
-.vtt-roll-set-lbl {
-  font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
-  color: var(--text-dim);
-}
-
-/* Sélecteur de mode = contrôle segmenté (icône + libellé) */
-.vtt-roll-mode-row {
-  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .25rem;
-}
-.vtt-roll-mode-btn {
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: .4rem .2rem; border-radius: 7px; font-family: inherit;
-  background: var(--bg-dark); border: 1px solid var(--border);
-  color: var(--text-muted); cursor: pointer; transition: all .1s;
-}
-.vtt-rm-ic  { font-size: .95rem; line-height: 1; }
-.vtt-rm-lbl { font-size: .58rem; font-weight: 700; white-space: nowrap; letter-spacing: .01em; }
-.vtt-roll-mode-btn:hover { border-color: var(--gold-glow); color: var(--text); }
-/* État sélectionné : fond marqué + anneau interne + texte coloré → la sélection
-   (Désav./Normal/Avantage) doit être immédiatement lisible. */
-.vtt-roll-mode-btn.active[data-mode="advantage"]    { background: rgba(34,195,142,.28);  border-color: var(--emerald); color: var(--emerald); box-shadow: inset 0 0 0 1.5px var(--emerald); }
-.vtt-roll-mode-btn.active[data-mode="normal"]       { background: rgba(255,255,255,.18); border-color: var(--text);    color: var(--text);    box-shadow: inset 0 0 0 1.5px var(--text-muted); }
-.vtt-roll-mode-btn.active[data-mode="disadvantage"] { background: rgba(239,68,68,.28);   border-color: #ef4444;        color: #ef4444;        box-shadow: inset 0 0 0 1.5px #ef4444; }
-
-/* Stepper de bonus contextuel */
-.vtt-roll-bonus-stepper { display: flex; align-items: center; gap: .35rem; }
-.vtt-roll-bonus-adj {
-  width: 28px; height: 28px; border-radius: 7px;
-  background: var(--bg-dark); border: 1px solid var(--border);
-  color: var(--text); font-size: 1rem; font-weight: 700;
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  padding: 0; line-height: 1; transition: all .1s; flex-shrink: 0;
-}
-.vtt-roll-bonus-adj:hover { border-color: var(--gold-glow); color: var(--gold); background: oklch(72% 0.14 52 / 0.08); }
-.vtt-roll-bonus-adj:active { transform: scale(.94); }
-.vtt-roll-bonus-val {
-  flex: 1; text-align: center;
-  font-size: .95rem; font-weight: 700; font-family: monospace;
-  color: var(--text-dim); transition: color .12s;
-  background: var(--bg-dark); border: 1px solid var(--border); border-radius: 7px;
-  padding: .28rem 0;
-}
-.vtt-roll-bonus-val.nonzero { color: var(--gold); border-color: var(--gold-glow); }
-.vtt-roll-bonus-reset {
-  width: 28px; height: 28px; border-radius: 7px; flex-shrink: 0;
-  font-size: .8rem; color: var(--text-dim); background: transparent;
-  border: 1px solid var(--border); cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all .1s;
-}
-.vtt-roll-bonus-reset:hover { color: var(--text); border-color: var(--gold-glow); }
-.vtt-roll-bonus-reset.hide { visibility: hidden; }
-
-/* Bouton visibilité (MJ) = pleine largeur */
-.vtt-roll-hide-btn {
-  width: 100%; padding: .4rem; border-radius: 7px; font-family: inherit;
-  font-size: .68rem; font-weight: 700; cursor: pointer; transition: all .1s;
-  background: rgba(34,195,142,.10); border: 1px solid rgba(34,195,142,.55); color: var(--emerald);
-  letter-spacing: .02em;
-}
-.vtt-roll-hide-btn:hover { border-color: var(--emerald); color: var(--emerald); }
-.vtt-roll-hide-btn.active {
-  background: rgba(167,139,250,.28); border-color: #a78bfa; color: #fff;
-  text-shadow: 0 0 6px rgba(167,139,250,.7);
-  box-shadow: 0 0 0 1px #a78bfa inset, 0 0 8px rgba(167,139,250,.45);
-  text-transform: uppercase;
-}
-.vtt-roll-hide-btn.active:hover { border-color: #c4b5fd; color: #fff; }
-
-/* ── Filtre de recherche des jets de compétences ──────────────────── */
-.vtt-skill-filter {
-  display: flex; align-items: center; gap: .35rem;
-  padding: .28rem .45rem; margin-bottom: .3rem;
-  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 7px;
-}
-.vtt-skill-filter:focus-within { border-color: var(--gold-glow); }
-.vtt-skill-filter-ic { font-size: .8rem; opacity: .7; }
-.vtt-skill-filter-input {
-  flex: 1; min-width: 0; border: none; background: transparent;
-  color: var(--text); font-family: inherit; font-size: .74rem; outline: none;
-}
-.vtt-skill-filter-input::placeholder { color: var(--text-dim); }
-.vtt-skill-filter-clr {
-  border: none; background: transparent; color: var(--text-dim);
-  cursor: pointer; font-size: .7rem; padding: 0 .15rem; line-height: 1;
-}
-.vtt-skill-filter-clr:hover { color: var(--text); }
-.vtt-skill-filter-clr.hide { visibility: hidden; }
-
-/* ── Groupes de compétences par caractéristique ───────────────────── */
-.vtt-ins-skills { display: flex; flex-direction: column; gap: .5rem; }
-.vtt-sk-group-hd {
-  font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
-  padding: 0 0 .16rem 0; margin-bottom: .28rem;
-  border-bottom: 1px solid; opacity: .85;
-}
-.vtt-sk-group-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: .22rem;
-}
-.vtt-sk-empty {
-  font-size: .68rem; color: var(--text-dim); text-align: center; padding: .5rem 0;
-}
-.vtt-skill-btn {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
-  padding: .3rem .4rem; border-radius: 6px;
-  background: var(--bg-elevated); border: 1px solid var(--border);
-  cursor: pointer; text-align: left; font-family: inherit;
-  transition: border-color .1s, background .1s;
-}
-.vtt-skill-btn:hover { border-color: var(--gold-glow); background: oklch(72% 0.14 52 / 0.08); }
-.vtt-skill-btn:active { transform: scale(.97); }
-.vtt-sk-name { font-size: .68rem; color: var(--text); font-weight: 600; line-height: 1.2; }
-.vtt-sk-mod  { font-size: .6rem; font-weight: 700; line-height: 1; }
+/* [Réglages de jet + filtre + groupes de compétences : retirés — le lanceur
+   refondu (vtt-dice.js) porte désormais mode/bonus/visibilité et les chips de
+   compétences. Styles dans la section « Lanceur de dés & compétences ».] */
 .vtt-ins-actions .vtt-btn-sm { flex: 1; justify-content: center; }
 .vtt-source-links {
   display: grid;
@@ -7363,7 +7234,10 @@ html:not([data-theme="light"]) .vtt-root {
   .vtt-actbar-chip { padding: .4rem .5rem; }
 }
 
-/* ── Lanceur de dés libre ───────────────────────────────────────── */
+/* ── Lanceur de dés & compétences — refonte « une seule barre » ─────
+   Carte : barre de commande fixe · corps défilant · barre de jet fixe.
+   Palette 100% tokens (adapte clair/sombre), zéro couleur inventée. La taille
+   et le positionnement du panneau sont fixés par .vtt-session-tools (bandeau). */
 .vtt-dice-float {
   position: absolute; bottom: 14px; left: 106px; z-index: 30;
   display: flex; flex-direction: column; align-items: flex-start; gap: .35rem;
@@ -7377,108 +7251,194 @@ html:not([data-theme="light"]) .vtt-root {
   box-shadow: 0 2px 8px rgba(0,0,0,.45);
 }
 .vtt-dice-trigger:hover { background: var(--bg-elevated); box-shadow: 0 3px 14px rgba(0,0,0,.55); }
-.vtt-dice-trigger.active { border-color: var(--gold); box-shadow: 0 0 0 2px oklch(72% 0.14 52 / 0.3); }
+.vtt-dice-trigger.active { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold-glow); }
 .vtt-dice-panel {
-  flex-direction: column; gap: .5rem;
-  background: var(--bg-panel); border: 1px solid var(--border);
-  border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,.6);
-  padding: .6rem; width: 258px;
+  flex-direction: column; gap: 0; overflow: hidden;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+  border: 1px solid var(--border-md);
+  border-radius: var(--r-lg); box-shadow: var(--elev-3);
+  padding: 0; width: min(376px, 92vw);
+  max-height: min(620px, calc(100vh - 130px));
 }
-.vtt-dice-hd {
-  display: flex; align-items: center; justify-content: space-between;
-  font-size: .8rem; font-weight: 700; color: var(--text);
-  padding-bottom: .4rem; border-bottom: 1px solid var(--border);
-}
-.vtt-dice-grid {
-  display: grid; grid-template-columns: repeat(7, 1fr); gap: .3rem;
-}
-.vtt-dice-die-btn {
-  position: relative; display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  aspect-ratio: 1; border: 1.5px solid var(--border);
-  border-radius: 7px; background: var(--bg-elevated);
-  cursor: pointer; font-size: .68rem; font-weight: 700; color: var(--text-muted);
-  transition: border-color .1s, background .1s, color .1s;
-  user-select: none;
-}
-.vtt-dice-die-btn:hover { border-color: var(--gold); background: rgba(255,210,0,.08); color: var(--gold); }
-.vtt-dice-die-btn.active { border-color: var(--gold); background: rgba(255,210,0,.14); color: var(--gold); }
-.vtt-dice-die-cnt {
-  position: absolute; top: 0; right: 0;
-  font-size: .5rem; font-weight: 800; color: var(--gold); line-height: 1;
-  padding: 2px 3px; border-radius: 0 6px 0 6px;
-  cursor: pointer;
-}
-.vtt-dice-die-cnt:hover { background: var(--ember, #ef4444); color: #fff; }
-.vtt-dice-formula-row {
-  display: flex; align-items: center; justify-content: space-between; gap: .4rem;
-  background: rgba(255,255,255,.04); border-radius: 6px;
-  padding: .3rem .45rem; min-height: 28px;
-}
-.vtt-dice-formula-str {
-  font-size: .72rem; font-family: monospace; color: var(--text-soft);
-  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.vtt-dice-clear-btn {
-  font-size: .65rem; color: var(--text-dim); background: none; border: none;
-  cursor: pointer; padding: 0 .2rem; flex-shrink: 0;
-  transition: color .1s;
-}
-.vtt-dice-clear-btn:hover { color: #ef4444; }
-.vtt-dice-bonus-row {
-  display: flex; align-items: center; gap: .35rem;
-}
-.vtt-dice-bonus-lbl { font-size: .72rem; color: var(--text-muted); flex: 1; }
-.vtt-dice-bonus-inp {
-  width: 46px; text-align: center; font-size: .78rem; font-weight: 700;
-  background: var(--bg-elevated); border: 1px solid var(--border);
-  border-radius: 6px; color: var(--text); padding: .2rem;
-  -moz-appearance: textfield;
-}
-.vtt-dice-bonus-inp::-webkit-outer-spin-button,
-.vtt-dice-bonus-inp::-webkit-inner-spin-button { -webkit-appearance: none; }
-.vtt-dice-mode-row {
-  display: flex; gap: .3rem;
-}
-.vtt-dice-roll-btn {
-  width: 100%; padding: .45rem; font-size: .82rem; font-weight: 700;
-  background: rgba(255,210,0,.12); border: 1px solid rgba(255,210,0,.35);
-  border-radius: 8px; color: var(--gold); cursor: pointer;
-  transition: background .12s, box-shadow .12s;
-}
-.vtt-dice-roll-btn:hover:not(:disabled) {
-  background: rgba(255,210,0,.22); box-shadow: 0 0 12px rgba(255,210,0,.2);
-}
-.vtt-dice-roll-btn:disabled { opacity: .4; cursor: not-allowed; }
 
-/* ── Lanceur libre : historique des derniers jets ────────────────── */
-.vtt-dice-hist { margin-top: .5rem; border-top: 1px solid var(--border); padding-top: .45rem; }
-.vtt-dice-hist-hd {
-  display: flex; align-items: center; justify-content: space-between; gap: .5rem;
-  margin-bottom: .35rem;
-  font-size: .62rem; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .06em; color: var(--text-dim);
+/* 1 · Barre de commande (fixe) — filtre une compétence OU détecte une formule */
+.vtt-dice-cmd {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  padding: 10px 11px;
+  background: linear-gradient(180deg, var(--gold-glow), transparent), var(--surface-sunken);
+  border-bottom: 1px solid var(--border-md);
 }
-.vtt-dice-reroll-btn {
-  padding: .22rem .5rem; font-size: .68rem; font-weight: 700;
-  background: rgba(255,210,0,.12); border: 1px solid rgba(255,210,0,.35);
-  border-radius: 6px; color: var(--gold); cursor: pointer;
-  transition: background .12s;
+.vtt-dice-who { display: flex; align-items: center; gap: 7px; min-width: 0; flex: none; }
+.vtt-dice-who-av {
+  width: 28px; height: 28px; border-radius: 50%; flex: none;
+  display: grid; place-items: center; color: #fff;
+  font-family: var(--font-display); font-weight: 600; font-size: 13px;
+  background: linear-gradient(160deg, var(--gold), var(--gold-dark));
 }
-.vtt-dice-reroll-btn:hover { background: rgba(255,210,0,.24); }
-.vtt-dice-hist-list { display: flex; flex-direction: column; gap: .25rem; }
+.vtt-dice-who-mj { font-size: 11px; background: linear-gradient(160deg, var(--arcane), color-mix(in srgb, var(--arcane) 55%, #000)); }
+.vtt-dice-who-img { object-fit: cover; background: var(--surface-3); border: 1px solid var(--border-strong); }
+.vtt-dice-who b {
+  display: block; max-width: 92px; font-family: var(--font-display); font-size: 13.5px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.vtt-dice-bar {
+  flex: 1; display: flex; align-items: center; gap: 7px; min-width: 0;
+  padding: 6px 10px; border-radius: var(--r-full);
+  background: var(--surface-2); border: 1px solid var(--border-md); color: var(--text-muted); font-size: 12px;
+}
+.vtt-dice-bar:focus-within { border-color: var(--border-bright); box-shadow: 0 0 0 3px var(--gold-glow); }
+.vtt-dice-bar input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; font-size: 13px; color: var(--text); }
+.vtt-dice-bar input::placeholder { color: var(--text-muted); }
+.vtt-dice-bar button { flex: none; background: none; border: 0; cursor: pointer; color: var(--text-muted); font-size: 12px; }
+.vtt-dice-bar button:hover { color: var(--text); }
+
+/* 2 · Corps (seul élément défilant) */
+.vtt-dice-body { flex: 1; overflow-y: auto; padding: 10px 11px 12px; display: flex; flex-direction: column; gap: 9px; }
+.vtt-dice-detect {
+  display: flex; align-items: center; gap: 9px; padding: 9px 11px; border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--arcane) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--arcane) 34%, transparent);
+}
+.vtt-dice-detect b { font-family: var(--font-mono); font-size: 17px; font-weight: 700; color: var(--arcane-light); }
+.vtt-dice-detect em { font-style: normal; font-size: 11.5px; color: var(--text-muted); margin-left: auto; }
+
+.vtt-dice-sec { display: flex; flex-direction: column; gap: 6px; }
+.vtt-dice-sec-hd {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 9.5px; letter-spacing: .17em; text-transform: uppercase; font-weight: 700; color: var(--text-muted);
+}
+.vtt-dice-sec-hd > span { flex: none; }
+.vtt-dice-sec-hd::after { content: ''; order: 1; flex: 1; height: 1px; background: var(--border-md); }
+/* Pilule explicite (vider / désélectionner) placée après le trait, à droite */
+.vtt-dice-sec-btn {
+  order: 2; flex: none; cursor: pointer; font-family: inherit;
+  font-size: 11px; letter-spacing: .02em; text-transform: none; font-weight: 600;
+  color: var(--text-soft); background: var(--surface-2);
+  border: 1px solid var(--border-strong); border-radius: var(--r-full); padding: 2px 9px;
+}
+.vtt-dice-sec-btn:hover { color: var(--text); background: var(--surface-3); border-color: var(--border-bright); }
+/* « Vider » = action destructive → rouge, plus visible */
+.vtt-dice-sec-btn--danger { color: var(--crimson); background: color-mix(in srgb, var(--crimson) 12%, transparent); border-color: color-mix(in srgb, var(--crimson) 45%, transparent); }
+.vtt-dice-sec-btn--danger:hover { color: #fff; background: var(--crimson); border-color: var(--crimson); }
+
+/* Compétences : chips en grille 2 colonnes, la stat porte la couleur (liseré) */
+.vtt-dice-skills { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.vtt-skill-btn {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 7px;
+  padding: 6px 8px 6px 9px; border-radius: var(--r-sm); font-family: inherit; text-align: left;
+  background: var(--surface-2); border: 1px solid var(--border);
+  cursor: pointer; position: relative; overflow: hidden; transition: background .13s, border-color .13s;
+}
+.vtt-skill-btn::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2.5px; background: var(--c); }
+.vtt-skill-btn:hover { background: var(--surface-3); border-color: var(--border-strong); }
+.vtt-skill-btn.on {
+  background: color-mix(in srgb, var(--c) 15%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--c) 55%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 28%, transparent);
+}
+.vtt-sk-name {
+  display: flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 500; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.vtt-skill-btn.on .vtt-sk-name { font-weight: 600; }
+.vtt-sk-name i { font-style: normal; font-size: 9px; flex: none; }
+.vtt-sk-mod { font-family: var(--font-mono); font-size: 12.5px; font-weight: 700; color: var(--c); flex: none; }
+.vtt-dice-empty { padding: 20px 0; text-align: center; color: var(--text-muted); font-size: 12.5px; }
+
+/* Dés libres : grille 7 colonnes, indépendante d'un onglet */
+.vtt-dice-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.vtt-dice-die-btn {
+  position: relative; height: 38px; border-radius: var(--r-sm);
+  display: grid; place-items: center; font-family: var(--font-mono); font-size: 12.5px; font-weight: 700;
+  color: var(--text-soft); background: var(--surface-2); border: 1px solid var(--border);
+  cursor: pointer; user-select: none; transition: background .13s, color .13s, border-color .13s;
+}
+.vtt-dice-die-btn:hover { background: var(--surface-3); color: var(--text); border-color: var(--border-strong); }
+.vtt-dice-die-btn.active {
+  color: var(--arcane-light);
+  background: color-mix(in srgb, var(--arcane) 15%, transparent);
+  border-color: color-mix(in srgb, var(--arcane) 45%, transparent);
+}
+.vtt-dice-die-cnt {
+  position: absolute; top: -4px; right: -4px; min-width: 17px; height: 17px; padding: 0 3px;
+  display: grid; place-items: center; border-radius: var(--r-full); cursor: pointer;
+  font-size: 9.5px; font-weight: 700; color: #12161d;
+  background: var(--arcane-light); border: 1.5px solid var(--surface-1);
+}
+.vtt-dice-die-cnt:hover { background: var(--crimson); color: #fff; }
+
+/* Historique UNIFIÉ : compétences ET dés (clic = recharger · 🔁 = relancer) */
+.vtt-dice-hist { display: flex; flex-direction: column; gap: 4px; }
 .vtt-dice-hist-item {
-  display: flex; align-items: center; gap: .4rem;
-  padding: .28rem .5rem; width: 100%;
-  background: var(--bg-elevated); border: 1px solid var(--border);
-  border-radius: 6px; color: var(--text); cursor: pointer;
-  transition: border-color .12s, background .12s;
+  display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 8px;
+  width: 100%; padding: 6px 9px; text-align: left; cursor: pointer; font-family: inherit;
+  background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--r-sm);
+  transition: background .13s, border-color .13s;
 }
-.vtt-dice-hist-item:hover { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 8%, var(--bg-elevated)); }
-.vtt-dice-hist-formula { flex: 1; min-width: 0; text-align: left; font-size: .72rem; font-family: ui-monospace, monospace;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vtt-dice-hist-eq { font-size: .66rem; color: var(--text-muted); }
-.vtt-dice-hist-total { font-size: .82rem; font-weight: 800; color: var(--gold); min-width: 1.4rem; text-align: right; }
+.vtt-dice-hist-item:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.vtt-hi-ico { font-style: normal; font-size: 12px; flex: none; opacity: .8; }
+.vtt-hi-f { min-width: 0; font-size: 11.5px; color: var(--text-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vtt-hi-f b { font-family: var(--font-mono); font-weight: 700; color: var(--text-muted); font-size: 11px; margin-left: 5px; }
+.vtt-hi-t { font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--text); flex: none; }
+.vtt-hi-t.crit { color: var(--emerald); }
+.vtt-hi-t.fail { color: var(--crimson); }
+.vtt-hi-re { flex: none; font-size: 12px; color: var(--text-muted); cursor: pointer; padding: 0 2px; border-radius: var(--r-xs); }
+.vtt-hi-re:hover { color: var(--gold-2); background: var(--surface-3); }
+
+/* 3 · Barre de jet PARTAGÉE (fixe) — identique pour compétence et dés libres */
+.vtt-dice-roll {
+  flex: none; display: flex; flex-direction: column; gap: 8px;
+  padding: 9px 11px; border-top: 1px solid var(--border-md); background: var(--surface-sunken);
+}
+.vtt-dice-sel { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.vtt-dice-sel-ic {
+  width: 30px; height: 30px; flex: none; border-radius: var(--r-sm);
+  display: grid; place-items: center; font-size: 15px;
+  background: color-mix(in srgb, var(--sc) 14%, var(--surface-3));
+  border: 1px solid color-mix(in srgb, var(--sc) 30%, transparent);
+}
+.vtt-dice-sel-b { min-width: 0; flex: 1; }
+.vtt-dice-sel-b s { display: block; text-decoration: none; font-size: 9px; letter-spacing: .15em; text-transform: uppercase; color: var(--text-muted); font-weight: 700; }
+.vtt-dice-sel-b b { display: block; font-family: var(--font-display); font-size: 13.5px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vtt-dice-sel-f { flex: none; font-family: var(--font-mono); font-size: 15px; font-weight: 700; color: var(--sc); white-space: nowrap; }
+.vtt-dice-sel-f em { font-style: normal; font-size: 12px; color: var(--amber); }
+.vtt-dice-sel.none .vtt-dice-sel-b b { font-family: var(--font-body); font-size: 12.5px; font-weight: 500; color: var(--text-muted); }
+
+.vtt-dice-knobs { display: flex; align-items: center; gap: 7px; }
+.vtt-dice-mode { display: flex; gap: 2px; padding: 2px; flex: none; border-radius: var(--r-full); background: var(--surface-1); border: 1px solid var(--border); }
+.vtt-dice-mode button { width: 30px; height: 25px; border: 0; border-radius: var(--r-full); background: none; cursor: pointer; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: var(--text-muted); transition: .14s; }
+.vtt-dice-mode button:hover { color: var(--text-soft); }
+.vtt-dice-mode button.on[data-m="disadvantage"] { background: color-mix(in srgb, var(--crimson) 20%, transparent); color: color-mix(in srgb, var(--crimson) 45%, var(--text)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--crimson) 45%, transparent); }
+.vtt-dice-mode button.on[data-m="normal"] { background: var(--surface-3); color: var(--text-soft); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.vtt-dice-mode button.on[data-m="advantage"] { background: color-mix(in srgb, var(--emerald) 20%, transparent); color: color-mix(in srgb, var(--emerald) 45%, var(--text)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--emerald) 45%, transparent); }
+.vtt-dice-mode.locked { opacity: .45; pointer-events: none; }
+.vtt-dice-bonus { display: flex; align-items: center; gap: 1px; padding: 2px; flex: none; border-radius: var(--r-full); background: var(--surface-1); border: 1px solid var(--border); }
+.vtt-dice-bonus.set { border-color: color-mix(in srgb, var(--amber) 40%, transparent); background: color-mix(in srgb, var(--amber) 8%, transparent); }
+.vtt-dice-bonus button { width: 25px; height: 25px; border: 0; border-radius: var(--r-full); background: none; cursor: pointer; display: grid; place-items: center; font-size: 14px; font-weight: 700; color: var(--text-muted); }
+.vtt-dice-bonus button:hover { background: var(--surface-3); color: var(--text); }
+.vtt-dice-bonus input { width: 34px; text-align: center; background: none; border: 0; outline: 0; color: var(--text); font-family: var(--font-mono); font-size: 13px; font-weight: 700; -moz-appearance: textfield; }
+.vtt-dice-bonus input::-webkit-outer-spin-button,
+.vtt-dice-bonus input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.vtt-dice-bonus.set input { color: var(--amber); }
+.vtt-dice-hide {
+  flex: none; height: 29px; padding: 0 10px; border-radius: var(--r-full); cursor: pointer;
+  display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+  color: var(--text-muted); background: none; border: 1px solid var(--border-md);
+}
+.vtt-dice-hide:hover { color: var(--text-soft); background: var(--surface-2); }
+.vtt-dice-hide.on { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, transparent); background: color-mix(in srgb, var(--amber) 10%, transparent); }
+.vtt-dice-go {
+  flex: 1; height: 29px; border: 0; border-radius: var(--r-full); cursor: pointer;
+  font-size: 13px; font-weight: 700; color: #fff; white-space: nowrap;
+  background: linear-gradient(180deg, var(--gold), var(--gold-dark));
+  box-shadow: 0 6px 18px var(--gold-glow);
+}
+.vtt-dice-go:hover { filter: brightness(1.08); }
+.vtt-dice-go:disabled { opacity: .5; box-shadow: none; cursor: not-allowed; filter: none; background: var(--surface-3); color: var(--text-muted); }
+.vtt-dice-go.free {
+  background: linear-gradient(180deg, var(--arcane), color-mix(in srgb, var(--arcane) 65%, #000));
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--arcane) 28%, transparent);
+}
 
 /* ── Court repos (vote groupe) ───────────────────────────────────── */
 .vtt-rest-float {
@@ -9733,8 +9693,7 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-timer,
 .vtt-weather-ic,
 .vtt-weather-pop,
-.vtt-loot-panel,
-.vtt-dice-panel {
+.vtt-loot-panel {
   background: rgba(8,14,25,.74);
   border: 1px solid var(--vtt-stroke);
   border-radius: 14px;
@@ -11170,7 +11129,6 @@ html:not([data-theme="light"]) .vtt-root {
 
 .vtt-emote-picker,
 .vtt-loot-panel,
-.vtt-dice-panel,
 .vtt-music-panel,
 .vtt-rest-panel {
   border-radius: 16px;
@@ -11193,8 +11151,10 @@ html:not([data-theme="light"]) .vtt-root {
 }
 
 .vtt-dice-panel {
-  width: 286px;
-  padding: .72rem;
+  width: min(376px, 92vw);
+  max-height: min(620px, calc(100vh - 130px));
+  padding: 0;
+  overflow: hidden;
 }
 
 .vtt-emote-picker-search,
@@ -11261,8 +11221,6 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-loot-shop-row,
 .vtt-rest-counter,
 .vtt-rest-voter,
-.vtt-dice-formula-row,
-.vtt-dice-hist-item,
 .vtt-music-pool-item,
 .vtt-music-pl-sound {
   border: 1px solid rgba(255,255,255,.065);
@@ -11272,7 +11230,6 @@ html:not([data-theme="light"]) .vtt-root {
 
 .vtt-loot-row:hover,
 .vtt-loot-shop-row:hover,
-.vtt-dice-hist-item:hover,
 .vtt-music-pool-item:hover,
 .vtt-music-pl-sound:hover {
   border-color: rgba(126,176,255,.28);
@@ -11294,9 +11251,7 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-rest-btn,
 .vtt-music-upload-btn,
 .vtt-mact,
-.vtt-music-ctrl,
-.vtt-dice-reroll-btn,
-.vtt-dice-roll-btn {
+.vtt-music-ctrl {
   border-radius: 999px;
 }
 
@@ -11310,64 +11265,9 @@ html:not([data-theme="light"]) .vtt-root {
   background: rgba(255,255,255,.04);
 }
 
-.vtt-dice-grid {
-  grid-template-columns: repeat(4, 1fr);
-  gap: .42rem;
-}
-
-.vtt-dice-die-btn {
-  border-radius: 13px;
-  border-color: var(--vtt-stroke);
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.025));
-  font-size: .78rem;
-}
-
-.vtt-dice-die-btn:hover,
-.vtt-dice-die-btn.active {
-  border-color: rgba(240,191,87,.48);
-  background:
-    linear-gradient(180deg, rgba(240,191,87,.18), rgba(240,191,87,.06));
-}
-
-.vtt-dice-formula-row {
-  min-height: 36px;
-  padding: .42rem .55rem;
-}
-
-.vtt-dice-formula-str {
-  font-size: .78rem;
-  color: #dbeafe;
-}
-
-.vtt-dice-mode-row {
-  padding: 3px;
-  border: 1px solid var(--vtt-stroke);
-  border-radius: 999px;
-  background: rgba(0,0,0,.18);
-}
-
-.vtt-dice-mode-row .vtt-btn-sm {
-  flex: 1;
-  min-height: 28px;
-  justify-content: center;
-  border-radius: 999px;
-  border-color: transparent;
-  background: transparent;
-}
-
-.vtt-dice-roll-btn {
-  min-height: 38px;
-  color: #14120a;
-  background: linear-gradient(180deg, #f3c760, #d99d32);
-  border-color: rgba(255,224,138,.5);
-  box-shadow: 0 10px 24px rgba(217,157,50,.18);
-}
-
-.vtt-dice-roll-btn:hover:not(:disabled) {
-  background: linear-gradient(180deg, #ffd978, #e7ad3e);
-  box-shadow: 0 12px 30px rgba(217,157,50,.24);
-}
+/* [Grille de dés, dés, formule, mode, bouton lancer : restylés dans la section
+   « Lanceur de dés & compétences ». Les anciens overrides ambrés/4 colonnes sont
+   retirés — la refonte gouverne désormais ces éléments.] */
 
 .vtt-rest-counter {
   padding: .55rem .65rem;
@@ -11475,16 +11375,11 @@ html:not([data-theme="light"]) .vtt-root {
 [data-theme="light"] .vtt-rest-trigger,
 [data-theme="light"] .vtt-emote-picker,
 [data-theme="light"] .vtt-loot-panel,
-[data-theme="light"] .vtt-dice-panel,
 [data-theme="light"] .vtt-music-panel,
 [data-theme="light"] .vtt-rest-panel,
 [data-theme="light"] .vtt-combat-tracker {
   background: linear-gradient(180deg, rgba(255,255,255,.95), rgba(241,245,249,.92));
   border-color: var(--vtt-stroke);
-}
-
-[data-theme="light"] .vtt-dice-roll-btn {
-  color: #1f1300;
 }
 
 /* Paysage mobile : ces adaptations doivent rester après les styles principaux

@@ -152,7 +152,8 @@ import {
 import {
   _vttToggleDice, _vttDiceAddDie, _vttDiceRemoveDie, _vttDiceClear, _vttDiceBonusStep,
   _vttDiceBonusSet, _vttDiceMode, _vttDiceRoll, _closeDicePanel,
-  _vttDiceRerollLast, _vttDiceUseHistory, _vttJetsMode, setJetsBuilder,
+  _vttDiceUseHistory, setJetsBuilder,
+  _vttDiceCmdInput, _vttDiceSelectSkill, _vttDiceRerollHistory, _vttDiceRollTyped,
 } from './vtt-dice.js';
 import {
   _renderTimer, _timerStartTick, _timerStopTick, _vttTimerToggle, _vttTimerReset, _vttTimerLabel,
@@ -12984,9 +12985,12 @@ export const VTT_ACTIONS = {
   _vttDiceBonusSet,
   _vttDiceBonusStep,
   _vttDiceClear,
+  _vttDiceCmdInput,
   _vttDiceMode,
   _vttDiceRoll,
-  _vttDiceRerollLast,
+  _vttDiceRollTyped,
+  _vttDiceRerollHistory,
+  _vttDiceSelectSkill,
   _vttDiceUseHistory,
   _vttDrawColor,
   _vttDrawShape,
@@ -13005,7 +13009,6 @@ export const VTT_ACTIONS = {
   _vttFogRedo,
   _vttImportGithubRelease,
   _vttInsTab,
-  _vttJetsMode,
   _vttOpenSource,
   _vttRcolView,
   _vttSkillFilter,

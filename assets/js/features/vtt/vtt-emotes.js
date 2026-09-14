@@ -99,11 +99,9 @@ export function _vttToggleRollHidden() {
   if (!STATE.isAdmin) return;
   VS.rollHidden = !VS.rollHidden;
   lsJson.set('vtt-roll-hidden', VS.rollHidden);
-  const btn = document.getElementById('vtt-roll-hide-btn');
-  if (btn) {
-    btn.classList.toggle('active', VS.rollHidden);
-    btn.textContent = VS.rollHidden ? '🕶 Jet caché MJ' : '👁 Visible joueurs';
-  }
+  // Le bouton 👁/🕶 vit désormais dans le lanceur (vtt-dice.js) : on le laisse se
+  // re-rendre via l'évènement partagé (pas d'import croisé) plutôt que de le muter.
+  document.dispatchEvent(new CustomEvent('vtt-roll-history'));
 }
 
 export async function _vttRollSkill(skillName, stat) {
@@ -186,6 +184,18 @@ export async function _vttRollSkill(skillName, stat) {
     natural: roll,
     total,
   });
+
+  // Historique UNIFIÉ du lanceur (état partagé VS.rollHistory pour éviter un import
+  // croisé vtt-emotes ↔ vtt-dice). On notifie le panneau par un évènement DOM ; s'il
+  // est ouvert, vtt-dice.js le re-render. Jamais un historique factice : vrai résultat.
+  const _modSigned = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '±0';
+  VS.rollHistory.unshift({
+    kind: 'skill', label: skillName, skillName, stat,
+    mod, mode: effectiveRollMode, bonus: VS.rollBonus || 0,
+    formulaStr: `1d20 ${_modSigned}`, total, crit: isCrit, fail: isFumble,
+  });
+  if (VS.rollHistory.length > 6) VS.rollHistory.length = 6;
+  document.dispatchEvent(new CustomEvent('vtt-roll-history'));
 }
 
 export async function _saveEmotes(list) {

@@ -48,10 +48,14 @@ export const VS = {
   miniCharId:   null,     // characterId sélectionné dans la mini-fiche
   bstTracker:   {},       // creatureId → tracker joueur (pvActuel, pmActuel, caEstimee…)
   selectedMulti: new Set(), // ids des tokens en multi-sélection
-  rollMode:     'normal', // 'advantage' | 'normal' | 'disadvantage'
-  rollBonus:    0,        // bonus contextuel temporaire (anneau, sort, etc.)
+  rollMode:     'normal', // 'advantage' | 'normal' | 'disadvantage' — PARTAGÉ compétences + dés libres (lanceur)
+  rollBonus:    0,        // bonus contextuel temporaire (anneau, sort, etc.) — PARTAGÉ compétences + dés libres
   rollHidden:   false,    // MJ only — jet caché des joueurs (init via lsJson dans vtt.js)
   diceSkills:   [],       // [{name, stat}] chargées depuis world/dice_skills
+  // Historique UNIFIÉ du lanceur (compétences + dés libres), le plus récent en tête.
+  // Alimenté par vtt-dice.js (_vttDiceRoll) ET vtt-emotes.js (_vttRollSkill) — état
+  // partagé pour éviter un import croisé (dépendance circulaire) entre ces modules.
+  rollHistory:  [],       // [{ kind:'free'|'skill', label, formulaStr, total, ... }]
 
   // ── Caches de règles (chargés une fois, lus par le combat ET l'affichage de sorts) ──
   damageTypes:   null,    // cache types de dégâts (world/damage_types)

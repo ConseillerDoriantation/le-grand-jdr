@@ -758,11 +758,15 @@ export function _vttSkillFilterClear() {
   inp?.focus();
 }
 
-// ── Corps « Jets » (compétences + actions de combat + actions de créature) ──
-// Extrait pour être rendu par le LANCEUR DE DÉS du dock (vtt-dice.js) : le joueur
-// lance ses compétences ET ses dés libres depuis un seul endroit. Renvoie
-// { hasSkills, body } pour le token courant (ou celui passé). Sans token
-// contrôlable → { hasSkills:false }.
+// ── Données « Compétences » pour le LANCEUR DE DÉS du dock (vtt-dice.js) ──
+// Renvoie une LISTE STRUCTURÉE (pas du HTML) — vtt-dice.js rend la grille + la barre
+// partagée. Le calcul (statMod + eqBonus + profBonus) et le title détaillé restent
+// ICI, inchangés. Contrat setJetsBuilder conservé : aucun import de vtt-dice.js.
+//   → { hasSkills, who:{name,initial}, skills:[{name,stat,statKey,statColor,mod,
+//        modStr,level,eqBonus,title}] }.
+// Sans token contrôlable → { hasSkills:false } (strictement équivalent à l'existant :
+// dés libres seuls). Les « Actions de combat » (Courir) et « Actions de la créature »
+// NE sont plus ici : elles vivent dans la modale « Action tactique ».
 export function _vttBuildJetsBody(tArg) {
   // Sans token explicite : on prend le token contrôlé de la scène (propriétaire ou
   // délégation), pas seulement la sélection — le joueur lance ses compétences sans
@@ -776,133 +780,47 @@ export function _vttBuildJetsBody(tArg) {
     );
     t = id ? (VS.tokens[id]?.data ?? null) : null;
   }
-  if (!t) return { hasSkills: false, body: '' };
+  if (!t) return { hasSkills: false };
 
-  const _combatActionsHtml = (() => {
-    const inCombat = !!VS.session?.combat?.active;
-    const canEdit  = _canControlToken(t);
-    if (!inCombat || !canEdit || (t.type !== 'player' && t.type !== 'npc')) return '';
-    const ld2  = _live(t);
-    const base = ld2.displayMovement ?? 6;
-    const couru = (t.bonusMvt||0) > 0;
-    return `<div class="vtt-ins-section">
-        <div class="vtt-ins-section-title">⚔️ Actions de combat</div>
-        <div class="vtt-combat-actions">
-          <button class="vtt-combat-action-btn${couru?' used':''}"
-            data-vtt-fn="_vttCourir" data-vtt-args="${t.id}"
-            ${couru?'disabled':''}>
-            <span class="vtt-ca-icon">🏃</span>
-            <span class="vtt-ca-body">
-              <span class="vtt-ca-name">Courir</span>
-              <span class="vtt-ca-desc">${couru?'Déjà utilisé':'Ajoute +'+base+' cases de mouvement'}</span>
-            </span>
-          </button>
-        </div>
-      </div>`;
-  })();
+  const canRoll = (t.type === 'player' || t.type === 'npc') && VS.diceSkills.length && _canControlToken(t);
+  if (!canRoll) return { hasSkills: false };
 
-  const _skillsHtml = ((t.type==='player'||t.type==='npc') && VS.diceSkills.length && _canControlToken(t)) ? (() => {
-    const cForBonus = t?.characterId ? VS.characters[t.characterId] : null;
-    const _mkBtn = (s) => {
+  const ld = _live(t);
+  const name = ld?.displayName ?? t.name ?? 'Token';
+  const cForBonus = t?.characterId ? VS.characters[t.characterId] : null;
+  // Portrait : image du token si posée (override), sinon photo de la fiche de perso.
+  const avatar = t.imageUrl || cForBonus?.photoURL || cForBonus?.photo || cForBonus?.avatar || null;
+  const who = { name, initial: String(name || '?').trim().slice(0, 1).toUpperCase() || '?', avatar };
+
+  // Tri : par caractéristique associée (FOR, DEX, CON, INT, SAG, CHA) puis alphabétique.
+  const _STAT_ORDER = { FOR: 0, DEX: 1, CON: 2, INT: 3, SAG: 4, CHA: 5 };
+  const skills = VS.diceSkills
+    .slice()
+    .sort((a, b) => {
+      const oa = _STAT_ORDER[a.stat] ?? 99, ob = _STAT_ORDER[b.stat] ?? 99;
+      return oa !== ob ? oa - ob : a.name.localeCompare(b.name, 'fr');
+    })
+    .map((s) => {
       const statKey = _STAT_KEY[s.stat] || '';
       const statMod = _tokenStatMod(t, statKey);
       const eqBonus = cForBonus ? computeEquipSkillBonus(cForBonus.equipement || {}, s.name) : 0;
-      const skillLvl = (cForBonus?.competences && !Array.isArray(cForBonus.competences)) ? cForBonus.competences[s.name] : null;
-      const profBonus = (skillLvl === 'forme' || skillLvl === 'expert') ? 2 : 0;
+      const level = (cForBonus?.competences && !Array.isArray(cForBonus.competences)) ? cForBonus.competences[s.name] : null;
+      const profBonus = (level === 'forme' || level === 'expert') ? 2 : 0;
       const mod = statMod + eqBonus + profBonus;
       const modStr = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '±0';
-      const col  = _STAT_COLOR[s.stat] || 'var(--text-dim)';
-      const parts = [`base ${statMod>=0?'+':''}${statMod}`];
-      if (eqBonus) parts.push(`équip. ${eqBonus>0?'+':''}${eqBonus}`);
-      if (profBonus) parts.push(`${skillLvl==='expert'?'expertise':'maîtrise'} +${profBonus}`);
-      if (skillLvl==='expert') parts.push('avantage');
-      const eqTitle = ` title="${_esc(parts.join(' · '))}"`;
-      const profDot = skillLvl==='expert' ? ' <span style="color:#f4c430;font-size:.72em" title="Expertise — +2 & avantage">◉</span>'
-                    : skillLvl==='forme'  ? ' <span style="color:#7eb0ff;font-size:.72em" title="Maîtrisée — +2">◐</span>' : '';
-      const hide = _searchIncludes(s.name, _skillFilter) ? '' : ' style="display:none"';
-      return `<button class="vtt-skill-btn" data-skill="${_esc(s.name)}" data-vtt-fn="_vttRollSkill" data-vtt-args="${_esc(s.name)}|${s.stat}"${eqTitle}${hide}>
-          <span class="vtt-sk-name">${s.name}${eqBonus!==0?' <span style="color:#22c38e;font-size:.7em" title="Bonus d\'équipement">●</span>':''}${profDot}</span>
-          <span class="vtt-sk-mod" style="color:${col}">${s.stat ? s.stat+' '+modStr : '—'}</span>
-        </button>`;
-    };
-    const byStat = {};
-    for (const s of VS.diceSkills) (byStat[s.stat || ''] ||= []).push(s);
-    const groupsHtml = _SK_STAT_ORDER.filter(k => byStat[k]?.length).map(k => {
-      const list = byStat[k].slice().sort((a,b) => a.name.localeCompare(b.name, 'fr'));
-      const col  = _STAT_COLOR[k] || 'var(--text-dim)';
-      const anyVis = list.some(s => _searchIncludes(s.name, _skillFilter));
-      return `<div class="vtt-sk-group"${anyVis?'':' style="display:none"'}>
-          <div class="vtt-sk-group-hd" style="color:${col};border-color:${col}">${_SK_STAT_LABEL[k] || 'Autres'}</div>
-          <div class="vtt-sk-group-grid">${list.map(_mkBtn).join('')}</div>
-        </div>`;
-    }).join('');
-    const anyMatch = VS.diceSkills.some(s => _searchIncludes(s.name, _skillFilter));
-    return `<div class="vtt-ins-section">
-        <div class="vtt-ins-section-title">🎲 Jets de compétences</div>
-        <div class="vtt-roll-settings">
-          <div class="vtt-atk-mode vtt-skill-mode">
-            <div class="vtt-atk-mode-label">Mode de lancer</div>
-            <div class="vtt-atk-mode-toggle" role="group" aria-label="Mode de lancer">
-              <button class="vtt-atk-mode-btn is-dis${VS.rollMode==='disadvantage'?' is-active':''}" data-vtt-fn="_vttSetRollMode" data-vtt-args="disadvantage" data-mode="disadvantage" aria-pressed="${VS.rollMode==='disadvantage'}">
-                <span class="vtt-atk-mode-icon">−</span>
-                <span class="vtt-atk-mode-copy"><strong>Désavantage</strong><small>Garde le plus bas</small></span>
-              </button>
-              <button class="vtt-atk-mode-btn is-normal${VS.rollMode==='normal'?' is-active':''}" data-vtt-fn="_vttSetRollMode" data-vtt-args="normal" data-mode="normal" aria-pressed="${VS.rollMode==='normal'}">
-                <span class="vtt-atk-mode-icon">•</span>
-                <span class="vtt-atk-mode-copy"><strong>Normal</strong><small>1d20</small></span>
-              </button>
-              <button class="vtt-atk-mode-btn is-adv${VS.rollMode==='advantage'?' is-active':''}" data-vtt-fn="_vttSetRollMode" data-vtt-args="advantage" data-mode="advantage" aria-pressed="${VS.rollMode==='advantage'}">
-                <span class="vtt-atk-mode-icon">+</span>
-                <span class="vtt-atk-mode-copy"><strong>Avantage</strong><small>Garde le plus haut</small></span>
-              </button>
-            </div>
-          </div>
-          <div class="vtt-roll-set-row">
-            <label class="vtt-atk-bonus-field vtt-skill-bonus" title="Bonus / malus fixe ajouté au jet">
-              <span>Bonus contextuel</span>
-              <span class="vtt-atk-bonus-stepper">
-                <button type="button" data-vtt-fn="_vttAdjBonus" data-vtt-args="-1" data-vtt-blur title="−1">-</button>
-                <input type="number" id="vtt-bonus-val" value="${VS.rollBonus}" min="-20" max="20"
-                  data-vtt-fn="_vttSetBonus" data-vtt-on="input" data-vtt-args="$value">
-                <button type="button" data-vtt-fn="_vttAdjBonus" data-vtt-args="1" data-vtt-blur title="+1">+</button>
-              </span>
-            </label>
-            ${STATE.isAdmin ? `
-            <div class="vtt-atk-bonus-field vtt-roll-vis-field" title="Jet caché : seul le MJ voit le résultat dans le log">
-              <span>Visibilité du jet</span>
-              <button class="vtt-roll-hide-btn${VS.rollHidden?' active':''}" id="vtt-roll-hide-btn" data-vtt-fn="_vttToggleRollHidden">
-                ${VS.rollHidden ? '🕶 Jet caché MJ' : '👁 Visible joueurs'}
-              </button>
-            </div>` : ''}
-          </div>
-        </div>
-        <div class="vtt-skill-filter">
-          <span class="vtt-skill-filter-ic">🔍</span>
-          <input type="text" class="vtt-skill-filter-input" placeholder="Filtrer une compétence…"
-            data-vtt-fn="_vttSkillFilter" data-vtt-on="input" data-vtt-args="$value" value="${_esc(_skillFilter)}">
-          <button type="button" class="vtt-skill-filter-clr${_skillFilter?'':' hide'}" title="Effacer" data-vtt-fn="_vttSkillFilterClear">✕</button>
-        </div>
-        <div class="vtt-ins-skills">
-          ${groupsHtml}
-          <div class="vtt-sk-empty"${anyMatch?' style="display:none"':''}>Aucune compétence ne correspond.</div>
-        </div>
-      </div>`;
-  })() : '';
+      const parts = [`base ${statMod >= 0 ? '+' : ''}${statMod}`];
+      if (eqBonus) parts.push(`équip. ${eqBonus > 0 ? '+' : ''}${eqBonus}`);
+      if (profBonus) parts.push(`${level === 'expert' ? 'expertise' : 'maîtrise'} +${profBonus}`);
+      if (level === 'expert') parts.push('avantage');
+      return {
+        name: s.name,
+        stat: s.stat || '',
+        statKey,
+        statColor: _STAT_COLOR[s.stat] || 'var(--text-dim)',
+        mod, modStr, level, eqBonus,
+        title: parts.join(' · '),
+      };
+    });
 
-  const _summonActionsHtml = (Array.isArray(t.summonActions) && t.summonActions.length)
-    ? `<div class="vtt-ins-section">
-        <div class="vtt-ins-section-title">🎬 Actions de la créature</div>
-        ${t.summonActions.map(a => {
-          const det = [a.degats && `🎲 ${_esc(a.degats)}`, a.portee && `📏 ${_esc(a.portee)}`, a.pm ? `${a.pm} PM` : ''].filter(Boolean).join(' · ');
-          return `<div class="vtt-creat-act">
-            <div class="vtt-creat-act-name">🎬 ${_esc(a.nom || 'Action')}</div>
-            ${det ? `<div style="font-size:.7rem;color:var(--text-muted);margin-top:.12rem">${det}</div>` : ''}
-            ${a.effet ? `<div class="vtt-creat-atk-desc">${_esc(a.effet)}</div>` : ''}
-          </div>`;
-        }).join('')}
-      </div>`
-    : '';
-
-  const body = (_combatActionsHtml + _skillsHtml + _summonActionsHtml).trim();
-  return { hasSkills: !!body, body };
+  return { hasSkills: skills.length > 0, who, skills };
 }
