@@ -6679,6 +6679,14 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-ms-deck-val small { font-size: .62rem; font-weight: 700; color: var(--text-dim); }
 .vtt-ms-deckbar.is-over .vtt-ms-deck-val { color: #ff8b8b; }
 .vtt-ms-deck-hint { font-size: .58rem; color: var(--text-dim); margin-left: auto; flex: 1; text-align: right; min-width: 110px; }
+.cs-v3 .vtt-ms-spellgrid .toggle.is-always {
+  border-color: rgba(167,139,250,.48) !important;
+  background: rgba(139,92,246,.2) !important;
+  cursor: default;
+}
+.cs-v3 .vtt-ms-spellgrid .toggle.is-always::after {
+  background: #bca9ff !important;
+}
 /* La mini-fiche est étroite → une seule colonne, cartes un peu plus compactes */
 .cs-v3 .vtt-ms-spellgrid { grid-template-columns: 1fr; gap: 8px; }
 

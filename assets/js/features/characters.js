@@ -18,6 +18,7 @@ import {
   sortCharactersForDisplay, modStr,
 } from '../shared/char-stats.js';
 import { getCharacterRules } from '../shared/character-rules.js';
+import { getDeckUsage } from '../shared/spell-deck.js';
 import { isFeatureEnabled } from '../shared/features.js';
 import { recordRecentNavigation } from '../shared/recent-navigation.js';
 import {
@@ -323,15 +324,16 @@ function _computeCharCalculation(btn) {
     const intMod = getMod(c, 'intelligence');
     const progression = Math.floor(Math.max(0, intMod) * Math.pow(Math.max(0, level - 1), 0.75));
     const penalty = Math.min(0, intMod);
-    const active = (c.deck_sorts || []).filter(spell => spell.actif).length;
+    const usage = getDeckUsage(c.deck_sorts);
     title = 'Capacité du deck';
-    result = `${active} / ${calcDeckMax(c)}`;
+    result = `${usage.used} / ${calcDeckMax(c)}${usage.free ? ` + ${usage.free} libre${usage.free > 1 ? 's' : ''}` : ''}`;
     rows = [
       _calcRow('Capacité de base', 3),
       _calcRow('Malus d’Intelligence', modStr(penalty)),
       _calcRow('Progression', modStr(progression), `Intelligence ${modStr(intMod)} · niveau ${level}`),
+      usage.free ? _calcRow('Toujours prêts', usage.free, 'Ne consomment aucun emplacement') : '',
     ].join('');
-    note = 'Le premier nombre correspond aux sorts actifs, le second à la capacité maximale.';
+    note = 'Le premier nombre correspond aux emplacements utilisés. Les sorts « Toujours prêts » restent disponibles sans réduire cette capacité.';
   } else if (type?.startsWith('weapon-')) {
     const slot = btn.dataset.slot || getPrimaryWeaponSlotId();
     const item = _weaponForSlot(c, slot);
@@ -793,10 +795,11 @@ function _buildStatTilesHtml(c, canEdit, lvlPointsRemaining) {
 function _buildTabsHtml(c, v3Tab) {
   // Icône SVG du jeu maison (rendu homogène cross-OS vs émoji ; hérite currentColor).
   const _ico = (id) => `<svg class="cs-tab-svg" aria-hidden="true"><use href="./assets/img/icons.svg#icon-${id}"/></svg>`;
+  const deckUsage = getDeckUsage(c.deck_sorts);
   return [
     { k: 'combat',    ico: 'sword',       lbl: 'Combat' },
     { k: 'capacites', ico: 'star',        lbl: 'Capacités' },
-    { k: 'sorts',     ico: 'sparkles',    lbl: 'Sorts',      badge: `${(c.deck_sorts||[]).filter(x=>x.actif).length}/${calcDeckMax(c)}` },
+    { k: 'sorts',     ico: 'sparkles',    lbl: 'Sorts',      badge: `${deckUsage.used}/${calcDeckMax(c)}${deckUsage.free ? ` +${deckUsage.free}` : ''}` },
     { k: 'inv',     ico: 'bag',         lbl: 'Inventaire', badge: `${(c.inventaire||[]).length||''}` },
     { k: 'compte',  ico: 'coin',        lbl: 'Bourse' },
     { k: 'journal', ico: 'book',        lbl: 'Journal' },
@@ -811,7 +814,7 @@ function _buildTabsHtml(c, v3Tab) {
   </button>`).join('');
 }
 
-function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckMax, titresChips }) {
+function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckFree, deckMax, titresChips }) {
   const buildSwitcher = _buildBuildSwitcherHtml(c, canEdit);
   const owner = _characterOwnerMeta(c);
   return `<aside class="id-side" id="cs-sidebar" data-aura="${c.auraColor?'custom':(c.aura||'blue')}">
@@ -954,7 +957,7 @@ function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax,
     <div class="cs-mini-grid cs-mini-grid-3">
       <button class="cs-mini cs-calc-trigger" data-action="toggleCharDerivative" data-calc="ca" data-id="${c.id}" title="Voir le calcul de la CA"><span class="cs-mini-icon">🛡️</span><span class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val">${calcCA(c)}</span></span><span class="cs-mini-arrow" aria-hidden="true">›</span></button>
       <button class="cs-mini cs-calc-trigger" data-action="toggleCharDerivative" data-calc="speed" data-id="${c.id}" title="Voir le calcul de la vitesse"><span class="cs-mini-icon">🏃</span><span class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val">${calcVitesse(c)}m</span></span><span class="cs-mini-arrow" aria-hidden="true">›</span></button>
-      <button class="cs-mini cs-calc-trigger" data-action="toggleCharDerivative" data-calc="deck" data-id="${c.id}" title="Voir le calcul de la capacité du deck"><span class="cs-mini-icon">✦</span><span class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}<small style="font-size:.62rem;color:var(--text-dim);font-weight:600;margin-left:1px">/${deckMax}</small></span></span><span class="cs-mini-arrow" aria-hidden="true">›</span></button>
+      <button class="cs-mini cs-calc-trigger" data-action="toggleCharDerivative" data-calc="deck" data-id="${c.id}" title="Voir le calcul de la capacité du deck"><span class="cs-mini-icon">✦</span><span class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}<small style="font-size:.62rem;color:var(--text-dim);font-weight:600;margin-left:1px">/${deckMax}${deckFree ? ` +${deckFree} libre${deckFree > 1 ? 's' : ''}` : ''}</small></span></span><span class="cs-mini-arrow" aria-hidden="true">›</span></button>
     </div>
     <div class="brk cs-brk" id="cs-brk-panel"></div>
 
@@ -1166,7 +1169,9 @@ function renderCharSheet(c, keepTab) {
   const pvCur  = c.hp ?? c.pvActuel ?? pvMax, pmCur = c.pmActuel ?? c.pm ?? pmMax;
   const pvPct  = pct(pvCur, pvMax), pmPct = pct(pmCur, pmMax);
   const xpCur  = c.exp || 0, xpPalier = calcPalier(c.niveau || 1), xpPct = pct(xpCur, xpPalier);
-  const deckActifs = (c.deck_sorts || []).filter(s => s.actif).length;
+  const deckUsage  = getDeckUsage(c.deck_sorts);
+  const deckActifs = deckUsage.used;
+  const deckFree   = deckUsage.free;
   const deckMax    = calcDeckMax(c);
   const hpBarCls   = pvPct < 25 ? 'vital-bar-fill low' : pvPct < 50 ? 'vital-bar-fill mid' : 'vital-bar-fill';
 
@@ -1184,7 +1189,7 @@ function renderCharSheet(c, keepTab) {
 
   const titresChips = _characterTitlesHtml(c, canEdit);
 
-  const sidebarHtml = _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckMax, titresChips });
+  const sidebarHtml = _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckFree, deckMax, titresChips });
   const mainColHtml = _buildMainColHtml(canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, v3Tab });
 
   area.innerHTML = `<div class="cs-v3" style="${_auraStyleVars(c)}">

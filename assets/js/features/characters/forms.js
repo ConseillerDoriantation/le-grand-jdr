@@ -6,6 +6,7 @@ import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal, confirmModal, modalSection } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { calcDeckMax, calcPVMax, calcPMMax, pct } from '../../shared/char-stats.js';
+import { deckHasRoomFor, getDeckUsage, isAlwaysPreparedSpell } from '../../shared/spell-deck.js';
 import { spellUid, ensureSpellIds, _getCurrentSpellChar } from './spells-calc.js';
 // Hôte des sorts : PNJ ou perso. Défaut = STATE.activeChar / collection 'characters'.
 import { runSpellRerenderIfHosted, spellHostCollection } from './spells.js';
@@ -122,6 +123,10 @@ export async function toggleSort(idx, btn = null) {
   const c=_getCurrentSpellChar(); if(!c) return;
   const sorts=c.deck_sorts||[];
   const s = sorts[idx]; if (!s) return;
+  if (isAlwaysPreparedSpell(s)) {
+    showNotif('Ce sort est « Toujours prêt » : le MJ peut modifier ce statut dans sa fiche.', 'info');
+    return;
+  }
   // Un joueur ne peut mettre dans son Deck qu'un sort VALIDÉ par le MJ.
   // Rétro-compat : un sort créé AVANT la validation MJ (aucun champ) = validé
   // (sinon tous les sorts existants seraient bloqués hors du deck).
@@ -133,8 +138,8 @@ export async function toggleSort(idx, btn = null) {
     return;
   }
   const deckMax = calcDeckMax(c);
-  const deckCount = sorts.filter(x => x?.actif).length;
-  if (!s.actif && deckCount >= deckMax) {
+  const deckCount = getDeckUsage(sorts).used;
+  if (!deckHasRoomFor(s, sorts, deckMax)) {
     showNotif(`Deck plein (${deckCount}/${deckMax}) — retire un sort avant d'en ajouter un.`, 'error');
     return;
   }
@@ -277,6 +282,7 @@ export async function duplicateSort(idx) {
   clone.id = spellUid();
   clone.nom = `${(src.nom || 'Sort').trim() || 'Sort'} (copie)`;
   clone.actif = false;
+  clone.alwaysPrepared = false;
   clone.mjValidation = 'pending';
   clone.mjValidated = false;
   sorts.splice(idx + 1, 0, clone);
@@ -298,6 +304,7 @@ export async function setSortValidation(idx, status) {
   const nextStatus = ['ok', 'pending', 'no'].includes(status) ? status : 'pending';
   const next = { ...s, mjValidation: nextStatus, mjValidated: nextStatus === 'ok' };
   if (nextStatus !== 'ok') next.actif = false;
+  else if (isAlwaysPreparedSpell(next)) next.actif = true;
   sorts[idx] = next;
   c.deck_sorts = sorts;
   if (charSession.getCurrentChar()?.id === c.id)

@@ -42,6 +42,7 @@ import {
 import { getArmorTypeOptions } from '../shared/armor-set-settings.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
+import { getDeckUsage } from '../shared/spell-deck.js';
 import { loadRarities, getRarities, RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
 import { _getTraits } from './characters/data.js';
 import { listPlaces } from './map/data/places.repo.js';
@@ -1146,7 +1147,11 @@ function _renderFiche(n) {
   const { totals } = _npcVitalTotals(n);
   const pvBase = _npcBaseVital(n, 'pv'), pmBase = _npcBaseVital(n, 'pm');
   const deckMax = calcDeckMax(n);
-  const deckActifs = _npcSpellList(n).filter(s => s?.actif !== false).length;
+  const deckUsage = getDeckUsage(_npcSpellList(n).map(spell => (
+    spell && typeof spell.actif !== 'boolean' ? { ...spell, actif: true } : spell
+  )));
+  const deckActifs = deckUsage.used;
+  const deckFree = deckUsage.free;
   const orgs = Array.isArray(n.organisations) ? n.organisations.filter(Boolean) : [];
   const initial = (n.nom || '?')[0].toUpperCase();
   const portraitInner = n.imageUrl ? `<img src="${_esc(n.imageUrl)}" alt="">` : `<span>${initial}</span>`;
@@ -1228,7 +1233,7 @@ function _renderFiche(n) {
     <div class="cs-mini-grid cs-mini-grid-3">
       <div class="cs-mini"><span class="cs-mini-icon">🛡️</span><span class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val" data-npc-derived="ca">${totals.ca}</span></span></div>
       <div class="cs-mini"><span class="cs-mini-icon">🏃</span><span class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val" data-npc-derived="vitesse">${totals.vitesse}m</span></span></div>
-      <div class="cs-mini"><span class="cs-mini-icon">✦</span><span class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}/${deckMax}</span></span></div>
+      <div class="cs-mini"><span class="cs-mini-icon">✦</span><span class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}/${deckMax}${deckFree ? ` +${deckFree}` : ''}</span></span></div>
     </div>
     ${adm
       ? `<div class="npc-id-notes">
@@ -1245,7 +1250,7 @@ function _renderFiche(n) {
       <button type="button" class="tab-v3 ${tab === 'combat' ? 'active' : ''}" role="tab" aria-selected="${tab === 'combat'}" data-action="npcSetTab" data-tab="combat">
         ${_tico('sword')} Combat</button>
       <button type="button" class="tab-v3 ${tab === 'sorts' ? 'active' : ''}" role="tab" aria-selected="${tab === 'sorts'}" data-action="npcSetTab" data-tab="sorts">
-        ${_tico('sparkles')} Sorts <span class="tab-badge">${deckActifs}/${deckMax}</span></button>
+        ${_tico('sparkles')} Sorts <span class="tab-badge">${deckActifs}/${deckMax}${deckFree ? ` +${deckFree}` : ''}</span></button>
     </nav>`;
   // Onglet Sorts actif → le PNJ devient l'hôte du moteur de sorts (édition +
   // enregistrement sur son doc). Sinon on relâche l'hôte (comportement joueur).

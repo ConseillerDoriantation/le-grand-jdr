@@ -6,6 +6,7 @@ import { openModal, closeModal, pushModal, popModal, closeModalDirect, updateMod
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br, _norm } from '../../shared/html.js';
 import { calcDeckMax, calcPMMax, getMaitriseBonus as getSharedMaitriseBonus } from '../../shared/char-stats.js';
+import { deckHasRoomFor, getDeckUsage, isAlwaysPreparedSpell } from '../../shared/spell-deck.js';
 import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, getMatrixSuggestions, getComboConfig } from '../../shared/spell-matrices.js';
@@ -318,7 +319,7 @@ function _renderSpellInspector(allSorts, pmDelta, c, canEdit) {
     </div>
     <div class="cs-spellinspector-state">
       <span><small>STATUT</small><b>${_sortValidationState(s)==='ok'?'✓ Validé':_sortValidationState(s)==='no'?'✕ À corriger':'⌛ En attente'}</b></span>
-      <span><small>DECK</small><b>${s.actif?'⚡ Préparé':'Non préparé'}</b></span>
+      <span><small>DECK</small><b>${isAlwaysPreparedSpell(s) ? '∞ Toujours prêt' : s.actif?'⚡ Préparé':'Non préparé'}</b></span>
     </div>
     ${mjLimitChips.length ? `<div class="cs-spellinspector-mjlimits">
       <span>LIMITES MJ</span>
@@ -339,7 +340,9 @@ function _renderSpellInspector(allSorts, pmDelta, c, canEdit) {
       <button class="is-compare ${isCompared?'on':''}" data-action="_sortsToggleCompare" data-idx="${index}">${isCompared?'✓ Sélectionné':'◫ Comparer'}</button>
       ${canEdit ? `<button data-action="duplicateSort" data-idx="${index}">⧉ Dupliquer</button>
       ${(s.runes || []).includes('Invocation') ? `<button data-action="_openInvocationConfig" data-idx="${index}" title="Modifier les invocations autorisées">🐾 ${invocationScope.mode === 'all' ? 'Toutes' : `${invocationScope.ids.length} autorisée${invocationScope.ids.length > 1 ? 's' : ''}`}</button>` : ''}
-      <button data-action="toggleSort" data-idx="${index}">${s.actif?'− Retirer':'⚡ Préparer'}</button>
+      ${isAlwaysPreparedSpell(s)
+        ? '<span class="cs-spellinspector-always">∞ Toujours prêt</span>'
+        : `<button data-action="toggleSort" data-idx="${index}">${s.actif?'− Retirer':'⚡ Préparer'}</button>`}
       <button class="is-primary" data-action="editSort" data-idx="${index}">✏ Modifier</button>
       <button class="is-danger" data-action="deleteSort" data-idx="${index}">🗑 Supprimer</button>` : ''}
     </footer>
@@ -372,7 +375,7 @@ function _renderSpellComparePanel(allSorts, pmDelta, c) {
       runes: { label: 'Runes', value: _spellCompareRuneText(s) },
       role: { label: 'Rôle', value: types || 'Non défini' },
       action: { label: 'Activation', value: actionLabel },
-      deck: { label: 'Deck', value: s.actif ? 'Équipé' : 'Hors deck' },
+      deck: { label: 'Deck', value: isAlwaysPreparedSpell(s) ? 'Toujours prêt · libre' : s.actif ? 'Préparé' : 'Hors deck' },
       effect: { label: 'Effet', value: String(s.effet || 'Aucune description') },
       recipe: { label: 'Empreinte', value: _spellRecipeKey(s) },
     };
@@ -493,23 +496,28 @@ function _renderDeckStats(activeSorts = [], deckMax = Infinity, pmDelta = 0) {
 
 // ── Résumé du Deck : liste compacte des sorts réellement préparés ──
 function _renderDeckSockets(entries, deckMax, pmDelta, canEdit, pmCur = null, pmMax = null) {
-  const over = Number.isFinite(deckMax) && entries.length > deckMax;
+  const usage = getDeckUsage(entries.map(({ s }) => s));
+  const over = Number.isFinite(deckMax) && usage.used > deckMax;
   const replacing = _sortsReplaceIdx != null;
-  const prepared = entries.map(({ s, i }) => canEdit
-    ? (replacing
+  const prepared = entries.map(({ s, i }) => {
+    const always = isAlwaysPreparedSpell(s);
+    const body = `<span class="cs-prepared-spell-icon">${s.icon ? _esc(s.icon) : '✦'}</span><span class="cs-prepared-spell-name">${_esc(s.nom || 'Sort')}</span><b>${_effectiveSortPm(s, pmDelta)} ${_esc(_sortResLabel(s))}</b><i>${always ? '∞' : replacing ? '⇄' : canEdit ? '✕' : ''}</i>`;
+    if (always) return `<span class="cs-prepared-spell is-always" title="Toujours prêt · aucun emplacement consommé">${body}</span>`;
+    if (!canEdit) return `<span class="cs-prepared-spell">${body}</span>`;
+    return (replacing
       ? `<button class="cs-prepared-spell is-swap" data-action="_sortsReplaceWith" data-idx="${i}" title="Remplacer ${_esc(s.nom || 'ce sort')} par le sort choisi">`
       : `<button class="cs-prepared-spell" data-action="toggleSort" data-idx="${i}" title="Retirer ${_esc(s.nom || 'ce sort')} du deck">`)
-      + `<span class="cs-prepared-spell-icon">${s.icon ? _esc(s.icon) : '✦'}</span><span class="cs-prepared-spell-name">${_esc(s.nom || 'Sort')}</span><b>${_effectiveSortPm(s, pmDelta)} ${_esc(_sortResLabel(s))}</b><i>${replacing?'⇄':'✕'}</i></button>`
-    : `<span class="cs-prepared-spell"><span class="cs-prepared-spell-icon">${s.icon ? _esc(s.icon) : '✦'}</span><span class="cs-prepared-spell-name">${_esc(s.nom || 'Sort')}</span><b>${_effectiveSortPm(s, pmDelta)} ${_esc(_sortResLabel(s))}</b></span>`);
+      + `${body}</button>`;
+  });
   // Σ ne totalise que les sorts payés en PM : ils partagent la même réserve.
   const pmSum = entries.reduce((a, { s }) => a + (spellCostRes(s).id === 'pm' ? _effectiveSortPm(s, pmDelta) : 0), 0);
-  const freeSlots = Number.isFinite(deckMax) ? Math.max(0, deckMax - entries.length) : null;
+  const freeSlots = Number.isFinite(deckMax) ? Math.max(0, deckMax - usage.used) : null;
   const pmRes = pmMax != null
     ? `<span class="cs-sorts-pmres ${pmCur <= Math.floor(pmMax / 4) ? 'is-low' : ''}" title="Tes points de magie actuels / maximum">💧 <b>${pmCur}</b><small>/${pmMax} PM</small></span>`
     : '';
   return `<div class="cs-sorts-sockets cs-sorts-prepared ${over ? 'is-over' : ''} ${replacing ? 'is-replacing' : ''}">
     <div class="cs-sorts-prepared-head">
-      <div><strong>${replacing ? 'Choisir le sort à remplacer' : 'Sorts préparés'}</strong><small>${entries.length}${Number.isFinite(deckMax)?`/${deckMax}`:''} emplacement${deckMax !== 1 ? 's' : ''} utilisé${entries.length !== 1 ? 's' : ''}</small></div>
+      <div><strong>${replacing ? 'Choisir le sort à remplacer' : 'Sorts préparés'}</strong><small>${usage.used}${Number.isFinite(deckMax)?`/${deckMax}`:''} emplacement${deckMax !== 1 ? 's' : ''} utilisé${usage.used !== 1 ? 's' : ''}${usage.free ? ` · ${usage.free} toujours prêt${usage.free > 1 ? 's' : ''}` : ''}</small></div>
       <span class="cs-sorts-prepared-metrics">${pmSum ? `<b title="Coût total du deck">Σ ${pmSum} PM</b>` : ''}${pmRes}</span>
     </div>
     <div class="cs-sorts-prepared-list">${prepared.length ? prepared.join('') : '<span class="cs-sorts-prepared-empty">Aucun sort préparé.</span>'}</div>
@@ -534,10 +542,13 @@ function _sortsTileTap(i) {
 async function _sortsTileToggle(i) {
   const c = _getCurrentSpellChar(); if (!c) return;
   const s = (c.deck_sorts || [])[i]; if (!s) return;
+  if (isAlwaysPreparedSpell(s)) {
+    showNotif('Ce sort est toujours prêt et ne consomme aucun emplacement.', 'info');
+    return;
+  }
   const validated = STATE.isAdmin || _sortValidationState(s) === 'ok';
   const deckMax = calcDeckMax(c);
-  const deckCount = (c.deck_sorts || []).filter(x => x?.actif).length;
-  if (!s.actif && validated && Number.isFinite(deckMax) && deckCount >= deckMax) {
+  if (!s.actif && validated && !deckHasRoomFor(s, c.deck_sorts, deckMax)) {
     _sortsReplaceIdx = i;
     _sortsRerender();
     showNotif('Deck plein — choisis dans le tray ⚡ le sort à remplacer.', 'info');
@@ -587,7 +598,9 @@ function _sortsOpenSheet(i) {
   wrap.innerHTML = `<div class="cs-v3 cs-spell-sheet" role="dialog" aria-modal="true" aria-label="${_esc(s.nom || 'Sort')}">
     <div class="cs-spell-sheet-card"></div>
     <div class="cs-spell-sheet-btns">
-      ${canEdit ? `<button class="btn btn-sm ${s.actif ? 'btn-outline' : 'btn-gold'}" data-action="_sortsSheetToggle" data-idx="${i}">${s.actif ? '− Retirer du Deck' : '⚡ Préparer'}</button>` : ''}
+      ${canEdit ? (isAlwaysPreparedSpell(s)
+        ? '<span class="btn btn-sm cs-spell-sheet-always">∞ Toujours prêt · aucun emplacement</span>'
+        : `<button class="btn btn-sm ${s.actif ? 'btn-outline' : 'btn-gold'}" data-action="_sortsSheetToggle" data-idx="${i}">${s.actif ? '− Retirer du Deck' : '⚡ Préparer'}</button>`) : ''}
       ${canEdit ? `<button class="btn btn-outline btn-sm" data-action="editSort" data-idx="${i}">✏️ Modifier</button>` : ''}
       <button class="btn btn-outline btn-sm cs-spell-sheet-close" type="button">Fermer</button>
     </div>
@@ -811,7 +824,9 @@ export function renderCharDeck(c, canEdit) {
 
   // Stats globales avant filtre
   const activeSorts = allSorts.filter(s => s.actif);
-  const deckCount = activeSorts.length;
+  const deckUsage = getDeckUsage(allSorts);
+  const deckCount = deckUsage.used;
+  const deckFree = deckUsage.free;
   const deckMax   = calcDeckMax(c);
   const npcSpellHost = _isNpcSpellHost(c);
   // PM du perso (mode Préparer) : ressource courante pour signaler les sorts
@@ -941,8 +956,8 @@ export function renderCharDeck(c, canEdit) {
       <div class="cs-sorts-deckhdr">
         <span class="cs-sorts-deck-ico">🔮</span>
         <div class="cs-sorts-deck-copy">
-          <b>${deckCount}/${deckMax} sort${deckCount !== 1 ? 's' : ''} préparé${deckCount !== 1 ? 's' : ''}</b>
-          <small>${deckPmSum} PM pour lancer tout le deck</small>
+          <b>${deckCount}/${deckMax} emplacement${deckMax !== 1 ? 's' : ''}${deckFree ? ` · ${deckFree} toujours prêt${deckFree > 1 ? 's' : ''}` : ''}</b>
+          <small>${activeSorts.length} sort${activeSorts.length !== 1 ? 's' : ''} disponible${activeSorts.length !== 1 ? 's' : ''} · ${deckPmSum} PM au total</small>
         </div>
       </div>
       ${deckDotsHtml}
@@ -983,7 +998,7 @@ export function renderCharDeck(c, canEdit) {
         <button class="cs-sorts-seg cs-sorts-seg--deck ${mode==='prepare'?'on':''} ${deckOver?'is-over':''}" role="tab" aria-selected="${mode==='prepare'}" data-action="_sortsSetMode" data-mode="prepare" title="${npcSpellHost ? 'Les nouveaux sorts sont ajoutés automatiquement. Clique une tuile pour les ajouter ou les retirer du Deck.' : 'Préparer ton Deck : clique une tuile pour ajouter ou retirer un sort (capacité INT)'}">
           <span class="cs-sorts-seg-ico">⚡</span>
           <span class="cs-sorts-seg-copy"><strong>Deck</strong></span>
-          <b>${deckCount}<small>/${deckMax}</small></b>
+          <b>${deckCount}<small>/${deckMax}${deckFree ? ` +${deckFree}` : ''}</small></b>
         </button>
       </div>
       ${mode==='grimoire' ? `<div class="cs-sorts-viewseg cs-sorts-densityseg" role="group" aria-label="Densité d'affichage">
@@ -1382,13 +1397,15 @@ async function _sortsPrepareVisible() {
   if (!c || !charSession.getCanEditChar()) return;
   const sorts = (c.deck_sorts || []).map(s => ({ ...s }));
   const deckMax = calcDeckMax(c);
-  const activeCount = sorts.filter(s => s?.actif).length;
+  const activeCount = getDeckUsage(sorts).used;
   const room = Number.isFinite(deckMax) ? Math.max(0, deckMax - activeCount) : Infinity;
   const candidates = _sortsVisibleIndices.filter(idx => {
     const s = sorts[idx];
     return s && !s.actif && (STATE.isAdmin || _sortValidationState(s) === 'ok');
   });
-  const selected = candidates.slice(0, room);
+  const always = candidates.filter(idx => isAlwaysPreparedSpell(sorts[idx]));
+  const normal = candidates.filter(idx => !isAlwaysPreparedSpell(sorts[idx])).slice(0, room);
+  const selected = [...always, ...normal];
   if (!selected.length) {
     showNotif(room <= 0 ? 'Le deck est plein.' : 'Aucun sort affiché ne peut être préparé.', 'info');
     return;
@@ -1404,9 +1421,12 @@ async function _sortsPrepareVisible() {
 async function _sortsUnprepareVisible() {
   const c = _getCurrentSpellChar();
   if (!c || !charSession.getCanEditChar()) return;
-  const selected = _sortsVisibleIndices.filter(idx => c.deck_sorts?.[idx]?.actif);
+  const selected = _sortsVisibleIndices.filter(idx => {
+    const spell = c.deck_sorts?.[idx];
+    return spell?.actif && !isAlwaysPreparedSpell(spell);
+  });
   if (!selected.length) {
-    showNotif('Aucun sort affiché n’est préparé.', 'info');
+    showNotif('Aucun sort affiché ne peut être retiré. Les sorts « Toujours prêts » sont gérés par le MJ.', 'info');
     return;
   }
   if (!await confirmModal(`Retirer <b>${selected.length}</b> sort${selected.length > 1 ? 's' : ''} affiché${selected.length > 1 ? 's' : ''} du deck ?`, {
@@ -1432,6 +1452,7 @@ async function _sortsValidateVisible() {
   selected.forEach(idx => {
     sorts[idx].mjValidation = 'ok';
     sorts[idx].mjValidated = true;
+    if (isAlwaysPreparedSpell(sorts[idx])) sorts[idx].actif = true;
   });
   await _sortsCommitBulk(c, sorts, `${selected.length} sort${selected.length > 1 ? 's validés' : ' validé'}.`);
 }
@@ -1807,6 +1828,10 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
                  : vs === 'no' ? 'Sort refusé par le Maître du Jeu'
                  : 'Pas encore validé par le Maître du Jeu';
   const valStatus = vs === 'ok' ? '' : `<span class="cs-spellcard-status cs-spellcard-status--${vs}" title="${valTitle}">${vs==='no'?'❌':'⏳'}</span>`;
+  const alwaysPrepared = isAlwaysPreparedSpell(s);
+  const alwaysStatus = alwaysPrepared
+    ? '<span class="cs-spellcard-always" title="Toujours dans le Deck · aucun emplacement consommé">∞ Toujours prêt</span>'
+    : '';
   const valActions = STATE.isAdmin ? `<span class="cs-spellcard-mj-actions" data-stop-propagation>
     <button class="cs-spellcard-mjbtn ok ${vs==='ok'?'is-active':''}" data-action="setSortValidation" data-idx="${i}" data-val="ok" title="Valider ce sort">✅</button>
     <button class="cs-spellcard-mjbtn no ${vs==='no'?'is-active':''}" data-action="setSortValidation" data-idx="${i}" data-val="no" title="Refuser ce sort">❌</button>
@@ -1848,8 +1873,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   </div>`;
 
   const validationAllows = STATE.isAdmin || vs === 'ok';
-  const deckFull = deckCount >= deckMax;
-  const deckAllows = s.actif || !deckFull;
+  const deckAllows = deckHasRoomFor(s, c.deck_sorts, deckMax);
   const canActivate = validationAllows && deckAllows;
   const lockTitle = !validationAllows
     ? 'Doit être validé par le MJ pour entrer dans le Deck'
@@ -1866,7 +1890,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
     : ` tabindex="0" data-action="_sortsInspectSpell" data-idx="${i}" role="button" aria-label="${_sortsCompareKeys.length===1 && !isCompared?'Choisir comme second sort : ':'Inspecter '}${_esc(s.nom || 'ce sort')}"`;
   const isSwapIn = isTiles && _sortsReplaceIdx === i;
 
-  return `<article class="cs-spellcard ${s.actif?'is-actif':''} ${isOpen?'is-open':''} ${isCompared?'is-compared':''} ${isInspected?'is-inspected':''} ${vs==='no'?'is-refused':''} ${pmShort>0?'is-pmshort':''} ${s.mjNotes?'has-mjnote':''} ${isSwapIn?'is-swapin':''}" style="--type-col:${typeCol}"
+  return `<article class="cs-spellcard ${s.actif?'is-actif':''} ${alwaysPrepared?'is-always-prepared':''} ${isOpen?'is-open':''} ${isCompared?'is-compared':''} ${isInspected?'is-inspected':''} ${vs==='no'?'is-refused':''} ${pmShort>0?'is-pmshort':''} ${s.mjNotes?'has-mjnote':''} ${isSwapIn?'is-swapin':''}" style="--type-col:${typeCol}"
     data-sort-idx="${i}"${tileAttrs}>
     ${canDrag ? `<span class="cs-spellcard-drag" data-action="" data-stop-propagation title="Maintenir puis glisser pour déplacer le sort" aria-label="Déplacer le sort">⠿</span>` : ''}
 
@@ -1876,7 +1900,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
         <div class="cs-spellcard-name-row">
           <span class="cs-spellcard-name" title="${_esc(s.nom||'Sans nom')}">${_esc(s.nom||'Sans nom')}</span>
           ${canEdit ? `<button type="button" class="cs-spellcard-quickedit" data-action="editSort" data-idx="${i}" data-stop-propagation aria-label="Modifier ${_esc(s.nom || 'ce sort')}" title="Modifier ce sort"><span aria-hidden="true">✏️</span><span class="cs-spellcard-quickedit-label">Modifier</span></button>` : ''}
-          ${valStatus}${valActions}
+          ${alwaysStatus}${valStatus}${valActions}
         </div>
         <div class="cs-spellcard-sub">
           <span class="cs-spellcard-act" style="--c:${acfg.color}">${acfg.label}</span>
@@ -1885,7 +1909,9 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
         </div>
       </div>
       <span class="cs-spellcard-pm" title="${_esc(pmTitle)}">${pmVal}<small>${_esc(resLbl)}</small></span>
-      ${canEdit
+      ${alwaysPrepared
+        ? '<span class="toggle cs-spellcard-equip on is-always" data-label="∞ Toujours prêt" title="Dans le Deck sans consommer d’emplacement"></span>'
+        : canEdit
         ? `<button type="button" class="toggle cs-spellcard-equip ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" data-label="${s.actif?'✓ Préparé':(!canActivate?'🔒 Bloqué':'＋ Préparer')}" aria-pressed="${s.actif?'true':'false'}" aria-label="${s.actif?'Retirer':'Ajouter'} ${_esc(s.nom||'ce sort')} ${s.actif?'du':'au'} deck" data-action="toggleSort" data-idx="${i}" data-stop-propagation title="${lockTitle}"></button>`
         : `<span class="toggle cs-spellcard-equip ${s.actif?'on':''}" data-label="${s.actif?'✓ Préparé':'Non préparé'}"></span>`}
     </header>
@@ -2568,6 +2594,9 @@ function _buildClassicSortFromDOM(idx = -1, prevList = []) {
   const validation = STATE.isAdmin
     ? (document.getElementById('s-classic-validation')?.value || 'pending')
     : previousValidation;
+  const alwaysPrepared = !_itemEditCtx && STATE.isAdmin
+    ? !!document.getElementById('s-classic-always-prepared')?.checked
+    : !!prev.alwaysPrepared;
   return {
     designMode: 'classic',
     classicFormulaFinal: true,
@@ -2633,7 +2662,8 @@ function _buildClassicSortFromDOM(idx = -1, prevList = []) {
       : (prev.mjNotes || ''),
     mjValidation: validation,
     mjValidated: validation === 'ok',
-    actif: idx >= 0 ? !!prev.actif : false,
+    alwaysPrepared,
+    actif: alwaysPrepared && validation === 'ok' ? true : (idx >= 0 ? !!prev.actif : false),
     id: prev.id || null,
   };
 }
@@ -2916,9 +2946,10 @@ async function _openClassicSortModal(idx, s, allTypes) {
               <div class="classic-spell-section-head"><span>MJ</span><div><b>Validation</b><small>Équilibrage et exceptions.</small></div></div>
               ${STATE.isAdmin ? `
                 <label><span>Statut</span><select id="s-classic-validation" class="input-field">${_classicSelectOptions([['ok','Validé'],['pending','En attente'],['no','Refusé']], validation)}</select></label>
+                ${!_itemEditCtx ? `<label class="classic-spell-check classic-spell-always"><input type="checkbox" id="s-classic-always-prepared" ${s?.alwaysPrepared ? 'checked' : ''}><span><b>∞ Toujours prêt</b><small>Reste dans le Deck sans utiliser d’emplacement. Idéal pour Rage et les aptitudes de classe.</small></span></label>` : ''}
                 <label class="classic-spell-check"><input type="checkbox" id="s-classic-always-max" ${s?.mjAlwaysMax ? 'checked' : ''}><span><b>Toujours valeur maximum</b><small>Les dés prennent leur valeur maximale.</small></span></label>
                 <label><span>Notes MJ</span><textarea id="s-classic-mj-notes" class="input-field" rows="2">${_esc(s?.mjNotes || '')}</textarea></label>`
-              : `<div class="classic-spell-readonly">${validation === 'ok' ? '✓ Validé' : validation === 'no' ? '✕ Refusé' : '◷ En attente de validation'}</div>`}
+              : `<div class="classic-spell-readonly">${validation === 'ok' ? '✓ Validé' : validation === 'no' ? '✕ Refusé' : '◷ En attente de validation'}</div>${s?.alwaysPrepared ? '<div class="classic-spell-readonly is-always">∞ Toujours prêt · hors capacité du Deck</div>' : ''}`}
             </section>
           </aside>
         </div>
@@ -3602,6 +3633,9 @@ export async function openSortModal(idx, s) {
                   : '⏳ En attente de validation du MJ';
         return `<div class="cs-mjval-readonly cs-mjval-readonly--${vs}">${lbl}</div>`;
       })()}
+      ${!STATE.isAdmin && s?.alwaysPrepared
+        ? '<div class="cs-mjval-readonly cs-mjval-readonly--always">∞ Toujours prêt · ne consomme aucun emplacement du Deck</div>'
+        : ''}
 
       <div class="form-group" style="margin-bottom:.5rem">
         <label style="font-size:.72rem">Notes / restrictions <span style="color:var(--text-dim);font-weight:400;font-size:.68rem">(affichées dans la fiche)</span></label>
@@ -3615,6 +3649,18 @@ export async function openSortModal(idx, s) {
           value="${s?.pmOverride ?? ''}" placeholder="auto"
           style="max-width:120px">
       </div>
+      ${!_itemEditCtx ? `<div class="cs-mj-validation cs-mj-validation--always ${s?.alwaysPrepared?'is-on':''}">
+        <input type="checkbox" id="s-always-prepared" ${s?.alwaysPrepared?'checked':''}
+          data-change="_csMjValToggle">
+        <label for="s-always-prepared" class="cs-mj-validation-label">
+          <span class="cs-mj-validation-switch"><span class="cs-mj-validation-thumb"></span></span>
+          <span class="cs-mj-validation-info">
+            <span class="cs-mj-validation-title">∞ Toujours prêt</span>
+            <span class="cs-mj-validation-sub">Le sort reste utilisable dans le Deck sans occuper d’emplacement — aptitude de classe, Rage, posture…</span>
+          </span>
+          <span class="cs-mj-validation-state"></span>
+        </label>
+      </div>` : ''}
       <div class="cs-mj-validation cs-mj-validation--max ${s?.mjAlwaysMax?'is-on':''}">
         <input type="checkbox" id="s-mj-always-max" ${s?.mjAlwaysMax?'checked':''}
           data-change="_csMjValToggle">
@@ -5152,6 +5198,7 @@ function _buildSortFromDOM() {
   return {
     icon:        iconRaw.trim() || '',
     mjValidation: mjVal, mjValidated: mjVal === 'ok',
+    alwaysPrepared: !!document.getElementById('s-always-prepared')?.checked,
     noyau, noyauTypeId, noyauTypeIds: [..._noyauIdsEdit], runes, types,
     actionMode: (_runeCountsEdit?.[ACTION_RUNE] || 0) > 0
       ? (document.getElementById('s-action-mode')?.value || _actionModeEdit || 'reaction')
@@ -5431,7 +5478,7 @@ function _sortContentSig(s) {
   if (!s) return '';
   // `nom` exclu : renommer un sort est purement cosmétique et ne doit PAS
   // redéclencher la validation MJ (seul le contenu jouable compte).
-  const SKIP = new Set(['nom','actif','mjValidation','mjValidated','catId','pm','pmOverride','mjNotes','mjAlwaysMax','enchantSlot','types','typeSoin','id','maitriseActive']);
+  const SKIP = new Set(['nom','actif','alwaysPrepared','mjValidation','mjValidated','catId','pm','pmOverride','mjNotes','mjAlwaysMax','enchantSlot','types','typeSoin','id','maitriseActive']);
   const o = {};
   Object.keys(s).filter(k => !SKIP.has(k)).sort().forEach(k => { o[k] = s[k]; });
   o.types = [...(_getSortTypes(s) || [])].sort();
@@ -5551,6 +5598,9 @@ async function _saveClassicSort(idx, btn = null) {
     // Un sort créé pour un PNJ est immédiatement utilisable dans le VTT. Le MJ
     // peut toujours l'en retirer individuellement depuis la vue Deck partagée.
     if (idx < 0 && _isNpcSpellHost(character)) spell.actif = true;
+    // Sur une fiche de personnage, aucun sort en attente ou refusé ne doit
+    // rester lançable, y compris lorsqu'il porte l'exception « Toujours prêt ».
+    if (!_isNpcSpellHost(character) && spell.mjValidation !== 'ok') spell.actif = false;
 
     if (!STATE.isAdmin && previous
         && (previousValidation === 'ok' || previousValidation === 'no')
@@ -5642,6 +5692,9 @@ export async function saveSort(idx, btn = null) {
       ? (document.getElementById('s-mj-validation')?.value || 'pending')
       : prevVal;
     const mjValidated  = mjValidation === 'ok'; // rétro-compat booléen
+    const alwaysPrepared = STATE.isAdmin
+      ? !!document.getElementById('s-always-prepared')?.checked
+      : (idx >= 0 ? !!sorts[idx]?.alwaysPrepared : false);
 
     // PM override (MJ uniquement) : si vide → null (utilise autoPm). Si admin n'existe pas ce champ.
     const pmOvrRaw = STATE.isAdmin ? document.getElementById('s-pm-override')?.value : null;
@@ -5653,6 +5706,7 @@ export async function saveSort(idx, btn = null) {
     const newSort = _sanitizeAbsorbedComboFields({
       icon:     (document.getElementById('s-icon')?.value || '').trim() || '',
       mjValidation, mjValidated,
+      alwaysPrepared,
       mjAlwaysMax: STATE.isAdmin
         ? !!document.getElementById('s-mj-always-max')?.checked
         : (idx >= 0 ? !!sorts[idx]?.mjAlwaysMax : false),
@@ -5680,7 +5734,9 @@ export async function saveSort(idx, btn = null) {
       // Legacy compat : typeSoin si defensif sans offensif + mode soin
       typeSoin: types.includes('defensif') && !types.includes('offensif') && (document.getElementById('s-prot-mode')?.value === 'soin'),
       catId:         document.getElementById('s-catid')?.value || '',
-      actif:         idx >= 0 ? !!sorts[idx].actif : _isNpcSpellHost(c),
+      actif:         alwaysPrepared && mjValidation === 'ok'
+        ? true
+        : (idx >= 0 ? !!sorts[idx].actif : _isNpcSpellHost(c)),
       enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
       enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
     enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
@@ -5731,6 +5787,9 @@ export async function saveSort(idx, btn = null) {
     });
     // Id STABLE (les index bougent au tri/drag ; le VTT peut référencer le sort).
     newSort.id = (idx >= 0 && sorts[idx]?.id) || spellUid();
+    // L'exception ne contourne jamais la validation du MJ : elle ne rend le
+    // sort automatiquement actif qu'une fois celui-ci validé.
+    if (!_isNpcSpellHost(c) && newSort.mjValidation !== 'ok') newSort.actif = false;
     // Validation : côté JOUEUR, un sort VALIDÉ modifié repasse « À valider » et
     // sort du Deck ; un sort REFUSÉ corrigé repart AUSSI dans la file du MJ
     // (sinon il resterait refusé à jamais). Le MJ pilote la validation

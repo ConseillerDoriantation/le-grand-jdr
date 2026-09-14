@@ -19634,6 +19634,53 @@ button.cs-prepared-spell:hover {
 }
 .cs-v3 .cs-sorts-prepared-foot button { cursor: pointer; }
 .cs-v3 .cs-sorts-prepared-foot .is-over { color: #ff8b8b; border-color: rgba(239,68,68,.3); }
+
+/* Sort hors capacité : visible dans le Deck, mais aucun emplacement consommé. */
+.cs-v3 .cs-spellcard-always,
+.cs-spellinspector-always {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  max-width: 100%;
+  padding: 3px 7px;
+  border: 1px solid rgba(167,139,250,.34);
+  border-radius: 999px;
+  background: rgba(139,92,246,.11);
+  color: #cbbcff;
+  font: 700 .58rem/1.1 var(--font-ui, var(--font-body));
+  white-space: nowrap;
+}
+.cs-v3 .cs-spellcard-head .toggle.cs-spellcard-equip.is-always {
+  border-color: rgba(167,139,250,.55) !important;
+  background: rgba(139,92,246,.18) !important;
+  color: #ddd3ff !important;
+  cursor: default;
+}
+.cs-v3 .cs-spellcard-head .toggle.cs-spellcard-equip.is-always::before {
+  color: inherit;
+}
+.cs-v3 .cs-prepared-spell.is-always {
+  border-color: rgba(167,139,250,.3);
+  background: rgba(139,92,246,.08);
+}
+.cs-v3 .cs-prepared-spell.is-always > i { color: #bca9ff; font-size: .82rem; }
+.cs-v3 .cs-mjval-readonly--always,
+.classic-spell-readonly.is-always {
+  border-color: rgba(167,139,250,.32);
+  background: rgba(139,92,246,.09);
+  color: #cbbcff;
+}
+.cs-v3 .cs-mj-validation--always.is-on {
+  border-color: rgba(167,139,250,.42);
+  background: rgba(139,92,246,.09);
+}
+.cs-v3 .cs-spell-sheet-always {
+  border-color: rgba(167,139,250,.4);
+  background: rgba(139,92,246,.12);
+  color: #cbbcff;
+  cursor: default;
+}
 .cs-v3 .cs-sorts-prepared-foot .cs-sorts-swapcancel { margin-left: auto; color: #ff9aaa; }
 
 /* La liste perd progressivement ses colonnes secondaires sans tronquer le nom. */

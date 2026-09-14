@@ -38,6 +38,7 @@ import {
   getPrimaryWeaponSlotId,
 } from '../../shared/equipment-slots.js';
 import { canControlCharacter } from '../../shared/character-state.js';
+import { deckHasRoomFor, getDeckUsage, isAlwaysPreparedSpell } from '../../shared/spell-deck.js';
 
 let _miniTab = 'combat'; // onglet actif de la mini-fiche (état local)
 
@@ -326,12 +327,12 @@ function _msQuickSummary(c) {
   // qui, eux, ne sont pas dans le dock (Deck, Or) ou complètent (CA, Vitesse).
   const deckMax = calcDeckMax(c);
   // Les sorts PRÉPARÉS vivent dans deck_sorts (cf. spells.js), pas dans sorts.
-  const deckCount = (c?.deck_sorts || []).filter(s => s && s.actif).length;
+  const deckUsage = getDeckUsage(c?.deck_sorts);
   return `<div class="vtt-ms-summary">
     <div class="vtt-ms-quickfacts">
       <span><b>${calcCA(c)}</b><small>CA</small></span>
       <span><b>${calcVitesse(c)}</b><small>VIT.</small></span>
-      <span><b>${deckCount}/${deckMax}</b><small>DECK</small></span>
+      <span><b>${deckUsage.used}/${deckMax}${deckUsage.free ? ` +${deckUsage.free}` : ''}</b><small>DECK</small></span>
       <span><b>${calcOr(c)}</b><small>OR</small></span>
     </div>
   </div>`;
@@ -414,6 +415,10 @@ async function _vttToggleMsSort(charId, uid, idx) {
   const c = VS.characters[charId]; if (!c) return;
   const sorts = [...(c.deck_sorts||[])];
   const s = sorts[idx]; if (!s) return;
+  if (isAlwaysPreparedSpell(s)) {
+    showNotif('Ce sort est toujours prêt et ne consomme aucun emplacement.', 'info');
+    return;
+  }
   // Un joueur ne peut mettre dans son Deck qu'un sort VALIDÉ par le MJ (le MJ n'est pas limité).
   const isValidated = (s.mjValidation || (s.mjValidated ? 'ok' : 'pending')) === 'ok';
   if (!s.actif && !isValidated && !STATE.isAdmin) {
@@ -421,8 +426,8 @@ async function _vttToggleMsSort(charId, uid, idx) {
     return;
   }
   const deckMax = calcDeckMax(c);
-  const deckCount = sorts.filter(x => x?.actif).length;
-  if (!s.actif && deckCount >= deckMax) {
+  const deckCount = getDeckUsage(sorts).used;
+  if (!deckHasRoomFor(s, sorts, deckMax)) {
     showNotif(`Deck plein (${deckCount}/${deckMax}) — retire un sort avant d'en ajouter un.`, 'error');
     return;
   }
@@ -796,18 +801,20 @@ function _vttSpellCardHtml(s, i, c, uid, canEdit, deckCount = 0, deckMax = Infin
       return `<span class="cs-runechip" style="--c:${m.color}" title="${_esc(nom)}">${m.icon} ${_esc(nom)}${n>1?` ×${n}`:''}</span>`;
     }).join('')}</div>` : '';
   const validationAllows = STATE.isAdmin || vs === 'ok';
-  const deckFull = deckCount >= deckMax;
-  const deckAllows = s.actif || !deckFull;
+  const alwaysPrepared = isAlwaysPreparedSpell(s);
+  const deckAllows = deckHasRoomFor(s, c.deck_sorts, deckMax);
   const canActivate = validationAllows && deckAllows;
   const lockTitle = !validationAllows
     ? 'Doit être validé par le MJ pour entrer dans le Deck'
     : !deckAllows
       ? `Deck plein (${deckCount}/${deckMax}) — retire un sort avant d'en ajouter un`
       : (s.actif?'Retirer du deck':'Ajouter au deck');
-  const toggle = canEdit
+  const toggle = alwaysPrepared
+    ? '<div class="toggle on is-always" title="Toujours prêt · aucun emplacement consommé"></div>'
+    : canEdit
     ? `<div class="toggle ${s.actif?'on':''} ${(!canActivate && !s.actif)?'is-locked':''}" data-vtt-fn="_vttToggleMsSort" data-vtt-args="${c.id}|${uid}|${i}" title="${lockTitle}"></div>`
     : `<div class="toggle ${s.actif?'on':''}"></div>`;
-  return `<article class="cs-spellcard ${s.actif?'is-actif':''} ${vs==='no'?'is-refused':''}" style="--type-col:${typeCol}"
+  return `<article class="cs-spellcard ${s.actif?'is-actif':''} ${alwaysPrepared?'is-always-prepared':''} ${vs==='no'?'is-refused':''}" style="--type-col:${typeCol}"
       data-name="${_esc(_norm(s.nom||''))}" data-cat="${_esc(s.catId||'__none')}" data-actif="${s.actif?1:0}">
     <header class="cs-spellcard-head">
       ${toggle}
@@ -815,6 +822,7 @@ function _vttSpellCardHtml(s, i, c, uid, canEdit, deckCount = 0, deckMax = Infin
       <div class="cs-spellcard-id">
         <div class="cs-spellcard-name" title="${_esc(s.nom||'Sans nom')}">${_esc(s.nom||'Sans nom')}</div>
         <div class="cs-spellcard-sub">
+          ${alwaysPrepared ? '<span class="cs-spellcard-always" title="Ne consomme aucun emplacement">∞ Toujours prêt</span>' : ''}
           <span class="cs-spellcard-act" style="--c:${acfg.color}">${acfg.label}</span>
           ${concentration ? `<span class="cs-spellcard-conc" title="Concentration">🧠</span>` : ''}
           ${noyauPills}
@@ -832,7 +840,9 @@ function _vttSpellCardHtml(s, i, c, uid, canEdit, deckCount = 0, deckMax = Infin
 function _msTabSorts(c, uid, canEdit) {
   const sorts = c?.deck_sorts || [];
   if (!sorts.length) return '<div class="vtt-ms-empty">Aucun sort</div>';
-  const deckCount = sorts.filter(s => s.actif).length;
+  const deckUsage = getDeckUsage(sorts);
+  const deckCount = deckUsage.used;
+  const deckFree = deckUsage.free;
   const deckMax = calcDeckMax(c);
   const over = deckCount > deckMax;
   const validCount = sorts.filter(s => (s.mjValidation || (s.mjValidated ? 'ok' : 'pending')) === 'ok').length;
@@ -842,7 +852,7 @@ function _msTabSorts(c, uid, canEdit) {
     const pm = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : (parseInt(s.pm) || 0);
     return sum + Math.max(0, pm);
   }, 0);
-  const intro = _msTabIntro('sorts', 'Sorts', `${deckCount}/${deckMax}`, `${validCount} validé${validCount > 1 ? 's' : ''} · ${pmTotal} PM dans le deck`);
+  const intro = _msTabIntro('sorts', 'Sorts', `${deckCount}/${deckMax}${deckFree ? ` +${deckFree}` : ''}`, `${validCount} validé${validCount > 1 ? 's' : ''} · ${pmTotal} PM dans le deck`);
 
   // Barre de filtre : Tous · ⚡ Deck actif · catégories du perso (présentes) · Sans cat.
   let filterBar = '';
@@ -850,7 +860,7 @@ function _msTabSorts(c, uid, canEdit) {
     const cats = (c?.sort_cats || []).filter(ct => sorts.some(s => s.catId === ct.id));
     const chips = [
       { key:'all',    label:'Tous' },
-      { key:'__deck', label:`⚡ Deck (${deckCount})` },
+      { key:'__deck', label:`⚡ Deck (${deckUsage.active})` },
       ...cats.map(ct => ({ key: ct.id, label: ct.nom || 'Catégorie', color: ct.couleur })),
     ];
     if (sorts.some(s => !s.catId)) chips.push({ key:'__none', label:'Sans cat.' });
@@ -865,7 +875,7 @@ function _msTabSorts(c, uid, canEdit) {
     ${intro}
     <div class="vtt-ms-deckbar${over ? ' is-over' : ''}">
       <span class="vtt-ms-deck-lbl">⚡ Deck</span>
-      <span class="vtt-ms-deck-val">${deckCount}<small>/${deckMax}</small></span>
+      <span class="vtt-ms-deck-val">${deckCount}<small>/${deckMax}${deckFree ? ` · +${deckFree} libre${deckFree > 1 ? 's' : ''}` : ''}</small></span>
       ${canEdit ? `<span class="vtt-ms-deck-hint">Coche un sort pour l'ajouter / le retirer du deck</span>` : ''}
     </div>
     ${filterBar}
