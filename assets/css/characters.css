@@ -8775,7 +8775,8 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   justify-content: center;
 }
 .cs-v3 .id-actions-mini button:hover { color: var(--gold); background: rgba(79,140,255,.12); }
-.cs-v3 .id-actions-mini .id-owner-btn {
+.cs-v3 .id-actions-mini .id-owner-btn,
+.cs-v3 .id-actions-mini .id-owner-readonly {
   width: auto;
   max-width: calc(100% - 90px);
   flex: 1 1 auto;
@@ -8789,6 +8790,12 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   font-weight: 600;
   letter-spacing: .015em;
 }
+.cs-v3 .id-actions-mini .id-owner-readonly {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  cursor: default;
+}
 .cs-v3 .id-actions-mini .id-owner-btn:hover {
   color: #7cf0c6;
   background: rgba(34,195,142,.18);
@@ -8800,7 +8807,14 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cs-v3 .id-owner-ico { flex: 0 0 auto; }
+.cs-v3 .id-owner-avatar {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid rgba(255,255,255,.18);
+}
 /* Suppression du personnage : hover rouge pour signaler l'action destructive */
 .cs-v3 .id-actions-mini .id-del-btn:hover { color: var(--crimson-light, #ff8ca7); background: rgba(220,38,38,.10); }
 /* Bouton "définir par défaut" (étoile) */
