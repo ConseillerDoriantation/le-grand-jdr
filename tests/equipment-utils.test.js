@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildInventoryEquipPatch,
   buildEquippedItemFromInventory,
   getEquippedSourceItem,
   getItemTraits,
@@ -80,6 +81,43 @@ test('getMainWeapon conserve le slot historique des PNJ si le slot principal a �
   const weapon = { nom: 'Bâton du thaumaturge', degats: '2d8' };
   assert.equal(getMainWeapon({ equipement: { 'Main principale': weapon } }), weapon);
   setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
+});
+
+test('équiper depuis l inventaire remplace le slot sans retirer l ancien objet', () => {
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
+  const character = {
+    inventaire: [
+      { itemId: 'old', nom: 'Vieille épée', template: 'arme', degats: '1d6' },
+      { itemId: 'new', nom: 'Épée runique', template: 'arme', degats: '2d6', statBonuses: { force: 2 } },
+    ],
+    equipement: {
+      'Main principale': { itemId: 'old', nom: 'Vieille épée', sourceInvIndex: 0 },
+    },
+  };
+
+  const patch = buildInventoryEquipPatch(character, 1);
+  assert.equal(patch.slot, 'Main principale');
+  assert.equal(patch.replacedItem.nom, 'Vieille épée');
+  assert.equal(patch.equipement['Main principale'].nom, 'Épée runique');
+  assert.equal(patch.equipement['Main principale'].sourceInvIndex, 1);
+  assert.equal(patch.statsBonus.force, 2);
+  assert.equal(character.inventaire.length, 2);
+  assert.equal(character.equipement['Main principale'].nom, 'Vieille épée');
+});
+
+test('équiper respecte les slots configurés et conserve les données d arme', () => {
+  setEquipmentSlotsForTests([
+    { id: 'Arme active', label: 'Arme active', kind: 'weapon', role: 'primaryWeapon' },
+  ]);
+  const character = {
+    inventaire: [{ nom: 'Arc astral', template: 'arme', degats: '2d8+3', portee: 12 }],
+    equipement: {},
+  };
+
+  const patch = buildInventoryEquipPatch(character, 0);
+  assert.equal(patch.slot, 'Arme active');
+  assert.equal(patch.equipement['Arme active'].degats, '2d8+3');
+  assert.equal(patch.equipement['Arme active'].portee, 12);
 });
 
 test.after(() => setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS));

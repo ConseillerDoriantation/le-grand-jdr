@@ -6,13 +6,17 @@ import { showNotif } from '../../shared/notifications.js';
 import { computeEquipStatsBonus, getItemStatBonus, getItemEffectText } from '../../shared/char-stats.js';
 import { saveBuildPatch } from '../../shared/character-builds.js';
 import { _esc } from '../../shared/html.js';
-import { _getTraits, inferAttackStatFromItem, buildEquippedItemFromInventory } from '../../shared/equipment-utils.js';
+import {
+  _getTraits,
+  buildInventoryEquipPatch,
+  inferAttackStatFromItem,
+} from '../../shared/equipment-utils.js';
 import { equipmentSlotAcceptsItem, getEquipmentSlot } from '../../shared/equipment-slots.js';
 
 let _equipCompatibles = [];
 let _equipSelectedMeta = {};
-function _renderEquipmentChar(c) {
-  charSession.renderSheet(c, 'combat');
+function _renderEquipmentChar(c, tab = 'combat') {
+  charSession.renderSheet(c, tab);
 }
 
 // ══════════════════════════════════════════════
@@ -20,45 +24,53 @@ function _renderEquipmentChar(c) {
 // ══════════════════════════════════════════════
 export async function equipSlotFromInv(val, slot) {
   if (!val || !val.startsWith('inv:')) return;
-  const c = STATE.activeChar; if (!c) return;
-
   const invIndex = parseInt(val.split(':')[1], 10);
   if (Number.isNaN(invIndex)) return;
 
-  const item = (c.inventaire || [])[invIndex];
-  if (!item) return;
+  return equipInventoryItem(invIndex, slot, { closeAfter: true, renderTab: 'combat' });
+}
 
-  const slotDef = getEquipmentSlot(slot);
-  if (!slotDef || !equipmentSlotAcceptsItem(slotDef, item)) {
-    showNotif(`Cet objet n'est pas compatible avec l'emplacement ${slotDef?.label || slot}.`, 'error');
-    return;
+/** Équipe immédiatement une unité de l'inventaire dans le build actif. */
+export async function equipInventoryItem(invIndex, requestedSlot = '', {
+  closeAfter = false,
+  renderTab = charSession.getCurrentCharTab() || 'inv',
+} = {}) {
+  const c = STATE.activeChar;
+  if (!c) return false;
+
+  const change = buildInventoryEquipPatch(c, invIndex, requestedSlot);
+  if (!change) {
+    showNotif("Cet objet ne correspond à aucun emplacement d'équipement actif.", 'error');
+    return false;
   }
 
-  const equip = { ...(c.equipement || {}) };
-
-  Object.keys(equip).forEach(otherSlot => {
-    if (otherSlot !== slot && equip[otherSlot]?.sourceInvIndex === invIndex) {
-      delete equip[otherSlot];
-    }
-  });
-
-  const equippedItem = buildEquippedItemFromInventory(slot, item, invIndex);
-  if (!equippedItem) return;
-
-  equip[slot] = equippedItem;
-  const bonus = computeEquipStatsBonus(equip);
-
-  c.equipement = equip;
-  c.statsBonus = bonus;
+  const previousEquipement = c.equipement;
+  const previousStatsBonus = c.statsBonus;
+  const previousBuilds = c.builds == null ? c.builds : JSON.parse(JSON.stringify(c.builds));
+  const previousActiveBuildId = c.activeBuildId;
+  c.equipement = change.equipement;
+  c.statsBonus = change.statsBonus;
 
   try {
-    await saveBuildPatch(c.id, c, { equipement: equip, statsBonus: bonus });
-    closeModal();
-    showNotif(`Équipement mis à jour : ${item.nom || 'objet'} → ${slot}`, 'success');
+    await saveBuildPatch(c.id, c, {
+      equipement: change.equipement,
+      statsBonus: change.statsBonus,
+    });
+    if (closeAfter) closeModal();
+    const replaced = change.replacedItem && change.replacedItem.sourceInvIndex !== invIndex
+      ? ` · ${change.replacedItem.nom} déséquipé`
+      : '';
+    showNotif(`${change.item.nom || 'Objet'} équipé · ${change.slotDef.label}${replaced}`, 'success');
   } catch (e) {
+    c.equipement = previousEquipement;
+    c.statsBonus = previousStatsBonus;
+    c.builds = previousBuilds;
+    c.activeBuildId = previousActiveBuildId;
     showNotif(e?.message || 'Erreur de sauvegarde.', 'error');
+    return false;
   }
-  _renderEquipmentChar(c);
+  _renderEquipmentChar(c, renderTab);
+  return true;
 }
 
 // ══════════════════════════════════════════════
@@ -294,6 +306,19 @@ export async function clearEquipSlot(slot) {
 
 registerActions({
   equipSlotFromInv: (el) => equipSlotFromInv(el.value, el.dataset.equipSlot),
+  equipInventoryItem: async (btn) => {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+    const saved = await equipInventoryItem(Number(btn.dataset.index), btn.dataset.slot || '', {
+      closeAfter: btn.dataset.closeModal === 'true',
+      renderTab: btn.dataset.renderTab || charSession.getCurrentCharTab() || 'inv',
+    });
+    if (!saved && btn.isConnected) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
+  },
   saveEquipSlot:  (btn) => saveEquipSlot(btn.dataset.slot),
   clearEquipSlot: (btn) => clearEquipSlot(btn.dataset.slot),
   _eqClose:       ()    => closeModal(),

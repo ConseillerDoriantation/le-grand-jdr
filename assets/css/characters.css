@@ -8435,6 +8435,7 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 
 /* ── Bandeau collant unifié (titre + sélecteur de perso + onglets) ───────── */
 .cs-v3 { --top-h: 104px; }
+.cs-v3:has(.cs-player-switch) { --top-h: 128px; }
 /* Scroll interne de la page Personnage : les conteneurs globaux (html/body/#app)
    ont tous overflow-x:hidden → ils deviennent des conteneurs de scroll qui NE
    scrollent pas et piègent position:sticky. On scrolle donc DANS char-sheet-area,
@@ -8475,6 +8476,86 @@ body .modal:has(.sh-admin-modal.is-spell) #modal-body {
 .cs-v3 .cs-top .char-switch::-webkit-scrollbar { height: 4px; }
 .cs-v3 .cs-top .char-switch::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
 .cs-v3 .cs-top .char-pill { flex: 0 0 auto; }
+
+/* Joueur avec peu de personnages : portraits visibles, noms en légende. */
+.cs-v3 .cs-player-switch {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 6px 2px 2px;
+  scrollbar-width: none;
+  overscroll-behavior-inline: contain;
+}
+.cs-v3 .cs-player-switch::-webkit-scrollbar { display: none; }
+.cs-v3 .cs-player-char {
+  position: relative;
+  flex: 0 0 58px;
+  width: 58px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+}
+.cs-v3 .cs-player-char:focus-visible {
+  outline: 2px solid var(--av-c, #4f8cff);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+.cs-v3 .cs-player-char-avatar { position: relative; display: block; }
+.cs-v3 .cs-player-char .char-pill-av {
+  width: 42px;
+  height: 42px;
+  transition: border-color .15s, box-shadow .15s, transform .15s;
+}
+.cs-v3 .cs-player-char .char-pill-name {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: inherit;
+  font-family: var(--font-body, 'Inter', sans-serif);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.15;
+  text-align: center;
+}
+.cs-v3 .cs-player-char:hover { color: var(--text); }
+.cs-v3 .cs-player-char:hover .char-pill-av { transform: translateY(-1px); }
+.cs-v3 .cs-player-char.active { color: var(--text); }
+.cs-v3 .cs-player-char.active .char-pill-av {
+  border-color: var(--av-c, #4f8cff);
+  box-shadow: 0 0 0 2px var(--surface-page, #080d16), 0 0 0 4px var(--av-c, #4f8cff), 0 0 16px var(--av-c, #4f8cff);
+}
+.cs-v3 .cs-player-char.active .char-pill-name { color: var(--av-c, var(--text)); }
+.cs-v3 .cs-player-char-new-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 18px;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.cs-v3 .cs-player-char-new:hover .cs-player-char-new-icon {
+  border-color: var(--gold);
+  background: var(--gold-glow);
+  color: var(--gold);
+}
 
 /* ── Sélecteur de personnage (vue MJ : recherche + filtre par compte) ────── */
 .cs-v3 .cs-charpick { position: relative; flex: 0 0 auto; }
@@ -12257,7 +12338,27 @@ body .modal:has(.cs-build-modal) {
 }
 .cs-v3 .inv-act svg { width: 14px; height: 14px; }
 .cs-v3 .inv-act:hover { transform: translateY(-1px); }
-.cs-v3 .inv-act.eq { color: var(--gold-2, #7eb0ff); background: rgba(79,140,255,.08); border-color: rgba(79,140,255,.3); }
+.cs-v3 .inv-act.eq {
+  width: auto;
+  display: inline-flex;
+  gap: 4px;
+  padding-inline: 7px;
+  color: var(--gold-2, #7eb0ff);
+  background: rgba(79,140,255,.08);
+  border-color: rgba(79,140,255,.3);
+}
+.cs-v3 .inv-equip-label { font-size: .63rem; line-height: 1; }
+.cs-v3 .inv-act.eq:hover:not(:disabled) { background: rgba(79,140,255,.2); border-color: rgba(79,140,255,.52); }
+.cs-v3 .inv-act.eq.is-on,
+.cs-v3 .inv-act.eq:disabled {
+  color: #86efac;
+  background: rgba(74,222,128,.1);
+  border-color: rgba(74,222,128,.34);
+  cursor: default;
+  opacity: .9;
+}
+.cs-v3 .inv-act.eq:disabled:hover { transform: none; }
+.cs-v3 .inv-act.is-loading { opacity: .55; cursor: wait; }
 .cs-v3 .inv-act.sell { color: var(--amber, var(--amber)); background: rgba(244,196,48,.08); border-color: rgba(244,196,48,.3); }
 .cs-v3 .inv-act.send { color: #bca0ff; background: rgba(157,111,255,.08); border-color: rgba(157,111,255,.3); }
 .cs-v3 .inv-act.del { color: var(--crimson-light, #ff8ca7); background: rgba(255,90,126,.08); border-color: rgba(255,90,126,.3); }
@@ -12325,6 +12426,8 @@ body .modal:has(.cs-build-modal) {
 .cs-v3 .inv-grid.is-list .inv-card-values { grid-area: values; }
 .cs-v3 .inv-grid.is-list .inv-detail-btn { grid-area: detail; }
 .cs-v3 .inv-grid.is-list .inv-card-actions { grid-area: actions; }
+.cs-v3 .inv-grid.is-list .inv-act.eq { width: 27px; padding-inline: 0; }
+.cs-v3 .inv-grid.is-list .inv-equip-label { display: none; }
 
 @media (max-width: 980px) {
   .cs-v3 .inv-grid.is-list .inv-card {
@@ -13951,6 +14054,12 @@ body .modal:has(.cs-build-modal) {
     min-width: 0;
     flex: 1 1 0;
   }
+  .cs-v3 .cs-player-switch {
+    flex: 1 1 0;
+    justify-content: flex-start;
+    scroll-snap-type: x proximity;
+  }
+  .cs-v3 .cs-player-char { scroll-snap-align: start; }
   .cs-v3 .id-side {
     position: static;
     display: grid;

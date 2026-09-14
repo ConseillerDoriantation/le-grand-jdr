@@ -31,6 +31,7 @@ import {
   getEquippedInventoryIndexMap,
   syncEquipmentAfterInventoryMutation,
 } from './data.js';
+import { getEquipmentSlot, resolveEquipmentSlotForItem } from '../../shared/equipment-slots.js';
 
 import { getCharacterById } from '../../shared/character-state.js';
 let _charInvSearch = '';
@@ -581,6 +582,12 @@ export async function openInventoryItemDetail(charId, indicesB64) {
   const rarityColor = _rareteColor(rarityName) || '#7a8fa8';
   const equippedMap = getEquippedInventoryIndexMap(c);
   const equippedSlots = [...new Set(indices.flatMap(idx => equippedMap.get(idx) || []))];
+  const equipSlotId = resolveEquipmentSlotForItem(item);
+  const equipSlot = equipSlotId ? getEquipmentSlot(equipSlotId) : null;
+  const equipIndex = indices.find(idx => !(equippedMap.get(idx) || []).length) ?? indices[0];
+  const equippedInTarget = !!equipSlotId && indices.some(idx => (equippedMap.get(idx) || []).includes(equipSlotId));
+  const canEquip = !!equipSlot && (STATE.isAdmin || c.uid === STATE.user?.uid);
+  const replacedName = equipSlotId && !equippedInTarget ? c.equipement?.[equipSlotId]?.nom : '';
   const traits = _getTraits(item);
   const statBonusHtml = _inventoryStatBadgesHtml(item);
   const rawEffectText = String(getItemEffectText(item) || '').trim();
@@ -665,6 +672,14 @@ export async function openInventoryItemDetail(charId, indicesB64) {
       </section>` : ''}
 
       <footer class="inv-detail-footer">
+        ${canEquip ? `<button class="btn ${equippedInTarget ? 'btn-outline is-equipped' : 'btn-gold'}" data-action="equipInventoryItem"
+          data-index="${equipIndex}" data-slot="${_esc(equipSlotId)}" data-close-modal="true" data-render-tab="inv"
+          ${equippedInTarget ? 'disabled' : ''}
+          title="${equippedInTarget
+            ? `Déjà équipé dans ${_esc(equipSlot.label)}`
+            : `Équiper dans ${_esc(equipSlot.label)}${replacedName ? ` et remplacer ${_esc(replacedName)}` : ''}`}">
+          ${equippedInTarget ? '✓ Déjà équipé' : `⚔️ Équiper · ${_esc(equipSlot.label)}`}
+        </button>` : ''}
         ${canEditItem ? `<button class="btn btn-outline" data-action="openCreateItemModal"
           data-id="${_esc(c.id)}" data-index="${indices[0]}"
           title="Modifier cet objet dans la forge">🛠️ Modifier</button>` : ''}
