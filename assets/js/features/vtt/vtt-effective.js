@@ -315,19 +315,22 @@ export function _live(t) {
   if (!STATE.isAdmin && t.type === 'enemy') {
     if (b) {
       const track  = VS.bstTracker[t.beastId] || {};
-      const estMax = track.pvActuel !== undefined ? parseInt(track.pvActuel) : null;
+      const parsedEstMax = parseInt(track.pvActuel, 10);
+      const estMax = Number.isFinite(parsedEstMax) && parsedEstMax > 0 ? parsedEstMax : null;
       if (estMax !== null) {
         // pvCombatHp est stocké sur le token lui-même (écrit lors des attaques joueur).
         // Tous les clients le reçoivent via le onSnapshot vttTokens existant.
         // null → token frais ou jamais frappé par un joueur → afficher pleins PV estimés.
-        const pvCombatHp = t.pvCombatHp != null
+        const pvCombatHp = t.pvCombatHpEstimated === true && t.pvCombatHp != null
           ? Math.max(0, parseInt(t.pvCombatHp) || 0) : null;
         if (pvCombatHp !== null) {
-          result.displayHp = pvCombatHp;           // suivi de groupe via token (prioritaire)
-        } else if (t.hp !== null) {
-          result.displayHp = Math.min(hpCurrent, estMax); // HP réel borné à l'estimation
+          // Ce compteur partagé peut avoir été initialisé par le MJ avec les PV
+          // réels. Il doit toujours rester borné par l'estimation du joueur.
+          result.displayHp = Math.min(pvCombatHp, estMax);
         } else {
-          result.displayHp = estMax;               // token frais = pleins PV estimés
+          // Jamais de repli sur t.hp : même bornée, une valeur réelle inférieure
+          // à l'estimation révélerait les PV exacts de la créature.
+          result.displayHp = estMax;
         }
         result.displayHpMax = estMax;
       } else {

@@ -1,5 +1,5 @@
 import { STATE } from '../core/state.js';
-import { loadCollection, loadChars, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { loadCollection, loadChars, addToCol, updateInCol, deleteFromCol, batchUpdateInCol } from '../data/firestore.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
 import { openModal, pushModal, updateModalContent, closeModalDirect, confirmModal, promptModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -35,6 +35,7 @@ import { getShopCharId, setShopCharId } from '../shared/shop-session.js';
 import { characterPortraitContent, characterAvatarHtml } from '../shared/portraits.js';
 import { loadConditionLibrary } from '../shared/conditions.js';
 import { makeSortable } from '../shared/sortable-helper.js';
+import { compareManualOrder, manualOrderValue, mergeVisibleManualOrder, nextManualOrder } from '../shared/manual-order.js';
 import { spellActionCardHtml } from '../shared/spell-action-card.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { consumeTargetEntity } from '../shared/entity-navigation.js';
@@ -224,7 +225,7 @@ async function loadShopData() {
   _items = items;
   _weaponFormats = weaponFormats;
   _cats.sort((a,b) => (a.ordre||0)-(b.ordre||0));
-  _items.sort((a,b) => (a.ordre??999)-(b.ordre??999));
+  _items.sort(compareManualOrder);
   _shopSousTypes = [...new Set(_items.filter(i=>i.sousType).map(i=>i.sousType))].sort();
   _rebuildShopSearchIndex();
 }
@@ -957,7 +958,11 @@ function _getFilteredItems(catId) {
   }
 
   // 🔀 Tri
-  if (_filterSort && _filterSort !== 'ordre') {
+  if (!_filterSort || _filterSort === 'ordre') {
+    // Toujours recalculer l'ordre manuel : les retours du cache Firestore et
+    // les mises à jour partielles ne garantissent pas l'ordre du tableau reçu.
+    items = [...items].sort(compareManualOrder);
+  } else {
     // Pour le tri "Recommandé", on précalcule les scores (évite N appels au getter)
     let recoScores = null;
     if (_filterSort === 'recommande') {
@@ -992,6 +997,10 @@ function _getFilteredItems(catId) {
   return items;
 }
 
+function _isManualOrganizeMode() {
+  return STATE.isAdmin && (!_filterSort || _filterSort === 'ordre');
+}
+
 function _renderItemsView() {
   const isUncategorized = _activeCat === '__uncategorized__';
   const cat = isUncategorized
@@ -1004,9 +1013,10 @@ function _renderItemsView() {
   const search = _norm(_filterSearch);
 
   const total = items.length;
-  const pages = Math.ceil(total / PAGE_SIZE);
-  const p     = Math.max(1, Math.min(_page, pages));
-  const slice = items.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
+  const organizeAll = _isManualOrganizeMode();
+  const pages = organizeAll ? 1 : Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const p     = organizeAll ? 1 : Math.max(1, Math.min(_page, pages));
+  const slice = organizeAll ? items : items.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
   const allItems  = _getBaseItems(_activeCat);
   const tagGroups = _buildTagGroups(allItems);
   const hasFilters = Boolean(search || _filterTags.size > 0 || _smartFilters.size > 0);
@@ -1048,6 +1058,9 @@ function _renderItemsView() {
       </label>
       <div class="sh-filter-actions">
         <span id="sh-count" role="status" aria-live="polite">${total} article${total!==1?'s':''}</span>
+        <span id="sh-order-mode" class="sh-order-mode" ${organizeAll ? '' : 'hidden'} title="Tous les articles sont affichés pour permettre leur réorganisation">
+          ↕ Organisation · tous affichés
+        </span>
         <button id="sh-clear-btn" class="sh-filter-clear" data-sh-action="resetFilters"
           ${hasFilters ? '' : 'hidden'}>✕ Tout effacer</button>
         ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" data-sh-action="openItemModal">+ Article</button>` : ''}
@@ -2528,13 +2541,17 @@ function _updateItemsOnly() {
   const search = _norm(_filterSearch);
 
   const total  = items.length;
-  const pages  = Math.ceil(total / PAGE_SIZE);
-  const p      = Math.max(1, Math.min(_page, pages));
-  const slice  = items.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
+  const organizeAll = _isManualOrganizeMode();
+  const pages  = organizeAll ? 1 : Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const p      = organizeAll ? 1 : Math.max(1, Math.min(_page, pages));
+  const slice  = organizeAll ? items : items.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
   const hasF   = Boolean(search || _filterTags.size > 0 || _smartFilters.size > 0);
 
   const counter = document.getElementById('sh-count');
   if (counter) counter.textContent = `${total} article${total!==1?'s':''}`;
+
+  const orderMode = document.getElementById('sh-order-mode');
+  if (orderMode) orderMode.hidden = !organizeAll;
 
   const clearBtn = document.getElementById('sh-clear-btn');
   if (clearBtn) clearBtn.hidden = !hasF;
@@ -2579,6 +2596,10 @@ function _updateItemsOnly() {
     html += `</div>`;
   }
   grid.innerHTML = html;
+  // Le remplacement de innerHTML détruit l'ancien conteneur Sortable. Le
+  // remonter à la frame suivante permet d'enchaîner les déplacements sans
+  // recharger la page, y compris après le re-rendu déclenché par un drag.
+  _scheduleSortablesMount();
 }
 
 // ── Mise à jour partielle vue home — résultats sans toucher le champ texte ──
@@ -2601,6 +2622,15 @@ function _refreshSmartFiltersFromCache() {
 // DRAG & DROP (SortableJS) — Catégories & Articles
 // ══════════════════════════════════════════════════════════════════════════════
 let _sortCats = null, _sortItems = null, _dragBlockClick = false, _clickGuardInstalled = false;
+let _sortMountFrame = null;
+
+function _scheduleSortablesMount() {
+  if (_sortMountFrame) cancelAnimationFrame(_sortMountFrame);
+  _sortMountFrame = requestAnimationFrame(() => {
+    _sortMountFrame = null;
+    _mountSortables();
+  });
+}
 
 function _installClickGuard() {
   if (_clickGuardInstalled) return;
@@ -2657,17 +2687,37 @@ function _mountSortables() {
       onEnd: async (evt) => {
         finishDrag();
         if (evt.oldIndex === evt.newIndex) return;
-        const visible = _activeCat === '__uncategorized__'
-          ? _items.filter(i => !_cats.find(c => c.id === i.categorieId))
-          : _items.filter(i => i.categorieId === _activeCat);
-        const [moved] = visible.splice(evt.oldIndex, 1);
-        visible.splice(evt.newIndex, 0, moved);
+
+        // L'ordre du DOM est la seule source fiable ici : les index Sortable
+        // portent sur la page affichée, qui peut être filtrée, paginée ou triée.
+        const domIds = [...itemGrid.children]
+          .filter(element => element.classList.contains('sh-sortable-item'))
+          .map(element => element.dataset.itemId)
+          .filter(Boolean);
+        const displayed = _getFilteredItems(_activeCat);
+        const pageStart = _isManualOrganizeMode() ? 0 : (Math.max(1, _page) - 1) * PAGE_SIZE;
+        const desiredVisibleIds = displayed.map(item => item.id);
+        desiredVisibleIds.splice(pageStart, domIds.length, ...domIds);
+
+        const base = [..._getBaseItems(_activeCat)].sort(compareManualOrder);
+        const reordered = mergeVisibleManualOrder(base, desiredVisibleIds);
+        const previousSort = _filterSort;
+        _filterSort = 'ordre';
+        localStorage.setItem('shop_sort', 'ordre');
         try {
-          // Idem : seuls les items réellement décalés sont réécrits.
-          const writes = [];
-          visible.forEach((item, i) => { if (Number(item.ordre) !== i) writes.push(updateInCol('shop', item.id, { ordre: i })); });
-          await Promise.all(writes);
-          visible.forEach((item, i) => { item.ordre = i; });
+          // Les lots réduisent les allers-retours sans dépasser la limite
+          // Firestore. Tous les articles déplacés reçoivent un ordre unique.
+          const updates = reordered
+            .map((item, ordre) => ({ item, ordre }))
+            .filter(({ item, ordre }) => manualOrderValue(item) !== ordre)
+            .map(({ item, ordre }) => ({ col: 'shop', id: item.id, data: { ordre } }));
+          for (let i = 0; i < updates.length; i += 450) {
+            await batchUpdateInCol(updates.slice(i, i + 450));
+          }
+          reordered.forEach((item, ordre) => { item.ordre = ordre; });
+          _items.sort(compareManualOrder);
+          if (previousSort !== 'ordre') showNotif('Ordre manuel activé et enregistré.', 'success');
+          _updateItemsOnly();
         } catch (err) { notifySaveError(err); renderShop(); }
       },
     });
@@ -3677,7 +3727,20 @@ async function saveShopItem(itemId) {
     const nom=document.getElementById('si-nom')?.value.trim();
     if(!nom){showNotif('Nom requis.','error');return;}
 
-    const data={ nom, categorieId:catId, template:tplKey, image:document.getElementById('si-img-b64')?.value||'' };
+    const sameCategory = item && item.categorieId === catId;
+    const categoryItems = _items.filter(entry => entry.id !== itemId && entry.categorieId === catId);
+    const existingOrder = manualOrderValue(item);
+    const data={
+      nom,
+      categorieId:catId,
+      template:tplKey,
+      image:document.getElementById('si-img-b64')?.value||'',
+      // Une modification conserve sa place. Un nouvel article, ou un article
+      // déplacé vers une autre catégorie, est ajouté proprement à la fin.
+      ordre: sameCategory && existingOrder !== null
+        ? existingOrder
+        : nextManualOrder(categoryItems),
+    };
 
     tpl.fields.forEach(f=>{
       if(f.type==='dispo'){

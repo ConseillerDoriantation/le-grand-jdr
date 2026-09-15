@@ -17,6 +17,7 @@ import { _vttPanelError } from './vtt-utils.js';
 import { _findUsableReactiveShield, _canControlToken } from './vtt.js'; // circ. (combat)
 import { _applyEmotes } from './vtt-emotes.js'; // leaf émotes
 import { _live } from './vtt-effective.js';
+import { combatTargetResourceVisibility, trackedCombatResourceValues } from './vtt-chat-visibility.js';
 
 // État chat (déplacé de vtt.js)
 export let _chatMsgs = [];   // derniers messages rendus (lookup "répondre" + bouclier/undo côté vtt.js)
@@ -25,6 +26,23 @@ let _logMain    = [];   // log public (vttLog) — dernier snapshot
 let _logGm      = [];   // jets cachés (vttLogGm) — uniquement abonné côté MJ
 const _optimisticLogs = new Map();
 const _optimisticTimers = new Map();
+
+// Firestore peut avoir déjà placé un callback dans la file microtask lorsque
+// unsubscribe() est appelé. Le wrapper invalide d'abord l'abonnement côté VTT :
+// aucun snapshot ni refus tardif ne doit alors modifier l'UI ou polluer la
+// console pendant une navigation / déconnexion.
+function _watchWhileActive(source, onNext, onError) {
+  let active = true;
+  const unsubscribe = onSnapshot(
+    source,
+    snapshot => { if (active) onNext(snapshot); },
+    error => { if (active) onError(error); },
+  );
+  return () => {
+    active = false;
+    unsubscribe();
+  };
+}
 
 function _clearOptimisticLog(id) {
   _optimisticLogs.delete(id);
@@ -77,7 +95,7 @@ export async function _vttPublishOptimisticLog(payload, { errorMessage = 'L’ac
 // Souscriptions Firestore au log (publiques + jets cachés MJ). Appelé par vtt.js
 // dans la séquence de montage. Les unsubs sont poussés dans VS.unsubs.
 export function _initChatLogSubs() {
-  VS.unsubs.push(onSnapshot(
+  VS.unsubs.push(_watchWhileActive(
     query(_logCol(), orderBy('createdAt', 'desc'), limit(80)),
     snap => {
       _logMain = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -95,7 +113,7 @@ export function _initChatLogSubs() {
     }
   ));
   if (STATE.isAdmin) {
-    VS.unsubs.push(onSnapshot(
+    VS.unsubs.push(_watchWhileActive(
       query(_logGmCol(), orderBy('createdAt', 'desc'), limit(80)),
       snap => { _logGm = snap.docs.map(d => ({ id: d.id, ...d.data() })); _rebuildChatLog(); },
       e => { console.error('[vtt] gm chat listener:', e); }
@@ -327,6 +345,37 @@ export function _renderChatLogImpl(msgs) {
     }
     if (target.npcId) return '?'; // PNJ : pas d'estimation, masquée
     return realCA ?? '?';
+  };
+
+  // État des ressources après un soin. Les logs contiennent les valeurs utiles
+  // au MJ et à l'annulation, mais un joueur ne doit jamais les voir pour une
+  // cible hostile/non contrôlée. On ne se fie pas uniquement à `type` : les
+  // anciens tokens et certains PNJ de combat peuvent ne pas être typés enemy.
+  const _trackedResourceValues = (target, targetToken, isMana = false) => {
+    const beastId = target?.beastId || targetToken?.beastId;
+    const tracker = beastId ? VS.bstTracker?.[beastId] : null;
+    return trackedCombatResourceValues({ tracker, token:targetToken, isMana });
+  };
+
+  const _viewRestoredResource = (target, isMana = false) => {
+    const label = isMana ? 'PM' : 'PV';
+    const currentKey = isMana ? 'newPm' : 'newHp';
+    const maxKey = isMana ? 'pmMax' : 'hpMax';
+    const targetToken = target?.tokenId ? VS.tokens?.[target.tokenId]?.data : null;
+    const visibility = combatTargetResourceVisibility({
+      isAdmin: STATE.isAdmin,
+      target,
+      token: targetToken,
+      canControl: !!targetToken && _canControlToken(targetToken),
+    });
+    if (visibility === 'exact') return `${label} ${target?.[currentKey] ?? '?'} / ${target?.[maxKey] ?? '?'}`;
+
+    // Lecture directe du tracker personnel : aucun repli possible vers les PV
+    // réels du token ou ceux conservés dans le message Firestore.
+    const { current, max } = visibility === 'estimate'
+      ? _trackedResourceValues(target, targetToken, isMana)
+      : { current:null, max:null };
+    return `${label} ${current ?? '?'} / ${max ?? '?'}`;
   };
 
   // Badges avantage / désavantage
@@ -675,26 +724,34 @@ export function _renderChatLogImpl(msgs) {
       const dmgVal = isHeal
         ? `+${Math.max(0, Number(r.applied) || 0)}`
         : (r.hit || r.halfDmg) ? (r.dmgTotal < 0 ? `+${-r.dmgTotal}` : r.dmgTotal) : '—';
-      const dmgSuffix = r.newHp === 0 ? ' 💀' : '';
+      const targetToken = r.tokenId ? VS.tokens?.[r.tokenId]?.data : null;
+      const targetVisibility = combatTargetResourceVisibility({
+        isAdmin: STATE.isAdmin,
+        target: r,
+        token: targetToken,
+        canControl: !!targetToken && _canControlToken(targetToken),
+      });
+      const targetIsHiddenEnemy = targetVisibility !== 'exact';
+      const visibleResourceCurrent = targetVisibility === 'estimate'
+        ? _trackedResourceValues(r, targetToken, !!m.isMana).current
+        : null;
+      const dmgSuffix = (!targetIsHiddenEnemy ? r.newHp === 0 : visibleResourceCurrent === 0) ? ' 💀' : '';
       const shownCA = _viewCA(r, r.targetCA);
       const mitigation = r.dmgReduction > 0 ? ` · 🛡 −${r.dmgReduction}` : '';
       const resourceState = isHeal
-        ? (m.isMana
-            ? `PM ${r.newPm ?? '?'} / ${r.pmMax ?? '?'}`
-            : `PV ${r.newHp ?? '?'} / ${r.hpMax ?? '?'}`)
+        ? _viewRestoredResource(r, !!m.isMana)
         : null;
       // Portrait de la cible : son image si disponible (ex. invocation), sinon
       // l'icône de résolution. La pastille de couleur reste le statut hit/miss.
       // Une image data:/blob: n'est volontairement pas recopiée dans Firestore
       // (une AoE la dupliquerait jusqu'à dépasser 1 Mio). Le chat la retrouve
       // directement depuis le token et sa fiche bestiaire déjà chargés.
-      const targetToken = r.tokenId ? VS.tokens?.[r.tokenId]?.data : null;
       const targetImage = r.targetImage || (targetToken ? _live(targetToken)?.displayImage : null);
       const portraitInner = targetImage
         ? `<img src="${_esc(targetImage)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" data-img-err="text" data-img-err-text="${_esc(icon)}">`
         : icon;
       const targetSourceLink = _sourceLink(_targetArgs(r, 'combat'), 'Ouvrir la cible');
-      return `<div class="vtt-log-target" style="--row-c:${baseCol}">
+      return `<div class="vtt-log-target${targetSourceLink ? ' has-source-link' : ''}" style="--row-c:${baseCol}">
         <div class="vtt-log-target-portrait" style="background:${baseCol}">${portraitInner}</div>
         <span class="vtt-log-target-name">${_esc(r.name)}</span>${targetSourceLink}
         <span class="vtt-log-target-ca">${resourceState || (r.techniqueSplash ? `Explosion · CA ${shownCA}` : `CA ${shownCA}`)}${isHeal ? '' : mitigation}</span>
@@ -835,11 +892,14 @@ export function _renderChatLogImpl(msgs) {
       srcImg: m.characterImage || null, srcName: m.tokenName || '?',
       label: lbl, badges: '', ts, sourceArgs: _targetArgs(m, 'combat'),
     });
+    const resourceState = m.newHp != null && m.hpMax
+      ? _viewRestoredResource(m, false)
+      : null;
     const body = `<div class="vtt-log-body">
       <span class="vtt-log-icon">${isHealTick ? '💚' : '🩸'}</span>
       <strong class="vtt-log-result" style="font-size:1.15rem">${isHealTick ? '+' : '−'}${m.total}</strong>
       <span class="vtt-log-result-sub">PV (${isHealTick ? 'Régénération' : 'DoT'})</span>
-      ${m.newHp != null && m.hpMax ? `<span class="vtt-log-vs">→ ${m.newHp}/${m.hpMax}</span>` : ''}
+      ${resourceState ? `<span class="vtt-log-vs">→ ${resourceState}</span>` : ''}
     </div>`;
     const detailHtml = rollsDetail
       ? `<div class="vtt-log-detail-row"><span class="vtt-log-detail-label"><span class="op">🎲</span>${rollsDetail}</span><span class="vtt-log-detail-val"><strong>${m.total}</strong></span></div>`

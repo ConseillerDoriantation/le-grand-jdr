@@ -12,6 +12,7 @@ import { openCharacterRulesAdmin } from '../../shared/character-rules.js';
 import { openEquipmentSlotsAdmin, getPrimaryWeaponSlotId, getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { openArmorSetsAdmin } from '../../shared/armor-set-settings.js';
 import { openSpellSystemAdmin } from '../../shared/spell-system.js';
+import { defaultCombatStyles, detectCombatStyle as detectCombatStyleRule, normalizeCombatStyles } from '../../shared/combat-styles.js';
 import { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, resolveEquippedInventoryIndices, _getBaseTraits, _getAddedTraits, _getTraits } from '../../shared/equipment-utils.js';
 export { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, _getBaseTraits, _getAddedTraits, _getTraits };
 
@@ -36,68 +37,13 @@ export async function loadCombatStyles() {
     getDocData('world', 'combat_styles').catch(() => null),
     loadWeaponFormats(),
   ]);
-  _combatStyles = stylesDoc?.styles || _defaultCombatStyles();
+  _combatStyles = normalizeCombatStyles(stylesDoc?.styles || _defaultCombatStyles());
   _weaponFormats = formats;
   return _combatStyles;
 }
 
 export function _defaultCombatStyles() {
-  return [
-    {
-      id: 'baguette',
-      label: '🪄 Baguette magique',
-      condPrincipale: ['Arme 1M CaC Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.',''],
-      condSecondaire: ['Baguette'],
-      condSousTypeS:  [],
-      description: 'Baguette en main secondaire : dégâts de l\'arme passent de 1d6 à 1d10. Accès à la magie.',
-      couleur: '#b47fff',
-    },
-    {
-      id: 'bouclier',
-      label: '🛡️ Bouclier',
-      condPrincipale: ['Arme 1M CaC Phy.','Arme 2M CaC Phy.',''],
-      condSecondaire: ['Bouclier'],
-      condSousTypeS:  [],
-      description: '+2 CA passive. Pas d\'attaque d\'opportunité avec la main secondaire.',
-      couleur: '#22c38e',
-    },
-    {
-      id: 'deux_mains',
-      label: '⚔️⚔️ Deux armes',
-      condPrincipale: ['Arme 1M CaC Phy.'],
-      condSecondaire: ['Arme 1M CaC Phy.'],
-      condSousTypeS:  [],
-      description: 'Attaque bonus avec l\'arme secondaire (dégâts seulement, pas de mod). Désavantage si armes lourdes.',
-      couleur: '#ff6b6b',
-    },
-    {
-      id: 'main_libre',
-      label: '🤜 Main libre',
-      condPrincipale: ['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 1M CaC Phy.'],
-      condSecondaire: ['Main Libre',''],
-      condSousTypeS:  [],
-      description: 'Main secondaire libre (torche, objet...). Attaque d\'opportunité possible. Peut parer (+1 CA si en garde).',
-      couleur: '#4f8cff',
-    },
-    {
-      id: 'arme_2m',
-      label: '🗡️ Arme à 2 mains',
-      condPrincipale: ['Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.'],
-      condSecondaire: [''],
-      condSousTypeS:  [],
-      description: 'Arme à 2 mains : dégâts maximisés (relancer les 1 et 2). Pas de réaction d\'attaque.',
-      couleur: '#e8b84b',
-    },
-    {
-      id: 'mains_nues',
-      label: '🤛 Mains nues',
-      condPrincipale: [''],
-      condSecondaire: [''],
-      condSousTypeS:  [],
-      description: 'Aucune arme équipée. Dégâts 1d4 + Force. Attaque bonus possible chaque tour.',
-      couleur: '#9ca3af',
-    },
-  ];
+  return defaultCombatStyles();
 }
 
 /**
@@ -106,35 +52,7 @@ export function _defaultCombatStyles() {
  * Ordre des styles : du plus spécifique au plus général.
  */
 export function detectCombatStyle(c, styles) {
-  const equip  = c?.equipement || {};
-  const mainP  = equip[getPrimaryWeaponSlotId()];
-  const mainS  = equip[getSecondaryWeaponSlotId()];
-  const fmtP   = mainP?.format   || '';
-  const fmtS   = mainS?.format   || '';
-  const stypeS = (mainS?.sousType || mainS?.nom || '').toLowerCase();
-
-  for (const style of styles) {
-    const condP   = style.condPrincipale || [];
-    const condS   = style.condSecondaire || [];
-    const condST  = (style.condSousTypeS || []).map(s => s.toLowerCase());
-
-    const matchP = condP.length === 0
-      || condP.includes(fmtP)
-      || (condP.includes('') && !fmtP);
-
-    const matchS = condS.length === 0
-      || condS.includes(fmtS)
-      || (condS.includes('') && !fmtS);
-
-    // Si le style a un filtre sousType secondaire, il doit correspondre
-    const matchST = condST.length === 0
-      || condST.some(st => stypeS.includes(st));
-
-    // Pour "main libre" : le sousType secondaire NE DOIT PAS être bouclier ni baguette
-    // (c'est géré par l'ordre : bouclier et baguette passent en premier)
-    if (matchP && matchS && matchST) return style;
-  }
-  return null;
+  return detectCombatStyleRule(c, styles);
 }
 
 // Admin : ouvrir la gestion des styles de combat
@@ -146,39 +64,64 @@ export async function openCombatStylesAdmin() {
 }
 
 export function _renderCombatStylesModal(styles) {
+  const normalized = normalizeCombatStyles(styles);
+  const rulePills = style => {
+    const rules = style.rules;
+    const pills = [];
+    if (rules.opportunityAttack === 'allow') pills.push('<span class="cs-rule-pill reaction">↪ Opportunité autorisée</span>');
+    if (rules.opportunityAttack === 'forbid') pills.push('<span class="cs-rule-pill muted">⊘ Sans opportunité</span>');
+    if (rules.contactAttackMode !== 'none') {
+      const label = rules.contactAttackMode === 'advantage' ? 'Avantage' : 'Désavantage';
+      const scope = rules.contactAttackScope === 'all' ? 'toutes actions ciblées' : 'attaques et soins à distance';
+      pills.push(`<span class="cs-rule-pill ${rules.contactAttackMode === 'advantage' ? 'positive' : 'warning'}">${rules.contactAttackMode === 'advantage' ? '↗' : '↘'} ${label} au contact · ${scope} · ${rules.contactDistance}c</span>`);
+    }
+    return pills.join('') || '<span class="cs-rule-pill muted">Règles héritées</span>';
+  };
 
-  openModal('⚔️ Styles de Combat', `
-    <div style="font-size:.78rem;color:var(--text-dim);margin-bottom:.75rem">
-      Les styles sont détectés automatiquement selon les armes équipées.
-      Le <strong>premier style</strong> dont les conditions correspondent est affiché.
-    </div>
-    <div id="cs-styles-list" style="display:flex;flex-direction:column;gap:.5rem">
-      ${styles.map((s, i) => `
-      <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;
-        padding:.7rem .85rem;border-left:3px solid ${s.couleur||'var(--border)'}">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
-          <div style="font-weight:600;font-size:.85rem;color:var(--text)">${s.label||'Style '+i}</div>
-          <div style="display:flex;gap:.3rem">
-            <button class="btn-icon" style="font-size:.72rem" data-action="_editCombatStyle" data-idx="${i}">✏️</button>
-            <button class="btn-icon" style="font-size:.72rem;color:#ff6b6b" data-action="_deleteCombatStyle" data-idx="${i}">🗑️</button>
-          </div>
+  openModal('', `
+    <div class="sh-admin-modal is-combat-styles">
+      <div class="sh-admin-head">
+        <div class="sh-admin-head-ico">⚔️</div>
+        <div class="sh-admin-head-title">
+          <h2>Styles de combat</h2>
+          <small>Détection par équipement · règles automatiquement appliquées dans le VTT</small>
         </div>
-        <div style="font-size:.72rem;color:var(--text-dim);margin-top:.2rem">
-          Principale : <strong>${(s.condPrincipale||[]).join(', ')||'(vide)'}</strong>
-          · Secondaire : <strong>${(s.condSecondaire||[]).join(', ')||'(vide)'}</strong>
+        <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
+      </div>
+      <div class="sh-admin-body">
+        <p class="sh-admin-intro">Le premier style correspondant à l’équipement actif est utilisé. La description sert au contexte ; les règles ci-dessous pilotent réellement le combat.</p>
+        <div class="cs-style-list" id="cs-styles-list">
+          ${normalized.map((s, i) => `
+            <article class="cs-style-admin-card" style="--style-c:${s.couleur || '#4f8cff'}">
+              <div class="cs-style-admin-main">
+                <div class="cs-style-admin-title">${_esc(s.label || `Style ${i + 1}`)}</div>
+                <div class="cs-style-admin-rules">${rulePills(s)}</div>
+                ${s.description ? `<p>${_esc(s.description)}</p>` : ''}
+                <div class="cs-style-admin-match">
+                  <span><b>Principale</b>${_esc((s.condPrincipale || []).filter(Boolean).join(', ') || 'aucune arme')}</span>
+                  <span><b>Secondaire</b>${_esc((s.condSecondaire || []).filter(Boolean).join(', ') || 'aucune arme')}</span>
+                </div>
+              </div>
+              <div class="cs-style-admin-actions">
+                <button class="btn-icon" data-action="_editCombatStyle" data-idx="${i}" title="Modifier">✏️</button>
+                <button class="btn-icon danger" data-action="_deleteCombatStyle" data-idx="${i}" title="Supprimer">🗑️</button>
+              </div>
+            </article>`).join('')}
         </div>
-        <div style="font-size:.75rem;color:var(--text-muted);margin-top:.25rem;font-style:italic">${s.description||''}</div>
-      </div>`).join('')}
-    </div>
-    <div style="display:flex;gap:.5rem;margin-top:.85rem">
-      <button class="btn btn-gold" style="flex:1" data-action="_addCombatStyle">+ Nouveau style</button>
-      <button class="btn btn-outline btn-sm" data-action="close-modal">Fermer</button>
-    </div>
-  `);
+      </div>
+      <div class="sh-admin-footer">
+        <button class="btn btn-gold" data-action="_addCombatStyle">＋ Nouveau style</button>
+        <span class="sh-admin-footer-spacer"></span>
+        <button class="btn btn-outline btn-sm" data-action="close-modal">Fermer</button>
+      </div>
+    </div>`);
 }
 
 function _addCombatStyle() {
-  _openStyleEditor(-1, { label:'', condPrincipale:[], condSecondaire:[], description:'', couleur:'#4f8cff' });
+  _openStyleEditor(-1, {
+    label:'', condPrincipale:[], condSecondaire:[], description:'', couleur:'#4f8cff',
+    rules: { opportunityAttack:'inherit', contactAttackMode:'none', contactAttackScope:'ranged', contactDistance:1 },
+  });
 }
 function _editCombatStyle(i) {
   _openStyleEditor(i, _combatStyles[i] || {});
@@ -199,56 +142,107 @@ export function _getFormatsOpt() {
 }
 
 export function _openStyleEditor(idx, s) {
-  openModal(idx >= 0 ? '✏️ Modifier le style' : '+ Nouveau style', `
-    <div class="form-group">
-      <label>Nom du style</label>
-      <input class="input-field" id="cs-style-label" value="${s.label||''}" placeholder="🛡️ Bouclier">
-    </div>
-    <div class="form-group">
-      <label>Format main principale <span style="color:var(--text-dim);font-weight:400">(plusieurs = OU)</span></label>
-      <div id="cs-cond-p" style="display:flex;flex-direction:column;gap:.3rem">
+  const style = normalizeCombatStyles([s])[0];
+  const rules = style.rules;
+  openModal('', `
+    <div class="sh-admin-modal is-combat-styles is-editor">
+      <div class="sh-admin-head">
+        <div class="sh-admin-head-ico">${idx >= 0 ? '✏️' : '＋'}</div>
+        <div class="sh-admin-head-title">
+          <h2>${idx >= 0 ? 'Modifier le style' : 'Nouveau style'}</h2>
+          <small>Associe un équipement à des règles lisibles et exécutables</small>
+        </div>
+        <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
+      </div>
+      <div class="sh-admin-body cs-style-editor">
+        <section class="cs-style-editor-section identity">
+          <div class="cs-style-editor-heading"><span>1</span><div><b>Identité</b><small>Nom et repère visuel sur la fiche.</small></div></div>
+          <div class="cs-style-identity-grid">
+            <label class="cs-style-field"><span>Nom du style</span><input class="input-field" id="cs-style-label" value="${_esc(style.label || '')}" placeholder="🏹 Tir à distance"></label>
+            <label class="cs-style-field color"><span>Couleur</span><input type="color" id="cs-style-color" value="${_esc(style.couleur || '#4f8cff')}"></label>
+          </div>
+        </section>
+
+        <section class="cs-style-editor-section">
+          <div class="cs-style-editor-heading"><span>2</span><div><b>Équipement déclencheur</b><small>Plusieurs choix dans une main signifient « ou ».</small></div></div>
+          <div class="cs-style-hands-grid">
+            <div class="cs-style-hand">
+              <label>Main principale</label>
+              <div id="cs-cond-p" class="cs-style-conditions">
         ${(s.condPrincipale?.length ? s.condPrincipale : ['']).map((v,fi) => `
-        <div style="display:flex;gap:.3rem">
-          <select class="input-field cs-cond-p-sel" style="flex:1">
-            ${_getFormatsOpt().map(o=>`<option value="${o.v}" ${v===o.v?'selected':''}>${o.l}</option>`).join('')}
+                <div class="cs-style-condition-row">
+          <select class="input-field cs-cond-p-sel">
+            ${_getFormatsOpt().map(o=>`<option value="${_esc(o.v)}" ${v===o.v?'selected':''}>${_esc(o.l)}</option>`).join('')}
           </select>
-          <button type="button" data-action="_removeParent" style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:0 6px">✕</button>
+                  <button type="button" data-action="_removeParent" title="Retirer">✕</button>
         </div>`).join('')}
       </div>
       <button type="button" data-action="_csAddCond" data-container="cs-cond-p" data-sel="cs-cond-p-sel"
-        style="font-size:.72rem;background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.3);
-        border-radius:6px;padding:2px 10px;cursor:pointer;color:#4f8cff;margin-top:.3rem">+ Condition</button>
-    </div>
-    <div class="form-group">
-      <label>Format main secondaire <span style="color:var(--text-dim);font-weight:400">(plusieurs = OU)</span></label>
-      <div id="cs-cond-s" style="display:flex;flex-direction:column;gap:.3rem">
+                class="cs-style-add-condition">＋ Ajouter un format</button>
+            </div>
+            <div class="cs-style-hand">
+              <label>Main secondaire</label>
+              <div id="cs-cond-s" class="cs-style-conditions">
         ${(s.condSecondaire?.length ? s.condSecondaire : ['']).map((v,fi) => `
-        <div style="display:flex;gap:.3rem">
-          <select class="input-field cs-cond-s-sel" style="flex:1">
-            ${_getFormatsOpt().map(o=>`<option value="${o.v}" ${v===o.v?'selected':''}>${o.l}</option>`).join('')}
+                <div class="cs-style-condition-row">
+          <select class="input-field cs-cond-s-sel">
+            ${_getFormatsOpt().map(o=>`<option value="${_esc(o.v)}" ${v===o.v?'selected':''}>${_esc(o.l)}</option>`).join('')}
           </select>
-          <button type="button" data-action="_removeParent" style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:0 6px">✕</button>
+                  <button type="button" data-action="_removeParent" title="Retirer">✕</button>
         </div>`).join('')}
       </div>
       <button type="button" data-action="_csAddCond" data-container="cs-cond-s" data-sel="cs-cond-s-sel"
-        style="font-size:.72rem;background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.3);
-        border-radius:6px;padding:2px 10px;cursor:pointer;color:#4f8cff;margin-top:.3rem">+ Condition</button>
-    </div>
-    <div class="form-group">
-      <label>Description / Effets</label>
-      <textarea class="input-field" id="cs-style-desc" rows="3" placeholder="Décris les bonus, malus, règles spéciales...">${s.description||''}</textarea>
-    </div>
-    <div class="form-group">
-      <label>Couleur</label>
-      <div style="display:flex;align-items:center;gap:.6rem">
-        <input type="color" id="cs-style-color" value="${s.couleur||'#4f8cff'}"
-          style="width:44px;height:36px;border-radius:8px;border:1px solid var(--border);cursor:pointer;padding:2px">
-        <span style="font-size:.78rem;color:var(--text-dim)">Couleur de l'encart style</span>
+                class="cs-style-add-condition">＋ Ajouter un format</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="cs-style-editor-section">
+          <div class="cs-style-editor-heading"><span>3</span><div><b>Règles actives</b><small>Ces choix ne sont pas seulement descriptifs : le VTT les utilise.</small></div></div>
+          <div class="cs-style-rules-grid">
+            <label class="cs-style-field">
+              <span>Attaque d’opportunité</span>
+              <select class="input-field" id="cs-style-opportunity">
+                <option value="inherit" ${rules.opportunityAttack==='inherit'?'selected':''}>Aucune règle particulière</option>
+                <option value="allow" ${rules.opportunityAttack==='allow'?'selected':''}>Autorisée à la sortie de portée</option>
+                <option value="forbid" ${rules.opportunityAttack==='forbid'?'selected':''}>Interdite avec ce style</option>
+              </select>
+              <small>La réaction est disponible lorsqu’une cible quitte la portée d’attaque.</small>
+            </label>
+            <label class="cs-style-field">
+              <span>Ennemi au contact</span>
+              <select class="input-field" id="cs-style-contact-mode">
+                <option value="none" ${rules.contactAttackMode==='none'?'selected':''}>Aucun modificateur</option>
+                <option value="disadvantage" ${rules.contactAttackMode==='disadvantage'?'selected':''}>Désavantage automatique</option>
+                <option value="advantage" ${rules.contactAttackMode==='advantage'?'selected':''}>Avantage automatique</option>
+              </select>
+              <small>Se combine naturellement aux avantages et désavantages des états.</small>
+            </label>
+            <label class="cs-style-field">
+              <span>Actions concernées</span>
+              <select class="input-field" id="cs-style-contact-scope">
+                <option value="ranged" ${rules.contactAttackScope==='ranged'?'selected':''}>Attaques et soins à distance</option>
+                <option value="all" ${rules.contactAttackScope==='all'?'selected':''}>Toutes les actions ciblées</option>
+              </select>
+            </label>
+            <label class="cs-style-field compact">
+              <span>Distance de contact</span>
+              <div class="cs-style-distance"><input class="input-field" type="number" id="cs-style-contact-distance" min="1" max="12" value="${rules.contactDistance}"><em>cases</em></div>
+            </label>
+          </div>
+          <div class="cs-style-rule-info"><span>✦</span><div><b>Dégâts en cas d’échec</b><small>Cette règle vient du type de dégâts de l’arme : un type magique configuré à « moitié » inflige ½ dégâts sur un échec de CA, et toujours 0 sur un échec critique.</small></div></div>
+        </section>
+
+        <section class="cs-style-editor-section">
+          <div class="cs-style-editor-heading"><span>4</span><div><b>Effets complémentaires</b><small>Pour les règles qui ne sont pas encore automatisées.</small></div></div>
+          <label class="cs-style-field"><span>Description</span><textarea class="input-field" id="cs-style-desc" rows="3" placeholder="Ex. : peut parer et gagner +1 CA lorsqu’il est en garde.">${_esc(style.description || '')}</textarea></label>
+        </section>
       </div>
-    </div>
-    <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" data-action="_saveCombatStyle" data-idx="${idx}">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" data-action="_backToStylesList">← Retour</button>
+      <div class="sh-admin-footer">
+        <button class="btn btn-outline btn-sm" data-action="_backToStylesList">← Liste</button>
+        <span class="sh-admin-footer-spacer"></span>
+        <button class="btn btn-gold" data-action="_saveCombatStyle" data-idx="${idx}">Enregistrer le style</button>
+      </div>
     </div>
   `);
 }
@@ -257,13 +251,12 @@ function _csAddCond(containerId, selClass) {
   const container = document.getElementById(containerId);
   if (!container) return;
   const div = document.createElement('div');
-  div.style.cssText = 'display:flex;gap:.3rem';
+  div.className = 'cs-style-condition-row';
   div.innerHTML = `
-    <select class="input-field ${selClass}" style="flex:1">
-      ${_getFormatsOpt().map(o=>`<option value="${o.v}">${o.l}</option>`).join('')}
+    <select class="input-field ${selClass}">
+      ${_getFormatsOpt().map(o=>`<option value="${_esc(o.v)}">${_esc(o.l)}</option>`).join('')}
     </select>
-    <button type="button" data-action="_removeParent"
-      style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:0 6px">✕</button>`;
+    <button type="button" data-action="_removeParent" title="Retirer">✕</button>`;
   container.appendChild(div);
 }
 
@@ -279,6 +272,14 @@ async function _saveCombatStyle(idx) {
     condSecondaire: condS,
     description: document.getElementById('cs-style-desc')?.value?.trim() || '',
     couleur: document.getElementById('cs-style-color')?.value || '#4f8cff',
+    condSousTypeS: idx >= 0 ? (_combatStyles[idx]?.condSousTypeS || []) : [],
+    rules: {
+      opportunityAttack: document.getElementById('cs-style-opportunity')?.value || 'inherit',
+      opportunityTrigger: 'leave-reach',
+      contactAttackMode: document.getElementById('cs-style-contact-mode')?.value || 'none',
+      contactAttackScope: document.getElementById('cs-style-contact-scope')?.value || 'ranged',
+      contactDistance: Math.max(1, Math.min(12, parseInt(document.getElementById('cs-style-contact-distance')?.value, 10) || 1)),
+    },
   };
   if (!_combatStyles) _combatStyles = [];
   if (idx >= 0) _combatStyles[idx] = style;

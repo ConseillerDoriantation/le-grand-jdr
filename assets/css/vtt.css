@@ -6094,13 +6094,17 @@ html:not([data-theme="light"]) .vtt-root {
 }
 .vtt-log-target {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto auto auto;
+  grid-template-columns: 24px minmax(4rem, 1fr) max-content max-content;
   align-items: center; gap: .35rem;
+  min-width: 0;
   padding: .25rem .4rem;
   background: rgba(255,255,255,.03);
   border-radius: 6px;
   border-left: 2px solid var(--row-c, var(--border));
   font-size: .72rem;
+}
+.vtt-log-target.has-source-link {
+  grid-template-columns: 24px minmax(4rem, 1fr) 20px max-content max-content;
 }
 .vtt-log-target-portrait {
   width: 24px; height: 24px; border-radius: 50%;
@@ -6117,6 +6121,14 @@ html:not([data-theme="light"]) .vtt-root {
   font-size: .62rem; color: var(--text-dim);
   padding: .1rem .35rem; border-radius: 4px;
   background: rgba(255,255,255,.04);
+  min-width: 0;
+  max-width: 8.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  writing-mode: horizontal-tb;
 }
 .vtt-log-target-dmg {
   font-weight: 800; font-size: .88rem;
@@ -9408,12 +9420,15 @@ html:not([data-theme="light"]) .vtt-root {
 }
 
 .vtt-log-target {
-  grid-template-columns: 26px minmax(0, 1fr) 22px auto auto;
+  grid-template-columns: 26px minmax(4rem, 1fr) max-content max-content;
   border-left: 0;
   border: 1px solid color-mix(in srgb, var(--row-c, #8aa0bd) 24%, var(--vtt-stroke));
   border-radius: 11px;
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--row-c, #8aa0bd) 10%, transparent), rgba(255,255,255,.025));
+}
+.vtt-log-target.has-source-link {
+  grid-template-columns: 26px minmax(4rem, 1fr) 22px max-content max-content;
 }
 
 .vtt-log-target .vtt-log-source-btn {
