@@ -830,8 +830,9 @@ match /adventures/{adventureId} {
   }
   // Visée & sceaux runiques temps réel : 1 doc par joueur (id = uid).
   // Porte les lignes de visée (active/srcId/targets/pageId) ET le champ
-  // sigilFire {tokenId, sigil, targets, impColor, pageId, n} qui déclenche le
-  // sceau + les impacts chez les autres joueurs au lancement d'un sort.
+  // sigilFire {tokenId, sigil, targets, zone, impColor, pageId, n} qui déclenche
+  // le sceau, la zone AoE et les impacts chez les autres joueurs, et
+  // techniqueFire {areas, pageId, n} pour les zones transitoires des techniques.
   // Lecture : tous les membres · Écriture : chacun son propre doc.
   match /vttCasting/{uid} {
     allow read:  if inAdventure(adventureId);

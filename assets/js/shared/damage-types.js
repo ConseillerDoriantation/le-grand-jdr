@@ -1,4 +1,5 @@
 import { getCurrentAdventureId, getDocData, saveDoc } from '../data/firestore.js';
+import { normalizeWeaponTechnique } from './weapon-techniques.js';
 
 // ══════════════════════════════════════════════
 // TYPES DE DÉGÂTS
@@ -41,8 +42,17 @@ export const DEFAULT_DAMAGE_TYPES = [
   { id: 'tonnerre',    label: 'Tonnerre',           icon: '🌩️', color: '#60a5fa', isMagic: true,  rules: { missEffect: 'none', armorPen: 0, dmgBonus: 0 } },
 ];
 
+export function normalizeDamageType(type = {}) {
+  const techniques = Array.isArray(type.techniques) ? type.techniques : [];
+  return {
+    ...type,
+    rules: { ...DEFAULT_RULES, ...(type.rules || {}) },
+    techniques: techniques.map(normalizeWeaponTechnique).filter(technique => technique.label),
+  };
+}
+
 function _cloneDamageTypes(types = DEFAULT_DAMAGE_TYPES) {
-  return types.map(t => ({ ...t, rules: { ...DEFAULT_RULES, ...(t.rules || {}) } }));
+  return types.map(t => normalizeDamageType({ ...t }));
 }
 
 function _defaultDamageTypesForAdventure() {
@@ -55,7 +65,7 @@ export async function loadDamageTypes() {
   if (_damageTypes) return _damageTypes;
   try {
     const d = await getDocData('world', 'damage_types');
-    _damageTypes = d?.types?.length ? d.types : _defaultDamageTypesForAdventure();
+    _damageTypes = d?.types?.length ? d.types.map(normalizeDamageType) : _defaultDamageTypesForAdventure();
   } catch {
     _damageTypes = _defaultDamageTypesForAdventure();
   }
@@ -63,8 +73,9 @@ export async function loadDamageTypes() {
 }
 
 export async function saveDamageTypes(types) {
-  await saveDoc('world', 'damage_types', { types });
-  _damageTypes = types;
+  const normalized = (types || []).map(normalizeDamageType);
+  await saveDoc('world', 'damage_types', { types: normalized });
+  _damageTypes = normalized;
 }
 
 export function invalidateDamageTypesCache() {

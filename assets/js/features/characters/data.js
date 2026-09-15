@@ -4,6 +4,7 @@ import { openModal, closeModal, closeModalDirect, confirmModal, setModalCloseGua
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { loadWeaponFormats, saveWeaponFormats, normalizeWeaponTechnique } from '../../shared/weapon-formats.js';
 import { loadDamageTypes, saveDamageTypes } from '../../shared/damage-types.js';
+import { CONDITION_DEFAULT_LIBRARY, loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, saveSpellMatrices, SPELL_SLOTS, SLOT_LABELS, COMBO_IDS, COMBO_DEFAULTS } from '../../shared/spell-matrices.js';
 import { _esc, modStr } from '../../shared/html.js';
 import { computeEquipStatsBonus, getMod, getMaitriseBonus as _getMaitriseBonus } from '../../shared/char-stats.js';
@@ -21,9 +22,13 @@ export { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, g
 export let _combatStyles = null; // cache en mémoire
 export let _weaponFormats = null; // cache en mémoire (partagé avec weapon-formats.js)
 let _damageTypes = null; // cache local types de dégâts
+let _techniqueConditions = CONDITION_DEFAULT_LIBRARY;
 let _wfTechniqueFormatIndex = -1;
 let _wfTechniqueDrafts = [];
 let _wfTechniqueDirty = false;
+let _dtTechniqueTypeIndex = -1;
+let _dtTechniqueDrafts = [];
+let _dtTechniqueDirty = false;
 
 export async function loadCombatStyles() {
   if (_combatStyles) return _combatStyles;
@@ -291,12 +296,14 @@ function _backToStylesList() {
 // FORMATS D'ARMES — Admin
 // ══════════════════════════════════════════════
 export async function openWeaponFormatsAdmin() {
-  [_weaponFormats, _damageTypes] = await Promise.all([loadWeaponFormats(), loadDamageTypes()]);
+  [_weaponFormats, _damageTypes, _techniqueConditions] = await Promise.all([
+    loadWeaponFormats(), loadDamageTypes(), loadConditionLibrary(),
+  ]);
   _renderWeaponFormatsModal(_weaponFormats);
 }
 
 export async function openDamageTypesAdmin() {
-  _damageTypes = await loadDamageTypes();
+  [_damageTypes, _techniqueConditions] = await Promise.all([loadDamageTypes(), loadConditionLibrary()]);
   _renderDamageTypesModal(_damageTypes);
 }
 
@@ -399,61 +406,143 @@ async function _deleteWeaponFormat(i) {
 const _WF_TECHNIQUE_PRESETS = {
   blank: {
     icon: '⚔️', label: 'Nouvelle technique', description: '', defenseBonus: 0,
-    extraWeaponDice: 0, extraDamageFormula: '', extraDamageFlat: 0, onHitEffect: '',
+    extraWeaponDice: 0, extraDamageFormula: '', extraDamageFlat: 0,
+    addWeaponModifier: false, blastRadius: 0, onHitEffect: '',
   },
   weak_spot: {
     icon: '🎯', label: 'Point faible',
     description: 'Vise une zone vulnérable : plus difficile à toucher, mais plus destructeur.',
-    defenseBonus: 4, extraWeaponDice: 1, extraDamageFormula: '', extraDamageFlat: 0, onHitEffect: '',
+    defenseBonus: 4, extraWeaponDice: 1, extraDamageFormula: '', extraDamageFlat: 0,
+    addWeaponModifier: false, blastRadius: 0, onHitEffect: '',
   },
   power: {
     icon: '💥', label: 'Coup puissant',
     description: 'Sacrifie la précision pour porter un impact plus lourd.',
-    defenseBonus: 2, extraWeaponDice: 0, extraDamageFormula: '', extraDamageFlat: 2, onHitEffect: '',
+    defenseBonus: 2, extraWeaponDice: 0, extraDamageFormula: '', extraDamageFlat: 2,
+    addWeaponModifier: false, blastRadius: 0, onHitEffect: '',
   },
 };
 
-function _wfTechniqueCard(t, i) {
+const _TECH_STAT_OPTIONS = [
+  ['force', 'Force'], ['dexterite', 'Dextérité'], ['constitution', 'Constitution'],
+  ['intelligence', 'Intelligence'], ['sagesse', 'Sagesse'], ['charisme', 'Charisme'],
+];
+
+function _techniqueOptions(rows, selected, emptyLabel = '') {
+  return `${emptyLabel ? `<option value="">${_esc(emptyLabel)}</option>` : ''}${rows.map(([value, label]) =>
+    `<option value="${_esc(value)}" ${selected === value ? 'selected' : ''}>${_esc(label)}</option>`
+  ).join('')}`;
+}
+
+function _techniqueConfigCard(t, i, kind) {
+  const isWeapon = kind === 'weapon';
+  const handler = isWeapon ? '_wfTechniqueDraftField' : '_dtTechniqueDraftField';
+  const remove = isWeapon ? '_deleteWeaponFormatTechnique' : '_deleteDamageTypeTechnique';
+  const bind = (field, event = 'input') => `data-${event}="${handler}" data-idx="${i}" data-field="${field}"`;
+  const damageOptions = (_damageTypes || []).map(type => [type.id, `${type.icon || ''} ${type.label}`]);
+  const conditionOptions = (_techniqueConditions || []).map(condition => [condition.id, `${condition.icon || ''} ${condition.label}`]);
   return `
-    <article class="wf-tech-card">
+    <article class="wf-tech-card tech-builder-card">
       <div class="wf-tech-card-head">
-        <input class="wf-tech-icon" value="${_esc(t.icon || '🎯')}" maxlength="8"
-          data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="icon" aria-label="Icône">
-        <input class="wf-tech-name" value="${_esc(t.label || '')}" maxlength="60" placeholder="Nom de la technique"
-          data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="label">
-        <button class="sh-admin-del-btn" data-action="_deleteWeaponFormatTechnique" data-idx="${i}" title="Retirer la technique">🗑️</button>
+        <input class="wf-tech-icon" value="${_esc(t.icon || (isWeapon ? '🎯' : '💥'))}" maxlength="8" ${bind('icon')} aria-label="Icône">
+        <input class="wf-tech-name" value="${_esc(t.label || '')}" maxlength="60" placeholder="Nom de la technique" ${bind('label')}>
+        <span class="tech-builder-kind">${isWeapon ? '⚔️ Arme' : '✨ Type de dégâts'}</span>
+        <button class="sh-admin-del-btn" data-action="${remove}" data-idx="${i}" title="Retirer la technique">🗑️</button>
       </div>
-      <textarea class="wf-tech-desc" rows="2" maxlength="240" placeholder="Explique clairement le choix proposé au joueur…"
-        data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="description">${_esc(t.description || '')}</textarea>
-      <div class="wf-tech-rules">
-        <label title="Valeur ajoutée à la CA de chaque cible pour cette attaque">
-          <span>CA de la cible</span>
-          <div><b>+</b><input type="number" min="0" max="30" value="${t.defenseBonus || 0}"
-            data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="defenseBonus"></div>
-        </label>
-        <label title="Nombre de dés supplémentaires du même type que l'arme">
-          <span>Dés d'arme bonus</span>
-          <input type="number" min="0" max="9" value="${t.extraWeaponDice || 0}"
-            data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="extraWeaponDice">
-        </label>
-        <label title="Formule de dégâts indépendante, par exemple 1d4 ou 2d6+1">
-          <span>Formule bonus</span>
-          <input value="${_esc(t.extraDamageFormula || '')}" maxlength="30" placeholder="ex. 1d6"
-            data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="extraDamageFormula">
-        </label>
-        <label title="Dégâts fixes ajoutés si l'attaque touche">
-          <span>Dégâts plats</span>
-          <div><b>+</b><input type="number" min="0" max="999" value="${t.extraDamageFlat || 0}"
-            data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="extraDamageFlat"></div>
-        </label>
+      <textarea class="wf-tech-desc" rows="2" maxlength="240" placeholder="Décris clairement ce choix pour le joueur…" ${bind('description')}>${_esc(t.description || '')}</textarea>
+
+      <div class="tech-builder-sections">
+        <details class="tech-builder-section is-core" open>
+          <summary><span>1</span><div><b>Déclenchement</b><small>Quand et avec quelle précision ?</small></div></summary>
+          <div class="tech-builder-grid">
+            <label><span>Déclenchement</span><select ${bind('trigger', 'change')}>${_techniqueOptions([
+              ['hit', 'Sur une touche'], ['miss', 'Sur un échec'], ['crit', 'Sur un critique'], ['always', 'Toujours'],
+            ], t.trigger || 'hit')}</select></label>
+            <label><span>Effets si échec</span><select ${bind('missEffectMode', 'change')}>${_techniqueOptions([
+              ['none', 'Aucun effet'], ['half', 'Effets + ½ dégâts'], ['full', 'Effets + dégâts complets'],
+            ], t.missEffectMode || 'none')}</select></label>
+            <label><span>Bonus au toucher</span><input type="number" min="-30" max="30" value="${t.attackModifier || 0}" ${bind('attackModifier')}></label>
+            <label><span>CA de la cible</span><input type="number" min="0" max="30" value="${t.defenseBonus || 0}" ${bind('defenseBonus')}></label>
+            <label><span>Sur un critique</span><select ${bind('criticalMode', 'change')}>${_techniqueOptions([
+              ['normal', 'Bonus normal'], ['double', 'Bonus doublé'],
+            ], t.criticalMode || 'normal')}</select></label>
+          </div>
+          <label class="wf-tech-check tech-builder-check"><input type="checkbox" ${t.allowWithAbilities !== false ? 'checked' : ''} ${bind('allowWithAbilities', 'change')}><span><b>Disponible avec les sorts et compétences</b><small>Sinon, la technique apparaît uniquement sur l’attaque directe de l’arme ou du type concerné.</small></span></label>
+          <small class="tech-builder-note">« Effets si échec » concerne uniquement une technique normalement déclenchée sur une touche. Un déclencheur « Sur un échec » reste volontairement actif.</small>
+        </details>
+
+        <details class="tech-builder-section" open>
+          <summary><span>2</span><div><b>Dégâts et progression</b><small>La part propre à cette technique.</small></div></summary>
+          <div class="tech-builder-grid tech-builder-grid--damage">
+            <label><span>Dés de l’arme</span><input type="number" min="0" max="9" value="${t.extraWeaponDice || 0}" ${bind('extraWeaponDice')}></label>
+            <label><span>Formule bonus</span><input value="${_esc(t.extraDamageFormula || '')}" maxlength="30" placeholder="1d6" ${bind('extraDamageFormula')}></label>
+            <label><span>Dégâts plats</span><input type="number" min="0" max="999" value="${t.extraDamageFlat || 0}" ${bind('extraDamageFlat')}></label>
+            <label><span>Type propre</span><select ${bind('damageTypeId', 'change')}>${_techniqueOptions(damageOptions, t.damageTypeId || '', 'Même type que l’attaque')}</select></label>
+          </div>
+          <label class="wf-tech-check tech-builder-check"><input type="checkbox" ${t.addWeaponModifier ? 'checked' : ''} ${bind('addWeaponModifier', 'change')}><span><b>Ajouter le modificateur de l’arme</b><small>Ex. DEX avec un arc ou FOR avec une hache.</small></span></label>
+          <div class="tech-builder-progression">
+            <label><span>Progression</span><select ${bind('scalingMode', 'change')}>${_techniqueOptions([
+              ['none', 'Aucune'], ['level', 'Selon le niveau'], ['mastery', 'Selon la maîtrise'], ['stat', 'Selon une caractéristique'],
+            ], t.scalingMode || 'none')}</select></label>
+            <label><span>Chaque palier de</span><input type="number" min="1" max="20" value="${t.scalingEvery || 1}" ${bind('scalingEvery')}></label>
+            <label><span>Ajoute</span><input value="${_esc(t.scalingFormula || '')}" maxlength="30" placeholder="1d4" ${bind('scalingFormula')}></label>
+            <label><span>Caractéristique</span><select ${bind('scalingStat', 'change')}>${_techniqueOptions(_TECH_STAT_OPTIONS, t.scalingStat || 'force')}</select></label>
+          </div>
+        </details>
+
+        <details class="tech-builder-section">
+          <summary><span>3</span><div><b>Zone</b><small>Forme, origine et cibles affectées.</small></div></summary>
+          <div class="tech-builder-grid">
+            <label><span>Rayon / longueur</span><input type="number" min="0" max="30" value="${t.blastRadius || 0}" ${bind('blastRadius')}></label>
+            <label><span>Forme</span><select ${bind('areaShape', 'change')}>${_techniqueOptions([
+              ['square', 'Carré'], ['circle', 'Cercle'], ['line', 'Ligne'], ['cone', 'Cône'],
+            ], t.areaShape || 'square')}</select></label>
+            <label><span>Origine</span><select ${bind('areaOrigin', 'change')}>${_techniqueOptions([
+              ['target', 'Autour de la cible'], ['caster', 'Autour du lanceur'],
+            ], t.areaOrigin || 'target')}</select></label>
+            <label><span>Affecte</span><select ${bind('areaTargets', 'change')}>${_techniqueOptions([
+              ['all', 'Tout le monde'], ['enemies', 'Ennemis seulement'], ['allies', 'Alliés seulement'],
+            ], t.areaTargets || 'all')}</select></label>
+          </div>
+          <label class="wf-tech-check tech-builder-check"><input type="checkbox" ${t.includeCaster ? 'checked' : ''} ${bind('includeCaster', 'change')}><span><b>Le lanceur peut être affecté</b><small>Utile pour les auras, risques et explosions sans protection.</small></span></label>
+          <small class="tech-builder-note">Les lignes et cônes partent toujours du lanceur vers la cible visée.</small>
+        </details>
+
+        <details class="tech-builder-section">
+          <summary><span>4</span><div><b>État et déplacement</b><small>Effets mécaniques appliqués au déclenchement.</small></div></summary>
+          <div class="tech-builder-grid">
+            <label><span>État appliqué</span><select ${bind('conditionId', 'change')}>${_techniqueOptions(conditionOptions, t.conditionId || '', 'Aucun état')}</select></label>
+            <label><span>Durée (tours)</span><input type="number" min="0" max="100" value="${t.conditionDuration || 0}" title="0 utilise la durée par défaut de l’état" ${bind('conditionDuration')}></label>
+            <label><span>Jet de sauvegarde</span><select ${bind('conditionSaveStat', 'change')}>${_techniqueOptions(_TECH_STAT_OPTIONS, t.conditionSaveStat || '', 'Aucun JS')}</select></label>
+            <label><span>DD</span><input type="number" min="0" max="99" value="${t.conditionSaveDC || 0}" placeholder="0 = défaut" ${bind('conditionSaveDC')}></label>
+            <label><span>Déplacement</span><select ${bind('forcedMovement', 'change')}>${_techniqueOptions([
+              ['none', 'Aucun'], ['push', 'Pousser'], ['pull', 'Attirer'],
+            ], t.forcedMovement || 'none')}</select></label>
+            <label><span>Distance</span><input type="number" min="0" max="30" value="${t.forcedMovementDistance || 0}" ${bind('forcedMovementDistance')}></label>
+          </div>
+          <label class="wf-tech-effect"><span>Effet affiché dans le résultat</span><input value="${_esc(t.onHitEffect || '')}" maxlength="160" placeholder="Ex. La cible lâche son arme" ${bind('onHitEffect')}></label>
+        </details>
+
+        <details class="tech-builder-section">
+          <summary><span>5</span><div><b>Coût et limites</b><small>Ressource, usages et recharge.</small></div></summary>
+          <div class="tech-builder-grid">
+            <label><span>Ressource</span><select ${bind('resourceType', 'change')}>${_techniqueOptions([
+              ['none', 'Aucune'], ['pm', 'Points de mana'], ['pv', 'Points de vie'], ['or', 'Or'],
+            ], t.resourceType || 'none')}</select></label>
+            <label><span>Coût</span><input type="number" min="0" max="999" value="${t.resourceCost || 0}" ${bind('resourceCost')}></label>
+            <label><span>Limite</span><select ${bind('usageScope', 'change')}>${_techniqueOptions([
+              ['none', 'Illimitée'], ['combat', 'Par combat'], ['session', 'Par session'],
+            ], t.usageScope || 'none')}</select></label>
+            <label><span>Utilisations</span><input type="number" min="0" max="99" value="${t.maxUses || 0}" ${bind('maxUses')}></label>
+            <label><span>Recharge (tours)</span><input type="number" min="0" max="99" value="${t.cooldownRounds || 0}" ${bind('cooldownRounds')}></label>
+          </div>
+          <small class="tech-builder-note">0 = gratuit, illimité ou sans recharge. Les limites de session repartent à la prochaine ouverture de table.</small>
+        </details>
       </div>
-      <label class="wf-tech-effect">
-        <span>Effet narratif sur une touche <small>(affiché dans le résultat)</small></span>
-        <input value="${_esc(t.onHitEffect || '')}" maxlength="160" placeholder="ex. La cible lâche l'objet qu'elle tient"
-          data-input="_wfTechniqueDraftField" data-idx="${i}" data-field="onHitEffect">
-      </label>
     </article>`;
 }
+
+function _wfTechniqueCard(t, i) { return _techniqueConfigCard(t, i, 'weapon'); }
 
 function _editWeaponFormatTechniques(i) {
   const format = _weaponFormats?.[i];
@@ -493,8 +582,8 @@ function _renderWeaponFormatTechniquesEditor() {
       </div>
       <div class="sh-admin-body">
         <p class="sh-admin-intro">
-          La difficulté modifie la <strong>CA de toutes les cibles</strong>. Les dégâts et l'effet ne s'appliquent que si l'attaque touche.
-          Les dés d'arme bonus reprennent automatiquement le type de dé de l'arme équipée.
+          Chaque technique possède ses propres règles de déclenchement, dégâts, zone, état, déplacement et coût.
+          Les deux premiers blocs restent ouverts ; les réglages avancés se déplient au besoin. Une technique d’arme et une technique élémentaire peuvent être activées ensemble.
         </p>
         <div class="wf-tech-list">
           ${_wfTechniqueDrafts.length
@@ -521,7 +610,7 @@ function _wfTechniqueDraftField(el) {
   const technique = _wfTechniqueDrafts[Number(el.dataset.idx)];
   if (!technique) return;
   const field = el.dataset.field;
-  technique[field] = el.type === 'number' ? (parseInt(el.value, 10) || 0) : el.value;
+  technique[field] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? (parseInt(el.value, 10) || 0) : el.value;
   _wfTechniqueDirty = true;
 }
 
@@ -552,7 +641,9 @@ async function _saveWeaponFormatTechniques() {
   const i = _wfTechniqueFormatIndex;
   if (!_weaponFormats?.[i]) return;
   const techniques = _wfTechniqueDrafts.map(normalizeWeaponTechnique).filter(t => t.label);
-  const invalidFormula = techniques.find(t => t.extraDamageFormula && !/^\d*d\d+(?:[+-]\d+)?$/i.test(t.extraDamageFormula));
+  const invalidFormula = techniques.find(t =>
+    [t.extraDamageFormula, t.scalingFormula].some(formula => formula && !/^\d*d\d+(?:[+-]\d+)?$/i.test(formula))
+  );
   if (invalidFormula) {
     showNotif(`Formule invalide pour « ${invalidFormula.label} » (exemple attendu : 1d6+2).`, 'error');
     return;
@@ -578,6 +669,7 @@ const DT_SWATCHES = ['#9ca3af', '#f97316', '#4f8cff', '#22c38e', '#b47fff', '#63
 function _dtBadges(t) {
   const r = t.rules || {}, b = [];
   if (t.isMagic) b.push('<span class="dt-badge dt-badge--mag" title="Élément magique">🔮</span>');
+  if (t.techniques?.length) b.push(`<span class="dt-badge dt-badge--tech" title="Technique optionnelle">💥 ${t.techniques.length}</span>`);
   const me = r.missEffect || 'none';
   if (me !== 'none') {
     const scope = r.missScope || 'always';
@@ -616,6 +708,8 @@ function _renderDamageTypesModal(types) {
           aria-label="Nom du type"
           data-change="_saveDmgTypeProp" data-i="${i}" data-prop="label">
         <span class="dt-badges" data-badges="${i}">${_dtBadges(t)}</span>
+        <button type="button" class="wf-tech-open dt-tech-open" data-action="_editDamageTypeTechniques" data-idx="${i}"
+          title="Configurer les techniques de ce type">💥 ${t.techniques?.length || 0}</button>
         <button type="button" class="dt-toggle" data-action="_toggleDmgRow" data-i="${i}"
           title="Régler ce type" aria-label="Régler ce type">▾</button>
         <button class="sh-admin-del-btn" data-action="_deleteDmgType" data-idx="${i}" title="Supprimer">🗑️</button>
@@ -717,6 +811,135 @@ function _renderDamageTypesModal(types) {
   `);
   setTimeout(() => document.getElementById('dt-new-label')?.focus(), 60);
   _initDmgSortable();
+}
+
+const _DT_TECHNIQUE_PRESETS = {
+  blank: {
+    icon: '💥', label: 'Nouvelle technique', description: '', defenseBonus: 0,
+    extraWeaponDice: 0, extraDamageFormula: '', extraDamageFlat: 0,
+    addWeaponModifier: false, blastRadius: 0, onHitEffect: '',
+  },
+  burst: {
+    icon: '💥', label: 'Explosion élémentaire',
+    description: 'Sur une touche, l’élément explose autour de la cible.',
+    defenseBonus: 0, extraWeaponDice: 0, extraDamageFormula: '1d4', extraDamageFlat: 0,
+    addWeaponModifier: true, blastRadius: 1, onHitEffect: '',
+  },
+};
+
+function _dtTechniqueCard(t, i) { return _techniqueConfigCard(t, i, 'damage'); }
+
+function _editDamageTypeTechniques(i) {
+  const type = _damageTypes?.[i];
+  if (!type) return;
+  _dtTechniqueTypeIndex = i;
+  _dtTechniqueDrafts = (type.techniques || []).map((technique, idx) => normalizeWeaponTechnique({ ...technique }, idx));
+  _dtTechniqueDirty = false;
+  _renderDamageTypeTechniquesEditor();
+}
+
+function _installDamageTypeTechniqueCloseGuard() {
+  setModalCloseGuard(() => {
+    if (!_dtTechniqueDirty) return false;
+    confirmModal('Quitter sans enregistrer les techniques ?', { title: 'Modifications non enregistrées' })
+      .then(ok => {
+        if (!ok) return;
+        _dtTechniqueDirty = false;
+        closeModalDirect();
+      });
+    return true;
+  });
+}
+
+function _renderDamageTypeTechniquesEditor() {
+  const type = _damageTypes?.[_dtTechniqueTypeIndex];
+  if (!type) return _renderDamageTypesModal(_damageTypes || []);
+  openModal('', `
+    <div class="sh-admin-modal is-formats wf-tech-editor">
+      <div class="sh-admin-head">
+        <button class="wf-tech-back" data-action="_backToDamageTypes" title="Retour aux types de dégâts">←</button>
+        <div class="sh-admin-head-ico">${_esc(type.icon || '💥')}</div>
+        <div class="sh-admin-head-title">
+          <h2>Techniques · ${_esc(type.label)}</h2>
+          <small>Le joueur choisit de les activer avant son jet. L’attaque normale reste toujours disponible.</small>
+        </div>
+        <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
+      </div>
+      <div class="sh-admin-body">
+        <p class="sh-admin-intro">
+          Cette technique dispose exactement des mêmes possibilités qu’une technique d’arme : déclencheur, précision, dégâts, zone, états, déplacement, coût et recharge.
+          Elle peut être cumulée avec une technique de l’arme équipée ; une même cible ne reçoit chaque technique qu’une fois par activation.
+        </p>
+        <div class="wf-tech-list">
+          ${_dtTechniqueDrafts.length
+            ? _dtTechniqueDrafts.map(_dtTechniqueCard).join('')
+            : '<div class="wf-tech-empty"><span>💥</span><strong>Aucune technique</strong><small>Ce type de dégâts conserve son comportement normal.</small></div>'}
+        </div>
+        <div class="wf-tech-presets">
+          <span>Ajouter :</span>
+          <button data-action="_addDamageTypeTechnique" data-preset="blank">＋ Libre</button>
+          <button data-action="_addDamageTypeTechnique" data-preset="burst">💥 Explosion 1d4 + mod</button>
+        </div>
+      </div>
+      <div class="sh-admin-footer">
+        <button class="btn btn-outline btn-sm" data-action="_backToDamageTypes">Retour</button>
+        <div class="sh-admin-footer-spacer"></div>
+        <button class="btn btn-gold" data-action="_saveDamageTypeTechniques">Enregistrer les techniques</button>
+      </div>
+    </div>`);
+  _installDamageTypeTechniqueCloseGuard();
+}
+
+function _dtTechniqueDraftField(el) {
+  const technique = _dtTechniqueDrafts[Number(el.dataset.idx)];
+  if (!technique) return;
+  const field = el.dataset.field;
+  technique[field] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? (parseInt(el.value, 10) || 0) : el.value;
+  _dtTechniqueDirty = true;
+}
+
+function _addDamageTypeTechnique(preset = 'blank') {
+  const source = _DT_TECHNIQUE_PRESETS[preset] || _DT_TECHNIQUE_PRESETS.blank;
+  const type = _damageTypes?.[_dtTechniqueTypeIndex];
+  const label = preset === 'burst' && type?.id === 'feu' ? 'Explosion ardente' : source.label;
+  _dtTechniqueDrafts.push(normalizeWeaponTechnique({ ...source, label, id: `dtype_tech_${Date.now()}` }, _dtTechniqueDrafts.length));
+  _dtTechniqueDirty = true;
+  _renderDamageTypeTechniquesEditor();
+}
+
+function _deleteDamageTypeTechnique(i) {
+  if (!_dtTechniqueDrafts[i]) return;
+  _dtTechniqueDrafts.splice(i, 1);
+  _dtTechniqueDirty = true;
+  _renderDamageTypeTechniquesEditor();
+}
+
+async function _backToDamageTypes() {
+  if (_dtTechniqueDirty) {
+    const discard = await confirmModal('Revenir aux types sans enregistrer les techniques ?', { title: 'Modifications non enregistrées' });
+    if (!discard) return;
+  }
+  _dtTechniqueDirty = false;
+  _renderDamageTypesModal(_damageTypes || []);
+}
+
+async function _saveDamageTypeTechniques() {
+  const i = _dtTechniqueTypeIndex;
+  if (!_damageTypes?.[i]) return;
+  const techniques = _dtTechniqueDrafts.map(normalizeWeaponTechnique).filter(technique => technique.label);
+  const invalidFormula = techniques.find(technique =>
+    [technique.extraDamageFormula, technique.scalingFormula].some(formula => formula && !/^\d*d\d+(?:[+-]\d+)?$/i.test(formula))
+  );
+  if (invalidFormula) {
+    showNotif(`Formule invalide pour « ${invalidFormula.label} » (exemple attendu : 1d4+2).`, 'error');
+    return;
+  }
+  const types = _damageTypes.map((type, idx) => idx === i ? { ...type, techniques } : type);
+  await saveDamageTypes(types);
+  _damageTypes = types;
+  _dtTechniqueDirty = false;
+  showNotif(`${techniques.length} technique${techniques.length > 1 ? 's' : ''} enregistrée${techniques.length > 1 ? 's' : ''}.`, 'success');
+  _renderDamageTypesModal(types);
 }
 
 // ── Réordonnancement par glisser-déposer (Sortable, poignée ⠿) ──────────────
@@ -1290,6 +1513,12 @@ registerActions({
   _deleteWeaponFormatTechnique: (btn) => _deleteWeaponFormatTechnique(Number(btn.dataset.idx)),
   _saveWeaponFormatTechniques: () => _saveWeaponFormatTechniques(),
   _backToWeaponFormats:     ()    => _backToWeaponFormats(),
+  _editDamageTypeTechniques: (btn) => _editDamageTypeTechniques(Number(btn.dataset.idx)),
+  _dtTechniqueDraftField:    (el)  => _dtTechniqueDraftField(el),
+  _addDamageTypeTechnique:   (btn) => _addDamageTypeTechnique(btn.dataset.preset),
+  _deleteDamageTypeTechnique:(btn) => _deleteDamageTypeTechnique(Number(btn.dataset.idx)),
+  _saveDamageTypeTechniques: ()    => _saveDamageTypeTechniques(),
+  _backToDamageTypes:        ()    => _backToDamageTypes(),
   _addWeaponFormat:         ()    => _addWeaponFormat(),
   _deleteWeaponFormat:      (btn) => _deleteWeaponFormat(Number(btn.dataset.idx)),
   openCombatStylesAdmin:    ()    => openCombatStylesAdmin(),

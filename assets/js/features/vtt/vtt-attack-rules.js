@@ -18,3 +18,10 @@ export function receivesOffensiveDamageBonus(option) {
   const isStandardAction = !option.actionType || option.actionType === 'action';
   return isStandardAction && (isDirectAttack || option.sortIdx !== undefined);
 }
+
+/** Compare un jet de toucher commun à la CA propre d'une cible. */
+export function attackRollHitsTarget({ hitTotal = 0, targetCA = 10, autoHit = false, isCrit = false, isFumble = false } = {}) {
+  if (autoHit || isCrit) return true;
+  if (isFumble) return false;
+  return Number(hitTotal) >= Number(targetCA);
+}

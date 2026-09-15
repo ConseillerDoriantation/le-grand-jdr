@@ -26,13 +26,16 @@ import { getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { buildProjectionPatch, switchBuild } from '../../shared/character-builds.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
 import { resolveWeaponDamageContext } from '../../shared/weapon-damage-context.js';
-import { weaponTechniqueTargetCA, weaponTechniqueDamageTerms } from '../../shared/weapon-techniques.js';
+import {
+  combinedTechniqueTargetCA, techniqueAllowedForAction, techniqueAreaIntersects, techniqueOutcomeMultiplier, techniqueTriggerApplies,
+  weaponTechniqueDamageTerms,
+} from '../../shared/weapon-techniques.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../../shared/damage-types.js';
 import { getAttackMissEffect } from '../../shared/damage-type-rules.js';
-import { playSigil, playImpact, playProjectile, playSlash } from './vtt-rune-sigil.js';
+import { playSigil, playImpact, playProjectile, playSlash, playTechniqueArea } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
-import { calcSpellDuration, calcSpellTargets, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, getProtectionRestoreMode, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { calculateSummonStats, getPreparedInvocationActions, INVOCATION_ABILITIES, invocationStatModifier, invocationStatShort, invocationsAllowedForSpell, normalizeInvocationSelection, normalizeInvocationStats, toggleInvocationChoice } from '../../shared/invocation-stats.js';
 import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
@@ -63,7 +66,7 @@ import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisu
 import { vttCanvasPixelRatio } from './vtt-fog-performance.js';
 import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenHealthMeta, tokenMovementMeta, tokenRelationTone } from './vtt-token-visual.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
-import { receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
+import { attackRollHitsTarget, receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
 import { conditionDamageReductionApplies, conditionStatRollMode } from './vtt-condition-rules.js';
 import { planGroupGridStep } from './vtt-group-movement.js';
 import { invocableCharacterTokens, resolveCharacterControlToken } from './vtt-token-control.js';
@@ -4321,6 +4324,14 @@ function _buildSpellOption(s, ctx) {
       ? 'bonus'
       : 'action';
   const sortIcon = actionType === 'reaction' ? '⚡' : actionType === 'bonus' ? '💫' : '✨';
+  // Les capacités peuvent autoriser les techniques du format de l'arme tenue.
+  // La technique elle-même garde le dernier mot via `allowWithAbilities`.
+  const abilityWeapon = c ? getMainWeapon(c) : null;
+  const abilityWeaponContext = abilityWeapon && !abilityWeapon.isDefault
+    ? resolveWeaponDamageContext(VS.weaponFormats, VS.damageTypes, abilityWeapon, c?.elements || [])
+    : null;
+  const abilityWeaponTechniques = Array.isArray(abilityWeaponContext?.format?.techniques)
+    ? abilityWeaponContext.format.techniques : [];
 
   // Bloc de champs communs réutilisé dans chaque variante d'option
   const common = {
@@ -4337,6 +4348,7 @@ function _buildSpellOption(s, ctx) {
     targetSelf: !!s.targetSelf || (s.designMode === 'classic' && s.classicTarget === 'self'),
     actionDescription: s.designMode === 'classic' ? (s.effet || '') : '',
     mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
+    weaponTechniques: abilityWeaponTechniques,
     ...extras,
   };
 
@@ -4474,9 +4486,13 @@ function _buildSpellOption(s, ctx) {
     && s.ampMode !== 'deplacement'
     && !(s.runes || []).includes('Protection');
   const isClassicHeal = s.designMode === 'classic' && s.classicEffect === 'heal' && !!String(s.soin || '').trim();
+  // Protection en mode Soin/Mana suffit à définir l'effet. Certains sorts
+  // existants n'ont pas (ou plus) le type éditorial « defensif » : les exiger
+  // transformait leur AoE en simple zone persistante sans restauration.
+  const protectionRestoreMode = getProtectionRestoreMode(s);
   // Mode Mana : même mécanique que le Soin mais restaure des PM (drapeau isMana).
-  const isManaRegen = protMode === 'mana' && (s.runes || []).includes('Protection');
-  if (types.includes('defensif') && (isClassicHeal || protMode === 'soin' || isManaRegen || isAmpSupportHeal)) {
+  const isManaRegen = protectionRestoreMode === 'mana';
+  if (isClassicHeal || protectionRestoreMode === 'soin' || isManaRegen || isAmpSupportHeal) {
     // Régén PM : formule littérale (pas de scaling Protection ni de stat auto) ;
     // la stat explicite éventuelle est déjà intégrée dans la formule.
     const soinFormula = isManaRegen ? _calcSortMana(s, c) : _vttSortSoinFormula(s, c);
@@ -5433,10 +5449,16 @@ function _vttSpellRuneChips(o, srcChar) {
   const _runes = _vttDisplayRunes(_s?.runes || []);
   if (!_runes.length) return '';
   const _counts = {}; _runes.forEach(r => { _counts[r] = (_counts[r]||0)+1; });
-  return `<div class="cs-spellcard-runes">${Object.entries(_counts).map(([nom, n]) => {
+  return `<div class="vtt-atk-runes" aria-label="Composition du sort">
+    <span class="vtt-atk-runes-label">Runes du sort</span>
+    <span class="vtt-atk-runes-list">${Object.entries(_counts).map(([nom, n]) => {
     const m = _VTT_RUNE_META[nom] || { icon:'•', color:'#888' };
-    return `<span class="cs-runechip" style="--c:${m.color}" title="${_esc(nom)}">${m.icon} ${_esc(nom)}${n>1?` ×${n}`:''}</span>`;
-  }).join('')}</div>`;
+    return `<span class="vtt-atk-rune" style="--rune-color:${m.color}" title="${_esc(nom)}">
+      <span class="vtt-atk-rune-icon">${m.icon}</span>
+      <span>${_esc(nom)}</span>${n > 1 ? `<b>×${n}</b>` : ''}
+    </span>`;
+  }).join('')}</span>
+  </div>`;
 }
 
 async function _execAttack(srcId, tgtId, exOpts = {}) {
@@ -6314,56 +6336,170 @@ function _vttAtkSetElement(elemId) {
   if (inter) inter.innerHTML = _atkInteractionHtml(ctx.opt);
   const miss = document.getElementById('atk-miss-note');
   if (miss) miss.innerHTML = _atkMissNoteHtml(ctx.opt);
+  // Une technique élémentaire dépend du type actuellement choisi. On conserve
+  // une technique d'arme, mais on retire proprement celle de l'ancien élément.
+  const choices = _vttAttackTechniques(ctx.opt);
+  if (ctx.damageTechnique && !choices.some(choice => choice._choiceId === ctx.damageTechnique._choiceId)) {
+    ctx.damageTechnique = null;
+  }
+  const techniqueSlot = document.getElementById('atk-techniques-slot');
+  if (techniqueSlot) techniqueSlot.innerHTML = _vttWeaponTechniquesHtml(ctx.opt);
 }
 
 function _weaponTechniqueEffectParts(technique) {
   if (!technique) return [];
   const parts = [];
+  const triggers = { hit: 'sur touche', miss: 'sur échec', crit: 'sur critique', always: 'toujours' };
+  parts.push(triggers[technique.trigger] || 'sur touche');
+  if (technique.allowWithAbilities !== false) parts.push('sorts/compétences autorisés');
+  if (technique.trigger === 'hit') {
+    const missLabels = {
+      none: 'aucun effet sur échec',
+      half: 'effets + ½ dégâts sur échec',
+      full: 'effets complets sur échec',
+    };
+    parts.push(missLabels[technique.missEffectMode] || missLabels.none);
+  }
   if (technique.defenseBonus > 0) parts.push(`CA cible +${technique.defenseBonus}`);
+  if (technique.attackModifier) parts.push(`${technique.attackModifier > 0 ? '+' : ''}${technique.attackModifier} au toucher`);
   if (technique.extraWeaponDice > 0) parts.push(`+${technique.extraWeaponDice} dé${technique.extraWeaponDice > 1 ? 's' : ''} d'arme`);
   if (technique.extraDamageFormula) parts.push(`+${technique.extraDamageFormula}`);
+  if (technique.addWeaponModifier) parts.push('+ mod. de l’arme');
   if (technique.extraDamageFlat > 0) parts.push(`+${technique.extraDamageFlat} dégâts`);
+  if (technique.damageTypeId) parts.push(`type ${getDamageTypeById(VS.damageTypes, technique.damageTypeId)?.label || technique.damageTypeId}`);
+  if (technique.criticalMode === 'double') parts.push('bonus ×2 sur critique');
+  if (technique.scalingMode !== 'none' && technique.scalingFormula) parts.push(`progression ${technique.scalingFormula} / ${technique.scalingEvery}`);
+  if (technique.blastRadius > 0) {
+    const shapes = { square: 'carré', circle: 'cercle', line: 'ligne', cone: 'cône' };
+    parts.push(`${shapes[technique.areaShape] || 'zone'} · rayon ${technique.blastRadius}`);
+  }
+  if (technique.conditionId) parts.push(`état ${CONDITION_BY_ID[technique.conditionId]?.label || technique.conditionId}`);
+  if (technique.forcedMovement !== 'none' && technique.forcedMovementDistance > 0) parts.push(`${technique.forcedMovement === 'pull' ? 'attire' : 'pousse'} ${technique.forcedMovementDistance}c`);
+  if (technique.resourceType !== 'none' && technique.resourceCost > 0) parts.push(`${technique.resourceCost} ${_RES_LABEL[technique.resourceType] || technique.resourceType}`);
+  if (technique.maxUses > 0 && technique.usageScope !== 'none') parts.push(`${technique.maxUses}/${technique.usageScope === 'combat' ? 'combat' : 'session'}`);
+  if (technique.cooldownRounds > 0) parts.push(`recharge ${technique.cooldownRounds}t`);
   if (technique.onHitEffect) parts.push(technique.onHitEffect);
   return parts;
 }
 
-function _vttWeaponTechniquesHtml(opt) {
-  const techniques = Array.isArray(opt?.weaponTechniques) ? opt.weaponTechniques.filter(t => t?.label) : [];
-  if (!techniques.length) return '';
-  // Rangée de pastilles (statut lu sur la pastille active). Les ids atk-technique-icon
-  // / atk-technique-status restent dans le DOM (cachés) : _vttSetWeaponTechnique les
-  // écrit toujours, et il bascule .vtt-atk-technique-choice.is-active (classe conservée).
-  return `
-    <div class="vtt-atk-optrow vtt-atk-techniques" role="group" aria-label="Technique d'arme optionnelle">
-      <b>Technique</b>
-      ${techniques.map(t => {
-        const detail = [t.description, ..._weaponTechniqueEffectParts(t)].filter(Boolean).join(' · ');
-        return `<button type="button" class="vtt-atk-pick vtt-atk-technique-choice" style="--ec:var(--amber)" data-technique-id="${_esc(t.id)}"
-          data-vtt-fn="_vttSetWeaponTechnique" data-vtt-args="${_esc(t.id)}" aria-pressed="false"
-          title="${_esc(detail || t.label)}">${_esc(t.icon || '🎯')} ${_esc(t.label)}</button>`;
-      }).join('')}
-      <em>optionnelle</em>
-      <span id="atk-technique-icon" hidden>⚔️</span><span id="atk-technique-status" hidden>Attaque normale</span>
-    </div>`;
+function _vttTechniqueKey(technique) {
+  return String(technique?._choiceId || `${technique?._source || 'weapon'}:${technique?.id || 'technique'}`)
+    .replace(/[^a-z0-9:_-]/gi, '_');
 }
 
-function _vttSetWeaponTechnique(techniqueId) {
+function _vttTechniqueAvailability(technique, src) {
+  if (!technique || !src) return { available: true, remaining: null, cooldown: 0 };
+  const key = _vttTechniqueKey(technique);
+  const round = Math.max(0, parseInt(VS.session?.combat?.round, 10) || 0);
+  const readyRound = parseInt(src.techniqueCooldowns?.[key], 10) || 0;
+  const cooldown = VS.session?.combat?.active ? Math.max(0, readyRound - round) : 0;
+  let remaining = null;
+  if (technique.maxUses > 0 && technique.usageScope === 'combat' && VS.session?.combat?.active) {
+    const sameCombat = src.techniqueCombatKey === VS.session?.combat?.techniqueCombatKey;
+    const used = sameCombat ? (parseInt(src.techniqueCombatUses?.[key], 10) || 0) : 0;
+    remaining = Math.max(0, technique.maxUses - used);
+  } else if (technique.maxUses > 0 && technique.usageScope === 'session') {
+    const sessionKey = VS.session?.techniqueSessionKey || 'legacy';
+    const sameSession = src.techniqueSessionKey === sessionKey;
+    const used = sameSession ? (parseInt(src.techniqueSessionUses?.[key], 10) || 0) : 0;
+    remaining = Math.max(0, technique.maxUses - used);
+  }
+  return { available: cooldown <= 0 && (remaining == null || remaining > 0), remaining, cooldown };
+}
+
+function _vttAttackTechniques(opt) {
+  const ability = opt?.sortIdx !== undefined || !!opt?._itemAction || !!opt?._npcAction || !!opt?._summonAction;
+  const weapon = (Array.isArray(opt?.weaponTechniques) ? opt.weaponTechniques : [])
+    .filter(technique => technique?.label && techniqueAllowedForAction(technique, { ability }))
+    .map(technique => ({ ...technique, _source: 'weapon', _choiceId: `weapon:${technique.id}` }));
+  const damageType = getDamageTypeById(VS.damageTypes, opt?.damageTypeId);
+  const elemental = (Array.isArray(damageType?.techniques) ? damageType.techniques : [])
+    .filter(technique => technique?.label && techniqueAllowedForAction(technique, { ability }))
+    .map(technique => ({
+      ...technique,
+      _source: 'damage-type',
+      _sourceLabel: damageType.label || opt?.damageTypeId || 'Élément',
+      _choiceId: `damage:${damageType.id}:${technique.id}`,
+    }));
+  return [...weapon, ...elemental];
+}
+
+function _vttWeaponTechniquesHtml(opt) {
+  const techniques = _vttAttackTechniques(opt);
+  if (!techniques.length) return '';
+  const renderGroup = (sourceKey, label) => {
+    const group = techniques.filter(technique => technique._source === sourceKey);
+    if (!group.length) return '';
+    const selected = sourceKey === 'weapon' ? _atkCtx?.weaponTechnique : _atkCtx?.damageTechnique;
+    return `<div class="vtt-atk-optrow vtt-atk-techniques" data-technique-source="${sourceKey}" role="group" aria-label="${_esc(label)} optionnelle">
+      <b>${_esc(label)}</b>
+      ${group.map(t => {
+        const detail = [t.description, ..._weaponTechniqueEffectParts(t)].filter(Boolean).join(' · ');
+        const source = t._source === 'damage-type' ? `${t._sourceLabel} · ` : '';
+        const active = selected?._choiceId === t._choiceId;
+        const availability = _vttTechniqueAvailability(t, VS.tokens[_atkCtx?.srcId]?.data);
+        const availabilityLabel = availability.cooldown > 0 ? ` · recharge ${availability.cooldown}t`
+          : availability.remaining != null ? ` · ${availability.remaining}/${t.maxUses}` : '';
+        return `<button type="button" class="vtt-atk-pick vtt-atk-technique-choice ${active ? 'is-active' : ''}" style="--ec:${t._source === 'damage-type' ? (opt.damageTypeColor || '#f97316') : 'var(--amber)'}" data-technique-id="${_esc(t._choiceId)}"
+          data-vtt-fn="_vttSetWeaponTechnique" data-vtt-args="${sourceKey}|${_esc(t._choiceId)}" aria-pressed="${active ? 'true' : 'false'}"
+          ${availability.available ? '' : 'disabled aria-disabled="true"'} title="${_esc(`${source}${detail || t.label}${availabilityLabel}`)}">${_esc(t.icon || '🎯')} ${_esc(t.label)}${availabilityLabel}</button>`;
+      }).join('')}
+      <em>1 choix dans cette famille · cumulable avec l’autre</em>
+    </div>`;
+  };
+  return `${renderGroup('weapon', 'Technique d’arme')}${renderGroup('damage-type', 'Technique élémentaire')}`;
+}
+
+function _vttSetWeaponTechnique(sourceKey, techniqueId) {
   const ctx = _atkCtx;
   if (!ctx?.opt) return;
+  const source = sourceKey === 'damage-type' ? 'damage-type' : 'weapon';
+  const stateKey = source === 'damage-type' ? 'damageTechnique' : 'weaponTechnique';
   const id = String(techniqueId || '');
-  const clicked = (ctx.opt.weaponTechniques || []).find(t => t.id === id) || null;
-  ctx.weaponTechnique = clicked && ctx.weaponTechnique?.id !== clicked.id ? clicked : null;
-  const icon = document.getElementById('atk-technique-icon');
-  if (icon) icon.textContent = ctx.weaponTechnique?.icon || '⚔️';
-  const status = document.getElementById('atk-technique-status');
-  if (status) status.textContent = ctx.weaponTechnique?.label || 'Attaque normale';
-  const section = status?.closest('.vtt-atk-techniques');
-  section?.classList.toggle('has-technique', !!ctx.weaponTechnique);
-  document.querySelectorAll('.vtt-atk-technique-choice').forEach(btn => {
-    const active = btn.dataset.techniqueId === ctx.weaponTechnique?.id;
+  const clicked = _vttAttackTechniques(ctx.opt)
+    .find(technique => technique._source === source && technique._choiceId === id) || null;
+  if (clicked && !_vttTechniqueAvailability(clicked, VS.tokens[ctx.srcId]?.data).available) {
+    showNotif('Cette technique n’est pas encore disponible.', 'warning');
+    return;
+  }
+  ctx[stateKey] = clicked && ctx[stateKey]?._choiceId !== clicked._choiceId ? clicked : null;
+  const section = document.querySelector(`.vtt-atk-techniques[data-technique-source="${source}"]`);
+  section?.classList.toggle('has-technique', !!ctx[stateKey]);
+  section?.querySelectorAll('.vtt-atk-technique-choice').forEach(btn => {
+    const active = btn.dataset.techniqueId === ctx[stateKey]?._choiceId;
     btn.classList.toggle('is-active', active);
     btn.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
+}
+
+function _vttTechniqueSplashTargets(technique, originIds, srcId) {
+  if (!technique || (parseInt(technique.blastRadius, 10) || 0) <= 0) return [];
+  const src = VS.tokens[srcId]?.data;
+  const origins = (originIds || []).map(id => VS.tokens[id]?.data).filter(Boolean);
+  if (!src || !origins.length) return [];
+  const excluded = new Set(originIds || []);
+  if (!technique.includeCaster) excluded.add(srcId);
+  const srcDims = _tokenDims(src);
+  const sourceRect = { col: src.col, row: src.row, width: srcDims.w, height: srcDims.h };
+  const srcEnemy = src.type === 'enemy';
+  return Object.entries(VS.tokens)
+    .filter(([id, entry]) => {
+      const candidate = entry?.data;
+      if (!candidate || excluded.has(id) || candidate.pageId !== VS.activePage?.id) return false;
+      if (!candidate.visible && !STATE.isAdmin) return false;
+      const candidateEnemy = candidate.type === 'enemy';
+      if (technique.areaTargets === 'enemies' && candidateEnemy === srcEnemy) return false;
+      if (technique.areaTargets === 'allies' && candidateEnemy !== srcEnemy) return false;
+      const candidateDims = _tokenDims(candidate);
+      const candidateRect = { col: candidate.col, row: candidate.row, width: candidateDims.w, height: candidateDims.h };
+      return origins.some(aim => {
+        const aimDims = _tokenDims(aim);
+        const aimRect = { col: aim.col, row: aim.row, width: aimDims.w, height: aimDims.h };
+        const originRect = technique.areaOrigin === 'caster' ? sourceRect : aimRect;
+        return techniqueAreaIntersects({ origin: originRect, candidate: candidateRect, source: sourceRect, aim: aimRect }, technique);
+      });
+    })
+    .map(([id]) => id);
 }
 
 function _vttPickOpt(srcId, tgtId, idx) {
@@ -6430,7 +6566,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
   // la résolution. Couleur = élément, géométrie = runes, forme = catégorie.
   const _sigil = _buildCastSigil(src, opt);
 
-  _atkCtx = { srcId, tgtId, opt, lS, lT, allTargets, sigil: _sigil, weaponTechnique: null };
+  _atkCtx = { srcId, tgtId, opt, lS, lT, allTargets, sigil: _sigil, weaponTechnique: null, damageTechnique: null };
 
   const dist    = _tokenAttackDistance(src, tgt);
   // Bonus toucher d'enchantement — lu frais sur le lanceur (jamais figé dans l'option)
@@ -6647,7 +6783,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
 
       <div class="vtt-atk-rows" data-atk-rows>${centerBlock}</div>
 
-      ${(elemSelectorHtml || _vttWeaponTechniquesHtml(opt)) ? `<div class="vtt-atk-opts">${elemSelectorHtml}${_vttWeaponTechniquesHtml(opt)}</div>` : ''}
+      ${(elemSelectorHtml || _vttWeaponTechniquesHtml(opt)) ? `<div class="vtt-atk-opts">${elemSelectorHtml}<div id="atk-techniques-slot">${_vttWeaponTechniquesHtml(opt)}</div></div>` : ''}
 
       <div class="vtt-atk-notes">${_notesHtml}</div>
 
@@ -7211,28 +7347,37 @@ async function _zoneValidate() {
     })
     .map(([id]) => id);
 
-  // ── Sceau runique + effet de zone (projectile → centre, onde, impacts) ──
+  // ── Sceau runique + zone visible (projectile → zone → impacts) ──────
+  // La zone est rendue pour TOUTES les AoE, même celles sans sceau runique.
   const _zoneSigil = _buildCastSigil(srcData, opt);
-  if (_zoneSigil) {
-    const _isSummon = _zoneSigil.category === 'summon';
-    const _zImpColor = _zoneSigil.category === 'heal' ? '#22c38e' : _zoneSigil.color;
-    _playSigilForToken(srcId, _zoneSigil);
-    _playZoneFx(srcId, { x, y }, { w: wPx, h: hPx }, targets, _zImpColor, _zoneSigil.physical, _isSummon);
-    try {
-      const _uid = STATE.user?.uid;
-      if (_uid) {
-        const _n = Date.now();
-        _seenSigilFire[_uid] = _n;
-        setDoc(_castingRef(_uid), {
-          sigilFire: {
-            tokenId: srcId, sigil: _zoneSigil, pageId: VS.activePage?.id || null, n: _n,
-            targets, impColor: _zImpColor, physical: _zoneSigil.physical,
-            zone: { x, y, w: wPx, h: hPx }, isSummon: _isSummon,
-          },
-        }, { merge: true }).catch(() => {});
-      }
-    } catch {}
-  }
+  const _isSummon = _zoneSigil?.category === 'summon' || !!opt?.mods?.invocation || !!opt?.mods?.sentinelle;
+  const _isHealingZone = _zoneSigil?.category === 'heal' || !!opt.isHeal || !!opt.isRegen;
+  const _zoneDamageType = getDamageTypeById(VS.damageTypes, opt.damageTypeId);
+  const _zImpColor = _isHealingZone
+    ? '#22c38e'
+    : (_zoneSigil?.color || _zoneDamageType?.color || opt.damageTypeColor || (opt.isCaSort ? '#4f8cff' : '#b47fff'));
+  const _zoneVisual = {
+    x, y, w: wPx, h: hPx,
+    shape: opt.zoneShape || 'rect',
+    label: `${opt.icon || (_isHealingZone ? '💚' : '✨')} ${opt.label || (_isHealingZone ? 'Zone de soin' : 'Zone d’effet')}`,
+    cellSize: CELL,
+  };
+  if (_zoneSigil) _playSigilForToken(srcId, _zoneSigil);
+  _playZoneFx(srcId, { x, y }, _zoneVisual, targets, _zImpColor, !!_zoneSigil?.physical, _isSummon);
+  try {
+    const _uid = STATE.user?.uid;
+    if (_uid) {
+      const _n = Date.now();
+      _seenSigilFire[_uid] = _n;
+      setDoc(_castingRef(_uid), {
+        sigilFire: {
+          tokenId: srcId, sigil: _zoneSigil || null, pageId: VS.activePage?.id || null, n: _n,
+          targets, impColor: _zImpColor, physical: !!_zoneSigil?.physical,
+          zone: _zoneVisual, isSummon: _isSummon,
+        },
+      }, { merge: true }).catch(() => {});
+    }
+  } catch {}
 
   // ── Sort « pose de zone » : utilitaire SANS effet appliqué sur cible (Mur de
   //    pierre, ou Affliction « sans état défini »…). Pose UNIQUEMENT un marqueur
@@ -7435,9 +7580,14 @@ function _buildCastSigil(src, opt) {
 // cf. l'abonnement après VS.stage = new K.Stage…).
 function _syncSigilLayer() {
   const layer = VS.stage?.container()?.querySelector('.vtt-sigil-layer');
-  if (!layer || !VS.layers?.token) return;
-  const m = VS.layers.token.getAbsoluteTransform().getMatrix();
-  layer.style.transform = `matrix(${m[0]},${m[1]},${m[2]},${m[3]},${m[4]},${m[5]})`;
+  if (!layer || !VS.stage) return;
+  // Les effets sont exprimés dans les mêmes coordonnées monde que les tokens.
+  // Copier directement le transform du stage évite les matrices intermédiaires
+  // du layer, qui pouvaient dériver pendant un zoom centré sur le pointeur.
+  const position = VS.stage.position();
+  const scaleX = VS.stage.scaleX() || 1;
+  const scaleY = VS.stage.scaleY() || scaleX;
+  layer.style.transform = `translate(${position.x}px, ${position.y}px) scale(${scaleX}, ${scaleY})`;
 }
 function _ensureSigilSync() { _syncSigilLayer(); }
 
@@ -7471,6 +7621,16 @@ function _playZoneFx(srcId, center, zonePx, targetIds, color, physical, isSummon
       const sp = _tokenLogicalCenter(src);
       playProjectile(cont, sp.x, sp.y, center.x, center.y, { color, physical });
     }
+    playTechniqueArea(cont, {
+      x: center.x,
+      y: center.y,
+      width: Math.max(CELL, zonePx?.w || CELL),
+      height: Math.max(CELL, zonePx?.h || CELL),
+      shape: zonePx?.shape || 'rect',
+      color,
+      label: zonePx?.label || 'Zone d’effet',
+      cellSize: zonePx?.cellSize || CELL,
+    });
     playImpact(cont, center.x, center.y, Math.max(zonePx?.w || 0, zonePx?.h || 0, CELL) * 1.15, color);
     _ensureSigilSync();
     if (!isSummon) visibleTargets.forEach(tid => _playImpactForToken(tid, color));
@@ -7479,6 +7639,7 @@ function _playZoneFx(srcId, center, zonePx, targetIds, color, physical, isSummon
 
 // Sceaux déjà rejoués (par uid → dernier n) pour ne pas rejouer un même cast.
 let _seenSigilFire = {};
+let _seenTechniqueFire = {};
 
 /** Joue le sceau runique sur un token (coords logiques → suit pan/zoom). */
 function _playSigilForToken(tokenId, sigil) {
@@ -7523,6 +7684,64 @@ function _playImpactForToken(tokenId, color) {
   } catch (e) { console.warn('[impact]', e); }
 }
 
+/** Géométrie logique de la zone d'une technique, alignée sur ses tests de cible. */
+function _techniqueAreaFxData(technique, originId, srcId, opt) {
+  const radius = Math.max(0, parseInt(technique?.blastRadius, 10) || 0);
+  const source = _tokenDataById(srcId);
+  const aim = _tokenDataById(originId);
+  if (!radius || !source || !aim) return null;
+  const shape = ['square', 'circle', 'line', 'cone'].includes(technique.areaShape)
+    ? technique.areaShape : 'square';
+  const type = getDamageTypeById(VS.damageTypes, technique.damageTypeId || opt?.damageTypeId);
+  const common = {
+    shape,
+    color: type?.color || opt?.damageTypeColor || '#f97316',
+    label: `${technique.icon || '💥'} ${technique.label || 'Zone d’effet'}`,
+    sourceId: srcId,
+    originId,
+  };
+
+  if (shape === 'square' || shape === 'circle') {
+    const centerData = technique.areaOrigin === 'caster' ? source : aim;
+    const dims = _tokenDims(centerData);
+    const center = _tokenCenter(centerData);
+    return {
+      ...common,
+      x: center.x,
+      y: center.y,
+      width: (dims.w + radius * 2) * CELL,
+      height: (dims.h + radius * 2) * CELL,
+      rotation: 0,
+    };
+  }
+
+  const from = _tokenCenter(source), toward = _tokenCenter(aim);
+  const dx = toward.x - from.x, dy = toward.y - from.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance < 0.001) return null;
+  const ux = dx / distance, uy = dy / distance;
+  const length = Math.max(CELL, radius * CELL);
+  return {
+    ...common,
+    x: from.x + ux * length / 2,
+    y: from.y + uy * length / 2,
+    width: length,
+    height: shape === 'cone' ? Math.max(CELL, length * 2) : CELL,
+    rotation: Math.atan2(dy, dx) * 180 / Math.PI,
+  };
+}
+
+function _playTechniqueAreaFx(areas = []) {
+  if (!areas.length) return;
+  const container = VS.stage?.container();
+  if (!container) return;
+  for (const area of areas) {
+    if (!STATE.isAdmin && !_tokenFxIsVisible(area.originId) && !_tokenFxIsVisible(area.sourceId)) continue;
+    playTechniqueArea(container, area);
+  }
+  _ensureSigilSync();
+}
+
 /** Rendu des lignes de ciblage distantes (broadcast Firestore). */
 function _renderRemoteCastings(docs, prime = false) {
   if (!VS.layers.token) return;
@@ -7539,12 +7758,17 @@ function _renderRemoteCastings(docs, prime = false) {
       if (!prime) {
         _playSigilForToken(sf.tokenId, sf.sigil);
         if (sf.zone) {
-          _playZoneFx(sf.tokenId, { x: sf.zone.x, y: sf.zone.y }, { w: sf.zone.w, h: sf.zone.h }, sf.targets || [], sf.impColor, !!sf.physical, !!sf.isSummon);
+          _playZoneFx(sf.tokenId, { x: sf.zone.x, y: sf.zone.y }, sf.zone, sf.targets || [], sf.impColor, !!sf.physical, !!sf.isSummon);
         } else {
           (sf.targets || []).forEach(tid => _playCastTargetFx(sf.tokenId, tid, sf.impColor, !!sf.melee, !!sf.physical));
           if (sf.selfAura) _playImpactForToken(sf.tokenId, sf.impColor);
         }
       }
+    }
+    const tf = c.techniqueFire;
+    if (tf && tf.n && tf.pageId === VS.activePage?.id && _seenTechniqueFire[d.id] !== tf.n) {
+      _seenTechniqueFire[d.id] = tf.n;
+      if (!prime) _playTechniqueAreaFx(Array.isArray(tf.areas) ? tf.areas : []);
     }
     if (!c.active || c.pageId !== VS.activePage?.id || d.id === myUid) return;
     const srcEntry = Object.values(VS.tokens).find(e => e.data?.id === c.srcId);
@@ -7587,11 +7811,24 @@ async function _vttRollAttack() {
   closeModalDirect();
   _atkCtx = null;
 
-  const weaponTechnique = ctx.weaponTechnique || null;
-  const techniqueDefenseBonus = Math.max(0, parseInt(weaponTechnique?.defenseBonus, 10) || 0);
+  const selectedTechniques = [ctx.weaponTechnique, ctx.damageTechnique].filter(Boolean);
+  const techniqueDefenseBonus = selectedTechniques.reduce(
+    (total, technique) => total + Math.max(0, parseInt(technique?.defenseBonus, 10) || 0),
+    0,
+  );
+  const techniqueAttackModifier = selectedTechniques.reduce(
+    (total, technique) => total + Math.max(-30, Math.min(30, parseInt(technique?.attackModifier, 10) || 0)),
+    0,
+  );
 
   // Liste des cibles : multi si allTargets, sinon cible unique
   const targetIds = allTargets && allTargets.length > 0 ? allTargets : [tgtId];
+  const primaryTargetSet = new Set(targetIds);
+  // Capture aussi les victimes potentielles avant le jet : si l'explosion se
+  // déclenche, l'annulation MJ pourra restaurer toutes leurs jauges.
+  const potentialSplashTargetIds = [...new Set(selectedTechniques.flatMap(technique =>
+    _vttTechniqueSplashTargets(technique, targetIds, srcId)
+  ))].filter(id => !primaryTargetSet.has(id));
 
   // Sceau runique signature sur le lanceur — joué localement ET diffusé à tous
   // les joueurs via le canal casting (champ sigilFire, keyé par n unique).
@@ -7622,7 +7859,7 @@ async function _vttRollAttack() {
     } catch {}
   }
   // Snapshot pré-action pour l'annulation MJ (attaché aux logs de l'action).
-  const _undoSnap = _captureUndoSnapshot(srcId, targetIds);
+  const _undoSnap = _captureUndoSnapshot(srcId, [...targetIds, ...potentialSplashTargetIds]);
 
   const authorName = STATE.profile?.pseudo||STATE.profile?.prenom||STATE.user?.displayName||'MJ';
   let _preAppliedCastStatsDelta = null;
@@ -7636,14 +7873,27 @@ async function _vttRollAttack() {
     : null;
   const _pmPayerNpcId = !_pmPayerCharId && src.npcId ? src.npcId : null;
   const _costRes = _optCostRes(opt);
-  const _deductPm  = async () => {
-    if (opt.pmCost <= 0) return;
+  const _deductCost = async (resource, amount, label = opt.label) => {
+    const cost = Math.max(0, parseInt(amount, 10) || 0);
+    if (cost <= 0 || resource === 'none') return;
+    if (resource !== 'pm') {
+      if (_pmPayerCharId) {
+        await _spendCharSpellCost(_pmPayerCharId, resource, cost, src.id, label);
+        return;
+      }
+      if (resource === 'pv') {
+        const live = _live(src);
+        await _setHp(src, Math.max(0, (live.displayHp ?? 0) - cost));
+        return;
+      }
+      throw new Error(`La ressource ${_RES_LABEL[resource] || resource} n’est pas disponible pour ce lanceur.`);
+    }
     if (_pmPayerToken) {
       const curPm = Math.max(0, _numOr(_pmPayerToken.pm, _numOr(_pmPayerToken.pmMax, 0)));
       const curCmb = Math.max(0, _numOr(_pmPayerToken.pmCombat, curPm));
       const patch = {
-        pm: Math.max(0, curPm - opt.pmCost),
-        pmCombat: Math.max(0, curCmb - opt.pmCost),
+        pm: Math.max(0, curPm - cost),
+        pmCombat: Math.max(0, curCmb - cost),
       };
       Object.assign(_pmPayerToken, patch);
       _patchShape(srcId);
@@ -7655,8 +7905,7 @@ async function _vttRollAttack() {
       return;
     }
     if (_pmPayerCharId) {
-      // Route vers la ressource choisie (PM/PV/Or) du lanceur.
-      await _spendCharSpellCost(_pmPayerCharId, _costRes, opt.pmCost, src.id, opt.label);
+      await _spendCharSpellCost(_pmPayerCharId, 'pm', cost, src.id, label);
       return;
     }
     if (_pmPayerNpcId) {
@@ -7664,7 +7913,7 @@ async function _vttRollAttack() {
       if (n) {
         const maxPm = _numOr(n.pmMax, _numOr(n.pm, 0));
         const curPm = _numOr(n.pmCurrent, maxPm);
-        const nextPm = Math.max(0, curPm - opt.pmCost);
+        const nextPm = Math.max(0, curPm - cost);
         n.pmCurrent = nextPm;
         _patchEntityTokenShapes('npcId', _pmPayerNpcId);
         await updateDoc(_npcRef(_pmPayerNpcId), { pmCurrent: nextPm }).catch(error => {
@@ -7682,8 +7931,8 @@ async function _vttRollAttack() {
       const curPm  = src.pm != null ? src.pm : _beastPmMax;
       const curCmb = src.pmCombat != null ? src.pmCombat : _beastPmMax;
       const patch = {
-        pm: Math.max(0, curPm - opt.pmCost),
-        pmCombat: Math.max(0, curCmb - opt.pmCost),
+        pm: Math.max(0, curPm - cost),
+        pmCombat: Math.max(0, curCmb - cost),
       };
       Object.assign(src, patch);
       _patchShape(srcId);
@@ -7693,6 +7942,23 @@ async function _vttRollAttack() {
         throw error;
       });
     }
+  };
+  const _deductPm = () => _deductCost(_costRes, opt.pmCost, opt.label);
+  const _techniqueCosts = selectedTechniques
+    .filter(technique => technique.resourceType !== 'none' && technique.resourceCost > 0)
+    .map(technique => ({
+      resource: technique.resourceType,
+      amount: Math.max(0, parseInt(technique.resourceCost, 10) || 0),
+      label: technique.label,
+    }));
+  const _deductTechniqueCosts = async () => {
+    // Séquentiel par intention : deux techniques peuvent débiter la même jauge.
+    // Chaque dépense relit alors la valeur optimiste de la précédente.
+    for (const cost of _techniqueCosts) await _deductCost(cost.resource, cost.amount, cost.label);
+  };
+  const _deductAllCosts = async () => {
+    await _deductPm();
+    await _deductTechniqueCosts();
   };
   // Consomme 1 exemplaire de l'objet si l'option vient d'un item-action marqué `consommable`.
   // Convention "1 entrée = 1 unité" → on retire la 1ère entrée correspondante.
@@ -7726,17 +7992,44 @@ async function _vttRollAttack() {
     showNotif(`🧪 ${meta.itemNom || 'Objet'} consommé`, 'info');
   };
   const _markActionUsed = async () => {
-    if (!VS.session?.combat?.active) return;
-    const field = opt.actionType === 'bonus'
-      ? 'bonusActionThisTurn'
-      : opt.actionType === 'reaction'
-        ? 'reactionThisTurn'
-        : 'attackedThisTurn';
-    const patch = { [field]: true };
-    const spellCooldowns = _vttCooldownPatch(src, opt);
-    if (spellCooldowns) {
-      patch.spellCooldowns = spellCooldowns;
+    const combat = VS.session?.combat;
+    const patch = {};
+    if (combat?.active) {
+      const field = opt.actionType === 'bonus'
+        ? 'bonusActionThisTurn'
+        : opt.actionType === 'reaction'
+          ? 'reactionThisTurn'
+          : 'attackedThisTurn';
+      patch[field] = true;
+      const spellCooldowns = _vttCooldownPatch(src, opt);
+      if (spellCooldowns) patch.spellCooldowns = spellCooldowns;
     }
+    const round = Math.max(0, parseInt(combat?.round, 10) || 0);
+    const cooldowns = { ...(src.techniqueCooldowns || {}) };
+    const combatKey = combat?.techniqueCombatKey || null;
+    const combatUses = src.techniqueCombatKey === combatKey ? { ...(src.techniqueCombatUses || {}) } : {};
+    const sessionKey = VS.session?.techniqueSessionKey || 'legacy';
+    const sessionUses = src.techniqueSessionKey === sessionKey ? { ...(src.techniqueSessionUses || {}) } : {};
+    let hasCooldown = false, hasCombatUses = false, hasSessionUses = false;
+    for (const technique of selectedTechniques) {
+      const key = _vttTechniqueKey(technique);
+      if (combat?.active && technique.cooldownRounds > 0) {
+        cooldowns[key] = round + technique.cooldownRounds;
+        hasCooldown = true;
+      }
+      if (combat?.active && technique.usageScope === 'combat' && technique.maxUses > 0) {
+        combatUses[key] = (parseInt(combatUses[key], 10) || 0) + 1;
+        hasCombatUses = true;
+      }
+      if (technique.usageScope === 'session' && technique.maxUses > 0) {
+        sessionUses[key] = (parseInt(sessionUses[key], 10) || 0) + 1;
+        hasSessionUses = true;
+      }
+    }
+    if (hasCooldown) patch.techniqueCooldowns = cooldowns;
+    if (hasCombatUses) Object.assign(patch, { techniqueCombatKey: combatKey, techniqueCombatUses: combatUses });
+    if (hasSessionUses) Object.assign(patch, { techniqueSessionKey: sessionKey, techniqueSessionUses: sessionUses });
+    if (!Object.keys(patch).length) return;
     const previous = Object.fromEntries(Object.keys(patch).map(key => [key, src[key]]));
     Object.assign(src, patch);
     if (VS.selected === src.id) _renderInspectorSoon();
@@ -7773,6 +8066,42 @@ async function _vttRollAttack() {
   const _ciblSuffix = r => r > 0 ? ` · 🎯 ${r} cible${r>1?'s':''} restante${r>1?'s':''}` : '';
 
   try {
+
+    for (const technique of selectedTechniques) {
+      if (!_vttTechniqueAvailability(technique, src).available) {
+        showNotif(`⚠ ${technique.label} n’est plus disponible.`, 'error');
+        return;
+      }
+    }
+
+    // Le coût du sort et ceux des deux techniques sont contrôlés ensemble.
+    // Une jauge à 5 PM ne peut donc pas valider un sort à 4 PM + une technique à 2 PM.
+    const requiredResources = new Map();
+    const addRequired = (resource, amount) => {
+      const cost = Math.max(0, parseInt(amount, 10) || 0);
+      if (cost > 0 && resource !== 'none') requiredResources.set(resource, (requiredResources.get(resource) || 0) + cost);
+    };
+    addRequired(_costRes, opt.pmCost);
+    _techniqueCosts.forEach(cost => addRequired(cost.resource, cost.amount));
+    const availableResource = resource => {
+      if (_pmPayerCharId) return _charResCur(VS.characters[_pmPayerCharId], resource);
+      if (resource === 'pv') return _live(src).displayHp ?? 0;
+      if (resource === 'or') return 0;
+      if (_pmPayerToken) return Math.max(0, _numOr(_pmPayerToken.pm, _numOr(_pmPayerToken.pmMax, 0)));
+      if (_pmPayerNpcId) {
+        const npc = VS.npcs[_pmPayerNpcId];
+        return _numOr(npc?.pmCurrent, _numOr(npc?.pmMax, _numOr(npc?.pm, 0)));
+      }
+      return src.beastId ? Math.max(0, _numOr(src.pm, _numOr(VS.bestiary[src.beastId]?.pmMax, 0))) : 0;
+    };
+    for (const [resource, required] of requiredResources) {
+      const available = availableResource(resource);
+      if (available < required) {
+        const label = _RES_LABEL[resource] || resource;
+        showNotif(`⚠ ${label} insuffisant${label === 'PM' || label === 'PV' ? 's' : ''} (${available}/${required} requis)`, 'error');
+        return;
+      }
+    }
 
     // ── Vérification PM sur la réserve choisie pour l'invocation ──
     if (opt.pmCost > 0 && _pmPayerToken) {
@@ -8308,7 +8637,8 @@ async function _vttRollAttack() {
             characterId: curTgtData.characterId || null,
             npcId: curTgtData.npcId || null,
             beastId: curTgtData.beastId || null,
-            targetImage: lCur.displayImage || null,
+            tokenId: curTgtData.id || curTgtId,
+            targetImage: _combatLogImage(lCur.displayImage),
           };
         }
         const curHp = lCur.displayHp ?? 20, hpMax = lCur.displayHpMax ?? 20;
@@ -8322,7 +8652,8 @@ async function _vttRollAttack() {
           characterId: curTgtData.characterId || null,
           npcId: curTgtData.npcId || null,
           beastId: curTgtData.beastId || null,
-          targetImage: lCur.displayImage || null,
+          tokenId: curTgtData.id || curTgtId,
+          targetImage: _combatLogImage(lCur.displayImage),
         };
       }))).filter(Boolean);
       const healTargetWrites = healResults.map(result => result._write).filter(Boolean);
@@ -8379,6 +8710,7 @@ async function _vttRollAttack() {
           ..._diceLogFields('dmg', healRollsDetail),
           ..._diceLogFields('crit', healCritRollsDetail),
           critNormalMax: healCritNormalMax || 0,
+          healTotal,
           targets: cleanHealResults.map(r => ({ ...r, hit: true, halfDmg: false, dmgTotal: healTotal, targetCA: HEAL_DD })),
           createdAt: serverTimestamp(),
         }).catch(()=>{});
@@ -8470,7 +8802,7 @@ async function _vttRollAttack() {
         extraHitSum += bonusHitDice > 0 ? r : -r;
       }
     }
-    let hitTotal = d20 + atkBase + bonusHit + extraHitSum + _touchBuff;
+    let hitTotal = d20 + atkBase + bonusHit + extraHitSum + _touchBuff + techniqueAttackModifier;
     const rules      = opt.typeRules || {};
     const armorPen   = rules.armorPen || 0;
     const typeDmgBon = rules.dmgBonus || 0;
@@ -8488,7 +8820,7 @@ async function _vttRollAttack() {
       const lCurTgt = _live(curTgtData || {});
       const rawCA = lCurTgt.realDefense ?? lCurTgt.displayDefense ?? 10;
       const effectiveCA = armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
-      return weaponTechniqueTargetCA(effectiveCA, weaponTechnique);
+      return combinedTechniqueTargetCA(effectiveCA, selectedTechniques);
     });
     const missesEveryTarget = targetCas.length
       ? targetCas.every(targetCA => hitTotal < targetCA)
@@ -8499,7 +8831,7 @@ async function _vttRollAttack() {
       luckRerollValue = luckyReroll.reroll;
       isCrit   = d20 >= critThreshold;
       isFumble = d20 === 1;
-      hitTotal = d20 + atkBase + bonusHit + extraHitSum + _touchBuff;
+      hitTotal = d20 + atkBase + bonusHit + extraHitSum + _touchBuff + techniqueAttackModifier;
       luckUsed = true;
     }
     // Touche automatique : aucun jet de toucher → toujours touché, ni critique ni
@@ -8559,23 +8891,131 @@ async function _vttRollAttack() {
       else if (missEffect === 'full') sharedDmgTotalHalf = sharedDmgTotalHit;
     }
 
-    // Technique d'arme : le coût de précision est déjà intégré à la CA ci-dessus.
-    // Les dégâts supplémentaires sont tirés une seule fois pour l'action et ne
-    // s'ajoutent qu'à un coup réussi (jamais au demi-effet d'un sort raté).
-    const techniqueDmgDetails = [];
-    let techniqueDmgBonus = 0;
-    if (weaponTechnique && !isFumble) {
-      for (const term of weaponTechniqueDamageTerms(weaponTechnique, effectiveDice)) {
-        if (term.kind === 'flat') {
-          techniqueDmgBonus += term.flat;
-          techniqueDmgDetails.push({ rolls: [], mod: term.flat, total: term.flat, n: 0, sides: 0, kind: 'flat', formula: String(term.flat) });
-          continue;
+    // Chaque famille peut fournir une technique : une technique d'arme ET une
+    // technique élémentaire peuvent donc être actives sur la même attaque.
+    // Leurs dégâts sont tirés séparément afin que seule la technique portant
+    // réellement une explosion propage sa propre part autour de la cible.
+    const primaryOutcomes = new Map(targetIds.map(curTgtId => {
+      const curTgtData = VS.tokens[curTgtId]?.data;
+      if (!curTgtData || blockedTargets.has(curTgtId)) return [curTgtId, {
+        hit: false, isCrit, isFumble, blocked: blockedTargets.has(curTgtId),
+      }];
+      const lCurTgt = _live(curTgtData);
+      const rawCA = lCurTgt.realDefense ?? lCurTgt.displayDefense ?? 10;
+      const effectiveCA = armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
+      const targetCA = combinedTechniqueTargetCA(effectiveCA, selectedTechniques);
+      const hit = attackRollHitsTarget({ hitTotal, targetCA, autoHit: opt.autoHit, isCrit, isFumble });
+      return [curTgtId, { hit, isCrit, isFumble, targetCA }];
+    }));
+    const techniqueRolls = [];
+    for (const technique of selectedTechniques) {
+      const triggerOriginIds = targetIds.filter(id => techniqueTriggerApplies(technique, primaryOutcomes.get(id)));
+      if (triggerOriginIds.length) {
+        const damageDetails = [];
+        let damageBonus = 0;
+        const scalingStatModifier = _tokenStatMod(src, technique.scalingStat || 'force');
+        const sourceLevel = Math.max(1, parseInt(
+          _srcChar?.niveau ?? VS.npcs[src.npcId]?.niveau ?? VS.bestiary[src.beastId]?.niveau ?? src.summonLevel ?? 1,
+          10,
+        ) || 1);
+        for (const term of weaponTechniqueDamageTerms(technique, effectiveDice, opt.dmgStatMod, {
+          level: sourceLevel,
+          masteryBonus: opt.maitriseBonus || 0,
+          statModifier: scalingStatModifier,
+        })) {
+          if (Object.hasOwn(term, 'flat')) {
+            damageBonus += term.flat;
+            damageDetails.push({ rolls: [], mod: term.flat, total: term.flat, n: 0, sides: 0, kind: term.kind, formula: String(term.flat) });
+            continue;
+          }
+          const det = _rollDiceDetailed(term.formula);
+          damageBonus += Math.max(0, det.total);
+          damageDetails.push({ ...det, kind: term.kind, formula: term.formula });
         }
-        const det = _rollDiceDetailed(term.formula);
-        techniqueDmgBonus += Math.max(0, det.total);
-        techniqueDmgDetails.push({ ...det, kind: term.kind, formula: term.formula });
+        damageBonus = Math.max(0, damageBonus);
+        if (isCrit && technique.criticalMode === 'double') damageBonus *= 2;
+        techniqueRolls.push({ technique, damageBonus, damageDetails, triggerOriginIds });
       }
-      sharedDmgTotalHit += techniqueDmgBonus;
+    }
+
+    // L'explosion part uniquement des cibles principales pour lesquelles la
+    // technique s'applique (touche, ou échec explicitement autorisé).
+    // Les victimes secondaires partagent le jet de toucher initial, mais celui-ci
+    // sera comparé séparément à leur propre CA lors de la résolution.
+    const splashDamageByTarget = new Map();
+    const splashTechniquesByTarget = new Map();
+    for (const roll of techniqueRolls) {
+      if ((parseInt(roll.technique?.blastRadius, 10) || 0) <= 0) continue;
+      for (const originId of roll.triggerOriginIds) {
+        const multiplier = techniqueOutcomeMultiplier(roll.technique, primaryOutcomes.get(originId));
+        const damageBonus = Math.max(0, Math.floor(roll.damageBonus * multiplier));
+        const splashIds = _vttTechniqueSplashTargets(roll.technique, [originId], srcId)
+            .filter(id => !primaryTargetSet.has(id));
+        for (const id of splashIds) {
+          const previous = splashTechniquesByTarget.get(id) || [];
+          const existing = previous.find(item => item.id === roll.technique.id && item.source === roll.technique._source);
+          if (existing) {
+            // Plusieurs zones identiques peuvent se recouvrir : une technique ne
+            // frappe qu'une fois, avec le meilleur multiplicateur disponible.
+            existing.damageBonus = Math.max(existing.damageBonus, damageBonus);
+          } else {
+            previous.push({
+              id: roll.technique.id,
+              source: roll.technique._source || 'weapon',
+              icon: roll.technique.icon || '💥',
+              label: roll.technique.label,
+              damageBonus,
+            });
+          }
+          splashTechniquesByTarget.set(id, previous);
+          splashDamageByTarget.set(id, previous.reduce((total, item) => total + item.damageBonus, 0));
+        }
+      }
+    }
+    const splashTargetIds = [...splashDamageByTarget.keys()];
+    const splashOutcomes = new Map(splashTargetIds.map(curTgtId => {
+      const curTgtData = VS.tokens[curTgtId]?.data;
+      if (!curTgtData) return [curTgtId, { hit: false, isCrit, isFumble, targetCA: null }];
+      const lCurTgt = _live(curTgtData);
+      const rawCA = lCurTgt.realDefense ?? lCurTgt.displayDefense ?? 10;
+      const effectiveCA = armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
+      const targetCA = combinedTechniqueTargetCA(effectiveCA, selectedTechniques);
+      const hit = attackRollHitsTarget({ hitTotal, targetCA, autoHit: opt.autoHit, isCrit, isFumble });
+      return [curTgtId, { hit, isCrit, isFumble, targetCA }];
+    }));
+    const resolutionTargetIds = [...targetIds, ...new Set(splashTargetIds)];
+    if (splashTargetIds.length) {
+      const color = opt.damageTypeColor || '#f97316';
+      splashTargetIds.filter(id => splashOutcomes.get(id)?.hit).forEach(id => _playImpactForToken(id, color));
+    }
+
+    // Montrer la zone réelle de chaque technique qui vient de se déclencher.
+    // Les zones identiques (ex. origine « lanceur » en multicible) sont dédupliquées.
+    const techniqueAreas = [];
+    const techniqueAreaKeys = new Set();
+    for (const roll of techniqueRolls) {
+      if ((parseInt(roll.technique?.blastRadius, 10) || 0) <= 0) continue;
+      for (const originId of roll.triggerOriginIds) {
+        const area = _techniqueAreaFxData(roll.technique, originId, srcId, opt);
+        if (!area) continue;
+        const key = [area.shape, area.x, area.y, area.width, area.height, area.rotation, area.label].join('|');
+        if (techniqueAreaKeys.has(key)) continue;
+        techniqueAreaKeys.add(key);
+        techniqueAreas.push(area);
+      }
+    }
+    if (techniqueAreas.length) {
+      _playTechniqueAreaFx(techniqueAreas);
+      try {
+        const uid = STATE.user?.uid;
+        if (uid) {
+          const n = Date.now();
+          _seenTechniqueFire[uid] = n;
+          setDoc(_castingRef(uid), {
+            techniqueFire: { n, pageId: VS.activePage?.id || null, areas: techniqueAreas },
+          }, { merge: true }).catch(() => {});
+        }
+      } catch {}
     }
 
     // ── Bonus dégâts depuis buff d'enchantement arme actif sur le lanceur ──
@@ -8618,19 +9058,21 @@ async function _vttRollAttack() {
       }
     }
 
-    const sourceWritesDone = Promise.all([_deductPm(), _consumeItem(), _markActionUsed()])
+    const sourceWritesDone = Promise.all([_deductAllCosts(), _consumeItem(), _markActionUsed()])
       .then(() => null, error => error);
 
     // ── Appliquer les HP + collecter résultats par cible ──────────────
     const targetResults = [];
     const targetWritePromises = [];
+    const techniqueSaveLogs = [];
     const _statsDelta = { chars: {} };   // delta de stats accumulé (réversible à l'annulation)
     const _atkActor = _statsActor(src);
     let _maxHit = 0;                      // plus gros coup de cette attaque (record, non réversible)
-    for (const curTgtId of targetIds) {
+    for (const curTgtId of resolutionTargetIds) {
       const curTgtData = VS.tokens[curTgtId]?.data;
       if (!curTgtData) continue;
       const lCurTgt = _live(curTgtData);
+      const isTechniqueSplash = !primaryTargetSet.has(curTgtId);
 
       // ⚠️ TOUJOURS la VRAIE CA (realDefense), JAMAIS l'estimation du joueur.
       // Si un joueur attaque, lCurTgt.displayDefense renverrait son estimation
@@ -8638,12 +9080,32 @@ async function _vttRollAttack() {
       // qui contourne ce filtre d'affichage.
       const rawCA    = lCurTgt.realDefense ?? lCurTgt.displayDefense ?? 10;
       const effectiveCA = armorPen > 0 ? Math.round(rawCA * (1 - armorPen / 100)) : rawCA;
-      const targetCA = weaponTechniqueTargetCA(effectiveCA, weaponTechnique);
+      const targetCA = isTechniqueSplash
+        ? (splashOutcomes.get(curTgtId)?.targetCA ?? combinedTechniqueTargetCA(effectiveCA, selectedTechniques))
+        : combinedTechniqueTargetCA(effectiveCA, selectedTechniques);
       // Bouclier réactif : annule complètement l'attaque (pas de touche, pas de demi-dégâts, pas de fumble visuel)
       const isBlocked = blockedTargets.has(curTgtId);
-      const hit      = isBlocked ? false : (opt.autoHit ? true : (isCrit ? true : isFumble ? false : hitTotal >= targetCA));
-      const halfDmg  = !isBlocked && !hit && missEffect !== 'none' && !isFumble;
-      let dmgTotal   = hit ? sharedDmgTotalHit : halfDmg ? sharedDmgTotalHalf : 0;
+      const hit      = isBlocked
+        ? false
+        : isTechniqueSplash
+          ? (splashOutcomes.get(curTgtId)?.hit ?? false)
+          : (primaryOutcomes.get(curTgtId)?.hit ?? false);
+      const halfDmg  = !isTechniqueSplash && !isBlocked && !hit && missEffect !== 'none' && !isFumble;
+      const applicableTechniqueRolls = isTechniqueSplash
+        ? techniqueRolls.map(roll => {
+          if (!hit) return null;
+          const detail = splashTechniquesByTarget.get(curTgtId)?.find(item => item.id === roll.technique.id && item.source === (roll.technique._source || 'weapon'));
+          return detail ? { ...roll, damageBonus: detail.damageBonus } : null;
+        }).filter(Boolean)
+        : techniqueRolls.map(roll => {
+          const multiplier = techniqueOutcomeMultiplier(roll.technique, primaryOutcomes.get(curTgtId));
+          return multiplier > 0 ? { ...roll, damageBonus: Math.max(0, Math.floor(roll.damageBonus * multiplier)) } : null;
+        }).filter(Boolean);
+      const techniqueDamageForTarget = applicableTechniqueRolls.reduce((total, roll) => total + roll.damageBonus, 0);
+      let dmgTotal   = isTechniqueSplash
+        ? techniqueDamageForTarget
+        : (hit ? sharedDmgTotalHit : halfDmg ? sharedDmgTotalHalf : 0) + techniqueDamageForTarget;
+      const damageBeforeTargetConditions = dmgTotal;
       let interaction = null;
 
       // ── Bonus de dégâts subis depuis les états actifs de la cible (Marqué, etc.) ──
@@ -8706,12 +9168,48 @@ async function _vttRollAttack() {
       // Valeur AVANT interaction du profil de la créature (pour log "10 → 5").
       let dmgPre = dmgTotal;
       let dmgReduction = 0;
+      let damageBreakdown = [];
+      const techniqueReductionRatio = damageBeforeTargetConditions > 0
+        ? Math.min(1, Math.max(0, dmgTotal / damageBeforeTargetConditions)) : 0;
+      const techniquePieces = applicableTechniqueRolls.filter(roll => roll.damageBonus > 0).map(roll => ({
+        roll,
+        amount: Math.max(0, Math.floor(roll.damageBonus * techniqueReductionRatio)),
+      }));
+      const techniqueRawTotal = techniquePieces.reduce((total, piece) => total + piece.amount, 0);
+      const rawDamagePieces = [
+        ...(dmgTotal - techniqueRawTotal > 0 ? [{
+          label: opt.label || 'Attaque',
+          icon: opt.damageTypeIcon || '⚔️',
+          damageTypeId: opt.damageTypeId || 'physique',
+          amount: dmgTotal - techniqueRawTotal,
+          source: 'attack',
+        }] : []),
+        ...techniquePieces.map(({ roll, amount }) => {
+          const typeId = roll.technique.damageTypeId || opt.damageTypeId || 'physique';
+          const type = getDamageTypeById(VS.damageTypes, typeId);
+          return {
+            label: roll.technique.label,
+            icon: type?.icon || roll.technique.icon || '🎯',
+            damageTypeId: typeId,
+            amount,
+            source: 'technique',
+          };
+        }),
+      ];
+      const resolveDamagePieces = profile => {
+        if (!profile || !rawDamagePieces.length) return dmgTotal;
+        damageBreakdown = rawDamagePieces.map(piece => {
+          const resolved = applyDamageTypeInteraction(piece.amount, piece.damageTypeId, profile);
+          return { ...piece, resolved: resolved.dmgTotal, interaction: resolved.interaction || null };
+        });
+        const meaningful = damageBreakdown.find(piece => piece.interaction && piece.interaction !== 'Normal');
+        interaction = meaningful?.interaction || null;
+        return damageBreakdown.reduce((total, piece) => total + piece.resolved, 0);
+      };
       if (hit || halfDmg) {
         if (curTgtData.type === 'enemy' && curTgtData.beastId) {
           const bEnt    = VS.bestiary[curTgtData.beastId];
-          const result  = applyDamageTypeInteraction(dmgTotal, opt.damageTypeId, bEnt);
-          dmgTotal      = result.dmgTotal;
-          interaction   = result.interaction;
+          dmgTotal      = resolveDamagePieces(bEnt);
 
           const realMax = _numOr(bEnt?.pvMax, 20);
           const realCur = curTgtData.hp !== null ? _numOr(curTgtData.hp, realMax) : realMax;
@@ -8726,23 +9224,30 @@ async function _vttRollAttack() {
           targetWrite = updateDoc(_tokRef(curTgtData.id), { hp: newHp, pvCombatHp: newEst })
             .then(() => _syncDownedCondition(curTgtData, newHp));
         } else {
+          // Le registre VTT contient aussi les personnages des autres joueurs.
+          // STATE.characters peut être volontairement limité au compte courant :
+          // il ne suffit donc pas pour défendre une cible secondaire d'AoE.
           const tgtChar = curTgtData.characterId
-            ? STATE.characters.find(x => x.id === curTgtData.characterId) : null;
+            ? (VS.characters?.[curTgtData.characterId]
+              || STATE.characters?.find?.(x => x.id === curTgtData.characterId))
+            : null;
           // Résistances / immunités / absorptions / faiblesses accordées par
           // l'équipement du personnage (non cumulable — cf. getCharDamageProfile).
           if (tgtChar) {
             const prof = getCharFullDamageProfile(tgtChar);
             if (prof) {
-              const result = applyDamageTypeInteraction(dmgTotal, opt.damageTypeId, prof);
-              dmgTotal    = result.dmgTotal;
-              interaction = result.interaction;
+              dmgTotal = resolveDamagePieces(prof);
             }
           }
           // Set Lourd : réduction plate par coup (sur des dégâts positifs uniquement —
           // une absorption rend des PV et ne doit pas être rognée).
           if (dmgTotal > 0 && tgtChar) {
-            dmgReduction = getArmorSetData(tgtChar).modifiers.damageReduction || 0;
-            if (dmgReduction > 0) dmgTotal = Math.max(1, dmgTotal - dmgReduction);
+            const setReduction = getArmorSetData(tgtChar).modifiers.damageReduction || 0;
+            if (setReduction > 0) {
+              const beforeSet = dmgTotal;
+              dmgTotal = Math.max(1, dmgTotal - setReduction);
+              dmgReduction = beforeSet - dmgTotal;
+            }
           }
           // Borne haute = hpMax pour qu'une absorption ne soigne pas au-delà du max.
           newHp = Math.max(0, Math.min(hpMax, curHp - dmgTotal));
@@ -8776,7 +9281,7 @@ async function _vttRollAttack() {
       //    l'effet `consumedByAttackAgainst` est activé après que les bonus
       //    de dégâts aient été appliqués. Persistance immédiate.
       const _consumedNotes = [];
-      if (hit) {
+      if (hit && !isTechniqueSplash) {
         const curConds = curTgtData.conditions || [];
         const remaining = [];
         for (const c of curConds) {
@@ -8797,6 +9302,97 @@ async function _vttRollAttack() {
           });
         }
       }
+
+      // Effets tactiques structurés : état (avec JS éventuel) et déplacement.
+      // Le résultat est déterminé immédiatement pour que le journal ne dépende
+      // pas de la latence Firestore ; la mutation reste chaînée après les PV.
+      const techniqueEffects = [];
+      for (const roll of applicableTechniqueRolls) {
+        const technique = roll.technique;
+        const lib = technique.conditionId ? CONDITION_BY_ID[technique.conditionId] : null;
+        let applyCondition = false;
+        if (lib) {
+          const char = curTgtData.characterId
+            ? (VS.characters?.[curTgtData.characterId] || STATE.characters?.find?.(item => item.id === curTgtData.characterId))
+            : null;
+          const normalize = value => String(value || '').trim().toLocaleLowerCase('fr');
+          const resistance = Array.isArray(char?.resistances) ? char.resistances.find(entry => {
+            if (entry?.cat !== 'etat') return false;
+            return entry.t === lib.id || normalize(entry.label) === normalize(lib.label)
+              || normalize(CONDITION_BY_ID[entry.t]?.label) === normalize(lib.label);
+          }) : null;
+          const saveStat = technique.conditionSaveStat || lib.defaultSaveStat || '';
+          const saveDC = Math.max(0, parseInt(technique.conditionSaveDC, 10) || parseInt(lib.defaultDC, 10) || 0);
+          const immune = resistance?.k === 'imm';
+          let passed = immune;
+          let saveResult = null;
+          if (!immune && saveStat && saveDC > 0) {
+            const rawBaseMode = _conditionStatRollMode(curTgtData, saveStat, 'save');
+            const baseMode = rawBaseMode === 'normal' ? '' : rawBaseMode;
+            const resistanceMode = resistance?.k === 'res' ? 'advantage' : resistance?.k === 'vul' ? 'disadvantage' : '';
+            const rollMode = baseMode && resistanceMode && baseMode !== resistanceMode ? 'normal' : (resistanceMode || baseMode || 'normal');
+            const d1 = Math.floor(Math.random() * 20) + 1;
+            const d2 = rollMode === 'advantage' || rollMode === 'disadvantage' ? Math.floor(Math.random() * 20) + 1 : null;
+            const d20 = rollMode === 'advantage' ? Math.max(d1, d2) : rollMode === 'disadvantage' ? Math.min(d1, d2) : d1;
+            const mod = _tokenStatMod(curTgtData, saveStat);
+            const total = d20 + mod;
+            passed = d20 === 20 || (d20 !== 1 && total >= saveDC);
+            saveResult = { saveStat, saveDC, d20, d20rolls: d2 == null ? null : [d1, d2], mod, total, rollMode };
+          }
+          applyCondition = !passed;
+          techniqueEffects.push({
+            type: 'condition', techniqueId: technique.id, icon: lib.icon || technique.icon || '✨',
+            label: lib.label, applied: applyCondition, immune, ...(saveResult || {}),
+          });
+          if (saveResult || immune) {
+            const tgtName = lCurTgt.displayName ?? curTgtData.name ?? 'Cible';
+            techniqueSaveLogs.push({
+              type: 'save', authorId: STATE.user?.uid || null, authorName,
+              tokenName: tgtName, characterImage: lCurTgt.displayImage || null,
+              ..._vttLogTargetFields(curTgtData),
+              conditionLabel: `${lib.icon || '✨'} ${lib.label}`,
+              sortLabel: technique.label, statLabel: statShort(saveResult?.saveStat || lib.defaultSaveStat || ''),
+              mod: saveResult?.mod || 0, d20: saveResult?.d20 || null,
+              d20rolls: saveResult?.d20rolls || null, rollMode: saveResult?.rollMode || 'normal',
+              total: saveResult?.total || 0, dd: saveResult?.saveDC || technique.conditionSaveDC || lib.defaultDC || 0,
+              passed, immune, createdAt: serverTimestamp(),
+            });
+          }
+        }
+        const moveDistance = technique.forcedMovement !== 'none'
+          ? Math.max(0, parseInt(technique.forcedMovementDistance, 10) || 0) : 0;
+        if (moveDistance > 0) {
+          techniqueEffects.push({
+            type: 'movement', techniqueId: technique.id, icon: technique.forcedMovement === 'pull' ? '🧲' : '💨',
+            label: technique.forcedMovement === 'pull' ? 'Attraction' : 'Repoussement',
+            mode: technique.forcedMovement, distance: moveDistance,
+          });
+        }
+        if (applyCondition || moveDistance > 0) {
+          targetWrite = targetWrite.then(async () => {
+            if (applyCondition) {
+              const round = Math.max(0, parseInt(VS.session?.combat?.round, 10) || 0);
+              const consumed = !!lib.effects?.consumedByAttackAgainst;
+              const duration = Math.max(1, parseInt(technique.conditionDuration, 10) || parseInt(lib.defaultDuration, 10) || 2);
+              const before = curTgtData.conditions || [];
+              const prepared = await _vttConditionsBeforeStateApplication({ ...curTgtData, conditions: before }, lib);
+              const conditions = [...prepared.filter(condition => condition.id !== lib.id), {
+                id: lib.id, appliedAt: Date.now(), appliedBy: srcId, source: technique.label,
+                saveDC: technique.conditionSaveDC || lib.defaultDC || null,
+                saveStat: technique.conditionSaveStat || lib.defaultSaveStat || null,
+                expiresAtRound: round > 0 && !consumed ? round + duration - 1 : null,
+                ...(round === 0 && !consumed ? { pendingDuration: duration } : {}),
+              }];
+              _vttPatchTokenOptimistically(curTgtData.id, { conditions });
+              await updateDoc(_tokRef(curTgtData.id), { conditions }).catch(error => {
+                _vttPatchTokenOptimistically(curTgtData.id, { conditions: before });
+                throw error;
+              });
+            }
+            if (moveDistance > 0) await _vttApplyDeplacement(src, curTgtData, technique.forcedMovement, moveDistance);
+          });
+        }
+      }
       targetWritePromises.push(targetWrite);
 
       targetResults.push({
@@ -8804,7 +9400,11 @@ async function _vttRollAttack() {
         dmgTotal, dmgApplied, dmgPre, dmgReduction, newHp, hpMax, interaction,
         tokenId: curTgtData.id,   // pour l'annulation manuelle (bouclier réactif)
         shieldBlocked: isBlocked,
-        techniqueDefenseBonus,
+        techniqueDefenseBonus: isTechniqueSplash ? 0 : techniqueDefenseBonus,
+        techniqueSplash: isTechniqueSplash,
+        techniqueSplashDetails: isTechniqueSplash ? (splashTechniquesByTarget.get(curTgtId) || []) : null,
+        techniqueEffects: techniqueEffects.length ? techniqueEffects : null,
+        damageBreakdown: damageBreakdown.length ? damageBreakdown : null,
         condDmgNotes: _condDmgNotes, condDmgDetails: _condDmgDetails, consumedNotes: _consumedNotes,
         // Métadonnées pour le rendu côté joueur (estimation CA, portrait)
         beastId: curTgtData.beastId || null,
@@ -8849,6 +9449,15 @@ async function _vttRollAttack() {
       if (r.consumedNotes?.length) {
         for (const n of r.consumedNotes) modNotes.push(n + ` (${r.name})`);
       }
+      for (const effect of r.techniqueEffects || []) {
+        if (effect.type === 'condition') {
+          modNotes.push(effect.immune
+            ? `🛡 ${r.name} immunisé à ${effect.label}`
+            : effect.applied ? `${effect.icon} ${effect.label} appliqué à ${r.name}` : `🛡 ${r.name} résiste à ${effect.label}`);
+        } else if (effect.type === 'movement') {
+          modNotes.push(`${effect.icon} ${r.name} : ${effect.label.toLowerCase()} ${effect.distance}c`);
+        }
+      }
     }
 
     // ── JS Concentration auto : buffs canalisés + états de type Concentré.
@@ -8874,7 +9483,7 @@ async function _vttRollAttack() {
       if (grant && !_mods?.laceration) {
         const baseRoundLg = Math.max(1, roundLg);
         for (const r of targetResults) {
-          if (!(r.hit || r.halfDmg) || !r._data) continue;
+          if (r.techniqueSplash || !(r.hit || r.halfDmg) || !r._data) continue;
           const curTgtData = r._data;
           const beast = curTgtData.beastId ? VS.bestiary[curTgtData.beastId] : null;
           const rang = (beast?.rang || 'classique').toLowerCase();
@@ -8898,7 +9507,7 @@ async function _vttRollAttack() {
 
       for (const r of targetResults) {
         const wasHit = r.hit || r.halfDmg;
-        if (!wasHit || !r._data) continue;
+        if (r.techniqueSplash || !wasHit || !r._data) continue;
         const curTgtData = r._data;
 
         // ── Lacération : -CA brut sur la cible (plafonné selon rang) ────
@@ -8972,6 +9581,51 @@ async function _vttRollAttack() {
     // ── Un seul message dans le log ────────────────────────────────────
     // Strip _data (référence token interne, non sérialisable Firestore)
     const cleanResults = targetResults.map(({ _data, ...rest }) => rest);
+    const techniqueLogs = selectedTechniques.map(technique => {
+      const rolled = techniqueRolls.find(entry => entry.technique._choiceId === technique._choiceId);
+      return {
+        id: technique.id,
+        icon: technique.icon || '🎯',
+        label: technique.label,
+        description: technique.description || '',
+        source: technique._source || 'weapon',
+        triggered: !!rolled,
+        allowWithAbilities: technique.allowWithAbilities !== false,
+        trigger: technique.trigger || 'hit',
+        missEffectMode: technique.missEffectMode || 'none',
+        attackModifier: parseInt(technique.attackModifier, 10) || 0,
+        defenseBonus: Math.max(0, parseInt(technique.defenseBonus, 10) || 0),
+        damageBonus: rolled?.damageBonus || 0,
+        damageDetails: rolled?.damageDetails || [],
+        damageTypeId: technique.damageTypeId || opt.damageTypeId || null,
+        addWeaponModifier: !!technique.addWeaponModifier,
+        criticalMode: technique.criticalMode || 'normal',
+        scalingMode: technique.scalingMode || 'none',
+        scalingEvery: technique.scalingEvery || 1,
+        scalingFormula: technique.scalingFormula || '',
+        scalingStat: technique.scalingStat || '',
+        blastRadius: Math.max(0, parseInt(technique.blastRadius, 10) || 0),
+        areaShape: technique.areaShape || 'square',
+        areaOrigin: technique.areaOrigin || 'target',
+        areaTargets: technique.areaTargets || 'all',
+        includeCaster: !!technique.includeCaster,
+        conditionId: technique.conditionId || '',
+        conditionDuration: technique.conditionDuration || 0,
+        conditionSaveStat: technique.conditionSaveStat || '',
+        conditionSaveDC: technique.conditionSaveDC || 0,
+        forcedMovement: technique.forcedMovement || 'none',
+        forcedMovementDistance: technique.forcedMovementDistance || 0,
+        resourceType: technique.resourceType || 'none',
+        resourceCost: technique.resourceCost || 0,
+        usageScope: technique.usageScope || 'none',
+        maxUses: technique.maxUses || 0,
+        cooldownRounds: technique.cooldownRounds || 0,
+        onHitEffect: technique.onHitEffect || '',
+      };
+    });
+    // `technique` reste renseigné pour les anciens clients ; les nouveaux
+    // lisent `techniques`, qui conserve indépendamment les deux familles.
+    const legacyTechnique = techniqueLogs[0] || null;
     const isMulti = cleanResults.length > 1;
     if (isMulti) {
       await _publishCombatLog({
@@ -8984,12 +9638,10 @@ async function _vttRollAttack() {
         characterImage: _combatLogImage(lS.displayImage),
         attackerRank,
         optLabel: opt.label,
-        technique: weaponTechnique ? {
-          id: weaponTechnique.id, icon: weaponTechnique.icon || '🎯', label: weaponTechnique.label,
-          description: weaponTechnique.description || '', defenseBonus: techniqueDefenseBonus,
-          damageBonus: techniqueDmgBonus, damageDetails: techniqueDmgDetails,
-          onHitEffect: weaponTechnique.onHitEffect || '',
-        } : null,
+        technique: legacyTechnique,
+        techniques: techniqueLogs,
+        techniqueDefenseBonus,
+        techniqueAttackModifier,
         autoHit: !!opt.autoHit,
         isCrit, isFumble, advMode: effectiveMode, advAuto: effectiveMode !== mode,
         advReasons: effectiveMode !== mode ? condMods.reasons : null,
@@ -9003,7 +9655,8 @@ async function _vttRollAttack() {
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
         dmgMaitriseBonus: opt.maitriseBonus??0,
         dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
-        dmgFull: sharedDmgTotalHit, dmgFullHalf: sharedDmgTotalHalf,
+        dmgFull: cleanResults.find(result => !result.techniqueSplash)?.dmgPre ?? sharedDmgTotalHit,
+        dmgFullHalf: sharedDmgTotalHalf,
         bonusHitDice: bonusHitDice||null, extraHitRolls: extraHitRolls.length ? extraHitRolls : null,
         critNormalMax: sharedCritNormalMax, critRaw2: sharedCritRaw2, critFixed2: sharedCritFixed2,
         critFormula: criticalEffectFormulaLabel(),
@@ -9036,12 +9689,10 @@ async function _vttRollAttack() {
         // Bouclier réactif manuel : token cible + rang attaquant (vérif du palier).
         defenderTokenId: r.tokenId || null,
         attackerRank,
-        technique: weaponTechnique ? {
-          id: weaponTechnique.id, icon: weaponTechnique.icon || '🎯', label: weaponTechnique.label,
-          description: weaponTechnique.description || '', defenseBonus: techniqueDefenseBonus,
-          damageBonus: techniqueDmgBonus, damageDetails: techniqueDmgDetails,
-          onHitEffect: weaponTechnique.onHitEffect || '',
-        } : null,
+        technique: legacyTechnique,
+        techniques: techniqueLogs,
+        techniqueDefenseBonus,
+        techniqueAttackModifier,
         // Identifiants cible pour rendu côté joueur (estimation CA)
         beastId: r.beastId || null,
         npcId: r.npcId || null,
@@ -9061,7 +9712,7 @@ async function _vttRollAttack() {
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
         dmgMaitriseBonus: opt.maitriseBonus??0,
         dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
-        dmgTotal: r.dmgTotal, dmgApplied: r.dmgApplied, dmgFull: sharedDmgTotalHit, dmgPre: r.dmgPre ?? r.dmgTotal, dmgReduction: r.dmgReduction || 0,
+        dmgTotal: r.dmgTotal, dmgApplied: r.dmgApplied, dmgFull: r.dmgPre ?? sharedDmgTotalHit, dmgPre: r.dmgPre ?? r.dmgTotal, dmgReduction: r.dmgReduction || 0,
         bonusHitDice: bonusHitDice||null, extraHitRolls: extraHitRolls.length ? extraHitRolls : null,
         critNormalMax: sharedCritNormalMax, critRaw2: sharedCritRaw2, critFixed2: sharedCritFixed2,
         critFormula: criticalEffectFormulaLabel(),
@@ -9079,11 +9730,16 @@ async function _vttRollAttack() {
         ..._diceLogFields('dmg', sharedDmgRollsDetail),
         ..._diceLogFields('crit', sharedCritRollsDetail),
         interaction: r.interaction || null,
+        damageBreakdown: r.damageBreakdown || null,
+        techniqueEffects: r.techniqueEffects || null,
         createdAt: serverTimestamp(),
       });
     }
 
-    await Promise.all(concentrationLogs.map(payload => _publishCombatLog(payload)));
+    await Promise.all([
+      ...techniqueSaveLogs.map(payload => _vttPublishOptimisticLog(payload).catch(() => {})),
+      ...concentrationLogs.map(payload => _publishCombatLog(payload)),
+    ]);
 
     const [sourceWriteError, targetWriteError] = await Promise.all([sourceWritesDone, targetWritesDone]);
     if (sourceWriteError) throw sourceWriteError;
@@ -9110,13 +9766,17 @@ async function _vttRollAttack() {
     // (pas de pollution sur les ratés)
     const _anyHitForEnchant = cleanResults.some(r => r.hit);
     if (buffDmgNotes.length && _anyHitForEnchant) notifParts.push(...buffDmgNotes);
-    if (weaponTechnique) {
-      const techniqueHit = cleanResults.some(r => r.hit);
-      const techResult = techniqueHit
-        ? `${weaponTechnique.icon || '🎯'} ${weaponTechnique.label}${techniqueDmgBonus > 0 ? ` +${techniqueDmgBonus}` : ''}`
-        : `${weaponTechnique.icon || '🎯'} ${weaponTechnique.label} manqué`;
-      notifParts.unshift(techResult);
-      if (techniqueHit && weaponTechnique.onHitEffect) notifParts.push(`Effet : ${weaponTechnique.onHitEffect}`);
+    if (techniqueLogs.length) {
+      for (const technique of [...techniqueLogs].reverse()) {
+        const splashCount = cleanResults.filter(r =>
+          r.techniqueSplashDetails?.some(item => item.id === technique.id && item.source === technique.source)
+        ).length;
+        const techResult = !technique.triggered
+          ? `${technique.icon} ${technique.label} · déclencheur non rempli`
+          : `${technique.icon} ${technique.label}${technique.damageBonus > 0 ? ` +${technique.damageBonus}` : ''}${splashCount ? ` · zone sur ${splashCount} cible${splashCount > 1 ? 's' : ''}` : ''}`;
+        notifParts.unshift(techResult);
+        if (technique.triggered && technique.onHitEffect) notifParts.push(`Effet : ${technique.onHitEffect}`);
+      }
     }
     if (luckUsed) notifParts.unshift(`🍀 Coup de chance utilisé (d20 → ${d20})`);
     const anyHit = cleanResults.some(r => r.hit || r.halfDmg);
@@ -12676,6 +13336,12 @@ async function _vttMountTable(content) {
     content.innerHTML='<div style="padding:2rem;color:var(--text-dim)">Impossible de charger Konva.js.</div>';
     content.style.overflow=''; return;
   }
+  // Les options d'attaque sont interactives dès le premier rendu : les formats
+  // et types doivent donc être présents avant d'afficher la table. Les lectures
+  // ont déjà tourné en parallèle du chargement de Konva et viennent du cache live.
+  const [weaponFormats, damageTypes] = await _formatsP;
+  VS.weaponFormats = weaponFormats;
+  VS.damageTypes = damageTypes;
   content.innerHTML=_buildHtml();
   // Overlay "tourne ton téléphone" — visible uniquement en portrait sur petit
   // écran (piloté par media-query CSS). En paysage il disparaît et la table
@@ -12880,7 +13546,6 @@ async function _vttMountTable(content) {
       img.decode().catch(() => {}); // ignore erreurs réseau / format
     });
   });
-  _formatsP.then(([f, d]) => { VS.weaponFormats = f; VS.damageTypes = d; });
   // Précharge les matrices MJ (combos, armes invoquées) pour les sorts en combat
   loadSpellMatrices().then(m => { _spellMatrices = m; }).catch(() => {});
   // Précharge les overrides MJ de la librairie d'états (CONDITION_LIBRARY)

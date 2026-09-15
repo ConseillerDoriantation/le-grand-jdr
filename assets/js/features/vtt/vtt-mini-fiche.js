@@ -14,7 +14,7 @@ import { _esc, _norm, loadingHtml } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal, promptModal } from '../../shared/modal.js';
 import { getArmorSetData, syncEquipmentAfterInventoryMutation, _getTraits } from '../../shared/equipment-utils.js';
-import { calcSpellDuration, calcSpellTargets } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, getProtectionRestoreMode } from '../../shared/spell-runes.js';
 import { getDamageTypeById } from '../../shared/damage-types.js';
 import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, calcOr,
          computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, getMod,
@@ -712,8 +712,9 @@ function _vttSpellChips(s, c) {
     && runes.includes('Amplification')
     && s.ampMode !== 'deplacement'
     && !runes.includes('Protection');
+  const protectionRestoreMode = getProtectionRestoreMode(s);
   if (!(runes.includes('Protection') && runes.includes('Affliction') && !_isLac)
-      && types.includes('defensif') && (s.protectionMode === 'soin' || s.typeSoin || isAmpSupportHeal)) {
+      && (protectionRestoreMode === 'soin' || s.typeSoin || isAmpSupportHeal)) {
     let soin = _vttSortSoinFormula(s, c);
     if (isClassic && s.degatsStat && s.degatsStat !== 'none') {
       const mod = getMod(c, s.degatsStat);
@@ -721,7 +722,7 @@ function _vttSpellChips(s, c) {
     }
     if (soin) chips.push({ icon:'💚', val: _effectDisplay(s, soin), color:'#22c38e', lbl:'Soin' });
   }
-  if (runes.includes('Protection') && s.protectionMode === 'mana' && types.includes('defensif')) {
+  if (protectionRestoreMode === 'mana') {
     chips.push({ icon:'💙', val:`${_calcSortMana(s, c)} PM`, color:'#8b5cf6', lbl:'Régénération de PM' });
   }
   if (isClassic && s.classicEffect === 'utility' && s.effet) {

@@ -81,7 +81,11 @@ export function _initChatLogSubs() {
     query(_logCol(), orderBy('createdAt', 'desc'), limit(80)),
     snap => {
       _logMain = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      _logMain.forEach(message => _clearOptimisticLog(message.id));
+      // Un snapshot local peut livrer createdAt=null tant que le Timestamp
+      // serveur n'est pas résolu. L'entrée optimiste doit rester visible jusque-là.
+      _logMain.forEach(message => {
+        if (message.createdAt?.toMillis?.() != null) _clearOptimisticLog(message.id);
+      });
       _rebuildChatLog();
     },
     e => {
@@ -113,9 +117,11 @@ export function _vttToggleLogDetail(detailId) {
 }
 
 export function _rebuildChatLog() {
-  const publicLogs = _optimisticLogs.size
-    ? _logMain.concat([..._optimisticLogs.values()])
-    : _logMain;
+  // Déduplique par id et préfère la version optimiste, correctement horodatée,
+  // au document local encore incomplet retourné par Firestore.
+  const publicById = new Map(_logMain.map(message => [message.id, message]));
+  _optimisticLogs.forEach((message, id) => publicById.set(id, message));
+  const publicLogs = [...publicById.values()];
   const merged = _logGm.length ? publicLogs.concat(_logGm) : publicLogs;
   const msgs = merged
     .slice()
@@ -289,12 +295,26 @@ export function _renderChatLogImpl(msgs) {
     return `<span class="vtt-log-dice-expr">d20${_rollChips([kept ?? '?'])}</span>`;
   };
 
+  const _techniques = message => Array.isArray(message?.techniques) && message.techniques.length
+    ? message.techniques
+    : message?.technique ? [message.technique] : [];
+  const _techniqueBadges = message => _techniques(message).map(technique =>
+    `<span class="vtt-log-badge" style="color:${technique.triggered === false ? '#94a3b8' : '#fcd34d'};background:${technique.triggered === false ? 'rgba(148,163,184,.1)' : 'rgba(251,191,36,.14)'}" title="${technique.triggered === false ? 'Déclencheur non rempli' : 'Technique déclenchée'}">${_esc(technique.icon || '🎯')} ${_esc(technique.label)}</span>`
+  ).join('');
+  const _techniqueEffects = message =>
+    _techniques(message).filter(technique => technique.triggered !== false && technique.onHitEffect).map(technique =>
+      `<div class="vtt-log-body vtt-log-technique-effect"><span class="vtt-log-icon">${_esc(technique.icon || '🎯')}</span><span class="vtt-log-result-sub"><strong>${_esc(technique.label)}</strong> · ${_esc(technique.onHitEffect)}</span></div>`
+    ).join('');
+
   // Estimation CA visible par le joueur (pas spoil pour les non-MJ)
   //  • MJ : voit la vraie CA enregistrée dans le log
   //  • Joueur : voit son estimation (track.caEstimee du bestiaire) ; sinon "?"
   //  • Pour un PJ allié : on montre la CA réelle (les joueurs connaissent leurs alliés)
   const _viewCA = (target, realCA) => {
-    const techniqueBonus = Math.max(0, parseInt(target?.techniqueDefenseBonus ?? target?.technique?.defenseBonus, 10) || 0);
+    const storedBonus = Number(target?.techniqueDefenseBonus);
+    const techniqueBonus = Number.isFinite(storedBonus)
+      ? Math.max(0, storedBonus)
+      : _techniques(target).reduce((total, technique) => total + Math.max(0, parseInt(technique?.defenseBonus, 10) || 0), 0);
     const withTechnique = value => Number.isFinite(Number(value)) ? Number(value) + techniqueBonus : value;
     if (STATE.isAdmin) return realCA ?? '?';
     if (target.characterId) return realCA ?? '?';
@@ -334,7 +354,7 @@ export function _renderChatLogImpl(msgs) {
 
     const badges = [
       _advBadge(m.advMode),
-      m.technique ? `<span class="vtt-log-badge" style="color:#fcd34d;background:rgba(251,191,36,.14)">${_esc(m.technique.icon || '🎯')} ${_esc(m.technique.label)}</span>` : '',
+      _techniqueBadges(m),
       isCrit   ? `<span class="vtt-log-badge vtt-log-badge--crit">💥 CRIT</span>` : '',
       isFumble ? `<span class="vtt-log-badge vtt-log-badge--fumble">💀 FUMBLE</span>` : '',
     ].join('');
@@ -417,9 +437,7 @@ export function _renderChatLogImpl(msgs) {
         ${m.dmgReduction > 0 ? `<span class="vtt-log-badge" style="color:#60a5fa;background:rgba(96,165,250,.18)">🛡 Set Lourd −${m.dmgReduction}</span>` : ''}
       </div>` : '';
       bodyHtml = hitRow + dmgRow;
-      if (m.technique?.onHitEffect && isHit) {
-        bodyHtml += `<div class="vtt-log-body vtt-log-technique-effect"><span class="vtt-log-icon">${_esc(m.technique.icon || '🎯')}</span><span class="vtt-log-result-sub"><strong>${_esc(m.technique.label)}</strong> · ${_esc(m.technique.onHitEffect)}</span></div>`;
-      }
+      bodyHtml += _techniqueEffects(m, isHit);
     }
 
     // Panneau détail
@@ -465,12 +483,15 @@ export function _renderChatLogImpl(msgs) {
     if (m.hitToucherMod != null && m.hitToucherStatLabel) touchParts.push(`${sn(m.hitToucherMod)}${sub(m.hitToucherStatLabel)}`);
     if (m.hitToucherSetBonus > 0) touchParts.push(`+${m.hitToucherSetBonus}${sub('Set')}`);
     if (m.hitTouchBuff > 0) touchParts.push(`+${m.hitTouchBuff}${sub('🎯 Ench')}`);
+    if (m.techniqueAttackModifier) touchParts.push(`${sn(m.techniqueAttackModifier)}${sub('Technique')}`);
     if (m.hitBonus) touchParts.push(`${sn(m.hitBonus)}${sub('bonus')}`);
     if (m.extraHitRolls?.length) m.extraHitRolls.forEach(r => touchParts.push(`+${_d20(r, [r])}`));
     const _caShown = isHeal ? null : _viewCA(m, m.targetCA);
     rows.push(_row(touchParts.join(' '), `<strong>${m.hitTotal ?? '?'}</strong>${isHeal ? ` <small>vs DD ${m.healDD ?? 2}</small>` : ` <small>vs CA ${_caShown}</small>`}`, { op: '🎯' }));
-    if (m.technique?.defenseBonus > 0) {
-      rows.push(_row(`${_esc(m.technique.icon || '🎯')} ${_esc(m.technique.label)} ${sub('difficulté')}`, `<strong>CA +${m.technique.defenseBonus}</strong>`, { op: '🎯', muted: true }));
+    for (const technique of _techniques(m)) {
+      if (technique.defenseBonus > 0) {
+        rows.push(_row(`${_esc(technique.icon || '🎯')} ${_esc(technique.label)} ${sub('difficulté')}`, `<strong>CA +${technique.defenseBonus}</strong>`, { op: '🎯', muted: true }));
+      }
     }
 
     // ── DÉGÂTS / SOIN ──
@@ -515,10 +536,42 @@ export function _renderChatLogImpl(msgs) {
         rows.push(_row(`Enchantement`, `<strong>+${m.buffDmgBonus}</strong>`, { op: '✨' }));
       }
 
-      if (m.technique) {
-        for (const det of (m.technique.damageDetails || [])) {
-          const label = det.kind === 'weapon' ? 'Dé d’arme bonus' : det.kind === 'flat' ? 'Dégâts plats' : 'Dégâts bonus';
-          rows.push(_row(`${label}${det.rolls?.length ? ` ${_dice(det, det.formula || det.total)}` : ''}`, `<strong>+${det.total || 0}</strong>`, { op: m.technique.icon || '🎯' }));
+      for (const technique of _techniques(m)) {
+        if (technique.triggered === false) {
+          rows.push(_row(`${_esc(technique.icon || '🎯')} ${_esc(technique.label)}`, `<strong>Non déclenchée</strong>`, { op: '○', muted: true }));
+          continue;
+        }
+        for (const det of (technique.damageDetails || [])) {
+          const label = det.kind === 'weapon' ? 'Dé d’arme bonus'
+            : det.kind === 'weapon_modifier' ? 'Modificateur de l’arme'
+              : det.kind === 'flat' ? 'Dégâts plats' : 'Dégâts bonus';
+          rows.push(_row(`${_esc(technique.label)} · ${label}${det.rolls?.length ? ` ${_dice(det, det.formula || det.total)}` : ''}`, `<strong>${_signed(det.total || 0)}</strong>`, { op: technique.icon || '🎯' }));
+        }
+        if (technique.blastRadius > 0) {
+          const shape = { square:'Carré', circle:'Cercle', line:'Ligne', cone:'Cône' }[technique.areaShape] || 'Zone';
+          rows.push(_row(`${_esc(technique.label)} · ${shape}`, `<strong>${technique.blastRadius} case${technique.blastRadius > 1 ? 's' : ''}</strong>`, { op: '💥', muted: true }));
+        }
+        if (technique.criticalMode === 'double' && m.isCrit) rows.push(_row(`${_esc(technique.label)} · critique`, `<strong>×2</strong>`, { op: '💥', muted: true }));
+        if (technique.resourceType !== 'none' && technique.resourceCost > 0) rows.push(_row(`${_esc(technique.label)} · coût`, `<strong>−${technique.resourceCost} ${_esc(String(technique.resourceType).toUpperCase())}</strong>`, { op: '◇', muted: true }));
+      }
+
+      const breakdowns = Array.isArray(m.damageBreakdown) ? m.damageBreakdown
+        : Array.isArray(m.targets) ? m.targets.flatMap(target => (target.damageBreakdown || []).map(piece => ({ ...piece, targetName: target.name }))) : [];
+      for (const piece of breakdowns) {
+        const suffix = piece.targetName ? ` ${sub(piece.targetName)}` : '';
+        const transition = piece.amount !== piece.resolved ? `${piece.amount} → ${piece.resolved}` : String(piece.resolved);
+        rows.push(_row(`${_esc(piece.icon || '⚔️')} ${_esc(piece.label || 'Dégâts')}${suffix}${piece.interaction ? ` ${sub(piece.interaction)}` : ''}`, `<strong>${transition}</strong>`, { op: '◈', muted: true }));
+      }
+
+      const effectRows = Array.isArray(m.techniqueEffects) ? m.techniqueEffects
+        : Array.isArray(m.targets) ? m.targets.flatMap(target => (target.techniqueEffects || []).map(effect => ({ ...effect, targetName: target.name }))) : [];
+      for (const effect of effectRows) {
+        const suffix = effect.targetName ? ` ${sub(effect.targetName)}` : '';
+        if (effect.type === 'condition') {
+          const status = effect.immune ? 'Immunisé' : effect.applied ? 'Appliqué' : 'Résisté';
+          rows.push(_row(`${_esc(effect.icon || '✨')} ${_esc(effect.label)}${suffix}`, `<strong>${status}</strong>`, { op: effect.applied ? '✓' : '🛡', muted: !effect.applied }));
+        } else if (effect.type === 'movement') {
+          rows.push(_row(`${_esc(effect.icon || '💨')} ${_esc(effect.label)}${suffix}`, `<strong>${effect.distance} case${effect.distance > 1 ? 's' : ''}</strong>`, { op: '↔', muted: true }));
         }
       }
 
@@ -576,11 +629,14 @@ export function _renderChatLogImpl(msgs) {
 
   /** Attaque multi-cibles (sort à plusieurs cibles, AoE) */
   const renderMultiAttack = (m, i, ts) => {
+    const isHeal = !!m.isHeal;
     const isCrit = !!m.isCrit, isFumble = !!m.isFumble;
-    const theme = isCrit ? 'crit' : isFumble ? 'fumble' : (m.targets?.some(r=>r.hit) ? 'hit' : 'miss');
+    const theme = isHeal
+      ? (isFumble ? 'fumble' : 'heal')
+      : isCrit ? 'crit' : isFumble ? 'fumble' : (m.targets?.some(r=>r.hit) ? 'hit' : 'miss');
     const badges = [
       _advBadge(m.advMode),
-      m.technique ? `<span class="vtt-log-badge" style="color:#fcd34d;background:rgba(251,191,36,.14)">${_esc(m.technique.icon || '🎯')} ${_esc(m.technique.label)}</span>` : '',
+      _techniqueBadges(m),
       isCrit   ? `<span class="vtt-log-badge vtt-log-badge--crit">💥 CRIT</span>` : '',
       isFumble ? `<span class="vtt-log-badge vtt-log-badge--fumble">💀 FUMBLE</span>` : '',
     ].join('');
@@ -591,22 +647,42 @@ export function _renderChatLogImpl(msgs) {
       label:   m.optLabel, badges, ts, sourceArgs: _sourceArgs(m, m.isHeal ? 'sorts' : 'combat'),
     });
 
-    // Headline : touche total (commun à toutes les cibles)
-    const body = `<div class="vtt-log-body">
-      <span class="vtt-log-icon">🎯</span>
-      <strong class="vtt-log-result" style="font-size:1.15rem">${m.hitTotal}</strong>
-      <span class="vtt-log-vs">contre les CA</span>
-      ${_toggle(`d${i}`)}
-    </div>`;
+    // Le soin affiche le montant produit ; l'offensif conserve le jet commun.
+    const hasSplash = !!m.targets?.some(r => r.techniqueSplash);
+    const healTotal = m.healTotal ?? m.targets?.[0]?.dmgTotal ?? 0;
+    const body = isHeal
+      ? `<div class="vtt-log-body">
+          <span class="vtt-log-icon">${m.isMana ? '💙' : '💚'}</span>
+          <strong class="vtt-log-result" style="font-size:1.15rem">+${healTotal}</strong>
+          <span class="vtt-log-vs">${m.isMana ? 'PM par cible' : 'PV par cible'} · ${(m.targets || []).length} cibles</span>
+          ${isCrit ? `<span class="vtt-log-result-sub" style="color:#f59e0b">critique</span>` : ''}
+          ${_toggle(`d${i}`)}
+        </div>`
+      : `<div class="vtt-log-body">
+          <span class="vtt-log-icon">🎯</span>
+          <strong class="vtt-log-result" style="font-size:1.15rem">${m.hitTotal}</strong>
+          <span class="vtt-log-vs">${hasSplash ? 'jet commun · CA individuelles' : 'contre les CA'}</span>
+          ${_toggle(`d${i}`)}
+        </div>`;
 
     // Liste des cibles avec leur résolution individuelle
     // CA affichée selon le viewer : MJ = réelle, joueur = estimation perso
     const targets = (m.targets || []).map(r => {
-      const baseCol = r.hit ? '#22c38e' : r.halfDmg ? '#b47fff' : '#6b7280';
-      const icon = r.hit ? '✓' : r.halfDmg ? '✦' : '✗';
-      const dmgVal = (r.hit || r.halfDmg) ? (r.dmgTotal < 0 ? `+${-r.dmgTotal}` : r.dmgTotal) : '—';
+      const baseCol = isHeal ? '#22c38e'
+        : r.techniqueSplash ? (r.hit ? '#f97316' : '#6b7280') : r.hit ? '#22c38e' : r.halfDmg ? '#b47fff' : '#6b7280';
+      const icon = isHeal ? (m.isMana ? '💙' : '💚')
+        : r.techniqueSplash ? (r.hit ? '💥' : '✗') : r.hit ? '✓' : r.halfDmg ? '✦' : '✗';
+      const dmgVal = isHeal
+        ? `+${Math.max(0, Number(r.applied) || 0)}`
+        : (r.hit || r.halfDmg) ? (r.dmgTotal < 0 ? `+${-r.dmgTotal}` : r.dmgTotal) : '—';
       const dmgSuffix = r.newHp === 0 ? ' 💀' : '';
       const shownCA = _viewCA(r, r.targetCA);
+      const mitigation = r.dmgReduction > 0 ? ` · 🛡 −${r.dmgReduction}` : '';
+      const resourceState = isHeal
+        ? (m.isMana
+            ? `PM ${r.newPm ?? '?'} / ${r.pmMax ?? '?'}`
+            : `PV ${r.newHp ?? '?'} / ${r.hpMax ?? '?'}`)
+        : null;
       // Portrait de la cible : son image si disponible (ex. invocation), sinon
       // l'icône de résolution. La pastille de couleur reste le statut hit/miss.
       // Une image data:/blob: n'est volontairement pas recopiée dans Firestore
@@ -621,7 +697,7 @@ export function _renderChatLogImpl(msgs) {
       return `<div class="vtt-log-target" style="--row-c:${baseCol}">
         <div class="vtt-log-target-portrait" style="background:${baseCol}">${portraitInner}</div>
         <span class="vtt-log-target-name">${_esc(r.name)}</span>${targetSourceLink}
-        <span class="vtt-log-target-ca">CA ${shownCA}</span>
+        <span class="vtt-log-target-ca">${resourceState || (r.techniqueSplash ? `Explosion · CA ${shownCA}` : `CA ${shownCA}`)}${isHeal ? '' : mitigation}</span>
         <span class="vtt-log-target-dmg">${dmgVal}${dmgSuffix}</span>
       </div>`;
     }).join('');
@@ -630,9 +706,9 @@ export function _renderChatLogImpl(msgs) {
       ${head}
       ${body}
       <div class="vtt-log-targets">${targets}</div>
-      ${m.technique?.onHitEffect && m.targets?.some(r => r.hit) ? `<div class="vtt-log-body vtt-log-technique-effect"><span class="vtt-log-icon">${_esc(m.technique.icon || '🎯')}</span><span class="vtt-log-result-sub"><strong>${_esc(m.technique.label)}</strong> · ${_esc(m.technique.onHitEffect)}</span></div>` : ''}
+      ${_techniqueEffects(m, m.targets?.some(r => !r.techniqueSplash && r.hit))}
       ${_undoBtn(m)}
-      <div class="vtt-log-detail" id="d${i}">${buildAttackDetail(m, false)}</div>
+      <div class="vtt-log-detail" id="d${i}">${buildAttackDetail(m, isHeal)}</div>
     </div>`;
   };
 
