@@ -233,6 +233,11 @@ async function _doLogout() {
   try {
     // Stoppe d'abord les abonnements temps réel pour éviter les
     // "Accès refusé" lorsque l'auth est révoquée.
+    // Les features qui possèdent leurs propres listeners (notamment le VTT)
+    // se nettoient via cet événement sans qu'auth.js ait à les importer.
+    document.dispatchEvent(new CustomEvent('app:session-releasing', {
+      detail: { reason: 'logout' },
+    }));
     try { unwatchAll(); } catch {}
     try { teardownChat(); } catch {}
     try { releaseSessionData(); } catch {}

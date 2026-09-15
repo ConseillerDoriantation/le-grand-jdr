@@ -110,7 +110,11 @@ const FEATURE_CSS = {
   // partagés `.sh-admin-*` / `.sh-dmg-*` définis dans shop.css → sinon, ouvertes
   // hors boutique, elles s'affichent sans mise en forme. Chargeur dédoublonné.
   characters: ['characters.css', 'characters-switcher.css', 'shop.css', 'recipes.css'],
-  shop:       ['shop.css'],
+  // L'éditeur d'actions d'un article réutilise directement la modale complète
+  // des sorts. Ses styles vivent dans characters.css : elle doit être correcte
+  // dès une arrivée directe sur Boutique, sans passage préalable par une fiche.
+  // shop.css reste chargé après pour conserver ses surcharges spécifiques.
+  shop:       ['characters.css', 'shop.css'],
   // Console MJ : admin.css pour la page elle-même. Les CSS des modales (empruntées
   // à d'autres features) sont chargées à l'ouverture de chaque modale via
   // _adminLazyOpen (pages.js) — inutile de tirer vtt.css/histoire.css avant besoin.
