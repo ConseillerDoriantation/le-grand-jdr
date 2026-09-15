@@ -7404,6 +7404,18 @@ body .main-content > .sh-page--v2 {
   white-space: nowrap;
 }
 
+.sh-page--v2 .sh-order-mode {
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--gold) 34%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
+  color: var(--gold-light, #f3cf72);
+  font-size: .65rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.sh-page--v2 .sh-order-mode[hidden] { display: none !important; }
+
 .sh-page--v2 .sh-filter-clear {
   min-height: 32px;
   padding: 5px 10px;

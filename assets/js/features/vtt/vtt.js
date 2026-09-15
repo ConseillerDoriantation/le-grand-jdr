@@ -32,6 +32,7 @@ import {
 } from '../../shared/weapon-techniques.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../../shared/damage-types.js';
 import { getAttackMissEffect } from '../../shared/damage-type-rules.js';
+import { combatStyleAttackModifiers, defaultCombatStyles, detectCombatStyle, nearestHostileDistance, normalizeCombatStyle, normalizeCombatStyles } from '../../shared/combat-styles.js';
 import { playSigil, playImpact, playProjectile, playSlash, playTechniqueArea } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
@@ -675,19 +676,28 @@ async function _spendCharSpellCost(cid, res, cost, tokenId, label) {
 }
 
 // HP écrit sur la fiche source (bidirectionnel)
-export async function _setHp(t, newHp) {
+export async function _setHp(t, newHp, tokenPatch = null) {
   const v = Math.max(0, newHp);
   const live = _live(t);
   const previous = (t.characterId ? VS.characters[t.characterId]?.hp
     : t.npcId ? VS.npcs[t.npcId]?.hp
     : t.hp) ?? live.displayHp;
+  const previousTokenPatch = {};
+  if (!t.characterId && !t.npcId && tokenPatch) {
+    for (const key of Object.keys(tokenPatch)) previousTokenPatch[key] = t[key];
+    Object.assign(t, tokenPatch);
+  }
   _showAppliedHpDelta(t, live.displayHp ?? previous, v);
   _patchHpOptimistically(t, v);
   try {
     if (t.characterId) await updateDoc(_chrRef(t.characterId), { hp: v });
     else if (t.npcId)  await updateDoc(_npcRef(t.npcId),       { hp: v });
-    else               await updateDoc(_tokRef(t.id),          { hp: v });
+    else               await updateDoc(_tokRef(t.id),          { hp: v, ...(tokenPatch || {}) });
   } catch (error) {
+    for (const [key, value] of Object.entries(previousTokenPatch)) {
+      if (value === undefined) delete t[key];
+      else t[key] = value;
+    }
     if (previous != null) _patchHpOptimistically(t, previous);
     throw error;
   }
@@ -2012,7 +2022,7 @@ export function _vttPatchTokenOptimistically(id, patch) {
 
 // Répercute immédiatement les PV dans le cache vivant et sur la jauge Konva.
 // Le snapshot Firestore confirmera ensuite la même valeur sans saut visuel.
-function _patchHpOptimistically(token, hp, pvCombatHp = undefined) {
+function _patchHpOptimistically(token, hp, pvCombatHp = undefined, pvCombatHpEstimated = undefined, pvCombatHpEstimatedMax = undefined) {
   if (!token) return;
   if (token.characterId && VS.characters[token.characterId]) {
     VS.characters[token.characterId].hp = hp;
@@ -2022,6 +2032,8 @@ function _patchHpOptimistically(token, hp, pvCombatHp = undefined) {
     token.hp = hp;
   }
   if (pvCombatHp !== undefined) token.pvCombatHp = pvCombatHp;
+  if (pvCombatHpEstimated !== undefined) token.pvCombatHpEstimated = pvCombatHpEstimated;
+  if (pvCombatHpEstimatedMax !== undefined) token.pvCombatHpEstimatedMax = pvCombatHpEstimatedMax;
   _patchShape(token.id);
   _refreshDisplayedIdentitySoon(token.id);
 }
@@ -5312,6 +5324,28 @@ function _effectiveTokenHp(t) {
   return t.hp ?? null;
 }
 
+// Maximum RÉEL correspondant. Ne jamais utiliser displayHpMax pour résoudre un
+// soin : côté joueur, cette valeur est volontairement remplacée par son estimation.
+function _effectiveTokenHpMax(t) {
+  if (t.characterId) {
+    const c = VS.characters[t.characterId];
+    return c ? calcPVMax(c) : _numOr(t.hpMax, _numOr(t.pvMax, null));
+  }
+  if (t.npcId) {
+    const n = VS.npcs[t.npcId];
+    if (!n) return _numOr(t.hpMax, _numOr(t.pvMax, null));
+    return calcPVMax({
+      ...n,
+      niveau: Math.max(1, parseInt(n.niveau, 10) || 1),
+      pvBase: _numOr(n.pvBase, _numOr(n.pv, 20)),
+      statsBonus: computeEquipStatsBonus(n.equipement || {}),
+      equipement: n.equipement || {},
+    });
+  }
+  if (t.beastId) return _numOr(VS.bestiary[t.beastId]?.pvMax, _numOr(t.hpMax, null));
+  return _numOr(t.hpMax, _numOr(t.pvMax, _numOr(t.pv, null)));
+}
+
 // PM courant RÉEL stocké SUR LE TOKEN (créatures bestiaire / invocations qui
 // paient leurs compétences sur leur propre mana). null si le token ne porte pas
 // de PM (perso/PNJ → le PM est sur la fiche, capturé via `chars`).
@@ -5334,6 +5368,8 @@ function _captureUndoSnapshot(srcId, targetIds) {
     tokens[id] = {
       hp: _effectiveTokenHp(t),
       pvCombatHp: t.pvCombatHp ?? null,
+      pvCombatHpEstimated: t.pvCombatHpEstimated === true,
+      pvCombatHpEstimatedMax: t.pvCombatHpEstimatedMax ?? null,
       pm: _effectiveTokenPm(t),
       pmCombat: t.pmCombat ?? _effectiveTokenPm(t),
       buffs: Array.isArray(t.buffs) ? JSON.parse(JSON.stringify(t.buffs)) : [],
@@ -6322,10 +6358,10 @@ function _effectiveMissEffect(opt) {
 function _atkMissNoteHtml(opt) {
   const me = _effectiveMissEffect(opt);
   if (me === 'full') {
-    return `<span class="vtt-atk-note weak">✦ Dégâts complets même en cas d'échec</span>`;
+    return `<span class="vtt-atk-note weak">✦ Échec : dégâts complets · échec critique : 0</span>`;
   }
   if (me === 'half' || opt?.pmCost > 0) {
-    return `<span class="vtt-atk-note free">✦ ½ dégâts garantis même en cas d'échec${me !== 'half' && opt?.pmCost > 0 ? ' (mana consommé)' : ''}</span>`;
+    return `<span class="vtt-atk-note free">◐ Échec : ½ dégâts · échec critique : 0${me !== 'half' && opt?.pmCost > 0 ? ' · mana consommé' : ''}</span>`;
   }
   return '';
 }
@@ -6578,9 +6614,9 @@ function _vttPickOpt(srcId, tgtId, idx) {
   // la résolution. Couleur = élément, géométrie = runes, forme = catégorie.
   const _sigil = _buildCastSigil(src, opt);
 
-  _atkCtx = { srcId, tgtId, opt, lS, lT, allTargets, sigil: _sigil, weaponTechnique: null, damageTechnique: null };
-
   const dist    = _tokenAttackDistance(src, tgt);
+  const combatStyle = _combatStyleContext(src, tgt, opt);
+  _atkCtx = { srcId, tgtId, opt, lS, lT, allTargets, sigil: _sigil, weaponTechnique: null, damageTechnique: null, combatStyle };
   // Bonus toucher d'enchantement — lu frais sur le lanceur (jamais figé dans l'option)
   const _touchBuff = _touchBuffOf(src);
   const atkBase = (opt.toucher !== null && opt.toucher !== undefined ? opt.toucher : (lS.displayAttack ?? 5)) + _touchBuff;
@@ -6772,10 +6808,18 @@ function _vttPickOpt(srcId, tgtId, idx) {
   const _pills = _vttSpellPills(opt);
   const _runes = _vttSpellRuneChips(opt, srcChar);
   const _utilNotesHtml = utilNotes.map(([cls, txt]) => `<span class="vtt-atk-note ${cls}">${txt}</span>`).join('');
+  const _styleRules = combatStyle?.style ? normalizeCombatStyle(combatStyle.style).rules : null;
+  const _styleNotesHtml = [
+    combatStyle?.modifiers?.hasDis ? '<span class="vtt-atk-note weak">↘ Désavantage automatique · ennemi au contact du lanceur</span>' : '',
+    combatStyle?.modifiers?.hasAdv ? '<span class="vtt-atk-note free">↗ Avantage automatique · ennemi au contact du lanceur</span>' : '',
+    _styleRules?.opportunityAttack === 'allow' ? '<span class="vtt-atk-note">↪ Réaction d’opportunité · sortie de portée</span>' : '',
+    _styleRules?.opportunityAttack === 'forbid' ? '<span class="vtt-atk-note weak">⊘ Attaque d’opportunité indisponible</span>' : '',
+  ].join('');
   const _notesHtml = `
     ${_pills.length ? `<span class="cs-spellcard-tags">${_pills.join('')}</span>` : ''}
     ${_runes}
     ${_utilNotesHtml}
+    ${_styleNotesHtml}
     <span id="atk-miss-note">${_atkMissNoteHtml(opt)}</span>
     <span id="atk-interaction">${_atkInteractionHtml(opt)}</span>
     ${opt.actionDescription ? `<details class="vtt-atk-desc"><summary>ℹ️ Description</summary><p>${_esc(opt.actionDescription)}</p></details>` : ''}`;
@@ -8511,10 +8555,14 @@ async function _vttRollAttack() {
       // (les états de la cible ne devraient pas affecter un soin)
       let hMode = mode;
       const hCondMods = _conditionsAttackMods(src, null, opt);
-      if (hMode === 'normal') {
-        if (hCondMods.hasAdv && !hCondMods.hasDis) hMode = 'adv';
-        else if (hCondMods.hasDis && !hCondMods.hasAdv) hMode = 'dis';
-      }
+      // Recalculé au clic : un ennemi peut avoir bougé depuis l'ouverture de la modale.
+      const hStyleMods = _combatStyleContext(src, tgt, opt).modifiers;
+      const hHasAdv = mode === 'adv' || hCondMods.hasAdv || hStyleMods.hasAdv;
+      const hHasDis = mode === 'dis' || hCondMods.hasDis || hStyleMods.hasDis;
+      if (hHasAdv && hHasDis) hMode = 'normal';
+      else if (hHasAdv) hMode = 'adv';
+      else if (hHasDis) hMode = 'dis';
+      const hAutomaticReasons = [...hCondMods.reasons, ...hStyleMods.reasons];
       // Roll d20 avec mode adv/dis
       const hRoll1 = Math.floor(Math.random()*20)+1;
       const hRoll2 = hMode !== 'normal' ? Math.floor(Math.random()*20)+1 : null;
@@ -8566,7 +8614,7 @@ async function _vttRollAttack() {
         }
         const logWrite = _publishCombatLog({
           type: 'attack', isHeal: true, isFumble: true, advMode: hMode, advAuto: hMode !== mode,
-          advReasons: hMode !== mode ? hCondMods.reasons : null,
+          advReasons: hMode !== mode ? hAutomaticReasons : null,
           undo: _undoSnap,
           statsDelta: _healDelta,
           ..._vttLogSourceFields(src),
@@ -8653,9 +8701,30 @@ async function _vttRollAttack() {
             targetImage: _combatLogImage(lCur.displayImage),
           };
         }
-        const curHp = lCur.displayHp ?? 20, hpMax = lCur.displayHpMax ?? 20;
+        // Résolution autoritative : les estimations joueur ne doivent jamais
+        // modifier la quantité réellement rendue à une créature.
+        const hpMax = _effectiveTokenHpMax(curTgtData) ?? 20;
+        const curHp = Math.max(0, Math.min(hpMax, _effectiveTokenHp(curTgtData) ?? hpMax));
         const newHp = Math.min(hpMax, curHp + healTotal);
-        const _write = _setHp(curTgtData, newHp);
+        let estimatedHpPatch = null;
+        if (curTgtData.type === 'enemy') {
+          const trustedCurrent = curTgtData.pvCombatHpEstimated === true && curTgtData.pvCombatHp != null
+            ? Math.max(0, parseInt(curTgtData.pvCombatHp, 10) || 0)
+            : null;
+          const playerEstimateMax = !STATE.isAdmin && lCur.displayHpMax != null
+            ? Math.max(0, Number(lCur.displayHpMax) || 0)
+            : null;
+          const estimateMax = _numOr(curTgtData.pvCombatHpEstimatedMax, playerEstimateMax);
+          const estimateCurrent = trustedCurrent ?? playerEstimateMax;
+          estimatedHpPatch = estimateCurrent != null && estimateMax != null
+            ? {
+                pvCombatHp: Math.min(estimateMax, estimateCurrent + healTotal),
+                pvCombatHpEstimated: true,
+                pvCombatHpEstimatedMax: estimateMax,
+              }
+            : { pvCombatHpEstimated:false };
+        }
+        const _write = _setHp(curTgtData, newHp, estimatedHpPatch);
         return {
           name: lCur.displayName ?? curTgtData.name,
           applied: Math.max(0, newHp - curHp),
@@ -8688,7 +8757,7 @@ async function _vttRollAttack() {
       // Payload commun pour le log (jet de toucher détaillé)
       const hitPayload = {
         isCrit: hIsCrit, isFumble: false, advMode: hMode, advAuto: hMode !== mode,
-        advReasons: hMode !== mode ? hCondMods.reasons : null,
+        advReasons: hMode !== mode ? hAutomaticReasons : null,
         hitD20: hD20, hitRoll1: hRoll1, hitRoll2: hRoll2,
         hitD20rolls: hLuck ? [hRoll1, ...(hRoll2 != null ? [hRoll2] : []), hLuck.reroll] : (hRoll2 != null ? [hRoll1, hRoll2] : null),
         hitToucherMod: hTouchMod, hitToucherSetBonus: hSetBon,
@@ -8780,10 +8849,14 @@ async function _vttRollAttack() {
     // Le mode explicite du joueur est respecté mais peut être renforcé.
     let effectiveMode = mode;
     const condMods = _conditionsAttackMods(src, tgt, opt);
-    if (mode === 'normal') {
-      if (condMods.hasAdv && !condMods.hasDis) effectiveMode = 'adv';
-      else if (condMods.hasDis && !condMods.hasAdv) effectiveMode = 'dis';
-    }
+    // Recalculé au clic : un ennemi peut avoir bougé depuis l'ouverture de la modale.
+    const styleMods = _combatStyleContext(src, tgt, opt).modifiers;
+    const hasAdv = mode === 'adv' || condMods.hasAdv || styleMods.hasAdv;
+    const hasDis = mode === 'dis' || condMods.hasDis || styleMods.hasDis;
+    if (hasAdv && hasDis) effectiveMode = 'normal';
+    else if (hasAdv) effectiveMode = 'adv';
+    else if (hasDis) effectiveMode = 'dis';
+    const automaticReasons = [...condMods.reasons, ...styleMods.reasons];
     // ── Attaque offensive — un seul roll d20, appliqué à chaque cible ──
     const roll1    = Math.floor(Math.random()*20)+1;
     const roll2    = effectiveMode !== 'normal' ? Math.floor(Math.random()*20)+1 : null;
@@ -9229,11 +9302,26 @@ async function _vttRollAttack() {
           // Plafonner par realMax pour éviter qu'une absorption (dmgTotal négatif)
           // ne soigne au-dessus du PV max de la créature.
           newHp = Math.max(0, Math.min(realMax, realCur - dmgTotal));
-          const prevEst = curTgtData.pvCombatHp != null ? Math.max(0, parseInt(curTgtData.pvCombatHp)||0) : (lCurTgt.displayHpMax??realMax);
-          const newEst  = Math.max(0, Math.min(realMax, prevEst - dmgTotal));
+          const trustedExistingEstimate = curTgtData.pvCombatHpEstimated === true && curTgtData.pvCombatHp != null
+            ? Math.max(0, parseInt(curTgtData.pvCombatHp) || 0)
+            : null;
+          const playerEstimateMax = !STATE.isAdmin && lCurTgt.displayHpMax != null
+            ? Math.max(0, Number(lCurTgt.displayHpMax) || 0)
+            : null;
+          const prevEst = trustedExistingEstimate ?? playerEstimateMax;
+          const trustedEstimateMax = curTgtData.pvCombatHpEstimated === true
+            ? _numOr(curTgtData.pvCombatHpEstimatedMax, null)
+            : null;
+          const estimateMax = trustedEstimateMax ?? playerEstimateMax ?? prevEst;
+          const newEst = prevEst == null
+            ? null
+            : Math.max(0, Math.min(estimateMax, prevEst - dmgTotal));
           _showAppliedHpDelta(curTgtData, realCur, newHp, STATE.isAdmin ? newHp : newEst);
-          _patchHpOptimistically(curTgtData, newHp, newEst);
-          targetWrite = updateDoc(_tokRef(curTgtData.id), { hp: newHp, pvCombatHp: newEst })
+          _patchHpOptimistically(curTgtData, newHp, newEst ?? undefined, newEst != null, estimateMax ?? undefined);
+          const hpPatch = newEst == null
+            ? { hp:newHp, pvCombatHpEstimated:false }
+            : { hp:newHp, pvCombatHp:newEst, pvCombatHpEstimated:true, pvCombatHpEstimatedMax:estimateMax };
+          targetWrite = updateDoc(_tokRef(curTgtData.id), hpPatch)
             .then(() => _syncDownedCondition(curTgtData, newHp));
         } else {
           // Le registre VTT contient aussi les personnages des autres joueurs.
@@ -9656,7 +9744,7 @@ async function _vttRollAttack() {
         techniqueAttackModifier,
         autoHit: !!opt.autoHit,
         isCrit, isFumble, advMode: effectiveMode, advAuto: effectiveMode !== mode,
-        advReasons: effectiveMode !== mode ? condMods.reasons : null,
+        advReasons: effectiveMode !== mode ? automaticReasons : null,
         hitD20: d20, hitD20rolls: luckUsed ? [roll1, ...(roll2 !== null ? [roll2] : []), luckRerollValue] : (roll2 !== null ? [roll1, roll2] : [roll1]),
         hitBase: atkBase, hitBonus: bonusHit, hitTotal,
         hitToucherMod: opt.toucherMod??null, hitToucherSetBonus: opt.toucherSetBonus??0,
@@ -9712,7 +9800,7 @@ async function _vttRollAttack() {
         optLabel: opt.label,
         autoHit: !!opt.autoHit,
         isCrit, isFumble, advMode: effectiveMode, advAuto: effectiveMode !== mode,
-        advReasons: effectiveMode !== mode ? condMods.reasons : null,
+        advReasons: effectiveMode !== mode ? automaticReasons : null,
         hitD20: d20, hitD20rolls: luckUsed ? [roll1, ...(roll2 !== null ? [roll2] : []), luckRerollValue] : (roll2 !== null ? [roll1, roll2] : [roll1]),
         hitBase: atkBase, hitBonus: bonusHit, hitTotal,
         hitToucherMod: opt.toucherMod??null, hitToucherSetBonus: opt.toucherSetBonus??0,
@@ -11841,6 +11929,34 @@ function _conditionsAttackMods(srcToken, tgtToken, opt) {
   }
   return { hasAdv, hasDis, reasons };
 }
+
+/** Règles du style actif du personnage, résolues au moment du jet. */
+function _combatStyleContext(srcToken, tgtToken, opt) {
+  const character = _characterForToken(srcToken);
+  const style = character ? detectCombatStyle(character, VS.combatStyles || []) : null;
+  const hasAttackRoll = !opt?.autoHit && !opt?.isCaSort && !opt?.isUtil
+    && !opt?.isAffliction && !opt?.isEnchant;
+  if (!style || !hasAttackRoll) {
+    return { style, modifiers: { hasAdv:false, hasDis:false, reasons:[] } };
+  }
+  const rules = normalizeCombatStyle(style).rules;
+  const distance = nearestHostileDistance(
+    srcToken,
+    Object.values(VS.tokens || {}).map(entry => entry?.data || entry),
+    (source, hostile) => _tokenAttackDistance(source, hostile, rules.contactDistance === 1 ? 1 : null),
+    token => (_effectiveTokenHp(token) ?? 1) > 0,
+  );
+  return {
+    style,
+    modifiers: combatStyleAttackModifiers(style, {
+      distance,
+      // Un soin reste une action ciblée à distance pour cette gêne, même lancé
+      // sur une cible adjacente : c'est la présence de l'ennemi qui compte.
+      isMeleeAttack: !opt?.isHeal && (opt?.isMeleeAttack === true || (opt?.portee || 1) <= 1),
+      isHealingAction: !!opt?.isHeal,
+    }),
+  };
+}
 /** Retire un buff à l'index donné (MJ uniquement). */
 async function _vttRemoveBuff(tokenId, idx) {
   if (!STATE.isAdmin) return;
@@ -11941,6 +12057,8 @@ async function _vttUndoAction(logId) {
       const t = VS.tokens[tid]?.data;
       const patch = { buffs: st.buffs || [], conditions: st.conditions || [] };
       if (st.pvCombatHp != null) patch.pvCombatHp = st.pvCombatHp;
+      patch.pvCombatHpEstimated = st.pvCombatHpEstimated === true;
+      if (st.pvCombatHpEstimatedMax != null) patch.pvCombatHpEstimatedMax = st.pvCombatHpEstimatedMax;
       // PM porté par le token (créatures bestiaire / invocations) → rendu.
       if (st.pm != null)       patch.pm = st.pm;
       if (st.pmCombat != null) patch.pmCombat = st.pmCombat;
@@ -13343,7 +13461,11 @@ async function _vttMountTable(content) {
   const _konvaP   = _loadKonva();
   const _emotesP  = _loadEmotes();
   const _skillsP  = _loadDiceSkills();
-  const _formatsP = Promise.all([loadWeaponFormats(), loadDamageTypes()]);
+  const _formatsP = Promise.all([
+    loadWeaponFormats(),
+    loadDamageTypes(),
+    getDocData('world', 'combat_styles').catch(() => null),
+  ]);
   try { await _konvaP; }
   catch {
     content.innerHTML='<div style="padding:2rem;color:var(--text-dim)">Impossible de charger Konva.js.</div>';
@@ -13352,9 +13474,10 @@ async function _vttMountTable(content) {
   // Les options d'attaque sont interactives dès le premier rendu : les formats
   // et types doivent donc être présents avant d'afficher la table. Les lectures
   // ont déjà tourné en parallèle du chargement de Konva et viennent du cache live.
-  const [weaponFormats, damageTypes] = await _formatsP;
+  const [weaponFormats, damageTypes, combatStylesDoc] = await _formatsP;
   VS.weaponFormats = weaponFormats;
   VS.damageTypes = damageTypes;
+  VS.combatStyles = normalizeCombatStyles(combatStylesDoc?.styles || defaultCombatStyles());
   content.innerHTML=_buildHtml();
   // Overlay "tourne ton téléphone" — visible uniquement en portrait sur petit
   // écran (piloté par media-query CSS). En paysage il disparaît et la table

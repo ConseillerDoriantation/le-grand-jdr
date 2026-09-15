@@ -11621,28 +11621,174 @@ body .modal:has(.cs-build-modal) {
 .cs-v3 .cstyle-desc {
   font-size: .74rem; color: var(--text-soft, #c8d4e8); line-height: 1.45;
 }
-/* Bande de style compacte (sous les armes) : 1 ligne, desc tronquée + tooltip. */
-.cs-v3 .cstyle-strip {
-  display: flex; align-items: center; gap: 8px;
-  margin-top: 10px; padding: 7px 12px;
-  border: 1px solid var(--border); border-left: 3px solid var(--style-c, #4f8cff);
-  border-radius: 10px; background: var(--surface-2);
+/* Style de combat : une vraie synthèse de règles, alignée aux cartes de la fiche. */
+.cs-v3 .cstyle-panel {
+  position: relative;
+  display: grid;
+  gap: 9px;
+  margin-top: 10px;
+  padding: 11px 13px 10px 15px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--style-c, #4f8cff) 34%, var(--border));
+  border-radius: 13px;
+  background:
+    linear-gradient(110deg, color-mix(in srgb, var(--style-c, #4f8cff) 9%, transparent), transparent 48%),
+    var(--surface-2);
 }
-.cs-v3 .cstyle-strip-ico { font-size: 1rem; line-height: 1; flex-shrink: 0; }
-.cs-v3 .cstyle-strip-name {
-  font-family: var(--font-display, 'Cinzel', serif); font-weight: 600;
-  font-size: .82rem; flex-shrink: 0;
+.cs-v3 .cstyle-panel::before {
+  content: '';
+  position: absolute; inset: 0 auto 0 0; width: 3px;
+  background: var(--style-c, #4f8cff);
 }
-.cs-v3 .cstyle-strip-desc {
-  flex: 1; min-width: 0; font-size: .72rem; color: var(--text-muted);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  border-left: 1px solid var(--border-md, rgba(255,255,255,.1)); padding-left: 8px;
+.cs-v3 .cstyle-panel-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.cs-v3 .cstyle-panel-icon {
+  display: grid; place-items: center; flex: 0 0 30px;
+  width: 30px; height: 30px; border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--style-c, #4f8cff) 35%, transparent);
+  background: color-mix(in srgb, var(--style-c, #4f8cff) 13%, transparent);
+  font-style: normal;
 }
-.cs-v3 .cstyle-strip-cog {
-  margin-left: auto; flex-shrink: 0; background: none; border: none;
-  color: var(--text-dim); cursor: pointer; font-size: .72rem; padding: 2px 4px; line-height: 1;
+.cs-v3 .cstyle-panel-title { display: grid; gap: 1px; min-width: 0; }
+.cs-v3 .cstyle-panel-title small {
+  color: var(--text-dim); font-size: .55rem; font-weight: 700;
+  letter-spacing: .11em; text-transform: uppercase;
 }
-.cs-v3 .cstyle-strip-cog:hover { color: var(--gold-2, #7eb0ff); }
+.cs-v3 .cstyle-panel-title b {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-display, 'Cinzel', serif); font-size: .84rem;
+}
+.cs-v3 .cstyle-panel-cog {
+  display: grid; place-items: center; flex: 0 0 28px;
+  width: 28px; height: 28px; margin-left: auto;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: rgba(255,255,255,.025); color: var(--text-muted); cursor: pointer;
+}
+.cs-v3 .cstyle-panel-cog:hover { color: var(--style-c, #7eb0ff); border-color: var(--style-c, #7eb0ff); }
+.cs-v3 .cstyle-rule-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.cs-v3 .cstyle-rule {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-width: 145px; padding: 6px 9px;
+  border: 1px solid var(--border); border-radius: 9px;
+  background: rgba(3,9,18,.35); color: var(--text-soft);
+}
+.cs-v3 .cstyle-rule > i { font-size: .9rem; color: var(--rule-c, var(--text-muted)); font-style: normal; }
+.cs-v3 .cstyle-rule > span { display: grid; gap: 1px; }
+.cs-v3 .cstyle-rule b { font-size: .67rem; line-height: 1.2; color: var(--rule-c, var(--text-soft)); }
+.cs-v3 .cstyle-rule small { font-size: .56rem; color: var(--text-dim); line-height: 1.2; }
+.cs-v3 .cstyle-rule.reaction { --rule-c: #6aa1ff; }
+.cs-v3 .cstyle-rule.warning { --rule-c: #fbbf24; }
+.cs-v3 .cstyle-rule.positive { --rule-c: #34d399; }
+.cs-v3 .cstyle-rule.arcane { --rule-c: #c4a7ff; }
+.cs-v3 .cstyle-rule.muted { --rule-c: var(--text-muted); }
+.cs-v3 .cstyle-panel-desc {
+  margin: 0; padding-top: 7px; border-top: 1px solid var(--border);
+  color: var(--text-muted); font-size: .68rem; line-height: 1.45;
+}
+.cs-v3 .cstyle-panel.is-loading,
+.cs-v3 .cstyle-panel.is-empty { display: flex; align-items: center; color: var(--text-dim); font-size: .7rem; }
+.cs-v3 .cstyle-panel.is-empty > span:nth-child(2) { display: grid; gap: 1px; }
+.cs-v3 .cstyle-panel.is-empty b { color: var(--text-muted); font-size: .72rem; }
+.cs-v3 .cstyle-panel.is-empty small { color: var(--text-dim); font-size: .62rem; }
+@media (max-width: 620px) {
+  .cs-v3 .cstyle-rule { flex: 1 1 150px; }
+}
+
+/* Gestion structurée des styles de combat. */
+body .modal:has(.sh-admin-modal.is-combat-styles) {
+  max-width: min(860px, 96vw) !important;
+}
+.sh-admin-modal.is-combat-styles {
+  --admin-tint: rgba(79,140,255,.12);
+  --admin-glow: rgba(79,140,255,.42);
+  --admin-bd: rgba(79,140,255,.34);
+  --admin-accent: #7eb0ff;
+}
+.cs-style-list { display: grid; gap: 8px; }
+.cs-style-admin-card {
+  position: relative;
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 11px 12px 11px 15px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--style-c) 26%, var(--border));
+  border-radius: 12px;
+  background: linear-gradient(105deg, color-mix(in srgb, var(--style-c) 7%, transparent), transparent 48%), rgba(0,0,0,.16);
+}
+.cs-style-admin-card::before {
+  content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--style-c);
+}
+.cs-style-admin-main { display: grid; gap: 7px; flex: 1; min-width: 0; }
+.cs-style-admin-title { color: var(--text); font-family: var(--font-display, 'Cinzel', serif); font-size: .86rem; font-weight: 700; }
+.cs-style-admin-main > p { margin: 0; color: var(--text-muted); font-size: .7rem; line-height: 1.4; }
+.cs-style-admin-rules { display: flex; flex-wrap: wrap; gap: 5px; }
+.cs-rule-pill {
+  display: inline-flex; align-items: center; padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--rule-c, var(--text-muted)) 36%, transparent);
+  border-radius: 999px; background: color-mix(in srgb, var(--rule-c, var(--text-muted)) 9%, transparent);
+  color: var(--rule-c, var(--text-muted)); font-size: .6rem; font-weight: 700;
+}
+.cs-rule-pill.reaction { --rule-c:#6aa1ff; }
+.cs-rule-pill.warning { --rule-c:#fbbf24; }
+.cs-rule-pill.positive { --rule-c:#34d399; }
+.cs-rule-pill.muted { --rule-c:var(--text-muted); }
+.cs-style-admin-match { display: flex; flex-wrap: wrap; gap: 6px; }
+.cs-style-admin-match > span {
+  display: inline-flex; gap: 5px; padding: 4px 7px; min-width: 0;
+  border-radius: 7px; background: rgba(255,255,255,.025);
+  color: var(--text-dim); font-size: .59rem;
+}
+.cs-style-admin-match b { color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; }
+.cs-style-admin-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.cs-style-admin-actions .btn-icon.danger { color: #ff7d96; }
+.cs-style-editor { gap: 10px !important; }
+.cs-style-editor-section {
+  display: grid; gap: 10px; padding: 12px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: rgba(255,255,255,.02);
+}
+.cs-style-editor-heading { display: flex; align-items: center; gap: 9px; }
+.cs-style-editor-heading > span {
+  display: grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px;
+  border-radius: 8px; background: rgba(79,140,255,.13); color: #7eb0ff; font-size: .68rem; font-weight: 800;
+}
+.cs-style-editor-heading > div { display: grid; gap: 1px; }
+.cs-style-editor-heading b { color: var(--text); font-size: .76rem; }
+.cs-style-editor-heading small { color: var(--text-dim); font-size: .62rem; }
+.cs-style-identity-grid { display: grid; grid-template-columns: minmax(0, 1fr) 78px; gap: 9px; }
+.cs-style-field { display: grid; gap: 5px; min-width: 0; }
+.cs-style-field > span,
+.cs-style-hand > label { color: var(--text-muted); font-size: .63rem; font-weight: 700; }
+.cs-style-field > small { color: var(--text-dim); font-size: .58rem; line-height: 1.35; }
+.cs-style-field.color input {
+  width: 100%; height: 38px; padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); cursor: pointer;
+}
+.cs-style-hands-grid,
+.cs-style-rules-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.cs-style-hand { display: grid; align-content: start; gap: 6px; padding: 9px; border: 1px solid var(--border); border-radius: 10px; background: rgba(0,0,0,.15); }
+.cs-style-conditions { display: grid; gap: 5px; }
+.cs-style-condition-row { display: grid; grid-template-columns: minmax(0,1fr) 30px; gap: 5px; }
+.cs-style-condition-row > button,
+.cs-style-add-condition {
+  border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.025); color: var(--text-muted); cursor: pointer;
+}
+.cs-style-condition-row > button:hover { color: #ff7d96; border-color: rgba(255,125,150,.38); }
+.cs-style-add-condition { padding: 6px 8px; color: #7eb0ff; font-size: .61rem; }
+.cs-style-add-condition:hover { border-color: rgba(79,140,255,.4); background: rgba(79,140,255,.08); }
+.cs-style-distance { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 7px; }
+.cs-style-distance em { color: var(--text-dim); font-size: .62rem; font-style: normal; }
+.cs-style-rule-info {
+  display: flex; align-items: flex-start; gap: 9px; padding: 9px 10px;
+  border: 1px solid rgba(180,127,255,.22); border-radius: 10px; background: rgba(180,127,255,.06);
+}
+.cs-style-rule-info > span { color: #c4a7ff; }
+.cs-style-rule-info > div { display: grid; gap: 2px; }
+.cs-style-rule-info b { color: #c4a7ff; font-size: .66rem; }
+.cs-style-rule-info small { color: var(--text-muted); font-size: .6rem; line-height: 1.4; }
+@media (max-width: 650px) {
+  .cs-style-hands-grid,
+  .cs-style-rules-grid { grid-template-columns: 1fr; }
+  .cs-style-admin-card { align-items: stretch; }
+  .cs-style-admin-actions { flex-direction: column; }
+}
 /* Colonne "Maîtrises d'armes" (jumelée à la carte Éléments dans combat-footer). */
 .cs-v3 .cmeta-col {
   padding: 12px 14px; border-radius: 18px;

@@ -60,4 +60,5 @@ export const VS = {
   // ── Caches de règles (chargés une fois, lus par le combat ET l'affichage de sorts) ──
   damageTypes:   null,    // cache types de dégâts (world/damage_types)
   weaponFormats: null,    // cache formats d'armes (world/weapon_formats)
+  combatStyles:  null,    // styles et règles de combat (world/combat_styles)
 };

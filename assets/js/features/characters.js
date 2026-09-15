@@ -30,6 +30,7 @@ import { canControlCharacter, getCharacterById, getVisibleCharacters } from '../
 import {
   loadCombatStyles, detectCombatStyle,
   openCombatStylesAdmin, openDamageTypesAdmin,
+  _weaponFormats,
   _getTraits, getEquippedInventoryIndexMap, getArmorTypeMeta, getArmorSetData,
   // V3 — combat helpers
   getMainWeapon, getWeaponToucherParts, getWeaponDegatsParts,
@@ -129,7 +130,10 @@ import {
 import { openCharExportMenu } from './characters/export.js';
 
 import { quickViewChar } from './characters/quick-view.js';
-import { loadDamageTypes, getMagicTypes } from '../shared/damage-types.js';
+import { loadDamageTypes, getDamageTypeRules, getMagicTypes } from '../shared/damage-types.js';
+import { getAttackMissEffect } from '../shared/damage-type-rules.js';
+import { resolveWeaponDamageContext } from '../shared/weapon-damage-context.js';
+import { combatStyleRuleLabels } from '../shared/combat-styles.js';
 import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -1562,33 +1566,53 @@ function renderCharCombatV3(c, canEdit) {
     }).catch(() => { _combatTabCache.dmgTypes = []; });
   }
 
-  // ── STYLE de combat : auto-détecté depuis les armes équipées (comme avant)
-  // Style de combat — détecté depuis les armes. Rendu en bande compacte (1 ligne)
-  // placée sous la grille d'armes, à sa source logique : nom + aperçu de l'effet,
-  // description complète au survol. Économise tout un bloc.
+  // ── STYLE de combat : règles structurées + règle de dégâts de l'arme active.
   let styleHtml = '';
   let detected = null;
   try { detected = detectCombatStyle?.(c, _combatTabCache.styles || []); } catch (e) { console.warn('[style detect]', e); }
-  const _styleCog = STATE.isAdmin ? `<button class="cstyle-strip-cog" data-action="openCombatStylesAdmin" title="Gérer les styles (admin)">⚙️</button>` : '';
+  const _styleCog = STATE.isAdmin ? `<button class="cstyle-panel-cog" data-action="openCombatStylesAdmin" title="Gérer les styles de combat">⚙️</button>` : '';
   if (!_combatTabCache.styles) {
-    styleHtml = `<div class="cstyle-strip" style="--style-c:var(--text-dim)">
-      <span class="cstyle-strip-ico">🧙</span>
-      <span class="cstyle-strip-name" style="color:var(--text-dim);font-style:italic">Style — chargement…</span>
+    styleHtml = `<div class="cstyle-panel is-loading" style="--style-c:var(--text-dim)">
+      <span class="cstyle-panel-icon">⚔️</span>
+      <span>Chargement du style de combat…</span>
     </div>`;
   } else if (detected) {
     const col  = detected.couleur || detected.color || '#9d6fff';
     const name = detected.label || detected.name || 'Sans nom';
     const desc = detected.description || '';
-    styleHtml = `<div class="cstyle-strip" style="--style-c:${col}"${desc?` title="${_esc(desc)}"`:''}>
-      <span class="cstyle-strip-ico">${_esc(detected.icon || detected.icone || '🧙')}</span>
-      <span class="cstyle-strip-name" style="color:${col}">${_esc(name)}</span>
-      ${desc?`<span class="cstyle-strip-desc">${_esc(desc)}</span>`:''}
-      ${_styleCog}
+    const ruleCards = combatStyleRuleLabels(detected).map(rule => `
+      <span class="cstyle-rule ${rule.tone}">
+        <i>${rule.icon}</i><span><b>${_esc(rule.label)}</b><small>${_esc(rule.detail)}</small></span>
+      </span>`);
+    const mainWeapon = getMainWeapon(c);
+    const damageContext = resolveWeaponDamageContext(
+      _weaponFormats || [], _combatTabCache.dmgTypes || [], mainWeapon, c.elements || [],
+    );
+    const damageTypeRules = getDamageTypeRules(_combatTabCache.dmgTypes || [], damageContext.damageTypeId || 'physique');
+    const missEffect = getAttackMissEffect({
+      damageTypeId: damageContext.damageTypeId,
+      isMagicWeapon: damageContext.isMagic,
+      typeRules: damageTypeRules,
+    }, _combatTabCache.dmgTypes || []);
+    const missRule = missEffect === 'full'
+      ? { tone:'arcane', icon:'✦', label:'Échec : dégâts complets', detail:'échec critique : 0 dégât' }
+      : missEffect === 'half'
+        ? { tone:'arcane', icon:'◐', label:'Échec : ½ dégâts', detail:'échec critique : 0 dégât' }
+        : { tone:'muted', icon:'○', label:'Échec : 0 dégât', detail:'aucun dégât si la CA résiste' };
+    ruleCards.push(`<span class="cstyle-rule ${missRule.tone}"><i>${missRule.icon}</i><span><b>${missRule.label}</b><small>${missRule.detail}</small></span></span>`);
+    styleHtml = `<div class="cstyle-panel" style="--style-c:${col}">
+      <div class="cstyle-panel-head">
+        <span class="cstyle-panel-icon">⚔️</span>
+        <span class="cstyle-panel-title"><small>Style de combat actif</small><b style="color:${col}">${_esc(name)}</b></span>
+        ${_styleCog}
+      </div>
+      <div class="cstyle-rule-grid">${ruleCards.join('')}</div>
+      ${desc ? `<p class="cstyle-panel-desc">${_esc(desc)}</p>` : ''}
     </div>`;
   } else {
-    styleHtml = `<div class="cstyle-strip" style="--style-c:var(--text-dim)">
-      <span class="cstyle-strip-ico">🧙</span>
-      <span class="cstyle-strip-name" style="color:var(--text-dim);font-style:italic">Aucun style — équipe une arme</span>
+    styleHtml = `<div class="cstyle-panel is-empty" style="--style-c:var(--text-dim)">
+      <span class="cstyle-panel-icon">⚔️</span>
+      <span><b>Aucun style détecté</b><small>Équipe une arme correspondant à un style configuré.</small></span>
       ${_styleCog}
     </div>`;
   }
