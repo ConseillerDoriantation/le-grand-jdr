@@ -15,6 +15,17 @@ export function usesHealingMastery(spell = {}, isMagic = false, statKey = '') {
   return usesSpellMastery(spell) && isMagic && !!statKey && statKey !== 'none';
 }
 
+/**
+ * Renvoie la ressource restaurée par une rune Protection, indépendamment du
+ * type éditorial du sort. La rune et son mode sont la source de vérité : un
+ * ancien sort sans `types: ['defensif']` doit rester un vrai soin dans le VTT.
+ */
+export function getProtectionRestoreMode(spell = {}) {
+  if (runeCount(spell, 'Protection') <= 0) return null;
+  const mode = spell?.protectionMode || 'ca';
+  return mode === 'soin' || mode === 'mana' ? mode : null;
+}
+
 const SPELL_MODIFIER_STATS = new Set([
   'force', 'dexterite', 'intelligence', 'sagesse', 'constitution', 'charisme',
 ]);

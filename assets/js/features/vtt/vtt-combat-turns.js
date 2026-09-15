@@ -148,7 +148,13 @@ export async function _vttToggleCombat() {
   VS.session ||= {};
   const active=!VS.session?.combat?.active;
   const previous = VS.session?.combat || {};
-  const next = { ...previous, active, round:active?1:0, activeTokenId:null };
+  const next = {
+    ...previous,
+    active,
+    round: active ? 1 : 0,
+    activeTokenId: null,
+    ...(active ? { techniqueCombatKey: Date.now() } : {}),
+  };
   VS.session.combat = next;
   _renderCombatTrackerSoon();
   try {

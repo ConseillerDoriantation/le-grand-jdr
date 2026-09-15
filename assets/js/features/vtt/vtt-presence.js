@@ -90,10 +90,20 @@ function _renderSessionBtn() {
 async function _vttToggleSessionLive() {
   if (!STATE.isAdmin) return;
   const live = !VS.session?.live;
+  const techniqueSessionKey = live ? Date.now() : (VS.session?.techniqueSessionKey || null);
+  const previous = { ...VS.session };
+  VS.session = { ...VS.session, live, ...(live ? { techniqueSessionKey } : {}) };
+  _renderSessionBtn();
   try {
-    await setDoc(_sesRef(), live ? { live: true, liveSince: serverTimestamp() } : { live: false }, { merge: true });
+    await setDoc(_sesRef(), live
+      ? { live: true, liveSince: serverTimestamp(), techniqueSessionKey }
+      : { live: false }, { merge: true });
     showNotif(live ? '🔴 Session déclarée en cours.' : '⏹ Session terminée.', 'success');
-  } catch { showNotif('Erreur d\'enregistrement de la session.', 'error'); }
+  } catch {
+    VS.session = previous;
+    _renderSessionBtn();
+    showNotif('Erreur d\'enregistrement de la session.', 'error');
+  }
 }
 
 async function _vttKickPresence(uid) {

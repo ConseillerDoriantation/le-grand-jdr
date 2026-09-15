@@ -3838,6 +3838,7 @@ html:not([data-theme="light"]) .vtt-root {
 
 /* ── 3 · Choix optionnels (élément / technique) : rangées de pastilles ── */
 .vtt-atk-opts { display: flex; flex-direction: column; gap: 7px; padding: 0 13px 11px; }
+#atk-techniques-slot { display: contents; }
 .vtt-atk-optrow {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 8px 10px; border-radius: var(--r-md);
@@ -3862,6 +3863,33 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-atk-notes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 0 13px 11px; }
 .vtt-atk-notes:empty { display: none; }
 .vtt-atk-notes .cs-spellcard-tags { display: contents; }
+.vtt-atk-runes {
+  width: 100%; display: flex; align-items: center; gap: 10px; min-width: 0;
+  padding: 8px 10px; border-radius: var(--r-md);
+  border: 1px solid var(--border); background: var(--surface-sunken);
+}
+.vtt-atk-runes-label {
+  flex: none; font-size: 9.5px; line-height: 1; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--text-dim); font-weight: 700;
+}
+.vtt-atk-runes-list { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.vtt-atk-rune {
+  --rune-color: #a78bfa;
+  display: inline-flex; align-items: center; gap: 5px; min-height: 27px;
+  padding: 3px 9px 3px 4px; border-radius: var(--r-full);
+  color: color-mix(in srgb, var(--rune-color) 82%, white);
+  background: color-mix(in srgb, var(--rune-color) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rune-color) 38%, transparent);
+  font-size: 11.5px; font-weight: 650; white-space: nowrap;
+}
+.vtt-atk-rune-icon {
+  width: 19px; height: 19px; display: grid; place-items: center; flex: none;
+  border-radius: 50%; color: #fff;
+  background: color-mix(in srgb, var(--rune-color) 42%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rune-color) 50%, transparent);
+  font-size: 11px;
+}
+.vtt-atk-rune b { font-size: 10px; color: var(--text-soft); }
 .vtt-atk-note {
   display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
   font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: var(--r-full); border: 1px solid var(--border-md);
@@ -3917,6 +3945,7 @@ html:not([data-theme="light"]) .vtt-root {
   .vtt-atk-drawer { grid-template-columns: 1fr; }
   .vtt-atk-footer { flex-wrap: wrap; }
   .vtt-atk-ftk { order: 3; flex-basis: 100%; }
+  .vtt-atk-runes { align-items: flex-start; flex-direction: column; gap: 7px; }
 }
 
 /* En-têtes de catégorie */
@@ -8712,6 +8741,73 @@ html:not([data-theme="light"]) .vtt-root {
   0%   { opacity: 0; transform: translate(-50%,-50%) scale(.2); }
   25%  { opacity: 1; }
   100% { opacity: 0; transform: translate(-50%,-50%) scale(1.35); }
+}
+
+/* Zone réellement couverte par une technique (explosion, ligne ou cône).
+   Effet volontairement léger : un seul élément DOM par origine, sans redraw Konva. */
+.vtt-tech-area-fx {
+  position: absolute;
+  box-sizing: border-box;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -50%) rotate(var(--tech-area-rotation, 0deg)) scale(.82);
+  transform-origin: center;
+  border: 3px solid var(--tech-area-color, #f97316);
+  background:
+    radial-gradient(circle at center, color-mix(in srgb, var(--tech-area-color, #f97316) 34%, transparent), transparent 68%),
+    color-mix(in srgb, var(--tech-area-color, #f97316) 15%, transparent);
+  box-shadow:
+    inset 0 0 18px color-mix(in srgb, var(--tech-area-color, #f97316) 52%, transparent),
+    0 0 18px color-mix(in srgb, var(--tech-area-color, #f97316) 78%, transparent);
+  animation: vtt-tech-area-reveal 2.15s cubic-bezier(.2,.8,.25,1) forwards;
+}
+.vtt-tech-area-fx::after {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border: 1px dashed color-mix(in srgb, var(--tech-area-color, #f97316) 80%, white 20%);
+  border-radius: inherit;
+  animation: vtt-tech-area-pulse .72s ease-in-out 2 alternate;
+}
+.vtt-tech-area-fx--circle { border-radius: 50%; }
+.vtt-tech-area-fx--line { border-radius: 999px; }
+.vtt-tech-area-fx--cone {
+  clip-path: polygon(0 50%, 100% 0, 100% 100%);
+  transform-origin: center;
+}
+.vtt-tech-area-label {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  max-width: calc(100% - 12px);
+  transform: translate(-50%, -50%) rotate(var(--tech-area-counter-rotation, 0deg));
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--tech-area-color, #f97316) 68%, white 32%);
+  border-radius: 999px;
+  background: rgba(7, 13, 24, .88);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px #000;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .38);
+}
+@keyframes vtt-tech-area-reveal {
+  0%   { opacity: 0; transform: translate(-50%, -50%) rotate(var(--tech-area-rotation, 0deg)) scale(.82); }
+  14%  { opacity: 1; transform: translate(-50%, -50%) rotate(var(--tech-area-rotation, 0deg)) scale(1.035); }
+  24%, 74% { opacity: .94; transform: translate(-50%, -50%) rotate(var(--tech-area-rotation, 0deg)) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--tech-area-rotation, 0deg)) scale(1.04); }
+}
+@keyframes vtt-tech-area-pulse {
+  from { opacity: .42; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vtt-tech-area-fx { animation-duration: 1.6s; }
+  .vtt-tech-area-fx::after { animation: none; }
 }
 .vtt-sigil-fx .sig-spin,
 .vtt-sigil-fx .sig-spinr,

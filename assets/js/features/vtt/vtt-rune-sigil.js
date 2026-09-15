@@ -167,6 +167,42 @@ export function playImpact(container, x, y, size, color = '#4f8cff') {
   setTimeout(() => el.remove(), 1800);
 }
 
+/**
+ * Matérialise brièvement la véritable zone d'une technique sur la grille.
+ * Les coordonnées restent logiques : le calque parent suit déjà le pan/zoom.
+ */
+export function playTechniqueArea(container, {
+  x = 0, y = 0, width = 0, height = 0, rotation = 0,
+  shape = 'square', color = '#f97316', label = 'Zone d’effet', cellSize = 0,
+} = {}) {
+  if (!container || width <= 0 || height <= 0) return;
+  const layer = _ensureLayer(container);
+  const el = document.createElement('div');
+  const safeShape = ['square', 'rect', 'circle', 'line', 'cone', 'cross', 'diamond'].includes(shape)
+    ? shape : 'square';
+  el.className = `vtt-tech-area-fx vtt-tech-area-fx--${safeShape}`;
+  el.style.cssText = [
+    `left:${x}px`, `top:${y}px`, `width:${width}px`, `height:${height}px`,
+    `--tech-area-color:${color}`, `--tech-area-rotation:${rotation}deg`,
+    `--tech-area-counter-rotation:${-rotation}deg`,
+  ].join(';');
+  if (safeShape === 'diamond') {
+    el.style.clipPath = 'polygon(50% 0, 100% 50%, 50% 100%, 0 50%)';
+  } else if (safeShape === 'cross') {
+    const halfX = Math.min(50, Math.max(2, (Math.max(1, cellSize) / Math.max(1, width)) * 50));
+    const halfY = Math.min(50, Math.max(2, (Math.max(1, cellSize) / Math.max(1, height)) * 50));
+    const x1 = 50 - halfX, x2 = 50 + halfX, y1 = 50 - halfY, y2 = 50 + halfY;
+    el.style.clipPath = `polygon(${x1}% 0, ${x2}% 0, ${x2}% ${y1}%, 100% ${y1}%, 100% ${y2}%, ${x2}% ${y2}%, ${x2}% 100%, ${x1}% 100%, ${x1}% ${y2}%, 0 ${y2}%, 0 ${y1}%, ${x1}% ${y1}%)`;
+  }
+  const caption = document.createElement('span');
+  caption.className = 'vtt-tech-area-label';
+  caption.textContent = label;
+  el.appendChild(caption);
+  layer.appendChild(el);
+  el.addEventListener('animationend', event => { if (event.target === el) el.remove(); });
+  setTimeout(() => el.remove(), 2600);
+}
+
 function _ensureLayer(container) {
   let layer = container.querySelector('.vtt-sigil-layer');
   if (!layer) { layer = document.createElement('div'); layer.className = 'vtt-sigil-layer'; container.appendChild(layer); }

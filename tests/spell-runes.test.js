@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runeCount, calcSpellTargets, calcSpellDuration, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
+import { runeCount, calcSpellTargets, calcSpellDuration, getProtectionRestoreMode, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
 
 const sort = (runes = [], extra = {}) => ({ runes, ...extra });
 
@@ -34,6 +34,17 @@ test('la maîtrise de soin exige un noyau magique et une statistique active', ()
   assert.equal(usesHealingMastery({}, true, ''), false, 'statistique absente');
   assert.equal(usesHealingMastery({}, true, 'none'), false, 'soin sans modificateur');
   assert.equal(usesHealingMastery({ maitriseActive: false }, true, 'intelligence'), false);
+});
+
+test('Protection conserve son soin de zone même sans type défensif', () => {
+  const zoneHeal = sort(['Protection', 'Dispersion', 'Amplification'], {
+    protectionMode: 'soin',
+    types: ['utilitaire'],
+  });
+  assert.equal(getProtectionRestoreMode(zoneHeal), 'soin');
+  assert.equal(getProtectionRestoreMode({ ...zoneHeal, protectionMode: 'mana' }), 'mana');
+  assert.equal(getProtectionRestoreMode({ ...zoneHeal, protectionMode: 'ca' }), null);
+  assert.equal(getProtectionRestoreMode(sort(['Dispersion', 'Amplification'], { protectionMode: 'soin' })), null);
 });
 
 test('calcSpellTargets : Dispersion pilote le nombre de cibles (1 + nbDisp)', () => {
