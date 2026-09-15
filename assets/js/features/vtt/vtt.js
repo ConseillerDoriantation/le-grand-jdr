@@ -989,6 +989,7 @@ export async function _vttTriggerConcentrationSave(td, damageAmount, nextHp = nu
 let _vttListenersArmed = false;
 let _vttArmTimer = null;
 let _vttArmDetach = null;
+let _vttPageActive = false;
 function _vttArmListeners() {
   if (_vttListenersArmed) return;
   _vttListenersArmed = true;
@@ -1014,6 +1015,7 @@ function _vttCancelListenerSchedule() {
 }
 
 function _cleanup() {
+  _vttPageActive = false;
   _vttCancelListenerSchedule();
   _resetKeyboardMovement({ persist:true });
   VS.unsubs.forEach(u => u?.());
@@ -1055,6 +1057,16 @@ function _cleanup() {
   const mc = document.getElementById('main-content');
   if (mc) { mc.style.overflow = ''; mc.style.height = ''; mc.style.paddingBottom = ''; }
 }
+
+// Le module VTT reste en cache après la première visite. Ses listeners propres
+// doivent cependant vivre uniquement tant que la table est affichée, et être
+// coupés avant que l'authentification ne disparaisse lors d'une déconnexion.
+document.addEventListener('app:page-changed', event => {
+  if (_vttPageActive && event.detail?.page !== 'vtt') _cleanup();
+});
+document.addEventListener('app:session-releasing', () => {
+  if (_vttPageActive) _cleanup();
+});
 
 // ═══════════════════════════════════════════════════════════════════
 // CANVAS
@@ -13270,6 +13282,7 @@ export async function renderVttPage() {
   _cleanup();
   const content=document.getElementById('main-content');
   if (!content) return;
+  _vttPageActive = true;
   content.style.overflow='hidden';
   content.style.height='100vh';
   content.style.paddingBottom='0';

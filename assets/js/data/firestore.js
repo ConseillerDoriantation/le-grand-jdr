@@ -17,7 +17,7 @@
 // ══════════════════════════════════════════════
 
 import {
-  db,
+  auth, db,
   doc, setDoc, getDoc,
   collection, collectionGroup, getDocs,
   addDoc, updateDoc, deleteDoc,
@@ -535,6 +535,11 @@ function _handleFirestoreError(e, ctx, { silent = false } = {}) {
   if (!notify || silent) return;
 
   const code = e?.code || '';
+
+  // Un onSnapshot déjà en transit peut encore livrer son callback d'erreur
+  // juste après signOut, même si unsubscribe vient d'être appelé. Ce refus est
+  // alors attendu et ne décrit aucun problème de droits pour l'utilisateur.
+  if (code === 'permission-denied' && !auth.currentUser) return;
 
   if (code === 'permission-denied') {
     notify(`Accès refusé — ${ctx}`, 'error');
