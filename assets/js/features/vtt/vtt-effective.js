@@ -318,14 +318,14 @@ export function _live(t) {
       const parsedEstMax = parseInt(track.pvActuel, 10);
       const estMax = Number.isFinite(parsedEstMax) && parsedEstMax > 0 ? parsedEstMax : null;
       if (estMax !== null) {
-        // pvCombatHp est stocké sur le token lui-même (écrit lors des attaques joueur).
-        // Tous les clients le reçoivent via le onSnapshot vttTokens existant.
-        // null → token frais ou jamais frappé par un joueur → afficher pleins PV estimés.
-        const pvCombatHp = t.pvCombatHpEstimated === true && t.pvCombatHp != null
-          ? Math.max(0, parseInt(t.pvCombatHp) || 0) : null;
+        // L'estimation courante reste locale au joueur. Le champ historique
+        // partagé peut provenir du MJ ou d'un autre joueur et n'est pas fiable.
+        const localEstimate = VS.combatHpEstimates.get(t.id)?.current;
+        const pvCombatHp = localEstimate != null
+          ? Math.max(0, parseInt(localEstimate, 10) || 0) : null;
         if (pvCombatHp !== null) {
-          // Ce compteur partagé peut avoir été initialisé par le MJ avec les PV
-          // réels. Il doit toujours rester borné par l'estimation du joueur.
+          // L'estimation locale reste toujours bornée par le maximum renseigné
+          // par ce joueur dans son suivi du bestiaire.
           result.displayHp = Math.min(pvCombatHp, estMax);
         } else {
           // Jamais de repli sur t.hp : même bornée, une valeur réelle inférieure

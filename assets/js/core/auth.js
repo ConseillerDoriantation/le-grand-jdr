@@ -14,6 +14,7 @@ import {
 
 import { setProfile } from './state.js';
 import { unwatchAll } from '../shared/realtime.js';
+import { stopPresence } from '../shared/presence.js';
 import { releaseSessionData, saveDoc } from '../data/firestore.js';
 import { teardownChat } from '../features/chat.js';
 export { showApp, showAuth } from './layout.js';
@@ -241,6 +242,7 @@ async function _doLogout() {
     try { unwatchAll(); } catch {}
     try { teardownChat(); } catch {}
     try { releaseSessionData(); } catch {}
+    try { await stopPresence(); } catch {}
     await signOut(auth);
     return true;
   } catch (error) {

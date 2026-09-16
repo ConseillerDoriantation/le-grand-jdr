@@ -471,6 +471,10 @@ export function subscribeCollection(col, callback) {
       callback(data);
     },
     err => {
+      // Un listener détaché juste avant signOut peut encore recevoir un dernier
+      // refus déjà placé dans la file Firestore. Aucun log ni rendu de repli ne
+      // doit être déclenché dans ce cas attendu.
+      if (_isAuthTeardownPermissionError(err)) return;
       _handleFirestoreError(err, `subscribeCollection(${path})`);
       // Débloquer le consommateur (page en attente de son 1er fire) au lieu de le
       // laisser en chargement infini quand l'accès est refusé/indisponible.
@@ -518,6 +522,7 @@ export function subscribeDoc(col, id, callback, { silent = false } = {}) {
       callback(data);
     },
     err => {
+      if (_isAuthTeardownPermissionError(err)) return;
       _handleFirestoreError(err, `subscribeDoc(${path}/${id})`, { silent });
       try { callback(null); } catch (e) { console.error('[firestore] callback error', e); }
     }
@@ -525,9 +530,16 @@ export function subscribeDoc(col, id, callback, { silent = false } = {}) {
 }
 
 // ── Gestionnaire d'erreur centralisé ───────────
+function _isAuthTeardownPermissionError(error) {
+  return error?.code === 'permission-denied' && !auth.currentUser;
+}
+
 // silent=true : lecture optionnelle → log seulement, pas de notif « Accès refusé »
 // (ex. contenu MJ chargé au mieux dont l'échec ne casse rien).
 function _handleFirestoreError(e, ctx, { silent = false } = {}) {
+  // Tester avant console.error : ce refus tardif est une conséquence normale de
+  // la déconnexion, pas une erreur applicative à afficher ou journaliser.
+  if (_isAuthTeardownPermissionError(e)) return;
   if (silent) console.debug(`[firestore] optional operation unavailable: ${ctx}`, e?.code || e);
   else console.error(`[firestore] ${ctx}`, e);
 
@@ -535,11 +547,6 @@ function _handleFirestoreError(e, ctx, { silent = false } = {}) {
   if (!notify || silent) return;
 
   const code = e?.code || '';
-
-  // Un onSnapshot déjà en transit peut encore livrer son callback d'erreur
-  // juste après signOut, même si unsubscribe vient d'être appelé. Ce refus est
-  // alors attendu et ne décrit aucun problème de droits pour l'utilisateur.
-  if (code === 'permission-denied' && !auth.currentUser) return;
 
   if (code === 'permission-denied') {
     notify(`Accès refusé — ${ctx}`, 'error');

@@ -578,6 +578,7 @@ function _closeCtx() { document.getElementById('sidebar-ctx')?.classList.remove(
 // ── CTA « Jouer maintenant » : état de séance via présence temps réel ─────
 let _presenceUnsub = null;
 let _sessionUnsub = null;
+let _presenceAdventureId = null;
 let _presenceList = [];
 let _sessionLive = false;   // flag posé par le MJ (vtt/session.live)
 function _renderPlayCTA() {
@@ -602,8 +603,20 @@ function _renderPlayCTA() {
   }
   if (dot) dot.hidden = !(_sessionLive || online > 0);
 }
+function _stopPresenceWatch() {
+  try { _presenceUnsub?.(); } catch {}
+  try { _sessionUnsub?.(); } catch {}
+  _presenceUnsub = null;
+  _sessionUnsub = null;
+  _presenceAdventureId = null;
+  _presenceList = [];
+  _sessionLive = false;
+}
 function _startPresenceWatch() {
-  if (!STATE.adventure) return;
+  const adventureId = STATE.adventure?.id || null;
+  if (!adventureId) { _stopPresenceWatch(); return; }
+  if (_presenceAdventureId && _presenceAdventureId !== adventureId) _stopPresenceWatch();
+  _presenceAdventureId = adventureId;
   if (!_presenceUnsub) {
     try {
       _presenceUnsub = subscribeCollection('presence', (list) => {
@@ -621,6 +634,11 @@ function _startPresenceWatch() {
     } catch {}
   }
 }
+
+// Ces listeners appartiennent à la barre latérale (pas à une page) : ils ne
+// sont donc pas couverts par unwatchAll(). Les arrêter explicitement avant le
+// logout évite leurs refus Firestore tardifs et les réarme au prochain login.
+document.addEventListener('app:session-releasing', _stopPresenceWatch);
 
 // ── Init (rendu idempotent ; écouteurs attachés une seule fois) ────────────
 function _initSidebar() {

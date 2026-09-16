@@ -53,14 +53,16 @@ test('sans estimation joueur, les PV restent entièrement inconnus', () => {
 test('un compteur réel ne peut jamais dépasser l estimation du joueur', () => {
   assert.deepEqual(trackedCombatResourceValues({
     tracker: { pvActuel: 20 },
-    token: { hp: 99999, pvCombatHp: 99999, pvCombatHpEstimated:true },
+    token: { hp: 99999, pvCombatHp: 99999 },
+    estimateCurrent: 99999,
   }), { current:20, max:20 });
 });
 
 test('le suivi estimé connu reste affichable sans utiliser les PV réels', () => {
   assert.deepEqual(trackedCombatResourceValues({
     tracker: { pvActuel: 20 },
-    token: { hp: 99999, pvCombatHp: 7, pvCombatHpEstimated:true },
+    token: { hp: 99999, pvCombatHp: 99999 },
+    estimateCurrent: 7,
   }), { current:7, max:20 });
 });
 
