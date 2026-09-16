@@ -47,6 +47,7 @@ export const VS = {
   miniUid:      null,     // uid du joueur dont la mini-fiche est ouverte
   miniCharId:   null,     // characterId sélectionné dans la mini-fiche
   bstTracker:   {},       // creatureId → tracker joueur (pvActuel, pmActuel, caEstimee…)
+  combatHpEstimates: new Map(), // tokenId → { current, max } connu localement par ce joueur
   selectedMulti: new Set(), // ids des tokens en multi-sélection
   rollMode:     'normal', // 'advantage' | 'normal' | 'disadvantage' — PARTAGÉ compétences + dés libres (lanceur)
   rollBonus:    0,        // bonus contextuel temporaire (anneau, sort, etc.) — PARTAGÉ compétences + dés libres

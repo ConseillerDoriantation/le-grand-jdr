@@ -119,7 +119,7 @@ export function editEquipSlot(slot) {
     ${hasCompat
       ? `<div class="form-group">
           <label>Choisir depuis l'inventaire <span style="font-size:0.72rem;color:var(--text-dim)">· équipe immédiatement</span></label>
-          <select class="input-field sh-modal-select" id="eq-inv-sel" data-equip-slot="${slot}" data-change="equipSlotFromInv">
+          <select class="input-field sh-modal-select" id="eq-inv-sel" data-equip-slot="${slot}" data-change="equipSlotFromInv" data-no-dirty-guard>
             <option value="">— Sélectionner un objet —</option>
             ${invOptions}
           </select>

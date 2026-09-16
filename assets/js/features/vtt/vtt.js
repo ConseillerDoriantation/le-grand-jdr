@@ -1082,6 +1082,7 @@ function _cleanup() {
   _mtBroadcasting = false;
   VS.presence = {}; VS.miniUid = null; VS.miniCharId = null;
   VS.tokens = {}; VS.pages = {}; VS.characters = {}; VS.npcs = {}; VS.bestiary = {}; VS.bstTracker = {};
+  VS.combatHpEstimates.clear();
   _bestiaryLoads.clear();
   VS.session = {}; VS.activePage = null; VS.selected = null; _attackSrc = null;
   _clearAim(); _hideActBar();
@@ -2059,7 +2060,7 @@ export function _vttPatchTokenOptimistically(id, patch) {
 
 // Répercute immédiatement les PV dans le cache vivant et sur la jauge Konva.
 // Le snapshot Firestore confirmera ensuite la même valeur sans saut visuel.
-function _patchHpOptimistically(token, hp, pvCombatHp = undefined, pvCombatHpEstimated = undefined, pvCombatHpEstimatedMax = undefined) {
+function _patchHpOptimistically(token, hp, pvCombatHp = undefined) {
   if (!token) return;
   if (token.characterId && VS.characters[token.characterId]) {
     VS.characters[token.characterId].hp = hp;
@@ -2069,8 +2070,6 @@ function _patchHpOptimistically(token, hp, pvCombatHp = undefined, pvCombatHpEst
     token.hp = hp;
   }
   if (pvCombatHp !== undefined) token.pvCombatHp = pvCombatHp;
-  if (pvCombatHpEstimated !== undefined) token.pvCombatHpEstimated = pvCombatHpEstimated;
-  if (pvCombatHpEstimatedMax !== undefined) token.pvCombatHpEstimatedMax = pvCombatHpEstimatedMax;
   _patchShape(token.id);
   _refreshDisplayedIdentitySoon(token.id);
 }
@@ -5405,8 +5404,9 @@ function _captureUndoSnapshot(srcId, targetIds) {
     tokens[id] = {
       hp: _effectiveTokenHp(t),
       pvCombatHp: t.pvCombatHp ?? null,
-      pvCombatHpEstimated: t.pvCombatHpEstimated === true,
-      pvCombatHpEstimatedMax: t.pvCombatHpEstimatedMax ?? null,
+      combatHpEstimate: VS.combatHpEstimates.has(t.id)
+        ? { ...VS.combatHpEstimates.get(t.id) }
+        : null,
       pm: _effectiveTokenPm(t),
       pmCombat: t.pmCombat ?? _effectiveTokenPm(t),
       buffs: Array.isArray(t.buffs) ? JSON.parse(JSON.stringify(t.buffs)) : [],
@@ -8769,21 +8769,17 @@ async function _vttRollAttack() {
         const newHp = Math.min(hpMax, curHp + healTotal);
         let estimatedHpPatch = null;
         if (curTgtData.type === 'enemy') {
-          const trustedCurrent = curTgtData.pvCombatHpEstimated === true && curTgtData.pvCombatHp != null
-            ? Math.max(0, parseInt(curTgtData.pvCombatHp, 10) || 0)
-            : null;
           const playerEstimateMax = !STATE.isAdmin && lCur.displayHpMax != null
             ? Math.max(0, Number(lCur.displayHpMax) || 0)
             : null;
-          const estimateMax = _numOr(curTgtData.pvCombatHpEstimatedMax, playerEstimateMax);
-          const estimateCurrent = trustedCurrent ?? playerEstimateMax;
-          estimatedHpPatch = estimateCurrent != null && estimateMax != null
-            ? {
-                pvCombatHp: Math.min(estimateMax, estimateCurrent + healTotal),
-                pvCombatHpEstimated: true,
-                pvCombatHpEstimatedMax: estimateMax,
-              }
-            : { pvCombatHpEstimated:false };
+          const knownEstimate = VS.combatHpEstimates.get(curTgtData.id);
+          const estimateMax = knownEstimate?.max ?? playerEstimateMax;
+          const estimateCurrent = knownEstimate?.current ?? playerEstimateMax;
+          if (estimateCurrent != null && estimateMax != null) {
+            const current = Math.min(estimateMax, estimateCurrent + healTotal);
+            VS.combatHpEstimates.set(curTgtData.id, { current, max:estimateMax });
+            estimatedHpPatch = { pvCombatHp:current };
+          }
         }
         const _write = _setHp(curTgtData, newHp, estimatedHpPatch);
         return {
@@ -9372,25 +9368,23 @@ async function _vttRollAttack() {
           // Plafonner par realMax pour éviter qu'une absorption (dmgTotal négatif)
           // ne soigne au-dessus du PV max de la créature.
           newHp = Math.max(0, Math.min(realMax, realCur - dmgTotal));
-          const trustedExistingEstimate = curTgtData.pvCombatHpEstimated === true && curTgtData.pvCombatHp != null
-            ? Math.max(0, parseInt(curTgtData.pvCombatHp) || 0)
-            : null;
           const playerEstimateMax = !STATE.isAdmin && lCurTgt.displayHpMax != null
             ? Math.max(0, Number(lCurTgt.displayHpMax) || 0)
             : null;
-          const prevEst = trustedExistingEstimate ?? playerEstimateMax;
-          const trustedEstimateMax = curTgtData.pvCombatHpEstimated === true
-            ? _numOr(curTgtData.pvCombatHpEstimatedMax, null)
-            : null;
-          const estimateMax = trustedEstimateMax ?? playerEstimateMax ?? prevEst;
+          const knownEstimate = VS.combatHpEstimates.get(curTgtData.id);
+          const prevEst = knownEstimate?.current ?? playerEstimateMax;
+          const estimateMax = knownEstimate?.max ?? playerEstimateMax ?? prevEst;
           const newEst = prevEst == null
             ? null
             : Math.max(0, Math.min(estimateMax, prevEst - dmgTotal));
+          if (newEst != null) {
+            VS.combatHpEstimates.set(curTgtData.id, { current:newEst, max:estimateMax });
+          }
           _showAppliedHpDelta(curTgtData, realCur, newHp, STATE.isAdmin ? newHp : newEst);
-          _patchHpOptimistically(curTgtData, newHp, newEst ?? undefined, newEst != null, estimateMax ?? undefined);
+          _patchHpOptimistically(curTgtData, newHp, newEst ?? undefined);
           const hpPatch = newEst == null
-            ? { hp:newHp, pvCombatHpEstimated:false }
-            : { hp:newHp, pvCombatHp:newEst, pvCombatHpEstimated:true, pvCombatHpEstimatedMax:estimateMax };
+            ? { hp:newHp }
+            : { hp:newHp, pvCombatHp:newEst };
           targetWrite = updateDoc(_tokRef(curTgtData.id), hpPatch)
             .then(() => _syncDownedCondition(curTgtData, newHp));
         } else {
@@ -12127,8 +12121,8 @@ async function _vttUndoAction(logId) {
       const t = VS.tokens[tid]?.data;
       const patch = { buffs: st.buffs || [], conditions: st.conditions || [] };
       if (st.pvCombatHp != null) patch.pvCombatHp = st.pvCombatHp;
-      patch.pvCombatHpEstimated = st.pvCombatHpEstimated === true;
-      if (st.pvCombatHpEstimatedMax != null) patch.pvCombatHpEstimatedMax = st.pvCombatHpEstimatedMax;
+      if (st.combatHpEstimate) VS.combatHpEstimates.set(tid, { ...st.combatHpEstimate });
+      else VS.combatHpEstimates.delete(tid);
       // PM porté par le token (créatures bestiaire / invocations) → rendu.
       if (st.pm != null)       patch.pm = st.pm;
       if (st.pmCombat != null) patch.pmCombat = st.pmCombat;

@@ -48,6 +48,10 @@ export function stopPresence() {
   if (_timer)        { clearInterval(_timer); _timer = null; }
   if (_onVisibility) { document.removeEventListener('visibilitychange', _onVisibility); _onVisibility = null; }
   if (_onUnload)     { window.removeEventListener('beforeunload', _onUnload); _onUnload = null; }
-  if (_ref)          { deleteDoc(_ref).catch(() => {}); _ref = null; }
+  const ref = _ref;
+  _ref = null;
   _lastWriteAt = 0;
+  // La déconnexion peut await cette suppression pendant que l'utilisateur est
+  // encore authentifié. Les autres appelants gardent le comportement best-effort.
+  return ref ? deleteDoc(ref).catch(() => {}) : Promise.resolve();
 }

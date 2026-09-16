@@ -143,6 +143,15 @@ function _focusModalLayer() {
   else setTimeout(run, 0);
 }
 
+// L'attribut HTML `autofocus` injecté via innerHTML entre en concurrence avec
+// le focus déjà présent dans la SPA et fait journaliser un avertissement par le
+// navigateur. Le composant gère lui-même le focus : on convertit donc cet
+// attribut en intention explicite consommée par _focusModalLayer().
+function _setModalBodyHtml(body, html) {
+  if (!body) return;
+  body.innerHTML = String(html ?? '').replace(/\sautofocus(?=[\s>])/gi, ' data-modal-initial-focus');
+}
+
 function _a11yOnShow() {
   const overlay = document.getElementById('modal-overlay');
   if (!overlay) return;
@@ -188,7 +197,7 @@ export function openModal(title, bodyHtml, opts = {}) {
   _a11yOnShow();
   overlay?.removeAttribute('aria-describedby');
   _applyModalHeader(title, opts);
-  if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
+  _setModalBodyHtml(bodyEl, bodyHtml);
   overlay?.classList.add('show');
   _dispatchModalEvent('app:modal-opened');
   restoreViewContextAfterRender(bodyEl, viewContext, { includeFocus: true });
@@ -225,7 +234,7 @@ export function pushModal(title, bodyHtml, restore = null, opts = {}) {
   _activeDismiss = typeof opts.onDismiss === 'function' ? opts.onDismiss : null;
 
   _applyModalHeader(title, opts);
-  if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
+  _setModalBodyHtml(bodyEl, bodyHtml);
   overlay?.classList.add('show');
   _focusModalLayer();
 }
@@ -256,7 +265,7 @@ export function updateModalContent(title, bodyHtml, opts = {}) {
   const bodyEl  = document.getElementById('modal-body');
   const viewContext = captureViewContext(bodyEl, { includeFocus: true });
   _applyModalHeader(title, opts);
-  if (bodyEl)  bodyEl.innerHTML    = bodyHtml;
+  _setModalBodyHtml(bodyEl, bodyHtml);
   restoreViewContextAfterRender(bodyEl, viewContext, { includeFocus: true });
   _focusModalLayer();
 }

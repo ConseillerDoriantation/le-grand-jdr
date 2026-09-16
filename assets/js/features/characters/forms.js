@@ -55,6 +55,39 @@ function _paintVital(stat, newVal, maxVal) {
   }
 }
 
+// Les clics répétés sur +/− sont immédiats côté fiche. On regroupe leur
+// sauvegarde et on sérialise les écritures pour qu'une ancienne valeur ne puisse
+// pas arriver après une saisie directe plus récente.
+const _vitalSaves = new Map();
+function _queueVitalSave(stat, charId, value, immediate = false) {
+  const key = `${charId}:${stat}`;
+  let state = _vitalSaves.get(key);
+  if (!state) {
+    state = { timer: null, pending: undefined, tail: Promise.resolve() };
+    _vitalSaves.set(key, state);
+  }
+  state.pending = value;
+  if (state.timer) clearTimeout(state.timer);
+  state.timer = null;
+
+  const flush = () => {
+    state.timer = null;
+    const next = state.pending;
+    state.pending = undefined;
+    if (next === undefined) return state.tail;
+    const patch = stat === 'pvActuel' ? { pvActuel: next, hp: next } : { pmActuel: next, pm: next };
+    const write = state.tail.then(() => trySave('characters', charId, patch));
+    state.tail = write;
+    write.finally(() => {
+      if (state.tail === write && state.pending === undefined && !state.timer) _vitalSaves.delete(key);
+    });
+    return write;
+  };
+
+  if (immediate) return flush();
+  state.timer = setTimeout(flush, 180);
+}
+
 // Applique une valeur ABSOLUE de PV/PM courant : clamp, sauvegarde + MAJ DOM.
 // PV : le VTT lit le champ `hp` → on l'écrit aussi pour connecter fiche ↔ VTT
 // (comme le PM écrit déjà `pm`/`pmActuel`).
@@ -64,17 +97,25 @@ export async function setVitalCurrent(stat, newValRaw, charId) {
   const maxVal = stat === 'pvActuel' ? calcPVMax(c) : calcPMMax(c);
   const newVal = Math.max(0, Math.min(maxVal, parseInt(newValRaw, 10) || 0));
   c[stat] = newVal;
-  if (stat === 'pvActuel') { c.hp = newVal; await trySave('characters', c.id, { pvActuel: newVal, hp: newVal }); }
-  else                     { c.pm = newVal; await trySave('characters', c.id, { pmActuel: newVal, pm: newVal }); }
+  if (stat === 'pvActuel') c.hp = newVal;
+  else c.pm = newVal;
   _paintVital(stat, newVal, maxVal);
+  await _queueVitalSave(stat, c.id, newVal, true);
 }
 
-export async function adjustStat(stat, delta, charId) {
+export function adjustStat(stat, delta, charId) {
   const c = getCharacterById(charId);
   if (!c) return;
   const maxVal = stat === 'pvActuel' ? calcPVMax(c) : calcPMMax(c);
-  const cur = c[stat] ?? maxVal;
-  await setVitalCurrent(stat, cur + delta, charId);
+  const cur = Number(c[stat] ?? maxVal);
+  if (!Number.isFinite(cur) || !Number.isFinite(delta)) return;
+  const next = Math.max(0, Math.min(maxVal, cur + delta));
+  if (next === cur) return;
+  c[stat] = next;
+  if (stat === 'pvActuel') c.hp = next;
+  else c.pm = next;
+  _paintVital(stat, next, maxVal);
+  _queueVitalSave(stat, c.id, next);
 }
 
 // Saisie directe de la valeur courante (clic sur le nombre) : évite d'appuyer

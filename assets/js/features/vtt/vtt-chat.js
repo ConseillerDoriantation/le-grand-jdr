@@ -354,7 +354,10 @@ export function _renderChatLogImpl(msgs) {
   const _trackedResourceValues = (target, targetToken, isMana = false) => {
     const beastId = target?.beastId || targetToken?.beastId;
     const tracker = beastId ? VS.bstTracker?.[beastId] : null;
-    return trackedCombatResourceValues({ tracker, token:targetToken, isMana });
+    const estimateCurrent = !isMana && targetToken?.id
+      ? VS.combatHpEstimates.get(targetToken.id)?.current ?? null
+      : null;
+    return trackedCombatResourceValues({ tracker, token:targetToken, estimateCurrent, isMana });
   };
 
   const _viewRestoredResource = (target, isMana = false) => {

@@ -14,7 +14,7 @@ export function combatTargetResourceVisibility({ isAdmin = false, target = {}, t
 }
 
 /** Ressource estimée, strictement bornée par ce que le joueur a renseigné. */
-export function trackedCombatResourceValues({ tracker = null, token = null, isMana = false } = {}) {
+export function trackedCombatResourceValues({ tracker = null, token = null, estimateCurrent = null, isMana = false } = {}) {
   const maxRaw = isMana ? tracker?.pmActuel : tracker?.pvActuel;
   if (maxRaw === undefined || maxRaw === null || maxRaw === '') return { current:null, max:null };
   const parsedMax = Number.parseInt(maxRaw, 10);
@@ -22,11 +22,11 @@ export function trackedCombatResourceValues({ tracker = null, token = null, isMa
     return { current:null, max:null };
   }
   // `pvCombatHp` historique n'a pas de provenance et a parfois été initialisé
-  // depuis les PV réels par le MJ. Il n'est fiable côté joueur que si le VTT l'a
-  // explicitement marqué comme estimation.
+  // depuis les PV réels par le MJ. Pour les PV, seule l'estimation calculée dans
+  // la session locale du joueur est fiable.
   const currentRaw = isMana
     ? token?.pmCombat
-    : token?.pvCombatHpEstimated === true ? token?.pvCombatHp : null;
+    : estimateCurrent;
   const parsedCurrent = currentRaw === undefined || currentRaw === null || currentRaw === ''
     ? parsedMax
     : Number.parseInt(currentRaw, 10);
