@@ -331,6 +331,25 @@ export function calcPMMax(c) {
   }, fallback));
 }
 
+// Plafond par défaut de la réserve de Garde quand la mécanique est active sans
+// plafond manuel. Modifiable par perso via le champ `gardeMax` (override fiche).
+export const GARDE_MAX_DEFAULT = 10;
+
+/**
+ * Plafond de « Garde » : ressource défensive gagnée en bloquant des coups (jet
+ * d'attaque < CA) et dépensée par certains sorts.
+ * ACTIVATION AUTOMATIQUE : dès que le perso possède au moins un sort payé en
+ * Garde (dans son deck VTT `deck_sorts` ou sa bibliothèque `sorts`), la mécanique
+ * s'active avec un plafond par défaut. Un `gardeMax` > 0 saisi sur la fiche prime
+ * comme plafond personnalisé. 0/absent + aucun sort Garde = mécanique inactive.
+ */
+export function calcGardeMax(c) {
+  const override = parseInt(c?.gardeMax, 10);
+  if (Number.isFinite(override) && override > 0) return override;
+  const usesGarde = (list) => Array.isArray(list) && list.some(s => s?.costResource === 'garde');
+  return (usesGarde(c?.deck_sorts) || usesGarde(c?.sorts)) ? GARDE_MAX_DEFAULT : 0;
+}
+
 /**
  * Or disponible du personnage : recettes − dépenses.
  * Supporte à la fois le format livre de compte (recettes/dépenses) et le champ `or` direct.

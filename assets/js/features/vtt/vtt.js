@@ -15,7 +15,7 @@ import {
   setDoc, onSnapshot, serverTimestamp, writeBatch, deleteField,
   query, orderBy, limit,
 } from '../../config/firebase.js';
-import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcPalier, calcDeckMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay, calcOr } from '../../shared/char-stats.js';
+import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcGardeMax, calcPalier, calcDeckMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay, calcOr } from '../../shared/char-stats.js';
 import { useGold } from '../../shared/economy.js';
 import { calcCriticalEffectTotal, criticalEffectFormulaLabel } from '../../shared/character-rules.js';
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
@@ -631,6 +631,8 @@ export function _resolveUidName(uid) {
 // rester cohérent avec les anciennes sessions et tous les consommateurs.
 export function _charPmCur(c) { return c?.pmActuel ?? c?.pm ?? calcPMMax(c); }
 export function _charPmPatch(v) { return { pm: v, pmActuel: v }; }
+/** Réserve de Garde courante (ressource défensive), bornée à ≥ 0. */
+export function _charGardeCur(c) { const n = parseInt(c?.garde, 10); return Number.isFinite(n) && n > 0 ? n : 0; }
 
 // ── Ressource de coût d'un sort (PM par défaut, sinon PV / Or / aucune) ──────────
 // Un sort peut se payer en PM, PV ou Or (choisi sur la fiche). On route la
@@ -641,9 +643,10 @@ function _optCostRes(opt) { return opt?.costRes || 'pm'; }
 function _charResCur(c, res) {
   if (res === 'pv') return c?.hp ?? calcPVMax(c);
   if (res === 'or') return calcOr(c);
+  if (res === 'garde') return _charGardeCur(c);
   return _charPmCur(c);
 }
-const _RES_LABEL = { pm: 'PM', pv: 'PV', or: 'Or', none: '' };
+const _RES_LABEL = { pm: 'PM', pv: 'PV', or: 'Or', garde: 'Garde', none: '' };
 /** Dépense `cost` de la ressource `res` sur le perso `cid`. */
 async function _spendCharSpellCost(cid, res, cost, tokenId, label) {
   const c = VS.characters[cid];
@@ -664,6 +667,18 @@ async function _spendCharSpellCost(cid, res, cost, tokenId, label) {
     });
     return;
   }
+  if (res === 'garde') {
+    const cur = _charGardeCur(c);
+    const next = Math.max(0, cur - cost);
+    c.garde = next;
+    _patchEntityTokenShapes('characterId', cid);
+    await updateDoc(_chrRef(cid), { garde: next, vttControlTokenId: tokenId }).catch(error => {
+      c.garde = cur;
+      _patchEntityTokenShapes('characterId', cid);
+      throw error;
+    });
+    return;
+  }
   const cur = _charPmCur(c);
   const next = Math.max(0, cur - cost);
   Object.assign(c, _charPmPatch(next));
@@ -673,6 +688,28 @@ async function _spendCharSpellCost(cid, res, cost, tokenId, label) {
     _patchEntityTokenShapes('characterId', cid);
     throw error;
   });
+}
+
+// « Garde » : un coup DIRECT reçu et bloqué par la CA (jet d'attaque < CA, ni
+// critique, ni maladresse, ni auto-touche) charge de +1 la réserve défensive du
+// PERSONNAGE ciblé, s'il possède la mécanique (gardeMax > 0). Réservé aux persos
+// joueurs (t.characterId) — pas les PNJ/créatures. Écriture bornée (1 par blocage).
+function _awardGardeOnBlock(td) {
+  const cid = td?.characterId; if (!cid) return;
+  const c = VS.characters[cid]; if (!c) return;
+  const max = calcGardeMax(c); if (max <= 0) return;
+  const cur = _charGardeCur(c);
+  if (cur >= max) return;
+  const next = Math.min(max, cur + 1);
+  c.garde = next;
+  _patchEntityTokenShapes('characterId', cid);
+  updateDoc(_chrRef(cid), { garde: next }).catch(error => {
+    c.garde = cur;
+    _patchEntityTokenShapes('characterId', cid);
+    console.error('[vtt] Garde non enregistrée', error);
+  });
+  const who = _live(td).displayName ?? c.nom ?? 'Personnage';
+  showNotif(`🛡️ ${who} pare le coup : +1 Garde (${next}/${max})`, 'info');
 }
 
 // HP écrit sur la fiche source (bidirectionnel)
@@ -5587,6 +5624,30 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   const sortCats  = srcChar?.sort_cats || [];
   const hasCats   = sortCats.length > 0 && spellOpts.some(o => o.catId);
 
+  // Jauges de ressources HORS PM (PV / Garde / Or) : affichées uniquement pour les
+  // ressources qu'un sort RÉELLEMENT disponible du lanceur consomme. Le lanceur doit
+  // être un personnage (les PNJ/créatures n'ont ni Garde ni Or de fiche).
+  const _spellReses = srcChar ? new Set(spellOpts.map(o => o.costRes || 'pm')) : new Set();
+  const _resRows = [];
+  if (srcChar) {
+    if (_spellReses.has('pv'))    _resRows.push({ icon: '❤️', label: 'PV',    color: '#e0556f', cur: Math.max(0, lS.displayHp ?? 0), max: lS.displayHpMax ?? 0 });
+    if (_spellReses.has('garde')) _resRows.push({ icon: '🛡️', label: 'Garde', color: '#5fb0c8', cur: _charGardeCur(srcChar),        max: calcGardeMax(srcChar) });
+    if (_spellReses.has('or'))    _resRows.push({ icon: '🪙', label: 'Or',    color: '#d9a441', cur: calcOr(srcChar),               max: 0 });
+  }
+  const _resPct = (r) => r.max > 0 ? Math.round(Math.min(r.cur, r.max) / r.max * 100) : 0;
+  // Style « jauge modale » (banner-res, à côté du Mana)
+  const resManaGauges = _resRows.map(r => `
+    <div class="vtt-aopt-mana" style="--rc:${r.color}">
+      <div class="vtt-aopt-mana-top"><span style="color:${r.color}">${r.icon} ${r.label}</span><b style="color:${r.color}">${r.cur}${r.max > 0 ? `<i>/${r.max}</i>` : ''}</b></div>
+      ${r.max > 0 ? `<div class="vtt-aopt-mana-track"><i class="vtt-aopt-mana-fill" style="width:${_resPct(r)}%;background:${r.color}"></i></div>` : ''}
+    </div>`).join('');
+  // Style « barre HUD » (à côté de pmBar, flux action d'abord)
+  const resPmBars = _resRows.map(r => `<div class="vtt-atk-pm-bar">
+      <span style="color:${r.color}">${r.icon}</span>
+      ${r.max > 0 ? `<div class="vtt-atk-pm-track"><div class="vtt-atk-pm-fill" style="width:${_resPct(r)}%;background:${r.color}"></div></div>` : ''}
+      <span style="font-size:.72rem;color:${r.color};font-weight:700">${r.cur}${r.max > 0 ? `/${r.max}` : ''}</span>
+    </div>`).join('');
+
   // Construire une map catId → opts (préserve l'ordre des sort_cats)
   const catMap = new Map();
   spellOpts.forEach(o => {
@@ -5972,7 +6033,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
           ? `<span class="vtt-aopt-modal-dist" title="Choisis l'action puis clique une cible">🎯 puis clique une cible</span>`
           : `<span class="vtt-aopt-modal-dist" title="Distance source → cible">📏 ${dist}c</span>`}
       </div>
-      ${pmBar}
+      ${pmBar}${resPmBars}
       ${spellScopeHtml}
       ${tabsHtml}
       ${noTgt ? searchHtml.replace(' autofocus', '') : searchHtml}
@@ -6022,7 +6083,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
         ${targetFace}
         <span class="vtt-aopt-banner-dist" title="${selfTarget ? 'Action sur soi' : 'Distance source → cible'}">${selfTarget ? '◉ Sur soi' : `📏 ${dist} case${dist > 1 ? 's' : ''} · à portée`}</span>
       </div>
-      ${(manaGauge || econPips) ? `<div class="vtt-aopt-banner-res">${manaGauge}${econPips}</div>` : ''}
+      ${(manaGauge || resManaGauges || econPips) ? `<div class="vtt-aopt-banner-res">${manaGauge}${resManaGauges}${econPips}</div>` : ''}
     </div>
     ${ctrlHtml}
     <div class="vtt-aopt-list vtt-action-list cs-v3">${optsHtml}${basicHtml}
@@ -8992,6 +9053,15 @@ async function _vttRollAttack() {
       const hit = attackRollHitsTarget({ hitTotal, targetCA, autoHit: opt.autoHit, isCrit, isFumble });
       return [curTgtId, { hit, isCrit, isFumble, targetCA }];
     }));
+    // Garde : chaque cible directe qui pare le coup par sa CA (jet < CA, hors
+    // critique/maladresse/auto-touche) gagne +1 Garde si elle a la mécanique.
+    if (!opt.autoHit && !isCrit && !isFumble) {
+      for (const [curTgtId, oc] of primaryOutcomes) {
+        if (oc.hit || oc.blocked || oc.targetCA == null) continue;
+        if (hitTotal >= oc.targetCA) continue; // vrai blocage par la CA uniquement
+        _awardGardeOnBlock(VS.tokens[curTgtId]?.data);
+      }
+    }
     const techniqueRolls = [];
     for (const technique of selectedTechniques) {
       const triggerOriginIds = targetIds.filter(id => techniqueTriggerApplies(technique, primaryOutcomes.get(id)));

@@ -5,7 +5,7 @@ import { trySave } from '../../shared/crud.js';
 import { openModal, closeModal, confirmModal, promptModal, modalSection } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { modStr, _esc, normalizeImageUrl } from '../../shared/html.js';
-import { getMod, calcPVMax, calcPMMax, calcOr, calcPalier } from '../../shared/char-stats.js';
+import { getMod, calcPVMax, calcPMMax, calcGardeMax, calcOr, calcPalier } from '../../shared/char-stats.js';
 import { richTextContentHtml } from '../../shared/rich-text.js';
 import { quillEditorHtml, getQuillHtml, markQuillSaved } from '../../shared/rich-text-quill.js';
 import { uploadJpeg } from '../../shared/image-upload.js';
@@ -205,6 +205,36 @@ export function renderCharCarac(c, canEdit) {
         helpPos:'Tu gagnes {mod} PM par niveau au-delà du 1er ({niv} niveaux gagnés).',
         helpNeg:'Malus de Sagesse ({mod}) appliqué une seule fois, pas par niveau.',
       })}
+      ${(() => {
+        // Garde : ressource défensive OPTIONNELLE (plafond fixe gardeMax). Carte
+        // masquée si désactivée (gardeMax=0) sauf en édition, pour pouvoir l'activer.
+        const gardeMaxV = calcGardeMax(c);
+        const gardeCur  = Math.max(0, Math.min(gardeMaxV || 0, parseInt(c.garde, 10) || 0));
+        if (gardeMaxV <= 0 && !canEdit) return '';
+        const on = gardeMaxV > 0;
+        return `<div class="cs-vital-card cs-vital-card--garde"${on ? '' : ' style="opacity:.55"'}>
+          <div class="cs-vital-card-hdr">
+            <span class="cs-vital-card-title">🛡️ Garde</span>
+            <span class="cs-vital-card-total">${on ? `${gardeCur} / ${gardeMaxV}` : 'désactivée'}</span>
+          </div>
+          <div class="cs-vital-formula">
+            <span class="cs-vital-part cs-vital-part--base">
+              <span class="cs-vital-part-lbl">Plafond</span>
+              <span class="cs-vital-part-val ${canEdit ? 'cs-vital-base-val--edit' : ''}"
+                    ${canEdit ? `data-action="inlineEditNum" data-id="${c.id}" data-field="gardeMax" data-min="0" data-max="99" title="Plafond de Garde · 0 = mécanique désactivée"` : ''}>${gardeMaxV}</span>
+            </span>
+            ${on ? `<span class="cs-vital-op">·</span>
+            <span class="cs-vital-part">
+              <span class="cs-vital-part-lbl">Réserve</span>
+              <span class="cs-vital-part-val ${canEdit ? 'cs-vital-base-val--edit' : ''}"
+                    ${canEdit ? `data-action="inlineEditNum" data-id="${c.id}" data-field="garde" data-min="0" data-max="${gardeMaxV}" title="Réserve de Garde actuelle"` : ''}>${gardeCur}</span>
+            </span>` : ''}
+          </div>
+          <div class="cs-vital-help">${on
+            ? 'Gagne +1 en bloquant un coup (jet d’attaque &lt; CA). Dépensée par les sorts au coût « Garde ». Plafond automatique — saisis une valeur pour le personnaliser.'
+            : 'Ressource défensive. S’active dès que le personnage a un sort au coût « Garde » (ou fixe un plafond manuel ici).'}</div>
+        </div>`;
+      })()}
     </div>
 
     <!-- XP -->

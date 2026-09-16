@@ -39,10 +39,13 @@ const ACTION_RUNE = 'Déclenchement';
 // composition (noyau + chaque rune) : PM/PV = 2 par unité, Or = 5 par unité.
 // `id` reste stocké dans s.costResource ; absent ⇒ 'pm' (rétro-compat totale).
 export const SPELL_COST_RESOURCES = [
-  { id: 'pm',   label: 'PM', full: 'Points de magie', icon: '✦',  mult: 2, color: '#4f8cff' },
-  { id: 'pv',   label: 'PV', full: 'Points de vie',   icon: '❤️', mult: 2, color: '#e0556f' },
-  { id: 'or',   label: 'Or', full: 'Pièces d’or',     icon: '🪙', mult: 10, color: '#d9a441' },
-  { id: 'none', label: '—',  full: 'Gratuit',         icon: '🆓', mult: 0, color: '#7c8aa5' },
+  { id: 'pm',    label: 'PM', full: 'Points de magie', icon: '✦',  mult: 2,  color: '#4f8cff' },
+  { id: 'pv',    label: 'PV', full: 'Points de vie',   icon: '❤️', mult: 2,  color: '#e0556f' },
+  { id: 'or',    label: 'Or', full: 'Pièces d’or',     icon: '🪙', mult: 10, color: '#d9a441' },
+  // Garde : ressource défensive gagnée en bloquant des coups (jet d'attaque < CA).
+  // Réservée aux persos ayant un plafond (gardeMax > 0). Coût par unité = 2 (comme PM/PV).
+  { id: 'garde', label: 'GD', full: 'Garde',           icon: '🛡️', mult: 2,  color: '#5fb0c8' },
+  { id: 'none',  label: '—',  full: 'Gratuit',         icon: '🆓', mult: 0,  color: '#7c8aa5' },
 ];
 const _COST_RES_BY_ID = Object.fromEntries(SPELL_COST_RESOURCES.map(r => [r.id, r]));
 
