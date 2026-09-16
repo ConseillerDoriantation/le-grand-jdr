@@ -12264,6 +12264,24 @@ async function _vttSetHp(tokenId,hp) {
     notes.forEach(msg => showNotif(msg, msg.startsWith('💢') ? 'error' : 'info'));
   }
 }
+function _vttAdjustVital(tokenId, kind, delta) {
+  const t = VS.tokens[tokenId]?.data;
+  if (!t || !_canControlToken(t)) return;
+  const live = _live(t);
+  const isHp = kind === 'PV';
+  if (!isHp && kind !== 'PM') return;
+  const current = Number(isHp ? live.displayHp : live.displayPm);
+  const max = Number(isHp ? live.displayHpMax : live.displayPmMax);
+  if (!Number.isFinite(current) || !Number.isFinite(max) || max < 0) return;
+  const step = Math.sign(Number(delta));
+  if (!Number.isFinite(step) || !step) return;
+  const next = Math.max(0, Math.min(max, current + step));
+  if (next === current) return;
+  // Le cache est mis à jour immédiatement par les setters ; ne pas bloquer les
+  // clics suivants en attendant l'acquittement Firestore de chaque pas.
+  void (isHp ? _vttSetHp(tokenId, next) : _vttSetPm(tokenId, next))
+    .catch(error => _vttReportActionFailure('_vttAdjustVital', error));
+}
 async function _vttSetPm(tokenId,pm) {
   const t=VS.tokens[tokenId]?.data; if (!t) return;
   if (!_canControlToken(t)) return;
@@ -14050,6 +14068,7 @@ export const VTT_ACTIONS = {
   _vttSelectMiniChar,
   _vttSendToPage,
   _vttSetEmoteAlbum,
+  _vttAdjustVital,
   _vttSetHp,
   _vttSetImgbbKey,
   _vttSetMode,
