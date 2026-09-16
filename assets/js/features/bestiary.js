@@ -560,6 +560,15 @@ function _bstGetSlot(cid, key, scope) {
   if (scope === 'stat') return t[key] ?? '';
   return t.deductions?.[key] ?? '';
 }
+function _bstHasSlotValue(cid, key, scope) {
+  const value = _bstGetSlot(cid, key, scope);
+  return value !== null && value !== undefined && String(value).trim() !== ''
+    && (scope !== 'stat' || Number(value) !== 0);
+}
+const _bstCertaintyKey = (scope, key) => `${scope}:${key}`;
+function _bstIsCertain(cid, key, scope) {
+  return STORE.tracker[cid]?.certainties?.[_bstCertaintyKey(scope, key)] === true;
+}
 function _bstCarnetKeys(c) {
   const ks = BST_STAT_CARNET.filter(k => _bstStatDefined(c, k)).map(k => ({ key: k, scope: 'stat' }));
   (c.armesNaturelles || []).forEach((a, i) => ['nom', 'toucher', 'degats', 'portee', 'effet']
@@ -574,8 +583,10 @@ function _bstCarnetKeys(c) {
 }
 function _bstCarnetPct(c) {
   const ks = _bstCarnetKeys(c);
-  const filled = ks.filter(k => String(_bstGetSlot(c.id, k.key, k.scope)).trim()).length;
-  return { pct: ks.length ? Math.round(filled / ks.length * 100) : 0, filled, total: ks.length };
+  const filledKeys = ks.filter(k => _bstHasSlotValue(c.id, k.key, k.scope));
+  const filled = filledKeys.length;
+  const confirmed = filledKeys.filter(k => _bstIsCertain(c.id, k.key, k.scope)).length;
+  return { pct: ks.length ? Math.round(filled / ks.length * 100) : 0, filled, confirmed, total: ks.length };
 }
 function _bstCarnetColor(p) {
   return p >= 80 ? 'var(--emerald)' : p >= 35 ? 'var(--amber)' : p > 0 ? 'var(--ember)' : 'var(--text-dim)';
@@ -1338,8 +1349,14 @@ function _bstToast(msg) {
 // Un trou du carnet : imprimé si rempli, pointillé cliquable sinon.
 function _bstSlot(cid, key, scope, opts = {}) {
   const v = _bstGetSlot(cid, key, scope);
-  const cls = ['bst-slot', v ? 'full' : '', opts.wide ? 'wide' : '', opts.strong ? 'strong' : ''].filter(Boolean).join(' ');
-  return `<span class="${cls}" role="button" tabindex="0" data-slot-key="${_esc(key)}" data-scope="${scope}" data-cid="${_esc(cid)}" data-val="${_esc(v)}" data-ph="${_esc(opts.ph || '')}">${v ? _esc(v) : _esc(opts.hole || '?')}</span>`;
+  const filled = _bstHasSlotValue(cid, key, scope);
+  const certain = filled && _bstIsCertain(cid, key, scope);
+  const cls = ['bst-slot', filled ? 'full' : '', opts.wide ? 'wide' : '', opts.strong ? 'strong' : ''].filter(Boolean).join(' ');
+  const status = certain ? 'Sûr' : 'À confirmer';
+  return `<span class="bst-slot-field${opts.wide ? ' wide' : ''}${filled ? (certain ? ' is-sure' : ' is-unsure') : ''}">
+    <span class="${cls}" role="button" tabindex="0" data-slot-key="${_esc(key)}" data-scope="${scope}" data-cid="${_esc(cid)}" data-val="${_esc(v)}" data-ph="${_esc(opts.ph || '')}">${filled ? _esc(v) : _esc(opts.hole || '?')}</span>
+    ${filled ? `<button type="button" class="bst-cert-toggle" data-bst-action="toggleCertainty" data-id="${_esc(cid)}" data-key="${_esc(key)}" data-scope="${scope}" aria-label="${certain ? 'Marquer cette estimation comme incertaine' : 'Marquer cette estimation comme sûre'}" aria-pressed="${certain}" title="${status} — cliquer pour changer">${certain ? '✓' : '?'}</button>` : ''}
+  </span>`;
 }
 // Transforme un trou en input, valide/annule, saute au suivant.
 function _bstSlotOpen(el) {
@@ -1752,8 +1769,8 @@ function _renderPanel(c) {
     <div class="bst-carnet" style="--kc:${kc}">
       <span class="cring"><svg width="38" height="38"><circle class="bg" cx="19" cy="19" r="17.25"/>
         <circle class="fg" cx="19" cy="19" r="17.25" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - k.pct / 100)}"/></svg><b>${k.pct}</b></span>
-      <span class="txt"><b>${k.filled} / ${k.total} informations notées</b>
-        <small>Ce qui est en pointillés est un trou de ton carnet. Clique pour le remplir, <kbd>↵</kbd> saute au suivant.</small></span>
+      <span class="txt"><b>${k.filled} / ${k.total} informations notées · ${k.confirmed} sûres</b>
+        <small>Un champ rempli reste <span class="bst-cert-legend unsure">? à confirmer</span> tant que tu ne le marques pas <span class="bst-cert-legend sure">✓ sûr</span>. Clique sur une valeur pour la modifier ; <kbd>↵</kbd> passe à la suivante.</small></span>
     </div>
     <section class="bst-sc" id="s-stats"><div class="bst-sc-h"><b>Ce que tu estimes</b><em>${statFilled}/${statDefs.length}</em></div>
       <div class="bst-hint">Ces chiffres sont les tiens : ils apparaissent aussi sur le token, au VTT, à la place des « ? ». Une case « — » ne s'applique pas à cette créature.</div>
@@ -2202,6 +2219,8 @@ function _bstSetLoot(el) {
 function _bstClearLoot(id, idx) {
   const d = STORE.tracker[id]?.deductions;
   if (d) { delete d[`but_nom_${idx}`]; delete d[`but_qte_${idx}`]; }
+  const certainties = STORE.tracker[id]?.certainties;
+  if (certainties) { delete certainties[`ded:but_nom_${idx}`]; delete certainties[`ded:but_qte_${idx}`]; }
   const row = document.querySelector(`.bst-loot-est[data-loot-cid="${id}"][data-loot-idx="${idx}"]`);
   if (row) row.querySelectorAll('.bst-deduct-input').forEach(inp => { inp.value = ''; });
   _bstLootRefreshDel(id, idx);  // ligne vide â†’ remplace la croix par le spacer
@@ -2212,12 +2231,39 @@ function _bstClearLoot(id, idx) {
 function _bstSetDeduction(id, key, val) {
   if (!STORE.tracker[id]) STORE.tracker[id] = {};
   if (!STORE.tracker[id].deductions) STORE.tracker[id].deductions = {};
+  if ((STORE.tracker[id].deductions[key] !== val || !val) && STORE.tracker[id].certainties) {
+    delete STORE.tracker[id].certainties[_bstCertaintyKey('ded', key)];
+  }
   if (val === '' || val === null || val === undefined) {
     delete STORE.tracker[id].deductions[key];
   } else {
     STORE.tracker[id].deductions[key] = val;
   }
   _saveTracker();
+}
+
+function _bstToggleCertainty(el) {
+  const { id, key, scope } = el.dataset;
+  if (_isAdminView() || !['stat', 'ded'].includes(scope) || !_bstHasSlotValue(id, key, scope)) return;
+  const tracker = STORE.tracker[id];
+  if (!tracker.certainties) tracker.certainties = {};
+  const certaintyKey = _bstCertaintyKey(scope, key);
+  const certain = tracker.certainties[certaintyKey] !== true;
+  if (certain) tracker.certainties[certaintyKey] = true;
+  else delete tracker.certainties[certaintyKey];
+
+  const field = el.closest('.bst-slot-field');
+  field?.classList.toggle('is-sure', certain);
+  field?.classList.toggle('is-unsure', !certain);
+  el.textContent = certain ? '✓' : '?';
+  el.title = `${certain ? 'Sûr' : 'À confirmer'} — cliquer pour changer`;
+  el.setAttribute('aria-pressed', String(certain));
+  el.setAttribute('aria-label', certain ? 'Marquer cette estimation comme incertaine' : 'Marquer cette estimation comme sûre');
+  const creature = STORE.creatures.find(c => c.id === id);
+  const count = creature && _bstCarnetPct(creature);
+  const summary = document.querySelector('.bst-carnet .txt b');
+  if (count && summary) summary.textContent = `${count.filled} / ${count.total} informations notées · ${count.confirmed} sûres`;
+  return _saveTracker();
 }
 
 function _bstAdjust(id, type, delta) {
@@ -2248,7 +2294,11 @@ function _bstAdjust(id, type, delta) {
 
 function _bstSetStat(id, key, val) {
   if (!STORE.tracker[id]) STORE.tracker[id] = {};
-  STORE.tracker[id][key] = parseInt(val)||0;
+  const next = parseInt(val) || 0;
+  if ((STORE.tracker[id][key] !== next || !next) && STORE.tracker[id].certainties) {
+    delete STORE.tracker[id].certainties[_bstCertaintyKey('stat', key)];
+  }
+  STORE.tracker[id][key] = next;
   _saveTracker();
 }
 
@@ -2539,6 +2589,7 @@ Object.assign(bstHandlers, {
   // Vue joueur : estimations / dÃ©ductions
   setStat:        (el) => _bstSetStat(el.dataset.id, el.dataset.key, el.value),
   setDeduction:   (el) => _bstSetDeduction(el.dataset.id, el.dataset.key, el.value),
+  toggleCertainty:(el) => _bstToggleCertainty(el),
   setLoot:        (el) => _bstSetLoot(el),
   clearLoot:      (el) => _bstClearLoot(el.dataset.id, el.dataset.idx),
 

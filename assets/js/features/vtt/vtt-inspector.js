@@ -67,7 +67,7 @@ export function _renderInspectorSoon() {
     _inspectorDirty = false;
     // Ne pas reconstruire le panneau pendant que le joueur tape dans le filtre de
     // compétences (perte de focus + reset). On diffère le rendu tant qu'il a le focus.
-    if (document.activeElement?.classList?.contains('vtt-skill-filter-input')) {
+    if (document.activeElement?.matches?.('.vtt-skill-filter-input, .vtt-vital-input')) {
       setTimeout(_renderInspectorSoon, 400);
       return;
     }
@@ -697,10 +697,22 @@ export function _renderInspectorImpl(t) {
     .map(c => { const l = CONDITION_BY_ID[c.id] || { label: c.id, icon: '⚡', color: '#888' };
       return `<span class="vtt-vit cond" style="--cc:${l.color}" title="${_esc(l.label)}">${l.icon} ${_esc(l.label)}</span>`; }).join('');
   const _ed = _canControlToken(t);
-  const _pvVal = _ed ? `<input class="vtt-ins-input" type="number" value="${hp}" min="0" max="${hpm}" data-vtt-fn="_vttSetHp" data-vtt-on="change" data-vtt-args="${t.id}|$value">` : `<b>${hp}</b>`;
-  const _pvMaxBtn = _ed ? `<button class="vtt-ins-max-btn" data-vtt-fn="_vttSetHp" data-vtt-args="${t.id}|${hpm}" title="PV au max">Max</button>` : '';
-  const _pmVal = _ed ? `<input class="vtt-ins-input" type="number" value="${_pm}" min="0" max="${_pmMax}" data-vtt-fn="_vttSetPm" data-vtt-on="change" data-vtt-args="${t.id}|$value">` : `<b>${_pm}</b>`;
-  const _pmMaxBtn = _ed ? `<button class="vtt-ins-max-btn" data-vtt-fn="_vttSetPm" data-vtt-args="${t.id}|${_pmMax}" title="PM au max">Max</button>` : '';
+  const _resource = (kind, label, current, max, pct, color) => {
+    const setter = kind === 'PV' ? '_vttSetHp' : '_vttSetPm';
+    const controls = _ed
+      ? `<div class="vtt-resource-controls" aria-label="Modifier les ${label}">
+           <button type="button" class="vtt-resource-step" data-vtt-fn="_vttAdjustVital" data-vtt-args="${t.id}|${kind}|-1" aria-label="Retirer 1 ${kind}" title="−1 ${kind}" ${current <= 0 ? 'disabled' : ''}>−</button>
+           <input class="vtt-ins-input vtt-vital-input" type="number" inputmode="numeric" value="${current}" min="0" max="${max}" aria-label="${label} actuels" title="Saisir la valeur puis appuyer sur Entrée ou quitter le champ" data-vtt-fn="${setter}" data-vtt-on="change" data-vtt-args="${t.id}|$value">
+           <span class="vtt-resource-total">/ ${max}</span>
+           <button type="button" class="vtt-resource-step" data-vtt-fn="_vttAdjustVital" data-vtt-args="${t.id}|${kind}|1" aria-label="Ajouter 1 ${kind}" title="+1 ${kind}" ${current >= max ? 'disabled' : ''}>+</button>
+           <button type="button" class="vtt-ins-max-btn" data-vtt-fn="${setter}" data-vtt-args="${t.id}|${max}" title="Remettre les ${label} au maximum" ${current === max ? 'disabled' : ''}>Max</button>
+         </div>`
+      : `<span class="vtt-resource-readonly"><b>${current}</b><span>/ ${max}</span></span>`;
+    return `<div class="vtt-resource" style="--vtt-resource-color:${color}">
+      <div class="vtt-resource-top"><span class="vtt-resource-name" title="${label}">${kind}</span>${controls}</div>
+      <div class="vtt-dbar-t" role="progressbar" aria-label="${label}" aria-valuenow="${current}" aria-valuemin="0" aria-valuemax="${max}"><b class="vtt-dbar-f" style="width:${Math.max(0, Math.min(100, pct))}%;background:${color}"></b></div>
+    </div>`;
+  };
   const _dbar = (k, valHtml, pct, col, maxBtn = '') =>
     `<div class="vtt-dbar"><span class="vtt-dbar-k">${k}</span>` +
     `<div class="vtt-dbar-t"><b class="vtt-dbar-f" style="width:${pct}%;background:${col}"></b></div>` +
@@ -712,8 +724,8 @@ export function _renderInspectorImpl(t) {
         ${_identitySheetBtn}
       </div>
       <div class="vtt-bars">
-        ${_dbar('PV', `${_pvVal}<i> / ${hpm}</i>`, Math.round(rat * 100), hpColor(rat), _pvMaxBtn)}
-        ${(_pm !== null && _pmMax !== null) ? _dbar('PM', `${_pmVal}<i> / ${_pmMax}</i>`, _pmMax > 0 ? Math.round(Math.max(0, _pm) / _pmMax * 100) : 0, '#b47fff', _pmMaxBtn) : ''}
+        ${_resource('PV', 'points de vie', hp, hpm, Math.round(rat * 100), hpColor(rat))}
+        ${(_pm !== null && _pmMax !== null) ? _resource('PM', 'points de mana', _pm, _pmMax, _pmMax > 0 ? Math.round(Math.max(0, _pm) / _pmMax * 100) : 0, '#b47fff') : ''}
         ${_dbar('Dép', `<b>${_remMv}</b><i> / ${_maxMv}</i>`, _maxMv > 0 ? Math.round(_remMv / _maxMv * 100) : 0, _mvCol)}
       </div>
       <div class="vtt-vitals"><span class="vtt-vit"><span>CA</span><b>${_ca}</b></span>${_condPills || '<span class="vtt-vit vtt-vit-empty">Aucun état</span>'}</div>
