@@ -668,9 +668,11 @@ match /adventures/{adventureId} {
       // ── VTT : tout membre de l'aventure peut écrire les champs de combat ──
       //   nécessaire pour que les sorts (DoT, soins, buffs, états) lancés par
       //   un joueur appliquent leur effet sur une fiche cible (PJ allié comme
-      //   PJ ennemi).
+      //   PJ ennemi). `garde` : ressource défensive gagnée quand la cible pare
+      //   un coup — l'attaquant (ou le MJ) qui résout l'attaque crédite la Garde
+      //   de la fiche parée, comme il applique dégâts/états.
       request.resource.data.diff(resource.data)
-        .affectedKeys().hasOnly(['hp', 'pvCombatHp', 'buffs', 'conditions'])
+        .affectedKeys().hasOnly(['hp', 'pvCombatHp', 'buffs', 'conditions', 'garde'])
     );
     allow delete: if inAdventure(adventureId) &&
       canControlAdventureCharacter(adventureId, id);

@@ -28,11 +28,13 @@ export const SPELL_COST_ROWS = [
 ];
 
 // Colonnes de ressources éditables + coût par défaut de CHAQUE brique.
-// (Défaut identique pour toutes les briques : 2 PM, 2 PV, 5 Or.)
+// (Défaut par brique : 2 PM, 2 PV, 10 Or, 2 Garde.) Le MJ édite ces montants dans
+// la console « Système de sort › Coût des runes ».
 export const SPELL_COST_COLS = [
-  { res: 'pm', label: 'PM', icon: '✦',  def: 2,  color: '#4f8cff' },
-  { res: 'pv', label: 'PV', icon: '❤️', def: 2,  color: '#e0556f' },
-  { res: 'or', label: 'Or', icon: '🪙', def: 10, color: '#d9a441' },
+  { res: 'pm',    label: 'PM', icon: '✦',  def: 2,  color: '#4f8cff' },
+  { res: 'pv',    label: 'PV', icon: '❤️', def: 2,  color: '#e0556f' },
+  { res: 'or',    label: 'Or', icon: '🪙', def: 10, color: '#d9a441' },
+  { res: 'garde', label: 'GD', icon: '🛡️', def: 2,  color: '#5fb0c8' },
 ];
 const _COL_DEF = Object.fromEntries(SPELL_COST_COLS.map(c => [c.res, c.def]));
 

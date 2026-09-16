@@ -20967,7 +20967,7 @@ body .modal:has(.sh-admin-modal.is-armor-sets) {
 }
 .spell-cost-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) repeat(3, 66px);
+  grid-template-columns: minmax(120px, 1fr) repeat(4, 66px);
   align-items: center;
   gap: 8px;
   padding: 3px 8px;
