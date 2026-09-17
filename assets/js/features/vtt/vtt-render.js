@@ -18,6 +18,26 @@ import { _pgRef } from './vtt-refs.js';
 import { _showCtxMenu } from './vtt-utils.js';
 import { showNotif } from '../../shared/notifications.js';
 import { tokenActiveEffects, tokenEffectsSignature, tokenFootprintMeta, tokenHealthMeta } from './vtt-token-visual.js';
+import { _cellInShape } from '../../shared/spell-zones.js';
+
+/**
+ * Surligne EN CASES une zone de forme (cône/anneau/losange/croix). Retourne un
+ * tableau de K.Rect (1 par case couverte), centré sur (0,0). zw/zh = taille px de
+ * la bounding-box. Même prédicat _cellInShape que le ciblage → parfaite cohérence.
+ */
+export function _zoneCellRects(K, zw, zh, shape, dir = 'down', style = {}) {
+  const cols = Math.max(1, Math.round(zw / CELL));
+  const rows = Math.max(1, Math.round(zh / CELL));
+  const ox = -cols * CELL / 2, oy = -rows * CELL / 2;
+  const out = [];
+  for (let ri = 0; ri < rows; ri += 1) {
+    for (let ci = 0; ci < cols; ci += 1) {
+      if (!_cellInShape(shape, ci, ri, cols, rows, dir)) continue;
+      out.push(new K.Rect({ x: ox + ci * CELL, y: oy + ri * CELL, width: CELL, height: CELL, ...style }));
+    }
+  }
+  return out;
+}
 import { vttCanvasPixelRatio, vttShouldReduceEffects } from './vtt-fog-performance.js';
 
 const _tokenImageCache = new Map();
@@ -604,6 +624,12 @@ export function _buildAnnotVisual(K, data) {
         closed: true, fill: col + '24', stroke: col, strokeWidth: _zsw,
         dash: [10, 6], hitStrokeWidth: 0, listening: true,
       }));
+    } else if (data.shape === 'cone' || data.shape === 'ring' || data.shape === 'diamond') {
+      // Formes en CASES (cône stepped 1/3/5…, anneau en losange évidé, losange plein) :
+      // on surligne exactement les cases couvertes → cohérent avec le ciblage.
+      for (const cell of _zoneCellRects(K, zw, zh, data.shape, data.coneDir || 'down', {
+        fill: col + '5a', stroke: col, strokeWidth: 2, shadowColor: col, shadowBlur: 8, shadowOpacity: 0.6, hitStrokeWidth: 0, listening: true,
+      })) g.add(cell);
     } else {
       g.add(new K.Rect({ x: 0, y: 0, width: zw, height: zh, offsetX: zw / 2, offsetY: zh / 2,
         fill: col + '24', stroke: col, strokeWidth: _zsw, dash: [10, 6], cornerRadius: 4,

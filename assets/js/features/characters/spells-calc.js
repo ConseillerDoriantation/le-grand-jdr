@@ -10,6 +10,7 @@ import { charSession } from '../../shared/char-session.js';
 import { getMaitriseBonus as getSharedMaitriseBonus, getMod, statShort } from '../../shared/char-stats.js';
 import { getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getMainWeapon } from './data.js';
+import { ZONE_SHAPES, _zoneCount, _zoneDims, _zoneShapeUnlocked, _zoneCellCount } from '../../shared/spell-zones.js';
 import { calcSpellDuration, calcSpellTargets, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { spellSetCostDelta } from '../../shared/spell-system.js';
 import { calculateSummonStats, normalizeInvocationStats } from '../../shared/invocation-stats.js';
@@ -820,6 +821,11 @@ export function _ampDispDim(n) { const v = parseInt(n) || 0; return v >= 1 ? (4 
  */
 export function _ampCrossDim(n) { const v = parseInt(n) || 0; return v >= 1 ? (6 * v - 1) : 0; }
 
+// Modèle « zones » v2 : source unique dans shared/spell-zones.js (pur, testable,
+// réutilisable par le VTT). Importé pour usage local + ré-exporté pour ne pas
+// changer les imports existants (spells.js importe _zoneDims/_zoneCount/ZONE_SHAPES d'ici).
+export { ZONE_SHAPES, _zoneCount, _zoneDims, _zoneShapeUnlocked, _zoneCellCount };
+
 /** Zone calculée :
  *  - Si zoneW/H manuels saisis → ils priment (override MJ)
  *  - Sinon, calculé depuis les runes Amplification (+ Dispersion en combo) :
@@ -836,27 +842,24 @@ export function _calcSortZone(s) {
   // de l'enchantement (portée/déplacement de l'état) → ce n'est PAS un sort de zone.
   if (runes.filter(r => r === 'Enchantement').length > 0
       && runes.filter(r => r === 'Invocation').length === 0) return null;
+  const nbAmp  = runes.filter(r => r === 'Amplification').length;
+  const nbDisp = runes.filter(r => r === 'Dispersion').length;
+  const count  = _zoneCount(nbDisp);   // Dispersion = nombre de poses (1 + nDisp)
+
   const wMan = s.zoneW ? parseInt(s.zoneW) : 0;
   const hMan = s.zoneH ? parseInt(s.zoneH) : 0;
   if (wMan > 0 || hMan > 0) {
-    const shape = ['cross', 'diamond'].includes(s?.zoneShape) ? s.zoneShape : 'rect';
-    return { w: wMan || hMan, h: hMan || wMan, shape, source: 'manual' };
+    // Override MJ : le losange reste accepté en manuel (les runes ne le produisent pas).
+    const shape = [...ZONE_SHAPES, 'diamond'].includes(s?.zoneShape) ? s.zoneShape : 'rect';
+    return { w: wMan || hMan, h: hMan || wMan, shape, count, source: 'manual', amp: nbAmp, disp: nbDisp };
   }
 
-  const nbAmp  = runes.filter(r => r === 'Amplification').length;
-  const nbDisp = runes.filter(r => r === 'Dispersion').length;
   if (nbAmp === 0) return null;
 
-  if (nbDisp >= 1) {
-    // Combo : Amplification → hauteur, Dispersion → largeur (chaque rune agrandit son axe).
-    // Croix = bras plus longs (6N−1) que le carré (4N−1) → portée > mais pas de diagonales.
-    const shape = s.zoneShape === 'cross' ? 'cross' : 'rect';
-    const dim = shape === 'cross' ? _ampCrossDim : _ampDispDim;
-    return { w: dim(nbDisp), h: dim(nbAmp), shape, source: 'runes', amp: nbAmp, disp: nbDisp };
-  }
-
-  const length = _ampLength(nbAmp);
-  return { w: length, h: 1, shape: 'rect', source: 'runes', amp: nbAmp, disp: nbDisp };
+  // v2 : Amplification pilote la TAILLE d'UNE zone (forme au choix), Dispersion la RÉPÈTE.
+  const shape = ZONE_SHAPES.includes(s?.zoneShape) ? s.zoneShape : 'rect';
+  const dims  = _zoneDims(shape, nbAmp);
+  return { ...dims, count, source: 'runes', amp: nbAmp, disp: nbDisp };
 }
 
 /** Déplacement (rune Amplification en mode 'deplacement').
