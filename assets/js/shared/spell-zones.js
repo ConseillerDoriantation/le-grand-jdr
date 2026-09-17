@@ -13,7 +13,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 /** Formes de zone valides pilotées par les runes. */
-export const ZONE_SHAPES = ['rect', 'cross', 'cone', 'ring'];
+export const ZONE_SHAPES = ['rect', 'cross', 'cone', 'ring', 'line'];
 
 /** Nombre de poses de la zone / de l'effet (Dispersion = répétitions). 0 Disp = 1. */
 export function _zoneCount(nbDisp) {
@@ -34,6 +34,9 @@ export function _zoneShapeUnlocked(nbAmp) { return (parseInt(nbAmp) || 0) >= 2; 
  *                        même budget de cases que le carré au palier 2, mais +1 de portée.
  *  - cone  (Cône)      : depuis le lanceur, profondeur N+1, base 2·prof−1 (2→prof 3, base 5).
  *  - ring  (Anneau)    : couronne de rayon N (centre épargné), envergure 2N+1 (2→rayon 2, 5×5).
+ *  - line  (Ligne)     : rayon droit large de 1 ; +2 cases par Amplification → longueur 2N+1
+ *                        (1→3, 2→5, 3→7, 4→9). Peu de cases mais portée maximale en ligne
+ *                        (pivote H/V avec R). Idéale pour percer une rangée / un couloir.
  * @returns {{w:number,h:number,shape:string,depth?:number,radius?:number}|null}
  */
 /**
@@ -58,6 +61,7 @@ export function _cellInShape(shape, ci, ri, cols, rows, dir = 'down') {
       if (dir === 'left')  return Math.abs(ri - rc) <= (cols - 1 - ci);
       if (dir === 'right') return Math.abs(ri - rc) <= ci;
       return Math.abs(ci - cc) <= ri;   // down : apex en haut, s'ouvre vers le bas
+    case 'line':   // boîte 1×L → toutes les cases de la boîte SONT la ligne (comme rect)
     case 'rect':
     default:      return true;
   }
@@ -82,6 +86,7 @@ export function _zoneDims(shape, nbAmp) {
     case 'cross': { const span = 2 * n + 1; return { w: span, h: span, shape: 'cross' }; }
     case 'cone':  { const depth = n + 1; return { w: 2 * depth - 1, h: depth, shape: 'cone', depth }; }
     case 'ring':  { const radius = n; const span = 2 * n + 1; return { w: span, h: span, shape: 'ring', radius }; }
+    case 'line':  { const len = 2 * n + 1; return { w: len, h: 1, shape: 'line' }; }   // rayon droit (+2 cases / Amp)
     case 'rect':
     default:      { const s = 2 * n - 1; return { w: s, h: s, shape: 'rect' }; }
   }

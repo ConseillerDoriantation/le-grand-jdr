@@ -3750,7 +3750,7 @@ async function _selfMoveTo(col, row) {
   showNotif(`🏃 ${name} se déplace de ${dist} case${dist > 1 ? 's' : ''} (${opt.label})`, 'success');
 }
 
-function _selfMoveCancel() { _selfClear(); showNotif('Déplacement annulé', 'info'); }
+function _selfMoveCancel() { _selfClear(); showNotif('Déplacement annulé', 'info'); _vttReturnToActions(); }
 
 function _showSelfHud() {
   document.getElementById('vtt-self-hud')?.remove();
@@ -5322,6 +5322,9 @@ function _buildAttackOptions(t) {
 const _atkOptsCache = {};
 // Contexte de l'attaque en cours (multi-étapes)
 let _atkCtx = null;
+// Modale d'action d'où l'on vient : annuler un sort en cours (zone / multi-cibles /
+// déplacement) rouvre cette modale plutôt que de tout fermer. { srcId, tgtId }.
+let _actModalReturn = null;
 // Sorts multi-cibles : casts gratuits restants — key: "${tokenId}_${sortIdx}"
 const _multiCastFree = new Map();
 // Sorts gratuits one-shot (déclenchement d'un sort suspendu) — Set<"${tokenId}_${sortIdx}">
@@ -5435,7 +5438,7 @@ function _vttSpellPills(o, { includeTraits = true } = {}) {
   if (targetSelf) {
     pills.push(_vttAoptPill('targets self', `🧍 Sur soi`));
   } else if (o.zoneW > 0 || o.zoneH > 0) {
-    const zoneIcon = o.zoneShape === 'cross' ? '✚' : o.zoneShape === 'diamond' ? '◇' : '📐';
+    const zoneIcon = o.zoneShape === 'cross' ? '✚' : o.zoneShape === 'cone' ? '🔺' : o.zoneShape === 'ring' ? '◯' : o.zoneShape === 'line' ? '▬' : o.zoneShape === 'diamond' ? '◇' : '📐';
     pills.push(_vttAoptPill('zone', `${zoneIcon} ${o.zoneW||o.zoneH}×${o.zoneH||o.zoneW}c · ${o.portee}c`));
   } else if ((o.nbCibles || 1) > 1) {
     const lbl = isFriendly ? 'alliés' : isHostile ? 'ennemis' : 'cibles';
@@ -5623,17 +5626,34 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
   const _spellReses = srcChar ? new Set(spellOpts.map(o => o.costRes || 'pm')) : new Set();
   const _resRows = [];
   if (srcChar) {
-    if (_spellReses.has('pv'))    _resRows.push({ icon: '❤️', label: 'PV',    color: '#e0556f', cur: Math.max(0, lS.displayHp ?? 0), max: lS.displayHpMax ?? 0 });
-    if (_spellReses.has('garde')) _resRows.push({ icon: '🛡️', label: 'Garde', color: '#5fb0c8', cur: _charGardeCur(srcChar),        max: calcGardeMax(srcChar) });
-    if (_spellReses.has('or'))    _resRows.push({ icon: '🪙', label: 'Or',    color: '#d9a441', cur: calcOr(srcChar),               max: 0 });
+    if (_spellReses.has('pv'))    _resRows.push({ resId: 'pv',    icon: '❤️', label: 'PV',    color: '#e0556f', cur: Math.max(0, lS.displayHp ?? 0), max: lS.displayHpMax ?? 0 });
+    if (_spellReses.has('garde')) _resRows.push({ resId: 'garde', icon: '🛡️', label: 'Garde', color: '#5fb0c8', cur: _charGardeCur(srcChar),        max: calcGardeMax(srcChar) });
+    if (_spellReses.has('or'))    _resRows.push({ resId: 'or',    icon: '🪙', label: 'Or',    color: '#d9a441', cur: calcOr(srcChar),               max: 0 });
   }
   const _resPct = (r) => r.max > 0 ? Math.round(Math.min(r.cur, r.max) / r.max * 100) : 0;
-  // Style « jauge modale » (banner-res, à côté du Mana)
-  const resManaGauges = _resRows.map(r => `
-    <div class="vtt-aopt-mana" style="--rc:${r.color}">
-      <div class="vtt-aopt-mana-top"><span style="color:${r.color}">${r.icon} ${r.label}</span><b style="color:${r.color}">${r.cur}${r.max > 0 ? `<i>/${r.max}</i>` : ''}</b></div>
-      ${r.max > 0 ? `<div class="vtt-aopt-mana-track"><i class="vtt-aopt-mana-fill" style="width:${_resPct(r)}%;background:${r.color}"></i></div>` : ''}
-    </div>`).join('');
+  // Réserve courante par ressource → contrôle « coût > réserve » sur les cartes.
+  const _resCurMap = { pm };
+  _resRows.forEach(r => { _resCurMap[r.resId] = r.cur; });
+  // Jauge unifiée (Mana + PV / Garde / Or) : label + valeur + coût « −X » + barre avec
+  // FANTÔME, tous pilotés au survol par _vttAoptBindControls. Chaque jauge porte sa
+  // ressource (data-aopt-res) et sa réserve (data-cur / data-max) → l'aperçu retrouve
+  // la bonne barre à réduire selon la ressource du sort survolé.
+  const _resGauge = (r) => `
+    <div class="vtt-aopt-mana" data-aopt-res="${r.resId}" data-cur="${r.cur}" data-max="${r.max}" style="--rc:${r.color}">
+      <div class="vtt-aopt-mana-top">
+        <span style="color:${r.color}">${r.icon} ${r.label}</span>
+        <b style="color:${r.color}"><u class="vtt-aopt-mana-now">${r.cur}</u>${r.max > 0 ? `<i>/${r.max}</i>` : ''}<em class="vtt-aopt-mana-cost" hidden></em></b>
+      </div>
+      ${r.max > 0 ? `<div class="vtt-aopt-mana-track">
+        <i class="vtt-aopt-mana-fill" style="width:${_resPct(r)}%${r.resId === 'pm' ? '' : `;background:${r.color}`}"></i>
+        <u class="vtt-aopt-mana-ghost"></u>
+      </div>` : ''}
+    </div>`;
+  const _allResRows = [
+    ...(pm != null && pmMax != null && pmMax > 0 ? [{ resId: 'pm', icon: '✨', label: 'Mana', color: '#b47fff', cur: pm, max: pmMax }] : []),
+    ..._resRows,
+  ];
+  const resGaugesHtml = _allResRows.map(_resGauge).join('');
   // Style « barre HUD » (à côté de pmBar, flux action d'abord)
   const resPmBars = _resRows.map(r => `<div class="vtt-atk-pm-bar">
       <span style="color:${r.color}">${r.icon}</span>
@@ -5776,9 +5796,13 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       // prévisualise sur la jauge MANA que pour un coût EN PM sans réserve alternative
       // (summonManaSource / coût PV·Or → badge sans fantôme). Aucune logique de cast
       // touchée : purement visuel.
-      const _isPmCost = (o.costRes || 'pm') === 'pm' && !o.summonManaSource;
-      const _ghostCost = (_isPmCost && o.pmCost > 0) ? o.pmCost : 0;
-      const _insuff = _isPmCost && o.pmCost > 0 && pm != null && o.pmCost > pm;
+      // Aperçu du coût sur la jauge de la ressource concernée (PM / PV / Garde / Or).
+      // Exclu si le coût est payé par une réserve d'invocation (pas la barre du lanceur).
+      const _canPreview = o.pmCost > 0 && !o.summonManaSource;
+      const _ghostCost = _canPreview ? o.pmCost : 0;
+      const _ghostRes  = _canPreview ? _res.id : '';
+      const _resCur    = _resCurMap[_res.id];
+      const _insuff = _canPreview && _resCur != null && o.pmCost > _resCur;
       let costHtml;
       if (o.pmCost > 0) {
         costHtml = `<span class="vtt-aopt-cost ${_insuff ? 'vtt-aopt-cost--warn' : 'vtt-aopt-cost--pm'}"${_manaSource ? ` title="Réserve utilisée : ${_esc(o.summonManaSource)}"` : ''}>${_resIco} ${o.pmCost} ${_res.label}${_manaSource}${_setExtra}</span>`;
@@ -5803,7 +5827,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       const metaExtra = `${sourceChip}${deckChip}${stack}`;
       const _detail = `${weaponTraitsHtml}${runeChipsHtml}${desc ? `<span class="vtt-action-choice-desc">${_esc(desc)}</span>` : ''}`;
       return `
-      <button ${buttonAttrs} class="vtt-aopt vtt-action-choice ${cardKind} ${cardState} ${isPrimaryWeapon ? 'is-primary-weapon' : ''} ${isSecondaryWeapon ? 'is-secondary-weapon' : ''}" data-cost="${_ghostCost}">
+      <button ${buttonAttrs} class="vtt-aopt vtt-action-choice ${cardKind} ${cardState} ${isPrimaryWeapon ? 'is-primary-weapon' : ''} ${isSecondaryWeapon ? 'is-secondary-weapon' : ''}" data-cost="${_ghostCost}" data-cost-res="${_ghostRes}">
         <span class="vtt-action-choice-icon">${o.icon}</span>
         <span class="vtt-action-choice-body">
           <span class="vtt-action-choice-head">
@@ -6034,23 +6058,6 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
         <div class="vtt-aopt-empty" hidden><span style="opacity:.5">Aucune action ne correspond.</span></div>
       </div>`;
 
-  // Jauge de mana étiquetée (label + valeur au-dessus d'une barre), avec fantôme +
-  // lecture chiffrée du coût (« −X ») pilotés par _vttAoptBindControls au survol / à la
-  // sélection. Même réserve que pmBar. Affichée dès qu'un pool de mana existe (pmMax>0)
-  // même à 0 PM, pour que la barre — et donc le coût — soit toujours visible.
-  const _hasMana = pm != null && pmMax != null && pmMax > 0;
-  const manaGauge = _hasMana ? `
-    <div class="vtt-aopt-mana">
-      <div class="vtt-aopt-mana-top">
-        <span>✨ Mana</span>
-        <b><u class="vtt-aopt-mana-now">${pm}</u><i>/${pmMax}</i><em class="vtt-aopt-mana-cost" hidden></em></b>
-      </div>
-      <div class="vtt-aopt-mana-track" data-aopt-mana data-pm="${pm}" data-pmmax="${pmMax}">
-        <i class="vtt-aopt-mana-fill" style="width:${Math.round(Math.max(0,pm)/pmMax*100)}%"></i>
-        <u class="vtt-aopt-mana-ghost"></u>
-      </div>
-    </div>` : '';
-
   // Pips d'économie d'action — UNIQUEMENT en combat, où l'état est réellement suivi
   // sur le token (attackedThisTurn / bonusActionThisTurn / reactionThisTurn, remis à
   // zéro à chaque tour par vtt-combat-turns.js). Hors combat : pas de pips (ornement).
@@ -6076,7 +6083,7 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
         ${targetFace}
         <span class="vtt-aopt-banner-dist" title="${selfTarget ? 'Action sur soi' : 'Distance source → cible'}">${selfTarget ? '◉ Sur soi' : `📏 ${dist} case${dist > 1 ? 's' : ''} · à portée`}</span>
       </div>
-      ${(manaGauge || resManaGauges || econPips) ? `<div class="vtt-aopt-banner-res">${manaGauge}${resManaGauges}${econPips}</div>` : ''}
+      ${(resGaugesHtml || econPips) ? `<div class="vtt-aopt-banner-res" style="flex-direction:column;align-items:stretch;gap:8px">${resGaugesHtml}${econPips}</div>` : ''}
     </div>
     ${ctrlHtml}
     <div class="vtt-aopt-list vtt-action-list cs-v3">${optsHtml}${basicHtml}
@@ -6142,10 +6149,7 @@ function _vttAoptBindControls(root) {
 
   const launchBtn = root.querySelector('[data-aopt-launch]');
   const recap = root.querySelector('[data-aopt-recap]');
-  const manaTrack = root.querySelector('[data-aopt-mana]');
-  const ghost = manaTrack?.querySelector('.vtt-aopt-mana-ghost');
-  const costOut = root.querySelector('.vtt-aopt-mana-cost');
-  const manaNow = root.querySelector('.vtt-aopt-mana-now');
+  const gauges = Array.from(root.querySelectorAll('[data-aopt-res]'));
   const searchInput = root.querySelector('.vtt-aopt-search-input');
 
   // Cartes sélectionnables/lançables = cartes d'action visibles et non en recharge.
@@ -6163,26 +6167,31 @@ function _vttAoptBindControls(root) {
     });
   };
 
-  // Fantôme (segment ancré à droite) + lecture chiffrée « −X » figurant le coût en PM
-  // qui serait débité, et aperçu du reliquat sur la valeur courante.
-  const setGhost = (cost) => {
-    if (!manaTrack) return;
-    const pm = +manaTrack.dataset.pm || 0;
-    const pmMax = +manaTrack.dataset.pmmax || 0;
-    const active = cost > 0 && pmMax > 0;
-    if (ghost) {
-      ghost.style.width = active ? `${(Math.min(pm, cost) / pmMax) * 100}%` : '0';
-      ghost.classList.toggle('is-over', cost > pm);
-    }
-    if (costOut) {
-      costOut.textContent = active ? `−${cost}` : '';
-      costOut.hidden = !active;
-      costOut.classList.toggle('is-over', active && cost > pm);
-    }
-    if (manaNow) {
-      manaNow.textContent = active ? String(Math.max(0, pm - cost)) : String(pm);
-      manaNow.classList.toggle('is-preview', active);
-    }
+  // Aperçu du coût sur la jauge de la ressource concernée : fantôme (segment rouge
+  // ancré à droite) + lecture « −X » + reliquat sur la valeur. Toutes les autres
+  // jauges sont remises à neutre. `resId` = ressource débitée (pm/pv/garde/or).
+  const setGhost = (cost, resId) => {
+    gauges.forEach(g => {
+      const cur = +g.dataset.cur || 0;
+      const max = +g.dataset.max || 0;
+      const on = !!resId && g.dataset.aoptRes === resId && cost > 0;
+      const ghost = g.querySelector('.vtt-aopt-mana-ghost');
+      const costOut = g.querySelector('.vtt-aopt-mana-cost');
+      const now = g.querySelector('.vtt-aopt-mana-now');
+      if (ghost) {
+        ghost.style.width = (on && max > 0) ? `${(Math.min(cur, cost) / max) * 100}%` : '0';
+        ghost.classList.toggle('is-over', on && cost > cur);
+      }
+      if (costOut) {
+        costOut.textContent = on ? `−${cost}` : '';
+        costOut.hidden = !on;
+        costOut.classList.toggle('is-over', on && cost > cur);
+      }
+      if (now) {
+        now.textContent = on ? String(Math.max(0, cur - cost)) : g.dataset.cur;
+        now.classList.toggle('is-preview', on);
+      }
+    });
   };
 
   // Nom de la cible (pour le récap) lu depuis le bandeau.
@@ -6194,7 +6203,7 @@ function _vttAoptBindControls(root) {
     cards().forEach(c => { if (c !== card) c.classList.remove('sel'); });
     card.classList.add('sel');
     card.scrollIntoView({ block: 'nearest' });
-    setGhost(+card.dataset.cost || 0);
+    setGhost(+card.dataset.cost || 0, card.dataset.costRes);
     const name = card.querySelector('.vtt-action-choice-name')?.textContent?.trim() || 'Action';
     const kind = card.querySelector('.vtt-action-choice-kind')?.textContent?.trim() || '';
     const cost = card.querySelector('.vtt-aopt-cost')?.textContent?.trim() || '';
@@ -6216,7 +6225,7 @@ function _vttAoptBindControls(root) {
   const clearSel = () => {
     const c = selected();
     if (c) c.classList.remove('sel');
-    setGhost(0);
+    setGhost(0, '');
     if (launchBtn) { launchBtn.disabled = true; launchBtn.classList.remove('is-oor'); launchBtn.textContent = 'Lancer'; }
     if (recap) recap.textContent = 'Choisis une action — survole pour prévisualiser son coût.';
   };
@@ -6226,12 +6235,12 @@ function _vttAoptBindControls(root) {
   // fantôme de la carte sélectionnée (ou on masque).
   root.addEventListener('mouseover', (e) => {
     const card = e.target.closest?.('.vtt-action-choice');
-    if (card && root.contains(card)) setGhost(+card.dataset.cost || 0);
+    if (card && root.contains(card)) setGhost(+card.dataset.cost || 0, card.dataset.costRes);
   });
   root.addEventListener('mouseout', (e) => {
     if (e.target.closest?.('.vtt-action-choice')) {
       const sel = selected();
-      setGhost(sel ? (+sel.dataset.cost || 0) : 0);
+      setGhost(sel ? (+sel.dataset.cost || 0) : 0, sel ? sel.dataset.costRes : '');
     }
   });
 
@@ -6611,6 +6620,10 @@ function _vttPickOpt(srcId, tgtId, idx) {
     showNotif(`Sort en recharge (${opt.cooldownRemaining} tour${opt.cooldownRemaining > 1 ? 's' : ''}).`, 'warning');
     return;
   }
+  // Mémorise la modale d'action pour pouvoir y revenir si on annule le sort à une
+  // étape suivante (placement de zone, ciblage, déplacement). Pas sur une ré-entrée
+  // depuis une validation (_mtPending) : on garde la modale d'origine.
+  if (!_mtPending) _actModalReturn = { srcId, tgtId };
   closeModalDirect();
 
   // Auto-cible le lanceur si l'action est marquée "sur soi" (potions, buffs perso, etc.)
@@ -6850,7 +6863,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
   else if (opt.pmCost === 0 && opt.basePm > 0) _costChip = `<span class="vtt-atk-chip pm">🔮 Gratuit</span>`;
   let _extraChip = '';
   if (opt.zoneW > 0 || opt.zoneH > 0) {
-    const zoneIcon = opt.zoneShape === 'cross' ? '✚' : opt.zoneShape === 'diamond' ? '◇' : '📐';
+    const zoneIcon = opt.zoneShape === 'cross' ? '✚' : opt.zoneShape === 'cone' ? '🔺' : opt.zoneShape === 'ring' ? '◯' : opt.zoneShape === 'line' ? '▬' : opt.zoneShape === 'diamond' ? '◇' : '📐';
     _extraChip = `<span class="vtt-atk-chip">${zoneIcon} ${opt.zoneW}×${opt.zoneH}</span>`;
   } else if ((opt.nbCibles || 1) > 1) {
     _extraChip = `<span class="vtt-atk-chip">🎯 ${opt.nbCibles} cibles</span>`;
@@ -6921,6 +6934,20 @@ function _restoreAttackSourceSelection() {
   const src = VS.tokens[srcId]?.data;
   if (srcId && src && _canControlToken(src) && VS.selected !== srcId) _select(srcId);
 }
+// Rouvre la modale d'action mémorisée (après annulation d'un sort en cours). Renvoie
+// true si une modale a été rouverte. La cible peut avoir disparu → _execAttack gère.
+function _vttReturnToActions() {
+  const ret = _actModalReturn;
+  _actModalReturn = null;
+  if (!ret || !VS.tokens[ret.srcId]?.data) return false;
+  if (ret.tgtId != null && ret.tgtId !== ret.srcId && !VS.tokens[ret.tgtId]?.data) {
+    _execAttack(ret.srcId, null);   // cible partie → on rouvre en « action d'abord »
+  } else {
+    _execAttack(ret.srcId, ret.tgtId);
+  }
+  return true;
+}
+
 function _vttCancelAtk() { _atkCtx=null; _restoreAttackSourceSelection(); closeModalDirect(); }
 function _closeActionModal() { _restoreAttackSourceSelection(); closeModalDirect(); }
 
@@ -7223,7 +7250,7 @@ function _mtToggleTarget(tgtId) {
   _mtBroadcast();
 }
 
-function _mtCancel() { _mtClear(); showNotif('Ciblage annulé', 'info'); }
+function _mtCancel() { _mtClear(); showNotif('Ciblage annulé', 'info'); _vttReturnToActions(); }
 
 function _mtValidate() {
   if (!_mtCtx || _mtCtx.targets.length === 0) return;
@@ -7307,6 +7334,7 @@ function _buildZonePreview() {
   const _srcC = VS.tokens[_zoneCtx.srcId]?.data ? _tokenCenter(VS.tokens[_zoneCtx.srcId].data) : null;
   const _range = Math.max(0, parseInt(_zoneCtx.opt?.portee) || 1);
   const _oor = !!(_srcC && _zoneCenterDistCells(_srcC, x, y) > _range);
+  _zoneCtx._oor = _oor;   // mémorise l'état (détection du basculement dans _zoneUpdatePreview)
   const _fill = _oor ? 'rgba(255,90,110,0.30)' : 'rgba(253,224,71,0.42)';
   const _stroke = _oor ? '#ff5a6e' : '#ffe86b';
   const _shp = _zoneCtx.opt?.zoneShape;
@@ -7317,8 +7345,8 @@ function _buildZonePreview() {
     // snapping (coneDirEff) pour que le dessin colle exactement aux cases snappées.
     const cl = _coneLayout(_zoneCtx.srcId, x, y, wPx, hPx, _zoneCtx.coneDirManual || _zoneCtx.coneDirEff);
     for (const cell of _zoneCellRects(K, cl.w, cl.h, 'cone', cl.dir, _cellStyle)) group.add(cell);
-  } else if (_shp === 'cross' || _shp === 'ring' || _shp === 'diamond') {
-    // Formes EN CASES (croix, anneau en losange évidé, losange plein) → cohérent avec le ciblage.
+  } else if (_shp === 'cross' || _shp === 'ring' || _shp === 'diamond' || _shp === 'line') {
+    // Formes EN CASES (croix, anneau en losange évidé, losange plein, ligne 1×L) → cohérent avec le ciblage.
     for (const cell of _zoneCellRects(K, wPx, hPx, _shp, 'down', _cellStyle)) group.add(cell);
   } else {
     group.add(new K.Rect({
@@ -7328,12 +7356,12 @@ function _buildZonePreview() {
       strokeWidth: 3, dash: [10, 5],
       cornerRadius: 3, listening: false,
     }));
-    // Halo intérieur pour la lisibilité sur fond clair ou sombre
+    // Halo intérieur pour la lisibilité sur fond clair ou sombre (rouge hors portée)
     group.add(new K.Rect({
       x: -wPx / 2 + 2, y: -hPx / 2 + 2,
       width: wPx - 4, height: hPx - 4,
       fill: 'transparent',
-      stroke: 'rgba(253,224,71,0.45)',
+      stroke: _oor ? 'rgba(255,90,110,0.5)' : 'rgba(253,224,71,0.45)',
       strokeWidth: 1, listening: false,
     }));
   }
@@ -7363,8 +7391,18 @@ function _zoneUpdatePreview(wp) {
   const snapX = Math.round((wp.x - wPx / 2) / CELL) * CELL + wPx / 2;
   const snapY = Math.round((wp.y - hPx / 2) / CELL) * CELL + hPx / 2;
   _zoneCtx.x = snapX; _zoneCtx.y = snapY;
-  if (_zoneCtx.opt?.zoneShape === 'cone' && !_zoneCtx.coneDirManual) _buildZonePreview();
-  _zonePreview.position({ x: snapX, y: snapY });
+  // Recoloration LIVE (toutes les formes) : rouge si le centre sort de la portée,
+  // jaune si la zone est posable. On reconstruit quand l'état hors-portée bascule
+  // (ou pour le cône auto, dont l'orientation dépend aussi de la position).
+  const _srcC = VS.tokens[_zoneCtx.srcId]?.data ? _tokenCenter(VS.tokens[_zoneCtx.srcId].data) : null;
+  const _range = Math.max(0, parseInt(_zoneCtx.opt?.portee) || 1);
+  const _oorNow = !!(_srcC && _zoneCenterDistCells(_srcC, snapX, snapY) > _range);
+  const _coneAuto = _zoneCtx.opt?.zoneShape === 'cone' && !_zoneCtx.coneDirManual;
+  if (_coneAuto || _oorNow !== _zoneCtx._oor) {
+    _buildZonePreview();   // recouleur (rouge/jaune) + orientation du cône
+  } else {
+    _zonePreview.position({ x: snapX, y: snapY });
+  }
   VS.layers.token.batchDraw();
 }
 
@@ -7499,7 +7537,7 @@ export function _vttExpireSpellZones(round) {
   VS.layers.draw?.batchDraw();
 }
 
-function _zoneCancel() { _zoneClear(); showNotif('Zone annulée', 'info'); }
+function _zoneCancel() { _zoneClear(); showNotif('Zone annulée', 'info'); _vttReturnToActions(); }
 
 const _CONE_DIRS = ['down', 'right', 'up', 'left'];
 function _zoneRotate() {
@@ -12723,6 +12761,28 @@ async function _vttMsSetPm(charId, uid, pm) {
   c.pmActuel = val;
   _renderMiniSheet(uid);
 }
+
+// Ajuste la réserve de Garde d'un personnage depuis la mini-fiche (bornée à
+// [0, gardeMax]). Mêmes garde-fous que les PV/PM. No-op si la mécanique est inactive.
+async function _vttMsSetGarde(charId, uid, garde) {
+  if (!_msCanEditVitals(charId, uid)) return;
+  const c = VS.characters[charId]; if (!c) return;
+  const controlledToken = resolveCharacterControlToken(charId, VS.tokens, STATE.user?.uid, VS.characters);
+  if (!STATE.isAdmin && c.uid !== STATE.user?.uid && !controlledToken) return;
+  const max = calcGardeMax(c);
+  if (max <= 0) return;
+  const val = Math.max(0, Math.min(max, Math.round(garde)));
+  const patch = { garde: val, ...(controlledToken ? { vttControlTokenId: controlledToken.id } : {}) };
+  const saved = await updateDoc(_chrRef(charId), patch).then(() => true).catch(error => {
+    console.error('[vtt] Garde personnage non modifiée depuis la mini-fiche', error);
+    showNotif('Impossible de modifier la Garde de ce personnage', 'error');
+    return false;
+  });
+  if (!saved) return;
+  c.garde = val;
+  _patchEntityTokenShapes('characterId', charId);
+  _renderMiniSheet(uid);
+}
 function _vttEditToken(id) { return _openStatsModal(VS.tokens[id]?.data??null); }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -14251,6 +14311,7 @@ export const VTT_ACTIONS = {
   _vttMsLevelUp,
   _vttMsSetHp,
   _vttMsSetPm,
+  _vttMsSetGarde,
   _vttMsSlotChange,
   _vttMsSortCat,
   _vttMsSortClear,

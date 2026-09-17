@@ -86,7 +86,7 @@ function buildLineCtx(lines, s, c) {
         } else {
           const shp = ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect';
           const d = _zoneDims(shp, counts.Amplification || 1) || { w: 0, h: 0 };
-          const nom = shp === 'cross' ? 'Croix' : shp === 'cone' ? 'Cône' : shp === 'ring' ? 'Anneau' : 'Zone';
+          const nom = shp === 'cross' ? 'Croix' : shp === 'cone' ? 'Cône' : shp === 'ring' ? 'Anneau' : shp === 'line' ? 'Ligne' : 'Zone';
           const cells = _zoneCellCount(shp, d.w, d.h);
           const val = shp === 'rect' ? `Zone ${d.w}×${d.h}` : `${nom} · ${cells} case${cells > 1 ? 's' : ''}`;
           ctx.amp = { value: val, text: true, source: 'Zone dimensionnée par l’Amplification', color: '#4f8cff' };
@@ -164,7 +164,7 @@ let _sortTypesEdit = new Set(['utilitaire']);
 let _deplModeEdit = null;
 let _actionModeEdit = 'reaction';
 let _protModeEdit = 'ca';   // mode rune Protection en cours d'édition ('ca'|'soin'|'mana') — source fiable (≠ DOM périmé)
-let _zoneShapeEdit = 'rect'; // forme de zone combo Amp+Disp en cours d'édition ('rect'|'cross')
+let _zoneShapeEdit = 'rect'; // forme de zone en cours d'édition ('rect'|'cross'|'cone'|'ring'|'line')
 let _enchantExtraSavedEdit = [];   // états d'enchantement supplémentaires sauvegardés (slots 2..n)
 let _invImageEdit = '';      // image (dataUrl) de l'invocation en cours d'édition
 let _invCrop = null;         // instance du cropper pan/zoom inline de l'image d'invocation
@@ -2320,7 +2320,7 @@ function _runeLiveContribution(nom, counts) {
       // Dispersion ne l'élargit plus : elle répète la zone (cf. contribution Disp).
       const shape = ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect';
       const d = _zoneDims(shape, cnt) || { w: 0, h: 0 };
-      const nom = shape === 'cross' ? 'Croix' : shape === 'cone' ? 'Cône' : shape === 'ring' ? 'Anneau' : 'Zone';
+      const nom = shape === 'cross' ? 'Croix' : shape === 'cone' ? 'Cône' : shape === 'ring' ? 'Anneau' : shape === 'line' ? 'Ligne' : 'Zone';
       const nbDisp = counts['Dispersion'] || 0;
       const suffix = nbDisp > 0 ? ` · ×${_zoneCount(nbDisp)} poses` : '';
       return { main: `${nom} ${d.w}×${d.h} cases${suffix}` };
@@ -3532,17 +3532,20 @@ export async function openSortModal(idx, s) {
 
       <div id="s-amp-zone-section" style="${ampMode==='zone'?'':'display:none'}">
         <div style="font-size:.74rem;color:var(--text-dim);padding:.1rem .1rem .3rem">
-          📐 Zone depuis les runes : sans Dispersion → <b>ligne 3N×1</b>. Combo <b>Amp + Dispersion</b> → <b>Amplification = hauteur</b>, <b>Dispersion = largeur</b> (chaque rune agrandit son axe).
+          📐 <b>Amplification = TAILLE</b> d'une zone · <b>Dispersion = NOMBRE de poses</b> (chaque zone applique l'effet plein). La forme se choisit à partir de <b>2 Amplifications</b>.
         </div>
-        <div id="s-amp-shape-row" class="form-group" style="${hasDisp?'':'display:none'}">
-          <label style="font-size:.72rem">✚ Forme (combo Amplification + Dispersion)</label>
+        <div id="s-amp-shape-row" class="form-group" style="${nbAmp >= 2?'':'display:none'}">
+          <label style="font-size:.72rem">✚ Forme de zone</label>
           <div style="font-size:.66rem;color:var(--text-dim);padding:0 .1rem .25rem;line-height:1.4">
-            <b>Carré</b> = plus de cases (diagonales comprises). <b>Croix</b> = bras plus longs (6N−1) → frappe plus loin en ligne, mais sans les diagonales.
+            <b>Carré</b> = plus de cases (diagonales). <b>Croix</b> = bras longs sans diagonales. <b>Cône</b> = éventail depuis le lanceur. <b>Anneau</b> = couronne (centre épargné). <b>Ligne</b> = rayon droit large de 1 (portée max, +2 cases/Amp).
           </div>
-          <div style="display:flex;gap:.4rem">
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap">
             ${[
-              { v:'rect',  label:'▭ Rectangle / Carré', color:'#4f8cff' },
-              { v:'cross', label:'✚ Croix',             color:'#a855f7' },
+              { v:'rect',  label:'▭ Carré',  color:'#4f8cff' },
+              { v:'cross', label:'✚ Croix',  color:'#a855f7' },
+              { v:'cone',  label:'🔺 Cône',   color:'#f59e42' },
+              { v:'ring',  label:'◯ Anneau', color:'#22c38e' },
+              { v:'line',  label:'▬ Ligne',  color:'#e8b84b' },
             ].map(o => {
               const sel = _zoneShapeEdit === o.v;
               return `<button type="button" data-action="_selectZoneShape" data-val="${o.v}"
@@ -4677,13 +4680,13 @@ function _selectAmpMode(mode) {
   _updateSortPreview();
 }
 
-// Forme de la zone combo Amp+Disp ('rect' | 'cross').
+// Forme de la zone (Amplification ≥2) : 'rect' | 'cross' | 'cone' | 'ring' | 'line'.
 function _selectZoneShape(shape) {
   _zoneShapeEdit = ZONE_SHAPES.includes(shape) ? shape : 'rect';
   const hidden = document.getElementById('s-zone-shape');
   if (hidden) hidden.value = _zoneShapeEdit;
   // Boutons legacy du store (rect/croix) : maj visuelle si présents (sans erreur sinon).
-  const SHAPE_COL = { rect: '#4f8cff', cross: '#a855f7', cone: '#f59e42', ring: '#22c38e' };
+  const SHAPE_COL = { rect: '#4f8cff', cross: '#a855f7', cone: '#f59e42', ring: '#22c38e', line: '#e8b84b' };
   document.querySelectorAll('#s-forge-store [data-action="_selectZoneShape"]').forEach(btn => {
     const active = btn.dataset.val === _zoneShapeEdit;
     const col = SHAPE_COL[btn.dataset.val] || '#4f8cff';

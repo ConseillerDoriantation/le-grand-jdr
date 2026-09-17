@@ -23,7 +23,7 @@ export const ACTION_RUNE = 'Déclenchement';
  * @property {string} [ampMode]    - 'zone' | 'deplacement'  (défaut 'zone')
  * @property {string} [afflMode]   - 'dot' | 'etat' | 'laceration' (défaut 'dot')
  * @property {string} [enchMode]   - 'dmg' | 'etat'          (défaut 'etat')
- * @property {string} [zoneShape]  - 'rect' | 'cross'        (défaut 'rect')
+ * @property {string} [zoneShape]  - 'rect' | 'cross' | 'cone' | 'ring' | 'line' (défaut 'rect')
  * @property {string} [actionMode] - 'reaction' | 'action_bonus' (défaut 'reaction')
  */
 
@@ -57,7 +57,7 @@ export function computeSheetLines(state = {}) {
   const ampMode   = state.ampMode  || 'zone';
   const afflMode  = state.afflMode || 'dot';
   const enchMode  = state.enchMode || 'etat';
-  const zoneShape = ['cross', 'cone', 'ring'].includes(state.zoneShape) ? state.zoneShape : 'rect';
+  const zoneShape = ['cross', 'cone', 'ring', 'line'].includes(state.zoneShape) ? state.zoneShape : 'rect';
   const actionMode = state.actionMode || 'reaction';
   const has = (n) => (counts[n] || 0) > 0;
 
@@ -146,8 +146,8 @@ export function computeSheetLines(state = {}) {
     // Forme de zone : débloquée à partir de 2 Amplification (à 1 Amp c'est toujours
     // la ligne 1×3, choisir une forme n'aurait aucun effet).
     if (ampMode === 'zone' && (counts.Amplification || 0) >= 2)
-      lines.push({ slot: 'zone', id: 'shape', sub: true, icon: zoneShape === 'cross' ? '✚' : zoneShape === 'cone' ? '🔺' : zoneShape === 'ring' ? '◯' : '▭',
-        segment: { key: 'zoneShape', cur: zoneShape, hiddenId: 's-zone-shape', opts: [['rect', '▭', '#4f8cff'], ['cross', '✚', '#a855f7'], ['cone', '🔺', '#f59e42'], ['ring', '◯', '#22c38e']] } });
+      lines.push({ slot: 'zone', id: 'shape', sub: true, icon: zoneShape === 'cross' ? '✚' : zoneShape === 'cone' ? '🔺' : zoneShape === 'ring' ? '◯' : zoneShape === 'line' ? '▬' : '▭',
+        segment: { key: 'zoneShape', cur: zoneShape, hiddenId: 's-zone-shape', opts: [['rect', '▭', '#4f8cff'], ['cross', '✚', '#a855f7'], ['cone', '🔺', '#f59e42'], ['ring', '◯', '#22c38e'], ['line', '▬', '#e8b84b']] } });
   }
   // Dispersion : répète l'effet (1 + nDisp). Avec Amp → N zones ; seule → N cibles.
   if (has('Dispersion') && !isRegen)

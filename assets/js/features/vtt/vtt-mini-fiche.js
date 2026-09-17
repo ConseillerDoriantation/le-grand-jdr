@@ -18,7 +18,7 @@ import { calcSpellDuration, calcSpellTargets, getProtectionRestoreMode } from '.
 import { ZONE_SHAPES, _zoneDims, _zoneCount } from '../../shared/spell-zones.js';
 import { getDamageTypeById } from '../../shared/damage-types.js';
 import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, calcOr,
-         computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, getMod,
+         calcGardeMax, computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, getMod,
          sortCharactersForDisplay, favoriteFirst } from '../../shared/char-stats.js';
 import { useGold } from '../../shared/economy.js';
 import { loadCollection } from '../../data/firestore.js'; // lecture recettes/boutique (couche quota)
@@ -577,6 +577,26 @@ function _msTabCombat(c, uid, canEdit) {
   const setData = getArmorSetData(c);
   const setHtml = setData?.active ? `<div class="vtt-ms-setbonus">${_msIco('equip')} Set ${_esc(setData.type)}</div>` : '';
 
+  // Garde : ressource défensive éditable (jauge active seulement si gardeMax > 0).
+  // Le contrôleur du token / propriétaire / MJ peut ajuster la réserve courante ici,
+  // comme les PV/PM dans le dock. Persistance + garde-fous côté _vttMsSetGarde.
+  const gardeMax = calcGardeMax(c);
+  const gardeCur = Math.max(0, Math.min(gardeMax || 0, parseInt(c?.garde, 10) || 0));
+  const canEditVitals = _msCanEditVitals(c?.id, uid);
+  const gardeHtml = gardeMax > 0 ? `
+    <div class="vtt-ms-def-item">
+      <span>🛡️ Garde</span>
+      ${canEditVitals
+        ? `<strong style="display:inline-flex;align-items:center;gap:2px">
+             <input class="vtt-ms-garde-input" type="number" value="${gardeCur}" min="0" max="${gardeMax}"
+               data-vtt-fn="_vttMsSetGarde" data-vtt-on="change" data-vtt-args="${c.id}|${uid}|$value"
+               style="width:3ch;background:rgba(95,176,200,.14);border:1px solid rgba(95,176,200,.45);border-radius:5px;color:inherit;font:inherit;font-weight:800;text-align:center;padding:1px 2px"
+               title="Réserve de Garde actuelle (0–${gardeMax})">
+             <i style="font-style:normal;opacity:.6;font-weight:600">/ ${gardeMax}</i>
+           </strong>`
+        : `<strong>${gardeCur} / ${gardeMax}</strong>`}
+    </div>` : '';
+
   return `
     ${_msTabIntro('combat', 'Combat', `CA ${calcCA(c)}`, weapon?.nom ? _esc(weapon.nom) : 'Aucune arme équipée')}
     <div class="vtt-ms-combat-hero">
@@ -595,6 +615,7 @@ function _msTabCombat(c, uid, canEdit) {
       <div class="vtt-ms-def-item"><span>Défense</span><strong>${calcCA(c)}</strong></div>
       <div class="vtt-ms-def-item"><span>Vitesse</span><strong>${calcVitesse(c)}</strong></div>
       <div class="vtt-ms-def-item"><span>Maîtrise</span><strong>+${getMaitriseBonus(c)}</strong></div>
+      ${gardeHtml}
     </div>
     <div class="vtt-ms-sect-label">Caractéristiques</div>
     <div class="vtt-ms-grid">${statsHtml}</div>
@@ -748,8 +769,8 @@ function _vttSpellChips(s, c) {
   const nbAmp = runes.filter(r => r === 'Amplification').length;
   // Avec Enchantement (hors Invocation), l'Amplification booste l'effet → pas de zone.
   const _enchNoZone = runes.includes('Enchantement') && !runes.includes('Invocation');
-  const _zoneIcon = (shp) => shp === 'cross' ? '✚' : shp === 'cone' ? '🔺' : shp === 'ring' ? '◯' : shp === 'diamond' ? '◇' : '📐';
-  const _zoneLbl  = (shp) => shp === 'cross' ? 'Zone en croix' : shp === 'cone' ? 'Zone en cône' : shp === 'ring' ? 'Zone en anneau' : shp === 'diamond' ? 'Zone circulaire sur la grille' : 'Zone rectangulaire';
+  const _zoneIcon = (shp) => shp === 'cross' ? '✚' : shp === 'cone' ? '🔺' : shp === 'ring' ? '◯' : shp === 'line' ? '▬' : shp === 'diamond' ? '◇' : '📐';
+  const _zoneLbl  = (shp) => shp === 'cross' ? 'Zone en croix' : shp === 'cone' ? 'Zone en cône' : shp === 'ring' ? 'Zone en anneau' : shp === 'line' ? 'Zone en ligne' : shp === 'diamond' ? 'Zone circulaire sur la grille' : 'Zone rectangulaire';
   if (isClassic && (parseInt(s.zoneW) || 0) > 0 && (parseInt(s.zoneH) || 0) > 0) {
     chips.push({ icon:_zoneIcon(s.zoneShape), val:`${parseInt(s.zoneW)}×${parseInt(s.zoneH)} cases`, color:'#b47fff', lbl:_zoneLbl(s.zoneShape), dim:true });
   } else if (nbAmp > 0 && s.ampMode !== 'deplacement' && !_enchNoZone) {

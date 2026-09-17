@@ -86,7 +86,8 @@ test('Amplification ≥2 + Dispersion : ligne zone + sous-ligne forme + poses', 
   assert.deepEqual(ids(s), ['amp', 'shape', 'disp']);
   assert.equal(line(s, 'shape').sub, true);
   assert.equal(line(s, 'shape').segment.hiddenId, 's-zone-shape');
-  assert.equal(line(s, 'shape').segment.opts.length, 4);   // rect / cross / cone / ring
+  assert.equal(line(s, 'shape').segment.opts.length, 5);   // rect / cross / cone / ring / line
+  assert.ok(line(s, 'shape').segment.opts.some(o => o[0] === 'line'));
 });
 
 test('1 Amplification : PAS de sélecteur de forme (toujours une ligne 1×3)', () => {
