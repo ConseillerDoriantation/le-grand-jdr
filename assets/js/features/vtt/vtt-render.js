@@ -432,7 +432,7 @@ export function _buildTokenVisual(t, ld, condById) {
     fontFamily:'Inter,sans-serif', visible:false, listening:false, name:'move-value' }));
   // Mode Performance : couper toutes les ombres du token (coût de redraw majeur
   // en canvas 2D sur machines modestes). Le reste du visuel est conservé.
-  if (vttLowFx()) { try { g.find('Shape').forEach(n => n.shadowEnabled && n.shadowEnabled(false)); } catch {} }
+  if (vttLowFx()) _stripShadows(g);
   return g;
 }
 
@@ -658,5 +658,19 @@ export function _buildAnnotVisual(K, data) {
   if (data.rotation) shape.rotation(data.rotation);
   if (data.scaleX)   shape.scaleX(data.scaleX);
   if (data.scaleY)   shape.scaleY(data.scaleY);
+  // Mode performance : les ombres Konva (shadowBlur) sont TRÈS coûteuses sous
+  // Firefox (bien plus que sur Chromium) → on les coupe aussi sur les annotations,
+  // zones de sort et dessins, pas seulement sur les tokens.
+  if (vttLowFx()) _stripShadows(shape);
   return shape;
+}
+
+/** Désactive toutes les ombres d'un nœud Konva (Shape ou Group) — mode perf. */
+export function _stripShadows(node) {
+  if (!node) return;
+  try {
+    const nodes = typeof node.find === 'function' ? node.find('Shape') : [node];
+    nodes.forEach(n => n.shadowEnabled && n.shadowEnabled(false));
+    if (node.shadowEnabled && typeof node.find !== 'function') node.shadowEnabled(false);
+  } catch {}
 }

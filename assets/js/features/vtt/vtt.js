@@ -65,7 +65,7 @@ import {
   _reactionsCol, _reactionRef, _annotCol, _annotRef,
 } from './vtt-refs.js';
 import { CELL, CELL_M, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
-import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual, vttLowFx, setVttLowFx } from './vtt-render.js';
+import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual, vttLowFx, setVttLowFx, _stripShadows } from './vtt-render.js';
 import { vttCanvasPixelRatio } from './vtt-fog-performance.js';
 import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenHealthMeta, tokenMovementMeta, tokenRelationTone } from './vtt-token-visual.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
@@ -14114,7 +14114,12 @@ export const VTT_ACTIONS = {
       window.Konva.pixelRatio = on ? 1 : vttCanvasPixelRatio(window.devicePixelRatio, navigator.deviceMemory, navigator.hardwareConcurrency);
       VS.stage?.getLayers?.().forEach(l => { try { l.getCanvas().setPixelRatio(window.Konva.pixelRatio); l.getHitCanvas?.()?.setPixelRatio(window.Konva.pixelRatio); } catch {} });
     } catch {}
+    // Reconstruit tokens ET annotations : à l'activation, leurs ombres (shadowBlur,
+    // très coûteuses sous Firefox) sont coupées au build ; à la désactivation, elles
+    // reviennent. Puis balayage global du stage pour couper les ombres restantes.
     try { _renderAllTokens(); } catch {}
+    try { _renderAnnotLayer(); } catch {}
+    if (on) { try { _stripShadows(VS.stage); } catch {} }
     VS.stage?.batchDraw?.();
     document.getElementById('vtt-root')?.toggleAttribute('data-vtt-lowfx', on);  // coupe les backdrop-filter (CSS)
     const b = document.querySelector('.vtt-tool-float-tools [data-vtt-fn="_vttToggleLowFx"]');
