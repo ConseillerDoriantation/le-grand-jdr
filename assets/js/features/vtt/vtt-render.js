@@ -624,8 +624,8 @@ export function _buildAnnotVisual(K, data) {
         closed: true, fill: col + '24', stroke: col, strokeWidth: _zsw,
         dash: [10, 6], hitStrokeWidth: 0, listening: true,
       }));
-    } else if (data.shape === 'cone' || data.shape === 'ring' || data.shape === 'diamond') {
-      // Formes en CASES (cône stepped 1/3/5…, anneau en losange évidé, losange plein) :
+    } else if (data.shape === 'cone' || data.shape === 'ring' || data.shape === 'diamond' || data.shape === 'line') {
+      // Formes en CASES (cône stepped 1/3/5…, anneau en losange évidé, losange plein, ligne 1×L) :
       // on surligne exactement les cases couvertes → cohérent avec le ciblage.
       for (const cell of _zoneCellRects(K, zw, zh, data.shape, data.coneDir || 'down', {
         fill: col + '5a', stroke: col, strokeWidth: 2, shadowColor: col, shadowBlur: 8, shadowOpacity: 0.6, hitStrokeWidth: 0, listening: true,

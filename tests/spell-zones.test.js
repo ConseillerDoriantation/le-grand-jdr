@@ -18,13 +18,13 @@ test('_zoneCount : Dispersion = 1 + nDisp poses', () => {
   assert.equal(_zoneCount(undefined), 1);
 });
 
-test('ZONE_SHAPES : rect, cross, cone, ring (pas de diamond côté runes)', () => {
-  assert.deepEqual(ZONE_SHAPES, ['rect', 'cross', 'cone', 'ring']);
+test('ZONE_SHAPES : rect, cross, cone, ring, line (pas de diamond côté runes)', () => {
+  assert.deepEqual(ZONE_SHAPES, ['rect', 'cross', 'cone', 'ring', 'line']);
 });
 
 test('1 Amplification = ligne 3×1 quelle que soit la forme (forme non débloquée)', () => {
   assert.equal(_zoneShapeUnlocked(1), false);
-  for (const shp of ['rect', 'cross', 'cone', 'ring']) {
+  for (const shp of ['rect', 'cross', 'cone', 'ring', 'line']) {
     assert.deepEqual(_zoneDims(shp, 1), { w: 3, h: 1, shape: 'rect' });
   }
 });
@@ -53,6 +53,15 @@ test('cone (Cône) : profondeur N+1, base 2·prof−1, depuis le lanceur', () =>
 test('ring (Anneau) : rayon N, envergure 2N+1, centre épargné', () => {
   assert.deepEqual(_zoneDims('ring', 2), { w: 5, h: 5, shape: 'ring', radius: 2 });
   assert.deepEqual(_zoneDims('ring', 3), { w: 7, h: 7, shape: 'ring', radius: 3 });
+});
+
+test('line (Ligne) : rayon droit 1×L, +2 cases par Amplification (longueur 2N+1)', () => {
+  assert.deepEqual(_zoneDims('line', 2), { w: 5, h: 1, shape: 'line' });
+  assert.deepEqual(_zoneDims('line', 3), { w: 7, h: 1, shape: 'line' });
+  assert.deepEqual(_zoneDims('line', 4), { w: 9, h: 1, shape: 'line' });
+  // toutes les cases de la boîte 1×L sont la ligne (couverture = longueur)
+  assert.equal(cellCount('line', 2), 5);
+  assert.equal(cellCount('line', 3), 7);
 });
 
 test('cône en cases : apex → base = 1, 3, 5 (palier 2)', () => {
