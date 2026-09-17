@@ -25,6 +25,8 @@ import { getArmorSetData, getMainWeapon, getItemTraits, getEquippedSourceItem, r
 import { getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { buildProjectionPatch, switchBuild } from '../../shared/character-builds.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
+import { ZONE_SHAPES, _zoneDims, _zoneCount } from '../../shared/spell-zones.js';
+import { _zoneCellRects } from './vtt-render.js';
 import { resolveWeaponDamageContext } from '../../shared/weapon-damage-context.js';
 import {
   combinedTechniqueTargetCA, techniqueAllowedForAction, techniqueAreaIntersects, techniqueOutcomeMultiplier, techniqueTriggerApplies,
@@ -1425,7 +1427,7 @@ function _initCanvas(container) {
     if (e.target===VS.stage) {
       if (_suppressNextClick) { _suppressNextClick = false; return; }
       if (_selfCtx) return; // placement déplacement actif : clic hors case = ne rien faire
-      if (_zoneCtx) { _zoneCtx.placed = !_zoneCtx.placed; return; }
+      if (_zoneCtx) { _zoneClickAction(); return; }
       _deselect(); _deselectAnnot();
     }
   });
@@ -1923,7 +1925,7 @@ function _buildShape(t) {
     // Aucun token n'est sélectionnable ici, lanceur compris : sinon cliquer sur
     // le lanceur tombait dans le `else` final et rouvrait le HUD d'action.
     if (_zoneCtx) {
-      _zoneCtx.placed = !_zoneCtx.placed;
+      _zoneClickAction();
       return;
     }
 
@@ -2536,7 +2538,7 @@ function _showMoveRange(t) {
       // on bascule placed pour zone et on annule le déplacement
       if (_zoneCtx) {
         e.cancelBubble = true;
-        _zoneCtx.placed = !_zoneCtx.placed;
+        _zoneClickAction();
         return;
       }
       if (_mtCtx) { e.cancelBubble = true; return; }
@@ -4350,24 +4352,15 @@ function _buildSpellOption(s, ctx) {
                    && runes.filter(r => r === 'Invocation').length === 0;
   let zoneW = (_isDepl || _enchActive) ? 0 : (s.zoneW || 0);
   let zoneH = (_isDepl || _enchActive) ? 0 : (s.zoneH || 0);
-  let zoneShape = ['cross', 'diamond'].includes(s.zoneShape) ? s.zoneShape : 'rect';
-  // Miroir EXACT de _calcSortZone (spells-calc) : Amp seul → ligne 3N×1 ;
-  // combo Amp+Disp → Amplification = HAUTEUR, Dispersion = LARGEUR (4N−1 par axe),
-  // forme rectangle/carré ou croix selon s.zoneShape. 1 case par unité (pas de conversion mètres).
+  let zoneShape = [...ZONE_SHAPES, 'diamond'].includes(s.zoneShape) ? s.zoneShape : 'rect';
+  // Modèle « zones » v2 (source unique : shared/spell-zones.js) — Amplification pilote
+  // la TAILLE d'UNE zone (forme au choix), Dispersion la RÉPÈTE (cf. nbCibles ci-dessous).
   if (!_isDepl && !_enchActive && zoneW <= 0 && zoneH <= 0) {
-    const _runes = s.runes || [];
-    const _nbAmp  = _runes.filter(r => r === 'Amplification').length;
-    const _nbDisp = _runes.filter(r => r === 'Dispersion').length;
+    const _nbAmp = (s.runes || []).filter(r => r === 'Amplification').length;
     if (_nbAmp >= 1) {
-      if (_nbDisp >= 1) {
-        zoneShape = s.zoneShape === 'cross' ? 'cross' : 'rect';
-        const _m = zoneShape === 'cross' ? 6 : 4;   // croix : bras plus longs (6N−1)
-        zoneH = _m * _nbAmp - 1;    // Amplification → hauteur
-        zoneW = _m * _nbDisp - 1;   // Dispersion → largeur
-      } else {
-        zoneW = 3 * _nbAmp;
-        zoneH = 1;
-      }
+      const _shape = ZONE_SHAPES.includes(s.zoneShape) ? s.zoneShape : 'rect';
+      const _d = _zoneDims(_shape, _nbAmp);
+      zoneW = _d.w; zoneH = _d.h; zoneShape = _d.shape;   // à 1 Amp → ligne 3×1 (forme forcée rect)
     }
   }
   // Sentinelle / Invocation : force une zone min 1×1 (utile pour le placement)
@@ -7055,6 +7048,14 @@ function _tokenCenter(t) {
   return { x: t.col * CELL + d.w * CELL / 2, y: t.row * CELL + d.h * CELL / 2 };
 }
 
+/** Distance en CASES (Manhattan, comme la règle de mesure) entre le lanceur et la
+ *  case centrale d'une zone (px centre → case entière). Sert au contrôle de portée. */
+function _zoneCenterDistCells(casterCenter, zx, zy) {
+  const cCol = Math.floor(casterCenter.x / CELL), cRow = Math.floor(casterCenter.y / CELL);
+  const zCol = Math.floor(zx / CELL), zRow = Math.floor(zy / CELL);
+  return Math.abs(zCol - cCol) + Math.abs(zRow - cRow);
+}
+
 /** Dessine une ligne pointillée src→tgt sur le layer token. */
 function _mtDrawLine(srcData, tgtData, color) {
   const K = window.Konva; if (!K || !VS.layers.token) return null;
@@ -7261,30 +7262,64 @@ function _zoneClear() {
   hud?.remove();
   _zonePreview?.destroy();
   _zonePreview = null;
+  _zoneCtx?._dropGroup?.destroy();   // zones posées en attente (aperçu Dispersion)
   _zoneCtx = null;
   VS.layers.token?.batchDraw();
+}
+
+/** Dessine une zone posée (déjà validée en attente de résolution) — plus discrète
+ *  que le fantôme actif, pour qu'on voie ce qui est déjà placé. Renvoie un groupe
+ *  Konva positionné en absolu. */
+function _zoneDroppedGroup(K, v) {
+  const g = new K.Group({ x: v.x, y: v.y, listening: false, name: 'zone-dropped' });
+  const zv = v.zoneVisual || {};
+  const wPx = zv.w || v.wPx, hPx = zv.h || v.hPx;
+  const shp = zv.shape || 'rect';
+  const col = v.color || '#60a5fa';
+  const style = { fill: col + '3a', stroke: col, strokeWidth: 2, shadowColor: col, shadowBlur: 5, shadowOpacity: 0.5, listening: false };
+  if (shp === 'rect') {
+    g.add(new K.Rect({ x: -wPx / 2, y: -hPx / 2, width: wPx, height: hPx, ...style, cornerRadius: 3 }));
+  } else {
+    for (const cell of _zoneCellRects(K, wPx, hPx, shp, zv.coneDir || 'down', style)) g.add(cell);
+  }
+  return g;
 }
 
 /** (Re)Construit le rectangle Konva de prévisualisation. */
 function _buildZonePreview() {
   if (!_zoneCtx || !VS.layers.token) return;
   _zonePreview?.destroy();
+  _zoneCtx._dropGroup?.destroy();
+  _zoneCtx._dropGroup = null;
   const K = window.Konva;
+  // Zones à effet déjà posées (Dispersion) : rendues en clair pour rester visibles
+  // pendant qu'on place les suivantes.
+  if (Array.isArray(_zoneCtx._accFx) && _zoneCtx._accFx.length) {
+    const dg = new K.Group({ listening: false, name: 'zone-dropped-layer' });
+    for (const v of _zoneCtx._accFx) dg.add(_zoneDroppedGroup(K, v));
+    VS.layers.token.add(dg);
+    _zoneCtx._dropGroup = dg;
+  }
   const { wPx, hPx, x, y } = _zoneCtx;
   const group = new K.Group({ x, y, listening: false, name: 'zone-preview' });
-  const _fill = 'rgba(253,224,71,0.22)', _stroke = '#fde047';
-  if (_zoneCtx.opt?.zoneShape === 'cross') {
-    // Croix : barre verticale (1 case × hauteur) + barre horizontale (largeur × 1 case).
-    group.add(new K.Rect({ x: -CELL / 2, y: -hPx / 2, width: CELL, height: hPx,
-      fill: _fill, stroke: _stroke, strokeWidth: 3, dash: [10, 5], listening: false }));
-    group.add(new K.Rect({ x: -wPx / 2, y: -CELL / 2, width: wPx, height: CELL,
-      fill: _fill, stroke: _stroke, strokeWidth: 3, dash: [10, 5], listening: false }));
-  } else if (_zoneCtx.opt?.zoneShape === 'diamond') {
-    group.add(new K.Line({
-      points: [0, -hPx / 2, wPx / 2, 0, 0, hPx / 2, -wPx / 2, 0],
-      closed: true,
-      fill: _fill, stroke: _stroke, strokeWidth: 3, dash: [10, 5], listening: false,
-    }));
+  // Hors de portée (centre de la zone > portée) → aperçu ROUGE (feedback direct :
+  // le placement sera refusé à la validation).
+  const _srcC = VS.tokens[_zoneCtx.srcId]?.data ? _tokenCenter(VS.tokens[_zoneCtx.srcId].data) : null;
+  const _range = Math.max(0, parseInt(_zoneCtx.opt?.portee) || 1);
+  const _oor = !!(_srcC && _zoneCenterDistCells(_srcC, x, y) > _range);
+  const _fill = _oor ? 'rgba(255,90,110,0.30)' : 'rgba(253,224,71,0.42)';
+  const _stroke = _oor ? '#ff5a6e' : '#ffe86b';
+  const _shp = _zoneCtx.opt?.zoneShape;
+  // Cases bien visibles : remplissage opaque + bordure pleine + halo par case.
+  const _cellStyle = { fill: _oor ? 'rgba(255,90,110,0.42)' : 'rgba(253,224,71,0.52)', stroke: _stroke, strokeWidth: 2.5, shadowColor: _stroke, shadowBlur: 9, shadowOpacity: 0.7, listening: false };
+  if (_shp === 'cone') {
+    // Cône EN CASES (1, 3, 5…). Direction : manuelle (R) sinon celle calculée au
+    // snapping (coneDirEff) pour que le dessin colle exactement aux cases snappées.
+    const cl = _coneLayout(_zoneCtx.srcId, x, y, wPx, hPx, _zoneCtx.coneDirManual || _zoneCtx.coneDirEff);
+    for (const cell of _zoneCellRects(K, cl.w, cl.h, 'cone', cl.dir, _cellStyle)) group.add(cell);
+  } else if (_shp === 'cross' || _shp === 'ring' || _shp === 'diamond') {
+    // Formes EN CASES (croix, anneau en losange évidé, losange plein) → cohérent avec le ciblage.
+    for (const cell of _zoneCellRects(K, wPx, hPx, _shp, 'down', _cellStyle)) group.add(cell);
   } else {
     group.add(new K.Rect({
       x: -wPx / 2, y: -hPx / 2,
@@ -7315,11 +7350,20 @@ function _buildZonePreview() {
 /** Déplace la prévisualisation si la zone n'est pas posée. */
 function _zoneUpdatePreview(wp) {
   if (!_zoneCtx || !_zonePreview || _zoneCtx.placed) return;
-  const { wPx, hPx } = _zoneCtx;
-  // Snapper le coin haut-gauche sur la grille (pas le centre)
+  let wPx = _zoneCtx.wPx, hPx = _zoneCtx.hPx;
+  // Cône : la box est pivotée pour les sens horizontaux → on snappe avec la box
+  // RÉELLEMENT dessinée (sinon les cases sont à cheval sur la grille). On mémorise
+  // la direction effective pour que l'aperçu se dessine à l'identique.
+  if (_zoneCtx.opt?.zoneShape === 'cone') {
+    const cl = _coneLayout(_zoneCtx.srcId, wp.x, wp.y, _zoneCtx.wPx, _zoneCtx.hPx, _zoneCtx.coneDirManual);
+    wPx = cl.w; hPx = cl.h; _zoneCtx.coneDirEff = cl.dir;
+  }
+  // Snapper le coin haut-gauche sur la grille → cases alignées quelles que soient
+  // les dimensions (paires ou impaires).
   const snapX = Math.round((wp.x - wPx / 2) / CELL) * CELL + wPx / 2;
   const snapY = Math.round((wp.y - hPx / 2) / CELL) * CELL + hPx / 2;
   _zoneCtx.x = snapX; _zoneCtx.y = snapY;
+  if (_zoneCtx.opt?.zoneShape === 'cone' && !_zoneCtx.coneDirManual) _buildZonePreview();
   _zonePreview.position({ x: snapX, y: snapY });
   VS.layers.token.batchDraw();
 }
@@ -7328,26 +7372,32 @@ function _zoneUpdatePreview(wp) {
 function _showZoneHud() {
   document.getElementById('vtt-zone-hud')?.remove();
   const opt = _zoneCtx.opt;
+  const total = _zoneCtx.invocationsTotal || 1;
+  const done  = _zoneCtx.invocationsDone || 0;
+  const multi = total > 1;   // Dispersion / invocations multiples → on pose plusieurs zones
   const hud = document.createElement('div');
   hud.id = 'vtt-zone-hud';
   hud.className = 'vtt-mt-hud';
   hud.innerHTML = `
     <div class="vtt-mt-hud-header">
-      <span>${_esc(opt.icon || '✨')} ${_esc(opt.label)}</span>
-      <span class="vtt-mt-hud-count" style="color:#fde047;background:rgba(253,224,71,.12);border-color:rgba(253,224,71,.35)">📐 ${opt.zoneW}×${opt.zoneH} cases</span>
+      <span>${_esc(opt.icon || '✨')} ${_esc(_zoneCtx.baseLabel || opt.label)}</span>
+      <span class="vtt-mt-hud-count" style="color:#fde047;background:rgba(253,224,71,.12);border-color:rgba(253,224,71,.35)">📐 ${opt.zoneW}×${opt.zoneH} cases${multi ? ` · ${done}/${total} posées` : ''}</span>
     </div>
     <div class="vtt-zone-hint">
-      Déplacez · Clic = poser/reprendre · <kbd>R</kbd> = tourner · <kbd>Entrée</kbd> = valider
+      ${multi
+        ? `Déplacez · <kbd>Clic</kbd> = poser une zone · <kbd>R</kbd> = tourner · <kbd>Retour</kbd> = annuler la dernière · <kbd>Entrée</kbd> = valider`
+        : `Déplacez · Clic = poser/reprendre · <kbd>R</kbd> = tourner · <kbd>Entrée</kbd> = valider`}
     </div>
     <div class="vtt-mt-hud-actions">
       <button class="vtt-mt-btn-cancel"   data-vtt-fn="_zoneCancel">✕ Annuler</button>
-      <button class="vtt-mt-btn-validate" data-vtt-fn="_zoneValidate">✓ Valider</button>
+      <button class="vtt-mt-btn-validate" data-vtt-fn="_zoneValidate">✓ Valider${multi ? ` (${done}/${total})` : ''}</button>
     </div>`;
   const onKey = e => {
     if (_vttIsTypingTarget(e.target)) return;
-    if (e.key === 'Enter')              { e.preventDefault(); _zoneValidate(); }
-    if (e.key === 'Escape')             _zoneCancel();
-    if (e.key === 'r' || e.key === 'R') _zoneRotate();
+    if (e.key === 'Enter')                     { e.preventDefault(); _zoneValidate(); }
+    if (e.key === 'Escape')                    _zoneCancel();
+    if (e.key === 'r' || e.key === 'R')        _zoneRotate();
+    if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); _zoneUndoLast(); }
   };
   document.addEventListener('keydown', onKey);
   hud._removeKey = () => document.removeEventListener('keydown', onKey);
@@ -7366,17 +7416,40 @@ function _startZonePlacement(srcId, tgtId, opt, optIdx) {
   _mtCtx = null; // annuler multi-cibles sans broadcast (zone prend la main)
   const wPx = opt.zoneW * CELL;  // zoneW/H = nombre de cases
   const hPx = opt.zoneH * CELL;
-  // Nombre de placements : invocations choisies au lancement, sinon sentinelle (Dispersion) / 1.
+  // Nombre de placements : invocations choisies, sinon sentinelle, sinon — modèle
+  // zones v2 — Dispersion répète la zone (1 + nDisp poses via nbCibles), sinon 1.
+  // (La pose répétée n'est branchée que pour les zones-MARQUEUR utilitaires ; les
+  // zones à effet instantané [dégâts/soin] restent une pose — cf. Passe 2b.)
   const nbInvoc = (opt._invSelIds && opt._invSelIds.length)
     ? opt._invSelIds.length
-    : (opt?.mods?.sentinelle?.nbInvocations || opt?.mods?.invocation?.nbInvocations || 1);
+    : (opt?.mods?.sentinelle?.nbInvocations || opt?.mods?.invocation?.nbInvocations
+       || Math.max(1, opt.nbCibles || 1));
   _zoneCtx = {
     srcId, tgtId, opt, optIdx, wPx, hPx, x: 0, y: 0, placed: false,
+    baseLabel: opt.label,        // libellé de référence (le compteur « (n/T) » se recompose dessus)
     invocationsTotal: nbInvoc,
     invocationsDone: 0,
+    _accFx: [],                  // poses accumulées (zones à effet) → aperçu + résolution groupée
   };
   _buildZonePreview();
   _showZoneHud();
+}
+
+// Orientation d'un cône : direction cardinale lanceur→zone (l'apex est du côté du
+// lanceur, la base au loin). Pour les sens horizontaux, la bounding-box est pivotée
+// (profondeur = largeur px). wPx/hPx = base×profondeur (issus de _zoneDims).
+function _coneLayout(srcId, x, y, wPx, hPx, forcedDir) {
+  let dir = forcedDir || null;
+  if (!dir) {
+    const cc = _tokenCenter(VS.tokens[srcId]?.data);
+    dir = 'down';
+    if (cc && Number.isFinite(cc.x) && Number.isFinite(cc.y)) {
+      const dx = x - cc.x, dy = y - cc.y;
+      dir = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'right' : 'left') : (dy >= 0 ? 'down' : 'up');
+    }
+  }
+  const horiz = dir === 'left' || dir === 'right';
+  return { dir, w: horiz ? hPx : wPx, h: horiz ? wPx : hPx };
 }
 
 // Pose une zone de sort PERSISTANTE (sort utilitaire) : un dessin partagé par
@@ -7391,10 +7464,15 @@ async function _vttPlaceSpellZone(srcId, opt, { x, y, wPx, hPx }) {
   const expiresAtRound = round > 0 ? (round + dur - 1) : dur;
   const sigil = _buildCastSigil(VS.tokens[srcId]?.data, opt);
   const color = sigil?.color || opt.enchantElementColor || opt.afflictionElementColor || '#b47fff';
+  const _shape = [...ZONE_SHAPES, 'diamond'].includes(opt.zoneShape) ? opt.zoneShape : 'rect';
+  // Cône : orienté en 4 directions cardinales (apex du côté du lanceur, base au loin) ;
+  // la bounding-box est pivotée pour les sens horizontaux.
+  let _w = wPx, _h = hPx, _coneDir = null;
+  if (_shape === 'cone') { const cl = _coneLayout(srcId, x, y, wPx, hPx, _zoneCtx?.coneDirManual || _zoneCtx?.coneDirEff); _w = cl.w; _h = cl.h; _coneDir = cl.dir; }
   const data = {
     type: 'spellzone',
-    x, y, w: wPx, h: hPx,
-    shape: ['cross', 'diamond'].includes(opt.zoneShape) ? opt.zoneShape : 'rect',
+    x, y, w: _w, h: _h, ...(_coneDir ? { coneDir: _coneDir } : {}),
+    shape: _shape,
     color, fill: true, strokeWidth: 2,
     label: opt.label || 'Zone', icon: opt.icon || '✨',
     totalDuration: dur, startRound: round, expiresAtRound,
@@ -7423,25 +7501,84 @@ export function _vttExpireSpellZones(round) {
 
 function _zoneCancel() { _zoneClear(); showNotif('Zone annulée', 'info'); }
 
+const _CONE_DIRS = ['down', 'right', 'up', 'left'];
 function _zoneRotate() {
   if (!_zoneCtx) return;
-  [_zoneCtx.wPx, _zoneCtx.hPx] = [_zoneCtx.hPx, _zoneCtx.wPx];
+  if (_zoneCtx.opt?.zoneShape === 'cone') {
+    // Cône : on ne permute PAS la bounding-box (ça cassait la forme). On fait
+    // tourner sa DIRECTION dans les 4 sens (l'apex reste du côté visé). Le 1er R
+    // part du sens auto (lanceur→curseur), puis cycle.
+    const cur = _zoneCtx.coneDirManual || _coneLayout(_zoneCtx.srcId, _zoneCtx.x, _zoneCtx.y, _zoneCtx.wPx, _zoneCtx.hPx).dir;
+    _zoneCtx.coneDirManual = _CONE_DIRS[(_CONE_DIRS.indexOf(cur) + 1) % 4];
+  } else {
+    [_zoneCtx.wPx, _zoneCtx.hPx] = [_zoneCtx.hPx, _zoneCtx.wPx];
+  }
   _buildZonePreview();
   _zonePreview?.position({ x: _zoneCtx.x, y: _zoneCtx.y });
   VS.layers.token?.batchDraw();
 }
 
-async function _zoneValidate() {
+// Clic pendant un placement de zone :
+//  · zone MULTIPLE (Dispersion / invocations) → POSE une zone et on continue (on ne
+//    résout qu'à l'Entrée / bouton Valider) ;
+//  · zone UNIQUE → verrouille/déverrouille la position (comportement historique).
+function _zoneClickAction() {
+  if (!_zoneCtx) return;
+  const total = _zoneCtx.invocationsTotal || 1;
+  if (total > 1) { _zoneValidate(false); return; }
+  _zoneCtx.placed = !_zoneCtx.placed;
+}
+
+// Annule la DERNIÈRE zone posée sans quitter le placement (déplacer une zone mal
+// posée = Retour puis re-clic ailleurs). Marche pour les 3 familles :
+//  · marqueurs / invocations / sentinelles → détruit le dernier token/annotation créé ;
+//  · zones à effet → retire la dernière pose accumulée (_accFx).
+async function _zoneUndoLast() {
+  if (!_zoneCtx) return;
+  const done = _zoneCtx.invocationsDone || 0;
+  if (done <= 0) { showNotif('Aucune zone à annuler', 'info'); return; }
+  // Zones à effet instantané : la pose n'est qu'accumulée (pas encore résolue).
+  if (Array.isArray(_zoneCtx._accFx) && _zoneCtx._accFx.length) _zoneCtx._accFx.pop();
+  // Marqueurs utilitaires : supprime la dernière annotation persistante posée.
+  if (Array.isArray(_zoneCtx.placedZoneIds) && _zoneCtx.placedZoneIds.length) {
+    const zid = _zoneCtx.placedZoneIds.pop();
+    if (zid) { _annotations[zid]?.shape?.destroy?.(); delete _annotations[zid]; await deleteDoc(_annotRef(zid)).catch(() => {}); }
+  }
+  // Invocations / sentinelles : supprime le dernier token invoqué.
+  if (Array.isArray(_summonSpawnIds) && _summonSpawnIds.length
+      && (_zoneCtx.opt?.mods?.invocation || _zoneCtx.opt?.mods?.sentinelle)) {
+    const tid = _summonSpawnIds.pop();
+    if (tid) { VS.tokens[tid]?.shape?.destroy?.(); delete VS.tokens[tid]; await deleteDoc(_tokRef(tid)).catch(() => {}); }
+  }
+  _zoneCtx.invocationsDone = done - 1;
+  _zoneCtx.placed = false;
+  const total = _zoneCtx.invocationsTotal || 1;
+  _zoneCtx.opt = { ..._zoneCtx.opt, label: `${_zoneCtx.baseLabel} (${Math.min((_zoneCtx.invocationsDone || 0) + 1, total)}/${total})` };
+  showNotif(`Dernière zone annulée (${_zoneCtx.invocationsDone}/${total})`, 'info');
+  _showZoneHud();
+  _buildZonePreview();
+  VS.layers.token?.batchDraw();
+}
+
+// finalize=false : « poser » une zone (clic) et rester en placement pour la suivante.
+// finalize=true (défaut : Entrée / bouton Valider) : résoudre toutes les zones posées.
+async function _zoneValidate(finalize = true) {
   if (!_zoneCtx) return;
   const { srcId, opt, wPx, hPx, x, y } = _zoneCtx;
 
-  // Vérification portée : centre de la zone vs lanceur
+  // Vérification portée : le CENTRE de la zone doit être dans la portée du lanceur
+  // (si la zone déborde au-delà, ce n'est pas grave). NB : `opt.portee` peut arriver
+  // en chaîne → on force un nombre, sinon `"6" + 0.5` = "60.5" et la portée saute.
   const srcData = VS.tokens[srcId]?.data;
   if (srcData) {
     const sc = _tokenCenter(srcData);
-    const distCells = Math.hypot(x - sc.x, y - sc.y) / CELL;
-    if (distCells > (opt.portee || 1) + 0.5) {
-      showNotif(`Zone hors de portée (${Math.round(distCells)}c — portée : ${opt.portee}c)`, 'error');
+    // Distance en CASES ENTIÈRES entre la case centrale de la zone et le lanceur,
+    // en Manhattan (|Δcol|+|Δligne|) — MÊME métrique que la règle de mesure. La
+    // case centrale ne peut PAS dépasser la portée (pas de tolérance flottante).
+    const distCells = _zoneCenterDistCells(sc, x, y);
+    const range = Math.max(0, parseInt(opt.portee) || 1);
+    if (distCells > range) {
+      showNotif(`Zone hors de portée (${distCells}c — portée : ${range}c)`, 'error');
       return;
     }
   }
@@ -7449,6 +7586,10 @@ async function _zoneValidate() {
   // Détection sur l'empreinte complète du token, pas uniquement sur le centre
   // de son portrait. La clé du dictionnaire est conservée comme id canonique
   // pour que toutes les cibles détectées soient ensuite résolues sans perte.
+  // Descripteur de zone pour le ciblage : cône orienté (box pivotée + sens) sinon w×h.
+  const _zShape = opt.zoneShape || 'rect';
+  const _zLay = _zShape === 'cone' ? _coneLayout(srcId, x, y, wPx, hPx, _zoneCtx?.coneDirManual || _zoneCtx?.coneDirEff) : { w: wPx, h: hPx, dir: null };
+  const _zoneHit = { x, y, width: _zLay.w, height: _zLay.h, shape: _zShape, cellSize: CELL, coneDir: _zLay.dir };
   const targets = Object.entries(VS.tokens)
     .filter(([, e]) => {
       if (!e.data || e.data.pageId !== VS.activePage?.id) return false;
@@ -7459,7 +7600,7 @@ async function _zoneValidate() {
       const dims = _tokenDims(e.data);
       return tokenFootprintIntersectsZone(
         { col: e.data.col, row: e.data.row, width: dims.w, height: dims.h },
-        { x, y, width: wPx, height: hPx, shape: opt.zoneShape || 'rect', cellSize: CELL },
+        _zoneHit,
       );
     })
     .map(([id]) => id);
@@ -7474,27 +7615,18 @@ async function _zoneValidate() {
     ? '#22c38e'
     : (_zoneSigil?.color || _zoneDamageType?.color || opt.damageTypeColor || (opt.isCaSort ? '#4f8cff' : '#b47fff'));
   const _zoneVisual = {
-    x, y, w: wPx, h: hPx,
+    x, y, w: _zLay.w, h: _zLay.h,
     shape: opt.zoneShape || 'rect',
+    ...(_zLay.dir ? { coneDir: _zLay.dir } : {}),
     label: `${opt.icon || (_isHealingZone ? '💚' : '✨')} ${opt.label || (_isHealingZone ? 'Zone de soin' : 'Zone d’effet')}`,
     cellSize: CELL,
   };
-  if (_zoneSigil) _playSigilForToken(srcId, _zoneSigil);
-  _playZoneFx(srcId, { x, y }, _zoneVisual, targets, _zImpColor, !!_zoneSigil?.physical, _isSummon);
-  try {
-    const _uid = STATE.user?.uid;
-    if (_uid) {
-      const _n = Date.now();
-      _seenSigilFire[_uid] = _n;
-      setDoc(_castingRef(_uid), {
-        sigilFire: {
-          tokenId: srcId, sigil: _zoneSigil || null, pageId: VS.activePage?.id || null, n: _n,
-          targets, impColor: _zImpColor, physical: !!_zoneSigil?.physical,
-          zone: _zoneVisual, isSummon: _isSummon,
-        },
-      }, { merge: true }).catch(() => {});
-    }
-  } catch {}
+  // TOUS les effets de rune (sceau/dessin + projectile + empreinte de zone + diffusion)
+  // sont DIFFÉRÉS : ils apparaissent une fois l'action RÉSOLUE, pas à l'ouverture de
+  // la modale de résolution.
+  //  · sorts à cibles → joués à la fin de _vttRollAttack (via opt._zoneFx) ;
+  //  · pose de marqueur / sentinelle (résolution synchrone) → joués sur place ci-dessous.
+  opt._zoneFx = () => _emitOneZoneFx({ srcId, x, y, zoneVisual: _zoneVisual, targets, color: _zImpColor, physical: !!_zoneSigil?.physical, isSummon: _isSummon, sigil: _zoneSigil });   // différée par défaut
 
   // ── Sort « pose de zone » : utilitaire SANS effet appliqué sur cible (Mur de
   //    pierre, ou Affliction « sans état défini »…). Pose UNIQUEMENT un marqueur
@@ -7510,15 +7642,35 @@ async function _zoneValidate() {
   const _zoneAppliesEffect = opt.isHeal || opt.isRegen || opt.isEnchant || opt.isCaSort || _afflHasEffect;
   if (opt.isUtil && (opt.zoneW > 0 || opt.zoneH > 0) && !_zoneAppliesEffect
       && !opt?.mods?.invocation && !opt?.mods?.sentinelle) {
-    const _zid = await _vttPlaceSpellZone(srcId, opt, { x, y, wPx, hPx });
+    // Modèle zones v2 : la Dispersion pose la zone 1 + nDisp fois (invocationsTotal).
+    // On boucle comme les invocations : PM/journal une seule fois, à la dernière pose.
+    if (!_zoneCtx.invocationsDone) _zoneCtx.placedZoneIds = [];
+    const total = _zoneCtx.invocationsTotal || 1;
+    const _done0 = _zoneCtx.invocationsDone || 0;
+    if (_done0 < total) {   // pose un marqueur (sauf si le quota est déjà atteint)
+      const _zid = await _vttPlaceSpellZone(srcId, opt, { x, y, wPx, hPx });
+      if (_zid) _zoneCtx.placedZoneIds.push(_zid);
+      _zoneCtx.invocationsDone = _done0 + 1;
+    }
+    const done = _zoneCtx.invocationsDone || 0;
+    if (!finalize) {   // clic : pose et reste en placement ; Entrée validera
+      showNotif(done >= total ? `${done}/${total} zones posées — Entrée pour valider (Retour = annuler la dernière)` : `${opt.icon || '✨'} Zone ${done}/${total} posée — clic pour la suivante`, 'info');
+      _zoneCtx.placed = false;
+      _zoneCtx.opt = { ..._zoneCtx.opt, label: `${_zoneCtx.baseLabel} (${Math.min(done + 1, total)}/${total})` };
+      _showZoneHud();
+      _zonePreview?.position({ x: _zoneCtx.x, y: _zoneCtx.y });
+      VS.layers.token?.batchDraw();
+      return; // reste en mode placement
+    }
+    const _ids = _zoneCtx.placedZoneIds || [];
     const srcD = VS.tokens[srcId]?.data;
     const _snap = _captureUndoSnapshot(srcId, []);
-    if (_zid) _snap.createdAnnots = [_zid];
+    _snap.createdAnnots = [..._ids];
     if (srcD && !(await _vttSpendSpellPm(srcD, opt))) {
-      if (_zid) {
-        _annotations[_zid]?.shape?.destroy?.();
-        delete _annotations[_zid];
-        await deleteDoc(_annotRef(_zid)).catch(() => {});
+      for (const zid of _ids) {
+        _annotations[zid]?.shape?.destroy?.();
+        delete _annotations[zid];
+        await deleteDoc(_annotRef(zid)).catch(() => {});
       }
       _zoneClear();
       return;
@@ -7526,6 +7678,7 @@ async function _zoneValidate() {
     if (srcD) await _vttStartSpellCooldown(srcD, opt);
     await _vttApplyCasterConcentration(srcId, opt);
     const _statsDelta = srcD ? _applyCastStatsDelta(srcD, opt) : null;
+    const _zLbl = total > 1 ? `${total} zones` : 'zone';
     await _publishCombatLog({
       type: 'cast', undo: _snap,
       ...(_hasStatsDelta(_statsDelta) ? { statsDelta: _statsDelta } : {}),
@@ -7534,11 +7687,12 @@ async function _zoneValidate() {
       authorName: STATE.profile?.pseudo || STATE.profile?.prenom || STATE.user?.displayName || 'MJ',
       casterName: srcD ? (_live(srcD).displayName ?? srcD.name) : '?',
       characterImage: srcD ? _combatLogImage(_live(srcD).displayImage) : null,
-      targetName: 'zone', optLabel: opt.label,
-      castEffect: `${opt.icon || '✨'} ${opt.label} — zone (${opt.sortDuree ?? 2} t)`,
+      targetName: _zLbl, optLabel: opt.label,
+      castEffect: `${opt.icon || '✨'} ${opt.label} — ${_zLbl} (${opt.sortDuree ?? 2} t)`,
       createdAt: serverTimestamp(),
     }).catch(() => {});
-    showNotif(`${opt.icon || '✨'} Zone « ${opt.label} » placée`, 'success');
+    showNotif(`${opt.icon || '✨'} ${total > 1 ? total + ' zones' : 'Zone'} « ${opt.label} » placée${total > 1 ? 's' : ''}`, 'success');
+    opt._zoneFx?.(); opt._zoneFx = null;   // pose de marqueur = résolution → empreinte maintenant
     _zoneClear();
     return;
   }
@@ -7547,17 +7701,20 @@ async function _zoneValidate() {
   // (pas d'attaque du lanceur — la créature a ses propres stats/actions)
   if (opt?.mods?.invocation) {
     if (!_zoneCtx.invocationsDone) _summonSpawnIds = []; // 1ère pose → reset collecteur
-    const col = Math.round((x - wPx / 2) / CELL);
-    const row = Math.round((y - hPx / 2) / CELL);
-    const _spawned = await _vttSpawnSummon({ kind: 'invocation', srcId, col, row, opt, durationTurns: opt.mods.invocation.duree || 2 });
-    if (_spawned?.id) _summonSpawnIds.push(_spawned.id);
-    _zoneCtx.invocationsDone = (_zoneCtx.invocationsDone || 0) + 1;
     const total = _zoneCtx.invocationsTotal || 1;
-    const done  = _zoneCtx.invocationsDone;
-    if (done < total) {
-      showNotif(`🐾 Invocation ${done}/${total} placée — place la suivante`, 'info');
+    const done0 = _zoneCtx.invocationsDone || 0;
+    if (done0 < total) {   // place une invocation (sauf quota déjà atteint)
+      const col = Math.round((x - wPx / 2) / CELL);
+      const row = Math.round((y - hPx / 2) / CELL);
+      const _spawned = await _vttSpawnSummon({ kind: 'invocation', srcId, col, row, opt, durationTurns: opt.mods.invocation.duree || 2 });
+      if (_spawned?.id) _summonSpawnIds.push(_spawned.id);
+      _zoneCtx.invocationsDone = done0 + 1;
+    }
+    const done = _zoneCtx.invocationsDone || 0;
+    if (!finalize) {   // clic : place et reste en placement ; Entrée validera
+      showNotif(done >= total ? `${done}/${total} invocations placées — Entrée pour valider (Retour = annuler la dernière)` : `🐾 Invocation ${done}/${total} placée — clic pour la suivante`, 'info');
       _zoneCtx.placed = false;
-      _zoneCtx.opt = { ..._zoneCtx.opt, label: `${opt.label} (${done + 1}/${total})` };
+      _zoneCtx.opt = { ..._zoneCtx.opt, label: `${_zoneCtx.baseLabel} (${Math.min(done + 1, total)}/${total})` };
       _showZoneHud();
       _zonePreview?.position({ x: _zoneCtx.x, y: _zoneCtx.y });
       VS.layers.token?.batchDraw();
@@ -7600,24 +7757,21 @@ async function _zoneValidate() {
   // Avec Dispersion, plusieurs sentinelles peuvent être posées en boucle.
   if (opt?.mods?.sentinelle) {
     if (!_zoneCtx.invocationsDone) _summonSpawnIds = []; // 1ère pose → reset collecteur
-    const col = Math.round((x - wPx / 2) / CELL);
-    const row = Math.round((y - hPx / 2) / CELL);
-    const _spawned = await _vttSpawnSummon({ kind: 'sentinelle', srcId, col, row, opt, durationTurns: 2 });
-    if (_spawned?.id) _summonSpawnIds.push(_spawned.id);
-    _zoneCtx.invocationsDone = (_zoneCtx.invocationsDone || 0) + 1;
     const total = _zoneCtx.invocationsTotal || 1;
-    const done  = _zoneCtx.invocationsDone;
-    if (done < total) {
-      // Reste des sentinelles à placer : on re-prépare le placement
-      showNotif(`🪤 Sentinelle ${done}/${total} posée — place la suivante`, 'info');
+    const done0 = _zoneCtx.invocationsDone || 0;
+    if (done0 < total) {   // pose une sentinelle (sauf quota déjà atteint)
+      const col = Math.round((x - wPx / 2) / CELL);
+      const row = Math.round((y - hPx / 2) / CELL);
+      const _spawned = await _vttSpawnSummon({ kind: 'sentinelle', srcId, col, row, opt, durationTurns: 2 });
+      if (_spawned?.id) _summonSpawnIds.push(_spawned.id);
+      _zoneCtx.invocationsDone = done0 + 1;
+    }
+    const done = _zoneCtx.invocationsDone || 0;
+    if (!finalize) {   // clic : pose et reste en placement ; Entrée validera
+      showNotif(done >= total ? `${done}/${total} sentinelles posées — Entrée pour valider (Retour = annuler la dernière)` : `🪤 Sentinelle ${done}/${total} posée — clic pour la suivante`, 'info');
       _zoneCtx.placed = false;
-      // Rafraîchit le HUD pour montrer la progression
-      _zoneCtx.opt = {
-        ..._zoneCtx.opt,
-        label: `${opt.label} (${done + 1}/${total})`,
-      };
+      _zoneCtx.opt = { ..._zoneCtx.opt, label: `${_zoneCtx.baseLabel} (${Math.min(done + 1, total)}/${total})` };
       _showZoneHud();
-      // Reposionne la prévisualisation au centre du stage actuel
       _zonePreview?.position({ x: _zoneCtx.x, y: _zoneCtx.y });
       VS.layers.token?.batchDraw();
       return; // reste en mode placement
@@ -7643,20 +7797,55 @@ async function _zoneValidate() {
     showNotif(`🪤 ${total} sentinelle${total > 1 ? 's' : ''} posée${total > 1 ? 's' : ''}`, 'success');
     // Si aucune cible présente, on s'arrête là (sentinelles posées, pas d'attaque)
     if (!targets.length) {
+      opt._zoneFx?.(); opt._zoneFx = null;   // sentinelle posée = résolution → empreinte maintenant
       _zoneClear();
       return;
     }
-  } else if (!targets.length) {
-    showNotif('Aucune cible dans la zone', 'error');
-    return;
+  } else {
+    // ── Effet instantané (dégâts/soin/…). Modèle zones v2 : Dispersion = PLUSIEURS
+    //    ZONES. On accumule les cibles de CHAQUE pose puis on résout tout ensemble.
+    const _zTotal = _zoneCtx.invocationsTotal || 1;
+    if (_zTotal > 1) {
+      // Pose N zones : le clic POSE et enchaîne (finalize=false), Entrée/Valider RÉSOUT tout.
+      const _done = _zoneCtx.invocationsDone || 0;
+      if (_done < _zTotal) {   // ajoute la pose courante (sauf si quota déjà atteint)
+        _zoneCtx._accFx = [ ...(_zoneCtx._accFx || []), { srcId, x, y, wPx, hPx, coneDir: _zoneCtx.coneDirManual || _zoneCtx.coneDirEff, zoneVisual: _zoneVisual, targets: [...targets], color: _zImpColor, physical: !!_zoneSigil?.physical, isSummon: _isSummon, sigil: _zoneSigil } ];
+        _zoneCtx.invocationsDone = _done + 1;
+      }
+      const _nowDone = _zoneCtx.invocationsDone || 0;
+      if (!finalize) {
+        showNotif(_nowDone >= _zTotal
+          ? `${_nowDone}/${_zTotal} zones posées — Entrée pour valider (Retour = annuler la dernière)`
+          : `Zone ${_nowDone}/${_zTotal} posée — clic pour la suivante · Entrée pour valider`, 'info');
+        _zoneCtx.placed = false;
+        _zoneCtx.opt = { ..._zoneCtx.opt, label: `${_zoneCtx.baseLabel} (${Math.min(_nowDone + 1, _zTotal)}/${_zTotal})` };
+        _showZoneHud();
+        _buildZonePreview();   // affiche la zone qu'on vient de poser (aperçu clair) + le fantôme
+        _zonePreview?.position({ x: _zoneCtx.x, y: _zoneCtx.y });
+        VS.layers.token?.batchDraw();
+        return;   // reste en placement — on résoudra à l'Entrée
+      }
+      // finalize : cibles = union de toutes les zones posées ; empreinte = toutes les poses.
+      const _fxList = _zoneCtx._accFx || [];
+      _zoneCtx._finalTargets = [...new Set(_fxList.flatMap(v => v.targets || []))];
+      opt._zoneFx = () => { for (const v of _fxList) _emitOneZoneFx({ ...v, cellsOnly: true }); };
+      if (!_zoneCtx._finalTargets.length) { showNotif('Aucune cible dans les zones', 'error'); _zoneClear(); return; }
+    } else if (!targets.length) {
+      showNotif('Aucune cible dans la zone', 'error');
+      return;
+    } else {
+      // Zone unique à effet : empreinte en cases seule (sceau/impacts via _vttRollAttack).
+      opt._zoneFx = () => _emitOneZoneFx({ srcId, x, y, zoneVisual: _zoneVisual, color: _zImpColor, cellsOnly: true });
+    }
   }
 
   const { optIdx } = _zoneCtx;
+  const _finalTargets = _zoneCtx._finalTargets || targets;   // union (multi-zones) ou cibles de l'unique zone
   _zoneClear();
 
   // Flux identique à multi-cibles : stocker les cibles, ouvrir la modale d'attaque
-  _mtPending = targets;
-  const firstTgt = targets[0];
+  _mtPending = _finalTargets;
+  const firstTgt = _finalTargets[0];
   const src = VS.tokens[srcId]?.data; if (!src) { _mtPending = null; return; }
   if (!VS.tokens[firstTgt]?.data) { _mtPending = null; return; }
   // Le sort zone est mis seul dans le cache à l'index 0 (portée déjà vérifiée sur la zone)
@@ -7738,20 +7927,69 @@ function _playZoneFx(srcId, center, zonePx, targetIds, color, physical, isSummon
       const sp = _tokenLogicalCenter(src);
       playProjectile(cont, sp.x, sp.y, center.x, center.y, { color, physical });
     }
-    playTechniqueArea(cont, {
-      x: center.x,
-      y: center.y,
-      width: Math.max(CELL, zonePx?.w || CELL),
-      height: Math.max(CELL, zonePx?.h || CELL),
-      shape: zonePx?.shape || 'rect',
-      color,
-      label: zonePx?.label || 'Zone d’effet',
-      cellSize: zonePx?.cellSize || CELL,
-    });
+    // Onde de zone (animation) : réservée au RECTANGLE. Les autres formes rendent
+    // un contour lissé peu fidèle à la grille → on laisse l'empreinte EN CASES
+    // (_playZoneCellImpact) porter le visuel exact.
+    if ((zonePx?.shape || 'rect') === 'rect') {
+      playTechniqueArea(cont, {
+        x: center.x, y: center.y,
+        width: Math.max(CELL, zonePx?.w || CELL),
+        height: Math.max(CELL, zonePx?.h || CELL),
+        shape: 'rect', color,
+        label: zonePx?.label || 'Zone d’effet',
+        cellSize: zonePx?.cellSize || CELL,
+      });
+    }
     playImpact(cont, center.x, center.y, Math.max(zonePx?.w || 0, zonePx?.h || 0, CELL) * 1.15, color);
+    // Empreinte EN CASES qui s'estompe : montre à TOUS (le cast est diffusé) les
+    // cases exactes touchées — même pour les sorts instantanés qui ne laissent pas
+    // de marqueur persistant. Utilise le même prédicat que le ciblage.
+    _playZoneCellImpact(zonePx, color);
     _ensureSigilSync();
     if (!isSummon) visibleTargets.forEach(tid => _playImpactForToken(tid, color));
   } catch (e) { console.warn('[zonefx]', e); }
+}
+
+/** Joue l'empreinte d'UNE zone (dessin local + diffusion à tous). Réutilisé pour
+ *  une zone unique OU chaque zone d'une Dispersion (plusieurs zones). */
+function _emitOneZoneFx(v) {
+  if (!v) return;
+  // cellsOnly : sort à effet (dégâts/soin) — le sceau de rune + les impacts sur les
+  // cibles + la diffusion sont déjà joués À LA RÉSOLUTION par _vttRollAttack. On ne
+  // dessine donc QUE l'empreinte en cases (localement), pour ne pas doubler le sceau.
+  if (v.cellsOnly) { _playZoneCellImpact(v.zoneVisual, v.color); return; }
+  if (v.sigil) _playSigilForToken(v.srcId, v.sigil);   // sceau/dessin de rune sur le lanceur (à la résolution)
+  _playZoneFx(v.srcId, { x: v.x, y: v.y }, v.zoneVisual, v.targets || [], v.color, !!v.physical, !!v.isSummon);
+  try {
+    const _uid = STATE.user?.uid;
+    if (_uid) {
+      const _n = Date.now() + Math.floor(Math.random() * 1000);
+      _seenSigilFire[_uid] = _n;
+      setDoc(_castingRef(_uid), {
+        sigilFire: {
+          tokenId: v.srcId, sigil: v.sigil || null, pageId: VS.activePage?.id || null, n: _n,
+          targets: v.targets || [], impColor: v.color, physical: !!v.physical,
+          zone: v.zoneVisual, isSummon: !!v.isSummon,
+        },
+      }, { merge: true }).catch(() => {});
+    }
+  } catch {}
+}
+
+/** Overlay Konva des cases d'une zone, qui apparaît puis s'estompe (~1,7 s). */
+function _playZoneCellImpact(zonePx, color) {
+  const K = window.Konva;
+  if (!K || !VS.layers?.token || !zonePx) return;
+  const w = zonePx.w || 0, h = zonePx.h || 0;
+  if (w <= 0 || h <= 0) return;
+  const g = new K.Group({ x: zonePx.x, y: zonePx.y, listening: false });
+  for (const cell of _zoneCellRects(K, w, h, zonePx.shape || 'rect', zonePx.coneDir || 'down', {
+    fill: (color || '#b47fff') + '5a', stroke: color || '#b47fff', strokeWidth: 2,
+    shadowColor: color || '#b47fff', shadowBlur: 8, shadowOpacity: 0.6, listening: false,
+  })) g.add(cell);
+  VS.layers.token.add(g);
+  VS.layers.token.batchDraw();
+  g.to({ opacity: 0, duration: 1.7, easing: K.Easings.EaseIn, onFinish: () => g.destroy() });
 }
 
 // Sceaux déjà rejoués (par uid → dernier n) pour ne pas rejouer un même cast.
@@ -7927,6 +8165,11 @@ async function _vttRollAttack() {
   const bonusDmgDice = parseInt(document.getElementById('atk-bonus-dmg-dice')?.value)||0;
   closeModalDirect();
   _atkCtx = null;
+
+  // Sort à ZONE : l'empreinte a été différée à _zoneValidate → on la dessine ET
+  // on la diffuse à tous MAINTENANT, à l'ENVOI de la résolution (pas à l'ouverture
+  // de la modale). opt est propre à ce cast → aucune empreinte parasite ailleurs.
+  if (opt?._zoneFx) { try { opt._zoneFx(); } catch {} opt._zoneFx = null; }
 
   const selectedTechniques = [ctx.weaponTechnique, ctx.damageTechnique].filter(Boolean);
   const techniqueDefenseBonus = selectedTechniques.reduce(
@@ -13213,8 +13456,11 @@ function _keyHandler(e) {
     if (_vttClipboard.tokens.length || _vttClipboard.annots.length) { e.preventDefault(); _vttPasteClipboard(); }
     return;
   }
-  // Raccourci R : bascule l'outil règle (sans modificateur, hors saisie)
+  // Raccourci R : bascule l'outil règle (sans modificateur, hors saisie).
+  // En placement de zone, R sert à PIVOTER la zone (géré par le HUD de placement)
+  // → on ne déclenche pas la règle pour éviter que les deux s'entrechoquent.
   if ((e.key==='r' || e.key==='R') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (_zoneCtx) return;
     e.preventDefault();
     _vttTool('ruler');
   }

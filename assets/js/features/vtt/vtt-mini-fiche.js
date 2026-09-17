@@ -15,6 +15,7 @@ import { showNotif } from '../../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal, promptModal } from '../../shared/modal.js';
 import { getArmorSetData, syncEquipmentAfterInventoryMutation, _getTraits } from '../../shared/equipment-utils.js';
 import { calcSpellDuration, calcSpellTargets, getProtectionRestoreMode } from '../../shared/spell-runes.js';
+import { ZONE_SHAPES, _zoneDims, _zoneCount } from '../../shared/spell-zones.js';
 import { getDamageTypeById } from '../../shared/damage-types.js';
 import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, calcOr,
          computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, getMod,
@@ -747,16 +748,17 @@ function _vttSpellChips(s, c) {
   const nbAmp = runes.filter(r => r === 'Amplification').length;
   // Avec Enchantement (hors Invocation), l'Amplification booste l'effet → pas de zone.
   const _enchNoZone = runes.includes('Enchantement') && !runes.includes('Invocation');
+  const _zoneIcon = (shp) => shp === 'cross' ? '✚' : shp === 'cone' ? '🔺' : shp === 'ring' ? '◯' : shp === 'diamond' ? '◇' : '📐';
+  const _zoneLbl  = (shp) => shp === 'cross' ? 'Zone en croix' : shp === 'cone' ? 'Zone en cône' : shp === 'ring' ? 'Zone en anneau' : shp === 'diamond' ? 'Zone circulaire sur la grille' : 'Zone rectangulaire';
   if (isClassic && (parseInt(s.zoneW) || 0) > 0 && (parseInt(s.zoneH) || 0) > 0) {
-    const zoneIcon = s.zoneShape === 'cross' ? '✚' : s.zoneShape === 'diamond' ? '◇' : '📐';
-    const zoneLabel = s.zoneShape === 'cross' ? 'Zone en croix'
-      : s.zoneShape === 'diamond' ? 'Zone circulaire sur la grille' : 'Zone rectangulaire';
-    chips.push({ icon:zoneIcon, val:`${parseInt(s.zoneW)}×${parseInt(s.zoneH)} cases`, color:'#b47fff', lbl:zoneLabel, dim:true });
+    chips.push({ icon:_zoneIcon(s.zoneShape), val:`${parseInt(s.zoneW)}×${parseInt(s.zoneH)} cases`, color:'#b47fff', lbl:_zoneLbl(s.zoneShape), dim:true });
   } else if (nbAmp > 0 && s.ampMode !== 'deplacement' && !_enchNoZone) {
+    // Modèle zones v2 : Amplification pilote la taille (forme au choix), Dispersion répète.
+    const shp = ZONE_SHAPES.includes(s.zoneShape) ? s.zoneShape : 'rect';
+    const d = _zoneDims(shp, nbAmp) || { w: 0, h: 0, shape: 'rect' };
     const nbDisp = runes.filter(r => r === 'Dispersion').length;
-    const zoneW = nbDisp >= 1 ? _vttAmpDispCircleSize(nbAmp, nbDisp) : 3 * nbAmp;
-    const zoneH = nbDisp >= 1 ? zoneW : 1;
-    chips.push({ icon:'📐', val:`${zoneW}×${zoneH} cases`, color:'#b47fff', lbl:'Zone d\'effet (cases)', dim:true });
+    const poses = nbDisp >= 1 ? ` ·×${_zoneCount(nbDisp)}` : '';
+    chips.push({ icon:_zoneIcon(d.shape), val:`${d.w}×${d.h}${poses}`, color:'#b47fff', lbl:_zoneLbl(d.shape), dim:true });
   }
   if ((isClassic && (parseInt(s.classicDuration ?? s.dureeBase) || 0) > 0)
       || runes.includes('Durée') || (s.dureeBase && s.dureeBase >= 2)) {

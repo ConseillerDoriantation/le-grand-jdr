@@ -53,10 +53,11 @@ test('calcSpellTargets : Dispersion pilote le nombre de cibles (1 + nbDisp)', ()
   assert.equal(calcSpellTargets(sort(['Dispersion', 'Dispersion'])), 3);
 });
 
-test('calcSpellTargets : combos qui ramènent à 1 cible', () => {
-  // Amplification + Dispersion → la Dispersion élargit la zone, pas le nb de cibles
-  assert.equal(calcSpellTargets(sort(['Amplification', 'Dispersion'])), 1);
-  // Sentinelle (Affliction + Invocation) + Dispersion → 1 (gérée par les sentinelles)
+test('calcSpellTargets : Dispersion = nombre de poses (modèle zones v2)', () => {
+  // v2 : Amplification pilote la TAILLE, Dispersion RÉPÈTE la zone → 1 + nDisp poses.
+  assert.equal(calcSpellTargets(sort(['Amplification', 'Dispersion'])), 2);
+  assert.equal(calcSpellTargets(sort(['Amplification', 'Dispersion', 'Dispersion'])), 3);
+  // Sentinelle (Affliction + Invocation) + Dispersion → 1 (une sentinelle porte l'effet)
   assert.equal(calcSpellTargets(sort(['Affliction', 'Invocation', 'Dispersion'])), 1);
 });
 

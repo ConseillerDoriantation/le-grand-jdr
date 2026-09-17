@@ -18,10 +18,111 @@ import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
 import { resolveSpellModifierStat, usesSpellMastery } from '../../shared/spell-runes.js';
 import { calculateInvocationDerivedStats, getPreparedInvocationActions, INVOCATION_ABILITIES, INVOCATION_DEFAULT_STATS, invocationStatModifier, normalizeInvocationSelection, normalizeInvocationStats } from '../../shared/invocation-stats.js';
-import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDD, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortMana, _calcSortZone, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds, SPELL_COST_RESOURCES, spellCostRes, spellCostMult } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _zoneDims, _zoneCount, _zoneCellCount, ZONE_SHAPES, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDD, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortMana, _calcSortZone, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds, SPELL_COST_RESOURCES, spellCostRes, spellCostMult } from './spells-calc.js';
+import { computeSheetLines, renderSheetLines } from '../../shared/spell-sheet-lines.js';
 
 // Ressource de coût lisible d'un sort (label court : PM / PV / Or / —).
 const _sortResLabel = (s) => spellCostRes(s).label;
+
+// ── Refonte « lire = régler » : la fiche (colonne de droite) affiche une ligne par
+// effet, calculée par computeSheetLines (pur) + rendue par renderSheetLines. En mode
+// readonly (aperçu), l'édition passe encore par les sections d'origine → aucun id du
+// contrat _buildSortFromDOM n'est dupliqué. `s` vient de _buildSortFromDOM.
+function _sortSheetState(s) {
+  return {
+    types:      s?.types || [],
+    counts:     _runeCountsEdit || {},
+    protMode:   s?.protectionMode || 'ca',
+    ampMode:    s?.ampMode || 'zone',
+    afflMode:   s?.afflictionMode || 'dot',
+    enchMode:   s?.enchantMode || 'etat',
+    zoneShape:  _zoneShapeEdit || 'rect',
+    actionMode: s?.actionMode || _actionModeEdit || 'reaction',
+  };
+}
+
+// Valeurs affichées par ligne (calculées au rendu, contexte perso). Réutilise les
+// vraies fonctions du moteur + _runeLiveContribution — zéro règle inventée.
+function buildLineCtx(lines, s, c) {
+  const counts = _runeCountsEdit || {};
+  const li = (nom) => _runeLiveContribution(nom, counts)?.main || '';
+  const ctx = {};
+  for (const l of lines) {
+    switch (l.id) {
+      case 'dmg':
+        ctx.dmg = { value: _calcSortDegats(s, c), source: _autoSourceDegats(s, c), color: '#ff6b4a' };
+        break;
+      case 'hit':
+        ctx.hit = { value: '1d20', text: true, source: 'Toucher · mod. de stat + maîtrise', color: '#f4c430' };
+        break;
+      case 'prot': {
+        const pm = s?.protectionMode || 'ca';
+        if (l.drain) ctx.prot = { value: `Vol de vie ${_calcDrainPct(counts.Protection || 0)}%`, text: true, source: 'Combo Drain · soigne le lanceur', color: '#ff5a7e' };
+        else if (l.reactiveShield) ctx.prot = { value: 'Bloque 1 attaque', text: true, source: 'Combo Bouclier réactif · sans bonus de CA', color: '#4f8cff' };
+        else if (pm === 'ca') ctx.prot = { value: _getSortCA(s), source: _autoSourceCA(s), color: '#4f8cff' };
+        else ctx.prot = { value: (pm === 'mana' ? _calcSortMana(s, c) : _calcSortSoin(s, c)), source: (pm === 'mana' ? 'Régénération de PM · (nb Protection)d4' : _autoSourceSoin(s, c)), color: (pm === 'mana' ? '#8b5cf6' : '#22c38e') };
+        break;
+      }
+      case 'soin':
+        ctx.soin = { value: _calcSortSoin(s, c), source: _autoSourceSoin(s, c), color: '#22c38e' };
+        break;
+      case 'regen':
+        ctx.regen = { value: s?.regenerationFormula || `${counts.Protection || 1}d4 / tour`, text: !s?.regenerationFormula, source: 'Combo Régénération · soin sur la durée', color: '#22c38e' };
+        break;
+      case 'ench':
+        ctx.ench = { value: `${counts.Enchantement || 1} état${(counts.Enchantement || 1) > 1 ? 's' : ''} sur allié`, text: true, source: li('Enchantement') || 'Buff allié · 2 tours', color: '#e8b84b' };
+        break;
+      case 'affl': {
+        const am = s?.afflictionMode || 'dot';
+        if (l.sentinelle) ctx.affl = { value: 'Portée par la sentinelle', text: true, source: 'Combo Sentinelle · stationnaire', color: '#a16207' };
+        else if (am === 'dot') ctx.affl = { value: _calcAfflictionDot(s), source: _autoSourceAfflictionDot(s), color: '#e8894b' };
+        else if (am === 'etat') ctx.affl = { value: 'État infligé sur échec', text: true, source: `JS DD ${11 + 2 * ((counts.Affliction || 1) - 1)} · 2 tours`, color: '#a855f7' };
+        else ctx.affl = { value: `CA cible −${Math.min(counts.Affliction || 1, 2)}`, text: true, source: 'Lacération · frappe l’attaque de base', color: '#ff5a7e' };
+        break;
+      }
+      case 'amp': {
+        if (s?.ampMode === 'deplacement') {
+          ctx.amp = { value: `1 à ${_ampLength(counts.Amplification || 1)} cases`, text: true, source: 'Déplacement · aucun dégât infligé', color: '#f59e42' };
+        } else {
+          const shp = ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect';
+          const d = _zoneDims(shp, counts.Amplification || 1) || { w: 0, h: 0 };
+          const nom = shp === 'cross' ? 'Croix' : shp === 'cone' ? 'Cône' : shp === 'ring' ? 'Anneau' : 'Zone';
+          const cells = _zoneCellCount(shp, d.w, d.h);
+          const val = shp === 'rect' ? `Zone ${d.w}×${d.h}` : `${nom} · ${cells} case${cells > 1 ? 's' : ''}`;
+          ctx.amp = { value: val, text: true, source: 'Zone dimensionnée par l’Amplification', color: '#4f8cff' };
+        }
+        break;
+      }
+      case 'shape': {
+        const SHP_DESC = { rect: 'Carré — zone pleine', cross: 'Croix — bras longs, sans diagonales', cone: 'Cône — depuis le lanceur, rien derrière', ring: 'Anneau — couronne, centre épargné' };
+        const SHP_COL  = { rect: '#4f8cff', cross: '#a855f7', cone: '#f59e42', ring: '#22c38e' };
+        const shp = ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect';
+        ctx.shape = { value: SHP_DESC[shp], text: true, source: 'Forme de la zone', color: SHP_COL[shp] };
+        break;
+      }
+      case 'disp': {
+        const total = _zoneCount(counts.Dispersion || 0);   // 1 + nDisp
+        const hasZone = (counts.Amplification || 0) > 0;
+        ctx.disp = { value: hasZone ? `×${total} zones` : `${total} cibles`, text: true, source: hasZone ? 'Dispersion · répète la zone (dégâts pleins par pose)' : 'Dispersion · cibles distinctes', color: '#a855f7' };
+        break;
+      }
+      case 'trig': { const ab = (_actionModeEdit || s?.actionMode) === 'action_bonus'; ctx.trig = { value: ab ? 'Action bonus' : 'Réaction', text: true, source: ab ? 'Pendant son tour' : 'Hors de son tour · ouvre les combos de Réaction', color: ab ? '#22c38e' : '#ec4899' }; break; }
+      case 'inv':   ctx.inv   = { value: `${counts.Invocation || 1} créature${(counts.Invocation || 1) > 1 ? 's' : ''}`, text: true, source: 'Choix au lancement · bibliothèque perso', color: '#a16207' }; break;
+      case 'mods':  ctx.mods  = { chipLabels: { Chance: li('Chance'), Concentration: li('Concentration') } }; break;
+    }
+  }
+  // Enrichit les lignes à override : valeur brute (current) + placeholder auto +
+  // options de stat/toucher, pour les tiroirs « régler » (proxys data-ovr/statproxy).
+  const OVR_S = { 's-degats':'degats', 's-ca':'ca', 's-soin':'soin', 's-regeneration-formula':'regenerationFormula', 's-affliction-dot-formula':'afflictionDotFormula' };
+  for (const l of lines) {
+    const o = l.override; if (!o) continue;
+    const e = ctx[l.id] || (ctx[l.id] = {});
+    if (o.fieldId) { e.current = (s && s[OVR_S[o.fieldId]]) || ''; e.placeholder = e.value || ''; }
+    if (o.statId)   e.statHtml   = _SPELL_STAT_OPTIONS(s?.degatsStat || '');
+    if (o.toucherId) e.toucherHtml = _SPELL_STAT_OPTIONS(s?.toucherStat || '');
+  }
+  return ctx;
+}
 
 let _sortsSearch = '';
 // Facettes COMBINABLES : type ET rune ET noyau (chacune toggle indépendamment).
@@ -56,6 +157,7 @@ let _sortsAnalysisOpen = false;   // outils avancés du rail, masqués par défa
 let _sortsVisibleIndices = [];    // résultats courants, utilisés par les actions groupées
 let _newSortCatColor = '#4f8cff';
 let _runeCountsEdit = {};
+let _sortTunedEdit = new Set();   // ids des lignes de la fiche dont le tiroir « régler » est ouvert
 let _sortAllowedNoyauIds = null;
 let _noyauIdsEdit = [];   // noyaux élémentaires sélectionnés (multi). [0] = primaire (compat soin/suggestions/VTT).
 let _sortTypesEdit = new Set(['utilitaire']);
@@ -2214,25 +2316,19 @@ function _runeLiveContribution(nom, counts) {
       };
     }
     case 'Amplification': {
-      const len = _ampLength(cnt);
+      // v2 : l'Amplification pilote la TAILLE d'UNE zone (forme au choix). La
+      // Dispersion ne l'élargit plus : elle répète la zone (cf. contribution Disp).
+      const shape = ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect';
+      const d = _zoneDims(shape, cnt) || { w: 0, h: 0 };
+      const nom = shape === 'cross' ? 'Croix' : shape === 'cone' ? 'Cône' : shape === 'ring' ? 'Anneau' : 'Zone';
       const nbDisp = counts['Dispersion'] || 0;
-      if (nbDisp > 0) {
-        const cross = _zoneShapeEdit === 'cross';
-        const dim = cross ? _ampCrossDim : _ampDispDim;
-        const h = dim(cnt), w = dim(nbDisp);
-        return { main: cross ? `Combo → croix ${h}×${w} (longue portée, sans diagonales)` : `Combo Dispersion → rectangle ${h}×${w} cases` };
-      }
-      return { main: `Zone ${len}×1 cases (ligne)` };
+      const suffix = nbDisp > 0 ? ` · ×${_zoneCount(nbDisp)} poses` : '';
+      return { main: `${nom} ${d.w}×${d.h} cases${suffix}` };
     }
     case 'Dispersion': {
       const nbAmp = counts['Amplification'] || 0;
-      if (nbAmp > 0) {
-        const cross = _zoneShapeEdit === 'cross';
-        const dim = cross ? _ampCrossDim : _ampDispDim;
-        const h = dim(nbAmp), w = dim(cnt);
-        return { main: cross ? `Combo → croix ${h}×${w} (Amp=bras vertical, Disp=bras horizontal)` : `Combo Amp+Disp → rectangle ${h}×${w} (Amp=hauteur, Disp=largeur)` };
-      }
-      return { main: `${1 + cnt} cibles différentes` };
+      const total = _zoneCount(cnt);   // 1 + nDisp
+      return { main: nbAmp > 0 ? `Pose la zone ${total}× (répète l'effet)` : `${total} cibles différentes` };
     }
     case 'Lacération': {
       const red = cnt;
@@ -2290,83 +2386,78 @@ function _spellRuneLimit() {
 
 function _renderRunesSection() {
   const counts = _runeCountsEdit || {};
-  const activeMetas = RUNE_META.filter(r => (counts[r.nom] || 0) > 0);
-  // ── En-tête : compteur de runes d'effet vs limite du perso ──────────────
-  const limit  = _spellRuneLimit();
-  const total  = Object.values(counts).reduce((a, b) => a + b, 0);
+  const limit   = _spellRuneLimit();
+  const total   = Object.values(counts).reduce((a, b) => a + b, 0);
   const atLimit = total >= limit;
-  const limitHeader = `<div class="cs-rune-limit${total > limit ? ' over' : atLimit ? ' full' : ''}">
-    <span class="cs-rune-limit-count">🔮 Runes d'effet <b>${total}</b> / ${limit}</span>
-    ${STATE.isAdmin
-      ? `<span class="cs-rune-limit-mj">
-          <span>Débloquées (MJ)</span>
-          <button type="button" class="cs-rune-btn minus" data-action="_mjAdjRuneLimit" data-delta="-1" title="Retirer une rune débloquée">−</button>
-          <button type="button" class="cs-rune-btn plus"  data-action="_mjAdjRuneLimit" data-delta="1" title="Débloquer une rune">+</button>
-        </span>`
-      : (atLimit ? `<span class="cs-rune-limit-hint">Limite atteinte — le MJ peut en débloquer</span>` : '')}
-  </div>`;
+  const over    = total > limit;
+  // Pips : pleins (dans la limite) puis rouges au-delà (cas override MJ).
+  const pips = Array.from({ length: Math.max(limit, total) }, (_, i) =>
+    `<span class="pip ${i < total ? (i < limit ? 'f' : 'o') : ''}"></span>`).join('');
+  const mjAdj = STATE.isAdmin
+    ? `<span class="pre" style="margin-left:4px">
+        <button type="button" class="pr" data-action="_mjAdjRuneLimit" data-delta="-1" title="Retirer une rune débloquée (MJ)">−</button>
+        <button type="button" class="pr" data-action="_mjAdjRuneLimit" data-delta="1" title="Débloquer une rune (MJ)">+</button>
+      </span>` : '';
+  const header = `<div class="zt">Runes d'effet
+    <span class="pips" aria-hidden="true">${pips}</span>
+    <i>${total} / ${limit}${over ? ' · dépassé (MJ)' : ''}</i>
+    <span class="sp"></span>
+    <i>clic&nbsp;=&nbsp;+1 · clic&nbsp;droit&nbsp;=&nbsp;−1</i>${mjAdj}</div>`;
 
-  // ① Grosses cartes des runes actives
-  const activeHtml = activeMetas.length ? activeMetas.map(r => {
-    const cnt = counts[r.nom];
-    const contrib = _runeLiveContribution(r.nom, counts);
-    return `<div class="cs-rune-active" style="--rune-c:${r.color}">
-      <div class="cs-rune-active-main">
-        <div class="cs-rune-active-hdr">
-          <span class="cs-rune-active-icon">${r.icon}</span>
-          <span class="cs-rune-active-nom">${r.nom}</span>
-          <span class="cs-rune-active-x">×${cnt}</span>
-        </div>
-        <div class="cs-rune-active-contrib">${contrib?.main || r.effet}</div>
-      </div>
-      <div class="cs-rune-active-ctrl">
-        <button type="button" class="cs-rune-btn minus" data-action="runeDecrement" data-nom="${r.nom}">−</button>
-        <button type="button" class="cs-rune-btn plus"  data-action="runeIncrement" data-nom="${r.nom}">+</button>
-      </div>
-    </div>`;
-  }).join('') : `<div class="cs-rune-active-empty">
-    <span class="cs-rune-active-empty-icon">🔮</span>
-    <span>Aucune rune sélectionnée. Choisis ci-dessous pour façonner ton sort.</span>
-  </div>`;
+  // ── UNE seule grille de tuiles (maquette .rn), place FIXE par famille ──
+  // Tuile = <div role=button data-action=runeIncrement> pour autoriser le bouton
+  // − imbriqué (data-action=runeDecrement) — le closest([data-action]) le plus
+  // profond gagne. runeIncrement borne déjà la limite (joueur) et Déclenchement.
+  let grid = '';
+  RUNE_GROUPS.forEach(g => {
+    const runes = RUNE_META.filter(r => r.family === g.id);
+    if (!runes.length) return;
+    grid += `<div class="fam">${g.title}</div>`;
+    runes.forEach(r => {
+      const cnt = counts[r.nom] || 0;
+      const on  = cnt > 0;
+      const capped = r.nom === ACTION_RUNE && cnt > 0;
+      const dis = (atLimit && !STATE.isAdmin && !on) || capped;
+      const contrib = on ? (_runeLiveContribution(r.nom, counts)?.main || r.effet) : r.effet;
+      grid += `<div class="rn${on ? ' on' : ''}${dis ? ' dis' : ''}" style="--c:${r.color}"
+        role="button" tabindex="0" data-action="runeIncrement" data-nom="${r.nom}" aria-pressed="${on}"
+        aria-label="${on ? `${r.nom} ×${cnt}` : `Ajouter ${r.nom}`} — ${_esc(r.effet)}">
+        <span class="rn-i" aria-hidden="true">${r.icon}</span>
+        <span class="rn-n">${r.nom}</span>
+        <span class="rn-c">${_esc(contrib)}</span>
+        <span class="rn-x">${on
+          ? `<b class="rn-q">×${cnt}</b><button type="button" class="rn-m" data-action="runeDecrement" data-nom="${r.nom}" aria-label="Retirer ${r.nom}" title="Retirer">−</button>`
+          : '<span class="rn-p" aria-hidden="true">+</span>'}</span>
+      </div>`;
+    });
+  });
 
-  // ② Picker compact — n'affiche QUE les runes pas encore actives
-  // (les actives sont gérées via leurs cartes en haut, plus de doublon = plus d'ambiguïté)
-  const pickerGroups = RUNE_GROUPS.map(g => {
-    const runesInGroup = RUNE_META.filter(r => r.family === g.id && !((counts[r.nom] || 0) > 0));
-    if (runesInGroup.length === 0) return ''; // groupe vide = caché
-    return `<div class="cs-rune-pick-group">
-      <div class="cs-rune-pick-group-title">${g.title} <span>${g.desc}</span></div>
-      <div class="cs-rune-pick-list">
-        ${runesInGroup.map(r => `
-          <button type="button" class="cs-rune-pick-item"
-            style="--rune-c:${r.color}" data-action="runeIncrement" data-nom="${r.nom}"
-            data-tip="${r.effet}" aria-label="Ajouter ${r.nom} — ${r.effet}">
-            <span class="cs-rune-pick-icon">${r.icon}</span>
-            <span class="cs-rune-pick-nom">${r.nom}</span>
-            <span class="cs-rune-pick-add" aria-hidden="true">+</span>
-          </button>
-        `).join('')}
-      </div>
-    </div>`;
-  }).filter(Boolean).join('');
+  return `${header}<div class="runes">${grid}</div>`;
+}
 
-  const pickerEmpty = pickerGroups === '';
-  const pickerHtml = pickerEmpty
-    ? `<div class="cs-runes-picker-empty">✓ Toutes les runes sont actives — utilise les boutons + sur les cartes ci-dessus pour empiler une même rune.</div>`
-    : pickerGroups;
+// Rend les éléments (noyaux) en chips de flux (maquette .els/.el). 1er = noyau.
+function _renderSpellElements(noyaux = []) {
+  if (!noyaux.length) return '<div class="rez-none">Aucun élément accessible. Demande au MJ d’en débloquer un.</div>';
+  return noyaux.map(n => {
+    const on   = _noyauIdsEdit.includes(n.id);
+    const pri  = _noyauIdsEdit[0] === n.id;
+    const lock = !!n.locked && !on;   // verrouillé mais non sélectionné = non ajoutable
+    const attrs = lock
+      ? `aria-disabled="true" title="Élément non débloqué sur ta fiche"`
+      : `data-action="selectNoyau" data-noyau-label="${_esc(n.label + ' ' + n.icon)}" data-noyau-color="${n.color}" title="${n.locked ? 'Élément retiré de ta fiche — clique pour le retirer' : 'Choisir ' + _esc(n.label)}"`;
+    return `<button type="button" class="el${on ? ' on' : ''}${pri ? ' pri' : ''}${lock ? ' lk' : ''}" style="--c:${n.color}"
+      data-noyau-id="${n.id}" aria-pressed="${on}" ${attrs}>${n.icon} ${n.label}</button>`;
+  }).join('');
+}
 
-  // Joueur ayant atteint sa limite → on verrouille l'ajout (le MJ n'est jamais bloqué)
-  const locked = atLimit && !STATE.isAdmin;
-  return `
-    ${limitHeader}
-    <div class="cs-runes-block${locked ? ' cs-runes-locked' : ''}">
-      <div class="cs-runes-active-list">${activeHtml}</div>
-      <div class="cs-runes-picker">
-        <div class="cs-runes-picker-hdr">+ Ajouter une rune <span>(les runes actives sont gérées via les cartes au-dessus)</span></div>
-        ${pickerHtml}
-      </div>
-    </div>
-  `;
+// Re-synchronise les classes on/pri des chips d'éléments depuis _noyauIdsEdit
+// (appelé après selectNoyau, sans reconstruire toute la liste).
+function _syncElementChips() {
+  document.querySelectorAll('.cs-forge2 .els .el[data-noyau-id]').forEach(chip => {
+    const id = chip.dataset.noyauId;
+    chip.classList.toggle('on', _noyauIdsEdit.includes(id));
+    chip.classList.toggle('pri', _noyauIdsEdit[0] === id);
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2476,41 +2567,24 @@ function _renderResonance() {
   near.sort((a, b) => b.ratio - a.ratio);
   const nearShown = near.slice(0, 3);
 
+  // Maquette : pastilles allumées (.rz.lit) + en approche (.rz.nr) dans .rez (flex).
   const litHtml = lit.map(l => {
     const isNew = !_rezPrevLit.has(l.entry.id);
-    return `<div class="cs-rez-card cs-rez-card--lit${isNew ? ' is-new' : ''}" style="--rez-c:${l.entry.color}">
-      <div class="cs-rez-spark" aria-hidden="true"></div>
-      <div class="cs-rez-head">
-        <span class="cs-rez-icon">${l.entry.icon}</span>
-        <span class="cs-rez-name">${_esc(l.name)}</span>
-        <span class="cs-rez-badge">résonne</span>
-      </div>
-      <div class="cs-rez-detail">${_esc(l.detail)}</div>
-    </div>`;
+    return `<div class="rz lit${isNew ? ' is-new' : ''}" style="--c:${l.entry.color}">${l.entry.icon} <b>${_esc(l.name)}</b><s>${_esc(l.detail)}</s></div>`;
   }).join('');
 
   const nearHtml = nearShown.map(n => {
-    const chips = n.ings.map(i => `<span class="cs-rez-ing${i.ok ? ' ok' : ''}">${i.ok ? '✓' : '○'} ${_esc(i.label)}</span>`).join('');
-    const blk = n.blockers.length
-      ? `<div class="cs-rez-blocker">⚠ bloqué par ${n.blockers.map(b => _esc(b)).join(', ')}</div>`
-      : '';
-    return `<div class="cs-rez-card cs-rez-card--near" style="--rez-c:${n.entry.color}">
-      <div class="cs-rez-head">
-        <span class="cs-rez-icon">${n.entry.icon}</span>
-        <span class="cs-rez-name">${_esc(n.name)}</span>
-        <span class="cs-rez-hint">en approche</span>
-      </div>
-      <div class="cs-rez-ings">${chips}</div>
-      ${blk}
-    </div>`;
+    const chips = n.ings.map(i => `<u class="${i.ok ? 'ok' : ''}">${i.ok ? '✓' : '○'} ${_esc(i.label)}</u>`).join('');
+    const blk = n.blockers.length ? `<s style="color:var(--amber)">⚠ ${n.blockers.map(b => _esc(b)).join(', ')}</s>` : '';
+    return `<div class="rz nr" style="--c:${n.entry.color}">${n.entry.icon} <b>${_esc(n.name)}</b><span class="rz-g">${chips}</span>${blk}</div>`;
   }).join('');
 
   _rezPrevLit = new Set(lit.map(l => l.entry.id));
 
   if (!lit.length && !nearShown.length) {
-    return `<div class="cs-rez-empty"><span class="cs-rez-empty-ico">✦</span> Certaines paires de runes révèlent des <b>pouvoirs cachés</b>. Empile-les pour les faire résonner…</div>`;
+    return `<div class="rez-none">✦ Certaines paires de runes révèlent des <b>pouvoirs cachés</b>. Empile-les pour les faire résonner…</div>`;
   }
-  return `${lit.length ? `<div class="cs-rez-grid cs-rez-grid--lit">${litHtml}</div>` : ''}${nearShown.length ? `<div class="cs-rez-grid cs-rez-grid--near">${nearHtml}</div>` : ''}`;
+  return `${litHtml}${nearHtml}`;
 }
 
 /** Décompose le coût en chips lisibles (Noyau + chaque rune × mult ressource). */
@@ -3016,7 +3090,7 @@ export async function openSortModal(idx, s) {
   const runeCounts = {};
   _actionModeEdit = _spellActionMode(s);
   _protModeEdit = s?.protectionMode || 'ca';   // fixé depuis la donnée (pas le DOM périmé)
-  _zoneShapeEdit = s?.zoneShape === 'cross' ? 'cross' : 'rect';
+  _zoneShapeEdit = ZONE_SHAPES.includes(s?.zoneShape) ? s.zoneShape : 'rect';
   _enchantExtraSavedEdit = Array.isArray(s?.enchantEtatIds) ? s.enchantEtatIds.slice(1) : [];
   runesSrc.forEach(r => {
     const nom = (r === 'Réaction' || r === 'Action Bonus') ? ACTION_RUNE : r;
@@ -3024,6 +3098,7 @@ export async function openSortModal(idx, s) {
   });
   if (runeCounts[ACTION_RUNE] > 1) runeCounts[ACTION_RUNE] = 1;
   _runeCountsEdit = { ...runeCounts };
+  _sortTunedEdit = new Set();   // tiroirs « régler » repliés à l'ouverture
 
   // Noyau : id de type (nouveau) ou migration depuis label (ancien)
   let noyauTypeIdSel = s?.noyauTypeId || '';
@@ -3149,97 +3224,57 @@ export async function openSortModal(idx, s) {
   const _modalOpen = _itemEditCtx ? pushModal : openModal;
   _modalOpen('', `
    <div class="sh-admin-modal is-spell">
-    <div class="sh-admin-head">
-      <div class="sh-admin-head-ico">${idx>=0?'✏️':'✨'}</div>
-      <div class="sh-admin-head-title">
-        <h2>${idx>=0?'Modifier le sort':'Nouveau sort'}</h2>
-        <small>Construis le sort étape par étape : identité, noyau, runes, puis réglages.</small>
-      </div>
-      <button class="sh-admin-close" data-action="closeModalDirect" title="Fermer">✕</button>
-    </div>
     <div class="sh-admin-body">
-     <div class="cs-spell-forge">
+     <div class="cs-spell-forge cs-forge2">
     ${_sortEditWasOk ? `<div id="s-revalidate-banner" class="cs-forge-revalidate" hidden>
       <span class="cs-forge-revalidate-ico">⚠️</span>
       <span>Ce sort est <b>validé</b>. L'enregistrer avec ces changements le renverra <b>en attente de validation MJ</b> et le retirera du Deck.</span>
     </div>` : ''}
-    <!-- ① Essentiel : tout ce qui identifie le sort avant la mécanique -->
-    <section class="cs-spell-card cs-spell-card--identity" aria-label="Essentiel du sort">
-      <div class="cs-spell-card-head"><span>1</span><div><b>Essentiel</b><small>Nom, catégorie et intention du sort.</small></div></div>
-      <div class="cs-spell-identity">
-        <div class="cs-spell-identity-field"><label>Icône</label>
-          <button type="button" id="s-icon-btn" class="cs-spell-icon-btn"
-            data-action="_toggleSortIconPicker"
-            title="Cliquer pour choisir une icône">${s?.icon || '🔮'}</button>
-          <input type="hidden" id="s-icon" value="${s?.icon||''}">
-          <div id="s-icon-picker" class="cs-spell-icon-picker" style="display:none"></div>
-        </div>
-        <div class="cs-spell-identity-field cs-spell-identity-field--name"><label>Nom du sort</label>
-          <input class="input-field" id="s-nom" value="${s?.nom||''}" placeholder="Boule de feu, Vague de soin…" aria-describedby="s-nom-error">
-          <div id="s-nom-error" class="cs-spell-field-error" hidden>Donne un nom au sort avant de l'enregistrer.</div>
-        </div>
-        <div class="cs-spell-identity-field"><label>Catégorie</label>
-          <select class="input-field" id="s-catid">
-            <option value="">— Aucune —</option>
-            ${(_modalChar()?.sort_cats||[]).map(cat =>
-              `<option value="${cat.id}" ${s?.catId===cat.id?'selected':''}>${cat.nom}</option>`
-            ).join('')}
-          </select>
-        </div>
+
+    <!-- ① Ligne d'identité : icône · nom · catégorie · types · fermer -->
+    <header class="fh" aria-label="Identité du sort">
+      <button type="button" id="s-icon-btn" class="ic" data-action="_toggleSortIconPicker" title="Choisir une icône">${s?.icon || '🔮'}</button>
+      <input type="hidden" id="s-icon" value="${s?.icon||''}">
+      <div id="s-icon-picker" class="cs-spell-icon-picker" style="display:none"></div>
+      <input class="nm" id="s-nom" value="${s?.nom||''}" placeholder="Nom du sort…" aria-describedby="s-nom-error">
+      <div id="s-nom-error" class="cs-spell-field-error" hidden>Donne un nom au sort avant de l'enregistrer.</div>
+      <select class="cat" id="s-catid" title="Catégorie">
+        <option value="">— Catégorie —</option>
+        ${(_modalChar()?.sort_cats||[]).map(cat =>
+          `<option value="${cat.id}" ${s?.catId===cat.id?'selected':''}>${cat.nom}</option>`
+        ).join('')}
+      </select>
+      <div class="tps" title="Optionnel · plusieurs possibles">
+        ${TYPE_CFG.map(t => {
+          const on = typesInit.includes(t.v);
+          return `<button type="button" id="s-type-${t.v}" class="tp${on?' on':''}" style="--c:${t.color}"
+            data-action="_toggleSortType" data-type="${t.v}" aria-pressed="${on?'true':'false'}">${t.label}</button>`;
+        }).join('')}
       </div>
-      <div class="cs-spell-inline-row cs-spell-type-row">
-        <span class="cs-spell-inline-label" title="Optionnel · plusieurs possibles · cliquer pour activer/désactiver">Type</span>
-        <div class="cs-spell-type-buttons">${typeBtnsHtml}</div>
+      <button type="button" class="fh-x" data-action="closeModalDirect" title="Fermer">✕</button>
+    </header>
+
+   <div class="fb">
+    <!-- Colonne gauche : composer -->
+    <section class="compose">
+      <div>
+        <div class="zt">Éléments <i>le 1<sup>er</sup> choisi est le noyau · 2 PM</i></div>
+        <div class="els" id="cs-els">${_renderSpellElements(NOYAUX)}</div>
+        <input type="hidden" id="s-noyau" value="${noyauSel}">
+        <input type="hidden" id="s-noyau-id" value="${noyauTypeIdSel}">
+        <div id="s-noyau-error" class="cs-spell-field-error" hidden>Sélectionne un élément pour enregistrer ce sort.</div>
       </div>
-      <div class="form-group cs-spell-desc">
-        <label>Description / effet libre <span>narration, conditions spéciales, fluff</span></label>
-        <textarea class="input-field" id="s-effet" rows="2" placeholder="Décris brièvement le sort, son apparence, ses conditions particulières…">${s?.effet||''}</textarea>
-      </div>
+      <div id="cs-runes-section">${runesSectionHtml}</div>
+      ${STATE.isAdmin ? `<div id="cs-rezwrap">
+        <div class="zt">Résonance <i>MJ · les combos s’allument d’eux-mêmes</i></div>
+        <div class="rez" id="cs-resonance"></div>
+      </div>` : ''}
     </section>
 
-   <!-- Atelier principal : construction à gauche, résumé et réglages à droite -->
-   <div class="cs-spell-layout">
-    <main class="cs-spell-main">
-
-    <!-- ③ Noyau — section visuelle dédiée -->
-    <div class="cs-spell-section cs-spell-section--noyau">
-      <div class="cs-spell-section-title"><span class="cs-step-pill">2</span> Rune noyau <span class="cs-spell-section-hint">obligatoire · 2 PM · un ou plusieurs éléments</span></div>
-      <div class="cs-noyau-grid" id="noyau-grid">
-        ${NOYAUX.length ? NOYAUX.map(n => {
-          const selected = _noyauIdsEdit.includes(n.id);
-          const locked = !!n.locked;
-          // Verrouillé mais DÉJÀ sélectionné → cliquable pour le RETIRER du sort.
-          // Verrouillé et non sélectionné → non ajoutable (désactivé).
-          const disabled = locked && !selected;
-          const selectedStyle = selected ? `border-color:${n.color};background:${n.color}20;color:${n.color}` : '';
-          const attrs = disabled
-            ? `disabled aria-disabled="true" title="Ce noyau n'est plus accessible à ce personnage"`
-            : `data-action="selectNoyau" data-noyau-label="${_esc(n.label+' '+n.icon)}" data-noyau-color="${n.color}" title="${locked ? 'Élément retiré de ta fiche — clique pour le retirer du sort' : 'Choisir ' + _esc(n.label)}"`;
-          const lockedBadge = locked ? `<span class="cs-noyau-lock">${selected ? 'à retirer' : 'non accessible'}</span>` : '';
-          return `<button type="button" class="cs-noyau-btn ${selected?'selected':''}${locked?' cs-noyau-btn--locked':''}" style="${selectedStyle}" ${attrs} data-noyau-id="${n.id}" aria-pressed="${selected?'true':'false'}">${n.icon} ${n.label}${lockedBadge}</button>`;
-        }).join('') : '<div class="cs-noyau-empty">Aucun noyau accessible. Demande au MJ de débloquer un élément sur ta fiche.</div>'}
-      </div>
-      <input type="hidden" id="s-noyau" value="${noyauSel}">
-      <input type="hidden" id="s-noyau-id" value="${noyauTypeIdSel}">
-      <div id="s-noyau-error" class="cs-spell-field-error" hidden>Sélectionne une rune noyau pour enregistrer ce sort.</div>
-    </div>
-
-    <!-- ④ Runes — Forge -->
-    <div class="cs-spell-section cs-spell-section--runes">
-      <div class="cs-spell-section-title"><span class="cs-step-pill">3</span> Runes d’effet <span class="cs-spell-section-hint">+2 PM par rune · cumulables</span></div>
-      <div id="cs-runes-section">${runesSectionHtml}</div>
-    </div>
-
-    <!-- ✦ La Résonance — RÉSERVÉE AU MJ : révèle les combos. Cachée aux joueurs
-         pour ne pas spoiler la découverte des combinaisons. -->
-    ${STATE.isAdmin ? `<div class="cs-spell-section cs-spell-section--resonance">
-      <div class="cs-spell-section-title"><span class="cs-step-pill">✦</span> Résonance <span class="cs-spell-section-hint">MJ · les combos s’allument quand les bonnes runes se rencontrent</span></div>
-      <div id="cs-resonance" class="cs-resonance"></div>
-    </div>` : ''}
-
-    <!-- ④ Effets générés par les choix précédents -->
+    <!-- Store caché : ancien panneau d'effets (câblage 100% intact). Ses contrôles
+         sont relocalisés dans les tiroirs « régler » des lignes de la fiche. -->
+    <div id="s-forge-store" hidden>
     <section class="cs-spell-effects-panel" aria-label="Effets générés par le sort">
-      <div class="cs-spell-effects-title"><span class="cs-step-pill">4</span><div><b>Effets actifs</b><small>Les options apparaissent uniquement quand les runes ou types concernés sont présents.</small></div></div>
       <div id="s-effects-empty" class="cs-spell-effects-empty">Choisis un type ou une rune pour afficher les effets actifs.</div>
       <input type="hidden" id="s-maitrise-active" value="${usesSpellMastery(s) ? '1' : '0'}">
 
@@ -3546,158 +3581,78 @@ export async function openSortModal(idx, s) {
     </div>
 
     </section><!-- /cs-spell-effects-panel -->
-    </main>
+    </div><!-- /s-forge-store -->
 
-    <aside class="cs-spell-side" aria-label="Résumé et réglages du sort">
-      <div class="cs-spell-side-card cs-spell-side-card--preview">
-        <div class="cs-spell-preview cs-spell-preview--sticky">
-          <div class="cs-spell-preview-title">Résumé jouable
-            <span class="cs-spell-preview-pm">Coût : <strong id="s-pm-display">0</strong> <span id="s-pm-unit">${_esc(spellCostRes(s).label)}</span></span>
-          </div>
-          <div class="cs-spell-cost-res">
-            <span class="cs-spell-cost-res-lbl">💰 Ressource de coût</span>
-            <div class="cs-spell-cost-res-seg" role="group" aria-label="Ressource dépensée par le lanceur">
-              ${SPELL_COST_RESOURCES.map(r => {
-                const on = (s?.costResource || 'pm') === r.id;
-                const tip = r.mult ? `${r.full} · ×${r.mult} par rune` : r.full;
-                return `<button type="button" class="cs-spell-cost-res-btn ${on ? 'is-on' : ''}" style="--rc:${r.color}"
-                  data-action="_selectCostRes" data-res="${r.id}" aria-pressed="${on ? 'true' : 'false'}" title="${_esc(tip)}">
-                  <span class="cs-spell-cost-res-ic">${r.icon}</span>
-                  <span class="cs-spell-cost-res-tx">${r.id === 'none' ? 'Gratuit' : _esc(r.label)}</span>
-                </button>`;
-              }).join('')}
-            </div>
-            <input type="hidden" id="s-cost-resource" value="${s?.costResource || 'pm'}">
-          </div>
-          <div id="s-pm-breakdown" class="cs-pmbd"></div>
-          <div id="s-preview-body" class="cs-spell-preview-body"></div>
-          <input type="hidden" id="s-pm" value="${s?.pm||2}">
+    <!-- Colonne droite : la fiche (lire = régler) -->
+    <aside class="sheet" aria-label="Fiche jouable du sort">
+      <div class="cost">
+        <div class="cost-t"><b id="s-pm-display">0</b><s id="s-pm-unit">${_esc(spellCostRes(s).label)}</s><span class="pl" id="s-playline"></span></div>
+        <div class="res" role="group" aria-label="Ressource dépensée par le lanceur">
+          ${SPELL_COST_RESOURCES.map(r => {
+            const on = (s?.costResource || 'pm') === r.id;
+            const tip = r.mult ? `${r.full} · ×${r.mult} par rune` : r.full;
+            return `<button type="button" class="rs${on ? ' on' : ''}" style="--c:${r.color}"
+              data-action="_selectCostRes" data-res="${r.id}" aria-pressed="${on ? 'true' : 'false'}" title="${_esc(tip)}">
+              ${r.icon} ${r.id === 'none' ? 'Gratuit' : _esc(r.label)}</button>`;
+          }).join('')}
         </div>
+        <input type="hidden" id="s-cost-resource" value="${s?.costResource || 'pm'}">
+        <div id="s-pm-breakdown" class="bd"></div>
       </div>
+      <div id="s-preview-body" class="lines"></div>
+      <input type="hidden" id="s-pm" value="${s?.pm||2}">
 
-      <details class="cs-spell-advanced" open>
-        <summary><span>Réglages</span><small>Durée et portée optionnelles</small></summary>
-        <div class="cs-spell-advanced-body">
-
-    <!-- ⑧ Durée — auto-calculée (base 2 tours + Durée scalée), override possible.
-         Visible pour tous les sorts persistants (Enchant, Affliction, Protection CA, rune Durée). -->
-    <div id="s-duree-base-section" class="cs-duree-section" style="${_needsDureeBase(s)?'':'display:none'}">
-      ${_autoValHtml({
-        fieldId: 's-duree-base',
-        label: '⏳ Durée (tours)',
-        autoValue:  String(_calcSortDuree(s || {})),
-        autoSource: _autoSourceDuree(s || {}),
-        currentValue: s?.dureeBase,
-        placeholder: 'ex : 5',
-      })}
-    </div>
-
-    <!-- ⑧b Portée — override de la portée de l'arme (laisser vide = portée d'arme) -->
-    <div class="form-group cs-spell-side-setting">
-      <label>🎯 Portée <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">cases — laisser vide pour utiliser la portée de l'arme</span></label>
-      <div style="display:flex;gap:.4rem;align-items:center">
-        <input type="number" class="input-field" id="s-portee" min="0" max="50"
-          value="${s?.portee != null ? s.portee : ''}" placeholder="auto (arme)" style="width:100px;text-align:center;padding:.3rem">
-        <span style="font-size:.8rem;color:var(--text-dim)">cases</span>
-      </div>
-    </div>
-
+      <div class="sf">
+        <div class="sf-r">
+          <label class="fld"><span class="fld-l">⏳ Durée</span><input id="s-duree-base" value="${s?.dureeBase ?? ''}" placeholder="auto"><span class="fld-u">tours</span></label>
+          <label class="fld"><span class="fld-l">🎯 Portée</span><input type="number" id="s-portee" min="0" max="50" value="${s?.portee != null ? s.portee : ''}" placeholder="arme"><span class="fld-u">cases</span></label>
         </div>
-      </details>
-
-      <details class="cs-spell-advanced cs-spell-advanced--mj" ${STATE.isAdmin ? 'open' : ''}>
-        <summary><span>Validation MJ</span><small>Statut, notes et exceptions</small></summary>
-        <div class="cs-spell-advanced-body">
-
-    <!-- ⑩ Limites MJ (équilibrage + overrides) -->
-    <div class="cs-mj-limits">
-      <div class="cs-mj-limits-title">🔒 Limites MJ <span>— équilibrage des combos & overrides</span></div>
-
-      <!-- Validation MJ : 3 états (admins) / badge lecture seule (joueurs) -->
-      ${(() => {
-        const vs = _sortValidationState(s);
-        if (STATE.isAdmin) {
-          const seg = (val, label) => `<button type="button" class="cs-mjval-btn cs-mjval-btn--${val} ${vs===val?'is-active':''}" data-mjval="${val}" data-action="_csSetMjVal">${label}</button>`;
-          return `<div class="cs-mjval-block">
-            <div class="cs-mjval-block-title">Validation MJ <span>— statut de ce sort</span></div>
-            <input type="hidden" id="s-mj-validation" value="${vs}">
-            <div class="cs-mjval-seg">
-              ${seg('ok', '✅ Validé')}
-              ${seg('pending', '⏳ En attente')}
-              ${seg('no', '❌ Refusé')}
-            </div>
-          </div>`;
-        }
-        const lbl = vs === 'ok' ? '✅ Sort validé par le MJ'
-                  : vs === 'no' ? '❌ Sort refusé par le MJ'
-                  : '⏳ En attente de validation du MJ';
-        return `<div class="cs-mjval-readonly cs-mjval-readonly--${vs}">${lbl}</div>`;
-      })()}
-      ${!STATE.isAdmin && s?.alwaysPrepared
-        ? '<div class="cs-mjval-readonly cs-mjval-readonly--always">∞ Toujours prêt · ne consomme aucun emplacement du Deck</div>'
-        : ''}
-
-      <div class="form-group" style="margin-bottom:.5rem">
-        <label style="font-size:.72rem">Notes / restrictions <span style="color:var(--text-dim);font-weight:400;font-size:.68rem">(affichées dans la fiche)</span></label>
-        <textarea class="input-field" id="s-mj-notes" rows="2" placeholder="ex : soin va uniquement au lanceur">${s?.mjNotes||''}</textarea>
+        <textarea class="note" id="s-effet" placeholder="Note narrative, conditions spéciales…">${s?.effet||''}</textarea>
       </div>
 
-      ${STATE.isAdmin ? `
-      <div class="form-group" style="margin-bottom:.5rem">
-        <label style="font-size:.72rem">Coût personnalisé <span style="color:var(--text-dim);font-weight:400;font-size:.68rem">(MJ — dans la ressource choisie ci-dessus ; vide = auto selon runes ; set d'armure appliqué par-dessus pour les sorts en PM, jamais en dessous de 0)</span></label>
-        <input type="number" class="input-field" id="s-pm-override" min="0" max="50"
-          value="${s?.pmOverride ?? ''}" placeholder="auto"
-          style="max-width:120px">
-      </div>
-      ${!_itemEditCtx ? `<div class="cs-mj-validation cs-mj-validation--always ${s?.alwaysPrepared?'is-on':''}">
-        <input type="checkbox" id="s-always-prepared" ${s?.alwaysPrepared?'checked':''}
-          data-change="_csMjValToggle">
-        <label for="s-always-prepared" class="cs-mj-validation-label">
-          <span class="cs-mj-validation-switch"><span class="cs-mj-validation-thumb"></span></span>
-          <span class="cs-mj-validation-info">
-            <span class="cs-mj-validation-title">∞ Toujours prêt</span>
-            <span class="cs-mj-validation-sub">Le sort reste utilisable dans le Deck sans occuper d’emplacement — aptitude de classe, Rage, posture…</span>
-          </span>
-          <span class="cs-mj-validation-state"></span>
-        </label>
-      </div>` : ''}
-      <div class="cs-mj-validation cs-mj-validation--max ${s?.mjAlwaysMax?'is-on':''}">
-        <input type="checkbox" id="s-mj-always-max" ${s?.mjAlwaysMax?'checked':''}
-          data-change="_csMjValToggle">
-        <label for="s-mj-always-max" class="cs-mj-validation-label">
-          <span class="cs-mj-validation-switch"><span class="cs-mj-validation-thumb"></span></span>
-          <span class="cs-mj-validation-info">
-            <span class="cs-mj-validation-title">🎲 Toujours valeur maximum</span>
-            <span class="cs-mj-validation-sub">Les dés tirent leur valeur max (1d6 = 6, 2d4+2 = 10) — potions, objets à effet fixe</span>
-          </span>
-          <span class="cs-mj-validation-state"></span>
-        </label>
-      </div>
-      <div class="cs-mj-validation cs-mj-validation--autohit ${s?.mjAutoHit?'is-on':''}">
-        <input type="checkbox" id="s-mj-auto-hit" ${s?.mjAutoHit?'checked':''}
-          data-change="_csMjValToggle">
-        <label for="s-mj-auto-hit" class="cs-mj-validation-label">
-          <span class="cs-mj-validation-switch"><span class="cs-mj-validation-thumb"></span></span>
-          <span class="cs-mj-validation-info">
-            <span class="cs-mj-validation-title">✅ Réussite automatique (sans jet)</span>
-            <span class="cs-mj-validation-sub">Pas de jet de toucher : le sort réussit toujours (évite les échecs critiques — potions, soins, buffs à effet garanti)</span>
-          </span>
-          <span class="cs-mj-validation-state"></span>
-        </label>
-      </div>` : ''}
-    </div>
+      <details class="mj" open>
+        <summary>🔒 Validation MJ &amp; exceptions <span class="st pd" id="s-mj-badge">⏳ En attente</span></summary>
+        <div class="mj-b">
+    ${(() => {
+      const vs = _sortValidationState(s);
+      if (STATE.isAdmin) {
+        const seg = (val, label, col) => `<button type="button" class="rs${vs === val ? ' on' : ''}" style="--c:${col}" data-mjval="${val}" data-action="_csSetMjVal">${label}</button>`;
+        return `
+          <input type="hidden" id="s-mj-validation" value="${vs}">
+          <div class="res" role="group" aria-label="Statut de validation du sort">
+            ${seg('ok', '✅ Validé', '#22c38e')}
+            ${seg('pending', '⏳ En attente', '#f4c430')}
+            ${seg('no', '❌ Refusé', '#ff5a7e')}
+          </div>
+          ${!_itemEditCtx ? `<label class="sw"><input type="checkbox" id="s-always-prepared" ${s?.alwaysPrepared ? 'checked' : ''}> <span>∞ Toujours prêt <em>(hors emplacement du Deck)</em></span></label>` : ''}
+          <label class="sw"><input type="checkbox" id="s-mj-always-max" ${s?.mjAlwaysMax ? 'checked' : ''}> <span>🎲 Toujours valeur maximum</span></label>
+          <label class="sw"><input type="checkbox" id="s-mj-auto-hit" ${s?.mjAutoHit ? 'checked' : ''}> <span>✅ Réussite automatique <em>(sans jet)</em></span></label>
+          <textarea class="note" id="s-mj-notes" placeholder="Notes / restrictions (ex : soin uniquement au lanceur)…">${s?.mjNotes || ''}</textarea>
+          <span class="fld"><span>Coût imposé</span><input type="number" id="s-pm-override" min="0" max="50" value="${s?.pmOverride ?? ''}" placeholder="auto"></span>
+        `;
+      }
+      const lbl = vs === 'ok' ? '✅ Sort validé par le MJ'
+                : vs === 'no' ? '❌ Sort refusé par le MJ'
+                : '⏳ En attente de validation du MJ';
+      return `
+        <div class="cs-mjval-readonly cs-mjval-readonly--${vs}">${lbl}</div>
+        ${s?.alwaysPrepared ? '<div class="cs-mjval-readonly cs-mjval-readonly--always">∞ Toujours prêt · ne consomme aucun emplacement du Deck</div>' : ''}
+        <textarea class="note" id="s-mj-notes" placeholder="Notes / restrictions…">${s?.mjNotes || ''}</textarea>
+      `;
+    })()}
         </div>
       </details>
 
     </aside>
-   </div><!-- /cs-spell-layout -->
+   </div><!-- /fb -->
+
+   <footer class="ff">
+     <div class="hint" id="s-hint"><kbd>1</kbd>–<kbd>9</kbd> rune · <kbd>⇧</kbd>+chiffre retire · <kbd>⌘S</kbd> enregistrer</div>
+     <button class="save" data-action="saveSort" data-idx="${idx}">💾 Enregistrer le sort</button>
+   </footer>
 
    </div><!-- /cs-spell-forge -->
     </div><!-- /sh-admin-body -->
-    <div class="sh-admin-footer">
-      <div class="sh-admin-footer-spacer"></div>
-      <button class="btn btn-gold btn-sm" data-action="saveSort" data-idx="${idx}">💾 Enregistrer le sort</button>
-    </div>
    </div><!-- /sh-admin-modal -->
   `);
 
@@ -3713,17 +3668,40 @@ export async function openSortModal(idx, s) {
     if (modal && !modal.dataset.previewBound) {
       modal.dataset.previewBound = '1';
       modal.addEventListener('input', (event) => {
-        if (event.target?.id === 's-nom') _setSortNameRequiredError(false);
-        if (event.target?.classList?.contains('s-maitrise-active-toggle')) return;
+        const t = event.target;
+        if (t?.id === 's-nom') _setSortNameRequiredError(false);
+        if (t?.classList?.contains('s-maitrise-active-toggle')) return;
+        // Proxy d'override de formule (tiroir « régler ») : écrit dans le vrai input
+        // caché du store SANS re-rendre la fiche → garde le focus pendant la saisie.
+        if (t?.dataset?.ovr != null) {
+          const f = document.getElementById(t.dataset.ovr);
+          if (f) f.value = t.value;
+          return;
+        }
         _updateSortPreview();
       });
       modal.addEventListener('change', (event) => {
-        if (event.target?.classList?.contains('s-maitrise-active-toggle')) {
-          _setSpellMastery(event.target);
+        const t = event.target;
+        // Proxy de stat (toucher / dégâts) : recopie dans le vrai select du store.
+        if (t?.dataset?.statproxy != null) {
+          const sel = document.getElementById(t.dataset.statproxy);
+          if (sel) sel.value = t.value;
+          _updateSortPreview();
+          return;
+        }
+        if (t?.classList?.contains('s-maitrise-active-toggle')) {
+          _setSpellMastery(t);
         } else {
           _updateSortPreview();
         }
-        if (event.target?.id === 's-enchant-etat') _refreshEnchantStateTuning();
+        if (t?.id === 's-enchant-etat') _refreshEnchantStateTuning();
+      });
+      // Clic droit sur une tuile de rune → retire une occurrence (miroir du clic gauche).
+      modal.addEventListener('contextmenu', (event) => {
+        const rn = event.target?.closest?.('.cs-forge2 .rn[data-nom]');
+        if (!rn) return;
+        event.preventDefault();
+        runeDecrement(rn.dataset.nom);
       });
       // Emoji perso : Entrée dans le champ applique l'emoji saisi.
       modal.addEventListener('keydown', (event) => {
@@ -3939,19 +3917,9 @@ function _calcRegenerationAuto(s) {
 
 /** Re-style les boutons de type + ajuste la visibilité des sections conditionnelles. */
 function _applyTypeChange() {
-  const TYPE_CFG = {
-    offensif:   '#ff6b6b',
-    defensif:   '#22c38e',
-    utilitaire: '#b47fff',
-  };
-  Object.entries(TYPE_CFG).forEach(([t, color]) => {
+  ['offensif', 'defensif', 'utilitaire'].forEach(t => {
     const btn = document.getElementById(`s-type-${t}`);
-    if (!btn) return;
-    const active = _sortTypesEdit.has(t);
-    btn.style.borderColor  = active ? color : 'var(--border)';
-    btn.style.background   = active ? color+'20' : 'var(--bg-elevated)';
-    btn.style.color        = active ? color : 'var(--text-dim)';
-    btn.style.fontWeight   = active ? '700' : '400';
+    if (btn) btn.classList.toggle('on', _sortTypesEdit.has(t));
   });
   _refreshConditionalSections();
   _updateSortPreview();
@@ -4711,12 +4679,14 @@ function _selectAmpMode(mode) {
 
 // Forme de la zone combo Amp+Disp ('rect' | 'cross').
 function _selectZoneShape(shape) {
-  _zoneShapeEdit = shape === 'cross' ? 'cross' : 'rect';
+  _zoneShapeEdit = ZONE_SHAPES.includes(shape) ? shape : 'rect';
   const hidden = document.getElementById('s-zone-shape');
   if (hidden) hidden.value = _zoneShapeEdit;
-  document.querySelectorAll('[data-action="_selectZoneShape"]').forEach(btn => {
+  // Boutons legacy du store (rect/croix) : maj visuelle si présents (sans erreur sinon).
+  const SHAPE_COL = { rect: '#4f8cff', cross: '#a855f7', cone: '#f59e42', ring: '#22c38e' };
+  document.querySelectorAll('#s-forge-store [data-action="_selectZoneShape"]').forEach(btn => {
     const active = btn.dataset.val === _zoneShapeEdit;
-    const col = btn.dataset.val === 'cross' ? '#a855f7' : '#4f8cff';
+    const col = SHAPE_COL[btn.dataset.val] || '#4f8cff';
     btn.style.borderColor = active ? col : 'var(--border)';
     btn.style.background  = active ? col + '18' : 'var(--bg-elevated)';
     btn.style.color       = active ? col : 'var(--text-dim)';
@@ -5149,8 +5119,9 @@ function _selectCostRes(btn) {
   const res = SPELL_COST_RESOURCES.some(r => r.id === btn?.dataset?.res) ? btn.dataset.res : 'pm';
   const hidden = document.getElementById('s-cost-resource');
   if (hidden) hidden.value = res;
-  document.querySelectorAll('.cs-spell-cost-res-btn').forEach(b => {
+  document.querySelectorAll('.cs-forge2 .res .rs, .cs-spell-cost-res-btn').forEach(b => {
     const on = b.dataset.res === res;
+    b.classList.toggle('on', on);
     b.classList.toggle('is-on', on);
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
@@ -5181,7 +5152,34 @@ export function updateSortPM() {
   if (unitEl) unitEl.textContent = res.label;
   const bd = document.getElementById('s-pm-breakdown');
   if (bd) bd.innerHTML = _renderPmBreakdown();
+  // Ligne jouable (Action · 1 cible / Réaction · zone 6×3 · concentration)
+  const plEl = document.getElementById('s-playline');
+  if (plEl) plEl.textContent = _sortPlayLine();
+  // Badge de validation MJ dans le résumé du <details>
+  const badge = document.getElementById('s-mj-badge');
+  if (badge) {
+    const vs = document.getElementById('s-mj-validation')?.value || 'pending';
+    badge.className = 'st ' + (vs === 'ok' ? 'ok' : vs === 'no' ? 'no' : 'pd');
+    badge.textContent = vs === 'ok' ? '✅ Validé' : vs === 'no' ? '❌ Refusé' : '⏳ En attente';
+  }
   _updateSortPreview();
+}
+
+// Ligne jouable résumée depuis l'état d'édition courant (runes + modes).
+function _sortPlayLine() {
+  const ct = _runeCountsEdit || {};
+  const cnt = (n) => ct[n] || 0;
+  const bits = [];
+  bits.push(cnt(ACTION_RUNE) ? (_actionModeEdit === 'action_bonus' ? 'Action bonus' : 'Réaction') : 'Action');
+  const a = cnt('Amplification'), d = cnt('Dispersion');
+  const ampMode = document.getElementById('s-amp-mode')?.value || 'zone';
+  if (a && d) bits.push(`zone ${_ampLength(a)}×${_ampLength(d)}`);
+  else if (a && ampMode === 'zone') bits.push(`ligne ${_ampLength(a)}`);
+  else if (a && ampMode === 'deplacement') bits.push('déplacement');
+  else if (d) bits.push(`${1 + d} cibles`);
+  else bits.push('1 cible');
+  if (cnt('Concentration')) bits.push('concentration');
+  return bits.join(' · ');
 }
 
 /** Reconstruit un objet sort depuis l'état du modal (pour la preview live) */
@@ -5232,7 +5230,7 @@ function _buildSortFromDOM() {
     dureeBase: dureeBase >= 2 ? dureeBase : null,
     deplacement: deplMode ? { mode: deplMode } : null,
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
-    zoneShape: _zoneShapeEdit === 'cross' ? 'cross' : 'rect',
+    zoneShape: ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect',
     // Portée + stats overrides : doivent être lus du DOM pour que la preview live
     // et les chips auto reflètent la sélection courante (sinon auto-dérivation kick in).
     portee:      (() => {
@@ -5329,47 +5327,64 @@ function _itemPreviewPlaceholderChar() {
 function _updateSortPreview() {
   const body = document.getElementById('s-preview-body');
   if (!body) return;
-  // En contexte item-edit : on utilise un perso virtuel pour avoir un aperçu générique
-  //   (formules de base sans modificateurs perso, ce qui correspond au comportement réel
-  //   de l'item — les modificateurs viennent du caster au moment de l'utilisation).
+  const store = document.getElementById('s-forge-store');
+  // En contexte item-edit : perso virtuel pour un aperçu générique.
   const c = _modalChar() || (_itemEditCtx ? _itemPreviewPlaceholderChar() : null);
   if (!c) { body.innerHTML = ''; return; }
   if (typeof _refreshAutoValChips === 'function') _refreshAutoValChips();
   if (typeof _refreshSpellSuggestions === 'function') _refreshSpellSuggestions();
+  // ① Rapatrie les contrôles relocalisés (états, invocation) vers le store AVANT le
+  //    wipe innerHTML — sinon ces vrais nœuds du contrat DOM seraient détruits.
+  if (store) body.querySelectorAll('.cs-forge-slot').forEach(slot => {
+    const n = slot.firstElementChild; if (n) store.appendChild(n);
+  });
   const s = _buildSortFromDOM();
-  let lines = [];
+  // Refonte « lire = régler » : une ligne par effet, éditée sur place (proxys
+  // data-ovr/data-statproxy → store) + tiroirs qui relocalisent les contrôles
+  // complexes du store. Repli sur l'ancien résumé en cas d'erreur.
   try {
-    lines = _buildSortResume(s, c);
+    const sheetLines = computeSheetLines(_sortSheetState(s));
+    body.className = 'lines cs-sheet-lines';
+    body.innerHTML = renderSheetLines(sheetLines, buildLineCtx(sheetLines, s, c), _sortTunedEdit, {});
+    // ② Relocalise les contrôles requis dans les tiroirs « régler » ouverts.
+    if (store) body.querySelectorAll('.cs-forge-slot[data-slot]').forEach(slot => {
+      const node = document.getElementById(slot.dataset.slot);
+      if (node) slot.appendChild(node);
+    });
   } catch (e) {
-    console.warn('[Preview] _buildSortResume a échoué :', e);
-    lines = [{ icon:'⚠️', label:'Aperçu indisponible', detail: String(e?.message || e) }];
+    console.warn('[Sheet] rendu des lignes échoué :', e);
+    body.className = '';
+    let lines = [];
+    try { lines = _buildSortResume(s, c); }
+    catch (e2) { lines = [{ icon: '⚠️', label: 'Aperçu indisponible', detail: String(e2?.message || e2) }]; }
+    body.innerHTML = lines.map(l => `
+      <div class="cs-spell-preview-row ${l.isCombo ? 'cs-spell-preview-row--combo' : ''}">
+        ${l.icon ? `<span class="cs-spell-preview-icon">${l.icon}</span>` : '<span class="cs-spell-preview-icon"></span>'}
+        <span class="cs-spell-preview-label">${_esc(l.label)}</span>
+        ${l.detail ? `<span class="cs-spell-preview-detail">${_esc(l.detail)}</span>` : ''}
+      </div>
+    `).join('');
   }
-  body.innerHTML = lines.map(l => `
-    <div class="cs-spell-preview-row ${l.isCombo ? 'cs-spell-preview-row--combo' : ''}">
-      ${l.icon ? `<span class="cs-spell-preview-icon">${l.icon}</span>` : '<span class="cs-spell-preview-icon"></span>'}
-      <span class="cs-spell-preview-label">${_esc(l.label)}</span>
-      ${l.detail ? `<span class="cs-spell-preview-detail">${_esc(l.detail)}</span>` : ''}
-    </div>
-  `).join('');
 
-  // La Résonance : circuit de combos (allumés + en approche). RÉSERVÉE AU MJ — la
-  // section n'existe pas côté joueur (cf. openSortModal), donc rez est nul pour eux.
+  // Éléments (chips) : re-synchronise les états on/pri depuis _noyauIdsEdit.
+  _syncElementChips();
+
+  // La Résonance : circuit de combos (MJ uniquement).
   const rez = STATE.isAdmin ? document.getElementById('cs-resonance') : null;
   if (rez) rez.innerHTML = _renderResonance();
 
-  // Bandeau avant/après : prévient AVANT la save qu'un changement de contenu
-  // renverra ce sort validé en attente MJ (même comparaison que saveSort).
+  // Bandeau avant/après : prévient AVANT la save qu'un changement renverra le sort à valider.
   const banner = document.getElementById('s-revalidate-banner');
   if (banner && _sortEditWasOk) {
     const changed = _sortEditContentBaseline != null && _sortContentSig(s) !== _sortEditContentBaseline;
     banner.hidden = !changed;
-    const saveBtn = document.querySelector('.sh-admin-footer [data-action="saveSort"]');
+    const saveBtn = document.querySelector('.ff [data-action="saveSort"]');
     if (saveBtn) saveBtn.textContent = changed ? '💾 Enregistrer (repasse à valider)' : '💾 Enregistrer le sort';
   }
 }
 
 function _setSortNameRequiredError(show, message = "Donne un nom au sort avant de l'enregistrer.") {
-  const field = document.getElementById('s-nom')?.closest('.cs-spell-identity-field');
+  const field = document.getElementById('s-nom')?.closest('.cs-forge-idname, .cs-spell-identity-field');
   const input = document.getElementById('s-nom');
   const error = document.getElementById('s-nom-error');
   field?.classList.toggle('is-invalid', !!show);
@@ -5429,31 +5444,17 @@ export function selectNoyau(el, noyauId, noyauLabel, noyauColor) {
   if (i >= 0) _noyauIdsEdit.splice(i, 1);
   else        _noyauIdsEdit.push(noyauId);
   const on = _noyauIdsEdit.includes(noyauId);
-  el.classList.toggle('selected', on);
-  el.setAttribute('aria-pressed', on ? 'true' : 'false');
-  if (on && noyauColor) {
-    el.style.borderColor = noyauColor;
-    el.style.background  = noyauColor + '20';
-    el.style.color       = noyauColor;
-  } else {
-    el.style.borderColor = '';
-    el.style.background  = '';
-    el.style.color       = '';
-  }
-  // Élément non accessible qu'on vient de RETIRER → on le désactive pour qu'il
-  // ne puisse pas être re-sélectionné (il n'est plus débloqué sur la fiche).
-  if (!on && _sortAllowedNoyauIds && !_sortAllowedNoyauIds.has(noyauId)) {
-    el.disabled = true;
-    el.setAttribute('aria-disabled', 'true');
+  // Élément non accessible qu'on vient de RETIRER → devient non re-sélectionnable.
+  if (!on && _sortAllowedNoyauIds && !_sortAllowedNoyauIds.has(noyauId) && el) {
+    el.classList.add('lk');
     el.removeAttribute('data-action');
-    el.title = "Ce noyau n'est plus accessible à ce personnage";
-    const badge = el.querySelector('.cs-noyau-lock');
-    if (badge) badge.textContent = 'non accessible';
+    el.setAttribute('aria-disabled', 'true');
+    el.title = "Élément non débloqué sur ta fiche";
   }
-  // Primaire = premier sélectionné → conserve s-noyau / s-noyau-id pour la compat
-  // (calcul des soins, suggestions matrice, élément par défaut côté VTT).
+  _syncElementChips();   // maj on/pri sur les chips .el
+  // Primaire = premier sélectionné → conserve s-noyau / s-noyau-id pour la compat.
   const primId  = _noyauIdsEdit[0] || '';
-  const primBtn = primId ? document.querySelector(`.cs-noyau-btn[data-noyau-id="${primId}"]`) : null;
+  const primBtn = primId ? document.querySelector(`.cs-forge2 .els .el[data-noyau-id="${primId}"]`) : null;
   const inputLabel = document.getElementById('s-noyau');
   const inputId    = document.getElementById('s-noyau-id');
   if (inputId)    inputId.value    = primId;
@@ -5461,8 +5462,6 @@ export function selectNoyau(el, noyauId, noyauLabel, noyauColor) {
     ? (primBtn?.getAttribute('data-noyau-label') || noyauLabel || primId)
     : '';
   _setNoyauRequiredError(_noyauIdsEdit.length === 0);
-  // Le changement de noyau affecte le calcul des soins (magique → arme · physique → Con)
-  // et les suggestions matrice (Enchant/Affliction · Protection CA)
   updateSortPM();
   if (typeof _refreshAutoValChips === 'function') _refreshAutoValChips();
 }
@@ -5764,7 +5763,7 @@ export async function saveSort(idx, btn = null) {
       dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
       deplacement: deplMode ? { mode: deplMode } : null,
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
-    zoneShape: _zoneShapeEdit === 'cross' ? 'cross' : 'rect',
+    zoneShape: ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect',
       // Portée override : 0 ou vide = utilise la portée de l'arme par défaut (côté VTT)
       portee:     (() => {
         const raw = document.getElementById('s-portee')?.value;
@@ -5914,7 +5913,7 @@ function _buildSortFromForm(idx, prevList = []) {
     dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
     deplacement: deplMode ? { mode: deplMode } : null,
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
-    zoneShape: _zoneShapeEdit === 'cross' ? 'cross' : 'rect',
+    zoneShape: ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect',
     portee:     (() => {
       const raw = document.getElementById('s-portee')?.value;
       if (raw === '' || raw == null) return null;
@@ -5970,8 +5969,12 @@ registerActions({
     const val = btn.dataset.mjval;
     const inp = document.getElementById('s-mj-validation');
     if (inp) inp.value = val;
-    document.querySelectorAll('.cs-mjval-btn').forEach(b => b.classList.toggle('is-active', b.dataset.mjval === val));
-    _updateSortPreview();
+    document.querySelectorAll('.cs-forge2 .mj .res .rs[data-mjval], .cs-mjval-btn').forEach(b => {
+      const on = b.dataset.mjval === val;
+      b.classList.toggle('on', on);
+      b.classList.toggle('is-active', on);
+    });
+    updateSortPM();
   },
   addSort:                ()    => addSort(),
   openSortCatEditor:      ()    => openSortCatEditor(),
@@ -6034,6 +6037,8 @@ registerActions({
   _selectZoneShape:       (btn) => _selectZoneShape(btn.dataset.val),
   _selectEnchantMode:     (btn) => _selectEnchantMode(btn.dataset.val),
   _selectAfflictionMode:  (btn) => _selectAfflictionMode(btn.dataset.val),
+  _toggleLineTune:        (btn) => { const id = btn.dataset.line; if (_sortTunedEdit.has(id)) _sortTunedEdit.delete(id); else _sortTunedEdit.add(id); _updateSortPreview(); },
+  _lineTuneAuto:          (btn) => { const f = document.getElementById(btn.dataset.ovr); if (f) f.value = ''; _updateSortPreview(); },
   _toggleSortIconPicker:  ()    => _toggleSortIconPicker(),
   _applyCustomSortIcon:   ()    => _applyCustomSortIcon(),
   _pickSortIcon:          (btn) => _pickSortIcon(btn.dataset.icon),

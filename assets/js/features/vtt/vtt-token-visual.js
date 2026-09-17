@@ -3,6 +3,8 @@
 // alimenter à la fois le canvas, l'infobulle et les tests sans dupliquer les
 // règles de présentation.
 
+import { _cellInShape } from '../../shared/spell-zones.js';
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const NEGATIVE_BUFFS = new Set(['dot', 'move_debuff', 'affliction']);
 const NEUTRAL_BUFFS = new Set(['suspended_spell']);
@@ -108,20 +110,20 @@ export function tokenFootprintIntersectsZone(token = {}, zone = {}) {
   const shape = zone.shape || 'rect';
   if (shape === 'rect') return true;
 
-  // Pour les formes non rectangulaires, tester le centre de chaque case occupée
-  // par le token plutôt que le seul centre global de son portrait.
+  // Formes non rectangulaires : couverture EN CASES (même prédicat que le rendu →
+  // cohérence parfaite entre ce qu'on voit et ce qui est touché). On teste le centre
+  // de chaque case occupée par le token contre la case correspondante de la zone.
+  const cols = Math.max(1, Math.round(zoneW / cellSize));
+  const rows = Math.max(1, Math.round(zoneH / cellSize));
+  const dir = zone.coneDir || 'down';
   for (let dx = 0; dx < width; dx += 1) {
     for (let dy = 0; dy < height; dy += 1) {
       const cx = (col + dx + 0.5) * cellSize;
       const cy = (row + dy + 0.5) * cellSize;
       if (cx < x1 || cx > x2 || cy < y1 || cy > y2) continue;
-      if (shape === 'cross') {
-        if (Math.abs(cx - zoneX) <= cellSize / 2 || Math.abs(cy - zoneY) <= cellSize / 2) return true;
-      } else if (shape === 'diamond') {
-        const rx = Math.max(1, zoneW / 2);
-        const ry = Math.max(1, zoneH / 2);
-        if (Math.abs(cx - zoneX) / rx + Math.abs(cy - zoneY) / ry <= 1) return true;
-      }
+      const ci = Math.floor((cx - x1) / cellSize);
+      const ri = Math.floor((cy - y1) / cellSize);
+      if (_cellInShape(shape, ci, ri, cols, rows, dir)) return true;
     }
   }
   return false;

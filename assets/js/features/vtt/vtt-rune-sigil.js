@@ -178,7 +178,7 @@ export function playTechniqueArea(container, {
   if (!container || width <= 0 || height <= 0) return;
   const layer = _ensureLayer(container);
   const el = document.createElement('div');
-  const safeShape = ['square', 'rect', 'circle', 'line', 'cone', 'cross', 'diamond'].includes(shape)
+  const safeShape = ['square', 'rect', 'circle', 'line', 'cone', 'cross', 'diamond', 'ring'].includes(shape)
     ? shape : 'square';
   el.className = `vtt-tech-area-fx vtt-tech-area-fx--${safeShape}`;
   el.style.cssText = [
@@ -188,6 +188,15 @@ export function playTechniqueArea(container, {
   ].join(';');
   if (safeShape === 'diamond') {
     el.style.clipPath = 'polygon(50% 0, 100% 50%, 50% 100%, 0 50%)';
+  } else if (safeShape === 'cone') {
+    // Cône : triangle, pointe en haut (l'orientation vient de --tech-area-rotation).
+    el.style.clipPath = 'polygon(50% 0, 100% 100%, 0 100%)';
+  } else if (safeShape === 'ring') {
+    // Anneau : couronne évidée via un masque radial (centre transparent).
+    const _hole = 'radial-gradient(circle at 50% 50%, transparent 0 34%, #000 35% 50%, transparent 51%)';
+    el.style.webkitMaskImage = _hole;
+    el.style.maskImage = _hole;
+    el.style.borderRadius = '50%';
   } else if (safeShape === 'cross') {
     const halfX = Math.min(50, Math.max(2, (Math.max(1, cellSize) / Math.max(1, width)) * 50));
     const halfY = Math.min(50, Math.max(2, (Math.max(1, cellSize) / Math.max(1, height)) * 50));

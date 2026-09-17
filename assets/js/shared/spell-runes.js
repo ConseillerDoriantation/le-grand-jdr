@@ -48,10 +48,11 @@ export function resolveSpellModifierStat(spell = {}, field, fallback = '') {
 export function calcSpellTargets(spell = {}) {
   if (spell?.designMode === 'classic') return 1;
   const nbDisp = runeCount(spell, 'Dispersion');
-  const nbAmp = runeCount(spell, 'Amplification');
   const nbAff = runeCount(spell, 'Affliction');
   const nbInv = runeCount(spell, 'Invocation');
-  if (nbAmp > 0 && nbDisp > 0) return 1;
+  // Modèle zones v2 : Dispersion = nombre de poses (zone OU cible). Amp+Disp ne
+  // « fond » plus la Dispersion dans la largeur → elle multiplie les zones (1+nDisp).
+  // Exception Sentinelle (Affliction+Invocation) : une seule sentinelle porte l'effet.
   if (nbAff > 0 && nbInv > 0 && nbDisp > 0) return 1;
   return nbDisp === 0 ? 1 : 1 + nbDisp;
 }
