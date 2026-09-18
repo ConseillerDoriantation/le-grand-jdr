@@ -82,7 +82,7 @@ import {
 } from './vtt-ruler.js';
 import {
   _initChatLogSubs, _vttToggleLogDetail, _vttSendChat, _vttChatReply, _vttChatReplyCancel, _chatMsgs,
-  _vttPublishOptimisticLog,
+  _vttPublishOptimisticLog, _vttRefreshCombatHpEstimates, _vttResetCombatHpLog,
 } from './vtt-chat.js';
 import {
   _loadEmotes, _loadDiceSkills, _vttSetRollMode, _vttAdjBonus, _vttSetBonus, _vttToggleRollHidden, _vttRollSkill,
@@ -1085,6 +1085,7 @@ function _cleanup() {
   VS.presence = {}; VS.miniUid = null; VS.miniCharId = null;
   VS.tokens = {}; VS.pages = {}; VS.characters = {}; VS.npcs = {}; VS.bestiary = {}; VS.bstTracker = {};
   VS.combatHpEstimates.clear();
+  _vttResetCombatHpLog();
   _bestiaryLoads.clear();
   VS.session = {}; VS.activePage = null; VS.selected = null; _attackSrc = null;
   _clearAim(); _hideActBar();
@@ -9048,21 +9049,9 @@ async function _vttRollAttack() {
         const hpMax = _effectiveTokenHpMax(curTgtData) ?? 20;
         const curHp = Math.max(0, Math.min(hpMax, _effectiveTokenHp(curTgtData) ?? hpMax));
         const newHp = Math.min(hpMax, curHp + healTotal);
-        let estimatedHpPatch = null;
-        if (curTgtData.type === 'enemy') {
-          const playerEstimateMax = !STATE.isAdmin && lCur.displayHpMax != null
-            ? Math.max(0, Number(lCur.displayHpMax) || 0)
-            : null;
-          const knownEstimate = VS.combatHpEstimates.get(curTgtData.id);
-          const estimateMax = knownEstimate?.max ?? playerEstimateMax;
-          const estimateCurrent = knownEstimate?.current ?? playerEstimateMax;
-          if (estimateCurrent != null && estimateMax != null) {
-            const current = Math.min(estimateMax, estimateCurrent + healTotal);
-            VS.combatHpEstimates.set(curTgtData.id, { current, max:estimateMax });
-            estimatedHpPatch = { pvCombatHp:current };
-          }
-        }
-        const _write = _setHp(curTgtData, newHp, estimatedHpPatch);
+        // Le journal public fera évoluer l'estimation propre à chaque joueur.
+        // Ne pas enregistrer l'estimation d'un joueur sur le token partagé.
+        const _write = _setHp(curTgtData, newHp);
         return {
           name: lCur.displayName ?? curTgtData.name,
           applied: Math.max(0, newHp - curHp),
@@ -9147,6 +9136,8 @@ async function _vttRollAttack() {
             characterImage: _combatLogImage(lS.displayImage),
             defenderName: r.name,
             defenderImage: _live(tgt)?.displayImage || null,
+            defenderTokenId: r.tokenId || null,
+            tokenId: r.tokenId || null,
             characterId: tgt?.characterId || null,
             npcId: tgt?.npcId || null,
             beastId: tgt?.beastId || null,
@@ -9658,15 +9649,9 @@ async function _vttRollAttack() {
           const newEst = prevEst == null
             ? null
             : Math.max(0, Math.min(estimateMax, prevEst - dmgTotal));
-          if (newEst != null) {
-            VS.combatHpEstimates.set(curTgtData.id, { current:newEst, max:estimateMax });
-          }
           _showAppliedHpDelta(curTgtData, realCur, newHp, STATE.isAdmin ? newHp : newEst);
-          _patchHpOptimistically(curTgtData, newHp, newEst ?? undefined);
-          const hpPatch = newEst == null
-            ? { hp:newHp }
-            : { hp:newHp, pvCombatHp:newEst };
-          targetWrite = updateDoc(_tokRef(curTgtData.id), hpPatch)
+          _patchHpOptimistically(curTgtData, newHp);
+          targetWrite = updateDoc(_tokRef(curTgtData.id), { hp:newHp })
             .then(() => _syncDownedCondition(curTgtData, newHp));
         } else {
           // Le registre VTT contient aussi les personnages des autres joueurs.
@@ -10970,6 +10955,7 @@ function _initListeners() {
     if (uid) {
       VS.unsubs.push(onSnapshot(_bstTrackerRef(uid), snap => {
         VS.bstTracker = snap.exists() ? (snap.data().data || {}) : {};
+        _vttRefreshCombatHpEstimates();
         // Mettre à jour la barre HP de tous les tokens ennemis sur le canvas
         for (const [id, e] of Object.entries(VS.tokens)) {
           if (e.data?.type === 'enemy' && e.data?.beastId) _patchShape(id);
@@ -10985,11 +10971,13 @@ function _initListeners() {
 
   // 6. Tokens
   VS.unsubs.push(onSnapshot(_toksCol(), snap => {
+    let estimateTargetsChanged = false;
     snap.docChanges().forEach(ch => {
      try {
       const id=ch.doc.id;
       let data={id,...ch.doc.data()};
       if (ch.type==='removed') {
+        if (VS.tokens[id]?.data?.type === 'enemy') estimateTargetsChanged = true;
         _keyboardOptimisticMoves.delete(id);
         VS.tokens[id]?.shape?.destroy(); delete VS.tokens[id];
         if (VS.selected===id) _deselect();
@@ -11002,6 +10990,9 @@ function _initListeners() {
       if (optimistic && !_keyboardPatchMatches(data, optimistic.patch))
         data={...data,...optimistic.patch};
       const prev=VS.tokens[id];
+      if (data.type === 'enemy' && (!prev || prev.data.type !== data.type || prev.data.beastId !== data.beastId)) {
+        estimateTargetsChanged = true;
+      }
       if (prev) {
         const changedPage=prev.data.pageId!==data.pageId;
         prev.data=data;
@@ -11028,6 +11019,7 @@ function _initListeners() {
      } catch (e) { _vttPanelError('Token', e, null); }
     });
     _syncTokenStackVisuals();
+    if (estimateTargetsChanged) _vttRefreshCombatHpEstimates();
     // Joueur : dès que son token apparaît/arrive sur la carte active, on affiche sa
     // fiche sans clic (gardé : seulement si rien n'est sélectionné).
     if (!STATE.isAdmin) _vttAutoSelectOwnToken();
