@@ -250,8 +250,33 @@
 .bst-jg3 label > em { font-style: normal; font-size: 9px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-dim); }
 .bst-jrow-e { margin-top: 5px; font-size: 11.5px; color: var(--text-muted); display: flex; flex-direction: column; gap: 2px; }
 .bst-jrow-e > em { font-style: normal; font-size: 9px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-dim); }
-.bst-jrel { display: grid; grid-template-columns: 82px minmax(0, 1fr); align-items: start; gap: 9px; padding: 7px 9px; border-radius: var(--r-sm); background: var(--surface-sunken); border: 1px solid var(--border); border-left: 2px solid var(--relc); margin-bottom: 6px; font-size: 12px; }
-.bst-jrel > span { font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: var(--relc); font-weight: 700; padding-top: 2px; }
+/* Relations aux dégâts (joueur) : réutilise le segment type-first du MJ (.bst-dmg-*). */
+
+/* Attaque observée (joueur) — carte : nom, puis Toucher / Dégâts / Portée sur une
+   ligne, puis Effet. Un seul ✓/? pour toute la carte. */
+.bst-jatk { padding: 8px 10px; border-radius: var(--r-sm); background: var(--surface-sunken); border: 1px solid var(--border); margin-bottom: 7px; }
+.bst-jatk.done { border-color: var(--border-md); background: var(--surface-2); }
+.bst-jatk-h { display: flex; align-items: baseline; gap: 7px; margin-bottom: 7px; font-size: 12.5px; }
+.bst-jatk-h .ix { font-size: 9.5px; font-weight: 700; color: var(--text-dim); letter-spacing: .06em; text-transform: uppercase; flex: none; }
+.bst-jatk-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.bst-jf { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bst-jf > em { font-style: normal; font-size: 9px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-dim); }
+.bst-jf .bst-slot { font-size: 12px; }
+.bst-jatk-eff { margin-top: 8px; display: flex; align-items: flex-start; gap: 6px; font-size: 11.5px; color: var(--text-muted); }
+.bst-jatk-eff > em { flex: none; font-style: normal; font-size: 9px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-dim); padding-top: 3px; }
+.bst-jatk-eff .bst-slot-field { flex: 1; }
+.bst-jatk-eff .bst-cert-toggle { margin-left: auto; }
+
+/* Butin supposé (joueur) — tableau : n° · objet · quantité · ✓/? */
+.bst-jlhead { display: grid; grid-template-columns: 22px minmax(0,1fr) 62px 22px; gap: 6px; padding: 0 6px 4px 10px; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); font-weight: 700; }
+.bst-jlhead span:first-child { grid-column: 1/3; }
+.bst-jlhead span:last-child { text-align: center; }
+.bst-jloot { display: flex; flex-direction: column; gap: 3px; }
+.bst-jlrow { display: grid; grid-template-columns: 22px minmax(0,1fr) 62px 22px; align-items: center; gap: 6px; padding: 6px 6px 6px 10px; border-radius: var(--r-xs); background: var(--surface-sunken); border: 1px solid var(--border); font-size: 12px; }
+.bst-jlrow.done { border-color: var(--border-md); background: var(--surface-2); }
+.bst-jlrow.or { background: color-mix(in srgb, var(--amber) 6%, var(--surface-sunken)); border-color: color-mix(in srgb, var(--amber) 20%, var(--border)); }
+.bst-jlrow .ix { font-size: 9.5px; font-weight: 700; color: var(--text-dim); letter-spacing: .06em; text-transform: uppercase; text-align: center; }
+
 .bst-blind { display: flex; align-items: center; gap: 9px; padding: 9px 11px; border-radius: var(--r-sm); border: 1px dashed var(--border-md); font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
 .bst-blind b { color: var(--text-muted); font-weight: 600; }
 
@@ -981,73 +1006,78 @@ select.bst-p-input option {
 }
 .bst-p-row-remove:hover { background: rgba(255,90,126,0.18); }
 
-/* ── Carte d'arme naturelle (édition MJ) ─────────────────────────────────────── */
-.bst-arme-card { gap: 7px; }
-.bst-arme-head {
-  display: grid; grid-template-columns: 1fr 112px 26px; gap: 6px; align-items: center;
-}
-.bst-arme-nom { font-weight: 600; }
-.bst-arme-dice { text-align: center; }
+/* ── Attaque naturelle (v2) — carte à deux états, lisible comme un jet ──────── */
+.bst-arme-card { display: block; border-radius: var(--r-sm); background: var(--surface-sunken); border: 1px solid var(--border); margin-bottom: 7px; overflow: hidden; }
+.bst-arme-card.open { border-color: var(--border-md); background: var(--surface-2); }
+.bst-arme-h { display: grid; grid-template-columns: minmax(0,1fr) 68px 21px 21px; align-items: center; gap: 5px; padding: 7px 8px 5px; }
+.bst-arme-nm, .bst-arme-dice { height: 26px; padding: 0 8px; background: transparent; border: 1px solid transparent; border-radius: var(--r-xs); outline: 0; font: inherit; font-size: 12.5px; font-weight: 600; min-width: 0; color: inherit; }
+.bst-arme-dice { text-align: center; color: var(--crimson); font-variant-numeric: tabular-nums; }
+.bst-arme-nm:hover, .bst-arme-dice:hover { border-color: var(--border-md); }
+.bst-arme-nm:focus, .bst-arme-dice:focus { background: var(--surface-1); border-color: var(--gold); }
+.bst-arme-ic { width: 21px; height: 21px; border-radius: 5px; display: grid; place-items: center; background: none; border: 0; cursor: pointer; font-size: 11px; color: var(--text-dim); }
+.bst-arme-ic:hover { background: var(--surface-3); color: var(--text); }
+.bst-arme-ic.dngr:hover { background: color-mix(in srgb, var(--crimson) 16%, transparent); color: var(--crimson); }
+.bst-arme-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 0 10px 8px; font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.bst-arme-hit { color: var(--gold-2); font-weight: 600; }
+.bst-arme-dmgv { color: var(--text-soft); font-weight: 600; }
+.bst-arme-rng { color: var(--text-dim); }
+.bst-arme-mag { color: var(--arcane); }
+.bst-arme-inf { flex-basis: 100%; color: var(--text-dim); font-size: 11px; line-height: 1.45; }
+.bst-arme-set { display: none; flex-direction: column; gap: 5px; padding: 2px 10px 9px; border-top: 1px solid var(--border); }
+.bst-arme-card.open .bst-arme-set { display: flex; }
+.bst-arme-sent { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-dim); padding-top: 6px; }
+.bst-arme-sent > span { flex: none; }
+.bst-arme-sent.wide { align-items: stretch; }
+.bst-arme-sel, .bst-arme-n, .bst-arme-tx { height: 26px; background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--r-xs); font: inherit; font-size: 12px; color: var(--text); outline: 0; padding: 0 6px; }
+.bst-arme-sel { cursor: pointer; }
+.bst-arme-n { width: 50px; text-align: center; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
+.bst-arme-n::-webkit-outer-spin-button, .bst-arme-n::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.bst-arme-tx { flex: 1; min-width: 110px; }
+.bst-arme-rngtx { flex: 0 1 154px; min-width: 92px; }
+.bst-arme-sel:focus, .bst-arme-n:focus, .bst-arme-tx:focus { border-color: var(--gold); }
+.bst-arme-dref { font-size: 12px; font-weight: 600; color: var(--crimson); font-variant-numeric: tabular-nums; padding: 0 2px; }
+.bst-arme-chk { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px 0 7px; border-radius: var(--r-full); border: 1px solid var(--border); font-size: 11px; color: var(--text-dim); cursor: pointer; white-space: nowrap; }
+.bst-arme-chk input { accent-color: var(--gold); margin: 0; width: 13px; height: 13px; cursor: pointer; }
+.bst-arme-chk.on { border-color: color-mix(in srgb, var(--gold) 40%, transparent); color: var(--gold-2); background: color-mix(in srgb, var(--gold) 12%, transparent); }
+.bst-arme-brk { margin-top: 3px; font-size: 10.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.bst-arme-brk b { color: var(--text-muted); font-weight: 600; }
+.bst-arme-more { display: block; width: 100%; padding: 5px 0 6px; background: none; border: 0; border-top: 1px solid var(--border); cursor: pointer; font: inherit; font-size: 10.5px; color: var(--text-dim); transition: color .15s, background .15s; }
+.bst-arme-more:hover { color: var(--gold-2); background: color-mix(in srgb, var(--gold) 5%, transparent); }
 
-/* Dégâts / Toucher : deux sous-blocs lisibles, stat + bonus groupés */
-.bst-arme-duo { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-.bst-arme-grp {
-  display: grid; gap: 4px;
-  padding: 6px 8px;
-  background: rgba(255,255,255,0.022);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.bst-arme-grp-hd {
-  font-size: .6rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
-  color: var(--text-muted);
-}
-.bst-arme-grp-fields { display: grid; grid-template-columns: 1fr 52px; gap: 5px; }
-.bst-arme-grp-fields .bst-p-input { font-size: .8rem; }
-.bst-arme-auto {
-  display: flex; align-items: center; gap: .45rem; width: 100%;
-  margin: 6px 0 0; padding: .4rem .6rem; box-sizing: border-box;
-  background: var(--bg-elevated); border: 1px solid var(--border);
-  border-radius: 8px; cursor: pointer;
-  font-size: .74rem; font-weight: 600; color: var(--text-dim);
-  transition: border-color .12s, background .12s, color .12s;
-}
-.bst-arme-auto:hover { border-color: var(--gold); color: var(--text); }
-.bst-arme-auto.is-on {
-  color: var(--gold);
-  background: color-mix(in srgb, var(--gold) 10%, var(--bg-elevated));
-  border-color: color-mix(in srgb, var(--gold) 40%, var(--border));
-}
-.bst-arme-auto input { accent-color: var(--gold); cursor: pointer; flex-shrink: 0; }
-.bst-arme-auto-hint { font-weight: 500; color: var(--text-muted); font-size: .68rem; }
-
-/* Portée · Format · Type */
-.bst-arme-trio { display: grid; grid-template-columns: 96px 1fr 1fr; gap: 6px; align-items: end; }
-
-.bst-arme-info { font-size: .78rem; }
-
-/* Matrice de dégâts (panneau, chips) */
-.bst-dmg-edit { display: flex; flex-direction: column; gap: 6px; }
-.bst-dmg-edit-row {
-  padding: 8px 10px; border-radius: var(--r-sm);
-  display: flex; flex-direction: column; gap: 6px;
-}
-.bst-dmg-edit-head {
-  display: flex; align-items: center; gap: 6px; font-family: var(--font-display);
-  font-size: 0.64rem; font-weight: 700; letter-spacing: 0.06em;
-}
-.bst-dmg-edit-head .bst-dmg-rule {
-  margin-left: auto; font-size: 0.54rem; color: var(--text-dim);
-  font-family: inherit; font-weight: 500;
-}
-.bst-dmg-edit-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+/* ── Profil de dégâts (v2) — MJ : une relation par type, exclusive ─────── */
+.bst-dmg-editbtn { min-width: 64px; text-align: center; }
+/* lecture : seules les exceptions, en pastilles colorées */
+.bst-dmg-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .bst-dmg-chip {
-  padding: 3px 8px; border-radius: var(--r-full);
-  background: rgba(255,255,255,0.03); border: 1px solid var(--border);
-  color: var(--text-muted); cursor: pointer; transition: all 0.12s;
-  font-size: 0.66rem; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 6px; height: 25px; padding: 0 10px 0 7px;
+  border-radius: var(--r-full); background: color-mix(in srgb, var(--pc) 13%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pc) 34%, transparent);
+  font-size: 11.5px; color: var(--text);
 }
-.bst-dmg-chip:hover { color: var(--text-soft); border-color: var(--border-md); }
+.bst-dmg-chip b { font-size: 11px; font-weight: 700; color: var(--pc); font-variant-numeric: tabular-nums; min-width: 15px; text-align: center; }
+.bst-dmg-note { font-size: 10.5px; color: var(--text-dim); margin-top: 7px; line-height: 1.5; }
+.bst-dmg-none { margin-top: 0; padding: 9px 11px; border: 1px dashed var(--border-md); border-radius: var(--r-sm); font-size: 11.5px; }
+/* gabarits (profils / armes / …) : une seule ligne */
+.bst-tpl { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin: -2px 0 9px; }
+.bst-tpl > span { font-size: 9px; letter-spacing: .09em; text-transform: uppercase; color: var(--text-dim); font-weight: 700; flex: none; }
+.bst-tplchip { height: 23px; padding: 0 9px; border-radius: var(--r-full); border: 1px solid var(--border-md); background: var(--surface-sunken); font: inherit; font-size: 11px; color: var(--text-soft); white-space: nowrap; cursor: pointer; transition: all .15s; }
+.bst-tplchip:hover { border-color: var(--gold-2); color: var(--gold-2); }
+.bst-tplchip.ghost { border-style: dashed; color: var(--text-dim); }
+/* édition : une ligne par type, segment exclusif */
+.bst-dmg-types { display: flex; flex-direction: column; gap: 3px; }
+.bst-dmg-trow {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  padding: 3px 4px 3px 8px; border-radius: var(--r-xs); background: var(--surface-sunken);
+  border: 1px solid var(--border); border-left: 2px solid transparent;
+}
+.bst-dmg-trow.on { border-left-color: var(--pc); background: color-mix(in srgb, var(--pc) 7%, var(--surface-sunken)); }
+.bst-dmg-tname { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bst-dmg-tname i { font-style: normal; font-size: 11px; opacity: .8; width: 14px; text-align: center; flex: none; }
+.bst-dmg-trow.on .bst-dmg-tname { color: var(--text); }
+.bst-dmg-seg { display: inline-flex; gap: 2px; background: var(--surface-2); border-radius: var(--r-full); padding: 2px; flex: none; }
+.bst-dmg-seg button { width: 29px; height: 21px; border-radius: var(--r-full); background: none; border: 0; cursor: pointer; font: inherit; font-size: 11px; font-weight: 600; color: var(--text-dim); font-variant-numeric: tabular-nums; transition: all .14s; }
+.bst-dmg-seg button:hover { color: var(--text-soft); background: var(--surface-3); }
+.bst-dmg-seg button.on { background: color-mix(in srgb, var(--pc) 22%, var(--surface-3)); color: var(--pc); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pc) 42%, transparent); }
 
 /* Déductions joueur */
 .bst-deduct-input {
@@ -1213,59 +1243,31 @@ textarea.bst-deduct-input {
   border-radius: 8px; text-align: center;
 }
 
-/* ── Butin : ligne compacte (dot · img · nom · qte · chance · ✕) ──────── */
-/* Override explicite de `.bst-p-row` qui force flex-direction: column. */
-.bst-butin-card.bst-p-row {
-  display: flex; flex-direction: row; align-items: center; gap: .4rem;
-  padding: .25rem .45rem;
-  background: var(--bg-elevated, rgba(255,255,255,.03));
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  transition: border-color .12s;
-  min-height: 0;
-}
-.bst-butin-card:hover { border-color: var(--gold); }
-.bst-butin-card.is-orphan { border-color: #ef4444; background: rgba(239,68,68,.06); }
-.bst-butin-dot {
-  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
-  box-shadow: 0 0 3px currentColor;
-}
-.bst-butin-img {
-  width: 22px; height: 22px; border-radius: 4px; flex-shrink: 0;
-  object-fit: cover; background: rgba(255,255,255,.04);
-  display: flex; align-items: center; justify-content: center;
-  font-size: .85rem;
-}
-.bst-butin-img--empty { color: var(--text-dim); }
-.bst-butin-name {
-  flex: 1; min-width: 0;
-  font-weight: 600; font-size: .78rem; color: var(--text);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.bst-butin-orphan-tag {
-  color: #ef4444; font-weight: 700; margin-left: .2rem;
-}
-.bst-butin-mini {
-  width: 52px !important; text-align: center;
-  font-size: .72rem !important; padding: .2rem .25rem !important;
-  flex-shrink: 0;
-}
-.bst-butin-card .bst-p-row-remove {
-  padding: 0 .3rem; font-size: .75rem;
-}
-/* La liste de butins : pas de gap-pile énorme entre rows */
-.bst-p-rows .bst-butin-card + .bst-butin-card { margin-top: .2rem; }
-
-/* ── Or lâché (formule brute ou XdY) dans la section Butins du panneau ── */
-.bst-butin-or-row {
-  display: flex; align-items: center; gap: .4rem;
-  margin-bottom: .5rem;
-}
-.bst-butin-or-ic { font-size: 1rem; flex-shrink: 0; }
-.bst-butin-or-input { flex: 1; min-width: 0; }
-.bst-butin-or-hint {
-  font-size: .65rem; color: var(--text-dim); font-style: italic; flex-shrink: 0;
-}
+/* ── Butin (v2) — tableau aligné, chance en pastille, tirage d'essai ──────── */
+.bst-lhead { display: grid; grid-template-columns: minmax(0,1fr) 54px 42px 58px 21px; gap: 5px; padding: 0 8px 4px 19px; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); font-weight: 700; }
+.bst-lhead span:nth-child(2), .bst-lhead span:nth-child(3) { text-align: center; }
+.bst-lhead span:first-child { grid-column: 1/3; }
+.bst-loot { display: flex; flex-direction: column; gap: 3px; }
+.bst-loot-items { display: flex; flex-direction: column; gap: 3px; }
+.bst-lrow.bst-p-row, .bst-lrow { display: grid; grid-template-columns: 9px minmax(0,1fr) 54px 42px 58px 21px; align-items: center; gap: 5px; padding: 5px 4px 5px 8px; border-radius: var(--r-xs); background: var(--surface-sunken); border: 1px solid var(--border); min-height: 0; }
+.bst-lrow.is-orphan { border-color: color-mix(in srgb, var(--crimson) 40%, var(--border)); background: color-mix(in srgb, var(--crimson) 6%, var(--surface-sunken)); }
+.bst-lrow.or { grid-template-columns: 9px minmax(0,1fr) 100px 58px 21px; background: color-mix(in srgb, var(--amber) 6%, var(--surface-sunken)); border-color: color-mix(in srgb, var(--amber) 20%, var(--border)); }
+.bst-lrow.or .bst-lrar { display: none; }
+.bst-lrow.or .bst-lqte { text-align: left; padding: 0 8px; }
+.bst-ldot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); }
+.bst-lname { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bst-lorphan { color: var(--crimson); font-weight: 700; }
+.bst-lrar { font-size: 9.5px; color: var(--text-dim); text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: capitalize; }
+.bst-lqte { height: 23px; padding: 0 4px; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--r-xs); font: inherit; font-size: 11.5px; text-align: center; font-variant-numeric: tabular-nums; outline: 0; min-width: 0; color: inherit; }
+.bst-lqte:focus { border-color: var(--gold); }
+.bst-lch { height: 23px; border-radius: var(--r-full); border: 1px solid var(--border-md); background: none; cursor: pointer; font: inherit; font-size: 10.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bst-lch:hover { border-color: var(--border-strong); color: var(--text); }
+.bst-lch.on { border-color: color-mix(in srgb, var(--emerald) 40%, transparent); background: color-mix(in srgb, var(--emerald) 12%, transparent); color: var(--emerald); }
+.bst-drawbar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-top: 9px; }
+.bst-draw { height: 28px; padding: 0 12px; border-radius: var(--r-full); border: 1px solid var(--border-md); background: var(--surface-2); cursor: pointer; font: inherit; font-size: 11.5px; color: var(--text-soft); white-space: nowrap; }
+.bst-draw:hover { border-color: var(--gold); color: var(--gold-2); }
+.bst-drawr { font-size: 11.5px; color: var(--text); background: color-mix(in srgb, var(--emerald) 8%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--emerald) 24%, transparent); border-radius: var(--r-full); padding: 4px 11px; line-height: 1.4; }
+.bst-pn-foot { padding: 14px 0 4px; border-top: 1px solid var(--border); margin-top: 12px; }
 .bst-loot-est-gold {
   border-color: rgba(232,184,75,.32);
   background: rgba(232,184,75,.055);
