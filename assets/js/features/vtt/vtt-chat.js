@@ -14,10 +14,11 @@ import { DAMAGE_INTERACTIONS } from '../../shared/damage-profile.js';
 import { onSnapshot, query, orderBy, limit, doc, setDoc, serverTimestamp } from '../../config/firebase.js';
 import { _logCol, _logGmCol } from './vtt-refs.js';
 import { _vttPanelError } from './vtt-utils.js';
-import { _findUsableReactiveShield, _canControlToken } from './vtt.js'; // circ. (combat)
+import { _findUsableReactiveShield, _canControlToken, _vttPatchTokenOptimistically } from './vtt.js'; // circ. (combat)
 import { _applyEmotes } from './vtt-emotes.js'; // leaf émotes
 import { _live } from './vtt-effective.js';
 import { combatTargetResourceVisibility, trackedCombatResourceValues } from './vtt-chat-visibility.js';
+import { combatHpDeltas, replayCombatHpEstimates } from './vtt-hp-estimates.js';
 
 // État chat (déplacé de vtt.js)
 export let _chatMsgs = [];   // derniers messages rendus (lookup "répondre" + bouclier/undo côté vtt.js)
@@ -26,6 +27,34 @@ let _logMain    = [];   // log public (vttLog) — dernier snapshot
 let _logGm      = [];   // jets cachés (vttLogGm) — uniquement abonné côté MJ
 const _optimisticLogs = new Map();
 const _optimisticTimers = new Map();
+const _hpEventLogs = new Map(); // conserve les actions sorties des 80 derniers messages pendant la visite
+
+export function _vttResetCombatHpLog() {
+  _hpEventLogs.clear();
+}
+
+export function _vttRefreshCombatHpEstimates() {
+  if (STATE.isAdmin) return;
+  const previous = new Map(VS.combatHpEstimates);
+  const next = replayCombatHpEstimates(_hpEventLogs.values(), VS.tokens, VS.bstTracker);
+  VS.combatHpEstimates.clear();
+  next.forEach((value, id) => VS.combatHpEstimates.set(id, value));
+  for (const id of new Set([...previous.keys(), ...next.keys()])) {
+    if (previous.get(id)?.current !== next.get(id)?.current || previous.get(id)?.max !== next.get(id)?.max) {
+      _vttPatchTokenOptimistically(id, {});
+    }
+  }
+}
+
+function _rememberCombatHpLogs(logs) {
+  if (STATE.isAdmin) return;
+  for (const log of logs) {
+    if (log?.id && (log.type === 'attack' || log.type === 'attack-multi')) {
+      _hpEventLogs.set(log.id, { createdAt: log.createdAt, deltas: combatHpDeltas(log) });
+    }
+  }
+  _vttRefreshCombatHpEstimates();
+}
 
 // Firestore peut avoir déjà placé un callback dans la file microtask lorsque
 // unsubscribe() est appelé. Le wrapper invalide d'abord l'abonnement côté VTT :
@@ -62,10 +91,15 @@ export function _vttShowOptimisticCombatLog(id, payload) {
     _optimistic: true,
     createdAt: { toMillis: () => localMs },
   });
+  _rememberCombatHpLogs([_optimisticLogs.get(id)]);
   _rebuildChatLog();
   _optimisticTimers.set(id, setTimeout(() => {
     if (!_optimisticLogs.has(id)) return;
     _clearOptimisticLog(id);
+    if (!_logMain.some(message => message.id === id)) {
+      _hpEventLogs.delete(id);
+      _vttRefreshCombatHpEstimates();
+    }
     _rebuildChatLog();
   }, 15_000));
 }
@@ -73,6 +107,10 @@ export function _vttShowOptimisticCombatLog(id, payload) {
 export function _vttDiscardOptimisticCombatLog(id) {
   if (!_optimisticLogs.has(id)) return;
   _clearOptimisticLog(id);
+  if (!_logMain.some(message => message.id === id)) {
+    _hpEventLogs.delete(id);
+    _vttRefreshCombatHpEstimates();
+  }
   _rebuildChatLog();
 }
 
@@ -104,6 +142,9 @@ export function _initChatLogSubs() {
       _logMain.forEach(message => {
         if (message.createdAt?.toMillis?.() != null) _clearOptimisticLog(message.id);
       });
+      _rememberCombatHpLogs(_logMain.map(message =>
+        message.createdAt?.toMillis?.() == null && _optimisticLogs.has(message.id)
+          ? _optimisticLogs.get(message.id) : message));
       _rebuildChatLog();
     },
     e => {
