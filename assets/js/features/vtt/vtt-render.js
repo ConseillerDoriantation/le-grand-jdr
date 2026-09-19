@@ -38,7 +38,7 @@ export function _zoneCellRects(K, zw, zh, shape, dir = 'down', style = {}) {
   }
   return out;
 }
-import { vttCanvasPixelRatio, vttShouldReduceEffects } from './vtt-fog-performance.js';
+import { vttCanvasPixelRatio, vttDefaultLowFx, vttIsPhoneViewport } from './vtt-fog-performance.js';
 
 const _tokenImageCache = new Map();
 
@@ -52,10 +52,20 @@ export function vttLowFx() {
   if (_vttLowFxCache !== null) return _vttLowFxCache;
   let v = null;
   try { const s = localStorage.getItem('vtt.lowFx'); if (s === '1') v = true; else if (s === '0') v = false; } catch {}
-  // Défaut (aucun choix explicite stocké) : les JOUEURS démarrent en Mode
-  // performance (le lag les concerne) ; le MJ garde le rendu complet, sauf
+  // Défaut (aucun choix explicite stocké) : les JOUEURS et tous les téléphones
+  // démarrent en Mode performance. Le MJ desktop garde le rendu complet, sauf
   // machine détectée comme faible. Le bouton ⚡ surcharge dans les deux sens.
-  if (v === null) v = !STATE.isAdmin || vttShouldReduceEffects(navigator.deviceMemory, navigator.hardwareConcurrency);
+  const phone = vttIsPhoneViewport(
+    window.innerWidth, window.innerHeight,
+    !!window.matchMedia?.('(pointer: coarse)')?.matches,
+    navigator.maxTouchPoints,
+  );
+  if (v === null) v = vttDefaultLowFx({
+    isAdmin: STATE.isAdmin,
+    isPhone: phone,
+    deviceMemory: navigator.deviceMemory,
+    hardwareConcurrency: navigator.hardwareConcurrency,
+  });
   _vttLowFxCache = !!v;
   return _vttLowFxCache;
 }

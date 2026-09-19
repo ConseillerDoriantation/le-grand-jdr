@@ -66,7 +66,7 @@ import {
 } from './vtt-refs.js';
 import { CELL, CELL_M, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
 import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual, vttLowFx, setVttLowFx, _stripShadows } from './vtt-render.js';
-import { vttCanvasPixelRatio } from './vtt-fog-performance.js';
+import { vttCanvasPixelRatio, vttPinchCameraTransform } from './vtt-fog-performance.js';
 import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenHealthMeta, tokenMovementMeta, tokenRelationTone } from './vtt-token-visual.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
 import { attackRollHitsTarget, receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
@@ -1437,22 +1437,82 @@ function _initCanvas(container) {
   //    Sur desktop le pan se fait au clic droit / molette ; le tactile n'a
   //    aucun de ces boutons → sans ça, impossible de se déplacer sur mobile.
   //    Toucher un token/image laisse Konva gérer le drag (e.target ≠ stage).
-  let _touchPanOff = null;
+  let _touchPanOff = null, _touchPinch = null;
+  const _touchPair = touches => {
+    if (!touches || touches.length < 2) return null;
+    const rect = VS.stage.container().getBoundingClientRect();
+    const a = touches[0], b = touches[1];
+    return {
+      center: {
+        x: (a.clientX + b.clientX) / 2 - rect.left,
+        y: (a.clientY + b.clientY) / 2 - rect.top,
+      },
+      distance: Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY),
+    };
+  };
+  const _stopTouchDrag = target => {
+    window.Konva?.DD?.node?.stopDrag?.();
+    let node = target;
+    while (node && node !== VS.stage) {
+      if (node.isDragging?.()) { node.stopDrag(); break; }
+      node = node.getParent?.();
+    }
+  };
   VS.stage.on('touchstart', e => {
     if (fogIsEditMode() || VS.tool === 'draw' || VS.tool === 'ruler') { _touchPanOff = null; return; }
     const ts = e.evt.touches;
+    if (ts?.length >= 2) {
+      e.evt.preventDefault();
+      _stopTouchDrag(e.target);
+      const pair = _touchPair(ts);
+      _touchPanOff = null;
+      _touchPinch = pair ? {
+        startScale: VS.stage.scaleX(),
+        startPosition: { ...VS.stage.position() },
+        startCenter: pair.center,
+        startDistance: pair.distance,
+      } : null;
+      return;
+    }
+    _touchPinch = null;
+    const rect = VS.stage.container().getBoundingClientRect();
     _touchPanOff = (ts && ts.length === 1 && e.target === VS.stage)
-      ? { x: ts[0].clientX - VS.stage.x(), y: ts[0].clientY - VS.stage.y() }
+      ? { x: ts[0].clientX - rect.left - VS.stage.x(), y: ts[0].clientY - rect.top - VS.stage.y() }
       : null;
   });
   VS.stage.on('touchmove', e => {
-    if (!_touchPanOff) return;
     const ts = e.evt.touches;
-    if (!ts || ts.length !== 1) { _touchPanOff = null; return; }
+    if (ts?.length >= 2) {
+      e.evt.preventDefault();
+      _stopTouchDrag(e.target);
+      const pair = _touchPair(ts);
+      if (!_touchPinch && pair) {
+        _touchPinch = {
+          startScale: VS.stage.scaleX(),
+          startPosition: { ...VS.stage.position() },
+          startCenter: pair.center,
+          startDistance: pair.distance,
+        };
+      }
+      if (_touchPinch && pair) {
+        const view = vttPinchCameraTransform({ ..._touchPinch, currentCenter:pair.center, currentDistance:pair.distance, minScale:MIN_SCALE, maxScale:MAX_SCALE });
+        VS.stage.scale({ x:view.scale, y:view.scale });
+        VS.stage.position({ x:view.x, y:view.y });
+        VS.stage.batchDraw();
+      }
+      _touchPanOff = null;
+      return;
+    }
+    if (!_touchPanOff) return;
+    if (!ts || ts.length !== 1) { _touchPanOff = null; _touchPinch = null; return; }
     e.evt.preventDefault();   // empêche le scroll/zoom de page natif
-    VS.stage.position({ x: ts[0].clientX - _touchPanOff.x, y: ts[0].clientY - _touchPanOff.y });
+    const rect = VS.stage.container().getBoundingClientRect();
+    VS.stage.position({ x: ts[0].clientX - rect.left - _touchPanOff.x, y: ts[0].clientY - rect.top - _touchPanOff.y });
   });
-  VS.stage.on('touchend touchcancel', () => { _touchPanOff = null; });
+  VS.stage.on('touchend touchcancel', e => {
+    _touchPanOff = null;
+    if (!e.evt.touches || e.evt.touches.length < 2) _touchPinch = null;
+  });
 
   _resizeObs = new ResizeObserver(() => {
     if (!VS.stage) return;

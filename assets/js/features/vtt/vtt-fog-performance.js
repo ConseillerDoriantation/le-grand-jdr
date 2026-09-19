@@ -22,6 +22,36 @@ export function vttShouldReduceEffects(deviceMemory = null, hardwareConcurrency 
     || (Number.isFinite(cores) && cores > 0 && cores <= 2);
 }
 
+/** Détection volontairement conservatrice d'un téléphone : une tablette
+ * tactile garde le rendu normal, même tenue en portrait. */
+export function vttIsPhoneViewport(width, height, hasCoarsePointer = false, maxTouchPoints = 0) {
+  const shortSide = Math.min(Number(width) || 0, Number(height) || 0);
+  const touchCapable = hasCoarsePointer || Number(maxTouchPoints) > 0;
+  return touchCapable && shortSide > 0 && shortSide <= 600;
+}
+
+export function vttDefaultLowFx({ isAdmin = false, isPhone = false, deviceMemory = null, hardwareConcurrency = null } = {}) {
+  return isPhone || !isAdmin || vttShouldReduceEffects(deviceMemory, hardwareConcurrency);
+}
+
+/** Transformation caméra d'un pincement à deux doigts. Le point du monde situé
+ * sous le centre initial reste sous les doigts, même si leur centre se déplace. */
+export function vttPinchCameraTransform({
+  startScale, startPosition, startCenter, currentCenter,
+  startDistance, currentDistance, minScale = 0.15, maxScale = 4,
+}) {
+  const baseScale = Math.max(Number(startScale) || 1, 0.0001);
+  const distanceRatio = (Number(currentDistance) || 0) / Math.max(Number(startDistance) || 1, 1);
+  const scale = Math.min(maxScale, Math.max(minScale, baseScale * distanceRatio));
+  const worldX = (startCenter.x - startPosition.x) / baseScale;
+  const worldY = (startCenter.y - startPosition.y) / baseScale;
+  return {
+    scale,
+    x: currentCenter.x - worldX * scale,
+    y: currentCenter.y - worldY * scale,
+  };
+}
+
 /**
  * Taille, en pixels de canvas, utilisée pour rasteriser une case de la carte.
  * Le canvas est ensuite étiré aux dimensions monde par Konva. La LOS conserve
