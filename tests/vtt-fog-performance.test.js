@@ -5,6 +5,9 @@ import {
   fogGeometrySignature,
   fogRasterCellSize,
   vttCanvasPixelRatio,
+  vttDefaultLowFx,
+  vttIsPhoneViewport,
+  vttPinchCameraTransform,
   vttShouldReduceEffects,
 } from '../assets/js/features/vtt/vtt-fog-performance.js';
 
@@ -33,6 +36,42 @@ test('les effets lourds deviennent statiques uniquement sur matériel très cont
   assert.equal(vttShouldReduceEffects(2, 8), true);
   assert.equal(vttShouldReduceEffects(8, 2), true);
   assert.equal(vttShouldReduceEffects(4, 4), false);
+});
+
+test('un téléphone tactile est distingué d une tablette et d un petit desktop', () => {
+  assert.equal(vttIsPhoneViewport(390, 844, true, 5), true);
+  assert.equal(vttIsPhoneViewport(844, 390, true, 5), true);
+  assert.equal(vttIsPhoneViewport(768, 1024, true, 5), false);
+  assert.equal(vttIsPhoneViewport(390, 844, false, 0), false);
+});
+
+test('le mode performance est activé par défaut sur téléphone, même pour le MJ', () => {
+  assert.equal(vttDefaultLowFx({ isAdmin:true, isPhone:true, deviceMemory:8, hardwareConcurrency:8 }), true);
+  assert.equal(vttDefaultLowFx({ isAdmin:true, isPhone:false, deviceMemory:8, hardwareConcurrency:8 }), false);
+  assert.equal(vttDefaultLowFx({ isAdmin:false, isPhone:false, deviceMemory:8, hardwareConcurrency:8 }), true);
+});
+
+test('le pincement dézoome autour du centre des doigts', () => {
+  const view = vttPinchCameraTransform({
+    startScale:2,
+    startPosition:{ x:-100, y:-50 },
+    startCenter:{ x:200, y:150 },
+    currentCenter:{ x:210, y:140 },
+    startDistance:200,
+    currentDistance:100,
+  });
+  assert.deepEqual(view, { scale:1, x:60, y:40 });
+});
+
+test('le pincement respecte les limites de zoom', () => {
+  assert.equal(vttPinchCameraTransform({
+    startScale:1, startPosition:{x:0,y:0}, startCenter:{x:0,y:0}, currentCenter:{x:0,y:0},
+    startDistance:200, currentDistance:1,
+  }).scale, 0.15);
+  assert.equal(vttPinchCameraTransform({
+    startScale:1, startPosition:{x:0,y:0}, startCenter:{x:0,y:0}, currentCenter:{x:0,y:0},
+    startDistance:10, currentDistance:100,
+  }).scale, 4);
 });
 
 test('la signature du fog ignore les PV et les états des tokens', () => {
