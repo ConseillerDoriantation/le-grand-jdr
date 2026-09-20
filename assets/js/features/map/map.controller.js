@@ -170,7 +170,7 @@ function shellHTML() {
           <div class="map-loader" aria-hidden="true"><span class="map-loader__text">Chargement de la carte</span></div>
           <div id="map-transform" class="map-transform">
             ${hasImage
-              ? `<img id="map-img" src="${_esc(state.map.imageUrl)}" draggable="false" alt="" decoding="async" fetchpriority="high">`
+              ? `<img id="map-img" src="${_esc(state.map.imageUrl)}" draggable="false" alt="${_esc(state.map.name || state.map.nom || 'Carte du monde')}" decoding="async" fetchpriority="high">`
               : `<div class="map-placeholder">
                    ${isAdmin
                      ? 'Aucune image. Ouvre ⚙️ Paramètres pour en ajouter une.'

@@ -656,12 +656,12 @@ function openEditEmail() {
       Une confirmation sera requise. Ton mot de passe actuel est nécessaire.
     </p>
     <div class="form-group">
-      <label>Nouvel email</label>
-      <input class="input-field" id="acc-new-email" type="email" placeholder="nouveau@email.com">
+      <label for="acc-new-email">Nouvel email</label>
+      <input class="input-field" id="acc-new-email" type="email" placeholder="nouveau@email.com" inputmode="email" autocomplete="email" maxlength="254" required>
     </div>
     <div class="form-group">
-      <label>Mot de passe actuel</label>
-      <input class="input-field" id="acc-reauth-pw-email" type="password" placeholder="••••••••">
+      <label for="acc-reauth-pw-email">Mot de passe actuel</label>
+      <input class="input-field" id="acc-reauth-pw-email" type="password" placeholder="••••••••" autocomplete="current-password" maxlength="128" required>
     </div>
     <div style="display:flex;gap:.5rem;margin-top:.75rem">
       <button class="btn btn-gold" style="flex:1" data-action="saveEmail">Enregistrer</button>
@@ -671,7 +671,9 @@ function openEditEmail() {
 }
 
 async function saveEmail() {
-  const newEmail = document.getElementById('acc-new-email')?.value?.trim();
+  const emailInput = document.getElementById('acc-new-email');
+  if (emailInput && !emailInput.checkValidity()) { emailInput.reportValidity(); return; }
+  const newEmail = emailInput?.value?.trim();
   const password = document.getElementById('acc-reauth-pw-email')?.value;
   if (!newEmail || !password) { showNotif('Remplis tous les champs.', 'error'); return; }
 

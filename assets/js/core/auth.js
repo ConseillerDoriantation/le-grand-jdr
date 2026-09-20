@@ -25,6 +25,14 @@ function clearAuthError() {
 }
 
 let _authUiBound = false;
+let _registerShownAt = Date.now();
+let _lastRegisterAttempt = 0;
+
+function validateForm(form) {
+  if (!form || form.checkValidity()) return true;
+  form.reportValidity();
+  return false;
+}
 
 export function setAuthError(message) {
   const errorBox = document.getElementById('auth-error');
@@ -99,6 +107,7 @@ export function switchAuthTab(tab) {
 
   if (loginPanel) loginPanel.style.display = isLogin ? 'block' : 'none';
   if (registerPanel) registerPanel.style.display = isLogin ? 'none' : 'block';
+  if (!isLogin) _registerShownAt = Date.now();
 
   clearAuthError();
 }
@@ -117,6 +126,8 @@ async function saveProfile(user, pseudo) {
 
 export async function doLogin() {
   clearAuthError();
+
+  if (!validateForm(document.getElementById('tab-login'))) return;
 
   const email = document.getElementById('login-email')?.value?.trim() || '';
   const password = document.getElementById('login-password')?.value || '';
@@ -143,6 +154,21 @@ export async function doLogin() {
 export async function doRegister() {
   clearAuthError();
 
+  const form = document.getElementById('tab-register');
+  if (!validateForm(form)) return;
+  // Honeypot + temps minimal : réduit les soumissions automatisées triviales.
+  // La limitation autoritative reste celle de Firebase Auth.
+  if (document.getElementById('reg-website')?.value) return;
+  if (Date.now() - _registerShownAt < 800) {
+    setAuthError('Patiente un instant avant de valider l’inscription.');
+    return;
+  }
+  if (Date.now() - _lastRegisterAttempt < 2500) {
+    setAuthError('Une tentative est déjà en cours. Réessaie dans quelques secondes.');
+    return;
+  }
+  _lastRegisterAttempt = Date.now();
+
   const pseudo = document.getElementById('reg-pseudo')?.value?.trim() || '';
   const email = document.getElementById('reg-email')?.value?.trim() || '';
   const password = document.getElementById('reg-password')?.value || '';
@@ -152,8 +178,8 @@ export async function doRegister() {
     return;
   }
 
-  if (password.length < 6) {
-    setAuthError('Mot de passe trop court (6 caractères minimum).');
+  if (password.length < 8) {
+    setAuthError('Mot de passe trop court (8 caractères minimum).');
     return;
   }
 
@@ -252,40 +278,27 @@ async function _doLogout() {
   }
 }
 
-function handleAuthKeydown(event) {
-  if (event.key !== 'Enter') return;
-
-  const authScreen = document.getElementById('auth-screen');
-  if (!authScreen || authScreen.style.display === 'none') return;
-
-  const registerVisible =
-    document.getElementById('tab-register')?.style.display !== 'none';
-
-  if (registerVisible) doRegister();
-  else doLogin();
-}
-
 export function bindAuthUI() {
   if (_authUiBound) return;
   _authUiBound = true;
 
-  const loginBtn = getLoginButton();
-  const registerBtn = getRegisterButton();
   const googleBtn = document.querySelector('[data-action="google-login"]');
   const loginTab = getLoginTabButton();
   const registerTab = getRegisterTabButton();
   const logoutBtn = document.querySelector('[data-action="logout"]');
   const forgotLink = document.querySelector('[data-action="forgot-pw"]');
+  const loginForm = document.getElementById('tab-login');
+  const registerForm = document.getElementById('tab-register');
 
-  if (loginBtn) {
-    loginBtn.addEventListener('click', (e) => {
+  if (loginForm) {
+    loginForm.addEventListener('submit', (e) => {
       e.preventDefault();
       doLogin();
     });
   }
 
-  if (registerBtn) {
-    registerBtn.addEventListener('click', (e) => {
+  if (registerForm) {
+    registerForm.addEventListener('submit', (e) => {
       e.preventDefault();
       doRegister();
     });
@@ -325,8 +338,6 @@ export function bindAuthUI() {
       doPasswordReset();
     });
   }
-
-  document.addEventListener('keydown', handleAuthKeydown);
 }
 
 export function initAuth() {

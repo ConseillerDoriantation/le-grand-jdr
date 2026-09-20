@@ -4,7 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Grimorium — Réinitialisation</title>
+  <meta name="description" content="Réinitialiser en toute sécurité le mot de passe de votre compte Grimorium.">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="referrer" content="no-referrer">
   <link rel="icon" href="./favicon.ico" sizes="any">
+  <script src="./assets/js/shared/https-only.js"></script>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -27,9 +31,9 @@
   }
   </script>
 
-  <link rel="stylesheet" href="./assets/css/tokens.css">
-  <link rel="stylesheet" href="./assets/css/base.css">
-  <link rel="stylesheet" href="./assets/css/auth.css">
+  <link rel="stylesheet" href="./assets/css/tokens.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/base.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/auth.css?v=20260919">
 
   <style>
     .aa-state { display: none; }
@@ -111,13 +115,13 @@
     </div>
 
     <!-- ═══ Formulaire nouveau mot de passe ═══ -->
-    <div class="aa-state" id="state-form">
+    <form class="aa-state" id="state-form" novalidate>
       <div class="aa-email" id="aa-email"></div>
 
       <div class="form-group">
-        <label>Nouveau mot de passe</label>
+        <label for="new-password">Nouveau mot de passe</label>
         <div class="pw-wrap">
-          <input type="password" id="new-password" placeholder="••••••••" autocomplete="new-password">
+          <input type="password" id="new-password" placeholder="8 caractères minimum" autocomplete="new-password" minlength="8" maxlength="128" required>
           <button type="button" class="pw-toggle" data-target="new-password" aria-label="Afficher le mot de passe" title="Afficher / masquer">
             <svg class="pw-icon pw-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/>
@@ -132,9 +136,9 @@
       </div>
 
       <div class="form-group">
-        <label>Confirmer</label>
+        <label for="confirm-password">Confirmer</label>
         <div class="pw-wrap">
-          <input type="password" id="confirm-password" placeholder="••••••••" autocomplete="new-password">
+          <input type="password" id="confirm-password" placeholder="••••••••" autocomplete="new-password" minlength="8" maxlength="128" required>
           <button type="button" class="pw-toggle" data-target="confirm-password" aria-label="Afficher le mot de passe" title="Afficher / masquer">
             <svg class="pw-icon pw-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/>
@@ -148,9 +152,9 @@
         </div>
       </div>
 
-      <button type="button" class="btn-primary" id="btn-confirm">Forger le nouveau mot de passe</button>
+      <button type="submit" class="btn-primary" id="btn-confirm">Forger le nouveau mot de passe</button>
       <div class="auth-error" id="form-error" role="alert"></div>
-    </div>
+    </form>
 
     <!-- ═══ Succès ═══ -->
     <div class="aa-state" id="state-success">
@@ -216,7 +220,7 @@
       'auth/invalid-action-code': 'Lien invalide. Il a peut-être déjà été utilisé.',
       'auth/user-disabled': 'Ce compte est désactivé.',
       'auth/user-not-found': 'Compte introuvable.',
-      'auth/weak-password': 'Mot de passe trop faible (6 caractères minimum).',
+      'auth/weak-password': 'Mot de passe trop faible (8 caractères minimum).',
       'auth/network-request-failed': 'Erreur réseau. Réessaie.',
     };
     return map[code] || err?.message || 'Une erreur est survenue.';
@@ -252,6 +256,10 @@
 
   async function handleConfirm() {
     setFormError('');
+    if (!states.form.checkValidity()) {
+      states.form.reportValidity();
+      return;
+    }
     const pw1 = document.getElementById('new-password').value;
     const pw2 = document.getElementById('confirm-password').value;
 
@@ -259,8 +267,8 @@
       setFormError('Remplis les deux champs.');
       return;
     }
-    if (pw1.length < 6) {
-      setFormError('Mot de passe trop court (6 caractères minimum).');
+    if (pw1.length < 8) {
+      setFormError('Mot de passe trop court (8 caractères minimum).');
       return;
     }
     if (pw1 !== pw2) {
@@ -284,12 +292,9 @@
     }
   }
 
-  document.getElementById('btn-confirm').addEventListener('click', handleConfirm);
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && states.form.classList.contains('active')) {
-      handleConfirm();
-    }
+  states.form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    handleConfirm();
   });
 
   init();

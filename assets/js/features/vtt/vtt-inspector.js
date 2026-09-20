@@ -102,7 +102,15 @@ function _defaultInspectorToken(t) {
 }
 export function _renderInspector(t) {
   const resolved = t ?? (!STATE.isAdmin && !VS.selected ? _defaultInspectorToken(null) : t);
-  try { return _renderInspectorImpl(resolved); }
+  try {
+    const result = _renderInspectorImpl(resolved);
+    // La désélection MJ doit immédiatement remplacer les modificateurs de l'ancien
+    // token par les jets neutres MJ, même si _renderInspectorImpl sort tôt.
+    if (document.getElementById('vtt-dice-panel')?.dataset.open === '1') {
+      try { _renderDicePanel(); } catch {}
+    }
+    return result;
+  }
   catch (e) { _vttPanelError('Inspecteur', e, 'vtt-inspector'); }
 }
 export function _renderInspectorImpl(t) {
@@ -745,7 +753,6 @@ export function _renderInspectorImpl(t) {
 
   // Le lanceur de dés du dock affiche les compétences du token courant : si son
   // panneau est ouvert, on le rafraîchit à chaque changement de sélection.
-  if (document.getElementById('vtt-dice-panel')?.dataset.open === '1') { try { _renderDicePanel(); } catch {} }
 }
 
 export function _vttInsTab(tab) {
@@ -788,8 +795,9 @@ export function _vttSkillFilterClear() {
 // ICI, inchangés. Contrat setJetsBuilder conservé : aucun import de vtt-dice.js.
 //   → { hasSkills, who:{name,initial}, skills:[{name,stat,statKey,statColor,mod,
 //        modStr,level,eqBonus,title}] }.
-// Sans token contrôlable → { hasSkills:false } (strictement équivalent à l'existant :
-// dés libres seuls). Les « Actions de combat » (Courir) et « Actions de la créature »
+// Sans token contrôlable, un joueur conserve seulement les dés libres ; le MJ garde
+// toutes les compétences avec un modificateur neutre et le bonus contextuel du lanceur.
+// Les « Actions de combat » (Courir) et « Actions de la créature »
 // NE sont plus ici : elles vivent dans la modale « Action tactique ».
 export function _vttBuildJetsBody(tArg) {
   let t = tArg;
@@ -797,8 +805,8 @@ export function _vttBuildJetsBody(tArg) {
     const uid = STATE.user?.uid;
     if (STATE.isAdmin) {
       // MJ : on ne s'accroche PAS à un token arbitraire (il les contrôle tous).
-      // Seul un token EXPLICITEMENT sélectionné porte ses compétences ; sinon →
-      // dés libres seuls (le MJ peut lancer sans pion sélectionné).
+      // Seul un token EXPLICITEMENT sélectionné porte ses caractéristiques. Sans
+      // sélection, le MJ dispose tout de même des compétences avec un bonus de base 0.
       const sel = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : null;
       const onPage = sel && (!VS.activePage?.id || sel.pageId === VS.activePage.id);
       t = (onPage && _canControlToken(sel, uid)) ? sel : null;
@@ -812,23 +820,32 @@ export function _vttBuildJetsBody(tArg) {
       t = id ? (VS.tokens[id]?.data ?? null) : null;
     }
   }
-  if (!t) return { hasSkills: false };
+  const genericMjRoll = !t && STATE.isAdmin;
+  if (!t && !genericMjRoll) return { hasSkills: false };
 
   // Jets ouverts à tout token porteur de stats (joueur, PNJ, créature du bestiaire)
   // dès qu'on le contrôle. _tokenStatMod sait lire characterId/npcId/beastId ; le
   // contrôle (_canControlToken) empêche un joueur de lancer pour un ennemi, le MJ
   // les contrôle tous. Les dessins/zones (sans source de stats) restent exclus.
-  const hasStatSource = !!(t.characterId || t.npcId || t.beastId);
-  const canRoll = hasStatSource && VS.diceSkills.length && _canControlToken(t);
+  const hasStatSource = !!(t?.characterId || t?.npcId || t?.beastId);
+  const canRoll = genericMjRoll
+    ? VS.diceSkills.length > 0
+    : hasStatSource && VS.diceSkills.length && _canControlToken(t);
   if (!canRoll) return { hasSkills: false };
 
-  const ld = _live(t);
-  const name = ld?.displayName ?? t.name ?? 'Token';
+  const ld = t ? _live(t) : null;
+  const name = genericMjRoll ? 'Maître du jeu' : (ld?.displayName ?? t.name ?? 'Token');
   const cForBonus = t?.characterId ? VS.characters[t.characterId] : null;
   // Portrait : _live(t).displayImage résout déjà la photo pour joueurs, PNJ ET
   // créatures (fiche liée puis image du token) ; repli sur l'image posée du token.
-  const avatar = ld?.displayImage || t.imageUrl || null;
-  const who = { name, initial: String(name || '?').trim().slice(0, 1).toUpperCase() || '?', avatar };
+  const avatar = genericMjRoll
+    ? (STATE.profile?.photoURL || STATE.profile?.photo || STATE.profile?.avatar || null)
+    : (ld?.displayImage || t.imageUrl || null);
+  const who = {
+    name,
+    initial: genericMjRoll ? 'MJ' : (String(name || '?').trim().slice(0, 1).toUpperCase() || '?'),
+    avatar,
+  };
 
   // Tri : par caractéristique associée (FOR, DEX, CON, INT, SAG, CHA) puis alphabétique.
   const _STAT_ORDER = { FOR: 0, DEX: 1, CON: 2, INT: 3, SAG: 4, CHA: 5 };
@@ -840,13 +857,15 @@ export function _vttBuildJetsBody(tArg) {
     })
     .map((s) => {
       const statKey = _STAT_KEY[s.stat] || '';
-      const statMod = _tokenStatMod(t, statKey);
+      const statMod = genericMjRoll ? 0 : _tokenStatMod(t, statKey);
       const eqBonus = cForBonus ? computeEquipSkillBonus(cForBonus.equipement || {}, s.name) : 0;
       const level = (cForBonus?.competences && !Array.isArray(cForBonus.competences)) ? cForBonus.competences[s.name] : null;
       const profBonus = (level === 'forme' || level === 'expert') ? 2 : 0;
       const mod = statMod + eqBonus + profBonus;
       const modStr = mod > 0 ? `+${mod}` : mod < 0 ? `${mod}` : '±0';
-      const parts = [`base ${statMod >= 0 ? '+' : ''}${statMod}`];
+      const parts = genericMjRoll
+        ? ['Jet MJ sans token', 'base +0']
+        : [`base ${statMod >= 0 ? '+' : ''}${statMod}`];
       if (eqBonus) parts.push(`équip. ${eqBonus > 0 ? '+' : ''}${eqBonus}`);
       if (profBonus) parts.push(`${level === 'expert' ? 'expertise' : 'maîtrise'} +${profBonus}`);
       if (level === 'expert') parts.push('avantage');

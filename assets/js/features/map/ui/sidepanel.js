@@ -208,7 +208,7 @@ function placeView(place) {
         <button class="map-panel__close" data-action="close" title="Fermer">×</button>
       </header>
 
-      ${place.imageUrl ? `<img class="map-panel__image" src="${_esc(place.imageUrl)}" alt="">` : ''}
+      ${place.imageUrl ? `<img class="map-panel__image" src="${_esc(place.imageUrl)}" alt="Illustration de ${_esc(place.name || 'ce lieu')}" loading="lazy" decoding="async">` : ''}
 
       ${place.summary ? `<p class="map-panel__summary">${_esc(place.summary)}</p>` : ''}
       ${place.description ? `<div class="map-panel__desc">${_esc(place.description)}</div>` : ''}
@@ -263,7 +263,7 @@ function orgView(org) {
         <button class="map-panel__close" data-action="close" title="Fermer">×</button>
       </header>
 
-      ${org.imageUrl ? `<img class="map-panel__image" src="${_esc(org.imageUrl)}" alt="">` : ''}
+      ${org.imageUrl ? `<img class="map-panel__image" src="${_esc(org.imageUrl)}" alt="Illustration de ${_esc(org.name || 'cette organisation')}" loading="lazy" decoding="async">` : ''}
       ${org.summary ? `<p class="map-panel__summary">${_esc(org.summary)}</p>` : ''}
       ${org.description ? `<div class="map-panel__desc">${_esc(org.description)}</div>` : ''}
 
