@@ -3008,6 +3008,7 @@
   cursor: pointer;
   text-align: left;
 }
+.mv-picker-member[hidden] { display: none !important; }
 .mv-picker-member:hover {
   border-color: rgba(34,195,142,.42);
   background: rgba(34,195,142,.08);
