@@ -1796,7 +1796,7 @@ function _renderCard(c, sortable = _canReorderBestiary()) {
 function _bstPanelShell(c, rs, SEC, bodyHtml, isMJ) {
   return `<div class="bst-pn" style="--rc:${rs.color}">
     <div class="bst-pn-hero">
-      ${c.imageUrl ? `<img src="${_esc(c.imageUrl)}" alt="">` : `<span class="bst-pn-e">${_esc(c.emoji || '❓')}</span>`}
+      ${c.imageUrl ? `<img src="${_esc(c.imageUrl)}" alt="Portrait de ${_esc(c.nom || 'la créature')}" decoding="async">` : `<span class="bst-pn-e">${_esc(c.emoji || '❓')}</span>`}
       ${isMJ ? `<span class="bst-pn-badge">MJ</span>` : ''}
       <button class="bst-pn-x" data-bst-action="close" title="Fermer">×</button>
       <div class="bst-pn-id">

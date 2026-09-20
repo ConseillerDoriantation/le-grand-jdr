@@ -3294,7 +3294,7 @@ function openItemModal(itemId) {
   ).join('');
 
   const imgPreviewHtml = item?.image
-    ? `<img src="${item.image}" alt="">`
+    ? `<img src="${_esc(item.image)}" alt="Aperçu de ${_esc(item.nom || 'l’article')}">`
     : `<span class="si-img-placeholder">+</span>`;
 
   const headerHtml = `

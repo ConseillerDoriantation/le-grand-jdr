@@ -493,7 +493,7 @@ function _renderCard(item, idx) {
            qu'on applique en CSS inline. Aucun stockage de base64 dupliqué. -->
       <div class="pp-card-image-wrap">
         ${cardImg
-          ? `<img class="pp-card-image" src="${_esc(cardImg)}" alt="" style="${cardImgStyle}"
+          ? `<img class="pp-card-image" src="${_esc(cardImg)}" alt="Portrait de ${_esc(item.nom || 'ce personnage')}" style="${cardImgStyle}"
               loading="lazy" decoding="async" referrerpolicy="no-referrer">`
           : `<div class="pp-card-image-empty">${item.initials}</div>`}
         <!-- Badges flottants -->

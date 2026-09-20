@@ -471,6 +471,7 @@ let _selectedAnnotId  = null; // id de l'annotation sélectionnée (sélection s
 let _selectedAnnotIds = new Set(); // multi-sélection annotations
 let _vttClipboard = { tokens: [], annots: [] }; // presse-papier Ctrl+C/V (mémoire de session)
 let _annotTransformer = null; // Konva Transformer pour resize/rotation
+let _annotMovePassthrough = false; // les cases de mouvement priment temporairement sur les dessins
 let _annotGroupDragOrigins = null; // { [id]: {x,y} } pour déplacement groupé annotations
 let _skipAnnotRebuild = new Set(); // ids dont le onSnapshot doit sauter le rebuild (transform local)
 
@@ -1094,6 +1095,7 @@ function _cleanup() {
   _annotations = {}; _drawing = false; _drawLive = null; _drawHistory = []; _drawRedo = [];
   _polyPts = []; _polyLive = null; _polyActive = false;
   _selectedAnnotId = null; _selectedAnnotIds.clear(); _annotTransformer = null;
+  _annotMovePassthrough = false;
   _annotGroupDragOrigins = null;
   _marqueeActive = false; _marqueeOrigin = null; _marqueeLastWp = null;
   _marqueeShape = null; _suppressNextClick = false;
@@ -1228,11 +1230,13 @@ function _initCanvas(container) {
   _annotTransformer = new K.Transformer({
     rotateEnabled: true, keepRatio: false,
     borderStroke: '#ffe600', borderStrokeWidth: 2, borderDash: [4, 3],
-    anchorStroke: '#ffe600', anchorFill: '#1a1a2e', anchorSize: 13, anchorCornerRadius: 3,
-    rotateAnchorOffset: 26, padding: 5,
+    anchorStroke: '#ffe600', anchorStrokeWidth: 2,
+    anchorFill: '#101827', anchorSize: 20, anchorCornerRadius: 6,
+    rotateAnchorOffset: 34, padding: 7,
     rotationSnaps: [0, 45, 90, 135, 180, 225, 270, 315], rotationSnapTolerance: 8,
   });
   VS.layers.draw.add(_annotTransformer);
+  _syncAnnotTransformerHandles();
 
   // Listener natif window : règle + marquee (bypass Konva, garanti même hors drag)
   const _nativeMoveHandler = e => {
@@ -1289,6 +1293,7 @@ function _initCanvas(container) {
     const ptr = VS.stage.getPointerPosition();
     VS.stage.scale({ x:sc, y:sc });
     VS.stage.position({ x: ptr.x - (ptr.x-VS.stage.x())*(sc/old), y: ptr.y - (ptr.y-VS.stage.y())*(sc/old) });
+    _syncAnnotTransformerHandles();
   });
 
   let _pan = false, _po = null, _rightStageDown = null;
@@ -1498,6 +1503,7 @@ function _initCanvas(container) {
         const view = vttPinchCameraTransform({ ..._touchPinch, currentCenter:pair.center, currentDistance:pair.distance, minScale:MIN_SCALE, maxScale:MAX_SCALE });
         VS.stage.scale({ x:view.scale, y:view.scale });
         VS.stage.position({ x:view.x, y:view.y });
+        _syncAnnotTransformerHandles();
         VS.stage.batchDraw();
       }
       _touchPanOff = null;
@@ -1954,6 +1960,10 @@ function _buildShape(t) {
   const handleTokenAction = (e, opts = {}) => {
     e.cancelBubble = true;
     if (VS.tool === 'ruler' || VS.tool === 'draw') return; // outils de dessin ignorent les tokens
+    // Le calque des dessins est sous celui des tokens : si le clic atteint bien un
+    // token, l'intention est d'interagir avec lui. Retirer alors le Transformer évite
+    // qu'une forme englobante reprenne visuellement le focus au clic suivant.
+    if (_selectedAnnotIds.size > 0) _deselectAnnot();
     // Si le token du joueur est masqué sous un autre token, prioriser son propre token
     // lors d'une sélection simple (sauf attaque/zone/cible multi/shift).
     const stack=_stackPeers(t);
@@ -2283,6 +2293,7 @@ function _patchShapeImpl(id) {
 // ── Sélection ───────────────────────────────────────────────────────
 export function _select(id, { quiet = false } = {}) {
   _clearAim(); // changer de sélection annule une visée action-first en cours
+  if (_selectedAnnotIds.size > 0) _deselectAnnot();
   if (VS.imgTr&&VS.selImg) { VS.imgTr.nodes([]); VS.selImg=null; VS.layers.map?.batchDraw(); }
   _setSelectionRing(VS.selected, false);
   _clearTargetRings();
@@ -2620,11 +2631,15 @@ function _showMoveRange(t) {
     rect.on('contextmenu', e => { e.evt.preventDefault(); moveSelectedHere(e); });
     VS.layers.grid.add(rect); _moveHL.push(rect);
   }
+  // Les dessins restent visibles, mais ne capturent plus les clics destinés aux
+  // cases bleues. Le token et les autres tokens restent au-dessus et interactifs.
+  _setAnnotMovePassthrough(_moveHL.length > 0);
   VS.layers.grid.batchDraw();
 }
 export function _clearHL() {
   _moveHL.forEach(r=>r.destroy());
   _moveHL=[];
+  _setAnnotMovePassthrough(false);
   _clearReachableFootprints();
   if (VS.stage) VS.stage.container().style.cursor='';   // le survol des cases de déplacement le passait à 'pointer'
   VS.layers.grid?.batchDraw();
@@ -10450,10 +10465,36 @@ function _buildAnnotShape(K, data) {
 }
 
 // ── Sélection groupée annotations ──────────────────────────────────
+// Les poignées d'un Transformer Konva vivent dans les coordonnées de la scène :
+// sans compensation, un dézoom les rend presque impossibles à saisir. On garde
+// ici une taille VISUELLE stable, avec une cible un peu plus large sur écran tactile.
+function _syncAnnotTransformerHandles() {
+  if (!_annotTransformer || !VS.stage) return;
+  const scale = Math.max(MIN_SCALE, Number(VS.stage.scaleX()) || 1);
+  const coarsePointer = !!window.matchMedia?.('(pointer: coarse)')?.matches;
+  const screenAnchor = coarsePointer ? 26 : 20;
+  const anchorSize = Math.min(160, Math.max(5, screenAnchor / scale));
+  _annotTransformer.setAttrs({
+    anchorSize,
+    anchorCornerRadius: Math.min(anchorSize / 2, Math.max(2, 6 / scale)),
+    anchorStrokeWidth: Math.max(0.75, 2 / scale),
+    borderStrokeWidth: Math.max(0.75, 2 / scale),
+    padding: Math.min(48, Math.max(1.5, 7 / scale)),
+    rotateAnchorOffset: Math.min(180, Math.max(8, 34 / scale)),
+  });
+  _annotTransformer.forceUpdate?.();
+  VS.layers.draw?.batchDraw();
+}
+
 function _applyAnnotTransformer() {
   if (!_annotTransformer) return;
   const shapes = [..._selectedAnnotIds].map(id => _annotations[id]?.shape).filter(Boolean);
   _annotTransformer.nodes(shapes);
+  // Les annotations sont reconstruites après le Transformer et peuvent donc passer
+  // devant ses poignées. Le remonter garantit que saisir une poignée conserve la
+  // forme courante ; un clic ailleurs atteint toujours normalement l'autre forme.
+  _annotTransformer.moveToTop();
+  _syncAnnotTransformerHandles();
   VS.layers.draw?.batchDraw();
 }
 
@@ -10629,13 +10670,21 @@ function _updateAnnotDraggable() {
   Object.values(_annotations).forEach(e => {
     if (!e.shape) return;
     const canEdit = STATE.isAdmin || e.data.createdBy === uid;
-    const active  = inSelect && canEdit;
+    const active  = inSelect && canEdit && !_annotMovePassthrough;
     e.shape.draggable(active);
     // Écoute en sélection (clic/drag) ET en gomme (hit-test), sinon non listening.
-    e.shape.listening((inSelect || inErase) && canEdit);
+    e.shape.listening(!_annotMovePassthrough && (inSelect || inErase) && canEdit);
   });
+  _annotTransformer?.listening(!_annotMovePassthrough);
   if (inSelect) _applyAnnotTransformer(); // maintenir le transformer sur la sélection courante
   VS.layers.draw.batchDraw();
+}
+
+function _setAnnotMovePassthrough(enabled) {
+  const next = !!enabled;
+  if (_annotMovePassthrough === next) return;
+  _annotMovePassthrough = next;
+  _updateAnnotDraggable();
 }
 
 // ── Draw live (crayon + formes) ────────────────────────────────────

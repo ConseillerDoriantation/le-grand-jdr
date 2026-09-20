@@ -3,6 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Grimorium centralise vos campagnes de jeu de rôle : personnages, sorts, agenda, statistiques, boutique et table virtuelle collaborative.">
+  <meta name="robots" content="index,follow,max-image-preview:large">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <link rel="canonical" href="https://conseillerdoriantation.github.io/le-grand-jdr/">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="fr_FR">
+  <meta property="og:site_name" content="Grimorium">
+  <meta property="og:title" content="Grimorium — Gestion de campagne JDR">
+  <meta property="og:description" content="Personnages, sorts, agenda, statistiques et table virtuelle réunis dans un même codex de campagne.">
+  <meta property="og:url" content="https://conseillerdoriantation.github.io/le-grand-jdr/">
+  <meta property="og:image" content="https://conseillerdoriantation.github.io/le-grand-jdr/assets/img/grimorium-social.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Grimorium, le codex de votre campagne JDR">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Grimorium — Gestion de campagne JDR">
+  <meta name="twitter:description" content="Le codex collaboratif de votre campagne de jeu de rôle.">
+  <meta name="twitter:image" content="https://conseillerdoriantation.github.io/le-grand-jdr/assets/img/grimorium-social.png">
+  <!-- Renseigner un identifiant G-XXXXXXXXXX pour activer Analytics. Le script
+       tiers ne sera chargé qu'après consentement explicite. -->
+  <meta name="grimorium-analytics-id" content="">
 
   <!-- CSP STRICTE — ACTIVE. Vrai rempart anti-XSS. Procédure + checklist : docs/security.md §3.
        Si l'importmap (versions SDK Firebase) change → recalculer le hash sha256 de script-src.
@@ -11,15 +32,16 @@
        la CSP minimale ci-dessous. -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
-    script-src 'self' https://www.gstatic.com 'sha256-pux95tWeUAUbC4qBEFQ0c9EyyXfMrPyeU6SN0nA8yVE=';
+    script-src 'self' https://www.gstatic.com https://www.googletagmanager.com 'sha256-pux95tWeUAUbC4qBEFQ0c9EyyXfMrPyeU6SN0nA8yVE=';
     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
     font-src https://fonts.gstatic.com;
     img-src 'self' data: https:;
     media-src 'self' https:;
-    connect-src 'self' https://www.gstatic.com https://*.googleapis.com https://*.firebaseio.com https://*.cloudinary.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://api.github.com wss://*.firebaseio.com;
+    connect-src 'self' https://www.gstatic.com https://*.googleapis.com https://*.firebaseio.com https://*.cloudinary.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://api.github.com https://*.google-analytics.com https://*.analytics.google.com wss://*.firebaseio.com;
     frame-src https://*.firebaseapp.com https://accounts.google.com https://apis.google.com;
     object-src 'none';
-    base-uri 'self'">
+    base-uri 'self';
+    upgrade-insecure-requests">
 
   <!-- CSP minimale — FALLBACK de revert (ne restreint ni script-src ni connect-src → ne peut
        pas casser Firebase/auth). Pour revenir en arrière : commenter la CSP stricte ci-dessus
@@ -29,6 +51,7 @@
 
   <title>Grimorium</title>
   <link rel="icon" href="./favicon.ico" sizes="any">
+  <script src="./assets/js/shared/https-only.js"></script>
 
   <!-- PWA : installable + lecture hors-ligne (manifest + service worker) -->
   <link rel="manifest" href="./manifest.json">
@@ -65,20 +88,21 @@
        Les feuilles spécifiques aux pages sont chargées en lazy à la navigation
        via FEATURE_CSS dans assets/js/core/navigation.js. Garder ici uniquement
        le global et les petits composants transverses déclenchables hors route. -->
-  <link rel="stylesheet" href="./assets/css/tokens.css?v=20260918f">
-  <link rel="stylesheet" href="./assets/css/base.css?v=20260918f">
-  <link rel="stylesheet" href="./assets/css/auth.css?v=20260918f">
-  <link rel="stylesheet" href="./assets/css/adventure.css?v=20260918f">
-  <link rel="stylesheet" href="./assets/css/layout.css?v=20260918f">
-  <link rel="stylesheet" href="./assets/css/responsive.css?v=20260918f">
-  <link rel="stylesheet" href="./assets/css/features.css?v=20260918f">
-  <link rel="stylesheet" href="./assets/css/rich-text.css?v=20260918f">
-  <link rel="stylesheet" href="./assets/css/free-page.css?v=20260918f">
-  <link rel="stylesheet" href="./assets/css/quick-view.css?v=20260918f">
-  <link rel="stylesheet" href="./assets/css/command-palette.css?v=20260918f">
-  <link rel="stylesheet" href="./assets/css/session-center.css?v=20260918f">
-  <link rel="stylesheet" href="./assets/css/chat.css?v=20260918f">
-  <link rel="stylesheet" href="./assets/css/print.css?v=20260918f">
+  <link rel="stylesheet" href="./assets/css/tokens.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/base.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/auth.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/adventure.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/layout.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/responsive.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/features.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/rich-text.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/free-page.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/quick-view.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/command-palette.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/session-center.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/chat.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/print.css?v=20260919">
+  <link rel="stylesheet" href="./assets/css/legal.css?v=20260919">
 </head>
 <body>
 <a href="#main-content" class="skip-link">Aller au contenu</a>
@@ -111,15 +135,15 @@
       <button class="auth-tab"        type="button" data-action="auth-tab-register">Créer un compte</button>
     </div>
 
-    <div id="tab-login">
+    <form id="tab-login" novalidate>
       <div class="form-group">
-        <label>Email</label>
-        <input type="email" id="login-email" placeholder="votre@email.com" autocomplete="email">
+        <label for="login-email">Email</label>
+        <input type="email" id="login-email" placeholder="votre@email.com" autocomplete="email" inputmode="email" maxlength="254" required>
       </div>
       <div class="form-group">
-        <label>Mot de passe</label>
+        <label for="login-password">Mot de passe</label>
         <div class="pw-wrap">
-          <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password">
+          <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" maxlength="128" required>
           <button type="button" class="pw-toggle" data-action="toggle-pw" data-target="login-password" aria-label="Afficher le mot de passe" title="Afficher / masquer">
             <svg class="pw-icon pw-icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/>
@@ -132,27 +156,32 @@
           </button>
         </div>
       </div>
-      <button type="button" class="btn-primary" data-action="login">Entrer dans le Monde</button>
+      <button type="submit" class="btn-primary" data-action="login">Se connecter</button>
       <div class="auth-forgot">
         <a href="#" data-action="forgot-pw">Mot de passe oublié ?</a>
       </div>
-    </div>
+    </form>
 
-    <div id="tab-register" style="display:none">
-      <div class="form-group">
-        <label>Pseudo</label>
-        <input type="text" id="reg-pseudo" placeholder="Votre nom d'aventurier" autocomplete="username">
+    <form id="tab-register" style="display:none" novalidate>
+      <div class="auth-honeypot" aria-hidden="true">
+        <label for="reg-website">Site web</label>
+        <input type="text" id="reg-website" name="website" tabindex="-1" autocomplete="off">
       </div>
       <div class="form-group">
-        <label>Email</label>
-        <input type="email" id="reg-email" placeholder="votre@email.com" autocomplete="email">
+        <label for="reg-pseudo">Pseudo</label>
+        <input type="text" id="reg-pseudo" placeholder="Votre nom d'aventurier" autocomplete="username" minlength="2" maxlength="40" required>
       </div>
       <div class="form-group">
-        <label>Mot de passe</label>
-        <input type="password" id="reg-password" placeholder="••••••••" autocomplete="new-password">
+        <label for="reg-email">Email</label>
+        <input type="email" id="reg-email" placeholder="votre@email.com" autocomplete="email" inputmode="email" maxlength="254" required>
       </div>
-      <button type="button" class="btn-primary" data-action="register">Rejoindre l'Aventure</button>
-    </div>
+      <div class="form-group">
+        <label for="reg-password">Mot de passe</label>
+        <input type="password" id="reg-password" placeholder="8 caractères minimum" autocomplete="new-password" minlength="8" maxlength="128" required>
+      </div>
+      <label class="form-consent"><input type="checkbox" id="reg-terms" required><span>J’accepte les <a href="./terms.html" target="_blank" rel="noopener">conditions d’utilisation</a> et j’ai lu la <a href="./privacy.html" target="_blank" rel="noopener">politique de confidentialité</a>.</span></label>
+      <button type="submit" class="btn-primary" data-action="register">Créer mon compte</button>
+    </form>
 
     <div class="auth-divider"><span>ou</span></div>
 
@@ -167,6 +196,11 @@
     </button>
 
     <div class="auth-error" id="auth-error" role="alert"></div>
+    <nav class="auth-legal" aria-label="Informations légales">
+      <a href="./privacy.html">Confidentialité</a>
+      <a href="./terms.html">CGU</a>
+      <button type="button" data-consent-settings>Cookies</button>
+    </nav>
   </div>
 </div>
 
@@ -395,6 +429,9 @@
           <button type="button" role="menuitem" data-action="toggle-theme">
             <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-sun"/></svg>Mode jour / nuit<span class="kb">T</span>
           </button>
+          <a role="menuitem" href="./privacy.html">Politique de confidentialité</a>
+          <a role="menuitem" href="./terms.html">Conditions d’utilisation</a>
+          <button type="button" role="menuitem" data-consent-settings>Préférences de cookies</button>
           <button type="button" role="menuitem" class="admin-only" data-action="cloudinaryConfig"
             title="Configurer Cloudinary (hébergement images)" style="display:none">
             <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-cog"/></svg>Hébergement d'images
@@ -523,6 +560,7 @@
   </div>
 </div>
 
+<script type="module" src="./assets/js/shared/consent.js"></script>
 <script type="module" src="./assets/js/app.js"></script>
 </body>
 </html>

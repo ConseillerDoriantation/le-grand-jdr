@@ -62,8 +62,10 @@ export async function _loadDiceSkills() {
     const data = await getDocData('world', 'dice_skills');
     if (data?.skills?.length) VS.diceSkills = data.skills;
   } catch { /* garde le cache local */ }
-  // Re-render l'inspector si un token est déjà sélectionné
+  // Re-render l'inspector si un token est déjà sélectionné.
   if (VS.selected) _renderInspector(VS.tokens[VS.selected]?.data ?? null);
+  // Le lanceur MJ expose aussi les compétences sans token sélectionné.
+  document.dispatchEvent(new CustomEvent('vtt-roll-history'));
 }
 
 export function _vttSetRollMode(mode) {
@@ -109,23 +111,32 @@ export async function _vttRollSkill(skillName, stat) {
   // (propriétaire ou délégation), comme pour les émotes. La sélection ne prime que
   // si elle vise un token qu'on contrôle réellement.
   const uid = STATE.user?.uid;
-  const tokenId = resolveControlledTokenId(
-    VS.selected, VS.tokens, VS.activePage?.id || null,
-    token => _canControlToken(token, uid),
-  );
+  // Le MJ sans sélection ne doit jamais hériter silencieusement d'un token
+  // arbitraire : son jet est un jet neutre, auquel il peut ajouter le bonus du lanceur.
+  const tokenId = STATE.isAdmin
+    ? (() => {
+        const selected = VS.selected ? VS.tokens[VS.selected]?.data : null;
+        const onPage = selected && (!VS.activePage?.id || selected.pageId === VS.activePage.id);
+        return onPage && _canControlToken(selected, uid) ? selected.id : null;
+      })()
+    : resolveControlledTokenId(
+        VS.selected, VS.tokens, VS.activePage?.id || null,
+        token => _canControlToken(token, uid),
+      );
   const t = tokenId ? VS.tokens[tokenId]?.data : null;
-  if (!t || !_canControlToken(t)) return; // joueur ne peut lancer que son propre token (ou ceux délégués)
+  const genericMjRoll = STATE.isAdmin && !t;
+  if (!genericMjRoll && (!t || !_canControlToken(t))) return; // joueur : token propre ou délégué uniquement
   const c = t?.characterId ? VS.characters[t.characterId] : null;
   const n = t?.npcId ? VS.npcs[t.npcId] : null;
   const b = t?.beastId ? VS.bestiary[t.beastId] : null; // créature du bestiaire
   const statKey = _STAT_KEY[stat] || '';
-  const mod = _tokenStatMod(t, statKey);
+  const mod = genericMjRoll ? 0 : _tokenStatMod(t, statKey);
   // Bonus de compétence depuis les items équipés (pour les PJ)
   const equipSkillBonus = c ? computeEquipSkillBonus(c.equipement || {}, skillName) : 0;
   const armorRollMode = c
     ? getArmorSetRollModeFor(getArmorSetData(c), { stat: statKey, skill: skillName })
     : '';
-  const conditionRollMode = _conditionStatRollMode(t, statKey, 'check');
+  const conditionRollMode = t ? _conditionStatRollMode(t, statKey, 'check') : '';
   // Niveau de compétence de la fiche (onglet Capacités, c.competences[skill]) :
   // formée = +2 · expertise = +2 & avantage. Non formée (absent) = jet normal.
   const _skillLvl = (c?.competences && !Array.isArray(c.competences)) ? c.competences[skillName] : null;
@@ -148,11 +159,13 @@ export async function _vttRollSkill(skillName, stat) {
   const total   = roll + mod + VS.rollBonus + equipSkillBonus + skillProfBonus;
   const isCrit  = roll === 20, isFumble = roll === 1;
   const authorName    = STATE.profile?.pseudo || STATE.profile?.prenom || 'Joueur';
-  const characterName = c?.nom || n?.nom || b?.nom || t?.name || null;
-  const characterImage = c?.photoURL || c?.photo || c?.avatar
+  const characterName = genericMjRoll ? 'Maître du jeu' : (c?.nom || n?.nom || b?.nom || t?.name || null);
+  const characterImage = (genericMjRoll
+    ? (STATE.profile?.photoURL || STATE.profile?.photo || STATE.profile?.avatar || null)
+    : (c?.photoURL || c?.photo || c?.avatar
     || n?.photoURL || n?.photo || n?.avatar || n?.imageUrl
     || b?.photoURL || b?.photo || b?.avatar || b?.imageUrl
-    || t?.imageUrl || null;
+    || t?.imageUrl || null));
   const gmOnly = STATE.isAdmin && VS.rollHidden;
   try {
     // Jet caché → sous-collection MJ (secret serveur) ; sinon log public.

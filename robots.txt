@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /le-grand-jdr/auth-action.html
+
+Sitemap: https://conseillerdoriantation.github.io/le-grand-jdr/sitemap.xml

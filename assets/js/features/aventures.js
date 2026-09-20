@@ -489,7 +489,7 @@ export async function openManageAdventureModal(adventureId) {
           <div class="adv-invite-box">
             <label for="adv-invite-email">Inviter par email</label>
             <div class="adv-invite-row">
-              <input type="email" id="adv-invite-email" placeholder="email@exemple.com" data-enter-click="#_advInvite-${adventureId}">
+              <input type="email" id="adv-invite-email" placeholder="email@exemple.com" inputmode="email" autocomplete="email" maxlength="254" required data-enter-click="#_advInvite-${adventureId}">
               <button class="adv-panel-save" id="_advInvite-${adventureId}" data-action="_advInvite" data-id="${adventureId}">Inviter</button>
             </div>
             <p>L'invitation sera visible à la prochaine connexion du joueur.</p>
@@ -777,7 +777,9 @@ async function deleteAdventureAndRefresh(advId) {
 }
 
 async function inviteAdventurePlayer(advId) {
-  const email = document.getElementById('adv-invite-email')?.value?.trim();
+  const emailInput = document.getElementById('adv-invite-email');
+  if (emailInput && !emailInput.checkValidity()) { emailInput.reportValidity(); return; }
+  const email = emailInput?.value?.trim();
   if (!email) { showNotif('Saisis un email à inviter.', 'error'); return; }
   try {
     await inviteByEmail(advId, email);
