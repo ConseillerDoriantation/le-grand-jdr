@@ -3807,6 +3807,7 @@ body .modal:has(.achm) > #modal-body {
   background:var(--bg-elevated); color:var(--text-dim);
   transition:border-color .15s, background .15s, transform .15s;
 }
+.achm-contrib[hidden] { display:none !important; }
 .achm-contrib:hover {
   transform:translateY(-1px);
   border-color:color-mix(in srgb, var(--cc) 58%, var(--border));
