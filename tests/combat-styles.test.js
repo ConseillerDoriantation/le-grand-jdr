@@ -21,6 +21,7 @@ test('le désavantage de contact ne touche par défaut que les attaques à dista
   assert.equal(combatStyleAttackModifiers(style, { distance: 1, isMeleeAttack: false }).hasDis, true);
   assert.equal(combatStyleAttackModifiers(style, { distance: 1, isMeleeAttack: true }).hasDis, false);
   assert.equal(combatStyleAttackModifiers(style, { distance: 2, isMeleeAttack: false }).hasDis, false);
+  assert.equal(combatStyleAttackModifiers(style, { distance: null, isMeleeAttack: false }).hasDis, false);
 });
 
 test('un style peut appliquer sa règle de contact à toutes les attaques', () => {
@@ -50,4 +51,27 @@ test('la gêne vient de l ennemi autour du lanceur, pas de la cible choisie', ()
     (a, b) => Math.abs(a.col - b.col),
   );
   assert.equal(distance, 1);
+});
+
+test('un ennemi présent mais hors du corps-à-corps ne donne aucun désavantage', () => {
+  const style = { label: 'Archer', rules: { contactAttackMode: 'disadvantage', contactDistance: 1 } };
+  const source = { id: 'hero', type: 'player', pageId: 'scene', col: 2, row: 2 };
+  const distantEnemy = { id: 'enemy', type: 'enemy', pageId: 'scene', col: 8, row: 2 };
+  const distance = nearestHostileDistance(
+    source,
+    [source, distantEnemy],
+    (a, b) => Math.max(Math.abs(a.col - b.col), Math.abs(a.row - b.row)),
+  );
+
+  assert.equal(distance, 6);
+  assert.equal(combatStyleAttackModifiers(style, { distance, isMeleeAttack: false }).hasDis, false);
+});
+
+test('aucun ennemi détecté ne peut pas être interprété comme une distance zéro', () => {
+  const style = { label: 'Archer', rules: { contactAttackMode: 'disadvantage', contactDistance: 1 } };
+  const source = { id: 'hero', type: 'player', pageId: 'scene', col: 2, row: 2 };
+  const distance = nearestHostileDistance(source, [source], () => 0);
+
+  assert.equal(distance, null);
+  assert.equal(combatStyleAttackModifiers(style, { distance, isMeleeAttack: false }).hasDis, false);
 });

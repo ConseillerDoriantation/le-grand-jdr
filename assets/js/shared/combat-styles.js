@@ -118,7 +118,15 @@ export function detectCombatStyle(character, styles = []) {
 /** Modificateur automatique d'un style pour un jet d'attaque donné. */
 export function combatStyleAttackModifiers(style, { distance, isMeleeAttack = false, isHealingAction = false } = {}) {
   const rules = normalizeCombatStyle(style).rules;
-  const inContact = Number.isFinite(Number(distance)) && Number(distance) <= rules.contactDistance;
+  // `nearestHostileDistance` renvoie null quand aucun adversaire actif n'est
+  // présent autour du lanceur. Number(null) vaut 0 : sans cette garde, l'absence
+  // d'ennemi était interprétée comme un ennemi sur la même case et imposait le
+  // désavantage en permanence.
+  const hasDistance = distance !== null && distance !== undefined && distance !== '';
+  const numericDistance = hasDistance ? Number(distance) : Number.NaN;
+  const inContact = Number.isFinite(numericDistance)
+    && numericDistance >= 0
+    && numericDistance <= rules.contactDistance;
   const appliesToAttack = rules.contactAttackScope === 'all' || !isMeleeAttack;
   if (!inContact || !appliesToAttack || rules.contactAttackMode === 'none') {
     return { hasAdv: false, hasDis: false, reasons: [] };
