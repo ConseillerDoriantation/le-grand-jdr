@@ -523,6 +523,34 @@ match /adventures/{adventureId} {
   match /combat_styles/{id}     { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /order/{id}             { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /bastion/{id}           { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+  // Cagnotte ciblée des salles : un document cumulé par joueur/personnage/salle.
+  // Les joueurs ne peuvent qu'augmenter leur propre contribution ; sa dépense
+  // effective reste pilotée par le document bastion/main réservé au MJ.
+  match /bastionInvestments/{id} {
+    allow read: if inAdventure(adventureId);
+    allow create: if inAdventure(adventureId)
+      && request.resource.data.get('uid', '') == request.auth.uid
+      && request.resource.data.get('charId', '') != ''
+      && request.resource.data.get('roomSlug', '') != ''
+      && request.resource.data.get('roomSlug', '').size() <= 120
+      && request.resource.data.get('amount', 0) is int
+      && request.resource.data.get('amount', 0) > 0
+      && request.resource.data.get('amount', 0) <= 10000000
+      && exists(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(request.resource.data.charId))
+      && canControlAdventureCharacter(adventureId, request.resource.data.charId);
+    allow update: if inAdventure(adventureId)
+      && resource.data.get('uid', '') == request.auth.uid
+      && request.resource.data.get('uid', '') == request.auth.uid
+      && request.resource.data.get('charId', '') == resource.data.get('charId', '')
+      && request.resource.data.get('roomSlug', '') == resource.data.get('roomSlug', '')
+      && request.resource.data.get('amount', 0) is int
+      && request.resource.data.get('amount', 0) >= resource.data.get('amount', 0)
+      && request.resource.data.get('amount', 0) <= 10000000
+      && request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['amount', 'charName', 'updatedAt'])
+      && canControlAdventureCharacter(adventureId, request.resource.data.charId);
+    allow delete: if isAdvAdmin(adventureId);
+  }
   // Mur social du Bastion : 1 document par publication. `main.items` est conservé
   // uniquement pour les annonces historiques. Un membre peut interagir, mais pas
   // réécrire le texte ou les images d'un autre auteur ; suppression = auteur/MJ.
