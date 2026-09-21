@@ -7,6 +7,7 @@
 //   or, renommee, influence,              // ressources
 //   roomCatalog: [ { slug, nom, emoji, desc, color, niveaux } ],
 //   salles: { [slug]: { niveau, builtAt, weeksLeftToBuild, targetNiveau } },
+//   roomInvestmentSpent: { [slug]: number }, // contributions déjà consommées
 //   coffre: [ { id, nom, quantite, emoji, source, weekAdded } ],
 //   historique: [ { week, type, msg } ], // last 30
 //   createdAt,
@@ -47,6 +48,7 @@ import {
 import { useGold } from '../shared/economy.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../shared/inventory-history.js';
 import { shouldRestoreLegacyBastionCatalog } from '../shared/bastion-catalog.js';
+import { roomFundingPlan, roomInvestmentAvailable } from '../shared/bastion-investments.js';
 
 
 const STORE = {
@@ -64,6 +66,8 @@ const STORE = {
   histoExpanded:  false,
   catalogMigrationInFlight: false,
   addingCustomRoom: false,
+  investments: [],             // cagnotte ciblée par salle (1 doc / joueur / perso / salle)
+  investmentInProgress: false,
 };
 
 
@@ -378,6 +382,26 @@ function _roomBuilding(b, slug) {
   return !!(s && s.weeksLeftToBuild > 0);
 }
 
+function _roomInvestmentAvailable(b, slug) {
+  return roomInvestmentAvailable(b, STORE.investments, slug);
+}
+
+function _roomInvestmentContributors(slug) {
+  const contributors = new Map();
+  for (const investment of STORE.investments || []) {
+    if (investment?.roomSlug !== slug || !(Number(investment.amount) > 0)) continue;
+    const key = investment.charId || investment.uid || investment.id;
+    const current = contributors.get(key) || {
+      charId: investment.charId || '',
+      charName: investment.charName || 'Personnage',
+      amount: 0,
+    };
+    current.amount += Number(investment.amount) || 0;
+    contributors.set(key, current);
+  }
+  return [...contributors.values()].sort((a, b) => b.amount - a.amount || a.charName.localeCompare(b.charName, 'fr'));
+}
+
 // Calcule le niveau "actuel + en construction = target" affiché
 function _roomTargetLabel(slug, b, isUnlimited) {
   const s = b?.salles?.[slug];
@@ -630,6 +654,12 @@ function _attachListener() {
     _wallComments = docs || [];
     if (STATE.currentPage === 'bastion') _renderPage();
   }, { field: 'ts', max: 200, silent: true });
+  // Collection structurellement bornée : un document cumulé par
+  // joueur/personnage/salle, jamais un document par versement.
+  watchRecent('bastionInvestments', 'bastionInvestments', docs => {
+    STORE.investments = docs || [];
+    if (STATE.currentPage === 'bastion') _renderPage();
+  }, { field: 'updatedAt', max: 500, silent: true });
   if (STATE.user?.uid) watchDoc('bastionWallRead', 'bastionWallReads', STATE.user.uid, data => {
     _wallRead = data || null;
   }, { silent: true });
@@ -652,22 +682,29 @@ async function _bastionBuild(slug) {
   const target = curNiv + 1;
   const niveauDef = _getNiveauData(def, target);
 
-  // Vérif coût
-  if ((b.or || 0) < niveauDef.cout) {
-    showNotif(`Or insuffisant (${b.or}/${niveauDef.cout} requis).`, 'error');
+  // La cagnotte ciblée est consommée avant le trésor commun. Les contributions
+  // restent dans leur journal dédié ; `roomInvestmentSpent` mémorise la part
+  // déjà utilisée afin qu'une même pièce d'or ne finance jamais deux niveaux.
+  const plan = roomFundingPlan(niveauDef.cout, _roomInvestmentAvailable(b, slug), b.or || 0);
+  if (!plan.canFund) {
+    showNotif(`Financement insuffisant : ${plan.missing} or manquants.`, 'error');
     return;
   }
 
-  b.or = (b.or || 0) - niveauDef.cout;
+  b.or = (b.or || 0) - plan.treasuryUsed;
+  b.roomInvestmentSpent = { ...(b.roomInvestmentSpent || {}) };
+  b.roomInvestmentSpent[slug] = (Number(b.roomInvestmentSpent[slug]) || 0) + plan.investmentUsed;
   b.salles = { ...(b.salles || {}) };
   b.salles[slug] = {
     niveau: curNiv,                  // niveau actuel inchangé tant que construction pas finie
     targetNiveau: target,
     weeksLeftToBuild: niveauDef.semaines,
     builtAt: b.salles[slug]?.builtAt || null,
+    investmentUsed: plan.investmentUsed,
+    treasuryUsed: plan.treasuryUsed,
   };
   _addHistorique(b, 'construction',
-    `🏗 ${def.emoji} ${def.nom} — construction niveau ${def.unlimited ? target : NIVEAU_LABEL[target]} commencée (${niveauDef.semaines} période, ${niveauDef.cout} or)`);
+    `🏗 ${def.emoji} ${def.nom} — construction niveau ${def.unlimited ? target : NIVEAU_LABEL[target]} commencée (${niveauDef.semaines} période, ${niveauDef.cout} or · ${plan.investmentUsed} investis · ${plan.treasuryUsed} trésor)`);
 
   await _save(b);
   showNotif(`Construction de ${def.nom} ${NIVEAU_LABEL[target]} lancée.`, 'success');
@@ -683,24 +720,39 @@ async function _bastionCancelBuild(slug) {
   const def = _getRoomDef(slug, b);
   const target = s.targetNiveau;
   const niveauDef = def ? _getNiveauData(def, target) : null;
-  const refund = niveauDef?.cout || 0;
+  const legacyRefund = niveauDef?.cout || 0;
+  const investmentRefund = Math.max(0, Number(s.investmentUsed) || 0);
+  const treasuryRefund = s.treasuryUsed == null
+    ? legacyRefund
+    : Math.max(0, Number(s.treasuryUsed) || 0);
   const tLabel = def?.unlimited ? `${target}` : (NIVEAU_LABEL[target] || target);
   const ok = await confirmModal(
-    `Annuler la construction de ${def?.emoji || ''} ${_esc(def?.nom || slug)} (niveau ${tLabel}) ?\n\n${refund} or seront remboursés.`,
+    `Annuler la construction de ${def?.emoji || ''} ${_esc(def?.nom || slug)} (niveau ${tLabel}) ?\n\n${treasuryRefund} or retourneront au trésor${investmentRefund ? ` et ${investmentRefund} or à la cagnotte de la salle` : ''}.`,
     { title: '✖ Annuler la construction', okLabel: '✖ Annuler la construction', cancelLabel: 'Garder' }
   ).catch(() => false);
   if (!ok) return;
 
-  b.or = (b.or || 0) + refund;
+  b.or = (b.or || 0) + treasuryRefund;
+  if (investmentRefund > 0) {
+    b.roomInvestmentSpent = { ...(b.roomInvestmentSpent || {}) };
+    b.roomInvestmentSpent[slug] = Math.max(0, (Number(b.roomInvestmentSpent[slug]) || 0) - investmentRefund);
+  }
   const prevNiv = s.niveau || 0;
   // Remet la salle à son niveau d'avant le chantier (0 = non construite). On écrit
   // des valeurs explicites car la sauvegarde est en merge (un delete serait ignoré).
   b.salles = { ...(b.salles || {}) };
-  b.salles[slug] = { niveau: prevNiv, targetNiveau: null, weeksLeftToBuild: 0, builtAt: s.builtAt || null };
+  b.salles[slug] = {
+    niveau: prevNiv,
+    targetNiveau: null,
+    weeksLeftToBuild: 0,
+    builtAt: s.builtAt || null,
+    investmentUsed: 0,
+    treasuryUsed: 0,
+  };
   _addHistorique(b, 'construction',
-    `✖ ${def?.emoji || ''} ${def?.nom || slug} — construction annulée (${refund} or remboursés)`);
+    `✖ ${def?.emoji || ''} ${def?.nom || slug} — construction annulée (${treasuryRefund} or au trésor${investmentRefund ? `, ${investmentRefund} or rendus disponibles dans la cagnotte` : ''})`);
   await _save(b);
-  showNotif(`Construction annulée — ${refund} or remboursés.`, 'success');
+  showNotif('Construction annulée — financement restauré.', 'success');
 }
 
 async function _bastionAdvanceWeek() {
@@ -2298,6 +2350,149 @@ async function _bastionDoTransfer(direction) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ACTIONS — Investissement ciblé dans une salle (joueurs & MJ)
+// ══════════════════════════════════════════════════════════════════════════════
+function _investmentDocId(uid, charId, roomSlug) {
+  return [uid, charId, roomSlug]
+    .map(value => String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_'))
+    .join('__');
+}
+
+function _bastionOpenInvest(slug) {
+  const b = STORE.bastion || _defaultBastion();
+  const def = _getRoomDef(slug, b);
+  if (!def || _roomBuilding(b, slug)) return;
+  const target = _roomNiveau(b, slug) + 1;
+  const nextDef = _getNiveauData(def, target);
+  if (!nextDef) return;
+
+  const remaining = Math.max(0, (Number(nextDef.cout) || 0) - _roomInvestmentAvailable(b, slug));
+  if (!remaining) {
+    showNotif('Ce niveau est déjà entièrement financé.', 'success');
+    return;
+  }
+
+  const chars = _eligibleChars();
+  if (!chars.length) {
+    showNotif('Aucun personnage disponible pour investir.', 'error');
+    return;
+  }
+  const defaultChar = getDefaultCharForUser(chars, STATE.user?.uid) || chars[0];
+  const contributors = _roomInvestmentContributors(slug);
+  const contributorsHtml = contributors.length
+    ? `<div class="bs-invest-contributors">
+        <span>Contributions cumulées</span>
+        ${contributors.map(entry => `<div><b>${_esc(entry.charName)}</b><strong>${entry.amount} or</strong></div>`).join('')}
+      </div>`
+    : '';
+
+  openModal(`🤝 Investir dans ${def.nom}`, `
+    <div class="bs-invest-modal" data-room="${_esc(slug)}">
+      <div class="bs-invest-target" style="--c:${def.color}">
+        <span>${_esc(def.emoji)}</span>
+        <div><small>Prochain niveau</small><strong>${_esc(def.nom)} · Niv. ${def.unlimited ? target : (NIVEAU_LABEL[target] || target)}</strong></div>
+        <b>${remaining} or à réunir</b>
+      </div>
+      <label class="form-group">Personnage
+        <select class="input-field" id="bas-invest-char" data-change="_bastionRefreshInvestment" data-slug="${_esc(slug)}">
+          ${chars.map(char => `<option value="${char.id}"${char.id === defaultChar.id ? ' selected' : ''}>${_esc(char.nom || '?')}</option>`).join('')}
+        </select>
+      </label>
+      <label class="form-group">Montant
+        <div class="bs-invest-amount">
+          <input type="number" class="input-field" id="bas-invest-amount" min="1" value="${Math.min(50, remaining)}">
+          <button type="button" class="btn btn-outline btn-sm" data-action="_bastionFillInvestment" data-slug="${_esc(slug)}">Maximum</button>
+        </div>
+        <small id="bas-invest-info"></small>
+      </label>
+      <p class="bs-invest-note">L'or est retiré du personnage et réservé à cette salle. Il ne sera dépensé que lorsque le MJ lancera le chantier.</p>
+      ${contributorsHtml}
+      <button type="button" class="btn btn-gold" data-action="_bastionDoInvest" data-slug="${_esc(slug)}">🤝 Confirmer l'investissement</button>
+    </div>
+  `, { subtitle: `${_roomInvestmentAvailable(b, slug)} / ${nextDef.cout} or déjà réunis`, accent: def.color || '#e8b84b' });
+  _bastionRefreshInvestment(slug);
+}
+
+function _bastionRefreshInvestment(slug) {
+  const charId = document.getElementById('bas-invest-char')?.value;
+  const char = _eligibleChars().find(entry => entry.id === charId);
+  const input = document.getElementById('bas-invest-amount');
+  const info = document.getElementById('bas-invest-info');
+  const def = _getRoomDef(slug);
+  if (!char || !input || !info || !def) return;
+  const nextDef = _getNiveauData(def, _roomNiveau(STORE.bastion, slug) + 1);
+  const remaining = Math.max(0, (Number(nextDef?.cout) || 0) - _roomInvestmentAvailable(STORE.bastion, slug));
+  const balance = calcOr(char);
+  const max = Math.max(0, Math.min(balance, remaining));
+  input.max = max;
+  if ((Number(input.value) || 0) > max) input.value = max;
+  info.textContent = `${char.nom || 'Ce personnage'} possède ${balance} or · maximum possible : ${max} or`;
+}
+
+function _bastionFillInvestment(slug) {
+  _bastionRefreshInvestment(slug);
+  const input = document.getElementById('bas-invest-amount');
+  if (input) input.value = input.max || 0;
+}
+
+async function _bastionDoInvest(slug) {
+  if (STORE.investmentInProgress) return;
+  const b = STORE.bastion || _defaultBastion();
+  const def = _getRoomDef(slug, b);
+  if (!def || _roomBuilding(b, slug)) {
+    showNotif('Cette salle est déjà en construction.', 'error');
+    return;
+  }
+  const charId = document.getElementById('bas-invest-char')?.value;
+  const char = _eligibleChars().find(entry => entry.id === charId);
+  const amount = Math.floor(Number(document.getElementById('bas-invest-amount')?.value) || 0);
+  const nextDef = _getNiveauData(def, _roomNiveau(b, slug) + 1);
+  const remaining = Math.max(0, (Number(nextDef?.cout) || 0) - _roomInvestmentAvailable(b, slug));
+  if (!char) { showNotif('Personnage introuvable.', 'error'); return; }
+  if (amount <= 0 || amount > remaining || amount > calcOr(char)) {
+    showNotif('Montant invalide ou supérieur à l’or disponible.', 'error');
+    _bastionRefreshInvestment(slug);
+    return;
+  }
+
+  STORE.investmentInProgress = true;
+  const uid = STATE.user?.uid || '';
+  const docId = _investmentDocId(uid, char.id, slug);
+  const debit = await useGold(char.id, -amount, `Investissement Bastion : ${def.nom}`, { charObj: char });
+  if (!debit.ok) {
+    STORE.investmentInProgress = false;
+    showNotif(debit.error || 'Impossible de débiter cet or.', 'error');
+    return;
+  }
+
+  try {
+    const now = Date.now();
+    const saved = await mutateInCol('bastionInvestments', docId, current => ({
+      uid,
+      charId: char.id,
+      charName: char.nom || 'Personnage',
+      roomSlug: slug,
+      amount: Math.max(0, Number(current?.amount) || 0) + amount,
+      createdAt: current?.createdAt || now,
+      updatedAt: now,
+    }));
+    const local = { id: docId, ...saved };
+    const index = STORE.investments.findIndex(entry => entry.id === docId);
+    if (index >= 0) STORE.investments.splice(index, 1, local);
+    else STORE.investments.push(local);
+    closeModal();
+    _renderPage();
+    showNotif(`${char.nom} investit ${amount} or dans ${def.nom}.`, 'success');
+  } catch (error) {
+    const rollback = await useGold(char.id, amount, `Remboursement : investissement ${def.nom} non enregistré`, { charObj: char });
+    if (!rollback.ok) console.error('[bastion] remboursement investissement échoué', rollback.error);
+    notifySaveError(error);
+  } finally {
+    STORE.investmentInProgress = false;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // RENDU
 // ══════════════════════════════════════════════════════════════════════════════
 function _renderHeader(b) {
@@ -2443,10 +2638,12 @@ function _renderRoomCard(def, b) {
   const nextDef = targetNiv ? _getNiveauData(def, targetNiv) : null;
   const isUnlimited = !!def.unlimited;
   const supportsPersonnel = !isUnlimited; // Entrepôt n'a pas de PNJ assignable
+  const invested = nextDef ? _roomInvestmentAvailable(b, def.slug) : 0;
+  const funding = nextDef ? roomFundingPlan(nextDef.cout, invested, b.or || 0) : null;
 
   // Etat global de la carte
   const status = building ? 'building' : (curNiv > 0 ? 'active' : 'available');
-  const orNotEnough = nextDef && (b.or || 0) < (nextDef.cout || 0);
+  const fundingMissing = funding && !funding.canFund;
 
   const sallesData = b.salles?.[def.slug];
 
@@ -2509,12 +2706,34 @@ function _renderRoomCard(def, b) {
     </div>`;
   }
 
+  // Cagnotte visible par tous : les joueurs savent immédiatement ce qui manque
+  // et peuvent financer précisément la salle qui les intéresse.
+  let investmentHtml = '';
+  if (!building && nextDef) {
+    const shownInvested = Math.min(invested, nextDef.cout);
+    const pct = nextDef.cout > 0 ? Math.min(100, Math.round(shownInvested / nextDef.cout * 100)) : 100;
+    const remaining = Math.max(0, nextDef.cout - invested);
+    const contributors = _roomInvestmentContributors(def.slug);
+    const canInvest = _eligibleChars().length > 0 && remaining > 0;
+    investmentHtml = `<div class="bs-room-investment${remaining === 0 ? ' is-funded' : ''}">
+      <div class="bs-room-investment-head">
+        <span>${remaining === 0 ? '✓ Niveau financé' : '🤝 Cagnotte des joueurs'}</span>
+        <strong>${shownInvested} / ${nextDef.cout} or</strong>
+      </div>
+      <div class="bs-room-investment-bar"><i style="width:${pct}%;background:${def.color}"></i></div>
+      <div class="bs-room-investment-foot">
+        <small>${contributors.length ? `${contributors.length} contributeur${contributors.length > 1 ? 's' : ''}` : 'Aucune contribution'}</small>
+        ${canInvest ? `<button type="button" data-action="_bastionOpenInvest" data-slug="${def.slug}">Investir</button>` : ''}
+      </div>
+    </div>`;
+  }
+
   // Bouton MJ pour construire / améliorer
   let actionHtml = '';
   if (isMj && !building && targetNiv) {
-    const disabled = orNotEnough;
-    const tooltip = orNotEnough ? `Or ${b.or||0}/${nextDef.cout} requis`
-                  : `Construire niveau ${niveauLabel(targetNiv)} — ${nextDef.semaines} période, ${nextDef.cout} or`;
+    const disabled = fundingMissing;
+    const tooltip = disabled ? `${funding.missing} or manquants (cagnotte + trésor)`
+                  : `Construire niveau ${niveauLabel(targetNiv)} — ${funding.investmentUsed} or investis + ${funding.treasuryUsed} or du trésor`;
     actionHtml = `
       <button class="bs-room-action${disabled ? ' bs-room-action--disabled' : ''}"
         ${disabled ? '' : `data-action="_bastionBuild" data-slug="${def.slug}"`}
@@ -2549,6 +2768,7 @@ function _renderRoomCard(def, b) {
       ${bonusHtml}
       ${personnelHtml}
       ${buildingHtml}
+      ${investmentHtml}
       ${actionHtml}
     </div>`;
 }
@@ -3643,6 +3863,8 @@ async function renderBastionPage() {
     _wallUi.editPostId = '';
     _wallUi.editCommentId = '';
     _wallUi.focusedPostId = '';
+    STORE.investments = [];
+    STORE.investmentInProgress = false;
     _wallRestoreDraft();
   }
 
@@ -3730,6 +3952,10 @@ registerActions({
   _bastionSelectHireCard:   (btn) => _bastionSelectHireCard(btn.dataset.id),
   _bastionDoHire:           () => _bastionDoHire(),
   _bastionDoTransfer:       (btn) => _bastionDoTransfer(btn.dataset.dir),
+  _bastionOpenInvest:       (btn) => _bastionOpenInvest(btn.dataset.slug),
+  _bastionRefreshInvestment:(el) => _bastionRefreshInvestment(el.dataset.slug),
+  _bastionFillInvestment:   (btn) => _bastionFillInvestment(btn.dataset.slug),
+  _bastionDoInvest:         (btn) => _bastionDoInvest(btn.dataset.slug),
   _bastionOpenPersonnel:    () => _bastionOpenPersonnel(),
   _bastionEditIdentite:     () => _bastionEditIdentite(),
   _bastionOpenCatalogEditor:() => _bastionOpenCatalogEditor(),
