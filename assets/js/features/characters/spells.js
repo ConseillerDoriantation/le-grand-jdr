@@ -20,6 +20,7 @@ import { resolveSpellModifierStat, usesSpellMastery } from '../../shared/spell-r
 import { calculateInvocationDerivedStats, getPreparedInvocationActions, INVOCATION_ABILITIES, INVOCATION_DEFAULT_STATS, invocationStatModifier, normalizeInvocationSelection, normalizeInvocationStats } from '../../shared/invocation-stats.js';
 import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _zoneDims, _zoneCount, _zoneCellCount, ZONE_SHAPES, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDD, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortMana, _calcSortZone, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds, SPELL_COST_RESOURCES, spellCostRes, spellCostMult } from './spells-calc.js';
 import { computeSheetLines, renderSheetLines } from '../../shared/spell-sheet-lines.js';
+import { shouldTrackSpellStats } from '../../shared/spell-stats-policy.js';
 
 // Ressource de coût lisible d'un sort (label court : PM / PV / Or / —).
 const _sortResLabel = (s) => spellCostRes(s).label;
@@ -34,6 +35,7 @@ function _sortSheetState(s) {
     counts:     _runeCountsEdit || {},
     protMode:   s?.protectionMode || 'ca',
     ampMode:    s?.ampMode || 'zone',
+    deplMode:   _deplModeEdit || s?.deplacement?.mode || 'self',
     afflMode:   s?.afflictionMode || 'dot',
     enchMode:   s?.enchantMode || 'etat',
     zoneShape:  _zoneShapeEdit || 'rect',
@@ -91,6 +93,13 @@ function buildLineCtx(lines, s, c) {
           const val = shp === 'rect' ? `Zone ${d.w}×${d.h}` : `${nom} · ${cells} case${cells > 1 ? 's' : ''}`;
           ctx.amp = { value: val, text: true, source: 'Zone dimensionnée par l’Amplification', color: '#4f8cff' };
         }
+        break;
+      }
+      case 'deplmode': {
+        const dm = _deplModeEdit || s?.deplacement?.mode || 'self';
+        const D = { self: ['Se déplace soi-même', '#22c38e'], push: ['Pousse la cible', '#e8b84b'], pull: ['Attire la cible', '#4f8cff'] };
+        const info = D[dm] || D.self;
+        ctx.deplmode = { value: info[0], text: true, source: `1 à ${_ampLength(counts.Amplification || 1)} cases`, color: info[1] };
         break;
       }
       case 'shape': {
@@ -2179,6 +2188,20 @@ export function toggleSortDetail(idx) {
 // saveSort() lit ce contexte pour aiguiller la sauvegarde.
 let _itemEditCtx = null;
 
+function _modalStatsSource() {
+  return _itemEditCtx ? 'item' : 'spell';
+}
+
+function _spellStatsChecked(spell = {}) {
+  return shouldTrackSpellStats(spell, { source: _modalStatsSource() });
+}
+
+function _readSpellStatsChoice(previous = {}) {
+  const input = document.getElementById('s-count-in-stats')
+    || document.getElementById('s-classic-count-in-stats');
+  return input ? !!input.checked : _spellStatsChecked(previous);
+}
+
 export function addSort() { _itemEditCtx = null; openSortModal(-1, {}); }
 export function editSort(idx) { _itemEditCtx = null; openSortModal(idx, (_getCurrentSpellChar()?.deck_sorts||[])[idx]); }
 
@@ -2727,6 +2750,7 @@ function _buildClassicSortFromDOM(idx = -1, prevList = []) {
           image: prev.invocation?.image || '',
         }
       : null,
+    countInStats: _readSpellStatsChoice(prev),
     mjAutoHit: !!document.getElementById('s-classic-auto-hit')?.checked,
     mjAlwaysMax: STATE.isAdmin
       ? !!document.getElementById('s-classic-always-max')?.checked
@@ -3022,8 +3046,9 @@ async function _openClassicSortModal(idx, s, allTypes) {
                 <label><span>Statut</span><select id="s-classic-validation" class="input-field">${_classicSelectOptions([['ok','Validé'],['pending','En attente'],['no','Refusé']], validation)}</select></label>
                 ${!_itemEditCtx ? `<label class="classic-spell-check classic-spell-always"><input type="checkbox" id="s-classic-always-prepared" ${s?.alwaysPrepared ? 'checked' : ''}><span><b>∞ Toujours prêt</b><small>Reste dans le Deck sans utiliser d’emplacement. Idéal pour Rage et les aptitudes de classe.</small></span></label>` : ''}
                 <label class="classic-spell-check"><input type="checkbox" id="s-classic-always-max" ${s?.mjAlwaysMax ? 'checked' : ''}><span><b>Toujours valeur maximum</b><small>Les dés prennent leur valeur maximale.</small></span></label>
+                <label class="classic-spell-check"><input type="checkbox" id="s-classic-count-in-stats" ${_spellStatsChecked(s) ? 'checked' : ''}><span><b>Compter dans les statistiques</b><small>${_itemEditCtx ? 'Désactivé par défaut pour les actions d’objet : une potion ne crédite pas son utilisateur comme soigneur.' : 'Décoche pour une action narrative ou technique qui ne doit pas influencer les classements.'}</small></span></label>
                 <label><span>Notes MJ</span><textarea id="s-classic-mj-notes" class="input-field" rows="2">${_esc(s?.mjNotes || '')}</textarea></label>`
-              : `<div class="classic-spell-readonly">${validation === 'ok' ? '✓ Validé' : validation === 'no' ? '✕ Refusé' : '◷ En attente de validation'}</div>${s?.alwaysPrepared ? '<div class="classic-spell-readonly is-always">∞ Toujours prêt · hors capacité du Deck</div>' : ''}`}
+              : `<div class="classic-spell-readonly">${validation === 'ok' ? '✓ Validé' : validation === 'no' ? '✕ Refusé' : '◷ En attente de validation'}</div>${s?.alwaysPrepared ? '<div class="classic-spell-readonly is-always">∞ Toujours prêt · hors capacité du Deck</div>' : ''}${!_spellStatsChecked(s) ? '<div class="classic-spell-readonly">◌ Hors statistiques</div>' : ''}`}
             </section>
           </aside>
         </div>
@@ -3630,6 +3655,7 @@ export async function openSortModal(idx, s) {
           ${!_itemEditCtx ? `<label class="sw"><input type="checkbox" id="s-always-prepared" ${s?.alwaysPrepared ? 'checked' : ''}> <span>∞ Toujours prêt <em>(hors emplacement du Deck)</em></span></label>` : ''}
           <label class="sw"><input type="checkbox" id="s-mj-always-max" ${s?.mjAlwaysMax ? 'checked' : ''}> <span>🎲 Toujours valeur maximum</span></label>
           <label class="sw"><input type="checkbox" id="s-mj-auto-hit" ${s?.mjAutoHit ? 'checked' : ''}> <span>✅ Réussite automatique <em>(sans jet)</em></span></label>
+          <label class="sw"><input type="checkbox" id="s-count-in-stats" ${_spellStatsChecked(s) ? 'checked' : ''}> <span>📊 Compter dans les statistiques <em>(${_itemEditCtx ? 'désactivé par défaut pour les objets' : 'soins, dégâts et soutien'})</em></span></label>
           <textarea class="note" id="s-mj-notes" placeholder="Notes / restrictions (ex : soin uniquement au lanceur)…">${s?.mjNotes || ''}</textarea>
           <span class="fld"><span>Coût imposé</span><input type="number" id="s-pm-override" min="0" max="50" value="${s?.pmOverride ?? ''}" placeholder="auto"></span>
         `;
@@ -3640,6 +3666,7 @@ export async function openSortModal(idx, s) {
       return `
         <div class="cs-mjval-readonly cs-mjval-readonly--${vs}">${lbl}</div>
         ${s?.alwaysPrepared ? '<div class="cs-mjval-readonly cs-mjval-readonly--always">∞ Toujours prêt · ne consomme aucun emplacement du Deck</div>' : ''}
+        ${!_spellStatsChecked(s) ? '<div class="cs-mjval-readonly">◌ Hors statistiques</div>' : ''}
         <textarea class="note" id="s-mj-notes" placeholder="Notes / restrictions…">${s?.mjNotes || ''}</textarea>
       `;
     })()}
@@ -4765,12 +4792,16 @@ export function runeIncrement(nom) {
   }
   const prevCnt = _runeCountsEdit[nom] || 0;
   _runeCountsEdit[nom] = prevCnt + 1;
-  // Intelligence : la 1ère Protection suggère la branche Soutien.
-  // Puissance ne coche pas Offensif : elle peut renforcer un enchantement, un DoT,
-  // une invocation, etc. sans impliquer des dégâts directs au cast.
+  // Intelligence : la 1ère Protection suggère la branche Soutien ; la 1ère Puissance
+  // suggère Offensif (dégâts par défaut — le MJ/joueur peut décocher pour l'utiliser
+  // sur un DoT / enchantement / invocation sans dégâts directs).
   if (prevCnt === 0 && _sortTypesEdit) {
     if (nom === 'Protection' && !_sortTypesEdit.has('defensif')) {
       _sortTypesEdit.add('defensif');
+      _applyTypeChange();
+    } else if (nom === 'Puissance' && !_sortTypesEdit.has('offensif')) {
+      _sortTypesEdit.delete('utilitaire');
+      _sortTypesEdit.add('offensif');
       _applyTypeChange();
     }
   }
@@ -5200,6 +5231,7 @@ function _buildSortFromDOM() {
     icon:        iconRaw.trim() || '',
     mjValidation: mjVal, mjValidated: mjVal === 'ok',
     alwaysPrepared: !!document.getElementById('s-always-prepared')?.checked,
+    countInStats: _readSpellStatsChoice(),
     noyau, noyauTypeId, noyauTypeIds: [..._noyauIdsEdit], runes, types,
     actionMode: (_runeCountsEdit?.[ACTION_RUNE] || 0) > 0
       ? (document.getElementById('s-action-mode')?.value || _actionModeEdit || 'reaction')
@@ -5480,7 +5512,7 @@ function _sortContentSig(s) {
   if (!s) return '';
   // `nom` exclu : renommer un sort est purement cosmétique et ne doit PAS
   // redéclencher la validation MJ (seul le contenu jouable compte).
-  const SKIP = new Set(['nom','actif','alwaysPrepared','mjValidation','mjValidated','catId','pm','pmOverride','mjNotes','mjAlwaysMax','enchantSlot','types','typeSoin','id','maitriseActive']);
+  const SKIP = new Set(['nom','actif','alwaysPrepared','countInStats','mjValidation','mjValidated','catId','pm','pmOverride','mjNotes','mjAlwaysMax','enchantSlot','types','typeSoin','id','maitriseActive']);
   const o = {};
   Object.keys(s).filter(k => !SKIP.has(k)).sort().forEach(k => { o[k] = s[k]; });
   o.types = [...(_getSortTypes(s) || [])].sort();
@@ -5709,6 +5741,7 @@ export async function saveSort(idx, btn = null) {
       icon:     (document.getElementById('s-icon')?.value || '').trim() || '',
       mjValidation, mjValidated,
       alwaysPrepared,
+      countInStats: _readSpellStatsChoice(idx >= 0 ? sorts[idx] : {}),
       mjAlwaysMax: STATE.isAdmin
         ? !!document.getElementById('s-mj-always-max')?.checked
         : (idx >= 0 ? !!sorts[idx]?.mjAlwaysMax : false),
@@ -5872,6 +5905,7 @@ function _buildSortFromForm(idx, prevList = []) {
   return _sanitizeAbsorbedComboFields({
     icon:     (document.getElementById('s-icon')?.value || '').trim() || '',
     mjValidation, mjValidated,
+    countInStats: _readSpellStatsChoice(idx >= 0 ? prevList[idx] : {}),
     nom:      document.getElementById('s-nom')?.value?.trim() || '',
     pm:       autoPm,
     pmOverride,

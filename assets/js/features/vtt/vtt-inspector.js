@@ -737,10 +737,10 @@ export function _renderInspectorImpl(t) {
         ${_dbar('Dép', `<b>${_remMv}</b><i> / ${_maxMv}</i>`, _maxMv > 0 ? Math.round(_remMv / _maxMv * 100) : 0, _mvCol)}
       </div>
       <div class="vtt-vitals"><span class="vtt-vit"><span>CA</span><b>${_ca}</b></span>${_condPills || '<span class="vtt-vit vtt-vit-empty">Aucun état</span>'}</div>
-      <div class="vtt-eco-row"><span class="vtt-eco-lbl">Éco</span>
-        <div class="vtt-eco-pip ${t.attackedThisTurn ? 'spent' : ''}"><b>${t.attackedThisTurn ? '✓' : '○'}</b>Action</div>
-        <div class="vtt-eco-pip ${t.bonusActionThisTurn ? 'spent' : ''}"><b>${t.bonusActionThisTurn ? '✓' : '○'}</b>Bonus</div>
-        <div class="vtt-eco-pip ${t.reactionThisTurn ? 'spent' : ''}"><b>${t.reactionThisTurn ? '✓' : '○'}</b>Réaction</div>
+      <div class="vtt-eco-row"><span class="vtt-eco-lbl">Tour</span>
+        <div class="vtt-eco-pip action${t.attackedThisTurn ? ' spent' : ''}" aria-label="Action ${t.attackedThisTurn ? 'faite' : 'disponible'}" title="Action ${t.attackedThisTurn ? 'faite' : 'disponible'}"><span>Action</span><b>${t.attackedThisTurn ? '✓ Faite' : '○ Libre'}</b></div>
+        <div class="vtt-eco-pip bonus${t.bonusActionThisTurn ? ' spent' : ''}" aria-label="Action bonus ${t.bonusActionThisTurn ? 'faite' : 'disponible'}" title="Action bonus ${t.bonusActionThisTurn ? 'faite' : 'disponible'}"><span>Action bonus</span><b>${t.bonusActionThisTurn ? '✓ Faite' : '○ Libre'}</b></div>
+        <div class="vtt-eco-pip reaction${t.reactionThisTurn ? ' spent' : ''}" aria-label="Réaction ${t.reactionThisTurn ? 'faite' : 'disponible'}" title="Réaction ${t.reactionThisTurn ? 'faite' : 'disponible'}"><span>Réaction</span><b>${t.reactionThisTurn ? '✓ Faite' : '○ Libre'}</b></div>
       </div>
     </div>`;
 

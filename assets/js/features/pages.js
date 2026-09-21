@@ -9,8 +9,8 @@ import { emptyStateHtml } from '../shared/list-renderer.js';
 import { isFeatureEnabled } from '../shared/features.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { loadStats, resetStats, deleteCharStats, deleteCharDateStats, deleteDateStats, deleteMissionStats, correctDateCombatStats, setSessionMission } from '../shared/stats.js';
-import { aggregateActionAverages, aggregateSkillAverages, aggregateVttRollDetails, combatAverages, mergeTrackedCombatStats, mergeTrackedSkillStats, normalizeSkillStats, vttLogTimeMs } from '../shared/stats-analysis.js';
-import { scoreMvpView } from '../shared/stats-mvp.js';
+import { aggregateActionAverages, aggregateSkillAverages, aggregateVttRollDetails, combatAverages, mergeTrackedCombatStats, mergeTrackedSkillStats, normalizeSkillStats, topStatTies, vttLogTimeMs } from '../shared/stats-analysis.js';
+import { MVP_AXIS_GUIDE, MVP_SCORING_GUIDE, scoreMvpView } from '../shared/stats-mvp.js';
 import { showNotif } from '../shared/notifications.js';
 import { copyText } from '../shared/clipboard.js';
 import { confirmModal, openModal, promptModal, closeModalDirect } from '../shared/modal.js';
@@ -54,8 +54,8 @@ function _hideDisabledDashboardBlocks(root) {
 
 // ── Statistiques : état léger pour la vue « par séance » (évite une relecture) ──
 let _statsData = null;                 // dernier doc stats chargé (pour la modale par date)
-let _statsVttLogs = [];                // journal récent : sommes absentes des anciennes stats
-let _statsVttLogLimited = false;       // vrai si la fenêtre bornée est entièrement remplie
+let _statsVttLogs = [];                // journal complet : détails absents des anciens compteurs
+let _statsVttLogsLoaded = false;       // évite de présenter un ancien compteur gonflé comme canonique
 let _statsVttDetailCache = new Map();  // scope de dates → agrégat du journal
 let _statsRowsCache = new Map();       // scope de dates → lignes calculées (réutilisées entre onglets)
 let _statsEmoteUrl = new Map();        // name → url (affichage de l'émote réelle)
@@ -75,6 +75,7 @@ let _statsTab = 'overview';            // onglet actif : overview|ranking|player
 let _statsPopOpen = false;             // popover « joueurs ciblés » ouvert (persisté entre rendus)
 let _statsMissionPopOpen = false;      // popover « Mission » (avec images) ouvert
 let _statsRankSort = { key: 'dmg', dir: -1 }; // tri du tableau de classement (dir : -1 desc, 1 asc)
+let _statsRollSort = { table: 'skills', key: 'count', dir: -1 }; // tri des tableaux Jets & moyennes
 let _statsRythmeView = 'timeline';     // vue du rythme : 'timeline' (barres) | 'pie' (camembert répartition)
 let _statsCompareKind = 'players';     // 'players' | 'groups'
 const _statsCompareSelection = { players: [], groups: [] };
@@ -491,8 +492,10 @@ const _STATS_AWARD_CATALOG = [
   ['heal', 'Plus grand soigneur'],
   ['mage', 'Lanceur le + actif'],
   ['tank', "L'Increvable"],
+  ['parry', 'Le Rempart'],
   ['emotes', 'Le Bavard'],
   ['rolls', 'Le Joueur'],
+  ['crit', 'Le plus critique'],
   ['fumble', 'Le plus malchanceux'],
 ];
 
@@ -721,6 +724,9 @@ function _statsNormCombat(cm = {}) {
     attacksTaken: n(cm.attacksTaken), attacksAvoided: n(cm.attacksAvoided),
     spellsCast: n(cm.spellsCast), tacticalSpells: n(cm.tacticalSpells), supportSpells: n(cm.supportSpells), afflictionSpells: n(cm.afflictionSpells), controlSpells: n(cm.controlSpells),
     pmSpent: n(cm.pmSpent), heal: n(cm.heal), manaHealed: n(cm.manaHealed),
+    supplementalRolls: n(cm.supplementalRolls), supplementalNaturalTotal: n(cm.supplementalNaturalTotal),
+    supplementalResultRolls: n(cm.supplementalResultRolls), supplementalResultTotal: n(cm.supplementalResultTotal),
+    supplementalCrits: n(cm.supplementalCrits), supplementalFumbles: n(cm.supplementalFumbles),
     biggestHit: n(cm.biggestHit), biggestTaken: n(cm.biggestTaken),
   };
 }
@@ -842,8 +848,19 @@ function _statsSumByDates(c, dates) {
       if (!obj || typeof obj !== 'object') continue;
       const a = (acc[grp] ??= {});
       for (const [k, v] of Object.entries(obj)) {
-        if (typeof v === 'number') a[k] = (a[k] || 0) + v;
-        else if (v && typeof v === 'object') { const a2 = (a[k] ??= {}); for (const [k2, v2] of Object.entries(v)) if (typeof v2 === 'number') a2[k2] = (a2[k2] || 0) + v2; }
+        if (typeof v === 'number') {
+          a[k] = grp === 'combat' && (k === 'biggestHit' || k === 'biggestTaken')
+            ? Math.max(a[k] || 0, v)
+            : (a[k] || 0) + v;
+        }
+        else if (v && typeof v === 'object') {
+          const a2 = (a[k] ??= {});
+          for (const [k2, v2] of Object.entries(v)) if (typeof v2 === 'number') {
+            a2[k2] = grp === 'combat' && (k2 === 'biggestHit' || k2 === 'biggestTaken')
+              ? Math.max(a2[k2] || 0, v2)
+              : (a2[k2] || 0) + v2;
+          }
+        }
       }
     }
   }
@@ -867,8 +884,13 @@ function _statsRowsFor(dateKeys) {
     const resolveCharacterId = (log, kind) => {
       const direct = kind === 'attack' ? log?.sourceCharacterId : log?.characterId;
       if (direct && _statsData?.chars?.[direct]) return direct;
+      const deltaIds = Object.keys(log?.statsDelta?.chars || {}).filter(charId => _statsData?.chars?.[charId]);
+      if (deltaIds.length === 1) return deltaIds[0];
+      // Un PNJ ou une créature homonyme ne doit jamais donner ses actions à un
+      // personnage. Les invocations restent attribuables via statsDelta ci-dessus.
+      if (kind === 'attack' && (log?.sourceNpcId || log?.sourceBeastId)) return '';
       const name = kind === 'attack'
-        ? (log?.attackerName || log?.characterName)
+        ? (log?.attackerName || log?.casterName || log?.characterName)
         : (log?.characterName || log?.charName);
       return names.get(_norm(name || '')) || '';
     };
@@ -877,7 +899,13 @@ function _statsRowsFor(dateKeys) {
       return _statsNum(kind === 'taken' ? combat.manualDamageTaken : combat.manualDamageDealt) > 0;
     };
     const isCharacterLogExcluded = (charId, date, log) => {
-      const cutoff = _statsNum(_statsData?.chars?.[charId]?.vttLogCutoffs?.[date]);
+      const charStats = _statsData?.chars?.[charId] || {};
+      const recordedDates = Object.keys(charStats.byDate || {});
+      // En vue campagne, ne jamais ressusciter depuis le journal des essais VTT,
+      // séances supprimées ou anciennes données absentes des stats du personnage.
+      // Les personnages vraiment legacy (aucun byDate) gardent le repli complet.
+      if (!dateKeys && recordedDates.length && !charStats.byDate?.[date]) return true;
+      const cutoff = _statsNum(charStats.vttLogCutoffs?.[date]);
       const logTime = vttLogTimeMs(log?.createdAt);
       return cutoff > 0 && logTime != null && logTime <= cutoff;
     };
@@ -899,12 +927,36 @@ function _statsRowsFor(dateKeys) {
       return normalizeSkillStats(sk, v);
     }).sort((a, b) => b.rolls - a.rolls);
     const combat = _statsNormCombat(mergeTrackedCombatStats(src.combat || {}, logDetails.combat || {}));
+    const loggedCombat = logDetails.combat || {};
     const spells = Object.entries(src.spells || {}).map(([n, v]) => ({ n, c: num(v) })).sort((a, b) => b.c - a.c);
     const emotes = Object.entries(src.emotes || {}).map(([n, v]) => ({ n, c: num(v) })).sort((a, b) => b.c - a.c);
     const emoteTotal = emotes.reduce((s, e) => s + e.c, 0);
     const hasDates = !!c.byDate && Object.keys(c.byDate).length > 0;
     const skillAverages = aggregateSkillAverages([{ perSkill }]);
-    const actionAverages = aggregateActionAverages(skillAverages, combat);
+    // Pour « Jets & moyennes », le journal complet est la source canonique des
+    // actions : une attaque ou un sort lancé vaut exactement 1, même en zone.
+    // Les compteurs persistés restent utilisés ailleurs pour leurs totaux métier.
+    const actionCombat = _statsVttLogsLoaded ? {
+      attacks: num(loggedCombat.attackActions),
+      attackRolls: num(loggedCombat.attackRolls),
+      attackRollTotal: num(loggedCombat.attackRollTotal),
+      attackResultRolls: num(loggedCombat.attackResultRolls),
+      attackResultTotal: num(loggedCombat.attackResultTotal),
+      crits: num(loggedCombat.crits),
+      fumbles: num(loggedCombat.fumbles),
+    } : combat;
+    const actionExtrasSource = _statsVttLogsLoaded ? loggedCombat : combat;
+    const actionExtras = {
+      rolls: num(actionExtrasSource.supplementalRolls),
+      trackedRolls: num(actionExtrasSource.supplementalRolls),
+      naturalTotal: num(actionExtrasSource.supplementalNaturalTotal),
+      resultRolls: num(actionExtrasSource.supplementalResultRolls),
+      resultTotal: num(actionExtrasSource.supplementalResultTotal),
+      crits: num(actionExtrasSource.supplementalCrits),
+      fumbles: num(actionExtrasSource.supplementalFumbles),
+    };
+    const combatActionCount = _statsVttLogsLoaded ? num(loggedCombat.canonicalActions) : null;
+    const actionAverages = aggregateActionAverages(skillAverages, actionCombat, actionExtras);
     return {
       id, name: c.name || '?',
       // Une seule source pour les totaux de compétences : le même agrégat que
@@ -912,9 +964,10 @@ function _statsRowsFor(dateKeys) {
       sRolls: skillAverages.rolls,
       sCrits: skillAverages.crits,
       sFumbles: skillAverages.fumbles,
-      perSkill, skillAverages, actionAverages, combat, spells, emotes, emoteTotal, hasDates,
+      perSkill, skillAverages, actionAverages, actionCombat, actionExtras, combatActionCount,
+      combat, spells, emotes, emoteTotal, hasDates,
     };
-  }).filter(r => r.sRolls > 0 || r.combat.attacks > 0 || r.combat.dmgTaken > 0 || r.combat.spellsCast > 0 || r.emotes.length);
+  }).filter(r => r.sRolls > 0 || r.combat.attacks > 0 || r.combat.attacksTaken > 0 || r.combat.dmgTaken > 0 || r.combat.heal > 0 || r.combat.spellsCast > 0 || r.emotes.length);
   _statsRowsCache.set(detailKey, rows);
   return rows;
 }
@@ -935,7 +988,19 @@ function _statsNeedsVttBackfill(data) {
     // Le journal permet également de retirer l'overkill des anciens compteurs
     // de dégâts subis (valeur du jet au lieu des PV réellement perdus).
     const needsDamageTakenReconciliation = _statsNum(combat.dmgTaken) > 0;
-    return missingSkillDetail || needsCanonicalCombatActions || missingAttackDetail || missingDamageDetail || needsDamageTakenReconciliation;
+    // Les anciens soins et sorts de soutien n'enregistraient leur d20 que dans
+    // le journal VTT. On le recharge donc dès qu'un personnage en a lancé afin
+    // que leurs réussites/échecs critiques rejoignent les temps forts.
+    const needsSupplementalActionDetail = _statsNum(combat.spellsCast) > 0
+      || _statsNum(combat.heal) > 0
+      || _statsNum(combat.supportSpells) > 0
+      || _statsNum(combat.tacticalSpells) > 0;
+    return missingSkillDetail
+      || needsCanonicalCombatActions
+      || missingAttackDetail
+      || missingDamageDetail
+      || needsDamageTakenReconciliation
+      || needsSupplementalActionDetail;
   });
 }
 
@@ -955,9 +1020,24 @@ function _statsAggregateRows(rows = []) {
   });
   combat.biggestHit = Math.max(0, ...rows.map(r => r.combat.biggestHit || 0));
   combat.biggestTaken = Math.max(0, ...rows.map(r => r.combat.biggestTaken || 0));
+  const actionCombat = rows.reduce((total, row) => {
+    for (const key of ['attacks', 'crits', 'fumbles', 'attackRolls', 'attackRollTotal', 'attackResultRolls', 'attackResultTotal']) {
+      total[key] += _statsNum(row.actionCombat?.[key]);
+    }
+    return total;
+  }, { attacks: 0, crits: 0, fumbles: 0, attackRolls: 0, attackRollTotal: 0, attackResultRolls: 0, attackResultTotal: 0 });
+  const combatActionCount = _statsVttLogsLoaded
+    ? rows.reduce((total, row) => total + _statsNum(row.combatActionCount), 0)
+    : null;
   const skills = aggregateSkillAverages(rows);
+  const actionExtras = rows.reduce((total, row) => {
+    for (const key of ['rolls', 'trackedRolls', 'naturalTotal', 'resultRolls', 'resultTotal', 'crits', 'fumbles']) {
+      total[key] += _statsNum(row.actionExtras?.[key]);
+    }
+    return total;
+  }, { rolls: 0, trackedRolls: 0, naturalTotal: 0, resultRolls: 0, resultTotal: 0, crits: 0, fumbles: 0 });
   const hitRate = combat.attacks ? Math.round(combat.hits / combat.attacks * 100) : 0;
-  return { combat, skills, hitRate };
+  return { combat, skills, actionCombat, actionExtras, combatActionCount, hitRate };
 }
 
 // Classement top 5 homogène (sorts / compétences / émotes).
@@ -992,27 +1072,11 @@ function _statsBindRenderedInteractions(root) {
   _statsBindNavSpy(root);
   _statsBindPopCloser();
 
-  let hasOpenCharacter = false;
-  root.querySelectorAll('.stats-char[open]').forEach(charDetails => {
-    if (!hasOpenCharacter) {
-      hasOpenCharacter = true;
-      return;
-    }
-    charDetails.open = false;
-    if (charDetails.dataset.drawerKey) _statsDrawerState.set(charDetails.dataset.drawerKey, false);
-  });
-
   root.querySelectorAll('.stats-char').forEach(charDetails => {
     if (charDetails.dataset.statsToggleBound === 'true') return;
     charDetails.dataset.statsToggleBound = 'true';
     charDetails.addEventListener('toggle', () => {
-      if (!charDetails.open) return;
-      root.querySelectorAll('.stats-char[open]').forEach(otherDetails => {
-        if (otherDetails === charDetails) return;
-        otherDetails.open = false;
-        if (otherDetails.dataset.drawerKey) _statsDrawerState.set(otherDetails.dataset.drawerKey, false);
-      });
-      if (charDetails.dataset.drawerKey) _statsDrawerState.set(charDetails.dataset.drawerKey, true);
+      if (charDetails.dataset.drawerKey) _statsDrawerState.set(charDetails.dataset.drawerKey, !!charDetails.open);
     });
   });
 }
@@ -1242,7 +1306,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   const GS = aggregate.skills;
   const hitRate = aggregate.hitRate;
   const combatMean = combatAverages(GC);
-  const actionMean = aggregateActionAverages(GS, GC);
+  const actionMean = aggregateActionAverages(GS, aggregate.actionCombat, aggregate.actionExtras);
   const statsAvg = (value) => value == null
     ? '—'
     : Number(value).toLocaleString('fr-FR', { minimumFractionDigits: Number.isInteger(value) ? 0 : 1, maximumFractionDigits: 1 });
@@ -1268,12 +1332,25 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   const emoteTally = tallyWithContributors(r => r.emotes);
   const topSkill = skillTally[0];
 
-  const best = (key) => [...rows].filter(r => r.combat[key] > 0).sort((a, b) => b.combat[key] - a.combat[key])[0];
-  const topDmg = best('dmgDealt'), topKo = best('kosDealt'), topHeal = best('heal'), topBig = best('biggestHit'), topTank = best('dmgTaken'), topMage = best('spellsCast');
-  const topHit = [...rows].filter(r => r.combat.attacks >= 3).map(r => ({ ...r, hr: Math.round(r.combat.hits / r.combat.attacks * 100) })).sort((a, b) => b.hr - a.hr)[0];
-  const topFumble = [...rows].map(r => ({ ...r, tf: r.actionAverages?.fumbles || 0 })).filter(r => r.tf > 0).sort((a, b) => b.tf - a.tf)[0];
-  const topEmoter = [...rows].filter(r => r.emoteTotal > 0).sort((a, b) => b.emoteTotal - a.emoteTotal)[0];
-  const topRoller = [...rows].filter(r => r.sRolls > 0).sort((a, b) => b.sRolls - a.sRolls)[0];
+  const metricLeaders = key => topStatTies(rows, row => row.combat[key]);
+  const dmgLeaders = metricLeaders('dmgDealt');
+  const koLeaders = metricLeaders('kosDealt');
+  const healLeaders = metricLeaders('heal');
+  const bigHitLeaders = metricLeaders('biggestHit');
+  const tankLeaders = metricLeaders('dmgTaken');
+  const parryLeaders = metricLeaders('attacksAvoided');
+  const mageLeaders = metricLeaders('spellsCast');
+  const hitLeaders = topStatTies(
+    rows.filter(row => row.combat.attacks >= 3).map(row => ({ ...row, hr: Math.round(row.combat.hits / row.combat.attacks * 100) })),
+    row => row.hr,
+  );
+  const critLeaders = topStatTies(rows, row => row.actionAverages?.crits || 0);
+  const fumbleLeaders = topStatTies(rows, row => row.actionAverages?.fumbles || 0);
+  const emoteLeaders = topStatTies(rows, row => row.emoteTotal);
+  const rollLeaders = topStatTies(rows, row => row.sRolls);
+  // Le panneau d'audit historique attend encore un personnage unique ; la carte
+  // Temps forts, elle, affiche bien tous les ex æquo.
+  const topMage = mageLeaders.winners[0];
   // MVP V2 : chaque personnage est mesuré sur des repères absolus. Le filtre
   // « joueurs » intervient seulement après le calcul et la composition des
   // groupes n'a aucune influence sur les scores individuels.
@@ -1324,9 +1401,13 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   // Award : renvoie { html, txt } pour mutualiser affichage et export.
   const awards = [];
   let awardTotal = 0;
-  // Carte-trophée : icône + intitulé + gagnant · valeur, liseré coloré (--tc).
-  const award = (id, ic, lbl, row, val, col) => { if (!row?.name) return ''; awardTotal += 1; if (_statsHiddenAwards.has(id)) return ''; awards.push(`${ic} ${lbl} : ${row.name} (${val})`);
-    const char = STATE.characters?.find(x => x.id === row.id) || { nom: row.name };
+  // Carte-trophée : tous les premiers ex æquo partagent la distinction.
+  const award = (id, ic, lbl, winnerRows, val, col) => {
+    const winners = (Array.isArray(winnerRows) ? winnerRows : [winnerRows]).filter(row => row?.name);
+    if (!winners.length) return '';
+    awardTotal += 1;
+    if (_statsHiddenAwards.has(id)) return '';
+    awards.push(`${ic} ${lbl} : ${winners.map(row => row.name).join(' & ')} (${val})`);
     // Valeur = nombre mis en avant + unité discrète (ex. « 23 dmg »).
     const vm = String(val ?? '').trim().match(/^([\d.,]+\s*%?)\s*(.*)$/);
     const vNum = vm ? vm[1] : String(val ?? '');
@@ -1335,16 +1416,23 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
       <span class="stats-trophy-medal">${ic}</span>
       <div class="stats-trophy-body">
         <span class="stats-trophy-lbl">${lbl}</span>
-        <span class="stats-trophy-who">${characterAvatarHtml(char, { size: 22, className: 'stats-trophy-av', title: row.name, border: '1px solid rgba(255,255,255,.14)', background: `${col}22`, color: col })}<span>${_esc(row.name)}</span></span>
+        <span class="stats-trophy-who${winners.length > 1 ? ' is-tie' : ''}">${winners.map(row => {
+          const char = STATE.characters?.find(x => x.id === row.id) || { nom: row.name };
+          return `<span class="stats-trophy-person">${characterAvatarHtml(char, { size: 22, className: 'stats-trophy-av', title: row.name, border: '1px solid rgba(255,255,255,.14)', background: `${col}22`, color: col })}<span>${_esc(row.name)}</span></span>`;
+        }).join('')}</span>
       </div>
       <span class="stats-trophy-val"><b>${_esc(vNum)}</b>${vUnit ? `<small>${_esc(vUnit)}</small>` : ''}</span>
-    </div>`; };
+    </div>`;
+  };
 
   const charBlock = (r) => {
     const cm = r.combat;
     const combatMean = combatAverages(cm);
     const skillMean = r.skillAverages || aggregateSkillAverages([r]);
+    const combatActions = aggregateActionAverages({}, r.actionCombat, r.actionExtras);
+    const allActions = r.actionAverages || aggregateActionAverages(skillMean, r.actionCombat, r.actionExtras);
     const rhr = cm.attacks ? Math.round(cm.hits / cm.attacks * 100) : null;
+    const avoidRate = cm.attacksTaken ? Math.round(cm.attacksAvoided / cm.attacksTaken * 100) : null;
     const quickMetric = (icon, value, label, color) => `<span class="stats-char-kpi">
       <b${color ? ` style="color:${color}"` : ''}>${Number(value || 0).toLocaleString('fr-FR')}</b><small>${icon} ${label}</small>
     </span>`;
@@ -1396,11 +1484,23 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
           <section class="stats-char-detail">
             <h4>⚔️ Combat</h4>
             <div class="stats-char-facts">
+              ${fact('Attaques tentées', cm.attacks)}
               ${fact('Attaques réussies', `${cm.hits}/${cm.attacks}`, '#22c38e')}
+              ${fact('Taux de touche', rhr == null ? '—' : `${rhr}%`, '#22c38e')}
+              ${fact('Dégâts infligés', cm.dmgDealt, '#c9b6ff')}
               ${fact(combatMean.damageAverageEstimated ? 'Dégâts / touche' : 'Dégâts moyens', statsAvg(combatMean.damageAverage), '#c9b6ff')}
-              ${fact('Plus gros coup', cm.biggestHit)}
-              ${fact('Dégâts subis', cm.dmgTaken)}
+              ${fact('Plus gros coup', cm.biggestHit, '#ff8b6b')}
               ${fact('KO infligés', cm.kosDealt, '#ef4444')}
+            </div>
+          </section>
+          <section class="stats-char-detail">
+            <h4>🛡️ Protection</h4>
+            <div class="stats-char-facts">
+              ${fact('Attaques subies', cm.attacksTaken)}
+              ${fact('Coups parés / esquivés', cm.attacksAvoided, '#76a9ff')}
+              ${fact('Taux d’évitement', avoidRate == null ? '—' : `${avoidRate}%`, '#76a9ff')}
+              ${fact('Dégâts encaissés', cm.dmgTaken)}
+              ${fact('Plus gros coup subi', cm.biggestTaken)}
               ${fact('Fois mis KO', cm.kosTaken)}
             </div>
           </section>
@@ -1408,9 +1508,25 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
             <h4>🔮 Magie &amp; soutien</h4>
             <div class="stats-char-facts">
               ${fact('Sorts lancés', cm.spellsCast, '#bca0ff')}
+              ${fact('Sorts tactiques', cm.tacticalSpells)}
+              ${fact('Soutien', cm.supportSpells, '#4fd3a6')}
+              ${fact('Contrôle', cm.controlSpells)}
               ${fact('PM dépensés', cm.pmSpent)}
               ${fact('Soin produit', cm.heal, '#4fd3a6')}
+              ${fact('Mana rendu', cm.manaHealed, '#76a9ff')}
               ${fact('Émotes', r.emoteTotal)}
+            </div>
+          </section>
+          <section class="stats-char-detail">
+            <h4>🎲 Jets &amp; critiques</h4>
+            <div class="stats-char-facts">
+              ${fact('Jets de compétence', skillMean.rolls, '#7fb0ff')}
+              ${fact('Actions de combat', r.combatActionCount ?? '…', '#ff9d7a')}
+              ${fact('Tous les jets', allActions.rolls)}
+              ${fact('Chance au dé', allActions.naturalAvg == null ? '—' : `${statsAvg(allActions.naturalAvg)}/20`, '#4fd3a6')}
+              ${fact('Résultat moyen', statsAvg(allActions.resultAvg), '#7fb0ff')}
+              ${fact('Réussites critiques', allActions.crits, '#f4c430')}
+              ${fact('Échecs critiques', allActions.fumbles, '#ff6b6b')}
             </div>
           </section>
           ${skillHtml ? `<section class="stats-char-detail stats-char-detail--skills"><h4>🎲 Compétences</h4>${skillHtml}</section>` : ''}
@@ -1423,16 +1539,18 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   const combatTitle = dateKey ? `⚔️ Combat — séance du ${_statsFmtDate(dateKey)}`
     : isMission ? `⚔️ Combat — ${_esc(missionName)}` : '⚔️ Combat (table)';
   const awardCards = [
-    award('dmg', '🗡️', 'Dégâts totaux', topDmg, `${topDmg?.combat.dmgDealt} dmg`, '#f4c430'),
-    award('bigHit', '💥', 'Plus gros coup', topBig, `${topBig?.combat.biggestHit} dmg`, '#ff8b6b'),
-    award('hitRate', '🎯', 'Meilleur taux de touche', topHit, topHit ? `${topHit.hr} %` : '', '#22c38e'),
-    award('ko', '☠️', 'Mises à terre', topKo, `${topKo?.combat.kosDealt} KO`, '#ef4444'),
-    award('heal', '💚', 'Soin prodigué', topHeal, `${topHeal?.combat.heal} PV`, '#4fd3a6'),
-    award('mage', '🧙', 'Sorts lancés', topMage, `${topMage?.combat.spellsCast} sorts`, '#bca0ff'),
-    award('tank', '🪨', 'Dégâts encaissés', topTank, `${topTank?.combat.dmgTaken} dmg`, '#9aa0aa'),
-    award('emotes', '💬', 'Émotes envoyées', topEmoter, `${topEmoter?.emoteTotal} émotes`, '#4f8cff'),
-    award('rolls', '🎲', 'Jets de dés', topRoller, `${topRoller?.sRolls} jets`, '#7fb0ff'),
-    award('fumble', '🤡', 'Échecs critiques', topFumble, `${topFumble?.tf} échec${topFumble?.tf > 1 ? 's' : ''}`, '#ff6b6b'),
+    award('dmg', '🗡️', 'Dégâts totaux', dmgLeaders.winners, `${dmgLeaders.value} dmg`, '#f4c430'),
+    award('bigHit', '💥', 'Plus gros coup', bigHitLeaders.winners, `${bigHitLeaders.value} dmg`, '#ff8b6b'),
+    award('hitRate', '🎯', 'Meilleur taux de touche', hitLeaders.winners, `${hitLeaders.value} %`, '#22c38e'),
+    award('ko', '☠️', 'Mises à terre', koLeaders.winners, `${koLeaders.value} KO`, '#ef4444'),
+    award('heal', '💚', 'Soin prodigué', healLeaders.winners, `${healLeaders.value} PV`, '#4fd3a6'),
+    award('mage', '🧙', 'Sorts lancés', mageLeaders.winners, `${mageLeaders.value} sorts`, '#bca0ff'),
+    award('tank', '🪨', 'Dégâts encaissés', tankLeaders.winners, `${tankLeaders.value} dmg`, '#9aa0aa'),
+    award('parry', '🛡️', 'Coups parés ou esquivés', parryLeaders.winners, `${parryLeaders.value} coup${parryLeaders.value > 1 ? 's' : ''}`, '#76a9ff'),
+    award('emotes', '💬', 'Émotes envoyées', emoteLeaders.winners, `${emoteLeaders.value} émotes`, '#4f8cff'),
+    award('rolls', '🎲', 'Jets de dés', rollLeaders.winners, `${rollLeaders.value} jets`, '#7fb0ff'),
+    award('crit', '🌟', 'Réussites critiques', critLeaders.winners, `${critLeaders.value} critique${critLeaders.value > 1 ? 's' : ''}`, '#f4c430'),
+    award('fumble', '🤡', 'Échecs critiques', fumbleLeaders.winners, `${fumbleLeaders.value} échec${fumbleLeaders.value > 1 ? 's' : ''}`, '#ff6b6b'),
   ].filter(Boolean);
   const awardsHtml = awardCards.join('');
 
@@ -1444,7 +1562,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     `📊 Stats — ${scopeLabel}`,
     `⚔️ ${GC.attacks} attaques (${hitRate}%) · 🗡️ ${GC.dmgDealt} dmg · ☠️ ${GC.kosDealt} KO · 💚 ${GC.heal} PV soignés · 🔮 ${GC.spellsCast} sorts`,
     `📐 Moyennes · 🗡️ ${statsAvg(combatMean.damageAverage)} dégâts/${combatMean.damageAverageEstimated ? 'touche' : 'impact'} · 🎲 action finale ${statsAvg(actionMean.resultAvg)} (d20 ${statsAvg(actionMean.naturalAvg)})`,
-    `🎲 ${actionMean.rolls} actions au d20 (${GS.rolls} compétences + ${GC.attacks} attaques · 💥 ${actionMean.crits} · 💔 ${actionMean.fumbles})`,
+    `🎲 ${actionMean.rolls} jets au d20 (${GS.rolls} compétences + ${aggregate.actionCombat.attacks} attaques${actionMean.supplementalRolls ? ` + ${actionMean.supplementalRolls} soins/soutiens` : ''} · 💥 ${actionMean.crits} · 💔 ${actionMean.fumbles})`,
   ];
   if (awards.length) { sumLines.push('', '— Récompenses —', ...awards); }
   sumLines.push('', '— Par personnage —');
@@ -1484,7 +1602,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   if (selectedMissionId && selectedMissionDates.length) contextItems.push(`${selectedMissionDates.length} séance${selectedMissionDates.length > 1 ? 's' : ''} liée${selectedMissionDates.length > 1 ? 's' : ''} à cette mission.`);
   if ((GC.attacksTaken || 0) === 0 && (GC.attacksAvoided || 0) === 0) contextItems.push('Attaques subies/évitées : nouvelles stats, non rétroactives.');
   if (actionMean.rolls && (actionMean.coverage < 100 || actionMean.resultCoverage < 100)) {
-    contextItems.push(`Moyennes : ${actionMean.resultTrackedRolls}/${actionMean.rolls} actions disposent de leur résultat final détaillé.`);
+    contextItems.push(`Moyennes : ${actionMean.resultTrackedRolls}/${actionMean.rolls} jets disposent de leur résultat final détaillé.`);
   }
   const contextSec = renderOverview && contextItems.length ? `
     <section class="stats-context">
@@ -1592,22 +1710,79 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     const lead = activeDetailLeader || mvps[0];
     const leadDetails = lead?.impactDetails || { entries: [], score: lead?.impact || 0 };
     const isTopLead = detailLeaders[0]?.id === lead?.id;
+    const fmtMvpNum = (value) => {
+      const number = Number(value) || 0;
+      return Number.isInteger(number)
+        ? number.toLocaleString('fr-FR')
+        : number.toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+    };
+    const axisFormula = (key) => (MVP_AXIS_GUIDE[key]?.contributions || [])
+      .map(item => `${item.label} × ${fmtMvpNum(item.coef)}`)
+      .join(' + ');
     // On affiche l'INDICE de performance par axe (repère = 100), pas les points
     // pondérés par le rang : sinon l'axe signature d'un perso (l'offense d'un DPS
     // classé 2e/3e) apparaît écrasé à ~5 % de sa valeur et devient illisible.
     const axisPerf = e => Number.isFinite(Number(e.normalized)) ? Number(e.normalized) : (e.points || 0);
-    const axes = (leadDetails.entries || []).filter(e => axisPerf(e) > 0).sort((a, b) => axisPerf(b) - axisPerf(a)).slice(0, 6);
+    // Les quatre axes restent visibles, même à zéro : leur absence était une
+    // des raisons pour lesquelles les joueurs ne comprenaient pas le calcul.
+    const axes = [...(leadDetails.entries || [])].sort((a, b) => (a.axisRank || 9) - (b.axisRank || 9));
     const axesMax = Math.max(...axes.map(axisPerf), 1);
     const axesHtml = axes.map(a => {
       const perf = axisPerf(a);
-      const contrib = `Indice ${Math.round(perf)} (repère 100) · pèse ${fmtPts(a.points)} au score après rang #${a.axisRank || 1}`;
-      return `<div class="stats-axe" title="${_esc(contrib)}">
-      <i>${a.icon || '•'}</i><span class="stats-axe-lbl">${_esc(a.label)}</span>
-      <span class="stats-axe-cnt">${a.count != null ? Number(a.count).toLocaleString('fr-FR') : ''}</span>
+      const guide = MVP_AXIS_GUIDE[a.key] || {};
+      const formula = axisFormula(a.key);
+      const contrib = `${guide.summary || a.label} ${formula ? `Calcul brut : ${formula}. ` : ''}Indice ${fmtMvpNum(perf)} (repère 100), puis ${Math.round((a.dampener ?? 1) * 100)} % au rang #${a.axisRank || 1}.`;
+      return `<div class="stats-axe stats-axe--${_esc(a.key)}" title="${_esc(contrib)}">
+      <i>${a.icon || '•'}</i><span class="stats-axe-copy"><b>${_esc(a.label)}</b><small>${_esc(formula)}</small></span>
       <span class="stats-axe-bar"><i style="width:${Math.round(perf / axesMax * 100)}%"></i></span>
-      <span class="stats-axe-pts">${Math.round(perf)}</span>
+      <span class="stats-axe-pts"><b>${fmtMvpNum(perf)}</b><small>indice</small></span>
     </div>`;
     }).join('');
+    const detailedAxesHtml = axes.map(axis => {
+      const guide = MVP_AXIS_GUIDE[axis.key] || {};
+      const currentParts = leadDetails.mode === 'campaign'
+        ? ''
+        : (axis.children || []).map(part => `<span>
+            <i>${part.icon || '•'}</i>
+            <b>${_esc(part.label)}</b>
+            <em>${fmtMvpNum(part.count)} × ${fmtMvpNum(part.coef)}</em>
+            <strong>${fmtMvpNum(part.points)} pts bruts</strong>
+          </span>`).join('');
+      const weightPct = Math.round((axis.dampener ?? 0) * 100);
+      return `<article class="stats-mvp-rule-axis stats-mvp-rule-axis--${_esc(axis.key)}">
+        <header><span>${axis.icon || '•'}</span><div><b>${_esc(axis.label)}</b><small>${_esc(guide.summary || '')}</small></div></header>
+        <div class="stats-mvp-rule-formula">${_esc(axisFormula(axis.key))}</div>
+        ${guide.note ? `<p>${_esc(guide.note)}</p>` : ''}
+        ${currentParts ? `<div class="stats-mvp-rule-parts">${currentParts}</div>` : ''}
+        <div class="stats-mvp-rule-chain">
+          <span><small>${leadDetails.mode === 'campaign' ? 'Contribution médiane' : 'Contribution brute'}</small><b>${fmtMvpNum(axis.raw)}</b></span>
+          <i>→</i><span><small>Repère de la vue</small><b>${fmtMvpNum(axis.reference)}</b></span>
+          <i>→</i><span><small>Niveau du repère</small><b>${fmtMvpNum(axis.baseNormalized)}%</b></span>
+          <i>→</i><span><small>Après rendements</small><b>${fmtMvpNum(axis.normalized)}</b></span>
+          <i>→</i><span><small>Axe #${axis.axisRank || 1} · poids ${weightPct}%</small><b>${fmtPts(axis.points)}</b></span>
+        </div>
+      </article>`;
+    }).join('');
+    const weightsLabel = MVP_SCORING_GUIDE.axisWeights.map((weight, index) => `axe #${index + 1} : ${Math.round(weight * 100)} %`).join(' · ');
+    const capsLabel = MVP_SCORING_GUIDE.softCaps.map((tier, index, tiers) => {
+      const start = index ? tiers[index - 1].upTo : 0;
+      return Number.isFinite(tier.upTo)
+        ? `${start}–${tier.upTo} à ${Math.round(tier.multiplier * 100)} %`
+        : `au-delà de ${start} à ${Math.round(tier.multiplier * 100)} %`;
+    }).join(' · ');
+    const mvpExplanationHtml = `<details class="stats-mvp-rules">
+      <summary><span><b>Comment ce score est-il calculé ?</b><small>Formules, repères et poids des quatre axes</small></span><i>⌄</i></summary>
+      <div class="stats-mvp-rules-body">
+        <div class="stats-mvp-rule-intro">
+          <p><b>1.</b> Les actions produisent des points bruts dans un seul axe. <b>2.</b> Ce total est comparé au repère de la vue : atteindre le repère donne un indice 100. <b>3.</b> Les rendements deviennent progressivement plus faibles au-dessus de 100. <b>4.</b> Les axes du personnage sont classés, puis pondérés avant addition.</p>
+          <span><b>Poids :</b> ${_esc(weightsLabel)}</span>
+          <span><b>Rendements :</b> ${_esc(capsLabel)}</span>
+          <span><b>Repères :</b> médiane des contributions positives quand au moins ${MVP_SCORING_GUIDE.minimumCalibrationSamples} profils sont disponibles ; sinon valeurs stables par défaut.</span>
+          ${leadDetails.mode === 'campaign' ? `<span><b>Vue actuelle :</b> chaque mission compte comme une unité ; le score affiché utilise la médiane de ${leadDetails.sessionCount || 1} mission${(leadDetails.sessionCount || 1) > 1 ? 's' : ''}, pas leur cumul.</span>` : '<span><b>Vue actuelle :</b> les valeurs ci-dessous correspondent directement à la mission ou séance affichée.</span>'}
+        </div>
+        <div class="stats-mvp-rule-grid">${detailedAxesHtml}</div>
+      </div>
+    </details>`;
     const runnersHtml = detailLeaders.length > 1 ? `<div class="stats-mvp-runners">
       ${detailLeaders.slice(0, 4).map((p, i) => `<button type="button" class="stats-runner${p.id === lead?.id ? ' on' : ''}" data-action="_statsMvpDetailPick" data-id="${_esc(p.id)}">
         ${_statsAvatar(p.id, p.name, 24)}<span>${_esc(p.name)}<em>${i === 0 ? 'MVP' : '#' + (i + 1)}</em></span><b>${p.impactDetails?.score ?? p.impact}</b>
@@ -1619,6 +1794,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
         <div class="stats-mvp-sc"><b>${leadDetails.score ?? lead.impact}</b><small>${campaignMvp ? 'médiane' : 'score'}</small></div>
       </div>
       <div class="stats-axes">${axesHtml || '<div class="stats-empty-inline">Aucun axe positif sur ce périmètre.</div>'}</div>
+      ${mvpExplanationHtml}
       ${runnersHtml}
     </div>`;
   })() : '';
@@ -1805,68 +1981,107 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   </article>`;
   const actionBreakdown = [
     GS.rolls ? `${GS.rolls} compétence${GS.rolls > 1 ? 's' : ''}` : '',
-    GC.attacks ? `${GC.attacks} attaque${GC.attacks > 1 ? 's' : ''}` : '',
+    aggregate.actionCombat.attacks ? `${aggregate.actionCombat.attacks} attaque${aggregate.actionCombat.attacks > 1 ? 's' : ''}` : '',
+    actionMean.supplementalRolls ? `${actionMean.supplementalRolls} soin${actionMean.supplementalRolls > 1 ? 's' : ''}/soutien` : '',
   ].filter(Boolean).join(' + ') || 'Aucune action au d20';
-  const trackedNaturalLabel = actionMean.trackedRolls
-    ? `${actionMean.trackedRolls}/${actionMean.rolls} actions détaillées · ${actionBreakdown}`
-    : 'Aucun d20 naturel détaillé disponible';
-  const trackedResultLabel = actionMean.resultTrackedRolls
-    ? `${actionMean.resultTrackedRolls}/${actionMean.rolls} actions détaillées · ${actionBreakdown}`
-    : 'Aucun résultat final détaillé disponible';
-  const critSample = actionMean.rolls
-    ? `${actionMean.crits} sur ${actionMean.rolls} actions · ${GS.crits} en compétence + ${GC.crits} en combat`
-    : 'Aucune action au d20';
-  const fumbleSample = actionMean.rolls
-    ? `${actionMean.fumbles} sur ${actionMean.rolls} actions · ${GS.fumbles} en compétence + ${GC.fumbles} en combat`
-    : 'Aucune action au d20';
-  // Cellule « chance au dé » : valeur brute du d20 colorée selon la moyenne
-  // attendue d'un dé équitable (10,5). Au-dessus = chanceux, en dessous = malchanceux.
-  const luckCell = (v) => {
-    const n = Number(v);
-    if (!Number.isFinite(n)) return `<td data-label="Chance au dé">—</td>`;
-    const cls = n > 10.5 ? 'is-lucky' : n < 10.5 ? 'is-unlucky' : 'is-even';
-    const tip = n > 10.5 ? 'Au-dessus de 10,5 attendu : dés favorables'
-              : n < 10.5 ? 'En dessous de 10,5 attendu : dés défavorables'
-              : 'Pile dans la moyenne (10,5)';
-    return `<td data-label="Chance au dé"><span class="stats-luck ${cls}" title="${tip}">${statsAvg(n)}<small>/20</small></span></td>`;
-  };
-  // ── Jets & moyennes (refonte fidèle à la maquette) : 6 cartes .avg + légende
-  // + note + tableau par compétence (volume en barre + chance au dé colorée) ──
-  const _avgCard = (ic, v, l, sample, col, sfx = '') => `<div class="stats-avg" style="--ac:${col}"><small>${ic} ${l}</small><b>${statsAvg(v)}${v == null ? '' : sfx}</b><em>${sample}</em></div>`;
+  // ── Jets & moyennes : compétences, combat, puis vue réellement globale. ──
   const _luckInline = (v) => { const n = Number(v); if (!Number.isFinite(n)) return '<span class="stats-tbl-z">—</span>'; const cls = n > 10.5 ? 'is-lucky' : n < 10.5 ? 'is-unlucky' : 'is-even'; return `<span class="stats-luck ${cls}">${statsAvg(n)}<small>/20</small></span>`; };
-  const _skillsSorted = [...(GS.perSkill || [])].sort((a, b) => b.rolls - a.rolls);
+  const combatActionMean = aggregateActionAverages({}, aggregate.actionCombat, aggregate.actionExtras);
+  const _rollMetric = (label, value, hint, color) => `<span class="stats-roll-metric" style="--rm:${color}"><small>${label}</small><b>${value}</b><em>${hint}</em></span>`;
+  const _rollGroup = (icon, title, subtitle, values, color) => `<article class="stats-roll-group" style="--rg:${color}">
+    <header><span>${icon}</span><div><b>${title}</b><small>${subtitle}</small></div></header>
+    <div>${values.join('')}</div>
+  </article>`;
+  const _sortRollRows = (items, table, getters) => {
+    const active = _statsRollSort.table === table;
+    const key = active && getters[_statsRollSort.key] ? _statsRollSort.key : 'count';
+    const dir = active ? _statsRollSort.dir : -1;
+    return [...items].sort((a, b) => {
+      const av = getters[key](a), bv = getters[key](b);
+      if (typeof av === 'string' || typeof bv === 'string') return String(av).localeCompare(String(bv), 'fr') * dir;
+      return ((_statsNum(av) - _statsNum(bv)) || String(a.name || a.sk || '').localeCompare(String(b.name || b.sk || ''), 'fr')) * dir;
+    });
+  };
+  const _rollTh = (table, key, label, className = '') => {
+    const active = _statsRollSort.table === table && _statsRollSort.key === key;
+    return `<th class="${className}${className ? ' ' : ''}stats-th-sort${active ? ' on' : ''}" data-action="_statsSortRolls" data-table="${table}" data-key="${key}">${label}${active ? `<span class="stats-th-arw">${_statsRollSort.dir === -1 ? '▼' : '▲'}</span>` : ''}</th>`;
+  };
+  const skillGetters = {
+    name: s => s.sk, count: s => s.rolls, natural: s => s.naturalAvg ?? -1,
+    result: s => s.resultAvg ?? -1, crits: s => s.crits + s.fumbles,
+  };
+  const _skillsSorted = _sortRollRows(GS.perSkill || [], 'skills', skillGetters);
   const _skMax = Math.max(..._skillsSorted.map(s => s.rolls), 1);
   const averageSkillRows = renderRolls ? _skillsSorted.map(s => `<tr>
     <td class="stats-td-who"><span class="stats-who-in"><b>${_esc(s.sk)}</b></span></td>
     <td><span class="stats-cellbar" style="--mc:#7fb0ff"><i style="width:${Math.round(s.rolls / _skMax * 100)}%"></i><b>${s.rolls}</b></span></td>
-    <td class="on">${statsAvg(s.resultAvg)}</td>
     <td>${_luckInline(s.naturalAvg)}</td>
-    <td class="stats-tbl-z">${s.trackedRolls}/${s.rolls} détaillés</td>
+    <td class="on">${statsAvg(s.resultAvg)}</td>
     <td><span style="color:var(--amber)">💥 ${s.crits}</span> <span class="stats-dim">${s.critRate || 0}%</span> &nbsp; <span style="color:var(--crimson)">💔 ${s.fumbles}</span> <span class="stats-dim">${s.fumbleRate || 0}%</span></td>
   </tr>`).join('') : '';
+  const combatRowsRaw = rows.map(row => ({
+    ...row,
+    combatActions: aggregateActionAverages({}, row.actionCombat, row.actionExtras),
+    actionCount: row.combatActionCount,
+  })).filter(row => (row.actionCount ?? row.combatActions.rolls) > 0);
+  const combatGetters = {
+    name: r => r.name, count: r => r.actionCount ?? r.combatActions.rolls, natural: r => r.combatActions.naturalAvg ?? -1,
+    result: r => r.combatActions.resultAvg ?? -1, crits: r => r.combatActions.crits + r.combatActions.fumbles,
+  };
+  const combatRows = _sortRollRows(combatRowsRaw, 'combat', combatGetters);
+  const _combatMax = Math.max(...combatRows.map(r => r.actionCount ?? r.combatActions.rolls), 1);
+  const averageCombatRows = renderRolls ? combatRows.map(r => {
+    const a = r.combatActions;
+    const actionCount = r.actionCount ?? a.rolls;
+    return `<tr>
+      <td class="stats-td-who"><span class="stats-who-in">${_statsAvatar(r.id, r.name, 22)}<b>${_esc(r.name)}</b></span></td>
+      <td><span class="stats-cellbar" style="--mc:#ff9d7a"><i style="width:${Math.round(actionCount / _combatMax * 100)}%"></i><b>${actionCount}</b></span></td>
+      <td>${_luckInline(a.naturalAvg)}</td>
+      <td class="on">${statsAvg(a.resultAvg)}</td>
+      <td><span style="color:var(--amber)">💥 ${a.crits}</span> <span class="stats-dim">${a.critRate || 0}%</span> &nbsp; <span style="color:var(--crimson)">💔 ${a.fumbles}</span> <span class="stats-dim">${a.fumbleRate || 0}%</span></td>
+    </tr>`;
+  }).join('') : '';
   const _avgNote = (!actionMean.trackedRolls || actionMean.coverage < 100 || actionMean.resultCoverage < 100 || combatMean.damageAverageEstimated)
-    ? `<div class="stats-note"><span>ℹ️</span><span>Les moyennes exactes regroupent compétences et attaques retrouvées dans les compteurs et le journal VTT${_statsVttLogLimited ? ' (500 dernières entrées)' : ''}. Les tirets correspondent à des actions historiques dont le détail n’est plus disponible.</span></div>` : '';
+    ? `<div class="stats-note"><span>ℹ️</span><span>Le journal VTT complet de l’aventure est pris en compte, sans limite de 500 entrées. Un tiret signifie que certaines actions très anciennes ne contenaient pas encore la valeur détaillée du d20 ou de ses bonus ; leur nombre et leurs critiques restent comptés.</span></div>` : '';
   const averagesHtml = renderRolls ? `<section class="stats-surface" id="moyennes">
-    <div class="stats-surface-head"><div><span>Valeur typique des actions</span><h3>Moyennes des jets</h3></div><small>${actionMean.resultTrackedRolls ? `${actionMean.resultCoverage}% des actions avec résultat final détaillé` : 'Détail indisponible'}</small></div>
-    <div class="stats-avg-grid">
-      ${_avgCard('⚔️', combatMean.damageAverage, combatMean.damageAverageEstimated ? 'Dégâts moyens par touche' : 'Dégâts moyens par impact', combatMean.damageAverageEstimated ? `${GC.dmgDealt} ÷ ${GC.hits} touches` : `${combatMean.damageEvents} impact${combatMean.damageEvents > 1 ? 's' : ''} suivi${combatMean.damageEvents > 1 ? 's' : ''}`, '#c9b6ff')}
-      ${_avgCard('∑', actionMean.rolls, 'Actions au d20 analysées', `${GS.rolls} compétence${GS.rolls > 1 ? 's' : ''} + ${GC.attacks} attaque${GC.attacks > 1 ? 's' : ''}`, '#ff9d7a')}
-      ${_avgCard('🎲', actionMean.resultAvg, 'Résultat final moyen', `${actionMean.resultTrackedRolls}/${actionMean.rolls} actions détaillées`, '#7fb0ff')}
-      ${_avgCard('🎯', actionMean.naturalAvg, 'Chance au dé (moy. /20)', 'Dé équitable attendu : 10,5', '#4fd3a6')}
-      ${_avgCard('💥', actionMean.critRate, 'Critiques · toutes actions', `${actionMean.crits} sur ${actionMean.rolls} actions`, '#f4c430', '%')}
-      ${_avgCard('💔', actionMean.fumbleRate, 'Échecs critiques', `${actionMean.fumbles} sur ${actionMean.rolls} actions`, '#ff6b6b', '%')}
+    <div class="stats-surface-head"><div><span>Compétences, combat et ensemble</span><h3>Moyennes des jets</h3></div><small>Historique complet de l’aventure</small></div>
+    <div class="stats-roll-groups">
+      ${_rollGroup('🎲', 'Compétences', 'Jets de compétence uniquement', [
+        _rollMetric('Nombre', GS.rolls, 'jets enregistrés', '#7fb0ff'),
+        _rollMetric('Chance au dé', GS.naturalAvg == null ? '—' : `${statsAvg(GS.naturalAvg)}/20`, 'd20 naturel, sans bonus', '#4fd3a6'),
+        _rollMetric('Résultat moyen', statsAvg(GS.resultAvg), 'd20 + modificateurs', '#7fb0ff'),
+        _rollMetric('Crit. / échecs', `${GS.crits} / ${GS.fumbles}`, '20 naturels / 1 naturels', '#f4c430'),
+      ], '#7fb0ff')}
+      ${_rollGroup('⚔️', 'Combat', 'Attaques et sorts réellement lancés', [
+        _rollMetric('Nombre', aggregate.combatActionCount ?? '…', '1 par attaque ou sort réellement lancé', '#ff9d7a'),
+        _rollMetric('Chance au dé', combatActionMean.naturalAvg == null ? '—' : `${statsAvg(combatActionMean.naturalAvg)}/20`, 'd20 naturel, sans bonus', '#4fd3a6'),
+        _rollMetric('Résultat moyen', statsAvg(combatActionMean.resultAvg), 'd20 + modificateurs', '#7fb0ff'),
+        _rollMetric('Crit. / échecs', `${combatActionMean.crits} / ${combatActionMean.fumbles}`, 'toutes actions de combat', '#f4c430'),
+        _rollMetric('Dégâts moyens', statsAvg(combatMean.damageAverage), combatMean.damageAverageEstimated ? 'par touche' : 'par impact suivi', '#c9b6ff'),
+      ], '#ff9d7a')}
+      ${_rollGroup('∑', 'Tous les jets', 'Compétences + combat', [
+        _rollMetric('Nombre', actionMean.rolls, actionBreakdown, '#ff9d7a'),
+        _rollMetric('Chance au dé', actionMean.naturalAvg == null ? '—' : `${statsAvg(actionMean.naturalAvg)}/20`, 'd20 naturel, sans bonus', '#4fd3a6'),
+        _rollMetric('Résultat moyen', statsAvg(actionMean.resultAvg), 'd20 + tous les modificateurs', '#7fb0ff'),
+        _rollMetric('Crit. / échecs', `${actionMean.crits} / ${actionMean.fumbles}`, 'toutes actions au d20', '#f4c430'),
+      ], '#bca0ff')}
     </div>
     <div class="stats-legend">
-      <span><b>Résultat final</b> = dé + modificateurs</span>
-      <span><b>Chance au dé</b> = valeur brute du d20, hors bonus</span>
+      <span><b>Chance au dé</b> = moyenne du d20 naturel, sans aucun bonus (10,5 est la moyenne théorique).</span>
+      <span><b>Résultat moyen</b> = moyenne réellement obtenue après les bonus et malus.</span>
       <span><b>Dégâts</b> = total infligé ÷ impacts</span>
-      <span><b>Critiques</b> = compétences + combat ÷ actions au d20</span>
+      <span><b>Nombre (combat)</b> = une action par attaque ou sort lancé, quel que soit le nombre de cibles.</span>
     </div>
     ${_avgNote}
-    <div class="stats-surface-head stats-surface-head--sub"><div><span>Où la table est bonne, où elle bloque</span><h3>Détail par compétence</h3></div><small>Trié par volume de jets</small></div>
+    <div class="stats-surface-head stats-surface-head--sub"><div><span>Détail des compétences</span><h3>Par compétence</h3></div><small>Cliquer sur un libellé pour trier</small></div>
     <div class="stats-tbl-wrap"><table class="stats-tbl">
-      <thead><tr><th class="stats-th-who">Compétence</th><th>Volume</th><th>Résultat moyen</th><th>Chance au dé</th><th>Jets</th><th>Crit. / échecs</th></tr></thead>
-      <tbody>${averageSkillRows || '<tr><td colspan="6" class="stats-tbl-z" style="text-align:center;padding:16px">Aucun jet de compétence sur ce périmètre.</td></tr>'}</tbody>
+      <thead><tr>${_rollTh('skills', 'name', 'Compétence', 'stats-th-who')}${_rollTh('skills', 'count', 'Nombre')}${_rollTh('skills', 'natural', 'Chance au dé')}${_rollTh('skills', 'result', 'Résultat moyen')}${_rollTh('skills', 'crits', 'Crit. / échecs')}</tr></thead>
+      <tbody>${averageSkillRows || '<tr><td colspan="5" class="stats-tbl-z" style="text-align:center;padding:16px">Aucun jet de compétence sur ce périmètre.</td></tr>'}</tbody>
+    </table></div>
+    <div class="stats-surface-head stats-surface-head--sub"><div><span>Détail des actions de combat</span><h3>Combat par personnage</h3></div><small>Une attaque ou un sort = une action</small></div>
+    <div class="stats-tbl-wrap"><table class="stats-tbl">
+      <thead><tr>${_rollTh('combat', 'name', 'Personnage', 'stats-th-who')}${_rollTh('combat', 'count', 'Nombre')}${_rollTh('combat', 'natural', 'Chance au dé')}${_rollTh('combat', 'result', 'Résultat moyen')}${_rollTh('combat', 'crits', 'Crit. / échecs')}</tr></thead>
+      <tbody>${averageCombatRows || '<tr><td colspan="5" class="stats-tbl-z" style="text-align:center;padding:16px">Aucune action de combat au d20 sur ce périmètre.</td></tr>'}</tbody>
     </table></div>
   </section>` : '';
   // Scoreboard (refonte) : jauge + périmètre, puis 5 KPI avec delta vs séance
@@ -3972,7 +4187,7 @@ const PAGES = {
     if (_statsAdventureId !== adventureId) {
       _statsAdventureId = adventureId;
       _statsVttLogs = [];
-      _statsVttLogLimited = false;
+      _statsVttLogsLoaded = false;
       _statsVttDetailCache = new Map();
       _statsRowsCache = new Map();
       _statsEmoteUrl = new Map();
@@ -4010,8 +4225,10 @@ const PAGES = {
     _statsRender(_statsScope);
 
     const vttLogsPromise = _statsNeedsVttBackfill(_statsData)
-      ? loadRecentCollection('vttLog', { max: 500 }).catch(() => [])
-      : Promise.resolve([]);
+      ? loadCollection('vttLog')
+          .then(logs => ({ logs, loaded: true }))
+          .catch(() => ({ logs: [], loaded: false }))
+      : Promise.resolve({ logs: [], loaded: true });
     // Ne pas attendre ces compléments ici : `navigate()` maintient toute la
     // page en `pointer-events:none` tant que cette fonction n'est pas terminée.
     // Le premier rendu est complet et interactif ; l'enrichissement remplace
@@ -4022,13 +4239,13 @@ const PAGES = {
       questsPromise,
       storyPromise,
       vttLogsPromise,
-    ]).then(([emoteDoc, chars, quests, story, vttLogs]) => {
+    ]).then(([emoteDoc, chars, quests, story, vttLogResult]) => {
       if (revision !== _statsLoadRevision || !document.getElementById('stats-root')) return;
       if (Array.isArray(chars) && chars.length) STATE.characters = chars;
       _statsQuests = Array.isArray(quests) ? quests : [];
       _statsStory = Array.isArray(story) ? story : [];
-      _statsVttLogs = Array.isArray(vttLogs) ? vttLogs : [];
-      _statsVttLogLimited = _statsVttLogs.length >= 500;
+      _statsVttLogs = Array.isArray(vttLogResult?.logs) ? vttLogResult.logs : [];
+      _statsVttLogsLoaded = vttLogResult?.loaded === true;
       _statsVttDetailCache = new Map();
       _statsRowsCache = new Map();
       _statsEmoteUrl = new Map((emoteDoc?.emotes || []).filter(e => e?.name && e?.url).map(e => [e.name, e.url]));
@@ -4488,6 +4705,18 @@ registerActions({
     const key = btn.dataset.key;
     if (!key) return;
     _statsRankSort = { key, dir: _statsRankSort.key === key ? -_statsRankSort.dir : -1 };
+    _statsRender(_statsScope);
+  },
+  _statsSortRolls: (btn) => {
+    const table = btn.dataset.table;
+    const key = btn.dataset.key;
+    if (!table || !key) return;
+    const same = _statsRollSort.table === table && _statsRollSort.key === key;
+    _statsRollSort = {
+      table,
+      key,
+      dir: same ? -_statsRollSort.dir : (key === 'name' ? 1 : -1),
+    };
     _statsRender(_statsScope);
   },
   // Popover « joueurs ciblés » : ouverture/fermeture (état persisté entre rendus).

@@ -123,6 +123,9 @@ function _sumByDatesRaw(c, dates) {
       if (!obj || typeof obj !== 'object') continue;
       const a = (acc[grp] ??= {});
       for (const [k, v] of Object.entries(obj)) {
+        // Les records sont des maxima datés, pas des compteurs sommables : les
+        // soustraire du record campagne produirait une valeur incohérente.
+        if (grp === 'combat' && (k === 'biggestHit' || k === 'biggestTaken')) continue;
         if (typeof v === 'number') a[k] = (a[k] || 0) + v;
         else if (v && typeof v === 'object') { const a2 = (a[k] ??= {}); for (const [k2, v2] of Object.entries(v)) if (typeof v2 === 'number') a2[k2] = (a2[k2] || 0) + v2; }
       }
@@ -133,8 +136,9 @@ function _sumByDatesRaw(c, dates) {
 
 // Supprime les stats enregistrées pour un ENSEMBLE de dates : soustrait leur
 // miroir des totaux campagne (champs sommables) puis retire les entrées byDate
-// et la description de séance. Les records "max" (biggestHit) ne sont pas datés
-// → non ajustés (cosmétique). Réservé au MJ (règle doc stats).
+// et la description de séance. Les records « max » ne sont pas soustraits comme
+// des compteurs ; le journal permet de retrouver le maximum des scopes restants.
+// Réservé au MJ (règle doc stats).
 export async function deleteDatesStats(dates) {
   const ref = _statsRef();
   if (!ref || !Array.isArray(dates) || !dates.length) return false;
@@ -249,7 +253,11 @@ export function accAttackDelta(acc, { attackerId, attackerName, targetId, target
 
 // Cast d'un sort : +1 sort lancé, +PM dépensés, +1 sur la répartition par sort,
 // +soin éventuel. Accumulé dans le même delta réversible que l'attaque.
-export function accCastDelta(acc, { casterId, casterName, spellName, pm = 0, heal = 0, mana = 0, tactical = 0, support = 0, affliction = 0, control = 0 } = {}) {
+export function accCastDelta(acc, {
+  casterId, casterName, spellName, pm = 0, heal = 0, mana = 0,
+  tactical = 0, support = 0, affliction = 0, control = 0,
+  natural = null, result = null, crit = false, fumble = false,
+} = {}) {
   if (!casterId) return acc;
   acc.chars ??= {};
   const dk = statsDateKey();
@@ -268,6 +276,18 @@ export function accCastDelta(acc, { casterId, casterName, spellName, pm = 0, hea
   if (support > 0)    bump('combat', 'supportSpells', support);
   if (affliction > 0) bump('combat', 'afflictionSpells', affliction);
   if (control > 0)    bump('combat', 'controlSpells', control);
+  const trackedNatural = natural !== null && natural !== '' && Number.isFinite(Number(natural)) ? Number(natural) : null;
+  const trackedResult = result !== null && result !== '' && Number.isFinite(Number(result)) ? Number(result) : null;
+  if (trackedNatural != null) {
+    bump('combat', 'supplementalRolls', 1);
+    bump('combat', 'supplementalNaturalTotal', trackedNatural);
+    if (trackedResult != null) {
+      bump('combat', 'supplementalResultRolls', 1);
+      bump('combat', 'supplementalResultTotal', trackedResult);
+    }
+    if (crit) bump('combat', 'supplementalCrits', 1);
+    if (fumble) bump('combat', 'supplementalFumbles', 1);
+  }
   if (spellName) bump('spells', spellName, 1);
   return acc;
 }
@@ -297,9 +317,20 @@ async function _bumpMaxField(charId, charName, field, val) {
   if (!charId || !(val > 0)) return;
   if (!_mem) _mem = (await loadStats()) || {};
   const cur = Number(_mem?.chars?.[charId]?.combat?.[field]) || 0;
-  if (val <= cur) return;
-  ((((_mem.chars ??= {})[charId] ??= {}).combat ??= {})[field]) = val;
-  return bumpStats({ chars: { [charId]: { name: charName || '', combat: { [field]: val } } } });
+  const dk = statsDateKey();
+  const dateCur = Number(_mem?.chars?.[charId]?.byDate?.[dk]?.combat?.[field]) || 0;
+  if (val <= cur && val <= dateCur) return;
+  const char = ((_mem.chars ??= {})[charId] ??= {});
+  const patch = { chars: { [charId]: { name: charName || '' } } };
+  if (val > cur) {
+    (char.combat ??= {})[field] = val;
+    patch.chars[charId].combat = { [field]: val };
+  }
+  if (val > dateCur) {
+    (((char.byDate ??= {})[dk] ??= {}).combat ??= {})[field] = val;
+    patch.chars[charId].byDate = { [dk]: { combat: { [field]: val } } };
+  }
+  return bumpStats(patch);
 }
 export const bumpBiggestHit   = (charId, name, dmg) => _bumpMaxField(charId, name, 'biggestHit', dmg);
 export const bumpBiggestTaken = (charId, name, dmg) => _bumpMaxField(charId, name, 'biggestTaken', dmg);

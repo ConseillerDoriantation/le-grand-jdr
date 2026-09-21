@@ -74,7 +74,7 @@ const _CACHE_TTL = {
   players:            30 * 60_000,
   collectionSettings: 30 * 60_000,
   achievements_meta:  30 * 60_000,
-  vttLog:             30 * 60_000,  // historique borné utilisé seulement pour le rattrapage des moyennes
+  vttLog:             30 * 60_000,  // historique complet chargé en arrière-plan pour les moyennes
   // Aventures — TTL moyen (structure change rarement en session)
   adventures:         60_000,
 };

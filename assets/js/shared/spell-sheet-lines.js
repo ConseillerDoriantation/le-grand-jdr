@@ -55,6 +55,7 @@ export function computeSheetLines(state = {}) {
   const types     = Array.isArray(state.types) ? state.types : [...(state.types || [])];
   const protMode  = state.protMode || 'ca';
   const ampMode   = state.ampMode  || 'zone';
+  const deplMode  = state.deplMode || 'self';
   const afflMode  = state.afflMode || 'dot';
   const enchMode  = state.enchMode || 'etat';
   const zoneShape = ['cross', 'cone', 'ring', 'line'].includes(state.zoneShape) ? state.zoneShape : 'rect';
@@ -122,7 +123,7 @@ export function computeSheetLines(state = {}) {
 
   // 4 · Enchantement (le bloc état + les slots supplémentaires sont relocalisés
   // depuis le store dans le tiroir « régler »).
-  if (hasEnchant) lines.push({ slot: 'ench', id: 'ench', icon: '✨', enchant: true, select: { hiddenId: 's-enchant-etat', label: 'État' }, slots: ['s-enchant-etat-block', 's-enchant-extra-slots'] });
+  if (hasEnchant) lines.push({ slot: 'ench', id: 'ench', icon: '✨', enchant: true, select: { hiddenId: 's-enchant-etat', label: 'État' }, inlineSlots: ['s-enchant-etat-block', 's-enchant-extra-slots'] });
 
   // 5 · Affliction (Sentinelle si + Invocation)
   if (hasAffliction && !isRegen) {
@@ -131,7 +132,7 @@ export function computeSheetLines(state = {}) {
       line.sentinelle = true;                                     // portée par la sentinelle : pas de réglage
     } else {
       line.segment = { key: 'afflMode', cur: afflMode, hiddenId: 's-affliction-mode', opts: [['dot', 'DoT', '#e8894b'], ['etat', 'État', '#a855f7'], ['laceration', 'Lacér.', '#ff5a7e']] };
-      if (afflMode === 'etat') { line.select = { hiddenId: 's-affliction-etat', label: 'État', saveStatId: 's-affliction-save-stat' }; line.slots = ['s-affliction-etat-block']; }
+      if (afflMode === 'etat') { line.select = { hiddenId: 's-affliction-etat', label: 'État', saveStatId: 's-affliction-save-stat' }; line.inlineSlots = ['s-affliction-etat-block']; }
       else if (afflMode === 'dot') line.override = { fieldId: 's-affliction-dot-formula' };
       // laceration : valeur calculée (CA cible −n) → pas d'override
     }
@@ -143,6 +144,10 @@ export function computeSheetLines(state = {}) {
   if (hasAmp && !hasEnchant) {
     lines.push({ slot: 'zone', id: 'amp', icon: ampMode === 'zone' ? '🌐' : '↔️',
       segment: { key: 'ampMode', cur: ampMode, hiddenId: 's-amp-mode', opts: [['zone', 'Zone', '#4f8cff'], ['deplacement', 'Dépl.', '#f59e42']] } });
+    // Déplacement : sens du mouvement (soi / pousser / attirer) — sous-ligne dédiée.
+    if (isDepl)
+      lines.push({ slot: 'zone', id: 'deplmode', sub: true, icon: deplMode === 'push' ? '💨' : deplMode === 'pull' ? '🧲' : '🏃',
+        segment: { key: 'deplMode', cur: deplMode, hiddenId: 's-depl-mode', opts: [['self', 'Soi', '#22c38e'], ['push', 'Pousser', '#e8b84b'], ['pull', 'Attirer', '#4f8cff']] } });
     // Forme de zone : débloquée à partir de 2 Amplification (à 1 Amp c'est toujours
     // la ligne 1×3, choisir une forme n'aurait aucun effet).
     if (ampMode === 'zone' && (counts.Amplification || 0) >= 2)
@@ -155,7 +160,7 @@ export function computeSheetLines(state = {}) {
 
   // 7 · Invocation générique (hors combos Sentinelle / Arme invoquée)
   if (anyInvoc && !hasAffliction && !hasEnchant)
-    lines.push({ slot: 'inv', id: 'inv', icon: '🐾', invocationConfig: true, slots: ['s-invocation-section'] });
+    lines.push({ slot: 'inv', id: 'inv', icon: '🐾', invocationConfig: true, inlineSlots: ['s-invocation-section'] });
 
   // 8 · Déclenchement (mode de lancer)
   if (has(ACTION_RUNE))
@@ -176,6 +181,7 @@ const SEG_ACTION = {
   protMode:  '_selectProtMode',
   afflMode:  '_selectAfflictionMode',
   ampMode:   '_selectAmpMode',
+  deplMode:  '_selectDeplMode',
   zoneShape: '_selectZoneShape',
   actionMode:'_selectActionMode',
 };
@@ -233,12 +239,18 @@ export function renderSheetLines(lines = [], ctx = {}, tuned = new Set(), opts =
       if (l.slots) for (const sid of l.slots) inner += `<span class="cs-forge-slot" data-slot="${_esc(sid)}"></span>`;
       if (inner) tune = `<div class="tun">${inner}</div>`;
     }
+    // Slots INLINE : contrôles complexes (sélecteur d'état, config d'invocation)
+    // affichés DIRECTEMENT sous la ligne (pas derrière « régler »), relocalisés
+    // depuis le store comme les slots de tiroir.
+    const inlineSlots = (!readonly && l.inlineSlots && l.inlineSlots.length)
+      ? `<div class="ln-slots">${l.inlineSlots.map((sid) => `<span class="cs-forge-slot" data-slot="${_esc(sid)}"></span>`).join('')}</div>`
+      : '';
     const note = c.note ? `<div class="ln-note">${c.note}</div>` : '';
     return `<div class="ln${l.sub ? ' sub' : ''}" data-line="${_esc(l.id)}" style="--c:${c.color || 'var(--gold)'}">`
       + `<span class="ln-i">${l.icon}</span>`
       + `<div class="ln-b"><b class="${c.text ? 'tx' : ''}">${_esc(c.value || '—')}</b><s>${_esc(c.source || '')}</s></div>`
       + `<div class="ln-c">${seg}${adj}</div>`
-      + `${tune}${note}`
+      + `${inlineSlots}${tune}${note}`
       + `</div>`;
   }).join('');
 }

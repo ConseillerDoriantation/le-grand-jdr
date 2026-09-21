@@ -118,6 +118,11 @@ function _renderCombatTracker() {
   if (!el) return;
   const active = !!VS.session?.combat?.active;
   const mj = STATE.isAdmin;
+  const visible = active || mj;
+  if (!visible && el.contains(document.activeElement)) document.activeElement?.blur?.();
+  el.setAttribute('aria-hidden', visible ? 'false' : 'true');
+  if (visible) el.removeAttribute('inert');
+  else el.setAttribute('inert', '');
 
   // Combat inactif : MJ → ruban « idle » (démarrer) ; joueur → ruban collapsé.
   if (!active) {

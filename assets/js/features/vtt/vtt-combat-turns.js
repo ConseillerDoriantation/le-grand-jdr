@@ -275,12 +275,14 @@ export async function _vttNextRound() {
         const share = totalHeal > 0 ? Math.round(effectiveHeal * ((healRolls[i]?.rolled || 0) / totalHeal)) : 0;
         const hc = VS.tokens[d.casterId]?.data;
         const _hcId = hc?.characterId || hc?.summonOwnerCharId || null;
-        if (_hcId && share > 0) bumpHeal(_hcId, hc.name, share);
+        if (_hcId && share > 0 && d.countInStats !== false) bumpHeal(_hcId, hc.name, share);
       });
       dotNotifs.push(`💚 ${effectiveHeal} PV Régénération → ${tgtName}`);
       await _vttPublishOptimisticLog({
         type: 'dot-tick',
         isHeal: true,
+        statsExcluded: _regenBuffs.every(buff => buff.countInStats === false),
+        statsSource: _regenBuffs.some(buff => buff.statsSource === 'item') ? 'item' : 'spell',
         authorId: STATE.user?.uid || null,
         authorName: STATE.profile?.pseudo || STATE.profile?.prenom || 'MJ',
         tokenName: tgtName,
