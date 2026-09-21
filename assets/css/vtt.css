@@ -1062,9 +1062,13 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-vit-empty { color: var(--text-dim); font-style: italic; background: none; border-color: transparent; }
 .vtt-eco-row { display: flex; align-items: center; gap: 5px; margin-top: auto; }
 .vtt-eco-lbl { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
-.vtt-eco-pip { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 2px; border-radius: var(--r-xs); background: var(--surface-2); border: 1px solid var(--border); font-size: 9.5px; color: var(--text-muted); }
-.vtt-eco-pip b { font-size: 12px; line-height: 1; }
-.vtt-eco-pip.spent { opacity: .45; text-decoration: line-through; }
+.vtt-eco-pip { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 3px; border-radius: var(--r-xs); background: var(--surface-2); border: 1px solid var(--border); font-size: 9.5px; color: var(--text-muted); text-align: center; }
+.vtt-eco-pip span { line-height: 1.15; }
+.vtt-eco-pip b { font-size: 10px; line-height: 1.1; font-weight: 700; white-space: nowrap; }
+.vtt-eco-pip.action { --eco-color: var(--crimson-light); }
+.vtt-eco-pip.bonus { --eco-color: var(--emerald); }
+.vtt-eco-pip.reaction { --eco-color: var(--arcane); }
+.vtt-eco-pip.spent { color: var(--eco-color); border-color: color-mix(in srgb, var(--eco-color) 48%, var(--border)); background: color-mix(in srgb, var(--eco-color) 14%, var(--surface-2)); }
 
 /* Onglet « Stats » — cartes ajustables (déplac./défense/portée) + infos */
 .vtt-stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }

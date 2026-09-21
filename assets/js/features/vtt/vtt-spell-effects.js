@@ -188,6 +188,9 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
   }).join(', ');
   const castLogWrite = _vttPublishOptimisticLog({
     type: 'affliction-cast',
+    ...(opt?._statsActionId ? { statsActionId: opt._statsActionId } : {}),
+    statsExcluded: opt?.countInStats === false,
+    statsSource: opt?._itemAction ? 'item' : 'spell',
     ...(undo ? { undo } : {}),
     ...(statsDelta ? { statsDelta } : {}),
     authorId: STATE.user?.uid || null,
@@ -251,6 +254,8 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
     })();
     void _vttPublishOptimisticLog({
       type: 'save',
+      statsExcluded: opt?.countInStats === false,
+      statsSource: opt?._itemAction ? 'item' : 'spell',
       authorId: STATE.user?.uid || null,
       authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
       tokenName: tgtName,
@@ -364,6 +369,8 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       // Log du tick immédiat (cohérent avec le tick de round suivant)
       await _vttPublishOptimisticLog({
         type: 'dot-tick',
+        statsExcluded: opt?.countInStats === false,
+        statsSource: opt?._itemAction ? 'item' : 'spell',
         authorId: STATE.user?.uid || null,
         authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
         tokenName: tgtName,
@@ -424,10 +431,12 @@ export async function _vttApplyRegeneration(srcId, targetIds, opt) {
     if (!hpApplied) return;
     // Statistiques : soin réel attribué au soigneur (proc immédiat de Régénération).
     const _healCharId = _caster?.characterId || _caster?.summonOwnerCharId || null;
-    if (_healCharId) bumpHeal(_healCharId, _caster.name, effectiveHeal);
+    if (_healCharId && opt?.countInStats !== false) bumpHeal(_healCharId, _caster.name, effectiveHeal);
     await _vttPublishOptimisticLog({
       type: 'dot-tick',
       isHeal: true,
+      statsExcluded: opt?.countInStats === false,
+      statsSource: opt?._itemAction ? 'item' : 'spell',
       authorId: STATE.user?.uid || null,
       authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
       tokenName: name,

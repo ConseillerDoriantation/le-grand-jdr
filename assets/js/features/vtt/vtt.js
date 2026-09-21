@@ -46,6 +46,7 @@ import { showNotif } from '../../shared/notifications.js';
 import { toggleTheme } from '../../shared/theme.js';
 import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit, bumpBiggestTaken, bumpDamageTaken } from '../../shared/stats.js';
 import { appliedDamageAmount } from '../../shared/stats-analysis.js';
+import { shouldTrackSpellStats } from '../../shared/spell-stats-policy.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
@@ -3952,6 +3953,28 @@ function _hasStatsDelta(delta) {
   return !!(delta?.chars && Object.keys(delta.chars).length);
 }
 
+function _ensureStatsActionId(opt = {}) {
+  if (!opt._statsActionId) {
+    opt._statsActionId = globalThis.crypto?.randomUUID?.()
+      || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+  return opt._statsActionId;
+}
+
+function _statsLogMeta(opt = {}) {
+  const item = opt?._itemAction;
+  return {
+    statsActionId: _ensureStatsActionId(opt),
+    statsExcluded: opt?.countInStats === false,
+    statsSource: item ? 'item' : (opt?.sortIdx !== undefined ? 'spell' : 'weapon'),
+    ...(item ? {
+      statsItemId: item.itemId || null,
+      statsItemName: item.itemNom || null,
+      statsItemActionId: item.actionId || null,
+    } : {}),
+  };
+}
+
 function _castStatKinds(opt = {}) {
   const mods = opt.mods || {};
   const support = !!(
@@ -4005,9 +4028,10 @@ function _castStatKinds(opt = {}) {
   return { tactical, support, affliction, control };
 }
 
-function _buildCastStatsDelta(src, opt) {
+function _buildCastStatsDelta(src, opt, roll = {}) {
   const actor = _statsActor(src);
   const delta = { chars: {} };
+  if (opt?.countInStats === false) return delta;
   const isSpellLike = opt?.sortIdx !== undefined || !!opt?.spellId || !!opt?.isUtil || !!opt?.isCaSort || !!opt?.isHeal || !!opt?.isInvocation;
   if (!actor.id || (!isSpellLike && !(opt?.pmCost > 0))) return delta;
   const kinds = _castStatKinds(opt);
@@ -4020,12 +4044,16 @@ function _buildCastStatsDelta(src, opt) {
     support: kinds.support ? 1 : 0,
     affliction: kinds.affliction ? 1 : 0,
     control: kinds.control ? 1 : 0,
+    natural: roll.natural ?? null,
+    result: roll.result ?? null,
+    crit: roll.crit === true,
+    fumble: roll.fumble === true,
   });
   return delta;
 }
 
-function _applyCastStatsDelta(src, opt) {
-  const delta = _buildCastStatsDelta(src, opt);
+function _applyCastStatsDelta(src, opt, roll = {}) {
+  const delta = _buildCastStatsDelta(src, opt, roll);
   if (_hasStatsDelta(delta)) applyStatsDelta(delta, +1);
   return delta;
 }
@@ -4249,6 +4277,8 @@ export function _buffShared(opt, srcId) {
     expiresAtRound: isCanalise ? null : (dur != null ? baseRound + dur - 1 : null),
     casterId: srcId || null,
     sortLabel: opt.label || '',
+    countInStats: opt?.countInStats !== false,
+    statsSource: opt?._itemAction ? 'item' : 'spell',
     ...(isCanalise ? { canalisePersistant: true } : {}),
   };
 }
@@ -4479,6 +4509,9 @@ function _buildSpellOption(s, ctx) {
     mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
     weaponTechniques: abilityWeaponTechniques,
     ...extras,
+    // Les actions d'objet legacy sont hors statistiques par défaut. Le choix
+    // explicite du MJ sur l'action reste prioritaire.
+    countInStats: shouldTrackSpellStats(s, { source: extras?._itemAction ? 'item' : 'spell' }),
   };
 
   // Combo Coup de chance : effet unique, les effets normaux de Chance/Réaction
@@ -7794,6 +7827,7 @@ async function _zoneValidate(finalize = true) {
     const _statsDelta = srcD ? _applyCastStatsDelta(srcD, opt) : null;
     const _zLbl = total > 1 ? `${total} zones` : 'zone';
     await _publishCombatLog({
+      ..._statsLogMeta(opt),
       type: 'cast', undo: _snap,
       ...(_hasStatsDelta(_statsDelta) ? { statsDelta: _statsDelta } : {}),
       ..._vttLogSourceFields(srcD),
@@ -7850,6 +7884,7 @@ async function _zoneValidate(finalize = true) {
     await _vttApplyCasterConcentration(srcId, opt);
     const _statsDelta = srcD ? _applyCastStatsDelta(srcD, opt) : null;
     await _publishCombatLog({
+      ..._statsLogMeta(opt),
       type: 'cast', undo: _snap,
       ...(_hasStatsDelta(_statsDelta) ? { statsDelta: _statsDelta } : {}),
       ..._vttLogSourceFields(srcD),
@@ -7897,6 +7932,7 @@ async function _zoneValidate(finalize = true) {
     _snap.createdTokens = [..._summonSpawnIds];
     const _statsDelta = !targets.length && _srcD ? _applyCastStatsDelta(_srcD, opt) : null;
     await _publishCombatLog({
+      ..._statsLogMeta(opt),
       type: 'cast', undo: _snap,
       ...(_hasStatsDelta(_statsDelta) ? { statsDelta: _statsDelta } : {}),
       ..._vttLogSourceFields(_srcD),
@@ -8264,6 +8300,7 @@ async function _vttRollAttack() {
   const { srcId, tgtId, opt, lS, lT, allTargets } = ctx;
   const src=VS.tokens[srcId]?.data, tgt=VS.tokens[tgtId]?.data;
   if (!src || !tgt) return;
+  _ensureStatsActionId(opt);
   // Le panneau peut être resté ouvert pendant qu'un état a été appliqué :
   // revérifier l'interdiction au clic empêche de contourner Rage via une UI obsolète.
   if (opt?.sortIdx !== undefined && _hasConditionEffect(src, 'cantCastSpells')) {
@@ -8697,6 +8734,7 @@ async function _vttRollAttack() {
       await _vttApplyCasterConcentration(srcId, opt);
       const targetsLabel = appliedTargets.join(', ');
       const logWrite = _publishCombatLog({
+        ..._statsLogMeta(opt),
         type: 'cast',
         undo: _undoSnap,
         ..._vttLogSourceFields(src),
@@ -8780,10 +8818,15 @@ async function _vttRollAttack() {
       if (_enchD20 === 1) {
         // Échec critique : le sort ne se lance pas, mais le mana est perdu.
         const sourceWrites = Promise.all([_deductPm(), _consumeItem(), _markActionUsed()]);
+        const failedStatsDelta = _applyCastStatsDelta(src, opt, {
+          natural: _enchD20, result: _enchD20, fumble: true,
+        });
         const ecTgt = targetIds.map(id => { const td = VS.tokens[id]?.data; return td ? (_live(td).displayName ?? td.name) : null; })
           .filter(Boolean).join(', ') || (lT?.displayName ?? tgt?.name ?? '');
         const logWrite = _publishCombatLog({
+          ..._statsLogMeta(opt),
           type: 'cast', undo: _undoSnap,
+          ...(_hasStatsDelta(failedStatsDelta) ? { statsDelta: failedStatsDelta } : {}),
           ..._vttLogSourceFields(src),
           ..._vttLogSingleTargetFields(targetIds),
           authorId: STATE.user?.uid||null, authorName,
@@ -8791,7 +8834,7 @@ async function _vttRollAttack() {
           characterImage: _combatLogImage(lS.displayImage),
           targetName: ecTgt,
           optLabel: opt.label, pmCost: opt.pmCost,
-          castEC: true,
+          castD20: _enchD20, castIsCrit: false, castIsFumble: true, castEC: true,
           castEffect: `💔 Échec critique (d20 = 1) — sort raté${opt.pmCost>0?`, ${opt.pmCost} ${_RES_LABEL[_costRes]||'PM'} perdus`:''}`,
           createdAt: serverTimestamp(),
         }).catch(()=>{});
@@ -8831,7 +8874,11 @@ async function _vttRollAttack() {
       }
       const sourceWrites = Promise.all([_deductPm(), _consumeItem(), _markActionUsed()]);
       const rCa = _handleMultiCast();
-      const _utilStatsDelta = _preAppliedCastStatsDelta || _applyCastStatsDelta(src, opt);
+      const _utilStatsDelta = _preAppliedCastStatsDelta || _applyCastStatsDelta(src, opt, {
+        natural: _enchD20,
+        result: _enchD20,
+        crit: _enchRC,
+      });
 
 
       // Appliquer le buff CA sur chaque cible
@@ -8917,6 +8964,7 @@ async function _vttRollAttack() {
       // alors que le JS pourrait avoir réussi.
       if (!opt.isAffliction) {
         await Promise.all([sourceWrites, ...effectWrites, _publishCombatLog({
+          ..._statsLogMeta(opt),
           type: 'cast',
           undo: _undoSnap,
           ...(_hasStatsDelta(_utilStatsDelta) ? { statsDelta: _utilStatsDelta } : {}),
@@ -8927,6 +8975,7 @@ async function _vttRollAttack() {
           characterImage: _combatLogImage(lS.displayImage),
           targetName: targetsLabel,
           optLabel: opt.label, pmCost: opt.pmCost,
+          ...(_enchD20 != null ? { castD20: _enchD20, castIsCrit: _enchRC, castIsFumble: false } : {}),
           castEffect,
           createdAt: serverTimestamp(),
         }).catch(()=>{})]);
@@ -9026,15 +9075,20 @@ async function _vttRollAttack() {
         // Stats : soin raté → compte quand même 1 sort lancé + PM (soin 0), réversible.
         const _healDelta = { chars: {} };
         const _healActor = _statsActor(src);
-        if (_healActor.id) {
-          accCastDelta(_healDelta, { casterId: _healActor.id, casterName: _healActor.name, spellName: opt.label || 'Soin', pm: ((opt.costRes||'pm')==='pm' ? (opt.pmCost||0) : 0), heal: 0 });
+        if (_healActor.id && opt.countInStats !== false) {
+          accCastDelta(_healDelta, {
+            casterId: _healActor.id, casterName: _healActor.name,
+            spellName: opt.label || 'Soin', pm: ((opt.costRes||'pm')==='pm' ? (opt.pmCost||0) : 0), heal: 0,
+            natural: hD20, result: hHitTotal, fumble: true,
+          });
           applyStatsDelta(_healDelta, +1);
         }
         const logWrite = _publishCombatLog({
+          ..._statsLogMeta(opt),
           type: 'attack', isHeal: true, isFumble: true, advMode: hMode, advAuto: hMode !== mode,
           advReasons: hMode !== mode ? hAutomaticReasons : null,
           undo: _undoSnap,
-          statsDelta: _healDelta,
+          ...(_hasStatsDelta(_healDelta) ? { statsDelta: _healDelta } : {}),
           ..._vttLogSourceFields(src),
           authorId: STATE.user?.uid||null, authorName,
           attackerName: lS.displayName??src.name,
@@ -9146,8 +9200,13 @@ async function _vttRollAttack() {
       // Statistiques (soin) : 1 sort lancé + PM + soin réel, réversible à l'annulation.
       const _healDelta = { chars: {} };
       const _healActor = _statsActor(src);
-      if (_healActor.id) {
-        accCastDelta(_healDelta, { casterId: _healActor.id, casterName: _healActor.name, spellName: opt.label || 'Soin', pm: ((opt.costRes||'pm')==='pm' ? (opt.pmCost||0) : 0), heal: opt.isMana ? 0 : _healActual, mana: opt.isMana ? _healActual : 0 });
+      if (_healActor.id && opt.countInStats !== false) {
+        accCastDelta(_healDelta, {
+          casterId: _healActor.id, casterName: _healActor.name,
+          spellName: opt.label || 'Soin', pm: ((opt.costRes||'pm')==='pm' ? (opt.pmCost||0) : 0),
+          heal: opt.isMana ? 0 : _healActual, mana: opt.isMana ? _healActual : 0,
+          natural: hD20, result: hHitTotal, crit: hIsCrit,
+        });
         applyStatsDelta(_healDelta, +1);
       }
 
@@ -9172,9 +9231,10 @@ async function _vttRollAttack() {
 
       if (isMultiHeal) {
         healLogWrite = _publishCombatLog({
+          ..._statsLogMeta(opt),
           type: 'attack-multi', isHeal: true, isMana: !!opt.isMana,
           undo: _undoSnap,
-          statsDelta: _healDelta,
+          ...(_hasStatsDelta(_healDelta) ? { statsDelta: _healDelta } : {}),
           ..._vttLogSourceFields(src),
           authorId: STATE.user?.uid||null, authorName,
           attackerName: lS.displayName??src.name,
@@ -9202,9 +9262,10 @@ async function _vttRollAttack() {
         const r = cleanHealResults[0];
         if (r) {
           healLogWrite = _publishCombatLog({
+            ..._statsLogMeta(opt),
             type:'attack', isHeal:true, isMana: !!opt.isMana,
             undo: _undoSnap,
-            statsDelta: _healDelta,
+            ...(_hasStatsDelta(_healDelta) ? { statsDelta: _healDelta } : {}),
             ..._vttLogSourceFields(src),
             authorId: STATE.user?.uid||null, authorName,
             attackerName: lS.displayName??src.name,
@@ -9564,6 +9625,7 @@ async function _vttRollAttack() {
     const targetWritePromises = [];
     const techniqueSaveLogs = [];
     const _statsDelta = { chars: {} };   // delta de stats accumulé (réversible à l'annulation)
+    const _statsEnabled = opt.countInStats !== false;
     const _atkActor = _statsActor(src);
     let _maxHit = 0;                      // plus gros coup de cette attaque (record, non réversible)
     for (const curTgtId of resolutionTargetIds) {
@@ -9767,19 +9829,21 @@ async function _vttRollAttack() {
 
       // ── Statistiques de combat : accumule (écrit une fois après la boucle,
       //    stocké dans le log pour pouvoir l'annuler avec l'action) ──
-      accAttackDelta(_statsDelta, {
-        attackerId:   _atkActor.id,
-        attackerName: _atkActor.name,
-        targetId:     curTgtData.characterId || null,
-        targetName:   curTgtData.name || '',
-        hit, crit: false, fumble: false,
-        dmg: (hit || halfDmg) ? dmgApplied : 0,
-        ko: (hpBeforeApplied > 0 && newHp <= 0),
-        countAction: false,
-      });
-      if ((hit || halfDmg) && dmgApplied > _maxHit) _maxHit = dmgApplied;
+      if (_statsEnabled) {
+        accAttackDelta(_statsDelta, {
+          attackerId:   _atkActor.id,
+          attackerName: _atkActor.name,
+          targetId:     curTgtData.characterId || null,
+          targetName:   curTgtData.name || '',
+          hit, crit: false, fumble: false,
+          dmg: (hit || halfDmg) ? dmgApplied : 0,
+          ko: (hpBeforeApplied > 0 && newHp <= 0),
+          countAction: false,
+        });
+        if ((hit || halfDmg) && dmgApplied > _maxHit) _maxHit = dmgApplied;
+      }
       // Record du plus gros coup REÇU par la cible (PJ).
-      if ((hit || halfDmg) && dmgApplied > 0 && curTgtData.characterId)
+      if (_statsEnabled && (hit || halfDmg) && dmgApplied > 0 && curTgtData.characterId)
         bumpBiggestTaken(curTgtData.characterId, curTgtData.name || '', dmgApplied);
 
       // ── États consommés au 1er coup (Marqué, etc.) : retire ceux dont
@@ -9928,7 +9992,7 @@ async function _vttRollAttack() {
 
     // Un seul d20 a été lancé pour toute l'action, même si elle touche plusieurs
     // cibles. Les impacts ont été comptés séparément dans la boucle ci-dessus.
-    if (targetResults.length) {
+    if (_statsEnabled && targetResults.length) {
       accAttackDelta(_statsDelta, {
         attackerId: _atkActor.id,
         attackerName: _atkActor.name,
@@ -10069,7 +10133,7 @@ async function _vttRollAttack() {
 
     // ── Statistiques : cast (sort lancé + PM) puis écriture du delta ──
     const _castActor = _statsActor(src);
-    if (_castActor.id && (opt.sortIdx !== undefined || (opt.pmCost || 0) > 0)) {
+    if (_statsEnabled && _castActor.id && (opt.sortIdx !== undefined || (opt.pmCost || 0) > 0)) {
       accCastDelta(_statsDelta, {
         casterId: _castActor.id, casterName: _castActor.name,
         spellName: opt.sortIdx !== undefined ? (opt.label || 'Sort') : null,
@@ -10080,8 +10144,8 @@ async function _vttRollAttack() {
         control: _castKinds.control ? 1 : 0,
       });
     }
-    applyStatsDelta(_statsDelta, +1);
-    if (_castActor.id && _maxHit > 0) bumpBiggestHit(_castActor.id, _castActor.name, _maxHit);
+    if (_hasStatsDelta(_statsDelta)) applyStatsDelta(_statsDelta, +1);
+    if (_statsEnabled && _castActor.id && _maxHit > 0) bumpBiggestHit(_castActor.id, _castActor.name, _maxHit);
 
     // ── Un seul message dans le log ────────────────────────────────────
     // Strip _data (référence token interne, non sérialisable Firestore)
@@ -10134,9 +10198,10 @@ async function _vttRollAttack() {
     const isMulti = cleanResults.length > 1;
     if (isMulti) {
       await _publishCombatLog({
+        ..._statsLogMeta(opt),
         type: 'attack-multi',
         undo: _undoSnap,
-        statsDelta: _statsDelta,
+        ...(_hasStatsDelta(_statsDelta) ? { statsDelta: _statsDelta } : {}),
         ..._vttLogSourceFields(src),
         authorId: STATE.user?.uid||null, authorName,
         attackerName: lS.displayName??src.name,
@@ -10182,9 +10247,10 @@ async function _vttRollAttack() {
       // Image de la cible pour affichage dans le chat (single target)
       const _defImg = _combatLogImage(_live(tgt)?.displayImage || r?.targetImage);
       if (r) await _publishCombatLog({
+        ..._statsLogMeta(opt),
         type: 'attack',
         undo: _undoSnap,
-        statsDelta: _statsDelta,
+        ...(_hasStatsDelta(_statsDelta) ? { statsDelta: _statsDelta } : {}),
         ..._vttLogSourceFields(src),
         authorId: STATE.user?.uid||null, authorName,
         attackerName: lS.displayName??src.name,

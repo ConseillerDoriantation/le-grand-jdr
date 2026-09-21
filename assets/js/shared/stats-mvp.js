@@ -25,6 +25,48 @@ const AXIS_SOFT_CAPS = [
   { upTo: 500, multiplier: 0.10 },
   { upTo: Infinity, multiplier: 0.05 },
 ];
+
+const CONTRIBUTIONS = Object.freeze({
+  damage:       { label: 'Dégâts réellement infligés', coef: 1, icon: '🗡️' },
+  heal:         { label: 'Soin réel produit',             coef: 1, icon: '💚' },
+  mana:         { label: 'PM régénérés',                   coef: 1, icon: '💙' },
+  tactical:     { label: 'Actions tactiques uniques',        coef: 12, icon: '✨' },
+  avoided:      { label: 'Attaques évitées',                 coef: 12, icon: '🛡️' },
+  held:         { label: 'Ciblages tenus',                   coef: 3, icon: '🧱' },
+  damageTaken:  { label: 'Dégâts encaissés',                 coef: 0.12, icon: '🩸' },
+  skillRolls:   { label: 'Jets de compétence',                 coef: 5, icon: '🎲' },
+});
+
+// Source unique pour l'explication affichée aux joueurs. Les composants et
+// coefficients ci-dessous sont aussi ceux consommés par buildMvpRawProfile.
+export const MVP_AXIS_GUIDE = Object.freeze({
+  offense: {
+    summary: 'Mesure les dégâts effectivement retirés aux cibles.',
+    contributions: [CONTRIBUTIONS.damage],
+  },
+  support: {
+    summary: 'Mesure les soins, le mana rendu et les actions de soutien ou de contrôle.',
+    note: 'Pour les actions tactiques, seul le plus grand compteur entre soutien, affliction et contrôle est retenu afin de ne pas payer deux fois la même action.',
+    contributions: [CONTRIBUTIONS.heal, CONTRIBUTIONS.mana, CONTRIBUTIONS.tactical],
+  },
+  protection: {
+    summary: 'Mesure la pression ennemie absorbée : attaques évitées, ciblages maintenus et dégâts encaissés.',
+    note: 'Un ciblage tenu est une attaque reçue qui n’a pas été évitée.',
+    contributions: [CONTRIBUTIONS.avoided, CONTRIBUTIONS.held, CONTRIBUTIONS.damageTaken],
+  },
+  skill: {
+    summary: 'Mesure les jets de compétence enregistrés pendant la partie.',
+    note: 'Le jeu de rôle sans jet n’est pas noté automatiquement.',
+    contributions: [CONTRIBUTIONS.skillRolls],
+  },
+});
+
+export const MVP_SCORING_GUIDE = Object.freeze({
+  axisWeights: [...AXIS_WEIGHTS],
+  softCaps: AXIS_SOFT_CAPS.map(tier => ({ ...tier })),
+  minimumCalibrationSamples: MIN_CALIBRATION_SAMPLES,
+});
+
 const num = value => Math.max(0, Number(value) || 0);
 const rounded = value => Math.round((Number(value) || 0) * 10) / 10;
 
@@ -37,6 +79,11 @@ function median(values = []) {
 
 function part(label, count, coef, icon) {
   return { label, count, coef, points: count * coef, icon };
+}
+
+function contributionPart(key, count) {
+  const contribution = CONTRIBUTIONS[key];
+  return part(contribution.label, count, contribution.coef, contribution.icon);
 }
 
 /**
@@ -93,20 +140,20 @@ export function buildMvpRawProfile(row = {}) {
     name: row.name || '?',
     axes: {
       offense: axis('offense', [
-        part('Dégâts infligés', damage, 1, '🗡️'),
+        contributionPart('damage', damage),
       ], num(combat.attacks)),
       support: axis('support', [
-        part('Soin réel produit', heal, 1, '💚'),
-        part('PM régénérés', mana, 1, '💙'),
-        part('Actions tactiques uniques', tacticalActions, 12, '✨'),
+        contributionPart('heal', heal),
+        contributionPart('mana', mana),
+        contributionPart('tactical', tacticalActions),
       ], tacticalActions + (heal > 0 ? 1 : 0) + (mana > 0 ? 1 : 0)),
       protection: axis('protection', [
-        part('Attaques évitées', attacksAvoided, 12, '🛡️'),
-        part('Ciblages tenus', attacksHeld, 3, '🧱'),
-        part('Dégâts encaissés', damageTaken, 0.12, '🩸'),
+        contributionPart('avoided', attacksAvoided),
+        contributionPart('held', attacksHeld),
+        contributionPart('damageTaken', damageTaken),
       ], attacksTaken),
       skill: axis('skill', [
-        part('Jets de compétence', skillRolls, 5, '🎲'),
+        contributionPart('skillRolls', skillRolls),
       ], skillRolls),
     },
   };

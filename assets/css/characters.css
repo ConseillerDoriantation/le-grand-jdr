@@ -19791,6 +19791,56 @@ button.cs-prepared-spell:hover {
   .cs-v3 .cs-sorts-prepared-foot { flex-wrap: wrap; }
 }
 
+/*
+ * Sorts — stabilité sur les petites largeurs.
+ * La fiche ouverte vit dans la grille des cartes : ses anciennes largeurs
+ * minimales pouvaient agrandir la colonne principale et repousser le rail
+ * Catégories / Runes. Chaque niveau peut désormais réellement se contracter.
+ */
+.cs-v3 .cs-sorts-v3,
+.cs-v3 .cs-spellbook-workspace,
+.cs-v3 .cs-spellbook-workspace.has-inspector,
+.cs-v3 .cs-spellbook-workspace > *,
+.cs-v3 .cs-spellbook-collection,
+.cs-v3 .cs-spellbook-collection .cs-sort-cats-wrap,
+.cs-v3 .cs-spellbook-collection .cs-sort-cat-block,
+.cs-v3 .cs-spellbook-collection .cs-spellcard-grid,
+.cs-v3 .cs-spellbook-collection .cs-spellcard {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.cs-v3 .cs-spellbook-collection .cs-spellcard-grid > .cs-spellinspector {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr);
+}
+
+.cs-v3 .cs-spellbook-collection .cs-spellcard-grid > .cs-spellinspector > *,
+.cs-v3 .cs-spellbook-collection .cs-spellinspector-hero > div,
+.cs-v3 .cs-spellbook-collection .cs-spellinspector-state > span,
+.cs-v3 .cs-spellbook-collection .cs-spellinspector-effects-list > div,
+.cs-v3 .cs-spellbook-collection .cs-spellinspector-effects-list p {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.cs-v3 .cs-spellbook-collection .cs-spellinspector-description p,
+.cs-v3 .cs-spellbook-collection .cs-spellinspector-effects-list p b,
+.cs-v3 .cs-spellbook-collection .cs-spellinspector-effects-list p small {
+  overflow-wrap: anywhere;
+}
+
+/* Le seuil suit la largeur réellement disponible, pas celle de l'écran. */
+@container (max-width: 760px) {
+  .cs-v3 .cs-spellbook-collection .cs-spellcard-grid > .cs-spellinspector {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Page Personnage : la fiche s'aligne sur le filtre admin et la gouttiere globale. */
 #main-content[data-page="characters"] .cs-v3 .app-shell {
   max-width: none !important;
@@ -22367,6 +22417,16 @@ body .modal:has(.inv-history-modal-shell) {
 .cs-forge2 .tun label{ font-size:10px; letter-spacing:.1em; text-transform:uppercase; font-weight:700; color:var(--text-dim); }
 .cs-forge2 .tun .rst{ font-size:10.5px; color:var(--text-muted); text-decoration:underline; }
 .cs-forge2 .tun .rst:hover{ color:var(--text-soft); }
+/* Slots INLINE (sélecteur d'état, config d'invocation) — affichés sous la ligne,
+   compacts, alignés avec le contenu. */
+.cs-forge2 .ln-slots{ grid-column:1/-1; padding:2px 0 3px 31px; min-width:0; }
+.cs-forge2 .ln-slots .cs-forge-slot{ display:block; }
+.cs-forge2 .ln-slots .cs-forge-slot + .cs-forge-slot{ margin-top:6px; }
+.cs-forge2 .ln-slots .form-group{ margin:0; }
+.cs-forge2 .ln-slots label{ display:block; margin:0 0 4px; font-size:10px; letter-spacing:.08em; text-transform:uppercase; font-weight:700; color:var(--text-dim); }
+.cs-forge2 .ln-slots label span{ display:none; }   /* sous-textes verbeux masqués (— buff/bénédiction…) */
+.cs-forge2 .ln-slots .input-field,.cs-forge2 .ln-slots select{ height:30px; padding:0 8px; border-radius:var(--r-sm); background:var(--surface-1); border:1px solid var(--border-md); outline:0; font-size:12px; color:var(--text); width:100%; max-width:300px; }
+.cs-forge2 .ln-slots .input-field:focus,.cs-forge2 .ln-slots select:focus{ border-color:var(--border-bright); }
 .cs-forge2 .ln.mods{ gap:6px; }
 .cs-forge2 .mods .ln-b{ display:flex; flex-wrap:wrap; gap:4px; }
 .cs-forge2 .mods .ln-b span{ font-size:10.5px; padding:2px 8px; border-radius:var(--r-full); background:color-mix(in srgb,var(--c,var(--gold)) 14%,var(--surface-2)); border:1px solid color-mix(in srgb,var(--c,var(--gold)) 40%,transparent); color:var(--text-soft); }

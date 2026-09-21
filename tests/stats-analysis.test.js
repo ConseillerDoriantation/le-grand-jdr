@@ -11,6 +11,7 @@ import {
   mergeTrackedSkillStats,
   normalizeSkillStats,
   statsAverage,
+  topStatTies,
 } from '../assets/js/shared/stats-analysis.js';
 
 test('les dégâts appliqués sont bornés aux PV réellement perdus', () => {
@@ -19,6 +20,7 @@ test('les dégâts appliqués sont bornés aux PV réellement perdus', () => {
   assert.equal(appliedDamageAmount({ rolledDamage: 8 }), 8);
   assert.equal(appliedDamageAmount({ beforeHp: 10, afterHp: 14, rolledDamage: -4 }), 0);
   assert.equal(appliedDamageAmount({ beforeHp: 42, afterHp: 0, rolledDamage: 2107, cancelled: true }), 0);
+  assert.equal(appliedDamageAmount({ beforeHp: 100, afterHp: 55, rolledDamage: 9 }), 9);
 });
 
 test('statsAverage renvoie null sans échantillon et arrondit à un décimal', () => {
@@ -48,6 +50,22 @@ test('normalizeSkillStats sépare les jets historiques des jets détaillés', ()
     critRate: 13,
     fumbleRate: 13,
   });
+});
+
+test('une somme de d20 impossible est remplacée par le journal ou masquée', () => {
+  const repaired = mergeTrackedSkillStats(
+    { rolls: 95, trackedRolls: 59, naturalTotal: 4248, resultTotal: 5100 },
+    { trackedRolls: 59, naturalTotal: 620, resultTotal: 910, crits: 2, fumbles: 1 },
+  );
+  assert.equal(normalizeSkillStats('Perception', repaired).naturalAvg, 10.5);
+  assert.equal(normalizeSkillStats('Perception', repaired).resultAvg, 15.4);
+
+  const unavailable = normalizeSkillStats('Discrétion', {
+    rolls: 4, trackedRolls: 4, naturalTotal: 88, resultTotal: 104,
+  });
+  assert.equal(unavailable.naturalAvg, null);
+  assert.equal(unavailable.resultAvg, null);
+  assert.equal(unavailable.trackedRolls, 0);
 });
 
 test('aggregateSkillAverages agrège les joueurs et conserve la couverture', () => {
@@ -83,6 +101,7 @@ test('aggregateActionAverages réunit compétences et combat dans tout le résum
     rolls: 8,
     skillRolls: 4,
     combatRolls: 4,
+    supplementalRolls: 0,
     trackedRolls: 6,
     resultTrackedRolls: 5,
     naturalTotal: 80,
@@ -96,6 +115,31 @@ test('aggregateActionAverages réunit compétences et combat dans tout le résum
     coverage: 75,
     resultCoverage: 63,
   });
+});
+
+test('les critiques de soin et de soutien complètent les attaques et compétences', () => {
+  const result = aggregateActionAverages(
+    { rolls: 2, trackedRolls: 2, naturalTotal: 21, resultTotal: 27, crits: 1, fumbles: 0 },
+    { attacks: 2, attackRolls: 2, attackRollTotal: 21, attackResultRolls: 2, attackResultTotal: 29, crits: 0, fumbles: 1 },
+    { rolls: 2, trackedRolls: 2, naturalTotal: 21, resultRolls: 1, resultTotal: 24, crits: 1, fumbles: 1 },
+  );
+
+  assert.equal(result.rolls, 6);
+  assert.equal(result.supplementalRolls, 2);
+  assert.equal(result.crits, 2);
+  assert.equal(result.fumbles, 2);
+});
+
+test('topStatTies conserve tous les premiers ex aequo', () => {
+  const result = topStatTies([
+    { id: 'a', value: 4 },
+    { id: 'b', value: 7 },
+    { id: 'c', value: 7 },
+    { id: 'd', value: 0 },
+  ], row => row.value);
+
+  assert.equal(result.value, 7);
+  assert.deepEqual(result.winners.map(row => row.id), ['b', 'c']);
 });
 
 test('combatAverages calcule uniquement sur les impacts suivis', () => {
@@ -163,6 +207,7 @@ test('aggregateVttRollDetails reconstruit les moyennes depuis les logs VTT', () 
     Artisanat: { trackedRolls: 1, naturalTotal: 12, resultTotal: 16, crits: 0, fumbles: 0 },
   });
   assert.deepEqual(result.byCharacter.c1.combat, {
+    canonicalActions: 4,
     attackActions: 3,
     hits: 2,
     crits: 0,
@@ -171,10 +216,50 @@ test('aggregateVttRollDetails reconstruit les moyennes depuis les logs VTT', () 
     attackRollTotal: 32,
     attackResultRolls: 3,
     attackResultTotal: 43,
+    supplementalRolls: 1,
+    supplementalNaturalTotal: 20,
+    supplementalResultRolls: 0,
+    supplementalResultTotal: 0,
+    supplementalCrits: 1,
+    supplementalFumbles: 0,
     damageEvents: 3,
     damageTotal: 17,
+    biggestHit: 8,
   });
-  assert.equal(result.relevantLogs, 6);
+  assert.equal(result.relevantLogs, 7);
+});
+
+test('les actions explicitement hors statistiques ne reviennent pas par le journal VTT', () => {
+  const createdAt = new Date(2026, 7, 11, 12);
+  const result = aggregateVttRollDetails([
+    {
+      type: 'attack', sourceCharacterId: 'c1', hitD20: 18, hitTotal: 22,
+      hit: true, dmgTotal: 9, statsExcluded: true, statsSource: 'item', createdAt,
+    },
+    {
+      type: 'attack', sourceCharacterId: 'c1', hitD20: 12, hitTotal: 16,
+      hit: true, dmgTotal: 5, createdAt,
+    },
+  ]);
+
+  assert.equal(result.relevantLogs, 1);
+  assert.equal(result.byCharacter.c1.combat.attackActions, 1);
+  assert.equal(result.byCharacter.c1.combat.damageTotal, 5);
+});
+
+test('le journal reconnaît les critiques de soin et d enchantement sans créer d attaques', () => {
+  const createdAt = new Date(2026, 7, 11, 12);
+  const result = aggregateVttRollDetails([
+    { type: 'attack', isHeal: true, sourceCharacterId: 'c1', hitD20: 20, hitTotal: 24, isCrit: true, createdAt },
+    { type: 'attack-multi', isHeal: true, sourceCharacterId: 'c1', hitD20: 1, hitTotal: 5, isFumble: true, targets: [{ hit: true }, { hit: true }], createdAt },
+    { type: 'cast', sourceCharacterId: 'c1', castEffect: '🎲 20 💥 RC · Renforcé', createdAt },
+    { type: 'cast', sourceCharacterId: 'c1', castEC: true, createdAt },
+  ]);
+
+  assert.equal(result.byCharacter.c1.combat.attackActions, 0);
+  assert.equal(result.byCharacter.c1.combat.supplementalRolls, 4);
+  assert.equal(result.byCharacter.c1.combat.supplementalCrits, 2);
+  assert.equal(result.byCharacter.c1.combat.supplementalFumbles, 2);
 });
 
 test('une séance supprimée pour un personnage ne réapparaît pas depuis le journal VTT', () => {
@@ -263,6 +348,7 @@ test('une attaque multicible ne compte que comme un seul jet critique ou échec'
   }]);
 
   assert.deepEqual(result.byCharacter.c1.combat, {
+    canonicalActions: 1,
     attackActions: 1,
     hits: 0,
     crits: 0,
@@ -271,8 +357,15 @@ test('une attaque multicible ne compte que comme un seul jet critique ou échec'
     attackRollTotal: 1,
     attackResultRolls: 1,
     attackResultTotal: 5,
+    supplementalRolls: 0,
+    supplementalNaturalTotal: 0,
+    supplementalResultRolls: 0,
+    supplementalResultTotal: 0,
+    supplementalCrits: 0,
+    supplementalFumbles: 0,
     damageEvents: 0,
     damageTotal: 0,
+    biggestHit: 0,
     actionOvercounts: {
       attacks: 4,
       fumbles: 4,
@@ -302,11 +395,13 @@ test('une attaque multicible ne compte que comme un seul jet critique ou échec'
     attackRollTotal: 1,
     attackResultRolls: 1,
     attackResultTotal: 5,
+    biggestHit: 0,
   });
   assert.deepEqual(aggregateActionAverages({ rolls: 0 }, correctedCombat), {
     rolls: 1,
     skillRolls: 0,
     combatRolls: 1,
+    supplementalRolls: 0,
     trackedRolls: 1,
     resultTrackedRolls: 1,
     naturalTotal: 1,
@@ -320,6 +415,70 @@ test('une attaque multicible ne compte que comme un seul jet critique ou échec'
     coverage: 100,
     resultCoverage: 100,
   });
+});
+
+test('le nombre d actions de combat compte chaque attaque ou sort une seule fois', () => {
+  const createdAt = new Date(2026, 7, 11, 12);
+  const result = aggregateVttRollDetails([
+    {
+      type: 'attack-multi', sourceCharacterId: 'c1', hitD20: 14, hitTotal: 19,
+      targets: Array.from({ length: 9 }, () => ({ hit: true, dmgTotal: 4 })), createdAt,
+    },
+    { type: 'cast', sourceCharacterId: 'c1', castEffect: 'Bouclier', createdAt },
+    { type: 'affliction-cast', sourceCharacterId: 'c1', createdAt },
+    { type: 'save', sourceCharacterId: 'c1', createdAt },
+    { type: 'cast', sourceCharacterId: 'c1', actionUndone: true, createdAt },
+    { type: 'attack', sourceCharacterId: 'c1', statsExcluded: true, createdAt },
+  ]);
+
+  assert.equal(result.byCharacter.c1.combat.canonicalActions, 3);
+  assert.equal(result.byCharacter.c1.combat.attackActions, 1);
+});
+
+test('une compétence concernant plusieurs cibles reste un seul jet', () => {
+  const result = aggregateVttRollDetails([{
+    type: 'roll', characterId: 'c1', rollSkill: 'Intimidation',
+    rollRaw: 16, rollResult: 21,
+    targets: ['garde-1', 'garde-2', 'garde-3', 'garde-4'],
+    createdAt: new Date(2026, 7, 11, 12),
+  }]);
+
+  assert.equal(result.byCharacter.c1.skills.Intimidation.trackedRolls, 1);
+  assert.equal(result.byCharacter.c1.skills.Intimidation.naturalTotal, 16);
+  assert.equal(result.byCharacter.c1.skills.Intimidation.resultTotal, 21);
+});
+
+test('un lancement de sort suivi de son attaque ne devient pas deux actions', () => {
+  const base = new Date(2026, 7, 11, 12).getTime();
+  const result = aggregateVttRollDetails([
+    { type: 'affliction-cast', sourceCharacterId: 'c1', optLabel: 'Brûlure', createdAt: new Date(base) },
+    { type: 'attack', sourceCharacterId: 'c1', optLabel: 'Brûlure', hitD20: 14, hitTotal: 19, createdAt: new Date(base + 2_000) },
+    { type: 'affliction-cast', sourceCharacterId: 'c1', optLabel: 'Brûlure', createdAt: new Date(base + 20_000) },
+    { type: 'attack', sourceCharacterId: 'c1', optLabel: 'Brûlure', hitD20: 11, hitTotal: 16, createdAt: new Date(base + 22_000) },
+  ]);
+
+  assert.equal(result.byCharacter.c1.combat.canonicalActions, 2);
+});
+
+test('les identifiants d action dédupliquent toutes les lignes techniques futures', () => {
+  const createdAt = new Date(2026, 7, 11, 12);
+  const result = aggregateVttRollDetails([
+    { type: 'affliction-cast', sourceCharacterId: 'c1', statsActionId: 'action-1', optLabel: 'Brûlure', createdAt },
+    { type: 'attack', sourceCharacterId: 'c1', statsActionId: 'action-1', optLabel: 'Brûlure', hitD20: 14, createdAt },
+    { type: 'attack-multi', sourceCharacterId: 'c1', statsActionId: 'action-2', optLabel: 'Explosion', hitD20: 12, targets: [{ hit: true }, { hit: true }], createdAt },
+  ]);
+
+  assert.equal(result.byCharacter.c1.combat.canonicalActions, 2);
+});
+
+test('les anciennes lignes par cible d une même attaque sont regroupées', () => {
+  const base = new Date(2026, 7, 11, 12).getTime();
+  const result = aggregateVttRollDetails([
+    { type: 'attack', sourceCharacterId: 'c1', optLabel: 'Double flèche', hitD20: 17, hitTotal: 23, createdAt: new Date(base) },
+    { type: 'attack', sourceCharacterId: 'c1', optLabel: 'Double flèche', hitD20: 17, hitTotal: 23, createdAt: new Date(base + 300) },
+  ]);
+
+  assert.equal(result.byCharacter.c1.combat.canonicalActions, 1);
 });
 
 test('les détails du journal remplacent seulement une couverture plus faible', () => {
@@ -338,7 +497,24 @@ test('les détails du journal remplacent seulement une couverture plus faible', 
     attackResultTotal: 43,
     damageEvents: 3,
     damageTotal: 17,
+    biggestHit: 0,
   });
+});
+
+test('le journal remplace un ancien record et borne un snapshot concurrent', () => {
+  const createdAt = new Date(2026, 7, 11, 12);
+  const details = aggregateVttRollDetails([{
+    type: 'attack', sourceCharacterId: 'c1', hitD20: 14, hitTotal: 19,
+    hit: true, dmgTotal: 9, dmgApplied: 45, newHp: 55, createdAt,
+  }]);
+  assert.equal(details.byCharacter.c1.combat.damageTotal, 9);
+  assert.equal(details.byCharacter.c1.combat.biggestHit, 9);
+
+  const merged = mergeTrackedCombatStats(
+    { attacks: 1, biggestHit: 53, damageEvents: 1, damageTotal: 53 },
+    details.byCharacter.c1.combat,
+  );
+  assert.equal(merged.biggestHit, 9);
 });
 
 test('le journal réattribue les échecs critiques au bon personnage pour le MVP', () => {

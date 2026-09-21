@@ -1,9 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildMvpRawProfile, calibrateReferences, DEFAULT_REFERENCES, scoreMvpAxis, scoreMvpCampaign, scoreMvpSession, scoreMvpView } from '../assets/js/shared/stats-mvp.js';
+import { buildMvpRawProfile, calibrateReferences, DEFAULT_REFERENCES, MVP_AXIS_GUIDE, MVP_SCORING_GUIDE, scoreMvpAxis, scoreMvpCampaign, scoreMvpSession, scoreMvpView } from '../assets/js/shared/stats-mvp.js';
 
 const row = (id, combat = {}, sRolls = 0) => ({ id, name: id, combat, sRolls });
+
+test('le guide MVP public reflète les coefficients et pondérations du calcul', () => {
+  assert.deepEqual(MVP_AXIS_GUIDE.offense.contributions.map(item => item.coef), [1]);
+  assert.deepEqual(MVP_AXIS_GUIDE.support.contributions.map(item => item.coef), [1, 1, 12]);
+  assert.deepEqual(MVP_AXIS_GUIDE.protection.contributions.map(item => item.coef), [12, 3, 0.12]);
+  assert.deepEqual(MVP_AXIS_GUIDE.skill.contributions.map(item => item.coef), [5]);
+  assert.deepEqual(MVP_SCORING_GUIDE.axisWeights, [1, 0.20, 0.05, 0]);
+});
 
 test('le MVP V2 ne recompte ni critiques, ni KO, ni plus gros coup', () => {
   const plain = buildMvpRawProfile(row('dps', { dmgDealt: 40, attacks: 3 }));

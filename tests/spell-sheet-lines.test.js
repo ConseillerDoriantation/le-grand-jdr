@@ -102,10 +102,15 @@ test('Amplification ≥2 SANS Dispersion : la forme est réglable (v2)', () => {
   assert.equal(line(s, 'shape').segment.cur, 'cone');
 });
 
-test('Amplification déplacement : segment zone/dépl, pas de dégâts', () => {
+test('Amplification déplacement : segment zone/dépl + sous-ligne sens, pas de dégâts', () => {
   const s = { types: ['offensif'], counts: { Amplification: 1 }, ampMode: 'deplacement' };
-  assert.deepEqual(ids(s), ['amp']);
+  assert.deepEqual(ids(s), ['amp', 'deplmode']);
   assert.equal(line(s, 'amp').segment.hiddenId, 's-amp-mode');
+  // Sous-ligne : sens du déplacement (soi / pousser / attirer).
+  const seg = line(s, 'deplmode').segment;
+  assert.equal(seg.key, 'deplMode');
+  assert.deepEqual(seg.opts.map(o => o[0]), ['self', 'push', 'pull']);
+  assert.equal(line(s, 'deplmode').sub, true);
 });
 
 test('Enchantement masque la ligne Amplification (Amp booste l’état)', () => {
