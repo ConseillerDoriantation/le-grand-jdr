@@ -131,6 +131,27 @@
   filter: drop-shadow(0 0 6px rgba(157,111,255,0.50));
 }
 .bottom-nav-item--primary:hover:not(.active) .bn-icon { stroke: var(--arcane); }
+.bottom-nav-item--primary.is-session-live { color: #ffb4b4; }
+.bottom-nav-item--primary.is-session-live .bn-icon {
+  stroke: #f87171;
+  filter: drop-shadow(0 0 7px rgba(239,68,68,.75));
+}
+.bottom-nav-item--primary.is-session-live::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: calc(50% - 18px);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239,68,68,.18), 0 0 9px #ef4444;
+  animation: bottom-nav-live-pulse 1.05s ease-in-out infinite;
+}
+@keyframes bottom-nav-live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .35; transform: scale(.7); }
+}
 
 /* ═══════════════════════════════════════════════════════════
    MORE-MENU  (défini globalement, affiché < 768px via .show)

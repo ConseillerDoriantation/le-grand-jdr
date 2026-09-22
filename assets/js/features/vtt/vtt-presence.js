@@ -26,6 +26,7 @@ let _presLastWriteAt = 0;
 let _presVisibility = null; // listener visibilitychange (pause heartbeat onglet masqué)
 let _presUnload = null; // listener beforeunload VTT
 let _presRefresh  = null; // intervalId du rafraîchissement présence
+let _sessionUpdating = false;
 
 // Démarre le heartbeat de présence (appelé au montage de la table).
 function _startPresence() {
@@ -79,19 +80,30 @@ function _renderSessionBtn() {
   if (!btn) return;
   const live = !!VS.session?.live;
   btn.classList.toggle('is-live', live);
-  btn.innerHTML = live
-    ? '<span class="vtt-canvas-ctl-icon vtt-live-dot" aria-hidden="true"></span><span class="vtt-canvas-ctl-copy"><strong>En direct</strong><small>Terminer la session</small></span>'
-    : '<span class="vtt-canvas-ctl-icon" aria-hidden="true">▶</span><span class="vtt-canvas-ctl-copy"><strong>Session</strong><small>Démarrer</small></span>';
-  btn.setAttribute('aria-label', live ? 'Terminer la session en cours' : 'Démarrer la session');
+  btn.classList.toggle('is-pending', _sessionUpdating);
+  btn.disabled = _sessionUpdating;
+  btn.setAttribute('aria-busy', String(_sessionUpdating));
+  btn.innerHTML = _sessionUpdating
+    ? '<span class="vtt-session-spinner" aria-hidden="true"></span><span class="vtt-canvas-ctl-copy"><strong>Mise à jour…</strong><small>Un instant</small></span>'
+    : live
+      ? '<span class="vtt-live-status" aria-hidden="true"><i></i><b>LIVE</b></span><span class="vtt-canvas-ctl-copy"><strong>Session en direct</strong><small>Cliquer pour terminer</small></span>'
+      : '<span class="vtt-session-play" aria-hidden="true">▶</span><span class="vtt-canvas-ctl-copy"><strong>Démarrer la session</strong><small>Prévenir les joueurs</small></span>';
+  btn.setAttribute('aria-label', live ? 'Terminer la session en cours' : 'Démarrer la session et prévenir les joueurs');
   btn.title = live
-    ? 'Session déclarée en cours — clique pour la terminer'
+    ? 'Session en direct — cliquer pour la terminer'
     : 'Démarrer la session (prévient les joueurs qui rejoignent)';
 }
 async function _vttToggleSessionLive() {
-  if (!STATE.isAdmin) return;
-  const live = !VS.session?.live;
+  if (!STATE.isAdmin || _sessionUpdating) return;
+  const wasLive = !!VS.session?.live;
+  if (wasLive && !await confirmModal(
+    'Les joueurs ne verront plus la session comme étant en direct. La table et ses données resteront intactes.',
+    { title: 'Terminer la session ?', confirmLabel: 'Terminer', cancelLabel: 'Continuer à jouer', icon: '⏹️' },
+  )) return;
+  const live = !wasLive;
   const techniqueSessionKey = live ? Date.now() : (VS.session?.techniqueSessionKey || null);
   const previous = { ...VS.session };
+  _sessionUpdating = true;
   VS.session = { ...VS.session, live, ...(live ? { techniqueSessionKey } : {}) };
   _renderSessionBtn();
   try {
@@ -101,8 +113,10 @@ async function _vttToggleSessionLive() {
     showNotif(live ? '🔴 Session déclarée en cours.' : '⏹ Session terminée.', 'success');
   } catch {
     VS.session = previous;
-    _renderSessionBtn();
     showNotif('Erreur d\'enregistrement de la session.', 'error');
+  } finally {
+    _sessionUpdating = false;
+    _renderSessionBtn();
   }
 }
 
