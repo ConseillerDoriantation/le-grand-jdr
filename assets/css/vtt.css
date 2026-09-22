@@ -5875,7 +5875,30 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-log--savefail { --log-c: #ef4444; }
 .vtt-log--dot    { --log-c: #dc2626; }
 .vtt-log--roll   { --log-c: #e8b84b; }
+.vtt-log--gm-hidden {
+  --log-c: #a78bfa;
+  border: 1px solid color-mix(in srgb, #a78bfa 46%, transparent);
+  border-left-width: 3px;
+  background: linear-gradient(135deg, color-mix(in srgb, #7c3aed 20%, transparent), rgba(255,255,255,.025));
+  box-shadow: inset 0 0 18px color-mix(in srgb, #7c3aed 9%, transparent);
+}
 .vtt-log--chat   { --log-c: transparent; background: rgba(255,255,255,.02); border-left: 0; padding: .25rem .55rem; }
+
+.vtt-log-private-note {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: .35rem;
+  padding: .28rem .45rem;
+  border-radius: 7px;
+  color: #ddd0ff;
+  background: color-mix(in srgb, #7c3aed 24%, rgba(0,0,0,.24));
+  border: 1px solid color-mix(in srgb, #a78bfa 36%, transparent);
+  font-size: .68rem;
+  line-height: 1.2;
+}
+.vtt-log-private-note strong { text-transform: uppercase; letter-spacing: .045em; }
+.vtt-log-private-note em { justify-self: end; color: #b9a8d9; font-style: normal; font-size: .62rem; }
 
 /* ── Header : Source ▸ Cible + label sort + badges ─────────────────── */
 .vtt-log-head {
@@ -5973,7 +5996,11 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-log-badge--ok      { color: var(--emerald); background: rgba(34,195,142,.18); }
 .vtt-log-badge--fail    { color: #ef4444; background: rgba(239,68,68,.18); }
 .vtt-log-badge--pm      { color: #c4b5fd; background: rgba(180,127,255,.18); }
-.vtt-log-badge--hidden  { color: #c4b5fd; background: rgba(120,80,200,.22); }
+.vtt-log-badge--hidden  {
+  color: #eadfff;
+  background: rgba(124,58,237,.32);
+  border: 1px solid rgba(196,181,253,.35);
+}
 
 /* ── Body : ligne principale avec résultat ───────────────────────────── */
 .vtt-log-body {
@@ -7423,17 +7450,18 @@ html:not([data-theme="light"]) .vtt-root {
 }
 .vtt-dice-die-btn:hover { background: var(--surface-3); color: var(--text); border-color: var(--border-strong); }
 .vtt-dice-die-btn.active {
-  color: var(--arcane-light);
-  background: color-mix(in srgb, var(--arcane) 15%, transparent);
-  border-color: color-mix(in srgb, var(--arcane) 45%, transparent);
+  color: var(--arcane-light, #c9b8ff);
+  background: color-mix(in srgb, var(--arcane) 22%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--arcane) 72%, var(--border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arcane) 30%, transparent);
 }
 .vtt-dice-die-cnt {
-  position: absolute; top: -4px; right: -4px; min-width: 17px; height: 17px; padding: 0 3px;
-  display: grid; place-items: center; border-radius: var(--r-full); cursor: pointer;
-  font-size: 9.5px; font-weight: 700; color: #12161d;
-  background: var(--arcane-light); border: 1.5px solid var(--surface-1);
+  position: absolute; top: -6px; right: -6px; min-width: 24px; height: 20px; padding: 0 5px;
+  display: grid; place-items: center; border-radius: var(--r-full); pointer-events: none;
+  font-size: 10px; line-height: 1; font-weight: 800; color: #fff;
+  background: var(--arcane, #9d6fff); border: 2px solid var(--surface-1, #111827);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 55%);
 }
-.vtt-dice-die-cnt:hover { background: var(--crimson); color: #fff; }
 
 /* Historique UNIFIÉ : compétences ET dés (clic = recharger · 🔁 = relancer) */
 .vtt-dice-hist { display: flex; flex-direction: column; gap: 4px; }
@@ -7472,7 +7500,14 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-dice-sel-f em { font-style: normal; font-size: 12px; color: var(--amber); }
 .vtt-dice-sel.none .vtt-dice-sel-b b { font-family: var(--font-body); font-size: 12.5px; font-weight: 500; color: var(--text-muted); }
 
-.vtt-dice-knobs { display: flex; align-items: center; gap: 7px; }
+.vtt-dice-knobs {
+  display: grid;
+  grid-template-columns: max-content max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+}
 .vtt-dice-mode { display: flex; gap: 2px; padding: 2px; flex: none; border-radius: var(--r-full); background: var(--surface-1); border: 1px solid var(--border); }
 .vtt-dice-mode button { width: 30px; height: 25px; border: 0; border-radius: var(--r-full); background: none; cursor: pointer; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: var(--text-muted); transition: .14s; }
 .vtt-dice-mode button:hover { color: var(--text-soft); }
@@ -7492,12 +7527,20 @@ html:not([data-theme="light"]) .vtt-root {
   flex: none; height: 29px; padding: 0 10px; border-radius: var(--r-full); cursor: pointer;
   display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
   color: var(--text-muted); background: none; border: 1px solid var(--border-md);
+  justify-self: end;
 }
 .vtt-dice-hide:hover { color: var(--text-soft); background: var(--surface-2); }
-.vtt-dice-hide.on { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, transparent); background: color-mix(in srgb, var(--amber) 10%, transparent); }
+.vtt-dice-hide.on {
+  color: #e9ddff;
+  border-color: color-mix(in srgb, var(--arcane) 72%, var(--border));
+  background: color-mix(in srgb, var(--arcane) 28%, var(--surface-2));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--arcane) 25%, transparent), 0 0 12px color-mix(in srgb, var(--arcane) 18%, transparent);
+}
 .vtt-dice-go {
-  flex: 1; height: 29px; border: 0; border-radius: var(--r-full); cursor: pointer;
+  grid-column: 1 / -1;
+  width: 100%; min-width: 0; height: 31px; border: 0; border-radius: var(--r-full); cursor: pointer;
   font-size: 13px; font-weight: 700; color: #fff; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
   background: linear-gradient(180deg, var(--gold), var(--gold-dark));
   box-shadow: 0 6px 18px var(--gold-glow);
 }

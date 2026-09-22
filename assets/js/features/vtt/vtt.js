@@ -2001,8 +2001,10 @@ function _buildShape(t) {
       return;
     }
 
-    // Mode ciblage multi-cibles actif → basculer la cible
-    if (_mtCtx && t.id !== _mtCtx.srcId) {
+    // Mode ciblage multi-cibles actif → basculer toute cible, lanceur compris.
+    // Le clic sur son propre token ne doit jamais retomber sur l'ouverture des
+    // actions : un soin/buff multicible peut tout à fait inclure le lanceur.
+    if (_mtCtx) {
       _mtToggleTarget(t.id);
       return;
     }
