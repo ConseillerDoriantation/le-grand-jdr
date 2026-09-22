@@ -11,12 +11,13 @@
 // Le jet est diffusé dans le log VTT (rendu local immédiat puis Firestore).
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { serverTimestamp } from '../../config/firebase.js';
+import { addDoc, serverTimestamp } from '../../config/firebase.js';
 import { STATE } from '../../core/state.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _esc } from '../../shared/html.js';
 import { VS } from './vtt-state.js';
 import { _vttPublishOptimisticLog } from './vtt-chat.js';
+import { _logGmCol } from './vtt-refs.js';
 
 // ── État local (partie « dés libres » + sélection) ──────────────────
 let _diceFormula = {};          // { faces→count } ex: { 20:2, 6:1 }
@@ -117,7 +118,15 @@ function _vttDiceSelectSkill(name, stat) {
   _diceFormula = {}; _diceQuery = '';
   _renderDicePanel();
 }
-function _vttDiceAddDie(f) { _diceFormula[f] = (_diceFormula[f] || 0) + 1; _diceSel = null; _renderDicePanel(); }
+function _vttDiceAddDie(f) {
+  // Un premier dé libre démarre un nouveau jet : il ne doit pas hériter du
+  // mode avantage/désavantage de la compétence précédemment sélectionnée.
+  // Les clics suivants conservent en revanche le mode choisi pour ce jet libre.
+  if (!_hasDice()) VS.rollMode = 'normal';
+  _diceFormula[f] = (_diceFormula[f] || 0) + 1;
+  _diceSel = null;
+  _renderDicePanel();
+}
 function _vttDiceRemoveDie(f) { if (_diceFormula[f] > 1) _diceFormula[f]--; else delete _diceFormula[f]; _renderDicePanel(); }
 function _vttDiceClear() { _diceFormula = {}; _renderDicePanel(); }
 function _vttDiceMode(m) { VS.rollMode = m; _renderDicePanel(); }               // PARTAGÉ
@@ -206,7 +215,8 @@ function _renderDicePanel() {
       <div class="vtt-dice-sec-hd"><span>Dés libres</span>${_hasDice() ? `<button type="button" class="vtt-dice-sec-btn vtt-dice-sec-btn--danger" data-vtt-fn="_vttDiceClear">Vider</button>` : ''}</div>
       <div class="vtt-dice-grid">${_ALL_DICE.map(f => {
         const cnt = _diceFormula[f] || 0; const lbl = f === 100 ? '%' : f;
-        return `<button type="button" class="vtt-dice-die-btn${cnt ? ' active' : ''}" data-die="${f}" data-vtt-fn="_vttDiceAddDie" data-vtt-args="${f}" title="Clic gauche : +1 d${lbl} · clic droit : −1">d${lbl}${cnt ? `<span class="vtt-dice-die-cnt">${cnt}</span>` : ''}</button>`;
+        const selectedLabel = cnt ? ` · ${cnt} sélectionné${cnt > 1 ? 's' : ''}` : '';
+        return `<button type="button" class="vtt-dice-die-btn${cnt ? ' active' : ''}" data-die="${f}" data-vtt-fn="_vttDiceAddDie" data-vtt-args="${f}" aria-pressed="${cnt > 0}" aria-label="d${lbl}${selectedLabel}" title="Clic gauche : +1 d${lbl} · clic droit : −1">d${lbl}${cnt ? `<span class="vtt-dice-die-cnt" aria-hidden="true">×${cnt}</span>` : ''}</button>`;
       }).join('')}</div>
     </section>` : '';
 
@@ -240,7 +250,7 @@ function _renderDicePanel() {
           <input id="vtt-bonus-val" type="number" value="${bonus}" min="-20" max="20" data-vtt-fn="_vttDiceBonusSet" data-vtt-on="input" data-vtt-args="$value">
           <button type="button" data-vtt-fn="_vttDiceBonusStep" data-vtt-args="1">＋</button>
         </div>
-        ${isMj ? `<button type="button" class="vtt-dice-hide${VS.rollHidden ? ' on' : ''}" id="vtt-roll-hide-btn" data-vtt-fn="_vttToggleRollHidden" title="Jet caché : seul le MJ voit le résultat">${VS.rollHidden ? '🕶' : '👁'}</button>` : ''}
+        ${isMj ? `<button type="button" class="vtt-dice-hide${VS.rollHidden ? ' on' : ''}" id="vtt-roll-hide-btn" data-vtt-fn="_vttToggleRollHidden" aria-pressed="${VS.rollHidden}" title="${VS.rollHidden ? 'Jet privé : seul le MJ verra le résultat' : 'Jet public : les joueurs verront le résultat'}"><span aria-hidden="true">${VS.rollHidden ? '🔒' : '👁'}</span><span>${VS.rollHidden ? 'MJ seul' : 'Public'}</span></button>` : ''}
         <button type="button" class="vtt-dice-go${cur && cur.kind !== 'skill' ? ' free' : ''}" ${cur ? `data-vtt-fn="${cur.go.fn}" data-vtt-args="${_esc(cur.go.args)}"` : 'disabled'}>${cur ? (cur.kind === 'skill' ? `Lancer ${_esc(cur.label)}` : `Lancer ${_esc(cur.formula)}`) : 'Lancer'}</button>
       </div>
     </div>`;
@@ -319,12 +329,20 @@ function _vttDiceRoll(keepPanel) {
   else if (bonus < 0) fmtParts.push(String(bonus));
   const formula = fmtParts.join('+');
 
-  _vttPublishOptimisticLog({
+  const gmOnly = STATE.isAdmin && VS.rollHidden;
+  const payload = {
     type: 'dice-free', authorId: STATE.user?.uid || null, authorName,
-    formula, groups, bonus, mode, total,
+    formula, groups, bonus, mode, total, gmOnly,
     createdAt: serverTimestamp(),
-  }).catch(() => {});
-  showNotif(`🎲 ${formula} = ${total}`, 'success');
+  };
+  const publish = gmOnly ? addDoc(_logGmCol(), payload) : _vttPublishOptimisticLog(payload);
+  Promise.resolve(publish).catch(error => showNotif(`Erreur jet : ${error.message}`, 'error'));
+  showNotif(
+    gmOnly
+      ? `🔒 Jet privé MJ : ${formula} = ${total} · invisible des joueurs`
+      : `🎲 ${formula} = ${total}`,
+    'success',
+  );
 
   // Historique UNIFIÉ (le plus récent en tête).
   VS.rollHistory.unshift({ kind: 'free', label: 'Jet libre', formula: { ..._diceFormula }, bonus, mode, formulaStr: formula, total });

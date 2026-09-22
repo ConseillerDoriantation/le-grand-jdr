@@ -962,7 +962,7 @@ export function _renderChatLogImpl(msgs) {
     const skillStr = m.rollSkillBonus > 0 ? `+${m.rollSkillBonus}` : m.rollSkillBonus < 0 ? `${m.rollSkillBonus}` : '';
     const skillLbl = m.rollSkillLevel === 'expert' ? 'expertise' : 'maîtrise';
     const badges = [
-      m.gmOnly ? `<span class="vtt-log-badge vtt-log-badge--hidden" title="Jet caché — invisible des joueurs">🕶 Caché</span>` : '',
+      m.gmOnly ? `<span class="vtt-log-badge vtt-log-badge--hidden" title="Jet privé — invisible des joueurs">🔒 MJ seul</span>` : '',
       m.isCrit ? `<span class="vtt-log-badge vtt-log-badge--crit">✨ CRIT</span>` : '',
       m.isFumble ? `<span class="vtt-log-badge vtt-log-badge--fumble">💀 FUMBLE</span>` : '',
       _advBadge(m.rollMode === 'advantage' ? 'adv' : m.rollMode === 'disadvantage' ? 'dis' : null),
@@ -980,7 +980,10 @@ export function _renderChatLogImpl(msgs) {
       <strong class="vtt-log-result" style="color:${resultCol};font-size:1.3rem">${m.rollResult ?? '?'}</strong>
       <span class="vtt-log-result-sub">${diceStr} ${modStr ? `${modStr}${sub(m.rollStat||'')}` : ''} ${skillStr ? `${skillStr}${sub(skillLbl)}` : ''} ${equipStr ? `${equipStr}${sub('équip.')}` : ''} ${bonusStr ? `${bonusStr}${sub('bonus')}` : ''}</span>
     </div>`;
-    return `<div class="vtt-log vtt-log--roll">${head}${body}</div>`;
+    const privateNote = m.gmOnly
+      ? `<div class="vtt-log-private-note"><span>🔒</span><strong>Jet privé du MJ</strong><em>Invisible pour les joueurs</em></div>`
+      : '';
+    return `<div class="vtt-log vtt-log--roll${m.gmOnly ? ' vtt-log--gm-hidden' : ''}">${privateNote}${head}${body}</div>`;
   };
 
   /** Jet libre formule (dice-free) */
@@ -994,10 +997,13 @@ export function _renderChatLogImpl(msgs) {
       return `${g.count}d${g.faces}[${g.rolls.map(r=>`<strong>${r}</strong>`).join(',')}]`;
     });
     if (m.bonus) detail.push(m.bonus>0 ? `<span style="color:#e8b84b">+${m.bonus}</span>` : `<span style="color:#ef4444">${m.bonus}</span>`);
-    const badges = m.mode === 'advantage'
-      ? `<span class="vtt-log-badge vtt-log-badge--adv">⬆ ADV</span>`
-      : m.mode === 'disadvantage'
-        ? `<span class="vtt-log-badge vtt-log-badge--dis">⬇ DIS</span>` : '';
+    const badges = [
+      m.gmOnly ? `<span class="vtt-log-badge vtt-log-badge--hidden" title="Jet privé — invisible des joueurs">🔒 MJ seul</span>` : '',
+      m.mode === 'advantage'
+        ? `<span class="vtt-log-badge vtt-log-badge--adv">⬆ ADV</span>`
+        : m.mode === 'disadvantage'
+          ? `<span class="vtt-log-badge vtt-log-badge--dis">⬇ DIS</span>` : '',
+    ].join('');
     const head = _header({
       srcImg: null, srcName: m.authorName || '?',
       label: m.formula || 'Jet libre', badges, ts,
@@ -1007,7 +1013,10 @@ export function _renderChatLogImpl(msgs) {
       <strong class="vtt-log-result" style="color:${totalCol};font-size:1.3rem">${m.total}</strong>
       <span class="vtt-log-result-sub">${detail.join(' · ')}</span>
     </div>`;
-    return `<div class="vtt-log vtt-log--roll">${head}${body}</div>`;
+    const privateNote = m.gmOnly
+      ? `<div class="vtt-log-private-note"><span>🔒</span><strong>Jet privé du MJ</strong><em>Invisible pour les joueurs</em></div>`
+      : '';
+    return `<div class="vtt-log vtt-log--roll${m.gmOnly ? ' vtt-log--gm-hidden' : ''}">${privateNote}${head}${body}</div>`;
   };
 
   /** Message chat normal */
