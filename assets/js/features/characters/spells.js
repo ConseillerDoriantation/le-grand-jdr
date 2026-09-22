@@ -1352,6 +1352,38 @@ function _sortsRestoreSearchFocus() {
   const n = el.value.length;
   try { el.setSelectionRange(n, n); } catch { /* type non textuel */ }
 }
+
+// scrollIntoView() déplace aussi l'axe horizontal. Dans la fiche Personnage,
+// #char-sheet-area masque cet axe mais reste défilable par script : ouvrir une
+// fiche de sort pouvait donc repousser le portrait et la navigation hors écran.
+// On ne corrige ici que l'axe vertical, sans jamais toucher à scrollLeft.
+function _sortsScrollIntoViewY(el, block = 'nearest') {
+  if (!el) return;
+  const sheetScroller = document.getElementById('char-sheet-area');
+  const usesSheetScroller = sheetScroller
+    && sheetScroller.scrollHeight > sheetScroller.clientHeight
+    && ['auto', 'scroll'].includes(getComputedStyle(sheetScroller).overflowY);
+  const viewport = usesSheetScroller
+    ? sheetScroller.getBoundingClientRect()
+    : { top: 0, bottom: window.innerHeight, height: window.innerHeight };
+  const rect = el.getBoundingClientRect();
+  const topInset = usesSheetScroller ? 12 : 72;
+  const viewTop = viewport.top + topInset;
+  const viewBottom = viewport.bottom - 16;
+  let delta = 0;
+
+  if (block === 'start') delta = rect.top - viewTop;
+  else if (block === 'center') delta = rect.top + rect.height / 2 - (viewTop + viewBottom) / 2;
+  else if (rect.top < viewTop) delta = rect.top - viewTop;
+  else if (rect.bottom > viewBottom) delta = rect.bottom - viewBottom;
+
+  if (Math.abs(delta) < 1) return;
+  if (usesSheetScroller) {
+    sheetScroller.scrollTo({ top: sheetScroller.scrollTop + delta, behavior: 'smooth' });
+  } else {
+    window.scrollBy({ top: delta, behavior: 'smooth' });
+  }
+}
 function _sortsSetSearch(v, opts = {}) {
   _sortsSearch = v || '';
   if (_sortsSearchTimer) clearTimeout(_sortsSearchTimer);
@@ -1578,7 +1610,7 @@ function _sortsFocusCategory(id) {
   const scrollToCat = () => {
     const target = [...document.querySelectorAll('.cs-sort-cat-block')]
       .find(el => el.dataset.catId === id);
-    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    _sortsScrollIntoViewY(target, 'start');
   };
   if (_sortsCatCollapsed?.[id]) {
     _sortsCatCollapsed[id] = false;
@@ -1596,8 +1628,7 @@ function _sortsFocusCategorySelect(el) {
     _sortsFocusCategory(id);
     return;
   }
-  document.querySelector('.cs-spellbook-collection')
-    ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  _sortsScrollIntoViewY(document.querySelector('.cs-spellbook-collection'), 'start');
 }
 
 function _sortsToggleDuplicateRecipes() {
@@ -1634,8 +1665,10 @@ function _sortsInspectSpell(index) {
   _sortsInspectorKey = opening ? key : '';
   _sortsRerender();
   if (opening) {
-    requestAnimationFrame(() => document.querySelector('.cs-spellinspector')
-      ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+    requestAnimationFrame(() => _sortsScrollIntoViewY(
+      document.querySelector('.cs-spellinspector'),
+      'nearest',
+    ));
   }
 }
 
@@ -1647,7 +1680,7 @@ function _sortsCloseInspector() {
 function _sortsFocusComparePanel() {
   requestAnimationFrame(() => requestAnimationFrame(() => {
     const panel = document.querySelector('.cs-spellcompare');
-    panel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    _sortsScrollIntoViewY(panel, 'start');
     panel?.focus({ preventScroll: true });
   }));
 }
