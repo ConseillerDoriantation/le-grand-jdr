@@ -18844,12 +18844,6 @@ button.cs-sock.is-empty:hover { border-color: rgba(232,184,75,.55); color: var(-
 .cs-v3 .cs-spellinspector-mjlimits i {
   font-style: normal;
 }
-@media (min-width: 1500px) {
-  .cs-v3 .cs-spellbook-collection .cs-spellcard-grid > .cs-spellinspector {
-    margin-left: clamp(0px, 4vw, 70px);
-  }
-}
-
 /* Sorts : identite d'abord, effet ensuite, composition en dernier. */
 .cs-v3 .is-cards .cs-spellcard:not(.is-open) .cs-spellcard-name,
 .cs-v3 .is-list .cs-spellcard:not(.is-open) .cs-spellcard-name,
@@ -19811,10 +19805,22 @@ button.cs-prepared-spell:hover {
   box-sizing: border-box;
 }
 
-.cs-v3 .cs-spellbook-collection .cs-spellcard-grid > .cs-spellinspector {
+/* Les deux grilles parentes doivent elles aussi pouvoir se contracter. Sans
+   cela, un inspecteur riche peut augmenter la largeur minimale de main-col et
+   dépasser du côté droit au lieu de réorganiser son contenu. */
+.cs-v3 .main-col,
+.cs-v3 .tab-body-v3:has(.cs-sorts-v3) {
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
+}
+
+.cs-v3 .cs-spellbook-collection .cs-spellcard-grid > .cs-spellinspector {
+  min-width: 0;
+  max-width: 100%;
+  margin-left: 0;
+  box-sizing: border-box;
+  justify-self: stretch;
   grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr);
 }
 
