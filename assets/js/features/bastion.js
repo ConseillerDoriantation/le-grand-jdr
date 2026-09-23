@@ -70,6 +70,8 @@ const STORE = {
   investments: [],             // cagnotte ciblée par salle (1 doc / joueur / perso / salle)
   investmentInProgress: false,
   tab:            null,          // onglet actif : 'salles' | 'mur' | 'coffre' (résolu via _bsGetTab)
+  roomSel:        null,          // slug de la salle sélectionnée (fiche de droite)
+  roomFilter:     'all',         // 'all'|'built'|'funding'|'building'|'todo'
 };
 
 
@@ -2639,46 +2641,205 @@ function _bastionProductionSummary(b) {
   return summary;
 }
 
-function _renderRoomCard(def, b) {
-  const isMj = STATE.isAdmin;
-  const curNiv  = _roomNiveau(b, def.slug);
+// Pastilles de niveau (I·II·III, hachurée = cible en chantier) ; Entrepôt = texte.
+function _roomPips(def, b) {
+  if (def.unlimited) {
+    const niv = _roomNiveau(b, def.slug);
+    return `<span class="bs-pips-unl">Niv. ${niv} · ${_bastionCapacity(b)} pl.</span>`;
+  }
+  const cur = _roomNiveau(b, def.slug);
+  const building = _roomBuilding(b, def.slug);
+  const target = b?.salles?.[def.slug]?.targetNiveau || 0;
+  let pips = '';
+  for (let n = 1; n <= 3; n++) {
+    const on = n <= cur, build = building && n === target;
+    pips += `<i class="bs-pip${on ? ' on' : ''}${build ? ' build' : ''}"></i>`;
+  }
+  return `<span class="bs-pips" aria-label="Niveau ${cur}/3">${pips}</span>`;
+}
+
+// Prédicat de filtre (partagé rendu + compteurs).
+function _roomMatchesFilter(def, b, f) {
+  if (f === 'all') return true;
+  const cur = _roomNiveau(b, def.slug);
+  const building = _roomBuilding(b, def.slug);
+  if (f === 'building') return building;
+  if (f === 'built')    return cur > 0 && !building;
+  if (f === 'todo')     return cur === 0 && !building;
+  if (f === 'funding') {
+    if (building || cur >= _maxLevel(def)) return false;
+    const invested = _roomInvestmentAvailable(b, def.slug);
+    const cost = _getNiveauData(def, cur + 1)?.cout || 0;
+    return invested > 0 && invested < cost;
+  }
+  return true;
+}
+
+// Ligne compacte : icône, nom + pastilles, ce qu'elle apporte (2 lignes), état.
+function _renderRoomRow(def, b) {
+  const cur = _roomNiveau(b, def.slug);
   const building = _roomBuilding(b, def.slug);
   const max = _maxLevel(def);
-  const targetNiv = curNiv >= max ? null : curNiv + 1;
-  const nextDef = targetNiv ? _getNiveauData(def, targetNiv) : null;
-  const isUnlimited = !!def.unlimited;
-  const supportsPersonnel = !isUnlimited; // Entrepôt n'a pas de PNJ assignable
-  const invested = nextDef ? _roomInvestmentAvailable(b, def.slug) : 0;
-  const funding = nextDef ? roomFundingPlan(nextDef.cout, invested, b.or || 0) : null;
+  const isUnl = !!def.unlimited;
+  const selected = STORE.roomSel === def.slug;
 
-  // Etat global de la carte
-  const status = building ? 'building' : (curNiv > 0 ? 'active' : 'available');
-  const fundingMissing = funding && !funding.canFund;
-
-  const sallesData = b.salles?.[def.slug];
-
-  // Label de niveau (I/II/III pour normales, "1/2/.../99" pour unlimited)
-  const niveauLabel = (n) => isUnlimited ? `${n}` : NIVEAU_LABEL[n];
-
-  // Production actuelle (niveau actif)
-  let prodHtml = '';
-  let bonusHtml = '';
-  if (curNiv > 0 && !building) {
-    const niveauDef = _getNiveauData(def, curNiv) || {};
+  let apporte;
+  if (cur > 0) {
+    const nd = _getNiveauData(def, cur) || {};
     const parts = [];
-    if (niveauDef.prod?.or > 0) parts.push(`<span class="bs-prod-or">+${niveauDef.prod.or} or</span>`);
-    for (const item of (niveauDef.prod?.items || [])) {
-      parts.push(`<span class="bs-prod-item">${item.emoji} ${item.nom}${item.q > 1 ? ` ×${item.q}` : ''}</span>`);
-    }
-    if (parts.length) prodHtml = `<div class="bs-room-prod"><span class="bs-prod-lbl">Production / période :</span> ${parts.join(' · ')}</div>`;
-    if (niveauDef.bonus) bonusHtml = `<div class="bs-room-bonus" title="Bonus passif au groupe">🎁 ${_esc(niveauDef.bonus)}</div>`;
+    if (nd.prod?.or > 0) parts.push(`+${nd.prod.or} or`);
+    for (const it of (nd.prod?.items || [])) parts.push(`${it.emoji || ''} ${it.nom}${it.q > 1 ? ` ×${it.q}` : ''}`);
+    if (isUnl) parts.push(`Capacité ${_bastionCapacity(b)}`);
+    apporte = `<div class="bs-rr-prod">${parts.length ? _esc(parts.join(' · ')) : '—'}</div>`
+      + (nd.bonus ? `<div class="bs-rr-bonus">🎁 ${_esc(nd.bonus)}</div>` : '');
+  } else {
+    apporte = `<div class="bs-rr-prod bs-rr-muted">Non construite</div>`;
   }
 
-  // Personnel assigné à cette salle (slots = niveau)
-  let personnelHtml = '';
-  if (supportsPersonnel && curNiv > 0 && !building) {
+  let state;
+  if (building) {
+    state = `<div class="bs-rr-state is-build">🏗 ${b.salles[def.slug].weeksLeftToBuild} pér.</div>`;
+  } else if (cur >= max) {
+    state = `<div class="bs-rr-state is-max">✦ Max</div>`;
+  } else {
+    const nd = _getNiveauData(def, cur + 1) || { cout: 0 };
+    const invested = _roomInvestmentAvailable(b, def.slug);
+    const shown = Math.min(invested, nd.cout);
+    const pct = nd.cout > 0 ? Math.min(100, Math.round(shown / nd.cout * 100)) : 0;
+    state = `<div class="bs-rr-state is-fund">
+      <span>${shown}/${nd.cout} or</span>
+      <i class="bs-rr-bar"><b style="width:${pct}%;background:${def.color}"></b></i>
+    </div>`;
+  }
+
+  return `<button type="button" class="bs-room-row${selected ? ' is-selected' : ''}${building ? ' is-building' : ''}" style="--c:${def.color}"
+      data-action="_bastionSelectRoom" data-slug="${_esc(def.slug)}" aria-pressed="${selected}">
+    <span class="bs-rr-emoji">${def.emoji}</span>
+    <div class="bs-rr-main">
+      <div class="bs-rr-top"><span class="bs-rr-name">${_esc(def.nom)}</span>${_roomPips(def, b)}</div>
+      ${apporte}
+    </div>
+    ${state}
+  </button>`;
+}
+
+// Fiche collante : en-tête, Ce qu'elle apporte, Cotisation (+ chantier MJ), Paliers, Personnel.
+function _renderRoomDetail(def, b) {
+  if (!def) return `<div class="bs-fiche bs-fiche-empty">Sélectionne une salle pour voir ses détails.</div>`;
+  const isMj = STATE.isAdmin;
+  const cur = _roomNiveau(b, def.slug);
+  const building = _roomBuilding(b, def.slug);
+  const max = _maxLevel(def);
+  const isUnl = !!def.unlimited;
+  const nivLbl = (n) => isUnl ? `${n}` : (NIVEAU_LABEL[n] || n);
+  const target = cur >= max ? null : cur + 1;
+  const nextDef = target ? _getNiveauData(def, target) : null;
+
+  const header = `<div class="bs-fiche-hd">
+    <span class="bs-fiche-emoji">${def.emoji}</span>
+    <div class="bs-fiche-ttl">
+      <h3>${_esc(def.nom)}</h3>
+      <small>${cur > 0 ? `Niv. ${nivLbl(cur)}${isUnl ? ` / ${max}` : ''}` : 'Non construite'}${building ? ` · 🏗 → ${nivLbl(b.salles[def.slug].targetNiveau)}` : ''}</small>
+    </div>
+    ${isMj && !isUnl ? `<button class="btn btn-outline btn-sm" data-action="_bastionEditRoom" data-slug="${_esc(def.slug)}">✏️ Modifier</button>` : ''}
+  </div>`;
+
+  // Ce qu'elle apporte (niveau actuel, sinon aperçu niveau I).
+  const showNiv = cur > 0 ? cur : 1;
+  const apDef = _getNiveauData(def, showNiv) || {};
+  const apParts = [];
+  if (apDef.prod?.or > 0) apParts.push(`<li>🪙 +${apDef.prod.or} or / période</li>`);
+  for (const it of (apDef.prod?.items || [])) apParts.push(`<li>${it.emoji || '📦'} ${_esc(it.nom)}${it.q > 1 ? ` ×${it.q}` : ''} / période</li>`);
+  if (isUnl) apParts.push(`<li>📦 Capacité du coffre : ${20 + showNiv * (def.capacitePerLevel || 10)} objets</li>`);
+  if (apDef.bonus) apParts.push(`<li>🎁 ${_esc(apDef.bonus)}</li>`);
+  const apporte = `<div class="bs-fiche-sec">
+    <h4>Ce qu'elle apporte${cur > 0 ? '' : ' (niveau I)'}</h4>
+    <ul class="bs-fiche-list">${apParts.join('') || '<li class="bs-rr-muted">Aucun effet direct.</li>'}</ul>
+  </div>`;
+
+  // Cotisation vers le niveau suivant (ou encart chantier).
+  let fund;
+  if (building) {
+    const s = b.salles[def.slug];
+    const totalSem = _getNiveauData(def, s.targetNiveau)?.semaines || 1;
+    const pct = totalSem > 0 ? Math.round((totalSem - s.weeksLeftToBuild) / totalSem * 100) : 0;
+    fund = `<div class="bs-fiche-sec">
+      <h4>🏗 Chantier en cours</h4>
+      <div class="bs-fiche-fundbar"><i style="width:${pct}%;background:${def.color}"></i></div>
+      <p class="bs-fiche-note">Niv. ${nivLbl(s.targetNiveau)} — ${s.weeksLeftToBuild} période(s) restante(s).</p>
+      ${isMj ? `<button class="btn btn-outline btn-sm bs-fiche-cancel" data-action="_bastionCancelBuild" data-slug="${_esc(def.slug)}">✖ Annuler le chantier</button>` : ''}
+    </div>`;
+  } else if (nextDef) {
+    const invested = _roomInvestmentAvailable(b, def.slug);
+    const shown = Math.min(invested, nextDef.cout);
+    const remaining = Math.max(0, nextDef.cout - invested);
+    const pct = nextDef.cout > 0 ? Math.min(100, Math.round(shown / nextDef.cout * 100)) : 100;
+    const contributors = _roomInvestmentContributors(def.slug);
+    const chars = _eligibleChars();
+    const scope = _bastionScopeChar();
+    const plan = roomFundingPlan(nextDef.cout, invested, b.or || 0);
+    const contribHtml = contributors.length
+      ? `<div class="bs-fiche-contribs">${contributors.map(c => `<span><b>${_esc(c.charName)}</b> ${c.amount} or</span>`).join('')}</div>`
+      : `<p class="bs-fiche-note">Aucune contribution pour l'instant.</p>`;
+    const investCtrls = (chars.length && remaining > 0) ? `
+      <div class="bs-fiche-invest">
+        <select class="input-field" id="bas-invest-char" data-change="_bastionRefreshInvestment" data-slug="${_esc(def.slug)}" aria-label="Personnage qui cotise">
+          ${chars.map(c => `<option value="${c.id}"${scope && c.id === scope.id ? ' selected' : ''}>${_esc(c.nom || '?')}</option>`).join('')}
+        </select>
+        <div class="bs-fiche-quick">
+          <input type="number" class="input-field" id="bas-invest-amount" min="1" value="${Math.min(50, remaining)}" aria-label="Montant à cotiser">
+          <button type="button" data-action="_bastionQuickInvest" data-slug="${_esc(def.slug)}" data-amount="10">+10</button>
+          <button type="button" data-action="_bastionQuickInvest" data-slug="${_esc(def.slug)}" data-amount="50">+50</button>
+          <button type="button" data-action="_bastionQuickInvest" data-slug="${_esc(def.slug)}" data-amount="100">+100</button>
+          <button type="button" class="bs-fiche-fill" data-action="_bastionQuickInvest" data-slug="${_esc(def.slug)}" data-amount="fill">Compléter</button>
+        </div>
+        <small id="bas-invest-info" class="bs-fiche-note"></small>
+        <button type="button" class="btn btn-gold btn-sm bs-fiche-go" data-action="_bastionDoInvest" data-slug="${_esc(def.slug)}">🤝 Cotiser le montant</button>
+      </div>`
+      : (remaining === 0 ? `<p class="bs-fiche-note">✓ Niveau entièrement financé.</p>` : `<p class="bs-fiche-note">Aucun personnage disponible pour cotiser.</p>`);
+    const buildBtn = isMj
+      ? (plan.canFund
+          ? `<button class="btn btn-gold bs-fiche-build" data-action="_bastionBuild" data-slug="${_esc(def.slug)}">🏗 Lancer le chantier · Niv. ${nivLbl(target)}<span>${plan.investmentUsed} investis + ${plan.treasuryUsed} trésor</span></button>`
+          : `<div class="bs-fiche-note">${plan.missing} or manquants (cagnotte + trésor) pour lancer le chantier.</div>`)
+      : '';
+    fund = `<div class="bs-fiche-sec">
+      <h4>🤝 Cotisation → Niv. ${nivLbl(target)}</h4>
+      <div class="bs-fiche-fundhead"><strong>${shown} / ${nextDef.cout} or</strong><span>${nextDef.semaines} période(s)</span></div>
+      <div class="bs-fiche-fundbar"><i style="width:${pct}%;background:${def.color}"></i></div>
+      ${contribHtml}
+      ${investCtrls}
+      ${buildBtn}
+    </div>`;
+  } else {
+    fund = `<div class="bs-fiche-sec"><h4>Niveau maximum</h4><p class="bs-fiche-note">✦ Cette salle est au niveau maximum.</p></div>`;
+  }
+
+  // Paliers.
+  let paliers;
+  if (!isUnl) {
+    const target2 = b?.salles?.[def.slug]?.targetNiveau || 0;
+    paliers = `<div class="bs-fiche-sec"><h4>Paliers</h4><div class="bs-fiche-tiers">
+      ${def.niveaux.map((nd, i) => {
+        const n = i + 1;
+        const st = n <= cur ? 'done' : (building && n === target2 ? 'build' : (n === cur + 1 ? 'next' : 'todo'));
+        const prod = [];
+        if (nd.prod?.or > 0) prod.push(`+${nd.prod.or} or`);
+        for (const it of (nd.prod?.items || [])) prod.push(`${it.emoji || ''}${it.q > 1 ? `×${it.q}` : ''}`);
+        return `<div class="bs-tier is-${st}">
+          <div class="bs-tier-h"><b>Niv. ${NIVEAU_LABEL[n]}</b><span>${nd.cout} or · ${nd.semaines} pér.</span></div>
+          <div class="bs-tier-b">${prod.length ? _esc(prod.join(' · ')) : ''}${nd.bonus ? `<em>🎁 ${_esc(nd.bonus)}</em>` : ''}</div>
+        </div>`;
+      }).join('')}
+    </div></div>`;
+  } else {
+    paliers = `<div class="bs-fiche-sec"><h4>Paliers</h4><p class="bs-fiche-note">Chaque niveau ajoute +${def.capacitePerLevel || 10} de capacité (jusqu'à ${max}). Coût de base ${def.baseCost || 100} or, ×${def.costMultiplier || 1.1} par niveau.</p></div>`;
+  }
+
+  // Personnel (hors Entrepôt).
+  let personnel = '';
+  if (!isUnl) {
     const assigned = (b.personnel || []).filter(e => e.roomSlug === def.slug);
-    const slots = curNiv; // 1 PNJ par niveau
+    const slots = cur;
     const npcs = STORE.hireNpcsCache || STORE.npcsCache || [];
     const cards = assigned.map(e => {
       const npc = e.npcId ? npcs.find(n => n.id === e.npcId) : null;
@@ -2694,124 +2855,77 @@ function _renderRoomCard(def, b) {
         ${isMj ? `<button class="bs-emp-mini-rm" data-action="_bastionFireEmployee" data-id="${e.id}" title="Renvoyer">✕</button>` : ''}
       </div>`;
     }).join('');
-    const free = slots - assigned.length;
-    const addBtn = (isMj && free > 0) ? `<button class="bs-emp-add" data-action="_bastionOpenHire" data-slug="${def.slug}">＋ Embaucher (${free} slot${free > 1 ? 's' : ''} libre${free > 1 ? 's' : ''})</button>` : '';
-    personnelHtml = `<div class="bs-room-personnel">
-      <div class="bs-room-personnel-hd">👥 Personnel ${assigned.length}/${slots}</div>
-      ${cards}
-      ${addBtn}
+    const free = Math.max(0, slots - assigned.length);
+    const addBtn = (isMj && free > 0 && cur > 0) ? `<button class="bs-emp-add" data-action="_bastionOpenHire" data-slug="${_esc(def.slug)}">＋ Embaucher (${free} libre${free > 1 ? 's' : ''})</button>` : '';
+    personnel = `<div class="bs-fiche-sec"><h4>👥 Personnel${cur > 0 ? ` ${assigned.length}/${slots}` : ''}</h4>
+      ${cur > 0 ? ((cards + addBtn) || '<p class="bs-fiche-note">Aucun employé.</p>') : '<p class="bs-fiche-note">Construis la salle pour affecter du personnel.</p>'}
     </div>`;
   }
 
-  // Bandeau de construction en cours
-  let buildingHtml = '';
-  if (building && sallesData) {
-    const totalSem = _getNiveauData(def, sallesData.targetNiveau)?.semaines || 1;
-    const done = totalSem - sallesData.weeksLeftToBuild;
-    const pct = totalSem > 0 ? Math.round((done / totalSem) * 100) : 0;
-    buildingHtml = `<div class="bs-room-building">
-      <div class="bs-room-building-lbl">🏗 Construction Niv. ${niveauLabel(sallesData.targetNiveau)} — ${sallesData.weeksLeftToBuild} période(s) restante(s)</div>
-      <div class="bs-room-bar"><div class="bs-room-bar-fill" style="width:${pct}%;background:${def.color}"></div></div>
-      ${isMj ? `<button class="bs-room-cancel" data-action="_bastionCancelBuild" data-slug="${def.slug}" title="Annuler cette construction et rembourser l'or">✖ Annuler la construction</button>` : ''}
-    </div>`;
-  }
-
-  // Cagnotte visible par tous : les joueurs savent immédiatement ce qui manque
-  // et peuvent financer précisément la salle qui les intéresse.
-  let investmentHtml = '';
-  if (!building && nextDef) {
-    const shownInvested = Math.min(invested, nextDef.cout);
-    const pct = nextDef.cout > 0 ? Math.min(100, Math.round(shownInvested / nextDef.cout * 100)) : 100;
-    const remaining = Math.max(0, nextDef.cout - invested);
-    const contributors = _roomInvestmentContributors(def.slug);
-    const canInvest = _eligibleChars().length > 0 && remaining > 0;
-    investmentHtml = `<div class="bs-room-investment${remaining === 0 ? ' is-funded' : ''}">
-      <div class="bs-room-investment-head">
-        <span>${remaining === 0 ? '✓ Niveau financé' : '🤝 Cagnotte des joueurs'}</span>
-        <strong>${shownInvested} / ${nextDef.cout} or</strong>
-      </div>
-      <div class="bs-room-investment-bar"><i style="width:${pct}%;background:${def.color}"></i></div>
-      <div class="bs-room-investment-foot">
-        <small>${contributors.length ? `${contributors.length} contributeur${contributors.length > 1 ? 's' : ''}` : 'Aucune contribution'}</small>
-        ${canInvest ? `<button type="button" data-action="_bastionOpenInvest" data-slug="${def.slug}">Investir</button>` : ''}
-      </div>
-    </div>`;
-  }
-
-  // Bouton MJ pour construire / améliorer
-  let actionHtml = '';
-  if (isMj && !building && targetNiv) {
-    const disabled = fundingMissing;
-    const tooltip = disabled ? `${funding.missing} or manquants (cagnotte + trésor)`
-                  : `Construire niveau ${niveauLabel(targetNiv)} — ${funding.investmentUsed} or investis + ${funding.treasuryUsed} or du trésor`;
-    actionHtml = `
-      <button class="bs-room-action${disabled ? ' bs-room-action--disabled' : ''}"
-        ${disabled ? '' : `data-action="_bastionBuild" data-slug="${def.slug}"`}
-        title="${_esc(tooltip)}">
-        ${curNiv === 0 ? '＋ Construire' : `↑ Améliorer Niv. ${niveauLabel(targetNiv)}`}
-        <span class="bs-room-cost">${nextDef.cout} or · ${nextDef.semaines} période</span>
-      </button>`;
-  } else if (isMj && curNiv >= max) {
-    actionHtml = `<div class="bs-room-maxed">✦ Niveau maximum atteint</div>`;
-  }
-
-  // Affichage du niveau dans le header
-  const nivDisplay = curNiv > 0
-    ? `Niv. ${niveauLabel(curNiv)}${isUnlimited ? ` / ${max}` : ''}`
-    : 'Non construite';
-
-  return `
-    <div class="bs-room bs-room--${status}" style="--c:${def.color}">
-      <div class="bs-room-header">
-        <span class="bs-room-emoji">${def.emoji}</span>
-        <div class="bs-room-title">
-          <div class="bs-room-name">${_esc(def.nom)}</div>
-          <div class="bs-room-niv">${nivDisplay}${building ? ` · ${_roomTargetLabel(def.slug, b, isUnlimited)}` : ''}</div>
-        </div>
-        <div class="bs-room-actions-top">
-          ${isMj && !isUnlimited ? `<button class="bs-room-edit" data-action="_bastionEditRoom" data-slug="${def.slug}" title="Modifier cette salle">✏️</button>` : ''}
-          <button class="bs-room-info" data-action="_bastionShowDetails" data-slug="${def.slug}" title="Voir les niveaux et bonus">ⓘ</button>
-        </div>
-      </div>
-      <div class="bs-room-desc">${_esc(def.desc)}</div>
-      ${prodHtml}
-      ${bonusHtml}
-      ${personnelHtml}
-      ${buildingHtml}
-      ${investmentHtml}
-      ${actionHtml}
-    </div>`;
+  return `<div class="bs-fiche" style="--c:${def.color}">${header}${apporte}${fund}${paliers}${personnel}</div>`;
 }
 
-function _renderAddRoomCard() {
-  return `
-    <button type="button" class="bs-room-add-card" data-action="_bastionAddCustomRoom" title="Ajouter une salle / activité" aria-label="Ajouter une salle ou activité au Bastion">
-      <span class="bs-room-add-plus" aria-hidden="true"></span>
-      <span class="bs-room-add-label">Nouvelle salle</span>
-    </button>`;
+function _bastionSelectRoom(slug) { STORE.roomSel = slug; _renderPage(); }
+function _bastionSetRoomFilter(f) { STORE.roomFilter = f; _renderPage(); }
+
+// Cotise un montant rapide puis lance l'investissement (réutilise le flux réel).
+function _bastionQuickInvest(slug, amount) {
+  const input = document.getElementById('bas-invest-amount');
+  if (!input) return;
+  if (amount === 'fill') _bastionFillInvestment(slug);
+  else input.value = String(Math.max(1, Number(amount) || 0));
+  _bastionDoInvest(slug);
 }
 
 function _renderRooms(b) {
   const isMj = STATE.isAdmin;
-  const anyBuilt = Object.values(b.salles || {}).some(s => (s?.niveau || 0) > 0 || s?.weeksLeftToBuild > 0);
   const catalog = _getRoomCatalog(b);
-  const roomsHtml = catalog.length ? `
-      <div class="bs-rooms-grid">
-        ${catalog.map(def => _renderRoomCard(def, b)).join('')}
-        ${isMj ? _renderAddRoomCard() : ''}
-      </div>` : `
-      ${isMj ? `<div class="bs-rooms-grid bs-rooms-grid--empty">${_renderAddRoomCard()}</div>` : `<div class="bs-coffre-empty">Aucune salle n'est définie pour cette aventure.</div>`}`;
+
+  // Résout la salle sélectionnée (défaut : 1re construite, sinon 1re du catalogue).
+  let sel = catalog.find(d => d.slug === STORE.roomSel);
+  if (!sel) sel = catalog.find(d => _roomNiveau(b, d.slug) > 0) || catalog[0] || null;
+  STORE.roomSel = sel?.slug || null;
+
+  const F = STORE.roomFilter || 'all';
+  const filtered = catalog.filter(def => _roomMatchesFilter(def, b, F));
+
+  // Bandeau « Chaque période » : production + capacité du coffre.
+  const prod = _bastionProductionSummary(b);
+  const prodParts = [];
+  if (prod.or > 0) prodParts.push(`🪙 +${prod.or} or`);
+  if (prod.items.length) prodParts.push(`📦 ${prod.items.length} objet${prod.items.length > 1 ? 's' : ''}`);
+  const used = _bastionInvCount(b), capacity = _bastionCapacity(b);
+  const topBar = `<div class="bs-salles-top">
+    <div class="bs-salles-top-cell"><small>Chaque période</small><strong>${prodParts.length ? prodParts.join(' · ') : 'Aucune production'}</strong></div>
+    <div class="bs-salles-top-cell"><small>Coffre</small><strong>${used} / ${capacity} objets</strong></div>
+  </div>`;
+
+  const FILTERS = [['all', 'Toutes'], ['built', 'Construites'], ['funding', 'En cotisation'], ['building', 'En chantier'], ['todo', 'À construire']];
+  const filterBar = `<div class="bs-salles-filters" role="group" aria-label="Filtrer les salles">
+    ${FILTERS.map(([k, lbl]) => {
+      const n = catalog.filter(d => _roomMatchesFilter(d, b, k)).length;
+      return `<button type="button" class="bs-salles-filter${F === k ? ' is-on' : ''}" data-action="_bastionSetRoomFilter" data-filter="${k}" aria-pressed="${F === k}">${lbl}<span class="bs-salles-filter-n">${n}</span></button>`;
+    }).join('')}
+  </div>`;
+
+  const listHtml = filtered.length
+    ? filtered.map(def => _renderRoomRow(def, b)).join('')
+    : `<div class="bs-coffre-empty">Aucune salle dans ce filtre.</div>`;
+  const addRow = isMj ? `<button type="button" class="bs-room-row bs-room-row--add" data-action="_bastionAddCustomRoom">＋ Nouvelle salle / activité</button>` : '';
+
   return `
-    <section class="bs-section">
+    <section class="bs-section bs-salles">
       <div class="bs-section-hd">
         <h2 class="bs-section-title">🏛 Salles &amp; activités</h2>
-        ${isMj && anyBuilt ? `<button class="btn btn-outline btn-sm bs-reset-btn"
-          data-action="_bastionResetRooms" title="Réinitialiser toutes les salles construites">
-          🔄 Reset salles
-        </button>` : ''}
+        ${isMj && catalog.some(d => _roomNiveau(b, d.slug) > 0 || _roomBuilding(b, d.slug)) ? `<button class="btn btn-outline btn-sm bs-reset-btn"
+          data-action="_bastionResetRooms" title="Réinitialiser toutes les salles construites">🔄 Reset salles</button>` : ''}
       </div>
-      <p class="bs-section-sub">Chaque salle débloque une activité. Construis et améliore selon les priorités du groupe.</p>
-      ${roomsHtml}
+      ${topBar}
+      ${filterBar}
+      <div class="bs-salles-layout">
+        <div class="bs-salles-list">${listHtml}${addRow}</div>
+        <aside class="bs-salles-fiche">${_renderRoomDetail(sel, b)}</aside>
+      </div>
     </section>`;
 }
 
@@ -3777,6 +3891,8 @@ function _renderPage() {
       </div>
     </div>`;
   if (tab === 'mur') requestAnimationFrame(_wallFocusTarget);
+  // Renseigne l'info « or dispo / max » des contrôles de cotisation inline.
+  if (tab === 'salles' && STORE.roomSel) requestAnimationFrame(() => _bastionRefreshInvestment(STORE.roomSel));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3923,6 +4039,9 @@ registerActions({
   _bastionResetRooms:       () => _bastionResetRooms(),
   _bastionOpenDeposit:      () => _bastionOpenDeposit(),
   _bastionSetTab:           (btn) => _bastionSetTab(btn.dataset.tab),
+  _bastionSelectRoom:       (btn) => _bastionSelectRoom(btn.dataset.slug),
+  _bastionSetRoomFilter:    (btn) => _bastionSetRoomFilter(btn.dataset.filter),
+  _bastionQuickInvest:      (btn) => _bastionQuickInvest(btn.dataset.slug, btn.dataset.amount),
   _bastionSetCoffreFilter:  (btn) => _bastionSetCoffreFilter(btn.dataset.filter),
   _bastionOpenWithdrawItem: (btn) => _bastionOpenWithdrawItem(btn.dataset.id),
   _bastionSaveQuest:        (btn) => _bastionSaveQuest(btn.dataset.id || ''),
