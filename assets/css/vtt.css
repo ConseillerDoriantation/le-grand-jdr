@@ -11963,7 +11963,8 @@ html:not([data-theme="light"]) .vtt-root {
 /* ══════════════════════════════════════════════════════════════════════════
    Refonte « La Régie » — panneau Sons & musique (tout scopé .vtt-music-panel)
    ══════════════════════════════════════════════════════════════════════════ */
-.vtt-music-panel { display:flex; flex-direction:column; width:min(720px,calc(100vw - 40px)); max-height:min(560px,calc(100vh - 130px)); font-size:13px; line-height:1.4; font-variant-numeric:tabular-nums; }
+.vtt-music-panel { display:flex; flex-direction:column; width:min(720px,calc(100vw - 40px)); height:min(680px,calc(100vh - 110px)); max-height:calc(100vh - 90px); font-size:13px; line-height:1.4; font-variant-numeric:tabular-nums; }
+.vtt-music-panel.player { height:auto; }
 .vtt-music-panel.player  { width:min(380px,calc(100vw - 40px)); }
 .vtt-music-panel.compact { width:min(440px,calc(100vw - 40px)); }
 .vtt-music-panel svg.i { width:15px; height:15px; flex:none; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
@@ -12050,9 +12051,8 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-music-panel .pl .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
 .vtt-music-panel .pl .ct { font-size:11px; color:var(--text-dim,var(--text-muted)); }
 .vtt-music-panel .pl .wave { color:var(--gold-2,var(--gold)); }
-.vtt-music-panel .pl .pl-acts { display:none; gap:1px; }
+.vtt-music-panel .pl .pl-acts { display:none; gap:1px; position:absolute; right:5px; top:50%; transform:translateY(-50%); padding:1px; border-radius:6px; background:var(--surface-3,var(--bg-elevated)); box-shadow:-8px 0 8px -6px var(--surface-3,var(--bg-elevated)); }
 .vtt-music-panel .pl:hover .pl-acts { display:flex; }
-.vtt-music-panel .pl:hover .ct { display:none; }
 .vtt-music-panel .pl.drop { box-shadow:inset 0 0 0 1.5px var(--gold); background:var(--gold-glow,rgba(79,140,255,.18)); }
 .vtt-music-panel .pl-sep { height:1px; background:var(--border); margin:6px 8px; }
 .vtt-music-panel .rail-add { margin:0 8px 10px; display:flex; align-items:center; gap:7px; padding:7px 8px; border-radius:6px; border:1px dashed var(--border-strong,var(--border-md,var(--border))); color:var(--text-muted); font-size:12px; background:none; cursor:pointer; }

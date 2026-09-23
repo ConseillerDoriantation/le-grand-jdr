@@ -274,8 +274,9 @@ function _renderMusicPanel() {
   const curSound = playing ? _sounds.find(s => s.id === ms.currentSoundId) : null;
   const live = playing && !ms.paused;
 
-  // Mémorise défilement de la liste + focus/caret de la recherche (re-render).
+  // Mémorise défilement liste + rail + focus/caret de la recherche (re-render).
   const prevScroll = document.getElementById('vtt-music-list')?.scrollTop || 0;
+  const prevRailScroll = document.getElementById('vtt-music-rail')?.scrollTop || 0;
   const searchActive = document.activeElement === document.getElementById('vtt-music-search');
   const caret = searchActive ? document.getElementById('vtt-music-search').selectionStart : null;
 
@@ -362,9 +363,11 @@ function _renderMusicPanel() {
     _queueDurations();
   }
 
-  // Restaure défilement + focus/caret de la recherche.
+  // Restaure défilement (liste + rail) + focus/caret de la recherche.
   const list = document.getElementById('vtt-music-list');
   if (list) list.scrollTop = prevScroll;
+  const railEl = document.getElementById('vtt-music-rail');
+  if (railEl) railEl.scrollTop = prevRailScroll;
   if (searchActive) {
     const n = document.getElementById('vtt-music-search');
     if (n) { n.focus(); try { n.setSelectionRange(caret, caret); } catch { /* noop */ } }
@@ -473,10 +476,13 @@ function _pumpDurations() {
   const finish = (dur) => {
     if (done) return; done = true;
     try { a.src = ''; } catch { /* noop */ }
-    _durCache.set(id, dur > 0 ? Math.round(dur) : 0);
-    if (dur > 0) updateDoc(_sonRef(id), { duration: Math.round(dur) }).catch(() => {});
+    const rounded = dur > 0 ? Math.round(dur) : 0;
+    _durCache.set(id, rounded);
+    if (rounded > 0) updateDoc(_sonRef(id), { duration: rounded }).catch(() => {});
+    // Mise à jour CIBLÉE des cellules durée (pas de re-render → pas de saut du rail).
+    const txt = rounded > 0 ? _fmtTime(rounded) : '—';
+    try { document.querySelectorAll(`.vtt-music-panel .t[data-sound-id="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"] .dur`).forEach(c => { c.textContent = txt; }); } catch { /* noop */ }
     _durBusy = false;
-    if (!_durQueue.length && document.getElementById('vtt-music-panel')?.dataset.open === '1') _renderMusicPanel();
     setTimeout(_pumpDurations, 40);
   };
   a.addEventListener('loadedmetadata', () => finish(a.duration || 0));
