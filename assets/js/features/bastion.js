@@ -50,6 +50,7 @@ import { useGold } from '../shared/economy.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../shared/inventory-history.js';
 import { shouldRestoreLegacyBastionCatalog } from '../shared/bastion-catalog.js';
 import { roomFundingPlan, roomInvestmentAvailable } from '../shared/bastion-investments.js';
+import { touchBastionWallActivity, refreshBastionWallDot } from '../shared/bastion-signal.js';
 
 
 const STORE = {
@@ -3129,6 +3130,7 @@ function _wallMarkSeen() {
   const seenAt = Date.now();
   const known = Math.max(Number(_wallRead?.seenAt) || 0, _wallSeenWriteAt);
   try { localStorage.setItem(key, String(seenAt)); } catch { /* stockage privé indisponible */ }
+  refreshBastionWallDot();   // le mur est vu → masque la pastille de navigation
   if (!STATE.user?.uid) return;
   if (seenAt - known < 5000) {
     clearTimeout(_wallSeenTimer);
@@ -3544,7 +3546,7 @@ async function _bastionPostAnnonce() {
   const text = _wallUi.draftText.trim().slice(0, 4000);
   if (!identity) { showNotif('Choisis un personnage pour publier.', 'error'); return; }
   if (!text && !_wallUi.images.length) { showNotif('Ajoute un message ou une image avant de publier.', 'error'); return; }
-  const button = document.querySelector('.bs-wall-publish');
+  const button = document.querySelector('[data-action="_bastionPostAnnonce"]');
   if (button) button.disabled = true;
   let mediaId = '';
   try {
@@ -3574,6 +3576,7 @@ async function _bastionPostAnnonce() {
       { id: postId, ...postPayload, createdAt: new Date().toISOString() },
       ..._annonces.filter(post => post.id !== postId),
     ]);
+    touchBastionWallActivity();   // signale l'activité → pastille de navigation
     const mentioned = bastionWallMentionedCharacters(text, STATE.characters || []);
     await _wallCreateNotifications(mentioned.map(character => character.uid), {
       postId, actor: identity, kind: 'mention', text,
@@ -3726,6 +3729,7 @@ async function _bastionWallReply(id) {
       return { ...current, comments: next.comments, updatedAt: next.updatedAt };
     });
   }
+  touchBastionWallActivity();   // une réponse = activité du mur → pastille
   const mentioned = bastionWallMentionedCharacters(text, STATE.characters || []);
   const targets = bastionWallNotificationTargets({
     post,

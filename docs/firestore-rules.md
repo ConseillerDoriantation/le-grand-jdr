@@ -601,6 +601,16 @@ match /adventures/{adventureId} {
     allow update, delete: if inAdventure(adventureId)
       && (isAdvAdmin(adventureId) || resource.data.get('uid', '') == request.auth.uid);
   }
+  // Signal de non-lus : un seul doc `bastionWall/meta` porte `lastActivityAt`,
+  // bumpé à chaque publication / réponse. Sert la pastille de navigation
+  // (shared/bastion-signal.js) sans abonner tout le mur hors de la page Bastion.
+  match /bastionWall/{id} {
+    allow read: if inAdventure(adventureId);
+    allow create: if inAdventure(adventureId)
+      && request.resource.data.keys().hasOnly(['lastActivityAt']);
+    allow update: if inAdventure(adventureId)
+      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastActivityAt']);
+  }
   // Une réponse = un document : un fil actif ne peut plus faire dépasser au post
   // principal la limite Firestore de 1 Mio.
   match /bastionWallComments/{id} {
