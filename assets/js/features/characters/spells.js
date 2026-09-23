@@ -61,7 +61,7 @@ function buildLineCtx(lines, s, c) {
         const pm = s?.protectionMode || 'ca';
         if (l.drain) ctx.prot = { value: `Vol de vie ${_calcDrainPct(counts.Protection || 0)}%`, text: true, source: 'Combo Drain · soigne le lanceur', color: '#ff5a7e' };
         else if (l.reactiveShield) ctx.prot = { value: 'Bloque 1 attaque', text: true, source: 'Combo Bouclier réactif · sans bonus de CA', color: '#4f8cff' };
-        else if (pm === 'ca') ctx.prot = { value: _getSortCA(s), source: _autoSourceCA(s), color: '#4f8cff' };
+        else if (pm === 'ca') ctx.prot = { value: _getSortCA(s), text: true, source: _autoSourceCA(s), color: '#4f8cff' };
         else ctx.prot = { value: (pm === 'mana' ? _calcSortMana(s, c) : _calcSortSoin(s, c)), source: (pm === 'mana' ? 'Régénération de PM · (nb Protection)d4' : _autoSourceSoin(s, c)), color: (pm === 'mana' ? '#8b5cf6' : '#22c38e') };
         break;
       }

@@ -22433,6 +22433,19 @@ body .modal:has(.inv-history-modal-shell) {
 .cs-forge2 .ln-slots label span{ display:none; }   /* sous-textes verbeux masqués (— buff/bénédiction…) */
 .cs-forge2 .ln-slots .input-field,.cs-forge2 .ln-slots select{ height:30px; padding:0 8px; border-radius:var(--r-sm); background:var(--surface-1); border:1px solid var(--border-md); outline:0; font-size:12px; color:var(--text); width:100%; max-width:300px; }
 .cs-forge2 .ln-slots .input-field:focus,.cs-forge2 .ln-slots select:focus{ border-color:var(--border-bright); }
+/* Invocation inline : compacte (en-tête redondant masqué, boutons courts, grille dense) */
+.cs-forge2 .ln-slots .cs-inv-section{ padding:0; margin:0; background:none; border:0; }
+.cs-forge2 .ln-slots .cs-inv-head{ display:none; }
+.cs-forge2 .ln-slots .spell-inv-assignment{ gap:7px; }
+.cs-forge2 .ln-slots .spell-inv-mode-btn{ padding:6px 9px; text-align:left; }
+.cs-forge2 .ln-slots .spell-inv-mode-btn small{ display:none; }
+.cs-forge2 .ln-slots .spell-inv-mode-btn b{ font-size:.72rem; }
+.cs-forge2 .ln-slots .classic-inv-grid{ grid-template-columns:1fr; gap:5px; margin-top:6px; max-height:170px; }
+.cs-forge2 .ln-slots .classic-inv-card{ grid-template-columns:auto 30px minmax(0,1fr); gap:7px; padding:5px 7px; }
+.cs-forge2 .ln-slots .classic-inv-portrait{ width:30px; height:30px; font-size:.9rem; }
+.cs-forge2 .ln-slots .classic-inv-body b{ font-size:.78rem; }
+.cs-forge2 .ln-slots .classic-inv-body small{ font-size:.66rem; }
+.cs-forge2 .ln-slots .classic-inv-foot{ margin-top:6px; font-size:.66rem; display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .cs-forge2 .ln.mods{ gap:6px; }
 .cs-forge2 .mods .ln-b{ display:flex; flex-wrap:wrap; gap:4px; }
 .cs-forge2 .mods .ln-b span{ font-size:10.5px; padding:2px 8px; border-radius:var(--r-full); background:color-mix(in srgb,var(--c,var(--gold)) 14%,var(--surface-2)); border:1px solid color-mix(in srgb,var(--c,var(--gold)) 40%,transparent); color:var(--text-soft); }
