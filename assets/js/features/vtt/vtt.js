@@ -141,6 +141,7 @@ import {
   _vttPlayAmbience, _vttStopAmbience, _vttPlaylistCtxMenu, _vttMusicAddMenu, _vttMusicToolsMenu,
   _vttPlColorSelect, _vttPreview, _vttSeek, _vttAddSonUrl, _vttImportGithubRelease,
   _vttMusicToggleHideTitle, _vttMusicToggleSoundTitle, _vttRenamePlaylistConfirm,
+  _vttMusicSelectRail,
 } from './vtt-music.js';
 import {
   _vttShortRestVote, _vttShortRestUnvote, _vttShortRestCancel, _vttShortRestForce,
@@ -14615,6 +14616,7 @@ export const VTT_ACTIONS = {
   _vttCreatePlaylistConfirm,
   _vttMusicToggleHideTitle,
   _vttMusicToggleSoundTitle,
+  _vttMusicSelectRail,
   _vttRenamePlaylistConfirm,
   _vttDiceRemoveDie,
   _vttMsAddXp,
