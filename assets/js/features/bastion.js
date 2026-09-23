@@ -3375,47 +3375,58 @@ function _wallReactionPicker(postId) {
   return `<div class="bs-wall-reaction-picker" aria-label="Choisir une réaction">${emotes}${emojis}</div>`;
 }
 
-function _wallComposer() {
-  const chars = _wallEnsureCharacter();
-  const identity = _wallIdentity();
-  const typeBtns = Object.entries(BASTION_WALL_TYPES).map(([id, type]) =>
-    `<button type="button" class="bs-annonce-type${_wallUi.type === id ? ' active' : ''}" style="--ac:${type.color}" data-action="_bastionSetAnnonceType" data-type="${id}" aria-pressed="${_wallUi.type === id}"><span class="bs-annonce-type-icon">${type.icon}</span><span><strong>${type.label}</strong><small>${type.description}</small></span></button>`
-  ).join('');
-  const authorChoice = chars.length > 1
-    ? `<label class="bs-wall-author-select"><span>Publier avec</span><select data-change="_bastionWallSetChar">${chars.map(char => `<option value="${_esc(char.id)}" ${char.id === _wallUi.charId ? 'selected' : ''}>${_esc(char.nom || 'Personnage')}</option>`).join('')}</select></label>`
-    : `<div class="bs-wall-author-copy"><small>Publier avec</small><strong>${_esc(identity?.charName || 'Aucun personnage')}</strong></div>`;
+// Sous-titre d'un post : classe/métier du personnage (si connu) + ancienneté.
+function _wallCharSub(charId, ago) {
+  const c = (STATE.characters || []).find(x => x.id === charId);
+  const role = c?.classe || c?.class || c?.metier || c?.role || c?.race || '';
+  return role ? `${_esc(role)} · ${ago}` : ago;
+}
 
-  return `<aside class="bs-annonce-compose bs-wall-compose">
-    <div class="bs-wall-compose-head">
-      ${identity ? _wallAvatar(identity, 42) : '<span class="bs-wall-avatar bs-wall-avatar-empty">?</span>'}
-      ${authorChoice}
+function _wallComposer() {
+  _wallEnsureCharacter();
+  const identity = _wallIdentity();
+  if (!identity) {
+    return `<div class="bs-w-card bs-w-compose"><div class="bs-wall-no-character"><strong>Choisis ton identité</strong><p>Il faut un personnage de cette aventure pour écrire, réagir ou répondre sur le mur.</p><button class="btn btn-outline" data-navigate="characters">Voir mes personnages</button></div></div>`;
+  }
+  const PH = {
+    message: 'Une nouvelle à partager avec le Bastion ?',
+    quete:   'Décris la quête : objectif, lieu, récompense…',
+    offre:   'Que proposes-tu ? Objet, service, prix…',
+    demande: 'De quoi as-tu besoin ?',
+  };
+  const typeBtns = Object.entries(BASTION_WALL_TYPES).map(([id, type]) =>
+    `<button type="button" class="bs-w-tpick${_wallUi.type === id ? ' on' : ''}" style="--tc:${type.color}" data-action="_bastionSetAnnonceType" data-type="${id}" aria-pressed="${_wallUi.type === id}"><i></i>${_esc(type.label)}</button>`
+  ).join('');
+  const canPost = _wallUi.draftText.trim() || _wallUi.images.length;
+
+  return `<div class="bs-w-card bs-w-compose">
+    <div class="bs-w-compose-row">
+      ${_wallAvatar(identity, 36)}
+      <div id="bs-annonce-text" class="bs-w-editor" contenteditable="true" role="textbox" aria-multiline="true" data-input="_bastionWallDraft" data-placeholder="${_esc(PH[_wallUi.type] || PH.message)}">${applyEmotes(_esc(_wallUi.draftText), _wallEmotes)}</div>
     </div>
-    ${identity ? `
-      <div class="bs-wall-type-label">Quel type de publication&nbsp;?</div>
-      <div class="bs-annonce-types">${typeBtns}</div>
-      <div id="bs-annonce-text" class="bs-annonce-input bs-wall-editor" contenteditable="true" role="textbox" aria-multiline="true" data-input="_bastionWallDraft" data-placeholder="Que se passe-t-il au Bastion ?">${applyEmotes(_esc(_wallUi.draftText), _wallEmotes)}</div>
-      <div id="bs-wall-mention-slot">${_wallMentionSuggestions()}</div>
-      <div id="bs-wall-media-preview">${_wallComposerMedia()}</div>
-      ${_wallPicker()}
-      <div class="bs-annonce-compose-foot">
-        <div class="bs-wall-compose-tools">
-          <button type="button" data-action="_bastionWallTogglePicker" aria-expanded="${_wallUi.pickerOpen}">☺ <span>Émojis</span></button>
-          <button type="button" data-action="_bastionWallAddImage" ${_wallUi.images.length >= 3 ? 'disabled' : ''}>▧ <span>Image${_wallUi.images.length ? ` ${_wallUi.images.length}/3` : ''}</span></button>
-        </div>
-        <button type="button" class="btn btn-gold bs-wall-publish" data-action="_bastionPostAnnonce" ${_wallUi.draftText.trim() || _wallUi.images.length ? '' : 'disabled'}>Publier</button>
-      </div>` : `<div class="bs-wall-no-character"><strong>Choisis ton identité</strong><p>Il faut un personnage de cette aventure pour écrire, réagir ou répondre sur le mur.</p><button class="btn btn-outline" data-navigate="characters">Voir mes personnages</button></div>`}
-  </aside>`;
+    <div id="bs-wall-mention-slot">${_wallMentionSuggestions()}</div>
+    <div id="bs-wall-media-preview">${_wallComposerMedia()}</div>
+    ${_wallPicker()}
+    <div class="bs-w-compose-ft">
+      ${typeBtns}
+      <div class="bs-w-compose-tools">
+        <button type="button" class="bs-w-tool" data-action="_bastionWallTogglePicker" aria-expanded="${_wallUi.pickerOpen}" title="Émojis & émotes">☺</button>
+        <button type="button" class="bs-w-tool" data-action="_bastionWallAddImage" ${_wallUi.images.length >= 3 ? 'disabled' : ''} title="Ajouter une image">▧${_wallUi.images.length ? ` ${_wallUi.images.length}/3` : ''}</button>
+      </div>
+      <button type="button" class="bs-w-btn bs-w-go" data-action="_bastionPostAnnonce" ${canPost ? '' : 'disabled'}>Publier</button>
+    </div>
+  </div>`;
 }
 
 function _wallCommentHtml(comment, post) {
   const canDelete = STATE.isAdmin || comment.uid === STATE.user?.uid;
   const isEditing = _wallUi.editCommentId === comment.id;
-  return `<div class="bs-wall-comment">
-    ${_wallAvatar(comment, 30)}
-    <div class="bs-wall-comment-body"><strong>${_esc(comment.charName || 'Personnage')}</strong>${isEditing
-      ? `<textarea rows="2" maxlength="1200" data-input="_bastionWallEditCommentDraft">${_esc(_wallUi.editCommentText)}</textarea><div class="bs-wall-edit-actions"><button type="button" data-action="_bastionWallCancelCommentEdit">Annuler</button><button type="button" data-action="_bastionWallSaveComment" data-comment="${_esc(comment.id)}">Enregistrer</button></div>`
-      : `<div>${_wallText(comment.text)}</div><small>${_annonceTimeAgo(comment.ts)}${comment.editedAt ? ' · Modifié' : ''}</small>`}</div>
-    ${canDelete && !post.legacy && !comment.legacy ? `<div class="bs-wall-comment-tools">${!isEditing ? `<button type="button" data-action="_bastionWallEditComment" data-id="${_esc(post.id)}" data-comment="${_esc(comment.id)}" title="Modifier cette réponse">✎</button>` : ''}<button type="button" class="bs-wall-comment-delete" data-action="_bastionWallDeleteComment" data-id="${_esc(post.id)}" data-comment="${_esc(comment.id)}" title="Supprimer cette réponse">×</button></div>` : ''}
+  return `<div class="bs-w-cmt">
+    ${_wallAvatar(comment, 24)}
+    <div class="bs-w-cmt-body">${isEditing
+      ? `<b>${_esc(comment.charName || 'Personnage')}</b><textarea rows="2" maxlength="1200" data-input="_bastionWallEditCommentDraft">${_esc(_wallUi.editCommentText)}</textarea><div class="bs-w-edit-actions"><button type="button" data-action="_bastionWallCancelCommentEdit">Annuler</button><button type="button" class="bs-w-btn" data-action="_bastionWallSaveComment" data-comment="${_esc(comment.id)}">Enregistrer</button></div>`
+      : `<span><b>${_esc(comment.charName || 'Personnage')}</b>${_wallText(comment.text)}<small>${_annonceTimeAgo(comment.ts)}${comment.editedAt ? ' · Modifié' : ''}</small></span>`}</div>
+    ${canDelete && !post.legacy && !comment.legacy && !isEditing ? `<div class="bs-w-cmt-tools"><button type="button" data-action="_bastionWallEditComment" data-id="${_esc(post.id)}" data-comment="${_esc(comment.id)}" title="Modifier">✎</button><button type="button" data-action="_bastionWallDeleteComment" data-id="${_esc(post.id)}" data-comment="${_esc(comment.id)}" title="Supprimer">×</button></div>` : ''}
   </div>`;
 }
 
@@ -3459,22 +3470,33 @@ function _wallCard(post) {
   const images = _wallImages(post);
   const media = images.length ? `<div class="bs-wall-media bs-wall-media-${images.length}">${images.map((_src, index) => `<button type="button" data-action="_bastionOpenPostImage" data-id="${_esc(post.id)}" data-index="${index}" aria-label="Agrandir l'image ${index + 1}"><img src="${_esc(images[index])}" alt="Image jointe à la publication"></button>`).join('')}</div>` : (post.imageCount ? '<div class="bs-wall-media-loading">Chargement des images…</div>' : '');
   const countedReactions = Object.entries(counts).map(([reaction, count]) => !post.legacy && identity
-    ? `<button type="button" class="${mine === reaction ? 'active' : ''}" data-action="_bastionWallReact" data-id="${_esc(post.id)}" data-reaction="${_esc(reaction)}" title="Réagir avec ${_esc(reaction)}">${_wallReactionVisual(reaction)}<span>${count}</span></button>`
-    : `<span>${_wallReactionVisual(reaction)} ${count}</span>`).join('');
-  const reactionButtons = `${countedReactions}${!post.legacy && identity ? `<button type="button" class="bs-wall-react-open${_wallUi.reactionPostId === post.id ? ' active' : ''}" data-action="_bastionWallToggleReactions" data-id="${_esc(post.id)}">☺ <span>Réagir</span></button>` : ''}`;
+    ? `<button type="button" class="bs-w-rx${mine === reaction ? ' mine' : ''}" data-action="_bastionWallReact" data-id="${_esc(post.id)}" data-reaction="${_esc(reaction)}" title="Réagir avec ${_esc(reaction)}">${_wallReactionVisual(reaction)} <span>${count}</span></button>`
+    : `<span class="bs-w-rx">${_wallReactionVisual(reaction)} ${count}</span>`).join('');
+  const canResolve = post.type !== 'message' && !post.legacy && (post.uid === STATE.user?.uid || STATE.isAdmin);
+  const tags = `${post.pinned ? '<span class="bs-w-chip">📌 Épinglé</span>' : ''}`
+    + `${post.status !== 'active' ? `<span class="bs-w-chip">${status.icon} ${status.label}</span>` : ''}`
+    + `<span class="bs-w-chip t" style="--tc:${type.color}"><i></i>${type.label}</span>`
+    + `${canDelete ? `<button type="button" class="bs-w-menu-btn" data-action="_bastionWallToggleMenu" data-id="${_esc(post.id)}" aria-label="Gérer cette publication" aria-expanded="${_wallUi.menuPostId === post.id}">•••</button>${_wallPostMenu(post)}` : ''}`;
 
-  return `<article id="bastion-post-${_esc(post.id)}" class="bs-annonce bs-wall-card${post.status !== 'active' ? ` is-${post.status}` : ''}${post.pinned ? ' is-pinned' : ''}" style="--ac:${type.color}">
-    <header class="bs-wall-card-head">
-      ${_wallAvatar(author, 40)}
-      <div><strong>${_esc(author.charName)}</strong><span class="bs-wall-card-meta"><b style="--ac:${type.color}">${type.icon} ${type.label}</b>${post.type !== 'message' ? `<b class="bs-wall-status" style="--status:${status.color}">${status.icon} ${status.label}</b>` : ''}${post.pinned ? '<b class="bs-wall-pinned">⌂ Épinglée</b>' : ''}<small>${_annonceTimeAgo(post.ts)}${post.editedAt ? ' · Modifié' : ''}${post.legacy ? ' · archive' : ''}</small></span></div>
-      ${canDelete ? `<button type="button" class="bs-annonce-del" data-action="_bastionWallToggleMenu" data-id="${_esc(post.id)}" aria-label="Gérer cette publication" aria-expanded="${_wallUi.menuPostId === post.id}">•••</button>${_wallPostMenu(post)}` : ''}
-    </header>
-    ${_wallPostEdit(post) || `${post.text ? `<div class="bs-annonce-text bs-wall-card-text">${_wallText(post.text)}</div>` : ''}${media}`}
-    <div class="bs-wall-social-summary"><span>${Object.keys(post.reactions || {}).length ? `${Object.keys(post.reactions || {}).length} réaction${Object.keys(post.reactions || {}).length > 1 ? 's' : ''}` : ''}</span><span>${comments.length ? `${comments.length} réponse${comments.length > 1 ? 's' : ''}` : ''}</span></div>
-    <div class="bs-wall-actions"><div class="bs-wall-reactions">${reactionButtons}</div>${!post.legacy && identity ? `<button type="button" data-action="_bastionWallToggleReply" data-id="${_esc(post.id)}">↩ Répondre</button>` : ''}</div>
+  return `<article id="bastion-post-${_esc(post.id)}" class="bs-w-card bs-w-post${post.status === 'resolved' ? ' done' : ''}${post.pinned ? ' is-pinned' : ''}" style="--tc:${type.color}">
+    <div class="bs-w-post-hd">
+      ${_wallAvatar(author, 34)}
+      <div class="bs-w-who"><b>${_esc(author.charName)}</b><small>${_wallCharSub(post.charId, _annonceTimeAgo(post.ts))}${post.editedAt ? ' · Modifié' : ''}${post.legacy ? ' · archive' : ''}</small></div>
+      <div class="bs-w-tags">${tags}</div>
+    </div>
+    ${_wallPostEdit(post) || `${post.text ? `<div class="bs-w-post-tx">${_wallText(post.text)}</div>` : ''}${media}`}
+    ${comments.length ? `<div class="bs-w-cmts">${comments.slice(replyOpen ? 0 : -1).map(comment => _wallCommentHtml(comment, post)).join('')}${comments.length > 1 && !replyOpen ? `<button class="bs-w-morecmt" data-action="_bastionWallToggleReply" data-id="${_esc(post.id)}">Voir les ${comments.length} réponses</button>` : ''}</div>` : ''}
+    ${replyOpen && identity && !post.legacy ? `<div class="bs-w-reply">${_wallAvatar(identity, 28)}<textarea rows="1" maxlength="1200" data-input="_bastionWallReplyDraft" data-id="${_esc(post.id)}" placeholder="Répondre à ${_esc(author.charName)}…">${_esc(_wallUi.replyDrafts.get(post.id) || '')}</textarea><button type="button" class="bs-w-btn" data-action="_bastionWallReply" data-id="${_esc(post.id)}">Envoyer</button></div>` : ''}
     ${_wallReactionPicker(post.id)}
-    ${comments.length ? `<div class="bs-wall-comments">${comments.slice(replyOpen ? 0 : -1).map(comment => _wallCommentHtml(comment, post)).join('')}${comments.length > 1 && !replyOpen ? `<button class="bs-wall-more-comments" data-action="_bastionWallToggleReply" data-id="${_esc(post.id)}">Voir les ${comments.length} réponses</button>` : ''}</div>` : ''}
-    ${replyOpen && identity && !post.legacy ? `<div class="bs-wall-reply">${_wallAvatar(identity, 30)}<textarea rows="2" maxlength="1200" data-input="_bastionWallReplyDraft" data-id="${_esc(post.id)}" placeholder="Répondre avec ${_esc(identity.charName)}…">${_esc(_wallUi.replyDrafts.get(post.id) || '')}</textarea><button type="button" data-action="_bastionWallReply" data-id="${_esc(post.id)}">Envoyer</button></div>` : ''}
+    <div class="bs-w-post-ft">
+      ${countedReactions}
+      ${!post.legacy && identity ? `<span class="bs-w-rx-add"><button type="button" class="bs-w-rx bs-w-rx-open${_wallUi.reactionPostId === post.id ? ' active' : ''}" data-action="_bastionWallToggleReactions" data-id="${_esc(post.id)}" title="Ajouter une réaction">${mine ? '↺' : '+'}</button></span>` : ''}
+      <button type="button" class="bs-w-lk" data-action="_bastionWallToggleReply" data-id="${_esc(post.id)}">💬 ${comments.length || ''} ${replyOpen ? 'Masquer' : 'Répondre'}</button>
+      <span class="bs-w-rt">
+        ${STATE.isAdmin ? `<button type="button" class="bs-w-lk" data-action="_bastionWallPin" data-id="${_esc(post.id)}">${post.pinned ? 'Désépingler' : 'Épingler'}</button>` : ''}
+        ${canResolve ? `<button type="button" class="bs-w-lk" data-action="_bastionWallSetStatus" data-id="${_esc(post.id)}" data-status="${post.status === 'resolved' ? 'active' : 'resolved'}">${post.status === 'resolved' ? 'Rouvrir' : 'Clore'}</button>` : ''}
+      </span>
+    </div>
   </article>`;
 }
 
@@ -3486,25 +3508,26 @@ function _renderAnnonces() {
       ? posts.filter(post => post.status !== 'active')
       : posts.filter(post => post.type === _wallUi.filter && post.status === 'active');
   const visible = filtered.slice(0, _wallUi.visible);
-  const filters = [['all', { icon: '●', label: 'Actifs' }], ...Object.entries(BASTION_WALL_TYPES), ['archive', { icon: '◷', label: 'Historique' }]]
-    .map(([id, type]) => {
-      const count = id === 'all' ? posts.filter(post => post.status === 'active').length
-        : id === 'archive' ? posts.filter(post => post.status !== 'active').length
-        : posts.filter(post => post.type === id && post.status === 'active').length;
-      return `<button type="button" class="${_wallUi.filter === id ? 'active' : ''}" data-action="_bastionWallSetFilter" data-filter="${id}" aria-pressed="${_wallUi.filter === id}">${type.icon} ${type.label}<span>${count}</span></button>`;
-    }).join('');
+  const activeCount = posts.filter(p => p.status === 'active').length;
+  const archiveCount = posts.filter(p => p.status !== 'active').length;
+  const filters = `<div class="bs-w-fchips" role="group" aria-label="Filtrer les publications">
+    <button type="button" class="bs-w-fchip${_wallUi.filter === 'all' ? ' on' : ''}" data-action="_bastionWallSetFilter" data-filter="all" aria-pressed="${_wallUi.filter === 'all'}">Actifs<span>${activeCount}</span></button>
+    ${Object.entries(BASTION_WALL_TYPES).map(([id, type]) => `<button type="button" class="bs-w-fchip${_wallUi.filter === id ? ' on' : ''}" style="--tc:${type.color}" data-action="_bastionWallSetFilter" data-filter="${id}" aria-pressed="${_wallUi.filter === id}"><i></i>${_esc(type.label)}<span>${posts.filter(p => p.type === id && p.status === 'active').length}</span></button>`).join('')}
+    <button type="button" class="bs-w-fchip${_wallUi.filter === 'archive' ? ' on' : ''}" data-action="_bastionWallSetFilter" data-filter="archive" aria-pressed="${_wallUi.filter === 'archive'}">◷ Historique<span>${archiveCount}</span></button>
+  </div>`;
   const emptyState = !posts.length
     ? 'Le mur est encore silencieux. Publie le premier message du Bastion.'
     : _wallUi.filter === 'archive'
-      ? `Aucune publication dans l’historique.<button type="button" data-action="_bastionWallSetFilter" data-filter="all">Voir les actifs</button>`
+      ? `Aucune publication dans l’historique.<button type="button" class="bs-w-lk" data-action="_bastionWallSetFilter" data-filter="all">Voir les actifs</button>`
       : _wallUi.filter === 'all'
-        ? `Aucune publication active.<button type="button" data-action="_bastionWallSetFilter" data-filter="archive">Voir l’historique</button>`
-        : `Aucune publication active de ce type.<button type="button" data-action="_bastionWallSetFilter" data-filter="all">Voir tous les actifs</button>`;
+        ? `Aucune publication active.<button type="button" class="bs-w-lk" data-action="_bastionWallSetFilter" data-filter="archive">Voir l’historique</button>`
+        : `Aucune publication active de ce type.<button type="button" class="bs-w-lk" data-action="_bastionWallSetFilter" data-filter="all">Voir tous les actifs</button>`;
   if (posts.length) queueMicrotask(_wallMarkSeen);
-  return `<section class="bs-section bs-social-wall">
-    <div class="bs-section-hd"><div><h2 class="bs-section-title">📌 Le mur du Bastion <span class="bs-section-count">${posts.length}</span></h2><p class="bs-section-sub">Nouvelles, souvenirs et discussions publiés par les personnages.</p></div></div>
-    <div class="bs-annonce-wall"><nav class="bs-wall-feed-filters" aria-label="Filtrer les publications">${filters}</nav><div class="bs-annonce-list">${_wallComposer()}${visible.map(_wallCard).join('') || `<div class="bs-annonce-empty">${emptyState}</div>`}${filtered.length > visible.length ? `<button class="bs-wall-load-more" data-action="_bastionWallMore">Afficher ${Math.min(12, filtered.length - visible.length)} publications de plus</button>` : ''}</div></div>
-  </section>`;
+  return `<div class="bs-w-feedwrap">
+    ${_wallComposer()}
+    ${filters}
+    <div class="bs-w-feed">${visible.map(_wallCard).join('') || `<div class="bs-w-card bs-w-empty">${emptyState}</div>`}${filtered.length > visible.length ? `<button class="bs-w-more" data-action="_bastionWallMore">Afficher ${Math.min(12, filtered.length - visible.length)} publications de plus</button>` : ''}</div>
+  </div>`;
 }
 
 // Élément cliquable de la colonne droite : renvoie vers le post dans le fil.
