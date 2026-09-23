@@ -41,6 +41,7 @@ import {
   bastionWallNotificationTargets,
   bastionWallReactionCounts,
   bastionWallSeenKey,
+  bastionWallUnreadCount,
   normalizeBastionWallPost,
   sortBastionWallPosts,
   toggleBastionWallReaction,
@@ -62,12 +63,18 @@ const STORE = {
   npcsCache:      null,          // cache tous les PNJ (lazy)
   hireInProgress: false,
   coffreFilter:   'all',         // 'all'|'armes'|'armures'|…
-  coffreSearch:   '',
+  coffreSearch:   '',            // recherche normalisée (filtrage)
+  coffreSearchRaw:'',            // texte saisi (affichage)
+  coffreOpen:     null,          // id de l'objet du coffre déplié pour « Prendre »
+  takeQty:        1,             // quantité choisie dans la ligne dépliée
   histoExpanded:  false,
   catalogMigrationInFlight: false,
   addingCustomRoom: false,
   investments: [],             // cagnotte ciblée par salle (1 doc / joueur / perso / salle)
   investmentInProgress: false,
+  tab:            null,          // onglet actif : 'salles' | 'mur' | 'coffre' (résolu via _bsGetTab)
+  roomSel:        null,          // slug de la salle sélectionnée (fiche de droite)
+  roomFilter:     'all',         // 'all'|'built'|'funding'|'building'|'todo'
 };
 
 
@@ -400,17 +407,6 @@ function _roomInvestmentContributors(slug) {
     contributors.set(key, current);
   }
   return [...contributors.values()].sort((a, b) => b.amount - a.amount || a.charName.localeCompare(b.charName, 'fr'));
-}
-
-// Calcule le niveau "actuel + en construction = target" affiché
-function _roomTargetLabel(slug, b, isUnlimited) {
-  const s = b?.salles?.[slug];
-  if (!s) return '';
-  const lbl = (n) => isUnlimited ? `${n}` : (NIVEAU_LABEL[n] || n);
-  if (s.weeksLeftToBuild > 0) {
-    return `→ ${lbl(s.targetNiveau)} (${s.weeksLeftToBuild} période)`;
-  }
-  return `Niv. ${lbl(s.niveau)}`;
 }
 
 function _decodeBastionEntities(value = '') {
@@ -1074,33 +1070,6 @@ async function _bastionDoDeposit() {
     closeModal();
     showNotif(`✓ ${qte}× ${item.nom} déposé au coffre.`, 'success');
   } catch (e) { notifySaveError(e); }
-}
-
-function _bastionOpenWithdrawItem(coffreId) {
-  const item = (STORE.bastion?.coffre || []).find(c => c.id === coffreId);
-  if (!item) return;
-  let chars = _eligibleChars();
-  if (!chars.length) { showNotif('Aucun personnage destinataire.', 'error'); return; }
-  // Liste déjà triée par _eligibleChars (joueur alpha → ★ par défaut → nom).
-  // Default = le perso ★ de l'utilisateur, sinon son premier, sinon le premier de la liste.
-  const defaultChar = getDefaultCharForUser(chars, STATE.user?.uid) || chars[0];
-
-  openModal(`📤 Retirer : ${_esc(item.nom)} ×${item.quantite}`, `
-    <div class="form-group">
-      <label>Vers le personnage</label>
-      <select class="input-field" id="bas-wd-char">
-        ${chars.map(c => `<option value="${c.id}"${c.id === defaultChar.id ? ' selected' : ''}>${_esc(c.nom || '?')}</option>`).join('')}
-      </select>
-    </div>
-    <div class="form-group">
-      <label>Quantité <span style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:.4rem">(stack : ${item.quantite})</span></label>
-      <div style="display:flex;gap:6px;align-items:center">
-        <input type="number" class="input-field" id="bas-wd-qte" min="1" max="${item.quantite}" value="${item.quantite}" style="flex:1">
-        <button type="button" class="btn btn-outline btn-sm" data-action="_bastionSetMax" data-target="bas-wd-qte" data-val="${item.quantite}">Tout</button>
-      </div>
-    </div>
-    <button class="btn btn-gold" style="width:100%" data-action="_bastionDoWithdraw" data-id="${coffreId}">📤 Retirer</button>
-  `);
 }
 
 async function _bastionDoWithdraw(coffreId) {
@@ -2026,79 +1995,6 @@ async function _bastionFireEmployee(empId) {
   showNotif(`${emp.nom} a quitté le bastion.`, 'success');
 }
 
-function _bastionShowDetails(slug) {
-  const def = _getRoomDef(slug);
-  if (!def) return;
-  const b = STORE.bastion || _defaultBastion();
-  const curNiv = _roomNiveau(b, slug);
-  const buildingTarget = b?.salles?.[slug]?.targetNiveau || 0;
-
-  // Mode unlimited (Entrepôt) → affichage compact
-  if (def.unlimited) {
-    const nextCost = Math.round((def.baseCost || 100) * Math.pow(def.costMultiplier || 1.1, curNiv));
-    const nextCapacity = 20 + (curNiv + 1) * (def.capacitePerLevel || 10);
-    openModal(`${def.emoji} ${def.nom} — détails`, `
-      <div class="bs-det">
-        <p class="bs-det-desc">${_esc(def.desc)}</p>
-        <div class="bs-det-levels">
-          <div class="bs-det-level bs-det-level--active">
-            <div class="bs-det-level-head">
-              <span class="bs-det-level-num">Niveau actuel</span>
-              <span class="bs-det-level-state">Niv. ${curNiv} / ${def.maxLevel || 99}</span>
-            </div>
-            <div class="bs-det-level-cost">📦 Capacité actuelle : <strong>${_bastionCapacity(b)} objets</strong></div>
-          </div>
-          ${curNiv < (def.maxLevel || 99) ? `<div class="bs-det-level">
-            <div class="bs-det-level-head">
-              <span class="bs-det-level-num">Niveau suivant</span>
-              <span class="bs-det-level-state">🔓 Niv. ${curNiv + 1}</span>
-            </div>
-            <div class="bs-det-level-cost">💰 ${nextCost} or · ⏱ ${def.baseSemaines || 1} période · +${def.capacitePerLevel || 10} capacité (→ ${nextCapacity} total)</div>
-          </div>` : `<div class="bs-det-level bs-det-level--locked">
-            <div class="bs-det-level-head">
-              <span class="bs-det-level-num">Niveau max atteint</span>
-              <span class="bs-det-level-state">🔒 Niv. ${def.maxLevel || 99}</span>
-            </div>
-          </div>`}
-        </div>
-      </div>
-    `);
-    return;
-  }
-
-  const niveauxHtml = def.niveaux.map((n, i) => {
-    const niv = i + 1;
-    const state = curNiv >= niv ? 'active' : (buildingTarget === niv ? 'building' : 'locked');
-    const prodParts = [];
-    if (n.prod.or > 0) prodParts.push(`<span class="bs-det-prod-or">+${n.prod.or} or</span>`);
-    for (const item of (n.prod.items || [])) {
-      prodParts.push(`<span class="bs-det-prod-item">${item.emoji} ${item.nom}${item.q > 1 ? ` ×${item.q}` : ''}</span>`);
-    }
-    const stateLabel = state === 'active' ? '✓ Active'
-                     : state === 'building' ? '🏗 En construction'
-                     : (curNiv >= niv - 1 ? '🔓 Prochaine étape' : '🔒 Verrouillée');
-    return `
-      <div class="bs-det-level bs-det-level--${state}">
-        <div class="bs-det-level-head">
-          <span class="bs-det-level-num">Niv. ${NIVEAU_LABEL[niv]}</span>
-          <span class="bs-det-level-state">${stateLabel}</span>
-        </div>
-        <div class="bs-det-level-cost">
-          💰 ${n.cout} or · ⏱ ${n.semaines} période
-        </div>
-        ${prodParts.length ? `<div class="bs-det-level-prod"><span class="bs-det-prod-lbl">Production/période :</span> ${prodParts.join(' · ')}</div>` : ''}
-        ${n.bonus ? `<div class="bs-det-level-bonus"><span class="bs-det-bonus-lbl">🎁 Bonus :</span> ${_esc(n.bonus)}</div>` : ''}
-      </div>`;
-  }).join('');
-
-  openModal(`${def.emoji} ${def.nom} — détails`, `
-    <div class="bs-det">
-      <p class="bs-det-desc">${_esc(def.desc)}</p>
-      <div class="bs-det-levels">${niveauxHtml}</div>
-    </div>
-  `);
-}
-
 // ══════════════════════════════════════════════════════════════════════════════
 // EXPORT JSON — backup du bastion
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2358,60 +2254,6 @@ function _investmentDocId(uid, charId, roomSlug) {
     .join('__');
 }
 
-function _bastionOpenInvest(slug) {
-  const b = STORE.bastion || _defaultBastion();
-  const def = _getRoomDef(slug, b);
-  if (!def || _roomBuilding(b, slug)) return;
-  const target = _roomNiveau(b, slug) + 1;
-  const nextDef = _getNiveauData(def, target);
-  if (!nextDef) return;
-
-  const remaining = Math.max(0, (Number(nextDef.cout) || 0) - _roomInvestmentAvailable(b, slug));
-  if (!remaining) {
-    showNotif('Ce niveau est déjà entièrement financé.', 'success');
-    return;
-  }
-
-  const chars = _eligibleChars();
-  if (!chars.length) {
-    showNotif('Aucun personnage disponible pour investir.', 'error');
-    return;
-  }
-  const defaultChar = getDefaultCharForUser(chars, STATE.user?.uid) || chars[0];
-  const contributors = _roomInvestmentContributors(slug);
-  const contributorsHtml = contributors.length
-    ? `<div class="bs-invest-contributors">
-        <span>Contributions cumulées</span>
-        ${contributors.map(entry => `<div><b>${_esc(entry.charName)}</b><strong>${entry.amount} or</strong></div>`).join('')}
-      </div>`
-    : '';
-
-  openModal(`🤝 Investir dans ${def.nom}`, `
-    <div class="bs-invest-modal" data-room="${_esc(slug)}">
-      <div class="bs-invest-target" style="--c:${def.color}">
-        <span>${_esc(def.emoji)}</span>
-        <div><small>Prochain niveau</small><strong>${_esc(def.nom)} · Niv. ${def.unlimited ? target : (NIVEAU_LABEL[target] || target)}</strong></div>
-        <b>${remaining} or à réunir</b>
-      </div>
-      <label class="form-group">Personnage
-        <select class="input-field" id="bas-invest-char" data-change="_bastionRefreshInvestment" data-slug="${_esc(slug)}">
-          ${chars.map(char => `<option value="${char.id}"${char.id === defaultChar.id ? ' selected' : ''}>${_esc(char.nom || '?')}</option>`).join('')}
-        </select>
-      </label>
-      <label class="form-group">Montant
-        <div class="bs-invest-amount">
-          <input type="number" class="input-field" id="bas-invest-amount" min="1" value="${Math.min(50, remaining)}">
-          <button type="button" class="btn btn-outline btn-sm" data-action="_bastionFillInvestment" data-slug="${_esc(slug)}">Maximum</button>
-        </div>
-        <small id="bas-invest-info"></small>
-      </label>
-      <p class="bs-invest-note">L'or est retiré du personnage et réservé à cette salle. Il ne sera dépensé que lorsque le MJ lancera le chantier.</p>
-      ${contributorsHtml}
-      <button type="button" class="btn btn-gold" data-action="_bastionDoInvest" data-slug="${_esc(slug)}">🤝 Confirmer l'investissement</button>
-    </div>
-  `, { subtitle: `${_roomInvestmentAvailable(b, slug)} / ${nextDef.cout} or déjà réunis`, accent: def.color || '#e8b84b' });
-  _bastionRefreshInvestment(slug);
-}
 
 function _bastionRefreshInvestment(slug) {
   const charId = document.getElementById('bas-invest-char')?.value;
@@ -2495,49 +2337,120 @@ async function _bastionDoInvest(slug) {
 // ══════════════════════════════════════════════════════════════════════════════
 // RENDU
 // ══════════════════════════════════════════════════════════════════════════════
-function _renderHeader(b) {
-  const isMj = STATE.isAdmin;
-  return `
-    <header class="bs-page-top">
-      <div class="bs-page-top-in">
-        <div class="bs-page-top-row">
-          <span class="bs-page-mark" aria-hidden="true">${_esc(b.emoji || '🏰')}</span>
-          <div class="bs-page-brand">
-            <h1>${_esc(b.nom || 'Le Bastion')}</h1>
-            <small>Période ${b.semaine || 1}${b.lieu ? ` · ${_esc(b.lieu)}` : ''}</small>
-          </div>
-          <div class="bs-page-actions">
-            <button class="btn btn-outline btn-sm" data-action="_bastionOpenPersonnel">👥 Personnel${b.personnel?.length ? ` <span style="opacity:.7">(${b.personnel.length})</span>` : ''}</button>
-            ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionEditIdentite">✏️ Identité</button>` : ''}
-            ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionOpenCatalogEditor">🏛 Éditer salles</button>` : ''}
-            ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionOpenPreview">🔮 Prévisualiser</button>` : ''}
-            ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionExportJSON" title="Backup JSON du bastion" aria-label="Exporter le Bastion">💾</button>` : ''}
-            ${isMj && b._undoSnapshot ? `<button class="btn btn-outline btn-sm" data-action="_bastionUndoWeek" title="Annuler le dernier passage de période">↩ Annuler la période</button>` : ''}
-            ${isMj ? `<button class="btn btn-gold" data-action="_bastionAdvanceWeek">▶ Passer la période</button>` : ''}
-          </div>
-        </div>
-      </div>
-    </header>`;
+// ── Onglets (coquille de page, construite comme l'Agenda) ────────────────────
+const _BS_TABS = [
+  ['salles', '🧱', 'Salles'],
+  ['mur',    '📣', 'Mur'],
+  ['coffre', '📦', 'Coffre'],
+];
+const _BS_TAB_KEY = 'bs-tab';
+
+function _bsGetTab() {
+  if (STORE.tab && _BS_TABS.some(([k]) => k === STORE.tab)) return STORE.tab;
+  try {
+    const t = localStorage.getItem(_BS_TAB_KEY);
+    if (_BS_TABS.some(([k]) => k === t)) { STORE.tab = t; return t; }
+  } catch { /* stockage privé indisponible */ }
+  return 'salles';
+}
+function _bastionSetTab(tab) {
+  if (!_BS_TABS.some(([k]) => k === tab)) return;
+  STORE.tab = tab;
+  try { localStorage.setItem(_BS_TAB_KEY, tab); } catch { /* stockage privé indisponible */ }
+  _renderPage();
 }
 
-function _renderGauges(b) {
-  const hasEligibleChar = _eligibleChars().length > 0;
-  const bastionHasOr = (b.or || 0) > 0;
+// Perso courant du scope « Je joue » (source unique = _wallUi.charId, défaut = perso ★).
+function _bastionScopeChar() {
+  const chars = _eligibleChars();
+  if (!chars.length) return null;
+  return chars.find(c => c.id === _wallUi.charId)
+    || getDefaultCharForUser(chars, STATE.user?.uid)
+    || chars[0];
+}
+
+// Nombre de publications du mur non lues (badge rouge de l'onglet Mur).
+function _bastionWallUnread() {
+  let seen = Number(_wallRead?.seenAt) || 0;
+  try { seen = Math.max(seen, Number(localStorage.getItem(bastionWallSeenKey(STATE.adventure?.id, STATE.user?.uid))) || 0); } catch { /* privé */ }
+  return bastionWallUnreadCount(_wallAllPosts(), seen, STATE.user?.uid);
+}
+
+function _renderHeader(b) {
+  const isMj = STATE.isAdmin;
+  const chars = _eligibleChars();
+  const hasChar = chars.length > 0;
+  const bastionOr = b.or || 0;
+
+  // Compteurs d'onglets.
+  const catalog = _getRoomCatalog(b);
+  const built = catalog.filter(def => _roomNiveau(b, def.slug) > 0).length;
+  const activePosts = _wallAllPosts().filter(p => p.status !== 'cancelled').length;
+  const unread = _bastionWallUnread();
+  const used = _bastionInvCount(b);
+  const capacity = _bastionCapacity(b);
+  const tabCounts = {
+    salles: `${built}/${catalog.length}`,
+    mur: `${activePosts}`,
+    coffre: `${used}/${capacity}`,
+  };
+  const activeTab = _bsGetTab();
+
+  // Menu « Période ▾ » — regroupe TOUTES les actions MJ ; joueur = Personnel + Historique.
+  const histoCount = (b.historique || []).filter(entry => !_ADMIN_HISTO_TYPES.has(entry.type)).length;
+  const menuItems = isMj
+    ? [
+        `<button data-action="_bastionAdvanceWeek">▶ Passer la période</button>`,
+        b._undoSnapshot ? `<button data-action="_bastionUndoWeek">↩ Annuler la période</button>` : '',
+        `<hr class="bs-menu-sep">`,
+        `<button data-action="_bastionEditIdentite">✏️ Identité du Bastion</button>`,
+        `<button data-action="_bastionOpenCatalogEditor">🏛 Éditer les salles</button>`,
+        `<button data-action="_bastionOpenPersonnel">👥 Personnel${b.personnel?.length ? ` (${b.personnel.length})` : ''}</button>`,
+        `<button data-action="_bastionOpenQuestEditor">📋 Quêtes du Bastion</button>`,
+        `<button data-action="_bastionOpenPreview">🔮 Prévisualiser la période</button>`,
+        `<button data-action="_bastionOpenHistory">📜 Historique${histoCount ? ` (${histoCount})` : ''}</button>`,
+        `<button data-action="_bastionExportJSON">💾 Exporter (JSON)</button>`,
+      ]
+    : [
+        `<button data-action="_bastionOpenPersonnel">👥 Personnel${b.personnel?.length ? ` (${b.personnel.length})` : ''}</button>`,
+        `<button data-action="_bastionOpenHistory">📜 Historique${histoCount ? ` (${histoCount})` : ''}</button>`,
+      ];
 
   return `
-    <div class="bs-gauges">
-      <div class="bs-gauge bs-gauge--or">
-        <div class="bs-gauge-icon">💰</div>
-        <div class="bs-gauge-info">
-          <div class="bs-gauge-lbl">Trésor commun</div>
-          <div class="bs-gauge-val">${b.or || 0} <span class="bs-gauge-unit">or</span></div>
+    <header class="ag-top bs-top">
+      <div class="ag-top-in">
+        <div class="ag-top-row">
+          <div class="ag-brand">
+            <span aria-hidden="true" style="font-size:20px">${_esc(b.emoji || '🏰')}</span>
+            <h1>${_esc(b.nom || 'Le Bastion')}</h1>
+            <small>${b.lieu ? _esc(b.lieu) : 'Quartier général'}</small>
+          </div>
+          <div style="flex:1"></div>
+          <div class="ag-scope bs-scope">
+            <div class="ag-sc-btn"><small>Période</small><span>${b.semaine || 1}</span></div>
+            <div class="ag-sc-btn"><small>Trésor</small><span>${bastionOr} or</span></div>
+          </div>
+          ${hasChar ? `<div class="bs-scope-tx">
+            <button class="btn btn-outline btn-sm" data-action="_bastionOpenTransfer" data-dir="deposit">＋ Verser</button>
+            ${bastionOr > 0 ? `<button class="btn btn-outline btn-sm" data-action="_bastionOpenTransfer" data-dir="withdraw">− Retirer</button>` : ''}
+          </div>` : ''}
+          <details class="ag-menu bs-menu">
+            <summary class="ag-menu-btn" title="Actions du Bastion" aria-label="Actions du Bastion">⋯</summary>
+            <div class="ag-menu-pop">${menuItems.filter(Boolean).join('')}</div>
+          </details>
         </div>
-        <div class="bs-gauge-actions">
-          ${hasEligibleChar ? `<button class="bs-gauge-btn" data-action="_bastionOpenTransfer" data-dir="deposit">＋ Verser</button>` : ''}
-          ${hasEligibleChar && bastionHasOr ? `<button class="bs-gauge-btn bs-gauge-btn--alt" data-action="_bastionOpenTransfer" data-dir="withdraw">− Retirer</button>` : ''}
-        </div>
+        <nav class="ag-tabs bs-tabs" aria-label="Sections du Bastion">
+          ${_BS_TABS.map(([k, ic, lbl]) => {
+            const on = k === activeTab;
+            const badge = k === 'mur' && unread > 0 ? `<span class="bs-tab-badge">${unread}</span>` : '';
+            return `<button class="ag-tab${on ? ' is-on' : ''}" data-action="_bastionSetTab" data-tab="${k}" aria-pressed="${on}">
+              <span aria-hidden="true">${ic}</span> ${lbl}
+              <span class="ag-tab-cnt">${tabCounts[k]}</span>${badge}
+            </button>`;
+          }).join('')}
+        </nav>
       </div>
-    </div>`;
+    </header>`;
 }
 
 function _bastionProductionSummary(b) {
@@ -2557,118 +2470,202 @@ function _bastionProductionSummary(b) {
   return summary;
 }
 
-function _renderBastionOverview(b) {
-  const catalog = _getRoomCatalog(b);
-  const built = catalog.filter(def => _roomNiveau(b, def.slug) > 0);
-  const building = catalog.filter(def => _roomBuilding(b, def.slug));
-  const used = _bastionInvCount(b);
-  const capacity = _bastionCapacity(b);
-  const personnel = b.personnel || [];
-  const salaries = personnel.reduce((s, e) => s + (parseInt(e.salaire) || 0), 0);
-  const prod = _bastionProductionSummary(b);
-  const storagePct = capacity ? Math.round((used / capacity) * 100) : 0;
-  const cards = [
-    { icon: '💰', label: 'Trésor', value: `${b.or || 0}`, unit: 'or', tone: '#e8b84b' },
-    { icon: '📦', label: 'Coffre', value: `${used}/${capacity}`, unit: `${storagePct}%`, tone: storagePct >= 90 ? '#ff5a7e' : '#4f8cff' },
-    { icon: '🏛', label: 'Salles actives', value: `${built.length}`, unit: `${catalog.length} plans`, tone: '#7eb0ff' },
-    { icon: '🏗', label: 'Chantiers', value: `${building.length}`, unit: building.length ? 'en cours' : 'calme', tone: '#ff9544' },
-    { icon: '👥', label: 'Personnel', value: `${personnel.length}`, unit: `${salaries} or/période`, tone: '#22c38e' },
-    { icon: '🪙', label: 'Production', value: `+${prod.or}`, unit: `${prod.items.length} objet${prod.items.length > 1 ? 's' : ''}`, tone: '#b47fff' },
-  ];
-  // Cartes seules (sans wrapper) : placées comme tuiles directes de .bs-etat-stats.
-  return cards.map(c => `
-    <div class="bs-overview-card" style="--tone:${c.tone}">
-      <span class="bs-overview-icon">${_esc(c.icon)}</span>
-      <div>
-        <span>${_esc(c.label)}</span>
-        <strong>${_esc(c.value)}</strong>
-        <small>${_esc(c.unit)}</small>
-      </div>
-    </div>`).join('');
+// Pastilles de niveau (I·II·III, hachurée = cible en chantier) ; Entrepôt = texte.
+function _roomPips(def, b) {
+  if (def.unlimited) {
+    const niv = _roomNiveau(b, def.slug);
+    return `<span class="bs-pips-unl">Niv. ${niv} · ${_bastionCapacity(b)} pl.</span>`;
+  }
+  const cur = _roomNiveau(b, def.slug);
+  const building = _roomBuilding(b, def.slug);
+  const target = b?.salles?.[def.slug]?.targetNiveau || 0;
+  let pips = '';
+  for (let n = 1; n <= 3; n++) {
+    const on = n <= cur, build = building && n === target;
+    pips += `<i class="bs-pip${on ? ' on' : ''}${build ? ' build' : ''}"></i>`;
+  }
+  return `<span class="bs-pips" aria-label="Niveau ${cur}/3">${pips}</span>`;
 }
 
-function _renderOperationsPanel(b) {
-  const catalog = _getRoomCatalog(b);
-  const prod = _bastionProductionSummary(b);
-  const building = catalog
-    .filter(def => _roomBuilding(b, def.slug))
-    .map(def => ({ def, state: b.salles?.[def.slug] || {} }));
-  const itemPreview = prod.items.slice(0, 4);
-
-  return `
-    <section class="bs-side-panel bs-side-panel--ops bs-etat-next">
-      <div class="bs-side-panel-hd">
-        <span>🧭</span>
-        <div>
-          <small>Pilotage</small>
-          <strong>Prochaine période</strong>
-        </div>
-      </div>
-      <div class="bs-ops-flow">
-        <div class="bs-ops-stat"><span>Or produit</span><strong>+${prod.or}</strong></div>
-        <div class="bs-ops-stat"><span>Objets produits</span><strong>${prod.items.length}</strong></div>
-        <div class="bs-ops-stat"><span>Chantiers</span><strong>${building.length}</strong></div>
-        <div class="bs-ops-cell">
-          ${itemPreview.length ? `
-            <div class="bs-mini-list">
-              ${itemPreview.map(item => `<div><b>${_esc(item.emoji || '📦')}</b><span>${_esc(item.nom)}${item.q > 1 ? ` ×${item.q}` : ''}</span><small>${_esc(item.room)}</small></div>`).join('')}
-              ${prod.items.length > itemPreview.length ? `<em>+${prod.items.length - itemPreview.length} autre${prod.items.length - itemPreview.length > 1 ? 's' : ''}</em>` : ''}
-            </div>` : `<p class="bs-side-empty">Aucune production d'objet active.</p>`}
-        </div>
-        <div class="bs-ops-cell">
-          ${building.length ? `
-            <div class="bs-build-list">
-              ${building.map(({ def, state }) => `
-                <div class="bs-build-line" style="--c:${def.color}">
-                  <span>${_esc(def.emoji)}</span>
-                  <div><strong>${_esc(def.nom)}</strong><small>Niv. ${state.targetNiveau || '?'} · ${state.weeksLeftToBuild || 0} période(s)</small></div>
-                </div>`).join('')}
-            </div>` : `<p class="bs-side-empty">Aucun chantier en cours.</p>`}
-        </div>
-      </div>
-    </section>`;
+// Prédicat de filtre (partagé rendu + compteurs).
+function _roomMatchesFilter(def, b, f) {
+  if (f === 'all') return true;
+  const cur = _roomNiveau(b, def.slug);
+  const building = _roomBuilding(b, def.slug);
+  if (f === 'building') return building;
+  if (f === 'built')    return cur > 0 && !building;
+  if (f === 'todo')     return cur === 0 && !building;
+  if (f === 'funding') {
+    if (building || cur >= _maxLevel(def)) return false;
+    const invested = _roomInvestmentAvailable(b, def.slug);
+    const cost = _getNiveauData(def, cur + 1)?.cout || 0;
+    return invested > 0 && invested < cost;
+  }
+  return true;
 }
 
-function _renderRoomCard(def, b) {
-  const isMj = STATE.isAdmin;
-  const curNiv  = _roomNiveau(b, def.slug);
+// Ligne compacte : icône, nom + pastilles, ce qu'elle apporte (2 lignes), état.
+function _renderRoomRow(def, b) {
+  const cur = _roomNiveau(b, def.slug);
   const building = _roomBuilding(b, def.slug);
   const max = _maxLevel(def);
-  const targetNiv = curNiv >= max ? null : curNiv + 1;
-  const nextDef = targetNiv ? _getNiveauData(def, targetNiv) : null;
-  const isUnlimited = !!def.unlimited;
-  const supportsPersonnel = !isUnlimited; // Entrepôt n'a pas de PNJ assignable
-  const invested = nextDef ? _roomInvestmentAvailable(b, def.slug) : 0;
-  const funding = nextDef ? roomFundingPlan(nextDef.cout, invested, b.or || 0) : null;
+  const isUnl = !!def.unlimited;
+  const selected = STORE.roomSel === def.slug;
 
-  // Etat global de la carte
-  const status = building ? 'building' : (curNiv > 0 ? 'active' : 'available');
-  const fundingMissing = funding && !funding.canFund;
-
-  const sallesData = b.salles?.[def.slug];
-
-  // Label de niveau (I/II/III pour normales, "1/2/.../99" pour unlimited)
-  const niveauLabel = (n) => isUnlimited ? `${n}` : NIVEAU_LABEL[n];
-
-  // Production actuelle (niveau actif)
-  let prodHtml = '';
-  let bonusHtml = '';
-  if (curNiv > 0 && !building) {
-    const niveauDef = _getNiveauData(def, curNiv) || {};
+  let apporte;
+  if (cur > 0) {
+    const nd = _getNiveauData(def, cur) || {};
     const parts = [];
-    if (niveauDef.prod?.or > 0) parts.push(`<span class="bs-prod-or">+${niveauDef.prod.or} or</span>`);
-    for (const item of (niveauDef.prod?.items || [])) {
-      parts.push(`<span class="bs-prod-item">${item.emoji} ${item.nom}${item.q > 1 ? ` ×${item.q}` : ''}</span>`);
-    }
-    if (parts.length) prodHtml = `<div class="bs-room-prod"><span class="bs-prod-lbl">Production / période :</span> ${parts.join(' · ')}</div>`;
-    if (niveauDef.bonus) bonusHtml = `<div class="bs-room-bonus" title="Bonus passif au groupe">🎁 ${_esc(niveauDef.bonus)}</div>`;
+    if (nd.prod?.or > 0) parts.push(`+${nd.prod.or} or`);
+    for (const it of (nd.prod?.items || [])) parts.push(`${it.emoji || ''} ${it.nom}${it.q > 1 ? ` ×${it.q}` : ''}`);
+    if (isUnl) parts.push(`Capacité ${_bastionCapacity(b)}`);
+    apporte = `<div class="bs-rr-prod">${parts.length ? _esc(parts.join(' · ')) : '—'}</div>`
+      + (nd.bonus ? `<div class="bs-rr-bonus">🎁 ${_esc(nd.bonus)}</div>` : '');
+  } else {
+    apporte = `<div class="bs-rr-prod bs-rr-muted">Non construite</div>`;
   }
 
-  // Personnel assigné à cette salle (slots = niveau)
-  let personnelHtml = '';
-  if (supportsPersonnel && curNiv > 0 && !building) {
+  let state;
+  if (building) {
+    state = `<div class="bs-rr-state is-build">🏗 ${b.salles[def.slug].weeksLeftToBuild} pér.</div>`;
+  } else if (cur >= max) {
+    state = `<div class="bs-rr-state is-max">✦ Max</div>`;
+  } else {
+    const nd = _getNiveauData(def, cur + 1) || { cout: 0 };
+    const invested = _roomInvestmentAvailable(b, def.slug);
+    const shown = Math.min(invested, nd.cout);
+    const pct = nd.cout > 0 ? Math.min(100, Math.round(shown / nd.cout * 100)) : 0;
+    state = `<div class="bs-rr-state is-fund">
+      <span>${shown}/${nd.cout} or</span>
+      <i class="bs-rr-bar"><b style="width:${pct}%;background:${def.color}"></b></i>
+    </div>`;
+  }
+
+  return `<button type="button" class="bs-room-row${selected ? ' is-selected' : ''}${building ? ' is-building' : ''}" style="--c:${def.color}"
+      data-action="_bastionSelectRoom" data-slug="${_esc(def.slug)}" aria-pressed="${selected}">
+    <span class="bs-rr-emoji">${def.emoji}</span>
+    <div class="bs-rr-main">
+      <div class="bs-rr-top"><span class="bs-rr-name">${_esc(def.nom)}</span>${_roomPips(def, b)}</div>
+      ${apporte}
+    </div>
+    ${state}
+  </button>`;
+}
+
+// Fiche collante : en-tête, Ce qu'elle apporte, Cotisation (+ chantier MJ), Paliers, Personnel.
+function _renderRoomDetail(def, b) {
+  if (!def) return `<div class="bs-fiche bs-fiche-empty">Sélectionne une salle pour voir ses détails.</div>`;
+  const isMj = STATE.isAdmin;
+  const cur = _roomNiveau(b, def.slug);
+  const building = _roomBuilding(b, def.slug);
+  const max = _maxLevel(def);
+  const isUnl = !!def.unlimited;
+  const nivLbl = (n) => isUnl ? `${n}` : (NIVEAU_LABEL[n] || n);
+  const target = cur >= max ? null : cur + 1;
+  const nextDef = target ? _getNiveauData(def, target) : null;
+
+  const header = `<div class="bs-fiche-hd">
+    <span class="bs-fiche-emoji">${def.emoji}</span>
+    <div class="bs-fiche-ttl">
+      <h3>${_esc(def.nom)}</h3>
+      <small>${cur > 0 ? `Niv. ${nivLbl(cur)}${isUnl ? ` / ${max}` : ''}` : 'Non construite'}${building ? ` · 🏗 → ${nivLbl(b.salles[def.slug].targetNiveau)}` : ''}</small>
+    </div>
+    ${isMj && !isUnl ? `<button class="btn btn-outline btn-sm" data-action="_bastionEditRoom" data-slug="${_esc(def.slug)}">✏️ Modifier</button>` : ''}
+  </div>`;
+
+  // Ce qu'elle apporte (niveau actuel, sinon aperçu niveau I).
+  const showNiv = cur > 0 ? cur : 1;
+  const apDef = _getNiveauData(def, showNiv) || {};
+  const apParts = [];
+  if (apDef.prod?.or > 0) apParts.push(`<li>🪙 +${apDef.prod.or} or / période</li>`);
+  for (const it of (apDef.prod?.items || [])) apParts.push(`<li>${it.emoji || '📦'} ${_esc(it.nom)}${it.q > 1 ? ` ×${it.q}` : ''} / période</li>`);
+  if (isUnl) apParts.push(`<li>📦 Capacité du coffre : ${20 + showNiv * (def.capacitePerLevel || 10)} objets</li>`);
+  if (apDef.bonus) apParts.push(`<li>🎁 ${_esc(apDef.bonus)}</li>`);
+  const apporte = `<div class="bs-fiche-sec">
+    <h4>Ce qu'elle apporte${cur > 0 ? '' : ' (niveau I)'}</h4>
+    <ul class="bs-fiche-list">${apParts.join('') || '<li class="bs-rr-muted">Aucun effet direct.</li>'}</ul>
+  </div>`;
+
+  // Cotisation vers le niveau suivant (ou encart chantier).
+  let fund;
+  if (building) {
+    const s = b.salles[def.slug];
+    const totalSem = _getNiveauData(def, s.targetNiveau)?.semaines || 1;
+    const pct = totalSem > 0 ? Math.round((totalSem - s.weeksLeftToBuild) / totalSem * 100) : 0;
+    fund = `<div class="bs-fiche-sec">
+      <h4>🏗 Chantier en cours</h4>
+      <div class="bs-fiche-fundbar"><i style="width:${pct}%;background:${def.color}"></i></div>
+      <p class="bs-fiche-note">Niv. ${nivLbl(s.targetNiveau)} — ${s.weeksLeftToBuild} période(s) restante(s).</p>
+      ${isMj ? `<button class="btn btn-outline btn-sm bs-fiche-cancel" data-action="_bastionCancelBuild" data-slug="${_esc(def.slug)}">✖ Annuler le chantier</button>` : ''}
+    </div>`;
+  } else if (nextDef) {
+    const invested = _roomInvestmentAvailable(b, def.slug);
+    const shown = Math.min(invested, nextDef.cout);
+    const remaining = Math.max(0, nextDef.cout - invested);
+    const pct = nextDef.cout > 0 ? Math.min(100, Math.round(shown / nextDef.cout * 100)) : 100;
+    const contributors = _roomInvestmentContributors(def.slug);
+    const chars = _eligibleChars();
+    const scope = _bastionScopeChar();
+    const plan = roomFundingPlan(nextDef.cout, invested, b.or || 0);
+    const contribHtml = contributors.length
+      ? `<div class="bs-fiche-contribs">${contributors.map(c => `<span><b>${_esc(c.charName)}</b> ${c.amount} or</span>`).join('')}</div>`
+      : `<p class="bs-fiche-note">Aucune contribution pour l'instant.</p>`;
+    const investCtrls = (chars.length && remaining > 0) ? `
+      <div class="bs-fiche-invest">
+        <select class="input-field" id="bas-invest-char" data-change="_bastionRefreshInvestment" data-slug="${_esc(def.slug)}" aria-label="Personnage qui cotise">
+          ${chars.map(c => `<option value="${c.id}"${scope && c.id === scope.id ? ' selected' : ''}>${_esc(c.nom || '?')}</option>`).join('')}
+        </select>
+        <div class="bs-fiche-quick">
+          <input type="number" class="input-field" id="bas-invest-amount" min="1" placeholder="Montant en or…" aria-label="Montant à cotiser">
+          <button type="button" class="bs-fiche-fill" data-action="_bastionFillInvestment" data-slug="${_esc(def.slug)}">Compléter</button>
+        </div>
+        <small id="bas-invest-info" class="bs-fiche-note"></small>
+        <button type="button" class="btn btn-gold btn-sm bs-fiche-go" data-action="_bastionDoInvest" data-slug="${_esc(def.slug)}">🤝 Cotiser le montant</button>
+      </div>`
+      : (remaining === 0 ? `<p class="bs-fiche-note">✓ Niveau entièrement financé.</p>` : `<p class="bs-fiche-note">Aucun personnage disponible pour cotiser.</p>`);
+    const buildBtn = isMj
+      ? (plan.canFund
+          ? `<button class="btn btn-gold bs-fiche-build" data-action="_bastionBuild" data-slug="${_esc(def.slug)}">🏗 Lancer le chantier · Niv. ${nivLbl(target)}<span>${plan.investmentUsed} investis + ${plan.treasuryUsed} trésor</span></button>`
+          : `<div class="bs-fiche-note">${plan.missing} or manquants (cagnotte + trésor) pour lancer le chantier.</div>`)
+      : '';
+    fund = `<div class="bs-fiche-sec">
+      <h4>🤝 Cotisation → Niv. ${nivLbl(target)}</h4>
+      <div class="bs-fiche-fundhead"><strong>${shown} / ${nextDef.cout} or</strong><span>${nextDef.semaines} période(s)</span></div>
+      <div class="bs-fiche-fundbar"><i style="width:${pct}%;background:${def.color}"></i></div>
+      ${contribHtml}
+      ${investCtrls}
+      ${buildBtn}
+    </div>`;
+  } else {
+    fund = `<div class="bs-fiche-sec"><h4>Niveau maximum</h4><p class="bs-fiche-note">✦ Cette salle est au niveau maximum.</p></div>`;
+  }
+
+  // Paliers.
+  let paliers;
+  if (!isUnl) {
+    const target2 = b?.salles?.[def.slug]?.targetNiveau || 0;
+    paliers = `<div class="bs-fiche-sec"><h4>Paliers</h4><div class="bs-fiche-tiers">
+      ${def.niveaux.map((nd, i) => {
+        const n = i + 1;
+        const st = n <= cur ? 'done' : (building && n === target2 ? 'build' : (n === cur + 1 ? 'next' : 'todo'));
+        const prod = [];
+        if (nd.prod?.or > 0) prod.push(`+${nd.prod.or} or`);
+        for (const it of (nd.prod?.items || [])) prod.push(`${it.emoji || ''}${it.q > 1 ? `×${it.q}` : ''}`);
+        return `<div class="bs-tier is-${st}">
+          <div class="bs-tier-h"><b>Niv. ${NIVEAU_LABEL[n]}</b><span>${nd.cout} or · ${nd.semaines} pér.</span></div>
+          <div class="bs-tier-b">${prod.length ? _esc(prod.join(' · ')) : ''}${nd.bonus ? `<em>🎁 ${_esc(nd.bonus)}</em>` : ''}</div>
+        </div>`;
+      }).join('')}
+    </div></div>`;
+  } else {
+    paliers = `<div class="bs-fiche-sec"><h4>Paliers</h4><p class="bs-fiche-note">Chaque niveau ajoute +${def.capacitePerLevel || 10} de capacité (jusqu'à ${max}). Coût de base ${def.baseCost || 100} or, ×${def.costMultiplier || 1.1} par niveau.</p></div>`;
+  }
+
+  // Personnel (hors Entrepôt).
+  let personnel = '';
+  if (!isUnl) {
     const assigned = (b.personnel || []).filter(e => e.roomSlug === def.slug);
-    const slots = curNiv; // 1 PNJ par niveau
+    const slots = cur;
     const npcs = STORE.hireNpcsCache || STORE.npcsCache || [];
     const cards = assigned.map(e => {
       const npc = e.npcId ? npcs.find(n => n.id === e.npcId) : null;
@@ -2684,124 +2681,68 @@ function _renderRoomCard(def, b) {
         ${isMj ? `<button class="bs-emp-mini-rm" data-action="_bastionFireEmployee" data-id="${e.id}" title="Renvoyer">✕</button>` : ''}
       </div>`;
     }).join('');
-    const free = slots - assigned.length;
-    const addBtn = (isMj && free > 0) ? `<button class="bs-emp-add" data-action="_bastionOpenHire" data-slug="${def.slug}">＋ Embaucher (${free} slot${free > 1 ? 's' : ''} libre${free > 1 ? 's' : ''})</button>` : '';
-    personnelHtml = `<div class="bs-room-personnel">
-      <div class="bs-room-personnel-hd">👥 Personnel ${assigned.length}/${slots}</div>
-      ${cards}
-      ${addBtn}
+    const free = Math.max(0, slots - assigned.length);
+    const addBtn = (isMj && free > 0 && cur > 0) ? `<button class="bs-emp-add" data-action="_bastionOpenHire" data-slug="${_esc(def.slug)}">＋ Embaucher (${free} libre${free > 1 ? 's' : ''})</button>` : '';
+    personnel = `<div class="bs-fiche-sec"><h4>👥 Personnel${cur > 0 ? ` ${assigned.length}/${slots}` : ''}</h4>
+      ${cur > 0 ? ((cards + addBtn) || '<p class="bs-fiche-note">Aucun employé.</p>') : '<p class="bs-fiche-note">Construis la salle pour affecter du personnel.</p>'}
     </div>`;
   }
 
-  // Bandeau de construction en cours
-  let buildingHtml = '';
-  if (building && sallesData) {
-    const totalSem = _getNiveauData(def, sallesData.targetNiveau)?.semaines || 1;
-    const done = totalSem - sallesData.weeksLeftToBuild;
-    const pct = totalSem > 0 ? Math.round((done / totalSem) * 100) : 0;
-    buildingHtml = `<div class="bs-room-building">
-      <div class="bs-room-building-lbl">🏗 Construction Niv. ${niveauLabel(sallesData.targetNiveau)} — ${sallesData.weeksLeftToBuild} période(s) restante(s)</div>
-      <div class="bs-room-bar"><div class="bs-room-bar-fill" style="width:${pct}%;background:${def.color}"></div></div>
-      ${isMj ? `<button class="bs-room-cancel" data-action="_bastionCancelBuild" data-slug="${def.slug}" title="Annuler cette construction et rembourser l'or">✖ Annuler la construction</button>` : ''}
-    </div>`;
-  }
-
-  // Cagnotte visible par tous : les joueurs savent immédiatement ce qui manque
-  // et peuvent financer précisément la salle qui les intéresse.
-  let investmentHtml = '';
-  if (!building && nextDef) {
-    const shownInvested = Math.min(invested, nextDef.cout);
-    const pct = nextDef.cout > 0 ? Math.min(100, Math.round(shownInvested / nextDef.cout * 100)) : 100;
-    const remaining = Math.max(0, nextDef.cout - invested);
-    const contributors = _roomInvestmentContributors(def.slug);
-    const canInvest = _eligibleChars().length > 0 && remaining > 0;
-    investmentHtml = `<div class="bs-room-investment${remaining === 0 ? ' is-funded' : ''}">
-      <div class="bs-room-investment-head">
-        <span>${remaining === 0 ? '✓ Niveau financé' : '🤝 Cagnotte des joueurs'}</span>
-        <strong>${shownInvested} / ${nextDef.cout} or</strong>
-      </div>
-      <div class="bs-room-investment-bar"><i style="width:${pct}%;background:${def.color}"></i></div>
-      <div class="bs-room-investment-foot">
-        <small>${contributors.length ? `${contributors.length} contributeur${contributors.length > 1 ? 's' : ''}` : 'Aucune contribution'}</small>
-        ${canInvest ? `<button type="button" data-action="_bastionOpenInvest" data-slug="${def.slug}">Investir</button>` : ''}
-      </div>
-    </div>`;
-  }
-
-  // Bouton MJ pour construire / améliorer
-  let actionHtml = '';
-  if (isMj && !building && targetNiv) {
-    const disabled = fundingMissing;
-    const tooltip = disabled ? `${funding.missing} or manquants (cagnotte + trésor)`
-                  : `Construire niveau ${niveauLabel(targetNiv)} — ${funding.investmentUsed} or investis + ${funding.treasuryUsed} or du trésor`;
-    actionHtml = `
-      <button class="bs-room-action${disabled ? ' bs-room-action--disabled' : ''}"
-        ${disabled ? '' : `data-action="_bastionBuild" data-slug="${def.slug}"`}
-        title="${_esc(tooltip)}">
-        ${curNiv === 0 ? '＋ Construire' : `↑ Améliorer Niv. ${niveauLabel(targetNiv)}`}
-        <span class="bs-room-cost">${nextDef.cout} or · ${nextDef.semaines} période</span>
-      </button>`;
-  } else if (isMj && curNiv >= max) {
-    actionHtml = `<div class="bs-room-maxed">✦ Niveau maximum atteint</div>`;
-  }
-
-  // Affichage du niveau dans le header
-  const nivDisplay = curNiv > 0
-    ? `Niv. ${niveauLabel(curNiv)}${isUnlimited ? ` / ${max}` : ''}`
-    : 'Non construite';
-
-  return `
-    <div class="bs-room bs-room--${status}" style="--c:${def.color}">
-      <div class="bs-room-header">
-        <span class="bs-room-emoji">${def.emoji}</span>
-        <div class="bs-room-title">
-          <div class="bs-room-name">${_esc(def.nom)}</div>
-          <div class="bs-room-niv">${nivDisplay}${building ? ` · ${_roomTargetLabel(def.slug, b, isUnlimited)}` : ''}</div>
-        </div>
-        <div class="bs-room-actions-top">
-          ${isMj && !isUnlimited ? `<button class="bs-room-edit" data-action="_bastionEditRoom" data-slug="${def.slug}" title="Modifier cette salle">✏️</button>` : ''}
-          <button class="bs-room-info" data-action="_bastionShowDetails" data-slug="${def.slug}" title="Voir les niveaux et bonus">ⓘ</button>
-        </div>
-      </div>
-      <div class="bs-room-desc">${_esc(def.desc)}</div>
-      ${prodHtml}
-      ${bonusHtml}
-      ${personnelHtml}
-      ${buildingHtml}
-      ${investmentHtml}
-      ${actionHtml}
-    </div>`;
+  return `<div class="bs-fiche" style="--c:${def.color}">${header}${apporte}${fund}${paliers}${personnel}</div>`;
 }
 
-function _renderAddRoomCard() {
-  return `
-    <button type="button" class="bs-room-add-card" data-action="_bastionAddCustomRoom" title="Ajouter une salle / activité" aria-label="Ajouter une salle ou activité au Bastion">
-      <span class="bs-room-add-plus" aria-hidden="true"></span>
-      <span class="bs-room-add-label">Nouvelle salle</span>
-    </button>`;
-}
+function _bastionSelectRoom(slug) { STORE.roomSel = slug; _renderPage(); }
+function _bastionSetRoomFilter(f) { STORE.roomFilter = f; _renderPage(); }
 
 function _renderRooms(b) {
   const isMj = STATE.isAdmin;
-  const anyBuilt = Object.values(b.salles || {}).some(s => (s?.niveau || 0) > 0 || s?.weeksLeftToBuild > 0);
   const catalog = _getRoomCatalog(b);
-  const roomsHtml = catalog.length ? `
-      <div class="bs-rooms-grid">
-        ${catalog.map(def => _renderRoomCard(def, b)).join('')}
-        ${isMj ? _renderAddRoomCard() : ''}
-      </div>` : `
-      ${isMj ? `<div class="bs-rooms-grid bs-rooms-grid--empty">${_renderAddRoomCard()}</div>` : `<div class="bs-coffre-empty">Aucune salle n'est définie pour cette aventure.</div>`}`;
+
+  // Résout la salle sélectionnée (défaut : 1re construite, sinon 1re du catalogue).
+  let sel = catalog.find(d => d.slug === STORE.roomSel);
+  if (!sel) sel = catalog.find(d => _roomNiveau(b, d.slug) > 0) || catalog[0] || null;
+  STORE.roomSel = sel?.slug || null;
+
+  const F = STORE.roomFilter || 'all';
+  const filtered = catalog.filter(def => _roomMatchesFilter(def, b, F));
+
+  // Bandeau « Chaque période » : production + capacité du coffre.
+  const prod = _bastionProductionSummary(b);
+  const prodParts = [];
+  if (prod.or > 0) prodParts.push(`🪙 +${prod.or} or`);
+  if (prod.items.length) prodParts.push(`📦 ${prod.items.length} objet${prod.items.length > 1 ? 's' : ''}`);
+  const used = _bastionInvCount(b), capacity = _bastionCapacity(b);
+  const topBar = `<div class="bs-salles-top">
+    <div class="bs-salles-top-cell"><small>Chaque période</small><strong>${prodParts.length ? prodParts.join(' · ') : 'Aucune production'}</strong></div>
+    <div class="bs-salles-top-cell"><small>Coffre</small><strong>${used} / ${capacity} objets</strong></div>
+  </div>`;
+
+  const FILTERS = [['all', 'Toutes'], ['built', 'Construites'], ['funding', 'En cotisation'], ['building', 'En chantier'], ['todo', 'À construire']];
+  const filterBar = `<div class="bs-salles-filters" role="group" aria-label="Filtrer les salles">
+    ${FILTERS.map(([k, lbl]) => {
+      const n = catalog.filter(d => _roomMatchesFilter(d, b, k)).length;
+      return `<button type="button" class="bs-salles-filter${F === k ? ' is-on' : ''}" data-action="_bastionSetRoomFilter" data-filter="${k}" aria-pressed="${F === k}">${lbl}<span class="bs-salles-filter-n">${n}</span></button>`;
+    }).join('')}
+  </div>`;
+
+  const listHtml = filtered.length
+    ? filtered.map(def => _renderRoomRow(def, b)).join('')
+    : `<div class="bs-coffre-empty">Aucune salle dans ce filtre.</div>`;
+  const addRow = isMj ? `<button type="button" class="bs-room-row bs-room-row--add" data-action="_bastionAddCustomRoom">＋ Nouvelle salle / activité</button>` : '';
+
   return `
-    <section class="bs-section">
+    <section class="bs-section bs-salles">
       <div class="bs-section-hd">
         <h2 class="bs-section-title">🏛 Salles &amp; activités</h2>
-        ${isMj && anyBuilt ? `<button class="btn btn-outline btn-sm bs-reset-btn"
-          data-action="_bastionResetRooms" title="Réinitialiser toutes les salles construites">
-          🔄 Reset salles
-        </button>` : ''}
+        ${isMj && catalog.some(d => _roomNiveau(b, d.slug) > 0 || _roomBuilding(b, d.slug)) ? `<button class="btn btn-outline btn-sm bs-reset-btn"
+          data-action="_bastionResetRooms" title="Réinitialiser toutes les salles construites">🔄 Reset salles</button>` : ''}
       </div>
-      <p class="bs-section-sub">Chaque salle débloque une activité. Construis et améliore selon les priorités du groupe.</p>
-      ${roomsHtml}
+      ${topBar}
+      ${filterBar}
+      <div class="bs-salles-layout">
+        <div class="bs-salles-list">${listHtml}${addRow}</div>
+        <aside class="bs-salles-fiche">${_renderRoomDetail(sel, b)}</aside>
+      </div>
     </section>`;
 }
 
@@ -2854,100 +2795,133 @@ function _coffreItemCategory(item) {
 
 
 function _bastionSetCoffreFilter(cat) { STORE.coffreFilter = cat; _renderPage(); }
-function _bastionSetCoffreSearch(val) { STORE.coffreSearch = _norm(val || ''); _renderPage(); }
+function _bastionSetCoffreSearch(val) {
+  STORE.coffreSearchRaw = val || '';
+  STORE.coffreSearch = _norm(val || '');
+  _renderPage();
+  const el = document.getElementById('bas-coffre-q');
+  if (el) { el.focus(); const n = el.value.length; try { el.setSelectionRange(n, n); } catch { /* noop */ } }
+}
+
+// Catégories du coffre : libellé, couleur, emoji (chips + icône de repli).
+const _COFFRE_CATS = {
+  armes:      { l: 'Armes',      c: '#ff6b4a', e: '⚔️' },
+  armures:    { l: 'Armures',    c: '#4f8cff', e: '🛡' },
+  potions:    { l: 'Potions',    c: '#22c38e', e: '🧪' },
+  scrolls:    { l: 'Scrolls',    c: '#9d6fff', e: '📜' },
+  bijoux:     { l: 'Bijoux',     c: '#e8b84b', e: '💎' },
+  ressources: { l: 'Ressources', c: '#a0a8b8', e: '🪵' },
+  autre:      { l: 'Autre',      c: '#7a8699', e: '📦' },
+};
+
+function _bastionCoffreOpen(id) { STORE.coffreOpen = STORE.coffreOpen === id ? null : id; STORE.takeQty = 1; _renderPage(); }
+function _bastionCoffreQty(delta, max) {
+  STORE.takeQty = Math.max(1, Math.min(Number(max) || 1, (STORE.takeQty || 1) + Number(delta)));
+  _renderPage();
+}
+// Retrait en ligne : réutilise _bastionDoWithdraw (lit #bas-wd-char / #bas-wd-qte).
+async function _bastionCoffreTake(id) {
+  STORE.coffreOpen = null;
+  await _bastionDoWithdraw(id);
+  if (STATE.currentPage === 'bastion') _renderPage();
+}
+function _bastionCoffreExpand() { STORE.roomSel = 'entrepot'; _bastionSetTab('salles'); }
 
 function _renderCoffre(b) {
   const coffre = (b.coffre || []);
   const capacity = _bastionCapacity(b);
   const used = _bastionInvCount(b);
   const pct = capacity > 0 ? Math.min(100, Math.round(used / capacity * 100)) : 0;
-  const hasEligibleChar = _eligibleChars().length > 0;
+  const nearFull = pct > 85;
   const isFull = used >= capacity;
+  const chars = _eligibleChars();
+  const hasEligibleChar = chars.length > 0;
+  const scope = _bastionScopeChar();
+  const prod = _bastionProductionSummary(b);
 
-  // Comptes par catégorie (utiles pour les pills)
-  const counts = { all: coffre.length, armes:0, armures:0, potions:0, scrolls:0, bijoux:0, ressources:0, autre:0, mine:0 };
-  const myCharNoms = new Set(getVisibleCharacters().map(c => c.nom));
-  coffre.forEach(it => {
-    counts[_coffreItemCategory(it)]++;
-    if (it.source && myCharNoms.size && [...myCharNoms].some(n => (it.source || '').includes(n))) counts.mine++;
-  });
+  const myNoms = new Set(getVisibleCharacters().map(c => c.nom));
+  const isMine = (it) => it.source && myNoms.size && [...myNoms].some(n => (it.source || '').includes(n));
+  const counts = { all: coffre.length, mine: 0 };
+  for (const k of Object.keys(_COFFRE_CATS)) counts[k] = 0;
+  coffre.forEach(it => { counts[_coffreItemCategory(it)]++; if (isMine(it)) counts.mine++; });
 
-  // Header avec capacité + bouton Déposer
-  const header = `
-    <div class="bs-section-hd">
-      <h2 class="bs-section-title">📦 Coffre commun <span class="bs-section-count">${used}/${capacity}</span></h2>
-      ${hasEligibleChar ? `<button class="btn btn-outline btn-sm${isFull ? ' bs-btn-disabled' : ''}" ${isFull ? '' : 'data-action="_bastionOpenDeposit"'} title="${isFull ? 'Coffre plein — améliore l\'Entrepôt' : 'Déposer un objet'}">📥 Déposer</button>` : ''}
+  // Bande haute : Or + Capacité.
+  const entrepotNiv = _roomNiveau(b, 'entrepot');
+  const band = `<div class="bs-v-band">
+    <div class="bs-v-cell">
+      <div class="bs-v-kv"><span class="bs-v-lbl">Or du Bastion</span><span class="bs-v-val">${b.or || 0} <small>or</small></span>${prod.or > 0 ? `<span class="bs-v-sub">+${prod.or} or à la fin de la période</span>` : ''}</div>
+      ${hasEligibleChar ? `<div class="bs-v-acts"><button class="bs-w-btn" data-action="_bastionOpenTransfer" data-dir="deposit">Déposer</button>${(b.or || 0) > 0 ? `<button class="bs-w-btn" data-action="_bastionOpenTransfer" data-dir="withdraw">Retirer</button>` : ''}</div>` : ''}
     </div>
-    <div class="bs-capacity">
-      <div class="bs-capacity-bar"><div class="bs-capacity-fill" style="width:${pct}%;background:${pct >= 90 ? '#ff5a7e' : pct >= 70 ? '#f4c430' : '#22c38e'}"></div></div>
-      <div class="bs-capacity-lbl">${used} / ${capacity} objets ${isFull ? '— <strong>plein</strong>' : pct >= 90 ? '— presque plein' : ''}</div>
-    </div>`;
+    <div class="bs-v-cell">
+      <div class="bs-v-kv"><span class="bs-v-lbl">Capacité</span><span class="bs-v-val">${used} <small>/ ${capacity} places</small></span>
+        <div class="bs-v-bar" style="--bc:${nearFull ? 'var(--crimson, #ff5a7e)' : 'var(--gold)'}"><i style="width:${pct}%"></i></div>
+        <span class="bs-v-sub">Entrepôt niv. ${entrepotNiv} · <a data-action="_bastionCoffreExpand">agrandir</a></span></div>
+    </div>
+  </div>`;
 
-  if (!coffre.length) {
-    return `<section class="bs-section">${header}
-      <div class="bs-coffre-empty">Le coffre est vide. Les productions des salles et les dépôts des joueurs apparaîtront ici.</div>
-    </section>`;
-  }
+  // Outils : recherche + filtres + Déposer.
+  const CATS = ['all', ...Object.keys(_COFFRE_CATS), 'mine'];
+  const CAT_LABEL = (k) => k === 'all' ? 'Tout' : k === 'mine' ? '🎒 Mes dépôts' : `${_COFFRE_CATS[k].e} ${_COFFRE_CATS[k].l}`;
+  const tools = `<div class="bs-v-tools">
+    <label class="bs-v-search">🔍<input id="bas-coffre-q" type="search" placeholder="Chercher un objet…" value="${_esc(STORE.coffreSearchRaw)}" data-input="_bastionSetCoffreSearch"></label>
+    <div class="bs-w-fchips">
+      ${CATS.filter(k => k === 'all' || counts[k] > 0).map(k => `<button class="bs-w-fchip${STORE.coffreFilter === k ? ' on' : ''}"${_COFFRE_CATS[k] ? ` style="--tc:${_COFFRE_CATS[k].c}"` : ''} data-action="_bastionSetCoffreFilter" data-filter="${k}">${_COFFRE_CATS[k] ? '<i></i>' : ''}${CAT_LABEL(k)}<span>${counts[k]}</span></button>`).join('')}
+    </div>
+    ${hasEligibleChar ? `<button class="bs-w-btn bs-w-go bs-v-deposit" data-action="_bastionOpenDeposit" ${isFull ? 'disabled title="Coffre plein — améliore l\'Entrepôt"' : ''}>＋ Déposer un objet</button>` : ''}
+  </div>`;
 
-  // Barre de filtres
-  const CATS = [
-    ['all',        'Tout'],
-    ['armes',      '⚔️ Armes'],
-    ['armures',    '🛡 Armures'],
-    ['potions',    '🧪 Potions'],
-    ['scrolls',    '📜 Scrolls'],
-    ['bijoux',     '💎 Bijoux'],
-    ['ressources', '🪵 Ressources'],
-    ['autre',      'Autre'],
-    ['mine',       '🎒 Mes dépôts'],
-  ];
-  const filterBar = `
-    <div class="bs-coffre-filters">
-      <input type="search" class="bs-coffre-search" placeholder="🔍 Rechercher…"
-        value="${_esc(STORE.coffreSearch)}"
-        data-input="_bastionSetCoffreSearch">
-      <div class="bs-coffre-pills">
-        ${CATS.filter(([k]) => counts[k] > 0).map(([k, label]) => `
-          <button class="bs-coffre-pill${STORE.coffreFilter === k ? ' active' : ''}"
-            data-action="_bastionSetCoffreFilter" data-filter="${k}">
-            ${label} <span class="bs-coffre-pill-count">${counts[k]}</span>
-          </button>`).join('')}
-      </div>
-    </div>`;
-
-  // Appliquer filtres + recherche
+  // Filtrage + tri.
   let filtered = coffre.slice();
-  if (STORE.coffreFilter && STORE.coffreFilter !== 'all') {
-    if (STORE.coffreFilter === 'mine') {
-      filtered = filtered.filter(it => myCharNoms.size && [...myCharNoms].some(n => (it.source || '').includes(n)));
-    } else {
-      filtered = filtered.filter(it => _coffreItemCategory(it) === STORE.coffreFilter);
-    }
-  }
-  if (STORE.coffreSearch) {
-    filtered = filtered.filter(it => _norm(it.nom || '').includes(STORE.coffreSearch));
-  }
+  if (STORE.coffreFilter === 'mine') filtered = filtered.filter(isMine);
+  else if (STORE.coffreFilter !== 'all') filtered = filtered.filter(it => _coffreItemCategory(it) === STORE.coffreFilter);
+  if (STORE.coffreSearch) filtered = filtered.filter(it => _norm(it.nom || '').includes(STORE.coffreSearch));
+  filtered.sort((a, b2) => (b2.weekAdded || 0) - (a.weekAdded || 0));
 
-  // Tri : plus récents d'abord
-  filtered.sort((a, b) => (b.weekAdded || 0) - (a.weekAdded || 0));
+  const rows = filtered.map(item => {
+    const k = _COFFRE_CATS[_coffreItemCategory(item)] || _COFFRE_CATS.autre;
+    const open = STORE.coffreOpen === item.id;
+    const maxQ = item.quantite || 1;
+    const takeRow = open ? `<div class="bs-v-take">
+      <span class="bs-v-take-lbl">Prendre</span>
+      <span class="bs-v-step"><button data-action="_bastionCoffreQty" data-delta="-1" data-max="${maxQ}">−</button><span>${STORE.takeQty}</span><button data-action="_bastionCoffreQty" data-delta="1" data-max="${maxQ}">+</button></span>
+      <span class="bs-v-take-info">sur ${maxQ} · va à <b>${_esc(scope?.nom || '?')}</b></span>
+      <select class="input-field bs-v-take-char" id="bas-wd-char" aria-label="Personnage destinataire">${chars.map(c => `<option value="${c.id}"${scope && c.id === scope.id ? ' selected' : ''}>${_esc(c.nom || '?')}</option>`).join('')}</select>
+      <input type="hidden" id="bas-wd-qte" value="${STORE.takeQty}">
+      <button class="bs-w-btn bs-w-go bs-w-sm" data-action="_bastionCoffreTake" data-id="${_esc(item.id)}">Confirmer</button>
+    </div>` : '';
+    return `<div class="bs-v-row${open ? ' open' : ''}">
+      <span class="bs-v-ic">${_esc(item.emoji || k.e)}</span>
+      <span class="bs-v-nm">${_esc(item.nom)}</span>
+      <span class="bs-v-cat"><span class="bs-w-chip t" style="--tc:${k.c}"><i></i>${k.l}</span></span>
+      <span class="bs-v-q">×${maxQ}</span>
+      <span class="bs-v-by">${_esc(item.source || '—')}</span>
+      <span class="bs-v-per">pér. ${item.weekAdded || '?'}</span>
+      <span class="bs-v-act">${hasEligibleChar ? `<button class="bs-w-btn bs-w-sm" data-action="_bastionCoffreOpen" data-id="${_esc(item.id)}">${open ? 'Annuler' : 'Prendre'}</button>` : ''}</span>
+    </div>${takeRow}`;
+  }).join('');
 
-  const itemsHtml = filtered.length
-    ? filtered.map(item => `
-        <div class="bs-coffre-item">
-          <div class="bs-coffre-emoji">${_esc(item.emoji || '📦')}</div>
-          <div class="bs-coffre-body">
-            <div class="bs-coffre-name">${_esc(item.nom)}${item.quantite > 1 ? ` <span class="bs-coffre-qte">×${item.quantite}</span>` : ''}</div>
-            <div class="bs-coffre-meta">${_esc(item.source || '')} · période ${item.weekAdded || '?'}</div>
-          </div>
-          ${hasEligibleChar ? `<button class="bs-coffre-withdraw" data-action="_bastionOpenWithdrawItem" data-id="${item.id}" title="Retirer">↩</button>` : ''}
-        </div>`).join('')
-    : `<div class="bs-coffre-empty">Aucun objet ne correspond aux filtres.</div>`;
+  const table = `<div class="bs-w-card bs-v-table">
+    <div class="bs-v-row hd"><span></span><span>Objet</span><span class="bs-v-cat">Catégorie</span><span class="bs-v-q">Qté</span><span class="bs-v-by">Déposé par</span><span class="bs-v-per">Arrivée</span><span></span></div>
+    ${rows || `<div class="bs-v-empty">${coffre.length ? 'Aucun objet ne correspond.' : 'Le coffre est vide. Les productions des salles et les dépôts des joueurs apparaîtront ici.'}</div>`}
+  </div>`;
 
-  return `
-    <section class="bs-section">${header}
-      ${filterBar}
-      <div class="bs-coffre">${itemsHtml}</div>
-    </section>`;
+  // Besace du perso courant + mouvements récents (historique hors admin).
+  const besace = scope ? _groupInventaire(scope.inventaire) : [];
+  const besaceHtml = besace.length
+    ? besace.map(g => `<div class="bs-v-mv"><span class="bs-v-mv-ic">${_esc(g.item.icone || g.item.emoji || '📦')}</span><span class="bs-v-mv-tx">${_esc(g.item.nom || '?')}<small>×${g.totalQte}${g.item.rarete ? ` · ${_esc(g.item.rarete)}` : ''}</small></span><button class="bs-w-btn bs-w-sm" data-action="_bastionOpenDeposit"${isFull ? ' disabled' : ''}>Déposer</button></div>`).join('')
+    : `<p class="bs-side-empty">Inventaire vide.</p>`;
+  const moves = (b.historique || []).filter(e => !_ADMIN_HISTO_TYPES.has(e.type)).slice(0, 10);
+  const movesHtml = moves.length
+    ? moves.map(e => `<div class="bs-v-mv"><span class="bs-v-mv-tx bs-v-mv-full">${_esc(e.msg || '')}<small>période ${e.week ?? '?'}</small></span></div>`).join('')
+    : `<p class="bs-side-empty">Aucun mouvement récent.</p>`;
+
+  return `<div class="bs-v-layout">
+    <div class="bs-v-main">${band}${tools}${table}</div>
+    <aside class="bs-mur-side">
+      <div class="bs-side-card"><h3 class="bs-side-h">🎒 Ma besace${scope ? ` · ${_esc(scope.nom)}` : ''} <span>${besace.length}</span></h3>${besaceHtml}</div>
+      <div class="bs-side-card"><h3 class="bs-side-h">🔁 Mouvements récents</h3>${movesHtml}</div>
+    </aside>
+  </div>`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3041,43 +3015,6 @@ async function _bastionDeleteQuest(id) {
   await _save(b);
   closeModal();
   showNotif('Quête supprimée.', 'success');
-}
-
-function _renderBastionQuests(b) {
-  const quests = (b.bastionQuests || []);
-  const isMj = STATE.isAdmin;
-  // Filtre : joueurs voient ouvertes + en_cours + terminée récente ; MJ voit tout
-  const visible = isMj
-    ? quests
-    : quests.filter(q => ['ouverte', 'en_cours', 'terminee'].includes(q.statut || 'ouverte'));
-
-  if (!visible.length && !isMj) return '';
-
-  // Tri : ouvertes en premier, puis en_cours, puis terminées, puis échouées
-  const order = { ouverte: 0, en_cours: 1, terminee: 2, echouee: 3 };
-  const sorted = [...visible].sort((a, b) => (order[a.statut] ?? 0) - (order[b.statut] ?? 0));
-
-  return `
-    <section class="bs-section">
-      <div class="bs-section-hd">
-        <h2 class="bs-section-title">📋 Quêtes du Bastion <span class="bs-section-count">${visible.length}</span></h2>
-        ${isMj ? `<button class="btn btn-gold btn-sm" data-action="_bastionOpenQuestEditor">＋ Nouvelle</button>` : ''}
-      </div>
-      ${visible.length ? `<div class="bs-quests-grid">
-        ${sorted.map(q => {
-          const st = BQ_STATUTS[q.statut || 'ouverte'];
-          return `<div class="bs-quest bs-quest--${q.statut || 'ouverte'}" style="--c:${st.color}">
-            <div class="bs-quest-hd">
-              <div class="bs-quest-title">${_esc(q.titre || '?')}</div>
-              <div class="bs-quest-statut">${st.emoji} ${st.lbl}</div>
-            </div>
-            ${q.description ? `<div class="bs-quest-desc">${_esc(q.description)}</div>` : ''}
-            ${q.recompense ? `<div class="bs-quest-recompense">🎁 ${_esc(q.recompense)}</div>` : ''}
-            ${isMj ? `<button class="bs-quest-edit" data-action="_bastionOpenQuestEditor" data-id="${q.id}">✏️ Modifier</button>` : ''}
-          </div>`;
-        }).join('')}
-      </div>` : `<div class="bs-coffre-empty">Aucune quête pour l'instant. ${isMj ? 'Crée la première !' : 'Le MJ n\'a rien posté.'}</div>`}
-    </section>`;
 }
 
 // Types d'entrées d'historique purement administratives — masqués du rendu
@@ -3251,47 +3188,58 @@ function _wallReactionPicker(postId) {
   return `<div class="bs-wall-reaction-picker" aria-label="Choisir une réaction">${emotes}${emojis}</div>`;
 }
 
-function _wallComposer() {
-  const chars = _wallEnsureCharacter();
-  const identity = _wallIdentity();
-  const typeBtns = Object.entries(BASTION_WALL_TYPES).map(([id, type]) =>
-    `<button type="button" class="bs-annonce-type${_wallUi.type === id ? ' active' : ''}" style="--ac:${type.color}" data-action="_bastionSetAnnonceType" data-type="${id}" aria-pressed="${_wallUi.type === id}"><span class="bs-annonce-type-icon">${type.icon}</span><span><strong>${type.label}</strong><small>${type.description}</small></span></button>`
-  ).join('');
-  const authorChoice = chars.length > 1
-    ? `<label class="bs-wall-author-select"><span>Publier avec</span><select data-change="_bastionWallSetChar">${chars.map(char => `<option value="${_esc(char.id)}" ${char.id === _wallUi.charId ? 'selected' : ''}>${_esc(char.nom || 'Personnage')}</option>`).join('')}</select></label>`
-    : `<div class="bs-wall-author-copy"><small>Publier avec</small><strong>${_esc(identity?.charName || 'Aucun personnage')}</strong></div>`;
+// Sous-titre d'un post : classe/métier du personnage (si connu) + ancienneté.
+function _wallCharSub(charId, ago) {
+  const c = (STATE.characters || []).find(x => x.id === charId);
+  const role = c?.classe || c?.class || c?.metier || c?.role || c?.race || '';
+  return role ? `${_esc(role)} · ${ago}` : ago;
+}
 
-  return `<aside class="bs-annonce-compose bs-wall-compose">
-    <div class="bs-wall-compose-head">
-      ${identity ? _wallAvatar(identity, 42) : '<span class="bs-wall-avatar bs-wall-avatar-empty">?</span>'}
-      ${authorChoice}
+function _wallComposer() {
+  _wallEnsureCharacter();
+  const identity = _wallIdentity();
+  if (!identity) {
+    return `<div class="bs-w-card bs-w-compose"><div class="bs-wall-no-character"><strong>Choisis ton identité</strong><p>Il faut un personnage de cette aventure pour écrire, réagir ou répondre sur le mur.</p><button class="btn btn-outline" data-navigate="characters">Voir mes personnages</button></div></div>`;
+  }
+  const PH = {
+    message: 'Une nouvelle à partager avec le Bastion ?',
+    quete:   'Décris la quête : objectif, lieu, récompense…',
+    offre:   'Que proposes-tu ? Objet, service, prix…',
+    demande: 'De quoi as-tu besoin ?',
+  };
+  const typeBtns = Object.entries(BASTION_WALL_TYPES).map(([id, type]) =>
+    `<button type="button" class="bs-w-tpick${_wallUi.type === id ? ' on' : ''}" style="--tc:${type.color}" data-action="_bastionSetAnnonceType" data-type="${id}" aria-pressed="${_wallUi.type === id}"><i></i>${_esc(type.label)}</button>`
+  ).join('');
+  const canPost = _wallUi.draftText.trim() || _wallUi.images.length;
+
+  return `<div class="bs-w-card bs-w-compose">
+    <div class="bs-w-compose-row">
+      ${_wallAvatar(identity, 36)}
+      <div id="bs-annonce-text" class="bs-w-editor" contenteditable="true" role="textbox" aria-multiline="true" data-input="_bastionWallDraft" data-placeholder="${_esc(PH[_wallUi.type] || PH.message)}">${applyEmotes(_esc(_wallUi.draftText), _wallEmotes)}</div>
     </div>
-    ${identity ? `
-      <div class="bs-wall-type-label">Quel type de publication&nbsp;?</div>
-      <div class="bs-annonce-types">${typeBtns}</div>
-      <div id="bs-annonce-text" class="bs-annonce-input bs-wall-editor" contenteditable="true" role="textbox" aria-multiline="true" data-input="_bastionWallDraft" data-placeholder="Que se passe-t-il au Bastion ?">${applyEmotes(_esc(_wallUi.draftText), _wallEmotes)}</div>
-      <div id="bs-wall-mention-slot">${_wallMentionSuggestions()}</div>
-      <div id="bs-wall-media-preview">${_wallComposerMedia()}</div>
-      ${_wallPicker()}
-      <div class="bs-annonce-compose-foot">
-        <div class="bs-wall-compose-tools">
-          <button type="button" data-action="_bastionWallTogglePicker" aria-expanded="${_wallUi.pickerOpen}">☺ <span>Émojis</span></button>
-          <button type="button" data-action="_bastionWallAddImage" ${_wallUi.images.length >= 3 ? 'disabled' : ''}>▧ <span>Image${_wallUi.images.length ? ` ${_wallUi.images.length}/3` : ''}</span></button>
-        </div>
-        <button type="button" class="btn btn-gold bs-wall-publish" data-action="_bastionPostAnnonce" ${_wallUi.draftText.trim() || _wallUi.images.length ? '' : 'disabled'}>Publier</button>
-      </div>` : `<div class="bs-wall-no-character"><strong>Choisis ton identité</strong><p>Il faut un personnage de cette aventure pour écrire, réagir ou répondre sur le mur.</p><button class="btn btn-outline" data-navigate="characters">Voir mes personnages</button></div>`}
-  </aside>`;
+    <div id="bs-wall-mention-slot">${_wallMentionSuggestions()}</div>
+    <div id="bs-wall-media-preview">${_wallComposerMedia()}</div>
+    ${_wallPicker()}
+    <div class="bs-w-compose-ft">
+      ${typeBtns}
+      <div class="bs-w-compose-tools">
+        <button type="button" class="bs-w-tool" data-action="_bastionWallTogglePicker" aria-expanded="${_wallUi.pickerOpen}" title="Émojis & émotes">☺</button>
+        <button type="button" class="bs-w-tool" data-action="_bastionWallAddImage" ${_wallUi.images.length >= 3 ? 'disabled' : ''} title="Ajouter une image">▧${_wallUi.images.length ? ` ${_wallUi.images.length}/3` : ''}</button>
+      </div>
+      <button type="button" class="bs-w-btn bs-w-go" data-action="_bastionPostAnnonce" ${canPost ? '' : 'disabled'}>Publier</button>
+    </div>
+  </div>`;
 }
 
 function _wallCommentHtml(comment, post) {
   const canDelete = STATE.isAdmin || comment.uid === STATE.user?.uid;
   const isEditing = _wallUi.editCommentId === comment.id;
-  return `<div class="bs-wall-comment">
-    ${_wallAvatar(comment, 30)}
-    <div class="bs-wall-comment-body"><strong>${_esc(comment.charName || 'Personnage')}</strong>${isEditing
-      ? `<textarea rows="2" maxlength="1200" data-input="_bastionWallEditCommentDraft">${_esc(_wallUi.editCommentText)}</textarea><div class="bs-wall-edit-actions"><button type="button" data-action="_bastionWallCancelCommentEdit">Annuler</button><button type="button" data-action="_bastionWallSaveComment" data-comment="${_esc(comment.id)}">Enregistrer</button></div>`
-      : `<div>${_wallText(comment.text)}</div><small>${_annonceTimeAgo(comment.ts)}${comment.editedAt ? ' · Modifié' : ''}</small>`}</div>
-    ${canDelete && !post.legacy && !comment.legacy ? `<div class="bs-wall-comment-tools">${!isEditing ? `<button type="button" data-action="_bastionWallEditComment" data-id="${_esc(post.id)}" data-comment="${_esc(comment.id)}" title="Modifier cette réponse">✎</button>` : ''}<button type="button" class="bs-wall-comment-delete" data-action="_bastionWallDeleteComment" data-id="${_esc(post.id)}" data-comment="${_esc(comment.id)}" title="Supprimer cette réponse">×</button></div>` : ''}
+  return `<div class="bs-w-cmt">
+    ${_wallAvatar(comment, 24)}
+    <div class="bs-w-cmt-body">${isEditing
+      ? `<b>${_esc(comment.charName || 'Personnage')}</b><textarea rows="2" maxlength="1200" data-input="_bastionWallEditCommentDraft">${_esc(_wallUi.editCommentText)}</textarea><div class="bs-w-edit-actions"><button type="button" data-action="_bastionWallCancelCommentEdit">Annuler</button><button type="button" class="bs-w-btn" data-action="_bastionWallSaveComment" data-comment="${_esc(comment.id)}">Enregistrer</button></div>`
+      : `<span><b>${_esc(comment.charName || 'Personnage')}</b>${_wallText(comment.text)}<small>${_annonceTimeAgo(comment.ts)}${comment.editedAt ? ' · Modifié' : ''}</small></span>`}</div>
+    ${canDelete && !post.legacy && !comment.legacy && !isEditing ? `<div class="bs-w-cmt-tools"><button type="button" data-action="_bastionWallEditComment" data-id="${_esc(post.id)}" data-comment="${_esc(comment.id)}" title="Modifier">✎</button><button type="button" data-action="_bastionWallDeleteComment" data-id="${_esc(post.id)}" data-comment="${_esc(comment.id)}" title="Supprimer">×</button></div>` : ''}
   </div>`;
 }
 
@@ -3335,22 +3283,33 @@ function _wallCard(post) {
   const images = _wallImages(post);
   const media = images.length ? `<div class="bs-wall-media bs-wall-media-${images.length}">${images.map((_src, index) => `<button type="button" data-action="_bastionOpenPostImage" data-id="${_esc(post.id)}" data-index="${index}" aria-label="Agrandir l'image ${index + 1}"><img src="${_esc(images[index])}" alt="Image jointe à la publication"></button>`).join('')}</div>` : (post.imageCount ? '<div class="bs-wall-media-loading">Chargement des images…</div>' : '');
   const countedReactions = Object.entries(counts).map(([reaction, count]) => !post.legacy && identity
-    ? `<button type="button" class="${mine === reaction ? 'active' : ''}" data-action="_bastionWallReact" data-id="${_esc(post.id)}" data-reaction="${_esc(reaction)}" title="Réagir avec ${_esc(reaction)}">${_wallReactionVisual(reaction)}<span>${count}</span></button>`
-    : `<span>${_wallReactionVisual(reaction)} ${count}</span>`).join('');
-  const reactionButtons = `${countedReactions}${!post.legacy && identity ? `<button type="button" class="bs-wall-react-open${_wallUi.reactionPostId === post.id ? ' active' : ''}" data-action="_bastionWallToggleReactions" data-id="${_esc(post.id)}">☺ <span>Réagir</span></button>` : ''}`;
+    ? `<button type="button" class="bs-w-rx${mine === reaction ? ' mine' : ''}" data-action="_bastionWallReact" data-id="${_esc(post.id)}" data-reaction="${_esc(reaction)}" title="Réagir avec ${_esc(reaction)}">${_wallReactionVisual(reaction)} <span>${count}</span></button>`
+    : `<span class="bs-w-rx">${_wallReactionVisual(reaction)} ${count}</span>`).join('');
+  const canResolve = post.type !== 'message' && !post.legacy && (post.uid === STATE.user?.uid || STATE.isAdmin);
+  const tags = `${post.pinned ? '<span class="bs-w-chip">📌 Épinglé</span>' : ''}`
+    + `${post.status !== 'active' ? `<span class="bs-w-chip">${status.icon} ${status.label}</span>` : ''}`
+    + `<span class="bs-w-chip t" style="--tc:${type.color}"><i></i>${type.label}</span>`
+    + `${canDelete ? `<button type="button" class="bs-w-menu-btn" data-action="_bastionWallToggleMenu" data-id="${_esc(post.id)}" aria-label="Gérer cette publication" aria-expanded="${_wallUi.menuPostId === post.id}">•••</button>${_wallPostMenu(post)}` : ''}`;
 
-  return `<article id="bastion-post-${_esc(post.id)}" class="bs-annonce bs-wall-card${post.status !== 'active' ? ` is-${post.status}` : ''}${post.pinned ? ' is-pinned' : ''}" style="--ac:${type.color}">
-    <header class="bs-wall-card-head">
-      ${_wallAvatar(author, 40)}
-      <div><strong>${_esc(author.charName)}</strong><span class="bs-wall-card-meta"><b style="--ac:${type.color}">${type.icon} ${type.label}</b>${post.type !== 'message' ? `<b class="bs-wall-status" style="--status:${status.color}">${status.icon} ${status.label}</b>` : ''}${post.pinned ? '<b class="bs-wall-pinned">⌂ Épinglée</b>' : ''}<small>${_annonceTimeAgo(post.ts)}${post.editedAt ? ' · Modifié' : ''}${post.legacy ? ' · archive' : ''}</small></span></div>
-      ${canDelete ? `<button type="button" class="bs-annonce-del" data-action="_bastionWallToggleMenu" data-id="${_esc(post.id)}" aria-label="Gérer cette publication" aria-expanded="${_wallUi.menuPostId === post.id}">•••</button>${_wallPostMenu(post)}` : ''}
-    </header>
-    ${_wallPostEdit(post) || `${post.text ? `<div class="bs-annonce-text bs-wall-card-text">${_wallText(post.text)}</div>` : ''}${media}`}
-    <div class="bs-wall-social-summary"><span>${Object.keys(post.reactions || {}).length ? `${Object.keys(post.reactions || {}).length} réaction${Object.keys(post.reactions || {}).length > 1 ? 's' : ''}` : ''}</span><span>${comments.length ? `${comments.length} réponse${comments.length > 1 ? 's' : ''}` : ''}</span></div>
-    <div class="bs-wall-actions"><div class="bs-wall-reactions">${reactionButtons}</div>${!post.legacy && identity ? `<button type="button" data-action="_bastionWallToggleReply" data-id="${_esc(post.id)}">↩ Répondre</button>` : ''}</div>
+  return `<article id="bastion-post-${_esc(post.id)}" class="bs-w-card bs-w-post${post.status === 'resolved' ? ' done' : ''}${post.pinned ? ' is-pinned' : ''}" style="--tc:${type.color}">
+    <div class="bs-w-post-hd">
+      ${_wallAvatar(author, 34)}
+      <div class="bs-w-who"><b>${_esc(author.charName)}</b><small>${_wallCharSub(post.charId, _annonceTimeAgo(post.ts))}${post.editedAt ? ' · Modifié' : ''}${post.legacy ? ' · archive' : ''}</small></div>
+      <div class="bs-w-tags">${tags}</div>
+    </div>
+    ${_wallPostEdit(post) || `${post.text ? `<div class="bs-w-post-tx">${_wallText(post.text)}</div>` : ''}${media}`}
+    ${comments.length ? `<div class="bs-w-cmts">${comments.slice(replyOpen ? 0 : -1).map(comment => _wallCommentHtml(comment, post)).join('')}${comments.length > 1 && !replyOpen ? `<button class="bs-w-morecmt" data-action="_bastionWallToggleReply" data-id="${_esc(post.id)}">Voir les ${comments.length} réponses</button>` : ''}</div>` : ''}
+    ${replyOpen && identity && !post.legacy ? `<div class="bs-w-reply">${_wallAvatar(identity, 28)}<textarea rows="1" maxlength="1200" data-input="_bastionWallReplyDraft" data-id="${_esc(post.id)}" placeholder="Répondre à ${_esc(author.charName)}…">${_esc(_wallUi.replyDrafts.get(post.id) || '')}</textarea><button type="button" class="bs-w-btn" data-action="_bastionWallReply" data-id="${_esc(post.id)}">Envoyer</button></div>` : ''}
     ${_wallReactionPicker(post.id)}
-    ${comments.length ? `<div class="bs-wall-comments">${comments.slice(replyOpen ? 0 : -1).map(comment => _wallCommentHtml(comment, post)).join('')}${comments.length > 1 && !replyOpen ? `<button class="bs-wall-more-comments" data-action="_bastionWallToggleReply" data-id="${_esc(post.id)}">Voir les ${comments.length} réponses</button>` : ''}</div>` : ''}
-    ${replyOpen && identity && !post.legacy ? `<div class="bs-wall-reply">${_wallAvatar(identity, 30)}<textarea rows="2" maxlength="1200" data-input="_bastionWallReplyDraft" data-id="${_esc(post.id)}" placeholder="Répondre avec ${_esc(identity.charName)}…">${_esc(_wallUi.replyDrafts.get(post.id) || '')}</textarea><button type="button" data-action="_bastionWallReply" data-id="${_esc(post.id)}">Envoyer</button></div>` : ''}
+    <div class="bs-w-post-ft">
+      ${countedReactions}
+      ${!post.legacy && identity ? `<span class="bs-w-rx-add"><button type="button" class="bs-w-rx bs-w-rx-open${_wallUi.reactionPostId === post.id ? ' active' : ''}" data-action="_bastionWallToggleReactions" data-id="${_esc(post.id)}" title="Ajouter une réaction">${mine ? '↺' : '+'}</button></span>` : ''}
+      <button type="button" class="bs-w-lk" data-action="_bastionWallToggleReply" data-id="${_esc(post.id)}">💬 ${comments.length || ''} ${replyOpen ? 'Masquer' : 'Répondre'}</button>
+      <span class="bs-w-rt">
+        ${STATE.isAdmin ? `<button type="button" class="bs-w-lk" data-action="_bastionWallPin" data-id="${_esc(post.id)}">${post.pinned ? 'Désépingler' : 'Épingler'}</button>` : ''}
+        ${canResolve ? `<button type="button" class="bs-w-lk" data-action="_bastionWallSetStatus" data-id="${_esc(post.id)}" data-status="${post.status === 'resolved' ? 'active' : 'resolved'}">${post.status === 'resolved' ? 'Rouvrir' : 'Clore'}</button>` : ''}
+      </span>
+    </div>
   </article>`;
 }
 
@@ -3362,25 +3321,107 @@ function _renderAnnonces() {
       ? posts.filter(post => post.status !== 'active')
       : posts.filter(post => post.type === _wallUi.filter && post.status === 'active');
   const visible = filtered.slice(0, _wallUi.visible);
-  const filters = [['all', { icon: '●', label: 'Actifs' }], ...Object.entries(BASTION_WALL_TYPES), ['archive', { icon: '◷', label: 'Historique' }]]
-    .map(([id, type]) => {
-      const count = id === 'all' ? posts.filter(post => post.status === 'active').length
-        : id === 'archive' ? posts.filter(post => post.status !== 'active').length
-        : posts.filter(post => post.type === id && post.status === 'active').length;
-      return `<button type="button" class="${_wallUi.filter === id ? 'active' : ''}" data-action="_bastionWallSetFilter" data-filter="${id}" aria-pressed="${_wallUi.filter === id}">${type.icon} ${type.label}<span>${count}</span></button>`;
-    }).join('');
+  const activeCount = posts.filter(p => p.status === 'active').length;
+  const archiveCount = posts.filter(p => p.status !== 'active').length;
+  const filters = `<div class="bs-w-fchips" role="group" aria-label="Filtrer les publications">
+    <button type="button" class="bs-w-fchip${_wallUi.filter === 'all' ? ' on' : ''}" data-action="_bastionWallSetFilter" data-filter="all" aria-pressed="${_wallUi.filter === 'all'}">Actifs<span>${activeCount}</span></button>
+    ${Object.entries(BASTION_WALL_TYPES).map(([id, type]) => `<button type="button" class="bs-w-fchip${_wallUi.filter === id ? ' on' : ''}" style="--tc:${type.color}" data-action="_bastionWallSetFilter" data-filter="${id}" aria-pressed="${_wallUi.filter === id}"><i></i>${_esc(type.label)}<span>${posts.filter(p => p.type === id && p.status === 'active').length}</span></button>`).join('')}
+    <button type="button" class="bs-w-fchip${_wallUi.filter === 'archive' ? ' on' : ''}" data-action="_bastionWallSetFilter" data-filter="archive" aria-pressed="${_wallUi.filter === 'archive'}">◷ Historique<span>${archiveCount}</span></button>
+  </div>`;
   const emptyState = !posts.length
     ? 'Le mur est encore silencieux. Publie le premier message du Bastion.'
     : _wallUi.filter === 'archive'
-      ? `Aucune publication dans l’historique.<button type="button" data-action="_bastionWallSetFilter" data-filter="all">Voir les actifs</button>`
+      ? `Aucune publication dans l’historique.<button type="button" class="bs-w-lk" data-action="_bastionWallSetFilter" data-filter="all">Voir les actifs</button>`
       : _wallUi.filter === 'all'
-        ? `Aucune publication active.<button type="button" data-action="_bastionWallSetFilter" data-filter="archive">Voir l’historique</button>`
-        : `Aucune publication active de ce type.<button type="button" data-action="_bastionWallSetFilter" data-filter="all">Voir tous les actifs</button>`;
+        ? `Aucune publication active.<button type="button" class="bs-w-lk" data-action="_bastionWallSetFilter" data-filter="archive">Voir l’historique</button>`
+        : `Aucune publication active de ce type.<button type="button" class="bs-w-lk" data-action="_bastionWallSetFilter" data-filter="all">Voir tous les actifs</button>`;
   if (posts.length) queueMicrotask(_wallMarkSeen);
-  return `<section class="bs-section bs-social-wall">
-    <div class="bs-section-hd"><div><h2 class="bs-section-title">📌 Le mur du Bastion <span class="bs-section-count">${posts.length}</span></h2><p class="bs-section-sub">Nouvelles, souvenirs et discussions publiés par les personnages.</p></div></div>
-    <div class="bs-annonce-wall"><nav class="bs-wall-feed-filters" aria-label="Filtrer les publications">${filters}</nav><div class="bs-annonce-list">${_wallComposer()}${visible.map(_wallCard).join('') || `<div class="bs-annonce-empty">${emptyState}</div>`}${filtered.length > visible.length ? `<button class="bs-wall-load-more" data-action="_bastionWallMore">Afficher ${Math.min(12, filtered.length - visible.length)} publications de plus</button>` : ''}</div></div>
-  </section>`;
+  return `<div class="bs-w-feedwrap">
+    ${_wallComposer()}
+    ${filters}
+    <div class="bs-w-feed">${visible.map(_wallCard).join('') || `<div class="bs-w-card bs-w-empty">${emptyState}</div>`}${filtered.length > visible.length ? `<button class="bs-w-more" data-action="_bastionWallMore">Afficher ${Math.min(12, filtered.length - visible.length)} publications de plus</button>` : ''}</div>
+  </div>`;
+}
+
+// Élément cliquable de la colonne droite : renvoie vers le post dans le fil.
+function _wallSideItem(p) {
+  const type = BASTION_WALL_TYPES[p.type] || BASTION_WALL_TYPES.message;
+  const author = p.charName || p.author || 'Personnage';
+  const preview = (p.text || '').replace(/\s+/g, ' ').trim().slice(0, 70);
+  return `<button type="button" class="bs-side-item" data-action="_bastionWallJump" data-id="${_esc(p.id)}" style="--c:${type.color}">
+    <span class="bs-side-ic">${type.icon}</span>
+    <span class="bs-side-txt"><b>${_esc(author)}</b><small>${_esc(preview || type.label)}</small></span>
+  </button>`;
+}
+
+// Fiche de lecture d'une quête du Bastion (accessible à tous ; MJ peut éditer).
+function _bastionShowQuest(id) {
+  const q = (STORE.bastion?.bastionQuests || []).find(x => x.id === id);
+  if (!q) return;
+  const st = BQ_STATUTS[q.statut || 'ouverte'] || BQ_STATUTS.ouverte;
+  openModal(`${st.emoji} ${_esc(q.titre || 'Quête du Bastion')}`, `
+    <div class="bs-quest-view">
+      <div class="bs-quest-view-statut" style="--c:${st.color}">${st.emoji} ${st.lbl}</div>
+      <p class="bs-quest-view-desc"${q.description ? '' : ' style="color:var(--text-dim)"'}>${q.description ? _esc(q.description) : 'Aucune description fournie.'}</p>
+      ${q.recompense ? `<div class="bs-quest-view-reward">🎁 ${_esc(q.recompense)}</div>` : ''}
+      ${STATE.isAdmin ? `<button class="btn btn-outline" style="width:100%;margin-top:.7rem" data-action="_bastionOpenQuestEditor" data-id="${_esc(q.id)}">✏️ Modifier la quête</button>` : ''}
+    </div>
+  `, { accent: st.color });
+}
+
+// Colonne droite du Mur : quêtes ouvertes (quêtes MJ lecture seule + posts type
+// Quête) et offres/demandes. Clic = défilement + surbrillance du post concerné.
+function _renderWallSidebar(b) {
+  const isMj = STATE.isAdmin;
+  const active = _wallAllPosts().filter(p => p.status === 'active');
+  const questPosts = active.filter(p => p.type === 'quete');
+  const offers = active.filter(p => p.type === 'offre' || p.type === 'demande');
+  const mjQuests = (b.bastionQuests || []).filter(q => ['ouverte', 'en_cours'].includes(q.statut || 'ouverte'));
+
+  const questItems = [
+    ...mjQuests.map(q => {
+      const st = BQ_STATUTS[q.statut || 'ouverte'] || BQ_STATUTS.ouverte;
+      return `<button type="button" class="bs-side-item bs-side-item--mj" data-action="_bastionShowQuest" data-id="${_esc(q.id)}" style="--c:${st.color}">
+        <span class="bs-side-ic" title="Quête du MJ">${st.emoji}</span>
+        <span class="bs-side-txt"><b>${_esc(q.titre || '?')}</b><small>${q.recompense ? `🎁 ${_esc(q.recompense)}` : st.lbl}</small></span>
+        <span class="bs-side-tag">MJ</span>
+      </button>`;
+    }),
+    ...questPosts.map(_wallSideItem),
+  ];
+  const offerItems = offers.map(_wallSideItem);
+
+  return `
+    <div class="bs-side-card">
+      <h3 class="bs-side-h">📋 Quêtes ouvertes <span>${questItems.length}</span></h3>
+      ${questItems.length ? questItems.join('') : '<p class="bs-side-empty">Aucune quête ouverte.</p>'}
+    </div>
+    <div class="bs-side-card">
+      <h3 class="bs-side-h">🪙 Offres &amp; demandes <span>${offerItems.length}</span></h3>
+      ${offerItems.length ? offerItems.join('') : '<p class="bs-side-empty">Rien à échanger pour l’instant.</p>'}
+    </div>`;
+}
+
+// Ouvre le fil sur le post ciblé (ajuste filtre + pagination) puis le met en avant.
+function _bastionWallJump(id) {
+  const post = _wallPostById(id);
+  if (!post) return;
+  _wallUi.filter = bastionWallFilterForTarget(_wallUi.filter, post);
+  const active = _wallAllPosts();
+  const f = _wallUi.filter;
+  const filtered = f === 'all' ? active.filter(p => p.status === 'active')
+    : f === 'archive' ? active.filter(p => p.status !== 'active')
+      : active.filter(p => p.type === f && p.status === 'active');
+  const idx = filtered.findIndex(p => p.id === id);
+  if (idx >= 0) _wallUi.visible = Math.max(_wallUi.visible, idx + 1);
+  _renderPage();
+  requestAnimationFrame(() => {
+    const card = document.getElementById(`bastion-post-${id}`);
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('is-targeted');
+    setTimeout(() => card.classList.remove('is-targeted'), 3200);
+  });
 }
 
 function _bastionSetAnnonceType(btn) {
@@ -3747,87 +3788,31 @@ async function _loadWallEmotes() {
   _wallEmotes = Array.isArray(data?.emotes) ? data.emotes.filter(emote => emote?.name && emote?.url) : [];
 }
 
-// ── Navigation rapide (ancres collées) + scroll-spy ──────────────────────────
-const _BS_NAV = [
-  ['bs-z-etat',      '🏛', 'État'],
-  ['bs-z-salles',    '🧱', 'Salles'],
-  ['bs-z-coffre',    '📦', 'Coffre'],
-  ['bs-z-quetes',    '📋', 'Quêtes'],
-  ['bs-z-annonces',  '📌', 'Annonces'],
-];
-
-function _renderQuickNav() {
-  const historyCount = (STORE.bastion?.historique || []).filter(entry => !_ADMIN_HISTO_TYPES.has(entry.type)).length;
-  return `<nav class="bs-quicknav" aria-label="Sections du Bastion">
-    ${_BS_NAV.map(([id, ic, lbl]) =>
-      `<a href="#${id}" class="bs-qn" data-target="${id}">${ic} <span>${lbl}</span></a>`).join('')}
-    ${historyCount ? `<button type="button" class="bs-qn bs-qn-history" data-action="_bastionOpenHistory">📜 <span>Historique</span><small>${historyCount}</small></button>` : ''}
-  </nav>`;
-}
-
-// Enveloppe une section rendue dans une ancre nommée (rien si la section est vide).
-function _wrapZone(id, html) {
-  return html ? `<div id="${id}" class="bs-zone">${html}</div>` : '';
-}
-
-// Met en surbrillance le lien de la section actuellement en haut du viewport.
-function _bsNavSpy() {
-  const links = document.querySelectorAll('.bs-qn[data-target]');
-  if (!links.length) return;
-  let cur = null;
-  links.forEach(a => {
-    const el = document.getElementById(a.dataset.target);
-    if (el && el.getBoundingClientRect().top - 90 <= 1) cur = a.dataset.target;
-  });
-  links.forEach(a => a.classList.toggle('on', a.dataset.target === cur));
-}
-
-let _bsNavWired = false;
-function _initQuickNav() {
-  // Masque les liens dont la section est absente (quêtes/chronique vides…).
-  document.querySelectorAll('.bs-qn[data-target]').forEach(a => {
-    a.style.display = document.getElementById(a.dataset.target) ? '' : 'none';
-  });
-  if (!_bsNavWired) {
-    _bsNavWired = true;               // 1 seul listener pour toute la session
-    const sc = document.getElementById('main-content');
-    (sc || window).addEventListener('scroll', _bsNavSpy, { passive: true });
-    if (sc) window.addEventListener('scroll', _bsNavSpy, { passive: true });
-  }
-  _bsNavSpy();
-}
-
-// Bloc « État » : KPI + trésor commun + prochaine période réunis.
-function _renderEtatZone(b) {
-  return `
-    <section class="bs-section bs-etat">
-      <div class="bs-section-hd"><h2 class="bs-section-title">🏛 État du Bastion</h2></div>
-      <div class="bs-etat-stats">
-        ${_renderBastionOverview(b)}
-        ${_renderGauges(b)}
-      </div>
-      ${_renderOperationsPanel(b)}
-    </section>`;
+// Contenu de l'onglet actif (une seule section à la fois → fin du long scroll).
+function _bsTabBody(b, tab) {
+  if (tab === 'coffre') return _renderCoffre(b);
+  if (tab === 'mur') return `<div class="bs-mur-layout">
+    <div class="bs-mur-feed">${_renderAnnonces()}</div>
+    <aside class="bs-mur-side">${_renderWallSidebar(b)}</aside>
+  </div>`;
+  return _renderRooms(b);   // 'salles' par défaut
 }
 
 function _renderPage() {
   const content = document.getElementById('main-content');
   if (!content) return;
   const b = STORE.bastion || _defaultBastion();
+  const tab = _bsGetTab();
   content.innerHTML = `
-    <div class="bs-root bs-root-v2">
+    <div class="bs-root-v2 bs-page">
       ${_renderHeader(b)}
-      <div class="bs-page-body">
-        ${_renderQuickNav()}
-        ${_wrapZone('bs-z-etat',      _renderEtatZone(b))}
-        ${_wrapZone('bs-z-salles',    _renderRooms(b))}
-        ${_wrapZone('bs-z-coffre',    _renderCoffre(b))}
-        ${_wrapZone('bs-z-quetes',    _renderBastionQuests(b))}
-        ${_wrapZone('bs-z-annonces',  _renderAnnonces(b))}
+      <div class="bs-wrap bs-tab-body" data-tab="${tab}">
+        ${_bsTabBody(b, tab)}
       </div>
     </div>`;
-  _initQuickNav();
-  requestAnimationFrame(_wallFocusTarget);
+  if (tab === 'mur') requestAnimationFrame(_wallFocusTarget);
+  // Renseigne l'info « or dispo / max » des contrôles de cotisation inline.
+  if (tab === 'salles' && STORE.roomSel) requestAnimationFrame(() => _bastionRefreshInvestment(STORE.roomSel));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3867,6 +3852,9 @@ async function renderBastionPage() {
     STORE.investmentInProgress = false;
     _wallRestoreDraft();
   }
+
+  // Lien profond vers une publication → ouvre directement l'onglet Mur.
+  if (_wallTargetFromRoute()) STORE.tab = 'mur';
 
   STORE.shopItemsCache = null; STORE.npcsCache = null; // reset au cas où on aurait changé d'aventure
 
@@ -3934,7 +3922,6 @@ registerActions({
   _bastionResetAll:         () => _bastionResetAll(),
   _bastionFillDepositMax:   () => _bastionFillDepositMax(),
   _bastionDoDeposit:        () => _bastionDoDeposit(),
-  _bastionSetMax:      (btn) => { const el = document.getElementById(btn.dataset.target); if (el) el.value = btn.dataset.val; },
   _bastionDoWithdraw:       (btn) => _bastionDoWithdraw(btn.dataset.id),
   _bastionEditRoom:         (btn) => _bastionEditRoom(btn.dataset.slug),
   _bastionReturnToCatalog:  (btn) => _bastionReturnToCatalog(btn.dataset.slug),
@@ -3952,7 +3939,6 @@ registerActions({
   _bastionSelectHireCard:   (btn) => _bastionSelectHireCard(btn.dataset.id),
   _bastionDoHire:           () => _bastionDoHire(),
   _bastionDoTransfer:       (btn) => _bastionDoTransfer(btn.dataset.dir),
-  _bastionOpenInvest:       (btn) => _bastionOpenInvest(btn.dataset.slug),
   _bastionRefreshInvestment:(el) => _bastionRefreshInvestment(el.dataset.slug),
   _bastionFillInvestment:   (btn) => _bastionFillInvestment(btn.dataset.slug),
   _bastionDoInvest:         (btn) => _bastionDoInvest(btn.dataset.slug),
@@ -3967,11 +3953,17 @@ registerActions({
   _bastionOpenHire:         (btn) => _bastionOpenHire(btn.dataset.slug),
   _bastionBuild:            (btn) => _bastionBuild(btn.dataset.slug),
   _bastionCancelBuild:      (btn) => _bastionCancelBuild(btn.dataset.slug),
-  _bastionShowDetails:      (btn) => _bastionShowDetails(btn.dataset.slug),
   _bastionResetRooms:       () => _bastionResetRooms(),
   _bastionOpenDeposit:      () => _bastionOpenDeposit(),
+  _bastionSetTab:           (btn) => _bastionSetTab(btn.dataset.tab),
+  _bastionSelectRoom:       (btn) => _bastionSelectRoom(btn.dataset.slug),
+  _bastionSetRoomFilter:    (btn) => _bastionSetRoomFilter(btn.dataset.filter),
+  _bastionShowQuest:        (btn) => _bastionShowQuest(btn.dataset.id),
   _bastionSetCoffreFilter:  (btn) => _bastionSetCoffreFilter(btn.dataset.filter),
-  _bastionOpenWithdrawItem: (btn) => _bastionOpenWithdrawItem(btn.dataset.id),
+  _bastionCoffreOpen:       (btn) => _bastionCoffreOpen(btn.dataset.id),
+  _bastionCoffreQty:        (btn) => _bastionCoffreQty(btn.dataset.delta, btn.dataset.max),
+  _bastionCoffreTake:       (btn) => _bastionCoffreTake(btn.dataset.id),
+  _bastionCoffreExpand:     () => _bastionCoffreExpand(),
   _bastionSaveQuest:        (btn) => _bastionSaveQuest(btn.dataset.id || ''),
   _bastionSetQuestStatut:   (btn) => _bastionSetQuestStatut(btn),
   _bastionDeleteQuest:      (btn) => _bastionDeleteQuest(btn.dataset.id),
@@ -3980,7 +3972,6 @@ registerActions({
   _bastionDeleteHisto:      (btn) => _bastionDeleteHisto(Number(btn.dataset.idx)),
   _bastionSetAnnonceType:   (btn) => _bastionSetAnnonceType(btn),
   _bastionWallDraft:        (el) => _bastionWallDraft(el),
-  _bastionWallSetChar:      (el) => { _wallUi.charId = el.value || ''; _wallPersistDraft(); _renderPage(); },
   _bastionWallMention:      (btn) => _bastionWallMention(btn),
   _bastionWallTogglePicker: () => _bastionWallTogglePicker(),
   _bastionWallInsert:       (btn) => _bastionWallInsert(btn),
@@ -4007,6 +3998,7 @@ registerActions({
   _bastionWallSaveComment:  (btn) => _bastionWallSaveComment(btn.dataset.comment),
   _bastionWallDeleteComment:(btn) => _bastionWallDeleteComment(btn),
   _bastionOpenPostImage:    (btn) => _bastionOpenPostImage(btn),
+  _bastionWallJump:         (btn) => _bastionWallJump(btn.dataset.id),
   _bastionWallMore:         () => { _wallUi.visible += 12; _renderPage(); },
   _bastionWallSetFilter:    (btn) => { _wallUi.filter = btn.dataset.filter || 'all'; _wallUi.visible = 12; _renderPage(); },
 });

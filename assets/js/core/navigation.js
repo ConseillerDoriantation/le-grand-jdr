@@ -129,7 +129,10 @@ const FEATURE_CSS = {
   diapo:      ['diapo.css'],
   collection: ['histoire.css'],
   players:    ['histoire.css'],
-  bastion:    ['bastion.css'],
+  // agenda.css : le bandeau du Bastion est construit avec les classes partagées
+  // `.ag-top`/`.ag-scope`/`.ag-menu`/`.ag-tabs` (entièrement scopées `.ag-*`) →
+  // sinon le bandeau s'affiche sans mise en forme. bastion.css garde ses ajouts `bs-*`.
+  bastion:    ['agenda.css', 'bastion.css'],
   vtt:        ['vtt.css'],
   // shop-picker.css : le picker de butins (shared/shop-picker.js) utilise des
   // classes `vtt-loot-*` qui ne vivent sinon que dans vtt.css → sans lui, la
