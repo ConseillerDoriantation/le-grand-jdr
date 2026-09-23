@@ -88,21 +88,21 @@
        Les feuilles spécifiques aux pages sont chargées en lazy à la navigation
        via FEATURE_CSS dans assets/js/core/navigation.js. Garder ici uniquement
        le global et les petits composants transverses déclenchables hors route. -->
-  <link rel="stylesheet" href="./assets/css/tokens.css?v=20260923j">
-  <link rel="stylesheet" href="./assets/css/base.css?v=20260923j">
-  <link rel="stylesheet" href="./assets/css/auth.css?v=20260923j">
-  <link rel="stylesheet" href="./assets/css/adventure.css?v=20260923j">
-  <link rel="stylesheet" href="./assets/css/layout.css?v=20260923j">
-  <link rel="stylesheet" href="./assets/css/responsive.css?v=20260923j">
-  <link rel="stylesheet" href="./assets/css/features.css?v=20260923j">
-  <link rel="stylesheet" href="./assets/css/rich-text.css?v=20260923j">
-  <link rel="stylesheet" href="./assets/css/free-page.css?v=20260923j">
-  <link rel="stylesheet" href="./assets/css/quick-view.css?v=20260923j">
-  <link rel="stylesheet" href="./assets/css/command-palette.css?v=20260923j">
-  <link rel="stylesheet" href="./assets/css/session-center.css?v=20260923j">
-  <link rel="stylesheet" href="./assets/css/chat.css?v=20260923j">
-  <link rel="stylesheet" href="./assets/css/print.css?v=20260923j">
-  <link rel="stylesheet" href="./assets/css/legal.css?v=20260923j">
+  <link rel="stylesheet" href="./assets/css/tokens.css?v=20260923k">
+  <link rel="stylesheet" href="./assets/css/base.css?v=20260923k">
+  <link rel="stylesheet" href="./assets/css/auth.css?v=20260923k">
+  <link rel="stylesheet" href="./assets/css/adventure.css?v=20260923k">
+  <link rel="stylesheet" href="./assets/css/layout.css?v=20260923k">
+  <link rel="stylesheet" href="./assets/css/responsive.css?v=20260923k">
+  <link rel="stylesheet" href="./assets/css/features.css?v=20260923k">
+  <link rel="stylesheet" href="./assets/css/rich-text.css?v=20260923k">
+  <link rel="stylesheet" href="./assets/css/free-page.css?v=20260923k">
+  <link rel="stylesheet" href="./assets/css/quick-view.css?v=20260923k">
+  <link rel="stylesheet" href="./assets/css/command-palette.css?v=20260923k">
+  <link rel="stylesheet" href="./assets/css/session-center.css?v=20260923k">
+  <link rel="stylesheet" href="./assets/css/chat.css?v=20260923k">
+  <link rel="stylesheet" href="./assets/css/print.css?v=20260923k">
+  <link rel="stylesheet" href="./assets/css/legal.css?v=20260923k">
 </head>
 <body>
 <a href="#main-content" class="skip-link">Aller au contenu</a>
@@ -392,6 +392,7 @@
             <button class="nav-item" type="button" data-navigate="bastion" title="Bastion">
               <svg class="nav-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-castle"/></svg>
               <span class="nav-label">Bastion</span>
+              <span class="bastion-nav-dot" aria-label="Nouvelles publications du Bastion" hidden></span>
             </button>
           </div>
         </details>
@@ -530,7 +531,7 @@
     <div class="more-group-label" role="presentation">Groupe</div>
     <div class="more-grid">
       <button type="button" class="more-menu-item" data-navigate="players"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-swords"/></svg>Joueurs</button>
-      <button type="button" class="more-menu-item" data-navigate="bastion"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-castle"/></svg>Bastion</button>
+      <button type="button" class="more-menu-item" data-navigate="bastion"><svg class="icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-castle"/></svg>Bastion<span class="bastion-nav-dot" aria-label="Nouvelles publications du Bastion" hidden></span></button>
     </div>
 
     <div class="more-group-label" role="presentation">Gestion</div>

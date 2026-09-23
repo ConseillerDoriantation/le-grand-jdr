@@ -573,6 +573,16 @@ html, body { min-height:100%; }
 .sidebar-nav-group { display: grid; gap: 2px; }
 
 /* ── Item de nav ─────────────────────────────────────────────────────────── */
+/* Pastille de non-lus du Mur du Bastion (pilotée par shared/bastion-signal.js) */
+.bastion-nav-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--crimson, #ff5a7e);
+  margin-left: auto; flex: none;
+  box-shadow: 0 0 0 2px var(--surface-1, rgba(0,0,0,.4));
+}
+.bastion-nav-dot[hidden] { display: none; }
+.more-menu-item .bastion-nav-dot { margin-left: 8px; }
+
 .nav-item {
   position: relative;
   display: flex;

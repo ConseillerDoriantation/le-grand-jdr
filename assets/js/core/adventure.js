@@ -22,6 +22,7 @@ import {
 import { setCurrentAdventure, primeSessionData } from '../data/firestore.js';
 import { startPresence } from '../shared/presence.js';
 import { initChat } from '../features/chat.js';
+import { initBastionWallSignal } from '../shared/bastion-signal.js';
 import { initCharacterPages } from '../shared/character-pages.js';
 import { initWorldPages } from '../shared/world-pages.js';
 import { DEFAULT_ENABLED } from '../shared/features.js';
@@ -411,6 +412,9 @@ export async function selectAdventure(adv) {
 
   // Chat flottant de l'aventure (bulle en bas à droite, sur toutes les pages)
   if (uid) initChat(uid);
+
+  // Pastille de non-lus du Mur du Bastion sur la navigation (toutes pages).
+  initBastionWallSignal();
 }
 
 // ── Créer une aventure ──────────────────────────
