@@ -63,7 +63,10 @@ const STORE = {
   npcsCache:      null,          // cache tous les PNJ (lazy)
   hireInProgress: false,
   coffreFilter:   'all',         // 'all'|'armes'|'armures'|…
-  coffreSearch:   '',
+  coffreSearch:   '',            // recherche normalisée (filtrage)
+  coffreSearchRaw:'',            // texte saisi (affichage)
+  coffreOpen:     null,          // id de l'objet du coffre déplié pour « Prendre »
+  takeQty:        1,             // quantité choisie dans la ligne dépliée
   histoExpanded:  false,
   catalogMigrationInFlight: false,
   addingCustomRoom: false,
@@ -2978,100 +2981,133 @@ function _coffreItemCategory(item) {
 
 
 function _bastionSetCoffreFilter(cat) { STORE.coffreFilter = cat; _renderPage(); }
-function _bastionSetCoffreSearch(val) { STORE.coffreSearch = _norm(val || ''); _renderPage(); }
+function _bastionSetCoffreSearch(val) {
+  STORE.coffreSearchRaw = val || '';
+  STORE.coffreSearch = _norm(val || '');
+  _renderPage();
+  const el = document.getElementById('bas-coffre-q');
+  if (el) { el.focus(); const n = el.value.length; try { el.setSelectionRange(n, n); } catch { /* noop */ } }
+}
+
+// Catégories du coffre : libellé, couleur, emoji (chips + icône de repli).
+const _COFFRE_CATS = {
+  armes:      { l: 'Armes',      c: '#ff6b4a', e: '⚔️' },
+  armures:    { l: 'Armures',    c: '#4f8cff', e: '🛡' },
+  potions:    { l: 'Potions',    c: '#22c38e', e: '🧪' },
+  scrolls:    { l: 'Scrolls',    c: '#9d6fff', e: '📜' },
+  bijoux:     { l: 'Bijoux',     c: '#e8b84b', e: '💎' },
+  ressources: { l: 'Ressources', c: '#a0a8b8', e: '🪵' },
+  autre:      { l: 'Autre',      c: '#7a8699', e: '📦' },
+};
+
+function _bastionCoffreOpen(id) { STORE.coffreOpen = STORE.coffreOpen === id ? null : id; STORE.takeQty = 1; _renderPage(); }
+function _bastionCoffreQty(delta, max) {
+  STORE.takeQty = Math.max(1, Math.min(Number(max) || 1, (STORE.takeQty || 1) + Number(delta)));
+  _renderPage();
+}
+// Retrait en ligne : réutilise _bastionDoWithdraw (lit #bas-wd-char / #bas-wd-qte).
+async function _bastionCoffreTake(id) {
+  STORE.coffreOpen = null;
+  await _bastionDoWithdraw(id);
+  if (STATE.currentPage === 'bastion') _renderPage();
+}
+function _bastionCoffreExpand() { STORE.roomSel = 'entrepot'; _bastionSetTab('salles'); }
 
 function _renderCoffre(b) {
   const coffre = (b.coffre || []);
   const capacity = _bastionCapacity(b);
   const used = _bastionInvCount(b);
   const pct = capacity > 0 ? Math.min(100, Math.round(used / capacity * 100)) : 0;
-  const hasEligibleChar = _eligibleChars().length > 0;
+  const nearFull = pct > 85;
   const isFull = used >= capacity;
+  const chars = _eligibleChars();
+  const hasEligibleChar = chars.length > 0;
+  const scope = _bastionScopeChar();
+  const prod = _bastionProductionSummary(b);
 
-  // Comptes par catégorie (utiles pour les pills)
-  const counts = { all: coffre.length, armes:0, armures:0, potions:0, scrolls:0, bijoux:0, ressources:0, autre:0, mine:0 };
-  const myCharNoms = new Set(getVisibleCharacters().map(c => c.nom));
-  coffre.forEach(it => {
-    counts[_coffreItemCategory(it)]++;
-    if (it.source && myCharNoms.size && [...myCharNoms].some(n => (it.source || '').includes(n))) counts.mine++;
-  });
+  const myNoms = new Set(getVisibleCharacters().map(c => c.nom));
+  const isMine = (it) => it.source && myNoms.size && [...myNoms].some(n => (it.source || '').includes(n));
+  const counts = { all: coffre.length, mine: 0 };
+  for (const k of Object.keys(_COFFRE_CATS)) counts[k] = 0;
+  coffre.forEach(it => { counts[_coffreItemCategory(it)]++; if (isMine(it)) counts.mine++; });
 
-  // Header avec capacité + bouton Déposer
-  const header = `
-    <div class="bs-section-hd">
-      <h2 class="bs-section-title">📦 Coffre commun <span class="bs-section-count">${used}/${capacity}</span></h2>
-      ${hasEligibleChar ? `<button class="btn btn-outline btn-sm${isFull ? ' bs-btn-disabled' : ''}" ${isFull ? '' : 'data-action="_bastionOpenDeposit"'} title="${isFull ? 'Coffre plein — améliore l\'Entrepôt' : 'Déposer un objet'}">📥 Déposer</button>` : ''}
+  // Bande haute : Or + Capacité.
+  const entrepotNiv = _roomNiveau(b, 'entrepot');
+  const band = `<div class="bs-v-band">
+    <div class="bs-v-cell">
+      <div class="bs-v-kv"><span class="bs-v-lbl">Or du Bastion</span><span class="bs-v-val">${b.or || 0} <small>or</small></span>${prod.or > 0 ? `<span class="bs-v-sub">+${prod.or} or à la fin de la période</span>` : ''}</div>
+      ${hasEligibleChar ? `<div class="bs-v-acts"><button class="bs-w-btn" data-action="_bastionOpenTransfer" data-dir="deposit">Déposer</button>${(b.or || 0) > 0 ? `<button class="bs-w-btn" data-action="_bastionOpenTransfer" data-dir="withdraw">Retirer</button>` : ''}</div>` : ''}
     </div>
-    <div class="bs-capacity">
-      <div class="bs-capacity-bar"><div class="bs-capacity-fill" style="width:${pct}%;background:${pct >= 90 ? '#ff5a7e' : pct >= 70 ? '#f4c430' : '#22c38e'}"></div></div>
-      <div class="bs-capacity-lbl">${used} / ${capacity} objets ${isFull ? '— <strong>plein</strong>' : pct >= 90 ? '— presque plein' : ''}</div>
-    </div>`;
+    <div class="bs-v-cell">
+      <div class="bs-v-kv"><span class="bs-v-lbl">Capacité</span><span class="bs-v-val">${used} <small>/ ${capacity} places</small></span>
+        <div class="bs-v-bar" style="--bc:${nearFull ? 'var(--crimson, #ff5a7e)' : 'var(--gold)'}"><i style="width:${pct}%"></i></div>
+        <span class="bs-v-sub">Entrepôt niv. ${entrepotNiv} · <a data-action="_bastionCoffreExpand">agrandir</a></span></div>
+    </div>
+  </div>`;
 
-  if (!coffre.length) {
-    return `<section class="bs-section">${header}
-      <div class="bs-coffre-empty">Le coffre est vide. Les productions des salles et les dépôts des joueurs apparaîtront ici.</div>
-    </section>`;
-  }
+  // Outils : recherche + filtres + Déposer.
+  const CATS = ['all', ...Object.keys(_COFFRE_CATS), 'mine'];
+  const CAT_LABEL = (k) => k === 'all' ? 'Tout' : k === 'mine' ? '🎒 Mes dépôts' : `${_COFFRE_CATS[k].e} ${_COFFRE_CATS[k].l}`;
+  const tools = `<div class="bs-v-tools">
+    <label class="bs-v-search">🔍<input id="bas-coffre-q" type="search" placeholder="Chercher un objet…" value="${_esc(STORE.coffreSearchRaw)}" data-input="_bastionSetCoffreSearch"></label>
+    <div class="bs-w-fchips">
+      ${CATS.filter(k => k === 'all' || counts[k] > 0).map(k => `<button class="bs-w-fchip${STORE.coffreFilter === k ? ' on' : ''}"${_COFFRE_CATS[k] ? ` style="--tc:${_COFFRE_CATS[k].c}"` : ''} data-action="_bastionSetCoffreFilter" data-filter="${k}">${_COFFRE_CATS[k] ? '<i></i>' : ''}${CAT_LABEL(k)}<span>${counts[k]}</span></button>`).join('')}
+    </div>
+    ${hasEligibleChar ? `<button class="bs-w-btn bs-w-go bs-v-deposit" data-action="_bastionOpenDeposit" ${isFull ? 'disabled title="Coffre plein — améliore l\'Entrepôt"' : ''}>＋ Déposer un objet</button>` : ''}
+  </div>`;
 
-  // Barre de filtres
-  const CATS = [
-    ['all',        'Tout'],
-    ['armes',      '⚔️ Armes'],
-    ['armures',    '🛡 Armures'],
-    ['potions',    '🧪 Potions'],
-    ['scrolls',    '📜 Scrolls'],
-    ['bijoux',     '💎 Bijoux'],
-    ['ressources', '🪵 Ressources'],
-    ['autre',      'Autre'],
-    ['mine',       '🎒 Mes dépôts'],
-  ];
-  const filterBar = `
-    <div class="bs-coffre-filters">
-      <input type="search" class="bs-coffre-search" placeholder="🔍 Rechercher…"
-        value="${_esc(STORE.coffreSearch)}"
-        data-input="_bastionSetCoffreSearch">
-      <div class="bs-coffre-pills">
-        ${CATS.filter(([k]) => counts[k] > 0).map(([k, label]) => `
-          <button class="bs-coffre-pill${STORE.coffreFilter === k ? ' active' : ''}"
-            data-action="_bastionSetCoffreFilter" data-filter="${k}">
-            ${label} <span class="bs-coffre-pill-count">${counts[k]}</span>
-          </button>`).join('')}
-      </div>
-    </div>`;
-
-  // Appliquer filtres + recherche
+  // Filtrage + tri.
   let filtered = coffre.slice();
-  if (STORE.coffreFilter && STORE.coffreFilter !== 'all') {
-    if (STORE.coffreFilter === 'mine') {
-      filtered = filtered.filter(it => myCharNoms.size && [...myCharNoms].some(n => (it.source || '').includes(n)));
-    } else {
-      filtered = filtered.filter(it => _coffreItemCategory(it) === STORE.coffreFilter);
-    }
-  }
-  if (STORE.coffreSearch) {
-    filtered = filtered.filter(it => _norm(it.nom || '').includes(STORE.coffreSearch));
-  }
+  if (STORE.coffreFilter === 'mine') filtered = filtered.filter(isMine);
+  else if (STORE.coffreFilter !== 'all') filtered = filtered.filter(it => _coffreItemCategory(it) === STORE.coffreFilter);
+  if (STORE.coffreSearch) filtered = filtered.filter(it => _norm(it.nom || '').includes(STORE.coffreSearch));
+  filtered.sort((a, b2) => (b2.weekAdded || 0) - (a.weekAdded || 0));
 
-  // Tri : plus récents d'abord
-  filtered.sort((a, b) => (b.weekAdded || 0) - (a.weekAdded || 0));
+  const rows = filtered.map(item => {
+    const k = _COFFRE_CATS[_coffreItemCategory(item)] || _COFFRE_CATS.autre;
+    const open = STORE.coffreOpen === item.id;
+    const maxQ = item.quantite || 1;
+    const takeRow = open ? `<div class="bs-v-take">
+      <span class="bs-v-take-lbl">Prendre</span>
+      <span class="bs-v-step"><button data-action="_bastionCoffreQty" data-delta="-1" data-max="${maxQ}">−</button><span>${STORE.takeQty}</span><button data-action="_bastionCoffreQty" data-delta="1" data-max="${maxQ}">+</button></span>
+      <span class="bs-v-take-info">sur ${maxQ} · va à <b>${_esc(scope?.nom || '?')}</b></span>
+      <select class="input-field bs-v-take-char" id="bas-wd-char" aria-label="Personnage destinataire">${chars.map(c => `<option value="${c.id}"${scope && c.id === scope.id ? ' selected' : ''}>${_esc(c.nom || '?')}</option>`).join('')}</select>
+      <input type="hidden" id="bas-wd-qte" value="${STORE.takeQty}">
+      <button class="bs-w-btn bs-w-go bs-w-sm" data-action="_bastionCoffreTake" data-id="${_esc(item.id)}">Confirmer</button>
+    </div>` : '';
+    return `<div class="bs-v-row${open ? ' open' : ''}">
+      <span class="bs-v-ic">${_esc(item.emoji || k.e)}</span>
+      <span class="bs-v-nm">${_esc(item.nom)}</span>
+      <span class="bs-v-cat"><span class="bs-w-chip t" style="--tc:${k.c}"><i></i>${k.l}</span></span>
+      <span class="bs-v-q">×${maxQ}</span>
+      <span class="bs-v-by">${_esc(item.source || '—')}</span>
+      <span class="bs-v-per">pér. ${item.weekAdded || '?'}</span>
+      <span class="bs-v-act">${hasEligibleChar ? `<button class="bs-w-btn bs-w-sm" data-action="_bastionCoffreOpen" data-id="${_esc(item.id)}">${open ? 'Annuler' : 'Prendre'}</button>` : ''}</span>
+    </div>${takeRow}`;
+  }).join('');
 
-  const itemsHtml = filtered.length
-    ? filtered.map(item => `
-        <div class="bs-coffre-item">
-          <div class="bs-coffre-emoji">${_esc(item.emoji || '📦')}</div>
-          <div class="bs-coffre-body">
-            <div class="bs-coffre-name">${_esc(item.nom)}${item.quantite > 1 ? ` <span class="bs-coffre-qte">×${item.quantite}</span>` : ''}</div>
-            <div class="bs-coffre-meta">${_esc(item.source || '')} · période ${item.weekAdded || '?'}</div>
-          </div>
-          ${hasEligibleChar ? `<button class="bs-coffre-withdraw" data-action="_bastionOpenWithdrawItem" data-id="${item.id}" title="Retirer">↩</button>` : ''}
-        </div>`).join('')
-    : `<div class="bs-coffre-empty">Aucun objet ne correspond aux filtres.</div>`;
+  const table = `<div class="bs-w-card bs-v-table">
+    <div class="bs-v-row hd"><span></span><span>Objet</span><span class="bs-v-cat">Catégorie</span><span class="bs-v-q">Qté</span><span class="bs-v-by">Déposé par</span><span class="bs-v-per">Arrivée</span><span></span></div>
+    ${rows || `<div class="bs-v-empty">${coffre.length ? 'Aucun objet ne correspond.' : 'Le coffre est vide. Les productions des salles et les dépôts des joueurs apparaîtront ici.'}</div>`}
+  </div>`;
 
-  return `
-    <section class="bs-section">${header}
-      ${filterBar}
-      <div class="bs-coffre">${itemsHtml}</div>
-    </section>`;
+  // Besace du perso courant + mouvements récents (historique hors admin).
+  const besace = scope ? _groupInventaire(scope.inventaire) : [];
+  const besaceHtml = besace.length
+    ? besace.map(g => `<div class="bs-v-mv"><span class="bs-v-mv-ic">${_esc(g.item.icone || g.item.emoji || '📦')}</span><span class="bs-v-mv-tx">${_esc(g.item.nom || '?')}<small>×${g.totalQte}${g.item.rarete ? ` · ${_esc(g.item.rarete)}` : ''}</small></span><button class="bs-w-btn bs-w-sm" data-action="_bastionOpenDeposit"${isFull ? ' disabled' : ''}>Déposer</button></div>`).join('')
+    : `<p class="bs-side-empty">Inventaire vide.</p>`;
+  const moves = (b.historique || []).filter(e => !_ADMIN_HISTO_TYPES.has(e.type)).slice(0, 10);
+  const movesHtml = moves.length
+    ? moves.map(e => `<div class="bs-v-mv"><span class="bs-v-mv-tx bs-v-mv-full">${_esc(e.msg || '')}<small>période ${e.week ?? '?'}</small></span></div>`).join('')
+    : `<p class="bs-side-empty">Aucun mouvement récent.</p>`;
+
+  return `<div class="bs-v-layout">
+    <div class="bs-v-main">${band}${tools}${table}</div>
+    <aside class="bs-mur-side">
+      <div class="bs-side-card"><h3 class="bs-side-h">🎒 Ma besace${scope ? ` · ${_esc(scope.nom)}` : ''} <span>${besace.length}</span></h3>${besaceHtml}</div>
+      <div class="bs-side-card"><h3 class="bs-side-h">🔁 Mouvements récents</h3>${movesHtml}</div>
+    </aside>
+  </div>`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -4135,6 +4171,10 @@ registerActions({
   _bastionSetRoomFilter:    (btn) => _bastionSetRoomFilter(btn.dataset.filter),
   _bastionQuickInvest:      (btn) => _bastionQuickInvest(btn.dataset.slug, btn.dataset.amount),
   _bastionSetCoffreFilter:  (btn) => _bastionSetCoffreFilter(btn.dataset.filter),
+  _bastionCoffreOpen:       (btn) => _bastionCoffreOpen(btn.dataset.id),
+  _bastionCoffreQty:        (btn) => _bastionCoffreQty(btn.dataset.delta, btn.dataset.max),
+  _bastionCoffreTake:       (btn) => _bastionCoffreTake(btn.dataset.id),
+  _bastionCoffreExpand:     () => _bastionCoffreExpand(),
   _bastionOpenWithdrawItem: (btn) => _bastionOpenWithdrawItem(btn.dataset.id),
   _bastionSaveQuest:        (btn) => _bastionSaveQuest(btn.dataset.id || ''),
   _bastionSetQuestStatut:   (btn) => _bastionSetQuestStatut(btn),
