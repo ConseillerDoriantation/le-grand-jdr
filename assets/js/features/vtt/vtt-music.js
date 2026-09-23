@@ -399,7 +399,7 @@ function _queueDurations() {
   _pumpDurations();
 }
 function _pumpDurations() {
-  if (_durBusy) return;
+  if (_durBusy || _musicDragActive) return;   // pas de chargements pendant un drag
   const id = _durQueue.shift();
   if (!id) return;
   const s = _sounds.find(x => x.id === id);
@@ -537,16 +537,17 @@ function _initMusicSortable() {
   const scrollEl = document.querySelector('.vtt-music-panel .lib') || document.getElementById('vtt-music-panel') || true;
   const dragOpts = {
     forceFallback: true, fallbackOnBody: true, fallbackClass: 'vtt-ms-drag',
-    scroll: scrollEl, scrollSensitivity: 90, scrollSpeed: 18, bubbleScroll: true,
+    animation: 0, fallbackTolerance: 6, delay: 0,
+    scroll: scrollEl, scrollSensitivity: 60, scrollSpeed: 10, bubbleScroll: true,
     onStart: () => { _musicDragActive = true; },
-    onEnd: () => { setTimeout(() => { _musicDragActive = false; }, 60); },
+    onEnd: () => { setTimeout(() => { _musicDragActive = false; _pumpDurations(); }, 60); },
   };
 
   // Rail : réordonner les playlists + chaque entrée = zone de dépôt d'un son.
   const rail = document.getElementById('vtt-music-rail');
   if (rail) {
     _musicSortables.push(new Sortable(rail, {
-      ...dragOpts, animation: 120, ghostClass: 'vtt-sort-ghost',
+      ...dragOpts, ghostClass: 'vtt-sort-ghost',
       draggable: '.pl[data-pl-id]', filter: '.ib,.pl-acts',
       onUpdate: async () => {
         const ids = [...rail.querySelectorAll('.pl[data-pl-id]')].map(e => e.dataset.plId).filter(Boolean);
@@ -573,7 +574,7 @@ function _initMusicSortable() {
   const plId = list?.dataset.plId || null;
   if (list) {
     _musicSortables.push(new Sortable(list, {
-      ...dragOpts, animation: 120, ghostClass: 'vtt-sort-ghost',
+      ...dragOpts, ghostClass: 'vtt-sort-ghost',
       group: { name: 'vtt-sounds', pull: 'clone', put: false }, sort: !!plId,
       draggable: '.t[data-sound-id]', filter: '.ib,.btn,.qa,.grp,.empty,.sec-hd',
       onUpdate: async () => {
@@ -788,7 +789,11 @@ function _killAudio() {
 }
 
 function _killAmbience() {
-  if (_ambienceEl) { if (_ambienceEl._fadeTimer) clearInterval(_ambienceEl._fadeTimer); _ambienceEl.pause(); _ambienceEl.src=''; _ambienceEl=null; }
+  if (_ambienceEl) {
+    if (_ambienceEl._fadeTimer) clearInterval(_ambienceEl._fadeTimer);
+    if (_ambienceEl._errorHandler) _ambienceEl.removeEventListener('error', _ambienceEl._errorHandler);
+    _ambienceEl.pause(); _ambienceEl.src=''; _ambienceEl=null;
+  }
 }
 
 // Autoplay bloqué (ex. après un rafraîchissement de page : le navigateur exige
@@ -869,11 +874,15 @@ function _syncAmbience(ms) {
   el.dataset.soundId = id;
   el.loop = true;
   el.volume = 0;   // fondu d'entrée
-  el.addEventListener('error', () => {
+  // Handler nommé + stocké sur l'élément : _fadeOutAndDispose / _killAmbience le
+  // retirent avant `src=''` pour ne pas déclencher une fausse « injouable » à l'arrêt.
+  const onAmbErr = () => {
     console.error('[vtt music] ambiance audio error:', el.error?.code, sound.url);
     if (STATE.isAdmin) showNotif(`🔇 Ambiance « ${sound.name} » injouable — vérifier l'URL`, 'error');
     _killAmbience();
-  }, { once:true });
+  };
+  el._errorHandler = onAmbErr;
+  el.addEventListener('error', onAmbErr, { once: true });
   el.addEventListener('playing', () => _fade(el, _getAmbienceVolume(), _AMB_FADE_MS), { once:true });
   el.play().catch(err => {
     if (err.name === 'NotAllowedError') _armAutoplayResume();   // reprise auto silencieuse
@@ -901,9 +910,14 @@ function _resetMusicState(keepAudio = false) {
   _musicSoundLoads.clear();
 }
 
-async function _setMusicState(patch) {
-  if (!aid()) return;
-  await setDoc(_musicStateRef(), patch, {merge:true}).catch(()=>{});
+// Écriture « fire-and-forget » : on N'ATTEND PAS l'accusé serveur. Le onSnapshot
+// local (_syncMusicPlayback) applique l'effet immédiatement ; attendre setDoc
+// bloquait les boutons (spinner infini) sur réseau lent. L'écriture part quand
+// même en arrière-plan et se propage aux autres clients.
+function _setMusicState(patch) {
+  if (!aid()) return Promise.resolve();
+  setDoc(_musicStateRef(), patch, { merge: true }).catch(() => {});
+  return Promise.resolve();
 }
 
 // ── Sync lecture ────────────────────────────────────────────────────
