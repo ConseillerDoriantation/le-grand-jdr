@@ -346,6 +346,11 @@ function _renderMusicPanel() {
   if (mj) {
     _initMusicSortable();
     panel.querySelectorAll('.t[data-sound-id]').forEach(row => {
+      // Clic sur la ligne = lecture, sauf sur un bouton ou juste après un drag.
+      row.onclick = e => {
+        if (_musicDragActive || e.target.closest('button, a, input')) return;
+        _vttPlaySound(row.dataset.soundId, false);
+      };
       row.oncontextmenu = e => {
         e.preventDefault();
         _vttSoundCtxMenu(e, row.dataset.soundId, row.dataset.plctx || undefined);
@@ -354,6 +359,7 @@ function _renderMusicPanel() {
     panel.querySelectorAll('.pl[data-pl-id]').forEach(el => {
       el.oncontextmenu = e => { e.preventDefault(); _vttPlaylistCtxMenu(e, el.dataset.plId); };
     });
+    _queueDurations();
   }
 
   // Restaure défilement + focus/caret de la recherche.
@@ -436,7 +442,52 @@ function _applyMusicFilter(query) {
 }
 
 // Rendu unifié : pool "Non classés" + playlists, tous pliables.
-const _msDur = s => (s && s.duration > 0) ? _fmtTime(s.duration) : '—';
+// Durée d'une piste : champ Firestore `duration`, sinon cache client (rempli en
+// arrière-plan), sinon « … » (chargement) ou « — » (échec/inconnu).
+const _durCache = new Map();   // soundId → secondes
+const _durQueue = [];          // file d'attente de rattrapage (MJ)
+let _durBusy = false;
+function _msDur(s) {
+  const d = (s && s.duration > 0) ? s.duration : _durCache.get(s?.id);
+  return d > 0 ? _fmtTime(d) : (_durCache.get(s?.id) === 0 ? '—' : '…');
+}
+// Rattrapage lazy des durées manquantes (MJ) : charge les métadonnées audio une
+// par une, mémorise en cache + écrit `duration` dans vttSons (1 écriture/son).
+function _queueDurations() {
+  if (!STATE.isAdmin) return;
+  for (const s of _sounds) {
+    if (s && s.url && !(s.duration > 0) && !_durCache.has(s.id) && !_durQueue.includes(s.id)) _durQueue.push(s.id);
+  }
+  _pumpDurations();
+}
+function _pumpDurations() {
+  if (_durBusy) return;
+  const id = _durQueue.shift();
+  if (!id) return;
+  const s = _sounds.find(x => x.id === id);
+  if (!s || !s.url) { _pumpDurations(); return; }
+  _durBusy = true;
+  const a = new Audio();
+  a.preload = 'metadata';
+  let done = false;
+  const finish = (dur) => {
+    if (done) return; done = true;
+    try { a.src = ''; } catch { /* noop */ }
+    _durCache.set(id, dur > 0 ? Math.round(dur) : 0);
+    if (dur > 0) updateDoc(_sonRef(id), { duration: Math.round(dur) }).catch(() => {});
+    _durBusy = false;
+    if (!_durQueue.length && document.getElementById('vtt-music-panel')?.dataset.open === '1') _renderMusicPanel();
+    setTimeout(_pumpDurations, 40);
+  };
+  a.addEventListener('loadedmetadata', () => finish(a.duration || 0));
+  a.addEventListener('error', () => finish(0));
+  setTimeout(() => finish(a.duration || 0), 9000);   // garde-fou réseau
+  a.src = s.url;
+}
+
+// Anti-« clic-lecture » après un glisser-déposer (le clic de fin de drag doit
+// être ignoré). Posé par Sortable onStart, relâché peu après onEnd.
+let _musicDragActive = false;
 function _vttMusicSelectRail(sel) { _setMusicSel(sel); }
 
 // Rail gauche : Tous / Non classés / séparateur / playlists.
@@ -525,7 +576,7 @@ function _trackRow(s, ctx, i, mj) {
   const isAmb = ms.ambienceSoundId === s.id;
   const titleHidden = s.hideTitle === true;
   const previewing = _previewEl && _previewEl.dataset.soundId === s.id;
-  return `<div class="t${isCurrent ? ' cur' : ''}${isAmb ? ' isamb' : ''}" data-sound-id="${s.id}"${inPlaylist ? ` data-plctx="${inPlaylist}"` : ''}${mj ? ` data-vtt-fn="_vttPlaySound" data-vtt-args="${s.id}|false"` : ''} title="${_esc(s.name)}">
+  return `<div class="t${isCurrent ? ' cur' : ''}${isAmb ? ' isamb' : ''}" data-sound-id="${s.id}"${inPlaylist ? ` data-plctx="${inPlaylist}"` : ''} title="${_esc(s.name)}">
     <span class="n"><span class="num">${i + 1}</span><span class="ph">${_mi(isCurrent && !paused ? 'pause' : 'play')}</span>${_MS_WAVE}</span>
     <span class="nm"><span>${_esc(s.name)}</span>${mj && titleHidden ? _mi('eyeoff') : ''}${isAmb ? '<span class="ambtag">AMBIANCE</span>' : ''}</span>
     ${mj ? `<span class="qa">
@@ -543,7 +594,12 @@ function _initMusicSortable() {
   _musicSortables.forEach(s => s.destroy()); _musicSortables = [];
   // Ghost détaché du body (sinon clippé par l'overflow du panneau) + auto-scroll.
   const scrollEl = document.querySelector('.vtt-music-panel .lib') || document.getElementById('vtt-music-panel') || true;
-  const dragOpts = { forceFallback: true, fallbackOnBody: true, scroll: scrollEl, scrollSensitivity: 90, scrollSpeed: 18, bubbleScroll: true };
+  const dragOpts = {
+    forceFallback: true, fallbackOnBody: true, fallbackClass: 'vtt-ms-drag',
+    scroll: scrollEl, scrollSensitivity: 90, scrollSpeed: 18, bubbleScroll: true,
+    onStart: () => { _musicDragActive = true; },
+    onEnd: () => { setTimeout(() => { _musicDragActive = false; }, 60); },
+  };
 
   // Rail : réordonner les playlists + chaque entrée = zone de dépôt d'un son.
   const rail = document.getElementById('vtt-music-rail');

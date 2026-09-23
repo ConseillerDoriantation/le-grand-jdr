@@ -11963,17 +11963,23 @@ html:not([data-theme="light"]) .vtt-root {
 /* ══════════════════════════════════════════════════════════════════════════
    Refonte « La Régie » — panneau Sons & musique (tout scopé .vtt-music-panel)
    ══════════════════════════════════════════════════════════════════════════ */
-.vtt-music-panel { display:flex; flex-direction:column; width:min(700px,calc(100vw - 40px)); max-height:calc(100vh - 120px); }
+.vtt-music-panel { display:flex; flex-direction:column; width:min(720px,calc(100vw - 40px)); max-height:min(560px,calc(100vh - 130px)); font-size:13px; line-height:1.4; font-variant-numeric:tabular-nums; }
 .vtt-music-panel.player  { width:min(380px,calc(100vw - 40px)); }
 .vtt-music-panel.compact { width:min(440px,calc(100vw - 40px)); }
-.vtt-music-panel svg.i { width:16px; height:16px; flex:none; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+.vtt-music-panel svg.i { width:15px; height:15px; flex:none; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+
+/* Clone de glisser-déposer (détaché du body → hors scope) : chip lisible. */
+.vtt-ms-drag { display:flex !important; align-items:center; gap:8px; max-width:280px; padding:6px 12px; border-radius:8px; background:var(--bg-panel,#111b2a); border:1px solid var(--gold); box-shadow:0 10px 28px rgba(0,0,0,.55); color:var(--text,#eef2fb); font-size:12.5px; opacity:.96; pointer-events:none; }
+.vtt-ms-drag .n, .vtt-ms-drag .qa, .vtt-ms-drag .dur, .vtt-ms-drag .pl-acts, .vtt-ms-drag .ct, .vtt-ms-drag .wave { display:none !important; }
+.vtt-ms-drag .nm, .vtt-ms-drag .nm > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text,#eef2fb) !important; font-weight:500; min-width:0; }
+.vtt-ms-drag svg.i { width:14px; height:14px; flex:none; }
 .vtt-music-panel .grow { flex:1; }
 .vtt-music-panel .sep  { width:1px; height:18px; background:var(--border-md,var(--border)); margin:0 5px; }
 .vtt-music-panel kbd { font-family:inherit; font-size:10px; padding:1px 5px; border-radius:4px; border:1px solid var(--border-md,var(--border)); color:var(--text-dim,var(--text-muted)); margin-right:4px; }
 
 .vtt-music-panel .vtt-ms-hd { display:flex; align-items:center; gap:10px; padding:11px 12px 11px 16px; border-bottom:1px solid var(--border); }
-.vtt-music-panel .vtt-ms-hd h2 { font-family:var(--font-display,inherit); font-size:14px; font-weight:600; letter-spacing:.03em; color:var(--text); }
-.vtt-music-panel .ib { width:30px; height:30px; border-radius:6px; display:grid; place-items:center; color:var(--text-muted); background:none; border:0; cursor:pointer; position:relative; transition:all .14s; }
+.vtt-music-panel .vtt-ms-hd h2 { font-family:var(--font-display,inherit); font-size:13px; font-weight:600; letter-spacing:.03em; color:var(--text); }
+.vtt-music-panel .ib { width:30px; height:30px; border-radius:6px; display:grid; place-items:center; color:var(--text-muted); background:none; border:0; cursor:pointer; position:relative; transition:background .1s, color .1s; }
 .vtt-music-panel .ib:hover { background:var(--surface-2,var(--bg-elevated)); color:var(--text); }
 .vtt-music-panel .ib.on { color:var(--gold-2,var(--gold)); background:var(--gold-glow,rgba(79,140,255,.18)); }
 .vtt-music-panel .ib.sm { width:26px; height:26px; }
@@ -11992,7 +11998,7 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-music-panel .ch.amb .ch-tag { color:var(--amb,#9d6fff); }
 .vtt-music-panel .ch-main { min-width:0; display:flex; flex-direction:column; gap:7px; }
 .vtt-music-panel .np-title { display:flex; align-items:center; gap:8px; min-width:0; }
-.vtt-music-panel .np-title b { font-size:15px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
+.vtt-music-panel .np-title b { font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
 .vtt-music-panel .np-title.idle b { color:var(--text-dim,var(--text-muted)); font-weight:500; font-size:13.5px; }
 .vtt-music-panel .np-src { display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--text-muted); min-width:0; }
 .vtt-music-panel .np-src .dot { width:7px; height:7px; border-radius:50%; flex:none; }
@@ -12032,7 +12038,7 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-music-panel .fader.m { --fc:var(--gold); }
 .vtt-music-panel .fader.a { --fc:var(--amb,#9d6fff); }
 
-.vtt-music-panel .lib { display:grid; grid-template-columns:200px minmax(0,1fr); min-height:0; flex:1; overflow:hidden; }
+.vtt-music-panel .lib { display:grid; grid-template-columns:232px minmax(0,1fr); min-height:0; flex:1; overflow:hidden; }
 .vtt-music-panel .rail { border-right:1px solid var(--border); display:flex; flex-direction:column; min-height:0; background:var(--surface-sunken,var(--bg-panel)); }
 .vtt-music-panel .rail-hd { padding:12px 12px 6px 14px; font-size:10px; letter-spacing:.16em; text-transform:uppercase; font-weight:600; color:var(--text-dim,var(--text-muted)); }
 .vtt-music-panel .pls { flex:1; overflow-y:auto; padding:2px 6px 8px; display:flex; flex-direction:column; gap:1px; }
@@ -12062,7 +12068,7 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-music-panel .btn:hover { background:var(--gold-2,var(--gold)); }
 .vtt-music-panel .btn.ghost { background:var(--surface-2,var(--bg-elevated)); color:var(--text-soft,var(--text)); border:1px solid var(--border-md,var(--border)); }
 .vtt-music-panel .sec-hd { display:flex; align-items:center; gap:8px; padding:4px 14px 8px; }
-.vtt-music-panel .sec-hd h3 { font-family:var(--font-display,inherit); font-size:14px; font-weight:600; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
+.vtt-music-panel .sec-hd h3 { font-family:var(--font-display,inherit); font-size:13px; font-weight:600; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
 .vtt-music-panel .sec-hd .dot { width:10px; height:10px; border-radius:3px; }
 .vtt-music-panel .list { flex:1; overflow-y:auto; padding:0 6px 10px; min-height:0; }
 .vtt-music-panel .grp { font-size:10px; letter-spacing:.14em; text-transform:uppercase; font-weight:600; color:var(--text-dim,var(--text-muted)); padding:10px 10px 4px; display:flex; align-items:center; gap:7px; }
@@ -12078,8 +12084,9 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-music-panel .t .nm > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-soft,var(--text)); }
 .vtt-music-panel .t .nm svg.i { width:13px; height:13px; color:var(--amber,#f4c430); }
 .vtt-music-panel .t .dur { font-size:11px; color:var(--text-dim,var(--text-muted)); min-width:32px; text-align:right; }
-.vtt-music-panel .t .qa { display:flex; gap:1px; opacity:0; transition:opacity .12s; }
+.vtt-music-panel .t .qa { display:flex; gap:1px; opacity:0; }
 .vtt-music-panel .t:hover .qa, .vtt-music-panel .t .qa:focus-within { opacity:1; }
+.vtt-music-panel .pl .pl-acts, .vtt-music-panel .t .qa { transition:none; }
 .vtt-music-panel .t.cur { background:var(--gold-glow,rgba(79,140,255,.18)); }
 .vtt-music-panel .t.cur .nm > span { color:var(--gold-2,var(--gold)); font-weight:600; }
 .vtt-music-panel .t.cur .n .num { display:none; }
