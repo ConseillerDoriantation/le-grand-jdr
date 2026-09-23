@@ -149,6 +149,35 @@
   .bs-salles-fiche { position: static; }
 }
 
+/* ─── Onglet Mur : fil + colonne droite (quêtes / offres) ──────────────── */
+.bs-mur-layout { display: grid; grid-template-columns: minmax(0,1fr) 300px; gap: 16px; align-items: start; }
+.bs-mur-feed { min-width: 0; }
+.bs-mur-feed > .bs-section { margin-top: 0; }
+.bs-mur-side { position: sticky; top: 118px; display: flex; flex-direction: column; gap: 14px; }
+.bs-side-card { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-1); padding: 12px 14px; }
+.bs-side-h { display: flex; align-items: center; justify-content: space-between; font-family: var(--font-display); font-size: 14px; font-weight: 600; margin: 0 0 10px; }
+.bs-side-h span { font-size: 11px; padding: 1px 7px; border-radius: var(--r-full); background: var(--surface-2); color: var(--text-dim); }
+.bs-side-empty { font-size: 11.5px; color: var(--text-dim); margin: 0; }
+.bs-side-item {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; margin-bottom: 6px;
+  padding: 8px; border-radius: var(--r-sm); border: 1px solid transparent; border-left: 2px solid var(--c);
+  background: var(--surface-2); cursor: pointer; transition: border-color .15s, background .15s;
+}
+.bs-side-item:last-child { margin-bottom: 0; }
+.bs-side-item:hover:not([disabled]) { border-color: var(--c); background: color-mix(in srgb, var(--c) 8%, var(--surface-2)); }
+.bs-side-item[disabled] { cursor: default; }
+.bs-side-ic { font-size: 15px; flex: none; }
+.bs-side-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.bs-side-txt b { font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bs-side-txt small { font-size: 10.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bs-side-tag { font-size: 9px; font-weight: 700; letter-spacing: .06em; padding: 1px 5px; border-radius: var(--r-full); background: var(--c); color: #fff; flex: none; }
+
+@media (max-width: 1240px) {
+  .bs-mur-layout { grid-template-columns: 1fr; }
+  .bs-mur-side { position: static; flex-direction: row; flex-wrap: wrap; }
+  .bs-mur-side .bs-side-card { flex: 1; min-width: 260px; }
+}
+
 /* ─── HERO ─────────────────────────────────────────────────────────── */
 .bs-hero {
   display: flex;

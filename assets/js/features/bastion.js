@@ -3507,6 +3507,72 @@ function _renderAnnonces() {
   </section>`;
 }
 
+// Élément cliquable de la colonne droite : renvoie vers le post dans le fil.
+function _wallSideItem(p) {
+  const type = BASTION_WALL_TYPES[p.type] || BASTION_WALL_TYPES.message;
+  const author = p.charName || p.author || 'Personnage';
+  const preview = (p.text || '').replace(/\s+/g, ' ').trim().slice(0, 70);
+  return `<button type="button" class="bs-side-item" data-action="_bastionWallJump" data-id="${_esc(p.id)}" style="--c:${type.color}">
+    <span class="bs-side-ic">${type.icon}</span>
+    <span class="bs-side-txt"><b>${_esc(author)}</b><small>${_esc(preview || type.label)}</small></span>
+  </button>`;
+}
+
+// Colonne droite du Mur : quêtes ouvertes (quêtes MJ lecture seule + posts type
+// Quête) et offres/demandes. Clic = défilement + surbrillance du post concerné.
+function _renderWallSidebar(b) {
+  const isMj = STATE.isAdmin;
+  const active = _wallAllPosts().filter(p => p.status === 'active');
+  const questPosts = active.filter(p => p.type === 'quete');
+  const offers = active.filter(p => p.type === 'offre' || p.type === 'demande');
+  const mjQuests = (b.bastionQuests || []).filter(q => ['ouverte', 'en_cours'].includes(q.statut || 'ouverte'));
+
+  const questItems = [
+    ...mjQuests.map(q => {
+      const st = BQ_STATUTS[q.statut || 'ouverte'] || BQ_STATUTS.ouverte;
+      return `<button type="button" class="bs-side-item bs-side-item--mj"${isMj ? ` data-action="_bastionOpenQuestEditor" data-id="${_esc(q.id)}"` : ' disabled'} style="--c:${st.color}">
+        <span class="bs-side-ic" title="Quête du MJ">${st.emoji}</span>
+        <span class="bs-side-txt"><b>${_esc(q.titre || '?')}</b><small>${q.recompense ? `🎁 ${_esc(q.recompense)}` : st.lbl}</small></span>
+        <span class="bs-side-tag">MJ</span>
+      </button>`;
+    }),
+    ...questPosts.map(_wallSideItem),
+  ];
+  const offerItems = offers.map(_wallSideItem);
+
+  return `
+    <div class="bs-side-card">
+      <h3 class="bs-side-h">📋 Quêtes ouvertes <span>${questItems.length}</span></h3>
+      ${questItems.length ? questItems.join('') : '<p class="bs-side-empty">Aucune quête ouverte.</p>'}
+    </div>
+    <div class="bs-side-card">
+      <h3 class="bs-side-h">🪙 Offres &amp; demandes <span>${offerItems.length}</span></h3>
+      ${offerItems.length ? offerItems.join('') : '<p class="bs-side-empty">Rien à échanger pour l’instant.</p>'}
+    </div>`;
+}
+
+// Ouvre le fil sur le post ciblé (ajuste filtre + pagination) puis le met en avant.
+function _bastionWallJump(id) {
+  const post = _wallPostById(id);
+  if (!post) return;
+  _wallUi.filter = bastionWallFilterForTarget(_wallUi.filter, post);
+  const active = _wallAllPosts();
+  const f = _wallUi.filter;
+  const filtered = f === 'all' ? active.filter(p => p.status === 'active')
+    : f === 'archive' ? active.filter(p => p.status !== 'active')
+      : active.filter(p => p.type === f && p.status === 'active');
+  const idx = filtered.findIndex(p => p.id === id);
+  if (idx >= 0) _wallUi.visible = Math.max(_wallUi.visible, idx + 1);
+  _renderPage();
+  requestAnimationFrame(() => {
+    const card = document.getElementById(`bastion-post-${id}`);
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('is-targeted');
+    setTimeout(() => card.classList.remove('is-targeted'), 3200);
+  });
+}
+
 function _bastionSetAnnonceType(btn) {
   _wallUi.type = BASTION_WALL_TYPES[btn.dataset.type] ? btn.dataset.type : 'message';
   _wallPersistDraft();
@@ -3874,7 +3940,10 @@ async function _loadWallEmotes() {
 // Contenu de l'onglet actif (une seule section à la fois → fin du long scroll).
 function _bsTabBody(b, tab) {
   if (tab === 'coffre') return _renderCoffre(b);
-  if (tab === 'mur')    return _renderAnnonces() + _renderBastionQuests(b);
+  if (tab === 'mur') return `<div class="bs-mur-layout">
+    <div class="bs-mur-feed">${_renderAnnonces()}</div>
+    <aside class="bs-mur-side">${_renderWallSidebar(b)}</aside>
+  </div>`;
   return _renderRooms(b);   // 'salles' par défaut
 }
 
@@ -4079,6 +4148,7 @@ registerActions({
   _bastionWallSaveComment:  (btn) => _bastionWallSaveComment(btn.dataset.comment),
   _bastionWallDeleteComment:(btn) => _bastionWallDeleteComment(btn),
   _bastionOpenPostImage:    (btn) => _bastionOpenPostImage(btn),
+  _bastionWallJump:         (btn) => _bastionWallJump(btn.dataset.id),
   _bastionWallMore:         () => { _wallUi.visible += 12; _renderPage(); },
   _bastionWallSetFilter:    (btn) => { _wallUi.filter = btn.dataset.filter || 'all'; _wallUi.visible = 12; _renderPage(); },
 });
