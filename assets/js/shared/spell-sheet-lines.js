@@ -123,7 +123,10 @@ export function computeSheetLines(state = {}) {
 
   // 4 · Enchantement (le bloc état + les slots supplémentaires sont relocalisés
   // depuis le store dans le tiroir « régler »).
-  if (hasEnchant) lines.push({ slot: 'ench', id: 'ench', icon: '✨', enchant: true, select: { hiddenId: 's-enchant-etat', label: 'État' }, inlineSlots: ['s-enchant-etat-block', 's-enchant-extra-slots'] });
+  // Enchantement : le sélecteur d'état est affiché EN LIGNE (juste le <select>,
+  // compact) ; les réglages secondaires (états en plus, bonus de l'état) restent
+  // dans le tiroir « régler ».
+  if (hasEnchant) lines.push({ slot: 'ench', id: 'ench', icon: '✨', enchant: true, select: { hiddenId: 's-enchant-etat', label: 'État' }, inlineSlots: ['s-enchant-etat'], slots: ['s-enchant-state-tuning', 's-enchant-extra-slots'] });
 
   // 5 · Affliction (Sentinelle si + Invocation)
   if (hasAffliction && !isRegen) {
@@ -132,7 +135,7 @@ export function computeSheetLines(state = {}) {
       line.sentinelle = true;                                     // portée par la sentinelle : pas de réglage
     } else {
       line.segment = { key: 'afflMode', cur: afflMode, hiddenId: 's-affliction-mode', opts: [['dot', 'DoT', '#e8894b'], ['etat', 'État', '#a855f7'], ['laceration', 'Lacér.', '#ff5a7e']] };
-      if (afflMode === 'etat') { line.select = { hiddenId: 's-affliction-etat', label: 'État', saveStatId: 's-affliction-save-stat' }; line.inlineSlots = ['s-affliction-etat-block']; }
+      if (afflMode === 'etat') { line.select = { hiddenId: 's-affliction-etat', label: 'État', saveStatId: 's-affliction-save-stat' }; line.inlineSlots = ['s-affliction-etat']; }   // juste le <select>, compact
       else if (afflMode === 'dot') line.override = { fieldId: 's-affliction-dot-formula' };
       // laceration : valeur calculée (CA cible −n) → pas d'override
     }
@@ -159,8 +162,9 @@ export function computeSheetLines(state = {}) {
     lines.push({ slot: 'zone', id: 'disp', icon: '🎯' });         // valeur calculée (poses/cibles)
 
   // 7 · Invocation générique (hors combos Sentinelle / Arme invoquée)
+  // Invocation : config repliée derrière « régler » (pas de scroll imposé) + compactée.
   if (anyInvoc && !hasAffliction && !hasEnchant)
-    lines.push({ slot: 'inv', id: 'inv', icon: '🐾', invocationConfig: true, inlineSlots: ['s-invocation-section'] });
+    lines.push({ slot: 'inv', id: 'inv', icon: '🐾', invocationConfig: true, slots: ['s-invocation-section'] });
 
   // 8 · Déclenchement (mode de lancer)
   if (has(ACTION_RUNE))
@@ -243,7 +247,7 @@ export function renderSheetLines(lines = [], ctx = {}, tuned = new Set(), opts =
     // affichés DIRECTEMENT sous la ligne (pas derrière « régler »), relocalisés
     // depuis le store comme les slots de tiroir.
     const inlineSlots = (!readonly && l.inlineSlots && l.inlineSlots.length)
-      ? `<div class="ln-slots">${l.inlineSlots.map((sid) => `<span class="cs-forge-slot" data-slot="${_esc(sid)}"></span>`).join('')}</div>`
+      ? `<div class="ln-slots">${l.select ? `<em class="ln-slots-lbl">${_esc(l.select.label)}</em>` : ''}${l.inlineSlots.map((sid) => `<span class="cs-forge-slot" data-slot="${_esc(sid)}"></span>`).join('')}</div>`
       : '';
     const note = c.note ? `<div class="ln-note">${c.note}</div>` : '';
     return `<div class="ln${l.sub ? ' sub' : ''}" data-line="${_esc(l.id)}" style="--c:${c.color || 'var(--gold)'}">`
