@@ -409,17 +409,6 @@ function _roomInvestmentContributors(slug) {
   return [...contributors.values()].sort((a, b) => b.amount - a.amount || a.charName.localeCompare(b.charName, 'fr'));
 }
 
-// Calcule le niveau "actuel + en construction = target" affiché
-function _roomTargetLabel(slug, b, isUnlimited) {
-  const s = b?.salles?.[slug];
-  if (!s) return '';
-  const lbl = (n) => isUnlimited ? `${n}` : (NIVEAU_LABEL[n] || n);
-  if (s.weeksLeftToBuild > 0) {
-    return `→ ${lbl(s.targetNiveau)} (${s.weeksLeftToBuild} période)`;
-  }
-  return `Niv. ${lbl(s.niveau)}`;
-}
-
 function _decodeBastionEntities(value = '') {
   let text = String(value ?? '');
   const named = {
@@ -1081,33 +1070,6 @@ async function _bastionDoDeposit() {
     closeModal();
     showNotif(`✓ ${qte}× ${item.nom} déposé au coffre.`, 'success');
   } catch (e) { notifySaveError(e); }
-}
-
-function _bastionOpenWithdrawItem(coffreId) {
-  const item = (STORE.bastion?.coffre || []).find(c => c.id === coffreId);
-  if (!item) return;
-  let chars = _eligibleChars();
-  if (!chars.length) { showNotif('Aucun personnage destinataire.', 'error'); return; }
-  // Liste déjà triée par _eligibleChars (joueur alpha → ★ par défaut → nom).
-  // Default = le perso ★ de l'utilisateur, sinon son premier, sinon le premier de la liste.
-  const defaultChar = getDefaultCharForUser(chars, STATE.user?.uid) || chars[0];
-
-  openModal(`📤 Retirer : ${_esc(item.nom)} ×${item.quantite}`, `
-    <div class="form-group">
-      <label>Vers le personnage</label>
-      <select class="input-field" id="bas-wd-char">
-        ${chars.map(c => `<option value="${c.id}"${c.id === defaultChar.id ? ' selected' : ''}>${_esc(c.nom || '?')}</option>`).join('')}
-      </select>
-    </div>
-    <div class="form-group">
-      <label>Quantité <span style="font-size:.72rem;color:var(--text-dim);font-weight:400;margin-left:.4rem">(stack : ${item.quantite})</span></label>
-      <div style="display:flex;gap:6px;align-items:center">
-        <input type="number" class="input-field" id="bas-wd-qte" min="1" max="${item.quantite}" value="${item.quantite}" style="flex:1">
-        <button type="button" class="btn btn-outline btn-sm" data-action="_bastionSetMax" data-target="bas-wd-qte" data-val="${item.quantite}">Tout</button>
-      </div>
-    </div>
-    <button class="btn btn-gold" style="width:100%" data-action="_bastionDoWithdraw" data-id="${coffreId}">📤 Retirer</button>
-  `);
 }
 
 async function _bastionDoWithdraw(coffreId) {
@@ -2033,79 +1995,6 @@ async function _bastionFireEmployee(empId) {
   showNotif(`${emp.nom} a quitté le bastion.`, 'success');
 }
 
-function _bastionShowDetails(slug) {
-  const def = _getRoomDef(slug);
-  if (!def) return;
-  const b = STORE.bastion || _defaultBastion();
-  const curNiv = _roomNiveau(b, slug);
-  const buildingTarget = b?.salles?.[slug]?.targetNiveau || 0;
-
-  // Mode unlimited (Entrepôt) → affichage compact
-  if (def.unlimited) {
-    const nextCost = Math.round((def.baseCost || 100) * Math.pow(def.costMultiplier || 1.1, curNiv));
-    const nextCapacity = 20 + (curNiv + 1) * (def.capacitePerLevel || 10);
-    openModal(`${def.emoji} ${def.nom} — détails`, `
-      <div class="bs-det">
-        <p class="bs-det-desc">${_esc(def.desc)}</p>
-        <div class="bs-det-levels">
-          <div class="bs-det-level bs-det-level--active">
-            <div class="bs-det-level-head">
-              <span class="bs-det-level-num">Niveau actuel</span>
-              <span class="bs-det-level-state">Niv. ${curNiv} / ${def.maxLevel || 99}</span>
-            </div>
-            <div class="bs-det-level-cost">📦 Capacité actuelle : <strong>${_bastionCapacity(b)} objets</strong></div>
-          </div>
-          ${curNiv < (def.maxLevel || 99) ? `<div class="bs-det-level">
-            <div class="bs-det-level-head">
-              <span class="bs-det-level-num">Niveau suivant</span>
-              <span class="bs-det-level-state">🔓 Niv. ${curNiv + 1}</span>
-            </div>
-            <div class="bs-det-level-cost">💰 ${nextCost} or · ⏱ ${def.baseSemaines || 1} période · +${def.capacitePerLevel || 10} capacité (→ ${nextCapacity} total)</div>
-          </div>` : `<div class="bs-det-level bs-det-level--locked">
-            <div class="bs-det-level-head">
-              <span class="bs-det-level-num">Niveau max atteint</span>
-              <span class="bs-det-level-state">🔒 Niv. ${def.maxLevel || 99}</span>
-            </div>
-          </div>`}
-        </div>
-      </div>
-    `);
-    return;
-  }
-
-  const niveauxHtml = def.niveaux.map((n, i) => {
-    const niv = i + 1;
-    const state = curNiv >= niv ? 'active' : (buildingTarget === niv ? 'building' : 'locked');
-    const prodParts = [];
-    if (n.prod.or > 0) prodParts.push(`<span class="bs-det-prod-or">+${n.prod.or} or</span>`);
-    for (const item of (n.prod.items || [])) {
-      prodParts.push(`<span class="bs-det-prod-item">${item.emoji} ${item.nom}${item.q > 1 ? ` ×${item.q}` : ''}</span>`);
-    }
-    const stateLabel = state === 'active' ? '✓ Active'
-                     : state === 'building' ? '🏗 En construction'
-                     : (curNiv >= niv - 1 ? '🔓 Prochaine étape' : '🔒 Verrouillée');
-    return `
-      <div class="bs-det-level bs-det-level--${state}">
-        <div class="bs-det-level-head">
-          <span class="bs-det-level-num">Niv. ${NIVEAU_LABEL[niv]}</span>
-          <span class="bs-det-level-state">${stateLabel}</span>
-        </div>
-        <div class="bs-det-level-cost">
-          💰 ${n.cout} or · ⏱ ${n.semaines} période
-        </div>
-        ${prodParts.length ? `<div class="bs-det-level-prod"><span class="bs-det-prod-lbl">Production/période :</span> ${prodParts.join(' · ')}</div>` : ''}
-        ${n.bonus ? `<div class="bs-det-level-bonus"><span class="bs-det-bonus-lbl">🎁 Bonus :</span> ${_esc(n.bonus)}</div>` : ''}
-      </div>`;
-  }).join('');
-
-  openModal(`${def.emoji} ${def.nom} — détails`, `
-    <div class="bs-det">
-      <p class="bs-det-desc">${_esc(def.desc)}</p>
-      <div class="bs-det-levels">${niveauxHtml}</div>
-    </div>
-  `);
-}
-
 // ══════════════════════════════════════════════════════════════════════════════
 // EXPORT JSON — backup du bastion
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2365,60 +2254,6 @@ function _investmentDocId(uid, charId, roomSlug) {
     .join('__');
 }
 
-function _bastionOpenInvest(slug) {
-  const b = STORE.bastion || _defaultBastion();
-  const def = _getRoomDef(slug, b);
-  if (!def || _roomBuilding(b, slug)) return;
-  const target = _roomNiveau(b, slug) + 1;
-  const nextDef = _getNiveauData(def, target);
-  if (!nextDef) return;
-
-  const remaining = Math.max(0, (Number(nextDef.cout) || 0) - _roomInvestmentAvailable(b, slug));
-  if (!remaining) {
-    showNotif('Ce niveau est déjà entièrement financé.', 'success');
-    return;
-  }
-
-  const chars = _eligibleChars();
-  if (!chars.length) {
-    showNotif('Aucun personnage disponible pour investir.', 'error');
-    return;
-  }
-  const defaultChar = getDefaultCharForUser(chars, STATE.user?.uid) || chars[0];
-  const contributors = _roomInvestmentContributors(slug);
-  const contributorsHtml = contributors.length
-    ? `<div class="bs-invest-contributors">
-        <span>Contributions cumulées</span>
-        ${contributors.map(entry => `<div><b>${_esc(entry.charName)}</b><strong>${entry.amount} or</strong></div>`).join('')}
-      </div>`
-    : '';
-
-  openModal(`🤝 Investir dans ${def.nom}`, `
-    <div class="bs-invest-modal" data-room="${_esc(slug)}">
-      <div class="bs-invest-target" style="--c:${def.color}">
-        <span>${_esc(def.emoji)}</span>
-        <div><small>Prochain niveau</small><strong>${_esc(def.nom)} · Niv. ${def.unlimited ? target : (NIVEAU_LABEL[target] || target)}</strong></div>
-        <b>${remaining} or à réunir</b>
-      </div>
-      <label class="form-group">Personnage
-        <select class="input-field" id="bas-invest-char" data-change="_bastionRefreshInvestment" data-slug="${_esc(slug)}">
-          ${chars.map(char => `<option value="${char.id}"${char.id === defaultChar.id ? ' selected' : ''}>${_esc(char.nom || '?')}</option>`).join('')}
-        </select>
-      </label>
-      <label class="form-group">Montant
-        <div class="bs-invest-amount">
-          <input type="number" class="input-field" id="bas-invest-amount" min="1" value="${Math.min(50, remaining)}">
-          <button type="button" class="btn btn-outline btn-sm" data-action="_bastionFillInvestment" data-slug="${_esc(slug)}">Maximum</button>
-        </div>
-        <small id="bas-invest-info"></small>
-      </label>
-      <p class="bs-invest-note">L'or est retiré du personnage et réservé à cette salle. Il ne sera dépensé que lorsque le MJ lancera le chantier.</p>
-      ${contributorsHtml}
-      <button type="button" class="btn btn-gold" data-action="_bastionDoInvest" data-slug="${_esc(slug)}">🤝 Confirmer l'investissement</button>
-    </div>
-  `, { subtitle: `${_roomInvestmentAvailable(b, slug)} / ${nextDef.cout} or déjà réunis`, accent: def.color || '#e8b84b' });
-  _bastionRefreshInvestment(slug);
-}
 
 function _bastionRefreshInvestment(slug) {
   const charId = document.getElementById('bas-invest-char')?.value;
@@ -2545,8 +2380,6 @@ function _renderHeader(b) {
   const isMj = STATE.isAdmin;
   const chars = _eligibleChars();
   const hasChar = chars.length > 0;
-  const scopeChar = _bastionScopeChar();
-  const maBourse = scopeChar ? calcOr(scopeChar) : 0;
   const bastionOr = b.or || 0;
 
   // Compteurs d'onglets.
@@ -2596,13 +2429,6 @@ function _renderHeader(b) {
           <div class="ag-scope bs-scope">
             <div class="ag-sc-btn"><small>Période</small><span>${b.semaine || 1}</span></div>
             <div class="ag-sc-btn"><small>Trésor</small><span>${bastionOr} or</span></div>
-            ${hasChar ? `
-            <label class="ag-sc-btn is-on"><small>Je joue</small>
-              <select data-change="_bastionWallSetChar" aria-label="Personnage joué">
-                ${chars.map(c => `<option value="${c.id}"${scopeChar && c.id === scopeChar.id ? ' selected' : ''}>${_esc(c.nom || '?')}${c.uid === STATE.user?.uid ? ' (vous)' : ''}</option>`).join('')}
-              </select>
-            </label>
-            <div class="ag-sc-btn"><small>Ma bourse</small><span>${maBourse} or</span></div>` : ''}
           </div>
           ${hasChar ? `<div class="bs-scope-tx">
             <button class="btn btn-outline btn-sm" data-action="_bastionOpenTransfer" data-dir="deposit">＋ Verser</button>
@@ -2790,11 +2616,8 @@ function _renderRoomDetail(def, b) {
           ${chars.map(c => `<option value="${c.id}"${scope && c.id === scope.id ? ' selected' : ''}>${_esc(c.nom || '?')}</option>`).join('')}
         </select>
         <div class="bs-fiche-quick">
-          <input type="number" class="input-field" id="bas-invest-amount" min="1" value="${Math.min(50, remaining)}" aria-label="Montant à cotiser">
-          <button type="button" data-action="_bastionQuickInvest" data-slug="${_esc(def.slug)}" data-amount="10">+10</button>
-          <button type="button" data-action="_bastionQuickInvest" data-slug="${_esc(def.slug)}" data-amount="50">+50</button>
-          <button type="button" data-action="_bastionQuickInvest" data-slug="${_esc(def.slug)}" data-amount="100">+100</button>
-          <button type="button" class="bs-fiche-fill" data-action="_bastionQuickInvest" data-slug="${_esc(def.slug)}" data-amount="fill">Compléter</button>
+          <input type="number" class="input-field" id="bas-invest-amount" min="1" placeholder="Montant en or…" aria-label="Montant à cotiser">
+          <button type="button" class="bs-fiche-fill" data-action="_bastionFillInvestment" data-slug="${_esc(def.slug)}">Compléter</button>
         </div>
         <small id="bas-invest-info" class="bs-fiche-note"></small>
         <button type="button" class="btn btn-gold btn-sm bs-fiche-go" data-action="_bastionDoInvest" data-slug="${_esc(def.slug)}">🤝 Cotiser le montant</button>
@@ -2870,15 +2693,6 @@ function _renderRoomDetail(def, b) {
 
 function _bastionSelectRoom(slug) { STORE.roomSel = slug; _renderPage(); }
 function _bastionSetRoomFilter(f) { STORE.roomFilter = f; _renderPage(); }
-
-// Cotise un montant rapide puis lance l'investissement (réutilise le flux réel).
-function _bastionQuickInvest(slug, amount) {
-  const input = document.getElementById('bas-invest-amount');
-  if (!input) return;
-  if (amount === 'fill') _bastionFillInvestment(slug);
-  else input.value = String(Math.max(1, Number(amount) || 0));
-  _bastionDoInvest(slug);
-}
 
 function _renderRooms(b) {
   const isMj = STATE.isAdmin;
@@ -3201,43 +3015,6 @@ async function _bastionDeleteQuest(id) {
   await _save(b);
   closeModal();
   showNotif('Quête supprimée.', 'success');
-}
-
-function _renderBastionQuests(b) {
-  const quests = (b.bastionQuests || []);
-  const isMj = STATE.isAdmin;
-  // Filtre : joueurs voient ouvertes + en_cours + terminée récente ; MJ voit tout
-  const visible = isMj
-    ? quests
-    : quests.filter(q => ['ouverte', 'en_cours', 'terminee'].includes(q.statut || 'ouverte'));
-
-  if (!visible.length && !isMj) return '';
-
-  // Tri : ouvertes en premier, puis en_cours, puis terminées, puis échouées
-  const order = { ouverte: 0, en_cours: 1, terminee: 2, echouee: 3 };
-  const sorted = [...visible].sort((a, b) => (order[a.statut] ?? 0) - (order[b.statut] ?? 0));
-
-  return `
-    <section class="bs-section">
-      <div class="bs-section-hd">
-        <h2 class="bs-section-title">📋 Quêtes du Bastion <span class="bs-section-count">${visible.length}</span></h2>
-        ${isMj ? `<button class="btn btn-gold btn-sm" data-action="_bastionOpenQuestEditor">＋ Nouvelle</button>` : ''}
-      </div>
-      ${visible.length ? `<div class="bs-quests-grid">
-        ${sorted.map(q => {
-          const st = BQ_STATUTS[q.statut || 'ouverte'];
-          return `<div class="bs-quest bs-quest--${q.statut || 'ouverte'}" style="--c:${st.color}">
-            <div class="bs-quest-hd">
-              <div class="bs-quest-title">${_esc(q.titre || '?')}</div>
-              <div class="bs-quest-statut">${st.emoji} ${st.lbl}</div>
-            </div>
-            ${q.description ? `<div class="bs-quest-desc">${_esc(q.description)}</div>` : ''}
-            ${q.recompense ? `<div class="bs-quest-recompense">🎁 ${_esc(q.recompense)}</div>` : ''}
-            ${isMj ? `<button class="bs-quest-edit" data-action="_bastionOpenQuestEditor" data-id="${q.id}">✏️ Modifier</button>` : ''}
-          </div>`;
-        }).join('')}
-      </div>` : `<div class="bs-coffre-empty">Aucune quête pour l'instant. ${isMj ? 'Crée la première !' : 'Le MJ n\'a rien posté.'}</div>`}
-    </section>`;
 }
 
 // Types d'entrées d'historique purement administratives — masqués du rendu
@@ -3577,6 +3354,21 @@ function _wallSideItem(p) {
   </button>`;
 }
 
+// Fiche de lecture d'une quête du Bastion (accessible à tous ; MJ peut éditer).
+function _bastionShowQuest(id) {
+  const q = (STORE.bastion?.bastionQuests || []).find(x => x.id === id);
+  if (!q) return;
+  const st = BQ_STATUTS[q.statut || 'ouverte'] || BQ_STATUTS.ouverte;
+  openModal(`${st.emoji} ${_esc(q.titre || 'Quête du Bastion')}`, `
+    <div class="bs-quest-view">
+      <div class="bs-quest-view-statut" style="--c:${st.color}">${st.emoji} ${st.lbl}</div>
+      <p class="bs-quest-view-desc"${q.description ? '' : ' style="color:var(--text-dim)"'}>${q.description ? _esc(q.description) : 'Aucune description fournie.'}</p>
+      ${q.recompense ? `<div class="bs-quest-view-reward">🎁 ${_esc(q.recompense)}</div>` : ''}
+      ${STATE.isAdmin ? `<button class="btn btn-outline" style="width:100%;margin-top:.7rem" data-action="_bastionOpenQuestEditor" data-id="${_esc(q.id)}">✏️ Modifier la quête</button>` : ''}
+    </div>
+  `, { accent: st.color });
+}
+
 // Colonne droite du Mur : quêtes ouvertes (quêtes MJ lecture seule + posts type
 // Quête) et offres/demandes. Clic = défilement + surbrillance du post concerné.
 function _renderWallSidebar(b) {
@@ -3589,7 +3381,7 @@ function _renderWallSidebar(b) {
   const questItems = [
     ...mjQuests.map(q => {
       const st = BQ_STATUTS[q.statut || 'ouverte'] || BQ_STATUTS.ouverte;
-      return `<button type="button" class="bs-side-item bs-side-item--mj"${isMj ? ` data-action="_bastionOpenQuestEditor" data-id="${_esc(q.id)}"` : ' disabled'} style="--c:${st.color}">
+      return `<button type="button" class="bs-side-item bs-side-item--mj" data-action="_bastionShowQuest" data-id="${_esc(q.id)}" style="--c:${st.color}">
         <span class="bs-side-ic" title="Quête du MJ">${st.emoji}</span>
         <span class="bs-side-txt"><b>${_esc(q.titre || '?')}</b><small>${q.recompense ? `🎁 ${_esc(q.recompense)}` : st.lbl}</small></span>
         <span class="bs-side-tag">MJ</span>
@@ -4130,7 +3922,6 @@ registerActions({
   _bastionResetAll:         () => _bastionResetAll(),
   _bastionFillDepositMax:   () => _bastionFillDepositMax(),
   _bastionDoDeposit:        () => _bastionDoDeposit(),
-  _bastionSetMax:      (btn) => { const el = document.getElementById(btn.dataset.target); if (el) el.value = btn.dataset.val; },
   _bastionDoWithdraw:       (btn) => _bastionDoWithdraw(btn.dataset.id),
   _bastionEditRoom:         (btn) => _bastionEditRoom(btn.dataset.slug),
   _bastionReturnToCatalog:  (btn) => _bastionReturnToCatalog(btn.dataset.slug),
@@ -4148,7 +3939,6 @@ registerActions({
   _bastionSelectHireCard:   (btn) => _bastionSelectHireCard(btn.dataset.id),
   _bastionDoHire:           () => _bastionDoHire(),
   _bastionDoTransfer:       (btn) => _bastionDoTransfer(btn.dataset.dir),
-  _bastionOpenInvest:       (btn) => _bastionOpenInvest(btn.dataset.slug),
   _bastionRefreshInvestment:(el) => _bastionRefreshInvestment(el.dataset.slug),
   _bastionFillInvestment:   (btn) => _bastionFillInvestment(btn.dataset.slug),
   _bastionDoInvest:         (btn) => _bastionDoInvest(btn.dataset.slug),
@@ -4163,19 +3953,17 @@ registerActions({
   _bastionOpenHire:         (btn) => _bastionOpenHire(btn.dataset.slug),
   _bastionBuild:            (btn) => _bastionBuild(btn.dataset.slug),
   _bastionCancelBuild:      (btn) => _bastionCancelBuild(btn.dataset.slug),
-  _bastionShowDetails:      (btn) => _bastionShowDetails(btn.dataset.slug),
   _bastionResetRooms:       () => _bastionResetRooms(),
   _bastionOpenDeposit:      () => _bastionOpenDeposit(),
   _bastionSetTab:           (btn) => _bastionSetTab(btn.dataset.tab),
   _bastionSelectRoom:       (btn) => _bastionSelectRoom(btn.dataset.slug),
   _bastionSetRoomFilter:    (btn) => _bastionSetRoomFilter(btn.dataset.filter),
-  _bastionQuickInvest:      (btn) => _bastionQuickInvest(btn.dataset.slug, btn.dataset.amount),
+  _bastionShowQuest:        (btn) => _bastionShowQuest(btn.dataset.id),
   _bastionSetCoffreFilter:  (btn) => _bastionSetCoffreFilter(btn.dataset.filter),
   _bastionCoffreOpen:       (btn) => _bastionCoffreOpen(btn.dataset.id),
   _bastionCoffreQty:        (btn) => _bastionCoffreQty(btn.dataset.delta, btn.dataset.max),
   _bastionCoffreTake:       (btn) => _bastionCoffreTake(btn.dataset.id),
   _bastionCoffreExpand:     () => _bastionCoffreExpand(),
-  _bastionOpenWithdrawItem: (btn) => _bastionOpenWithdrawItem(btn.dataset.id),
   _bastionSaveQuest:        (btn) => _bastionSaveQuest(btn.dataset.id || ''),
   _bastionSetQuestStatut:   (btn) => _bastionSetQuestStatut(btn),
   _bastionDeleteQuest:      (btn) => _bastionDeleteQuest(btn.dataset.id),
@@ -4184,7 +3972,6 @@ registerActions({
   _bastionDeleteHisto:      (btn) => _bastionDeleteHisto(Number(btn.dataset.idx)),
   _bastionSetAnnonceType:   (btn) => _bastionSetAnnonceType(btn),
   _bastionWallDraft:        (el) => _bastionWallDraft(el),
-  _bastionWallSetChar:      (el) => { _wallUi.charId = el.value || ''; _wallPersistDraft(); _renderPage(); },
   _bastionWallMention:      (btn) => _bastionWallMention(btn),
   _bastionWallTogglePicker: () => _bastionWallTogglePicker(),
   _bastionWallInsert:       (btn) => _bastionWallInsert(btn),
