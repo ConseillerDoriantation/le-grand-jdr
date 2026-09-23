@@ -41,6 +41,7 @@ import {
   bastionWallNotificationTargets,
   bastionWallReactionCounts,
   bastionWallSeenKey,
+  bastionWallUnreadCount,
   normalizeBastionWallPost,
   sortBastionWallPosts,
   toggleBastionWallReaction,
@@ -68,6 +69,7 @@ const STORE = {
   addingCustomRoom: false,
   investments: [],             // cagnotte ciblée par salle (1 doc / joueur / perso / salle)
   investmentInProgress: false,
+  tab:            null,          // onglet actif : 'salles' | 'mur' | 'coffre' (résolu via _bsGetTab)
 };
 
 
@@ -2495,49 +2497,129 @@ async function _bastionDoInvest(slug) {
 // ══════════════════════════════════════════════════════════════════════════════
 // RENDU
 // ══════════════════════════════════════════════════════════════════════════════
-function _renderHeader(b) {
-  const isMj = STATE.isAdmin;
-  return `
-    <header class="bs-page-top">
-      <div class="bs-page-top-in">
-        <div class="bs-page-top-row">
-          <span class="bs-page-mark" aria-hidden="true">${_esc(b.emoji || '🏰')}</span>
-          <div class="bs-page-brand">
-            <h1>${_esc(b.nom || 'Le Bastion')}</h1>
-            <small>Période ${b.semaine || 1}${b.lieu ? ` · ${_esc(b.lieu)}` : ''}</small>
-          </div>
-          <div class="bs-page-actions">
-            <button class="btn btn-outline btn-sm" data-action="_bastionOpenPersonnel">👥 Personnel${b.personnel?.length ? ` <span style="opacity:.7">(${b.personnel.length})</span>` : ''}</button>
-            ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionEditIdentite">✏️ Identité</button>` : ''}
-            ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionOpenCatalogEditor">🏛 Éditer salles</button>` : ''}
-            ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionOpenPreview">🔮 Prévisualiser</button>` : ''}
-            ${isMj ? `<button class="btn btn-outline btn-sm" data-action="_bastionExportJSON" title="Backup JSON du bastion" aria-label="Exporter le Bastion">💾</button>` : ''}
-            ${isMj && b._undoSnapshot ? `<button class="btn btn-outline btn-sm" data-action="_bastionUndoWeek" title="Annuler le dernier passage de période">↩ Annuler la période</button>` : ''}
-            ${isMj ? `<button class="btn btn-gold" data-action="_bastionAdvanceWeek">▶ Passer la période</button>` : ''}
-          </div>
-        </div>
-      </div>
-    </header>`;
+// ── Onglets (coquille de page, construite comme l'Agenda) ────────────────────
+const _BS_TABS = [
+  ['salles', '🧱', 'Salles'],
+  ['mur',    '📣', 'Mur'],
+  ['coffre', '📦', 'Coffre'],
+];
+const _BS_TAB_KEY = 'bs-tab';
+
+function _bsGetTab() {
+  if (STORE.tab && _BS_TABS.some(([k]) => k === STORE.tab)) return STORE.tab;
+  try {
+    const t = localStorage.getItem(_BS_TAB_KEY);
+    if (_BS_TABS.some(([k]) => k === t)) { STORE.tab = t; return t; }
+  } catch { /* stockage privé indisponible */ }
+  return 'salles';
+}
+function _bastionSetTab(tab) {
+  if (!_BS_TABS.some(([k]) => k === tab)) return;
+  STORE.tab = tab;
+  try { localStorage.setItem(_BS_TAB_KEY, tab); } catch { /* stockage privé indisponible */ }
+  _renderPage();
 }
 
-function _renderGauges(b) {
-  const hasEligibleChar = _eligibleChars().length > 0;
-  const bastionHasOr = (b.or || 0) > 0;
+// Perso courant du scope « Je joue » (source unique = _wallUi.charId, défaut = perso ★).
+function _bastionScopeChar() {
+  const chars = _eligibleChars();
+  if (!chars.length) return null;
+  return chars.find(c => c.id === _wallUi.charId)
+    || getDefaultCharForUser(chars, STATE.user?.uid)
+    || chars[0];
+}
+
+// Nombre de publications du mur non lues (badge rouge de l'onglet Mur).
+function _bastionWallUnread() {
+  let seen = Number(_wallRead?.seenAt) || 0;
+  try { seen = Math.max(seen, Number(localStorage.getItem(bastionWallSeenKey(STATE.adventure?.id, STATE.user?.uid))) || 0); } catch { /* privé */ }
+  return bastionWallUnreadCount(_wallAllPosts(), seen, STATE.user?.uid);
+}
+
+function _renderHeader(b) {
+  const isMj = STATE.isAdmin;
+  const chars = _eligibleChars();
+  const hasChar = chars.length > 0;
+  const scopeChar = _bastionScopeChar();
+  const maBourse = scopeChar ? calcOr(scopeChar) : 0;
+  const bastionOr = b.or || 0;
+
+  // Compteurs d'onglets.
+  const catalog = _getRoomCatalog(b);
+  const built = catalog.filter(def => _roomNiveau(b, def.slug) > 0).length;
+  const activePosts = _wallAllPosts().filter(p => p.status !== 'cancelled').length;
+  const unread = _bastionWallUnread();
+  const used = _bastionInvCount(b);
+  const capacity = _bastionCapacity(b);
+  const tabCounts = {
+    salles: `${built}/${catalog.length}`,
+    mur: `${activePosts}`,
+    coffre: `${used}/${capacity}`,
+  };
+  const activeTab = _bsGetTab();
+
+  // Menu « Période ▾ » — regroupe TOUTES les actions MJ ; joueur = Personnel + Historique.
+  const histoCount = (b.historique || []).filter(entry => !_ADMIN_HISTO_TYPES.has(entry.type)).length;
+  const menuItems = isMj
+    ? [
+        `<button data-action="_bastionAdvanceWeek">▶ Passer la période</button>`,
+        b._undoSnapshot ? `<button data-action="_bastionUndoWeek">↩ Annuler la période</button>` : '',
+        `<hr class="bs-menu-sep">`,
+        `<button data-action="_bastionEditIdentite">✏️ Identité du Bastion</button>`,
+        `<button data-action="_bastionOpenCatalogEditor">🏛 Éditer les salles</button>`,
+        `<button data-action="_bastionOpenPersonnel">👥 Personnel${b.personnel?.length ? ` (${b.personnel.length})` : ''}</button>`,
+        `<button data-action="_bastionOpenQuestEditor">📋 Quêtes du Bastion</button>`,
+        `<button data-action="_bastionOpenPreview">🔮 Prévisualiser la période</button>`,
+        `<button data-action="_bastionOpenHistory">📜 Historique${histoCount ? ` (${histoCount})` : ''}</button>`,
+        `<button data-action="_bastionExportJSON">💾 Exporter (JSON)</button>`,
+      ]
+    : [
+        `<button data-action="_bastionOpenPersonnel">👥 Personnel${b.personnel?.length ? ` (${b.personnel.length})` : ''}</button>`,
+        `<button data-action="_bastionOpenHistory">📜 Historique${histoCount ? ` (${histoCount})` : ''}</button>`,
+      ];
 
   return `
-    <div class="bs-gauges">
-      <div class="bs-gauge bs-gauge--or">
-        <div class="bs-gauge-icon">💰</div>
-        <div class="bs-gauge-info">
-          <div class="bs-gauge-lbl">Trésor commun</div>
-          <div class="bs-gauge-val">${b.or || 0} <span class="bs-gauge-unit">or</span></div>
+    <header class="ag-top bs-top">
+      <div class="ag-top-in">
+        <div class="ag-top-row">
+          <div class="ag-brand">
+            <span aria-hidden="true" style="font-size:20px">${_esc(b.emoji || '🏰')}</span>
+            <h1>${_esc(b.nom || 'Le Bastion')}</h1>
+            <small>${b.lieu ? _esc(b.lieu) : 'Quartier général'}</small>
+          </div>
+          <div style="flex:1"></div>
+          <div class="ag-scope bs-scope">
+            <div class="ag-sc-btn"><small>Période</small><span>${b.semaine || 1}</span></div>
+            <div class="ag-sc-btn"><small>Trésor</small><span>${bastionOr} or</span></div>
+            ${hasChar ? `
+            <label class="ag-sc-btn is-on"><small>Je joue</small>
+              <select data-change="_bastionWallSetChar" aria-label="Personnage joué">
+                ${chars.map(c => `<option value="${c.id}"${scopeChar && c.id === scopeChar.id ? ' selected' : ''}>${_esc(c.nom || '?')}${c.uid === STATE.user?.uid ? ' (vous)' : ''}</option>`).join('')}
+              </select>
+            </label>
+            <div class="ag-sc-btn"><small>Ma bourse</small><span>${maBourse} or</span></div>` : ''}
+          </div>
+          ${hasChar ? `<div class="bs-scope-tx">
+            <button class="btn btn-outline btn-sm" data-action="_bastionOpenTransfer" data-dir="deposit">＋ Verser</button>
+            ${bastionOr > 0 ? `<button class="btn btn-outline btn-sm" data-action="_bastionOpenTransfer" data-dir="withdraw">− Retirer</button>` : ''}
+          </div>` : ''}
+          <details class="ag-menu bs-menu">
+            <summary class="ag-menu-btn" title="Actions du Bastion" aria-label="Actions du Bastion">⋯</summary>
+            <div class="ag-menu-pop">${menuItems.filter(Boolean).join('')}</div>
+          </details>
         </div>
-        <div class="bs-gauge-actions">
-          ${hasEligibleChar ? `<button class="bs-gauge-btn" data-action="_bastionOpenTransfer" data-dir="deposit">＋ Verser</button>` : ''}
-          ${hasEligibleChar && bastionHasOr ? `<button class="bs-gauge-btn bs-gauge-btn--alt" data-action="_bastionOpenTransfer" data-dir="withdraw">− Retirer</button>` : ''}
-        </div>
+        <nav class="ag-tabs bs-tabs" aria-label="Sections du Bastion">
+          ${_BS_TABS.map(([k, ic, lbl]) => {
+            const on = k === activeTab;
+            const badge = k === 'mur' && unread > 0 ? `<span class="bs-tab-badge">${unread}</span>` : '';
+            return `<button class="ag-tab${on ? ' is-on' : ''}" data-action="_bastionSetTab" data-tab="${k}" aria-pressed="${on}">
+              <span aria-hidden="true">${ic}</span> ${lbl}
+              <span class="ag-tab-cnt">${tabCounts[k]}</span>${badge}
+            </button>`;
+          }).join('')}
+        </nav>
       </div>
-    </div>`;
+    </header>`;
 }
 
 function _bastionProductionSummary(b) {
@@ -2555,78 +2637,6 @@ function _bastionProductionSummary(b) {
     }
   });
   return summary;
-}
-
-function _renderBastionOverview(b) {
-  const catalog = _getRoomCatalog(b);
-  const built = catalog.filter(def => _roomNiveau(b, def.slug) > 0);
-  const building = catalog.filter(def => _roomBuilding(b, def.slug));
-  const used = _bastionInvCount(b);
-  const capacity = _bastionCapacity(b);
-  const personnel = b.personnel || [];
-  const salaries = personnel.reduce((s, e) => s + (parseInt(e.salaire) || 0), 0);
-  const prod = _bastionProductionSummary(b);
-  const storagePct = capacity ? Math.round((used / capacity) * 100) : 0;
-  const cards = [
-    { icon: '💰', label: 'Trésor', value: `${b.or || 0}`, unit: 'or', tone: '#e8b84b' },
-    { icon: '📦', label: 'Coffre', value: `${used}/${capacity}`, unit: `${storagePct}%`, tone: storagePct >= 90 ? '#ff5a7e' : '#4f8cff' },
-    { icon: '🏛', label: 'Salles actives', value: `${built.length}`, unit: `${catalog.length} plans`, tone: '#7eb0ff' },
-    { icon: '🏗', label: 'Chantiers', value: `${building.length}`, unit: building.length ? 'en cours' : 'calme', tone: '#ff9544' },
-    { icon: '👥', label: 'Personnel', value: `${personnel.length}`, unit: `${salaries} or/période`, tone: '#22c38e' },
-    { icon: '🪙', label: 'Production', value: `+${prod.or}`, unit: `${prod.items.length} objet${prod.items.length > 1 ? 's' : ''}`, tone: '#b47fff' },
-  ];
-  // Cartes seules (sans wrapper) : placées comme tuiles directes de .bs-etat-stats.
-  return cards.map(c => `
-    <div class="bs-overview-card" style="--tone:${c.tone}">
-      <span class="bs-overview-icon">${_esc(c.icon)}</span>
-      <div>
-        <span>${_esc(c.label)}</span>
-        <strong>${_esc(c.value)}</strong>
-        <small>${_esc(c.unit)}</small>
-      </div>
-    </div>`).join('');
-}
-
-function _renderOperationsPanel(b) {
-  const catalog = _getRoomCatalog(b);
-  const prod = _bastionProductionSummary(b);
-  const building = catalog
-    .filter(def => _roomBuilding(b, def.slug))
-    .map(def => ({ def, state: b.salles?.[def.slug] || {} }));
-  const itemPreview = prod.items.slice(0, 4);
-
-  return `
-    <section class="bs-side-panel bs-side-panel--ops bs-etat-next">
-      <div class="bs-side-panel-hd">
-        <span>🧭</span>
-        <div>
-          <small>Pilotage</small>
-          <strong>Prochaine période</strong>
-        </div>
-      </div>
-      <div class="bs-ops-flow">
-        <div class="bs-ops-stat"><span>Or produit</span><strong>+${prod.or}</strong></div>
-        <div class="bs-ops-stat"><span>Objets produits</span><strong>${prod.items.length}</strong></div>
-        <div class="bs-ops-stat"><span>Chantiers</span><strong>${building.length}</strong></div>
-        <div class="bs-ops-cell">
-          ${itemPreview.length ? `
-            <div class="bs-mini-list">
-              ${itemPreview.map(item => `<div><b>${_esc(item.emoji || '📦')}</b><span>${_esc(item.nom)}${item.q > 1 ? ` ×${item.q}` : ''}</span><small>${_esc(item.room)}</small></div>`).join('')}
-              ${prod.items.length > itemPreview.length ? `<em>+${prod.items.length - itemPreview.length} autre${prod.items.length - itemPreview.length > 1 ? 's' : ''}</em>` : ''}
-            </div>` : `<p class="bs-side-empty">Aucune production d'objet active.</p>`}
-        </div>
-        <div class="bs-ops-cell">
-          ${building.length ? `
-            <div class="bs-build-list">
-              ${building.map(({ def, state }) => `
-                <div class="bs-build-line" style="--c:${def.color}">
-                  <span>${_esc(def.emoji)}</span>
-                  <div><strong>${_esc(def.nom)}</strong><small>Niv. ${state.targetNiveau || '?'} · ${state.weeksLeftToBuild || 0} période(s)</small></div>
-                </div>`).join('')}
-            </div>` : `<p class="bs-side-empty">Aucun chantier en cours.</p>`}
-        </div>
-      </div>
-    </section>`;
 }
 
 function _renderRoomCard(def, b) {
@@ -3747,87 +3757,26 @@ async function _loadWallEmotes() {
   _wallEmotes = Array.isArray(data?.emotes) ? data.emotes.filter(emote => emote?.name && emote?.url) : [];
 }
 
-// ── Navigation rapide (ancres collées) + scroll-spy ──────────────────────────
-const _BS_NAV = [
-  ['bs-z-etat',      '🏛', 'État'],
-  ['bs-z-salles',    '🧱', 'Salles'],
-  ['bs-z-coffre',    '📦', 'Coffre'],
-  ['bs-z-quetes',    '📋', 'Quêtes'],
-  ['bs-z-annonces',  '📌', 'Annonces'],
-];
-
-function _renderQuickNav() {
-  const historyCount = (STORE.bastion?.historique || []).filter(entry => !_ADMIN_HISTO_TYPES.has(entry.type)).length;
-  return `<nav class="bs-quicknav" aria-label="Sections du Bastion">
-    ${_BS_NAV.map(([id, ic, lbl]) =>
-      `<a href="#${id}" class="bs-qn" data-target="${id}">${ic} <span>${lbl}</span></a>`).join('')}
-    ${historyCount ? `<button type="button" class="bs-qn bs-qn-history" data-action="_bastionOpenHistory">📜 <span>Historique</span><small>${historyCount}</small></button>` : ''}
-  </nav>`;
-}
-
-// Enveloppe une section rendue dans une ancre nommée (rien si la section est vide).
-function _wrapZone(id, html) {
-  return html ? `<div id="${id}" class="bs-zone">${html}</div>` : '';
-}
-
-// Met en surbrillance le lien de la section actuellement en haut du viewport.
-function _bsNavSpy() {
-  const links = document.querySelectorAll('.bs-qn[data-target]');
-  if (!links.length) return;
-  let cur = null;
-  links.forEach(a => {
-    const el = document.getElementById(a.dataset.target);
-    if (el && el.getBoundingClientRect().top - 90 <= 1) cur = a.dataset.target;
-  });
-  links.forEach(a => a.classList.toggle('on', a.dataset.target === cur));
-}
-
-let _bsNavWired = false;
-function _initQuickNav() {
-  // Masque les liens dont la section est absente (quêtes/chronique vides…).
-  document.querySelectorAll('.bs-qn[data-target]').forEach(a => {
-    a.style.display = document.getElementById(a.dataset.target) ? '' : 'none';
-  });
-  if (!_bsNavWired) {
-    _bsNavWired = true;               // 1 seul listener pour toute la session
-    const sc = document.getElementById('main-content');
-    (sc || window).addEventListener('scroll', _bsNavSpy, { passive: true });
-    if (sc) window.addEventListener('scroll', _bsNavSpy, { passive: true });
-  }
-  _bsNavSpy();
-}
-
-// Bloc « État » : KPI + trésor commun + prochaine période réunis.
-function _renderEtatZone(b) {
-  return `
-    <section class="bs-section bs-etat">
-      <div class="bs-section-hd"><h2 class="bs-section-title">🏛 État du Bastion</h2></div>
-      <div class="bs-etat-stats">
-        ${_renderBastionOverview(b)}
-        ${_renderGauges(b)}
-      </div>
-      ${_renderOperationsPanel(b)}
-    </section>`;
+// Contenu de l'onglet actif (une seule section à la fois → fin du long scroll).
+function _bsTabBody(b, tab) {
+  if (tab === 'coffre') return _renderCoffre(b);
+  if (tab === 'mur')    return _renderAnnonces() + _renderBastionQuests(b);
+  return _renderRooms(b);   // 'salles' par défaut
 }
 
 function _renderPage() {
   const content = document.getElementById('main-content');
   if (!content) return;
   const b = STORE.bastion || _defaultBastion();
+  const tab = _bsGetTab();
   content.innerHTML = `
-    <div class="bs-root bs-root-v2">
+    <div class="bs-root-v2 bs-page">
       ${_renderHeader(b)}
-      <div class="bs-page-body">
-        ${_renderQuickNav()}
-        ${_wrapZone('bs-z-etat',      _renderEtatZone(b))}
-        ${_wrapZone('bs-z-salles',    _renderRooms(b))}
-        ${_wrapZone('bs-z-coffre',    _renderCoffre(b))}
-        ${_wrapZone('bs-z-quetes',    _renderBastionQuests(b))}
-        ${_wrapZone('bs-z-annonces',  _renderAnnonces(b))}
+      <div class="bs-wrap bs-tab-body" data-tab="${tab}">
+        ${_bsTabBody(b, tab)}
       </div>
     </div>`;
-  _initQuickNav();
-  requestAnimationFrame(_wallFocusTarget);
+  if (tab === 'mur') requestAnimationFrame(_wallFocusTarget);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3867,6 +3816,9 @@ async function renderBastionPage() {
     STORE.investmentInProgress = false;
     _wallRestoreDraft();
   }
+
+  // Lien profond vers une publication → ouvre directement l'onglet Mur.
+  if (_wallTargetFromRoute()) STORE.tab = 'mur';
 
   STORE.shopItemsCache = null; STORE.npcsCache = null; // reset au cas où on aurait changé d'aventure
 
@@ -3970,6 +3922,7 @@ registerActions({
   _bastionShowDetails:      (btn) => _bastionShowDetails(btn.dataset.slug),
   _bastionResetRooms:       () => _bastionResetRooms(),
   _bastionOpenDeposit:      () => _bastionOpenDeposit(),
+  _bastionSetTab:           (btn) => _bastionSetTab(btn.dataset.tab),
   _bastionSetCoffreFilter:  (btn) => _bastionSetCoffreFilter(btn.dataset.filter),
   _bastionOpenWithdrawItem: (btn) => _bastionOpenWithdrawItem(btn.dataset.id),
   _bastionSaveQuest:        (btn) => _bastionSaveQuest(btn.dataset.id || ''),

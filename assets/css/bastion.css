@@ -11,6 +11,25 @@
   gap: 22px;
 }
 
+/* ─── Coquille V3 : bandeau (construit comme l'Agenda, classes .ag-*) +
+       onglets Salles/Mur/Coffre + corps d'onglet ───────────────────────── */
+.bs-page { display: flex; flex-direction: column; min-height: 0; }
+.bs-top { z-index: 45; }
+.bs-scope { flex-wrap: wrap; }
+.bs-scope-tx { display: flex; align-items: center; gap: 6px; }
+.bs-menu-pop .bs-menu-sep { border: 0; border-top: 1px solid var(--border); margin: 4px 2px; }
+.bs-tab-badge {
+  min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+  background: var(--crimson, #ff5a7e); color: #fff; font-size: 10px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  line-height: 1; margin-left: 3px; font-variant-numeric: tabular-nums;
+}
+.bs-wrap {
+  max-width: var(--content-max, 1280px); width: 100%; margin: 0 auto;
+  padding: 16px clamp(14px, 2vw, 28px) 80px;
+}
+.bs-tab-body > .bs-section:first-child { margin-top: 0; }
+
 /* ─── HERO ─────────────────────────────────────────────────────────── */
 .bs-hero {
   display: flex;
