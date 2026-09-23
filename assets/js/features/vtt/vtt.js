@@ -134,7 +134,7 @@ import { _getSortTypes, spellCostRes, _calcSortMana } from '../characters/spells
 import { spellSetCostDelta } from '../../shared/spell-system.js';
 import {
   _musicStateRef, _syncMusicPlayback, _resetMusicState, _closeMusicPanel,
-  _vttToggleMusicCat, _vttToggleAllMusicCats, _vttToggleMusic, _vttPlaySound,
+  _vttToggleMusic, _vttPlaySound,
   _vttPlayPlaylist, _vttMusicNext, _vttMusicPrev, _vttToggleLoop, _vttToggleMusicPause, _vttStopMusic,
   _vttSoundCtxMenu, _vttDeleteSound, _vttCreatePlaylist, _vttCreatePlaylistConfirm,
   _vttDeletePlaylist, _vttAddSoundToPlaylist, _vttRemoveSoundFromPlaylist, _vttCleanMissingSounds,
@@ -14569,7 +14569,6 @@ export const VTT_ACTIONS = {
   _vttTimerToggle,
   _vttWeatherToggle,
   _vttSetWeather,
-  _vttToggleAllMusicCats,
   _vttToggleCombat,
   _vttToggleDice,
   _vttToggleDrawFill,
@@ -14582,7 +14581,6 @@ export const VTT_ACTIONS = {
   _vttToggleMiniSheet,
   _vttToggleMsSort,
   _vttToggleMusic,
-  _vttToggleMusicCat,
   _vttToggleMusicPause,
   _vttToggleNpc,
   _vttToggleOff,

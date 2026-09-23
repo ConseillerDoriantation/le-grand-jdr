@@ -202,36 +202,6 @@ function _eyeSvg(off) {
   return `<svg class="vtt-eye" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 }
 
-// État replié/déplié des catégories — persisté localement (par utilisateur)
-const _CAT_COLLAPSE_KEY = 'vtt:musicCollapsed';
-function _loadCollapseMap() {
-  try { return JSON.parse(localStorage.getItem(_CAT_COLLAPSE_KEY) || '{}') || {}; }
-  catch { return {}; }
-}
-function _isCatCollapsed(catId) { return !!_loadCollapseMap()[catId]; }
-function _setCatCollapsed(catId, collapsed) {
-  const map = _loadCollapseMap();
-  if (collapsed) map[catId] = true; else delete map[catId];
-  try { localStorage.setItem(_CAT_COLLAPSE_KEY, JSON.stringify(map)); } catch {}
-}
-function _vttToggleMusicCat(catId) {
-  const cat = document.querySelector(`.vtt-music-cat[data-cat-id="${CSS.escape(catId)}"]`);
-  if (!cat) return;
-  const collapsed = cat.dataset.collapsed === '1';
-  cat.dataset.collapsed = collapsed ? '0' : '1';
-  cat.querySelector('.vtt-music-cat-hd')?.setAttribute('aria-expanded', collapsed ? 'true' : 'false');
-  _setCatCollapsed(catId, !collapsed);
-}
-function _vttToggleAllMusicCats() {
-  const cats = document.querySelectorAll('.vtt-music-body .vtt-music-cat');
-  if (!cats.length) return;
-  const collapseAll = [...cats].some(c => c.dataset.collapsed !== '1');
-  cats.forEach(c => {
-    c.dataset.collapsed = collapseAll ? '1' : '0';
-    c.querySelector('.vtt-music-cat-hd')?.setAttribute('aria-expanded', collapseAll ? 'false' : 'true');
-    _setCatCollapsed(c.dataset.catId, collapseAll);
-  });
-}
 
 function _vttPreview(soundId, btn) {
   const sound = _sounds.find(s=>s.id===soundId); if (!sound) return;
@@ -410,41 +380,6 @@ function _fmtTime(s) {
   return `${m}:${String(sec).padStart(2,'0')}`;
 }
 
-// Filtre la vue unifiée par texte : masque les catégories sans match,
-// auto-déplie les catégories qui en ont un. Préserve l'état persisté quand
-// le champ est vidé. NB: on utilise style.display car les items portent
-// `display: flex` (classe) qui bat la règle UA `[hidden]{display:none}`.
-function _applyMusicFilter(query) {
-  const q = _norm(query || '');
-  const root = document.querySelector('.vtt-music-body'); if (!root) return;
-  const text = el => _norm(el?.textContent || '');
-  const show = (el, ok) => { if (el) el.style.display = ok ? '' : 'none'; };
-
-  root.querySelectorAll('.vtt-music-cat').forEach(cat => {
-    const catId = cat.dataset.catId;
-    const catNameEl = cat.querySelector('.vtt-music-cat-name');
-    const catMatch = !q || text(catNameEl).includes(q);
-    const sons = cat.querySelectorAll('[data-sound-id]');
-    let anySonMatch = false;
-    sons.forEach(s => {
-      const nameEl = s.querySelector('.vtt-music-pool-name, .vtt-music-pl-sname');
-      const ok = !q || catMatch || text(nameEl).includes(q);
-      show(s, ok);
-      if (ok && q) anySonMatch = true;
-    });
-    if (q) {
-      const visible = catMatch || anySonMatch;
-      show(cat, visible);
-      // Force déplie pendant une recherche (sans toucher au localStorage)
-      if (visible) cat.dataset.collapsed = '0';
-    } else {
-      show(cat, true);
-      cat.dataset.collapsed = _isCatCollapsed(catId) ? '1' : '0';
-    }
-  });
-}
-
-// Rendu unifié : pool "Non classés" + playlists, tous pliables.
 // Durée d'une piste : champ Firestore `duration`, sinon cache client (rempli en
 // arrière-plan), sinon « … » (chargement) ou « — » (échec/inconnu).
 const _durCache = new Map();   // soundId → secondes
@@ -1372,19 +1307,15 @@ async function _vttRemoveSoundFromPlaylist(plId, soundId) {
 }
 
 export {
-  _applyMusicFilter,
   _closeMusicPanel,
   _fmtTime,
   _getUserVolume,
   _initMusicSortable,
-  _isCatCollapsed,
   _killAudio,
   _resetMusicState,
-  _loadCollapseMap,
   _loadMusicSoundById,
   _musicStateRef,
   _renderMusicPanel,
-  _setCatCollapsed,
   _setMusicState,
   _setUserVolume,
   _sortSoundsByCreatedAt,
@@ -1420,8 +1351,6 @@ export {
   _vttSeek,
   _vttSoundCtxMenu,
   _vttStopMusic,
-  _vttToggleAllMusicCats,
   _vttToggleMusic,
-  _vttToggleMusicCat,
   _vttToggleMusicPause,
 };
