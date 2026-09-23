@@ -22430,6 +22430,9 @@ body .modal:has(.inv-history-modal-shell) {
 .cs-forge2 .ln-slots .cs-forge-slot{ flex:1; min-width:0; max-width:320px; }
 .cs-forge2 .ln-slots select,.cs-forge2 .ln-slots .input-field{ width:100%; height:30px; padding:0 8px; border-radius:var(--r-sm); background:var(--surface-1); border:1px solid var(--border-md); outline:0; font-size:12px; color:var(--text); }
 .cs-forge2 .ln-slots select:focus,.cs-forge2 .ln-slots .input-field:focus{ border-color:var(--border-bright); }
+/* Effet de l'état choisi (nom en valeur, description ici) — pleine largeur, lisible,
+   retour à la ligne autorisé car le texte peut être long. */
+.cs-forge2 .ln-note{ grid-column:1/-1; padding:2px 0 4px 31px; font-size:11px; line-height:1.4; color:var(--text-muted); white-space:normal; }
 /* Config d'invocation (tiroir « régler ») — compacte : en-tête masqué, boutons
    courts, grille de créatures dense (bornée en hauteur). */
 .cs-forge2 .tun .cs-forge-slot{ flex-basis:100%; }
