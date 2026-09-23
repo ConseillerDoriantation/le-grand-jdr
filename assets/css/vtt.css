@@ -8678,15 +8678,84 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-gate-note { font-size: .68rem; color: var(--text-dim); margin: 16px 0 0; }
 
 /* Bouton MJ "Session en cours" (barre du haut) */
+.vtt-session-btn {
+  min-width: 154px !important;
+  justify-content: flex-start;
+  border-color: rgba(52,211,153,.3);
+  background: linear-gradient(135deg, rgba(16,185,129,.12), rgba(255,255,255,.035));
+}
+.vtt-session-btn:hover {
+  border-color: rgba(52,211,153,.58);
+  box-shadow: 0 0 0 1px rgba(52,211,153,.08), 0 5px 16px rgba(0,0,0,.2);
+}
+.vtt-session-play {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 24px;
+  padding-left: 2px;
+  border-radius: 8px;
+  color: #6ee7b7;
+  background: rgba(16,185,129,.14);
+  border: 1px solid rgba(52,211,153,.28);
+  font-size: .72rem;
+}
+.vtt-live-status {
+  min-width: 39px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 7px;
+  color: #fecaca;
+  background: rgba(239,68,68,.17);
+  border: 1px solid rgba(248,113,113,.38);
+}
+.vtt-live-status i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 7px #ef4444;
+  animation: vtt-live-blink 1.05s ease-in-out infinite;
+}
+.vtt-live-status b { font-size: .54rem; line-height: 1; letter-spacing: .06em; }
+.vtt-session-spinner {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  border: 2px solid rgba(255,255,255,.2);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: vtt-session-spin .7s linear infinite;
+}
+.vtt-session-btn.is-pending { cursor: wait; opacity: .7; }
 .vtt-session-btn.is-live {
   color: #ff9d9d !important; border-color: rgba(239,68,68,.55) !important;
-  background: rgba(239,68,68,.16) !important;
+  background: linear-gradient(135deg, rgba(127,29,29,.42), rgba(239,68,68,.12)) !important;
+  box-shadow: 0 0 0 1px rgba(239,68,68,.08), 0 4px 18px rgba(239,68,68,.14);
 }
 .vtt-session-btn.is-live .vtt-canvas-ctl-copy strong { color: #ff8b8b; }
-/* Pastille « live » : point rouge qui bat doucement (opacité, léger). */
-.vtt-live-dot { width: 9px; height: 9px; border-radius: 50%; background: #ef4444;
-  box-shadow: 0 0 0 3px rgba(239,68,68,.22); animation: vtt-live-blink 1.6s ease-in-out infinite; }
 @keyframes vtt-live-blink { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+@keyframes vtt-session-spin { to { transform: rotate(360deg); } }
+@media (max-width: 1100px) {
+  .vtt-session-btn {
+    width: 38px;
+    min-width: 38px !important;
+    justify-content: center;
+    padding-inline: 5px;
+  }
+  .vtt-session-btn .vtt-canvas-ctl-copy { display: none; }
+  .vtt-session-btn .vtt-live-status { min-width: 26px; padding-inline: 4px; }
+  .vtt-session-btn .vtt-live-status b { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vtt-live-status i, .vtt-session-spinner { animation: none; }
+}
 
 /* Entrée d'un nouveau jet de dé dans le chat (classe posée en JS sur la seule
    nouvelle entrée) : il "tombe" en place avec un léger ressort. */

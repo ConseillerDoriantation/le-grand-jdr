@@ -61,7 +61,7 @@ function buildLineCtx(lines, s, c) {
         const pm = s?.protectionMode || 'ca';
         if (l.drain) ctx.prot = { value: `Vol de vie ${_calcDrainPct(counts.Protection || 0)}%`, text: true, source: 'Combo Drain · soigne le lanceur', color: '#ff5a7e' };
         else if (l.reactiveShield) ctx.prot = { value: 'Bloque 1 attaque', text: true, source: 'Combo Bouclier réactif · sans bonus de CA', color: '#4f8cff' };
-        else if (pm === 'ca') ctx.prot = { value: _getSortCA(s), source: _autoSourceCA(s), color: '#4f8cff' };
+        else if (pm === 'ca') ctx.prot = { value: _getSortCA(s), text: true, source: _autoSourceCA(s), color: '#4f8cff' };
         else ctx.prot = { value: (pm === 'mana' ? _calcSortMana(s, c) : _calcSortSoin(s, c)), source: (pm === 'mana' ? 'Régénération de PM · (nb Protection)d4' : _autoSourceSoin(s, c)), color: (pm === 'mana' ? '#8b5cf6' : '#22c38e') };
         break;
       }
@@ -71,14 +71,38 @@ function buildLineCtx(lines, s, c) {
       case 'regen':
         ctx.regen = { value: s?.regenerationFormula || `${counts.Protection || 1}d4 / tour`, text: !s?.regenerationFormula, source: 'Combo Régénération · soin sur la durée', color: '#22c38e' };
         break;
-      case 'ench':
-        ctx.ench = { value: `${counts.Enchantement || 1} état${(counts.Enchantement || 1) > 1 ? 's' : ''} sur allié`, text: true, source: li('Enchantement') || 'Buff allié · 2 tours', color: '#e8b84b' };
+      case 'ench': {
+        const n = counts.Enchantement || 1;
+        // Nom + effet de l'état choisi affichés directement (le joueur comprend ce
+        // que fait le buff sans deviner depuis le seul intitulé).
+        const em = s?.enchantEtatId ? _spellConditionMeta(s.enchantEtatId) : null;
+        const extra = n > 1 ? ` · +${n - 1} autre${n - 1 > 1 ? 's' : ''}` : '';
+        ctx.ench = {
+          value: em ? `${em.icon || ''} ${em.label}`.trim() : `${n} état${n > 1 ? 's' : ''} sur allié`,
+          text: true,
+          source: (li('Enchantement') || 'Buff allié · 2 tours') + extra,
+          color: em?.color || '#e8b84b',
+          note: em?.desc ? _esc(em.desc) : '',
+        };
         break;
+      }
       case 'affl': {
         const am = s?.afflictionMode || 'dot';
         if (l.sentinelle) ctx.affl = { value: 'Portée par la sentinelle', text: true, source: 'Combo Sentinelle · stationnaire', color: '#a16207' };
         else if (am === 'dot') ctx.affl = { value: _calcAfflictionDot(s), source: _autoSourceAfflictionDot(s), color: '#e8894b' };
-        else if (am === 'etat') ctx.affl = { value: 'État infligé sur échec', text: true, source: `JS DD ${11 + 2 * ((counts.Affliction || 1) - 1)} · 2 tours`, color: '#a855f7' };
+        else if (am === 'etat') {
+          // Nom + effet de l'état infligé (crucial pour les joueurs qui lisent le sort).
+          const id = _spellAfflictionStateId(s);
+          const meta = id ? _spellConditionMeta(id, { label: s.afflictionEtatLabel, icon: s.afflictionEtatIcon }) : null;
+          const dd = 11 + 2 * ((counts.Affliction || 1) - 1);
+          ctx.affl = {
+            value: meta ? `${meta.icon || ''} ${meta.label}`.trim() : 'État à choisir',
+            text: true,
+            source: `Infligé sur échec · JS DD ${dd} · 2 tours`,
+            color: meta?.color || '#a855f7',
+            note: meta?.desc ? _esc(meta.desc) : '',
+          };
+        }
         else ctx.affl = { value: `CA cible −${Math.min(counts.Affliction || 1, 2)}`, text: true, source: 'Lacération · frappe l’attaque de base', color: '#ff5a7e' };
         break;
       }

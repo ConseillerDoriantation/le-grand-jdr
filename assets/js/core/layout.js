@@ -315,6 +315,10 @@ function _updateMobileBottomNav() {
       <svg class="bn-icon" aria-hidden="true"><use href="./assets/img/icons.svg#icon-more"/></svg>
       <span>Plus</span>
     </button>`;
+
+  // La barre mobile est reconstruite à chaque navigation : réappliquer
+  // immédiatement l'état live déjà connu, sans attendre le prochain snapshot.
+  _renderPlayCTA();
 }
 
 // ── Rendu de l'écran sélecteur ─────────────────
@@ -584,7 +588,8 @@ let _sessionLive = false;   // flag posé par le MJ (vtt/session.live)
 function _renderPlayCTA() {
   const sub = document.getElementById('sidebar-play-sub');
   const dot = document.getElementById('sidebar-play-dot');
-  if (!sub) return;
+  const playBtn = document.querySelector('.sidebar-play[data-navigate="vtt"]');
+  const mobileBtn = document.querySelector('.bottom-nav-item--primary[data-page="vtt"]');
   const me = STATE.user?.uid;
   const now = Date.now();
   const online = (_presenceList || []).filter((p) => {
@@ -595,13 +600,25 @@ function _renderPlayCTA() {
   // Priorité au flag « session déclarée en cours » du MJ ; sinon repli sur la
   // présence temps réel (des joueurs sont en ligne).
   if (_sessionLive) {
-    sub.textContent = online > 0 ? `En direct · ${online} en ligne` : 'Séance en direct';
+    if (sub) sub.textContent = online > 0 ? `En direct · ${online} en ligne` : 'Séance en direct';
   } else if (online > 0) {
-    sub.textContent = `Séance en cours · ${online} en ligne`;
+    if (sub) sub.textContent = `${online} en ligne sur la table`;
   } else {
-    sub.textContent = 'Table virtuelle';
+    if (sub) sub.textContent = 'Table virtuelle';
   }
-  if (dot) dot.hidden = !(_sessionLive || online > 0);
+  const hasActivity = _sessionLive || online > 0;
+  if (dot) {
+    dot.hidden = !hasActivity;
+    dot.classList.toggle('is-session-live', _sessionLive);
+  }
+  playBtn?.classList.toggle('is-session-live', _sessionLive);
+  mobileBtn?.classList.toggle('is-session-live', _sessionLive);
+  playBtn?.setAttribute('aria-label', _sessionLive
+    ? 'Session en direct, rejoindre la table virtuelle'
+    : 'Jouer maintenant, ouvrir la table virtuelle');
+  mobileBtn?.setAttribute('aria-label', _sessionLive
+    ? 'Session en direct, rejoindre la table virtuelle'
+    : 'Jouer maintenant, ouvrir la table virtuelle');
 }
 function _stopPresenceWatch() {
   try { _presenceUnsub?.(); } catch {}
@@ -611,6 +628,7 @@ function _stopPresenceWatch() {
   _presenceAdventureId = null;
   _presenceList = [];
   _sessionLive = false;
+  _renderPlayCTA();
 }
 function _startPresenceWatch() {
   const adventureId = STATE.adventure?.id || null;
