@@ -114,9 +114,14 @@
 .bs-fiche-contribs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .bs-fiche-contribs span { font-size: 11px; padding: 2px 8px; border-radius: var(--r-full); background: var(--surface-2); color: var(--text-soft); }
 .bs-fiche-invest { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-.bs-fiche-invest .input-field { height: 32px; font-size: 12.5px; }
+/* Padding réduit : sur la page Bastion, characters.css (surcharges select.input-field)
+   n'est pas chargée ; le padding vertical de base (0.82rem) écrasait le texte du
+   <select> dans les 32px de haut. */
+.bs-fiche-invest .input-field { height: 32px; padding: 0 10px; font-size: 12.5px; border-radius: 8px; }
+.bs-fiche-invest select.input-field { padding-right: 24px; cursor: pointer; }
+.bs-fiche-invest select.input-field option { background: var(--surface-3); color: var(--text); }
 .bs-fiche-quick { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.bs-fiche-quick .input-field { width: 80px; }
+.bs-fiche-quick .input-field { width: 80px; text-align: center; }
 .bs-fiche-quick button {
   padding: 5px 10px; border-radius: var(--r-sm); border: 1px solid var(--border-md);
   background: var(--surface-2); color: var(--text-soft); font-size: 12px; cursor: pointer;
