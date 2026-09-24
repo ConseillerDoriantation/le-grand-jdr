@@ -206,25 +206,62 @@ function _statsCaptureDrawerState(root = document.getElementById('stats-root')) 
     if (d.dataset.drawerKey) _statsDrawerState.set(d.dataset.drawerKey, !!d.open);
   });
 }
+function _statsSessionEntry(sessionKey) {
+  return sessionKey ? (_statsData?.sessions?.[sessionKey] || {}) : {};
+}
+function _statsDateOf(sessionKey) {
+  const stored = _statsSessionEntry(sessionKey).date;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(stored || ''))) return stored;
+  const prefix = String(sessionKey || '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(prefix) ? prefix : '';
+}
+function _statsSessionBucket(char, sessionKey) {
+  return char?.bySession?.[sessionKey] || char?.byDate?.[sessionKey] || null;
+}
+function _statsAllSessionKeys() {
+  const keys = new Set();
+  Object.values(_statsData?.chars || {}).forEach(char => {
+    Object.keys(char?.byDate || {}).forEach(key => keys.add(key));
+    Object.keys(char?.bySession || {}).forEach(key => keys.add(key));
+  });
+  return [...keys].sort((a, b) => {
+    const dateCmp = _statsDateOf(b).localeCompare(_statsDateOf(a));
+    if (dateCmp) return dateCmp;
+    return Number(_statsSessionEntry(b).startedAt || 0) - Number(_statsSessionEntry(a).startedAt || 0)
+      || b.localeCompare(a);
+  });
+}
+function _statsSessionTime(sessionKey) {
+  const startedAt = Number(_statsSessionEntry(sessionKey).startedAt) || 0;
+  if (!startedAt) return '';
+  return new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' }).format(new Date(startedAt));
+}
+function _statsSessionLabel(sessionKey, { short = false } = {}) {
+  const date = _statsFmtDate(sessionKey);
+  const time = _statsSessionTime(sessionKey);
+  return [short ? date.slice(0, 5) : date, time].filter(Boolean).join(' · ');
+}
+
 // Mission d'une séance (libellé MJ), ou '' si non renseignée.
-const _statsMissionOf = (dateKey) => (dateKey && _statsData?.sessions?.[dateKey]?.mission) || '';
-const _statsSessionIsLinked = (dateKey) => !!(dateKey && _statsData?.sessions?.[dateKey]?.missionId);
-const _statsUnlinkedDates = (dates = []) => dates.filter(dateKey => !_statsSessionIsLinked(dateKey));
-const _statsGroupOf   = (dateKey) => {
-  const session = dateKey ? _statsData?.sessions?.[dateKey] : null;
+const _statsMissionOf = (sessionKey) => (sessionKey && _statsData?.sessions?.[sessionKey]?.mission) || '';
+const _statsSessionIsLinked = (sessionKey) => !!(sessionKey && _statsData?.sessions?.[sessionKey]?.missionId);
+const _statsUnlinkedDates = (sessions = []) => sessions.filter(sessionKey => !_statsSessionIsLinked(sessionKey));
+const _statsGroupOf   = (sessionKey) => {
+  const session = sessionKey ? _statsData?.sessions?.[sessionKey] : null;
   if (!session) return '';
   const current = session.groupId ? (_statsQuests || []).find(q => q.id === session.groupId) : null;
   if (current) return _statsGroupName(current);
   const group = session.group || '';
   return (group && group !== 'Groupe') ? group : '';
 };
-// Dates liées à une mission (via sessions.{date}.missionId).
+// Séances liées à une mission. Les anciennes clés sont des dates ; les nouvelles
+// sont des identifiants uniques portant leur date dans `sessions.{id}.date`.
 const _statsMissionDates = (mid) => Object.entries(_statsData?.sessions || {}).filter(([, s]) => s?.missionId === mid).map(([dk]) => dk);
-const _statsGroupKeyOf = (dateKey) => {
-  const session = dateKey ? _statsData?.sessions?.[dateKey] : null;
+const _statsGroupKeyOf = (sessionKey) => {
+  const session = sessionKey ? _statsData?.sessions?.[sessionKey] : null;
   if (!session) return '__nogroup';
   if (session.groupId) return `id:${session.groupId}`;
-  const group = _statsGroupOf(dateKey);
+  const group = _statsGroupOf(sessionKey);
   return group ? `name:${_norm(group)}` : '__nogroup';
 };
 // Missions distinctes ayant ≥1 séance liée (pour la frise).
@@ -730,7 +767,12 @@ function _statsNormCombat(cm = {}) {
     biggestHit: n(cm.biggestHit), biggestTaken: n(cm.biggestTaken),
   };
 }
-const _statsFmtDate = (d) => { const [y, m, da] = d.split('-'); return `${da}/${m}/${y}`; };
+const _statsFmtDate = (sessionKey) => {
+  const date = _statsDateOf(sessionKey);
+  if (!date) return 'Date inconnue';
+  const [y, m, d] = date.split('-');
+  return `${d}/${m}/${y}`;
+};
 
 // Jauge circulaire (donut) — pct 0-100 + couleur d'accent. Optionnellement un
 // sous-label. Utilisée pour le taux de réussite (héro + carte perso).
@@ -843,7 +885,7 @@ function _statsPieChart(rows, key) {
 function _statsSumByDates(c, dates) {
   const acc = {};
   for (const dk of dates) {
-    const bd = c?.byDate?.[dk]; if (!bd) continue;
+    const bd = _statsSessionBucket(c, dk); if (!bd) continue;
     for (const [grp, obj] of Object.entries(bd)) {
       if (!obj || typeof obj !== 'object') continue;
       const a = (acc[grp] ??= {});
@@ -895,16 +937,16 @@ function _statsRowsFor(dateKeys) {
       return names.get(_norm(name || '')) || '';
     };
     const hasManualCombatCorrection = (charId, date, kind) => {
-      const combat = _statsData?.chars?.[charId]?.byDate?.[date]?.combat || {};
+      const combat = _statsSessionBucket(_statsData?.chars?.[charId], date)?.combat || {};
       return _statsNum(kind === 'taken' ? combat.manualDamageTaken : combat.manualDamageDealt) > 0;
     };
     const isCharacterLogExcluded = (charId, date, log) => {
       const charStats = _statsData?.chars?.[charId] || {};
-      const recordedDates = Object.keys(charStats.byDate || {});
+      const recordedDates = [...Object.keys(charStats.byDate || {}), ...Object.keys(charStats.bySession || {})];
       // En vue campagne, ne jamais ressusciter depuis le journal des essais VTT,
       // séances supprimées ou anciennes données absentes des stats du personnage.
       // Les personnages vraiment legacy (aucun byDate) gardent le repli complet.
-      if (!dateKeys && recordedDates.length && !charStats.byDate?.[date]) return true;
+      if (!dateKeys && recordedDates.length && !_statsSessionBucket(charStats, date)) return true;
       const cutoff = _statsNum(charStats.vttLogCutoffs?.[date]);
       const logTime = vttLogTimeMs(log?.createdAt);
       return cutoff > 0 && logTime != null && logTime <= cutoff;
@@ -931,7 +973,7 @@ function _statsRowsFor(dateKeys) {
     const spells = Object.entries(src.spells || {}).map(([n, v]) => ({ n, c: num(v) })).sort((a, b) => b.c - a.c);
     const emotes = Object.entries(src.emotes || {}).map(([n, v]) => ({ n, c: num(v) })).sort((a, b) => b.c - a.c);
     const emoteTotal = emotes.reduce((s, e) => s + e.c, 0);
-    const hasDates = !!c.byDate && Object.keys(c.byDate).length > 0;
+    const hasDates = Object.keys(c.byDate || {}).length > 0 || Object.keys(c.bySession || {}).length > 0;
     const skillAverages = aggregateSkillAverages([{ perSkill }]);
     // Pour « Jets & moyennes », le journal complet est la source canonique des
     // actions : une attaque ou un sort lancé vaut exactement 1, même en zone.
@@ -1094,7 +1136,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   const dateKey   = (scope && !isMission && !isAct) ? scope : null;
   const missions  = _statsMissionList();
   const acts = _statsActList(missions);
-  const allDates = [...new Set(Object.values(_statsData?.chars || {}).flatMap(c => Object.keys(c.byDate || {})))].sort().reverse();
+  const allDates = _statsAllSessionKeys();
 
   // Sélecteur hiérarchique : campagne/mission d'abord, séances ensuite.
   const currentSession = dateKey ? (_statsData?.sessions?.[dateKey] || {}) : null;
@@ -1195,7 +1237,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     ${rows.length ? '<span class="stats-tools-caption">Exporter</span>' : ''}${exportBtn}${visualBtn}${manageBtn}
   </div>` : '';
   // ── Barre sticky (refonte) : périmètre 3 selects + popover joueurs + onglets ──
-  const scopeKicker = dateKey ? `Séance du ${_statsFmtDate(dateKey)}`
+  const scopeKicker = dateKey ? `Séance du ${_statsSessionLabel(dateKey)}`
     : isMission ? (selectedMission?.name || 'Mission')
     : isAct ? (selectedAct?.label || 'Acte')
     : 'Toute la campagne';
@@ -1222,7 +1264,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     <label class="stats-sc${dateKey ? ' on' : ''}"><small>Séance</small>
       <select data-change="_statsSetScopeSel" data-level="session" data-mission="${_esc(selectedMissionId || '')}" data-act="${isAct ? _esc(actKey) : ''}">
         ${_scOpt('', `${sessionOpts.length} séance${sessionOpts.length > 1 ? 's' : ''}`, dateKey || '')}
-        ${sessionOpts.map(d => _scOpt(d, `${_statsFmtDate(d).slice(0, 5)}${_statsGroupOf(d) ? ' · ' + _statsGroupOf(d) : ''}`, dateKey || '')).join('')}
+        ${sessionOpts.map(d => _scOpt(d, `${_statsSessionLabel(d, { short: true })}${_statsGroupOf(d) ? ' · ' + _statsGroupOf(d) : ''}`, dateKey || '')).join('')}
       </select></label>
   </div>`;
   const popRows = allRows;
@@ -1268,7 +1310,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
       : (linkBtn || '<span class="stats-sb-none">Mission non renseignée</span>');
     return `<div class="stats-session-banner">
       <div class="stats-sb-info">
-        <div class="stats-sb-date">📅 Séance du ${_statsFmtDate(dateKey)}</div>
+        <div class="stats-sb-date">📅 Séance du ${_statsSessionLabel(dateKey)}</div>
         <div class="stats-sb-mission">${missLine}</div>
       </div>
       ${partsHtml ? `<div class="stats-sb-parts" title="Participants">${partsHtml}</div>` : ''}
@@ -1292,7 +1334,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     _statsVisualSummary = null;
     _statsVisualSummaryEnricher = null;
     const why = (sel && sel.size) ? 'les joueurs ciblés'
-      : dateKey ? `la séance du ${_statsFmtDate(dateKey)}`
+      : dateKey ? `la séance du ${_statsSessionLabel(dateKey)}`
       : isMission ? `la mission « ${missionName} »` : 'le moment';
     root.innerHTML = `${controls}<div class="stats-empty">Aucune statistique pour ${why}.<br>
       <span>Ajuste la vue ou les joueurs ciblés ci-dessus.</span></div>`;
@@ -1456,7 +1498,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
       : '';
     const delBtn = STATE.isAdmin
       ? (dateKey
-          ? `<button class="stats-char-btn stats-char-del" data-action="_statsDelChar" data-id="${r.id}" data-date="${_esc(dateKey)}" data-name="${_esc(r.name)}" title="Supprimer uniquement les statistiques de ce personnage pour la séance du ${_statsFmtDate(dateKey)}">🗑 Cette séance</button>`
+          ? `<button class="stats-char-btn stats-char-del" data-action="_statsDelChar" data-id="${r.id}" data-date="${_esc(dateKey)}" data-name="${_esc(r.name)}" title="Supprimer uniquement les statistiques de ce personnage pour la séance du ${_statsSessionLabel(dateKey)}">🗑 Cette séance</button>`
           : `<button class="stats-char-btn stats-char-del" data-action="_statsDelChar" data-id="${r.id}" data-name="${_esc(r.name)}" title="Supprimer toutes les statistiques de ce personnage, sur toute la campagne">🗑 Toutes ses stats</button>`)
       : '';
     const char = STATE.characters?.find(x => x.id === r.id) || { nom: r.name };
@@ -1536,7 +1578,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     </details>`;
   };
 
-  const combatTitle = dateKey ? `⚔️ Combat — séance du ${_statsFmtDate(dateKey)}`
+  const combatTitle = dateKey ? `⚔️ Combat — séance du ${_statsSessionLabel(dateKey)}`
     : isMission ? `⚔️ Combat — ${_esc(missionName)}` : '⚔️ Combat (table)';
   const awardCards = [
     award('dmg', '🗡️', 'Dégâts totaux', dmgLeaders.winners, `${dmgLeaders.value} dmg`, '#f4c430'),
@@ -1555,7 +1597,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   const awardsHtml = awardCards.join('');
 
   // Récap texte (export) — construit à partir du scope courant.
-  const scopeLabel = dateKey ? `séance du ${_statsFmtDate(dateKey)}`
+  const scopeLabel = dateKey ? `séance du ${_statsSessionLabel(dateKey)}`
     : isAct && selectedAct ? `acte « ${selectedAct.label} »`
     : isMission ? `mission « ${missionName} »${groupScopeText ? ` · groupes ${groupScopeText}` : ''}` : 'toute la campagne';
   const sumLines = [
@@ -1816,7 +1858,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   };
   const groupSessionItem = (x) => `<div class="stats-group-session">
     <div class="stats-group-session-main">
-      <span class="stats-time-date">📅 ${_statsFmtDate(x.d)}</span>
+      <span class="stats-time-date">📅 ${_statsSessionLabel(x.d)}</span>
       <span class="stats-time-avatars">${x.rows.slice(0, 6).map(r => _statsAvatar(r.id, r.name, 18)).join('')}</span>
     </div>
     <div class="stats-time-metrics">
@@ -2148,9 +2190,9 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   const rythmeBody = _rythmeView === 'pie'
     ? _statsPieChart(rows, evoKey)
     : `<div class="stats-tl">${chronoSessions.map((s, i) => `<button type="button" class="stats-tl-col${s.date === dateKey ? ' on' : ''}" data-action="_statsSetScope" data-scope="${s.date === dateKey ? '' : s.date}" style="--mc:${evoM.color}">
-        <span class="stats-tl-tip">${_statsFmtDate(s.date)} · <b>${_kpiNum(evoVals[i])}</b> ${evoM.lbl.toLowerCase()}${s.mission ? `<br><span class="stats-dim">${_esc(s.mission)}</span>` : ''}</span>
+        <span class="stats-tl-tip">${_statsSessionLabel(s.date)} · <b>${_kpiNum(evoVals[i])}</b> ${evoM.lbl.toLowerCase()}${s.mission ? `<br><span class="stats-dim">${_esc(s.mission)}</span>` : ''}</span>
         <span class="stats-tl-bar" style="height:${Math.max(3, Math.round(evoVals[i] / evoMax * 100))}%"></span>
-        <span class="stats-tl-x">${i % evoStep === 0 ? _statsFmtDate(s.date).slice(0, 5) : ''}</span></button>`).join('')}</div>
+        <span class="stats-tl-x">${i % evoStep === 0 ? (_statsSessionTime(s.date) || _statsFmtDate(s.date).slice(0, 5)) : ''}</span></button>`).join('')}</div>
       <div class="stats-tl-legend"><span>Pic : ${_kpiNum(evoMax)} · moyenne : ${_kpiNum(evoAvg)} / séance</span><span>${evoM.lbl}</span></div>`;
   const timelineSec = renderOverview && (_canTimeline || rows.length) ? `<div class="stats-surface stats-chart">
     <div class="stats-chart-hd"><div><b>${_rythmeView === 'pie' ? 'Répartition par personnage' : 'Évolution par séance'}</b><small>${_rythmeView === 'pie' ? `Part de chaque personnage · ${evoM.lbl.toLowerCase()}` : chronoSessions.length + ' séances · cliquer pour cadrer la vue'}</small></div><div class="stats-chart-ctrl">${rythmeToggle}${_statsMetricSelect(evoKey, '_statsEvoMetric')}</div></div>
@@ -4215,7 +4257,7 @@ const PAGES = {
     _statsLoadAwardPrefs();
     const requestedScope = _statsRequestedScope;
     _statsRequestedScope = null;
-    const availableDates = new Set(Object.values(_statsData?.chars || {}).flatMap(c => Object.keys(c?.byDate || {})));
+    const availableDates = new Set(_statsAllSessionKeys());
     _statsScope = requestedScope && availableDates.has(requestedScope) ? requestedScope : null;
     _statsPlayerSel = null;
     _statsGroupSel = null;
@@ -4368,7 +4410,7 @@ registerActions({
   // Statistiques : modale de gestion des données (MJ) — supprimer ciblé ou tout.
   _statsManage: () => {
     if (!STATE.isAdmin) return;
-    const dates = [...new Set(Object.values(_statsData?.chars || {}).flatMap(c => Object.keys(c.byDate || {})))].sort().reverse();
+    const dates = _statsAllSessionKeys();
     const pendingDates = _statsUnlinkedDates(dates);
     const linkedDates = dates.filter(d => _statsSessionIsLinked(d));
     const missions = _statsMissionList();
@@ -4382,10 +4424,10 @@ registerActions({
         ? `🎯 ${_esc(mi || 'Mission liée')}${gr ? ` · 👥 ${_esc(gr)}` : ''}`
         : (mi ? `<span class="stats-mng-incomplete">⚠ Ancien lien incomplet · ${_esc(mi)}</span>` : '<span class="stats-sb-none">Aucune mission associée</span>');
       return `<div class="stats-mng-row${linked ? ' is-linked' : ' is-pending'}">
-        <span class="stats-mng-lbl">📅 ${_statsFmtDate(d)} — ${label}</span>
+        <span class="stats-mng-lbl">📅 ${_statsSessionLabel(d)} — ${label}</span>
         <span class="stats-mng-acts">
           <button class="stats-mng-link" data-action="_statsEditMission" data-scope="${d}">🔗 ${linked ? 'Modifier' : 'Relier'}</button>
-          <button class="stats-mng-del" data-action="_statsDelDate" data-scope="${d}" title="Supprimer uniquement les statistiques de cette séance" aria-label="Supprimer les statistiques de la séance du ${_statsFmtDate(d)}">🗑 Supprimer</button>
+          <button class="stats-mng-del" data-action="_statsDelDate" data-scope="${d}" title="Supprimer uniquement les statistiques de cette séance" aria-label="Supprimer les statistiques de la séance du ${_statsSessionLabel(d)}">🗑 Supprimer</button>
         </span>
       </div>`;
     };
@@ -4399,7 +4441,7 @@ registerActions({
         ${healthHtml}
         <div class="stats-mng-info">
           <strong>Les filtres de la page ne suppriment jamais de données.</strong>
-          <span>Ici, chaque suppression indique précisément son périmètre avant confirmation.</span>
+          <span>Ici, chaque suppression indique précisément son périmètre avant confirmation. Une même date peut contenir plusieurs séances : leur heure permet de les distinguer.</span>
         </div>
         ${pendingDates.length ? `<div class="stats-mng-sec stats-mng-sec--pending"><div class="stats-mng-hd"><span>À relier en priorité</span><b>${pendingDates.length}</b></div>${pendingDates.map(dateRow).join('')}</div>` : ''}
         ${linkedDates.length ? `<details class="stats-mng-linked"${pendingDates.length ? '' : ' open'}>
@@ -4420,7 +4462,7 @@ registerActions({
   _statsDelDate: async (btn) => {
     if (!STATE.isAdmin) return;
     const d = btn.dataset.scope; if (!d) return;
-    const ok = await confirmModal(`Supprimer toutes les stats de la séance du <b>${_statsFmtDate(d)}</b> ?<br>Les totaux de campagne seront ajustés en conséquence.`, {
+    const ok = await confirmModal(`Supprimer toutes les stats de la séance du <b>${_statsSessionLabel(d)}</b> ?<br>Les totaux de campagne seront ajustés en conséquence.`, {
       title: '🗑 Supprimer une séance', confirmLabel: 'Supprimer', cancelLabel: 'Annuler', danger: true,
     }).catch(() => false);
     if (!ok) return;
@@ -4445,7 +4487,7 @@ registerActions({
   // Suppression TOTALE — confirmation explicite par saisie (« EFFACER »).
   _statsResetAsk: async () => {
     if (!STATE.isAdmin) return;
-    const dates = [...new Set(Object.values(_statsData?.chars || {}).flatMap(c => Object.keys(c.byDate || {})))];
+    const dates = _statsAllSessionKeys();
     const missions = _statsMissionList();
     const trackedChars = Object.keys(_statsData?.chars || {}).length;
     const adventureName = _esc(STATE.adventure?.nom || 'Aventure courante');
@@ -4471,7 +4513,7 @@ registerActions({
     const name = btn.dataset.name || btn.closest('.stats-char')?.querySelector('.stats-char-name')?.textContent || _statsData?.chars?.[id]?.name || 'ce personnage';
     const singleSession = !!date;
     const message = singleSession
-      ? `<span class="stats-delete-scope">Une seule séance</span>Supprimer uniquement les statistiques de <b>${_esc(name)}</b> pour le <b>${_statsFmtDate(date)}</b> ?<br><small>Ses autres séances sont conservées. La séance, son lien mission/groupe et les données des autres personnages ne changent pas.</small>`
+      ? `<span class="stats-delete-scope">Une seule séance</span>Supprimer uniquement les statistiques de <b>${_esc(name)}</b> pour le <b>${_statsSessionLabel(date)}</b> ?<br><small>Ses autres séances sont conservées. La séance, son lien mission/groupe et les données des autres personnages ne changent pas.</small>`
       : `<span class="stats-delete-scope stats-delete-scope--all">Toute la campagne</span>Supprimer toutes les statistiques de <b>${_esc(name)}</b>, pour toutes ses séances ?<br><small>Cette action ignore les filtres affichés. Les autres personnages ne changent pas.</small>`;
     const ok = await confirmModal(message, {
       title: singleSession ? '🗑 Supprimer cette séance du personnage' : '🗑 Supprimer toutes les stats du personnage',
@@ -4480,7 +4522,7 @@ registerActions({
     if (!ok) return;
     const done = singleSession ? await deleteCharDateStats(id, date) : await deleteCharStats(id);
     showNotif(done
-      ? (singleSession ? `Séance du ${_statsFmtDate(date)} supprimée pour ${name}.` : `Toutes les statistiques de ${name} ont été supprimées.`)
+      ? (singleSession ? `Séance du ${_statsSessionLabel(date)} supprimée pour ${name}.` : `Toutes les statistiques de ${name} ont été supprimées.`)
       : 'Échec de la suppression.', done ? 'success' : 'error');
     if (!done) return;
     if (btn.dataset.origin === 'dates-modal') closeModalDirect();
@@ -4491,8 +4533,8 @@ registerActions({
   _statsCharDates: (btn) => {
     const id = btn.dataset.id; if (!id) return;
     const c = _statsData?.chars?.[id]; if (!c) return;
-    const byDate = c.byDate || {};
-    const dates = Object.keys(byDate).sort().reverse();
+    const dates = [...new Set([...Object.keys(c.byDate || {}), ...Object.keys(c.bySession || {})])]
+      .sort((a, b) => _statsDateOf(b).localeCompare(_statsDateOf(a)) || Number(_statsSessionEntry(b).startedAt || 0) - Number(_statsSessionEntry(a).startedAt || 0));
     const metric = (icon, value, label, color = '') => `<span class="stats-date-kpi">
       <span>${icon}</span><span><b${color ? ` style="color:${color}"` : ''}>${value}</b><small>${label}</small></span>
     </span>`;
@@ -4500,7 +4542,7 @@ registerActions({
       <small>${label}</small><b${color ? ` style="color:${color}"` : ''}>${value}</b>
     </span>`;
     const body = dates.length ? dates.map((d) => {
-      const e = byDate[d] || {};
+      const e = _statsSessionBucket(c, d) || {};
       const mergedRow = _statsRowsFor([d]).find(row => row.id === id);
       const cm = mergedRow?.combat || _statsNormCombat(e.combat);
       const cmAverage = combatAverages(cm);
@@ -4519,7 +4561,7 @@ registerActions({
       const context = [_statsMissionOf(d), _statsGroupOf(d)].filter(Boolean).join(' · ') || 'Séance non reliée';
       return `<details class="stats-date">
         <summary class="stats-date-summary">
-          <span class="stats-date-id"><b>📅 ${_statsFmtDate(d)}</b><small>${_esc(context)}</small></span>
+          <span class="stats-date-id"><b>📅 ${_statsSessionLabel(d)}</b><small>${_esc(context)}</small></span>
           <span class="stats-date-kpis">
             ${metric('🗡️', cm.dmgDealt, 'Dégâts', '#c9b6ff')}
             ${metric('💚', cm.heal, 'Soin', '#4fd3a6')}
@@ -4581,7 +4623,7 @@ registerActions({
     if (!STATE.isAdmin) return;
     const id = btn.dataset.id, date = btn.dataset.date;
     const c = _statsData?.chars?.[id];
-    const combat = c?.byDate?.[date]?.combat;
+    const combat = _statsSessionBucket(c, date)?.combat;
     if (!id || !date || !combat) { showNotif('Compteurs de séance introuvables.', 'error'); return; }
     const input = (field, label, hint = '') => `<label class="stats-correction-field">
       <span>${label}${hint ? `<small>${hint}</small>` : ''}</span>
@@ -4589,7 +4631,7 @@ registerActions({
     </label>`;
     openModal(`🧾 Corriger ${_esc(c.name || 'Personnage')}`, `
       <div class="stats-correction">
-        <div class="stats-correction-note"><b>Séance du ${_statsFmtDate(date)}</b><span>Modifie les valeurs réellement observées. Les totaux de campagne seront ajustés automatiquement.</span></div>
+        <div class="stats-correction-note"><b>Séance du ${_statsSessionLabel(date)}</b><span>Modifie les valeurs réellement observées. Les totaux de campagne seront ajustés automatiquement.</span></div>
         <section><h4>⚔️ Actions offensives</h4><div class="stats-correction-grid">
           ${input('attacks', 'Attaques')}${input('hits', 'Réussites')}${input('crits', 'Critiques')}${input('fumbles', 'Échecs critiques')}
           ${input('dmgDealt', 'Dégâts infligés', 'PV réellement retirés')}${input('damageEvents', 'Impacts avec dégâts')}${input('kosDealt', 'KO infligés')}
@@ -4816,7 +4858,7 @@ registerActions({
       `<button type="button" class="stats-mp-opt${active ? ' active' : ''}" data-name="${_esc(_norm(title))}"
         data-action="_statsPickMission" data-scope="${dk}" data-mission-id="${_esc(id)}" data-mission="${_esc(title)}">
         <span class="stats-mp-ico">${ico}</span><span class="stats-mp-tt">${_esc(title)}</span>${active ? '<span class="stats-mp-check">✓</span>' : ''}</button>`;
-    openModal(`📅 Séance du ${_statsFmtDate(dk)}`, `
+    openModal(`📅 Séance du ${_statsSessionLabel(dk)}`, `
       <div class="stats-mp">
         <input type="text" class="stats-mp-search" placeholder="🔍 Rechercher une mission / un événement…" data-input="_statsMissionSearch" autocomplete="off">
         <div class="stats-mp-list">

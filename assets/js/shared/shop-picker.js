@@ -57,6 +57,8 @@ export async function getShopItemById(itemId) {
   };
 }
 
+export async function loadShopData() { return _loadShopData(); }
+
 async function _loadShopData() {
   if (_cache) return _cache;
   if (_loading) return _loading;

@@ -18,6 +18,7 @@ import { sortCharactersForDisplay, modStr } from '../shared/char-stats.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 import { pickImageFile } from '../shared/image-upload.js';
 import { openShopPicker, getRareteColor } from '../shared/shop-picker.js';
+import { drawCreatureLoot } from '../shared/loot-draw.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import { registerActions } from '../core/actions.js';
 import { makeSortable } from '../shared/sortable-helper.js';
@@ -1009,19 +1010,13 @@ function _bstRoll(s) {
 // « Tirer le butin » : simule la chute (chances + quantités + or). Vérification MJ.
 function _bstDrawLoot(id) {
   const c = STORE.creatures.find(x => x.id === id); if (!c) return;
-  const items = _bstShopItemsCache || [];
-  const out = [];
-  (c.butins || []).forEach(b => {
-    const ch = String(b.chance || '100%').trim();
-    const p = ch === '100%' ? 100 : (parseInt(ch) || 0);
-    if (Math.random() * 100 < p) {
-      const q = _bstRoll(b.quantite) || b.quantite || 1;
-      const nom = items.find(x => x.id === b.itemId)?.nom || b.nom || 'Objet';
-      out.push(`${nom} ×${q}`);
-    }
+  const shopItems = _bstShopItemsCache || [];
+  const { items, gold } = drawCreatureLoot(c, { draw: true, count: 1 });
+  const out = items.map(it => {
+    const nom = shopItems.find(x => x.id === it.itemId)?.nom || it.nom || 'Objet';
+    return `${nom} ×${it.qty}`;
   });
-  const or = _bstRoll(c.or);
-  if (or) out.push(`${or} or`);
+  if (gold) out.push(`${gold} or`);
   _bstDrawResult = { id, txt: out.length ? out.join(' · ') : 'rien ne tombe' };
   _bstResyncPanel();
 }
