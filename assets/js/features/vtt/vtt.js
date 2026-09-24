@@ -192,6 +192,7 @@ import {
   _vttMsSortClear, _vttToggleMsSort, _vttMsCompteAdd, _vttMsCompteDel, _vttMsCraft,
   _vttMsCraftSearch, _vttMsCraftClear,
   _vttMsSendGoldPicker, _vttMsConfirmSendGold,
+  _vttMsSac, _vttMsGoPurse,
 } from './vtt-mini-fiche.js';
 
 let _vttDelegSearch = '';
@@ -14654,6 +14655,8 @@ export const VTT_ACTIONS = {
   _vttMsSetHp,
   _vttMsSetPm,
   _vttMsSetGarde,
+  _vttMsSac,
+  _vttMsGoPurse,
   _vttMsSlotChange,
   _vttMsSortCat,
   _vttMsSortClear,

@@ -12127,3 +12127,64 @@ button.vtt-loot-qb:hover:not(:disabled) { background:var(--surface-3,var(--bg-el
 .vtt-emote-wslot kbd { position:absolute; bottom:-5px; right:-5px; min-width:14px; height:14px; font-size:9px; display:inline-grid; place-items:center; border-radius:5px; border:1px solid var(--border-md,var(--border)); background:var(--surface-3,var(--bg-elevated)); color:var(--text-soft,var(--text)); }
 .vtt-emote-wcenter { position:absolute; left:-46px; top:-24px; width:92px; height:48px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; font-size:10.5px; color:var(--text-muted); line-height:1.25; }
 .vtt-emote-wcenter b { font-size:12px; color:var(--text); font-weight:600; }
+
+/* ════════════════════════════════════════════════════════════════════
+   MINI-FICHE — refonte (zone fixe + 4 onglets). Appended last → surcharge.
+   ════════════════════════════════════════════════════════════════════ */
+.vtt-mini-panel.open { width: min(392px, calc(100vw - 40px)); }
+.vtt-mini-panel.open > * { flex-shrink:0; }
+.vtt-mini-panel.open > .vtt-ms-tab-content { flex:1 1 auto; min-height:0; }
+.vtt-mini-panel .vtt-ms-header { align-items:flex-start; gap:10px; }
+.vtt-ms-portrait { position:relative; width:58px; height:58px; flex:none; }
+.vtt-ms-ring { position:absolute; inset:0; width:58px; height:58px; }
+.vtt-ms-portrait.up .vtt-ms-ring .fill { animation:vttMsPulse 1.4s ease-in-out infinite; }
+@keyframes vttMsPulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+.vtt-ms-portrait .vtt-ms-avatar, .vtt-ms-portrait .vtt-ms-avatar-init { position:absolute; inset:6px; width:46px; height:46px; box-shadow:none; border:0; }
+.vtt-ms-niv { position:absolute; bottom:-5px; left:50%; transform:translateX(-50%); padding:0 6px; height:15px; border-radius:8px; background:var(--arcane,#9d6fff); color:#fff; font-size:9px; font-weight:700; display:grid; place-items:center; white-space:nowrap; border:1.5px solid var(--bg-panel); }
+.vtt-ms-portrait.up .vtt-ms-niv { background:#f59e0b; }
+.vtt-ms-info { flex:1; min-width:0; padding-top:2px; }
+.vtt-ms-name { font-family:var(--font-display,inherit); font-size:15px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vtt-ms-sub { font-size:11px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px; }
+.vtt-ms-player-mj { color:var(--text-soft,var(--text)); font-weight:500; }
+.vtt-ms-close { flex:none; }
+.vtt-ms-ro { flex:none; margin:0 .65rem .4rem; padding:5px 9px; border-radius:8px; font-size:11px; background:color-mix(in srgb,var(--amber,#f4c430) 12%,transparent); color:var(--amber,#f4c430); border:1px solid color-mix(in srgb,var(--amber,#f4c430) 30%,transparent); }
+
+/* Chiffres clés */
+.vtt-ms-facts { flex:none; display:grid; grid-template-columns:repeat(5,1fr); gap:5px; padding:8px .65rem 4px; }
+.vtt-ms-fact { display:flex; flex-direction:column; align-items:center; gap:1px; padding:6px 2px; border-radius:9px; background:var(--bg-elevated); border:1px solid var(--border); }
+.vtt-ms-fact b { font-size:15px; font-weight:700; color:var(--text); line-height:1.1; }
+.vtt-ms-fact small { font-size:9px; letter-spacing:.03em; text-transform:uppercase; color:var(--text-muted); }
+button.vtt-ms-fact { cursor:pointer; transition:border-color .12s,background .12s; }
+button.vtt-ms-fact:hover { border-color:var(--gold); }
+
+/* Caractéristiques (affichage seul) */
+.vtt-ms-stats2 { flex:none; display:grid; grid-template-columns:repeat(6,1fr); gap:4px; padding:2px .65rem 6px; }
+.vtt-ms-st { position:relative; display:flex; flex-direction:column; align-items:center; padding:4px 1px; border-radius:8px; background:var(--bg-elevated); border-top:2px solid var(--sc); }
+.vtt-ms-st small { font-size:8.5px; font-weight:700; letter-spacing:.02em; color:var(--sc); }
+.vtt-ms-st b { font-size:14px; font-weight:700; color:var(--text); line-height:1.15; }
+.vtt-ms-st span { font-size:9px; color:var(--text-muted); }
+.vtt-ms-st i { position:absolute; top:-6px; right:-3px; font-style:normal; font-size:8px; font-weight:700; padding:0 3px; border-radius:6px; background:var(--emerald,#22c38e); color:#fff; }
+
+/* Onglets (4) */
+.vtt-ms-tabbar { flex:none; display:flex; gap:2px; padding:6px .65rem; border-bottom:1px solid var(--border); background:var(--bg-panel); }
+.vtt-ms-tab { flex:1; display:flex; align-items:center; justify-content:center; gap:4px; padding:6px 4px; border-radius:8px; font-size:12px; font-weight:600; color:var(--text-muted); background:none; border:0; cursor:pointer; height:auto; }
+.vtt-ms-tab:hover { color:var(--text-soft,var(--text)); }
+.vtt-ms-tab.active { background:var(--bg-elevated); color:var(--text); }
+.vtt-ms-tab small { font-size:10px; color:var(--text-dim,var(--text-muted)); font-weight:500; }
+.vtt-ms-tab-content { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; padding:8px .65rem 12px; }
+
+/* Sac : sous-onglets */
+.vtt-ms-seg { display:flex; gap:2px; padding:2px; border-radius:9px; background:var(--bg-elevated); border:1px solid var(--border); margin-bottom:8px; }
+.vtt-ms-seg button { flex:1; padding:5px 6px; border-radius:7px; font-size:11.5px; font-weight:500; color:var(--text-muted); background:none; border:0; cursor:pointer; white-space:nowrap; }
+.vtt-ms-seg button.on { background:var(--bg-panel); color:var(--text); box-shadow:0 1px 3px rgba(0,0,0,.2); }
+.vtt-ms-seg small { color:var(--text-dim,var(--text-muted)); }
+
+/* Combat : carte d'attaque (affichage seul) */
+.vtt-ms-sect-label { font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; font-weight:600; color:var(--text-dim,var(--text-muted)); margin:4px 0; }
+.vtt-ms-atk { border:1px solid var(--border); border-radius:10px; padding:8px 10px; background:var(--bg-elevated); margin-bottom:8px; }
+.vtt-ms-atk-hd b { font-size:13px; font-weight:600; color:var(--text); }
+.vtt-ms-atk-row { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px; }
+.vtt-ms-atk-cell { display:flex; flex-direction:column; align-items:center; gap:1px; padding:6px; border-radius:8px; background:var(--bg-panel); border:1px solid var(--border); }
+.vtt-ms-atk-cell small { font-size:9px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); }
+.vtt-ms-atk-cell b { font-size:16px; font-weight:700; color:var(--text); }
+.vtt-ms-atk-empty { font-size:11px; color:var(--text-dim,var(--text-muted)); margin-top:6px; }
