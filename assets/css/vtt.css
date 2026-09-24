@@ -12881,7 +12881,7 @@ button.vtt-ms-fact:last-child:hover { border-right-color: transparent; }
 .vtt-ms-craft-res.lose { color:var(--crimson,#ff5a7e); background:color-mix(in srgb,var(--crimson,#ff5a7e) 12%,transparent); }
 .vtt-ms-craft-ft { display:flex; align-items:center; gap:8px; }
 .vtt-ms-craft-ft p { flex:1; min-width:0; font-size:11px; color:var(--text-muted); margin:0; }
-.vtt-mini-panel .vtt-ms-craft-btn { flex:none; display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 12px; border-radius:8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--bg-panel); color:var(--text-soft,var(--text)); cursor:pointer; white-space:nowrap; }
+.vtt-mini-panel .vtt-ms-craft-btn { flex:none; width:auto; display:inline-flex; align-items:center; justify-content:center; gap:6px; height:30px; padding:0 12px; margin:0; border-radius:8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--bg-panel); color:var(--text-soft,var(--text)); cursor:pointer; white-space:nowrap; }
 .vtt-mini-panel .vtt-ms-craft-btn:hover:not(:disabled) { border-color:var(--border-strong,var(--border)); color:var(--text); }
 .vtt-mini-panel .vtt-ms-craft-btn:disabled { opacity:.4; cursor:default; }
 .vtt-mini-panel .vtt-ms-craft-btn.pri { background:var(--gold); border-color:var(--gold); color:#fff; }
