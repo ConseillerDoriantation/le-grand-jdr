@@ -360,9 +360,9 @@ function _lootRow(item, zone) {
   const sub = [catL, _rarLabel(item.rarete)].filter(Boolean).join(' · ');
   let acts = '';
   if (zone === 'stash') {
-    acts = `${item.qty > 1 ? `<button class="vtt-loot-ib sm one go" data-vtt-fn="_vttLootMove1" data-vtt-args="${item.id}" data-tip="En poser un seul">1${_li('right')}</button>` : ''}<button class="vtt-loot-ib sm go" data-vtt-fn="_vttLootMove" data-vtt-args="${item.id}|stash" data-tip="Poser sur la table">${_li('right')}</button><button class="vtt-loot-ib sm danger" data-vtt-fn="_vttLootRemoveStash" data-vtt-args="${item.id}" data-tip="Supprimer">${_li('trash')}</button>`;
+    acts = `${item.qty > 1 ? `<button class="vtt-loot-ib sm one go" data-vtt-fn="_vttLootMove1" data-vtt-args="${item.id}" title="En poser un seul">1${_li('right')}</button>` : ''}<button class="vtt-loot-ib sm go" data-vtt-fn="_vttLootMove" data-vtt-args="${item.id}|stash" title="Poser sur la table">${_li('right')}</button><button class="vtt-loot-ib sm danger" data-vtt-fn="_vttLootRemoveStash" data-vtt-args="${item.id}" title="Supprimer">${_li('trash')}</button>`;
   } else if (!voteOpen) {
-    acts = `<button class="vtt-loot-ib sm go" data-vtt-fn="_vttLootMove" data-vtt-args="${item.id}|loot" data-tip="Remettre en réserve">${_li('left')}</button><button class="vtt-loot-ib sm go" data-vtt-fn="_vttLootOpenVote" data-vtt-args="${item.id}" data-tip="Répartir (les joueurs demandent)">${_li('scale')}</button><button class="vtt-loot-ib sm danger" data-vtt-fn="_vttLootRemoveLoot" data-vtt-args="${item.id}" data-tip="Supprimer">${_li('trash')}</button>`;
+    acts = `<button class="vtt-loot-ib sm go" data-vtt-fn="_vttLootMove" data-vtt-args="${item.id}|loot" title="Remettre en réserve">${_li('left')}</button><button class="vtt-loot-ib sm go" data-vtt-fn="_vttLootOpenVote" data-vtt-args="${item.id}" title="Répartir (les joueurs demandent)">${_li('scale')}</button><button class="vtt-loot-ib sm danger" data-vtt-fn="_vttLootRemoveLoot" data-vtt-args="${item.id}" title="Supprimer">${_li('trash')}</button>`;
   }
   const qtyCell = voteOpen
     ? `<span class="vtt-loot-pill voting">${_li('scale')}×${item.qty}</span>`
@@ -455,7 +455,7 @@ function _lootCreatureCard(c) {
     return `<div class="vtt-loot-cr-row"><i class="vtt-loot-dot" style="background:${_rarColor(it?.rarete)}"></i><span>${_esc(it?.nom || b.nom || 'Objet')}</span><span class="ch${ch === '100%' ? ' sure' : ''}">${_esc(ch)}</span><span class="qq">${_esc(String(b.quantite || '1'))}${c.n > 1 ? ' ×' + c.n : ''}</span></div>`;
   }).join('');
   return `<div class="vtt-loot-cr"><div class="vtt-loot-cr-hd"><span class="av">${_esc((c.nom || '?')[0])}</span><span class="tt"><b>${_esc(c.nom)}${c.n > 1 ? ` ×${c.n}` : ''}</b><small>Sur la carte${c.or ? ` · or ${_esc(c.or)}` : ''}</small></span>
-    <button class="vtt-loot-btn sm ghost" data-vtt-fn="_vttLootCreatureAll" data-vtt-args="${c.beastId}" data-tip="Tout ajouter au panier, sans tirage">${_li('plus')}Tout</button>
+    <button class="vtt-loot-btn sm ghost" data-vtt-fn="_vttLootCreatureAll" data-vtt-args="${c.beastId}" title="Tout ajouter au panier, sans tirage">${_li('plus')}Tout</button>
     <button class="vtt-loot-btn sm" data-vtt-fn="_vttLootCreatureDraw" data-vtt-args="${c.beastId}">${_li('dice')}Tirer le butin</button></div>
     ${rows}${d ? `<div class="vtt-loot-cr-res">Tombé : <b>${_esc(d)}</b> → ajouté au panier</div>` : ''}</div>`;
 }
@@ -521,7 +521,7 @@ function _lootPlayer() {
     const voteOpen = !!e.vote?.open;
     const right = voteOpen
       ? `<span class="vtt-loot-pill voting">${_li('scale')}×${e.qty}</span>`
-      : `<span class="vtt-loot-plq"><span class="vtt-loot-qb">×${e.qty}</span><button class="vtt-loot-ib sm" data-vtt-fn="_vttLootOpenVote" data-vtt-args="${e.id}" data-tip="Répartir entre les joueurs">${_li('scale')}</button><button class="vtt-loot-btn sm ghost" data-vtt-fn="_vttLootToggleTake" data-vtt-args="${e.id}">Prendre</button></span>`;
+      : `<span class="vtt-loot-plq"><span class="vtt-loot-qb">×${e.qty}</span><button class="vtt-loot-ib sm" data-vtt-fn="_vttLootOpenVote" data-vtt-args="${e.id}" title="Répartir entre les joueurs">${_li('scale')}</button><button class="vtt-loot-btn sm ghost" data-vtt-fn="_vttLootToggleTake" data-vtt-args="${e.id}">Prendre</button></span>`;
     const inline = voteOpen ? `<div class="vtt-loot-vote" id="vtt-vote-inline-${e.id}"></div>` : `<div class="vtt-loot-take-inline" id="vtt-take-inline-${e.id}" style="display:none"></div>`;
     return `<div class="vtt-loot-row-wrap${voteOpen ? ' voting' : ''}" data-id="${e.id}"><div class="vtt-loot-row pl-it"><i class="vtt-loot-dot" style="background:${_rarColor(e.rarete)}"></i><span class="vtt-loot-name"><b>${_esc(e.nom)}</b><small>${_esc([_catName(e), _rarLabel(e.rarete)].filter(Boolean).join(' · '))}</small></span><span class="vtt-loot-acts"></span>${right}</div>${inline}</div>`;
   }).join('');
