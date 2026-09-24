@@ -276,24 +276,7 @@ function _renderMusicPanel() {
     sf.oninput = e => { _musicSearch = e.target.value; _renderMusicPanel(); };
   }
   // Faders : volume local (musique) + ambiance, préférences par utilisateur.
-  const bindFader = (id, outId, get, set) => {
-    const el = document.getElementById(id); if (!el) return;
-    const pct = Math.round(get() * 100);
-    el.value = pct; el.style.setProperty('--v', pct + '%');
-    const out = document.getElementById(outId); if (out) out.textContent = pct;
-    el.oninput = e => {
-      const p = +e.target.value;
-      e.target.style.setProperty('--v', p + '%');
-      const o = document.getElementById(outId); if (o) o.textContent = p;
-      set(p / 100);
-    };
-  };
-  bindFader('vtt-music-vol', 'vtt-music-vol-out', _getUserVolume, (v) => {
-    const nv = _setUserVolume(v);
-    if (_audioEl) { if (_audioEl._fadeTimer) { clearInterval(_audioEl._fadeTimer); _audioEl._fadeTimer = null; } _audioEl.volume = nv; }
-    if (_previewEl) _previewEl.volume = nv;
-  });
-  bindFader('vtt-music-amb-vol', 'vtt-music-amb-out', _getAmbienceVolume, (v) => _setAmbienceVolume(v));
+  _bindMusicFaders();
 
   // Raccourcis clavier (scopés au panneau) : Espace = pause · ←/→ = piste ·
   // « / » = focus recherche.
@@ -340,6 +323,101 @@ function _renderMusicPanel() {
   if (searchActive) {
     const n = document.getElementById('vtt-music-search');
     if (n) { n.focus(); try { n.setSelectionRange(caret, caret); } catch { /* noop */ } }
+  }
+}
+
+// Liaison des faders (volume musique + ambiance) — appelée après tout (re)rendu
+// de la zone « air » qui les contient (rendu complet ET reflet de lecture).
+function _bindMusicFaders() {
+  const bindFader = (id, outId, get, set) => {
+    const el = document.getElementById(id); if (!el) return;
+    const pct = Math.round(get() * 100);
+    el.value = pct; el.style.setProperty('--v', pct + '%');
+    const out = document.getElementById(outId); if (out) out.textContent = pct;
+    el.oninput = e => {
+      const p = +e.target.value;
+      e.target.style.setProperty('--v', p + '%');
+      const o = document.getElementById(outId); if (o) o.textContent = p;
+      set(p / 100);
+    };
+  };
+  bindFader('vtt-music-vol', 'vtt-music-vol-out', _getUserVolume, (v) => {
+    const nv = _setUserVolume(v);
+    if (_audioEl) { if (_audioEl._fadeTimer) { clearInterval(_audioEl._fadeTimer); _audioEl._fadeTimer = null; } _audioEl.volume = nv; }
+    if (_previewEl) _previewEl.volume = nv;
+  });
+  bindFader('vtt-music-amb-vol', 'vtt-music-amb-out', _getAmbienceVolume, (v) => _setAmbienceVolume(v));
+}
+
+// En-tête d'une playlist sélectionnée (bouton Lire/Pause + aléatoire + options).
+// Extrait pour être régénéré seul lors d'un reflet de lecture, sans reconstruire
+// toute la liste.
+function _playlistSecHd(p, ms) {
+  const active = ms.playing && ms.currentPlaylistId === p.id;
+  return `<span class="dot" style="background:${p.color || '#6366f1'}"></span><h3>${_esc(p.name)}</h3>
+    <button class="btn${active ? ' ghost' : ''}" data-vtt-fn="_vttPlayPlaylist" data-vtt-args="${p.id}|false">${_mi(active && !ms.paused ? 'pause' : 'play')}${active ? (ms.paused ? 'Reprendre' : 'En cours') : 'Lire'}</button>
+    <button class="ib${active && ms.shuffle ? ' on' : ''}" data-vtt-fn="_vttPlayPlaylist" data-vtt-args="${p.id}|true" data-tip="Lecture aléatoire">${_mi('shuffle')}</button>
+    <button class="ib" data-vtt-fn="_vttPlaylistCtxMenu" data-vtt-args="$event|${p.id}" data-tip="Renommer, couleur, supprimer" aria-haspopup="menu">${_mi('more')}</button>`;
+}
+
+// Reflet LÉGER de l'état de lecture : ne reconstruit NI la liste des pistes NI
+// les Sortable (coûteux quand « Tous les sons » est affiché → c'est ce qui
+// faisait tout ramer tant qu'on n'avait pas réduit la vue à une playlist).
+// Met uniquement à jour la zone « air », les reflets « en cours » (lignes, rail,
+// en-tête de playlist) et le bouton de session. Retombe sur un rendu complet si
+// la structure attendue n'est pas là.
+function _reflectPlaybackUi() {
+  const panel = document.getElementById('vtt-music-panel');
+  if (!panel || panel.dataset.open !== '1') return;
+  const air = panel.querySelector('.air');
+  if (!air) { _renderMusicPanel(); return; }   // structure inattendue → rendu complet
+
+  const mj = STATE.isAdmin;
+  const ms = _musicState;
+  const playing = !!(ms.playing && ms.currentSoundId);
+  const curSound = playing ? _sounds.find(s => s.id === ms.currentSoundId) : null;
+  const live = playing && !ms.paused;
+
+  // 1) Zone « air » (en cours + contrôles + prog + ambiance + faders).
+  air.outerHTML = _renderAir(curSound, ms, mj);
+  _bindMusicFaders();
+  // La barre de progression a été recréée : relance le rafraîchissement si besoin.
+  clearInterval(_musicProgTimer); _musicProgTimer = null;
+  if (_audioEl && !_audioEl.paused) { _updateMusicProg(); _musicProgTimer = setInterval(_updateMusicProg, 500); }
+
+  // 2) En-tête : pastille « Diffusé » + reflet du bouton de la barre de session.
+  const hd = panel.querySelector('.vtt-ms-hd');
+  if (hd) {
+    const existing = hd.querySelector('.pill.live');
+    if (live && !existing) hd.querySelector('h2')?.insertAdjacentHTML('afterend', '<span class="pill live"><i></i>Diffusé à la table</span>');
+    else if (!live && existing) existing.remove();
+  }
+  document.getElementById('vtt-music-trigger')?.classList.toggle('live', live);
+
+  // 3) Lignes de pistes : classes cur/isamb + icône lecture/pause (pas de rebuild).
+  panel.querySelectorAll('.t[data-sound-id]').forEach(row => {
+    const id = row.dataset.soundId;
+    const inPlaylist = row.dataset.plctx || null;
+    const isCurrent = ms.playing && ms.currentSoundId === id &&
+      (inPlaylist ? ms.currentPlaylistId === inPlaylist : true);
+    row.classList.toggle('cur', !!isCurrent);
+    row.classList.toggle('isamb', ms.ambienceSoundId === id);
+    const ph = row.querySelector('.n .ph');
+    if (ph) ph.innerHTML = _mi(isCurrent && !ms.paused ? 'pause' : 'play');
+  });
+
+  // 4) Rail : onde « en cours » sur la playlist active.
+  panel.querySelectorAll('.pl[data-pl-id]').forEach(row => {
+    const on = ms.playing && ms.currentPlaylistId === row.dataset.plId && !ms.paused;
+    const wave = row.querySelector(':scope > .wave');
+    if (on && !wave) row.querySelector(':scope > .ct')?.insertAdjacentHTML('beforebegin', _MS_WAVE);
+    else if (!on && wave) wave.remove();
+  });
+
+  // 5) En-tête de la playlist ouverte (bouton Lire/Pause/aléatoire).
+  if (!_musicSearch) {
+    const p = _playlists.find(x => x.id === _musicSel);
+    if (p) { const sh = panel.querySelector('.sec-hd'); if (sh) sh.innerHTML = _playlistSecHd(p, ms); }
   }
 }
 
@@ -454,11 +532,7 @@ function _renderTracks() {
   } else {
     const p = _playlists.find(x => x.id === _musicSel);
     if (!p) { _musicSel = 'all'; return _renderTracks(); }
-    const active = _musicState.playing && _musicState.currentPlaylistId === p.id;
-    head = `<div class="sec-hd"><span class="dot" style="background:${p.color || '#6366f1'}"></span><h3>${_esc(p.name)}</h3>
-      <button class="btn${active ? ' ghost' : ''}" data-vtt-fn="_vttPlayPlaylist" data-vtt-args="${p.id}|false">${_mi(active && !_musicState.paused ? 'pause' : 'play')}${active ? (_musicState.paused ? 'Reprendre' : 'En cours') : 'Lire'}</button>
-      <button class="ib${active && _musicState.shuffle ? ' on' : ''}" data-vtt-fn="_vttPlayPlaylist" data-vtt-args="${p.id}|true" data-tip="Lecture aléatoire">${_mi('shuffle')}</button>
-      <button class="ib" data-vtt-fn="_vttPlaylistCtxMenu" data-vtt-args="$event|${p.id}" data-tip="Renommer, couleur, supprimer" aria-haspopup="menu">${_mi('more')}</button></div>`;
+    head = `<div class="sec-hd">${_playlistSecHd(p, _musicState)}</div>`;
     const sounds = (p.soundIds || []).map(snd).filter(Boolean);
     body = sounds.length ? sounds.map((s, i) => _trackRow(s, p.id, i, mj)).join('') : `<div class="empty">Glissez des sons ici depuis « Tous les sons ».</div>`;
     listAttr = ` data-pl-id="${p.id}"`;
@@ -895,13 +969,13 @@ function _syncMusicPlayback(ms) {
 
   if (!ms.playing || !ms.currentSoundId) {
     _fadeOutCurrent(_FADE_MS);   // fondu de sortie plutôt qu'une coupure sèche
-    if (panel?.dataset.open==='1') _renderMusicPanel();
+    if (panel?.dataset.open==='1') _reflectPlaybackUi();
     return;
   }
 
   if (ms.paused) {
     if (_audioEl && !_audioEl.paused) _audioEl.pause();
-    if (panel?.dataset.open==='1') _renderMusicPanel();
+    if (panel?.dataset.open==='1') _reflectPlaybackUi();
     return;
   }
 
@@ -931,7 +1005,7 @@ function _syncMusicPlayback(ms) {
         if (pos >= 0 && pos < _audioEl.duration - 0.3) _audioEl.currentTime = pos;
       }
     }
-    if (panel?.dataset.open==='1') _renderMusicPanel();
+    if (panel?.dataset.open==='1') _reflectPlaybackUi();
     return;
   }
 
@@ -992,7 +1066,7 @@ function _syncMusicPlayback(ms) {
   });
   _audioEl = el;
   if (_prevEl && _prevEl !== el) _fadeOutAndDispose(_prevEl, _FADE_MS);   // crossfade
-  if (panel?.dataset.open==='1') _renderMusicPanel();
+  if (panel?.dataset.open==='1') _reflectPlaybackUi();
 }
 
 // ── Menu contextuel son ──────────────────────────────────────────────
