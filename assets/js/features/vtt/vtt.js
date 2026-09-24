@@ -44,7 +44,7 @@ import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
 import { toggleTheme } from '../../shared/theme.js';
-import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit, bumpBiggestTaken, bumpDamageTaken } from '../../shared/stats.js';
+import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit, bumpBiggestTaken, bumpDamageTaken, setActiveStatsSession } from '../../shared/stats.js';
 import { appliedDamageAmount } from '../../shared/stats-analysis.js';
 import { shouldTrackSpellStats } from '../../shared/spell-stats-policy.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
@@ -152,11 +152,17 @@ import {
   _vttToggleLoot, _vttLootRemoveStash, _vttLootRemoveLoot, _vttLootClear,
   _vttLootAddItemToStash, _vttLootOpenShop, _vttLootToggleTake, _vttLootTakeSetChar,
   _vttLootTakeStep, _vttLootConfirmTake, _vttCreatSendLootToStash, _vttCreatSendGoldToStash,
-  _vttLootAddGoldPrompt, _resetLootState,
+  _resetLootState,
   _closeLootPanel,
   _vttLootOpenVote, _vttLootCloseVote, _vttLootForceDistribute,
   _vttLootClaimSetChar, _vttLootClaimStep, _vttLootClaimEdit,
   _vttLootClaimSubmit, _vttLootClaimWithdraw,
+  _vttLootMove, _vttLootMove1, _vttLootQtyEdit, _vttLootQtyStep, _vttLootRevealAll,
+  _vttLootGoldEdit, _vttLootGoldCancel, _vttLootGoldOk, _vttLootGoldMove, _vttLootGoldSplit,
+  _vttLootStashMenu, _vttLootTableMenu, _vttLootQaPick,
+  _vttLootCataBack, _vttLootCataSel, _vttLootCataRar, _vttLootCataAdd,
+  _vttLootBasketStep, _vttLootBasketRemove, _vttLootBasketClear, _vttLootBasketSend,
+  _vttLootCreatureAll, _vttLootCreatureDraw, _vttLootSetMe,
 } from './vtt-loot.js';
 import {
   _vttToggleDice, _vttDiceAddDie, _vttDiceRemoveDie, _vttDiceClear, _vttDiceBonusStep,
@@ -1089,6 +1095,7 @@ function _cleanup() {
   VS.tokens = {}; VS.pages = {}; VS.characters = {}; VS.npcs = {}; VS.bestiary = {}; VS.bstTracker = {};
   VS.combatHpEstimates.clear();
   _vttResetCombatHpLog();
+  setActiveStatsSession(null);
   _bestiaryLoads.clear();
   VS.session = {}; VS.activePage = null; VS.selected = null; _attackSrc = null;
   _clearAim(); _hideActBar();
@@ -11007,6 +11014,9 @@ function _initListeners() {
     const previousRound = VS.session?.combat?.round ?? 0;
     const previousActiveTokenId = VS.session?.combat?.activeTokenId ?? null;
     VS.session=snap.exists()?snap.data():{};
+    setActiveStatsSession(VS.session.live && VS.session.statsSessionKey
+      ? { key: VS.session.statsSessionKey, date: VS.session.statsSessionDate }
+      : null);
     const combatVisualChanged = previousCombatActive !== !!VS.session?.combat?.active
       || previousRound !== (VS.session?.combat?.round ?? 0)
       || previousActiveTokenId !== (VS.session?.combat?.activeTokenId ?? null);
@@ -14389,7 +14399,30 @@ export const VTT_ACTIONS = {
   _vttCourirAndClose,
   _vttCreatSendLootToStash,
   _vttCreatSendGoldToStash,
-  _vttLootAddGoldPrompt,
+  _vttLootMove,
+  _vttLootMove1,
+  _vttLootQtyEdit,
+  _vttLootQtyStep,
+  _vttLootRevealAll,
+  _vttLootGoldEdit,
+  _vttLootGoldCancel,
+  _vttLootGoldOk,
+  _vttLootGoldMove,
+  _vttLootGoldSplit,
+  _vttLootStashMenu,
+  _vttLootTableMenu,
+  _vttLootQaPick,
+  _vttLootCataBack,
+  _vttLootCataSel,
+  _vttLootCataRar,
+  _vttLootCataAdd,
+  _vttLootBasketStep,
+  _vttLootBasketRemove,
+  _vttLootBasketClear,
+  _vttLootBasketSend,
+  _vttLootCreatureAll,
+  _vttLootCreatureDraw,
+  _vttLootSetMe,
   _vttCreateEnemy,
   _vttCreatePlaylist,
   _vttDeletePage,
