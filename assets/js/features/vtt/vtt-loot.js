@@ -13,7 +13,9 @@ import { STATE } from '../../core/state.js';
 import { VS, aid } from './vtt-state.js';
 import { _esc, _norm, loadingHtml } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
-import { getShopItemById, loadShopData, RARETE_COLOR } from '../../shared/shop-picker.js';
+import { getShopItemById, loadShopData } from '../../shared/shop-picker.js';
+import { getRarities, loadRarities } from '../../shared/rarity.js';
+import { _getRareteNum } from '../shop-item-stats.js';
 import { drawCreatureLoot, rollLootFormula } from '../../shared/loot-draw.js';
 import { shopItemToInvEntry } from '../../shared/inventory-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
@@ -30,13 +32,13 @@ const _lootCount = (item) => item?.kind === 'gold' ? (item.amount || 0) : (item.
 // Or lâché : nombre brut ("20") ou formule de dés ("5d4", "2d6+3"). Jet inclus.
 const _rollGoldFormula = (str) => rollLootFormula(str);
 
-// ── Libellés de rareté (clés boutique) ──────────────────────────────
-const _RAR_LABEL = {
-  commune: 'Commune', peu_commune: 'Peu commune', rare: 'Rare',
-  tres_rare: 'Très rare', legendaire: 'Légendaire',
-};
-const _rarColor = (r) => RARETE_COLOR[r] || '#9ca3af';
-const _rarLabel = (r) => _RAR_LABEL[r] || (r ? String(r) : '');
+// ── Rareté (système numérique par aventure, cf. shared/rarity.js) ───
+// Les objets boutique stockent `rarete` en valeur numérique (1..N). On
+// résout couleur + nom via les raretés chargées de l'aventure.
+let _rarByVal = {};   // valeur numérique → { value, name, color }
+function _refreshRarities() { _rarByVal = {}; for (const r of getRarities()) _rarByVal[r.value] = r; }
+const _rarColor = (rareteVal) => _rarByVal[_getRareteNum(rareteVal)]?.color || 'var(--text-dim)';
+const _rarLabel = (rareteVal) => _rarByVal[_getRareteNum(rareteVal)]?.name || '';
 const _fmtPo = (n) => Number(n || 0).toLocaleString('fr-FR');
 
 // ── Sprite SVG (préfixe `il-` pour ne pas entrer en collision avec la Régie) ──
@@ -101,15 +103,24 @@ let _shopLoaded = false;
 async function _ensureShopCache() {
   if (_shopLoaded) return;
   try {
-    const data = await loadShopData();
+    const [data] = await Promise.all([loadShopData(), loadRarities().catch(() => {})]);
     _shopItems  = data.items || [];
     _shopCatMap = data.catMap || {};
+    _refreshRarities();
     _shopLoaded = true;
     _renderLootPanel();
   } catch { /* boutique indisponible → catalogue vide, le reste marche */ }
 }
 const _shopItem = (id) => _shopItems.find(i => i.id === id) || null;
 const _catName  = (item) => item ? (_shopCatMap[item.categorieId]?.nom || '') : '';
+
+// Raretés de l'aventure (couleurs/noms des pastilles) — MJ et joueurs.
+let _raritiesReady = false;
+async function _ensureRarities() {
+  if (_raritiesReady) return;
+  try { await loadRarities(); _refreshRarities(); _raritiesReady = true; _renderLootPanel(); }
+  catch { /* raretés indisponibles → pastilles neutres */ }
+}
 
 // ── Récents (localStorage MJ) ───────────────────────────────────────
 const _RECENT_KEY = () => `vtt:lootRecent:${aid() || '_'}`;
@@ -349,9 +360,9 @@ function _lootRow(item, zone) {
   const sub = [catL, _rarLabel(item.rarete)].filter(Boolean).join(' · ');
   let acts = '';
   if (zone === 'stash') {
-    acts = `${item.qty > 1 ? `<button class="vtt-loot-ib sm one go" data-vtt-fn="_vttLootMove1" data-vtt-args="${item.id}" data-tip="En poser un seul">1${_li('right')}</button>` : ''}<button class="vtt-loot-ib sm go" data-vtt-fn="_vttLootMove" data-vtt-args="${item.id}|stash" data-tip="Poser sur la table">${_li('right')}</button><button class="vtt-loot-ib sm danger" data-vtt-fn="_vttLootRemoveStash" data-vtt-args="${item.id}" data-tip="Supprimer">${_li('trash')}</button>`;
+    acts = `${item.qty > 1 ? `<button class="vtt-loot-ib sm one go" data-vtt-fn="_vttLootMove1" data-vtt-args="${item.id}" title="En poser un seul">1${_li('right')}</button>` : ''}<button class="vtt-loot-ib sm go" data-vtt-fn="_vttLootMove" data-vtt-args="${item.id}|stash" title="Poser sur la table">${_li('right')}</button><button class="vtt-loot-ib sm danger" data-vtt-fn="_vttLootRemoveStash" data-vtt-args="${item.id}" title="Supprimer">${_li('trash')}</button>`;
   } else if (!voteOpen) {
-    acts = `<button class="vtt-loot-ib sm go" data-vtt-fn="_vttLootMove" data-vtt-args="${item.id}|loot" data-tip="Remettre en réserve">${_li('left')}</button><button class="vtt-loot-ib sm go" data-vtt-fn="_vttLootOpenVote" data-vtt-args="${item.id}" data-tip="Répartir (les joueurs demandent)">${_li('scale')}</button><button class="vtt-loot-ib sm danger" data-vtt-fn="_vttLootRemoveLoot" data-vtt-args="${item.id}" data-tip="Supprimer">${_li('trash')}</button>`;
+    acts = `<button class="vtt-loot-ib sm go" data-vtt-fn="_vttLootMove" data-vtt-args="${item.id}|loot" title="Remettre en réserve">${_li('left')}</button><button class="vtt-loot-ib sm go" data-vtt-fn="_vttLootOpenVote" data-vtt-args="${item.id}" title="Répartir (les joueurs demandent)">${_li('scale')}</button><button class="vtt-loot-ib sm danger" data-vtt-fn="_vttLootRemoveLoot" data-vtt-args="${item.id}" title="Supprimer">${_li('trash')}</button>`;
   }
   const qtyCell = voteOpen
     ? `<span class="vtt-loot-pill voting">${_li('scale')}×${item.qty}</span>`
@@ -444,7 +455,7 @@ function _lootCreatureCard(c) {
     return `<div class="vtt-loot-cr-row"><i class="vtt-loot-dot" style="background:${_rarColor(it?.rarete)}"></i><span>${_esc(it?.nom || b.nom || 'Objet')}</span><span class="ch${ch === '100%' ? ' sure' : ''}">${_esc(ch)}</span><span class="qq">${_esc(String(b.quantite || '1'))}${c.n > 1 ? ' ×' + c.n : ''}</span></div>`;
   }).join('');
   return `<div class="vtt-loot-cr"><div class="vtt-loot-cr-hd"><span class="av">${_esc((c.nom || '?')[0])}</span><span class="tt"><b>${_esc(c.nom)}${c.n > 1 ? ` ×${c.n}` : ''}</b><small>Sur la carte${c.or ? ` · or ${_esc(c.or)}` : ''}</small></span>
-    <button class="vtt-loot-btn sm ghost" data-vtt-fn="_vttLootCreatureAll" data-vtt-args="${c.beastId}" data-tip="Tout ajouter au panier, sans tirage">${_li('plus')}Tout</button>
+    <button class="vtt-loot-btn sm ghost" data-vtt-fn="_vttLootCreatureAll" data-vtt-args="${c.beastId}" title="Tout ajouter au panier, sans tirage">${_li('plus')}Tout</button>
     <button class="vtt-loot-btn sm" data-vtt-fn="_vttLootCreatureDraw" data-vtt-args="${c.beastId}">${_li('dice')}Tirer le butin</button></div>
     ${rows}${d ? `<div class="vtt-loot-cr-res">Tombé : <b>${_esc(d)}</b> → ajouté au panier</div>` : ''}</div>`;
 }
@@ -461,7 +472,7 @@ function _lootCatalogue() {
     if (q) list = _shopItems.filter(i => _norm(i.nom || '').includes(q));
     else if (_cSel === 'recent') list = _recentIds().map(_shopItem).filter(Boolean);
     else if (_cSel !== 'all') list = _shopItems.filter(i => i.categorieId === _cSel);
-    if (_cRar) list = list.filter(i => i.rarete === _cRar);
+    if (_cRar !== '' && _cRar != null) list = list.filter(i => _getRareteNum(i.rarete) === Number(_cRar));
     title = q ? `Résultats · ${list.length}` : _cSel === 'recent' ? 'Utilisés récemment' : _cSel === 'all' ? `Tout le catalogue · ${list.length}` : `${_esc(_shopCatMap[_cSel]?.nom || 'Catégorie')} · ${list.length}`;
     body = `<div class="vtt-loot-lbl">${title}</div>` + (list.length ? list.map(_lootCatItem).join('') : `<div class="vtt-loot-empty">Aucun objet ne correspond.</div>`);
   }
@@ -472,7 +483,7 @@ function _lootCatalogue() {
     ${rp('recent', 'Récents', _recentIds().length, 'clock')}${rp('crea', 'Créatures de la scène', _lootCreatures().length, 'swords')}<div class="vtt-loot-pl-sep"></div>${rp('all', 'Tout le catalogue', _shopItems.length, 'book')}
     ${cats.map(c => rp(c.id, _esc(c.nom || '?'), _shopItems.filter(i => i.categorieId === c.id).length, 'tag')).join('')}</div></aside>`;
 
-  const rars = (_cSel === 'crea' && !q) ? '' : `<div class="vtt-loot-rars"><button class="vtt-loot-chip${!_cRar ? ' on' : ''}" data-vtt-fn="_vttLootCataRar" data-vtt-args="">Toutes raretés</button>${Object.keys(_RAR_LABEL).map(k => `<button class="vtt-loot-chip${_cRar === k ? ' on' : ''}" data-vtt-fn="_vttLootCataRar" data-vtt-args="${k}"><i class="vtt-loot-dot" style="background:${_rarColor(k)}"></i>${_rarLabel(k)}</button>`).join('')}</div>`;
+  const rars = (_cSel === 'crea' && !q) ? '' : `<div class="vtt-loot-rars"><button class="vtt-loot-chip${!_cRar ? ' on' : ''}" data-vtt-fn="_vttLootCataRar" data-vtt-args="">Toutes raretés</button>${getRarities().map(r => `<button class="vtt-loot-chip${Number(_cRar) === r.value ? ' on' : ''}" data-vtt-fn="_vttLootCataRar" data-vtt-args="${r.value}"><i class="vtt-loot-dot" style="background:${r.color}"></i>${_esc(r.name)}</button>`).join('')}</div>`;
 
   const bk = Object.entries(_basket).filter(([, n]) => n > 0);
   const chips = bk.map(([k, n]) => `<span class="vtt-loot-bkc">${k === 'gold' ? `${_fmtPo(n)} po` : `${_esc(_shopItem(k)?.nom || 'Objet')} ×${n}`}<button data-vtt-fn="_vttLootBasketRemove" data-vtt-args="${k}" aria-label="Retirer">${_li('x')}</button></span>`).join('');
@@ -510,7 +521,7 @@ function _lootPlayer() {
     const voteOpen = !!e.vote?.open;
     const right = voteOpen
       ? `<span class="vtt-loot-pill voting">${_li('scale')}×${e.qty}</span>`
-      : `<span class="vtt-loot-plq"><span class="vtt-loot-qb">×${e.qty}</span><button class="vtt-loot-btn sm ghost" data-vtt-fn="_vttLootToggleTake" data-vtt-args="${e.id}">Prendre</button></span>`;
+      : `<span class="vtt-loot-plq"><span class="vtt-loot-qb">×${e.qty}</span><button class="vtt-loot-ib sm" data-vtt-fn="_vttLootOpenVote" data-vtt-args="${e.id}" title="Répartir entre les joueurs">${_li('scale')}</button><button class="vtt-loot-btn sm ghost" data-vtt-fn="_vttLootToggleTake" data-vtt-args="${e.id}">Prendre</button></span>`;
     const inline = voteOpen ? `<div class="vtt-loot-vote" id="vtt-vote-inline-${e.id}"></div>` : `<div class="vtt-loot-take-inline" id="vtt-take-inline-${e.id}" style="display:none"></div>`;
     return `<div class="vtt-loot-row-wrap${voteOpen ? ' voting' : ''}" data-id="${e.id}"><div class="vtt-loot-row pl-it"><i class="vtt-loot-dot" style="background:${_rarColor(e.rarete)}"></i><span class="vtt-loot-name"><b>${_esc(e.nom)}</b><small>${_esc([_catName(e), _rarLabel(e.rarete)].filter(Boolean).join(' · '))}</small></span><span class="vtt-loot-acts"></span>${right}</div>${inline}</div>`;
   }).join('');
@@ -611,6 +622,7 @@ function _vttToggleLoot() {
   trigger?.setAttribute('aria-expanded', 'true');
   _lootView = 'main';
   void _ensureLootListener();
+  void _ensureRarities();
   if (STATE.isAdmin) void _ensureShopCache();
   _renderLootPanel();
   _lootCloseOutside = (e) => {
@@ -1032,10 +1044,13 @@ function _myLootChars() {
   return favoriteFirst(Object.values(VS.characters).filter(c => canControlCharacter(c, uid)));
 }
 
+// Ouvrir une répartition : MJ, OU un joueur qui veut partager un objet contesté
+// (les règles Firestore autorisent tous les membres à écrire vtt/loot). Le reste
+// du vote (quorum, auto-application, forçage MJ) est inchangé.
 async function _vttLootOpenVote(id) {
-  if (!STATE.isAdmin) return;
   const item = _loot.loot.find(i => i.id === id);
   if (!item) return;
+  if (item.vote?.open) return;                 // déjà en répartition
   if (_lootCount(item) <= 0) { showNotif('Rien à répartir', 'error'); return; }
   _clearItemClaims(id);
   item.vote = { open: true };
@@ -1305,6 +1320,7 @@ function _resetLootState() {
   _goldEdit = false; _goldVal = ''; _qtyEdit = null;
   _cSel = 'recent'; _cQ = ''; _cRar = ''; _basket = {}; _creatureDraws = {};
   _flash = null;
+  _shopLoaded = false; _raritiesReady = false; _rarByVal = {};
 }
 
 export {
