@@ -482,6 +482,22 @@ function _msPopHtml(c, uid) {
       + (canEdit
         ? `<div class="vtt-ms-pop-form"><label>XP gagnée<input class="vtt-ms-pop-inp" id="vtt-ms-xp-add" type="number" min="1" placeholder="ex. 150 puis Entrée" data-vtt-fn="_vttMsAddXp" data-vtt-on="keydown-enter" data-vtt-args="${c.id}|${uid}|$value"></label>${up ? `<button class="vtt-ms-pop-btn amber" data-vtt-fn="_vttMsLevelUp" data-vtt-args="${c.id}|${uid}">Passer niveau ${niv + 1} · garde ${xp - palier} XP</button>` : `<div class="vtt-ms-pop-note">Encore ${palier - xp} XP avant le niveau ${niv + 1}.</div>`}</div>`
         : `<div class="vtt-ms-pop-empty">${xp} / ${palier} XP</div>`);
+  } else if (p.v === 'gold') {
+    const solde = calcOr(c);
+    const targets = _msPresentTargets(uid);
+    h = `<div class="vtt-ms-pop-lbl">Donner de l'or</div>`
+      + (targets.length
+        ? `<div class="vtt-ms-pop-form"><label>Montant (solde ${solde})<input class="vtt-ms-pop-inp" id="vtt-ms-gold-amt" type="number" min="1" max="${solde}" value="${Math.min(10, solde) || 1}"></label></div>`
+          + targets.map(t => `<button class="vtt-ms-pop-it" data-vtt-fn="_vttMsConfirmSendGold" data-vtt-args="${c.id}|${uid}|${t.charId}"><span class="vtt-ms-pop-av">${_esc((t.charNom || '?')[0].toUpperCase())}</span><span>${_esc(t.charNom)}</span><em>${_esc(t.pseudo)}</em></button>`).join('')
+        : '<div class="vtt-ms-pop-empty">Aucun joueur présent.</div>');
+  } else if (p.v === 'send') {
+    const inv = c?.inventaire || [];
+    const item = inv[parseInt(p.arg)];
+    const targets = _msPresentTargets(uid);
+    h = `<div class="vtt-ms-pop-lbl">Donner ${_esc(item?.nom || 'l\'objet')}</div>`
+      + (targets.length
+        ? targets.map(t => `<button class="vtt-ms-pop-it" data-vtt-fn="_vttMsConfirmSend" data-vtt-args="${c.id}|${uid}|${p.arg}|${t.charId}"><span class="vtt-ms-pop-av">${_esc((t.charNom || '?')[0].toUpperCase())}</span><span>${_esc(t.charNom)}</span><em>${_esc(t.pseudo)}</em></button>`).join('')
+        : '<div class="vtt-ms-pop-empty">Aucun joueur présent.</div>');
   }
   return `<div class="vtt-ms-pop" id="vtt-ms-pop">${h}</div>`;
 }
@@ -648,6 +664,7 @@ function _vttMsSendPicker(charId, uid, invIndex) {
 
 // Effectue le transfert d'objet entre deux personnages
 async function _vttMsConfirmSend(senderCharId, senderUid, invIndex, recipCharId) {
+  _msPop = null;
   invIndex = parseInt(invIndex);
   const sender = VS.characters[senderCharId]; if (!sender) return;
   const recip  = VS.characters[recipCharId];  if (!recip)  return;
@@ -1109,6 +1126,18 @@ function _msTabSorts(c, uid, canEdit) {
 
 // ─── Onglet Compte (or : recettes / dépenses) ─────────────────────
 // Réutilise la couche economy.js (useGold) + le modèle c.compte de la fiche.
+// Destinataires d'un don (joueurs présents autres que soi) → { charId, charNom, pseudo }.
+function _msPresentTargets(uid) {
+  return Object.entries(VS.presence || {})
+    .filter(([pUid]) => pUid !== uid)
+    .flatMap(([pUid, p]) => Object.values(VS.characters)
+      .filter(ch => ch.uid === pUid)
+      .map(ch => ({ charId: ch.id, charNom: ch.nom || p.pseudo, pseudo: p.pseudo })));
+}
+const _msParseDate = (d) => { const m = String(d || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/); return m ? new Date(+m[3] < 100 ? 2000 + +m[3] : +m[3], +m[2] - 1, +m[1]).getTime() : 0; };
+
+// Bourse (refonte) : solde en grand, reçus/dépensés, ajout, don en popover,
+// historique FUSIONNÉ chronologique (au lieu de deux colonnes).
 function _msTabCompte(c, uid, canEdit) {
   const compte   = c?.compte || { recettes: [], depenses: [] };
   const recettes = compte.recettes || [];
@@ -1117,55 +1146,36 @@ function _msTabCompte(c, uid, canEdit) {
   const totalD = depenses.reduce((s, d) => s + (parseFloat(d?.montant) || 0), 0);
   const solde  = calcOr(c);
 
-  const addForm = canEdit ? `
-    <div class="vtt-ms-cpt-add">
-      <div class="vtt-ms-cpt-fields">
-        <input id="vtt-ms-cpt-lib" class="vtt-ms-cpt-lib" type="text" placeholder="Libellé (ex. Vente potion)" maxlength="60">
-        <div class="vtt-ms-cpt-amt-wrap">
-          <input id="vtt-ms-cpt-amt" class="vtt-ms-cpt-amt" type="number" min="0" step="1" placeholder="0" inputmode="numeric"
-            onkeydown="if(event.key==='Enter')this.blur()">
-          <span class="vtt-ms-cpt-amt-suffix">or</span>
-        </div>
-      </div>
-      <div class="vtt-ms-cpt-btns">
-        <button class="vtt-ms-cpt-btn pos" data-vtt-fn="_vttMsCompteAdd" data-vtt-args="${c.id}|${uid}|1"  title="Ajouter une recette">+ Recette</button>
-        <button class="vtt-ms-cpt-btn neg" data-vtt-fn="_vttMsCompteAdd" data-vtt-args="${c.id}|${uid}|-1" title="Ajouter une dépense">− Dépense</button>
-        ${solde > 0 ? `<button class="vtt-ms-cpt-btn gold" data-vtt-fn="_vttMsSendGoldPicker" data-vtt-args="${c.id}|${uid}" title="Envoyer de l'or à un joueur présent">💰 Envoyer</button>` : ''}
-      </div>
+  const merged = [
+    ...recettes.map((r, i) => ({ ...r, type: 'recettes', idx: i, sign: 1 })),
+    ...depenses.map((r, i) => ({ ...r, type: 'depenses', idx: i, sign: -1 })),
+  ].map((e, order) => ({ ...e, _o: order }))
+   .sort((a, b) => (_msParseDate(b.date) - _msParseDate(a.date)) || (b._o - a._o));
+
+  const purse = `<div class="vtt-ms-purse">
+    <div class="vtt-ms-purse-v"><b>${solde}<small>or</small></b><span><i>+${totalR}</i> reçus · <u>−${totalD}</u> dépensés</span></div>
+    ${canEdit && solde > 0 ? `<button class="vtt-ms-purse-give" data-vtt-fn="_vttMsPop" data-vtt-args="gold|gold" data-pid="gold">${_msIco('send')} Donner</button>` : ''}
+  </div>`;
+
+  const addForm = canEdit ? `<div class="vtt-ms-tx-add">
+      <input id="vtt-ms-cpt-lib" class="vtt-ms-tx-inp" type="text" placeholder="Libellé (ex. Vente potion)" maxlength="60">
+      <input id="vtt-ms-cpt-amt" class="vtt-ms-tx-inp amt" type="number" min="1" step="1" placeholder="Montant" inputmode="numeric" onkeydown="if(event.key==='Enter')this.blur()">
+    </div>
+    <div class="vtt-ms-tx-btns">
+      <button class="vtt-ms-tx-btn pos" data-vtt-fn="_vttMsCompteAdd" data-vtt-args="${c.id}|${uid}|1">+ Recette</button>
+      <button class="vtt-ms-tx-btn neg" data-vtt-fn="_vttMsCompteAdd" data-vtt-args="${c.id}|${uid}|-1">− Dépense</button>
     </div>` : '';
 
-  // Liste compacte par type : 5 plus récentes (fin de tableau), récent en haut.
-  const histList = (list, type) => {
-    if (!list.length) return `<div class="vtt-ms-cpt-empty">Aucune entrée.</div>`;
-    return list.map((r, i) => ({ r, i })).slice(-5).reverse().map(({ r, i }) => `
-      <div class="vtt-ms-cpt-row">
-        <span class="vtt-ms-cpt-row-lib" title="${_esc(r.libelle || '')}">${_esc(r.libelle || '—')}</span>
-        <span class="vtt-ms-cpt-row-amt ${type === 'recettes' ? 'pos' : 'neg'}">${type === 'recettes' ? '+' : '−'}${r.montant || 0}</span>
-        ${canEdit ? `<button class="vtt-ms-cpt-del" data-vtt-fn="_vttMsCompteDel" data-vtt-args="${c.id}|${uid}|${type}|${i}" title="Supprimer">🗑️</button>` : ''}
-      </div>`).join('');
-  };
+  const hist = merged.length
+    ? merged.map(e => `<div class="vtt-ms-tx">
+        <small>${_esc(e.date || '')}</small>
+        <span title="${_esc(e.libelle || '')}">${_esc(e.libelle || '—')}</span>
+        <b class="${e.sign > 0 ? 'pos' : 'neg'}">${e.sign > 0 ? '+' : '−'}${e.montant || 0}</b>
+        ${canEdit ? `<button class="vtt-ms-tx-del" data-vtt-fn="_vttMsCompteDel" data-vtt-args="${c.id}|${uid}|${e.type}|${e.idx}" title="Supprimer">${_msIco('trash')}</button>` : ''}
+      </div>`).join('')
+    : '<div class="vtt-ms-empty">Aucun mouvement.</div>';
 
-  const txCount = recettes.length + depenses.length;
-  return `${_msTabIntro('compte', 'Bourse', `${solde} or`, `${txCount} mouvement${txCount > 1 ? 's' : ''} enregistré${txCount > 1 ? 's' : ''}`)}
-  <div class="vtt-ms-cpt">
-    <div class="vtt-ms-cpt-solde">
-      <div class="vtt-ms-cpt-solde-main">💰 <strong>${solde}</strong><span class="vtt-ms-cpt-or">or</span></div>
-      <div class="vtt-ms-cpt-solde-sub">
-        <span class="pos">+${totalR}</span> · <span class="neg">−${totalD}</span>
-      </div>
-    </div>
-    ${addForm}
-    <div class="vtt-ms-cpt-cols">
-      <div class="vtt-ms-cpt-col">
-        <div class="vtt-ms-cpt-col-hd pos">📈 Recettes</div>
-        ${histList(recettes, 'recettes')}
-      </div>
-      <div class="vtt-ms-cpt-col">
-        <div class="vtt-ms-cpt-col-hd neg">📉 Dépenses</div>
-        ${histList(depenses, 'depenses')}
-      </div>
-    </div>
-  </div>`;
+  return `${purse}${addForm}<div class="vtt-ms-sect-label">Historique <em>${merged.length}</em></div><div class="vtt-ms-txlist">${hist}</div>`;
 }
 
 // Ajoute une recette (sign>0) ou dépense (sign<0). Réutilise useGold (vérifie le
@@ -1191,16 +1201,21 @@ async function _vttMsCompteDel(charId, uid, type, idx) {
   if (type !== 'recettes' && type !== 'depenses') return;
   idx = parseInt(idx);
   const c = VS.characters[charId]; if (!c) return;
-  const compte = { recettes: [], depenses: [], ...(c.compte || {}) };
-  const list = [...(compte[type] || [])];
-  if (!list[idx]) return;
+  const prevCompte = { recettes: [], depenses: [], ...(c.compte || {}) };
+  const list = [...(prevCompte[type] || [])];
+  const removed = list[idx]; if (!removed) return;
   list.splice(idx, 1);
-  const newCompte = { ...compte, [type]: list };
-  try {
-    await updateDoc(_chrRef(charId), { compte: newCompte });
-    c.compte = newCompte;
+  const newCompte = { ...prevCompte, [type]: list };
+  c.compte = newCompte;
+  if (VS.miniUid) _renderMiniSheet(VS.miniUid);
+  try { await updateDoc(_chrRef(charId), { compte: newCompte }); }
+  catch (e) { console.error('[vtt] compte del', e); c.compte = prevCompte; if (VS.miniUid) _renderMiniSheet(VS.miniUid); showNotif('Erreur suppression', 'error'); return; }
+  showNotif('Mouvement supprimé', 'info', { action: { label: 'Annuler', onClick: () => {
+    const cc = VS.characters[charId]; if (!cc) return;
+    cc.compte = prevCompte;
     if (VS.miniUid) _renderMiniSheet(VS.miniUid);
-  } catch (e) { console.error('[vtt] compte del', e); showNotif('Erreur suppression', 'error'); }
+    updateDoc(_chrRef(charId), { compte: prevCompte }).catch(() => showNotif('Restauration impossible', 'error'));
+  } } });
 }
 
 // Envoyer de l'or à un joueur présent — choix du montant + destinataire (mini-fiche).
@@ -1238,7 +1253,8 @@ async function _vttMsConfirmSendGold(senderCharId, senderUid, recipCharId) {
   if (!_msCanEdit(senderUid)) return;
   const sender = VS.characters[senderCharId]; if (!sender) return;
   const recip  = VS.characters[recipCharId];  if (!recip)  return;
-  const amtEl = document.getElementById('vtt-ms-gold-amt');
+  const amtEl = document.getElementById('vtt-ms-gold-amt');   // encore présent (popover pas re-rendu)
+  _msPop = null;                                              // fermé au prochain rendu
   const montant = Math.floor(Math.abs(parseFloat(amtEl?.value) || 0));
   if (!montant) { showNotif('Montant invalide', 'info'); amtEl?.focus(); return; }
   if (montant > calcOr(sender)) { showNotif('Solde insuffisant', 'error'); return; }
@@ -1339,7 +1355,7 @@ function _msTabInventaire(c, uid, canEdit) {
         ${canEdit?`<div class="vtt-ms-it-acts">
           ${isEquipCat && (!isEq || total > 1) ? `<button class="vtt-ms-it-btn" data-vtt-fn="_vttMsEquipPicker" data-vtt-args="${c.id}|${uid}|${idxToEquip}" title="Équiper" aria-label="Équiper">${_msIco('equip')}</button>` : ''}
           ${isEq ? `<button class="vtt-ms-it-btn" data-vtt-fn="_vttMsUnequipAll" data-vtt-args="${c.id}|${uid}|${idxToUnequip}" title="Déséquiper" aria-label="Déséquiper">${_msIco('unlock')}</button>` : ''}
-          <button class="vtt-ms-it-btn" data-vtt-fn="_vttMsSendPicker" data-vtt-args="${c.id}|${uid}|${firstIdx}" title="Donner" aria-label="Donner">${_msIco('send')}</button>
+          <button class="vtt-ms-it-btn" data-vtt-fn="_vttMsPop" data-vtt-args="send|send-${firstIdx}|${firstIdx}" data-pid="send-${firstIdx}" title="Donner" aria-label="Donner">${_msIco('send')}</button>
           <button class="vtt-ms-it-btn danger" data-vtt-fn="_vttMsDeleteItem" data-vtt-args="${c.id}|${uid}|${firstIdx}" title="Supprimer" aria-label="Supprimer">${_msIco('trash')}</button>
         </div>`:''}
       </div>`;
