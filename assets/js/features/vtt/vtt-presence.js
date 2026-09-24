@@ -13,6 +13,7 @@ import { _esc } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { confirmModal } from '../../shared/modal.js';
 import { sortCharactersForDisplay } from '../../shared/char-stats.js';
+import { makeStatsSessionKey, registerStatsSession, setActiveStatsSession, statsDateKey } from '../../shared/stats.js';
 import { _sesRef, _pingRef } from './vtt-refs.js';   // refs Firestore (leaf)
 import { _renderTraySoon } from './vtt-tray.js';
 import { _renderMiniSheet, _vttToggleMiniSheet } from './vtt-mini-fiche.js';
@@ -101,18 +102,36 @@ async function _vttToggleSessionLive() {
     { title: 'Terminer la session ?', confirmLabel: 'Terminer', cancelLabel: 'Continuer à jouer', icon: '⏹️' },
   )) return;
   const live = !wasLive;
-  const techniqueSessionKey = live ? Date.now() : (VS.session?.techniqueSessionKey || null);
+  const startedAt = live ? Date.now() : null;
+  const techniqueSessionKey = live ? startedAt : (VS.session?.techniqueSessionKey || null);
+  const statsSessionDate = live ? statsDateKey(new Date(startedAt)) : (VS.session?.statsSessionDate || '');
+  const statsSessionKey = live ? makeStatsSessionKey(statsSessionDate, startedAt) : (VS.session?.statsSessionKey || '');
   const previous = { ...VS.session };
   _sessionUpdating = true;
-  VS.session = { ...VS.session, live, ...(live ? { techniqueSessionKey } : {}) };
+  VS.session = { ...VS.session, live, ...(live ? { techniqueSessionKey, statsSessionKey, statsSessionDate } : {}) };
+  setActiveStatsSession(live ? { key: statsSessionKey, date: statsSessionDate } : null);
   _renderSessionBtn();
   try {
-    await setDoc(_sesRef(), live
-      ? { live: true, liveSince: serverTimestamp(), techniqueSessionKey }
-      : { live: false }, { merge: true });
+    if (live) {
+      await setDoc(_sesRef(), {
+        live: true,
+        liveSince: serverTimestamp(),
+        techniqueSessionKey,
+        statsSessionKey,
+        statsSessionDate,
+      }, { merge: true });
+      // Le descriptif améliore les libellés de la page Stats. Les compteurs et
+      // les logs portent déjà la clé, donc un échec isolé reste récupérable.
+      await registerStatsSession({ key: statsSessionKey, date: statsSessionDate, startedAt });
+    } else {
+      await setDoc(_sesRef(), { live: false }, { merge: true });
+    }
     showNotif(live ? '🔴 Session déclarée en cours.' : '⏹ Session terminée.', 'success');
   } catch {
     VS.session = previous;
+    setActiveStatsSession(previous.live && previous.statsSessionKey
+      ? { key: previous.statsSessionKey, date: previous.statsSessionDate }
+      : null);
     showNotif('Erreur d\'enregistrement de la session.', 'error');
   } finally {
     _sessionUpdating = false;

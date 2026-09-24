@@ -117,10 +117,17 @@ export function _vttDiscardOptimisticCombatLog(id) {
 /** Publie n'importe quel résultat d'action VTT sans faire attendre son rendu.
  * Le listener remplace ensuite l'entrée locale grâce au même id Firestore. */
 export async function _vttPublishOptimisticLog(payload, { errorMessage = 'L’action a été appliquée, mais son message n’a pas pu être enregistré.' } = {}) {
+  const sessionPayload = VS.session?.live && VS.session?.statsSessionKey
+    ? {
+        ...payload,
+        statsSessionKey: VS.session.statsSessionKey,
+        statsSessionDate: VS.session.statsSessionDate || '',
+      }
+    : payload;
   const logRef = doc(_logCol());
-  _vttShowOptimisticCombatLog(logRef.id, payload);
+  _vttShowOptimisticCombatLog(logRef.id, sessionPayload);
   try {
-    await setDoc(logRef, payload);
+    await setDoc(logRef, sessionPayload);
     return true;
   } catch (error) {
     _vttDiscardOptimisticCombatLog(logRef.id);

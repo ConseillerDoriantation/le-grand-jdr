@@ -1370,6 +1370,10 @@ async function _vttMsCraft(charId, uid, recipeId) {
     characterImage: c.photoURL || c.photo || c.avatar || null,
     charName: c.nom || '', recipeName: recipe.nom || '',
     statLabel: 'Artisanat (INT)', mod, d20, total, dd: _MS_CRAFT_DD, passed,
+    ...(VS.session?.live && VS.session?.statsSessionKey ? {
+      statsSessionKey: VS.session.statsSessionKey,
+      statsSessionDate: VS.session.statsSessionDate || '',
+    } : {}),
     createdAt: serverTimestamp(),
   }).catch(() => {});
 

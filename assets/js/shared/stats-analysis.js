@@ -121,7 +121,9 @@ export function aggregateVttRollDetails(logs = [], {
   hasManualCombatCorrection = null,
   isCharacterLogExcluded = null,
 } = {}) {
-  const dates = dateKeys ? new Set(dateKeys) : null;
+  // `dateKeys` accepte désormais aussi les identifiants de séance VTT. Les
+  // anciens logs sans identifiant continuent d'être filtrés par YYYY-MM-DD.
+  const sessions = dateKeys ? new Set(dateKeys) : null;
   const byCharacter = {};
   const combatActionCandidates = [];
   let relevantLogs = 0;
@@ -145,18 +147,19 @@ export function aggregateVttRollDetails(logs = [], {
   for (const log of logs || []) {
     if (!log || log.actionUndone || log.statsExcluded === true) continue;
     const logDate = vttLogDateKey(log.createdAt);
-    if (dates && !dates.has(logDate)) continue;
+    const logSessionKey = log.statsSessionKey || logDate;
+    if (sessions && !sessions.has(logSessionKey)) continue;
 
     // Les entrées principales sont corrélées après lecture du journal : certains
     // sorts ont historiquement publié un cast puis une attaque pour la même action.
     if (_COMBAT_ACTION_TYPES.has(log.type)) {
       const id = resolve(log, 'attack');
-      if (id && !isCharacterLogExcluded?.(id, logDate, log)) combatActionCandidates.push({ id, log });
+      if (id && !isCharacterLogExcluded?.(id, logSessionKey, log)) combatActionCandidates.push({ id, log });
     }
 
     if (log.type === 'roll' || log.type === 'craft') {
       const id = resolve(log, 'skill');
-      if (id && isCharacterLogExcluded?.(id, logDate, log)) continue;
+      if (id && isCharacterLogExcluded?.(id, logSessionKey, log)) continue;
       const natural = log.type === 'craft' ? log.d20 : log.rollRaw;
       const total = log.type === 'craft' ? log.total : log.rollResult;
       const skill = String(log.type === 'craft' ? 'Artisanat' : (log.rollSkill || '')).trim();
@@ -178,7 +181,7 @@ export function aggregateVttRollDetails(logs = [], {
     // le taux de touche, mais comptent bien dans les temps forts critiques.
     if ((log.type === 'attack' || log.type === 'attack-multi') && log.isHeal && finite(log.hitD20)) {
       const id = resolve(log, 'attack');
-      if (!id || isCharacterLogExcluded?.(id, logDate, log)) continue;
+      if (!id || isCharacterLogExcluded?.(id, logSessionKey, log)) continue;
       const combat = entryFor(id).combat;
       combat.supplementalRolls += 1;
       combat.supplementalNaturalTotal += Number(log.hitD20);
@@ -202,7 +205,7 @@ export function aggregateVttRollDetails(logs = [], {
         : legacyMatch ? Number(legacyMatch[1]) : (log.castEC === true ? 1 : null);
       if (castNatural != null) {
         const id = resolve(log, 'attack');
-        if (!id || isCharacterLogExcluded?.(id, logDate, log)) continue;
+        if (!id || isCharacterLogExcluded?.(id, logSessionKey, log)) continue;
         const combat = entryFor(id).combat;
         combat.supplementalRolls += 1;
         combat.supplementalNaturalTotal += castNatural;
@@ -222,7 +225,7 @@ export function aggregateVttRollDetails(logs = [], {
       const actionHit = !log.shieldCancelled && targets.some(target => target?.hit) ? 1 : 0;
       const actionCrit = log.isCrit ? 1 : 0;
       const actionFumble = log.isFumble ? 1 : 0;
-      const combat = id && !isCharacterLogExcluded?.(id, logDate, log) ? entryFor(id).combat : null;
+      const combat = id && !isCharacterLogExcluded?.(id, logSessionKey, log) ? entryFor(id).combat : null;
       if (combat) {
         combat.attackActions += 1;
         combat.hits += actionHit;
@@ -280,14 +283,14 @@ export function aggregateVttRollDetails(logs = [], {
         actionDamage += appliedDamage;
         actionDamageEvents += appliedDamage > 0 ? 1 : 0;
         if (!targetId) continue;
-        if (isCharacterLogExcluded?.(targetId, logDate, log)) continue;
+        if (isCharacterLogExcluded?.(targetId, logSessionKey, log)) continue;
         const current = actualTakenByCharacter.get(targetId) || { damage: 0, events: 0 };
         current.damage += appliedDamage;
         current.events += appliedDamage > 0 ? 1 : 0;
         actualTakenByCharacter.set(targetId, current);
       }
       for (const [targetId, actual] of actualTakenByCharacter) {
-        if (hasManualCombatCorrection?.(targetId, logDate, 'taken')) continue;
+        if (hasManualCombatCorrection?.(targetId, logSessionKey, 'taken')) continue;
         const stored = log.statsDelta?.chars?.[targetId]?.combat || {};
         const corrections = (entryFor(targetId).combat.receivedOvercounts ??= {});
         const recordedDamage = num(stored.dmgTaken);
@@ -315,7 +318,7 @@ export function aggregateVttRollDetails(logs = [], {
         const recordedDealt = num(storedAttacker.dmgDealt);
         const recordedDamageTotal = num(storedAttacker.damageTotal);
         const recordedDamageEvents = num(storedAttacker.damageEvents);
-        const manualDamageDealt = !!hasManualCombatCorrection?.(id, logDate, 'dealt');
+        const manualDamageDealt = !!hasManualCombatCorrection?.(id, logSessionKey, 'dealt');
         if (manualDamageDealt) combat.manualDamageDealt = true;
         if (!manualDamageDealt) {
           if (recordedDealt > actionDamage) dealtCorrections.dmgDealt = num(dealtCorrections.dmgDealt) + recordedDealt - actionDamage;

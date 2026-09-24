@@ -229,6 +229,32 @@ test('aggregateVttRollDetails reconstruit les moyennes depuis les logs VTT', () 
   assert.equal(result.relevantLogs, 7);
 });
 
+test('deux séances le même jour gardent leurs journaux statistiques séparés', () => {
+  const createdAt = new Date(2026, 8, 24, 15);
+  const afternoonKey = '2026-09-24__apresmidi';
+  const eveningKey = '2026-09-24__soir';
+  const logs = [
+    {
+      type: 'attack', sourceCharacterId: 'apres-midi', hitD20: 14, hitTotal: 19,
+      hit: true, dmgTotal: 8, statsSessionKey: afternoonKey, createdAt,
+    },
+    {
+      type: 'attack', sourceCharacterId: 'soir', hitD20: 17, hitTotal: 22,
+      hit: true, dmgTotal: 11, statsSessionKey: eveningKey, createdAt,
+    },
+  ];
+
+  const afternoon = aggregateVttRollDetails(logs, { dateKeys: [afternoonKey] });
+  const evening = aggregateVttRollDetails(logs, { dateKeys: [eveningKey] });
+
+  assert.equal(afternoon.relevantLogs, 1);
+  assert.equal(afternoon.byCharacter['apres-midi'].combat.damageTotal, 8);
+  assert.equal(afternoon.byCharacter.soir, undefined);
+  assert.equal(evening.relevantLogs, 1);
+  assert.equal(evening.byCharacter.soir.combat.damageTotal, 11);
+  assert.equal(evening.byCharacter['apres-midi'], undefined);
+});
+
 test('les actions explicitement hors statistiques ne reviennent pas par le journal VTT', () => {
   const createdAt = new Date(2026, 7, 11, 12);
   const result = aggregateVttRollDetails([

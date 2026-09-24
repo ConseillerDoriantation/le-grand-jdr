@@ -75,8 +75,22 @@ function _missionName(mission = {}, fallback = '') {
   return (mission.titre || mission.nom || fallback || '').trim() || 'Mission non reliée';
 }
 
-function _sessionHasStats(stats, dateKey) {
-  return Object.values(stats?.chars || {}).some(c => c?.byDate?.[dateKey]);
+function _statsSessionDate(stats, sessionKey) {
+  const stored = stats?.sessions?.[sessionKey]?.date;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(stored || ''))) return stored;
+  const prefix = String(sessionKey || '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(prefix) ? prefix : '';
+}
+
+function _sessionHasStats(stats, dateKey, groupId = '') {
+  return Object.values(stats?.chars || {}).some(c => {
+    if (c?.byDate?.[dateKey]) return true;
+    return Object.keys(c?.bySession || {}).some(sessionKey => {
+      if (_statsSessionDate(stats, sessionKey) !== dateKey) return false;
+      const statsGroupId = stats?.sessions?.[sessionKey]?.groupId || '';
+      return !groupId || (!!statsGroupId && statsGroupId === groupId);
+    });
+  });
 }
 
 function _visibleToCurrentUser(raw = {}, group = null) {
@@ -117,22 +131,26 @@ function _normalizeSessions({ agendaDoc, stats, quests, story }) {
       orphanedGroup: Boolean(raw.questId && !group),
       groupLabel: group ? _groupName(group) : (raw.questTitle || 'Groupe non relié'),
       raw,
-      hasStats: _sessionHasStats(stats, raw.date),
+      hasStats: _sessionHasStats(stats, raw.date, groupId),
     });
   });
 
-  const statsDates = new Set(Object.keys(stats?.sessions || {}));
+  const statsSessions = new Set(Object.keys(stats?.sessions || {}));
   Object.values(stats?.chars || {}).forEach(c => {
-    Object.keys(c?.byDate || {}).forEach(date => statsDates.add(date));
+    Object.keys(c?.byDate || {}).forEach(date => statsSessions.add(date));
+    Object.keys(c?.bySession || {}).forEach(sessionKey => statsSessions.add(sessionKey));
   });
 
-  [...statsDates].forEach(date => {
-    const raw = stats?.sessions?.[date] || {};
+  [...statsSessions].forEach(sessionKey => {
+    const raw = stats?.sessions?.[sessionKey] || {};
+    const date = _statsSessionDate(stats, sessionKey);
     const group = raw.groupId ? questById.get(raw.groupId) || null : null;
     if (!_visibleToCurrentUser({}, group)) return;
     const mission = raw.missionId ? missionById.get(raw.missionId) || null : null;
-    const existing = [...map.values()].find(s =>
-      s.date === date && (!raw.groupId || !s.groupId || s.groupId === raw.groupId));
+    const sameDayAgenda = [...map.values()].filter(s => s.source === 'agenda' && s.date === date);
+    const existing = raw.groupId
+      ? sameDayAgenda.find(s => !s.groupId || s.groupId === raw.groupId)
+      : (sameDayAgenda.length === 1 ? sameDayAgenda[0] : null);
     if (existing) {
       existing.hasStats = true;
       existing.statsRaw = raw;
@@ -143,7 +161,7 @@ function _normalizeSessions({ agendaDoc, stats, quests, story }) {
       }
       return;
     }
-    const key = `stats:${date}:${raw.groupId || 'none'}`;
+    const key = `stats:${sessionKey}:${raw.groupId || 'none'}`;
     map.set(key, {
       key,
       source: 'stats',
