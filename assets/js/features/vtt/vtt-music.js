@@ -193,16 +193,6 @@ function _setAmbienceVolume(v) {
   return clamped;
 }
 
-// Icône visibilité joueurs : œil (visible) / œil barré (masqué). SVG monochrome
-// (currentColor) — remplace l'ancien émoji 🙈.
-function _eyeSvg(off) {
-  const p = off
-    ? '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20C5 20 1 12 1 12a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'
-    : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
-  return `<svg class="vtt-eye" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
-}
-
-
 function _vttPreview(soundId, btn) {
   const sound = _sounds.find(s=>s.id===soundId); if (!sound) return;
   // Même son → stop
@@ -1069,43 +1059,43 @@ function _syncMusicPlayback(ms) {
   if (panel?.dataset.open==='1') _reflectPlaybackUi();
 }
 
-// ── Menu contextuel son ──────────────────────────────────────────────
-// currentPlId : playlist d'où vient le clic (undefined = pool)
+// Icône œil pour le menu contextuel : dimensionnée en inline car le menu est
+// monté sur <body>, hors `.vtt-music-panel` (où `svg.i` est stylé).
+function _ctxEye(off) {
+  const p = off
+    ? '<path d="M9.9 5.2A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-2.6 3.4"/><path d="M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><line x1="2" y1="2" x2="22" y2="22"/>'
+    : '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
+  return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:.55rem" aria-hidden="true">${p}</svg>`;
+}
+
+// ── Menu contextuel son (clic droit / bouton ⋯) ──────────────────────
+// currentPlId : playlist affichée d'où vient le clic (undefined = pool / tous).
 function _vttSoundCtxMenu(e, soundId, currentPlId) {
   const sound = _sounds.find(s=>s.id===soundId); if (!sound) return;
-  const ms = _musicState;
-  const inSingle = ms.playing && ms.currentSoundId === soundId && !ms.currentPlaylistId;
-  const isAmb = ms.ambienceSoundId === soundId;
+  const hidden = sound.hideTitle === true;
 
   const items = [
-    { label: inSingle && !ms.loop ? '⏹ Arrêter' : '▶ Lire', fn: () => _vttPlaySound(soundId, false) },
-    { label: inSingle && ms.loop ? '⏹ Arrêter la boucle' : '🔁 Jouer en boucle', fn: () => _vttPlaySound(soundId, true) },
-    { label: isAmb ? '⏹ Arrêter l’ambiance' : '🌫 Jouer en ambiance', fn: () => _vttPlayAmbience(soundId) },
+    { label: 'Renommer', fn: () => _vttRenameSound(soundId) },
+    { label: `${_ctxEye(!hidden)}${hidden ? 'Montrer le titre aux joueurs' : 'Masquer le titre aux joueurs'}`,
+      fn: () => _vttMusicToggleSoundTitle(soundId) },
     '---',
-    {
-      label: sound.hideTitle === true ? `${_eyeSvg(false)} Afficher le titre aux joueurs` : `${_eyeSvg(true)} Masquer le titre aux joueurs`,
-      fn: () => _vttMusicToggleSoundTitle(soundId),
-    },
   ];
 
-  // Playlists cibles (exclut celle d'où il vient s'il y est déjà)
-  const targets = _playlists.filter(pl =>
-    pl.id !== currentPlId && !(pl.soundIds||[]).includes(soundId)
-  );
-  if (targets.length) {
-    items.push('---');
-    items.push({ label: `<span style="color:var(--text-dim);font-size:.65rem">Ajouter à…</span>`, fn: null });
-    targets.forEach(pl => items.push({
-      label: `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${pl.color||'#6366f1'};margin-right:.4rem"></span>${_esc(pl.name)}`,
-      fn: () => _vttAddSoundToPlaylist(pl.id, soundId),
-    }));
-  }
+  // Toutes les playlists : carré de couleur + ✓ si le son y est ; clic = bascule.
+  _playlists.forEach(pl => {
+    const inPl = (pl.soundIds || []).includes(soundId);
+    items.push({
+      label: `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${pl.color || '#6366f1'};vertical-align:middle;margin-right:.55rem"></span>${inPl ? '✓ ' : ''}${_esc(pl.name)}`,
+      fn: () => (inPl ? _vttRemoveSoundFromPlaylist(pl.id, soundId) : _vttAddSoundToPlaylist(pl.id, soundId)),
+    });
+  });
 
   items.push('---');
-  if (currentPlId) {
-    items.push({ label: '✕ Retirer de cette playlist', fn: () => _vttRemoveSoundFromPlaylist(currentPlId, soundId) });
+  const cur = currentPlId ? _playlists.find(p => p.id === currentPlId) : null;
+  if (cur && (cur.soundIds || []).includes(soundId)) {
+    items.push({ label: `Retirer de « ${_esc(cur.name)} »`, fn: () => _vttRemoveSoundFromPlaylist(cur.id, soundId) });
   }
-  items.push({ label: '🗑 Supprimer définitivement', fn: () => _vttDeleteSound(soundId) });
+  items.push({ label: `<span style="color:var(--crimson)">Supprimer le son</span>`, fn: () => _vttDeleteSound(soundId) });
 
   _showCtxMenu(e.clientX, e.clientY, items);
 }
@@ -1135,7 +1125,7 @@ function _vttMusicToolsMenu(e) {
   if (!STATE.isAdmin) return;
   const hideOn = !!_musicState.hideTitle;
   _showCtxMenu(e.clientX, e.clientY, [
-    { label: hideOn ? `${_eyeSvg(false)} Réafficher tous les titres aux joueurs` : `${_eyeSvg(true)} Masquer tous les titres aux joueurs`, fn: () => _vttMusicToggleHideTitle() },
+    { label: hideOn ? `${_ctxEye(false)}Réafficher tous les titres aux joueurs` : `${_ctxEye(true)}Masquer tous les titres aux joueurs`, fn: () => _vttMusicToggleHideTitle() },
     { label: '🧹 Nettoyer les sons manquants', fn: () => _vttCleanMissingSounds() },
   ]);
 }
@@ -1180,6 +1170,15 @@ async function _vttAddSonUrl() {
   if (!name) return;
   await addDoc(_sonsCol(), { name, url, createdAt:serverTimestamp(), addedBy:STATE.user?.uid||null });
   showNotif(`✅ "${name}" ajouté`, 'success');
+}
+
+async function _vttRenameSound(soundId) {
+  const s = _sounds.find(x=>x.id===soundId); if (!s) return;
+  const name = (await promptModal('Nom du son :', { title: 'Renommer le son', default: s.name || '', required: true }))?.trim();
+  if (!name || name === s.name) return;
+  // Le snapshot vttSons déclenche le re-rendu ; pas de MAJ optimiste nécessaire.
+  await updateDoc(_sonRef(soundId), { name })
+    .catch(err => { console.error('[vtt music] renommage du son:', err); showNotif('Impossible de renommer le son', 'error'); });
 }
 
 async function _vttDeleteSound(soundId) {
