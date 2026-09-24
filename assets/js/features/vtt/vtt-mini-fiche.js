@@ -52,6 +52,7 @@ const _MS_STATS   = [
   { key:'sagesse',      abbr:'SAG' }, { key:'charisme',     abbr:'CHA' },
 ];
 let _msOpenNote   = null; // index de la note dépliée (onglet Notes)
+let _msOpenSpell  = null; // id/index du sort déplié (onglet Sorts)
 let _msInvQuery   = '', _msInvCat  = 'all';
 let _msSortQuery  = '', _msSortCat = 'all';
 let _msCraftQuery = '';   // filtre de recherche de l'onglet Craft
@@ -246,7 +247,7 @@ function _msApplyInvFilter() {
 // Applique le filtre Sorts (catégorie / deck actif + recherche) sans re-render.
 function _msApplySortFilter() {
   const q = _norm(_msSortQuery);
-  const cards = document.querySelectorAll('#vtt-mini-panel .vtt-ms-spellgrid .cs-spellcard');
+  const cards = document.querySelectorAll('#vtt-mini-panel .vtt-ms-spellgrid .vtt-ms-sp');
   let anyVisible = false;
   cards.forEach(card => {
     const catOk = _msSortCat === 'all'
@@ -949,51 +950,78 @@ function _vttSpellCardHtml(s, i, c, uid, canEdit, deckCount = 0, deckMax = Infin
   </article>`;
 }
 
+// Sort déplié (id ou index) — clic sur la ligne (hors interrupteur de Deck).
+function _vttMsToggleSpell(id) { _msOpenSpell = String(_msOpenSpell) === String(id) ? null : id; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
+
+// Ligne de sort compacte (refonte) : interrupteur Deck · icône teintée · nom +
+// badges · action + 2 effets · coût. Un clic déplie tout (effets/desc/MJ/runes).
+function _msSpellLine(s, i, c, uid, canEdit, deckCount, deckMax) {
+  const runes = s.runes || [];
+  const types = (Array.isArray(s.types) && s.types.length) ? s.types : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : []));
+  const action = _vttSpellActionMode(s);
+  const ACT = { action: ['Act.', '#e8b84b'], action_bonus: ['Bonus', '#f97316'], reaction: ['Réac.', '#a78bfa'] };
+  const acfg = ACT[action] || ACT.action;
+  const vs = s.mjValidation || (s.mjValidated ? 'ok' : 'pending');
+  const typeCol = types.includes('offensif') ? '#ff6b6b' : types.includes('defensif') ? '#22c38e' : '#b47fff';
+  const chips = _vttSpellChips(s, c);
+  const fx = chips.slice(0, 2).map(ch => `<span class="vtt-ms-sp-fx" style="--fxc:${ch.color}">${ch.icon} ${_esc(ch.val)}</span>`).join('');
+  const alwaysPrepared = isAlwaysPreparedSpell(s);
+  const validationAllows = STATE.isAdmin || vs === 'ok';
+  const deckAllows = deckHasRoomFor(s, c.deck_sorts, deckMax);
+  const canActivate = validationAllows && deckAllows;
+  const lockTitle = !validationAllows ? 'Doit être validé par le MJ'
+    : !deckAllows ? `Deck plein (${deckCount}/${deckMax}) — retire un sort` : (s.actif ? 'Retirer du deck' : 'Ajouter au deck');
+  const toggle = alwaysPrepared
+    ? '<span class="vtt-ms-sp-tg always" title="Toujours prêt · aucun emplacement"></span>'
+    : canEdit
+      ? `<button class="vtt-ms-sp-tg${s.actif ? ' on' : ''}${(!canActivate && !s.actif) ? ' lock' : ''}" data-vtt-fn="_vttToggleMsSort" data-vtt-args="${c.id}|${uid}|${i}" title="${lockTitle}"></button>`
+      : `<span class="vtt-ms-sp-tg${s.actif ? ' on' : ''}"></span>`;
+  const cost = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : (parseInt(s.pm) || 0);
+  const badges = `${alwaysPrepared ? '<span class="vtt-ms-sp-badge inf" title="Toujours prêt">∞</span>' : ''}${vs === 'pending' ? '<span class="vtt-ms-sp-badge wait">À valider</span>' : vs === 'no' ? '<span class="vtt-ms-sp-badge no">Refusé</span>' : ''}`;
+  const open = String(_msOpenSpell) === String(s.id || i);
+  let expand = '';
+  if (open) {
+    const counts = {}; _vttDisplayRunes(runes).forEach(r => { counts[r] = (counts[r] || 0) + 1; });
+    const runeChips = Object.keys(counts).length ? `<div class="vtt-ms-sp-chips">${Object.entries(counts).map(([nom, n]) => { const m = _VTT_RUNE_META[nom] || { icon: '•', color: '#888' }; return `<span class="vtt-ms-sp-rune" style="--rc:${m.color}">${m.icon} ${_esc(nom)}${n > 1 ? ` ×${n}` : ''}</span>`; }).join('')}</div>` : '';
+    const allChips = chips.length > 2 ? `<div class="vtt-ms-sp-chips">${chips.map(ch => `<span class="vtt-ms-sp-chip" style="color:${ch.color}">${ch.icon} ${_esc(ch.val)}</span>`).join('')}</div>` : '';
+    expand = `<div class="vtt-ms-sp-x">${allChips}${s.effet ? `<p>${_esc(s.effet)}</p>` : ''}${s.mjNotes ? `<div class="vtt-ms-sp-mjn"><b>MJ</b> ${_esc(s.mjNotes)}</div>` : ''}${runeChips}</div>`;
+  }
+  return `<div class="vtt-ms-sp${open ? ' open' : ''}${s.actif ? '' : ' off'}" data-name="${_esc(_norm(s.nom || ''))}" data-cat="${_esc(s.catId || '__none')}" data-actif="${s.actif ? 1 : 0}">
+    <div class="vtt-ms-sp-row" data-vtt-fn="_vttMsToggleSpell" data-vtt-args="${s.id || i}">
+      ${toggle}
+      <span class="vtt-ms-sp-ico" style="--tc:${typeCol}">${s.icon ? _esc(s.icon) : '✦'}</span>
+      <div class="vtt-ms-sp-b"><div class="vtt-ms-sp-nm"><span>${_esc(s.nom || 'Sans nom')}</span>${badges}</div><div class="vtt-ms-sp-meta"><span class="vtt-ms-sp-act" style="--ac:${acfg[1]}">${acfg[0]}</span>${fx}</div></div>
+      <div class="vtt-ms-sp-cost"><b>${cost}</b><small>${_esc(spellCostRes(s).label)}</small></div>
+    </div>${expand}</div>`;
+}
+
 function _msTabSorts(c, uid, canEdit) {
   const sorts = c?.deck_sorts || [];
   if (!sorts.length) return '<div class="vtt-ms-empty">Aucun sort</div>';
   const deckUsage = getDeckUsage(sorts);
-  const deckCount = deckUsage.used;
-  const deckFree = deckUsage.free;
-  const deckMax = calcDeckMax(c);
-  const over = deckCount > deckMax;
-  const validCount = sorts.filter(s => (s.mjValidation || (s.mjValidated ? 'ok' : 'pending')) === 'ok').length;
-  // Σ PM du deck : ne totalise que les sorts payés en PM (même réserve).
+  const deckCount = deckUsage.used, deckFree = deckUsage.free, deckMax = calcDeckMax(c);
+  const full = deckCount >= deckMax;
   const pmTotal = sorts.filter(s => s.actif).reduce((sum, s) => {
     if (spellCostRes(s).id !== 'pm') return sum;
     const pm = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : (parseInt(s.pm) || 0);
     return sum + Math.max(0, pm);
   }, 0);
-  const intro = _msTabIntro('sorts', 'Sorts', `${deckCount}/${deckMax}${deckFree ? ` +${deckFree}` : ''}`, `${validCount} validé${validCount > 1 ? 's' : ''} · ${pmTotal} PM dans le deck`);
 
-  // Barre de filtre : Tous · ⚡ Deck actif · catégories du perso (présentes) · Sans cat.
+  // Jauge de Deck en segments (+ « toujours prêts » en pointillé).
+  const gauge = `<div class="vtt-ms-deck${full ? ' full' : ''}"><b>${deckCount}/${deckMax}</b><div class="vtt-ms-deck-g">${Array.from({ length: deckMax }, (_, k) => `<i class="${k < deckCount ? 'on' : ''}"></i>`).join('')}${Array.from({ length: deckFree }, () => '<i class="free" title="Toujours prêt"></i>').join('')}</div><small>${pmTotal} PM au total</small></div>`;
+
+  // Barre de filtre (existante) : Tous · ⚡ Deck · catégories · Sans cat.
   let filterBar = '';
   if (sorts.length >= 4) {
     const cats = (c?.sort_cats || []).filter(ct => sorts.some(s => s.catId === ct.id));
-    const chips = [
-      { key:'all',    label:'Tous' },
-      { key:'__deck', label:`⚡ Deck (${deckUsage.active})` },
-      ...cats.map(ct => ({ key: ct.id, label: ct.nom || 'Catégorie', color: ct.couleur })),
-    ];
-    if (sorts.some(s => !s.catId)) chips.push({ key:'__none', label:'Sans cat.' });
-    // Garde-fou : si la catégorie active n'existe plus, on retombe sur "Tous".
+    const chips = [{ key: 'all', label: 'Tous' }, { key: '__deck', label: `⚡ Deck (${deckUsage.active})` }, ...cats.map(ct => ({ key: ct.id, label: ct.nom || 'Catégorie', color: ct.couleur }))];
+    if (sorts.some(s => !s.catId)) chips.push({ key: '__none', label: 'Sans cat.' });
     if (!chips.some(ch => ch.key === _msSortCat)) _msSortCat = 'all';
     filterBar = _msFilterBar('sorts', chips, _msSortQuery);
-  } else {
-    _msSortCat = 'all'; _msSortQuery = '';
-  }
+  } else { _msSortCat = 'all'; _msSortQuery = ''; }
 
-  return `
-    ${intro}
-    <div class="vtt-ms-deckbar${over ? ' is-over' : ''}">
-      <span class="vtt-ms-deck-lbl">⚡ Deck</span>
-      <span class="vtt-ms-deck-val">${deckCount}<small>/${deckMax}${deckFree ? ` · +${deckFree} libre${deckFree > 1 ? 's' : ''}` : ''}</small></span>
-      ${canEdit ? `<span class="vtt-ms-deck-hint">Coche un sort pour l'ajouter / le retirer du deck</span>` : ''}
-    </div>
-    ${filterBar}
-    <div class="cs-v3"><div class="cs-spellcard-grid vtt-ms-spellgrid">
-      ${sorts.map((s, i) => _vttSpellCardHtml(s, i, c, uid, canEdit, deckCount, deckMax)).join('')}
-    </div></div>
+  return `${gauge}${filterBar}
+    <div class="vtt-ms-spellgrid">${sorts.map((s, i) => _msSpellLine(s, i, c, uid, canEdit, deckCount, deckMax)).join('')}</div>
     <div class="vtt-ms-filter-empty" data-kind="sorts" style="display:none">Aucun sort ne correspond.</div>`;
 }
 
@@ -1767,6 +1795,7 @@ export {
   _vttMsSac,
   _vttMsGoPurse,
   _vttMsPop,
+  _vttMsToggleSpell,
   _vttMsSaveNote,
   _vttMsSendPicker,
   _vttMsSlotChange,
