@@ -12859,3 +12859,33 @@ button.vtt-ms-fact:last-child:hover { border-right-color: transparent; }
 .vtt-ms-it-btn:hover { background:var(--bg-card2,var(--bg-panel)); color:var(--text); }
 .vtt-ms-it-btn.danger:hover { color:var(--crimson,#ff5a7e); background:color-mix(in srgb,var(--crimson,#ff5a7e) 12%,transparent); }
 .vtt-ms-it-btn svg { width:15px; height:15px; }
+
+/* Sac › Recettes (cartes) */
+.vtt-mini-panel .vtt-ms-craft { display:flex; flex-direction:column; gap:8px; }
+.vtt-mini-panel .vtt-ms-craft-card { border:1px solid var(--border); border-radius:12px; padding:9px 11px; background:var(--bg-elevated); display:flex; flex-direction:column; gap:7px; }
+.vtt-mini-panel .vtt-ms-craft-card.craftable { border-color:color-mix(in srgb,var(--emerald,#22c38e) 45%,transparent); box-shadow:0 0 0 1px color-mix(in srgb,var(--emerald,#22c38e) 18%,transparent); }
+.vtt-ms-craft-hd { display:flex; align-items:center; gap:9px; }
+.vtt-ms-craft-type { flex:none; width:28px; height:28px; border-radius:8px; display:grid; place-items:center; background:var(--bg-panel); border:1px solid var(--border); color:var(--text-muted); }
+.vtt-ms-craft-type.ok { color:var(--emerald,#22c38e); border-color:color-mix(in srgb,var(--emerald,#22c38e) 40%,transparent); background:color-mix(in srgb,var(--emerald,#22c38e) 12%,transparent); }
+.vtt-ms-craft-type svg { width:16px; height:16px; }
+.vtt-ms-craft-name { font-size:13px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vtt-ms-craft-effet { margin-left:auto; flex:none; max-width:48%; font-size:11px; color:var(--gold-2,var(--gold)); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }
+.vtt-ms-craft-ingrs { display:flex; flex-wrap:wrap; gap:5px; }
+.vtt-ms-craft-ingr { display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--text-soft,var(--text)); padding:2px 8px; border-radius:999px; background:var(--bg-panel); border:1px solid var(--border); }
+.vtt-ms-craft-ingr b { font-weight:700; }
+.vtt-ms-craft-ingr b.ok { color:var(--emerald,#22c38e); }
+.vtt-ms-craft-ingr b.ko { color:var(--crimson,#ff5a7e); }
+.vtt-ms-craft-noingr { font-size:11px; color:var(--text-dim,var(--text-muted)); }
+.vtt-ms-craft-res { font-size:11px; padding:6px 9px; border-radius:8px; }
+.vtt-ms-craft-res.win { color:var(--emerald,#22c38e); background:color-mix(in srgb,var(--emerald,#22c38e) 12%,transparent); }
+.vtt-ms-craft-res.lose { color:var(--crimson,#ff5a7e); background:color-mix(in srgb,var(--crimson,#ff5a7e) 12%,transparent); }
+.vtt-ms-craft-ft { display:flex; align-items:center; gap:8px; }
+.vtt-ms-craft-ft p { flex:1; min-width:0; font-size:11px; color:var(--text-muted); margin:0; }
+.vtt-mini-panel .vtt-ms-craft-btn { flex:none; display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 12px; border-radius:8px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--bg-panel); color:var(--text-soft,var(--text)); cursor:pointer; white-space:nowrap; }
+.vtt-mini-panel .vtt-ms-craft-btn:hover:not(:disabled) { border-color:var(--border-strong,var(--border)); color:var(--text); }
+.vtt-mini-panel .vtt-ms-craft-btn:disabled { opacity:.4; cursor:default; }
+.vtt-mini-panel .vtt-ms-craft-btn.pri { background:var(--gold); border-color:var(--gold); color:#fff; }
+.vtt-mini-panel .vtt-ms-craft-btn.pri:hover { background:var(--gold-2,var(--gold)); }
+.vtt-mini-panel .vtt-ms-craft-btn.amber { background:#f59e0b; border-color:#f59e0b; color:#111; }
+.vtt-mini-panel .vtt-ms-craft-btn.ghost { background:none; }
+.vtt-ms-craft-btn svg { width:14px; height:14px; }

@@ -408,7 +408,9 @@ function _msCollapsedHtml(c) {
 function _msTabSac(c, uid, canEdit) {
   if (_msSac !== 'obj' && _msSac !== 'craft' && _msSac !== 'bourse') _msSac = 'obj';
   const n = (c?.inventaire || []).length;
-  const seg = `<div class="vtt-ms-seg">${[['obj', 'Objets', n], ['craft', 'Recettes', ''], ['bourse', 'Bourse', calcOr(c) + ' or']].map(([k, l, b]) =>
+  const known = _msCraftRecipes ? _msKnownRecipes(uid) : null;
+  const craftBadge = known ? `${known.filter(r => _msRecipeIngrStatus(r, _msInvNameCounts(c)).allOk).length}/${known.length}` : '';
+  const seg = `<div class="vtt-ms-seg">${[['obj', 'Objets', n], ['craft', 'Recettes', craftBadge], ['bourse', 'Bourse', calcOr(c) + ' or']].map(([k, l, b]) =>
     `<button class="${_msSac === k ? 'on' : ''}" data-vtt-fn="_vttMsSac" data-vtt-args="${k}">${l}${b !== '' ? ` <small>${b}</small>` : ''}</button>`).join('')}</div>`;
   const body = _msSac === 'craft' ? _msTabCraft(c, uid, canEdit)
     : _msSac === 'bourse' ? _msTabCompte(c, uid, canEdit)
@@ -1362,6 +1364,8 @@ const _MS_CRAFT_TYPE_ICON = { cuisine:'craft', potion:'craft', arme:'combat', ar
 let _msCraftRecipes = null;   // recettes chargées (array) | null = pas encore chargé
 let _msCraftLoading = false;
 let _msCraftShop    = null;   // items boutique (chargés à la demande : recettes + images du sac)
+let _msCraftConfirm = null;   // id de recette en confirmation inline
+let _msCraftResult  = {};     // id de recette → { win, txt } affiché 6 s sur la carte
 let _msShopLoading  = false;
 
 // Charge le catalogue boutique une fois (cache session) pour résoudre les images
@@ -1429,7 +1433,9 @@ function _msTabCraft(c, uid, canEdit) {
     .sort((a, b) => (b.st.allOk - a.st.allOk) || (a.r.nom || '').localeCompare(b.r.nom || ''));
   const craftableCount = cards.filter(x => x.st.allOk).length;
 
-  return _msTabIntro('craft', 'Craft rapide', `${craftableCount}/${known.length}`, `DD ${_MS_CRAFT_DD} · Artisanat INT`)
+  const intMod = getMod(c, 'intelligence');
+  const header = `<div class="vtt-ms-sect-label">Artisanat · INT ${intMod >= 0 ? '+' + intMod : intMod} contre DD ${_MS_CRAFT_DD}</div>`;
+  return header
     + _msFilterBar('craft', [], _msCraftQuery)
     + `<div class="vtt-ms-filter-empty" data-kind="craft" style="display:none">Aucune recette ne correspond.</div>`
     + `<div class="vtt-ms-craft">${cards.map(({ r, st }) => {
@@ -1437,25 +1443,25 @@ function _msTabCraft(c, uid, canEdit) {
     const searchTxt = _norm([r.nom, r.type, r.effet, ...((r.ingredients || []).map(ig => ig?.nom))].filter(Boolean).join(' '));
     const ingrHtml = st.hasIngr
       ? `<div class="vtt-ms-craft-ingrs">${st.rows.map(row =>
-          `<span class="vtt-ms-craft-ingr ${row.ok ? 'ok' : 'ko'}">${_esc(row.nom)} <b>${row.have}/${row.need}</b></span>`).join('')}</div>`
+          `<span class="vtt-ms-craft-ingr">${_esc(row.nom)}<b class="${row.ok ? 'ok' : 'ko'}">${row.have}/${row.need}</b></span>`).join('')}</div>`
       : `<div class="vtt-ms-craft-noingr">Pas d'ingrédients listés — non craftable ici.</div>`;
     const canCraft = canEdit && st.allOk;
-    const btnTitle = !canEdit ? 'Lecture seule'
-      : !st.hasIngr ? 'Recette sans ingrédients structurés'
-      : !st.allOk ? 'Ingrédients manquants'
-      : `Jet d'Artisanat (INT) DD ${_MS_CRAFT_DD}`;
+    const confirming = _msCraftConfirm === r.id && canCraft;
+    const res = _msCraftResult[r.id];
+    const successTxt = r.shopItemId ? 'Réussite : l\'objet va dans le sac.' : 'Réussite : effet à appliquer à la main.';
+    const footer = !canEdit ? ''
+      : confirming
+        ? `<div class="vtt-ms-craft-ft"><p>Ingrédients consommés même en cas d'échec.</p><button class="vtt-ms-craft-btn ghost" data-vtt-fn="_vttMsCraftCancel">Annuler</button><button class="vtt-ms-craft-btn amber" data-vtt-fn="_vttMsCraft" data-vtt-args="${c.id}|${uid}|${r.id}">Lancer le jet</button></div>`
+        : `<div class="vtt-ms-craft-ft"><p>${successTxt}</p><button class="vtt-ms-craft-btn${canCraft ? ' pri' : ''}" ${canCraft ? `data-vtt-fn="_vttMsCraftAsk" data-vtt-args="${r.id}"` : 'disabled'} title="${st.allOk ? `Jet d'Artisanat (INT) DD ${_MS_CRAFT_DD}` : 'Ingrédients manquants'}">${_msIco('craft')} Crafter</button></div>`;
     return `<div class="vtt-ms-craft-card${st.allOk ? ' craftable' : ''}" data-name="${_esc(searchTxt)}">
       <div class="vtt-ms-craft-hd">
-        <span class="vtt-ms-craft-type" title="${_esc(r.type || '')}">${icon}</span>
+        <span class="vtt-ms-craft-type${st.allOk ? ' ok' : ''}" title="${_esc(r.type || '')}">${icon}</span>
         <span class="vtt-ms-craft-name" title="${_esc(r.nom || '')}">${_esc(r.nom || '?')}</span>
-        ${r.shopItemId ? `<span class="vtt-ms-craft-out" title="Donne un objet à la réussite">${_msIco('inv')}</span>` : ''}
+        ${r.effet ? `<span class="vtt-ms-craft-effet" title="${_esc(r.effet)}">${_esc(r.effet)}</span>` : ''}
       </div>
       ${ingrHtml}
-      ${r.effet ? `<div class="vtt-ms-craft-effet">${_msIco('sorts')} ${_esc(r.effet)}</div>` : ''}
-      <button class="vtt-ms-craft-btn" title="${_esc(btnTitle)}"${canCraft ? '' : ' disabled'}
-        data-vtt-fn="_vttMsCraft" data-vtt-args="${c.id}|${uid}|${r.id}">
-        ${_msIco('craft')} Crafter <span class="vtt-ms-craft-dd">DD ${_MS_CRAFT_DD} · INT</span>
-      </button>
+      ${res ? `<div class="vtt-ms-craft-res ${res.win ? 'win' : 'lose'}">${_esc(res.txt)}</div>` : ''}
+      ${footer}
     </div>`;
   }).join('')}</div>`;
 }
@@ -1480,15 +1486,9 @@ async function _vttMsCraft(charId, uid, recipeId) {
   const status = _msRecipeIngrStatus(recipe, _msInvNameCounts(c));
   if (!status.hasIngr) { showNotif('Recette sans ingrédients structurés.', 'info'); return; }
   if (!status.allOk)   { showNotif('Ingrédients insuffisants.', 'error'); return; }
-
-  const ingrTxt = status.rows.map(r => `${r.need}× ${r.nom}`).join(', ');
-  const outTxt = recipe.shopItemId
-    ? `Réussite → l'objet de la recette est ajouté au sac. `
-    : `Réussite → aucun objet produit (recette sans objet lié), à ajouter à la main. `;
-  if (!await confirmModal(
-    `Tenter de crafter <b>${_esc(recipe.nom || '')}</b> ?<br>
-     <span style="color:var(--text-dim);font-size:.85rem">Jet d'Artisanat (INT) DD ${_MS_CRAFT_DD}. ${outTxt}Les ingrédients (${_esc(ingrTxt)}) sont consommés même en cas d'échec.</span>`,
-    { title: '🔨 Recette rapide', confirmLabel: 'Lancer le jet' })) return;
+  // La confirmation « Ingrédients consommés même en cas d'échec » est désormais
+  // inline (sur la carte, cf. _vttMsCraftAsk). Ici on lance directement le jet.
+  _msCraftConfirm = null;
 
   // 1) Indices des entrées à consommer (les `need` premières par nom normalisé).
   const oldInv = [...(c.inventaire || [])];
@@ -1565,8 +1565,18 @@ async function _vttMsCraft(charId, uid, recipeId) {
     (passed ? okMsg : '❌ Échec — ingrédients perdus'),
     passed ? 'success' : 'error');
 
+  // Résultat affiché sur la carte pendant 6 s.
+  _msCraftResult[recipeId] = {
+    win: passed,
+    txt: `d20 [${d20}] ${mod >= 0 ? '+' : ''}${mod} = ${total} contre DD ${_MS_CRAFT_DD} · ${passed ? (produced ? 'réussi, ajouté au sac' : 'réussi') : 'échec, ingrédients perdus'}`,
+  };
   if (VS.miniUid) _renderMiniSheet(VS.miniUid);
+  setTimeout(() => { delete _msCraftResult[recipeId]; if (VS.miniUid && _miniTab === 'sac' && _msSac === 'craft') _renderMiniSheet(VS.miniUid); }, 6000);
 }
+
+// Confirmation inline « Crafter » (1er clic) puis « Lancer le jet » (2e).
+function _vttMsCraftAsk(recipeId) { _msCraftConfirm = recipeId; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
+function _vttMsCraftCancel() { _msCraftConfirm = null; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
 
 // ── Onglet Notes (modèle notesList partagé avec la vraie fiche) ──────────
 function _msTabNotes(c, uid, canEdit) {
@@ -1863,6 +1873,8 @@ export {
   _vttMsCompteDel,
   _vttMsConfirmSend,
   _vttMsCraft,
+  _vttMsCraftAsk,
+  _vttMsCraftCancel,
   _vttMsCraftSearch,
   _vttMsCraftClear,
   _vttMsDeleteItem,
