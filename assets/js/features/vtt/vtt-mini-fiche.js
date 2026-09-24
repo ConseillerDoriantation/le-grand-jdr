@@ -362,6 +362,63 @@ function _msTabSac(c, uid, canEdit) {
 function _vttMsSac(sub) { _msSac = sub; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
 function _vttMsGoPurse() { _miniTab = 'sac'; _msSac = 'bourse'; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
 
+// ── Popover unique interne au panneau (remplace modales + <select>) ──
+// _msPop = { v:'char'|'xp'|'slot'|'equipto'|'send'|'gold', pid, arg }
+let _msPop = null;
+let _msPopInit = false;
+function _msClosePop() { _msPop = null; document.getElementById('vtt-ms-pop')?.remove(); }
+function _vttMsPop(v, pid, arg = '') {
+  if (_msPop && _msPop.pid === pid) { _msClosePop(); return; }
+  _msPop = { v, pid, arg };
+  if (VS.miniUid) _renderMiniSheet(VS.miniUid);
+}
+function _msInitPop() {
+  if (_msPopInit) return; _msPopInit = true;
+  document.addEventListener('mousedown', e => {
+    if (!_msPop) return;
+    const panel = document.getElementById('vtt-mini-panel');
+    if (!panel || !panel.contains(e.target)) { _msClosePop(); return; }
+    if (e.target.closest('#vtt-ms-pop')) return;
+    const trig = e.target.closest('[data-vtt-fn="_vttMsPop"]');
+    if (trig && trig.dataset.pid === _msPop.pid) return;   // le toggle du clic s'en charge
+    _msClosePop();
+  }, true);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && _msPop) { e.stopPropagation(); _msClosePop(); } }, true);
+}
+function _msPopHtml(c, uid) {
+  const p = _msPop; if (!p) return '';
+  let h = '';
+  if (p.v === 'char') {
+    const chars = favoriteFirst(Object.values(VS.characters).filter(x => x.uid === uid
+      && (STATE.isAdmin || uid === STATE.user?.uid || canControlCharacter(x))));
+    h = `<div class="vtt-ms-pop-lbl">${STATE.isAdmin ? 'Personnages' : 'Mes personnages'}</div>`
+      + chars.map(x => `<button class="vtt-ms-pop-it${x.id === c.id ? ' on' : ''}" data-vtt-fn="_vttSelectMiniChar" data-vtt-args="${uid}|${x.id}"><span class="vtt-ms-pop-av">${_esc((x.nom || '?')[0].toUpperCase())}</span><span>${_esc(x.nom || 'Perso')}</span>${x.titreActuel || x.titre ? `<em>${_esc(x.titreActuel || x.titre)}</em>` : ''}</button>`).join('');
+  } else if (p.v === 'xp') {
+    const niv = parseInt(c?.niveau) || 1, xp = parseInt(c?.exp) || 0, palier = calcPalier(niv), up = palier > 0 && xp >= palier;
+    const canEdit = _msCanEdit(uid, c?.id);
+    h = `<div class="vtt-ms-pop-lbl">Expérience · niveau ${niv}</div>`
+      + (canEdit
+        ? `<div class="vtt-ms-pop-form"><label>XP gagnée<input class="vtt-ms-pop-inp" id="vtt-ms-xp-add" type="number" min="1" placeholder="ex. 150 puis Entrée" data-vtt-fn="_vttMsAddXp" data-vtt-on="keydown-enter" data-vtt-args="${c.id}|${uid}|$value"></label>${up ? `<button class="vtt-ms-pop-btn amber" data-vtt-fn="_vttMsLevelUp" data-vtt-args="${c.id}|${uid}">Passer niveau ${niv + 1} · garde ${xp - palier} XP</button>` : `<div class="vtt-ms-pop-note">Encore ${palier - xp} XP avant le niveau ${niv + 1}.</div>`}</div>`
+        : `<div class="vtt-ms-pop-empty">${xp} / ${palier} XP</div>`);
+  }
+  return `<div class="vtt-ms-pop" id="vtt-ms-pop">${h}</div>`;
+}
+function _msPlacePop() {
+  const panel = document.getElementById('vtt-mini-panel');
+  const pop = document.getElementById('vtt-ms-pop');
+  if (!pop || !_msPop || !panel) return;
+  let anchor; try { anchor = panel.querySelector(`[data-pid="${(window.CSS && CSS.escape) ? CSS.escape(_msPop.pid) : _msPop.pid}"]`); } catch { anchor = null; }
+  if (!anchor) { _msClosePop(); return; }
+  const ar = anchor.getBoundingClientRect(), pr = panel.getBoundingClientRect();
+  const pw = pop.offsetWidth, ph = pop.offsetHeight;
+  let x = ar.left - pr.left;
+  let y = ar.bottom - pr.top + 6;
+  if (x + pw > pr.width - 8) x = Math.max(8, ar.right - pr.left - pw);
+  if (ar.bottom + ph + 10 > pr.bottom) y = Math.max(8, ar.top - pr.top - ph - 6);
+  pop.style.left = x + 'px';
+  pop.style.top = y + 'px';
+}
+
 function _msQuickSummary(c) {
   // PV/PM NE sont PLUS ici : le dock d'identité du pupitre les affiche déjà en
   // direct et éditables (fini la redondance). On garde une ligne de faits utiles
@@ -1587,31 +1644,33 @@ function _renderMiniSheetImpl(uid) {
   const caret = fid && typeof ae.selectionStart === 'number' ? ae.selectionStart : null;
   const contentScroll = panel.querySelector('.vtt-ms-tab-content')?.scrollTop || 0;
 
+  const multiChar = chars.length > 1;
   panel.classList.add('open');
   panel.innerHTML = `
     <div class="vtt-ms-header">
-      <div class="vtt-ms-portrait${up ? ' up' : ''}" title="XP ${parseInt(c?.exp) || 0} / ${calcPalier(niv)}">
+      <button class="vtt-ms-portrait${up ? ' up' : ''}" data-vtt-fn="_vttMsPop" data-vtt-args="xp|xp" data-pid="xp" title="XP ${parseInt(c?.exp) || 0} / ${calcPalier(niv)} — gérer">
         ${_msRingHtml(c)}
         ${img ? `<img class="vtt-ms-avatar" src="${img}" alt="">` : `<div class="vtt-ms-avatar-init">${init}</div>`}
         <span class="vtt-ms-niv">Niv. ${niv}${up ? ' ↑' : ''}</span>
-      </div>
+      </button>
       <div class="vtt-ms-info">
-        <div class="vtt-ms-name"><span>${_esc(c?.nom || 'Personnage')}</span></div>
+        <div class="vtt-ms-name"><span>${_esc(c?.nom || 'Personnage')}</span>${multiChar ? `<button class="vtt-ms-name-sel" data-vtt-fn="_vttMsPop" data-vtt-args="char|char" data-pid="char" title="Changer de personnage">▾</button>` : ''}</div>
         ${subLine ? `<div class="vtt-ms-sub">${subLine}</div>` : ''}
       </div>
       <button class="vtt-ms-close" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${uid}" title="Fermer · C">✕</button>
     </div>
-    ${selectorHtml}
     ${roBanner}
     ${_msFactsHtml(c)}
     ${_msStatsFixedHtml(c)}
-    ${_msXpSection(c, uid, canEdit)}
     ${tabBarHtml}
-    <div class="vtt-ms-tab-content">${tabHtml}</div>`;
+    <div class="vtt-ms-tab-content">${tabHtml}</div>
+    ${_msPopHtml(c, uid)}`;
 
   // Applique le filtre de l'onglet actif sur le DOM fraîchement rendu.
   if (_miniTab === 'sac' && _msSac === 'obj') _msApplyInvFilter();
   else if (_miniTab === 'sorts')              _msApplySortFilter();
+  _msInitPop(); _msPlacePop();
+  const popInp = document.getElementById('vtt-ms-xp-add'); if (popInp && _msPop?.v === 'xp') popInp.focus();
   const content = panel.querySelector('.vtt-ms-tab-content'); if (content) content.scrollTop = contentScroll;
   if (fid) { const el = document.getElementById(fid); if (el) { el.focus(); try { el.setSelectionRange(caret, caret); } catch { /* noop */ } } }
 }
@@ -1643,6 +1702,7 @@ function _vttToggleMiniSheet(uid, charId = null) {
 
 function _vttSelectMiniChar(uid, charId) {
   if (!_msCanView(uid, charId)) { showNotif('Fiche réservée à son propriétaire.', 'info'); return; }
+  _msPop = null;
   VS.miniCharId = charId;
   // Reset des filtres : l'inventaire/les sorts diffèrent d'un perso à l'autre.
   _msInvQuery = ''; _msInvCat = 'all'; _msSortQuery = ''; _msSortCat = 'all'; _msCraftQuery = '';
@@ -1691,6 +1751,7 @@ export {
   _vttMsRenameNote,
   _vttMsSac,
   _vttMsGoPurse,
+  _vttMsPop,
   _vttMsSaveNote,
   _vttMsSendPicker,
   _vttMsSlotChange,
