@@ -1790,6 +1790,7 @@ function _renderMiniSheetImpl(uid) {
   const xpMax = calcPalier(niv);
   panel.classList.add('open');
   panel.innerHTML = `
+    <div class="vtt-ms-resize" title="Glisser pour redimensionner"></div>
     <div class="vtt-ms-header">
       <button class="vtt-ms-portrait${up ? ' up' : ''}" data-vtt-fn="_vttMsPop" data-vtt-args="xp|xp" data-pid="xp" title="XP ${parseInt(c?.exp) || 0} / ${calcPalier(niv)} — gérer">
         ${_msRingHtml(c)}
@@ -1817,6 +1818,7 @@ function _renderMiniSheetImpl(uid) {
   if (_miniTab === 'sac' && _msSac === 'obj') _msApplyInvFilter();
   else if (_miniTab === 'sorts')              _msApplySortFilter();
   _msInitPop(); _msPlacePop();
+  _msInitResize(); _msApplyStoredWidth();
   const popInp = document.getElementById('vtt-ms-xp-add'); if (popInp && _msPop?.v === 'xp') popInp.focus();
   const content = panel.querySelector('.vtt-ms-tab-content'); if (content) content.scrollTop = contentScroll;
   if (fid) { const el = document.getElementById(fid); if (el) { el.focus(); try { el.setSelectionRange(caret, caret); } catch { /* noop */ } } }
@@ -1860,9 +1862,60 @@ function _vttSelectMiniChar(uid, charId) {
   _syncMiniSheetLaunchers();
 }
 
+// Touche C : ouvre/ferme la fiche du personnage contrôlé (token sélectionné,
+// sinon son propre perso). Câblée dans _keyHandler (hors saisie, sans modif.).
+function _vttMsKeyToggle() {
+  if (VS.miniUid) { _vttToggleMiniSheet(VS.miniUid, VS.miniCharId); return; }
+  const uid = STATE.user?.uid;
+  const selT = VS.selected ? VS.tokens[VS.selected]?.data : null;
+  if (selT?.characterId) {
+    const sUid = selT.ownerId || VS.characters[selT.characterId]?.uid || uid;
+    if (_msCanView(sUid, selT.characterId)) { _vttToggleMiniSheet(sUid, selT.characterId); return; }
+  }
+  const own = favoriteFirst(Object.values(VS.characters).filter(ch => ch.uid === uid));
+  if (own.length) { _vttToggleMiniSheet(uid, own[0].id); return; }
+  showNotif('Aucune fiche à afficher', 'info');
+}
+
+// Largeur réglable du panneau (340–560 px), mémorisée dans localStorage.
+const _MS_W_MIN = 340, _MS_W_MAX = 560;
+function _msApplyStoredWidth() {
+  const panel = document.getElementById('vtt-mini-panel'); if (!panel) return;
+  const w = parseInt(lsJson.get('vtt-ms-width', 0));
+  if (w >= _MS_W_MIN && w <= _MS_W_MAX) panel.style.setProperty('--vtt-ms-w', w + 'px');
+}
+let _msResizeInit = false;
+function _msInitResize() {
+  if (_msResizeInit) return; _msResizeInit = true;
+  let dragging = false;
+  document.addEventListener('pointerdown', e => {
+    if (!e.target.closest('.vtt-ms-resize')) return;
+    const panel = document.getElementById('vtt-mini-panel'); if (!panel) return;
+    e.preventDefault(); dragging = true; panel.classList.add('resizing');
+    try { e.target.setPointerCapture(e.pointerId); } catch { /* noop */ }
+  });
+  document.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const panel = document.getElementById('vtt-mini-panel'); if (!panel) return;
+    const left = panel.getBoundingClientRect().left;
+    const w = Math.max(_MS_W_MIN, Math.min(_MS_W_MAX, Math.round(e.clientX - left)));
+    panel.style.setProperty('--vtt-ms-w', w + 'px');
+  });
+  document.addEventListener('pointerup', () => {
+    if (!dragging) return; dragging = false;
+    const panel = document.getElementById('vtt-mini-panel');
+    panel?.classList.remove('resizing');
+    const w = parseInt((panel?.style.getPropertyValue('--vtt-ms-w') || '').replace('px', ''));
+    if (w >= _MS_W_MIN && w <= _MS_W_MAX) lsJson.set('vtt-ms-width', w);
+  });
+}
+
 export {
   _msApplyInvFilter,
   _msApplySortFilter,
+  _vttMsKeyToggle,
+  _msInitResize,
+  _msApplyStoredWidth,
   _msBuildEquipItem,
   _msCanEdit,
   _msCanEditVitals,

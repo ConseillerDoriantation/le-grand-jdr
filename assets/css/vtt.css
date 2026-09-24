@@ -12124,7 +12124,13 @@ button.vtt-loot-qb:hover:not(:disabled) { background:var(--surface-3,var(--bg-el
 /* ════════════════════════════════════════════════════════════════════
    MINI-FICHE — refonte (zone fixe + 4 onglets). Appended last → surcharge.
    ════════════════════════════════════════════════════════════════════ */
-.vtt-mini-panel.open { width: min(392px, calc(100vw - 40px)); }
+.vtt-mini-panel.open { width: var(--vtt-ms-w, min(392px, calc(100vw - 40px))); }
+.vtt-mini-panel.resizing { transition:none; user-select:none; }
+.vtt-mini-panel.open.is-collapsed { width:64px; }
+.vtt-ms-resize { position:absolute; top:0; right:0; width:8px; height:100%; cursor:ew-resize; z-index:5; }
+.vtt-ms-resize::after { content:''; position:absolute; top:0; right:0; width:2px; height:100%; background:transparent; transition:background .12s; }
+.vtt-ms-resize:hover::after, .vtt-mini-panel.resizing .vtt-ms-resize::after { background:var(--gold); }
+.vtt-mini-panel.is-collapsed .vtt-ms-resize { display:none; }
 .vtt-mini-panel.open > * { flex-shrink:0; }
 .vtt-mini-panel.open > .vtt-ms-tab-content { flex:1 1 auto; min-height:0; }
 .vtt-mini-panel .vtt-ms-header { align-items:flex-start; gap:10px; }

@@ -192,7 +192,7 @@ import {
   _vttMsSortClear, _vttToggleMsSort, _vttMsCompteAdd, _vttMsCompteDel, _vttMsCraft, _vttMsCraftAsk, _vttMsCraftCancel,
   _vttMsCraftSearch, _vttMsCraftClear,
   _vttMsSendGoldPicker, _vttMsConfirmSendGold,
-  _vttMsSac, _vttMsGoPurse, _vttMsPop, _vttMsToggleSpell,
+  _vttMsSac, _vttMsGoPurse, _vttMsPop, _vttMsToggleSpell, _vttMsKeyToggle,
 } from './vtt-mini-fiche.js';
 
 let _vttDelegSearch = '';
@@ -13830,6 +13830,11 @@ function _keyHandler(e) {
     if (_zoneCtx) return;
     e.preventDefault();
     _vttTool('ruler');
+  }
+  // Touche C : ouvre/ferme la mini-fiche du personnage contrôlé.
+  if ((e.key==='c' || e.key==='C') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    _vttMsKeyToggle();
   }
   if ((e.key==='Delete'||e.key==='Backspace') && VS.tool==='select') {
     // 1) Annotations sélectionnées
