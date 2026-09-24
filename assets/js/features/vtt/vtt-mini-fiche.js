@@ -18,7 +18,7 @@ import { calcSpellDuration, calcSpellTargets, getProtectionRestoreMode } from '.
 import { ZONE_SHAPES, _zoneDims, _zoneCount } from '../../shared/spell-zones.js';
 import { getDamageTypeById } from '../../shared/damage-types.js';
 import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, calcOr,
-         calcGardeMax, computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, getMod,
+         computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, getMod,
          sortCharactersForDisplay, favoriteFirst } from '../../shared/char-stats.js';
 import { useGold } from '../../shared/economy.js';
 import { loadCollection } from '../../data/firestore.js'; // lecture recettes/boutique (couche quota)
@@ -38,12 +38,14 @@ import {
   equipmentSlotAcceptsItem, getEquipmentSlot, getEquipmentSlots,
   getPrimaryWeaponSlotId,
 } from '../../shared/equipment-slots.js';
-import { canControlCharacter } from '../../shared/character-state.js';
+import { canControlCharacter, getControlledCharacters } from '../../shared/character-state.js';
 import { deckHasRoomFor, getDeckUsage, isAlwaysPreparedSpell } from '../../shared/spell-deck.js';
 import { lsJson } from '../../shared/local-storage.js';
 
 let _miniTab = 'combat'; // onglet actif de la mini-fiche (état local)
 let _msSac   = 'obj';    // sous-onglet du Sac : 'obj' | 'craft' | 'bourse'
+let _msAttackSlot = null; // arme affichée dans Combat (principale / secondaire)
+let _miniCollapsed = false; // rail compact de la mini-fiche
 
 // ── Constantes & état local ─────────────────────────────────────────
 const _MS_STATS   = [
@@ -144,8 +146,20 @@ function _msBuildEquipItem(slot, item, invIndex) {
 }
 
 function _msCanEdit(uid, charId = VS.miniCharId) {
-  if (STATE.isAdmin || STATE.user?.uid === uid) return true;
-  return !!charId && canControlCharacter(VS.characters[charId], STATE.user?.uid);
+  if (STATE.isAdmin) return true;
+  const character = charId ? VS.characters[charId] : null;
+  if (character) return canControlCharacter(character, STATE.user?.uid);
+  return !!uid && STATE.user?.uid === uid;
+}
+
+function _msAvailableCharacters(uid) {
+  const all = Object.values(VS.characters || {});
+  // Le MJ conserve le contexte du joueur ouvert. Pour un joueur, la source de
+  // vérité est le contrôle canonique : personnages possédés + tous les délégués.
+  const available = STATE.isAdmin
+    ? all.filter(character => character.uid === uid)
+    : getControlledCharacters(all, STATE.user?.uid, { sorted: false });
+  return favoriteFirst(available);
 }
 
 // Sécurité — droit d'OUVRIR/VOIR une mini-feuille (contenu privé : équipement,
@@ -199,7 +213,9 @@ function _msIco(name, cls = 'vtt-ms-ic') {
 
 // ─── Handlers exposés ────────────────────────────────────────────
 
-function _vttMsTab(tab) { _miniTab = tab; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
+function _vttMsTab(tab) { _miniTab = tab; _miniCollapsed = false; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
+function _vttMsToggleCollapsed() { _miniCollapsed = !_miniCollapsed; _msPop = null; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
+function _vttMsAttackSlot(slotId) { _msAttackSlot = slotId; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
 
 // ── Filtres des onglets Sac / Sorts ──────────────────────────────
 // Barre commune : puces de catégorie + champ de recherche. `kind` = 'inv'|'sorts'.
@@ -335,7 +351,6 @@ function _msFactsHtml(c) {
   return `<div class="vtt-ms-facts">
     <div class="vtt-ms-fact" title="Classe d'armure"><b>${calcCA(c)}</b><small>CA</small></div>
     <div class="vtt-ms-fact" title="Vitesse"><b>${calcVitesse(c)}</b><small>Vit.</small></div>
-    <div class="vtt-ms-fact" title="Bonus de maîtrise"><b>+${getMaitriseBonus(c)}</b><small>Maît.</small></div>
     <button class="vtt-ms-fact btn" data-vtt-fn="_vttMsTab" data-vtt-args="sorts" title="Sorts préparés"><b>${du.used}/${deckMax}</b><small>Deck</small></button>
     <button class="vtt-ms-fact btn" data-vtt-fn="_vttMsGoPurse" title="Ouvrir la bourse"><b>${calcOr(c)}</b><small>Or</small></button>
   </div>`;
@@ -347,6 +362,30 @@ function _msStatsFixedHtml(c) {
     const sgn = n => (n >= 0 ? '+' + n : '' + n);
     return `<div class="vtt-ms-st" style="--sc:${col}" title="${s.abbr} ${total} · base ${base}${bonus ? ` ${sgn(bonus)} équipement` : ''}">${bonus ? `<i>${sgn(bonus)}</i>` : ''}<small>${s.abbr}</small><b>${sgn(mod)}</b><span>${total}</span></div>`;
   }).join('')}</div>`;
+}
+
+function _msCollapsedHtml(c) {
+  const img = c?.photoURL || c?.photo || c?.avatar || null;
+  const init = _esc((c?.nom || '?')[0].toUpperCase());
+  const niv = parseInt(c?.niveau) || 1;
+  const tabs = [
+    ['combat', 'combat', 'Combat'],
+    ['sorts', 'sorts', 'Sorts'],
+    ['sac', 'inv', 'Sac'],
+    ['notes', 'notes', 'Carnet'],
+  ];
+  return `<div class="vtt-ms-rail">
+    <button class="vtt-ms-rail-portrait" data-vtt-fn="_vttMsToggleCollapsed" title="Déployer la mini-fiche" aria-label="Déployer la mini-fiche">
+      <span class="vtt-ms-rail-ring">${_msRingHtml(c, 48)}${img ? `<img src="${_esc(img)}" alt="">` : `<b>${init}</b>`}</span>
+      <small>Niv. ${niv}</small>
+    </button>
+    <div class="vtt-ms-rail-fact"><b>${calcCA(c)}</b><small>CA</small></div>
+    <div class="vtt-ms-rail-fact"><b>${calcOr(c)}</b><small>Or</small></div>
+    <span class="vtt-ms-rail-sep" aria-hidden="true"></span>
+    <nav class="vtt-ms-rail-tabs" aria-label="Mini-fiche">
+      ${tabs.map(([key, icon, label]) => `<button class="${_miniTab === key ? 'active' : ''}" data-vtt-fn="_vttMsTab" data-vtt-args="${key}" title="Ouvrir ${label}" aria-label="Ouvrir ${label}">${_msIco(icon)}</button>`).join('')}
+    </nav>
+  </div>`;
 }
 
 // Sac : sous-onglets Objets / Recettes / Bourse (fusion des anciens onglets).
@@ -361,7 +400,7 @@ function _msTabSac(c, uid, canEdit) {
   return seg + body;
 }
 function _vttMsSac(sub) { _msSac = sub; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
-function _vttMsGoPurse() { _miniTab = 'sac'; _msSac = 'bourse'; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
+function _vttMsGoPurse() { _miniTab = 'sac'; _msSac = 'bourse'; _miniCollapsed = false; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
 
 // ── Popover unique interne au panneau (remplace modales + <select>) ──
 // _msPop = { v:'char'|'xp'|'slot'|'equipto'|'send'|'gold', pid, arg }
@@ -390,10 +429,18 @@ function _msPopHtml(c, uid) {
   const p = _msPop; if (!p) return '';
   let h = '';
   if (p.v === 'char') {
-    const chars = favoriteFirst(Object.values(VS.characters).filter(x => x.uid === uid
-      && (STATE.isAdmin || uid === STATE.user?.uid || canControlCharacter(x))));
-    h = `<div class="vtt-ms-pop-lbl">${STATE.isAdmin ? 'Personnages' : 'Mes personnages'}</div>`
-      + chars.map(x => `<button class="vtt-ms-pop-it${x.id === c.id ? ' on' : ''}" data-vtt-fn="_vttSelectMiniChar" data-vtt-args="${uid}|${x.id}"><span class="vtt-ms-pop-av">${_esc((x.nom || '?')[0].toUpperCase())}</span><span>${_esc(x.nom || 'Perso')}</span>${x.titreActuel || x.titre ? `<em>${_esc(x.titreActuel || x.titre)}</em>` : ''}</button>`).join('');
+    const chars = _msAvailableCharacters(uid);
+    h = `<div class="vtt-ms-pop-lbl">${STATE.isAdmin ? 'Personnages' : 'Personnages contrôlés'}</div>`
+      + chars.map(x => {
+          const photo = x?.photoURL || x?.photo || x?.avatar || '';
+          const initial = _esc((x.nom || '?')[0].toUpperCase());
+          const delegated = !STATE.isAdmin && x.uid !== STATE.user?.uid;
+          const meta = _esc([x.race, x.classe, x.titreActuel || x.titre].filter(Boolean).join(' · '));
+          return `<button class="vtt-ms-pop-it vtt-ms-pop-char${x.id === c.id ? ' on' : ''}" data-vtt-fn="_vttSelectMiniChar" data-vtt-args="${_esc(x.uid || uid)}|${x.id}">
+            <span class="vtt-ms-pop-av">${photo ? `<img src="${_esc(photo)}" alt="">` : initial}</span>
+            <span class="vtt-ms-pop-char-name"><b>${_esc(x.nom || 'Personnage')}</b><small>${delegated ? '<em class="vtt-ms-pop-delegated">Délégué</em>' : ''}${meta ? `<span>${meta}</span>` : ''}</small></span>
+          </button>`;
+        }).join('');
   } else if (p.v === 'slot') {
     const slotId = p.arg;
     const equip = c?.equipement || {}, inv = c?.inventaire || [];
@@ -661,10 +708,17 @@ async function _vttMsDeleteItem(charId, uid, invIndex) {
 // ─── Rendus par onglet ────────────────────────────────────────────
 
 // Combat (refonte) : carte d'attaque en AFFICHAGE SEUL (aucun jet), apports
-// d'arme complets (traits non tronqués), Garde, bonus de set. Les caracs, les
+// d'arme complets (traits non tronqués) et bonus de set. Les caracs, les
 // chiffres clés et l'XP sont dans la zone fixe ; l'équipement est ajouté ensuite.
 function _msTabCombat(c, uid, canEdit) {
-  const weapon = c?.equipement?.[getPrimaryWeaponSlotId()];
+  const weaponSlots = _msSlots().filter(slot => slot.kind === 'weapon')
+    .map(slot => ({ slot, item: c?.equipement?.[slot.id] }))
+    .filter(entry => entry.item?.nom && entry.item?.degats);
+  const primaryId = getPrimaryWeaponSlotId();
+  if (!weaponSlots.some(entry => entry.slot.id === _msAttackSlot)) {
+    _msAttackSlot = weaponSlots.find(entry => entry.slot.id === primaryId)?.slot.id || weaponSlots[0]?.slot.id || primaryId;
+  }
+  const weapon = c?.equipement?.[_msAttackSlot];
   const weaponSource = _msEquipSourceItem(weapon, c?.inventaire || []);
   let attackDice = '—';
   let attackTouch = '+0';
@@ -679,35 +733,21 @@ function _msTabCombat(c, uid, canEdit) {
     attackTouch = `${tchTotal>=0?'+'+tchTotal:tchTotal}`;
   }
   // Apports : traits ENTIERS (plus de `compact`).
-  const contrib = weapon?.nom ? _msEquipContributionHtml(weaponSource, { label: 'Apports' }) : '';
-  const weaponExtra = (contrib || weapon?.particularite)
-    ? `<div class="vtt-ms-weapon">${contrib}${weapon?.particularite ? `<div class="vtt-ms-weapon-note">${_esc(weapon.particularite)}</div>` : ''}</div>`
-    : '';
+  const contrib = weapon?.nom ? _msEquipContributionHtml(weaponSource) : '';
+  const weaponExtra = `${contrib}${weapon?.particularite ? `<div class="vtt-ms-atk-note">${_esc(weapon.particularite)}</div>` : ''}`;
 
   const setData = getArmorSetData(c);
   const setHtml = setData?.active ? `<div class="vtt-ms-setbonus">${_msIco('equip')} Set ${_esc(setData.type)}</div>` : '';
 
-  // Garde : ressource éditable (conservée ici tant qu'elle n'est pas dans le dock).
-  const gardeMax = calcGardeMax(c);
-  const gardeCur = Math.max(0, Math.min(gardeMax || 0, parseInt(c?.garde, 10) || 0));
-  const canEditVitals = _msCanEditVitals(c?.id, uid);
-  const gardeHtml = gardeMax > 0 ? `<div class="vtt-ms-defenses"><div class="vtt-ms-def-item">
-      <span>🛡️ Garde</span>
-      ${canEditVitals
-        ? `<strong style="display:inline-flex;align-items:center;gap:2px">
-             <input class="vtt-ms-garde-input" type="number" value="${gardeCur}" min="0" max="${gardeMax}"
-               data-vtt-fn="_vttMsSetGarde" data-vtt-on="change" data-vtt-args="${c.id}|${uid}|$value"
-               style="width:3ch;background:rgba(95,176,200,.14);border:1px solid rgba(95,176,200,.45);border-radius:5px;color:inherit;font:inherit;font-weight:800;text-align:center;padding:1px 2px"
-               title="Réserve de Garde actuelle (0–${gardeMax})">
-             <i style="font-style:normal;opacity:.6;font-weight:600">/ ${gardeMax}</i>
-           </strong>`
-        : `<strong>${gardeCur} / ${gardeMax}</strong>`}
-    </div></div>` : '';
+  const weaponSwitch = weaponSlots.length > 1 ? `<div class="vtt-ms-atk-switch" aria-label="Arme affichée">
+    ${weaponSlots.map(({ slot }) => `<button type="button" class="${slot.id === _msAttackSlot ? 'on' : ''}"
+      data-vtt-fn="_vttMsAttackSlot" data-vtt-args="${_esc(slot.id)}">${slot.role === 'primaryWeapon' ? 'Principale' : 'Secondaire'}</button>`).join('')}
+  </div>` : '';
 
   return `
     <div class="vtt-ms-sect-label">Attaque</div>
     <div class="vtt-ms-atk">
-      <div class="vtt-ms-atk-hd"><b>${weapon?.nom ? _esc(weapon.nom) : 'Mains nues'}</b></div>
+      <div class="vtt-ms-atk-hd"><b>${weapon?.nom ? _esc(weapon.nom) : 'Mains nues'}</b>${weaponSwitch}</div>
       <div class="vtt-ms-atk-row">
         <div class="vtt-ms-atk-cell"><small>Toucher</small><b>${attackTouch}</b></div>
         <div class="vtt-ms-atk-cell"><small>Dégâts</small><b>${_esc(attackDice)}</b></div>
@@ -715,7 +755,6 @@ function _msTabCombat(c, uid, canEdit) {
       ${weaponExtra}
       ${weapon?.nom ? '' : '<div class="vtt-ms-atk-empty">Aucune arme équipée — choisis-en une dans Équipement.</div>'}
     </div>
-    ${gardeHtml}
     ${setHtml}`;
 }
 
@@ -767,7 +806,10 @@ function _msXpSection(c, uid, canEdit) {
 function _msTabEquipement(c, uid, canEdit) {
   const equip = c?.equipement || {}, inv = c?.inventaire || [];
   const slots = _msSlots();
-  const full = slots.filter(s => equip[s.id]?.nom);
+  const occupied = slots.filter(s => equip[s.id]?.nom);
+  // L'arme actuellement détaillée dans le bloc Attaque n'est pas répétée juste
+  // en dessous. Les autres armes restent visibles et donc équipables/modifiables.
+  const full = occupied.filter(s => s.id !== _msAttackSlot);
   const free = slots.filter(s => !equip[s.id]?.nom);
   const setData = getArmorSetData(c);
   const sIco = s => _msIco(s.kind === 'weapon' ? 'combat' : s.kind === 'armor' ? 'equip' : 'ring');
@@ -787,8 +829,8 @@ function _msTabEquipement(c, uid, canEdit) {
     : '';
   const setHtml = setData?.active ? `<div class="vtt-ms-setrow">${_msIco('equip')}<span>Set ${_esc(setData.type)}</span></div>` : '';
 
-  return `<div class="vtt-ms-sect-label">Équipement <em>${full.length}/${slots.length}</em></div>
-    <div class="vtt-ms-eqs">${fullHtml || '<div class="vtt-ms-atk-empty">Rien d\'équipé.</div>'}</div>
+  return `<div class="vtt-ms-sect-label">Équipement <em>${occupied.length}/${slots.length}</em></div>
+    <div class="vtt-ms-eqs">${fullHtml || (occupied.length ? '' : '<div class="vtt-ms-atk-empty">Rien d\'équipé.</div>')}</div>
     ${freeHtml}${setHtml}`;
 }
 
@@ -1617,14 +1659,13 @@ function _renderMiniSheetImpl(uid) {
   if (!panel) return;
 
   if (!uid) { panel.classList.remove('open'); panel.innerHTML = ''; return; }
-  const pres = VS.presence[uid];
+  let pres = VS.presence[uid];
   const playerLabel = pres?.pseudo
     || (uid === STATE.user?.uid ? (STATE.user?.displayName || STATE.user?.email?.split('@')[0]) : '')
     || 'Joueur hors ligne';
 
   // Favori en tête → sélection d'office du perso favori si aucun choix explicite.
-  const chars = favoriteFirst(Object.values(VS.characters).filter(c => c.uid === uid
-    && (STATE.isAdmin || uid === STATE.user?.uid || canControlCharacter(c))));
+  const chars = _msAvailableCharacters(uid);
   if (!chars.length) {
     panel.classList.add('open');
     panel.innerHTML = `<div class="vtt-ms-empty">Aucun personnage lié pour ${_esc(playerLabel)}.</div>`;
@@ -1634,6 +1675,11 @@ function _renderMiniSheetImpl(uid) {
   const validId = chars.find(c => c.id === VS.miniCharId) ? VS.miniCharId : chars[0].id;
   VS.miniCharId = validId;
   const c = chars.find(c => c.id === validId);
+  // Le contexte suit toujours le propriétaire réel du personnage sélectionné.
+  // Les contrôleurs délégués gardent leurs droits via `_msCanEdit`.
+  uid = c?.uid || uid;
+  VS.miniUid = uid;
+  pres = VS.presence[uid];
   // Sécurité (défense en profondeur) : ne jamais rendre la fiche d'un tiers, même
   // si l'ouverture est déclenchée par ailleurs. Seuls MJ / propriétaire / contrôleur
   // réel (délégation sur CE personnage) sont autorisés.
@@ -1644,18 +1690,9 @@ function _renderMiniSheetImpl(uid) {
     return;
   }
   const canEdit = _msCanEdit(uid, c?.id);
-  const canEditVitals = _msCanEditVitals(c?.id, uid);
 
   const img      = c?.photoURL || c?.photo || c?.avatar || null;
   const init     = (c?.nom || '?')[0].toUpperCase();
-  const subtitle = [c?.race, c?.titreActuel||c?.titre, c?.niveau ? 'Niv.'+c.niveau : ''].filter(Boolean).join(' · ');
-
-  const selectorHtml = chars.length > 1
-    ? `<div class="vtt-ms-selector">${chars.map(ch =>
-        `<button class="vtt-ms-sel-btn${ch.id===validId?' active':''}"
-          data-vtt-fn="_vttSelectMiniChar" data-vtt-args="${uid}|${ch.id}">${ch.nom||'Perso'}</button>`
-      ).join('')}</div>`
-    : '';
 
   // Migration des anciennes clés d'onglet → 4 onglets (Combat / Sorts / Sac / Carnet).
   if (_miniTab === 'equip') _miniTab = 'combat';
@@ -1665,6 +1702,13 @@ function _renderMiniSheetImpl(uid) {
   }
 
   const niv = parseInt(c?.niveau) || 1;
+  if (_miniCollapsed) {
+    panel.classList.add('open', 'is-collapsed');
+    panel.innerHTML = _msCollapsedHtml(c);
+    _syncMiniSheetLaunchers();
+    return;
+  }
+  panel.classList.remove('is-collapsed');
   const up  = _msXpUp(c);
   const deckMax = calcDeckMax(c), du = getDeckUsage(c?.deck_sorts);
   const invN = (c?.inventaire || []).length, notesN = (c?.notesList || []).length;
@@ -1678,9 +1722,13 @@ function _renderMiniSheetImpl(uid) {
     : _miniTab === 'notes' ? _msTabNotes(c, uid, canEdit)
     :                        _msTabCombat(c, uid, canEdit) + _msTabEquipement(c, uid, canEdit);
 
-  const roBanner = !canEdit ? '<div class="vtt-ms-ro">Contrôle délégué : lecture seule. La Garde reste modifiable.</div>' : '';
-  const subLine = [c?.race, c?.titreActuel || c?.titre].filter(Boolean).join(' · ')
-    + (STATE.isAdmin && playerLabel ? `${(c?.race || c?.titreActuel || c?.titre) ? ' · ' : ''}<b class="vtt-ms-player-mj">${_esc(playerLabel)}</b>` : '');
+  const roBanner = !canEdit ? '<div class="vtt-ms-ro">Fiche consultable en lecture seule.</div>' : '';
+  const subText = [c?.race, c?.classe, c?.titreActuel || c?.titre]
+    .filter(Boolean)
+    .map(_esc)
+    .join(' · ');
+  const online = !!pres;
+  const onlineDot = `<span class="vtt-ms-online-dot ${online ? 'is-online' : 'is-offline'}" title="Joueur ${online ? 'en ligne' : 'hors ligne'}" aria-label="Joueur ${online ? 'en ligne' : 'hors ligne'}"></span>`;
 
   // Préserve le défilement + le focus/caret (recherches, notes, bourse).
   const ae = document.activeElement, fid = ae && panel.contains(ae) ? ae.id : null;
@@ -1688,19 +1736,25 @@ function _renderMiniSheetImpl(uid) {
   const contentScroll = panel.querySelector('.vtt-ms-tab-content')?.scrollTop || 0;
 
   const multiChar = chars.length > 1;
+  const xp = parseInt(c?.exp) || 0;
+  const xpMax = calcPalier(niv);
   panel.classList.add('open');
   panel.innerHTML = `
     <div class="vtt-ms-header">
       <button class="vtt-ms-portrait${up ? ' up' : ''}" data-vtt-fn="_vttMsPop" data-vtt-args="xp|xp" data-pid="xp" title="XP ${parseInt(c?.exp) || 0} / ${calcPalier(niv)} — gérer">
         ${_msRingHtml(c)}
-        ${img ? `<img class="vtt-ms-avatar" src="${img}" alt="">` : `<div class="vtt-ms-avatar-init">${init}</div>`}
+        ${img ? `<img class="vtt-ms-avatar" src="${_esc(img)}" alt="">` : `<div class="vtt-ms-avatar-init">${init}</div>`}
         <span class="vtt-ms-niv">Niv. ${niv}${up ? ' ↑' : ''}</span>
       </button>
       <div class="vtt-ms-info">
-        <div class="vtt-ms-name"><span>${_esc(c?.nom || 'Personnage')}</span>${multiChar ? `<button class="vtt-ms-name-sel" data-vtt-fn="_vttMsPop" data-vtt-args="char|char" data-pid="char" title="Changer de personnage">▾</button>` : ''}</div>
-        ${subLine ? `<div class="vtt-ms-sub">${subLine}</div>` : ''}
+        <div class="vtt-ms-name">${onlineDot}<span>${_esc(c?.nom || 'Personnage')}</span>${multiChar ? `<button class="vtt-ms-name-sel" data-vtt-fn="_vttMsPop" data-vtt-args="char|char" data-pid="char" title="Changer de personnage">▾</button>` : ''}</div>
+        ${subText ? `<div class="vtt-ms-sub">${subText}</div>` : ''}
+        <div class="vtt-ms-xp-summary"><b>${xp.toLocaleString('fr-FR')}</b><span>/ ${xpMax.toLocaleString('fr-FR')} XP</span></div>
       </div>
-      <button class="vtt-ms-close" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${uid}" title="Fermer · C">✕</button>
+      <div class="vtt-ms-head-actions">
+        <button class="vtt-ms-collapse" data-vtt-fn="_vttMsToggleCollapsed" title="Réduire la mini-fiche" aria-label="Réduire la mini-fiche">‹</button>
+        <button class="vtt-ms-close" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${uid}" title="Fermer · C" aria-label="Fermer la mini-fiche">×</button>
+      </div>
     </div>
     ${roBanner}
     ${_msFactsHtml(c)}
@@ -1730,6 +1784,7 @@ function _syncMiniSheetLaunchers() {
 function _vttToggleMiniSheet(uid, charId = null) {
   const sameCharacter = VS.miniUid === uid && (!charId || VS.miniCharId === charId);
   if (sameCharacter) {
+    _miniCollapsed = false;
     VS.miniUid = null; VS.miniCharId = null;
     const panel = document.getElementById('vtt-mini-panel');
     if (panel) { panel.classList.remove('open'); panel.innerHTML = ''; }
@@ -1737,6 +1792,7 @@ function _vttToggleMiniSheet(uid, charId = null) {
     // Sécurité : refuser l'ouverture de la fiche d'un autre joueur (contenu privé).
     if (!_msCanView(uid, charId)) { showNotif('Fiche réservée à son propriétaire.', 'info'); return; }
     VS.miniUid = uid; VS.miniCharId = charId || null;
+    _miniCollapsed = false;
     _renderMiniSheet(uid);
   }
   _syncMiniSheetLaunchers();
@@ -1746,10 +1802,11 @@ function _vttToggleMiniSheet(uid, charId = null) {
 function _vttSelectMiniChar(uid, charId) {
   if (!_msCanView(uid, charId)) { showNotif('Fiche réservée à son propriétaire.', 'info'); return; }
   _msPop = null;
+  VS.miniUid = VS.characters[charId]?.uid || uid;
   VS.miniCharId = charId;
   // Reset des filtres : l'inventaire/les sorts diffèrent d'un perso à l'autre.
   _msInvQuery = ''; _msInvCat = 'all'; _msSortQuery = ''; _msSortCat = 'all'; _msCraftQuery = '';
-  _renderMiniSheet(uid);
+  _renderMiniSheet(VS.miniUid);
   _syncMiniSheetLaunchers();
 }
 
@@ -1803,6 +1860,8 @@ export {
   _vttMsSortClear,
   _vttMsSortSearch,
   _vttMsTab,
+  _vttMsToggleCollapsed,
+  _vttMsAttackSlot,
   _vttMsToggleNote,
   _vttMsUnequip,
   _vttMsUnequipAll,
