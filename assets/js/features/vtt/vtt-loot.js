@@ -746,7 +746,7 @@ function _vttLootOpenShop() {   // ← ouvre le catalogue intégré (plus de mod
 }
 function _vttLootCataBack() { _lootView = 'main'; _renderLootPanel(); }
 function _vttLootCataSel(id) { _cSel = id; _cQ = ''; _cRar = ''; _renderLootPanel(); }
-function _vttLootCataRar(id) { _cRar = id; _renderLootPanel(); }
+function _vttLootCataRar(id = '') { _cRar = id || ''; _renderLootPanel(); }
 function _vttLootCataAdd(itemId) {
   // Le stepper interne a son propre data-vtt-fn (dispatcher = plus proche) :
   // ce handler ne se déclenche que sur le corps de la ligne.
