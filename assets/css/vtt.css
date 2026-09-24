@@ -12211,3 +12211,21 @@ button.vtt-ms-portrait { padding:0; border:0; background:none; cursor:pointer; }
 .vtt-ms-pop-btn.amber { background:#f59e0b; color:#111; }
 .vtt-ms-pop-note { font-size:11px; color:var(--text-muted); }
 .vtt-ms-pop-empty { padding:8px; font-size:12px; color:var(--text-muted); }
+.vtt-ms-pop-sep { height:1px; background:var(--border); margin:4px 2px; }
+.vtt-ms-pop-it.danger { color:var(--crimson,#ff5a7e); }
+.vtt-ms-pop-it.danger:hover { background:color-mix(in srgb,var(--crimson,#ff5a7e) 12%,transparent); }
+
+/* Équipement : emplacements pleins + libres */
+.vtt-ms-eqs { display:flex; flex-direction:column; gap:5px; margin-bottom:8px; }
+.vtt-ms-eq { display:flex; align-items:flex-start; gap:9px; width:100%; text-align:left; padding:8px 9px; border-radius:10px; background:var(--bg-elevated); border:1px solid var(--border); cursor:pointer; transition:border-color .12s; }
+.vtt-ms-eq:hover, .vtt-ms-eq.sel { border-color:var(--gold); }
+.vtt-ms-eq-ic { flex:none; width:26px; height:26px; border-radius:7px; display:grid; place-items:center; background:var(--bg-panel); color:var(--text-muted); }
+.vtt-ms-eq-b { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.vtt-ms-eq-b small { font-size:9px; letter-spacing:.05em; text-transform:uppercase; color:var(--text-dim,var(--text-muted)); }
+.vtt-ms-eq-nm { font-size:12.5px; font-weight:600; color:var(--text); }
+.vtt-ms-eq-free { display:flex; align-items:center; flex-wrap:wrap; gap:5px; margin-bottom:8px; }
+.vtt-ms-eq-free > span { font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--text-dim,var(--text-muted)); font-weight:600; }
+.vtt-ms-efree { display:inline-flex; align-items:center; gap:5px; padding:4px 9px; border-radius:999px; border:1px dashed var(--border-strong,var(--border)); background:none; color:var(--text-muted); font-size:11.5px; cursor:pointer; }
+.vtt-ms-efree:hover, .vtt-ms-efree.sel { color:var(--gold-2,var(--gold)); border-color:var(--gold); }
+.vtt-ms-efree svg { width:13px; height:13px; }
+.vtt-ms-setrow { display:flex; align-items:center; gap:8px; padding:7px 9px; border-radius:9px; font-size:11.5px; color:var(--emerald,#22c38e); background:color-mix(in srgb,var(--emerald,#22c38e) 10%,transparent); border:1px solid color-mix(in srgb,var(--emerald,#22c38e) 26%,transparent); }

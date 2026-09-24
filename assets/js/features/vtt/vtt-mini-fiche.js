@@ -393,6 +393,22 @@ function _msPopHtml(c, uid) {
       && (STATE.isAdmin || uid === STATE.user?.uid || canControlCharacter(x))));
     h = `<div class="vtt-ms-pop-lbl">${STATE.isAdmin ? 'Personnages' : 'Mes personnages'}</div>`
       + chars.map(x => `<button class="vtt-ms-pop-it${x.id === c.id ? ' on' : ''}" data-vtt-fn="_vttSelectMiniChar" data-vtt-args="${uid}|${x.id}"><span class="vtt-ms-pop-av">${_esc((x.nom || '?')[0].toUpperCase())}</span><span>${_esc(x.nom || 'Perso')}</span>${x.titreActuel || x.titre ? `<em>${_esc(x.titreActuel || x.titre)}</em>` : ''}</button>`).join('');
+  } else if (p.v === 'slot') {
+    const slotId = p.arg;
+    const equip = c?.equipement || {}, inv = c?.inventaire || [];
+    const cur = equip[slotId];
+    const slotDef = _msSlots().find(s => s.id === slotId);
+    const opts = inv.map((it, i) => ({ it, i })).filter(({ it, i }) => _msItemFitsSlot(it, slotId, equip, i));
+    h = `<div class="vtt-ms-pop-lbl">${_esc(slotDef?.label || 'Emplacement')}</div>`
+      + (opts.length
+        ? opts.map(({ it, i }) => {
+            const otherSlot = Object.keys(equip).find(s => s !== slotId && (equip[s]?.sourceInvIndex ?? -1) === i);
+            const otherLbl = otherSlot ? _msSlots().find(s => s.id === otherSlot)?.label : '';
+            const onCur = (cur?.sourceInvIndex ?? -2) === i;
+            return `<button class="vtt-ms-pop-it${onCur ? ' on' : ''}" data-vtt-fn="_vttMsEquip" data-vtt-args="${c.id}|${uid}|${slotId}|${i}"><span>${_esc(it.nom)}${(it.qte || 1) > 1 ? ` ×${it.qte}` : ''}</span>${otherLbl && !onCur ? `<em>équipé : ${_esc(otherLbl)}</em>` : ''}</button>`;
+          }).join('')
+        : '<div class="vtt-ms-pop-empty">Aucun objet compatible dans le sac.</div>')
+      + (cur?.nom ? `<div class="vtt-ms-pop-sep"></div><button class="vtt-ms-pop-it danger" data-vtt-fn="_vttMsUnequip" data-vtt-args="${c.id}|${uid}|${slotId}"><span>Retirer ${_esc(cur.nom)}</span></button>` : '');
   } else if (p.v === 'xp') {
     const niv = parseInt(c?.niveau) || 1, xp = parseInt(c?.exp) || 0, palier = calcPalier(niv), up = palier > 0 && xp >= palier;
     const canEdit = _msCanEdit(uid, c?.id);
@@ -447,6 +463,9 @@ async function _vttMsEquip(charId, uid, slot, invIndex) {
   const built = _msBuildEquipItem(slot, item, invIndex); if (!built) return;
   equip[slot] = built;
   const bonus = computeEquipStatsBonus(equip);
+  _msPop = null;
+  c.equipement = equip; c.statsBonus = bonus;   // optimiste : reflet immédiat + ferme le popover
+  _renderMiniSheet(uid);
   try {
     await updateDoc(_chrRef(charId), { equipement: equip, statsBonus: bonus });
     showNotif(`${item.nom} → ${slot}`, 'success');
@@ -460,6 +479,9 @@ async function _vttMsUnequip(charId, uid, slot) {
   const nom = equip[slot]?.nom || slot;
   delete equip[slot];
   const bonus = computeEquipStatsBonus(equip);
+  _msPop = null;
+  c.equipement = equip; c.statsBonus = bonus;   // optimiste : reflet immédiat + ferme le popover
+  _renderMiniSheet(uid);
   try {
     await updateDoc(_chrRef(charId), { equipement: equip, statsBonus: bonus });
     showNotif(`${nom} retiré`, 'success');
@@ -738,42 +760,35 @@ function _msXpSection(c, uid, canEdit) {
     </div>`;
 }
 
+// Équipement (refonte) : emplacements PLEINS en lignes pleine largeur avec tous
+// les apports (traits entiers), emplacements LIBRES regroupés en pastilles. Un
+// clic ouvre un popover de choix d'objet (compatibles + Retirer). Plus de <select>.
 function _msTabEquipement(c, uid, canEdit) {
-  const equip = c?.equipement||{}, inv = c?.inventaire||[];
+  const equip = c?.equipement || {}, inv = c?.inventaire || [];
   const slots = _msSlots();
-  const equippedCount = slots.filter(slot => equip[slot.id]?.nom).length;
+  const full = slots.filter(s => equip[s.id]?.nom);
+  const free = slots.filter(s => !equip[s.id]?.nom);
   const setData = getArmorSetData(c);
-  const setLabel = setData?.active ? `Set ${setData.type}` : 'Aucun set actif';
-  const intro = _msTabIntro('equip', 'Équipement', `${equippedCount}/${slots.length}`, setLabel);
+  const sIco = s => _msIco(s.kind === 'weapon' ? 'combat' : s.kind === 'armor' ? 'equip' : 'ring');
+  const pa = sid => canEdit ? `data-vtt-fn="_vttMsPop" data-vtt-args="slot|slot-${sid}|${sid}" data-pid="slot-${sid}"` : '';
+  const on = sid => (_msPop?.v === 'slot' && _msPop.arg === sid) ? ' sel' : '';
 
-  return `${intro}<div class="vtt-ms-slots is-upgraded">${slots.map((slotDef, slotIdx) => {
-    const slot = slotDef.id;
-    const equipped    = equip[slot];
-    const equippedIdx = equipped?.sourceInvIndex ?? -1;
-    const opts = inv.map((item, i) => {
-      if (!_msItemFitsSlot(item, slot, equip, i)) return '';
-      return `<option value="${i}"${equippedIdx===i?' selected':''}>${item.nom}${(item.qte||1)>1?' ×'+item.qte:''}</option>`;
-    }).join('');
-    // Icône SVG par nature de slot (robuste même si le MJ renomme les slots).
-    const slotIcon = _msIco(slotDef.kind === 'weapon' ? 'combat' : slotDef.kind === 'armor' ? 'equip' : 'ring');
-    const contributionItem = _msEquipSourceItem(equipped, inv);
-    const contributionHtml = equipped?.nom
-      ? _msEquipContributionHtml(contributionItem, { label: 'Apports' })
-      : '';
-    return `<div class="vtt-ms-slot-row ${equipped?.nom ? 'is-filled' : 'is-empty'}">
-      <span class="vtt-ms-slot-icon">${slotIcon}</span>
-      <div class="vtt-ms-slot-main">
-        <span class="vtt-ms-slot-lbl">${_esc(slotDef.label)}</span>
-        <span class="vtt-ms-slot-current" title="${_esc(equipped?.nom || 'Emplacement libre')}">${_esc(equipped?.nom || 'Emplacement libre')}</span>
-      </div>
-      ${contributionHtml}
-      <div class="vtt-ms-slot-ctrl">${canEdit
-        ? `<select class="vtt-ms-slot-sel" data-vtt-fn="_vttMsSlotChange" data-vtt-on="change" data-vtt-args="$this|${c.id}|${uid}|${slotIdx}">
-             <option value="">— vide —</option>${opts}</select>`
-        : `<span class="vtt-ms-slot-val">${equipped?.nom||'—'}</span>`}
-      </div>
-    </div>`;
-  }).join('')}</div>`;
+  const fullHtml = full.map(s => {
+    const it = equip[s.id];
+    const chips = _msEquipContributionHtml(_msEquipSourceItem(it, inv), { label: '' });
+    return `<button class="vtt-ms-eq${on(s.id)}" ${pa(s.id)}>
+      <span class="vtt-ms-eq-ic">${sIco(s)}</span>
+      <span class="vtt-ms-eq-b"><small>${_esc(s.label)}</small><span class="vtt-ms-eq-nm">${_esc(it.nom)}</span>${chips}</span>
+    </button>`;
+  }).join('');
+  const freeHtml = free.length
+    ? `<div class="vtt-ms-eq-free"><span>Libres</span>${free.map(s => `<button class="vtt-ms-efree${on(s.id)}" ${pa(s.id)} title="Équiper : ${_esc(s.label)}">${sIco(s)}${_esc(s.label)}</button>`).join('')}</div>`
+    : '';
+  const setHtml = setData?.active ? `<div class="vtt-ms-setrow">${_msIco('equip')}<span>Set ${_esc(setData.type)}</span></div>` : '';
+
+  return `<div class="vtt-ms-sect-label">Équipement <em>${full.length}/${slots.length}</em></div>
+    <div class="vtt-ms-eqs">${fullHtml || '<div class="vtt-ms-atk-empty">Rien d\'équipé.</div>'}</div>
+    ${freeHtml}${setHtml}`;
 }
 
 // Méta runes (icône/couleur) — miroir de RUNE_META (spells.js) pour un rendu de
