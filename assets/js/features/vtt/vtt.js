@@ -2758,24 +2758,23 @@ export function _showEmoteBubble(tokenId, emoteUrl, emoteName, key, opts = {}) {
 // Pile de bulles par token : 3 emplacements alignés au-dessus. Un 4ᵉ envoi fait
 // sortir le plus ancien. Combo : même émote/même cible pendant qu'une bulle est
 // visible → pas d'empilement, badge ×N + grossissement + durée relancée.
-const _emoteStacks = {};      // tokenId -> [slot0, slot1, slot2]  (null | record)
-const _EMOTE_SLOTS = 3;
+const _emoteStacks = {};      // tokenId -> record | null  (UNE bulle par token)
 
 function _emoteRetire(rec) {
   if (!rec || rec._out) return;
   rec._out = true;
   clearTimeout(rec.timer);
   const g = rec.group, K = window.Konva;
-  const slots = _emoteStacks[rec.tokenId];
-  if (slots && slots[rec.slot] === rec) slots[rec.slot] = null;
+  if (_emoteStacks[rec.tokenId] === rec) _emoteStacks[rec.tokenId] = null;
   if (!g || g.getStage() === null) { try { g?.destroy(); } catch {} VS.layers.ping?.batchDraw(); return; }
-  g.to({ y: g.y() - CELL * 0.55, opacity: 0, scaleX: g.scaleX() * 0.85, scaleY: g.scaleY() * 0.85,
-    duration: 0.5, easing: K.Easings.EaseIn,
+  g.to({ y: g.y() - CELL * 0.5, opacity: 0, scaleX: g.scaleX() * 0.85, scaleY: g.scaleY() * 0.85,
+    duration: 0.4, easing: K.Easings.EaseIn,
     onFinish: () => { g.destroy(); VS.layers.ping?.batchDraw(); } });
 }
 
-// Émote ancrée : pop-in élastique au-dessus du token, pile de 3, combo, amplifié,
-// ciblé (courbe + halo). opts : { big, targetTokenId, authorName, remote, count }.
+// Émote ancrée : UNE bulle par token, centrée au-dessus. Une nouvelle émote
+// remplace la précédente ; la même (combo) incrémente ×N sans empiler.
+// opts : { big, targetTokenId, authorName, remote, count }.
 function _spawnTokenEmote(tokenId, t, emoteUrl, emoteName, opts = {}) {
   const K = window.Konva;
   if (!K || !VS.layers.ping) return;
@@ -2785,41 +2784,30 @@ function _spawnTokenEmote(tokenId, t, emoteUrl, emoteName, opts = {}) {
   const dim = _tokenDims(t);
   const cx = t.col * CELL + dim.w * CELL / 2;
   const topY = t.row * CELL;
-  const D = (big ? CELL * 2.4 : CELL * 1.5), R = D / 2;
-  const spacing = CELL * 1.0;
+  const D = (big ? CELL * 2.5 : CELL * 1.65), R = D / 2;
+  const cy = topY - R * 1.12;    // au-dessus du token, la pointe descend vers lui
 
-  const slots = (_emoteStacks[tokenId] ||= [null, null, null]);
+  const cur = _emoteStacks[tokenId];
 
-  // ── Combo : bulle vivante identique (même émote + cible, non amplifiée) ──
-  if (!big) {
-    const live = slots.find(s => s && !s._out && !s.big && s.name === emoteName && (s.target || '') === (targetId || ''));
-    if (live) {
-      const n = Math.max((live.count || 1) + 1, opts.count || 0);
-      live.count = n;
-      const grow = live.baseScale * Math.min(1 + 0.07 * (n - 1), 1.35);
-      live.group.to({ scaleX: grow, scaleY: grow, duration: 0.2, easing: K.Easings.BackEaseOut });
-      _emoteBadge(live, n, color);
-      clearTimeout(live.timer);
-      live.timer = setTimeout(() => _emoteRetire(live), 2600);
-      if (targetId) _emoteAim(t, targetId, color);
-      VS.layers.ping.batchDraw();
-      return;
-    }
+  // ── Combo : même bulle vivante (même émote + cible, non amplifiée) → ×N ──
+  if (cur && !cur._out && !big && !cur.big && cur.name === emoteName && (cur.target || '') === (targetId || '')) {
+    const n = Math.max((cur.count || 1) + 1, opts.count || 0);
+    cur.count = n;
+    const grow = cur.baseScale * Math.min(1 + 0.07 * (n - 1), 1.35);
+    cur.group.to({ scaleX: grow, scaleY: grow, duration: 0.2, easing: K.Easings.BackEaseOut });
+    _emoteBadge(cur, n, color);
+    clearTimeout(cur.timer);
+    cur.timer = setTimeout(() => _emoteRetire(cur), 2600);
+    if (targetId) _emoteAim(t, targetId, color);
+    VS.layers.ping.batchDraw();
+    return;
   }
 
-  // ── Nouvelle bulle : trouver un emplacement libre (sinon retirer le plus ancien) ──
-  let slot = slots.indexOf(null);
-  if (slot < 0) {
-    let oldest = 0;
-    for (let i = 1; i < _EMOTE_SLOTS; i++) if ((slots[i]?.ts || 0) < (slots[oldest]?.ts || 0)) oldest = i;
-    _emoteRetire(slots[oldest]);
-    slot = oldest;
-  }
-  const xOff = (slot - (_EMOTE_SLOTS - 1) / 2) * spacing;
-  const cy = topY - R * 0.95;
+  // ── Émote différente (ou amplifiée) → remplace la précédente ──
+  if (cur) _emoteRetire(cur);
 
   const baseScale = 1;
-  const group = new K.Group({ x: cx + xOff, y: cy, opacity: 0, scaleX: 0.2, scaleY: 0.2, listening: false });
+  const group = new K.Group({ x: cx, y: cy, opacity: 0, scaleX: 0.2, scaleY: 0.2, listening: false });
   // Pointe vers le token
   group.add(new K.Line({ points: [-R * 0.26, R * 0.82, R * 0.26, R * 0.82, 0, R * 1.3], closed: true, fill: color,
     shadowColor: '#000', shadowBlur: R * 0.2, shadowOpacity: 0.35, shadowOffsetY: 2 }));
@@ -2831,9 +2819,9 @@ function _spawnTokenEmote(tokenId, t, emoteUrl, emoteName, opts = {}) {
   group.add(clip);
   VS.layers.ping.add(group);
 
-  const rec = { tokenId, slot, group, name: emoteName, target: targetId, big, count: Math.max(1, opts.count || 1),
+  const rec = { tokenId, group, name: emoteName, target: targetId, big, R, count: Math.max(1, opts.count || 1),
     ts: Date.now(), baseScale, timer: null, _out: false };
-  slots[slot] = rec;
+  _emoteStacks[tokenId] = rec;
 
   const imgEl = new Image();
   imgEl.onload = () => { if (group.getStage() === null) return; const side = R * 1.78;
@@ -2863,7 +2851,7 @@ function _spawnTokenEmote(tokenId, t, emoteUrl, emoteName, opts = {}) {
 
   if (big) {
     // Onde de choc + deux secousses.
-    const wave = new K.Circle({ x: cx + xOff, y: cy, radius: R, stroke: color, strokeWidth: 3, opacity: 0.8, listening: false });
+    const wave = new K.Circle({ x: cx, y: cy, radius: R, stroke: color, strokeWidth: 3, opacity: 0.8, listening: false });
     VS.layers.ping.add(wave);
     wave.to({ radius: R * 2.1, opacity: 0, duration: 0.9, easing: K.Easings.EaseOut, onFinish: () => wave.destroy() });
     setTimeout(() => { if (group.getStage()) group.to({ rotation: -9, duration: 0.12, onFinish: () => group.to({ rotation: 9, duration: 0.16, onFinish: () => group.to({ rotation: 0, duration: 0.12 }) }) }); }, 420);
@@ -2878,7 +2866,7 @@ function _spawnTokenEmote(tokenId, t, emoteUrl, emoteName, opts = {}) {
 function _emoteBadge(rec, n, color) {
   const K = window.Konva, g = rec.group;
   if (!g || g.getStage() === null) return;
-  const R = (rec.big ? CELL * 2.4 : CELL * 1.5) / 2;
+  const R = rec.R || (CELL * 1.65) / 2;
   if (!rec.badge) {
     const bg = new K.Group({ x: R * 0.72, y: -R * 0.72 });
     bg.add(new K.Circle({ radius: Math.max(9, R * 0.34), fill: color, stroke: '#fff', strokeWidth: 2 }));
@@ -14357,7 +14345,6 @@ async function _vttMountTable(content) {
     <button class="vtt-emote-trigger" data-vtt-fn="_vttToggleEmotePicker" title="Émotes" aria-label="Émotes" aria-expanded="false" aria-controls="vtt-emote-picker">😄</button>`;
   sessionTools.appendChild(_ef);
   _initEmoteGestures();     // gestes (maintien/glisser) + roue E + touches 1-8
-  _updateEmoteTrigger();    // reflète la dernière émote sur le bouton
 
   // Lanceur de dés LIBRE dans le dock d'outils : accessible sans sélectionner de
   // token (le MJ notamment n'a pas de token). Réutilise _vttToggleDice/_renderDicePanel.

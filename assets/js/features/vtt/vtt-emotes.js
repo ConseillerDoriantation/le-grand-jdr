@@ -497,7 +497,6 @@ export async function _vttSendEmote(name, opts = {}) {
   if (token.characterId) bumpEmote(token.characterId, VS.characters[token.characterId]?.nom || token.name, name);
 
   _emoteLast = name;
-  _updateEmoteTrigger(name);
   if (_emoteTab === 'rec') _renderEmotePickerIfOpen();
 }
 
