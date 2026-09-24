@@ -9,7 +9,7 @@
 import { VS } from './vtt-state.js';
 import { STATE } from '../../core/state.js';
 import { _esc, _searchIncludes, eyeIcon } from '../../shared/html.js';
-import { computeEquipSkillBonus, statShort, calcCA } from '../../shared/char-stats.js';
+import { computeEquipSkillBonus, statShort, calcCA, calcGardeMax } from '../../shared/char-stats.js';
 import { normalizeCharacterBuilds } from '../../shared/character-builds.js';
 import { hpColor, TYPE_COLOR, _STAT_COLOR, _STAT_KEY, _MS_BONUS_BUFF, _VTT_RUNE_META } from './vtt-constants.js';
 import { DAMAGE_INTERACTIONS } from '../../shared/damage-profile.js';
@@ -28,6 +28,8 @@ let _insTab = null;             // onglet DÉPLOYÉ (null = fiche compacte, rien
 // (Le panneau « Jets » a été fusionné dans le lanceur de dés du dock — vtt-dice.js.)
 let _inspectorDirty = false;    // coalescing des rafales de snapshots → 1 render/tick
 let _skillFilter = '';          // filtre live du panneau « Jets de compétences »
+let _openResourceKey = null;    // PV / PM / Garde : reste ouvert pendant une série de réglages
+let _resourceOutsideBound = false;
 // Regroupement des compétences par caractéristique (scan plus rapide pour le joueur).
 const _SK_STAT_ORDER = ['FOR', 'DEX', 'CON', 'INT', 'SAG', 'CHA', ''];
 const _SK_STAT_LABEL = { FOR:'Force', DEX:'Dextérité', CON:'Constitution', INT:'Intelligence', SAG:'Sagesse', CHA:'Charisme', '':'Autres' };
@@ -92,13 +94,36 @@ function _defaultInspectorToken(t) {
   const pageId = VS.activePage?.id;
   const controlled = controlledCharacterTokens(VS.tokens, token => _canControlToken(token, uid));
   const onPage = pageId ? controlled.filter(token => token.pageId === pageId) : [];
-  const candidates = onPage.length ? onPage : controlled;
-  return candidates.find(token => {
+  // Un token en réserve ne doit pas apparaître comme s'il était déjà posé :
+  // l'état vide du pupitre propose alors explicitement de l'invoquer.
+  return onPage.find(token => {
     const character = VS.characters[token.characterId];
     return character?.uid === uid && character?.isDefault;
-  }) || candidates.find(token => VS.characters[token.characterId]?.uid === uid)
-    || candidates.find(token => VS.characters[token.characterId]?.isDefault)
-    || candidates[0] || null;
+  }) || onPage.find(token => VS.characters[token.characterId]?.uid === uid)
+    || onPage.find(token => VS.characters[token.characterId]?.isDefault)
+    || onPage[0] || null;
+}
+
+function _wireResourceEditors(el) {
+  const editors = [...el.querySelectorAll('details.vtt-resource[data-resource]')];
+  editors.forEach(editor => editor.addEventListener('toggle', () => {
+    const key = editor.dataset.resource || null;
+    if (editor.open) {
+      _openResourceKey = key;
+      editors.forEach(other => { if (other !== editor) other.open = false; });
+    } else if (_openResourceKey === key) {
+      _openResourceKey = null;
+    }
+  }));
+
+  if (_resourceOutsideBound) return;
+  _resourceOutsideBound = true;
+  document.addEventListener('pointerdown', event => {
+    const openEditor = document.querySelector('#vtt-inspector details.vtt-resource[open]');
+    if (!openEditor || openEditor.contains(event.target)) return;
+    _openResourceKey = null;
+    openEditor.open = false;
+  }, true);
 }
 export function _renderInspector(t) {
   const resolved = t ?? (!STATE.isAdmin && !VS.selected ? _defaultInspectorToken(null) : t);
@@ -117,6 +142,7 @@ export function _renderInspectorImpl(t) {
   const el=document.getElementById('vtt-inspector'); if (!el) return;
   // Entrée animée : uniquement quand la sélection CHANGE (≠ re-render PV/tour).
   const _selKey = VS.selectedMulti.size>1 ? `multi:${VS.selectedMulti.size}` : (t?.id || null);
+  if (_selKey !== _insLastSelKey) _openResourceKey = null;
   if (_selKey && _selKey !== _insLastSelKey) {
     el.classList.remove('vtt-ins-enter');
     void el.offsetWidth;                 // reflow → (re)joue l'anim
@@ -148,9 +174,14 @@ export function _renderInspectorImpl(t) {
       token => _canControlToken(token),
     ).length > 0;
     const invokeBtn = canInvoke
-      ? `<button type="button" class="vtt-ins-action-main" data-vtt-fn="_vttInvokeMyToken" title="Placer ton personnage sur la carte"><span>🧑</span><b>Invoquer mon token</b></button>`
+      ? `<button type="button" class="vtt-empty-invoke" data-vtt-fn="_vttInvokeMyToken" title="Placer un personnage contrôlé sur la carte"><span aria-hidden="true">＋</span><b>Invoquer mon token</b></button>`
       : '';
-    el.innerHTML = `<div class="vtt-ins-empty"><div style="font-size:1.8rem">🎲</div><div>Sélectionne un token${!STATE.isAdmin ? ' ou invoque ton personnage' : ''}</div>${invokeBtn}</div>`;
+    const hint = canInvoke ? 'Choisis un token ou place ton personnage' : 'Clique sur un token du plateau';
+    el.innerHTML = `<div class="vtt-fiche vtt-fiche--compact vtt-fiche--empty">
+      <span class="vtt-empty-token" aria-hidden="true">◎</span>
+      <span class="vtt-empty-copy"><b>Sélectionne un token</b><small>${hint}</small></span>
+      ${invokeBtn}
+    </div>`;
     return;
   }
   el.dataset.tokenId = t.id || '';
@@ -160,7 +191,6 @@ export function _renderInspectorImpl(t) {
   const icon={player:'🧑',enemy:'👹',npc:'👤'}[t.type]??'🎭';
   const lbl={player:'Joueur',enemy:'Ennemi',npc:'PNJ'}[t.type]??t.type;
   const img=ld.displayImage;
-  const linked=t.characterId||t.npcId;
   const buildSwitcherHtml = _buildTokenBuildSwitcher(t);
 
   const pageOpts=STATE.isAdmin
@@ -674,7 +704,7 @@ export function _renderInspectorImpl(t) {
     : null;
   const _sheetOpen = !!(_sheetUid && VS.miniUid === _sheetUid && VS.miniCharId === t.characterId);
   const _identitySheetBtn = (_sheetUid && _ctrl)
-    ? `<button type="button" class="vtt-who-sheet${_sheetOpen ? ' active' : ''}" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${_esc(_sheetUid)}|${_esc(t.characterId)}" data-mini-uid="${_esc(_sheetUid)}" data-mini-char="${_esc(t.characterId)}" title="Ouvrir la mini-feuille de ${_esc(ld.displayName ?? t.name)}" aria-label="Ouvrir la mini-feuille du personnage" aria-pressed="${_sheetOpen}">📜</button>`
+    ? `<button type="button" class="vtt-who-sheet${_sheetOpen ? ' active' : ''}" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${_esc(_sheetUid)}|${_esc(t.characterId)}" data-mini-uid="${_esc(_sheetUid)}" data-mini-char="${_esc(t.characterId)}" title="Ouvrir la mini-feuille de ${_esc(ld.displayName ?? t.name)}" aria-label="Ouvrir la mini-feuille du personnage" aria-pressed="${_sheetOpen}"><span>▤</span><b>Fiche</b><kbd>C</kbd></button>`
     : '';
   const _tabBar = (_tabs.length && _ctrl)
     ? `<div class="vtt-fiche-tabs">${_tabs.map(s =>
@@ -689,67 +719,61 @@ export function _renderInspectorImpl(t) {
 
   // ── Bloc d'identité (présentation Claude Design) + boutons Max ──
   const _char = t.characterId ? VS.characters[t.characterId] : null;
-  const _lvl  = _char?.niveau ?? (t.beastId ? VS.bstTracker?.[t.beastId]?.niveau : null);
-  const _cls  = _char?.classe || '';
-  const _sub  = [_cls, _lvl ? `Niv. ${_lvl}` : ''].filter(Boolean).join(' · ') || lbl;
   const _camp = t.type === 'enemy' ? 'var(--c-enemy)' : t.type === 'npc' ? 'var(--c-npc)' : 'var(--c-player)';
   const _pm = ld.displayPm ?? null, _pmMax = ld.displayPmMax ?? null;
-  const _inCombat = !!VS.session?.combat?.active;
-  const _baseMv = ld.displayMovement ?? 6, _maxMv = _baseMv + (t.bonusMvt || 0);
-  const _remMv = _inCombat ? Math.max(0, _maxMv - (t.movedCells || 0)) : _maxMv;
-  const _mvCol = _remMv === 0 ? '#f87171' : _remMv <= 2 ? '#f59e0b' : '#4ade80';
-  const _ca = ld.caBadge ?? (ld.displayDefense ?? '?');
-  const _rr = VS.session?.combat?.round ?? 0;
-  const _condPills = (Array.isArray(t.conditions) ? t.conditions : [])
-    .filter(c => c.expiresAtRound == null || _rr === 0 || _rr <= c.expiresAtRound)
-    .map(c => { const l = CONDITION_BY_ID[c.id] || { label: c.id, icon: '⚡', color: '#888' };
-      return `<span class="vtt-vit cond" style="--cc:${l.color}" title="${_esc(l.label)}">${l.icon} ${_esc(l.label)}</span>`; }).join('');
   const _ed = _canControlToken(t);
-  const _resource = (kind, label, current, max, pct, color) => {
-    const setter = kind === 'PV' ? '_vttSetHp' : '_vttSetPm';
-    const controls = _ed
-      ? `<div class="vtt-resource-controls" aria-label="Modifier les ${label}">
-           <button type="button" class="vtt-resource-step" data-vtt-fn="_vttAdjustVital" data-vtt-args="${t.id}|${kind}|-1" aria-label="Retirer 1 ${kind}" title="−1 ${kind}" ${current <= 0 ? 'disabled' : ''}>−</button>
-           <input class="vtt-ins-input vtt-vital-input" type="number" inputmode="numeric" value="${current}" min="0" max="${max}" aria-label="${label} actuels" title="Saisir la valeur puis appuyer sur Entrée ou quitter le champ" data-vtt-fn="${setter}" data-vtt-on="change" data-vtt-args="${t.id}|$value">
+  const _resource = (kind, label, current, max, pct, color, options = {}) => {
+    const setter = options.setter || (kind === 'PV' ? '_vttSetHp' : '_vttSetPm');
+    const direct = !!options.direct;
+    const prefix = options.prefix || t.id;
+    const setArgs = `${prefix}|$value`;
+    const stepButton = (delta, disabled) => direct
+      ? `<button type="button" class="vtt-resource-step" data-vtt-fn="${setter}" data-vtt-args="${prefix}|${Math.max(0, Math.min(max, current + delta))}" aria-label="${delta < 0 ? 'Retirer' : 'Ajouter'} 1 ${kind}" title="${delta < 0 ? '−' : '+'}1 ${kind}" ${disabled ? 'disabled' : ''}>${delta < 0 ? '−' : '+'}</button>`
+      : `<button type="button" class="vtt-resource-step" data-vtt-fn="_vttAdjustVital" data-vtt-args="${t.id}|${kind}|${delta}" aria-label="${delta < 0 ? 'Retirer' : 'Ajouter'} 1 ${kind}" title="${delta < 0 ? '−' : '+'}1 ${kind}" ${disabled ? 'disabled' : ''}>${delta < 0 ? '−' : '+'}</button>`;
+    const resourceKey = kind.toLowerCase();
+    const summary = `<span class="vtt-resource-summary vtt-resource-summary--${resourceKey}">
+      <span class="vtt-resource-value"><b>${kind}</b> ${current}/${max}</span>
+      <span class="vtt-dbar-t" role="progressbar" aria-label="${label}" aria-valuenow="${current}" aria-valuemin="0" aria-valuemax="${max}"><b class="vtt-dbar-f" style="width:${Math.max(0, Math.min(100, pct))}%;background:${color}"></b></span>
+    </span>`;
+    if (!_ed) return `<div class="vtt-resource vtt-resource--${resourceKey} vtt-resource--readonly" style="--vtt-resource-color:${color}">${summary}</div>`;
+    const controls = `<div class="vtt-resource-controls" aria-label="Modifier les ${label}">
+           ${stepButton(-1, current <= 0)}
+           <input class="vtt-ins-input vtt-vital-input" type="number" inputmode="numeric" value="${current}" min="0" max="${max}" aria-label="${label} actuels" title="Saisir la valeur puis appuyer sur Entrée ou quitter le champ" data-vtt-fn="${setter}" data-vtt-on="change" data-vtt-args="${setArgs}">
            <span class="vtt-resource-total">/ ${max}</span>
-           <button type="button" class="vtt-resource-step" data-vtt-fn="_vttAdjustVital" data-vtt-args="${t.id}|${kind}|1" aria-label="Ajouter 1 ${kind}" title="+1 ${kind}" ${current >= max ? 'disabled' : ''}>+</button>
-           <button type="button" class="vtt-ins-max-btn" data-vtt-fn="${setter}" data-vtt-args="${t.id}|${max}" title="Remettre les ${label} au maximum" ${current === max ? 'disabled' : ''}>Max</button>
-         </div>`
-      : `<span class="vtt-resource-readonly"><b>${current}</b><span>/ ${max}</span></span>`;
-    return `<div class="vtt-resource" style="--vtt-resource-color:${color}">
-      <div class="vtt-resource-top"><span class="vtt-resource-name" title="${label}">${kind}</span>${controls}</div>
-      <div class="vtt-dbar-t" role="progressbar" aria-label="${label}" aria-valuenow="${current}" aria-valuemin="0" aria-valuemax="${max}"><b class="vtt-dbar-f" style="width:${Math.max(0, Math.min(100, pct))}%;background:${color}"></b></div>
-    </div>`;
+           ${stepButton(1, current >= max)}
+           <button type="button" class="vtt-ins-max-btn" data-vtt-fn="${setter}" data-vtt-args="${prefix}|${max}" title="Remettre les ${label} au maximum" ${current === max ? 'disabled' : ''}>Max</button>
+         </div>`;
+    return `<details class="vtt-resource vtt-resource--${resourceKey}" data-resource="${resourceKey}" style="--vtt-resource-color:${color}" ${_openResourceKey === resourceKey ? 'open' : ''}>
+      <summary title="Modifier les ${label}">${summary}</summary>
+      <div class="vtt-resource-editor">${controls}</div>
+    </details>`;
   };
-  const _dbar = (k, valHtml, pct, col, maxBtn = '') =>
-    `<div class="vtt-dbar"><span class="vtt-dbar-k">${k}</span>` +
-    `<div class="vtt-dbar-t"><b class="vtt-dbar-f" style="width:${pct}%;background:${col}"></b></div>` +
-    `<span class="vtt-dbar-v">${valHtml}</span>${maxBtn}</div>`;
+  const _gardeMax = _char ? calcGardeMax(_char) : 0;
+  const _gardeCur = _gardeMax > 0 ? Math.max(0, Math.min(_gardeMax, parseInt(_char?.garde, 10) || 0)) : 0;
   const _summary = `<div class="vtt-fiche-id" style="--c:${_camp}">
-      <div class="vtt-who">
-        <div class="vtt-who-av">${img ? `<img src="${img}" alt="">` : `<span>${icon}</span>`}</div>
-        <div class="vtt-who-b"><span class="vtt-who-name">${_esc(ld.displayName ?? t.name)}</span><span class="vtt-who-sub">${_esc(_sub)}${linked ? ' · 🔗' : ''}</span></div>
-        ${_identitySheetBtn}
-      </div>
-      <div class="vtt-bars">
-        ${_resource('PV', 'points de vie', hp, hpm, Math.round(rat * 100), hpColor(rat))}
-        ${(_pm !== null && _pmMax !== null) ? _resource('PM', 'points de mana', _pm, _pmMax, _pmMax > 0 ? Math.round(Math.max(0, _pm) / _pmMax * 100) : 0, '#b47fff') : ''}
-        ${_dbar('Dép', `<b>${_remMv}</b><i> / ${_maxMv}</i>`, _maxMv > 0 ? Math.round(_remMv / _maxMv * 100) : 0, _mvCol)}
-      </div>
-      <div class="vtt-vitals"><span class="vtt-vit"><span>CA</span><b>${_ca}</b></span>${_condPills || '<span class="vtt-vit vtt-vit-empty">Aucun état</span>'}</div>
-      <div class="vtt-eco-row"><span class="vtt-eco-lbl">Tour</span>
-        <div class="vtt-eco-pip action${t.attackedThisTurn ? ' spent' : ''}" aria-label="Action ${t.attackedThisTurn ? 'faite' : 'disponible'}" title="Action ${t.attackedThisTurn ? 'faite' : 'disponible'}"><span>Action</span><b>${t.attackedThisTurn ? '✓ Faite' : '○ Libre'}</b></div>
-        <div class="vtt-eco-pip bonus${t.bonusActionThisTurn ? ' spent' : ''}" aria-label="Action bonus ${t.bonusActionThisTurn ? 'faite' : 'disponible'}" title="Action bonus ${t.bonusActionThisTurn ? 'faite' : 'disponible'}"><span>Action bonus</span><b>${t.bonusActionThisTurn ? '✓ Faite' : '○ Libre'}</b></div>
-        <div class="vtt-eco-pip reaction${t.reactionThisTurn ? ' spent' : ''}" aria-label="Réaction ${t.reactionThisTurn ? 'faite' : 'disponible'}" title="Réaction ${t.reactionThisTurn ? 'faite' : 'disponible'}"><span>Réaction</span><b>${t.reactionThisTurn ? '✓ Faite' : '○ Libre'}</b></div>
+      <div class="vtt-who-av">${img ? `<img src="${_esc(img)}" alt="">` : `<span>${icon}</span>`}</div>
+      <div class="vtt-fiche-main">
+        <div class="vtt-who-b"><span class="vtt-who-name">${_esc(ld.displayName ?? t.name)}</span></div>
+        <div class="vtt-bars vtt-bars--compact">
+          ${_resource('PV', 'points de vie', hp, hpm, Math.round(rat * 100), hpColor(rat))}
+          ${(_pm !== null && _pmMax !== null) ? _resource('PM', 'points de mana', _pm, _pmMax, _pmMax > 0 ? Math.round(Math.max(0, _pm) / _pmMax * 100) : 0, '#7b87f5') : ''}
+          ${_gardeMax > 0 ? _resource('Garde', 'points de Garde', _gardeCur, _gardeMax, Math.round(_gardeCur / _gardeMax * 100), '#5fb0c8', {
+            setter: '_vttMsSetGarde', direct: true, prefix: `${_char.id}|${_char.uid || _sheetUid || ''}`,
+          }) : ''}
+        </div>
       </div>
     </div>`;
 
   el.innerHTML = `
     ${_panelHtml}
-    <div class="vtt-fiche">
+    <div class="vtt-fiche vtt-fiche--compact">
       ${_summary}
-      ${_tabBar}
+      <div class="vtt-fiche-actions">
+        ${_identitySheetBtn}
+        ${_tabBar ? `<details class="vtt-fiche-tools"><summary title="Stats, États et gestion" aria-label="Ouvrir Stats, États et Gérer">•••</summary>${_tabBar}</details>` : ''}
+      </div>
     </div>`;
+  _wireResourceEditors(el);
 
   // Le lanceur de dés du dock affiche les compétences du token courant : si son
   // panneau est ouvert, on le rafraîchit à chaque changement de sélection.

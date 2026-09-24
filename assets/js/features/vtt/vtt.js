@@ -185,13 +185,14 @@ import {
 } from './vtt-presence.js';
 import {
   _renderMiniSheet, _vttToggleMiniSheet, _vttSelectMiniChar, _msCanEdit, _msCanEditVitals,
-  _vttMsTab, _vttMsAddNote, _vttMsToggleNote, _vttMsRenameNote, _vttMsSaveNote,
+  _vttMsTab, _vttMsToggleCollapsed, _vttMsAttackSlot, _vttMsAddNote, _vttMsToggleNote,
   _vttMsDeleteNote, _vttMsEquip, _vttMsUnequip, _vttMsUnequipAll, _vttMsEquipPicker,
   _vttMsSlotChange, _vttMsDeleteItem, _vttMsSendPicker, _vttMsConfirmSend,
   _vttMsInvSearch, _vttMsInvCat, _vttMsInvClear, _vttMsSortSearch, _vttMsSortCat,
-  _vttMsSortClear, _vttToggleMsSort, _vttMsCompteAdd, _vttMsCompteDel, _vttMsCraft,
+  _vttMsSortClear, _vttToggleMsSort, _vttMsCompteAdd, _vttMsCompteDel, _vttMsCraft, _vttMsCraftAsk, _vttMsCraftCancel,
   _vttMsCraftSearch, _vttMsCraftClear,
   _vttMsSendGoldPicker, _vttMsConfirmSendGold,
+  _vttMsSac, _vttMsGoPurse, _vttMsPop, _vttMsToggleSpell, _vttMsKeyToggle,
 } from './vtt-mini-fiche.js';
 
 let _vttDelegSearch = '';
@@ -2343,23 +2344,6 @@ export function _select(id, { quiet = false } = {}) {
 function _vttAutoSelectOwnToken() {
   if (STATE.isAdmin || VS.selected) return;
   _renderInspectorSoon();
-}
-
-// Replie / déplie le dock de fiche (bas-gauche). Certains joueurs préfèrent le
-// masquer : on ne garde alors qu'une petite pastille pour le rouvrir. Persisté.
-function _vttToggleFicheDock() {
-  const dock = document.getElementById('vtt-fiche-dock');
-  if (!dock) return;
-  const collapsed = !dock.classList.contains('is-collapsed');
-  dock.classList.toggle('is-collapsed', collapsed);
-  lsJson.set('vtt-fiche-dock-hidden', collapsed);
-  const btn = document.getElementById('vtt-fiche-dock-toggle');
-  if (btn) { btn.title = collapsed ? 'Afficher la fiche' : 'Masquer la fiche'; btn.setAttribute('aria-pressed', collapsed ? 'true' : 'false'); }
-}
-// Applique la préférence « fiche masquée » (appelé au montage de la table).
-function _vttApplyFicheDockPref() {
-  const dock = document.getElementById('vtt-fiche-dock');
-  if (dock && lsJson.get('vtt-fiche-dock-hidden', false)) dock.classList.add('is-collapsed');
 }
 
 function _updateTokenDraggable() {
@@ -13082,16 +13066,29 @@ async function _vttMsSetGarde(charId, uid, garde) {
   const max = calcGardeMax(c);
   if (max <= 0) return;
   const val = Math.max(0, Math.min(max, Math.round(garde)));
+  const previous = Math.max(0, Math.min(max, parseInt(c.garde, 10) || 0));
+  if (val === previous) return;
   const patch = { garde: val, ...(controlledToken ? { vttControlTokenId: controlledToken.id } : {}) };
-  const saved = await updateDoc(_chrRef(charId), patch).then(() => true).catch(error => {
-    console.error('[vtt] Garde personnage non modifiée depuis la mini-fiche', error);
-    showNotif('Impossible de modifier la Garde de ce personnage', 'error');
-    return false;
-  });
-  if (!saved) return;
+
+  // Même ressenti que les PV/PM : le pupitre et le token réagissent avant le
+  // retour Firestore. Les clics rapides ne sont donc plus bloqués par le réseau.
   c.garde = val;
   _patchEntityTokenShapes('characterId', charId);
-  _renderMiniSheet(uid);
+  if (VS.miniUid === uid && VS.miniCharId === charId) _renderMiniSheet(uid);
+  _renderInspectorSoon();
+
+  await updateDoc(_chrRef(charId), patch).catch(error => {
+    // Une écriture plus récente peut déjà avoir avancé la valeur : ne jamais
+    // l'écraser lors du rollback d'un ancien clic.
+    if ((parseInt(c.garde, 10) || 0) === val) {
+      c.garde = previous;
+      _patchEntityTokenShapes('characterId', charId);
+      if (VS.miniUid === uid && VS.miniCharId === charId) _renderMiniSheet(uid);
+      _renderInspectorSoon();
+    }
+    console.error('[vtt] Garde personnage non modifiée depuis la mini-fiche', error);
+    showNotif('Impossible de modifier la Garde de ce personnage', 'error');
+  });
 }
 function _vttEditToken(id) { return _openStatsModal(VS.tokens[id]?.data??null); }
 
@@ -13834,6 +13831,11 @@ function _keyHandler(e) {
     e.preventDefault();
     _vttTool('ruler');
   }
+  // Touche C : ouvre/ferme la mini-fiche du personnage contrôlé.
+  if ((e.key==='c' || e.key==='C') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    _vttMsKeyToggle();
+  }
   if ((e.key==='Delete'||e.key==='Backspace') && VS.tool==='select') {
     // 1) Annotations sélectionnées
     if (_selectedAnnotIds.size > 0) {
@@ -14020,9 +14022,6 @@ function _buildHtml() {
 
     <!-- ── FICHE : dock flottant compact en bas à gauche (identité + onglets déployables + Jets) ── -->
     <div class="vtt-fiche-dock" id="vtt-fiche-dock">
-      <button class="vtt-fiche-dock-toggle" id="vtt-fiche-dock-toggle" data-vtt-fn="_vttToggleFicheDock" title="Masquer la fiche" aria-label="Masquer ou afficher la fiche">
-        <span class="vtt-fdt-chev" aria-hidden="true">▾</span><span>🎴 Ma fiche</span>
-      </button>
       <div class="vtt-inspector" id="vtt-inspector">
         <div class="vtt-ins-empty"><div style="font-size:1.2rem">🎲</div>Sélectionne ton token</div>
       </div>
@@ -14364,7 +14363,6 @@ async function _vttMountTable(content) {
   _slideOpen = false;
   if (_slidePinned) _vttSlide('chat');
   _vttApplySlidePin();
-  _vttApplyFicheDockPref();   // restaure « fiche masquée » si le joueur l'avait choisi
   // NB : le lanceur de dés libre vit désormais dans le panneau « Jets » du
   // pupitre (vtt-inspector.js) — plus de puce flottante dédiée ici.
   document.addEventListener('keydown',_keyHandler);
@@ -14441,7 +14439,7 @@ export const VTT_ACTIONS = {
   _vttSlide,
   _vttSlideClose,
   _vttSlidePin,
-  _vttToggleFicheDock,
+  _vttMsAttackSlot,
   _vttUndoDraw,
   _vttRedoDraw,
   _invPickToggle,
@@ -14637,6 +14635,8 @@ export const VTT_ACTIONS = {
   _vttMsConfirmSendGold,
   _vttMsConfirmSend,
   _vttMsCraft,
+  _vttMsCraftAsk,
+  _vttMsCraftCancel,
   _vttMsCraftSearch,
   _vttMsCraftClear,
   _vttMsDeleteItem,
@@ -14646,19 +14646,22 @@ export const VTT_ACTIONS = {
   _vttMsInvCat,
   _vttMsInvClear,
   _vttMsInvSearch,
-  _vttMsRenameNote,
-  _vttMsSaveNote,
   _vttMsSendPicker,
   _vttMsSetNiveau,
   _vttMsLevelUp,
   _vttMsSetHp,
   _vttMsSetPm,
   _vttMsSetGarde,
+  _vttMsSac,
+  _vttMsGoPurse,
+  _vttMsPop,
+  _vttMsToggleSpell,
   _vttMsSlotChange,
   _vttMsSortCat,
   _vttMsSortClear,
   _vttMsSortSearch,
   _vttMsTab,
+  _vttMsToggleCollapsed,
   _vttMsToggleNote,
   _vttMsUnequip,
   _vttMsUnequipAll,
