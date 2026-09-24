@@ -400,6 +400,8 @@ function _queueDurations() {
 }
 function _pumpDurations() {
   if (_durBusy || _musicDragActive) return;   // pas de chargements pendant un drag
+  // Ne pas concurrencer une piste en cours de chargement (changement de musique).
+  if (_audioEl && _audioEl.readyState < 2) { setTimeout(_pumpDurations, 500); return; }
   const id = _durQueue.shift();
   if (!id) return;
   const s = _sounds.find(x => x.id === id);
@@ -413,12 +415,15 @@ function _pumpDurations() {
     try { a.src = ''; } catch { /* noop */ }
     const rounded = dur > 0 ? Math.round(dur) : 0;
     _durCache.set(id, rounded);
-    if (rounded > 0) updateDoc(_sonRef(id), { duration: rounded }).catch(() => {});
-    // Mise à jour CIBLÉE des cellules durée (pas de re-render → pas de saut du rail).
+    // IMPORTANT : on N'ÉCRIT PAS dans vttSons ici. Un updateDoc déclencherait le
+    // onSnapshot(vttSons) → re-render complet du panneau, en boucle sur chaque son
+    // (lags, DnD cassé, lecture lente tant que la file n'est pas vidée). Le cache
+    // suffit pour l'affichage ; il est reconstitué à chaque session (aucune écriture).
+    // Mise à jour CIBLÉE des cellules durée (pas de re-render).
     const txt = rounded > 0 ? _fmtTime(rounded) : '—';
     try { document.querySelectorAll(`.vtt-music-panel .t[data-sound-id="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"] .dur`).forEach(c => { c.textContent = txt; }); } catch { /* noop */ }
     _durBusy = false;
-    setTimeout(_pumpDurations, 40);
+    setTimeout(_pumpDurations, 180);
   };
   a.addEventListener('loadedmetadata', () => finish(a.duration || 0));
   a.addEventListener('error', () => finish(0));
