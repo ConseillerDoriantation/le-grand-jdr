@@ -330,7 +330,6 @@ function _renderMusicPanel() {
     panel.querySelectorAll('.pl[data-pl-id]').forEach(el => {
       el.oncontextmenu = e => { e.preventDefault(); _vttPlaylistCtxMenu(e, el.dataset.plId); };
     });
-    _queueDurations();
   }
 
   // Restaure défilement (liste + rail) + focus/caret de la recherche.
@@ -380,55 +379,15 @@ function _fmtTime(s) {
   return `${m}:${String(sec).padStart(2,'0')}`;
 }
 
-// Durée d'une piste : champ Firestore `duration`, sinon cache client (rempli en
-// arrière-plan), sinon « … » (chargement) ou « — » (échec/inconnu).
+// Durée d'une piste : champ Firestore `duration`, sinon cache client (rempli
+// GRATUITEMENT quand le son est joué, cf. loadedmetadata de _audioEl), sinon « — ».
+// NB : pas de sondage de fond de toute la bibliothèque — charger les métadonnées
+// de tous les sons saturait le réseau/pipeline média et faisait tout ramer tant
+// que ce n'était pas fini.
 const _durCache = new Map();   // soundId → secondes
-const _durQueue = [];          // file d'attente de rattrapage (MJ)
-let _durBusy = false;
 function _msDur(s) {
   const d = (s && s.duration > 0) ? s.duration : _durCache.get(s?.id);
-  return d > 0 ? _fmtTime(d) : (_durCache.get(s?.id) === 0 ? '—' : '…');
-}
-// Rattrapage lazy des durées manquantes (MJ) : charge les métadonnées audio une
-// par une, mémorise en cache + écrit `duration` dans vttSons (1 écriture/son).
-function _queueDurations() {
-  if (!STATE.isAdmin) return;
-  for (const s of _sounds) {
-    if (s && s.url && !(s.duration > 0) && !_durCache.has(s.id) && !_durQueue.includes(s.id)) _durQueue.push(s.id);
-  }
-  _pumpDurations();
-}
-function _pumpDurations() {
-  if (_durBusy || _musicDragActive) return;   // pas de chargements pendant un drag
-  // Ne pas concurrencer une piste en cours de chargement (changement de musique).
-  if (_audioEl && _audioEl.readyState < 2) { setTimeout(_pumpDurations, 500); return; }
-  const id = _durQueue.shift();
-  if (!id) return;
-  const s = _sounds.find(x => x.id === id);
-  if (!s || !s.url) { _pumpDurations(); return; }
-  _durBusy = true;
-  const a = new Audio();
-  a.preload = 'metadata';
-  let done = false;
-  const finish = (dur) => {
-    if (done) return; done = true;
-    try { a.src = ''; } catch { /* noop */ }
-    const rounded = dur > 0 ? Math.round(dur) : 0;
-    _durCache.set(id, rounded);
-    // IMPORTANT : on N'ÉCRIT PAS dans vttSons ici. Un updateDoc déclencherait le
-    // onSnapshot(vttSons) → re-render complet du panneau, en boucle sur chaque son
-    // (lags, DnD cassé, lecture lente tant que la file n'est pas vidée). Le cache
-    // suffit pour l'affichage ; il est reconstitué à chaque session (aucune écriture).
-    // Mise à jour CIBLÉE des cellules durée (pas de re-render).
-    const txt = rounded > 0 ? _fmtTime(rounded) : '—';
-    try { document.querySelectorAll(`.vtt-music-panel .t[data-sound-id="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"] .dur`).forEach(c => { c.textContent = txt; }); } catch { /* noop */ }
-    _durBusy = false;
-    setTimeout(_pumpDurations, 180);
-  };
-  a.addEventListener('loadedmetadata', () => finish(a.duration || 0));
-  a.addEventListener('error', () => finish(0));
-  setTimeout(() => finish(a.duration || 0), 9000);   // garde-fou réseau
-  a.src = s.url;
+  return d > 0 ? _fmtTime(d) : '—';
 }
 
 // Anti-« clic-lecture » après un glisser-déposer (le clic de fin de drag doit
@@ -545,7 +504,7 @@ function _initMusicSortable() {
     animation: 0, fallbackTolerance: 6, delay: 0,
     scroll: scrollEl, scrollSensitivity: 60, scrollSpeed: 10, bubbleScroll: true,
     onStart: () => { _musicDragActive = true; },
-    onEnd: () => { setTimeout(() => { _musicDragActive = false; _pumpDurations(); }, 60); },
+    onEnd: () => { setTimeout(() => { _musicDragActive = false; }, 60); },
   };
 
   // Rail : réordonner les playlists + chaque entrée = zone de dépôt d'un son.
@@ -1014,6 +973,12 @@ function _syncMusicPlayback(ms) {
   el.addEventListener('loadedmetadata', () => {
     _updateMusicProg();
     if (!_musicProgTimer) _musicProgTimer = setInterval(_updateMusicProg, 500);
+    // Mémorise la durée du son joué (gratuit) → s'affiche dans la bibliothèque.
+    if (el.duration > 0) {
+      _durCache.set(el.dataset.soundId, Math.round(el.duration));
+      const txt = _fmtTime(el.duration);
+      try { document.querySelectorAll(`.vtt-music-panel .t[data-sound-id="${(window.CSS && CSS.escape) ? CSS.escape(el.dataset.soundId) : el.dataset.soundId}"] .dur`).forEach(c => { c.textContent = txt; }); } catch { /* noop */ }
+    }
   }, {once:true});
 
   // Fondu d'entrée au démarrage réel de la lecture.
