@@ -677,15 +677,22 @@ async function _vttMsConfirmSend(senderCharId, senderUid, invIndex, recipCharId)
 
 // Supprime définitivement un exemplaire de l'inventaire (sans destinataire).
 // Même logique de réindexation de l'équipement que _vttMsConfirmSend.
+// Suppression SANS confirmation, avec « Annuler » (4 s) dans le toast.
+// Écriture immédiate + ré-écriture à l'annulation : robuste face au listener
+// temps réel des personnages (une écriture différée laisserait un snapshot
+// entrant faire réapparaître l'objet). La réindexation est inchangée.
 async function _vttMsDeleteItem(charId, uid, invIndex) {
   if (!_msCanEdit(uid)) return;
   invIndex = parseInt(invIndex);
   const c = VS.characters[charId]; if (!c) return;
-  const inv = [...(c.inventaire||[])];
-  const item = inv[invIndex]; if (!item) return;
-  if (!await confirmModal(`Supprimer <b>${_esc(item.nom||'cet objet')}</b> de l'inventaire ?`, { title: 'Inventaire', confirmLabel: 'Supprimer' })) return;
-  inv.splice(invIndex, 1);
-  const equip = { ...(c.equipement||{}) };
+  const prevInv   = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+  const prevEquip = { ...(c.equipement || {}) };
+  const prevBonus = { ...(c.statsBonus || {}) };
+  const prevHist  = Array.isArray(c.inventoryHistory) ? [...c.inventoryHistory] : c.inventoryHistory;
+  const item = prevInv[invIndex]; if (!item) return;
+
+  const inv = [...prevInv]; inv.splice(invIndex, 1);
+  const equip = { ...prevEquip };
   Object.keys(equip).forEach(s => {
     const e = equip[s]; if (!e) return;
     if (e.sourceInvIndex === invIndex)    delete equip[s];
@@ -697,12 +704,27 @@ async function _vttMsDeleteItem(charId, uid, invIndex) {
     actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
     source: 'VTT',
   }));
+
+  _msPop = null;
+  c.inventaire = inv; c.equipement = equip; c.statsBonus = bonus; c.inventoryHistory = historyPatch.inventoryHistory;
+  _renderMiniSheet(uid);
   try {
     await updateDoc(_chrRef(charId), { inventaire: inv, equipement: equip, statsBonus: bonus, ...historyPatch });
-    c.inventaire = inv;
-    c.inventoryHistory = historyPatch.inventoryHistory;
-    showNotif(`${item.nom||'Objet'} supprimé`, 'info');
-  } catch(e) { console.error('[vtt] delete item', e); showNotif('Erreur suppression', 'error'); }
+  } catch (e) {
+    console.error('[vtt] delete item', e);
+    c.inventaire = prevInv; c.equipement = prevEquip; c.statsBonus = prevBonus; c.inventoryHistory = prevHist;
+    _renderMiniSheet(uid);
+    showNotif('Erreur suppression', 'error');
+    return;
+  }
+
+  showNotif(`${item.nom || 'Objet'} supprimé`, 'info', { action: { label: 'Annuler', onClick: async () => {
+    const cc = VS.characters[charId]; if (!cc) return;
+    cc.inventaire = prevInv; cc.equipement = prevEquip; cc.statsBonus = prevBonus; cc.inventoryHistory = prevHist;
+    _renderMiniSheet(uid);
+    updateDoc(_chrRef(charId), { inventaire: prevInv, equipement: prevEquip, statsBonus: prevBonus, ...(prevHist !== undefined ? { inventoryHistory: prevHist } : {}) })
+      .catch(err => { console.error('[vtt] undo delete', err); showNotif('Restauration impossible', 'error'); });
+  } } });
 }
 
 // ─── Rendus par onglet ────────────────────────────────────────────
