@@ -119,6 +119,17 @@ function _msEquipContributionHtml(item = {}, opts = {}) {
   return `<div class="vtt-ms-equip-contrib${compact ? ' is-compact' : ''}">${label}${statHtml}${traitHtml}${moreHtml}</div>`;
 }
 
+// Chips propres d'un objet (Sac) : bonus de stats + CA/VIT (vert/rouge) et
+// traits (violet). Mêmes données que _msEquipContributionHtml, style épuré.
+function _msItemChips(item = {}) {
+  const parts = [];
+  _msEquipStatBonuses(item).forEach(s => parts.push(`<span class="vtt-ms-chip ${s.value > 0 ? 'pos' : 'neg'}">${s.abbr} ${s.value > 0 ? '+' : ''}${s.value}</span>`));
+  const ca = parseInt(item.ca) || 0; if (ca) parts.push(`<span class="vtt-ms-chip pos">CA ${ca > 0 ? '+' : ''}${ca}</span>`);
+  const vit = parseInt(item.vitesse ?? item.vit ?? item.bonusVitesse) || 0; if (vit) parts.push(`<span class="vtt-ms-chip ${vit > 0 ? 'pos' : 'neg'}">VIT ${vit > 0 ? '+' : ''}${vit}</span>`);
+  _msEquipTraits(item).forEach(t => parts.push(`<span class="vtt-ms-chip trait" title="${_esc(t)}">${_esc(t)}</span>`));
+  return parts.length ? `<div class="vtt-ms-chips">${parts.join('')}</div>` : '';
+}
+
 function _msBuildEquipItem(slot, item, invIndex) {
   if (!item) return null;
   const isWeapon = getEquipmentSlot(slot)?.kind === 'weapon';
@@ -206,6 +217,10 @@ const _MS_ICONS = {
   send:   '<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M16 6 12 2 8 6"/><path d="M12 2v13"/>',
   trash:  '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
   ring:   '<circle cx="12" cy="15" r="5.5"/><path d="M8.5 10 12 4l3.5 6"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  x:      '<path d="M18 6 6 18M6 6l12 12"/>',
+  potion: '<path d="M9 3h6"/><path d="M10 3v5L5 17a3 3 0 0 0 2.6 4.5h8.8A3 3 0 0 0 19 17l-5-9V3"/>',
+  misc:   '<rect x="4" y="7" width="16" height="13" rx="2"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/>',
 };
 function _msIco(name, cls = 'vtt-ms-ic') {
   return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${_MS_ICONS[name] || ''}</svg>`;
@@ -230,14 +245,15 @@ function _msFilterBar(kind, chips, query) {
     `<button class="vtt-ms-fchip${activeCat===ch.key?' active':''}"${ch.color?` style="--chip-col:${_esc(ch.color)}"`:''}
       data-vtt-fn="${catFn}" data-vtt-args="${ch.key}|$this">${_esc(ch.label)}</button>`
   ).join('');
+  const ph = kind === 'inv' ? 'Rechercher un objet…' : kind === 'sorts' ? 'Rechercher un sort…' : 'Rechercher…';
   return `<div class="vtt-ms-filter" data-kind="${kind}">
-    ${chipsHtml ? `<div class="vtt-ms-fchips">${chipsHtml}</div>` : ''}
     <div class="vtt-ms-fsearch">
-      <span class="vtt-ms-fsearch-ic">🔍</span>
-      <input type="text" class="vtt-ms-fsearch-input" placeholder="Rechercher…"
+      <span class="vtt-ms-fsearch-ic">${_msIco('search')}</span>
+      <input type="text" class="vtt-ms-fsearch-input" placeholder="${ph}"
         value="${_esc(query)}" data-vtt-fn="${searchFn}" data-vtt-on="input" data-vtt-args="$value">
-      ${query ? `<button class="vtt-ms-fsearch-clr" title="Effacer" data-vtt-fn="${clrFn}">✕</button>` : ''}
+      ${query ? `<button class="vtt-ms-fsearch-clr" title="Effacer" data-vtt-fn="${clrFn}">${_msIco('x')}</button>` : '<kbd class="vtt-ms-fsearch-kbd">/</kbd>'}
     </div>
+    ${chipsHtml ? `<div class="vtt-ms-fchips">${chipsHtml}</div>` : ''}
   </div>`;
 }
 
@@ -1294,10 +1310,8 @@ function _msTabInventaire(c, uid, canEdit) {
     if (!groups.length) continue;
     const totalUnits = groups.reduce((s,g) => s + g.indices.length, 0);
     html += `<div class="vtt-ms-inv-group" data-cat="${cat}">
-      <div class="vtt-ms-inv-cat">
-        <span class="vtt-ms-inv-cat-lbl">${CAT_LABEL[cat]}</span>
-        <span class="vtt-ms-inv-cnt">${totalUnits}</span>
-      </div>`;
+      <div class="vtt-ms-cat">${CAT_LABEL[cat]} <span>${totalUnits}</span></div>`;
+    const catIco = { arme: 'combat', armure: 'equip', bijou: 'ring', consommable: 'potion', divers: 'misc' }[cat] || 'inv';
     for (const g of groups) {
       const item = g.item;
       const firstIdx = g.indices[0];
@@ -1309,34 +1323,22 @@ function _msTabInventaire(c, uid, canEdit) {
       const detail = item.degats
         ? `${item.degats}${item.typeArme?' · '+item.typeArme:''}${item.portee?' · '+item.portee:''}`
         : (item.typeArmure ? `${item.typeArmure}${item.ca?' · CA +'+item.ca:''}` : '');
-      const rarDot = item.rarete
-        ? `<span class="vtt-ms-inv-rar" style="background:${_rarColor(item.rarete)}"></span>` : '';
-      html += `<div class="vtt-ms-inv-item${isEq?' is-equipped':''}" data-name="${_esc(_norm(item.nom||''))}">
-        ${rarDot}
-        ${(() => {
-          const img = getInventoryItemImage(item, item.itemId ? catalog.get(item.itemId) : null);
-          return img
-            ? `<img class="vtt-ms-inv-img" src="${_esc(img)}" alt="" loading="lazy">`
-            : `<span class="vtt-ms-inv-img vtt-ms-inv-img--empty">${_msIco(cat==='arme'?'combat':cat==='armure'?'equip':'inv')}</span>`;
-        })()}
-        <div class="vtt-ms-inv-body">
-          <div class="vtt-ms-inv-line1">
-            <span class="vtt-ms-inv-nom" title="${_esc(item.nom)}">${_esc(item.nom)}</span>
-            ${total>1?`<span class="vtt-ms-inv-qte">×${total}</span>`:''}
-            ${isEq?'<span class="vtt-ms-inv-badge">équipé</span>':''}
-          </div>
-          ${detail?`<div class="vtt-ms-inv-detail">${_esc(detail)}</div>`:''}
-          ${(cat==='arme'||cat==='armure'||cat==='bijou') ? _msEquipContributionHtml(item, { compact: true }) : ''}
+      const eqEntry = isEq ? Object.entries(equip).find(([, e]) => e?.sourceInvIndex === equippedIdx) : null;
+      const eqLabel = eqEntry ? (_msSlots().find(sl => sl.id === eqEntry[0])?.label || 'Équipé') : '';
+      const img = getInventoryItemImage(item, item.itemId ? catalog.get(item.itemId) : null);
+      const isEquipCat = (cat === 'arme' || cat === 'armure' || cat === 'bijou');
+      html += `<div class="vtt-ms-inv-item vtt-ms-it${isEq?' eq':''}" data-name="${_esc(_norm(item.nom||''))}">
+        <span class="vtt-ms-it-img" style="--rc:${_rarColor(item.rarete)}">${img ? `<img src="${_esc(img)}" alt="" loading="lazy">` : _msIco(catIco)}</span>
+        <div class="vtt-ms-it-b">
+          <div class="vtt-ms-it-nm"><span title="${_esc(item.nom)}">${_esc(item.nom)}</span>${total>1?`<span class="vtt-ms-it-q">×${total}</span>`:''}${eqLabel?`<span class="vtt-ms-it-slot">${_esc(eqLabel)}</span>`:''}</div>
+          ${detail?`<div class="vtt-ms-it-d">${_esc(detail)}</div>`:''}
+          ${isEquipCat ? _msItemChips(item) : ''}
         </div>
-        ${canEdit?`<div class="vtt-ms-inv-actions">
-          ${(cat==='arme'||cat==='armure'||cat==='bijou') && (!isEq || total > 1)
-            ?`<button class="vtt-ms-inv-btn" data-vtt-fn="_vttMsEquipPicker" data-vtt-args="${c.id}|${uid}|${idxToEquip}" title="Équiper" aria-label="Équiper">${_msIco('equip')}</button>`
-            :''}
-          ${isEq
-            ?`<button class="vtt-ms-inv-btn" data-vtt-fn="_vttMsUnequipAll" data-vtt-args="${c.id}|${uid}|${idxToUnequip}" title="Déséquiper" aria-label="Déséquiper">${_msIco('unlock')}</button>`
-            :''}
-          <button class="vtt-ms-inv-btn" data-vtt-fn="_vttMsSendPicker" data-vtt-args="${c.id}|${uid}|${firstIdx}" title="Envoyer" aria-label="Envoyer">${_msIco('send')}</button>
-          <button class="vtt-ms-inv-btn" data-vtt-fn="_vttMsDeleteItem" data-vtt-args="${c.id}|${uid}|${firstIdx}" title="Supprimer" aria-label="Supprimer">${_msIco('trash')}</button>
+        ${canEdit?`<div class="vtt-ms-it-acts">
+          ${isEquipCat && (!isEq || total > 1) ? `<button class="vtt-ms-it-btn" data-vtt-fn="_vttMsEquipPicker" data-vtt-args="${c.id}|${uid}|${idxToEquip}" title="Équiper" aria-label="Équiper">${_msIco('equip')}</button>` : ''}
+          ${isEq ? `<button class="vtt-ms-it-btn" data-vtt-fn="_vttMsUnequipAll" data-vtt-args="${c.id}|${uid}|${idxToUnequip}" title="Déséquiper" aria-label="Déséquiper">${_msIco('unlock')}</button>` : ''}
+          <button class="vtt-ms-it-btn" data-vtt-fn="_vttMsSendPicker" data-vtt-args="${c.id}|${uid}|${firstIdx}" title="Donner" aria-label="Donner">${_msIco('send')}</button>
+          <button class="vtt-ms-it-btn danger" data-vtt-fn="_vttMsDeleteItem" data-vtt-args="${c.id}|${uid}|${firstIdx}" title="Supprimer" aria-label="Supprimer">${_msIco('trash')}</button>
         </div>`:''}
       </div>`;
     }
