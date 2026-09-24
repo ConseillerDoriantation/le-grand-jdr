@@ -87,8 +87,10 @@ import {
 } from './vtt-chat.js';
 import {
   _loadEmotes, _loadDiceSkills, _vttSetRollMode, _vttAdjBonus, _vttSetBonus, _vttToggleRollHidden, _vttRollSkill,
-  _vttFilterEmotes, _vttToggleFav, _closeEmotePicker, _vttToggleEmotePicker, _vttPickEmote,
+  _vttToggleFav, _closeEmotePicker, _vttToggleEmotePicker, _vttPickEmote,
   _ouvrirGestionEmotes, _renderEmotePicker, _emotes,
+  _vttSendEmote, _vttEmoteTab, _vttEmoteMenu, _vttEmotePickEmitter, _vttSetEmoteEmitter,
+  _updateEmoteTrigger, _emoteEmitterId, _emoteTokenColor, _initEmoteGestures,
 } from './vtt-emotes.js';
 import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
@@ -1100,6 +1102,7 @@ function _cleanup() {
   VS.session = {}; VS.activePage = null; VS.selected = null; _attackSrc = null;
   _clearAim(); _hideActBar();
   _moveHL = []; _renderedPings.clear(); _renderedReactions.clear();
+  for (const k of Object.keys(_emoteStacks)) delete _emoteStacks[k];
   VS.selectedMulti.clear(); _multiDragOrigin = null;
   _annotations = {}; _drawing = false; _drawLive = null; _drawHistory = []; _drawRedo = [];
   _polyPts = []; _polyLive = null; _polyActive = false;
@@ -2329,6 +2332,7 @@ export function _select(id, { quiet = false } = {}) {
     VS.layers.token.batchDraw();
     _showAttackRange(data);
     _hideActBar();
+    _vttSetEmoteEmitter(id);  // ce token devient l'émetteur d'émotes
   } else {
     _hideActBar();
   }
@@ -2737,7 +2741,7 @@ function _renderPings(pings) {
 // Dispatcher : émote ancrée au-dessus du token émetteur si présent sur la page
 // active (rendu Konva en coords monde → suit pan/zoom), sinon bulle de repli
 // dans le coin du canvas.
-export function _showEmoteBubble(tokenId, emoteUrl, emoteName, key) {
+export function _showEmoteBubble(tokenId, emoteUrl, emoteName, key, opts = {}) {
   if (_renderedReactions.has(key)) return;
   _renderedReactions.add(key);
   // purge mémoire douce (évite la croissance infinie du Set sur longue session)
@@ -2745,66 +2749,198 @@ export function _showEmoteBubble(tokenId, emoteUrl, emoteName, key) {
 
   const e = tokenId ? VS.tokens[tokenId] : null;
   if (e?.data && e.shape && e.data.pageId === VS.activePage?.id && VS.layers.ping && window.Konva) {
-    _spawnTokenEmote(e.data, emoteUrl, emoteName);
+    _spawnTokenEmote(tokenId, e.data, emoteUrl, emoteName, opts);
   } else {
     _spawnCornerEmote(emoteUrl, emoteName);
   }
 }
 
-// Émote ancrée : pop-in élastique au-dessus du token, légère montée puis fondu.
-function _spawnTokenEmote(t, emoteUrl, emoteName) {
+// Pile de bulles par token : 3 emplacements alignés au-dessus. Un 4ᵉ envoi fait
+// sortir le plus ancien. Combo : même émote/même cible pendant qu'une bulle est
+// visible → pas d'empilement, badge ×N + grossissement + durée relancée.
+const _emoteStacks = {};      // tokenId -> [slot0, slot1, slot2]  (null | record)
+const _EMOTE_SLOTS = 3;
+
+function _emoteRetire(rec) {
+  if (!rec || rec._out) return;
+  rec._out = true;
+  clearTimeout(rec.timer);
+  const g = rec.group, K = window.Konva;
+  const slots = _emoteStacks[rec.tokenId];
+  if (slots && slots[rec.slot] === rec) slots[rec.slot] = null;
+  if (!g || g.getStage() === null) { try { g?.destroy(); } catch {} VS.layers.ping?.batchDraw(); return; }
+  g.to({ y: g.y() - CELL * 0.55, opacity: 0, scaleX: g.scaleX() * 0.85, scaleY: g.scaleY() * 0.85,
+    duration: 0.5, easing: K.Easings.EaseIn,
+    onFinish: () => { g.destroy(); VS.layers.ping?.batchDraw(); } });
+}
+
+// Émote ancrée : pop-in élastique au-dessus du token, pile de 3, combo, amplifié,
+// ciblé (courbe + halo). opts : { big, targetTokenId, authorName, remote, count }.
+function _spawnTokenEmote(tokenId, t, emoteUrl, emoteName, opts = {}) {
   const K = window.Konva;
+  if (!K || !VS.layers.ping) return;
+  const big = !!opts.big;
+  const targetId = opts.targetTokenId || null;
+  const color = _emoteTokenColor(t);
   const dim = _tokenDims(t);
   const cx = t.col * CELL + dim.w * CELL / 2;
   const topY = t.row * CELL;
-  const D = CELL * 1.5, R = D / 2;
-  const cy = topY - R * 0.95;              // centre de la bulle, au-dessus du token
+  const D = (big ? CELL * 2.4 : CELL * 1.5), R = D / 2;
+  const spacing = CELL * 1.0;
 
-  const group = new K.Group({ x: cx, y: cy, opacity: 0, scaleX: 0.2, scaleY: 0.2, listening: false });
-  // Pointeur vers le token (triangle vers le bas)
-  group.add(new K.Line({
-    points: [-R * 0.26, R * 0.82, R * 0.26, R * 0.82, 0, R * 1.32],
-    closed: true, fill: '#fff',
-    shadowColor: '#000', shadowBlur: R * 0.25, shadowOpacity: 0.4, shadowOffsetY: 2,
-  }));
-  // Cercle blanc + ombre
-  group.add(new K.Circle({
-    radius: R, fill: '#fff',
-    stroke: 'rgba(0,0,0,0.18)', strokeWidth: Math.max(1.5, R * 0.05),
-    shadowColor: '#000', shadowBlur: R * 0.35, shadowOpacity: 0.45, shadowOffsetY: 3,
-  }));
-  // Image rognée en cercle
+  const slots = (_emoteStacks[tokenId] ||= [null, null, null]);
+
+  // ── Combo : bulle vivante identique (même émote + cible, non amplifiée) ──
+  if (!big) {
+    const live = slots.find(s => s && !s._out && !s.big && s.name === emoteName && (s.target || '') === (targetId || ''));
+    if (live) {
+      const n = Math.max((live.count || 1) + 1, opts.count || 0);
+      live.count = n;
+      const grow = live.baseScale * Math.min(1 + 0.07 * (n - 1), 1.35);
+      live.group.to({ scaleX: grow, scaleY: grow, duration: 0.2, easing: K.Easings.BackEaseOut });
+      _emoteBadge(live, n, color);
+      clearTimeout(live.timer);
+      live.timer = setTimeout(() => _emoteRetire(live), 2600);
+      if (targetId) _emoteAim(t, targetId, color);
+      VS.layers.ping.batchDraw();
+      return;
+    }
+  }
+
+  // ── Nouvelle bulle : trouver un emplacement libre (sinon retirer le plus ancien) ──
+  let slot = slots.indexOf(null);
+  if (slot < 0) {
+    let oldest = 0;
+    for (let i = 1; i < _EMOTE_SLOTS; i++) if ((slots[i]?.ts || 0) < (slots[oldest]?.ts || 0)) oldest = i;
+    _emoteRetire(slots[oldest]);
+    slot = oldest;
+  }
+  const xOff = (slot - (_EMOTE_SLOTS - 1) / 2) * spacing;
+  const cy = topY - R * 0.95;
+
+  const baseScale = 1;
+  const group = new K.Group({ x: cx + xOff, y: cy, opacity: 0, scaleX: 0.2, scaleY: 0.2, listening: false });
+  // Pointe vers le token
+  group.add(new K.Line({ points: [-R * 0.26, R * 0.82, R * 0.26, R * 0.82, 0, R * 1.3], closed: true, fill: color,
+    shadowColor: '#000', shadowBlur: R * 0.2, shadowOpacity: 0.35, shadowOffsetY: 2 }));
+  // Cercle blanc, anneau couleur émetteur
+  group.add(new K.Circle({ radius: R, fill: '#fff', stroke: color, strokeWidth: Math.max(2, R * 0.09),
+    shadowColor: '#000', shadowBlur: R * 0.35, shadowOpacity: 0.45, shadowOffsetY: 3 }));
+  if (big) group.add(new K.Circle({ radius: R, fill: '#fff', stroke: color, strokeWidth: Math.max(1.5, R * 0.05), opacity: 0.5 }));
   const clip = new K.Group({ clipFunc: ctx => { ctx.arc(0, 0, R * 0.86, 0, Math.PI * 2, false); } });
   group.add(clip);
   VS.layers.ping.add(group);
-  VS.layers.ping.batchDraw();
+
+  const rec = { tokenId, slot, group, name: emoteName, target: targetId, big, count: Math.max(1, opts.count || 1),
+    ts: Date.now(), baseScale, timer: null, _out: false };
+  slots[slot] = rec;
 
   const imgEl = new Image();
-  imgEl.onload = () => {
-    if (group.getStage() === null) return; // déjà détruit
-    const side = R * 1.78;
-    clip.add(new K.Image({ image: imgEl, width: side, height: side, x: -side / 2, y: -side / 2 }));
-    VS.layers.ping.batchDraw();
-  };
+  imgEl.onload = () => { if (group.getStage() === null) return; const side = R * 1.78;
+    clip.add(new K.Image({ image: imgEl, width: side, height: side, x: -side / 2, y: -side / 2 })); VS.layers.ping.batchDraw(); };
   imgEl.onerror = () => {};
   imgEl.src = emoteUrl;
 
-  // Animation : pop élastique → settle → maintien → montée + fondu
-  group.to({
-    scaleX: 1.12, scaleY: 1.12, opacity: 1, duration: 0.26, easing: K.Easings.BackEaseOut,
-    onFinish: () => group.to({
-      scaleX: 1, scaleY: 1, duration: 0.12,
-      onFinish: () => {
-        group._holdTimer = setTimeout(() => {
-          if (group.getStage() === null) return; // stage détruit (changement de page / sortie)
-          group.to({
-            y: cy - CELL * 0.9, opacity: 0, duration: 0.85, easing: K.Easings.EaseIn,
-            onFinish: () => { group.destroy(); VS.layers.ping?.batchDraw(); },
-          });
-        }, 1700);
-      },
-    }),
-  });
+  // Étiquettes : envoyeur (remote) + cible (« → Nom »).
+  const labels = [];
+  if (opts.remote && opts.authorName) labels.push(opts.authorName);
+  if (targetId) { const tt = VS.tokens[targetId]?.data; if (tt) labels.push(`→ ${tt.name || '?'}`); }
+  if (labels.length) {
+    const txt = new K.Text({ text: labels.join('   '), fontSize: Math.max(10, R * 0.34), fontStyle: '600',
+      fill: '#fff', align: 'center' });
+    txt.offsetX(txt.width() / 2); txt.y(-R - txt.height() - 4); txt.offsetY(0);
+    const bg = new K.Rect({ x: -txt.width() / 2 - 5, y: -R - txt.height() - 7, width: txt.width() + 10, height: txt.height() + 6,
+      cornerRadius: 8, fill: 'rgba(8,12,20,.82)', stroke: targetId ? 'rgba(255,90,126,.5)' : color, strokeWidth: 1 });
+    group.add(bg); group.add(txt);
+  }
+
+  // Badge combo si count > 1 dès l'arrivée (rattrapage après fusion d'écritures).
+  if (rec.count > 1) _emoteBadge(rec, rec.count, color);
+
+  // Pop élastique → maintien → (retire via timer).
+  group.to({ scaleX: 1.12 * baseScale, scaleY: 1.12 * baseScale, opacity: 1, duration: 0.28, easing: K.Easings.BackEaseOut,
+    onFinish: () => group.to({ scaleX: baseScale, scaleY: baseScale, duration: 0.12 }) });
+
+  if (big) {
+    // Onde de choc + deux secousses.
+    const wave = new K.Circle({ x: cx + xOff, y: cy, radius: R, stroke: color, strokeWidth: 3, opacity: 0.8, listening: false });
+    VS.layers.ping.add(wave);
+    wave.to({ radius: R * 2.1, opacity: 0, duration: 0.9, easing: K.Easings.EaseOut, onFinish: () => wave.destroy() });
+    setTimeout(() => { if (group.getStage()) group.to({ rotation: -9, duration: 0.12, onFinish: () => group.to({ rotation: 9, duration: 0.16, onFinish: () => group.to({ rotation: 0, duration: 0.12 }) }) }); }, 420);
+  }
+
+  rec.timer = setTimeout(() => _emoteRetire(rec), big ? 4200 : 2800);
+  if (targetId) _emoteAim(t, targetId, color);
+  VS.layers.ping.batchDraw();
+}
+
+// Badge « ×N » en haut-droite d'une bulle (créé/màj avec un petit rebond).
+function _emoteBadge(rec, n, color) {
+  const K = window.Konva, g = rec.group;
+  if (!g || g.getStage() === null) return;
+  const R = (rec.big ? CELL * 2.4 : CELL * 1.5) / 2;
+  if (!rec.badge) {
+    const bg = new K.Group({ x: R * 0.72, y: -R * 0.72 });
+    bg.add(new K.Circle({ radius: Math.max(9, R * 0.34), fill: color, stroke: '#fff', strokeWidth: 2 }));
+    const t = new K.Text({ text: `×${n}`, fontSize: Math.max(9, R * 0.3), fontStyle: '700', fill: '#fff' });
+    t.offsetX(t.width() / 2); t.offsetY(t.height() / 2);
+    bg.add(t); bg._txt = t; g.add(bg); rec.badge = bg;
+  } else {
+    rec.badge._txt.text(`×${n}`); rec.badge._txt.offsetX(rec.badge._txt.width() / 2);
+  }
+  rec.badge.to({ scaleX: 1.3, scaleY: 1.3, duration: 0.12, onFinish: () => rec.badge.to({ scaleX: 1, scaleY: 1, duration: 0.14 }) });
+}
+
+// Courbe de ciblage émetteur → cible + impulsion d'anneau sur la cible.
+function _emoteAim(fromT, targetId, color) {
+  const K = window.Konva;
+  const to = VS.tokens[targetId]?.data;
+  if (!to || !VS.layers.ping) return;
+  const df = _tokenDims(fromT), dt = _tokenDims(to);
+  const x1 = fromT.col * CELL + df.w * CELL / 2, y1 = fromT.row * CELL + df.h * CELL / 2;
+  const x2 = to.col * CELL + dt.w * CELL / 2, y2 = to.row * CELL + dt.h * CELL / 2;
+  const mx = (x1 + x2) / 2, my = Math.min(y1, y2) - Math.abs(x2 - x1) * 0.25 - CELL * 0.8;
+  const curve = new K.Shape({ stroke: color, strokeWidth: 2.5, dash: [6, 7], lineCap: 'round', listening: false,
+    sceneFunc: (ctx, shape) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.quadraticCurveTo(mx, my, x2, y2); ctx.fillStrokeShape(shape); } });
+  VS.layers.ping.add(curve);
+  let off = 0; const anim = new K.Animation(() => { off -= 1.6; curve.dashOffset(off); }, VS.layers.ping);
+  anim.start();
+  curve.to({ opacity: 0, duration: 1.8, easing: K.Easings.EaseIn, onFinish: () => { anim.stop(); curve.destroy(); VS.layers.ping?.batchDraw(); } });
+  // Impulsion d'anneau sur la cible
+  const ring = new K.Circle({ x: x2, y: y2, radius: Math.max(dt.w, dt.h) * CELL * 0.45, stroke: color, strokeWidth: 3, opacity: 0.85, listening: false });
+  VS.layers.ping.add(ring);
+  ring.to({ radius: ring.radius() * 1.7, opacity: 0, duration: 0.9, easing: K.Easings.EaseOut, onFinish: () => ring.destroy() });
+}
+
+// Halo de cible pendant le glisser d'une émote (Konva, coords monde).
+let _emoteDropHalo = null;
+export function _vttEmoteDropHalo(tokenId) {
+  const K = window.Konva;
+  if (_emoteDropHalo) { _emoteDropHalo.destroy(); _emoteDropHalo = null; }
+  const t = tokenId ? VS.tokens[tokenId]?.data : null;
+  if (!t || !K || !VS.layers.ping || t.pageId !== VS.activePage?.id) { VS.layers.ping?.batchDraw(); return; }
+  const dim = _tokenDims(t);
+  const cx = t.col * CELL + dim.w * CELL / 2, cy = t.row * CELL + dim.h * CELL / 2;
+  _emoteDropHalo = new K.Circle({ x: cx, y: cy, radius: Math.max(dim.w, dim.h) * CELL * 0.62, stroke: '#ff5a7e', strokeWidth: 3, dash: [7, 6], opacity: 0.9, listening: false });
+  VS.layers.ping.add(_emoteDropHalo);
+  VS.layers.ping.batchDraw();
+}
+
+// Hit-test « écran → token » (glisser d'émote). Position en grille (robuste au
+// pan/zoom) plutôt que le DOM : le panneau ne masque pas les tokens.
+export function _vttTokenIdAtClient(clientX, clientY) {
+  if (!VS.stage) return null;
+  const rect = VS.stage.container().getBoundingClientRect();
+  if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+  const wp = _stageToWorld({ x: clientX - rect.left, y: clientY - rect.top });
+  const col = Math.floor(wp.x / CELL), row = Math.floor(wp.y / CELL);
+  const pid = VS.activePage?.id || null;
+  for (const [id, e] of Object.entries(VS.tokens || {})) {
+    const t = e?.data; if (!t || t.pageId !== pid) continue;
+    const dim = _tokenDims(t);
+    if (col >= t.col && col < t.col + dim.w && row >= t.row && row < t.row + dim.h) return id;
+  }
+  return null;
 }
 
 // Émote de repli (token absent de la page) : bulle qui monte dans le coin du canvas.
@@ -11325,7 +11461,13 @@ function _initListeners() {
       if (now - ts > 12000) return; // ignorer les réactions de plus de 12s
       const key = `${r.id}_${ts}`;
       // _renderedReactions.has(key) bloque le double affichage pour l'émetteur
-      _showEmoteBubble(r.tokenId, r.emoteUrl, r.emoteName, key);
+      _showEmoteBubble(r.tokenId, r.emoteUrl, r.emoteName, key, {
+        big: !!r.big,
+        targetTokenId: r.targetTokenId || null,
+        authorName: r.authorName || '',
+        count: r.count || 1,
+        remote: r.id !== STATE.user?.uid,
+      });
     });
   }, err => {
     console.error('[vtt] réactions émotes — erreur listener:', err);
@@ -14214,6 +14356,8 @@ async function _vttMountTable(content) {
   _ef.innerHTML = `<div class="vtt-emote-picker" id="vtt-emote-picker" role="dialog" aria-label="Choisir une émote" aria-hidden="true"></div>
     <button class="vtt-emote-trigger" data-vtt-fn="_vttToggleEmotePicker" title="Émotes" aria-label="Émotes" aria-expanded="false" aria-controls="vtt-emote-picker">😄</button>`;
   sessionTools.appendChild(_ef);
+  _initEmoteGestures();     // gestes (maintien/glisser) + roue E + touches 1-8
+  _updateEmoteTrigger();    // reflète la dernière émote sur le bouton
 
   // Lanceur de dés LIBRE dans le dock d'outils : accessible sans sélectionner de
   // token (le MJ notamment n'a pas de token). Réutilise _vttToggleDice/_renderDicePanel.
@@ -14450,7 +14594,10 @@ export const VTT_ACTIONS = {
   _vttEditToken,
   _vttEnsureConditionsLoaded,
   _vttFilterDelegates,
-  _vttFilterEmotes,
+  _vttSendEmote,
+  _vttEmoteTab,
+  _vttEmoteMenu,
+  _vttEmotePickEmitter,
   _vttFogClearOps,
   _vttFogTool,
   _vttFogUndo,

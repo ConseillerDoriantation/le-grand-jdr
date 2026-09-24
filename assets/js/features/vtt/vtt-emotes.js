@@ -28,13 +28,12 @@ import { resolveControlledTokenId } from './vtt-token-control.js';
 import { _vttPublishOptimisticLog } from './vtt-chat.js';
 import {
   VTT_ACTIONS, _showEmoteBubble, _canControlToken, _conditionStatRollMode,
-  _tokenStatMod, _vttLogTargetFields,
+  _tokenStatMod, _vttLogTargetFields, _vttTokenIdAtClient, _vttEmoteDropHalo,
 } from './vtt.js'; // circ. (runtime)
 import { _renderInspector } from './vtt-inspector.js'; // re-render après changement de mode de jet
 
 // État émotes (déplacé de vtt.js). _emotes exporté : préchargé au montage côté vtt.js.
 export let _emotes = [];        // [{id, name, url}] chargées depuis world/vtt_emotes
-let _emoteCloseOutside = null;  // listener mousedown fermeture picker émotes
 
 export async function _loadEmotes() {
   // 1. Tenter le path scopé à l'aventure (path normal)
@@ -231,99 +230,198 @@ export function _applyEmotes(escaped) {
   return escaped;
 }
 
-// Favoris émotes — stockés en localStorage
+// Favoris (« Roue ») + récents — stockés en localStorage (clés inchangées).
 export const _getFavs = () => lsJson.get('vtt-emote-favs', []);
 export const _setFavs = v => lsJson.set('vtt-emote-favs', v);
 export const _getRecents = () => lsJson.get('vtt-emote-recents', []);
 export function _pushRecent(name) {
   const r = _getRecents().filter(n => n !== name);
   r.unshift(name);
-  lsJson.set('vtt-emote-recents', r.slice(0, 8));
+  lsJson.set('vtt-emote-recents', r.slice(0, 12));   // portée 8 → 12
 }
 
-export function _emoteGridHtml(list, favSet=new Set()) {
-  if (!list.length) return '<div class="vtt-emote-empty-grid">Aucune émote trouvée</div>';
+// ── État UI du picker ───────────────────────────────────────────────
+let _emoteTab   = 'fav';     // 'fav' (Roue) | 'rec' (Récents) | 'all' (Toutes)
+let _emoteQuery = '';
+let _emoteMenu  = false;     // dropdown « depuis [token] » ouvert
+let _emoteHover = null;      // émote survolée (aperçu du pied)
+let _emoteLast  = null;      // dernière émote envoyée (badge du bouton de session)
+let _emoteJustOpened = false; // auto-focus recherche à l'ouverture uniquement
+// Combo côté émetteur : compteur cumulé écrit dans Firestore (robuste à la
+// fusion d'écritures par onSnapshot — cf. handoff §4).
+let _emoteCombo = { key: null, count: 0, ts: 0 };
+
+// Couleur stable par token (anneau des bulles / avatar émetteur) — pas de champ
+// couleur sur les tokens, on dérive d'un hash de l'identité.
+const _EMOTE_COLORS = ['#4f8cff', '#9d6fff', '#22c38e', '#f4c430', '#ff5a7e', '#ff9544', '#38bdf8', '#a3e635'];
+export function _emoteTokenColor(t) {
+  const seed = String(t?.ownerId || t?.characterId || t?.id || t?.name || '?');
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return _EMOTE_COLORS[h % _EMOTE_COLORS.length];
+}
+
+// ── Émetteur (token qui envoie) ─────────────────────────────────────
+function _emoteControllable() {
+  const uid = STATE.user?.uid;
+  const pid = VS.activePage?.id || null;
+  return Object.entries(VS.tokens || {})
+    .filter(([, e]) => e?.data && e.data.pageId === pid && _canControlToken(e.data, uid))
+    .map(([id, e]) => ({ id, data: e.data }));
+}
+function _emoteIsMine(t) {
+  const uid = STATE.user?.uid;
+  if (!uid) return false;
+  if (t.ownerId === uid) return true;
+  return Array.isArray(t.controlDelegates) && t.controlDelegates.includes(uid);
+}
+// Émetteur courant : mémorisé (VS.emoteEmitterId) s'il reste contrôlable sur la
+// page, sinon résolu depuis la sélection (resolveControlledTokenId).
+export function _emoteEmitterId() {
+  const uid = STATE.user?.uid;
+  const pid = VS.activePage?.id || null;
+  const cur = VS.emoteEmitterId;
+  if (cur && VS.tokens[cur]?.data?.pageId === pid && _canControlToken(VS.tokens[cur].data, uid)) return cur;
+  const id = resolveControlledTokenId(VS.selected, VS.tokens, pid, t => _canControlToken(t, uid)) || null;
+  VS.emoteEmitterId = id;
+  return id;
+}
+// Appelé depuis vtt.js quand on clique un token qu'on contrôle.
+export function _vttSetEmoteEmitter(tokenId) {
+  const uid = STATE.user?.uid;
+  const t = VS.tokens[tokenId]?.data;
+  if (!t || !_canControlToken(t, uid)) return;
+  if (VS.emoteEmitterId === tokenId) return;
+  VS.emoteEmitterId = tokenId;
+  if (document.getElementById('vtt-emote-picker')?.classList.contains('open')) _renderEmotePicker();
+}
+
+// ── Tuiles ──────────────────────────────────────────────────────────
+function _emoteTiles(list, favs) {
+  if (!list.length) return '';
   return list.map(em => {
-    const safe = em.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-    const isFav = favSet.has(em.name);
-    return `<div class="vtt-emote-item-wrap">
-      <button class="vtt-emote-item" data-vtt-fn="_vttPickEmote" data-vtt-args="${safe}" title=":${_esc(em.name)}:">
-        <img src="${em.url}" alt="${_esc(em.name)}" loading="lazy">
-        <span>${_esc(em.name)}</span>
-      </button>
-      <button class="vtt-emote-fav-btn${isFav?' active':''}" data-vtt-fn="_vttToggleFav" data-vtt-args="${safe}" title="${isFav?'Retirer des favoris':'Ajouter aux favoris'}">${isFav?'★':'☆'}</button>
+    const safe = _esc(em.name);
+    const fi = favs.indexOf(em.name);
+    const isFav = fi >= 0;
+    const kbd = isFav && fi < 8 ? `<kbd>${fi + 1}</kbd>` : '';
+    return `<div class="vtt-emote-tile" data-emote="${safe}" title=":${safe}:">
+      <img src="${em.url}" alt=":${safe}:" loading="lazy" draggable="false">${kbd}
+      <button class="vtt-emote-star${isFav ? ' on' : ''}" data-vtt-fn="_vttToggleFav" data-vtt-args="${safe}" title="${isFav ? 'Retirer de la roue' : 'Ajouter à la roue'}">${isFav ? '★' : '☆'}</button>
     </div>`;
   }).join('');
+}
+
+function _emoteListFor() {
+  const q = _emoteQuery.trim();
+  if (q) return _emotes.filter(e => _searchIncludes(e.name, q));
+  const byName = new Map(_emotes.map(e => [e.name, e]));
+  if (_emoteTab === 'fav') return _getFavs().map(n => byName.get(n)).filter(Boolean);
+  if (_emoteTab === 'rec') return _getRecents().map(n => byName.get(n)).filter(Boolean);
+  return _emotes;
 }
 
 export function _renderEmotePicker() {
   const el = document.getElementById('vtt-emote-picker');
   if (!el) return;
   if (!_emotes.length) {
-    el.innerHTML = '<div class="vtt-emote-picker-search"><span style="padding:.5rem;display:block;font-size:.75rem;color:var(--text-muted)">Aucune émote — à configurer dans la Console MJ</span></div>';
+    el.innerHTML = `<div class="vtt-emote-hd"><h3>Émotes</h3><span class="vtt-emote-grow"></span><button class="vtt-emote-x" data-vtt-fn="_vttToggleEmotePicker" title="Fermer">✕</button></div>
+      <div class="vtt-emote-empty"><b>Aucune émote</b>À configurer dans la Console MJ.</div>`;
     return;
   }
-  const favSet = new Set(_getFavs());
-  const byName = new Map(_emotes.map(e => [e.name, e]));
-  const recentEmotes = _getRecents().map(n => byName.get(n)).filter(Boolean);
-  const favEmotes = _emotes.filter(e => favSet.has(e.name));
+  const favs = _getFavs();
+  const q = _emoteQuery.trim();
+  const list = _emoteListFor();
 
-  const recentBlock = recentEmotes.length
-    ? `<div id="vtt-emote-recent-section">
-        <div class="vtt-emote-section-lbl">🕘 Récents</div>
-        <div class="vtt-emote-grid">${_emoteGridHtml(recentEmotes, favSet)}</div>
-      </div>`
-    : `<div id="vtt-emote-recent-section" data-empty="1" style="display:none"></div>`;
-  const favBlock = favEmotes.length
-    ? `<div id="vtt-emote-fav-section">
-        <div class="vtt-emote-section-lbl gold">⭐ Favoris</div>
-        <div class="vtt-emote-grid" id="vtt-emote-fav-grid">${_emoteGridHtml(favEmotes, favSet)}</div>
-      </div>`
-    : `<div id="vtt-emote-fav-section" data-empty="1" style="display:none"></div>`;
-  const allLbl = (recentEmotes.length || favEmotes.length)
-    ? `<div class="vtt-emote-section-lbl" id="vtt-emote-all-lbl">Toutes</div>` : '';
+  // En-tête : titre + sélecteur d'émetteur + fermer.
+  const emitterId = _emoteEmitterId();
+  const emitter = emitterId ? VS.tokens[emitterId]?.data : null;
+  const ctrl = _emoteControllable();
+  const emitterBtn = emitter
+    ? `<button class="vtt-emote-emitter" data-vtt-fn="_vttEmoteMenu" title="Token qui envoie l'émote"><span class="vtt-emote-av" style="--c:${_emoteTokenColor(emitter)}">${_esc((emitter.name || '?')[0])}</span><small>depuis</small><b>${_esc(emitter.name || 'Token')}</b>${ctrl.length > 1 ? '<i>▾</i>' : ''}</button>`
+    : `<button class="vtt-emote-emitter" data-vtt-fn="_vttEmoteMenu" title="Aucun token contrôlable"><small>depuis</small><b>—</b></button>`;
+  const item = (x) => `<button class="${x.id === emitterId ? 'on' : ''}" data-vtt-fn="_vttEmotePickEmitter" data-vtt-args="${x.id}"><span class="vtt-emote-av" style="--c:${_emoteTokenColor(x.data)}">${_esc((x.data.name || '?')[0])}</span><span>${_esc(x.data.name || 'Token')}</span></button>`;
+  const mine = ctrl.filter(x => _emoteIsMine(x.data));
+  const others = ctrl.filter(x => !_emoteIsMine(x.data));
+  const menu = (_emoteMenu && ctrl.length > 1)
+    ? `<div class="vtt-emote-emenu">${mine.length ? `<div class="vtt-emote-emenu-lbl">${STATE.isAdmin ? 'Mes tokens' : 'Mes tokens'}</div>` + mine.map(item).join('') : ''}${others.length ? `<div class="vtt-emote-emenu-lbl">Sur la scène</div>` + others.map(item).join('') : ''}</div>`
+    : '';
+
+  // Onglets ou « Résultats N ».
+  const tabs = q
+    ? `<span class="vtt-emote-tab on">Résultats <small>${list.length}</small></span>`
+    : [['fav', '★ Roue', favs.length], ['rec', 'Récents', _getRecents().length], ['all', 'Toutes', _emotes.length]]
+        .map(([k, l, n]) => `<button class="vtt-emote-tab${_emoteTab === k ? ' on' : ''}" data-vtt-fn="_vttEmoteTab" data-vtt-args="${k}">${l} <small>${n}</small></button>`).join('');
+
+  // Corps.
+  let body;
+  if (!list.length) {
+    body = q
+      ? `<div class="vtt-emote-empty"><b>Aucune émote</b>pour « ${_esc(_emoteQuery)} »</div>`
+      : _emoteTab === 'fav'
+        ? `<div class="vtt-emote-empty"><b>Ta roue est vide</b>Clique sur ☆ en coin d'une émote dans « Toutes » pour l'ajouter à la roue (touche E) et aux touches 1–8.</div>`
+        : `<div class="vtt-emote-empty"><b>Rien d'envoyé pour l'instant</b></div>`;
+  } else {
+    body = `<div class="vtt-emote-grid2">${_emoteTiles(list, favs)}</div>`;
+  }
+
+  // Pied fixe (hauteur constante) : aperçu au survol, sinon rappel des gestes.
+  const foot = _emoteFootHtml();
+
   el.innerHTML = `
-    <div class="vtt-emote-picker-search">
-      <input type="text" id="vtt-emote-search" placeholder="🔍 Rechercher…" autocomplete="off"
-        data-vtt-fn="_vttFilterEmotes" data-vtt-on="input" data-vtt-args="$value">
-    </div>
-    <div class="vtt-emote-picker-body">
-      ${recentBlock}
-      ${favBlock}
-      ${allLbl}
-      <div class="vtt-emote-grid" id="vtt-emote-grid">${_emoteGridHtml(_emotes, favSet)}</div>
-    </div>`;
-  setTimeout(() => document.getElementById('vtt-emote-search')?.focus(), 40);
+    <div class="vtt-emote-hd"><h3>Émotes</h3><div class="vtt-emote-emitwrap">${emitterBtn}${menu}</div><span class="vtt-emote-grow"></span><button class="vtt-emote-x" data-vtt-fn="_vttToggleEmotePicker" title="Fermer · Échap">✕</button></div>
+    <div class="vtt-emote-search"><input id="vtt-emote-q" type="text" placeholder="Rechercher une émote…  (Entrée pour envoyer)" autocomplete="off" value="${_esc(_emoteQuery)}"></div>
+    <div class="vtt-emote-tabs">${tabs}</div>
+    <div class="vtt-emote-body"><div id="vtt-emote-grid">${body}</div></div>
+    <div class="vtt-emote-foot" id="vtt-emote-foot">${foot}</div>`;
+
+  _bindEmoteInputs();
 }
 
-export function _vttFilterEmotes(q) {
-  const favSet = new Set(_getFavs());
-  const grid = document.getElementById('vtt-emote-grid'); if (!grid) return;
-  const filtered = q.trim() ? _emotes.filter(e => _searchIncludes(e.name, q)) : _emotes;
-  grid.innerHTML = _emoteGridHtml(filtered, favSet);
-  const hide = !!q.trim();
-  const recentSection = document.getElementById('vtt-emote-recent-section');
-  const favSection = document.getElementById('vtt-emote-fav-section');
-  const allLbl = document.getElementById('vtt-emote-all-lbl');
-  if (recentSection && recentSection.dataset.empty !== '1') recentSection.style.display = hide ? 'none' : '';
-  if (favSection && favSection.dataset.empty !== '1') favSection.style.display = hide ? 'none' : '';
-  if (allLbl) allLbl.style.display = hide ? 'none' : '';
+function _emoteFootHtml() {
+  const em = _emoteHover ? _emotes.find(e => e.name === _emoteHover) : null;
+  if (em) {
+    return `<span class="vtt-emote-pv"><img src="${em.url}" alt=""></span><div class="vtt-emote-pv-b"><b>:${_esc(em.name)}:</b><div class="vtt-emote-hints"><span><em>Clic</em> envoyer</span><span><em>Maintenir</em> amplifier</span><span><em>Glisser</em> viser</span><span><em>☆</em> roue</span></div></div>`;
+  }
+  return `<div class="vtt-emote-pv-b"><b>Roue : maintiens <kbd>E</kbd></b><div class="vtt-emote-hints"><span><em>☆</em> sur une émote pour l'y ajouter</span><span><kbd>1</kbd>–<kbd>8</kbd> envoi direct</span></div></div>`;
 }
+
+// Liaisons (recherche + survol du pied) — préserve le focus/caret.
+function _bindEmoteInputs() {
+  const q = document.getElementById('vtt-emote-q');
+  if (q) {
+    q.oninput = e => { _emoteQuery = e.target.value; _renderEmotePicker(); };
+    q.onkeydown = e => {
+      if (e.key === 'Enter') { const f = _emoteListFor()[0]; if (f) _vttSendEmote(f.name); }
+      else if (e.key === 'Escape') { if (_emoteQuery) { _emoteQuery = ''; _renderEmotePicker(); } else _closeEmotePicker(); e.stopPropagation(); }
+    };
+    if (_emoteJustOpened) { _emoteJustOpened = false; setTimeout(() => document.getElementById('vtt-emote-q')?.focus(), 30); }
+  }
+  const grid = document.getElementById('vtt-emote-grid');
+  if (grid) {
+    grid.onmouseover = e => { const t = e.target.closest('.vtt-emote-tile'); const n = t?.dataset.emote || null; if (n !== _emoteHover) { _emoteHover = n; _refreshEmoteFoot(); } };
+    grid.onmouseleave = () => { if (_emoteHover) { _emoteHover = null; _refreshEmoteFoot(); } };
+  }
+}
+function _refreshEmoteFoot() { const f = document.getElementById('vtt-emote-foot'); if (f) f.innerHTML = _emoteFootHtml(); }
+function _renderEmotePickerIfOpen() { if (document.getElementById('vtt-emote-picker')?.classList.contains('open')) _renderEmotePicker(); }
+
+// ── Onglets / émetteur / favoris ────────────────────────────────────
+export function _vttEmoteTab(tab) { _emoteTab = tab; _emoteMenu = false; _renderEmotePicker(); }
+export function _vttEmoteMenu() { _emoteMenu = !_emoteMenu; _renderEmotePicker(); }
+export function _vttEmotePickEmitter(tokenId) { VS.emoteEmitterId = tokenId; _emoteMenu = false; _renderEmotePicker(); }
 
 export function _vttToggleFav(name) {
   const favs = _getFavs();
   const idx = favs.indexOf(name);
-  if (idx >= 0) favs.splice(idx, 1); else favs.push(name);
+  const had = idx >= 0;
+  if (had) favs.splice(idx, 1); else favs.push(name);
   _setFavs(favs);
-  // Re-render en préservant la query de recherche
-  const q = document.getElementById('vtt-emote-search')?.value || '';
+  showNotif(had ? 'Retirée de la roue' : (favs.length > 8 ? 'Ajoutée — la roue affiche les 8 premières' : `Ajoutée à la roue · touche ${favs.length}`), 'info');
   _renderEmotePicker();
-  if (q) {
-    const input = document.getElementById('vtt-emote-search');
-    if (input) { input.value = q; _vttFilterEmotes(q); }
-  }
 }
 
+// ── Ouverture / fermeture (plus de fermeture au clic extérieur : permet le
+// glisser vers la carte). Ferme par ✕, Échap ou le bouton de la barre. ──
 export function _closeEmotePicker() {
   const el  = document.getElementById('vtt-emote-picker');
   const btn = document.querySelector('.vtt-emote-trigger');
@@ -331,10 +429,7 @@ export function _closeEmotePicker() {
   el?.setAttribute('aria-hidden', 'true');
   btn?.classList.remove('open');
   btn?.setAttribute('aria-expanded', 'false');
-  if (_emoteCloseOutside) {
-    document.removeEventListener('mousedown', _emoteCloseOutside, true);
-    _emoteCloseOutside = null;
-  }
+  _emoteMenu = false;
 }
 
 export function _vttToggleEmotePicker() {
@@ -345,58 +440,205 @@ export function _vttToggleEmotePicker() {
   btn?.classList.toggle('open', open);
   btn?.setAttribute('aria-expanded', open ? 'true' : 'false');
   el.setAttribute('aria-hidden', open ? 'false' : 'true');
-  if (open) {
-    _renderEmotePicker();
-    _emoteCloseOutside = (e) => {
-      const float = document.querySelector('.vtt-emote-float');
-      if (float && !float.contains(e.target)) _closeEmotePicker();
-    };
-    document.addEventListener('mousedown', _emoteCloseOutside, true);
-  } else {
-    _closeEmotePicker();
-  }
+  if (open) { _emoteMenu = false; _emoteJustOpened = true; _renderEmotePicker(); }
+  else _closeEmotePicker();
 }
 
-export async function _vttPickEmote(name) {
+// Reflet de la dernière émote sur le bouton de la barre de session.
+export function _updateEmoteTrigger(name) {
+  if (name) _emoteLast = name;
+  const btn = document.querySelector('.vtt-emote-trigger');
+  if (!btn) return;
+  const em = _emoteLast ? _emotes.find(e => e.name === _emoteLast) : null;
+  btn.innerHTML = em ? `<img class="vtt-emote-trigger-img" src="${em.url}" alt=":${_esc(em.name)}:">` : '😄';
+}
+
+// ── Envoi (clic / roue / touche / geste) ────────────────────────────
+// opts : { big, targetTokenId }
+export async function _vttSendEmote(name, opts = {}) {
   const uid = STATE.user?.uid; if (!uid) return;
   const em = _emotes.find(e => e.name === name); if (!em) return;
-  // Le picker reste ouvert — l'utilisateur ferme manuellement
-
-  // Une sélection peut viser un token adverse pour l'inspecter ou l'attaquer.
-  // Elle ne donne jamais le droit de l'utiliser comme source d'une interaction.
-  // On retombe sur un token contrôlé de la scène (propriétaire ou délégation).
-  const tokenId = resolveControlledTokenId(
-    VS.selected,
-    VS.tokens,
-    VS.activePage?.id || null,
-    token => _canControlToken(token, uid),
-  );
+  const tokenId = _emoteEmitterId();
   const token = tokenId ? VS.tokens[tokenId]?.data : null;
   if (!token || !_canControlToken(token, uid)) {
     showNotif('Sélectionne un token que tu contrôles pour envoyer une émote.', 'info');
     return;
   }
+  const big = !!opts.big;
+  const targetTokenId = (opts.targetTokenId && opts.targetTokenId !== tokenId) ? opts.targetTokenId : null;
+
+  // Combo : même émote + émetteur + cible, non amplifié, fenêtre courte.
+  const comboKey = `${tokenId}|${name}|${targetTokenId || ''}`;
+  const now = Date.now();
+  if (!big && _emoteCombo.key === comboKey && now - _emoteCombo.ts < 2600) _emoteCombo.count++;
+  else _emoteCombo = { key: comboKey, count: 1, ts: now };
+  _emoteCombo.ts = now;
+  const count = _emoteCombo.count;
 
   _pushRecent(name);
-
-  // Clé partagée locale + Firestore : même timestamp → _renderedReactions évite le double affichage
-  const ts = Date.now();
+  const ts = now;
   const key = `${uid}_${ts}`;
+  const authorName = STATE.user?.pseudo || STATE.user?.displayName || (STATE.isAdmin ? 'MJ' : STATE.user?.email || '');
 
-  // Affichage local immédiat (ancré au token émetteur si présent)
-  _showEmoteBubble(tokenId, em.url, name, key);
+  // Affichage local immédiat (ancré au token émetteur).
+  _showEmoteBubble(tokenId, em.url, name, key, { big, targetTokenId, authorName, remote: false, count });
 
-  // Propagation aux autres joueurs via Firestore
+  // Propagation temps réel (champs ajoutés : big / targetTokenId / authorName / count).
   setDoc(_reactionRef(uid), {
     tokenId, emoteName: name, emoteUrl: em.url,
     pageId: VS.activePage?.id ?? null,
-    createdAt: ts,           // nombre (ms) — même valeur que la clé locale
+    createdAt: ts,
+    big, targetTokenId: targetTokenId || null, authorName: authorName || '', count,
   }).catch(err => {
     console.error('[vtt] émote temps réel — écriture refusée. Vérifier vttEmoteReactions dans Firestore.', err);
   });
 
-  // Statistiques : compte l'émote (attribuée au personnage du token émetteur).
+  // Statistiques : compte l'émote (attribuée au personnage du token émetteur), chaque envoi.
   if (token.characterId) bumpEmote(token.characterId, VS.characters[token.characterId]?.nom || token.name, name);
+
+  _emoteLast = name;
+  _updateEmoteTrigger(name);
+  if (_emoteTab === 'rec') _renderEmotePickerIfOpen();
+}
+
+// Compat : ancien handler de clic sur une tuile → envoi normal.
+export const _vttPickEmote = (name) => _vttSendEmote(name);
+
+// ══════════════════════════════════════════════════════════════════════
+// GESTES : clic / maintien (amplifié) / glisser (ciblé) + roue E + touches 1-8
+// ══════════════════════════════════════════════════════════════════════
+let _emoteGesturesInit = false;
+let _EP = null;                                   // geste pointeur en cours (tuile)
+let _EW = null;                                   // roue rapide (E) en cours
+let _emoteMouse = { x: innerWidth / 2, y: innerHeight / 2 };
+
+const _emoteTyping = (e) => {
+  const el = e.target;
+  return !!el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);
+};
+const _emoteInCanvas = () => !!document.getElementById('vtt-canvas-wrap')
+  && !document.getElementById('modal-overlay')?.classList.contains('show');
+
+function _emoteEndDrag() {
+  if (!_EP) return;
+  clearTimeout(_EP.timer);
+  _EP.ghost?.remove();
+  _EP.el?.classList.remove('charging', 'charged');
+  try { _vttEmoteDropHalo(null); } catch { /* stage absent */ }
+  _EP = null;
+}
+
+export function _initEmoteGestures() {
+  if (_emoteGesturesInit) return;
+  _emoteGesturesInit = true;
+
+  // ── Pointerdown sur une tuile (délégué, scopé au picker ouvert) ──
+  document.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.target.closest('.vtt-emote-star')) return;
+    const picker = document.getElementById('vtt-emote-picker');
+    if (!picker?.classList.contains('open')) return;
+    const tile = e.target.closest('.vtt-emote-tile');
+    if (!tile || !picker.contains(tile)) return;
+    e.preventDefault();
+    _EP = { name: tile.dataset.emote, el: tile, x: e.clientX, y: e.clientY, big: false, drag: false, ghost: null, over: null };
+    tile.classList.add('charging');
+    _EP.timer = setTimeout(() => { if (!_EP) return; _EP.big = true; _EP.el.classList.add('charged'); _EP.ghost?.classList.add('big'); }, 450);
+  }, true);
+
+  // ── Déplacement : fantôme + hit-test Konva de la cible ──
+  document.addEventListener('pointermove', (e) => {
+    _emoteMouse = { x: e.clientX, y: e.clientY };
+    if (_EW) _emoteWheelSelect(e.clientX, e.clientY);
+    if (!_EP) return;
+    if (!_EP.drag && Math.hypot(e.clientX - _EP.x, e.clientY - _EP.y) > 7) {
+      _EP.drag = true;
+      if (!_EP.big) { clearTimeout(_EP.timer); _EP.el.classList.remove('charging'); }
+      const em = _emotes.find(x => x.name === _EP.name);
+      _EP.ghost = document.createElement('div');
+      _EP.ghost.className = 'vtt-emote-ghost' + (_EP.big ? ' big' : '');
+      _EP.ghost.innerHTML = `<img src="${em?.url || ''}" alt=""><small>Lâche sur un token</small>`;
+      document.body.appendChild(_EP.ghost);
+    }
+    if (!_EP.drag) return;
+    _EP.ghost.style.left = e.clientX + 'px';
+    _EP.ghost.style.top = e.clientY + 'px';
+    const emitterId = _emoteEmitterId();
+    const id = _vttTokenIdAtClient(e.clientX, e.clientY);
+    const tgt = (id && id !== emitterId) ? id : null;
+    if (tgt !== _EP.over) {
+      _EP.over = tgt;
+      _EP.ghost.classList.toggle('hit', !!tgt);
+      try { _vttEmoteDropHalo(tgt); } catch { /* stage absent */ }
+      const small = _EP.ghost.querySelector('small');
+      if (small) small.textContent = tgt ? `→ ${VS.tokens[tgt]?.data?.name || '?'}` : 'Lâche sur un token';
+    }
+  }, true);
+
+  document.addEventListener('pointerup', (e) => {
+    if (!_EP) return;
+    const { name, big, drag, over } = _EP;
+    _emoteEndDrag();
+    if (drag) {
+      if (over) _vttSendEmote(name, { big, targetTokenId: over });
+      else showNotif('Glisse l\'émote sur un token pour le viser', 'info');
+    } else {
+      _vttSendEmote(name, { big });
+    }
+  }, true);
+
+  // ── Suivi souris (position de la roue) ──
+  document.addEventListener('mousemove', (e) => { _emoteMouse = { x: e.clientX, y: e.clientY }; });
+
+  // ── Roue (E maintenu) + touches 1-8 ──
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { if (_EW) _emoteCloseWheel(false); return; }
+    if (_emoteTyping(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+    if ((e.key === 'e' || e.key === 'E') && !e.repeat && !_EW) {
+      if (!_emoteInCanvas()) return;
+      e.preventDefault(); _emoteOpenWheel();
+    } else if (/^[1-8]$/.test(e.key)) {
+      if (!_emoteInCanvas()) return;
+      const n = _getFavs()[+e.key - 1];
+      if (n) { e.preventDefault(); _vttSendEmote(n); }
+    }
+  });
+  document.addEventListener('keyup', (e) => { if ((e.key === 'e' || e.key === 'E') && _EW) _emoteCloseWheel(true); });
+  window.addEventListener('blur', () => { _emoteCloseWheel(false); _emoteEndDrag(); });
+}
+
+// ── Roue rapide des 8 premiers favoris (zone morte 30 px) ──
+function _emoteOpenWheel() {
+  const byName = new Map(_emotes.map(e => [e.name, e]));
+  const favs = _getFavs().slice(0, 8).map(n => byName.get(n)).filter(Boolean);
+  if (!favs.length) { showNotif('Roue vide : clique ☆ sur une émote pour l\'ajouter', 'info'); return; }
+  const x = Math.max(130, Math.min(innerWidth - 130, _emoteMouse.x));
+  const y = Math.max(130, Math.min(innerHeight - 130, _emoteMouse.y));
+  const w = document.createElement('div');
+  w.className = 'vtt-emote-wheel';
+  w.style.left = x + 'px'; w.style.top = y + 'px';
+  w.innerHTML = '<div class="vtt-emote-wheel-bg"></div>' + favs.map((em, i) => {
+    const a = -Math.PI / 2 + i * 2 * Math.PI / favs.length;
+    return `<div class="vtt-emote-wslot" data-i="${i}" style="left:${Math.cos(a) * 84}px;top:${Math.sin(a) * 84}px"><img src="${em.url}" alt=""><kbd>${i + 1}</kbd></div>`;
+  }).join('') + '<div class="vtt-emote-wcenter" id="vtt-emote-wc"></div>';
+  document.body.appendChild(w);
+  _EW = { el: w, x, y, favs, sel: null };
+  _emoteWheelSelect(_emoteMouse.x, _emoteMouse.y);
+}
+function _emoteWheelSelect(mx, my) {
+  if (!_EW) return;
+  const dx = mx - _EW.x, dy = my - _EW.y, n = _EW.favs.length;
+  let sel = null;
+  if (Math.hypot(dx, dy) > 30) { let a = Math.atan2(dy, dx) + Math.PI / 2; if (a < 0) a += 2 * Math.PI; sel = Math.round(a / (2 * Math.PI / n)) % n; }
+  _EW.sel = sel;
+  _EW.el.querySelectorAll('.vtt-emote-wslot').forEach(s => s.classList.toggle('on', +s.dataset.i === sel));
+  const wc = document.getElementById('vtt-emote-wc');
+  if (wc) wc.innerHTML = sel == null ? 'Vise une émote<br>puis relâche E' : `<b>:${_esc(_EW.favs[sel].name)}:</b>relâche pour envoyer`;
+}
+function _emoteCloseWheel(go) {
+  if (!_EW) return;
+  const sel = _EW.sel, favs = _EW.favs;
+  _EW.el.remove(); _EW = null;
+  if (go && sel != null) _vttSendEmote(favs[sel].name);
 }
 
 export async function _ouvrirGestionEmotes() {
