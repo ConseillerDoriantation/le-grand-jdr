@@ -7075,19 +7075,26 @@ html:not([data-theme="light"]) .vtt-root {
   font-size: .72rem; font-weight: 700; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;
 }
-.vtt-ms-note-hd-r { display: flex; align-items: center; gap: .15rem; flex-shrink: 0; }
-.vtt-ms-note-ic {
-  background: none; border: none; cursor: pointer;
-  font-size: .72rem; padding: .1rem .2rem; border-radius: 4px; line-height: 1;
-  opacity: .65; transition: opacity .12s, background .12s;
-}
-.vtt-ms-note-ic:hover { opacity: 1; background: var(--bg-panel); }
-.vtt-ms-note-chev { font-size: .6rem; color: var(--text-dim); margin-left: .1rem; }
+.vtt-ms-note-chev { font-size: .6rem; color: var(--text-dim); flex-shrink: 0; }
 .vtt-ms-note-date {
-  font-size: .58rem; color: var(--text-dim);
-  padding: 0 .5rem .3rem;
+  font-size: .58rem; color: var(--text-dim); flex-shrink: 0; white-space: nowrap;
+}
+/* Aperçu (première ligne) sous l'en-tête d'une note fermée */
+.vtt-ms-note-pv {
+  padding: 0 .5rem .4rem;
+  font-size: .64rem; line-height: 1.4; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .vtt-ms-note-body { padding: 0 .5rem .5rem; }
+.vtt-ms-note-title-inp {
+  width: 100%; box-sizing: border-box; margin-bottom: .35rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); font-size: .74rem; font-weight: 700;
+  padding: .35rem .45rem; font-family: inherit; outline: none;
+  transition: border-color .12s;
+}
+.vtt-ms-note-title-inp:focus { border-color: var(--gold); }
 .vtt-ms-note-area {
   width: 100%; box-sizing: border-box;
   background: var(--bg-panel);
@@ -7098,15 +7105,20 @@ html:not([data-theme="light"]) .vtt-root {
   transition: border-color .12s;
 }
 .vtt-ms-note-area:focus { border-color: var(--gold); }
-.vtt-ms-note-save {
-  margin-top: .4rem; width: 100%;
-  padding: .32rem;
-  background: var(--gold-glow, color-mix(in srgb, var(--gold) 12%, transparent));
-  border: 1px solid color-mix(in srgb, var(--gold) 35%, var(--border));
-  border-radius: 6px; color: var(--gold); font-size: .66rem; font-weight: 700;
-  cursor: pointer; transition: background .12s, border-color .12s;
+.vtt-ms-note-ft {
+  display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+  margin-top: .35rem;
 }
-.vtt-ms-note-save:hover { background: color-mix(in srgb, var(--gold) 20%, transparent); border-color: var(--gold); }
+.vtt-ms-note-status { font-size: .58rem; color: var(--text-dim); transition: color .12s; }
+.vtt-ms-note-status.saved { color: var(--success, #6bbf59); }
+.vtt-ms-note-del {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid transparent; border-radius: 6px;
+  color: var(--text-dim); cursor: pointer; padding: .2rem .3rem; line-height: 0;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.vtt-ms-note-del:hover { color: var(--danger, #d9534f); border-color: color-mix(in srgb, var(--danger, #d9534f) 40%, transparent); background: color-mix(in srgb, var(--danger, #d9534f) 10%, transparent); }
+.vtt-ms-note-del .vtt-ms-ic { width: 14px; height: 14px; }
 .vtt-ms-note-content {
   font-size: .7rem; line-height: 1.5; color: var(--text-muted);
   white-space: pre-wrap; word-break: break-word;

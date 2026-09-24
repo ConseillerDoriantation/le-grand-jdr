@@ -12,7 +12,7 @@ import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
 import { _esc, _norm, loadingHtml } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
-import { openModal, closeModalDirect, confirmModal, promptModal } from '../../shared/modal.js';
+import { openModal, closeModalDirect } from '../../shared/modal.js';
 import { getArmorSetData, syncEquipmentAfterInventoryMutation, _getTraits } from '../../shared/equipment-utils.js';
 import { calcSpellDuration, calcSpellTargets, getProtectionRestoreMode } from '../../shared/spell-runes.js';
 import { ZONE_SHAPES, _zoneDims, _zoneCount } from '../../shared/spell-zones.js';
@@ -1595,43 +1595,66 @@ function _vttMsCraftAsk(recipeId) { _msCraftConfirm = recipeId; if (VS.miniUid) 
 function _vttMsCraftCancel() { _msCraftConfirm = null; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
 
 // ── Onglet Notes (modèle notesList partagé avec la vraie fiche) ──────────
+// Carnet (refonte) : + note ouvre directement, titre éditable sur place,
+// textarea AUTOSAVE (débounce 600 ms, sans re-render pendant la frappe).
 function _msTabNotes(c, uid, canEdit) {
   const notes = c?.notesList || [];
-  const openCount = _msOpenNote !== null && notes[_msOpenNote] ? 1 : 0;
-  let html = `${_msTabIntro('notes', 'Notes', `${notes.length}`, openCount ? 'Une note ouverte' : 'Carnet de table')}
-  <div class="vtt-ms-notes">`;
-  if (canEdit) {
-    html += `<button class="vtt-ms-note-add" data-vtt-fn="_vttMsAddNote" data-vtt-args="${c.id}|${uid}">+ Nouvelle note</button>`;
-  }
-  if (!notes.length) {
-    html += `<div class="vtt-ms-empty">${canEdit ? 'Aucune note. Crée-en une.' : 'Aucune note.'}</div></div>`;
-    return html;
-  }
+  let html = `<div class="vtt-ms-notes">`;
+  if (canEdit) html += `<button class="vtt-ms-note-add" data-vtt-fn="_vttMsAddNote" data-vtt-args="${c.id}|${uid}">+ Nouvelle note</button>`;
+  if (!notes.length) return html + `<div class="vtt-ms-empty">${canEdit ? 'Carnet vide. Crée une note.' : 'Carnet vide.'}</div></div>`;
   notes.forEach((note, i) => {
     const open = _msOpenNote === i;
-    const body = open ? (canEdit
-      ? `<div class="vtt-ms-note-body">
-          <textarea class="vtt-ms-note-area" id="vtt-ms-note-${c.id}-${i}" rows="6"
-            placeholder="Contenu de la note…">${_esc(_msNoteText(note.contenu))}</textarea>
-          <button class="vtt-ms-note-save" data-vtt-fn="_vttMsSaveNote" data-vtt-args="${c.id}|${uid}|${i}">💾 Enregistrer</button>
-        </div>`
-      : `<div class="vtt-ms-note-body"><div class="vtt-ms-note-content">${note.contenu || '<em style="opacity:.5">Vide</em>'}</div></div>`)
-      : '';
+    const preview = _msNoteText(note.contenu).split('\n')[0] || '';
+    const body = open
+      ? (canEdit
+        ? `<div class="vtt-ms-note-body">
+            <input class="vtt-ms-note-title-inp" id="vtt-ms-nt-t-${i}" data-note-idx="${i}" value="${_esc(note.titre || '')}" placeholder="Titre" maxlength="80">
+            <textarea class="vtt-ms-note-area" id="vtt-ms-nt-x-${i}" data-note-idx="${i}" rows="6" placeholder="Écris ici…">${_esc(_msNoteText(note.contenu))}</textarea>
+            <div class="vtt-ms-note-ft"><span class="vtt-ms-note-status" id="vtt-ms-nt-s-${i}">Enregistrement automatique</span><button class="vtt-ms-note-del" data-vtt-fn="_vttMsDeleteNote" data-vtt-args="${c.id}|${uid}|${i}" title="Supprimer la note">${_msIco('trash')}</button></div>
+          </div>`
+        : `<div class="vtt-ms-note-body"><p class="vtt-ms-note-content">${_esc(_msNoteText(note.contenu)) || '—'}</p></div>`)
+      : (preview ? `<div class="vtt-ms-note-pv">${_esc(preview)}</div>` : '');
     html += `<div class="vtt-ms-note-card${open ? ' open' : ''}">
       <div class="vtt-ms-note-hd" data-vtt-fn="_vttMsToggleNote" data-vtt-args="${i}" role="button" tabindex="0" aria-expanded="${open}">
-        <span class="vtt-ms-note-title">${_esc(note.titre || 'Note sans titre')}</span>
-        <div class="vtt-ms-note-hd-r">
-          ${canEdit ? `<button class="vtt-ms-note-ic" data-vtt-fn="_vttMsRenameNote" data-vtt-args="${c.id}|${uid}|${i}" title="Renommer">✏️</button>
-                       <button class="vtt-ms-note-ic" data-vtt-fn="_vttMsDeleteNote" data-vtt-args="${c.id}|${uid}|${i}" title="Supprimer">🗑️</button>` : ''}
-          <span class="vtt-ms-note-chev">${open ? '▲' : '▼'}</span>
-        </div>
+        <b class="vtt-ms-note-title">${_esc(note.titre || 'Sans titre')}</b>
+        <small class="vtt-ms-note-date">${_esc(note.date || '')}</small>
+        <span class="vtt-ms-note-chev">${open ? '▲' : '▼'}</span>
       </div>
-      ${note.date ? `<div class="vtt-ms-note-date">${_esc(note.date)}</div>` : ''}
       ${body}
     </div>`;
   });
-  html += '</div>';
-  return html;
+  return html + '</div>';
+}
+
+// Autosave du Carnet — lie le titre + le textarea de la note ouverte, débounce
+// 600 ms, écrit sans re-render (focus/caret préservés). Appelé après le rendu.
+const _msNoteTimers = {};
+function _bindMiniNotes(charId, uid) {
+  const idx = _msOpenNote; if (idx === null || idx === undefined) return;
+  const t = document.getElementById(`vtt-ms-nt-t-${idx}`);
+  const x = document.getElementById(`vtt-ms-nt-x-${idx}`);
+  const onInput = (el) => {
+    const s = document.getElementById(`vtt-ms-nt-s-${idx}`);
+    if (s) { s.textContent = 'Enregistrement…'; s.classList.remove('saved'); }
+    if (el === t) { const h = el.closest('.vtt-ms-note-card')?.querySelector('.vtt-ms-note-title'); if (h) h.textContent = el.value.trim() || 'Sans titre'; }
+    clearTimeout(_msNoteTimers[idx]);
+    _msNoteTimers[idx] = setTimeout(() => _msNoteAutosave(charId, uid, idx), 600);
+  };
+  if (t) t.oninput = () => onInput(t);
+  if (x) x.oninput = () => onInput(x);
+}
+async function _msNoteAutosave(charId, uid, idx) {
+  if (!_msCanEdit(uid)) return;
+  const c = VS.characters[charId]; if (!c) return;
+  const t = document.getElementById(`vtt-ms-nt-t-${idx}`);
+  const x = document.getElementById(`vtt-ms-nt-x-${idx}`);
+  const notes = [...(c.notesList || [])];
+  if (!notes[idx]) return;
+  notes[idx] = { ...notes[idx], titre: (t ? (t.value.trim() || 'Sans titre') : notes[idx].titre), contenu: x ? x.value : notes[idx].contenu };
+  c.notesList = notes;   // reflet local, PAS de re-render → frappe non interrompue
+  const ok = await updateDoc(_chrRef(charId), { notesList: notes }).then(() => true).catch(() => false);
+  const s = document.getElementById(`vtt-ms-nt-s-${idx}`);
+  if (s) { s.textContent = ok ? 'Enregistré' : 'Non enregistré'; s.classList.toggle('saved', ok); }
 }
 
 // Texte affiché dans le textarea : si la note vient de l'éditeur riche de la vraie
@@ -1648,8 +1671,12 @@ async function _vttMsAddNote(charId, uid) {
   if (!_msCanEdit(uid)) return;
   const c = VS.characters[charId]; if (!c) return;
   const notes = [...(c.notesList || [])];
-  notes.push({ titre: 'Nouvelle note', contenu: '', date: new Date().toLocaleDateString('fr-FR') });
-  _msOpenNote = notes.length - 1;
+  notes.push({ titre: '', contenu: '', date: new Date().toLocaleDateString('fr-FR') });
+  const newIdx = notes.length - 1;
+  _msOpenNote = newIdx;
+  c.notesList = notes;                 // reflet local → note ouverte tout de suite
+  if (VS.miniUid) _renderMiniSheet(VS.miniUid);
+  setTimeout(() => document.getElementById(`vtt-ms-nt-t-${newIdx}`)?.focus(), 30);
   await updateDoc(_chrRef(charId), { notesList: notes }).catch(() => showNotif('Erreur sauvegarde', 'error'));
 }
 
@@ -1659,43 +1686,32 @@ function _vttMsToggleNote(idx) {
   if (VS.miniUid) _renderMiniSheet(VS.miniUid);
 }
 
-async function _vttMsRenameNote(charId, uid, idx) {
-  if (!_msCanEdit(uid)) return;
-  idx = parseInt(idx);
-  const c = VS.characters[charId]; if (!c) return;
-  const notes = [...(c.notesList || [])];
-  if (!notes[idx]) return;
-  const val = await promptModal('Titre de la note :', { title: 'Renommer la note', default: notes[idx].titre || 'Note sans titre' });
-  if (val === null) return;
-  notes[idx] = { ...notes[idx], titre: val.trim() || notes[idx].titre || 'Note sans titre' };
-  await updateDoc(_chrRef(charId), { notesList: notes }).catch(() => showNotif('Erreur sauvegarde', 'error'));
-}
-
-async function _vttMsSaveNote(charId, uid, idx) {
-  if (!_msCanEdit(uid)) return;
-  idx = parseInt(idx);
-  const c = VS.characters[charId]; if (!c) return;
-  const ta = document.getElementById(`vtt-ms-note-${charId}-${idx}`);
-  const notes = [...(c.notesList || [])];
-  if (!notes[idx] || !ta) return;
-  notes[idx] = { ...notes[idx], contenu: ta.value };
-  if (await updateDoc(_chrRef(charId), { notesList: notes }).then(() => true).catch(() => false))
-    showNotif('Note enregistrée', 'success');
-  else showNotif('Erreur sauvegarde', 'error');
-}
-
+// Suppression sans confirmation + toast « Annuler » (comme le Sac / la Bourse).
 async function _vttMsDeleteNote(charId, uid, idx) {
   if (!_msCanEdit(uid)) return;
   idx = parseInt(idx);
   const c = VS.characters[charId]; if (!c) return;
-  const notes = [...(c.notesList || [])];
-  if (!notes[idx]) return;
-  if (!await confirmModal('Supprimer cette note ?', { title: 'Note', confirmLabel: 'Supprimer' })) return;
+  const prev = [...(c.notesList || [])];
+  if (!prev[idx]) return;
+  const prevOpen = _msOpenNote;
+  const notes = [...prev];
   notes.splice(idx, 1);
   if (_msOpenNote === idx) _msOpenNote = null;
   else if (_msOpenNote > idx) _msOpenNote--;
-  if (await updateDoc(_chrRef(charId), { notesList: notes }).then(() => true).catch(() => false))
-    showNotif('Note supprimée', 'info');
+  c.notesList = notes;
+  if (VS.miniUid) _renderMiniSheet(VS.miniUid);
+  if (!await updateDoc(_chrRef(charId), { notesList: notes }).then(() => true).catch(() => false)) {
+    c.notesList = prev; _msOpenNote = prevOpen;
+    if (VS.miniUid) _renderMiniSheet(VS.miniUid);
+    showNotif('Suppression impossible', 'error');
+    return;
+  }
+  showNotif('Note supprimée', 'info', { action: { label: 'Annuler', onClick: () => {
+    const cc = VS.characters[charId]; if (!cc) return;
+    cc.notesList = prev; _msOpenNote = prevOpen;
+    if (VS.miniUid) _renderMiniSheet(VS.miniUid);
+    updateDoc(_chrRef(charId), { notesList: prev }).catch(() => showNotif('Restauration impossible', 'error'));
+  } } });
 }
 
 // ─── Rendu principal ─────────────────────────────────────────────
@@ -1817,6 +1833,7 @@ function _renderMiniSheetImpl(uid) {
   // Applique le filtre de l'onglet actif sur le DOM fraîchement rendu.
   if (_miniTab === 'sac' && _msSac === 'obj') _msApplyInvFilter();
   else if (_miniTab === 'sorts')              _msApplySortFilter();
+  else if (_miniTab === 'notes')              _bindMiniNotes(c.id, uid);
   _msInitPop(); _msPlacePop();
   _msInitResize(); _msApplyStoredWidth();
   const popInp = document.getElementById('vtt-ms-xp-add'); if (popInp && _msPop?.v === 'xp') popInp.focus();
@@ -1953,12 +1970,10 @@ export {
   _vttMsInvCat,
   _vttMsInvClear,
   _vttMsInvSearch,
-  _vttMsRenameNote,
   _vttMsSac,
   _vttMsGoPurse,
   _vttMsPop,
   _vttMsToggleSpell,
-  _vttMsSaveNote,
   _vttMsSendPicker,
   _vttMsSlotChange,
   _vttMsSortCat,

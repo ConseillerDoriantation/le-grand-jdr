@@ -185,7 +185,7 @@ import {
 } from './vtt-presence.js';
 import {
   _renderMiniSheet, _vttToggleMiniSheet, _vttSelectMiniChar, _msCanEdit, _msCanEditVitals,
-  _vttMsTab, _vttMsToggleCollapsed, _vttMsAttackSlot, _vttMsAddNote, _vttMsToggleNote, _vttMsRenameNote, _vttMsSaveNote,
+  _vttMsTab, _vttMsToggleCollapsed, _vttMsAttackSlot, _vttMsAddNote, _vttMsToggleNote,
   _vttMsDeleteNote, _vttMsEquip, _vttMsUnequip, _vttMsUnequipAll, _vttMsEquipPicker,
   _vttMsSlotChange, _vttMsDeleteItem, _vttMsSendPicker, _vttMsConfirmSend,
   _vttMsInvSearch, _vttMsInvCat, _vttMsInvClear, _vttMsSortSearch, _vttMsSortCat,
@@ -14646,8 +14646,6 @@ export const VTT_ACTIONS = {
   _vttMsInvCat,
   _vttMsInvClear,
   _vttMsInvSearch,
-  _vttMsRenameNote,
-  _vttMsSaveNote,
   _vttMsSendPicker,
   _vttMsSetNiveau,
   _vttMsLevelUp,
