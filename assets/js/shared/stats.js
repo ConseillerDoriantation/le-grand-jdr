@@ -23,9 +23,14 @@
 // Les stats GLOBALES (table) = somme des chars, calculée à l'affichage.
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { db, doc, getDoc, setDoc, updateDoc, increment, deleteField } from '../config/firebase.js';
+import { db, doc, getDoc, setDoc, updateDoc, increment, deleteField, runTransaction } from '../config/firebase.js';
 import { getCurrentAdventureId } from '../data/firestore.js';
 import { buildCombatCorrectionDeltas } from './stats-corrections.js';
+import {
+  statsSessionEntryForChar as _sessionEntryForChar,
+  sumStatsSessionsRaw as _sumByDatesRaw,
+  removeStatsSessionsFromData,
+} from './stats-session-data.js';
 
 function _statsRef() {
   const aid = getCurrentAdventureId();   // id canonique (même source que le VTT)
@@ -64,13 +69,6 @@ function _statsBucket() {
   if (_activeSession) return { field: 'bySession', key: _activeSession.key, date: _activeSession.date };
   const date = statsDateKey();
   return { field: 'byDate', key: date, date };
-}
-
-function _sessionEntryForChar(char, sessionKey) {
-  if (!char || !sessionKey) return { field: '', value: null };
-  if (char.bySession?.[sessionKey]) return { field: 'bySession', value: char.bySession[sessionKey] };
-  if (char.byDate?.[sessionKey]) return { field: 'byDate', value: char.byDate[sessionKey] };
-  return { field: '', value: null };
 }
 
 // Miroir mémoire best-effort du doc (pour le « plus gros coup » : un max ne se
@@ -168,26 +166,6 @@ export async function setSessionMission(dateKey, { mission = '', missionId = '',
 }
 
 // ── Suppression ciblée de stats (MJ) ────────────────────────────────────────
-// Somme brute des miroirs `byDate` / `bySession` d'un perso.
-function _sumByDatesRaw(c, dates) {
-  const acc = {};
-  for (const dk of dates) {
-    const bd = _sessionEntryForChar(c, dk).value; if (!bd) continue;
-    for (const [grp, obj] of Object.entries(bd)) {
-      if (!obj || typeof obj !== 'object') continue;
-      const a = (acc[grp] ??= {});
-      for (const [k, v] of Object.entries(obj)) {
-        // Les records sont des maxima datés, pas des compteurs sommables : les
-        // soustraire du record campagne produirait une valeur incohérente.
-        if (grp === 'combat' && (k === 'biggestHit' || k === 'biggestTaken')) continue;
-        if (typeof v === 'number') a[k] = (a[k] || 0) + v;
-        else if (v && typeof v === 'object') { const a2 = (a[k] ??= {}); for (const [k2, v2] of Object.entries(v)) if (typeof v2 === 'number') a2[k2] = (a2[k2] || 0) + v2; }
-      }
-    }
-  }
-  return acc;
-}
-
 // Supprime les stats enregistrées pour un ENSEMBLE de dates : soustrait leur
 // miroir des totaux campagne (champs sommables) puis retire les entrées de séance
 // et la description de séance. Les records « max » ne sont pas soustraits comme
@@ -196,29 +174,25 @@ function _sumByDatesRaw(c, dates) {
 export async function deleteDatesStats(dates) {
   const ref = _statsRef();
   if (!ref || !Array.isArray(dates) || !dates.length) return false;
-  const snap = await getDoc(ref).catch(() => null);
-  const d = snap?.exists() ? snap.data() : null;
-  if (!d) return false;
-  const charsPatch = {};
-  for (const [id, c] of Object.entries(d.chars || {})) {
-    const relevant = dates.filter(dk => _sessionEntryForChar(c, dk).value);
-    if (!relevant.length) continue;
-    const sum = _sumByDatesRaw(c, relevant);
-    const byDateDel = {}, bySessionDel = {};
-    relevant.forEach(dk => {
-      if (_sessionEntryForChar(c, dk).field === 'bySession') bySessionDel[dk] = deleteField();
-      else byDateDel[dk] = deleteField();
-    });
-    charsPatch[id] = { ..._incTree(sum, -1) };
-    if (Object.keys(byDateDel).length) charsPatch[id].byDate = byDateDel;
-    if (Object.keys(bySessionDel).length) charsPatch[id].bySession = bySessionDel;
-  }
-  const sessionsDel = {}; dates.forEach(dk => { sessionsDel[dk] = deleteField(); });
+  const sessionKeys = [...new Set(dates.filter(Boolean))];
+  const deletedAt = Date.now();
   try {
-    await setDoc(ref, { chars: charsPatch, sessions: sessionsDel }, { merge: true });
+    const changed = await runTransaction(db, async transaction => {
+      const snap = await transaction.get(ref);
+      if (!snap.exists()) return false;
+      const data = snap.data();
+      const hasChange = removeStatsSessionsFromData(data, sessionKeys, deletedAt);
+      if (!hasChange) return false;
+      transaction.set(ref, data);
+      return true;
+    });
+    if (!changed) return false;
     _mem = null;   // forcera un re-fetch propre au prochain loadStats
     return true;
-  } catch { return false; }
+  } catch (error) {
+    console.error('[stats] suppression de séance impossible', error);
+    return false;
+  }
 }
 
 export const deleteDateStats = (dateKey) => deleteDatesStats(dateKey ? [dateKey] : []);

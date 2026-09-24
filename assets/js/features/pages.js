@@ -4467,9 +4467,15 @@ registerActions({
     }).catch(() => false);
     if (!ok) return;
     const done = await deleteDateStats(d);
-    showNotif(done ? 'Séance supprimée.' : 'Échec de la suppression.', done ? 'success' : 'error');
+    if (!done) {
+      showNotif('La séance n’a pas pu être supprimée. La fenêtre reste ouverte pour éviter toute ambiguïté.', 'error');
+      return;
+    }
+    showNotif('Séance supprimée.', 'success');
     closeModalDirect();
-    if (done) { if (_statsScope === d) _statsScope = null; _statsGroupSel = null; PAGES.statistiques(); }
+    if (_statsScope === d) _statsScope = null;
+    _statsGroupSel = null;
+    await PAGES.statistiques();
   },
   // Supprime les stats liées à une mission (toutes ses séances).
   _statsDelMission: async (btn) => {
