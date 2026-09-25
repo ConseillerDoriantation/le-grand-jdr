@@ -14,7 +14,7 @@ import { DAMAGE_INTERACTIONS } from '../../shared/damage-profile.js';
 import { onSnapshot, query, orderBy, limit, doc, setDoc, serverTimestamp } from '../../config/firebase.js';
 import { _logCol, _logGmCol } from './vtt-refs.js';
 import { _vttPanelError } from './vtt-utils.js';
-import { _findUsableReactiveShield, _canControlToken, _vttPatchTokenOptimistically } from './vtt.js'; // circ. (combat)
+import { _findUsableReactiveShield, _canControlToken, _vttPatchTokenOptimistically, _vttNotifyChatMessage } from './vtt.js'; // circ. (combat)
 import { _applyEmotes } from './vtt-emotes.js'; // leaf émotes
 import { _live } from './vtt-effective.js';
 import { combatTargetResourceVisibility, trackedCombatResourceValues } from './vtt-chat-visibility.js';
@@ -23,11 +23,107 @@ import { combatHpDeltas, replayCombatHpEstimates } from './vtt-hp-estimates.js';
 // État chat (déplacé de vtt.js)
 export let _chatMsgs = [];   // derniers messages rendus (lookup "répondre" + bouclier/undo côté vtt.js)
 let _chatReplyTo= null; // message auquel on répond { id, authorName, text }
+let _chatFilter = (() => { try { return localStorage.getItem('vtt-chat-filter') || 'all'; } catch { return 'all'; } })();
+let _chatStuck = true;
+let _chatNewBelow = 0;
 let _logMain    = [];   // log public (vttLog) — dernier snapshot
 let _logGm      = [];   // jets cachés (vttLogGm) — uniquement abonné côté MJ
 const _optimisticLogs = new Map();
 const _optimisticTimers = new Map();
 const _hpEventLogs = new Map(); // conserve les actions sorties des 80 derniers messages pendant la visite
+let _chatPortraitSignature = '';
+
+const _CHAT_TYPES = {
+  combat: new Set(['attack', 'attack-multi', 'cast', 'affliction-cast', 'save', 'concentration-save', 'dot-tick']),
+  rolls: new Set(['roll', 'dice-free', 'craft']),
+  messages: new Set(['chat']),
+};
+
+const _entityPortrait = entity => entity?.photoURL || entity?.photo || entity?.avatar
+  || entity?.imageUrl || entity?.image || entity?.portraitUrl || null;
+
+function _chatTargetToken(target, tokenId = null) {
+  const directId = tokenId || target?.tokenId || target?.defenderTokenId || null;
+  if (directId && VS.tokens?.[directId]?.data) return VS.tokens[directId].data;
+  if (!target) return null;
+  return Object.values(VS.tokens || {}).map(entry => entry?.data).find(token => token && (
+    (target.characterId && token.characterId === target.characterId)
+    || (target.npcId && token.npcId === target.npcId)
+    || (target.beastId && token.beastId === target.beastId)
+  )) || null;
+}
+
+// Les images data:/blob: ne sont volontairement pas conservées dans le journal
+// Firestore. On les résout donc depuis le token ou la fiche locale au rendu :
+// cela couvre notamment les portraits de PJ et ceux des invocations.
+function _chatTargetPortrait(target, tokenId = null) {
+  const token = _chatTargetToken(target, tokenId);
+  const summonOwnerCharId = target?.summonOwnerCharId || token?.summonOwnerCharId || null;
+  const summonInvId = target?.summonInvId || token?.summonInvId || null;
+  if (summonOwnerCharId && summonInvId) {
+    const owner = VS.characters?.[summonOwnerCharId]
+      || STATE.characters?.find?.(character => character?.id === summonOwnerCharId);
+    const invocation = owner?.invocations?.find?.(item => String(item?.id) === String(summonInvId));
+    if (invocation?.image) return invocation.image;
+  }
+  const liveImage = token ? _live(token)?.displayImage : null;
+  if (liveImage) return liveImage;
+  const entity = (target?.characterId && (VS.characters?.[target.characterId]
+      || STATE.characters?.find?.(character => character?.id === target.characterId)))
+    || (target?.npcId && VS.npcs?.[target.npcId])
+    || (target?.beastId && VS.bestiary?.[target.beastId])
+    || null;
+  if (_entityPortrait(entity)) return _entityPortrait(entity);
+  return _entityPortrait(token) || target?.targetImage || target?.defenderImage || null;
+}
+
+function _currentChatPortraitSignature() {
+  return (_chatMsgs || []).flatMap(message => {
+    const source = message?.sourceTokenId
+      ? _chatTargetPortrait(message, message.sourceTokenId)
+      : message?.characterImage || '';
+    if (message?.type === 'attack-multi') {
+      return [source, ...(message.targets || []).map(target => _chatTargetPortrait(target, target?.tokenId) || '')];
+    }
+    if (message?.type === 'attack') {
+      return [source, _chatTargetPortrait(message, message.defenderTokenId || message.tokenId) || ''];
+    }
+    return [source];
+  }).join('|');
+}
+
+// Les abonnements du chat peuvent répondre avant ceux des fiches/tokens. Une
+// fois leurs portraits disponibles, on rafraîchit uniquement si la signature
+// visuelle a changé (les déplacements/PV n'entraînent donc aucun rerendu).
+export function _vttRefreshChatPortraits() {
+  if (!document.getElementById('vtt-chat-log') || !_chatMsgs.length) return;
+  const signature = _currentChatPortraitSignature();
+  if (signature === _chatPortraitSignature) return;
+  _chatPortraitSignature = signature;
+  _renderChatLog(_chatMsgs);
+}
+export function _vttChatFilter(filter) {
+  _chatFilter = ['all', 'combat', 'rolls', 'messages'].includes(filter) ? filter : 'all';
+  try { localStorage.setItem('vtt-chat-filter', _chatFilter); } catch {}
+  _chatStuck = true;
+  _renderChatLog(_chatMsgs);
+}
+export function _vttChatShowNew() {
+  const el = document.getElementById('vtt-chat-log');
+  if (!el) return;
+  _chatNewBelow = 0;
+  el.scrollTo({ top:el.scrollHeight, behavior:'smooth' });
+  _updateNewButton();
+}
+function _updateNewButton() {
+  const btn = document.getElementById('vtt-chat-new');
+  if (!btn) return;
+  btn.hidden = _chatStuck;
+  const label = btn.querySelector('span');
+  if (label) label.textContent = _chatNewBelow
+    ? `${_chatNewBelow} nouveau${_chatNewBelow > 1 ? 'x' : ''}`
+    : 'Messages récents';
+}
 
 export function _vttResetCombatHpLog() {
   _hpEventLogs.clear();
@@ -210,12 +306,37 @@ export function _renderChatLogImpl(msgs) {
   // (collection vttLogGm non abonnée + règles), ce filtre reste un garde-fou UI.
   if (!STATE.isAdmin) msgs = msgs.filter(m => !m.gmOnly);
   _chatMsgs = msgs;   // pour le lookup "Répondre"
+  const allMsgs = msgs;
+  const categoryOf = type => _CHAT_TYPES.combat.has(type) ? 'combat'
+    : _CHAT_TYPES.rolls.has(type) ? 'rolls'
+      : _CHAT_TYPES.messages.has(type) ? 'messages' : null;
+  const counts = allMsgs.reduce((acc, message) => {
+    acc.all += 1;
+    const category = categoryOf(message.type);
+    if (category) acc[category] += 1;
+    return acc;
+  }, { all:0, combat:0, rolls:0, messages:0 });
+  const filterEl = document.getElementById('vtt-chat-filters');
+  if (filterEl) filterEl.innerHTML = [
+    ['all', 'Tout'], ['combat', 'Combat'], ['rolls', 'Jets'], ['messages', 'Messages'],
+  ].map(([key, label]) => `<button type="button" class="vtt-chat-filter${_chatFilter === key ? ' active' : ''}" data-vtt-fn="_vttChatFilter" data-vtt-args="${key}">${label}<b>${counts[key]}</b></button>`).join('');
+  const visibleMsgs = _chatFilter === 'all' ? allMsgs : allMsgs.filter(message => categoryOf(message.type) === _chatFilter);
+  const wasAtBottom = _chatStuck || el.scrollHeight - el.scrollTop - el.clientHeight < 34;
+  const previousScrollTop = el.scrollTop;
+  if (!el.dataset.stickyBound) {
+    el.dataset.stickyBound = '1';
+    el.addEventListener('scroll', () => {
+      _chatStuck = el.scrollHeight - el.scrollTop - el.clientHeight < 34;
+      if (_chatStuck) _chatNewBelow = 0;
+      _updateNewButton();
+    }, { passive:true });
+  }
 
   // Bouclier réactif : repère le DERNIER coup reçu (damageant, non annulé) par
   // chaque token → seul ce log porte le bouton « Annuler ».
   const _lastHitLogId = {};
   const _lastHitMs = {};
-  for (const m of msgs) {
+  for (const m of allMsgs) {
     if (m.type !== 'attack' || m.isHeal || !(m.dmgTotal > 0) || !m.defenderTokenId || m.shieldCancelled) continue;
     const t = m.createdAt?.toMillis?.() ?? Infinity; // timestamp en attente = le plus récent
     if (t >= (_lastHitMs[m.defenderTokenId] ?? -1)) { _lastHitMs[m.defenderTokenId] = t; _lastHitLogId[m.defenderTokenId] = m.id; }
@@ -269,22 +390,22 @@ export function _renderChatLogImpl(msgs) {
       || (m?.sourceNpcId && VS.npcs?.[m.sourceNpcId])
       || (m?.sourceBeastId && VS.bestiary?.[m.sourceBeastId])
       || null;
-    return entity?.photoURL || entity?.photo || entity?.avatar || entity?.imageUrl || entity?.image
-      || m?.characterImage || null;
+    return _entityPortrait(entity) || _entityPortrait(token) || m?.characterImage || null;
   };
   const _sourceLink = (args, title = 'Ouvrir la source') => args
     ? `<button class="vtt-log-source-btn" data-vtt-fn="_vttOpenSource" data-vtt-args="${_esc(args)}" title="${_esc(title)}">↗</button>`
     : '';
 
   // Header source ▸ cible avec label optionnel
-  const _header = ({ srcImg, srcName, tgtImg, tgtName, label, badges = '', ts = '', sourceArgs = '', targetArgs = '' }) => {
-    const arrow = tgtName ? `<span class="vtt-log-arrow">▸</span>` : '';
+  const _header = ({ srcImg, srcName, tgtImg, tgtName, label, actionIcon = '', badges = '', ts = '', sourceArgs = '', targetArgs = '' }) => {
+    const arrow = tgtName ? `<span class="vtt-log-arrow">→</span>` : '';
     const tgt = tgtName ? _actor(tgtImg, tgtName) : '';
     const lbl = label ? `<span class="vtt-log-label">${_esc(label)}</span>` : '';
+    const ico = actionIcon ? `<span class="vtt-log-action-icon" aria-hidden="true">${_esc(actionIcon)}</span>` : '';
     return `<div class="vtt-log-head">
-      ${_actor(srcImg, srcName)}${_sourceLink(sourceArgs)}${arrow}${tgt}${_sourceLink(targetArgs, 'Ouvrir la cible')}${lbl}
-      <span class="vtt-log-meta">${badges}${ts}</span>
-    </div>`;
+      ${_actor(srcImg, srcName)}${_sourceLink(sourceArgs)}${arrow}${tgt}${_sourceLink(targetArgs, 'Ouvrir la cible')}
+      <span class="vtt-log-meta">${ts}</span>
+    </div>${lbl || badges ? `<div class="vtt-log-action-row">${ico}${lbl}${badges}</div>` : ''}`;
   };
 
   // Timestamp HH:MM
@@ -296,7 +417,7 @@ export function _renderChatLogImpl(msgs) {
   };
 
   // Bouton de toggle détail (avec écouteur attaché plus bas)
-  const _toggle = (id) => `<button class="vtt-log-toggle" data-detail="${id}">détail ▾</button>`;
+  const _toggle = (id) => `<button class="vtt-log-toggle" data-detail="${id}">Voir le calcul <span aria-hidden="true">⌄</span></button>`;
 
   const _num = (v, fallback = 0) => Number.isFinite(Number(v)) ? Number(v) : fallback;
   const _html = v => v == null ? '' : String(v);
@@ -452,91 +573,69 @@ export function _renderChatLogImpl(msgs) {
     else if (isHit)  theme = 'hit';
     else if (isHalf) theme = 'half';
 
+    const interactionBadge = !isHeal && m.interaction && DAMAGE_INTERACTIONS[m.interaction]
+      ? (() => { const interaction = DAMAGE_INTERACTIONS[m.interaction];
+          return `<span class="vtt-log-badge" style="color:${interaction.color};background:${interaction.color}1a">${interaction.icon} ${_esc(m.interaction)}</span>`;
+        })()
+      : '';
     const badges = [
       _advBadge(m.advMode),
       _techniqueBadges(m),
+      m.pmCost > 0 ? `<span class="vtt-log-badge vtt-log-badge--pm">−${m.pmCost} PM</span>` : '',
+      interactionBadge,
+      m.dmgReduction > 0 ? `<span class="vtt-log-badge vtt-log-badge--armor">🛡 −${m.dmgReduction}</span>` : '',
       isCrit   ? `<span class="vtt-log-badge vtt-log-badge--crit">💥 CRIT</span>` : '',
       isFumble ? `<span class="vtt-log-badge vtt-log-badge--fumble">💀 FUMBLE</span>` : '',
     ].join('');
 
-    const defenderToken = m.defenderTokenId ? VS.tokens?.[m.defenderTokenId]?.data : null;
-    const defenderImage = m.defenderImage || (defenderToken ? _live(defenderToken)?.displayImage : null);
+    const defenderImage = _chatTargetPortrait(m, m.defenderTokenId || m.tokenId);
     const head = _header({
       srcImg: _sourceImage(m), srcName: m.attackerName || m.authorName || '?',
       tgtImg: defenderImage, tgtName: m.defenderName,
-      label:  m.optLabel, badges, ts,
+      label:  m.optLabel, actionIcon: isHeal ? (m.isMana ? '💧' : '♥') : '⚔', badges, ts,
       sourceArgs: _sourceArgs(m, m.isHeal ? 'sorts' : 'combat'),
       targetArgs: _targetArgs(m, 'combat'),
     });
 
-    // Headline : résultat principal
+    // Une seule composition visuelle : total dans le dé, verdict au centre,
+    // effet appliqué à droite. Les calculs détaillés restent dans le volet.
     let bodyHtml = '';
     if (isHeal) {
-      if (isFumble) {
-        bodyHtml = `<div class="vtt-log-body">
-          <span class="vtt-log-icon">💔</span>
-          <strong class="vtt-log-result">RATÉ</strong>
-          <span class="vtt-log-result-sub">${m.pmCost||0} PM consommés</span>
-          ${_toggle(`d${i}`)}
-        </div>`;
-      } else {
-        bodyHtml = `<div class="vtt-log-body">
-          <span class="vtt-log-icon">${m.isMana ? '💙' : '💚'}</span>
-          <strong class="vtt-log-result">+${m.dmgTotal}</strong>
-          <span class="vtt-log-result-sub">${m.isMana ? 'PM régénérés' : 'PV soignés'}</span>
-          ${isCrit ? `<span class="vtt-log-result-sub" style="color:#f59e0b">(critique)</span>` : ''}
-          ${_toggle(`d${i}`)}
-        </div>`;
-      }
-    } else {
-      // Attaque offensive : Toucher en premier, dégâts en second
-      const dmgCol = m.interaction === 'Absorption' ? '#22c38e'
-                   : isHalf                          ? '#b47fff'
-                   :                                   '#ef4444';
-      const dmgIcon = m.interaction === 'Absorption' ? '💚'
-                    : m.interaction === 'Immunité'   ? '🚫'
-                    :                                   '⚔️';
-      const dmgLabel = m.interaction === 'Absorption' ? 'PV soignés'
-                     : m.interaction === 'Immunité'   ? 'aucun dégât'
-                     : m.newHp === 0                  ? 'KO'
-                     : isHalf                         ? '½ dégâts'
-                     :                                  'dégâts';
-      const interTag = m.interaction && DAMAGE_INTERACTIONS[m.interaction]
-        ? (() => { const im = DAMAGE_INTERACTIONS[m.interaction];
-            return `<span class="vtt-log-badge" style="color:${im.color};background:${im.color}1a">${im.icon} ${_esc(m.interaction)}</span>`;
-          })()
-        : '';
-      const dmgVal = m.dmgTotal < 0 ? `+${-m.dmgTotal}` : m.dmgTotal;
-      // Ligne 1 : jet de toucher — on affiche le TOTAL calculé ET le dé naturel.
-      // (CA estimée pour les joueurs sur les ennemis)
-      const _shownCA = _viewCA(m, m.targetCA);
-      const natDie = (m.hitD20 != null)
-        ? `<span class="vtt-log-nat" title="Jet naturel du dé (avant modificateurs)">${_d20(m.hitD20, m.hitD20rolls)}</span>`
-        : '';
-      const hitRow = m.autoHit
-        ? `<div class="vtt-log-body">
-        <span class="vtt-log-icon">🎯</span>
-        <strong class="vtt-log-result" style="color:#22c38e">Touche auto</strong>
-        <span class="vtt-log-result-sub" style="color:#22c38e;font-weight:700">✓ TOUCHE</span>
-        ${_toggle(`d${i}`)}
-      </div>`
-        : `<div class="vtt-log-body">
-        <span class="vtt-log-icon">🎯</span>
-        <strong class="vtt-log-result" style="font-size:1.15rem;color:${isHit?'#22c38e':'#ef4444'}">${m.hitTotal ?? '?'}</strong>
-        ${natDie}
-        <span class="vtt-log-vs">vs CA ${_shownCA}</span>
-        <span class="vtt-log-result-sub" style="color:${isHit?'#22c38e':'#ef4444'};font-weight:700">${isHit ? '✓ TOUCHE' : '✗ RATÉ'}</span>
-        ${_toggle(`d${i}`)}
+      const amount = Math.max(0, Number(m.dmgTotal) || 0);
+      const resource = m.isMana ? 'PM' : 'PV';
+      bodyHtml = `<div class="vtt-log-resolution">
+        <span class="vtt-log-die"><b>${isFumble ? '—' : `+${amount}`}</b></span>
+        <div class="vtt-log-verdict">
+          <strong>${isFumble ? 'RATÉ' : (isCrit ? 'SOIN CRITIQUE' : (m.isMana ? 'MANA' : 'SOIN'))}</strong>
+          <span>${isFumble ? `${m.pmCost || 0} PM consommés` : `<b>+${amount} ${resource}</b> restaurés`}</span>
+        </div>
       </div>`;
-      // Ligne 2 : dégâts (si applicable)
-      const dmgRow = (isHit || isHalf) ? `<div class="vtt-log-body" style="padding-top:.05rem">
-        <span class="vtt-log-icon">${dmgIcon}</span>
-        <strong class="vtt-log-result" style="color:${dmgCol}">${dmgVal}</strong>
-        <span class="vtt-log-result-sub" style="color:${dmgCol}">${dmgLabel}</span>
-        ${interTag}
-        ${m.dmgReduction > 0 ? `<span class="vtt-log-badge" style="color:#60a5fa;background:rgba(96,165,250,.18)">🛡 Set Lourd −${m.dmgReduction}</span>` : ''}
-      </div>` : '';
-      bodyHtml = hitRow + dmgRow;
+    } else {
+      const shownCA = _viewCA(m, m.targetCA);
+      const verdict = isCrit ? 'CRITIQUE' : isFumble ? 'MALADRESSE' : isHit ? 'TOUCHÉ' : isHalf ? 'EFFET PARTIEL' : 'RATÉ';
+      const hasEffect = isHit || isHalf || isCrit;
+      const dmgVal = m.dmgTotal < 0 ? `+${-m.dmgTotal}` : (m.dmgTotal ?? 0);
+      const damageLabel = m.interaction === 'Absorption' ? 'PV SOIGNÉS'
+        : m.interaction === 'Immunité' ? 'AUCUN DÉGÂT'
+          : m.newHp === 0 ? 'KO' : isHalf ? '½ DÉGÂTS' : 'DÉGÂTS';
+      const damageColor = m.interaction === 'Absorption' ? '#22c38e' : isHalf ? '#b47fff' : '#ff4768';
+      const natural = m.hitD20 != null
+        ? ` · nat <span class="vtt-log-natural">${_rollChips(
+            Array.isArray(m.hitD20rolls) && m.hitD20rolls.length ? m.hitD20rolls : [m.hitD20],
+            m.hitD20,
+          )}</span>`
+        : '';
+      bodyHtml = `<div class="vtt-log-resolution">
+        <span class="vtt-log-die"><b>${m.autoHit ? '✓' : (m.hitTotal ?? '?')}</b></span>
+        <div class="vtt-log-verdict">
+          <strong>${verdict}</strong>
+          <span>${m.autoHit ? 'Touche automatiquement' : `vs CA <b>${shownCA}</b>${natural}`}</span>
+        </div>
+        <div class="vtt-log-damage${hasEffect ? '' : ' is-none'}" style="--damage-c:${damageColor}">
+          <b>${hasEffect ? dmgVal : '—'}</b>
+          <small>${hasEffect ? damageLabel : 'AUCUN DÉGÂT'}</small>
+        </div>
+      </div>`;
       bodyHtml += _techniqueEffects(m, isHit);
     }
 
@@ -562,11 +661,15 @@ export function _renderChatLogImpl(msgs) {
       }
     }
 
-    return `<div class="vtt-log vtt-log--${theme}">
+    return `<div class="vtt-log vtt-log--${theme} vtt-log--attack-card">
       ${head}
       ${bodyHtml}
-      ${shieldHtml}
-      ${_undoBtn(m)}
+      <div class="vtt-log-footer">
+        ${_toggle(`d${i}`)}
+        <span class="vtt-log-footer-spacer"></span>
+        ${shieldHtml}
+        ${_undoBtn(m)}
+      </div>
       <div class="vtt-log-detail" id="d${i}">${detail}</div>
     </div>`;
   };
@@ -744,7 +847,7 @@ export function _renderChatLogImpl(msgs) {
     const head = _header({
       srcImg: _sourceImage(m), srcName: m.attackerName || m.authorName || '?',
       tgtName: `${(m.targets||[]).length} cibles`,
-      label:   m.optLabel, badges, ts, sourceArgs: _sourceArgs(m, m.isHeal ? 'sorts' : 'combat'),
+      label:   m.optLabel, actionIcon: isHeal ? (m.isMana ? '💧' : '♥') : '✦', badges, ts, sourceArgs: _sourceArgs(m, m.isHeal ? 'sorts' : 'combat'),
     });
 
     // Le soin affiche le montant produit ; l'offensif conserve le jet commun.
@@ -756,13 +859,11 @@ export function _renderChatLogImpl(msgs) {
           <strong class="vtt-log-result" style="font-size:1.15rem">+${healTotal}</strong>
           <span class="vtt-log-vs">${m.isMana ? 'PM par cible' : 'PV par cible'} · ${(m.targets || []).length} cibles</span>
           ${isCrit ? `<span class="vtt-log-result-sub" style="color:#f59e0b">critique</span>` : ''}
-          ${_toggle(`d${i}`)}
         </div>`
       : `<div class="vtt-log-body">
           <span class="vtt-log-icon">🎯</span>
           <strong class="vtt-log-result" style="font-size:1.15rem">${m.hitTotal}</strong>
           <span class="vtt-log-vs">${hasSplash ? 'jet commun · CA individuelles' : 'contre les CA'}</span>
-          ${_toggle(`d${i}`)}
         </div>`;
 
     // Liste des cibles avec leur résolution individuelle
@@ -775,7 +876,7 @@ export function _renderChatLogImpl(msgs) {
       const dmgVal = isHeal
         ? `+${Math.max(0, Number(r.applied) || 0)}`
         : (r.hit || r.halfDmg) ? (r.dmgTotal < 0 ? `+${-r.dmgTotal}` : r.dmgTotal) : '—';
-      const targetToken = r.tokenId ? VS.tokens?.[r.tokenId]?.data : null;
+      const targetToken = _chatTargetToken(r, r.tokenId);
       const targetVisibility = combatTargetResourceVisibility({
         isAdmin: STATE.isAdmin,
         target: r,
@@ -797,7 +898,7 @@ export function _renderChatLogImpl(msgs) {
       // Une image data:/blob: n'est volontairement pas recopiée dans Firestore
       // (une AoE la dupliquerait jusqu'à dépasser 1 Mio). Le chat la retrouve
       // directement depuis le token et sa fiche bestiaire déjà chargés.
-      const targetImage = r.targetImage || (targetToken ? _live(targetToken)?.displayImage : null);
+      const targetImage = _chatTargetPortrait(r, r.tokenId);
       const portraitInner = targetImage
         ? `<img src="${_esc(targetImage)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit" data-img-err="text" data-img-err-text="${_esc(icon)}">`
         : icon;
@@ -815,7 +916,11 @@ export function _renderChatLogImpl(msgs) {
       ${body}
       <div class="vtt-log-targets">${targets}</div>
       ${_techniqueEffects(m, m.targets?.some(r => !r.techniqueSplash && r.hit))}
-      ${_undoBtn(m)}
+      <div class="vtt-log-footer">
+        ${_toggle(`d${i}`)}
+        <span class="vtt-log-footer-spacer"></span>
+        ${_undoBtn(m)}
+      </div>
       <div class="vtt-log-detail" id="d${i}">${buildAttackDetail(m, isHeal)}</div>
     </div>`;
   };
@@ -833,7 +938,11 @@ export function _renderChatLogImpl(msgs) {
       <span class="vtt-log-icon">${m.castEC ? '💔' : '✨'}</span>
       <span class="vtt-log-text">${_esc(m.castEffect || 'Sort activé')}</span>
     </div>`;
-    return `<div class="vtt-log vtt-log--cast${m.castEC ? ' vtt-log--cast-ec' : ''}">${head}${body}${_undoBtn(m)}</div>`;
+    const undo = _undoBtn(m);
+    const footer = undo
+      ? `<div class="vtt-log-footer"><span class="vtt-log-footer-spacer"></span>${undo}</div>`
+      : '';
+    return `<div class="vtt-log vtt-log--cast${m.castEC ? ' vtt-log--cast-ec' : ''}">${head}${body}${footer}</div>`;
   };
 
   /** Annonce d'affliction : "A lance Silence sur B" */
@@ -899,9 +1008,7 @@ export function _renderChatLogImpl(msgs) {
     const theme = passed ? 'saveok' : 'savefail';
     const badge = forced
       ? `<span class="vtt-log-badge vtt-log-badge--fail">PV À 0</span>`
-      : passed
-        ? `<span class="vtt-log-badge vtt-log-badge--ok">✅ MAINTENU</span>`
-        : `<span class="vtt-log-badge vtt-log-badge--fail">❌ ROMPU</span>`;
+      : '';
     const head = _header({
       srcImg: m.characterImage || null,
       srcName: m.tokenName || '?',
@@ -919,7 +1026,7 @@ export function _renderChatLogImpl(msgs) {
          <span class="vtt-log-result-sub">d20[<strong>${m.d20}</strong>] ${modStr}${sub(m.statLabel || 'Sa')}</span>`;
     const tail = passed
       ? `<span class="vtt-log-result-sub" style="color:#86efac;font-weight:700">→ sort maintenu</span>`
-      : `<span class="vtt-log-result-sub" style="color:#fca5a5;font-weight:700">→ effets dissipés</span>`;
+      : `<span class="vtt-log-result-sub" style="color:#fca5a5;font-weight:700">→ sort rompu</span>`;
     const body = `<div class="vtt-log-body">
       <span class="vtt-log-icon">🧠</span>
       ${result}
@@ -962,6 +1069,7 @@ export function _renderChatLogImpl(msgs) {
 
   /** Jet libre (test de carac) */
   const renderRoll = (m, i, ts) => {
+    const rollTheme = m.isCrit ? 'crit' : m.isFumble ? 'fumble' : 'roll';
     const resultCol = m.isCrit ? '#ffd700' : m.isFumble ? '#ef4444' : 'var(--text)';
     const modStr   = m.rollMod > 0 ? `+${m.rollMod}` : m.rollMod < 0 ? `${m.rollMod}` : '';
     const bonusStr = m.rollBonus > 0 ? `+${m.rollBonus}` : m.rollBonus < 0 ? `${m.rollBonus}` : '';
@@ -976,25 +1084,33 @@ export function _renderChatLogImpl(msgs) {
     ].join('');
     const head = _header({
       srcImg: m.characterImage, srcName: m.characterName || m.authorName || '?',
-      label: m.rollSkill || m.rollFormula || 'Jet', badges, ts,
+      ts,
       sourceArgs: _targetArgs(m, 'combat'),
     });
     const diceStr = Array.isArray(m.rollDice) && m.rollDice.length === 2
       ? _d20(m.rollRaw, m.rollDice)
       : `d20[<strong>${m.rollRaw ?? '?'}</strong>]`;
-    const body = `<div class="vtt-log-body">
-      <span class="vtt-log-icon">🎲</span>
-      <strong class="vtt-log-result" style="color:${resultCol};font-size:1.3rem">${m.rollResult ?? '?'}</strong>
-      <span class="vtt-log-result-sub">${diceStr} ${modStr ? `${modStr}${sub(m.rollStat||'')}` : ''} ${skillStr ? `${skillStr}${sub(skillLbl)}` : ''} ${equipStr ? `${equipStr}${sub('équip.')}` : ''} ${bonusStr ? `${bonusStr}${sub('bonus')}` : ''}</span>
+    const body = `<div class="vtt-log-skill-summary">
+      <span class="vtt-log-skill-die" style="--skill-result-c:${resultCol}"><b>${m.rollResult ?? '?'}</b></span>
+      <span class="vtt-log-skill-copy">
+        <strong>${_esc(m.rollSkill || m.rollFormula || 'Jet')}</strong>
+        <span>${diceStr} ${modStr ? `${modStr}${sub(m.rollStat||'')}` : ''} ${skillStr ? `${skillStr}${sub(skillLbl)}` : ''} ${equipStr ? `${equipStr}${sub('équip.')}` : ''} ${bonusStr ? `${bonusStr}${sub('bonus')}` : ''}</span>
+      </span>
+      ${badges ? `<span class="vtt-log-skill-badges">${badges}</span>` : ''}
     </div>`;
     const privateNote = m.gmOnly
       ? `<div class="vtt-log-private-note"><span>🔒</span><strong>Jet privé du MJ</strong><em>Invisible pour les joueurs</em></div>`
       : '';
-    return `<div class="vtt-log vtt-log--roll${m.gmOnly ? ' vtt-log--gm-hidden' : ''}">${privateNote}${head}${body}</div>`;
+    return `<div class="vtt-log vtt-log--${rollTheme} vtt-log--skill-roll${m.gmOnly ? ' vtt-log--gm-hidden' : ''}">${privateNote}${head}${body}</div>`;
   };
 
   /** Jet libre formule (dice-free) */
   const renderDiceFree = (m, i, ts) => {
+    const d20Group = (m.groups || []).length === 1 && Number(m.groups[0]?.faces) === 20 ? m.groups[0] : null;
+    const natural = d20Group ? Number(d20Group.kept ?? d20Group.rolls?.[0]) : null;
+    const isCrit = natural === 20;
+    const isFumble = natural === 1;
+    const rollTheme = isCrit ? 'crit' : isFumble ? 'fumble' : 'roll';
     const totalCol = m.total >= 20 ? '#22c38e' : m.total <= 3 ? '#ef4444' : 'var(--text)';
     const detail = (m.groups || []).map(g => {
       if (g.kept != null) {
@@ -1006,6 +1122,8 @@ export function _renderChatLogImpl(msgs) {
     if (m.bonus) detail.push(m.bonus>0 ? `<span style="color:#e8b84b">+${m.bonus}</span>` : `<span style="color:#ef4444">${m.bonus}</span>`);
     const badges = [
       m.gmOnly ? `<span class="vtt-log-badge vtt-log-badge--hidden" title="Jet privé — invisible des joueurs">🔒 MJ seul</span>` : '',
+      isCrit ? `<span class="vtt-log-badge vtt-log-badge--crit">✨ CRIT</span>` : '',
+      isFumble ? `<span class="vtt-log-badge vtt-log-badge--fumble">💀 FUMBLE</span>` : '',
       m.mode === 'advantage'
         ? `<span class="vtt-log-badge vtt-log-badge--adv">⬆ ADV</span>`
         : m.mode === 'disadvantage'
@@ -1023,22 +1141,28 @@ export function _renderChatLogImpl(msgs) {
     const privateNote = m.gmOnly
       ? `<div class="vtt-log-private-note"><span>🔒</span><strong>Jet privé du MJ</strong><em>Invisible pour les joueurs</em></div>`
       : '';
-    return `<div class="vtt-log vtt-log--roll${m.gmOnly ? ' vtt-log--gm-hidden' : ''}">${privateNote}${head}${body}</div>`;
+    return `<div class="vtt-log vtt-log--${rollTheme}${m.gmOnly ? ' vtt-log--gm-hidden' : ''}">${privateNote}${head}${body}</div>`;
   };
 
   /** Message chat normal */
-  const renderChat = (m) => {
+  const renderChat = (m, previous = null) => {
     const isMe = m.authorId === myUid;
+    const ms = m.createdAt?.toMillis?.() || 0;
+    const previousMs = previous?.createdAt?.toMillis?.() || 0;
+    const continued = previous?.type === 'chat' && previous.authorId === m.authorId && ms - previousMs < 180_000;
+    const isMj = !!m.isAdmin || m.authorRole === 'mj' || /^mj$/i.test(m.authorName || '');
+    const hue = [...String(m.authorId || m.authorName || 'chat')].reduce((value, char) => (value * 31 + char.charCodeAt(0)) % 360, 220);
+    const color = isMj ? '#9d6fff' : `hsl(${hue} 68% 58%)`;
     const quote = m.replyTo ? `<div class="vtt-chat-quote">
         <span class="vtt-chat-quote-who">↩ ${_esc(m.replyTo.authorName||'?')}</span>
         <span class="vtt-chat-quote-text">${_esc(m.replyTo.text||'')}</span>
       </div>` : '';
-    return `<div class="vtt-log vtt-log--chat">
+    return `<div class="vtt-log vtt-log--chat${isMe ? ' is-me' : ''}${isMj ? ' is-mj' : ''}${continued ? ' is-cont' : ''}" style="--chat-c:${color}">
+      <span class="vtt-chat-avatar" aria-hidden="true">${_esc((m.authorName || '?')[0].toUpperCase())}</span>
       <div class="vtt-log-chat-msg">
         ${quote}
-        <span class="vtt-log-chat-who${isMe?' me':''}">${_esc(m.authorName||'?')}</span>
+        <span class="vtt-log-chat-who${isMe?' me':''}">${_esc(m.authorName||'?')} ${_ts(m)}</span>
         <span class="vtt-log-chat-text">${_applyEmotes(_esc(m.text||''))}</span>
-        <span class="vtt-log-meta">${_ts(m)}</span>
         <button class="vtt-chat-reply-btn" data-vtt-fn="_vttChatReply" data-vtt-args="${m.id}" title="Répondre">↩</button>
       </div>
     </div>`;
@@ -1070,31 +1194,43 @@ export function _renderChatLogImpl(msgs) {
   // ═══════════════════════════════════════════════════════════════════
   // RENDU
   // ═══════════════════════════════════════════════════════════════════
-  el.innerHTML = msgs.map((m, i) => {
+  let previousVisible = null;
+  let previousTime = null;
+  el.innerHTML = visibleMsgs.map((m, i) => {
     const ts = _ts(m);
-    if (m.type === 'attack')          return renderAttack(m, i, ts);
-    if (m.type === 'attack-multi')    return renderMultiAttack(m, i, ts);
-    if (m.type === 'cast')            return renderCast(m, i, ts);
-    if (m.type === 'affliction-cast') return renderAfflictionCast(m, i, ts);
-    if (m.type === 'save')            return renderSave(m, i, ts);
-    if (m.type === 'concentration-save') return renderConcentrationSave(m, i, ts);
-    if (m.type === 'dot-tick')        return renderDotTick(m, i, ts);
-    if (m.type === 'roll')            return renderRoll(m, i, ts);
-    if (m.type === 'dice-free')       return renderDiceFree(m, i, ts);
-    if (m.type === 'craft')           return renderCraft(m, i, ts);
-    return renderChat(m);
+    const currentTime = m.createdAt?.toMillis?.() || null;
+    const separator = currentTime && (!previousTime || currentTime - previousTime >= 300_000)
+      ? `<div class="vtt-chat-time-sep"><span>${new Date(currentTime).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })}</span></div>` : '';
+    let html;
+    if (m.type === 'attack')          html = renderAttack(m, i, ts);
+    else if (m.type === 'attack-multi')    html = renderMultiAttack(m, i, ts);
+    else if (m.type === 'cast')            html = renderCast(m, i, ts);
+    else if (m.type === 'affliction-cast') html = renderAfflictionCast(m, i, ts);
+    else if (m.type === 'save')            html = renderSave(m, i, ts);
+    else if (m.type === 'concentration-save') html = renderConcentrationSave(m, i, ts);
+    else if (m.type === 'dot-tick')        html = renderDotTick(m, i, ts);
+    else if (m.type === 'roll')            html = renderRoll(m, i, ts);
+    else if (m.type === 'dice-free')       html = renderDiceFree(m, i, ts);
+    else if (m.type === 'craft')           html = renderCraft(m, i, ts);
+    else html = renderChat(m, previousVisible);
+    previousVisible = m;
+    if (currentTime) previousTime = currentTime;
+    return separator + html;
   }).join('');
+  _chatPortraitSignature = _currentChatPortraitSignature();
 
   // Anime UNIQUEMENT le dernier jet quand un NOUVEAU arrive (pas au 1er rendu,
   // pas sur une simple mise à jour). Donne de la vie à chaque résultat de dé.
-  const _newest = msgs.length ? msgs[msgs.length - 1] : null;
+  const _newest = allMsgs.length ? allMsgs[allMsgs.length - 1] : null;
   const _newestId = _newest ? _newest.id : null;
-  if (_newestId && _chatLastNewestId !== null && _newestId !== _chatLastNewestId) {
+  const isNewArrival = !!(_newestId && _chatLastNewestId !== null && _newestId !== _chatLastNewestId);
+  if (isNewArrival) {
     const last = el.lastElementChild;
     if (last) {
       last.classList.add('vtt-log-enter');
       last.addEventListener('animationend', () => last.classList.remove('vtt-log-enter'), { once: true });
     }
+    _vttNotifyChatMessage(_newest, last);
     // Mode onglets (petit écran) : nouveau message alors qu'on regarde l'autre
     // panneau → pastille « non lu » sur l'onglet Chat. Invisible si la barre
     // d'onglets est masquée (grand écran), donc sans effet là-bas.
@@ -1133,11 +1269,20 @@ export function _renderChatLogImpl(msgs) {
       if (!panel) return;
       const open = panel.classList.toggle('is-open');
       btn.classList.toggle('is-open', open);
-      btn.textContent = open ? 'détail ▴' : 'détail ▾';
+      btn.innerHTML = `${open ? 'Masquer' : 'Voir'} le calcul <span aria-hidden="true">${open ? '⌃' : '⌄'}</span>`;
     };
   });
 
-  el.scrollTop = el.scrollHeight;
+  if (wasAtBottom) {
+    _chatStuck = true;
+    _chatNewBelow = 0;
+    el.scrollTop = el.scrollHeight;
+  } else {
+    _chatStuck = false;
+    el.scrollTop = previousScrollTop;
+    if (isNewArrival) _chatNewBelow += 1;
+  }
+  _updateNewButton();
 }
 
 export async function _vttSendChat() {

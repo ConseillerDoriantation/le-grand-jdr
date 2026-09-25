@@ -12,12 +12,12 @@
 import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
 import Sortable from '../../vendor/sortable.esm.js';
-import { db, setDoc, writeBatch } from '../../config/firebase.js';
+import { db, setDoc, updateDoc, writeBatch } from '../../config/firebase.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _esc, _searchIncludes, normalizeImageUrl } from '../../shared/html.js';
 import { promptModal } from '../../shared/modal.js';
 import { githubPagesUrl } from '../../shared/github-folder.js';
-import { _sesRef, _pgRef } from './vtt-refs.js';
+import { _sesRef, _pgRef, _tokRef } from './vtt-refs.js';
 import { TYPE_COLOR, hpColor } from './vtt-constants.js';
 import { _live } from './vtt-effective.js';
 import { _showCtxMenu, _tokenEntityKey, _vttPanelError } from './vtt-utils.js';
@@ -32,9 +32,11 @@ import { controlledCharacterTokens, invocableCharacterTokens } from './vtt-token
 
 let _trayFilter       = 'all'; // filtre actif : 'all'|'player'|'npc'|'enemy'
 let _traySearch       = '';    // filtre texte appliqué à la réserve
-let _reserveFilter    = (() => { try { return localStorage.getItem('vtt-reserve-filter') || 'all'; } catch { return 'all'; } })();
+let _reserveFilter    = (() => { try { const value = localStorage.getItem('vtt-reserve-filter') || 'all'; return value === 'online' ? 'player' : value; } catch { return 'all'; } })();
 let _bstSearch        = '';    // filtre texte appliqué au bestiaire
-export let _trayTab          = (() => { try { return localStorage.getItem('vtt-tray-tab') || 'scenes'; } catch { return 'scenes'; } })(); // onglet actif du panneau MJ
+export let _trayTab          = (() => { try { return localStorage.getItem('vtt-tray-tab') || 'reserve'; } catch { return 'reserve'; } })(); // onglet actif du panneau MJ
+let _reserveLayout = 'grid';
+const _reservePicked = new Set();
 let _pageSearch       = '';    // filtre texte appliqué à la liste des pages
 let _pageFolderFilter = (() => { try { return localStorage.getItem('vtt-page-folder-filter') || 'all'; } catch { return 'all'; } })();
 const _savePageFolderFilter = () => { try { localStorage.setItem('vtt-page-folder-filter', _pageFolderFilter); } catch {} };
@@ -65,6 +67,65 @@ export function _vttTrayFilter(f) { _trayFilter = f; _renderTraySoon(); }
 export function _vttTraySearch(v) { _traySearch = String(v || ''); _renderTraySoon(); }
 export function _vttTrayClearSearch() { _traySearch = ''; _renderTraySoon(); }
 export function _vttReserveFilter(f) { _reserveFilter = f || 'all'; _saveReserveFilter(); _renderTraySoon(); }
+export function _vttReserveLayout(layout) {
+  _reserveLayout = layout === 'list' ? 'list' : 'grid';
+  try { localStorage.setItem('vtt-reserve-layout', _reserveLayout); } catch {}
+  _renderTraySoon();
+}
+export function _vttReservePick(id, event = null) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  if (_reservePicked.has(id)) _reservePicked.delete(id); else _reservePicked.add(id);
+  _renderTraySoon();
+}
+export function _vttReserveClearPicked() { _reservePicked.clear(); _renderTraySoon(); }
+
+function _reserveFreeCells(count) {
+  const page = VS.activePage;
+  if (!page) return [];
+  const occupied = new Set(Object.values(VS.tokens || {})
+    .map(entry => entry?.data)
+    .filter(token => token?.pageId === page.id)
+    .map(token => `${token.col || 0},${token.row || 0}`));
+  const result = [];
+  const cx = Math.floor(page.cols / 2), cy = Math.floor(page.rows / 2);
+  for (let radius = 0; result.length < count && radius <= Math.max(page.cols, page.rows); radius++) {
+    for (let dy = -radius; dy <= radius && result.length < count; dy++) {
+      for (let dx = -radius; dx <= radius && result.length < count; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+        const col = cx + dx, row = cy + dy, key = `${col},${row}`;
+        if (col < 0 || row < 0 || col >= page.cols || row >= page.rows || occupied.has(key)) continue;
+        occupied.add(key); result.push({ col, row });
+      }
+    }
+  }
+  return result;
+}
+async function _placeReserveTokens(ids) {
+  if (!STATE.isAdmin || !VS.activePage || !ids.length) return;
+  const cells = _reserveFreeCells(ids.length);
+  const results = await Promise.allSettled(ids.map((id, index) => {
+    const cell = cells[index] || { col:Math.floor(VS.activePage.cols / 2), row:Math.floor(VS.activePage.rows / 2) };
+    return updateDoc(_tokRef(id), { pageId:VS.activePage.id, col:cell.col, row:cell.row, visible:true });
+  }));
+  const failed = results.filter(result => result.status === 'rejected').length;
+  if (failed) showNotif(`${failed} placement${failed > 1 ? 's' : ''} impossible${failed > 1 ? 's' : ''}.`, 'error');
+  _reservePicked.clear();
+  _renderTraySoon();
+}
+export function _vttReserveCard(id, event = null) {
+  if (event?.shiftKey) return _vttReservePick(id, event);
+  return _placeReserveTokens([id]);
+}
+export function _vttReservePlacePicked() { return _placeReserveTokens([..._reservePicked]); }
+export function _vttPlaceOnlineReserve() {
+  const now = Date.now();
+  const ids = Object.values(VS.tokens || {}).map(entry => entry?.data).filter(token =>
+    token?.type === 'player' && token.pageId !== VS.activePage?.id && token.ownerId
+      && VS.presence[token.ownerId] && now - (VS.presence[token.ownerId].lastSeen || 0) < 120_000
+  ).map(token => token.id);
+  return _placeReserveTokens([...new Set(ids)]);
+}
 export function _vttBstSearch(v) { _bstSearch = String(v || ''); _renderTraySoon(); }
 export function _vttBstClearSearch() { _bstSearch = ''; _renderTraySoon(); }
 // Onglets du panneau MJ (Scènes / Réserve / Bestiaire / Images) — affiche une vue à la fois.
@@ -126,115 +187,98 @@ export function _renderTrayImpl() {
     if (reserveSeen.has(key)) return false;
     reserveSeen.add(key); return true;
   });
+  const edgeReserveCount = document.getElementById('vtt-edge-reserve-count');
+  if (edgeReserveCount) edgeReserveCount.textContent = String(reserve.length);
 
   const ae = document.activeElement;
   const focusedSearch = ae?.classList?.contains('vtt-tray-search-input') ? ae.dataset.search : null;
   const caretPos = focusedSearch != null ? ae.selectionStart : null;
-  const sourceBtn = (t, compact = false) => {
-    let args = '', title = '';
-    if (t.characterId) {
-      args = `char|${t.characterId}|combat`;
-      title = 'Ouvrir la fiche personnage';
-    } else if (t.npcId) {
-      args = `npc|${t.npcId}`;
-      title = 'Ouvrir le PNJ source';
-    } else if (t.beastId) {
-      args = `bestiary|${t.beastId}`;
-      title = 'Ouvrir la créature source';
-    }
-    return args
-      ? `<span class="vtt-tray-source-btn${compact ? ' is-compact' : ''}" data-vtt-fn="_vttOpenSource" data-vtt-args="${_esc(args)}" title="${_esc(title)}">↗</span>`
-      : '';
+  const tokenInitial = (token, liveData = _live(token)) => String(liveData?.displayName || token?.name || '?').trim().charAt(0).toUpperCase() || '?';
+  const playerLabel = token => {
+    const character = token?.characterId ? VS.characters?.[token.characterId] : null;
+    const profile = token?.ownerId ? STATE.adventure?.memberProfiles?.[token.ownerId] : null;
+    return profile?.pseudo || character?.ownerPseudo || VS.presence?.[token?.ownerId]?.pseudo || 'Joueur';
   };
+  const sortTokensByName = tokens => [...tokens].sort((a, b) =>
+    (_live(a).displayName ?? a.name ?? '').localeCompare(_live(b).displayName ?? b.name ?? '', 'fr', { sensitivity:'base' }));
 
   const mkItem = (t) => {
     const ld = _live(t);
     const hpKnownL = ld.displayHp !== null && ld.displayHpMax !== null;
     const hp = hpKnownL ? ld.displayHp : 0, hpm = hpKnownL ? ld.displayHpMax : 1;
-    const rat = hpKnownL ? (hpm > 0 ? Math.max(0, hp / hpm) : 1) : 0.5;
-    const typeIcon = t.type === 'player' ? '🧑' : t.type === 'npc' ? '👤' : '👹';
-    const dupBtn = t.type === 'enemy'
-      ? `<button class="vtt-tray-btn" data-vtt-fn="_vttDuplicateToken" data-vtt-args="${t.id}" title="Dupliquer">＋</button>` : '';
-    const delBtn = t.type === 'enemy'
-      ? `<button class="vtt-tray-btn vtt-tray-btn-del" data-vtt-fn="_vttDeleteToken" data-vtt-args="${t.id}" title="Supprimer">×</button>` : '';
+    const rat = hpKnownL ? (hpm > 0 ? Math.max(0, hp / hpm) : 1) : 1;
     const isSummon = isTemporarySummonToken(t);
-    const actionBtn = `<button class="vtt-tray-btn" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="${isSummon ? 'Dissiper cette invocation' : 'Retirer de la scène'}">${isSummon ? '✕' : '↩'}</button>`;
-    const hpFrac = inCombat && t.type === 'enemy' && hpKnownL
-      ? `<span class="vtt-tray-hp-frac" style="color:${hpColor(rat)}">${hp}/${hpm}</span>` : '';
-    return `<div class="vtt-tray-item ${VS.selected === t.id ? 'active' : ''}" data-vtt-fn="_vttSelectFromTray" data-vtt-args="${t.id}">
-      <div class="vtt-tray-dot" style="background:${TYPE_COLOR[t.type] ?? '#888'}">
+    const actionBtn = t.type === 'enemy'
+      ? `<button class="vtt-scene-token-remove" data-vtt-fn="_vttDeleteToken" data-vtt-args="${t.id}" title="Supprimer de la scène">×</button>`
+      : `<button class="vtt-scene-token-remove" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="${isSummon ? 'Dissiper cette invocation' : 'Renvoyer en réserve'}">${isSummon ? '×' : '↩'}</button>`;
+    return `<div class="vtt-scene-token ${VS.selected === t.id ? 'active' : ''}" data-vtt-fn="_vttSelectFromTray" data-vtt-args="${t.id}" title="${_esc(ld.displayName ?? t.name)}${hpKnownL ? ` · PV ${hp}/${hpm}` : ''}">
+      <div class="vtt-scene-token-ring" style="--hp:${Math.round(rat * 100)}%;--hc:${hpKnownL ? hpColor(rat) : '#64748b'};--tc:${TYPE_COLOR[t.type] ?? '#888'}">
+      <div class="vtt-tray-dot">
         ${ld.displayImage
           ? `<img src="${ld.displayImage}" alt="${_esc(ld.displayName || '')}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">`
-          : `<span style="font-size:.65rem">${typeIcon}</span>`}
+          : `<span>${_esc(tokenInitial(t, ld))}</span>`}
       </div>
-      <div class="vtt-tray-info">
-        <div class="vtt-tray-name">${_esc(ld.displayName ?? t.name)}</div>
-        <div class="vtt-tray-hp-row">
-          <div class="vtt-tray-hp-bar" style="flex:1"><div style="width:${Math.round(rat * 100)}%;height:100%;background:${hpKnownL ? hpColor(rat) : '#555'};border-radius:2px"></div></div>
-          ${hpFrac}
-        </div>
       </div>
-      <div class="vtt-tray-actions">${sourceBtn(t)}${dupBtn}${actionBtn}${delBtn}</div>
+      ${actionBtn}
     </div>`;
   };
 
   const mkResLine = t => {
     const ld = _live(t);
-    const typeIcon = t.type === 'player' ? '🧑' : '👤';
     const col = TYPE_COLOR[t.type] ?? '#888';
     const online = t.type === 'player' && isOnline(t.ownerId);
     const pageName = t.pageId && t.pageId !== VS.activePage?.id ? (VS.pages[t.pageId]?.name || 'autre scène') : '';
     const hpKnown = ld.displayHp !== null && ld.displayHpMax !== null;
-    const hpTxt = hpKnown ? `${ld.displayHp}/${ld.displayHpMax}` : '';
-    const tags = [
-      t.type === 'player' ? (online ? 'en ligne' : 'hors ligne') : 'PNJ',
-      pageName ? `sur ${pageName}` : 'réserve',
-      hpTxt ? `PV ${hpTxt}` : '',
-    ].filter(Boolean);
+    const level = t.characterId ? Number(VS.characters?.[t.characterId]?.niveau || VS.characters?.[t.characterId]?.level || 0) : 0;
+    const subline = t.type === 'player' ? `${playerLabel(t)}${level ? ` · Nv ${level}` : ''}` : 'PNJ';
     const statusDot = t.type === 'player'
       ? `<span class="vtt-res-line-status ${online ? 'is-online' : ''}" title="${online ? 'En ligne' : 'Hors ligne'}"></span>` : '';
     const name = _esc(ld.displayName ?? t.name);
-    return `<div class="vtt-res-line ${pageName ? 'is-elsewhere' : ''}" role="button" tabindex="0" draggable="true" data-vtt-drag="token:${t.id}" data-vtt-fn="_vttPlace" data-vtt-args="${t.id}" title="Placer ${name} (clic = centre · glisser sur la carte = à l'endroit voulu)">
+    return `<div class="vtt-res-line ${pageName ? 'is-elsewhere' : ''}${t.type === 'player' && !online ? ' is-offline' : ''}${_reservePicked.has(t.id) ? ' is-picked' : ''}" role="button" tabindex="0" draggable="true" data-vtt-drag="token:${t.id}" data-vtt-fn="_vttReserveCard" data-vtt-args="${t.id}|$event" title="Placer ${name} (clic · Maj+clic pour sélectionner · glisser sur la carte)">
+      ${pageName ? `<span class="vtt-res-where" title="Actuellement sur ${_esc(pageName)}">sur ${_esc(pageName)}</span>` : ''}
+      <button type="button" class="vtt-res-check" data-vtt-fn="_vttReservePick" data-vtt-args="${t.id}|$event" title="Sélectionner" aria-pressed="${_reservePicked.has(t.id)}">✓</button>
       <span class="vtt-res-line-dot" style="border-color:${col};color:${col}">
-        ${ld.displayImage ? `<img src="${ld.displayImage}" alt="">` : `<span>${typeIcon}</span>`}
+        ${ld.displayImage ? `<img src="${ld.displayImage}" alt="${name}">` : `<span>${_esc(tokenInitial(t, ld))}</span>`}
         ${statusDot}
       </span>
       <span class="vtt-res-line-main">
         <span class="vtt-res-line-name">${name}</span>
-        <span class="vtt-res-line-meta">${tags.map(x => `<i>${_esc(x)}</i>`).join('')}</span>
+        <span class="vtt-res-line-meta"><i>${_esc(subline)}</i></span>
+        ${hpKnown ? `<span class="vtt-res-hp"><i style="width:${Math.round((ld.displayHp / Math.max(1, ld.displayHpMax)) * 100)}%;background:${hpColor(ld.displayHp / Math.max(1, ld.displayHpMax))}"></i></span>` : '<span class="vtt-res-hp"></span>'}
       </span>
       <span class="vtt-res-line-actions">
-        ${sourceBtn(t, true)}
-        <span class="vtt-res-line-place" title="Placer sur la scène">＋</span>
+        <span class="vtt-res-line-place" title="Placer sur la scène">＋ <em>Placer</em></span>
       </span>
     </div>`;
   };
 
   const scEl = document.getElementById('vtt-scene-tokens');
   if (scEl) {
+    const countEl = document.getElementById('vtt-scene-token-count');
+    if (countEl) countEl.textContent = String(onPage.length);
+    const pageEl = document.getElementById('vtt-scene-token-page');
+    if (pageEl) pageEl.textContent = VS.activePage?.name || '';
     if (!onPage.length) {
       scEl.innerHTML = `<div class="vtt-tray-empty">Aucun token sur cette scène</div>`;
     } else {
-      const players = onPage.filter(t => t.type === 'player');
-      const npcs    = onPage.filter(t => t.type === 'npc');
+      const players = sortTokensByName(onPage.filter(t => t.type === 'player'));
+      const npcs    = sortTokensByName(onPage.filter(t => t.type === 'npc'));
       let   enemies = onPage.filter(t => t.type === 'enemy');
       if (inCombat && enemies.length > 1) {
         enemies = [...enemies].sort((a, b) => {
           const la = _live(a), lb = _live(b);
           return ((la.displayHp ?? 1) / Math.max(1, la.displayHpMax ?? 1)) - ((lb.displayHp ?? 1) / Math.max(1, lb.displayHpMax ?? 1));
         });
-      }
+      } else enemies = sortTokensByName(enemies);
       const multi = [players, npcs, enemies].filter(g => g.length).length > 1;
-      const grp = (icon, label, items) => !items.length ? ''
-        : (multi ? `<div class="vtt-tray-sublabel">${icon} ${label}</div>` : '') + items.map(mkItem).join('');
-      scEl.innerHTML = grp('🧑', 'Joueurs', players) + grp('👤', 'PNJ', npcs) + grp('👹', 'Ennemis', enemies);
+      const grp = (label, items) => !items.length ? ''
+        : `<div class="vtt-scene-token-group"><label>${label}</label><div>${items.map(mkItem).join('')}</div></div>`;
+      scEl.innerHTML = grp('Joueurs', players) + grp('PNJ', npcs) + grp('Ennemis', enemies);
     }
   }
 
   const reEl = document.getElementById('vtt-reserve-body');
   if (reEl) {
-    const sortByName = arr => [...arr].sort((a, b) =>
-      (_live(a).displayName ?? a.name ?? '').localeCompare(_live(b).displayName ?? b.name ?? '', 'fr', { sensitivity: 'base' }));
     const counts = {
       all: reserve.length,
       online: reserve.filter(t => t.type === 'player' && isOnline(t.ownerId)).length,
@@ -243,7 +287,7 @@ export function _renderTrayImpl() {
       elsewhere: reserve.filter(t => t.pageId && t.pageId !== VS.activePage?.id).length,
     };
     const filterMatch = t => {
-      if (_reserveFilter === 'online') return t.type === 'player' && isOnline(t.ownerId);
+      if (_reserveFilter === 'player') return t.type === 'player';
       if (_reserveFilter === 'offline') return t.type === 'player' && !isOnline(t.ownerId);
       if (_reserveFilter === 'npc') return t.type === 'npc';
       if (_reserveFilter === 'elsewhere') return !!(t.pageId && t.pageId !== VS.activePage?.id);
@@ -252,47 +296,42 @@ export function _renderTrayImpl() {
     const searched = reserve.filter(t =>
       filterMatch(t)
       && (!_traySearch || _searchIncludes(`${_live(t).displayName ?? t.name ?? ''} ${VS.pages[t.pageId]?.name || ''}`, _traySearch)));
-    const presentPlayers = sortByName(searched.filter(t => t.type === 'player' && isOnline(t.ownerId)));
-    const absentPlayers  = sortByName(searched.filter(t => t.type === 'player' && !isOnline(t.ownerId)));
-    const npcs           = sortByName(searched.filter(t => t.type === 'npc'));
-    const forceOpen = !!_traySearch;
-    const mkBlock = (label, items, toggleFn, open) => {
+    const presentPlayers = sortTokensByName(searched.filter(t => t.type === 'player' && isOnline(t.ownerId)));
+    const absentPlayers  = sortTokensByName(searched.filter(t => t.type === 'player' && !isOnline(t.ownerId)));
+    const npcs           = sortTokensByName(searched.filter(t => t.type === 'npc'));
+    const mkBlock = (label, items) => {
       if (!items.length) return '';
-      const isOpen = open || forceOpen;
-      return `<div class="vtt-tray-sublabel vtt-tray-sub-toggle" data-vtt-fn="${toggleFn}">`
-        + `<span class="vtt-tray-sub-caret">${isOpen ? '▾' : '▸'}</span>${label} `
-        + `<span class="vtt-tray-sublabel-n">${items.length}</span></div>`
-        + (isOpen ? items.map(mkResLine).join('') : '');
+      return `<div class="vtt-res-group-title">${label} · ${items.length}</div>` + items.map(mkResLine).join('');
     };
     const clrBtn = _traySearch ? `<button class="vtt-tray-search-clr" data-vtt-fn="_vttTrayClearSearch" title="Effacer">✕</button>` : '';
     const filterChip = (key, label, count) => `<button class="vtt-res-filter ${_reserveFilter === key ? 'active' : ''}" data-vtt-fn="_vttReserveFilter" data-vtt-args="${key}">${label}<b>${count}</b></button>`;
     const list = searched.length
-      ? mkBlock('🟢 En ligne', presentPlayers, '_vttToggleOn', _trayOnOpen)
-        + mkBlock('🕓 Hors ligne', absentPlayers, '_vttToggleOff', _trayOffOpen)
-        + mkBlock('👤 PNJ', npcs, '_vttToggleNpc', _trayNpcOpen)
+      ? mkBlock('Joueurs en ligne', presentPlayers)
+        + mkBlock('Joueurs hors ligne', absentPlayers)
+        + mkBlock('PNJ', npcs)
       : `<div class="vtt-tray-empty">${reserve.length ? 'Aucun résultat' : 'Réserve vide'}</div>`;
+    const onlineReserveCount = reserve.filter(t => t.type === 'player' && isOnline(t.ownerId)).length;
+    const selectionBar = _reservePicked.size ? `<div class="vtt-res-selection"><span><b>${_reservePicked.size}</b> sélectionné${_reservePicked.size > 1 ? 's' : ''}</span><button data-vtt-fn="_vttReserveClearPicked">Annuler</button><button class="primary" data-vtt-fn="_vttReservePlacePicked">＋ Placer</button></div>` : '';
     reEl.innerHTML = `
       <div class="vtt-res-head">
-        <div>
-          <strong>Réserve</strong>
-          <span>${searched.length}/${reserve.length} disponibles</span>
-        </div>
-        ${blockedSummons.length ? `<button type="button" class="vtt-res-clean-summons" data-vtt-fn="_vttClearReserveSummons" title="Supprimer uniquement les invocations temporaires bloquées dans la réserve">🐾 Nettoyer ${blockedSummons.length}</button>` : ''}
+        <strong>En réserve</strong><span>${reserve.length}</span><i></i>
+        ${onlineReserveCount ? `<button type="button" class="vtt-res-place-online" data-vtt-fn="_vttPlaceOnlineReserve">＋ Placer les joueurs en ligne · ${onlineReserveCount}</button>` : ''}
       </div>
+      ${blockedSummons.length ? `<div class="vtt-res-summon-warning"><span>🐾 ${blockedSummons.length} invocation${blockedSummons.length > 1 ? 's' : ''} bloquée${blockedSummons.length > 1 ? 's' : ''}</span><button type="button" data-vtt-fn="_vttClearReserveSummons">Dissiper</button></div>` : ''}
       <div class="vtt-tray-search">
-        <span class="vtt-tray-search-ic">🔍</span>
-        <input type="text" class="vtt-tray-search-input" data-search="reserve" placeholder="Rechercher perso, PNJ, scène…"
+        <svg class="vtt-tray-search-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>
+        <input type="text" class="vtt-tray-search-input" data-search="reserve" placeholder="Nom, joueur, scène…"
           value="${_esc(_traySearch)}" data-vtt-fn="_vttTraySearch" data-vtt-on="input" data-vtt-args="$value">
         ${clrBtn}
       </div>
       <div class="vtt-res-filters">
         ${filterChip('all', 'Tous', counts.all)}
-        ${filterChip('online', 'En ligne', counts.online)}
-        ${filterChip('offline', 'Hors ligne', counts.offline)}
+        ${filterChip('player', 'Joueurs', counts.online + counts.offline)}
         ${filterChip('npc', 'PNJ', counts.npc)}
         ${counts.elsewhere ? filterChip('elsewhere', 'Ailleurs', counts.elsewhere) : ''}
       </div>
-      <div class="vtt-res-scroll">${list}</div>`;
+      <div class="vtt-res-scroll vtt-res-cards is-grid${_reservePicked.size ? ' is-selecting' : ''}">${list}</div>
+      ${selectionBar}`;
   }
 
   const beEl = document.getElementById('vtt-bestiary-body');
@@ -311,16 +350,15 @@ export function _renderTrayImpl() {
           const family = b.type || b.famille || b.categorie || '';
           return `<div class="vtt-bst-tile" role="button" tabindex="0" draggable="true" data-vtt-drag="beast:${b.id}" data-vtt-fn="_vttPlaceFromBestiary" data-vtt-args="${b.id}"
               title="${_esc(b.nom || 'Créature')} · PV ${pv} · clic = centre · glisser sur la carte = à l'endroit voulu">
-            <span class="vtt-tray-source-btn is-compact" data-vtt-fn="_vttOpenSource" data-vtt-args="bestiary|${_esc(b.id)}" title="Ouvrir la créature source">↗</span>
             <div class="vtt-bst-portrait">${img ? `<img src="${_esc(img)}" alt="${_esc(b.nom || '')}" loading="lazy">` : `<span class="vtt-bst-icon">${_esc(init)}</span>`}</div>
             <div class="vtt-bst-info">
               <div class="vtt-bst-name">${_esc(b.nom || 'Créature')}</div>
               ${family ? `<div class="vtt-bst-type">${_esc(family)}</div>` : ''}
-            </div>
-            <div class="vtt-bst-meta">
-              <span>${pv} PV</span>
-              <span>${ca} CA</span>
-              ${vit ? `<span>${vit} m</span>` : ''}
+              <div class="vtt-bst-meta">
+                <span><i>PV</i> ${pv}</span>
+                <span><i>CA</i> ${ca}</span>
+                ${vit ? `<span><i>VIT</i> ${vit} m</span>` : ''}
+              </div>
             </div>
           </div>`;
         }).join('')}</div>`
@@ -328,10 +366,12 @@ export function _renderTrayImpl() {
     beEl.innerHTML = `
       <div class="vtt-bst-head">
         <strong>Bestiaire</strong>
-        <span>${bsts.length}/${Object.keys(VS.bestiary).length} créatures</span>
+        <span>${bsts.length}/${Object.keys(VS.bestiary).length}</span>
+        <i></i>
+        <button type="button" class="vtt-bst-create" data-vtt-fn="_vttCreateEnemy"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Créer</button>
       </div>
       <div class="vtt-tray-search">
-        <span class="vtt-tray-search-ic">🔍</span>
+        <svg class="vtt-tray-search-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>
         <input type="text" class="vtt-tray-search-input" data-search="bestiary" placeholder="Rechercher une créature…"
           value="${_esc(_bstSearch)}" data-vtt-fn="_vttBstSearch" data-vtt-on="input" data-vtt-args="$value">
         ${clrBtn}
@@ -389,17 +429,18 @@ function _pageCard(p, broadcastId, { showFolder = false } = {}) {
   const thumb = _pageThumbUrl(p);
   const cls = isMj && isPlayers ? 'mj-and-players' : isMj ? 'mj' : isPlayers ? 'players' : '';
   const status = [
-    isMj ? '<span class="vtt-page-status is-mj" title="Votre vue">MJ</span>' : '',
-    isPlayers ? '<span class="vtt-page-status is-live" title="Scène envoyée aux joueurs">Live</span>' : '',
-    p.fogEnabled ? '<span class="vtt-page-status is-fog" title="Éclairage dynamique actif">◐</span>' : '',
+    isMj ? '<span class="vtt-page-status is-mj" title="Votre vue">VOUS</span>' : '',
+    isPlayers ? '<span class="vtt-page-status is-live" title="Scène envoyée aux joueurs">● JOUEURS</span>' : '',
+    p.fogEnabled ? '<span class="vtt-page-status is-fog" title="Éclairage dynamique actif">◐ ÉCLAIRAGE</span>' : '',
   ].join('');
   const tokenSummary = stats.total
     ? `<span title="${stats.players} joueur(s), ${stats.npcs} PNJ, ${stats.enemies} ennemi(s)">♟ ${stats.total}</span>`
     : '';
+  const sendIcon = '<svg class="vtt-page-action-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M8 8a5.6 5.6 0 0 0 0 8M16 8a5.6 5.6 0 0 1 0 8M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></svg>';
   return `<div class="vtt-page-item ${cls}" data-page-id="${p.id}" data-vtt-fn="_vttSwitchPage" data-vtt-args="${p.id}" title="Ouvrir ${_esc(p.name)}">
     <span class="vtt-page-item-grip" title="Glisser pour déplacer">⠿</span>
     <div class="vtt-page-thumb ${thumb ? '' : 'is-empty'}">
-      ${thumb ? `<img src="${_esc(thumb)}" alt="" loading="lazy">` : '<span>∅</span>'}
+      ${thumb ? `<img src="${_esc(thumb)}" alt="Aperçu de ${_esc(p.name)}" loading="lazy">` : '<span class="vtt-page-thumb-grid" aria-hidden="true"></span>'}
     </div>
     <div class="vtt-page-item-main">
       <div class="vtt-page-item-top">
@@ -408,13 +449,13 @@ function _pageCard(p, broadcastId, { showFolder = false } = {}) {
       <div class="vtt-page-item-meta">
         ${showFolder ? `<span class="is-folder">${_esc(_pageFolderLabel(p.folder))}</span>` : ''}
         <span>${p.cols||24} × ${p.rows||18}</span>
-        <span>${bgCount ? `▧ ${bgCount}` : 'Sans carte'}</span>
+        <span>${bgCount ? `${bgCount} carte${bgCount > 1 ? 's' : ''}` : 'Sans carte'}</span>
         ${tokenSummary}
       </div>
+      <div class="vtt-page-item-status">${status}</div>
     </div>
     <div class="vtt-page-item-side">
-      <div class="vtt-page-item-status">${status}</div>
-      <button class="vtt-page-item-menu vtt-page-item-send" data-vtt-fn="_vttSendToPage" data-vtt-args="${p.id}" title="Envoyer les joueurs sur cette scène" aria-label="Envoyer les joueurs sur ${_esc(p.name)}">📡</button>
+      ${isPlayers ? '' : `<button class="vtt-page-item-menu vtt-page-item-send" data-vtt-fn="_vttSendToPage" data-vtt-args="${p.id}" title="Envoyer les joueurs sur cette scène" aria-label="Envoyer les joueurs sur ${_esc(p.name)}">${sendIcon}</button>`}
       <button class="vtt-page-item-menu" data-vtt-fn="_vttPageMenu" data-vtt-args="$event|${p.id}" title="Autres actions de la scène" aria-label="Actions pour ${_esc(p.name)}" aria-haspopup="menu">•••</button>
     </div>
   </div>`;
@@ -506,12 +547,10 @@ export function _renderPageList() {
   const liveSummary = `
     <div class="vtt-page-live-summary${sameLivePage ? ' is-synced' : ''}">
       <button type="button" class="vtt-page-live-card is-mj" ${mjPage ? `data-vtt-fn="_vttSwitchPage" data-vtt-args="${mjPage.id}" title="Ouvrir votre scène"` : 'disabled'}>
-        <span class="vtt-page-live-icon">◆</span>
-        <span><small>Votre scène</small><strong>${_esc(mjPage?.name || 'Aucune scène')}</strong></span>
+        <small><i></i>Votre vue</small><strong>${_esc(mjPage?.name || 'Aucune scène')}</strong>
       </button>
       <button type="button" class="vtt-page-live-card is-players" ${playersPage ? `data-vtt-fn="_vttSwitchPage" data-vtt-args="${playersPage.id}" title="Ouvrir la scène des joueurs"` : 'disabled'}>
-        <span class="vtt-page-live-icon">●</span>
-        <span><small>Joueurs</small><strong>${_esc(playersPage?.name || 'Aucune scène envoyée')}</strong></span>
+        <small><i></i>Joueurs</small><strong>${_esc(playersPage?.name || 'Aucune scène envoyée')}</strong>
       </button>
     </div>`;
   const folderChips = [
@@ -561,27 +600,27 @@ export function _renderPageList() {
   }
 
   el.innerHTML = `
-    <div class="vtt-page-command">
+    <div class="vtt-page-scenes-shell">
+      ${liveSummary}
       <div class="vtt-page-command-top">
         <div>
           <strong>Scènes</strong>
-          <span>${filtered.length === all.length ? `${all.length} scène${all.length > 1 ? 's' : ''}` : `${filtered.length} affichée${filtered.length > 1 ? 's' : ''} sur ${all.length}`}</span>
+          <span>${filtered.length === all.length ? all.length : `${filtered.length}/${all.length}`}</span>
         </div>
         <div class="vtt-page-command-actions">
-          <button class="vtt-page-command-add" data-vtt-fn="_vttAddPage" ${_pageFolderFilter === 'all' ? '' : `data-vtt-args="${encodeURIComponent(_pageFolderFilter)}"`} title="Nouvelle scène${_pageFolderFilter === 'all' ? '' : ` dans ${_esc(_pageFolderLabel(_pageFolderFilter))}`}" aria-label="Créer une nouvelle scène">＋ Nouvelle</button>
-          <button class="vtt-page-command-menu" data-vtt-fn="_vttPageFoldersMenu" data-vtt-args="$event" title="Gérer les dossiers" aria-label="Gérer les dossiers" aria-haspopup="menu">•••</button>
+          <button class="vtt-page-command-add" data-vtt-fn="_vttAddPage" ${_pageFolderFilter === 'all' ? '' : `data-vtt-args="${encodeURIComponent(_pageFolderFilter)}"`} title="Nouvelle scène${_pageFolderFilter === 'all' ? '' : ` dans ${_esc(_pageFolderLabel(_pageFolderFilter))}`}" aria-label="Créer une nouvelle scène"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Nouvelle</button>
         </div>
       </div>
       <div class="vtt-page-search-row">
+        <svg class="vtt-page-search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>
         <input type="text" id="vtt-page-search" class="vtt-page-search" placeholder="Rechercher nom, dossier…"
           autocomplete="off" value="${_esc(_pageSearch)}"
           data-vtt-fn="_vttPageSearch" data-vtt-on="input" data-vtt-args="$value">
         ${_pageSearch?`<button class="vtt-page-search-x" data-vtt-fn="_vttPageSearchClear" title="Effacer">✕</button>`:''}
       </div>
       <div class="vtt-page-folder-chips">${folderChips}</div>
-      ${liveSummary}
-    </div>
-    <div class="vtt-page-list">${listHtml}</div>`;
+      <div class="vtt-page-list">${listHtml}</div>
+    </div>`;
 
   if (searchFocused) {
     const inp = document.getElementById('vtt-page-search');

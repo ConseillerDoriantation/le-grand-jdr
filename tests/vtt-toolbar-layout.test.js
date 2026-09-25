@@ -11,7 +11,20 @@ test('le rail VTT utilise les icônes SVG et conserve les outils historiques', (
   assert.match(vtt, /id="vtt-draw-fill-btn"/);
   assert.match(vtt, /id="vtt-draw-undo-btn"/);
   assert.match(vtt, /id="vtt-fog-toggle"/);
+  assert.match(vtt, /id="vtt-vision-unlimited-toggle"/);
+  assert.match(vtt, /data-vtt-fn="_vttToggleVisionUnlimited"/);
   assert.match(vtt, /STATE\.isAdmin \? `<section id="vtt-walls-bar"/);
+  assert.match(vtt, /data-lock-visibility="always"/);
+  assert.match(vtt, /data-lock-visibility="discover"/);
+  assert.match(vtt, /Lire la carte/);
+  assert.match(vtt, /vttStructureLegendSvg/);
+});
+
+test('la portée illimitée est configurable par scène sans couper les murs', () => {
+  assert.match(vtt, /id="\$\{pfx\}vision-unlimited"/);
+  assert.match(vtt, /visionUnlimited:!!p\.visionUnlimited/);
+  assert.match(vtt, /const patch = \{name,folder,cols,rows,fogEnabled,visionUnlimited\}/);
+  assert.match(vtt, /Les murs bloquent toujours la vue/);
 });
 
 test('les panneaux contextuels sont uniques, repliables et persistants', () => {
@@ -24,10 +37,12 @@ test('les panneaux contextuels sont uniques, repliables et persistants', () => {
   assert.match(css, /\.vtt-tool-panel\.is-collapsed/);
 });
 
-test('les raccourcis V R D M et point interrogation pilotent le rail', () => {
-  for (const key of ['r','v','d','m']) assert.match(vtt, new RegExp(`e\\.key==='${key}'`));
+test('les raccourcis V R D M X et point interrogation pilotent le rail', () => {
+  for (const key of ['r','v','d','m','x']) assert.match(vtt, new RegExp(`e\\.key==='${key}'`));
   assert.match(vtt, /e\.key === '\?'/);
   assert.match(vtt, /if \(_vttToolPanel === 'keys'\)/);
+  assert.match(vtt, /_vttRailButton\('center','Recentrer','X'/);
+  assert.match(vtt, /shortcutRow\('Recentrer sur mon personnage',\['X'\]\)/);
 });
 
 test('le rail se compacte sur les écrans peu hauts et reste ancré à droite', () => {

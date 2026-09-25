@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   fogGeometrySignature,
+  fogHasUnlimitedVision,
   fogRasterCellSize,
   fogSharedVisionTokens,
   fogVisionFeatherCells,
@@ -14,8 +15,16 @@ import {
   vttShouldReduceEffects,
 } from '../assets/js/features/vtt/vtt-fog-performance.js';
 
+test('la vision illimitée reste un choix explicite par scène ou personnage', () => {
+  assert.equal(fogHasUnlimitedVision({}, {}), false);
+  assert.equal(fogHasUnlimitedVision(null, null), false);
+  assert.equal(fogHasUnlimitedVision({ visionUnlimited:true }, {}), true);
+  assert.equal(fogHasUnlimitedVision({}, { visionUnlimited:true }), true);
+});
+
 test('la vision dynamique est bornée à trois cases par défaut et reste configurable', () => {
   assert.equal(fogVisionRadiusCells({}, {}), 3);
+  assert.equal(fogVisionRadiusCells(null, null), 3);
   assert.equal(fogVisionRadiusCells({ visionRadius:8 }, {}), 8);
   assert.equal(fogVisionRadiusCells({ visionRadius:8 }, { visionRadius:3 }), 3);
   assert.equal(fogVisionRadiusCells({}, { visionRadius:999 }), 40);
@@ -132,4 +141,8 @@ test('la signature du fog change avec la position joueur et les obstacles', () =
 
   assert.notEqual(fogGeometrySignature(basePage, tokens, false), fogGeometrySignature(basePage, moved, false));
   assert.notEqual(fogGeometrySignature(basePage, tokens, false), fogGeometrySignature(withWall, tokens, false));
+  assert.notEqual(
+    fogGeometrySignature(basePage, tokens, false),
+    fogGeometrySignature({ ...basePage, visionUnlimited:true }, tokens, false),
+  );
 });

@@ -67,7 +67,8 @@ import {
 } from './vtt-refs.js';
 import { CELL, CELL_M, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
 import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual, vttLowFx, setVttLowFx, _stripShadows } from './vtt-render.js';
-import { vttCanvasPixelRatio, vttPinchCameraTransform } from './vtt-fog-performance.js';
+import { fogHasUnlimitedVision, fogVisionRadiusCells, vttCanvasPixelRatio, vttPinchCameraTransform } from './vtt-fog-performance.js';
+import { vttStructureLegendSvg } from './vtt-wall-utils.js';
 import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenHealthMeta, tokenMovementMeta, tokenRelationTone } from './vtt-token-visual.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
 import { attackRollHitsTarget, receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
@@ -84,6 +85,7 @@ import {
 import {
   _initChatLogSubs, _vttToggleLogDetail, _vttSendChat, _vttChatReply, _vttChatReplyCancel, _chatMsgs,
   _vttPublishOptimisticLog, _vttRefreshCombatHpEstimates, _vttResetCombatHpLog,
+  _vttChatFilter, _vttChatShowNew, _vttRefreshChatPortraits,
 } from './vtt-chat.js';
 import {
   _loadEmotes, _loadDiceSkills, _vttSetRollMode, _vttAdjBonus, _vttSetBonus, _vttToggleRollHidden, _vttRollSkill,
@@ -126,6 +128,8 @@ import {
   _vttTrayFilter, _vttTraySearch, _vttTrayClearSearch, _vttBstSearch, _vttBstClearSearch, _vttTrayTab,
   _vttToggleOn, _vttToggleOff, _vttToggleNpc, _vttReserveFilter, _vttPageSearch, _vttPageSearchClear, _vttPageFolderToggle,
   _vttPageFolderFilter, _vttPageMenu, _vttPageFoldersMenu, _vttPageFolderRename,
+  _vttReserveLayout, _vttReservePick, _vttReserveCard, _vttReserveClearPicked,
+  _vttReservePlacePicked, _vttPlaceOnlineReserve,
 } from './vtt-tray.js';
 import {
   VTT_ACTION_RUNE, _parseDice, _maxDice, _maxEffectDisplay, _effectDisplay,
@@ -2192,6 +2196,9 @@ function _patchHpOptimistically(token, hp, pvCombatHp = undefined) {
   if (pvCombatHp !== undefined) token.pvCombatHp = pvCombatHp;
   _patchShape(token.id);
   _refreshDisplayedIdentitySoon(token.id);
+  // L'anneau de PV du panneau « En scène » est du DOM (pas du Konva) : il
+  // doit suivre la valeur optimiste sans attendre le retour Firestore.
+  _renderTraySoon();
 }
 
 function _showTokenNotice(token, label, color='#fbbf24') {
@@ -9321,6 +9328,8 @@ async function _vttRollAttack() {
             characterId: curTgtData.characterId || null,
             npcId: curTgtData.npcId || null,
             beastId: curTgtData.beastId || null,
+            summonOwnerCharId: curTgtData.summonOwnerCharId || null,
+            summonInvId: curTgtData.summonInvId || null,
             tokenId: curTgtData.id || curTgtId,
             targetImage: _combatLogImage(lCur.displayImage),
           };
@@ -9341,6 +9350,8 @@ async function _vttRollAttack() {
           characterId: curTgtData.characterId || null,
           npcId: curTgtData.npcId || null,
           beastId: curTgtData.beastId || null,
+          summonOwnerCharId: curTgtData.summonOwnerCharId || null,
+          summonInvId: curTgtData.summonInvId || null,
           tokenId: curTgtData.id || curTgtId,
           targetImage: _combatLogImage(lCur.displayImage),
         };
@@ -9423,12 +9434,16 @@ async function _vttRollAttack() {
             attackerName: lS.displayName??src.name,
             characterImage: _combatLogImage(lS.displayImage),
             defenderName: r.name,
-            defenderImage: _live(tgt)?.displayImage || null,
+            // Le portrait complet reste résolu depuis le token/la fiche au rendu.
+            // Ne jamais embarquer une image data:/blob: dans le document de log.
+            defenderImage: _combatLogImage(_live(tgt)?.displayImage || r.targetImage),
             defenderTokenId: r.tokenId || null,
             tokenId: r.tokenId || null,
             characterId: tgt?.characterId || null,
             npcId: tgt?.npcId || null,
             beastId: tgt?.beastId || null,
+            summonOwnerCharId: r.summonOwnerCharId || tgt?.summonOwnerCharId || null,
+            summonInvId: r.summonInvId || tgt?.summonInvId || null,
             optLabel: opt.label,
             ...hitPayload,
             dmgFormula: opt.dice, dmgRawDice: opt.rawDice||null,
@@ -10131,6 +10146,8 @@ async function _vttRollAttack() {
         beastId: curTgtData.beastId || null,
         npcId:   curTgtData.npcId   || null,
         characterId: curTgtData.characterId || null,
+        summonOwnerCharId: curTgtData.summonOwnerCharId || null,
+        summonInvId: curTgtData.summonInvId || null,
         targetImage: _combatLogImage(lCurTgt.displayImage),
         _data: curTgtData,
       });
@@ -10420,6 +10437,8 @@ async function _vttRollAttack() {
         beastId: r.beastId || null,
         npcId: r.npcId || null,
         characterId: r.characterId || null,
+        summonOwnerCharId: r.summonOwnerCharId || null,
+        summonInvId: r.summonInvId || null,
         optLabel: opt.label,
         autoHit: !!opt.autoHit,
         isCrit, isFumble, advMode: effectiveMode, advAuto: effectiveMode !== mode,
@@ -11226,6 +11245,7 @@ function _initListeners() {
     }
 
     VS.characters = next;
+    _vttRefreshChatPortraits();
     for (const [id, e] of Object.entries(VS.tokens)) {
       if (e.data.characterId && changed.has(e.data.characterId)) {
         _patchShape(id); if (VS.selected === id) _renderInspectorSoon();
@@ -11265,6 +11285,7 @@ function _initListeners() {
 
     const changed = _changedEntityIds(prev, next);
     VS.npcs = next;
+    _vttRefreshChatPortraits();
     for (const [id, e] of Object.entries(VS.tokens)) {
       if (e.data.npcId && changed.has(e.data.npcId)) {
         _patchShape(id); if (VS.selected === id) _renderInspectorSoon();
@@ -11349,6 +11370,7 @@ function _initListeners() {
      } catch (e) { _vttPanelError('Token', e, null); }
     });
     _syncTokenStackVisuals();
+    _vttRefreshChatPortraits();
     if (estimateTargetsChanged) _vttRefreshCombatHpEstimates();
     // Joueur : dès que son token apparaît/arrive sur la carte active, on affiche sa
     // fiche sans clic (gardé : seulement si rien n'est sélectionné).
@@ -11691,9 +11713,26 @@ function _vttRefreshToolPanels() {
     const on = !!VS.activePage?.fogEnabled;
     fogToggle.classList.toggle('active', on);
     fogToggle.setAttribute('aria-checked', String(on));
-    const status = fogToggle.querySelector('[data-fog-status]');
-    if (status) status.textContent = on ? 'Actif sur cette page' : 'Coupé — carte entièrement visible';
+    const status = document.querySelector('[data-fog-status]');
+    if (status) status.textContent = on
+      ? (fogHasUnlimitedVision(VS.activePage) ? 'Actif · vision illimitée' : `Actif · vision partagée ${fogVisionRadiusCells(VS.activePage)} cases`)
+      : 'Coupé — carte entièrement visible';
   }
+  const visionToggle = document.getElementById('vtt-vision-unlimited-toggle');
+  if (visionToggle) {
+    const unlimited = fogHasUnlimitedVision(VS.activePage);
+    visionToggle.classList.toggle('active', unlimited);
+    visionToggle.setAttribute('aria-checked', String(unlimited));
+    visionToggle.disabled = !VS.activePage?.fogEnabled;
+  }
+  const visionStatus = document.querySelector('[data-vision-status]');
+  if (visionStatus) visionStatus.textContent = fogHasUnlimitedVision(VS.activePage)
+    ? 'Sans limite · murs respectés'
+    : `${fogVisionRadiusCells(VS.activePage)} cases autour du groupe`;
+  const lockVisibility = VS.activePage?.lockVisibility === 'discover' ? 'discover' : 'always';
+  document.querySelectorAll('[data-lock-visibility]').forEach(button => {
+    button.classList.toggle('active', button.dataset.lockVisibility === lockVisibility);
+  });
   document.getElementById('vtt-structure-help')?.classList.toggle('open', _vttStructureHelp);
   document.getElementById('vtt-structure-help-btn')?.classList.toggle('active', _vttStructureHelp);
   document.querySelectorAll('[data-vtt-panel-collapse]').forEach(btn => {
@@ -11949,6 +11988,40 @@ async function _vttToggleFog() {
     showNotif('Erreur fog','error');
   });
 }
+async function _vttToggleVisionUnlimited() {
+  if (!_vttAdvancedPremium()) return _vttPremiumInfo();
+  if (!VS.activePage?.fogEnabled) {
+    showNotif('Active d’abord l’éclairage dynamique sur cette scène.', 'info');
+    return;
+  }
+  const previous = fogHasUnlimitedVision(VS.activePage);
+  const next = !previous;
+  VS.activePage.visionUnlimited = next;
+  _vttRefreshToolPanels();
+  fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
+  await updateDoc(_pgRef(VS.activePage.id), { visionUnlimited: next }).catch(() => {
+    VS.activePage.visionUnlimited = previous;
+    _vttRefreshToolPanels();
+    fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
+    showNotif('Impossible de modifier la portée de vision.', 'error');
+  });
+}
+async function _vttSetLockVisibility(mode) {
+  if (!_vttAdvancedPremium()) return _vttPremiumInfo();
+  if (!VS.activePage) return;
+  const next = mode === 'discover' ? 'discover' : 'always';
+  const previous = VS.activePage.lockVisibility || 'always';
+  if (next === previous) return;
+  VS.activePage.lockVisibility = next;
+  _vttRefreshToolPanels();
+  fogRenderWalls(VS.activePage, STATE.isAdmin);
+  await updateDoc(_pgRef(VS.activePage.id), { lockVisibility:next }).catch(() => {
+    VS.activePage.lockVisibility = previous;
+    _vttRefreshToolPanels();
+    fogRenderWalls(VS.activePage, STATE.isAdmin);
+    showNotif('Impossible de modifier la visibilité des verrous.', 'error');
+  });
+}
 async function _vttFogClearOps() {
   if (!_vttAdvancedPremium()) return _vttPremiumInfo();
   if (!VS.activePage) return;
@@ -12082,7 +12155,7 @@ function _pgPreviewImageUrl(image) {
   }
   return normalizeImageUrl(String(image?.url || source).trim());
 }
-function _pgModalBody(pfx, { name='', folder='', cols=30, rows=20, fog=null, mapImages=[] } = {}) {
+function _pgModalBody(pfx, { name='', folder='', cols=30, rows=20, fog=null, visionUnlimited=false, mapImages=[] } = {}) {
   const canUseAdvancedVtt = _vttAdvancedPremium();
   const placedImages = (Array.isArray(mapImages) ? mapImages : []).filter(image => _pgPreviewImageUrl(image));
   const previewLayers = placedImages.map(image => {
@@ -12153,10 +12226,16 @@ function _pgModalBody(pfx, { name='', folder='', cols=30, rows=20, fog=null, map
           </div>
           ${canUseAdvancedVtt ? `
           <label class="vtt-pgm-switch-row">
-            <input type="checkbox" id="${pfx}fog" ${fog?'checked':''}>
+            <input type="checkbox" id="${pfx}fog" ${fog?'checked':''} data-vtt-fn="_vttPgFogMode" data-vtt-on="change" data-vtt-args="${pfx}">
             <span class="vtt-pgm-switch" aria-hidden="true"><span></span></span>
             <span class="vtt-pgm-switch-copy"><strong>Éclairage dynamique</strong><small>Brouillard de guerre, murs et lignes de vue.</small></span>
             <span class="vtt-pgm-switch-status"><span class="is-off">Désactivé</span><span class="is-on">Activé</span></span>
+          </label>
+          <label class="vtt-pgm-switch-row" id="${pfx}vision-row">
+            <input type="checkbox" id="${pfx}vision-unlimited" ${visionUnlimited?'checked':''}>
+            <span class="vtt-pgm-switch" aria-hidden="true"><span></span></span>
+            <span class="vtt-pgm-switch-copy"><strong>Vision illimitée</strong><small>Les murs bloquent toujours la vue, mais aucun rayon ne limite les personnages.</small></span>
+            <span class="vtt-pgm-switch-status"><span class="is-off">3 cases</span><span class="is-on">Illimitée</span></span>
           </label>` : `
           <div class="vtt-pgm-switch-row is-locked">
             <span class="vtt-pgm-switch" aria-hidden="true"><span></span></span>
@@ -12213,6 +12292,16 @@ function _vttPgToggleFit(pfx) {
 }
 function _vttPgInit(pfx) {
   _vttPgDimensions(pfx);
+  _vttPgFogMode(pfx);
+}
+function _vttPgFogMode(pfx) {
+  const fog = document.getElementById(pfx+'fog');
+  const vision = document.getElementById(pfx+'vision-unlimited');
+  const row = document.getElementById(pfx+'vision-row');
+  if (!vision || !row) return;
+  const available = !!fog?.checked;
+  vision.disabled = !available;
+  row.classList.toggle('is-disabled', !available);
 }
 function _vttPgDimensions(pfx, changedAxis = '') {
   const cEl = document.getElementById(pfx+'cols'), rEl = document.getElementById(pfx+'rows');
@@ -12282,13 +12371,16 @@ async function _vttConfirmAddPage(openAfter = true) {
   const fogEnabled = _vttAdvancedPremium()
     ? (document.getElementById('vpf-fog')?.checked ?? false)
     : false;
+  const visionUnlimited = _vttAdvancedPremium()
+    ? (document.getElementById('vpf-vision-unlimited')?.checked ?? false)
+    : false;
   const order = Object.keys(VS.pages).length;
   try {
     const pageRef = await addDoc(_pgsCol(),{
-      name,folder,cols,rows,fogEnabled,backgroundImages:[],order,createdAt:serverTimestamp(),
+      name,folder,cols,rows,fogEnabled,visionUnlimited,backgroundImages:[],order,createdAt:serverTimestamp(),
     });
     VS.pages[pageRef.id] = {
-      id:pageRef.id,name,folder,cols,rows,fogEnabled,backgroundImages:[],order,createdAt:new Date(),
+      id:pageRef.id,name,folder,cols,rows,fogEnabled,visionUnlimited,backgroundImages:[],order,createdAt:new Date(),
     };
     closeModalDirect();
     if (openAfter !== 'false' && openAfter !== false) await _switchPage(pageRef.id);
@@ -12316,7 +12408,7 @@ export async function _vttConditionsBeforeStateApplication(token, conditionLib) 
 function _vttEditPage(id) {
   const p=VS.pages[id]; if (!p) return;
   openModal('✏️ Modifier la scène', `
-    ${_pgModalBody('vpe-', { name:p.name, folder:p.folder||'', cols:p.cols||24, rows:p.rows||18, fog:!!p.fogEnabled, mapImages:p.backgroundImages||[] })}
+    ${_pgModalBody('vpe-', { name:p.name, folder:p.folder||'', cols:p.cols||24, rows:p.rows||18, fog:!!p.fogEnabled, visionUnlimited:!!p.visionUnlimited, mapImages:p.backgroundImages||[] })}
     <div class="vtt-pgm-actions">
       <button class="btn-secondary" data-action="close-modal">Annuler</button>
       <button class="btn-primary" data-vtt-fn="_vttConfirmEditPage" data-vtt-args="${id}">Enregistrer</button>
@@ -12332,8 +12424,11 @@ async function _vttConfirmEditPage(id) {
   const fogEnabled = _vttAdvancedPremium()
     ? (document.getElementById('vpe-fog')?.checked ?? false)
     : !!VS.pages[id]?.fogEnabled;
+  const visionUnlimited = _vttAdvancedPremium()
+    ? (document.getElementById('vpe-vision-unlimited')?.checked ?? false)
+    : !!VS.pages[id]?.visionUnlimited;
   closeModalDirect();
-  const patch = {name,folder,cols,rows,fogEnabled};
+  const patch = {name,folder,cols,rows,fogEnabled,visionUnlimited};
   await updateDoc(_pgRef(id),patch).catch(()=>showNotif('Erreur','error'));
   if (VS.activePage?.id===id) {
     VS.activePage={...VS.activePage,...patch};
@@ -13549,6 +13644,22 @@ async function _vttAddImageUrl() {
   } catch (e) { console.error('[vtt] ajout image fond', e); showNotif("Échec de l'ajout de l'image de fond", 'error'); }
 }
 function _vttUploadClick() { return document.getElementById('vtt-img-input')?.click(); }
+function _vttLibImportMenu(event) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  const anchor = event?.currentTarget || event?.target?.closest?.('.vtt-lib-import');
+  const rect = anchor?.getBoundingClientRect?.();
+  const items = [
+    ...(CLOUDINARY_ENABLED ? [{ label:'⬆ Importer une image', action:'_vttUploadClick' }] : []),
+    { label:'🔗 Ajouter par URL', action:'_vttAddImageUrl' },
+    { label:'📥 Importer un dossier GitHub', action:'_vttLibImportGithub' },
+    '---',
+    { label:'📁 Nouveau dossier', action:'_vttLibNewFolder' },
+    { label:'🧹 Nettoyer les doublons', action:'_vttLibCleanDuplicates' },
+    ...(CLOUDINARY_ENABLED ? [{ label:'🔑 Configurer l’hébergement', action:'_vttSetImgbbKey' }] : []),
+  ];
+  _showCtxMenu(event?.clientX || rect?.left || 0, event?.clientY || rect?.bottom || 0, items);
+}
 
 // [Combat: démarrer/terminer + round suivant (_vttToggleCombat/_vttNextRound) → vtt-combat-turns.js]
 
@@ -13992,6 +14103,12 @@ function _keyHandler(e) {
     _vttOpenKeyboardHelp();
     return;
   }
+  // Touche X : recentre la caméra sur le personnage contrôlé prioritaire.
+  if ((e.key==='x' || e.key==='X') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    _vttCenterOnMyToken();
+    return;
+  }
   // Entrée : ferme le polygone en cours.
   if (e.key === 'Enter' && _polyActive) { e.preventDefault(); _polyFinish(); return; }
   // Ctrl+C / Ctrl+V : copier / coller la sélection (tokens + dessins)
@@ -14123,8 +14240,10 @@ function _vttRcolView(view) {
 
 // ── Panneau glissant : fiche/chat (right-col) + réserve (tray MJ) ──────────
 // Fermé par défaut → la carte occupe toute la largeur. Ouvert par les boutons
-// .vtt-mj-quick. Réutilise _vttRcolView et l'onglet courant du tray.
+// onglets de bord. Réutilise _vttRcolView et l'onglet courant du tray.
 let _slideOpen = false;
+let _slideUnread = 0;
+let _slidePeekTimer = null;
 // Épinglage : quand actif, le panneau reste ouvert et se range À CÔTÉ de la
 // toile (la toile rétrécit au lieu d'être recouverte). Préférence persistée.
 let _slidePinned = lsJson.get('vtt-slide-pinned', false);
@@ -14136,18 +14255,114 @@ function _vttSlide(arg) {
   const nextMode = wantReserve ? 'reserve' : 'sheet';   // sheet = Chat
   // Toggle : re-cliquer le panneau déjà affiché le ferme.
   const already = _slideOpen && slide.dataset.slide === nextMode;
-  if (already) { _vttSlideClose(); return; }
+  if (already) {
+    if (!_slidePinned) _vttSlideClose();
+    return;
+  }
   slide.dataset.slide = nextMode;
   _slideOpen = true;
   slide.classList.add('open');
   slide.setAttribute('aria-hidden', 'false');
+  if (!wantReserve) {
+    _vttRcolView('chat');
+    _slideUnread = 0;
+    _vttRemoveChatPeek();
+  }
+  _vttRefreshSlideShell();
 }
 function _vttSlideClose() {
   const slide = document.getElementById('vtt-slide');
   if (!slide) return;
   _slideOpen = false;
+  if (_slidePinned) {
+    _slidePinned = false;
+    lsJson.set('vtt-slide-pinned', false);
+    _vttApplySlidePin();
+  }
   slide.classList.remove('open');
   slide.setAttribute('aria-hidden', 'true');
+  _vttRefreshSlideShell();
+}
+function _vttOnlinePlayerCount() {
+  const now = Date.now();
+  return Object.values(VS.presence || {}).filter(p => p && now - (p.lastSeen || 0) < 120_000).length;
+}
+function _vttReserveCount() {
+  const seen = new Set();
+  return Object.values(VS.tokens || {}).reduce((count, entry) => {
+    const token = entry?.data;
+    if (!token || token.type === 'enemy' || isTemporarySummonToken(token) || token.pageId === VS.activePage?.id) return count;
+    const key = _tokenEntityKey(token) || token.id;
+    if (seen.has(key)) return count;
+    seen.add(key);
+    return count + 1;
+  }, 0);
+}
+function _vttRefreshSlideShell({ ping = false } = {}) {
+  const root = document.getElementById('vtt-root');
+  const slide = document.getElementById('vtt-slide');
+  if (!root || !slide) return;
+  root.dataset.slideOpen = _slideOpen ? '1' : '';
+  const reserve = slide.dataset.slide === 'reserve';
+  const onlineCount = _vttOnlinePlayerCount();
+  const title = document.getElementById('vtt-slide-title');
+  if (title) title.innerHTML = reserve
+    ? `Réserve<small>${_esc(VS.activePage?.name || 'Aucune scène')}</small>`
+    : `Chat &amp; jets<small>${onlineCount} joueur${onlineCount > 1 ? 's' : ''} en ligne</small>`;
+  document.querySelectorAll('.vtt-slide-edge-btn').forEach(btn => {
+    const active = _slideOpen && btn.dataset.edgeMode === (reserve ? 'reserve' : 'chat');
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  const unread = document.getElementById('vtt-edge-chat-count');
+  if (unread) { unread.textContent = String(_slideUnread); unread.hidden = !_slideUnread; }
+  const reserveBadge = document.getElementById('vtt-edge-reserve-count');
+  if (reserveBadge) reserveBadge.textContent = String(_vttReserveCount());
+  const chatBtn = document.querySelector('.vtt-slide-edge-btn[data-edge-mode="chat"]');
+  if (chatBtn && ping) {
+    chatBtn.classList.remove('ping');
+    void chatBtn.offsetWidth;
+    chatBtn.classList.add('ping');
+  }
+}
+function _vttRemoveChatPeek() {
+  clearTimeout(_slidePeekTimer);
+  _slidePeekTimer = null;
+  document.getElementById('vtt-chat-peek')?.remove();
+}
+export function _vttNotifyChatMessage(message, renderedNode) {
+  if (!message || (message.gmOnly && !STATE.isAdmin)) return;
+  const slide = document.getElementById('vtt-slide');
+  const visible = _slideOpen && slide?.dataset.slide === 'sheet';
+  if (visible) { _slideUnread = 0; _vttRefreshSlideShell(); return; }
+  _slideUnread += 1;
+  _vttRefreshSlideShell({ ping:true });
+  if (matchMedia('(max-width: 699px)').matches) return;
+  _vttRemoveChatPeek();
+  const edge = document.querySelector('.vtt-slide-edge-btn[data-edge-mode="chat"]');
+  if (!edge) return;
+  const peek = document.createElement('button');
+  peek.type = 'button';
+  peek.id = 'vtt-chat-peek';
+  peek.className = 'vtt-chat-peek';
+  peek.setAttribute('aria-label', 'Ouvrir le nouveau message dans le chat');
+  const clone = renderedNode?.cloneNode?.(true);
+  if (clone) {
+    clone.querySelectorAll('button,.vtt-log-detail,.vtt-log-private-note').forEach(node => node.remove());
+    clone.classList.remove('vtt-log-enter');
+    peek.appendChild(clone);
+  } else {
+    peek.textContent = message.type === 'chat' ? `${message.authorName || 'Message'} : ${message.text || ''}` : (message.optLabel || message.type || 'Nouvelle action');
+  }
+  const rect = edge.getBoundingClientRect();
+  peek.style.top = `${Math.max(12, rect.top - 8)}px`;
+  peek.dataset.vttFn = '_vttSlide';
+  peek.dataset.vttArgs = 'chat';
+  document.getElementById('vtt-root')?.appendChild(peek);
+  _slidePeekTimer = setTimeout(() => {
+    peek.classList.add('out');
+    setTimeout(() => peek.remove(), 280);
+  }, 5000);
 }
 // Reflète l'état épinglé sur la coquille (.vtt-root) + le bouton épingle. La
 // toile rétrécit via le flux flex (la ResizeObserver de Konva suit tout seul).
@@ -14160,6 +14375,7 @@ function _vttApplySlidePin() {
     btn.setAttribute('aria-pressed', _slidePinned ? 'true' : 'false');
     btn.title = _slidePinned ? 'Détacher le panneau (retour en superposition)' : 'Épingler le panneau à droite de la table';
   }
+  _vttRefreshSlideShell();
 }
 function _vttSlidePin() {
   _slidePinned = !_slidePinned;
@@ -14227,40 +14443,41 @@ function _buildHtml() {
     <!-- ── OUTILS DE SESSION : barre dédiée bas-centre (Repos · Musique · Butin · Émotes) ── -->
     <div class="vtt-session-tools" id="vtt-session-tools" role="toolbar" aria-label="Outils de session"></div>
 
-    <!-- ── Ouverture du panneau glissant (sur la toile) ── -->
-    <div class="vtt-mj-quick" role="toolbar" aria-label="Panneaux">
-      <button class="vtt-chip" data-vtt-fn="_vttSlide" data-vtt-args="chat" title="Chat &amp; dés">💬 Chat</button>
-      ${mj ? `<button class="vtt-chip" data-vtt-fn="_vttSlide" data-vtt-args="reserve" title="Réserve · scènes · bestiaire · images">🗺 Réserve</button>` : ''}
-    </div>
+    <!-- ── Onglets de bord : toujours accessibles, sans recouvrir la carte ── -->
+    <nav class="vtt-slide-edge" id="vtt-slide-edge" aria-label="Panneaux de la table">
+      <button class="vtt-slide-edge-btn" data-edge-mode="chat" data-vtt-fn="_vttSlide" data-vtt-args="chat" aria-pressed="false" title="Chat &amp; jets">
+        <svg class="vtt-edge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg><small>Chat</small><b id="vtt-edge-chat-count" class="vtt-edge-badge" hidden>0</b>
+      </button>
+      ${mj ? `<button class="vtt-slide-edge-btn" data-edge-mode="reserve" data-vtt-fn="_vttSlide" data-vtt-args="reserve" aria-pressed="false" title="Réserve">
+        <svg class="vtt-edge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5M16 5.2a3 3 0 0 1 0 5.6M18 14.8c1.8.7 3 2.5 3 5.2"/></svg><small>Réserve</small><b id="vtt-edge-reserve-count" class="vtt-edge-badge is-soft">0</b>
+      </button>` : ''}
+    </nav>
 
     <!-- ── PANNEAU GLISSANT : fiche/chat + réserve MJ ── -->
     <aside class="vtt-slide" id="vtt-slide" data-slide="sheet" aria-hidden="true">
       <div class="vtt-slide-hd">
-        <div class="vtt-slide-modes">
-          <button class="vtt-slide-mode" data-slide-mode="sheet" data-vtt-fn="_vttSlide" data-vtt-args="chat">Chat</button>
-          ${mj ? `<button class="vtt-slide-mode" data-slide-mode="reserve" data-vtt-fn="_vttSlide" data-vtt-args="reserve">Réserve</button>` : ''}
-        </div>
+        <h2 id="vtt-slide-title">Chat &amp; jets<small>0 joueur en ligne</small></h2>
         <button class="vtt-slide-pin" id="vtt-slide-pin" data-vtt-fn="_vttSlidePin" title="Épingler le panneau à droite de la table" aria-label="Épingler le panneau" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6M10 4v5l-2 4h8l-2-4V4M12 17v3"/></svg></button>
-        <button class="vtt-slide-x" data-vtt-fn="_vttSlideClose" title="Fermer (Échap)" aria-label="Fermer le panneau">✕</button>
+        <button class="vtt-slide-x" data-vtt-fn="_vttSlideClose" title="Fermer (Échap)" aria-label="Fermer le panneau"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
       </div>
       <div class="vtt-slide-body">
     ${mj?`
     <div class="vtt-tray" id="vtt-tray">
       <div class="vtt-tray-tabs" role="tablist" aria-label="Panneau du maître de jeu">
-        <button id="vtt-tray-tab-scenes" class="vtt-tray-tab${_trayTab==='scenes'?' active':''}" data-tab="scenes" data-vtt-fn="_vttTrayTab" data-vtt-args="scenes" title="Scènes &amp; pages" role="tab" aria-selected="${_trayTab === 'scenes'}" aria-controls="vtt-tray-view-scenes"><span class="vtt-tt-ic">🗺</span>Scènes</button>
-        <button id="vtt-tray-tab-reserve" class="vtt-tray-tab${_trayTab==='reserve'?' active':''}" data-tab="reserve" data-vtt-fn="_vttTrayTab" data-vtt-args="reserve" title="Réserve (joueurs / PNJ)" role="tab" aria-selected="${_trayTab === 'reserve'}" aria-controls="vtt-tray-view-reserve"><span class="vtt-tt-ic">👥</span>Réserve</button>
-        <button id="vtt-tray-tab-bestiary" class="vtt-tray-tab${_trayTab==='bestiary'?' active':''}" data-tab="bestiary" data-vtt-fn="_vttTrayTab" data-vtt-args="bestiary" title="Bestiaire" role="tab" aria-selected="${_trayTab === 'bestiary'}" aria-controls="vtt-tray-view-bestiary"><span class="vtt-tt-ic">🐾</span>Bestiaire</button>
-        <button id="vtt-tray-tab-images" class="vtt-tray-tab${_trayTab==='images'?' active':''}" data-tab="images" data-vtt-fn="_vttTrayTab" data-vtt-args="images" title="Bibliothèque d'images" role="tab" aria-selected="${_trayTab === 'images'}" aria-controls="vtt-tray-view-images"><span class="vtt-tt-ic">🖼</span>Images</button>
+        <button id="vtt-tray-tab-reserve" class="vtt-tray-tab${_trayTab==='reserve'?' active':''}" data-tab="reserve" data-vtt-fn="_vttTrayTab" data-vtt-args="reserve" title="Personnages en scène et en réserve" role="tab" aria-selected="${_trayTab === 'reserve'}" aria-controls="vtt-tray-view-reserve"><svg class="vtt-tt-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5M16 5.2a3 3 0 0 1 0 5.6M18 14.8c1.8.7 3 2.5 3 5.2"/></svg>Personnages</button>
+        <button id="vtt-tray-tab-scenes" class="vtt-tray-tab${_trayTab==='scenes'?' active':''}" data-tab="scenes" data-vtt-fn="_vttTrayTab" data-vtt-args="scenes" title="Scènes &amp; pages" role="tab" aria-selected="${_trayTab === 'scenes'}" aria-controls="vtt-tray-view-scenes"><svg class="vtt-tt-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14"/></svg>Scènes</button>
+        <button id="vtt-tray-tab-bestiary" class="vtt-tray-tab${_trayTab==='bestiary'?' active':''}" data-tab="bestiary" data-vtt-fn="_vttTrayTab" data-vtt-args="bestiary" title="Bestiaire" role="tab" aria-selected="${_trayTab === 'bestiary'}" aria-controls="vtt-tray-view-bestiary"><svg class="vtt-tt-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="7" cy="10" r="1.8"/><circle cx="11" cy="6.5" r="1.8"/><circle cx="15.5" cy="7.5" r="1.8"/><circle cx="18" cy="12" r="1.8"/><path d="M8 17c0-2.5 2-4.5 4.5-4.5S17 14 16 17c-.6 2-3 2.5-4 2-1 .5-3.6.3-4-2z"/></svg>Bestiaire</button>
+        <button id="vtt-tray-tab-images" class="vtt-tray-tab${_trayTab==='images'?' active':''}" data-tab="images" data-vtt-fn="_vttTrayTab" data-vtt-args="images" title="Bibliothèque d'images" role="tab" aria-selected="${_trayTab === 'images'}" aria-controls="vtt-tray-view-images"><svg class="vtt-tt-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg>Images</button>
       </div>
       <div class="vtt-tray-views">
         <div id="vtt-tray-view-scenes" class="vtt-tray-view${_trayTab==='scenes'?' active':''}" data-view="scenes" role="tabpanel" aria-labelledby="vtt-tray-tab-scenes" ${_trayTab === 'scenes' ? '' : 'hidden'}>
           <div id="vtt-tray-pages">${loadingHtml('Chargement…', { compact: true })}</div>
-          <div class="vtt-tray-section-hd vtt-scene-tok-hd"><span>🗺 Sur la scène</span></div>
-          <div id="vtt-scene-tokens"></div>
         </div>
-        <div id="vtt-tray-view-reserve" class="vtt-tray-view${_trayTab==='reserve'?' active':''}" data-view="reserve" role="tabpanel" aria-labelledby="vtt-tray-tab-reserve" ${_trayTab === 'reserve' ? '' : 'hidden'}><div id="vtt-reserve-body"></div></div>
+        <div id="vtt-tray-view-reserve" class="vtt-tray-view${_trayTab==='reserve'?' active':''}" data-view="reserve" role="tabpanel" aria-labelledby="vtt-tray-tab-reserve" ${_trayTab === 'reserve' ? '' : 'hidden'}>
+          <section class="vtt-reserve-stage"><div class="vtt-res-section-hd"><h3>En scène</h3><span id="vtt-scene-token-count"></span><i></i><small id="vtt-scene-token-page"></small></div><div id="vtt-scene-tokens"></div></section>
+          <div id="vtt-reserve-body"></div>
+        </div>
         <div id="vtt-tray-view-bestiary" class="vtt-tray-view${_trayTab==='bestiary'?' active':''}" data-view="bestiary" role="tabpanel" aria-labelledby="vtt-tray-tab-bestiary" ${_trayTab === 'bestiary' ? '' : 'hidden'}>
-          <div class="vtt-tray-section-hd"><span>👹 Bestiaire</span><button class="vtt-tray-add-btn" data-vtt-fn="_vttCreateEnemy" title="Créer un ennemi">＋</button></div>
           <div id="vtt-bestiary-body"></div>
         </div>
         <div id="vtt-tray-view-images" class="vtt-tray-view${_trayTab==='images'?' active':''}" data-view="images" role="tabpanel" aria-labelledby="vtt-tray-tab-images" ${_trayTab === 'images' ? '' : 'hidden'}>
@@ -14270,14 +14487,15 @@ function _buildHtml() {
     </div>`:''}
     <div class="vtt-right-col vtt-right-col--chatonly" id="vtt-right-col">
       <div class="vtt-chat">
-        <div class="vtt-chat-hd">💬 Chat &amp; Dés</div>
+        <div class="vtt-chat-filters" id="vtt-chat-filters"></div>
         <div class="vtt-chat-log" id="vtt-chat-log"></div>
+        <button type="button" class="vtt-chat-new" id="vtt-chat-new" data-vtt-fn="_vttChatShowNew" aria-label="Revenir aux messages récents" hidden>↓ <span>Messages récents</span></button>
         <div class="vtt-chat-reply-bar" id="vtt-chat-reply-bar" style="display:none"></div>
         <div class="vtt-chat-input-row">
           <input type="text" id="vtt-chat-input" class="vtt-chat-input" placeholder="Message…"
             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
             data-vtt-fn="_vttSendChat" data-vtt-on="keydown-enter">
-          <button class="vtt-chat-send" data-vtt-fn="_vttSendChat" title="Envoyer">↵</button>
+          <button class="vtt-chat-send" data-vtt-fn="_vttSendChat" title="Envoyer" aria-label="Envoyer">➤</button>
         </div>
       </div>
     </div>
@@ -14339,6 +14557,8 @@ export function _vttLogTargetFields(t) {
     characterId: t?.characterId || null,
     npcId: t?.npcId || null,
     beastId: t?.beastId || null,
+    summonOwnerCharId: t?.summonOwnerCharId || null,
+    summonInvId: t?.summonInvId || null,
   };
 }
 export function _vttLogSingleTargetFields(targetIds = []) {
@@ -14374,6 +14594,7 @@ function _vttToolbarMarkup() {
   const shape = (id, label) => `<button class="vtt-draw-btn${_drawShape === id ? ' active' : ''}" id="vtt-ds-${id}" data-vtt-fn="_vttDrawShape" data-vtt-args="${id}" aria-label="${label}" title="${label}">${_vttToolIcon(id)}</button>`;
   const fogChip = (id, label) => `<button class="vtt-tool-chip${_vttFogActiveTool === id ? ' active' : ''}" data-fog-tool="${id}" data-vtt-fn="_vttFogTool" data-vtt-args="${id}">${_vttToolIcon(id)}<span>${label}</span></button>`;
   const shortcutRow = (label, keys) => `<li><span>${label}</span><span>${keys.map(key => `<kbd>${key}</kbd>`).join('<i>+</i>')}</span></li>`;
+  const legendRow = (kind, label, detail) => `<li class="vtt-map-legend-row"><span class="vtt-map-legend-icon">${vttStructureLegendSvg(kind)}</span><span><b>${label}</b><small>${detail}</small></span></li>`;
   return `<div class="vtt-tool-shell">
     <div class="vtt-tool-float-tools" role="toolbar" aria-label="Outils de la table virtuelle">
       <div class="vtt-tool-group">
@@ -14384,7 +14605,7 @@ function _vttToolbarMarkup() {
           ? _vttRailButton('walls','Structure','M','Murs, portes, vitres, lumière et brouillard.',{tool:'walls',panel:'walls'})
           : `<button class="vtt-tool vtt-tool-premium" data-vtt-fn="_vttPremiumInfo" aria-label="Structure Premium">${_vttToolIcon('walls')}<span class="vtt-tool-key">M</span><span class="vtt-tool-tooltip"><span><strong>Structure</strong><kbd>M</kbd></span><small>Disponible avec le VTT avancé Premium.</small></span></button>`) : ''}
       </div>
-      <div class="vtt-tool-group">${_vttRailButton('center','Recentrer','','Ramène la vue sur ton personnage.')}</div>
+      <div class="vtt-tool-group">${_vttRailButton('center','Recentrer','X','Ramène la vue sur ton personnage.')}</div>
       <div class="vtt-tool-group">
         ${_vttRailButton('perf','Mode performance','','Coupe les effets coûteux pour fluidifier la table.',{active:vttLowFx(),extra:'vtt-tool-performance'})}
         ${_vttRailButton('keys','Raccourcis','?','Affiche toutes les commandes clavier.',{panel:'keys'})}
@@ -14416,7 +14637,8 @@ function _vttToolbarMarkup() {
           <button class="vtt-structure-kind" data-fog-tool="door" data-vtt-fn="_vttFogTool" data-vtt-args="door"><i class="door"></i><span><b>Porte</b><small>Fermée puis ouvrable</small></span></button>
           <button class="vtt-structure-kind" data-fog-tool="window" data-vtt-fn="_vttFogTool" data-vtt-args="window"><i class="window"></i><span><b>Vitre</b><small>Vision libre, passage bloqué</small></span></button>
         </div></div>
-        <div class="vtt-tool-section"><span class="vtt-tool-section-label">Lumière</span><div class="vtt-fog-toggle-row"><span><b>Éclairage dynamique</b><small data-fog-status>Coupé — carte entièrement visible</small></span><button id="vtt-fog-toggle" class="vtt-switch" data-vtt-fn="_vttToggleFog" role="switch" aria-checked="false"><i></i></button></div><div class="vtt-tool-chip-row">${fogChip('light','Source')}</div></div>
+        <div class="vtt-tool-section"><span class="vtt-tool-section-label">Lumière</span><div class="vtt-fog-toggle-row"><span><b>Éclairage dynamique</b><small data-fog-status>Coupé — carte entièrement visible</small></span><button id="vtt-fog-toggle" class="vtt-switch" data-vtt-fn="_vttToggleFog" role="switch" aria-checked="false"><i></i></button></div><div class="vtt-fog-toggle-row vtt-fog-toggle-row--sub"><span><b>Vision illimitée</b><small data-vision-status>3 cases autour du groupe</small></span><button id="vtt-vision-unlimited-toggle" class="vtt-switch" data-vtt-fn="_vttToggleVisionUnlimited" role="switch" aria-checked="false"><i></i></button></div><div class="vtt-tool-chip-row">${fogChip('light','Source')}</div></div>
+        <div class="vtt-tool-section"><span class="vtt-tool-section-label">Verrous côté joueurs</span><div class="vtt-tool-segment vtt-lock-visibility"><button data-lock-visibility="always" data-vtt-fn="_vttSetLockVisibility" data-vtt-args="always">Toujours visibles</button><button data-lock-visibility="discover" data-vtt-fn="_vttSetLockVisibility" data-vtt-args="discover">À découvrir</button></div></div>
         <div class="vtt-tool-section"><span class="vtt-tool-section-label">Brouillard</span><div class="vtt-tool-chip-row">${fogChip('hide','Cacher')}${fogChip('reveal','Révéler')}<button id="vtt-fog-clear-btn" class="vtt-tool-chip danger" data-vtt-fn="_vttFogClearOps">Vider</button></div></div>
         <div class="vtt-tool-actions vtt-structure-actions">${fogChip('eraser','Gomme')}<span></span><button id="vtt-fog-undo-btn" class="vtt-tool-panel-icon" data-vtt-fn="_vttFogUndo" title="Annuler">${_vttToolIcon('undo')}</button><button id="vtt-fog-redo-btn" class="vtt-tool-panel-icon" data-vtt-fn="_vttFogRedo" title="Rétablir">${_vttToolIcon('redo')}</button><button id="vtt-structure-help-btn" class="vtt-tool-panel-icon" data-vtt-fn="_vttStructureHelpToggle" title="Aide">${_vttToolIcon('help')}</button></div>
         <div id="vtt-structure-help" class="vtt-structure-help"><p><kbd>Shift</kbd> tracé libre · <kbd>Alt</kbd> précision ×2</p><p>Hors édition, clique une porte ou une vitre pour l’ouvrir.</p><p><i class="ok"></i> raccordé <i class="bad"></i> isolé <i class="snap"></i> aimantation</p></div>
@@ -14427,9 +14649,10 @@ function _vttToolbarMarkup() {
     <section id="vtt-keys-bar" class="vtt-tool-panel vtt-tool-panel--keys" data-panel="keys" hidden>
       ${_vttPanelHeader('keys','Raccourcis','?',false)}
       <div class="vtt-tool-panel-body vtt-shortcut-groups">
-        <div><span class="vtt-tool-section-label">Outils</span><ul>${shortcutRow('Sélection',['V'])}${shortcutRow('Règle',['R'])}${shortcutRow('Dessin',['D'])}${STATE.isAdmin ? shortcutRow('Structure',['M']) : ''}${shortcutRow('Revenir à la sélection',['Échap'])}</ul></div>
+        <div><span class="vtt-tool-section-label">Outils</span><ul>${shortcutRow('Sélection',['V'])}${shortcutRow('Règle',['R'])}${shortcutRow('Dessin',['D'])}${STATE.isAdmin ? shortcutRow('Structure',['M']) : ''}${shortcutRow('Recentrer sur mon personnage',['X'])}${shortcutRow('Revenir à la sélection',['Échap'])}</ul></div>
         <div><span class="vtt-tool-section-label">Édition</span><ul>${shortcutRow('Annuler',['Ctrl','Z'])}${shortcutRow('Rétablir',['Ctrl','Y'])}${shortcutRow('Copier / coller',['Ctrl','C / V'])}${shortcutRow('Retirer',['Suppr'])}${shortcutRow('Fermer le polygone',['Entrée'])}</ul></div>
         <div><span class="vtt-tool-section-label">Table</span><ul>${shortcutRow('Mini-fiche',['C'])}${shortcutRow('Roue d’émotes',['E'])}${shortcutRow('Émote rapide',['1 — 8'])}</ul></div>
+        <div class="vtt-map-legend"><span class="vtt-tool-section-label">Lire la carte</span><ul>${legendRow('wall','Mur','Vue et passage bloqués')}${legendRow('door-closed','Porte fermée','Vue et passage bloqués')}${legendRow('door-open','Porte ouverte','Passage libre')}${legendRow('window-closed','Vitre fermée','Vue libre, passage bloqué')}${legendRow('window-open','Vitre ouverte','Vue et passage libres')}${legendRow('locked','Verrou','Interaction réservée au MJ')}</ul></div>
       </div>
     </section>
   </div>`;
@@ -14605,6 +14828,8 @@ export const VTT_ACTIONS = {
   _vttSlide,
   _vttSlideClose,
   _vttSlidePin,
+  _vttChatFilter,
+  _vttChatShowNew,
   _vttMsAttackSlot,
   _vttUndoDraw,
   _vttRedoDraw,
@@ -14765,6 +14990,7 @@ export const VTT_ACTIONS = {
   _vttLibDelFolder,
   _vttLibDelImg,
   _vttLibImportGithub,
+  _vttLibImportMenu,
   _vttLibCleanDuplicates,
   _vttLibMoveMenu,
   _vttLibMoveRoot,
@@ -14850,6 +15076,7 @@ export const VTT_ACTIONS = {
   _vttPageSearch,
   _vttPageSearchClear,
   _vttPgDimensions,
+  _vttPgFogMode,
   _vttPgPreset,
   _vttPgSwap,
   _vttPgToggleFit,
@@ -14866,6 +15093,12 @@ export const VTT_ACTIONS = {
   _vttRemoveTokenDelegate,
   _vttRenderDelegateModalBody,
   _vttReserveFilter,
+  _vttReserveLayout,
+  _vttReservePick,
+  _vttReserveCard,
+  _vttReserveClearPicked,
+  _vttReservePlacePicked,
+  _vttPlaceOnlineReserve,
   _vttResetTurn,
   _vttResolveArg,
   _vttRetireMyToken,
@@ -14911,6 +15144,8 @@ export const VTT_ACTIONS = {
   _vttToggleEmotePicker,
   _vttToggleFav,
   _vttToggleFog,
+  _vttToggleVisionUnlimited,
+  _vttSetLockVisibility,
   _vttToggleLogDetail,
   _vttToggleLoot,
   _vttToggleMapMode,

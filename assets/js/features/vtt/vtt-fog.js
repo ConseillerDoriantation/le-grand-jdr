@@ -14,9 +14,10 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { updateDoc } from '../../config/firebase.js';
 import { showNotif }  from '../../shared/notifications.js';
-import { VTT_WALL_TYPES, vttWallState } from './vtt-wall-utils.js';
+import { VTT_STRUCTURE_STYLE, VTT_WALL_TYPES, vttWallState } from './vtt-wall-utils.js';
 import {
   fogGeometrySignature,
+  fogHasUnlimitedVision,
   fogRasterCellSize,
   fogSharedVisionTokens,
   fogVisionFeatherCells,
@@ -40,6 +41,9 @@ let _selectedId = null;   // id du segment/lumière sélectionné
 let _ctxMenu    = null;   // div du menu contextuel actif
 let _stageEvts  = {};     // {event: fn} — listeners de l'éditeur, pour nettoyage
 let _page       = null;   // référence TOUJOURS à jour vers la page active (évite closures stales)
+let _structureTip = null; // tooltip DOM des structures (hors mode édition)
+const _discoveredLocks = new Set(); // découverte locale, valable pour la session VTT
+const _shownLockMedallions = new Set(); // animation d'apparition une seule fois
 
 let _fogPending = false;  // debounce requestAnimationFrame
 let _fogPendingArgs = null; // le dernier état demandé gagne pendant la frame
@@ -244,8 +248,12 @@ function _buildFogCanvas(page, tokens, isAdmin = false) {
       const ox = (tok.col + tw * 0.5) * C;
       const oy = (tok.row + th * 0.5) * C;
       const poly = _visPoly(ox, oy, blockers, W, H, C / 20);
-      const radiusCells = fogVisionRadiusCells(page, tok);
-      fillPolyClipped(poly, ox, oy, radiusCells * C, fogVisionFeatherCells(radiusCells) * C);
+      if (fogHasUnlimitedVision(page, tok)) {
+        fillPoly(poly);
+      } else {
+        const radiusCells = fogVisionRadiusCells(page, tok);
+        fillPolyClipped(poly, ox, oy, radiusCells * C, fogVisionFeatherCells(radiusCells) * C);
+      }
     }
   }
 
@@ -311,6 +319,8 @@ export function fogInit(stage, layers, CELL) {
   // Suppr/Delete supprime l'élément sélectionné (une seule liaison, ré-entrante).
   document.removeEventListener('keydown', _fogKeydown);
   document.addEventListener('keydown', _fogKeydown);
+  _stage?.off?.('scaleXChange.vttFogLocks');
+  _stage?.on?.('scaleXChange.vttFogLocks', _syncLockMedallions);
 }
 
 export function fogSetPgRef(fn) { _pgRefFn = fn; }
@@ -323,6 +333,7 @@ export function fogSetPage(page) {
     _playerFogContext = null;
     _fogGeometryKey = '';
   }
+  _hideStructureTip();
   _page = page;
 }
 
@@ -434,108 +445,217 @@ export function fogUpdateSoon(page, tokens, isAdmin) {
 // RENDU DES MURS (layer walls)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function _bindObstacleNode(node, wall, isAdmin) {
-  if (!node) return;
-  node.on('mouseenter', () => {
-    const container = _stage?.container?.();
-    if (container) container.style.cursor = 'pointer';
-  });
-  node.on('mouseleave', () => {
-    const container = _stage?.container?.();
-    if (container) container.style.cursor = _editMode ? 'crosshair' : '';
-  });
-  node.on('click tap', event => {
-    event.cancelBubble = true;
-    if (_editMode && isAdmin) _selectItem(wall.id);
-    else _toggleDoor(wall, isAdmin);
-  });
-}
-
-function _addObstacleStateBadge(K, wall, state, mx, my, canInteract, isAdmin) {
-  if (!state.canOpen) return;
-  // Verrouillé : libellé explicite « 🔒 VERROUILLÉE » sur fond rouge, pour ne pas
-  // le confondre avec une simple porte/vitre fermée.
-  const text = state.locked ? `🔒 VERROUILLÉE` : state.stateShort;
-  const width = Math.max(58, text.length * 5.2 + 20);
-  const color = state.locked ? '#ef4444' : state.open ? '#22c55e' : state.color;
-  const badge = new K.Group({
-    x: mx - width / 2, y: my - 9, width, height: 18,
-    listening: canInteract, id: `obstacle-state-${wall.id}`,
-  });
-  badge.add(new K.Rect({
-    width, height: 18, cornerRadius: 9,
-    fill: state.locked ? 'rgba(69,10,10,.94)' : 'rgba(5,10,19,.92)',
-    stroke: color, strokeWidth: state.locked ? 2 : 1.5,
-    shadowColor: '#000', shadowBlur: 5, shadowOpacity: .45,
-  }));
-  badge.add(new K.Circle({ x: 8, y: 9, radius: 3, fill: state.open ? '#22c55e' : color }));
-  badge.add(new K.Text({
-    x: 14, y: 5, width: width - 18, text,
-    fill: state.open ? '#bbf7d0' : state.locked ? '#fecaca' : '#f8fafc',
-    fontFamily: 'Arial, sans-serif', fontSize: 8, fontStyle: 'bold',
-    align: 'center', wrap: 'none', listening: false,
-  }));
-  _bindObstacleNode(badge, wall, isAdmin);
-  _wallsLayer.add(badge);
-}
-
-function _addOpenDoorVisual(K, pts, color, width) {
-  const [x1, y1, x2, y2] = pts;
+function _structureGeometry(points) {
+  const [x1, y1, x2, y2] = points;
   const dx = x2 - x1, dy = y2 - y1;
   const length = Math.max(1, Math.hypot(dx, dy));
   const ux = dx / length, uy = dy / length;
-  const leafLength = Math.min(length, _CELL * .9);
-  const nx = -uy, ny = ux;
-
-  // Seuil à son emplacement réel, volontairement discret car le passage est libre.
-  _wallsLayer.add(new K.Line({
-    points: pts, stroke: color, strokeWidth: 2, dash: [5, 6], opacity: .35,
-    lineCap: 'round', listening: false,
-  }));
-  // Battant pivoté à 90° + arc de débattement : lecture top-down immédiate.
-  _wallsLayer.add(new K.Line({
-    points: [x1, y1, x1 + nx * leafLength, y1 + ny * leafLength],
-    stroke: '#22c55e', strokeWidth: width, lineCap: 'round', listening: false,
-  }));
-  const start = Math.atan2(uy, ux);
-  const arc = [];
-  for (let i = 0; i <= 10; i++) {
-    const angle = start + (Math.PI / 2) * (i / 10);
-    arc.push(x1 + Math.cos(angle) * leafLength, y1 + Math.sin(angle) * leafLength);
-  }
-  _wallsLayer.add(new K.Line({
-    points: arc, stroke: '#22c55e', strokeWidth: 1.5, dash: [3, 4], opacity: .6,
-    lineCap: 'round', listening: false,
-  }));
+  return { x1, y1, x2, y2, dx, dy, length, ux, uy, nx: -uy, ny: ux, mx: (x1+x2)/2, my: (y1+y2)/2 };
 }
 
-function _addWindowVisual(K, pts, state, color, width) {
-  const [x1, y1, x2, y2] = pts;
-  const dx = x2 - x1, dy = y2 - y1;
-  const length = Math.max(1, Math.hypot(dx, dy));
-  const nx = -dy / length, ny = dx / length;
+function _structurePoint(g, along = 0, normal = 0) {
+  return [g.x1 + g.ux*along + g.nx*normal, g.y1 + g.uy*along + g.ny*normal];
+}
+
+function _addStructureLine(K, group, points, attrs = {}) {
+  const line = new K.Line({ points, lineCap:'round', lineJoin:'round', listening:false, ...attrs });
+  group.add(line);
+  return line;
+}
+
+function _addJambs(K, group, g, k) {
+  for (const along of [0, g.length]) {
+    const a = _structurePoint(g, along, -8*k);
+    const b = _structurePoint(g, along, 8*k);
+    _addStructureLine(K, group, [...a, ...b], { stroke:VTT_STRUCTURE_STYLE.casing, strokeWidth:7*k });
+    _addStructureLine(K, group, [...a, ...b], { stroke:VTT_STRUCTURE_STYLE.wall, strokeWidth:3.5*k });
+  }
+}
+
+function _addWallVisual(K, group, g, k) {
+  const pts = [g.x1,g.y1,g.x2,g.y2];
+  _addStructureLine(K, group, pts, { stroke:VTT_STRUCTURE_STYLE.casing, strokeWidth:10*k });
+  _addStructureLine(K, group, pts, { stroke:VTT_STRUCTURE_STYLE.wall, strokeWidth:5.5*k });
+}
+
+function _addClosedDoorVisual(K, group, g, k) {
+  _addJambs(K, group, g, k);
+  const a = _structurePoint(g, Math.min(5*k, g.length*.2));
+  const b = _structurePoint(g, Math.max(g.length-5*k, g.length*.8));
+  _addStructureLine(K, group, [...a,...b], { stroke:VTT_STRUCTURE_STYLE.casing, strokeWidth:12.2*k });
+  _addStructureLine(K, group, [...a,...b], { stroke:VTT_STRUCTURE_STYLE.wood, strokeWidth:9*k });
+  _addStructureLine(K, group, [g.mx-g.nx*4*k,g.my-g.ny*4*k,g.mx+g.nx*4*k,g.my+g.ny*4*k], {
+    stroke:'rgba(0,0,0,.28)', strokeWidth:1.6*k,
+  });
+}
+
+function _addOpenDoorVisual(K, group, g, k) {
+  _addJambs(K, group, g, k);
+  const inset = Math.min(5*k, g.length*.2);
+  const leafLength = Math.max(4*k, g.length - inset*2);
+  const hinge = _structurePoint(g, inset);
+  const thresholdEnd = _structurePoint(g, g.length-inset);
+  _addStructureLine(K, group, [...hinge,...thresholdEnd], {
+    stroke:VTT_STRUCTURE_STYLE.wood, strokeWidth:1.5*k, dash:[3*k,5*k], opacity:.55,
+  });
+  const leafEnd = [hinge[0] + g.nx*leafLength, hinge[1] + g.ny*leafLength];
+  _addStructureLine(K, group, [...hinge,...leafEnd], { stroke:VTT_STRUCTURE_STYLE.casing, strokeWidth:11.2*k });
+  _addStructureLine(K, group, [...hinge,...leafEnd], { stroke:VTT_STRUCTURE_STYLE.wood, strokeWidth:8*k });
+  const start = Math.atan2(g.uy, g.ux);
+  const arc = [];
+  for (let i=0; i<=12; i++) {
+    const angle = start + Math.PI/2*(i/12);
+    arc.push(hinge[0]+Math.cos(angle)*leafLength, hinge[1]+Math.sin(angle)*leafLength);
+  }
+  _addStructureLine(K, group, arc, {
+    stroke:VTT_STRUCTURE_STYLE.wood, strokeWidth:1.4*k, dash:[3*k,4*k], opacity:.7,
+  });
+}
+
+function _windowPanelPoints(g, from, to, offset, halfThickness) {
+  const a = _structurePoint(g, g.length*from, offset-halfThickness);
+  const b = _structurePoint(g, g.length*to, offset-halfThickness);
+  const c = _structurePoint(g, g.length*to, offset+halfThickness);
+  const d = _structurePoint(g, g.length*from, offset+halfThickness);
+  return [...a,...b,...c,...d];
+}
+
+function _addWindowVisual(K, group, g, state, k) {
+  _addJambs(K, group, g, k);
+  const inset = Math.min(5*k, g.length*.18);
   if (!state.open) {
-    for (const offset of [-2.5, 2.5]) {
-      _wallsLayer.add(new K.Line({
-        points: [x1 + nx*offset, y1 + ny*offset, x2 + nx*offset, y2 + ny*offset],
-        stroke: color, strokeWidth: Math.max(1.5, width - 1), lineCap: 'round',
-        dash: [8, 4], listening: false,
-      }));
-    }
+    const from = inset/g.length, to = 1-from;
+    group.add(new K.Line({
+      points:_windowPanelPoints(g, from, to, 0, 4*k), closed:true,
+      fill:'rgba(143,220,255,.28)', stroke:VTT_STRUCTURE_STYLE.glass,
+      strokeWidth:1.8*k, lineJoin:'round', listening:false,
+    }));
+    const a = _structurePoint(g, g.length/2, -4*k);
+    const b = _structurePoint(g, g.length/2, 4*k);
+    _addStructureLine(K, group, [...a,...b], { stroke:VTT_STRUCTURE_STYLE.glass, strokeWidth:1.8*k });
     return;
   }
-
-  // Vitre coulissante ouverte : dormant discret et panneaux regroupés aux bords.
-  _wallsLayer.add(new K.Line({
-    points: pts, stroke: color, strokeWidth: 1.5, dash: [3, 6], opacity: .3,
-    listening: false,
-  }));
-  const panel = (from, to, offset) => new K.Line({
-    points: [x1 + dx*from + nx*offset, y1 + dy*from + ny*offset,
-             x1 + dx*to   + nx*offset, y1 + dy*to   + ny*offset],
-    stroke: '#22c55e', strokeWidth: width, lineCap: 'round', listening: false,
+  const a = _structurePoint(g, inset), b = _structurePoint(g, g.length-inset);
+  _addStructureLine(K, group, [...a,...b], {
+    stroke:VTT_STRUCTURE_STYLE.glass, strokeWidth:1.2*k, dash:[2*k,5*k], opacity:.5,
   });
-  _wallsLayer.add(panel(0, .3, -2.5), panel(.7, 1, 2.5));
+  for (const [from,to,offset] of [[inset/g.length,.3,-2.4*k],[.7,1-inset/g.length,2.4*k]]) {
+    group.add(new K.Line({
+      points:_windowPanelPoints(g, from, to, offset, 2.2*k), closed:true,
+      fill:'rgba(143,220,255,.28)', stroke:VTT_STRUCTURE_STYLE.glass,
+      strokeWidth:1.5*k, lineJoin:'round', listening:false,
+    }));
+  }
+}
+
+function _lockKey(wall) { return `${_page?.id || 'page'}:${wall.id}`; }
+
+function _lockIsVisible(wall, isAdmin, page = _page) {
+  if (!wall?.locked) return false;
+  return !!isAdmin || page?.lockVisibility !== 'discover' || _discoveredLocks.has(_lockKey(wall));
+}
+
+function _syncLockMedallions() {
+  const inverseScale = 1 / Math.max(.15, Number(_stage?.scaleX?.()) || 1);
+  _wallsLayer?.find?.('.vtt-lock-medallion')?.forEach?.(node => node.scale({ x:inverseScale, y:inverseScale }));
+  _wallsLayer?.batchDraw?.();
+}
+
+function _addLockMedallion(K, group, wall, g) {
+  const inverseScale = 1 / Math.max(.15, Number(_stage?.scaleX?.()) || 1);
+  const medallion = new K.Group({
+    x:g.mx, y:g.my, name:'vtt-lock-medallion', listening:false,
+    scaleX:inverseScale, scaleY:inverseScale,
+  });
+  medallion.add(new K.Circle({ radius:12, fill:'#0a0f18', stroke:VTT_STRUCTURE_STYLE.lock, strokeWidth:2.5 }));
+  medallion.add(new K.Line({ points:[-3.5,-1,-3.5,-4.2,0,-7,3.5,-4.2,3.5,-1], stroke:'#fff', strokeWidth:1.8, lineCap:'round', lineJoin:'round' }));
+  medallion.add(new K.Rect({ x:-5.5,y:-1.5,width:11,height:8,cornerRadius:2,fill:'#fff' }));
+  medallion.add(new K.Circle({ y:2.2,radius:1.25,fill:'#0a0f18' }));
+  group.add(medallion);
+  const key = _lockKey(wall);
+  if (!_shownLockMedallions.has(key)) {
+    _shownLockMedallions.add(key);
+    medallion.opacity(0);
+    medallion.scale({ x:inverseScale*.2, y:inverseScale*.2 });
+    medallion.to({ opacity:1, scaleX:inverseScale, scaleY:inverseScale, duration:.4, easing:K.Easings?.BackEaseOut });
+  }
+}
+
+function _ensureStructureTip() {
+  if (_structureTip?.isConnected) return _structureTip;
+  _structureTip = document.createElement('div');
+  _structureTip.className = 'vtt-structure-tip';
+  _structureTip.setAttribute('role', 'tooltip');
+  document.body.appendChild(_structureTip);
+  return _structureTip;
+}
+
+function _hideStructureTip() { _structureTip?.classList.remove('open'); }
+
+function _positionStructureTip(event) {
+  if (!_structureTip) return;
+  const evt = event?.evt || event;
+  const x = Number(evt?.clientX), y = Number(evt?.clientY);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  const rect = _structureTip.getBoundingClientRect();
+  _structureTip.style.left = `${Math.max(8, Math.min(innerWidth-rect.width-8, x+14))}px`;
+  _structureTip.style.top = `${Math.max(8, Math.min(innerHeight-rect.height-8, y+14))}px`;
+}
+
+function _showStructureTip(wall, state, isAdmin, event) {
+  if (_editMode) return;
+  const locked = _lockIsVisible(wall, isAdmin);
+  const visibleState = locked ? 'Verrouillée' : state.stateLabel;
+  const stateClass = locked ? 'locked' : state.open ? 'open-state' : 'closed-state';
+  const effect = state.type === 'wall'
+    ? 'Bloque la vue et le passage.'
+    : state.type === 'window'
+      ? (state.open ? 'Laisse voir et passer.' : 'Laisse voir, bloque le passage.')
+      : (state.open ? 'Passage et vue libres.' : 'Bloque la vue et le passage.');
+  const action = !state.canOpen ? ''
+    : isAdmin ? `Clic : ${state.open ? 'fermer' : 'ouvrir'} · Maj+clic : ${state.locked ? 'déverrouiller' : 'verrouiller'}`
+      : locked ? `Seul le MJ peut l’ouvrir.` : `Clic pour ${state.open ? 'fermer' : 'ouvrir'}.`;
+  const tip = _ensureStructureTip();
+  tip.innerHTML = `<div class="vtt-structure-tip-head"><b>${state.label}</b>${state.canOpen ? `<span class="${stateClass}">${visibleState}</span>` : ''}</div><p>${effect}</p>${action ? `<small>${action}</small>` : ''}`;
+  tip.classList.add('open');
+  _positionStructureTip(event);
+}
+
+function _shakeStructure(id) {
+  const node = _wallsLayer?.findOne?.(`#vtt-structure-${id}`);
+  if (!node) return;
+  const origin = node.x();
+  const inverseScale = 1 / Math.max(.15, Number(_stage?.scaleX?.()) || 1);
+  const offsets = [-3,3,-2,2,0];
+  const step = index => {
+    if (index >= offsets.length) return;
+    node.to({ x:origin+offsets[index]*inverseScale, duration:.076, onFinish:()=>step(index+1) });
+  };
+  step(0);
+}
+
+function _bindObstacleNode(node, halo, wall, state, isAdmin) {
+  if (!node) return;
+  node.on('mouseenter', event => {
+    const container = _stage?.container?.();
+    if (container) container.style.cursor = state.canOpen ? 'pointer' : '';
+    halo?.opacity(1);
+    _showStructureTip(wall, state, isAdmin, event);
+    _wallsLayer?.batchDraw?.();
+  });
+  node.on('mousemove touchmove', _positionStructureTip);
+  node.on('mouseleave', () => {
+    const container = _stage?.container?.();
+    if (container) container.style.cursor = _editMode ? 'crosshair' : '';
+    halo?.opacity(0);
+    _hideStructureTip();
+    _wallsLayer?.batchDraw?.();
+  });
+  node.on('click tap', event => {
+    event.cancelBubble = true;
+    _hideStructureTip();
+    if (state.canOpen) _toggleDoor(wall, isAdmin, event);
+  });
 }
 
 export function fogRenderWalls(page, isAdmin) {
@@ -551,67 +671,49 @@ export function fogRenderWalls(page, isAdmin) {
 
   // ── Murs / portes / fenêtres ──────────────────────────────────────────────
   for (const w of walls) {
-    const state   = vttWallState(w);
-    const drawColBase = (_editMode && isAdmin) ? state.editColor : state.color;
-    // Verrouillé (et fermé) : trait rouge pour être lisible d'un coup d'œil,
-    // au-delà du seul badge de la mi-porte.
-    const lockedClosed = state.locked && !state.open;
-    const drawCol = lockedClosed ? '#ef4444' : drawColBase;
-    const width   = state.width;
-    const pts     = [w.x1*C, w.y1*C, w.x2*C, w.y2*C];
-    const mx = (w.x1 + w.x2) * 0.5 * C;
-    const my = (w.y1 + w.y2) * 0.5 * C;
+    const state = vttWallState(w);
+    const points = [w.x1*C, w.y1*C, w.x2*C, w.y2*C];
+    const g = _structureGeometry(points);
+    const k = C/64;
+    const group = new K.Group({ id:`vtt-structure-${w.id}`, name:'vtt-structure' });
+    let halo = null;
 
-    if (state.type === 'door' && state.open) {
-      _addOpenDoorVisual(K, pts, drawCol, width);
-    } else if (state.type === 'window') {
-      _addWindowVisual(K, pts, state, drawCol, width);
-    } else {
-      // Mur ou porte fermée : trait plein, bord sombre pour rester lisible sur
-      // une battlemap claire comme sombre.
-      _wallsLayer.add(new K.Line({
-        points: pts, stroke: 'rgba(2,6,12,.82)', strokeWidth: width + 3,
-        lineCap: 'round', listening: false,
-      }));
-      _wallsLayer.add(new K.Line({
-        points: pts, stroke: drawCol,
-        strokeWidth: (_selectedId === w.id ? width + 1 : width) + (lockedClosed ? 1 : 0),
-        lineCap: 'round', listening: false,
-      }));
-    }
-
-    // Porte ou vitre : état textuel permanent + large zone de clic.
-    if (state.canOpen) {
-      const canInteract = isAdmin || _playerPointIsVisible(mx, my, page);
-      _addObstacleStateBadge(K, w, state, mx, my, canInteract, isAdmin);
-
-      // Zone de clic sur toute la ligne (en mode normal)
-      if (!_editMode) {
-        const hitLine = new K.Line({
-          points: pts, stroke: 'transparent', strokeWidth: 18, listening: canInteract,
-        });
-        _bindObstacleNode(hitLine, w, isAdmin);
-        _wallsLayer.add(hitLine);
-      }
-    }
-
-    // Mode éditeur : clic pour sélectionner
-    if (_editMode && isAdmin) {
-      const hitLine = new K.Line({
-        points: pts, stroke: 'transparent', strokeWidth: 14, listening: true,
+    if (state.canOpen && !_editMode) {
+      halo = _addStructureLine(K, group, points, {
+        stroke:'rgba(126,176,255,.45)', strokeWidth:20*k, opacity:0,
       });
-      hitLine.on('click tap', e => { e.cancelBubble = true; _selectItem(w.id); });
-      _wallsLayer.add(hitLine);
+    }
 
-      // Surlignage sélection
+    if (state.type === 'wall') _addWallVisual(K, group, g, k);
+    else if (state.type === 'door') {
+      if (state.open) _addOpenDoorVisual(K, group, g, k);
+      else _addClosedDoorVisual(K, group, g, k);
+    } else _addWindowVisual(K, group, g, state, k);
+
+    if (_lockIsVisible(w, isAdmin, page)) _addLockMedallion(K, group, w, g);
+
+    const canInteract = isAdmin || _playerPointIsVisible(g.mx, g.my, page);
+    if (!_editMode) {
+      const hitLine = new K.Line({
+        points, stroke:'rgba(0,0,0,0.001)', strokeWidth:22*k,
+        lineCap:'round', listening:canInteract,
+      });
+      _bindObstacleNode(hitLine, halo, w, state, isAdmin);
+      group.add(hitLine);
+    } else if (isAdmin) {
+      const hitLine = new K.Line({
+        points, stroke:'rgba(0,0,0,0.001)', strokeWidth:14*k,
+        lineCap:'round', listening:true,
+      });
+      hitLine.on('click tap', event => { event.cancelBubble = true; _selectItem(w.id); });
+      group.add(hitLine);
       if (_selectedId === w.id) {
-        const hl = new K.Line({
-          points: pts, stroke: '#fff', strokeWidth: width + 4,
-          lineCap: 'round', opacity: 0.4, listening: false,
+        _addStructureLine(K, group, points, {
+          stroke:'#fff', strokeWidth:(state.width+5)*k, opacity:.38,
         });
-        _wallsLayer.add(hl); hl.moveToBottom();
       }
     }
+    _wallsLayer.add(group);
   }
 
   // ── Rectangles de brouillard manuel en mode édition ──────────────────────
@@ -718,16 +820,32 @@ function _commitWalls(nextWalls, isAdmin, { successMessage = '', errorMessage = 
   });
 }
 
-function _toggleDoor(wall, _isAdmin) {
+function _toggleDoor(wall, _isAdmin, event = null) {
   const state = vttWallState(wall);
   if (!state.canOpen) return;
   if (state.locked && !_isAdmin) {
-    showNotif(`${state.label} verrouillée 🔒`, 'error');
+    _discoveredLocks.add(_lockKey(wall));
+    fogRenderWalls(_page, false);
+    _shakeStructure(wall.id);
+    showNotif(`${state.label} verrouillée`, 'error');
     return;
   }
   if (!_page) return;
+  if (_isAdmin && event?.evt?.shiftKey) {
+    const nextLocked = !state.locked;
+    const nw = (_page.walls || []).map(w => w.id === wall.id
+      ? { ...w, locked:nextLocked, ...(nextLocked ? { open:false } : {}) }
+      : w);
+    _commitWalls(nw, true, {
+      successMessage:`${state.label} ${nextLocked ? 'verrouillée' : 'déverrouillée'}`,
+      errorMessage:`Impossible de modifier le verrou`,
+    });
+    return;
+  }
   const nextOpen = !state.open;
-  const nw = (_page.walls || []).map(w => w.id === wall.id ? { ...w, open: nextOpen } : w);
+  const nw = (_page.walls || []).map(w => w.id === wall.id
+    ? { ...w, open:nextOpen, ...(nextOpen && state.locked ? { locked:false } : {}) }
+    : w);
   _commitWalls(nw, _isAdmin, {
     successMessage: `${state.label} ${nextOpen ? 'ouverte' : 'fermée'}`,
     errorMessage: `Impossible de modifier la ${state.label.toLowerCase()}`,
@@ -1256,8 +1374,18 @@ function _refreshWallsBar(page) {
   }
   const status = bar.querySelector('[data-fog-status]');
   if (status) status.textContent = fogOn
-    ? `Actif · vision partagée ${fogVisionRadiusCells(page)} cases`
+    ? (fogHasUnlimitedVision(page) ? 'Actif · vision illimitée' : `Actif · vision partagée ${fogVisionRadiusCells(page)} cases`)
     : 'Coupé — carte entièrement visible';
+  const visionBtn = bar.querySelector('#vtt-vision-unlimited-toggle');
+  if (visionBtn) {
+    visionBtn.classList.toggle('active', fogHasUnlimitedVision(page));
+    visionBtn.setAttribute('aria-checked', String(fogHasUnlimitedVision(page)));
+    visionBtn.disabled = !fogOn;
+  }
+  const visionStatus = bar.querySelector('[data-vision-status]');
+  if (visionStatus) visionStatus.textContent = fogHasUnlimitedVision(page)
+    ? 'Sans limite · murs respectés'
+    : `${fogVisionRadiusCells(page)} cases autour du groupe`;
   const undoBtn = bar.querySelector('#vtt-fog-undo-btn');
   const redoBtn = bar.querySelector('#vtt-fog-redo-btn');
   const clearBtn = bar.querySelector('#vtt-fog-clear-btn');
